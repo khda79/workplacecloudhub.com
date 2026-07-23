@@ -70,13 +70,17 @@ The report contains aggregated evidence only and does not expose raw personal da
 
 All SmartFinOps Workplace user-facing report text and decision values are produced in English.
 
-The top license-utilization banner exposes three automatic review signals:
+The top license-utilization banner leads with actionable, persona-led decisions:
 
-- **Unused E3/F3 licenses**: no M365 service activity, Entra/AD sign-in, or recent Intune device presence was observed within the configured stale-user period (90 days by default). Mailbox size and mailbox measurement availability do not affect this signal.
-- **Possibly unused E3/F3 licenses**: recent technical presence exists, but no recent M365 service usage is observed and the measured mailbox is at or below 100 MB. Missing mailbox measurements are excluded only from this category.
-- **E3 licenses without observed E3 capability usage**: measured mailbox storage below 100 GB and no observed Microsoft 365 Apps desktop activation. This is a directional rightsizing signal only; it does not prove Frontline eligibility and never triggers an automatic downgrade. The E3 capability population can overlap with the unused populations and must not be added to them.
+- **High-confidence no-license candidates**: persona `None`, disabled or blocked account, and no recent M365 or technical evidence.
+- **No-license candidates requiring review**: persona `None`, no recent evidence, but the account is still enabled.
+- **Conditional E3-to-F3 candidates**: persona F3, no observed technical blocker, and documented Frontline eligibility still required.
+- **E3-to-F3 activity and eligibility reviews**: no technical blocker is observed, but business need and Frontline eligibility remain unproven.
+- **Dormant license telemetry signals**: a secondary review population split between named, generic/special, and other account types. It is never presented as a removable-license count or a financial opportunity.
 
-Recent M365 service evidence includes aggregate and detailed Exchange, Email, OneDrive, Teams, SharePoint, Microsoft 365 Apps, Copilot, and Teams Phone activity. Entra/AD sign-ins and recent Intune device presence are tracked separately as technical presence.
+The former “E3 licenses without observed E3 capability usage” card is intentionally excluded. A mailbox below 100 GB and no observed desktop activation do not establish that E3 capabilities are unnecessary. This combination remains available only as explicit diagnostic telemetry in the supporting CSV.
+
+Recent M365 service evidence includes aggregate and detailed Exchange, Email, OneDrive, Teams, SharePoint, Microsoft 365 Apps, Copilot, and Teams Phone activity. Its 90-day window ends on the oldest available `Report Refresh Date` across loaded decision sources. Entra/AD sign-ins and recent Intune device presence use the analysis date as their separate technical evidence date.
 
 Windows Update risk and Windows 11 eligibility are used for service-quality, cost-avoidance, and lifecycle forecasting. They are not converted to euros until an internal incident, remediation, or replacement cost model is approved. Endpoint Analytics remains a performance evidence source and is not monetized by the current model.
 
@@ -110,7 +114,7 @@ SmartFinOps requires no separate manual input file. The detailed CSV contains th
 
 Persona alone never changes a license. E3-to-F3 cases require recent activity, no observed Microsoft 365 desktop activation, Exchange and OneDrive storage within the 2 GB F3 limits, and documented Frontline eligibility. If Frontline eligibility is not proven, the result remains a conditional review opportunity and not an executable downgrade.
 
-No-license findings require persona `None` plus corroborating disabled/blocked account state or absence of recent activity across the correlated sources. Active users whose persona is `None` are reported as conflicts and excluded from no-license savings. `LogonCount = 0` is not a no-license rule because the AD attribute can be unknown and is not replicated between domain controllers.
+High-confidence no-license findings require persona `None`, a disabled or blocked account, and no recent M365 or technical evidence. Enabled dormant accounts remain review-only. Any recent evidence creates a conflict review even when the account is disabled. `LogonCount = 0` is not a no-license rule because the AD attribute can be unknown and is not replicated between domain controllers.
 
 No recommendation is an automatic license, mailbox or account change. Shared mailboxes and special accounts always follow a separate review path.
 
@@ -153,7 +157,7 @@ For Active Directory:
 - `AD_Users_AllDomains.csv` and `AD_Computers_AllDomains.csv` are the canonical enriched KPI tables;
 - `AD_Users_AllDomains_Brut.csv` and `AD_Computers_AllDomains_Brut.csv` are validation or fallback sources only.
 
-`-ValidateOnly` checks source existence, required columns and freshness without importing CSV rows. The default freshness threshold is 72 hours.
+`-ValidateOnly` checks source existence, required columns and freshness without importing full CSV row sets. Freshness uses `Report Refresh Date` when the source exposes it and falls back to the file modification time otherwise. The default freshness threshold is 72 hours.
 
 SharePoint user activity, Teams device usage, Microsoft 365 Copilot usage, and Teams Phone user usage are activity guardrails for base-license decisions when data is available. They are not monetized as separate products.
 
