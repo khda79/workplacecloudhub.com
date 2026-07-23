@@ -69,7 +69,8 @@ function New-SmartFinOpsUserEvidenceMap {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$CopilotUsageRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TeamsPhoneUsageRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
-        [Parameter(Mandatory)][datetime]$RecentCutoff
+        [Parameter(Mandatory)][datetime]$M365RecentCutoff,
+        [Parameter(Mandatory)][datetime]$TechnicalRecentCutoff
     )
 
     $map = @{}
@@ -81,7 +82,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         $workload = [string](Get-RowPropertyValue -Row $row -Names @('LastActivityWorkload'))
         if ([string]::IsNullOrWhiteSpace($workload)) { $workload = 'M365 aggregate' }
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate')) -Workload $workload -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate')) -Workload $workload -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $MailboxUsageRows) {
@@ -89,7 +90,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Exchange mailbox' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Exchange mailbox' -RecentCutoff $M365RecentCutoff
         $storageValue = Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)')
         if (-not [string]::IsNullOrWhiteSpace([string]$storageValue)) {
             $evidence.HasMailboxStorageEvidence = $true
@@ -104,7 +105,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('Owner Principal Name', 'User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'OneDrive' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'OneDrive' -RecentCutoff $M365RecentCutoff
         $storage = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)'))
         if ($storage -gt $evidence.OneDriveStorageBytes) { $evidence.OneDriveStorageBytes = $storage }
     }
@@ -115,7 +116,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         $productType = [string](Get-RowPropertyValue -Row $row -Names @('Product Type'))
         $lastActivation = Get-RowPropertyValue -Row $row -Names @('Last Activated Date')
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value $lastActivation -Workload 'Microsoft 365 Apps' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value $lastActivation -Workload 'Microsoft 365 Apps' -RecentCutoff $M365RecentCutoff
         $desktopCount = (ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $row -Names @('Windows'))) +
             (ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $row -Names @('Mac')))
         if ($productType -match 'MICROSOFT 365 APPS FOR ENTERPRISE' -and $desktopCount -gt 0) {
@@ -129,7 +130,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Teams' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Teams' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $EmailActivityRows) {
@@ -137,7 +138,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Email' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Email' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $SharePointActivityRows) {
@@ -145,7 +146,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'SharePoint' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'SharePoint' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $TeamsDeviceUsageRows) {
@@ -153,28 +154,28 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'Teams device usage' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'Teams device usage' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $CopilotUsageRows) {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('UserPrincipalName', 'User Principal Name')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate', 'Microsoft365CopilotLastActivityDate')) -Workload 'Microsoft 365 Copilot' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate', 'Microsoft365CopilotLastActivityDate')) -Workload 'Microsoft 365 Copilot' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $TeamsPhoneUsageRows) {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('UserPrincipalName', 'User Principal Name')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
-        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastCallDate', 'Last Call Date')) -Workload 'Teams Phone' -RecentCutoff $RecentCutoff
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastCallDate', 'Last Call Date')) -Workload 'Teams Phone' -RecentCutoff $M365RecentCutoff
     }
 
     foreach ($row in $IntuneDeviceRows) {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('Primary user UPN', 'Primary user email address', 'UserPrincipalName')
         if (-not $key) { continue }
         $lastCheckIn = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $row -Names @('Last check-in', 'LastSyncDateTime', 'Last check in'))
-        if ($null -eq $lastCheckIn -or $lastCheckIn -lt $RecentCutoff) { continue }
+        if ($null -eq $lastCheckIn -or $lastCheckIn -lt $TechnicalRecentCutoff) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         $evidence.HasRecentManagedDevice = $true
         [void]$evidence.RecentWorkloads.Add('Active Intune device')
@@ -190,7 +191,10 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$M365Users,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ADUsers,
         [Parameter(Mandatory)][hashtable]$EvidenceMap,
-        [Parameter(Mandatory)][datetime]$RecentCutoff,
+        [Parameter(Mandatory)][datetime]$M365RecentCutoff,
+        [Parameter(Mandatory)][datetime]$TechnicalRecentCutoff,
+        [Parameter(Mandatory)][datetime]$M365EvidenceAsOfDate,
+        [Parameter(Mandatory)][datetime]$TechnicalEvidenceAsOfDate,
         [Parameter(Mandatory)][AllowNull()]$PriceModel
     )
 
@@ -276,13 +280,13 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         $latestActivityDate = if ($latestActivity.Count -gt 0) { [datetime]$latestActivity[0] } else { $null }
         $recentM365ServiceEvidence = @(@($evidence.RecentM365Services) | Sort-Object)
         $recentTechnicalEvidence = New-Object System.Collections.Generic.List[string]
-        if ($lastSignIn -and $lastSignIn -ge $RecentCutoff) { $recentTechnicalEvidence.Add('Entra sign-in') | Out-Null }
-        if ($lastAdLogon -and $lastAdLogon -ge $RecentCutoff) { $recentTechnicalEvidence.Add('AD logon') | Out-Null }
+        if ($lastSignIn -and $lastSignIn -ge $TechnicalRecentCutoff) { $recentTechnicalEvidence.Add('Entra sign-in') | Out-Null }
+        if ($lastAdLogon -and $lastAdLogon -ge $TechnicalRecentCutoff) { $recentTechnicalEvidence.Add('AD logon') | Out-Null }
         if ($evidence.HasRecentManagedDevice) { $recentTechnicalEvidence.Add('Active Intune device') | Out-Null }
         $hasRecentM365ServiceActivity = $recentM365ServiceEvidence.Count -gt 0
         $hasRecentTechnicalPresence = $recentTechnicalEvidence.Count -gt 0
         $hasRecentObservedActivity = $hasRecentM365ServiceActivity -or $hasRecentTechnicalPresence
-        $hasRecentActivity = ($latestActivityDate -and $latestActivityDate -ge $RecentCutoff) -or $evidence.HasDesktopAppsActivation -or $evidence.HasRecentManagedDevice
+        $hasRecentActivity = $hasRecentM365ServiceActivity -or $hasRecentTechnicalPresence -or $evidence.HasDesktopAppsActivation
 
         $mailboxOverF3Limit = $evidence.MailboxStorageBytes -gt 2GB
         $oneDriveOverF3Limit = $evidence.OneDriveStorageBytes -gt 2GB
@@ -293,13 +297,13 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         $isDisabled = ($m365Enabled -eq $false) -or ($adEnabled -eq $false)
         $isCurrentE3 = $currentBaseSku -eq 'SPE_E3'
         $isCurrentF3 = $currentBaseSku -eq 'SPE_F1'
-        $isUnusedE3F3License = ($isCurrentE3 -or $isCurrentF3) -and (-not $hasRecentObservedActivity)
-        $isPossiblyUnusedE3F3License = ($isCurrentE3 -or $isCurrentF3) -and
+        $hasNoObservedActivityE3F3 = ($isCurrentE3 -or $isCurrentF3) -and (-not $hasRecentObservedActivity)
+        $hasTechnicalPresenceWithoutM365ActivityE3F3 = ($isCurrentE3 -or $isCurrentF3) -and
             $hasRecentTechnicalPresence -and
             (-not $hasRecentM365ServiceActivity) -and
             $evidence.HasMailboxStorageEvidence -and
             $evidence.MailboxStorageBytes -le 100MB
-        $isE3WithoutObservedE3Capabilities = $isCurrentE3 -and
+        $isE3Below100GBWithoutDesktopActivation = $isCurrentE3 -and
             $evidence.HasMailboxStorageEvidence -and
             $evidence.MailboxStorageBytes -lt 100GB -and
             (-not $evidence.HasDesktopAppsActivation)
@@ -327,10 +331,15 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             $basis = "Account type '$accountType'; validate technical usage and required services before making any change."
         }
         elseif (($isCurrentE3 -or $isCurrentF3) -and $targetPersona -eq 'None') {
-            if ($isDisabled) {
+            if ($isDisabled -and -not $hasRecentActivity) {
                 $recommended = 'No license - candidate'
                 $confidence = 'High'
                 $basis = 'M365LicenseTargetPersona is None and the user account is disabled or blocked; confirm retention, departure, ownership, and regulatory requirements before removing the license.'
+            }
+            elseif ($isDisabled) {
+                $recommended = 'Disabled no-license persona with active evidence - review'
+                $confidence = 'Medium'
+                $basis = 'M365LicenseTargetPersona is None and the account is disabled or blocked, but recent service or technical evidence exists; investigate ownership and activity before removing the license.'
             }
             elseif (-not $hasRecentActivity) {
                 $recommended = 'No license - review'
@@ -456,6 +465,8 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             F3TechnicalStatus = $f3TechnicalStatus
             FrontlineEligibilityStatus = $frontlineEligibilityStatus
             LatestKnownActivity = if ($latestActivityDate) { $latestActivityDate.ToString('yyyy-MM-dd') } else { '' }
+            M365EvidenceAsOfDate = $M365EvidenceAsOfDate.ToString('yyyy-MM-dd')
+            TechnicalEvidenceAsOfDate = $TechnicalEvidenceAsOfDate.ToString('yyyy-MM-dd')
             RecentEvidence = (@($evidence.RecentWorkloads) | Sort-Object) -join ' | '
             RecentM365ServiceEvidence = $recentM365ServiceEvidence -join ' | '
             RecentTechnicalEvidence = $recentTechnicalEvidence.ToArray() -join ' | '
@@ -466,9 +477,9 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             HasMailboxStorageEvidence = $evidence.HasMailboxStorageEvidence
             MailboxStorageGB = [math]::Round([double]$evidence.MailboxStorageBytes / 1GB, 2)
             OneDriveStorageGB = [math]::Round([double]$evidence.OneDriveStorageBytes / 1GB, 2)
-            IsUnusedE3F3License = $isUnusedE3F3License
-            IsPossiblyUnusedE3F3License = $isPossiblyUnusedE3F3License
-            IsE3WithoutObservedE3Capabilities = $isE3WithoutObservedE3Capabilities
+            HasNoObservedActivityE3F3 = $hasNoObservedActivityE3F3
+            HasTechnicalPresenceWithoutM365ActivityE3F3 = $hasTechnicalPresenceWithoutM365ActivityE3F3
+            IsE3Below100GBWithoutDesktopActivation = $isE3Below100GBWithoutDesktopActivation
             CurrentMonthlyPriceEUR = $currentPrice
             RecommendedMonthlyPriceEUR = $recommendedPrice
             IndicativeMonthlyDifferenceEUR = $monthlyDelta
