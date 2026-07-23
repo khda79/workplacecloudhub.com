@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Managed Devices",
+                    "value": "Intune Managed Devices",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

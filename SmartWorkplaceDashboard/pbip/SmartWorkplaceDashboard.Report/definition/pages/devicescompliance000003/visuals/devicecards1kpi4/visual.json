@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Device Compliance Rate"
+                  "Property": "AD Enabled Computers"
                 }
               },
-              "queryRef": "M365_Users_Active.Device Compliance Rate",
-              "nativeQueryRef": "Device Compliance Rate"
+              "queryRef": "M365_Users_Active.AD Enabled Computers",
+              "nativeQueryRef": "AD Enabled Computers"
             }
           ]
         }

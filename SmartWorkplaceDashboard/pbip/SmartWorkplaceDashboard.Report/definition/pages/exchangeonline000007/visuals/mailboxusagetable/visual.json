@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "mailboxusagetable",
   "position": {
-    "x": 644,
+    "x": 826,
     "y": 500,
-    "width": 612,
+    "width": 430,
     "height": 220,
     "z": 9000,
     "tabOrder": 9000
@@ -20,84 +20,70 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
+                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                     }
                   },
-                  "Property": "User Principal Name"
+                  "Property": "DisplayName"
                 }
               },
-              "queryRef": "M365_Mailbox_Usage.User Principal Name",
-              "nativeQueryRef": "User Principal Name"
+              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.DisplayName",
+              "nativeQueryRef": "DisplayName"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
+                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                     }
                   },
-                  "Property": "Display Name"
+                  "Property": "PrimarySmtpAddress"
                 }
               },
-              "queryRef": "M365_Mailbox_Usage.Display Name",
-              "nativeQueryRef": "Display Name"
+              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.PrimarySmtpAddress",
+              "nativeQueryRef": "PrimarySmtpAddress"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
+                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                     }
                   },
-                  "Property": "Last Activity Date"
+                  "Property": "MailboxType"
                 }
               },
-              "queryRef": "M365_Mailbox_Usage.Last Activity Date",
-              "nativeQueryRef": "Last Activity Date"
+              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.MailboxType",
+              "nativeQueryRef": "MailboxType"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
+                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                     }
                   },
-                  "Property": "Item Count"
+                  "Property": "ArchiveStatus"
                 }
               },
-              "queryRef": "M365_Mailbox_Usage.Item Count",
-              "nativeQueryRef": "Item Count"
+              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.ArchiveStatus",
+              "nativeQueryRef": "ArchiveStatus"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
+                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                     }
                   },
-                  "Property": "Storage Used (Byte)"
+                  "Property": "LastUserActionTime"
                 }
               },
-              "queryRef": "M365_Mailbox_Usage.Storage Used (Byte)",
-              "nativeQueryRef": "Storage Used (Byte)"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "M365_Mailbox_Usage"
-                    }
-                  },
-                  "Property": "Prohibit Send/Receive Quota (Byte)"
-                }
-              },
-              "queryRef": "M365_Mailbox_Usage.Prohibit Send/Receive Quota (Byte)",
-              "nativeQueryRef": "Prohibit Send/Receive Quota (Byte)"
+              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.LastUserActionTime",
+              "nativeQueryRef": "LastUserActionTime"
             }
           ]
         }
@@ -109,10 +95,10 @@
               "Column": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "M365_Mailbox_Usage"
+                    "Entity": "Exchange_EXO_Mailboxes_AllDomains"
                   }
                 },
-                "Property": "Storage Used (Byte)"
+                "Property": "LastUserActionTime"
               }
             },
             "direction": "Descending"
@@ -228,7 +214,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox usage and quota evidence'"
+                  "Value": "'Exchange Online mailbox and archive evidence'"
                 }
               }
             },

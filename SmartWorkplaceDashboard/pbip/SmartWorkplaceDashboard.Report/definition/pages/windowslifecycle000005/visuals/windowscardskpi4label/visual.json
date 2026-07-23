@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "windowscardskpi4label",
   "position": {
-    "x": 340,
+    "x": 34,
     "y": 184,
-    "width": 278,
+    "width": 176,
     "height": 30,
     "z": 3007,
     "tabOrder": 3007
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Windows 11 Blocking Devices",
+                    "value": "Eligible Devices",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",
