@@ -227,7 +227,9 @@ function Write-SmartFinOpsHtmlReport {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DataQualityRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ValueRows,
         [Parameter(Mandatory)][AllowNull()]$PriceModel,
-        [int]$StaleUserDays = 90
+        [int]$StaleUserDays = 90,
+        [Parameter(Mandatory)][datetime]$M365EvidenceAsOfDate,
+        [Parameter(Mandatory)][datetime]$TechnicalEvidenceAsOfDate
     )
 
     $potentialRows = @($ValueRows | Where-Object { $_.ValuePillar -eq 'Potential savings' })
@@ -252,17 +254,20 @@ function Write-SmartFinOpsHtmlReport {
     $noLicenseHigh = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' }).Count
     $noLicenseReview = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - review' }).Count
     $personaNoneActiveConflicts = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Target persona conflict - active user review' }).Count
+    $disabledNoLicenseActiveEvidenceConflicts = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Disabled no-license persona with active evidence - review' }).Count
     $f3ToE3Reviews = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 capability review' }).Count
     $f3TechnicalConflicts = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3 technical conflict - review' }).Count
-    $unusedE3F3Rows = @($UserDecisionRows | Where-Object { $_.IsUnusedE3F3License -eq $true })
-    $possiblyUnusedE3F3Rows = @($UserDecisionRows | Where-Object { $_.IsPossiblyUnusedE3F3License -eq $true })
-    $unusedOrPossiblyUnusedE3F3Rows = @($unusedE3F3Rows + $possiblyUnusedE3F3Rows)
-    $unusedE3F3 = $unusedE3F3Rows.Count
-    $possiblyUnusedE3F3 = $possiblyUnusedE3F3Rows.Count
-    $unusedOrPossiblyUnusedE3F3 = $unusedOrPossiblyUnusedE3F3Rows.Count
-    $unusedOrPossiblyUnusedE3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count
-    $unusedOrPossiblyUnusedF3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count
-    $e3WithoutObservedE3Capabilities = @($UserDecisionRows | Where-Object { $_.IsE3WithoutObservedE3Capabilities -eq $true }).Count
+    $noObservedActivityE3F3Rows = @($UserDecisionRows | Where-Object { $_.HasNoObservedActivityE3F3 -eq $true })
+    $technicalOnlyE3F3Rows = @($UserDecisionRows | Where-Object { $_.HasTechnicalPresenceWithoutM365ActivityE3F3 -eq $true })
+    $dormantTelemetryE3F3Rows = @($noObservedActivityE3F3Rows + $technicalOnlyE3F3Rows)
+    $noObservedActivityE3F3 = $noObservedActivityE3F3Rows.Count
+    $technicalOnlyE3F3 = $technicalOnlyE3F3Rows.Count
+    $dormantTelemetryE3F3 = $dormantTelemetryE3F3Rows.Count
+    $dormantTelemetryE3 = @($dormantTelemetryE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count
+    $dormantTelemetryF3 = @($dormantTelemetryE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count
+    $dormantNamedAccounts = @($dormantTelemetryE3F3Rows | Where-Object { $_.AccountType -eq 'Named Account' }).Count
+    $dormantSpecialAccounts = @($dormantTelemetryE3F3Rows | Where-Object { $_.AccountType -match 'Service Account|Generic Account|Admin Account|System Account' }).Count
+    $dormantOtherAccounts = $dormantTelemetryE3F3 - $dormantNamedAccounts - $dormantSpecialAccounts
     $implementationLicenseRows = @($UserDecisionRows | Where-Object { $_.DecisionClass -in @('Recommended', 'Conditional') })
     $groupManagedLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -eq 'Group' }).Count
     $directLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -eq 'Direct' }).Count
@@ -337,10 +342,13 @@ function Write-SmartFinOpsHtmlReport {
     h3 { font-size:18px; margin:0 0 8px; }
     p { margin:0 0 12px; }
     .meta, .muted { color:var(--muted); font-size:13px; }
-    .license-banner { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:24px; }
+    .license-banner { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-top:24px; }
     .license-signal { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow); }
-    .license-signal.unused { border-top:5px solid var(--orange); }
-    .license-signal.e3-fit { border-top:5px solid var(--gold); }
+    .license-signal.recommended { border-top:5px solid var(--green); }
+    .license-signal.conditional { border-top:5px solid var(--blue); }
+    .license-signal.review { border-top:5px solid var(--gold); }
+    .license-signal.dormant { border-top:5px solid var(--orange); grid-column:1/-1; }
+    .license-signal.dormant .signal-value { font-size:clamp(30px,4vw,44px); }
     .license-signal .signal-label { color:var(--muted); font-size:13px; font-weight:650; }
     .license-signal .signal-value { display:block; font-size:clamp(34px,5vw,52px); font-weight:800; line-height:1; margin:8px 0 10px; }
     .license-signal .signal-context { color:var(--muted); font-size:13px; }
@@ -379,7 +387,7 @@ function Write-SmartFinOpsHtmlReport {
     summary { cursor:pointer; font-weight:700; }
     .assumptions { font-size:13px; color:var(--muted); }
     .assumptions li { margin:8px 0; }
-    @media (max-width:850px) { .kpis,.tradeoffs { grid-template-columns:1fr 1fr; } .bar-row { grid-template-columns:1fr; gap:5px; } .bar-value { text-align:left; } }
+    @media (max-width:850px) { .kpis,.tradeoffs,.license-banner { grid-template-columns:1fr 1fr; } .bar-row { grid-template-columns:1fr; gap:5px; } .bar-value { text-align:left; } }
     @media (max-width:560px) { header,main { padding-left:16px; padding-right:16px; } section { padding:20px; } .kpis,.tradeoffs,.license-banner { grid-template-columns:1fr; } }
     @media print { body { background:white; } header,main { max-width:none; } section,.kpi { box-shadow:none; break-inside:avoid; } }
   </style>
@@ -388,19 +396,34 @@ function Write-SmartFinOpsHtmlReport {
   <header>
     <div class="eyebrow">SmartFinOps Workplace</div>
     <h1>$(ConvertTo-HtmlEncoded $ReportTitle)</h1>
-    <p class="meta">Tenant $(ConvertTo-HtmlEncoded $Tenant) · Analysis generated $(Get-Date -Format 'yyyy-MM-dd HH:mm') · Indicative France pricing, excluding VAT · Run $(ConvertTo-HtmlEncoded $script:RunId)</p>
+    <p class="meta">Tenant $(ConvertTo-HtmlEncoded $Tenant) · M365 evidence as of $($M365EvidenceAsOfDate.ToString('yyyy-MM-dd')) · Technical evidence as of $($TechnicalEvidenceAsOfDate.ToString('yyyy-MM-dd')) · Indicative France pricing, excluding VAT · Run $(ConvertTo-HtmlEncoded $script:RunId)</p>
     <div class="license-banner" aria-label="License utilization signals">
-      <div class="license-signal unused">
-        <div class="signal-label">Unused or possibly unused E3/F3 licenses</div>
-        <span class="signal-value">$unusedOrPossiblyUnusedE3F3</span>
-        <div class="signal-context">$unusedE3F3 unused + $possiblyUnusedE3F3 possibly unused · $unusedOrPossiblyUnusedE3 E3 + $unusedOrPossiblyUnusedF3 F3</div>
+      <div class="license-signal recommended">
+        <div class="signal-label">High-confidence no-license candidates</div>
+        <span class="signal-value">$noLicenseHigh</span>
+        <div class="signal-context">Persona None · disabled or blocked · no recent M365 or technical evidence</div>
       </div>
-      <div class="license-signal e3-fit">
-        <div class="signal-label">E3 licenses without observed E3 capability usage</div>
-        <span class="signal-value">$e3WithoutObservedE3Capabilities</span>
-        <div class="signal-context">No observed Microsoft 365 Apps desktop activation · measured mailbox below 100 GB</div>
+      <div class="license-signal review">
+        <div class="signal-label">No-license candidates requiring review</div>
+        <span class="signal-value">$noLicenseReview</span>
+        <div class="signal-context">Persona None · no recent evidence · account still enabled</div>
       </div>
-      <p class="license-banner-note">Unused means no activity observed for $StaleUserDays days, regardless of mailbox size or measurement. Possibly unused means technical presence only, no observed M365 service usage, and a measured mailbox at or below 100 MB. The E3 capability population can overlap with these signals and must not be added to them.</p>
+      <div class="license-signal conditional">
+        <div class="signal-label">Conditional E3-to-F3 candidates</div>
+        <span class="signal-value">$e3ToF3Candidates</span>
+        <div class="signal-context">Persona F3 · no observed technical blocker · Frontline eligibility still required</div>
+      </div>
+      <div class="license-signal review">
+        <div class="signal-label">E3-to-F3 activity and eligibility reviews</div>
+        <span class="signal-value">$e3ToF3ActivityReviews</span>
+        <div class="signal-context">No blocker observed, but business need and Frontline eligibility remain unproven</div>
+      </div>
+      <div class="license-signal dormant">
+        <div class="signal-label">Dormant license telemetry signals — not removable-license decisions</div>
+        <span class="signal-value">$dormantTelemetryE3F3</span>
+        <div class="signal-context">$noObservedActivityE3F3 with no observed activity + $technicalOnlyE3F3 with technical presence only · $dormantTelemetryE3 E3 + $dormantTelemetryF3 F3 · $dormantNamedAccounts named + $dormantSpecialAccounts generic/special + $dormantOtherAccounts other</div>
+      </div>
+      <p class="license-banner-note">Dormant telemetry uses a $StaleUserDays-day window ending on the effective evidence dates above. It is a review population, never a savings total. $disabledNoLicenseActiveEvidenceConflicts disabled no-license persona case(s) with recent evidence are excluded from high-confidence removal.</p>
     </div>
   </header>
   <main>
@@ -442,8 +465,8 @@ function Write-SmartFinOpsHtmlReport {
       <div class="kpis" aria-label="License decisions">
         <div class="kpi"><div class="label">E3 to F3 — conditional</div><div class="value">$e3ToF3Candidates</div><div class="context">Persona F3 and no observed technical blocker; Frontline eligibility is mandatory before execution</div></div>
         <div class="kpi"><div class="label">E3 to F3 — blocked or incomplete</div><div class="value">$($e3ToF3Blockers + $e3ToF3ActivityReviews)</div><div class="context">$e3ToF3Blockers technical blockers and $e3ToF3ActivityReviews activity reviews</div></div>
-        <div class="kpi"><div class="label">No license — high priority</div><div class="value">$noLicenseHigh</div><div class="context">Persona None plus disabled or blocked account</div></div>
-        <div class="kpi"><div class="label">No license — review</div><div class="value">$noLicenseReview</div><div class="context">No recent activity; $personaNoneActiveConflicts active persona conflicts stay separate</div></div>
+        <div class="kpi"><div class="label">No license — high priority</div><div class="value">$noLicenseHigh</div><div class="context">Persona None, disabled or blocked, and no recent M365 or technical evidence</div></div>
+        <div class="kpi"><div class="label">No license — review</div><div class="value">$noLicenseReview</div><div class="context">No recent activity; $personaNoneActiveConflicts active-user and $disabledNoLicenseActiveEvidenceConflicts disabled-account conflicts stay separate</div></div>
       </div>
       <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Primary evidence</th><th>Guardrail</th></tr></thead><tbody>
         <tr><td><strong>E3 → F3</strong></td><td>Current E3, M365LicenseTargetPersona F3, recent activity, no desktop activation, and Exchange/OneDrive storage within 2 GB.</td><td>Documented Frontline eligibility is mandatory. $e3ToF3Candidates cases are conditional opportunities, never automatic downgrades.</td></tr>

@@ -72,6 +72,22 @@ function Test-SmartFinOpsCsvHasDataRow {
     }
 }
 
+function Get-SmartFinOpsCsvReportRefreshDate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$HeaderColumns
+    )
+
+    $candidateColumns = @('ReportRefreshDate', 'Report Refresh Date', 'Report refresh date')
+    $reportRefreshColumn = @($candidateColumns | Where-Object { $_ -in $HeaderColumns } | Select-Object -First 1)
+    if ($reportRefreshColumn.Count -eq 0) { return $null }
+
+    $firstRow = Import-Csv -LiteralPath $Path | Select-Object -First 1
+    if ($null -eq $firstRow) { return $null }
+    return ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $firstRow -Names @($reportRefreshColumn[0]))
+}
+
 function Resolve-FirstExistingCsv {
     [CmdletBinding()]
     param(
@@ -134,12 +150,15 @@ function Import-SmartFinOpsSourceCsv {
             Status = $missingStatus
             ContractStatus = 'NotChecked'
             FreshnessStatus = 'NotChecked'
+            FreshnessBasis = 'NotChecked'
             Path = ($eligibleFileNames -join ' | ')
             FileName = ''
             RowCount = 0
             ColumnCount = 0
+            ReportRefreshDate = ''
             LastWriteTime = ''
             AgeHours = ''
+            FileAgeHours = ''
             RequiredColumnsMissing = ''
             BlockedReason = $BlockedReason
             Notes = $missingNotes
@@ -149,9 +168,15 @@ function Import-SmartFinOpsSourceCsv {
 
     try {
         $item = Get-Item -LiteralPath $path
-        $ageHours = [math]::Round(((Get-Date) - $item.LastWriteTime).TotalHours, 1)
-        $freshnessStatus = if ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
+        $fileAgeHours = [math]::Round(((Get-Date) - $item.LastWriteTime).TotalHours, 1)
         $headerColumns = @(Get-SmartFinOpsCsvHeaderColumns -Path $path)
+        $reportRefreshDate = Get-SmartFinOpsCsvReportRefreshDate -Path $path -HeaderColumns $headerColumns
+        $freshnessBasis = if ($reportRefreshDate) { 'ReportRefreshDate' } else { 'LastWriteTime' }
+        $ageHours = if ($reportRefreshDate) {
+            [math]::Round(((Get-Date) - $reportRefreshDate).TotalHours, 1)
+        }
+        else { $fileAgeHours }
+        $freshnessStatus = if ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
         $missingColumns = @($RequiredColumns | Where-Object { $_ -notin $headerColumns })
         $contractStatus = if ($missingColumns.Count -eq 0) { 'Valid' } else { 'Invalid' }
         $hasDataRow = Test-SmartFinOpsCsvHasDataRow -Path $path
@@ -182,12 +207,15 @@ function Import-SmartFinOpsSourceCsv {
             Status = $status
             ContractStatus = $contractStatus
             FreshnessStatus = $freshnessStatus
+            FreshnessBasis = $freshnessBasis
             Path = $path
             FileName = $item.Name
             RowCount = $rowCount
             ColumnCount = $headerColumns.Count
+            ReportRefreshDate = if ($reportRefreshDate) { $reportRefreshDate.ToString('yyyy-MM-dd') } else { '' }
             LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
             AgeHours = $ageHours
+            FileAgeHours = $fileAgeHours
             RequiredColumnsMissing = ($missingColumns -join ' | ')
             BlockedReason = ''
             Notes = ($notes -join ' ')
@@ -213,12 +241,15 @@ function Import-SmartFinOpsSourceCsv {
             Status = 'Error'
             ContractStatus = 'Error'
             FreshnessStatus = 'NotChecked'
+            FreshnessBasis = 'NotChecked'
             Path = $path
             FileName = [System.IO.Path]::GetFileName($path)
             RowCount = 0
             ColumnCount = 0
+            ReportRefreshDate = ''
             LastWriteTime = ''
             AgeHours = ''
+            FileAgeHours = ''
             RequiredColumnsMissing = ''
             BlockedReason = $BlockedReason
             Notes = $_.Exception.Message
