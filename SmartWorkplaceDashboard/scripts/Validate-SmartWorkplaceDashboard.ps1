@@ -1,4 +1,4 @@
-# Version: 4.5.0
+# Version: 4.9.0
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -16,10 +16,10 @@ $model=Read-Json $modelPath;$selection=Read-Json $selectionPath
 if($model.compatibilityLevel-ne1600){throw "compatibilityLevel must be 1600; found $($model.compatibilityLevel)"}
 $files=@($selection.includedFiles);if($files.Count-ne90){throw "Expected 90 selected CSV files; found $($files.Count)"};if(($files|Sort-Object -Unique).Count-ne$files.Count){throw 'Duplicate selected CSV file'}
 $approvedSummary=@($selection.includeOverrides);foreach($f in $files){if(-not$f.EndsWith('.csv',[StringComparison]::OrdinalIgnoreCase)){throw "Not a CSV: $f"};if($f-match'_MAXITEMS'){throw "Bounded export selected: $f"};if($f-match'Summary' -and$approvedSummary-notcontains$f){throw "Unapproved Summary selected: $f"}}
-$expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$tables=@($model.model.tables);$actualNames=@($tables.name)
-$missing=@($expectedNames|Where-Object{$actualNames-notcontains$_});$extra=@($actualNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Non-source tables found: $($extra-join', ')"};if($tables.Count-ne90){throw "Expected exactly 90 source tables; found $($tables.Count)"}
+$expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$derivedTableNames=@('DeviceDetail','UserDetail');$tables=@($model.model.tables);$actualNames=@($tables.name);$sourceTables=@($tables|Where-Object{$derivedTableNames-notcontains$_.name});$actualSourceNames=@($sourceTables.name)
+$missing=@($expectedNames|Where-Object{$actualSourceNames-notcontains$_});$extra=@($actualSourceNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Unexpected source tables found: $($extra-join', ')"};if($sourceTables.Count-ne90){throw "Expected exactly 90 source tables; found $($sourceTables.Count)"};if($tables.Count-ne92){throw "Expected 90 source tables and two derived tables; found $($tables.Count) tables"}
 $old=@('DimUser','DimDevice','DimLicenseSku','FactAction','FactBackupMailbox','FactDataQuality','FactDeviceCompliance','FactMailbox','FactSharePointSite','FactSourceFreshness','FactSyncHealth','FactTeam','FactUpgradeEligibility','FactUserActivity','FactUserLicense','FactWindowsUpdate','HistoryCoverage','DashboardMetrics','Measures');$present=@($actualNames|Where-Object{$old-contains$_});if($present.Count){throw "Legacy work tables remain: $($present-join', ')"}
-$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey','__TenantAppKey');$derived=@('IsEnabled','PlanStatus','IsServicePlanActive');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
+$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey','__TenantAppKey');$derived=@('IsEnabled','PlanStatus','IsServicePlanActive','__WeekStart','WindowsVersionFamily','BIOSDateKnown','BIOSOlderThan5Years');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
 foreach ($f in $files) {
     $name = [IO.Path]::GetFileNameWithoutExtension($f)
     $t = $tables | Where-Object name -eq $name | Select-Object -First 1
@@ -51,12 +51,61 @@ foreach ($f in $files) {
         if (($header -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "CSV/model columns differ for $name" }
     }
     foreach ($m in $metadata) { if ($cols -notcontains $m) { throw "Missing snapshot metadata $name[$m]" } }}
-$relationships=@($model.model.relationships)
-if($relationships.Count-ne3){throw "Expected exactly 3 validated relationships; found $($relationships.Count)"}
+$deviceDetail=$tables|Where-Object name -eq 'DeviceDetail'|Select-Object -First 1
+if($null-eq$deviceDetail){throw 'Missing derived DeviceDetail table'}
+if(@($deviceDetail.partitions).Count-ne1-or[string]$deviceDetail.partitions[0].source.type-ne'm'){throw 'DeviceDetail must have one M partition'}
+$deviceDetailColumns=@{};foreach($column in $deviceDetail.columns){$deviceDetailColumns[[string]$column.name]=$column}
+$requiredDeviceDetailFields=@{
+    'CanonicalDeviceKey'='string';'DeviceName'='string';'PrimaryUserUPN'='string';'Country'='string';'SourceCoverage'='string';
+    'InAD'='boolean';'InEntra'='boolean';'InIntune'='boolean';'ADEnabled'='boolean';'EntraAccountEnabled'='boolean';'EntraIsManaged'='boolean';'EntraIsCompliant'='boolean';'IntuneIsCompliant'='boolean';
+    'ADLastLogonDateTime'='dateTime';'EntraLastSignInDateTime'='dateTime';'IntuneLastSyncDateTime'='dateTime';'LastActivityDateTime'='dateTime';
+    'DaysSinceLastActivity'='int64';'PhysicalMemoryGB'='double';'StorageTotalGB'='double';'StorageFreeGB'='double';'ActionPriority'='int64';'ActionRequired'='boolean';'RecommendedAction'='string'
+}
+foreach($entry in $requiredDeviceDetailFields.GetEnumerator()){
+    if(-not$deviceDetailColumns.ContainsKey($entry.Key)){throw "Missing DeviceDetail field: $($entry.Key)"}
+    if([string]$deviceDetailColumns[$entry.Key].dataType-ne[string]$entry.Value){throw "DeviceDetail type regression: $($entry.Key) is $($deviceDetailColumns[$entry.Key].dataType), expected $($entry.Value)"}
+}
+foreach($hiddenField in @('CanonicalDeviceKey','ADObjectGUID','EntraObjectId','EntraDeviceId','IntuneDeviceId','ActionPriority')){if($deviceDetailColumns[$hiddenField].isHidden-ne$true){throw "DeviceDetail technical field must be hidden: $hiddenField"}}
+$deviceDetailExpression=[string]$deviceDetail.partitions[0].source.expression
+foreach($fragment in @('#"AD_Computers_AllDomains"','#"M365_Entra_Devices"','#"Intune_Devices_Inventory"','#"M365_Users_Active"','[__IsCurrent]=true','A_EntraObjectId','A_EntraDeviceId','A_IntuneDeviceId','I_EntraObjectId','I_AzureADDeviceId','"AD:"&Norm([A_ObjectGUID])','"INTUNE:"&Norm([I_DeviceId])','"ENTRA:"&[E_ObjectKey]')){if(-not$deviceDetailExpression.Contains($fragment,[StringComparison]::Ordinal)){throw "DeviceDetail exact-key contract regression: $fragment"}}
+foreach($joinLine in [regex]::Matches($deviceDetailExpression,'Table\.NestedJoin\([^\r\n]+')){if($joinLine.Value-match 'DisplayName|DeviceName|A_Name|I_DeviceName'){throw "DeviceDetail must not join devices by name: $($joinLine.Value)"}}$userDetail=$tables|Where-Object name -eq 'UserDetail'|Select-Object -First 1
+if($null-eq$userDetail){throw 'Missing derived UserDetail table'}
+if(@($userDetail.partitions).Count-ne1-or[string]$userDetail.partitions[0].source.type-ne'm'){throw 'UserDetail must have one M partition'}
+$userDetailColumns=@{};foreach($column in $userDetail.columns){$userDetailColumns[[string]$column.name]=$column}
+$requiredUserDetailFields=@{
+    'CanonicalUserKey'='string';'DisplayName'='string';'UserPrincipalName'='string';'PrimarySmtpAddress'='string';'Country'='string';'SourceCoverage'='string';'IdentityMatchStatus'='string';'HybridIdentityType'='string';
+    'InAD'='boolean';'InEntra'='boolean';'InExchangeOnPrem'='boolean';'InExchangeOnline'='boolean';'ADAccountEnabled'='boolean';'EntraAccountEnabled'='boolean';'IsEnabled'='boolean';'AccountStatus'='string';
+    'DirSyncEnabled'='boolean';'OnPremisesSyncEnabled'='boolean';'IsLikelyServiceAccount'='boolean';'EXOMailboxSizeGB'='double';'OnPremMailboxSizeGB'='double';'TotalMailboxSizeGB'='double';'ArchiveMailboxSizeGB'='double';'MailboxItemCount'='int64';
+    'ADLastLogonDateTime'='dateTime';'EntraLastSignInDateTime'='dateTime';'EXOLastUserActionDateTime'='dateTime';'OnPremLastLogonDateTime'='dateTime';'LastActivityDateTime'='dateTime';'DaysSinceLastActivity'='int64';
+    'ActionPriority'='int64';'ActionRequired'='boolean';'RecommendedAction'='string'
+}
+foreach($entry in $requiredUserDetailFields.GetEnumerator()){
+    if(-not$userDetailColumns.ContainsKey($entry.Key)){throw "Missing UserDetail field: $($entry.Key)"}
+    if([string]$userDetailColumns[$entry.Key].dataType-ne[string]$entry.Value){throw "UserDetail type regression: $($entry.Key) is $($userDetailColumns[$entry.Key].dataType), expected $($entry.Value)"}
+}
+foreach($hiddenField in @('CanonicalUserKey','ADObjectGUID','EntraObjectId','OnPremExchangeGuid','EXOMailboxGuid','ActionPriority')){if($userDetailColumns[$hiddenField].isHidden-ne$true){throw "UserDetail technical field must be hidden: $hiddenField"}}
+$userDetailExpression=[string]$userDetail.partitions[0].source.expression
+foreach($fragment in @('#"AD_Users_AllDomains"','#"M365_Users_Active"','#"Exchange_OnPrem_Mailboxes_AllDomains"','#"Exchange_EXO_Mailboxes_AllDomains"','[__IsCurrent]=true','A_ImmutableId','A_SID','A_UPN','O_ObjectGUID','X_ExternalDirectoryObjectId','CandidateCount({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]})>1','FirstText({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]','FirstText({[CanonicalByADObject],[CanonicalByUPN],[CanonicalBySmtp]','FirstText({[CanonicalByEntraObject],[CanonicalByImmutable],[CanonicalByUPN],[CanonicalBySmtp]','"AD:"&Norm([A_ObjectGUID])','"ONPREM:"&Norm([O_ObjectGUID])','"EXO:"&Norm([X_MailboxGuid])')){if(-not$userDetailExpression.Contains($fragment,[StringComparison]::Ordinal)){throw "UserDetail exact-key contract regression: $fragment"}}
+foreach($joinLine in [regex]::Matches($userDetailExpression,'Table\.NestedJoin\([^\r\n]+')){if($joinLine.Value-match 'DisplayName|GivenName|Surname'){throw "UserDetail must not join users by display name: $($joinLine.Value)"}}
+if($userDetailExpression-match 'ProxyAddresses|EmailAddresses'){throw 'UserDetail must not merge users from alias or proxy-address collections'}$relationships=@($model.model.relationships)
+if($relationships.Count-ne16){throw "Expected exactly 16 validated relationships; found $($relationships.Count)"}
 $expectedRelationships=@{
     'rel_ServicePlanStates_Catalog' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='__SkuPlanKey'; toTable='M365_Licenses_ServicePlans_Catalog'; toColumn='__SkuPlanKey' }
     'rel_ServicePlanStates_Users' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='UserId'; toTable='M365_Users_Active'; toColumn='Object Id' }
     'rel_DiscoveredAppRelations_Summary' = @{ fromTable='Intune_DiscoveredApps_AppDeviceRelations'; fromColumn='__TenantAppKey'; toTable='Intune_DiscoveredApps_Summary'; toColumn='__TenantAppKey' }
+    'rel_UserActivity_Users' = @{ fromTable='M365_Users_Activity'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_IntuneInventory_Users' = @{ fromTable='Intune_Devices_Inventory'; fromColumn='Primary user UPN'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_LocalSystem_Users' = @{ fromTable='Intune_Devices_LocalSystem'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_WindowsUpdate_Users' = @{ fromTable='Intune_WindowsUpdate_Status'; fromColumn='UPN'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_EXO_Users' = @{ fromTable='Exchange_EXO_Mailboxes_AllDomains'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_OnPremMailboxes_Users' = @{ fromTable='Exchange_OnPrem_Mailboxes_AllDomains'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_TeamsActivity_Users' = @{ fromTable='M365_Teams_UserActivity'; fromColumn='User Principal Name'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_TeamsGuests_Users' = @{ fromTable='M365_Teams_Guests'; fromColumn='UserId'; toTable='M365_Users_Active'; toColumn='Object Id' }
+    'rel_MailboxUsage_Users' = @{ fromTable='M365_Mailbox_Usage'; fromColumn='User Principal Name'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_CopilotUsage_Users' = @{ fromTable='M365_Copilot_UserUsage'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_BackupProtected_Users' = @{ fromTable='M365_Backup_ProtectedMailboxes'; fromColumn='UserPrincipalName'; toTable='M365_Users_Active'; toColumn='User principal name' }
+    'rel_BackupScope_Users' = @{ fromTable='M365_BackupPolicyScope_MailboxCoverage'; fromColumn='MemberId'; toTable='M365_Users_Active'; toColumn='Object Id' }
+    'rel_HybridIssues_Users' = @{ fromTable='Exchange_HybridIdentity_Issues'; fromColumn='ObjectGUID'; toTable='M365_Users_Active'; toColumn='Object Id' }
 }
 foreach($relationshipName in $expectedRelationships.Keys){
     $relationship=$relationships|Where-Object name -eq $relationshipName|Select-Object -First 1
@@ -90,10 +139,11 @@ $typedExpectations = @{
     'M365_Users_Active' = @{ 'AccountEnabled' = 'boolean' }
     'M365_Users_Activity' = @{ 'HasAnyM365Activity' = 'boolean'; 'LastActivityDate' = 'dateTime' }
     'Intune_Devices_Inventory' = @{ 'IsCompliant' = 'boolean'; 'LastSyncDateTime' = 'dateTime' }
+    'Intune_Devices_LocalSystem' = @{ 'IsEncrypted' = 'boolean' }
     'Intune_Windows11_Readiness_Issues' = @{ 'IsBlocking' = 'boolean' }
     'M365_SPO_Sites' = @{ 'IsInactive' = 'boolean'; 'IsOrphaned' = 'boolean' }
     'M365_SPO_Tenant' = @{ 'StorageUsedTB' = 'double'; 'StorageCapacityTB' = 'double'; 'StorageUtilizationPercent' = 'double'; 'IsPartialInventory' = 'boolean' }
-    'M365_Mailbox_Usage' = @{ 'Storage Used (Byte)' = 'int64'; 'Prohibit Send/Receive Quota (Byte)' = 'int64'; 'Last Activity Date' = 'dateTime' }
+    'M365_Mailbox_Usage' = @{ 'Is Deleted' = 'boolean'; 'Storage Used (Byte)' = 'int64'; 'Prohibit Send/Receive Quota (Byte)' = 'int64'; 'Last Activity Date' = 'dateTime' }
     'Exchange_OnPrem_Servers_Compute' = @{ 'IsVirtualMachine' = 'boolean'; 'MemoryGB' = 'double'; 'PhysicalCoreCount' = 'int64' }
     'Exchange_OnPrem_Servers_LogicalDisks' = @{ 'LowSpaceWarning' = 'boolean'; 'FreePercent' = 'double' }
     'Exchange_OnPrem_Servers_RemoteAccess' = @{ 'PingOk' = 'boolean'; 'WmiDcomOk' = 'boolean' }
@@ -110,24 +160,40 @@ foreach ($tableName in $typedExpectations.Keys) {
         if ($partitionText -notmatch [regex]::Escape("{`"$columnName`", `"$mKind`"}")) { throw "Power Query type map regression: $tableName[$columnName] must use $mKind" }
     }
 }
-$measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -First 1;$measureNames=@($measureTable.measures.name);if($measureNames.Count -lt 60){throw "Expected at least 60 measures; found $($measureNames.Count)"};foreach($n in @('Enabled Users','Enabled Users Inactive 90d','Purchased Licenses','M365 SKU Utilization','Service Plan Assignments','Service Plan Assigned Users','Enabled Service Plan Assignments','Disabled Service Plan Assignments','Users with Disabled Service Plans','Service Plan Enablement Rate','Managed Devices','Device Compliance Rate','Windows 11 Affected Devices','Mailboxes','Mailbox Quota Utilization','Teams','SharePoint Sites','SharePoint Storage License Units','SharePoint Estimated Capacity TB','SharePoint Estimated Remaining TB','SharePoint Estimated Utilization','SharePoint Approx Project Visio Capacity TB','Migration Failed Items','Protected Mailboxes','Backup Coverage Rate','Hybrid Identity Affected Users','Model Device Count','Application Device Instances','Devices with Discovered Applications','Devices per Application','AD Enabled Users Trend','Managed Devices Trend','Selected Source Tables','On-prem Hosted Mailboxes','Online Placement Rate','Remote Mailboxes without EXO','Potential Dual-hosted SMTP','Exchange Servers','Server Inventory Coverage','Low Space Volumes')){if($measureNames -notcontains $n){throw "Missing measure: $n"}}
+$measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -First 1;$measureNames=@($measureTable.measures.name);if($measureNames.Count -lt 100){throw "Expected at least 100 measures; found $($measureNames.Count)"};foreach($n in @('Enabled Users','Enabled Users Inactive 90d','M365 E3 Purchased','M365 E3 Consumed','M365 E3 Available','M365 E3 Utilization','M365 E5 Purchased','M365 E5 Consumed','M365 E5 Available','M365 E5 Utilization','M365 F3 Purchased','M365 F3 Consumed','M365 F3 Available','M365 F3 Utilization','M365 SKU Utilization','Service Plan Assignments','Users with Disabled Service Plans','Managed Devices','Intune Managed Devices','Entra Device Objects','AD Computer Objects','AD Enabled Computers','Unified Devices','Devices in All Three Sources','Device Detail Intune Managed','Device Detail Noncompliant','Device Detail Stale 30d','Device Detail Action Required','Unified Users','User Detail Enabled Users','User Detail Inactive 90d','User Detail AD Users','User Detail Entra Users','User Detail Exchange Online','User Detail Exchange On-prem','User Detail Action Required','Device Compliance Rate','Windows 11 Devices','Windows 10 Devices','Windows 11 Device Rate','Windows 10 Device Rate','Hardware Refresh Candidates','Hardware Refresh Candidate Rate','BIOS Older Than 5 Years Devices','BIOS Older Than 5 Years Rate','Mailboxes','Mailbox Storage Used GB','Mailbox Quota GB','Mailbox Storage TB','Mailbox Storage Utilization','On-prem Mailbox Storage GB','On-prem Mailbox Storage TB','Online Placement Rate','On-prem Placement Rate','Teams Storage Used GB','Teams Storage Used TB','Teams Storage Quota TB','Teams Storage Utilization','SharePoint Storage Used GB','SharePoint Storage Used TB','SharePoint Estimated Capacity TB','SharePoint Estimated Utilization','AD Enabled Users Weekly Snapshot','Migration Failed Items','Protected Mailboxes','Hybrid Identity Affected Users','Model Device Count','Devices per Application','Selected Source Tables','Potential Dual-hosted SMTP','Exchange Servers')){if($measureNames -notcontains $n){throw "Missing measure: $n"}}
 $tableMap=@{};foreach($t in $tables){$tableMap[$t.name]=@($t.columns.name)};$measureSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);foreach($n in $measureNames){$null=$measureSet.Add($n)}
 foreach($m in $measureTable.measures){$matches=[regex]::Matches([string]$m.expression,"'([^']+)'\[([^\]]+)\]");foreach($x in $matches){$tn=$x.Groups[1].Value;$cn=$x.Groups[2].Value;if(-not $tableMap.ContainsKey($tn)){throw "Measure $($m.name) references missing table $tn"};if($tableMap[$tn] -notcontains $cn){throw "Measure $($m.name) references missing field $tn[$cn]"}}}
-$pagesMeta=Read-Json (Join-Path $definition 'pages\pages.json');if(@($pagesMeta.pageOrder).Count-ne15){throw "Expected 15 report pages; found $(@($pagesMeta.pageOrder).Count)"}
-$visualFiles=@(Get-ChildItem -LiteralPath (Join-Path $definition 'pages') -Filter visual.json -File -Recurse);if($visualFiles.Count-ne356){throw "Expected exactly 356 visuals; found $($visualFiles.Count)"}
+$invalidMeasureFormats=@($measureTable.measures|Where-Object { [string]$_.formatString -match '\[>=' })
+if($invalidMeasureFormats.Count-gt0){throw "Unsupported conditional measure formats: $($invalidMeasureFormats.name -join ', ')"}
+foreach($sku in @('E3','E5','F3')){$utilization=$measureTable.measures|Where-Object name -eq "M365 $sku Utilization"|Select-Object -First 1;if([string]$utilization.expression-notmatch 'BLANK\(\)'){throw "M365 $sku Utilization must be blank when no licenses are purchased"}}$pagesMeta=Read-Json (Join-Path $definition 'pages\pages.json');if(@($pagesMeta.pageOrder).Count-ne19){throw "Expected 19 report pages; found $(@($pagesMeta.pageOrder).Count)"}
+$visualFiles=@(Get-ChildItem -LiteralPath (Join-Path $definition 'pages') -Filter visual.json -File -Recurse);if($visualFiles.Count-ne501){throw "Expected exactly 501 visuals; found $($visualFiles.Count)"}
 $visualObjects=@($visualFiles|ForEach-Object{Read-Json $_.FullName})
 $logoVisuals=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'image'})
-if($logoVisuals.Count-ne15){throw "Expected one logo image per page; found $($logoVisuals.Count)"}
+if($logoVisuals.Count-ne19){throw "Expected one logo image per page; found $($logoVisuals.Count)"}
 foreach($logo in $logoVisuals){$url=[string]$logo.visual.objects.general[0].properties.imageUrl.expr.Literal.Value;if(-not$url.StartsWith("'data:image/png;base64,")){throw 'Logo image is not embedded as PNG data'}}
 $slicers=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'slicer'})
-if($slicers.Count-lt1){throw 'Ownership slicer is missing'}
+if($slicers.Count-lt39){throw 'Expected country slicers plus operational slicers'};foreach($slicer in $slicers){$headerVisible=[string]$slicer.visual.objects.header[0].properties.show.expr.Literal.Value;if($headerVisible-ne'false'){throw "Technical slicer header must be hidden: $($slicer.name)"}}
+$countrySlicers=@($visualObjects|Where-Object{$_.name-match'country$'})
+if($countrySlicers.Count-ne19){throw "Expected one country slicer per page; found $($countrySlicers.Count)"};foreach($countrySlicer in $countrySlicers){$countryTitle=[string]$countrySlicer.visual.visualContainerObjects.title[0].properties.text.expr.Literal.Value;if($countryTitle-ne"'Country'"-or[double]$countrySlicer.position.height-lt80){throw "Country slicer layout regression: $($countrySlicer.name) title=$countryTitle height=$($countrySlicer.position.height)"}}
 $cardVisuals=@($visualObjects|Where-Object{$_.visual.visualType-eq'cardVisual'})
 $kpiLabels=@($visualObjects|Where-Object{$_.name-match'kpi\d+label$'})
-if($cardVisuals.Count-ne118){throw "Expected 118 individual KPI cards; found $($cardVisuals.Count)"}
-if($kpiLabels.Count-ne118){throw "Expected 118 wrapped KPI labels; found $($kpiLabels.Count)"}
+if($cardVisuals.Count-ne161){throw "Expected 161 individual KPI cards; found $($cardVisuals.Count)"}
+if($kpiLabels.Count-ne161){throw "Expected 161 wrapped KPI labels; found $($kpiLabels.Count)"}
 $visualByName=@{};foreach($visualObject in $visualObjects){if($visualByName.ContainsKey([string]$visualObject.name)){throw "Duplicate visual name: $($visualObject.name)"};$visualByName[[string]$visualObject.name]=$visualObject;$right=[double]$visualObject.position.x+[double]$visualObject.position.width;$bottom=[double]$visualObject.position.y+[double]$visualObject.position.height;if($right-gt1280.001-or$bottom-gt720.001){throw "Visual outside 1280x720 canvas: $($visualObject.name) right=$right bottom=$bottom"}}
-foreach($kpiCard in $cardVisuals){if([string]$kpiCard.name-notmatch'kpi\d+$'){throw "Legacy multi-measure card remains: $($kpiCard.name)"};$projections=@($kpiCard.visual.query.queryState.Data.projections);if($projections.Count-ne1){throw "KPI card must expose exactly one measure: $($kpiCard.name)"};$measureName=[string]$projections[0].field.Measure.Property;$builtInLabel=[string]$kpiCard.visual.objects.label[0].properties.show.expr.Literal.Value;if($builtInLabel-ne'false'){throw "KPI built-in label must be hidden: $($kpiCard.name)"};$labelName=[string]$kpiCard.name+'label';if(-not$visualByName.ContainsKey($labelName)){throw "Missing wrapped KPI label: $labelName"};$label=$visualByName[$labelName];$labelText=[string]$label.visual.objects.general[0].properties.paragraphs[0].textRuns[0].value;if($labelText-ne$measureName){throw "KPI label mismatch: $($kpiCard.name) expected '$measureName', found '$labelText'"}}
-foreach($vf in $visualFiles){$v=Read-Json $vf.FullName;Visit-Node $v {param($node);foreach($kind in @('Column','Measure')){$exact=$node.PSObject.Properties[$kind];if($null -ne $exact){$entry=$exact.Value;$entity=$entry.Expression.SourceRef.Entity;$property=$entry.Property;if(-not $entity -or -not $property){throw "Incomplete $kind reference in $($vf.FullName)"};if(-not $tableMap.ContainsKey([string]$entity)){throw "Visual references missing table $entity"};if($kind -eq 'Column' -and $tableMap[[string]$entity] -notcontains [string]$property){throw "Visual references missing field $entity.$property"};if($kind -eq 'Measure' -and -not $measureSet.Contains([string]$property)){throw "Visual references missing measure $property"}}}}}
+$requiredDeviceDetailVisuals=@('devicedetail000018country','devicedetaildevice','devicedetailuser','devicedetailsources','devicedetailcompliance','devicedetailownership','devicedetailtrust','devicedetailactivity','devicedetailaction','devicedetailtable')
+foreach($visualName in $requiredDeviceDetailVisuals){if(-not$visualByName.ContainsKey($visualName)){throw "Missing Devices Detail visual: $visualName"}}
+$deviceCountryProjection=$visualByName['devicedetail000018country'].visual.query.queryState.Values.projections[0].field.Column
+if([string]$deviceCountryProjection.Expression.SourceRef.Entity-ne'DeviceDetail'-or[string]$deviceCountryProjection.Property-ne'Country'){throw 'Devices Detail country slicer must use DeviceDetail[Country]'}
+$deviceTableFields=@($visualByName['devicedetailtable'].visual.query.queryState.Values.projections|ForEach-Object{[string]$_.field.Column.Property})
+foreach($fieldName in @('DeviceName','PrimaryUserUPN','Country','SourceCoverage','ActionSeverity','RecommendedAction','ComplianceStatus','LastActivityDateTime','Windows11Readiness','UpdateRisk')){if($deviceTableFields-notcontains$fieldName){throw "Devices Detail table is missing operator field: $fieldName"}}$requiredUserDetailVisuals=@('userdetail000019country','userdetailuser','userdetaildepartment','userdetailaccount','userdetailtype','userdetailsources','userdetailplacement','userdetaillicense','userdetailactivity','userdetailaction','userdetailtable')
+foreach($visualName in $requiredUserDetailVisuals){if(-not$visualByName.ContainsKey($visualName)){throw "Missing Users Detail visual: $visualName"}}
+$userCountryProjection=$visualByName['userdetail000019country'].visual.query.queryState.Values.projections[0].field.Column
+if([string]$userCountryProjection.Expression.SourceRef.Entity-ne'UserDetail'-or[string]$userCountryProjection.Property-ne'Country'){throw 'Users Detail country slicer must use UserDetail[Country]'}
+$userTableFields=@($visualByName['userdetailtable'].visual.query.queryState.Values.projections|ForEach-Object{[string]$_.field.Column.Property})
+foreach($fieldName in @('DisplayName','UserPrincipalName','PrimarySmtpAddress','Country','SourceCoverage','IdentityMatchStatus','AccountStatus','LicenseSummary','MailboxPlacement','LastActivityDateTime','ActionSeverity','RecommendedAction')){if($userTableFields-notcontains$fieldName){throw "Users Detail table is missing operator field: $fieldName"}}foreach($kpiCard in $cardVisuals){if([string]$kpiCard.name-notmatch'kpi\d+$'){throw "Legacy multi-measure card remains: $($kpiCard.name)"};$projections=@($kpiCard.visual.query.queryState.Data.projections);if($projections.Count-ne1){throw "KPI card must expose exactly one measure: $($kpiCard.name)"};$measureName=[string]$projections[0].field.Measure.Property;$builtInLabel=[string]$kpiCard.visual.objects.label[0].properties.show.expr.Literal.Value;if($builtInLabel-ne'false'){throw "KPI built-in label must be hidden: $($kpiCard.name)"};$labelName=[string]$kpiCard.name+'label';if(-not$visualByName.ContainsKey($labelName)){throw "Missing wrapped KPI label: $labelName"};$label=$visualByName[$labelName];$labelText=[string]$label.visual.objects.general[0].properties.paragraphs[0].textRuns[0].value;if($labelText-ne$measureName){throw "KPI label mismatch: $($kpiCard.name) expected '$measureName', found '$labelText'"}}
+foreach($kpiCard in $cardVisuals){$units=[string]$kpiCard.visual.objects.value[0].properties.displayUnits.expr.Literal.Value;$decimals=[string]$kpiCard.visual.objects.value[0].properties.decimalPlaces.expr.Literal.Value;if($units-ne'0D'-or$decimals-ne'1D'){throw "KPI numeric formatting regression: $($kpiCard.name) displayUnits=$units decimalPlaces=$decimals"}}
+$barVisuals=@($visualObjects|Where-Object{$_.visual.visualType-eq'barChart'})
+foreach($barVisual in $barVisuals){$units=[string]$barVisual.visual.objects.labels[0].properties.labelDisplayUnits.expr.Literal.Value;$precision=[string]$barVisual.visual.objects.labels[0].properties.labelPrecision.expr.Literal.Value;if($units-ne'0D'-or$precision-ne'1D'){throw "Bar label formatting regression: $($barVisual.name) displayUnits=$units precision=$precision"}}foreach($vf in $visualFiles){$v=Read-Json $vf.FullName;Visit-Node $v {param($node);foreach($kind in @('Column','Measure')){$exact=$node.PSObject.Properties[$kind];if($null -ne $exact){$entry=$exact.Value;$entity=$entry.Expression.SourceRef.Entity;$property=$entry.Property;if(-not $entity -or -not $property){throw "Incomplete $kind reference in $($vf.FullName)"};if(-not $tableMap.ContainsKey([string]$entity)){throw "Visual references missing table $entity"};if($kind -eq 'Column' -and $tableMap[[string]$entity] -notcontains [string]$property){throw "Visual references missing field $entity.$property"};if($kind -eq 'Measure' -and -not $measureSet.Contains([string]$property)){throw "Visual references missing measure $property"}}}}}
 foreach($n in @('fnGetSourceFiles','fnLoadSourceTable','fnToLogical','fnToDateTime','fnToNumber','fnToInt64')){if(-not ($model.model.expressions|Where-Object name -eq $n)){throw "Missing Power Query expression: $n"}}
 $invalidDaxMeasures=@($tables.measures|Where-Object { [string]$_.expression -match '&&\s*VAR\b' })
 if($invalidDaxMeasures.Count -gt 0){throw "Invalid DAX variable placement in measures: $($invalidDaxMeasures.name -join ', ')"}
@@ -135,7 +201,7 @@ $loaderExpression=[string](($model.model.expressions|Where-Object name -eq 'fnLo
 if(([regex]::Matches($loaderExpression,'\(')).Count -ne ([regex]::Matches($loaderExpression,'\)')).Count){throw 'Unbalanced parentheses in fnLoadSourceTable'}
 $forbidden=@('SmartWorkplaceCMDB','LocalDateTable_','C:\Users\');$publishable=@(Get-ChildItem -LiteralPath $DashboardRoot -File -Recurse|Where-Object{$_.FullName -notmatch '\\\.pbi\\' -and $_.Name -ne 'LOCAL_MEMORY.md' -and $_.FullName -ne $PSCommandPath -and $_.Extension -in @('.js','.ps1','.json','.bim','.pbip','.pbir','.pbism','.pq','.md')});foreach($p in $publishable){$text=Get-Content -LiteralPath $p.FullName -Raw;foreach($term in $forbidden){if($text.Contains($term,[StringComparison]::OrdinalIgnoreCase)){throw "Forbidden dependency '$term' in $($p.FullName)"}}}
 $builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& node --check $builder;if($LASTEXITCODE-ne0){throw 'Builder JavaScript syntax check failed'}
-Write-Host "OK SmartWorkplaceDashboard: 90 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, 118 readable KPI labels, StateCode and discovered-app relationships validated."
+Write-Host "OK SmartWorkplaceDashboard: 90 source tables, 2 derived tables, $($measureNames.Count) measures, 19 pages, $($visualFiles.Count) visuals, 161 readable KPI labels, StateCode and discovered-app relationships validated."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

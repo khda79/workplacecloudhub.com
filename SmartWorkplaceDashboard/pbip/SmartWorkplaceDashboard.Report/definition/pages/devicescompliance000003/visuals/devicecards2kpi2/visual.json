@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Autopilot Devices"
+                  "Property": "Noncompliant Devices"
                 }
               },
-              "queryRef": "M365_Users_Active.Autopilot Devices",
-              "nativeQueryRef": "Autopilot Devices"
+              "queryRef": "M365_Users_Active.Noncompliant Devices",
+              "nativeQueryRef": "Noncompliant Devices"
             }
           ]
         }

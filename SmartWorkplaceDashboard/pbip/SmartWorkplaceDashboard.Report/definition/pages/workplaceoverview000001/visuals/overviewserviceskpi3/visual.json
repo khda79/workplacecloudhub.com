@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "SharePoint Sites"
+                  "Property": "Mailbox Storage TB"
                 }
               },
-              "queryRef": "M365_Users_Active.SharePoint Sites",
-              "nativeQueryRef": "SharePoint Sites"
+              "queryRef": "M365_Users_Active.Mailbox Storage TB",
+              "nativeQueryRef": "Mailbox Storage TB"
             }
           ]
         }

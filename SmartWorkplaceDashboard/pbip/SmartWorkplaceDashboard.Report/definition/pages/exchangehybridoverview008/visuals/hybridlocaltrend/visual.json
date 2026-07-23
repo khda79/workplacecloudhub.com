@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "hybridlocaltrend",
   "position": {
-    "x": 24,
+    "x": 644,
     "y": 480,
-    "width": 388,
-    "height": 170,
-    "z": 8000,
-    "tabOrder": 8000
+    "width": 296,
+    "height": 200,
+    "z": 9000,
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "lineChart",

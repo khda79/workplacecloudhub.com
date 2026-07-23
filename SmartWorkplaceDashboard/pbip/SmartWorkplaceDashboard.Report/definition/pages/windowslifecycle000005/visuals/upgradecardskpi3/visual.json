@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "upgradecardskpi3",
   "position": {
-    "x": 644,
-    "y": 179,
-    "width": 302,
+    "x": 1057.3333333333333,
+    "y": 96,
+    "width": 198.66666666666666,
     "height": 75,
     "z": 4004,
     "tabOrder": 4004
@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Upgraded Devices"
+                  "Property": "BIOS Older Than 5 Years Devices"
                 }
               },
-              "queryRef": "M365_Users_Active.Upgraded Devices",
-              "nativeQueryRef": "Upgraded Devices"
+              "queryRef": "M365_Users_Active.BIOS Older Than 5 Years Devices",
+              "nativeQueryRef": "BIOS Older Than 5 Years Devices"
             }
           ]
         }

@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "upgradecardskpi2label",
   "position": {
-    "x": 964,
+    "x": 860.6666666666666,
     "y": 101,
-    "width": 282,
+    "width": 178.66666666666666,
     "height": 30,
     "z": 4003,
     "tabOrder": 4003
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Not Eligible Devices",
+                    "value": "Hardware Refresh Candidate Rate",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

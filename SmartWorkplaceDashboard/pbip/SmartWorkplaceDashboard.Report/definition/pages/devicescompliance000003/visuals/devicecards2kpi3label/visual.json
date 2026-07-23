@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Entra Removal Candidates",
+                    "value": "Stale Devices 30d",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

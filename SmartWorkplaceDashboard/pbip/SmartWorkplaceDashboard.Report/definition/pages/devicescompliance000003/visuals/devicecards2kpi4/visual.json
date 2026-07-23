@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Hardware ID Conflicts"
+                  "Property": "Entra Removal Candidates"
                 }
               },
-              "queryRef": "M365_Users_Active.Hardware ID Conflicts",
-              "nativeQueryRef": "Hardware ID Conflicts"
+              "queryRef": "M365_Users_Active.Entra Removal Candidates",
+              "nativeQueryRef": "Entra Removal Candidates"
             }
           ]
         }

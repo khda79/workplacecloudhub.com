@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Compliant Devices"
+                  "Property": "Entra Device Objects"
                 }
               },
-              "queryRef": "M365_Users_Active.Compliant Devices",
-              "nativeQueryRef": "Compliant Devices"
+              "queryRef": "M365_Users_Active.Entra Device Objects",
+              "nativeQueryRef": "Entra Device Objects"
             }
           ]
         }

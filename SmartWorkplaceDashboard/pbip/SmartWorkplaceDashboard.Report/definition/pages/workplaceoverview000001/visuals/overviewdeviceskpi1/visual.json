@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Intune Managed Devices"
                 }
               },
-              "queryRef": "M365_Users_Active.Managed Devices",
-              "nativeQueryRef": "Managed Devices"
+              "queryRef": "M365_Users_Active.Intune Managed Devices",
+              "nativeQueryRef": "Intune Managed Devices"
             }
           ]
         }

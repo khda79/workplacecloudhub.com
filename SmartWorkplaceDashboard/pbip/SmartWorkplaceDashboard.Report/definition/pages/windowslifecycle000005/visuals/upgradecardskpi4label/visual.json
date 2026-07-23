@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "upgradecardskpi4label",
   "position": {
-    "x": 964,
+    "x": 654,
     "y": 184,
-    "width": 282,
+    "width": 178.66666666666666,
     "height": 30,
     "z": 4007,
     "tabOrder": 4007
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Windows 11 Affected Devices",
+                    "value": "BIOS Older Than 5 Years Rate",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

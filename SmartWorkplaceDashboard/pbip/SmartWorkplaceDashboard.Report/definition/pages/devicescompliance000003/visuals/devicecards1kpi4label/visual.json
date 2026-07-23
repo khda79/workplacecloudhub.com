@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Device Compliance Rate",
+                    "value": "AD Enabled Computers",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

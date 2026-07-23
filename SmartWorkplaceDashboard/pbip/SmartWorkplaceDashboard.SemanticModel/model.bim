@@ -2538,6 +2538,12 @@
             "sourceColumn": "Inactive90DaysUsers"
           },
           {
+            "name": "__WeekStart",
+            "dataType": "dateTime",
+            "sourceColumn": "__WeekStart",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
             "name": "__SnapshotDate",
             "dataType": "dateTime",
             "sourceColumn": "__SnapshotDate",
@@ -2582,7 +2588,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"AD_Users_DailyStats.csv\", \";\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"Date\", \"DomainName\", \"TotalUsers\", \"EnabledUsers\", \"DisabledUsers\", \"Inactive90DaysUsers\"}, {{\"Date\", \"datetime\"}, {\"TotalUsers\", \"int64\"}, {\"EnabledUsers\", \"int64\"}, {\"DisabledUsers\", \"int64\"}, {\"Inactive90DaysUsers\", \"int64\"}}, false)"
+              "expression": "let Source=fnLoadSourceTable(\"AD_Users_DailyStats.csv\", \";\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"Date\", \"DomainName\", \"TotalUsers\", \"EnabledUsers\", \"DisabledUsers\", \"Inactive90DaysUsers\"}, {{\"Date\", \"datetime\"}, {\"TotalUsers\", \"int64\"}, {\"EnabledUsers\", \"int64\"}, {\"DisabledUsers\", \"int64\"}, {\"Inactive90DaysUsers\", \"int64\"}}, false), WithWeekStart=Table.AddColumn(Source, \"__WeekStart\", each if [Date]=null then null else DateTime.From(Date.StartOfWeek(Date.From([Date]),Day.Monday)), type nullable datetime) in WithWeekStart"
             }
           }
         ]
@@ -7278,6 +7284,11 @@
             "formatString": "dd/MM/yyyy"
           },
           {
+            "name": "WindowsVersionFamily",
+            "dataType": "string",
+            "sourceColumn": "WindowsVersionFamily"
+          },
+          {
             "name": "__SnapshotDate",
             "dataType": "dateTime",
             "sourceColumn": "__SnapshotDate",
@@ -7321,7 +7332,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"Intune_Devices_Inventory.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"Device ID\", \"Device name\", \"Enrollment date\", \"Last check-in\", \"LastSyncDateTime\", \"Intune registered\", \"Azure AD Device ID\", \"Azure AD registered\", \"OS\", \"OS version\", \"Manufacturer\", \"Model\", \"Serial number\", \"Supervised\", \"Encrypted\", \"Compliance\", \"IsCompliant\", \"Device state\", \"Managed by\", \"Ownership\", \"Primary user UPN\", \"Primary user email address\", \"Primary user display name\", \"UserId\", \"Registered owners\", \"EAS activation ID\", \"EAS activated\", \"Last EAS sync time\", \"EAS status\", \"EAS reason\", \"Total storage\", \"Free storage\", \"Management name\", \"Category\", \"PhysicalMemoryGB\", \"Entra ObjectId\", \"Entra DeviceId\", \"Entra DisplayName\", \"Entra ApproximateLastSignInDateTime\"}, {{\"Enrollment date\", \"datetime\"}, {\"Last check-in\", \"datetime\"}, {\"LastSyncDateTime\", \"datetime\"}, {\"Intune registered\", \"logical\"}, {\"Azure AD registered\", \"logical\"}, {\"Supervised\", \"logical\"}, {\"Encrypted\", \"logical\"}, {\"IsCompliant\", \"logical\"}, {\"EAS activated\", \"logical\"}, {\"Last EAS sync time\", \"datetime\"}, {\"Total storage\", \"number\"}, {\"Free storage\", \"number\"}, {\"PhysicalMemoryGB\", \"number\"}, {\"Entra ApproximateLastSignInDateTime\", \"datetime\"}}, true)"
+              "expression": "let Source=fnLoadSourceTable(\"Intune_Devices_Inventory.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"Device ID\", \"Device name\", \"Enrollment date\", \"Last check-in\", \"LastSyncDateTime\", \"Intune registered\", \"Azure AD Device ID\", \"Azure AD registered\", \"OS\", \"OS version\", \"Manufacturer\", \"Model\", \"Serial number\", \"Supervised\", \"Encrypted\", \"Compliance\", \"IsCompliant\", \"Device state\", \"Managed by\", \"Ownership\", \"Primary user UPN\", \"Primary user email address\", \"Primary user display name\", \"UserId\", \"Registered owners\", \"EAS activation ID\", \"EAS activated\", \"Last EAS sync time\", \"EAS status\", \"EAS reason\", \"Total storage\", \"Free storage\", \"Management name\", \"Category\", \"PhysicalMemoryGB\", \"Entra ObjectId\", \"Entra DeviceId\", \"Entra DisplayName\", \"Entra ApproximateLastSignInDateTime\"}, {{\"Enrollment date\", \"datetime\"}, {\"Last check-in\", \"datetime\"}, {\"LastSyncDateTime\", \"datetime\"}, {\"Intune registered\", \"logical\"}, {\"Azure AD registered\", \"logical\"}, {\"Supervised\", \"logical\"}, {\"Encrypted\", \"logical\"}, {\"IsCompliant\", \"logical\"}, {\"EAS activated\", \"logical\"}, {\"Last EAS sync time\", \"datetime\"}, {\"Total storage\", \"number\"}, {\"Free storage\", \"number\"}, {\"PhysicalMemoryGB\", \"number\"}, {\"Entra ApproximateLastSignInDateTime\", \"datetime\"}}, true), WithWindowsVersion=Table.AddColumn(Source, \"WindowsVersionFamily\", each let OsName=if [OS]=null then \"\" else Text.Upper(Text.Trim(Text.From([OS]))), Parts=if [OS version]=null then {} else Text.Split(Text.From([OS version]),\".\"), Build=if List.Count(Parts)>2 then try Number.FromText(Parts{2}) otherwise null else null in if OsName<>\"WINDOWS\" then if [OS]=null then \"Unknown\" else Text.From([OS]) else if Build=null then \"Unknown\" else if Build>=22000 then \"Windows 11\" else \"Windows 10\", type text) in WithWindowsVersion"
             }
           }
         ]
@@ -7417,7 +7428,7 @@
           },
           {
             "name": "IsEncrypted",
-            "dataType": "string",
+            "dataType": "boolean",
             "sourceColumn": "IsEncrypted"
           },
           {
@@ -7449,6 +7460,16 @@
             "name": "LastSyncDateTime",
             "dataType": "string",
             "sourceColumn": "LastSyncDateTime"
+          },
+          {
+            "name": "BIOSDateKnown",
+            "dataType": "boolean",
+            "sourceColumn": "BIOSDateKnown"
+          },
+          {
+            "name": "BIOSOlderThan5Years",
+            "dataType": "boolean",
+            "sourceColumn": "BIOSOlderThan5Years"
           },
           {
             "name": "__SnapshotDate",
@@ -7495,7 +7516,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"Intune_Devices_LocalSystem.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DeviceName\", \"DeviceId\", \"AzureADDeviceId\", \"UserPrincipalName\", \"SecureBootStatus\", \"BIOSVersion\", \"BIOSDate\", \"FirmwareType\", \"PlatformScriptLastUpdate\", \"LastRebootDate\", \"Last Reboot Date\", \"LastBootUpTime\", \"LastBootTime\", \"IsEncrypted\", \"DeviceGuardVBSState\", \"DeviceGuardVBSHardwareRequirement\", \"DeviceGuardCredentialGuardState\", \"ManagementState\", \"ComplianceState\", \"LastSyncDateTime\"}, {}, false)"
+              "expression": "let Source=fnLoadSourceTable(\"Intune_Devices_LocalSystem.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DeviceName\", \"DeviceId\", \"AzureADDeviceId\", \"UserPrincipalName\", \"SecureBootStatus\", \"BIOSVersion\", \"BIOSDate\", \"FirmwareType\", \"PlatformScriptLastUpdate\", \"LastRebootDate\", \"Last Reboot Date\", \"LastBootUpTime\", \"LastBootTime\", \"IsEncrypted\", \"DeviceGuardVBSState\", \"DeviceGuardVBSHardwareRequirement\", \"DeviceGuardCredentialGuardState\", \"ManagementState\", \"ComplianceState\", \"LastSyncDateTime\"}, {{\"IsEncrypted\", \"logical\"}}, false), WithBIOSDateKnown=Table.AddColumn(Source, \"BIOSDateKnown\", each fnToDateTime([BIOSDate])<>null, type logical), WithBIOSAge=Table.AddColumn(WithBIOSDateKnown, \"BIOSOlderThan5Years\", each let d=fnToDateTime([BIOSDate]) in d<>null and Date.From(d)<Date.AddYears(Date.From(DateTime.LocalNow()),-5), type logical) in WithBIOSAge"
             }
           }
         ]
@@ -12477,7 +12498,7 @@
           },
           {
             "name": "Is Deleted",
-            "dataType": "string",
+            "dataType": "boolean",
             "sourceColumn": "Is Deleted"
           },
           {
@@ -12593,7 +12614,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"M365_Mailbox_Usage.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"RunId\", \"ReportName\", \"ReportPeriodRequested\", \"Report Refresh Date\", \"User Principal Name\", \"Display Name\", \"Is Deleted\", \"Deleted Date\", \"Created Date\", \"Last Activity Date\", \"Item Count\", \"Storage Used (Byte)\", \"Issue Warning Quota (Byte)\", \"Prohibit Send Quota (Byte)\", \"Prohibit Send/Receive Quota (Byte)\", \"Deleted Item Count\", \"Deleted Item Size (Byte)\", \"Deleted Item Quota (Byte)\", \"Has Archive\", \"Report Period\"}, {{\"Report Refresh Date\", \"datetime\"}, {\"Deleted Date\", \"datetime\"}, {\"Created Date\", \"datetime\"}, {\"Last Activity Date\", \"datetime\"}, {\"Item Count\", \"int64\"}, {\"Storage Used (Byte)\", \"int64\"}, {\"Issue Warning Quota (Byte)\", \"int64\"}, {\"Prohibit Send Quota (Byte)\", \"int64\"}, {\"Prohibit Send/Receive Quota (Byte)\", \"int64\"}, {\"Deleted Item Count\", \"int64\"}, {\"Deleted Item Size (Byte)\", \"int64\"}, {\"Deleted Item Quota (Byte)\", \"int64\"}}, false)"
+              "expression": "fnLoadSourceTable(\"M365_Mailbox_Usage.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"RunId\", \"ReportName\", \"ReportPeriodRequested\", \"Report Refresh Date\", \"User Principal Name\", \"Display Name\", \"Is Deleted\", \"Deleted Date\", \"Created Date\", \"Last Activity Date\", \"Item Count\", \"Storage Used (Byte)\", \"Issue Warning Quota (Byte)\", \"Prohibit Send Quota (Byte)\", \"Prohibit Send/Receive Quota (Byte)\", \"Deleted Item Count\", \"Deleted Item Size (Byte)\", \"Deleted Item Quota (Byte)\", \"Has Archive\", \"Report Period\"}, {{\"Report Refresh Date\", \"datetime\"}, {\"Is Deleted\", \"logical\"}, {\"Deleted Date\", \"datetime\"}, {\"Created Date\", \"datetime\"}, {\"Last Activity Date\", \"datetime\"}, {\"Item Count\", \"int64\"}, {\"Storage Used (Byte)\", \"int64\"}, {\"Issue Warning Quota (Byte)\", \"int64\"}, {\"Prohibit Send Quota (Byte)\", \"int64\"}, {\"Prohibit Send/Receive Quota (Byte)\", \"int64\"}, {\"Deleted Item Count\", \"int64\"}, {\"Deleted Item Size (Byte)\", \"int64\"}, {\"Deleted Item Quota (Byte)\", \"int64\"}}, false)"
             }
           }
         ]
@@ -16005,37 +16026,37 @@
           {
             "name": "Enabled Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Active'[Object Id]),'M365_Users_Active'[__IsCurrent]=TRUE(),'M365_Users_Active'[AccountEnabled]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Disabled Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Active'[Object Id]),'M365_Users_Active'[__IsCurrent]=TRUE(),'M365_Users_Active'[AccountEnabled]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Guest Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Active'[Object Id]),'M365_Users_Active'[__IsCurrent]=TRUE(),'M365_Users_Active'[UserType]=\"Guest\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Enabled Users Inactive 90d",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Active'[Object Id]),'M365_Users_Active'[__IsCurrent]=TRUE(),'M365_Users_Active'[AccountEnabled]=TRUE(),FILTER('M365_Users_Active',VAR LastActivity=MAX('M365_Users_Active'[LastSignInDateTime],'M365_Users_Active'[LastNonInteractiveSignInDateTime]) RETURN ISBLANK(LastActivity)||LastActivity<NOW()-90))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Active M365 Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Activity'[UserPrincipalName]),'M365_Users_Activity'[__IsCurrent]=TRUE(),'M365_Users_Activity'[HasAnyM365Activity]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Inactive M365 Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Users_Activity'[UserPrincipalName]),'M365_Users_Activity'[__IsCurrent]=TRUE(),'M365_Users_Activity'[HasAnyM365Activity]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
@@ -16047,55 +16068,103 @@
           {
             "name": "Hybrid Identity Issue Rows",
             "expression": "COUNTROWS('Exchange_HybridIdentity_Issues')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
             "name": "Hybrid Identity Affected Users",
             "expression": "DISTINCTCOUNT('Exchange_HybridIdentity_Issues'[ObjectGUID])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Identity"
           },
           {
-            "name": "Purchased Licenses",
-            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_F1\"}))",
-            "formatString": "#,0",
+            "name": "M365 E3 Purchased",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber]=\"SPE_E3\"),0)",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
-            "name": "Consumed Licenses",
-            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_F1\"}))",
-            "formatString": "#,0",
+            "name": "M365 E3 Consumed",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber]=\"SPE_E3\"),0)",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
-            "name": "Available Licenses",
-            "expression": "[Purchased Licenses]-[Consumed Licenses]",
-            "formatString": "#,0",
+            "name": "M365 E3 Available",
+            "expression": "[M365 E3 Purchased]-[M365 E3 Consumed]",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
-            "name": "License Utilization",
-            "expression": "DIVIDE([Consumed Licenses],[Purchased Licenses])",
+            "name": "M365 E3 Utilization",
+            "expression": "IF([M365 E3 Purchased]=0,BLANK(),DIVIDE([M365 E3 Consumed],[M365 E3 Purchased]))",
+            "formatString": "0.0%",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 E5 Purchased",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E5\",\"Microsoft_365_E5\"}),0)",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 E5 Consumed",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E5\",\"Microsoft_365_E5\"}),0)",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 E5 Available",
+            "expression": "[M365 E5 Purchased]-[M365 E5 Consumed]",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 E5 Utilization",
+            "expression": "IF([M365 E5 Purchased]=0,BLANK(),DIVIDE([M365 E5 Consumed],[M365 E5 Purchased]))",
+            "formatString": "0.0%",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 F3 Purchased",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_F1\",\"SPE_F3\"}),0)",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 F3 Consumed",
+            "expression": "COALESCE(CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),'M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_F1\",\"SPE_F3\"}),0)",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 F3 Available",
+            "expression": "[M365 F3 Purchased]-[M365 F3 Consumed]",
+            "formatString": "#,0.0",
+            "displayFolder": "Licensing"
+          },
+          {
+            "name": "M365 F3 Utilization",
+            "expression": "IF([M365 F3 Purchased]=0,BLANK(),DIVIDE([M365 F3 Consumed],[M365 F3 Purchased]))",
             "formatString": "0.0%",
             "displayFolder": "Licensing"
           },
           {
             "name": "M365 SKU Purchased",
-            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_F1\"}))",
-            "formatString": "#,0",
+            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantPrepaidEnabled]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_E5\",\"Microsoft_365_E5\",\"SPE_F1\",\"SPE_F3\"}))",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
             "name": "M365 SKU Consumed",
-            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_F1\"}))",
-            "formatString": "#,0",
+            "expression": "CALCULATE(SUM('M365_Licenses_Tenant'[TenantConsumedUnits]),'M365_Licenses_Tenant'[__IsCurrent]=TRUE(),KEEPFILTERS('M365_Licenses_Tenant'[TenantSkuPartNumber] IN {\"SPE_E3\",\"SPE_E5\",\"Microsoft_365_E5\",\"SPE_F1\",\"SPE_F3\"}))",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
             "name": "M365 SKU Available",
             "expression": "[M365 SKU Purchased]-[M365 SKU Consumed]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing"
           },
           {
@@ -16107,31 +16176,31 @@
           {
             "name": "Service Plan Assignments",
             "expression": "CALCULATE(COUNTROWS('M365_Licenses_UserServicePlanStates'),'M365_Licenses_UserServicePlanStates'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing Service Plans"
           },
           {
             "name": "Service Plan Assigned Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Licenses_UserServicePlanStates'[UserId]),'M365_Licenses_UserServicePlanStates'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing Service Plans"
           },
           {
             "name": "Enabled Service Plan Assignments",
             "expression": "CALCULATE(COUNTROWS('M365_Licenses_UserServicePlanStates'),'M365_Licenses_UserServicePlanStates'[__IsCurrent]=TRUE(),'M365_Licenses_UserServicePlanStates'[IsEnabled]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing Service Plans"
           },
           {
             "name": "Disabled Service Plan Assignments",
             "expression": "CALCULATE(COUNTROWS('M365_Licenses_UserServicePlanStates'),'M365_Licenses_UserServicePlanStates'[__IsCurrent]=TRUE(),'M365_Licenses_UserServicePlanStates'[IsEnabled]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing Service Plans"
           },
           {
             "name": "Users with Disabled Service Plans",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Licenses_UserServicePlanStates'[UserId]),'M365_Licenses_UserServicePlanStates'[__IsCurrent]=TRUE(),'M365_Licenses_UserServicePlanStates'[IsEnabled]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Licensing Service Plans"
           },
           {
@@ -16143,19 +16212,43 @@
           {
             "name": "Managed Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Intune Managed Devices",
+            "expression": "[Managed Devices]",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Entra Device Objects",
+            "expression": "CALCULATE(DISTINCTCOUNT('M365_Entra_Devices'[ObjectId]),'M365_Entra_Devices'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "AD Computer Objects",
+            "expression": "CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "AD Enabled Computers",
+            "expression": "CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE(),'AD_Computers_AllDomains'[Enabled]=\"True\")",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Compliant Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[IsCompliant]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Noncompliant Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[IsCompliant]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
@@ -16165,129 +16258,219 @@
             "displayFolder": "Devices"
           },
           {
+            "name": "Windows Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[OS]=\"Windows\")",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Windows 11 Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[WindowsVersionFamily]=\"Windows 11\")",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Windows 10 Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[WindowsVersionFamily]=\"Windows 10\")",
+            "formatString": "#,0.0",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Windows 11 Device Rate",
+            "expression": "DIVIDE([Windows 11 Devices],[Windows Devices])",
+            "formatString": "0.0%",
+            "displayFolder": "Devices"
+          },
+          {
+            "name": "Windows 10 Device Rate",
+            "expression": "DIVIDE([Windows 10 Devices],[Windows Devices])",
+            "formatString": "0.0%",
+            "displayFolder": "Devices"
+          },
+          {
             "name": "Stale Devices 30d",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),FILTER('Intune_Devices_Inventory',NOT ISBLANK('Intune_Devices_Inventory'[LastSyncDateTime])&&'Intune_Devices_Inventory'[LastSyncDateTime]<NOW()-30))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Autopilot Devices",
             "expression": "CALCULATE(COUNTROWS('Intune_Autopilot_Devices'),'Intune_Autopilot_Devices'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Entra Removal Candidates",
             "expression": "COUNTROWS('M365_Entra_Devices_RemovalCandidates')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Hardware ID Conflicts",
             "expression": "COUNTROWS('M365_Entra_Devices_HardwareIdConflicts')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
           {
             "name": "Update Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_WindowsUpdate_Status'[DeviceId]),'Intune_WindowsUpdate_Status'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "High Risk Update Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_WindowsUpdate_Status'[DeviceId]),'Intune_WindowsUpdate_Status'[__IsCurrent]=TRUE(),'Intune_WindowsUpdate_Status'[RiskBucket]=\"High\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Medium Risk Update Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_WindowsUpdate_Status'[DeviceId]),'Intune_WindowsUpdate_Status'[__IsCurrent]=TRUE(),'Intune_WindowsUpdate_Status'[RiskBucket]=\"Medium\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Upgrade Assessed Devices",
             "expression": "DISTINCTCOUNT('Intune_Devices_UpgradeEligibility'[GraphId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Eligible Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_UpgradeEligibility'[GraphId]),'Intune_Devices_UpgradeEligibility'[UpgradeEligibilityLabel]=\"Eligible\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Not Eligible Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_UpgradeEligibility'[GraphId]),'Intune_Devices_UpgradeEligibility'[UpgradeEligibilityLabel]=\"NotEligible\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Upgraded Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_UpgradeEligibility'[GraphId]),'Intune_Devices_UpgradeEligibility'[UpgradeEligibilityLabel]=\"Upgraded\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Windows 11 Affected Devices",
             "expression": "DISTINCTCOUNT('Intune_Windows11_Readiness_Issues'[ObjectGUID_Norm])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Windows 11 Blocking Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_Windows11_Readiness_Issues'[ObjectGUID_Norm]),'Intune_Windows11_Readiness_Issues'[IsBlocking]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Windows Lifecycle"
+          },
+          {
+            "name": "Hardware Refresh Candidates",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_UpgradeEligibility'[GraphId]),'Intune_Devices_UpgradeEligibility'[__IsCurrent]=TRUE(),'Intune_Devices_UpgradeEligibility'[UpgradeEligibilityLabel]=\"NotEligible\",FILTER('Intune_Devices_UpgradeEligibility','Intune_Devices_UpgradeEligibility'[RamCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[StorageCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[ProcessorCoreCountCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[ProcessorSpeedCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[TPMCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[SecureBootCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[ProcessorFamilyCheckFailed]=TRUE()||'Intune_Devices_UpgradeEligibility'[Processor64BitCheckFailed]=TRUE()))",
+            "formatString": "#,0.0",
+            "displayFolder": "Windows Lifecycle"
+          },
+          {
+            "name": "Hardware Refresh Candidate Rate",
+            "expression": "DIVIDE([Hardware Refresh Candidates],[Upgrade Assessed Devices])",
+            "formatString": "0.0%",
+            "displayFolder": "Windows Lifecycle"
+          },
+          {
+            "name": "BIOS Date Known Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_LocalSystem'[DeviceId]),'Intune_Devices_LocalSystem'[__IsCurrent]=TRUE(),'Intune_Devices_LocalSystem'[BIOSDateKnown]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Windows Lifecycle"
+          },
+          {
+            "name": "BIOS Older Than 5 Years Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT('Intune_Devices_LocalSystem'[DeviceId]),'Intune_Devices_LocalSystem'[__IsCurrent]=TRUE(),'Intune_Devices_LocalSystem'[BIOSOlderThan5Years]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Windows Lifecycle"
+          },
+          {
+            "name": "BIOS Older Than 5 Years Rate",
+            "expression": "DIVIDE([BIOS Older Than 5 Years Devices],[BIOS Date Known Devices])",
+            "formatString": "0.0%",
             "displayFolder": "Windows Lifecycle"
           },
           {
             "name": "Mailboxes",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_EXO_Mailboxes_AllDomains'[MailboxGuid]),'Exchange_EXO_Mailboxes_AllDomains'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Online"
           },
           {
             "name": "Shared Mailboxes",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_EXO_Mailboxes_AllDomains'[MailboxGuid]),'Exchange_EXO_Mailboxes_AllDomains'[__IsCurrent]=TRUE(),'Exchange_EXO_Mailboxes_AllDomains'[MailboxType]=\"SharedMailbox\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Exchange Online"
+          },
+          {
+            "name": "Mailbox Storage Used GB",
+            "expression": "DIVIDE(CALCULATE(SUM('M365_Mailbox_Usage'[Storage Used (Byte)]),'M365_Mailbox_Usage'[__IsCurrent]=TRUE(),'M365_Mailbox_Usage'[Is Deleted]<>TRUE()),1073741824)",
+            "formatString": "#,0.0",
+            "displayFolder": "Exchange Online"
+          },
+          {
+            "name": "Mailbox Quota GB",
+            "expression": "DIVIDE(CALCULATE(SUM('M365_Mailbox_Usage'[Prohibit Send/Receive Quota (Byte)]),'M365_Mailbox_Usage'[__IsCurrent]=TRUE(),'M365_Mailbox_Usage'[Is Deleted]<>TRUE()),1073741824)",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Online"
           },
           {
             "name": "Mailbox Storage TB",
-            "expression": "DIVIDE(CALCULATE(SUM('M365_Mailbox_Usage'[Storage Used (Byte)]),'M365_Mailbox_Usage'[__IsCurrent]=TRUE()),1099511627776)",
+            "expression": "DIVIDE([Mailbox Storage Used GB],1024)",
             "formatString": "#,0.0",
             "displayFolder": "Exchange Online"
           },
           {
             "name": "Mailbox Aggregate Quota TB",
-            "expression": "DIVIDE(CALCULATE(SUM('M365_Mailbox_Usage'[Prohibit Send/Receive Quota (Byte)]),'M365_Mailbox_Usage'[__IsCurrent]=TRUE()),1099511627776)",
+            "expression": "DIVIDE([Mailbox Quota GB],1024)",
             "formatString": "#,0.0",
             "displayFolder": "Exchange Online"
           },
           {
+            "name": "Mailbox Storage Utilization",
+            "expression": "DIVIDE([Mailbox Storage Used GB],[Mailbox Quota GB])",
+            "formatString": "0.0%",
+            "displayFolder": "Exchange Online"
+          },
+          {
             "name": "Mailbox Quota Utilization",
-            "expression": "DIVIDE([Mailbox Storage TB],[Mailbox Aggregate Quota TB])",
+            "expression": "[Mailbox Storage Utilization]",
             "formatString": "0.0%",
             "displayFolder": "Exchange Online"
           },
           {
             "name": "On-prem Hosted Mailboxes",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Mailboxes_AllDomains'[ExchangeGuid]),'Exchange_OnPrem_Mailboxes_AllDomains'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Exchange Hybrid"
+          },
+          {
+            "name": "On-prem Mailbox Storage GB",
+            "expression": "CALCULATE(DIVIDE(SUM('Exchange_OnPrem_Mailboxes_AllDomains'[TotalItemSize-In-MB]),1024),'Exchange_OnPrem_Mailboxes_AllDomains'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Exchange Hybrid"
+          },
+          {
+            "name": "On-prem Mailbox Storage TB",
+            "expression": "DIVIDE([On-prem Mailbox Storage GB],1024)",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Online Hosted Mailboxes",
             "expression": "[Mailboxes]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Hybrid Hosted Mailboxes",
             "expression": "[On-prem Hosted Mailboxes]+[Online Hosted Mailboxes]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
@@ -16297,27 +16480,33 @@
             "displayFolder": "Exchange Hybrid"
           },
           {
+            "name": "On-prem Placement Rate",
+            "expression": "DIVIDE([On-prem Hosted Mailboxes],[Hybrid Hosted Mailboxes])",
+            "formatString": "0.0%",
+            "displayFolder": "Exchange Hybrid"
+          },
+          {
             "name": "Remote Mailbox Objects",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_RemoteMailboxes_AllDomains'[PrimarySmtpAddress]),'Exchange_OnPrem_RemoteMailboxes_AllDomains'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Remote Mailboxes Matched EXO",
             "expression": "VAR ExoAddresses=CALCULATETABLE(VALUES('Exchange_EXO_Mailboxes_AllDomains'[PrimarySmtpAddress]),'Exchange_EXO_Mailboxes_AllDomains'[__IsCurrent]=TRUE()) RETURN CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_RemoteMailboxes_AllDomains'[PrimarySmtpAddress]),'Exchange_OnPrem_RemoteMailboxes_AllDomains'[__IsCurrent]=TRUE(),TREATAS(ExoAddresses,'Exchange_OnPrem_RemoteMailboxes_AllDomains'[PrimarySmtpAddress]))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Remote Mailboxes without EXO",
             "expression": "[Remote Mailbox Objects]-[Remote Mailboxes Matched EXO]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "EXO Mailboxes without Remote",
             "expression": "[Online Hosted Mailboxes]-[Remote Mailboxes Matched EXO]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
@@ -16329,49 +16518,49 @@
           {
             "name": "Potential Dual-hosted SMTP",
             "expression": "VAR ExoAddresses=CALCULATETABLE(VALUES('Exchange_EXO_Mailboxes_AllDomains'[PrimarySmtpAddress]),'Exchange_EXO_Mailboxes_AllDomains'[__IsCurrent]=TRUE()) RETURN CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Mailboxes_AllDomains'[PrimarySMTPaddress]),'Exchange_OnPrem_Mailboxes_AllDomains'[__IsCurrent]=TRUE(),TREATAS(ExoAddresses,'Exchange_OnPrem_Mailboxes_AllDomains'[PrimarySMTPaddress]))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "On-prem Local Mailboxes Trend",
             "expression": "SUM('Exchange_OnPrem_Mailboxes_DailyStats'[TotalLocalMailboxCount])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Remote Mailbox Objects Trend",
             "expression": "SUM('Exchange_OnPrem_Mailboxes_DailyStats'[TotalRemoteMailboxCount])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Hybrid"
           },
           {
             "name": "Migration Batches",
             "expression": "DISTINCTCOUNT('Exchange_EXO_MigrationJobs'[BatchGuid])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Migration Users",
             "expression": "DISTINCTCOUNT('Exchange_EXO_MigrationJobs'[MigrationUser])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Migration Failed Users",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_EXO_MigrationJobs'[MigrationUser]),'Exchange_EXO_MigrationJobs'[UserStatus]=\"Failed\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Migration Failed Items",
             "expression": "SUMX(VALUES('Exchange_EXO_MigrationJobs'[BatchGuid]),CALCULATE(MAX('Exchange_EXO_MigrationJobs'[FailedCount])))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Migration Failed Batches",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_EXO_MigrationJobs'[BatchGuid]),'Exchange_EXO_MigrationJobs'[FailedCount]>0)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
@@ -16383,43 +16572,43 @@
           {
             "name": "Migration Readiness Settings",
             "expression": "COUNTROWS('Exchange_OnPrem_MigrationReadiness_Config')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Migration Readiness Errors",
             "expression": "CALCULATE(COUNTROWS('Exchange_OnPrem_MigrationReadiness_Config'),'Exchange_OnPrem_MigrationReadiness_Config'[CollectionStatus]<>\"OK\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Migration"
           },
           {
             "name": "Exchange Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Inventory'[Name]),'Exchange_OnPrem_Servers_Inventory'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Exchange Mailbox Role Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Inventory'[Name]),'Exchange_OnPrem_Servers_Inventory'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Inventory'[ServerRole]=\"Mailbox\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Exchange Edge Role Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Inventory'[Name]),'Exchange_OnPrem_Servers_Inventory'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Inventory'[ServerRole]=\"Edge\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Exchange 2016 Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Inventory'[Name]),'Exchange_OnPrem_Servers_Inventory'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Inventory'[IsExchange2016]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Compute Inventoried Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Compute'[ExchangeServerName]),'Exchange_OnPrem_Servers_Compute'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Compute'[CollectionStatus]=\"OK\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
@@ -16431,7 +16620,7 @@
           {
             "name": "Exchange Virtual Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_Compute'[ExchangeServerName]),'Exchange_OnPrem_Servers_Compute'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Compute'[CollectionStatus]=\"OK\",'Exchange_OnPrem_Servers_Compute'[IsVirtualMachine]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
@@ -16443,7 +16632,7 @@
           {
             "name": "Exchange Physical Cores",
             "expression": "CALCULATE(SUM('Exchange_OnPrem_Servers_Compute'[PhysicalCoreCount]),'Exchange_OnPrem_Servers_Compute'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_Compute'[CollectionStatus]=\"OK\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
@@ -16467,37 +16656,37 @@
           {
             "name": "Low Space Volumes",
             "expression": "CALCULATE(COUNTROWS('Exchange_OnPrem_Servers_LogicalDisks'),'Exchange_OnPrem_Servers_LogicalDisks'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_LogicalDisks'[LowSpaceWarning]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "WMI Inaccessible Servers",
             "expression": "CALCULATE(DISTINCTCOUNT('Exchange_OnPrem_Servers_RemoteAccess'[ExchangeServerName]),'Exchange_OnPrem_Servers_RemoteAccess'[__IsCurrent]=TRUE(),'Exchange_OnPrem_Servers_RemoteAccess'[WmiDcomOk]=FALSE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Server Readiness Warnings",
             "expression": "CALCULATE(MAX('Exchange_OnPrem_Servers_Inventory_Summary'[ExchangeReadinessWarnings]),'Exchange_OnPrem_Servers_Inventory_Summary'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Server Readiness Errors",
             "expression": "CALCULATE(MAX('Exchange_OnPrem_Servers_Inventory_Summary'[ExchangeReadinessErrors]),'Exchange_OnPrem_Servers_Inventory_Summary'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Exchange Schema Range Upper",
             "expression": "CALCULATE(MAX('Exchange_OnPrem_Servers_Inventory_Summary'[ExchangeSchemaRangeUpper]),'Exchange_OnPrem_Servers_Inventory_Summary'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Exchange Infrastructure"
           },
           {
             "name": "Exchange Servers Trend",
             "expression": "MAX('Exchange_OnPrem_Servers_Inventory_Summary'[ExchangeServersCount])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
@@ -16515,31 +16704,31 @@
           {
             "name": "Exchange Readiness Errors Trend",
             "expression": "MAX('Exchange_OnPrem_Servers_Inventory_Summary'[ExchangeReadinessErrors])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "Protected Mailboxes",
             "expression": "DISTINCTCOUNT('M365_Backup_ProtectedMailboxes'[ProtectionUnitId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
             "name": "Backup Scope Mailboxes",
             "expression": "DISTINCTCOUNT('M365_BackupPolicyScope_MailboxCoverage'[MemberId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
             "name": "Protected Mailboxes in Scope",
             "expression": "VAR ProtectedIds=VALUES('M365_Backup_ProtectedMailboxes'[MailboxId]) RETURN CALCULATE(DISTINCTCOUNT('M365_BackupPolicyScope_MailboxCoverage'[MemberId]),TREATAS(ProtectedIds,'M365_BackupPolicyScope_MailboxCoverage'[MemberId]))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
             "name": "Backup Scope Gap",
             "expression": "[Backup Scope Mailboxes]-[Protected Mailboxes in Scope]",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
@@ -16551,73 +16740,103 @@
           {
             "name": "Protected Mailboxes Outside Scope",
             "expression": "COUNTROWS(EXCEPT(VALUES('M365_Backup_ProtectedMailboxes'[MailboxId]),VALUES('M365_BackupPolicyScope_MailboxCoverage'[MemberId])))",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
             "name": "Backup Coverage Warnings",
             "expression": "CALCULATE(COUNTROWS('M365_BackupPolicyScope_MailboxCoverage'),'M365_BackupPolicyScope_MailboxCoverage'[Status]<>\"OK\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Protection"
           },
           {
             "name": "Teams",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Teams_Teams'[TeamId]),'M365_Teams_Teams'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "Inactive Teams",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Teams_Teams'[TeamId]),'M365_Teams_Teams'[__IsCurrent]=TRUE(),'M365_Teams_Teams'[InactiveDays]>90)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "Active Teams Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Teams_UserActivity'[User Principal Name]),'M365_Teams_UserActivity'[__IsCurrent]=TRUE(),'M365_Teams_UserActivity'[Last Activity Date]<>BLANK())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Collaboration"
+          },
+          {
+            "name": "Teams Storage Used GB",
+            "expression": "CALCULATE(SUM('M365_Teams_Teams'[StorageUsedGB]),'M365_Teams_Teams'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "Teams Storage Used TB",
-            "expression": "DIVIDE(CALCULATE(SUM('M365_Teams_Teams'[StorageUsedGB]),'M365_Teams_Teams'[__IsCurrent]=TRUE()),1024)",
+            "expression": "DIVIDE([Teams Storage Used GB],1024)",
             "formatString": "#,0.0",
+            "displayFolder": "Collaboration"
+          },
+          {
+            "name": "Teams Storage Quota GB",
+            "expression": "CALCULATE(SUM('M365_Teams_Teams'[StorageQuotaGB]),'M365_Teams_Teams'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Collaboration"
+          },
+          {
+            "name": "Teams Storage Quota TB",
+            "expression": "DIVIDE([Teams Storage Quota GB],1024)",
+            "formatString": "#,0.0",
+            "displayFolder": "Collaboration"
+          },
+          {
+            "name": "Teams Storage Utilization",
+            "expression": "DIVIDE([Teams Storage Used GB],[Teams Storage Quota GB])",
+            "formatString": "0.0%",
             "displayFolder": "Collaboration"
           },
           {
             "name": "SharePoint Sites",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_SPO_Sites'[SiteUrl]),'M365_SPO_Sites'[__IsCurrent]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "Inactive SharePoint Sites",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_SPO_Sites'[SiteUrl]),'M365_SPO_Sites'[__IsCurrent]=TRUE(),'M365_SPO_Sites'[IsInactive]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "Orphaned SharePoint Sites",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_SPO_Sites'[SiteUrl]),'M365_SPO_Sites'[__IsCurrent]=TRUE(),'M365_SPO_Sites'[IsOrphaned]=TRUE())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "External Sharing Signals",
             "expression": "COUNTROWS('M365_SPO_ExternalSharing')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Collaboration"
+          },
+          {
+            "name": "SharePoint Storage Used GB",
+            "expression": "CALCULATE(SUM('M365_SPO_Sites'[StorageUsedGB]),'M365_SPO_Sites'[__IsCurrent]=TRUE())",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "SharePoint Storage Used TB",
-            "expression": "CALCULATE(MAX('M365_SPO_Tenant'[StorageUsedTB]),'M365_SPO_Tenant'[__IsCurrent]=TRUE())",
+            "expression": "DIVIDE([SharePoint Storage Used GB],1024)",
             "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
             "name": "SharePoint Storage License Units",
             "expression": "SUMX(FILTER('M365_Licenses_Tenant',VAR Sku=UPPER(COALESCE('M365_Licenses_Tenant'[TenantSkuPartNumber],\"\")) VAR SkuName=UPPER(COALESCE('M365_Licenses_Tenant'[TenantSkuDisplayName],\"\")) RETURN 'M365_Licenses_Tenant'[__IsCurrent]=TRUE()&&NOT(CONTAINSSTRING(SkuName,\"FREE\"))&&NOT(CONTAINSSTRING(SkuName,\"TRIAL\"))&&NOT(CONTAINSSTRING(SkuName,\"DEVELOPER\"))&&NOT(Sku IN {\"SPE_F1\",\"SPE_F3\",\"STANDARDPACK_FACULTY\",\"STANDARDPACK_STUDENT\"})&&(Sku IN {\"SPE_E3\",\"SPE_E5\",\"ENTERPRISEPACK\",\"ENTERPRISEPREMIUM\",\"STANDARDPACK\",\"O365_BUSINESS_ESSENTIALS\",\"O365_BUSINESS_PREMIUM\",\"SPB\",\"SHAREPOINTSTANDARD\",\"SHAREPOINTENTERPRISE\"}||CONTAINSSTRING(SkuName,\"MICROSOFT 365 E3\")||CONTAINSSTRING(SkuName,\"MICROSOFT 365 E5\")||CONTAINSSTRING(SkuName,\"OFFICE 365 E1\")||CONTAINSSTRING(SkuName,\"OFFICE 365 E3\")||CONTAINSSTRING(SkuName,\"OFFICE 365 E5\")||CONTAINSSTRING(SkuName,\"BUSINESS BASIC\")||CONTAINSSTRING(SkuName,\"BUSINESS STANDARD\")||CONTAINSSTRING(SkuName,\"BUSINESS PREMIUM\")||CONTAINSSTRING(SkuName,\"SHAREPOINT ONLINE PLAN 1\")||CONTAINSSTRING(SkuName,\"SHAREPOINT ONLINE PLAN 2\")||CONTAINSSTRING(SkuName,\"TEAMS ESSENTIALS\"))),'M365_Licenses_Tenant'[TenantPrepaidEnabled])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Collaboration"
           },
           {
@@ -16659,7 +16878,7 @@
           {
             "name": "Endpoint Analytics Devices",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_EndpointAnalytics_DevicePerformance'[DeviceId]),'Intune_EndpointAnalytics_DevicePerformance'[__IsCurrent]=TRUE(),'Intune_EndpointAnalytics_DevicePerformance'[ReportName]=\"EADeviceScoresV2\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Experience"
           },
           {
@@ -16683,13 +16902,13 @@
           {
             "name": "Device Crashes",
             "expression": "CALCULATE(SUM('Intune_EndpointAnalytics_DevicePerformance'[CrashCount]),'Intune_EndpointAnalytics_DevicePerformance'[__IsCurrent]=TRUE(),'Intune_EndpointAnalytics_DevicePerformance'[ReportName]=\"EADeviceScoresV2\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Experience"
           },
           {
             "name": "Model Device Count",
             "expression": "CALCULATE(DISTINCTCOUNT('Intune_EndpointAnalytics_DevicePerformance'[DeviceId]),'Intune_EndpointAnalytics_DevicePerformance'[__IsCurrent]=TRUE(),'Intune_EndpointAnalytics_DevicePerformance'[ReportName]=\"EADeviceScoresV2\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Experience"
           },
           {
@@ -16713,140 +16932,230 @@
           {
             "name": "Discovered Applications",
             "expression": "DISTINCTCOUNT('Intune_DiscoveredApps_Summary'[AppId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Applications"
           },
           {
             "name": "Application Versions",
             "expression": "COUNTROWS('Intune_DiscoveredApps_Summary')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Applications"
           },
           {
             "name": "Application Device Instances",
             "expression": "COUNTROWS('Intune_DiscoveredApps_AppDeviceRelations')",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Applications"
           },
           {
             "name": "Devices with Discovered Applications",
             "expression": "DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Applications"
           },
           {
             "name": "Devices per Application",
             "expression": "DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Applications"
           },
           {
             "name": "Copilot Active Users",
             "expression": "CALCULATE(DISTINCTCOUNT('M365_Copilot_UserUsage'[UserPrincipalName]),'M365_Copilot_UserUsage'[LastActivityDate]<>BLANK())",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Adoption"
           },
           {
             "name": "AD Health Critical",
             "expression": "CALCULATE(COUNTROWS('AD_HealthCheck'),'AD_HealthCheck'[Status]=\"Critical\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "AD Health Warnings",
             "expression": "CALCULATE(COUNTROWS('AD_HealthCheck'),'AD_HealthCheck'[Status]=\"Warning\")",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Selected Source Tables",
             "expression": "90",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Source Columns",
             "expression": "2219",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Historical Series",
             "expression": "14",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Users Source Age Hours",
             "expression": "DATEDIFF(MAX('M365_Users_Active'[__SnapshotDateTime]),NOW(),HOUR)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Devices Source Age Hours",
             "expression": "DATEDIFF(MAX('Intune_Devices_Inventory'[__SnapshotDateTime]),NOW(),HOUR)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Licenses Source Age Hours",
             "expression": "DATEDIFF(MAX('M365_Licenses_Tenant'[__SnapshotDateTime]),NOW(),HOUR)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Exchange Source Age Hours",
             "expression": "DATEDIFF(MAX('Exchange_EXO_Mailboxes_AllDomains'[__SnapshotDateTime]),NOW(),HOUR)",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "AD Enabled Users Trend",
             "expression": "SUM('AD_Users_DailyStats'[EnabledUsers])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
+            "displayFolder": "Evolution"
+          },
+          {
+            "name": "AD Enabled Users Weekly Snapshot",
+            "expression": "VAR LatestDate=MAX('AD_Users_DailyStats'[Date]) RETURN CALCULATE(SUM('AD_Users_DailyStats'[EnabledUsers]),'AD_Users_DailyStats'[Date]=LatestDate)",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "AD Enabled Computers Trend",
             "expression": "SUM('AD_Computers_DailyStats'[EnabledAccounts])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "On-prem Mailboxes Trend",
             "expression": "SUM('Exchange_OnPrem_Mailboxes_DailyStats'[TotalMailboxCount])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "Managed Devices Trend",
             "expression": "DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "Consumed Licenses Trend",
             "expression": "SUM('M365_Licenses_Tenant'[TenantConsumedUnits])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "Mailboxes Trend",
             "expression": "DISTINCTCOUNT('Exchange_EXO_Mailboxes_AllDomains'[MailboxGuid])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "Teams Trend",
             "expression": "DISTINCTCOUNT('M365_Teams_Teams'[TeamId])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
           },
           {
             "name": "SharePoint Sites Trend",
             "expression": "DISTINCTCOUNT('M365_SPO_Sites'[SiteUrl])",
-            "formatString": "#,0",
+            "formatString": "#,0.0",
             "displayFolder": "Evolution"
+          },
+          {
+            "name": "Unified Devices",
+            "expression": "COUNTROWS('DeviceDetail')",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Devices in All Three Sources",
+            "expression": "CALCULATE(COUNTROWS('DeviceDetail'),'DeviceDetail'[SourceCoverage]=\"AD + Entra + Intune\")",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Device Detail Intune Managed",
+            "expression": "CALCULATE(COUNTROWS('DeviceDetail'),'DeviceDetail'[InIntune]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Device Detail Noncompliant",
+            "expression": "CALCULATE(COUNTROWS('DeviceDetail'),'DeviceDetail'[IntuneIsCompliant]=FALSE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Device Detail Stale 30d",
+            "expression": "CALCULATE(COUNTROWS('DeviceDetail'),FILTER('DeviceDetail','DeviceDetail'[DaysSinceLastActivity]>30))",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Device Detail Action Required",
+            "expression": "CALCULATE(COUNTROWS('DeviceDetail'),'DeviceDetail'[ActionRequired]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "Device Detail"
+          },
+          {
+            "name": "Unified Users",
+            "expression": "COUNTROWS('UserDetail')",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Enabled Users",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[IsEnabled]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Inactive 90d",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[IsEnabled]=TRUE(),FILTER('UserDetail','UserDetail'[DaysSinceLastActivity]>90))",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail AD Users",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[InAD]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Entra Users",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[InEntra]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Exchange Online",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[InExchangeOnline]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Exchange On-prem",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[InExchangeOnPrem]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
+          },
+          {
+            "name": "User Detail Action Required",
+            "expression": "CALCULATE(COUNTROWS('UserDetail'),'UserDetail'[ActionRequired]=TRUE())",
+            "formatString": "#,0.0",
+            "displayFolder": "User Detail"
           }
         ]
       },
@@ -17049,6 +17358,551 @@
             }
           }
         ]
+      },
+      {
+        "name": "DeviceDetail",
+        "description": "Unified current-state device inventory derived from AD, Entra ID and Intune using exact identifiers only.",
+        "columns": [
+          {
+            "name": "CanonicalDeviceKey",
+            "dataType": "string",
+            "sourceColumn": "CanonicalDeviceKey",
+            "isHidden": true
+          },
+          {
+            "name": "DeviceName",
+            "dataType": "string",
+            "sourceColumn": "DeviceName"
+          },
+          {
+            "name": "PrimaryUserUPN",
+            "dataType": "string",
+            "sourceColumn": "PrimaryUserUPN"
+          },
+          {
+            "name": "Country",
+            "dataType": "string",
+            "sourceColumn": "Country"
+          },
+          {
+            "name": "SourceCoverage",
+            "dataType": "string",
+            "sourceColumn": "SourceCoverage"
+          },
+          {
+            "name": "InAD",
+            "dataType": "boolean",
+            "sourceColumn": "InAD"
+          },
+          {
+            "name": "InEntra",
+            "dataType": "boolean",
+            "sourceColumn": "InEntra"
+          },
+          {
+            "name": "InIntune",
+            "dataType": "boolean",
+            "sourceColumn": "InIntune"
+          },
+          {
+            "name": "ADObjectGUID",
+            "dataType": "string",
+            "sourceColumn": "ADObjectGUID",
+            "isHidden": true
+          },
+          {
+            "name": "EntraObjectId",
+            "dataType": "string",
+            "sourceColumn": "EntraObjectId",
+            "isHidden": true
+          },
+          {
+            "name": "EntraDeviceId",
+            "dataType": "string",
+            "sourceColumn": "EntraDeviceId",
+            "isHidden": true
+          },
+          {
+            "name": "IntuneDeviceId",
+            "dataType": "string",
+            "sourceColumn": "IntuneDeviceId",
+            "isHidden": true
+          },
+          {
+            "name": "DomainName",
+            "dataType": "string",
+            "sourceColumn": "DomainName"
+          },
+          {
+            "name": "OrganizationalUnit",
+            "dataType": "string",
+            "sourceColumn": "OrganizationalUnit"
+          },
+          {
+            "name": "ADEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "ADEnabled"
+          },
+          {
+            "name": "ADLastLogonDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "ADLastLogonDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "EntraAccountEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "EntraAccountEnabled"
+          },
+          {
+            "name": "TrustType",
+            "dataType": "string",
+            "sourceColumn": "TrustType"
+          },
+          {
+            "name": "EntraIsManaged",
+            "dataType": "boolean",
+            "sourceColumn": "EntraIsManaged"
+          },
+          {
+            "name": "EntraIsCompliant",
+            "dataType": "boolean",
+            "sourceColumn": "EntraIsCompliant"
+          },
+          {
+            "name": "EntraOwnership",
+            "dataType": "string",
+            "sourceColumn": "EntraOwnership"
+          },
+          {
+            "name": "EntraLastSignInDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "EntraLastSignInDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "Ownership",
+            "dataType": "string",
+            "sourceColumn": "Ownership"
+          },
+          {
+            "name": "ComplianceStatus",
+            "dataType": "string",
+            "sourceColumn": "ComplianceStatus"
+          },
+          {
+            "name": "IntuneIsCompliant",
+            "dataType": "boolean",
+            "sourceColumn": "IntuneIsCompliant"
+          },
+          {
+            "name": "OperatingSystem",
+            "dataType": "string",
+            "sourceColumn": "OperatingSystem"
+          },
+          {
+            "name": "OSVersion",
+            "dataType": "string",
+            "sourceColumn": "OSVersion"
+          },
+          {
+            "name": "WindowsVersionFamily",
+            "dataType": "string",
+            "sourceColumn": "WindowsVersionFamily"
+          },
+          {
+            "name": "Manufacturer",
+            "dataType": "string",
+            "sourceColumn": "Manufacturer"
+          },
+          {
+            "name": "Model",
+            "dataType": "string",
+            "sourceColumn": "Model"
+          },
+          {
+            "name": "SerialNumber",
+            "dataType": "string",
+            "sourceColumn": "SerialNumber"
+          },
+          {
+            "name": "PhysicalMemoryGB",
+            "dataType": "double",
+            "sourceColumn": "PhysicalMemoryGB"
+          },
+          {
+            "name": "StorageTotalGB",
+            "dataType": "double",
+            "sourceColumn": "StorageTotalGB"
+          },
+          {
+            "name": "StorageFreeGB",
+            "dataType": "double",
+            "sourceColumn": "StorageFreeGB"
+          },
+          {
+            "name": "IntuneLastSyncDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "IntuneLastSyncDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "LastActivityDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "LastActivityDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "DaysSinceLastActivity",
+            "dataType": "int64",
+            "sourceColumn": "DaysSinceLastActivity"
+          },
+          {
+            "name": "ActivityBucket",
+            "dataType": "string",
+            "sourceColumn": "ActivityBucket"
+          },
+          {
+            "name": "Windows11Readiness",
+            "dataType": "string",
+            "sourceColumn": "Windows11Readiness"
+          },
+          {
+            "name": "Windows11MigrationPhase",
+            "dataType": "string",
+            "sourceColumn": "Windows11MigrationPhase"
+          },
+          {
+            "name": "UpdateRisk",
+            "dataType": "string",
+            "sourceColumn": "UpdateRisk"
+          },
+          {
+            "name": "ActionSeverity",
+            "dataType": "string",
+            "sourceColumn": "ActionSeverity"
+          },
+          {
+            "name": "ActionPriority",
+            "dataType": "int64",
+            "sourceColumn": "ActionPriority",
+            "isHidden": true
+          },
+          {
+            "name": "ActionRequired",
+            "dataType": "boolean",
+            "sourceColumn": "ActionRequired"
+          },
+          {
+            "name": "RecommendedAction",
+            "dataType": "string",
+            "sourceColumn": "RecommendedAction"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DeviceDetail",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let\n CleanText=(v as any) as nullable text => let t=if v=null then null else Text.Trim(Text.From(v)) in if t=null or t=\"\" then null else t,\n Norm=(v as any) as nullable text => let t=CleanText(v) in if t=null then null else Text.Lower(t),\n FirstText=(values as list) as nullable text => let usable=List.RemoveNulls(List.Transform(values,each CleanText(_))) in if List.Count(usable)=0 then null else usable{0},\n MaxDate=(values as list) as nullable datetime => let usable=List.RemoveNulls(List.Transform(values,each fnToDateTime(_))) in if List.Count(usable)=0 then null else List.Max(usable),\n EntraCurrent=Table.SelectRows(#\"M365_Entra_Devices\",each [__IsCurrent]=true),\n EntraSelected=Table.SelectColumns(EntraCurrent,{\"ObjectId\",\"DeviceId\",\"DisplayName\",\"OperatingSystem\",\"OperatingSystemVersion\",\"IsCompliant\",\"IsManaged\",\"DeviceOwnership\",\"AccountEnabled\",\"TrustType\",\"Manufacturer\",\"Model\",\"ApproximateLastSignInDateTime\"},MissingField.UseNull),\n EntraRenamed=Table.RenameColumns(EntraSelected,{{\"ObjectId\",\"E_ObjectId\"},{\"DeviceId\",\"E_DeviceId\"},{\"DisplayName\",\"E_DisplayName\"},{\"OperatingSystem\",\"E_OperatingSystem\"},{\"OperatingSystemVersion\",\"E_OSVersion\"},{\"IsCompliant\",\"E_IsCompliant\"},{\"IsManaged\",\"E_IsManaged\"},{\"DeviceOwnership\",\"E_Ownership\"},{\"AccountEnabled\",\"E_AccountEnabled\"},{\"TrustType\",\"E_TrustType\"},{\"Manufacturer\",\"E_Manufacturer\"},{\"Model\",\"E_Model\"},{\"ApproximateLastSignInDateTime\",\"E_LastSignIn\"}}),\n EntraKey1=Table.AddColumn(EntraRenamed,\"E_ObjectKey\",each Norm([E_ObjectId]),type nullable text),\n EntraKey2=Table.AddColumn(EntraKey1,\"E_DeviceKey\",each Norm([E_DeviceId]),type nullable text),\n EntraKeyed=Table.AddColumn(EntraKey2,\"CanonicalDeviceKey\",each if [E_ObjectKey]<>null then \"ENTRA:\"&[E_ObjectKey] else if [E_DeviceKey]<>null then \"ENTRADEVICE:\"&[E_DeviceKey] else null,type nullable text),\n EntraPrepared=Table.Distinct(Table.SelectRows(EntraKeyed,each [CanonicalDeviceKey]<>null),{\"CanonicalDeviceKey\"}),\n EntraObjectMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_ObjectKey\",\"CanonicalDeviceKey\"}),each [E_ObjectKey]<>null),{\"E_ObjectKey\"}),\n EntraDeviceMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_DeviceKey\",\"CanonicalDeviceKey\"}),each [E_DeviceKey]<>null),{\"E_DeviceKey\"}),\n IntuneCurrent=Table.SelectRows(#\"Intune_Devices_Inventory\",each [__IsCurrent]=true),\n IntuneSelected=Table.SelectColumns(IntuneCurrent,{\"Device ID\",\"Device name\",\"Entra ObjectId\",\"Azure AD Device ID\",\"Entra DeviceId\",\"Primary user UPN\",\"Ownership\",\"Compliance\",\"IsCompliant\",\"OS\",\"OS version\",\"WindowsVersionFamily\",\"Manufacturer\",\"Model\",\"Serial number\",\"PhysicalMemoryGB\",\"Total storage\",\"Free storage\",\"LastSyncDateTime\"},MissingField.UseNull),\n IntuneRenamed=Table.RenameColumns(IntuneSelected,{{\"Device ID\",\"I_DeviceId\"},{\"Device name\",\"I_DeviceName\"},{\"Entra ObjectId\",\"I_EntraObjectId\"},{\"Azure AD Device ID\",\"I_AzureADDeviceId\"},{\"Entra DeviceId\",\"I_EntraDeviceId\"},{\"Primary user UPN\",\"I_PrimaryUserUPN\"},{\"Ownership\",\"I_Ownership\"},{\"Compliance\",\"I_Compliance\"},{\"IsCompliant\",\"I_IsCompliant\"},{\"OS\",\"I_OS\"},{\"OS version\",\"I_OSVersion\"},{\"WindowsVersionFamily\",\"I_WindowsVersionFamily\"},{\"Manufacturer\",\"I_Manufacturer\"},{\"Model\",\"I_Model\"},{\"Serial number\",\"I_SerialNumber\"},{\"PhysicalMemoryGB\",\"I_PhysicalMemoryGB\"},{\"Total storage\",\"I_TotalStorage\"},{\"Free storage\",\"I_FreeStorage\"},{\"LastSyncDateTime\",\"I_LastSync\"}}),\n IntuneKey1=Table.AddColumn(IntuneRenamed,\"I_ObjectKey\",each Norm([I_EntraObjectId]),type nullable text),\n IntuneKey2=Table.AddColumn(IntuneKey1,\"I_EntraDeviceKey\",each Norm(FirstText({[I_EntraDeviceId],[I_AzureADDeviceId]})),type nullable text),\n IntuneJoinObject=Table.NestedJoin(IntuneKey2,{\"I_ObjectKey\"},EntraObjectMap,{\"E_ObjectKey\"},\"ObjectMatch\",JoinKind.LeftOuter),\n IntuneExpandObject=Table.ExpandTableColumn(IntuneJoinObject,\"ObjectMatch\",{\"CanonicalDeviceKey\"},{\"CanonicalByObject\"}),\n IntuneJoinDevice=Table.NestedJoin(IntuneExpandObject,{\"I_EntraDeviceKey\"},EntraDeviceMap,{\"E_DeviceKey\"},\"DeviceMatch\",JoinKind.LeftOuter),\n IntuneExpandDevice=Table.ExpandTableColumn(IntuneJoinDevice,\"DeviceMatch\",{\"CanonicalDeviceKey\"},{\"CanonicalByDevice\"}),\n IntuneCanonical=Table.AddColumn(IntuneExpandDevice,\"CanonicalDeviceKey\",each FirstText({[CanonicalByDevice],[CanonicalByObject],if Norm([I_DeviceId])<>null then \"INTUNE:\"&Norm([I_DeviceId]) else null}),type nullable text),\n IntunePrepared=Table.Distinct(Table.SelectRows(Table.RemoveColumns(IntuneCanonical,{\"CanonicalByObject\",\"CanonicalByDevice\"}),each [CanonicalDeviceKey]<>null),{\"CanonicalDeviceKey\"}),\n IntuneDeviceMap0=Table.AddColumn(Table.SelectColumns(IntunePrepared,{\"I_DeviceId\",\"CanonicalDeviceKey\"}),\"I_DeviceKey\",each Norm([I_DeviceId]),type nullable text),\n IntuneDeviceMap=Table.Distinct(Table.SelectRows(Table.RemoveColumns(IntuneDeviceMap0,{\"I_DeviceId\"}),each [I_DeviceKey]<>null),{\"I_DeviceKey\"}),\n ADCurrent=Table.SelectRows(#\"AD_Computers_AllDomains\",each [__IsCurrent]=true),\n ADSelected=Table.SelectColumns(ADCurrent,{\"ObjectGUID\",\"Name\",\"DNSHostName\",\"DomainName\",\"OrganizationalUnitLeafName\",\"Enabled\",\"LastLogonDate\",\"OperatingSystem\",\"operatingSystemVersion\",\"Manufacturer\",\"IntunePrimaryUserPrincipalName\",\"IntuneDeviceId\",\"EntraObjectId\",\"EntraDeviceIdNormalized\",\"IntuneOwnership\",\"IntuneDeviceModel\",\"PhysicalMemoryGB\",\"Windows11UpgradeEligibility\",\"Windows11MigrationPhase\",\"DeviceMigrationIssueSeverity\",\"Windows11MigrationAction\",\"WindowsUpdateWindows1125H2RiskBucket\",\"WindowsUpdateWindows1124H2RiskBucket\",\"WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket\"},MissingField.UseNull),\n ADRenamed=Table.RenameColumns(ADSelected,{{\"ObjectGUID\",\"A_ObjectGUID\"},{\"Name\",\"A_Name\"},{\"DNSHostName\",\"A_DNSHostName\"},{\"DomainName\",\"A_DomainName\"},{\"OrganizationalUnitLeafName\",\"A_OrganizationalUnit\"},{\"Enabled\",\"A_Enabled\"},{\"LastLogonDate\",\"A_LastLogon\"},{\"OperatingSystem\",\"A_OperatingSystem\"},{\"operatingSystemVersion\",\"A_OSVersion\"},{\"Manufacturer\",\"A_Manufacturer\"},{\"IntunePrimaryUserPrincipalName\",\"A_PrimaryUserUPN\"},{\"IntuneDeviceId\",\"A_IntuneDeviceId\"},{\"EntraObjectId\",\"A_EntraObjectId\"},{\"EntraDeviceIdNormalized\",\"A_EntraDeviceId\"},{\"IntuneOwnership\",\"A_IntuneOwnership\"},{\"IntuneDeviceModel\",\"A_IntuneModel\"},{\"PhysicalMemoryGB\",\"A_PhysicalMemoryGB\"},{\"Windows11UpgradeEligibility\",\"A_Windows11Readiness\"},{\"Windows11MigrationPhase\",\"A_Windows11MigrationPhase\"},{\"DeviceMigrationIssueSeverity\",\"A_MigrationSeverity\"},{\"Windows11MigrationAction\",\"A_MigrationAction\"},{\"WindowsUpdateWindows1125H2RiskBucket\",\"A_UpdateRisk25H2\"},{\"WindowsUpdateWindows1124H2RiskBucket\",\"A_UpdateRisk24H2\"},{\"WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket\",\"A_UpdateRiskAutopatch\"}}),\n ADKey1=Table.AddColumn(ADRenamed,\"A_ObjectKey\",each Norm([A_EntraObjectId]),type nullable text),\n ADKey2=Table.AddColumn(ADKey1,\"A_EntraDeviceKey\",each Norm([A_EntraDeviceId]),type nullable text),\n ADKey3=Table.AddColumn(ADKey2,\"A_IntuneDeviceKey\",each Norm([A_IntuneDeviceId]),type nullable text),\n ADJoinObject=Table.NestedJoin(ADKey3,{\"A_ObjectKey\"},EntraObjectMap,{\"E_ObjectKey\"},\"ObjectMatch\",JoinKind.LeftOuter),\n ADExpandObject=Table.ExpandTableColumn(ADJoinObject,\"ObjectMatch\",{\"CanonicalDeviceKey\"},{\"CanonicalByObject\"}),\n ADJoinDevice=Table.NestedJoin(ADExpandObject,{\"A_EntraDeviceKey\"},EntraDeviceMap,{\"E_DeviceKey\"},\"DeviceMatch\",JoinKind.LeftOuter),\n ADExpandDevice=Table.ExpandTableColumn(ADJoinDevice,\"DeviceMatch\",{\"CanonicalDeviceKey\"},{\"CanonicalByDevice\"}),\n ADJoinIntune=Table.NestedJoin(ADExpandDevice,{\"A_IntuneDeviceKey\"},IntuneDeviceMap,{\"I_DeviceKey\"},\"IntuneMatch\",JoinKind.LeftOuter),\n ADExpandIntune=Table.ExpandTableColumn(ADJoinIntune,\"IntuneMatch\",{\"CanonicalDeviceKey\"},{\"CanonicalByIntune\"}),\n ADCanonical=Table.AddColumn(ADExpandIntune,\"CanonicalDeviceKey\",each FirstText({[CanonicalByIntune],[CanonicalByObject],[CanonicalByDevice],if Norm([A_ObjectGUID])<>null then \"AD:\"&Norm([A_ObjectGUID]) else null}),type nullable text),\n ADPrepared=Table.Distinct(Table.SelectRows(Table.RemoveColumns(ADCanonical,{\"CanonicalByObject\",\"CanonicalByDevice\",\"CanonicalByIntune\"}),each [CanonicalDeviceKey]<>null),{\"CanonicalDeviceKey\"}),\n Keys=Table.Distinct(Table.Combine({Table.SelectColumns(ADPrepared,{\"CanonicalDeviceKey\"}),Table.SelectColumns(EntraPrepared,{\"CanonicalDeviceKey\"}),Table.SelectColumns(IntunePrepared,{\"CanonicalDeviceKey\"})}),{\"CanonicalDeviceKey\"}),\n JoinAD=Table.NestedJoin(Keys,{\"CanonicalDeviceKey\"},ADPrepared,{\"CanonicalDeviceKey\"},\"AD\",JoinKind.LeftOuter),\n ExpandAD=Table.ExpandTableColumn(JoinAD,\"AD\",{\"A_ObjectGUID\",\"A_Name\",\"A_DNSHostName\",\"A_DomainName\",\"A_OrganizationalUnit\",\"A_Enabled\",\"A_LastLogon\",\"A_OperatingSystem\",\"A_OSVersion\",\"A_Manufacturer\",\"A_PrimaryUserUPN\",\"A_IntuneDeviceId\",\"A_EntraObjectId\",\"A_EntraDeviceId\",\"A_IntuneOwnership\",\"A_IntuneModel\",\"A_PhysicalMemoryGB\",\"A_Windows11Readiness\",\"A_Windows11MigrationPhase\",\"A_MigrationSeverity\",\"A_MigrationAction\",\"A_UpdateRisk25H2\",\"A_UpdateRisk24H2\",\"A_UpdateRiskAutopatch\"}),\n JoinEntra=Table.NestedJoin(ExpandAD,{\"CanonicalDeviceKey\"},EntraPrepared,{\"CanonicalDeviceKey\"},\"Entra\",JoinKind.LeftOuter),\n ExpandEntra=Table.ExpandTableColumn(JoinEntra,\"Entra\",{\"E_ObjectId\",\"E_DeviceId\",\"E_DisplayName\",\"E_OperatingSystem\",\"E_OSVersion\",\"E_IsCompliant\",\"E_IsManaged\",\"E_Ownership\",\"E_AccountEnabled\",\"E_TrustType\",\"E_Manufacturer\",\"E_Model\",\"E_LastSignIn\"}),\n JoinIntune=Table.NestedJoin(ExpandEntra,{\"CanonicalDeviceKey\"},IntunePrepared,{\"CanonicalDeviceKey\"},\"Intune\",JoinKind.LeftOuter),\n ExpandIntune=Table.ExpandTableColumn(JoinIntune,\"Intune\",{\"I_DeviceId\",\"I_DeviceName\",\"I_EntraObjectId\",\"I_AzureADDeviceId\",\"I_EntraDeviceId\",\"I_PrimaryUserUPN\",\"I_Ownership\",\"I_Compliance\",\"I_IsCompliant\",\"I_OS\",\"I_OSVersion\",\"I_WindowsVersionFamily\",\"I_Manufacturer\",\"I_Model\",\"I_SerialNumber\",\"I_PhysicalMemoryGB\",\"I_TotalStorage\",\"I_FreeStorage\",\"I_LastSync\"}),\n WithInAD=Table.AddColumn(ExpandIntune,\"InAD\",each [A_ObjectGUID]<>null,type logical),\n WithInEntra=Table.AddColumn(WithInAD,\"InEntra\",each [E_ObjectId]<>null,type logical),\n WithInIntune=Table.AddColumn(WithInEntra,\"InIntune\",each [I_DeviceId]<>null,type logical),\n WithCoverage=Table.AddColumn(WithInIntune,\"SourceCoverage\",each if [InAD] and [InEntra] and [InIntune] then \"AD + Entra + Intune\" else if [InAD] and [InEntra] then \"AD + Entra\" else if [InAD] and [InIntune] then \"AD + Intune\" else if [InEntra] and [InIntune] then \"Entra + Intune\" else if [InAD] then \"AD only\" else if [InEntra] then \"Entra only\" else \"Intune only\",type text),\n WithDeviceName=Table.AddColumn(WithCoverage,\"DeviceName\",each FirstText({[I_DeviceName],[E_DisplayName],[A_Name],[A_DNSHostName]}),type nullable text),\n WithPrimaryUser=Table.AddColumn(WithDeviceName,\"PrimaryUserUPN\",each FirstText({[I_PrimaryUserUPN],[A_PrimaryUserUPN]}),type nullable text),\n WithUserKey=Table.AddColumn(WithPrimaryUser,\"UserKey\",each Norm([PrimaryUserUPN]),type nullable text),\n UsersCurrent=Table.SelectRows(#\"M365_Users_Active\",each [__IsCurrent]=true),\n UsersSelected=Table.SelectColumns(UsersCurrent,{\"User principal name\",\"CountryOrRegion\"},MissingField.UseNull),\n UsersKeyed=Table.AddColumn(UsersSelected,\"UserKey\",each Norm([#\"User principal name\"]),type nullable text),\n UsersMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(UsersKeyed,{\"UserKey\",\"CountryOrRegion\"}),each [UserKey]<>null),{\"UserKey\"}),\n JoinUsers=Table.NestedJoin(WithUserKey,{\"UserKey\"},UsersMap,{\"UserKey\"},\"User\",JoinKind.LeftOuter),\n ExpandUsers=Table.ExpandTableColumn(JoinUsers,\"User\",{\"CountryOrRegion\"},{\"UserCountry\"}),\n WithCountry=Table.AddColumn(ExpandUsers,\"Country\",each let c=CleanText([UserCountry]) in if c=null then \"Unknown / not user-linked\" else c,type text),\n WithADObject=Table.AddColumn(WithCountry,\"ADObjectGUID\",each CleanText([A_ObjectGUID]),type nullable text),\n WithEntraObject=Table.AddColumn(WithADObject,\"EntraObjectId\",each FirstText({[E_ObjectId],[I_EntraObjectId],[A_EntraObjectId]}),type nullable text),\n WithEntraDevice=Table.AddColumn(WithEntraObject,\"EntraDeviceId\",each FirstText({[E_DeviceId],[I_EntraDeviceId],[I_AzureADDeviceId],[A_EntraDeviceId]}),type nullable text),\n WithIntuneDevice=Table.AddColumn(WithEntraDevice,\"IntuneDeviceId\",each FirstText({[I_DeviceId],[A_IntuneDeviceId]}),type nullable text),\n WithDomain=Table.AddColumn(WithIntuneDevice,\"DomainName\",each CleanText([A_DomainName]),type nullable text),\n WithOU=Table.AddColumn(WithDomain,\"OrganizationalUnit\",each CleanText([A_OrganizationalUnit]),type nullable text),\n WithADEnabled=Table.AddColumn(WithOU,\"ADEnabled\",each fnToLogical([A_Enabled]),type nullable logical),\n WithADLastLogon=Table.AddColumn(WithADEnabled,\"ADLastLogonDateTime\",each fnToDateTime([A_LastLogon]),type nullable datetime),\n WithEntraEnabled=Table.AddColumn(WithADLastLogon,\"EntraAccountEnabled\",each fnToLogical([E_AccountEnabled]),type nullable logical),\n WithTrust=Table.AddColumn(WithEntraEnabled,\"TrustType\",each let t=CleanText([E_TrustType]) in if t=null then \"Unknown\" else t,type text),\n WithEntraManaged=Table.AddColumn(WithTrust,\"EntraIsManaged\",each fnToLogical([E_IsManaged]),type nullable logical),\n WithEntraCompliant=Table.AddColumn(WithEntraManaged,\"EntraIsCompliant\",each fnToLogical([E_IsCompliant]),type nullable logical),\n WithEntraOwnership=Table.AddColumn(WithEntraCompliant,\"EntraOwnership\",each CleanText([E_Ownership]),type nullable text),\n WithEntraLastSignIn=Table.AddColumn(WithEntraOwnership,\"EntraLastSignInDateTime\",each fnToDateTime([E_LastSignIn]),type nullable datetime),\n WithOwnership=Table.AddColumn(WithEntraLastSignIn,\"Ownership\",each let v=FirstText({[I_Ownership],[E_Ownership],[A_IntuneOwnership]}) in if v=null then \"Unknown\" else v,type text),\n WithIntuneCompliant=Table.AddColumn(WithOwnership,\"IntuneIsCompliant\",each fnToLogical([I_IsCompliant]),type nullable logical),\n WithCompliance=Table.AddColumn(WithIntuneCompliant,\"ComplianceStatus\",each let c=CleanText([I_Compliance]),b=[IntuneIsCompliant] in if not [InIntune] then \"Not managed by Intune\" else if c<>null then c else if b=true then \"compliant\" else if b=false then \"noncompliant\" else \"unknown\",type text),\n WithOS=Table.AddColumn(WithCompliance,\"OperatingSystem\",each FirstText({[I_OS],[E_OperatingSystem],[A_OperatingSystem]}),type nullable text),\n WithOSVersion=Table.AddColumn(WithOS,\"OSVersion\",each FirstText({[I_OSVersion],[E_OSVersion],[A_OSVersion]}),type nullable text),\n WithWindowsFamily=Table.AddColumn(WithOSVersion,\"WindowsVersionFamily\",each let f=CleanText([I_WindowsVersionFamily]),os=Text.Upper(if [OperatingSystem]=null then \"\" else [OperatingSystem]),parts=if [OSVersion]=null then {} else Text.Split([OSVersion],\".\"),build=if List.Count(parts)>2 then try Number.FromText(parts{2}) otherwise null else null in if f<>null then f else if not Text.Contains(os,\"WINDOWS\") then if [OperatingSystem]=null then \"Unknown\" else [OperatingSystem] else if build=null then \"Unknown\" else if build>=22000 then \"Windows 11\" else \"Windows 10\",type text),\n WithManufacturer=Table.AddColumn(WithWindowsFamily,\"Manufacturer\",each FirstText({[I_Manufacturer],[E_Manufacturer],[A_Manufacturer]}),type nullable text),\n WithModel=Table.AddColumn(WithManufacturer,\"Model\",each FirstText({[I_Model],[E_Model],[A_IntuneModel]}),type nullable text),\n WithSerial=Table.AddColumn(WithModel,\"SerialNumber\",each CleanText([I_SerialNumber]),type nullable text),\n WithMemory=Table.AddColumn(WithSerial,\"PhysicalMemoryGB\",each let n=fnToNumber(FirstText({[I_PhysicalMemoryGB],[A_PhysicalMemoryGB]})) in n,type nullable number),\n WithStorageTotal=Table.AddColumn(WithMemory,\"StorageTotalGB\",each let n=fnToNumber([I_TotalStorage]) in if n=null then null else n/1073741824,type nullable number),\n WithStorageFree=Table.AddColumn(WithStorageTotal,\"StorageFreeGB\",each let n=fnToNumber([I_FreeStorage]) in if n=null then null else n/1073741824,type nullable number),\n WithIntuneLastSync=Table.AddColumn(WithStorageFree,\"IntuneLastSyncDateTime\",each fnToDateTime([I_LastSync]),type nullable datetime),\n WithLastActivity=Table.AddColumn(WithIntuneLastSync,\"LastActivityDateTime\",each MaxDate({[IntuneLastSyncDateTime],[EntraLastSignInDateTime],[ADLastLogonDateTime]}),type nullable datetime),\n WithDays=Table.AddColumn(WithLastActivity,\"DaysSinceLastActivity\",each if [LastActivityDateTime]=null then null else Duration.Days(DateTime.LocalNow()-[LastActivityDateTime]),Int64.Type),\n WithActivity=Table.AddColumn(WithDays,\"ActivityBucket\",each if [DaysSinceLastActivity]=null then \"Unknown\" else if [DaysSinceLastActivity]<=30 then \"Active <= 30d\" else if [DaysSinceLastActivity]<=90 then \"Inactive 31-90d\" else \"Stale > 90d\",type text),\n WithReadiness=Table.AddColumn(WithActivity,\"Windows11Readiness\",each let v=CleanText([A_Windows11Readiness]) in if v=null then \"Unknown / not assessed\" else v,type text),\n WithMigration=Table.AddColumn(WithReadiness,\"Windows11MigrationPhase\",each let v=CleanText([A_Windows11MigrationPhase]) in if v=null then \"Unknown / not assessed\" else v,type text),\n WithRisk=Table.AddColumn(WithMigration,\"UpdateRisk\",each let v=FirstText({[A_UpdateRisk25H2],[A_UpdateRisk24H2],[A_UpdateRiskAutopatch]}) in if v=null then \"Unknown / not assessed\" else v,type text),\n WithSeverity=Table.AddColumn(WithRisk,\"ActionSeverity\",each let risk=Text.Upper([UpdateRisk]),migration=Text.Upper(if [A_MigrationSeverity]=null then \"\" else Text.From([A_MigrationSeverity])) in if [IntuneIsCompliant]=false or risk=\"HIGH\" or List.Contains({\"CRITICAL\",\"HIGH\"},migration) then \"Critical\" else if [ADEnabled]=false or ([DaysSinceLastActivity]<>null and [DaysSinceLastActivity]>90) or [SourceCoverage]<>\"AD + Entra + Intune\" then \"Warning\" else \"Healthy\",type text),\n WithPriority=Table.AddColumn(WithSeverity,\"ActionPriority\",each if [ActionSeverity]=\"Critical\" then 1 else if [ActionSeverity]=\"Warning\" then 2 else 3,Int64.Type),\n WithActionRequired=Table.AddColumn(WithPriority,\"ActionRequired\",each [ActionSeverity]<>\"Healthy\",type logical),\n WithRecommendedAction=Table.AddColumn(WithActionRequired,\"RecommendedAction\",each if [IntuneIsCompliant]=false then \"Remediate Intune noncompliance\" else if Text.Upper([UpdateRisk])=\"HIGH\" then \"Investigate Windows Update blocking risk\" else if [ADEnabled]=false then \"Review disabled AD computer\" else if [DaysSinceLastActivity]<>null and [DaysSinceLastActivity]>90 then \"Validate stale device and retire if obsolete\" else if [SourceCoverage]<>\"AD + Entra + Intune\" then \"Reconcile missing inventory source\" else let a=CleanText([A_MigrationAction]) in if a=null then \"No immediate action\" else a,type text),\n Result=Table.SelectColumns(WithRecommendedAction,{\"CanonicalDeviceKey\",\"DeviceName\",\"PrimaryUserUPN\",\"Country\",\"SourceCoverage\",\"InAD\",\"InEntra\",\"InIntune\",\"ADObjectGUID\",\"EntraObjectId\",\"EntraDeviceId\",\"IntuneDeviceId\",\"DomainName\",\"OrganizationalUnit\",\"ADEnabled\",\"ADLastLogonDateTime\",\"EntraAccountEnabled\",\"TrustType\",\"EntraIsManaged\",\"EntraIsCompliant\",\"EntraOwnership\",\"EntraLastSignInDateTime\",\"Ownership\",\"ComplianceStatus\",\"IntuneIsCompliant\",\"OperatingSystem\",\"OSVersion\",\"WindowsVersionFamily\",\"Manufacturer\",\"Model\",\"SerialNumber\",\"PhysicalMemoryGB\",\"StorageTotalGB\",\"StorageFreeGB\",\"IntuneLastSyncDateTime\",\"LastActivityDateTime\",\"DaysSinceLastActivity\",\"ActivityBucket\",\"Windows11Readiness\",\"Windows11MigrationPhase\",\"UpdateRisk\",\"ActionSeverity\",\"ActionPriority\",\"ActionRequired\",\"RecommendedAction\"})\nin Result"
+            }
+          }
+        ],
+        "annotations": [
+          {
+            "name": "SmartWorkplaceDashboard.TableKind",
+            "value": "Derived operational view"
+          }
+        ]
+      },
+      {
+        "name": "UserDetail",
+        "description": "Unified current-state user inventory derived from AD, Entra ID, Exchange On-premises and Exchange Online using exact identifiers only.",
+        "columns": [
+          {
+            "name": "CanonicalUserKey",
+            "dataType": "string",
+            "sourceColumn": "CanonicalUserKey",
+            "isHidden": true
+          },
+          {
+            "name": "DisplayName",
+            "dataType": "string",
+            "sourceColumn": "DisplayName"
+          },
+          {
+            "name": "UserPrincipalName",
+            "dataType": "string",
+            "sourceColumn": "UserPrincipalName"
+          },
+          {
+            "name": "PrimarySmtpAddress",
+            "dataType": "string",
+            "sourceColumn": "PrimarySmtpAddress"
+          },
+          {
+            "name": "Country",
+            "dataType": "string",
+            "sourceColumn": "Country"
+          },
+          {
+            "name": "Department",
+            "dataType": "string",
+            "sourceColumn": "Department"
+          },
+          {
+            "name": "Title",
+            "dataType": "string",
+            "sourceColumn": "Title"
+          },
+          {
+            "name": "Company",
+            "dataType": "string",
+            "sourceColumn": "Company"
+          },
+          {
+            "name": "Office",
+            "dataType": "string",
+            "sourceColumn": "Office"
+          },
+          {
+            "name": "Manager",
+            "dataType": "string",
+            "sourceColumn": "Manager"
+          },
+          {
+            "name": "SourceCoverage",
+            "dataType": "string",
+            "sourceColumn": "SourceCoverage"
+          },
+          {
+            "name": "IdentityMatchStatus",
+            "dataType": "string",
+            "sourceColumn": "IdentityMatchStatus"
+          },
+          {
+            "name": "HybridIdentityType",
+            "dataType": "string",
+            "sourceColumn": "HybridIdentityType"
+          },
+          {
+            "name": "InAD",
+            "dataType": "boolean",
+            "sourceColumn": "InAD"
+          },
+          {
+            "name": "InEntra",
+            "dataType": "boolean",
+            "sourceColumn": "InEntra"
+          },
+          {
+            "name": "InExchangeOnPrem",
+            "dataType": "boolean",
+            "sourceColumn": "InExchangeOnPrem"
+          },
+          {
+            "name": "InExchangeOnline",
+            "dataType": "boolean",
+            "sourceColumn": "InExchangeOnline"
+          },
+          {
+            "name": "ADObjectGUID",
+            "dataType": "string",
+            "sourceColumn": "ADObjectGUID",
+            "isHidden": true
+          },
+          {
+            "name": "EntraObjectId",
+            "dataType": "string",
+            "sourceColumn": "EntraObjectId",
+            "isHidden": true
+          },
+          {
+            "name": "OnPremExchangeGuid",
+            "dataType": "string",
+            "sourceColumn": "OnPremExchangeGuid",
+            "isHidden": true
+          },
+          {
+            "name": "EXOMailboxGuid",
+            "dataType": "string",
+            "sourceColumn": "EXOMailboxGuid",
+            "isHidden": true
+          },
+          {
+            "name": "ADDomain",
+            "dataType": "string",
+            "sourceColumn": "ADDomain"
+          },
+          {
+            "name": "ADOrganizationalUnit",
+            "dataType": "string",
+            "sourceColumn": "ADOrganizationalUnit"
+          },
+          {
+            "name": "ADAccountEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "ADAccountEnabled"
+          },
+          {
+            "name": "EntraAccountEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "EntraAccountEnabled"
+          },
+          {
+            "name": "IsEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "IsEnabled"
+          },
+          {
+            "name": "AccountStatus",
+            "dataType": "string",
+            "sourceColumn": "AccountStatus"
+          },
+          {
+            "name": "UserType",
+            "dataType": "string",
+            "sourceColumn": "UserType"
+          },
+          {
+            "name": "DirSyncEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "DirSyncEnabled"
+          },
+          {
+            "name": "OnPremisesSyncEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "OnPremisesSyncEnabled"
+          },
+          {
+            "name": "IsLikelyServiceAccount",
+            "dataType": "boolean",
+            "sourceColumn": "IsLikelyServiceAccount"
+          },
+          {
+            "name": "LicenseSummary",
+            "dataType": "string",
+            "sourceColumn": "LicenseSummary"
+          },
+          {
+            "name": "MailboxPlacement",
+            "dataType": "string",
+            "sourceColumn": "MailboxPlacement"
+          },
+          {
+            "name": "EXOMailboxType",
+            "dataType": "string",
+            "sourceColumn": "EXOMailboxType"
+          },
+          {
+            "name": "OnPremMailboxType",
+            "dataType": "string",
+            "sourceColumn": "OnPremMailboxType"
+          },
+          {
+            "name": "EXOMailboxSizeGB",
+            "dataType": "double",
+            "sourceColumn": "EXOMailboxSizeGB"
+          },
+          {
+            "name": "OnPremMailboxSizeGB",
+            "dataType": "double",
+            "sourceColumn": "OnPremMailboxSizeGB"
+          },
+          {
+            "name": "TotalMailboxSizeGB",
+            "dataType": "double",
+            "sourceColumn": "TotalMailboxSizeGB"
+          },
+          {
+            "name": "ArchiveMailboxSizeGB",
+            "dataType": "double",
+            "sourceColumn": "ArchiveMailboxSizeGB"
+          },
+          {
+            "name": "MailboxItemCount",
+            "dataType": "int64",
+            "sourceColumn": "MailboxItemCount"
+          },
+          {
+            "name": "ADLastLogonDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "ADLastLogonDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "EntraLastSignInDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "EntraLastSignInDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "EXOLastUserActionDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "EXOLastUserActionDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "OnPremLastLogonDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "OnPremLastLogonDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "LastActivityDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "LastActivityDateTime",
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "DaysSinceLastActivity",
+            "dataType": "int64",
+            "sourceColumn": "DaysSinceLastActivity"
+          },
+          {
+            "name": "ActivityBucket",
+            "dataType": "string",
+            "sourceColumn": "ActivityBucket"
+          },
+          {
+            "name": "ActionSeverity",
+            "dataType": "string",
+            "sourceColumn": "ActionSeverity"
+          },
+          {
+            "name": "ActionPriority",
+            "dataType": "int64",
+            "sourceColumn": "ActionPriority",
+            "isHidden": true
+          },
+          {
+            "name": "ActionRequired",
+            "dataType": "boolean",
+            "sourceColumn": "ActionRequired"
+          },
+          {
+            "name": "RecommendedAction",
+            "dataType": "string",
+            "sourceColumn": "RecommendedAction"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "UserDetail",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let\n CleanText=(v as any) as nullable text => let t=if v=null then null else Text.Trim(Text.From(v)) in if t=null or t=\"\" then null else t,\n Norm=(v as any) as nullable text => let t=CleanText(v) in if t=null then null else Text.Lower(t),\n FirstText=(values as list) as nullable text => let usable=List.RemoveNulls(List.Transform(values,each CleanText(_))) in if List.Count(usable)=0 then null else usable{0},\n MaxDate=(values as list) as nullable datetime => let usable=List.RemoveNulls(List.Transform(values,each fnToDateTime(_))) in if List.Count(usable)=0 then null else List.Max(usable),\n CandidateCount=(values as list) as number => List.Count(List.Distinct(List.RemoveNulls(List.Transform(values,each CleanText(_))))),\n EntraCurrent=Table.SelectRows(#\"M365_Users_Active\",each [__IsCurrent]=true),\n EntraSelected=Table.SelectColumns(EntraCurrent,{\"Object Id\",\"User principal name\",\"Display name\",\"First name\",\"Last name\",\"Title\",\"Department\",\"City\",\"CountryOrRegion\",\"Office\",\"StateOrProvince\",\"Usage location\",\"Block credential\",\"Licenses\",\"DirSyncEnabled\",\"OnPremisesImmutableId\",\"OnPremisesSecurityIdentifier\",\"OnPremisesSyncEnabled\",\"AccountEnabled\",\"UserType\",\"LastSignInDateTime\",\"LastNonInteractiveSignInDateTime\"},MissingField.UseNull),\n EntraRenamed=Table.RenameColumns(EntraSelected,{{\"Object Id\",\"E_ObjectId\"},{\"User principal name\",\"E_UPN\"},{\"Display name\",\"E_DisplayName\"},{\"First name\",\"E_FirstName\"},{\"Last name\",\"E_LastName\"},{\"Title\",\"E_Title\"},{\"Department\",\"E_Department\"},{\"City\",\"E_City\"},{\"CountryOrRegion\",\"E_Country\"},{\"Office\",\"E_Office\"},{\"StateOrProvince\",\"E_State\"},{\"Usage location\",\"E_UsageLocation\"},{\"Block credential\",\"E_BlockCredential\"},{\"Licenses\",\"E_Licenses\"},{\"DirSyncEnabled\",\"E_DirSyncEnabled\"},{\"OnPremisesImmutableId\",\"E_ImmutableId\"},{\"OnPremisesSecurityIdentifier\",\"E_SID\"},{\"OnPremisesSyncEnabled\",\"E_OnPremisesSyncEnabled\"},{\"AccountEnabled\",\"E_AccountEnabled\"},{\"UserType\",\"E_UserType\"},{\"LastSignInDateTime\",\"E_LastSignIn\"},{\"LastNonInteractiveSignInDateTime\",\"E_LastNonInteractiveSignIn\"}}),\n EntraKey1=Table.AddColumn(EntraRenamed,\"E_ObjectKey\",each Norm([E_ObjectId]),type nullable text),\n EntraKey2=Table.AddColumn(EntraKey1,\"E_ImmutableKey\",each Norm([E_ImmutableId]),type nullable text),\n EntraKey3=Table.AddColumn(EntraKey2,\"E_SIDKey\",each Norm([E_SID]),type nullable text),\n EntraKey4=Table.AddColumn(EntraKey3,\"E_UPNKey\",each Norm([E_UPN]),type nullable text),\n EntraKeyed=Table.AddColumn(EntraKey4,\"CanonicalUserKey\",each if [E_ObjectKey]=null then null else \"ENTRA:\"&[E_ObjectKey],type nullable text),\n EntraPrepared=Table.Distinct(Table.SelectRows(EntraKeyed,each [CanonicalUserKey]<>null),{\"CanonicalUserKey\"}),\n EntraObjectMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_ObjectKey\",\"CanonicalUserKey\"}),each [E_ObjectKey]<>null),{\"E_ObjectKey\"}),\n EntraImmutableMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_ImmutableKey\",\"CanonicalUserKey\"}),each [E_ImmutableKey]<>null),{\"E_ImmutableKey\"}),\n EntraSIDMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_SIDKey\",\"CanonicalUserKey\"}),each [E_SIDKey]<>null),{\"E_SIDKey\"}),\n EntraUPNMap=Table.Distinct(Table.SelectRows(Table.SelectColumns(EntraPrepared,{\"E_UPNKey\",\"CanonicalUserKey\"}),each [E_UPNKey]<>null),{\"E_UPNKey\"}),\n ADCurrent=Table.SelectRows(#\"AD_Users_AllDomains\",each [__IsCurrent]=true),\n ADSelected=Table.SelectColumns(ADCurrent,{\"ObjectGUID\",\"DomainName\",\"UserPrincipalName\",\"Enabled\",\"DisplayName\",\"GivenName\",\"Surname\",\"Department\",\"Title\",\"Company\",\"Office\",\"manager\",\"Country\",\"CountryName\",\"City\",\"AdOrganizationalUnitPath\",\"EntitySiteType\",\"EntityIntegrationType\",\"IsLikelyServiceAccount\",\"AccountType\",\"M365LicenseName\",\"M365LicenseType\",\"ActivityCategory\",\"LastLogonDate\",\"ResolvedLastActivityDateTime\",\"PrimarySmtpAddress\",\"MailboxSource\",\"ObjectSID\",\"ImmutableId_AD\",\"HasMailbox\",\"HasRemoteMailbox\"},MissingField.UseNull),\n ADRenamed=Table.RenameColumns(ADSelected,{{\"ObjectGUID\",\"A_ObjectGUID\"},{\"DomainName\",\"A_DomainName\"},{\"UserPrincipalName\",\"A_UPN\"},{\"Enabled\",\"A_Enabled\"},{\"DisplayName\",\"A_DisplayName\"},{\"GivenName\",\"A_GivenName\"},{\"Surname\",\"A_Surname\"},{\"Department\",\"A_Department\"},{\"Title\",\"A_Title\"},{\"Company\",\"A_Company\"},{\"Office\",\"A_Office\"},{\"manager\",\"A_Manager\"},{\"Country\",\"A_Country\"},{\"CountryName\",\"A_CountryName\"},{\"City\",\"A_City\"},{\"AdOrganizationalUnitPath\",\"A_OrganizationalUnit\"},{\"EntitySiteType\",\"A_SiteType\"},{\"EntityIntegrationType\",\"A_IntegrationType\"},{\"IsLikelyServiceAccount\",\"A_IsLikelyServiceAccount\"},{\"AccountType\",\"A_AccountType\"},{\"M365LicenseName\",\"A_M365LicenseName\"},{\"M365LicenseType\",\"A_M365LicenseType\"},{\"ActivityCategory\",\"A_ActivityCategory\"},{\"LastLogonDate\",\"A_LastLogon\"},{\"ResolvedLastActivityDateTime\",\"A_ResolvedLastActivity\"},{\"PrimarySmtpAddress\",\"A_PrimarySmtp\"},{\"MailboxSource\",\"A_MailboxSource\"},{\"ObjectSID\",\"A_SID\"},{\"ImmutableId_AD\",\"A_ImmutableId\"},{\"HasMailbox\",\"A_HasMailbox\"},{\"HasRemoteMailbox\",\"A_HasRemoteMailbox\"}}),\n ADKey1=Table.AddColumn(ADRenamed,\"A_ImmutableKey\",each Norm([A_ImmutableId]),type nullable text),\n ADKey2=Table.AddColumn(ADKey1,\"A_SIDKey\",each Norm([A_SID]),type nullable text),\n ADKey3=Table.AddColumn(ADKey2,\"A_UPNKey\",each Norm([A_UPN]),type nullable text),\n ADJoinImmutable=Table.NestedJoin(ADKey3,{\"A_ImmutableKey\"},EntraImmutableMap,{\"E_ImmutableKey\"},\"ImmutableMatch\",JoinKind.LeftOuter),\n ADExpandImmutable=Table.ExpandTableColumn(ADJoinImmutable,\"ImmutableMatch\",{\"CanonicalUserKey\"},{\"CanonicalByImmutable\"}),\n ADJoinSID=Table.NestedJoin(ADExpandImmutable,{\"A_SIDKey\"},EntraSIDMap,{\"E_SIDKey\"},\"SIDMatch\",JoinKind.LeftOuter),\n ADExpandSID=Table.ExpandTableColumn(ADJoinSID,\"SIDMatch\",{\"CanonicalUserKey\"},{\"CanonicalBySID\"}),\n ADJoinUPN=Table.NestedJoin(ADExpandSID,{\"A_UPNKey\"},EntraUPNMap,{\"E_UPNKey\"},\"UPNMatch\",JoinKind.LeftOuter),\n ADExpandUPN=Table.ExpandTableColumn(ADJoinUPN,\"UPNMatch\",{\"CanonicalUserKey\"},{\"CanonicalByUPN\"}),\n ADWithMatchStatus=Table.AddColumn(ADExpandUPN,\"A_MatchStatus\",each if CandidateCount({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]})>1 then \"Conflicting exact identifiers\" else if FirstText({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]})<>null then \"Matched Entra\" else \"AD only\",type text),\n ADCanonical=Table.AddColumn(ADWithMatchStatus,\"CanonicalUserKey\",each FirstText({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN],if Norm([A_ObjectGUID])<>null then \"AD:\"&Norm([A_ObjectGUID]) else null}),type nullable text),\n ADPrepared=Table.Distinct(Table.SelectRows(Table.RemoveColumns(ADCanonical,{\"CanonicalByImmutable\",\"CanonicalBySID\",\"CanonicalByUPN\"}),each [CanonicalUserKey]<>null),{\"CanonicalUserKey\"}),\n ADObjectMap0=Table.AddColumn(Table.SelectColumns(ADPrepared,{\"A_ObjectGUID\",\"CanonicalUserKey\"}),\"A_ObjectKey\",each Norm([A_ObjectGUID]),type nullable text),\n ADObjectMap=Table.Distinct(Table.SelectRows(Table.RemoveColumns(ADObjectMap0,{\"A_ObjectGUID\"}),each [A_ObjectKey]<>null),{\"A_ObjectKey\"}),\n ADSmtpMap0=Table.AddColumn(Table.SelectColumns(ADPrepared,{\"A_PrimarySmtp\",\"CanonicalUserKey\"}),\"A_SmtpKey\",each Norm([A_PrimarySmtp]),type nullable text),\n ADSmtpMap=Table.Distinct(Table.SelectRows(Table.RemoveColumns(ADSmtpMap0,{\"A_PrimarySmtp\"}),each [A_SmtpKey]<>null),{\"A_SmtpKey\"}),\n OnPremCurrent=Table.SelectRows(#\"Exchange_OnPrem_Mailboxes_AllDomains\",each [__IsCurrent]=true),\n OnPremSelected=Table.SelectColumns(OnPremCurrent,{\"ObjectGUID\",\"DisplayName\",\"UserPrincipalName\",\"AccountDisabled\",\"IsShared\",\"IsResource\",\"RecipientType\",\"PrimarySMTPaddress\",\"ExchangeGuid\",\"LastLogonTime\",\"TotalItemSize-In-MB\",\"ItemCount\",\"ArchiveTotalItemSize-In-MB\"},MissingField.UseNull),\n OnPremRenamed=Table.RenameColumns(OnPremSelected,{{\"ObjectGUID\",\"O_ObjectGUID\"},{\"DisplayName\",\"O_DisplayName\"},{\"UserPrincipalName\",\"O_UPN\"},{\"AccountDisabled\",\"O_AccountDisabled\"},{\"IsShared\",\"O_IsShared\"},{\"IsResource\",\"O_IsResource\"},{\"RecipientType\",\"O_RecipientType\"},{\"PrimarySMTPaddress\",\"O_PrimarySmtp\"},{\"ExchangeGuid\",\"O_ExchangeGuid\"},{\"LastLogonTime\",\"O_LastLogon\"},{\"TotalItemSize-In-MB\",\"O_SizeMB\"},{\"ItemCount\",\"O_ItemCount\"},{\"ArchiveTotalItemSize-In-MB\",\"O_ArchiveSizeMB\"}}),\n OnPremKey1=Table.AddColumn(OnPremRenamed,\"O_ObjectKey\",each Norm([O_ObjectGUID]),type nullable text),\n OnPremKey2=Table.AddColumn(OnPremKey1,\"O_UPNKey\",each Norm([O_UPN]),type nullable text),\n OnPremKey3=Table.AddColumn(OnPremKey2,\"O_SmtpKey\",each Norm([O_PrimarySmtp]),type nullable text),\n OnPremJoinObject=Table.NestedJoin(OnPremKey3,{\"O_ObjectKey\"},ADObjectMap,{\"A_ObjectKey\"},\"ObjectMatch\",JoinKind.LeftOuter),\n OnPremExpandObject=Table.ExpandTableColumn(OnPremJoinObject,\"ObjectMatch\",{\"CanonicalUserKey\"},{\"CanonicalByADObject\"}),\n OnPremJoinUPN=Table.NestedJoin(OnPremExpandObject,{\"O_UPNKey\"},EntraUPNMap,{\"E_UPNKey\"},\"UPNMatch\",JoinKind.LeftOuter),\n OnPremExpandUPN=Table.ExpandTableColumn(OnPremJoinUPN,\"UPNMatch\",{\"CanonicalUserKey\"},{\"CanonicalByUPN\"}),\n OnPremJoinSmtp=Table.NestedJoin(OnPremExpandUPN,{\"O_SmtpKey\"},ADSmtpMap,{\"A_SmtpKey\"},\"SmtpMatch\",JoinKind.LeftOuter),\n OnPremExpandSmtp=Table.ExpandTableColumn(OnPremJoinSmtp,\"SmtpMatch\",{\"CanonicalUserKey\"},{\"CanonicalBySmtp\"}),\n OnPremWithMatchStatus=Table.AddColumn(OnPremExpandSmtp,\"O_MatchStatus\",each if CandidateCount({[CanonicalByADObject],[CanonicalByUPN],[CanonicalBySmtp]})>1 then \"Conflicting exact identifiers\" else if FirstText({[CanonicalByADObject],[CanonicalByUPN],[CanonicalBySmtp]})<>null then \"Matched identity\" else \"Mailbox only\",type text),\n OnPremCanonical=Table.AddColumn(OnPremWithMatchStatus,\"CanonicalUserKey\",each FirstText({[CanonicalByADObject],[CanonicalByUPN],[CanonicalBySmtp],if Norm([O_ObjectGUID])<>null then \"ONPREM:\"&Norm([O_ObjectGUID]) else if Norm([O_ExchangeGuid])<>null then \"ONPREMMAILBOX:\"&Norm([O_ExchangeGuid]) else null}),type nullable text),\n OnPremPrepared=Table.Distinct(Table.SelectRows(Table.RemoveColumns(OnPremCanonical,{\"CanonicalByADObject\",\"CanonicalByUPN\",\"CanonicalBySmtp\"}),each [CanonicalUserKey]<>null),{\"CanonicalUserKey\"}),\n EXOCurrent=Table.SelectRows(#\"Exchange_EXO_Mailboxes_AllDomains\",each [__IsCurrent]=true),\n EXOSelected=Table.SelectColumns(EXOCurrent,{\"DisplayName\",\"UserPrincipalName\",\"PrimarySmtpAddress\",\"RecipientTypeDetails\",\"MailboxType\",\"MailboxGuid\",\"AccountEnabled\",\"IsDirSynced\",\"LastUserActionTime\",\"LastLogonTime\",\"TotalItemSizeGB\",\"ItemCount\",\"ArchiveStatus\",\"ExternalDirectoryObjectId\",\"OnPremisesImmutableId\"},MissingField.UseNull),\n EXORenamed=Table.RenameColumns(EXOSelected,{{\"DisplayName\",\"X_DisplayName\"},{\"UserPrincipalName\",\"X_UPN\"},{\"PrimarySmtpAddress\",\"X_PrimarySmtp\"},{\"RecipientTypeDetails\",\"X_RecipientTypeDetails\"},{\"MailboxType\",\"X_MailboxType\"},{\"MailboxGuid\",\"X_MailboxGuid\"},{\"AccountEnabled\",\"X_AccountEnabled\"},{\"IsDirSynced\",\"X_IsDirSynced\"},{\"LastUserActionTime\",\"X_LastUserAction\"},{\"LastLogonTime\",\"X_LastLogon\"},{\"TotalItemSizeGB\",\"X_SizeGB\"},{\"ItemCount\",\"X_ItemCount\"},{\"ArchiveStatus\",\"X_ArchiveStatus\"},{\"ExternalDirectoryObjectId\",\"X_ExternalDirectoryObjectId\"},{\"OnPremisesImmutableId\",\"X_ImmutableId\"}}),\n EXOKey1=Table.AddColumn(EXORenamed,\"X_ObjectKey\",each Norm([X_ExternalDirectoryObjectId]),type nullable text),\n EXOKey2=Table.AddColumn(EXOKey1,\"X_ImmutableKey\",each Norm([X_ImmutableId]),type nullable text),\n EXOKey3=Table.AddColumn(EXOKey2,\"X_UPNKey\",each Norm([X_UPN]),type nullable text),\n EXOKey4=Table.AddColumn(EXOKey3,\"X_SmtpKey\",each Norm([X_PrimarySmtp]),type nullable text),\n EXOJoinObject=Table.NestedJoin(EXOKey4,{\"X_ObjectKey\"},EntraObjectMap,{\"E_ObjectKey\"},\"ObjectMatch\",JoinKind.LeftOuter),\n EXOExpandObject=Table.ExpandTableColumn(EXOJoinObject,\"ObjectMatch\",{\"CanonicalUserKey\"},{\"CanonicalByEntraObject\"}),\n EXOJoinImmutable=Table.NestedJoin(EXOExpandObject,{\"X_ImmutableKey\"},EntraImmutableMap,{\"E_ImmutableKey\"},\"ImmutableMatch\",JoinKind.LeftOuter),\n EXOExpandImmutable=Table.ExpandTableColumn(EXOJoinImmutable,\"ImmutableMatch\",{\"CanonicalUserKey\"},{\"CanonicalByImmutable\"}),\n EXOJoinUPN=Table.NestedJoin(EXOExpandImmutable,{\"X_UPNKey\"},EntraUPNMap,{\"E_UPNKey\"},\"UPNMatch\",JoinKind.LeftOuter),\n EXOExpandUPN=Table.ExpandTableColumn(EXOJoinUPN,\"UPNMatch\",{\"CanonicalUserKey\"},{\"CanonicalByUPN\"}),\n EXOJoinSmtp=Table.NestedJoin(EXOExpandUPN,{\"X_SmtpKey\"},ADSmtpMap,{\"A_SmtpKey\"},\"SmtpMatch\",JoinKind.LeftOuter),\n EXOExpandSmtp=Table.ExpandTableColumn(EXOJoinSmtp,\"SmtpMatch\",{\"CanonicalUserKey\"},{\"CanonicalBySmtp\"}),\n EXOWithMatchStatus=Table.AddColumn(EXOExpandSmtp,\"X_MatchStatus\",each if CandidateCount({[CanonicalByEntraObject],[CanonicalByImmutable],[CanonicalByUPN],[CanonicalBySmtp]})>1 then \"Conflicting exact identifiers\" else if FirstText({[CanonicalByEntraObject],[CanonicalByImmutable],[CanonicalByUPN],[CanonicalBySmtp]})<>null then \"Matched identity\" else \"Mailbox only\",type text),\n EXOCanonical=Table.AddColumn(EXOWithMatchStatus,\"CanonicalUserKey\",each FirstText({[CanonicalByEntraObject],[CanonicalByImmutable],[CanonicalByUPN],[CanonicalBySmtp],if Norm([X_MailboxGuid])<>null then \"EXO:\"&Norm([X_MailboxGuid]) else null}),type nullable text),\n EXOPrepared=Table.Distinct(Table.SelectRows(Table.RemoveColumns(EXOCanonical,{\"CanonicalByEntraObject\",\"CanonicalByImmutable\",\"CanonicalByUPN\",\"CanonicalBySmtp\"}),each [CanonicalUserKey]<>null),{\"CanonicalUserKey\"}),\n Keys=Table.Distinct(Table.Combine({Table.SelectColumns(ADPrepared,{\"CanonicalUserKey\"}),Table.SelectColumns(EntraPrepared,{\"CanonicalUserKey\"}),Table.SelectColumns(OnPremPrepared,{\"CanonicalUserKey\"}),Table.SelectColumns(EXOPrepared,{\"CanonicalUserKey\"})}),{\"CanonicalUserKey\"}),\n JoinAD=Table.NestedJoin(Keys,{\"CanonicalUserKey\"},ADPrepared,{\"CanonicalUserKey\"},\"AD\",JoinKind.LeftOuter),\n ExpandAD=Table.ExpandTableColumn(JoinAD,\"AD\",{\"A_ObjectGUID\",\"A_DomainName\",\"A_UPN\",\"A_Enabled\",\"A_DisplayName\",\"A_GivenName\",\"A_Surname\",\"A_Department\",\"A_Title\",\"A_Company\",\"A_Office\",\"A_Manager\",\"A_Country\",\"A_CountryName\",\"A_City\",\"A_OrganizationalUnit\",\"A_SiteType\",\"A_IntegrationType\",\"A_IsLikelyServiceAccount\",\"A_AccountType\",\"A_M365LicenseName\",\"A_M365LicenseType\",\"A_ActivityCategory\",\"A_LastLogon\",\"A_ResolvedLastActivity\",\"A_PrimarySmtp\",\"A_MailboxSource\",\"A_HasMailbox\",\"A_HasRemoteMailbox\",\"A_MatchStatus\"}),\n JoinEntra=Table.NestedJoin(ExpandAD,{\"CanonicalUserKey\"},EntraPrepared,{\"CanonicalUserKey\"},\"Entra\",JoinKind.LeftOuter),\n ExpandEntra=Table.ExpandTableColumn(JoinEntra,\"Entra\",{\"E_ObjectId\",\"E_UPN\",\"E_DisplayName\",\"E_FirstName\",\"E_LastName\",\"E_Title\",\"E_Department\",\"E_City\",\"E_Country\",\"E_Office\",\"E_State\",\"E_UsageLocation\",\"E_BlockCredential\",\"E_Licenses\",\"E_DirSyncEnabled\",\"E_OnPremisesSyncEnabled\",\"E_AccountEnabled\",\"E_UserType\",\"E_LastSignIn\",\"E_LastNonInteractiveSignIn\"}),\n JoinOnPrem=Table.NestedJoin(ExpandEntra,{\"CanonicalUserKey\"},OnPremPrepared,{\"CanonicalUserKey\"},\"OnPrem\",JoinKind.LeftOuter),\n ExpandOnPrem=Table.ExpandTableColumn(JoinOnPrem,\"OnPrem\",{\"O_ObjectGUID\",\"O_DisplayName\",\"O_UPN\",\"O_AccountDisabled\",\"O_IsShared\",\"O_IsResource\",\"O_RecipientType\",\"O_PrimarySmtp\",\"O_ExchangeGuid\",\"O_LastLogon\",\"O_SizeMB\",\"O_ItemCount\",\"O_ArchiveSizeMB\",\"O_MatchStatus\"}),\n JoinEXO=Table.NestedJoin(ExpandOnPrem,{\"CanonicalUserKey\"},EXOPrepared,{\"CanonicalUserKey\"},\"EXO\",JoinKind.LeftOuter),\n ExpandEXO=Table.ExpandTableColumn(JoinEXO,\"EXO\",{\"X_DisplayName\",\"X_UPN\",\"X_PrimarySmtp\",\"X_RecipientTypeDetails\",\"X_MailboxType\",\"X_MailboxGuid\",\"X_AccountEnabled\",\"X_IsDirSynced\",\"X_LastUserAction\",\"X_LastLogon\",\"X_SizeGB\",\"X_ItemCount\",\"X_ArchiveStatus\",\"X_ExternalDirectoryObjectId\",\"X_MatchStatus\"}),\n WithInAD=Table.AddColumn(ExpandEXO,\"InAD\",each [A_ObjectGUID]<>null,type logical),\n WithInEntra=Table.AddColumn(WithInAD,\"InEntra\",each [E_ObjectId]<>null,type logical),\n WithInOnPrem=Table.AddColumn(WithInEntra,\"InExchangeOnPrem\",each [O_ExchangeGuid]<>null,type logical),\n WithInEXO=Table.AddColumn(WithInOnPrem,\"InExchangeOnline\",each [X_MailboxGuid]<>null,type logical),\n WithCoverage=Table.AddColumn(WithInEXO,\"SourceCoverage\",each Text.Combine(List.RemoveNulls({if [InAD] then \"AD\" else null,if [InEntra] then \"Entra\" else null,if [InExchangeOnPrem] then \"Exchange On-prem\" else null,if [InExchangeOnline] then \"Exchange Online\" else null}),\" + \"),type text),\n WithMatchStatus=Table.AddColumn(WithCoverage,\"IdentityMatchStatus\",each if List.Contains({[A_MatchStatus],[O_MatchStatus],[X_MatchStatus]},\"Conflicting exact identifiers\") then \"Conflicting exact identifiers\" else if [InAD] and [InEntra] then \"AD and Entra matched\" else if [InEntra] then \"Cloud-only Entra\" else if [InAD] then \"AD-only identity\" else \"Mailbox-only identity\",type text),\n WithHybridType=Table.AddColumn(WithMatchStatus,\"HybridIdentityType\",each if [InAD] and [InEntra] then \"Hybrid\" else if [InEntra] then \"Cloud only\" else if [InAD] then \"AD only\" else \"Mailbox only\",type text),\n WithDisplayName=Table.AddColumn(WithHybridType,\"DisplayName\",each FirstText({[E_DisplayName],[A_DisplayName],[X_DisplayName],[O_DisplayName]}),type nullable text),\n WithUPN=Table.AddColumn(WithDisplayName,\"UserPrincipalName\",each FirstText({[E_UPN],[A_UPN],[X_UPN],[O_UPN]}),type nullable text),\n WithSmtp=Table.AddColumn(WithUPN,\"PrimarySmtpAddress\",each FirstText({[X_PrimarySmtp],[A_PrimarySmtp],[O_PrimarySmtp]}),type nullable text),\n WithCountry=Table.AddColumn(WithSmtp,\"Country\",each let c=FirstText({[E_Country],[A_CountryName],[A_Country],[E_UsageLocation]}) in if c=null then \"Unknown\" else c,type text),\n WithDepartment=Table.AddColumn(WithCountry,\"Department\",each FirstText({[E_Department],[A_Department]}),type nullable text),\n WithTitle=Table.AddColumn(WithDepartment,\"Title\",each FirstText({[E_Title],[A_Title]}),type nullable text),\n WithCompany=Table.AddColumn(WithTitle,\"Company\",each CleanText([A_Company]),type nullable text),\n WithOffice=Table.AddColumn(WithCompany,\"Office\",each FirstText({[E_Office],[A_Office]}),type nullable text),\n WithManager=Table.AddColumn(WithOffice,\"Manager\",each CleanText([A_Manager]),type nullable text),\n WithADObject=Table.AddColumn(WithManager,\"ADObjectGUID\",each CleanText([A_ObjectGUID]),type nullable text),\n WithEntraObject=Table.AddColumn(WithADObject,\"EntraObjectId\",each FirstText({[E_ObjectId],[X_ExternalDirectoryObjectId]}),type nullable text),\n WithOnPremGuid=Table.AddColumn(WithEntraObject,\"OnPremExchangeGuid\",each CleanText([O_ExchangeGuid]),type nullable text),\n WithEXOGuid=Table.AddColumn(WithOnPremGuid,\"EXOMailboxGuid\",each CleanText([X_MailboxGuid]),type nullable text),\n WithADDomain=Table.AddColumn(WithEXOGuid,\"ADDomain\",each CleanText([A_DomainName]),type nullable text),\n WithADOU=Table.AddColumn(WithADDomain,\"ADOrganizationalUnit\",each CleanText([A_OrganizationalUnit]),type nullable text),\n WithADEnabled=Table.AddColumn(WithADOU,\"ADAccountEnabled\",each fnToLogical([A_Enabled]),type nullable logical),\n WithEntraEnabled=Table.AddColumn(WithADEnabled,\"EntraAccountEnabled\",each fnToLogical([E_AccountEnabled]),type nullable logical),\n WithIsEnabled=Table.AddColumn(WithEntraEnabled,\"IsEnabled\",each if [InEntra] then [EntraAccountEnabled] else if [InAD] then [ADAccountEnabled] else fnToLogical([X_AccountEnabled]),type nullable logical),\n WithAccountStatus=Table.AddColumn(WithIsEnabled,\"AccountStatus\",each if [InAD] and [InEntra] and [ADAccountEnabled]<>null and [EntraAccountEnabled]<>null and [ADAccountEnabled]<>[EntraAccountEnabled] then \"Conflict\" else if [IsEnabled]=true then \"Enabled\" else if [IsEnabled]=false then \"Disabled\" else \"Unknown\",type text),\n WithUserType=Table.AddColumn(WithAccountStatus,\"UserType\",each let v=FirstText({[E_UserType],[A_AccountType]}) in if v=null then \"Unknown\" else v,type text),\n WithDirSync=Table.AddColumn(WithUserType,\"DirSyncEnabled\",each fnToLogical([E_DirSyncEnabled]),type nullable logical),\n WithOnPremSync=Table.AddColumn(WithDirSync,\"OnPremisesSyncEnabled\",each fnToLogical([E_OnPremisesSyncEnabled]),type nullable logical),\n WithServiceAccount=Table.AddColumn(WithOnPremSync,\"IsLikelyServiceAccount\",each fnToLogical([A_IsLikelyServiceAccount]),type nullable logical),\n WithLicense=Table.AddColumn(WithServiceAccount,\"LicenseSummary\",each let v=FirstText({[A_M365LicenseName],[A_M365LicenseType],[E_Licenses]}) in if v=null then \"Unlicensed / not identified\" else v,type text),\n WithPlacement=Table.AddColumn(WithLicense,\"MailboxPlacement\",each if [InExchangeOnPrem] and [InExchangeOnline] then \"On-premises + Online\" else if [InExchangeOnline] then \"Exchange Online\" else if [InExchangeOnPrem] then \"Exchange On-premises\" else \"No mailbox\",type text),\n WithEXOType=Table.AddColumn(WithPlacement,\"EXOMailboxType\",each FirstText({[X_MailboxType],[X_RecipientTypeDetails]}),type nullable text),\n WithOnPremType=Table.AddColumn(WithEXOType,\"OnPremMailboxType\",each CleanText([O_RecipientType]),type nullable text),\n WithEXOSize=Table.AddColumn(WithOnPremType,\"EXOMailboxSizeGB\",each fnToNumber([X_SizeGB]),type nullable number),\n WithOnPremSize=Table.AddColumn(WithEXOSize,\"OnPremMailboxSizeGB\",each let n=fnToNumber([O_SizeMB]) in if n=null then null else n/1024,type nullable number),\n WithTotalSize=Table.AddColumn(WithOnPremSize,\"TotalMailboxSizeGB\",each List.Sum(List.RemoveNulls({[EXOMailboxSizeGB],[OnPremMailboxSizeGB]})),type number),\n WithArchiveSize=Table.AddColumn(WithTotalSize,\"ArchiveMailboxSizeGB\",each let n=fnToNumber([O_ArchiveSizeMB]) in if n=null then null else n/1024,type nullable number),\n WithItemCount=Table.AddColumn(WithArchiveSize,\"MailboxItemCount\",each let values=List.RemoveNulls({fnToInt64([X_ItemCount]),fnToInt64([O_ItemCount])}) in if List.Count(values)=0 then null else List.Sum(values),Int64.Type),\n WithADLastLogon=Table.AddColumn(WithItemCount,\"ADLastLogonDateTime\",each MaxDate({[A_ResolvedLastActivity],[A_LastLogon]}),type nullable datetime),\n WithEntraLastSignIn=Table.AddColumn(WithADLastLogon,\"EntraLastSignInDateTime\",each MaxDate({[E_LastSignIn],[E_LastNonInteractiveSignIn]}),type nullable datetime),\n WithEXOLastAction=Table.AddColumn(WithEntraLastSignIn,\"EXOLastUserActionDateTime\",each MaxDate({[X_LastUserAction],[X_LastLogon]}),type nullable datetime),\n WithOnPremLastLogon=Table.AddColumn(WithEXOLastAction,\"OnPremLastLogonDateTime\",each fnToDateTime([O_LastLogon]),type nullable datetime),\n WithLastActivity=Table.AddColumn(WithOnPremLastLogon,\"LastActivityDateTime\",each MaxDate({[ADLastLogonDateTime],[EntraLastSignInDateTime],[EXOLastUserActionDateTime],[OnPremLastLogonDateTime]}),type nullable datetime),\n WithDays=Table.AddColumn(WithLastActivity,\"DaysSinceLastActivity\",each if [LastActivityDateTime]=null then null else Duration.Days(DateTime.LocalNow()-[LastActivityDateTime]),Int64.Type),\n WithActivity=Table.AddColumn(WithDays,\"ActivityBucket\",each if [DaysSinceLastActivity]=null then \"Unknown\" else if [DaysSinceLastActivity]<=30 then \"Active <= 30d\" else if [DaysSinceLastActivity]<=90 then \"Inactive 31-90d\" else \"Inactive > 90d\",type text),\n WithSeverity=Table.AddColumn(WithActivity,\"ActionSeverity\",each if [IdentityMatchStatus]=\"Conflicting exact identifiers\" or [AccountStatus]=\"Conflict\" then \"Critical\" else if ([IsEnabled]=true and [DaysSinceLastActivity]<>null and [DaysSinceLastActivity]>90) or ([InAD] and not [InEntra]) or ([InExchangeOnPrem] and [InExchangeOnline]) or (not [InAD] and not [InEntra]) then \"Warning\" else \"Healthy\",type text),\n WithPriority=Table.AddColumn(WithSeverity,\"ActionPriority\",each if [ActionSeverity]=\"Critical\" then 1 else if [ActionSeverity]=\"Warning\" then 2 else 3,Int64.Type),\n WithActionRequired=Table.AddColumn(WithPriority,\"ActionRequired\",each [ActionSeverity]<>\"Healthy\",type logical),\n WithRecommendedAction=Table.AddColumn(WithActionRequired,\"RecommendedAction\",each if [IdentityMatchStatus]=\"Conflicting exact identifiers\" then \"Resolve conflicting immutable ID, SID or UPN mapping\" else if [AccountStatus]=\"Conflict\" then \"Reconcile AD and Entra account status\" else if [IsEnabled]=true and [DaysSinceLastActivity]<>null and [DaysSinceLastActivity]>90 then \"Review enabled inactive account\" else if [InAD] and not [InEntra] then \"Investigate AD identity missing from Entra\" else if [InExchangeOnPrem] and [InExchangeOnline] then \"Validate coexistence or migration mailbox placement\" else if not [InAD] and not [InEntra] then \"Investigate mailbox without identity inventory\" else \"No immediate action\",type text),\n Result=Table.SelectColumns(WithRecommendedAction,{\"CanonicalUserKey\",\"DisplayName\",\"UserPrincipalName\",\"PrimarySmtpAddress\",\"Country\",\"Department\",\"Title\",\"Company\",\"Office\",\"Manager\",\"SourceCoverage\",\"IdentityMatchStatus\",\"HybridIdentityType\",\"InAD\",\"InEntra\",\"InExchangeOnPrem\",\"InExchangeOnline\",\"ADObjectGUID\",\"EntraObjectId\",\"OnPremExchangeGuid\",\"EXOMailboxGuid\",\"ADDomain\",\"ADOrganizationalUnit\",\"ADAccountEnabled\",\"EntraAccountEnabled\",\"IsEnabled\",\"AccountStatus\",\"UserType\",\"DirSyncEnabled\",\"OnPremisesSyncEnabled\",\"IsLikelyServiceAccount\",\"LicenseSummary\",\"MailboxPlacement\",\"EXOMailboxType\",\"OnPremMailboxType\",\"EXOMailboxSizeGB\",\"OnPremMailboxSizeGB\",\"TotalMailboxSizeGB\",\"ArchiveMailboxSizeGB\",\"MailboxItemCount\",\"ADLastLogonDateTime\",\"EntraLastSignInDateTime\",\"EXOLastUserActionDateTime\",\"OnPremLastLogonDateTime\",\"LastActivityDateTime\",\"DaysSinceLastActivity\",\"ActivityBucket\",\"ActionSeverity\",\"ActionPriority\",\"ActionRequired\",\"RecommendedAction\"})\nin Result"
+            }
+          }
+        ],
+        "annotations": [
+          {
+            "name": "SmartWorkplaceDashboard.TableKind",
+            "value": "Derived operational view"
+          }
+        ]
       }
     ],
     "relationships": [
@@ -17072,12 +17926,103 @@
         "fromColumn": "__TenantAppKey",
         "toTable": "Intune_DiscoveredApps_Summary",
         "toColumn": "__TenantAppKey"
+      },
+      {
+        "name": "rel_UserActivity_Users",
+        "fromTable": "M365_Users_Activity",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_IntuneInventory_Users",
+        "fromTable": "Intune_Devices_Inventory",
+        "fromColumn": "Primary user UPN",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_LocalSystem_Users",
+        "fromTable": "Intune_Devices_LocalSystem",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_WindowsUpdate_Users",
+        "fromTable": "Intune_WindowsUpdate_Status",
+        "fromColumn": "UPN",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_EXO_Users",
+        "fromTable": "Exchange_EXO_Mailboxes_AllDomains",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_OnPremMailboxes_Users",
+        "fromTable": "Exchange_OnPrem_Mailboxes_AllDomains",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_TeamsActivity_Users",
+        "fromTable": "M365_Teams_UserActivity",
+        "fromColumn": "User Principal Name",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_TeamsGuests_Users",
+        "fromTable": "M365_Teams_Guests",
+        "fromColumn": "UserId",
+        "toTable": "M365_Users_Active",
+        "toColumn": "Object Id"
+      },
+      {
+        "name": "rel_MailboxUsage_Users",
+        "fromTable": "M365_Mailbox_Usage",
+        "fromColumn": "User Principal Name",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_CopilotUsage_Users",
+        "fromTable": "M365_Copilot_UserUsage",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_BackupProtected_Users",
+        "fromTable": "M365_Backup_ProtectedMailboxes",
+        "fromColumn": "UserPrincipalName",
+        "toTable": "M365_Users_Active",
+        "toColumn": "User principal name"
+      },
+      {
+        "name": "rel_BackupScope_Users",
+        "fromTable": "M365_BackupPolicyScope_MailboxCoverage",
+        "fromColumn": "MemberId",
+        "toTable": "M365_Users_Active",
+        "toColumn": "Object Id"
+      },
+      {
+        "name": "rel_HybridIssues_Users",
+        "fromTable": "Exchange_HybridIdentity_Issues",
+        "fromColumn": "ObjectGUID",
+        "toTable": "M365_Users_Active",
+        "toColumn": "Object Id"
       }
     ],
     "annotations": [
       {
         "name": "SmartWorkplaceDashboard.SourcePolicy",
-        "value": "Each visible source table keeps the SmartInventory CSV basename. Only validated one-to-many relationships are added."
+        "value": "Each visible source table keeps the SmartInventory CSV basename. Derived detail views use exact identifiers and preserve unmatched entities. Only validated one-to-many relationships are added."
       },
       {
         "name": "__PBI_TimeIntelligenceEnabled",

@@ -23,11 +23,11 @@
                       "Entity": "Intune_Devices_Inventory"
                     }
                   },
-                  "Property": "OS"
+                  "Property": "WindowsVersionFamily"
                 }
               },
-              "queryRef": "Intune_Devices_Inventory.OS",
-              "nativeQueryRef": "OS",
+              "queryRef": "Intune_Devices_Inventory.WindowsVersionFamily",
+              "nativeQueryRef": "WindowsVersionFamily",
               "active": true
             }
           ]
@@ -137,7 +137,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed devices by operating system'"
+                  "Value": "'Managed devices by Windows version'"
                 }
               }
             },

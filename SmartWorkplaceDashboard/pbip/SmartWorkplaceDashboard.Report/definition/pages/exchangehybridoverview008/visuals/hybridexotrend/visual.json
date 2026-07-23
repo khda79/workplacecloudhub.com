@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "hybridexotrend",
   "position": {
-    "x": 832,
+    "x": 956,
     "y": 480,
-    "width": 424,
-    "height": 170,
+    "width": 300,
+    "height": 200,
     "z": 10000,
     "tabOrder": 10000
   },
