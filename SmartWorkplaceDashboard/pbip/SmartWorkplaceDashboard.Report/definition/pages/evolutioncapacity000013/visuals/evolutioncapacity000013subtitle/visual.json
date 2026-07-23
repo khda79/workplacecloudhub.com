@@ -4,7 +4,7 @@
   "position": {
     "x": 24,
     "y": 56,
-    "width": 1080,
+    "width": 900,
     "height": 28,
     "z": 2000,
     "tabOrder": 2000
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Native daily series plus deduplicated weekly SmartInventory snapshots",
+                    "value": "Native operational series plus deduplicated weekly SmartInventory snapshots",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

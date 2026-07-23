@@ -3,7 +3,7 @@
   "name": "overviewnote",
   "position": {
     "x": 24,
-    "y": 640,
+    "y": 674,
     "width": 1220,
     "height": 34,
     "z": 10000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Latest-state KPIs use DATA-LAST. Trend pages use native daily statistics and deduplicated weekly SmartInventory snapshots.",
+                    "value": "Licensing is separated into Microsoft 365 E3, E5 and F3. User, device and mailbox trends use weekly snapshots. Country filters user-linked data; tenant-level capacities remain global.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

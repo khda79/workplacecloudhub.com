@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Stale Devices 30d",
+                    "value": "Device Compliance Rate",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "upgradecardskpi3label",
   "position": {
-    "x": 654,
-    "y": 184,
-    "width": 282,
+    "x": 1067.3333333333333,
+    "y": 101,
+    "width": 178.66666666666666,
     "height": 30,
     "z": 4005,
     "tabOrder": 4005
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Upgraded Devices",
+                    "value": "BIOS Older Than 5 Years Devices",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",
