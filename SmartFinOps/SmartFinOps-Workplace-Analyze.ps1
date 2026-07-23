@@ -8,7 +8,7 @@ and a standalone HTML report. The script is read-only and does not connect to Mi
 Graph, Azure, Citrix, or Azure Virtual Desktop.
 
 .NOTES
-Version: 1.3
+Version: 1.4
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -401,7 +401,29 @@ try {
     }
 
     $now = Get-Date
-    $staleUserCutoff = $now.AddDays(-1 * [math]::Abs($StaleUserDays))
+    $m365DecisionSourceNames = @(
+        'M365 user activity',
+        'M365 mailbox usage',
+        'M365 OneDrive usage',
+        'M365 Apps activations',
+        'M365 Teams user activity',
+        'M365 email activity',
+        'M365 SharePoint user activity',
+        'M365 Teams device usage',
+        'M365 Copilot user usage',
+        'M365 Teams Phone user usage'
+    )
+    $m365ReportRefreshDates = @($dataQualityRows |
+        Where-Object { $_.SourceName -in $m365DecisionSourceNames -and $_.Status -eq 'Loaded' -and -not [string]::IsNullOrWhiteSpace([string](Get-RowPropertyValue -Row $_ -Names @('ReportRefreshDate'))) } |
+        ForEach-Object { ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $_ -Names @('ReportRefreshDate')) } |
+        Where-Object { $null -ne $_ })
+    $m365EvidenceAsOfDate = if ($m365ReportRefreshDates.Count -gt 0) {
+        [datetime]($m365ReportRefreshDates | Sort-Object | Select-Object -First 1)
+    }
+    else { $now }
+    $technicalEvidenceAsOfDate = $now
+    $staleUserCutoff = $m365EvidenceAsOfDate.AddDays(-1 * [math]::Abs($StaleUserDays))
+    $technicalUserCutoff = $technicalEvidenceAsOfDate.AddDays(-1 * [math]::Abs($StaleUserDays))
     $staleDeviceCutoff = $now.AddDays(-1 * [math]::Abs($StaleDeviceDays))
     $priceModel = Get-PriceModel
     $currency = if ($priceModel -and $priceModel.PSObject.Properties['Currency']) { [string]$priceModel.Currency } else { '' }
@@ -489,7 +511,8 @@ try {
         -CopilotUsageRows $m365CopilotUserUsage `
         -TeamsPhoneUsageRows $m365TeamsPhoneUserUsage `
         -IntuneDeviceRows $intuneDevices `
-        -RecentCutoff $staleUserCutoff
+        -M365RecentCutoff $staleUserCutoff `
+        -TechnicalRecentCutoff $technicalUserCutoff
     Write-SmartFinOpsLog -Message ("Built consolidated activity evidence for {0} user(s)." -f $userEvidenceMap.Count)
     $uniqueLicensedUserKeys = New-Object System.Collections.Generic.HashSet[string]
     foreach ($licenseRow in $m365LicenseUsers) {
@@ -559,7 +582,10 @@ try {
         -M365Users $m365Users `
         -ADUsers $adUsers `
         -EvidenceMap $userEvidenceMap `
-        -RecentCutoff $staleUserCutoff `
+        -M365RecentCutoff $staleUserCutoff `
+        -TechnicalRecentCutoff $technicalUserCutoff `
+        -M365EvidenceAsOfDate $m365EvidenceAsOfDate `
+        -TechnicalEvidenceAsOfDate $technicalEvidenceAsOfDate `
         -PriceModel $priceModel
     Write-SmartFinOpsLog -Message ("Built {0} user license decision(s)." -f $userLicenseDecisionRows.Count)
 
@@ -666,22 +692,28 @@ try {
         )) | Out-Null
     }
 
-    $unusedE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.IsUnusedE3F3License -eq $true })
-    $possiblyUnusedE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.IsPossiblyUnusedE3F3License -eq $true })
-    $unusedOrPossiblyUnusedE3F3Rows = @($unusedE3F3Rows + $possiblyUnusedE3F3Rows)
-    $e3WithoutObservedE3CapabilitiesRows = @($userLicenseDecisionRows | Where-Object { $_.IsE3WithoutObservedE3Capabilities -eq $true })
+    $noObservedActivityE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.HasNoObservedActivityE3F3 -eq $true })
+    $technicalOnlyE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.HasTechnicalPresenceWithoutM365ActivityE3F3 -eq $true })
+    $dormantTelemetryE3F3Rows = @($noObservedActivityE3F3Rows + $technicalOnlyE3F3Rows)
+    $e3Below100GBWithoutDesktopActivationRows = @($userLicenseDecisionRows | Where-Object { $_.IsE3Below100GBWithoutDesktopActivation -eq $true })
+    $dormantNamedAccountRows = @($dormantTelemetryE3F3Rows | Where-Object { $_.AccountType -eq 'Named Account' })
+    $dormantSpecialAccountRows = @($dormantTelemetryE3F3Rows | Where-Object { $_.AccountType -match 'Service Account|Generic Account|Admin Account|System Account' })
+    $dormantOtherAccountCount = $dormantTelemetryE3F3Rows.Count - $dormantNamedAccountRows.Count - $dormantSpecialAccountRows.Count
 
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unique licensed users' -Value $uniqueLicensedUserKeys.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License optimization findings' -Value $licenseOptimizationRows.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'User license decisions' -Value $userLicenseDecisionRows.Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused E3 or F3 licenses' -Value $unusedE3F3Rows.Count -Interpretation "No M365 service activity, Entra/AD sign-in, or recent Intune device presence was observed within $StaleUserDays days. Mailbox size and mailbox measurement availability do not affect this signal.")) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused E3 licenses' -Value @($unusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused F3 licenses' -Value @($unusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused E3 or F3 licenses' -Value $possiblyUnusedE3F3Rows.Count -Interpretation 'Recent technical presence was observed, but no recent M365 service activity was found and the measured mailbox is at or below 100 MB. Directional review indicator only.')) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused E3 licenses' -Value @($possiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused F3 licenses' -Value @($possiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused or possibly unused E3 or F3 licenses' -Value $unusedOrPossiblyUnusedE3F3Rows.Count -Interpretation 'Combined directional population. Unused and possibly unused categories are mutually exclusive.')) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 licenses without observed E3 capability usage' -Value $e3WithoutObservedE3CapabilitiesRows.Count -Interpretation 'E3 with measured mailbox storage below 100 GB and no observed Microsoft 365 Apps desktop activation. This does not prove Frontline eligibility or justify an automatic downgrade.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'M365 evidence as-of date' -Value $m365EvidenceAsOfDate.ToString('yyyy-MM-dd') -Unit 'date' -Interpretation 'Oldest Report Refresh Date across loaded M365 decision sources; used as the end of the M365 inactivity window.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Technical evidence as-of date' -Value $technicalEvidenceAsOfDate.ToString('yyyy-MM-dd') -Unit 'date' -Interpretation 'Analysis date used for Entra, AD, and Intune technical-presence signals.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No observed activity E3 or F3 signals' -Value $noObservedActivityE3F3Rows.Count -Interpretation "No M365 service activity as of $($m365EvidenceAsOfDate.ToString('yyyy-MM-dd')) and no Entra/AD sign-in or recent Intune device presence as of $($technicalEvidenceAsOfDate.ToString('yyyy-MM-dd')) within $StaleUserDays days. This is a telemetry signal, not a removable-license count.")) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No observed activity E3 signals' -Value @($noObservedActivityE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No observed activity F3 signals' -Value @($noObservedActivityE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Technical presence without M365 activity signals' -Value $technicalOnlyE3F3Rows.Count -Interpretation 'Recent technical presence exists, but no M365 service usage was observed and the measured mailbox is at or below 100 MB. Review-only telemetry.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Dormant license telemetry signals' -Value $dormantTelemetryE3F3Rows.Count -Interpretation 'Combined directional population; never treated as a financial opportunity without an approved persona-led decision.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Dormant named-account signals' -Value $dormantNamedAccountRows.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Dormant generic or special-account signals' -Value $dormantSpecialAccountRows.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Dormant other-account signals' -Value $dormantOtherAccountCount)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 below 100 GB without observed desktop activation - diagnostic only' -Value $e3Below100GBWithoutDesktopActivationRows.Count -Interpretation 'Descriptive telemetry only. It does not establish that E3 capabilities are unnecessary and is excluded from the executive banner and financial opportunities.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Recommended license decisions' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Recommended' }).Count -Interpretation 'Automatically classified from strong evidence; no action is executed by SmartFinOps.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Conditional license decisions' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Conditional' }).Count -Interpretation 'A prerequisite such as Frontline eligibility remains before execution.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License decisions requiring review' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Review' }).Count -Interpretation 'Available evidence is insufficient for a direct recommendation.')) | Out-Null
@@ -692,6 +724,7 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license high-confidence candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license review candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - review' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Active users conflicting with no-license persona' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Target persona conflict - active user review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Disabled no-license personas with active evidence' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Disabled no-license persona with active evidence - review' }).Count -Interpretation 'Excluded from high-confidence removal because recent M365 or technical evidence exists.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 to E3 capability reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 capability review' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 technical conflicts' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3 technical conflict - review' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Special-account license reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -match '^Separate review - (shared mailbox|special account)$' }).Count)) | Out-Null
@@ -792,7 +825,7 @@ try {
 
     $historyHtmlPath = Join-Path -Path $runOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
     $latestHtmlPath = Join-Path -Path $LatestOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
-    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -ExchangeRows $exchangeOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray() -ValueRows $valueOpportunityRows -PriceModel $priceModel -StaleUserDays $StaleUserDays
+    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -ExchangeRows $exchangeOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray() -ValueRows $valueOpportunityRows -PriceModel $priceModel -StaleUserDays $StaleUserDays -M365EvidenceAsOfDate $m365EvidenceAsOfDate -TechnicalEvidenceAsOfDate $technicalEvidenceAsOfDate
     Copy-Item -LiteralPath $historyHtmlPath -Destination $latestHtmlPath -Force
 
     Write-SmartFinOpsLog -Level SUCCESS -Message ("SmartFinOps Workplace analysis completed. Report={0}" -f $latestHtmlPath)
