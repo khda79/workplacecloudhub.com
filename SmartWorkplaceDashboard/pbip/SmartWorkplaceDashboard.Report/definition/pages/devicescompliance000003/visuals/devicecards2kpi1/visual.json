@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Stale Devices 30d"
+                  "Property": "Device Compliance Rate"
                 }
               },
-              "queryRef": "M365_Users_Active.Stale Devices 30d",
-              "nativeQueryRef": "Stale Devices 30d"
+              "queryRef": "M365_Users_Active.Device Compliance Rate",
+              "nativeQueryRef": "Device Compliance Rate"
             }
           ]
         }

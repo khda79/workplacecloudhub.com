@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "identitycardskpi2label",
   "position": {
-    "x": 340,
+    "x": 184,
     "y": 101,
-    "width": 278,
+    "width": 122,
     "height": 30,
     "z": 3003,
     "tabOrder": 3003

@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "upgradecardskpi2",
   "position": {
-    "x": 954,
+    "x": 850.6666666666666,
     "y": 96,
-    "width": 302,
+    "width": 198.66666666666666,
     "height": 75,
     "z": 4002,
     "tabOrder": 4002
@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Not Eligible Devices"
+                  "Property": "Hardware Refresh Candidate Rate"
                 }
               },
-              "queryRef": "M365_Users_Active.Not Eligible Devices",
-              "nativeQueryRef": "Not Eligible Devices"
+              "queryRef": "M365_Users_Active.Hardware Refresh Candidate Rate",
+              "nativeQueryRef": "Hardware Refresh Candidate Rate"
             }
           ]
         }

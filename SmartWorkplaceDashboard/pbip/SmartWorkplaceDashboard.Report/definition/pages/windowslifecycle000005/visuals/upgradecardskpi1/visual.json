@@ -4,7 +4,7 @@
   "position": {
     "x": 644,
     "y": 96,
-    "width": 302,
+    "width": 198.66666666666666,
     "height": 75,
     "z": 4000,
     "tabOrder": 4000
@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Eligible Devices"
+                  "Property": "Hardware Refresh Candidates"
                 }
               },
-              "queryRef": "M365_Users_Active.Eligible Devices",
-              "nativeQueryRef": "Eligible Devices"
+              "queryRef": "M365_Users_Active.Hardware Refresh Candidates",
+              "nativeQueryRef": "Hardware Refresh Candidates"
             }
           ]
         }

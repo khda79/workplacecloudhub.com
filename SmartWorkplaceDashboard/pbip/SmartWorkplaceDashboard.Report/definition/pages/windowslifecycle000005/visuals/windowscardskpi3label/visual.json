@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "windowscardskpi3label",
   "position": {
-    "x": 34,
-    "y": 184,
-    "width": 278,
+    "x": 442,
+    "y": 101,
+    "width": 176,
     "height": 30,
     "z": 3005,
     "tabOrder": 3005

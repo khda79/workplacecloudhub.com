@@ -4,7 +4,7 @@
   "position": {
     "x": 24,
     "y": 56,
-    "width": 1080,
+    "width": 900,
     "height": 28,
     "z": 2000,
     "tabOrder": 2000
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Current state, adoption, service risk and operating posture from SmartInventory",
+                    "value": "Executive view of workforce, endpoint, collaboration, licensing and estate movement",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

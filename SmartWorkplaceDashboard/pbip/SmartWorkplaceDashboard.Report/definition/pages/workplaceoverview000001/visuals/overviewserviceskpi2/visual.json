@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Teams"
+                  "Property": "On-prem Placement Rate"
                 }
               },
-              "queryRef": "M365_Users_Active.Teams",
-              "nativeQueryRef": "Teams"
+              "queryRef": "M365_Users_Active.On-prem Placement Rate",
+              "nativeQueryRef": "On-prem Placement Rate"
             }
           ]
         }

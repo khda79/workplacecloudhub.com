@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Teams",
+                    "value": "On-prem Placement Rate",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

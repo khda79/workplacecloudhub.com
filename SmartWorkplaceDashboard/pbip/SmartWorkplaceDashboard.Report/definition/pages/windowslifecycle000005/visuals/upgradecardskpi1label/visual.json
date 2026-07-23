@@ -4,7 +4,7 @@
   "position": {
     "x": 654,
     "y": 101,
-    "width": 282,
+    "width": 178.66666666666666,
     "height": 30,
     "z": 4001,
     "tabOrder": 4001
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Eligible Devices",
+                    "value": "Hardware Refresh Candidates",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

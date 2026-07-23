@@ -4,7 +4,7 @@
   "position": {
     "x": 24,
     "y": 14,
-    "width": 1080,
+    "width": 900,
     "height": 42,
     "z": 1000,
     "tabOrder": 1000
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Smart Workplace — Executive & Operations Overview",
+                    "value": "Smart Workplace — Executive Overview",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "26px",

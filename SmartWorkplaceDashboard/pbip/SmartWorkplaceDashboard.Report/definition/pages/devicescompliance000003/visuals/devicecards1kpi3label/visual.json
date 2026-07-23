@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Noncompliant Devices",
+                    "value": "AD Computer Objects",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

@@ -1,0 +1,604 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "userdetailtable",
+  "position": {
+    "x": 24,
+    "y": 364,
+    "width": 1232,
+    "height": 326,
+    "z": 6000,
+    "tabOrder": 6000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "DisplayName"
+                }
+              },
+              "queryRef": "UserDetail.DisplayName",
+              "nativeQueryRef": "DisplayName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "UserPrincipalName"
+                }
+              },
+              "queryRef": "UserDetail.UserPrincipalName",
+              "nativeQueryRef": "UserPrincipalName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "PrimarySmtpAddress"
+                }
+              },
+              "queryRef": "UserDetail.PrimarySmtpAddress",
+              "nativeQueryRef": "PrimarySmtpAddress"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "UserDetail.Country",
+              "nativeQueryRef": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "Department"
+                }
+              },
+              "queryRef": "UserDetail.Department",
+              "nativeQueryRef": "Department"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "Title"
+                }
+              },
+              "queryRef": "UserDetail.Title",
+              "nativeQueryRef": "Title"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "Company"
+                }
+              },
+              "queryRef": "UserDetail.Company",
+              "nativeQueryRef": "Company"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "SourceCoverage"
+                }
+              },
+              "queryRef": "UserDetail.SourceCoverage",
+              "nativeQueryRef": "SourceCoverage"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "IdentityMatchStatus"
+                }
+              },
+              "queryRef": "UserDetail.IdentityMatchStatus",
+              "nativeQueryRef": "IdentityMatchStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "AccountStatus"
+                }
+              },
+              "queryRef": "UserDetail.AccountStatus",
+              "nativeQueryRef": "AccountStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "UserType"
+                }
+              },
+              "queryRef": "UserDetail.UserType",
+              "nativeQueryRef": "UserType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "LicenseSummary"
+                }
+              },
+              "queryRef": "UserDetail.LicenseSummary",
+              "nativeQueryRef": "LicenseSummary"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "MailboxPlacement"
+                }
+              },
+              "queryRef": "UserDetail.MailboxPlacement",
+              "nativeQueryRef": "MailboxPlacement"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "EXOMailboxType"
+                }
+              },
+              "queryRef": "UserDetail.EXOMailboxType",
+              "nativeQueryRef": "EXOMailboxType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "OnPremMailboxType"
+                }
+              },
+              "queryRef": "UserDetail.OnPremMailboxType",
+              "nativeQueryRef": "OnPremMailboxType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "EXOMailboxSizeGB"
+                }
+              },
+              "queryRef": "UserDetail.EXOMailboxSizeGB",
+              "nativeQueryRef": "EXOMailboxSizeGB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "OnPremMailboxSizeGB"
+                }
+              },
+              "queryRef": "UserDetail.OnPremMailboxSizeGB",
+              "nativeQueryRef": "OnPremMailboxSizeGB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "LastActivityDateTime"
+                }
+              },
+              "queryRef": "UserDetail.LastActivityDateTime",
+              "nativeQueryRef": "LastActivityDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "DaysSinceLastActivity"
+                }
+              },
+              "queryRef": "UserDetail.DaysSinceLastActivity",
+              "nativeQueryRef": "DaysSinceLastActivity"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "ActivityBucket"
+                }
+              },
+              "queryRef": "UserDetail.ActivityBucket",
+              "nativeQueryRef": "ActivityBucket"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "ActionSeverity"
+                }
+              },
+              "queryRef": "UserDetail.ActionSeverity",
+              "nativeQueryRef": "ActionSeverity"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "UserDetail"
+                    }
+                  },
+                  "Property": "RecommendedAction"
+                }
+              },
+              "queryRef": "UserDetail.RecommendedAction",
+              "nativeQueryRef": "RecommendedAction"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "UserDetail"
+                  }
+                },
+                "Property": "ActionPriority"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#005A9E'"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F5F8FB'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "9D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Unified user inventory and operational actions'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "13D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#DDE7F0'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "6D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "6D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -23,11 +23,11 @@
                       "Entity": "AD_Users_DailyStats"
                     }
                   },
-                  "Property": "Date"
+                  "Property": "__WeekStart"
                 }
               },
-              "queryRef": "AD_Users_DailyStats.Date",
-              "nativeQueryRef": "Date",
+              "queryRef": "AD_Users_DailyStats.__WeekStart",
+              "nativeQueryRef": "__WeekStart",
               "active": true
             }
           ]
@@ -42,11 +42,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "AD Enabled Users Trend"
+                  "Property": "AD Enabled Users Weekly Snapshot"
                 }
               },
-              "queryRef": "M365_Users_Active.AD Enabled Users Trend",
-              "nativeQueryRef": "AD Enabled Users Trend"
+              "queryRef": "M365_Users_Active.AD Enabled Users Weekly Snapshot",
+              "nativeQueryRef": "AD Enabled Users Weekly Snapshot"
             }
           ]
         }
@@ -61,7 +61,7 @@
                     "Entity": "AD_Users_DailyStats"
                   }
                 },
-                "Property": "Date"
+                "Property": "__WeekStart"
               }
             },
             "direction": "Ascending"
@@ -116,7 +116,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Enabled AD users — daily'"
+                  "Value": "'Enabled users — weekly snapshots'"
                 }
               }
             },
