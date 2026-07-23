@@ -23,11 +23,11 @@
                       "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "Mailboxes"
+                  "Property": "Online Placement Rate"
                 }
               },
-              "queryRef": "M365_Users_Active.Mailboxes",
-              "nativeQueryRef": "Mailboxes"
+              "queryRef": "M365_Users_Active.Online Placement Rate",
+              "nativeQueryRef": "Online Placement Rate"
             }
           ]
         }

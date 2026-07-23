@@ -4,7 +4,7 @@
   "position": {
     "x": 24,
     "y": 500,
-    "width": 604,
+    "width": 786,
     "height": 220,
     "z": 8000,
     "tabOrder": 8000
@@ -20,84 +20,98 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Mailbox_Usage"
                     }
                   },
-                  "Property": "DisplayName"
+                  "Property": "Display Name"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.DisplayName",
-              "nativeQueryRef": "DisplayName"
+              "queryRef": "M365_Mailbox_Usage.Display Name",
+              "nativeQueryRef": "Display Name"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Mailbox_Usage"
                     }
                   },
-                  "Property": "PrimarySmtpAddress"
+                  "Property": "User Principal Name"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.PrimarySmtpAddress",
-              "nativeQueryRef": "PrimarySmtpAddress"
+              "queryRef": "M365_Mailbox_Usage.User Principal Name",
+              "nativeQueryRef": "User Principal Name"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Mailbox_Usage"
                     }
                   },
-                  "Property": "MailboxType"
+                  "Property": "Last Activity Date"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.MailboxType",
-              "nativeQueryRef": "MailboxType"
+              "queryRef": "M365_Mailbox_Usage.Last Activity Date",
+              "nativeQueryRef": "Last Activity Date"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Mailbox_Usage"
                     }
                   },
-                  "Property": "ArchiveStatus"
+                  "Property": "Item Count"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.ArchiveStatus",
-              "nativeQueryRef": "ArchiveStatus"
+              "queryRef": "M365_Mailbox_Usage.Item Count",
+              "nativeQueryRef": "Item Count"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "LastUserActionTime"
+                  "Property": "Mailbox Storage Used GB"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.LastUserActionTime",
-              "nativeQueryRef": "LastUserActionTime"
+              "queryRef": "M365_Users_Active.Mailbox Storage Used GB",
+              "nativeQueryRef": "Mailbox Storage Used GB"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                      "Entity": "M365_Users_Active"
                     }
                   },
-                  "Property": "TotalItemSizeGB"
+                  "Property": "Mailbox Quota GB"
                 }
               },
-              "queryRef": "Exchange_EXO_Mailboxes_AllDomains.TotalItemSizeGB",
-              "nativeQueryRef": "TotalItemSizeGB"
+              "queryRef": "M365_Users_Active.Mailbox Quota GB",
+              "nativeQueryRef": "Mailbox Quota GB"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "M365_Users_Active"
+                    }
+                  },
+                  "Property": "Mailbox Storage Utilization"
+                }
+              },
+              "queryRef": "M365_Users_Active.Mailbox Storage Utilization",
+              "nativeQueryRef": "Mailbox Storage Utilization"
             }
           ]
         }
@@ -106,13 +120,13 @@
         "sort": [
           {
             "field": {
-              "Column": {
+              "Measure": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "Exchange_EXO_Mailboxes_AllDomains"
+                    "Entity": "M365_Users_Active"
                   }
                 },
-                "Property": "TotalItemSizeGB"
+                "Property": "Mailbox Storage Used GB"
               }
             },
             "direction": "Descending"
@@ -228,7 +242,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange Online mailbox inventory'"
+                  "Value": "'Exchange Online mailbox storage (GB)'"
                 }
               }
             },
