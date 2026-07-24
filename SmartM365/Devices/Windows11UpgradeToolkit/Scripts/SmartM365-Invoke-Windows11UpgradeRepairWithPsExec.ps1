@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.69
+    0.1.70
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -77,7 +77,6 @@ param(
     [string]$IntuneInventoryNameColumn,
     [ValidateRange(1, 999)][int]$IntuneInventoryPageSize = 999,
     [string]$IntuneTenantId,
-    [string]$IntuneTenantProfile = 'test',
     [switch]$SkipIntuneInventoryRefresh,
 
     [string]$LogRoot,
@@ -111,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.69'
+$script:LauncherVersion = '0.1.70'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -213,14 +212,17 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
         $intuneRootFullName = [System.IO.Path]::GetFullPath($intuneRootInventoryItem.FullName)
         $intuneRootInventoryAge = (Get-Date) - $intuneRootInventoryItem.LastWriteTime
         $intuneRootFirstRow = Import-Csv -LiteralPath $intuneRootFullName | Select-Object -First 1
-        $intuneRootProfile = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryTenantProfile']) { [string]$intuneRootFirstRow.InventoryTenantProfile } else { '' }
+        $intuneRootTenantId = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryTenantId']) { [string]$intuneRootFirstRow.InventoryTenantId } else { '' }
+        $intuneRootAuthenticationMode = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryAuthenticationMode']) { [string]$intuneRootFirstRow.InventoryAuthenticationMode } else { '' }
         $intuneRootScope = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryScope']) { [string]$intuneRootFirstRow.InventoryScope } else { '' }
-        $intuneRootProvenanceMatches = ($intuneRootProfile -ieq $IntuneTenantProfile -and $intuneRootScope -eq 'AllManagedDevices')
+        $intuneRootTenantMatches = (-not [string]::IsNullOrWhiteSpace($intuneRootTenantId) -and ([string]::IsNullOrWhiteSpace($IntuneTenantId) -or $intuneRootTenantId -ieq $IntuneTenantId))
+        $intuneRootDelegated = ($intuneRootAuthenticationMode -in @('DelegatedInteractive','DelegatedExistingSession'))
+        $intuneRootProvenanceMatches = ($intuneRootTenantMatches -and $intuneRootDelegated -and $intuneRootScope -eq 'AllManagedDevices')
         $IntuneRootInventoryCacheProvenance = if ($intuneRootProvenanceMatches) {
-            "Verified:Profile=$intuneRootProfile;Scope=$intuneRootScope"
+            "Verified:TenantId=$intuneRootTenantId;Auth=$intuneRootAuthenticationMode;Scope=$intuneRootScope"
         }
         else {
-            "Rejected:Profile=$intuneRootProfile;Scope=$intuneRootScope;ExpectedProfile=$IntuneTenantProfile;ExpectedScope=AllManagedDevices"
+            "Rejected:TenantId=$intuneRootTenantId;Auth=$intuneRootAuthenticationMode;Scope=$intuneRootScope;ExpectedTenantId=$IntuneTenantId;ExpectedAuth=Delegated;ExpectedScope=AllManagedDevices"
         }
         if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours -and $intuneRootProvenanceMatches) {
             $IntuneRootInventoryCsv = $intuneRootFullName
@@ -1451,7 +1453,6 @@ function Invoke-FullIntuneInventoryExport {
         [Parameter(Mandatory = $true)][string]$LogPath,
         [Parameter(Mandatory = $true)][string]$ComputerListPath,
         [Parameter(Mandatory = $false)][int]$PageSize = 999,
-        [Parameter(Mandatory = $false)][string]$TenantProfile = 'test',
         [Parameter(Mandatory = $false)][string]$TenantId
     )
 
@@ -1464,7 +1465,6 @@ function Invoke-FullIntuneInventoryExport {
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
             '-File', $ExportScriptPath,
-            '-Tenant', $TenantProfile,
             '-OutputPath', $OutputPath,
             '-ComputerListPath', $ComputerListPath,
             '-PageSize', ([string]$PageSize),
@@ -1606,7 +1606,6 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     -LogPath $cycleIntuneInventoryLogPath `
                     -ComputerListPath $ComputerListPath `
                     -PageSize $IntuneInventoryPageSize `
-                    -TenantProfile $IntuneTenantProfile `
                     -TenantId $IntuneTenantId
                 if ($cycleIntuneInventory.Success) {
                     $script:IntuneInventoryMap = $cycleIntuneInventory.InventoryMap
@@ -2156,7 +2155,6 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneRootInventoryCsv'; Value = [string]$IntuneRootInventoryCsv }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryNameColumn'; Value = [string]$IntuneInventoryNameColumn }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryPageSize'; Value = [string]$IntuneInventoryPageSize }
-    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantProfile'; Value = [string]$IntuneTenantProfile }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantId'; Value = [string]$IntuneTenantId }
     [pscustomobject]@{ Category = 'Intune'; Option = 'SkipIntuneInventoryRefresh'; Value = [string][bool]$SkipIntuneInventoryRefresh }
     [pscustomobject]@{ Category = 'Intune'; Option = 'EffectiveSkipIntuneInventoryRefresh'; Value = [string][bool]$EffectiveSkipIntuneInventoryRefresh }

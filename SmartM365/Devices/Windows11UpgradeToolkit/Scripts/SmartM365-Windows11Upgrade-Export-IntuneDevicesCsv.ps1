@@ -9,7 +9,7 @@ Uses Microsoft Graph to read Intune managed devices from:
 When -ComputerListPath is provided, the default output is DevicesIntune.csv next to that Computers.txt.
 Otherwise, when this script is stored in a Scripts folder, the default output is DevicesIntune.csv in the parent folder.
 The CSV includes DeviceName and ComputerName columns so SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1
-can use it with -IntuneInventoryCsv. InventoryTenantProfile, InventoryTenantId, and InventoryScope
+can use it with -IntuneInventoryCsv. InventoryTenantId, InventoryAuthenticationMode, and InventoryScope
 record cache provenance for guarded reuse.
 
 .PARAMETER OutputPath
@@ -21,17 +21,8 @@ Computers.txt path. Defaults to Computers.txt next to this script when present. 
 .PARAMETER PageSize
 Graph page size for the full managedDevices read. Defaults to 999.
 
-.PARAMETER Tenant
-SmartM365 local tenant profile key. Defaults to test.
-
 .PARAMETER TenantId
-Optional tenant id override. App-only client and certificate values still come from the selected local tenant profile.
-
-.PARAMETER ClientId
-Optional app registration client id override.
-
-.PARAMETER CertificateThumbprint
-Optional certificate thumbprint override.
+Optional tenant id used to constrain the delegated interactive sign-in.
 
 .PARAMETER NoConnect
 Do not call Connect-MgGraph. Use this only when the current PowerShell session is already connected.
@@ -52,26 +43,23 @@ Regenerates the CSV even when a recent DevicesIntune.csv exists in the parent fo
 .\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 -ComputerListPath .\Computers.txt -PageSize 999
 
 .EXAMPLE
-.\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 -Tenant prod -OutputPath .\DevicesIntune.csv
+.\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 -TenantId "contoso.onmicrosoft.com" -OutputPath .\DevicesIntune.csv
 
 .EXAMPLE
 .\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1 -IntuneInventoryCsv .\DevicesIntune.csv
 
 .VERSION
-1.1.0
+1.2.0
 #>
 
 #requires -Version 5.1
 
 [CmdletBinding()]
 param(
-    [string]$Tenant = 'test',
     [string]$OutputPath,
     [string]$ComputerListPath,
     [int]$PageSize = 999,
     [string]$TenantId,
-    [string]$ClientId,
-    [string]$CertificateThumbprint,
     [switch]$NoConnect,
     [switch]$IncludeAllProperties,
     [switch]$SkipModuleInstall,
@@ -80,7 +68,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "1.1.0"
+$ScriptVersion = "1.2.0"
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
@@ -129,11 +117,20 @@ if (-not $OutputPathWasProvided -and -not $ComputerListPathWasProvided -and -not
             $parentInventoryItem = Get-Item -LiteralPath $parentInventoryPath -ErrorAction Stop
             $parentInventoryAge = (Get-Date) - $parentInventoryItem.LastWriteTime
             if ($parentInventoryAge.TotalHours -le 2) {
-                Write-Host "Export-IntuneDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
-                Write-Host ("Recent parent DevicesIntune.csv found: {0}" -f $parentInventoryPath) -ForegroundColor Green
-                Write-Host ("Last write time: {0}; Age: {1:N1} hour(s)" -f $parentInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $parentInventoryAge.TotalHours) -ForegroundColor Green
-                Write-Host "No new Graph export generated. Use -ForceRefresh to regenerate anyway." -ForegroundColor Yellow
-                return
+                $parentFirstRow = Import-Csv -LiteralPath $parentInventoryPath | Select-Object -First 1
+                $parentTenantId = if ($parentFirstRow -and $parentFirstRow.PSObject.Properties['InventoryTenantId']) { [string]$parentFirstRow.InventoryTenantId } else { '' }
+                $parentAuthenticationMode = if ($parentFirstRow -and $parentFirstRow.PSObject.Properties['InventoryAuthenticationMode']) { [string]$parentFirstRow.InventoryAuthenticationMode } else { '' }
+                $parentScope = if ($parentFirstRow -and $parentFirstRow.PSObject.Properties['InventoryScope']) { [string]$parentFirstRow.InventoryScope } else { '' }
+                $parentTenantMatches = (-not [string]::IsNullOrWhiteSpace($parentTenantId) -and ([string]::IsNullOrWhiteSpace($TenantId) -or $parentTenantId -ieq $TenantId))
+                $parentProvenanceMatches = ($parentTenantMatches -and $parentAuthenticationMode -in @('DelegatedInteractive','DelegatedExistingSession') -and $parentScope -eq 'AllManagedDevices')
+                if ($parentProvenanceMatches) {
+                    Write-Host "Export-IntuneDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
+                    Write-Host ("Recent delegated parent DevicesIntune.csv found: {0}" -f $parentInventoryPath) -ForegroundColor Green
+                    Write-Host ("Last write time: {0}; Age: {1:N1} hour(s); Tenant={2}; Auth={3}" -f $parentInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $parentInventoryAge.TotalHours, $parentTenantId, $parentAuthenticationMode) -ForegroundColor Green
+                    Write-Host "No new Graph export generated. Use -ForceRefresh to regenerate anyway." -ForegroundColor Yellow
+                    return
+                }
+                Write-Host ("Recent parent DevicesIntune.csv ignored because delegated provenance is missing or mismatched: Tenant={0}; Auth={1}; Scope={2}" -f $parentTenantId,$parentAuthenticationMode,$parentScope) -ForegroundColor Yellow
             }
         }
     }
@@ -204,45 +201,6 @@ function Get-GraphConnectionContext {
 }
 
 
-function Find-SmartM365TenantContextPath {
-    param([Parameter(Mandatory = $true)][string]$StartPath)
-
-    $current = $StartPath
-    while ($current) {
-        foreach ($candidate in @(
-            (Join-Path $current 'SmartM365-TenantContext.ps1'),
-            (Join-Path $current 'Config\SmartM365-TenantContext.ps1')
-        )) {
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                return $candidate
-            }
-        }
-
-        $parent = Split-Path -Parent $current
-        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
-        $current = $parent
-    }
-
-    throw 'SmartM365-TenantContext.ps1 not found. Run this script from a complete SmartM365 checkout.'
-}
-
-function Get-TenantAuthValue {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string[]]$Names
-    )
-
-    foreach ($name in $Names) {
-        $property = $Config.PSObject.Properties[$name]
-        if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
-            $value = ([string]$property.Value).Trim()
-            if ($value -notmatch '^(__USE_GLOBAL__|USE_GLOBAL|0+(-0+)*)$') {
-                return $value
-            }
-        }
-    }
-    return ''
-}
 function ConvertTo-ComputerName {
     param([string]$DeviceName)
 
@@ -401,59 +359,30 @@ function Invoke-GraphPagedRequest {
     return @($items)
 }
 
-$tenantContextPath = Find-SmartM365TenantContextPath -StartPath $BaseDir
-. $tenantContextPath
-$tenantConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $BaseDir
-
 Import-GraphAuthenticationModule
 
 if (-not $NoConnect) {
-    $effectiveTenantId = if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $TenantId.Trim()
-    }
-    else {
-        Get-TenantAuthValue -Config $tenantConfig -Names @('TenantId')
-    }
-    $effectiveClientId = if (-not [string]::IsNullOrWhiteSpace($ClientId)) {
-        $ClientId.Trim()
-    }
-    else {
-        Get-TenantAuthValue -Config $tenantConfig -Names @('AppId', 'ClientId')
-    }
-    $effectiveThumbprint = if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
-        $CertificateThumbprint.Replace(' ', '').ToUpperInvariant()
-    }
-    else {
-        (Get-TenantAuthValue -Config $tenantConfig -Names @('Thumbprint', 'Thumb')).Replace(' ', '').ToUpperInvariant()
-    }
-
-    $missingAuth = @()
-    if ([string]::IsNullOrWhiteSpace($effectiveTenantId)) { $missingAuth += 'TenantId' }
-    if ([string]::IsNullOrWhiteSpace($effectiveClientId)) { $missingAuth += 'AppId' }
-    if ([string]::IsNullOrWhiteSpace($effectiveThumbprint)) { $missingAuth += 'Thumbprint' }
-    if ($missingAuth.Count -gt 0) {
-        throw ("App-only Graph authentication is incomplete in SmartM365 tenant profile '{0}'. Missing: {1}." -f $Tenant, ($missingAuth -join ', '))
-    }
-
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { Write-Verbose ("Previous Graph session could not be disconnected: {0}" -f $_.Exception.Message) }
     $connectParams = @{
-        TenantId              = $effectiveTenantId
-        ClientId              = $effectiveClientId
-        CertificateThumbprint = $effectiveThumbprint
-        NoWelcome             = $true
+        Scopes    = @('DeviceManagementManagedDevices.Read.All')
+        NoWelcome = $true
     }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParams.TenantId = $TenantId.Trim() }
     Connect-MgGraph @connectParams | Out-Null
 }
 
 $context = Get-GraphConnectionContext
 if (-not $context) {
-    throw "Not connected to Microsoft Graph. Run without -NoConnect to use app-only certificate authentication, or provide a preconnected session with -NoConnect."
+    throw "Not connected to Microsoft Graph. Run without -NoConnect for delegated interactive authentication, or provide a delegated preconnected session with -NoConnect."
 }
+$contextAuthType = if ($context.PSObject.Properties['AuthType']) { [string]$context.AuthType } else { '' }
+if ($contextAuthType -ieq 'AppOnly') {
+    throw 'App-only Microsoft Graph authentication is not supported by this exporter. Sign in with a delegated interactive account.'
+}
+$inventoryAuthenticationMode = if ($NoConnect) { 'DelegatedExistingSession' } else { 'DelegatedInteractive' }
 
 Write-Host "Export-IntuneDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
-Write-Host "Profile     : $Tenant"
 Write-Host "Tenant      : $($context.TenantId)"
-Write-Host "Auth        : $(if ($NoConnect) { 'Existing Graph session' } else { 'App-only certificate' })"
+Write-Host "Auth        : $inventoryAuthenticationMode"
 Write-Host "Output      : $OutputPath"
 Write-Host "Page size   : $PageSize"
 
@@ -565,8 +494,8 @@ else {
 
 $inventoryScope = if ($requestedComputers.Count -gt 0) { 'ComputerList' } else { 'AllManagedDevices' }
 foreach ($row in @($export)) {
-    $row | Add-Member -NotePropertyName InventoryTenantProfile -NotePropertyValue $Tenant -Force
     $row | Add-Member -NotePropertyName InventoryTenantId -NotePropertyValue ([string]$context.TenantId) -Force
+    $row | Add-Member -NotePropertyName InventoryAuthenticationMode -NotePropertyValue $inventoryAuthenticationMode -Force
     $row | Add-Member -NotePropertyName InventoryScope -NotePropertyValue $inventoryScope -Force
 }
 

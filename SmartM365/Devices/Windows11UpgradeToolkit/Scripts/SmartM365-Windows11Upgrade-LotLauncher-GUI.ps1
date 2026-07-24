@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.39
+0.1.40
 #>
 param(
     [switch]$ValidateOnly
@@ -685,6 +685,9 @@ function Start-ToolkitLot {
     $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $Lot.Path -EnvironmentVariables $EnvironmentVariables
     $run = New-LotRunContext -RootPath $toolkitRoot -LotName $Lot.Name
     [void](Copy-AutomaticInventorySnapshotToRun -InventoryContext $InitialInventoryContext -RunPath $run.RunPath)
+    if ($InitialInventoryContext -and $InitialInventoryContext.PSObject.Properties['IntuneInventoryCsv'] -and -not [string]::IsNullOrWhiteSpace([string]$InitialInventoryContext.IntuneInventoryCsv)) {
+        $effectiveEnvironment['W11UT_SKIP_INTUNE_INVENTORY_REFRESH'] = '1'
+    }
     $effectiveEnvironment['W11UT_RUN_DIR'] = $run.RunPath
     $effectiveEnvironment['W11UT_LOT_DIR'] = $Lot.Path
 
@@ -809,7 +812,6 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES'; Argument = '-SetupSubnetConcurrencyLeaseMinutes' },
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT'; Argument = '-SetupSubnetConcurrencyGateRoot' },
         @{ Name = 'W11UT_AD_DOMAIN'; Argument = '-AdDomain' },
-        @{ Name = 'W11UT_INTUNE_TENANT_PROFILE'; Argument = '-IntuneTenantProfile' },
         @{ Name = 'W11UT_INTUNE_TENANT_ID'; Argument = '-IntuneTenantId' },
         @{ Name = 'W11UT_INTUNE_INVENTORY_PAGE_SIZE'; Argument = '-IntuneInventoryPageSize' },
         @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
@@ -945,10 +947,9 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '90'
     W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT = ''
     W11UT_AD_DOMAIN = ''
-    W11UT_INTUNE_TENANT_PROFILE = 'test'
     W11UT_INTUNE_TENANT_ID = ''
     W11UT_INTUNE_INVENTORY_PAGE_SIZE = '999'
-    W11UT_SKIP_INTUNE_INVENTORY_REFRESH = '0'
+    W11UT_SKIP_INTUNE_INVENTORY_REFRESH = '1'
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
     W11UT_SETUP_MEDIA_ID = 'Win11'
     W11UT_SETUP_LANGUAGE = 'MatchSystem'
@@ -1269,8 +1270,8 @@ $xaml = @'
                             <TextBlock Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
                             <TextBlock Text="Inventory source"/>
                             <ComboBox x:Name="AutomaticSourceCombo"/>
-                            <TextBlock Text="Intune tenant profile"/>
-                            <ComboBox x:Name="AutomaticTenantProfileCombo" ToolTip="Local SmartM365 app-only certificate profile. Used only when Intune is selected."/>
+                            <TextBlock Text="Intune authentication"/>
+                            <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when Refresh and preview is clicked." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,10"/>
                             <TextBlock Text="LOT name"/>
                             <TextBox x:Name="AutomaticLotNameText"/>
                             <TextBlock Text="Launch mode"/>
@@ -1544,7 +1545,7 @@ $controls = @{}
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
     'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
-    'AutomaticSourceCombo','AutomaticTenantProfileCombo','AutomaticLotNameText','AutomaticModeCombo',
+    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticModeCombo',
     'AutomaticPreviewButton','AutomaticCreateLaunchButton','AutomaticSummaryText',
     'AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
     'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
@@ -1660,68 +1661,52 @@ function Get-AutomaticSourceSelection {
 }
 
 
-function Update-AutomaticSourceState {
-    $intuneEnabled = (Get-AutomaticSourceSelection) -ne 'AD'
-    $controls.AutomaticTenantProfileCombo.IsEnabled = $intuneEnabled
-    $controls.AutomaticTenantProfileCombo.Opacity = if ($intuneEnabled) { 1.0 } else { 0.55 }
-}
-function Get-SmartM365TenantProfileKey {
-    $smartM365Root = Split-Path -Parent (Split-Path -Parent $toolkitRoot)
-    $profilesRoot = Join-Path $smartM365Root 'Config\Tenants'
-    $profiles = @()
-    if (Test-Path -LiteralPath $profilesRoot -PathType Container) {
-        $profiles = @(
-            Get-ChildItem -LiteralPath $profilesRoot -Filter '*.local.json' -File -ErrorAction SilentlyContinue |
-                ForEach-Object { $_.Name -replace '\.local\.json$', '' } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-                Sort-Object -Unique
-        )
-    }
-
-    $configured = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_PROFILE'
-    if (-not [string]::IsNullOrWhiteSpace($configured) -and $configured -notin $profiles) {
-        $profiles = @($profiles + $configured | Sort-Object -Unique)
-    }
-    if ($profiles.Count -eq 0) { $profiles = @('test') }
-    return $profiles
-}
-
 function Get-AutomaticInventoryFileInfo {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][double]$FreshnessHours,
         [Parameter(Mandatory = $true)][string]$SourceName,
-        [string]$ExpectedTenantProfile = ''
+        [string]$ExpectedTenantId = '',
+        [switch]$RequireDelegatedAuthentication
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ Source = $SourceName; Path = $Path; Exists = $false; Fresh = $false; AgeHours = [double]::PositiveInfinity; Detail = 'Cache missing' }
+        return [pscustomobject]@{ Source = $SourceName; Path = $Path; Exists = $false; Fresh = $false; AgeHours = [double]::PositiveInfinity; TenantId = ''; AuthenticationMode = ''; Scope = ''; Detail = 'Cache missing' }
     }
 
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
     $ageHours = ((Get-Date) - $item.LastWriteTime).TotalHours
-    $scopeVerified = $true
+    $tenantId = ''
+    $authenticationMode = ''
+    $scope = ''
+    $provenanceVerified = $true
     $scopeDetail = ''
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedTenantProfile)) {
+    if ($RequireDelegatedAuthentication) {
         $firstRow = Import-Csv -LiteralPath $Path | Select-Object -First 1
-        $profile = if ($firstRow -and $firstRow.PSObject.Properties['InventoryTenantProfile']) { [string]$firstRow.InventoryTenantProfile } else { '' }
+        $tenantId = if ($firstRow -and $firstRow.PSObject.Properties['InventoryTenantId']) { [string]$firstRow.InventoryTenantId } else { '' }
+        $authenticationMode = if ($firstRow -and $firstRow.PSObject.Properties['InventoryAuthenticationMode']) { [string]$firstRow.InventoryAuthenticationMode } else { '' }
         $scope = if ($firstRow -and $firstRow.PSObject.Properties['InventoryScope']) { [string]$firstRow.InventoryScope } else { '' }
-        $scopeVerified = ($profile -ieq $ExpectedTenantProfile -and $scope -eq 'AllManagedDevices')
-        $scopeDetail = if ($scopeVerified) {
-            "; profile=$profile; scope=$scope"
+        $tenantMatches = (-not [string]::IsNullOrWhiteSpace($tenantId) -and ([string]::IsNullOrWhiteSpace($ExpectedTenantId) -or $tenantId -ieq $ExpectedTenantId))
+        $authenticationMatches = ($authenticationMode -in @('DelegatedInteractive','DelegatedExistingSession'))
+        $provenanceVerified = ($tenantMatches -and $authenticationMatches -and $scope -eq 'AllManagedDevices')
+        $scopeDetail = if ($provenanceVerified) {
+            "; tenant=$tenantId; auth=$authenticationMode; scope=$scope"
         }
         else {
-            "; cache provenance mismatch (profile='$profile'; scope='$scope'; expected profile='$ExpectedTenantProfile'; expected scope='AllManagedDevices')"
+            "; cache provenance mismatch (tenant='$tenantId'; auth='$authenticationMode'; scope='$scope'; expected tenant='$ExpectedTenantId'; expected auth='Delegated'; expected scope='AllManagedDevices')"
         }
     }
 
     [pscustomobject]@{
-        Source   = $SourceName
-        Path     = $Path
-        Exists   = $true
-        Fresh    = ($ageHours -le $FreshnessHours -and $scopeVerified)
+        Source = $SourceName
+        Path = $Path
+        Exists = $true
+        Fresh = ($ageHours -le $FreshnessHours -and $provenanceVerified)
         AgeHours = $ageHours
-        Detail   = ('Cache age {0:N1}h; TTL {1:N0}h{2}' -f $ageHours, $FreshnessHours, $scopeDetail)
+        TenantId = $tenantId
+        AuthenticationMode = $authenticationMode
+        Scope = $scope
+        Detail = ('Cache age {0:N1}h; TTL {1:N0}h{2}' -f $ageHours, $FreshnessHours, $scopeDetail)
     }
 }
 
@@ -1730,7 +1715,8 @@ function Invoke-GuiPowerShellProcess {
         [Parameter(Mandatory = $true)][string]$ScriptPath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$LogPath,
-        [Parameter(Mandatory = $true)][string]$Activity
+        [Parameter(Mandatory = $true)][string]$Activity,
+        [switch]$Interactive
     )
 
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { throw "Script not found: $ScriptPath" }
@@ -1746,7 +1732,15 @@ function Invoke-GuiPowerShellProcess {
     }
 
     try {
-        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList ($argumentParts -join ' ') -WindowStyle Hidden -PassThru -RedirectStandardOutput $LogPath -RedirectStandardError $stderrPath
+        $startParameters = @{
+            FilePath = 'powershell.exe'
+            ArgumentList = ($argumentParts -join ' ')
+            PassThru = $true
+            RedirectStandardOutput = $LogPath
+            RedirectStandardError = $stderrPath
+        }
+        if (-not $Interactive) { $startParameters.WindowStyle = 'Hidden' }
+        $process = Start-Process @startParameters
         while (-not $process.HasExited) {
             $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
             Start-Sleep -Milliseconds 200
@@ -1769,8 +1763,7 @@ function Invoke-GuiPowerShellProcess {
 
 function Get-AutomaticInventorySnapshot {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('AD', 'Intune', 'Both')][string]$Source,
-        [Parameter(Mandatory = $true)][string]$TenantProfile
+        [Parameter(Mandatory = $true)][ValidateSet('AD', 'Intune', 'Both')][string]$Source
     )
 
     $automaticRoot = Join-Path (Get-RunsRoot -RootPath $toolkitRoot) 'AutomaticLotInventory'
@@ -1781,6 +1774,9 @@ function Get-AutomaticInventorySnapshot {
     $paths = @{ AD = ''; Intune = '' }
     $details = New-Object System.Collections.Generic.List[string]
     $failures = New-Object System.Collections.Generic.List[string]
+    $tenantId = ''
+    $authenticationMode = ''
+    $configuredTenantId = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
 
     foreach ($requestedSource in $requestedSources) {
         try {
@@ -1797,13 +1793,16 @@ function Get-AutomaticInventorySnapshot {
                 $outputCsv = Join-Path $sourceRunPath 'DevicesIntune.csv'
                 $logPath = Join-Path $sourceRunPath 'DevicesIntune.refresh.log'
                 $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1'
-                $arguments = @('-Tenant', $TenantProfile, '-OutputPath', $outputCsv, '-ForceRefresh')
-                $configuredTenantId = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
+                $arguments = @('-OutputPath', $outputCsv, '-ForceRefresh')
                 if (-not [string]::IsNullOrWhiteSpace($configuredTenantId)) { $arguments += @('-TenantId', $configuredTenantId) }
-                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments $arguments -LogPath $logPath -Activity ("Reading a fresh complete Intune inventory with app-only profile '{0}' for the automatic LOT..." -f $TenantProfile)
+                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments $arguments -LogPath $logPath -Activity 'Waiting for delegated interactive Microsoft Graph sign-in to read a fresh complete Intune inventory...' -Interactive
                 if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "Intune inventory CSV was not created: $outputCsv" }
+                $intuneInfo = Get-AutomaticInventoryFileInfo -Path $outputCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantId $configuredTenantId -RequireDelegatedAuthentication
+                if (-not $intuneInfo.Fresh) { throw ("Generated Intune inventory provenance is invalid: {0}" -f $intuneInfo.Detail) }
                 $paths.Intune = $outputCsv
-                $details.Add("Intune: generated isolated automatic snapshot $outputCsv")
+                $tenantId = [string]$intuneInfo.TenantId
+                $authenticationMode = [string]$intuneInfo.AuthenticationMode
+                $details.Add("Intune: generated delegated interactive snapshot; tenant=$tenantId; path=$outputCsv")
             }
         }
         catch {
@@ -1813,7 +1812,7 @@ function Get-AutomaticInventorySnapshot {
                 Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 12 -SourceName 'AD'
             }
             else {
-                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantProfile $TenantProfile
+                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantId $configuredTenantId -RequireDelegatedAuthentication
             }
 
             $fallbackAccepted = $false
@@ -1831,6 +1830,10 @@ function Get-AutomaticInventorySnapshot {
 
             if ($fallbackAccepted) {
                 $paths[$requestedSource] = $rootCsv
+                if ($requestedSource -eq 'Intune') {
+                    $tenantId = [string]$fallback.TenantId
+                    $authenticationMode = [string]$fallback.AuthenticationMode
+                }
                 $details.Add(("{0}: root cache fallback explicitly accepted after refresh failure; {1}" -f $requestedSource,$fallback.Detail))
                 continue
             }
@@ -1854,13 +1857,15 @@ function Get-AutomaticInventorySnapshot {
         RequestedSource = $Source
         AdInventoryCsv = [string]$paths.AD
         IntuneInventoryCsv = [string]$paths.Intune
-        TenantProfile = $TenantProfile
+        TenantId = $tenantId
+        AuthenticationMode = $authenticationMode
         PartialSource = ($failures.Count -gt 0)
         SourceDetails = $details.ToArray()
         Failures = $failures.ToArray()
         SourceRunPath = $sourceRunPath
     }
 }
+
 function Invoke-AutomaticLotSelection {
     param(
         [Parameter(Mandatory = $true)]$InventoryContext,
@@ -1896,7 +1901,8 @@ function Format-AutomaticLotSummary {
     @(
         "Requested source: $($summary.RequestedSource)"
         "Available source: $($summary.AvailableSources)$(if ($summary.PartialSource) { ' (PARTIAL)' } else { '' })"
-        "Tenant profile: $($InventoryContext.TenantProfile)"
+        "Intune tenant: $(if ([string]::IsNullOrWhiteSpace([string]$InventoryContext.TenantId)) { 'Not used' } else { [string]$InventoryContext.TenantId })"
+        "Intune auth: $(if ([string]::IsNullOrWhiteSpace([string]$InventoryContext.AuthenticationMode)) { 'Not used' } else { [string]$InventoryContext.AuthenticationMode })"
         @($InventoryContext.SourceDetails)
         ''
         "AD rows: $($summary.ADRows); Windows 10 candidates: $($summary.ADWindows10Candidates)"
@@ -1917,15 +1923,12 @@ function Format-AutomaticLotSummary {
 }
 
 function Get-AutomaticPreviewSignature {
-    return ('{0}|{1}|{2}' -f (Get-AutomaticSourceSelection), [string]$controls.AutomaticTenantProfileCombo.SelectedItem, [string]$controls.AutomaticLotNameText.Text.Trim())
+    return ('{0}|{1}|{2}' -f (Get-AutomaticSourceSelection), (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'), [string]$controls.AutomaticLotNameText.Text.Trim())
 }
 
 function Update-AutomaticLotPreview {
     $source = Get-AutomaticSourceSelection
-    $profile = [string]$controls.AutomaticTenantProfileCombo.SelectedItem
-    if ($source -in @('Intune', 'Both') -and [string]::IsNullOrWhiteSpace($profile)) { throw 'Select a SmartM365 Intune tenant profile.' }
-
-    $context = Get-AutomaticInventorySnapshot -Source $source -TenantProfile $profile
+    $context = Get-AutomaticInventorySnapshot -Source $source
     $result = Invoke-AutomaticLotSelection -InventoryContext $context
     $controls.AutomaticLotNameText.Text = [string]$result.Summary.LotName
     $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $result -InventoryContext $context
@@ -1946,7 +1949,8 @@ function Confirm-AutomaticLotLaunch {
         "Create and launch $($summary.LotName)?"
         ''
         "Inventory source: $($summary.AvailableSources)$(if ($summary.PartialSource) { ' (PARTIAL)' } else { '' })"
-        "Tenant profile: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.TenantProfile })"
+        "Intune tenant: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.TenantId })"
+        "Intune auth: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.AuthenticationMode })"
         "Selected Windows 10 devices: $($summary.SelectedDevices)"
         "Excluded devices: $($summary.ExcludedDevices)"
         "Stale warnings: AD=$($summary.ADStaleWarnings); Intune=$($summary.IntuneStaleWarnings)"
@@ -2137,10 +2141,6 @@ function Initialize-Options {
     Initialize-Combo -Combo $controls.LotModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.AutomaticSourceCombo -Values @('AD + Intune','AD','Intune') -Selected 'AD + Intune'
-    $tenantProfiles = @(Get-SmartM365TenantProfileKey)
-    $selectedTenantProfile = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_PROFILE'
-    if ($selectedTenantProfile -notin $tenantProfiles) { $selectedTenantProfile = $tenantProfiles[0] }
-    Initialize-Combo -Combo $controls.AutomaticTenantProfileCombo -Values $tenantProfiles -Selected $selectedTenantProfile
     Initialize-Combo -Combo $controls.AutomaticModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     if ([string]::IsNullOrWhiteSpace($controls.AutomaticLotNameText.Text)) { $controls.AutomaticLotNameText.Text = 'LOT-AUTO-W10-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss') }
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
@@ -2190,7 +2190,6 @@ function Initialize-Options {
     $controls.IgnoreTechRunGuardHistoryCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY') -eq '1')
     $controls.MaxCyclesText.Text = Get-ConfiguredValue 'W11UT_GUI_MAX_CYCLES'
     Invoke-LauncherOptionStateUpdate
-    Update-AutomaticSourceState
 }
 
 function Invoke-OptionCheckAvailabilityUpdate {
@@ -2292,7 +2291,6 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SETUP_SUBNET_PREFIX_LENGTH               = [string]$controls.SetupSubnetPrefixCombo.Text
         W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 90 -Minimum 1
         W11UT_AD_DOMAIN                                = Get-ConfiguredValue 'W11UT_AD_DOMAIN'
-        W11UT_INTUNE_TENANT_PROFILE                    = if ($controls.AutomaticTenantProfileCombo.SelectedItem) { [string]$controls.AutomaticTenantProfileCombo.SelectedItem } else { Get-ConfiguredValue 'W11UT_INTUNE_TENANT_PROFILE' }
         W11UT_INTUNE_TENANT_ID                         = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
         W11UT_INTUNE_INVENTORY_PAGE_SIZE               = Get-ConfiguredValue 'W11UT_INTUNE_INVENTORY_PAGE_SIZE'
         W11UT_SKIP_INTUNE_INVENTORY_REFRESH            = Get-ConfiguredValue 'W11UT_SKIP_INTUNE_INVENTORY_REFRESH'
@@ -2571,13 +2569,8 @@ $script:AutomaticPreviewContext = $null
 $script:AutomaticPreviewResult = $null
 $script:AutomaticPreviewSignature = ''
 $controls.AutomaticSourceCombo.Add_SelectionChanged({
-    Update-AutomaticSourceState
     $script:AutomaticPreviewSignature = ''
     $controls.AutomaticSummaryText.Text = 'Inventory source changed. Refresh the preview before creating the LOT.'
-})
-$controls.AutomaticTenantProfileCombo.Add_SelectionChanged({
-    $script:AutomaticPreviewSignature = ''
-    $controls.AutomaticSummaryText.Text = 'Tenant profile changed. Refresh the preview before creating the LOT.'
 })
 $controls.AutomaticPreviewButton.Add_Click({
     try {
