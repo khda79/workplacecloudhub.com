@@ -291,7 +291,7 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-AllowWUReset`: resets Windows Update cache and services.
 - `-AllowForceUpgrade`: triggers assigned Windows Update scan/download/install through Windows Update APIs and `UsoClient`.
 - `-AllowSetupUpgrade`: starts Windows setup upgrade only after setup media and readiness checks pass.
-- `-DirectSetupUpgrade`: starts Windows setup directly after setup media validation/cache preparation; the script still blocks when the system drive is below `-MinimumFreeDiskGB`.
+- `-DirectSetupUpgrade`: starts Windows setup directly after setup media validation/cache preparation. Confirmed `WINDOWS11_HARDWARE_NOT_CAPABLE` and insufficient free disk remain blocking; hardware `UNDETERMINED` is tagged but non-blocking.
 - `-AllowReboot`: permits a controlled reboot when a pending reboot blocks progress.
 - `-ForceRequiredRebootWhenUptimeOverDays`: default `7`. When `-AllowReboot` is enabled and a reboot is already required by a pending reboot or by the enabled setup-completion reboot path, forces the reboot if the device uptime is at or above the threshold. Set `0` to disable. LOT/config value: `W11UT_FORCE_REQUIRED_REBOOT_WHEN_UPTIME_OVER_DAYS=7`.
 - `-AllowSetupCompletionRebootWhenNoUser`: after setup upgrade exits successfully or requests a reboot, schedules a reboot only when no interactive user is connected, unless the required-reboot uptime threshold is exceeded. If user detection fails, no automatic reboot is scheduled unless that threshold force path applies. LOT/config value: `W11UT_SETUP_REBOOT_WHEN_NO_USER=1`.
@@ -301,7 +301,17 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-AllowAdvancedDiskCleanup`: optional heavier cleanup. Removes old guarded Windows upgrade folders when no setup/update activity appears active, then runs `DISM /Online /Cleanup-Image /StartComponentCleanup` only after safe cleanup still leaves insufficient free disk.
 - `-AuditOnly`: reports what would be done without running repair or upgrade actions.
 
-The script blocks setup upgrade when the device is already Windows 11, is not Windows 10, lacks confirmed Intune enrollment, has actionable Windows 11 compatibility blockers, has insufficient disk space, or has a pending reboot that has not been handled.
+The script blocks setup upgrade when the device is already Windows 11, is not Windows 10, is confirmed hardware-ineligible, lacks confirmed Intune enrollment, has actionable Windows 11 compatibility blockers, has insufficient disk space, or has a pending reboot that has not been handled. `DirectSetupUpgrade` still bypasses the Intune enrollment, AppCompat indicator, and policy gates, but it does not bypass confirmed hardware ineligibility.
+
+### Microsoft hardware readiness
+
+On Windows 10, the autonomous endpoint embeds an adapted copy of Microsoft's `HardwareReadiness.ps1` logic from `https://aka.ms/HWReadinessScript`. The downloaded Microsoft source used for the adaptation was verified against SHA-256 `3F21C32818BFC3A20293317FF91A62ADB349B5A0D468A6DDDEA752F68365C24A`, and the endpoint retains the Microsoft copyright and MIT license notice. It checks the OS disk total size, physical memory, TPM 2.0, processor family/baseline, and Secure Boot capability. Windows Setup remains the final compatibility authority.
+
+- `0 / CAPABLE`: tags `WINDOWS11_HARDWARE_CAPABLE` and continues the existing flow.
+- `1 / NOT CAPABLE`: returns `WINDOWS11_HARDWARE_NOT_CAPABLE`, uses next action `REVIEW_HARDWARE_READINESS`, and blocks all upgrade modes including `DirectSetupUpgrade`.
+- `-1 / UNDETERMINED` or `-2 / FAILED TO RUN`: tags `WINDOWS11_HARDWARE_READINESS_UNDETERMINED` and continues the existing flow, including `DirectSetupUpgrade`, so Windows Setup can perform final validation.
+
+`LastRun.json`, endpoint CSV, LOT CSV, and HTML reports expose `HardwareReadinessTag`, `HardwareReadinessCode`, `HardwareReadinessResult`, `HardwareReadinessReason`, `HardwareReadinessLog`, and `HardwareReadinessSource`. Confirmed hardware failures are collected in the existing `CentralLogs\Compatibility` bucket; an indeterminate tag remains visible on the final row even when the overall run status advances to setup-ready, setup-started, or another later outcome.
 
 ### Setup failure 0x8007001F and duplicate profiles
 
