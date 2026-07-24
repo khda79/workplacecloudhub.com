@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.66
+    0.1.67
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.65'
+$script:LauncherVersion = '0.1.67'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -569,7 +569,7 @@ function Get-TechnicianRunGuardFailureCategory {
     if ($status -in @('DIRECT_SETUP_UPGRADE_FAILED','SETUP_UPGRADE_FAILED','SETUP_MIGRATION_PROFILE_FAILURE','SETUP_MIGRATION_PROFILE_REPAIR_FAILED','SETUP_MIGRATION_PLUGIN_FAILURE','SETUP_PROCESS_TIMEOUT','SETUP_PROCESS_MONITOR_INTERRUPTED','SETUP_MEDIA_COPY_FAILED','SETUP_MEDIA_COPY_TIMEOUT','SETUP_MEDIA_MANIFEST_VALIDATION_FAILED')) {
         return 'SetupFailure'
     }
-    if ($status -in @('INSUFFICIENT_DISK','INSUFFICIENT_DISK_AFTER_CLEANUP','UNSUPPORTED_OS','NOT_INTUNE_ENROLLED','WINDOWS11_COMPAT_BLOCKER','WU_POLICY_BLOCKER','SETUP_SOURCE_LANGUAGE_UNAVAILABLE')) {
+    if ($status -in @('INSUFFICIENT_DISK','INSUFFICIENT_DISK_AFTER_CLEANUP','UNSUPPORTED_OS','NOT_INTUNE_ENROLLED','WINDOWS11_COMPAT_BLOCKER','WINDOWS11_HARDWARE_NOT_CAPABLE','WU_POLICY_BLOCKER','SETUP_SOURCE_LANGUAGE_UNAVAILABLE')) {
         return 'OperatorAction'
     }
     if ($status -in @('ERROR','JOB_ERROR','RUNSPACE_BROKEN','PSEXEC_EXIT_UNKNOWN','PSEXEC_COMMUNICATION_LOST','CENTRAL_LOG_COLLECTION_FAILED','REMOTE_LOG_COLLECTION_FAILED','REMOTE_RESULT_STALE','REMOTE_PAYLOAD_COPY_FAILED','SETUP_CACHE_LOCKED','SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT')) {
@@ -646,6 +646,7 @@ function Test-TechnicianRunGuardEntryShouldBlock {
         'UNSUPPORTED_OS',
         'NOT_INTUNE_ENROLLED',
         'WINDOWS11_COMPAT_BLOCKER',
+        'WINDOWS11_HARDWARE_NOT_CAPABLE',
         'WU_POLICY_BLOCKER',
         'SETUP_SOURCE_LANGUAGE_UNAVAILABLE',
         'SETUP_CACHE_LOCKED',
@@ -2167,6 +2168,12 @@ $reportColumns = @(
     'RemoteNextAction',
     'ExitCode',
     'Detail',
+    'HardwareReadinessTag',
+    'HardwareReadinessCode',
+    'HardwareReadinessResult',
+    'HardwareReadinessReason',
+    'HardwareReadinessLog',
+    'HardwareReadinessSource',
     'JobErrorMessage',
     'ADInventoryPresent',
     'ADDomain',

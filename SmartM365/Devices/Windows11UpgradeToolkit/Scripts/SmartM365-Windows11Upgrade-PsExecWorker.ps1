@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.30
+0.1.31
 #>
 
 #requires -Version 5.1
@@ -466,7 +466,7 @@ function Get-CentralLogBucket {
         if ($statusValue -like 'INSUFFICIENT_DISK*') {
             return 'InsufficientDisk'
         }
-        if ($statusValue -eq 'WINDOWS11_COMPAT_BLOCKER') {
+        if ($statusValue -in @('WINDOWS11_COMPAT_BLOCKER','WINDOWS11_HARDWARE_NOT_CAPABLE')) {
             return 'Compatibility'
         }
         if ($statusValue -eq 'PSEXEC_TIMEOUT') {
@@ -844,7 +844,7 @@ function Update-ResultFromLastRun {
     if ($LastRun.PSObject.Properties['SetupCacheAction']) {
         $Result.SetupCacheAction = [string]$LastRun.SetupCacheAction
     }
-    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','SetupProfileRepairAction','SetupProfileRepairDetail','SetupProfileRepairBlockingSid','SetupProfileRepairKeptSid','SetupProfileRepairProfilePath','SetupProfileRepairBackupPath','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers','RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName')) {
+    foreach ($propertyName in @('HardwareReadinessTag','HardwareReadinessCode','HardwareReadinessResult','HardwareReadinessReason','HardwareReadinessLog','HardwareReadinessSource','SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','SetupProfileRepairAction','SetupProfileRepairDetail','SetupProfileRepairBlockingSid','SetupProfileRepairKeptSid','SetupProfileRepairProfilePath','SetupProfileRepairBackupPath','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers','RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName')) {
         if ($LastRun.PSObject.Properties[$propertyName]) {
             $Result[$propertyName] = [string]$LastRun.$propertyName
         }
@@ -899,6 +899,12 @@ $result = [ordered]@{
     RemoteNextAction = ''
     ExitCode = ''
     Detail = ''
+    HardwareReadinessTag = ''
+    HardwareReadinessCode = ''
+    HardwareReadinessResult = ''
+    HardwareReadinessReason = ''
+    HardwareReadinessLog = ''
+    HardwareReadinessSource = ''
     DnsResolved = ''
     DnsAddressList = ''
     PingReachable = ''
