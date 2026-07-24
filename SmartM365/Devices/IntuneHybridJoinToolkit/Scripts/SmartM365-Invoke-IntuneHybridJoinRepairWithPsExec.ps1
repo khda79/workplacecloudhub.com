@@ -179,7 +179,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic LOT-scoped inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.76
+2.10.77
 #>
 
 #requires -Version 5.1
@@ -1833,6 +1833,22 @@ function Get-ComputerList {
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith("#") } |
         Select-Object -Unique)
 }
+function Test-ComputerListPresentWithRetry {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [ValidateRange(1,20)][int]$Attempts = 5,
+        [ValidateRange(0,5000)][int]$DelayMilliseconds = 200
+    )
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { return $true }
+        if ($attempt -lt $Attempts -and $DelayMilliseconds -gt 0) {
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+    return $false
+}
+
+
 
 function Get-ComputerListStats {
     param([Parameter(Mandatory=$true)][string]$Path)
@@ -1874,17 +1890,29 @@ function Get-TechnicianRunGuardHistoryPath {
 
 function Invoke-TechnicianRunGuardHistoryLock {
     param([Parameter(Mandatory=$true)][scriptblock]$ScriptBlock,[object[]]$ArgumentList=@())
-    $mutex = $null
-    $acquired = $false
+    $lockStream = $null
+    $lockPath = '{0}.lock' -f (Get-TechnicianRunGuardHistoryPath)
+    $lockFolder = Split-Path -Parent $lockPath
+    $deadlineUtc = (Get-Date).ToUniversalTime().AddSeconds(60)
+    if (-not (Test-Path -LiteralPath $lockFolder -PathType Container)) { New-Item -ItemType Directory -Path $lockFolder -Force | Out-Null }
     try {
-        $mutex = New-Object System.Threading.Mutex($false,"Local\SmartM365_IntuneHybridJoinToolkit_TechnicianRunGuardHistory")
-        $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(15))
-        if (-not $acquired) { throw "Timed out waiting for technician run guard history lock." }
+        while ($null -eq $lockStream -and (Get-Date).ToUniversalTime() -lt $deadlineUtc) {
+            try {
+                $lockStream = [System.IO.File]::Open(
+                    $lockPath,
+                    [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite,
+                    [System.IO.FileShare]::None
+                )
+            }
+            catch [System.IO.IOException] { Start-Sleep -Milliseconds 150 }
+            catch [System.UnauthorizedAccessException] { Start-Sleep -Milliseconds 150 }
+        }
+        if ($null -eq $lockStream) { throw "Timed out waiting for technician run guard history file lock after 60 seconds." }
         & $ScriptBlock @ArgumentList
     }
     finally {
-        if ($acquired -and $mutex) { try { $mutex.ReleaseMutex() } catch {} }
-        if ($mutex) { $mutex.Dispose() }
+        if ($lockStream) { $lockStream.Dispose() }
     }
 }
 
@@ -1929,12 +1957,31 @@ function Save-TechnicianRunGuardHistory {
     $folder = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     $History.UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
-    $temporaryPath = Join-Path $folder (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
-    try {
-        $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8 -Force
-        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    $json = $History | ConvertTo-Json -Depth 8
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        $temporaryPath = Join-Path $folder (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
+        try {
+            Set-Content -LiteralPath $temporaryPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+            Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+            return
+        }
+        catch [System.IO.IOException] {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(2000,150 * $attempt))
+        }
+        catch [System.UnauthorizedAccessException] {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(2000,150 * $attempt))
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
-    finally { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+    if ($lastError) { throw $lastError }
+    throw ("Failed to save technician run guard history: {0}" -f $Path)
 }
 
 function Get-TechnicianRunGuardCooldownHours {
@@ -3003,9 +3050,9 @@ function Save-GlobalLeaseData {
     $parent = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $json = $Data | ConvertTo-Json -Depth $Depth
-    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
     $lastError = $null
     for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
         try {
             Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
@@ -3015,10 +3062,35 @@ function Save-GlobalLeaseData {
             $lastError = $_
             Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt))
         }
+        finally {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
-    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
     if ($lastError) { throw $lastError }
     throw ("Failed to save global worker lease: {0}" -f $Path)
+}
+
+function Remove-GlobalWorkerLeaseFileUnlocked {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [ValidateRange(1,20)][int]$Attempts = 5
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $true }
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $true }
+        }
+        catch [System.IO.IOException] { }
+        catch [System.UnauthorizedAccessException] { }
+        catch { }
+        Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt))
+    }
+
+    return (-not (Test-Path -LiteralPath $Path -PathType Leaf))
 }
 
 function Remove-StaleGlobalWorkerLeases {
@@ -3052,8 +3124,12 @@ function Remove-StaleGlobalWorkerLeases {
             $remove = $true; $reason = "InvalidLease"
         }
         if ($remove) {
-            $removed.Add([pscustomobject]@{ Reason = $reason; Computer = $computerName; LauncherPid = $launcherPid })
-            Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
+            if (Remove-GlobalWorkerLeaseFileUnlocked -Path $lease.FullName) {
+                $removed.Add([pscustomobject]@{ Reason = $reason; Computer = $computerName; LauncherPid = $launcherPid })
+            }
+            else {
+                Write-Host ("LEASE_RELEASE_DEFERRED: stale lease could not be removed after retries. Path={0}; Reason={1}" -f $lease.FullName,$reason) -ForegroundColor Yellow
+            }
         }
     }
     if ($removed.Count -gt 0) {
@@ -3152,8 +3228,20 @@ function Acquire-GlobalWorkerLease {
 function Release-GlobalWorkerLease {
     param([AllowNull()][string]$LeasePath)
 
-    if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
-        Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock { Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue }
+    if ([string]::IsNullOrWhiteSpace($LeasePath)) { return }
+
+    try {
+        $removed = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
+            Remove-GlobalWorkerLeaseFileUnlocked -Path $LeasePath
+        }
+        if (-not $removed) {
+            Write-Host ("LEASE_RELEASE_DEFERRED: active lease could not be removed after retries. Path={0}" -f $LeasePath) -ForegroundColor Yellow
+        }
+        return
+    }
+    catch {
+        Write-Host ("LEASE_RELEASE_DEFERRED: active lease cleanup failed without stopping the LOT. Path={0}; Error={1}" -f $LeasePath,$_.Exception.Message) -ForegroundColor Yellow
+        return
     }
 }
 
@@ -3454,18 +3542,22 @@ function Invoke-IntuneHybridJoinRepairCycle {
         function Save-WorkerLeaseData {
             param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Data)
             $parent = Split-Path -Parent $Path
-            $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
             $json = $Data | ConvertTo-Json -Depth 4
             $lastError = $null
             for ($attempt = 1; $attempt -le 5; $attempt++) {
+                $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
                 try {
                     Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
                     Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
                     return
                 }
                 catch { $lastError = $_; Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt)) }
+                finally {
+                    if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                        try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch { }
+                    }
+                }
             }
-            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
             if ($lastError) { throw $lastError }
         }
         function Invoke-WithWorkerLeaseMutex {
@@ -4476,7 +4568,19 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             $techRunGuardFqdn = Get-TechnicianRunGuardFqdn -ComputerName $computer -AdInventoryMap $script:AdInventoryMap
             if ($script:UseEffectiveTechnicianRunGuardHistory) {
-                $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -Hours $TechnicianRunGuardHours
+                $activeTechRunGuard = $null
+                try {
+                    $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -Hours $TechnicianRunGuardHours
+                }
+                catch {
+                    $historyError = "Technician run guard history is unavailable; this computer was not launched. Error=$($_.Exception.Message)"
+                    $guardUnavailableResult = New-HybridJoinCancellationResult -ComputerName $computer -CycleNumber $CycleNumber -Status 'TECH_RUN_GUARD_HISTORY_UNAVAILABLE' -Detail $historyError
+                    $summary.Add($guardUnavailableResult)
+                    Add-LiveCycleReportRow -Path $liveSummaryPath -Columns $reportColumns -Row $guardUnavailableResult
+                    $completed++
+                    Write-Host ("Skipped {0}/{1}: {2} => TECH_RUN_GUARD_HISTORY_UNAVAILABLE" -f $completed,$computers.Count,$computer) -ForegroundColor Yellow
+                    continue
+                }
                 if ($activeTechRunGuard) {
                     $skipResult = New-TechnicianRunGuardSkippedResult -ComputerName $computer -CycleNumber $CycleNumber -HistoryEntry $activeTechRunGuard
                     $summary.Add($skipResult)
@@ -4528,7 +4632,12 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $jobStartedAtById[[string]$job.Id] = Get-Date
                 if ($script:UseEffectiveTechnicianRunGuardHistory) {
                     $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
-                    Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -Hours $TechnicianRunGuardHours -State Started -Result $null -JobId ([string]$job.Id) -CycleNumber $CycleNumber
+                    try {
+                        Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -Hours $TechnicianRunGuardHours -State Started -Result $null -JobId ([string]$job.Id) -CycleNumber $CycleNumber
+                    }
+                    catch {
+                        Write-Host ("TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: State=Started; Computer={0}; Error={1}" -f $computer,$_.Exception.Message) -ForegroundColor Yellow
+                    }
                 }
             }
             catch {
@@ -4731,7 +4840,20 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     if ($script:UseEffectiveTechnicianRunGuardHistory) {
                         $jobKey = [string]$job.Id
                         $resultFqdn = if ($techRunGuardFqdnByJobId.ContainsKey($jobKey)) { [string]$techRunGuardFqdnByJobId[$jobKey] } else { Get-TechnicianRunGuardFqdn -ComputerName ([string]$item.Computer) -AdInventoryMap $script:AdInventoryMap }
-                        Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.Computer) -Hours $TechnicianRunGuardHours -State Result -Result $item -JobId $jobKey -CycleNumber $CycleNumber
+                        try {
+                            Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.Computer) -Hours $TechnicianRunGuardHours -State Result -Result $item -JobId $jobKey -CycleNumber $CycleNumber
+                        }
+                        catch {
+                            $historyWarning = "TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: State=Result; Computer=$($item.Computer); Error=$($_.Exception.Message)"
+                            Write-Host $historyWarning -ForegroundColor Yellow
+                            if ($item.PSObject.Properties['ErrorMessage']) {
+                                $existingError = [string]$item.ErrorMessage
+                                $item.ErrorMessage = if ([string]::IsNullOrWhiteSpace($existingError)) { $historyWarning } else { "$existingError | $historyWarning" }
+                            }
+                            else {
+                                $item | Add-Member -NotePropertyName ErrorMessage -NotePropertyValue $historyWarning -Force
+                            }
+                        }
                     }
                     $summary.Add($item)
                     try {
@@ -5092,8 +5214,7 @@ if ($script:UseEffectiveTechnicianRunGuardHistory) {
         }
     }
     catch {
-        Write-Host ("Technician run guard history disabled: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-        $script:UseEffectiveTechnicianRunGuardHistory = $false
+        Write-Host ("Technician run guard history is temporarily unavailable; launches will fail closed until access recovers. Error={0}" -f $_.Exception.Message) -ForegroundColor Yellow
     }
 }
 Write-Host ("Technician run guard: Effective={0}; Requested={1}; Ignore={2}; Hours={3}; Path={4}" -f $script:UseEffectiveTechnicianRunGuardHistory,[bool]$UseTechnicianRunGuardHistory,[bool]$IgnoreTechnicianRunGuardHistory,$TechnicianRunGuardHours,$script:TechnicianRunGuardHistoryPath) -ForegroundColor DarkCyan
@@ -5108,6 +5229,7 @@ Write-Host ("Merged HTML report: {0}" -f $script:MergedHtmlReportPath) -Foregrou
 Set-ActiveLotRunState -Status 'Running' -ReportPath $script:MergedHtmlReportPath
 
 $cycle = 0
+$script:LotStopReason = ''
 do {
     $preCycleCancellation = Get-LotCancellationState
     if ($preCycleCancellation.Requested) {
@@ -5115,13 +5237,30 @@ do {
         break
     }
     Wait-OutsideNightPauseWindow -NextCycleNumber ($cycle + 1)
+    if (-not (Test-ComputerListPresentWithRetry -Path $ComputerListPath)) {
+        $script:LotStopReason = 'LOT_INPUT_REMOVED'
+        Write-Host ("[LOT_INPUT_REMOVED] Computers.txt disappeared after the LOT started. Existing reports are preserved and no new worker will start. Path={0}" -f $ComputerListPath) -ForegroundColor Yellow
+        Set-ActiveLotRunState -Status 'StoppedInputRemoved' -ReportPath $script:MergedHtmlReportPath
+        break
+    }
     $cycle++
     $cycleArgs = @($scriptArgsBase)
     if ($IgnoreRunGuard -and ($cycle -eq 1 -or $IgnoreRunGuardEveryCycle)) {
         $cycleArgs += "-IgnoreRunGuard"
     }
 
-    $null = Invoke-IntuneHybridJoinRepairCycle -CycleNumber $cycle -CycleScriptArgs $cycleArgs
+    try {
+        $null = Invoke-IntuneHybridJoinRepairCycle -CycleNumber $cycle -CycleScriptArgs $cycleArgs
+    }
+    catch {
+        if (-not (Test-ComputerListPresentWithRetry -Path $ComputerListPath)) {
+            $script:LotStopReason = 'LOT_INPUT_REMOVED'
+            Write-Host ("[LOT_INPUT_REMOVED] Computers.txt disappeared during cycle {0}. Existing reports are preserved and the LOT will stop cleanly. Path={1}" -f $cycle,$ComputerListPath) -ForegroundColor Yellow
+            Set-ActiveLotRunState -Status 'StoppedInputRemoved' -ReportPath $script:MergedHtmlReportPath
+            break
+        }
+        throw
+    }
 
     if ((Get-LotCancellationState).Requested) { break }
     if ($RunOnce) { break }
@@ -5157,7 +5296,8 @@ if ($script:LotRunMutex -ne $null) {
     $script:LotRunMutex = $null
 }
 
-Set-ActiveLotRunState -Status 'Finished' -ReportPath $script:MergedHtmlReportPath
+$finalLotRunStatus = if ($script:LotStopReason -eq 'LOT_INPUT_REMOVED') { 'StoppedInputRemoved' } else { 'Finished' }
+Set-ActiveLotRunState -Status $finalLotRunStatus -ReportPath $script:MergedHtmlReportPath
 Complete-LotCancellationSupport
 
 # SIG # Begin signature block

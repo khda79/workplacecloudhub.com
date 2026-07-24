@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.29
+0.1.30
 #>
 
 #requires -Version 5.1
@@ -119,9 +119,9 @@ function Save-WorkerLeaseData {
 
     $parent = Split-Path -Parent $Path
     $json = $Data | ConvertTo-Json -Depth $Depth
-    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
     $lastError = $null
     for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
         try {
             Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
@@ -131,9 +131,13 @@ function Save-WorkerLeaseData {
             $lastError = $_
             Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
         }
+        finally {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
 
-    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
     if ($lastError) { throw $lastError }
     throw ("Failed to save global worker lease: {0}" -f $Path)
 }
