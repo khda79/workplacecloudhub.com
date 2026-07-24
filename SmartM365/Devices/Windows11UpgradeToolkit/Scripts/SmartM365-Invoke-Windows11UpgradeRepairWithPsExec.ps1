@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.65
+    0.1.66
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -406,19 +406,29 @@ function Invoke-TechnicianRunGuardHistoryLock {
         [object[]]$ArgumentList = @()
     )
 
-    $mutex = $null
-    $acquired = $false
+    $lockStream = $null
+    $lockPath = '{0}.lock' -f (Get-TechnicianRunGuardHistoryPath)
+    $lockParent = Split-Path -Parent $lockPath
+    $deadlineUtc = (Get-Date).ToUniversalTime().AddSeconds(60)
+    New-Directory -Path $lockParent
     try {
-        $mutexName = 'Global\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory'
-        try { $mutex = New-Object System.Threading.Mutex($false, $mutexName) }
-        catch { $mutex = New-Object System.Threading.Mutex($false, 'Local\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory') }
-        try { $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(60)) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
-        if (-not $acquired) { throw 'Timed out waiting for technician run guard history lock after 60 seconds.' }
+        while ($null -eq $lockStream -and (Get-Date).ToUniversalTime() -lt $deadlineUtc) {
+            try {
+                $lockStream = [System.IO.File]::Open(
+                    $lockPath,
+                    [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite,
+                    [System.IO.FileShare]::None
+                )
+            }
+            catch [System.IO.IOException] { Start-Sleep -Milliseconds 150 }
+            catch [System.UnauthorizedAccessException] { Start-Sleep -Milliseconds 150 }
+        }
+        if ($null -eq $lockStream) { throw 'Timed out waiting for technician run guard history file lock after 60 seconds.' }
         & $ScriptBlock @ArgumentList
     }
     finally {
-        if ($acquired -and $mutex) { try { $mutex.ReleaseMutex() } catch { } }
-        if ($mutex) { $mutex.Dispose() }
+        if ($lockStream) { $lockStream.Dispose() }
     }
 }
 
@@ -513,10 +523,10 @@ function Save-TechnicianRunGuardHistory {
     New-Directory -Path $parent
     $History.UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
     $json = $History | ConvertTo-Json -Depth 8
-    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
     $lastError = $null
 
     for ($attempt = 1; $attempt -le 10; $attempt++) {
+        $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
         try {
             Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
@@ -530,9 +540,13 @@ function Save-TechnicianRunGuardHistory {
             $lastError = $_
             Start-Sleep -Milliseconds ([math]::Min(2000, 150 * $attempt))
         }
+        finally {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
 
-    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
     if ($lastError) { throw $lastError }
     throw ("Failed to save technician run guard history: {0}" -f $Path)
 }
@@ -920,6 +934,23 @@ function Get-ComputerList {
     }
     return @($result.ToArray())
 }
+
+function Test-ComputerListPresentWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 20)][int]$Attempts = 5,
+        [ValidateRange(0, 5000)][int]$DelayMilliseconds = 200
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { return $true }
+        if ($attempt -lt $Attempts -and $DelayMilliseconds -gt 0) {
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+    return $false
+}
+
 
 function Get-ComputerListStats {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -1948,8 +1979,7 @@ if ($script:UseEffectiveTechnicianRunGuardHistory) {
         }
     }
     catch {
-        Write-Host ("Technician run guard history disabled: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-        $script:UseEffectiveTechnicianRunGuardHistory = $false
+        Write-Host ("Technician run guard history is temporarily unavailable; launches will fail closed until access recovers. Error={0}" -f $_.Exception.Message) -ForegroundColor Yellow
     }
 }
 Test-SetupSourceMapSyntax -Path $SetupSourceMapPath
@@ -2712,9 +2742,9 @@ function Save-GlobalLeaseData {
     $parent = Split-Path -Parent $Path
     New-Directory -Path $parent
     $json = $Data | ConvertTo-Json -Depth $Depth
-    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
     $lastError = $null
     for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
         try {
             Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
@@ -2724,11 +2754,36 @@ function Save-GlobalLeaseData {
             $lastError = $_
             Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
         }
+        finally {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
 
-    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
     if ($lastError) { throw $lastError }
     throw ("Failed to save global worker lease: {0}" -f $Path)
+}
+
+function Remove-GlobalLeaseFileUnlocked {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 20)][int]$Attempts = 5
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $true }
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $true }
+        }
+        catch [System.IO.IOException] { }
+        catch [System.UnauthorizedAccessException] { }
+        catch { }
+        Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
+    }
+
+    return (-not (Test-Path -LiteralPath $Path -PathType Leaf))
 }
 
 function Remove-StaleGlobalLeases {
@@ -2757,8 +2812,12 @@ function Remove-StaleGlobalLeases {
             $remove = $true; $reason = 'InvalidLease'
         }
         if ($remove) {
-            $removed.Add([pscustomobject]@{ Reason = $reason; Computer = $computerName; LauncherPid = $launcherPid })
-            Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
+            if (Remove-GlobalLeaseFileUnlocked -Path $lease.FullName) {
+                $removed.Add([pscustomobject]@{ Reason = $reason; Computer = $computerName; LauncherPid = $launcherPid })
+            }
+            else {
+                Write-Host ("LEASE_RELEASE_DEFERRED: stale lease could not be removed after retries. Path={0}; Reason={1}" -f $lease.FullName,$reason) -ForegroundColor Yellow
+            }
         }
     }
     if ($removed.Count -gt 0) {
@@ -2876,8 +2935,20 @@ function Test-SampleDnsResolution {
 
 function Release-GlobalLease {
     param([AllowNull()][string]$LeasePath)
-    if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
-        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($LeasePath)) { return }
+
+    try {
+        $removed = Invoke-WithGlobalGateMutex -ScriptBlock {
+            Remove-GlobalLeaseFileUnlocked -Path $LeasePath
+        }
+        if (-not $removed) {
+            Write-Host ("LEASE_RELEASE_DEFERRED: active lease could not be removed after retries. Path={0}" -f $LeasePath) -ForegroundColor Yellow
+        }
+        return
+    }
+    catch {
+        Write-Host ("LEASE_RELEASE_DEFERRED: active lease cleanup failed without stopping the LOT. Path={0}; Error={1}" -f $LeasePath,$_.Exception.Message) -ForegroundColor Yellow
+        return
     }
 }
 
@@ -2897,6 +2968,7 @@ $script:AttemptNextActionCounter = @{}
 $script:AttemptAdminShareFailureCounter = @{}
 $script:AttemptRowCount = 0
 $allCycleProgressRows = New-Object System.Collections.ArrayList
+$script:LotStopReason = ''
 Write-Host ("Merged HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
 Set-ActiveLotRunState -Status 'Running' -ReportPath $mergedLiveHtmlPath
 do {
@@ -2905,13 +2977,41 @@ do {
         Write-Host ("Cancellation requested before cycle {0}; no new cycle will start." -f ($cycle + 1)) -ForegroundColor Yellow
         break
     }
+    if ($cycle -gt 0 -and -not (Test-ComputerListPresentWithRetry -Path $ComputerListPath)) {
+        $script:LotStopReason = 'LOT_INPUT_REMOVED'
+        Write-Host ("[LOT_INPUT_REMOVED] Computers.txt disappeared after the LOT started. The launcher will preserve existing reports and stop cleanly. Path={0}" -f $ComputerListPath) -ForegroundColor Yellow
+        Set-ActiveLotRunState -Status 'StoppedInputRemoved' -ReportPath $mergedLiveHtmlPath
+        break
+    }
     $cycle++
-    $preCycleInventory = Invoke-Windows11InventoryPreCycleRefresh -CycleNumber $cycle
+    try {
+        $preCycleInventory = Invoke-Windows11InventoryPreCycleRefresh -CycleNumber $cycle
+    }
+    catch {
+        if (-not (Test-ComputerListPresentWithRetry -Path $ComputerListPath)) {
+            $script:LotStopReason = 'LOT_INPUT_REMOVED'
+            Write-Host ("[LOT_INPUT_REMOVED] Computers.txt disappeared during cycle {0} preparation. Existing reports are preserved and no new worker will start. Path={1}" -f $cycle,$ComputerListPath) -ForegroundColor Yellow
+            Set-ActiveLotRunState -Status 'StoppedInputRemoved' -ReportPath $mergedLiveHtmlPath
+            break
+        }
+        throw
+    }
     if ($preCycleInventory.MovedFromIntune -gt 0 -or $preCycleInventory.MovedFromAd -gt 0) {
         Write-Host ("Cycle {0}: inventory precheck removed {1} already-Windows11 computer(s); Remaining={2}" -f $cycle,($preCycleInventory.MovedFromIntune + $preCycleInventory.MovedFromAd),$preCycleInventory.RemainingComputers) -ForegroundColor Green
     }
-    $computers = @(Get-ComputerList -Path $ComputerListPath)
-    $computerListStats = Get-ComputerListStats -Path $ComputerListPath
+    try {
+        $computers = @(Get-ComputerList -Path $ComputerListPath)
+        $computerListStats = Get-ComputerListStats -Path $ComputerListPath
+    }
+    catch {
+        if (-not (Test-ComputerListPresentWithRetry -Path $ComputerListPath)) {
+            $script:LotStopReason = 'LOT_INPUT_REMOVED'
+            Write-Host ("[LOT_INPUT_REMOVED] Computers.txt disappeared before cycle {0} could queue workers. Existing reports are preserved. Path={1}" -f $cycle,$ComputerListPath) -ForegroundColor Yellow
+            Set-ActiveLotRunState -Status 'StoppedInputRemoved' -ReportPath $mergedLiveHtmlPath
+            break
+        }
+        throw
+    }
     if ($computerListStats.DuplicateGroups -gt 0) {
         Write-Host ("Cycle {0}: Computers.txt contains {1} duplicate line(s) in {2} duplicate group(s). Duplicates ignored: {3}" -f $cycle,$computerListStats.DuplicateLines,$computerListStats.DuplicateGroups,$computerListStats.DuplicateSamples) -ForegroundColor Yellow
     }
@@ -2983,7 +3083,19 @@ do {
 
             $techRunGuardFqdn = Get-TechnicianRunGuardFqdn -ComputerName $computer -AdInventoryMap $script:AdInventoryMap
             if ($script:UseEffectiveTechnicianRunGuardHistory) {
-                $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -RunGuardHours $RunGuardHours
+                $activeTechRunGuard = $null
+                try {
+                    $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -RunGuardHours $RunGuardHours
+                }
+                catch {
+                    $historyError = "Technician run guard history is unavailable; this computer was not launched. Error=$($_.Exception.Message)"
+                    $guardUnavailableResult = New-Windows11CancellationResult -ComputerName $computer -CycleNumber $cycle -Status 'TECH_RUN_GUARD_HISTORY_UNAVAILABLE' -Detail $historyError
+                    $guardUnavailableResult = Add-AdInventoryFieldsToResult -Result $guardUnavailableResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    $guardUnavailableResult = Add-IntuneInventoryFieldsToResult -Result $guardUnavailableResult -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
+                    [void]$results.Add($guardUnavailableResult)
+                    Write-Host ("  [TECH_RUN_GUARD_HISTORY_UNAVAILABLE] {0}: {1}" -f $computer,$historyError) -ForegroundColor Yellow
+                    continue
+                }
                 if ($null -ne $activeTechRunGuard) {
                     $skipResult = New-TechnicianRunGuardSkippedResult -ComputerName $computer -CycleNumber $cycle -HistoryEntry $activeTechRunGuard -RunGuardHours $RunGuardHours
                     $skipResult = Add-AdInventoryFieldsToResult -Result $skipResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
@@ -3036,7 +3148,12 @@ do {
                 $jobStartedAtById[[string]$job.Id] = Get-Date
                 if ($script:UseEffectiveTechnicianRunGuardHistory) {
                     $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
-                    Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -RunGuardHours $RunGuardHours -State Started -Result $null -JobId ([string]$job.Id)
+                    try {
+                        Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -RunGuardHours $RunGuardHours -State Started -Result $null -JobId ([string]$job.Id)
+                    }
+                    catch {
+                        Write-Host ("TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: State=Started; Computer={0}; Error={1}" -f $computer,$_.Exception.Message) -ForegroundColor Yellow
+                    }
                 }
             }
             catch {
@@ -3190,7 +3307,20 @@ do {
                     Write-Host ("Completed {0}; Elapsed={1} min; Status={2}; NextAction={3}; ExitCode={4}; Detail={5}" -f $computerForLog,$jobElapsedMinutes,$statusForLog,$nextActionForLog,$exitCodeForLog,$detailForLog) -ForegroundColor $completionColor
                     if ($script:UseEffectiveTechnicianRunGuardHistory) {
                         $resultFqdn = if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) { [string]$techRunGuardFqdnByJobId[[string]$job.Id] } else { Get-TechnicianRunGuardFqdn -ComputerName ([string]$item.ComputerName) -AdInventoryMap $script:AdInventoryMap }
-                        Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.ComputerName) -RunGuardHours $RunGuardHours -State Result -Result $item -JobId ([string]$job.Id)
+                        try {
+                            Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.ComputerName) -RunGuardHours $RunGuardHours -State Result -Result $item -JobId ([string]$job.Id)
+                        }
+                        catch {
+                            $historyWarning = "TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: State=Result; Computer=$($item.ComputerName); Error=$($_.Exception.Message)"
+                            Write-Host $historyWarning -ForegroundColor Yellow
+                            if ($item.PSObject.Properties['JobErrorMessage']) {
+                                $existingJobError = [string]$item.JobErrorMessage
+                                $item.JobErrorMessage = if ([string]::IsNullOrWhiteSpace($existingJobError)) { $historyWarning } else { "$existingJobError | $historyWarning" }
+                            }
+                            else {
+                                $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue $historyWarning -Force
+                            }
+                        }
                     }
                     [void]$results.Add($item)
                     if (-not $DryRun -and (Test-AlreadyWindows11CycleResult -Result $item)) {
@@ -3316,7 +3446,8 @@ if ($null -ne $script:globalGateMutex) {
     $script:globalGateMutex = $null
 }
 
-Set-ActiveLotRunState -Status 'Finished' -ReportPath $mergedFinalHtmlPath
+$finalLotRunStatus = if ($script:LotStopReason -eq 'LOT_INPUT_REMOVED') { 'StoppedInputRemoved' } else { 'Finished' }
+Set-ActiveLotRunState -Status $finalLotRunStatus -ReportPath $mergedFinalHtmlPath
 Complete-LotCancellationSupport
 
 # SIG # Begin signature block
