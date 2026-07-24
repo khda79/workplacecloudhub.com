@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.37
+0.1.39
 #>
 param(
     [switch]$ValidateOnly
@@ -371,6 +371,18 @@ function New-ToolkitLotFolder {
     }
 }
 
+function Assert-CmdLiteralValue {
+    param(
+        [AllowNull()][string]$Value,
+        [string]$Context = 'CMD value'
+    )
+
+    if ($null -eq $Value) { return }
+    if ($Value.IndexOf([char]0) -ge 0 -or $Value -match '[\r\n"%!]' ) {
+        throw ("{0} contains a character that cannot be represented safely in a generated CMD launcher. Remove quotes, percent signs, exclamation marks, or line breaks." -f $Context)
+    }
+}
+
 function ConvertTo-CmdArgument {
     param([string]$Value)
 
@@ -378,11 +390,12 @@ function ConvertTo-CmdArgument {
         return '""'
     }
 
+    Assert-CmdLiteralValue -Value $Value -Context 'CMD argument'
     if ($Value -match '^[A-Za-z0-9_:\\./=-]+$') {
         return $Value
     }
 
-    return ('"{0}"' -f ($Value -replace '"', '\"'))
+    return ('"{0}"' -f $Value)
 }
 
 function ConvertTo-CmdSetCommand {
@@ -395,7 +408,8 @@ function ConvertTo-CmdSetCommand {
         throw "Invalid environment variable name: $Name"
     }
 
-    return ('set "{0}={1}"' -f $Name, (($Value -replace '"', '\"')))
+    Assert-CmdLiteralValue -Value $Value -Context ("Environment variable {0}" -f $Name)
+    return ('set "{0}={1}"' -f $Name, $Value)
 }
 
 
@@ -469,6 +483,7 @@ function New-GuiLaunchCommandFile {
         [Parameter(Mandatory = $true)][string[]]$Commands,
         [string]$NamePrefix = 'W11UT-GUI',
         [string]$WindowTitle,
+        [string]$EvidenceDirectory,
         [switch]$PauseWhenDone
     )
 
@@ -481,7 +496,8 @@ function New-GuiLaunchCommandFile {
     $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     $launchLines = New-Object System.Collections.Generic.List[string]
     $launchLines.Add('@echo off')
-    $launchLines.Add('setlocal')
+    $launchLines.Add('setlocal DisableDelayedExpansion')
+    $launchLines.Add('echo GUI launcher : %~f0')
     if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
         $launchLines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle)))
     }
@@ -500,6 +516,20 @@ function New-GuiLaunchCommandFile {
     $launchLines.Add('exit /b %EXITCODE%')
 
     Set-Content -LiteralPath $launchPath -Value $launchLines -Encoding ASCII -Force
+    if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+        New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+        $evidencePath = Join-Path $EvidenceDirectory 'GuiLaunchCommand.cmd'
+        Copy-Item -LiteralPath $launchPath -Destination $evidencePath -Force
+        $launcherHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash
+        Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'GuiLaunchCommandEvidence.txt') -Encoding UTF8 -Force -Value @(
+            'SmartM365 Windows 11 Upgrade Toolkit GUI launcher evidence'
+            ('GeneratedUtc={0}' -f (Get-Date).ToUniversalTime().ToString('o'))
+            ('TemporaryLauncher={0}' -f $launchPath)
+            ('EvidenceLauncher={0}' -f $evidencePath)
+            ('WorkingDirectory={0}' -f $WorkingDirectory)
+            ('SHA256={0}' -f $launcherHash)
+        )
+    }
     return $launchPath
 }
 
@@ -509,7 +539,9 @@ function Start-GuiLaunchCommandFile {
         [Parameter(Mandatory = $true)][string]$WorkingDirectory
     )
 
-    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
+    Assert-CmdLiteralValue -Value $LaunchCommandPath -Context 'GUI launcher path'
+    $cmdArguments = '/d /s /c ""{0}""' -f $LaunchCommandPath
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArguments -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
 }
 
 function Start-LotHtmlReportOpenWatcher {
@@ -600,12 +632,39 @@ function Resolve-GuiPsExecPath {
     throw 'PsExec.exe not found. Place it in Scripts, System32, or PATH before launching.'
 }
 
+function Copy-AutomaticInventorySnapshotToRun {
+    param(
+        [AllowNull()]$InventoryContext,
+        [Parameter(Mandatory = $true)][string]$RunPath
+    )
+
+    if (-not $InventoryContext) { return @() }
+    $copied = New-Object System.Collections.Generic.List[string]
+    foreach ($source in @(
+        [pscustomobject]@{ Property = 'AdInventoryCsv'; FileName = 'DevicesAD.csv' },
+        [pscustomobject]@{ Property = 'IntuneInventoryCsv'; FileName = 'DevicesIntune.csv' }
+    )) {
+        if (-not $InventoryContext.PSObject.Properties[$source.Property]) { continue }
+        $sourcePath = [string]$InventoryContext.PSObject.Properties[$source.Property].Value
+        if ([string]::IsNullOrWhiteSpace($sourcePath)) { continue }
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw ("Automatic inventory snapshot not found: {0}" -f $sourcePath)
+        }
+
+        $destinationPath = Join-Path $RunPath $source.FileName
+        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        $copied.Add($destinationPath)
+    }
+    return @($copied)
+}
+
 function Start-ToolkitLot {
     param(
         [pscustomobject]$Lot,
         [string]$Mode,
         [string[]]$AdditionalArguments = @(),
-        [hashtable]$EnvironmentVariables = @{}
+        [hashtable]$EnvironmentVariables = @{},
+        [AllowNull()]$InitialInventoryContext
     )
 
     $wrapperName = switch ($Mode) {
@@ -625,6 +684,7 @@ function Start-ToolkitLot {
 
     $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $Lot.Path -EnvironmentVariables $EnvironmentVariables
     $run = New-LotRunContext -RootPath $toolkitRoot -LotName $Lot.Name
+    [void](Copy-AutomaticInventorySnapshotToRun -InventoryContext $InitialInventoryContext -RunPath $run.RunPath)
     $effectiveEnvironment['W11UT_RUN_DIR'] = $run.RunPath
     $effectiveEnvironment['W11UT_LOT_DIR'] = $Lot.Path
 
@@ -651,7 +711,7 @@ function Start-ToolkitLot {
 
     $commands.Add(($commandParts -join ' '))
     $launchTitle = "{0} - {1} - started {2}" -f $Lot.Name,$Mode,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle -EvidenceDirectory $run.LauncherLogRoot
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
     Start-LotHtmlReportOpenWatcher -ReportRoot $run.ReportRoot
 }
@@ -778,7 +838,7 @@ function Start-ToolkitSingleComputer {
         $commandParts.Add((ConvertTo-CmdArgument -Value $argument))
     }
 
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @(($commandParts -join ' ')) -NamePrefix ('Single-' + $run.SafeComputerName) -PauseWhenDone
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @(($commandParts -join ' ')) -NamePrefix ('Single-' + $run.SafeComputerName) -EvidenceDirectory $run.LauncherLogRoot -PauseWhenDone
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
     return $run
 }
@@ -1725,48 +1785,56 @@ function Get-AutomaticInventorySnapshot {
     foreach ($requestedSource in $requestedSources) {
         try {
             if ($requestedSource -eq 'AD') {
-                $rootCsv = Join-Path $toolkitRoot 'DevicesAD.csv'
-                $cache = Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 12 -SourceName 'AD'
-                if ($cache.Fresh) {
-                    $paths.AD = $rootCsv
-                    $details.Add("AD: reused $($cache.Detail)")
-                }
-                else {
-                    $outputCsv = Join-Path $sourceRunPath 'DevicesAD.csv'
-                    $logPath = Join-Path $sourceRunPath 'DevicesAD.refresh.log'
-                    $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1'
-                    Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments @('-OutputPath', $outputCsv, '-ForceRefresh') -LogPath $logPath -Activity 'Reading the complete AD forest inventory...'
-                    if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "AD inventory CSV was not created: $outputCsv" }
-                    $paths.AD = $outputCsv
-                    $details.Add("AD: refreshed read-only inventory to $outputCsv")
-                }
+                $outputCsv = Join-Path $sourceRunPath 'DevicesAD.csv'
+                $logPath = Join-Path $sourceRunPath 'DevicesAD.refresh.log'
+                $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1'
+                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments @('-OutputPath', $outputCsv, '-ForceRefresh') -LogPath $logPath -Activity 'Reading a fresh complete AD forest inventory for the automatic LOT...'
+                if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "AD inventory CSV was not created: $outputCsv" }
+                $paths.AD = $outputCsv
+                $details.Add("AD: generated isolated automatic snapshot $outputCsv")
             }
             else {
-                $rootCsv = Join-Path $toolkitRoot 'DevicesIntune.csv'
-                $cache = Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantProfile $TenantProfile
-                if ($cache.Fresh) {
-                    $paths.Intune = $rootCsv
-                    $details.Add("Intune: reused $($cache.Detail)")
-                }
-                else {
-                    if ($cache.Exists -and $cache.AgeHours -le 2) {
-                        $details.Add("Intune: ignored fresh root cache because $($cache.Detail)")
-                    }
-                    $outputCsv = Join-Path $sourceRunPath 'DevicesIntune.csv'
-                    $logPath = Join-Path $sourceRunPath 'DevicesIntune.refresh.log'
-                    $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1'
-                    $arguments = @('-Tenant', $TenantProfile, '-OutputPath', $outputCsv, '-ForceRefresh')
-                    $configuredTenantId = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
-                    if (-not [string]::IsNullOrWhiteSpace($configuredTenantId)) { $arguments += @('-TenantId', $configuredTenantId) }
-                    Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments $arguments -LogPath $logPath -Activity ("Reading the complete Intune inventory with app-only profile '{0}'..." -f $TenantProfile)
-                    if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "Intune inventory CSV was not created: $outputCsv" }
-                    $paths.Intune = $outputCsv
-                    $details.Add("Intune: refreshed read-only inventory to $outputCsv")
-                }
+                $outputCsv = Join-Path $sourceRunPath 'DevicesIntune.csv'
+                $logPath = Join-Path $sourceRunPath 'DevicesIntune.refresh.log'
+                $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1'
+                $arguments = @('-Tenant', $TenantProfile, '-OutputPath', $outputCsv, '-ForceRefresh')
+                $configuredTenantId = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
+                if (-not [string]::IsNullOrWhiteSpace($configuredTenantId)) { $arguments += @('-TenantId', $configuredTenantId) }
+                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments $arguments -LogPath $logPath -Activity ("Reading a fresh complete Intune inventory with app-only profile '{0}' for the automatic LOT..." -f $TenantProfile)
+                if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "Intune inventory CSV was not created: $outputCsv" }
+                $paths.Intune = $outputCsv
+                $details.Add("Intune: generated isolated automatic snapshot $outputCsv")
             }
         }
         catch {
-            $failures.Add(("{0}: {1}" -f $requestedSource, $_.Exception.Message))
+            $refreshError = $_.Exception.Message
+            $rootCsv = Join-Path $toolkitRoot $(if ($requestedSource -eq 'AD') { 'DevicesAD.csv' } else { 'DevicesIntune.csv' })
+            $fallback = if ($requestedSource -eq 'AD') {
+                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 12 -SourceName 'AD'
+            }
+            else {
+                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantProfile $TenantProfile
+            }
+
+            $fallbackAccepted = $false
+            if ($fallback.Fresh) {
+                $fallbackAccepted = Show-GuiWarningYesNo -Title ("{0} refresh failed" -f $requestedSource) -Message ((@(
+                    ("The automatic {0} snapshot could not be generated:" -f $requestedSource)
+                    $refreshError
+                    ''
+                    ("A verified recent root cache is available: {0}" -f $rootCsv)
+                    ([string]$fallback.Detail)
+                    ''
+                    'Use this root cache explicitly as the fallback for this preview? A copy will still be preserved in the automatic evidence and run folders.'
+                )) -join [Environment]::NewLine)
+            }
+
+            if ($fallbackAccepted) {
+                $paths[$requestedSource] = $rootCsv
+                $details.Add(("{0}: root cache fallback explicitly accepted after refresh failure; {1}" -f $requestedSource,$fallback.Detail))
+                continue
+            }
+            $failures.Add(("{0}: {1}" -f $requestedSource,$refreshError))
         }
     }
 
@@ -1793,7 +1861,6 @@ function Get-AutomaticInventorySnapshot {
         SourceRunPath = $sourceRunPath
     }
 }
-
 function Invoke-AutomaticLotSelection {
     param(
         [Parameter(Mandatory = $true)]$InventoryContext,
@@ -2546,7 +2613,7 @@ $controls.AutomaticCreateLaunchButton.Add_Click({
         Invoke-LotWrapperRefresh -RootPath $toolkitRoot
         $lot = Get-LotSummary -LotPath ([string]$created.Summary.LotPath)
         $lot = Ensure-LotWrappersReady -Lot $lot
-        Start-ToolkitLot -Lot $lot -Mode ([string]$controls.AutomaticModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+        Start-ToolkitLot -Lot $lot -Mode ([string]$controls.AutomaticModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment -InitialInventoryContext $script:AutomaticPreviewContext
 
         $script:AutomaticPreviewResult = $created
         $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $created -InventoryContext $script:AutomaticPreviewContext
