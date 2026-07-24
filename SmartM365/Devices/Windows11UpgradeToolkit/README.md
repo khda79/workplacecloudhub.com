@@ -73,13 +73,19 @@ preview-first:
 5. Click **Create and launch**, review the final confirmation, then launch through the normal
    LOT engine.
 
-Recent broad root caches are reused read-only: `DevicesAD.csv` for up to 12 hours and
-`DevicesIntune.csv` for up to 2 hours. The Intune root cache is reused only when its embedded `InventoryTenantProfile` and
-`InventoryScope=AllManagedDevices` provenance matches the selected profile; legacy or mismatched
-caches are refreshed. A missing or stale selected source is refreshed to a
-timestamped local folder under `Runs\AutomaticLotInventory`; automatic collection never
-overwrites a root cache. Intune refresh uses app-only certificate authentication from
-`Config\Tenants\<profile>.local.json` and requires the
+Every **Refresh and preview** first generates a fresh complete snapshot for each selected source
+under `Runs\AutomaticLotInventory\Sources-<timestamp>`; root `DevicesAD.csv` and
+`DevicesIntune.csv` files are never reused silently. If a refresh fails, the GUI may offer a
+verified recent root cache only after explicit operator confirmation: AD must be no older than
+12 hours, while Intune must be no older than 2 hours and its embedded
+`InventoryTenantProfile` and `InventoryScope=AllManagedDevices` provenance must match the
+selected profile. Automatic collection never overwrites a root cache.
+
+The selection engine preserves a copy of every accepted source in its timestamped evidence
+folder. **Create and launch** also copies the same preview snapshots to the new LOT run as
+`DevicesAD.csv` and/or `DevicesIntune.csv`; subsequent scoped cycle refreshes therefore stay
+run-local and cannot silently switch to a root cache. Intune refresh uses app-only certificate
+authentication from `Config\Tenants\<profile>.local.json` and requires the
 `DeviceManagementManagedDevices.Read.All` application permission. It does not use device-code
 authentication.
 
@@ -101,11 +107,15 @@ Selection rules are conservative:
 Evidence is stored outside Git:
 
 ```text
+Runs\AutomaticLotInventory\Sources-<timestamp>\DevicesAD.csv
+Runs\AutomaticLotInventory\Sources-<timestamp>\DevicesIntune.csv
 Runs\AutomaticLotInventory\<timestamp>\DevicesAD.csv
 Runs\AutomaticLotInventory\<timestamp>\DevicesIntune.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSelection.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotExclusions.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSummary.json
+Runs\<LOT>\<timestamp>\DevicesAD.csv
+Runs\<LOT>\<timestamp>\DevicesIntune.csv
 ```
 
 The reusable selection engine can also be run against existing CSV files without opening the
@@ -455,14 +465,14 @@ Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs\RemoteLogCollectionFailed\<Computer>\La
 Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs\Errors\<Computer>\Latest
 ```
 
-The shared LOT CMD and single-computer launcher prefer PowerShell 7 when available, with Windows PowerShell 5.1 as fallback. The WPF GUI itself remains on Windows PowerShell 5.1/STA.
+The shared LOT CMD and single-computer launcher prefer PowerShell 7 when available, with Windows PowerShell 5.1 as fallback. The WPF GUI itself remains on Windows PowerShell 5.1/STA. GUI launches disable `cmd.exe` AutoRun processing, reject CMD-expansion characters that could split or mutate a generated command, and preserve the exact generated launcher plus SHA-256 metadata as `Logs\GuiLaunchCommand.cmd` and `Logs\GuiLaunchCommandEvidence.txt` in the run folder.
 If PowerShell terminates natively with `0xC0000005`, the CMD writes `PowerShellCrash_<timestamp>.txt` in the run `Logs` folder with recent Application events 1000, 1001, and 1023.
 
 The merged HTML report keeps attempt-level status summaries but shows only the latest detailed row per computer. Per-cycle CSV files remain the exhaustive audit history and contain raw data only; clickable local, collected, and remote log links are HTML-only. Live HTML refreshes are throttled and do not run every few seconds when no result changed.
 
 By default, the orchestrator uses `W11UT_CENTRAL_LOG_COLLECTION_MODE=Standard` / `-CentralLogCollectionMode Standard`: it reads `LastRun.json`, copies the current endpoint log as `Endpoint.log`, the current result as `Result.csv`, and at most 12 recent small setup-evidence files under short `Setup\Snn.ext` names. Source paths and skipped or failed copies are recorded in `CentralLogCollection.skipped.txt`; full target logs remain available through `\\<Computer>\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs`. Use `W11UT_CENTRAL_LOG_COLLECTION_MODE=Full` or `-CentralLogCollectionMode Full` to restore the full mirror of remote `Logs`, `Output`, and `LastRun.json`. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, disk failures go to `InsufficientDisk`, compatibility failures go to `Compatibility`, missing setup languages go to `SetupSourceLanguageUnavailable`, duplicate profile setup failures go to `SetupMigrationProfileFailure`, successful duplicate profile repairs go to `SetupMigrationProfileRepaired`, migration plugin failures such as `0x8007007F`/`CscMig.dll`/`WSManMigrationPlugin.dll` go to `SetupMigrationPluginFailure`, setup media manifest validation failures go to `SetupMediaManifestFailure`, remote result collection/execution ambiguities such as `REMOTE_RESULT_STALE` go to `RemoteLogCollectionFailed` and use `CHECK_REMOTE_EXECUTION_AND_LASTRUN` as the next action, and uncategorized failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
 
-When technician run-guard history is enabled, repeated failures use status-aware retry delays: network failures wait 5, 15, 30, then 60 minutes; execution failures wait 15, 30, 60, then 120 minutes; setup failures and operator-action blockers wait up to the configured run-guard limit. Skipped rows expose `WAIT_RETRY_BACKOFF`, the failure category, consecutive failure count, and retry time. The GUI requires confirmation before launching with `Max cycles = 0` because that mode remains active until completion or operator cancellation.
+When technician run-guard history is enabled, repeated failures use status-aware retry delays: network failures wait 5, 15, 30, then 60 minutes; execution failures wait 15, 30, 60, then 120 minutes; setup failures and operator-action blockers wait up to the configured run-guard limit. Skipped rows expose `WAIT_RETRY_BACKOFF`, the failure category, consecutive failure count, and retry time. When an adaptive retry becomes due after a confirmed endpoint setup failure or a recognized endpoint-local transient state, that target receives `-IgnoreRunGuard` for that attempt only so the endpoint 12-hour guard does not cancel the approved shorter retry. Network-only failures, ambiguous PsExec/collection failures, operator-action blockers, pending-reboot states, and `RUN_GUARD_ACTIVE` never receive this automatic bypass. The GUI requires confirmation before launching with `Max cycles = 0` because that mode remains active until completion or operator cancellation.
 
 ## Controlled LOT Stop
 
