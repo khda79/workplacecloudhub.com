@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.67
+    0.1.68
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -77,6 +77,7 @@ param(
     [string]$IntuneInventoryNameColumn,
     [ValidateRange(1, 999)][int]$IntuneInventoryPageSize = 999,
     [string]$IntuneTenantId,
+    [string]$IntuneTenantProfile = 'test',
     [switch]$SkipIntuneInventoryRefresh,
 
     [string]$LogRoot,
@@ -110,7 +111,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.67'
+$script:LauncherVersion = '0.1.68'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -195,6 +196,7 @@ if (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) { $AdRootInventoryCs
 $EffectiveSkipAdInventoryRefresh = [bool]$SkipAdInventoryRefresh -or $AdInventoryUsesRecentRootCsv
 
 $IntuneInventoryUsesRecentRootCsv = $false
+$IntuneRootInventoryCacheProvenance = 'NotEvaluated'
 $requestedIntuneInventoryCsv = $IntuneInventoryCsv
 $defaultRootIntuneCsv = Join-Path $script:ToolkitRoot 'DevicesIntune.csv'
 $defaultLotIntuneFullName = [System.IO.Path]::GetFullPath($script:LotIntuneInventoryCsv)
@@ -210,7 +212,17 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
     if ($intuneRootInventoryItem) {
         $intuneRootFullName = [System.IO.Path]::GetFullPath($intuneRootInventoryItem.FullName)
         $intuneRootInventoryAge = (Get-Date) - $intuneRootInventoryItem.LastWriteTime
-        if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours) {
+        $intuneRootFirstRow = Import-Csv -LiteralPath $intuneRootFullName | Select-Object -First 1
+        $intuneRootProfile = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryTenantProfile']) { [string]$intuneRootFirstRow.InventoryTenantProfile } else { '' }
+        $intuneRootScope = if ($intuneRootFirstRow -and $intuneRootFirstRow.PSObject.Properties['InventoryScope']) { [string]$intuneRootFirstRow.InventoryScope } else { '' }
+        $intuneRootProvenanceMatches = ($intuneRootProfile -ieq $IntuneTenantProfile -and $intuneRootScope -eq 'AllManagedDevices')
+        $IntuneRootInventoryCacheProvenance = if ($intuneRootProvenanceMatches) {
+            "Verified:Profile=$intuneRootProfile;Scope=$intuneRootScope"
+        }
+        else {
+            "Rejected:Profile=$intuneRootProfile;Scope=$intuneRootScope;ExpectedProfile=$IntuneTenantProfile;ExpectedScope=AllManagedDevices"
+        }
+        if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours -and $intuneRootProvenanceMatches) {
             $IntuneRootInventoryCsv = $intuneRootFullName
             $requestedIntuneItem = if (-not [string]::IsNullOrWhiteSpace($requestedIntuneFullName)) { Get-Item -LiteralPath $requestedIntuneFullName -ErrorAction SilentlyContinue } else { $null }
             $shouldUseRootIntuneCsv = [string]::IsNullOrWhiteSpace($requestedIntuneFullName) -or (($requestedIntuneFullName -eq $defaultLotIntuneFullName) -and (-not $requestedIntuneItem))
@@ -1400,6 +1412,7 @@ function Invoke-FullIntuneInventoryExport {
         [Parameter(Mandatory = $true)][string]$LogPath,
         [Parameter(Mandatory = $true)][string]$ComputerListPath,
         [Parameter(Mandatory = $false)][int]$PageSize = 999,
+        [Parameter(Mandatory = $false)][string]$TenantProfile = 'test',
         [Parameter(Mandatory = $false)][string]$TenantId
     )
 
@@ -1412,6 +1425,7 @@ function Invoke-FullIntuneInventoryExport {
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
             '-File', $ExportScriptPath,
+            '-Tenant', $TenantProfile,
             '-OutputPath', $OutputPath,
             '-ComputerListPath', $ComputerListPath,
             '-PageSize', ([string]$PageSize),
@@ -1553,6 +1567,7 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     -LogPath $cycleIntuneInventoryLogPath `
                     -ComputerListPath $ComputerListPath `
                     -PageSize $IntuneInventoryPageSize `
+                    -TenantProfile $IntuneTenantProfile `
                     -TenantId $IntuneTenantId
                 if ($cycleIntuneInventory.Success) {
                     $script:IntuneInventoryMap = $cycleIntuneInventory.InventoryMap
@@ -2102,10 +2117,12 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneRootInventoryCsv'; Value = [string]$IntuneRootInventoryCsv }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryNameColumn'; Value = [string]$IntuneInventoryNameColumn }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryPageSize'; Value = [string]$IntuneInventoryPageSize }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantProfile'; Value = [string]$IntuneTenantProfile }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantId'; Value = [string]$IntuneTenantId }
     [pscustomobject]@{ Category = 'Intune'; Option = 'SkipIntuneInventoryRefresh'; Value = [string][bool]$SkipIntuneInventoryRefresh }
     [pscustomobject]@{ Category = 'Intune'; Option = 'EffectiveSkipIntuneInventoryRefresh'; Value = [string][bool]$EffectiveSkipIntuneInventoryRefresh }
     [pscustomobject]@{ Category = 'Intune'; Option = 'UsesRecentRootInventory'; Value = [string][bool]$IntuneInventoryUsesRecentRootCsv }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'RootInventoryCacheProvenance'; Value = [string]$IntuneRootInventoryCacheProvenance }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'ThrottleLimit'; Value = [string]$ThrottleLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLimit'; Value = [string]$GlobalConcurrencyLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLeaseTimeoutMinutes'; Value = [string]$GlobalConcurrencyLeaseTimeoutMinutes }
