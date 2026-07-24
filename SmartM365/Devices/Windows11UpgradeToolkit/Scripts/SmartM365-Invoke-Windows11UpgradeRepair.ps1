@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.54
+    0.1.55
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.54'
+$script:ScriptVersion = '0.1.55'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -584,6 +584,364 @@ function ConvertTo-Windows11IndicatorSignal {
 
     if ($signals.Count -eq 0) { return '' }
     return (@($signals) -join '; ')
+}
+
+function Get-SmartM365Windows11HardwareReadinessTag {
+    param([ValidateRange(-2, 1)][int]$ReturnCode)
+
+    switch ($ReturnCode) {
+        0 { return 'WINDOWS11_HARDWARE_CAPABLE' }
+        1 { return 'WINDOWS11_HARDWARE_NOT_CAPABLE' }
+        default { return 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED' }
+    }
+}
+
+# Adapted from Microsoft's HardwareReadiness.ps1 (Copyright (C) 2021 Microsoft Corporation).
+# Source: https://aka.ms/HWReadinessScript
+# Verified upstream source SHA256: 3F21C32818BFC3A20293317FF91A62ADB349B5A0D468A6DDDEA752F68365C24A
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+# and associated documentation files (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+function Get-SmartM365Windows11HardwareReadiness {
+    $minimumOsDiskSizeGb = 64
+    $minimumMemoryGb = 4
+    $minimumClockSpeedMhz = 1000
+    $minimumLogicalCores = 2
+    $requiredAddressWidth = 64
+    $outcome = [ordered]@{ ReturnCode = -2; Result = 'FAILED TO RUN'; Reason = ''; Logging = '' }
+
+    $updateReturnCode = {
+        param([ValidateRange(-2, 1)][int]$ReturnCode)
+        switch ($ReturnCode) {
+            0 { if ($outcome.ReturnCode -eq -2) { $outcome.ReturnCode = 0 } }
+            1 { $outcome.ReturnCode = 1 }
+            -1 { if ($outcome.ReturnCode -ne 1) { $outcome.ReturnCode = -1 } }
+        }
+    }
+    $appendReason = {
+        param([string]$Name)
+        if (-not [string]::IsNullOrWhiteSpace($Name)) { $outcome.Reason += ("{0}, " -f $Name) }
+    }
+    $appendLog = {
+        param([string]$Text)
+        if (-not [string]::IsNullOrWhiteSpace($Text)) { $outcome.Logging += $Text }
+    }
+
+    $cpuFamilySource = @'
+using Microsoft.Win32;
+using System;
+using System.Runtime.InteropServices;
+
+public class SmartM365HardwareReadinessCpuFamilyResult
+{
+    public bool IsValid { get; set; }
+    public string Message { get; set; }
+}
+
+public class SmartM365HardwareReadinessCpuFamily
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_INFO
+    {
+        public ushort ProcessorArchitecture;
+        ushort Reserved;
+        public uint PageSize;
+        public IntPtr MinimumApplicationAddress;
+        public IntPtr MaximumApplicationAddress;
+        public IntPtr ActiveProcessorMask;
+        public uint NumberOfProcessors;
+        public uint ProcessorType;
+        public uint AllocationGranularity;
+        public ushort ProcessorLevel;
+        public ushort ProcessorRevision;
+    }
+
+    [DllImport("kernel32.dll")]
+    internal static extern void GetNativeSystemInfo(ref SYSTEM_INFO lpSystemInfo);
+
+    public enum ProcessorFeature : uint { ARM_SUPPORTED_INSTRUCTIONS = 34 }
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool IsProcessorFeaturePresent(ProcessorFeature processorFeature);
+
+    private const ushort PROCESSOR_ARCHITECTURE_X86 = 0;
+    private const ushort PROCESSOR_ARCHITECTURE_ARM64 = 12;
+    private const ushort PROCESSOR_ARCHITECTURE_X64 = 9;
+    private const string INTEL_MANUFACTURER = "GenuineIntel";
+    private const string AMD_MANUFACTURER = "AuthenticAMD";
+    private const string QUALCOMM_MANUFACTURER = "Qualcomm Technologies Inc";
+
+    public static SmartM365HardwareReadinessCpuFamilyResult Validate(string manufacturer, ushort processorArchitecture)
+    {
+        SmartM365HardwareReadinessCpuFamilyResult result = new SmartM365HardwareReadinessCpuFamilyResult();
+        if (string.IsNullOrWhiteSpace(manufacturer))
+        {
+            result.IsValid = false;
+            result.Message = "Manufacturer is null or empty";
+            return result;
+        }
+
+        string registryPath = "HKEY_LOCAL_MACHINE\\Hardware\\Description\\System\\CentralProcessor\\0";
+        SYSTEM_INFO sysInfo = new SYSTEM_INFO();
+        GetNativeSystemInfo(ref sysInfo);
+
+        switch (processorArchitecture)
+        {
+            case PROCESSOR_ARCHITECTURE_ARM64:
+                if (manufacturer.Equals(QUALCOMM_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    bool isArmv81Supported = IsProcessorFeaturePresent(ProcessorFeature.ARM_SUPPORTED_INSTRUCTIONS);
+                    if (!isArmv81Supported)
+                    {
+                        long registryValue = (long)Registry.GetValue(registryPath, "CP 4030", -1);
+                        long atomicResult = (registryValue >> 20) & 0xF;
+                        if (atomicResult >= 2) { isArmv81Supported = true; }
+                    }
+                    result.IsValid = isArmv81Supported;
+                    result.Message = isArmv81Supported ? "" : "Processor does not implement ARM v8.1 atomic instruction";
+                }
+                else
+                {
+                    result.IsValid = false;
+                    result.Message = "The processor isn't currently supported for Windows 11";
+                }
+                break;
+
+            case PROCESSOR_ARCHITECTURE_X64:
+            case PROCESSOR_ARCHITECTURE_X86:
+                int cpuFamily = sysInfo.ProcessorLevel;
+                int cpuModel = (sysInfo.ProcessorRevision >> 8) & 0xFF;
+                int cpuStepping = sysInfo.ProcessorRevision & 0xFF;
+                if (manufacturer.Equals(INTEL_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        result.IsValid = true;
+                        result.Message = "";
+                        if (cpuFamily >= 6 && cpuModel <= 95 && !(cpuFamily == 6 && cpuModel == 85))
+                        {
+                            result.IsValid = false;
+                        }
+                        else if (cpuFamily == 6 && (cpuModel == 142 || cpuModel == 158) && cpuStepping == 9)
+                        {
+                            int registryValue = (int)Registry.GetValue(registryPath, "Platform Specific Field 1", -1);
+                            if ((cpuModel == 142 && registryValue != 16) || (cpuModel == 158 && registryValue != 8))
+                            {
+                                result.IsValid = false;
+                            }
+                            result.Message = "PlatformId " + registryValue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        result.IsValid = false;
+                        result.Message = "Exception:" + ex.GetType().Name;
+                    }
+                }
+                else if (manufacturer.Equals(AMD_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.IsValid = true;
+                    result.Message = "";
+                    if (cpuFamily < 23 || (cpuFamily == 23 && (cpuModel == 1 || cpuModel == 17)))
+                    {
+                        result.IsValid = false;
+                    }
+                }
+                else
+                {
+                    result.IsValid = false;
+                    result.Message = "Unsupported Manufacturer: " + manufacturer + ", Architecture: " + processorArchitecture + ", CPUFamily: " + sysInfo.ProcessorLevel + ", ProcessorRevision: " + sysInfo.ProcessorRevision;
+                }
+                break;
+
+            default:
+                result.IsValid = false;
+                result.Message = "Unsupported CPU category. Manufacturer: " + manufacturer + ", Architecture: " + processorArchitecture + ", CPUFamily: " + sysInfo.ProcessorLevel + ", ProcessorRevision: " + sysInfo.ProcessorRevision;
+                break;
+        }
+        return result;
+    }
+}
+'@
+
+    try {
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1
+        $systemDrive = if ($operatingSystem) { [string]$operatingSystem.SystemDrive } else { '' }
+        $logicalDisk = if ($systemDrive) { Get-CimInstance -ClassName Win32_LogicalDisk -Filter ("DeviceID='{0}'" -f $systemDrive) -ErrorAction Stop | Select-Object -First 1 } else { $null }
+        if ($null -eq $logicalDisk -or $null -eq $logicalDisk.Size) {
+            & $updateReturnCode 1
+            & $appendReason 'Storage'
+            & $appendLog 'Storage: Storage is null. FAIL; '
+        }
+        else {
+            $osDiskSizeGb = [int]([double]$logicalDisk.Size / 1GB)
+            if ($osDiskSizeGb -lt $minimumOsDiskSizeGb) {
+                & $updateReturnCode 1
+                & $appendReason 'Storage'
+                & $appendLog ("Storage: OSDiskSize={0}GB. FAIL; " -f $osDiskSizeGb)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Storage: OSDiskSize={0}GB. PASS; " -f $osDiskSizeGb)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Storage: OSDiskSize=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $memoryMeasure = @(Get-CimInstance -ClassName Win32_PhysicalMemory -ErrorAction Stop) | Measure-Object -Property Capacity -Sum
+        if ($null -eq $memoryMeasure -or $null -eq $memoryMeasure.Sum) {
+            & $updateReturnCode 1
+            & $appendReason 'Memory'
+            & $appendLog 'Memory: Memory is null. FAIL; '
+        }
+        else {
+            $memoryGb = [int]([double]$memoryMeasure.Sum / 1GB)
+            if ($memoryGb -lt $minimumMemoryGb) {
+                & $updateReturnCode 1
+                & $appendReason 'Memory'
+                & $appendLog ("Memory: System_Memory={0}GB. FAIL; " -f $memoryGb)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Memory: System_Memory={0}GB. PASS; " -f $memoryGb)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Memory: System_Memory=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $tpm = Get-Tpm -ErrorAction Stop
+        if ($null -eq $tpm) {
+            & $updateReturnCode 1
+            & $appendReason 'TPM'
+            & $appendLog 'TPM: TPM is null. FAIL; '
+        }
+        elseif ($tpm -is [string]) {
+            & $updateReturnCode -1
+            & $appendLog ("TPM: TPMVersion=Undetermined. UNDETERMINED; {0}; " -f $tpm)
+        }
+        elseif ($tpm.TpmPresent) {
+            $tpmVersion = Get-CimInstance -ClassName Win32_Tpm -Namespace 'root/CIMV2/Security/MicrosoftTpm' -ErrorAction Stop | Select-Object -First 1 -ExpandProperty SpecVersion
+            if ([string]::IsNullOrWhiteSpace([string]$tpmVersion)) {
+                & $updateReturnCode 1
+                & $appendReason 'TPM'
+                & $appendLog 'TPM: TPMVersion=null. FAIL; '
+            }
+            else {
+                $majorVersion = ([string]$tpmVersion).Split(',')[0] -as [int]
+                if ($null -eq $majorVersion -or $majorVersion -lt 2) {
+                    & $updateReturnCode 1
+                    & $appendReason 'TPM'
+                    & $appendLog ("TPM: TPMVersion={0}. FAIL; " -f $tpmVersion)
+                }
+                else {
+                    & $updateReturnCode 0
+                    & $appendLog ("TPM: TPMVersion={0}. PASS; " -f $tpmVersion)
+                }
+            }
+        }
+        else {
+            & $updateReturnCode 1
+            & $appendReason 'TPM'
+            & $appendLog ("TPM: TPMVersion={0}. FAIL; " -f $tpm.TpmPresent)
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("TPM: TPMVersion=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $cpuDetails = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)[0]
+        if ($null -eq $cpuDetails) {
+            & $updateReturnCode 1
+            & $appendReason 'Processor'
+            & $appendLog 'Processor: CpuDetails is null. FAIL; '
+        }
+        else {
+            if ($null -eq ('SmartM365HardwareReadinessCpuFamily' -as [type])) { Add-Type -TypeDefinition $cpuFamilySource -ErrorAction Stop }
+            $cpuFamilyResult = [SmartM365HardwareReadinessCpuFamily]::Validate([string]$cpuDetails.Manufacturer, [uint16]$cpuDetails.Architecture)
+            $cpuFamilyException = $false
+            if (-not $cpuFamilyResult.IsValid -and [string]$cpuDetails.Name -match '(?i)i7-7820hq cpu @ 2\.90ghz') {
+                $hardwareSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop | Select-Object -First 1
+                $model = if ($hardwareSystem) { ([string]$hardwareSystem.Model).Trim() } else { '' }
+                if ($model -in @('Surface Studio 2','Precision 5520')) {
+                    $cpuFamilyException = $true
+                    $cpuFamilyResult.IsValid = $true
+                    $cpuFamilyResult.Message = ("Microsoft supported-device exception: {0}" -f $model)
+                }
+            }
+
+            $processorCheckFailed = (
+                $null -eq $cpuDetails.AddressWidth -or [int]$cpuDetails.AddressWidth -ne $requiredAddressWidth -or
+                $null -eq $cpuDetails.MaxClockSpeed -or [int]$cpuDetails.MaxClockSpeed -le $minimumClockSpeedMhz -or
+                $null -eq $cpuDetails.NumberOfLogicalProcessors -or [int]$cpuDetails.NumberOfLogicalProcessors -lt $minimumLogicalCores -or
+                -not $cpuFamilyResult.IsValid
+            )
+            $cpuLog = "{AddressWidth=$($cpuDetails.AddressWidth); MaxClockSpeed=$($cpuDetails.MaxClockSpeed); NumberOfLogicalCores=$($cpuDetails.NumberOfLogicalProcessors); Manufacturer=$($cpuDetails.Manufacturer); Caption=$($cpuDetails.Caption); Name=$($cpuDetails.Name); FamilyException=$cpuFamilyException; $($cpuFamilyResult.Message)}"
+            if ($processorCheckFailed) {
+                & $updateReturnCode 1
+                & $appendReason 'Processor'
+                & $appendLog ("Processor: {0}. FAIL; " -f $cpuLog)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Processor: {0}. PASS; " -f $cpuLog)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Processor: Processor=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        [void](Confirm-SecureBootUEFI -ErrorAction Stop)
+        & $updateReturnCode 0
+        & $appendLog 'SecureBoot: Capable. PASS; '
+    }
+    catch [System.PlatformNotSupportedException] {
+        & $updateReturnCode 1
+        & $appendReason 'SecureBoot'
+        & $appendLog 'SecureBoot: Not capable. FAIL; '
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("SecureBoot: Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    $outcome.Result = switch ([int]$outcome.ReturnCode) {
+        0 { 'CAPABLE' }
+        1 { 'NOT CAPABLE' }
+        -1 { 'UNDETERMINED' }
+        default { 'FAILED TO RUN' }
+    }
+    $outcome.Reason = ([string]$outcome.Reason).TrimEnd(' ', ',')
+    return [pscustomobject]@{
+        ReturnCode = [int]$outcome.ReturnCode
+        Result = [string]$outcome.Result
+        Reason = [string]$outcome.Reason
+        Logging = [string]$outcome.Logging
+        Tag = Get-SmartM365Windows11HardwareReadinessTag -ReturnCode ([int]$outcome.ReturnCode)
+        Source = 'Microsoft HardwareReadiness.ps1 adapted; https://aka.ms/HWReadinessScript; SHA256=3F21C32818BFC3A20293317FF91A62ADB349B5A0D468A6DDDEA752F68365C24A'
+    }
 }
 
 function Get-Windows11IndicatorSummary {
@@ -3941,6 +4299,12 @@ function Save-SetupReturnCheckpoint {
             Detail = $Detail
             ActionResult = $ActionResult
             ExitCode = $ExitCode
+            HardwareReadinessTag = $script:HardwareReadiness.Tag
+            HardwareReadinessCode = $script:HardwareReadiness.ReturnCode
+            HardwareReadinessResult = $script:HardwareReadiness.Result
+            HardwareReadinessReason = $script:HardwareReadiness.Reason
+            HardwareReadinessLog = $script:HardwareReadiness.Logging
+            HardwareReadinessSource = $script:HardwareReadiness.Source
             SetupExecutionMode = $SetupExecutionMode
             SetupMediaId = $SetupMediaId
             SetupLanguage = $SetupLanguage
@@ -4035,6 +4399,7 @@ $script:SetupProcessLastSnapshot = ''
 $script:SetupProcessLastHeartbeatUtc = ''
 $script:SetupProcessExitCode = ''
 $script:DeviceUptimeSummary = $null
+$script:HardwareReadiness = [pscustomobject]@{ ReturnCode = ''; Result = 'NOT CHECKED'; Reason = ''; Logging = ''; Tag = ''; Source = '' }
 $computerSystem = $null
 
 try {
@@ -4101,6 +4466,28 @@ try {
     Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
     $script:DeviceUptimeSummary = Get-DeviceUptimeSummary -LastBootUpTime $os.LastBootUpTime
     Write-SmartLog ("Startup uptime before upgrade: {0}" -f $script:DeviceUptimeSummary.Detail)
+    if ($os.MajorFamily -eq 'Windows10') {
+        try {
+            $script:HardwareReadiness = Get-SmartM365Windows11HardwareReadiness
+        }
+        catch {
+            $script:HardwareReadiness = [pscustomobject]@{
+                ReturnCode = -2
+                Result = 'FAILED TO RUN'
+                Reason = ''
+                Logging = ("Hardware readiness execution failed: {0} {1}" -f $_.Exception.GetType().Name,$_.Exception.Message)
+                Tag = 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED'
+                Source = 'Microsoft HardwareReadiness.ps1 adapted; https://aka.ms/HWReadinessScript'
+            }
+        }
+        $hardwareLogLevel = if ([int]$script:HardwareReadiness.ReturnCode -eq 0) { 'INFO' } else { 'WARN' }
+        Write-SmartLog ("Hardware readiness: Tag={0}; ReturnCode={1}; Result={2}; Reason={3}; Detail={4}" -f $script:HardwareReadiness.Tag,$script:HardwareReadiness.ReturnCode,$script:HardwareReadiness.Result,$script:HardwareReadiness.Reason,$script:HardwareReadiness.Logging) $hardwareLogLevel
+    }
+    $hardwareReadinessBlocksUpgrade = ($os.MajorFamily -eq 'Windows10' -and [int]$script:HardwareReadiness.ReturnCode -eq 1)
+    $hardwareReadinessUndetermined = ($os.MajorFamily -eq 'Windows10' -and [int]$script:HardwareReadiness.ReturnCode -in @(-2,-1))
+    if ($hardwareReadinessUndetermined) {
+        Write-SmartLog 'Hardware readiness is undetermined. Tagging the result and continuing the existing upgrade flow as explicitly configured.' 'WARN'
+    }
     $freeGb = Get-SystemDriveFreeGb
     $pendingRebootInfo = Test-PendingReboot
     $pendingReboot = $pendingRebootInfo.IsPending
@@ -4112,7 +4499,7 @@ try {
     $policy = Get-WindowsUpdatePolicySummary
     $indicators = Get-Windows11IndicatorSummary
 
-    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
+    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $hardwareReadinessBlocksUpgrade -and -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
     if ($diskCleanupEligible -and $freeGb -lt $MinimumFreeDiskGB -and $AllowDiskCleanup -and -not $AuditOnly) {
         try {
             $freeGb = Invoke-SafeDiskCleanup
@@ -4157,8 +4544,14 @@ try {
         $detail = "OS family is $($os.MajorFamily)."
         $exitCode = 3
     }
+    elseif ($hardwareReadinessBlocksUpgrade) {
+        $status = 'WINDOWS11_HARDWARE_NOT_CAPABLE'
+        $nextAction = 'REVIEW_HARDWARE_READINESS'
+        $detail = ("HardwareReadinessResult={0}; Reason={1}; Detail={2}" -f $script:HardwareReadiness.Result,$script:HardwareReadiness.Reason,$script:HardwareReadiness.Logging)
+        $exitCode = 3
+    }
     elseif ($DirectSetupUpgrade) {
-        Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, and policy-blocker gates; pending reboot can still trigger a controlled reboot when allowed and no interactive user is connected; Windows Setup will perform final validation.' 'WARN'
+        Write-SmartLog 'Direct setup upgrade requested. Confirmed hardware NOT CAPABLE remains blocking; hardware UNDETERMINED is tagged but non-blocking. Intune enrollment, compatibility-indicator, and policy-blocker gates are skipped; pending reboot can still trigger a controlled reboot when allowed and no interactive user is connected; Windows Setup will perform final validation.' 'WARN'
         if ($pendingReboot -and ($AllowReboot -or $ScheduleRetryAfterReboot) -and -not $AuditOnly) {
             $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 direct setup readiness reboot - no interactive user connected'
             $status = $pendingOutcome.Status
@@ -4439,6 +4832,12 @@ finally {
         IntuneEnrolled = $finalIntuneEnrolled
         WUBlockers = $finalWuBlockers
         W11BlockingReasons = $finalW11BlockingReasons
+        HardwareReadinessTag = $script:HardwareReadiness.Tag
+        HardwareReadinessCode = $script:HardwareReadiness.ReturnCode
+        HardwareReadinessResult = $script:HardwareReadiness.Result
+        HardwareReadinessReason = $script:HardwareReadiness.Reason
+        HardwareReadinessLog = $script:HardwareReadiness.Logging
+        HardwareReadinessSource = $script:HardwareReadiness.Source
         SetupExecutionMode = $SetupExecutionMode
         SetupMediaId = $SetupMediaId
         SetupLanguage = $SetupLanguage
