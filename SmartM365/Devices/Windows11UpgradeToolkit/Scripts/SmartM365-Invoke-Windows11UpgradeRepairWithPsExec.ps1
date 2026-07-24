@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.68
+    0.1.69
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -111,7 +111,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.68'
+$script:LauncherVersion = '0.1.69'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -710,7 +710,7 @@ function Test-TechnicianRunGuardEntryShouldBlock {
     if ($effectiveStatusUpper -like '*_STARTED' -or $effectiveStatusUpper -like '*_REBOOT_REQUIRED' -or $effectiveStatusUpper -like '*_REBOOT_SCHEDULED_NO_USER') { return $true }
     return $false
 }
-function Get-ActiveTechnicianRunGuardEntry {
+function Get-TechnicianRunGuardEntry {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$ComputerFqdn,
@@ -728,8 +728,47 @@ function Get-ActiveTechnicianRunGuardEntry {
             if ([string]$entry.ComputerFqdn -eq $LockedComputerFqdn) { $FoundRef.Value = $entry; break }
         }
     }
-    if ($found.ContainsKey('Value') -and (Test-TechnicianRunGuardEntryShouldBlock -Entry $found.Value -RunGuardHours $RunGuardHours)) { return $found.Value }
+    if ($found.ContainsKey('Value')) { return $found.Value }
     return $null
+}
+
+
+function Test-TechnicianRunGuardEndpointBypassEligible {
+    param([AllowNull()]$Entry)
+
+    if (-not $Entry) { return $false }
+    if (-not $Entry.PSObject.Properties['State'] -or [string]$Entry.State -ne 'Result') { return $false }
+    if (-not $Entry.PSObject.Properties['RetryAfterUtc'] -or [string]::IsNullOrWhiteSpace([string]$Entry.RetryAfterUtc)) { return $false }
+
+    $retryAfterUtc = [datetime]::MinValue
+    if (-not (ConvertTo-TechnicianRunGuardUtcDateTime -Value $Entry.RetryAfterUtc -Result ([ref]$retryAfterUtc))) { return $false }
+    if ((Get-Date).ToUniversalTime() -lt $retryAfterUtc.ToUniversalTime()) { return $false }
+
+    $failureCategory = if ($Entry.PSObject.Properties['FailureCategory']) { [string]$Entry.FailureCategory } else { '' }
+    $remoteStatus = if ($Entry.PSObject.Properties['RemoteStatus']) { ([string]$Entry.RemoteStatus).ToUpperInvariant() } else { '' }
+    if ([string]::IsNullOrWhiteSpace($remoteStatus)) { return $false }
+
+    $setupFailureStatuses = @(
+        'DIRECT_SETUP_UPGRADE_FAILED',
+        'SETUP_UPGRADE_FAILED',
+        'SETUP_MIGRATION_PROFILE_FAILURE',
+        'SETUP_MIGRATION_PROFILE_REPAIR_FAILED',
+        'SETUP_MIGRATION_PLUGIN_FAILURE',
+        'SETUP_PROCESS_TIMEOUT',
+        'SETUP_PROCESS_MONITOR_INTERRUPTED',
+        'SETUP_MEDIA_COPY_FAILED',
+        'SETUP_MEDIA_COPY_TIMEOUT',
+        'SETUP_MEDIA_MANIFEST_VALIDATION_FAILED'
+    )
+    if ($failureCategory -eq 'SetupFailure' -and $remoteStatus -in $setupFailureStatuses) { return $true }
+
+    $endpointTransientStatuses = @(
+        'ERROR',
+        'SETUP_CACHE_LOCKED',
+        'SETUP_SUBNET_COPY_LEASE_TIMEOUT',
+        'SETUP_SOURCE_COPY_LEASE_TIMEOUT'
+    )
+    return ($failureCategory -eq 'ExecutionTransient' -and $remoteStatus -in $endpointTransientStatuses)
 }
 
 function Update-TechnicianRunGuardHistory {
@@ -3104,12 +3143,17 @@ do {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit -and -not (Get-LotCancellationState).Requested) {
             $computer = $computers[$nextIndex]
             $nextIndex++
+            $endpointRunGuardRetryBypass = $false
 
             $techRunGuardFqdn = Get-TechnicianRunGuardFqdn -ComputerName $computer -AdInventoryMap $script:AdInventoryMap
             if ($script:UseEffectiveTechnicianRunGuardHistory) {
                 $activeTechRunGuard = $null
+                $techRunGuardEntry = $null
                 try {
-                    $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -RunGuardHours $RunGuardHours
+                    $techRunGuardEntry = Get-TechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -RunGuardHours $RunGuardHours
+                    if ($techRunGuardEntry -and (Test-TechnicianRunGuardEntryShouldBlock -Entry $techRunGuardEntry -RunGuardHours $RunGuardHours)) {
+                        $activeTechRunGuard = $techRunGuardEntry
+                    }
                 }
                 catch {
                     $historyError = "Technician run guard history is unavailable; this computer was not launched. Error=$($_.Exception.Message)"
@@ -3128,6 +3172,10 @@ do {
                     Write-Host ("  [{0}] {1}: {2}" -f $skipResult.LauncherStatus,$computer,$skipResult.Detail) -ForegroundColor DarkYellow
                     continue
                 }
+                if (Test-TechnicianRunGuardEndpointBypassEligible -Entry $techRunGuardEntry) {
+                    $endpointRunGuardRetryBypass = $true
+                    Write-Host ("  [ENDPOINT_RUN_GUARD_RETRY_BYPASS] {0}: adaptive retry is due; PreviousStatus={1}; FailureCategory={2}; RetryAfterUtc={3}. Bypass applies to this target and attempt only." -f $computer,[string]$techRunGuardEntry.RemoteStatus,[string]$techRunGuardEntry.FailureCategory,[string]$techRunGuardEntry.RetryAfterUtc) -ForegroundColor DarkCyan
+                }
             }
 
             $globalLeasePath = Acquire-GlobalLease -Computer $computer -CycleNumber $cycle
@@ -3139,7 +3187,11 @@ do {
 
 
             try {
-                $remoteArgsJson = ([pscustomobject]@{ Args = @($remoteArgs.ToArray()) } | ConvertTo-Json -Compress)
+                $effectiveRemoteArgs = @($remoteArgs.ToArray())
+                if ($endpointRunGuardRetryBypass -and $effectiveRemoteArgs -notcontains '-IgnoreRunGuard') {
+                    $effectiveRemoteArgs += '-IgnoreRunGuard'
+                }
+                $remoteArgsJson = ([pscustomobject]@{ Args = @($effectiveRemoteArgs) } | ConvertTo-Json -Compress)
                 $workerArgs = @(
                     $computer,
                     $cycle,
