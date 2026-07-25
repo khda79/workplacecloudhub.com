@@ -3,7 +3,7 @@
 Runs synthetic tests for automatic Windows 10 LOT selection.
 
 .VERSION
-1.0.0
+1.1.0
 #>
 
 #requires -Version 5.1
@@ -51,8 +51,8 @@ try {
     )
 
     @(
-        [pscustomobject]@{ ComputerName = 'PC1'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $true; DNSHostName = 'pc1.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
-        [pscustomobject]@{ ComputerName = 'PC2'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $false; DNSHostName = 'pc2.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-PC1'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $true; DNSHostName = 'fr-pc1.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-PC2'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $false; DNSHostName = 'fr-pc2.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
         [pscustomobject]@{ ComputerName = 'PC3'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $true; DNSHostName = 'pc3.one.example'; OperatingSystem = 'Windows 11 Enterprise'; OperatingSystemVersion = '10.0 (22631)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
         [pscustomobject]@{ ComputerName = 'PC4'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $true; DNSHostName = 'pc4.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
         [pscustomobject]@{ ComputerName = 'DUP'; ADInventoryPresent = $true; ADDomain = 'one.example'; Enabled = $true; DNSHostName = 'dup.one.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
@@ -77,6 +77,10 @@ try {
 
     $preview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-TEST' -EvidenceRoot $evidenceRoot
     Assert-Equal -Actual $preview.Summary.SelectedDevices -Expected 3 -Message 'selected device count'
+    Assert-True -Condition (-not [bool]$preview.Summary.NameFilterEnabled) -Message 'blank name filter preserves the default selection scope'
+    Assert-Equal -Actual $preview.Summary.UniqueInventoryDevices -Expected 13 -Message 'unique inventory device count'
+    Assert-Equal -Actual $preview.Summary.NameFilterMatchedDevices -Expected 13 -Message 'blank name filter matches every unique device'
+    Assert-Equal -Actual $preview.Summary.NameFilterExcludedDevices -Expected 0 -Message 'blank name filter excludes no device'
     Assert-Equal -Actual $preview.Summary.Windows11Excluded -Expected 3 -Message 'Windows 11 exclusion count, including duplicate historical Intune evidence'
     Assert-Equal -Actual $preview.Summary.ADDisabledExcluded -Expected 2 -Message 'disabled AD exclusion count, including a conflicting Intune Windows 10 record'
     Assert-Equal -Actual $preview.Summary.IntuneStateExcluded -Expected 2 -Message 'Intune management-state exclusion count, including a conflicting AD Windows 10 record'
@@ -86,9 +90,42 @@ try {
     Assert-Equal -Actual $preview.Summary.ADStaleWarnings -Expected 1 -Message 'AD stale warning count'
 
     $selectedNames = @($preview.SelectedDevices | Select-Object -ExpandProperty ComputerName)
-    Assert-True -Condition ($selectedNames -contains 'pc1.one.example') -Message 'AD FQDN is preferred for PC1'
+    Assert-True -Condition ($selectedNames -contains 'fr-pc1.one.example') -Message 'AD FQDN is preferred for FR-PC1'
     Assert-True -Condition ($selectedNames -contains 'PC5') -Message 'Intune-only PC5 is selected'
     Assert-True -Condition ($selectedNames -contains 'stalead.one.example') -Message 'stale AD Windows 10 remains selected'
+
+    $filteredPreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-FILTER-PREVIEW' -EvidenceRoot $evidenceRoot -ComputerNamePrefix 'fr-'
+    Assert-True -Condition ([bool]$filteredPreview.Summary.NameFilterEnabled) -Message 'prefix filter is enabled'
+    Assert-Equal -Actual $filteredPreview.Summary.ComputerNamePrefixes -Expected 'FR-' -Message 'prefix filter is normalized case-insensitively'
+    Assert-Equal -Actual $filteredPreview.Summary.UniqueInventoryDevices -Expected 13 -Message 'filtered preview keeps the total unique inventory count'
+    Assert-Equal -Actual $filteredPreview.Summary.NameFilterMatchedDevices -Expected 2 -Message 'FR prefix matched device count'
+    Assert-Equal -Actual $filteredPreview.Summary.NameFilterExcludedDevices -Expected 11 -Message 'FR prefix filtered-out device count'
+    Assert-Equal -Actual $filteredPreview.Summary.SelectedDevices -Expected 1 -Message 'FR prefix selected Windows 10 count'
+    Assert-Equal -Actual $filteredPreview.Summary.ExcludedDevices -Expected 1 -Message 'FR prefix safety exclusion count'
+    Assert-Equal -Actual $filteredPreview.Summary.ADDisabledExcluded -Expected 1 -Message 'FR prefix keeps safety exclusions active'
+    Assert-True -Condition (@($filteredPreview.SelectedDevices | Select-Object -ExpandProperty ComputerName) -contains 'fr-pc1.one.example') -Message 'FR prefix matches the short name of an AD FQDN'
+    Assert-Equal -Actual $filteredPreview.FilterExcludedDevices.Count -Expected 11 -Message 'filter-excluded rows are returned separately'
+    $filterEvidencePath = Join-Path $filteredPreview.Summary.EvidencePath 'AutomaticLotFilterExclusions.csv'
+    Assert-True -Condition (Test-Path -LiteralPath $filterEvidencePath -PathType Leaf) -Message 'filter exclusion evidence was created'
+    $filterEvidence = @(Import-Csv -LiteralPath $filterEvidencePath)
+    Assert-Equal -Actual $filterEvidence.Count -Expected 11 -Message 'filter exclusion evidence row count'
+    Assert-True -Condition (@($filterEvidence | Where-Object { $_.FilterReason -ne 'COMPUTER_NAME_PREFIX_NOT_MATCHED' }).Count -eq 0) -Message 'filter exclusion evidence uses the expected reason'
+
+    $multiPrefixPreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-MULTI-PREFIX' -ComputerNamePrefix @('fr-','stale') -NoEvidence
+    Assert-Equal -Actual $multiPrefixPreview.Summary.ComputerNamePrefixes -Expected 'FR-;STALE' -Message 'multiple prefixes are normalized and reported'
+    Assert-Equal -Actual $multiPrefixPreview.Summary.NameFilterMatchedDevices -Expected 3 -Message 'multiple prefixes matched device count'
+    Assert-Equal -Actual $multiPrefixPreview.Summary.NameFilterExcludedDevices -Expected 10 -Message 'multiple prefixes filtered-out device count'
+    Assert-Equal -Actual $multiPrefixPreview.Summary.SelectedDevices -Expected 2 -Message 'multiple prefixes selected Windows 10 count'
+
+    $wildcardBlocked = $false
+    try {
+        & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-WILDCARD' -ComputerNamePrefix 'FR-*' -NoEvidence | Out-Null
+    }
+    catch {
+        $wildcardBlocked = $_.Exception.Message -match 'wildcards and regular expressions are not supported'
+    }
+    Assert-True -Condition $wildcardBlocked -Message 'wildcard prefix is rejected explicitly'
+
     $missingSourceBlocked = $false
     try {
         & $engine -Source Both -AdInventoryCsv $adCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-MISSING-SOURCE' -NoEvidence | Out-Null
@@ -108,6 +145,13 @@ try {
     Assert-Equal -Actual @(Get-Content -LiteralPath $created.Summary.ComputersPath).Count -Expected 3 -Message 'Computers.txt row count'
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $created.Summary.EvidencePath 'AutomaticLotSelection.csv') -PathType Leaf) -Message 'selection evidence was created'
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $created.Summary.EvidencePath 'AutomaticLotExclusions.csv') -PathType Leaf) -Message 'exclusion evidence was created'
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $created.Summary.EvidencePath 'AutomaticLotFilterExclusions.csv') -PathType Leaf) -Message 'empty filter evidence was created for the default scope'
+
+    $filteredCreated = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-FILTERED-CREATE' -EvidenceRoot $evidenceRoot -ComputerNamePrefix 'FR-' -Create -SkipWrapperRefresh
+    $filteredComputers = @(Get-Content -LiteralPath $filteredCreated.Summary.ComputersPath)
+    Assert-Equal -Actual $filteredComputers.Count -Expected 1 -Message 'filtered Computers.txt row count'
+    Assert-Equal -Actual $filteredComputers[0] -Expected 'fr-pc1.one.example' -Message 'filtered Computers.txt contains only the eligible FR device'
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $filteredCreated.Summary.EvidencePath 'AutomaticLotFilterExclusions.csv') -PathType Leaf) -Message 'filtered create evidence was created'
 
     Write-Output 'SmartM365 Windows 11 automatic LOT synthetic tests passed.'
 }
