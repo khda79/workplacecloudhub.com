@@ -69,23 +69,31 @@ preview-first:
 1. Select `AD + Intune`, `AD`, or `Intune`.
 2. Optionally enter one or more short-name prefixes in **Computer prefix(es)**, for example
    `FR-` or `FR-;BE-`. Leave the field empty to keep all computer names.
-3. When Intune is included, click **Refresh and preview** and complete the delegated interactive Microsoft Graph sign-in.
-4. Wait for the fresh AD and/or Intune snapshots to complete.
+3. Click **Refresh and preview**. Valid root caches are reused automatically; delegated Microsoft
+   Graph sign-in appears only when the Intune cache must be refreshed.
+4. Follow the small progress window while caches are checked, copied, refreshed when required,
+   and loaded into the preview.
 5. Review matched, filtered-out, selected, and safety-excluded counts plus the evidence CSV files.
 6. Click **Create and launch**, review the final confirmation, then launch through the normal
    LOT engine.
 
-Every **Refresh and preview** first generates a fresh complete snapshot for each selected source
-under `Runs\AutomaticLotInventory\Sources-<timestamp>`; root `DevicesAD.csv` and
-`DevicesIntune.csv` files are never reused silently. Intune collection uses delegated interactive
-Microsoft Graph authentication and the `DeviceManagementManagedDevices.Read.All` delegated
-scope. `W11UT_INTUNE_TENANT_ID` can optionally constrain the sign-in tenant; no app-only
-certificate or SmartM365 tenant profile is used.
+Every **Refresh and preview** checks the read-only root caches first. `DevicesAD.csv` is reusable
+for up to 12 hours. `DevicesIntune.csv` is reusable for up to 2 hours only when it contains a
+tenant id, delegated authentication provenance, and `InventoryScope=AllManagedDevices`; when
+`W11UT_INTUNE_TENANT_ID` is configured, the tenant must also match. Each accepted root cache
+is copied to `Runs\AutomaticLotInventory\Sources-<timestamp>` so the exact preview input remains
+preserved without regenerating the inventory or overwriting the root file.
 
-If a refresh fails, the GUI may offer a verified recent root cache only after explicit operator
-confirmation: AD must be no older than 12 hours, while Intune must be no older than 2 hours
-and must contain a tenant id, delegated authentication provenance, and
-`InventoryScope=AllManagedDevices`. Automatic collection never overwrites a root cache.
+When a cache is missing, stale, or invalid, only that source is refreshed. Intune refresh uses
+delegated interactive Microsoft Graph authentication with the
+`DeviceManagementManagedDevices.Read.All` scope. Select **Force inventory refresh this time**
+to bypass otherwise valid caches for one preview; the checkbox clears after that attempt. If a
+forced refresh fails and a verified recent root cache exists, the GUI can offer that cache as an
+explicit fallback.
+
+The progress window reports the current source, cache decision, inventory process output, and
+elapsed time. Empty stdout or stderr files are handled safely; refresh errors include the child
+process exit code and both log paths instead of masking the original failure.
 
 The selection engine preserves a copy of every accepted source in its timestamped evidence
 folder. **Create and launch** also copies the same preview snapshots to the new LOT run as

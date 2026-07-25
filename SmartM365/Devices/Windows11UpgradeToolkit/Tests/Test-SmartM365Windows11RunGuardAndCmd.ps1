@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 
 #requires -Version 5.1
@@ -71,42 +71,49 @@ try {
     . $gui -ValidateOnly | Out-Null
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticInventoryFileInfo'
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticInventorySnapshot'
+    Import-ScriptFunction -Path $gui -Name 'Get-GuiPowerShellProcessLogDetail'
     function global:Get-ConfiguredValue { param([string]$Name); return '' }
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
+    $global:SyntheticInventoryRefreshCalls = 0
     function global:Show-GuiWarningYesNo { param([string]$Title, [string]$Message); return [bool]$global:SyntheticRootFallbackAccepted }
     $automaticToolkitRoot = Join-Path $testRoot 'AutomaticToolkit'
     $automaticScriptsRoot = Join-Path $automaticToolkitRoot 'Scripts'
     New-Item -ItemType Directory -Path $automaticScriptsRoot -Force | Out-Null
-    [pscustomobject]@{ DeviceName = 'ROOT-AD'; Marker = 'ROOT' } | Export-Csv -LiteralPath (Join-Path $automaticToolkitRoot 'DevicesAD.csv') -NoTypeInformation -Encoding UTF8
-    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath (Join-Path $automaticToolkitRoot 'DevicesIntune.csv') -NoTypeInformation -Encoding UTF8
+    $rootAdPath = Join-Path $automaticToolkitRoot 'DevicesAD.csv'
+    $rootIntunePath = Join-Path $automaticToolkitRoot 'DevicesIntune.csv'
+    [pscustomobject]@{ ComputerName = 'ROOT-AD'; DeviceName = 'ROOT-AD'; Marker = 'ROOT'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0.19045' } | Export-Csv -LiteralPath $rootAdPath -NoTypeInformation -Encoding UTF8
+    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; OperatingSystem = 'Windows'; OSVersion = '10.0.19045'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $rootIntunePath -NoTypeInformation -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $automaticScriptsRoot 'SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1') -Value '# synthetic exporter' -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $automaticScriptsRoot 'SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1') -Value '# synthetic exporter' -Encoding UTF8
     $toolkitRoot = $automaticToolkitRoot
 
     function global:Invoke-GuiPowerShellProcess {
-        param([string]$ScriptPath, [string[]]$Arguments, [string]$LogPath, [string]$Activity, [switch]$Interactive)
+        param([string]$ScriptPath, [string[]]$Arguments, [string]$LogPath, [string]$Activity, [switch]$Interactive, [scriptblock]$ProgressCallback)
+        $global:SyntheticInventoryRefreshCalls++
         if ($global:SyntheticInventoryRefreshFails) { throw 'Synthetic inventory refresh failure.' }
         $outputIndex = [array]::IndexOf($Arguments, '-OutputPath')
         if ($outputIndex -lt 0) { throw 'Synthetic exporter did not receive -OutputPath.' }
         $outputPath = $Arguments[$outputIndex + 1]
         if ($ScriptPath -like '*Export-ADDevicesCsv.ps1') {
-            [pscustomobject]@{ DeviceName = 'REFRESHED-AD'; Marker = 'SNAPSHOT' } | Export-Csv -LiteralPath $outputPath -NoTypeInformation -Encoding UTF8
+            [pscustomobject]@{ ComputerName = 'REFRESHED-AD'; DeviceName = 'REFRESHED-AD'; Marker = 'SNAPSHOT'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0.19045' } | Export-Csv -LiteralPath $outputPath -NoTypeInformation -Encoding UTF8
         }
         else {
             if (-not $Interactive) { throw 'Synthetic Intune export was not launched interactively.' }
-            [pscustomobject]@{ DeviceName = 'REFRESHED-INTUNE'; Marker = 'SNAPSHOT'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $outputPath -NoTypeInformation -Encoding UTF8
+            [pscustomobject]@{ DeviceName = 'REFRESHED-INTUNE'; Marker = 'SNAPSHOT'; OperatingSystem = 'Windows'; OSVersion = '10.0.19045'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $outputPath -NoTypeInformation -Encoding UTF8
         }
         Set-Content -LiteralPath $LogPath -Value $Activity -Encoding UTF8
     }
 
     $automaticSnapshot = Get-AutomaticInventorySnapshot -Source Both
-    Assert-True -Condition ($automaticSnapshot.AdInventoryCsv -ne (Join-Path $automaticToolkitRoot 'DevicesAD.csv')) -Message 'automatic AD selection does not silently reuse root CSV'
-    Assert-True -Condition ($automaticSnapshot.IntuneInventoryCsv -ne (Join-Path $automaticToolkitRoot 'DevicesIntune.csv')) -Message 'automatic Intune selection does not silently reuse root CSV'
-    Assert-Equal -Actual (Import-Csv -LiteralPath $automaticSnapshot.AdInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'REFRESHED-AD' -Message 'automatic AD snapshot was freshly generated'
-    Assert-Equal -Actual (Import-Csv -LiteralPath $automaticSnapshot.IntuneInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'REFRESHED-INTUNE' -Message 'automatic Intune snapshot was freshly generated'
-    Assert-Equal -Actual $automaticSnapshot.TenantId -Expected 'tenant-001' -Message 'automatic snapshot records the connected tenant'
-    Assert-Equal -Actual $automaticSnapshot.AuthenticationMode -Expected 'DelegatedInteractive' -Message 'automatic snapshot records delegated interactive authentication'
+    Assert-True -Condition ($automaticSnapshot.AdInventoryCsv -ne $rootAdPath) -Message 'fresh AD root cache is copied to isolated evidence instead of used directly'
+    Assert-True -Condition ($automaticSnapshot.IntuneInventoryCsv -ne $rootIntunePath) -Message 'fresh Intune root cache is copied to isolated evidence instead of used directly'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $automaticSnapshot.AdInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'ROOT-AD' -Message 'fresh AD root cache content is reused'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $automaticSnapshot.IntuneInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'ROOT-INTUNE' -Message 'fresh Intune root cache content is reused'
+    Assert-Equal -Actual $global:SyntheticInventoryRefreshCalls -Expected 0 -Message 'fresh root caches avoid all exporter calls'
+    Assert-True -Condition (($automaticSnapshot.SourceDetails -join ' ') -match 'reused verified recent root cache') -Message 'automatic preview reports root cache reuse'
+    Assert-Equal -Actual $automaticSnapshot.TenantId -Expected 'tenant-001' -Message 'reused Intune cache preserves tenant provenance'
+    Assert-Equal -Actual $automaticSnapshot.AuthenticationMode -Expected 'DelegatedInteractive' -Message 'reused Intune cache preserves delegated authentication'
 
     $automaticRunPath = Join-Path $testRoot 'AutomaticRun'
     New-Item -ItemType Directory -Path $automaticRunPath -Force | Out-Null
@@ -115,25 +122,58 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $automaticRunPath 'DevicesAD.csv') -PathType Leaf) -Message 'run-local AD snapshot exists'
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $automaticRunPath 'DevicesIntune.csv') -PathType Leaf) -Message 'run-local Intune snapshot exists'
 
+    (Get-Item -LiteralPath $rootAdPath).LastWriteTime = (Get-Date).AddHours(-13)
+    $staleAdSnapshot = Get-AutomaticInventorySnapshot -Source AD
+    Assert-Equal -Actual $global:SyntheticInventoryRefreshCalls -Expected 1 -Message 'stale AD root cache triggers one targeted refresh'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $staleAdSnapshot.AdInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'REFRESHED-AD' -Message 'stale AD cache is replaced only in isolated evidence'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $rootAdPath | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'ROOT-AD' -Message 'AD root cache remains read-only'
+    (Get-Item -LiteralPath $rootAdPath).LastWriteTime = Get-Date
+
+    $forcedSnapshot = Get-AutomaticInventorySnapshot -Source AD -ForceRefresh
+    Assert-Equal -Actual $global:SyntheticInventoryRefreshCalls -Expected 2 -Message 'force refresh bypasses a fresh AD root cache'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $forcedSnapshot.AdInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'REFRESHED-AD' -Message 'forced AD refresh uses isolated output'
+
     $global:SyntheticInventoryRefreshFails = $true
-    $fallbackRejected = $false
-    try { Get-AutomaticInventorySnapshot -Source AD | Out-Null } catch { $fallbackRejected = $true }
-    Assert-True -Condition $fallbackRejected -Message 'fresh root cache is not reused when explicit fallback is rejected'
+    $forcedFallbackRejected = $false
+    try { Get-AutomaticInventorySnapshot -Source AD -ForceRefresh | Out-Null } catch { $forcedFallbackRejected = $true }
+    Assert-True -Condition $forcedFallbackRejected -Message 'failed forced refresh remains blocked when fresh root fallback is rejected'
 
     $global:SyntheticRootFallbackAccepted = $true
-    $acceptedFallback = Get-AutomaticInventorySnapshot -Source AD
-    Assert-Equal -Actual $acceptedFallback.AdInventoryCsv -Expected (Join-Path $automaticToolkitRoot 'DevicesAD.csv') -Message 'fresh root cache is used only after explicit fallback acceptance'
+    $acceptedFallback = Get-AutomaticInventorySnapshot -Source AD -ForceRefresh
+    Assert-True -Condition ($acceptedFallback.AdInventoryCsv -ne $rootAdPath) -Message 'accepted root fallback is copied to isolated evidence'
+    Assert-Equal -Actual (Import-Csv -LiteralPath $acceptedFallback.AdInventoryCsv | Select-Object -First 1 -ExpandProperty DeviceName) -Expected 'ROOT-AD' -Message 'accepted fallback preserves root cache content'
     Assert-True -Condition (($acceptedFallback.SourceDetails -join ' ') -match 'explicitly accepted') -Message 'accepted root fallback is marked in source details'
 
-    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'AppOnly'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath (Join-Path $automaticToolkitRoot 'DevicesIntune.csv') -NoTypeInformation -Encoding UTF8
-    $appOnlyFallbackRejected = $false
-    try { Get-AutomaticInventorySnapshot -Source Intune | Out-Null } catch { $appOnlyFallbackRejected = $true }
-    Assert-True -Condition $appOnlyFallbackRejected -Message 'app-only Intune root cache is rejected even when fallback confirmation is enabled'
+    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; OperatingSystem = 'Windows'; OSVersion = '10.0.19045'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'AppOnly'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $rootIntunePath -NoTypeInformation -Encoding UTF8
+    $refreshCallsBeforeInvalidIntune = $global:SyntheticInventoryRefreshCalls
+    $appOnlyCacheRejected = $false
+    try { Get-AutomaticInventorySnapshot -Source Intune | Out-Null } catch { $appOnlyCacheRejected = $true }
+    Assert-True -Condition $appOnlyCacheRejected -Message 'app-only Intune root cache is rejected'
+    Assert-Equal -Actual $global:SyntheticInventoryRefreshCalls -Expected ($refreshCallsBeforeInvalidIntune + 1) -Message 'invalid Intune provenance triggers an interactive refresh attempt'
 
-    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath (Join-Path $automaticToolkitRoot 'DevicesIntune.csv') -NoTypeInformation -Encoding UTF8
-    $delegatedFallback = Get-AutomaticInventorySnapshot -Source Intune
-    Assert-Equal -Actual $delegatedFallback.IntuneInventoryCsv -Expected (Join-Path $automaticToolkitRoot 'DevicesIntune.csv') -Message 'delegated Intune root cache can be explicitly accepted'
-    Assert-Equal -Actual $delegatedFallback.AuthenticationMode -Expected 'DelegatedInteractive' -Message 'delegated fallback authentication provenance is preserved'
+    [pscustomobject]@{ DeviceName = 'ROOT-INTUNE'; Marker = 'ROOT'; OperatingSystem = 'Windows'; OSVersion = '10.0.19045'; InventoryTenantId = 'tenant-001'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $rootIntunePath -NoTypeInformation -Encoding UTF8
+    $refreshCallsBeforeDelegatedReuse = $global:SyntheticInventoryRefreshCalls
+    $delegatedCache = Get-AutomaticInventorySnapshot -Source Intune
+    Assert-True -Condition ($delegatedCache.IntuneInventoryCsv -ne $rootIntunePath) -Message 'delegated Intune root cache is copied to isolated evidence'
+    Assert-Equal -Actual $delegatedCache.AuthenticationMode -Expected 'DelegatedInteractive' -Message 'delegated cache authentication provenance is preserved'
+    Assert-Equal -Actual $global:SyntheticInventoryRefreshCalls -Expected $refreshCallsBeforeDelegatedReuse -Message 'delegated fresh Intune root cache avoids Graph refresh'
+
+    $emptyStdout = Join-Path $testRoot 'empty.stdout.log'
+    $emptyStderr = Join-Path $testRoot 'empty.stderr.log'
+    [IO.File]::WriteAllText($emptyStdout, '')
+    [IO.File]::WriteAllText($emptyStderr, '')
+    Assert-Equal -Actual (Get-GuiPowerShellProcessLogDetail -Paths @($emptyStderr, $emptyStdout)) -Expected '' -Message 'empty inventory logs are read without a null Trim failure'
+
+    $invalidAdCache = Join-Path $testRoot 'invalid-ad-cache.csv'
+    [pscustomobject]@{ Marker = 'MISSING_REQUIRED_COLUMNS' } | Export-Csv -LiteralPath $invalidAdCache -NoTypeInformation -Encoding UTF8
+    $invalidAdCacheInfo = Get-AutomaticInventoryFileInfo -Path $invalidAdCache -FreshnessHours 12 -SourceName 'AD'
+    Assert-True -Condition (-not [bool]$invalidAdCacheInfo.Fresh) -Message 'recent AD cache without identity and OS columns is rejected'
+    Assert-True -Condition (-not [bool]$invalidAdCacheInfo.ContentVerified) -Message 'invalid AD cache content is reported explicitly'
+
+    $guiText = Get-Content -LiteralPath $gui -Raw
+    Assert-True -Condition ($guiText -match 'InventoryProgressBar.{0,160}IsIndeterminate="True"') -Message 'automatic inventory wait window uses an indeterminate progress bar'
+    Assert-True -Condition ($guiText -match 'AutomaticForceRefreshCheck') -Message 'automatic inventory force-refresh option is present'
+
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
     Assert-Equal -Actual (ConvertTo-CmdArgument -Value 'C:\Program Files\SmartM365') -Expected '"C:\Program Files\SmartM365"' -Message 'CMD path argument quoting'
