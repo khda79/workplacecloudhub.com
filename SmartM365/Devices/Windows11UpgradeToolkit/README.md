@@ -67,10 +67,12 @@ Intune managed-device inventory, or the union of both sources. The workflow is d
 preview-first:
 
 1. Select `AD + Intune`, `AD`, or `Intune`.
-2. When Intune is included, click **Refresh and preview** and complete the delegated interactive Microsoft Graph sign-in.
-3. Wait for the fresh AD and/or Intune snapshots to complete.
-4. Review selected and excluded counts plus the evidence CSV files.
-5. Click **Create and launch**, review the final confirmation, then launch through the normal
+2. Optionally enter one or more short-name prefixes in **Computer prefix(es)**, for example
+   `FR-` or `FR-;BE-`. Leave the field empty to keep all computer names.
+3. When Intune is included, click **Refresh and preview** and complete the delegated interactive Microsoft Graph sign-in.
+4. Wait for the fresh AD and/or Intune snapshots to complete.
+5. Review matched, filtered-out, selected, and safety-excluded counts plus the evidence CSV files.
+6. Click **Create and launch**, review the final confirmation, then launch through the normal
    LOT engine.
 
 Every **Refresh and preview** first generates a fresh complete snapshot for each selected source
@@ -98,7 +100,11 @@ Selection rules are conservative:
 - Intune requires a present Windows managed-device row with version `10.0`, build `10240` to
   `21999`, and no retire, wipe, or delete management state.
 - `AD + Intune` is a union. A device can be present in only one source.
-- Windows 11 evidence from either source wins and excludes the device.
+- An optional computer-name prefix filter is applied case-insensitively to the deduplicated short
+  name before eligibility checks. For example, `FR-` matches `fr-pc01.example.com`. Multiple
+  prefixes use semicolons; wildcards and regular expressions are rejected. The GUI does not
+  persist this operator-specific field after it closes.
+- Windows 11 evidence from either source wins and excludes the device within the filtered scope.
 - AD DNS host names are preferred in `Computers.txt`. Conflicting FQDNs sharing one short name
   are excluded for manual review.
 - Old AD logon or Intune sync timestamps are warnings only; they do not exclude an otherwise
@@ -115,6 +121,7 @@ Runs\AutomaticLotInventory\<timestamp>\DevicesAD.csv
 Runs\AutomaticLotInventory\<timestamp>\DevicesIntune.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSelection.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotExclusions.csv
+Runs\AutomaticLotInventory\<timestamp>\AutomaticLotFilterExclusions.csv
 Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSummary.json
 Runs\<LOT>\<timestamp>\DevicesAD.csv
 Runs\<LOT>\<timestamp>\DevicesIntune.csv
@@ -128,6 +135,7 @@ GUI:
   -Source Both `
   -AdInventoryCsv .\DevicesAD.csv `
   -IntuneInventoryCsv .\DevicesIntune.csv `
+  -ComputerNamePrefix 'FR-' `
   -LotName LOT-AUTO-W10-PILOT
 ```
 

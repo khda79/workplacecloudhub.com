@@ -8,7 +8,7 @@ deduplicates them, excludes Windows 11 evidence and unsafe inventory states, wri
 selection evidence under Runs, and can create a standard operational LOT.
 
 .VERSION
-1.0.0
+1.1.0
 #>
 
 #requires -Version 5.1
@@ -21,6 +21,7 @@ param(
     [string]$IntuneInventoryCsv,
     [string]$ToolkitRoot,
     [string]$LotName,
+    [string[]]$ComputerNamePrefix,
     [string]$EvidenceRoot,
     [switch]$Create,
     [switch]$AllowPartialSource,
@@ -30,7 +31,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.0.0'
+$script:AutomaticLotVersion = '1.1.0'
 
 function Get-AutomaticLotToolkitRoot {
     param([AllowNull()][string]$RequestedRoot)
@@ -121,6 +122,39 @@ function Get-InventoryShortName {
 
     if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
     return ($Name.Trim().Trim([char]34).Split('.')[0]).ToUpperInvariant()
+}
+
+function Get-AutomaticLotNamePrefixes {
+    param([AllowNull()][string[]]$Prefixes)
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Prefixes)) {
+        foreach ($candidate in @(([string]$item) -split ';')) {
+            $value = $candidate.Trim().Trim([char]34)
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+            $prefix = Get-InventoryShortName -Name $value
+            if ($prefix -notmatch '^[A-Z0-9_-]+$') {
+                throw "Invalid computer name prefix '$value'. Use only letters, digits, hyphens, or underscores; wildcards and regular expressions are not supported."
+            }
+            if (-not $normalized.Contains($prefix)) { $normalized.Add($prefix) }
+        }
+    }
+
+    return @($normalized.ToArray() | Sort-Object -Unique)
+}
+
+function Test-AutomaticLotNamePrefix {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerKey,
+        [string[]]$Prefixes
+    )
+
+    if (@($Prefixes).Count -eq 0) { return $true }
+    foreach ($prefix in @($Prefixes)) {
+        if ($ComputerKey.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 
 function Get-InventoryWindowsClassification {
@@ -324,8 +358,12 @@ foreach ($group in @($intuneRecords | Group-Object -Property Key)) {
 }
 
 $allKeys = @(@($adByKey.Keys) + @($intuneByKey.Keys) | Sort-Object -Unique)
+$namePrefixes = @(Get-AutomaticLotNamePrefixes -Prefixes $ComputerNamePrefix)
+$namePrefixDisplay = $namePrefixes -join ';'
 $selected = New-Object System.Collections.Generic.List[object]
 $excluded = New-Object System.Collections.Generic.List[object]
+$filterExcluded = New-Object System.Collections.Generic.List[object]
+$matchedKeyLookup = @{}
 
 foreach ($key in $allKeys) {
     $keyAdRecords = @()
@@ -334,6 +372,28 @@ foreach ($key in $allKeys) {
     }
     $keyIntuneRecords = if ($intuneAllByKey.ContainsKey($key)) { @($intuneAllByKey[$key]) } else { @() }
     $intuneRecord = if ($intuneByKey.ContainsKey($key)) { $intuneByKey[$key] } else { $null }
+
+    if (-not (Test-AutomaticLotNamePrefix -ComputerKey $key -Prefixes $namePrefixes)) {
+        $filterName = if ($keyAdRecords.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$keyAdRecords[0].PreferredName)) {
+            [string]$keyAdRecords[0].PreferredName
+        }
+        elseif ($null -ne $intuneRecord) {
+            [string]$intuneRecord.PreferredName
+        }
+        else {
+            $key
+        }
+        $filterExcluded.Add([pscustomobject]@{
+            ComputerKey   = $key
+            ComputerName  = $filterName
+            FilterType    = 'ComputerNamePrefix'
+            FilterValue   = $namePrefixDisplay
+            FilterReason  = 'COMPUTER_NAME_PREFIX_NOT_MATCHED'
+        })
+        continue
+    }
+    $matchedKeyLookup[$key] = $true
+
     $adFqdns = @($keyAdRecords | ForEach-Object { ([string]$_.DNSHostName).Trim().ToLowerInvariant() } | Where-Object { $_ -match '\.' } | Sort-Object -Unique)
     $adCollision = ($adFqdns.Count -gt 1)
     $windows11Evidence = (
@@ -461,8 +521,12 @@ if (-not $NoEvidence) {
         'ComputerKey', 'ComputerName', 'ExclusionReason', 'ADFQDNs', 'ADOperatingSystem',
         'IntuneOperatingSystem', 'IntuneOSVersion', 'IntuneManagementState'
     )
+    $filterExclusionColumns = @(
+        'ComputerKey', 'ComputerName', 'FilterType', 'FilterValue', 'FilterReason'
+    )
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotSelection.csv') -Columns $selectionColumns -Rows $selected.ToArray()
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotExclusions.csv') -Columns $exclusionColumns -Rows $excluded.ToArray()
+    Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotFilterExclusions.csv') -Columns $filterExclusionColumns -Rows $filterExcluded.ToArray()
 }
 
 $summary = [pscustomobject]@{
@@ -471,10 +535,15 @@ $summary = [pscustomobject]@{
     AvailableSources           = $availableSources.ToArray() -join '+'
     MissingSources             = $missingSources.ToArray() -join ','
     PartialSource              = ($missingSources.Count -gt 0)
+    ComputerNamePrefixes       = $namePrefixDisplay
+    NameFilterEnabled          = ($namePrefixes.Count -gt 0)
+    UniqueInventoryDevices     = $allKeys.Count
+    NameFilterMatchedDevices   = $matchedKeyLookup.Count
+    NameFilterExcludedDevices  = $filterExcluded.Count
     ADRows                     = $adRows.Count
     IntuneRows                 = $intuneRows.Count
-    ADWindows10Candidates      = @($adRecords | Where-Object { $_.Eligible }).Count
-    IntuneWindows10Candidates  = @($intuneRecords | Where-Object { $_.Eligible }).Count
+    ADWindows10Candidates      = @($adRecords | Where-Object { $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    IntuneWindows10Candidates  = @($intuneRecords | Where-Object { $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
     SelectedDevices            = $selected.Count
     ExcludedDevices            = $excluded.Count
     Windows11Excluded          = @($excluded | Where-Object { $_.ExclusionReason -match 'WINDOWS11_REPORTED' }).Count
@@ -483,8 +552,8 @@ $summary = [pscustomobject]@{
     UnknownOSExcluded          = @($excluded | Where-Object { $_.ExclusionReason -match 'OS_UNKNOWN_OR_UNSUPPORTED' }).Count
     ADNameCollisions           = @($excluded | Where-Object { $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count
     IntuneDuplicateRowsIgnored = $intuneDuplicateCount
-    ADStaleWarnings            = @($adRecords | Where-Object { $_.IsStale }).Count
-    IntuneStaleWarnings        = @($intuneRecords | Where-Object { $_.IsStale }).Count
+    ADStaleWarnings            = @($adRecords | Where-Object { $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    IntuneStaleWarnings        = @($intuneRecords | Where-Object { $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
     LotName                    = $safeLotName
     LotPath                    = $lotPath
     ComputersPath              = $computersPath
@@ -496,9 +565,10 @@ if (-not $NoEvidence) {
 }
 
 [pscustomobject]@{
-    Summary         = $summary
-    SelectedDevices = $selected.ToArray()
-    ExcludedDevices = $excluded.ToArray()
+    Summary               = $summary
+    SelectedDevices       = $selected.ToArray()
+    ExcludedDevices       = $excluded.ToArray()
+    FilterExcludedDevices = $filterExcluded.ToArray()
 }
 
 # SIG # Begin signature block
