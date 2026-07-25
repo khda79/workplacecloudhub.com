@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.40
+0.1.42
 #>
 param(
     [switch]$ValidateOnly
@@ -1265,22 +1265,55 @@ $xaml = @'
                         <ColumnDefinition Width="1.1*"/>
                     </Grid.ColumnDefinitions>
                     <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,0,8,0">
-                        <StackPanel>
-                            <TextBlock Text="Build from inventory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,12"/>
-                            <TextBlock Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                            <TextBlock Text="Inventory source"/>
-                            <ComboBox x:Name="AutomaticSourceCombo"/>
-                            <TextBlock Text="Intune authentication"/>
-                            <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when Refresh and preview is clicked." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,10"/>
-                            <TextBlock Text="LOT name"/>
-                            <TextBox x:Name="AutomaticLotNameText"/>
-                            <TextBlock Text="Launch mode"/>
-                            <ComboBox x:Name="AutomaticModeCombo"/>
-                            <WrapPanel Margin="0,4,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="Build from inventory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
+                            <TextBlock Grid.Row="1" Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                    <TextBlock Text="Inventory source"/>
+                                    <ComboBox x:Name="AutomaticSourceCombo"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                    <TextBlock Text="Launch mode"/>
+                                    <ComboBox x:Name="AutomaticModeCombo"/>
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Grid.Row="3">
+                                <TextBlock Text="Intune authentication"/>
+                                <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when Refresh and preview is clicked." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                            </StackPanel>
+                            <Grid Grid.Row="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                    <TextBlock Text="LOT name"/>
+                                    <TextBox x:Name="AutomaticLotNameText"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                    <TextBlock Text="Computer prefix(es)"/>
+                                    <TextBox x:Name="AutomaticNamePrefixText" ToolTip="Semicolon-separated prefixes, for example FR- or FR-;BE-"/>
+                                </StackPanel>
+                            </Grid>
+                            <WrapPanel Grid.Row="6" Margin="0,4,0,0">
                                 <Button x:Name="AutomaticPreviewButton" Content="Refresh and preview" MinWidth="155"/>
                                 <Button x:Name="AutomaticCreateLaunchButton" Content="Create and launch" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" MinWidth="155"/>
                             </WrapPanel>
-                        </StackPanel>
+                        </Grid>
                     </Border>
                     <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="8,0,0,0">
                         <Grid>
@@ -1545,7 +1578,7 @@ $controls = @{}
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
     'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
-    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticModeCombo',
+    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticModeCombo',
     'AutomaticPreviewButton','AutomaticCreateLaunchButton','AutomaticSummaryText',
     'AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
     'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
@@ -1880,6 +1913,8 @@ function Invoke-AutomaticLotSelection {
         LotName = [string]$controls.AutomaticLotNameText.Text
         EvidenceRoot = Join-Path (Get-RunsRoot -RootPath $toolkitRoot) 'AutomaticLotInventory'
     }
+    $namePrefixText = [string]$controls.AutomaticNamePrefixText.Text
+    if (-not [string]::IsNullOrWhiteSpace($namePrefixText)) { $parameters.ComputerNamePrefix = @($namePrefixText) }
     if (-not [string]::IsNullOrWhiteSpace([string]$InventoryContext.AdInventoryCsv)) { $parameters.AdInventoryCsv = [string]$InventoryContext.AdInventoryCsv }
     if (-not [string]::IsNullOrWhiteSpace([string]$InventoryContext.IntuneInventoryCsv)) { $parameters.IntuneInventoryCsv = [string]$InventoryContext.IntuneInventoryCsv }
     if ($InventoryContext.PartialSource) { $parameters.AllowPartialSource = $true }
@@ -1904,9 +1939,13 @@ function Format-AutomaticLotSummary {
         "Intune tenant: $(if ([string]::IsNullOrWhiteSpace([string]$InventoryContext.TenantId)) { 'Not used' } else { [string]$InventoryContext.TenantId })"
         "Intune auth: $(if ([string]::IsNullOrWhiteSpace([string]$InventoryContext.AuthenticationMode)) { 'Not used' } else { [string]$InventoryContext.AuthenticationMode })"
         @($InventoryContext.SourceDetails)
+        "Computer prefix(es): $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNamePrefixes)) { 'All' } else { [string]$summary.ComputerNamePrefixes })"
+        "Unique inventory devices: $($summary.UniqueInventoryDevices)"
+        "Matched by name filter: $($summary.NameFilterMatchedDevices)"
+        "Filtered out by name: $($summary.NameFilterExcludedDevices)"
         ''
-        "AD rows: $($summary.ADRows); Windows 10 candidates: $($summary.ADWindows10Candidates)"
-        "Intune rows: $($summary.IntuneRows); Windows 10 candidates: $($summary.IntuneWindows10Candidates)"
+        "AD rows: $($summary.ADRows); matching Windows 10 candidates: $($summary.ADWindows10Candidates)"
+        "Intune rows: $($summary.IntuneRows); matching Windows 10 candidates: $($summary.IntuneWindows10Candidates)"
         "Selected unique devices: $($summary.SelectedDevices)"
         "Excluded devices: $($summary.ExcludedDevices)"
         "Windows 11 excluded: $($summary.Windows11Excluded)"
@@ -1923,7 +1962,7 @@ function Format-AutomaticLotSummary {
 }
 
 function Get-AutomaticPreviewSignature {
-    return ('{0}|{1}|{2}' -f (Get-AutomaticSourceSelection), (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'), [string]$controls.AutomaticLotNameText.Text.Trim())
+    return ('{0}|{1}|{2}|{3}' -f (Get-AutomaticSourceSelection), (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'), [string]$controls.AutomaticLotNameText.Text.Trim(), [string]$controls.AutomaticNamePrefixText.Text.Trim())
 }
 
 function Update-AutomaticLotPreview {
@@ -1951,6 +1990,9 @@ function Confirm-AutomaticLotLaunch {
         "Inventory source: $($summary.AvailableSources)$(if ($summary.PartialSource) { ' (PARTIAL)' } else { '' })"
         "Intune tenant: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.TenantId })"
         "Intune auth: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.AuthenticationMode })"
+        "Computer prefix(es): $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNamePrefixes)) { 'All' } else { [string]$summary.ComputerNamePrefixes })"
+        "Matched by name filter: $($summary.NameFilterMatchedDevices)"
+        "Filtered out by name: $($summary.NameFilterExcludedDevices)"
         "Selected Windows 10 devices: $($summary.SelectedDevices)"
         "Excluded devices: $($summary.ExcludedDevices)"
         "Stale warnings: AD=$($summary.ADStaleWarnings); Intune=$($summary.IntuneStaleWarnings)"
@@ -2571,6 +2613,10 @@ $script:AutomaticPreviewSignature = ''
 $controls.AutomaticSourceCombo.Add_SelectionChanged({
     $script:AutomaticPreviewSignature = ''
     $controls.AutomaticSummaryText.Text = 'Inventory source changed. Refresh the preview before creating the LOT.'
+})
+$controls.AutomaticNamePrefixText.Add_TextChanged({
+    $script:AutomaticPreviewSignature = ''
+    $controls.AutomaticSummaryText.Text = 'Computer name filter changed. Refresh the preview before creating the LOT.'
 })
 $controls.AutomaticPreviewButton.Add_Click({
     try {
