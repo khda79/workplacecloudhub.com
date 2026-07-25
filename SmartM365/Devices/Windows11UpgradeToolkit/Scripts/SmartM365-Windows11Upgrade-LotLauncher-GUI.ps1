@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.42
+0.1.43
 #>
 param(
     [switch]$ValidateOnly
@@ -1293,7 +1293,8 @@ $xaml = @'
                             </Grid>
                             <StackPanel Grid.Row="3">
                                 <TextBlock Text="Intune authentication"/>
-                                <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when Refresh and preview is clicked." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                                <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when an Intune refresh is required." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,2"/>
+                                <CheckBox x:Name="AutomaticForceRefreshCheck" Content="Force inventory refresh this time" Margin="0,2,0,8" ToolTip="Ignore valid root caches for the next preview only."/>
                             </StackPanel>
                             <Grid Grid.Row="4">
                                 <Grid.ColumnDefinitions>
@@ -1578,7 +1579,7 @@ $controls = @{}
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
     'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
-    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticModeCombo',
+    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticModeCombo','AutomaticForceRefreshCheck',
     'AutomaticPreviewButton','AutomaticCreateLaunchButton','AutomaticSummaryText',
     'AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
     'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
@@ -1637,6 +1638,7 @@ $script:Lots = @()
 $script:SelectedLot = $null
 $script:LastSingleRunFolder = $null
 $script:UpdateCheckTimer = $null
+$script:AutomaticInventoryProgressState = $null
 
 function Add-Status {
     param(
@@ -1650,9 +1652,16 @@ function Add-Status {
     $controls.ActivityText.ScrollToEnd()
 }
 
+function Get-GuiDialogOwner {
+    if ($script:AutomaticInventoryProgressState -and $script:AutomaticInventoryProgressState.Window -and $script:AutomaticInventoryProgressState.Window.IsVisible) {
+        return $script:AutomaticInventoryProgressState.Window
+    }
+    return $window
+}
+
 function Show-GuiError {
     param([string]$Message)
-    [System.Windows.MessageBox]::Show($window, $Message, 'SmartM365', 'OK', 'Error') | Out-Null
+    [System.Windows.MessageBox]::Show((Get-GuiDialogOwner), $Message, 'SmartM365', 'OK', 'Error') | Out-Null
 }
 
 function Show-GuiWarningYesNo {
@@ -1661,7 +1670,7 @@ function Show-GuiWarningYesNo {
         [string]$Title
     )
 
-    $result = [System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Warning')
+    $result = [System.Windows.MessageBox]::Show((Get-GuiDialogOwner), $Message, $Title, 'YesNo', 'Warning')
     return ($result -eq [System.Windows.MessageBoxResult]::Yes)
 }
 
@@ -1686,6 +1695,63 @@ function Get-ConfiguredValue {
 }
 
 
+function New-AutomaticInventoryProgressState {
+    $progressXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="480" Height="230" WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Border BorderBrush="#B9DDF7" BorderThickness="1" CornerRadius="10" Background="White" Padding="22">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock x:Name="ProgressTitleText" Text="Preparing automatic LOT preview" FontSize="18" FontWeight="SemiBold" Foreground="#1F2937"/>
+            <TextBlock Grid.Row="1" x:Name="ProgressStageText" Text="Checking inventory caches..." Margin="0,14,0,0" FontWeight="SemiBold" Foreground="#005A9E" TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="2" x:Name="ProgressDetailText" Text="Please wait." Margin="0,6,0,0" Foreground="#475569" TextWrapping="Wrap" MaxHeight="58"/>
+            <ProgressBar Grid.Row="3" x:Name="InventoryProgressBar" Height="8" Margin="0,18,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
+            <TextBlock Grid.Row="4" x:Name="ProgressElapsedText" Text="Elapsed: 0 s" Margin="0,10,0,0" Foreground="#64748B" HorizontalAlignment="Right"/>
+        </Grid>
+    </Border>
+</Window>
+"@
+
+    $reader = New-Object System.Xml.XmlNodeReader ([xml]$progressXaml)
+    $progressWindow = [Windows.Markup.XamlReader]::Load($reader)
+    $progressWindow.Owner = $window
+    [pscustomobject]@{
+        Window = $progressWindow
+        StageText = $progressWindow.FindName('ProgressStageText')
+        DetailText = $progressWindow.FindName('ProgressDetailText')
+        ElapsedText = $progressWindow.FindName('ProgressElapsedText')
+        StartedUtc = [datetime]::UtcNow
+        Result = $null
+        ErrorRecord = $null
+    }
+}
+
+function Update-AutomaticInventoryProgress {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [string]$Detail = ''
+    )
+
+    if (-not $State.Window -or -not $State.Window.IsVisible) { return }
+    $State.StageText.Text = $Stage
+    $State.DetailText.Text = if ([string]::IsNullOrWhiteSpace($Detail)) { 'Please wait.' } else { $Detail }
+    $elapsedSeconds = [math]::Max(0, [math]::Floor(([datetime]::UtcNow - $State.StartedUtc).TotalSeconds))
+    $State.ElapsedText.Text = "Elapsed: $elapsedSeconds s"
+    $State.Window.UpdateLayout()
+    $State.Window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
+}
+
 function Get-AutomaticSourceSelection {
     $value = [string]$controls.AutomaticSourceCombo.SelectedItem
     if ($value -eq 'AD') { return 'AD' }
@@ -1704,7 +1770,7 @@ function Get-AutomaticInventoryFileInfo {
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ Source = $SourceName; Path = $Path; Exists = $false; Fresh = $false; AgeHours = [double]::PositiveInfinity; TenantId = ''; AuthenticationMode = ''; Scope = ''; Detail = 'Cache missing' }
+        return [pscustomobject]@{ Source = $SourceName; Path = $Path; Exists = $false; Fresh = $false; AgeHours = [double]::PositiveInfinity; TenantId = ''; AuthenticationMode = ''; Scope = ''; ContentVerified = $false; Detail = 'Cache missing' }
     }
 
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
@@ -1713,9 +1779,34 @@ function Get-AutomaticInventoryFileInfo {
     $authenticationMode = ''
     $scope = ''
     $provenanceVerified = $true
+    $contentVerified = $true
     $scopeDetail = ''
-    if ($RequireDelegatedAuthentication) {
+    $contentDetail = ''
+    $firstRow = $null
+    try {
         $firstRow = Import-Csv -LiteralPath $Path | Select-Object -First 1
+        if (-not $firstRow) {
+            $contentVerified = $false
+            $contentDetail = '; cache content invalid (no data rows)'
+        }
+        else {
+            $propertyNames = @($firstRow.PSObject.Properties.Name)
+            $identityColumns = if ($SourceName -eq 'AD') { @('ComputerName','Name','DNSHostName') } else { @('DeviceName','ManagedDeviceName','ComputerName') }
+            $hasIdentity = @($identityColumns | Where-Object { $propertyNames -contains $_ }).Count -gt 0
+            $hasOperatingSystem = ($propertyNames -contains 'OperatingSystem')
+            $hasOsVersion = if ($SourceName -eq 'Intune') { ($propertyNames -contains 'OSVersion' -or $propertyNames -contains 'OperatingSystemVersion') } else { $true }
+            $contentVerified = ($hasIdentity -and $hasOperatingSystem -and $hasOsVersion)
+            if (-not $contentVerified) {
+                $contentDetail = "; cache content invalid (identity=$hasIdentity; operatingSystem=$hasOperatingSystem; osVersion=$hasOsVersion)"
+            }
+        }
+    }
+    catch {
+        $contentVerified = $false
+        $contentDetail = "; cache content unreadable ($($_.Exception.Message))"
+    }
+
+    if ($RequireDelegatedAuthentication) {
         $tenantId = if ($firstRow -and $firstRow.PSObject.Properties['InventoryTenantId']) { [string]$firstRow.InventoryTenantId } else { '' }
         $authenticationMode = if ($firstRow -and $firstRow.PSObject.Properties['InventoryAuthenticationMode']) { [string]$firstRow.InventoryAuthenticationMode } else { '' }
         $scope = if ($firstRow -and $firstRow.PSObject.Properties['InventoryScope']) { [string]$firstRow.InventoryScope } else { '' }
@@ -1734,13 +1825,32 @@ function Get-AutomaticInventoryFileInfo {
         Source = $SourceName
         Path = $Path
         Exists = $true
-        Fresh = ($ageHours -le $FreshnessHours -and $provenanceVerified)
+        Fresh = ($ageHours -le $FreshnessHours -and $contentVerified -and $provenanceVerified)
         AgeHours = $ageHours
         TenantId = $tenantId
         AuthenticationMode = $authenticationMode
         Scope = $scope
-        Detail = ('Cache age {0:N1}h; TTL {1:N0}h{2}' -f $ageHours, $FreshnessHours, $scopeDetail)
+        ContentVerified = $contentVerified
+        Detail = ('Cache age {0:N1}h; TTL {1:N0}h{2}{3}' -f $ageHours, $FreshnessHours, $contentDetail, $scopeDetail)
     }
+}
+
+function Get-GuiPowerShellProcessLogDetail {
+    param(
+        [string[]]$Paths,
+        [int]$TailLines = 20
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($path in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $lines = @(Get-Content -LiteralPath $path -Tail $TailLines -ErrorAction SilentlyContinue)
+        $content = ([string]($lines -join [Environment]::NewLine)).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($content)) {
+            $parts.Add($content)
+        }
+    }
+    return ($parts.ToArray() -join [Environment]::NewLine)
 }
 
 function Invoke-GuiPowerShellProcess {
@@ -1749,11 +1859,14 @@ function Invoke-GuiPowerShellProcess {
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$LogPath,
         [Parameter(Mandatory = $true)][string]$Activity,
-        [switch]$Interactive
+        [switch]$Interactive,
+        [scriptblock]$ProgressCallback
     )
 
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { throw "Script not found: $ScriptPath" }
     Add-Status -Title 'Inventory refresh' -Message $Activity
+    $previewWasEnabled = $controls.AutomaticPreviewButton.IsEnabled
+    $createWasEnabled = $controls.AutomaticCreateLaunchButton.IsEnabled
     $controls.AutomaticPreviewButton.IsEnabled = $false
     $controls.AutomaticCreateLaunchButton.IsEnabled = $false
     $window.Cursor = [System.Windows.Input.Cursors]::Wait
@@ -1765,6 +1878,7 @@ function Invoke-GuiPowerShellProcess {
     }
 
     try {
+        if ($ProgressCallback) { & $ProgressCallback $Activity 'Starting PowerShell inventory process...' }
         $startParameters = @{
             FilePath = 'powershell.exe'
             ArgumentList = ($argumentParts -join ' ')
@@ -1774,29 +1888,40 @@ function Invoke-GuiPowerShellProcess {
         }
         if (-not $Interactive) { $startParameters.WindowStyle = 'Hidden' }
         $process = Start-Process @startParameters
+        $nextProgressUpdateUtc = [datetime]::MinValue
         while (-not $process.HasExited) {
             $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
+            if ($ProgressCallback -and [datetime]::UtcNow -ge $nextProgressUpdateUtc) {
+                $liveDetail = Get-GuiPowerShellProcessLogDetail -Paths @($LogPath, $stderrPath) -TailLines 3
+                & $ProgressCallback $Activity $liveDetail
+                $nextProgressUpdateUtc = [datetime]::UtcNow.AddSeconds(1)
+            }
             Start-Sleep -Milliseconds 200
             $process.Refresh()
         }
+        $process.Refresh()
         if ($process.ExitCode -ne 0) {
-            $detail = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue).Trim() } else { '' }
-            if ([string]::IsNullOrWhiteSpace($detail) -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
-                $detail = (Get-Content -LiteralPath $LogPath -Raw -ErrorAction SilentlyContinue).Trim()
-            }
-            throw ("Inventory refresh failed with exit code {0}. Log={1}. {2}" -f $process.ExitCode, $LogPath, $detail)
+            $detail = Get-GuiPowerShellProcessLogDetail -Paths @($stderrPath, $LogPath) -TailLines 20
+            if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'The inventory process produced no error text.' }
+            throw ("Inventory refresh failed with exit code {0}. Stdout={1}; Stderr={2}.{3}{4}" -f $process.ExitCode, $LogPath, $stderrPath, [Environment]::NewLine, $detail)
+        }
+        if ($ProgressCallback) {
+            $detail = Get-GuiPowerShellProcessLogDetail -Paths @($LogPath) -TailLines 3
+            & $ProgressCallback $Activity $detail
         }
     }
     finally {
         $window.Cursor = $null
-        $controls.AutomaticPreviewButton.IsEnabled = $true
-        $controls.AutomaticCreateLaunchButton.IsEnabled = $true
+        $controls.AutomaticPreviewButton.IsEnabled = $previewWasEnabled
+        $controls.AutomaticCreateLaunchButton.IsEnabled = $createWasEnabled
     }
 }
 
 function Get-AutomaticInventorySnapshot {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('AD', 'Intune', 'Both')][string]$Source
+        [Parameter(Mandatory = $true)][ValidateSet('AD', 'Intune', 'Both')][string]$Source,
+        [switch]$ForceRefresh,
+        [scriptblock]$ProgressCallback
     )
 
     $automaticRoot = Join-Path (Get-RunsRoot -RootPath $toolkitRoot) 'AutomaticLotInventory'
@@ -1811,24 +1936,86 @@ function Get-AutomaticInventorySnapshot {
     $authenticationMode = ''
     $configuredTenantId = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
 
+    if ($ProgressCallback) { & $ProgressCallback 'Checking root inventory caches...' "Requested source: $Source" }
+
     foreach ($requestedSource in $requestedSources) {
+        $rootCsv = Join-Path $toolkitRoot $(if ($requestedSource -eq 'AD') { 'DevicesAD.csv' } else { 'DevicesIntune.csv' })
+        $outputCsv = Join-Path $sourceRunPath $(if ($requestedSource -eq 'AD') { 'DevicesAD.csv' } else { 'DevicesIntune.csv' })
+        try {
+            $rootInfo = if ($requestedSource -eq 'AD') {
+                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 12 -SourceName 'AD'
+            }
+            else {
+                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantId $configuredTenantId -RequireDelegatedAuthentication
+            }
+        }
+        catch {
+            $rootInfo = [pscustomobject]@{
+                Source = $requestedSource
+                Path = $rootCsv
+                Exists = (Test-Path -LiteralPath $rootCsv -PathType Leaf)
+                Fresh = $false
+                AgeHours = [double]::PositiveInfinity
+                TenantId = ''
+                AuthenticationMode = ''
+                Scope = ''
+                Detail = "Cache validation failed: $($_.Exception.Message)"
+            }
+        }
+
+        if (-not $ForceRefresh -and $rootInfo.Fresh) {
+            try {
+                if ($ProgressCallback) { & $ProgressCallback "Reusing recent $requestedSource inventory..." ("{0}; copying root cache to {1}" -f $rootInfo.Detail, $outputCsv) }
+                Copy-Item -LiteralPath $rootCsv -Destination $outputCsv -Force -ErrorAction Stop
+                $paths[$requestedSource] = $outputCsv
+                if ($requestedSource -eq 'Intune') {
+                    $tenantId = [string]$rootInfo.TenantId
+                    $authenticationMode = [string]$rootInfo.AuthenticationMode
+                }
+                $details.Add(("{0}: reused verified recent root cache; {1}; snapshot={2}" -f $requestedSource, $rootInfo.Detail, $outputCsv))
+                continue
+            }
+            catch {
+                $details.Add(("{0}: recent root cache copy failed; refresh required; detail={1}" -f $requestedSource, $_.Exception.Message))
+            }
+        }
+        elseif ($ForceRefresh -and $rootInfo.Fresh) {
+            $details.Add(("{0}: force refresh requested; verified root cache retained as fallback; {1}" -f $requestedSource, $rootInfo.Detail))
+        }
+        else {
+            $details.Add(("{0}: root cache not reusable; {1}" -f $requestedSource, $rootInfo.Detail))
+        }
+
         try {
             if ($requestedSource -eq 'AD') {
-                $outputCsv = Join-Path $sourceRunPath 'DevicesAD.csv'
                 $logPath = Join-Path $sourceRunPath 'DevicesAD.refresh.log'
                 $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1'
-                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments @('-OutputPath', $outputCsv, '-ForceRefresh') -LogPath $logPath -Activity 'Reading a fresh complete AD forest inventory for the automatic LOT...'
+                $invokeParameters = @{
+                    ScriptPath = $exporter
+                    Arguments = @('-OutputPath', $outputCsv, '-ForceRefresh')
+                    LogPath = $logPath
+                    Activity = 'Reading a fresh complete AD forest inventory for the automatic LOT...'
+                }
+                if ($ProgressCallback) { $invokeParameters.ProgressCallback = $ProgressCallback }
+                Invoke-GuiPowerShellProcess @invokeParameters
                 if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "AD inventory CSV was not created: $outputCsv" }
                 $paths.AD = $outputCsv
                 $details.Add("AD: generated isolated automatic snapshot $outputCsv")
             }
             else {
-                $outputCsv = Join-Path $sourceRunPath 'DevicesIntune.csv'
                 $logPath = Join-Path $sourceRunPath 'DevicesIntune.refresh.log'
                 $exporter = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1'
                 $arguments = @('-OutputPath', $outputCsv, '-ForceRefresh')
                 if (-not [string]::IsNullOrWhiteSpace($configuredTenantId)) { $arguments += @('-TenantId', $configuredTenantId) }
-                Invoke-GuiPowerShellProcess -ScriptPath $exporter -Arguments $arguments -LogPath $logPath -Activity 'Waiting for delegated interactive Microsoft Graph sign-in to read a fresh complete Intune inventory...' -Interactive
+                $invokeParameters = @{
+                    ScriptPath = $exporter
+                    Arguments = $arguments
+                    LogPath = $logPath
+                    Activity = 'Waiting for delegated interactive Microsoft Graph sign-in to read a fresh complete Intune inventory...'
+                    Interactive = $true
+                }
+                if ($ProgressCallback) { $invokeParameters.ProgressCallback = $ProgressCallback }
+                Invoke-GuiPowerShellProcess @invokeParameters
                 if (-not (Test-Path -LiteralPath $outputCsv -PathType Leaf)) { throw "Intune inventory CSV was not created: $outputCsv" }
                 $intuneInfo = Get-AutomaticInventoryFileInfo -Path $outputCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantId $configuredTenantId -RequireDelegatedAuthentication
                 if (-not $intuneInfo.Fresh) { throw ("Generated Intune inventory provenance is invalid: {0}" -f $intuneInfo.Detail) }
@@ -1840,37 +2027,30 @@ function Get-AutomaticInventorySnapshot {
         }
         catch {
             $refreshError = $_.Exception.Message
-            $rootCsv = Join-Path $toolkitRoot $(if ($requestedSource -eq 'AD') { 'DevicesAD.csv' } else { 'DevicesIntune.csv' })
-            $fallback = if ($requestedSource -eq 'AD') {
-                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 12 -SourceName 'AD'
-            }
-            else {
-                Get-AutomaticInventoryFileInfo -Path $rootCsv -FreshnessHours 2 -SourceName 'Intune' -ExpectedTenantId $configuredTenantId -RequireDelegatedAuthentication
-            }
-
             $fallbackAccepted = $false
-            if ($fallback.Fresh) {
+            if ($rootInfo.Fresh) {
                 $fallbackAccepted = Show-GuiWarningYesNo -Title ("{0} refresh failed" -f $requestedSource) -Message ((@(
                     ("The automatic {0} snapshot could not be generated:" -f $requestedSource)
                     $refreshError
                     ''
                     ("A verified recent root cache is available: {0}" -f $rootCsv)
-                    ([string]$fallback.Detail)
+                    ([string]$rootInfo.Detail)
                     ''
                     'Use this root cache explicitly as the fallback for this preview? A copy will still be preserved in the automatic evidence and run folders.'
                 )) -join [Environment]::NewLine)
             }
 
             if ($fallbackAccepted) {
-                $paths[$requestedSource] = $rootCsv
+                Copy-Item -LiteralPath $rootCsv -Destination $outputCsv -Force -ErrorAction Stop
+                $paths[$requestedSource] = $outputCsv
                 if ($requestedSource -eq 'Intune') {
-                    $tenantId = [string]$fallback.TenantId
-                    $authenticationMode = [string]$fallback.AuthenticationMode
+                    $tenantId = [string]$rootInfo.TenantId
+                    $authenticationMode = [string]$rootInfo.AuthenticationMode
                 }
-                $details.Add(("{0}: root cache fallback explicitly accepted after refresh failure; {1}" -f $requestedSource,$fallback.Detail))
+                $details.Add(("{0}: root cache fallback explicitly accepted after refresh failure; {1}; snapshot={2}" -f $requestedSource, $rootInfo.Detail, $outputCsv))
                 continue
             }
-            $failures.Add(("{0}: {1}" -f $requestedSource,$refreshError))
+            $failures.Add(("{0}: {1}" -f $requestedSource, $refreshError))
         }
     }
 
@@ -1886,6 +2066,7 @@ function Get-AutomaticInventorySnapshot {
         if (-not $continuePartial) { throw 'Automatic LOT selection cancelled because one inventory source failed.' }
     }
 
+    if ($ProgressCallback) { & $ProgressCallback 'Inventory sources ready.' ($details.ToArray() -join [Environment]::NewLine) }
     [pscustomobject]@{
         RequestedSource = $Source
         AdInventoryCsv = [string]$paths.AD
@@ -1893,6 +2074,7 @@ function Get-AutomaticInventorySnapshot {
         TenantId = $tenantId
         AuthenticationMode = $authenticationMode
         PartialSource = ($failures.Count -gt 0)
+        ForceInventoryRefresh = [bool]$ForceRefresh
         SourceDetails = $details.ToArray()
         Failures = $failures.ToArray()
         SourceRunPath = $sourceRunPath
@@ -1966,8 +2148,16 @@ function Get-AutomaticPreviewSignature {
 }
 
 function Update-AutomaticLotPreview {
+    param(
+        [switch]$ForceInventoryRefresh,
+        [scriptblock]$ProgressCallback
+    )
+
     $source = Get-AutomaticSourceSelection
-    $context = Get-AutomaticInventorySnapshot -Source $source
+    $snapshotParameters = @{ Source = $source; ForceRefresh = [bool]$ForceInventoryRefresh }
+    if ($ProgressCallback) { $snapshotParameters.ProgressCallback = $ProgressCallback }
+    $context = Get-AutomaticInventorySnapshot @snapshotParameters
+    if ($ProgressCallback) { & $ProgressCallback 'Loading inventories and building the selection preview...' "Source snapshots: $($context.SourceRunPath)" }
     $result = Invoke-AutomaticLotSelection -InventoryContext $context
     $controls.AutomaticLotNameText.Text = [string]$result.Summary.LotName
     $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $result -InventoryContext $context
@@ -1976,8 +2166,47 @@ function Update-AutomaticLotPreview {
     $script:AutomaticPreviewContext = $context
     $script:AutomaticPreviewResult = $result
     $script:AutomaticPreviewSignature = Get-AutomaticPreviewSignature
+    if ($ProgressCallback) { & $ProgressCallback 'Automatic LOT preview ready.' ("Selected {0} Windows 10 device(s); safety exclusions {1}; filtered out {2}." -f $result.Summary.SelectedDevices, $result.Summary.ExcludedDevices, $result.Summary.NameFilterExcludedDevices) }
     Add-Status -Title 'Automatic preview' -Message ("Selected {0} unique Windows 10 device(s); excluded {1}." -f $result.Summary.SelectedDevices, $result.Summary.ExcludedDevices)
     return $result
+}
+
+function Invoke-AutomaticLotPreviewWithProgress {
+    param([switch]$ForceInventoryRefresh)
+
+    $state = New-AutomaticInventoryProgressState
+    $script:AutomaticInventoryProgressState = $state
+    $progressCallback = {
+        param([string]$Stage, [string]$Detail)
+        Update-AutomaticInventoryProgress -State $state -Stage $Stage -Detail $Detail
+    }.GetNewClosure()
+
+    $contentRendered = {
+        $work = {
+            try {
+                $state.Result = Update-AutomaticLotPreview -ForceInventoryRefresh:$ForceInventoryRefresh -ProgressCallback $progressCallback
+            }
+            catch {
+                $state.ErrorRecord = $_
+            }
+            finally {
+                if ($state.Window.IsVisible) { $state.Window.Close() }
+            }
+        }.GetNewClosure()
+        [void]$state.Window.Dispatcher.BeginInvoke([action]$work, [System.Windows.Threading.DispatcherPriority]::Background)
+    }.GetNewClosure()
+    $state.Window.Add_ContentRendered($contentRendered)
+
+    try {
+        [void]$state.Window.ShowDialog()
+    }
+    finally {
+        $script:AutomaticInventoryProgressState = $null
+        if ($ForceInventoryRefresh) { $controls.AutomaticForceRefreshCheck.IsChecked = $false }
+    }
+
+    if ($state.ErrorRecord) { throw $state.ErrorRecord }
+    return $state.Result
 }
 
 function Confirm-AutomaticLotLaunch {
@@ -2620,7 +2849,8 @@ $controls.AutomaticNamePrefixText.Add_TextChanged({
 })
 $controls.AutomaticPreviewButton.Add_Click({
     try {
-        [void](Update-AutomaticLotPreview)
+        $forceRefresh = [bool]$controls.AutomaticForceRefreshCheck.IsChecked
+        [void](Invoke-AutomaticLotPreviewWithProgress -ForceInventoryRefresh:$forceRefresh)
     }
     catch {
         Show-GuiError $_.Exception.Message
@@ -2635,8 +2865,9 @@ $controls.AutomaticOpenEvidenceButton.Add_Click({
 $controls.AutomaticCreateLaunchButton.Add_Click({
     try {
         $currentSignature = Get-AutomaticPreviewSignature
-        if ($null -eq $script:AutomaticPreviewResult -or $script:AutomaticPreviewSignature -ne $currentSignature) {
-            [void](Update-AutomaticLotPreview)
+        $forceRefresh = [bool]$controls.AutomaticForceRefreshCheck.IsChecked
+        if ($forceRefresh -or $null -eq $script:AutomaticPreviewResult -or $script:AutomaticPreviewSignature -ne $currentSignature) {
+            [void](Invoke-AutomaticLotPreviewWithProgress -ForceInventoryRefresh:$forceRefresh)
         }
 
         if ([int]$script:AutomaticPreviewResult.Summary.SelectedDevices -le 0) {
