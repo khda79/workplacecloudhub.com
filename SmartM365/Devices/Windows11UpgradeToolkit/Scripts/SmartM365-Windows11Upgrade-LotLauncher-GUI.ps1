@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.45
+0.1.46
 #>
 param(
     [switch]$ValidateOnly
@@ -1277,20 +1277,10 @@ $xaml = @'
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Text="Build from inventory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
                             <TextBlock Grid.Row="1" Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                            <Grid Grid.Row="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                                    <TextBlock Text="Inventory source"/>
-                                    <ComboBox x:Name="AutomaticSourceCombo"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                    <TextBlock Text="Launch mode"/>
-                                    <ComboBox x:Name="AutomaticModeCombo"/>
-                                </StackPanel>
-                            </Grid>
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="Inventory source"/>
+                                <ComboBox x:Name="AutomaticSourceCombo"/>
+                            </StackPanel>
                             <StackPanel Grid.Row="3">
                                 <TextBlock Text="Intune authentication"/>
                                 <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when an Intune refresh is required." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,2"/>
@@ -1312,7 +1302,7 @@ $xaml = @'
                             </Grid>
                             <WrapPanel Grid.Row="6" Margin="0,4,0,0">
                                 <Button x:Name="AutomaticPreviewButton" Content="Refresh and preview" MinWidth="155"/>
-                                <Button x:Name="AutomaticCreateLaunchButton" Content="Create and launch" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" MinWidth="155"/>
+                                <Button x:Name="AutomaticCreateButton" Content="Create" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" MinWidth="155"/>
                             </WrapPanel>
                         </Grid>
                     </Border>
@@ -1579,8 +1569,8 @@ $controls = @{}
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
     'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
-    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticModeCombo','AutomaticForceRefreshCheck',
-    'AutomaticPreviewButton','AutomaticCreateLaunchButton','AutomaticSummaryText',
+    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticForceRefreshCheck',
+    'AutomaticPreviewButton','AutomaticCreateButton','AutomaticSummaryText',
     'AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
     'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
     'DirectSetupUpgradeCheck','SkipVirtualMachinesCheck','SkipSetupPreCopyCheck',
@@ -1868,9 +1858,9 @@ function Invoke-GuiPowerShellProcess {
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { throw "Script not found: $ScriptPath" }
     Add-Status -Title 'Inventory refresh' -Message $Activity
     $previewWasEnabled = $controls.AutomaticPreviewButton.IsEnabled
-    $createWasEnabled = $controls.AutomaticCreateLaunchButton.IsEnabled
+    $createWasEnabled = $controls.AutomaticCreateButton.IsEnabled
     $controls.AutomaticPreviewButton.IsEnabled = $false
-    $controls.AutomaticCreateLaunchButton.IsEnabled = $false
+    $controls.AutomaticCreateButton.IsEnabled = $false
     $window.Cursor = [System.Windows.Input.Cursors]::Wait
 
     $stderrPath = "$LogPath.stderr.txt"
@@ -1915,7 +1905,7 @@ function Invoke-GuiPowerShellProcess {
     finally {
         $window.Cursor = $null
         $controls.AutomaticPreviewButton.IsEnabled = $previewWasEnabled
-        $controls.AutomaticCreateLaunchButton.IsEnabled = $createWasEnabled
+        $controls.AutomaticCreateButton.IsEnabled = $createWasEnabled
     }
 }
 
@@ -2254,12 +2244,12 @@ function Invoke-AutomaticLotPreviewWithProgress {
     return $state.Result
 }
 
-function Confirm-AutomaticLotLaunch {
+function Confirm-AutomaticLotCreate {
     param([Parameter(Mandatory = $true)]$Result)
 
     $summary = $Result.Summary
     $message = @(
-        "Create and launch $($summary.LotName)?"
+        "Create $($summary.LotName)?"
         ''
         "Inventory source: $($summary.AvailableSources)$(if ($summary.PartialSource) { ' (PARTIAL)' } else { '' })"
         "Intune tenant: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.TenantId })"
@@ -2270,13 +2260,10 @@ function Confirm-AutomaticLotLaunch {
         "Selected Windows 10 devices: $($summary.SelectedDevices)"
         "Excluded devices: $($summary.ExcludedDevices)"
         "Stale warnings: AD=$($summary.ADStaleWarnings); Intune=$($summary.IntuneStaleWarnings)"
-        "Launch mode: $([string]$controls.AutomaticModeCombo.SelectedItem)"
-        "Worker limit: $(Get-IntText -TextBox $controls.GlobalLimitText -Default 15 -Minimum 1)"
-        "Max cycles: $(Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0)"
         ''
-        'The existing run guard, Windows 11 precheck, hardware readiness checks, and setup guards remain active.'
+        'The LOT will be created but not launched. Open Existing LOT when you are ready to launch it.'
     ) -join [Environment]::NewLine
-    return Show-GuiWarningYesNo -Title 'Create and launch automatic LOT' -Message $message
+    return Show-GuiWarningYesNo -Title 'Create automatic LOT' -Message $message
 }
 function Invoke-NumericStepperClick {
     param(
@@ -2457,7 +2444,6 @@ function Initialize-Options {
     Initialize-Combo -Combo $controls.LotModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.AutomaticSourceCombo -Values @('AD + Intune','AD','Intune') -Selected 'AD + Intune'
-    Initialize-Combo -Combo $controls.AutomaticModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     Update-AutomaticGeneratedLotName
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
     Initialize-Combo -Combo $controls.SetupLanguageCombo -Values @('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL') -Selected (Get-ConfiguredValue 'W11UT_SETUP_LANGUAGE')
@@ -2908,7 +2894,7 @@ $controls.AutomaticOpenEvidenceButton.Add_Click({
         Open-FolderPath -Path $controls.AutomaticEvidencePathText.Text
     }
 })
-$controls.AutomaticCreateLaunchButton.Add_Click({
+$controls.AutomaticCreateButton.Add_Click({
     try {
         $currentSignature = Get-AutomaticPreviewSignature
         $forceRefresh = [bool]$controls.AutomaticForceRefreshCheck.IsChecked
@@ -2919,17 +2905,10 @@ $controls.AutomaticCreateLaunchButton.Add_Click({
         if ([int]$script:AutomaticPreviewResult.Summary.SelectedDevices -le 0) {
             throw 'No eligible Windows 10 device was selected. Review the exclusion evidence before creating a LOT.'
         }
-        if (-not (Confirm-AutomaticLotLaunch -Result $script:AutomaticPreviewResult)) { return }
-        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
-
-        $environment = Get-ToolkitOptionEnvironment
-        if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $environment -ScopeName ([string]$script:AutomaticPreviewResult.Summary.LotName))) { return }
+        if (-not (Confirm-AutomaticLotCreate -Result $script:AutomaticPreviewResult)) { return }
 
         $created = Invoke-AutomaticLotSelection -InventoryContext $script:AutomaticPreviewContext -Create
-        Invoke-LotWrapperRefresh -RootPath $toolkitRoot
         $lot = Get-LotSummary -LotPath ([string]$created.Summary.LotPath)
-        $lot = Ensure-LotWrappersReady -Lot $lot
-        Start-ToolkitLot -Lot $lot -Mode ([string]$controls.AutomaticModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment -InitialInventoryContext $script:AutomaticPreviewContext
 
         $script:AutomaticPreviewResult = $created
         $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $created -InventoryContext $script:AutomaticPreviewContext
@@ -2938,11 +2917,11 @@ $controls.AutomaticCreateLaunchButton.Add_Click({
         $script:SelectedLot = $lot
         Refresh-LotList
         Save-GuiOptions -Quiet
-        Add-Status -Title 'Automatic LOT launched' -Message ("Created and launched {0} with {1} device(s)." -f $lot.Name, $lot.ComputerCount)
+        Add-Status -Title 'Automatic LOT created' -Message ("Created {0} with {1} device(s). Open Existing LOT to launch it." -f $lot.Name, $lot.ComputerCount)
     }
     catch {
         Show-GuiError $_.Exception.Message
-        Add-Status -Title 'Automatic launch failed' -Message $_.Exception.Message
+        Add-Status -Title 'Automatic LOT creation failed' -Message $_.Exception.Message
     }
 })
 $script:SyncingGlobalLimitText = $false
