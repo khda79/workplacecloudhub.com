@@ -8,7 +8,7 @@ deduplicates them, excludes Windows 11 evidence and unsafe inventory states, wri
 selection evidence under Runs, and can create a standard operational LOT.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 
 #requires -Version 5.1
@@ -22,6 +22,11 @@ param(
     [string]$ToolkitRoot,
     [string]$LotName,
     [string[]]$ComputerNamePrefix,
+    [string[]]$ComputerNameContains,
+    [switch]$ExcludeIntunePresent,
+    [switch]$ExcludeStaleAd,
+    [ValidateRange(1, 3650)]
+    [int]$AdLastLogonMaxAgeDays = 45,
     [string]$EvidenceRoot,
     [switch]$Create,
     [switch]$AllowPartialSource,
@@ -31,7 +36,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.2.0'
+$script:AutomaticLotVersion = '1.3.0'
 
 function Get-AutomaticLotToolkitRoot {
     param([AllowNull()][string]$RequestedRoot)
@@ -165,6 +170,37 @@ function Test-AutomaticLotNamePrefix {
     if (@($Prefixes).Count -eq 0) { return $true }
     foreach ($prefix in @($Prefixes)) {
         if ($ComputerKey.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-AutomaticLotNameContainsValues {
+    param([AllowNull()][string[]]$ContainsValues)
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($ContainsValues)) {
+        foreach ($candidate in @(([string]$item) -split ';')) {
+            $value = $candidate.Trim().Trim([char]34).ToUpperInvariant()
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+            if ($value -notmatch '^[A-Z0-9_-]+$') {
+                throw "Invalid computer name contains value '$candidate'. Use only letters, digits, hyphens, or underscores; wildcards and regular expressions are not supported."
+            }
+            if (-not $normalized.Contains($value)) { $normalized.Add($value) }
+        }
+    }
+
+    return @($normalized.ToArray())
+}
+
+function Test-AutomaticLotNameContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerKey,
+        [string[]]$ContainsValues
+    )
+
+    if (@($ContainsValues).Count -eq 0) { return $true }
+    foreach ($value in @($ContainsValues)) {
+        if ($ComputerKey.IndexOf($value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
     }
     return $false
 }
@@ -343,6 +379,12 @@ if ('Intune' -in $requiredSources) {
 if ($missingSources.Count -gt 0 -and (-not $AllowPartialSource -or $availableSources.Count -eq 0)) {
     throw ('Required automatic LOT inventory source(s) missing: {0}.' -f ($missingSources.ToArray() -join ', '))
 }
+if ($ExcludeIntunePresent -and 'Intune' -notin $availableSources) {
+    throw 'ExcludeIntunePresent requires an available Intune inventory source.'
+}
+if ($ExcludeStaleAd -and 'AD' -notin $availableSources) {
+    throw 'ExcludeStaleAd requires an available AD inventory source.'
+}
 
 $adRows = if ('AD' -in $availableSources) { @(Import-Csv -LiteralPath $AdInventoryCsv) } else { @() }
 $intuneRows = if ('Intune' -in $availableSources) { @(Import-Csv -LiteralPath $IntuneInventoryCsv) } else { @() }
@@ -372,6 +414,9 @@ foreach ($group in @($intuneRecords | Group-Object -Property Key)) {
 $allKeys = @(@($adByKey.Keys) + @($intuneByKey.Keys) | Sort-Object -Unique)
 $namePrefixes = @(Get-AutomaticLotNamePrefixes -Prefixes $ComputerNamePrefix)
 $namePrefixDisplay = $namePrefixes -join ';'
+$nameContainsValues = @(Get-AutomaticLotNameContainsValues -ContainsValues $ComputerNameContains)
+$nameContainsDisplay = $nameContainsValues -join ';'
+$adLastLogonCutoffUtc = [datetime]::UtcNow.AddDays(-$AdLastLogonMaxAgeDays)
 $selected = New-Object System.Collections.Generic.List[object]
 $excluded = New-Object System.Collections.Generic.List[object]
 $filterExcluded = New-Object System.Collections.Generic.List[object]
@@ -385,22 +430,60 @@ foreach ($key in $allKeys) {
     $keyIntuneRecords = if ($intuneAllByKey.ContainsKey($key)) { @($intuneAllByKey[$key]) } else { @() }
     $intuneRecord = if ($intuneByKey.ContainsKey($key)) { $intuneByKey[$key] } else { $null }
 
+    $filterName = if ($keyAdRecords.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$keyAdRecords[0].PreferredName)) {
+        [string]$keyAdRecords[0].PreferredName
+    }
+    elseif ($null -ne $intuneRecord) {
+        [string]$intuneRecord.PreferredName
+    }
+    else {
+        $key
+    }
+    $filterTypes = New-Object System.Collections.Generic.List[string]
+    $filterValues = New-Object System.Collections.Generic.List[string]
+    $filterReasons = New-Object System.Collections.Generic.List[string]
     if (-not (Test-AutomaticLotNamePrefix -ComputerKey $key -Prefixes $namePrefixes)) {
-        $filterName = if ($keyAdRecords.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$keyAdRecords[0].PreferredName)) {
-            [string]$keyAdRecords[0].PreferredName
+        $filterTypes.Add('ComputerNamePrefix')
+        $filterValues.Add($namePrefixDisplay)
+        $filterReasons.Add('COMPUTER_NAME_PREFIX_NOT_MATCHED')
+    }
+    if (-not (Test-AutomaticLotNameContains -ComputerKey $key -ContainsValues $nameContainsValues)) {
+        $filterTypes.Add('ComputerNameContains')
+        $filterValues.Add($nameContainsDisplay)
+        $filterReasons.Add('COMPUTER_NAME_CONTAINS_NOT_MATCHED')
+    }
+
+    $intunePresent = (@($keyIntuneRecords | Where-Object { $_.Present }).Count -gt 0)
+    if ($ExcludeIntunePresent -and $intunePresent) {
+        $filterTypes.Add('IntunePresence')
+        $filterValues.Add('Present=True')
+        $filterReasons.Add('INTUNE_DEVICE_PRESENT')
+    }
+
+    $validAdLastSeen = @($keyAdRecords | Where-Object { $_.LastSeenUtc -ne [datetime]::MinValue } | Sort-Object -Property LastSeenUtc -Descending)
+    $latestAdLastSeen = if ($validAdLastSeen.Count -gt 0) { [datetime]$validAdLastSeen[0].LastSeenUtc } else { [datetime]::MinValue }
+    if ($ExcludeStaleAd) {
+        if ($latestAdLastSeen -eq [datetime]::MinValue) {
+            $filterTypes.Add('ADLastLogon')
+            $filterValues.Add("MaxAgeDays=$AdLastLogonMaxAgeDays")
+            $filterReasons.Add('AD_LAST_LOGON_UNKNOWN')
         }
-        elseif ($null -ne $intuneRecord) {
-            [string]$intuneRecord.PreferredName
+        elseif ($latestAdLastSeen -lt $adLastLogonCutoffUtc) {
+            $filterTypes.Add('ADLastLogon')
+            $filterValues.Add("MaxAgeDays=$AdLastLogonMaxAgeDays")
+            $filterReasons.Add('AD_LAST_LOGON_OLDER_THAN_LIMIT')
         }
-        else {
-            $key
-        }
+    }
+
+    if ($filterReasons.Count -gt 0) {
         $filterExcluded.Add([pscustomobject]@{
-            ComputerKey   = $key
-            ComputerName  = $filterName
-            FilterType    = 'ComputerNamePrefix'
-            FilterValue   = $namePrefixDisplay
-            FilterReason  = 'COMPUTER_NAME_PREFIX_NOT_MATCHED'
+            ComputerKey                = $key
+            ComputerName               = $filterName
+            FilterType                 = $filterTypes.ToArray() -join ';'
+            FilterValue                = $filterValues.ToArray() -join ' | '
+            FilterReason               = $filterReasons.ToArray() -join ';'
+            ADLastLogonTimestampUtc     = if ($latestAdLastSeen -eq [datetime]::MinValue) { '' } else { $latestAdLastSeen.ToString('o') }
+            IntunePresent               = $intunePresent
         })
         continue
     }
@@ -534,7 +617,8 @@ if (-not $NoEvidence) {
         'IntuneOperatingSystem', 'IntuneOSVersion', 'IntuneManagementState'
     )
     $filterExclusionColumns = @(
-        'ComputerKey', 'ComputerName', 'FilterType', 'FilterValue', 'FilterReason'
+        'ComputerKey', 'ComputerName', 'FilterType', 'FilterValue', 'FilterReason',
+        'ADLastLogonTimestampUtc', 'IntunePresent'
     )
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotSelection.csv') -Columns $selectionColumns -Rows $selected.ToArray()
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotExclusions.csv') -Columns $exclusionColumns -Rows $excluded.ToArray()
@@ -548,10 +632,19 @@ $summary = [pscustomobject]@{
     MissingSources             = $missingSources.ToArray() -join ','
     PartialSource              = ($missingSources.Count -gt 0)
     ComputerNamePrefixes       = $namePrefixDisplay
-    NameFilterEnabled          = ($namePrefixes.Count -gt 0)
+    ComputerNameContains       = $nameContainsDisplay
+    ExcludeIntunePresent       = [bool]$ExcludeIntunePresent
+    ExcludeStaleAd             = [bool]$ExcludeStaleAd
+    ADLastLogonMaxAgeDays      = $AdLastLogonMaxAgeDays
+    NameFilterEnabled          = ($namePrefixes.Count -gt 0 -or $nameContainsValues.Count -gt 0 -or $ExcludeIntunePresent -or $ExcludeStaleAd)
     UniqueInventoryDevices     = $allKeys.Count
     NameFilterMatchedDevices   = $matchedKeyLookup.Count
     NameFilterExcludedDevices  = $filterExcluded.Count
+    PrefixFilterExcluded       = @($filterExcluded | Where-Object { $_.FilterReason -match 'COMPUTER_NAME_PREFIX_NOT_MATCHED' }).Count
+    ContainsFilterExcluded     = @($filterExcluded | Where-Object { $_.FilterReason -match 'COMPUTER_NAME_CONTAINS_NOT_MATCHED' }).Count
+    IntunePresentFilterExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'INTUNE_DEVICE_PRESENT' }).Count
+    ADLastLogonFilterExcluded  = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_LAST_LOGON_' }).Count
+    ADLastLogonUnknownExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_LAST_LOGON_UNKNOWN' }).Count
     ADRows                     = $adRows.Count
     IntuneRows                 = $intuneRows.Count
     ADWindows10Candidates      = @($adRecords | Where-Object { $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
