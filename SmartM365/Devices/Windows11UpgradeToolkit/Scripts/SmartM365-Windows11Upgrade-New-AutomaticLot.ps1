@@ -8,7 +8,7 @@ deduplicates them, excludes Windows 11 evidence and unsafe inventory states, wri
 selection evidence under Runs, and can create a standard operational LOT.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 
 #requires -Version 5.1
@@ -31,7 +31,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.1.0'
+$script:AutomaticLotVersion = '1.2.0'
 
 function Get-AutomaticLotToolkitRoot {
     param([AllowNull()][string]$RequestedRoot)
@@ -45,10 +45,22 @@ function Get-AutomaticLotToolkitRoot {
 }
 
 function Get-AutomaticLotSafeName {
-    param([AllowNull()][string]$Name)
+    param(
+        [AllowNull()][string]$Name,
+        [AllowNull()][string[]]$NamePrefixes
+    )
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
-        $Name = 'LOT-AUTO-W10-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+        $nameSegments = New-Object System.Collections.Generic.List[string]
+        foreach ($prefix in @($NamePrefixes)) {
+            $segment = [regex]::Replace(([string]$prefix).ToUpperInvariant(), '[^A-Z0-9_-]+', '-').Trim('-_')
+            if (-not [string]::IsNullOrWhiteSpace($segment) -and -not $nameSegments.Contains($segment)) {
+                $nameSegments.Add($segment)
+            }
+        }
+
+        $prefixSegment = if ($nameSegments.Count -gt 0) { "-$($nameSegments -join '-')" } else { '' }
+        $Name = 'LOT-AUTO-W10{0}-{1}' -f $prefixSegment, (Get-Date -Format 'yyyyMMdd-HHmmss')
     }
 
     $safeName = [regex]::Replace($Name.Trim(), '[^A-Za-z0-9._-]+', '-').Trim('-._')
@@ -141,7 +153,7 @@ function Get-AutomaticLotNamePrefixes {
         }
     }
 
-    return @($normalized.ToArray() | Sort-Object -Unique)
+    return @($normalized.ToArray())
 }
 
 function Test-AutomaticLotNamePrefix {
@@ -457,7 +469,7 @@ foreach ($key in $allKeys) {
     })
 }
 
-$safeLotName = Get-AutomaticLotSafeName -Name $LotName
+$safeLotName = Get-AutomaticLotSafeName -Name $LotName -NamePrefixes $namePrefixes
 $lotPath = ''
 $computersPath = ''
 if ($Create) {

@@ -68,7 +68,10 @@ preview-first:
 
 1. Select `AD + Intune`, `AD`, or `Intune`.
 2. Optionally enter one or more short-name prefixes in **Computer prefix(es)**, for example
-   `FR-` or `FR-;BE-`. Leave the field empty to keep all computer names.
+   `FR-` or `FR-;BE-`. Leave the field empty to keep all computer names. While the LOT name
+   remains automatically managed, the GUI includes the normalized prefixes in that name:
+   `FR-` becomes `LOT-AUTO-W10-FR-<timestamp>` and `FR-;BE-` becomes
+   `LOT-AUTO-W10-FR-BE-<timestamp>`. A manually edited LOT name is never overwritten.
 3. Click **Refresh and preview**. Valid root caches are reused automatically; delegated Microsoft
    Graph sign-in appears only when the Intune cache must be refreshed.
 4. Follow the small progress window while caches are checked, copied, refreshed when required,
@@ -112,6 +115,9 @@ Selection rules are conservative:
   name before eligibility checks. For example, `FR-` matches `fr-pc01.example.com`. Multiple
   prefixes use semicolons; wildcards and regular expressions are rejected. The GUI does not
   persist this operator-specific field after it closes.
+- Automatic and manual LOT folder names are Windows-safe: unsupported characters are replaced
+  with hyphens, trailing punctuation is removed, and the mandatory `LOT-` prefix prevents reserved
+  device names such as `CON`, `AUX`, `NUL`, `COM1`, or `LPT1`.
 - Windows 11 evidence from either source wins and excludes the device within the filtered scope.
 - AD DNS host names are preferred in `Computers.txt`. Conflicting FQDNs sharing one short name
   are excluded for manual review.

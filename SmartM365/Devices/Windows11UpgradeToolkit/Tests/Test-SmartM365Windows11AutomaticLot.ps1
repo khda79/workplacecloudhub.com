@@ -3,7 +3,7 @@
 Runs synthetic tests for automatic Windows 10 LOT selection.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 
 #requires -Version 5.1
@@ -116,6 +116,15 @@ try {
     Assert-Equal -Actual $multiPrefixPreview.Summary.NameFilterMatchedDevices -Expected 3 -Message 'multiple prefixes matched device count'
     Assert-Equal -Actual $multiPrefixPreview.Summary.NameFilterExcludedDevices -Expected 10 -Message 'multiple prefixes filtered-out device count'
     Assert-Equal -Actual $multiPrefixPreview.Summary.SelectedDevices -Expected 2 -Message 'multiple prefixes selected Windows 10 count'
+
+    $generatedPrefixNamePreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -ComputerNamePrefix @('fr-','be-') -NoEvidence
+    Assert-True -Condition ($generatedPrefixNamePreview.Summary.LotName -match '^LOT-AUTO-W10-FR-BE-\d{8}-\d{6}$') -Message 'default LOT name contains normalized prefix segments in operator order'
+
+    $sanitizedNamePreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'AUTO: W10/FR*?' -NoEvidence
+    Assert-Equal -Actual $sanitizedNamePreview.Summary.LotName -Expected 'LOT-AUTO-W10-FR' -Message 'Windows-forbidden directory characters are sanitized from a manual LOT name'
+
+    $reservedNamePreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'CON' -NoEvidence
+    Assert-Equal -Actual $reservedNamePreview.Summary.LotName -Expected 'LOT-CON' -Message 'mandatory LOT prefix neutralizes Windows reserved device names'
 
     $wildcardBlocked = $false
     try {
