@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.43
+0.1.44
 #>
 param(
     [switch]$ValidateOnly
@@ -1639,6 +1639,8 @@ $script:SelectedLot = $null
 $script:LastSingleRunFolder = $null
 $script:UpdateCheckTimer = $null
 $script:AutomaticInventoryProgressState = $null
+$script:AutomaticLotNameTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$script:AutomaticGeneratedLotName = ''
 
 function Add-Status {
     param(
@@ -2147,6 +2149,35 @@ function Get-AutomaticPreviewSignature {
     return ('{0}|{1}|{2}|{3}' -f (Get-AutomaticSourceSelection), (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'), [string]$controls.AutomaticLotNameText.Text.Trim(), [string]$controls.AutomaticNamePrefixText.Text.Trim())
 }
 
+function Get-AutomaticGeneratedLotName {
+    param([AllowNull()][string]$PrefixText)
+
+    $segments = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @(([string]$PrefixText) -split ';')) {
+        $segment = [regex]::Replace($candidate.Trim().Trim([char]34).ToUpperInvariant(), '[^A-Z0-9_-]+', '-').Trim('-_')
+        if (-not [string]::IsNullOrWhiteSpace($segment) -and -not $segments.Contains($segment)) {
+            $segments.Add($segment)
+        }
+    }
+
+    $prefixSegment = if ($segments.Count -gt 0) { "-$($segments -join '-')" } else { '' }
+    return 'LOT-AUTO-W10{0}-{1}' -f $prefixSegment, $script:AutomaticLotNameTimestamp
+}
+
+function Update-AutomaticGeneratedLotName {
+    $currentName = [string]$controls.AutomaticLotNameText.Text
+    if (
+        -not [string]::IsNullOrWhiteSpace($currentName) -and
+        $currentName -cne [string]$script:AutomaticGeneratedLotName
+    ) {
+        return
+    }
+
+    $generatedName = Get-AutomaticGeneratedLotName -PrefixText ([string]$controls.AutomaticNamePrefixText.Text)
+    $script:AutomaticGeneratedLotName = $generatedName
+    $controls.AutomaticLotNameText.Text = $generatedName
+}
+
 function Update-AutomaticLotPreview {
     param(
         [switch]$ForceInventoryRefresh,
@@ -2413,7 +2444,7 @@ function Initialize-Options {
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.AutomaticSourceCombo -Values @('AD + Intune','AD','Intune') -Selected 'AD + Intune'
     Initialize-Combo -Combo $controls.AutomaticModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
-    if ([string]::IsNullOrWhiteSpace($controls.AutomaticLotNameText.Text)) { $controls.AutomaticLotNameText.Text = 'LOT-AUTO-W10-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss') }
+    Update-AutomaticGeneratedLotName
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
     Initialize-Combo -Combo $controls.SetupLanguageCombo -Values @('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL') -Selected (Get-ConfiguredValue 'W11UT_SETUP_LANGUAGE')
     Initialize-Combo -Combo $controls.SetupDynamicUpdateCombo -Values @('Disable','Enable','NoDrivers','NoLCU','NoDriversNoLCU') -Selected (Get-ConfiguredValue 'W11UT_SETUP_DYNAMIC_UPDATE')
@@ -2844,6 +2875,7 @@ $controls.AutomaticSourceCombo.Add_SelectionChanged({
     $controls.AutomaticSummaryText.Text = 'Inventory source changed. Refresh the preview before creating the LOT.'
 })
 $controls.AutomaticNamePrefixText.Add_TextChanged({
+    Update-AutomaticGeneratedLotName
     $script:AutomaticPreviewSignature = ''
     $controls.AutomaticSummaryText.Text = 'Computer name filter changed. Refresh the preview before creating the LOT.'
 })
