@@ -3,7 +3,7 @@
 Runs synthetic tests for automatic Windows 10 LOT selection.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 
 #requires -Version 5.1
@@ -42,6 +42,8 @@ $testToolkitRoot = Join-Path $testRoot 'Toolkit'
 $evidenceRoot = Join-Path $testRoot 'Evidence'
 $adCsv = Join-Path $testRoot 'DevicesAD.csv'
 $intuneCsv = Join-Path $testRoot 'DevicesIntune.csv'
+$filterAdCsv = Join-Path $testRoot 'FilterDevicesAD.csv'
+$filterIntuneCsv = Join-Path $testRoot 'FilterDevicesIntune.csv'
 
 try {
     New-Item -ItemType Directory -Path $testToolkitRoot -Force | Out-Null
@@ -74,6 +76,21 @@ try {
         [pscustomobject]@{ ComputerName = 'PC10'; DeviceName = 'PC10'; IntuneInventoryPresent = $true; IntuneManagedDeviceId = '10-new'; OperatingSystem = 'Windows'; OSVersion = '10.0.19045.1'; ManagementState = 'managed'; LastSyncDateTime = (Get-Date).AddHours(-1).ToString('o') }
         [pscustomobject]@{ ComputerName = 'PC10'; DeviceName = 'PC10'; IntuneInventoryPresent = $true; IntuneManagedDeviceId = '10-old-w11'; OperatingSystem = 'Windows'; OSVersion = '10.0.22631.1'; ManagementState = 'managed'; LastSyncDateTime = (Get-Date).AddDays(-10).ToString('o') }
     ) | Export-Csv -LiteralPath $intuneCsv -NoTypeInformation -Encoding UTF8
+
+    @(
+        [pscustomobject]@{ ComputerName = 'FR-A-RECENT'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-recent.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-A-OLD'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-old.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-60).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-A-UNKNOWN'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-unknown.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = '' }
+        [pscustomobject]@{ ComputerName = 'BE-A-RECENT'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'be-a-recent.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-B-RECENT'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-b-recent.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-A-INTUNE'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-intune.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-A-MULTI'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-multi.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-60).ToString('o') }
+        [pscustomobject]@{ ComputerName = 'FR-A-MULTI'; ADInventoryPresent = $true; Enabled = $true; DNSHostName = 'fr-a-multi.example'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).AddDays(-2).ToString('o') }
+    ) | Export-Csv -LiteralPath $filterAdCsv -NoTypeInformation -Encoding UTF8
+    @(
+        [pscustomobject]@{ DeviceName = 'FR-A-INTUNE'; IntuneInventoryPresent = $true; OperatingSystem = 'Windows'; OSVersion = '10.0.19045.1'; ManagementState = 'managed'; LastSyncDateTime = (Get-Date).AddHours(-1).ToString('o') }
+        [pscustomobject]@{ DeviceName = 'OTHER'; IntuneInventoryPresent = $true; OperatingSystem = 'Windows'; OSVersion = '10.0.19045.1'; ManagementState = 'managed'; LastSyncDateTime = (Get-Date).AddHours(-1).ToString('o') }
+    ) | Export-Csv -LiteralPath $filterIntuneCsv -NoTypeInformation -Encoding UTF8
 
     $preview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-TEST' -EvidenceRoot $evidenceRoot
     Assert-Equal -Actual $preview.Summary.SelectedDevices -Expected 3 -Message 'selected device count'
@@ -117,6 +134,27 @@ try {
     Assert-Equal -Actual $multiPrefixPreview.Summary.NameFilterExcludedDevices -Expected 10 -Message 'multiple prefixes filtered-out device count'
     Assert-Equal -Actual $multiPrefixPreview.Summary.SelectedDevices -Expected 2 -Message 'multiple prefixes selected Windows 10 count'
 
+    $advancedFilterPreview = & $engine -Source Both -AdInventoryCsv $filterAdCsv -IntuneInventoryCsv $filterIntuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-ADVANCED-FILTERS' -EvidenceRoot $evidenceRoot -ComputerNamePrefix 'FR-' -ComputerNameContains '-A-' -ExcludeIntunePresent -ExcludeStaleAd -AdLastLogonMaxAgeDays 45
+    Assert-Equal -Actual $advancedFilterPreview.Summary.ComputerNameContains -Expected '-A-' -Message 'contains filter is normalized and reported'
+    Assert-True -Condition ([bool]$advancedFilterPreview.Summary.ExcludeIntunePresent) -Message 'Intune presence filter is enabled'
+    Assert-True -Condition ([bool]$advancedFilterPreview.Summary.ExcludeStaleAd) -Message 'AD LastLogon filter is enabled'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.ADLastLogonMaxAgeDays -Expected 45 -Message 'AD LastLogon default threshold is 45 days'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.UniqueInventoryDevices -Expected 8 -Message 'advanced filter unique inventory count'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.NameFilterMatchedDevices -Expected 2 -Message 'advanced filters combine with AND semantics'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.NameFilterExcludedDevices -Expected 6 -Message 'advanced filters keep one exclusion row per device'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.SelectedDevices -Expected 2 -Message 'advanced filters retain recent AD-only devices'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.PrefixFilterExcluded -Expected 2 -Message 'prefix filter exclusion count'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.ContainsFilterExcluded -Expected 2 -Message 'contains filter exclusion count'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.IntunePresentFilterExcluded -Expected 2 -Message 'Intune presence filter exclusion count'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.ADLastLogonFilterExcluded -Expected 3 -Message 'AD LastLogon filter exclusion count'
+    Assert-Equal -Actual $advancedFilterPreview.Summary.ADLastLogonUnknownExcluded -Expected 2 -Message 'unknown AD LastLogon exclusion count'
+    Assert-True -Condition (@($advancedFilterPreview.SelectedDevices | Where-Object { $_.ComputerKey -eq 'FR-A-MULTI' }).Count -eq 1) -Message 'newest valid AD LastLogon wins for duplicate AD rows'
+    $advancedFilterEvidence = @(Import-Csv -LiteralPath (Join-Path $advancedFilterPreview.Summary.EvidencePath 'AutomaticLotFilterExclusions.csv'))
+    Assert-Equal -Actual $advancedFilterEvidence.Count -Expected 6 -Message 'advanced filter evidence has one row per excluded device'
+    $multiReasonEvidence = @($advancedFilterEvidence | Where-Object { $_.ComputerKey -eq 'OTHER' })
+    Assert-Equal -Actual $multiReasonEvidence.Count -Expected 1 -Message 'multi-filter exclusion is consolidated into one evidence row'
+    Assert-True -Condition ($multiReasonEvidence[0].FilterReason -match 'COMPUTER_NAME_PREFIX_NOT_MATCHED.+COMPUTER_NAME_CONTAINS_NOT_MATCHED.+INTUNE_DEVICE_PRESENT.+AD_LAST_LOGON_UNKNOWN') -Message 'multi-filter evidence preserves every exclusion reason'
+
     $generatedPrefixNamePreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -ComputerNamePrefix @('fr-','be-') -NoEvidence
     Assert-True -Condition ($generatedPrefixNamePreview.Summary.LotName -match '^LOT-AUTO-W10-FR-BE-\d{8}-\d{6}$') -Message 'default LOT name contains normalized prefix segments in operator order'
 
@@ -134,6 +172,33 @@ try {
         $wildcardBlocked = $_.Exception.Message -match 'wildcards and regular expressions are not supported'
     }
     Assert-True -Condition $wildcardBlocked -Message 'wildcard prefix is rejected explicitly'
+
+    $containsWildcardBlocked = $false
+    try {
+        & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-CONTAINS-WILDCARD' -ComputerNameContains '*-A-*' -NoEvidence | Out-Null
+    }
+    catch {
+        $containsWildcardBlocked = $_.Exception.Message -match 'wildcards and regular expressions are not supported'
+    }
+    Assert-True -Condition $containsWildcardBlocked -Message 'wildcard contains filter is rejected explicitly'
+
+    $intuneFilterSourceBlocked = $false
+    try {
+        & $engine -Source AD -AdInventoryCsv $adCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-INTUNE-FILTER-SOURCE' -ExcludeIntunePresent -NoEvidence | Out-Null
+    }
+    catch {
+        $intuneFilterSourceBlocked = $_.Exception.Message -match 'requires an available Intune inventory source'
+    }
+    Assert-True -Condition $intuneFilterSourceBlocked -Message 'Intune presence filter requires Intune inventory evidence'
+
+    $adFilterSourceBlocked = $false
+    try {
+        & $engine -Source Intune -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-AD-FILTER-SOURCE' -ExcludeStaleAd -NoEvidence | Out-Null
+    }
+    catch {
+        $adFilterSourceBlocked = $_.Exception.Message -match 'requires an available AD inventory source'
+    }
+    Assert-True -Condition $adFilterSourceBlocked -Message 'AD LastLogon filter requires AD inventory evidence'
 
     $missingSourceBlocked = $false
     try {
