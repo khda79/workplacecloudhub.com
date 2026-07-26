@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.3.0
+1.4.0
 #>
 
 #requires -Version 5.1
@@ -74,6 +74,27 @@ try {
     Import-ScriptFunction -Path $gui -Name 'Get-GuiPowerShellProcessLogDetail'
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticGeneratedLotName'
     Import-ScriptFunction -Path $gui -Name 'Update-AutomaticGeneratedLotName'
+    Import-ScriptFunction -Path $gui -Name 'New-AutomaticLotPreviewWork'
+    $successfulProgressState = [pscustomobject]@{
+        Window = [pscustomobject]@{ IsVisible = $false }
+        Result = $null
+        ErrorRecord = $null
+    }
+    $successfulWork = New-AutomaticLotPreviewWork -ProgressState $successfulProgressState -Operation { 'SYNTHETIC_PREVIEW_OK' }
+    & $successfulWork
+    Assert-Equal -Actual $successfulProgressState.Result -Expected 'SYNTHETIC_PREVIEW_OK' -Message 'preview work closure preserves the progress state result property'
+    Assert-True -Condition ($null -eq $successfulProgressState.ErrorRecord) -Message 'successful preview work closure does not create an error record'
+
+    $failedProgressState = [pscustomobject]@{
+        Window = [pscustomobject]@{ IsVisible = $false }
+        Result = $null
+        ErrorRecord = $null
+    }
+    $failedWork = New-AutomaticLotPreviewWork -ProgressState $failedProgressState -Operation { throw 'SYNTHETIC_PREVIEW_FAILURE' }
+    & $failedWork
+    Assert-True -Condition ($null -ne $failedProgressState.ErrorRecord) -Message 'failed preview work closure preserves the original error record'
+    Assert-True -Condition ($failedProgressState.ErrorRecord.Exception.Message -match 'SYNTHETIC_PREVIEW_FAILURE') -Message 'failed preview work closure preserves the original error message'
+
     $global:controls = [pscustomobject]@{
         AutomaticLotNameText = [pscustomobject]@{ Text = '' }
         AutomaticNamePrefixText = [pscustomobject]@{ Text = '' }
