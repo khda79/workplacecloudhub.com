@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 
 #requires -Version 5.1
@@ -72,6 +72,27 @@ try {
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticInventoryFileInfo'
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticInventorySnapshot'
     Import-ScriptFunction -Path $gui -Name 'Get-GuiPowerShellProcessLogDetail'
+    Import-ScriptFunction -Path $gui -Name 'Get-AutomaticGeneratedLotName'
+    Import-ScriptFunction -Path $gui -Name 'Update-AutomaticGeneratedLotName'
+    $global:controls = [pscustomobject]@{
+        AutomaticLotNameText = [pscustomobject]@{ Text = '' }
+        AutomaticNamePrefixText = [pscustomobject]@{ Text = '' }
+    }
+    $script:AutomaticLotNameTimestamp = '20260726-120000'
+    $script:AutomaticGeneratedLotName = ''
+    Update-AutomaticGeneratedLotName
+    Assert-Equal -Actual $global:controls.AutomaticLotNameText.Text -Expected 'LOT-AUTO-W10-20260726-120000' -Message 'automatic LOT name starts without a prefix segment'
+    $global:controls.AutomaticNamePrefixText.Text = 'fr-'
+    Update-AutomaticGeneratedLotName
+    Assert-Equal -Actual $global:controls.AutomaticLotNameText.Text -Expected 'LOT-AUTO-W10-FR-20260726-120000' -Message 'automatic LOT name includes one normalized prefix'
+    $global:controls.AutomaticNamePrefixText.Text = 'fr-;be-'
+    Update-AutomaticGeneratedLotName
+    Assert-Equal -Actual $global:controls.AutomaticLotNameText.Text -Expected 'LOT-AUTO-W10-FR-BE-20260726-120000' -Message 'automatic LOT name preserves multiple prefix order'
+    $global:controls.AutomaticLotNameText.Text = 'LOT-MANUAL-PILOT'
+    $global:controls.AutomaticNamePrefixText.Text = 'de-'
+    Update-AutomaticGeneratedLotName
+    Assert-Equal -Actual $global:controls.AutomaticLotNameText.Text -Expected 'LOT-MANUAL-PILOT' -Message 'manual LOT name is not overwritten by a prefix change'
+    Remove-Variable -Name controls -Scope Global -Force
     function global:Get-ConfiguredValue { param([string]$Name); return '' }
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
@@ -173,6 +194,7 @@ try {
     $guiText = Get-Content -LiteralPath $gui -Raw
     Assert-True -Condition ($guiText -match 'InventoryProgressBar.{0,160}IsIndeterminate="True"') -Message 'automatic inventory wait window uses an indeterminate progress bar'
     Assert-True -Condition ($guiText -match 'AutomaticForceRefreshCheck') -Message 'automatic inventory force-refresh option is present'
+    Assert-True -Condition ($guiText -match 'Update-AutomaticGeneratedLotName') -Message 'automatic computer-prefix changes update the generated LOT name'
 
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
