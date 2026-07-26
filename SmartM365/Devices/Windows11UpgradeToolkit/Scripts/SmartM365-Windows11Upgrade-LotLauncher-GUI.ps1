@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.44
+0.1.45
 #>
 param(
     [switch]$ValidateOnly
@@ -2202,6 +2202,27 @@ function Update-AutomaticLotPreview {
     return $result
 }
 
+function New-AutomaticLotPreviewWork {
+    param(
+        [Parameter(Mandatory = $true)]$ProgressState,
+        [Parameter(Mandatory = $true)][scriptblock]$Operation
+    )
+
+    return {
+        try {
+            $ProgressState.Result = & $Operation
+        }
+        catch {
+            $ProgressState.ErrorRecord = $_
+        }
+        finally {
+            if ($ProgressState.Window -and $ProgressState.Window.IsVisible) {
+                $ProgressState.Window.Close()
+            }
+        }
+    }.GetNewClosure()
+}
+
 function Invoke-AutomaticLotPreviewWithProgress {
     param([switch]$ForceInventoryRefresh)
 
@@ -2212,18 +2233,11 @@ function Invoke-AutomaticLotPreviewWithProgress {
         Update-AutomaticInventoryProgress -State $state -Stage $Stage -Detail $Detail
     }.GetNewClosure()
 
+    $operation = {
+        Update-AutomaticLotPreview -ForceInventoryRefresh:$ForceInventoryRefresh -ProgressCallback $progressCallback
+    }.GetNewClosure()
+    $work = New-AutomaticLotPreviewWork -ProgressState $state -Operation $operation
     $contentRendered = {
-        $work = {
-            try {
-                $state.Result = Update-AutomaticLotPreview -ForceInventoryRefresh:$ForceInventoryRefresh -ProgressCallback $progressCallback
-            }
-            catch {
-                $state.ErrorRecord = $_
-            }
-            finally {
-                if ($state.Window.IsVisible) { $state.Window.Close() }
-            }
-        }.GetNewClosure()
         [void]$state.Window.Dispatcher.BeginInvoke([action]$work, [System.Windows.Threading.DispatcherPriority]::Background)
     }.GetNewClosure()
     $state.Window.Add_ContentRendered($contentRendered)
