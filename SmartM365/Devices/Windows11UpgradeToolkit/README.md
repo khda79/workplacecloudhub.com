@@ -77,8 +77,9 @@ preview-first:
 4. Follow the small progress window while caches are checked, copied, refreshed when required,
    and loaded into the preview.
 5. Review matched, filtered-out, selected, and safety-excluded counts plus the evidence CSV files.
-6. Click **Create and launch**, review the final confirmation, then launch through the normal
-   LOT engine.
+6. Click **Create** and review the final confirmation. The LOT folder, `Computers.txt`,
+   configuration, wrappers, and evidence are created without starting a launcher. Open
+   **Existing LOT** when you are ready to launch the new LOT.
 
 Every **Refresh and preview** checks the read-only root caches first. `DevicesAD.csv` is reusable
 for up to 12 hours. `DevicesIntune.csv` is reusable for up to 2 hours only when it contains a
@@ -99,10 +100,9 @@ elapsed time. Empty stdout or stderr files are handled safely; refresh errors in
 process exit code and both log paths instead of masking the original failure.
 
 The selection engine preserves a copy of every accepted source in its timestamped evidence
-folder. **Create and launch** also copies the same preview snapshots to the new LOT run as
-`DevicesAD.csv` and/or `DevicesIntune.csv`. Intune background refresh is disabled for that run,
-so no Microsoft Graph authentication starts in the middle of an automatic LOT. Run **Refresh
-and preview** again whenever a newer Intune snapshot is required.
+folder. **Create** writes the filtered computer list and LOT configuration without starting
+workers or creating a run. The accepted AD and/or Intune snapshots remain preserved with the
+selection evidence. Run **Refresh and preview** again whenever a newer snapshot is required.
 
 Selection rules are conservative:
 
