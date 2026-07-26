@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.4.0
+1.5.0
 #>
 
 #requires -Version 5.1
@@ -216,6 +216,12 @@ try {
     Assert-True -Condition ($guiText -match 'InventoryProgressBar.{0,160}IsIndeterminate="True"') -Message 'automatic inventory wait window uses an indeterminate progress bar'
     Assert-True -Condition ($guiText -match 'AutomaticForceRefreshCheck') -Message 'automatic inventory force-refresh option is present'
     Assert-True -Condition ($guiText -match 'Update-AutomaticGeneratedLotName') -Message 'automatic computer-prefix changes update the generated LOT name'
+    Assert-True -Condition ($guiText -match 'x:Name="AutomaticCreateButton"\s+Content="Create"') -Message 'automatic LOT action is labelled Create'
+    Assert-True -Condition ($guiText -notmatch 'AutomaticModeCombo|Create and launch') -Message 'automatic LOT tab no longer exposes launch controls'
+    $automaticCreateHandler = [regex]::Match($guiText, '(?s)\$controls\.AutomaticCreateButton\.Add_Click\(\{(?<Body>.*?)\r?\n\}\)\r?\n\$script:SyncingGlobalLimitText')
+    Assert-True -Condition $automaticCreateHandler.Success -Message 'automatic LOT Create handler is present'
+    Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -match 'Invoke-AutomaticLotSelection.+-Create') -Message 'automatic LOT Create handler creates the LOT'
+    Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -notmatch 'Start-ToolkitLot|Confirm-UnlimitedCycleLaunch|Test-SetupSourceBeforeLaunch|Get-ToolkitOptionEnvironment') -Message 'automatic LOT Create handler cannot launch the LOT'
 
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
