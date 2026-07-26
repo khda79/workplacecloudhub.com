@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.5.0
+1.6.0
 #>
 
 #requires -Version 5.1
@@ -75,6 +75,8 @@ try {
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticGeneratedLotName'
     Import-ScriptFunction -Path $gui -Name 'Update-AutomaticGeneratedLotName'
     Import-ScriptFunction -Path $gui -Name 'New-AutomaticLotPreviewWork'
+    Import-ScriptFunction -Path $gui -Name 'Get-AutomaticSourceSelection'
+    Import-ScriptFunction -Path $gui -Name 'Test-AutomaticFilterSourceCompatibility'
     $successfulProgressState = [pscustomobject]@{
         Window = [pscustomobject]@{ IsVisible = $false }
         Result = $null
@@ -98,6 +100,11 @@ try {
     $global:controls = [pscustomobject]@{
         AutomaticLotNameText = [pscustomobject]@{ Text = '' }
         AutomaticNamePrefixText = [pscustomobject]@{ Text = '' }
+        AutomaticSourceCombo = [pscustomobject]@{ SelectedItem = 'AD' }
+        AutomaticNameContainsText = [pscustomobject]@{ Text = '' }
+        AutomaticExcludeIntuneCheck = [pscustomobject]@{ IsChecked = $false }
+        AutomaticExcludeStaleAdCheck = [pscustomobject]@{ IsChecked = $false }
+        AutomaticLastLogonDaysText = [pscustomobject]@{ Text = '45'; IsEnabled = $false }
     }
     $script:AutomaticLotNameTimestamp = '20260726-120000'
     $script:AutomaticGeneratedLotName = ''
@@ -113,6 +120,21 @@ try {
     $global:controls.AutomaticNamePrefixText.Text = 'de-'
     Update-AutomaticGeneratedLotName
     Assert-Equal -Actual $global:controls.AutomaticLotNameText.Text -Expected 'LOT-MANUAL-PILOT' -Message 'manual LOT name is not overwritten by a prefix change'
+    Test-AutomaticFilterSourceCompatibility
+    $global:controls.AutomaticExcludeIntuneCheck.IsChecked = $true
+    $intuneExclusionSourceRejected = $false
+    try { Test-AutomaticFilterSourceCompatibility } catch { $intuneExclusionSourceRejected = ($_.Exception.Message -match 'AD \+ Intune') }
+    Assert-True -Condition $intuneExclusionSourceRejected -Message 'Intune-presence exclusion requires the combined inventory source'
+    $global:controls.AutomaticSourceCombo.SelectedItem = 'Both'
+    Test-AutomaticFilterSourceCompatibility
+    $global:controls.AutomaticExcludeIntuneCheck.IsChecked = $false
+    $global:controls.AutomaticExcludeStaleAdCheck.IsChecked = $true
+    $global:controls.AutomaticSourceCombo.SelectedItem = 'Intune'
+    $staleAdSourceRejected = $false
+    try { Test-AutomaticFilterSourceCompatibility } catch { $staleAdSourceRejected = ($_.Exception.Message -match 'AD or AD \+ Intune') }
+    Assert-True -Condition $staleAdSourceRejected -Message 'AD LastLogon exclusion rejects an Intune-only source'
+    $global:controls.AutomaticSourceCombo.SelectedItem = 'Both'
+    Test-AutomaticFilterSourceCompatibility
     Remove-Variable -Name controls -Scope Global -Force
     function global:Get-ConfiguredValue { param([string]$Name); return '' }
     $global:SyntheticInventoryRefreshFails = $false
@@ -216,12 +238,20 @@ try {
     Assert-True -Condition ($guiText -match 'InventoryProgressBar.{0,160}IsIndeterminate="True"') -Message 'automatic inventory wait window uses an indeterminate progress bar'
     Assert-True -Condition ($guiText -match 'AutomaticForceRefreshCheck') -Message 'automatic inventory force-refresh option is present'
     Assert-True -Condition ($guiText -match 'Update-AutomaticGeneratedLotName') -Message 'automatic computer-prefix changes update the generated LOT name'
+    Assert-True -Condition ($guiText -match 'AutomaticNameContainsText') -Message 'automatic literal contains filter is present'
+    Assert-True -Condition ($guiText -match 'AutomaticExcludeIntuneCheck') -Message 'automatic Intune-presence exclusion is present'
+    Assert-True -Condition ($guiText -match 'AutomaticExcludeStaleAdCheck') -Message 'automatic AD LastLogon exclusion is present'
+    Assert-True -Condition ($guiText -match 'AutomaticLastLogonDaysText.+Text="45"') -Message 'automatic AD LastLogon threshold defaults to 45 days'
     Assert-True -Condition ($guiText -match 'x:Name="AutomaticCreateButton"\s+Content="Create"') -Message 'automatic LOT action is labelled Create'
     Assert-True -Condition ($guiText -notmatch 'AutomaticModeCombo|Create and launch') -Message 'automatic LOT tab no longer exposes launch controls'
     $automaticCreateHandler = [regex]::Match($guiText, '(?s)\$controls\.AutomaticCreateButton\.Add_Click\(\{(?<Body>.*?)\r?\n\}\)\r?\n\$script:SyncingGlobalLimitText')
     Assert-True -Condition $automaticCreateHandler.Success -Message 'automatic LOT Create handler is present'
     Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -match 'Invoke-AutomaticLotSelection.+-Create') -Message 'automatic LOT Create handler creates the LOT'
     Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -notmatch 'Start-ToolkitLot|Confirm-UnlimitedCycleLaunch|Test-SetupSourceBeforeLaunch|Get-ToolkitOptionEnvironment') -Message 'automatic LOT Create handler cannot launch the LOT'
+    $automaticSelectionFunction = [regex]::Match($guiText, '(?s)function Invoke-AutomaticLotSelection\s*\{(?<Body>.*?)\r?\n\}\r?\n\r?\nfunction Format-AutomaticLotSummary')
+    Assert-True -Condition $automaticSelectionFunction.Success -Message 'automatic LOT selection function is present'
+    Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'ComputerNameContains|ExcludeIntunePresent|ExcludeStaleAd|AdLastLogonMaxAgeDays') -Message 'automatic LOT selection passes every advanced filter to the engine'
+    Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -notmatch 'SkipWrapperRefresh') -Message 'automatic Create lets the engine generate launch wrappers'
 
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false

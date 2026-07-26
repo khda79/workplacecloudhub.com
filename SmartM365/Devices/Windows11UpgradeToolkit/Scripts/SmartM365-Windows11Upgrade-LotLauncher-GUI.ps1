@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.46
+0.1.47
 #>
 param(
     [switch]$ValidateOnly
@@ -1259,12 +1259,12 @@ $xaml = @'
             </TabItem>
 
             <TabItem Header="Automatic LOT">
-                <Grid Margin="0,14,0,0">
+                <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="0.9*"/>
                         <ColumnDefinition Width="1.1*"/>
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,0,8,0">
+                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="12" Margin="0,0,8,0">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -1272,32 +1272,48 @@ $xaml = @'
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="Build from inventory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
-                            <TextBlock Grid.Row="1" Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <TextBlock Grid.Row="0" Text="Build from inventory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,6"/>
+                            <TextBlock Grid.Row="1" Text="Create a LOT from explicit Windows 10 records. Windows 11 evidence always excludes the device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                             <StackPanel Grid.Row="2">
                                 <TextBlock Text="Inventory source"/>
-                                <ComboBox x:Name="AutomaticSourceCombo"/>
+                                <ComboBox x:Name="AutomaticSourceCombo" Height="28"/>
                             </StackPanel>
                             <StackPanel Grid.Row="3">
-                                <TextBlock Text="Intune authentication"/>
-                                <TextBlock Text="Delegated interactive Microsoft Graph sign-in starts only when an Intune refresh is required." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,2"/>
-                                <CheckBox x:Name="AutomaticForceRefreshCheck" Content="Force inventory refresh this time" Margin="0,2,0,8" ToolTip="Ignore valid root caches for the next preview only."/>
+                                <TextBlock Text="Intune refresh uses delegated Microsoft Graph sign-in." Foreground="{StaticResource MutedBrush}" Margin="0,2,0,2"/>
+                                <CheckBox x:Name="AutomaticForceRefreshCheck" Content="Force inventory refresh this time" Margin="0,2,0,2" ToolTip="Ignore valid root caches for the next preview only."/>
                             </StackPanel>
                             <Grid Grid.Row="4">
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.45*"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,6,0">
                                     <TextBlock Text="LOT name"/>
-                                    <TextBox x:Name="AutomaticLotNameText"/>
+                                    <TextBox x:Name="AutomaticLotNameText" Height="28"/>
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                    <TextBlock Text="Computer prefix(es)"/>
-                                    <TextBox x:Name="AutomaticNamePrefixText" ToolTip="Semicolon-separated prefixes, for example FR- or FR-;BE-"/>
+                                <StackPanel Grid.Column="1" Margin="6,0,6,0">
+                                    <TextBlock Text="Prefix(es)"/>
+                                    <TextBox x:Name="AutomaticNamePrefixText" Height="28" ToolTip="Semicolon-separated prefixes, for example FR- or FR-;BE-"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Margin="6,0,0,0">
+                                    <TextBlock Text="Contains"/>
+                                    <TextBox x:Name="AutomaticNameContainsText" Height="28" ToolTip="Semicolon-separated literal values, for example -A- or -A-;-P-."/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid Grid.Row="5" Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Grid.Column="0" x:Name="AutomaticExcludeIntuneCheck" Content="Exclude devices present in Intune" Margin="0,0,6,0" ToolTip="Requires AD + Intune inventory source."/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="6,0,0,0">
+                                    <CheckBox x:Name="AutomaticExcludeStaleAdCheck" Content="Exclude stale AD" ToolTip="Unknown or invalid LastLogonTimestampUtc values are also excluded."/>
+                                    <TextBox x:Name="AutomaticLastLogonDaysText" Text="45" Width="38" Margin="6,0,4,0" IsEnabled="False" ToolTip="Maximum AD LastLogon age in days."/>
+                                    <TextBlock Text="days" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Grid>
                             <WrapPanel Grid.Row="6" Margin="0,4,0,0">
@@ -1569,7 +1585,8 @@ $controls = @{}
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
     'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
-    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticForceRefreshCheck',
+    'AutomaticSourceCombo','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticForceRefreshCheck',
+    'AutomaticExcludeIntuneCheck','AutomaticExcludeStaleAdCheck','AutomaticLastLogonDaysText',
     'AutomaticPreviewButton','AutomaticCreateButton','AutomaticSummaryText',
     'AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
     'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
@@ -1751,6 +1768,26 @@ function Get-AutomaticSourceSelection {
     return 'Both'
 }
 
+
+function Test-AutomaticFilterSourceCompatibility {
+    $source = Get-AutomaticSourceSelection
+    if ([bool]$controls.AutomaticExcludeIntuneCheck.IsChecked -and $source -ne 'Both') {
+        throw 'Exclude devices present in Intune requires the AD + Intune inventory source.'
+    }
+    if ([bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked -and $source -eq 'Intune') {
+        throw 'Exclude stale AD requires the AD or AD + Intune inventory source.'
+    }
+}
+
+function Update-AutomaticFilterControlState {
+    $controls.AutomaticLastLogonDaysText.IsEnabled = [bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked
+}
+
+function Set-AutomaticFilterPreviewStale {
+    param([string]$Message = 'Selection filter changed. Refresh the preview before creating the LOT.')
+    $script:AutomaticPreviewSignature = ''
+    $controls.AutomaticSummaryText.Text = $Message
+}
 
 function Get-AutomaticInventoryFileInfo {
     param(
@@ -2089,12 +2126,18 @@ function Invoke-AutomaticLotSelection {
     }
     $namePrefixText = [string]$controls.AutomaticNamePrefixText.Text
     if (-not [string]::IsNullOrWhiteSpace($namePrefixText)) { $parameters.ComputerNamePrefix = @($namePrefixText) }
+    $nameContainsText = [string]$controls.AutomaticNameContainsText.Text
+    if (-not [string]::IsNullOrWhiteSpace($nameContainsText)) { $parameters.ComputerNameContains = @($nameContainsText) }
+    if ([bool]$controls.AutomaticExcludeIntuneCheck.IsChecked) { $parameters.ExcludeIntunePresent = $true }
+    if ([bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked) {
+        $parameters.ExcludeStaleAd = $true
+        $parameters.AdLastLogonMaxAgeDays = [int](Get-IntText -TextBox $controls.AutomaticLastLogonDaysText -Default 45 -Minimum 1)
+    }
     if (-not [string]::IsNullOrWhiteSpace([string]$InventoryContext.AdInventoryCsv)) { $parameters.AdInventoryCsv = [string]$InventoryContext.AdInventoryCsv }
     if (-not [string]::IsNullOrWhiteSpace([string]$InventoryContext.IntuneInventoryCsv)) { $parameters.IntuneInventoryCsv = [string]$InventoryContext.IntuneInventoryCsv }
     if ($InventoryContext.PartialSource) { $parameters.AllowPartialSource = $true }
     if ($Create) {
         $parameters.Create = $true
-        $parameters.SkipWrapperRefresh = $true
     }
 
     return & $engine @parameters
@@ -2114,9 +2157,13 @@ function Format-AutomaticLotSummary {
         "Intune auth: $(if ([string]::IsNullOrWhiteSpace([string]$InventoryContext.AuthenticationMode)) { 'Not used' } else { [string]$InventoryContext.AuthenticationMode })"
         @($InventoryContext.SourceDetails)
         "Computer prefix(es): $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNamePrefixes)) { 'All' } else { [string]$summary.ComputerNamePrefixes })"
+        "Computer contains: $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNameContains)) { 'All' } else { [string]$summary.ComputerNameContains })"
+        "Exclude devices present in Intune: $([bool]$summary.ExcludeIntunePresent)"
+        "AD LastLogon filter: $(if ([bool]$summary.ExcludeStaleAd) { "Older than $($summary.ADLastLogonMaxAgeDays) day(s); unknown values excluded" } else { 'Disabled' })"
         "Unique inventory devices: $($summary.UniqueInventoryDevices)"
-        "Matched by name filter: $($summary.NameFilterMatchedDevices)"
-        "Filtered out by name: $($summary.NameFilterExcludedDevices)"
+        "Matched by all filters: $($summary.NameFilterMatchedDevices)"
+        "Filtered out: $($summary.NameFilterExcludedDevices)"
+        "Filter exclusions: prefix=$($summary.PrefixFilterExcluded); contains=$($summary.ContainsFilterExcluded); Intune present=$($summary.IntunePresentFilterExcluded); AD LastLogon=$($summary.ADLastLogonFilterExcluded) (unknown=$($summary.ADLastLogonUnknownExcluded))"
         ''
         "AD rows: $($summary.ADRows); matching Windows 10 candidates: $($summary.ADWindows10Candidates)"
         "Intune rows: $($summary.IntuneRows); matching Windows 10 candidates: $($summary.IntuneWindows10Candidates)"
@@ -2136,7 +2183,16 @@ function Format-AutomaticLotSummary {
 }
 
 function Get-AutomaticPreviewSignature {
-    return ('{0}|{1}|{2}|{3}' -f (Get-AutomaticSourceSelection), (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'), [string]$controls.AutomaticLotNameText.Text.Trim(), [string]$controls.AutomaticNamePrefixText.Text.Trim())
+    return @(
+        (Get-AutomaticSourceSelection)
+        (Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID')
+        [string]$controls.AutomaticLotNameText.Text.Trim()
+        [string]$controls.AutomaticNamePrefixText.Text.Trim()
+        [string]$controls.AutomaticNameContainsText.Text.Trim()
+        [bool]$controls.AutomaticExcludeIntuneCheck.IsChecked
+        [bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked
+        [string]$controls.AutomaticLastLogonDaysText.Text.Trim()
+    ) -join '|'
 }
 
 function Get-AutomaticGeneratedLotName {
@@ -2175,6 +2231,7 @@ function Update-AutomaticLotPreview {
     )
 
     $source = Get-AutomaticSourceSelection
+    Test-AutomaticFilterSourceCompatibility
     $snapshotParameters = @{ Source = $source; ForceRefresh = [bool]$ForceInventoryRefresh }
     if ($ProgressCallback) { $snapshotParameters.ProgressCallback = $ProgressCallback }
     $context = Get-AutomaticInventorySnapshot @snapshotParameters
@@ -2255,8 +2312,11 @@ function Confirm-AutomaticLotCreate {
         "Intune tenant: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.TenantId })"
         "Intune auth: $(if ($summary.RequestedSource -eq 'AD') { 'Not used' } else { [string]$script:AutomaticPreviewContext.AuthenticationMode })"
         "Computer prefix(es): $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNamePrefixes)) { 'All' } else { [string]$summary.ComputerNamePrefixes })"
-        "Matched by name filter: $($summary.NameFilterMatchedDevices)"
-        "Filtered out by name: $($summary.NameFilterExcludedDevices)"
+        "Computer contains: $(if ([string]::IsNullOrWhiteSpace([string]$summary.ComputerNameContains)) { 'All' } else { [string]$summary.ComputerNameContains })"
+        "Exclude devices present in Intune: $([bool]$summary.ExcludeIntunePresent)"
+        "AD LastLogon filter: $(if ([bool]$summary.ExcludeStaleAd) { "Older than $($summary.ADLastLogonMaxAgeDays) day(s); unknown values excluded" } else { 'Disabled' })"
+        "Matched by all filters: $($summary.NameFilterMatchedDevices)"
+        "Filtered out: $($summary.NameFilterExcludedDevices)"
         "Selected Windows 10 devices: $($summary.SelectedDevices)"
         "Excluded devices: $($summary.ExcludedDevices)"
         "Stale warnings: AD=$($summary.ADStaleWarnings); Intune=$($summary.IntuneStaleWarnings)"
@@ -2444,6 +2504,10 @@ function Initialize-Options {
     Initialize-Combo -Combo $controls.LotModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.AutomaticSourceCombo -Values @('AD + Intune','AD','Intune') -Selected 'AD + Intune'
+    $controls.AutomaticExcludeIntuneCheck.IsChecked = $false
+    $controls.AutomaticExcludeStaleAdCheck.IsChecked = $false
+    if ([string]::IsNullOrWhiteSpace([string]$controls.AutomaticLastLogonDaysText.Text)) { $controls.AutomaticLastLogonDaysText.Text = '45' }
+    Update-AutomaticFilterControlState
     Update-AutomaticGeneratedLotName
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
     Initialize-Combo -Combo $controls.SetupLanguageCombo -Values @('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL') -Selected (Get-ConfiguredValue 'W11UT_SETUP_LANGUAGE')
@@ -2871,14 +2935,24 @@ $script:AutomaticPreviewContext = $null
 $script:AutomaticPreviewResult = $null
 $script:AutomaticPreviewSignature = ''
 $controls.AutomaticSourceCombo.Add_SelectionChanged({
-    $script:AutomaticPreviewSignature = ''
-    $controls.AutomaticSummaryText.Text = 'Inventory source changed. Refresh the preview before creating the LOT.'
+    Set-AutomaticFilterPreviewStale -Message 'Inventory source changed. Refresh the preview before creating the LOT.'
 })
 $controls.AutomaticNamePrefixText.Add_TextChanged({
     Update-AutomaticGeneratedLotName
-    $script:AutomaticPreviewSignature = ''
-    $controls.AutomaticSummaryText.Text = 'Computer name filter changed. Refresh the preview before creating the LOT.'
+    Set-AutomaticFilterPreviewStale
 })
+$controls.AutomaticNameContainsText.Add_TextChanged({ Set-AutomaticFilterPreviewStale })
+$controls.AutomaticExcludeIntuneCheck.Add_Checked({ Set-AutomaticFilterPreviewStale })
+$controls.AutomaticExcludeIntuneCheck.Add_Unchecked({ Set-AutomaticFilterPreviewStale })
+$controls.AutomaticExcludeStaleAdCheck.Add_Checked({
+    Update-AutomaticFilterControlState
+    Set-AutomaticFilterPreviewStale
+})
+$controls.AutomaticExcludeStaleAdCheck.Add_Unchecked({
+    Update-AutomaticFilterControlState
+    Set-AutomaticFilterPreviewStale
+})
+$controls.AutomaticLastLogonDaysText.Add_TextChanged({ Set-AutomaticFilterPreviewStale })
 $controls.AutomaticPreviewButton.Add_Click({
     try {
         $forceRefresh = [bool]$controls.AutomaticForceRefreshCheck.IsChecked
