@@ -3,7 +3,7 @@
 Runs synthetic tests for automatic Windows 10 LOT selection.
 
 .VERSION
-1.3.0
+1.3.1
 #>
 
 #requires -Version 5.1
@@ -226,6 +226,21 @@ try {
     Assert-Equal -Actual $filteredComputers.Count -Expected 1 -Message 'filtered Computers.txt row count'
     Assert-Equal -Actual $filteredComputers[0] -Expected 'fr-pc1.one.example' -Message 'filtered Computers.txt contains only the eligible FR device'
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $filteredCreated.Summary.EvidencePath 'AutomaticLotFilterExclusions.csv') -PathType Leaf) -Message 'filtered create evidence was created'
+
+    $syntheticWrapperPath = Join-Path $testToolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Update-LotCmdWrappers.ps1'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $syntheticWrapperPath) -Force | Out-Null
+    Set-Content -LiteralPath $syntheticWrapperPath -Encoding UTF8 -Value @(
+        'param([string]$ToolkitRoot)'
+        'Write-Output "SYNTHETIC_WRAPPER_OUTPUT"'
+        'Write-Host "SYNTHETIC_WRAPPER_HOST"'
+        'exit 0'
+    )
+    $wrapperCreateOutput = @(
+        & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-WRAPPER-OUTPUT' -NoEvidence -Create
+    )
+    Assert-Equal -Actual $wrapperCreateOutput.Count -Expected 1 -Message 'wrapper console output does not contaminate the automatic LOT engine result'
+    Assert-True -Condition ($null -ne $wrapperCreateOutput[0].PSObject.Properties['Summary']) -Message 'wrapper create returns the Summary result object'
+    Assert-Equal -Actual $wrapperCreateOutput[0].Summary.LotName -Expected 'LOT-AUTO-WRAPPER-OUTPUT' -Message 'wrapper create result preserves the requested LOT name'
 
     Write-Output 'SmartM365 Windows 11 automatic LOT synthetic tests passed.'
 }
