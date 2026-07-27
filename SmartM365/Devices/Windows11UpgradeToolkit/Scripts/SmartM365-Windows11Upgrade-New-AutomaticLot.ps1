@@ -27,6 +27,7 @@ param(
     [switch]$ExcludeStaleAd,
     [ValidateRange(1, 3650)]
     [int]$AdLastLogonMaxAgeDays = 45,
+    [scriptblock]$ProgressCallback,
     [string]$EvidenceRoot,
     [switch]$Create,
     [switch]$AllowPartialSource,
@@ -36,7 +37,65 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.3.1'
+$script:AutomaticLotVersion = '1.3.2'
+$script:AutomaticLotProgressCallback = $ProgressCallback
+
+function Publish-AutomaticLotProgress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [string]$Detail = ''
+    )
+
+    if ($script:AutomaticLotProgressCallback) {
+        & $script:AutomaticLotProgressCallback $Stage $Detail | Out-Null
+    }
+}
+
+function Invoke-AutomaticLotWrapperRefresh {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$EffectiveToolkitRoot
+    )
+
+    $powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { $powerShellPath = 'powershell.exe' }
+    $quotedScriptPath = '"{0}"' -f $ScriptPath.Replace('"', '\"')
+    $quotedToolkitRoot = '"{0}"' -f $EffectiveToolkitRoot.Replace('"', '\"')
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $powerShellPath
+    $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File $quotedScriptPath -ToolkitRoot $quotedToolkitRoot"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $startedUtc = [datetime]::UtcNow
+    try {
+        if (-not $process.Start()) { throw 'The LOT wrapper refresh process did not start.' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        while (-not $process.WaitForExit(1000)) {
+            $elapsedSeconds = [math]::Max(0, [math]::Floor(([datetime]::UtcNow - $startedUtc).TotalSeconds))
+            Publish-AutomaticLotProgress -Stage 'Refreshing LOT command wrappers...' -Detail ("Generating operational launch commands; elapsed: {0} s." -f $elapsedSeconds)
+        }
+        $process.WaitForExit()
+        $standardOutput = [string]$stdoutTask.Result
+        $standardError = [string]$stderrTask.Result
+        $outputLines = @(
+            @($standardOutput -split '\r?\n')
+            @($standardError -split '\r?\n')
+        )
+        return [pscustomobject]@{
+            ExitCode = [int]$process.ExitCode
+            Output = @($outputLines | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
 
 function Get-AutomaticLotToolkitRoot {
     param([AllowNull()][string]$RequestedRoot)
@@ -386,6 +445,7 @@ if ($ExcludeStaleAd -and 'AD' -notin $availableSources) {
     throw 'ExcludeStaleAd requires an available AD inventory source.'
 }
 
+Publish-AutomaticLotProgress -Stage 'Loading inventory records...' -Detail ("Available sources: {0}" -f ($availableSources.ToArray() -join ' + '))
 $adRows = if ('AD' -in $availableSources) { @(Import-Csv -LiteralPath $AdInventoryCsv) } else { @() }
 $intuneRows = if ('Intune' -in $availableSources) { @(Import-Csv -LiteralPath $IntuneInventoryCsv) } else { @() }
 $adRows = @($adRows)
@@ -552,12 +612,14 @@ foreach ($key in $allKeys) {
     })
 }
 
+Publish-AutomaticLotProgress -Stage 'Applying selection and safety filters...' -Detail ("Selected: {0}; safety exclusions: {1}; filtered out: {2}" -f $selected.Count,$excluded.Count,$filterExcluded.Count)
 $safeLotName = Get-AutomaticLotSafeName -Name $LotName -NamePrefixes $namePrefixes
 $lotPath = ''
 $computersPath = ''
 if ($Create) {
     if ($selected.Count -eq 0) { throw 'No eligible Windows 10 device was selected; the LOT was not created.' }
 
+    Publish-AutomaticLotProgress -Stage 'Creating the automatic LOT folder...' -Detail ("LOT: {0}; selected devices: {1}" -f $safeLotName,$selected.Count)
     $lotsRoot = Join-Path $effectiveToolkitRoot 'Lots'
     New-Item -ItemType Directory -Path $lotsRoot -Force | Out-Null
     $lotPath = Join-Path $lotsRoot $safeLotName
@@ -565,9 +627,11 @@ if ($Create) {
 
     New-Item -ItemType Directory -Path $lotPath -Force | Out-Null
     $computersPath = Join-Path $lotPath 'Computers.txt'
+    Publish-AutomaticLotProgress -Stage 'Writing Computers.txt...' -Detail ("{0} selected device(s)" -f $selected.Count)
     @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName) |
         Set-Content -LiteralPath $computersPath -Encoding ASCII
 
+    Publish-AutomaticLotProgress -Stage 'Creating the LOT configuration...' -Detail $lotPath
     $configTemplate = Join-Path $effectiveToolkitRoot 'Windows11UpgradeToolkit.config.template'
     $lotConfigPath = Join-Path $lotPath 'Windows11UpgradeToolkit.config'
     if (Test-Path -LiteralPath $configTemplate -PathType Leaf) {
@@ -581,12 +645,14 @@ if ($Create) {
     }
 
     if (-not $SkipWrapperRefresh) {
+        Publish-AutomaticLotProgress -Stage 'Refreshing LOT command wrappers...' -Detail 'Generating the launch commands for operational LOT folders. This step can take some time.'
         $wrapperRefresh = Join-Path $effectiveToolkitRoot 'Scripts\SmartM365-Windows11Upgrade-Update-LotCmdWrappers.ps1'
         if (-not (Test-Path -LiteralPath $wrapperRefresh -PathType Leaf)) {
             throw "Wrapper refresh script not found: $wrapperRefresh"
         }
-        $wrapperRefreshOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $wrapperRefresh -ToolkitRoot $effectiveToolkitRoot 2>&1)
-        $wrapperRefreshExitCode = $LASTEXITCODE
+        $wrapperRefreshResult = Invoke-AutomaticLotWrapperRefresh -ScriptPath $wrapperRefresh -EffectiveToolkitRoot $effectiveToolkitRoot
+        $wrapperRefreshOutput = @($wrapperRefreshResult.Output)
+        $wrapperRefreshExitCode = [int]$wrapperRefreshResult.ExitCode
         if ($wrapperRefreshExitCode -ne 0) {
             $wrapperRefreshDetail = @(
                 $wrapperRefreshOutput |
@@ -607,9 +673,11 @@ if (-not $NoEvidence) {
     if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         $EvidenceRoot = Join-Path $effectiveToolkitRoot 'Runs\AutomaticLotInventory'
     }
+    Publish-AutomaticLotProgress -Stage 'Preparing the evidence folder...' -Detail $EvidenceRoot
     $evidencePath = Join-Path $EvidenceRoot (Get-Date -Format 'yyyyMMdd-HHmmssfff')
     New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
 
+    Publish-AutomaticLotProgress -Stage 'Copying inventory evidence...' -Detail ("Sources: {0}" -f ($availableSources.ToArray() -join ' + '))
     if ('AD' -in $availableSources) {
         Copy-Item -LiteralPath $AdInventoryCsv -Destination (Join-Path $evidencePath 'DevicesAD.csv') -Force
     }
@@ -630,6 +698,7 @@ if (-not $NoEvidence) {
         'ComputerKey', 'ComputerName', 'FilterType', 'FilterValue', 'FilterReason',
         'ADLastLogonTimestampUtc', 'IntunePresent'
     )
+    Publish-AutomaticLotProgress -Stage 'Writing selection reports...' -Detail $evidencePath
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotSelection.csv') -Columns $selectionColumns -Rows $selected.ToArray()
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotExclusions.csv') -Columns $exclusionColumns -Rows $excluded.ToArray()
     Export-AutomaticLotCsv -Path (Join-Path $evidencePath 'AutomaticLotFilterExclusions.csv') -Columns $filterExclusionColumns -Rows $filterExcluded.ToArray()
@@ -676,8 +745,11 @@ $summary = [pscustomobject]@{
 }
 
 if (-not $NoEvidence) {
+    Publish-AutomaticLotProgress -Stage 'Finalizing automatic LOT evidence...' -Detail $evidencePath
     $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidencePath 'AutomaticLotSummary.json') -Encoding UTF8
 }
+
+Publish-AutomaticLotProgress -Stage $(if ($Create) { 'Automatic LOT created.' } else { 'Automatic LOT preview ready.' }) -Detail $(if ($Create) { $lotPath } else { "Selected devices: $($selected.Count)" })
 
 [pscustomobject]@{
     Summary               = $summary
