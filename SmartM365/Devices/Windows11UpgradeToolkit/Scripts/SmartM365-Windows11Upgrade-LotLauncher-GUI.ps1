@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.48
+0.1.49
 #>
 param(
     [switch]$ValidateOnly
@@ -1705,6 +1705,12 @@ function Get-ConfiguredValue {
 
 
 function New-AutomaticInventoryProgressState {
+    param(
+        [string]$Title = 'Preparing automatic LOT preview',
+        [string]$InitialStage = 'Checking inventory caches...',
+        [string]$InitialDetail = 'Please wait.'
+    )
+
     $progressXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1734,10 +1740,17 @@ function New-AutomaticInventoryProgressState {
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$progressXaml)
     $progressWindow = [Windows.Markup.XamlReader]::Load($reader)
     $progressWindow.Owner = $window
+    $titleText = $progressWindow.FindName('ProgressTitleText')
+    $stageText = $progressWindow.FindName('ProgressStageText')
+    $detailText = $progressWindow.FindName('ProgressDetailText')
+    $titleText.Text = $Title
+    $stageText.Text = $InitialStage
+    $detailText.Text = $InitialDetail
     [pscustomobject]@{
         Window = $progressWindow
-        StageText = $progressWindow.FindName('ProgressStageText')
-        DetailText = $progressWindow.FindName('ProgressDetailText')
+        TitleText = $titleText
+        StageText = $stageText
+        DetailText = $detailText
         ElapsedText = $progressWindow.FindName('ProgressElapsedText')
         StartedUtc = [datetime]::UtcNow
         Result = $null
@@ -2113,7 +2126,8 @@ function Get-AutomaticInventorySnapshot {
 function Invoke-AutomaticLotSelection {
     param(
         [Parameter(Mandatory = $true)]$InventoryContext,
-        [switch]$Create
+        [switch]$Create,
+        [scriptblock]$ProgressCallback
     )
 
     $engine = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-New-AutomaticLot.ps1'
@@ -2139,6 +2153,7 @@ function Invoke-AutomaticLotSelection {
     if ($Create) {
         $parameters.Create = $true
     }
+    if ($ProgressCallback) { $parameters.ProgressCallback = $ProgressCallback }
 
     $engineOutput = @(& $engine @parameters)
     $engineResults = @(
@@ -2245,7 +2260,7 @@ function Update-AutomaticLotPreview {
     if ($ProgressCallback) { $snapshotParameters.ProgressCallback = $ProgressCallback }
     $context = Get-AutomaticInventorySnapshot @snapshotParameters
     if ($ProgressCallback) { & $ProgressCallback 'Loading inventories and building the selection preview...' "Source snapshots: $($context.SourceRunPath)" }
-    $result = Invoke-AutomaticLotSelection -InventoryContext $context
+    $result = Invoke-AutomaticLotSelection -InventoryContext $context -ProgressCallback $ProgressCallback
     $controls.AutomaticLotNameText.Text = [string]$result.Summary.LotName
     $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $result -InventoryContext $context
     $controls.AutomaticEvidencePathText.Text = [string]$result.Summary.EvidencePath
@@ -2304,6 +2319,47 @@ function Invoke-AutomaticLotPreviewWithProgress {
     finally {
         $script:AutomaticInventoryProgressState = $null
         if ($ForceInventoryRefresh) { $controls.AutomaticForceRefreshCheck.IsChecked = $false }
+    }
+
+    if ($state.ErrorRecord) { throw $state.ErrorRecord }
+    return $state.Result
+}
+
+function Invoke-AutomaticLotCreateWithProgress {
+    $lotName = [string]$controls.AutomaticLotNameText.Text
+    $state = New-AutomaticInventoryProgressState -Title 'Creating automatic LOT' -InitialStage 'Starting LOT creation...' -InitialDetail $lotName
+    $script:AutomaticInventoryProgressState = $state
+    $progressCallback = {
+        param([string]$Stage, [string]$Detail)
+        Update-AutomaticInventoryProgress -State $state -Stage $Stage -Detail $Detail
+    }.GetNewClosure()
+
+    $operation = {
+        & $progressCallback 'Validating the confirmed selection...' "LOT: $lotName"
+        $created = Invoke-AutomaticLotSelection -InventoryContext $script:AutomaticPreviewContext -Create -ProgressCallback $progressCallback
+        & $progressCallback 'Reading the created LOT...' ([string]$created.Summary.LotPath)
+        $lot = Get-LotSummary -LotPath ([string]$created.Summary.LotPath)
+        & $progressCallback 'Refreshing the LOT list...' ("Created {0} with {1} device(s)." -f $lot.Name,$lot.ComputerCount)
+        $script:SelectedLot = $lot
+        Refresh-LotList
+        & $progressCallback 'Saving launcher options...' 'The LOT is created but will not be launched.'
+        Save-GuiOptions -Quiet
+        [pscustomobject]@{
+            Result = $created
+            Lot = $lot
+        }
+    }.GetNewClosure()
+    $work = New-AutomaticLotPreviewWork -ProgressState $state -Operation $operation
+    $contentRendered = {
+        [void]$state.Window.Dispatcher.BeginInvoke([action]$work, [System.Windows.Threading.DispatcherPriority]::Background)
+    }.GetNewClosure()
+    $state.Window.Add_ContentRendered($contentRendered)
+
+    try {
+        [void]$state.Window.ShowDialog()
+    }
+    finally {
+        $script:AutomaticInventoryProgressState = $null
     }
 
     if ($state.ErrorRecord) { throw $state.ErrorRecord }
@@ -2990,16 +3046,14 @@ $controls.AutomaticCreateButton.Add_Click({
         }
         if (-not (Confirm-AutomaticLotCreate -Result $script:AutomaticPreviewResult)) { return }
 
-        $created = Invoke-AutomaticLotSelection -InventoryContext $script:AutomaticPreviewContext -Create
-        $lot = Get-LotSummary -LotPath ([string]$created.Summary.LotPath)
+        $creation = Invoke-AutomaticLotCreateWithProgress
+        $created = $creation.Result
+        $lot = $creation.Lot
 
         $script:AutomaticPreviewResult = $created
         $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $created -InventoryContext $script:AutomaticPreviewContext
         $controls.AutomaticEvidencePathText.Text = [string]$created.Summary.EvidencePath
         $controls.AutomaticOpenEvidenceButton.IsEnabled = $true
-        $script:SelectedLot = $lot
-        Refresh-LotList
-        Save-GuiOptions -Quiet
         Add-Status -Title 'Automatic LOT created' -Message ("Created {0} with {1} device(s). Open Existing LOT to launch it." -f $lot.Name, $lot.ComputerCount)
     }
     catch {

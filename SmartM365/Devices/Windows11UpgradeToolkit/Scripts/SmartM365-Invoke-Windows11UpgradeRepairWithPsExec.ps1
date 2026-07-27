@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.70
+    0.1.71
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.70'
+$script:LauncherVersion = '0.1.71'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -1100,97 +1100,179 @@ function Test-AlreadyWindows11CycleResult {
     return ($launcherStatus -eq 'ALREADY_WINDOWS11' -or $remoteStatus -eq 'ALREADY_WINDOWS11')
 }
 
+function Test-HardwareNotCapableCycleResult {
+    param([Parameter(Mandatory = $true)][psobject]$Result)
+
+    $launcherStatus = if ($Result.PSObject.Properties['LauncherStatus']) { [string]$Result.LauncherStatus } else { '' }
+    $remoteStatus = if ($Result.PSObject.Properties['RemoteStatus']) { [string]$Result.RemoteStatus } else { '' }
+    return ($launcherStatus -eq 'WINDOWS11_HARDWARE_NOT_CAPABLE' -or $remoteStatus -eq 'WINDOWS11_HARDWARE_NOT_CAPABLE')
+}
+
+function Get-ComputerListMutexName {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $canonicalPath = [System.IO.Path]::GetFullPath($Path).ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($canonicalPath))
+        $hashText = -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    return "Local\SmartM365_W11UT_ComputerList_$hashText"
+}
+
+function Invoke-WithComputerListMutex {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock
+    )
+
+    $mutexName = Get-ComputerListMutexName -Path $ComputerListPath
+    $mutex = New-Object System.Threading.Mutex($false, $mutexName)
+    $acquired = $false
+    try {
+        try {
+            $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(60))
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+        if (-not $acquired) {
+            throw "Could not acquire the Computers.txt update mutex within 60 seconds: $mutexName"
+        }
+        return & $ScriptBlock
+    }
+    finally {
+        if ($acquired) {
+            try { $mutex.ReleaseMutex() } catch { Write-Verbose ("Failed to release Computers.txt mutex: {0}" -f $_.Exception.Message) }
+        }
+        $mutex.Dispose()
+    }
+}
+
+function Move-CycleStatusComputersFromList {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [Parameter(Mandatory = $true)][object[]]$CycleSummary,
+        [Parameter(Mandatory = $true)][scriptblock]$StatusTest,
+        [Parameter(Mandatory = $true)][string]$ArchiveFileName,
+        [Parameter(Mandatory = $true)][string]$StatusLabel
+    )
+
+    $matchingComputers = @(
+        $CycleSummary |
+            Where-Object { $_ -and (& $StatusTest $_) } |
+            ForEach-Object { if ($_.PSObject.Properties['ComputerName']) { [string]$_.ComputerName } } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    if ($matchingComputers.Count -eq 0) {
+        return [pscustomobject]@{ Moved = 0; ArchivePath = ''; Detail = "No $StatusLabel computer detected in this cycle." }
+    }
+
+    $moveKeys = @{}
+    foreach ($computer in $matchingComputers) {
+        $key = Get-ComputerListKey -ComputerName $computer
+        if (-not [string]::IsNullOrWhiteSpace($key) -and -not $moveKeys.ContainsKey($key)) { $moveKeys[$key] = $computer.Trim() }
+    }
+
+    return Invoke-WithComputerListMutex -ComputerListPath $ComputerListPath -ScriptBlock {
+        $listLines = @(Get-Content -LiteralPath $ComputerListPath -ErrorAction Stop)
+        $remainingLines = New-Object System.Collections.Generic.List[string]
+        $movedFromList = New-Object System.Collections.Generic.List[string]
+
+        foreach ($line in $listLines) {
+            $trimmed = ([string]$line).Trim().Trim([char]34)
+            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
+                [void]$remainingLines.Add($line)
+                continue
+            }
+
+            $key = Get-ComputerListKey -ComputerName $trimmed
+            if ($moveKeys.ContainsKey($key)) {
+                [void]$movedFromList.Add($trimmed)
+                continue
+            }
+
+            [void]$remainingLines.Add($line)
+        }
+
+        if ($movedFromList.Count -eq 0) {
+            return [pscustomobject]@{ Moved = 0; ArchivePath = ''; Detail = "$StatusLabel computers were detected, but none were still present in Computers.txt." }
+        }
+
+        $computerListDir = Split-Path -Parent $ComputerListPath
+        if ([string]::IsNullOrWhiteSpace($computerListDir)) { $computerListDir = '.' }
+        $archivePath = Join-Path $computerListDir $ArchiveFileName
+        $archiveLines = New-Object System.Collections.Generic.List[string]
+        $existingKeys = @{}
+        if (Test-Path -LiteralPath $archivePath) {
+            foreach ($line in @(Get-Content -LiteralPath $archivePath -ErrorAction Stop)) {
+                [void]$archiveLines.Add([string]$line)
+                $trimmed = ([string]$line).Trim().Trim([char]34)
+                if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) { continue }
+                $key = Get-ComputerListKey -ComputerName $trimmed
+                if (-not $existingKeys.ContainsKey($key)) { $existingKeys[$key] = $true }
+            }
+        }
+
+        foreach ($computer in $movedFromList) {
+            $key = Get-ComputerListKey -ComputerName $computer
+            if (-not $existingKeys.ContainsKey($key)) {
+                [void]$archiveLines.Add($computer)
+                $existingKeys[$key] = $true
+            }
+        }
+
+        $tmpArchivePath = '{0}.tmp.{1}.txt' -f $archivePath,([guid]::NewGuid().ToString('N'))
+        $tmpComputerListPath = '{0}.tmp.{1}.txt' -f $ComputerListPath,([guid]::NewGuid().ToString('N'))
+        try {
+            Set-Content -LiteralPath $tmpArchivePath -Value $archiveLines -Encoding ASCII -Force
+            Set-Content -LiteralPath $tmpComputerListPath -Value $remainingLines -Encoding ASCII -Force
+            Move-Item -LiteralPath $tmpArchivePath -Destination $archivePath -Force
+            Move-Item -LiteralPath $tmpComputerListPath -Destination $ComputerListPath -Force
+        }
+        finally {
+            Remove-Item -LiteralPath $tmpArchivePath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tmpComputerListPath -Force -ErrorAction SilentlyContinue
+        }
+
+        return [pscustomobject]@{
+            Moved = $movedFromList.Count
+            ArchivePath = $archivePath
+            Detail = ('Moved {0} {1} computer(s) from Computers.txt to {2}.' -f $movedFromList.Count,$StatusLabel,$ArchiveFileName)
+        }
+    }
+}
+
 function Move-AlreadyWindows11ComputersFromList {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerListPath,
         [Parameter(Mandatory = $true)][object[]]$CycleSummary
     )
 
-    $alreadyWindows11 = @(
-        $CycleSummary |
-            Where-Object { $_ -and (Test-AlreadyWindows11CycleResult -Result $_) } |
-            ForEach-Object { if ($_.PSObject.Properties['ComputerName']) { [string]$_.ComputerName } } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-            Select-Object -Unique
+    $result = Move-CycleStatusComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $CycleSummary -StatusTest { param($item) Test-AlreadyWindows11CycleResult -Result $item } -ArchiveFileName 'ComputersAlreadyW11.txt' -StatusLabel 'already-Windows11'
+    return [pscustomobject]@{
+        Moved = $result.Moved
+        AlreadyWindows11Path = $result.ArchivePath
+        Detail = $result.Detail
+    }
+}
+
+function Move-HardwareNotCapableComputersFromList {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [Parameter(Mandatory = $true)][object[]]$CycleSummary
     )
 
-    if ($alreadyWindows11.Count -eq 0) {
-        return [pscustomobject]@{ Moved = 0; AlreadyWindows11Path = ''; Detail = 'No already-Windows11 computer detected in this cycle.' }
-    }
-
-    $moveKeys = @{}
-    foreach ($computer in $alreadyWindows11) {
-        $key = Get-ComputerListKey -ComputerName $computer
-        if (-not [string]::IsNullOrWhiteSpace($key) -and -not $moveKeys.ContainsKey($key)) { $moveKeys[$key] = $computer.Trim() }
-    }
-
-    $listLines = @(Get-Content -LiteralPath $ComputerListPath -ErrorAction Stop)
-    $remainingLines = New-Object System.Collections.Generic.List[string]
-    $movedFromList = New-Object System.Collections.Generic.List[string]
-
-    foreach ($line in $listLines) {
-        $trimmed = ([string]$line).Trim().Trim([char]34)
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
-            [void]$remainingLines.Add($line)
-            continue
-        }
-
-        $key = Get-ComputerListKey -ComputerName $trimmed
-        if ($moveKeys.ContainsKey($key)) {
-            [void]$movedFromList.Add($trimmed)
-            continue
-        }
-
-        [void]$remainingLines.Add($line)
-    }
-
-    if ($movedFromList.Count -eq 0) {
-        return [pscustomobject]@{ Moved = 0; AlreadyWindows11Path = ''; Detail = 'Already-Windows11 computers were detected, but none were still present in Computers.txt.' }
-    }
-
-    $computerListDir = Split-Path -Parent $ComputerListPath
-    if ([string]::IsNullOrWhiteSpace($computerListDir)) { $computerListDir = '.' }
-    $alreadyWindows11Path = Join-Path $computerListDir 'ComputersAlreadyW11.txt'
-
-    $existingKeys = @{}
-    if (Test-Path -LiteralPath $alreadyWindows11Path) {
-        foreach ($line in @(Get-Content -LiteralPath $alreadyWindows11Path -ErrorAction SilentlyContinue)) {
-            $trimmed = ([string]$line).Trim().Trim([char]34)
-            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) { continue }
-            $key = Get-ComputerListKey -ComputerName $trimmed
-            if (-not $existingKeys.ContainsKey($key)) { $existingKeys[$key] = $true }
-        }
-    }
-
-    $appendLines = New-Object System.Collections.Generic.List[string]
-    foreach ($computer in $movedFromList) {
-        $key = Get-ComputerListKey -ComputerName $computer
-        if (-not $existingKeys.ContainsKey($key)) {
-            [void]$appendLines.Add($computer)
-            $existingKeys[$key] = $true
-        }
-    }
-
-    $tmpComputerListPath = '{0}.tmp.{1}.txt' -f $ComputerListPath,([guid]::NewGuid().ToString('N'))
-    try {
-        Set-Content -LiteralPath $tmpComputerListPath -Value $remainingLines -Encoding ASCII -Force
-        Move-Item -LiteralPath $tmpComputerListPath -Destination $ComputerListPath -Force
-    }
-    finally {
-        Remove-Item -LiteralPath $tmpComputerListPath -Force -ErrorAction SilentlyContinue
-    }
-
-    if ($appendLines.Count -gt 0) {
-        Add-Content -LiteralPath $alreadyWindows11Path -Value $appendLines -Encoding ASCII
-    }
-    elseif (-not (Test-Path -LiteralPath $alreadyWindows11Path)) {
-        New-Item -ItemType File -Path $alreadyWindows11Path -Force | Out-Null
-    }
-
+    $result = Move-CycleStatusComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $CycleSummary -StatusTest { param($item) Test-HardwareNotCapableCycleResult -Result $item } -ArchiveFileName 'ComputersHardwareNotCapable.txt' -StatusLabel 'hardware-not-capable'
     return [pscustomobject]@{
-        Moved = $movedFromList.Count
-        AlreadyWindows11Path = $alreadyWindows11Path
-        Detail = ('Moved {0} computer(s) from Computers.txt to ComputersAlreadyW11.txt.' -f $movedFromList.Count)
+        Moved = $result.Moved
+        HardwareNotCapablePath = $result.ArchivePath
+        Detail = $result.Detail
     }
 }
 
@@ -3408,6 +3490,17 @@ do {
                             Write-Host ("Failed to update ComputersAlreadyW11.txt for {0}: {1}" -f $item.ComputerName,$_.Exception.Message) -ForegroundColor Yellow
                         }
                     }
+                    if (-not $DryRun -and (Test-HardwareNotCapableCycleResult -Result $item)) {
+                        try {
+                            $moveHardwareResult = Move-HardwareNotCapableComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($item)
+                            if ($moveHardwareResult.Moved -gt 0) {
+                                Write-Host ("Moved hardware-not-capable computer from Computers.txt to {0}: {1}" -f $moveHardwareResult.HardwareNotCapablePath,$item.ComputerName) -ForegroundColor Yellow
+                            }
+                        }
+                        catch {
+                            Write-Host ("Failed to update ComputersHardwareNotCapable.txt for {0}: {1}" -f $item.ComputerName,$_.Exception.Message) -ForegroundColor Yellow
+                        }
+                    }
                 }
             }
             if ($globalLeaseByJobId.ContainsKey([string]$job.Id)) {
@@ -3472,6 +3565,16 @@ do {
     }
     catch {
         Write-Host ("Cycle {0}: failed to update ComputersAlreadyW11.txt: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow
+    }
+
+    try {
+        $moveHardwareResult = Move-HardwareNotCapableComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($normalizedResults)
+        if ($moveHardwareResult.Moved -gt 0) {
+            Write-Host ("Cycle {0}: moved {1} hardware-not-capable computer(s) to {2}" -f $cycle,$moveHardwareResult.Moved,$moveHardwareResult.HardwareNotCapablePath) -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host ("Cycle {0}: failed to update ComputersHardwareNotCapable.txt: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow
     }
 
     $sourceDistribution = @(

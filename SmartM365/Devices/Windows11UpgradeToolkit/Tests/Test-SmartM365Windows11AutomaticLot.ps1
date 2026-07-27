@@ -3,7 +3,7 @@
 Runs synthetic tests for automatic Windows 10 LOT selection.
 
 .VERSION
-1.3.1
+1.4.0
 #>
 
 #requires -Version 5.1
@@ -235,12 +235,19 @@ try {
         'Write-Host "SYNTHETIC_WRAPPER_HOST"'
         'exit 0'
     )
+    $progressStages = New-Object System.Collections.Generic.List[string]
+    $progressCallback = {
+        param([string]$Stage, [string]$Detail)
+        [void]$progressStages.Add($Stage)
+    }.GetNewClosure()
     $wrapperCreateOutput = @(
-        & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-WRAPPER-OUTPUT' -NoEvidence -Create
+        & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -ToolkitRoot $testToolkitRoot -LotName 'LOT-AUTO-WRAPPER-OUTPUT' -NoEvidence -Create -ProgressCallback $progressCallback
     )
     Assert-Equal -Actual $wrapperCreateOutput.Count -Expected 1 -Message 'wrapper console output does not contaminate the automatic LOT engine result'
     Assert-True -Condition ($null -ne $wrapperCreateOutput[0].PSObject.Properties['Summary']) -Message 'wrapper create returns the Summary result object'
     Assert-Equal -Actual $wrapperCreateOutput[0].Summary.LotName -Expected 'LOT-AUTO-WRAPPER-OUTPUT' -Message 'wrapper create result preserves the requested LOT name'
+    Assert-True -Condition ($progressStages -contains 'Refreshing LOT command wrappers...') -Message 'wrapper refresh stage is reported through the progress callback'
+    Assert-True -Condition ($progressStages -contains 'Automatic LOT created.') -Message 'automatic LOT completion is reported through the progress callback'
 
     Write-Output 'SmartM365 Windows 11 automatic LOT synthetic tests passed.'
 }
