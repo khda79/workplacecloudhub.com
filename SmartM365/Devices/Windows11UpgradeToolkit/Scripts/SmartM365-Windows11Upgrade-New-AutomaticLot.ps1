@@ -8,7 +8,7 @@ deduplicates them, excludes Windows 11 evidence and unsafe inventory states, wri
 selection evidence under Runs, and can create a standard operational LOT.
 
 .VERSION
-1.3.0
+1.3.1
 #>
 
 #requires -Version 5.1
@@ -36,7 +36,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.3.0'
+$script:AutomaticLotVersion = '1.3.1'
 
 function Get-AutomaticLotToolkitRoot {
     param([AllowNull()][string]$RequestedRoot)
@@ -585,9 +585,19 @@ if ($Create) {
         if (-not (Test-Path -LiteralPath $wrapperRefresh -PathType Leaf)) {
             throw "Wrapper refresh script not found: $wrapperRefresh"
         }
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $wrapperRefresh -ToolkitRoot $effectiveToolkitRoot
-        if ($LASTEXITCODE -ne 0) {
-            throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
+        $wrapperRefreshOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $wrapperRefresh -ToolkitRoot $effectiveToolkitRoot 2>&1)
+        $wrapperRefreshExitCode = $LASTEXITCODE
+        if ($wrapperRefreshExitCode -ne 0) {
+            $wrapperRefreshDetail = @(
+                $wrapperRefreshOutput |
+                    ForEach-Object { ([string]$_).Trim() } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                    Select-Object -Last 10
+            ) -join ' | '
+            if ([string]::IsNullOrWhiteSpace($wrapperRefreshDetail)) {
+                throw "LOT wrapper refresh failed with exit code $wrapperRefreshExitCode."
+            }
+            throw "LOT wrapper refresh failed with exit code $wrapperRefreshExitCode. Detail: $wrapperRefreshDetail"
         }
     }
 }

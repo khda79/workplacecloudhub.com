@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.47
+0.1.48
 #>
 param(
     [switch]$ValidateOnly
@@ -2140,7 +2140,16 @@ function Invoke-AutomaticLotSelection {
         $parameters.Create = $true
     }
 
-    return & $engine @parameters
+    $engineOutput = @(& $engine @parameters)
+    $engineResults = @(
+        $engineOutput | Where-Object {
+            $null -ne $_ -and $null -ne $_.PSObject.Properties['Summary']
+        }
+    )
+    if ($engineResults.Count -ne 1) {
+        throw "Automatic LOT engine returned $($engineResults.Count) result object(s); exactly one Summary result is required."
+    }
+    return $engineResults[0]
 }
 
 function Format-AutomaticLotSummary {
