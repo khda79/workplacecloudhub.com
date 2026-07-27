@@ -80,9 +80,9 @@ preview-first:
 5. Follow the small progress window while caches are checked, copied, refreshed when required,
    and loaded into the preview.
 6. Review matched, filtered-out, selected, and safety-excluded counts plus the evidence CSV files.
-7. Click **Create** and review the final confirmation. The LOT folder, `Computers.txt`,
-   configuration, wrappers, and evidence are created without starting a launcher. Open
-   **Existing LOT** when you are ready to launch the new LOT.
+7. Click **Create** and review the final confirmation. After confirmation, a progress window reports
+   creation of the LOT folder, `Computers.txt`, configuration, wrappers, evidence, and the final LOT
+   list refresh. The LOT is not launched. Open **Existing LOT** when you are ready to launch it.
 
 Every **Refresh and preview** checks the read-only root caches first. `DevicesAD.csv` is reusable
 for up to 12 hours. `DevicesIntune.csv` is reusable for up to 2 hours only when it contains a
@@ -475,6 +475,7 @@ Before each cycle, including cycle 1, the PsExec launcher can load or refresh In
 - Add `AdDomain.txt` in a LOT folder, or set `W11UT_AD_DOMAIN`, to restrict the automatic AD export to one domain.
 - Scoped cycle refreshes, when enabled, are limited to the current `Computers.txt` and write inventory CSV/log evidence inside the current run folder under `Runs`. AD can refresh automatically. Intune cycle refresh requires `W11UT_SKIP_INTUNE_INVENTORY_REFRESH=0` and delegated interactive sign-in by a present operator; after a successful refresh it is reused for up to 2 hours while the current computer scope remains covered.
 - Root `DevicesIntune.csv` and `DevicesAD.csv` files are broad read-only caches. A root `DevicesIntune.csv` younger than 2 hours is reused only when it records a tenant id, delegated authentication, and `AllManagedDevices` scope; when `W11UT_INTUNE_TENANT_ID` is set, the tenant must also match. A root `DevicesAD.csv` younger than 12 hours is reused automatically when no explicit existing scoped CSV was supplied. Refresh outputs always stay under `Runs` and never overwrite a root cache.
+- When a completed worker reports the exact status `WINDOWS11_HARDWARE_NOT_CAPABLE`, the launcher removes that computer from the operational `Computers.txt` immediately and archives it once in `ComputersHardwareNotCapable.txt`. FQDN and short names are matched as the same computer. `WINDOWS11_HARDWARE_READINESS_UNDETERMINED` and other compatibility statuses remain in `Computers.txt`. The update is serialized per LOT and uses atomic file replacement.
 
 ## Reports And Logs
 

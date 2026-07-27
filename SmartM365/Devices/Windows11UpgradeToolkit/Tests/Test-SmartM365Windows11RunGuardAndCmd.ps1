@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.6.1
+1.7.0
 #>
 
 #requires -Version 5.1
@@ -47,6 +47,64 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-W11UT-RunGua
 try {
     Import-ScriptFunction -Path $orchestrator -Name 'ConvertTo-TechnicianRunGuardUtcDateTime'
     Import-ScriptFunction -Path $orchestrator -Name 'Test-TechnicianRunGuardEndpointBypassEligible'
+    foreach ($functionName in @(
+        'Get-ComputerListKey',
+        'Test-HardwareNotCapableCycleResult',
+        'Get-ComputerListMutexName',
+        'Invoke-WithComputerListMutex',
+        'Move-CycleStatusComputersFromList',
+        'Move-HardwareNotCapableComputersFromList'
+    )) {
+        Import-ScriptFunction -Path $orchestrator -Name $functionName
+    }
+
+
+    $hardwareListRoot = Join-Path $testRoot 'hardware-list'
+    New-Item -ItemType Directory -Path $hardwareListRoot -Force | Out-Null
+    $hardwareListPath = Join-Path $hardwareListRoot 'Computers.txt'
+    Set-Content -LiteralPath $hardwareListPath -Encoding ASCII -Value @(
+        '# preserved comment'
+        'FR-HARDWARE-001.fr.example.test'
+        'FR-HARDWARE-002.fr.example.test'
+        'FR-UNDETERMINED-001.fr.example.test'
+        'FR-COMPAT-001.fr.example.test'
+    )
+    $remoteHardwareResult = [pscustomobject]@{
+        ComputerName = 'FR-HARDWARE-001'
+        LauncherStatus = 'ERROR'
+        RemoteStatus = 'WINDOWS11_HARDWARE_NOT_CAPABLE'
+    }
+    $remoteHardwareMove = Move-HardwareNotCapableComputersFromList -ComputerListPath $hardwareListPath -CycleSummary @($remoteHardwareResult)
+    Assert-Equal -Actual $remoteHardwareMove.Moved -Expected 1 -Message 'remote hardware-not-capable result is removed immediately'
+    Assert-True -Condition ([string]$remoteHardwareMove.HardwareNotCapablePath -match 'ComputersHardwareNotCapable\.txt$') -Message 'hardware archive uses the dedicated file'
+    $launcherHardwareResult = [pscustomobject]@{
+        ComputerName = 'FR-HARDWARE-002.fr.example.test'
+        LauncherStatus = 'WINDOWS11_HARDWARE_NOT_CAPABLE'
+        RemoteStatus = ''
+    }
+    $launcherHardwareMove = Move-HardwareNotCapableComputersFromList -ComputerListPath $hardwareListPath -CycleSummary @($launcherHardwareResult)
+    Assert-Equal -Actual $launcherHardwareMove.Moved -Expected 1 -Message 'launcher hardware-not-capable result is removed immediately'
+    $remainingHardwareList = @(Get-Content -LiteralPath $hardwareListPath)
+    Assert-True -Condition ($remainingHardwareList -notcontains 'FR-HARDWARE-001.fr.example.test') -Message 'short-name result matches and removes the FQDN from Computers.txt'
+    Assert-True -Condition ($remainingHardwareList -contains 'FR-UNDETERMINED-001.fr.example.test') -Message 'undetermined readiness remains in Computers.txt'
+    Assert-True -Condition ($remainingHardwareList -contains 'FR-COMPAT-001.fr.example.test') -Message 'other compatibility status remains in Computers.txt'
+    $hardwareArchiveLines = @(Get-Content -LiteralPath $remoteHardwareMove.HardwareNotCapablePath)
+    Assert-Equal -Actual $hardwareArchiveLines.Count -Expected 2 -Message 'hardware archive contains each removed computer once'
+    $duplicateHardwareMove = Move-HardwareNotCapableComputersFromList -ComputerListPath $hardwareListPath -CycleSummary @($remoteHardwareResult)
+    Assert-Equal -Actual $duplicateHardwareMove.Moved -Expected 0 -Message 'repeated result does not duplicate an archived computer'
+    Assert-Equal -Actual @(Get-Content -LiteralPath $remoteHardwareMove.HardwareNotCapablePath).Count -Expected 2 -Message 'hardware archive remains deduplicated'
+    $undeterminedResult = [pscustomobject]@{
+        ComputerName = 'FR-UNDETERMINED-001'
+        LauncherStatus = 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED'
+        RemoteStatus = 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED'
+    }
+    Assert-Equal -Actual (Move-HardwareNotCapableComputersFromList -ComputerListPath $hardwareListPath -CycleSummary @($undeterminedResult)).Moved -Expected 0 -Message 'undetermined readiness is not removed'
+    $compatibilityResult = [pscustomobject]@{
+        ComputerName = 'FR-COMPAT-001'
+        LauncherStatus = 'WINDOWS11_COMPAT_BLOCKER'
+        RemoteStatus = 'WINDOWS11_COMPAT_BLOCKER'
+    }
+    Assert-Equal -Actual (Move-HardwareNotCapableComputersFromList -ComputerListPath $hardwareListPath -CycleSummary @($compatibilityResult)).Moved -Expected 0 -Message 'generic compatibility blocker is not removed'
 
     $dueUtc = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString('o')
     $futureUtc = (Get-Date).ToUniversalTime().AddMinutes(10).ToString('o')
@@ -246,13 +304,20 @@ try {
     Assert-True -Condition ($guiText -notmatch 'AutomaticModeCombo|Create and launch') -Message 'automatic LOT tab no longer exposes launch controls'
     $automaticCreateHandler = [regex]::Match($guiText, '(?s)\$controls\.AutomaticCreateButton\.Add_Click\(\{(?<Body>.*?)\r?\n\}\)\r?\n\$script:SyncingGlobalLimitText')
     Assert-True -Condition $automaticCreateHandler.Success -Message 'automatic LOT Create handler is present'
-    Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -match 'Invoke-AutomaticLotSelection.+-Create') -Message 'automatic LOT Create handler creates the LOT'
+    Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -match 'Invoke-AutomaticLotCreateWithProgress') -Message 'automatic LOT Create handler opens the creation progress workflow'
     Assert-True -Condition ($automaticCreateHandler.Groups['Body'].Value -notmatch 'Start-ToolkitLot|Confirm-UnlimitedCycleLaunch|Test-SetupSourceBeforeLaunch|Get-ToolkitOptionEnvironment') -Message 'automatic LOT Create handler cannot launch the LOT'
+    $automaticCreateProgressFunction = [regex]::Match($guiText, '(?s)function Invoke-AutomaticLotCreateWithProgress\s*\{(?<Body>.*?)\r?\n\}\r?\n\r?\nfunction Confirm-AutomaticLotCreate')
+    Assert-True -Condition $automaticCreateProgressFunction.Success -Message 'automatic LOT creation progress workflow is present'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match 'Invoke-AutomaticLotSelection.+-Create.+-ProgressCallback') -Message 'creation progress workflow creates the LOT with live stage callbacks'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match 'Refresh-LotList') -Message 'creation progress includes the final LOT-list refresh'
     $automaticSelectionFunction = [regex]::Match($guiText, '(?s)function Invoke-AutomaticLotSelection\s*\{(?<Body>.*?)\r?\n\}\r?\n\r?\nfunction Format-AutomaticLotSummary')
     Assert-True -Condition $automaticSelectionFunction.Success -Message 'automatic LOT selection function is present'
     Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'ComputerNameContains|ExcludeIntunePresent|ExcludeStaleAd|AdLastLogonMaxAgeDays') -Message 'automatic LOT selection passes every advanced filter to the engine'
     Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -notmatch 'SkipWrapperRefresh') -Message 'automatic Create lets the engine generate launch wrappers'
     Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'engineOutput[\s\S]+engineResults') -Message 'automatic LOT GUI isolates the engine Summary result from incidental console output'
+    Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'ProgressCallback') -Message 'automatic LOT GUI forwards progress callbacks to the engine'
+    $automaticEngineText = Get-Content -LiteralPath (Join-Path $sourceToolkitRoot 'Scripts\SmartM365-Windows11Upgrade-New-AutomaticLot.ps1') -Raw
+    Assert-True -Condition ($automaticEngineText -match "Refreshing LOT command wrappers") -Message 'automatic LOT engine reports the long wrapper-refresh stage'
 
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
