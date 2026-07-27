@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.6.0
+1.6.1
 #>
 
 #requires -Version 5.1
@@ -252,6 +252,7 @@ try {
     Assert-True -Condition $automaticSelectionFunction.Success -Message 'automatic LOT selection function is present'
     Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'ComputerNameContains|ExcludeIntunePresent|ExcludeStaleAd|AdLastLogonMaxAgeDays') -Message 'automatic LOT selection passes every advanced filter to the engine'
     Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -notmatch 'SkipWrapperRefresh') -Message 'automatic Create lets the engine generate launch wrappers'
+    Assert-True -Condition ($automaticSelectionFunction.Groups['Body'].Value -match 'engineOutput[\s\S]+engineResults') -Message 'automatic LOT GUI isolates the engine Summary result from incidental console output'
 
     $global:SyntheticInventoryRefreshFails = $false
     $global:SyntheticRootFallbackAccepted = $false
