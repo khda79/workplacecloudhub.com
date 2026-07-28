@@ -1,4 +1,4 @@
-# Version: 4.9.0
+# Version: 4.9.1
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -51,6 +51,23 @@ foreach ($f in $files) {
         if (($header -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "CSV/model columns differ for $name" }
     }
     foreach ($m in $metadata) { if ($cols -notcontains $m) { throw "Missing snapshot metadata $name[$m]" } }}
+$adComputers=$tables|Where-Object name -eq 'AD_Computers_AllDomains'|Select-Object -First 1
+if($null-eq$adComputers){throw 'Missing AD_Computers_AllDomains table'}
+$adComputerTypes=@{Enabled='boolean';ExistsInIntune='boolean';IntuneDiskFreeGB='double';PhysicalMemoryGB='double';IntunePrimaryUserMailboxSizeGB='double'}
+foreach($entry in $adComputerTypes.GetEnumerator()){
+    $column=$adComputers.columns|Where-Object name -eq $entry.Key|Select-Object -First 1
+    if($null-eq$column){throw "Missing canonical AD computer field: $($entry.Key)"}
+    if([string]$column.dataType-ne[string]$entry.Value){throw "AD computer type regression: $($entry.Key) is $($column.dataType), expected $($entry.Value)"}
+}
+$adComputerPartition=[string]$adComputers.partitions[0].source.expression
+foreach($fragment in @('{"Enabled", "logical"}','{"ExistsInIntune", "logical"}','{"IntuneDiskFreeGB", "number"}','{"PhysicalMemoryGB", "number"}','{"IntunePrimaryUserMailboxSizeGB", "number"}')){
+    if(-not$adComputerPartition.Contains($fragment,[StringComparison]::Ordinal)){throw "AD computer typed-source contract regression: $fragment"}
+}
+$adEnabledMeasure=$tables.measures|Where-Object name -eq 'AD Enabled Computers'|Select-Object -First 1
+if($null-eq$adEnabledMeasure){throw 'Missing AD Enabled Computers measure'}
+$adEnabledExpression=[string]$adEnabledMeasure.expression
+if(-not$adEnabledExpression.Contains("'AD_Computers_AllDomains'[Enabled]=TRUE()",[StringComparison]::Ordinal)){throw 'AD Enabled Computers must filter the canonical boolean field'}
+if($adEnabledExpression.Contains('[Enabled]="True"',[StringComparison]::Ordinal)){throw 'AD Enabled Computers still compares Enabled as text'}
 $deviceDetail=$tables|Where-Object name -eq 'DeviceDetail'|Select-Object -First 1
 if($null-eq$deviceDetail){throw 'Missing derived DeviceDetail table'}
 if(@($deviceDetail.partitions).Count-ne1-or[string]$deviceDetail.partitions[0].source.type-ne'm'){throw 'DeviceDetail must have one M partition'}
@@ -68,7 +85,7 @@ foreach($entry in $requiredDeviceDetailFields.GetEnumerator()){
 foreach($hiddenField in @('CanonicalDeviceKey','ADObjectGUID','EntraObjectId','EntraDeviceId','IntuneDeviceId','ActionPriority')){if($deviceDetailColumns[$hiddenField].isHidden-ne$true){throw "DeviceDetail technical field must be hidden: $hiddenField"}}
 $deviceDetailExpression=[string]$deviceDetail.partitions[0].source.expression
 foreach($fragment in @('#"AD_Computers_AllDomains"','#"M365_Entra_Devices"','#"Intune_Devices_Inventory"','#"M365_Users_Active"','[__IsCurrent]=true','A_EntraObjectId','A_EntraDeviceId','A_IntuneDeviceId','I_EntraObjectId','I_AzureADDeviceId','"AD:"&Norm([A_ObjectGUID])','"INTUNE:"&Norm([I_DeviceId])','"ENTRA:"&[E_ObjectKey]')){if(-not$deviceDetailExpression.Contains($fragment,[StringComparison]::Ordinal)){throw "DeviceDetail exact-key contract regression: $fragment"}}
-foreach($joinLine in [regex]::Matches($deviceDetailExpression,'Table\.NestedJoin\([^\r\n]+')){if($joinLine.Value-match 'DisplayName|DeviceName|A_Name|I_DeviceName'){throw "DeviceDetail must not join devices by name: $($joinLine.Value)"}}$userDetail=$tables|Where-Object name -eq 'UserDetail'|Select-Object -First 1
+foreach($joinLine in [regex]::Matches($deviceDetailExpression,'Table\.NestedJoin\([^)]*\)')){if($joinLine.Value-match 'DisplayName|DeviceName|A_Name|I_DeviceName'){throw "DeviceDetail must not join devices by name: $($joinLine.Value)"}}$userDetail=$tables|Where-Object name -eq 'UserDetail'|Select-Object -First 1
 if($null-eq$userDetail){throw 'Missing derived UserDetail table'}
 if(@($userDetail.partitions).Count-ne1-or[string]$userDetail.partitions[0].source.type-ne'm'){throw 'UserDetail must have one M partition'}
 $userDetailColumns=@{};foreach($column in $userDetail.columns){$userDetailColumns[[string]$column.name]=$column}
@@ -86,7 +103,7 @@ foreach($entry in $requiredUserDetailFields.GetEnumerator()){
 foreach($hiddenField in @('CanonicalUserKey','ADObjectGUID','EntraObjectId','OnPremExchangeGuid','EXOMailboxGuid','ActionPriority')){if($userDetailColumns[$hiddenField].isHidden-ne$true){throw "UserDetail technical field must be hidden: $hiddenField"}}
 $userDetailExpression=[string]$userDetail.partitions[0].source.expression
 foreach($fragment in @('#"AD_Users_AllDomains"','#"M365_Users_Active"','#"Exchange_OnPrem_Mailboxes_AllDomains"','#"Exchange_EXO_Mailboxes_AllDomains"','[__IsCurrent]=true','A_ImmutableId','A_SID','A_UPN','O_ObjectGUID','X_ExternalDirectoryObjectId','CandidateCount({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]})>1','FirstText({[CanonicalByImmutable],[CanonicalBySID],[CanonicalByUPN]','FirstText({[CanonicalByADObject],[CanonicalByUPN],[CanonicalBySmtp]','FirstText({[CanonicalByEntraObject],[CanonicalByImmutable],[CanonicalByUPN],[CanonicalBySmtp]','"AD:"&Norm([A_ObjectGUID])','"ONPREM:"&Norm([O_ObjectGUID])','"EXO:"&Norm([X_MailboxGuid])')){if(-not$userDetailExpression.Contains($fragment,[StringComparison]::Ordinal)){throw "UserDetail exact-key contract regression: $fragment"}}
-foreach($joinLine in [regex]::Matches($userDetailExpression,'Table\.NestedJoin\([^\r\n]+')){if($joinLine.Value-match 'DisplayName|GivenName|Surname'){throw "UserDetail must not join users by display name: $($joinLine.Value)"}}
+foreach($joinLine in [regex]::Matches($userDetailExpression,'Table\.NestedJoin\([^)]*\)')){if($joinLine.Value-match 'DisplayName|GivenName|Surname'){throw "UserDetail must not join users by display name: $($joinLine.Value)"}}
 if($userDetailExpression-match 'ProxyAddresses|EmailAddresses'){throw 'UserDetail must not merge users from alias or proxy-address collections'}$relationships=@($model.model.relationships)
 if($relationships.Count-ne16){throw "Expected exactly 16 validated relationships; found $($relationships.Count)"}
 $expectedRelationships=@{
@@ -206,8 +223,8 @@ Write-Host "OK SmartWorkplaceDashboard: 90 source tables, 2 derived tables, $($m
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXp1tAGzvViSe6
-# QpSHTba65YdGy7i54DnNlAU3yKRgOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAWXbvZts+8pvR
+# /HijZZADYj/hQS0TvO8VgL/x9LffdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -340,31 +357,31 @@ Write-Host "OK SmartWorkplaceDashboard: 90 source tables, 2 derived tables, $($m
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPpb1M7EHryy9+wWHZ0Sz3A7SkvcKDF0+bRJCAHbCeXRMA0GCSqG
-# SIb3DQEBAQUABIIBgAQQwKg7JHDkIhQY7ND2zJvLusyevd6D+kB2zGcATe2A18Il
-# 4h3lxZKIK6sTOhV086se9LoKQ8qzUjkkqI9aU/Pc/u4Yur42VLfUI+K5QMTIdnqA
-# 4k4+UCSM7gNqI/0Tx29rY6CfiIoAfyEjWgzytxifswLLzWJKmHdarHeunEdgUwI5
-# 6A7LsoQmt7Mib42dQPljVg1aUIi5zc0Ee1Vx9ytNG79KLmRYa2oFk4TYKrxcOhG0
-# HI6tJ4tbC/IVkD2GKWUj0WD415po4MXbhP8wa+J1wEprHjbiGdd6jsLwxGgF12Cj
-# uSTMrH1/oGpU4JPaftxzhTVNgwLGTnbA0clRxFl/RTEfaJkWq3OANCFwyADZE/kv
-# R6+sKUoqGLjkjaoEo4fJnB7vcwEImbM/gJdYqdzf5dvKAM/HxN8PLpX+cxzlsEXw
-# SZ0Rz8xeVzwpY4vjjoItL97jCMovJkpiTeEjG98E/eUYLetas4QsEhoUeUC5YxuF
-# sYSncvnSC4cOYyvdkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJqSdzQQwUyO4dLZAhO+atve+j58SKbvPChujhNlr0AfMA0GCSqG
+# SIb3DQEBAQUABIIBgGP2F2hJwkahMSebaWUEoJ44TSNNbOrHN8Nbab1fBB3sx9bz
+# tndlAbnu2NoAVdhw+ygNemRQU9PhLjC3QBj085I9CDaLzJsZlgatts/YZvhgxp9S
+# XLwi2wOty39Ta6G/Ek0Pq//NNv1CRZDnMwl6Tbng2253/wraQfduj1KBsA5KKWJO
+# c8URY2hr8dlfX6kx79gpfeLhYUUSmzRIUGqy4qdTwmSTANIzsmhqSU8O8OntRKAC
+# yzVYoBjkeloZjDDr+mf1snfSLEt+ZaKKv4dggr5Lgycx+8qzZkMwNGiGKXaK3XXZ
+# 8czB05SUmodzK5vVr+IbuvI861KD432LVxvJBjV0CGPHIB6hNpYS1RoYu9vuirHF
+# DzxGY6v/DpW9Sx3fACV2LeyRxTW+wewy7HnPYhFMAHd8vYR/F7Oo+7goUwl/3UWc
+# 4+o2OHkhv8Y9yGKAf7S6GFu98BSclwRJC+cs3uqJ9fLutNcskDcS6//KNkcw3+JH
+# 0YdcPw/m8jfksDVlpqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjMwMTEy
-# MTFaMC8GCSqGSIb3DQEJBDEiBCDDip6ZQo3eHf8dXmjpVeFvMPvuBri0GJaWXMYU
-# x8sopjANBgkqhkiG9w0BAQEFAASCAgB9c7rSXcChW5qUN3MeOpe+UWQlUZPnd6DY
-# 7/SO7UFOJXnLPdzfAcyls3asmrGJ4KD6WLyc/9KilsAy6a6fiDo6fXbtW4xfNQL4
-# y4APzlob/QdowngdVSe6Q2KN0FP7UDj5VQh8K2BNxkC4ig3nFdmmljz2jB5XWC1R
-# PYPjhx1iBrnIEeB0m354aeyKC5FvGLQJjI3MyagZA+WdIROODiifUh0ASjRcHDgJ
-# F0pFBWWZBMvIl2y0kr8LPaa7+hu8hWj8ex/QSJ3YJU05sCpmPxkIt+oLJykOsSZU
-# wWI9lABg4QZqo95bVNhz4zznHTYc6ndCxU/5+mvCjFEqz/KU+NqUbOjsdkAUuF+f
-# 8dHhJ0kji4gFsXTFC6wfwJ96rDt0mCsx1KGApx5KDPmPQMZv1CIJIRweu8Z0X8TI
-# K3W3XOkhSNCa6fsG7B4hki2NLGlxyl4X+Mpa1Rn8aEQPn1NJYQOBItsNwFxbxBE2
-# TXhg/jv1No0SQO5aeB9sZemLcovPfRPLsKtUd3LziyTSB2QdFplJaRk2v4yqvuX2
-# N/KqF2g201YPPIY9Tfy94kiSIaSeZjZUFmE+lBwoXd7/fX5d6qO+6G1VbLr05inw
-# SMpiJPTUfRjlWlATX2U2PcqeuVC3vE2rPV8RhKOr0fGScu1DjbxGM37P2imq0ygq
-# GGtQhy0HTw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMDU3
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCAYCiHW/d3PrZU4U58jefeAjrgR9AZS1rL1Dko
+# Zzc2mDANBgkqhkiG9w0BAQEFAASCAgAheRMPB31mVUaMt5183lbc8HIv8rQyusCL
+# Wy4opfNzp9KEij3rXk7A5ed9DKDFVB79dc2J9nNw7hX2AlZUtW8GqJVEuy2HfJFi
+# 86R8whxLYIjpHHtfpO1OPXS5pIrfTGY7k6MjsENy3HYOb/71GhFEiwNeCU97PzjG
+# rZ+J4D7/XoCVwcAEGoJMPC0muL0pm2rnUueESfEoOoVOmm6HiQWyvqcagM2dX5IZ
+# HfXVBE4Q8+MWNgXeDnS1F2Gvcd5HtjdFetrrxHzAZf1n0/403leiC1VHOTwDv2X7
+# C2AQL+McGxdX8zwGwJLCtqMVqkXYDmrXnUy/uzw+bbTtBFgKhP/Gdbyu6m38054E
+# ojO9necL/Dx8ZowrtrA2Bgc377NoVm5ZyNF+RIvab5bLHIByIVsH5uG3Ce4bsCbo
+# pmesUMlQ+dJyGA1NK8KMVa3GUy+2UlAZ4NZS6G+l5sKfdXKBlhki98igPiflmkR3
+# 2SoV4fnOAdwDFFXxJTVxFQ9Hgrkp/K7wYYpzpSKTmag5yHAvC0rcsBmb01UUw92g
+# A6Ay5NMbqRDTKch0LETChibO9n7qqW2Ucx1Kh5zNIwennDeqp/c3e8xbVLW1RLrx
+# p1ElllUBP/AW4bzPdOKFyxLJ3E7yaO/SsVp9gf6QWJuEK5vO33rWX695dMuEC6pc
+# 4GfrcdHBDg==
 # SIG # End signature block

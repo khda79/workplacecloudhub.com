@@ -1,0 +1,342 @@
+{
+  "schemaVersion": "1.0",
+  "mappingKind": "derivedTables",
+  "purpose": "Mapping des colonnes CSV SmartInventory vers les colonnes techniques utilisees pour construire les vues unifiees DeviceDetail et UserDetail. Le mapping global des schemas CSV se trouve dans column-mapping.json.",
+  "authoritativeImplementation": "scripts/Build-SmartWorkplaceDashboard.js",
+  "generatedModelCopy": "pbip/SmartWorkplaceDashboard.SemanticModel/model.bim",
+  "notes": [
+    "Les noms de tables sources restent identiques aux noms de fichiers CSV sans l'extension .csv.",
+    "Les colonnes targetColumn de ce fichier sont des alias techniques intermediaires. Elles evitent les collisions lors de la fusion de plusieurs sources.",
+    "Les colonnes visibles finales et leur ordre de priorite sont documentes dans outputColumnPrecedence.",
+    "Le fichier model.bim est genere. Il ne doit pas etre utilise comme source de maintenance du mapping."
+  ],
+  "sourceColumnMappings": {
+    "DeviceDetail": {
+      "M365_Entra_Devices": {
+        "ObjectId": "E_ObjectId",
+        "DeviceId": "E_DeviceId",
+        "DisplayName": "E_DisplayName",
+        "OperatingSystem": "E_OperatingSystem",
+        "OperatingSystemVersion": "E_OSVersion",
+        "IsCompliant": "E_IsCompliant",
+        "IsManaged": "E_IsManaged",
+        "DeviceOwnership": "E_Ownership",
+        "AccountEnabled": "E_AccountEnabled",
+        "TrustType": "E_TrustType",
+        "Manufacturer": "E_Manufacturer",
+        "Model": "E_Model",
+        "ApproximateLastSignInDateTime": "E_LastSignIn"
+      },
+      "Intune_Devices_Inventory": {
+        "Device ID": "I_DeviceId",
+        "Device name": "I_DeviceName",
+        "Entra ObjectId": "I_EntraObjectId",
+        "Azure AD Device ID": "I_AzureADDeviceId",
+        "Entra DeviceId": "I_EntraDeviceId",
+        "Primary user UPN": "I_PrimaryUserUPN",
+        "Ownership": "I_Ownership",
+        "Compliance": "I_Compliance",
+        "IsCompliant": "I_IsCompliant",
+        "OS": "I_OS",
+        "OS version": "I_OSVersion",
+        "WindowsVersionFamily": "I_WindowsVersionFamily",
+        "Manufacturer": "I_Manufacturer",
+        "Model": "I_Model",
+        "Serial number": "I_SerialNumber",
+        "PhysicalMemoryGB": "I_PhysicalMemoryGB",
+        "Total storage": "I_TotalStorage",
+        "Free storage": "I_FreeStorage",
+        "LastSyncDateTime": "I_LastSync"
+      },
+      "AD_Computers_AllDomains": {
+        "ObjectGUID": "A_ObjectGUID",
+        "Name": "A_Name",
+        "DNSHostName": "A_DNSHostName",
+        "DomainName": "A_DomainName",
+        "OrganizationalUnitLeafName": "A_OrganizationalUnit",
+        "Enabled": "A_Enabled",
+        "LastLogonDate": "A_LastLogon",
+        "OperatingSystem": "A_OperatingSystem",
+        "operatingSystemVersion": "A_OSVersion",
+        "Manufacturer": "A_Manufacturer",
+        "IntunePrimaryUserPrincipalName": "A_PrimaryUserUPN",
+        "IntuneDeviceId": "A_IntuneDeviceId",
+        "EntraObjectId": "A_EntraObjectId",
+        "EntraDeviceIdNormalized": "A_EntraDeviceId",
+        "IntuneOwnership": "A_IntuneOwnership",
+        "IntuneDeviceModel": "A_IntuneModel",
+        "PhysicalMemoryGB": "A_PhysicalMemoryGB",
+        "Windows11UpgradeEligibility": "A_Windows11Readiness",
+        "Windows11MigrationPhase": "A_Windows11MigrationPhase",
+        "DeviceMigrationIssueSeverity": "A_MigrationSeverity",
+        "Windows11MigrationAction": "A_MigrationAction",
+        "WindowsUpdateWindows1125H2RiskBucket": "A_UpdateRisk25H2",
+        "WindowsUpdateWindows1124H2RiskBucket": "A_UpdateRisk24H2",
+        "WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket": "A_UpdateRiskAutopatch"
+      }
+    },
+    "UserDetail": {
+      "M365_Users_Active": {
+        "Object Id": "E_ObjectId",
+        "User principal name": "E_UPN",
+        "Display name": "E_DisplayName",
+        "First name": "E_FirstName",
+        "Last name": "E_LastName",
+        "Title": "E_Title",
+        "Department": "E_Department",
+        "City": "E_City",
+        "CountryOrRegion": "E_Country",
+        "Office": "E_Office",
+        "StateOrProvince": "E_State",
+        "Usage location": "E_UsageLocation",
+        "Block credential": "E_BlockCredential",
+        "Licenses": "E_Licenses",
+        "DirSyncEnabled": "E_DirSyncEnabled",
+        "OnPremisesImmutableId": "E_ImmutableId",
+        "OnPremisesSecurityIdentifier": "E_SID",
+        "OnPremisesSyncEnabled": "E_OnPremisesSyncEnabled",
+        "AccountEnabled": "E_AccountEnabled",
+        "UserType": "E_UserType",
+        "LastSignInDateTime": "E_LastSignIn",
+        "LastNonInteractiveSignInDateTime": "E_LastNonInteractiveSignIn"
+      },
+      "AD_Users_AllDomains": {
+        "ObjectGUID": "A_ObjectGUID",
+        "DomainName": "A_DomainName",
+        "UserPrincipalName": "A_UPN",
+        "Enabled": "A_Enabled",
+        "DisplayName": "A_DisplayName",
+        "GivenName": "A_GivenName",
+        "Surname": "A_Surname",
+        "Department": "A_Department",
+        "Title": "A_Title",
+        "Company": "A_Company",
+        "Office": "A_Office",
+        "manager": "A_Manager",
+        "Country": "A_Country",
+        "CountryName": "A_CountryName",
+        "City": "A_City",
+        "AdOrganizationalUnitPath": "A_OrganizationalUnit",
+        "EntitySiteType": "A_SiteType",
+        "EntityIntegrationType": "A_IntegrationType",
+        "IsLikelyServiceAccount": "A_IsLikelyServiceAccount",
+        "AccountType": "A_AccountType",
+        "M365LicenseName": "A_M365LicenseName",
+        "M365LicenseType": "A_M365LicenseType",
+        "ActivityCategory": "A_ActivityCategory",
+        "LastLogonDate": "A_LastLogon",
+        "ResolvedLastActivityDateTime": "A_ResolvedLastActivity",
+        "PrimarySmtpAddress": "A_PrimarySmtp",
+        "MailboxSource": "A_MailboxSource",
+        "ObjectSID": "A_SID",
+        "ImmutableId_AD": "A_ImmutableId",
+        "HasMailbox": "A_HasMailbox",
+        "HasRemoteMailbox": "A_HasRemoteMailbox"
+      },
+      "Exchange_OnPrem_Mailboxes_AllDomains": {
+        "ObjectGUID": "O_ObjectGUID",
+        "DisplayName": "O_DisplayName",
+        "UserPrincipalName": "O_UPN",
+        "AccountDisabled": "O_AccountDisabled",
+        "IsShared": "O_IsShared",
+        "IsResource": "O_IsResource",
+        "RecipientType": "O_RecipientType",
+        "PrimarySMTPaddress": "O_PrimarySmtp",
+        "ExchangeGuid": "O_ExchangeGuid",
+        "LastLogonTime": "O_LastLogon",
+        "TotalItemSize-In-MB": "O_SizeMB",
+        "ItemCount": "O_ItemCount",
+        "ArchiveTotalItemSize-In-MB": "O_ArchiveSizeMB"
+      },
+      "Exchange_EXO_Mailboxes_AllDomains": {
+        "DisplayName": "X_DisplayName",
+        "UserPrincipalName": "X_UPN",
+        "PrimarySmtpAddress": "X_PrimarySmtp",
+        "RecipientTypeDetails": "X_RecipientTypeDetails",
+        "MailboxType": "X_MailboxType",
+        "MailboxGuid": "X_MailboxGuid",
+        "AccountEnabled": "X_AccountEnabled",
+        "IsDirSynced": "X_IsDirSynced",
+        "LastUserActionTime": "X_LastUserAction",
+        "LastLogonTime": "X_LastLogon",
+        "TotalItemSizeGB": "X_SizeGB",
+        "ItemCount": "X_ItemCount",
+        "ArchiveStatus": "X_ArchiveStatus",
+        "ExternalDirectoryObjectId": "X_ExternalDirectoryObjectId",
+        "OnPremisesImmutableId": "X_ImmutableId"
+      }
+    }
+  },
+  "outputColumnPrecedence": {
+    "DeviceDetail": {
+      "DeviceName": [
+        "Intune_Devices_Inventory.Device name",
+        "M365_Entra_Devices.DisplayName",
+        "AD_Computers_AllDomains.Name",
+        "AD_Computers_AllDomains.DNSHostName"
+      ],
+      "PrimaryUserUPN": [
+        "Intune_Devices_Inventory.Primary user UPN",
+        "AD_Computers_AllDomains.IntunePrimaryUserPrincipalName"
+      ],
+      "Country": [
+        "M365_Users_Active.CountryOrRegion via PrimaryUserUPN"
+      ],
+      "EntraObjectId": [
+        "M365_Entra_Devices.ObjectId",
+        "Intune_Devices_Inventory.Entra ObjectId",
+        "AD_Computers_AllDomains.EntraObjectId"
+      ],
+      "EntraDeviceId": [
+        "M365_Entra_Devices.DeviceId",
+        "Intune_Devices_Inventory.Entra DeviceId",
+        "Intune_Devices_Inventory.Azure AD Device ID",
+        "AD_Computers_AllDomains.EntraDeviceIdNormalized"
+      ],
+      "IntuneDeviceId": [
+        "Intune_Devices_Inventory.Device ID",
+        "AD_Computers_AllDomains.IntuneDeviceId"
+      ],
+      "Ownership": [
+        "Intune_Devices_Inventory.Ownership",
+        "M365_Entra_Devices.DeviceOwnership",
+        "AD_Computers_AllDomains.IntuneOwnership"
+      ],
+      "OperatingSystem": [
+        "Intune_Devices_Inventory.OS",
+        "M365_Entra_Devices.OperatingSystem",
+        "AD_Computers_AllDomains.OperatingSystem"
+      ],
+      "OSVersion": [
+        "Intune_Devices_Inventory.OS version",
+        "M365_Entra_Devices.OperatingSystemVersion",
+        "AD_Computers_AllDomains.operatingSystemVersion"
+      ],
+      "Manufacturer": [
+        "Intune_Devices_Inventory.Manufacturer",
+        "M365_Entra_Devices.Manufacturer",
+        "AD_Computers_AllDomains.Manufacturer"
+      ],
+      "Model": [
+        "Intune_Devices_Inventory.Model",
+        "M365_Entra_Devices.Model",
+        "AD_Computers_AllDomains.IntuneDeviceModel"
+      ],
+      "PhysicalMemoryGB": [
+        "Intune_Devices_Inventory.PhysicalMemoryGB",
+        "AD_Computers_AllDomains.PhysicalMemoryGB"
+      ],
+      "LastActivityDateTime": [
+        "Intune_Devices_Inventory.LastSyncDateTime",
+        "M365_Entra_Devices.ApproximateLastSignInDateTime",
+        "AD_Computers_AllDomains.LastLogonDate"
+      ],
+      "UpdateRisk": [
+        "AD_Computers_AllDomains.WindowsUpdateWindows1125H2RiskBucket",
+        "AD_Computers_AllDomains.WindowsUpdateWindows1124H2RiskBucket",
+        "AD_Computers_AllDomains.WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket"
+      ]
+    },
+    "UserDetail": {
+      "DisplayName": [
+        "M365_Users_Active.Display name",
+        "AD_Users_AllDomains.DisplayName",
+        "Exchange_EXO_Mailboxes_AllDomains.DisplayName",
+        "Exchange_OnPrem_Mailboxes_AllDomains.DisplayName"
+      ],
+      "UserPrincipalName": [
+        "M365_Users_Active.User principal name",
+        "AD_Users_AllDomains.UserPrincipalName",
+        "Exchange_EXO_Mailboxes_AllDomains.UserPrincipalName",
+        "Exchange_OnPrem_Mailboxes_AllDomains.UserPrincipalName"
+      ],
+      "PrimarySmtpAddress": [
+        "Exchange_EXO_Mailboxes_AllDomains.PrimarySmtpAddress",
+        "AD_Users_AllDomains.PrimarySmtpAddress",
+        "Exchange_OnPrem_Mailboxes_AllDomains.PrimarySMTPaddress"
+      ],
+      "Country": [
+        "M365_Users_Active.CountryOrRegion",
+        "AD_Users_AllDomains.CountryName",
+        "AD_Users_AllDomains.Country",
+        "M365_Users_Active.Usage location"
+      ],
+      "Department": [
+        "M365_Users_Active.Department",
+        "AD_Users_AllDomains.Department"
+      ],
+      "Title": [
+        "M365_Users_Active.Title",
+        "AD_Users_AllDomains.Title"
+      ],
+      "Office": [
+        "M365_Users_Active.Office",
+        "AD_Users_AllDomains.Office"
+      ],
+      "EntraObjectId": [
+        "M365_Users_Active.Object Id",
+        "Exchange_EXO_Mailboxes_AllDomains.ExternalDirectoryObjectId"
+      ],
+      "IsEnabled": [
+        "M365_Users_Active.AccountEnabled when the user exists in Entra",
+        "AD_Users_AllDomains.Enabled when the user exists only in AD",
+        "Exchange_EXO_Mailboxes_AllDomains.AccountEnabled otherwise"
+      ],
+      "UserType": [
+        "M365_Users_Active.UserType",
+        "AD_Users_AllDomains.AccountType"
+      ],
+      "LicenseSummary": [
+        "AD_Users_AllDomains.M365LicenseName",
+        "AD_Users_AllDomains.M365LicenseType",
+        "M365_Users_Active.Licenses"
+      ],
+      "EXOMailboxType": [
+        "Exchange_EXO_Mailboxes_AllDomains.MailboxType",
+        "Exchange_EXO_Mailboxes_AllDomains.RecipientTypeDetails"
+      ],
+      "MailboxItemCount": [
+        "Exchange_EXO_Mailboxes_AllDomains.ItemCount",
+        "Exchange_OnPrem_Mailboxes_AllDomains.ItemCount"
+      ],
+      "ADLastLogonDateTime": [
+        "AD_Users_AllDomains.ResolvedLastActivityDateTime",
+        "AD_Users_AllDomains.LastLogonDate"
+      ],
+      "EntraLastSignInDateTime": [
+        "M365_Users_Active.LastSignInDateTime",
+        "M365_Users_Active.LastNonInteractiveSignInDateTime"
+      ],
+      "EXOLastUserActionDateTime": [
+        "Exchange_EXO_Mailboxes_AllDomains.LastUserActionTime",
+        "Exchange_EXO_Mailboxes_AllDomains.LastLogonTime"
+      ],
+      "LastActivityDateTime": [
+        "maximum of ADLastLogonDateTime",
+        "maximum of EntraLastSignInDateTime",
+        "maximum of EXOLastUserActionDateTime",
+        "Exchange_OnPrem_Mailboxes_AllDomains.LastLogonTime"
+      ]
+    }
+  },
+  "exactIdentityMatching": {
+    "DeviceDetail": [
+      "Entra ObjectId",
+      "Entra DeviceId",
+      "Intune DeviceId",
+      "AD ObjectGUID as fallback"
+    ],
+    "UserDetail": [
+      "Entra ObjectId",
+      "ImmutableId",
+      "SID",
+      "UPN",
+      "AD ObjectGUID or mailbox GUID as fallback"
+    ],
+    "prohibitedFuzzyKeys": [
+      "DisplayName",
+      "proxy-address collections"
+    ]
+  },
+  "globalCsvSchemaMapping": "column-mapping.json"
+}
