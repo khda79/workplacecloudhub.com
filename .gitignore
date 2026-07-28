@@ -37,7 +37,7 @@ SmartWorkplaceCMDB/**
 !/README.md
 !/CODE_OF_CONDUCT.md
 !/CONTRIBUTING.md
-!/.github/SECURITY.md
+!/SECURITY.md
 !/.github/PULL_REQUEST_TEMPLATE.md
 !/SmartM365/README.md
 !/SmartM365/Config/SmartM365.global.local.json.template
