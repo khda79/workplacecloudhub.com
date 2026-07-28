@@ -1,105 +1,39 @@
-#Requires -Version 5.1
+@{
+    RootModule        = 'SmartM365.DeviceRebootManager.psm1'
+    ModuleVersion     = '0.1.0'
+    GUID              = '76113cb7-698d-4d2d-b6d7-60babba59120'
+    Author            = 'WorkplaceCloudHub'
+    CompanyName       = 'WorkplaceCloudHub'
+    Copyright         = '(c) WorkplaceCloudHub. All rights reserved.'
+    Description       = 'Installs, updates, reports, and removes SmartM365 Device Reboot Manager on Windows.'
+    PowerShellVersion = '5.1'
 
-<#
-.SYNOPSIS
-    Creates the SmartM365 Device Reboot Manager scheduled task.
+    FunctionsToExport = @(
+        'Get-SmartM365DeviceRebootManager'
+        'Install-SmartM365DeviceRebootManager'
+        'Uninstall-SmartM365DeviceRebootManager'
+        'Update-SmartM365DeviceRebootManager'
+    )
 
-.DESCRIPTION
-    Registers a user-interactive scheduled task that starts the WPF GUI at user
-    logon and then regularly while a user session is available. This script is
-    intended for Intune Win32 deployments running as SYSTEM.
-#>
+    CmdletsToExport   = @()
+    VariablesToExport = @()
+    AliasesToExport   = @()
 
-[CmdletBinding()]
-param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
-    [string]$TaskPath = '\SmartM365\',
-    [string]$TaskName = 'Device Reboot Manager',
-    [int]$RepeatIntervalMinutes = 240,
-    [string]$PowerShellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe",
-    [string]$ConfigPath = '',
-    [switch]$RunOnceNow
-)
-
-$ErrorActionPreference = 'Stop'
-
-function ConvertTo-QuotedArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-    return ('"{0}"' -f ($Value -replace '"', '\"'))
-}
-
-if ($RepeatIntervalMinutes -lt 15) {
-    throw 'RepeatIntervalMinutes must be at least 15.'
-}
-
-if (-not (Test-Path -LiteralPath $PowerShellPath)) {
-    $PowerShellPath = 'powershell.exe'
-}
-
-$appScriptPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.ps1'
-if (-not (Test-Path -LiteralPath $appScriptPath)) {
-    throw "Device Reboot Manager script not found: $appScriptPath"
-}
-
-if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $candidateConfigPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
-    if (Test-Path -LiteralPath $candidateConfigPath) {
-        $ConfigPath = $candidateConfigPath
+    PrivateData = @{
+        PSData = @{
+            Prerelease   = 'preview4'
+            Tags         = @('SmartM365', 'Windows', 'WPF', 'Reboot', 'Intune')
+            ProjectUri   = 'https://github.com/khda79/workplacecloudhub.com'
+            ReleaseNotes = 'Preview 4 adds exact Intune version detection and keeps PowerShell Gallery automatic updates opt-in.'
+        }
     }
 }
-
-$taskArguments = @(
-    '-STA'
-    '-NoProfile'
-    '-WindowStyle'
-    'Hidden'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    (ConvertTo-QuotedArgument -Value $appScriptPath)
-)
-
-if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $taskArguments += @('-ConfigPath', (ConvertTo-QuotedArgument -Value $ConfigPath))
-}
-
-$action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
-$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
-$repeatTrigger = New-ScheduledTaskTrigger `
-    -Once `
-    -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes $RepeatIntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
-
-$principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-
-Register-ScheduledTask `
-    -TaskPath $TaskPath `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger @($logonTrigger, $repeatTrigger) `
-    -Principal $principal `
-    -Settings $settings `
-    -Description 'Starts the SmartM365 Device Reboot Manager GUI in the interactive user session.' `
-    -Force | Out-Null
-
-if ($RunOnceNow) {
-    Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
-}
-
-Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8r3a/hXeoj2OI
-# xdpN9AM9foXllpMUgpNGjdecKUUVyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCuxZi/hjuPo9iE
+# 5SF5Cg/05tlaL1pNy0j8b0itx1ubTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +166,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID+pzFvXOOCrnBfx3fzvlrTeyvqAgypwPGrgL68QaAB3MA0GCSqG
-# SIb3DQEBAQUABIIBgKpwePvjTbK1UhNswEobEt8hFtmgcGAo56Z1mQ7rfgjcCqzu
-# B3UAZn3nA/ddkqFUOnD2IOTKQw2gfoeIYWaQPmnXTFPUnJ/emdci2dk+TMQM0+4l
-# GqsJE3UU5Z7nL/Bz+C8GLJVlWBUDLviojiz6UBjta3kY8cznwkPVuxT1RE7KnPrN
-# 8kZzQ5kItctQlQdtZZ4Zh0Dj+aUM5qP/gdP6LWnRKxxwTRk5ZtkRg/WOeZyZSYe1
-# 9FV6+GOl9ABi41AW2WGM4ogyJFk+S/zIXRtu9ZJGm9DgLl8GrVSEbgBhzL6azNhg
-# p9euCaNwRSUnebG5qgiGFDQwWzf5C3n+rHRi1fV3Mhg7TtBMdN4/O1AkopYOFGuo
-# M8zgjo2f52ouduVe+2j4SEJJmhzr7Qcq7nOC907nsRzeQbSeDyWGuY7u/x5gvgS1
-# L9CcChjyvd6xFy8C3/S6+zPVi1/5K0fEmAP/UJib5u9EeycraLfHW3RxkrKs7F4E
-# bb35GpawY1jJdSr7QaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKi2XP2rKGCOECWR8ZnYcloG4VOJs4RJuWjq77/lvBR1MA0GCSqG
+# SIb3DQEBAQUABIIBgExzDkwJiIMemBrpdwsdhN23ASeltlz6CZsFG+TV3qCkuObC
+# KdLmt8zwimyPwIwdWMj34ONgKj7mD8axWhCTeH3umW/Co7kSEwsN79V8v+Tr225y
+# D6dd9K58WVpgaqK2TnejqCFbFpQJ7SpYHhlw7MuoEmCVy8jsNEymawZjHwPj0Cr2
+# LGhWKNaO9y2DDugsAPyUmJ+SqHqCuOh41SmGcz+TVMXsIJvEZSHcEJWTP8YIb6g0
+# n8hLds25K80h3MaG503adKOsSwaFHMo7s5wd0bCL5cBUbxjjwQrEYoSNrkkpp6es
+# MqtqQH/Y4gWLj/p+dIosAOdwYLTLpayo7a0PRjeteTqF6Rztixs+6ypRGJ3/qCnf
+# GjdBB25ivxeCOHiyrvgzO2pka1n90gTSSvyPQSzaug5oazx70EtNu1/FBCljnyKt
+# 6w0388baSTKMOxlapmiSEyDF3dqUGJYOLXk9t2v5jsFYuVwApe2sPSVD4tPbea+k
+# bQ5t9jXc6pKLJ3rNg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTU0
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDQZo1stAGCPyM9HMQXchDfCkabybRJGOzqsdm0
-# OJeKhTANBgkqhkiG9w0BAQEFAASCAgCfN6waatotxB5LC/+0Wvb5UxjBqhJimRx+
-# usSI8jrR3D1rDycKR4t1SuwLHnJrEiZI1NUwJ1O+rpZrTsiaXSodNAYh8i3PGLxD
-# cMrbKY7eb5Il6wDw2flENBcoUrMvq4NU8zwpxTba47vWviZ5WZpu6b+nGQB9Eqhb
-# rOh2eqPJEKAMHcHuv1KhtqNNXdBG4lBj2a7uRaxgjxfzbRBYU53czTLI3THMQSNk
-# vNjClhWY+Vl+iCDXaAfxsiTP3kasFeFq4t67fUqisYXVYmV+6G+tI1AvvFBHEP0R
-# BdYReTMSQwrW/kYL2WLlOxJD+rGvH0IPEmsMqoCLNMlx6u29X1Jk1CvMvD93zz/d
-# RDL2bEcAI8RSfHsvuQy+B5zvwsCFS8e/mOHk+YOgMFpdqadmJD8l9XyR878UWOik
-# GPOq5l45OpkRv0ukRFR2hPOwRUq49pHnNQUbKyIUlglQ8QU6EK4K6mEs03ZFiYXI
-# a311WW35oXPNv+hloPrCZcu+P4Z+cjsTggHVrdn3YNR+Tzlc9mDensWQlZJWrGEN
-# pzURpRFytdVqRJzcx//eCEWn/llIsCJGkOlKETdF6Zl4X2jmXP73vutAI3m2WP8U
-# GblgMsV7/XBwAIpAYkIh3OZ7MetngG+urhNtMUA9VaRM9wOv6twNn1tIp64VTK8+
-# Ft8mDl2Ctw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
+# MDdaMC8GCSqGSIb3DQEJBDEiBCAQ3oAOiPOAAnwtnndCwjnqrjanDKHSVXSuxW0k
+# KKk90TANBgkqhkiG9w0BAQEFAASCAgBeGWKwgHnE5L0bHL5woOR02m5acWcUM1cq
+# y9+qIFAWJz2FYjoLbu0g102xBgIXFqUgkOB7uJOUkFNSz5cni5qucYveTvqGdy2x
+# smztYGfmp4UVebtNjxeUkhBWJmm8xkcHfu3jqCnhS8DMPGcryrXjGE0SmH8yEVYO
+# /0ytpxtXPbcUSwMuorDk0Gtl64Y3t42qA2FfmZ3vFqfy936LFOHn/U2xtaHqsKIO
+# 8j30Ap7GrqJnLEwp5k80oS9svWJ496hOW1mEH3hcHaLBjXzz2X46iiGxmBzjW8sU
+# wkIqmSC6buZM75JBsqDLK2coOyk28GVMjFQfjcCyqRSWcWPX0X6Hzhz7egUJ8QOY
+# s9t9/1WX3Frl2PVYuY1moAn9uk7tlx552rNUB6GuWU/i9a1o1ap4+JMHu2FzYLrC
+# ZCw/bCSai0HhUCR43tzhX9Omh68N51qpwpzNsMPlAS/h3fXhmG4sos2QJn0RtOLI
+# ZvFPD8d5CmIl3Xpf6zsYcqxvBLFoyFiBPg2dhIOVl9yfbBHuISStkCoFc6WwpB90
+# jHxay5tR4E2HGMZ5GZXvaH/GLrmAKapYItw4YQkMTe4468TrGNlHoHKv+NtBKw8O
+# ILaxUMc3MPIf/zsuD4yy0ly/dC8aLlgoxy+bLVsh47RPpWqpAqTdPR+wi3WWsQG3
+# yQosCYR2wQ==
 # SIG # End signature block
