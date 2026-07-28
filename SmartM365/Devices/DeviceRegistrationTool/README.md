@@ -12,6 +12,21 @@ In the GUI, `Run diagnostic` only runs diagnostics. In Admin mode, `Run repair` 
 
 Use `-Cli` when an operator wants command-line mode.
 
+## Download
+
+Download the standalone Windows package from the
+[SmartM365 Device Registration Tool v1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-registration-tool-v1.0).
+
+After downloading:
+
+1. Verify the ZIP against the published SHA-256 file.
+2. Extract the complete ZIP to a local folder.
+3. Run `Start-SmartM365-DeviceRegistration-Tool-User.cmd` for diagnostic-only mode.
+4. Use `Start-SmartM365-DeviceRegistration-Tool-Admin.cmd` only when guarded repair actions are required.
+
+The PowerShell scripts in the package are Authenticode-signed by `workplacecloudhub.com`.
+The package does not include an installer or third-party binaries.
+
 ## Script
 
 - `SmartM365-DeviceRegistration-Tool.ps1`: checks local AD domain join, domain controller reachability, Intune enrollment signals, and `dsregcmd /status`.
@@ -175,7 +190,13 @@ If `SupportEmail` is configured, `Copy/email support summary` copies the summary
 
 ## Default GUI mode
 
-Open the GUI:
+From the standalone release folder, open the diagnostic-only GUI:
+
+```cmd
+Start-SmartM365-DeviceRegistration-Tool-User.cmd
+```
+
+From the `SmartM365` repository folder, open the GUI:
 
 ```powershell
 .\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1
