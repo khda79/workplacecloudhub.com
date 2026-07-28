@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.15
+1.16
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.15'
+$GuiVersion = '1.16'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -783,6 +783,7 @@ $script:ToolkitDefaultEnvironment = @{
     EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE = '0'
     EHJIR_SKIP_VIRTUAL_MACHINES = '1'
     EHJIR_AD_DOMAIN = ''
+    EHJIR_INTUNE_TENANT_ID = ''
     EHJIR_GUI_DRY_RUN = '0'
     EHJIR_GUI_AUDIT_ONLY = '0'
     EHJIR_GUI_IGNORE_RUN_GUARD_EVERY_CYCLE = '0'
@@ -1086,6 +1087,81 @@ $xaml = @'
                 </Border>
             </TabItem>
 
+            <TabItem Header="Automatic LOT">
+                <Grid Margin="0,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.05*"/>
+                        <ColumnDefinition Width="0.95*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,0,8,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Build from AD, Intune and Entra inventories" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBlock Grid.Row="1" Text="Select enabled Windows 10/11 AD clients absent from Intune. Entra evidence classifies Hybrid Join and enrollment needs." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,6" TextWrapping="Wrap"/>
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="Graph uses delegated interactive sign-in. AD and Intune are required; Entra is optional enrichment." Foreground="#005A9E" TextWrapping="Wrap"/>
+                                <CheckBox x:Name="AutomaticForceRefreshCheck" Content="Force inventory refresh this time" Margin="0,5,0,2" ToolTip="Ignore valid root caches for the next preview only."/>
+                            </StackPanel>
+                            <Grid Grid.Row="3" Margin="0,5,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.4*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                    <TextBlock Text="LOT name"/>
+                                    <TextBox x:Name="AutomaticLotNameText"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="6,0,6,0">
+                                    <TextBlock Text="Prefix(es)"/>
+                                    <TextBox x:Name="AutomaticNamePrefixText" ToolTip="Semicolon-separated prefixes, for example FR- or FR-;BE-"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Margin="6,0,0,0">
+                                    <TextBlock Text="Contains"/>
+                                    <TextBox x:Name="AutomaticNameContainsText" ToolTip="Semicolon-separated literal values, for example -A- or -A-;-P-."/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid Grid.Row="4" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Grid.Column="0" x:Name="AutomaticExcludeStaleAdCheck" Content="Exclude stale AD" ToolTip="Unknown or invalid LastLogonTimestampUtc values are also excluded."/>
+                                <TextBox Grid.Column="1" x:Name="AutomaticLastLogonDaysText" Text="45" Width="44" Margin="8,0,4,0" IsEnabled="False" ToolTip="Maximum AD LastLogon age in days."/>
+                                <TextBlock Grid.Column="2" Text="days" VerticalAlignment="Center"/>
+                            </Grid>
+                            <TextBlock Grid.Row="5" Text="Devices already present in Intune, Windows Server systems, disabled AD objects and ambiguous identities are always excluded." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                            <WrapPanel Grid.Row="6" Margin="0,8,0,0">
+                                <Button x:Name="AutomaticPreviewButton" Content="Refresh and preview" MinWidth="155"/>
+                                <Button x:Name="AutomaticCreateButton" Content="Create" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" MinWidth="155"/>
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="8,0,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Selection preview" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBox Grid.Row="1" x:Name="AutomaticSummaryText" Margin="0,14,0,8" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                            <TextBox Grid.Row="2" x:Name="AutomaticEvidencePathText" IsReadOnly="True" Margin="0,4,0,4"/>
+                            <Button Grid.Row="3" x:Name="AutomaticOpenEvidenceButton" Content="Open evidence folder" HorizontalAlignment="Left"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
             <TabItem Header="Options">
                 <ScrollViewer Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
                     <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18">
@@ -1298,7 +1374,10 @@ $controls = @{}
     'OpenLotComputersButton','OpenLotAdDomainButton','RefreshWrappersButton','LaunchLotButton',
     'ActivityText','SingleComputerText','SingleModeCombo','LaunchSingleButton','SingleRunFolderText',
     'OpenSingleRunFolderButton','NewLotNameText','CreateLotButton','NewLotComputersPathText',
-    'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowDsregLeaveCheck',
+    'OpenNewLotComputersButton','MainTabs','AutomaticLotNameText','AutomaticNamePrefixText','AutomaticNameContainsText',
+    'AutomaticForceRefreshCheck','AutomaticExcludeStaleAdCheck','AutomaticLastLogonDaysText','AutomaticPreviewButton',
+    'AutomaticCreateButton','AutomaticSummaryText','AutomaticEvidencePathText','AutomaticOpenEvidenceButton',
+    'DryRunCheck','AuditOnlyCheck','AllowDsregLeaveCheck',
     'AllowStaleCleanupCheck','AllowRebootNoUserCheck','AllowRebootAfterLeaveCheck',
     'IgnoreRunGuardCheck','RemoveNonIntuneMdmCheck','KeepCentralHistoryCheck',
     'NoCentralCollectionCheck','SkipPostCycleInventoryCheck','SkipVirtualMachinesCheck',
@@ -1671,6 +1750,10 @@ function Refresh-LotList {
     Update-SelectedLotView
     Add-Status -Message ("{0} LOT(s) found. {1} ready for launch." -f $script:Lots.Count, @(Get-LaunchableLotSummaries).Count)
 }
+
+$automaticGuiSupport = Join-Path $toolkitRoot 'Scripts\SmartM365-IntuneHybridJoinRepair-AutomaticLotGuiSupport.ps1'
+if (-not (Test-Path -LiteralPath $automaticGuiSupport -PathType Leaf)) { throw "Automatic LOT GUI support not found: $automaticGuiSupport" }
+. $automaticGuiSupport
 
 $controls.LotCombo.Add_SelectionChanged({ Update-SelectedLotView })
 $controls.RefreshButton.Add_Click({ try { Refresh-LotList } catch { Show-GuiError $_.Exception.Message } })
