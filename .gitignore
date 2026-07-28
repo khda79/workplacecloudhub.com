@@ -50,6 +50,7 @@ SmartWorkplaceCMDB/**
 !/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
 !/SmartM365/**/*.config.template.json
+!/SmartM365/Devices/DeviceRebootManager/SmartM365-DeviceRebootManager.version.json
 !/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit.config.template
 !/SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceMap.csv.template
 !/SmartM365/SharePointMigration/**/*.py
