@@ -4,6 +4,21 @@ PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows en
 
 This tool is the SmartM365 PowerShell edition of the previous SmartLogAnalyzer logic. It intentionally does not reuse the source project Git history, Python packaging, PyInstaller build files, GitHub release workflow, or SignPath signing configuration.
 
+## Download
+
+Download the standalone Windows package from the
+[Endpoint Diagnostics Analyzer v0.2.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.2.0).
+
+After downloading:
+
+1. Verify the ZIP against the published SHA-256 file.
+2. Extract the complete ZIP to a local folder.
+3. Run `Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd`.
+4. Approve the Windows UAC prompt when local collection or elevated diagnostics are required.
+
+The PowerShell scripts in the package are Authenticode-signed by `workplacecloudhub.com`.
+The package does not include Python, an installer, or third-party binaries.
+
 ## Purpose
 
 Smart Endpoint Diagnostics Analyzer reads Intune Device Diagnostics ZIP files and local endpoint diagnostic captures, then turns raw diagnostic files into a support-focused view of device state, Intune enrollment, IME errors, Windows Update posture, application and driver data, Windows 11 upgrade indicators, compliance signals, and recommended actions.
@@ -50,7 +65,13 @@ The following source-project elements are intentionally excluded:
 
 The GUI self-elevates at startup. If it is launched from a standard user context, Windows will show a UAC prompt and the elevated instance continues with the same parameters.
 
-Open the GUI:
+From the standalone release folder, open the GUI:
+
+```cmd
+Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd
+```
+
+From the `SmartM365` repository folder, open the GUI with PowerShell:
 
 ```powershell
 powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1
@@ -91,11 +112,3 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagno
 The core analysis runs locally.
 
 Anonymized ZIP export redacts common email addresses, GUIDs, IPv4 addresses, user profile paths, tenant IDs, device IDs, serial numbers and user principal names in text-like files. Binary files are preserved as-is. Always review an anonymized ZIP before sharing it externally.
-
-## Branch
-
-Initial PowerShell migration branch:
-
-```text
-feature/smart-endpoint-diagnostics-analyzer
-```
