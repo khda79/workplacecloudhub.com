@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-// Version: 3.7.0 - Unified current-state device and user detail views.
+// Version: 3.7.1 - Canonical AD device typing for boolean and numeric fields.
+// Governance: generic corrections proven in a client-specific dashboard variant must be ported to this canonical generator and validator; variant-only pages and Legacy_ fields stay in the variant.
 const fs=require('fs'); const path=require('path');
 const root=path.resolve(__dirname,'..'), pbip=path.join(root,'pbip');
 const reportRoot=path.join(pbip,'SmartWorkplaceDashboard.Report');
@@ -61,6 +62,7 @@ in Table.SelectColumns(Typed,List.Combine({expectedColumns,{"__SnapshotDate","__
 ];
 const history=new Set(['M365_Users_Activity','M365_Licenses_Tenant','Intune_Devices_Inventory','Intune_Devices_Compliance','Exchange_EXO_Mailboxes_AllDomains','M365_Teams_Teams','M365_Teams_UserActivity','M365_SPO_Sites','M365_SPO_Tenant','Intune_EndpointAnalytics_DevicePerformance','Exchange_OnPrem_Servers_Inventory_Summary']);
 const types={
+ AD_Computers_AllDomains:{Enabled:'boolean',ExistsInIntune:'boolean',IntuneDiskFreeGB:'double',PhysicalMemoryGB:'double',IntunePrimaryUserMailboxSizeGB:'double'},
  AD_Computers_DailyStats:{Date:'dateTime',TotalComputers:'int64',EnabledAccounts:'int64',DisabledAccounts:'int64','Windows 10 Enabled':'int64','Windows 11 Enabled':'int64'},
  AD_Users_DailyStats:{Date:'dateTime',TotalUsers:'int64',EnabledUsers:'int64',DisabledUsers:'int64',Inactive90DaysUsers:'int64'},
  Exchange_OnPrem_Mailboxes_DailyStats:{Date:'dateTime',TotalMailboxCount:'int64',TotalLocalMailboxCount:'int64',TotalRemoteMailboxCount:'int64',TotalLocalMailboxSizeGB:'double'},
@@ -131,7 +133,7 @@ const measures=[
  M('Intune Managed Devices','[Managed Devices]','#,0','Devices'),
  M('Entra Device Objects',`CALCULATE(DISTINCTCOUNT('M365_Entra_Devices'[ObjectId]),'M365_Entra_Devices'[__IsCurrent]=TRUE())`,'#,0','Devices'),
  M('AD Computer Objects',`CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE())`,'#,0','Devices'),
- M('AD Enabled Computers',`CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE(),'AD_Computers_AllDomains'[Enabled]="True")`,'#,0','Devices'),
+ M('AD Enabled Computers',`CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE(),'AD_Computers_AllDomains'[Enabled]=TRUE())`,'#,0','Devices'),
  M('Compliant Devices',`CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[IsCompliant]=TRUE())`,'#,0','Devices'),
  M('Noncompliant Devices',`CALCULATE(DISTINCTCOUNT('Intune_Devices_Inventory'[Device ID]),'Intune_Devices_Inventory'[__IsCurrent]=TRUE(),'Intune_Devices_Inventory'[IsCompliant]=FALSE())`,'#,0','Devices'),
  M('Device Compliance Rate','DIVIDE([Compliant Devices],[Managed Devices])','0.0%','Devices'),
