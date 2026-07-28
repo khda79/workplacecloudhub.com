@@ -2,104 +2,94 @@
 
 <#
 .SYNOPSIS
-    Creates the SmartM365 Device Reboot Manager scheduled task.
+Previews or publishes the Device Reboot Manager package to PowerShell Gallery.
 
 .DESCRIPTION
-    Registers a user-interactive scheduled task that starts the WPF GUI at user
-    logon and then regularly while a user session is available. This script is
-    intended for Intune Win32 deployments running as SYSTEM.
+The default mode is local validation only. Public publication requires
+-Execute, an API key stored in the selected environment variable, prerelease
+confirmation, complete public metadata, and PowerShellGet v3/PSResourceGet.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
-    [string]$TaskPath = '\SmartM365\',
-    [string]$TaskName = 'Device Reboot Manager',
-    [int]$RepeatIntervalMinutes = 240,
-    [string]$PowerShellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe",
-    [string]$ConfigPath = '',
-    [switch]$RunOnceNow
+    [string]$PackagePath = '',
+    [string]$OutputRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365\PowerShellGallery'),
+    [string]$Repository = 'PSGallery',
+    [string]$ApiKeyEnvironmentVariable = 'PSGALLERY_API_KEY',
+    [switch]$Execute,
+    [switch]$AllowPrereleasePublication,
+    [switch]$ForceBuild
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function ConvertTo-QuotedArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-    return ('"{0}"' -f ($Value -replace '"', '\"'))
+if ([string]::IsNullOrWhiteSpace($PackagePath)) {
+    $buildScript = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-Build-DeviceRebootManagerGalleryPackage.ps1'
+    $buildResult = & $buildScript -OutputRoot $OutputRoot -Force:$ForceBuild
+    $PackagePath = [string]$buildResult.PackagePath
 }
 
-if ($RepeatIntervalMinutes -lt 15) {
-    throw 'RepeatIntervalMinutes must be at least 15.'
+$manifestPath = Join-Path -Path $PackagePath -ChildPath 'SmartM365.DeviceRebootManager.psd1'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "Package manifest not found: $manifestPath"
 }
 
-if (-not (Test-Path -LiteralPath $PowerShellPath)) {
-    $PowerShellPath = 'powershell.exe'
+$manifest = Test-ModuleManifest -Path $manifestPath
+$prerelease = [string]$manifest.PrivateData.PSData.Prerelease
+$licenseProperty = $manifest.PrivateData.PSData.PSObject.Properties['LicenseUri']
+$licenseUri = if ($licenseProperty) {
+    [string]$licenseProperty.Value
+}
+else { '' }
+$metadataComplete = -not [string]::IsNullOrWhiteSpace($licenseUri)
+
+$preview = [pscustomobject]@{
+    Mode                      = if ($Execute) { 'Execute' } else { 'Preview' }
+    Repository                = $Repository
+    ModuleName                = [string]$manifest.Name
+    Version                   = [string]$manifest.Version
+    Prerelease                = $prerelease
+    PackagePath               = (Resolve-Path -LiteralPath $PackagePath).Path
+    ApiKeyEnvironmentVariable = $ApiKeyEnvironmentVariable
+    ApiKeyPresent             = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($ApiKeyEnvironmentVariable))
+    PublicMetadataComplete    = $metadataComplete
+    MissingPublicMetadata     = if ($metadataComplete) { @() } else { @('LicenseUri') }
+    PublicationAttempted      = $false
 }
 
-$appScriptPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.ps1'
-if (-not (Test-Path -LiteralPath $appScriptPath)) {
-    throw "Device Reboot Manager script not found: $appScriptPath"
+if (-not $Execute) {
+    return $preview
 }
 
-if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $candidateConfigPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
-    if (Test-Path -LiteralPath $candidateConfigPath) {
-        $ConfigPath = $candidateConfigPath
-    }
+if (-not [string]::IsNullOrWhiteSpace($prerelease) -and -not $AllowPrereleasePublication) {
+    throw "This is a prerelease package ($prerelease). Add -AllowPrereleasePublication after approval."
+}
+if (-not $metadataComplete) {
+    throw 'Public metadata is incomplete. Add the approved LicenseUri to the module manifest before publication.'
 }
 
-$taskArguments = @(
-    '-STA'
-    '-NoProfile'
-    '-WindowStyle'
-    'Hidden'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    (ConvertTo-QuotedArgument -Value $appScriptPath)
-)
-
-if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $taskArguments += @('-ConfigPath', (ConvertTo-QuotedArgument -Value $ConfigPath))
+$apiKey = [Environment]::GetEnvironmentVariable($ApiKeyEnvironmentVariable)
+if ([string]::IsNullOrWhiteSpace($apiKey)) {
+    throw "The API key environment variable is empty: $ApiKeyEnvironmentVariable"
+}
+if (-not (Get-Command Publish-PSResource -ErrorAction SilentlyContinue)) {
+    throw 'Publish-PSResource is unavailable. Install Microsoft.PowerShell.PSResourceGet first.'
 }
 
-$action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
-$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
-$repeatTrigger = New-ScheduledTaskTrigger `
-    -Once `
-    -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes $RepeatIntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
-
-$principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-
-Register-ScheduledTask `
-    -TaskPath $TaskPath `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger @($logonTrigger, $repeatTrigger) `
-    -Principal $principal `
-    -Settings $settings `
-    -Description 'Starts the SmartM365 Device Reboot Manager GUI in the interactive user session.' `
-    -Force | Out-Null
-
-if ($RunOnceNow) {
-    Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+$target = '{0} {1} to {2}' -f $manifest.Name,$manifest.Version,$Repository
+if ($PSCmdlet.ShouldProcess($target, 'Publish public PowerShell resource')) {
+    Publish-PSResource -Path $PackagePath -ApiKey $apiKey -Repository $Repository -ErrorAction Stop
+    $preview.PublicationAttempted = $true
 }
 
-Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
+$preview
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8r3a/hXeoj2OI
-# xdpN9AM9foXllpMUgpNGjdecKUUVyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzn5O2sd1q09Tz
+# GqFiiWmBlerTnSCmy1pHl7oFObEv4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +222,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID+pzFvXOOCrnBfx3fzvlrTeyvqAgypwPGrgL68QaAB3MA0GCSqG
-# SIb3DQEBAQUABIIBgKpwePvjTbK1UhNswEobEt8hFtmgcGAo56Z1mQ7rfgjcCqzu
-# B3UAZn3nA/ddkqFUOnD2IOTKQw2gfoeIYWaQPmnXTFPUnJ/emdci2dk+TMQM0+4l
-# GqsJE3UU5Z7nL/Bz+C8GLJVlWBUDLviojiz6UBjta3kY8cznwkPVuxT1RE7KnPrN
-# 8kZzQ5kItctQlQdtZZ4Zh0Dj+aUM5qP/gdP6LWnRKxxwTRk5ZtkRg/WOeZyZSYe1
-# 9FV6+GOl9ABi41AW2WGM4ogyJFk+S/zIXRtu9ZJGm9DgLl8GrVSEbgBhzL6azNhg
-# p9euCaNwRSUnebG5qgiGFDQwWzf5C3n+rHRi1fV3Mhg7TtBMdN4/O1AkopYOFGuo
-# M8zgjo2f52ouduVe+2j4SEJJmhzr7Qcq7nOC907nsRzeQbSeDyWGuY7u/x5gvgS1
-# L9CcChjyvd6xFy8C3/S6+zPVi1/5K0fEmAP/UJib5u9EeycraLfHW3RxkrKs7F4E
-# bb35GpawY1jJdSr7QaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDFyzflm/aZQ7NNcL832SE+EHRp7AZ1cHKkjHor8dVhDMA0GCSqG
+# SIb3DQEBAQUABIIBgHu7MYUPxKCbsDEKzJSLP2QVrTh11X+pUrp0p19scKdLP+eJ
+# dI3+oDrH4xxZB7rLs6DevJWe1rdYwiAPBliSTf+dU1gqsKy6AjEOzO5IYYK62wlc
+# z5EKG7vmU8lO9xiV8SM2pXtNNkPT8meatIr+Xg4ZOeqOP1yxwTLI4V0cIb50kXPO
+# YdxmlKtgjv/QISuFUSHt6IEQr4BmRRnQWxya8kDsGaw/2x6+Jf9Jx64T0SYrqRi7
+# 69zN5VhClItUAaFMocCQSRarTo+mM6v/aCAbaY++d/oHHR6CDyx1rjEWGaqXEhHO
+# dKw3pFiWWBMAsjHkyBPOjSwgKOX8JnqrryaVt9vf7zTH5h6wf64jpE+rJO661BZm
+# ev95Jh8pWkZCFtlml+Vlb5dMAOm+U21iD6H7rp5ycKhmR+v/P795+LNEWj7a5Pe8
+# k/4BllP12T9aWxxJRSEuInaBb6LBtNhaH8HyTiPws7m/uu5ZqznMvjkcZt/3aETP
+# XHBT8LhGdPA0lP5N7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTU0
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDQZo1stAGCPyM9HMQXchDfCkabybRJGOzqsdm0
-# OJeKhTANBgkqhkiG9w0BAQEFAASCAgCfN6waatotxB5LC/+0Wvb5UxjBqhJimRx+
-# usSI8jrR3D1rDycKR4t1SuwLHnJrEiZI1NUwJ1O+rpZrTsiaXSodNAYh8i3PGLxD
-# cMrbKY7eb5Il6wDw2flENBcoUrMvq4NU8zwpxTba47vWviZ5WZpu6b+nGQB9Eqhb
-# rOh2eqPJEKAMHcHuv1KhtqNNXdBG4lBj2a7uRaxgjxfzbRBYU53czTLI3THMQSNk
-# vNjClhWY+Vl+iCDXaAfxsiTP3kasFeFq4t67fUqisYXVYmV+6G+tI1AvvFBHEP0R
-# BdYReTMSQwrW/kYL2WLlOxJD+rGvH0IPEmsMqoCLNMlx6u29X1Jk1CvMvD93zz/d
-# RDL2bEcAI8RSfHsvuQy+B5zvwsCFS8e/mOHk+YOgMFpdqadmJD8l9XyR878UWOik
-# GPOq5l45OpkRv0ukRFR2hPOwRUq49pHnNQUbKyIUlglQ8QU6EK4K6mEs03ZFiYXI
-# a311WW35oXPNv+hloPrCZcu+P4Z+cjsTggHVrdn3YNR+Tzlc9mDensWQlZJWrGEN
-# pzURpRFytdVqRJzcx//eCEWn/llIsCJGkOlKETdF6Zl4X2jmXP73vutAI3m2WP8U
-# GblgMsV7/XBwAIpAYkIh3OZ7MetngG+urhNtMUA9VaRM9wOv6twNn1tIp64VTK8+
-# Ft8mDl2Ctw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTEx
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCQgsG/hwKXY3tbsPkcnkSYTRpvpdzxoNPfrG6F
+# iV/5VTANBgkqhkiG9w0BAQEFAASCAgDBv0CA9Jh5hGQPoAp7hyNcdOMtoh5NZ9FV
+# rqYysSzW/2P8GZ496xljtKr2sZcC73rwFyR6R2WGEuh3ytKqji8TzOif+XrvTrek
+# qPdipii6iJCxKMQFoXzTRpU9bpLfqOSfLSX3lpa+GwQe4aXc2QZZtxH/R8ZJvTIZ
+# nxO9GeRTPo7IBTbJLDXFvffah6vscsugt//fZQhEt7H+6tAApFvhuUv54xp402Ck
+# W91rHIdc8m6InS2dA8Ksp3BDKqfpvNHejZ/r0AlSLyFZckagVC82YfQ5ZMoLvE3V
+# 8sNu5fMB1E2VJujklehXeUbGJpViDqtawxGMVJ4DjWX5z8ngNqS1ICYdaT+1t5Ta
+# t3YQIcWLB+EDvIQq5rcxUw7HVhoOHEYgdu97ZPpB5gcxbF3MlF4Q8JNmvgQW/nQ0
+# 6vGJiS61gj8KT8OpxkLDc1exayTIwdPuajr9svi4avf3a/CS5Unn0Yj9wPbzkapn
+# In/CotXuYXVH/cwh9ru7TRyR5ILKoBLOg44/Jx99ezv9Kcl2apTegrInMufkr16H
+# vecBNBx4Ed39Ux2aIIJQrTFmZbPa54NL8vmij1HEAw7ws65VKjqvKu4dt6rp9k7R
+# YY5I+vuA8IlqBD2pQCT8SOnSjsP1Uj35xgtjJvwErsykycVZTnnnlnlHeaBuCjE8
+# TgHp5TcaKg==
 # SIG # End signature block

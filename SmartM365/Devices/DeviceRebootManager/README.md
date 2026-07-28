@@ -41,7 +41,10 @@ At each launch, the current `SmartM365-DeviceRebootManager.log` is archived to a
 
 ## Intune Win32 Deployment
 
-Package the whole `DeviceRebootManager` folder as an Intune Win32 app. The install script copies the runtime files to:
+Build the clean allow-listed package, then use the returned `IntuneSourcePath`
+(`...\SmartM365.DeviceRebootManager\0.1.0\Runtime`) as the Intune Win32 source.
+Do not package the whole working folder because it can contain private runtime
+configuration. The install script copies the runtime files to:
 
 ```text
 C:\ProgramData\SmartM365\DeviceRebootManager
@@ -65,11 +68,25 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-Devic
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-Uninstall.ps1
 ```
 
-Use the detection script as a custom detection rule:
+Use `Deploy\SmartM365-DeviceRebootManager-Detection.ps1` directly as the
+Intune custom detection script. Its default expected version is
+`0.1.0-preview4`; update that value for every new Intune package:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-Detection.ps1
 ```
+
+The Intune installer removes the optional
+`\SmartM365\Device Reboot Manager Update` Gallery task, records the exact
+installed version and source, and preserves the existing runtime configuration
+during an in-place upgrade. The detection rule returns success only when the
+expected version, metadata, GUI files and GUI task are present and the Gallery
+updater is absent.
+
+Publish each new version as a new Intune Win32 app, configure supersedence to
+replace the previous version, and explicitly assign the new app. Intune then
+controls rollout, retry, reporting and rollback; no local automatic-update task
+is required.
 
 The install script creates `SmartM365-DeviceRebootManager-GUI.config.json` from the committed template when no runtime config exists. To deploy a custom config, include a JSON file in the package and pass it with `-ConfigSourcePath`.
 
@@ -79,11 +96,137 @@ Example:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-Install.ps1 -ConfigSourcePath .\SmartM365-DeviceRebootManager-GUI.config.json -RepeatIntervalMinutes 120
 ```
 
+### Interactive Intune publication
+
+`Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1` prepares an
+administrator-controlled publication with delegated interactive Microsoft Graph
+authentication. Preview is the default: it validates the package, detection
+version and signer without connecting to the tenant or changing Intune.
+
+Preview the publication and proposed pilot group:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass `
+    -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0-preview4.intunewin
+```
+
+Publish the app, create or reuse the proposed assigned security group, and
+assign the app as `Required` only to that pilot group:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass `
+    -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0-preview4.intunewin `
+    -TenantId <tenant-id> `
+    -CreatePilotGroup `
+    -AssignPilotGroup `
+    -Execute
+```
+
+The proposed group is
+`GG-INTUNE-SmartM365-DeviceRebootManager-Pilot`. Use `-PilotGroupId` to
+target an existing security group instead. The required delegated scopes are
+`DeviceManagementApps.ReadWrite.All` and `Group.ReadWrite.All`; tenant consent
+and an administrator account with matching Intune/Entra permissions are still
+required.
+
+The script creates a version-specific Intune app, embeds the signed detection
+script, uploads and commits the encrypted content, and creates the pilot
+assignment individually through Graph. It does not enable the local Gallery
+updater and does not replace other app assignments.
+
 To recreate only the scheduled task on an already installed device:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1 -RepeatIntervalMinutes 240
 ```
+
+## PowerShell Gallery pilot
+
+The local pilot package is `SmartM365.DeviceRebootManager` version
+`0.1.0-preview4`. It is not published to PowerShell Gallery yet.
+
+Build and validate the package locally:
+
+```powershell
+.\PowerShellGallery\SmartM365-Build-DeviceRebootManagerGalleryPackage.ps1 -Force
+```
+
+Preview publication without sending anything to PowerShell Gallery:
+
+```powershell
+.\PowerShellGallery\SmartM365-Publish-DeviceRebootManagerGalleryPackage.ps1 -ForceBuild
+```
+
+Public publication remains blocked until the package name and license are
+approved and `LicenseUri` is added to the manifest. After approval, the API key
+must be supplied through `PSGALLERY_API_KEY`; it must never be written in a
+script or committed:
+
+```powershell
+$env:PSGALLERY_API_KEY = '<temporary-api-key>'
+.\PowerShellGallery\SmartM365-Publish-DeviceRebootManagerGalleryPackage.ps1 `
+    -ForceBuild `
+    -Execute `
+    -AllowPrereleasePublication
+```
+
+Once the package is published, an elevated Windows PowerShell session can
+install the preview and deploy the app:
+
+```powershell
+Install-Module SmartM365.DeviceRebootManager -Repository PSGallery -Scope AllUsers -AllowPrerelease -Force
+Import-Module SmartM365.DeviceRebootManager
+Install-SmartM365DeviceRebootManager
+```
+
+Automatic updates are disabled by default. A standard installation does not
+create an update task. Enable them explicitly when required:
+
+```powershell
+Install-SmartM365DeviceRebootManager -EnableAutomaticUpdate $true
+```
+
+When enabled, the deployment registers
+`\SmartM365\Device Reboot Manager Update` under `SYSTEM`. Every 24 hours, it
+checks PowerShell Gallery, validates every packaged PowerShell file against the
+pinned WorkplaceCloudHub signer, preserves the local runtime configuration,
+and redeploys the runtime.
+
+Operational commands:
+
+```powershell
+Get-SmartM365DeviceRebootManager
+Update-SmartM365DeviceRebootManager
+Uninstall-SmartM365DeviceRebootManager
+```
+
+### Clean VM validation bundle
+
+Build a transferable ZIP without installing or publishing anything:
+
+```powershell
+.\PowerShellGallery\SmartM365-New-DeviceRebootManagerGalleryVmBundle.ps1 -Force
+```
+
+After extracting the ZIP on an isolated VM, preview the validation:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1
+```
+
+Run the installation, opt-in, opt-out, configuration-preservation, and task
+checks from an elevated Windows PowerShell session:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1 -Execute -TrustSignerCertificate
+```
+
+`-TrustSignerCertificate` is intended only for the isolated pilot VM while the
+package uses the current self-signed WorkplaceCloudHub certificate. Add
+`-CleanupAfterTest` to remove the product and the certificate trust entries
+created by the validation.
 
 ## Examples
 

@@ -2,104 +2,202 @@
 
 <#
 .SYNOPSIS
-    Creates the SmartM365 Device Reboot Manager scheduled task.
+Builds the local PowerShell Gallery package for SmartM365 Device Reboot Manager.
 
 .DESCRIPTION
-    Registers a user-interactive scheduled task that starts the WPF GUI at user
-    logon and then regularly while a user session is available. This script is
-    intended for Intune Win32 deployments running as SYSTEM.
+Creates a clean module folder from an explicit allow-list, validates PowerShell
+syntax and the pinned WorkplaceCloudHub Authenticode signer, and never copies
+local runtime configuration or LOCAL_MEMORY.md.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
-    [string]$TaskPath = '\SmartM365\',
-    [string]$TaskName = 'Device Reboot Manager',
-    [int]$RepeatIntervalMinutes = 240,
-    [string]$PowerShellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe",
-    [string]$ConfigPath = '',
-    [switch]$RunOnceNow
+    [string]$SourceRoot = (Split-Path -Path $PSScriptRoot -Parent),
+    [string]$OutputRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365\PowerShellGallery'),
+    [string]$ExpectedSignerThumbprint = 'D70ECB7B00377EBFB76B304C08DFC6620584E114',
+    [switch]$Force,
+    [switch]$SkipAuthenticodeValidation
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function ConvertTo-QuotedArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-    return ('"{0}"' -f ($Value -replace '"', '\"'))
+function Get-NormalizedThumbprint {
+    param([string]$Value)
+    return ([string]$Value).Replace(' ', '').ToUpperInvariant()
 }
 
-if ($RepeatIntervalMinutes -lt 15) {
-    throw 'RepeatIntervalMinutes must be at least 15.'
-}
+function Assert-SafeChildPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Child
+    )
 
-if (-not (Test-Path -LiteralPath $PowerShellPath)) {
-    $PowerShellPath = 'powershell.exe'
-}
-
-$appScriptPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.ps1'
-if (-not (Test-Path -LiteralPath $appScriptPath)) {
-    throw "Device Reboot Manager script not found: $appScriptPath"
-}
-
-if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $candidateConfigPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
-    if (Test-Path -LiteralPath $candidateConfigPath) {
-        $ConfigPath = $candidateConfigPath
+    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $resolvedChild = [IO.Path]::GetFullPath($Child).TrimEnd('\', '/')
+    $prefix = $resolvedRoot + [IO.Path]::DirectorySeparatorChar
+    if ($resolvedChild -eq $resolvedRoot -or -not $resolvedChild.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe build target outside OutputRoot: $resolvedChild"
     }
 }
 
-$taskArguments = @(
-    '-STA'
-    '-NoProfile'
-    '-WindowStyle'
-    'Hidden'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    (ConvertTo-QuotedArgument -Value $appScriptPath)
+function Assert-PowerShellSyntax {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $parseErrors = $null
+    [void][Management.Automation.PSParser]::Tokenize(
+        (Get-Content -LiteralPath $Path -Raw),
+        [ref]$parseErrors
+    )
+    if ($parseErrors.Count -gt 0) {
+        $messages = $parseErrors | ForEach-Object { $_.Message }
+        throw ("PowerShell syntax validation failed for {0}: {1}" -f $Path,($messages -join '; '))
+    }
+}
+
+function Assert-PinnedSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $actualThumbprint = if ($signature.SignerCertificate) {
+        Get-NormalizedThumbprint $signature.SignerCertificate.Thumbprint
+    }
+    else {
+        ''
+    }
+
+    if ($signature.Status -ne 'Valid' -or $actualThumbprint -ne (Get-NormalizedThumbprint $Thumbprint)) {
+        throw ("Authenticode validation failed: file={0}; status={1}; signer={2}" -f $Path,$signature.Status,$actualThumbprint)
+    }
+}
+
+$moduleTemplateRoot = Join-Path -Path $PSScriptRoot -ChildPath 'Module'
+$manifestSourcePath = Join-Path -Path $moduleTemplateRoot -ChildPath 'SmartM365.DeviceRebootManager.psd1'
+if (-not (Test-Path -LiteralPath $manifestSourcePath -PathType Leaf)) {
+    throw "Module manifest not found: $manifestSourcePath"
+}
+
+$manifest = Test-ModuleManifest -Path $manifestSourcePath
+$moduleName = [string]$manifest.Name
+$moduleVersion = [string]$manifest.Version
+$prerelease = [string]$manifest.PrivateData.PSData.Prerelease
+$packageVersion = if ([string]::IsNullOrWhiteSpace($prerelease)) {
+    $moduleVersion
+}
+else {
+    '{0}-{1}' -f $moduleVersion,$prerelease
+}
+
+$versionManifestSourcePath = Join-Path -Path $SourceRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json'
+if (-not (Test-Path -LiteralPath $versionManifestSourcePath -PathType Leaf)) {
+    throw "Package version manifest not found: $versionManifestSourcePath"
+}
+$versionManifest = Get-Content -LiteralPath $versionManifestSourcePath -Raw | ConvertFrom-Json
+if ([int]$versionManifest.SchemaVersion -ne 1 -or [string]$versionManifest.PackageVersion -ne $packageVersion) {
+    throw ("Package version mismatch: manifest={0}; module={1}" -f $versionManifest.PackageVersion,$packageVersion)
+}
+
+$packagePath = Join-Path -Path (Join-Path -Path $OutputRoot -ChildPath $moduleName) -ChildPath $moduleVersion
+Assert-SafeChildPath -Root $OutputRoot -Child $packagePath
+
+if (Test-Path -LiteralPath $packagePath) {
+    if (-not $Force) {
+        throw "Build target already exists. Use -Force to replace it: $packagePath"
+    }
+    Remove-Item -LiteralPath $packagePath -Recurse -Force
+}
+
+New-Item -ItemType Directory -Path $packagePath -Force | Out-Null
+
+$moduleFiles = @(
+    'SmartM365.DeviceRebootManager.psd1'
+    'SmartM365.DeviceRebootManager.psm1'
+    'Tools\SmartM365-DeviceRebootManager-GalleryUpdate.ps1'
 )
 
-if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $taskArguments += @('-ConfigPath', (ConvertTo-QuotedArgument -Value $ConfigPath))
+$runtimeFiles = @(
+    'SmartM365-DeviceRebootManager.version.json'
+    'SmartM365-DeviceRebootManager-GUI.ps1'
+    'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+    'SmartM365-DeviceRebootManager-GUI.config.json.template'
+    'SmartM365.GuiSplash.ps1'
+    'WorkplaceCloudHub.ico'
+    'WorkplaceCloudHub-lockup-WPF.png'
+    'Start-SmartM365-DeviceRebootManager-GUI.cmd'
+    'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+)
+
+$deployFiles = @(
+    'SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
+    'SmartM365-DeviceRebootManager-Detection.ps1'
+    'SmartM365-DeviceRebootManager-Install.ps1'
+    'SmartM365-DeviceRebootManager-Uninstall.ps1'
+)
+
+foreach ($relativePath in $moduleFiles) {
+    $sourcePath = Join-Path -Path $moduleTemplateRoot -ChildPath $relativePath
+    $destinationPath = Join-Path -Path $packagePath -ChildPath $relativePath
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Required module file not found: $sourcePath"
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Path $destinationPath -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
 }
 
-$action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
-$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
-$repeatTrigger = New-ScheduledTaskTrigger `
-    -Once `
-    -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes $RepeatIntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
-
-$principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-
-Register-ScheduledTask `
-    -TaskPath $TaskPath `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger @($logonTrigger, $repeatTrigger) `
-    -Principal $principal `
-    -Settings $settings `
-    -Description 'Starts the SmartM365 Device Reboot Manager GUI in the interactive user session.' `
-    -Force | Out-Null
-
-if ($RunOnceNow) {
-    Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+foreach ($relativePath in $runtimeFiles) {
+    $sourcePath = Join-Path -Path $SourceRoot -ChildPath $relativePath
+    $destinationPath = Join-Path -Path (Join-Path $packagePath 'Runtime') -ChildPath $relativePath
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Required runtime file not found: $sourcePath"
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Path $destinationPath -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
 }
 
-Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
+foreach ($relativePath in $deployFiles) {
+    $sourcePath = Join-Path -Path (Join-Path $SourceRoot 'Deploy') -ChildPath $relativePath
+    $destinationPath = Join-Path -Path (Join-Path $packagePath 'Runtime\Deploy') -ChildPath $relativePath
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Required deployment file not found: $sourcePath"
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Path $destinationPath -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+}
+
+$packagedFiles = @(Get-ChildItem -LiteralPath $packagePath -Recurse -File)
+$powerShellFiles = @($packagedFiles | Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') })
+foreach ($file in $powerShellFiles) {
+    Assert-PowerShellSyntax -Path $file.FullName
+    if (-not $SkipAuthenticodeValidation) {
+        Assert-PinnedSignature -Path $file.FullName -Thumbprint $ExpectedSignerThumbprint
+    }
+}
+
+$builtManifestPath = Join-Path -Path $packagePath -ChildPath 'SmartM365.DeviceRebootManager.psd1'
+[void](Test-ModuleManifest -Path $builtManifestPath)
+
+[pscustomobject]@{
+    ModuleName               = $moduleName
+    Version                  = $moduleVersion
+    Prerelease               = $prerelease
+    PackageVersion           = $packageVersion
+    PackagePath              = $packagePath
+    IntuneSourcePath         = Join-Path -Path $packagePath -ChildPath 'Runtime'
+    FileCount                = $packagedFiles.Count
+    PowerShellFileCount      = $powerShellFiles.Count
+    SignaturesValidated      = (-not $SkipAuthenticodeValidation)
+    ExpectedSignerThumbprint = Get-NormalizedThumbprint $ExpectedSignerThumbprint
+    Ready                    = $true
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8r3a/hXeoj2OI
-# xdpN9AM9foXllpMUgpNGjdecKUUVyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7rY+rolsriUAT
+# 8J3mcxTx/J6mfseth9C8otB1ZJVmC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +330,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID+pzFvXOOCrnBfx3fzvlrTeyvqAgypwPGrgL68QaAB3MA0GCSqG
-# SIb3DQEBAQUABIIBgKpwePvjTbK1UhNswEobEt8hFtmgcGAo56Z1mQ7rfgjcCqzu
-# B3UAZn3nA/ddkqFUOnD2IOTKQw2gfoeIYWaQPmnXTFPUnJ/emdci2dk+TMQM0+4l
-# GqsJE3UU5Z7nL/Bz+C8GLJVlWBUDLviojiz6UBjta3kY8cznwkPVuxT1RE7KnPrN
-# 8kZzQ5kItctQlQdtZZ4Zh0Dj+aUM5qP/gdP6LWnRKxxwTRk5ZtkRg/WOeZyZSYe1
-# 9FV6+GOl9ABi41AW2WGM4ogyJFk+S/zIXRtu9ZJGm9DgLl8GrVSEbgBhzL6azNhg
-# p9euCaNwRSUnebG5qgiGFDQwWzf5C3n+rHRi1fV3Mhg7TtBMdN4/O1AkopYOFGuo
-# M8zgjo2f52ouduVe+2j4SEJJmhzr7Qcq7nOC907nsRzeQbSeDyWGuY7u/x5gvgS1
-# L9CcChjyvd6xFy8C3/S6+zPVi1/5K0fEmAP/UJib5u9EeycraLfHW3RxkrKs7F4E
-# bb35GpawY1jJdSr7QaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBg9rviOpOAiPP+Jpg3Ek31Nsy0MYyclaIlbJFCBvEplMA0GCSqG
+# SIb3DQEBAQUABIIBgBb9PCdrsJOI4T5wcCK6DT1UT2cismvxQ9NZcjQAkkpvRY1I
+# m79djaoyBMWqcZfsMrjCTbtAG/nu+r7dFgpweHJyuATpZiiQNw3EygcOfoWxtV5l
+# AvliX7boZpqsQlJq9He8RhZIcWcetM4CivIhJJvKPJdZeo7cVhu4joR/H6IIUvfl
+# cw2egG6jlTOQMdeCqObTIC6nAdp2vJazxtvYqn5WN/8NW4Q53NP4yoe7Fyh/he83
+# kSu1gfaWgCaMNgIlMMfQaakJXmK+TfgzeVD92l9vZ+jwM4gLt1cqwx0T4RzQ2b/l
+# 32tDTJxpkPcbNONcyOZdNO6tVOIWtnFN73V/fPfLulcxqPgv0Qv4hyom9+Lrchhc
+# /lWHjWHZdgUie8bOFo18FQ8vqirZjIQmoPWxNWT8FqyY+nAqueNjuf5k8fMQL/9M
+# KcVMjVyshSBjzTcqT69N7AHY2O1DHLTjPt43Wmw6gyLE9mKXTYLl+i1MU0IL9742
+# gZRA0sXpsb0NmQEOdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTU0
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDQZo1stAGCPyM9HMQXchDfCkabybRJGOzqsdm0
-# OJeKhTANBgkqhkiG9w0BAQEFAASCAgCfN6waatotxB5LC/+0Wvb5UxjBqhJimRx+
-# usSI8jrR3D1rDycKR4t1SuwLHnJrEiZI1NUwJ1O+rpZrTsiaXSodNAYh8i3PGLxD
-# cMrbKY7eb5Il6wDw2flENBcoUrMvq4NU8zwpxTba47vWviZ5WZpu6b+nGQB9Eqhb
-# rOh2eqPJEKAMHcHuv1KhtqNNXdBG4lBj2a7uRaxgjxfzbRBYU53czTLI3THMQSNk
-# vNjClhWY+Vl+iCDXaAfxsiTP3kasFeFq4t67fUqisYXVYmV+6G+tI1AvvFBHEP0R
-# BdYReTMSQwrW/kYL2WLlOxJD+rGvH0IPEmsMqoCLNMlx6u29X1Jk1CvMvD93zz/d
-# RDL2bEcAI8RSfHsvuQy+B5zvwsCFS8e/mOHk+YOgMFpdqadmJD8l9XyR878UWOik
-# GPOq5l45OpkRv0ukRFR2hPOwRUq49pHnNQUbKyIUlglQ8QU6EK4K6mEs03ZFiYXI
-# a311WW35oXPNv+hloPrCZcu+P4Z+cjsTggHVrdn3YNR+Tzlc9mDensWQlZJWrGEN
-# pzURpRFytdVqRJzcx//eCEWn/llIsCJGkOlKETdF6Zl4X2jmXP73vutAI3m2WP8U
-# GblgMsV7/XBwAIpAYkIh3OZ7MetngG+urhNtMUA9VaRM9wOv6twNn1tIp64VTK8+
-# Ft8mDl2Ctw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCi/ga8Mq8XDW+bdsh9FHscJCIGBz50o/KJkJGv
+# fPstoDANBgkqhkiG9w0BAQEFAASCAgC/LhELpaSBN+HIh5pwoOc1wZmvZuRhnTHk
+# KT8jCVqPwTRLZ1FlcMfTebs3kULfccnuQ4PQ+UyLPrNtS/ubojvf9keEtOe4QoPO
+# dN7Po7mdl3SzJ2YL8XIQWlOilEJ5GX12/wk4+zd/Q4QOES9MJmMOSIWyZu/Qr/f4
+# 9t8zpe6bZe+fCfJi3exfFyEHPHXjuf+wxjtd9EilK3FjqhZ6TUDTdtrVc1bTdLH7
+# d1hD+m1aUT6ktgMJrYEaQ+zlYCyN9dr2RNJUOE4Kiw2+eGciesmpyVlkkIBr59eA
+# hcvuCF+jZ7We/ZiexZDs3suPoNskCeJWZ2LTNtRyShLVS5qLDdpkCFYF9pdG9y6R
+# V5WlOzeh0PtKzHrxJ2AntaQ0lUErVrtPbig9l5TBiQJkHng90ajLxwLWkbMxuArm
+# lgcCE9nLBpXSSUIBIF3t363p+rifT/Q1JDlrZiSiuyCFexLvurGU4CxlVLvcr6tc
+# 3qdjLMaHJJxUm/n2jGv3dO19Acg+XiBBwKAKSAF1PZ07HPOdqG0CAL75VtR4McUr
+# F4cj8EabfeMtuHHoUFkC7aMtjjgCOU2nmVOzbhYu5c+OGq8jQGo+vRzSCkbeVqZ+
+# yFc0dZI5ogf3U3FXN5Hu4wajDGLe0OvY2aASGCx/2zaJv2UvoJEViT/6wXIZxyR9
+# MC87UHMAOw==
 # SIG # End signature block

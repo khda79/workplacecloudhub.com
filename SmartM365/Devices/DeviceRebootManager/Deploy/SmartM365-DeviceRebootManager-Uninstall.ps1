@@ -10,6 +10,8 @@ param(
     [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
     [string]$TaskPath = '\SmartM365\',
     [string]$TaskName = 'Device Reboot Manager',
+    [string]$UpdateTaskPath = '\SmartM365\',
+    [string]$UpdateTaskName = 'Device Reboot Manager Update',
     [switch]$KeepConfig
 )
 
@@ -23,6 +25,16 @@ try {
 }
 catch {
     Write-Warning ("Unable to remove scheduled task. {0}" -f $_.Exception.Message)
+}
+
+try {
+    $updateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
+    if ($null -ne $updateTask) {
+        Unregister-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -Confirm:$false
+    }
+}
+catch {
+    Write-Warning ("Unable to remove PowerShell Gallery update task. {0}" -f $_.Exception.Message)
 }
 
 if (Test-Path -LiteralPath $InstallPath) {
@@ -42,8 +54,8 @@ Write-Output 'SmartM365 Device Reboot Manager uninstalled.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClP6rvNAHvK4Nz
-# hLYLglCkZHt+cmtzsE+7nY8LK9Ri1KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsEEYoxxin/Hyf
+# 794o2Jp/4riwgVKCqg1RnjfN9+nsZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -176,31 +188,31 @@ Write-Output 'SmartM365 Device Reboot Manager uninstalled.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAPz2zwJbsOFkzhddH8rnGjjw+/kCq+wbSGzXofq6tJ8MA0GCSqG
-# SIb3DQEBAQUABIIBgFJJQY4yS3I6kvFWXyj4py5gwJzPEDimgzIWMQvSlSakq3Fn
-# kpX4mDUwxBC0oqKQV7DWM2CBznuSna6kc0jrLNRcKHpobFgkMgCpWBZ0j2Jp3qrD
-# 9/cVLRtLUj3nOsRdbgCJeB9hUzvFDT4QutAtqaLt7oOvngV5GymuR4VctA0w9IG9
-# 8/e15BupqsdksOUS9RanxXmdNZSlhIB+NI6tWw5oaEwx2mzkDa8iXUlj4N/PZ59X
-# bsJwl/hpRQRmMELpffAX0lgNjdweh+o+y2prm6TkJWpHnG4szWHKPJVnwIgIa1Zd
-# MYZmIY1LRTp3HQvQrxIycKSNNA337N8oueHqasMOhSA1WxBMNzIt8rW1baGjeZiq
-# u5ndpS1T3Uc88H6E9Q1AVH2cAeOBZJXZTkO3XRZHGYI8TT7KpRrvkUOhgNjpa1U0
-# 3Kg2Y1dxxU7I6FfGanrceN3FdghHkVaDPsm6RMZG7p2MgJzbC/cpXqHfWLfq5Zgw
-# p9TpU2GMLfl+UV0mx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH/6Nb/e5eMJLAGXgiTFblv2kDQkpbmZoyOD5a7/LnOLMA0GCSqG
+# SIb3DQEBAQUABIIBgItcX6W/CUsdoqD7XlkRu0dsdvh3gVqfJtbOHWmg7Tt0tH1Q
+# pozREUU9FKLuMkZVOIJttKyP9muflk1YTTCgFk5wq+ey68WkKM3sqwJKc595Jlr5
+# VGNvI/QRCpkbG3QnRTmIMX+lej/1OA/R3JH7XQcTqEwCNvDSRiwEDSNHhlfqfhli
+# ykZC3Wc9auIA1vJKgItsr2/OUg3VhH/cFF/knK0eeF/MpH+cAT8LlZEy5Od7/8nn
+# qvG5PKS1hRo5hYlBRxRtc92J6WzBVM7IyiZJYaneT8sFAIP2DRqdsKbrUFLXMTIU
+# Wg10y3Y9rPElSDy+3+Aww8vTVvCnO3gcLjFUJV/BX9nL+K8lQBcPGfq6vkE7saEI
+# 0USFVCfbt1gQoVvmT86r5HMYdgZE/E75CnKdY/lWY0htA7amOHLTHSzVMLjkQ66w
+# 5yv3vm83EMxkjtjKWxV8gXZumqzuYykyJSgJt//Sj0pX3QS/lDShyV8c5GswcYnV
+# 570RfxYG8RSE6XrHlaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjdaMC8GCSqGSIb3DQEJBDEiBCAHfULQv1CXp5iymrI6/nBoWiCJiR3Or2/gYHcw
-# 7n6ITzANBgkqhkiG9w0BAQEFAASCAgCcieIyDz1vHp400UXdASAEQmFLq0fP8laa
-# GAWY53p5qQi/5nWJXOkH3BkCXoGbLL6H3Nxoz7qG7MEVLPnZ7MxDVjhxRsji/KZa
-# E6r0Yxm5HxI16WKTmFCRnrt1FlvKmODN9ZBLvrLw0tBvc8NJwueEKlJB6E/Kwi5H
-# FH9fRqND7dlfm+mMg9Bhs5oFJ5iYT2HTQRNd9AjSpN9F0CjKGAPmzxuHvTZqKvaf
-# OMXw9OX06tjyyOuNBQiV8flSc2tnGaDubE4MFzbiONVjPofEjqNLgdFKk78Z4xGB
-# smTWYuOjltzNFO87o+n6zkbwXmezqz2vwlo1gSeZ7ZAJyEauD0FEq5N4924L97RJ
-# 5Q3dLTLQcRjUxOuLSIAwr03US8Zod3XR3mUl5iQKmJtceKjBgmstzSX6G4c3fjXC
-# 8dOUAEbyhetyx9N4goLSM+GAhWNm4A1mWySkwNc6maBPtmh/kfWI6ow3X227n8JO
-# Sx0CA8moqnoZJnZ+yd7vc29mS6HoocpcLyutkdeUohAcldqR9NzILBt9dlVtKhvY
-# vxmS9hjl6soMDu6M6XoYibEtKBj/gGmLXULTms5KST0mCNAmvc3+8k2wHObiR7kW
-# 8shPpgKIdqzBuIihqU0zp62WVmue5Q7+LAzVraHAT7LU9dwsAWEmChla1RZRgYk3
-# oHcAR8hvxQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
+# MDZaMC8GCSqGSIb3DQEJBDEiBCA7G5pAeHXOxOydt13H4Xv8bPTLD9uU7UGWSbOD
+# 1C3wnDANBgkqhkiG9w0BAQEFAASCAgAevpIfuNEyVyBke9lwHcnyv3PJDdQvXFUz
+# N6OpbdTAZcO5zLY0uoKRtQf7rfs05AtqUliVDO3CQhtkXRz22Ur62Rx3C7O8gj0p
+# 57Znb03GFZIQB+EqSXUdASkRM49gbuHueTtjKlH5Vhho2+8LA0Ta0uvcjLou8G6d
+# OSJbiiTC1+9gDkjr8aXg3tFbzctBDCOFh2hM3/RLCDJRQrz6NFkWBH5FIKMhh52O
+# Qbtkrd1flAs2frJgoXzVA9z26wg2dPGq1azRfPE9gCZtFSB8Qv6BP9GjUQ0duzXs
+# AjYFlWtTvnh2mOd9nTKTpte7L6qEREj2F8d9uHaWU4jtEbsSGAVxazkxt+zbcnTz
+# aQ/F0vD0STOPE90RT/+hwLdV+V+FzITTptNglA6SMdQtpF8bEhXCkAw11gzxiHmQ
+# GTHaTZVEaE+Z3uxbJVs1tLUT+y1HoGvHS/KQHX7cpIGVHdaW4BYvp/htSolYbr72
+# MmUNwzrAZ7jIkgSGgUvQpp9daSswM2n1OlbBu6FauVANiDDxFayjOeBCxxpJCfOZ
+# L6da6D7ZZ7dxesWGkFB/pbAwAsK6noiC637aX/a66SwStTuoo3fdzgbdKf+0RcX9
+# +X7t+gEiJ1vHhefpBc1GKs2JAk3fcmr2S3pI8eUGipWjqxCBq8byu9vsao7IWkxE
+# K5VceAbMYA==
 # SIG # End signature block

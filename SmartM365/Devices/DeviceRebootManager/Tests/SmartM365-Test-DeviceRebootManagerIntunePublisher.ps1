@@ -1,105 +1,74 @@
-#Requires -Version 5.1
-
-<#
-.SYNOPSIS
-    Creates the SmartM365 Device Reboot Manager scheduled task.
-
-.DESCRIPTION
-    Registers a user-interactive scheduled task that starts the WPF GUI at user
-    logon and then regularly while a user session is available. This script is
-    intended for Intune Win32 deployments running as SYSTEM.
-#>
+#Requires -Version 7.2
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
-    [string]$TaskPath = '\SmartM365\',
-    [string]$TaskName = 'Device Reboot Manager',
-    [int]$RepeatIntervalMinutes = 240,
-    [string]$PowerShellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe",
-    [string]$ConfigPath = '',
-    [switch]$RunOnceNow
+    [Parameter(Mandatory = $true)]
+    [string]$IntuneWinPath
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function ConvertTo-QuotedArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-    return ('"{0}"' -f ($Value -replace '"', '\"'))
-}
-
-if ($RepeatIntervalMinutes -lt 15) {
-    throw 'RepeatIntervalMinutes must be at least 15.'
-}
-
-if (-not (Test-Path -LiteralPath $PowerShellPath)) {
-    $PowerShellPath = 'powershell.exe'
-}
-
-$appScriptPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.ps1'
-if (-not (Test-Path -LiteralPath $appScriptPath)) {
-    throw "Device Reboot Manager script not found: $appScriptPath"
-}
-
-if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $candidateConfigPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
-    if (Test-Path -LiteralPath $candidateConfigPath) {
-        $ConfigPath = $candidateConfigPath
+function Assert-True {
+    param(
+        [Parameter(Mandatory = $true)][bool]$Condition,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+    if (-not $Condition) {
+        throw "Assertion failed: $Message"
     }
 }
 
-$taskArguments = @(
-    '-STA'
-    '-NoProfile'
-    '-WindowStyle'
-    'Hidden'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    (ConvertTo-QuotedArgument -Value $appScriptPath)
-)
+$productRoot = Split-Path -Path $PSScriptRoot -Parent
+$publisherPath = Join-Path $productRoot 'Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1'
+$detectionPath = Join-Path $productRoot 'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
 
-if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $taskArguments += @('-ConfigPath', (ConvertTo-QuotedArgument -Value $ConfigPath))
+foreach ($path in @($publisherPath,$detectionPath,$IntuneWinPath)) {
+    Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "Required test file not found: $path"
 }
 
-$action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
-$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
-$repeatTrigger = New-ScheduledTaskTrigger `
-    -Once `
-    -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes $RepeatIntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
+$publisherText = Get-Content -LiteralPath $publisherPath -Raw
+Assert-True ($publisherText -match '\[switch\]\$Execute') 'Publisher must require explicit -Execute.'
+Assert-True ($publisherText -match '\[switch\]\$CreatePilotGroup') 'Pilot group creation switch is missing.'
+Assert-True ($publisherText -match '\[switch\]\$AssignPilotGroup') 'Pilot assignment switch is missing.'
+Assert-True ($publisherText -match 'DeviceManagementApps\.ReadWrite\.All') 'Required Intune delegated scope is missing.'
+Assert-True ($publisherText -match 'Group\.ReadWrite\.All') 'Required group delegated scope is missing.'
+Assert-True ($publisherText -match 'mobileApps/\$AppId/assignments') 'Publisher must create an individual assignment.'
+Assert-True ($publisherText -notmatch 'mobileApps/\$AppId/assign["'']') 'Publisher must not replace the full assignment set.'
 
-$principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+$preview = & $publisherPath `
+    -IntuneWinPath $IntuneWinPath `
+    -CreatePilotGroup `
+    -AssignPilotGroup
 
-Register-ScheduledTask `
-    -TaskPath $TaskPath `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger @($logonTrigger, $repeatTrigger) `
-    -Principal $principal `
-    -Settings $settings `
-    -Description 'Starts the SmartM365 Device Reboot Manager GUI in the interactive user session.' `
-    -Force | Out-Null
+Assert-True ($preview.Mode -eq 'Preview') 'Publisher did not remain in preview mode.'
+Assert-True (-not $preview.ChangesAttempted) 'Preview unexpectedly attempted tenant changes.'
+Assert-True $preview.InteractiveAuthentication 'Interactive authentication was not reported.'
+Assert-True $preview.PilotGroupCreationRequested 'Pilot group proposal was not reported.'
+Assert-True $preview.PilotAssignmentRequested 'Pilot assignment proposal was not reported.'
+Assert-True ($preview.PilotAssignmentIntent -eq 'required') 'Pilot assignment intent must be Required.'
+Assert-True ($preview.PackageVersion -eq '0.1.0-preview4') 'Unexpected package version.'
+Assert-True ($preview.RequiredDelegatedScopes -contains 'DeviceManagementApps.ReadWrite.All') 'Intune scope missing from preview.'
+Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') 'Group scope missing from preview.'
 
-if ($RunOnceNow) {
-    Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+[pscustomobject]@{
+    Result                       = 'PASS'
+    Mode                         = $preview.Mode
+    AppDisplayName               = $preview.AppDisplayName
+    PackageVersion               = $preview.PackageVersion
+    PilotGroupDisplayName        = $preview.PilotGroupDisplayName
+    PilotGroupCreationRequested  = $preview.PilotGroupCreationRequested
+    PilotAssignmentRequested     = $preview.PilotAssignmentRequested
+    PilotAssignmentIntent        = $preview.PilotAssignmentIntent
+    InteractiveAuthentication    = $preview.InteractiveAuthentication
+    ChangesAttempted             = $preview.ChangesAttempted
 }
-
-Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8r3a/hXeoj2OI
-# xdpN9AM9foXllpMUgpNGjdecKUUVyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQc1kZfIJk/egX
+# M5/cfRTRZzmevw4hUk2Ur/YMaGhMDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +201,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID+pzFvXOOCrnBfx3fzvlrTeyvqAgypwPGrgL68QaAB3MA0GCSqG
-# SIb3DQEBAQUABIIBgKpwePvjTbK1UhNswEobEt8hFtmgcGAo56Z1mQ7rfgjcCqzu
-# B3UAZn3nA/ddkqFUOnD2IOTKQw2gfoeIYWaQPmnXTFPUnJ/emdci2dk+TMQM0+4l
-# GqsJE3UU5Z7nL/Bz+C8GLJVlWBUDLviojiz6UBjta3kY8cznwkPVuxT1RE7KnPrN
-# 8kZzQ5kItctQlQdtZZ4Zh0Dj+aUM5qP/gdP6LWnRKxxwTRk5ZtkRg/WOeZyZSYe1
-# 9FV6+GOl9ABi41AW2WGM4ogyJFk+S/zIXRtu9ZJGm9DgLl8GrVSEbgBhzL6azNhg
-# p9euCaNwRSUnebG5qgiGFDQwWzf5C3n+rHRi1fV3Mhg7TtBMdN4/O1AkopYOFGuo
-# M8zgjo2f52ouduVe+2j4SEJJmhzr7Qcq7nOC907nsRzeQbSeDyWGuY7u/x5gvgS1
-# L9CcChjyvd6xFy8C3/S6+zPVi1/5K0fEmAP/UJib5u9EeycraLfHW3RxkrKs7F4E
-# bb35GpawY1jJdSr7QaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN4ZrJn0I+6IYCEEcSWgdjl+nAxheJ03zeHrJtqVbgIjMA0GCSqG
+# SIb3DQEBAQUABIIBgJcgZpMbxebVfKyQDr11EhYFAxiKz+/+58y1eu0vehKlurrT
+# c636yC40Z2iBzRsUExuXIz8s5uZX5SksD3sjJ7LTNo3Lt2bmUzdz3DNAeEQGuOGs
+# 7UNxCgWRcsqGm+InTFDpRZaJBt13heRoTcoHuPkERz9CPTVBxItENE0ebETh8yEo
+# tBzsXbn/AqngH+daVil0ozVEOf8Q1pobuHBUbyQE+eofmi61C5I9zezMpL7KjvA3
+# JO1eEnGygfXNFDKdSQ5S1cvkH3Fu1NB1DqPwJ6/Hlv2tTf02ci7ee976jW1qPlzQ
+# qoI7V557a/4/b8BC4OsV2VeBlaFqVO9otcLVJ5NvPZQPkpCHVHrx1HiHtJU86P3Q
+# 28XsWjny9uZawm205X2Oykngx6wQg620xaVOp2UqO3j84O+rpKTsnrsUWiac/HAy
+# MxDSatDl3+tAoZXjMRDzKAhaMOSyXFRWz++EEJmt4rOfE3h/sowSWQeP1cXIX1Gl
+# ZCJ+ob1inwKowzsKS6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTU0
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDQZo1stAGCPyM9HMQXchDfCkabybRJGOzqsdm0
-# OJeKhTANBgkqhkiG9w0BAQEFAASCAgCfN6waatotxB5LC/+0Wvb5UxjBqhJimRx+
-# usSI8jrR3D1rDycKR4t1SuwLHnJrEiZI1NUwJ1O+rpZrTsiaXSodNAYh8i3PGLxD
-# cMrbKY7eb5Il6wDw2flENBcoUrMvq4NU8zwpxTba47vWviZ5WZpu6b+nGQB9Eqhb
-# rOh2eqPJEKAMHcHuv1KhtqNNXdBG4lBj2a7uRaxgjxfzbRBYU53czTLI3THMQSNk
-# vNjClhWY+Vl+iCDXaAfxsiTP3kasFeFq4t67fUqisYXVYmV+6G+tI1AvvFBHEP0R
-# BdYReTMSQwrW/kYL2WLlOxJD+rGvH0IPEmsMqoCLNMlx6u29X1Jk1CvMvD93zz/d
-# RDL2bEcAI8RSfHsvuQy+B5zvwsCFS8e/mOHk+YOgMFpdqadmJD8l9XyR878UWOik
-# GPOq5l45OpkRv0ukRFR2hPOwRUq49pHnNQUbKyIUlglQ8QU6EK4K6mEs03ZFiYXI
-# a311WW35oXPNv+hloPrCZcu+P4Z+cjsTggHVrdn3YNR+Tzlc9mDensWQlZJWrGEN
-# pzURpRFytdVqRJzcx//eCEWn/llIsCJGkOlKETdF6Zl4X2jmXP73vutAI3m2WP8U
-# GblgMsV7/XBwAIpAYkIh3OZ7MetngG+urhNtMUA9VaRM9wOv6twNn1tIp64VTK8+
-# Ft8mDl2Ctw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjU3
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCNZng8ZUfjKKYQRw7GX0Jl8OZNzTFqrYm0axon
+# JychtDANBgkqhkiG9w0BAQEFAASCAgBlkQhRIHa/lw01MGM4CBWWQc8rCbUJ25u+
+# 0REuhRSRpkOEoUb5Df1v4socc93xEOo7rknllgFBA/4xPLXp8EGYhu+bcHi4IjUa
+# xc4kexK6dvyXkzIfDCZ0sAMgJ7c50ct1rbBfNSE3Y9JnjXbahj36hJowPqd6Ou6c
+# fS4af8EpvBVAvIxni11HGMDZQ1YO6hpe6RlHbTTRh5q2rX22c9BCrcHbhJuhl9kl
+# rWuN3nwhkAKDOU/iFU6UKJtlBUuy7u5/hz1qOTlxl8+wqcIbUtJ4QMz2rraBiwun
+# FP0Rkt60oFJjYI0xgRtAQyxKYKrGh8+uXGz/wX7cibkbNmUxnF+XssIs408BJcVk
+# ZiveQxwM8Uq96XaySl0o2RkAec0ireERjAM0tTadmGIAsRUu7ZCiB4ZCfkhl7AFE
+# coKxbUIyQDQohRS5dzRXrJUWE1VAzITOnX6tyKFrwcAFLABxOKpnWnqoo+1tT27v
+# uCaIokoa00Bx1xH1xqBNVg0+AHUxUQlh/zNJkBaxYsHzABx+HmmFoKLbYdoiufvq
+# qaFwvawEdMcbQp4fXqXrwgIaeJ/rKKgVohjGVGiFsqWpAuxx82QgMHKpH0AZ8V29
+# tBGYWLLfPtkv1UQzZhD+apjOMq3pGZf863UtZPSWNzrQw+gmYcnbHXvqAvD7NXTz
+# Hiwo00p+fw==
 # SIG # End signature block
