@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose an improvement or a new WorkplaceCloudHub capability.
+title: "[Feature]: "
+labels: []
+assignees: []
+body:
+  - type: input
+    id: project_path
+    attributes:
+      label: Project or target area
+      description: Identify the existing project or proposed repository area.
+      placeholder: SmartAzure/SmartInventory
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the operational problem and who is affected.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the expected behavior, inputs, outputs, and safety model.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: impact
+    attributes:
+      label: Technical and operational impact
+      description: Note permissions, authentication, compatibility, schema, or write-operation implications.
+    validations:
+      required: false
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to help implement or test this proposal?
+      options:
+        - Yes, I can help implement it
+        - Yes, I can help test it
+        - I can provide requirements or examples
+        - No
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: I removed secrets, tenant identifiers, and customer data.
+          required: true
+        - label: I agree to follow the repository Code of Conduct.
+          required: true
