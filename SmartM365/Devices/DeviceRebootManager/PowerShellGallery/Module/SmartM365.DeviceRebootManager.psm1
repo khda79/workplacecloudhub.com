@@ -1,107 +1,193 @@
-#Requires -Version 5.1
-
-<#
-.SYNOPSIS
-    Intune Win32 detection script for SmartM365 Device Reboot Manager.
-#>
-
-[CmdletBinding()]
-param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
-    [string]$TaskPath = '\SmartM365\',
-    [string]$TaskName = 'Device Reboot Manager',
-    [string]$ExpectedVersion = '0.1.0-preview4',
-    [string]$UpdateTaskPath = '\SmartM365\',
-    [string]$UpdateTaskName = 'Device Reboot Manager Update',
-    [bool]$RequireGalleryAutomaticUpdateDisabled = $true
-)
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$requiredFiles = @(
-    'SmartM365-DeviceRebootManager.version.json'
-    'SmartM365-DeviceRebootManager.installation.json'
-    'SmartM365-DeviceRebootManager-GUI.ps1'
-    'SmartM365-DeviceRebootManager-GUI.strings.psd1'
-    'SmartM365-DeviceRebootManager-GUI.config.json'
-    'SmartM365.GuiSplash.ps1'
-    'WorkplaceCloudHub.ico'
-    'WorkplaceCloudHub-lockup-WPF.png'
+$script:ModuleName = 'SmartM365.DeviceRebootManager'
+$script:GalleryUpdateScriptName = 'SmartM365-DeviceRebootManager-GalleryUpdate.ps1'
+
+function Get-SmartM365DeviceRebootManager {
+    [CmdletBinding()]
+    param(
+        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$TaskPath = '\SmartM365\',
+        [string]$TaskName = 'Device Reboot Manager',
+        [string]$UpdateTaskPath = '\SmartM365\',
+        [string]$UpdateTaskName = 'Device Reboot Manager Update'
+    )
+
+    $metadataPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager.installation.json'
+    $metadata = $null
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        try {
+            $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        }
+        catch {
+            Write-Warning ("Unable to read installation metadata. {0}" -f $_.Exception.Message)
+        }
+    }
+
+    $runtimeFiles = @(
+        'SmartM365-DeviceRebootManager.version.json'
+        'SmartM365-DeviceRebootManager.installation.json'
+        'SmartM365-DeviceRebootManager-GUI.ps1'
+        'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+        'SmartM365-DeviceRebootManager-GUI.config.json'
+        'SmartM365.GuiSplash.ps1'
+        'WorkplaceCloudHub.ico'
+        'WorkplaceCloudHub-lockup-WPF.png'
+    )
+    $missingFiles = @($runtimeFiles | Where-Object {
+        -not (Test-Path -LiteralPath (Join-Path -Path $InstallPath -ChildPath $_) -PathType Leaf)
+    })
+
+    $guiTask = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+    $updateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
+    $installedModules = @(Get-Module -ListAvailable -Name $script:ModuleName | Sort-Object Version -Descending)
+
+    [pscustomobject]@{
+        ProductName             = 'Smart Device Reboot Manager'
+        Installed               = ((Test-Path -LiteralPath $InstallPath -PathType Container) -and $missingFiles.Count -eq 0 -and $null -ne $guiTask)
+        InstallPath             = $InstallPath
+        DeployedPackageVersion  = if ($metadata) { [string]$metadata.PackageVersion } else { '' }
+        PackageSource           = if ($metadata) { [string]$metadata.PackageSource } else { '' }
+        InstalledModuleVersions = @($installedModules | ForEach-Object { [string]$_.Version })
+        MissingRuntimeFiles     = $missingFiles
+        GuiTaskRegistered       = ($null -ne $guiTask)
+        UpdateTaskRegistered    = ($null -ne $updateTask)
+        MetadataPath            = $metadataPath
+    }
+}
+
+function Install-SmartM365DeviceRebootManager {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$ConfigSourcePath = '',
+        [switch]$ForceConfig,
+        [switch]$SkipScheduledTask,
+        [string]$TaskPath = '\SmartM365\',
+        [string]$TaskName = 'Device Reboot Manager',
+        [ValidateRange(15, 10080)]
+        [int]$RepeatIntervalMinutes = 240,
+        [bool]$EnableAutomaticUpdate = $false,
+        [string]$UpdateTaskPath = '\SmartM365\',
+        [string]$UpdateTaskName = 'Device Reboot Manager Update',
+        [ValidateRange(1, 168)]
+        [int]$UpdateIntervalHours = 24,
+        [bool]$IncludePrerelease = $true
+    )
+
+    $toolPath = Join-Path -Path $PSScriptRoot -ChildPath ("Tools\{0}" -f $script:GalleryUpdateScriptName)
+    if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+        throw "Package deployment helper not found: $toolPath"
+    }
+
+    if ($PSCmdlet.ShouldProcess($InstallPath, 'Install SmartM365 Device Reboot Manager')) {
+        & $toolPath `
+            -ModuleName $script:ModuleName `
+            -InstallPath $InstallPath `
+            -ConfigSourcePath $ConfigSourcePath `
+            -ForceConfig:$ForceConfig `
+            -SkipScheduledTask:$SkipScheduledTask `
+            -TaskPath $TaskPath `
+            -TaskName $TaskName `
+            -RepeatIntervalMinutes $RepeatIntervalMinutes `
+            -EnableAutomaticUpdate:$EnableAutomaticUpdate `
+            -UpdateTaskPath $UpdateTaskPath `
+            -UpdateTaskName $UpdateTaskName `
+            -UpdateIntervalHours $UpdateIntervalHours `
+            -IncludePrerelease:$IncludePrerelease `
+            -SkipPackageUpdate
+    }
+}
+
+function Update-SmartM365DeviceRebootManager {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$TaskPath = '\SmartM365\',
+        [string]$TaskName = 'Device Reboot Manager',
+        [ValidateRange(15, 10080)]
+        [int]$RepeatIntervalMinutes = 240,
+        [Nullable[bool]]$EnableAutomaticUpdate = $null,
+        [string]$UpdateTaskPath = '\SmartM365\',
+        [string]$UpdateTaskName = 'Device Reboot Manager Update',
+        [ValidateRange(1, 168)]
+        [int]$UpdateIntervalHours = 24,
+        [bool]$IncludePrerelease = $true
+    )
+
+    $toolPath = Join-Path -Path $PSScriptRoot -ChildPath ("Tools\{0}" -f $script:GalleryUpdateScriptName)
+    if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+        throw "Package update helper not found: $toolPath"
+    }
+
+    $effectiveEnableAutomaticUpdate = if ($null -ne $EnableAutomaticUpdate) {
+        [bool]$EnableAutomaticUpdate
+    }
+    else {
+        $existingUpdateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
+        $null -ne $existingUpdateTask
+    }
+
+    if ($PSCmdlet.ShouldProcess($script:ModuleName, 'Update package from PowerShell Gallery and redeploy runtime')) {
+        & $toolPath `
+            -ModuleName $script:ModuleName `
+            -InstallPath $InstallPath `
+            -TaskPath $TaskPath `
+            -TaskName $TaskName `
+            -RepeatIntervalMinutes $RepeatIntervalMinutes `
+            -EnableAutomaticUpdate:$effectiveEnableAutomaticUpdate `
+            -UpdateTaskPath $UpdateTaskPath `
+            -UpdateTaskName $UpdateTaskName `
+            -UpdateIntervalHours $UpdateIntervalHours `
+            -IncludePrerelease:$IncludePrerelease
+    }
+}
+
+function Uninstall-SmartM365DeviceRebootManager {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$TaskPath = '\SmartM365\',
+        [string]$TaskName = 'Device Reboot Manager',
+        [string]$UpdateTaskPath = '\SmartM365\',
+        [string]$UpdateTaskName = 'Device Reboot Manager Update',
+        [switch]$KeepConfig
+    )
+
+    $uninstaller = Join-Path -Path $PSScriptRoot -ChildPath 'Runtime\Deploy\SmartM365-DeviceRebootManager-Uninstall.ps1'
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+        throw "Runtime uninstaller not found: $uninstaller"
+    }
+
+    if ($PSCmdlet.ShouldProcess($InstallPath, 'Uninstall SmartM365 Device Reboot Manager')) {
+        $updateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
+        if ($null -ne $updateTask) {
+            Unregister-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -Confirm:$false
+        }
+
+        & $uninstaller `
+            -InstallPath $InstallPath `
+            -TaskPath $TaskPath `
+            -TaskName $TaskName `
+            -UpdateTaskPath $UpdateTaskPath `
+            -UpdateTaskName $UpdateTaskName `
+            -KeepConfig:$KeepConfig
+    }
+}
+
+Export-ModuleMember -Function @(
+    'Get-SmartM365DeviceRebootManager'
+    'Install-SmartM365DeviceRebootManager'
+    'Uninstall-SmartM365DeviceRebootManager'
+    'Update-SmartM365DeviceRebootManager'
 )
-
-$issues = New-Object System.Collections.Generic.List[string]
-
-foreach ($fileName in $requiredFiles) {
-    $path = Join-Path -Path $InstallPath -ChildPath $fileName
-    if (-not (Test-Path -LiteralPath $path)) {
-        $issues.Add(("Missing file: {0}" -f $path))
-    }
-}
-
-$task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($null -eq $task) {
-    $issues.Add(("Missing scheduled task: {0}{1}" -f $TaskPath,$TaskName))
-}
-
-$installedVersion = ''
-$versionPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager.version.json'
-if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
-    try {
-        $versionManifest = Get-Content -LiteralPath $versionPath -Raw | ConvertFrom-Json
-        $installedVersion = [string]$versionManifest.PackageVersion
-        if ([int]$versionManifest.SchemaVersion -ne 1) {
-            $issues.Add(("Unsupported version manifest schema: {0}" -f $versionManifest.SchemaVersion))
-        }
-        if ($installedVersion -ne $ExpectedVersion) {
-            $issues.Add(("Version mismatch: installed={0}; expected={1}" -f $installedVersion,$ExpectedVersion))
-        }
-    }
-    catch {
-        $issues.Add(("Invalid version manifest: {0}" -f $_.Exception.Message))
-    }
-}
-
-$installationMetadataPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager.installation.json'
-if (Test-Path -LiteralPath $installationMetadataPath -PathType Leaf) {
-    try {
-        $installationMetadata = Get-Content -LiteralPath $installationMetadataPath -Raw | ConvertFrom-Json
-        if ([string]$installationMetadata.PackageVersion -ne $ExpectedVersion) {
-            $issues.Add(("Installation metadata version mismatch: installed={0}; expected={1}" -f
-                $installationMetadata.PackageVersion,$ExpectedVersion))
-        }
-        if ([string]$installationMetadata.PackageSource -ne 'Intune') {
-            $issues.Add(("Unexpected installation source: {0}" -f $installationMetadata.PackageSource))
-        }
-    }
-    catch {
-        $issues.Add(("Invalid installation metadata: {0}" -f $_.Exception.Message))
-    }
-}
-
-if ($RequireGalleryAutomaticUpdateDisabled) {
-    $galleryUpdateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
-    if ($null -ne $galleryUpdateTask) {
-        $issues.Add(("Unexpected PowerShell Gallery update task: {0}{1}" -f $UpdateTaskPath,$UpdateTaskName))
-    }
-}
-
-if ($issues.Count -gt 0) {
-    Write-Output 'SmartM365 Device Reboot Manager is not detected.'
-    foreach ($issue in $issues) {
-        Write-Output $issue
-    }
-    exit 1
-}
-
-Write-Output ("SmartM365 Device Reboot Manager {0} detected; PowerShell Gallery automatic update is disabled." -f
-    $installedVersion)
-exit 0
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2e3GaSeEB9IDY
-# PNZrqZZ+KLByVqcjcAqmQk+tP5aGzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFveQ9YXfROD81
+# 1fKZ75OOmTT7KJqexlCplM/N3/Z8faCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +320,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMEMX+UQlwM8R88GkG7e+KDIGcU5Jo7hLSI3HrfWDZ9RMA0GCSqG
-# SIb3DQEBAQUABIIBgGvJyQIMUKhm38fCywR9CWS8x43csOduw0SEP1jpIuln6CSx
-# 0v2g/q5hH2QTVr1M8xDUoLNI6ToizIyctmoE00x5ZmI1VeXdYBc/BraII8fcqcdB
-# bILAM/IMeoz/uF2N1yXBucQ1glOqBwE4fvDGykA8EsEaxJ5ARmodsDQYZSG6kNKS
-# Rg3UO3qdUJFKnjWYzJA0mWZ69nLbtrQvMsdUSP5E+pVdrygVM5IPGCpKulqgB6h0
-# gX4sSNJsJH88Gr8UpMIFrX1qta1IQ4o3b/eRVzeFlzN7OPEWSUg30PV2borralHR
-# 2pm71PM2UPLAeBdeeRO/E45NF2M2bX8b56dFzBRUu/qFrbdzASSoeKWv/GPVFLxy
-# aS9JEHK02hIxsUf+M77I0dh97v2Osm68WJbkpGE2TgT5pI5hEF5p/cNub829CkhJ
-# IcX3k8EKIB40pcChDQO28zOn5RUeC5KZsVGHxzBX8Dqq1uhQlKkh/sbHEEuJg/pz
-# PWgvs6tjfQfA3sG5zKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPoZGersRuCKEflD3Xe6hUKqiewn87UNKUa+l2oxYjMhMA0GCSqG
+# SIb3DQEBAQUABIIBgCqDiTsB1/wE/amCckxpbdhSYUskL51glJk16GtTbpyilAnC
+# FfdXM/8RV2kZnNK1Q59PV3LURV9QzwuusNipuhe9+esGqtyedDxhKJpcb5Gt3MDe
+# bR2qr3DVd29FuX5RI1/H6q5Gvh/3HEJnoPiEgugwZira7eHKsPSO37TJewkNAkYM
+# ze0PYV7FIba7Uq6ag1CM+KPqQcn10Qw1Kdwezd836wuGx3rXUu9g/n2OktkO6ArA
+# 2nTON/9+Cxu1Cw5kXgfdok8eYEQClDJyt6CdmCm8vf4xHK7uowDZVQQGPUNmWL4Q
+# IHGc6Yf5VXJorHzfWnl7jEea/szbGHYghMiNkZbY4pKGeDp65JmrZ3b7700rfEHH
+# ezKOWpHhqegvxf5dlyu0qIL5/W6Yra8kaOFJjJoMvn4wyrcw1otsWvPEifYQNh6i
+# TVP5ghWw/917nXJPUhhO7TzU35sHcwKNfLGtBKSoOhj/H+mmAW9eBVmUZ1pWSFvm
+# Difz52PWn3w6xJ7hq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDAaHccUHuZ+kCMIZcc3hvO4uDwwy+G4iO80C9F
-# VP+WxDANBgkqhkiG9w0BAQEFAASCAgA5HQrKQyDbQaffyxHRQOZsu+2NBREolLyU
-# K0krZywULnCqwQCybg8nnKojicjVmIX2ly3H/eEKFHmv1JGnQQ2BpfnPOSS43FPC
-# 526xYfxyDMmETktZdAh90JsNsTQWV3pW8Sgry2q5FvyPIESgNOc8OVvY3lahDPe8
-# u4MJiZbqlMhxWqWBgy1nm4s7muO0xpRyPGVsX4uhFq01AzpKgK3gf/A6N8NzS/+X
-# +Gn4UETOL0/oYGGuDEvTbMi4gp/nV6UNpx4YWSoiC8YbhhR0TNb4GhCP64rxK9X5
-# f2/AJ0Vg8XxfXTRFbKZwv1PThPufN86YwpxJKR6E9DUDFqTBr9pDJmqjm1ben+uM
-# hACq1Nv/kWU5WakjB+OffD3EOZqtaw2XQ8EU/2akgd7DflWRhNBu9AW0JnFMWFPW
-# PaAzJraGjleJsg8J33bsB1Nn4m4uyMy4vvs3uLZXOcKbbBMhXo3Qugd3a4GAQduz
-# ENVLP6ZkTlM3sj/6b4zqzfdnZb1dAoRRDCU9uFA8RdRNgj0PpDY5uc6T8F0Cphkm
-# molI4+vUQ7vnvo8zIEbjAZ5jhOPuCIUjSw0285vdzrExhh3cw4sI7UmEiLCN1LIf
-# laiYkYY5ExjRUDFR3igH4MuRVACzTim7AEYg41IS8K3p8ndLQd9YbdL4dWepZQFU
-# slPeADGPsg==
+# MDdaMC8GCSqGSIb3DQEJBDEiBCDYmJFA/PwGGK0i2OJuojQt+5ARYk6B5b8Jyw9T
+# kgkdrzANBgkqhkiG9w0BAQEFAASCAgBSXqBPr4r9DEyq9qQyfiPy76vJGnSqAOkL
+# 4VZgJiF2CJjeT7bPNHo0O+s1HF+h5DuirWICJvrWKRD9YAkIvdhNYFrm/5/lRSpn
+# /eZSfdEAkdJChYf/8BCzaEd6ug+7NZNFLXUDD/JKnE+VHbE1kdgGStxSLWIwqQem
+# vLbx1qP7E2Z2cW1GdiE48TnaT3bbKhTWroCCAmR0h9U5IntQdV7CDAIHP2/2wIw4
+# RQgTTvL9qcbsbk48wFAtSEV/9+881VVl2Q58jS3LMTgrmeiSyLfvpY2NbHWHdU6+
+# S0xqwGW3F3JencTzs7W7nta0oRx40GHeb+a7rZObjcfGIl+qIwLt9McLTdapTRrq
+# ynLowfw6mHlC0OOuaMcEh78uliwLUhe2qYKCCiP3lxsLR2r/YWbfjypbbYJYI3v1
+# z+ItXIiGBpJSqmVjdToSt0bn7cpXRa6/LbweCFi5QAJnRtQqI6QiAMWl9VLACfY1
+# 9YIyEcoDRikOrFDnkJDPve87SC7WHJKcNv/t1ZlWE0jknrUH/GsrCImABvD/AyqI
+# cyOs/jTGUMDuvG32lZJXKWF2hWpLrjxAVirWjBq0PYl4aOmk4lNOIsK+ULvmdwyU
+# 4w7Vku27wcGlOPYovlSufGaPTykCMlhoYuQeQ4LkPvnqyCgewKa+SnsTQKzKUOgX
+# aDEz1Z6bwA==
 # SIG # End signature block

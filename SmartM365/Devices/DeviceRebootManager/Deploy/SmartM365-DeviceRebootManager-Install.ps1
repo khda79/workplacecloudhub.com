@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     Copies runtime files to ProgramData and creates the scheduled task used to
-    launch the GUI in the interactive user session.
+    launch the GUI in the interactive user session. Intune is the default
+    deployment channel and removes the optional PowerShell Gallery update task.
 #>
 
 [CmdletBinding()]
@@ -17,7 +18,11 @@ param(
     [switch]$SkipScheduledTask,
     [string]$TaskPath = '\SmartM365\',
     [string]$TaskName = 'Device Reboot Manager',
-    [int]$RepeatIntervalMinutes = 240
+    [int]$RepeatIntervalMinutes = 240,
+    [ValidateSet('Intune', 'PowerShellGallery', 'Local')]
+    [string]$PackageSource = 'Intune',
+    [string]$UpdateTaskPath = '\SmartM365\',
+    [string]$UpdateTaskName = 'Device Reboot Manager Update'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +41,7 @@ $deployRoot = $PSScriptRoot
 $sourceRoot = Split-Path -Path $deployRoot -Parent
 
 $requiredFiles = @(
+    'SmartM365-DeviceRebootManager.version.json'
     'SmartM365-DeviceRebootManager-GUI.ps1'
     'SmartM365-DeviceRebootManager-GUI.strings.psd1'
     'SmartM365-DeviceRebootManager-GUI.config.json.template'
@@ -45,6 +51,24 @@ $requiredFiles = @(
     'Start-SmartM365-DeviceRebootManager-GUI.cmd'
     'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
 )
+
+$versionSourcePath = Join-Path -Path $sourceRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json'
+if (-not (Test-Path -LiteralPath $versionSourcePath -PathType Leaf)) {
+    throw "Package version manifest not found: $versionSourcePath"
+}
+
+try {
+    $packageVersionManifest = Get-Content -LiteralPath $versionSourcePath -Raw | ConvertFrom-Json
+}
+catch {
+    throw "Package version manifest is invalid: $($_.Exception.Message)"
+}
+
+if ([int]$packageVersionManifest.SchemaVersion -ne 1 -or
+    [string]::IsNullOrWhiteSpace([string]$packageVersionManifest.ProductName) -or
+    [string]::IsNullOrWhiteSpace([string]$packageVersionManifest.PackageVersion)) {
+    throw 'Package version manifest is incomplete or uses an unsupported schema.'
+}
 
 New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 
@@ -70,6 +94,13 @@ elseif ($ForceConfig -or -not (Test-Path -LiteralPath $runtimeConfigPath)) {
     Copy-Item -LiteralPath $templatePath -Destination $runtimeConfigPath -Force
 }
 
+if ($PackageSource -eq 'Intune') {
+    $galleryUpdateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
+    if ($null -ne $galleryUpdateTask) {
+        Unregister-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -Confirm:$false
+    }
+}
+
 if (-not $SkipScheduledTask) {
     $taskScriptPath = Join-Path -Path $deployRoot -ChildPath 'SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
     if (-not (Test-Path -LiteralPath $taskScriptPath)) {
@@ -84,13 +115,25 @@ if (-not $SkipScheduledTask) {
         -ConfigPath $runtimeConfigPath
 }
 
-Write-Output "SmartM365 Device Reboot Manager installed to: $InstallPath"
+$installationMetadata = [ordered]@{
+    SchemaVersion  = 1
+    ProductName    = [string]$packageVersionManifest.ProductName
+    PackageVersion = [string]$packageVersionManifest.PackageVersion
+    PackageSource  = $PackageSource
+    InstalledAtUtc = [DateTime]::UtcNow.ToString('o')
+}
+$installationMetadata |
+    ConvertTo-Json -Depth 3 |
+    Set-Content -LiteralPath (Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager.installation.json') -Encoding UTF8
+
+Write-Output ("SmartM365 Device Reboot Manager {0} installed to: {1} (source={2})" -f
+    $packageVersionManifest.PackageVersion,$InstallPath,$PackageSource)
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDc52QknlALT4oB
-# Nm9F15mjUtWccN2dw8Ca0WEsKJjJLqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOA0zyiLGUPT1a
+# jCEBrbpGY2R8Gv3wP1bTA0eY8Jll6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -223,31 +266,31 @@ Write-Output "SmartM365 Device Reboot Manager installed to: $InstallPath"
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJIH5Ar0bore2ztxbV7BYAAELyBhs6fa+sP+NA0EG6LYMA0GCSqG
-# SIb3DQEBAQUABIIBgKkkiFMMIeBWkUhs74dsJY6rfaOLMdVGNoT5r6P7qu29Bq3e
-# n5llzwez/9O3UNZJDxgm11i21lTQvQ+5uQFgM3v3zJgSFIA8A/4t/mNYvbb2HL3r
-# lbkHCBSO4oFgCE9N/ShPqLbhnArkvy5iKoTzk6qv5EW0Qa4nM1j2arnTbB3I0x/2
-# dgKzTcKWb89IOXBnnbiiTuM2fiqGckfIljS4gqxE/SDWes4fLWPaWDmBYa/MAQWa
-# XbiYhaW94ql2IeLe0oUS65qZ2io9JCqE4Ph3lpj993S6JGnmncB9STplaCIfxMRF
-# Eja3D4Lqi+soIdZRXdtBoahAXSzkqcdJVehNd0VXzuJ7v+x+1rj8WjMivuCRi5WS
-# IiXxBoSZawB0Rmzty+Bivri6A1j2D5zCd/OocWtsfaXlN7LKHYOd9jR0atMI0hHW
-# dhUoCEs5cA/YK44b9jEMHay0X+DW76s7PCobW6DRpvSBzWrW/yNOHL9PMFVOu0Ht
-# JdWfxAMiSbQi8YQnVaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKQveXzjthzN7EWmVF3gLTUMYv8WDZPivnS1bb4fpWYiMA0GCSqG
+# SIb3DQEBAQUABIIBgANdU813jNL0+pnXOiV77iD2Max0SEZ2bIaAmHdldm4wdY+f
+# yrn7Oe7kHZtgHDM16S8chzYd3ibug4BzzxPQy72DErEtMXZ/tWKXwwvdVcp34eKV
+# oplifsSAo7izZVsn4VuXYoWZhERrooEsAJjSKyAOl3VkHm59l+787QMkRVzNKwN5
+# NPXIa9r6Rd0zApA6Lb05HgRR8jLs6TSB0X1upyUDUgl0pF8LNhI5xpZVvAk1B0Uz
+# D37lBBVZyCeo6m2I+DQ8jZVBlcIXeHjnvyvc2giXeLHc8E4zGIef3lckaHT7xfH6
+# QL4dns79bnu1IaWcWJsbuJy1yJ2aEDVlz7QpmIq1Ph1tJxuJShcomjHrTQ689MJm
+# C68qxNNp7yXcTltTOfrah9Y7MPqpbYbgsmG1Thd1N6N1tFDGnRKIh4iUrjcN0Zri
+# X/D5K87jmS6fwV7ZZB0l64szu37qEoDqkt51N30rBe3mD3ohcjYgF1kgnfrked2f
+# k4nIOd0SFzy2MZCDc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjdaMC8GCSqGSIb3DQEJBDEiBCA1ZAfBIzB3ebbl/9anurSSyZKAZQ+kBdanyfUW
-# lLJMsjANBgkqhkiG9w0BAQEFAASCAgDPCHClkPatO8bLraJKf7cdrXrEgc+nM8GU
-# AJ9dwGc6YKdtXgfa0VVhhxTuBbVNUCKIyeeuUI8n63FGSMfLz/TbT3godSnu+wUk
-# 2zYF7cyEzNbvffTSRrSzGf4KDtUe+RntN873ePIJEH8iFGI01Y/NDZKf5HdOiOTx
-# 0tX/IRHBOV5/ZVKx91ejH62I+35XpjSW4LFaX9v5gP7/+DXGf7HBjiZNJwZMdNye
-# yFol3cs08gsdRMQicIyxrv1GSIkZt0sUDXK+3pobYBoAJOyL0nVq/UwRZKB27nv3
-# QXVXD8g6PIi5MqqOJotYqaYvj5jR21bNO4RfICb8kKZkehUM430TaaepCBd8dXzy
-# +BhUvy42i3dTUjY+JbLxsd0+4ZHm/tiBRrKQ8auG0nqPoTFDD6bCCV6fh+lhQi10
-# YAREDCA2crzUyQz8HVOfjP9bJ7JlGIklMs0hMHvl92hiZTDUHmxiqagEd071xDZt
-# jQCu4zymDf6RaJ8eEt1O7T/+37C2ME0adMIZ5E/pDRhDP+++vhkUcB9zXJpKUBaG
-# lElBgyZhroY0zsq2JzVv2Je42ftMxVXqDagkQUivWngifQ+z6Pn+Baexe6DNoIL9
-# +u78JcXduhSxVmbaGQ5k1tDfhXt+upTc1NxtAGjiOU72NRWp/Wmn85ZJllzWTuQY
-# uLE5AHvmMQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
+# MDZaMC8GCSqGSIb3DQEJBDEiBCD/dqUxpx4rFK0PdxMuMGvPHMpp/gYYey8cMAS1
+# 6B+dXDANBgkqhkiG9w0BAQEFAASCAgCR6i+NmYa6aUHFMU8kYCXDwRD94vv+pGpp
+# FnkI0jHMUqf4ja12cYDWPLslwsr0CcBK2zDTVZhT8sOvNZpVKFzReG7Hb10T3Jzh
+# m10ZTtiEYwE1NmOon8PGiY+b639yMuOZUdo2rHQ3Azph4jUBdYPA5Y7JuluYBv+N
+# ZpKQxOGTdVvCCD9bStksmVK8lv1p2OkRCIP3fqyTuNoA31tTncChr2OGTviLnfTC
+# ZG+08xan1CdB4guEsyNKwYya6acLGUt8fjcauL+i+QzYcNRM8kvRTIPSxtdeUJDu
+# ABAcz8lYww/4ouVmrRbWc+fwLYI8kFKN3Z8L0JD/p5adPsXFzT8pqe/DUDyK+Sw0
+# 24VYg5e4UkeVAZE1dYgAS8GWkCUA3dxWlpkeh8LaxWcLOD4EFbXdnEaNFzbznQF5
+# S0u6zKyYLp/vXJWueuLHJaBdWZZMEZJT9/YEmGfpE4EZBkifweDCbpRqUb9oZIVS
+# 7IUlKbsd1Xb+P7HFhCIoDMtDEON/8mTxvNCBixx/FTFebLp+1b94iwnUX3GEbkav
+# P7DNhX0hWU4obP804EnJ9kUG1D5U8KhaTrM2+U5RCZrIJx7FBncbNq74H4yMMrQa
+# +yC2VZewlGGTNfGlv3hxMfIE5yjZckpfATz5vSNMkcv8rGvdmAH2lP3iOFZdAHpC
+# k+KhsJ/03A==
 # SIG # End signature block
