@@ -35,7 +35,9 @@ Lots\LOT-TEMPLATE\
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1`: full Entra device inventory export.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1`: AD computer inventory export for LOT report enrichment.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1`: refreshes small LOT CMD wrappers.
-- `Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1`: GUI that launches existing LOT folders and creates new empty LOT folders ready for `Computers.txt`.
+- Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1: GUI that launches existing LOT folders and creates manual or automatic LOT folders.
+- Scripts\SmartM365-IntuneHybridJoinRepair-New-AutomaticLot.ps1: guarded AD/Intune/Entra selection and evidence engine.
+- Scripts\SmartM365-IntuneHybridJoinRepair-Export-AutomaticGraphInventories.ps1: delegated full Intune and Entra refresh using one Graph session.
 
 ## When To Use This Toolkit
 
@@ -150,7 +152,7 @@ This skips the versioned `Lots\LOT-TEMPLATE` template and creates a blank `AdDom
 
 Use `Export-ADDevicesCsv.cmd` from the toolkit root to create a forest-wide `DevicesAD.csv`.
 LOT runs pass this root CSV separately and use it in priority when it exists and is less than
-120 minutes old. If `AdDomain.txt` is missing or blank, the LOT refreshes the root `DevicesAD.csv`
+12 hours old. If `AdDomain.txt` is missing or blank, the LOT refreshes the root `DevicesAD.csv`
 as a forest-wide AD export. A LOT can still use a per-LOT AD domain by setting `EHJIR_AD_DOMAIN`
 before launching the LOT, or by creating an `AdDomain.txt` file in that LOT folder with the domain
 name on the first line. In that domain-specific fallback mode, the repair launcher writes and
@@ -167,10 +169,73 @@ The GUI has an existing-LOT tab with a drop-down list of available operational `
 After a LOT is selected, it shows only the device count, AD scope, global worker limit, and launch mode.
 It can launch the selected LOT or all launchable LOT folders; empty LOT folders or folders with
 missing wrappers are skipped. When no operational LOT exists, the LOT selector and launch buttons
-stay disabled. Detailed paths and CSV freshness stay in logs and CLI output. A second tab creates a new empty LOT folder from a
-LOT name, refreshes wrappers, creates `Computers.txt` and `AdDomain.txt`, and offers to open
-`Computers.txt` so the operator can paste one computer per line.
+stay disabled. Detailed paths and CSV freshness stay in logs and CLI output. **Single PC** launches
+one explicit target. **New LOT** creates an empty folder, refreshes wrappers, creates `Computers.txt`
+and `AdDomain.txt`, and offers to open the computer list. **Automatic LOT** builds a guarded list
+from inventory as documented below.
 
+## Automatic Hybrid Join LOT
+
+Open **Automatic LOT** in the WPF launcher to build a LOT from broad inventory snapshots. The
+selection is intentionally conservative:
+
+- the computer must be present and enabled in AD;
+- AD must explicitly identify Windows 10 or Windows 11 client; Windows Server and unknown OS
+  values are excluded;
+- every matching Intune managed-device row excludes the computer;
+- AD short-name collisions, multiple `ServerAd` Entra objects, and disabled `ServerAd` objects
+  are excluded as ambiguous;
+- the preferred `DNSHostName` is written to `Computers.txt`, with the AD short name as fallback.
+
+Entra evidence classifies a selected device as `NEEDS_HYBRID_JOIN`, `HYBRID_JOIN_PENDING`, or
+`NEEDS_INTUNE_ENROLLMENT`. Entra is optional enrichment: when it cannot be read, otherwise-safe
+AD devices absent from Intune remain selectable as `ENTRA_INVENTORY_UNAVAILABLE`; the endpoint
+script then relies on its guarded local diagnosis. AD and Intune are mandatory, so the preview
+stops when either source is unavailable.
+
+Optional semicolon-separated **Prefix(es)** and **Contains** filters use literal values. Values
+inside each field use OR, while Prefix and Contains are combined with AND. **Exclude stale AD**
+is disabled by default; when enabled, its default maximum LastLogon age is 45 days and unknown
+or invalid timestamps are also excluded.
+
+Every preview checks read-only root caches before refreshing:
+
+- `DevicesAD.csv`: 12 hours;
+- `DevicesIntune.csv`: 2 hours;
+- `DevicesEntra.csv`: 2 hours.
+
+Graph caches are accepted only when their CSV provenance contains a non-empty tenant, delegated
+authentication, and the full inventory scope (`AllManagedDevices` or `AllEntraDevices`). Intune
+and Entra caches must identify the same tenant. **Force inventory refresh this time** bypasses
+valid caches for the next preview only. Fresh or newly generated sources are copied under
+`Runs\AutomaticLotInventory\Sources-<timestamp>`; automatic refresh never overwrites root caches.
+
+Graph refresh uses delegated interactive authentication only. The required read scopes are:
+
+```text
+DeviceManagementManagedDevices.Read.All
+Device.Read.All
+```
+
+App-only Graph contexts are rejected. The combined refresh connects once with both scopes,
+exports required Intune data first, then attempts optional Entra enrichment.
+
+The **Create** button creates `Lots\LOT-AUTO-IHJ-...`, `Computers.txt`, `AdDomain.txt`, and the
+standard wrappers. It never launches the LOT. Open **Existing LOT** to review and launch it.
+A modal progress window remains visible during cache checks, inventory refresh, filtering,
+evidence generation, and wrapper refresh.
+
+Each preview or creation preserves:
+
+```text
+Runs\AutomaticLotInventory\<timestamp>\DevicesAD.csv
+Runs\AutomaticLotInventory\<timestamp>\DevicesIntune.csv
+Runs\AutomaticLotInventory\<timestamp>\DevicesEntra.csv       # when available
+Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSelection.csv
+Runs\AutomaticLotInventory\<timestamp>\AutomaticLotExclusions.csv
+Runs\AutomaticLotInventory\<timestamp>\AutomaticLotFilterExclusions.csv
+Runs\AutomaticLotInventory\<timestamp>\AutomaticLotSummary.json
+```
 ## Controlled LOT Stop
 
 Each LOT launcher publishes an active-run control file in its run `State` folder.

@@ -5,6 +5,8 @@ Exports Microsoft Entra devices to DevicesEntra.csv for the repair launcher.
 .DESCRIPTION
 Uses Microsoft Graph to read Entra devices from /devices.
 When this script is stored in a Scripts folder, the default output is DevicesEntra.csv in the parent folder.
+InventoryTenantId, InventoryAuthenticationMode, and InventoryScope preserve the
+delegated full-inventory provenance used by Automatic LOT.
 
 .PARAMETER OutputPath
 Destination CSV path. Defaults to DevicesEntra.csv in the parent folder when running from Scripts.
@@ -42,7 +44,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.1"
+$ScriptVersion = "1.0.2"
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $DefaultOutputDir = $BaseDir
@@ -294,6 +296,7 @@ if (-not $NoConnect) {
         NoWelcome = $true
     }
     if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParams.TenantId = $TenantId }
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     Connect-MgGraph @connectParams | Out-Null
 }
 
@@ -301,10 +304,16 @@ $context = Get-GraphConnectionContext
 if (-not $context) {
     throw "Not connected to Microsoft Graph. Run without -NoConnect, or connect first with Connect-MgGraph -Scopes Device.Read.All."
 }
+$contextAuthType = if ($context.PSObject.Properties["AuthType"]){ [string]$context.AuthType } else { "" }
+if ($contextAuthType -ieq "AppOnly") {
+    throw "App-only Microsoft Graph authentication is not supported. Use delegated interactive authentication."
+}
+$inventoryAuthenticationMode = if ($NoConnect) { "DelegatedExistingSession" } else { "DelegatedInteractive" }
 
 Write-Host "Export-EntraDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
 Write-Host "Tenant      : $($context.TenantId)"
 Write-Host "Account     : $($context.Account)"
+Write-Host "Auth        : $inventoryAuthenticationMode"
 Write-Host "Output      : $OutputPath"
 Write-Host "Page size   : $PageSize"
 
@@ -373,6 +382,14 @@ else {
     $export = foreach ($device in $devices) { New-EntraDeviceExportRow -Device $device }
 }
 
+$export = @($export)
+$inventoryScope = if ($requestedComputers.Count -gt 0) { "RequestedComputers" } else { "AllEntraDevices" }
+foreach ($row in $export) {
+    $row | Add-Member -NotePropertyName InventoryTenantId -NotePropertyValue ([string]$context.TenantId) -Force
+    $row | Add-Member -NotePropertyName InventoryAuthenticationMode -NotePropertyValue $inventoryAuthenticationMode -Force
+    $row | Add-Member -NotePropertyName InventoryScope -NotePropertyValue $inventoryScope -Force
+}
+
 try {
     $outputDir = Split-Path -Parent $OutputPath
     if (-not [string]::IsNullOrWhiteSpace($outputDir) -and -not (Test-Path -LiteralPath $outputDir)) {
@@ -397,7 +414,7 @@ catch {
         Write-Host ("Temporary CSV kept for troubleshooting: {0}" -f $tempOutputPath) -ForegroundColor Yellow
     }
     Write-Host "Run the CMD as administrator, close the CSV if it is open in Excel, or use -OutputPath with a writable folder." -ForegroundColor Yellow
-    exit 1
+    throw
 }
 
 $uniqueComputers = @($export | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ComputerName) } | Select-Object -ExpandProperty ComputerName -Unique)

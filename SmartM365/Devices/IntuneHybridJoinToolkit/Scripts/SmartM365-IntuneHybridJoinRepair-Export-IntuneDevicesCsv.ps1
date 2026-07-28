@@ -9,7 +9,8 @@ Uses Microsoft Graph to read Intune managed devices from:
 When this script is stored in a Scripts folder, the default output is DevicesIntune.csv in the parent folder.
 Otherwise, the default output is DevicesIntune.csv next to this script.
 The CSV includes DeviceName and ComputerName columns so SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1
-can use it with -IntuneInventoryCsv.
+can use it with -IntuneInventoryCsv. InventoryTenantId, InventoryAuthenticationMode,
+and InventoryScope preserve the delegated full-inventory provenance used by Automatic LOT.
 
 .PARAMETER OutputPath
 Destination CSV path. Defaults to DevicesIntune.csv in the parent folder when running from Scripts, otherwise next to this script.
@@ -64,7 +65,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "1.3.7"
+$ScriptVersion = "1.3.8"
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
@@ -352,6 +353,7 @@ if (-not $NoConnect) {
         $connectParams.TenantId = $TenantId
     }
 
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     Connect-MgGraph @connectParams | Out-Null
 }
 
@@ -359,10 +361,16 @@ $context = Get-GraphConnectionContext
 if (-not $context) {
     throw "Not connected to Microsoft Graph. Run without -NoConnect, or connect first with Connect-MgGraph -Scopes DeviceManagementManagedDevices.Read.All."
 }
+$contextAuthType = if ($context.PSObject.Properties["AuthType"]){ [string]$context.AuthType } else { "" }
+if ($contextAuthType -ieq "AppOnly") {
+    throw "App-only Microsoft Graph authentication is not supported. Use delegated interactive authentication."
+}
+$inventoryAuthenticationMode = if ($NoConnect) { "DelegatedExistingSession" } else { "DelegatedInteractive" }
 
 Write-Host "Export-IntuneDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
 Write-Host "Tenant      : $($context.TenantId)"
 Write-Host "Account     : $($context.Account)"
+Write-Host "Auth        : $inventoryAuthenticationMode"
 Write-Host "Output      : $OutputPath"
 Write-Host "Page size   : $PageSize"
 
@@ -472,6 +480,14 @@ else {
     }
 }
 
+$export = @($export)
+$inventoryScope = if ($requestedComputers.Count -gt 0) { "RequestedComputers" } else { "AllManagedDevices" }
+foreach ($row in $export) {
+    $row | Add-Member -NotePropertyName InventoryTenantId -NotePropertyValue ([string]$context.TenantId) -Force
+    $row | Add-Member -NotePropertyName InventoryAuthenticationMode -NotePropertyValue $inventoryAuthenticationMode -Force
+    $row | Add-Member -NotePropertyName InventoryScope -NotePropertyValue $inventoryScope -Force
+}
+
 try {
     $outputDir = Split-Path -Parent $OutputPath
     if (-not [string]::IsNullOrWhiteSpace($outputDir) -and -not (Test-Path -LiteralPath $outputDir)) {
@@ -496,7 +512,7 @@ catch {
         Write-Host ("Temporary CSV kept for troubleshooting: {0}" -f $tempOutputPath) -ForegroundColor Yellow
     }
     Write-Host "Run the CMD as administrator, close the CSV if it is open in Excel, or use -OutputPath with a writable folder." -ForegroundColor Yellow
-    exit 1
+    throw
 }
 
 $uniqueComputers = @($export | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ComputerName) } | Select-Object -ExpandProperty ComputerName -Unique)
