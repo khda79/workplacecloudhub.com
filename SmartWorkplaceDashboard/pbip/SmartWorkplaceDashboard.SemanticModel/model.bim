@@ -201,7 +201,7 @@
           },
           {
             "name": "Enabled",
-            "dataType": "string",
+            "dataType": "boolean",
             "sourceColumn": "Enabled"
           },
           {
@@ -531,7 +531,7 @@
           },
           {
             "name": "ExistsInIntune",
-            "dataType": "string",
+            "dataType": "boolean",
             "sourceColumn": "ExistsInIntune"
           },
           {
@@ -551,7 +551,7 @@
           },
           {
             "name": "IntuneDiskFreeGB",
-            "dataType": "string",
+            "dataType": "double",
             "sourceColumn": "IntuneDiskFreeGB"
           },
           {
@@ -641,7 +641,7 @@
           },
           {
             "name": "PhysicalMemoryGB",
-            "dataType": "string",
+            "dataType": "double",
             "sourceColumn": "PhysicalMemoryGB"
           },
           {
@@ -731,7 +731,7 @@
           },
           {
             "name": "IntunePrimaryUserMailboxSizeGB",
-            "dataType": "string",
+            "dataType": "double",
             "sourceColumn": "IntunePrimaryUserMailboxSizeGB"
           },
           {
@@ -1024,7 +1024,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"AD_Computers_AllDomains.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DomainName\", \"ObjectType\", \"SamAccountName\", \"Name\", \"DistinguishedName\", \"Enabled\", \"DNSHostName\", \"OperatingSystem\", \"operatingSystemHotfix\", \"operatingSystemServicePack\", \"operatingSystemVersion\", \"LastLogonDate\", \"Description\", \"IPv4Address\", \"WhenCreated\", \"WhenChanged\", \"pwdLastSetDate\", \"CanonicalName\", \"MemberOfDNs\", \"PrimaryGroupName\", \"ObjectGUID\", \"SID\", \"SIDHistory\", \"extensionAttribute1\", \"extensionAttribute2\", \"extensionAttribute3\", \"extensionAttribute4\", \"extensionAttribute5\", \"extensionAttribute6\", \"extensionAttribute7\", \"extensionAttribute8\", \"extensionAttribute9\", \"extensionAttribute10\", \"extensionAttribute11\", \"extensionAttribute12\", \"extensionAttribute13\", \"extensionAttribute14\", \"extensionAttribute15\", \"DomainNameShort\", \"DomainAndSam\", \"ImmutableId_AD\", \"IsMemberOfConfiguredGroup01\", \"IsMemberOfConfiguredGroup02\", \"IsMemberOfConfiguredGroup03\", \"IsMemberOfConfiguredGroup04\", \"IsMemberOfConfiguredGroup05\", \"IsMemberOfConfiguredGroup06\", \"IsMemberOfConfiguredGroup07\", \"IsMemberOfConfiguredGroup08\", \"IsMemberOfConfiguredGroup09\", \"IsMemberOfConfiguredGroup10\", \"MatchedConfiguredGroups\", \"ObjectGuidNormalized\", \"OperatingSystemBuildNumber\", \"IsWindows10LtscByName\", \"IsWindows10LtscByBuild\", \"IsWindows10Ltsc\", \"MeetsWindows11MinimumOsBuild\", \"OrganizationalUnitCode\", \"DomainOrganizationalUnitKey\", \"OperatingSystemDisplayName\", \"IsInDisabledObjectsOU\", \"EntityLabel\", \"Manufacturer\", \"NeedsWindows11Upgrade\", \"OperatingSystemShortName\", \"Subnet\", \"EntitySiteType\", \"Windows11UpgradeEligibility\", \"IsInProductionOU\", \"OrganizationalUnitLeafName\", \"ExistsInIntune\", \"M365LicenseForAdUser\", \"IntunePrimaryUserOrganizationalUnitPath\", \"IntunePrimaryUserOrganizationalUnitName\", \"IntuneDiskFreeGB\", \"IntuneDiskTotalGB\", \"IntuneEnrollmentDateTime\", \"HasInsufficientStorageForWindows11Upgrade\", \"ResolvedPrimarySmtpAddress\", \"IntunePrimaryUserPrincipalName\", \"DiskFreePercent\", \"MigrationIssueScore\", \"IsWindows11\", \"IntuneOperatingSystemVersion\", \"IntuneLastSyncDateTime\", \"IntuneWindows11EligibilityCode\", \"IntuneWindows11EligibilityLabel\", \"IntuneDeviceModel\", \"IntuneOwnership\", \"IntuneComplianceState\", \"LastRebootDateTime\", \"IsInTargetHeadquartersOU\", \"PhysicalMemoryGB\", \"IsRegisteredInIntune\", \"IsOutsideTargetHeadquartersOU\", \"IsWindows11AndManagedByIntune\", \"EntraRegistrationDateTime\", \"EntraApproximateLastSignInDateTime\", \"EntraDaysSinceLastSignIn\", \"EntraHardwareIdDeviceCount\", \"HasDifferentDeviceId\", \"EntraCorrelationStatus\", \"EntraNameMatchCount\", \"EntraNameMatchesByObjectGuidList\", \"EntraMatchCountByObjectGuid\", \"ExistsInEntraByObjectGuid\", \"IsEntraRegistrationPending\", \"DeviceMigrationIssueSeverity\", \"M365LicenseForIntunePrimaryUser\", \"HasMailboxForIntunePrimaryUser\", \"IntunePrimaryUserMailboxSizeGB\", \"IntuneEnrollmentDate\", \"EntityIntegrationType\", \"Windows11MigrationPhase\", \"IntuneLastLoggedOnUser\", \"WindowsUpdateWindows1124H2AggregateState\", \"IntuneDeviceId\", \"WindowsUpdateWindows1125H2AggregateState\", \"WindowsUpdateAutopatchFeatureUpdateAnchorAggregateState\", \"WindowsUpdateWindows1124H2CurrentDeviceUpdateStatus\", \"WindowsUpdateWindows1125H2CurrentDeviceUpdateStatus\", \"WindowsUpdateAutopatchFeatureUpdateAnchorCurrentDeviceUpdateStatus\", \"WindowsUpdateWindows1125H2LatestAlertMessage\", \"WindowsUpdateAutopatchFeatureUpdateAnchorLatestAlertMessage\", \"WindowsUpdateWindows1124H2LatestAlertMessage\", \"EntraDeviceIdNormalized\", \"EntraDeviceIdMatchCount\", \"Windows11MigrationPhaseReason\", \"EntraLastSignInStatus\", \"IsEntraLastSignInOlderThan90Days\", \"IsEntraLastSignInWithin90Days\", \"ResolvedLastSignInDateTime\", \"IsActiveInLast90Days\", \"Windows11UpgradeEligibilitySource\", \"EntraObjectId\", \"IsWindows1125H2\", \"IsWindows1124H2\", \"IsActiveInLast30Days\", \"IsActiveInLast45Days\", \"BiosModel\", \"BiosVersion\", \"BiosKey\", \"SecureBootStatus\", \"AdLastLogonCategory\", \"EntraLastSignInCategory\", \"LastRebootCategory\", \"LastActivityDateTime\", \"LastActivityCategory\", \"EntraLastSignIn30DayCategory\", \"LastReboot30DayCategory\", \"LastActivity30DayCategory\", \"AdLastLogon30DayCategory\", \"WindowsUpdateAutopatchFeatureUpdateAnchorBlockingReason\", \"WindowsUpdateWindows1124H2BlockingReason\", \"WindowsUpdateWindows1125H2BlockingReason\", \"WindowsUpdateWindows1124H2RiskBucket\", \"WindowsUpdateWindows1125H2RiskBucket\", \"WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket\", \"Windows11MigrationAction\", \"IsVirtualMachine\"}, {}, false)"
+              "expression": "fnLoadSourceTable(\"AD_Computers_AllDomains.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DomainName\", \"ObjectType\", \"SamAccountName\", \"Name\", \"DistinguishedName\", \"Enabled\", \"DNSHostName\", \"OperatingSystem\", \"operatingSystemHotfix\", \"operatingSystemServicePack\", \"operatingSystemVersion\", \"LastLogonDate\", \"Description\", \"IPv4Address\", \"WhenCreated\", \"WhenChanged\", \"pwdLastSetDate\", \"CanonicalName\", \"MemberOfDNs\", \"PrimaryGroupName\", \"ObjectGUID\", \"SID\", \"SIDHistory\", \"extensionAttribute1\", \"extensionAttribute2\", \"extensionAttribute3\", \"extensionAttribute4\", \"extensionAttribute5\", \"extensionAttribute6\", \"extensionAttribute7\", \"extensionAttribute8\", \"extensionAttribute9\", \"extensionAttribute10\", \"extensionAttribute11\", \"extensionAttribute12\", \"extensionAttribute13\", \"extensionAttribute14\", \"extensionAttribute15\", \"DomainNameShort\", \"DomainAndSam\", \"ImmutableId_AD\", \"IsMemberOfConfiguredGroup01\", \"IsMemberOfConfiguredGroup02\", \"IsMemberOfConfiguredGroup03\", \"IsMemberOfConfiguredGroup04\", \"IsMemberOfConfiguredGroup05\", \"IsMemberOfConfiguredGroup06\", \"IsMemberOfConfiguredGroup07\", \"IsMemberOfConfiguredGroup08\", \"IsMemberOfConfiguredGroup09\", \"IsMemberOfConfiguredGroup10\", \"MatchedConfiguredGroups\", \"ObjectGuidNormalized\", \"OperatingSystemBuildNumber\", \"IsWindows10LtscByName\", \"IsWindows10LtscByBuild\", \"IsWindows10Ltsc\", \"MeetsWindows11MinimumOsBuild\", \"OrganizationalUnitCode\", \"DomainOrganizationalUnitKey\", \"OperatingSystemDisplayName\", \"IsInDisabledObjectsOU\", \"EntityLabel\", \"Manufacturer\", \"NeedsWindows11Upgrade\", \"OperatingSystemShortName\", \"Subnet\", \"EntitySiteType\", \"Windows11UpgradeEligibility\", \"IsInProductionOU\", \"OrganizationalUnitLeafName\", \"ExistsInIntune\", \"M365LicenseForAdUser\", \"IntunePrimaryUserOrganizationalUnitPath\", \"IntunePrimaryUserOrganizationalUnitName\", \"IntuneDiskFreeGB\", \"IntuneDiskTotalGB\", \"IntuneEnrollmentDateTime\", \"HasInsufficientStorageForWindows11Upgrade\", \"ResolvedPrimarySmtpAddress\", \"IntunePrimaryUserPrincipalName\", \"DiskFreePercent\", \"MigrationIssueScore\", \"IsWindows11\", \"IntuneOperatingSystemVersion\", \"IntuneLastSyncDateTime\", \"IntuneWindows11EligibilityCode\", \"IntuneWindows11EligibilityLabel\", \"IntuneDeviceModel\", \"IntuneOwnership\", \"IntuneComplianceState\", \"LastRebootDateTime\", \"IsInTargetHeadquartersOU\", \"PhysicalMemoryGB\", \"IsRegisteredInIntune\", \"IsOutsideTargetHeadquartersOU\", \"IsWindows11AndManagedByIntune\", \"EntraRegistrationDateTime\", \"EntraApproximateLastSignInDateTime\", \"EntraDaysSinceLastSignIn\", \"EntraHardwareIdDeviceCount\", \"HasDifferentDeviceId\", \"EntraCorrelationStatus\", \"EntraNameMatchCount\", \"EntraNameMatchesByObjectGuidList\", \"EntraMatchCountByObjectGuid\", \"ExistsInEntraByObjectGuid\", \"IsEntraRegistrationPending\", \"DeviceMigrationIssueSeverity\", \"M365LicenseForIntunePrimaryUser\", \"HasMailboxForIntunePrimaryUser\", \"IntunePrimaryUserMailboxSizeGB\", \"IntuneEnrollmentDate\", \"EntityIntegrationType\", \"Windows11MigrationPhase\", \"IntuneLastLoggedOnUser\", \"WindowsUpdateWindows1124H2AggregateState\", \"IntuneDeviceId\", \"WindowsUpdateWindows1125H2AggregateState\", \"WindowsUpdateAutopatchFeatureUpdateAnchorAggregateState\", \"WindowsUpdateWindows1124H2CurrentDeviceUpdateStatus\", \"WindowsUpdateWindows1125H2CurrentDeviceUpdateStatus\", \"WindowsUpdateAutopatchFeatureUpdateAnchorCurrentDeviceUpdateStatus\", \"WindowsUpdateWindows1125H2LatestAlertMessage\", \"WindowsUpdateAutopatchFeatureUpdateAnchorLatestAlertMessage\", \"WindowsUpdateWindows1124H2LatestAlertMessage\", \"EntraDeviceIdNormalized\", \"EntraDeviceIdMatchCount\", \"Windows11MigrationPhaseReason\", \"EntraLastSignInStatus\", \"IsEntraLastSignInOlderThan90Days\", \"IsEntraLastSignInWithin90Days\", \"ResolvedLastSignInDateTime\", \"IsActiveInLast90Days\", \"Windows11UpgradeEligibilitySource\", \"EntraObjectId\", \"IsWindows1125H2\", \"IsWindows1124H2\", \"IsActiveInLast30Days\", \"IsActiveInLast45Days\", \"BiosModel\", \"BiosVersion\", \"BiosKey\", \"SecureBootStatus\", \"AdLastLogonCategory\", \"EntraLastSignInCategory\", \"LastRebootCategory\", \"LastActivityDateTime\", \"LastActivityCategory\", \"EntraLastSignIn30DayCategory\", \"LastReboot30DayCategory\", \"LastActivity30DayCategory\", \"AdLastLogon30DayCategory\", \"WindowsUpdateAutopatchFeatureUpdateAnchorBlockingReason\", \"WindowsUpdateWindows1124H2BlockingReason\", \"WindowsUpdateWindows1125H2BlockingReason\", \"WindowsUpdateWindows1124H2RiskBucket\", \"WindowsUpdateWindows1125H2RiskBucket\", \"WindowsUpdateAutopatchFeatureUpdateAnchorRiskBucket\", \"Windows11MigrationAction\", \"IsVirtualMachine\"}, {{\"Enabled\", \"logical\"}, {\"ExistsInIntune\", \"logical\"}, {\"IntuneDiskFreeGB\", \"number\"}, {\"PhysicalMemoryGB\", \"number\"}, {\"IntunePrimaryUserMailboxSizeGB\", \"number\"}}, false)"
             }
           }
         ]
@@ -16235,7 +16235,7 @@
           },
           {
             "name": "AD Enabled Computers",
-            "expression": "CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE(),'AD_Computers_AllDomains'[Enabled]=\"True\")",
+            "expression": "CALCULATE(DISTINCTCOUNT('AD_Computers_AllDomains'[ObjectGUID]),'AD_Computers_AllDomains'[__IsCurrent]=TRUE(),'AD_Computers_AllDomains'[Enabled]=TRUE())",
             "formatString": "#,0.0",
             "displayFolder": "Devices"
           },
