@@ -34,12 +34,25 @@ Assert-True ($publisherText -match '\[switch\]\$AssignPilotGroup') 'Pilot assign
 Assert-True ($publisherText -match 'DeviceManagementApps\.ReadWrite\.All') 'Required Intune delegated scope is missing.'
 Assert-True ($publisherText -match 'Group\.ReadWrite\.All') 'Required group delegated scope is missing.'
 Assert-True ($publisherText -match 'mobileApps/\$AppId/assignments') 'Publisher must create an individual assignment.'
+Assert-True ($publisherText -match '#microsoft\.graph\.mobileAppSupersedence') 'Publisher must support Intune supersedence.'
+Assert-True ($publisherText -match 'deviceAppManagement/mobileAppRelationships') 'Publisher must read existing relationships before updating them.'
+Assert-True ($publisherText -match 'mobileApps/\$NewAppId/updateRelationships') 'Publisher must use the supported updateRelationships action.'
+Assert-True ($publisherText -match 'relationships\s*=\s*@\(\$relationshipSpecs\.ToArray\(\)\)') 'Publisher must submit the preserved relationship collection.'
+Assert-True ($publisherText -notmatch 'Invoke-GraphJson -Method POST -Uri \$relationshipsUri') 'Publisher must not POST directly to the unsupported relationships collection.'
+Assert-True ($publisherText -match '\[string\]\$ResumeAppId') 'Publisher must support safe recovery of an already committed app.'
+Assert-True ($publisherText.Contains('-Uri "$GraphBaseUri/deviceAppManagement/mobileApps/${ResumeAppId}"')) 'Resume lookup must request the derived Win32 app without an incompatible base-type select.'
+Assert-True (-not $publisherText.Contains('mobileApps/${ResumeAppId}?')) 'Resume lookup must not select derived properties through the mobileApp base type.'
+Assert-True ($publisherText -match '\*SmartM365 Device Reboot Manager\*') 'Publisher must accept a renamed Device Reboot Manager preview.'
+Assert-True ($publisherText -match 'PackageVersion=0\.1\.0-preview4') 'Publisher must validate the superseded preview version notes.'
 Assert-True ($publisherText -notmatch 'mobileApps/\$AppId/assign["'']') 'Publisher must not replace the full assignment set.'
 
 $preview = & $publisherPath `
     -IntuneWinPath $IntuneWinPath `
     -CreatePilotGroup `
-    -AssignPilotGroup
+    -AssignPilotGroup `
+    -SupersedeAppId '11111111-1111-1111-1111-111111111111' `
+    -ResumeAppId '22222222-2222-2222-2222-222222222222' `
+    -SupersedenceType update
 
 Assert-True ($preview.Mode -eq 'Preview') 'Publisher did not remain in preview mode.'
 Assert-True (-not $preview.ChangesAttempted) 'Preview unexpectedly attempted tenant changes.'
@@ -47,7 +60,11 @@ Assert-True $preview.InteractiveAuthentication 'Interactive authentication was n
 Assert-True $preview.PilotGroupCreationRequested 'Pilot group proposal was not reported.'
 Assert-True $preview.PilotAssignmentRequested 'Pilot assignment proposal was not reported.'
 Assert-True ($preview.PilotAssignmentIntent -eq 'required') 'Pilot assignment intent must be Required.'
-Assert-True ($preview.PackageVersion -eq '0.1.0-preview4') 'Unexpected package version.'
+Assert-True $preview.SupersedenceRequested 'Stable preview did not report the requested supersedence.'
+Assert-True ($preview.SupersedenceType -eq 'update') 'Stable promotion must use in-place update supersedence.'
+Assert-True $preview.ResumeRequested 'Stable preview did not report the requested recovery.'
+Assert-True ($preview.ResumeAppId -eq '22222222-2222-2222-2222-222222222222') 'Stable preview reported the wrong recovery app id.'
+Assert-True ($preview.PackageVersion -eq '0.1.0') 'Unexpected stable package version.'
 Assert-True ($preview.RequiredDelegatedScopes -contains 'DeviceManagementApps.ReadWrite.All') 'Intune scope missing from preview.'
 Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') 'Group scope missing from preview.'
 
@@ -60,6 +77,11 @@ Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') '
     PilotGroupCreationRequested  = $preview.PilotGroupCreationRequested
     PilotAssignmentRequested     = $preview.PilotAssignmentRequested
     PilotAssignmentIntent        = $preview.PilotAssignmentIntent
+    SupersedeAppId               = $preview.SupersedeAppId
+    SupersedenceRequested        = $preview.SupersedenceRequested
+    SupersedenceType             = $preview.SupersedenceType
+    ResumeAppId                  = $preview.ResumeAppId
+    ResumeRequested              = $preview.ResumeRequested
     InteractiveAuthentication    = $preview.InteractiveAuthentication
     ChangesAttempted             = $preview.ChangesAttempted
 }
@@ -67,8 +89,8 @@ Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') '
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCq/dYXjNN6Rzll
-# D73f9xKieqwnSd2cwIi0gUTGZMOAu6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpeAYCv9GRONy9
+# Q48QnORCWkG4WIv64fElOFlPcyb06aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -201,31 +223,31 @@ Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') '
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAPdgqw+ZQtzy5w49NBLuDQUvDYcBBIDKbmwCSx8xs+4MA0GCSqG
-# SIb3DQEBAQUABIIBgBCFuJPN/SpZ4RgCETndVz0KyrwPPHBVZEARV3rqpOpx76QQ
-# Uu4k4pOSqh68ZirWdawyKHdkIfcqBdnuiTQICMJOsaLJoWslbuIdLwP3VTEgfuxb
-# aBymfptzBSiN+lMurf9TC62S6u9qWa3OAsrSw6C1yTBitnM/S5rvGaQBtBJC5CcZ
-# Vyrj10nWp4LOolVg1nElZclnzruIx0fn1etNE6M7RJGDg6f6WOSRPtwCHvv/fZoy
-# QtJa2KNWiIPkObQwFWiv24NVIDBi5Ma+/+Yszr3T3UGydrVQqvjePAPcSu6haWIv
-# JtAJuqiW/SzYneRTiQhVLyaPZpNxbwLIBLuiSXbGl8inGGTFpW0ZOTZLI09/3oj8
-# rfw9cQtgHn8ga80JQY2XRGa9Uq2PZRH1TfywGZ1mvz1/x9WKQPErHlpGTpZF/YWe
-# rXJBSdHkd+WvUcDql4LWlaA+sxplMuiuBygLT/yX6Zb6dlF812j5gSZ0/pH1HAd0
-# NSlcRuVEM2mjI4Pji6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL15+aCV+zZMYofJ4Ev70v/FzUljcCRnHSqgygl4uugCMA0GCSqG
+# SIb3DQEBAQUABIIBgCASNr3RoIYbqOqYKZSilY4te/DxUkihPyXJ+eGhSZfXAP2n
+# dHy9wKMT6AZDPF+HBvrVgH49od2QvX0quZ1S8b0ARkDdcxkTloFsjqqHIRVQ8anG
+# pMrlfp0iQWrWA0HyjBx9pDghFWs+InOeSk29iIlGl7DEID6H5EXEmfHCdsoUr8Dz
+# lByy0rQnL2N7RXJzyAiGevmTKrpJMd1z+IXsw2fE8mF4gkpqDkwOdZAm8pyB04eV
+# p/G/EWaFyqc0+g76k1uy0juAjyWaWq7VD03bU45FWlV1Js0Mh3EEdKIpbN9u0IFf
+# XHYAX+7pGurE0Ym+hDa65I4J5HR0sCKOW9laO6D2OgpxRm0vS9wOvYQDm+W52VUF
+# +svuPn9AgPouaSfKhRGvZ9JQyrUz0RjKN8tsJGBsRY9dbfVP6WwG02STWuc8HNAK
+# 1DmuCIehZaDnUj4sofxJmbQ1ic5VqsbAsiCstdHxPYSWl+hiIIH1od/dBKbi9+rI
+# 0hYQshiVkJyyOepqcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMzA2
-# NTVaMC8GCSqGSIb3DQEJBDEiBCC8gmzry66l+EbaKIH7RRe4b2pfejYsQk8UOH3l
-# ZjKYtjANBgkqhkiG9w0BAQEFAASCAgChl8QX3pyvnCxTZnTEdSV2YdKUER/SRAdS
-# CY5zxUoQZOnzKR+7M3PN3uSeud3OgrVGsu8zMYaz9PuUgjcazElPPRQj5ertZvbY
-# yeiX9XnQMDg3fsCNJvjzo6Dz3XEW9wTyU/LAS41eXFipE+xI3KLj1mIrxrpOlJxV
-# B43kA8VDnSo2FzaxOYil/xWElJZe8egArKxV7mKJzy6+aA8juvjn2JMov1p6HMzO
-# rcDMdsj4e8fiKgQBmS0JKfTik/LDuUXrKAsQHSdt12a7LmjigBP7Xk/D/TYpq78L
-# 6rNGlYuHFhgFBKODOsB/TdUwiIL94/2OkWoV4ZsSvGyZFKfQTezfgedZCotCAB8G
-# vBt2FKK7hSFN1L16SQRAQxNEispMQpB2DAqZmdjjvMskMgCHpaeAV6QY6ntvEC/V
-# IcqGdebi64TGNEFrCjPHPM9kMfxnb7uvNUHsQ3yS99bZ9gHhKc7oOtUkDmGXOVxK
-# tY8ULv1u7q4rcYhl0qfPhrYH1nMZDh4NcRhohARxVIhTexVUKY4H4GlnoQwIPMqz
-# DCN4pOWEeWaOo35j3JR05c8DKHocvG9JKz0rPOp3QBrLrXli1vXoO9mlrlN/t6vO
-# y72TMnNCss3jKpEM1tnIiw9nl+/U2TPUC2dLff38U2AS2anOvVmh+WDiUMpG97YU
-# VYJwihOwwQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkxMDAx
+# MzFaMC8GCSqGSIb3DQEJBDEiBCBGrPhzZH3TeBz3yBVbViAUIcaOBlWXatgpbHqG
+# DntUQjANBgkqhkiG9w0BAQEFAASCAgDKJarormBdolPCuZd/JUH+6Qs7qWMGpePf
+# tXnNcupSe1dRd1WReQHrto+ZjoBF/nz7pWwSn90f3WNvvV+bXsxzgZiwaLrhJxVJ
+# mOryC+ZcyOloxei81qTPjRfQtcJmqs9ya2W1d0/UkwX0gYfQ/Wl5I7cXO04bYWR4
+# TglOOmYdEUCZ6MFyqrot/44y8EUD5wjWPJHbEqxSIblYgqbEASkhGPzQfIaHGUCf
+# MCZ2S6exqVcmbuP2prxXsPWJekLYncDvNmmhik6dO72093lPpPcO9lpBnGzEUq2V
+# Y2PdO1Ly39/1bKGKjEdjaOZIMX8j+kuz8myFyqwuQbs5HE/jlm9/vez5isO9dEUo
+# E7HItSQ6s+1c3Tr60H7TagvuqP23nVuJpKd6GvKEHeL058ER5JwJUoky48NZBvQ4
+# 1xYF6iBRSFGyd0RRjK5q3ez75yNpX4Xol8FmbeR39Sb9zB76jdkjIT6/ZQuhhkfm
+# zAUkr9+DmdLPzljfTJpas0rof0M2UWLnKelZ/kA0hgySJSR8dvD10DVthYmkkll9
+# S65eG++e+8IP54OYYaeGf2ulr0xKQ9plQruzgB1V0/vBvli+ET9Rc5A8beLiLrNF
+# XdsGPq2Axg4enRFwOv+3OsP7iTdvJ0SGVKy91AvXZFcYmogMmAsHQ4EIR+VcdbJl
+# waPm9PP7tg==
 # SIG # End signature block

@@ -7,7 +7,7 @@ Previews or publishes the Device Reboot Manager package to PowerShell Gallery.
 .DESCRIPTION
 The default mode is local validation only. Public publication requires
 -Execute, an API key stored in the selected environment variable, prerelease
-confirmation, complete public metadata, and PowerShellGet v3/PSResourceGet.
+approval when publishing a prerelease, complete public metadata, and PowerShellGet v3/PSResourceGet.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
@@ -36,12 +36,8 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 }
 
 $manifest = Test-ModuleManifest -Path $manifestPath
-$prerelease = [string]$manifest.PrivateData.PSData.Prerelease
-$licenseProperty = $manifest.PrivateData.PSData.PSObject.Properties['LicenseUri']
-$licenseUri = if ($licenseProperty) {
-    [string]$licenseProperty.Value
-}
-else { '' }
+$prerelease = [string]$manifest.PrivateData.PSData['Prerelease']
+$licenseUri = [string]$manifest.LicenseUri
 $metadataComplete = -not [string]::IsNullOrWhiteSpace($licenseUri)
 
 $preview = [pscustomobject]@{
@@ -88,8 +84,8 @@ $preview
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzn5O2sd1q09Tz
-# GqFiiWmBlerTnSCmy1pHl7oFObEv4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfzpNB0kbXjcQa
+# eWlGK1hJxDKdW0iBab8fNjxqGbLAxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -222,31 +218,31 @@ $preview
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDFyzflm/aZQ7NNcL832SE+EHRp7AZ1cHKkjHor8dVhDMA0GCSqG
-# SIb3DQEBAQUABIIBgHu7MYUPxKCbsDEKzJSLP2QVrTh11X+pUrp0p19scKdLP+eJ
-# dI3+oDrH4xxZB7rLs6DevJWe1rdYwiAPBliSTf+dU1gqsKy6AjEOzO5IYYK62wlc
-# z5EKG7vmU8lO9xiV8SM2pXtNNkPT8meatIr+Xg4ZOeqOP1yxwTLI4V0cIb50kXPO
-# YdxmlKtgjv/QISuFUSHt6IEQr4BmRRnQWxya8kDsGaw/2x6+Jf9Jx64T0SYrqRi7
-# 69zN5VhClItUAaFMocCQSRarTo+mM6v/aCAbaY++d/oHHR6CDyx1rjEWGaqXEhHO
-# dKw3pFiWWBMAsjHkyBPOjSwgKOX8JnqrryaVt9vf7zTH5h6wf64jpE+rJO661BZm
-# ev95Jh8pWkZCFtlml+Vlb5dMAOm+U21iD6H7rp5ycKhmR+v/P795+LNEWj7a5Pe8
-# k/4BllP12T9aWxxJRSEuInaBb6LBtNhaH8HyTiPws7m/uu5ZqznMvjkcZt/3aETP
-# XHBT8LhGdPA0lP5N7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIZuPbwqTm4cybci6XAs9Mx7G4mWBqzTJWLnWv8RviFPMA0GCSqG
+# SIb3DQEBAQUABIIBgKDCGJx1taQWhI70fgMwwg6bbLRcbzmXLQ8+RO4lG02cP67+
+# naPQxL2t/vZ9Bd5U69MEcmhqe2eD/L8/zhxRCN2i43V0yb9wOyuqigpd8eYLiaFx
+# d96OTaYlqBudPyMjHNVnedTYp4eHynZqVdVOgArdP/2Aoz74wXY6f2jv3sAb58rp
+# /vBWg4QnaQ4/y67gFkCLOtYxGZO7JkWFeqiU5CllbP1j5YanwAoJYi8DNquk6I6Y
+# E2XT22/es7J6GYDcLh1R5YD0QID2zT4q6jyL9EAKOt7b6raoroeML/IAfzZZ8pGW
+# cUeGo46H+uL4mPuNCd4HVHlqUwx0gQ+6+bf+8TkytdO/t2CagaNgJ3W8NDAyN7Js
+# BYWrbmSv2Iw7cnffS9+hkJNr67yutMEr5cnURoBz8Ie4c0Jv6UXBrq1X4CsdKKLU
+# Uc4IHKH0KCgQeCSHlzb7dCyNNmOamKjqp33cZA4kcmQ0MtTF9CXiWvZBtpr+x8nE
+# oGWLGkaAhxCCxPoOUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMTEx
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCQgsG/hwKXY3tbsPkcnkSYTRpvpdzxoNPfrG6F
-# iV/5VTANBgkqhkiG9w0BAQEFAASCAgDBv0CA9Jh5hGQPoAp7hyNcdOMtoh5NZ9FV
-# rqYysSzW/2P8GZ496xljtKr2sZcC73rwFyR6R2WGEuh3ytKqji8TzOif+XrvTrek
-# qPdipii6iJCxKMQFoXzTRpU9bpLfqOSfLSX3lpa+GwQe4aXc2QZZtxH/R8ZJvTIZ
-# nxO9GeRTPo7IBTbJLDXFvffah6vscsugt//fZQhEt7H+6tAApFvhuUv54xp402Ck
-# W91rHIdc8m6InS2dA8Ksp3BDKqfpvNHejZ/r0AlSLyFZckagVC82YfQ5ZMoLvE3V
-# 8sNu5fMB1E2VJujklehXeUbGJpViDqtawxGMVJ4DjWX5z8ngNqS1ICYdaT+1t5Ta
-# t3YQIcWLB+EDvIQq5rcxUw7HVhoOHEYgdu97ZPpB5gcxbF3MlF4Q8JNmvgQW/nQ0
-# 6vGJiS61gj8KT8OpxkLDc1exayTIwdPuajr9svi4avf3a/CS5Unn0Yj9wPbzkapn
-# In/CotXuYXVH/cwh9ru7TRyR5ILKoBLOg44/Jx99ezv9Kcl2apTegrInMufkr16H
-# vecBNBx4Ed39Ux2aIIJQrTFmZbPa54NL8vmij1HEAw7ws65VKjqvKu4dt6rp9k7R
-# YY5I+vuA8IlqBD2pQCT8SOnSjsP1Uj35xgtjJvwErsykycVZTnnnlnlHeaBuCjE8
-# TgHp5TcaKg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkwNzU4
+# NDJaMC8GCSqGSIb3DQEJBDEiBCADmS4m2L0bfK+G3QAkOgR/m4SSxGb6t7Q2jvjy
+# QejK/DANBgkqhkiG9w0BAQEFAASCAgCjdkd5gzSp7ReNDi8Lyu3XZWpgriWlFs6R
+# wf9pMh5d8izJuy3Y/Q1hv0j9f4lE48A2Hg8bVvJPf1JZxJTphqYxlHCiNRUxZyDN
+# jGUnGWiMntcRQ5d3H5ZDC4PPZKr731ve75ETh8n7VjMAfEH9UWGiwJ5k980O640X
+# pJnij5D5TLFzExYlMqc+WhDDMAOwjfjj8eR1S8PlK47wGFH+ACC/zOtL0vdLMBX3
+# EDT2CRzmcwzoYplxs+VPoxaW1QDdreuqI1V9eNpk9A166JdqF8WgdIIJil7a5JZD
+# spE2nBlp0s6BKEoC48ZBfEyo5OIRjbxBeg4dXLE5BBH0Oq3O8eXVMAzt/l8tTfyq
+# ZG6leNGAca2BkTy5zyrTShVvWP0qdkASLM7XS4qOMun2uuyISUqCC4YOvIx4hy3i
+# YAzYvANCghYmsRcqi2MOGqkiCMOurDteO+gqHic5iVRk6UZMXLZ0mr3QloFXqYgz
+# EA1F7fj5jLAeq4myIfBTAOCjdrDvHa0os2DajbrvhsK/miPAjnSGGisN6BwrMmZZ
+# FfYqLCN7zr80H+xKw4NtMT3oAEnZjKwPkO+CguNJBqSAIf1Z9ZBuvMvqxgVdzXZs
+# 5negJGLkT2my6PWUfuHkTDCbW+7wuE+hygLmE07bijx3c6ciGXttMcxgCZpN8QmQ
+# hoVWecNYUQ==
 # SIG # End signature block

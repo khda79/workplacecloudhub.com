@@ -70,7 +70,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-Devic
 
 Use `Deploy\SmartM365-DeviceRebootManager-Detection.ps1` directly as the
 Intune custom detection script. Its default expected version is
-`0.1.0-preview4`; update that value for every new Intune package:
+`0.1.0`; update that value for every new Intune package:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-Detection.ps1
@@ -108,19 +108,21 @@ Preview the publication and proposed pilot group:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass `
     -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
-    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0-preview4.intunewin
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0.intunewin
 ```
 
-Publish the app, create or reuse the proposed assigned security group, and
-assign the app as `Required` only to that pilot group:
+Publish the stable app, supersede the prior preview as an in-place update, reuse
+the assigned security group, and assign the stable app as `Required`:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass `
     -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
-    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0-preview4.intunewin `
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.0.intunewin `
     -TenantId <tenant-id> `
-    -CreatePilotGroup `
+    -PilotGroupId <pilot-group-id> `
     -AssignPilotGroup `
+    -SupersedeAppId <preview-app-id> `
+    -SupersedenceType update `
     -Execute
 ```
 
@@ -132,9 +134,18 @@ and an administrator account with matching Intune/Entra permissions are still
 required.
 
 The script creates a version-specific Intune app, embeds the signed detection
-script, uploads and commits the encrypted content, and creates the pilot
-assignment individually through Graph. It does not enable the local Gallery
-updater and does not replace other app assignments.
+script, uploads and commits the encrypted content, optionally creates an Intune
+supersedence relationship, and creates the pilot assignment individually through
+Graph. For upgrades of the same product, use `-SupersedenceType update` so the
+new installer performs the in-place update without first uninstalling the old
+version. The script does not enable the local Gallery updater and does not
+replace other app assignments.
+
+If publication fails after the app content is committed, rerun with
+`-ResumeAppId <incomplete-app-id>`. The script validates the existing app name,
+publisher, package-version notes, and committed content version before it resumes
+supersedence and assignment. It does not upload the package or create another app
+in recovery mode.
 
 To recreate only the scheduled task on an already installed device:
 
@@ -142,10 +153,10 @@ To recreate only the scheduled task on an already installed device:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1 -RepeatIntervalMinutes 240
 ```
 
-## PowerShell Gallery pilot
+## PowerShell Gallery stable package
 
-The local pilot package is `SmartM365.DeviceRebootManager` version
-`0.1.0-preview4`. It is not published to PowerShell Gallery yet.
+The stable package is `SmartM365.DeviceRebootManager` version `0.1.0`. It is not
+published to PowerShell Gallery yet.
 
 Build and validate the package locally:
 
@@ -159,24 +170,22 @@ Preview publication without sending anything to PowerShell Gallery:
 .\PowerShellGallery\SmartM365-Publish-DeviceRebootManagerGalleryPackage.ps1 -ForceBuild
 ```
 
-Public publication remains blocked until the package name and license are
-approved and `LicenseUri` is added to the manifest. After approval, the API key
-must be supplied through `PSGALLERY_API_KEY`; it must never be written in a
-script or committed:
+Public metadata includes the repository GPL-3.0 license. Publication still
+requires an explicit `-Execute` and an API key supplied through
+`PSGALLERY_API_KEY`; the key must never be written in a script or committed:
 
 ```powershell
 $env:PSGALLERY_API_KEY = '<temporary-api-key>'
 .\PowerShellGallery\SmartM365-Publish-DeviceRebootManagerGalleryPackage.ps1 `
     -ForceBuild `
-    -Execute `
-    -AllowPrereleasePublication
+    -Execute
 ```
 
 Once the package is published, an elevated Windows PowerShell session can
-install the preview and deploy the app:
+install the stable package and deploy the app:
 
 ```powershell
-Install-Module SmartM365.DeviceRebootManager -Repository PSGallery -Scope AllUsers -AllowPrerelease -Force
+Install-Module SmartM365.DeviceRebootManager -Repository PSGallery -Scope AllUsers -Force
 Import-Module SmartM365.DeviceRebootManager
 Install-SmartM365DeviceRebootManager
 ```
@@ -190,9 +199,9 @@ Install-SmartM365DeviceRebootManager -EnableAutomaticUpdate $true
 
 When enabled, the deployment registers
 `\SmartM365\Device Reboot Manager Update` under `SYSTEM`. Every 24 hours, it
-checks PowerShell Gallery, validates every packaged PowerShell file against the
-pinned WorkplaceCloudHub signer, preserves the local runtime configuration,
-and redeploys the runtime.
+checks the stable PowerShell Gallery channel by default, validates every
+packaged PowerShell file against the pinned WorkplaceCloudHub signer, preserves
+the local runtime configuration, and redeploys the runtime.
 
 Operational commands:
 
