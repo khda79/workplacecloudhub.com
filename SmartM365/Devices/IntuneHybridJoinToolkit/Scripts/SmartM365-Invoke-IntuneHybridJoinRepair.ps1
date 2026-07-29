@@ -69,7 +69,7 @@ Seconds to wait after startup before the SYSTEM retry task resumes the repair. D
 Maximum number of startup-task resume attempts before the retry state is removed. Defaults to 3.
 
 .VERSION
-2.10.38
+2.10.39
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -101,7 +101,7 @@ param(
     [switch]$RetryAfterRebootTaskRun
 )
 
-$ScriptVersion = "2.10.38"
+$ScriptVersion = "2.10.39"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -1223,21 +1223,22 @@ function Get-ParsedDsregStatusSnapshot {
         [Parameter(Mandatory=$true)][string]$PhaseLabel
     )
 
-    $tempStatus = Join-Path $env:TEMP ("dsreg_status_{0}_{1}.txt" -f $PhaseLabel, $RunIdValue)
-
     Write-RunLog ("Running dsregcmd /status snapshot. Phase={0}" -f $PhaseLabel)
-    $null = Invoke-DsregStatusToFile -DsregcmdPath $DsregcmdPath -TempFilePath $tempStatus
-    Start-Sleep -Seconds 2
-
-    if (-not (Test-Path $tempStatus)) {
-        throw "dsregcmd /status output file not found (Phase=$PhaseLabel)."
+    if (-not (Test-Path -LiteralPath $OutputDirPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $OutputDirPath -Force -ErrorAction Stop | Out-Null
     }
 
-    $lines = Read-DsregStatusLines -TempFilePath $tempStatus
+    $lines = @(& $DsregcmdPath /status 2>&1 | ForEach-Object { [string]$_ })
+    if (@($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -eq 0) {
+        Start-Sleep -Seconds 2
+        $lines = @(& $DsregcmdPath /status 2>&1 | ForEach-Object { [string]$_ })
+    }
+    if (@($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -eq 0) {
+        throw "dsregcmd /status output was empty after retry (Phase=$PhaseLabel)."
+    }
 
     $copy = Join-Path $OutputDirPath ("{0}_dsreg_status_{1}_{2}.txt" -f $ComputerNameValue, $PhaseLabel, $RunIdValue)
-    Copy-Item -Path $tempStatus -Destination $copy -Force
-    Remove-Item -Path $tempStatus -ErrorAction SilentlyContinue
+    $lines | Set-Content -LiteralPath $copy -Encoding UTF8 -Force -ErrorAction Stop
 
     return (Parse-DsregStatus -Lines $lines)
 }
