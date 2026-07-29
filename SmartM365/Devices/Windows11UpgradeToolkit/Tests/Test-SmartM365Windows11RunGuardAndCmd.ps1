@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.1
+1.7.2
 #>
 
 #requires -Version 5.1
@@ -41,10 +41,66 @@ function Import-ScriptFunction {
 $toolkitRoot = Split-Path -Parent $PSScriptRoot
 $sourceToolkitRoot = $toolkitRoot
 $orchestrator = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1'
+$endpoint = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1'
 $gui = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-W11UT-RunGuardCmd-{0}' -f [guid]::NewGuid().ToString('N'))
 
 try {
+    foreach ($functionName in @(
+        'Get-SystemInstallLanguageTag',
+        'Resolve-SetupLanguageRequirement',
+        'Get-SetupMediaLanguages',
+        'Resolve-SetupSourceMediaPath'
+    )) {
+        Import-ScriptFunction -Path $endpoint -Name $functionName
+    }
+
+    $global:SyntheticInstallLanguage = '040C'
+    $global:SyntheticLanguageLogs = New-Object System.Collections.ArrayList
+    function global:Get-RegistryValue {
+        param([string]$Path, [string]$Name)
+        if ($Name -eq 'InstallLanguage') { return $global:SyntheticInstallLanguage }
+        return $null
+    }
+    function global:Get-WinSystemLocale {
+        [CmdletBinding()]
+        param()
+        return [pscustomobject]@{ Name = 'fr-CH' }
+    }
+    function global:Write-SmartLog {
+        param([string]$Message, [string]$Level = 'INFO')
+        [void]$global:SyntheticLanguageLogs.Add(('{0}:{1}' -f $Level,$Message))
+    }
+
+    Assert-Equal -Actual (Resolve-SetupLanguageRequirement -RequestedLanguage 'MatchSystem') -Expected 'fr-FR' -Message 'MatchSystem prioritizes InstallLanguage 040C over SystemLocale fr-CH'
+    Assert-True -Condition (@($global:SyntheticLanguageLogs | Where-Object { $_ -match 'InstallLanguage=040C; InstallCulture=fr-FR; InstalledUICulture=.*; SystemLocale=fr-CH' }).Count -gt 0) -Message 'language diagnostics retain InstallLanguage, UI culture, and SystemLocale evidence'
+
+    $global:SyntheticInstallLanguage = ''
+    Assert-Equal -Actual (Get-SystemInstallLanguageTag) -Expected ([System.Globalization.CultureInfo]::InstalledUICulture.Name) -Message 'InstalledUICulture is used when InstallLanguage is unavailable'
+
+    $languageMediaRoot = Join-Path $testRoot 'language-media'
+    $frMediaRoot = Join-Path $languageMediaRoot 'fr-FR'
+    New-Item -ItemType Directory -Path (Join-Path $frMediaRoot 'sources') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $frMediaRoot 'sources\lang.ini') -Encoding ASCII -Value @(
+        '[Available UI Languages]'
+        'fr-FR = 3'
+    )
+    Assert-Equal -Actual (Resolve-SetupSourceMediaPath -SourcePath $languageMediaRoot -ExpectedLanguage 'fr-FR') -Expected $frMediaRoot -Message 'exact language in sources lang.ini selects the media folder'
+    $strictLanguageMismatchRejected = $false
+    try {
+        Resolve-SetupSourceMediaPath -SourcePath $languageMediaRoot -ExpectedLanguage 'fr-CH' | Out-Null
+    }
+    catch {
+        $strictLanguageMismatchRejected = $_.Exception.Message -match 'contains language fr-CH in sources\\lang\.ini'
+    }
+    Assert-True -Condition $strictLanguageMismatchRejected -Message 'sources lang.ini validation remains strict and rejects fr-CH when only fr-FR is present'
+
+    Remove-Item -Path Function:\global:Get-RegistryValue -Force
+    Remove-Item -Path Function:\global:Get-WinSystemLocale -Force
+    Remove-Item -Path Function:\global:Write-SmartLog -Force
+    Remove-Variable -Name SyntheticInstallLanguage -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name SyntheticLanguageLogs -Scope Global -ErrorAction SilentlyContinue
+
     Import-ScriptFunction -Path $orchestrator -Name 'ConvertTo-TechnicianRunGuardUtcDateTime'
     Import-ScriptFunction -Path $orchestrator -Name 'Test-TechnicianRunGuardEndpointBypassEligible'
     foreach ($functionName in @(
