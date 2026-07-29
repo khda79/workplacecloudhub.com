@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.55
+    0.1.56
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.55'
+$script:ScriptVersion = '0.1.56'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -1080,30 +1080,42 @@ function Invoke-AssignedUpdateInstall {
 }
 
 function Get-SystemInstallLanguageTag {
+    $installLanguageCode = ''
+    $installCultureName = ''
+    try {
+        $languageKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language'
+        $installLanguageCode = [string](Get-RegistryValue -Path $languageKey -Name 'InstallLanguage')
+        if (-not [string]::IsNullOrWhiteSpace($installLanguageCode)) {
+            $lcid = [Convert]::ToInt32($installLanguageCode, 16)
+            $installCultureName = ([System.Globalization.CultureInfo]::GetCultureInfo($lcid)).Name
+        }
+    }
+    catch { }
+
+    $installedUiCultureName = ''
+    try {
+        $installedUiCultureName = [string][System.Globalization.CultureInfo]::InstalledUICulture.Name
+    }
+    catch { }
+
+    $systemLocaleName = ''
     try {
         $systemLocale = Get-WinSystemLocale -ErrorAction Stop
         if ($systemLocale -and -not [string]::IsNullOrWhiteSpace($systemLocale.Name)) {
-            return [string]$systemLocale.Name
+            $systemLocaleName = [string]$systemLocale.Name
         }
     }
     catch { }
 
-    try {
-        $languageKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language'
-        $installLanguage = [string](Get-RegistryValue -Path $languageKey -Name 'InstallLanguage')
-        if (-not [string]::IsNullOrWhiteSpace($installLanguage)) {
-            $lcid = [Convert]::ToInt32($installLanguage, 16)
-            return ([System.Globalization.CultureInfo]::GetCultureInfo($lcid)).Name
-        }
-    }
-    catch { }
+    Write-SmartLog ("Windows setup language detection: InstallLanguage={0}; InstallCulture={1}; InstalledUICulture={2}; SystemLocale={3}." -f $installLanguageCode,$installCultureName,$installedUiCultureName,$systemLocaleName)
 
-    try {
-        return [System.Globalization.CultureInfo]::InstalledUICulture.Name
+    if (-not [string]::IsNullOrWhiteSpace($installCultureName)) {
+        return $installCultureName
     }
-    catch {
-        return ''
+    if (-not [string]::IsNullOrWhiteSpace($installedUiCultureName)) {
+        return $installedUiCultureName
     }
+    return ''
 }
 
 function Resolve-SetupLanguageRequirement {
@@ -1113,12 +1125,12 @@ function Resolve-SetupLanguageRequirement {
     $normalized = $RequestedLanguage.Trim()
     if ($normalized -in @('Any','None','Disabled')) { return '' }
     if ($normalized -in @('Auto','MatchSystem','System')) {
-        $systemLanguage = Get-SystemInstallLanguageTag
-        if ([string]::IsNullOrWhiteSpace($systemLanguage)) {
-            throw 'Unable to detect the installed Windows system language required for setup media validation.'
+        $installLanguage = Get-SystemInstallLanguageTag
+        if ([string]::IsNullOrWhiteSpace($installLanguage)) {
+            throw 'Unable to detect the installed Windows UI language required for setup media validation.'
         }
-        Write-SmartLog ("Setup language requirement resolved from system language: {0}" -f $systemLanguage)
-        return $systemLanguage
+        Write-SmartLog ("Setup language requirement resolved from installed Windows language: {0}" -f $installLanguage)
+        return $installLanguage
     }
 
     try {
