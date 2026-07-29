@@ -45,6 +45,10 @@ try {
     Assert-True ($updateHelperText -match '\[bool\]\$EnableAutomaticUpdate\s*=\s*\$false') 'Update helper must disable automatic updates by default.'
     Assert-True ($moduleSourceText -match '\[Nullable\[bool\]\]\$EnableAutomaticUpdate\s*=\s*\$null') `
         'Manual update must preserve the existing automatic-update state by default.'
+    Assert-True ($moduleSourceText -match '\[bool\]\$IncludePrerelease\s*=\s*\$false') `
+        'Stable module must not select prerelease updates by default.'
+    Assert-True ($updateHelperText -match '\[bool\]\$IncludePrerelease\s*=\s*\$false') `
+        'Stable update helper must not select prerelease updates by default.'
 
     $scheduledTaskScriptPath = Join-Path -Path $productRoot -ChildPath 'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
     $scheduledTaskScriptText = Get-Content -LiteralPath $scheduledTaskScriptPath -Raw
@@ -66,12 +70,13 @@ try {
     $sourceManifestPath = Join-Path -Path $moduleSourceRoot -ChildPath 'SmartM365.DeviceRebootManager.psd1'
     $sourceManifest = Test-ModuleManifest -Path $sourceManifestPath
     Assert-True ($sourceManifest.Name -eq 'SmartM365.DeviceRebootManager') 'Unexpected module name.'
-    Assert-True ([string]$sourceManifest.PrivateData.PSData.Prerelease -eq 'preview4') 'Unexpected prerelease label.'
+    $sourcePrerelease = [string]$sourceManifest.PrivateData.PSData['Prerelease']
+    Assert-True ([string]::IsNullOrWhiteSpace($sourcePrerelease)) 'Stable manifest must not contain a prerelease label.'
 
     $versionManifestPath = Join-Path -Path $productRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json'
     $versionManifest = Get-Content -LiteralPath $versionManifestPath -Raw | ConvertFrom-Json
     Assert-True ([int]$versionManifest.SchemaVersion -eq 1) 'Unexpected package version schema.'
-    Assert-True ([string]$versionManifest.PackageVersion -eq '0.1.0-preview4') 'Version manifest and module prerelease differ.'
+    Assert-True ([string]$versionManifest.PackageVersion -eq '0.1.0') 'Version manifest and stable module version differ.'
 
     $buildScript = Join-Path -Path $galleryRoot -ChildPath 'SmartM365-Build-DeviceRebootManagerGalleryPackage.ps1'
     $buildResult = & $buildScript `
@@ -79,7 +84,7 @@ try {
         -Force `
         -SkipAuthenticodeValidation:$SkipAuthenticodeValidation
     Assert-True $buildResult.Ready 'Build did not report Ready.'
-    Assert-True ($buildResult.PackageVersion -eq '0.1.0-preview4') 'Build package version is incorrect.'
+    Assert-True ($buildResult.PackageVersion -eq '0.1.0') 'Stable build package version is incorrect.'
     Assert-True (Test-Path -LiteralPath $buildResult.IntuneSourcePath -PathType Container) 'Intune source path was not created.'
 
     $requiredPackagePaths = @(
@@ -135,17 +140,22 @@ try {
     $preview = & $publishScript -PackagePath $buildResult.PackagePath
     Assert-True ($preview.Mode -eq 'Preview') 'Publish script did not stay in Preview mode.'
     Assert-True (-not $preview.PublicationAttempted) 'Preview unexpectedly attempted publication.'
-    Assert-True (-not $preview.PublicMetadataComplete) 'LicenseUri guard should block public publication in this pilot.'
+    Assert-True $preview.PublicMetadataComplete 'Stable package must include approved public license metadata.'
 
+    $missingApiKeyVariable = "SMARTM365_TEST_MISSING_API_KEY_$([guid]::NewGuid().ToString('N'))"
     $publicationGuardTriggered = $false
     try {
-        & $publishScript -PackagePath $buildResult.PackagePath -Execute -AllowPrereleasePublication -Confirm:$false | Out-Null
+        & $publishScript `
+            -PackagePath $buildResult.PackagePath `
+            -ApiKeyEnvironmentVariable $missingApiKeyVariable `
+            -Execute `
+            -Confirm:$false | Out-Null
     }
     catch {
-        $publicationGuardTriggered = $_.Exception.Message -like '*public metadata is incomplete*'
+        $publicationGuardTriggered = $_.Exception.Message -like '*API key environment variable is empty*'
         if (-not $publicationGuardTriggered) { throw }
     }
-    Assert-True $publicationGuardTriggered 'Execute mode was not blocked by the missing LicenseUri.'
+    Assert-True $publicationGuardTriggered 'Execute mode was not blocked when the API key was absent.'
 
     [pscustomobject]@{
         Result                 = 'PASS'
@@ -175,8 +185,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFyy5/wBF1TmRm
-# v6gMmZo6Rp3s2L+t5G5F2Gu+yeme9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6Shnq55fVHW22
+# CaJWSoQ9KEQdZT/EJwXPoSswuqhpJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -309,31 +319,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKAu/3KgJpD91vNvAy9UqSCYA9ZaiMU0ka4EvLtzGc9QMA0GCSqG
-# SIb3DQEBAQUABIIBgJxgCPHzBtrpTF5iOFzC8RL0Z6Dzkj6uR6LvHsNUKAz7V0UA
-# nydjvx4m5yqKATR+jUF4+lw3QAoduD5VJJ9v2Mj3IzfebgVdce3Wa6Q5Kd3ZKOII
-# 90GWQ/hkISHeVgICxqkx/GDyEGHTAamNDHhkI0o8HDQLNCmvkgpmOo0+tWNn/Jyh
-# k65fcCMn7zK5E2kRpqLk+Tma+sTm+gpyaqkxQW1s3TuEi1p/YCPAj6cCfdOobg10
-# s9R0pGUjj4fNVwpgIa7V8L+8aBYaIGDQ1j4ri4rMQ2lB9xdXhvOuLR7rOy0O4Heo
-# XQ3/7JOlAC/HV5SEMPdiCDHARKe+SI7u5eU90CA7G83bvwZkQ5Tf+66n5RKR0rNL
-# h91cXmovqEdn6EUSjW1b5E2rGldWamEFHeF9C7RSqtYo0d47oqTHMtNK8MTRvGPZ
-# 5yqyp4Uabto3HONWwYt2m0I4/eEbrdAeg/3QS5ZUBmjBIkVCpX1MQIirqx22m+cs
-# I/halAUR/ZIZ+lePD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJEb2WrHBHftoUDSvnZbJwyXi3zvsTP36Df+hbcQge11MA0GCSqG
+# SIb3DQEBAQUABIIBgEW0IAG8QPUFQx/CzGUMvH8v+T2JxycA9OVnNWJFGpPZot4O
+# w2ci+dUyJfHy6KKZmp5yJZJl+yKp/R8e9+7R1+CXJFw9rsv8shBULD8UAV+8w6pN
+# V5FQcjGYIhMJjdYNg11+u6ARtFUkGisbcftsGT3m8I+HRsX8IcnA7heSuZH9embH
+# tjYZ4DsV5wyYcdDXI63SeXx+99ksRxKocJ4wtOek7wFvyThlJXJ4I8h7AQZhWfBc
+# l8BlroHgicC3ubFxBiXZyIx9xT1TomCQ0L2ph5eLq9KxYwmu9+TLUCtFF5PGN5Hg
+# Vo8fi8MUJ/l7OuuRcMveYNUeAXMXlWLN65pWqljapO9TBnYeb4ZUPnKv9QHZVVQD
+# 8WFTindZL+7cTjotnJgJmbWpukwBWWSnSJlwFHZ6O26cQJGS6jIfPEs35lsEzZST
+# g2lZnrRTw7Aug1XpU+OocNkvHUFk442jE3y6g+ZUb5r/+2ka0MNtpop/sqr2qSeS
+# COgvixgIOGNf9NUqk6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMjIz
-# MDlaMC8GCSqGSIb3DQEJBDEiBCACmRXune2iF25wyxwfBEiX8Y5auZibka3bxo04
-# 1ZKyTTANBgkqhkiG9w0BAQEFAASCAgCK95jBpbyeZDqKvWQYLiIQ4jpGTXb/S5Wr
-# Zfy+wvMFldsytKgX/YToItLj/iykxg+wrWlVxW0Our4UDjw/+OfX387+XY+zmMu0
-# ccZDstboJfVav8/wQv2H+ms/ONbnwezG04+S7Kwj3E8XC+IESDnkZ7mgrLCLlfRS
-# 9V0qCPKqDyq024OmzXeG5JFAgkWBftP7xABaVFl+IzJe1pS929du7MvLiSQGZdGh
-# Au8QH8/MXuO4GlqM2vpLcNbQbCcSKLKqEgh5aVoo2Tar1ksWSHQlUNaWTwZSMnNP
-# RkZCg+uhvQqPguwLIFFNBGRRUpxEdW9Vq0z5nruQ/AK3QGzDAAjGXjFqBkOgj4XQ
-# J5r9Mf2ewTHrJuwZReMcbQLwcb504nRIGnr1AVH+SihAOW+MSpMsTB//GJ41PjFl
-# NyA3Z1cv5b8TI+rIj9uNWNqUqNicQ5J6c0Gvu9Nshv0GdIpEly/mX01KY65F8zkM
-# tU2xflZ/lW4jC/owjYploU1jh1hmXJHEf2LxxV+SP7sotJnppMP/p7XQEJLHV3ok
-# 3o743Vez83j+ZLm5yLqtsinzIM/Q3knycda68L/Lwqi9y65b5p1oQJGsxAEckQWE
-# 9ttarRasxQtW9G2FZQhy0HnrKSzKzwtvNmMVb6q5XxsabwCGM926s6AGlYDlaLk4
-# Y0w2QY5xBg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkwNzU4
+# NDNaMC8GCSqGSIb3DQEJBDEiBCD4LAqpGVkxgs+dS63Un2q0r/D7XUdR+7qeEnD3
+# v5fwhDANBgkqhkiG9w0BAQEFAASCAgB0bSAZp7RjcBrnWzMH+YGQMBne4Q+AoVos
+# 5ibk2yUqyL7fiZIlaVSyAc2C8xBW2nOiwnvWYKtynsfMmRjOHSF5jhIUUmaD6q38
+# +dIguy0RHJUwY4It3KG9oVtAmTwY/2Ngphz9rakV8Mqjh2yqz2gNcP9k6REaa7y/
+# CAy0Shknv7sfG2GxX9BWDDFwkgonKUyiRdZmeu9cnofBj7pYRxmUccnsyzJJ+ucH
+# rClP0cZYopw1LSJak0HEDA/YBvnpqRHwLuil5eZuXHCgGBG+JtzNuB+13lmDrrMI
+# lgJPbIfxhSE5oPqlFsDGlLfePhPlKTDbBFclBYHUrgqxKyTm7xhBGYpfNdNrw8Ni
+# S0aX/cyzW1whTnBzaodypv8N6xZHa9vrdj1O7EIC7BKZYMs0YkTZJca+by27LHX7
+# TtreGdd27ZepC/XRiVIp5Zx9ELy4fJmCJNYUZXcbhVfV1Og0GcOjNS3FPN4hpTmX
+# hMWZVCtf0lDpf/w6pU8jZyQmh3IfVjvCWFI4aPKLUiWvAMQK54dBfRrgrvdi6Nmp
+# 1zx+A3Ga5Df4JyaKsnl6ag+HALMfZHF8XwyNOXeF2QQjNiZlZGaW7iR8Yp7QyCli
+# FufVZIm/xbRE61JFDJg+9Q9IVD9O82QFt6NPI0BnrMeQkpT9S00w+PlRSrBe5aR0
+# Uv+gM+fxkw==
 # SIG # End signature block

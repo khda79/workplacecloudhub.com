@@ -9,7 +9,8 @@
     change. With -Execute, the script connects interactively, creates a new
     Intune Win32 app, uploads and commits the .intunewin content, optionally
     creates or reuses a pilot security group, and optionally assigns the app as
-    Required to that group.
+    Required to that group. Use -ResumeAppId to safely continue a publication
+    that failed after its app content was committed.
 
     The script never replaces an existing assignment set. It creates the pilot
     assignment individually and preserves all other assignments.
@@ -32,6 +33,10 @@ param(
     [string]$PilotGroupMailNickname = 'GG-INTUNE-SmartM365-DeviceRebootManager-Pilot',
     [string]$PilotGroupDescription = 'Pilot devices for SmartM365 Device Reboot Manager.',
     [string]$PilotGroupId = '',
+    [string]$SupersedeAppId = '',
+    [string]$ResumeAppId = '',
+    [ValidateSet('update', 'replace')]
+    [string]$SupersedenceType = 'update',
     [switch]$CreatePilotGroup,
     [switch]$AssignPilotGroup,
     [switch]$AllowDuplicateDisplayName,
@@ -507,6 +512,70 @@ function Resolve-PilotGroup {
     return $group
 }
 
+function Add-AppSupersedence {
+    param(
+        [Parameter(Mandatory = $true)][string]$NewAppId,
+        [Parameter(Mandatory = $true)][string]$SupersededAppId,
+        [Parameter(Mandatory = $true)][ValidateSet('update', 'replace')][string]$Type
+    )
+
+    $relationshipsUri = "$GraphBaseUri/deviceAppManagement/mobileAppRelationships"
+    $existingRelationships = @(Get-GraphCollection -Uri $relationshipsUri)
+    $currentRelationships = @($existingRelationships | Where-Object {
+        [string]$_.sourceId -eq $NewAppId
+    })
+    $existing = @($currentRelationships | Where-Object {
+        [string]$_.targetId -eq $SupersededAppId -and
+        [string]$_.supersedenceType -eq $Type
+    })
+    if ($existing.Count -gt 0) {
+        Write-Step "Supersedence already exists: $NewAppId -> $SupersededAppId ($Type)"
+        return $existing[0]
+    }
+
+    $relationshipSpecs = New-Object Collections.Generic.List[object]
+    foreach ($currentRelationship in $currentRelationships) {
+        if ([string]$currentRelationship.targetId -eq $SupersededAppId) {
+            continue
+        }
+        $odataType = [string]$currentRelationship.'@odata.type'
+        if ([string]::IsNullOrWhiteSpace($odataType) -or
+            [string]::IsNullOrWhiteSpace([string]$currentRelationship.targetId)) {
+            throw 'An existing Intune app relationship could not be safely preserved.'
+        }
+        $preservedRelationship = [ordered]@{
+            '@odata.type' = $odataType
+            targetId      = [string]$currentRelationship.targetId
+        }
+        if ($currentRelationship.PSObject.Properties['supersedenceType'] -and
+            -not [string]::IsNullOrWhiteSpace([string]$currentRelationship.supersedenceType)) {
+            $preservedRelationship.supersedenceType = [string]$currentRelationship.supersedenceType
+        }
+        elseif ($currentRelationship.PSObject.Properties['dependencyType'] -and
+            -not [string]::IsNullOrWhiteSpace([string]$currentRelationship.dependencyType)) {
+            $preservedRelationship.dependencyType = [string]$currentRelationship.dependencyType
+        }
+        else {
+            throw "Unsupported existing Intune app relationship type: $odataType"
+        }
+        $relationshipSpecs.Add($preservedRelationship)
+    }
+
+    $newRelationship = [ordered]@{
+        '@odata.type'    = '#microsoft.graph.mobileAppSupersedence'
+        targetId         = $SupersededAppId
+        supersedenceType = $Type
+    }
+    $relationshipSpecs.Add($newRelationship)
+    $updateBody = [ordered]@{
+        relationships = @($relationshipSpecs.ToArray())
+    }
+    $updateUri = "$GraphBaseUri/deviceAppManagement/mobileApps/$NewAppId/updateRelationships"
+    Invoke-GraphJson -Method POST -Uri $updateUri -Body $updateBody | Out-Null
+    Write-Step "Created Intune supersedence: $NewAppId -> $SupersededAppId ($Type)"
+    return [pscustomobject]$newRelationship
+}
+
 function Add-RequiredPilotAssignment {
     param(
         [Parameter(Mandatory = $true)][string]$AppId,
@@ -568,6 +637,21 @@ if ([string]::IsNullOrWhiteSpace($AppDisplayName)) {
 if ($AssignPilotGroup -and -not $CreatePilotGroup -and [string]::IsNullOrWhiteSpace($PilotGroupId)) {
     throw '-AssignPilotGroup requires -CreatePilotGroup or -PilotGroupId.'
 }
+if (-not [string]::IsNullOrWhiteSpace($SupersedeAppId)) {
+    $supersededGuid = [guid]::Empty
+    if (-not [guid]::TryParse($SupersedeAppId, [ref]$supersededGuid)) {
+        throw "-SupersedeAppId must be a valid GUID: $SupersedeAppId"
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($ResumeAppId)) {
+    $resumeGuid = [guid]::Empty
+    if (-not [guid]::TryParse($ResumeAppId, [ref]$resumeGuid)) {
+        throw "-ResumeAppId must be a valid GUID: $ResumeAppId"
+    }
+    if ($ResumeAppId -eq $SupersedeAppId) {
+        throw '-ResumeAppId and -SupersedeAppId must identify different Intune apps.'
+    }
+}
 
 $detectionScriptContent = Get-Content -LiteralPath $resolvedDetectionScriptPath -Raw
 if ([string]::IsNullOrWhiteSpace($detectionScriptContent)) {
@@ -608,6 +692,11 @@ $preview = [pscustomobject]@{
     PilotGroupCreationRequested = [bool]$CreatePilotGroup
     PilotAssignmentRequested   = [bool]$AssignPilotGroup
     PilotAssignmentIntent      = if ($AssignPilotGroup) { 'required' } else { 'none' }
+    SupersedeAppId             = $SupersedeAppId
+    SupersedenceRequested      = -not [string]::IsNullOrWhiteSpace($SupersedeAppId)
+    SupersedenceType           = if ([string]::IsNullOrWhiteSpace($SupersedeAppId)) { 'none' } else { $SupersedenceType }
+    ResumeAppId                = $ResumeAppId
+    ResumeRequested            = -not [string]::IsNullOrWhiteSpace($ResumeAppId)
     ChangesAttempted           = $false
 }
 
@@ -616,7 +705,7 @@ if (-not $Execute) {
 }
 if (-not $PSCmdlet.ShouldProcess(
         $AppDisplayName,
-        'Publish Intune Win32 app and optionally create/assign the pilot group'
+        'Publish Intune Win32 app, supersede a prior version, and optionally create/assign the pilot group'
     )) {
     return $preview
 }
@@ -647,10 +736,53 @@ if (-not $graphContext) {
 Write-Step ("Connected to Microsoft Graph. TenantId={0}; Account={1}" -f
     $graphContext.TenantId,$graphContext.Account)
 
+$supersededApp = $null
+if (-not [string]::IsNullOrWhiteSpace($SupersedeAppId)) {
+    $supersededApp = Invoke-GraphJson `
+        -Method GET `
+        -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/${SupersedeAppId}?`$select=id,displayName,publisher,notes"
+    if (-not $supersededApp -or [string]$supersededApp.id -ne $SupersedeAppId) {
+        throw "Superseded Intune app could not be validated: $SupersedeAppId"
+    }
+    $matchesProductName = [string]$supersededApp.displayName -like '*SmartM365 Device Reboot Manager*'
+    $matchesPreviewNotes = [string]$supersededApp.notes -like '*PackageVersion=0.1.0-preview4*'
+    if ([string]$supersededApp.publisher -ne 'WorkplaceCloudHub' -or
+        (-not $matchesProductName -and -not $matchesPreviewNotes)) {
+        throw ("Superseded app is not the WorkplaceCloudHub Device Reboot Manager preview. Id={0}; DisplayName={1}; Publisher={2}; Notes={3}" -f
+            $supersededApp.id,$supersededApp.displayName,$supersededApp.publisher,$supersededApp.notes)
+    }
+    Write-Step ("Validated superseded Intune app: {0} ({1})" -f
+        $supersededApp.displayName,$supersededApp.id)
+}
+
 $appId = ''
 $contentVersionId = ''
 $pilotGroup = $null
+$supersedence = $null
 try {
+    if (-not [string]::IsNullOrWhiteSpace($ResumeAppId)) {
+        $resumeApp = Invoke-GraphJson `
+            -Method GET `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/${ResumeAppId}"
+        $expectedVersionNote = "PackageVersion=$PackageVersion"
+        if (-not $resumeApp -or [string]$resumeApp.id -ne $ResumeAppId) {
+            throw "Existing Intune app could not be validated for resume: $ResumeAppId"
+        }
+        if ([string]$resumeApp.displayName -ne $AppDisplayName -or
+            [string]$resumeApp.publisher -ne $Publisher -or
+            [string]$resumeApp.notes -notlike "*$expectedVersionNote*") {
+            throw ("Existing Intune app does not match this publication. Id={0}; DisplayName={1}; Publisher={2}; Notes={3}" -f
+                $resumeApp.id,$resumeApp.displayName,$resumeApp.publisher,$resumeApp.notes)
+        }
+        $appId = [string]$resumeApp.id
+        $contentVersionId = [string]$resumeApp.committedContentVersion
+        if ([string]::IsNullOrWhiteSpace($contentVersionId)) {
+            throw "Existing Intune app has no committed content version and cannot be resumed: $ResumeAppId"
+        }
+        Write-Step ("Resuming existing Intune app: {0} ({1}); committed content version={2}" -f
+            $resumeApp.displayName,$appId,$contentVersionId)
+    }
+    else {
     $existingApps = @(Get-ExistingAppByDisplayName -DisplayName $AppDisplayName)
     if ($existingApps.Count -gt 0 -and -not $AllowDuplicateDisplayName) {
         $existingText = $existingApps |
@@ -785,6 +917,14 @@ try {
         -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" `
         -Body $finalAppBody | Out-Null
     Write-Step 'App metadata and content version committed.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SupersedeAppId)) {
+        $supersedence = Add-AppSupersedence `
+            -NewAppId $appId `
+            -SupersededAppId $SupersedeAppId `
+            -Type $SupersedenceType
+    }
 
     if ($CreatePilotGroup -or -not [string]::IsNullOrWhiteSpace($PilotGroupId)) {
         $pilotGroup = Resolve-PilotGroup `
@@ -812,6 +952,9 @@ try {
         PilotGroupDisplayName   = if ($pilotGroup) { [string]$pilotGroup.displayName } else { $PilotGroupDisplayName }
         PilotAssignmentCreated  = [bool]$AssignPilotGroup
         PilotAssignmentIntent   = if ($AssignPilotGroup) { 'required' } else { 'none' }
+        SupersededAppId         = $SupersedeAppId
+        SupersedenceCreated     = $null -ne $supersedence
+        SupersedenceType        = if ($null -ne $supersedence) { $SupersedenceType } else { 'none' }
         GalleryAutomaticUpdate  = $false
     }
 }
@@ -833,8 +976,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDcRRQibJN07TyA
-# k1JXtda9nhdcXor1TJqsuzl1flP5NqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+j7yeYEOpm3yY
+# 5Na1A63Wd125cBZ/jiELzH3hCOPIRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -967,31 +1110,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILv7kNtHiTfzaz9PgqaxvTzgyvEndCe1SY0EXgX7EwNpMA0GCSqG
-# SIb3DQEBAQUABIIBgEyvlJ0iPmWzJ1nfhqCaKl5Ii6z+5l+VHzgKB9SF2WgF5VsS
-# WRkQK3luOqoG8EpUKMqfNJOBDk6ysVFZ6/YyrJQ1lMVPmv+p9IxEh3hSSVg+kGvk
-# o2NmV+GzZpJ6mIST56HL8YhOfbxzDiH7ybLgJirB9aTMDCc7b5JsXZ3y60B1aKCC
-# Cg0SCV0qoIf9jJSHp9XDjpCxwC2S+9ctBGqjOkqMib9C4bE/TIjclSL0/8AMfLvq
-# /sufp3SA4NEqieqA4niXgW0R8aNT6gj4rc3EL2G1iJXTBIZUVgoi79P9dMeX1zWC
-# jOJD4/vTFZENtq+sscYQUlciIFPACLHtxlIf3OnOnpOhnOxG8LRlnV+xXpKJTvge
-# Lxt32pNTwc1tTtE9uIYcky0GHQij21NwZa98t/eSwEgvc92RdbOwSfZWIYqvZPJE
-# 766q25VzwBHw59EodbpTvApvm+Vj2s9y9TA61vRqQYUpOH2Ep07/4n0WMVDrQY3u
-# F051q9Xymmv3jh0suaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHNQpbY6JGmnJpJcdzQ0v5YRpDGVLyAGsVh8RVsfcU03MA0GCSqG
+# SIb3DQEBAQUABIIBgIABdGUlh5N4uNab+z0Y/qxw26yVFk8xlU5bdo/6r+62T41N
+# ZU9QGaSBFMBeHowI/KsjobY1MJg7ymkHPokiX4IGIR7NslYeqO84HdmBhIOmoG0X
+# 6xjLTRe5X0K/3HV2qLFVbteT2vkxhYPKzAeC3jYaNR+dk3JHAHsFkhRCwLKFnIUm
+# Ol/VUCoe/+KMDLXzHNJKijCzE5+5UGevyCnt6QXR9NjZH6CUqxMjsoAhc9iab8cl
+# 2d0o72Jzfv5assF722Jgvh3fQumqNYYd3eO4gZjUJnVOVj1bLiE+gH/TvfIZ+5KH
+# EBGXcaB8RoD1ofcppOYcwxZ6mnQsnaHqDLEyUK2fSxK3l9SdwdtBz8KVn/EgmbAb
+# xJXcSuSRYFhBElNK8471Ss+LplsGYURhNx/hNFrv9BdllsPNvwCUrmdEX+PuGYWj
+# nLPw56E31lNkULNog6gEM6Jc6Id3F4hqhHzPDgAy9NpPkpADqkH9+tLOgjjoLNj9
+# 3sotdpw3WIXcBDBBGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMzA2
-# NTRaMC8GCSqGSIb3DQEJBDEiBCC/95B/aXfELar93UsFmtrWDhEaqUupqKMwVueg
-# eL3qKTANBgkqhkiG9w0BAQEFAASCAgBssWmpTy6gG1Xy860YO3OLH5WLkbpEGuZn
-# AS5rV5O+dYqdaqmJhmd2cWwpICEBVO2+stxWPVAsXWmSwr25SqQBv1Lom3Frgjuj
-# FZRzhCKfdl8DuIqnYE2VcUCqI9IXknOPF41dEi0AgYTYO60ZgSN7miAE9J3SD18p
-# W0bafCtRuNsLv6fGjcT1/8939DO5rhtCaxo4VJcnP8SDhhnsW54XSg5d+aSqrXaG
-# LjZaLyqwwjQlv2r6KOkKlYgQNbMDHi6y1di3db6H1c6qoBQJNU/xayYZR0WyFYtp
-# 1cfvU25V2LXQqzS4IxXMq4t6jYYsLeTMuw/z5ODMMxiWLerG/cHwVb3ZhNymJvLc
-# pTDgfSyakEXjTcu2NlKHhBMqMWao22S7/wD4CaBOB4On9PNbRveYb+5UVvZmVIik
-# DCILD/ZePCFgAojm7EQ+iwTgPC3p3H96OK62G2jifOYPY8uHMNWBANZrU2j1HNaZ
-# tTCjmElNIAqE8Air6lOxsvanekD7lrutMdvENdN1pJHw5hqV6Lp8nV5Tg8TF8L2f
-# IvZccudBYN0wzBR/fH69RCE+ErkgU5EB5Cwdl/09ssyY0pkhyVxPDmvXwxINnPNp
-# ij+f7ZOjvqQxyV+xggoxoUBH6/Rt2lxix7Ai2Oy12BTPhO/XHL5SzT1s99C8RBDa
-# ztyI4ZLhQA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkxMDAx
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCj0RL/3lWmtIAAV3/QMoFln5ofjFhQaObfKScB
+# XqtQkTANBgkqhkiG9w0BAQEFAASCAgBKcwK9zPCNilctrpQt6OZ/9ryAwK1oqQ3M
+# 8VFd4WfciHUT3e8gvGlNWm8rJLzcvdd+6Z4iplwWYq8vqm4o1Jkp0tF5qojJW3m4
+# Uf3idBvvYCgBPsUSpTGW1c0N6mgAf47Av8xc7yd1xaW/eTv65mg1E3JF5MhFqFuK
+# AEAAoFcKoYdJgUR9WllvNkR0xwP3ws6mhw5u1STYQykcySN9x1bRCa6DdtLyqOHs
+# tGn2MgZ69AeCkeEXKmdZlvDhxRwpFrdNKwi6N8tw81KRfqboFXkK/ZsgY9yhSwP+
+# SLNUP0iWYV/iY1TSEVkxokFxiaqKPXN9/DkqilzLMuLf5MXXJb20S1tmVALx0fLB
+# fsG/wKFml6Wn288Qr4ZCPWM9mymLTJSwkWZ2PRaZ2cfSSJdJ0jR/9+yLPpQNQ4eq
+# RGdnbtFBjPUFuJmlt8tgyLIGYKxK8fDoeiIVs/g6XrNeSVCtlhnsM1t3kvQIjJso
+# mbYm1KCJC8m9f4mPa9sixBuReBP/jRa/n1UR+Vhdwo47DMM4tNno5ZL3jODatRxq
+# 2NFoSUEDZJ1S736lestaXUmd80Zz/5R2YmPpFZbObzgUrzHUG2ri4eV2VT9MQ74h
+# 5LAL73Vfg33db/2O+1w4RGsvVFS/91AoozafDBJtVWW88iCR1Bm0z357EkGqvoYM
+# n7H7to2YGA==
 # SIG # End signature block
