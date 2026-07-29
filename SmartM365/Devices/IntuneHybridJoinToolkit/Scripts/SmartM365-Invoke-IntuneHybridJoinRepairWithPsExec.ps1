@@ -250,7 +250,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.76"
+$LauncherVersion = "2.10.77"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1883,6 +1883,92 @@ function Get-ComputerListKey {
 
     return ($ComputerName.Trim().Split(".")[0]).ToUpperInvariant()
 }
+
+function Get-PostCycleCloudRefreshRows {
+    param([Parameter(Mandatory=$false)][object[]]$Rows = @())
+
+    return @(
+        $Rows | Where-Object {
+            [string]$_.Status -notmatch '^(ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_DIRECTORY_CREATE_FAILED|REMOTE_SCRIPT_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_)'
+        }
+    )
+}
+
+function Merge-ScopedInventoryMap {
+    param(
+        [Parameter(Mandatory=$false)][hashtable]$ExistingMap,
+        [Parameter(Mandatory=$false)][hashtable]$RefreshedMap,
+        [Parameter(Mandatory=$false)][string[]]$ScopedComputers = @()
+    )
+
+    if ($null -eq $ExistingMap) { $ExistingMap = @{} }
+    [void]$ExistingMap.Remove('__SMARTM365_INVENTORY_CHECKED__')
+
+    foreach ($computer in @($ScopedComputers)) {
+        if ([string]::IsNullOrWhiteSpace([string]$computer)) { continue }
+        [void]$ExistingMap.Remove((Get-ComputerListKey -ComputerName $computer))
+    }
+
+    if ($null -ne $RefreshedMap) {
+        foreach ($entry in $RefreshedMap.GetEnumerator()) {
+            if ([string]$entry.Key -eq '__SMARTM365_INVENTORY_CHECKED__') { continue }
+            $ExistingMap[[string]$entry.Key] = $entry.Value
+        }
+    }
+
+    return $ExistingMap
+}
+
+function Test-AdInventoryRefreshDue {
+    param(
+        [Parameter(Mandatory=$false)][AllowNull()][object]$LastRefreshUtc,
+        [Parameter(Mandatory=$true)][ValidateRange(1,168)][int]$FreshnessHours,
+        [Parameter(Mandatory=$false)][datetime]$NowUtc = [datetime]::UtcNow
+    )
+
+    if ($null -eq $LastRefreshUtc) { return $true }
+    try {
+        $lastRefresh = ([datetime]$LastRefreshUtc).ToUniversalTime()
+        return (($NowUtc.ToUniversalTime() - $lastRefresh).TotalHours -ge $FreshnessHours)
+    }
+    catch {
+        return $true
+    }
+}
+
+function Get-AdaptiveCycleDelaySeconds {
+    param(
+        [Parameter(Mandatory=$false)][object[]]$Rows = @(),
+        [Parameter(Mandatory=$true)][ValidateRange(0,86400)][int]$MinimumDelaySeconds,
+        [Parameter(Mandatory=$false)][datetime]$NowUtc = [datetime]::UtcNow
+    )
+
+    $effectiveRows = @($Rows)
+    if ($effectiveRows.Count -eq 0) { return $MinimumDelaySeconds }
+
+    $backoffStatuses = @('SKIPPED_BY_STATUS_BACKOFF','SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT')
+    foreach ($row in $effectiveRows) {
+        $status = if ($row.PSObject.Properties['EffectiveStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$row.EffectiveStatus)) { [string]$row.EffectiveStatus } else { [string]$row.Status }
+        if ($backoffStatuses -notcontains $status) { return $MinimumDelaySeconds }
+    }
+
+    $futureExpiries = New-Object System.Collections.ArrayList
+    foreach ($row in $effectiveRows) {
+        $rawExpiry = if ($row.PSObject.Properties['BackoffUntilUtc']) { [string]$row.BackoffUntilUtc } else { '' }
+        if ([string]::IsNullOrWhiteSpace($rawExpiry)) { continue }
+        $parsedExpiry = [datetime]::MinValue
+        if ([datetime]::TryParse($rawExpiry,[ref]$parsedExpiry)) {
+            $parsedExpiry = $parsedExpiry.ToUniversalTime()
+            if ($parsedExpiry -gt $NowUtc.ToUniversalTime()) { [void]$futureExpiries.Add($parsedExpiry) }
+        }
+    }
+
+    if ($futureExpiries.Count -eq 0) { return $MinimumDelaySeconds }
+    $earliestExpiry = @($futureExpiries | Sort-Object | Select-Object -First 1)[0]
+    $untilExpiry = [int][math]::Ceiling(($earliestExpiry - $NowUtc.ToUniversalTime()).TotalSeconds)
+    return [math]::Max($MinimumDelaySeconds,$untilExpiry)
+}
+
 function Get-TechnicianRunGuardHistoryPath {
     $stateRoot = Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "SmartM365\IntuneHybridJoinToolkit\LauncherState"
     return (Join-Path $stateRoot "RunGuardHistory.json")
@@ -2859,6 +2945,7 @@ if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
 }
 
 $AdInventoryMap = @{}
+$script:AdInventoryLastRefreshUtc = $null
 if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
     try {
         $refreshInitialAdInventory = $false
@@ -2880,6 +2967,7 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
         if ($AdInventoryUsesRecentRootCsv) {
             Write-Host ("AD forest inventory CSV is recent. Using root CSV in priority: {0}" -f $AdInventoryCsv) -ForegroundColor Green
             $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+            $script:AdInventoryLastRefreshUtc = $adInventoryItem.LastWriteTimeUtc
         }
         elseif ($refreshInitialAdInventory -and $DryRun) {
             Write-Host ("DryRun: AD inventory CSV is {0}; skipping automatic AD computer export." -f $initialAdInventoryReason) -ForegroundColor Yellow
@@ -2900,6 +2988,7 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
             if ($initialAdInventory.Success) {
                 $AdInventoryCsv = $initialAdInventory.CsvPath
                 $AdInventoryMap = $initialAdInventory.InventoryMap
+                $script:AdInventoryLastRefreshUtc = [datetime]::UtcNow
                 Write-Host ("Initial AD inventory refreshed. Devices={0}; CSV={1}" -f $AdInventoryMap.Count,$initialAdInventory.CsvPath) -ForegroundColor Green
             }
             else {
@@ -2907,11 +2996,13 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
                 if (Test-Path -LiteralPath $AdInventoryCsv) {
                     Write-Host "Continuing with existing AD CSV despite refresh failure." -ForegroundColor Yellow
                     $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+                    $script:AdInventoryLastRefreshUtc = (Get-Item -LiteralPath $AdInventoryCsv).LastWriteTimeUtc
                 }
             }
         }
         elseif (Test-Path -LiteralPath $AdInventoryCsv) {
             $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+            $script:AdInventoryLastRefreshUtc = (Get-Item -LiteralPath $AdInventoryCsv).LastWriteTimeUtc
         }
     }
     catch {
@@ -4182,50 +4273,43 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $result.LocalScriptHash = Get-FileSha256 -Path $LocalScriptPath
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Local script before copy: Version=$($result.LocalScriptVersion); SHA256=$($result.LocalScriptHash); Path=$LocalScriptPath" | Add-Content -LiteralPath $logPath -Encoding UTF8
 
+                $remoteStagingScript = Join-Path $remoteAdminDir (".{0}.{1}.{2}.tmp" -f $ScriptName,$PID,[guid]::NewGuid().ToString("N"))
                 try {
-                    Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteAdminScript -Force -ErrorAction Stop
+                    $localScriptItem = Get-Item -LiteralPath $LocalScriptPath -ErrorAction Stop
+                    Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteStagingScript -Force -ErrorAction Stop
+                    if (-not (Test-Path -LiteralPath $remoteStagingScript)) { throw "Staged remote script is missing: $remoteStagingScript" }
+
+                    $stagingScriptItem = Get-Item -LiteralPath $remoteStagingScript -ErrorAction Stop
+                    $stagingScriptVersion = Get-ScriptVersionFromFile -Path $remoteStagingScript
+                    $stagingScriptHash = Get-FileSha256 -Path $remoteStagingScript
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote staging script: Version=$stagingScriptVersion; SHA256=$stagingScriptHash; Bytes=$($stagingScriptItem.Length); Path=$remoteStagingScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    if ($stagingScriptItem.Length -ne $localScriptItem.Length) { throw "Staged remote script size mismatch. LocalBytes=$($localScriptItem.Length); StagedBytes=$($stagingScriptItem.Length)" }
+                    if ([string]::IsNullOrWhiteSpace($result.LocalScriptHash) -or [string]::IsNullOrWhiteSpace($stagingScriptHash) -or $stagingScriptHash -ne $result.LocalScriptHash) { throw "Staged remote script hash mismatch. LocalSHA256=$($result.LocalScriptHash); StagedSHA256=$stagingScriptHash" }
+                    if ((-not [string]::IsNullOrWhiteSpace($result.LocalScriptVersion)) -and $stagingScriptVersion -ne $result.LocalScriptVersion) { throw "Staged remote script version mismatch. LocalVersion=$($result.LocalScriptVersion); StagedVersion=$stagingScriptVersion" }
+
+                    Move-Item -LiteralPath $remoteStagingScript -Destination $remoteAdminScript -Force -ErrorAction Stop
                     $result.ScriptCopied = Test-Path -LiteralPath $remoteAdminScript
-                    if ($result.ScriptCopied) {
-                        $localScriptItem = Get-Item -LiteralPath $LocalScriptPath -ErrorAction Stop
-                        $remoteScriptItem = Get-Item -LiteralPath $remoteAdminScript -ErrorAction Stop
-                        $result.RemoteScriptVersion = Get-ScriptVersionFromFile -Path $remoteAdminScript
-                        $result.RemoteScriptHash = Get-FileSha256 -Path $remoteAdminScript
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote script after copy: Version=$($result.RemoteScriptVersion); SHA256=$($result.RemoteScriptHash); Bytes=$($remoteScriptItem.Length); Path=$remoteAdminScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                        if ($remoteScriptItem.Length -ne $localScriptItem.Length) {
-                            $result.ScriptCopied = $false
-                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
-                            $payloadFailureDetail = "Remote script copy size mismatch. LocalBytes=$($localScriptItem.Length); RemoteBytes=$($remoteScriptItem.Length); RemotePath=$remoteAdminScript"
-                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                            continue
-                        }
-                        if ([string]::IsNullOrWhiteSpace($result.LocalScriptHash) -or [string]::IsNullOrWhiteSpace($result.RemoteScriptHash) -or $result.RemoteScriptHash -ne $result.LocalScriptHash) {
-                            $result.ScriptCopied = $false
-                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
-                            $payloadFailureDetail = "Remote script copy hash mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); LocalSHA256=$($result.LocalScriptHash); RemoteSHA256=$($result.RemoteScriptHash); RemotePath=$remoteAdminScript"
-                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                            continue
-                        }
-                        if ((-not [string]::IsNullOrWhiteSpace($result.LocalScriptVersion)) -and $result.RemoteScriptVersion -ne $result.LocalScriptVersion) {
-                            $result.ScriptCopied = $false
-                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
-                            $payloadFailureDetail = "Remote script copy version mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); RemotePath=$remoteAdminScript"
-                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                            continue
-                        }
-                    }
-                    else {
-                        $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
-                        $payloadFailureDetail = "Remote script copy could not be verified: $remoteAdminScript"
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                        continue
-                    }
+                    if (-not $result.ScriptCopied) { throw "Final remote script is missing after atomic move: $remoteAdminScript" }
+
+                    $remoteScriptItem = Get-Item -LiteralPath $remoteAdminScript -ErrorAction Stop
+                    $result.RemoteScriptVersion = Get-ScriptVersionFromFile -Path $remoteAdminScript
+                    $result.RemoteScriptHash = Get-FileSha256 -Path $remoteAdminScript
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote script after atomic copy: Version=$($result.RemoteScriptVersion); SHA256=$($result.RemoteScriptHash); Bytes=$($remoteScriptItem.Length); Path=$remoteAdminScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    if ($remoteScriptItem.Length -ne $localScriptItem.Length) { throw "Final remote script size mismatch. LocalBytes=$($localScriptItem.Length); RemoteBytes=$($remoteScriptItem.Length)" }
+                    if ([string]::IsNullOrWhiteSpace($result.RemoteScriptHash) -or $result.RemoteScriptHash -ne $result.LocalScriptHash) { throw "Final remote script hash mismatch. LocalSHA256=$($result.LocalScriptHash); RemoteSHA256=$($result.RemoteScriptHash)" }
+                    if ((-not [string]::IsNullOrWhiteSpace($result.LocalScriptVersion)) -and $result.RemoteScriptVersion -ne $result.LocalScriptVersion) { throw "Final remote script version mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion)" }
                 }
                 catch {
                     $result.ScriptCopied = $false
                     $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
-                    $payloadFailureDetail = "Remote script copy failed: $remoteAdminScript; Error=$($_.Exception.Message)"
+                    $payloadFailureDetail = "Remote script staged copy failed: $remoteAdminScript; Error=$($_.Exception.Message)"
                     "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
                     continue
+                }
+                finally {
+                    if (Test-Path -LiteralPath $remoteStagingScript) {
+                        Remove-Item -LiteralPath $remoteStagingScript -Force -ErrorAction SilentlyContinue
+                    }
                 }
 
                 $payloadReady = $true
@@ -4932,13 +5016,21 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     $summaryRowsForPostCycle = @($summary | ForEach-Object { $_ })
-    $cycleCouldChangeCloudInventory = @($summaryRowsForPostCycle | Where-Object { [string]$_.Status -notmatch "^(ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_DIRECTORY_CREATE_FAILED|REMOTE_SCRIPT_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_)" }).Count -gt 0
+    $cloudRefreshRows = @(Get-PostCycleCloudRefreshRows -Rows $summaryRowsForPostCycle)
+    $cycleCouldChangeCloudInventory = $cloudRefreshRows.Count -gt 0
     if (-not $cycleCouldChangeCloudInventory) {
         Write-Host ("Cycle {0}: post-cycle Graph refresh skipped because no result could have changed Intune or Entra inventory." -f $CycleNumber) -ForegroundColor DarkGray
     }
     $postCycleScopePath = Join-Path $ReportRoot ("Devices_Cycle{0}_InventoryScope.txt" -f $CycleNumber)
+    $postCycleCloudScopePath = Join-Path $ReportRoot ("Devices_Cycle{0}_CloudRefreshScope.txt" -f $CycleNumber)
+    $cloudRefreshKeys = @{}
+    foreach ($cloudRefreshRow in $cloudRefreshRows) {
+        $cloudRefreshKey = Get-ComputerListKey -ComputerName $cloudRefreshRow.Computer
+        $cloudRefreshKeys[$cloudRefreshKey] = $true
+    }
     if (-not $DryRun) {
         $computers | Set-Content -LiteralPath $postCycleScopePath -Encoding ASCII
+        @($cloudRefreshRows | ForEach-Object { [string]$_.Computer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique) | Set-Content -LiteralPath $postCycleCloudScopePath -Encoding ASCII
     }
 
     if (-not $DryRun -and -not $SkipPostCycleIntuneInventory -and $cycleCouldChangeCloudInventory -and -not (Get-LotCancellationState).Requested) {
@@ -4951,14 +5043,15 @@ function Invoke-IntuneHybridJoinRepairCycle {
             -OutputPath $postInventoryOutputPath `
             -LogPath $postInventoryLogPath `
             -PageSize $PostCycleIntuneInventoryPageSize `
-            -ComputerListPath $postCycleScopePath
+            -ComputerListPath $postCycleCloudScopePath
 
         if ($postInventory.Success) {
             $postSet = $postInventory.InventorySet
-            $script:IntuneInventorySet = $postSet
+            $script:IntuneInventorySet = Merge-ScopedInventoryMap -ExistingMap $script:IntuneInventorySet -RefreshedMap $postSet -ScopedComputers @($cloudRefreshRows | ForEach-Object { [string]$_.Computer })
             $newlyDetected = 0
             foreach ($row in $summaryRowsForPostCycle) {
                 $key = Get-ComputerListKey -ComputerName $row.Computer
+                if (-not $cloudRefreshKeys.ContainsKey($key)) { continue }
                 $postPresent = [bool]($postSet -and $postSet.ContainsKey($key))
                 $preKnown = $row.PSObject.Properties["IntuneInventoryPresent"] -and -not [string]::IsNullOrWhiteSpace([string]$row.IntuneInventoryPresent)
                 $prePresent = Test-BooleanLikeTrue -Value $row.IntuneInventoryPresent
@@ -4980,11 +5073,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 }
             }
 
-            $postPresentCount = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $true }).Count
-            Write-Host ("Cycle {0}: post-cycle Intune inventory found {1}/{2}; newly detected this cycle={3}; CSV={4}" -f $CycleNumber,$postPresentCount,$summaryRowsForPostCycle.Count,$newlyDetected,$postInventory.CsvPath) -ForegroundColor Green
+            $postPresentCount = @($cloudRefreshRows | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $true }).Count
+            Write-Host ("Cycle {0}: post-cycle Intune inventory found {1}/{2}; newly detected this cycle={3}; CSV={4}" -f $CycleNumber,$postPresentCount,$cloudRefreshRows.Count,$newlyDetected,$postInventory.CsvPath) -ForegroundColor Green
         }
         else {
             foreach ($row in $summaryRowsForPostCycle) {
+                $key = Get-ComputerListKey -ComputerName $row.Computer
+                if (-not $cloudRefreshKeys.ContainsKey($key)) { continue }
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryPresent -NotePropertyValue "" -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneEnrollmentDetected -NotePropertyValue "" -Force
@@ -5014,15 +5109,16 @@ function Invoke-IntuneHybridJoinRepairCycle {
             -OutputPath $postEntraInventoryOutputPath `
             -LogPath $postEntraInventoryLogPath `
             -PageSize $PostCycleIntuneInventoryPageSize `
-            -ComputerListPath $postCycleScopePath
+            -ComputerListPath $postCycleCloudScopePath
 
         if ($postEntraInventory.Success) {
             $postEntraMap = $postEntraInventory.InventoryMap
-            $script:EntraInventoryMap = $postEntraMap
+            $script:EntraInventoryMap = Merge-ScopedInventoryMap -ExistingMap $script:EntraInventoryMap -RefreshedMap $postEntraMap -ScopedComputers @($cloudRefreshRows | ForEach-Object { [string]$_.Computer })
             $pendingResolved = 0
 
             foreach ($row in $summaryRowsForPostCycle) {
                 $key = Get-ComputerListKey -ComputerName $row.Computer
+                if (-not $cloudRefreshKeys.ContainsKey($key)) { continue }
                 $postEntraPresent = [bool]($postEntraMap -and $postEntraMap.ContainsKey($key))
                 $postEntraState = ""
                 $postAltSecIdCount = ""
@@ -5052,11 +5148,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 }
             }
 
-            $postPendingCount = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleEntraRegisteredState -eq "Pending" }).Count
+            $postPendingCount = @($cloudRefreshRows | Where-Object { $_.PostCycleEntraRegisteredState -eq "Pending" }).Count
             Write-Host ("Cycle {0}: post-cycle Entra inventory pending={1}; pending resolved this cycle={2}; CSV={3}" -f $CycleNumber,$postPendingCount,$pendingResolved,$postEntraInventory.CsvPath) -ForegroundColor Green
         }
         else {
             foreach ($row in $summaryRowsForPostCycle) {
+                $key = Get-ComputerListKey -ComputerName $row.Computer
+                if (-not $cloudRefreshKeys.ContainsKey($key)) { continue }
                 $row | Add-Member -NotePropertyName PostCycleEntraInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraInventoryPresent -NotePropertyValue "" -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraRegisteredState -NotePropertyValue "" -Force
@@ -5076,7 +5174,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
-    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not (Get-LotCancellationState).Requested) {
+    $postAdInventoryDue = Test-AdInventoryRefreshDue -LastRefreshUtc $script:AdInventoryLastRefreshUtc -FreshnessHours $AdInventoryFreshnessHours
+    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and $postAdInventoryDue -and -not (Get-LotCancellationState).Requested) {
         $postAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { "forest" } else { "domain '$AdDomain'" }
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle AD computer inventory. Scope={1}..." -f $CycleNumber,$postAdScope) -ForegroundColor Cyan
         $postAdInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -5092,6 +5191,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         if ($postAdInventory.Success) {
             $postAdMap = $postAdInventory.InventoryMap
             $script:AdInventoryMap = $postAdMap
+            $script:AdInventoryLastRefreshUtc = [datetime]::UtcNow
 
             foreach ($row in $summaryRowsForPostCycle) {
                 $key = Get-ComputerListKey -ComputerName $row.Computer
@@ -5122,6 +5222,10 @@ function Invoke-IntuneHybridJoinRepairCycle {
         catch {
             Write-Host ("Cycle {0}: failed to rewrite live CSV with post-cycle AD columns: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
         }
+    }
+    elseif (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not $postAdInventoryDue) {
+        $nextAdRefreshUtc = ([datetime]$script:AdInventoryLastRefreshUtc).ToUniversalTime().AddHours($AdInventoryFreshnessHours)
+        Write-Host ("Cycle {0}: post-cycle AD inventory reuse; cache remains fresh until {1:u}." -f $CycleNumber,$nextAdRefreshUtc) -ForegroundColor DarkGray
     }
 
 
@@ -5199,6 +5303,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
     Write-Host ("Cycle {0} merged HTML report: {1}" -f $CycleNumber,$script:MergedHtmlReportPath) -ForegroundColor Green
 
+    $script:LastCycleSummaryRows = @($summaryRowsForPostCycle)
     Write-Host ("Cycle {0} done. Summary: {1}" -f $CycleNumber,$summaryPath) -ForegroundColor Green
     return $summaryPath
 }
@@ -5225,6 +5330,7 @@ $mergedHtmlReportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:MergedHtmlReportPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Summary_{0}_{1}.html" -f $mergedSafeLotName,$mergedHtmlReportTimestamp)
 $script:AllCycleResults = New-Object System.Collections.ArrayList
 $script:AllCycleProgressRows = New-Object System.Collections.ArrayList
+$script:LastCycleSummaryRows = @()
 Write-Host ("Merged HTML report: {0}" -f $script:MergedHtmlReportPath) -ForegroundColor DarkCyan
 Set-ActiveLotRunState -Status 'Running' -ReportPath $script:MergedHtmlReportPath
 
@@ -5266,9 +5372,17 @@ do {
     if ($RunOnce) { break }
     if ($MaxCycles -gt 0 -and $cycle -ge $MaxCycles) { break }
 
-    if ($DelayBetweenCyclesMinutes -gt 0) {
-        Write-Host ("Waiting {0} minute(s) before next cycle. Press Ctrl+C to stop." -f $DelayBetweenCyclesMinutes) -ForegroundColor DarkGray
-        [void](Wait-LotCancellationAware -Seconds ($DelayBetweenCyclesMinutes * 60))
+    $minimumCycleDelaySeconds = $DelayBetweenCyclesMinutes * 60
+    $cycleDelaySeconds = Get-AdaptiveCycleDelaySeconds -Rows $script:LastCycleSummaryRows -MinimumDelaySeconds $minimumCycleDelaySeconds
+    if ($cycleDelaySeconds -gt 0) {
+        if ($cycleDelaySeconds -gt $minimumCycleDelaySeconds) {
+            $resumeAt = (Get-Date).AddSeconds($cycleDelaySeconds)
+            Write-Host ("All devices remain under technician backoff. Waiting until {0:yyyy-MM-dd HH:mm:ss} ({1:N1} minute(s)) before the next cycle. Press Ctrl+C to stop." -f $resumeAt,($cycleDelaySeconds / 60.0)) -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host ("Waiting {0:N1} minute(s) before next cycle. Press Ctrl+C to stop." -f ($cycleDelaySeconds / 60.0)) -ForegroundColor DarkGray
+        }
+        [void](Wait-LotCancellationAware -Seconds $cycleDelaySeconds)
     }
 } while ($true)
 
