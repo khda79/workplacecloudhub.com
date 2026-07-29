@@ -191,8 +191,11 @@ for runs where setup upgrade is disabled.
 The repository `SetupSource` folder is for local/direct tests or for preparing media before
 publishing it to a network share. See `SetupSource\README.md`.
 By default, setup language validation is enabled with `W11UT_SETUP_LANGUAGE=MatchSystem`.
-The target compares its installed Windows language with `sources\lang.ini` from the setup
-media before starting setup.
+The target resolves the Windows installation language from the registry `InstallLanguage`
+value, falls back to `InstalledUICulture`, and compares that language with
+`sources\lang.ini` before starting setup. `SystemLocale` is logged for diagnostics only
+because regional settings such as `fr-CH` do not necessarily identify the Windows setup
+UI language.
 `SetupSourcePath` can point either to a single media root or to a parent folder containing
 one media subfolder per language; in `MatchSystem` mode the toolkit selects the subfolder
 whose `sources\lang.ini` matches the target language.
@@ -391,7 +394,7 @@ Then launch a LOT wrapper.
 
 Setup language values:
 
-- `MatchSystem`: default. The target system language, for example `fr-FR`, must exist in the setup media `sources\lang.ini`.
+- `MatchSystem`: default. The Windows installation/UI language, for example `fr-FR`, must exist in the setup media `sources\lang.ini`. Regional `SystemLocale` values such as `fr-CH` are diagnostic only.
 - Specific culture tag, for example `fr-FR`, `en-GB`, or `en-US`: validates the source before copy when possible and again on the target.
 - `Any`: disables language matching and should only be used intentionally.
 
