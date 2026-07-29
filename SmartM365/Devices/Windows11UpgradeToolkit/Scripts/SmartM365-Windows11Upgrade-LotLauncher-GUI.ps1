@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.49
+0.1.50
 #>
 param(
     [switch]$ValidateOnly
@@ -328,9 +328,14 @@ function Invoke-LotWrapperRefresh {
         throw "Wrapper refresh script not found: $script"
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ToolkitRoot $RootPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
+    $wrapperOutput = @(
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ToolkitRoot $RootPath 2>&1
+    )
+    $wrapperExitCode = $LASTEXITCODE
+    if ($wrapperExitCode -ne 0) {
+        $wrapperDetail = (($wrapperOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+        if ([string]::IsNullOrWhiteSpace($wrapperDetail)) { $wrapperDetail = 'No process output was captured.' }
+        throw "LOT wrapper refresh failed with exit code $wrapperExitCode. Output: $wrapperDetail"
     }
 }
 
