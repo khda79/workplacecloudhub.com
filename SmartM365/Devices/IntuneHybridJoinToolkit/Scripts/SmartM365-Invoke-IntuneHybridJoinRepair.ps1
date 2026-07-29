@@ -36,7 +36,7 @@ Allows a reboot when Hybrid Join is healthy, Intune enrollment is missing, auto-
 Allows a reboot after a successful dsregcmd /leave when rejoin did not complete during the local retry window.
 
 .PARAMETER AllowRemoveNonIntuneMdmEnrollment
-Allows removal of existing non-Intune MDM enrollment registry keys and EnterpriseMgmt scheduled tasks before trying Intune auto-enrollment.
+Allows removal of confirmed non-Intune MDM enrollment registry keys and EnterpriseMgmt scheduled tasks before trying Intune auto-enrollment. WMI-to-CSP bridge registrations are never removable through this option.
 
 .PARAMETER AllowRemoveStaleIntuneEnrollment
 Allows removal of stale local Intune enrollment traces when Windows reports an Intune discovery URL but no confirmed Intune ProviderID.
@@ -69,7 +69,7 @@ Seconds to wait after startup before the SYSTEM retry task resumes the repair. D
 Maximum number of startup-task resume attempts before the retry state is removed. Defaults to 3.
 
 .VERSION
-2.10.37
+2.10.38
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -101,7 +101,7 @@ param(
     [switch]$RetryAfterRebootTaskRun
 )
 
-$ScriptVersion = "2.10.37"
+$ScriptVersion = "2.10.38"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -590,6 +590,46 @@ function Test-EnterpriseMgmtTaskFolderExists {
     catch { return $false }
 }
 
+function Get-MdmEnrollmentClassification {
+    param(
+        [string]$ProviderID,
+        [string]$DiscoveryServiceFullURL,
+        [bool]$OmadmAccountPresent,
+        [bool]$EnterpriseMgmtTaskPresent
+    )
+
+    $providerIdValue = ([string]$ProviderID).Trim()
+    $discoveryUrlValue = ([string]$DiscoveryServiceFullURL).Trim()
+    $internalProviderIds = @("Deploy Authority", "Cloud Authority", "Local Authority")
+    $hasProviderId = -not [string]::IsNullOrWhiteSpace($providerIdValue)
+    $hasDiscoveryUrl = -not [string]::IsNullOrWhiteSpace($discoveryUrlValue)
+    $isInternalProvider = $hasProviderId -and ($internalProviderIds -contains $providerIdValue)
+    $isIntuneProvider = ($providerIdValue -eq "MS DM Server")
+    $isIntuneDiscovery = ($discoveryUrlValue -match "(?i)enrollment\.manage\.microsoft\.com")
+    $isManagementBridge = ($providerIdValue -ieq "WMI_Bridge_SCCM_Server")
+    $isExternalProvider = $hasProviderId -and -not $isInternalProvider -and -not $isIntuneProvider -and -not $isManagementBridge
+    $isExternalDiscovery = $hasDiscoveryUrl -and -not $isIntuneDiscovery
+    $hasStrongOmaDmEvidence = ($isExternalDiscovery -or $OmadmAccountPresent -or $EnterpriseMgmtTaskPresent)
+    $isIntuneCandidate = ($isIntuneProvider -or $isIntuneDiscovery)
+    $isIntuneEnrollment = $isIntuneProvider
+    $isNonIntuneMdmEnrollment = (-not $isInternalProvider -and -not $isManagementBridge -and
+        ($isExternalDiscovery -or ($isExternalProvider -and ($OmadmAccountPresent -or $EnterpriseMgmtTaskPresent))))
+
+    [pscustomobject]@{
+        HasProviderId = $hasProviderId
+        HasDiscoveryUrl = $hasDiscoveryUrl
+        IsInternalProvider = $isInternalProvider
+        IsIntuneCandidate = $isIntuneCandidate
+        IsIntuneEnrollment = $isIntuneEnrollment
+        IsManagementBridge = $isManagementBridge
+        IsExternalProvider = $isExternalProvider
+        IsExternalDiscovery = $isExternalDiscovery
+        HasStrongOmaDmEvidence = $hasStrongOmaDmEvidence
+        IsNonIntuneMdmEnrollment = $isNonIntuneMdmEnrollment
+        IsMdmEnrollment = ($isIntuneEnrollment -or $isNonIntuneMdmEnrollment)
+    }
+}
+
 function Get-MdmEnrollmentState {
     try {
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
@@ -609,13 +649,17 @@ function Get-MdmEnrollmentState {
                 ProviderIds = ""
                 EnrollmentDetails = ""
                 IgnoredEnrollmentDetails = ""
+                ManagementBridgeDetected = $false
+                ManagementBridgeEnrollmentIds = ""
+                ManagementBridgeProviderIds = ""
+                ManagementBridgeDetails = ""
             }
         }
 
-        $internalProviderIds = @("Deploy Authority", "Cloud Authority", "Local Authority")
         $entries = @()
         $ignoredEntries = @()
         $unconfirmedIntuneEntries = @()
+        $managementBridgeEntries = @()
         foreach ($subName in $enrollKey.GetSubKeyNames()) {
             try {
                 $sub = $enrollKey.OpenSubKey($subName, $false)
@@ -625,13 +669,6 @@ function Get-MdmEnrollmentState {
                 $enrollmentType = [string]$sub.GetValue("EnrollmentType", "")
                 $upn = [string]$sub.GetValue("UPN", "")
                 $aadResourceId = [string]$sub.GetValue("AADResourceID", "")
-                $hasProviderId = -not [string]::IsNullOrWhiteSpace($providerId)
-                $hasDiscoveryUrl = -not [string]::IsNullOrWhiteSpace($discoveryServiceFullUrl)
-                $isInternalProvider = $hasProviderId -and ($internalProviderIds -contains $providerId)
-                $isIntuneProvider = ($providerId -eq "MS DM Server")
-                $isIntuneDiscovery = ($discoveryServiceFullUrl -match "(?i)enrollment\.manage\.microsoft\.com")
-                $isExternalProvider = $hasProviderId -and -not $isInternalProvider -and -not $isIntuneProvider
-                $isExternalDiscovery = $hasDiscoveryUrl -and -not $isIntuneDiscovery
 
                 $statusKeyPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Enrollments\Status\{0}" -f $subName)
                 $omadmAccountPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\{0}" -f $subName)
@@ -643,12 +680,12 @@ function Get-MdmEnrollmentState {
                 if ($policyProviderPresent) { $evidence += "PolicyProvider" }
                 if ($enterpriseMgmtTaskPresent) { $evidence += "EnterpriseMgmtTasks" }
                 $evidenceText = ($evidence -join ",")
-                $evidenceCount = $evidence.Count
 
-                $isIntuneCandidate = $isIntuneProvider -or $isIntuneDiscovery
-                $isIntuneEnrollment = $isIntuneProvider
-                $isNonIntuneMdmEnrollment = $isExternalProvider -or ($isExternalDiscovery -and ($evidenceCount -ge 1))
-                $isMdm = $isIntuneEnrollment -or $isNonIntuneMdmEnrollment
+                $classification = Get-MdmEnrollmentClassification `
+                    -ProviderID $providerId `
+                    -DiscoveryServiceFullURL $discoveryServiceFullUrl `
+                    -OmadmAccountPresent $omadmAccountPresent `
+                    -EnterpriseMgmtTaskPresent $enterpriseMgmtTaskPresent
 
                 $entry = [PSCustomObject]@{
                     EnrollmentId = $subName
@@ -658,17 +695,24 @@ function Get-MdmEnrollmentState {
                     UPN = $upn
                     AADResourceID = $aadResourceId
                     Evidence = $evidenceText
-                    IsIntune = $isIntuneEnrollment
+                    IsIntune = $classification.IsIntuneEnrollment
+                    IsNonIntuneMdm = $classification.IsNonIntuneMdmEnrollment
+                    IsManagementBridge = $classification.IsManagementBridge
+                    HasStrongOmaDmEvidence = $classification.HasStrongOmaDmEvidence
                 }
 
-                if ($isMdm) {
+                if ($classification.IsManagementBridge) {
+                    $managementBridgeEntries += $entry
+                    $ignoredEntries += $entry
+                }
+                elseif ($classification.IsMdmEnrollment) {
                     $entries += $entry
                 }
-                elseif ($isIntuneCandidate) {
+                elseif ($classification.IsIntuneCandidate) {
                     $unconfirmedIntuneEntries += $entry
                     $ignoredEntries += $entry
                 }
-                elseif ($hasProviderId -or $hasDiscoveryUrl -or (-not [string]::IsNullOrWhiteSpace($enrollmentType))) {
+                elseif ($classification.HasProviderId -or $classification.HasDiscoveryUrl -or (-not [string]::IsNullOrWhiteSpace($enrollmentType))) {
                     $ignoredEntries += $entry
                 }
             }
@@ -676,13 +720,17 @@ function Get-MdmEnrollmentState {
         }
 
         $intuneEntries = @($entries | Where-Object { $_.IsIntune })
-        $nonIntuneEntries = @($entries | Where-Object { -not $_.IsIntune })
+        $nonIntuneEntries = @($entries | Where-Object { $_.IsNonIntuneMdm })
         $providerIds = @($entries | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_.ProviderID)) { "<empty>" } else { $_.ProviderID } } | Select-Object -Unique)
         $details = @($entries | ForEach-Object {
             "EnrollmentId={0},ProviderID={1},DiscoveryURL={2},EnrollmentType={3},UPN={4},Evidence={5}" -f $_.EnrollmentId,$_.ProviderID,$_.DiscoveryServiceFullURL,$_.EnrollmentType,$_.UPN,$_.Evidence
         })
         $ignoredDetails = @($ignoredEntries | ForEach-Object {
             "EnrollmentId={0},ProviderID={1},DiscoveryURL={2},EnrollmentType={3},UPN={4},Evidence={5}" -f $_.EnrollmentId,$_.ProviderID,$_.DiscoveryServiceFullURL,$_.EnrollmentType,$_.UPN,$_.Evidence
+        })
+        $managementBridgeProviderIds = @($managementBridgeEntries | ForEach-Object { $_.ProviderID } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        $managementBridgeDetails = @($managementBridgeEntries | ForEach-Object {
+            "EnrollmentId={0},ProviderID={1},DiscoveryURL={2},EnrollmentType={3},Evidence={4},StrongOmaDmEvidence={5}" -f $_.EnrollmentId,$_.ProviderID,$_.DiscoveryServiceFullURL,$_.EnrollmentType,$_.Evidence,$_.HasStrongOmaDmEvidence
         })
 
         return [PSCustomObject]@{
@@ -696,6 +744,10 @@ function Get-MdmEnrollmentState {
             ProviderIds = ($providerIds -join ";")
             EnrollmentDetails = ($details -join " | ")
             IgnoredEnrollmentDetails = ($ignoredDetails -join " | ")
+            ManagementBridgeDetected = ($managementBridgeEntries.Count -gt 0)
+            ManagementBridgeEnrollmentIds = (($managementBridgeEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
+            ManagementBridgeProviderIds = ($managementBridgeProviderIds -join ";")
+            ManagementBridgeDetails = ($managementBridgeDetails -join " | ")
         }
     }
     catch { throw }
@@ -3028,6 +3080,10 @@ $nonIntuneEnrollmentIds = ""
 $unconfirmedIntuneEnrollmentIds = ""
 $mdmEnrollmentDetails = ""
 $ignoredEnrollmentDetails = ""
+$managementBridgeDetected = $false
+$managementBridgeEnrollmentIds = ""
+$managementBridgeProviderIds = ""
+$managementBridgeDetails = ""
 $staleIntuneEnrollmentDetected = $false
 $staleIntuneEnrollmentIds = ""
 $nonIntuneMdmRemovalAttempted = $false
@@ -3568,9 +3624,16 @@ try {
     $unconfirmedIntuneEnrollmentIds = $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds
     $mdmEnrollmentDetails = $mdmEnrollmentState.EnrollmentDetails
     $ignoredEnrollmentDetails = $mdmEnrollmentState.IgnoredEnrollmentDetails
+    $managementBridgeDetected = $mdmEnrollmentState.ManagementBridgeDetected
+    $managementBridgeEnrollmentIds = $mdmEnrollmentState.ManagementBridgeEnrollmentIds
+    $managementBridgeProviderIds = $mdmEnrollmentState.ManagementBridgeProviderIds
+    $managementBridgeDetails = $mdmEnrollmentState.ManagementBridgeDetails
     $staleIntuneEnrollmentDetected = (-not $mdmEnrollmentState.IntuneEnrollmentDetected) -and (-not [string]::IsNullOrWhiteSpace($unconfirmedIntuneEnrollmentIds)) -and ($gpUpdateMdmPolicyState -eq "AlreadyEnrolled")
     if ($staleIntuneEnrollmentDetected) { $staleIntuneEnrollmentIds = $unconfirmedIntuneEnrollmentIds }
-    Write-RunLog ("MDM enrollment registry state: AnyMdm={0}; Intune={1}; NonIntune={2}; Count={3}; ProviderIds={4}; IntuneIds={5}; NonIntuneIds={6}; UnconfirmedIntuneIds={7}; Details={8}; Ignored={9}" -f $anyMdmEnrollmentDetected,$mdmEnrollmentState.IntuneEnrollmentDetected,$nonIntuneMdmEnrollmentDetected,$mdmEnrollmentCount,$mdmProviderIds,$intuneEnrollmentIds,$nonIntuneEnrollmentIds,$unconfirmedIntuneEnrollmentIds,$mdmEnrollmentDetails,$ignoredEnrollmentDetails)
+    Write-RunLog ("MDM enrollment registry state: AnyMdm={0}; Intune={1}; NonIntune={2}; Count={3}; ProviderIds={4}; IntuneIds={5}; NonIntuneIds={6}; UnconfirmedIntuneIds={7}; ManagementBridge={8}; ManagementBridgeIds={9}; Details={10}; BridgeDetails={11}; Ignored={12}" -f $anyMdmEnrollmentDetected,$mdmEnrollmentState.IntuneEnrollmentDetected,$nonIntuneMdmEnrollmentDetected,$mdmEnrollmentCount,$mdmProviderIds,$intuneEnrollmentIds,$nonIntuneEnrollmentIds,$unconfirmedIntuneEnrollmentIds,$managementBridgeDetected,$managementBridgeEnrollmentIds,$mdmEnrollmentDetails,$managementBridgeDetails,$ignoredEnrollmentDetails)
+    if ($managementBridgeDetected -and -not $nonIntuneMdmEnrollmentDetected) {
+        Write-RunLog ("Management bridge registration detected and protected from MDM cleanup. ProviderIds={0}; EnrollmentIds={1}. It does not block Intune auto-enrollment without independent OMA-DM evidence." -f $managementBridgeProviderIds,$managementBridgeEnrollmentIds)
+    }
     if ($staleIntuneEnrollmentDetected) {
         Write-RunLog ("Stale local Intune enrollment suspected. UnconfirmedIntuneIds={0}; GpUpdateMdmPolicyState={1}" -f $staleIntuneEnrollmentIds,$gpUpdateMdmPolicyState)
     }
@@ -4080,6 +4143,10 @@ try {
                 $unconfirmedIntuneEnrollmentIds = $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds
                 $mdmEnrollmentDetails = $mdmEnrollmentState.EnrollmentDetails
                 $ignoredEnrollmentDetails = $mdmEnrollmentState.IgnoredEnrollmentDetails
+                $managementBridgeDetected = $mdmEnrollmentState.ManagementBridgeDetected
+                $managementBridgeEnrollmentIds = $mdmEnrollmentState.ManagementBridgeEnrollmentIds
+                $managementBridgeProviderIds = $mdmEnrollmentState.ManagementBridgeProviderIds
+                $managementBridgeDetails = $mdmEnrollmentState.ManagementBridgeDetails
                 $intuneEnrolled = $mdmEnrollmentState.IntuneEnrollmentDetected
 
                 if ($removeMdmResult.Success -and -not $nonIntuneMdmEnrollmentDetected) {
@@ -4425,6 +4492,10 @@ try {
         StaleIntuneEnrollmentIds = $staleIntuneEnrollmentIds
         MdmEnrollmentDetails    = $mdmEnrollmentDetails
         IgnoredEnrollmentDetails = $ignoredEnrollmentDetails
+        ManagementBridgeDetected = $managementBridgeDetected
+        ManagementBridgeEnrollmentIds = $managementBridgeEnrollmentIds
+        ManagementBridgeProviderIds = $managementBridgeProviderIds
+        ManagementBridgeDetails = $managementBridgeDetails
         NonIntuneMdmRemovalAttempted = $nonIntuneMdmRemovalAttempted
         NonIntuneMdmRemovalSuccess = $nonIntuneMdmRemovalSuccess
         NonIntuneMdmRemovalBackupDir = $nonIntuneMdmRemovalBackupDir
@@ -4638,6 +4709,10 @@ catch {
             StaleIntuneEnrollmentIds = $staleIntuneEnrollmentIds
             MdmEnrollmentDetails    = $mdmEnrollmentDetails
             IgnoredEnrollmentDetails = $ignoredEnrollmentDetails
+            ManagementBridgeDetected = $managementBridgeDetected
+            ManagementBridgeEnrollmentIds = $managementBridgeEnrollmentIds
+            ManagementBridgeProviderIds = $managementBridgeProviderIds
+            ManagementBridgeDetails = $managementBridgeDetails
             NonIntuneMdmRemovalAttempted = $nonIntuneMdmRemovalAttempted
             NonIntuneMdmRemovalSuccess = $nonIntuneMdmRemovalSuccess
             NonIntuneMdmRemovalBackupDir = $nonIntuneMdmRemovalBackupDir
@@ -4814,8 +4889,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwC8GxYwGJ7wsl
-# eaiIyOlXpnxcGmmUdpZL/HXrOB1a6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoGxq1U2X9dddN
+# lRb0pCjfcs0rN3qhedmOLSnuZQq6KqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4948,31 +5023,31 @@ exit $ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPQWpgj8ZxArG5UsmJFqf6sAJqNULI1SATi9QUCN8MoVMA0GCSqG
-# SIb3DQEBAQUABIIBgDCBh8N9xO/lAe5b3CC9jrU4X2/iPBqBqxhlXqp+zHqsPKQX
-# 4Q0xKZUNiu3eZ8mLiV39eUFdNVGVAPMVfL3CDYnzw1WL30yqe15W11qcEkCbOZtB
-# wXGrZhqkuE3Z45ESIwW3iNdUuq4piH/eVkqSPkwC8Rf/uSUY669rpkF1SFCkPLVS
-# nO+bUJbpCkqH9qCZiy0Jm0piTWRo+lNau9lQy2+QdILIHxw8AWho8vcyuUa6mTCj
-# tg267d0kw6rtn91jO8QRD2MRmQvdQXsW2NEQJvxfkt3ugxbGzWsayYcVQMdGB/Rz
-# AVc/mmDgyMWzAbJIMDlHnmRjBiv6UWm2JhUOKvE5eTG6ozDG81PDO83dMnXJ/CIn
-# acosMPRHEGH9w9A+u3elWuiJC0zT4Jpz/zEvpE/FYDe8l8TgAbeVZfXRPRQ4HKMi
-# JgZkM+nJEh7lGihoOFr/oWKG/noJLC/LWfZFXZ6ERVTDGa9PRwA+cINEBlW6mYeI
-# ik/kSGjV2vCnc7SGeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL2KYIeAzJBN+yhcaZJjyDNxU7cQIbC+E99+OfGNrkcrMA0GCSqG
+# SIb3DQEBAQUABIIBgG+5dB21mbVT5j++z7I1Eug+ycQckF4JMaeJdjrmmuhcsyu/
+# o1VU4JUwK2XWzG9xmPHY5U6zcXltz0/BFLR1/QaF2Crztg6ASLcjujkU6kQlxNXe
+# IeyF7I/b7Dy2/yZ5jXUjvMTSq0H71cbaHfTOrNxU1Vx8ylmvVAzoA4tpcv4YYGIr
+# GbRBVlQQ/4OFFuB8/79DLFLEUUfDk7utax/xJFum4t0n0qVsPpfsJlyhN/XifLVl
+# QIPFIBrffBEs427oix+1XmzjE8A3elTcBGn/voA9R9GeofdevCfYcndzIgUxDFir
+# tySfR+Irpkyr0iaD9jfQtNT+T7FV6B4Kyxp2tZ63NKwPFrmJByE7HeCwCS4CSCRo
+# HiHiurZ3yVW2R9kRq+Ck4Vqy7FXNL4WJnyYUybUAwQURzBY0FjUEDIXxLJLwihRT
+# FU99Ahi1uyvCDkPVm8PbmttNKNxezT/xq3m7ln8EtLya/AzHQHOz46sfV+sAtEVl
+# k0KIQAvecC6EsMw/WKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxNTIx
-# MDlaMC8GCSqGSIb3DQEJBDEiBCCSLjFc3EUxDibPvy1rN7MuKFlulCyXLkLTLZKF
-# g0nyBDANBgkqhkiG9w0BAQEFAASCAgCATpKy3U+iV9CVK6iLI/d3KVJ6VySESUiQ
-# pPOrK66wEoa8XbtAtxeCZc+vn5IO87A+gdemdg6hlWDO+e7jEfUfIijAi3xJNjR5
-# 5Dp2ZgWGwJazTjEf6zvetI/Uv4DS4l+CpmqMqmTPGyAj+99RpGyQYYXH1+EFQBbZ
-# q3PriZwdkzSRNarSGtzoOKglEktpGdoO5ADHWtUdmPRz7CraRUs5HCBd1oSo141O
-# 28JOS0WpykLM7TnhVc9uHfiiYCclLCMpdc2hfu9pCiRJT38URz+pk4ZzdPWejFUR
-# sKt0UkJ3JbuEZWHevFJbHHzjn1QJpQuqVyERzAlzmmyv9/NIjxdo2ZAOJr9LUaAZ
-# e22O+DodGMJqjoTHwulJE+LKHVhrdhP9NPKu+eQWvWOOZeFW4CkRISvTMWsXtq01
-# NefVaS0Q02zrCP7EV/0whW40ytunpXZlqVUdugKEghhrB6e7/QNJIZRG+V2ObcuW
-# 0X6xQCpKS24blu7L9Z8aeBZNHQDTva/y6xWfANccSHh31cco6Yt+V8qAd3YNQWGy
-# DUTpWUKjfV1DaBKKRtdRiiitZ1fMOAB4gEW3nzic0L7S7Yn//bsrggn7p5M3rlhW
-# wdP+vDrQTSTOiLMw9vxY1D+3+PQNIEPnKaYXdBDYNoe8pDC+2cT8OeT1m3ttvEJI
-# zY+U671wCQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkwNzU2
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAFTHU1sYXKZlkYkgejwc6XEnO5SRfWUMQcZ5hP
+# OBFO+TANBgkqhkiG9w0BAQEFAASCAgAJ2nyCu34RufDPk6GQN3wfXBPnVJRHOM8i
+# +7PphxFPSYWnNvlr0BopiSNtv3HlTl61VaZwBHs4Kmiw2Y1mt7PtHyFK7f3DsAsB
+# o04z3USk27R+ZkRIR0WPmAEh+kAlO9GMPe3seeldFosHh8HDMPbo84jGXP+hbUDT
+# +w06ZbuNRdFbcxk+sFa/iNAr8rLdB/GwWswcbD6RW9uehv8Gd8b0PWx+Yepnqa5r
+# vjNG8ewfEr74TB2P5HaayIyXC2FUe3U2MnXGtciGHNIp8OUSjJyXMGaoD4vHx1l/
+# Oa9tsacLe07vM/EshUgiqUTZ9lnvgvpWqvApjtVglKglF33wGGVdYTXznE7trFhh
+# a6gKHtUtRfwvW5ZbIpBIIRVd3pSF1/2QYYhKQxRyeaCVvF09l8Lu+m4VEMCiFZsH
+# /N9+16xgsiHRB2egJS/oiRgZYTCRgOKjZntYUJIVlXHkPrpIn7N4zPyO3VWarAOx
+# qHVclqMviDdn/IO9xISG1fP8UJ0MyMpAVV4uQfK8wYRQXuzJhaQvXT/X5m1mALP4
+# Dzze0/ZaU4erszSTV6f+1QsrX9nUrwAdcTwHL5GxZ83bvrWV/g4HOzFYNYqz0F/l
+# B4nwN0kMtaKPjdDEYewlKlD2W5oExG2J9lgCrJpHrDMv+Uc57SJYjKicZpZMOsOC
+# kAKtzK8LDg==
 # SIG # End signature block
