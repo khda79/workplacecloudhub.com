@@ -131,6 +131,13 @@ LOT wrappers also enable the guarded repair defaults used by the GUI:
 
 Set any of these values to `0` before launching a LOT to disable that action.
 
+`WMI_Bridge_SCCM_Server` is treated as a protected WMI-to-CSP management bridge marker, not as a confirmed
+competing MDM enrollment. When it is the only external provider marker, it is reported through
+`ManagementBridgeDetected`, `ManagementBridgeEnrollmentIds`, `ManagementBridgeProviderIds`, and
+`ManagementBridgeDetails` without blocking Intune auto-enrollment. `-AllowRemoveNonIntuneMdmEnrollment`
+never removes this bridge registration. Other external providers block auto-enrollment only when an external
+discovery URL, OMADM account, or EnterpriseMgmt task confirms OMA-DM enrollment.
+
 For either authorized controlled reboot, the endpoint first creates the SYSTEM startup task `SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot`. Its protected state remains bounded to three startup attempts. A separate durable `State\RebootSafety.json` counter prevents new LOT runs from starting unlimited reboot chains; user-credential reboots additionally require a changed interactive user/session context before another reboot can be authorized.
 
 Every endpoint run also owns the named mutex `Global\SmartM365_IntuneHybridJoinToolkit_Endpoint`. `-IgnoreRunGuard` never bypasses a genuinely active process. `State\EndpointInstance.json` records PID, RunId, start time and heartbeat; a dead process releases the mutex automatically and the next run replaces stale metadata.
