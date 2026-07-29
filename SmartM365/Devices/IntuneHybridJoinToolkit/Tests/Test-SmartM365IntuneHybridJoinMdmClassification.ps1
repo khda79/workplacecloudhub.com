@@ -92,7 +92,7 @@ Assert-True -Condition (-not $internal.IsMdmEnrollment) -Message 'Windows intern
 
 $repairScriptText = Get-Content -LiteralPath $repairScriptPath -Raw
 foreach ($requiredText in @(
-    '$ScriptVersion = "2.10.38"',
+    '$ScriptVersion = "2.10.39"',
     'ManagementBridgeDetected',
     'ManagementBridgeEnrollmentIds',
     'ManagementBridgeProviderIds',
