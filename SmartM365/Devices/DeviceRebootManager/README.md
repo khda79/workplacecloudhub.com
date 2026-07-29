@@ -2,6 +2,20 @@
 
 Local WPF user notification app for SmartM365 device restart governance.
 
+## Download
+
+Download the stable Windows package from the
+[SmartM365 Device Reboot Manager v0.1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v0.1.0).
+
+The GitHub release provides:
+
+- `SmartM365-DeviceRebootManager-0.1.0.zip`: complete standalone source package.
+- `SmartM365-DeviceRebootManager-0.1.0.intunewin`: clean Intune Win32 package.
+- `SmartM365-DeviceRebootManager-0.1.0.sha256`: SHA-256 checksums for both packages.
+
+The PowerShell module is also available from the
+[PowerShell Gallery](https://www.powershellgallery.com/packages/SmartM365.DeviceRebootManager/0.1.0).
+
 ## Scripts
 
 - `SmartM365-DeviceRebootManager-GUI.ps1`: improved SmartM365 GUI with status summary, safer state file, configurable postpone choices, preview mode, and cleaner logging.
@@ -155,8 +169,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-Devic
 
 ## PowerShell Gallery stable package
 
-The stable package is `SmartM365.DeviceRebootManager` version `0.1.0`. It is not
-published to PowerShell Gallery yet.
+The stable package `SmartM365.DeviceRebootManager` version `0.1.0` is published
+on [PowerShell Gallery](https://www.powershellgallery.com/packages/SmartM365.DeviceRebootManager/0.1.0).
 
 Build and validate the package locally:
 
@@ -181,8 +195,8 @@ $env:PSGALLERY_API_KEY = '<temporary-api-key>'
     -Execute
 ```
 
-Once the package is published, an elevated Windows PowerShell session can
-install the stable package and deploy the app:
+An elevated Windows PowerShell session can install the stable package and
+deploy the app:
 
 ```powershell
 Install-Module SmartM365.DeviceRebootManager -Repository PSGallery -Scope AllUsers -Force
