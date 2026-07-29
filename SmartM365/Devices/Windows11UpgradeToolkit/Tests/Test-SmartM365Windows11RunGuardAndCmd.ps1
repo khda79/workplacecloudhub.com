@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.0
+1.7.1
 #>
 
 #requires -Version 5.1
@@ -135,6 +135,25 @@ try {
     Import-ScriptFunction -Path $gui -Name 'New-AutomaticLotPreviewWork'
     Import-ScriptFunction -Path $gui -Name 'Get-AutomaticSourceSelection'
     Import-ScriptFunction -Path $gui -Name 'Test-AutomaticFilterSourceCompatibility'
+    foreach ($functionName in @('Get-LotConfigPath','Get-LotsRoot','Get-SafeLotName','Invoke-LotWrapperRefresh','New-ToolkitLotFolder')) {
+        Import-ScriptFunction -Path $gui -Name $functionName
+    }
+
+    $manualToolkitRoot = Join-Path $testRoot 'ManualLotToolkit'
+    $manualScriptsRoot = Join-Path $manualToolkitRoot 'Scripts'
+    New-Item -ItemType Directory -Path $manualScriptsRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $manualScriptsRoot 'SmartM365-Windows11Upgrade-Update-LotCmdWrappers.ps1') -Encoding UTF8 -Value @(
+        'param([string]$ToolkitRoot)'
+        'Write-Output "Synthetic wrapper refresh chatter"'
+        'exit 0'
+    )
+    $wrapperReturn = @(Invoke-LotWrapperRefresh -RootPath $manualToolkitRoot)
+    Assert-Equal -Actual $wrapperReturn.Count -Expected 0 -Message 'successful wrapper refresh does not leak child process output'
+    $manualLotResults = @(New-ToolkitLotFolder -RootPath $manualToolkitRoot -Name 'LOT-MANUAL-RETURN-TEST')
+    Assert-Equal -Actual $manualLotResults.Count -Expected 1 -Message 'manual LOT creation returns exactly one result object'
+    Assert-True -Condition ($null -ne $manualLotResults[0].PSObject.Properties['ComputersPath']) -Message 'manual LOT result exposes ComputersPath'
+    Assert-True -Condition (Test-Path -LiteralPath $manualLotResults[0].ComputersPath -PathType Leaf) -Message 'manual LOT result points to the created Computers.txt'
+
     $successfulProgressState = [pscustomobject]@{
         Window = [pscustomobject]@{ IsVisible = $false }
         Result = $null
