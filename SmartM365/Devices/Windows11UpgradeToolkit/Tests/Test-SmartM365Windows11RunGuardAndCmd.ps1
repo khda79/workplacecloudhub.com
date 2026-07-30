@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.4
+1.7.6
 #>
 
 #requires -Version 5.1
@@ -43,6 +43,11 @@ $sourceToolkitRoot = $toolkitRoot
 $orchestrator = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1'
 $endpoint = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1'
 $publisher = Join-Path $toolkitRoot 'IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1'
+$intuneBuilder = Join-Path $toolkitRoot 'IntuneWin32\Build-SmartM365Windows11IntunePackage.ps1'
+$intuneInstaller = Join-Path $toolkitRoot 'IntuneWin32\Source\Install.ps1'
+$intuneRunner = Join-Path $toolkitRoot 'IntuneWin32\Source\Run-IntuneUpgrade.ps1'
+$intuneDetection = Join-Path $toolkitRoot 'IntuneWin32\Source\Detect-Template.ps1'
+$setupMediaIntegrityHelper = Join-Path $toolkitRoot 'IntuneWin32\Source\SmartM365-SetupMediaIntegrity.ps1'
 $gui = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-W11UT-RunGuardCmd-{0}' -f [guid]::NewGuid().ToString('N'))
 
@@ -59,6 +64,9 @@ try {
         Import-ScriptFunction -Path $publisher -Name $functionName
     }
     Import-ScriptFunction -Path $gui -Name 'Test-UnlimitedCycleConfirmationRequired'
+    Import-ScriptFunction -Path $intuneRunner -Name 'Invoke-IntuneLogMaintenance'
+    Import-ScriptFunction -Path $intuneRunner -Name 'Set-PackageInstalledForWindows11'
+    . $setupMediaIntegrityHelper
 
     $global:SyntheticInstallLanguage = '040C'
     $global:SyntheticLanguageLogs = New-Object System.Collections.ArrayList
@@ -89,6 +97,104 @@ try {
     Assert-True -Condition (-not (Test-UnlimitedCycleConfirmationRequired -Mode 'Once' -MaxCycles 0)) -Message 'Once does not require unlimited-cycle confirmation'
     Assert-True -Condition (-not (Test-UnlimitedCycleConfirmationRequired -Mode 'OnceIgnoreRunGuard' -MaxCycles 0)) -Message 'OnceIgnoreRunGuard does not require unlimited-cycle confirmation'
 
+    $intuneLogRoot = Join-Path $testRoot 'intune-log-retention'
+    New-Item -ItemType Directory -Path $intuneLogRoot -Force | Out-Null
+    $now = Get-Date
+    foreach ($index in 0..7) {
+        $path = Join-Path $intuneLogRoot ('Endpoint_recent_{0:D2}_stdout.log' -f $index)
+        Set-Content -LiteralPath $path -Value $index -Encoding UTF8
+        (Get-Item -LiteralPath $path).LastWriteTime = $now.AddHours(-1 * $index)
+    }
+    foreach ($index in 0..1) {
+        $path = Join-Path $intuneLogRoot ('Endpoint_old_{0:D2}_stderr.log' -f $index)
+        Set-Content -LiteralPath $path -Value $index -Encoding UTF8
+        (Get-Item -LiteralPath $path).LastWriteTime = $now.AddDays(-8).AddHours(-1 * $index)
+    }
+    foreach ($persistentName in @('Run-IntuneUpgrade.log','Install.log','Install-Robocopy.log')) {
+        $path = Join-Path $intuneLogRoot $persistentName
+        Set-Content -LiteralPath $path -Value $persistentName -Encoding UTF8
+        (Get-Item -LiteralPath $path).LastWriteTime = $now.AddDays(-30)
+    }
+    $maintenance = Invoke-IntuneLogMaintenance -Path $intuneLogRoot -RetentionDays 7 -MaximumEndpointFiles 5
+    Assert-Equal -Actual $maintenance.Scanned -Expected 10 -Message 'Intune log maintenance scans only timestamped endpoint logs'
+    Assert-Equal -Actual $maintenance.RemovedByAge -Expected 2 -Message 'Intune log maintenance removes endpoint logs older than seven days'
+    Assert-Equal -Actual $maintenance.RemovedByCount -Expected 3 -Message 'Intune log maintenance enforces the endpoint file count cap after age cleanup'
+    Assert-Equal -Actual $maintenance.Remaining -Expected 5 -Message 'Intune log maintenance leaves only the configured number of endpoint files'
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $intuneLogRoot 'Endpoint_recent_00_stdout.log')) -Message 'Intune log maintenance preserves the newest endpoint log'
+    foreach ($persistentName in @('Run-IntuneUpgrade.log','Install.log','Install-Robocopy.log')) {
+        Assert-True -Condition (Test-Path -LiteralPath (Join-Path $intuneLogRoot $persistentName)) -Message "Intune log maintenance preserves $persistentName"
+    }
+    $intuneRunnerText = Get-Content -LiteralPath $intuneRunner -Raw
+    Assert-True -Condition ($intuneRunnerText -match '\$LogRetentionDays\s*=\s*7') -Message 'Intune runner defaults endpoint log retention to seven days'
+    Assert-True -Condition ($intuneRunnerText -match '\$MaxEndpointLogFiles\s*=\s*200') -Message 'Intune runner defaults endpoint log count to 200 files'
+    Assert-Equal -Actual ([regex]::Matches($intuneRunnerText, "Invoke-RunnerLogMaintenance -Phase '(Startup|PostRun)'").Count) -Expected 2 -Message 'Intune runner performs maintenance before and after endpoint execution'
+
+    $setupMediaTestRoot = Join-Path $testRoot 'setup-media-integrity'
+    New-Item -ItemType Directory -Path (Join-Path $setupMediaTestRoot 'sources') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $setupMediaTestRoot 'boot') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $setupMediaTestRoot 'setup.exe') -Value 'synthetic setup' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $setupMediaTestRoot 'sources\install.wim') -Value 'synthetic image' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $setupMediaTestRoot 'boot\bcd') -Value 'synthetic boot data' -Encoding ASCII
+    $setupMediaManifestRows = foreach ($relativePath in @('setup.exe','sources\install.wim','boot\bcd')) {
+        $mediaFile = Get-Item -LiteralPath (Join-Path $setupMediaTestRoot $relativePath)
+        [pscustomobject]@{
+            RelativePath = $relativePath
+            Length = [int64]$mediaFile.Length
+            SHA256 = (Get-FileHash -LiteralPath $mediaFile.FullName -Algorithm SHA256).Hash
+        }
+    }
+    $setupMediaManifestRows | Export-Csv -LiteralPath (Join-Path $setupMediaTestRoot 'SmartM365-SetupMediaManifest.sha256.csv') -NoTypeInformation -Encoding UTF8
+    $setupMediaIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $setupMediaTestRoot
+    Assert-Equal -Actual $setupMediaIntegrity.Files -Expected 3 -Message 'setup media validator verifies every manifest row'
+
+    Remove-Item -LiteralPath (Join-Path $setupMediaTestRoot 'boot\bcd') -Force
+    $missingBootFileRejected = $false
+    try { Test-SmartM365SetupMediaIntegrity -MediaRoot $setupMediaTestRoot | Out-Null }
+    catch { $missingBootFileRejected = $_.Exception.Message -match 'File missing.*boot\\bcd' }
+    Assert-True -Condition $missingBootFileRejected -Message 'setup media validator rejects a missing boot BCD file'
+
+    Set-Content -LiteralPath (Join-Path $setupMediaTestRoot 'boot\bcd') -Value 'synthetic boot data' -Encoding ASCII
+    Add-Content -LiteralPath (Join-Path $setupMediaTestRoot 'sources\install.wim') -Value 'corruption' -Encoding ASCII
+    $corruptedMediaRejected = $false
+    try { Test-SmartM365SetupMediaIntegrity -MediaRoot $setupMediaTestRoot | Out-Null }
+    catch { $corruptedMediaRejected = $_.Exception.Message -match '(Length|SHA256) mismatch.*sources\\install\.wim' }
+    Assert-True -Condition $corruptedMediaRejected -Message 'setup media validator rejects a changed install image'
+
+    $intuneBuilderText = Get-Content -LiteralPath $intuneBuilder -Raw
+    $intuneInstallerText = Get-Content -LiteralPath $intuneInstaller -Raw
+    $intuneDetectionText = Get-Content -LiteralPath $intuneDetection -Raw
+    $endpointText = Get-Content -LiteralPath $endpoint -Raw
+    Assert-Equal -Actual ([regex]::Matches($intuneBuilderText, 'Test-SmartM365SetupMediaIntegrity\s+-MediaRoot').Count) -Expected 3 -Message 'Intune builder validates source, staged, and prep setup media'
+    Assert-True -Condition ($intuneBuilderText -match 'SmartM365-SetupMediaIntegrity\.ps1') -Message 'Intune builder embeds the shared integrity helper'
+    Assert-True -Condition ($intuneInstallerText -match 'Test-SetupCacheReady[\s\S]*?Test-SmartM365SetupMediaIntegrity') -Message 'Intune installer validates the complete destination cache'
+    Assert-True -Condition ($intuneInstallerText.LastIndexOf("Set-PackageDetectionState -InstallState 'Installed'") -gt $intuneInstallerText.LastIndexOf('Test-SetupCacheReady -Path $targetMediaRoot')) -Message 'Intune installer writes Installed only after final cache validation on Windows 10'
+    Assert-True -Condition ($intuneInstallerText -match "Device is already Windows 11[\s\S]*?Set-PackageDetectionState -InstallState 'Installed'") -Message 'Intune installer marks an already-Windows 11 device Installed'
+    Assert-True -Condition ($intuneInstallerText -match 'if \(\$InstallState -eq ''Installed''\)[\s\S]*?RepairReason[\s\S]*?RepairRequiredUtc') -Message 'Intune installer clears stale repair metadata when Installed'
+    Assert-True -Condition ($intuneInstallerText.IndexOf("if ((Get-OsFamily) -eq 'Windows11')") -lt $intuneInstallerText.IndexOf('if (-not (Test-Path -LiteralPath $integrityHelperPackagePath')) -Message 'Windows 11 install success is evaluated before media helper validation'
+    Assert-True -Condition ($intuneRunnerText -match "InstallState\s+-Value\s+'RepairRequired'") -Message 'Intune runner marks an invalid setup cache as RepairRequired'
+    Assert-True -Condition ($intuneRunnerText -match "Set-PackageInstalledForWindows11[\s\S]*?InstallState\s+-Value\s+'Installed'") -Message 'Intune runner restores Installed state for Windows 11'
+    $global:registrySubKeyRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
+    $global:SyntheticRegistryWrites = New-Object System.Collections.ArrayList
+    $global:SyntheticRunnerLogs = New-Object System.Collections.ArrayList
+    function global:Set-Registry64String {
+        param([string]$SubKey, [string]$Name, [string]$Value)
+        [void]$global:SyntheticRegistryWrites.Add([pscustomobject]@{ SubKey = $SubKey; Name = $Name; Value = $Value })
+    }
+    function global:Write-RunnerLog {
+        param([string]$Message, [string]$Level = 'INFO')
+        [void]$global:SyntheticRunnerLogs.Add([pscustomobject]@{ Message = $Message; Level = $Level })
+    }
+    Set-PackageInstalledForWindows11 -Manifest ([pscustomobject]@{ PackageId = 'Synthetic-W11'; PackageVersion = '9.9.9' })
+    Assert-Equal -Actual (($global:SyntheticRegistryWrites | Where-Object Name -eq 'InstallState' | Select-Object -Last 1).Value) -Expected 'Installed' -Message 'Windows 11 runner state writes InstallState Installed'
+    Assert-Equal -Actual (($global:SyntheticRegistryWrites | Where-Object Name -eq 'CompletionReason' | Select-Object -Last 1).Value) -Expected 'AlreadyWindows11' -Message 'Windows 11 runner state records its completion reason'
+    Assert-Equal -Actual (($global:SyntheticRegistryWrites | Where-Object Name -eq 'RepairRequiredUtc' | Select-Object -Last 1).Value) -Expected '' -Message 'Windows 11 runner state clears prior repair timestamp'
+    Assert-True -Condition ($intuneRunnerText.IndexOf("if (`$osFamily -eq 'Windows11')") -lt $intuneRunnerText.IndexOf('if (-not (Test-Path -LiteralPath $endpointScript')) -Message 'runner evaluates Windows 11 before endpoint and cache validation'
+    Assert-True -Condition ($intuneDetectionText.IndexOf("Device is already Windows 11") -lt $intuneDetectionText.IndexOf('Get-Registry64PackageState -SubKey')) -Message 'Intune detection prioritizes Windows 11 over registry repair state'
+    Assert-True -Condition ($intuneDetectionText -match "@\('Installed', 'AlreadyWindows11'\)") -Message 'Intune detection rejects RepairRequired state for Windows 10'
+    $cacheFailureIndex = $endpointText.IndexOf('$cacheError = $_.Exception.Message')
+    $replacementLookupIndex = $endpointText.IndexOf('$setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)', $cacheFailureIndex)
+    $cacheClearIndex = $endpointText.IndexOf('Clear-SetupCachePath -CachePath $cachePath -Reason $cacheError', $cacheFailureIndex)
+    Assert-True -Condition ($cacheFailureIndex -ge 0 -and $replacementLookupIndex -gt $cacheFailureIndex -and $cacheClearIndex -gt $replacementLookupIndex) -Message 'endpoint finds a replacement source before clearing an invalid cache'
     $requirementRule = New-EndpointRequirementRule -Language 'fr-FR'
     $requirementScript = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$requirementRule.scriptContent))
     Assert-True -Condition ($requirementScript -match 'InstallLanguage') -Message 'Intune language requirement reads the Windows installation language'

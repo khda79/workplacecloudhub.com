@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.56
+    0.1.57
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.56'
+$script:ScriptVersion = '0.1.57'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -3320,12 +3320,13 @@ function Resolve-SetupUpgradeExecutable {
             if ($SkipSetupMediaPreCopy) {
                 throw ("Local setup cache is not ready and existing-media-only mode is enabled. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
             }
-            Write-SmartLog ("Local setup cache not ready: {0}" -f $_.Exception.Message) 'WARN'
-            Clear-SetupCachePath -CachePath $cachePath -Reason $_.Exception.Message
+            $cacheError = $_.Exception.Message
+            Write-SmartLog ("Local setup cache not ready: {0}" -f $cacheError) 'WARN'
             $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
-            if ($SetupExecutionMode -eq 'LocalCache' -and $setupSourceCandidates.Count -eq 0) {
-                throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
+            if ($setupSourceCandidates.Count -eq 0) {
+                throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}. The invalid cache was preserved for diagnostics." -f $cachePath,$cacheError)
             }
+            Clear-SetupCachePath -CachePath $cachePath -Reason $cacheError
         }
     }
 

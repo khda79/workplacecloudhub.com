@@ -4,7 +4,7 @@
 .DESCRIPTION
     Copies endpoint scripts to ProgramData, optionally copies packaged setup media or validates an existing cache, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.7
+    1.0.9
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -19,6 +19,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $packageRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$integrityHelperPackagePath = Join-Path $packageRoot 'SmartM365-SetupMediaIntegrity.ps1'
 $manifestPath = Join-Path $packageRoot 'PackageManifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "PackageManifest.json not found: $manifestPath" }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -266,6 +267,10 @@ function Set-PackageDetectionState {
     Set-Registry64String -SubKey $registrySubKey -Name PackageMode -Value $packageMode
     Set-Registry64String -SubKey $registrySubKey -Name InstallState -Value $InstallState
     Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+    if ($InstallState -eq 'Installed') {
+        Set-Registry64String -SubKey $registrySubKey -Name RepairReason -Value ''
+        Set-Registry64String -SubKey $registrySubKey -Name RepairRequiredUtc -Value ''
+    }
 }
 
 function Test-SetupCacheReady {
@@ -275,6 +280,8 @@ function Test-SetupCacheReady {
     $installWim = Join-Path $Path 'sources\install.wim'
     if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) { throw "Local setup cache is missing setup.exe: $Path" }
     if (-not (Test-Path -LiteralPath $installWim -PathType Leaf)) { throw "Local setup cache is missing sources\install.wim: $Path" }
+    $integrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $Path
+    Write-InstallLog ("Setup cache integrity validated. Files={0}; Bytes={1}; Root={2}" -f $integrity.Files,$integrity.Bytes,$integrity.MediaRoot)
     return $true
 }
 
@@ -297,16 +304,21 @@ Protect-ToolkitPathAcl -Path $logRoot -Directory
 
 if ((Get-OsFamily) -eq 'Windows11') {
     Write-InstallLog 'Device is already Windows 11 during package install. Writing detection state, removing scheduled task if present, and exiting success.'
-    Set-PackageDetectionState -InstallState 'AlreadyWindows11'
+    Set-PackageDetectionState -InstallState 'Installed'
     try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
     exit 0
 }
 
+if (-not (Test-Path -LiteralPath $integrityHelperPackagePath -PathType Leaf)) { throw "Setup media integrity helper not found: $integrityHelperPackagePath" }
+. $integrityHelperPackagePath
+
 Copy-Item -LiteralPath (Join-Path $packageRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Destination (Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Run-IntuneUpgrade.ps1') -Destination (Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1') -Force
+Copy-Item -LiteralPath $integrityHelperPackagePath -Destination (Join-Path $intuneRoot 'SmartM365-SetupMediaIntegrity.ps1') -Force
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $intuneRoot 'PackageManifest.json') -Force
 Protect-ToolkitPathAcl -Path (Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1')
 Protect-ToolkitPathAcl -Path (Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1')
+Protect-ToolkitPathAcl -Path (Join-Path $intuneRoot 'SmartM365-SetupMediaIntegrity.ps1')
 Protect-ToolkitPathAcl -Path (Join-Path $intuneRoot 'PackageManifest.json')
 
 if ($requiresExistingSetupCache) {
@@ -315,6 +327,8 @@ if ($requiresExistingSetupCache) {
     Protect-ToolkitPathAcl -Path $targetMediaRoot -Directory
 }
 else {
+    $packageIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $packageMediaRoot
+    Write-InstallLog ("Packaged setup media integrity validated before installation. Files={0}; Bytes={1}; Root={2}" -f $packageIntegrity.Files,$packageIntegrity.Bytes,$packageIntegrity.MediaRoot)
     if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'setup.exe') -PathType Leaf)) { throw "Packaged setup.exe not found: $packageMediaRoot" }
     if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'sources\install.wim') -PathType Leaf)) { throw "Packaged sources\install.wim not found: $packageMediaRoot" }
 
