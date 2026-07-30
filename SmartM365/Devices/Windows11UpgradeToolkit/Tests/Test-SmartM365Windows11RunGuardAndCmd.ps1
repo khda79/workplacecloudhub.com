@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.2
+1.7.3
 #>
 
 #requires -Version 5.1
@@ -42,6 +42,7 @@ $toolkitRoot = Split-Path -Parent $PSScriptRoot
 $sourceToolkitRoot = $toolkitRoot
 $orchestrator = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1'
 $endpoint = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1'
+$publisher = Join-Path $toolkitRoot 'IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1'
 $gui = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-W11UT-RunGuardCmd-{0}' -f [guid]::NewGuid().ToString('N'))
 
@@ -53,6 +54,9 @@ try {
         'Resolve-SetupSourceMediaPath'
     )) {
         Import-ScriptFunction -Path $endpoint -Name $functionName
+    }
+    foreach ($functionName in @('ConvertTo-Base64Utf8','New-EndpointRequirementRule')) {
+        Import-ScriptFunction -Path $publisher -Name $functionName
     }
 
     $global:SyntheticInstallLanguage = '040C'
@@ -77,6 +81,23 @@ try {
 
     $global:SyntheticInstallLanguage = ''
     Assert-Equal -Actual (Get-SystemInstallLanguageTag) -Expected ([System.Globalization.CultureInfo]::InstalledUICulture.Name) -Message 'InstalledUICulture is used when InstallLanguage is unavailable'
+
+
+    $requirementRule = New-EndpointRequirementRule -Language 'fr-FR'
+    $requirementScript = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$requirementRule.scriptContent))
+    Assert-True -Condition ($requirementScript -match 'InstallLanguage') -Message 'Intune language requirement reads the Windows installation language'
+    Assert-True -Condition ($requirementScript -match 'InstalledUICulture') -Message 'Intune language requirement keeps the installed UI culture fallback'
+    Assert-True -Condition ($requirementScript -notmatch 'Get-WinSystemLocale') -Message 'Intune language requirement does not use the regional SystemLocale'
+    $requirementRunspace = [powershell]::Create()
+    try {
+        $mockedRequirementScript = "function Get-ItemProperty {`r`n    [CmdletBinding()]`r`n    param([string]`$LiteralPath)`r`n    [pscustomobject]@{ InstallLanguage = '040C' }`r`n}`r`n" + $requirementScript
+        $requirementOutput = @($requirementRunspace.AddScript($mockedRequirementScript).Invoke())
+        Assert-True -Condition (-not $requirementRunspace.HadErrors) -Message 'Intune language requirement executes without runspace errors'
+        Assert-Equal -Actual ($requirementOutput -join ',') -Expected 'OK' -Message 'Intune requirement accepts SystemLocale-independent InstallLanguage 040C as fr-FR'
+    }
+    finally {
+        $requirementRunspace.Dispose()
+    }
 
     $languageMediaRoot = Join-Path $testRoot 'language-media'
     $frMediaRoot = Join-Path $languageMediaRoot 'fr-FR'
