@@ -17,6 +17,7 @@ Each generated package contains:
 ```text
 Install.ps1
 Run-IntuneUpgrade.ps1
+SmartM365-SetupMediaIntegrity.ps1
 PackageManifest.json
 SmartM365-Invoke-Windows11UpgradeRepair.ps1
 SetupMedia\Win11-<language>\...
@@ -150,11 +151,15 @@ Assign each language package only to devices with the matching Windows language,
 ## Operational notes
 
 - This mode does not use `SetupSource$` or `SetupSourceGates$`.
-- Intune downloads the `.intunewin`; the full-package installer copies the packaged setup media to the toolkit local cache. The `WithCacheOnly` installer does not copy media and fails before detection if the local cache is missing.
+- The builder validates every file, size, and SHA256 recorded in `SmartM365-SetupMediaManifest.sha256.csv` against the source media, the staged package, and the final prep folder. A partial source, including a missing `boot\bcd`, cannot produce a package.
+- Intune downloads the `.intunewin`; the full-package installer validates the packaged media before copying it and validates the complete destination cache before writing `InstallState=Installed`. The `WithCacheOnly` installer validates the existing local cache and fails before detection when it is missing or invalid.
 - The Intune installer and the endpoint upgrade script coordinate setup cache writes with an expiring local lock under `%ProgramData%\SmartM365\Windows11UpgradeToolkit\Locks`. If another SmartM365 process is copying or clearing the same cache, the Intune installer exits with `1618` so Intune retries instead of deleting a partial cache.
+- The scheduled runner validates the complete cache before every Windows 10 endpoint launch. If the cache becomes incomplete or corrupt, it writes `InstallState=RepairRequired` and removes its scheduled task; the detection rule then fails so Intune reinstalls the package. The endpoint preserves an invalid cache when no verified replacement source is available.
+- Windows 11 has priority over cache and repair state: the installer, runner, and detection rule report the application as `Installed` and remove the obsolete scheduled task as soon as Windows 11 is detected.
 - The scheduled task performs the upgrade asynchronously so Intune app installation can complete quickly.
 - Upgrade status remains in `LastRun.json`, endpoint CSV output, and logs under `C:\ProgramData\SmartM365\Windows11UpgradeToolkit`.
-- The package can be detected as installed even before Windows 11 is complete; use remediation/reporting to monitor final upgrade status.
+- On every scheduled run, `Logs\Intune\Endpoint_*.log` files older than 7 days are removed. The runner also keeps at most 200 of these timestamped stdout/stderr files, while preserving persistent logs such as `Run-IntuneUpgrade.log`, `Install.log`, and `Install-Robocopy.log`. Cleanup failures are logged but never block the upgrade.
+- The package can be detected as installed before Windows 11 is complete only while its setup cache remains valid; use remediation/reporting to monitor final upgrade status.
 
 
 ## Publish to Intune with Graph
