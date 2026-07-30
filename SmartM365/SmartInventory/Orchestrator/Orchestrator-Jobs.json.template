@@ -606,7 +606,7 @@
       "Name": "EXO-QuarantineMessages-Report",
       "ScriptPath": "ExchangeInventory\\Quarantine\\SmartM365-EXO-QuarantineMessages-Report.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
