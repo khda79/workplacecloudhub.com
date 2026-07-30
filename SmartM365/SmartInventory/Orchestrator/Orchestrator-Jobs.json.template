@@ -603,6 +603,34 @@
       "EstimatedDurationMinutes": 5
     },
     {
+      "Name": "EXO-QuarantineMessages-Report",
+      "ScriptPath": "ExchangeInventory\\Quarantine\\SmartM365-EXO-QuarantineMessages-Report.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 30,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "07:30"
+        ],
+        "MissedRunPolicy": "Skip"
+      },
+      "LauncherPath": "Launchers\\Cloud\\Start-SmartM365-EXO-QuarantineMessages-Report.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 10
+    },
+    {
       "Name": "EXO-MigrationJobs-Inventory",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-EXO-MigJob-Inventory.ps1",
       "Arguments": "",

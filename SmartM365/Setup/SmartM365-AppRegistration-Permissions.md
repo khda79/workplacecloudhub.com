@@ -120,7 +120,7 @@ This scope is not a SmartM365 runtime application permission. It is requested fr
 
 | Permission | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| `Exchange.ManageAsApp` on the `Office 365 Exchange Online` API | Enables certificate-based app-only authentication with `Connect-ExchangeOnline`. This is not a Microsoft Graph permission. It is not sufficient alone: the EXO app-only token must also contain a supported Entra role for Exchange RBAC to be built. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, and `Migration`, when they use app-only authentication. |
+| `Exchange.ManageAsApp` on the `Office 365 Exchange Online` API | Enables certificate-based app-only authentication with `Connect-ExchangeOnline`. This is not a Microsoft Graph permission. It is not sufficient alone: the EXO app-only token must also contain a supported Entra role for Exchange RBAC to be built. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, `Quarantine`, and `Migration`, when they use app-only authentication. |
 
 ## Power BI And Fabric Admin API Access
 
@@ -137,8 +137,10 @@ The read-only admin API tenant setting is distinct from the general developer se
 
 | Role | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| `Global Reader` | Privileged baseline for read-only Exchange Online runtime scripts. This Entra role is supported by Exchange Online PowerShell app-only auth and is normally enough for inventories and reports that only call `Get-*` cmdlets. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, and `Migration`, as long as they remain read-only. |
+| `Global Reader` | Privileged baseline for read-only Exchange Online runtime scripts. This Entra role is supported by Exchange Online PowerShell app-only auth and is normally enough for inventories and reports that only call `Get-*` cmdlets. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, `Quarantine`, and `Migration`, as long as they remain read-only. |
 | `Exchange Administrator` | Setup role, not runtime baseline. It may be required for the interactive administrator account that runs `Setup/SmartM365-Create-AppRegistration.ps1`, because the bootstrap creates/modifies a shared mailbox, a mail-enabled group, an Application Access Policy, and the service principal role assignment. | `Setup/SmartM365-Create-AppRegistration.ps1` only, or a future Exchange Online script that explicitly performs changes. |
+
+`SmartInventory/ExchangeInventory/Quarantine/SmartM365-EXO-QuarantineMessages-Report.ps1` uses only `Get-QuarantineMessage` for quarantine metadata. It does not call the quarantine preview, export, release, report, or delete cmdlets. The SmartM365 `Global Reader` runtime baseline provides read-only quarantine access; `Mail.Send` remains conditional on Graph report delivery.
 
 ## Exchange Online Configuration Created By The Bootstrap
 
