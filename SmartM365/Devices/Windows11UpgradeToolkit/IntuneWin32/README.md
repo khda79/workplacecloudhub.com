@@ -107,7 +107,7 @@ C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\Win11-fr-FR\setup.ex
 C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\Win11-fr-FR\sources\install.wim
 ```
 
-The publisher adds an Intune requirement rule that returns applicable only when the Windows setup language matches and, for `WithCacheOnly`, the local cache exists.
+The publisher adds an Intune requirement rule that returns applicable only when the Windows setup language matches and, for `WithCacheOnly`, the local cache exists. The rule resolves the registry `InstallLanguage` first and falls back to `InstalledUICulture`; regional `SystemLocale` values such as `fr-CH` do not exclude a device whose Windows installation language is `fr-FR`.
 
 ## Intune app settings
 
