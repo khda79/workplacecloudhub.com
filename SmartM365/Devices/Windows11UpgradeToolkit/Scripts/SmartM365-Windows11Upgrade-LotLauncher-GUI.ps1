@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.50
+0.1.51
 #>
 param(
     [switch]$ValidateOnly
@@ -2876,9 +2876,20 @@ function Refresh-LotList {
     Add-Status -Message ("{0} LOT(s) found. {1} ready for launch." -f $script:Lots.Count, @(Get-LaunchableLotSummaries).Count)
 }
 
+function Test-UnlimitedCycleConfirmationRequired {
+    param(
+        [string]$Mode,
+        [int]$MaxCycles
+    )
+
+    return ($Mode -in @('Loop','LoopIgnoreRunGuard') -and $MaxCycles -eq 0)
+}
+
 function Confirm-UnlimitedCycleLaunch {
+    param([string]$Mode)
+
     $maxCycles = [int](Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0)
-    if ($maxCycles -gt 0) { return $true }
+    if (-not (Test-UnlimitedCycleConfirmationRequired -Mode $Mode -MaxCycles $maxCycles)) { return $true }
 
     $choice = [System.Windows.MessageBox]::Show(
         "Max cycles is 0, so this launcher will keep cycling until all devices are removed, the operator stops it, or an external cancellation is requested.`n`nFailure backoff is enabled, but an unlimited run can remain active for days. Continue?",
@@ -2927,12 +2938,13 @@ $controls.LaunchLotButton.Add_Click({
     try {
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.ComputerCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
-        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
+        $mode = [string]$controls.LotModeCombo.SelectedItem
+        if (-not (Confirm-UnlimitedCycleLaunch -Mode $mode)) { return }
         $script:SelectedLot = Ensure-LotWrappersReady -Lot $script:SelectedLot
         $environment = Get-ToolkitOptionEnvironment
         $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLot.Path -EnvironmentVariables $environment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $script:SelectedLot.Name)) { return }
-        Start-ToolkitLot -Lot $script:SelectedLot -Mode ([string]$controls.LotModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+        Start-ToolkitLot -Lot $script:SelectedLot -Mode $mode -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
         Save-GuiOptions -Quiet
         Add-Status -Title 'Launched' -Message ("Launched LOT {0}." -f $script:SelectedLot.Name)
     } catch {
@@ -2941,7 +2953,8 @@ $controls.LaunchLotButton.Add_Click({
 })
 $controls.LaunchAllButton.Add_Click({
     try {
-        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
+        $mode = [string]$controls.LotModeCombo.SelectedItem
+        if (-not (Confirm-UnlimitedCycleLaunch -Mode $mode)) { return }
         $missingWrapperLots = @($script:Lots | Where-Object { $_.ComputerCount -gt 0 -and -not $_.WrappersReady })
         if ($missingWrapperLots.Count -gt 0) {
             Add-Status -Title 'Wrappers' -Message ("{0} LOT(s) have missing wrappers. Refreshing wrappers before launch all..." -f $missingWrapperLots.Count)
@@ -2954,7 +2967,7 @@ $controls.LaunchAllButton.Add_Click({
             $environment = Get-ToolkitOptionEnvironment
             $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $lot.Path -EnvironmentVariables $environment
             if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $lot.Name)) { return }
-            Start-ToolkitLot -Lot $lot -Mode ([string]$controls.LotModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+            Start-ToolkitLot -Lot $lot -Mode $mode -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
             Add-Status -Title 'Launch all' -Message ("Launched {0}. Next LOT starts in {1}s." -f $lot.Name, $launchAllLotStartDelaySeconds)
             Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
         }
@@ -2968,10 +2981,11 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
-        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
+        $mode = [string]$controls.SingleModeCombo.SelectedItem
+        if (-not (Confirm-UnlimitedCycleLaunch -Mode $mode)) { return }
         $environment = Get-ToolkitOptionEnvironment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $environment -ScopeName $computer)) { return }
-        $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+        $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode $mode -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
         Save-GuiOptions -Quiet
         $script:LastSingleRunFolder = $context.RunPath
         $controls.SingleRunFolderText.Text = $context.RunPath
