@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a staging source folder containing the endpoint script, Intune installer scripts, package manifest, and optionally one language-specific Windows setup media cache, then optionally runs IntuneWinAppUtil.exe.
 .VERSION
-    1.0.1
+    1.0.2
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -29,6 +29,9 @@ $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 $toolkitRoot = Split-Path -Parent $scriptDir
 $sourceTemplateRoot = Join-Path $scriptDir 'Source'
 $endpointScript = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1'
+$integrityHelperSource = Join-Path $sourceTemplateRoot 'SmartM365-SetupMediaIntegrity.ps1'
+if (-not (Test-Path -LiteralPath $integrityHelperSource -PathType Leaf)) { throw "Setup media integrity helper not found: $integrityHelperSource" }
+. $integrityHelperSource
 
 function Get-EndpointVersion {
     param([string]$Path)
@@ -61,6 +64,8 @@ if (-not $WithCacheOnly) {
     if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'setup.exe') -PathType Leaf)) { throw "setup.exe not found in media root: $mediaRoot" }
     if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'sources\install.wim') -PathType Leaf)) { throw "sources\install.wim not found in media root: $mediaRoot" }
     if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'SmartM365-SetupMediaManifest.sha256.csv') -PathType Leaf)) { throw "SmartM365-SetupMediaManifest.sha256.csv not found in media root: $mediaRoot" }
+    $sourceIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $mediaRoot
+    Write-Host ("Validated setup source integrity. Files={0}; Bytes={1}; Root={2}" -f $sourceIntegrity.Files,$sourceIntegrity.Bytes,$sourceIntegrity.MediaRoot)
 }
 
 $buildRoot = Join-Path $scriptDir ("Build\$packageId")
@@ -75,6 +80,7 @@ if (-not $WithCacheOnly) { New-Item -ItemType Directory -Path $mediaDest -Force 
 
 Copy-Item -LiteralPath (Join-Path $sourceTemplateRoot 'Install.ps1') -Destination (Join-Path $packageSource 'Install.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $sourceTemplateRoot 'Run-IntuneUpgrade.ps1') -Destination (Join-Path $packageSource 'Run-IntuneUpgrade.ps1') -Force
+Copy-Item -LiteralPath $integrityHelperSource -Destination (Join-Path $packageSource 'SmartM365-SetupMediaIntegrity.ps1') -Force
 Copy-Item -LiteralPath $endpointScript -Destination (Join-Path $packageSource 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Force
 
 $manifest = [ordered]@{
@@ -100,6 +106,8 @@ if (-not $WithCacheOnly) {
     & $robocopy $mediaRoot $mediaDest /MIR /R:2 /W:5 /NP /NFL /NDL | Out-Null
     $copyExit = [int]$LASTEXITCODE
     if ($copyExit -gt 7) { throw "Robocopy media copy failed with exit code $copyExit." }
+    $stagedIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $mediaDest
+    Write-Host ("Validated staged setup media integrity. Files={0}; Bytes={1}; Root={2}" -f $stagedIntegrity.Files,$stagedIntegrity.Bytes,$stagedIntegrity.MediaRoot)
 }
 else {
     Write-Host "Building cache-only package. Setup media is not embedded; endpoint will require local cache: $cacheFolder"
@@ -136,6 +144,11 @@ if (-not $SkipIntuneWinBuild) {
     & $robocopy $packageSource $prepSource /MIR /R:2 /W:5 /NP /NFL /NDL | Out-Null
     $prepCopyExit = [int]$LASTEXITCODE
     if ($prepCopyExit -gt 7) { throw "Robocopy content-prep copy failed with exit code $prepCopyExit." }
+    if (-not $WithCacheOnly) {
+        $prepMediaRoot = Join-Path $prepSource ("SetupMedia\{0}" -f $cacheFolder)
+        $prepIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $prepMediaRoot
+        Write-Host ("Validated content-prep setup media integrity. Files={0}; Bytes={1}; Root={2}" -f $prepIntegrity.Files,$prepIntegrity.Bytes,$prepIntegrity.MediaRoot)
+    }
 
     & $IntuneWinAppUtilPath -c $prepSource -s 'Install.ps1' -o $prepOutput -q
     if ($LASTEXITCODE -ne 0) { throw "IntuneWinAppUtil failed with exit code $LASTEXITCODE." }
