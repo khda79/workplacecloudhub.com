@@ -9,6 +9,7 @@ Exchange Online inventory and comparison scripts.
 - `CalendarPermissions/`: Exchange Online mailbox calendar permission inventory.
 - `OnPremises/CalendarPermissions/`: Exchange 2016 mailbox calendar permission inventory.
 - `Mailboxes/`: Exchange Online mailbox inventory.
+- `Quarantine/`: read-only Exchange Online quarantined email metadata report with CSV and Excel mail delivery.
 - `Migration/`: mailbox migration job inventory.
 - `Permissions/`: mailbox permission report grouped by delegated user across on-premises and EXO sources.
 - `OnPremises/Mailboxes/`: Exchange 2016 on-premises mailbox inventory and reporting.
