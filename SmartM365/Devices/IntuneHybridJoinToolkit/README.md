@@ -6,6 +6,28 @@ The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invok
 
 For single-device support with a richer GUI, support bundle, and CLI export experience, use `../DeviceRegistrationTool/`. Both tools intentionally share the same diagnostic and guarded repair concepts for Hybrid Join and Intune enrollment; when one side changes, the other should be reviewed for synchronization.
 
+## Download
+
+Download the standalone operator package from the
+[Smart Intune Hybrid Join Toolkit v2.10.77 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/intune-hybrid-join-toolkit-v2.10.77).
+
+The GitHub release provides:
+
+- `SmartM365-IntuneHybridJoinToolkit-2.10.77.zip`: complete signed toolkit for operator workstations;
+- `SmartM365-IntuneHybridJoinToolkit-2.10.77.sha256`: SHA-256 checksum for the ZIP.
+
+After downloading:
+
+1. Verify the ZIP against the published SHA-256 file.
+2. Extract the complete ZIP to a local folder.
+3. Install Microsoft Sysinternals PsExec separately when it is not already available.
+4. Open `Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd`.
+5. Start with a controlled test LOT and review Preview/Audit evidence before enabling repair actions.
+
+The package does not contain PsExec or customer-specific LOTs, inventories, logs, reports, tenant
+identifiers, device names, or account details. PowerShell scripts are Authenticode-signed by
+`workplacecloudhub.com`. The toolkit is distributed under the GNU General Public License v3.0.
+
 ## Layout
 
 ```text
