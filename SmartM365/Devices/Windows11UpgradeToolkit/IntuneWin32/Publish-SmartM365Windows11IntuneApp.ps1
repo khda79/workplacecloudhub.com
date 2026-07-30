@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.16
+    1.0.17
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -320,9 +320,22 @@ function New-EndpointRequirementRule {
 
     $script = @"
 try {
-    `$locale = (Get-WinSystemLocale).Name
+    `$locale = ''
+    try {
+        `$languageKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language'
+        `$installLanguage = [string](Get-ItemProperty -LiteralPath `$languageKey -ErrorAction Stop).InstallLanguage
+        if (-not [string]::IsNullOrWhiteSpace(`$installLanguage)) {
+            `$lcid = [Convert]::ToInt32(`$installLanguage, 16)
+            `$locale = ([System.Globalization.CultureInfo]::GetCultureInfo(`$lcid)).Name
+        }
+    }
+    catch { `$locale = '' }
+    if ([string]::IsNullOrWhiteSpace(`$locale)) {
+        try { `$locale = [System.Globalization.CultureInfo]::InstalledUICulture.Name }
+        catch { `$locale = '' }
+    }
     if ([string]::IsNullOrWhiteSpace(`$locale)) { `$locale = 'UNKNOWN' }
-    if (`$locale -ne '$Language') { Write-Output `$locale; exit 0 }
+    if (`$locale -ine '$Language') { Write-Output `$locale; exit 0 }
 $cacheCheck    Write-Output 'OK'
     exit 0
 }
