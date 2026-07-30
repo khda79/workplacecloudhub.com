@@ -4,7 +4,7 @@
 .DESCRIPTION
     Executes the local endpoint script against the packaged setup media cache and removes the scheduled task once the device is already Windows 11.
 .VERSION
-    1.0.8
+    1.0.11
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -12,7 +12,9 @@
 param(
     [string]$DataRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit',
     [string]$TaskName = 'SmartM365 Windows 11 Upgrade Toolkit - Intune',
-    [int]$RunGuardHours = 2
+    [int]$RunGuardHours = 2,
+    [ValidateRange(1, 365)][int]$LogRetentionDays = 7,
+    [ValidateRange(10, 5000)][int]$MaxEndpointLogFiles = 200
 )
 
 Set-StrictMode -Version 2.0
@@ -21,12 +23,60 @@ $ErrorActionPreference = 'Stop'
 $intuneRoot = Join-Path $DataRoot 'Intune'
 $logRoot = Join-Path $DataRoot 'Logs\Intune'
 $manifestPath = Join-Path $intuneRoot 'PackageManifest.json'
+$integrityHelperPath = Join-Path $intuneRoot 'SmartM365-SetupMediaIntegrity.ps1'
 $endpointScript = Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1'
 $setupCacheRoot = Join-Path $DataRoot 'SetupMedia'
+$registrySubKeyRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
 
 function New-Directory {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
+}
+
+function Invoke-IntuneLogMaintenance {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 365)][int]$RetentionDays = 7,
+        [ValidateRange(1, 5000)][int]$MaximumEndpointFiles = 200
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+
+    $cutoff = (Get-Date).AddDays(-1 * $RetentionDays)
+    $removedByAge = 0
+    $removedByCount = 0
+    $failed = 0
+    $files = @(Get-ChildItem -LiteralPath $Path -Filter 'Endpoint_*.log' -File -ErrorAction Stop)
+
+    foreach ($file in @($files | Where-Object { $_.LastWriteTime -lt $cutoff })) {
+        try {
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            $removedByAge++
+        }
+        catch { $failed++ }
+    }
+
+    $remaining = @(Get-ChildItem -LiteralPath $Path -Filter 'Endpoint_*.log' -File -ErrorAction Stop |
+        Sort-Object LastWriteTime,Name -Descending)
+    foreach ($file in @($remaining | Select-Object -Skip $MaximumEndpointFiles)) {
+        try {
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            $removedByCount++
+        }
+        catch { $failed++ }
+    }
+
+    $remainingCount = @(Get-ChildItem -LiteralPath $Path -Filter 'Endpoint_*.log' -File -ErrorAction Stop).Count
+    return [pscustomobject]@{
+        Scanned        = $files.Count
+        RemovedByAge   = $removedByAge
+        RemovedByCount = $removedByCount
+        Failed         = $failed
+        Remaining      = $remainingCount
+    }
 }
 
 function Write-RunnerLog {
@@ -36,6 +86,75 @@ function Write-RunnerLog {
     Add-Content -LiteralPath (Join-Path $logRoot 'Run-IntuneUpgrade.log') -Value $line -Encoding UTF8
 }
 
+function Invoke-RunnerLogMaintenance {
+    param([string]$Phase)
+
+    try {
+        $result = Invoke-IntuneLogMaintenance -Path $logRoot -RetentionDays $LogRetentionDays -MaximumEndpointFiles $MaxEndpointLogFiles
+        $level = if ($result.Failed -gt 0) { 'WARN' } else { 'INFO' }
+        Write-RunnerLog ("Intune log maintenance completed. Phase={0}; RetentionDays={1}; MaximumEndpointFiles={2}; Scanned={3}; RemovedByAge={4}; RemovedByCount={5}; Failed={6}; Remaining={7}" -f $Phase,$LogRetentionDays,$MaxEndpointLogFiles,$result.Scanned,$result.RemovedByAge,$result.RemovedByCount,$result.Failed,$result.Remaining) $level
+    }
+    catch {
+        Write-RunnerLog ("Intune log maintenance failed without blocking the upgrade. Phase={0}; Error={1}" -f $Phase,$_.Exception.Message) 'WARN'
+    }
+}
+
+function Open-Registry64LocalMachine {
+    return [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+}
+
+function Set-Registry64String {
+    param([string]$SubKey, [string]$Name, [string]$Value)
+
+    $baseKey = Open-Registry64LocalMachine
+    try {
+        $key = $baseKey.CreateSubKey($SubKey)
+        try { $key.SetValue($Name, [string]$Value, [Microsoft.Win32.RegistryValueKind]::String) }
+        finally { if ($key) { $key.Dispose() } }
+    }
+    finally { $baseKey.Dispose() }
+}
+
+function Set-PackageRepairRequired {
+    param(
+        [Parameter(Mandatory = $true)][object]$Manifest,
+        [Parameter(Mandatory = $true)][string]$Reason
+    )
+
+    $packageId = [string]$Manifest.PackageId
+    if ([string]::IsNullOrWhiteSpace($packageId)) { throw 'Cannot mark RepairRequired because PackageId is empty.' }
+    $subKey = "$registrySubKeyRoot\$packageId"
+    $safeReason = if ($Reason.Length -gt 2048) { $Reason.Substring(0, 2048) } else { $Reason }
+    Set-Registry64String -SubKey $subKey -Name PackageId -Value $packageId
+    Set-Registry64String -SubKey $subKey -Name PackageVersion -Value ([string]$Manifest.PackageVersion)
+    Set-Registry64String -SubKey $subKey -Name InstallState -Value 'RepairRequired'
+    Set-Registry64String -SubKey $subKey -Name RepairReason -Value $safeReason
+    Set-Registry64String -SubKey $subKey -Name RepairRequiredUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+    Write-RunnerLog ("Marked Intune package RepairRequired so detection triggers reinstall. PackageId={0}; Reason={1}" -f $packageId,$safeReason) 'WARN'
+    try {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+        Write-RunnerLog ("Removed scheduled task while package repair is required. TaskName={0}" -f $TaskName) 'WARN'
+    }
+    catch {
+        Write-RunnerLog ("Could not remove scheduled task after marking RepairRequired. TaskName={0}; Error={1}" -f $TaskName,$_.Exception.Message) 'WARN'
+    }
+}
+
+function Set-PackageInstalledForWindows11 {
+    param([Parameter(Mandatory = $true)][object]$Manifest)
+
+    $packageId = [string]$Manifest.PackageId
+    if ([string]::IsNullOrWhiteSpace($packageId)) { throw 'Cannot mark Installed because PackageId is empty.' }
+    $subKey = "$registrySubKeyRoot\$packageId"
+    Set-Registry64String -SubKey $subKey -Name PackageId -Value $packageId
+    Set-Registry64String -SubKey $subKey -Name PackageVersion -Value ([string]$Manifest.PackageVersion)
+    Set-Registry64String -SubKey $subKey -Name InstallState -Value 'Installed'
+    Set-Registry64String -SubKey $subKey -Name CompletionReason -Value 'AlreadyWindows11'
+    Set-Registry64String -SubKey $subKey -Name RepairReason -Value ''
+    Set-Registry64String -SubKey $subKey -Name RepairRequiredUtc -Value ''
+    Set-Registry64String -SubKey $subKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+    Write-RunnerLog ("Device is Windows 11. Marked Intune package Installed. PackageId={0}; PackageVersion={1}" -f $packageId,$Manifest.PackageVersion)
+}
 function Get-OsFamily {
     try {
         $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
@@ -52,9 +171,28 @@ trap {
     exit 1
 }
 
-Write-RunnerLog ("Runner started. DataRoot={0}; TaskName={1}; RunGuardHours={2}; User={3}; Computer={4}; PID={5}" -f $DataRoot,$TaskName,$RunGuardHours,([Security.Principal.WindowsIdentity]::GetCurrent().Name),$env:COMPUTERNAME,$PID)
+Invoke-RunnerLogMaintenance -Phase 'Startup'
+Write-RunnerLog ("Runner started. DataRoot={0}; TaskName={1}; RunGuardHours={2}; LogRetentionDays={3}; MaxEndpointLogFiles={4}; User={5}; Computer={6}; PID={7}" -f $DataRoot,$TaskName,$RunGuardHours,$LogRetentionDays,$MaxEndpointLogFiles,([Security.Principal.WindowsIdentity]::GetCurrent().Name),$env:COMPUTERNAME,$PID)
+
+$osFamily = Get-OsFamily
+if ($osFamily -eq 'Windows11') {
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            Set-PackageInstalledForWindows11 -Manifest $manifest
+        }
+        catch { Write-RunnerLog ("Windows 11 was detected, but package state could not be refreshed. Intune OS detection remains authoritative. Error={0}" -f $_.Exception.Message) 'WARN' }
+    }
+    else {
+        Write-RunnerLog ("Windows 11 was detected before package manifest validation. Intune OS detection remains authoritative. MissingManifest={0}" -f $manifestPath) 'WARN'
+    }
+    Write-RunnerLog 'Device is already Windows 11. Removing scheduled task.'
+    try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+    exit 0
+}
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Package manifest not found: $manifestPath" }
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if (-not (Test-Path -LiteralPath $endpointScript -PathType Leaf)) { throw "Endpoint script not found: $endpointScript" }
 $endpointParseErrors = $null
 [void][System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath $endpointScript -Raw), [ref]$endpointParseErrors)
@@ -64,14 +202,6 @@ if ($endpointParseErrors) {
     exit 1
 }
 Write-RunnerLog ("Endpoint script parse validation succeeded: {0}" -f $endpointScript)
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-
-if ((Get-OsFamily) -eq 'Windows11') {
-    Write-RunnerLog 'Device is already Windows 11. Removing scheduled task.'
-    try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
-    exit 0
-}
-
 $setupProcesses = @(Get-Process -Name setup,setuphost,setupprep -ErrorAction SilentlyContinue)
 if ($setupProcesses.Count -gt 0) {
     Write-RunnerLog ("Setup process already running; skipping this cycle. Processes={0}" -f (($setupProcesses | Select-Object -ExpandProperty Id) -join ','))
@@ -80,8 +210,19 @@ if ($setupProcesses.Count -gt 0) {
 
 $cacheFolder = [string]$manifest.SetupCacheFolder
 $cachePath = Join-Path $setupCacheRoot $cacheFolder
-if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'setup.exe') -PathType Leaf)) { throw "Local setup cache is missing setup.exe: $cachePath" }
-if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'sources\install.wim') -PathType Leaf)) { throw "Local setup cache is missing sources\install.wim: $cachePath" }
+try {
+    if (-not (Test-Path -LiteralPath $integrityHelperPath -PathType Leaf)) { throw "Setup media integrity helper not found: $integrityHelperPath" }
+    . $integrityHelperPath
+    if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'setup.exe') -PathType Leaf)) { throw "Local setup cache is missing setup.exe: $cachePath" }
+    if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'sources\install.wim') -PathType Leaf)) { throw "Local setup cache is missing sources\install.wim: $cachePath" }
+    $cacheIntegrity = Test-SmartM365SetupMediaIntegrity -MediaRoot $cachePath
+    Write-RunnerLog ("Setup cache integrity validated before endpoint launch. Files={0}; Bytes={1}; Root={2}" -f $cacheIntegrity.Files,$cacheIntegrity.Bytes,$cacheIntegrity.MediaRoot)
+}
+catch {
+    $repairReason = $_.Exception.Message
+    Set-PackageRepairRequired -Manifest $manifest -Reason $repairReason
+    throw $repairReason
+}
 
 $args = @(
     '-RunGuardHours', [string]$RunGuardHours,
@@ -110,6 +251,15 @@ $endpointStdOut = Join-Path $logRoot ("Endpoint_{0}_stdout.log" -f (Get-Date -Fo
 $endpointStdErr = Join-Path $logRoot ("Endpoint_{0}_stderr.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $process = Start-Process -FilePath $powerShellExe -ArgumentList $endpointProcessArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput $endpointStdOut -RedirectStandardError $endpointStdErr
 $exit = [int]$process.ExitCode
+Invoke-RunnerLogMaintenance -Phase 'PostRun'
+if ($exit -ne 0) {
+    try { [void](Test-SmartM365SetupMediaIntegrity -MediaRoot $cachePath) }
+    catch {
+        $postRunCacheError = $_.Exception.Message
+        try { Set-PackageRepairRequired -Manifest $manifest -Reason $postRunCacheError }
+        catch { Write-RunnerLog ("Failed to mark package RepairRequired after endpoint cache failure. Error={0}" -f $_.Exception.Message) 'ERROR' }
+    }
+}
 $latestEndpointLog = Get-ChildItem -LiteralPath (Join-Path $DataRoot 'Logs') -Filter 'SmartM365-Invoke-Windows11UpgradeRepair_*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($latestEndpointLog) {
     Write-RunnerLog ("Endpoint script exited with code {0}. LatestEndpointLog={1}; LastWriteTime={2}; StdOut={3}; StdErr={4}" -f $exit,$latestEndpointLog.FullName,$latestEndpointLog.LastWriteTime,$endpointStdOut,$endpointStdErr)
@@ -119,6 +269,7 @@ else {
 }
 
 if ((Get-OsFamily) -eq 'Windows11') {
+    Set-PackageInstalledForWindows11 -Manifest $manifest
     Write-RunnerLog 'Device is Windows 11 after endpoint run. Removing scheduled task.'
     try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
 }
