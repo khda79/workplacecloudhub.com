@@ -265,6 +265,6 @@ If upload and commit succeed but the final app content-version PATCH fails, fina
 ```powershell
 .\IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1 `
   -IntuneWinPath C:\tmp\SmartM365-W11UT-FR\Output\SmartM365-Windows11UpgradeToolkit-Win11-fr-FR.intunewin `
-  -FinalizeExistingAppId 6bd2540a-be73-44a1-8253-b79638f3f976 `
+  -FinalizeExistingAppId <IntuneAppId> `
   -FinalizeContentVersionId 1
 ```

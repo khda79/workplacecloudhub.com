@@ -126,6 +126,14 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - Runs the autonomous signed endpoint workflow as SYSTEM through PsExec with guarded repair and reboot controls.
 - Produces live CSV/HTML reporting, retry/backoff evidence, collected endpoint logs, and controlled LOT stop behavior.
 
+### SmartM365 Windows 11 Upgrade Toolkit
+
+`SmartM365/Devices/Windows11UpgradeToolkit/` contains **SmartM365 Windows 11 Upgrade Toolkit**, a guarded PowerShell toolkit for diagnosing and operating controlled Windows 10 to Windows 11 upgrade campaigns.
+
+- Builds preview-first LOTs from AD and Intune inventory with safety exclusions and evidence.
+- Supports signed PsExec/SYSTEM diagnostics, Windows Update repair paths, setup-media validation, and guarded upgrades.
+- Provides live CSV/HTML reporting, hardware-readiness evidence, controlled retries, concurrency limits, and operator stop controls.
+
 ### Smart Inventory
 
 `SmartM365/SmartInventory/` groups the inventory scripts that can feed Power BI datasets and other reporting or operational consumers.
