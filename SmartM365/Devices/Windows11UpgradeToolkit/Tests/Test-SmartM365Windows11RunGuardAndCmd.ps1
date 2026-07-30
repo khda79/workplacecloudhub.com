@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.3
+1.7.4
 #>
 
 #requires -Version 5.1
@@ -58,6 +58,7 @@ try {
     foreach ($functionName in @('ConvertTo-Base64Utf8','New-EndpointRequirementRule')) {
         Import-ScriptFunction -Path $publisher -Name $functionName
     }
+    Import-ScriptFunction -Path $gui -Name 'Test-UnlimitedCycleConfirmationRequired'
 
     $global:SyntheticInstallLanguage = '040C'
     $global:SyntheticLanguageLogs = New-Object System.Collections.ArrayList
@@ -82,6 +83,11 @@ try {
     $global:SyntheticInstallLanguage = ''
     Assert-Equal -Actual (Get-SystemInstallLanguageTag) -Expected ([System.Globalization.CultureInfo]::InstalledUICulture.Name) -Message 'InstalledUICulture is used when InstallLanguage is unavailable'
 
+    Assert-True -Condition (Test-UnlimitedCycleConfirmationRequired -Mode 'Loop' -MaxCycles 0) -Message 'unlimited Loop requires confirmation'
+    Assert-True -Condition (Test-UnlimitedCycleConfirmationRequired -Mode 'LoopIgnoreRunGuard' -MaxCycles 0) -Message 'unlimited LoopIgnoreRunGuard requires confirmation'
+    Assert-True -Condition (-not (Test-UnlimitedCycleConfirmationRequired -Mode 'Loop' -MaxCycles 1)) -Message 'bounded Loop does not require unlimited-cycle confirmation'
+    Assert-True -Condition (-not (Test-UnlimitedCycleConfirmationRequired -Mode 'Once' -MaxCycles 0)) -Message 'Once does not require unlimited-cycle confirmation'
+    Assert-True -Condition (-not (Test-UnlimitedCycleConfirmationRequired -Mode 'OnceIgnoreRunGuard' -MaxCycles 0)) -Message 'OnceIgnoreRunGuard does not require unlimited-cycle confirmation'
 
     $requirementRule = New-EndpointRequirementRule -Language 'fr-FR'
     $requirementScript = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$requirementRule.scriptContent))
@@ -389,6 +395,7 @@ try {
     Assert-True -Condition (-not [bool]$invalidAdCacheInfo.ContentVerified) -Message 'invalid AD cache content is reported explicitly'
 
     $guiText = Get-Content -LiteralPath $gui -Raw
+    Assert-Equal -Actual ([regex]::Matches($guiText, 'Confirm-UnlimitedCycleLaunch -Mode \$mode').Count) -Expected 3 -Message 'every GUI launch path validates unlimited cycles against its effective mode'
     Assert-True -Condition ($guiText -match 'InventoryProgressBar.{0,160}IsIndeterminate="True"') -Message 'automatic inventory wait window uses an indeterminate progress bar'
     Assert-True -Condition ($guiText -match 'AutomaticForceRefreshCheck') -Message 'automatic inventory force-refresh option is present'
     Assert-True -Condition ($guiText -match 'Update-AutomaticGeneratedLotName') -Message 'automatic computer-prefix changes update the generated LOT name'
