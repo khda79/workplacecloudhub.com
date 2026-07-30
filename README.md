@@ -118,6 +118,14 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - Collects local enrollment, MDM, `dsregcmd`, policy, and support-bundle evidence.
 - Supports localized GUI usage and CLI diagnostic exports for support handoff.
 
+### Smart Intune Hybrid Join Toolkit
+
+`SmartM365/Devices/IntuneHybridJoinToolkit/` contains **Smart Intune Hybrid Join Toolkit**, a PowerShell/WPF operator toolkit for diagnosing and repairing Hybrid Entra join and Intune enrollment across controlled device batches.
+
+- Builds manual or inventory-backed LOTs with conservative AD, Intune, and Entra selection evidence.
+- Runs the autonomous signed endpoint workflow as SYSTEM through PsExec with guarded repair and reboot controls.
+- Produces live CSV/HTML reporting, retry/backoff evidence, collected endpoint logs, and controlled LOT stop behavior.
+
 ### Smart Inventory
 
 `SmartM365/SmartInventory/` groups the inventory scripts that can feed Power BI datasets and other reporting or operational consumers.
@@ -144,10 +152,6 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - `CLI/`: delegated interactive CLI deployment script for Intune remediation packages.
 
 The GUI and CLI use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication.
-
-### Smart Intune Hybrid Join Toolkit
-
-`SmartM365/Devices/IntuneHybridJoinToolkit/` contains a PsExec/LOT toolkit for diagnosing and repairing Hybrid Entra Join plus Intune enrollment issues.
 
 ## Focus Areas
 
