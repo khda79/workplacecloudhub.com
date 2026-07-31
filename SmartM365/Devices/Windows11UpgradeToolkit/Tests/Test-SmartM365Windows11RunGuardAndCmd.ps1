@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.6
+1.7.7
 #>
 
 #requires -Version 5.1
@@ -518,6 +518,10 @@ try {
     $automaticCreateProgressFunction = [regex]::Match($guiText, '(?s)function Invoke-AutomaticLotCreateWithProgress\s*\{(?<Body>.*?)\r?\n\}\r?\n\r?\nfunction Confirm-AutomaticLotCreate')
     Assert-True -Condition $automaticCreateProgressFunction.Success -Message 'automatic LOT creation progress workflow is present'
     Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match 'Invoke-AutomaticLotSelection.+-Create.+-ProgressCallback') -Message 'creation progress workflow creates the LOT with live stage callbacks'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match '\$inventoryContext\s*=\s*\$script:AutomaticPreviewContext') -Message 'creation progress captures the preview context before entering a GetNewClosure scope'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match '-InventoryContext\s+\$inventoryContext') -Message 'creation progress passes the captured preview context to the automatic LOT engine'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -notmatch '-InventoryContext\s+\$script:AutomaticPreviewContext') -Message 'creation progress does not resolve the preview context from the closure script scope'
+    Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match 'Automatic LOT preview context is unavailable') -Message 'creation progress reports an actionable error when no preview context is available'
     Assert-True -Condition ($automaticCreateProgressFunction.Groups['Body'].Value -match 'Refresh-LotList') -Message 'creation progress includes the final LOT-list refresh'
     $automaticSelectionFunction = [regex]::Match($guiText, '(?s)function Invoke-AutomaticLotSelection\s*\{(?<Body>.*?)\r?\n\}\r?\n\r?\nfunction Format-AutomaticLotSummary')
     Assert-True -Condition $automaticSelectionFunction.Success -Message 'automatic LOT selection function is present'
