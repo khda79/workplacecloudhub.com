@@ -84,6 +84,22 @@ try {
     Assert-Equal $preview.Summary.ADNameCollisions 1 'AD short-name collision is excluded'
     Assert-Equal $preview.Summary.EntraAmbiguousExcluded 1 'multiple ServerAd objects are excluded'
     Assert-True ($progressStages -contains 'Automatic LOT preview ready.') 'preview completion is reported'
+    $strictAdPath = Join-Path $testRoot 'DevicesAD-StrictClientOS.csv'
+    $strictAdRows = @(
+        [pscustomobject]@{ ComputerName='STRICT-W10'; Name='STRICT-W10'; ADInventoryPresent=$true; Enabled=$true; OperatingSystem='Windows 10 Enterprise'; OperatingSystemVersion='10.0 (19045)' }
+        [pscustomobject]@{ ComputerName='STRICT-W11'; Name='STRICT-W11'; ADInventoryPresent=$true; Enabled=$true; OperatingSystem='Windows 11 Enterprise'; OperatingSystemVersion='10.0 (22631)' }
+        [pscustomobject]@{ ComputerName='STRICT-GENERIC-SERVER'; Name='STRICT-GENERIC-SERVER'; ADInventoryPresent=$true; Enabled=$true; OperatingSystem='Windows'; OperatingSystemVersion='10.0 (20348)' }
+        [pscustomobject]@{ ComputerName='STRICT-BLANK-SERVER'; Name='STRICT-BLANK-SERVER'; ADInventoryPresent=$true; Enabled=$true; OperatingSystem=''; OperatingSystemVersion='10.0 (26100)' }
+    )
+    $strictAdRows | Export-Csv -LiteralPath $strictAdPath -NoTypeInformation -Encoding UTF8
+    $strictPreview = & $engine -AdInventoryCsv $strictAdPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -ToolkitRoot $testRoot -LotName 'LOT-AUTO-IHJ-STRICT-OS' -NoEvidence
+    Assert-Equal $strictPreview.Summary.SelectedDevices 2 'only explicitly identified Windows 10 and Windows 11 clients are selected'
+    Assert-Equal $strictPreview.Summary.UnknownOSExcluded 2 'generic or blank AD operating systems remain excluded even when the build resembles Windows client'
+    $strictSelectedNames = @($strictPreview.SelectedDevices | Select-Object -ExpandProperty ComputerName)
+    Assert-True ($strictSelectedNames -contains 'STRICT-W10') 'explicit Windows 10 client remains eligible'
+    Assert-True ($strictSelectedNames -contains 'STRICT-W11') 'explicit Windows 11 client remains eligible'
+    Assert-True (-not ($strictSelectedNames -contains 'STRICT-GENERIC-SERVER' -or $strictSelectedNames -contains 'STRICT-BLANK-SERVER')) 'version-only server-like rows are never selected'
+
 
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath `
         -ToolkitRoot $testRoot -LotName 'LOT-AUTO-IHJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence
@@ -157,6 +173,15 @@ try {
     Assert-True ($guiText -match 'AutomaticCreateButton.+Content="Create"') 'GUI Create button does not claim to launch'
     Assert-True ($supportText -match 'The LOT will be created but not launched') 'confirmation explicitly states create-only behavior'
     Assert-True ($supportText -notmatch 'Start-ToolkitLot') 'automatic GUI support never launches the created LOT'
+    Assert-True ($supportText -notmatch '\$controls\.AutomaticCreateButton\.IsEnabled\s*=\s*\$false') 'automatic LOT Create remains available before preview and after filter changes'
+    $createHandler = [regex]::Match(
+        $supportText,
+        '(?s)\$controls\.AutomaticCreateButton\.Add_Click\(\{(?<Body>.*?)\r?\n    \}\)\r?\n    \$controls\.AutomaticOpenEvidenceButton'
+    )
+    Assert-True $createHandler.Success 'automatic LOT Create handler is present'
+    Assert-True ($createHandler.Groups['Body'].Value -match '\$null -eq \$script:AutomaticPreviewResult') 'automatic LOT Create detects a missing preview'
+    Assert-True ($createHandler.Groups['Body'].Value -match 'Update-AutomaticLotPreview\s+-ForceInventoryRefresh:\$force') 'automatic LOT Create refreshes a missing, stale, or forced preview'
+
 
     Write-Output 'PASS: Intune Hybrid Join Automatic LOT synthetic tests completed.'
 }
