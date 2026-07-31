@@ -3,7 +3,7 @@
 Provides the Automatic LOT workflow for the Intune Hybrid Join WPF launcher.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 
 Set-StrictMode -Version Latest
@@ -444,8 +444,7 @@ function Update-AutomaticGeneratedLotName {
 
 function Set-AutomaticPreviewStale {
     $script:AutomaticPreviewSignature = ''
-    $controls.AutomaticCreateButton.IsEnabled = $false
-    $controls.AutomaticSummaryText.Text = 'Filters changed. Refresh the preview before creating the LOT.'
+    $controls.AutomaticSummaryText.Text = 'Filters changed. Create will refresh the preview before creating the LOT.'
 }
 
 function Update-AutomaticLotPreview {
@@ -462,7 +461,6 @@ function Update-AutomaticLotPreview {
     $script:AutomaticPreviewSignature = Get-AutomaticPreviewSignature
     $controls.AutomaticSummaryText.Text = Format-AutomaticLotSummary -Result $result -InventoryContext $context
     $controls.AutomaticEvidencePathText.Text = [string]$result.Summary.EvidencePath
-    $controls.AutomaticCreateButton.IsEnabled = ([int]$result.Summary.SelectedDevices -gt 0)
     Add-Status -Title 'Automatic preview' -Message ("Selected {0} Hybrid Join repair candidate(s); excluded {1}." -f $result.Summary.SelectedDevices,$result.Summary.ExcludedDevices)
     return $result
 }
@@ -526,7 +524,6 @@ function Initialize-AutomaticLotGui {
     $script:AutomaticLastGeneratedLotName = ''
     $controls.AutomaticLastLogonDaysText.Text = '45'
     $controls.AutomaticLastLogonDaysText.IsEnabled = $false
-    $controls.AutomaticCreateButton.IsEnabled = $false
     $controls.AutomaticSummaryText.Text = 'No automatic selection has been calculated yet.'
     Update-AutomaticGeneratedLotName -Force
 
@@ -560,8 +557,15 @@ function Initialize-AutomaticLotGui {
     $controls.AutomaticCreateButton.Add_Click({
         try {
             $currentSignature = Get-AutomaticPreviewSignature
-            if ($null -eq $script:AutomaticPreviewResult -or $script:AutomaticPreviewSignature -ne $currentSignature) {
-                throw 'The automatic preview is stale. Click Refresh and preview first.'
+            $force = [bool]$controls.AutomaticForceRefreshCheck.IsChecked
+            if ($force -or $null -eq $script:AutomaticPreviewResult -or $script:AutomaticPreviewSignature -ne $currentSignature) {
+                [void](Invoke-AutomaticModalOperation -Title 'Preparing automatic Hybrid Join LOT preview' `
+                    -Stage 'Checking inventory caches...' `
+                    -Operation { param($callback) Update-AutomaticLotPreview -ForceInventoryRefresh:$force -ProgressCallback $callback }.GetNewClosure())
+                if ($force) {
+                    $controls.AutomaticForceRefreshCheck.IsChecked = $false
+                    $script:AutomaticPreviewSignature = Get-AutomaticPreviewSignature
+                }
             }
             if ([int]$script:AutomaticPreviewResult.Summary.SelectedDevices -le 0) { throw 'No eligible device is selected.' }
             if (-not (Confirm-AutomaticLotCreate -Result $script:AutomaticPreviewResult)) { return }

@@ -9,7 +9,7 @@ the remaining devices with Entra evidence, writes selection evidence under Runs,
 can create a standard operational LOT without launching it.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 
 #requires -Version 5.1
@@ -34,7 +34,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticLotVersion = '1.0.0'
+$script:AutomaticLotVersion = '1.0.1'
 $script:AutomaticLotProgressCallback = $ProgressCallback
 
 function Publish-AutomaticLotProgress {
@@ -214,22 +214,14 @@ function Test-AutomaticLotNameContains {
 
 function Get-WindowsClientClassification {
     param(
-        [AllowNull()][string]$OperatingSystem,
-        [AllowNull()][string]$Version
+        [AllowNull()][string]$OperatingSystem
     )
 
     $osText = ([string]$OperatingSystem).Trim()
-    $versionText = ([string]$Version).Trim()
     if ($osText -match '(?i)Server') { return 'WindowsServer' }
     if (-not [string]::IsNullOrWhiteSpace($osText) -and $osText -notmatch '(?i)Windows') { return 'Unsupported' }
-    if ($osText -match '(?i)Windows\s*11') { return 'Windows11' }
-    if ($osText -match '(?i)Windows\s*10') { return 'Windows10' }
-
-    $numbers = @([regex]::Matches($versionText, '\d+') | ForEach-Object { [int64]$_.Value })
-    if ($numbers.Count -ge 3 -and $numbers[0] -eq 10 -and $numbers[1] -eq 0) {
-        if ($numbers[2] -ge 22000) { return 'Windows11' }
-        if ($numbers[2] -ge 10240) { return 'Windows10' }
-    }
+    if ($osText -match '(?i)Windows\s*11\b') { return 'Windows11' }
+    if ($osText -match '(?i)Windows\s*10\b') { return 'Windows10' }
     return 'Unknown'
 }
 
@@ -257,7 +249,7 @@ function Get-AdAutomaticLotRecord {
             DistinguishedName  = [string](Get-InventoryValue -Row $row -Names @('DistinguishedName'))
             Present            = $present
             Enabled            = $enabled
-            Classification     = Get-WindowsClientClassification -OperatingSystem $operatingSystem -Version $operatingSystemVersion
+            Classification     = Get-WindowsClientClassification -OperatingSystem $operatingSystem
             OperatingSystem    = $operatingSystem
             OSVersion          = $operatingSystemVersion
             LastSeenUtc        = $lastSeen
