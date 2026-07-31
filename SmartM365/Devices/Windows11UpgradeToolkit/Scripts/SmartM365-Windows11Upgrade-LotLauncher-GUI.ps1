@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.51
+0.1.52
 #>
 param(
     [switch]$ValidateOnly
@@ -2332,6 +2332,11 @@ function Invoke-AutomaticLotPreviewWithProgress {
 
 function Invoke-AutomaticLotCreateWithProgress {
     $lotName = [string]$controls.AutomaticLotNameText.Text
+    $inventoryContext = $script:AutomaticPreviewContext
+    if ($null -eq $inventoryContext) {
+        throw 'Automatic LOT preview context is unavailable. Refresh the preview before creating the LOT.'
+    }
+
     $state = New-AutomaticInventoryProgressState -Title 'Creating automatic LOT' -InitialStage 'Starting LOT creation...' -InitialDetail $lotName
     $script:AutomaticInventoryProgressState = $state
     $progressCallback = {
@@ -2341,7 +2346,7 @@ function Invoke-AutomaticLotCreateWithProgress {
 
     $operation = {
         & $progressCallback 'Validating the confirmed selection...' "LOT: $lotName"
-        $created = Invoke-AutomaticLotSelection -InventoryContext $script:AutomaticPreviewContext -Create -ProgressCallback $progressCallback
+        $created = Invoke-AutomaticLotSelection -InventoryContext $inventoryContext -Create -ProgressCallback $progressCallback
         & $progressCallback 'Reading the created LOT...' ([string]$created.Summary.LotPath)
         $lot = Get-LotSummary -LotPath ([string]$created.Summary.LotPath)
         & $progressCallback 'Refreshing the LOT list...' ("Created {0} with {1} device(s)." -f $lot.Name,$lot.ComputerCount)
