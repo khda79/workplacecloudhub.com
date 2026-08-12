@@ -27,7 +27,7 @@ $parseErrors = $null
 $launcherAst = [System.Management.Automation.Language.Parser]::ParseFile($launcherPath,[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw "Launcher parsing failed: $($parseErrors[0].Message)" }
 
-foreach ($functionName in @('Get-ComputerListKey','Get-PostCycleCloudRefreshRows','Merge-ScopedInventoryMap','Test-AdInventoryRefreshDue','Get-AdaptiveCycleDelaySeconds')) {
+foreach ($functionName in @('Get-LocalWorkerStartDiagnosticText','Start-LocalWorkerJobWithRetry','Get-ComputerListKey','Get-PostCycleCloudRefreshRows','Merge-ScopedInventoryMap','Test-AdInventoryRefreshDue','Get-AdaptiveCycleDelaySeconds')) {
     $functions = @($launcherAst.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
@@ -35,6 +35,29 @@ foreach ($functionName in @('Get-ComputerListKey','Get-PostCycleCloudRefreshRows
     Assert-Equal $functions.Count 1 "helper $functionName exists exactly once"
     . ([scriptblock]::Create($functions[0].Extent.Text))
 }
+
+$global:SyntheticWorkerStartAttempts = 0
+$recoveredWorkerStart = Start-LocalWorkerJobWithRetry -ComputerName 'CH-RETRY-001' -JobName 'SyntheticRetry' -MaxAttempts 3 -RetryDelaySeconds 0 -StartOperation {
+    $global:SyntheticWorkerStartAttempts++
+    if ($global:SyntheticWorkerStartAttempts -lt 3) { throw 'Synthetic transient Start-Job failure.' }
+    [pscustomobject]@{ Id = 42; Name = 'SyntheticRetry' }
+}
+Assert-True $recoveredWorkerStart.Succeeded 'local worker start recovers on the third attempt'
+Assert-Equal $global:SyntheticWorkerStartAttempts 3 'local worker start retries exactly twice before recovery'
+Assert-Equal $recoveredWorkerStart.Job.Id 42 'recovered local worker job is returned'
+
+$global:SyntheticWorkerStartAttempts = 0
+$failedWorkerStart = Start-LocalWorkerJobWithRetry -ComputerName 'CH-FAIL-001' -JobName 'SyntheticFailure' -MaxAttempts 3 -RetryDelaySeconds 0 -StartOperation {
+    $global:SyntheticWorkerStartAttempts++
+    throw 'Synthetic persistent Start-Job failure.'
+}
+Assert-True (-not $failedWorkerStart.Succeeded) 'persistent local worker start failure is returned without throwing'
+Assert-Equal $global:SyntheticWorkerStartAttempts 3 'persistent local worker start failure stops after three attempts'
+Assert-True ($failedWorkerStart.Detail -match 'Attempt=3/3') 'persistent failure records every attempt'
+Assert-True ($failedWorkerStart.Detail -match 'ExpectedExecutable=.*pwsh\.exe|ExpectedExecutable=.*powershell\.exe') 'persistent failure records the expected PowerShell executable'
+Assert-True ($failedWorkerStart.Detail -match 'FileExists=') 'persistent failure records File.Exists evidence'
+Assert-True ($failedWorkerStart.Detail -match 'ProcessHandleCount=') 'persistent failure records process handle evidence'
+Remove-Variable -Name SyntheticWorkerStartAttempts -Scope Global -ErrorAction SilentlyContinue
 
 $cloudCandidates = @(Get-PostCycleCloudRefreshRows -Rows @(
     [pscustomobject]@{ Computer='FR-01'; Status='ADMIN_SHARE_UNREACHABLE' },
@@ -77,7 +100,7 @@ $invalidDelay = Get-AdaptiveCycleDelaySeconds -Rows @([pscustomobject]@{ Status=
 Assert-Equal $invalidDelay 60 'invalid backoff evidence safely falls back to the configured delay'
 
 $launcherText = Get-Content -LiteralPath $launcherPath -Raw
-foreach ($requiredText in @('$LauncherVersion = "2.10.77"','CloudRefreshScope.txt','Merge-ScopedInventoryMap','remoteStagingScript','Move-Item -LiteralPath $remoteStagingScript')) {
+foreach ($requiredText in @('$LauncherVersion = "2.10.78"','CloudRefreshScope.txt','Merge-ScopedInventoryMap','remoteStagingScript','Move-Item -LiteralPath $remoteStagingScript','LOCAL_WORKER_START_FAILED')) {
     Assert-True $launcherText.Contains($requiredText) "launcher source contains $requiredText"
 }
 
@@ -100,8 +123,8 @@ Write-Output 'PASS: Intune Hybrid Join orchestrator optimization tests completed
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/E0Y2VEzCkRBk
-# asDD4tWaUSUzOltFx1vSFMUKH0ZfN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASl//LAS3bP0w0
+# rB5Axe2lkCOlHk5VczBRmvt4CyDAvKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +257,31 @@ Write-Output 'PASS: Intune Hybrid Join orchestrator optimization tests completed
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKsVJxQlO15neCJkRaiVh36V8p2/GqJ4xMTOHOG/zZpRMA0GCSqG
-# SIb3DQEBAQUABIIBgHxAFQ47rmipTBS5MVdj59sScExtxuVj1L7cczP6+spfPbRT
-# 4z7Capjq9qBxAHOAddlBNhMHGkoU/JUayJlgzrYoKs0pGPvr1INXykjL39qZb9R6
-# JfZdtDzRuE58VAeu//9V+C5Tmj+qs897UBSG/VOoetjjy4dY47dqzCF2YsSUVGgf
-# lZKvAmWQDQR5hL52mqzdfrqJSj+HaePioybw8eBd/gV3rswJk+RefkJgCVz+GT/c
-# KYnDa0Syih7sz0jnTP2BgL8a9uwVAbEOiEGiUzRwtW8CgsfgKEb57DwmwWK3uAxi
-# Wrjo7FtEzgiF00yUNmeBbZ3YF5kPTMYEAbee3S1D1fvsObuhUOqeCsyCfriSMM7F
-# /Uz3J9zVtCd873yRqmNo6znU0fF/uibx3FLSTO2T55p/D1QDP8e9QnHrNOVOX0dX
-# 78ak90GEivzR/ZZjPukA422cS6iG0XHn8x1E+5pLI6rTCIXHYY6NJ7wBUOCp5IKk
-# /8FP0P8QwZ2CCweRg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKlDzqSpyer9ESVNS5NJ+Ek4v7m6qm1imKa8aj8MmiABMA0GCSqG
+# SIb3DQEBAQUABIIBgEcOgOl7mzJkMHv3It5+lQBniPZZGiElPl8gVmS6HZPd6TO6
+# WaPqBEI4sp8PNYfZcWSlANzhk5C3JyzpgowGR7WA0RR1D7fRSsvaH71MgVppLENB
+# f8o2ijMekiXzt6Ll41cx99kiZSZ+I/EdRcDZ4VS7EZgGN7uKp1xPxAwCMmzqZT4+
+# w9dZPxkeJJGGvvKBV/uJDG4258zZHDRc6NWOAuZkglHjBn3ktPL60+bOh9nLFd5b
+# Ysf2WYLGrS8z93kJha//siHQ0FTSrqZF4hUIifepoFL8TXWYTO2dl0B6yHalrqwV
+# /2Ckcr/Mj/jgcyN1nZRGLSOMOxo0nLWAjRCMtl6VgQseWQVzyQhybkcz+LWn0QY0
+# cF59DAUDsVV51rHc0UulVTi5D8oSjwG0YPbu4pmf3Qx/cTQuH4aD/GstKOI9RL+6
+# kqRwZRjOSVVJ7y/TE2ys5W6Uiud48iAa/3jxwyk0kGG6wvTFoBUXalR7xEZ86o5z
+# UIhT77RwTYmLlYK3I6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkxMjA2
-# MzhaMC8GCSqGSIb3DQEJBDEiBCBfzI7P8xfdhgAKflwUOhZk6LU5keyYItHAXYaW
-# uGDALzANBgkqhkiG9w0BAQEFAASCAgA1uSFWF3ZpKe2f3OQi1megg97svUSB0CEk
-# /B5slwOKfH8dxnse8LaUo8xnodmb/HYUVlyRPg/gKwTvUw2a0rEQVgiKJe5j89c9
-# rJJ9AKsQDdq3Lit3VVQXRiqA0sQGgRucfEoPU2M84vH8WlIYeLFClNi7WaEPffXZ
-# aULPf6sjldpv0q94HLwEg9Rr+hu5r0+4jwQp+XjyOV3VtAkKe49+3/ZJBEd7/1E/
-# LsQtgeZ8FpUa5LXXJJozfzlhdmClyZB7EAcf/iYdhcHd2vNm9cV2Z9c3K3kTzOEz
-# DYamRb/7nNtRTlJVnf3JwDC7s+SUpMCeX1M0Hk3M7iARv1PeObTgQg7bRbpQiULd
-# 0Q7Q/kS0P+HSajQJVyhoyoGSu/4w9dGYuyey6am49BPeSzxZUPnSV88LPtV1e0fJ
-# 2JsJMeX05L2HIisWe4TemtSTArA24fVPokfcGiIQPzoXcB+SRBZk9BIHbaZZOr2D
-# llZlTSX71WjgDRD+YpAa+5FTUGSV9FZYRF7N4oDya/vVq+dVjhN4vzyMDeCPAiQJ
-# lHDOt9TlvSMxjr8Oc4VWBPsEjFr9S37p2WsA1yGcTgOxVOgXFuhS0v3Xdse+X8Qd
-# zFhAyHE29oF9+AM9zaPqdWM5y0qQajLf+VYRDSJqQchAfrGoM1oz+LjLVlnBqs90
-# MpS0jYt4xg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxMDM5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCDK+HZS2RqV8uYums8hAkPS48r2BylVHk1O2G4M
+# Rels4TANBgkqhkiG9w0BAQEFAASCAgAZE/C4NKDelneq/2DlHDVMNqZ71T4h7xaO
+# nlcZHeyf/y4xj0MWaKJUuIBRotQ6X56SV0E0ilsiZSP6MLE+aZmfNB3xtIDgdiRh
+# vqqg5oPzsgoLWGVTmcBT5gGYP5HjEqB2Mf5LV8bdbH7mvz9QlVYg9v+iUiC7wIJV
+# /4JuLVqQCPe6YqXX0WAEToaSPCZ49HUoJ8AINV+WnM+SY89Hor6s0IAdBtdQLaYF
+# 7ebLQnDN+1LoVWTY4gWK2izCrEAGXCcuqjHaiDXNtVCycFLlZeTdnOBrDFR3WVbe
+# cguCzn1fayfgWdgYOCpfpxOCqrpWkPwJHlsY4nNp0ZDw90neMwVFXJGY0yTlweJP
+# 1LSU4xhDqqdRsokhf4n5J+EbJ8nF2gjCzauunFaD2O3yZoTBg0anUlbOtws94Mu3
+# 5SAsb3j4XXzUluMgqoHXc7clxuh2ZKNq8adG+BLDXB8bIkqR/vry3WNZWOZUvnct
+# UNANwtcX6Xx/B/3ZhkeAkE1a9xzt2fX44VKUYBPOWst0e7YUAMw8X3oHK/kAcWcD
+# AewaJA9qHbFpKUfurE11Jie1AYlpiMYusXU+GMVb6ndUQno5uh8qMYxFedf51ey4
+# pGjAtiZS1oCIJi9PIf4EDkyN9Da7mJv8HU5ZbgffXDD0bmpCwySNbhPgQ1KM5QmG
+# 81kjEb8GNg==
 # SIG # End signature block
