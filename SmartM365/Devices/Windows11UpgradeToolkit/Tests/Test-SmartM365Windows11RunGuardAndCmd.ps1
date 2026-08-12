@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.8
+1.7.9
 #>
 
 #requires -Version 5.1
@@ -48,6 +48,11 @@ $intuneInstaller = Join-Path $toolkitRoot 'IntuneWin32\Source\Install.ps1'
 $intuneRunner = Join-Path $toolkitRoot 'IntuneWin32\Source\Run-IntuneUpgrade.ps1'
 $intuneDetection = Join-Path $toolkitRoot 'IntuneWin32\Source\Detect-Template.ps1'
 $setupMediaIntegrityHelper = Join-Path $toolkitRoot 'IntuneWin32\Source\SmartM365-SetupMediaIntegrity.ps1'
+$endpointText = Get-Content -LiteralPath $endpoint -Raw
+Assert-True -Condition $endpointText.Contains("`$script:ScriptVersion = '0.1.58'") -Message 'endpoint version is incremented for final OS log evidence'
+Assert-True -Condition $endpointText.Contains('Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}; OSCaption={5}; OSVersion={6}; OSBuild={7}') -Message 'final log includes OS caption, version, and build even on early exits'
+Assert-True -Condition $endpointText.Contains('$result.OSCaption,$result.OSVersion,$result.OSBuild') -Message 'final OS log reuses the already collected final result fields'
+
 $gui = Join-Path $toolkitRoot 'Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-W11UT-RunGuardCmd-{0}' -f [guid]::NewGuid().ToString('N'))
 
@@ -598,8 +603,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvpV7ibhLXGz7R
-# noCrnhHaBGwqZTfDfjJP2Um0hzSHm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9vKwvWwooKeiP
+# fDeMWTGWaKZ4E0E2usfBCP1BZlm3rqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -732,31 +737,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG6GER5i3Y49DfYHEcv57DJIC6GC4P/YKFZTfjSArk4KMA0GCSqG
-# SIb3DQEBAQUABIIBgGTkxw2Alk+csAs23Ke8WUV78rQ69wQLW4Ynl9KtZzZAHa46
-# NJSWXJks8AKIb2iVLOqvvn+/T+Xcu9nka/goen3DincjEpxJZs5OHl2IjlvIkO/d
-# TT1V+XF1nnYuCAwHT6ZzOkNN+oZ7QBkiRTl2pk+UEo+Co6VBuTmydeBj8z3OzCTM
-# xRzEEsuWmLFVqpyT5FHAlsWrtXhlNDv56awSl4jYPXAdTFDH3zzz2gM+nxNuGbcu
-# PWqi/VFUYarws5NnEluwU8YdOsMfYpt7bwNBBQl2xEJn2bnYmGYrs59ACXtS/wA1
-# QaQkbaHPoe15KazLnF35zR6BOyDPbT5WGni/Si6+5Zx/RyQabohmXHCoJQSE5mSH
-# TGf3ETcQw9qVLsdgc1Q5L4uWPvbeosI/AybJaa1DCAQc0XdrpFFx+qPc17GIBtcp
-# bMSowErCwveRXpJDHMZpJggblH6ticnmljrCnXRDWyexCElNxJmSO/ToiXEBi7c9
-# UxibUZebcriOw56M86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF2DMSAfBbO96MnBeZjcghlWt06kS9hVKnq3oCyKgsbAMA0GCSqG
+# SIb3DQEBAQUABIIBgHPwKHvZxT0XLcEKr8zvcqDym8WHxGF/Vgny/yoJO7Zbs1SH
+# Dy/XYqdjdmdS1agWnhtXBq/VFjlCgP/yCXav4xUQPLycBsGDWlmaZfCiWMNlV20l
+# RScoJg+415kRONWjv9ePt2TKVlL+r/57vSeJrk/t87EqeBNXZHNGYCvs+GK9gOCC
+# 8w4NYZMq2q5aHIH+D/p45Ne7yMOYNgHKEb/cnttM+FlfV1tVKKY1oPWGOMSa1Vum
+# dOLeNpm8NhKwR3BQNoOn4i4PABVD67FJIsljZebArMzEq0END9PfR21ugwOVIugv
+# 5ZwFMw/vP7r5Vr8O53utG/ghzSrwmlV17QxrbUhTqqnpfhmVMxsEpePlCSi4yxOQ
+# K8Y0gn1PtPiC7qnnXqiHu6zWIn2ph8QSzvgM7zwu6rWIsembkgmq31Lz4RBhXYqZ
+# zshgYOVpMSnBCNHgM4Tp285rDq4v6dj2XAKJfbzN4lNStl/uPMkg/9ifj+tMpQKH
+# KkqWCav/eoL9Ef7MQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxMDM5
-# MDFaMC8GCSqGSIb3DQEJBDEiBCDqxcivqWvXJX5vhojFDrzT3pAERe8dit7g8iew
-# hog0YDANBgkqhkiG9w0BAQEFAASCAgCglUgksGQwqRBOKIB9bCA2cT7C+Kkl4VVj
-# lhVgqd0eTmltLkeRN7Ja4x5VPRBMrOTAxEMZSRgQIQCdEfNuY/Tvof59hZSMseeN
-# qT9LCOmuzkc190q2xND8RmBMWrXH4lA4Gd+SMqgLPztq8A8NkUj5iTRw1g1Sf1jI
-# bTx0RmoWGVjdS6xWE2QGKtoRYL1WVwWYnzIhhlJOOi2fJLWubpy7pKdoYyLq0+ig
-# 60GDK/0DsyiK0UHb8mAGkVP8cGzaTeUfzYdNmmoXeJUHhQDSg2glVzdc2le0VBUY
-# jA2QMmCC6j7co2pBIjsCyumaLNrqd4fiwoOjEIHGGjkYFoVanNxGCdRdfhyXOzfh
-# iaxCi3pPGa7diI+rwmnZl0kxV9Tx/IGjyqxa9645vjjYfZxhkhPOZO7HilG5zRVv
-# lCQhduHyKhL1yKjeA3XNOTGLHrm19Vw4gE4yADYhXANGrDolLl1Z/5XeEs1wYKI+
-# PAX6YNT7XeYIDeGxHbVs5BhsWHnI9RQqrS5Dd3H1WEJlSRz2PKDKwV7lNN4pcxYp
-# +YFEd0ETZFpkXlKoLZsT6nK9i8I29u2UI6IVJhWv4PHFQ1trsf0XIkogTO+88Boj
-# Z8n2ES+U+b6QSklo/qVnGUqHTsoFMVtSg5su0ezJBVZetBw9F6DEbJEutI/j+eSY
-# fAQ4LopLiQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxNTMy
+# MTVaMC8GCSqGSIb3DQEJBDEiBCAEGQCnSRHeNXZlnz9mdettgnnr43hvy1K/Y3DF
+# D4R09TANBgkqhkiG9w0BAQEFAASCAgDBwBvjtlaETR1vBHtSghC7kstMqhFM7xHg
+# QLha5gTX9PUuqJ4lQQ0vdns8XCBdovSoO4mXKbfo7RycZqttXpem08DS81bwen5j
+# 5iwatTnNxeABga6pgE3VxRu0VkcXItuHVqEcj2/Jc7GeYMVZMz8R1apt7jX41UWo
+# jozrA0jtpECpwVGfUQmWqG9vR8Fj8+PH4T+DsmXpOYTLo5FRVYHkv/Gy/3GGmwyw
+# zmJGifEPXBTXlAdraE7ibgtBXUdY26K9kH6vIALohubjwOGAgKxa18IXx3RHezOg
+# LmeBwXVjgjiiy+HzOHnD8HdgkgsTX9rjgTiDVeaFLJGigx3x4Q4c9Cts9STnUIxY
+# oOHfMiJ76wD6+FmMb2h0JsVIVwTICc8qJu+YTwi7o42p3HLMgZ4tA/eIL3kursml
+# aISPDlH2z0IfnR2DTqD6ohdnyW0wSfPtaf+/w2G2LkXg07AytUbd14eqZMf8dmFc
+# eIexse9jcCAWJ36jr/Qm6VkAyS2y2qVjzaTCSRF3LvqpAvp6O0jftM8JuCi0O187
+# RFdwVojHhk2/py3fkfWbXgOdWh2pToF+vDlBlea6VrL5TJZvgzcE7hjWBNTtW3Xv
+# YhNykVWmwpkru+9SYGrPRLSSzr6guNTUwRXS5LlaNF5423zYX+Boxr2iXRGP2eP0
+# /KbJCtAglA==
 # SIG # End signature block
