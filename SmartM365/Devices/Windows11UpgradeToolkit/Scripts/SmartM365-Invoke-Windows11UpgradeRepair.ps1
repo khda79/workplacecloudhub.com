@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.57
+    0.1.58
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.57'
+$script:ScriptVersion = '0.1.58'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -4905,7 +4905,7 @@ finally {
     if (($RetryAfterRebootTaskRun -or (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) -and $status -notlike 'PENDING_REBOOT*') {
         Unregister-RetryAfterRebootTask -Reason $status
     }
-    Write-SmartLog ("Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}" -f $status,$script:ComputerName,$script:LocalIPv4Addresses,$nextAction,$exitCode)
+    Write-SmartLog ("Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}; OSCaption={5}; OSVersion={6}; OSBuild={7}" -f $status,$script:ComputerName,$script:LocalIPv4Addresses,$nextAction,$exitCode,$result.OSCaption,$result.OSVersion,$result.OSBuild)
     if ($status -like 'PENDING_REBOOT*') {
         $rebootExplanation = switch ($status) {
             'PENDING_REBOOT_USER_CONNECTED' { 'Upgrade paused: a reboot is pending but was skipped because an interactive user is connected. The device will continue on a later cycle once it has rebooted or the user has logged off.' }
@@ -4930,8 +4930,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQdIryu66QM4x8
-# a9pknYWv505Njy4dXBKf3aCyzYKJ2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsa5yXrhW+Ybvx
+# 6qdCBCHX/zIYibuivRKbxtco5i8EcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5064,31 +5064,31 @@ exit $exitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPKXO3407bxTLpE6SGsjPw6A/qRL/KlQMDMC6Cs7axV1MA0GCSqG
-# SIb3DQEBAQUABIIBgIcxtifHel9AKfQHd52sFrbUhSDS/lfSlAMxJkNBaIn/6nUd
-# 08kgxeidWLFX7vczofuVrRxGiuLizy8PdlwK2DOeVEMstmbxtc2jaRy2cKByGDRc
-# JiieYDC2tEWYUp+erMjZGLrnSIBV1xXYUM/8yHxNql8lfS+HZFUFydEVzuYwHpeE
-# JqB6Tx8Lb+LuGlouMuWVM346RnhAhysfsqpvfBmDfjlRTSdIBbNosFOUnQS3drbl
-# OylB8xkfubMnItUPof1LGJXSogZtoCyM0/FZ7HYf5MDvlOe0Gd/oZBqtqn0ZOJN7
-# j/H33lI2XSqtp6grdflEqOCDgLSpqp5RIZMWgn+xTwXLBwRm2kMnlCA6goQ4Hb8M
-# xzgoUjjA2Z6BNDkRDrP9cPpJU1McocJNfZvbSqc3JXJemnQbd1dRbrT3TNcblN4B
-# 8jgkwR+7KvtH1EDb+0C3IerLpMCh6JdwIiQX+iYPOlCLw0vTghUm+DUISMRwwyyF
-# 71SxzNBYciLNi5R+lKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ72a2cBThzOTevr9EP+746MEkk6Mn7iYKj41WutKRTrMA0GCSqG
+# SIb3DQEBAQUABIIBgHsdGvQYlyPhY/g3v+GgOiZ4Uc/r4k+xCSckladGFlrXn/OT
+# ggPURMXFUw5Xa1VwJVGWIHnUz5kkLZqy1G4kKa/caZhNZASFvc6ngoRsgQ9X8F/C
+# gsMAsrujNcjUlf2WHxl3RKYI7sSXkemdHKxLHOLXJ2SDCWuvh/Q9ER1s7ok27PL3
+# bOu+BLDxX7GmvhgxDKOsC4kndER1LO5HH2JzLEarMSBhLKAU/XtyuNJJb2xGb11Q
+# xqTz0kzKYpCzz2nPIzdLS2q/ePq9Th6yCTQ5j54nHJu+6g5THIAlT+sJSDZ5ZgjU
+# p5W6NvOak+KvnYnrnpVWbFQX24o6AiWKGPZmrJ00IUy+vGtSTeJyC5jLbN3oVBWA
+# lCxxiPusTsuZMrSdMiePlWTRgc9UXMGLGYx6XpyiRRCRgHf4oPKuS84SYon5K3UJ
+# Ch+n0LOmKSAhogc+FPqTqb5s6PAYymDAJSC0CiwWVswGbzyfiKU493NqtnUi/p5G
+# l2W7xOjyPKEFCLeR6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MzAwNjU5
-# NThaMC8GCSqGSIb3DQEJBDEiBCBncAWEViucymIgkluag8UIREigtTlVc3ywQKeV
-# 6G0xTzANBgkqhkiG9w0BAQEFAASCAgCj9dprBzgoWt+bREYs3SbXUwTxZ2N3VOmj
-# xOAn0RE5lkpMHbn0iJL9Ln9MTVFLVEx//0VSDl57d12isPtxSCPFzYMQGiM4Hgs/
-# +Z1RLWk0IpNuaV5Wk2RJFNjJMnNdARbqVUzl0yBTvmAeRYFcTGROF1F8kloM5APh
-# 4FjFVFhVmQk3iQR99R2dUFLyS7xr6sodd3NIxWun0hOVR501ZdXiZo2TPc6oXxoi
-# rvQh5VdDXs69TYBdrSA3WWgtb4zHzHNw8+mdWMOipgESPXszDExeoL/IQCcK/PBE
-# llKz/Zzxk4jJ7093KH4hOLwmrE0MP+1ivOYTI+8LIhg+QM+YXEgGM2PvXoN7fpIx
-# NVbTOcZ+l4ZZ4MvfzsFRMP4QmFHR8KmmuaKrNh6R0BYGk+QrdPqS1AXFtVvSPOzc
-# lQIzI/c6Eauu1qxNWMrHux2OXeTD5HWxzR3UQ4GxHNmBiCiXdPZT9rg/7sqH6wS2
-# dgQUxVJEmRLqyblR4MfwVyeDC3mDJ7IDxTAmhRbgEXlV+esTWHu9T023NOEg/r1U
-# DeSySYQAVYiEchHbQB8Xp+gbtGoZ8spJvzTgf/q4GN6zxrJuCoYBDZkODxZ97Bb2
-# BivfpHWsG9GoyBkpqYws1x9gGq5lzErYe4tj2eIxq5x/FSqrBmmJ7iYFaNVWANtm
-# 6QDLCM3cDA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxNTMy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCC7q4yPulsDELra6EqGbcSY0M3hlYtowc8AHkrv
+# atO6czANBgkqhkiG9w0BAQEFAASCAgCDScDT8WXOz+nstOXtMdEzkKTVMrvUNXzY
+# kIF3a7OicssXKOdAOqnHd+A3hvRD6UIshNfZXcMhP9/eddckStfU0/FTAg9mvTwn
+# wHEZgNNAkwhQz2dRKDb+k2aQtluxcezmL7QaqM7syKMzpTdBOZcJAF9Hx9U35W1I
+# y27R61pE+2kmDcK75Ud8AyhOI7Q8VzOeOD0gSYTb8jeV/fB/8zQjqvwYyoUaX2Sh
+# wot3Dyjtz4gmMbzoHP8qLeszew7P6mZImAVJrs/5vTNBhvLMawW+Uns+A77WgU7p
+# bDTyslK89PhRQoaBi//h877UB+4XFoJrId8jrUfYGVThJFjmTog5CmLyWoBBRAj5
+# 0HTqwdPlNPQ6750A3aD8dGXMT15m/Qc4Yop0i139DdNrBQtTXseG5gOM4lNkvmYP
+# c8rgiYQHOD1K6RXivJWrlSBym1s4GR148BA9NlCr7QVAhl6hW47+k4MyLHxQnXd2
+# +8ytuxsYpH9fPDFlT0w06/YYDI+GFHu7dylVjmol5qDfAYRRcMIx4CuY3/rZ5CH9
+# Yg0AVphUz15zBGJagQb9ZrdLTIHyq+K2PekWn/nr8mYOQqUT6KuyOFZLrJFMHj/o
+# pnB/IvD4VmFqmoZcaYhjpD5r98zRLGRXCYyV97XT6e9wn3OVG7r5l5izA4dzZgqZ
+# BgKI7UIpag==
 # SIG # End signature block
