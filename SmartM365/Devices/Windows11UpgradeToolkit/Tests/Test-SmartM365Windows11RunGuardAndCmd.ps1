@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.7
+1.7.8
 #>
 
 #requires -Version 5.1
@@ -242,10 +242,35 @@ try {
         'Get-ComputerListMutexName',
         'Invoke-WithComputerListMutex',
         'Move-CycleStatusComputersFromList',
-        'Move-HardwareNotCapableComputersFromList'
+        'Move-HardwareNotCapableComputersFromList',
+        'Get-LocalWorkerStartDiagnosticText',
+        'Start-LocalWorkerJobWithRetry'
     )) {
         Import-ScriptFunction -Path $orchestrator -Name $functionName
     }
+
+    $global:SyntheticWorkerStartAttempts = 0
+    $recoveredWorkerStart = Start-LocalWorkerJobWithRetry -ComputerName 'FR-RETRY-001' -JobName 'SyntheticRetry' -MaxAttempts 3 -RetryDelaySeconds 0 -StartOperation {
+        $global:SyntheticWorkerStartAttempts++
+        if ($global:SyntheticWorkerStartAttempts -lt 3) { throw 'Synthetic transient Start-Job failure.' }
+        [pscustomobject]@{ Id = 42; Name = 'SyntheticRetry' }
+    }
+    Assert-True -Condition $recoveredWorkerStart.Succeeded -Message 'local worker start recovers on the third attempt'
+    Assert-Equal -Actual $global:SyntheticWorkerStartAttempts -Expected 3 -Message 'local worker start retries exactly twice before recovery'
+    Assert-Equal -Actual $recoveredWorkerStart.Job.Id -Expected 42 -Message 'recovered local worker job is returned'
+
+    $global:SyntheticWorkerStartAttempts = 0
+    $failedWorkerStart = Start-LocalWorkerJobWithRetry -ComputerName 'FR-FAIL-001' -JobName 'SyntheticFailure' -MaxAttempts 3 -RetryDelaySeconds 0 -StartOperation {
+        $global:SyntheticWorkerStartAttempts++
+        throw 'Synthetic persistent Start-Job failure.'
+    }
+    Assert-True -Condition (-not $failedWorkerStart.Succeeded) -Message 'persistent local worker start failure is returned without throwing'
+    Assert-Equal -Actual $global:SyntheticWorkerStartAttempts -Expected 3 -Message 'persistent local worker start failure stops after three attempts'
+    Assert-True -Condition ($failedWorkerStart.Detail -match 'Attempt=3/3') -Message 'persistent failure records every attempt'
+    Assert-True -Condition ($failedWorkerStart.Detail -match 'ExpectedExecutable=.*pwsh\.exe|ExpectedExecutable=.*powershell\.exe') -Message 'persistent failure records the expected PowerShell executable'
+    Assert-True -Condition ($failedWorkerStart.Detail -match 'FileExists=') -Message 'persistent failure records File.Exists evidence'
+    Assert-True -Condition ($failedWorkerStart.Detail -match 'ProcessHandleCount=') -Message 'persistent failure records process handle evidence'
+    Remove-Variable -Name SyntheticWorkerStartAttempts -Scope Global -ErrorAction SilentlyContinue
 
 
     $hardwareListRoot = Join-Path $testRoot 'hardware-list'
@@ -573,8 +598,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxU76RY5tTIW8J
-# zeza5YlM4mO7DAou1BnVDxN7B8WsTKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvpV7ibhLXGz7R
+# noCrnhHaBGwqZTfDfjJP2Um0hzSHm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -707,31 +732,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFV2baV7XoH6lBjdQE/9wl0efuNIUOG5GeH38bmfpFl8MA0GCSqG
-# SIb3DQEBAQUABIIBgFFh1a6cl1mJDQQ5ELr70rP5RTfesiW3+qSSmGvbzUaWNF2F
-# PO+Bcn2uVksssJSz7KicFZr5DQr9Z2lG0ZgRr+ffzX2TqTCIjlo3SE/qPIgZR2DQ
-# sUj0ZMV3BeIXI0kCbboyWdM8Oe2qk9E5LcNGzyVmrebBNl+yTy5cVi1WzYOGEu1K
-# 0oTRd05nwoPJt1LTL8FGMtUgviKq4C29MZZ9oV7hjVk1/Axn5DFOlHGFRqCbQZlU
-# T9VabvlURwU2Yw0C9h7DFbgSdA0/BWy9zF08gYigggFnla/z6/N/AL7fb3ODgEsw
-# 8QM3bEKTLprhfe1ChEY9x8ClDB1VKmA/NtlyeZfe283hT1inATMf1dtrx/s23/Qg
-# 2Dklx0nuUDwtg44USz6bNgw1ZWhU9cLp9H4bPJFUbZuCUcZsTgGV8wOJ3c4vuGAn
-# Sp5XgDyFZM2N5Sc086F3Ux+t2/ccxywOhNM2+y2DUjQKi4Pwe5pXYJlat7cEWzni
-# OMcTCGsoJqqBDwiDhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG6GER5i3Y49DfYHEcv57DJIC6GC4P/YKFZTfjSArk4KMA0GCSqG
+# SIb3DQEBAQUABIIBgGTkxw2Alk+csAs23Ke8WUV78rQ69wQLW4Ynl9KtZzZAHa46
+# NJSWXJks8AKIb2iVLOqvvn+/T+Xcu9nka/goen3DincjEpxJZs5OHl2IjlvIkO/d
+# TT1V+XF1nnYuCAwHT6ZzOkNN+oZ7QBkiRTl2pk+UEo+Co6VBuTmydeBj8z3OzCTM
+# xRzEEsuWmLFVqpyT5FHAlsWrtXhlNDv56awSl4jYPXAdTFDH3zzz2gM+nxNuGbcu
+# PWqi/VFUYarws5NnEluwU8YdOsMfYpt7bwNBBQl2xEJn2bnYmGYrs59ACXtS/wA1
+# QaQkbaHPoe15KazLnF35zR6BOyDPbT5WGni/Si6+5Zx/RyQabohmXHCoJQSE5mSH
+# TGf3ETcQw9qVLsdgc1Q5L4uWPvbeosI/AybJaa1DCAQc0XdrpFFx+qPc17GIBtcp
+# bMSowErCwveRXpJDHMZpJggblH6ticnmljrCnXRDWyexCElNxJmSO/ToiXEBi7c9
+# UxibUZebcriOw56M86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MzEwNjQ4
-# MjRaMC8GCSqGSIb3DQEJBDEiBCBZcp9jXPC4ZNV7Z3n9HcdTGF779Z2wp1u3Ojpv
-# jp/K7DANBgkqhkiG9w0BAQEFAASCAgCwWoVlvTXJO3McB6NfJQLVAcC5uN+9qbQF
-# Ne6yV4lTSNcxgvqq1JPJiIMjzN5NzeAYjYOHWXS4CIsEha7CYIzSXcBmuo8a9Fb0
-# SwBDzF8uJS3FJRbTj4qRPu17OtS9arB8EgNTBlOP6J2RBPiuxTy4RylkJuv2gmWk
-# +znaNXXGudOX+RM7iO8ouuPx8HLRbQ/d4HUcyi0StI89BYHryg5BXTck+4qk9xfF
-# R1pCBD7xWW8pIeVrt5sH946tri4sBW1hNR620EeGUNe/cQ8v7IFNQOj2+isR5E7X
-# /d8md4J1GtO4mE4cffFb6S3e5HHmZ3taGWL3vfIDMeu4EKyCVIqJt8qdesQ0nUwb
-# vIXynjcbgQ4xtcuekj5I4Prf+4KvHQQnZ9vHPh/oLw70qqaFr5IRzYAAYYipWqgv
-# bgsqvh8kBmDtXSDhHiSc9PTvwCCJdlcGXBK9rIwWb/HodhrT4bwRWkFTmWcSXzV9
-# o5ukqpODoiVp/cErYiPm5p6grnDnIB/a+FqSd72TCjtNKceeH4n4JUFUIJk+0lVt
-# PTXjrlZCJmQabJpKRoMQ7DRiiMRr7lxK98T8iPxYa69TRX4d2jd0c6NK8jkG7bUY
-# px0Kd5FiNhXHkyuVqDaO1N6D5XHN8Ar3Y001IncdonA04q3H8yXHSrpg5pDD/BkU
-# LXTdvtDugw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxMDM5
+# MDFaMC8GCSqGSIb3DQEJBDEiBCDqxcivqWvXJX5vhojFDrzT3pAERe8dit7g8iew
+# hog0YDANBgkqhkiG9w0BAQEFAASCAgCglUgksGQwqRBOKIB9bCA2cT7C+Kkl4VVj
+# lhVgqd0eTmltLkeRN7Ja4x5VPRBMrOTAxEMZSRgQIQCdEfNuY/Tvof59hZSMseeN
+# qT9LCOmuzkc190q2xND8RmBMWrXH4lA4Gd+SMqgLPztq8A8NkUj5iTRw1g1Sf1jI
+# bTx0RmoWGVjdS6xWE2QGKtoRYL1WVwWYnzIhhlJOOi2fJLWubpy7pKdoYyLq0+ig
+# 60GDK/0DsyiK0UHb8mAGkVP8cGzaTeUfzYdNmmoXeJUHhQDSg2glVzdc2le0VBUY
+# jA2QMmCC6j7co2pBIjsCyumaLNrqd4fiwoOjEIHGGjkYFoVanNxGCdRdfhyXOzfh
+# iaxCi3pPGa7diI+rwmnZl0kxV9Tx/IGjyqxa9645vjjYfZxhkhPOZO7HilG5zRVv
+# lCQhduHyKhL1yKjeA3XNOTGLHrm19Vw4gE4yADYhXANGrDolLl1Z/5XeEs1wYKI+
+# PAX6YNT7XeYIDeGxHbVs5BhsWHnI9RQqrS5Dd3H1WEJlSRz2PKDKwV7lNN4pcxYp
+# +YFEd0ETZFpkXlKoLZsT6nK9i8I29u2UI6IVJhWv4PHFQ1trsf0XIkogTO+88Boj
+# Z8n2ES+U+b6QSklo/qVnGUqHTsoFMVtSg5su0ezJBVZetBw9F6DEbJEutI/j+eSY
+# fAQ4LopLiQ==
 # SIG # End signature block

@@ -179,7 +179,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic LOT-scoped inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.77
+2.10.78
 #>
 
 #requires -Version 5.1
@@ -250,7 +250,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.77"
+$LauncherVersion = "2.10.78"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -670,6 +670,70 @@ function New-HybridJoinCancellationResult {
     $row['LogPath'] = $script:LauncherLogPath
     $row['ErrorMessage'] = ''
     return [pscustomobject]$row
+}
+
+function Get-LocalWorkerStartDiagnosticText {
+    param([string]$ErrorMessage)
+
+    $processPath = try { [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
+    $processHandleCount = try { [System.Diagnostics.Process]::GetCurrentProcess().HandleCount } catch { -1 }
+    $expectedExecutable = if ($PSVersionTable.PSEdition -eq 'Core') {
+        Join-Path $PSHOME 'pwsh.exe'
+    }
+    else {
+        Join-Path $PSHOME 'powershell.exe'
+    }
+    $fileExists = try { [System.IO.File]::Exists($expectedExecutable) } catch { $false }
+    $testPath = try { Test-Path -LiteralPath $expectedExecutable -PathType Leaf -ErrorAction Stop } catch { $false }
+    $fileAccess = try {
+        $item = Get-Item -LiteralPath $expectedExecutable -ErrorAction Stop
+        'Readable; Length={0}; LastWriteTimeUtc={1:o}' -f $item.Length,$item.LastWriteTimeUtc
+    }
+    catch {
+        'Unavailable; Error={0}' -f $_.Exception.Message
+    }
+
+    return ('Error={0}; PSEdition={1}; PSVersion={2}; PSHOME={3}; ExpectedExecutable={4}; FileExists={5}; TestPath={6}; FileAccess={7}; ProcessPath={8}; ProcessHandleCount={9}' -f $ErrorMessage,$PSVersionTable.PSEdition,$PSVersionTable.PSVersion,$PSHOME,$expectedExecutable,$fileExists,$testPath,$fileAccess,$processPath,$processHandleCount)
+}
+
+function Start-LocalWorkerJobWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$StartOperation,
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [ValidateRange(1,10)][int]$MaxAttempts = 3,
+        [ValidateRange(0,60)][int]$RetryDelaySeconds = 3
+    )
+
+    $attemptDiagnostics = New-Object System.Collections.Generic.List[string]
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $job = & $StartOperation
+            if ($null -eq $job) { throw 'Start-Job returned no job object.' }
+            if ($attempt -gt 1) {
+                Write-Host ("LOCAL_WORKER_START_RECOVERED: Computer={0}; Job={1}; Attempt={2}/{3}." -f $ComputerName,$JobName,$attempt,$MaxAttempts) -ForegroundColor Green
+            }
+            return [pscustomobject]@{
+                Succeeded = $true
+                Job = $job
+                Detail = ($attemptDiagnostics -join ' | ')
+            }
+        }
+        catch {
+            $diagnostic = Get-LocalWorkerStartDiagnosticText -ErrorMessage $_.Exception.Message
+            $attemptDiagnostics.Add(("Attempt={0}/{1}; {2}" -f $attempt,$MaxAttempts,$diagnostic))
+            Write-Host ("LOCAL_WORKER_START_RETRY: Computer={0}; Job={1}; Attempt={2}/{3}; {4}" -f $ComputerName,$JobName,$attempt,$MaxAttempts,$diagnostic) -ForegroundColor Yellow
+            if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Succeeded = $false
+        Job = $null
+        Detail = ($attemptDiagnostics -join ' | ')
+    }
 }
 
 function Get-ScriptHeaderVersionQuick {
@@ -4685,7 +4749,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             try {
                 $cycleScriptArgsJson = ([pscustomobject]@{ Args = @($CycleScriptArgs) } | ConvertTo-Json -Compress)
-                $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
+                $jobName = "EHJIR_C{0}_{1}" -f $CycleNumber,$computer
+                $jobStart = Start-LocalWorkerJobWithRetry -ComputerName $computer -JobName $jobName -StartOperation {
+                    Start-Job -Name $jobName -ScriptBlock $worker -ArgumentList @(
                     $computer,
                     $connectionTarget,
                     $CycleNumber,
@@ -4713,6 +4779,20 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $globalLeasePath,
                     $globalConcurrencyMutexName
                 )
+                }
+                if (-not $jobStart.Succeeded) {
+                    Release-GlobalWorkerLease -LeasePath $globalLeasePath
+                    $globalLeasePath = ''
+                    $failureDetail = "Local worker could not be started after 3 attempts. The LOT continued with the next computer. $($jobStart.Detail)"
+                    $failureResult = New-HybridJoinCancellationResult -ComputerName $computer -CycleNumber $CycleNumber -Status 'LOCAL_WORKER_START_FAILED' -Detail $failureDetail
+                    $failureResult.ErrorMessage = $failureDetail
+                    $summary.Add($failureResult)
+                    Add-LiveCycleReportRow -Path $liveSummaryPath -Columns $reportColumns -Row $failureResult
+                    $completed++
+                    Write-Host ("Completed {0}/{1}: {2} => LOCAL_WORKER_START_FAILED; NextAction=VERIFY_REMOTE_STATE_BEFORE_RELAUNCH; Detail={3}" -f $completed,$computers.Count,$computer,$failureDetail) -ForegroundColor Red
+                    continue
+                }
+                $job = $jobStart.Job
                 $jobStartedAtById[[string]$job.Id] = Get-Date
                 if ($script:UseEffectiveTechnicianRunGuardHistory) {
                     $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
@@ -5417,8 +5497,8 @@ Complete-LotCancellationSupport
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9Q+7C0eCiJ1EC
-# G/69YYdvxUb3XMBmvlGqqwhlOXYFsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE0Yg0xS8W/YC+
+# U29ylY/LQv6uWsMWXNQMTJf9qbwDIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5551,31 +5631,31 @@ Complete-LotCancellationSupport
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ+hzSiJdbcnJmCuMkcfGuEG1ikszXk6VdEUYZBxVsUVMA0GCSqG
-# SIb3DQEBAQUABIIBgCEkcQzRYxekA/RzeelGV/UaYXllo4jItMJ4FSdz3XW+j2lr
-# +zTMmA92dHP6bosOKtOO2i3OwGZ2z8FhZxhOX17vdZJ5Zsid6b0GE9mzD7F1nB+j
-# IReOXyei0sluaPfPSwy/y3CprLan9WkptLgMbtVt0LGACQHy0f2aJ8utoaaHLDk1
-# +QdC/Enh+pVAs/pXoUDkPUU9yST6eiC7np9xZ85TP2Xr1U4BJgZqBn5tQ598BYMS
-# luKZgv+ICab/tegc607MGBbeNU0bEVzbDtPBP5B+WbY9ntwspGKuDpClOdV7b9Xb
-# an/uuJR0xyBjSnOhjI2Z3Tk2Wgxu7TZ7+mSUxLNbg8QPbxIzyBbZs/MMArTKUOZi
-# dOIkJ2249nxG89AIQs4XQ0ax0Zl3pFHIurTRARX3OVHxPYsmSzpN/6j93qXZ1zoo
-# xcq1+CsOAbMepw9b21Txcy6E9VFrMJTV27xNUYIg6QXmmOjrigzMZ3rcrC2BpfUT
-# 4ouQfvq0KzUTP3GtnqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEU8mxoJr+lYkbpreGX1EUvH6KteoGH638VfZQaucbsQMA0GCSqG
+# SIb3DQEBAQUABIIBgCsSrbSjFoiglBMPY+unbOgOkrRB53y5sk+Agv4hLlp1xFYH
+# dc+YuJEg3KI1+9N2fIGixStUYDxkY/a+T0xA/qHYand9Qcc28fMOwX8sxSrgiSLj
+# Qiicfr5RxXcrnPOOmkNRe+LZY1IdQWk56qyck7eu40W0uYJuX7wcUl52A1RPtaJ6
+# WOjWLg6HynskONrtfwscz9mdWq99ZXhimgk2gRyCfXj7gms8CMR1P7BOphkENzkO
+# yBR/KtVYksAxCG8NKjI8NG1KNw42Bs+dtmEo1LKFag1W6Y4v8cM34S05p4qRHYGj
+# Wp/f74wTCMRtwMX/CGt/y4y9KdrBWNApVQh6uFQRQM/gFXqP0EWANPdUr5gMMP0u
+# OHOi2l9Yu6pmzVY5IErvup/96W5bpfuBlsujfW/TyqqXzHSYUcnjLPFRUuQ2CNGm
+# MbeCedhwn4693oIOuc4jeVzQFtUJP7W7KXiUL4pp88mgjbKIYZMHc7JHoz76J7en
+# NNhf0V70Sc3kld+YOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkxMjA2
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAD5r1u03ETa0dVxLvL0V2d8hlkBDPu2QRCNyHk
-# JArDfTANBgkqhkiG9w0BAQEFAASCAgCfGCVhGblBYgcJri+8bno4o/yNDujlE2LJ
-# vvQSHqhdPc5vo1CvVxme3sRq54Mms9fnVeTz1wCMOwc018YdiIfaJwD+LAPTfaNh
-# x2ZpvlQM5KxGaXge7J/8p/mGFFPPHfuuqvY1w0vkrwerd6Cj3yJDTxMpiVaaocdF
-# r3IJ7bzL2hB5iletwd2MUNuieR4gM5500JSAnTuoVO5VtfvJjsX4wZeeDMOE/A6m
-# yIiXI1nyGOFvKKgV5N+a9GrEIhzQcwqht6gLiFXwLK/CZx0iYEn7WKeiTi7VvJqS
-# sOv6n8La3+Ss+MDgPxxyWiha6guQ912dlybzcsswwjLCK5+BMlhlVsJjnFEIb0Et
-# /3xcVFywmv4umMWNUnjadwrmSOdCF3dijCsRJwRzxj/d11LSkRwQtmxlar0KvBjJ
-# reQAxuU9/RRe91WrInxYorigA2qmltMXjk/Jx2mOyDoT9DTPQu65faLo4QSk9feN
-# lRzu+8R7q2gFiAUPp3Uby2Zpjuh0iM2aUcmhjG4cV9ZbJlDo2Uq8bj/64SNV/s6p
-# IpK/zs18kv7qajOiYYPQRBr0Y3qdtgi47HY2TNT8v9Cb6SGm/aGBUyfRz9QrmvAI
-# MEZgFHi28D8I9xfM4g3WbLSnNk/2nfSsUcoVH5dSkalXawKolhwMlGbapJHlVeud
-# xD37I/FRqQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxMDM5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCB74MYATCU1wRWx1Y5PMsBq45yXCWdgo+2iP0c6
+# g+7zdTANBgkqhkiG9w0BAQEFAASCAgA39Gi6/IWm55hP6Psm3E88KdlJEzh5tKCf
+# v2pt5WErOTVkFcx8V4Ts+zWhWwdrEr9QHOMyb0VSZIXkT2OKias7e7xVPuJpgV7u
+# cRzHIdAxA3kHONLp5wMM9Wuy3BzQ8JC9/JLtDNXvGffXy1dhOdFtathkdmRnji/R
+# sQ3up2OUF9uUaylxWc7dlIXD+h8T+JObThm0TAaxq0LAV44Z3sb9Kv+AoLsbt93x
+# RAdR81f9DNy/7ydf+6DTsY1zhAWD1X/ixlbAseU/k8fv1Z8gYueBsz4APzWrcCwb
+# bxPHX5DGoGrifENyUCJC+rMS83OtS3HMoL3mF/rwsT1ouWQNEBvua7l7V5xIICzs
+# Nqkz1VpsFyARexCHZQPARPNRN8nNrxtbpIfTpMV9Qz64ENT3aClgbL5xd3AQurD9
+# cPEmzW1HTrsMAShYAsMgA32giREFzilaY533A5p+xu3/GjNOdTo4nyZgstYSWaYo
+# wjaiWmcgrsy1GIH9I/lXRcSilYxYSuYahlgg625PgyYkdcXd8bVzE2aZ98jnM/wI
+# LeWKmObDXU4W79+gKK64JtPtAd5X6J70ReXZHSqQ8itjHtV/nhX3dschLkyNaciX
+# 80uEfxuKJZls1Az+K+9dcHj0elIb2bSmNiqnXtIJLnc8yTwnnuXy9zMEXGVwyIT1
+# wqgbuvzodg==
 # SIG # End signature block

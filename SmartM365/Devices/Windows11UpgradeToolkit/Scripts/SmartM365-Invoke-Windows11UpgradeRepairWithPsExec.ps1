@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.71
+    0.1.72
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.71'
+$script:LauncherVersion = '0.1.72'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -408,6 +408,70 @@ function New-Windows11CancellationResult {
         PsExecLogPath = $script:LauncherLogPath
     }
 }
+function Get-LocalWorkerStartDiagnosticText {
+    param([string]$ErrorMessage)
+
+    $processPath = try { [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
+    $processHandleCount = try { [System.Diagnostics.Process]::GetCurrentProcess().HandleCount } catch { -1 }
+    $expectedExecutable = if ($PSVersionTable.PSEdition -eq 'Core') {
+        Join-Path $PSHOME 'pwsh.exe'
+    }
+    else {
+        Join-Path $PSHOME 'powershell.exe'
+    }
+    $fileExists = try { [System.IO.File]::Exists($expectedExecutable) } catch { $false }
+    $testPath = try { Test-Path -LiteralPath $expectedExecutable -PathType Leaf -ErrorAction Stop } catch { $false }
+    $fileAccess = try {
+        $item = Get-Item -LiteralPath $expectedExecutable -ErrorAction Stop
+        'Readable; Length={0}; LastWriteTimeUtc={1:o}' -f $item.Length,$item.LastWriteTimeUtc
+    }
+    catch {
+        'Unavailable; Error={0}' -f $_.Exception.Message
+    }
+
+    return ('Error={0}; PSEdition={1}; PSVersion={2}; PSHOME={3}; ExpectedExecutable={4}; FileExists={5}; TestPath={6}; FileAccess={7}; ProcessPath={8}; ProcessHandleCount={9}' -f $ErrorMessage,$PSVersionTable.PSEdition,$PSVersionTable.PSVersion,$PSHOME,$expectedExecutable,$fileExists,$testPath,$fileAccess,$processPath,$processHandleCount)
+}
+
+function Start-LocalWorkerJobWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$StartOperation,
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [ValidateRange(1,10)][int]$MaxAttempts = 3,
+        [ValidateRange(0,60)][int]$RetryDelaySeconds = 3
+    )
+
+    $attemptDiagnostics = New-Object System.Collections.Generic.List[string]
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $job = & $StartOperation
+            if ($null -eq $job) { throw 'Start-Job returned no job object.' }
+            if ($attempt -gt 1) {
+                Write-Host ("LOCAL_WORKER_START_RECOVERED: Computer={0}; Job={1}; Attempt={2}/{3}." -f $ComputerName,$JobName,$attempt,$MaxAttempts) -ForegroundColor Green
+            }
+            return [pscustomobject]@{
+                Succeeded = $true
+                Job = $job
+                Detail = ($attemptDiagnostics -join ' | ')
+            }
+        }
+        catch {
+            $diagnostic = Get-LocalWorkerStartDiagnosticText -ErrorMessage $_.Exception.Message
+            $attemptDiagnostics.Add(("Attempt={0}/{1}; {2}" -f $attempt,$MaxAttempts,$diagnostic))
+            Write-Host ("LOCAL_WORKER_START_RETRY: Computer={0}; Job={1}; Attempt={2}/{3}; {4}" -f $ComputerName,$JobName,$attempt,$MaxAttempts,$diagnostic) -ForegroundColor Yellow
+            if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Succeeded = $false
+        Job = $null
+        Detail = ($attemptDiagnostics -join ' | ')
+    }
+}
+
 
 function Get-TechnicianRunGuardHistoryPath {
     $stateRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SmartM365\Windows11UpgradeToolkit\LauncherState'
@@ -3300,7 +3364,23 @@ do {
                     $globalGateMutexName
                 )
 
-                $job = Start-Job -Name ("W11UT_C{0}_{1}" -f $cycle,$computer) -FilePath $LocalWorkerPath -ArgumentList $workerArgs
+                $jobName = "W11UT_C{0}_{1}" -f $cycle,$computer
+                $jobStart = Start-LocalWorkerJobWithRetry -ComputerName $computer -JobName $jobName -StartOperation {
+                    Start-Job -Name $jobName -FilePath $LocalWorkerPath -ArgumentList $workerArgs
+                }
+                if (-not $jobStart.Succeeded) {
+                    Release-GlobalLease -LeasePath $globalLeasePath
+                    $globalLeasePath = ''
+                    $failureDetail = "Local worker could not be started after 3 attempts. The LOT continued with the next computer. $($jobStart.Detail)"
+                    $failureResult = New-Windows11CancellationResult -ComputerName $computer -CycleNumber $cycle -Status 'LOCAL_WORKER_START_FAILED' -Detail $failureDetail
+                    $failureResult.JobErrorMessage = $failureDetail
+                    $failureResult = Add-AdInventoryFieldsToResult -Result $failureResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    $failureResult = Add-IntuneInventoryFieldsToResult -Result $failureResult -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
+                    [void]$results.Add($failureResult)
+                    Write-Host ("Completed {0}; Status=LOCAL_WORKER_START_FAILED; NextAction=VERIFY_REMOTE_STATE_BEFORE_RELAUNCH; Detail={1}" -f $computer,$failureDetail) -ForegroundColor Red
+                    continue
+                }
+                $job = $jobStart.Job
                 $jobStartedAtById[[string]$job.Id] = Get-Date
                 if ($script:UseEffectiveTechnicianRunGuardHistory) {
                     $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
@@ -3630,8 +3710,8 @@ Complete-LotCancellationSupport
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrJhBGRL4KmQHm
-# Tq0ybLCLRW1hW8xVjg7H4dc/n9rNo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnrlqmwp5hEkAN
+# GIAYdy2rKP5E13YTv/j1riWIUv064KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3764,31 +3844,31 @@ Complete-LotCancellationSupport
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMEx7AGAl5w2hpljXZBCXv3CERKuImT6H1Ch01aZ7q1/MA0GCSqG
-# SIb3DQEBAQUABIIBgKvS59QOWNAyUIXhSyFVQf6NgtOSAudHEwranaNnff4SFJU1
-# ZXJYACM352IziQr3HYUFKEgT2MUNoVSoNzSA7iOW7QYDk8jgXGmUuXiTGO2CM/aV
-# nFo3Dy4Qm2YBEHT/Ott+Saf2rl+lw+++L15DKDUenCXrQUyUiEsX7t3+S9PkLwik
-# X6+MPEe6JERdsPC6QI62XX/qnx7GPYVolfGM9jEL0Ki/jeK5NaamJQ+l/gjvsuwd
-# SKkYcEPg4YCHwtpmhrjwy0dqxsGA+V2sMNskdjfsIc0CAJP0jMfLyIsHF2jlw/3+
-# ++KGKwr3iDDoANs3GDPUXhqv7L447zsUTba8e2NdqIl50h2ytmJCSTv+Ka7Hifro
-# AUA2OE0Ki3W8FPb7DN7OPXp9rf2oB7xNip5LY1bLB/T0OiO/lTHf2BqHT+HAL529
-# SaqC+Vo2IEX9V67UoiXxZ3tUs41ZPx2eSLHBvFAn1j3maxGxXU/oB3iYX1qTShHu
-# GmoGn50XS7etDT2TB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO1QQXfKWsBDCB8kBAo7nrXyDpZpvHYFYVrfsAJTbDq1MA0GCSqG
+# SIb3DQEBAQUABIIBgHU+MPBKYdFfiRfTBeSM+mVjN2JTpsw1a0G/3AcC0QlHi42w
+# QFWFbpv6OHjl5bd5J7RvL12eFThBz/GqHZVSHba0oDrwlzOjkgp7pMRyUBla8Gnn
+# VVjp2GTb/RFJSlKToKajyixNMdE2gspTbyXNrGOzZsOblF1Q1/vgLCpMmmJgIHcE
+# R7tMMghFuAY9ADNBvRmEA0HYjglOCSEBXzhlWTFDXI5Y7h61qkzo/Uy7AWeW3m+6
+# uZCvVQS2pE9xsR7ALk5KxIZx2kQGcLeXX4C+xpUeWXrZUL02ZRh2WqyRe2nECz1j
+# rhwppiDIlQCX62lDUFQcagNOg6/eB5gaIM7ugLLB7owFlryigeykyDYCsCJz2gKI
+# 5gWY45yC0fuUi0B5JCNxcz0DOnKWrGclmw0bBgxDd3IunlZotKlsKjYrrv/h2Xkb
+# 0PHXys4ceQr5RxdXjiRxqVgKB+kE4lj4k8JfLgrL796rW2wqU51W63mwV2dsOZ3l
+# N2uXfBYuK3KkOzfbVKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjcxMzU5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCDFPNdbCNvq39vbufSBWnzWpIchCrP8+lbEQTij
-# 4nphajANBgkqhkiG9w0BAQEFAASCAgAeB7GWLrNORFuSAptI12XcDqw/+oItwfqp
-# mAP40kyr4UBlTyd9JLT344uInXYuSqn0tvblt2nJwlwB1tF4HWCXZ/7oEF40UW+s
-# T9drxQH7dfg0S6RwK92UsjEvkErilIzrCdNWnjMBnox2HbMAxTQS6lDlv5Mnuzjc
-# 6WES6yMJ20RfGBcqu/eghYQxDw/lNQXXRRxpinDsqcqpXQ5j68Ph8GlRD9+mve1T
-# Es9KOecYesD+d6SE1p3iLKTU3H110VNcc3X9h+3E7KC6f8T1oEIxurl0bkZ9TiFn
-# /1e9t7ht+yJv4iO1aMoKAdWzdocaHXy3m9xcxoMG3g4jQylPJMytMQJgiEbeV190
-# QoHtVDwiwjWb9VpVkQzrB5ZNNv2okki2ntqdGQLqYDAHEK4TJyQKSu1ABscLLsrq
-# ryT/NKVdL6jSHBW2Iv5NfUuFCXJOjdWK4adWs/lBYNpTfS4MjJFA7qEKmjou46tX
-# 2H9DpRM9MkIuSE/pSCqBG3szsikhLmnj3kfnzRqKQhDh+PJiubhbr+I8n3AoIzEr
-# +sZGIdy1HREi76I5EhnA/39I7uyR1D64UY/ttRbnB3JVd86d8cCMn6FpMeE5uJ3/
-# e5bgpQmn4yAK8JU5nVszX7npUizL+hbMexFysk0kx2shKm/2hvFPZJhNZqAAyrvU
-# yG5W95Y7wA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTIxMDM5
+# MDFaMC8GCSqGSIb3DQEJBDEiBCDS4t6j3h6xq43TinmynzvJqR9bGU+1meSa3SbO
+# gJ9LADANBgkqhkiG9w0BAQEFAASCAgBOD9IWnl7CsYkRP1B6pQ9rwa1Xz8c5kwb4
+# oCvVu5w+lhvVEcNIVh4+ZpXFAkvlRXXIiJnWgPMCeOhz4Q9YJ5Z8z+pRS9y+1kyu
+# LtosVvzxVJFV7KN0BrjARnjoFdaEWIpguKdDif1Gp7xnulUNXQSPpkH1H1OtvQDt
+# F0Td9kZqMv8KioGIqsqou/GEd+IP4MbNe3E8Jiy1FbJj/I/hFYBTk/IVTVqemToA
+# 7JG467uEwgaMMNX+g89bSgCBSK+Mq1OM+A8ssTZsSvw0Ut2FCJodGxo0/fCH2Qgj
+# LEKZHaP0BYI1Zc/6b77hKnfMU1tGADzyynk8OyKJl+Ub0EjDrLaiL6k4X6s68kZj
+# sU2/5B5UsDSszyCV3uS7f2THFD1D1PxLat7DN7fWC3MXNV9WhkG9+1LC1caXEc/o
+# RyRC8pil65AbAJflWDG9O1GzZJ8ZxajWYrbaI4OSgq1/CGxdTMGLNrt+ZtI9GUX8
+# l86gIf0oWcwn5YIEJEtrOrblhhndV3HNyo5ahddOzYtbQYagiqQFp0RNlVkYX9/F
+# Cljkjzt2viFeh2fjo6OeGDrVyCzsQO1QpF4hhID9EDwcCI6F5wW2BKP/Sj1MQZhV
+# hkmXcYYLeXZet5R6iHeke4YwEB9TtFxP4BFLTLTD5SKlisFhrteyOkX5EYyDUjKY
+# Y1tnFX+M4A==
 # SIG # End signature block
