@@ -156,10 +156,9 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 `SmartM365/Intune/Remediation/` contains the SmartM365 Intune remediation workspace.
 
 - `Packages/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
-- `GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
-- `CLI/`: delegated interactive CLI deployment script for Intune remediation packages.
+- `GUI/`: PowerShell 7/WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution reports, and archive local or cloud scripts.
 
-The GUI and CLI use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication.
+The GUI uses delegated interactive Microsoft Graph authentication. It does not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication. The current repository does not contain a separate remediation CLI.
 
 ## Focus Areas
 
