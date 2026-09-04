@@ -4,6 +4,8 @@ Local WPF user notification app for SmartM365 device restart governance.
 
 ## Download
 
+See the [public Smart Device Reboot Manager product page](https://workplacecloudhub.com/tools/smart-device-reboot-manager/) for the release overview, requirements, security boundaries, and localized documentation.
+
 Download the stable Windows package from the
 [SmartM365 Device Reboot Manager v0.1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v0.1.0).
 
@@ -27,6 +29,16 @@ The PowerShell module is also available from the
 - `Deploy/SmartM365-DeviceRebootManager-Uninstall.ps1`: Intune Win32 uninstall script.
 - `Deploy/SmartM365-DeviceRebootManager-Detection.ps1`: Intune Win32 detection script.
 - `Deploy/SmartM365-DeviceRebootManager-CreateScheduledTask.ps1`: standalone scheduled task creation script.
+
+## Requirements, Privileges, and Boundaries
+
+- The app is Windows-only and uses Windows PowerShell 5.1, WPF, and the Windows ScheduledTasks module.
+- The published Intune Win32 metadata targets x64 devices and declares Windows 10 version 1607 as its minimum supported operating system.
+- Direct GUI and preview launches run in the signed-in user's interactive session. The deployed GUI task also runs interactively with `RunLevel Limited`; it does not run the user interface in session 0 or with administrator rights.
+- Installation, update, and removal write under `C:\ProgramData` and register or remove scheduled tasks, so they must run elevated. The Intune Win32 install and uninstall commands are designed to run as `SYSTEM`.
+- A real restart remains subject to local Windows rights and policy. Use `-PreviewOnly` or the test launcher to review required and recommended states without restarting the device.
+- The shipped PowerShell files are Authenticode-signed with the self-signed `workplacecloudhub.com` code-signing certificate, thumbprint `D70ECB7B00377EBFB76B304C08DFC6620584E114`. A valid file signature does not make that certificate trusted automatically on every endpoint; trust still depends on the local certificate stores and execution policy. Verify the published SHA-256 values as well as the expected signer before deployment.
+- The tool provides local restart notification and governance. Intune remains responsible for application assignment, rollout, retry, reporting, and rollback when the Win32 package is used.
 
 ## Configuration
 
@@ -253,38 +265,40 @@ created by the validation.
 
 ## Examples
 
+Run these examples from the `SmartM365/Devices/DeviceRebootManager` folder or from the root of the extracted standalone release.
+
 Preview the required mode without rebooting:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRequiredRestart -PreviewOnly
+powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -TestRequiredRestart -PreviewOnly
 ```
 
 Preview the recommendation mode without rebooting:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRecommendedRestart -PreviewOnly
+powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -TestRecommendedRestart -PreviewOnly
 ```
 
 Run in recommendation-only mode, with no mandatory restart state:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -NeverForceRestart
+powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -NeverForceRestart
 ```
 
 Use a specific config file:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath C:\ProgramData\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json
+powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath C:\ProgramData\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json
 ```
 
 Launch through the CMD wrapper:
 
 ```cmd
-.\Devices\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI.cmd -TestRequiredRestart -PreviewOnly
+.\Start-SmartM365-DeviceRebootManager-GUI.cmd -TestRequiredRestart -PreviewOnly
 ```
 
 Launch the safe test wrapper:
 
 ```cmd
-.\Devices\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI-Test.cmd
+.\Start-SmartM365-DeviceRebootManager-GUI-Test.cmd
 ```
