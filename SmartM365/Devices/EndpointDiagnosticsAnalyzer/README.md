@@ -4,9 +4,9 @@ PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows en
 
 ## Release status
 
-The repository version is **0.3.0 stable**, promoted from preview18 without changing the diagnostic algorithms. It supports managed installation through PowerShell Gallery or Microsoft Intune. Promotion and local package building do not publish to either service.
+**0.3.0 stable is published** on [GitHub Releases](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0) and [PowerShell Gallery](https://www.powershellgallery.com/packages/SmartM365.EndpointDiagnosticsAnalyzer/0.3.0) as of September 4, 2026. It promotes preview18 without changing the diagnostic algorithms and supports managed installation through PowerShell Gallery or Microsoft Intune. The downloadable bundle includes administrator packaging files; their presence does not deploy anything to Intune.
 
-Validation boundary: the preview18 local-device and Intune-ZIP workflows were verified on Windows 10, including collection coverage, complete EVTX counts and finalization. The stable build has not yet been tested interactively on Windows 11. Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device.
+Validation boundary: the published release reports real local-device and Intune-ZIP workflows verified on Windows 10, including collection coverage, complete EVTX counts and finalization. **Interactive Windows 11 validation remains outstanding.** Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device. This documentation update does not report new functional tests.
 
 Preview18 corrects collection completeness and finalization reporting:
 
@@ -86,7 +86,7 @@ Preview13 keeps the responsive preview9 architecture and corrects parser and sco
 - The former Compliance view is explicitly a local configuration assessment; user SSO controls collected under SYSTEM are marked `NOT_EVALUATED`.
 - Localized driver and certificate output, Windows Update logs, `results.xml`, dynamic EVTX channels and Windows 11 applicability are parsed more conservatively.
 
-The last standalone public package remains [Endpoint Diagnostics Analyzer v0.2.0](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.2.0).
+The current public bundle is [Endpoint Diagnostics Analyzer v0.3.0](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0); installation instructions are below.
 
 All PowerShell release files must be Authenticode-signed by `workplacecloudhub.com` before publication.
 
@@ -126,27 +126,56 @@ Uninstallation preserves per-user configuration and logs unless `-RemoveUserData
 
 ## PowerShell Gallery
 
-After `SmartM365.EndpointDiagnosticsAnalyzer` 0.3.0 has been published, install the stable package with PSResourceGet:
+The published [SmartM365.EndpointDiagnosticsAnalyzer 0.3.0 package](https://www.powershellgallery.com/packages/SmartM365.EndpointDiagnosticsAnalyzer/0.3.0) can be installed for the current user with PSResourceGet:
 
 ```powershell
-Install-PSResource -Name SmartM365.EndpointDiagnosticsAnalyzer -Version 0.3.0 -Repository PSGallery -TrustRepository
-Import-Module SmartM365.EndpointDiagnosticsAnalyzer
+Install-PSResource -Name SmartM365.EndpointDiagnosticsAnalyzer -Version 0.3.0 -Repository PSGallery -Scope CurrentUser
+Import-Module SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0
 Install-SmartM365EndpointDiagnosticsAnalyzer
 ```
 
 PowerShellGet equivalent:
 
 ```powershell
-Install-Module -Name SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0 -Repository PSGallery
-Import-Module SmartM365.EndpointDiagnosticsAnalyzer
+Install-Module -Name SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0 -Repository PSGallery -Scope CurrentUser
+Import-Module SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0
 Install-SmartM365EndpointDiagnosticsAnalyzer
 ```
 
-An update is always explicit:
+Open **SmartM365 > Smart Endpoint Diagnostics Analyzer** from the Windows Start menu after installation.
+
+For a Gallery installation, updating the module and installed runtime is an explicit action:
 
 ```powershell
 Update-SmartM365EndpointDiagnosticsAnalyzer
 ```
+
+Automatic updates are disabled and no scheduled update task is created. The update command excludes prereleases by default and refuses Intune-owned installations; update those through Intune. To install exactly 0.3.0, use the version-pinned installation commands above.
+
+## Downloadable 0.3.0 bundle
+
+- [GitHub release and release notes](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0)
+- [Download the ZIP](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v0.3.0/SmartM365-EndpointDiagnosticsAnalyzer-v0.3.0.zip)
+- [Download the SHA-256 file](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v0.3.0/SmartM365-EndpointDiagnosticsAnalyzer-v0.3.0.sha256)
+
+Before extracting, compare `Get-FileHash -Algorithm SHA256` for the downloaded ZIP with the published checksum:
+
+```text
+C45783CEBF8FF651D6AAC06907AFE071E0563726B3A45DBC9B3AE052E18340B7
+```
+
+Extract the complete archive, open PowerShell in the extracted directory, then install the bundled module runtime:
+
+```powershell
+Import-Module .\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\0.3.0\SmartM365.EndpointDiagnosticsAnalyzer.psd1
+Install-SmartM365EndpointDiagnosticsAnalyzer
+```
+
+Open the Start menu shortcut described above. The bundle contains `SHA256SUMS.txt`, the Gallery module and administrator packaging files. Ordinary installation does not require running publication scripts. For a later bundle update, download and verify the chosen release, then import its module and explicitly run its installation command; do not assume a bundle import registers the module for Gallery updates.
+
+PowerShell payloads are Authenticode-signed by `workplacecloudhub.com`. Signature trust depends on the workstation's certificate trust and execution policy; this is not a claim of public-trust signing.
+
+## Maintainer package publication
 
 Build and preview publication locally:
 
@@ -182,11 +211,11 @@ Preview the Intune publication and pilot assignment without connecting to Graph:
 
 ## Security and privacy
 
-The core analysis runs locally. A remembered AI API key is encrypted with Windows DPAPI for the current user and stored in the application data directory; it is not stored in plaintext. If the legacy `%USERPROFILE%\.smartloganalyzer_ai.json` file exists, its configuration is migrated and any plaintext API key in that legacy file is cleared.
+The core analysis runs locally. Optional external AI analysis is a separate user action; review sensitive diagnostics before sending them to an external provider. A remembered AI API key is encrypted with Windows DPAPI for the current user and stored in the application data directory; it is not stored in plaintext. If the legacy `%USERPROFILE%\.smartloganalyzer_ai.json` file exists, its configuration is migrated and any plaintext API key in that legacy file is cleared.
 
 A command-line AI key is never forwarded in plaintext during UAC self-elevation. It is transferred through a temporary DPAPI-protected file restricted to the application data path and removed by the elevated process.
 
-Redacted-text ZIP export sanitizes common identifiers in supported text-like files and entry names. Binary and otherwise unsupported content is rejected, not silently passed through. This is not guaranteed anonymization: always inspect an output before sharing. Original diagnostic archives are unchanged. Diagnostic extraction directories are temporary and are removed after CLI analysis, GUI reset or application close.
+Redacted-text ZIP export sanitizes common identifiers in supported text-like files and entry names. Binary content such as EVTX/CAB and oversized or undecodable entries are rejected, not silently passed through; ordinary diagnostic archives containing these files cannot be exported with this action. This is not guaranteed anonymization: always inspect an output before sharing. Original diagnostic archives are unchanged. Diagnostic extraction directories are temporary and are removed after CLI analysis, GUI reset or application close.
 
 ## Direct usage from the repository
 
