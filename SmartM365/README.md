@@ -74,7 +74,7 @@ Use `-WhatIf` before live campaign runs. The provided launchers default to dry-r
 - `Devices/EndpointDiagnosticsAnalyzer/`: PowerShell/WPF GUI for Intune Device Diagnostics ZIP files and local endpoint captures.
 - `Devices/IntuneHybridJoinToolkit/`: PsExec/LOT orchestration for Hybrid Entra Join and Intune enrollment repair.
 - `Devices/Windows11UpgradeToolkit/`: PsExec/LOT orchestration for Windows 10 to Windows 11 upgrade diagnostics and guarded upgrade actions.
-- `Intune/Remediation/`: Intune remediation packages with GUI and CLI publishing tools.
+- `Intune/Remediation/`: Intune remediation packages with a delegated PowerShell 7/WPF publishing and administration GUI.
 
 ## Setup
 
@@ -100,7 +100,7 @@ Current Microsoft Graph application permissions include the read scopes used by 
 
 The Power BI and Microsoft Fabric activity collector uses a Power BI token with audience `https://analysis.windows.net/powerbi/api`. Interactive collection requires a Fabric Administrator with delegated `Tenant.Read.All` or `Tenant.ReadWrite.All`. App-only collection is authorized through the Fabric tenant setting **Service principals can access read-only admin APIs**, scoped to a security group containing the service principal; do not add admin-consent-required Power BI permissions to the app registration.
 
-`Intune/Remediation/CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
+`Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` is intentionally interactive only. It administers Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` for execution-report export jobs and `Group.Read.All` to enrich assignment exports with group names. It does not use SmartM365 app-only certificate authentication. The current repository does not contain a separate remediation CLI.
 
 See `Setup/SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.
 
@@ -188,4 +188,3 @@ Scripts should call `Send-SmartM365TeamsNotification` from `Modules/SmartM365.Co
 - `-Channel Alerts` or `-Channel Infos` can be used when a script must force a destination.
 - `-ResultSummary` should be provided for every `Infos` notification when the script has meaningful counters or output details. If omitted, the module adds a `Result summary` fact from the message text as a fallback.
 - `-HelpUrl` should point to a prefilled AI troubleshooting prompt when reporting a detailed script error.
-
