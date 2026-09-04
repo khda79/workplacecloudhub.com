@@ -4,5 +4,4 @@ This folder groups SmartM365 tools and package workspaces that target Microsoft 
 
 ## Tool Map
 
-- `Remediation/`: Intune remediation packages with delegated Graph GUI and CLI publishing tools.
-
+- `Remediation/`: Intune remediation packages with a delegated PowerShell 7/WPF Graph publishing and administration GUI.
