@@ -2,7 +2,7 @@
 
 WPF interface for browsing, exporting, editing, and publishing Microsoft Intune remediation scripts with delegated interactive Microsoft Graph authentication.
 
-The script reports version `1.1` and requires PowerShell 7 or later. It is distributed as repository source; there is no dedicated release archive, PowerShell Gallery package, installer, published release checksum, or automatic updater. See the [workspace README](../README.md) for distribution, integrity, security, and known-limit details.
+The script reports version `1.1` and requires PowerShell 7 or later. A [standalone GitHub Release](https://github.com/khda79/workplacecloudhub.com/releases/tag/smart-intune-remediation-manager-v1.1) and [published SHA-256 file](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.sha256) are available; repository source remains available, but there is no PowerShell Gallery package, installer, or automatic updater. See the [workspace README](../README.md) for download, integrity, security, and known-limit details.
 
 ## Launch
 
