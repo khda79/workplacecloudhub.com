@@ -1,9 +1,9 @@
-<#
+﻿<#
 .SYNOPSIS
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.17
+1.18
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.17'
+$GuiVersion = '1.18'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -542,6 +542,37 @@ function Resolve-GuiPowerShellPath {
     $command = Get-Command -Name 'powershell.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) { return $command.Source }
     throw 'Windows PowerShell or PowerShell 7 was not found.'
+}
+
+function Get-ToolkitLaunchConfirmationMessage {
+    param([string]$TargetDescription, [string]$Mode, [string[]]$ExtraArguments, [hashtable]$Environment)
+
+    $operation = if (@($ExtraArguments) -contains '-DryRun') { 'Dry run (no endpoint payload execution)' }
+        elseif (@($ExtraArguments) -contains '-AuditOnly') { 'Audit only (remote diagnostics and evidence writes, no repair)' }
+        else { 'REPAIR (remote SYSTEM execution; enrollment and device state can change)' }
+    $lines = @(
+        "Target: $TargetDescription"
+        "Mode: $Mode"
+        "Operation: $operation"
+        "Parallel devices per LOT: $($Environment['EHJIR_THROTTLE']); shared limit: $($Environment['EHJIR_GLOBAL_CONCURRENCY_LIMIT'])"
+        "Skip virtual machines: $($Environment['EHJIR_SKIP_VIRTUAL_MACHINES'])"
+        "Leave authorization: $($Environment['EHJIR_ALLOW_DSREG_LEAVE']); stale Intune cleanup: $($Environment['EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT'])"
+        "Reboot without user: $($Environment['EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER']); reboot after leave: $($Environment['EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE'])"
+        "Other MDM cleanup: $(@($ExtraArguments) -contains '-AllowRemoveNonIntuneMdmEnrollment')"
+        "Ignore endpoint guard every cycle: $(@($ExtraArguments) -contains '-IgnoreRunGuardEveryCycle'); technician guard bypass: $($Environment['EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY'])"
+        ''
+        'Authorization values: 1 = enabled, 0 = disabled. Dry run and Audit only suppress repair actions.'
+        'Review Options and Computers.txt before proceeding. Continue with this launch?'
+    )
+    return ($lines -join [Environment]::NewLine)
+}
+
+function Confirm-ToolkitLaunch {
+    param([string]$TargetDescription, [string]$Mode, [string[]]$ExtraArguments, [hashtable]$Environment)
+    $message = Get-ToolkitLaunchConfirmationMessage @PSBoundParameters
+    return ([System.Windows.MessageBox]::Show($window, $message, 'Confirm Hybrid Join Toolkit launch',
+        [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning,
+        [System.Windows.MessageBoxResult]::No) -eq [System.Windows.MessageBoxResult]::Yes)
 }
 
 function Start-ToolkitLot {
@@ -1790,8 +1821,12 @@ $controls.LaunchLotButton.Add_Click({
             Update-SelectedLotView
             return
         }
+        $mode = [string]$controls.LotModeCombo.SelectedItem
+        $arguments = @(Get-LauncherOptionArguments)
+        $environment = Get-LauncherOptionEnvironment
+        if (-not (Confirm-ToolkitLaunch -TargetDescription ("{0}: {1} device(s)" -f $script:SelectedLot.Name,$script:SelectedLot.DeviceCount) -Mode $mode -ExtraArguments $arguments -Environment $environment)) { return }
         Save-GuiOptions -Quiet
-        Start-ToolkitLot -Lot $script:SelectedLot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
+        Start-ToolkitLot -Lot $script:SelectedLot -Mode $mode -ExtraArguments $arguments -Environment $environment
         Register-LotLaunch -Lot $script:SelectedLot
         Update-SelectedLotView
         Add-Status -Title 'Launched' -Message ("Launched LOT {0}." -f $script:SelectedLot.Name)
@@ -1803,9 +1838,14 @@ $controls.LaunchAllButton.Add_Click({
     try {
         $lots = @(Get-LaunchableLotSummaries)
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
+        $mode = [string]$controls.LotModeCombo.SelectedItem
+        $arguments = @(Get-LauncherOptionArguments)
+        $environment = Get-LauncherOptionEnvironment
+        $targetDescription = (@($lots | ForEach-Object { '{0}: {1} device(s)' -f $_.Name,$_.DeviceCount }) -join '; ')
+        if (-not (Confirm-ToolkitLaunch -TargetDescription $targetDescription -Mode $mode -ExtraArguments $arguments -Environment $environment)) { return }
         foreach ($lot in $lots) {
             Save-GuiOptions -Quiet
-            Start-ToolkitLot -Lot $lot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
+            Start-ToolkitLot -Lot $lot -Mode $mode -ExtraArguments $arguments -Environment $environment
             Register-LotLaunch -Lot $lot
             Add-Status -Title 'Launch all' -Message ("Launched {0}. Next LOT starts in {1}s." -f $lot.Name, $launchAllLotStartDelaySeconds)
             Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
@@ -1820,8 +1860,12 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
+        $mode = [string]$controls.SingleModeCombo.SelectedItem
+        $arguments = @(Get-LauncherOptionArguments)
+        $environment = Get-LauncherOptionEnvironment
+        if (-not (Confirm-ToolkitLaunch -TargetDescription $computer -Mode $mode -ExtraArguments $arguments -Environment $environment)) { return }
         Save-GuiOptions -Quiet
-        $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
+        $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode $mode -ExtraArguments $arguments -Environment $environment
         $script:LastSingleRunFolder = $context.Root
         $controls.SingleRunFolderText.Text = $context.Root
         Add-Status -Title 'Launched' -Message ("Launched single computer run for {0}." -f $computer)
@@ -1937,8 +1981,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5rRVdKe8Avybj
-# P9W+U2Qw0gBOo8moCsreQ4zfCrg986CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYbJ1yzCrX/NEv
+# hqSGslEHiEVDvGgpxxcaRg74TfJBk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2029,25 +2073,25 @@ try {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -2055,47 +2099,47 @@ try {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII8+fGwG03x+9OujBt5g80cHbMJFqz/M9XGqjLwtmJ8WMA0GCSqG
-# SIb3DQEBAQUABIIBgA37ciQHtFLZOH3GSM0rUNQ1lCNXWTS5EXoWiFlENKKK1Fcf
-# cLVukQTYWCab4hHA4nghUsQLDp32FTjZ8dlHVHbl2JuJAYo/eGAPErcwzW7WvuxA
-# 7mfF7SLP5PzOGwCAd4NTZNtTevHt3TKDRlcUwARcjg6T2/Yp1gQhNGXWLo9NMDfY
-# hp4oNJigeP+Xo/VOO3C59zL2bY98Xy9R4ejMeTXJ7UIe2nVTeEQ9fA3ZayyVqhuz
-# SNiEWqQX5lHY+AzsVwg/y98prxkSuEKmwpvCoG7DEUbPaMtuA30KvJb9IWOIbTKC
-# etpxjU6dZLR0JbQVaBnCbgVZli6zqZRRlrJaaTKmzXtGiXwbF+2uhAUxyWH073Qo
-# XPrW81ZXxdcODEgMy4a1M9PjbyID1NnrAwALZz8lQsZclOn6gwq+0ZfX28dvz/zF
-# sWkYY2Kb3nqRrV1vXDJHJFrEy9AFcYCD3AcYK10EyBefKJPS6trVCd3IKj5XWlpI
-# pCXGC1BOpQUkUHqp8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIiu8Mci66GHTuVEPXyncHVtbiDCsmOBP8lLfQup++ezMA0GCSqG
+# SIb3DQEBAQUABIIBgBIBU//1leP7rKPgu1ppFll9dBsH8LkLgh2j+JvDZMpcnq+u
+# bgGNxLLLeMpliGxgmwQTi8ve94EZhMLc07dnecw17i1P/vVOEVFGMrYNnEGlX5/B
+# MbsKuKlvplwL9RP0Te3RHvKJisVaqp9ZvLdiUX89s52kitiUe9TuQR+byt+r/j5b
+# Sw9Q740OgK/n0SC9A3gY6AjRgkSme9M/ZCT+yugsV9+PGHEltWEpPVxoIlWGYQBu
+# suFsC3oaItQepc0UmVH9DFr84Nbaur2wRLgKaAxFq1T2hiPDS07+714U1lD4mZ2Y
+# 0pIIp40cC9GRp0yEg9EtGmYu6TT9h4Q240WRmurjQOeKqK5K4BSextcNdT41iR8T
+# ucYvbijUpo0X7FNAklJC/wg/1wwXIRxaUOhrVfKCXCNhGsH/kzTROPCfT0o2ByY9
+# Jj2poyYoUNyO8L8JTfwRBxE9DnjRrHOLT1wChfqelbNE8sLYu1dY+m8n3ikNei37
+# JkTBnwhwqKimyzyqt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MzEwNjU4
-# NTFaMC8GCSqGSIb3DQEJBDEiBCAGjzPASlvAEolprd88PVMGJ21p4x5yy1eCkYEK
-# 5xVh6jANBgkqhkiG9w0BAQEFAASCAgAFzb7bbTJv02DOGmcDLb4AfV0egSZm9L2S
-# bC4020/hZy3Y71uViRM9s5M76aP7ilsknRlMj/aGRNye6tROGZlkdgUYievsNItk
-# dB67J6cm5lDw5Q6kfI/JvUbkVIy4LBM1xTHFP4qJbYhzJ09ECP/M+4hXd7pxyntr
-# uhRob7ScFLesDRkp8ItA0H1DNzVVMjt9yw5ZGF6HEbZIOsk7riWhdzoq2PNBs2lQ
-# XHujNrORO8fn5ffq16ndJTQ1x4b349iZInfYI0tmKXY1fDLMwyq1t1nYOauPg1cr
-# enuBSvdKGgiAtz7VLK8VCjxXsTw/zQvmJOgoUsyjpChY1upMNOyfyQY70Z5iHSFD
-# 8ET94GbB0ia23e3imPLMelHuxzBg53zK03mZ8RLIEntHSRwj9mtellsRHxui1PuZ
-# vX+3/BY1OpOltgXEnfQbcXxgB27Urm3oY/HIqzk4iKSolArnAg+J8+JnYLQ8SmF6
-# LbZrtbjQRwuN5i46xjzlGIGrX1LnP+mYtSZS6fWGeCC11CRCc4Pzi+zHrnTcyK5k
-# 6u3xvS4XT6+Y0G8Uv4/Su++RbYdD7aCXbMS7F/91irl7heh4uzsY8oDy8b1HRtHo
-# R6q4A+X7raEKUZxQSv9efspsG1BFyJut1zPlMswCAVPnL/pDjmr0MYadi4i32019
-# chmTmb2aaw==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDcxNTI0
+# MzdaMC8GCSqGSIb3DQEJBDEiBCBxxWNYjN6hUZEmY8haI9CCJ+E7irPt5fU6T8Q1
+# 39HkAjANBgkqhkiG9w0BAQEFAASCAgCAw+nRaTmpa/M+0IgOIlt7uUD0KgRxyfI6
+# chyagV2jLDPF3ihUWc4+U9E1xhCwLhVl1QdFpKdfX433ypoq0xHRWQ3VMD2vJpS8
+# LQzup/kS99zNOu2BmMLOcilBLMbjTydmGINcMHHepFzalZzj26xViY2Z8cAneU6K
+# r45J2sc19xReKSzuWnT7GWBZdAXgoQJLYd2NOYznfekRpIoJXGSv4Q59Or65cYwx
+# m/EnJBPqCrEBC8JCDCQCl6AMpVCrQ9aqohx39pC0q8WS9/8WY0UOBqmYuY9JNgxk
+# aT/61Fc0E5VsaVaL2J61056wQaIyhLO6Aa+BH09A/oS/jxmpIDebK4mgq7QIWd4Q
+# 4Zsf7fVrOnKOFm0YcJqy4cubKomhLzlqVVGNaKa00hnEl6+85UXxxvaof1GN/6pQ
+# xQcSU8GeG3HHLeLmOukr30PVlcYnKwKr1kKylRFuurIipse1R3jofvdzJBmvfo3E
+# 6ygQBhv3/Sov0cWlcRRUCT/ryJx/Kd47JjAqeSKh6nKx+TRQUDfgrSohP0Sh3W5O
+# Oxge90+KfTafmpXD5L1mfxgCYaPlpuU9qFA3/wjDf9nb1T4Yx1p+VlhocEzNnnWd
+# wVWOkIouvKlecpesf6CjZd094/3vRMuIHz+2cReF7Nx09nGvgxkgUD8lMyLSvhh1
+# 05paFvC5Gw==
 # SIG # End signature block

@@ -9,12 +9,12 @@ For single-device support with a richer GUI, support bundle, and CLI export expe
 ## Download
 
 Download the standalone operator package from the
-[Smart Intune Hybrid Join Toolkit v2.10.77 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/intune-hybrid-join-toolkit-v2.10.77).
+[Smart Intune Hybrid Join Toolkit v2.10.78 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/intune-hybrid-join-toolkit-v2.10.78).
 
 The GitHub release provides:
 
-- `SmartM365-IntuneHybridJoinToolkit-2.10.77.zip`: complete signed toolkit for operator workstations;
-- `SmartM365-IntuneHybridJoinToolkit-2.10.77.sha256`: SHA-256 checksum for the ZIP.
+- `SmartM365-IntuneHybridJoinToolkit-2.10.78.zip`: complete signed toolkit for operator workstations;
+- `SmartM365-IntuneHybridJoinToolkit-2.10.78.sha256`: SHA-256 checksum for the ZIP.
 
 After downloading:
 
@@ -27,6 +27,32 @@ After downloading:
 The package does not contain PsExec or customer-specific LOTs, inventories, logs, reports, tenant
 identifiers, device names, or account details. PowerShell scripts are Authenticode-signed by
 `workplacecloudhub.com`. The toolkit is distributed under the GNU General Public License v3.0.
+
+### Requirements, trust and updates
+
+- The WPF GUI requires Windows PowerShell 5.1 with STA. LOT and single-PC orchestrators prefer PowerShell 7 when installed, with Windows PowerShell 5.1 fallback. The endpoint script remains autonomous (version 2.10.39); package/orchestrator version 2.10.78 and GUI version 1.18 identify different components.
+- Obtain [PsExec from Microsoft Sysinternals](https://learn.microsoft.com/en-us/sysinternals/downloads/psexec) separately. Remote operation requires an authorized account with target administrative access, reachable DNS, administrative shares and remote service execution. The GUI CMD does not elevate automatically; start from an elevated operator session when required by your environment.
+- AD export requires the ActiveDirectory PowerShell module (RSAT) and directory read access. Automatic Graph refresh requires Microsoft.Graph.Authentication and delegated read consent for `DeviceManagementManagedDevices.Read.All` and `Device.Read.All`; the combined exporter requests both. Automatic LOT selection requires usable AD and full Intune inventories. Entra enrichment is optional. No Graph write permission is required for these inventory exports.
+- Verify SHA-256 and Authenticode before starting. The signer is self-signed: `NotTrusted` on another workstation can mean that its trust stores do not contain the independently verified public certificate. Follow your organization's certificate approval policy. The CMD uses ExecutionPolicy Bypass; it does not enforce signature verification for you.
+- There is no installer, PowerShell Gallery module, IntuneWin package or automatic updater for this toolkit. Download a new immutable GitHub release and extract it to a separate folder. Preserve operational LOTs and evidence separately, review saved options, and refresh imported LOT wrappers deliberately. Do not replace files during an active run.
+
+```powershell
+Get-FileHash .\SmartM365-IntuneHybridJoinToolkit-2.10.78.zip -Algorithm SHA256
+Get-ChildItem .\SmartM365-IntuneHybridJoinToolkit-2.10.78 -Recurse -Filter *.ps1 |
+    Get-AuthenticodeSignature | Select-Object Path, Status, SignerCertificate
+```
+
+### Launch modes and confirmation
+
+Automatic **Preview** evaluates inventory and writes local selection evidence; it does not diagnose endpoints. **Create** writes a LOT without launching it. GUI **Dry run** suppresses endpoint payload execution, while **Audit only** runs remote diagnostics and writes evidence without repair. Audit is not a zero-write operation: PsExec staging, logs and diagnostic task evidence can still be created.
+
+Before **Launch LOT**, **Launch all** or **Single PC**, GUI 1.18 asks for confirmation with the target scope, mode, concurrency, exclusions, cleanup and reboot authorizations. The default answer is **No**. Rejected launches do not save options or start workers. Launch all uses the options snapshot that was confirmed. Direct CMD/PowerShell launches remain explicit operator actions and do not use this GUI confirmation. Their repair defaults can authorize leave, stale cleanup and reboot; review or disable them before execution.
+
+### Release 2.10.78 validation and limits
+
+This package includes the previously committed automatic LOT hardening and bounded local-worker startup retries, plus the GUI launch confirmation. Local synthetic tests cover conservative selection/provenance, MDM bridge classification, orchestrator helpers and the actual GUI launch handlers with mocked workers. PowerShell 5.1/7 parser checks and packaged GUI `-ValidateOnly` supplement these tests. These checks do not certify a live AD/Entra/Intune repair, remote PsExec execution or reboot scenario. A separately authorized lab/pilot remains necessary before production use.
+
+Generated inventories, reports, endpoint logs and support evidence can contain identifiable device, user and tenant information. They are not automatically anonymized; review them before sharing. The release itself contains only neutral templates and product files.
 
 ## Layout
 
@@ -292,7 +318,7 @@ The repair script must remain self-contained. Do not add mandatory runtime depen
 
 ## Notes
 
-- LOT folders should only contain `Computers.txt` and the small CMD wrappers.
+- LOT configuration includes `Computers.txt`, `AdDomain.txt` and the small CMD wrappers; runtime outputs remain under `Runs`.
 - Reports are written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports`.
 - A live cycle CSV is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports` as computers complete, and a final CSV remains available for every cycle.
 - One HTML report named `PsExec_IntuneHybridJoinRepair_Summary_<LOT>_<timestamp>.html` is created for the complete LOT run. The same file is refreshed while jobs run and finalized when the launcher stops.
