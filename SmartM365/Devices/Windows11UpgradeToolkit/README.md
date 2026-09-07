@@ -7,12 +7,12 @@ The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invok
 ## Download
 
 Download the standalone operator package from the
-[SmartM365 Windows 11 Upgrade Toolkit v0.1.71 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v0.1.71).
+[SmartM365 Windows 11 Upgrade Toolkit v0.1.72 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v0.1.72).
 
 The GitHub release provides:
 
-- `SmartM365-Windows11UpgradeToolkit-0.1.71.zip`: signed toolkit source and safe templates;
-- `SmartM365-Windows11UpgradeToolkit-0.1.71.sha256`: SHA-256 checksum for the ZIP.
+- [SmartM365-Windows11UpgradeToolkit-0.1.72.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v0.1.72/SmartM365-Windows11UpgradeToolkit-0.1.72.zip): signed toolkit source and safe templates;
+- [SmartM365-Windows11UpgradeToolkit-0.1.72.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v0.1.72/SmartM365-Windows11UpgradeToolkit-0.1.72.sha256): SHA-256 checksum for the ZIP.
 
 The public package does not contain Windows setup media, `.intunewin` packages, PsExec,
 operational LOTs, inventories, assignments, logs, reports, tenant identifiers, device names,
@@ -20,9 +20,79 @@ account details, or local configuration. Obtain PsExec separately from Microsoft
 and supply properly licensed Windows setup media through an operator-controlled source when
 setup-based upgrades are required.
 
-The package includes endpoint `0.1.57`, LOT orchestrator `0.1.71`, worker `0.1.31`, GUI `0.1.51`,
+The package includes endpoint `0.1.58`, LOT orchestrator `0.1.72`, worker `0.1.31`, GUI `0.1.53`,
 and automatic LOT engine `1.3.2`. PowerShell scripts are Authenticode-signed by
 `workplacecloudhub.com`. The toolkit is distributed under the GNU General Public License v3.0.
+
+### Verify and prepare the operator package
+
+The release notes and the `.sha256` asset publish the checksum of the final ZIP.
+After downloading both assets into the same folder, verify the archive before extraction:
+
+```powershell
+$zip = '.\SmartM365-Windows11UpgradeToolkit-0.1.72.zip'
+$published = ((Get-Content -LiteralPath '.\SmartM365-Windows11UpgradeToolkit-0.1.72.sha256' -Raw).Trim() -split '\s+')[0]
+$actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+if ($published -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $published) { throw 'ZIP SHA-256 mismatch. Stop and review the release assets.' }
+Expand-Archive -LiteralPath $zip -DestinationPath '.\Windows11Toolkit-verified'
+```
+
+Use a new destination folder. Open the extracted `SmartM365-Windows11UpgradeToolkit-0.1.72`
+folder and keep its directory structure intact. This is a portable operator source package;
+there is no MSI/EXE installer for the launcher. Verify the PowerShell signatures locally:
+
+```powershell
+Get-ChildItem -LiteralPath . -Recurse -File |
+  Where-Object { $_.Extension -in '.ps1', '.psd1' } |
+  Get-AuthenticodeSignature |
+  Select-Object Path, Status, @{Name='Signer'; Expression={$_.SignerCertificate.Subject}}
+```
+
+The scripts are signed by `workplacecloudhub.com`; trust results depend on the workstation's
+certificate trust configuration. A matching ZIP hash does not establish publisher trust.
+
+- Use Windows PowerShell 5.1 for the WPF GUI; its CMD launcher selects `powershell.exe -STA`.
+  LOT CMD wrappers prefer PowerShell 7 when available and fall back to Windows PowerShell 5.1.
+- Obtain [PsExec from Microsoft Sysinternals](https://learn.microsoft.com/en-us/sysinternals/downloads/psexec)
+  separately. Put `PsExec.exe` in `Scripts\` or make it available through `PATH` for the LOT wrappers.
+  Remote execution requires an operator account with administrative access to the targets.
+- Review `Windows11UpgradeToolkit.config.template` and the LOT templates. Keep operational
+  configuration, inventories, LOTs and reports local. The template `Computers.txt` contains
+  example names `PC-001` and `PC-002`; replace them with the reviewed target list before use.
+  AD inventory requires the ActiveDirectory
+  module and directory read access; Intune inventory uses delegated Graph sign-in as described below.
+- For setup-based LOT runs, provide extracted, licensed Windows media that the target SYSTEM
+  context can read, typically through a UNC share. The ZIP contains no Windows media.
+- Open the GUI, refresh and review the automatic LOT preview, then create a LOT. Creation does
+  not launch it. LOT wrappers are action-ready: use the explicit `-AuditOnly` orchestrator example
+  below for an initial diagnostic run, and review actions and reboot settings before any launch.
+
+### Stable release and manual updates
+
+Release `0.1.72` is associated with the immutable
+[Windows11 toolkit source tag](https://github.com/khda79/workplacecloudhub.com/tree/windows11-upgrade-toolkit-v0.1.72/SmartM365/Devices/Windows11UpgradeToolkit).
+The component versions above describe that ZIP. The README and scripts on `main` can advance
+independently; a newer source version is not automatically a published operator package.
+
+Compared with release `0.1.71`, this package includes the final Windows-version log evidence
+in endpoint `0.1.58` and orchestrator `0.1.72`, the captured inventory context for automatic
+creation, and a GUI `0.1.53` fix that selects the newly created LOT before saving launcher
+options. A failed creation keeps the previous selection. Creating a LOT still does not launch
+it. The automatic LOT engine header now agrees with its existing runtime version `1.3.2`.
+
+The GUI update check only compares source versions on `main` and offers to open GitHub.
+It does not download, install, or replace toolkit files and does not track stable releases.
+`Update-LotCmdWrappers.cmd` refreshes local LOT wrappers; it is not a product updater.
+
+For a manual update, finish or stop active LOTs through the controlled-stop workflow and check
+whether remote work is still running. Keep the current package and local configuration for
+recovery. Download and verify the chosen release, extract it into a separate folder, compare
+its templates, and migrate only the required local settings and LOT definitions deliberately.
+Review a fresh preview and diagnostic run before resuming a campaign. Do not mix individual
+files from `main` into a stable package and describe the result as the unchanged release.
+
+The [Intune Win32 helpers](IntuneWin32/README.md) build a separate endpoint deployment package.
+Their installer, detection state and scheduled task do not install or update the operator GUI.
 
 ## Layout
 
@@ -39,7 +109,7 @@ Runs\
 - `Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1` is the autonomous endpoint-side diagnostic and guarded action script.
 - `Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1` is the local PsExec orchestrator for LOT folders.
 - `Scripts\Run-Windows11UpgradeRepairWithPsExec-Lot.cmd` is the shared CMD launcher used by every LOT wrapper.
-- `Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1` is the WinForms LOT launcher.
+- `Scripts\SmartM365-Windows11Upgrade-LotLauncher-GUI.ps1` is the WPF LOT launcher.
 - `Lots\LOT-TEMPLATE\` is the neutral versioned template for LOT folders.
 
 Operational `Lots\LOT-*` folders contain the LOT configuration and computer lists. Runtime data is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>` so logs, reports, collected central logs, and per-run inventory CSV files stay separate from configuration.
