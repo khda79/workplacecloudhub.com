@@ -2,6 +2,19 @@
 
 This folder builds Intune Win32 apps per Windows setup language. The default package embeds Windows setup media inside the `.intunewin` so endpoints download it from Intune/Microsoft CDN instead of SMB or a custom HTTPS host. A smaller `WithCacheOnly` variant can also be built for devices that already have the setup media cache locally.
 
+## Distribution and version scope
+
+The public [operator release](../README.md#download) includes these builders and publisher
+scripts as source. It contains neither Windows media nor ready-made `.intunewin` files.
+Build endpoint packages locally from a reviewed toolkit version and licensed, extracted media.
+The operator ZIP is portable; the `Install.ps1` described here belongs to the generated
+endpoint package and writes files, registry detection state and a SYSTEM scheduled task.
+
+Unless `-PackageVersion` is supplied, the builder derives the endpoint package version from
+`$script:ScriptVersion` in the endpoint script. For the stable operator ZIP `0.1.72`, that value
+is `0.1.58`; it is not the LOT orchestrator version. Keep the generated `Detect.ps1` with its
+matching `.intunewin` and prefer inferred metadata when publishing.
+
 ## Package model
 
 Create one package per language:
@@ -29,7 +42,7 @@ The package installs files under:
 C:\ProgramData\SmartM365\Windows11UpgradeToolkit
 ```
 
-Then it registers and starts a SYSTEM scheduled task. The scheduled task runs the endpoint script from local cache and retries periodically until the device is already Windows 11.
+Then it registers and starts a SYSTEM scheduled task. The scheduled task runs the endpoint script from local cache immediately, then every two hours for a 30-day repetition window. It removes itself when Windows 11 is detected, or when invalid media requires package repair; it is not an unlimited retry service.
 
 ## Prepare media
 
@@ -49,7 +62,7 @@ Generate manifests before building:
 
 ## Build one language package
 
-Download Microsoft Win32 Content Prep Tool (`IntuneWinAppUtil.exe`) and run:
+Download the [Microsoft Win32 Content Prep Tool](https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool) (`IntuneWinAppUtil.exe`) separately and run:
 
 ```powershell
 .\IntuneWin32\Build-SmartM365Windows11IntunePackage.ps1 `
@@ -148,6 +161,19 @@ Recommended assignment:
 
 Assign each language package only to devices with the matching Windows language, or to a dynamic group you control per language.
 
+## Updates and uninstall scope
+
+Updating the operator ZIP or accepting the GUI version-check prompt does not update an Intune
+app or its endpoint content. To distribute changed endpoint scripts or media, rebuild and
+validate the package, then explicitly publish its content. `-UpdateMetadataOnly` does not
+upload new content; detection rules remain unchanged unless `-UpdateDetectionRules` is added.
+Use the version actually deployed when changing detection without replacing content.
+Assignments remain a separate, manual operator decision.
+
+`Install.ps1 -Uninstall` unregisters the named scheduled task and removes this package's
+registry detection key. It leaves the cached toolkit files, Windows setup media and logs on
+disk; it does not roll back Windows or guarantee that an already running upgrade has stopped.
+
 ## Operational notes
 
 - This mode does not use `SetupSource$` or `SetupSourceGates$`.
@@ -188,13 +214,13 @@ Preview the FR app payload without creating anything. `PackageId`, `PackageVersi
   -WhatIf
 ```
 
-Explicit preview:
+Explicit preview, using the actual version recorded in the generated package metadata:
 
 ```powershell
 .\IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1 `
   -IntuneWinPath C:\tmp\SmartM365-W11UT-FR\Output\SmartM365-Windows11UpgradeToolkit-Win11-fr-FR.intunewin `
   -PackageId SmartM365-Windows11UpgradeToolkit-Win11-fr-FR `
-  -PackageVersion 0.1.30 `
+  -PackageVersion <GeneratedPackageVersion> `
   -Language fr-FR `
   -WhatIf
 ```
@@ -205,7 +231,7 @@ Publish the FR app:
 .\IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1 `
   -IntuneWinPath C:\tmp\SmartM365-W11UT-FR\Output\SmartM365-Windows11UpgradeToolkit-Win11-fr-FR.intunewin `
   -PackageId SmartM365-Windows11UpgradeToolkit-Win11-fr-FR `
-  -PackageVersion 0.1.30 `
+  -PackageVersion <GeneratedPackageVersion> `
   -Language fr-FR
 ```
 
@@ -239,7 +265,7 @@ Update detection rules without uploading package content only when that is inten
 .\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
   -UpdateMetadataOnly `
   -UpdateDetectionRules `
-  -PackageVersion 0.1.47 `
+  -PackageVersion <DeployedPackageVersion> `
   -MinimumFreeDiskSpaceInMB 40960
 ```
 

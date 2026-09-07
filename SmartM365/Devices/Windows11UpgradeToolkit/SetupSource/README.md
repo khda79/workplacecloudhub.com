@@ -13,8 +13,8 @@ path reachable by target computers, for example:
 Copy the full contents of a Windows 11 ISO or extracted installation media into
 this folder only when you are testing locally or preparing the share content.
 
-You can either copy one ISO directly into this folder, or create one subfolder
-per language, for example:
+Copy the full extracted contents of one ISO directly into this folder, or create one
+subfolder per language. Copying the `.iso` file itself is not a usable setup source. For example:
 
 ```text
 SetupSource\fr-FR
@@ -32,8 +32,9 @@ Required files:
 
 Language handling:
 
-- Default validation is `MatchSystem`: the target computer language must be
-  listed in `sources\lang.ini` under `[Available UI Languages]`.
+- Default validation is `MatchSystem`: resolve the Windows installation language from
+  registry `InstallLanguage`, falling back to `InstalledUICulture`. That language must be
+  listed in `sources\lang.ini` under `[Available UI Languages]`; `SystemLocale` is diagnostic only.
 - For a French Windows estate, use a French Windows 11 source such as `fr-FR`.
 - For an English UK Windows estate, use an English Windows 11 source such as
   `en-GB`.
