@@ -6,7 +6,7 @@ PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows en
 
 **0.3.0 stable is published** on [GitHub Releases](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0) and [PowerShell Gallery](https://www.powershellgallery.com/packages/SmartM365.EndpointDiagnosticsAnalyzer/0.3.0) as of September 4, 2026. It promotes preview18 without changing the diagnostic algorithms and supports managed installation through PowerShell Gallery or Microsoft Intune. The downloadable bundle includes administrator packaging files; their presence does not deploy anything to Intune.
 
-Validation boundary: the published release reports real local-device and Intune-ZIP workflows verified on Windows 10, including collection coverage, complete EVTX counts and finalization. **Interactive Windows 11 validation remains outstanding.** Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device. This documentation update does not report new functional tests.
+Validation boundary: the published release reports real local-device and Intune-ZIP workflows verified on Windows 10, including collection coverage, complete EVTX counts and finalization. The user reported successfully completing a subsequent interactive test of stable 0.3.0 on Windows 11 on September 7, 2026. Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device.
 
 Preview18 corrects collection completeness and finalization reporting:
 
