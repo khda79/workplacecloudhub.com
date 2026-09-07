@@ -17,7 +17,7 @@ Smart Intune Remediation Manager GUI version `1.1` is published as a standalone 
 - Product page: [Smart Intune Remediation Manager](https://workplacecloudhub.com/tools/smart-intune-remediation-manager/)
 - Updates: download a newer GitHub Release when available or review repository changes and use a fresh clone or `git pull`; there is no in-app update check.
 
-The release packages source commit [`565af4d20710ccbb904c354033a77654b7a86088`](https://github.com/khda79/workplacecloudhub.com/commit/565af4d20710ccbb904c354033a77654b7a86088). The expected ZIP SHA-256 is `FF1B3DB66A8771CBFC30968319073F37CEDDA01AD1E42D94D7644715CD8B9A5E`. Compare the downloaded archive with the published checksum before extraction, then verify the Authenticode status and expected signer of the PowerShell scripts before use.
+The release packages source commit [`565af4d20710ccbb904c354033a77654b7a86088`](https://github.com/khda79/workplacecloudhub.com/commit/565af4d20710ccbb904c354033a77654b7a86088). Use the published `.sha256` asset as the authoritative ZIP checksum and compare it with the downloaded archive before extraction, then verify the Authenticode status and expected signer of the PowerShell scripts before use.
 
 ## Requirements And Launch
 
