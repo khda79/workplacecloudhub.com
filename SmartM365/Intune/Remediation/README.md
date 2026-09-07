@@ -6,13 +6,18 @@ The GUI reports version `1.1`. It browses local packages and Intune `deviceHealt
 
 ## Distribution Status
 
-Smart Intune Remediation Manager is currently distributed as repository source. There is no dedicated GitHub Release, standalone ZIP, published SHA-256 manifest, PowerShell Gallery package, installer, or automatic updater for GUI version `1.1`.
+Smart Intune Remediation Manager GUI version `1.1` is published as a standalone GitHub Release and remains available as repository source. It is not published as a PowerShell Gallery package and does not include an installer or automatic updater.
 
+- Release: [Smart Intune Remediation Manager v1.1](https://github.com/khda79/workplacecloudhub.com/releases/tag/smart-intune-remediation-manager-v1.1)
+- Standalone ZIP: [SmartM365-IntuneRemediationManager-1.1.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.zip)
+- Published checksum: [SmartM365-IntuneRemediationManager-1.1.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.sha256)
+- Release manifest: [SmartM365-IntuneRemediationManager-1.1.release.json](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.release.json)
+- Release notes: [SmartM365-IntuneRemediationManager-1.1-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1-RELEASE-NOTES.md)
 - Source and documentation: [SmartM365/Intune/Remediation](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/Intune/Remediation)
 - Product page: [Smart Intune Remediation Manager](https://workplacecloudhub.com/tools/smart-intune-remediation-manager/)
-- Updates: review repository changes and use a fresh clone or `git pull`; there is no in-app update check.
+- Updates: download a newer GitHub Release when available or review repository changes and use a fresh clone or `git pull`; there is no in-app update check.
 
-Because no immutable release artifact exists, verify the reviewed Git commit and the Authenticode status of the scripts you intend to use rather than relying on a release hash.
+The release packages source commit [`565af4d20710ccbb904c354033a77654b7a86088`](https://github.com/khda79/workplacecloudhub.com/commit/565af4d20710ccbb904c354033a77654b7a86088). The expected ZIP SHA-256 is `FF1B3DB66A8771CBFC30968319073F37CEDDA01AD1E42D94D7644715CD8B9A5E`. Compare the downloaded archive with the published checksum before extraction, then verify the Authenticode status and expected signer of the PowerShell scripts before use.
 
 ## Requirements And Launch
 
@@ -22,7 +27,13 @@ Because no immutable release artifact exists, verify the reviewed Git commit and
 - `PSScriptAnalyzer` for script analysis. If it is absent, the GUI installs it from PowerShell Gallery for the current user when analysis is first requested.
 - `ImportExcel` is optional. The GUI asks before installing it for the current user; CSV export remains available when it is absent or installation fails.
 
-From the repository root:
+From an extracted release folder:
+
+```powershell
+.\Start-SmartM365-IntuneRemediation-GUI.cmd
+```
+
+Or from a repository clone:
 
 ```powershell
 git clone https://github.com/khda79/workplacecloudhub.com.git
