@@ -1,6 +1,6 @@
 # Stable 0.3.0 promotion - 2026-09-04
 
-Stable 0.3.0 promotes preview18 at the user's explicit request, before an interactive Windows 11 validation. This release-channel choice must not be presented as Windows 11 certification.
+Stable 0.3.0 promoted preview18 at the user's explicit request. On 2026-09-07, the user reported that a subsequent interactive Windows 11 test completed successfully. This user-reported result covers that interactive test; it is not exhaustive Windows 11 certification of every diagnostic rule or hardware configuration.
 
 - Normalized comparison of the complete GUI source against the installed preview18 (413,487 characters, excluding Authenticode signatures) confirms that only the version changed. Diagnostic algorithms and collection scope are unchanged.
 - Collection (15 checks), correctness (28 checks), analysis regression, cache/performance, timeout and packaging suites pass under PowerShell 7.6.5 and Windows PowerShell 5.1.19041.6456. ValidateOnly passes under both. Packaging parses nineteen PowerShell files and tests controlled installation, integrity, detection and rollback/removal contracts.
