@@ -701,11 +701,13 @@ def load_path_mappings(path):
                 continue
 
             parts = [part for part in re.split(r"[\t;, ]+", line) if part]
-            if len(parts) < 2:
-                raise ValueError(f"Invalid path mapping at {path}:{line_number}. Expected: <source-url-or-path> <target-url-or-path>.")
+            if len(parts) != 2:
+                raise ValueError(f"Invalid path mapping at {path}:{line_number}. Expected exactly two fields: <source-url-or-path> <target-url-or-path>. Encode spaces as %20; put comments on separate lines.")
 
             mappings.append((normalize_mapping_path(parts[0]), normalize_mapping_path(parts[1])))
 
+    if not mappings:
+        raise ValueError(f"Path mapping file does not contain any active mapping rows: {path}")
     mappings.sort(key=lambda item: len(item[0]), reverse=True)
     return mappings
 
