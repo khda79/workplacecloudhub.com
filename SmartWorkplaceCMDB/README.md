@@ -1,5 +1,15 @@
 # SmartWorkplaceCMDB
 
+**BETA — not qualified as a stable release.** This status applies to the
+application, documentation, packages, and any future publication. Component
+versions and offline test results do not constitute production qualification.
+
+The locally prepared distribution candidate is **0.3.0-beta.1**. See
+[release notes and installation/update guidance](Release/NOTES.md). The package
+builder uses `Release/Files.json` as an explicit public file allowlist and
+refuses a stable channel or unsigned PowerShell files. Preparation is not
+publication approval.
+
 SmartWorkplaceCMDB is an autonomous Workplace configuration management database project for Microsoft workplace environments.
 
 The project collects workplace inventory data, normalizes it into CMDB entities, prepares Power BI-ready tables, and produces local reports without requiring another repository project as a runtime dependency.
@@ -21,6 +31,11 @@ Desktop, Citrix, local endpoint inventory, and external data sources remain
 planned extensions.
 
 ## Current Status
+
+The current beta includes offline-tested guards against relabeling foreign
+tenant rows during export and reporting on CSV rows from a different tenant.
+CSV exports honor their declared column order and omit undeclared properties;
+the HTML overview counts CSV records, including quoted multiline values.
 
 The repository currently provides autonomous configuration, tenant identity,
 CSV contracts, schema initialization, contract validation, a local report, and
@@ -365,8 +380,7 @@ publishes domain metadata, users, groups, computers, and direct group
 memberships. `-Server` can set the preferred controller used to discover the
 forest. A non-empty `-SearchBase` is supported only with `ForestWide` set to
 `false`, because one distinguished name cannot safely represent every forest
-domain. `-MaxItems 10` creates an isolated bounded test run when invoked through
-the orchestrator. Direct group relationships are preserved without recursively
+domain. `-MaxItems 10` creates an isolated bounded test run. Direct group relationships are preserved without recursively
 flattening nested groups.
 
 The normalizer requires only the raw CSVs, not domain connectivity. It publishes
@@ -457,9 +471,30 @@ Explicit full collection and curation:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Collect
 ```
 
-Bounded live runs are accepted only for an individual source pipeline. When no
-custom data root is supplied, their outputs are automatically isolated under
-`Data/TestRuns/<Tenant>_MAXITEMS-<N>_<timestamp>`.
+Bounded runs are accepted only for an individual source pipeline. Both live and
+fixture orchestration with `-MaxItems` isolate all history, latest and log
+outputs under `Data/TestRuns/MAXITEMS-<N>_<timestamp>_<id>` by default. An explicit
+`-DataRootPath` selects the parent of `TestRuns`, not the final output folder.
+Absolute child paths from configuration or command-line arguments are overridden
+for these bounded runs. Use the paths returned by the orchestrator to locate
+the isolated results. `-ValidateOnly` remains read-only.
+
+Direct collectors also isolate `-MaxItems` and `-InputJsonPath` runs. A new,
+empty explicit `-DataRootPath` can serve as a dedicated trial root. Occupied
+unmarked roots, or roots owned by another tenant/mode, receive a unique
+`TestRuns` child folder. A matching trial root can be reused; live collection
+cannot reuse a fixture/bounded root. Trial child paths are pinned to that root,
+and an explicit `-RawLatestOutputPath` outside its latest folder is rejected.
+Use returned output paths for subsequent direct normalization.
+
+Each raw CSV has a `.status.json` evidence file with identity, coverage,
+in-progress/completed/failed status, dates, row count and SHA-256. Failed attempts
+retain the previous raw CSV but block normalization until a successful refresh.
+Per-source locks prevent overlapping writers. Existing CSVs without evidence
+remain readable as legacy inputs; the report shows their source health as
+unknown. Copy evidence with raw CSVs when transferring them to another host.
+The current SharePoint uploader copies CSVs only, so evidence is unavailable in
+a CSV-only synchronized copy. No live completeness claim is made for that copy.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Collect -Pipeline EntraUsers -MaxItems 10
@@ -489,6 +524,32 @@ See `Launchers/Orchestrator/README.md` for preview, installation, immediate
 start, and removal commands.
 
 ## Validation
+
+Run the synthetic audit regressions:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-AuditRegressions.ps1
+```
+
+These cover tenant rejection before export/report replacement, column ordering,
+multiline CSV record counts, mixed-age freshness, and bounded output isolation
+despite absolute configuration and command-line paths. No live collection or
+scheduled-task installation is performed.
+
+Freshness findings use the oldest usable `SourceCollectedDateTime` in a
+non-empty entity table; a recent row cannot hide older rows in that table.
+Missing or invalid dates retain their separate findings. Intune enrichment now
+preserves the oldest contributing Entra/Intune date, or an unknown date if either
+one is missing. Source evidence distinguishes completed empty snapshots from
+unknown or incomplete sources and checks their age even when the CSV is empty.
+Fixture, bounded, scoped and disabled AD membership coverage are explicit. A
+complete source is limited to the collector's requested scope, not universal
+tenant coverage. Cross-source collection/curation is not a single transaction.
+Live behavior remains to be qualified.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-SourceEvidence.ps1
+```
 
 Run the autonomous test suite:
 

@@ -1,0 +1,8 @@
+{
+  "product": "SmartWorkplaceCMDB",
+  "version": "0.3.0-beta.1",
+  "channel": "beta",
+  "prerelease": true,
+  "liveQualified": false,
+  "tag": "smartworkplacecmdb-v0.3.0-beta.1"
+}

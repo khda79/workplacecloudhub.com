@@ -150,6 +150,8 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartWorkplaceCMDB/**/*.md
 !/SmartWorkplaceCMDB/**/*.json.template
 !/SmartWorkplaceCMDB/Schema/**/*.json
+!/SmartWorkplaceCMDB/RELEASE.json
+!/SmartWorkplaceCMDB/Release/Files.json
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
