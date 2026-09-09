@@ -17,7 +17,7 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 - `SmartThinClient/`: Windows endpoint thin-client shell tooling for controlled Citrix, Azure Virtual Desktop, or web workspace access.
-- `SmartFinOps/`: read-only FinOps reporting that consumes SmartInventory exports and produces CSV plus HTML reports.
+- `SmartFinOps/`: **SmartFinOps Workplace Beta 1.5.0-beta.1**, read-only FinOps reporting that consumes SmartInventory exports and produces CSV plus HTML reports.
 - `SmartWorkplaceCMDB/`: autonomous Workplace CMDB project with native collectors, normalized CMDB outputs, local reports, and Power BI-ready tables.
 
 Additional project directories will be added over time.
