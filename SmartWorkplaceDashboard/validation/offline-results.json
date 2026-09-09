@@ -1,0 +1,257 @@
+{
+  "version": "3.8.0-beta.1",
+  "status": "BETA",
+  "scope": "Synthetic offline Power Query execution; no tenant connection or real data",
+  "sdk": "Microsoft.PowerQuery.SdkTools 2.155.2",
+  "mScenarios": [
+    {
+      "Name": "invalid SourceMode rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "blank tenant configuration rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "unknown relative folder rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "local current uses direct enumeration",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "local history uses recursive enumeration",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "SharePoint current excludes nested folders",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "logical missing remains null",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "logical false/true French and numeric",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "decimal comma and dot",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "invalid and nonfinite numeric unknown",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "fractional integer unknown",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "invalid date unknown",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "comma import",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "semicolon import",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "quoted numeric comma import",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "header-only valid empty export",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "missing CSV",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "duplicate CSV",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "missing source field",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "duplicate source header",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "empty file",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "cross tenant row",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "blank tenant row",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "tenant normalization",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "partial inventory",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "unknown completeness",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "known complete inventory",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "missing timestamp remains unknown",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "future timestamp rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "oldest content date",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "partly missing content date unknown",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "weekly history retained",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "history floor rounds up for three current rows",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "historical tenant mismatch rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "historical duplicate timestamps rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "identical duplicate rows collapse",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "conflicting duplicate key rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "missing canonical ID rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "empty UserDetail",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "empty DeviceDetail",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "unmatched users retained",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "Base64 immutable IDs remain distinct",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "conflicting user identifiers rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "blank user canonical ID rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "unknown user activity is not healthy",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "unmatched device retained",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "conflicting device identifiers rejected",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "future activity is not active",
+      "Passed": true,
+      "Error": ""
+    },
+    {
+      "Name": "all 90 generated source partitions evaluate on empty synthetic schemas",
+      "Passed": true,
+      "Error": ""
+    }
+  ],
+  "nodeBuildTestsPassed": 7,
+  "generatedCodeAssertionsPassed": 22,
+  "daxEngineExecuted": false,
+  "powerBIDesktopRefreshExecuted": false
+}

@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Online mailbox estate, archive posture, storage used and aggregate mailbox quota consumption",
+                    "value": "BETA 3.8.0-beta.1 | Online mailbox estate, archive posture, storage used and aggregate mailbox quota consumption",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

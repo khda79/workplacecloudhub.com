@@ -2,8 +2,8 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "Report",
-    "displayName": "SmartWorkplaceDashboard",
-    "description": "Microsoft 365 and Workplace operations dashboard powered by SmartInventory."
+    "displayName": "SmartWorkplaceDashboard BETA 3.8.0-beta.1",
+    "description": "BETA Microsoft 365 and Workplace operations dashboard powered by SmartInventory; offline validation only."
   },
   "config": {
     "version": "2.0",

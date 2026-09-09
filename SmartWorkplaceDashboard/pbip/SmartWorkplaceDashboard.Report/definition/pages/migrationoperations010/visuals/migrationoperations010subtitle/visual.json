@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Dedicated migration execution status, failures, progress and actionable user evidence",
+                    "value": "BETA 3.8.0-beta.1 | Dedicated migration execution status, failures, progress and actionable user evidence",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",
