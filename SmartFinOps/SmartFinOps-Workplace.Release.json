@@ -9,5 +9,5 @@
   "readOnlyTenant": true,
   "currency": "EUR",
   "package": "SmartFinOps-Workplace-1.5.0-beta.1.zip",
-  "status": "candidate-awaiting-final-validation"
+  "status": "published-beta"
 }

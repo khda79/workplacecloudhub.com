@@ -1,6 +1,6 @@
 # Beta 1.5.0-beta.1 validation
 
-Candidate prepared on 2026-09-09. Scope: local code, synthetic evidence, standalone packaging and multilingual site preparation. No tenant connection or write, Git commit/push/tag, GitHub release, OVH deployment or LinkedIn action is part of this preparation.
+Candidate prepared on 2026-09-09. Scope: local code, synthetic evidence, standalone packaging and multilingual site preparation. The initial preparation made no tenant connection/write, Git publication, OVH deployment or LinkedIn action. After explicit user validation, Git commit/push/tag, the GitHub prerelease and the 25-file OVH delta were published and publicly verified on 2026-09-09. No tenant or LinkedIn action was performed.
 
 ## Reproducible checks
 

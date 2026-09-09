@@ -1,8 +1,12 @@
 # SmartFinOps Workplace — Beta 1.5.0-beta.1
 
-**Beta candidate for controlled evaluation; not yet published.** The versioned package is `SmartFinOps-Workplace-1.5.0-beta.1.zip`. The release manifest retains `channel: beta` and `prerelease: true`; any GitHub release must remain a prerelease.
+**Published beta prerelease for controlled evaluation.** The versioned package is `SmartFinOps-Workplace-1.5.0-beta.1.zip`. The release manifest retains `channel: beta` and `prerelease: true`; any GitHub release must remain a prerelease.
 
-Read [RELEASE-NOTES.md](RELEASE-NOTES.md), [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md), and [VALIDATION.md](VALIDATION.md). Git and publication are prepared for final validation, not executed.
+Read [RELEASE-NOTES.md](RELEASE-NOTES.md), [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md), and [VALIDATION.md](VALIDATION.md). Published on 2026-09-09: [GitHub beta prerelease](https://github.com/khda79/workplacecloudhub.com/releases/tag/smartfinops-workplace-v1.5.0-beta.1) and [six-language site guide](https://workplacecloudhub.com/tools/smartfinops-workplace/). The immutable approved ZIP retains its prepublication audit notes; this README and the GitHub prerelease record the completed publication.
+
+ZIP SHA-256: `2D60B1B0EB81C91C50B222C6A18BD0AE414F78788F87B34E0988C67D329C5C02`.
+
+[Download the beta ZIP](https://github.com/khda79/workplacecloudhub.com/releases/download/smartfinops-workplace-v1.5.0-beta.1/SmartFinOps-Workplace-1.5.0-beta.1.zip) · [SHA-256 file](https://github.com/khda79/workplacecloudhub.com/releases/download/smartfinops-workplace-v1.5.0-beta.1/SmartFinOps-Workplace-1.5.0-beta.1.zip.sha256)
 
 ## Evaluate the beta
 

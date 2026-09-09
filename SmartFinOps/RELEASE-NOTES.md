@@ -1,6 +1,6 @@
 # SmartFinOps Workplace 1.5.0-beta.1 — Beta
 
-Local beta candidate prepared for final validation. Every GitHub release of this candidate must be a **prerelease**, with tag `smartfinops-workplace-v1.5.0-beta.1` and `make_latest=false`.
+Published on 2026-09-09 as a [GitHub beta prerelease](https://github.com/khda79/workplacecloudhub.com/releases/tag/smartfinops-workplace-v1.5.0-beta.1). The approved ZIP is immutable and retains the preparation audit notes. Every GitHub release of this candidate must be a **prerelease**, with tag `smartfinops-workplace-v1.5.0-beta.1` and `make_latest=false`.
 
 The analyzer now excludes invalid schemas from calculations, consistently imports comma/semicolon CSVs, checks the oldest refresh timestamp across rows, and treats unknown/future timestamps as unreliable evidence. A missing source directory produces a partial report instead of a crash. Empty and singleton collections are handled explicitly.
 

@@ -1,6 +1,6 @@
 # SmartFinOps Workplace Beta 1.5.0-beta.1 — publication handoff
 
-Status: prepared locally; final user validation required before commit, push, tag, GitHub release or site upload. Preserve the beta channel. No tenant or LinkedIn action is authorized.
+Status: published on 2026-09-09 after explicit user validation. GitHub prerelease=true, latest=false; the 25-file site delta was published to OVH cluster129. Public package hashes and all 25 site files were read back and verified. Preserve the beta channel. No tenant or LinkedIn action was performed. The workflow below is retained for traceability and future releases; it is not an instruction to repeat this publication.
 
 ## Candidate assets
 
@@ -31,4 +31,4 @@ gh release create smartfinops-workplace-v1.5.0-beta.1 --verify-tag --prerelease 
 6. Recheck the public hashes of all existing HTML/sitemap paths and the absence of the six new routes. If anything changed, rebuild the bounded SmartFinOps delta against that current public baseline. Publish only the 25 paths from the local site manifest to the configured OVH `cluster129` target after GitHub assets are available. Use Windows PowerShell 5.1 for the existing OVH publisher.
 7. Read back all 25 public paths and compare bytes, then verify the six product languages, canonical/hreflang, beta markers and working GitHub asset links. Submit only the affected URLs to IndexNow if included in the approved publication. Submission receipt does not prove indexing.
 
-The site download link intentionally targets the planned prerelease and will not work until step 3 succeeds. Do not upload the staged pages before the approved prerelease exists. Do not publish an entire generated site directory: it contains unrelated concurrent work and existing translation debt.
+The site download link now targets the published beta prerelease. For future releases, publish site links only after the approved prerelease exists. Do not publish an entire generated site directory: it contains unrelated concurrent work and existing translation debt.
