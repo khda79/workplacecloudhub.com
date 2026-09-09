@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Builds a SmartFinOps Workplace report from SmartM365 SmartInventory CSV exports.
 
@@ -8,7 +8,7 @@ and a standalone HTML report. The script is read-only and does not connect to Mi
 Graph, Azure, Citrix, or Azure Virtual Desktop.
 
 .NOTES
-Version: 1.4
+Version: 1.5.0-beta.1 (Beta)
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -29,7 +29,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$runId = Get-Date -Format 'yyyyMMdd_HHmmss'
+Add-Type -AssemblyName Microsoft.VisualBasic
+$runId = (Get-Date -Format 'yyyyMMdd_HHmmss_fff') + '_' + [guid]::NewGuid().ToString('N').Substring(0,8)
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -60,6 +61,7 @@ if ([string]::IsNullOrWhiteSpace($ReportTitle)) { $ReportTitle = [string](Get-Sm
 if ($LicenseCapacityWarningPercent -lt 1 -or $LicenseCapacityWarningPercent -gt 100) { throw 'LicenseCapacityWarningPercent must be between 1 and 100.' }
 if (-not (Test-Path -LiteralPath $SourceContractPath -PathType Leaf)) { throw "Source contract not found: $SourceContractPath" }
 if (-not (Test-Path -LiteralPath $PriceBaselinePath -PathType Leaf)) { throw "Price baseline not found: $PriceBaselinePath" }
+$ReportTitle = $ReportTitle + ' | Beta 1.5.0-beta.1'
 $sourceContract = Get-Content -LiteralPath $SourceContractPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
 
 $resolvedOutputRoots = Resolve-SmartFinOpsOutputRoots -OutputRoot $OutputRoot -LatestOutputRoot $LatestOutputRoot -AreaPath 'Workplace'
@@ -184,7 +186,17 @@ function Export-SmartFinOpsCsv {
     foreach ($folder in @((Split-Path -Path $historyPath -Parent), (Split-Path -Path $latestPath -Parent))) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
     }
-    $Rows | Export-Csv -LiteralPath $historyPath -NoTypeInformation -Encoding UTF8
+    $Rows | ForEach-Object {
+        $exportRow = [ordered]@{}
+        foreach ($property in $_.PSObject.Properties) {
+            $value = $property.Value
+            if ($value -is [decimal] -or $value -is [double] -or $value -is [single]) {
+                $value = $value.ToString([Globalization.CultureInfo]::InvariantCulture)
+            }
+            $exportRow[$property.Name] = $value
+        }
+        [pscustomobject]$exportRow
+    } | Export-Csv -LiteralPath $historyPath -NoTypeInformation -Encoding UTF8
     Copy-Item -LiteralPath $historyPath -Destination $latestPath -Force
     Write-SmartFinOpsLog -Message ("Exported {0} row(s): {1}" -f @($Rows).Count, $latestPath)
     return $latestPath
@@ -333,38 +345,38 @@ try {
     $deviceOptimizationRows = New-Object System.Collections.Generic.List[object]
     $exchangeOptimizationRows = New-Object System.Collections.Generic.List[object]
 
-    $m365Users = Import-SmartFinOpsContractSource -Key 'M365ActiveUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365UserActivity = Import-SmartFinOpsContractSource -Key 'M365UserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365MailboxUsage = Import-SmartFinOpsContractSource -Key 'M365MailboxUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365OneDriveUsage = Import-SmartFinOpsContractSource -Key 'M365OneDriveUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365SharePointSiteUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 SharePoint site usage' -FileNames @('M365_SharePoint_SiteUsage.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365AppsActivations = Import-SmartFinOpsContractSource -Key 'M365AppsActivations' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365TeamsUserActivity = Import-SmartFinOpsContractSource -Key 'M365TeamsUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365EmailActivity = Import-SmartFinOpsContractSource -Key 'M365EmailActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $m365LicenseUsers = Import-SmartFinOpsContractSource -Key 'M365LicenseUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $null = Import-SmartFinOpsContractSource -Key 'M365LicenseGroups' -ValidationOnly -DataQualityRows $dataQualityRows
-    $m365LicenseTenant = Import-SmartFinOpsContractSource -Key 'M365LicenseTenant' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $intuneDevices = Import-SmartFinOpsContractSource -Key 'IntuneDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $upgradeEligibility = Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibility' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $null = Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibilitySummary' -ValidationOnly -DataQualityRows $dataQualityRows
-    $windowsUpdateStatus = Import-SmartFinOpsContractSource -Key 'IntuneWindowsUpdateStatus' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $intuneCompliance = Import-SmartFinOpsContractSource -Key 'IntuneCompliance' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $entraDevices = Import-SmartFinOpsContractSource -Key 'EntraDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $entraConnectSyncHealth = Import-SmartFinOpsContractSource -Key 'EntraConnectSyncHealth' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $adUsers = Import-SmartFinOpsContractSource -Key 'ADUsersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $adComputers = Import-SmartFinOpsContractSource -Key 'ADComputersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $null = Import-SmartFinOpsContractSource -Key 'ADUsersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
-    $null = Import-SmartFinOpsContractSource -Key 'ADComputersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
-    $autopilotDevices = Import-SmartFinOpsSourceCsv -SourceName 'Windows Autopilot devices' -FileNames @('Intune_Autopilot_Devices.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $exoMailboxes = Import-SmartFinOpsContractSource -Key 'EXOMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $exoMailboxStats = Import-SmartFinOpsContractSource -Key 'EXOMailboxStats' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $exoMailboxArchive = Import-SmartFinOpsContractSource -Key 'EXOMailboxArchive' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $exoMailboxPermissions = Import-SmartFinOpsContractSource -Key 'EXOMailboxPermissions' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $null = Import-SmartFinOpsContractSource -Key 'ExchangeAllSourcesPermissionsByUser' -ValidationOnly -DataQualityRows $dataQualityRows
-    $backupProtected = Import-SmartFinOpsContractSource -Key 'BackupProtectedMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $backupPolicyScope = Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $remoteRoutingIssues = Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $proxyAddressControl = Import-SmartFinOpsContractSource -Key 'ProxyAddressControl' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365Users = @(Import-SmartFinOpsContractSource -Key 'M365ActiveUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365UserActivity = @(Import-SmartFinOpsContractSource -Key 'M365UserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365MailboxUsage = @(Import-SmartFinOpsContractSource -Key 'M365MailboxUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365OneDriveUsage = @(Import-SmartFinOpsContractSource -Key 'M365OneDriveUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365SharePointSiteUsage = @(Import-SmartFinOpsSourceCsv -SourceName 'M365 SharePoint site usage' -FileNames @('M365_SharePoint_SiteUsage.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365AppsActivations = @(Import-SmartFinOpsContractSource -Key 'M365AppsActivations' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365TeamsUserActivity = @(Import-SmartFinOpsContractSource -Key 'M365TeamsUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365EmailActivity = @(Import-SmartFinOpsContractSource -Key 'M365EmailActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365LicenseUsers = @(Import-SmartFinOpsContractSource -Key 'M365LicenseUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $null = @(Import-SmartFinOpsContractSource -Key 'M365LicenseGroups' -ValidationOnly -DataQualityRows $dataQualityRows)
+    $m365LicenseTenant = @(Import-SmartFinOpsContractSource -Key 'M365LicenseTenant' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $intuneDevices = @(Import-SmartFinOpsContractSource -Key 'IntuneDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $upgradeEligibility = @(Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibility' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $null = @(Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibilitySummary' -ValidationOnly -DataQualityRows $dataQualityRows)
+    $windowsUpdateStatus = @(Import-SmartFinOpsContractSource -Key 'IntuneWindowsUpdateStatus' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $intuneCompliance = @(Import-SmartFinOpsContractSource -Key 'IntuneCompliance' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $entraDevices = @(Import-SmartFinOpsContractSource -Key 'EntraDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $entraConnectSyncHealth = @(Import-SmartFinOpsContractSource -Key 'EntraConnectSyncHealth' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $adUsers = @(Import-SmartFinOpsContractSource -Key 'ADUsersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $adComputers = @(Import-SmartFinOpsContractSource -Key 'ADComputersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $null = @(Import-SmartFinOpsContractSource -Key 'ADUsersRaw' -ValidationOnly -DataQualityRows $dataQualityRows)
+    $null = @(Import-SmartFinOpsContractSource -Key 'ADComputersRaw' -ValidationOnly -DataQualityRows $dataQualityRows)
+    $autopilotDevices = @(Import-SmartFinOpsSourceCsv -SourceName 'Windows Autopilot devices' -FileNames @('Intune_Autopilot_Devices.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $exoMailboxes = @(Import-SmartFinOpsContractSource -Key 'EXOMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $exoMailboxStats = @(Import-SmartFinOpsContractSource -Key 'EXOMailboxStats' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $exoMailboxArchive = @(Import-SmartFinOpsContractSource -Key 'EXOMailboxArchive' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $exoMailboxPermissions = @(Import-SmartFinOpsContractSource -Key 'EXOMailboxPermissions' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $null = @(Import-SmartFinOpsContractSource -Key 'ExchangeAllSourcesPermissionsByUser' -ValidationOnly -DataQualityRows $dataQualityRows)
+    $backupProtected = @(Import-SmartFinOpsContractSource -Key 'BackupProtectedMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $backupPolicyScope = @(Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $remoteRoutingIssues = @(Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $proxyAddressControl = @(Import-SmartFinOpsContractSource -Key 'ProxyAddressControl' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
     $m365SharePointUserActivity = @(Import-SmartFinOpsContractSource -Key 'M365SharePointUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
     $m365TeamsDeviceUsage = @(Import-SmartFinOpsContractSource -Key 'M365TeamsDeviceUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
     $m365CopilotUserUsage = @(Import-SmartFinOpsContractSource -Key 'M365CopilotUserUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
@@ -387,7 +399,7 @@ try {
         'IntuneEndpointAnalyticsDataQuality'
     )
     foreach ($readinessSourceKey in $readinessSourceKeys) {
-        $null = Import-SmartFinOpsContractSource -Key $readinessSourceKey -ValidationOnly -DataQualityRows $dataQualityRows
+        $null = @(Import-SmartFinOpsContractSource -Key $readinessSourceKey -ValidationOnly -DataQualityRows $dataQualityRows)
     }
 
     Add-SmartFinOpsUnreferencedCsvQualityRows -DataQualityRows $dataQualityRows
@@ -572,12 +584,14 @@ try {
                 AccountEnabled = $accountEnabled
                 ADEnabled = $adEnabled
                 Currency = $currency
-                EstimatedMonthlyWaste = $monthlyPrice
+                ReferenceMonthlyUnitPriceEUR = $monthlyPrice
+                EstimatedMonthlyWaste = ''
             }) | Out-Null
         }
     }
     Write-SmartFinOpsLog -Message 'Building E3, F3, or no-license decision matrix.'
-    $userLicenseDecisionRows = New-SmartFinOpsUserLicenseDecisionRows `
+    $userLicenseDecisionRows = @(New-SmartFinOpsUserLicenseDecisionRows `
+        -DecisionSourcesHealthy (Test-SmartFinOpsDecisionSources -DataQualityRows $dataQualityRows.ToArray()) `
         -LicenseRows $m365LicenseUsers `
         -M365Users $m365Users `
         -ADUsers $adUsers `
@@ -586,11 +600,11 @@ try {
         -TechnicalRecentCutoff $technicalUserCutoff `
         -M365EvidenceAsOfDate $m365EvidenceAsOfDate `
         -TechnicalEvidenceAsOfDate $technicalEvidenceAsOfDate `
-        -PriceModel $priceModel
+        -PriceModel $priceModel)
     Write-SmartFinOpsLog -Message ("Built {0} user license decision(s)." -f $userLicenseDecisionRows.Count)
 
     Write-SmartFinOpsLog -Message 'Building disabled user-mailbox conversion decisions.'
-    $sharedMailboxConversionRows = New-SmartFinOpsSharedMailboxConversionRows `
+    $sharedMailboxConversionRows = @(New-SmartFinOpsSharedMailboxConversionRows `
         -MailboxRows $exoMailboxes `
         -MailboxStatsRows $exoMailboxStats `
         -MailboxArchiveRows $exoMailboxArchive `
@@ -599,7 +613,7 @@ try {
         -M365Users $m365Users `
         -ADUsers $adUsers `
         -UserDecisionRows $userLicenseDecisionRows `
-        -Currency $currency
+        -Currency $currency)
     foreach ($row in $sharedMailboxConversionRows) { $exchangeOptimizationRows.Add($row) | Out-Null }
     Write-SmartFinOpsLog -Message ("Built {0} disabled user-mailbox conversion decision(s)." -f $sharedMailboxConversionRows.Count)
     $personaSignalDefinitions = @(
@@ -639,8 +653,12 @@ try {
     foreach ($tenantSku in $m365LicenseTenant) {
         $skuPartNumber = [string](Get-RowPropertyValue -Row $tenantSku -Names @('TenantSkuPartNumber', 'SkuPartNumber'))
         $skuDisplayName = [string](Get-RowPropertyValue -Row $tenantSku -Names @('TenantSkuDisplayName', 'SkuName'))
-        $enabledUnits = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $tenantSku -Names @('TenantPrepaidEnabled'))
-        $consumedUnits = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $tenantSku -Names @('TenantConsumedUnits'))
+        $enabledUnits = ConvertTo-SmartFinOpsNumberOrNull (Get-RowPropertyValue -Row $tenantSku -Names @('TenantPrepaidEnabled'))
+        $consumedUnits = ConvertTo-SmartFinOpsNumberOrNull (Get-RowPropertyValue -Row $tenantSku -Names @('TenantConsumedUnits'))
+        if ($null -eq $enabledUnits -or $null -eq $consumedUnits -or $enabledUnits % 1 -ne 0 -or $consumedUnits % 1 -ne 0) {
+            Write-SmartFinOpsLog -Level WARN -Message 'Invalid or missing tenant capacity; SKU excluded from capacity valuation.'
+            continue
+        }
         $availableUnits = $enabledUnits - $consumedUnits
         $utilization = if ($enabledUnits -gt 0) { [math]::Round(([double]$consumedUnits / [double]$enabledUnits) * 100, 2) } else { $null }
         $capacityStatus = if ($enabledUnits -le 0) { 'NoFiniteCapacity' }
@@ -658,6 +676,7 @@ try {
             UtilizationPercent = $utilization
             WarningThresholdPercent = $LicenseCapacityWarningPercent
             CapacityStatus = $capacityStatus
+            EvidenceFresh = @($dataQualityRows | Where-Object { $_.SourceName -eq 'M365 tenant licenses' -and $_.Status -eq 'Loaded' -and $_.FreshnessStatus -eq 'Fresh' }).Count -eq 1
         }) | Out-Null
     }
 
@@ -800,7 +819,7 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Autopilot device rows' -Value $autopilotDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Upgrade eligibility rows' -Value $upgradeEligibility.Count)) | Out-Null
 
-    $valueOpportunityRows = New-SmartFinOpsValueOpportunityRows -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -PriceModel $priceModel
+    $valueOpportunityRows = @(New-SmartFinOpsValueOpportunityRows -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -PriceModel $priceModel)
     $potentialMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings') -Property 'MonthlyValueEUR')
     $potentialAnnualValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings') -Property 'AnnualValueEUR')
     $recommendedMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object { $_.ValuePillar -eq 'Potential savings' -and $_.OpportunityClass -eq 'Recommended' }) -Property 'MonthlyValueEUR')
@@ -840,8 +859,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7aDg3d0XrPvp6
-# QrmaUVnOfMC0HiWYfSBCe+k7OQdoJqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCl+OgnwzNmZEq0
+# KbTllqqAqXxXW3E2VeNlRJUcqYWaz6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -932,25 +951,25 @@ catch {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -958,47 +977,47 @@ catch {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK3MEcM5omC7zG4N/6nfNGmor+eSQCEpLL3y3l7MJhDfMA0GCSqG
-# SIb3DQEBAQUABIIBgBO74000AbILs2vFQMLQv9aWg0mXyxCDqLeHFnX2wRK8GU+V
-# of+80kqW0WkBxd8UlU3xdUWHs/fPdNCWCJHaDqA6Y/de+uZzX6JJ38g84OLXKhys
-# 5GOu7G11le3Syui9yhD6h0QRlI+LUD4BB98/sJKtQlq91HJUVDfZQWIxPtwb+4wX
-# oSq2z2RBPVFUliJssaOKfQNFMbfWe4xk5jkLAB847GHpsmykJC7XQkNZjq0v2HWo
-# jbvY/GsGDd208ttgVHnc/b3y3ZFduwuJ3yiCMB2uos7e1aXnkjGwhX1tJZUu8IfN
-# LWATfwsT0iM449B66L2u53u9D+Lhzrc4bvDyti7g6wpyhlMzEhZNx+/BycFf39G+
-# CPNaOfBVBPDgWxfzHeIsBljM9+FZVSPiRskZkUeRhwktAClBjNHFTQp69ZLKgVi1
-# aE9uJsNidoioqfh93PD0sk7X+TaGkT1CTF12V20UEJ0d452K99xxRuBgNgfPxcgL
-# hZHHsQin1PsvssbPXqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINBvIHUYMVlPPlxSidTLZ/1icLz/5JzscJcvEWS29lkNMA0GCSqG
+# SIb3DQEBAQUABIIBgB+v0sLEXZ5RmfLTBipL4RH2o9yI6ul+qz8XGQ3F+/Z9JnUo
+# 3P51iMk+5/Lq6I202IjIbfzx4qGUpnB7DA6ERl/fbk4iYLLKlwWvGngK43NkY7Gu
+# TJmeeOD0lJA7VdwaIuuQOb6IvnJl/Ud3vCI1bGQPbZIq7hB277KOi9NIBtJZTD3l
+# gTroJGsSS42VfCSbNO/YG4kps6OsbolY8o9XfhzpRJHLFhdcPpU7rfa0wyN+rr64
+# ro1XmKoMOPAnyIy4ioC9vYS/aUVU4D1DD/+wroJ8fuQ1mdbpQHSkoQ+YzJ0eogAn
+# QcG6zA/h1ecmDTaIIwL6stvR7woi2kSFubInHROD7X5APpR01eUef0fmscTZH4IX
+# KzPw9uGalzigpQwqmWHHxpxQhQ2vu4j17y3/n286lABn8TDPmlIHvHsor3x8mfW/
+# vt4yyEgW53yg1VZXsIhh8O0qIfLnZPj7paq755OuezD9PCGRB0CI1qVgan5or5Wm
+# x4Gr7ApLul3O38yoKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjMwMTE1
-# NDhaMC8GCSqGSIb3DQEJBDEiBCDRfbv7vaMs0zEQHfbOcRc+CqTr9nL3qtXcHhNg
-# d1Jj/TANBgkqhkiG9w0BAQEFAASCAgCjUPrm2i3Ac8Iil8Njif5a3kg1H1m5daW2
-# J28VVzOHTs0x7+hYoczi5Lw5Qtkh16YlOysqTqBMkyFCKlyHUhk3X9Ppz6i1yWAC
-# 56/08wP+pFHkeQ0aR+Fw5d3AsZ9BCuAoLJ9SkTTRatTKLZjl7xD1na7vioPpxahn
-# VYZdgMeSIk++fRIS4CEWPkoi6t4kWMUwrYxgHG5vVmzd2hHH7C9p4J84xwaFbcLL
-# Qw9EjQF46qsegb4Vfk87DGnGiN3z57+16VeS0wUkajkPlmovXaonEdEPjPB/klBd
-# fSSysGboRtK47qVugeljZxlXHPqDjH79m0Ju6PbR7dXdr3ttKAJiTlk7F+nVftCd
-# doC8q52y7A0Rh71NhTWVvY+lGICFZyPsDGB74pO1mPo2CU5E8rrYIRxCTEpfR1k+
-# p333ZkhC7VDdWdqjsGMm8ExyBFKuMtcD4m/U60XyASRPn7MhcJ7h8UKFUEYRZMGK
-# FLduDEXIGB7sYHbeVyj2am0HJHk25FdEaBgzoLrkHwsHMlenqjwG76zadMIpjlFw
-# +HMWA5l+I+R2l9JqdgV2T18MLItTEqBOR4otnxQa6BJbKestdldluRGlYWYDYiRK
-# 7iDt4XtWvi5vpwjlgtU1P/3VHH6O0//3sq60Ov6dGIndI0u7OE484Slvt0yWXqOR
-# WC9dVRe67g==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODEx
+# NDlaMC8GCSqGSIb3DQEJBDEiBCCvGUWXZeFPiRo7rMhxY6dNwQhFacxserrr18jx
+# cV6gijANBgkqhkiG9w0BAQEFAASCAgCeEzxxDlSMWZxiNLp7p0L3tp1x0/dqKGDx
+# G7uPswIh27555rKsDusGygmgR0Xi3Qxn2v+LTvHBdxdSJ5CVUPA6v88b8mQb6SIW
+# E4358Wo4gvdUG2dW8qdIKwQF5JyLQQVMs03JsHh9VP2tUbMa1DfPNmD0Aq9udnoj
+# F57BHOoevUhX9/QJU41AffUTy/OvUa8ZzW3cnqPV6uRVvus9BaAlT7k9Db+AEyn3
+# PfftkdJhinRqqBDHrYxXuEoBPjAfGi8973vyTQwgXNFrdy+OVIx3TDngfXYZR9as
+# 6JjN29HicGr3pGDZpvbXne7jrx0jSVYMAD5b51Dk7F7U2RGHCcTb7uULhWRqb2dx
+# 5U+vsr9sH/r+8gIaJd3/wBhNZhbXoQlSpfEZB7EKknndQ5PILYdRCvKj7H9/m0Rd
+# nJvzJzwP3LxcGf0H/g9HTOuLNEFtwkX+hEkBe+LZ2JohVhCR9BQu7ADewq/ZxTq2
+# Rd/XuYJg4VNoj7Q8R35KE8GR+8rw61MBI6qcIHojo1vbyCQnaNXonGEDNYZ1AeCo
+# fRKQ1+giG0OmZ9fO8rtZ3M9bQgY0nYlVpsawwQsmbpNTe2b3E5fvd7FLMXGitHxm
+# VEtJ+3GNRm/3J4IXhhwUxH70Lviv62zPKUTMPp0Fauo2eQzFMT3YJmgF4cZ/uvPo
+# k3IrXx399Q==
 # SIG # End signature block

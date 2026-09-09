@@ -1,86 +1,75 @@
-﻿Set-StrictMode -Version 2.0
-
-function Add-SmartFinOpsUnreferencedCsvQualityRows {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$DataQualityRows
-    )
-
-    $knownFileNames = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($row in $DataQualityRows) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$row.FileName)) {
-            [void]$knownFileNames.Add([string]$row.FileName)
-        }
-    }
-
-    if (-not (Test-Path -LiteralPath $script:SmartM365LatestCsvFolderPath -PathType Container)) { return }
-    $additionalFiles = @(
-        Get-ChildItem -LiteralPath $script:SmartM365LatestCsvFolderPath -File -Filter '*.csv' |
-            Where-Object {
-                -not (Test-SmartFinOpsExcludedCsv -FileName $_.Name) -and
-                -not $knownFileNames.Contains($_.Name)
-            } |
-            Sort-Object Name
-    )
-
-    foreach ($item in $additionalFiles) {
-        try {
-            $ageHours = [math]::Round(((Get-Date) - $item.LastWriteTime).TotalHours, 1)
-            $freshnessStatus = if ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
-            $headerColumns = @(Get-SmartFinOpsCsvHeaderColumns -Path $item.FullName)
-            $notes = if ($freshnessStatus -eq 'Stale') {
-                "Source is older than $($script:SmartFinOpsMaxSourceAgeHours) hours."
-            }
-            else {
-                'Catalogued for freshness and schema inventory; not imported by the current analyzer.'
-            }
-            $DataQualityRows.Add([pscustomobject]@{
-                RunId = $script:RunId
-                SourceName = "Additional CSV: $($item.Name)"
-                SemanticRole = 'Catalogued source not consumed by the current analyzer'
-                SourceRequirement = 'Not defined'
-                Status = 'Catalogued'
-                ContractStatus = 'NotDefined'
-                FreshnessStatus = $freshnessStatus
-                Path = $item.FullName
-                FileName = $item.Name
-                RowCount = ''
-                ColumnCount = $headerColumns.Count
-                LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-                AgeHours = $ageHours
-                RequiredColumnsMissing = ''
-                BlockedReason = ''
-                Notes = $notes
-            }) | Out-Null
-        }
-        catch {
-            $DataQualityRows.Add([pscustomobject]@{
-                RunId = $script:RunId
-                SourceName = "Additional CSV: $($item.Name)"
-                SemanticRole = 'Catalogued source not consumed by the current analyzer'
-                SourceRequirement = 'Not defined'
-                Status = 'Error'
-                ContractStatus = 'Error'
-                FreshnessStatus = 'NotChecked'
-                Path = $item.FullName
-                FileName = $item.Name
-                RowCount = ''
-                ColumnCount = 0
-                LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-                AgeHours = ''
-                RequiredColumnsMissing = ''
-                BlockedReason = ''
-                Notes = $_.Exception.Message
-            }) | Out-Null
-        }
-    }
+﻿[CmdletBinding()]
+param([string]$EvidenceRoot = (Join-Path $env:TEMP ('SmartFinOps-integration-' + [guid]::NewGuid().ToString('N'))))
+$ErrorActionPreference='Stop'
+$project=Split-Path $PSScriptRoot -Parent
+$EvidenceRoot=[IO.Path]::GetFullPath($EvidenceRoot)
+$runtime=Join-Path $EvidenceRoot 'runtime/SmartFinOps'
+New-Item $runtime -ItemType Directory -Force | Out-Null
+# Explicit public input allowlist: no local config, exports, tenant identifiers or credentials.
+foreach($file in @('SmartFinOps-Workplace-Analyze.ps1','SmartFinOps.global.local.json.template','Config/SmartFinOps-TenantContext.ps1','Config/SmartFinOps-Workplace-DataContract.ps1','Config/SmartFinOps-Workplace-LicenseDecision.ps1','Config/SmartFinOps-Workplace-ExchangeDecision.ps1','Config/SmartFinOps-Workplace-ValueModel.ps1','Config/SmartFinOps-Workplace-InventoryValidation.ps1','Config/SmartFinOps-Workplace-SourceContracts.json','Config/SmartFinOps-Workplace-FrancePriceBaseline.json')) {
+ $target=Join-Path $runtime $file; New-Item (Split-Path $target -Parent) -ItemType Directory -Force | Out-Null; Copy-Item (Join-Path $project $file) $target -Force
 }
+$source=Join-Path $EvidenceRoot 'sources'; New-Item $source -ItemType Directory -Force | Out-Null
+$contract=Get-Content (Join-Path $runtime 'Config/SmartFinOps-Workplace-SourceContracts.json') -Raw | ConvertFrom-Json
+$keys=@('M365ActiveUsers','M365UserActivity','M365MailboxUsage','M365OneDriveUsage','M365AppsActivations','M365TeamsUserActivity','M365EmailActivity','M365LicenseUsers','M365LicenseTenant','ADUsersCanonical','IntuneDevices','M365SharePointUserActivity','M365TeamsDeviceUsage','M365CopilotUserUsage','M365TeamsPhoneUserUsage')
+foreach($spec in $contract.Sources | Where-Object Key -in $keys) {
+ $row=[ordered]@{}
+ foreach($column in $spec.RequiredColumns) { $row[$column]='' }
+ foreach($column in @($row.Keys)) { if($column -match 'principal.?name|^UserPrincipalName$') {$row[$column]='one@example.invalid'} }
+ $row['Report Refresh Date']=(Get-Date).AddHours(-2).ToString('s')
+ switch($spec.Key) {
+  M365ActiveUsers {$row.AccountEnabled='False'}
+  M365UserActivity {$row.LastActivityDate=(Get-Date).AddDays(-200).ToString('s');$row.HasAnyM365Activity='False'}
+  M365MailboxUsage {$row['Storage Used (Byte)']='0';$row['Has Archive']='False'}
+  M365OneDriveUsage {$row['Storage Used (Byte)']='0'}
+  M365AppsActivations {$row.Windows='0';$row.Mac='0'}
+  M365LicenseUsers {$row.SkuPartNumber='SPE_E3';$row.Source='Direct';$row.GroupCountForSku='0';$row.HasDirectAndGroup='False'}
+  M365LicenseTenant {$row.TenantSkuPartNumber='SPE_E3';$row.TenantPrepaidEnabled='10';$row.TenantConsumedUnits='8'}
+  ADUsersCanonical {$row.Enabled='False';$row.M365LicenseType='E3';$row.M365LicenseTargetPersona='None';$row.AccountType='Named Account'}
+  IntuneDevices {$row['Device ID']='synthetic-device';$row['Device name']='SYNTHETIC';$row['Last check-in']=(Get-Date).AddDays(-200).ToString('s')}
+ }
+ [pscustomobject]$row | Export-Csv (Join-Path $source $spec.FileNames[0]) -NoTypeInformation -Encoding UTF8
+}
+$engine=(Get-Process -Id $PID).Path
+$results=[System.Collections.Generic.List[object]]::new()
+function Run-Scenario($Name,$Expected,$ValidateOnly=$false) {
+ $out=Join-Path $EvidenceRoot $Name
+ $params=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $runtime 'SmartFinOps-Workplace-Analyze.ps1'),'-Tenant','synthetic','-SmartM365LatestCsvFolderPath',$source,'-OutputRoot',(Join-Path $out 'Archive'),'-LatestOutputRoot',(Join-Path $out 'Current'))
+ if($ValidateOnly) { $params+='-ValidateOnly' }
+ & $engine @params *> (Join-Path $EvidenceRoot ($Name+'.log'))
+ if($LASTEXITCODE -ne 0) { throw "Scenario failed: $Name. See local log." }
+ if(-not $ValidateOnly) {
+  $summary=Import-Csv (Join-Path $out 'Current/SmartFinOps_Workplace_Summary.csv')
+  $actual=[decimal]($summary | Where-Object Metric -eq 'Indicative monthly optimization potential').Value
+  if($actual -ne $Expected) {throw "$Name : expected $Expected, got $actual"}
+  $html=Get-Content (Join-Path $out 'Current/SmartFinOps_Workplace_Report.html') -Raw
+  if($html -notmatch 'Beta 1.5.0-beta.1') {throw 'Missing beta marker'}
+  if($html -match 'one@example.invalid') {throw 'Raw identity leaked into HTML'}
+  $diagnostics=@(Import-Csv (Join-Path $out 'Current/SmartFinOps_Workplace_LicenseOptimization.csv'))
+  if(@($diagnostics | Where-Object { -not [string]::IsNullOrWhiteSpace($_.EstimatedMonthlyWaste) }).Count) {throw 'Diagnostic finding incorrectly monetized'}
+ }
+ $results.Add([pscustomobject]@{Scenario=$Name;Status='Passed'})
+}
+Run-Scenario 'complete' 31.20
+Run-Scenario 'validate-only' 0 $true
+$licensePath=Join-Path $source 'M365_Licenses_Users.csv';$license=Import-Csv $licensePath; @($license,$license) | Export-Csv $licensePath -NoTypeInformation -Encoding UTF8
+Run-Scenario 'duplicate-assignment' 31.20
+$tenantPath=Join-Path $source 'M365_Licenses_Tenant.csv';$tenant=Import-Csv $tenantPath; @($tenant,$tenant) | Export-Csv $tenantPath -NoTypeInformation -Encoding UTF8
+Run-Scenario 'duplicate-capacity' 0
+$tenant | Export-Csv $tenantPath -NoTypeInformation -Encoding UTF8
+$activityPath=Join-Path $source 'M365_Users_Activity.csv'; $activity=Import-Csv $activityPath; $activity.'Report Refresh Date'=(Get-Date).AddDays(-10).ToString('s'); $activity | Export-Csv $activityPath -NoTypeInformation -Encoding UTF8
+Run-Scenario 'stale-activity' 0
+$source=Join-Path $EvidenceRoot 'does-not-exist'
+Run-Scenario 'absent-root' 0
+Run-Scenario 'validate-absent-root' 0 $true
+$results | ConvertTo-Json | Set-Content (Join-Path $EvidenceRoot 'integration-results.json') -Encoding UTF8
+Write-Output "Passed $($results.Count) integration scenarios. Evidence: $EvidenceRoot"
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZQSNZF0G9AmOu
-# La1aNbc08aWIwVPJpkXXirmGzZsjU6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLv6e6NOxOPGGM
+# zzOF4+UxQrbV4Ofe3AJZ1qZ7i7dsrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -213,31 +202,31 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG2hgA0wFPNzk4RtUI+iz518xH/Ih+00o0Zasla/qcklMA0GCSqG
-# SIb3DQEBAQUABIIBgGbM6Xg8jWZ04mb6Wa2FXzMbR+W9yDtVQN0K9+ASPuSFhope
-# xrB20nxWiY35SlbM/42G8QyK+vM6hGNKD+NHVD8xNdktTxaWBjYNLJmGilCPkFMu
-# 9YVBXT6wnuwoHUHm/nspfPXZLSXF1M+5Au+Ybhnmaf3jWaHjwjoLMH1k6m3fj0TQ
-# Kd4y00DHBYqnjksWlni5KVLiCqHUS9Nm7/x8CO0Zr2Uq4QHx3XfvIPSCDZ8HZeT2
-# plB963bJzqJnpSY33VzvC/rKWGssmEg4RYtWKQZOHUZk5G8dpJdn4mrC9cPi9A7d
-# tXUhgFaLcBXLpMJBs8pyExwQ5g/kLZ/Y5SCcQ+H2BWHz7kQiSdRv7A7VRxHJDLY1
-# VRjwaLZ+FPoOLPcn9eEs1kVnhB1nbv54yLuLXZK0Z9Y5NIX0NE1+DayGKzClKarH
-# /nEDNZq/nCr5eEKaSH/pFdhFt098GV2Jb8zcSqHFIOKUH/+M6ilPEH79VcsOVDtJ
-# Nvs/fgjaz3LFl4tvJaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN77YROpX/+yHXo2d7VGVLccqI4mhrPcHjYz4hycjtDvMA0GCSqG
+# SIb3DQEBAQUABIIBgD8yDKKKWr3nyeaS953+knQ95obnt9MtAz4Y+v7ldj8Pc0Eo
+# v6DeYMOZomYeiLP/1Bury7j9tSv8++QBSZH/V3bhv/WoYTufkf34sdUxfiZVXM6D
+# qBpig+msa5858mSjYDh3t6ovrxUmJxEfANS7ZOH62cppKXwujZA+rZC0AVc3M3Xn
+# Wsp+57/DJqBKN2c8+K1WHucDHtCq1aZeibKKBYQDd1fkQQogYkMUGeGkYkvjVevp
+# iE7NxVt+ryrVJoXcoJm8N6w4tE1bLAoC80QoTXwNEDDhzI/UoYie2Q5Zllp1MwgN
+# cAYIY83ClLbqzPhFWYQGB/KizUgUQsAx0EnHG6ddQIPFO2VAHxVkI6S3ExpuUe2n
+# qJw209jRE2TilZZn1pn8QahiCvuUfAWRIH3S62aEmYMRpSMDDqr67W08oMgBRIni
+# ccA7EvLQvzxks6sDxUnyvK6zZOMFFqYB7pnTh3Tix/e0kCRR2+UoKKbrAysBUfki
+# eDFSVJyFo0zyPm7pWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODA2
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAWZzbqXo7p+QOlwhrsK+4g008DL/NnjIWXfofK
-# 8coQhTANBgkqhkiG9w0BAQEFAASCAgA3eJtkNd+PQbAsxtYyXVdVVuKCCsb9jOFv
-# UJOLZMaXEfhX+PwmPbI9EuAuFGpYwSxAWk04ANPDe1fGS7R99F7O9ehQkSwAJeYn
-# ZVZL9EqEAB0ron3HhWbqGxoe/V0rZxKCXOxw7x0QDVBDr3iPpmt1YZjtmAAa94bi
-# I/whEvADLd0d8qL9rgDWEsU99felaDDqqOTw8XDWWTcnuvVJlh+GTza8dqUgRSFc
-# yqAoW/1olwmc4XheqjWjWMEHvavIGqqjvgxAo/rxduTPK1Bqj4erxTgoTtP60jtX
-# ycic4OV12GhZn54ZWrZuOQp972qY2Cgtr6EJ42sbTv67rY8F6mNcnIKWshT1vv13
-# dljhfacdPB0wqRzuNrlUTX7VpN46akxMXDxG6n9EaCPHek4IRPanJh5iKeXvW2B2
-# mAFIQlSA0jP+BiM3bSw7u5ZeUeiXyzEfTlya+mnzi2BcQ84K63sK5xz43W8C9nm1
-# o9mmmx6q7+nG7ha7Q+cR8SnWpmGJBLYjiMQ5xRjN3DhmtIo91BTmm4fW2nrxHJRu
-# 9k0nW77qbebx3fTdObNnvp0Bpt9NHSu46V7y55+vv+hlO7u9VrGNbwZmQKopDn7f
-# pFEkL2Zyr4NYkMhUQjD+mCvWzNrEEX0+5C4seuuGo5W6Ho9VlSBnHFhGawtTfVgI
-# Zk6skXtwKw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODEx
+# NDlaMC8GCSqGSIb3DQEJBDEiBCAofuRZATlRGt7zMMQ4m1/No347LqSLOFRasKgh
+# TOAb0DANBgkqhkiG9w0BAQEFAASCAgCBpYclKgw676wNt6ANsdrdhq+iCk1OMdmD
+# 3Lg1TH5jpoJbXKhjImivW07Ht3bmg9Um+g4BQ16DtXlGIwAYfnHRv77wBOxOdNq+
+# ZN6T/rEbeIhnt0rUv2TYYCnVJJuSwNza6IUID1rvBqEjAtBuR7iFQ+fdLKiZ3Wyq
+# Pu5G5BwCLBAmieTIP8xBRtv2emn3KtiN1AI90e726NQQHQTjykimSdxasM4DVZoZ
+# sZ2i881y1QZqbD99EfhfCpmZxLVpTOX1fIa7xakoJ2Be+3Hgy/yfZTlFzQzV8ND2
+# u8LoM72Xi+GjFfuv0Q2I6BZdDt+MtLz+h2hZt/vGFYIWbeW4iSe/75wLckrhteu2
+# sgRKbzSGWPIAuzVc4W2sSmOs7TyN+w4VuDV7rv5tyytCYuBQYI8TG9oWlcfZSCUN
+# ONdTSNASS0ptFgwG04Ayhj4vVyxV7dqa6hRNFrXRSdsDP55acXNsRtKiBdg11b60
+# zfdT8Ch9SDe+yV0mDK7t4HC8tilpe4uein1VmwZKSN6Ib7zTUjKJ+uEmVksj6mPK
+# 7YEs9GO0Pg50/aXTvVfOLhRIchpqxxSiHtbEYqdAO/lVGAqeDOucApb+NBtbidPZ
+# QmCi80QaFDTkKdRf+i9CaqcxhAsbPSwEpwxbE3xXtYNJQA5a/pTL6qnu/jm3cZyr
+# paRFeDqPCg==
 # SIG # End signature block

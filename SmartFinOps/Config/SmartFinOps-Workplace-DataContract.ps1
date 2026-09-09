@@ -1,4 +1,4 @@
-Set-StrictMode -Version 2.0
+﻿Set-StrictMode -Version 2.0
 
 function Test-SmartFinOpsExcludedCsv {
     [CmdletBinding()]
@@ -29,9 +29,7 @@ function Get-SmartFinOpsCsvHeaderColumns {
     $firstLine = Get-Content -LiteralPath $Path -TotalCount 1 -Encoding UTF8
     if ([string]::IsNullOrWhiteSpace($firstLine)) { return @() }
 
-    $commaCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ',' }).Count
-    $semicolonCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ';' }).Count
-    $delimiter = if ($semicolonCount -gt $commaCount) { ';' } else { ',' }
+    $delimiter = Get-SmartFinOpsCsvDelimiter -Path $Path
 
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
     try {
@@ -52,9 +50,7 @@ function Test-SmartFinOpsCsvHasDataRow {
     $firstLine = Get-Content -LiteralPath $Path -TotalCount 1 -Encoding UTF8
     if ([string]::IsNullOrWhiteSpace($firstLine)) { return $false }
 
-    $commaCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ',' }).Count
-    $semicolonCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ';' }).Count
-    $delimiter = if ($semicolonCount -gt $commaCount) { ';' } else { ',' }
+    $delimiter = Get-SmartFinOpsCsvDelimiter -Path $Path
 
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
     try {
@@ -83,9 +79,15 @@ function Get-SmartFinOpsCsvReportRefreshDate {
     $reportRefreshColumn = @($candidateColumns | Where-Object { $_ -in $HeaderColumns } | Select-Object -First 1)
     if ($reportRefreshColumn.Count -eq 0) { return $null }
 
-    $firstRow = Import-Csv -LiteralPath $Path | Select-Object -First 1
-    if ($null -eq $firstRow) { return $null }
-    return ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $firstRow -Names @($reportRefreshColumn[0]))
+    $oldest = $null
+    $invalidDate = $false
+    Import-Csv -LiteralPath $Path -Delimiter (Get-SmartFinOpsCsvDelimiter -Path $Path) | ForEach-Object {
+        $date = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $_ -Names @($reportRefreshColumn[0]))
+        if ($null -eq $date -or $date -gt (Get-Date)) { $invalidDate = $true }
+        elseif ($null -eq $oldest -or $date -lt $oldest) { $oldest = $date }
+    }
+    if ($invalidDate) { return $null }
+    return $oldest
 }
 
 function Resolve-FirstExistingCsv {
@@ -176,11 +178,28 @@ function Import-SmartFinOpsSourceCsv {
             [math]::Round(((Get-Date) - $reportRefreshDate).TotalHours, 1)
         }
         else { $fileAgeHours }
-        $freshnessStatus = if ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
+        $hasRefreshColumn = @($headerColumns | Where-Object { $_ -in @('ReportRefreshDate', 'Report Refresh Date') }).Count -gt 0
+        $freshnessStatus = if (($hasRefreshColumn -and $null -eq $reportRefreshDate) -or $ageHours -lt 0) { 'Unknown' } elseif ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
+        if ($hasRefreshColumn -and $null -eq $reportRefreshDate) { $freshnessBasis = 'InvalidReportRefreshDate'; $ageHours = '' }
         $missingColumns = @($RequiredColumns | Where-Object { $_ -notin $headerColumns })
         $contractStatus = if ($missingColumns.Count -eq 0) { 'Valid' } else { 'Invalid' }
         $hasDataRow = Test-SmartFinOpsCsvHasDataRow -Path $path
-        $rows = @(if (-not $ValidationOnly) { Import-Csv -LiteralPath $path })
+        $rows = @(if (-not $ValidationOnly -and $contractStatus -eq 'Valid') { Import-Csv -LiteralPath $path -Delimiter (Get-SmartFinOpsCsvDelimiter -Path $path) })
+        $uniqueColumns = switch ($SourceName) {
+            'M365 active users' { @('User principal name', 'UserPrincipalName') }
+            'Active Directory users - canonical enriched' { @('UserPrincipalName') }
+            'M365 tenant licenses' { @('TenantSkuPartNumber') }
+            'Exchange Online mailboxes' { @('UserPrincipalName') }
+        }
+        $identityIssue = $false
+        if ($uniqueColumns -and -not $ValidationOnly) {
+            $keys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($row in $rows) {
+                $key = ([string](Get-RowPropertyValue -Row $row -Names $uniqueColumns)).Trim()
+                if (-not $key -or -not $keys.Add($key)) { $identityIssue = $true }
+            }
+            if ($identityIssue) { $contractStatus = 'Invalid'; $rows = @() }
+        }
         $rowCount = if ($ValidationOnly) { '' } else { $rows.Count }
         $status = if ($contractStatus -eq 'Invalid') {
             'Invalid schema'
@@ -192,6 +211,8 @@ function Import-SmartFinOpsSourceCsv {
             'Loaded'
         }
         $notes = New-Object System.Collections.Generic.List[string]
+        if ($identityIssue) { $notes.Add('Duplicate or blank identity in a single-grain source; source excluded from calculations.') | Out-Null }
+        if ($freshnessStatus -eq 'Unknown') { $notes.Add('Missing, invalid or future source timestamp; freshness cannot be established.') | Out-Null }
         if ($freshnessStatus -eq 'Stale') {
             $notes.Add(("Source is older than {0} hours." -f $script:SmartFinOpsMaxSourceAgeHours)) | Out-Null
         }
@@ -282,12 +303,34 @@ function Import-SmartFinOpsContractSource {
         -DataQualityRows $DataQualityRows
 }
 
+function Get-SmartFinOpsCsvDelimiter {
+    param([Parameter(Mandatory)][string]$Path)
+    $line = Get-Content -LiteralPath $Path -TotalCount 1 -Encoding UTF8
+    # Ignore separators inside quoted header fields.
+    $unquoted = [regex]::Replace([string]$line, '"(?:[^"]|"")*"', '')
+    if (($unquoted.ToCharArray() | Where-Object { $_ -eq ';' } | Measure-Object).Count -gt ($unquoted.ToCharArray() | Where-Object { $_ -eq ',' } | Measure-Object).Count) { return [char]';' }
+    return [char]','
+}
+
+function Test-SmartFinOpsDecisionSources {
+    param([AllowEmptyCollection()][object[]]$DataQualityRows)
+    $required = @('M365 active users', 'M365 user activity', 'M365 mailbox usage', 'M365 OneDrive usage', 'M365 Apps activations', 'M365 Teams user activity', 'M365 email activity', 'M365 license user assignments', 'M365 tenant licenses', 'Active Directory users - canonical enriched', 'Intune devices')
+    foreach ($name in $required) {
+        $match = @($DataQualityRows | Where-Object { $_.SourceName -eq $name })
+        if ($match.Count -ne 1 -or $match[0].Status -ne 'Loaded' -or $match[0].FreshnessStatus -ne 'Fresh') { return $false }
+    }
+    # An optional activity source may be absent; a present but unusable source cannot prove inactivity.
+    foreach ($row in $DataQualityRows) {
+        if ($row.SourceName -in @('M365 SharePoint user activity','M365 Teams device usage','M365 Copilot user usage','M365 Teams Phone user usage') -and $row.Status -ne 'Missing optional' -and ($row.Status -ne 'Loaded' -or $row.FreshnessStatus -ne 'Fresh')) { return $false }
+    }
+    return $true
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH2j2AYFqzmg6U
-# qAMQQcv49eWgBexu86QTnCa1e/r0/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbjy9mF17haLrh
+# 5v3QCcRzgAxGwVi8qicc6OPta81QDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -378,25 +421,25 @@ function Import-SmartFinOpsContractSource {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -404,47 +447,47 @@ function Import-SmartFinOpsContractSource {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO+dEgDMmdzPgpAE3HtCVga8iyYf7GHvQ+6xGxjZGvS8MA0GCSqG
-# SIb3DQEBAQUABIIBgJocVb/J/SK8QJN2LKU29QBWVKyYVNpN0gPqyJKZxLpiQJiK
-# 7mgmLj2MCzm7gxZR+i4lqhFZueRvWszHfPAoOxGAqizCI70Tw25a+fLy2sLLkq04
-# PXct8YQ2ghc2xAMhsjp7kC6EihF8bdBMCJZB1UNJBkq8YXNHWm8aDtC8IKcwOedI
-# Ylx4YX9piSu2bZcYa8Bq4BSfICQZwFN4N+iYHUZ0Up+C2W5/NMZV28bsrKZEfOBq
-# ItA4Kkeq72635vaEjKDJWT6SOKoQBShbhZ4UY++RmoF3HAO/RcXGS39q0jBXcmLP
-# eSxMRfU/hvl6LdpkXy6VnQ0nxeVonm8gpFn6Gj4ukD0CMX3YcJNkfCs/E08VLFD4
-# RhlDHtqIuvUjYNAAZyhzV0wWZc1y28ys7sUk0p14TvuLUdcI4nx3TQASwPdfdbSr
-# jFvA0ulteX/M9SGRuSKcO7ONnfXfA5umgSAsZmTYzxH99CiKzJtzCOJiEMMzYfOA
-# AbgOdAeeIvyAa99e+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID0BXqc9OfGQLkEeOf2V4thPFO/2xg0BbWPv42mCm5hzMA0GCSqG
+# SIb3DQEBAQUABIIBgEKfCmFvvt3eI5UULI6mvzCfz22sXBsUs9GLbJAvrDZasaA9
+# 8Fq/IDYCbJY2/z6yDP/UJ6XQjYsF3Duz3jYJ4l7lUH7AKWSOk0qYnEKPzLvwqr/R
+# u9spcRsCQ0gOVHZZIwxmDRjYqT7FUt8S3+wdjnm4zEA3xIv1o1kxELR3YyX+Co+c
+# hDBSpF98y0b8FvmMTAVn+f9PuVIxhophOrJLNABvwbEoj8yDvkeAvHPSZNi52svb
+# JmPgRcAH+/UlpjztirM9zP4JK0AbEJXvJqwQ3ThoJ+Nh6mOTuopXifi5KvLI1INX
+# ivWI1Ka0kpz3bI0cZfVSe7EkJ75K5OOAzObimoDeEWcIusVyVZeuTUMUXU7COFHH
+# 6Sj4KnjN0llAdhoOO726oEtC79FidvJCPl9QfIQkvKEtbj0HSezyRjve9rVdixVH
+# lH1mrA0uJin4/ixaYJNlTv6eJDDJ0TeoJ5fTuqxKtHbEifu8wWy2bRS9g6pEB/Ss
+# 6M8XyCkPUM1OlJekW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjMwMTE1
-# NDVaMC8GCSqGSIb3DQEJBDEiBCBY7JPYi7nwKru6B6m6j0ItdI9hvxYutI3FdzKF
-# HxUp0DANBgkqhkiG9w0BAQEFAASCAgB4or/RbUue4cdk5EGMn0n4tGf+5FEk/u9e
-# 6IgL9uIz1geNlMxehQqFzUapkmd1f8H40s2Jv2i5ZEPgHs6o2Xrws32UVIhustF+
-# qfPKGQCcx6TPaVDDyhH9F8ZY4KkJCYKwlqiKjo+BrFLOP/qBnOZv/HRi5TfIE3Bt
-# h53p4zrC3Y9KMMHaLB2rM4hVwGf7BQ3581oqNkwJH6CSyGhWzi9SjTUq1qE25FCy
-# MuIosW5vzkGKlBt0mQAI666wM3/7O9gJI6zWx7teHM3hCnUvE5F+Wq+P62N86Lxf
-# HenonHyyD6lvUDiJvcc15CAu7M1qZXOAlsl2D+S6/+VcurVLIy8o0Egw6RmqhC3T
-# nsIPu3h6DI7o7Io/oJWC/i/fDNx2xUVWz/7wYhg2VD3DFlpZmwnqrszmAwjBKPsl
-# /EuQOiOSvbN8suzJuAKXSPqNpM5cG3ZbTFs+oCJvole/0DewknsZofhRx2F+qNUa
-# oj1891qexYeidRaGarmiyOkkG6vDGyBKd879SJEi3CbRH1imdgjX2VDnte3SHRY5
-# RybCOAtV7jubxWtHxSgvf38OGukvkp7v9+zQQnb6rBMt9IzASoMjfdymUoRiTCoJ
-# a98iAzvfKNWXJFgZzH5IhZxA5zHKxs9e2n3hgUBlJCaGkA5fdL/7QOPxFHoaEq6U
-# aWawkqYb9g==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODA2
+# MDJaMC8GCSqGSIb3DQEJBDEiBCAi4AQU1PmXqObbMxEOKeDpAP/capt9NiWU6AqC
+# 8c1iDzANBgkqhkiG9w0BAQEFAASCAgCqAL2o6/bKbC9ztxoitAXAAB2hqY32vn6k
+# 1wSaY4ThKTbqYYMHtBFPqSHMWcDwH2+j7v5inRxGeBi/jaMRHGsUB0BBA4wEqyhE
+# yO6SQoHjJebYFIcnCypGiRO1qGQAcYL+CT6cbfgGtuhQZJ/pkN4L/vcd0WFb+f8I
+# A0/IRlTUIzuDBBR70PKRFu833nPHQjXJao2NpM/XoqG1zYpp28UOIJWjlR39rFEi
+# xaSg9P0949RhggIwKQGQGEhknppREiwD6VVMlRGlS5JF/mg+spShOvIR270Gczzc
+# rFM/9qb3SGyVb0Qgd8SHjysVI9ak/eLgID6OQgss4fq69z+fBA7ltw21NlvfbQ2u
+# JiNOaxPIa4t5N+Z2qBYKXsUkLdLUCc7SEx0j6tey+5VigxdjIgXV1F7vhfLk9OTm
+# Dp2g+bR2EsMpdTd0mG3cv+5T9hVLwMsFkscEeDvAo4tz61bvR0jFfYfHV/z9nAFA
+# LCK28MUJtGg6hu9hDxA5QZDcuBj+SwUukP/IA35tHliBqvSe/D16hq02XxMGr+1B
+# gkegHegiWFzQcLCBl81BKXzGHtxs2Z6MwuG/qKkzjsLFPc7hUcegCzYtfBXX5kcT
+# ExOCjCwUFwa2qcvSeFeh34hYydbMoqhtQePfxW3ZyqCnvMHisn9ILEqBSd5HFpXB
+# AziHguSO+Q==
 # SIG # End signature block
