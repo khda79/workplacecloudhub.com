@@ -1,42 +1,71 @@
-@{
-    RootModule        = 'SmartWorkplaceCMDB.Core.psm1'
-    ModuleVersion     = '0.2.2'
-    PrivateData       = @{ PSData = @{ Prerelease = 'beta.2' } }
-    GUID              = 'fe81d6e3-5d5b-4ec0-9c8b-02f82d9bc001'
-    Author            = 'WorkplaceCloudHub'
-    CompanyName       = 'WorkplaceCloudHub'
-    Copyright         = '(c) WorkplaceCloudHub. All rights reserved.'
-    Description       = 'Core helpers for SmartWorkplaceCMDB.'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @(
-        'Resolve-SmartWorkplaceCMDBCollectionPaths',
-        'Start-SmartWorkplaceCMDBSourceCollection',
-        'Complete-SmartWorkplaceCMDBSourceCollection',
-        'Import-SmartWorkplaceCMDBSourceCsv',
-        'Get-SmartWorkplaceCMDBSourceHealth',
-        'Read-SmartWorkplaceCMDBCollectionFixture',
-        'Assert-SmartWorkplaceCMDBCollectionPage',
-
-        'Get-SmartWorkplaceCMDBProjectRoot',
-        'Read-SmartWorkplaceCMDBJsonFile',
-        'ConvertTo-SmartWorkplaceCMDBKey',
-        'Resolve-SmartWorkplaceCMDBContext',
-        'Resolve-SmartWorkplaceCMDBTenantPath',
-        'Initialize-SmartWorkplaceCMDBTenantFolder',
-        'Export-SmartWorkplaceCMDBCsv',
-        'Get-SmartWorkplaceCMDBTableContract',
-        'Test-SmartWorkplaceCMDBCsvContract'
-    )
-    CmdletsToExport   = @()
-    VariablesToExport = @()
-    AliasesToExport   = @()
+<#
+.SYNOPSIS
+Builds a beta-only distribution from an explicit public file allowlist.
+.VERSION
+0.1.0-beta.3
+#>
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$OutputDirectory)
+$ScriptVersion='0.1.0-beta.3'
+$ErrorActionPreference='Stop'
+$project=Split-Path -Parent $PSScriptRoot
+$release=Get-Content (Join-Path $project 'RELEASE.json') -Raw | ConvertFrom-Json
+if ($release.channel -ne 'beta' -or $release.prerelease -ne $true -or $release.version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$' -or $release.liveQualified -ne $false) {
+    throw 'Only an explicitly unqualified beta package can be prepared.'
 }
+$paths=Get-Content (Join-Path $project 'Release/Files.json') -Raw | ConvertFrom-Json
+$sources=@{}
+foreach ($relative in $paths) {
+    if ($relative -match '(^|[/\\])\.\.?([/\\]|$)|^[/\\]|:|\.local\.json$|(^|/)Data/|\.pfx$|\.csv$|\.log$|\.status\.json$') { throw "Disallowed package path: $relative" }
+    $source=[IO.Path]::GetFullPath((Join-Path $project $relative))
+    if (-not $source.StartsWith($project.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing or unsafe package source: $relative" }
+    if ([IO.Path]::GetExtension($source) -in @('.ps1','.psm1','.psd1')) {
+        if ((Get-AuthenticodeSignature -LiteralPath $source).Status -ne 'Valid') { throw "Invalid package signature: $relative" }
+    }
+    $key='SmartWorkplaceCMDB/'+($relative -replace '\\','/')
+    if ($sources.ContainsKey($key)) { throw "Duplicate package path: $key" }
+    $sources[$key]=$source
+}
+foreach ($legal in @('LICENSE','NOTICE')) { $sources[$legal]=Join-Path (Split-Path -Parent $project) $legal }
+$OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$name='SmartWorkplaceCMDB-'+$release.version
+$zipPath=Join-Path $OutputDirectory ($name+'.zip')
+$hashPath=Join-Path $OutputDirectory ($name+'.sha256')
+$filesPath=Join-Path $OutputDirectory ($name+'.files.sha256.csv')
+foreach ($target in @($zipPath,$hashPath,$filesPath)) { if (Test-Path -LiteralPath $target) { throw "Package output already exists: $target" } }
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$temp=$zipPath+'.tmp.'+[guid]::NewGuid().ToString('N')
+$stream=[IO.File]::Open($temp,[IO.FileMode]::CreateNew)
+$zip=New-Object IO.Compression.ZipArchive($stream,[IO.Compression.ZipArchiveMode]::Create)
+$records=New-Object 'System.Collections.Generic.List[object]'
+try {
+    foreach ($key in @($sources.Keys | Sort-Object)) {
+        $entry=$zip.CreateEntry($key,[IO.Compression.CompressionLevel]::Optimal)
+        $entry.LastWriteTime=[datetimeoffset]'2026-09-09T00:00:00Z'
+        $inputStream=[IO.File]::OpenRead($sources[$key])
+        $outputStream=$entry.Open()
+        try { $inputStream.CopyTo($outputStream) }
+        finally { $inputStream.Dispose(); $outputStream.Dispose() }
+        $records.Add([pscustomobject]@{Path=$key;SHA256=(Get-FileHash -LiteralPath $sources[$key] -Algorithm SHA256).Hash})
+    }
+} catch {
+    $zip.Dispose(); $stream.Dispose()
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
+    throw
+} finally { $zip.Dispose(); $stream.Dispose() }
+Move-Item -LiteralPath $temp -Destination $zipPath
+$hash=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+"$hash  $name.zip" | Set-Content -LiteralPath $hashPath -Encoding ASCII
+$records | Export-Csv -LiteralPath $filesPath -NoTypeInformation -Encoding UTF8
+[pscustomobject]@{Version=$release.version;Channel='beta';FileCount=$records.Count;ZipPath=$zipPath;SHA256=$hash;FileManifest=$filesPath}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD96lr6h1XzPtmD
-# 4uty+zDM6mdNtAPbcY+8/O5DUgLGeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKIwz/9MMCGx3x
+# Is1fVdWfd67l7SLLyOFsMsRY59X2/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -169,31 +198,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJxyJqtbrMbPzGIho7hlg3VcfiDx9OzwPjXBkDmAyBixMA0GCSqG
-# SIb3DQEBAQUABIIBgKd4tyZPxumrwNTzR5yMu+7onTTF/nepYxYA2ytHIXmMNOrd
-# T6ez4ADOLVHR9AtQ+7K7921gFbt19W48yOZVVtzOLgol0oywHYX3UfltUPLTfxZY
-# xd20loE2+/Ah1EutBfoDnt9UxjlOt5q2E26IdRMVBT8PqupGoYCKGoCe2AhfD1q1
-# jHWGszbDmm6Z2/7kwkL6Z4lg6P4YWYqpboiXnM8BRu+2cMh2x26+h/u3QbnflDHV
-# GhaTDMRy8IyHMWLEGTGkCB+CuKv9Shu2Kzi1cP8/WjKMbUkEU7s5uVjMj3pHOrnL
-# bLIq/eyw1cOhpi6NPZp1A1UrET5RryVMxK3YLL2bgNSr+RnhpegQAHJP1S3408Ks
-# gQnCD0QzNwaJ6iGUnLlyLknrLdGn/7Wn4rdftPT61PsQ/zNuknOBH9g/A5KvvFMd
-# WHOINtXBZSWSHC3z3l1MxG0aA8K567MF6SavV+imS7eeM0Vx7dpPMP8DFkjDzxdK
-# usjNxJ5aLkKGZ2UWnaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINUvx/iAq9QUFsEQ6GFFCXnYOdwwo+roOnli3gTB3kjGMA0GCSqG
+# SIb3DQEBAQUABIIBgFD5UcR/52zdNsa5vggCYVwTw6LylaperclRcktVvRs4o4PY
+# YQ8vxXi9m00M7CB9dvhFZWzwBrCA0wcvZyasZaCNNuEm2vKT4YI9wQR74l5/+qkd
+# zO1BbtU0HNoMEKJog63o3xq8UQfbGOUcWpeaRrHCAozmrxpD/+YqliTEle/OJRwj
+# vuJc3J1yRC9HSYU7kzosgl6fq4OMt4HzYZt6pSnBS9wmKatXfp4CkaDZvTDctAWU
+# 9LHM99Tstun3U5sK2v9I68dYbyR8q3MBesY9ncb9WaEPRiKTeDt1s1PwR01eDhbe
+# fRk5msUB53kx1buiJOKvBcE1DUbtdPSYDp/yJ3Z7rrRip/0zWqmy5R3C8obzcc/q
+# ofCOTOYIM+O6pmfkjl8nFmUpQ1XL1RSrnhKhC/4ZudF46akEqFNgb3pwHn2IRK3U
+# c732hCqZ7C4f/PO/cuQleSRkD/U6nrpxe8mtaIRkfg9mQZqiUlbxq+O9KzFGQ0Gx
+# fhke9rkeo8CcfBC1tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCBB0FChijR88OOeBPOzcXHDi8RxmcXJZaKLvXgp
-# l9spFjANBgkqhkiG9w0BAQEFAASCAgAserze/0yTaWAzNieA9j0jWCW+FFxY8Hzd
-# JXvtTzZ29N5dCg9hwg/oNcMwxAauHXzls+zsG+B2lmHjFyd4YPnFIhn8N9YJ3VEa
-# giYS3rKok3D/+iYvffkUJAi6gIe48dnGDEYpjL+Sog+I2p/6uJFbmbRQ0fsVlMTC
-# /MCIANrI2q9dBdV2n91Ls+CpRBvZtNlmmS+pqwx7XMNJAxenG653vWn6+RaNj4HZ
-# lNhVt1R0uIUvIrW7ghcI0ODdSyTezYp64IBohCP7kdUylXCAzDwkQzWTZNZT/8bF
-# rQvXP7oscC57NRwRv5DriQQXT9RV2mq3GfLg3kLV89ceQEwFAPdmeU+xXOrJXwmR
-# 9nW72tJ4yfGO6RO8MSWwyKWL6z/rywW1WW/fzp9LnaMBqZbR5vK78zPVxwFoFBX0
-# UPG70pnGcCpHhOWgoN3ocSx3FqX0Ccc0rqZTczmCGJKp4u1ruyk7YfNF8A0/bGId
-# Rxz6OtlCASlIX1eBs0ZsSRnhibCwr3+WEJLeVBE588ZsCshjion6KjGU6mHpUCUh
-# U96MPfD2l9Znv0F8DXgu958Rprsih8f0SJ7JNT8LisVo9frH79BUyJuvJ9l0gYJL
-# bVPvG3RZCawxYogeDQ8U+rJlBtZsIkgeYJqITomPu85JIb1zK5N2AKTf00WPY6Rm
-# 3n9lx+P1VA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDI1
+# NDJaMC8GCSqGSIb3DQEJBDEiBCAwcczrWWSZEQuuxj5iUpC459K6OQ600/n9XjE3
+# QKlKLzANBgkqhkiG9w0BAQEFAASCAgCnE8RGxZwPPMTwrp/p/9sqIkip9w02B8/L
+# 3pGmAdaTj2Z62qXLRXhapN/Uh8ZeFNtX0/cg8zWWdChzxmZOtV0MO3w+LyM6CIfp
+# AHpKIz7tEpufHdGmHpIhSRQp91hIPByK/VszKFVEogR6TEb0ydzz4jguzQdbkDpy
+# WgdnBS+zhzinrTAfnq1PL7reWVPScHE2uMoV+ZzR2fH54TupeXEKmZyxgsS42UXT
+# 2YcPtglGnvnlP+2wlcqEZcvgwWi8QuFjrRDtRCtZg8zOFhyJF+Y7iElqXxb7A/ES
+# O6Oo4FqKOwAnWHhLrtMJ4WHOvpDk3E0k2vM20WFpywmqenOMohdhgLXgBIF7AA+8
+# WBhNzhBEtqYic5sd+crSxsJYggrp0CuXIZhLoJGBdC+gm9mVAwe09B6Q1sMamHNL
+# DnRHdmTSMNI/D4gNRPvnKICnaZBfOHQ+kFjTnjAvTO9zdsDXOs8Lc/H5ELQnBhuq
+# mTXWz+ZWFigkIaLwOuWWPqSFsYuhkR4sXE2euOoLcOGTQQFpu1XRwWKOiCbhCIb4
+# yQD9JabAOD3dsc0EMbxlm7jHqiwvaCbVw93WlrxZ7ZoUKHPzidSh45sImlRbeJBF
+# xm0BFFl5MSwqPUWQGuf9fXr55eI3xviYVhXLMAbZPFjo4h97BpQGcnKYoJEPyZlr
+# q7aDmlDtCg==
 # SIG # End signature block

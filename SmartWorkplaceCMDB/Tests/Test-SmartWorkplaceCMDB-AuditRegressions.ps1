@@ -1,42 +1,112 @@
-@{
-    RootModule        = 'SmartWorkplaceCMDB.Core.psm1'
-    ModuleVersion     = '0.2.2'
-    PrivateData       = @{ PSData = @{ Prerelease = 'beta.2' } }
-    GUID              = 'fe81d6e3-5d5b-4ec0-9c8b-02f82d9bc001'
-    Author            = 'WorkplaceCloudHub'
-    CompanyName       = 'WorkplaceCloudHub'
-    Copyright         = '(c) WorkplaceCloudHub. All rights reserved.'
-    Description       = 'Core helpers for SmartWorkplaceCMDB.'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @(
-        'Resolve-SmartWorkplaceCMDBCollectionPaths',
-        'Start-SmartWorkplaceCMDBSourceCollection',
-        'Complete-SmartWorkplaceCMDBSourceCollection',
-        'Import-SmartWorkplaceCMDBSourceCsv',
-        'Get-SmartWorkplaceCMDBSourceHealth',
-        'Read-SmartWorkplaceCMDBCollectionFixture',
-        'Assert-SmartWorkplaceCMDBCollectionPage',
-
-        'Get-SmartWorkplaceCMDBProjectRoot',
-        'Read-SmartWorkplaceCMDBJsonFile',
-        'ConvertTo-SmartWorkplaceCMDBKey',
-        'Resolve-SmartWorkplaceCMDBContext',
-        'Resolve-SmartWorkplaceCMDBTenantPath',
-        'Initialize-SmartWorkplaceCMDBTenantFolder',
-        'Export-SmartWorkplaceCMDBCsv',
-        'Get-SmartWorkplaceCMDBTableContract',
-        'Test-SmartWorkplaceCMDBCsvContract'
-    )
-    CmdletsToExport   = @()
-    VariablesToExport = @()
-    AliasesToExport   = @()
+<#
+.SYNOPSIS
+Exercises synthetic tenant, CSV, freshness and bounded-run regressions.
+.VERSION
+0.1.0-beta.1
+#>
+[CmdletBinding()]
+param()
+$ScriptVersion = '0.1.0-beta.1'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+$project = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $project 'Modules/SmartWorkplaceCMDB.Core/SmartWorkplaceCMDB.Core.psd1') -Force
+$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('CMDB-Audit-' + [guid]::NewGuid().ToString('N'))
+$script:passed = 0
+$script:failed = 0
+function Check([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+function Reject([scriptblock]$Body, [string]$Pattern) {
+    try { & $Body | Out-Null } catch {
+        if ($_.Exception.Message -notmatch $Pattern) { throw }
+        return
+    }
+    throw "Expected rejection: $Pattern"
 }
+function Case([string]$Name, [scriptblock]$Body) {
+    try { & $Body; $script:passed++; Write-Host "PASS $Name" }
+    catch { $script:failed++; Write-Host "FAIL $Name : $($_.Exception.Message)" }
+}
+$identity = @{ Tenant='test'; OrganizationKey='example'; EnvironmentKey='test'; TenantKey='example-test'; TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'; NoConfigWrite=$true }
+$exportIdentity = @{ TenantKey=$identity.TenantKey; OrganizationKey=$identity.OrganizationKey; EnvironmentKey=$identity.EnvironmentKey; TenantId=$identity.TenantId }
+try {
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    Case 'Reject relabeling a foreign tenant and preserve target bytes' {
+        $path = Join-Path $tempRoot 'identity.csv'
+        Export-SmartWorkplaceCMDBCsv -Path $path -InputObject @([pscustomobject]@{Value='original'}) @exportIdentity
+        $before = (Get-FileHash $path).Hash
+        Reject { Export-SmartWorkplaceCMDBCsv -Path $path -InputObject @([pscustomobject]@{TenantKey='foreign-test'; Value='foreign'}) @exportIdentity } 'identity mismatch'
+        Check ((Get-FileHash $path).Hash -eq $before) 'Rejected export changed the file.'
+    }
+    Case 'Export follows ordered columns and excludes undeclared properties' {
+        $path = Join-Path $tempRoot 'columns.csv'
+        Export-SmartWorkplaceCMDBCsv -Path $path -Columns @('First','Second') -InputObject @([pscustomobject]@{Second='two'; PrivateNote='not for export'; First='one'})
+        $row = @(Import-Csv $path)[0]
+        Check (($row.PSObject.Properties.Name -join ',') -eq 'First,Second') 'Export ignored the requested column contract.'
+    }
+    $runtime = Join-Path $tempRoot 'Runtime'
+    $orchestrator = Join-Path $project 'Orchestration/SmartWorkplaceCMDB-Orchestrator.ps1'
+    $result = & $orchestrator @identity -DataRootPath $runtime -FixtureRootPath (Join-Path $PSScriptRoot 'Fixtures')
+    Check ($result.Status -eq 'Completed') 'Synthetic full pipeline failed.'
+    $latest = $result.LatestOutputRootPath
+    $userPath = Join-Path $latest 'CMDB/CMDB_Users.csv'
+    $originalUsers = [IO.File]::ReadAllBytes($userPath)
+    Case 'Report counts CSV records containing quoted newlines' {
+        $users = @(Import-Csv $userPath)
+        $users[0].DisplayName = "Synthetic`r`nMultiline"
+        $users | Export-Csv $userPath -NoTypeInformation -Encoding UTF8
+        $expected = 0
+        foreach ($file in Get-ChildItem (Join-Path $latest 'CMDB') -Filter '*.csv' -File) {
+            if ($file.Name -ne 'CMDB_BuildManifest.csv') { $expected += @(Import-Csv $file.FullName).Count }
+        }
+        & (Join-Path $project 'Reports/SmartWorkplaceCMDB-Report.ps1') @identity -DataRootPath $runtime | Out-Null
+        $html = Get-Content (Join-Path $latest 'SmartWorkplaceCMDB-Overview.html') -Raw
+        Check ($html.Contains(('class="value">{0}</div><div>CMDB rows' -f $expected))) 'Report counted physical lines instead of CSV records.'
+    }
+    [IO.File]::WriteAllBytes($userPath, $originalUsers)
+    Case 'Report rejects a foreign tenant before writing including ValidateOnly' {
+        $users = @(Import-Csv $userPath)
+        $users[0].TenantId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        $users | Export-Csv $userPath -NoTypeInformation -Encoding UTF8
+        $reportPath = Join-Path $latest 'SmartWorkplaceCMDB-Overview.html'
+        $before = (Get-FileHash $reportPath).Hash
+        Reject { & (Join-Path $project 'Reports/SmartWorkplaceCMDB-Report.ps1') @identity -DataRootPath $runtime -ValidateOnly } 'identity mismatch'
+        Reject { & (Join-Path $project 'Reports/SmartWorkplaceCMDB-Report.ps1') @identity -DataRootPath $runtime } 'identity mismatch'
+        Check ((Get-FileHash $reportPath).Hash -eq $before) 'Rejected report replaced output.'
+    }
+    [IO.File]::WriteAllBytes($userPath, $originalUsers)
+    Case 'Fresh records do not hide old records in the same dataset' {
+        $users = @(Import-Csv $userPath)
+        $users[0].SourceCollectedDateTime = '2026-01-01T00:00:00Z'
+        $users[1].SourceCollectedDateTime = '2026-09-09T00:00:00Z'
+        $users | Export-Csv $userPath -NoTypeInformation -Encoding UTF8
+        $quality = & (Join-Path $project 'Collectors/SmartWorkplaceCMDB-DataQuality-Normalize.ps1') @identity -DataRootPath $runtime -ReferenceDateTime '2026-09-09T01:00:00Z'
+        $findings = @(Import-Csv $quality.CmdbOutputPath | Where-Object { $_.FindingType -eq 'StaleDataset' -and $_.EntityId -eq 'CMDB_Users.csv' })
+        Check ($findings.Count -eq 1 -and $findings[0].Severity -eq 'Critical') 'Newest record concealed stale data.'
+    }
+    [IO.File]::WriteAllBytes($userPath, $originalUsers)
+    Case 'Bounded orchestration isolates all configured and explicit output roots' {
+        $before = (Get-FileHash $userPath).Hash
+        $config = Join-Path $tempRoot 'global.local.json'
+        @{Output=@{DataRootPath=$runtime; DataAllRootPath=(Join-Path $runtime 'DATA-ALL'); LatestOutputRootPath=$latest; LogRootPath=(Join-Path $runtime 'LOG-ALL')}} | ConvertTo-Json | Set-Content $config
+        $bounded = & $orchestrator @identity -DataRootPath $runtime -LatestOutputRootPath $latest -GlobalConfigPath $config -FixtureRootPath (Join-Path $PSScriptRoot 'Fixtures') -Pipeline EntraUsers -MaxItems 1
+        Check ($bounded.LatestOutputRootPath -ne $latest) 'Bounded run used canonical latest output.'
+        Check ((Get-FileHash $userPath).Hash -eq $before) 'Bounded run replaced canonical users.'
+        Check (@(Import-Csv (Join-Path $bounded.LatestOutputRootPath 'CMDB/CMDB_Users.csv')).Count -eq 1) 'Isolated bounded output is missing.'
+        Check ($bounded.LogPath.StartsWith($bounded.DataRootPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) 'Bounded log escaped isolated root.'
+    }
+} finally {
+    $resolved = [IO.Path]::GetFullPath($tempRoot)
+    $allowed = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if ($resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path $resolved)) { Remove-Item -LiteralPath $resolved -Recurse -Force }
+}
+Write-Host "Audit regressions $ScriptVersion : Passed=$script:passed; Failed=$script:failed"
+if ($script:failed) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD96lr6h1XzPtmD
-# 4uty+zDM6mdNtAPbcY+8/O5DUgLGeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmaNVbzi10t425
+# lPTSA/oON6MJhVT8m3aiT0LnjrPZtqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -169,31 +239,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJxyJqtbrMbPzGIho7hlg3VcfiDx9OzwPjXBkDmAyBixMA0GCSqG
-# SIb3DQEBAQUABIIBgKd4tyZPxumrwNTzR5yMu+7onTTF/nepYxYA2ytHIXmMNOrd
-# T6ez4ADOLVHR9AtQ+7K7921gFbt19W48yOZVVtzOLgol0oywHYX3UfltUPLTfxZY
-# xd20loE2+/Ah1EutBfoDnt9UxjlOt5q2E26IdRMVBT8PqupGoYCKGoCe2AhfD1q1
-# jHWGszbDmm6Z2/7kwkL6Z4lg6P4YWYqpboiXnM8BRu+2cMh2x26+h/u3QbnflDHV
-# GhaTDMRy8IyHMWLEGTGkCB+CuKv9Shu2Kzi1cP8/WjKMbUkEU7s5uVjMj3pHOrnL
-# bLIq/eyw1cOhpi6NPZp1A1UrET5RryVMxK3YLL2bgNSr+RnhpegQAHJP1S3408Ks
-# gQnCD0QzNwaJ6iGUnLlyLknrLdGn/7Wn4rdftPT61PsQ/zNuknOBH9g/A5KvvFMd
-# WHOINtXBZSWSHC3z3l1MxG0aA8K567MF6SavV+imS7eeM0Vx7dpPMP8DFkjDzxdK
-# usjNxJ5aLkKGZ2UWnaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILty7XXSU6bo48lRRayEFSxU5ZV0wuF+8fm+Cv0t5cVwMA0GCSqG
+# SIb3DQEBAQUABIIBgGHSNOihcoZfGiwfAQSUjA1IFAqW5/QPW04k0G+7/JLrjehO
+# zykTm0VuLCYf6i3SkxEdmm7ns/aPCS0zDl6Q4+EgTnnTZU63l/4e/x4as0cISolt
+# eNf2s+y1wRuCY8I6VVxOWmW7+lURuccayw37M0irFBW0b+AdiBVU90Rs3FsZAogf
+# sMUDC2dT7QW9pRb/1iTJ3mDdQR0oSqlzz2j/4fw0VbWcahGLthi7dbEZVLKQBfF1
+# JTSb7IqRjyjDtoFNsNRSZqJJ4HxosKdtiD4CoIDfgbmx2H3+f4yq/OIu/k+EmO7b
+# U085DASkTdRbd45IONhkVMLY+9vdSkXG5sjKljm7udU8e3nQXLiyLrtTmLEmCfn1
+# zYvWiQUUucvBWrir7dJCn/y8RzVpc5Vh7mYTk/j7TNAAoAkBpb6vLqdlljtk0M7y
+# Mt+E/PubIQlV4mtn77qSw6mIFZx5EMiiiCBLkvJisp/K2J1n3FpmduwiAnjVyz6T
+# t9+nzdkW9UxFTugxs6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCBB0FChijR88OOeBPOzcXHDi8RxmcXJZaKLvXgp
-# l9spFjANBgkqhkiG9w0BAQEFAASCAgAserze/0yTaWAzNieA9j0jWCW+FFxY8Hzd
-# JXvtTzZ29N5dCg9hwg/oNcMwxAauHXzls+zsG+B2lmHjFyd4YPnFIhn8N9YJ3VEa
-# giYS3rKok3D/+iYvffkUJAi6gIe48dnGDEYpjL+Sog+I2p/6uJFbmbRQ0fsVlMTC
-# /MCIANrI2q9dBdV2n91Ls+CpRBvZtNlmmS+pqwx7XMNJAxenG653vWn6+RaNj4HZ
-# lNhVt1R0uIUvIrW7ghcI0ODdSyTezYp64IBohCP7kdUylXCAzDwkQzWTZNZT/8bF
-# rQvXP7oscC57NRwRv5DriQQXT9RV2mq3GfLg3kLV89ceQEwFAPdmeU+xXOrJXwmR
-# 9nW72tJ4yfGO6RO8MSWwyKWL6z/rywW1WW/fzp9LnaMBqZbR5vK78zPVxwFoFBX0
-# UPG70pnGcCpHhOWgoN3ocSx3FqX0Ccc0rqZTczmCGJKp4u1ruyk7YfNF8A0/bGId
-# Rxz6OtlCASlIX1eBs0ZsSRnhibCwr3+WEJLeVBE588ZsCshjion6KjGU6mHpUCUh
-# U96MPfD2l9Znv0F8DXgu958Rprsih8f0SJ7JNT8LisVo9frH79BUyJuvJ9l0gYJL
-# bVPvG3RZCawxYogeDQ8U+rJlBtZsIkgeYJqITomPu85JIb1zK5N2AKTf00WPY6Rm
-# 3n9lx+P1VA==
+# MTBaMC8GCSqGSIb3DQEJBDEiBCA5zKF0mxUoroW4pGYK3yoKGeGYZkIfo6hhu45V
+# rb1NEjANBgkqhkiG9w0BAQEFAASCAgBzBC/WaWA/VdDYFdv0v7LW4b9pjYYTZSDp
+# eYfjfICZasDtW82315/4NwYgZ0sJ4xp3WEZ7Irs8FOqOgXbPD0FG2zJxEELMOjH8
+# md3Qorj2wmfYXzaYqyaasqL2CePdX4mXdKPE/Ug0iHgcUY/R0XOvDe5NpYj4y2j9
+# Xk29r3Gzmz2UAUrIwweeSaiiWMEuawxdfqBqboXi1lDJoYz49c8kRoEv8F+VY5Tf
+# X4qykJYcnY+MPZXk/jNeNpmqWvzjYHqIFlXesiCnI1xcwXBagfrqOOqpnoj0f6zf
+# RI8MUFt6tm4L6S9asjbrBkOkN46dJ0MwgtAxEHOr9n+5C4iPiagIGJu88FLsWFXG
+# f83WUlwt6HySbYBHIHcSukbb0TbocuKHM3ffnhEcE/YxqcFQtjktzjfjZamMJRJp
+# fDI6l9d4PsZsLfzEaExVRLC7Y/oZMwqu9yYyTLnmVqaNFsOYS607aYjhtDhFCtzp
+# xbhx+enrngclhPLitRzwEmmbozchI77nIZlqByulfdrxSY5TLXx2UmF3rtz3tiaa
+# V+bomOZ5qgZz7fCSJa5nAlcaI26zU9OYQN9CjAJDcBnbUF9z6BtYCETNE5cvqK4E
+# fHyxX5xO5+/hl5uN0S+pm+oyCzM0EQU56HerbCdhjSZ58jHs9SWX5K/UAq7aslow
+# ++/LV/yaEA==
 # SIG # End signature block
