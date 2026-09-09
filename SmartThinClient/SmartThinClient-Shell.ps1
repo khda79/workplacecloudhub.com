@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Audits, applies, and restores a controlled thin-client workspace shell on Windows.
 
@@ -243,7 +243,7 @@ function Merge-ProfileConfig {
     if ($null -eq $profileConfig) { return $merged }
 
     foreach ($property in $profileConfig.PSObject.Properties) {
-        if ($null -ne $property.Value -and ([string]$property.Value).Length -gt 0) {
+        if ($null -ne $property.Value -and ([string]$property.Value).Length -gt 0 -and [string]$property.Value -ne '__USE_GLOBAL__') {
             $merged[$property.Name] = $property.Value
         }
     }
@@ -305,6 +305,7 @@ function Resolve-Config {
     $templatePath = Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.template.json'
     $defaultConfigPath = Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json'
     $effectivePath = $ConfigPath
+    if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw 'The supplied ConfigPath does not exist.' }
     if ([string]::IsNullOrWhiteSpace($effectivePath)) { $effectivePath = $defaultConfigPath }
     Initialize-LocalJsonFiles -DefaultConfigPath $defaultConfigPath
 
@@ -395,15 +396,11 @@ function Get-RegistryValueSnapshot {
     $hasValue = $false
     $valueKind = ''
     if ($exists) {
-        try {
-            $item = Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop
-            $value = $item.$Name
+        $registryKey = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if ($Name -in $registryKey.GetValueNames()) {
+            $value = $registryKey.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
             $hasValue = $true
-            $registryKey = Get-Item -LiteralPath $Path -ErrorAction Stop
             $valueKind = [string]$registryKey.GetValueKind($Name)
-        }
-        catch {
-            $hasValue = $false
         }
     }
 
@@ -430,7 +427,9 @@ function Restore-RegistryValue {
     }
     else {
         if (Test-Path -LiteralPath $Snapshot.Path) {
-            Remove-ItemProperty -LiteralPath $Snapshot.Path -Name $Snapshot.Name -ErrorAction SilentlyContinue
+            if ($null -ne (Get-ItemProperty -LiteralPath $Snapshot.Path).PSObject.Properties[$Snapshot.Name]) {
+                Remove-ItemProperty -LiteralPath $Snapshot.Path -Name $Snapshot.Name -ErrorAction Stop
+            }
         }
     }
 }
@@ -599,7 +598,7 @@ function New-DedicatedUserIfNeeded {
     }
     New-LocalUser -Name $TargetUser.UserName -Password $DedicatedUserPassword -FullName 'Smart ThinClient Shell' -Description 'Dedicated SmartThinClient workspace user' | Out-Null
     if (Get-Command Add-LocalGroupMember -ErrorAction SilentlyContinue) {
-        Add-LocalGroupMember -Group 'Users' -Member $TargetUser.UserName -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $TargetUser.UserName -ErrorAction Stop
     }
     Write-SmartThinClientLog -Message "Created dedicated local user '$($TargetUser.UserName)'."
     return $true
@@ -652,6 +651,7 @@ function Invoke-ThinClientAudit {
         UseWebShell = [bool](Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true)
         CitrixWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'CitrixWebUrl' -Default ''))
         AvdWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'AvdWebUrl' -Default ''))
+        WindowsAppLaunchUriConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'WindowsAppLaunchUri' -Default ''))
         BrowserInstalled = $browser.Installed
         BrowserPath = $browser.Path
         WebOnlyUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'WebOnlyUrl' -Default ''))
@@ -950,7 +950,7 @@ function Write-ThinClientCliSummary {
 
 function Get-LauncherCommandLine {
     $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
-    return ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $launcherPath)
+    return ('powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $launcherPath)
 }
 
 function ConvertTo-QuotedPowerShellString {
@@ -966,6 +966,7 @@ function New-LauncherScript {
         [Parameter(Mandatory = $true)]$Audit
     )
 
+    Assert-ConfigValues -Config $Config
     $launcherRoot = Join-Path $script:OutputRoot 'Launcher'
     New-Item -Path $launcherRoot -ItemType Directory -Force | Out-Null
     $launcherPath = Join-Path $launcherRoot 'SmartThinClient-LaunchWorkspace.ps1'
@@ -1011,7 +1012,7 @@ function New-LauncherScript {
 
     $content = @"
 param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$EffectiveProfile')
-`$ErrorActionPreference = 'SilentlyContinue'
+`$ErrorActionPreference = 'Stop'
 
 `$CitrixPath = $citrixPathLiteral
 `$AvdPath = $avdPathLiteral
@@ -1036,7 +1037,12 @@ function Start-WorkspaceProcess {
     param([string]`$FilePath, [string]`$Arguments)
     if ([string]::IsNullOrWhiteSpace(`$FilePath)) { return `$false }
     if (-not (Test-Path -LiteralPath `$FilePath)) { return `$false }
-    Start-Process -FilePath `$FilePath -ArgumentList `$Arguments
+    if ([string]::IsNullOrWhiteSpace(`$Arguments)) {
+        Start-Process -FilePath `$FilePath -ErrorAction Stop
+    }
+    else {
+        Start-Process -FilePath `$FilePath -ArgumentList `$Arguments -ErrorAction Stop
+    }
     return `$true
 }
 
@@ -1108,7 +1114,22 @@ function Open-ExternalBrowser {
 
 function Select-HybridProvider {
     if (-not `$HybridSelectionAtStartup) { return `$HybridDefaultProvider }
-    return 'Hybrid'
+    Add-Type -AssemblyName PresentationFramework
+    `$choice = New-Object Windows.Window
+    `$choice.Title = 'Smart ThinClient - choose workspace'
+    `$choice.Width = 360; `$choice.Height = 220
+    `$choice.WindowStartupLocation = 'CenterScreen'
+    `$panel = New-Object Windows.Controls.StackPanel
+    foreach (`$provider in @('Citrix','AVD','WebOnly')) {
+        `$button = New-Object Windows.Controls.Button
+        `$button.Content = `$provider; `$button.Tag = `$provider
+        `$button.Height = 42; `$button.Margin = '10,5,10,5'
+        `$button.Add_Click({ param(`$sender,`$eventArgs) `$choice.Tag = [string]`$sender.Tag; `$choice.Close() })
+        [void]`$panel.Children.Add(`$button)
+    }
+    `$choice.Content = `$panel
+    [void]`$choice.ShowDialog()
+    return [string]`$choice.Tag
 }
 
 function Show-LimitedSettings {
@@ -1267,7 +1288,10 @@ function Show-WebShell {
     `$window.ShowDialog() | Out-Null
 }
 
-if (`$Profile -eq 'Hybrid') { `$Profile = Select-HybridProvider }
+if (`$Profile -eq 'Hybrid') {
+    `$Profile = Select-HybridProvider
+    if ([string]::IsNullOrWhiteSpace(`$Profile)) { exit 0 }
+}
 if (`$UseWebShell -and `$PreferredAccessMode -eq 'Web') {
     Show-WebShell -InitialProvider `$Profile
 }
@@ -1295,21 +1319,26 @@ function New-RollbackState {
     $runKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
     $explorerPolicy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
     $systemPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
-    $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-
     $snapshots = @(
-        Get-RegistryValueSnapshot -Path $runKey -Name 'SmartThinClientShell'
-        Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoRun'
-        Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoControlPanel'
-        Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoViewContextMenu'
-        Get-RegistryValueSnapshot -Path $systemPolicy -Name 'DisableCMD'
-        Get-RegistryValueSnapshot -Path $winlogon -Name 'Shell'
-        Get-RegistryValueSnapshot -Path $winlogon -Name 'Userinit'
+        if ((Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey') -eq 'RunKey') {
+            Get-RegistryValueSnapshot -Path $runKey -Name 'SmartThinClientShell'
+        }
+        $level = Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None'
+        if ((Get-ConfigValue -Config $Config -Name 'EnableShellLimitations' -Default $false) -and $level -in @('Basic', 'Strict')) {
+            Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoRun'
+            Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoControlPanel'
+            Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoViewContextMenu'
+            if ($level -eq 'Strict') { Get-RegistryValueSnapshot -Path $systemPolicy -Name 'DisableCMD' }
+        }
     )
+    $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
 
     [ordered]@{
         AppName = $script:AppName
         RunId = $script:RunId
+        SchemaVersion = 2
+        LauncherExisted = Test-Path -LiteralPath $launcherPath
+        LauncherContent = if (Test-Path -LiteralPath $launcherPath) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($launcherPath)) } else { '' }
         CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
         ComputerName = $env:COMPUTERNAME
         EffectiveProfile = $EffectiveProfile
@@ -1329,6 +1358,88 @@ function Save-RollbackState {
     ([pscustomobject]$State) | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
     Write-SmartThinClientLog -Message "Rollback state saved: $path"
     return $path
+}
+
+function Assert-ConfigValues {
+    param([Parameter(Mandatory = $true)]$Config)
+    $choices = @{
+        DefaultProfile = @('Auto','Citrix','AVD','WebOnly','Hybrid')
+        PreferredAccessMode = @('Web','Native')
+        AutoLaunchMode = @('None','RunKey')
+        ShellRestrictionLevel = @('None','Basic','Strict')
+        ShellMode = @('Launcher','AssignedAccess','ShellLauncher')
+        TargetUserMode = @('ExistingUser','DedicatedUser')
+    }
+    foreach ($key in $choices.Keys) {
+        if ($Config.Contains($key) -and $Config[$key] -notin $choices[$key]) { throw "Invalid configuration value for $key." }
+    }
+    foreach ($key in @('AllowApply','AllowRestore','RequireConfirmationPhrase','CreateDedicatedLocalUser','UseWebShell','BrowserKioskMode','EnableShellLimitations','EnableAssignedAccess','EnableShellLauncher','HybridSelectionAtStartup','WebShellShowProviderButtons','WebShellAllowExternalBrowser','WebShellAllowPowerControls','WebShellAllowLimitedSettings')) {
+        if ($Config.Contains($key) -and $Config[$key] -isnot [bool]) { throw "$key must be a JSON boolean, not a string." }
+    }
+}
+
+function Assert-CimSuccess {
+    param($Response)
+    if ($null -eq $Response -or $null -eq $Response.PSObject.Properties['ReturnValue'] -or $Response.ReturnValue -ne 0) {
+        throw 'Shell Launcher CIM operation did not return success; review the rollback file and log.'
+    }
+}
+
+function Assert-ApplyPreflight {
+    param($Config, $Audit, $TargetUser)
+    Assert-ConfigValues -Config $Config
+    $assigned = [bool](Get-ConfigValue -Config $Config -Name 'EnableAssignedAccess' -Default $false)
+    $shell = [bool](Get-ConfigValue -Config $Config -Name 'EnableShellLauncher' -Default $false)
+    $mode = Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher'
+    if ($assigned -and $shell) { throw 'Assigned Access and Shell Launcher cannot be applied together.' }
+    if (($mode -eq 'AssignedAccess' -and -not $assigned) -or ($mode -eq 'ShellLauncher' -and -not $shell)) { throw 'ShellMode requires its matching Enable setting.' }
+    if ($TargetUser.Mode -eq 'DedicatedUser' -and -not $TargetUser.LocalUserExists) {
+        if (-not (Get-ConfigValue -Config $Config -Name 'CreateDedicatedLocalUser' -Default $false) -or $null -eq $DedicatedUserPassword) { throw 'Dedicated user creation requires CreateDedicatedLocalUser and DedicatedUserPassword.' }
+        if (-not (Get-Command New-LocalUser -ErrorAction SilentlyContinue)) { throw 'New-LocalUser is unavailable.' }
+    }
+    if ($assigned -or $shell) {
+        if (-not $TargetUser.LocalUserExists -or -not $TargetUser.Enabled -or -not $TargetUser.Sid) { throw 'Kiosk modes require an existing enabled local user; prepare and verify that user separately.' }
+        $admins = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)
+        if ($TargetUser.Sid -in @($admins | ForEach-Object { [string]$_.SID })) { throw 'Kiosk target must not be a local administrator.' }
+    }
+    if ($assigned) {
+        if (-not $Audit.AssignedAccessCmdletAvailable -or -not (Get-Command Get-AssignedAccess -ErrorAction SilentlyContinue) -or -not (Get-Command Clear-AssignedAccess -ErrorAction SilentlyContinue)) { throw 'Assigned Access inspection/apply/restore cmdlets are required.' }
+        if ([string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'AssignedAccessAppUserModelId' -Default ''))) { throw 'AssignedAccessAppUserModelId is required.' }
+        if (@(Get-AssignedAccess -ErrorAction Stop).Count) { throw 'Existing Assigned Access configuration detected; this tool will not overwrite it.' }
+    }
+    if ($shell) {
+        if (-not $Audit.ShellLauncherClassAvailable) { throw 'Shell Launcher class is unavailable.' }
+        $enabled = Invoke-CimMethod -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -MethodName 'IsEnabled' -ErrorAction Stop
+        Assert-CimSuccess -Response $enabled
+        if (-not $enabled.Enabled) { throw 'Shell Launcher must already be enabled by an administrator; this tool does not enable Windows features.' }
+        $existing = @(Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -ErrorAction Stop | Where-Object { [string]$_.Sid -eq $TargetUser.Sid })
+        if ($existing.Count) { throw 'Existing custom shell detected for this SID; this tool will not overwrite it.' }
+        $defaultAction = Get-ConfigValue -Config $Config -Name 'ShellLauncherDefaultAction' -Default 0
+        if ($defaultAction -notin @(0,1,2,3)) { throw 'ShellLauncherDefaultAction must be 0, 1, 2 or 3.' }
+        if (-not (Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true) -or (Get-ConfigValue -Config $Config -Name 'PreferredAccessMode' -Default 'Web') -ne 'Web') { throw 'Shell Launcher requires the persistent embedded web shell; external/native launchers exit immediately.' }
+    }
+}
+
+function Assert-RollbackState {
+    param($State)
+    foreach ($name in @('SchemaVersion','AppName','ComputerName','Config','Registry','OutputRoot','LauncherPath','LauncherExisted','LauncherContent','TargetUserSid')) {
+        if ($null -eq $State.PSObject.Properties[$name]) { throw "Incomplete or legacy rollback: missing $name. Manual review is required." }
+    }
+    if ($State.SchemaVersion -ne 2 -or $State.AppName -ne $script:AppName -or $State.ComputerName -ne $env:COMPUTERNAME) { throw 'Rollback schema, application or computer does not match; no state restored.' }
+    $expected = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+    if ([IO.Path]::GetFullPath($State.OutputRoot) -ne [IO.Path]::GetFullPath($script:OutputRoot) -or [IO.Path]::GetFullPath($State.LauncherPath) -ne [IO.Path]::GetFullPath($expected)) { throw 'Rollback output/launcher path mismatch. Use the original OutputRoot.' }
+    if ($State.LauncherExisted -isnot [bool]) { throw 'Invalid rollback launcher state.' }
+    if ($State.LauncherExisted) { [void][Convert]::FromBase64String($State.LauncherContent) }
+    $allowed = @{
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' = @('SmartThinClientShell')
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' = @('NoRun','NoControlPanel','NoViewContextMenu')
+        'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' = @('DisableCMD')
+    }
+    foreach ($snapshot in @($State.Registry)) {
+        if (-not $allowed.ContainsKey([string]$snapshot.Path) -or $snapshot.Name -notin $allowed[[string]$snapshot.Path]) { throw 'Rollback contains an unrelated registry value.' }
+        if ($snapshot.ValueExists -isnot [bool] -or ($snapshot.ValueExists -and $snapshot.ValueKind -notin @('String','ExpandString','Binary','DWord','MultiString','QWord','None'))) { throw 'Invalid registry snapshot.' }
+    }
+    Assert-ConfigValues -Config (Convert-ObjectToHashtable -InputObject $State.Config)
 }
 
 function Assert-ApplyAllowed {
@@ -1354,7 +1465,10 @@ function Assert-RestoreAllowed {
 }
 
 function Apply-AutoLaunch {
-    param([Parameter(Mandatory = $true)][string]$CommandLine)
+    param([Parameter(Mandatory = $true)]$Config, [Parameter(Mandatory = $true)][string]$CommandLine)
+    $mode = [string](Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey')
+    if ($mode -eq 'None') { return }
+    if ($mode -ne 'RunKey') { throw 'AutoLaunchMode must be None or RunKey.' }
     Set-StringRegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SmartThinClientShell' -Value $CommandLine
     Write-SmartThinClientLog -Message 'Configured machine Run key for Smart ThinClient launcher.'
 }
@@ -1367,7 +1481,9 @@ function Apply-ShellLimitations {
         return
     }
 
-    $level = [string](Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'Basic')
+    $level = [string](Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None')
+    if ($level -eq 'None') { return }
+    if ($level -notin @('Basic', 'Strict')) { throw 'Invalid ShellRestrictionLevel.' }
     $explorerPolicy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
     $systemPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
 
@@ -1411,31 +1527,37 @@ function Apply-ShellLauncher {
 
     $defaultAction = [int](Get-ConfigValue -Config $Config -Name 'ShellLauncherDefaultAction' -Default 0)
     $shell = $LauncherCommand
-    Invoke-CimMethod -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -MethodName 'SetCustomShell' -Arguments @{
+    $response = Invoke-CimMethod -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -MethodName 'SetCustomShell' -Arguments @{
         Sid = $Audit.TargetUserSid
         Shell = $shell
         DefaultAction = $defaultAction
-    } | Out-Null
+    }
+    Assert-CimSuccess -Response $response
     Write-SmartThinClientLog -Message "Applied Shell Launcher for SID '$($Audit.TargetUserSid)'."
 }
 
 function Invoke-ThinClientApply {
     param([Parameter(Mandatory = $true)]$Config)
 
+    Assert-ConfigValues -Config $Config
     Assert-ApplyAllowed -Config $Config
     $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $Profile -RequestedAction 'Preview'
     $effectiveProfile = [string]$audit.EffectiveProfile
     $Config = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
     $targetUser = Get-TargetUserState -Config $Config
-    [void](New-DedicatedUserIfNeeded -Config $Config -TargetUser $targetUser)
-    $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $effectiveProfile -RequestedAction 'Preview'
+    Assert-ApplyAllowed -Config $Config
+    Assert-ApplyPreflight -Config $Config -Audit $audit -TargetUser $targetUser
 
     $rollbackState = New-RollbackState -Config $Config -Audit $audit -EffectiveProfile $effectiveProfile
     $rollbackFile = Save-RollbackState -State $rollbackState
+    [void](New-DedicatedUserIfNeeded -Config $Config -TargetUser $targetUser)
+    $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $effectiveProfile -RequestedAction 'Preview'
+    $rollbackState.TargetUserSid = $audit.TargetUserSid
+    [void](Save-RollbackState -State $rollbackState)
     $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
     $launcherCommand = Get-LauncherCommandLine
 
-    Apply-AutoLaunch -CommandLine $launcherCommand
+    Apply-AutoLaunch -Config $Config -CommandLine $launcherCommand
     Apply-ShellLimitations -Config $Config
     Apply-AssignedAccess -Config $Config -Audit $audit
     Apply-ShellLauncher -Config $Config -Audit $audit -LauncherCommand $launcherCommand
@@ -1465,10 +1587,15 @@ function Invoke-ThinClientLaunchOnly {
     $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $Profile -RequestedAction 'Preview'
     $effectiveProfile = [string]$audit.EffectiveProfile
     $Config = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
-    $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
-    $launcherCommand = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile)
+    $installedRoot = $script:OutputRoot
+    try {
+        $script:OutputRoot = Join-Path $installedRoot ('LaunchOnly\' + [guid]::NewGuid().ToString('N'))
+        $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
+    }
+    finally { $script:OutputRoot = $installedRoot }
+    $launcherCommand = ('powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile)
 
-    Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile) | Out-Null
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile) | Out-Null
 
     $result = [pscustomobject]([ordered]@{
         AppName = $script:AppName
@@ -1508,21 +1635,27 @@ function Invoke-ThinClientRestore {
     $path = Resolve-RollbackPath
     $rollback = Read-JsonFile -Path $path
     if ($null -eq $rollback) { throw "Rollback file is empty or invalid: $path" }
+    Assert-RollbackState -State $rollback
 
     foreach ($snapshot in @($rollback.Registry)) {
         Restore-RegistryValue -Snapshot $snapshot
     }
 
     $rollbackConfig = Convert-ObjectToHashtable -InputObject $rollback.Config
-    if ([bool](Get-ConfigValue -Config $rollbackConfig -Name 'EnableAssignedAccess' -Default $false) -and (Get-Command Clear-AssignedAccess -ErrorAction SilentlyContinue)) {
-        try { Clear-AssignedAccess | Out-Null } catch {}
+    if ([bool](Get-ConfigValue -Config $rollbackConfig -Name 'EnableAssignedAccess' -Default $false)) {
+        Clear-AssignedAccess -ErrorAction Stop | Out-Null
     }
-
     if ([bool](Get-ConfigValue -Config $rollbackConfig -Name 'EnableShellLauncher' -Default $false) -and $rollback.TargetUserSid) {
-        try {
-            Invoke-CimMethod -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -MethodName 'RemoveCustomShell' -Arguments @{ Sid = [string]$rollback.TargetUserSid } | Out-Null
-        }
-        catch {}
+        $response = Invoke-CimMethod -Namespace 'root\standardcimv2\embedded' -ClassName 'WESL_UserSetting' -MethodName 'RemoveCustomShell' -Arguments @{ Sid = [string]$rollback.TargetUserSid } -ErrorAction Stop
+        Assert-CimSuccess -Response $response
+    }
+    if ($rollback.LauncherExisted) {
+        $parent = Split-Path $rollback.LauncherPath -Parent
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        [IO.File]::WriteAllBytes($rollback.LauncherPath, [Convert]::FromBase64String($rollback.LauncherContent))
+    }
+    elseif (Test-Path -LiteralPath $rollback.LauncherPath) {
+        Remove-Item -LiteralPath $rollback.LauncherPath -Force -ErrorAction Stop
     }
 
     $result = [pscustomobject]([ordered]@{
@@ -1676,6 +1809,7 @@ function Show-ThinClientGui {
 }
 
 $config = Resolve-Config
+Assert-ConfigValues -Config $config
 if ($Profile -eq 'Auto') {
     $configuredProfile = [string](Get-ConfigValue -Config $config -Name 'DefaultProfile' -Default 'Auto')
     if ($configuredProfile -ne 'Auto') { $Profile = $configuredProfile }
@@ -1731,11 +1865,12 @@ catch {
     exit 1
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5z18aMq89zSGl
-# 01oVIZXjvDD1vGQfuNJ9JJsjCY2IPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWPe5TztqOj3hv
+# Iz0ydg+st7fiUslvJCnYkNhusnuUzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1826,25 +1961,25 @@ catch {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -1852,47 +1987,47 @@ catch {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDequ2HsbyRsZY0oHsooYToND3xLbWKgC7ZLgbOuGbXNMA0GCSqG
-# SIb3DQEBAQUABIIBgDoVYEGrqiCz96BpWOABbVRF13F6FFwVBNyQtsMmApJMAOQI
-# 2gUqFhewwxZv+od170RXZ1uOKvVwODFcV2u6sZmy5R4dk3Gf5v16vVZlC1xi6Gy/
-# 0Me/J96js4OMarE8E5Bsj4z3el2rpq6DHsanLuEyhENtpLVa37ZzdHHB+5Z9xUIr
-# gGttH+CF286/JVbJGHyD/JpmJRWcLBQGEsAJUCD7DyTb//cHPCkFL37scb035eO9
-# A7Lf2TzOuukAWs1qYN8b4/KZUrxPIKTFLM6prl9KWSMGk0GCI1kCLjE++cjREUjp
-# TAHfAkP/3EItdK6A44BEm06UQ3r6b5KvMXKZUumTRyv+62Huy0Bt+Ij728YSNyT9
-# YGfjoyLDO2qJgnr7JHFGRbGpPrSAm2NAfC+1dk0+izak0gYECpI3ZYtC9wkyyPB3
-# t7K0sOMxi4lNN5Yd7OsBpTiNTmg7aHHGLrD0uGyWx7mUihHt/Zyq32Bke7jNHz3V
-# 65q/+PvDadMb89tWV6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP1f6z0LT0E5AI/PvARRZP3/bmM0Qyg0WwmkF0yqWWLBMA0GCSqG
+# SIb3DQEBAQUABIIBgI5NnlWkkjyOF1gJFGJSFIQ6et2m71lDhkmo6iI7hX9JqI8q
+# cCkjD186PrNayC8Fwbfw3RTUwM+3WgURdkozE88DsG1j+pJwYdPFR+QSg3XEaEgG
+# TFcyO1jUMhPU9mQAAjGLmax0l6zUl3DI5f7dIGvy0MGi2c0XGEvUHFSXwLbYQw6y
+# 29gbSjzxPjw6NieNkompNQKH2PLkftyFF+wMHx5zsqju8tS6591mAjtWUvO7Evyq
+# QdbZKJrsCpDuClyw9xdDBo3XrDuOVlMiTBLNWqx9ZIz9wAdtxIbO0ryo/HEX4BM3
+# +IYnRQTdXqSxuxcmK1SR+D8RPMDb49pVOBPJ+tTrisysThmQqphaOX9meVaHFjdT
+# pnvaRNTUlQtm6kX4HFa0KC1L4WBhOAqJLJ7BiCpmmtj52nPEB+ob5nvvL6oiEBCA
+# x3PMegVS94lQ0wcQc4nl4wvYemq8LI4gE6yRPcbPRnWEXmFnipoJhRP76PzwV2a0
+# jh1+Y/gFbCkMrfT6xKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAVtAFXifpTnT1D8Vb7ErZzS0CXf7kx0wsdgxkB
-# LmohVjANBgkqhkiG9w0BAQEFAASCAgBAXAy4aq5JTYwH/det1itkhbV53CyZqdtR
-# CQ80gg+L/ksxZ58wIJV2eQyYvkPlofcgBtytJAiZLpIBSNngO9bTej4vvxOmabTd
-# ThNdS/Hbhn5g4wafAzkdJZrAdIsfrCyZlT8FNiBskKeD541BjNCLU0FMY2C92CKo
-# LD/g4b7iXu7dKMe2EETTfi5ANLUSpFeh4z72r6fgtxzBt/qT29P52eW8wi16Y4t/
-# FytKcz65wEYUhfqQfH+oDf3m+3j8nmzsdqNE+UU3nvCVJK9TzJegb2M6Xl1j9r1q
-# rWG9KtXMomTp1+bFXuLQn5hZ6vZQz5Lm9Bfn0+rc1fy8wOhpiBwKXsgKkaGrB+xu
-# IFRwzHed+c140qAmoEp07AUvS9C2gzKTz0eAKqbfCBA0uk+KI0LNreUNIl5dB32d
-# SenrlTQ7cYn6AwN87gk2ZMlMhlyv8FFVK2qnV3C06tHzyTLbtaR3BjxqLJbRm9CK
-# 7UtBtatrjFLORtzpTnUj5CBX/RF46nnu5y0ne9IHp2lyPgN//pOTEBWFL2CX93UB
-# RzQf6tP3mhSuZOt1o+7ybLBWsJHQQwy0dRI/NkWU+liPHrJj8LtZhwx5jMFQPfSd
-# AtGeRIVBQCFhf5B4AyF9Fjunw/I3C+pu/3/9NdSYCLR1dEh6FqYgiJLazUI7VOiK
-# QqNo1j7opQ==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwNjM5
+# MjFaMC8GCSqGSIb3DQEJBDEiBCCaSLJM3C8EUObNgF+E7n/OjoOsJt3qzTOhfFUy
+# xrhLnTANBgkqhkiG9w0BAQEFAASCAgAFdqq7vnZYY54agchGRn/0fGSsPKd2iW+N
+# I9ACA8W7t4AvObCSmWG6jVtBFbBLEuLmn1PlH7KMIWLRvorAgu42PpIAb9mZXdgq
+# T75mWBV8b9AlGnmYZJ2g3UlijAMGXBrQTQ4HuQmI9CFgxGX2qS0ZEztWp/tCQ5t4
+# HRygnAhnrdvyXtKsXEkFVyBxhsITJDxqsc3Rs/vQehJSW7q75xUbe8hwnkCNMhM0
+# KWCslmtz+wEZUk/Wm3X4IXqlWZjFp+UU/7kgXdqXaQg+AAMEUIgmhBbbxlAw6rp3
+# njf5JyamAmK2a7qh/kbhLvtp+i9Mxbzj3ea+uplNqTNd5IP7kPoysAHpnLijhO5f
+# PwALyxGk1ySTKLFu36xbNgcqZs1VvBVrcDPLjIclDXgg2rrsS1CwiogTj4laXwfW
+# kvTQNbJBiOd4fivk3R25jrDolOhwuPRgqyaLQ3c5rsIYwxJhe2wHClYe4IezJojW
+# FxVpfjYj0bljjZZb7QiV8siqP8ZmmdBQ2Jsnh1GJqbdkickTU4fKyFwj8CIV/WkN
+# nhSjY/PFncVPD9RZ9CURH48kPVylIvGJ2VBInU3yeVJ+uMv0EFM1yGuRZENsZAJj
+# yGy4AY3wEl+JyWYoxsTVzFwNfnr2+88t844+i5+BNxj5Izm4R/TGepW6xbkF4LqE
+# vWRpDRbbjg==
 # SIG # End signature block

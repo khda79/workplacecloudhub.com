@@ -2,11 +2,11 @@
   "ProfileName": "WebOnly",
   "Provider": "Browser",
   "LaunchMode": "WebShell",
-  "PreferredAccessMode": "Web",
-  "UseWebShell": true,
+  "PreferredAccessMode": "__USE_GLOBAL__",
+  "UseWebShell": "__USE_GLOBAL__",
   "WebOnlyUrl": "",
   "BrowserPath": "",
-  "BrowserKioskMode": true,
+  "BrowserKioskMode": "__USE_GLOBAL__",
   "ExpectedExecutableNames": [
     "msedge.exe",
     "chrome.exe"
