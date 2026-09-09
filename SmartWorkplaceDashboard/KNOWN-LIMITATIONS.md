@@ -1,0 +1,12 @@
+# Known limitations — BETA 3.8.0-beta.1
+
+- No real collection, tenant login, Graph/Exchange connection, production modification, scheduled refresh, gateway or SharePoint refresh was performed for this release preparation.
+- Power Query functions and identity reconciliation are tested with in-memory synthetic inputs using Microsoft PQTest. This is not a Power BI Desktop end-to-end refresh. DAX formula execution, rendered values, country interaction, CSV/Excel/PDF exports, accessibility and large-tenant performance remain unqualified.
+- One tenant per source root/model. Several CSV contracts do not expose TenantKey, so their provenance cannot be verified from rows. There is no RLS. Isolate storage, workspaces, permissions and exports operationally.
+- All 90 source files are required. Strict schema validation requires updating the pinned contract and reviewing the model after a collector schema change. Header-only tables are valid empty results, not evidence of collector success.
+- Invalid numeric cells become null. Aggregations outside the specifically guarded primary license measures may omit unknown values and must be reviewed for completeness. Storage units, licensing estimates, entitlement rules and business meaning need source/contract review; no financial or contractual certification is implied.
+- Four source-age cards do not cover all 90 tables. File modification timestamps are fallback proxies. Copying files can change apparent snapshot dates; file-time weekly history and its relative row-count heuristic cannot prove completeness, and can omit legitimate older smaller inventories. The beta has no universal stale-data decision gate.
+- Conflicting or duplicate entity mappings stop refresh instead of choosing a record. Expected canonical IDs must be present. Source systems must resolve ambiguities; no automatic repair is attempted.
+- Service-plan state is not product usage. Hardware/BIOS-age rules are proxies. Country filters do not affect unlinked/global datasets. DAX/context coverage must be reconciled before operational decisions.
+- No PBIT/PBIX, installer, Gallery module, tenant deployment, automatic update channel or custom export command is supplied. A refreshed PBIX contains data and is not the redistributable source ZIP.
+- PowerShell signature validity is checked locally. The signing certificate is self-signed; receiving machines must establish appropriate trust. This locally prepared signature has no timestamp; certificate expiry and byte/line-ending changes matter.

@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Unified current-state inventory across Active Directory, Entra ID, Exchange On-premises and Exchange Online",
+                    "value": "BETA 3.8.0-beta.1 | Unified current-state inventory across Active Directory, Entra ID, Exchange On-premises and Exchange Online",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Protected mailbox inventory, expected scope reconciliation, gaps and collection warnings",
+                    "value": "BETA 3.8.0-beta.1 | Protected mailbox inventory, expected scope reconciliation, gaps and collection warnings",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

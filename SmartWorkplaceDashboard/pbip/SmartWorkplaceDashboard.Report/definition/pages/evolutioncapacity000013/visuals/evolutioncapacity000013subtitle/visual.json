@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Native operational series plus deduplicated weekly SmartInventory snapshots",
+                    "value": "BETA 3.8.0-beta.1 | Native operational series plus deduplicated weekly SmartInventory snapshots",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

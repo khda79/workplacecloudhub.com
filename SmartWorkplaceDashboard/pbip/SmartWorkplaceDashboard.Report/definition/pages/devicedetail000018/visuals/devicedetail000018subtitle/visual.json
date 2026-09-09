@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Unified current-state inventory across Active Directory, Entra ID and Intune",
+                    "value": "BETA 3.8.0-beta.1 | Unified current-state inventory across Active Directory, Entra ID and Intune",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",
