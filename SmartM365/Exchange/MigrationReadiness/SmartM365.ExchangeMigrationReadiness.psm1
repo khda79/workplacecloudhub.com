@@ -1,6 +1,6 @@
-Set-StrictMode -Version 2.0
+﻿Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.16'
+$script:SemrVersion = '1.11.17'
 $script:ActiveDirectoryDomains = @()
 $script:ExchangeOnPremEvidenceByEmail = @{}
 $script:ExchangeOnPremHybridEvidence = $null
@@ -413,7 +413,7 @@ function Get-SemrMicrosoftGraphModuleState {
 
     $modules = @($RequiredModules | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     $moduleLiteral = ($modules | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ','
-    $probeScript = "`$ErrorActionPreference='Stop'; `$required=@($moduleLiteral); `$required | Where-Object { -not (Get-Module -ListAvailable -Name `$_) } | Sort-Object -Unique | ForEach-Object { [Console]::Out.WriteLine(`$_) }"
+    $probeScript = "`$ErrorActionPreference='Stop'; `$required=@($moduleLiteral); `$common=@((Get-Module -ListAvailable -Name `$required[0]).Version); foreach (`$name in `$required) { `$versions=@((Get-Module -ListAvailable -Name `$name).Version); `$common=@(`$common | Where-Object { `$_ -in `$versions }) }; if (`$common.Count -eq 0) { `$required | ForEach-Object { [Console]::Out.WriteLine(`$_) } }"
     $probe = Invoke-SemrIsolatedPowerShell -ScriptText $probeScript
     if ($probe.ExitCode -ne 0) {
         $detail = if ($probe.StandardError) { $probe.StandardError } else { $probe.StandardOutput }
@@ -438,10 +438,10 @@ function Install-SemrMicrosoftGraphModule {
         [scriptblock]$ProgressCallback
     )
 
-    $modules = @($ModuleNames | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    $modules = @(@('Microsoft.Graph.Authentication','Microsoft.Graph.Users','Microsoft.Graph.Identity.DirectoryManagement') + $ModuleNames | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     if ($modules.Count -eq 0) { return Get-SemrMicrosoftGraphModuleState }
     $moduleLiteral = ($modules | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ','
-    $installScript = "`$ErrorActionPreference='Stop'; `$ProgressPreference='SilentlyContinue'; if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) { throw 'Install-Module is unavailable in PowerShell 7.' }; foreach (`$moduleName in @($moduleLiteral)) { if (-not (Get-Module -ListAvailable -Name `$moduleName)) { Install-Module -Name `$moduleName -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop } }"
+    $installScript = "`$ErrorActionPreference='Stop'; `$ProgressPreference='SilentlyContinue'; if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) { throw 'Install-Module is unavailable in PowerShell 7.' }; `$version=(Find-Module Microsoft.Graph.Authentication -Repository PSGallery -ErrorAction Stop).Version; foreach (`$moduleName in @($moduleLiteral)) { Install-Module -Name `$moduleName -RequiredVersion `$version -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop }"
     $install = Invoke-SemrIsolatedPowerShell -ScriptText $installScript -ProgressCallback $ProgressCallback
     if ($install.ExitCode -ne 0) {
         $detail = if ($install.StandardError) { $install.StandardError } else { $install.StandardOutput }
@@ -750,18 +750,17 @@ function Get-SemrExchangeOnlineSessionInfo {
                     try {
                         @(& $probeCommand[0] -ResultSize 1 -ErrorAction Stop) | Out-Null
                         $previousAccount = if ($script:ExchangeOnlineSessionInfo) { [string]$script:ExchangeOnlineSessionInfo.Account } else { '' }
-                        $previousTenantId = if ($script:ExchangeOnlineSessionInfo) { [string]$script:ExchangeOnlineSessionInfo.TenantId } else { '' }
                         $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
                             Available = $true
-                            Usable = $true
+                            Usable = [string]::IsNullOrWhiteSpace($TenantId)
                             Account = $previousAccount
-                            TenantId = $previousTenantId
+                            TenantId = ''
                             Organization = ''
                             AuthType = 'Interactive'
                             State = 'ValidatedByGetEXOMailbox'
                             ConnectionCount = 0
                             Error = ''
-                            Diagnostic = "$metadataDiagnostic Read-only Get-EXOMailbox probe succeeded."
+                            Diagnostic = "$metadataDiagnostic Read-only Get-EXOMailbox probe succeeded, but does not establish tenant identity."
                             ModuleVersion = $moduleVersion
                             CommandSource = [string]$probeCommand[0].Source
                             ValidationMethod = 'Get-EXOMailbox'
@@ -798,6 +797,7 @@ function Get-SemrExchangeOnlineSessionInfo {
         $connectedTenantId = [string](Get-SemrPropertyValue -InputObject $connection -Names @('TenantID','TenantId') -Default '')
         $tokenStatus = [string](Get-SemrPropertyValue -InputObject $connection -Names @('TokenStatus','State') -Default '')
         $usable = [string]::IsNullOrWhiteSpace($tokenStatus) -or $tokenStatus -notmatch '(?i)expired|invalid|closed|disconnected'
+        if ($TenantId -and ($connections.Count -ne 1 -or $connectedTenantId -ne $TenantId)) { $usable = $false }
         $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
             Available = $true
             Usable = $usable
@@ -845,12 +845,18 @@ function Connect-SemrExchangeOnline {
 
     if (-not (Test-SemrCommand -Name 'Connect-ExchangeOnline') -or -not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop }
     $existing = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId -AllowCommandProbe
-    $tenantCompatible = -not $TenantId -or -not $existing.TenantId -or [string]$existing.TenantId -eq $TenantId
+    $tenantCompatible = -not $TenantId -or [string]$existing.TenantId -eq $TenantId
     if (-not $ForceAuthentication -and $existing.Available -and $existing.Usable -and $tenantCompatible) {
         if (-not $script:ConnectionState.ExchangeOnline) { $script:OwnsExchangeOnlineSession = $false }
         $script:ConnectionState.ExchangeOnline = $true
         return Get-SemrConnectionState
     }
+    if ($DisableWam -and -not (Get-Command Connect-ExchangeOnline -ErrorAction Stop).Parameters.ContainsKey('DisableWAM')) {
+        throw 'DisableWam=true requires ExchangeOnlineManagement 3.7.2 or later and a compatible PowerShell runtime. Update the module before connecting.'
+    }
+    $script:ConnectionState.ExchangeOnline = $false
+    $script:OwnsExchangeOnlineSession = $false
+    $script:ExchangeOnlineSessionInfo = $null
     if (Test-SemrCommand -Name 'Disconnect-ExchangeOnline') {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
     }
@@ -873,7 +879,7 @@ function Connect-SemrExchangeOnline {
         $connected.Account = $UserPrincipalName
         $script:ExchangeOnlineSessionInfo = $connected
     }
-    if ($TenantId -and $connected.TenantId -and [string]$connected.TenantId -ne $TenantId) {
+    if ($TenantId -and [string]$connected.TenantId -ne $TenantId) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
         throw "Exchange Online connected to tenant '$($connected.TenantId)' instead of configured tenant '$TenantId'."
     }
@@ -1878,10 +1884,10 @@ function Get-SemrGraphEvidence {
         return [pscustomobject]@{
             Available = $true
             Source = 'Live Microsoft Graph (isolated process)'
-            SourceTimestamp = Get-Date
+            SourceTimestamp = $null
             Users = @()
             LicenseDetails = @()
-            QueryError = ''
+            QueryError = 'The Graph worker returned no evidence for this mailbox. Rerun the collection.'
         }
     }
 
@@ -1963,37 +1969,61 @@ function Get-SemrTenantLicenseEvidence {
     return [pscustomobject]$result
 }
 
+function Get-SemrLicenseCapacityDecision {
+    param($Policy, $Capacity, [bool]$TargetLicenseAssigned)
+    if (-not $Policy.RequiresLicense) { return 'PASS' }
+    if (-not $Policy.Known -or -not $Policy.Eligible) { return 'FAIL' }
+    # An existing assignment already consumes a seat; do not require a second one.
+    if ($TargetLicenseAssigned) { return 'PASS' }
+    if (-not $Capacity -or -not $Capacity.Available) { return 'UNKNOWN' }
+    if ($Capacity.Found -and $Capacity.AvailableUnits -gt 0) { return 'PASS' }
+    return 'FAIL'
+}
+
 function Get-SemrExchangeOnlinePermission {
     param([Parameter(Mandatory)][string]$EmailAddress)
 
     $permissions = [System.Collections.Generic.List[object]]::new()
-    if (-not $script:ConnectionState.ExchangeOnline) { return @() }
+    if (-not $script:ConnectionState.ExchangeOnline) { throw 'Exchange Online is not connected; permission evidence is unavailable.' }
 
     $fullAccessCommand = if (Test-SemrCommand -Name 'Get-EXOMailboxPermission') { 'Get-EXOMailboxPermission' } elseif (Test-SemrCommand -Name 'Get-MailboxPermission') { 'Get-MailboxPermission' } else { '' }
+    if (-not $fullAccessCommand -or -not (Test-SemrCommand -Name 'Get-RecipientPermission')) {
+        throw "Required Full Access or Send As command is unavailable for '$EmailAddress'; no comparison can be produced."
+    }
     if ($fullAccessCommand) {
-        foreach ($permission in @(Invoke-SemrCommandSafe -CommandName $fullAccessCommand -Parameters @{ Identity = $EmailAddress })) {
+        $fullAccess = Invoke-SemrCommandResult -CommandName $fullAccessCommand -Parameters @{ Identity = $EmailAddress }
+        if (-not $fullAccess.Success) { throw "Full Access collection failed for '$EmailAddress': $($fullAccess.ErrorMessage)" }
+        foreach ($permission in @($fullAccess.Rows)) {
             $rights = @($permission.AccessRights | ForEach-Object { [string]$_ })
-            if ($permission.IsInherited -or $rights -notcontains 'FullAccess') { continue }
+            if ($permission.IsInherited -or [bool](Get-SemrPropertyValue $permission @('Deny') $false) -or $rights -notcontains 'FullAccess') { continue }
             $delegate = [string]$permission.User
-            if ($delegate -match 'NT AUTHORITY|S-1-5-|SELF') { continue }
+            if (-not (Test-SemrMigrationRelevantDelegate -Identity $delegate)) { continue }
             [void]$permissions.Add([pscustomobject]@{ EmailAddress = $EmailAddress; PermissionType = 'FullAccess'; Delegate = $delegate; IsInherited = [bool]$permission.IsInherited; Source = 'ExchangeOnline' })
         }
     }
     if (Test-SemrCommand -Name 'Get-RecipientPermission') {
-        foreach ($permission in @(Invoke-SemrCommandSafe -CommandName 'Get-RecipientPermission' -Parameters @{ Identity = $EmailAddress })) {
+        $sendAs = Invoke-SemrCommandResult -CommandName 'Get-RecipientPermission' -Parameters @{ Identity = $EmailAddress }
+        if (-not $sendAs.Success) { throw "Send As collection failed for '$EmailAddress': $($sendAs.ErrorMessage)" }
+        foreach ($permission in @($sendAs.Rows)) {
             if ($permission.IsInherited -or $permission.Deny -or @($permission.AccessRights) -notcontains 'SendAs') { continue }
             $delegate = [string]$permission.Trustee
-            if ($delegate -match 'NT AUTHORITY|S-1-5-|SELF') { continue }
+            if (-not (Test-SemrMigrationRelevantDelegate -Identity $delegate)) { continue }
             [void]$permissions.Add([pscustomobject]@{ EmailAddress = $EmailAddress; PermissionType = 'SendAs'; Delegate = $delegate; IsInherited = [bool]$permission.IsInherited; Source = 'ExchangeOnline' })
         }
     }
-    if (Test-SemrCommand -Name 'Get-EXOMailbox') {
-        $mailbox = @(Invoke-SemrCommandSafe -CommandName 'Get-EXOMailbox' -Parameters @{ Identity = $EmailAddress; Properties = @('GrantSendOnBehalfTo') } | Select-Object -First 1)
-        if ($mailbox.Count -eq 1) {
+    $mailboxCommand = if (Test-SemrCommand -Name 'Get-EXOMailbox') { 'Get-EXOMailbox' } elseif (Test-SemrCommand -Name 'Get-Mailbox') { 'Get-Mailbox' } else { '' }
+    $mailboxParameters = @{ Identity = $EmailAddress }
+    if ($mailboxCommand -eq 'Get-EXOMailbox') { $mailboxParameters.Properties = @('GrantSendOnBehalfTo') }
+    $sendOnBehalf = Invoke-SemrCommandResult -CommandName $mailboxCommand -Parameters $mailboxParameters
+    $mailbox = @($sendOnBehalf.Rows)
+    if (-not $sendOnBehalf.Success -or $mailbox.Count -ne 1 -or -not $mailbox[0].PSObject.Properties['GrantSendOnBehalfTo']) {
+        throw "Send on Behalf collection is incomplete for '$EmailAddress': $($sendOnBehalf.ErrorMessage)"
+    }
+    if ($mailbox.Count -eq 1) {
             foreach ($delegate in @($mailbox[0].GrantSendOnBehalfTo)) {
+                if (-not (Test-SemrMigrationRelevantDelegate -Identity ([string]$delegate))) { continue }
                 [void]$permissions.Add([pscustomobject]@{ EmailAddress = $EmailAddress; PermissionType = 'SendOnBehalf'; Delegate = [string]$delegate; IsInherited = $false; Source = 'ExchangeOnline' })
             }
-        }
     }
     return @($permissions)
 }
@@ -3289,13 +3319,13 @@ function Invoke-SemrAssessment {
                     }
                     $licenseCapacity = $licenseCapacityCache[$licenseKey]
                 }
-                $capacityPass = -not $mailboxTargetPolicy.RequiresLicense -or ($licenseCapacity -and $licenseCapacity.Found -and $licenseCapacity.AvailableUnits -gt 0)
-                $capacityResult = if (-not $mailboxTargetPolicy.RequiresLicense) { 'PASS' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { 'FAIL' } elseif (-not $licenseCapacity.Available) { 'UNKNOWN' } elseif ($capacityPass) { 'PASS' } else { 'FAIL' }
+                $capacityResult = Get-SemrLicenseCapacityDecision -Policy $mailboxTargetPolicy -Capacity $licenseCapacity -TargetLicenseAssigned $targetLicenseAssigned
+                $capacityPass = $capacityResult -eq 'PASS'
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'LICENSE-CAPACITY'; Category = 'Licensing'; Severity = if ($capacityPass) { 'Information' } else { 'Critical' }
                     Result = $capacityResult
-                    IsBlocking = -not $capacityPass; ObservedValue = if (-not $mailboxTargetPolicy.RequiresLicense) { $mailboxTargetPolicy.Message } elseif ($licenseCapacity) { $licenseCapacity.Message } else { $mailboxTargetPolicy.Message }; ExpectedValue = if ($mailboxTargetPolicy.RequiresLicense) { "At least one available $($mailboxTargetPolicy.TargetSku) license" } else { 'No direct license required below the shared mailbox quota' }
-                    EvidenceSource = if ($mailboxTargetPolicy.RequiresLicense) { "$graphSource subscribedSkus" } else { 'Configured shared mailbox policy' }; Message = if (-not $mailboxTargetPolicy.RequiresLicense) { 'This shared mailbox does not require a direct license while it stays within the 50 GB limit and uses no licensed-only feature.' } elseif ($capacityPass) { 'The target license SKU has available capacity.' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.Message } else { 'The target license SKU is missing or has no available capacity.' }
+                    IsBlocking = -not $capacityPass; ObservedValue = if (-not $mailboxTargetPolicy.RequiresLicense) { $mailboxTargetPolicy.Message } elseif ($targetLicenseAssigned) { "Target SKU $($mailboxTargetPolicy.TargetSku) already assigned; no additional seat required" } elseif ($licenseCapacity) { $licenseCapacity.Message } else { $mailboxTargetPolicy.Message }; ExpectedValue = if ($mailboxTargetPolicy.RequiresLicense) { "Target SKU already assigned, or at least one available $($mailboxTargetPolicy.TargetSku) license" } else { 'No direct license required below the shared mailbox quota' }
+                    EvidenceSource = if ($mailboxTargetPolicy.RequiresLicense) { "$graphSource licenseDetails + subscribedSkus" } else { 'Configured shared mailbox policy' }; Message = if (-not $mailboxTargetPolicy.RequiresLicense) { 'This shared mailbox does not require a direct license while it stays within the 50 GB limit and uses no licensed-only feature.' } elseif ($capacityPass -and $targetLicenseAssigned) { 'The target SKU is already assigned; its consumed seat must not be counted twice.' } elseif ($capacityPass) { 'The target license SKU has available capacity.' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.Message } else { 'The target license SKU is missing or has no available capacity.' }
                     RecommendedAction = if ($capacityPass) { '' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { 'Select an approved mailbox-eligible target SKU.' } else { 'Add license capacity or select an approved target SKU before the migration wave.' }
                 })
 
@@ -4021,8 +4051,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZmrdgcJULwyHf
-# hFrIc+rMIRiJzv/KhSKSY1Tj6F5IVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+vttqsD/8x97+
+# eFJ+zkKzHgs7DFHeuIFQAyuTarpWa6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4113,25 +4143,25 @@ Export-ModuleMember -Function @(
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -4139,47 +4169,47 @@ Export-ModuleMember -Function @(
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICsH2lsR6xoED25HERZsS6zJ+qY2arbF2+PdiIXzIcEkMA0GCSqG
-# SIb3DQEBAQUABIIBgKBTb8GeFVdrz/iQXGmuTofwF8ds6Ykeja688THJA3d77TdZ
-# 9GDrKOt4eo2uKlQxTebHIlo78v3XvFc4OsTryr1zq8ZZW1kZOfCX03SWPufe++Th
-# K9eDly7CM71OeQnfVYv6lvVt6sNkRMVpthD8Tp24zEi1beB3GhW2VofWB7REmDwt
-# B8XKabBp5SKwAUPMG88qp2LFFVptIVQw5BAvrPCpaOcoLLXxBOEPGlu6gWDpw4D1
-# RUMVhDcBfaIQ7WzdjaVCHyMNzEJ7fTncKhdrF0KGlEn4OO44r7hoap8QZ3riHx+R
-# kDWRdbrPfEdU3jd+qb9k0aiM1dF7XrMxXsJ5Vew4vG7lsl7v9iNV4mPlqkf/dZAh
-# KubKyITExjgHDfNHmvkVzYmN+E1n4gLIxrf8wekb1tgXoom598ps/CcSxuED0Ozf
-# xSwPwLpAvnBz2YmG7alHA2gVpe5j7F+q3TyZ8af0sJ2zNUdaZMVuROc0beDhbJ6F
-# OGa6hkrfoWHKe6UacaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPqsxaBQEpx4aVCoZbWGf7gbdTdFAh6GlB9tHIPgQlrIMA0GCSqG
+# SIb3DQEBAQUABIIBgJrlrtOjj//nrnV0Aia9/BfTefUKx77gjsAjln9LyTDRxyWs
+# flQX899KG+0s0fYIa7nnX6UDVr7MyzBeURHS83VhfiodzEd4/2SMx1a3KKtEF1DJ
+# Yzqvk9zCqMOQI+0Ltj+mIU4552iAe92qdISd4U/4thuZxev5e1hOMFKCKZgCIQku
+# qVlt0Ev6P4kwry2d0Ra+Muuda3LyIgkQiRf1GLyKyFm1HoLmLNNxOd+Q3/sdL222
+# /YyLJ27mMnX7BGZE3RWbQ7qW3xLW9hhubQxDH4qLO4ZL+8QQCW6fiWw0PikgqVTe
+# R2Ww7rQcXbbZJvWVAD608kQIpR+3YvBwGZjUFgmf11sqEfDiW1Gf8/IVigKk/D05
+# rP9BUh3yk7x5jVq3yiOFr2QorJSp9Ui6OOvIXFXSrdV87geZSqXpMviIqbdWH6uu
+# nIKQIZ7JMHV0s7qYskvej6h4y2o4zAAR4yhFBLTy5A8hO169AX7faMfQ4DxMrU0A
+# D2wactnUfx+7FrEBwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMDQ5
-# MzJaMC8GCSqGSIb3DQEJBDEiBCDNSaVZPy3T46rWZSB75gP3iTz02YaFJElMdYOz
-# jsBqajANBgkqhkiG9w0BAQEFAASCAgC70dEIQLMt00GV6MgNLsSwCPuGg2CdYvpe
-# YcsN463NVbm4Wh2Gf653592iQj/YvMiPAhBG9t/yKPM3omD291PLeGZSplAlCEsq
-# n2xtG43DDJz56VmbGLKqN3ZK8GHxv1pL/ai6FYACDjDgF0+kf8h+Ke/7/yBisVQK
-# ibE9ZsCR0gvvosTQqydTOHple8+6eB5butQyC53qBAW8i4ZF1+6yeWo4uDWQp7m6
-# 6VKsr6qdCEQYfEjCmHZ9QFriIQgG1Qmu5kGJ8c8546sh+LHvLyrWC7A6Ahs/EWfa
-# CJOeekN00tG2WTzFOVdxY8ynrtBCE1tC1K4l8zQzSjlw/ve2KFsFrLiTRNvdkAj0
-# 98BN5ikjqJF0UgwT7qaD78+Syy70JoeaGMvbUGo2GWbcffH9gtnquAsTsXsGmdVL
-# +SzYylMLCj5c+ninwp4qaMsQo6zJPTvWpl1fPWz1mPPUnvcEPPMKlwAzkqREyzZy
-# tsCugwC7fd80hv4ogMW678QW4Qlhuu+vaBiEI4pbtbBrBW9TLTyIj5AzDGYJybuz
-# cuhQ2aWle/QOJE5vwwjV0A2nDcesAWqhraWHSBfqmeNCN5oAqMYU+61UYkfwk/1W
-# r1cWpec5NnNO5kLYL7D0RZkxjmYGjfMyEMCeQOFOcHAVh98XLlgJexknAgEggJBX
-# JA/sRsqh8g==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDgyMTQ5
+# MjhaMC8GCSqGSIb3DQEJBDEiBCD+QpmXj2C4oc/r4HYErtk2ME/gYVlXlW6iP+JI
+# dv6RpzANBgkqhkiG9w0BAQEFAASCAgBmK0ykpARQ0YWdHDHkSeE63+Dur0kG76Zc
+# 4veHxTpn0Mz+FrhMRn+Rwqi54lTVm5CKGLneaYTu4RocA9E1LqNM5Kt3dBnQqSw6
+# a4YbORCw/jIxcepErGXFZFmX4E4BeclqqLNlrtpVdJlJQpNVAnc1sbfAU/c85TDm
+# Q6MWd/7bKT/i8IUhjtliHSgqGoemtpIeWjWm+B+yObyItpf9GpnnoY1WgEPGarCp
+# awNRpSW1spE1k5AXlWXKQp6La4iS44DBP/lG05uvhaVu+X65NIr02ugK9yjvQLeA
+# JbwlGZe9Xqa04V/SqRafX9swJnHdP5qTrUYjkYyBRSwbTwWbKEiOqy5FqDuEYKnJ
+# jBTzUGaXuhwsSkQTK2r+27j4uqMeBk2e/NgbVJJmfCxSRmlpLqVeu7yFwW7WbBxb
+# SYcePOls7/qabv4OHLCOnpq1k+4mVLSKsvfvLcCPNddTY8iwt4PTR0DOiweRx1DN
+# x6KWOe68cmA3hFJwNBIGJ+SZU/4Ex6nuPKbwfJMZ1d08guldGwcXb2calftsNAal
+# PvFIEK0Ys/K9pACM9xAXjlgbtlGxxZqHToz1pLGWe9qHOfpP3jBmwIqMNhous/L/
+# NiNopYz7TQNin5fwNeV3+a5PXAJl9x9MNU6GpQENLHwzLZZn5YZPUhs/G/BNL+8k
+# KUGO0ja33g==
 # SIG # End signature block

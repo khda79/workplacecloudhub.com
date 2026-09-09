@@ -1,6 +1,6 @@
 # Smart Exchange Migration Readiness
 
-Application autonome PowerShell 7 / WPF de prévalidation en lecture seule des batches de migration Exchange hybride vers Exchange Online.
+Application autonome PowerShell 7 / WPF de prévalidation en lecture seule des batches de migration Exchange hybride vers Exchange Online. Préversion **1.11.17**, publication approuvée le 9 septembre 2026. [Release GitHub et package portable](https://github.com/khda79/workplacecloudhub.com/releases/tag/exchange-migration-readiness-v1.11.17). La qualification Live sur un hôte Exchange équipé reste nécessaire ; les limites de validation sont détaillées dans `VALIDATION-1.11.17.md`.
 
 Elle charge un CSV de boîtes aux lettres, interroge les sources autoritaires en Live et produit un verdict par boîte : `GO`, `GO-WARNING`, `NO-GO` ou `UNKNOWN`.
 
@@ -8,7 +8,7 @@ Elle charge un CSV de boîtes aux lettres, interroge les sources autoritaires en
 
 L’application fonctionne exclusivement en **Live strict**. Elle ne propose plus de mode `CacheOnly` et ne charge aucun inventaire CSV de secours.
 
-L'outil détecte le produit et le build du serveur local via `Get-ExchangeServer`. Les versions prises en charge sont Exchange Server 2016 (15.1), Exchange Server 2019 (15.2 avant le build 2562) et Exchange Server Subscription Edition (15.2 build 2562 ou ultérieur).
+L'outil détecte le produit et le build du serveur local via `Get-ExchangeServer` : Exchange Server 2016 (15.1), Exchange Server 2019 (15.2 avant le build 2562) et Exchange Server Subscription Edition (15.2 build 2562 ou ultérieur). Cette reconnaissance technique n'est pas une certification de support Microsoft : Exchange 2016 et 2019 ont atteint leur fin de support le 14 octobre 2025 ([Microsoft Learn](https://learn.microsoft.com/en-us/troubleshoot/exchange/administration/exchange-2019-2016-end-of-support)).
 
 La phase d’évaluation reste sélectionnable :
 
@@ -47,9 +47,9 @@ L’application est strictement diagnostique : elle ne crée pas de batch et ne 
 
 ## Prérequis
 
-- Windows et PowerShell 7 ;
-- module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
-- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; le GUI peut proposer leur installation sous `CurrentUser` ;
+- Windows avec WPF et une version PowerShell compatible avec le module EXO : PowerShell 7.4 minimum pour EXO 3.5 à 3.9.2, PowerShell 7.6 minimum pour EXO 3.10 et ultérieur ([matrice Microsoft](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps)) ;
+- module `ExchangeOnlineManagement` 3.7.2 minimum avec le réglage par défaut `DisableWam=true` ;
+- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` à une **même version installée** ; le worker choisit la plus récente commune aux trois. Le GUI peut proposer leur installation alignée sous `CurrentUser` ;
 - module `ActiveDirectory` et accès à tous les domaines de la forêt ;
 - rôle/outils Exchange Management Shell 2016, 2019 ou Subscription Edition installés localement et snap-in `Microsoft.Exchange.Management.PowerShell.SnapIn` disponible sous Windows PowerShell 5.1 ;
 - compte interactif disposant des droits de lecture EXO et Graph nécessaires.
@@ -164,3 +164,51 @@ Output\SEMR-yyyyMMdd-HHmmss\
 ## Permissions après migration
 
 Après un assessment, l’onglet `Permissions baseline` permet de comparer la baseline enregistrée aux permissions Exchange Online actuelles. Cette comparaison est elle aussi en lecture seule.
+
+La comparaison s'arrête explicitement si une commande Full Access, Send As ou Send on Behalf est absente, échoue ou ne fournit pas la propriété attendue. Un échec de lecture ne signifie jamais « aucun droit ». Les ACE `Deny` ne sont pas exportées comme des autorisations ; les SID de délégués sont conservés. Les identités sont comparées textuellement sans distinction de casse : un même délégué représenté par SID, DN et UPN peut encore apparaître comme différent et doit être rapproché manuellement. Une baseline initiale partielle ne certifie pas la conservation de tous les droits. Ces exports décrivent les droits explicites, pas le calcul complet des accès effectifs via groupes et héritage.
+
+## Installation autonome et permissions opérateur
+
+Copier le dossier complet, y compris les deux workers, le module, les fichiers splash/update-check, les images, `Config` et `Samples`. Aucun MSI, déploiement Intune ou module PowerShell Gallery du produit n'est fourni. Les modules Microsoft restent des prérequis externes. Ne copier ni `*.local.json`, ni `Output`, ni les CSV réels dans une distribution publique.
+
+Sous PowerShell 7 compatible, installer les prérequis Microsoft si nécessaire :
+
+```powershell
+Install-Module ExchangeOnlineManagement -Scope CurrentUser -Repository PSGallery
+$graphVersion = (Find-Module Microsoft.Graph.Authentication -Repository PSGallery).Version
+Install-Module Microsoft.Graph.Authentication,Microsoft.Graph.Users,Microsoft.Graph.Identity.DirectoryManagement -RequiredVersion $graphVersion -Scope CurrentUser -Repository PSGallery
+```
+
+Préparer ensuite une copie du modèle `Config\SmartM365-ExchangeMigrationReadiness.local.json.template` nommée `SmartM365-ExchangeMigrationReadiness.local.json`. Renseigner `TenantProfile.TenantId` avec le GUID du tenant prévu, `RemoteRoutingDomain` et `Hybrid.TargetDeliveryDomain` avec le domaine hybride réel ; ajuster le SKU et le répertoire de sortie. Le chargement ajoute les clés manquantes du modèle sans écraser les valeurs locales. En copie autonome, aucune configuration centrale n'est disponible : le TenantId doit être renseigné explicitement. Une simple réussite de `Get-EXOMailbox` ne suffit plus à identifier le tenant ; des métadonnées EXO absentes ou plusieurs sessions imposent une nouvelle connexion vérifiable.
+
+| Source | Permissions et contrôles à préparer |
+| --- | --- |
+| Microsoft Graph délégué | Consentement administrateur pour les scopes ci-dessus ; compte avec un rôle Entra pris en charge pour la lecture des licences, par exemple Directory Readers ou Global Reader. Les scopes seuls ne garantissent pas les droits du compte. Voir [licenseDetails](https://learn.microsoft.com/en-us/graph/api/user-list-licensedetails?view=graph-rest-1.0). |
+| Exchange Online délégué | RBAC autorisant la lecture des destinataires, MailUser, mailboxes actives/soft-deleted/inactive, domaines, permissions, migrations/move requests et endpoints, ainsi que `Test-MigrationServerAvailability`. Vérifier les cmdlets réellement disponibles dans la session ; un simple rôle de lecture des destinataires ne couvre pas nécessairement les tests de migration. Voir [recherche des permissions de cmdlets](https://learn.microsoft.com/en-us/powershell/exchange/find-exchange-cmdlet-permissions?view=exchange-ps). |
+| AD et Exchange local | Identité Windows courante avec accès de lecture à tous les domaines de la forêt et aux objets Exchange, statistiques, permissions, bases et configuration hybride. Aucun compte local alternatif ni accès distant Exchange n'est utilisé. |
+| Poste opérateur | Répertoire de sortie inscriptible, accès réseau aux domaines AD, Microsoft Graph, EXO et à l'endpoint hybride. Le worker doit reconnaître un serveur Exchange local via `Get-ExchangeServer` : un poste RSAT seul ne suffit pas. |
+
+Ne pas exécuter le bootstrap app-only SmartM365 pour cette application autonome. Elle ne demande ni `Mail.Send` ni permission Graph d'écriture ; elle ne transmet pas automatiquement ses rapports à SharePoint ou Teams. Le test fonctionnel d'endpoint est diagnostique et ne crée pas de migration. Le contrôle de mise à jour au lancement consulte GitHub ; `-ValidateOnly` n'ouvre pas l'interface et ne lance aucune connexion tenant.
+
+## Validation et limites des rapports
+
+```powershell
+pwsh -NoProfile -STA -File .\SmartM365-ExchangeMigrationReadiness-GUI.ps1 -ValidateOnly
+pwsh -NoProfile -File .\SmartM365-ExchangeMigrationReadiness-GraphWorker.ps1 -ValidateOnly
+pwsh -NoProfile -File .\Tests\SmartM365-Test-ExchangeMigrationReadiness.ps1
+```
+
+Le premier contrôle valide le XAML, le JSON, la sérialisation PS5.1 et les auto-tests du moteur. Le second importe les modules Graph sans authentification. La suite de régression utilise exclusivement des fixtures locales, vérifie les erreurs de permissions, les sessions EXO ambiguës, les payloads Graph absents, les CSV et l'export réel d'un assessment sans sources. Ces tests ne certifient ni les permissions effectives d'un tenant ni la topologie hybride réelle.
+
+Le classeur autonome contient neuf feuilles de base : Summary, Mailbox Findings, Tenant Checks, Permissions, Evidence, Live Sources, Check Coverage, Action Plan et Check Options. Excel et ImportExcel ne sont pas nécessaires à sa génération. Le HTML et le GUI restent en anglais ; la présentation WorkplaceCloudHub est prévue en EN/FR/IT/ES/DE/AR. Les CSV, classeurs, HTML et logs contiennent des identités, adresses, délégations et détails d'infrastructure : ils ne sont pas anonymisés. Protéger leur accès. Dans Excel, ouvrir les CSV non fiables par import en colonnes texte ; le classeur généré encode les chaînes comme du texte.
+
+Un `GO` porte uniquement sur les contrôles activés et les preuves collectées à l'instant donné. Examiner aussi Check Options, Live Sources, Check Coverage et les `UNKNOWN`. Une information Graph absente du payload est une erreur de collecte, jamais la preuve qu'un utilisateur n'existe pas. La disponibilité des sources et le verdict métier sont deux informations distinctes.
+
+## Changements de la préversion 1.11.17
+
+- Sélection cohérente des versions Graph et diagnostic visible en cas d'échec de `-ValidateOnly`.
+- Refus d'une identité tenant EXO non vérifiable ou de plusieurs connexions ambiguës.
+- Distinction entre payload Graph absent et recherche d'utilisateur vide.
+- Une licence cible déjà attribuée ne réclame plus un second siège disponible ; la capacité globale du batch continue de compter les destinataires non licenciés.
+- Comparaison des permissions interrompue en cas d'évidence incomplète ; conservation des SID et exclusion des ACE Full Access `Deny` côté local et EXO.
+- Tests hors connexion, guide d'installation et limites de validation explicités.
