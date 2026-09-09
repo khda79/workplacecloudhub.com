@@ -25,6 +25,8 @@ Get-AuthenticodeSignature .\SmartThinClient-Shell.ps1
 
 The repository uses a self-signed WorkplaceCloudHub code-signing certificate. Certificate trust is an operator decision; a valid signature does not certify functionality. CMD wrappers and locally generated launchers explicitly use process-scoped `ExecutionPolicy Bypass`. They do not change the machine execution policy. Generated launcher files contain local configuration and are not Authenticode-signed; package-signature validation does not extend to those files.
 
+For signature verification, use a Git clone/checkout that honors the repository's `.gitattributes` (`*.ps1 text eol=crlf`). In the publication read-back, GitHub Raw served LF line endings and Windows reported `NotSigned`; restoring the repository's CRLF checkout produced `Valid` for the same source. A raw-file download or browser copy is therefore not equivalent to the signed Windows checkout. Do not bypass a failed signature check: verify the checkout and certificate trust first.
+
 For updates, keep a separate backup of local JSON, output and rollback files, compare the new templates, and rerun Preview. There is no automatic migration or update check. Existing local profiles remain explicit overrides: set inherited fields to `"__USE_GLOBAL__"` when adopting the corrected templates. Never overwrite local workspace URLs with a blank template.
 
 ## Modes
