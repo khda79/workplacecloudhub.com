@@ -1,4 +1,26 @@
-# SmartFinOps
+# SmartFinOps Workplace — Beta 1.5.0-beta.1
+
+**Beta candidate for controlled evaluation; not yet published.** The versioned package is `SmartFinOps-Workplace-1.5.0-beta.1.zip`. The release manifest retains `channel: beta` and `prerelease: true`; any GitHub release must remain a prerelease.
+
+Read [RELEASE-NOTES.md](RELEASE-NOTES.md), [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md), and [VALIDATION.md](VALIDATION.md). Git and publication are prepared for final validation, not executed.
+
+## Evaluate the beta
+
+Use Windows PowerShell 5.1 or PowerShell 7 on Windows. Extract the complete package, preserve `Config/`, and use existing exports from exactly one tenant. No Graph or Exchange module is needed. For AllSigned, trust the supplied public WorkplaceCloudHub code-signing certificate under your organization's policy.
+
+```powershell
+# Validate CSV contracts and freshness first; inspect the resulting DataQuality CSV.
+.\SmartFinOps-Workplace-Analyze.ps1 -Tenant test -SmartM365LatestCsvFolderPath 'C:\Inventory\test\DATA-LAST' -ValidateOnly
+# Full local analysis. CSVs and reports remain confidential evaluation outputs.
+.\SmartFinOps-Workplace-Analyze.ps1 -Tenant test -SmartM365LatestCsvFolderPath 'C:\Inventory\test\DATA-LAST'
+```
+
+For tests that create only synthetic data in an isolated temporary directory:
+
+```powershell
+.\Tests\SmartFinOps-Workplace-Beta.Tests.ps1
+.\Tests\SmartFinOps-Workplace-Integration.Tests.ps1
+```
 
 SmartFinOps is a read-only decision-support project that applies FinOps principles to workplace technology.
 
@@ -66,7 +88,7 @@ The HTML report is designed for a management audience. It shows, in this order:
 5. license capacity and forecasting;
 6. assumptions and a collapsed technical appendix.
 
-The report contains aggregated evidence only and does not expose raw personal data.
+The HTML report contains aggregated findings and may contain source paths or environment metadata. Supporting CSVs contain identities and operational data. Treat all outputs as confidential.
 
 All SmartFinOps Workplace user-facing report text and decision values are produced in English.
 
@@ -116,6 +138,8 @@ Persona alone never changes a license. E3-to-F3 cases require recent activity, n
 
 High-confidence no-license findings require persona `None`, a disabled or blocked account, and no recent M365 or technical evidence. Enabled dormant accounts remain review-only. Any recent evidence creates a conflict review even when the account is disabled. `LogonCount = 0` is not a no-license rule because the AD attribute can be unknown and is not replicated between domain controllers.
 
+Before any removal or downgrade valuation, required identity, activity and licensing sources must be loaded and fresh. A matching user activity row is required; F3 also requires valid mailbox and OneDrive storage. Missing evidence, conflicting directory states or simultaneous E3/F3 base suites remain unquantified review cases.
+
 No recommendation is an automatic license, mailbox or account change. Shared mailboxes and special accounts always follow a separate review path.
 
 Generic M365 inactivity does not prove that a Dynamics 365, Project, Power BI, Power Apps or other add-on license is unused. Those findings stay review-only and are not monetized without product-specific telemetry.
@@ -124,7 +148,7 @@ Generic M365 inactivity does not prove that a Dynamics 365, Project, Power BI, P
 
 `SmartFinOps_Workplace_ExchangeOptimization.csv` identifies licensed Exchange Online `UserMailbox` objects that are disabled in AD or Entra ID and still have configured delegates.
 
-A **strong candidate** must be below 45 GB and have no observed archive, litigation or retention hold, service-account signal, or conflicting account state. Mailboxes from 45 GB to below 50 GB require a capacity review. Mailboxes at or above 50 GB and cases with a guardrail failure are excluded.
+A **strong candidate** must be below 45 GB and have no observed archive, litigation or retention hold, service-account signal, or conflicting account state. Unknown archive or hold state excludes conversion. Mailboxes from 45 GB to below 50 GB require a capacity review. Mailboxes at or above 50 GB and cases with a guardrail failure are excluded.
 
 The decision correlates the canonical mailbox inventory with the separate statistics, archive, permissions, M365 mailbox usage, directory account state, and consolidated license decision sources. Configured permissions prove delegation exists; they do not prove who actively accesses the mailbox or that no application dependency exists.
 
@@ -137,7 +161,7 @@ The recommendation is review-only. It never converts a mailbox or removes a lice
 - Other mapped products use the public Microsoft France price or a simple public tier average when applicable.
 - Tenant-specific contract prices can override the baseline through `PriceModel.MonthlyUnitPriceBySkuPartNumber` in local configuration.
 
-Indicative prices are used to prioritize opportunities. They are not committed savings. A reduction becomes a realized saving only when purchased units can actually be reduced under the contract or at renewal. Reusing an existing license is reported separately as cost avoidance.
+The supplied baseline remains a historical snapshot dated 2026-07-18, not a newly verified quote. Only EUR is supported; non-EUR overrides are rejected. Indicative prices are used to prioritize opportunities. They are not committed savings. A reduction becomes a realized saving only when purchased units can actually be reduced under the contract or at renewal. Reusing an existing license is reported separately as cost avoidance.
 
 ## Configuration
 
@@ -155,9 +179,9 @@ Local `*.local.json` files must not be committed.
 For Active Directory:
 
 - `AD_Users_AllDomains.csv` and `AD_Computers_AllDomains.csv` are the canonical enriched KPI tables;
-- `AD_Users_AllDomains_Brut.csv` and `AD_Computers_AllDomains_Brut.csv` are validation or fallback sources only.
+- `AD_Users_AllDomains_Brut.csv` and `AD_Computers_AllDomains_Brut.csv` are validation sources only; this beta does not automatically fall back to raw rows for decisions.
 
-`-ValidateOnly` checks source existence, required columns and freshness without importing full CSV row sets. Freshness uses `Report Refresh Date` when the source exposes it and falls back to the file modification time otherwise. The default freshness threshold is 72 hours.
+`-ValidateOnly` checks source existence, required columns and freshness without retaining full CSV row sets; it streams report-refresh timestamps across all rows. Freshness uses the oldest valid `Report Refresh Date`. Missing, malformed or future timestamps in that column produce `Unknown`; only a source without the column falls back to file modification time. The default threshold is 72 hours. Full analysis additionally detects duplicate canonical identities and invalid numeric capacity. Successful execution does not mean the source checks passed.
 
 SharePoint user activity, Teams device usage, Microsoft 365 Copilot usage, and Teams Phone user usage are activity guardrails for base-license decisions when data is available. They are not monetized as separate products.
 
@@ -169,7 +193,10 @@ Readiness and control sources include Teams Phone assignments and detailed calls
 - `Empty`: the CSV contains a valid header but no data rows;
 - `Missing`: an expected source is absent;
 - `Missing optional`: an optional source is absent and does not reduce mandatory coverage;
-- `Blocked`: collection is known to be unavailable because of an external authorization or API condition;
-- `Invalid schema`: the CSV exists but required columns are missing.
+- `Blocked`: a custom source contract explicitly declares an external collection block; the generic beta does not assume a tenant-specific authorization failure;
+- `Invalid schema`: required columns are missing or a canonical identity is blank/duplicated; excluded from analysis.
+- `Error`: the CSV could not be parsed.
+
+Freshness is separate: `Fresh`, `Stale`, `Unknown`, or `NotChecked`. Incomplete assessments explicitly state that zero financial totals do not prove zero opportunity.
 
 Readiness-only sources do not change license recommendations or financial potential. Files whose names contain `MAXITEMS` remain excluded.

@@ -1,5 +1,7 @@
 {
   "Version": 4,
+  "ReleaseVersion": "1.5.0-beta.1",
+  "ReleaseChannel": "beta",
   "ExcludedFileNamePatterns": [
     "MAXITEMS"
   ],
@@ -8,13 +10,13 @@
       "Entity": "Active Directory users",
       "CanonicalEnrichedFile": "AD_Users_AllDomains.csv",
       "RawFile": "AD_Users_AllDomains_Brut.csv",
-      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file only for validation and fallback."
+      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file for validation only."
     },
     {
       "Entity": "Active Directory computers",
       "CanonicalEnrichedFile": "AD_Computers_AllDomains.csv",
       "RawFile": "AD_Computers_AllDomains_Brut.csv",
-      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file only for validation and fallback."
+      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file for validation only."
     }
   ],
   "Sources": [
@@ -130,8 +132,7 @@
       "FileNames": ["M365_PowerBI_Fabric_ActivityEvents.csv"],
       "RequiredColumns": ["CreationTime", "Activity", "PrincipalType"],
       "Optional": true,
-      "ValidationOnly": true,
-      "BlockedReason": "Power BI Activity Events API access is blocked for the current application identity (HTTP 403); no CSV is expected until tenant authorization is corrected."
+      "ValidationOnly": true
     },
     {
       "Key": "M365PowerBIFabricUserActivity",
@@ -139,8 +140,7 @@
       "SemanticRole": "User-level Power BI and Fabric activity evidence; readiness only until product-specific rules are approved",
       "FileNames": ["M365_PowerBI_Fabric_UserActivity.csv"],
       "RequiredColumns": ["UserPrincipalName", "PrincipalType", "LastActivityDate", "TotalActivityCount"],
-      "Optional": true,
-      "BlockedReason": "Power BI Activity Events API access is blocked for the current application identity (HTTP 403); no CSV is expected until tenant authorization is corrected."
+      "Optional": true
     },
     {
       "Key": "M365AppsActivations",
@@ -387,7 +387,7 @@
     {
       "Key": "ADUsersRaw",
       "DisplayName": "Active Directory users - raw",
-      "SemanticRole": "Raw user export retained for lineage and fallback only",
+      "SemanticRole": "Raw user export retained for lineage and validation only",
       "FileNames": [
         "AD_Users_AllDomains_Brut.csv"
       ],
@@ -415,7 +415,7 @@
     {
       "Key": "ADComputersRaw",
       "DisplayName": "Active Directory computers - raw",
-      "SemanticRole": "Raw computer export retained for lineage and fallback only",
+      "SemanticRole": "Raw computer export retained for lineage and validation only",
       "FileNames": [
         "AD_Computers_AllDomains_Brut.csv"
       ],

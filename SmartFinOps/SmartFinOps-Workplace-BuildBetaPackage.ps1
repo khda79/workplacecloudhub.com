@@ -1,86 +1,60 @@
-﻿Set-StrictMode -Version 2.0
-
-function Add-SmartFinOpsUnreferencedCsvQualityRows {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$DataQualityRows
-    )
-
-    $knownFileNames = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($row in $DataQualityRows) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$row.FileName)) {
-            [void]$knownFileNames.Add([string]$row.FileName)
-        }
-    }
-
-    if (-not (Test-Path -LiteralPath $script:SmartM365LatestCsvFolderPath -PathType Container)) { return }
-    $additionalFiles = @(
-        Get-ChildItem -LiteralPath $script:SmartM365LatestCsvFolderPath -File -Filter '*.csv' |
-            Where-Object {
-                -not (Test-SmartFinOpsExcludedCsv -FileName $_.Name) -and
-                -not $knownFileNames.Contains($_.Name)
-            } |
-            Sort-Object Name
-    )
-
-    foreach ($item in $additionalFiles) {
-        try {
-            $ageHours = [math]::Round(((Get-Date) - $item.LastWriteTime).TotalHours, 1)
-            $freshnessStatus = if ($ageHours -gt $script:SmartFinOpsMaxSourceAgeHours) { 'Stale' } else { 'Fresh' }
-            $headerColumns = @(Get-SmartFinOpsCsvHeaderColumns -Path $item.FullName)
-            $notes = if ($freshnessStatus -eq 'Stale') {
-                "Source is older than $($script:SmartFinOpsMaxSourceAgeHours) hours."
-            }
-            else {
-                'Catalogued for freshness and schema inventory; not imported by the current analyzer.'
-            }
-            $DataQualityRows.Add([pscustomobject]@{
-                RunId = $script:RunId
-                SourceName = "Additional CSV: $($item.Name)"
-                SemanticRole = 'Catalogued source not consumed by the current analyzer'
-                SourceRequirement = 'Not defined'
-                Status = 'Catalogued'
-                ContractStatus = 'NotDefined'
-                FreshnessStatus = $freshnessStatus
-                Path = $item.FullName
-                FileName = $item.Name
-                RowCount = ''
-                ColumnCount = $headerColumns.Count
-                LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-                AgeHours = $ageHours
-                RequiredColumnsMissing = ''
-                BlockedReason = ''
-                Notes = $notes
-            }) | Out-Null
-        }
-        catch {
-            $DataQualityRows.Add([pscustomobject]@{
-                RunId = $script:RunId
-                SourceName = "Additional CSV: $($item.Name)"
-                SemanticRole = 'Catalogued source not consumed by the current analyzer'
-                SourceRequirement = 'Not defined'
-                Status = 'Error'
-                ContractStatus = 'Error'
-                FreshnessStatus = 'NotChecked'
-                Path = $item.FullName
-                FileName = $item.Name
-                RowCount = ''
-                ColumnCount = 0
-                LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-                AgeHours = ''
-                RequiredColumnsMissing = ''
-                BlockedReason = ''
-                Notes = $_.Exception.Message
-            }) | Out-Null
-        }
-    }
+﻿[CmdletBinding()]
+param([string]$DestinationRoot = (Join-Path $PSScriptRoot 'Output/Packages'))
+$ErrorActionPreference='Stop'
+$release=Get-Content (Join-Path $PSScriptRoot 'SmartFinOps-Workplace.Release.json') -Raw | ConvertFrom-Json
+if ($release.channel -ne 'beta' -or -not $release.prerelease -or $release.version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$') { throw 'A beta version and prerelease=true are mandatory.' }
+$files=@(
+ 'SmartFinOps-Workplace-Analyze.ps1','SmartFinOps-Workplace-BuildBetaPackage.ps1','SmartFinOps-Workplace.Release.json',
+ 'README.md','KNOWN-LIMITATIONS.md','RELEASE-NOTES.md','VALIDATION.md','PUBLICATION.md',
+ 'Start-SmartFinOps-Workplace-Analyze-Test.cmd','Start-SmartFinOps-Workplace-Analyze-Prod.cmd',
+ 'SmartFinOps.global.local.json.template','Config/Tenants/tenant.local.json.template',
+ 'Config/SmartFinOps-TenantContext.ps1','Config/SmartFinOps-Workplace-DataContract.ps1',
+ 'Config/SmartFinOps-Workplace-ExchangeDecision.ps1','Config/SmartFinOps-Workplace-InventoryValidation.ps1',
+ 'Config/SmartFinOps-Workplace-LicenseDecision.ps1','Config/SmartFinOps-Workplace-ValueModel.ps1',
+ 'Config/SmartFinOps-Workplace-FrancePriceBaseline.json','Config/SmartFinOps-Workplace-SourceContracts.json',
+ 'Tests/SmartFinOps-Workplace-Beta.Tests.ps1','Tests/SmartFinOps-Workplace-Integration.Tests.ps1'
+)
+$DestinationRoot=[IO.Path]::GetFullPath($DestinationRoot)
+New-Item $DestinationRoot -ItemType Directory -Force | Out-Null
+$zip=Join-Path $DestinationRoot $release.package
+if(Test-Path $zip) {throw 'Package already exists. Use a new destination; do not silently replace a validated beta.'}
+$stage=Join-Path $DestinationRoot ('staging-'+[guid]::NewGuid().ToString('N'))
+$packageRoot=Join-Path $stage 'SmartFinOps'
+$evidence=[System.Collections.Generic.List[object]]::new()
+foreach($file in $files) {
+ $source=Join-Path $PSScriptRoot $file
+ if(-not (Test-Path $source -PathType Leaf)) {throw "Missing package input: $file"}
+ if($file -like '*.ps1') {
+  $signature=Get-AuthenticodeSignature $source
+  if($signature.Status -ne 'Valid') {throw "Invalid package signature: $file ($($signature.Status))"}
+ }
+ $target=Join-Path $packageRoot $file
+ New-Item (Split-Path $target -Parent) -ItemType Directory -Force | Out-Null
+ Copy-Item -LiteralPath $source -Destination $target
+ $evidence.Add([pscustomobject]@{path=('SmartFinOps/'+$file);sha256=(Get-FileHash $target -Algorithm SHA256).Hash;bytes=(Get-Item $target).Length})
 }
+$repo=Split-Path $PSScriptRoot -Parent
+$licenseSource=Join-Path $repo 'LICENSE'
+if(-not (Test-Path $licenseSource)) {$licenseSource=Join-Path $PSScriptRoot 'LICENSE'}
+Copy-Item $licenseSource (Join-Path $packageRoot 'LICENSE')
+$certName='workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer'
+$certSource=Join-Path $repo ('Certificates/'+$certName)
+if(-not (Test-Path $certSource)) {$certSource=Join-Path $PSScriptRoot $certName}
+Copy-Item $certSource (Join-Path $packageRoot $certName)
+foreach($name in @('LICENSE',$certName)) { $p=Join-Path $packageRoot $name; $evidence.Add([pscustomobject]@{path=('SmartFinOps/'+$name);sha256=(Get-FileHash $p -Algorithm SHA256).Hash;bytes=(Get-Item $p).Length}) }
+$manifest=[ordered]@{product=$release.product;version=$release.version;channel='beta';prerelease=$true;files=@($evidence)}
+$manifest | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $stage 'package-manifest.json') -Encoding UTF8
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+$hash=(Get-FileHash $zip -Algorithm SHA256).Hash
+Set-Content -LiteralPath ($zip+'.sha256') -Value ($hash+'  '+$release.package) -Encoding ASCII
+Copy-Item (Join-Path $stage 'package-manifest.json') (Join-Path $DestinationRoot 'package-manifest.json')
+Write-Output ("{0} Beta package prepared: {1}; SHA256={2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$zip,$hash)
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZQSNZF0G9AmOu
-# La1aNbc08aWIwVPJpkXXirmGzZsjU6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPZji/wOoQ3AxA
+# nwtMvDeX4JD23/adD76mI5dDUMBH2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -213,31 +187,31 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG2hgA0wFPNzk4RtUI+iz518xH/Ih+00o0Zasla/qcklMA0GCSqG
-# SIb3DQEBAQUABIIBgGbM6Xg8jWZ04mb6Wa2FXzMbR+W9yDtVQN0K9+ASPuSFhope
-# xrB20nxWiY35SlbM/42G8QyK+vM6hGNKD+NHVD8xNdktTxaWBjYNLJmGilCPkFMu
-# 9YVBXT6wnuwoHUHm/nspfPXZLSXF1M+5Au+Ybhnmaf3jWaHjwjoLMH1k6m3fj0TQ
-# Kd4y00DHBYqnjksWlni5KVLiCqHUS9Nm7/x8CO0Zr2Uq4QHx3XfvIPSCDZ8HZeT2
-# plB963bJzqJnpSY33VzvC/rKWGssmEg4RYtWKQZOHUZk5G8dpJdn4mrC9cPi9A7d
-# tXUhgFaLcBXLpMJBs8pyExwQ5g/kLZ/Y5SCcQ+H2BWHz7kQiSdRv7A7VRxHJDLY1
-# VRjwaLZ+FPoOLPcn9eEs1kVnhB1nbv54yLuLXZK0Z9Y5NIX0NE1+DayGKzClKarH
-# /nEDNZq/nCr5eEKaSH/pFdhFt098GV2Jb8zcSqHFIOKUH/+M6ilPEH79VcsOVDtJ
-# Nvs/fgjaz3LFl4tvJaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOGpFEKv+camugm1j5P/NyH5aLxtN+yPLKw/tlNtm8jxMA0GCSqG
+# SIb3DQEBAQUABIIBgIrXrvCgB/L7aqmnbuQJXm4zVrCXZClWOKsLJjakLe/U+9ae
+# NklGM4/KzCxPBnjztGgOgEgAGIIb40fTUQmKJYfoi2pQQm+ZYMt3uLTR6CJXd4LT
+# qLd6MvRl4S4W9wODMdNCFV8TVL/JLj1InnO9lQp78a5CxCxfb1qvtLK076WsYSgF
+# +v2z//u0ZI7ndc3w77DkC7aQrs695KqSnDkuN3IRQonnUFats4rkbt9J4EGJ5GFp
+# BJuMILYN32Njp8H4r1+1cD1csVnI1s37yUngSn8eTB8V1tOMXVH4pJngXemxi1Kz
+# QZbI0j2B0jTHLgl7X1V0UMT269pXdE8N4BQlzHVsQbgKlYeEZDdUscMyGwqA5eaR
+# MTXPta40Zap/grWHfkkNuVMgvYQlOEjmIiou8HeL/OttyFhcFtbJ25Eho3Xk50Lv
+# d9R6nSKCP8eEAGuULZF1z4x/ltGb72jQtKJJxIUWNIQ51c/+b8nJWZTZA2HBTD5n
+# skljVTozcd1m3dZKG6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODA2
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAWZzbqXo7p+QOlwhrsK+4g008DL/NnjIWXfofK
-# 8coQhTANBgkqhkiG9w0BAQEFAASCAgA3eJtkNd+PQbAsxtYyXVdVVuKCCsb9jOFv
-# UJOLZMaXEfhX+PwmPbI9EuAuFGpYwSxAWk04ANPDe1fGS7R99F7O9ehQkSwAJeYn
-# ZVZL9EqEAB0ron3HhWbqGxoe/V0rZxKCXOxw7x0QDVBDr3iPpmt1YZjtmAAa94bi
-# I/whEvADLd0d8qL9rgDWEsU99felaDDqqOTw8XDWWTcnuvVJlh+GTza8dqUgRSFc
-# yqAoW/1olwmc4XheqjWjWMEHvavIGqqjvgxAo/rxduTPK1Bqj4erxTgoTtP60jtX
-# ycic4OV12GhZn54ZWrZuOQp972qY2Cgtr6EJ42sbTv67rY8F6mNcnIKWshT1vv13
-# dljhfacdPB0wqRzuNrlUTX7VpN46akxMXDxG6n9EaCPHek4IRPanJh5iKeXvW2B2
-# mAFIQlSA0jP+BiM3bSw7u5ZeUeiXyzEfTlya+mnzi2BcQ84K63sK5xz43W8C9nm1
-# o9mmmx6q7+nG7ha7Q+cR8SnWpmGJBLYjiMQ5xRjN3DhmtIo91BTmm4fW2nrxHJRu
-# 9k0nW77qbebx3fTdObNnvp0Bpt9NHSu46V7y55+vv+hlO7u9VrGNbwZmQKopDn7f
-# pFEkL2Zyr4NYkMhUQjD+mCvWzNrEEX0+5C4seuuGo5W6Ho9VlSBnHFhGawtTfVgI
-# Zk6skXtwKw==
+# MDJaMC8GCSqGSIb3DQEJBDEiBCCrnBGjTlxV/yKNjcz2cXd2CbW3VF4PqtezE4jx
+# onioGTANBgkqhkiG9w0BAQEFAASCAgApfTNr6wKWtxpZl+uBA1MpULhZfqLJ2jr0
+# yBwN6+gQhNc6b1s6g80QMRoW+89n/tyPj/c8hzFZ0AZFlymuxk2bxTA6OXiIulFP
+# tRB5x6G4u0SMXuPgU8H5b8v2HABgeLxBjWjTC1j2OxnJYsUpfNv80jRJVbsR1z5O
+# vIGPUPox1lRkOzRFrDcpR7Y63OWVoyXIfbV3o8cq0XE7eTkAzw8vqcwGV/6k8a1/
+# Aj+ESiNCLnF7tzoRwdOe9eb4JMSTEIW1gBEIBP8NTqdi+/ZO87WoTIcC/vcNjyug
+# 1+WEQnC8+G2bBgdYSr8fUkncC4uVwtqLmtyCQTde81O9GnEPOnFXrmIftRW9sO8n
+# cXdzoGuLA5aGf11aQsucGnMNMP7kMXQxbAdPsKevcIjY57/vLX4pCTZRhPqFcq6K
+# x/fybFyWMFqa5cl3djNDf11YgI2tcDAllpFVd/BCYWFWA5BIjnZPQZu4G9dbcrEB
+# +aKflC1b41JKcmKBywpvuTJ/Tr4ue8RKAMwdWx0oJLjWd6k/50vqeHsI/Jy7IcM4
+# 4dGN8OujbL3gmb5RWtr4tUQiNG6s9TrjqjcrVBhNzlvWojzwEZVdnDYjOzdGVvSm
+# EOKm01QsoYll2xDQnDOEADOU3kdD1XUaNnfMn6weWM3jqXgBQ2Lh8ZKpktaUtgls
+# 9kotZNS82Q==
 # SIG # End signature block
