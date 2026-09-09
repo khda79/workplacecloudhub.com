@@ -1,0 +1,13 @@
+{
+  "product": "SmartFinOps Workplace",
+  "version": "1.5.0-beta.1",
+  "channel": "beta",
+  "prerelease": true,
+  "releaseTag": "smartfinops-workplace-v1.5.0-beta.1",
+  "entryPoint": "SmartFinOps-Workplace-Analyze.ps1",
+  "powershellMinimumVersion": "5.1",
+  "readOnlyTenant": true,
+  "currency": "EUR",
+  "package": "SmartFinOps-Workplace-1.5.0-beta.1.zip",
+  "status": "candidate-awaiting-final-validation"
+}

@@ -1,4 +1,4 @@
-Set-StrictMode -Version 2.0
+﻿Set-StrictMode -Version 2.0
 
 function Get-SmartFinOpsUpnKey {
     [CmdletBinding()]
@@ -27,6 +27,8 @@ function Get-SmartFinOpsEvidenceRecord {
             HasDesktopAppsActivation = $false
             HasRecentManagedDevice = $false
             HasMailboxStorageEvidence = $false
+            HasOneDriveStorageEvidence = $false
+            HasUserActivityEvidence = $false
             MailboxStorageBytes = [decimal]0
             OneDriveStorageBytes = [decimal]0
             HasArchiveMailbox = $false
@@ -80,6 +82,7 @@ function New-SmartFinOpsUserEvidenceMap {
         $key = Get-SmartFinOpsUpnKey -Row $row -Names @('UserPrincipalName', 'User Principal Name')
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
+        $evidence.HasUserActivityEvidence = $true
         $workload = [string](Get-RowPropertyValue -Row $row -Names @('LastActivityWorkload'))
         if ([string]::IsNullOrWhiteSpace($workload)) { $workload = 'M365 aggregate' }
         Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate')) -Workload $workload -RecentCutoff $M365RecentCutoff
@@ -92,9 +95,9 @@ function New-SmartFinOpsUserEvidenceMap {
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Exchange mailbox' -RecentCutoff $M365RecentCutoff
         $storageValue = Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)')
-        if (-not [string]::IsNullOrWhiteSpace([string]$storageValue)) {
+        $storage = ConvertTo-SmartFinOpsNumberOrNull $storageValue
+        if ($null -ne $storage) {
             $evidence.HasMailboxStorageEvidence = $true
-            $storage = ConvertTo-DecimalOrZero $storageValue
             if ($storage -gt $evidence.MailboxStorageBytes) { $evidence.MailboxStorageBytes = $storage }
         }
         if ((ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $row -Names @('Has Archive'))) -eq $true) { $evidence.HasArchiveMailbox = $true }
@@ -106,7 +109,8 @@ function New-SmartFinOpsUserEvidenceMap {
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'OneDrive' -RecentCutoff $M365RecentCutoff
-        $storage = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)'))
+        $storage = ConvertTo-SmartFinOpsNumberOrNull (Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)'))
+        if ($null -ne $storage) { $evidence.HasOneDriveStorageEvidence = $true }
         if ($storage -gt $evidence.OneDriveStorageBytes) { $evidence.OneDriveStorageBytes = $storage }
     }
 
@@ -195,6 +199,7 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         [Parameter(Mandatory)][datetime]$TechnicalRecentCutoff,
         [Parameter(Mandatory)][datetime]$M365EvidenceAsOfDate,
         [Parameter(Mandatory)][datetime]$TechnicalEvidenceAsOfDate,
+        [bool]$DecisionSourcesHealthy = $false,
         [Parameter(Mandatory)][AllowNull()]$PriceModel
     )
 
@@ -420,6 +425,20 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             }
         }
 
+        $accountStateConflict = ($null -ne $m365Enabled -and $null -ne $adEnabled -and $m365Enabled -ne $adEnabled)
+        $multipleBaseSuites = 'SPE_E3' -in $skus -and 'SPE_F1' -in $skus
+        if ($recommended -match '^No license|^Potential M365 F3') {
+            if ($accountStateConflict -or $multipleBaseSuites) {
+                $recommended = 'Conflicting identity or base licenses - review'; $confidence = 'Low'
+                $basis = 'Reconcile directory states and simultaneous E3/F3 assignments before valuation.'
+            }
+            elseif (-not $DecisionSourcesHealthy -or -not $evidence.HasUserActivityEvidence -or
+                ($targetPersona -eq 'M365 F3' -and (-not $evidence.HasMailboxStorageEvidence -or -not $evidence.HasOneDriveStorageEvidence))) {
+                $recommended = 'Insufficient or stale evidence - review'; $confidence = 'Low'
+                $basis = 'Refresh required decision sources and resolve missing user activity or storage evidence; financial potential is not quantified.'
+            }
+        }
+
         $currentPrice = if ($currentBaseSku) { Get-MonthlySkuPrice -PriceModel $PriceModel -SkuPartNumber $currentBaseSku } else { $null }
         $recommendedSku = if ($recommended -in @('Keep current M365 E3', 'Keep M365 E3 - activity review', 'Keep M365 E3 - F3 technical blocker', 'M365 E3 capability review')) {
             'SPE_E3'
@@ -462,6 +481,7 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             DecisionClass = $decisionClass
             DecisionConfidence = $confidence
             DecisionBasis = $basis
+            DecisionSourcesHealthy = $DecisionSourcesHealthy
             F3TechnicalStatus = $f3TechnicalStatus
             FrontlineEligibilityStatus = $frontlineEligibilityStatus
             LatestKnownActivity = if ($latestActivityDate) { $latestActivityDate.ToString('yyyy-MM-dd') } else { '' }
@@ -489,14 +509,19 @@ function New-SmartFinOpsUserLicenseDecisionRows {
     return $rows.ToArray()
 }
 
-
-
+function ConvertTo-SmartFinOpsNumberOrNull {
+    param([AllowNull()]$Value)
+    [decimal]$number = 0
+    if ([string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    if ([decimal]::TryParse(([string]$Value).Trim(), [Globalization.NumberStyles]::AllowDecimalPoint -bor [Globalization.NumberStyles]::AllowLeadingSign, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -and $number -ge 0) { return $number }
+    return $null
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+ZawI+1vyr4Io
-# ykoDOnjpJjH1LX+ol9XXb4KGo7D2AaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCADT1Tl/GoZivTT
+# D5gdmkqGFwRbgo5GH9uzhqPAdDdyQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -587,25 +612,25 @@ function New-SmartFinOpsUserLicenseDecisionRows {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -613,47 +638,47 @@ function New-SmartFinOpsUserLicenseDecisionRows {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHJtn4opOWBtMGKpBkhsMtzZ0K4Kv/S1zPy3u2ohniJwMA0GCSqG
-# SIb3DQEBAQUABIIBgBjJJwLViVCzMk42/t59yGKW7R2HCxfzzfiPq9RrtWUgslzN
-# 2Y6bFBr9f4r6zaDMa3rpJl6oYyEF4py4EgZV4PAmfwlkiedjjzd/wfSy9Tto0YrG
-# L9TF8rFjPes2kpwPhcm4uvnV8OPCM2JdIMm6pqzVSIssCGeqWBfuogL1mOia7KmJ
-# H0DCYxNdL3u395iGv8iX1VgAkKtlcMQjzP+WfYWlHaQMWshsvcM3OHlmdlr3sfBP
-# sSvgCSMviGOiaeiK0aiF/xxOwatzj7iG9KlCJWCjdPq9JwzbqjsCMfKgwktj1oKJ
-# R+uDDVzvw+cbrRpqRx1tzAa6SrghRKnR1SDSfsOKJy86fI3LUyq3HoDQKMcXh6i8
-# fAfbVsx3h6RH2SSieHTPVOHzKHmSA9uaaslK9KpRg43xPFFZ4AnRW2wsr4cMuJqu
-# FkznAULvxhbUa1Zq7Muz+No/gnvdmy/jhm9re+nhIl0HP9I1CXEfERlDFYltK/eT
-# G3324kkeZkDajBt2D6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII3YBfYyt/YoetZedZhK8ysJ6pNyGggSAHPK576REPnNMA0GCSqG
+# SIb3DQEBAQUABIIBgFDPIpxiWeJbDW03IxUjB7VsQMnde513ICLduJZ8XgiFgh9f
+# LD6j8ELm848V4FY9UyoSwuWi0oyNi2TWEX2EICuMdSQ/60IBCP0/3KdKwFUxwtWA
+# 11rVXRS3I47qKCMy2lMmk5+amQNZQ8TG3WP5E0aC3woSW+bYzSkxwFFiQ1UN7mpK
+# v/0irj9/6DaSsLEiwgH+d0ma8ZxTmYLECVbHdLF8jtqwWejXldyqhA9UocVmynx7
+# 2UNL4nQbAH8tYpQrHden4jXZyC3uGbxz7tx//77WdnPGUbrDSNukQJyOkUs4Ri04
+# IsraXatP5X+cQa2H6cHJNrAqNDvbblv/WJOZbWU5z0peqtjXVyI43ZiCm+An1qz1
+# aIgeOCdyegSizatm4J2Wgqgij8QDW3aKFl4x3rJFIsKO8FibYoVOUt9FudLBHkZ7
+# vygVJjBCJ2m60QerQJNWVGakPqq/RqnjIv6VKfmHzqYiHQeq6vtcCj0Z0vLK1k4S
+# Wl7kNTd5BjL44V1j1KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjMwMTE1
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDnfj4N6dMxVxr3hZud8K0Av+lW7Lfz666VyehU
-# HhYv/jANBgkqhkiG9w0BAQEFAASCAgBqsUvQ+zH3RV7TLBNOE+vj5peLc+IEN53j
-# utgmOniKA+KI9mEjYm+kcV77Db2YcoNLEvdzpExxLHjhkVtWZWmNtF00nQCBHT3V
-# 3OtkKKh25iTBczvRDsaFBAa/X2+9Bk7YtxGOc6Z2m+wjrVK5B2mRBH87BUT+FUe2
-# s2fFamMn1my4mRl78SwUbyoOaSNbc/eiHHz4QIcDh17iM5X4E7rBapena0m3gVGv
-# dyiGOiYH4KpltXTxTgsp2zb1kxx3qBcO97o384UeEQ4zEAnjM9Ky1pTTqvS8wwx3
-# pvNrrG0N6WRg/Qy8WK7k5BF1Y9ao01WP9Fon8Z50hhQSpzxXWCpmaHi4UEqw5cy2
-# L1x2ev6q4w9S1u4fXnm5Tr5fOqSKB5Pt22mYZDcgGKUIPINU3Cq39Am5UG9KxuGU
-# tfCdbep3h6jzYmE3FRbg94Swu2RsKqk/nBWsL3g0Ty50DeSk5YXD+lIbdJTqNpou
-# HhemXhg1sq6L9HxtB0WZ4jWp+9aAyaNM+ccJQeBhjHa1NLmFnLj630Qx3Gk/r7Yv
-# 6ncBVN8bPMGHQLUkTgpexG0tSf2JgA62L1BczSrXRF8Rq7kV1GyrNLWVd43UfvHk
-# vpSlKH0VSNLIrbPLnwojaspKq3K5eYaZiiGPxcVJDgPrZGZXiVy+/qdLuihApoLV
-# lwhh4JwTPg==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwODA2
+# MDNaMC8GCSqGSIb3DQEJBDEiBCDIYrnrFbWPXCkXac4npM9ktFVJTfnkOG9hEvKW
+# dqkoQTANBgkqhkiG9w0BAQEFAASCAgBgSe/PdZsLJ3+2k5bzzUyYng4fdMsCUGsC
+# kFizfYHJ/F/Qov8QGHxlkEtsYHYpGC4OSpFGo3rEnPg4oLNkqlXQ47rLSJJ7VQq6
+# P1+GSCkTV3q26bWJYiA0ySTM+2/ZNq38rP+5LAbPZf7rCrFRARQYTY2BlVnoOI/2
+# LXyTEDWd5poF7JtovidqqbBXhDFMfUIlU1F6WGNdIszDFhzvzUXZRXPbiT0F68ci
+# i/iGBwvwJnBF6SNTNE+MIIFAQu3rHvNq/ud762gLZ3F3HgZ6VQFmlSW0yUYzQWD6
+# THzbWqIsY1HqvfQEQjcEE594h6/yCpyJoLCgVQO4pYFkJ0XojvnBrdkowgUvR6/5
+# 51LoN2PwSsp8U+71OayawIzSs41e1Q4zpVuFw/dpB3bnb5nEtrkcGnqZUji24hCc
+# OWBveQ2AAC22OCUAHa8+9heOVOS+tLsI1qRxTYD3hl01PXpR78czh+yRAQKxhGGj
+# mA8Mrif8Bq2x+cxgeqvBtjaM7d6kN6ZgAG9k0llQ16rOT5pp6X7m65MB/bf76LQq
+# BUmqH+nOdjeSMTKDkglMUUL6i3KxG6BNtO+FKDHii7m4a32lBx+wke6qjxneWkCj
+# ZODvXA+LPa+Wg+P9ZOM/bZbcJohlVZLqG+B80OTJYo8Ulc6qa/5oU0f1UOUJ2Zf0
+# f6sBTVQuNg==
 # SIG # End signature block

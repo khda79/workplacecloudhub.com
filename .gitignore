@@ -242,6 +242,7 @@ SmartAzure/Data/**
 SmartAzureVirtualDesktop/Data/**
 SmartCitrix/Data/**
 SmartFinOps/Data/**
+!SmartFinOps/SmartFinOps-Workplace.Release.json
 SmartWorkplaceCMDB/Data/**
 
 # Temporary
