@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.11
+    Version : 1.5.12
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.11"
+$ScriptVersion = "1.5.12"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -1438,46 +1438,75 @@ function Complete-OrchestratorRunTracking {
 # ==========================================================
 function Enter-OrchestratorLock {
     $lockPath = $script:Settings.LockPath
-    for ($attempt = 0; $attempt -lt 2; $attempt++) {
-        try {
-            $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-            try {
-                $payload = @{ Pid = $PID; StartTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); ComputerName = $env:COMPUTERNAME } | ConvertTo-Json
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
-                $stream.Write($bytes, 0, $bytes.Length)
-            }
-            finally { $stream.Dispose() }
-            return $true
-        }
-        catch [System.IO.IOException] {
-            $ownerPid = 0
+    $guard = $null
+    $stream = $null
+    try {
+        # Keep this guard file; removing it would recreate the acquisition race.
+        $guard = [IO.File]::Open($lockPath + '.guard', [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        if (Test-Path -LiteralPath $lockPath) {
             try {
                 $existing = Get-Content -LiteralPath $lockPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                if ($existing.PSObject.Properties['Pid']) { $ownerPid = [int]$existing.Pid }
+                if (-not $existing.PSObject.Properties['Pid'] -or [int]$existing.Pid -le 0) { throw 'Lock owner PID is invalid.' }
+                $ownerProcess = $null
+                try { $ownerProcess = Get-Process -Id ([int]$existing.Pid) -ErrorAction Stop }
+                catch {
+                    if ($_.FullyQualifiedErrorId -notlike 'NoProcessFoundForGivenId*') { throw }
+                }
+                if ($ownerProcess -and [string]::IsNullOrWhiteSpace([string]$ownerProcess.ProcessName)) { throw 'Process name is inaccessible.' }
+                if ($ownerProcess -and $ownerProcess.ProcessName -eq 'pwsh') {
+                    Write-OrchestratorLog -Message 'Another orchestrator process holds the resident lock.' -Level ERROR
+                    return $false
+                }
             }
-            catch { }
-            $ownerProcess = $null
-            if ($ownerPid -gt 0) { $ownerProcess = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue }
-            if ($ownerProcess -and $ownerProcess.ProcessName -eq 'pwsh') {
-                Write-OrchestratorLog -Message ("Another orchestrator instance is already running (PID {0}); exiting." -f $ownerPid) -Level ERROR
-                return $false
-            }
-            Write-OrchestratorLog -Message ("Stale orchestrator lock found (PID {0} is gone); recovering the lock." -f $ownerPid) -Level WARN
-            try { Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop }
             catch {
-                Write-OrchestratorLog -Message ("Failed to remove stale lock '{0}': {1}" -f $lockPath, $_.Exception.Message) -Level ERROR
+                Write-OrchestratorLog -Message 'Resident lock ownership could not be determined; leaving the existing lock unchanged.' -Level ERROR
                 return $false
             }
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop
         }
+        $stream = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $payload = @{ Pid = $PID; StartTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); ComputerName = $env:COMPUTERNAME } | ConvertTo-Json
+        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        $script:ResidentLockStream = $stream
+        $script:ResidentLockGuard = $guard
+        $stream = $null
+        $guard = $null
+        return $true
     }
-    Write-OrchestratorLog -Message "Could not acquire the orchestrator lock after stale-lock recovery." -Level ERROR
-    return $false
+    catch {
+        Write-OrchestratorLog -Message ("Resident lock acquisition failed or is held by another instance: {0}" -f $_.Exception.Message) -Level ERROR
+        return $false
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $guard) { $guard.Dispose() }
+    }
 }
 
 function Exit-OrchestratorLock {
     if (-not $script:LockOwned) { return }
-    try { Remove-Item -LiteralPath $script:Settings.LockPath -Force -ErrorAction Stop } catch { }
-    $script:LockOwned = $false
+    try {
+        # The resident payload cannot be replaced while our stream is open.
+        if ($null -ne $script:ResidentLockStream) {
+            $script:ResidentLockStream.Dispose()
+            $script:ResidentLockStream = $null
+            if ($null -ne $script:ResidentLockGuard) {
+                Remove-Item -LiteralPath $script:Settings.LockPath -Force -ErrorAction Stop
+            }
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Resident lock cleanup failed: {0}" -f $_.Exception.Message) -Level WARN
+    }
+    finally {
+        if ($null -ne $script:ResidentLockGuard) {
+            $script:ResidentLockGuard.Dispose()
+            $script:ResidentLockGuard = $null
+        }
+        $script:LockOwned = $false
+    }
 }
 
 function Get-OrchestratorLockOwner {
@@ -1774,7 +1803,7 @@ function Write-OrchestratorHeartbeat {
         $info = $script:RunningJobs[$name]
         $running += @{
             Name = $name
-            Pid = $info.Process.Id
+            Pid = if ($null -ne $info.Process) { $info.Process.Id } else { $info.RecordedPid }
             StartTime = ConvertTo-StateTime -Value $info.StartTime
             ScheduledOccurrence = ConvertTo-StateTime -Value $info.Occurrence
         }
@@ -2777,11 +2806,18 @@ function Test-ProcessMatchesRecord {
         [string]$ExpectedProcessName = 'pwsh'
     )
 
-    $process = Get-Process -Id $RecordedPid -ErrorAction SilentlyContinue
+    $process = $null
+    try { $process = Get-Process -Id $RecordedPid -ErrorAction Stop }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*') { return $null }
+        throw
+    }
     if (-not $process) { return $null }
+    if ([string]::IsNullOrWhiteSpace([string]$process.ProcessName)) { throw 'Process name could not be inspected.' }
     if ($process.ProcessName -ne $ExpectedProcessName) { return $null }
     $actualStart = $null
-    try { $actualStart = $process.StartTime } catch { return $null }
+    $actualStart = $process.StartTime
+    if ($null -eq $actualStart) { throw 'Process start time could not be inspected.' }
     if ([math]::Abs(($actualStart - $ExpectedStartTime).TotalSeconds) -gt 5) { return $null }
     # Pin the process handle now so the exit code stays readable after the process ends.
     try { $null = $process.Handle } catch { }
@@ -3189,6 +3225,10 @@ function Update-RunningJobs {
 
     foreach ($name in @($script:RunningJobs.Keys)) {
         $info = $script:RunningJobs[$name]
+        if ($info.ContainsKey('RecoveryPending') -and $info.RecoveryPending) {
+            Restore-RunningJobs -JobNames @($name)
+            continue
+        }
         $process = $info.Process
         $exited = $false
         try {
@@ -3248,8 +3288,10 @@ function Update-RunningJobs {
 }
 
 function Restore-RunningJobs {
+    param([string[]]$JobNames = @())
     $stateChanged = $false
     foreach ($jobName in @($script:State.Jobs.Keys)) {
+        if ($JobNames.Count -gt 0 -and $JobNames -notcontains $jobName) { continue }
         $state = $script:State.Jobs[$jobName]
         if ($null -eq $state.Running) { continue }
         $record = $state.Running
@@ -3258,7 +3300,12 @@ function Restore-RunningJobs {
         $expectedProcessName = 'pwsh'
         if ($record.ContainsKey('ProcessName') -and $record.ProcessName) { $expectedProcessName = [string]$record.ProcessName }
         $process = $null
-        if ($null -ne $expectedStart) { $process = Test-ProcessMatchesRecord -RecordedPid $recordedPid -ExpectedStartTime $expectedStart -ExpectedProcessName $expectedProcessName }
+        $identityUncertain = $false
+        try {
+            if ($null -eq $expectedStart) { throw 'Recorded process start time is invalid.' }
+            $process = Test-ProcessMatchesRecord -RecordedPid $recordedPid -ExpectedStartTime $expectedStart -ExpectedProcessName $expectedProcessName
+        }
+        catch { $identityUncertain = $true }
 
         $runInfo = @{
             StartTime = $expectedStart
@@ -3273,6 +3320,17 @@ function Restore-RunningJobs {
         }
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
+
+        if ($identityUncertain) {
+            $runInfo['RecordedPid'] = $recordedPid
+            $runInfo['Process'] = $null
+            $runInfo['RecoveryPending'] = $true
+            $script:RunningJobs[$jobName] = $runInfo
+            $now = Get-Date
+            Write-OrchestratorRuntimeUpdateWarning -Key ("recovery-identity:{0}" -f $jobName) -Message ("Job {0}: recorded process identity is inaccessible or invalid; retaining running state and retrying inspection on later ticks." -f $jobName) -Now $now
+            Sync-RunningJobConcurrencyLease -JobName $jobName -RunInfo $runInfo -Now $now
+            continue
+        }
 
         if ($null -ne $process -and [string]::IsNullOrWhiteSpace([string]$runInfo.ClaimPath)) {
             $manifestJob = @(
@@ -5055,6 +5113,10 @@ try {
     if ($script:RunningJobs.Count -gt 0) {
         foreach ($name in $script:RunningJobs.Keys) {
             $info = $script:RunningJobs[$name]
+            if ($info.ContainsKey('RecoveryPending') -and $info.RecoveryPending) {
+                Write-OrchestratorLog -Message ("Job {0}: leaving recorded PID {1} pending identity inspection; the next instance must retry re-adoption." -f $name, $info.RecordedPid) -Level WARN
+                continue
+            }
             Write-OrchestratorLog -Message ("Job {0}: left running detached (PID {1}, started {2}); the next orchestrator instance will re-adopt it." -f $name, $info.Process.Id, ([datetime]$info.StartTime).ToString('yyyy-MM-dd HH:mm:ss'))
         }
     }
@@ -5107,8 +5169,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuNfxRTA8buw36
-# YWSmyToDBY2eJ8mcnuqzd4ZTy2GnzaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXpAPFUPeXkoM4
+# kD55VX5aqNlT1b9No53W0sedSGgJGaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5138,14 +5200,14 @@ exit $script:ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCARgEQOLCVwo9kVne/yKpAZ
-# BYZKKdwEJEwRX67WL+9oUzANBgkqhkiG9w0BAQEFAASCAYANpbcSAUA+lq871srO
-# MIv2VXL+1TPbpahUJuteHNXMjpXd3BQmkKHOBFe5hcVI51brJkjM40vSVzBBzlr8
-# 3Yr+Q4KDKUefo8Sa50TORWORBRQfY7cIAb6a0DFn7CRS0e0hZWjz6sLcC0vufvVX
-# cm251MUBwq3FyYIDb7HpaQulpoLUIa5DrE3FnajMao/4PK+3a0v0VEVvOVQRMDMT
-# zZQSNUv0ua/vWf4Ej4CjNN0u4QWXX0vdj7Kv15wlljRyAVhvplnoUIfyJO+uyERK
-# qrb6c87JhseUsQBBqhRzgkuvLrLDAgY9KoM6PmGJ/evbw/HgkUD8L42FjNRNiGg/
-# YuMz1PE8Sl7bTGH0jqU6HOEkjqhMccEt6jROsrj8MKTZiH0Dz4Kws7eVQifIzZmA
-# 9ohzBpnY1zog6EB4N8trUcxQv3Ux7y0bMj6lkSoodKGjI366bQ7VWmgnoBcWSzyO
-# CzT/9CO4VOOH/TdNumA2nx/zzAmw/5Ssr7JgMyj0AG6QSjI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD4SVaHuwYOepJW3geBPOM3
+# dOXScKbkBsYshouEj2suKDANBgkqhkiG9w0BAQEFAASCAYAvyEASRA1U/VZsRq/S
+# hQp0bl2/Mr/hg/FVB0aDXyRZStHXTggIqYKz48exZC88//q/PixHVHrfUcIvLYLW
+# +VEBfqp52XUHL+V5uTtNLr6hR8oNamMfFQxPeHWX5KRXmGbFswVxK1h+EpftUZzj
+# wV7xIVKqJU8U7e4agBfHK0np18tqoRMkaE8Mc0B+c8NHjftWuVaWrfn+TA5fiX48
+# 0YY+iDX+emIoIjj68V+GUFyLPTp4oyRSVrcEmmpMi0QuDsSsW0fhdpVhncFqfLH0
+# Geaj3gcvo75jDBY7eO8QKkPnuUJ7cWlznH+gc/DAInd2/aD2KPhO/9Jj/Xyqw4+8
+# MA5G6XYYqVCJ5WTnnwNx9MAuA7rfxxWd+3DJ3GpjrBfJpcFCChZthdfNv1e7G3Ma
+# idU/HE2Rx3pm1QijIHtUE9qNE5VYH+ShBjPMHk4RFkZfBZWOgcc1uDpTlvwQikDs
+# miVhdP+PmjzSjSRE8Qxj1eYTwp44MugyJuRvOXkOoBJtXkE=
 # SIG # End signature block

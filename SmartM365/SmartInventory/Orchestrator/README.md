@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.11) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.12) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -197,7 +197,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 - `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:
-  - Global lock file: two orchestrator instances never run at the same time for the same tenant; a stale lock (dead PID) is recovered with a warning (exit code 3 when a live instance holds the lock).
+  - Resident lock: acquisition and stale recovery use an exclusive guard handle; uncertainty refuses acquisition with exit code 3. See the re-adoption and resident lock safety section.
   - Per job: a job still running at its next occurrence is not relaunched; the occurrence is marked `Skipped` with a warning in the log and the summary.
 
 ### Supervision, timeout, retries
@@ -329,9 +329,39 @@ saved timeout intent is finalized as `TimedOut`; older records retain the existi
 This protection requires accessible state/lease storage and continued supervision.
 It does not fence a partitioned or stopped server, prove that a launcher left no
 detached descendants, or qualify actual Windows process permissions and SMB
-behavior. Process identity/access ambiguity during initial re-adoption remains
-outside this correction. See [audit lot 2](../AUDIT-LOT2.md) for synthetic evidence
+behavior. Initial process identity uncertainty is handled by the follow-up correction
+described below. See [audit lot 2](../AUDIT-LOT2.md) for synthetic evidence
 and remaining boundaries. No new tenant permission or configuration key is needed.
+
+
+## Re-adoption and resident lock safety
+
+Version 1.5.12 distinguishes a confirmed missing/mismatching PID from an
+inaccessible process identity. Failed PID lookup, unavailable process name or
+start time leaves the saved Running record intact. The job still occupies its
+local concurrency slot, blocks overlapping work and refreshes its existing
+concurrency lease when available. Identity inspection is retried on later ticks;
+no process kill, final result or retry is triggered while identity is uncertain.
+The heartbeat retains the recorded PID. Once inspection succeeds, normal
+supervision resumes; confirmed disappearance keeps the existing Interrupted or
+previously requested TimedOut outcome.
+
+Resident lock acquisition uses an additional Orchestrator.lock.guard file with an
+exclusive file handle held for the resident lifetime. The original JSON lock
+remains readable, with the same fields; its open handle prevents replacement
+while owned. A contender cannot recover a stale lock while another current
+instance is acquiring it. Normal exit removes the JSON payload while still
+holding the guard, then closes the guard handle. The empty guard file persists
+and must not be deleted as routine stale-file cleanup: its open handle, not its
+presence or age, determines ownership. Process termination releases OS handles.
+
+Malformed lock contents or an inaccessible incumbent are left unchanged and
+acquisition is refused (existing exit code 3). Inspect ownership and storage
+permissions before repairing corrupt state; never remove a live lock to bypass
+the guard. A valid legacy lock is still checked before acquisition. The guarantee
+requires consistent deployment and filesystem handle-sharing semantics; SMB
+disconnects, mixed versions and lost handles are not production-qualified.
+See [audit lot 3](../AUDIT-LOT3.md). No tenant API permissions or CSV schemas change.
 
 ## Configuration (`SmartM365-Inventory-Orchestrator.local.json`)
 
@@ -362,7 +392,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | 0 | Normal end: lifetime recycle, `-DryRun`, `-Once`, task stop, or execution summary sent successfully. |
 | 1 | Unexpected fatal error, or manual execution-summary email could not be sent. |
 | 2 | Configuration or jobs-manifest error at startup. |
-| 3 | Another live orchestrator instance holds the lock. |
+| 3 | Resident lock held, inaccessible or not safely recoverable. |
 
 ## Task Scheduler configuration
 
@@ -486,7 +516,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "SmartM365\SmartInventory\Orchestr
 ## Troubleshooting
 
 - **Is the loop alive?** Check `Orchestrator-Heartbeat.json` (timestamp must move every tick) and the daily orchestrator log. The log also emits `Heartbeat: alive; ...` every `OrchestratorHeartbeatLogIntervalMinutes` minutes by default.
-- **Exit code 3 / "Another orchestrator instance is already running"**: a live instance holds `Orchestrator.lock`. If no `pwsh` orchestrator is actually running, the lock is stale and the next start recovers it automatically.
+- **Exit code 3**: another instance holds the resident lock, or its ownership/storage cannot be inspected safely. Confirmed stale valid payloads can be recovered; malformed or inaccessible locks are preserved for investigation. Never delete a live guard file.
 - **A job never starts**: check `Enabled`, the server allowlist (the startup log lists "Jobs not allowed on this server"; `-DryRun` shows the effective allowed list per job), the `-Only`/`-Skip` filters, the dependency chain (a parent pending retry blocks dependents), and the concurrency queue messages in the log.
 - **Job marked `Interrupted`**: the child PID disappeared while the orchestrator was down (reboot, kill, crash). The retry policy applies; check the job log for partial output.
 - **Job marked `Skipped`**: previous run still in progress at the new occurrence (overlap guard), or missed occurrence with `MissedRunPolicy=Skip`.
