@@ -2,6 +2,26 @@
 
 Inventory scripts that can feed Power BI datasets, operational reports, CSV exports, SharePoint publishing, and other downstream consumers.
 
+## Audit status and distribution
+
+SmartInventory is a collection of independently versioned scripts and shared modules;
+this README does not assign a suite version or stable qualification. The current
+source audit starts with shared CSV persistence and distributed orchestrator
+persistence. Read [AUDIT-LOT1.md](AUDIT-LOT1.md) for the demonstrated corrections,
+synthetic tests, prerequisites and remaining limits, and
+[INVENTORY-MAP.md](INVENTORY-MAP.md) for collector, job and consumer mappings.
+
+Use a reviewed repository checkout with the required `Config/`, internal module
+manifests and templates. A single copied collector is not a self-contained package.
+No per-script ZIP release is required. Operational JSON, credentials, CSV exports
+and logs must stay outside Git and public distribution.
+
+The shared exporters reject conflicting source identities before writing
+files. Existing identity-first CSV columns, names, delimiters and business fields
+are preserved. A failed serialization cannot replace the previous valid CSV, but
+this does not establish a transaction across all files or prove collection
+completeness. Consumers must still check source dates, schemas and tenant identity.
+
 ## Organization
 
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.
