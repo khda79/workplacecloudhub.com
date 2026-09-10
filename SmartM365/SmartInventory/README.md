@@ -15,6 +15,9 @@ synthetic tests, prerequisites and remaining limits, and
 supervision and recovery corrections. Its synthetic validation is limited to that
 lifecycle scope and does not qualify all collectors or a live deployment.
 
+[AUDIT-LOT3.md](AUDIT-LOT3.md) covers the re-adoption and resident
+lock corrections, with synthetic evidence and explicit deployment limits.
+
 Use a reviewed repository checkout with the required `Config/`, internal module
 manifests and templates. A single copied collector is not a self-contained package.
 No per-script ZIP release is required. Operational JSON, credentials, CSV exports
