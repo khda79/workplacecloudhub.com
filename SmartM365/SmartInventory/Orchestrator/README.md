@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.10) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.11) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -301,9 +301,37 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a f
 }
 ```
 
-- `Running` (while a job is in progress): `Pid`, `StartTime`, `ScheduledOccurrence`, `LogPath`, `Attempt`, `TimeoutMinutes`, `ClaimPath`, `ConcurrencyLeasePath`, `ConcurrencyLeaseId`. This is what re-adoption uses after a recycle/reboot/crash.
+- `Running` (while a job is in progress): `Pid`, `StartTime`, `ScheduledOccurrence`, `LogPath`, `Attempt`, `TimeoutMinutes`, `ClaimPath`, `ConcurrencyLeasePath`, `ConcurrencyLeaseId`. This is what re-adoption uses after a recycle/reboot/crash. Optional `TimeoutRequested=true` records that termination was requested; absent means false for older state records.
 - `PendingRetry`: `NotBefore`, `Attempt`, `ScheduledOccurrence`.
 - The file is written atomically (unique temp file + SMB-compatible forced rename) after every mutation. Rename collisions are retried with exponential backoff and jitter for `AtomicWriteRetrySeconds` (default 30). If retries are exhausted, the process remains resident and pauses new launches until persistence recovers. An already executed occurrence is never relaunched; a missed occurrence follows `MissedRunPolicy`; a still-running job is re-adopted.
+
+## Timeout supervision and recovery
+
+A timeout requests process-tree termination; it does not itself confirm exit.
+Until the supervised process is confirmed exited, the job remains in `Running`,
+continues to occupy its concurrency slot, and keeps blocking the same job and
+other jobs with the same `ConcurrencyKey`. No terminal job-run row, lease release
+or failure retry is produced during this pending termination. Process inspection
+or wait failures also retain supervision. The kill request is retried on later
+ticks when the process can be inspected.
+
+Timeout intent is saved before termination. If state persistence is unavailable,
+termination is deferred until persistence recovers. The existing concurrency
+lease is refreshed beyond the current supervision time by at least
+`ElectionClaimGraceMinutes` (minimum one minute), even after the original deadline.
+Re-adoption uses a future lease deadline and restores timeout intent. A later
+exit code zero, or an increased configured timeout, cannot convert a previously
+requested timeout to success. Once exit is confirmed, existing `TimedOut`, retry,
+CSV, dependency and notification rules apply. A missing process on restart with
+saved timeout intent is finalized as `TimedOut`; older records retain the existing
+`Interrupted` behavior.
+
+This protection requires accessible state/lease storage and continued supervision.
+It does not fence a partitioned or stopped server, prove that a launcher left no
+detached descendants, or qualify actual Windows process permissions and SMB
+behavior. Process identity/access ambiguity during initial re-adoption remains
+outside this correction. See [audit lot 2](../AUDIT-LOT2.md) for synthetic evidence
+and remaining boundaries. No new tenant permission or configuration key is needed.
 
 ## Configuration (`SmartM365-Inventory-Orchestrator.local.json`)
 

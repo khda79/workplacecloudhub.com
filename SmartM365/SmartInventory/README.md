@@ -11,6 +11,10 @@ persistence. Read [AUDIT-LOT1.md](AUDIT-LOT1.md) for the demonstrated correction
 synthetic tests, prerequisites and remaining limits, and
 [INVENTORY-MAP.md](INVENTORY-MAP.md) for collector, job and consumer mappings.
 
+[AUDIT-LOT2.md](AUDIT-LOT2.md) covers the orchestrator timeout
+supervision and recovery corrections. Its synthetic validation is limited to that
+lifecycle scope and does not qualify all collectors or a live deployment.
+
 Use a reviewed repository checkout with the required `Config/`, internal module
 manifests and templates. A single copied collector is not a self-contained package.
 No per-script ZIP release is required. Operational JSON, credentials, CSV exports
