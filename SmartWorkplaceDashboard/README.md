@@ -1,12 +1,14 @@
-# Smart Workplace Dashboard — BETA 3.8.0-beta.1
+# Smart Workplace Dashboard — BETA 3.8.0-beta.2
 
 An autonomous Power BI source project for Microsoft 365 and Workplace operations. It reads existing SmartInventory CSV exports directly. This beta is prepared for controlled evaluation; offline validation is not real-environment qualification.
 
 ## Install and start
 
-Extract the entire package, retaining its folder structure. Open `pbip/SmartWorkplaceDashboard.pbip` in Power BI Desktop for Windows with PBIP/PBIR support enabled. The model uses compatibility level 1600. Microsoft still documents PBIP/PBIR preview limitations: [PBIP documentation](https://learn.microsoft.com/en-us/power-bi/developer/projects/projects-overview).
+Extract the entire package, retaining its folder structure. Open `pbip/SmartWorkplaceDashboard.pbip` in Power BI Desktop for Windows with PBIP/PBIR support enabled. The generator emits compatibility level 1600; the model saved from Desktop August 2026 uses 1606. This beta was tested locally with Desktop 2.157.1354.0 and synthetic data. Earlier Desktop versions are not qualified for this saved definition. Microsoft still documents PBIP/PBIR preview limitations: [PBIP documentation](https://learn.microsoft.com/en-us/power-bi/developer/projects/projects-overview).
 
 The distributed PBIP has no cached data. A refresh needs all 90 selected CSVs. It does not run collectors, install modules or connect to Graph/Exchange itself. No installer, automatic updater, PBIT or PBIX is supplied.
+
+When updating an existing checkout, also check for a local `pbip/SmartWorkplaceDashboard.SemanticModel/.pbi/cache.abf`. Desktop loads its previous model/data before applying the current definition; incompatible cached column values can therefore cause a type-conversion error during opening. Close the affected Desktop instance, preserve that cache in an ignored private backup location, and reopen the same PBIP without the cache. Keep the backup out of packages and Git. The project then opens with its model definition but no data; refresh requires explicitly configured, authorized sources. See [Microsoft's cache documentation](https://learn.microsoft.com/en-us/power-bi/developer/projects/projects-dataset#pbicacheabf).
 
 Configure these Power Query parameters before refresh:
 
@@ -58,4 +60,4 @@ The default build and validator use only public source contracts. Setting SMART_
 
 The public logo is included under assets. The PowerShell validator is Authenticode signed. The package manifest identifies the signer and timestamp status; signature trust depends on the receiving machine. Verify the ZIP SHA-256 before extracting. JavaScript, M, JSON and Markdown do not use PowerShell Authenticode signing.
 
-Read `RELEASE-NOTES.md`, `KNOWN-LIMITATIONS.md` and `VALIDATION.md` before evaluation. The next required product qualification is a separately authorized Desktop refresh and visual/export review on an isolated test environment. No real tenant qualification is claimed.
+Read `RELEASE-NOTES.md`, `KNOWN-LIMITATIONS.md` and `VALIDATION.md` before evaluation. Local synthetic Desktop refresh and targeted DAX/render checks passed. Interactive filters, native exports and broader environment qualification remain incomplete and require separate evaluation before operational use. No real tenant qualification is claimed.

@@ -69,17 +69,17 @@
                 }
               }
             },
-            "displayUnits": {
+            "labelDisplayUnits": {
               "expr": {
                 "Literal": {
                   "Value": "0D"
                 }
               }
             },
-            "decimalPlaces": {
+            "labelPrecision": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "1L"
                 }
               }
             }
