@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# Version: 3.8.0-beta.1 BETA
+# Version: 3.8.0-beta.2 BETA
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -14,7 +14,8 @@ function Visit-Node($Node,[scriptblock]$Action){if($null-eq$Node){return};&$Acti
 $pbip=Join-Path $DashboardRoot 'pbip';$report=Join-Path $pbip 'SmartWorkplaceDashboard.Report';$semantic=Join-Path $pbip 'SmartWorkplaceDashboard.SemanticModel';$modelPath=Join-Path $semantic 'model.bim';$definition=Join-Path $report 'definition';$selectionPath=Join-Path $DashboardRoot 'source-selection.json'
 $required=@((Join-Path $pbip 'SmartWorkplaceDashboard.pbip'),(Join-Path $report '.platform'),(Join-Path $report 'definition.pbir'),(Join-Path $definition 'version.json'),(Join-Path $definition 'report.json'),(Join-Path $definition 'pages\pages.json'),(Join-Path $semantic 'definition.pbism'),$selectionPath,$modelPath);foreach($p in $required){$null=Read-Json $p}
 $model=Read-Json $modelPath;$selection=Read-Json $selectionPath
-if($model.compatibilityLevel-ne1600){throw "compatibilityLevel must be 1600; found $($model.compatibilityLevel)"}
+# The generator emits 1600; Desktop August 2026 serializes the loaded model as 1606.
+if($model.compatibilityLevel-notin@(1600,1606)){throw "compatibilityLevel must be 1600 (generator) or 1606 (Desktop August 2026); found $($model.compatibilityLevel)"}
 $files=@($selection.includedFiles);if($files.Count-ne90){throw "Expected 90 selected CSV files; found $($files.Count)"};if(($files|Sort-Object -Unique).Count-ne$files.Count){throw 'Duplicate selected CSV file'}
 $approvedSummary=@($selection.includeOverrides);foreach($f in $files){if(-not$f.EndsWith('.csv',[StringComparison]::OrdinalIgnoreCase)){throw "Not a CSV: $f"};if($f-match'_MAXITEMS'){throw "Bounded export selected: $f"};if($f-match'Summary' -and$approvedSummary-notcontains$f){throw "Unapproved Summary selected: $f"}}
 $expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$derivedTableNames=@('DeviceDetail','UserDetail');$tables=@($model.model.tables);$actualNames=@($tables.name);$sourceTables=@($tables|Where-Object{$derivedTableNames-notcontains$_.name});$actualSourceNames=@($sourceTables.name)
@@ -31,7 +32,8 @@ foreach ($f in $files) {
         throw "Direct source contract missing for $name"
     }
     $csv = Join-Path $dataLast $f
-    $cols = @($t.columns.name)
+    # Desktop exports its internal RowNumber column; it is not a CSV field.
+    $cols = @($t.columns | Where-Object { $_.type -ne 'rowNumber' } | ForEach-Object name)
     $base = @($cols | Where-Object { $metadata -notcontains $_ -and $technical -notcontains $_ -and $derived -notcontains $_ })
     $overrideProperty = if ($null -ne $selection.schemaOverrides) { $selection.schemaOverrides.PSObject.Properties[$f] } else { $null }
     if ($null -ne $overrideProperty) {
@@ -203,7 +205,7 @@ $userCountryProjection=$visualByName['userdetail000019country'].visual.query.que
 if([string]$userCountryProjection.Expression.SourceRef.Entity-ne'UserDetail'-or[string]$userCountryProjection.Property-ne'Country'){throw 'Users Detail country slicer must use UserDetail[Country]'}
 $userTableFields=@($visualByName['userdetailtable'].visual.query.queryState.Values.projections|ForEach-Object{[string]$_.field.Column.Property})
 foreach($fieldName in @('DisplayName','UserPrincipalName','PrimarySmtpAddress','Country','SourceCoverage','IdentityMatchStatus','AccountStatus','LicenseSummary','MailboxPlacement','LastActivityDateTime','ActionSeverity','RecommendedAction')){if($userTableFields-notcontains$fieldName){throw "Users Detail table is missing operator field: $fieldName"}}foreach($kpiCard in $cardVisuals){if([string]$kpiCard.name-notmatch'kpi\d+$'){throw "Legacy multi-measure card remains: $($kpiCard.name)"};$projections=@($kpiCard.visual.query.queryState.Data.projections);if($projections.Count-ne1){throw "KPI card must expose exactly one measure: $($kpiCard.name)"};$measureName=[string]$projections[0].field.Measure.Property;$builtInLabel=[string]$kpiCard.visual.objects.label[0].properties.show.expr.Literal.Value;if($builtInLabel-ne'false'){throw "KPI built-in label must be hidden: $($kpiCard.name)"};$labelName=[string]$kpiCard.name+'label';if(-not$visualByName.ContainsKey($labelName)){throw "Missing wrapped KPI label: $labelName"};$label=$visualByName[$labelName];$labelText=[string]$label.visual.objects.general[0].properties.paragraphs[0].textRuns[0].value;if($labelText-ne$measureName){throw "KPI label mismatch: $($kpiCard.name) expected '$measureName', found '$labelText'"}}
-foreach($kpiCard in $cardVisuals){$units=[string]$kpiCard.visual.objects.value[0].properties.displayUnits.expr.Literal.Value;$decimals=[string]$kpiCard.visual.objects.value[0].properties.decimalPlaces.expr.Literal.Value;if($units-ne'0D'-or$decimals-ne'1D'){throw "KPI numeric formatting regression: $($kpiCard.name) displayUnits=$units decimalPlaces=$decimals"}}
+foreach($kpiCard in $cardVisuals){$units=[string]$kpiCard.visual.objects.value[0].properties.labelDisplayUnits.expr.Literal.Value;$decimals=[string]$kpiCard.visual.objects.value[0].properties.labelPrecision.expr.Literal.Value;if($units-ne'0D'-or$decimals-ne'1L'){throw "KPI numeric formatting regression: $($kpiCard.name) labelDisplayUnits=$units labelPrecision=$decimals"}}
 $barVisuals=@($visualObjects|Where-Object{$_.visual.visualType-eq'barChart'})
 foreach($barVisual in $barVisuals){$units=[string]$barVisual.visual.objects.labels[0].properties.labelDisplayUnits.expr.Literal.Value;$precision=[string]$barVisual.visual.objects.labels[0].properties.labelPrecision.expr.Literal.Value;if($units-ne'0D'-or$precision-ne'1D'){throw "Bar label formatting regression: $($barVisual.name) displayUnits=$units precision=$precision"}}foreach($vf in $visualFiles){$v=Read-Json $vf.FullName;Visit-Node $v {param($node);foreach($kind in @('Column','Measure')){$exact=$node.PSObject.Properties[$kind];if($null -ne $exact){$entry=$exact.Value;$entity=$entry.Expression.SourceRef.Entity;$property=$entry.Property;if(-not $entity -or -not $property){throw "Incomplete $kind reference in $($vf.FullName)"};if(-not $tableMap.ContainsKey([string]$entity)){throw "Visual references missing table $entity"};if($kind -eq 'Column' -and $tableMap[[string]$entity] -notcontains [string]$property){throw "Visual references missing field $entity.$property"};if($kind -eq 'Measure' -and -not $measureSet.Contains([string]$property)){throw "Visual references missing measure $property"}}}}}
 foreach($n in @('fnGetSourceFiles','fnLoadSourceTable','fnToLogical','fnToDateTime','fnToNumber','fnToInt64')){if(-not ($model.model.expressions|Where-Object name -eq $n)){throw "Missing Power Query expression: $n"}}
@@ -217,12 +219,11 @@ $builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& n
 if($LASTEXITCODE-ne0){throw 'Beta generated-code regression contracts failed'}
 Write-Host "OK SmartWorkplaceDashboard: 90 source tables, 2 derived tables, $($measureNames.Count) measures, 19 pages, $($visualFiles.Count) visuals, 161 readable KPI labels, StateCode and discovered-app relationships validated."
 
-
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoNq2djV5HSqRE
-# SZRtlOf/tndMH2Msh3TUU9A4zfr09KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY1EWFCsgUxbXz
+# o6qkUVDYaw7vZUyZC7N98leirY8DAKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -252,14 +253,14 @@ Write-Host "OK SmartWorkplaceDashboard: 90 source tables, 2 derived tables, $($m
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDj48WgoOCwzTifUNRFPmBy
-# C/Kyu5m/QOZ426ZNQboBPTANBgkqhkiG9w0BAQEFAASCAYACdH0onwozEhDsiu7M
-# pnFFyZgYvhYU8C5pfCVewoG1+hwu+zGWgBWchyp++OM+4vgECKMcc1qZc3+BwG9x
-# 1pJ7OZ4lrHYMkGBYom8kWJcpvbM4FNVYq7ytcgNx2EURxK56apyBcjiTbjjafGGV
-# tCY9AaHAjDYXRT9qGE312Zqapiuptg6W6jbYk/bcZXNzjbSQfD2R5T4xgokK9Wxs
-# PKeCSa7zpk5KMFB47Aujf+Kfe7EsTGX5n6uS13zEjDskxeZdREpwcFiWXEEn3Y6N
-# hMPcG6gpnq2U4ttmQIwwil5atEL7ZKxxQAdVyT9HLE/IY2IT6VZvc7gh0D4F8Y9c
-# Ve7QzdliMQBn/HH6fKctPGLOFtH6z7/5F4b5EMqDkwuqE54Ut3x3gJHAwWrkNfdz
-# rBlAw/CzaNqv/TwLAZ1YXXbSh0hpyNxPnnI97eUMZ6u1knq6shzMBCtcldw5Ane3
-# MOJkvpt66Xq9ZqkfRrTm12m6Yy6ZBuAgCdztCA1FZYiyFeo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBUZv0YL0+UVZI9Kj4+3oJF
+# BNfRtkpbOqk/OJBLtR5FhjANBgkqhkiG9w0BAQEFAASCAYA4wQ2675uFThZ5bnAu
+# BjaR41mW/9P4LNHGDh+pyA0JfvpGaITyK0uFf+T4oROUcsl/o2UGDcdxhvZevNdM
+# JEfF7g/XMscJkxbpjKiKGWCjHj7JEe/MkOjhAJfo/1Tz3fwZePSn4xPCIMXlEAP5
+# PoLyOvIWjZdwgE6SY+7VqN5zymkxePZDW90Wv2kxeTp8AgmdfOwMFWinvm/Op8ss
+# OsU2YRhOazoop7voplyadJuaYgz89P0NK0nyJ20eY6efzQH4DlniTW94dHP90C0P
+# uCVRuMEsDkKBu8LGs/k+iexXcTdN9acO7wRnE5kdDvk9nQY7BAnoPz47N8arP3em
+# LD5MT1NJH4aa+6Gyhzt6kHOibgfRVKxUP6Q2MbSovyGHBuVUK6WUMvvm1xCrET/z
+# 0vn0NwLWXLuF8D0w+07FX2nNkzQryALzh//xAIEKWWHpUbiiUHuUchanP67BWrwB
+# 4SjWJszeOGIPAh8EgzeSeIIX35ne9t8SLjrG7zR3eTdDaRA=
 # SIG # End signature block

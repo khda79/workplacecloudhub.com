@@ -1,7 +1,12 @@
-# Known limitations — BETA 3.8.0-beta.1
+# Known limitations — BETA 3.8.0-beta.2
+
+- An existing checkout may contain an older `.pbi/cache.abf`. Applying the current numeric column types to incompatible cached data can fail before the report opens. Package/source validation does not qualify that local cache. Preserve it privately and reopen the same PBIP without it; this does not qualify a subsequent refresh.
+
+- The earlier March 2026 Formula.Firewall failure on DeviceDetail / Result was not reproduced by the successful local synthetic XMLA Full refresh on Desktop August 2026. The March engine, UI refresh path, gateways and SharePoint remain unqualified. No privacy settings were relaxed and no experimental per-query wrappers were added.
+- All 19 pages were reviewed on the small synthetic fixture and PBIR validation reports zero warnings after textbox-padding corrections. Wide tables still require horizontal scrolling; long automatic chart-axis titles may abbreviate. Dense populated charts, long source values, accessibility and interactive slicer behavior are not qualified.
 
 - No real collection, tenant login, Graph/Exchange connection, production modification, scheduled refresh, gateway or SharePoint refresh was performed for this release preparation.
-- Power Query functions and identity reconciliation are tested with in-memory synthetic inputs using Microsoft PQTest. This is not a Power BI Desktop end-to-end refresh. DAX formula execution, rendered values, country interaction, CSV/Excel/PDF exports, accessibility and large-tenant performance remain unqualified.
+- Power Query functions and identity reconciliation have separate in-memory PQTest coverage and a local Desktop synthetic refresh. The Desktop fixture has 14 fabricated rows in four source tables; 86 required CSVs are header-only. All 189 measures execute, with 12 KPI values, two country contexts and seven mocked ratio scenarios checked. Interactive slicers, native CSV/Excel/PDF exports and large-tenant performance remain unqualified. The available Desktop bridge exposes state, report reload and PNG capture only; no native export was executed or replaced by a custom export test.
 - One tenant per source root/model. Several CSV contracts do not expose TenantKey, so their provenance cannot be verified from rows. There is no RLS. Isolate storage, workspaces, permissions and exports operationally.
 - All 90 source files are required. Strict schema validation requires updating the pinned contract and reviewing the model after a collector schema change. Header-only tables are valid empty results, not evidence of collector success.
 - Invalid numeric cells become null. Aggregations outside the specifically guarded primary license measures may omit unknown values and must be reviewed for completeness. Storage units, licensing estimates, entitlement rules and business meaning need source/contract review; no financial or contractual certification is implied.
