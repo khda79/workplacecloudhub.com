@@ -1,5 +1,5 @@
 'use strict';
-// Version: 3.8.0-beta.1 BETA. Generates in-memory M tests; no data-source calls.
+// Version: 3.8.0-beta.2 BETA. Generates in-memory M tests; no data-source calls.
 const fs=require('fs'),path=require('path');
 const app=path.resolve(process.argv[2]||path.join(__dirname,'..')),out=process.argv[3];
 if(!out)throw Error('Usage: node New-SyntheticQuery.cjs <app> <output.pq>');
