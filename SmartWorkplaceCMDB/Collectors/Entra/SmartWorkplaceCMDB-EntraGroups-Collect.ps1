@@ -9,7 +9,7 @@ contract is written below DATA-LAST\Raw\Entra. Offline JSON is supported for
 safe tests.
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -237,31 +237,14 @@ $historyFolder = Join-Path $paths.DataAllRootPath (
 $historyPath = Join-Path $historyFolder (
     'Entra_Groups_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 )
-$exportParameters = @{
-    InputObject     = $rawRows
-    Columns         = @($rawTable.columns | ForEach-Object { [string]$_ })
-    TenantKey       = $paths.TenantKey
-    OrganizationKey = $paths.OrganizationKey
-    EnvironmentKey  = $paths.EnvironmentKey
-    TenantId        = $paths.TenantId
-}
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $historyPath
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $RawLatestOutputPath
-
-$expectedLatestPath = Join-Path $paths.LatestOutputRootPath (
-    Join-Path ([string]$rawTable.area) ([string]$rawTable.name)
-)
-if ([System.IO.Path]::GetFullPath($expectedLatestPath) -eq $RawLatestOutputPath) {
-    $results = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $paths.LatestOutputRootPath `
-        -ContractPath $rawContractPath)
-    $groupResult = @($results | Where-Object Name -eq 'Entra_Groups.csv')
-    if ($groupResult.Count -ne 1 -or $groupResult[0].Status -ne 'Valid') {
-        throw 'The latest Entra groups raw CSV does not satisfy the raw SmartWorkplaceCMDB contract.'
-    }
-}
-
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $sourceRun `
+    -InputObject $rawRows `
+    -Columns @($rawTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $historyPath `
+    -LatestPath $RawLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'Entra_Groups.csv' | Out-Null
 
 Write-Information (
     "SmartWorkplaceCMDB Entra groups collection completed. Groups={0}; history='{1}'; latest='{2}'." -f
@@ -290,8 +273,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACqXxFav0ZThkJ
-# VSJbI6g1gJQMMBP4xD0IeIhhjiQLh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcgba6PzmjsjbO
+# 6tWLpOieIQBIU0rWd6yROvHaqvIEoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -424,31 +407,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINLYl+wRKjwD4g57WVwK5N6n76sQaHrtEQQpEe+dAJoHMA0GCSqG
-# SIb3DQEBAQUABIIBgGIU+5dgH9e7ATSFl6t164zybL746aMjkmQwM1M7Q4X7hqaA
-# KUnolXPDMq7eNNmc3rvejgW8tAws6giSoHKOO3AWSeJ6SybDes+o0a9E3zoq9SjL
-# E8z2XOjOn71ZNgJeHjG41rVVnseEsULP5jf6eTMHOEYqCTeR+0gPtuJHXyIIRsnu
-# XLulEnCcJflHpFpIkEBE2y4y4Bz6/Lxlp9JI3XHFdGX+dRFoRoLPlKrrkYMx4zk8
-# JEyQqzrlYLrmLz9oypm3sBm6LIa9zUHHT81BUP60PD6ZqaXDfCZdCDmqLK1/3xI+
-# d9jHj3QBFcdAChz513/lqsViZVQ3M4AnMe3b+LN7QGQCtBbVx6KsmHTU658cdKFT
-# hacj9nBGc+R4wh2Okbm4W4VLLeNJZg2QF0f40WCjxI284IepxY1Di6ovR4hJN87G
-# kSKLqGcwJjZOU/rCAUuci9t0+YRkDXjfaegOlhI0OLxzdSr6smuYesz5fVXxKsTF
-# dguTe5/3ukUxaThHbKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGytS0E2uuCwa25T94fCwMJj+x1FY+czNr/lwi61FIpQMA0GCSqG
+# SIb3DQEBAQUABIIBgKaKfhuCcho9szr+8WDdSl8znFxwOgOPPkJNL8UhG1+b0lcg
+# 0XcxmyJxQVvFKHs6ESZ5nOQqcG6N4V0+wa7/ePYC+8XQuMIadd3/j0uPvlVH2JMI
+# LKjGxX1XC8PhJbosUgZvsNDh2+EYEU7aKp9SRDlBvfBihCPO9s+2JtJBWnr07fSg
+# vrfqfHV3RTPOnUnNDmt8Vmjxqv22Q2LsLlDKQ+3851Co+ZzlfTsQfRtB6037Eq+V
+# PozVRHvTqkvIjb6R4MiVjFVJPsSCnhrKz3ew+XPbV/SUe9dp+OdyyNdu7aDjQBLa
+# KmL531sFMSKWa4R0cVG8NXjhV3tc7gV2KpjTEFyExv6qYqZJoz2zyf5kbwfcrQhf
+# FVDA8JZTi8Gb0/gZ4I5yUWQO/VJ5aXdNS2q/6xiEEX3TB+hMtos1qA8GtTwQTY7z
+# TWsGrMeeO1cZ3++1KNrMtaDMWj1QRpOlykO8JOn1VONRVaomWojpHE5j24d5gb/O
+# r/THF73tqcEzoh+I8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTJaMC8GCSqGSIb3DQEJBDEiBCAHcH3Qaekib9tmlUPRnF9ZOWzBrv+DB9Vc2NpA
-# xMcksTANBgkqhkiG9w0BAQEFAASCAgCQbuz5RdNkkS9S78Fy4sm588+V8PPiW/Ud
-# 9w/2xlwa7tnHmCNrC0P6n9pPaEzFis74JSwM0qfOI8+f0btzqmOeKzWSJ4yi9BrH
-# r4wtn6IuX6z8PFa1tBWXUtTzroEhfACstlgZWZY9x0wB9HYzAch4VDUpW5JXRcBr
-# kAA0u7jhaKe+wcYZRLHQbHmayPq4gpqxeDMMMgIFMaEmNd9639fdj40yQTF1yy8G
-# cuq4/9RU0TsEIyRYYglUavz+QFIk+un+cKGuq+gJhe7kuWBBkNwYeEBOU5bCEQRt
-# iH9UrcKfe3emraa4HOC6O297U/g3MLej+E9eyff/5KARBDdJEJ3PcJmXPknV9Vio
-# A4BrSWPEbv7rq1Mly7+SRLMTzL4uuXrQKBDTSZyyGHtXFta66ixnSRZ2aQ1m1oek
-# RefEri3NayZQ5U3O88YmaB6eKfOddpjNXHvNZN+osGbLgk2R80wmxcuB9GWejK4W
-# 50aJH3+Q5/Vu89n9SDLwrspCtZmz9Z64IA6dqh1UWccQxfW5M6f/r003l31+iiSJ
-# dYN4s1da8wiczBWjsAOHDXoBpLIVQsxxpqlQBGC/CqRYDrQECUUphF/6bqO6g/LG
-# DZopVgf7K0PHYaRUZXX0L9jbe1x65D74wNp3Q9yXZnyZ3fOrCXpnFKqH8GwXM/4+
-# wpMhxbAa2w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTRaMC8GCSqGSIb3DQEJBDEiBCC4ib9rgmNA17juKavcY8+PAIb2PN9BdRniCHWB
+# wWNldjANBgkqhkiG9w0BAQEFAASCAgAwb9IfU4P5qRKr6RvozO5rwEHvL9djlwcW
+# LaN0nU8aE9E3LwObL+DJhw0yoeDIAUmItQXxNqHXduMqlJmUVW7owXsjj0kD1UiU
+# aylk6FqOPoph3e5qieBK2YvqsYUlmUR5wA1QsNlC0tDc038p/qenWisqzEmtyrwm
+# mMLOG4W4e4LUD6ZlLbwdftamoRqjGG0wj1wGgMORS4VO5VT5NsUZ/o1ikitp/ZUR
+# 94ZtVK3I7Qx4Ml7iGpfMWMCGYIzojpZueldCKznU6E9WZ8xxYOFOJZbPI7kVZ0TK
+# KOGjeakYpLhNDFvYmeA78qPsIWH1YUgUVUGLGWOYJzKlM2u12QjXh7pJDC9WLcI0
+# TJRvEymdHnRnctH/4btgB4vU5BG+ia9dm0DoWw2iy6xv+k98TGm8gPyGTdCyYmyX
+# N6qGo8mXY7ECazJKQMWoihads6SZ+9Zm4NEZ2W57yX4vReMX1ER4m1JkKAxi5o+y
+# Ozp5QcQ8KkjNvNICHMelGWPBJwDfGvwOpR15qtSl63uaC/2ohqxELdGagyaok/as
+# iKxcWgF/QZGq8weoemkrxE0MnopXeQOMLQ89E1GlBNU70w3DTnpnlz5cqHcZIk9e
+# bm8JQ07SM/Q8azDfjeviS8EClqysnK3r7rm6I543k6iPRBsWkW131ihkWTdfqgSv
+# nmtiwTJ3jg==
 # SIG # End signature block

@@ -8,7 +8,7 @@ subscriptions and license unit capacity. The collector is read-only and writes
 history plus the latest raw contract. Offline JSON is supported for safe tests.
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -35,7 +35,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -239,28 +239,14 @@ $historyFolder = Join-Path $paths.DataAllRootPath (
 $historyPath = Join-Path $historyFolder (
     'M365_SubscribedSkus_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 )
-$exportParameters = @{
-    InputObject = $rawRows; Columns = @($rawTable.columns | ForEach-Object { [string]$_ })
-    TenantKey = $paths.TenantKey; OrganizationKey = $paths.OrganizationKey
-    EnvironmentKey = $paths.EnvironmentKey; TenantId = $paths.TenantId
-}
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $historyPath
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $RawLatestOutputPath
-
-$expectedLatestPath = Join-Path $paths.LatestOutputRootPath (
-    Join-Path ([string]$rawTable.area) ([string]$rawTable.name)
-)
-if ([IO.Path]::GetFullPath($expectedLatestPath) -eq $RawLatestOutputPath) {
-    $results = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $paths.LatestOutputRootPath `
-        -ContractPath $rawContractPath)
-    $skuResult = @($results | Where-Object Name -eq 'M365_SubscribedSkus.csv')
-    if ($skuResult.Count -ne 1 -or $skuResult[0].Status -ne 'Valid') {
-        throw 'The latest Microsoft 365 subscribed SKUs raw CSV does not satisfy the raw contract.'
-    }
-}
-
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $sourceRun `
+    -InputObject $rawRows `
+    -Columns @($rawTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $historyPath `
+    -LatestPath $RawLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'M365_SubscribedSkus.csv' | Out-Null
 
 Write-Information (
     "SmartWorkplaceCMDB Microsoft 365 subscribed SKUs collection completed. SKUs={0}; history='{1}'; latest='{2}'." -f
@@ -282,8 +268,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHbTPPkfHASQfz
-# jrRzpNLvpKUlY0UlgCbaW+MtUOz1ZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBE3dwMyKCuqC6C
+# 73uiLperjHaTFZ/7YUqktxFXpSd6Q6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -416,31 +402,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA6muSWmgIhDCUw+Pg+kKTV7hazmpazANwDavUZkPLxSMA0GCSqG
-# SIb3DQEBAQUABIIBgItu4O/DDXy8KprwMgk1PI+RzdpEM4VZV9ACDhM0AedeJc9G
-# X+QNmu9ayeuWz/Y927fqa/v5i77syCqBQqbKqoXahCkfddDn9GK2lU+KRubGiAAc
-# cHjlCilmRfNaPSclmzbjg3spkTz+lYO8SvmL7NtcNQ47sqDYoY4CaGbXowWpJ/6c
-# +BLVVW8zGlUAAZ+K+s6pCrtjmb2rGqKS2j64J5BII6Jn8asDc+ojyOdwTDrni3Fe
-# S2llXk9qg9/E2/E6vQ7EQU46BbBhGW++ZiU1hNXOBRLKkjNS2cy61Qly6QNvGDZY
-# vtqSd4h5rD78vuI0mmeNJlDLB+TKPwLVPjKOPmuuMnP98u1CVmAIjJn2ZUdmLNfA
-# JEn7yRxnEUb/jBh0Kb0n3pLcMnEEjNHHCS3qORirkRUZfpmq9kWmd+R96KgOx3KP
-# xXqCZFriVrGTjmHh8aQbc3ZsNn+SmrTQvf08Ys1Yl4zG/6Aw+ofEY+k3fUzBlz7z
-# BLs6aJv/IrZ9s9vXRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMRLi4pqXGwKfvXLv1vxKL+9UF69HllGeKWT+sUn9tQFMA0GCSqG
+# SIb3DQEBAQUABIIBgAXgpfl/A7MQeMcXzxUkcOuSr0v94qXktwFSBw6XjRINtDuS
+# IXw9/Bq5+cKoVbGF5mqREGw/hl7Ab0xJz0JK/1ovP6vSAm1yPgjlbavvhbYch0ia
+# q6F00+QtgwMwbrGUq2KAyOEJkjimt08/DJtUjT9F103jbSV/OmVnC7lzhxMP39Bm
+# n4EZue3hAOplCrbC3AVIAZJfaXstQY5sIE5NAdKRiMCEJsCZwiNJl6uXeW0g/s0T
+# Q+I7Tbd+RGCMFdqJ63hXTroUDB71nLn4zRQM26uMiTWMbdY2Txf5XZywYEFVkkT1
+# 0uyJBU1FJ9lT0vIWTFW1C7yG+XEAayjNlxpg5qaI1YMuXCtpLOSfR+dkl9aYa1AK
+# SYUA3CQ6w0GNg1Ao6ZsLT0Lrs9+is/WViCWxW01Mxvka8Elval48P3HQ6nwBAg+F
+# MoqbJGQlWxplFVzMWXs1mgxm0fI6RkzepSRgkkvRk69tGnIPKB0ustOjBbXBb7JR
+# 4xnYUFOzTV3mPCgk1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBFUTjfCURlwn42QqgQsXghglANSJ3gvc0jWU2w
-# 8bHhmzANBgkqhkiG9w0BAQEFAASCAgBfmK2v7A8DAW7iFJqDcXNXKntejnTc02Tn
-# nRbO858YAtCDuQba8ThyO4s/qM4l3+J0NjlrPqKHWBXY+vMhXZRt+JQJj7JMcKoI
-# VkR+zZBoJ7DTJlUVCjnTfMlogLse4KtrIZRLcof3sOED/ioAPhPPKVuUR5h92XCe
-# zeJZp5SbHbsT50GwjS/9qHlwYQ/y60tB+zX87ooO966y9jFKTt5yaC5PoO79GlwG
-# UXdH93vNaBlqlc5+uSo5w5+e+0WS4Fz2piMQvUstnT4t+mVsiRslhtHMJPb16EDV
-# gj7xNlA+okers+WbPveenfUdW70L6mH9sbH/R99LKS6nR1g7sBnarJ097/taD4T+
-# MWMHg3XhvRZmpeYnsbttUqa4N9sq54VCqwYdrzbbtS677Wip4vnqfPzp59ScgXs6
-# Nf4SY5rtdbUkO5xD7lC9N2oh7CmdmogGO+s+IoC/dglnw3qyTm+j/FQdLVsjRpkj
-# HdmK5KgO6C91KYoVwwr5a/HeExzvgV2k3Nx8tViiPXqbrJjPl16FNdmrwr0Xi9aB
-# 6bdGzRbY5+DNauhzj6s4qnXNk2PNR62s4xHLUO1kagHKZCvpXb4bpR6mdu/IJqeC
-# L3bXS+KxgH6+VYOMnSxb1V1biUxs6HrKOSC+g4qNLhW3ZigLjY5/pfMTGgBNtAUJ
-# vmnGoRovPA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTdaMC8GCSqGSIb3DQEJBDEiBCCeaKBLdNOhzHpoHB7RFskH+PEjRKG5MwZIx2EI
+# 8gZdRTANBgkqhkiG9w0BAQEFAASCAgCi2aP2tyOsuJUjWhmXqhPIYXg5m5LvXVOH
+# Tr+vy/206X4sWCjo99SRKfl5HALltvuodBMBp5Ltennpy1SdGpCUcb+h9TWHPXpq
+# BupJE3DG3sD/0X60I704OqON0duE1U6Vr0KsCQVCFb0JHIvv8KGNK01lfM2uJufc
+# aoIrZLxrQnI6xALHjmJ5466Y87aWeMWSiFwQKfOexR/bEauS5tX/nt+7FfNJDzO1
+# 6TEbQx/zWie0jfiuR/X91kS8bQ4iLYA9TgKE6Fq2mDIctILwDJxCiZaJcq+8fE2D
+# j2VX3v2QSIaUc7LPmSbrM/EvcDJ9jaaegF4mlVyMlsIVtzwEZyL+6D1w9DkWdZnO
+# oImoS8m1i4Ms3fzwGycHVsLwlDPAf3FGcHsjntngzncpbQcPTRGRwFSiCi6gvS9n
+# MxjLPnsYLRSHr2z9+wCLuPEeYJGZk2wfyMVROozRepIYQW7Spqoa8FQpmCGg1gvY
+# zEJ1TjVqMSB1uyukJGWSGXSGJ+4iqnmNMA/f7fJsAHuEcDDt+9HhKR+SdUOe+zQF
+# 0amLiCZfm3L/LsGP94MV1vMXvOVZVyaRmJdf1c/F99+R6PBmqytXY4Jl41rAx7Cj
+# 41Dxq4Q8FZfz85OHhLxuV0fp1nMxW3YyMm5QFUbwGXGw155bQvm+thfegjMSl2OS
+# ksVStrHPnQ==
 # SIG # End signature block

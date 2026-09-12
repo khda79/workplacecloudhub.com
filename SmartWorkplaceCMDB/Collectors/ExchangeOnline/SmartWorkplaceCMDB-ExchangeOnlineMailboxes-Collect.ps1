@@ -8,7 +8,7 @@ base mailbox inventory. The collector is read-only and writes history plus the
 latest raw contract. Offline JSON is supported for safe tests.
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -35,7 +35,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -332,31 +332,14 @@ $historyPath = Join-Path $historyFolder (
     'ExchangeOnline_Mailboxes_{0}.csv' -f
     $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 )
-$exportParameters = @{
-    InputObject     = $rawRows
-    Columns         = @($rawTable.columns | ForEach-Object { [string]$_ })
-    TenantKey       = $paths.TenantKey
-    OrganizationKey = $paths.OrganizationKey
-    EnvironmentKey = $paths.EnvironmentKey
-    TenantId        = $paths.TenantId
-}
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $historyPath
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $RawLatestOutputPath
-
-$expectedLatestPath = Join-Path $paths.LatestOutputRootPath (
-    Join-Path ([string]$rawTable.area) ([string]$rawTable.name)
-)
-if ([IO.Path]::GetFullPath($expectedLatestPath) -eq $RawLatestOutputPath) {
-    $results = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $paths.LatestOutputRootPath `
-        -ContractPath $rawContractPath)
-    $result = @($results | Where-Object Name -eq $rawTable.name)
-    if ($result.Count -ne 1 -or $result[0].Status -ne 'Valid') {
-        throw 'The exported Exchange Online mailbox CSV does not satisfy its raw contract.'
-    }
-}
-
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $sourceRun `
+    -InputObject $rawRows `
+    -Columns @($rawTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $historyPath `
+    -LatestPath $RawLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'ExchangeOnline_Mailboxes.csv' | Out-Null
 
 Write-Information (
     "SmartWorkplaceCMDB Exchange Online mailbox collection completed. Mailboxes={0}; RawLatest='{1}'." -f
@@ -381,8 +364,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGZW6M2k7rF7RX
-# sdwrlSKJVnSX7gV4DV44OOObmb2jMaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBW7+TVNpP5sc8U
+# lG+qJa4kB/yw0zK4yQLpgR25JlmBm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -515,31 +498,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBL1SfKseylc/pm0R1lJPiYfbXsubTS4G06Y3OhF0hydMA0GCSqG
-# SIb3DQEBAQUABIIBgDOY97DVNmiZ5wF5LQNHYHK8ITDQfrQvDJSNfqTA5SKhfD1Y
-# zi3Zj1ga2GoqSPQoP4VnXjc9mrl9bRQ5LBJ8b3LgpDUD+qxb5qZcsqgsCyVm3+/s
-# 5pNd+6dMy7eKnPlTPxHSIUODYyA6ihAvSCHuEAV6AwRbRqQXpXFO8PEyyQOJS9OJ
-# Jg2MVT4ynNVLylw7vNmZaZI6/1SnbNnydlSwVA4nBEsCmcf6YJ5FtQaB3CNy3RIv
-# gZs0UR2FbS2z1mUl4OJ7a9EaP4x6aDhWID0+dj9gNfI5f7HH3gq2AVvWUQxAI2dP
-# cCfFIr4TnHkzu6KuUDPL49ImWHm6HK8mj83DriaErn5IQfKuh0ZhcNJDq4iFPwKj
-# 3l/gHnYxUn/XBl1fctkT93gRwalPibELSS41k+rgpP2pPL+TGiJUWiqcVGWPtKU1
-# G5xZifchtvo9o0CDR7SLS7V5Q6ox4Mob11DuVChoP2VpFyk+TgWdkuTUXCLhLcTe
-# AWwvbgpohK3MzD40laGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBJHpcZnCE8skt6ARC5oV/Ik1sJRFhp65nasItRpPSwXMA0GCSqG
+# SIb3DQEBAQUABIIBgC/VjstcUkN0ncdoYB9NMjvE+bf4ZIwKL+NJWv7KUQooP3rD
+# PFJtwC5k3SYbXhmywIWGzKl2tLcTf27R0jBgwmVY6w20gOaDnfvf6P7vZaObUH9y
+# 4J5dbjDLP8FNaNZhd8zrgxhpTWfID0QXGjF63PY4nb2jQJF2Vf2kbU5Pu+m4kzsK
+# 0PCdgn4boJBvnGyNhWDXtaiRz357jHUtdVjw3ban+SPo0nL2hhFXXxbXcsxYgTM7
+# J0sFUFz9+aWPL9bjFZ8pRkCNgTp2J4xqEDU1uTSta3ooRjrk5fwg5cas0nhlvUAv
+# HDBDjjcqvyw3PiNCZDJ0QWAeikktKd+jY8okJmD5uVLtlydg6rcZhIXRuFgAyqlT
+# BrNgRovL9bSvGpqH2SG/aQm+Hn1d30SxjUvJubfHdPr5/zAjHTpIiy7S9NAi6yWt
+# ITua+9k8DH5po6cyT2gpDcNE3VUch5OpNgrF95jWnZKIKS3NOZLJp6BfTT/Arjna
+# QPnPFRDnZOyIWJJxaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTJaMC8GCSqGSIb3DQEJBDEiBCAyozDtmkYQrjyrw/V78MMDMrVYdyLFn7vTf/gk
-# DmWHTDANBgkqhkiG9w0BAQEFAASCAgAGraXzKF79TjhbatzdgMeIy7i6UOAwSCGp
-# WL0EfLwO6dxUhA4IRZsEiozffbPLhqEeXWCyPQ9Qaer9nz4vBHprpXeIVAG5NUXg
-# jm0OeWFYM86Q+871jiS1XCGOkf2ylDUJ4PZfn3cqnH7MLJTsghHAzHW4AzHxl/NG
-# Fxd1BM/vCdUTW+qJIiQK9ADb2gQTpsG2MhM+7FRegebwb43PiXJXqtgFoWzVIHXU
-# CkoF5aV2nwNZYbgkMREKtAirnAqmgtNbFMU4oqpRIOUaJYHh88TQPc4mkoFX5IXo
-# 7mSlkSNi/prbaeu2McvmjW4hWaT65wMwn6lzJMtJ2GAIf0i1xNLcAIrpIaAULrzw
-# fWGdTdotMHMHlDzsDnmINpKN5F0QrKmAsa2P7FG5etVHSJeUKnSTQvs15LH4ijxQ
-# bqmM2yY2IyDjI+eBciFiQxwOATseCT1Wx3YSFR59v5Cv5QQXBoDr4E3PoAFeSGoN
-# AXLDANZ3fq/FRF5My6rE8mlY+6hFZBWNejjDihvZG9ufbO0DWuzeE0kT75ps/qSz
-# GFfjrp+m6PykJax5BT16+2LgvCxovb/2Mm5BqydARTuPDXZJgQacL8/SEjPSDTQ3
-# Q0hkW1WN6WelRApw4x+SUS/cAAlsvZSMXpuUFBze6mr6W2QtTTDw+OweafLLFGNv
-# Px/nf0YuhQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDhPPpqhvxw3skSf6ldLEmvfl4cZdnw/iHLFopQ
+# klzxijANBgkqhkiG9w0BAQEFAASCAgBM7FnQlguKEFYnJe7m1SGsCXLYroDEzT1L
+# k+3cWTqCfudVDaYd6ynDxhoaAlnr1izyPIc2RurfSXVqyelb0XsuQjKTnB0CVZKa
+# SAFJCgVZaHYPI3qGbOoQAcVD2uDKUcU2LWgIF4Upz1gCG5siBfsCRfTwQQoPhxJm
+# 9kEXFR191uDWGciCuQSpNfKgc8uB9rLIL9JB2Vm1IgEcEncT3ggQC6OhrPxqvU3R
+# ZLMu3iDtewaU79Q5+/yOGW1X8I6xOF2M86/xDPXII4kHsRll2Quzk4k/EF9r31ZJ
+# s5MPwTgqzFFv9oCZHqTdoUPaaaRp9t0FkCVi0k70upb7EL7F/tYWuxJK1LAGRncO
+# OD3rgCJN+WNXNhZBCRoY0+2QyslJoj0hIJHPzBKcyPjD/RIolEvh2rY4kM26vikK
+# 7QfvWCwlOoKH2TKkyMbi5oNUG4BPcCsVhFNvfbCSqNumeY8NQYf4Hck3viB3lQr2
+# rklbVvkk5B2fc9CkXR2L59VtrODq4MXzqjGfmsUDi2gIEXu90KJ49HunjJi+xSiA
+# tfRATu0f9snN75QjM9jEqsMEEfas/mnb7R8EKBfwn3VqEhkq6KN3bg9ahf7D52B1
+# vxmO2hI0YN7IRT5McKWsyV8MLdzJ8PGWg2upB8k1UuSsyi4o+FiS3xJa++nfF2eO
+# Guzd2DEXSA==
 # SIG # End signature block

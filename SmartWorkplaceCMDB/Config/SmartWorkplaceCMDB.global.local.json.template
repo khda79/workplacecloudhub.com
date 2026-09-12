@@ -1,5 +1,5 @@
 {
-  "ConfigVersion": "0.3.0",
+  "ConfigVersion": "0.5.1",
   "ProfileKey": "default",
   "OrganizationKey": "organization",
   "EnvironmentKey": "default",
@@ -29,11 +29,40 @@
     "FreshnessCriticalHours": 168,
     "DefaultConfidenceScore": 0.5
   },
+  "Logging": {
+    "Enabled": true,
+    "OrchestratorLogRetentionDays": 30,
+    "StepLogRetentionDays": 30,
+    "RunCsvRetentionDays": 90,
+    "MaxOrchestratorLogs": 30,
+    "MaxStepLogsPerScript": 30,
+    "MaxRunCsvFiles": 90
+  },
   "SharePoint": {
     "Enabled": false,
     "SiteHostname": "",
     "SitePath": "",
     "LibraryDisplayName": "Documents",
     "TargetFolderPath": "SMART-CMDB/DATA"
+  },
+  "Notifications": {
+    "Enabled": false,
+    "SendMailMode": "Graph",
+    "From": "",
+    "To": "",
+    "Cc": "",
+    "Subject": "Smart Workplace CMDB",
+    "SmtpServer": "",
+    "SmtpPort": 25,
+    "SmtpUseSsl": false,
+    "SmtpUseIntegratedAuth": true,
+    "MailClientName": "Smart Workplace",
+    "LicenseFamilyPatterns": {
+      "F1": "^(M365_F1|Microsoft_365_F1)(?:_.*)?$",
+      "F3": "^(SPE_F1|SPE_F3|M365_F3|Microsoft_365_F3)(?:_.*)?$",
+      "E3": "^(SPE_E3|M365_E3|Microsoft_365_E3)(?:_.*)?$",
+      "E5": "^(SPE_E5|M365_E5|Microsoft_365_E5)(?:_.*)?$",
+      "Copilot": "^(Microsoft_365_Copilot|M365_COPILOT)(?:_.*)?$"
+    }
   }
 }

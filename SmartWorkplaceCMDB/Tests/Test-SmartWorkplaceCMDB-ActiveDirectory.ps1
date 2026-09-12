@@ -3,12 +3,12 @@
 Runs offline tests for the SmartWorkplaceCMDB Active Directory collector.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -56,6 +56,10 @@ if ($parseErrors.Count -gt 0) {
 foreach ($functionName in @(
         'Add-SmartWorkplaceCMDBActiveDirectoryDomainContext',
         'Get-SmartWorkplaceCMDBActiveDirectoryRangedMember',
+        'Test-SmartWorkplaceCMDBTransientActiveDirectoryError',
+        'Get-SmartWorkplaceCMDBActiveDirectoryRetryServer',
+        'Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation',
+        'Invoke-SmartWorkplaceCMDBActiveDirectoryDomainCollection',
         'Get-SmartWorkplaceCMDBActiveDirectoryLiveData'
     )) {
     $functionAst = @($collectorAst.FindAll({
@@ -94,6 +98,7 @@ try {
                 $source -match 'Get-ADUser\s+-Filter\s+\*\s+@common' -and
                 $source -match 'Get-ADGroup\s+-Filter\s+\*\s+@common' -and
                 $source -match 'Get-ADComputer\s+-Filter\s+\*\s+@common' -and
+                $source -match 'Get-ADOrganizationalUnit\s+-Filter\s+\*\s+@common' -and
                 $source -match "'PrimaryGroupID'" -and
                 $source -notmatch 'Get-ADGroupMember' -and
                 $source -match 'New-SmartWorkplaceCMDBActiveDirectoryLdapConnection' -and
@@ -190,36 +195,42 @@ try {
             ObjectSID = 'S-1-5-21-1-2-3-513'
             DistinguishedName = 'CN=Domain Users,CN=Users,DC=example,DC=invalid'
         }
-        function Get-ADUser {
+        function global:Get-ADUser {
             param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
                 $SearchBase, $ResultSetSize)
             $queryPageSizes.Add([int]$ResultPageSize)
             return $fakeUsers
         }
-        function Get-ADGroup {
+        function global:Get-ADGroup {
             param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
                 $SearchBase, $ResultSetSize)
             $queryPageSizes.Add([int]$ResultPageSize)
             return @($fakeGroup)
         }
-        function Get-ADComputer {
+        function global:Get-ADComputer {
             param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
                 $SearchBase, $ResultSetSize)
             $queryPageSizes.Add([int]$ResultPageSize)
             return @()
         }
-        function New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
+        function global:Get-ADOrganizationalUnit {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            $queryPageSizes.Add([int]$ResultPageSize)
+            return @()
+        }
+        function global:New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
             param([string]$Server)
             $counters.Connections++
             return [System.IO.MemoryStream]::new()
         }
-        function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
+        function global:Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
             param([string]$Server, [string]$GroupDistinguishedName,
                 [object]$Connection)
             $counters.Ranges++
             return @($fakeUsers.DistinguishedName)
         }
-        function Get-ADObject { throw 'The complete forest lookup should resolve every test member.' }
+        function global:Get-ADObject { throw 'The complete forest lookup should resolve every test member.' }
 
         $readiness = [pscustomobject]@{
             Domains = @([pscustomobject]@{
@@ -231,18 +242,96 @@ try {
                 })
         }
         $result = Get-SmartWorkplaceCMDBActiveDirectoryLiveData `
-            -Readiness $readiness -CollectMemberships $true -Limit 0
+            -Readiness $readiness -CollectMemberships $true -Limit 0 -RetryCount 0
         Assert-SmartWorkplaceCMDBAdTrue `
             -Condition (
                 $result.users.Count -eq 5105 -and
                 $result.groups.Count -eq 1 -and
                 $result.groupMemberships.Count -eq 5105 -and
-                $queryPageSizes.Count -eq 3 -and
+                $queryPageSizes.Count -eq 4 -and
                 @($queryPageSizes | Where-Object { $_ -ne 500 }).Count -eq 0 -and
                 $counters.Connections -eq 1 -and
                 $counters.Ranges -eq 1
             ) `
             -Message 'Large-domain paging, connection reuse, or primary-group deduplication failed.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Retry only a transient domain failure on a newly selected ADWS server' {
+        $attempts = [pscustomobject]@{ Count = 0; Sleeps = 0; Selections = 0 }
+        $domainContext = [pscustomobject]@{
+            Domain = [pscustomobject]@{ DNSRoot = 'example.invalid' }
+            Server = 'dc01.example.invalid'
+        }
+        $action = {
+            param([string]$SelectedServer)
+            $attempts.Count++
+            if ($attempts.Count -eq 1) {
+                throw [System.IO.IOException]::new('The LDAP server is unavailable.')
+            }
+            return $SelectedServer
+        }.GetNewClosure()
+        $selector = {
+            param([string]$DomainDnsRoot, [string]$CurrentServer)
+            $attempts.Selections++
+            return 'dc02.example.invalid'
+        }.GetNewClosure()
+        $sleep = {
+            param([int]$Seconds)
+            $attempts.Sleeps++
+        }.GetNewClosure()
+        $result = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
+            -DomainContext $domainContext `
+            -OperationName 'test inventory' `
+            -Action $action `
+            -RetryCount 3 `
+            -RetryDelaysSeconds @(0, 0, 0) `
+            -ServerSelector $selector `
+            -SleepAction $sleep
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $result.Value -eq 'dc02.example.invalid' -and
+                $result.Server -eq 'dc02.example.invalid' -and
+                $result.RetryCount -eq 1 -and
+                $attempts.Count -eq 2 -and
+                $attempts.Selections -eq 1 -and
+                $attempts.Sleeps -eq 1
+            ) `
+            -Message 'Transient retry did not select and use the replacement ADWS server.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Fail fast on an Active Directory authorization error' {
+        $attempts = [pscustomobject]@{ Count = 0; Selections = 0 }
+        $domainContext = [pscustomobject]@{
+            Domain = [pscustomobject]@{ DNSRoot = 'example.invalid' }
+            Server = 'dc01.example.invalid'
+        }
+        $action = {
+            param([string]$SelectedServer)
+            $attempts.Count++
+            throw [System.UnauthorizedAccessException]::new('Access is denied.')
+        }.GetNewClosure()
+        $selector = {
+            param([string]$DomainDnsRoot, [string]$CurrentServer)
+            $attempts.Selections++
+            return 'dc02.example.invalid'
+        }.GetNewClosure()
+        $failed = $false
+        try {
+            Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
+                -DomainContext $domainContext `
+                -OperationName 'test inventory' `
+                -Action $action `
+                -RetryCount 3 `
+                -RetryDelaysSeconds @(0, 0, 0) `
+                -ServerSelector $selector `
+                -SleepAction { param([int]$Seconds) } | Out-Null
+        }
+        catch {
+            $failed = $_.Exception.Message -match 'Access is denied'
+        }
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition ($failed -and $attempts.Count -eq 1 -and $attempts.Selections -eq 0) `
+            -Message 'An authorization error was retried instead of failing immediately.'
     }
 
     Invoke-SmartWorkplaceCMDBAdTest 'Validate fixture mode without AD connectivity' {
@@ -257,7 +346,7 @@ try {
     }
 
     $script:Collection = $null
-    Invoke-SmartWorkplaceCMDBAdTest 'Collect five Active Directory raw tables offline' {
+    Invoke-SmartWorkplaceCMDBAdTest 'Collect six Active Directory raw tables offline' {
         $script:Collection = & $collector @identity `
             -DataRootPath $runtimeRoot `
             -InputJsonPath $fixture `
@@ -268,6 +357,7 @@ try {
                 $script:Collection.UserCount -eq 3 -and
                 $script:Collection.GroupCount -eq 2 -and
                 $script:Collection.ComputerCount -eq 3 -and
+                $script:Collection.OrganizationalUnitCount -eq 3 -and
                 $script:Collection.GroupMembershipCount -eq 3
             ) `
             -Message 'Unexpected Active Directory fixture row counts.'
@@ -280,7 +370,7 @@ try {
                 Where-Object Name -like 'ActiveDirectory_*.csv')
         Assert-SmartWorkplaceCMDBAdTrue `
             -Condition (
-                $results.Count -eq 5 -and
+                $results.Count -eq 6 -and
                 @($results | Where-Object Status -ne 'Valid').Count -eq 0
             ) `
             -Message 'One or more Active Directory raw contracts are invalid.'
@@ -295,6 +385,7 @@ try {
                 $script:Normalization.UserCount -eq 3 -and
                 $script:Normalization.GroupCount -eq 2 -and
                 $script:Normalization.ComputerCount -eq 3 -and
+                $script:Normalization.OrganizationalUnitCount -eq 3 -and
                 $script:Normalization.GroupMembershipCount -eq 3
             ) `
             -Message 'Unexpected normalized Active Directory row counts.'
@@ -306,7 +397,7 @@ try {
                 -ContractPath $curatedContractPath)
         Assert-SmartWorkplaceCMDBAdTrue `
             -Condition (
-                $results.Count -eq 5 -and
+                $results.Count -eq 6 -and
                 @($results | Where-Object Status -ne 'Valid').Count -eq 0
             ) `
             -Message 'One or more normalized Active Directory contracts are invalid.'
@@ -315,17 +406,53 @@ try {
     Invoke-SmartWorkplaceCMDBAdTest 'Create stable tenant-scoped Active Directory keys' {
         $userPath = Join-Path $script:Normalization.CuratedOutputRootPath 'CMDB_ActiveDirectoryUsers.csv'
         $membershipPath = Join-Path $script:Normalization.CuratedOutputRootPath 'CMDB_ActiveDirectoryGroupMemberships.csv'
+        $ouPath = Join-Path $script:Normalization.CuratedOutputRootPath 'CMDB_ActiveDirectoryOrganizationalUnits.csv'
         $users = @(Import-Csv -LiteralPath $userPath)
         $memberships = @(Import-Csv -LiteralPath $membershipPath)
+        $organizationalUnits = @(Import-Csv -LiteralPath $ouPath)
         Assert-SmartWorkplaceCMDBAdTrue `
             -Condition (
                 $users[0].CmdbAdUserId -match '^contoso-prod\\|ad-user\\|' -and
                 $memberships[0].CmdbAdGroupId -match '^contoso-prod\\|ad-group\\|' -and
                 $memberships[0].CmdbAdMemberId -match '^contoso-prod\\|ad-(user|computer)\\|' -and
+                $organizationalUnits[0].CmdbAdOrganizationalUnitId -match '^contoso-prod\\|ad-organizational-unit\\|' -and
                 @($users | Where-Object DomainDnsRoot -eq 'child.example.invalid').Count -eq 1 -and
                 @($memberships | Where-Object DomainDnsRoot -eq 'child.example.invalid').Count -eq 1
             ) `
             -Message 'Active Directory normalized keys are not stable and tenant-scoped.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Preserve the complete last-valid AD snapshot after a rejected collection' {
+        $rawUserPath = Join-Path $runtimeRoot 'DATA-LAST\Raw\ActiveDirectory\ActiveDirectory_Users.csv'
+        $rawStatusPath = $rawUserPath + '.status.json'
+        $csvHash = (Get-FileHash -LiteralPath $rawUserPath -Algorithm SHA256).Hash
+        $statusHash = (Get-FileHash -LiteralPath $rawStatusPath -Algorithm SHA256).Hash
+        $badFixture = Join-Path $tempRoot 'ActiveDirectory.invalid.json'
+        $badDocument = Get-Content -LiteralPath $fixture -Raw | ConvertFrom-Json
+        $badDocument.organizationalUnits = @(
+            $badDocument.organizationalUnits + $badDocument.organizationalUnits[0]
+        )
+        $badDocument | ConvertTo-Json -Depth 12 |
+            Set-Content -LiteralPath $badFixture -Encoding UTF8
+        $rejected = $false
+        try {
+            & $collector @identity `
+                -DataRootPath $runtimeRoot `
+                -InputJsonPath $badFixture `
+                -IncludeGroupMemberships | Out-Null
+        }
+        catch {
+            $rejected = $_.Exception.Message -match 'Duplicate values detected'
+        }
+        $state = Get-Content -LiteralPath $rawStatusPath -Raw | ConvertFrom-Json
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $rejected -and
+                (Get-FileHash -LiteralPath $rawUserPath -Algorithm SHA256).Hash -eq $csvHash -and
+                (Get-FileHash -LiteralPath $rawStatusPath -Algorithm SHA256).Hash -eq $statusHash -and
+                $state.Status -eq 'Completed'
+            ) `
+            -Message 'A rejected AD collection damaged the last-valid CSV or its completed evidence.'
     }
 
     Invoke-SmartWorkplaceCMDBAdTest 'Honor MaxItems in an isolated output root' {
@@ -344,15 +471,21 @@ try {
             -Message 'MaxItems did not bound the Active Directory fixture output.'
     }
 
-    Invoke-SmartWorkplaceCMDBAdTest 'Run the Active Directory orchestrator pipeline offline' {
-        $orchestratedRoot = Join-Path $tempRoot 'Orchestrated'
-        $result = & $orchestrator @identity `
-            -DataRootPath $orchestratedRoot `
-            -Pipeline ActiveDirectory `
-            -FixtureRootPath (Split-Path -Parent $fixture)
-        Assert-SmartWorkplaceCMDBAdTrue `
-            -Condition ($result.StepCount -eq 2 -and $result.FailedStepCount -eq 0) `
-            -Message 'The offline Active Directory orchestrator pipeline did not complete both steps.'
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        Invoke-SmartWorkplaceCMDBAdTest 'Run the Active Directory orchestrator pipeline offline' {
+            $orchestratedRoot = Join-Path $tempRoot 'Orchestrated'
+            $result = & $orchestrator @identity `
+                -DataRootPath $orchestratedRoot `
+                -Pipeline ActiveDirectory `
+                -FixtureRootPath (Split-Path -Parent $fixture)
+            Assert-SmartWorkplaceCMDBAdTrue `
+                -Condition ($result.StepCount -eq 2 -and $result.FailedStepCount -eq 0) `
+                -Message 'The offline Active Directory orchestrator pipeline did not complete both steps.'
+        }
+    }
+    else {
+        Write-Information '[SKIP] Active Directory orchestrator pipeline requires PowerShell 7.' `
+            -InformationAction Continue
     }
 
     Invoke-SmartWorkplaceCMDBAdTest 'Validate centralized Active Directory launchers' {
@@ -393,8 +526,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhN95fS9QpNCZM
-# 43cRdsm94WjfaCxBMwTkS/I+0cIVeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB49uT92roGG4Q/
+# 7419dR78YjtDiRcNCHrDby8uHp2O2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -527,31 +660,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPjGBWa3OScSsQNz/3/wggRMoO2PieO4oFhMQ0F6KjsFMA0GCSqG
-# SIb3DQEBAQUABIIBgKan8vApfGjQP4VSZ2Xphk0Vzwj4O7fjCqKtz76QCIBeXTwu
-# v98lYM5/c1nWhLHKcO2FVjsaVE1YiSILjUzSRyD0NPZz4SLHQ9RZVi5phrhmOpZQ
-# sjDPne/Qo3qWrMGsCIGdFFmhFV7O4/Y1XT7kdiCfQEiPhE6biEMGm8oFPZSnOTn2
-# OnPc/svDd0Nd6LvydnlN7y0xA98qtUBmmEJRfSTTmJQjYHfz7a1Wd9kP9HRDmoaY
-# UI76Tx7KF2SdOXKfcT1Kd7UZ5zKTtUtaRk9fqH7gXvv7JgK2GXBSwWLWj0qYNPGb
-# x7sFrj+qkERRN8kO5842ULrMSpw+QKix5bYUpXuLPp43XsVJzamZSJbrc0gQTGtv
-# oPZSTbldBysUOwmrtubCF5Pf1pV0rW9towL9/xcsokrCcWbfBjVhP8NByUC1LUa8
-# q5g7MDZOtNU3KzGBaT+vMEdiVdRzZi4coPnH/J64S+ObMOlVtXmbR1q2uZTFcAhY
-# Z+JcdW56p12utQ7zx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFXTOsf9IiBWve4oAyZRZawxuRo90nsevAGel5YNkZHUMA0GCSqG
+# SIb3DQEBAQUABIIBgIlws4aYJd6I6c2VMj1ELqCZV6kD5yeIt/p67FzuAw5fdsku
+# X+zT+lTI2eX93pcokcEfcKUuS+EshBtjX7pIGsI4u2CrKW0DSMQIxwSHCwtE5yoq
+# FU1T12Ju722ThYgCOkMi5JhoqMjcGyQmfh7u9ILoUnSzw2A9nHi9IonN+uoRWT8t
+# c6waOlthOvaSdz5LdFJUW3Y4mbu2FXZdd+RyvqnOl1xayBXIgXa06qLWatVZwtxI
+# M1Hd4HRYVDxRsHu/Bj9bz157MYbsKxTM3ihmRvCwatluQYbuFql06w6by4A1AO8A
+# Pv45ZfkFcNiB3mjRi4mkw//U0qKL3sLNHTNGBVw19y40cKffbX32r65sTuBMo4qC
+# cVEWTK6ierS8BT1giEJM3GnQx7YiG90CR86jXArigM7HrrndygKRHSOp6Q3EXGOc
+# zQNlSwTTH+ZvTada1iv3PpWp0wpi0IrgKmTzXlcwJxCYwzIYx3PDK1cRE8d7kSrP
+# ejY++M/hnMGtNH8gd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMDM5
-# MTJaMC8GCSqGSIb3DQEJBDEiBCB6am9sKd6nQr+GJ9GSqOGaFHqNBdv/H0+YsaLR
-# Ww/ISDANBgkqhkiG9w0BAQEFAASCAgCwDc1KK4FV5Hr93aivYQOLDQnHB9mniXT+
-# 85y7xaeI/5fgsQidlkE1KZx/+F5Z8cfyXAeG52wnauHr5IfLaMmzH5eyyD4GSgaA
-# al7eY4yKemWZjdAwl7Z5rJ+GjWjmWXit3vO4WOZTYj6LAKxOpvLe94sTCKDH4Z9z
-# lY7RUZIjLRORgHND5eS5HoJpINXdKzH294d4hgOnH9Zk6/yBzO2beMT+AlYPIj99
-# 3voNogrcgzeJGspHmmixXexXuQwiNd9qGLTdXd1lE7pT0TXj1+xdQkiz+geiBJVe
-# wTcibztZFa620qzGFr3fhirZkJArK31I9Y0n/5eSzTjYEEFUZPbWSc5Oap+EadHk
-# QcOdNYMYxnE0nJ6pTahJRDS72CD3AY8jODDhcfdshiQZPh68nsnuKO2Bm2JhGtpn
-# hAnmvPd01cwkN4SqQCvZlOOgqcZqxTQeBRz8gE0miMDclp5bKe0VxwzbEozGE3JN
-# pC0zlGkADRKXWPj3ejMOwYcaB6alCPgPXpquRjhGktMdPq3t7kWC96l7QUwlVnAf
-# SCsKTe0eiZpPlAm7eBX8gJrFGH9XpcUT+v1Kx4mnThVqGhJGbeOXsBriHs8wrOSP
-# iU/vL2/gJEBXUh+hZUDPs6jlX+IA8rhYuXy27cAzJxVlFBm6wDkWpXEURZq7kYwj
-# GCKB1gpBzA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjJaMC8GCSqGSIb3DQEJBDEiBCCRm+jDZBrLK38k2sbCJ+89Gfk7Gd4uj3LZp1pA
+# CBziazANBgkqhkiG9w0BAQEFAASCAgBLpOmE/8S0b8S8AisTyIXb9gLS3UvdzjBH
+# f566as9wkzec36rLRX2084woGzpi9jOoMi0N77zDaTbJV/lkXiNRPvSFNpixsbqi
+# +D/5kZ4VbAPoV5axbrVGw+RXFqSPk+ck8n/pSeSTXRda6FavJaMlZ5GDJs9YvM5v
+# ocQaYevzF99c4Og/aNAM/TXmnYt4S0FF/ZGPI+3rVZod89wfqeIg2rHav1/ifT1W
+# M9LxmTi0oGBdD6XS45MEU+Op57OPLtraS8Kg00V20yyteGrmyrTLAKXol/vAQZov
+# RbE6/Af2j1WvYle3D9VZICRon5U2Y5efC4GlfQ0Qc1TkH+oOu64b2Kgamb0gr55O
+# hBbDKME3HNaxAfOMUaO/yrOKS5Rv7TybkVdkxXwviwGah5bcAzDc3r6z0f01JBBj
+# kQqPLacHpT3pubNl+1BQC85rZ2zo3MjzIoYKVhv84XHY+fRUjaR+DKrwrk04EWi/
+# x/poKfP+wxlQUU8jyAQ1DK/DCNqK+mqtqtkN0NIpjH0ZlhJAMr3by+XeChOlUgTr
+# FIBEhlFb8PpfIrt4x2CzPLhJ3c4RyeHCtJDhqBzK3PC1EF4980YmY1t6gLxTVW+N
+# BBFL07zgKNVVD765+yNkr6uWgxqqz7MLfMA0o7k0f1EycO7O+RGwWj3nxL6/2Lvz
+# eDD5ELa37Q==
 # SIG # End signature block

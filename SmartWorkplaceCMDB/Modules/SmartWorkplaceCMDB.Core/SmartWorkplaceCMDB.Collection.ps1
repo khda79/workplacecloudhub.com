@@ -1,5 +1,5 @@
-# Version: 1.0.0
-$script:SmartWorkplaceCMDBCollectionVersion = '1.0.0'
+# Version: 1.1.0
+$script:SmartWorkplaceCMDBCollectionVersion = '1.1.0'
 
 function Read-SmartWorkplaceCMDBCollectionFixture {
     [CmdletBinding()]
@@ -53,7 +53,7 @@ function Start-SmartWorkplaceCMDBSourceCollection {
     param([Parameter(Mandatory)]$Paths, [Parameter(Mandatory)][string[]]$RawPath,
         [switch]$Fixture, [int]$MaxItems, [switch]$Scoped, [switch]$NoWrite)
     $coverage = if ($MaxItems -gt 0) { 'Bounded' } elseif ($Fixture) { 'Fixture' } elseif ($Scoped) { 'Scoped' } else { 'Complete' }
-    $run = [pscustomobject]@{Paths=$Paths; RawPath=$RawPath; Fixture=[bool]$Fixture; Coverage=$coverage; MaxItems=$MaxItems; RunId=[guid]::NewGuid().ToString('N'); StartedUtc=[datetime]::UtcNow.ToString('o'); NoWrite=[bool]$NoWrite; Locks=(New-Object 'System.Collections.Generic.List[object]')}
+    $run = [pscustomobject]@{Paths=$Paths; RawPath=$RawPath; Fixture=[bool]$Fixture; Coverage=$coverage; MaxItems=$MaxItems; RunId=[guid]::NewGuid().ToString('N'); StartedUtc=[datetime]::UtcNow.ToString('o'); NoWrite=[bool]$NoWrite; Locks=(New-Object 'System.Collections.Generic.List[object]'); PreviousState=@{}}
     if ($NoWrite) { return $run }
     try {
         foreach ($path in $RawPath) {
@@ -61,6 +61,32 @@ function Start-SmartWorkplaceCMDBSourceCollection {
             $run.Locks.Add([IO.File]::Open(($path + '.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None))
         }
         foreach ($path in $RawPath) {
+            $statePath = $path + '.status.json'
+            $previous = [pscustomobject]@{
+                Exists = $false
+                Bytes = $null
+                IsUsable = $false
+                SHA256 = ''
+            }
+            if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+                $previous.Exists = $true
+                $previous.Bytes = [IO.File]::ReadAllBytes($statePath)
+                try {
+                    $state = Read-SmartWorkplaceCMDBJsonFile -Path $statePath
+                }
+                catch {
+                    $state = $null
+                }
+                if ($null -ne $state -and $state.Status -eq 'Completed' -and
+                    (Test-Path -LiteralPath $path -PathType Leaf)) {
+                    $previous.SHA256 = [string]$state.SHA256
+                    $previous.IsUsable = (
+                        [string]$state.SHA256 -eq
+                        [string](Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    )
+                }
+            }
+            $run.PreviousState[$path] = $previous
             Write-SmartWorkplaceCMDBSourceState -Run $run -Path $path -Status 'InProgress'
         }
     } catch { foreach ($handle in $run.Locks) { $handle.Dispose() }; throw }
@@ -86,9 +112,155 @@ function Complete-SmartWorkplaceCMDBSourceCollection {
     if ($Run.NoWrite) { return }
     try {
         foreach ($path in $Run.RawPath) {
-            Write-SmartWorkplaceCMDBSourceState -Run $Run -Path $path -Status $(if ($Failed) {'Failed'} else {'Completed'}) -NotCollectedPath $NotCollectedPath
+            $restored = $false
+            if ($Failed -and $Run.PSObject.Properties['PreviousState'] -and
+                $Run.PreviousState.ContainsKey($path)) {
+                $previous = $Run.PreviousState[$path]
+                if ($previous.Exists -and $previous.IsUsable -and
+                    (Test-Path -LiteralPath $path -PathType Leaf)) {
+                    try {
+                        $snapshotMatches = (
+                            [string]$previous.SHA256 -eq
+                            [string](Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                        )
+                        if ($snapshotMatches) {
+                            $statePath = $path + '.status.json'
+                            $temporaryStatePath = $statePath + '.restore.' + [guid]::NewGuid().ToString('N')
+                            [IO.File]::WriteAllBytes($temporaryStatePath, $previous.Bytes)
+                            Move-Item -LiteralPath $temporaryStatePath -Destination $statePath -Force
+                            $restored = $true
+                        }
+                    }
+                    catch {
+                        $restored = $false
+                    }
+                }
+            }
+            if (-not $restored) {
+                Write-SmartWorkplaceCMDBSourceState -Run $Run -Path $path -Status $(if ($Failed) {'Failed'} else {'Completed'}) -NotCollectedPath $NotCollectedPath
+            }
         }
     } finally { foreach ($handle in $Run.Locks) { $handle.Dispose() } }
+}
+
+function Publish-SmartWorkplaceCMDBSourceCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Run,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
+        [Parameter(Mandatory)][string[]]$Columns,
+        [Parameter(Mandatory)][string]$HistoryPath,
+        [Parameter(Mandatory)][string]$LatestPath,
+        [Parameter(Mandatory)][string]$ContractPath,
+        [Parameter(Mandatory)][string]$ContractTableName
+    )
+
+    if ($Run.NoWrite) {
+        throw 'Publish-SmartWorkplaceCMDBSourceCsv cannot publish a NoWrite collection run.'
+    }
+
+    $contract = Get-SmartWorkplaceCMDBTableContract -Path $ContractPath
+    $table = @($contract.tables | Where-Object name -eq $ContractTableName)
+    if ($table.Count -ne 1) {
+        throw "Source contract table '$ContractTableName' was not found exactly once."
+    }
+
+    $transactionRoot = Join-Path $Run.Paths.DataRootPath (
+        '.staging\Sources\{0}' -f $Run.RunId
+    )
+    $stagedLatestRoot = Join-Path $transactionRoot 'DATA-LAST'
+    $stagedPath = Join-Path $stagedLatestRoot (
+        Join-Path ([string]$table[0].area) ([string]$table[0].name)
+    )
+    $backupRoot = Join-Path $transactionRoot 'backups'
+    $promotions = @(
+        [pscustomobject]@{
+            Source = $stagedPath
+            Destination = [IO.Path]::GetFullPath($HistoryPath)
+            Backup = Join-Path $backupRoot ('history-' + [IO.Path]::GetFileName($HistoryPath))
+        },
+        [pscustomobject]@{
+            Source = $stagedPath
+            Destination = [IO.Path]::GetFullPath($LatestPath)
+            Backup = Join-Path $backupRoot ('latest-' + [IO.Path]::GetFileName($LatestPath))
+        }
+    )
+    $completedPromotions = New-Object System.Collections.Generic.List[object]
+
+    try {
+        Export-SmartWorkplaceCMDBCsv `
+            -InputObject @($InputObject) `
+            -Columns $Columns `
+            -Path $stagedPath `
+            -TenantKey $Run.Paths.TenantKey `
+            -OrganizationKey $Run.Paths.OrganizationKey `
+            -EnvironmentKey $Run.Paths.EnvironmentKey `
+            -TenantId $Run.Paths.TenantId
+
+        $stagedResults = @(Test-SmartWorkplaceCMDBCsvContract `
+                -LatestOutputRootPath $stagedLatestRoot `
+                -ContractPath $ContractPath)
+        $stagedTable = @($stagedResults | Where-Object Name -eq $ContractTableName)
+        if ($stagedTable.Count -ne 1 -or $stagedTable[0].Status -ne 'Valid') {
+            throw "Staged source CSV '$ContractTableName' does not satisfy its contract."
+        }
+
+        foreach ($promotion in $promotions) {
+            $destinationFolder = Split-Path $promotion.Destination -Parent
+            New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
+            $hadPrevious = Test-Path -LiteralPath $promotion.Destination -PathType Leaf
+            if ($hadPrevious) {
+                New-Item -ItemType Directory -Path (Split-Path $promotion.Backup -Parent) -Force | Out-Null
+                Copy-Item -LiteralPath $promotion.Destination -Destination $promotion.Backup -Force
+            }
+            $candidate = $promotion.Destination + '.candidate.' + $Run.RunId
+            Copy-Item -LiteralPath $promotion.Source -Destination $candidate -Force
+            Move-Item -LiteralPath $candidate -Destination $promotion.Destination -Force
+            $completedPromotions.Add([pscustomobject]@{
+                    Destination = $promotion.Destination
+                    Backup = $promotion.Backup
+                    HadPrevious = $hadPrevious
+                })
+        }
+
+        $defaultLatestPath = Join-Path $Run.Paths.LatestOutputRootPath (
+            Join-Path ([string]$table[0].area) ([string]$table[0].name)
+        )
+        if ([IO.Path]::GetFullPath($defaultLatestPath) -eq [IO.Path]::GetFullPath($LatestPath)) {
+            $publishedResults = @(Test-SmartWorkplaceCMDBCsvContract `
+                    -LatestOutputRootPath $Run.Paths.LatestOutputRootPath `
+                    -ContractPath $ContractPath)
+            $publishedTable = @($publishedResults | Where-Object Name -eq $ContractTableName)
+            if ($publishedTable.Count -ne 1 -or $publishedTable[0].Status -ne 'Valid') {
+                throw "Published source CSV '$ContractTableName' does not satisfy its contract."
+            }
+        }
+
+        Complete-SmartWorkplaceCMDBSourceCollection -Run $Run
+        return [pscustomobject]@{
+            HistoryPath = [IO.Path]::GetFullPath($HistoryPath)
+            LatestPath = [IO.Path]::GetFullPath($LatestPath)
+            ContractTableName = $ContractTableName
+        }
+    }
+    catch {
+        for ($index = $completedPromotions.Count - 1; $index -ge 0; $index--) {
+            $promotion = $completedPromotions[$index]
+            if ($promotion.HadPrevious -and
+                (Test-Path -LiteralPath $promotion.Backup -PathType Leaf)) {
+                Copy-Item -LiteralPath $promotion.Backup -Destination $promotion.Destination -Force
+            }
+            elseif (Test-Path -LiteralPath $promotion.Destination -PathType Leaf) {
+                Remove-Item -LiteralPath $promotion.Destination -Force
+            }
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $transactionRoot) {
+            Remove-Item -LiteralPath $transactionRoot -Recurse -Force
+        }
+    }
 }
 
 function Import-SmartWorkplaceCMDBSourceCsv {
@@ -165,8 +337,8 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATEeTZAGqDj1O3
-# 1Ow9SnwRefn5EwHeZCirRp05Pg8dYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9RwQW159IEgtM
+# 8sO1tbbvt80TGXErc2IWVVuHykFD3aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -299,31 +471,31 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIiRz0ntU3gnTWohXwH1Pt07FpDxctGLXX8O+QNMBdQsMA0GCSqG
-# SIb3DQEBAQUABIIBgDKoDliAiCIaCK6Yk4544Xivj7hQW2pwK4bGnWKjcoirYq8B
-# MLZiULzu0PMCKZdBGiO4MuJJ1qdtfUPo8bGGT/BBLe5ED6IREUOA1p0Y0lnbs2nO
-# 18S/hvKucz3otrNkqzpok49Ru2y1Sj/2ujry1j2moLuOzqkuGDlv/VStZMqHZcv7
-# 8Dd2imdQk7kL84TUBIUxTJDmJoZUwJWN3JpH+bT1i8OREglXk7QmjQ9Yoh8DysDI
-# YZQ+NCu2r9ux779anAibF5HC4DWyA0m3Fxt/q/0/uuC6mVARwU6bJExd5RYfIfU8
-# yMTpzjUZPNQpvAkwNDLEvrAAJ1boydMkwYitZ4KCYfxS3dfsIbVfXUd95+epoC5U
-# h+TwBKSrSAs1vRaGJja1JKpJ201mvR2d+VevqceZ7O4si++gsmlqGOjZWUsrJx9S
-# SH43pPwne/q2ZFvvKY5PRSx+lTFK00cj45Pk44TY1OEXOrLfJQ0aVIn9UFayiGnV
-# A8ImZjuKbiSbIHdMKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOWEDbDSasQwUxoHGsfhixMkhkfZsfomzOPjzPEajFvPMA0GCSqG
+# SIb3DQEBAQUABIIBgB2mjtNBbzrAumiIDUKtbDvIXpt52nOQkVb+zD0H/MkhqI64
+# 2PtGE9431LcAh4zJa+MNk5H11o9rVcyTVKXw6zaHk4SrYZKyrAYHrrfzDE95kMIa
+# Bp3w6hAEpuBN1thYSCNklIgOxAq3IADfknBBuDwVCNCuPzRE7Sd6tOt8Od2Or2y6
+# SAx2/VlMgCSw370nDVCtp5Wmnngr3S4aNqcjySVv9nHoZl1TxAQ6Aw7a7eEWClg+
+# gJ3VPJ7nzk0211pKxLyfyMoCYvKN2IfvdVNQOW0BGm+8Yfcl3f7FWaYlRKbPaKPf
+# atX/3iU8G8mXMYiAt/OPp6dK3ox6C+UsoOz1w/SAzYTAHDgeTskqyG673m3/ssi4
+# RMObGEOPqMMWADbBGL++UvzbWAQPivuQTNvms5aYZWC3wVAjTOu+k1A6lx1nx2dd
+# ut6UiGy4FOeMA7yV16Um/yb4AZyRygOBi7Q/Q7hMscBXFz7o2xU6fteDjj5+dH+q
+# euHMCn/faKrC3MHGTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTVaMC8GCSqGSIb3DQEJBDEiBCAywDKxJqjl6S/dE6h2bhyC6wa5FmJBtXl8HZtJ
-# Nxi6jzANBgkqhkiG9w0BAQEFAASCAgBnvH13447UVS3FD5c5iXeV5/YXAEHJ+jmA
-# T89D8dtUZkT//uW5ctR63n5Pnj1TPLixT9WI8Yz7FZ2LFLDTWz0FRAl2vsGb+RXr
-# 9jFo/BCc3VE/PtdTlOtucdijsKPq7YF6lsy50Eh7/UkFrNvPVxGbQD25bCvxGJL5
-# IPDd4ykpwW/5nVf0vfG7V2BaEicCbN6+ScEoGBXkfRAuo5fQxPGKVhFKKTxSYAtC
-# BNxEkdgTSfmydgMAEEYMBRlCrkYbeZDVkqx3wXi2NblV35a0O1FhXJybf88ad+ZY
-# J/Dlv8o6kkQ9h992RttC1wuGNU958g1Y9WHNYAgrh4AJ3AmKYHJj+kGaoN3/SKS2
-# XGWQy7mjRJYFztW7+Wbn0z06D0bDIHTL9Om3nOz/uPiIZX81xBM/ztLvyJXEp1Yw
-# 5o8lyAPpDgrGZbDCcK7WIJJ3AMA1JMRT251KtkQd/xB+55co5HPnVTA6Jz9vPKQ+
-# A8rMkeVqnCp9TWoxmSyf3W8HNOffubViSOt8wCwjBUC3cGwwdspUA03lHAqxpij+
-# uoJ9YzLrefxV5MfdG2pWm7KY5oiRlwbw7Ip1S+UtCpvk6fx/emjRLZsToZTBqC3Q
-# Ei4FNRKAEOu9rq4WDrv4hr/NJyKZisCYLzL0r/v+aDUyKMjYww68pveUyPx/xwfw
-# Fu10BxDpoQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjBaMC8GCSqGSIb3DQEJBDEiBCDkVSdk+0LqnQUSkLuyY3MRuzM5G2zSlWJwHXai
+# euApjTANBgkqhkiG9w0BAQEFAASCAgCMB6PfNMaFSnYVmNgabjfOgnjAVrhN86kM
+# 9ZfVddug1EWqu5gG5ah9uH0f0R7PioG6eYx8zeCfVK0RPWR+/eHZrWB0UwdeQegY
+# +EjdGJ2XBLZcyN4v4PlZBGZSHYqIu7iyOVIBXC5a/Vblv9hl8kIGU2sxOapbVVwt
+# Ajz3us24mNEq6YOHBq4FdgC3j1Ent2/ge6KomfcLZCrI450eSmw+YT8T/C/Nbd8c
+# 9FLYHXNQenCDn31doiz73otFKNDNa91E0DFycXMU1whoKM0uOyEcABowuNFxFs9l
+# VRnuk3KtG4+tgPRzxWh5HHXjEFsBnrcoG9jFNRPSDhpbZUNE99Cdy5NdAmOivhUg
+# EaKC5yv8FfTsVbbVT5Ec3Vh6CXklXhkNLdBByDxatAM5SZ3rzHPU2QQ1vhkb6/zV
+# kvs8/3QijskbgXn7zmWHDBaOx3Gu4zs3kSNn0NaBzEmyI25DhzaWrL7l+Rh1sGsa
+# 7EaqBQ6HLTt3qAaVssvLsDt5W3JscDxMqefReKeBT/4G6yuNhCZQbne65UAL8nat
+# 6wDY87lrZxlo0tv0+uDI1Z5OQs3Kg9jN98gI3OQRc9Pgf1JsXr4uixX+yTV8t1oy
+# kwbq6ohbibYXHnQAjvThSA/ykLU7GOEjqbYEr/o2Traf84TkBOz8VDrC1XsyxjVV
+# /6YuLYthVQ==
 # SIG # End signature block

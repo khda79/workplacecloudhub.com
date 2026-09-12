@@ -1,7 +1,66 @@
-# SmartWorkplaceCMDB 1.0.1
+# SmartWorkplaceCMDB 1.1.1
 
 **Stable release. Git publication is a separate reviewed action; tenant data,
 local configuration and private report artifacts are never part of this package.**
+
+## 1.1.1 stable feature candidate — 2026-09-12
+
+- Adds a timestamped orchestrator log, a structured run CSV and one dedicated
+  log per executed pipeline step under the tenant `LOG-ALL` root.
+- Uses separate `Orchestration\Logs`, `Orchestration\Runs` and
+  `Jobs\<script-name>` directories so concurrent hosts and repeated runs do not
+  overwrite one another.
+- Applies the SmartInventory retention pattern with configurable age limits of
+  30 days for orchestrator/step logs and 90 days for run CSVs. Count guards
+  additionally retain at most 30 logs per orchestrator/script and 90 run CSVs.
+- Prefixes every physical text-log line with local date/time and severity, and
+  records the exact step-log path in the structured execution CSV.
+
+## 1.1.0 stable feature candidate — 2026-09-12
+
+- Applies the common paged Microsoft Graph request and bounded transient retry
+  pattern to Entra users, completing the alignment of every Graph-native
+  collector.
+- Stages and contract-validates every single-table cloud source before
+  transactionally promoting history and `DATA-LAST`; a failed promotion
+  restores the previous completed source evidence.
+- Sends an optional aggregate summary after a successful live, unbounded,
+  unscoped `Full` collection, using direct Graph REST app-only mail or SMTP
+  without a SmartM365 runtime dependency.
+- Reports devices, users, mailboxes, and distinct Microsoft 365 F1, F3, E3, E5
+  and Copilot assignments with current capacity/utilization and deltas since
+  the immediately previous full collection, J-7 and J-30.
+- Keeps F1 (`M365_F1`) distinct from F3 (`SPE_F1`), retains private aggregate
+  snapshot history, retries transient mail/token failures, and never includes
+  entity identifiers in the generated HTML.
+- Skips notifications for validation, fixtures, bounded runs, scoped AD runs
+  and non-Full pipelines. A notification failure preserves collected data and
+  returns `CompletedWithWarnings`.
+
+This feature is covered by offline synthetic tests. No live tenant collection,
+mail delivery, SharePoint upload, or domain-reachable AD run was performed as
+part of this code validation.
+
+## 1.0.2 stable patch candidate — 2026-09-12
+
+- Collects each discovered Active Directory domain as an explicit completion
+  unit and retries only transient connectivity, ADWS, LDAP timeout, server-busy,
+  and invalid-enumeration-context failures.
+- Uses three configured retries with 5, 15, and 30 second delays and forces
+  domain-controller rediscovery before a retry. Authorization, schema, and data
+  errors fail immediately.
+- Stages and validates all Active Directory CSVs before transactional promotion;
+  a failed attempt restores the previous complete CSVs and source evidence.
+- Adds diagnostic `TargetDomains` scoping. Scoped AD runs are clearly evidenced
+  and cannot trigger SharePoint publication.
+- Adds normalized organizational-unit inventory plus limited user, computer,
+  and group attributes required for workplace analysis.
+- Keeps domain parallelism disabled (`DomainParallelThrottleLimit=1`) until a
+  live domain-reachable qualification demonstrates that it is safe.
+
+This patch is covered by offline synthetic tests only. A complete live Active
+Directory collection remains required on the domain-reachable host before live
+qualification can be claimed.
 
 ## 1.0.1 stable patch candidate — 2026-09-12
 

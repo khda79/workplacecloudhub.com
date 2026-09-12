@@ -9,7 +9,7 @@ raw contract is written below DATA-LAST\Raw\Intune. Offline JSON is supported
 for safe tests.
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -257,31 +257,14 @@ $historyFolder = Join-Path $paths.DataAllRootPath (
 $historyPath = Join-Path $historyFolder (
     'Intune_ManagedDevices_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 )
-$exportParameters = @{
-    InputObject     = $rawRows
-    Columns         = @($rawTable.columns | ForEach-Object { [string]$_ })
-    TenantKey       = $paths.TenantKey
-    OrganizationKey = $paths.OrganizationKey
-    EnvironmentKey  = $paths.EnvironmentKey
-    TenantId        = $paths.TenantId
-}
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $historyPath
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $RawLatestOutputPath
-
-$expectedLatestPath = Join-Path $paths.LatestOutputRootPath (
-    Join-Path ([string]$rawTable.area) ([string]$rawTable.name)
-)
-if ([IO.Path]::GetFullPath($expectedLatestPath) -eq $RawLatestOutputPath) {
-    $results = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $paths.LatestOutputRootPath `
-        -ContractPath $rawContractPath)
-    $deviceResult = @($results | Where-Object Name -eq 'Intune_ManagedDevices.csv')
-    if ($deviceResult.Count -ne 1 -or $deviceResult[0].Status -ne 'Valid') {
-        throw 'The latest Intune managed devices raw CSV does not satisfy the raw SmartWorkplaceCMDB contract.'
-    }
-}
-
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $sourceRun `
+    -InputObject $rawRows `
+    -Columns @($rawTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $historyPath `
+    -LatestPath $RawLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'Intune_ManagedDevices.csv' | Out-Null
 
 Write-Information (
     "SmartWorkplaceCMDB Intune managed devices collection completed. Devices={0}; history='{1}'; latest='{2}'." -f
@@ -310,8 +293,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3CD5uzMAacUIV
-# 7iPCajvIz3IsNv0sHwn8tkZ2X3kztKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZlSRVUm6qJ5lP
+# RqI85Ar0g9Q4ExmsWhBJ0vuyy3cxaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -444,31 +427,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHCdO0S5FcEnXLJFHo5ioSpxgC8TA/+TRHgFVyqnZ7gMMA0GCSqG
-# SIb3DQEBAQUABIIBgJBFleYVoBf1vE/fDyx8HmCrelaMCsE8kR1vu4X6P40mKa4D
-# MR5/fRNEQtLLCclme1k3g6u8LBSdyL00yJSNV/k2C8XbnVDKSv8QK1QpjkDO3cGj
-# SksYSbTJ0xytk0sSrhy3opa0aeshvtnoISPjCtj4JBGjRXjHKRrhZ7dhd+lFWC/6
-# Mipm5UZ+fsM2fxdSuG2svUuLZ1YadocytYB4vAuLJohpCksHuYViETgHlF8LUAcU
-# kiXcJ51YUOq6FAvUxXwqlqF172D6eKn9uz66sQFmj+r5046e7q9c2jYc9SB/sLxc
-# QOHnNePL+SJETRJOC/0wCLoBKhUed7mIxxZ2pYyKmbjTcjRTfNbUrB4W2GbMZzQE
-# IBG3uyEWzyYdvOgdpH3r3lMD9SLWIj0DRDLS5xr+8K7+9p0HVDx9Kvk9n3mtg+RN
-# 9m/ZCjtswT/TPlfQ0OrK6W5SdXi63maPnFNlf3BIQTnVHQjM95P/Hcubx0nk2FfV
-# I+mi3M/tKrFEGHdy16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN5YjUGf4GALr88G/CjECKiVTZEpPDkpVf6glIWiMW2bMA0GCSqG
+# SIb3DQEBAQUABIIBgEZrmgTQY8LqjGOFvJKCjJp6lcCM70c2wwHO6whLZp6gfZyo
+# MmIxQWuP8uyRJfgANqNGc6PQkdke1wM/EUyodvXltDI9OYGTy4UDL5CiN3jgTRIj
+# 7lLtCrUCCbNrVYpzi0CubOe+PwXoD/o/OEOQl9Sfcf5vL8ub6td2T91wnO2thu0k
+# QB+iNwhkh731mgih5tJpzS1aRyWRbcasR/O0ltozf5LzjZ1kyTC7lhEHwhYP0C8I
+# QznGEds2Ew9kCt6/slH3/Ju3Zy8ko2jn4QvWJ46s8aPZ9cPTydn/JX9QwRp2rxg8
+# l+YforXT5chcPFH1GwR576eUHY0pY7xz1pprfvP2XfiqUjtr/ngcc8gJ2BpRgsQD
+# h9/QdiGH/3b7is5ljLn93+c9nTRavbLEERF2odaoRSBB/uCx0H9sBTjVONs3F1ow
+# fbx2XFm63mifpvLvB29XSfFwTf5SiOUwjkVCrNMWtBtLX+ePPmcxJ3KU9PGEULAX
+# 4y2y1hh+Ch2KtHQt8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCCbEBIqIxkwS0yAH85X+DZNk6EydM0HtNvUvGVW
-# pFkBlTANBgkqhkiG9w0BAQEFAASCAgADMm2Jz1Mr+uMV59JyVXdSzOY3NJM8jh1i
-# 0d25zRuyzO9YtovAnudQhz7ZGz6atjQKiEjmmxOODY2QY8+JBCntmEmWsXi4Y69c
-# mViHwFHo5QmQu9pTAYToFTZebqy2JuRTQeqm89n4BzO79l31aAZ6wMi53VKOVNXW
-# 1uyyUBK1N6QoLEJvSNA38Hpd3gYfoI/X4zKTuwtYVw36Y1OqagbYArKMcMC/lyNb
-# 7dB1QubAfm0xFRHc/kJurMfLYnKFR9GZXpW9ZTGUAMc1U1/1F95GoZx5EOr+mLJc
-# zVc/9OmrexIEDuW326Ab1zVf6W62EgkY4iaNzPQay3Kf8qdf0ozSey3yMFeLJqxF
-# S1EUnZ4bEQefXMsED2AXPtTNVL3eFNEOwzZqPlmyjTs/bT1NNWyhWAGKVk918aDW
-# t/VL37qqCFzuPI+ypWmaGu2rp/doSzAWD1gpbX56vzQd5TyPW7cBskMKuGS6w8eJ
-# bkbjONHQJSMKr1vf9QROhdSmxsghqGTgDqndmebwOat1ySGcIF1DxNDdLLr1lQE/
-# WgIVd2sCv+5clnhnCGssmD1tflGg9DBttYuNczCpvDfhXwE+RjpF1HsO+BtOR7KA
-# N8K25jg7NjotmS5gedKBATHgTtu3gtLNnAHHDkB1EC7ahooBzQtSpAN1sVLwCYl7
-# 92hG81ATbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAXwr9JruJ83czYfjjBK2AxXRHy7uj1kJI7dxno
+# imrmXzANBgkqhkiG9w0BAQEFAASCAgCUrtNOSEqNui5zPsSS+R1DVT6S3B0+Tkd+
+# hJuN48PmBJV1EpKGjeSkc7uJnzi17Ojuw5p4xgFkHL6CXtS4qaLitop89nU3FXXR
+# 8PhnY5MQn0XJvZs0gPyI2YXjl/WcVqyO73drkpidj3mxicAPKed3PW9QHvA410jd
+# 1FY0+1RsURWtzyLERGCMAFIb5TFLiykoa4CPebkGrh0mrbeyH8I3d4yWnGqmacGx
+# vD7D1wg49HiNBUrO+D61zRHPDyJE1x9mlGW7TJF9csfs/4454NXikBxCDbc79Pph
+# G1HaDqwWXwCXvRCNdfl+4HK1Tfqk026wDLiyh7R7UPV5O6uPYZVwZc09jwtI7+ED
+# WQgUc6/mzhEP6WYdSnSekvEtRoJFYIUg9CKynswG1jWOlcxhVMyMqstV2PFSaWwN
+# 3tTdiQ35vNGbV0yFmd3MDWmpHqnZUJ5zkYd9/OGJr0I/ClAMtugRxWUwqMmQLJXL
+# v+jbOzVCeloIxLdRye86Jw60F1NM3g2AoiIEbBBMfEAuP75E7wC4nVZF3WKDXlr7
+# wLjIBy3BdZI5yRtjPJvjXKdge6OwEji2W8+uPLnGY8AunsX2mHOqQT+JOmQ7rquo
+# jOUuPzmpJ+Si3DD3LYg9EHCDZ6c7v7vCBZzZ/1T98frxbqGtc0FrcTdFLVoe1dz/
+# aQ9t7aWrug==
 # SIG # End signature block
