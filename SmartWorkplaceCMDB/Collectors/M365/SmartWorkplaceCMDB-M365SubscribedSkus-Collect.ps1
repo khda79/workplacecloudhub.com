@@ -8,7 +8,7 @@ subscriptions and license unit capacity. The collector is read-only and writes
 history plus the latest raw contract. Offline JSON is supported for safe tests.
 
 .VERSION
-1.1.2
+1.2.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -31,11 +31,12 @@ param(
     [Parameter(ParameterSetName = 'Fixture', Mandatory)][string]$InputJsonPath,
     [ValidateRange(0, 2147483647)][int]$MaxItems = 0,
     [string]$RawLatestOutputPath,
+    [string]$RawServicePlansLatestOutputPath,
     [switch]$NoConfigWrite,
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.1.2'
+$ScriptVersion = '1.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -119,10 +120,12 @@ $context = Resolve-SmartWorkplaceCMDBContext `
 $paths = Resolve-SmartWorkplaceCMDBCollectionPaths -Paths $context.Paths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -ExplicitDataRoot:([bool]$DataRootPath) -NoWrite:$ValidateOnly
 $rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 $rawTable = @($rawContract.tables | Where-Object name -eq 'M365_SubscribedSkus.csv')
-if ($rawTable.Count -ne 1) {
-    throw 'The raw contract must contain exactly one M365_SubscribedSkus.csv definition.'
+$servicePlanTable = @($rawContract.tables | Where-Object name -eq 'M365_ServicePlans.csv')
+if ($rawTable.Count -ne 1 -or $servicePlanTable.Count -ne 1) {
+    throw 'The raw contract must contain exactly one M365_SubscribedSkus.csv and M365_ServicePlans.csv definition.'
 }
 $rawTable = $rawTable[0]
+$servicePlanTable = $servicePlanTable[0]
 
 if ([string]::IsNullOrWhiteSpace($RawLatestOutputPath)) {
     $RawLatestOutputPath = Join-Path $paths.LatestOutputRootPath (
@@ -130,16 +133,26 @@ if ([string]::IsNullOrWhiteSpace($RawLatestOutputPath)) {
     )
 }
 $RawLatestOutputPath = [IO.Path]::GetFullPath($RawLatestOutputPath)
+$RawServicePlansLatestOutputPath = if ([string]::IsNullOrWhiteSpace($RawServicePlansLatestOutputPath)) {
+    Join-Path $paths.LatestOutputRootPath (Join-Path ([string]$servicePlanTable.area) ([string]$servicePlanTable.name))
+}
+else { [IO.Path]::GetFullPath($RawServicePlansLatestOutputPath) }
 if (($PSCmdlet.ParameterSetName -eq 'Fixture' -or $MaxItems -gt 0) -and
-    -not $RawLatestOutputPath.StartsWith($paths.LatestOutputRootPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'RawLatestOutputPath must stay inside the isolated latest output root.'
+    @(@($RawLatestOutputPath,$RawServicePlansLatestOutputPath) | Where-Object {
+        -not $_.StartsWith($paths.LatestOutputRootPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
+    }).Count -gt 0) {
+    throw 'Raw latest output paths must stay inside the isolated latest output root.'
 }
 $executionMode = if ($ValidateOnly) { 'Validate' } elseif ($PSCmdlet.ParameterSetName -eq 'Fixture') { 'Fixture' } else { 'Collect' }
 $runtimeContext = Start-SmartWorkplaceCMDBExecutionContext -Context $context -ScriptPath $PSCommandPath -ScriptVersion $ScriptVersion -Mode $executionMode -NoWrite:$ValidateOnly
 $executionError = $null
 $sourceRun = $null
+$servicePlanSourceRun = $null
+$sourceRunCompleted = $false
+$servicePlanSourceRunCompleted = $false
 try {
 $sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath @($RawLatestOutputPath) -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -NoWrite:$ValidateOnly
+$servicePlanSourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath @($RawServicePlansLatestOutputPath) -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -NoWrite:$ValidateOnly
 
 
 $graphConfiguration = Get-SmartWorkplaceCMDBConfigSection $context.Configuration 'MicrosoftGraph'
@@ -176,6 +189,7 @@ if ($ValidateOnly) {
         RequiredGraphPermission = 'LicenseAssignment.Read.All'
         RawContractVersion = [string]$rawContract.contractVersion
         RawLatestOutputPath = $RawLatestOutputPath
+        RawServicePlansLatestOutputPath = $RawServicePlansLatestOutputPath
         ProfileKey = $paths.ProfileKey; TenantKey = $paths.TenantKey
     } | Format-List
     return
@@ -185,7 +199,7 @@ $sourceSkus = if ($PSCmdlet.ParameterSetName -eq 'Fixture') {
     @($fixtureSkus)
 }
 else {
-    $select = 'id,skuId,skuPartNumber,appliesTo,capabilityStatus,consumedUnits,prepaidUnits'
+    $select = 'id,skuId,skuPartNumber,appliesTo,capabilityStatus,consumedUnits,prepaidUnits,servicePlans'
     $uri = 'https://graph.microsoft.com/v1.0/subscribedSkus?$select={0}' -f $select
     @(Invoke-SmartWorkplaceCMDBGraphPagedRequest `
         -TenantId $paths.TenantId `
@@ -236,12 +250,44 @@ if ($duplicateIds.Count -gt 0) {
     throw "Duplicate Microsoft 365 subscribed SKU identifiers were returned: $($duplicateIds.Name -join ', ')"
 }
 
+$servicePlanRows = @($sourceSkus | ForEach-Object {
+    $skuId = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'skuId')
+    $skuPartNumber = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'skuPartNumber')
+    foreach ($plan in @(Get-SmartWorkplaceCMDBGraphObjectValue $_ 'servicePlans')) {
+        $servicePlanId = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $plan 'servicePlanId')
+        $servicePlanName = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $plan 'servicePlanName')
+        if ([string]::IsNullOrWhiteSpace($skuId) -or [string]::IsNullOrWhiteSpace($servicePlanId) -or
+            [string]::IsNullOrWhiteSpace($servicePlanName)) {
+            throw 'A subscribed SKU service plan did not contain skuId, servicePlanId, and servicePlanName.'
+        }
+        [pscustomobject][ordered]@{
+            SourceSystem = 'MicrosoftGraph'
+            SkuId = $skuId
+            SkuPartNumber = $skuPartNumber
+            ServicePlanId = $servicePlanId
+            ServicePlanName = $servicePlanName
+            ProvisioningStatus = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $plan 'provisioningStatus')
+            AppliesTo = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $plan 'appliesTo')
+            SourceCollectedDateTime = $collectedDateTime
+        }
+    }
+})
+$duplicateServicePlans = @($servicePlanRows | Group-Object {
+    '{0}|{1}' -f ([string]$_.SkuId).ToLowerInvariant(),([string]$_.ServicePlanId).ToLowerInvariant()
+} | Where-Object Count -gt 1)
+if ($duplicateServicePlans.Count -gt 0) {
+    throw "Duplicate Microsoft 365 service-plan keys were returned: $($duplicateServicePlans.Name -join ', ')"
+}
+
 $historyTimestamp = [datetime]::UtcNow
 $historyFolder = Join-Path $paths.DataAllRootPath (
     'M365\SubscribedSkus\{0}\{1}' -f $historyTimestamp.ToString('yyyy'), $historyTimestamp.ToString('MM')
 )
 $historyPath = Join-Path $historyFolder (
     'M365_SubscribedSkus_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
+)
+$servicePlanHistoryPath = Join-Path $historyFolder (
+    'M365_ServicePlans_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 )
 Publish-SmartWorkplaceCMDBSourceCsv `
     -Run $sourceRun `
@@ -251,22 +297,36 @@ Publish-SmartWorkplaceCMDBSourceCsv `
     -LatestPath $RawLatestOutputPath `
     -ContractPath $rawContractPath `
     -ContractTableName 'M365_SubscribedSkus.csv' | Out-Null
+$sourceRunCompleted = $true
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $servicePlanSourceRun `
+    -InputObject $servicePlanRows `
+    -Columns @($servicePlanTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $servicePlanHistoryPath `
+    -LatestPath $RawServicePlansLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'M365_ServicePlans.csv' | Out-Null
+$servicePlanSourceRunCompleted = $true
 
 Write-Information (
-    "SmartWorkplaceCMDB Microsoft 365 subscribed SKUs collection completed. SKUs={0}; history='{1}'; latest='{2}'." -f
-    $rawRows.Count, $historyPath, $RawLatestOutputPath
+    "SmartWorkplaceCMDB Microsoft 365 subscribed SKUs collection completed. SKUs={0}; ServicePlans={1}; history='{2}'; latest='{3}'." -f
+    $rawRows.Count, $servicePlanRows.Count, $historyPath, $RawLatestOutputPath
 ) -InformationAction Continue
 [pscustomobject]@{
     Status = 'Completed'; ScriptVersion = $ScriptVersion; SkuCount = $rawRows.Count
     CollectedDateTime = $collectedDateTime; HistoryPath = $historyPath
     RawLatestOutputPath = $RawLatestOutputPath
+    ServicePlanCount = $servicePlanRows.Count
+    ServicePlanHistoryPath = $servicePlanHistoryPath
+    RawServicePlansLatestOutputPath = $RawServicePlansLatestOutputPath
     RawContractVersion = [string]$rawContract.contractVersion
     RequiredGraphPermission = 'LicenseAssignment.Read.All'
 }
 
 } catch {
     $executionError = $_
-    if ($null -ne $sourceRun) { Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed }
+    if ($null -ne $sourceRun -and -not $sourceRunCompleted) { Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed }
+    if ($null -ne $servicePlanSourceRun -and -not $servicePlanSourceRunCompleted) { Complete-SmartWorkplaceCMDBSourceCollection -Run $servicePlanSourceRun -Failed }
     throw
 } finally {
     Complete-SmartWorkplaceCMDBExecutionContext -RuntimeContext $runtimeContext -ErrorRecord $executionError
@@ -275,8 +335,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBybOah9yFS5btj
-# BRIZh/mCtmeqS99CMoTJPDhgPFRqE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAumIzb8PFGr9z8
+# rFqUElWI3ygTcQuwIZALfDn5mK3ufaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -409,31 +469,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHaVId1Etauou6Yvq2eevJrSWBc0FEFzNgbdhRV+hwxNMA0GCSqG
-# SIb3DQEBAQUABIIBgCnMO7DTRe6SRueYulU3zcYz7E+4dUXQpg9PK7xUe2MMAkLS
-# iRqYIe2EAAHC+9vm5uSdUda+MkdQh4Ia1AfXrZlFdS+GhEct4UFZnDxVonjnBerU
-# G8iCR39k+PI0UODs4dxXaZO3wxJ/QJKym50oc+As+M2iREACe3mNCzqFNCs8nrSo
-# q5hi4Yxw/Ka0TLZdib5ys8agpL0NCJN6oWoe8/O+83ZsIOvDBxGFjZ9eam6pkVTn
-# EtiSXk/Rl3dAuFL9SO97epctzlVhtLDdOwomHro7CAHkx/eV5IicbUSEfPh4barv
-# bNdBT3PtdYMinYXbgc1xcjC3LIHah34GR3kWP0/SbXna0gthArQaZ1MqUkqzNKoB
-# zGl0vMlcOXLRxzQQPDRZI6GT/K76eEBes7/LXHqJLHiXADj9cKpJqxBLEyIFME+4
-# uJWCL5HF0kkjfi1IHRy5XhF9jCpWmmGyS2FTmXIa+5G1uNGMi5Ysq15dbWhD6dQb
-# 1TGjxKeLpLCihSes4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAb+iJzGiy3Y062HpEciIvhuoSR3sM4BE2Ft9VvupZBFMA0GCSqG
+# SIb3DQEBAQUABIIBgDSQB0AIxGPB6AhB2f6xDInloJMyd6gfdHnFQNtOQH4Y7jkv
+# 5ggpcLPEpSElAQQkiAea1IRJwoBbGMLipj4FUFoDHpjGyvE0PxqPAOjUnWRTB7hR
+# 4UNbfZoja+njbHIAeAm/AUy/ZV7fuYWdY5WTm69AwDt7bYFaca0n4AkX/shRZVVR
+# sdaSHqAZkvrDSJCw6yYwEBTbhGBAQlUi816VFSfVfHHo+6PNOSCD9tH7rpw61Nlh
+# PvPvbcT+hhc5veGUe9YsEMJIQ3EPrbyAlmIHUWtnRtqD6SU9x3o+/0I9HzvF0YrP
+# WsjlhrSfhEANzn7VnYcmJk+zCKRjodeumd2/lO4CRgVpTZbd34nzq5FcbakVXt8Q
+# QMpDiNyAC1NXJOtRuAbVLzVZUyp8aSYtERp2ITdAcYPidTkJA9VYW7Drv2WqcpQl
+# 44HID94RZ4VTqmhH8dT+g9RLl4Cn7vmcR2h7kSUMD7luAfSvcqXIquNXe2WJeCTR
+# uabZ0agXVaeZayTjZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
-# NDFaMC8GCSqGSIb3DQEJBDEiBCCXkf5rUSdAqgQfTXq0wBpCciZUAapJi85ECj0+
-# bQL6WzANBgkqhkiG9w0BAQEFAASCAgB+reuqKl6fHx0mnn6hyhcNqM9J8NZZM/ig
-# xEX6IjQ4ol/5+0/WfAF9sjjaFQRw5RVRScv3HQmKWgjizYZmD9Y2Rqm2DdDLx1qG
-# sEXQAdHeVZ2zIIKm5zj47tLxzqxXKUEtm6lP/Ai4+ptBj4/vAK5ipF0YszSyNhM7
-# QGEWAozCWuRdUhnediK+4vTtjtLTsqOmbghuBNl5VuP93vTZUH2HpkGYRKyeLhAN
-# 9ZYzxFt+C/cjNQNwUyJOAoDDh06TdNXuUPLHbfdsQMDIjCcpeLS006T+48ur1g+W
-# nEHolE/X6dm8TIZ+h0UFanI5xPE6KOav8amS3h4NxDlUPF21aorhzkvAo1UkngQW
-# hgM3pnDWHvLwbPzqLgZ6I2U/po7PQe57jlpLgg9P2bD0ptUU6wndI8AKQ3EeEB0w
-# ZOKxzyAvBM3kpLfn87+sEgFPuOhv1tGsiIQdrVEC4ukzUjpaFqjUrRdb0nsl+Ia9
-# OYYDah0ZSMCQHgCIZ8aLb20XaWrfOstcaGyO/nNbBoynUrMEXQ/FQnNLcJr0QK7c
-# G4cttJXZkUUGK4tNNzYuWIEzm289Ba+MKMTEuoJtpUdNpD5veGJJo9aom8ttGpOD
-# 6N0bVAFJZbCFakSGTkPgYV9Fv/ytgj3WVeGdKCFqw64dR32cqxunQ1Yv3hLNZYSc
-# HsFOtJLMHA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjdaMC8GCSqGSIb3DQEJBDEiBCB3s71D9442JwCrx/u3wJZobbekXDMScXQalO3c
+# jZxiYTANBgkqhkiG9w0BAQEFAASCAgAHvvsiSck0fLeRWjAUHlgRa2J9cPeci5vg
+# EuDT6QGjo6qtLEPiyog6b+gSVCqqykDyhOWhlDRWcJuveE9n46BjQ5tuz0FIgrKk
+# GRqwg5iMDzaUI8oBR+yifHi43Sn3FOv/BkLxk2QwEpn6AANz41qprEYsIIUCY6cp
+# q3OzF5MzOLXmNE0KgU8UNzpnh1jCPtjDcMx4VILzLxG+mSZ5SEUxXMegLWyYMtgx
+# gbgAKUDWpYoba5XvoFP4ufnZyJB8y3C/0MI1hBWrMaAfqxG0S0AekbFfHafVvpg6
+# FqnmkN/IqhCT8WKy8HWnV46sZB9+fbqzLbDpTb3snay41+AWjvhWohnRupmazP3G
+# KvlD6z97Urcifa1o3KY1Uwt7CP0jGiblydRxXv6XttU12s+XtAA6CeX/p0WCvoTP
+# INbnCS1L3QZPr3SV0N1qwzySGLelSAul+7wsDhAZHdZIYM22zljDDfWTxYZXivsF
+# mnOrkCv2pwdPQ6PjGFuaR3rMV612JwO7RdyKPBDa5fuFtZBP0Q4W1athYPnhe1t2
+# 5cdQsgOSGaAvJjpkVUkwOdrh0BsaILEQR+5Cwx0IFc/0fvmYF+QY2kv0jQ0uK/Df
+# UFSX3Tww0xMjzHh7TfuQKm+xGXiwg6Bl+w84Hmtr9+yJ0KqC/Jwrd1/o7TegX0WV
+# UXkblQ2HtA==
 # SIG # End signature block

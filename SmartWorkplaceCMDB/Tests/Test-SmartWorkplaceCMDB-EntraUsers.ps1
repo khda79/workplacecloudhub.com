@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB Entra users collector and normalizer tests.
 
 .VERSION
-0.1.3
+0.2.0
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.3'
+$ScriptVersion = '0.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -148,6 +148,11 @@ try {
         Assert-SmartWorkplaceCMDBEntraUserTrue `
             -Condition ($franceRow.UsageLocation -eq 'fr') `
             -Message 'Raw Entra users did not preserve usageLocation from the source.'
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($franceRow.LastSignInDateTime -match '^2026-09-10T08:30:00' -and
+                $franceRow.LastNonInteractiveSignInDateTime -match '^2026-09-11T07:00:00' -and
+                $franceRow.LastSuccessfulSignInDateTime -match '^2026-09-10T08:30:00') `
+            -Message 'Raw Entra users did not preserve sign-in activity.'
     }
 
     Invoke-SmartWorkplaceCMDBEntraUserTest -Name 'Honor MaxItems without touching canonical output' -Test {
@@ -200,6 +205,16 @@ try {
         Assert-SmartWorkplaceCMDBEntraUserTrue `
             -Condition ($franceCmdbUser.UsageLocationStatus -eq 'Reported') `
             -Message 'CMDB_Users did not retain the normalized usageLocation status.'
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($franceCmdbUser.LastSuccessfulSignInDateTime -match '^2026-09-10T08:30:00') `
+            -Message 'CMDB_Users did not retain the observed successful sign-in.'
+        $disabledUser = @($dimRows | Where-Object AccountEnabled -eq 'False')[0]
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($disabledUser.ActivityState -eq 'Disabled') `
+            -Message 'DimUser did not classify the disabled account explicitly.'
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition (-not [string]::IsNullOrWhiteSpace([string]$franceUser.ActivityState)) `
+            -Message 'DimUser did not derive an activity state for the enabled account.'
 
         $contractResults = @(Test-SmartWorkplaceCMDBCsvContract `
             -LatestOutputRootPath (Join-Path $runtimeRoot 'DATA-LAST') `
@@ -284,8 +299,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAM3wmu2oEjvtkf
-# SD+pvDWM/DfNu5qIQ8v6mHBxxrgmjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUdwTiZdKv1FuG
+# fHqlsF/E42DVlrfmA8lkOhl5V+dfuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,31 +433,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINIYwPhnPppRx5Y94aEBUV3s7V48f15yyFQwJAg4t07+MA0GCSqG
-# SIb3DQEBAQUABIIBgJSq+TFflGjcSNuL/4xqKqV7XRY9fz+qVPvdiMAe1pvc+Sln
-# cDSXTQ7Dq+OioIiDWcGRnlRFsHbCLRzncQqne+MlQaiVlP4Z7Fr5RZkMYz9tl/k5
-# 6Son9QgHnNuSLo9GMhWxDfgyximDT15OuqL9njhDCsDl4r5NalJpGy/oe7lto7uO
-# Hc2bRgGBRHgYFEDAs7u5JTim2H88FmcASePOmPKMq3TF5v4FnyFH0CA7rIbsdIe2
-# NKXDUkpOOahpdGtJ9/VAz3pY8xp7rBkORU2p38fMKD8uqb7d6cJyrHXhsGvRD+LZ
-# WhI4YRREm0y8vIHKQi91xMYfIKOLAaguc4L5n8OoJfDiYC1jCR0dNlJLaOpgjgfY
-# 9FwGiDBBcppF2LzSi3WkoVNAjImk8kIeHoa/QT6DtQgQt2Rqo/ryUO/3AWXTGKif
-# LNZ23Qwn+FSVBzdu8tVctLS3s80LS4GNtspicGBrbKnv9Zx8Il3mRIHxcJg18vaD
-# qk/wrTn8WyBkGgsdKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOLxHwoD9F7+lkqrGTmyXhzWShQXB2dW7FN0KM5oH3CGMA0GCSqG
+# SIb3DQEBAQUABIIBgCzzug3zvA+xST7z4Y960dJYTU9nDo/GeRH8g06ofAuZ4bz1
+# CgwWgbBbCIMDH8es1+URtXavXfjtr9QX4TFlOca/+Prg7JqaGMFoiswKTGod0yWW
+# P7pp6IO0NIjb6H5aSse5MO/NdcNgastvxln/WwWQ/weeJNxFIbDvwb0m/PlpgX3J
+# 9+3b/rryzdy8kFyYcpcH75OEnvOxOt22u96p89FxgAbpfSn+BS+Xo7DiQDdiVPRr
+# z4hZ1q03UTAE3aED8ofVh5+ngxoP6P3XBYYsJnu4/5I62HLXUV6zoO3LPqDL5A8N
+# sOhPxcKUk5Ij0a4wg6bzAuQnHkscH/y0XpTg5kcYo08mvE3dRRNXZaR/7PGYHfyx
+# ERy/4Qv54fkoovCV4iJSmBEC8TgEjUiEllROGyVvCq379uqrFS3UwW5PLIVzg4HE
+# tlcg/l8y3I5C0dMLwCHJKMoLwSP8eF7OdQWqts4buAJ4oMTREDoYI/YP8EfPYp64
+# adTmPDVJxK4/mvFC8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MjRaMC8GCSqGSIb3DQEJBDEiBCDgeSBXSVtc2BhmyCdu+ErpFNgddW4A5W1S0n9M
-# Nk5nPDANBgkqhkiG9w0BAQEFAASCAgCKXASXQ+LLp62/5MPmWKvQdHvn41DZoIVM
-# G/0u5fKHGVcxXhxiBYdTWtu4shKj2bCQW7Ajr5SmAfC8tfEs1sTpiCP+l9NjzMip
-# WCo6yHIGRQpbuB1fzTVvNzO10BDaQjEnQmxF7e3xTPBeaDkzhIIVBIGiAJkloJoA
-# RCcTLNFpqzKCgiqVQbEUVEIXu5WEZM8iymMtyOQ8UJW0XtMbdguzbHouS7CskY8O
-# 81Tj2YFfXOmhlzR2KV2AhG3jxb2UI9Q2LYFIEgJq2mI2fYZqdSF1F7Ubm+QZNQ/R
-# Q979zlejtWvJuGB4nueqh4Sa/Pli6MB9ulZe7s0bieSoqo3eTbfUf68IvBeU+8ct
-# lvMuzgvxbF4BY9mDsxxcqD+/wqxBjZ7D5QxLicIBBAkTFesVSmrDLrbromCjbSJA
-# sAynnl/ZWUE0kYp4qSrB6pChlazTBBKsbWcKkCDBvBlAvvNveQCCVHf0wYxG7kiO
-# pCe9XjQo97+UotSAWqQWWGizzKvWbd0IHCe0jWgiLmGsbzEBzOAlI+RelmGLEtRP
-# WoRoh6VykP4L2lkKpQ5OF2u7jwk3eZtD4da8H2jJJwnr/oCGI2bAB6blBhd+AP3e
-# imwPi3mEXZI94wt51+YW8g/KiZCTSr6B/L1TZudH+woCZxXwHWItFZaMFPqPFkZZ
-# QS0zF0pM8w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjlaMC8GCSqGSIb3DQEJBDEiBCC+L0JY8bKwkNQNdqA6MGt/PShsbfWIprzu5vbh
+# eKI79zANBgkqhkiG9w0BAQEFAASCAgCmfVHLhx2NVOXInz/b/NVa25CtBppmUA2L
+# tmpIVPNG03ZdlOXNdWQ+lhzbWRJgeuP/dibbQoe0TddE+3iCBZv5AEKqBFc/tRKB
+# yfECQ9wPNNy56cbU9I/4cOkf9yLmcDgDpD+hq3/y1leLZkVzXOnc7WOGiUQxqEze
+# GsP6MtWQvYcnvB/lopIehoVGFPUJvPHnO/xO+i1SDgTqNmhZM7ocpso2DjiC6oTV
+# rJxOSFu1YE0KLo5wNsdMqdCT0p9on3z849GUaxiya0RYyzpWVHdiyTxLvd7QhCnL
+# H2gJy7qZ9HZvWZNmHAjeiNPVkZxxfRuIMVhsiryQi0aq7n+K0Bflsh2fBjfA8/X2
+# yVJeQB9TGPVTSEM/MYtmoNcIX1YX9z6t4UJF/YnwfJKZQoImlQmTHkHW+2LrWzdl
+# /D68DVR8XSeRyyTW+fkiWNXIScGGxuTV4vGl8A9e04n8uIkdlVrGkgvW9z/UnOIi
+# YkY9iAT7q9HR6NMhl1RhUJb4G+vSEi3bb/9vAgvRjORhO+eEebWbCEKykfgFBzTP
+# TpSRjVHeGFnLSeQQnZWZ1N4+UbvAqsWiDElG9wyIZmgQ7tLwnbSv1uYmW85fdH1R
+# i8sDbbfM8JhhppYl6tqYj2fy9ROuPtm606zOMTcLImvZbpXbUz/ISU6mLJrK0Zny
+# yELLF2IdVA==
 # SIG # End signature block
