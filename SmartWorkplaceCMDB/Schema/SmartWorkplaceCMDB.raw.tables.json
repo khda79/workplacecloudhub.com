@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.15.0",
+  "contractVersion": "0.16.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -368,6 +368,54 @@
         "SupportedServices",
         "AvailabilityStatus",
         "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_AutopilotDevices.csv",
+      "role": "raw",
+      "source": "MicrosoftIntune",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "AutopilotDeviceId", "DisplayName", "SerialNumber", "Manufacturer", "Model", "GroupTag",
+        "PurchaseOrderIdentifier", "EnrollmentState", "LastContactedDateTime", "UserPrincipalName",
+        "AzureAdDeviceId", "ManagedDeviceId", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_DetectedApps.csv",
+      "role": "raw",
+      "source": "MicrosoftIntune",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "AppId", "DisplayName", "Version", "Publisher", "DeviceCount", "Platform", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_ConfigurationPolicies.csv",
+      "role": "raw",
+      "source": "MicrosoftIntune",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "PolicyId", "DisplayName", "Description", "Platforms", "Technologies", "TemplateId",
+        "TemplateFamily", "CreatedDateTime", "LastModifiedDateTime", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_WindowsUpdatePolicies.csv",
+      "role": "raw",
+      "source": "MicrosoftIntune",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "PolicyType", "PolicyId", "DisplayName", "TargetVersion", "ReleaseDateTime",
+        "DaysUntilForcedReboot", "CreatedDateTime", "LastModifiedDateTime", "SourceCollectedDateTime"
       ]
     },
     {

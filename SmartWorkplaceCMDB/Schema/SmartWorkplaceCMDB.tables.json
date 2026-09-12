@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.7.0",
+  "contractVersion": "0.8.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -363,6 +363,49 @@
         "MatchRatio",
         "MatchMethod",
         "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactAutopilotDevice.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantAutopilotDeviceKey",
+        "AutopilotDeviceId", "DisplayName", "SerialNumber", "Manufacturer", "Model", "GroupTag",
+        "EnrollmentState", "LastContactedDateTime", "AzureAdDeviceId", "ManagedDeviceId", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimDetectedApplication.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantApplicationKey",
+        "AppId", "DisplayName", "Version", "Publisher", "DeviceCount", "Platform", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimIntuneConfigurationPolicy.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantPolicyKey",
+        "PolicyId", "DisplayName", "Description", "Platforms", "Technologies", "TemplateId",
+        "TemplateFamily", "CreatedDateTime", "LastModifiedDateTime", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimWindowsUpdatePolicy.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantUpdatePolicyKey",
+        "PolicyType", "PolicyId", "DisplayName", "TargetVersion", "ReleaseDateTime",
+        "DaysUntilForcedReboot", "CreatedDateTime", "LastModifiedDateTime", "SourceCollectedDateTime"
       ]
     },
     {
