@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.0
+1.0.1
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -43,7 +43,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -307,6 +307,143 @@ function Get-SmartWorkplaceCMDBActiveDirectoryReadiness {
     }
 }
 
+function New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Server)
+
+    Add-Type -AssemblyName System.DirectoryServices.Protocols
+    $identifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new(
+        $Server,
+        389,
+        $false,
+        $false
+    )
+    $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($identifier)
+    try {
+        $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Negotiate
+        $connection.Timeout = [timespan]::FromMinutes(2)
+        $connection.SessionOptions.ProtocolVersion = 3
+        $connection.SessionOptions.Signing = $true
+        $connection.SessionOptions.Sealing = $true
+        $connection.Bind()
+        return $connection
+    }
+    catch {
+        $connection.Dispose()
+        throw
+    }
+}
+
+function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][string]$GroupDistinguishedName,
+        [ValidateRange(1, 1000)][int]$RangeSize = 1000,
+        [object]$Connection,
+        [scriptblock]$RangeReader
+    )
+
+    $ownsConnection = $false
+    if ($null -eq $RangeReader) {
+        if ($null -eq $Connection) {
+            $Connection = New-SmartWorkplaceCMDBActiveDirectoryLdapConnection -Server $Server
+            $ownsConnection = $true
+        }
+
+        $RangeReader = {
+            param([string]$AttributeName, [int]$RangeStart, [int]$RangeEnd)
+            $request = [System.DirectoryServices.Protocols.SearchRequest]::new(
+                $GroupDistinguishedName,
+                '(objectClass=group)',
+                [System.DirectoryServices.Protocols.SearchScope]::Base,
+                [string[]]@($AttributeName)
+            )
+            $response = [System.DirectoryServices.Protocols.SearchResponse](
+                $Connection.SendRequest($request)
+            )
+            if ($response.Entries.Count -ne 1) {
+                throw "LDAP range retrieval did not return the requested group '$GroupDistinguishedName'."
+            }
+            $entry = $response.Entries[0]
+            $returnedName = @($entry.Attributes.AttributeNames | Where-Object {
+                    [string]$_ -ieq 'member' -or
+                    [string]$_ -imatch ('^member;range={0}-' -f $RangeStart)
+                } | Select-Object -First 1)
+            if ($returnedName.Count -eq 0) {
+                return [pscustomobject]@{ Name = ''; Values = @() }
+            }
+            $name = [string]$returnedName[0]
+            return [pscustomobject]@{
+                Name = $name
+                Values = @($entry.Attributes[$name].GetValues([string]))
+            }
+        }.GetNewClosure()
+    }
+
+    $values = New-Object System.Collections.Generic.List[string]
+    $seen = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    $start = 0
+    try {
+        while ($true) {
+            $end = $start + $RangeSize - 1
+            $requestedName = 'member;range={0}-{1}' -f $start, $end
+            $result = & $RangeReader $requestedName $start $end
+            if ($null -eq $result) {
+                throw "LDAP range retrieval returned no response for '$requestedName'."
+            }
+            $returnedName = [string]$result.Name
+            $returnedValues = @($result.Values)
+            if ([string]::IsNullOrWhiteSpace($returnedName)) {
+                if ($start -eq 0 -and $returnedValues.Count -eq 0) { break }
+                throw "LDAP range retrieval omitted '$requestedName' before the final range."
+            }
+
+            $isFinal = $false
+            $nextStart = -1
+            if ($returnedName -ieq 'member') {
+                if ($start -ne 0) {
+                    throw "LDAP range retrieval returned an unscoped member attribute after '$requestedName'."
+                }
+                $isFinal = $true
+            }
+            elseif ($returnedName -imatch '^member;range=(\d+)-(\d+|\*)$') {
+                $returnedStart = [int]$Matches[1]
+                if ($returnedStart -ne $start) {
+                    throw "LDAP range retrieval returned '$returnedName' while '$requestedName' was requested."
+                }
+                if ($Matches[2] -eq '*') {
+                    $isFinal = $true
+                }
+                else {
+                    $nextStart = [int]$Matches[2] + 1
+                    if ($nextStart -le $start) {
+                        throw "LDAP range retrieval made no progress after '$returnedName'."
+                    }
+                }
+            }
+            else {
+                throw "LDAP range retrieval returned an unexpected attribute '$returnedName'."
+            }
+
+            foreach ($value in $returnedValues) {
+                $text = [string]$value
+                if (-not [string]::IsNullOrWhiteSpace($text) -and $seen.Add($text)) {
+                    $values.Add($text)
+                }
+            }
+            if ($isFinal) { break }
+            $start = $nextStart
+        }
+        return @($values.ToArray())
+    }
+    finally {
+        if ($ownsConnection -and $null -ne $Connection) { $Connection.Dispose() }
+    }
+}
+
 function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     [CmdletBinding()]
     param(
@@ -325,6 +462,7 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     $groups = New-Object System.Collections.Generic.List[object]
     $computers = New-Object System.Collections.Generic.List[object]
     $memberships = New-Object System.Collections.Generic.List[object]
+    $domainInventories = New-Object System.Collections.Generic.List[object]
 
     $domainIndex = 0
     foreach ($domainContext in @($Readiness.Domains)) {
@@ -337,7 +475,11 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
             $domainIndex, @($Readiness.Domains).Count, $domainDnsRoot, $domainContext.Server
         ) -InformationAction Continue
 
-        $common = @{ Server = $domainContext.Server; ErrorAction = 'Stop' }
+        $common = @{
+            Server = $domainContext.Server
+            ErrorAction = 'Stop'
+            ResultPageSize = 500
+        }
         if (-not [string]::IsNullOrWhiteSpace($PreferredSearchBase)) {
             $common['SearchBase'] = $PreferredSearchBase
         }
@@ -349,7 +491,7 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                 'ObjectGUID', 'ObjectSID', 'UserPrincipalName', 'DisplayName',
                 'Enabled', 'Department', 'Title', 'Mail', 'EmployeeID',
                 'DistinguishedName', 'Manager', 'WhenCreated', 'WhenChanged',
-                'LastLogonDate', 'PasswordLastSet'
+                'LastLogonDate', 'PasswordLastSet', 'PrimaryGroupID'
             ))
         $domainGroups = @(Get-ADGroup -Filter * @common -Properties @(
                 'ObjectGUID', 'ObjectSID', 'SamAccountName', 'DisplayName',
@@ -360,7 +502,8 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                 'ObjectGUID', 'ObjectSID', 'SamAccountName', 'Name',
                 'DNSHostName', 'Enabled', 'OperatingSystem',
                 'OperatingSystemVersion', 'IPv4Address', 'DistinguishedName',
-                'ManagedBy', 'WhenCreated', 'WhenChanged', 'LastLogonDate'
+                'ManagedBy', 'WhenCreated', 'WhenChanged', 'LastLogonDate',
+                'PrimaryGroupID'
             ))
 
         foreach ($item in $domainUsers) {
@@ -376,42 +519,149 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                     $item $domainDnsRoot $domainNetBIOSName))
         }
 
-        if ($CollectMemberships) {
-            $started = [datetimeoffset]::UtcNow
-            for ($index = 0; $index -lt $domainGroups.Count; $index++) {
-                $group = $domainGroups[$index]
-                if ($index -eq 0 -or (($index + 1) % 25) -eq 0 -or
-                    $index -eq ($domainGroups.Count - 1)) {
-                    $elapsed = [datetimeoffset]::UtcNow - $started
-                    $eta = if ($index -gt 0) {
-                        [timespan]::FromSeconds(
-                            ($elapsed.TotalSeconds / $index) * ($domainGroups.Count - $index)
-                        ).ToString('hh\:mm\:ss')
-                    }
-                    else {
-                        'estimating'
-                    }
-                    Write-Information (
-                        "Active Directory memberships '{0}' [{1}/{2}] elapsed={3}; ETA={4}" -f
-                        $domainDnsRoot, ($index + 1), $domainGroups.Count,
-                        $elapsed.ToString('hh\:mm\:ss'), $eta
-                    ) -InformationAction Continue
-                }
+        $domainInventories.Add([pscustomobject]@{
+            Context = $domainContext
+            DomainDnsRoot = $domainDnsRoot
+            DomainNetBIOSName = $domainNetBIOSName
+            Users = $domainUsers
+            Groups = $domainGroups
+            Computers = $domainComputers
+        })
+    }
 
-                $members = @(Get-ADGroupMember -Identity $group.DistinguishedName `
-                        -Server $domainContext.Server -ErrorAction Stop)
-                foreach ($member in $members) {
-                    $memberships.Add([pscustomobject]@{
-                        DomainDnsRoot          = $domainDnsRoot
-                        DomainNetBIOSName      = $domainNetBIOSName
-                        GroupObjectGuid        = $group.ObjectGUID
-                        GroupDistinguishedName = $group.DistinguishedName
-                        MemberObjectGuid       = $member.ObjectGUID
-                        MemberObjectSid        = $member.SID
-                        MemberDistinguishedName = $member.DistinguishedName
-                        MemberObjectClass      = $member.ObjectClass
-                    })
+    if ($CollectMemberships) {
+        $principalByDistinguishedName = [System.Collections.Generic.Dictionary[string, object]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        $primaryMembersByDomainAndRid = @{}
+        foreach ($inventory in $domainInventories) {
+            foreach ($set in @(
+                    @{ Items = $inventory.Users; Class = 'user' },
+                    @{ Items = $inventory.Groups; Class = 'group' },
+                    @{ Items = $inventory.Computers; Class = 'computer' }
+                )) {
+                foreach ($item in @($set.Items)) {
+                    $dn = [string]$item.DistinguishedName
+                    if (-not [string]::IsNullOrWhiteSpace($dn)) {
+                        $principalByDistinguishedName[$dn] = [pscustomobject]@{
+                            ObjectGUID = $item.ObjectGUID
+                            SID = $item.ObjectSID
+                            DistinguishedName = $dn
+                            ObjectClass = $set.Class
+                        }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($dn) -and
+                        $set.Class -in @('user', 'computer') -and
+                        $null -ne $item.PrimaryGroupID) {
+                        $primaryKey = '{0}|{1}' -f (
+                            [string]$inventory.DomainDnsRoot
+                        ).ToLowerInvariant(), [string]$item.PrimaryGroupID
+                        if (-not $primaryMembersByDomainAndRid.ContainsKey($primaryKey)) {
+                            $primaryMembersByDomainAndRid[$primaryKey] = New-Object System.Collections.Generic.List[object]
+                        }
+                        $primaryMembersByDomainAndRid[$primaryKey].Add(
+                            $principalByDistinguishedName[$dn]
+                        )
+                    }
                 }
+            }
+        }
+
+        foreach ($inventory in $domainInventories) {
+            $domainContext = $inventory.Context
+            $domainDnsRoot = [string]$inventory.DomainDnsRoot
+            $domainNetBIOSName = [string]$inventory.DomainNetBIOSName
+            $domainGroups = @($inventory.Groups)
+            $started = [datetimeoffset]::UtcNow
+            $domainConnection = New-SmartWorkplaceCMDBActiveDirectoryLdapConnection `
+                -Server $domainContext.Server
+            try {
+                for ($index = 0; $index -lt $domainGroups.Count; $index++) {
+                    $group = $domainGroups[$index]
+                    if ($index -eq 0 -or (($index + 1) % 25) -eq 0 -or
+                        $index -eq ($domainGroups.Count - 1)) {
+                        $elapsed = [datetimeoffset]::UtcNow - $started
+                        $eta = if ($index -gt 0) {
+                            [timespan]::FromSeconds(
+                                ($elapsed.TotalSeconds / $index) * ($domainGroups.Count - $index)
+                            ).ToString('hh\:mm\:ss')
+                        }
+                        else {
+                            'estimating'
+                        }
+                        Write-Information (
+                            "Active Directory memberships '{0}' [{1}/{2}] elapsed={3}; ETA={4}" -f
+                            $domainDnsRoot, ($index + 1), $domainGroups.Count,
+                            $elapsed.ToString('hh\:mm\:ss'), $eta
+                        ) -InformationAction Continue
+                    }
+
+                    try {
+                        $memberDistinguishedNames = @(Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                                -Server $domainContext.Server `
+                                -GroupDistinguishedName $group.DistinguishedName `
+                                -Connection $domainConnection)
+                    }
+                    catch {
+                        throw "Active Directory membership retrieval failed for domain '$domainDnsRoot', group '$($group.DistinguishedName)', server '$($domainContext.Server)': $($_.Exception.Message)"
+                    }
+                    $groupMembers = New-Object System.Collections.Generic.List[object]
+                    foreach ($memberDn in $memberDistinguishedNames) {
+                        $member = $null
+                        if ($principalByDistinguishedName.ContainsKey($memberDn)) {
+                            $member = $principalByDistinguishedName[$memberDn]
+                        }
+                        else {
+                            $resolved = Get-ADObject -Identity $memberDn `
+                                -Server $domainContext.Server -ErrorAction Stop `
+                                -Properties @('ObjectGUID', 'ObjectSID', 'ObjectClass', 'DistinguishedName')
+                            if ($null -ne $resolved.ObjectSID) {
+                                $member = [pscustomobject]@{
+                                    ObjectGUID = $resolved.ObjectGUID
+                                    SID = $resolved.ObjectSID
+                                    DistinguishedName = $resolved.DistinguishedName
+                                    ObjectClass = $resolved.ObjectClass
+                                }
+                                $principalByDistinguishedName[$memberDn] = $member
+                            }
+                        }
+                        if ($null -ne $member) { $groupMembers.Add($member) }
+                    }
+
+                    $groupSid = [string]$group.ObjectSID
+                    if ($groupSid -match '-(\d+)$') {
+                        $primaryKey = '{0}|{1}' -f $domainDnsRoot.ToLowerInvariant(), $Matches[1]
+                        if ($primaryMembersByDomainAndRid.ContainsKey($primaryKey)) {
+                            foreach ($member in $primaryMembersByDomainAndRid[$primaryKey]) {
+                                $groupMembers.Add($member)
+                            }
+                        }
+                    }
+
+                    $seenMemberGuid = [System.Collections.Generic.HashSet[string]]::new(
+                        [System.StringComparer]::OrdinalIgnoreCase
+                    )
+                    foreach ($member in $groupMembers) {
+                        $memberGuid = [string]$member.ObjectGUID
+                        if ([string]::IsNullOrWhiteSpace($memberGuid) -or
+                            -not $seenMemberGuid.Add($memberGuid)) {
+                            continue
+                        }
+                        $memberships.Add([pscustomobject]@{
+                            DomainDnsRoot          = $domainDnsRoot
+                            DomainNetBIOSName      = $domainNetBIOSName
+                            GroupObjectGuid        = $group.ObjectGUID
+                            GroupDistinguishedName = $group.DistinguishedName
+                            MemberObjectGuid       = $member.ObjectGUID
+                            MemberObjectSid        = $member.SID
+                            MemberDistinguishedName = $member.DistinguishedName
+                            MemberObjectClass      = $member.ObjectClass
+                        })
+                    }
+                }
+            }
+            finally {
+                $domainConnection.Dispose()
             }
         }
     }
@@ -918,8 +1168,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEFX5jvhtegVcK
-# ayLxW8aBRPm8Am4DU14s/a28t8ou6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDE5gMpUHZPlijg
+# /zPPmYpFX5q+8Pme+23iTfkVR5KJIqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1052,31 +1302,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAI5y7l3y06pZDp5QtwLtXqASU11haV19X/7HexJTIU/MA0GCSqG
-# SIb3DQEBAQUABIIBgFxd39PjyUGZc0sKEzuKusG6x2TkFB4apcZ13uXmBVWHfMet
-# pEjkyIrdAByeW/fdmvDa3vy0iucFeLehTuYCsPvi7OMuP8vxOdgOV0KEBVvpUfMR
-# mfcR0BteIwkIKChP95gsSF/Qp53XfJUhiYRIHOkVxkqFpmFszIaCIjKeRiQS7nI5
-# Vyj/MUKpkNbTI/IH4N37xJ1UowAt3rfIVC3ItnmyKk3VGZH6xWsR1bxde2WZdkeW
-# 6wjwihMXGNsM1+1b/aiO+bVGW5DzMCwUaae9n+Po8VWUV02Iyy7uanwUjqho1Bqs
-# hQISvb/+nGvPtY1G60I/5NvRtndITvJv79ZGsujAFfncT+Dyu/Vn+azpUzMgWJ/v
-# alPlHV4ABVXB71c9x25LMEaXmlbp5AZc9aMYBMg0E+P7GVH7eqnLVoQroNUWDa1s
-# JfVSea9AhUpSlQd90rFNpsYTDuYtPBBD6DIDFY4lpNg+8hN1/mKJWWWke/CHnqSc
-# svHTKsntWk5yr2hRuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEYV8mzgrD4cZwevWve/2DYcAWN7kjTcucTX403RtFvgMA0GCSqG
+# SIb3DQEBAQUABIIBgH2k5LQyH2DMb2j6QhBQYD+JjNwmSUpPTr85XDWdih0Jo+Sp
+# iEzCZWMuzPsJSDjYsAHFVBIdMQF973SelZm3CkSBbCr40iebl03umU9RubdgIL9/
+# /El5t/Sz6JqqC4wIQHthIO9soGy/xhpdRma2S3xFE7+2HqDYmabZNklwYJifP5g5
+# 1q2Ry171niyY2sNbOmKZDi/TaI0g3CUeFByGuVjqUFWa2vkMGlUhZvn0pxBq03Lr
+# 2xB+ZTSsLi8XQ+I2XBFMC+viv8ape1K8d38HtUCxHFfIq/c3TEOFjaSaHzLQENv4
+# dOJgDJTapbTD9lnGRvkNBNwR4p5CL0ApAra+oiTlnT3ffq6zwU5ofFzjx3J5+gUd
+# el8vo6sEq4L3wBtOxkD9i+AIX8DUkxXvhJjbBRx/3XS7i1t9VeVYoPW+PfccY2Ol
+# dkYK+gBXa/ZQGLUjNBCidyHOcXKJUEePIyqgLKtBEnFKr8RQvOzMaqUvOT3Luiax
+# LYbVsV85su1hGhD5BKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTFaMC8GCSqGSIb3DQEJBDEiBCAL9ieT41uw/0A2TI3dc03sbqHdgoy3louSQfsH
-# JdSyaDANBgkqhkiG9w0BAQEFAASCAgB2fUE4jylu3Qd0zUVv29xg/q2KqPB118+v
-# MV/5/t+M3gbyqwfgeecyPEQufq+XxzaqmQfvI6nvrRrTgnSrjS/NWNsNzKYzq7af
-# O0gpoq8vNwws1NFuf7VPAt8+G3a198IKhYRq72O+uyRqCdxQmnN/AF2AdsF/ixhN
-# qx05ZckFz73ydpKVRplFyYYR459Hi5d72NACPrq/N4+ZAZ2MCY8ICTHK82xqCB6c
-# swgelQA4Eo/x0966wWFVh0MjpEZTKZ0idFCHKejHk0QCjM4YVUd1oZZLQPyXelvF
-# AOywWgpISquvnxPNjunFsY7Xlqt3eqzodbIMagyCW53zPBN7IrFJr7TruxHjPkcu
-# VlXMjK6OsMOgruHlD7B91M96Zf38QR7JDyIJ++1llVU0vpU9cKwMQRQpdzYObyhC
-# p6qz70JsQhFbHSPCZnYUAnr/Z2m8mnIpf7H3rxAtcylsK4Jj/W9Mw9ESmVNRQVp9
-# +++/8FHu93QqfPBkRJ8z5/Ug957d+dODDlnLTGB1TXk8Ggp1s9U/3kJ8lD64xE2j
-# oLQS34MOCrtN5LXTZ0a7I6VvDwvcyGHLUNCatqfbcDL0cmYClnMWpSBrJVDqP5Gn
-# sjQ88u0pP3uviBzNvX/fW14fPrSocWa/DroMJeIQDJfaKO8E1/wq6bNanzfLED/T
-# F+enxhQSNQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMDM5
+# MTJaMC8GCSqGSIb3DQEJBDEiBCACIYyQBjFRXc6Rxaqp22itHqgHnniKNsxgL96L
+# dPtbjDANBgkqhkiG9w0BAQEFAASCAgAJsidAMwdkjzU7EcOnwiLhhJn3xbBcsfqE
+# K4S5UVQaSq2P4hFMBr2OBt2/5I3bgQut1yjbHSLj6Mm3ZQXkgLWT/g2vqy15VnQE
+# 8xarV7hxas9B06IUHyYBgaprEgt1vu4xIjCCPouIWSgo4cjdMYcbFHbuj4rn1Qp6
+# H502P/uGUu2IqE5PZIPIEPr4TGkiUyJXy7mazmXKOkmZOk4Y3AXN8e1xMS22guiL
+# u4ZpSoXdLp7c7boNJlgvsAicSvw4RqtT4GksBOlPL9KnkB+DVrGuLl6Wvwj0uVcF
+# hfIJzMd3X/nVHxQBYECwraQpItixGbopT9/8Yv9cjQMolDANgikZinMlRox/lqUt
+# nxjriEt3wJRJDYKI44qlfckYojOlQN40vgl+Po4iv91bKK32/t2yFZ5FfrZMH2F8
+# nFUdF/gh36gwGUxgBSx1VsNV8vWsJSBAwHXvl19CUsZNXOHZRoRes/D+vXyKueC0
+# f/OEeeThUThSVeFzF1IxRG8CrAUnERK8BTQwy/ciUKIjseaoKRopeo6mFAiLJWxt
+# 1FsHzW36dvuGGOQ50cWv71dVVzVurG9gfcS1xt4TmA6UFPiU5JMgjEaLincixPan
+# SoA4xtkSg953kkUehcW8JDxl0zN0WqDQ2/Es9KTCDCcdftguHXl9mTIvhhWdds5l
+# aJwgZYtISA==
 # SIG # End signature block
