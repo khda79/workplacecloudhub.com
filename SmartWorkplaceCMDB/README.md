@@ -309,6 +309,18 @@ under `Logging`: step logs and transcripts independently use the same default
 of 30 days/30 files per script, while run CSVs use 90 days/90 files.
 `-ValidateOnly` remains read-only and does not create logs or transcripts.
 
+The shared preflight validates the runtime, paths, required modules, credential
+fields, output write access and the configured Authenticode policy before a
+live run. Fixture mode deliberately skips external module and credential checks.
+Set `Logging.ScriptSignaturePolicy` to `Disabled`, `Audit` or `Enforce`;
+`Enforce` blocks collection when a script signature cannot be verified.
+
+An atomic tenant-and-pipeline guard prevents overlapping writers. Persistent
+run state under `LOG-ALL/Orchestration/State/<tenant>` records the current step,
+completed-step count, heartbeat and final status for diagnosis and recovery. A
+failed complete `Full` collection can send an operational alert through the
+configured notification channel without creating a collection-summary snapshot.
+
 The orchestrator console follows the same lifecycle convention: an unprefixed
 WorkplaceCloudHub banner opens and closes the run, while every operational
 message between those banners starts with local date and time. This includes

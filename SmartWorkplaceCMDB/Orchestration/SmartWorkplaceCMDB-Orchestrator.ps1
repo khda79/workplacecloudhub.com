@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.3
+1.1.4
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +47,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.3'
+$ScriptVersion = '1.1.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -395,6 +395,8 @@ function Invoke-SmartWorkplaceCMDBLoggedStep {
         Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
             "Started step '{0}'. Script='{1}'." -f $Step.Name, $Step.ScriptPath)
     }
+    $previousParentRunId = [string]$env:SMARTWORKPLACECMDB_PARENT_RUN_ID
+    $env:SMARTWORKPLACECMDB_PARENT_RUN_ID = [string]$script:SmartWorkplaceCMDBCurrentRunId
     try {
         if ($transcriptStarted) {
             Write-SmartWorkplaceCMDBConsole -Message (
@@ -463,6 +465,7 @@ function Invoke-SmartWorkplaceCMDBLoggedStep {
         throw
     }
     finally {
+        $env:SMARTWORKPLACECMDB_PARENT_RUN_ID = $previousParentRunId
         if ($transcriptStarted) {
             Stop-Transcript -ErrorAction Stop | Out-Null
         }
@@ -475,6 +478,10 @@ $script:SmartWorkplaceCMDBCurrentLogPath = ''
 $script:SmartWorkplaceCMDBCurrentPipeline = $Pipeline
 $script:SmartWorkplaceCMDBCurrentMode = ''
 $script:SmartWorkplaceCMDBCurrentStepCount = 0
+$script:SmartWorkplaceCMDBCurrentRunId = ''
+$script:SmartWorkplaceCMDBCurrentRunGuard = $null
+$script:SmartWorkplaceCMDBCurrentStepName = ''
+$script:SmartWorkplaceCMDBCurrentTranscriptPath = ''
 Write-SmartWorkplaceCMDBStartupBanner
 
 try {
@@ -936,6 +943,7 @@ if ($mode -eq 'Validate' -and
 
 $runId = [guid]::NewGuid().ToString('N')
 $runStarted = [datetimeoffset]::UtcNow
+$script:SmartWorkplaceCMDBCurrentRunId = $runId
 $computerName = if ([string]::IsNullOrWhiteSpace([string]$env:COMPUTERNAME)) {
     'unknown-host'
 }
@@ -997,6 +1005,30 @@ else {
         $computerName,
         $runStamp)
 }
+
+$preflight = Test-SmartWorkplaceCMDBPreflight `
+    -Context $context `
+    -ProjectRoot $projectRoot `
+    -Pipeline $Pipeline `
+    -Mode $mode `
+    -ScriptPath @($executionSteps | ForEach-Object { [string]$_.ScriptPath }) `
+    -ThrowOnFailure:($mode -eq 'Collect')
+foreach ($check in @($preflight.Checks | Where-Object Status -in @('Failed','Warning'))) {
+    Write-SmartWorkplaceCMDBConsole `
+        -Level $(if ($check.Status -eq 'Failed') {'ERROR'} else {'WARN'}) `
+        -Message ("Preflight {0}: {1}" -f $check.Name, $check.Details)
+}
+
+$script:SmartWorkplaceCMDBCurrentRunGuard = Enter-SmartWorkplaceCMDBRunGuard `
+    -Paths $paths `
+    -Pipeline $Pipeline `
+    -RunId $runId `
+    -StartedDateTime $runStarted `
+    -NoWrite:($mode -ne 'Collect')
+Update-SmartWorkplaceCMDBRunState `
+    -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+    -Status 'Running' `
+    -LogPath $orchestratorLogPath
 
 if ($loggingEnabled) {
     Write-SmartWorkplaceCMDBStartupBanner `
@@ -1108,6 +1140,15 @@ try {
         $status = 'Completed'
         $errorText = ''
         try {
+            $script:SmartWorkplaceCMDBCurrentStepName = $step.Name
+            $script:SmartWorkplaceCMDBCurrentTranscriptPath = $stepTranscriptPath
+            Update-SmartWorkplaceCMDBRunState `
+                -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+                -Status 'Running' `
+                -CurrentStep $step.Name `
+                -CompletedStepCount $results.Count `
+                -LogPath $stepLogPath `
+                -TranscriptPath $stepTranscriptPath
             $parameters = Get-SmartWorkplaceCMDBStepParameter `
                 -Step $step `
                 -CommonParameters $commonParameters `
@@ -1168,6 +1209,14 @@ try {
                 TranscriptPath = $stepTranscriptPath
                 Error = $errorText
             })
+            Update-SmartWorkplaceCMDBRunState `
+                -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+                -Status $(if ($status -eq 'Failed') {'Failed'} else {'Running'}) `
+                -CurrentStep $step.Name `
+                -CompletedStepCount $results.Count `
+                -LogPath $stepLogPath `
+                -TranscriptPath $stepTranscriptPath `
+                -Error $errorText
         }
     }
     $script:SmartWorkplaceCMDBCurrentStepCount = $results.Count
@@ -1189,6 +1238,29 @@ if (-not [string]::IsNullOrWhiteSpace($failedMessage)) {
         Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
             -Message "Orchestration failed: $failedMessage" -Level ERROR
     }
+    $failureEmailError = ''
+    if ($summaryEnabled -and $mode -eq 'Collect' -and $Pipeline -eq 'Full') {
+        try {
+            @(& $summaryScriptPath @summaryParameters `
+                    -RunStatus 'Failed' `
+                    -SnapshotDateTime ([datetimeoffset]::UtcNow) `
+                    -OperationalError $failedMessage `
+                    -FailedStep $script:SmartWorkplaceCMDBCurrentStepName `
+                    -FailureLogPath $orchestratorLogPath `
+                    -FailureTranscriptPath $script:SmartWorkplaceCMDBCurrentTranscriptPath) | Out-Null
+        }
+        catch {
+            $failureEmailError = $_.Exception.Message
+            if ($loggingEnabled) {
+                Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+                    -Message "Failure notification email failed: $failureEmailError" -Level WARN
+            }
+        }
+    }
+    Exit-SmartWorkplaceCMDBRunGuard `
+        -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+        -Status 'Failed' `
+        -Error $failedMessage
     throw "SmartWorkplaceCMDB orchestration failed: $failedMessage"
 }
 
@@ -1382,6 +1454,10 @@ Write-SmartWorkplaceCMDBCompletionBanner `
     -ErrorCount 0
 $script:SmartWorkplaceCMDBCompletionWritten = $true
 
+Exit-SmartWorkplaceCMDBRunGuard `
+    -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+    -Status $runStatus
+
 [pscustomobject]@{
     Status = $runStatus
     ScriptVersion = $ScriptVersion
@@ -1404,6 +1480,10 @@ $script:SmartWorkplaceCMDBCompletionWritten = $true
     StepLogRootPath = if ($loggingEnabled) { $stepLogRootPath } else { '' }
     StepTranscriptRootPath = if ($loggingEnabled) { $stepLogRootPath } else { '' }
     LoggingEnabled = $loggingEnabled
+    PreflightStatus = $preflight.Status
+    PreflightFailedCount = $preflight.FailedCount
+    PreflightWarningCount = $preflight.WarningCount
+    RunStatePath = if ($script:SmartWorkplaceCMDBCurrentRunGuard) { $script:SmartWorkplaceCMDBCurrentRunGuard.StatePath } else { '' }
     OrchestratorLogRetentionDays = $orchestratorLogRetentionDays
     StepLogRetentionDays = $stepLogRetentionDays
     RunCsvRetentionDays = $runCsvRetentionDays
@@ -1430,6 +1510,10 @@ $script:SmartWorkplaceCMDBCompletionWritten = $true
 }
 }
 catch {
+    Exit-SmartWorkplaceCMDBRunGuard `
+        -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
+        -Status 'Failed' `
+        -Error $_.Exception.Message
     if (-not $script:SmartWorkplaceCMDBCompletionWritten) {
         $message = $_.Exception.Message
         Write-SmartWorkplaceCMDBConsole -Level ERROR -Message (
@@ -1451,8 +1535,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbphMMJUrO4bnG
-# dGC9bJ4gl05qj3lQiw66h6EPI/3dr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACjwGOtXIoEFdP
+# 0F1sVN4heA455DE/mJs2uIz/+gY3gKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1585,31 +1669,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBEWCqIUKSL09iNVO9ShiJobisZ8mtPKGYWAzATjiSj6MA0GCSqG
-# SIb3DQEBAQUABIIBgI6Ixx4aueIYJs8yPIhIXK4GtiLjOtVu3AYObqZ401rJewHf
-# cp9ud5+MxypfMKlLww/yT6lnbEaVu+g51F3hzjz0xLgXTT0/3W51wlUq8TreLJY3
-# hDA69xsdfsPqxX6L0MGZQ1int3ibpEsZ8btkoxSONnObdOZugsfqyDmk2svhva46
-# OxCL60FlXEFjq729o4Jf4lBT2AqN8/chl3ueoZqEr+b2s6xW0IQ/G4xLl1K/u2uT
-# /tWatbbSVjyTHO27FMutMUyghsaJSTOa8JPlnY2OtVMLnQMX08c73s8ifhv3B9IR
-# 14L7e42Zuee93Me9CIY1fktODTbHfyR+ow9ex0YAyCLHs1PXHFu1LI30yAEKVuc/
-# ysKN+g4cbi3MCOszog8VJHaSyJxBwdFbSSmkKhLm1RcyYdGvxS7mTbEhIIoFpPG5
-# IyHItVu6cBElStmYDLOQIKZKw6zDrpRwyLHjn6beQeuwrB+FDTid4XfPWvObPYJv
-# EKwJcmYEW6JBCIVv8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGOuIBYoSH00ZQNWVEaM/mxRyruAtv7HlotOO1gSxjCRMA0GCSqG
+# SIb3DQEBAQUABIIBgIhoWCKOoSqW3tTRGkM10qxmLInzEE+3GZNIiFEQpPwoLPHI
+# egJZHAS5Fg0/XRMiU22ElOc7pgEnwlyNcmDQ1IA0lcep7Oi2pJ6kHcICpf8CZfLz
+# STPRF48xU16WcgZ/cKk7wFzP3wUw7mVTMqUfyJ0QjhnaAmp59/sRBx5vm+6angb4
+# m51oylIN0MXP8yDc201T3FEyk5oF657cf0Eygg/ooxy6EL/dSc6LhBLHCut16VLb
+# 0nWJ33JNZsO7U2J/Q0l3U+RQ+h4eNDwZ7nagkBoyHjFNCCDKAj1pLSXpf1NBiO9X
+# Z/2Re1NEimZSiICp+LOc9EqSuDbfS3MsXwkHqc0+6KAUyVe0cxtst9zO7Ukjhh0i
+# az60H1b9t4zlU0yNxtsaPc+cOgllSFXnIs26rumn5dhXfAoXS5Mp7JZxZI+NuUJS
+# oLe5b/ZLLKcF0mTFY19TujmM1Gam3NqHg4YypxzcUO6/7WLV5+6UE0xRQkDPIf0Y
+# BjbLghL6Ur74dOyOD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNTQ0
-# NTdaMC8GCSqGSIb3DQEJBDEiBCCf7AH0NphOX4R6ijRhd4yCXxxw9tZsnQuMe6oI
-# 9ZAUbDANBgkqhkiG9w0BAQEFAASCAgAPWV40v7kuT30lIw31fJLH9rTxdKpc/g/c
-# IvAyt3vf/R18z9MHnppsgqMbLYLPKrPlYV61M8qtEZfeVC9RtpDRutMT4QAlT/b/
-# 3o7lr/GzPax2JQ4aYm3u9dy9kVFoRfCQtADUEZi+EVExc0mkVe8d9d3b4yj+U6pV
-# GaxK4T2jKuJ+sLWI1KvPK/gTjfT28pyBMOrnOx0J6sKQ15CwLCVAsG02XqBEYR/L
-# PtO/jpzo87kxEDIxhqXVHeweBBAQsbYrN6Qkh+zmW5U0gCdm0HfYcjca4kKcFngf
-# 00UTOhaPSAhO2D2pshZpAddR9pHsPoirKu6ShvygjidpjiKMnEHky0iXzeOD61q+
-# Prs3s3FaUQWhWqk2GlDnW3GnuX9pzzAG2HfU61XAlxSW6ehouwjgy/E9eyCMrFJc
-# G3+Sap7fvv6ywswckF+9356hyIHY3OYV/hGRIx6x3XpUb7meUTxoFIx89S481sTi
-# d1NV4pLJQ2JsySZItpUw+IlDl2ASxwWmOi1xfu+POOAe7JgBX20yEnlEJhFybioA
-# kYpgSDSBqyrjTOqbIMXAIxycu7JMox3PtMDmrvi1bW+cN2qnWmNeZ6WbGDzgfK1j
-# bobJ/e+lC+iUxRXNuKnsGKnPamdkp+/oN/ae2t5waewlW+qdLk72JgtVq57Aywt4
-# eAtwZrj4SA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDl+qyAM9dUVL9n0wCUL8N5refWzuXWuQwHsOL6
+# XpfoUzANBgkqhkiG9w0BAQEFAASCAgA7o3mKCafg2i1WG7t0qrkNXcsLbORVLk27
+# 25fLKwu2CsE5pmJ05aCRmTNi7aWtq5mFzfdHyBq2LoNN9qeUyA76eFH9L3phpZFN
+# b98b5+qD6kohnNyYYWZ1EK6iHxbtcfmtsjVDB/MmJSpqpV4MvvCRJJEH/ihJy9cU
+# lmRaTZB+x8KDBwT4oWALo+NpthXC5LzLtOjkOluE3mJkphyXTsXu8FanWH5q3ivH
+# 0d9bx/t3EdngbbT+Lcno6N42kfdTTnFqHfgUgua4MFHzJIdzMaTuLhap0n4E05Q8
+# dUvAL17i3iOlWHyj6adbprBm4p1E7E74GMWrc+L+jMi4ltMPj9TC+9MQbVH6IOJU
+# lxqYuNZf8NrGLapdYfBBKShJFofJ2oFsnCz88QQdf6oxnSJI9xsVc5MIipyqfrp1
+# ga2KoCFXxbkw49pYIJYlWRfdtXxadvHpBUHW+iiHpuKSERDJQBQE+J3dXGCL1jJu
+# /YQCcH9PkrLUQVCNjdSCMmvcReuRnHDpZNkoyuS3aZP6jtW/iIvmM0xKRP/M/xOG
+# NLXvb+pzHA5m/4RkvJYW2SzznXSvQCv1X7jF+G4VSOQuI9nWuwM3BbgICkkZ9v84
+# PNU0kpUNHPdqnbybL7P3IQicwGKbtXmR1HsDvbtwhYC//O8kd9FxfOjrJXiaA0Wc
+# W7Bw8aqWjw==
 # SIG # End signature block

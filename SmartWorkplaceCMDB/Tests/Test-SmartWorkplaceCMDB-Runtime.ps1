@@ -1,51 +1,77 @@
-@{
-    RootModule        = 'SmartWorkplaceCMDB.Core.psm1'
-    ModuleVersion     = '1.1.1'
-    PrivateData       = @{ PSData = @{} }
-    GUID              = 'fe81d6e3-5d5b-4ec0-9c8b-02f82d9bc001'
-    Author            = 'WorkplaceCloudHub'
-    CompanyName       = 'WorkplaceCloudHub'
-    Copyright         = '(c) WorkplaceCloudHub. All rights reserved.'
-    Description       = 'Core helpers for SmartWorkplaceCMDB.'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @(
-        'Resolve-SmartWorkplaceCMDBCollectionPaths',
-        'Start-SmartWorkplaceCMDBSourceCollection',
-        'Complete-SmartWorkplaceCMDBSourceCollection',
-        'Publish-SmartWorkplaceCMDBSourceCsv',
-        'Import-SmartWorkplaceCMDBSourceCsv',
-        'Get-SmartWorkplaceCMDBSourceHealth',
-        'Read-SmartWorkplaceCMDBCollectionFixture',
-        'Assert-SmartWorkplaceCMDBCollectionPage',
+# SmartWorkplaceCMDB runtime offline tests.
+# Version: 1.0.3
+[CmdletBinding()]
+param()
 
-        'Start-SmartWorkplaceCMDBExecutionContext',
-        'Complete-SmartWorkplaceCMDBExecutionContext',
-        'Write-SmartWorkplaceCMDBRuntimeLog',
-        'Test-SmartWorkplaceCMDBPreflight',
-        'Enter-SmartWorkplaceCMDBRunGuard',
-        'Update-SmartWorkplaceCMDBRunState',
-        'Exit-SmartWorkplaceCMDBRunGuard',
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+$ScriptVersion = '1.0.3'
 
-        'Get-SmartWorkplaceCMDBProjectRoot',
-        'Read-SmartWorkplaceCMDBJsonFile',
-        'ConvertTo-SmartWorkplaceCMDBKey',
-        'Resolve-SmartWorkplaceCMDBContext',
-        'Resolve-SmartWorkplaceCMDBTenantPath',
-        'Initialize-SmartWorkplaceCMDBTenantFolder',
-        'Export-SmartWorkplaceCMDBCsv',
-        'Get-SmartWorkplaceCMDBTableContract',
-        'Test-SmartWorkplaceCMDBCsvContract'
-    )
-    CmdletsToExport   = @()
-    VariablesToExport = @()
-    AliasesToExport   = @()
+function Assert-True {
+    param([bool]$Condition, [string]$Message)
+    if (-not $Condition) { throw $Message }
+}
+
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$modulePath = Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
+Import-Module $modulePath -Force
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartWorkplaceCMDB-Runtime-' + [guid]::NewGuid().ToString('N'))
+try {
+    $paths = [pscustomobject]@{
+        TenantKey='test-tenant';OrganizationKey='test-org';EnvironmentKey='test'
+        TenantId='00000000-0000-0000-0000-000000000001'
+        DataRootPath=$testRoot;DataAllRootPath=(Join-Path $testRoot 'DATA-ALL')
+        LatestOutputRootPath=(Join-Path $testRoot 'DATA-LAST');LogRootPath=(Join-Path $testRoot 'LOG-ALL')
+    }
+    $configuration = [ordered]@{
+        Logging=[ordered]@{Enabled=$true;StepLogRetentionDays=7;MaxStepLogsPerScript=10;ScriptSignaturePolicy='Disabled'}
+        MicrosoftGraph=[ordered]@{TenantId='';ClientId='';CertificateThumbprint=''}
+    }
+    $context = [pscustomobject]@{Paths=$paths;Configuration=$configuration}
+    $execution = Start-SmartWorkplaceCMDBExecutionContext -Context $context `
+        -ScriptPath $PSCommandPath -ScriptVersion $ScriptVersion -Mode Fixture
+    Write-SmartWorkplaceCMDBRuntimeLog -Path $execution.LogPath -Message 'offline runtime test' -Console
+    Complete-SmartWorkplaceCMDBExecutionContext -RuntimeContext $execution
+    Assert-True (Test-Path -LiteralPath $execution.LogPath -PathType Leaf) 'Runtime log was not created.'
+    Assert-True (Test-Path -LiteralPath $execution.TranscriptPath -PathType Leaf) 'Runtime transcript was not created.'
+    Assert-True ((Get-Content -LiteralPath $execution.LogPath -Raw) -match 'script completed') 'Completion banner is missing from the runtime log.'
+
+    $started = [datetimeoffset]::UtcNow
+    $guard = Enter-SmartWorkplaceCMDBRunGuard -Paths $paths -Pipeline Full -RunId 'run-one' -StartedDateTime $started
+    $secondBlocked = $false
+    try { Enter-SmartWorkplaceCMDBRunGuard -Paths $paths -Pipeline Full -RunId 'run-two' -StartedDateTime $started | Out-Null }
+    catch { $secondBlocked = $true }
+    Assert-True $secondBlocked 'A second concurrent run was not blocked.'
+    Update-SmartWorkplaceCMDBRunState -RunGuard $guard -CurrentStep 'Offline test' -CompletedStepCount 1
+    $state = Get-Content -LiteralPath $guard.StatePath -Raw | ConvertFrom-Json
+    Assert-True ($state.CurrentStep -eq 'Offline test') 'Run-state current step was not persisted.'
+    Exit-SmartWorkplaceCMDBRunGuard -RunGuard $guard -Status Completed
+    $state = Get-Content -LiteralPath $guard.StatePath -Raw | ConvertFrom-Json
+    Assert-True ($state.Status -eq 'Completed') 'Final run status was not persisted.'
+
+    $preflight = Test-SmartWorkplaceCMDBPreflight -Context $context -ProjectRoot $projectRoot `
+        -Pipeline CuratedOnly -Mode Fixture -ScriptPath @($PSCommandPath)
+    Assert-True ($preflight.FailedCount -eq 0) 'Offline CuratedOnly preflight failed.'
+
+    $configuration.Logging.ScriptSignaturePolicy = 'Audit'
+    $auditPreflight = Test-SmartWorkplaceCMDBPreflight -Context $context -ProjectRoot $projectRoot `
+        -Pipeline CuratedOnly -Mode Fixture -ScriptPath @($PSCommandPath)
+    Assert-True ($auditPreflight.FailedCount -eq 0) 'Audit signature policy unexpectedly blocked the offline preflight.'
+
+    [pscustomobject]@{
+        Status='Passed';TestCount=9;LogPath=$execution.LogPath
+        TranscriptPath=$execution.TranscriptPath;RunStatePath=$guard.StatePath
+    }
+}
+finally {
+    Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlxPe6b+O0aYWH
-# qoXN1yanh8T8ojYvEf6bd9CbT0v+6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAR9HeMMZozeL6g
+# zvu1gzdrVTcsWFL2xXktFxA89j5HZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -178,31 +204,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICLLpFVCptGEwW4xppYDHu+BOzYmV2E3jwk+x79x6222MA0GCSqG
-# SIb3DQEBAQUABIIBgBla2INk4cnasdOsjCaUOUSzJqAZb+/Mrk5V6My0cT4hDxSS
-# T/zLnVD2twpecBxvjUYuMfasZzGJJFelphdHIC5Vg9zna4DsLwqt+SbG6p9/2F3c
-# sguI5W/qkebe7Bo79UAE/BFWKDPKLrQHJjNI+BL80jHv5XaobhxqQ4I47cE1kG0f
-# sUye7Gd2ohY3UP4KFHzdWEqoxYPH4BjdMhMBfqM2NBjGPbKPlUa8aJJY+eC9I92V
-# L/HLsgYAvMZ+TV3rhCk0Y0XKNlVu1ArO6XvbqtdruMlwXOUCTuCZAL2NiQZxfKHk
-# 8haT1nmUmCuU1SiMQjKkSpUwngIw0i+PR97wfHn3T9owpTmjyVZo6KN+C4OpA8Yw
-# 5m6FLKoPr/l3eSKKGSN0sGPAihzuYAP+fcn9L4na4TO1lXtQ2JJgPgjGRNKRzLDw
-# feGwzh+voMlxzXodJFKxW55+wPFZpg1mNtyiKGyskF7nOlVUAL46VBSKVjlPnBVU
-# yDFJrliKESonM5y9DqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICtT8D4NL+lh1/7vxU6ex4HLvDLbPT4igsKAeS+7viAZMA0GCSqG
+# SIb3DQEBAQUABIIBgCcFZTmwXPdOp06aA0/TuORUL56dpA5xa4orUBH7zUDXXhGm
+# j9FJM4Gmi+iyxW+8djDOeJwic6duUFwcI9Q+nTOlJJK0CpIZ/hQR2zjRqUYmLtXd
+# qElhQbK0jQGAwAeSsuMgQ4ooJzCjQBnbchfa4ewJU6tIiCBep2nVNIu4NWRd/Q9y
+# Ci0jVKOPrb1lMIy7WvSA2JPd3spCvlXsKb9A866lE1xmrybVf4NOYN9cHc0SA3mo
+# qgi1H+pFz0WctLvLxEJBX7e6HVVvOsTIhE2FNUC5l/n2k8Jw66zSkEE9/ZyQ1+1t
+# ylpBlA9vwTBoy5s7GfzxKOA8PyvQ5mXeVX+gNAEfKMUyknMa7jAm0oJ8HUGEBEd6
+# x6khFA0BYVqCDzmft36/DZRlL7+OiiFSHOS/8qWO+vW1LdP31Kwps084diztRIGQ
+# AuVnJFh2WwVYdI7Qv33cs/fCbDAK2hNU+g9bZ4BWNt5seDxWnMYiEcDMKlVLVeKV
+# Qi7kBQQqVLyo/uGPwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
-# MzFaMC8GCSqGSIb3DQEJBDEiBCAos/7eC1EHfgCdChbbJpccdHUx6GUiD5B/i7FS
-# ynrxxjANBgkqhkiG9w0BAQEFAASCAgCzKl4cSg5PYwchaGsIMsNoO3bOeN/Icu/J
-# Jrexmb/Lkh9nzSdhbLnin3+h2L26YvO899mcvjEWPHIfJ+5JatOt8lGMAxVWWV3C
-# D2Qzpx9N5hkEHh0/cEklevNSJB3gUDt6iapgmqe8TTH87cthUCorTJOasewuGsGE
-# U1HMoitMAiHnwYZerrnPBkddQFU5FHfuFAIh/pdCjaiwNnNksV4KA+0xhlBTVESb
-# 2LOWw+FVq9Gxp+sQIbJegmlPPQJcvK99naodr6XdkCLKO41J27I3YtCjRvpuR19c
-# 5bhsrkercIKCRfiBCRmADnatkFbcGk6iib7/xuA84271BkWJGFkTlu4e23yyKNWT
-# sZwLlJjOIcTP7yEO+pUDZ3bRw9g2TSfCY0nKkfOpXA5bcBCm5uQSxq8Dv1IJljnY
-# iMEBjxz6xxep1SYACW9824db0K15z5ecxlsExd7f1m7zrKF6EvJPcEh+AmfMZDha
-# mhCAAjuDBesTczDRmFDQn4t9JjSklmEnXgVsSQhUO4yP0C5L/mRC4ts84Ntaypqr
-# EAfC45jGlriiEWVqlpWFtr22RPYma7VbAsnnLDRoQrv7LXslmrtOa0HH6q5aA03W
-# rYZKjzwGYyB7FwZYGSpa40QFIdD5t2qEgtEbANe4XWTwc0d7QFlN+Q9O4I2B9wHP
-# T4eU4b+wPA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzI4
+# MjNaMC8GCSqGSIb3DQEJBDEiBCB4RCcPARfZ3KsGP9LHEzThKpGX0vYGXdNfQmw2
+# 3anN6TANBgkqhkiG9w0BAQEFAASCAgAb99TIAGF8k3OEJxXpq/6x1mhiUG5ixxh+
+# dflEfw+TAKRXMDfUsXiIGJ3X/QGabu/uwcEk7IcFx99tiiUz0qPPfJ+DHPdp5S0B
+# OpcE4GQElVyGzGfJ8FZJqbfpvLincwIynrBr9Drlomt/f3etRZHGIv5QxDHYKfnw
+# CYqPPFET49+ZTLoucz51/pOLqurzW2x3pXL9Kzvn4izWMlpnEh2Z6//BkU9KQUXM
+# 3K6I0tJIQ1RwTSJM7EyX7nVXBKnxN3GbSsvrm/aWNwmAV8SrNYuta0V6wwQSWxSq
+# cv7E1F9So6/+zCFmR6sirbXeFnoq3mTey99gbBP8vecnIyh9fvqQ/4a1aGufw/9d
+# 14k13B6rj5E2ltF4tCF9x76/9dQSHi/XjVefoWJVGc1XtYf0dGRojukrUivZltAc
+# k/sBPZH2pzrpoSQB28mLxIuCV9jBhHOH5uee98w9no5j0cOWDZiEcXB5mJ3z9uKz
+# PQczlf5XGvboJAPQgo6sfSMz4F5/C4xRUBsqJcK13jscTdNiONuHe5pYA4EMuhgW
+# qnWwFiL1PCgnM9mUtolmQtFqYespTx1/DRwCFN6OyCE9kfYwg376htg1nCcJk0ZD
+# 565TWYMlf4YQH0cVaU892DkmYCSnOTaDNMSoLcLz2uIGSp8cYbcjwF+cGAzmJ9Ow
+# dPdpH/wCxA==
 # SIG # End signature block
