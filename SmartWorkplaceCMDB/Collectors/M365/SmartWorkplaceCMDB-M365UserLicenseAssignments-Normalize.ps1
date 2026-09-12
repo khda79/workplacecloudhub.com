@@ -12,7 +12,7 @@ lastUpdatedDateTime because the original assignment creation time is not
 available on licenseAssignmentState.
 
 .VERSION
-1.1.0
+1.1.1
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +35,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.1.0'
+$ScriptVersion = '1.1.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -67,6 +67,77 @@ function Test-SmartWorkplaceCMDBExactCsvHeader {
         UnexpectedColumns = ($unexpected -join ', ')
         OrderMatches = $orderMatches
     }
+}
+
+function Export-SmartWorkplaceCMDBUserServicePlanFacts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SelectedAssignments,
+        [Parameter(Mandatory)][hashtable]$ServicePlansBySku,
+        [Parameter(Mandatory)][string[]]$Columns,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)][string]$OrganizationKey,
+        [Parameter(Mandatory)][string]$EnvironmentKey,
+        [string]$TenantId
+    )
+
+    $folder = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+
+    $tempPath = '{0}.tmp.{1}.csv' -f $Path, ([guid]::NewGuid().ToString('N'))
+    $counter = [pscustomobject]@{ Value = 0 }
+    try {
+        & {
+            foreach ($selected in $SelectedAssignments) {
+                $sourceUserId = ([string]$selected.SourceUserId).Trim()
+                $skuId = ([string]$selected.SkuId).Trim()
+                $skuKey = $skuId.ToLowerInvariant()
+                if (-not $ServicePlansBySku.ContainsKey($skuKey)) { continue }
+
+                $disabledPlans = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+                foreach ($disabledPlanId in @(([string]$selected.DisabledPlanIds) -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+                    [void]$disabledPlans.Add($disabledPlanId.Trim())
+                }
+
+                foreach ($plan in $ServicePlansBySku[$skuKey]) {
+                    $servicePlanId = ([string]$plan.ServicePlanId).Trim()
+                    $counter.Value++
+                    [pscustomobject][ordered]@{
+                        TenantKey = $TenantKey
+                        OrganizationKey = $OrganizationKey
+                        EnvironmentKey = $EnvironmentKey
+                        TenantId = $TenantId
+                        TenantUserKey = ('{0}|entra-user|{1}' -f $TenantKey, $sourceUserId.ToLowerInvariant())
+                        TenantSkuKey = ('{0}|sku|{1}' -f $TenantKey, $skuKey)
+                        TenantServicePlanKey = ('{0}|service-plan|{1}|{2}' -f $TenantKey, $skuKey, $servicePlanId.ToLowerInvariant())
+                        CmdbUserId = ('{0}|entra-user|{1}' -f $TenantKey, $sourceUserId.ToLowerInvariant())
+                        SkuId = $skuId
+                        ServicePlanId = $servicePlanId
+                        ServicePlanName = [string]$plan.ServicePlanName
+                        IsEnabled = -not $disabledPlans.Contains($servicePlanId)
+                        AssignmentState = [string]$selected.AssignmentState
+                        SourceSystem = 'MicrosoftEntraID'
+                    }
+                }
+            }
+        } | Select-Object -Property $Columns |
+            Export-Csv -LiteralPath $tempPath -NoTypeInformation -Encoding UTF8 -Force
+
+        if ($counter.Value -eq 0) {
+            ($Columns -join ',') | Set-Content -LiteralPath $tempPath -Encoding UTF8 -Force
+        }
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force
+        }
+    }
+
+    return [int]$counter.Value
 }
 
 function Get-SmartWorkplaceCMDBAssignmentStatePriority {
@@ -210,7 +281,7 @@ $selectedAssignments = @($rawRows | Group-Object {
             @{ Expression = { Get-SmartWorkplaceCMDBAssignmentStatePriority ([string]$_.AssignmentState) }; Descending = $true },
             @{ Expression = { Get-SmartWorkplaceCMDBAssignmentDateValue ([string]$_.LastUpdatedDateTime) ([string]$_.RawAssignmentKey) }; Descending = $true },
             @{ Expression = { [string]$_.RawAssignmentKey }; Descending = $false })[0]
-    })
+    } | Sort-Object SourceUserId,SkuId)
 $factRows = @($selectedAssignments | ForEach-Object {
         $selected = $_
         $sourceUserId = ([string]$selected.SourceUserId).Trim()
@@ -234,33 +305,9 @@ if (Test-Path -LiteralPath $ServicePlansPath -PathType Leaf) {
         $servicePlansBySku[$skuKey].Add($plan)
     }
 }
-$servicePlanFactRows = @($selectedAssignments | ForEach-Object {
-    $selected = $_
-    $sourceUserId = ([string]$selected.SourceUserId).Trim()
-    $skuId = ([string]$selected.SkuId).Trim()
-    $skuKey = $skuId.ToLowerInvariant()
-    $disabledPlans = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($disabledPlanId in @(([string]$selected.DisabledPlanIds) -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
-        [void]$disabledPlans.Add($disabledPlanId.Trim())
-    }
-    if ($servicePlansBySku.ContainsKey($skuKey)) {
-        foreach ($plan in $servicePlansBySku[$skuKey]) {
-            $servicePlanId = ([string]$plan.ServicePlanId).Trim()
-            [pscustomobject][ordered]@{
-                TenantUserKey = ('{0}|entra-user|{1}' -f $paths.TenantKey,$sourceUserId.ToLowerInvariant())
-                TenantSkuKey = ('{0}|sku|{1}' -f $paths.TenantKey,$skuKey)
-                TenantServicePlanKey = ('{0}|service-plan|{1}|{2}' -f $paths.TenantKey,$skuKey,$servicePlanId.ToLowerInvariant())
-                CmdbUserId = ('{0}|entra-user|{1}' -f $paths.TenantKey,$sourceUserId.ToLowerInvariant())
-                SkuId = $skuId
-                ServicePlanId = $servicePlanId
-                ServicePlanName = [string]$plan.ServicePlanName
-                IsEnabled = -not $disabledPlans.Contains($servicePlanId)
-                AssignmentState = [string]$selected.AssignmentState
-                SourceSystem = 'MicrosoftEntraID'
-            }
-        }
-    }
-} | Sort-Object TenantUserKey,TenantSkuKey,TenantServicePlanKey)
+foreach ($skuKey in @($servicePlansBySku.Keys)) {
+    $servicePlansBySku[$skuKey] = @($servicePlansBySku[$skuKey] | Sort-Object ServicePlanId)
+}
 
 $knownUsers = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 if (Test-Path -LiteralPath $CmdbUsersPath -PathType Leaf) {
@@ -289,8 +336,15 @@ $identityExport = @{
 }
 Export-SmartWorkplaceCMDBCsv -InputObject $factRows -Path $factOutputPath `
     -Columns @($factTable.columns | ForEach-Object { [string]$_ }) @identityExport
-Export-SmartWorkplaceCMDBCsv -InputObject $servicePlanFactRows -Path $servicePlanFactOutputPath `
-    -Columns @($servicePlanFactTable.columns | ForEach-Object { [string]$_ }) @identityExport
+$servicePlanFactCount = Export-SmartWorkplaceCMDBUserServicePlanFacts `
+    -SelectedAssignments $selectedAssignments `
+    -ServicePlansBySku $servicePlansBySku `
+    -Columns @($servicePlanFactTable.columns | ForEach-Object { [string]$_ }) `
+    -Path $servicePlanFactOutputPath `
+    -TenantKey $paths.TenantKey `
+    -OrganizationKey $paths.OrganizationKey `
+    -EnvironmentKey $paths.EnvironmentKey `
+    -TenantId $paths.TenantId
 $factValidation = Test-SmartWorkplaceCMDBExactCsvHeader $factOutputPath @($factTable.columns | ForEach-Object { [string]$_ })
 $servicePlanFactValidation = Test-SmartWorkplaceCMDBExactCsvHeader $servicePlanFactOutputPath @($servicePlanFactTable.columns | ForEach-Object { [string]$_ })
 if ($factValidation.Status -ne 'Valid' -or $servicePlanFactValidation.Status -ne 'Valid') {
@@ -299,7 +353,7 @@ if ($factValidation.Status -ne 'Valid' -or $servicePlanFactValidation.Status -ne
 
 Write-Information (
     "SmartWorkplaceCMDB user license assignments normalization completed. Raw={0}; Facts={1}; ServicePlanFacts={2}; Collapsed={3}; OrphanUsers={4}; OrphanSKUs={5}." -f
-    $rawRows.Count, $factRows.Count, $servicePlanFactRows.Count, ($rawRows.Count - $factRows.Count), $orphanUserCount, $orphanSkuCount
+    $rawRows.Count, $factRows.Count, $servicePlanFactCount, ($rawRows.Count - $factRows.Count), $orphanUserCount, $orphanSkuCount
 ) -InformationAction Continue
 [pscustomobject]@{
     Status = 'Completed'; ScriptVersion = $ScriptVersion
@@ -309,7 +363,7 @@ Write-Information (
     GroupAssignmentCount = @($rawRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.AssignedByGroupId) }).Count
     OrphanUserCount = $orphanUserCount; OrphanSkuCount = $orphanSkuCount
     RawInputPath = $RawInputPath; FactUserLicenseOutputPath = $factOutputPath
-    ServicePlanFactCount = $servicePlanFactRows.Count
+    ServicePlanFactCount = $servicePlanFactCount
     FactUserServicePlanOutputPath = $servicePlanFactOutputPath
     RawContractVersion = [string]$rawContract.contractVersion
     CuratedContractVersion = [string]$curatedContract.contractVersion
@@ -318,8 +372,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgkXBnQAo67Eaj
-# jYkTXEIlQ1Hh6+bUq6nBz6y2so8JUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAN164j+2rOhSNs
+# 5sNdnHU9QwB40xo9HtiK6XC2yeS116CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -452,31 +506,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII9ur7gJWiL4yH0U+3Vl9Dyj9IVo8qrF5AYvnvQfS60BMA0GCSqG
-# SIb3DQEBAQUABIIBgBDTduCVqLXmW/KD44fGBTzczribDGssXQAPgNh6sU+3B1Sw
-# E4MWGr7gCAK68jPPZLFd7HleYvnhNVCvPxxdmIfErlzE6bKcxGAZI3n775i6MMAp
-# Wjmsob/Mh3OIGEefDXPbdiksIOZQhgA7hn8Q1ibYHQi5JlmUYTbRyS0K9wJyrfBg
-# NgUeKw7tC7EMTypvRQmV5L3WhsEVFcZhy9F/H5v9JABzxedovEe24bayjvCvhbL3
-# 5il/OJFkvEspHGvLkQyuGSmKjrtfGZZ9tS3Wc6wAXj+YX1P8ChFcFsqK5hINYASt
-# MGfJdmMiocZd53jafZ2Ow/m0Gz9X8656ojagmreMfmVW/HySosm7lG5ujBoFzEsY
-# e6O5gB9YT88lensJdz9zBB1cHQRa7l1Jsvcil+DTyZ2Z0MjkU0Pg+LmxERAGGguy
-# 4Ngk/9cNHPYDbHksPrKpSdc3Dyuim8+B7B72NJdwDayunCL+9kf1TSsWvy0P+Q9y
-# tZQalYhH5/UbWLywoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAmkF0Iv/ek5/iKC/if+91yIfn8YUDOfAT6wTDcySvDiMA0GCSqG
+# SIb3DQEBAQUABIIBgDEVdZO6osEL5hvB3tTeQ3qCooP4h0Xqi1AFqdK1x4ozh4O9
+# hmeS5/LGlgnWN/nGzRm7cTgWRwnIU8kj+eojFXDozGwSndV+eaxNBO1Yqfgrhm2z
+# j1dV3od8Ux8zgN257dXjqpkggxysSSHtXOAIT+Nquxab89iRyzjYsV5x2WkmukAI
+# DhL5yH7rmUWvAAS4NHLxV6AmWTmV4PyBRtW9EcbOMVwIZlDgM1KLo2tSVKYnsVTZ
+# yWsRzgnyzgsR1IO31lBXLy1HWNEMnbjWoMxOZZQdVT6/ae3vjfK8ocLgQIWS35K2
+# lrc7u98VS5rM7YMgh2l90bn1zJJd0gYb+CaGh5oVB0xVw/Idfz2PvUrfma11BxAq
+# 9CZS5z5ro3DiPWmZCc1el4HPvQKKXCIqFvjzA0uudsFIJ/oekF+r0nvuh0YzMRrj
+# KzQu1hiwowpC+iJn+BnG55+sLaNSogRD8iBKyi44aVWqCtsVEbKB+H3PAA0hBVFo
+# ELYUzVQ9+Rt/CcN1OKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
-# MjhaMC8GCSqGSIb3DQEJBDEiBCDCip02Y5O9fCM7I5R2JwzTkF6OhfSp06XwE91W
-# rQ4exjANBgkqhkiG9w0BAQEFAASCAgBKTI68yJl6GU9tog71Xjyj+ZJzhMlbsfkk
-# ypIwhqzSq2QNM0eP74j0S+jIAP3KUqOqt2EYTJ9oFiJ6+vyTqkOM2J2DbsB2pYr7
-# T2Rc6znS0OUKSvtnJ9GfSOHClDMwHxXV4wIxR2kFJhZnS6FlTWWHMAHg2k/fhn2R
-# 3rn5encZWwdyPA5d0Ao0FoEn+fRp1QAn6Sm3xESNClQ2XAq3R2NXGHKlCrHvLe1+
-# Gv0Bm7BqYSwZDuZTeJ3UQGL62olMsyXBWFTOw0rgNblNEguKm6kVnZNjh53wxr9/
-# hBNJ74P2ELzUJyBgwO/5W58NLqYi9I9DLu5bJ5KNbMmWTKHvAPqwflHjwhHPDHMt
-# 6yuGdSYr3V1ozoaW4PB7TNbq1T2GXKE7lFK+iLOH5lgOQ912NVOZU9eheoWrobZc
-# NKexZxQV9KTl8IzZW3sApxZCgaAVXHWDcbbe8AUbEMct1q/5e5cIn7GPEQiioF6q
-# HhTuK10Z1JNuP196NZRoXqzVCX+2T+UCyPA9TkIxTYXn7jxy0IrjIb4LQfRGVQrQ
-# c8TVznfs1VX0b0bEk5qSqjGUTmG5J/LJu98Dqkg8ITij3L54hL4TDLsTUAQ7Gk21
-# 0ignAcZELIp8wVdsZ8+NiOWTW26xQcnDA3FiGcvGLxjd9yS+hULza1b63Poz9zvO
-# E3aSjxZ9Jw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTUz
+# MDJaMC8GCSqGSIb3DQEJBDEiBCAhYcebB7VZ/vS8FSGpFVIASu3jRG3/MtlT6rP9
+# MxfTqDANBgkqhkiG9w0BAQEFAASCAgAfQROWfhGXc8vU2p9RkKnZfVrJt7tjH1/D
+# teDAz2D+Rh7NDJhUUEOe6cFRE1fzP4j9RWQ4dAkOAECwbpOf+F1WmQT5Gesy4eeh
+# /dUSX9pvEq90p2OEHwg8CvYCuZg3KdnJjomcPt7tFU1IdNM/irXznY41vBTe+9ZF
+# +TYUJZQp0nphLzTjODkbsHkP23XG4xNk9UrUdRDvEyAEP3RStouQphx/3XuyCN2r
+# K+/UPqRTKH28gJNGQHbdTUd2m7st3XSXXbEeg+ScU55przx4BYwX5Z+J4MwJzZpz
+# 1OilNFjqA6yMnQ2iap9kTp6bXzIJbYJp2OKSenZXA2mc1oYvQeaWN9V/81q64y1D
+# oyHFc/6WgJihPKs/rIgpMSGkMRd3u+lVwkmQ+EqbQprn2p+CCxV0vJ+77LnJ4rze
+# 4vjtoJaXM5veLAE7jcOdu3fFwPv2et/3D9ID5nquUC+m/SvVGkuXN/WiwcwtJ8/r
+# hqIW7iJ73P+x6QXeIDSMh8poifgTy5TSH2mgONtO2AUUV1cxuX7lMp1FviaxxyH2
+# Ek/zYmRlQQbOg/bPL4TX1EnG0OO3crLnQhpWGjf0pFDh8qQNo/M3QLO46zds6BIQ
+# 0MDPoY0tFUJF18/eTakOBWocc20VJT6ol6oABFHD9S6qCYI2Y7GKlDvGj6kEsXVl
+# sERAuHJyTQ==
 # SIG # End signature block
