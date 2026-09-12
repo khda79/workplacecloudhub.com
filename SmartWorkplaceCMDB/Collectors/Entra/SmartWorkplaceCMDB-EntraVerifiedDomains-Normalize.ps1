@@ -9,7 +9,7 @@ name matches between Active Directory and Entra. No user or device identifier
 is exposed in the coverage fact.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +22,7 @@ param(
     [switch]$NoConfigWrite,[switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -53,8 +53,8 @@ function Get-SmartWorkplaceCMDBDeviceKey {
 function New-SmartWorkplaceCMDBCoverageRow {
     param(
         [Parameter(Mandatory)][string]$EntityType,
-        [Parameter(Mandatory)][object[]]$LocalRows,
-        [Parameter(Mandatory)][object[]]$CloudRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$CloudRows,
         [Parameter(Mandatory)][scriptblock]$LocalKey,
         [Parameter(Mandatory)][scriptblock]$CloudKey,
         [Parameter(Mandatory)][bool]$LocalAvailable,
@@ -171,8 +171,8 @@ Write-Information ("SmartWorkplaceCMDB tenant identity health normalization comp
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFA6A4A/c0NC1x
-# dGLZHJetnHFo7KoQ6fvKKYcAsoRUMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ3XA86Vdb85gA
+# 48QH5QRnNrBrtKOT/DXAQldMeDLnPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -305,31 +305,31 @@ Write-Information ("SmartWorkplaceCMDB tenant identity health normalization comp
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH4R5sXL/l5WnlWSQvi3si4bzeQ+HXPF93kpk6+F8as+MA0GCSqG
-# SIb3DQEBAQUABIIBgIp8ToVIbYyzrkezhLBKc1W8Gg8MHFK1jJdXaaa+nbxjPmN6
-# tMh1eaH8qUv/k15hDSJIBXjh3bkfGZmCChHwzBvdda0LA0RDPJuRTmCvcR38BZ9S
-# F6fExCEWOM581X+slo6+3/muKezA7hO/pA7aOnGnKzLNVFQs4QeZ5YaksnPkwWOL
-# MH3NZXGytqqlkKW1DdKSKe6f/GzjcNigyknGk4V7KXgrGZSbKryvdlsKz/eR7Qh1
-# 7A0R+bTgXIUxwjLE1M8DsJcobH+obSRJm8fmK0lkMJgoAGuCybQ/bd4eQXAqzCL9
-# ZEy4nHPbeZmeQWu2d/peIbKFqFUJKxbg6oS3ooyk6Zq/DxtKZm7Lgm2N90VAgiXT
-# ctgRVnIyW2WG/TPEtWKrWUgJImBQUgCFLeLTVdcGfUkom6zVp1CWuHltMvgSoP6G
-# qJHq9aeQA0ZfVkRaodVIAG+ancF4TSsXgAWv5eREbGFrXvGMnG6idgbF0YCc7xih
-# wOUkt5KkWLASu2qZ2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOAYlttPQrF5kYM7PS92tIvF4v1Wv/xnYa+UXCaExx90MA0GCSqG
+# SIb3DQEBAQUABIIBgGrFKBCU3AtE7CONKW0qchCRbqW73A1bXG6hCaOiybN/sTSb
+# NDrDnpLGnr9/drT/c/lIFf5RcKqIL0wys06mNWu1vKH5d8pKsC3KVNzD2v5v/2g3
+# sLyl1bnH9nL6s1S47cSlvu+YT1F1gvwaU9IhGfTf8lbhiN8Uj6heEH2D8LAmM8Ud
+# rBnfpyxL56fSj+vi3vhvduk7s6BEP9LDEh7zd/hgbHqR3MIdrNYpm/364idWj1Vk
+# ieJFgsqsCcbkX3mY2wemZ47CCajFubfiyyeAmCp7hDSmWmofvw1uQ53LG3fqtHJi
+# +sdJhvFTLXost1YgQgQazPgwFKOSjycB9Ka2uADwK51eDb4IgD7Y40S45zmnCLlo
+# zK5pL9MFc3y7NgmEPWF7KEerLnHVGw0LSzvvIwbu6kPlH9ou/nuWqY+vSG5hYJ1f
+# AnHNfCFa4RylWbj2hRSjKu/56lzLgjz8teoElJjCW7BMNdMBwamGHUXV1tC4u9Lp
+# cTMPI3WfXkfid2gxKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODA2
-# NDVaMC8GCSqGSIb3DQEJBDEiBCCRniXsb7YLkCS9WLnxK/K7SDGaxbbLf7r9AXr/
-# y8HzcDANBgkqhkiG9w0BAQEFAASCAgCU/JqDeQU6WyYyzowQYVTjyxqvej3WOIj/
-# RnbAVCFNnjZOZW3HvoqegFsCgDphIZ5Q9OlKTJj7dpHm3QLBO1oR3LWJyINVv3FK
-# HrNzRojGujjsMG0n6pTDbhkhmFrbRBF0YIq0LCxO3baw+tlwudrWuAhaYRMCTb6O
-# l3R/H6yD8qw8UFRMghtFACctYSi2m4iIbLfXGjSfsxIzBZpQxBTEvQOz0B+vzIM1
-# /JYUftIy9Jz4MetYO4GcikT7/ctbyTbE76EYzTOvWmL51C9aZKQzIk4FsGe2oiHY
-# 5EtTQ1H/gAGrpgukBhehs6W00C0yZXTk1DEcTZBPfaAAFUSbWSdeN0+SiFqZfHgF
-# NdgBwpo/ldQy6QDaEPzNVqW6StIjKniQFbd1b+/M605PbwmPpF0cq8IMcCnS0Bop
-# iZWUi9cB7t/hehW/EYqI7f9mLSPpbINolSbKt8xLIZn2YA1J5l8o2uI+Hyb6/3bu
-# HpGTqOHN6U3zbYYp0IQt363gk4PSx19vi/Jvj/2sb3inUo5hdrcwgh/spWt5z6AO
-# bO4gZfEuJOnsdHeyN7MaNYTOkldnYrRS4C+JoLh7VXrz/Gzp22bC5ZMR4R2Am+3h
-# QGX5un5jCW7w/RsPmCvWaFbmCUJowyAoJbFPGPynvGUbNxsPLFQd/z4OTuCHbBTO
-# USEcfBFC8Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMDUy
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAs4qx0rQciYlzilnkkVaEZBf4q6Y6aFHkvp1xT
+# LcZo4zANBgkqhkiG9w0BAQEFAASCAgCSBVBKgXj1bB/iMZ4tHBY3m3Bbz1ULMqLX
+# +ZTKUr/bpGbdhINbp/22yfQDFGeIqQytPhCgZmVC0JObCVxr5fQVnVR5tcUlwiGL
+# A1/nHuPMeY3dSm47GyOz84AYhYEwIYttIlPpN0pKAO8PDrX6UTt1Su7KGCdNdjcf
+# 6+O1em+iZAXdiM58+azs0kmRYTjlaPKCfOlpNdPm6tbc0AWI2DHnI3IXEBR0jiRr
+# TTXyc1+kHvObJGvhKHRi9Ix/jPCjk6cT8ltg4N9vfkpSk9IV9Vo2pJbKxWjC0szq
+# jm7OmofPw88nPGWMdeGwLC4TpnH/FZfYJ7PQr4KZvWvAOUTSb3DBQtWFnC07vvWV
+# fvagQDvlHO7qQHMejGRk6BcduTsCThMXZEo0TX8PQRAlYAdtuU5Bn3dEE9vYwA2L
+# lVjIaqIS7LSj9hZDFW7/VtNRtwQGxOz02OgaausTp4xiFW26qQiMfsRdPSBlMz6z
+# GfQQXmJdtxuL/vGYKGrKgkicKABQpIxqYfcWNtZ5jO8yCtvQatON6IWu/6QCp2yg
+# Je4KHm09L8TKvUit4L+TEJ/mSXMPqymubsgJ+qcegzggSIeF7cA0PRPk77mj2pxW
+# W1ZQFo/wankS10AHNyV6S66UJGl41W6eUbsDjzsQRtipZTZreU6ybBBFz8GY6qZt
+# 8Sgs8kyS7g==
 # SIG # End signature block
