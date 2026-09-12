@@ -9,7 +9,7 @@ collector uses explicit Microsoft Graph fields and supports one synthetic JSON
 fixture containing the four source families.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding(DefaultParameterSetName='Graph')]
 param(
@@ -22,7 +22,7 @@ param(
     [switch]$NoConfigWrite,[switch]$ValidateOnly
 )
 
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.0.1'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
@@ -76,6 +76,20 @@ try{
     $rows=@{}
     $rows['Intune_AutopilotDevices.csv']=@($autopilot|ForEach-Object{$id=Get-Text(Get-Value $_ 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Autopilot response missing id.'};[pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';AutopilotDeviceId=$id;DisplayName=Get-Text(Get-Value $_ 'displayName');SerialNumber=Get-Text(Get-Value $_ 'serialNumber');Manufacturer=Get-Text(Get-Value $_ 'manufacturer');Model=Get-Text(Get-Value $_ 'model');GroupTag=Get-Text(Get-Value $_ 'groupTag');PurchaseOrderIdentifier=Get-Text(Get-Value $_ 'purchaseOrderIdentifier');EnrollmentState=Get-Text(Get-Value $_ 'enrollmentState');LastContactedDateTime=Get-DateText (Get-Value $_ 'lastContactedDateTime') 'lastContactedDateTime' $id;UserPrincipalName=Get-Text(Get-Value $_ 'userPrincipalName');AzureAdDeviceId=Get-Text(Get-Value $_ 'azureActiveDirectoryDeviceId');ManagedDeviceId=Get-Text(Get-Value $_ 'managedDeviceId');SourceCollectedDateTime=$collected}})
     $rows['Intune_DetectedApps.csv']=@($apps|ForEach-Object{$id=Get-Text(Get-Value $_ 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Detected application response missing id.'};[pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';AppId=$id;DisplayName=Get-Text(Get-Value $_ 'displayName');Version=Get-Text(Get-Value $_ 'version');Publisher=Get-Text(Get-Value $_ 'publisher');DeviceCount=Get-IntegerText (Get-Value $_ 'deviceCount') 'deviceCount' $id;Platform=Get-Text(Get-Value $_ 'platform');SourceCollectedDateTime=$collected}})
+    $detectedAppGroups=@($rows['Intune_DetectedApps.csv']|Group-Object AppId)
+    $duplicateDetectedAppGroups=@($detectedAppGroups|Where-Object Count -gt 1)
+    foreach($group in $duplicateDetectedAppGroups){
+        $reference=$group.Group[0]
+        foreach($candidate in @($group.Group|Select-Object -Skip 1)){
+            foreach($field in @('DisplayName','Version','Publisher','DeviceCount','Platform')){
+                if(([string]$candidate.$field)-cne([string]$reference.$field)){throw "Conflicting duplicate detected application '$($group.Name)' returned by Microsoft Graph. Field='$field'."}
+            }
+        }
+    }
+    if($duplicateDetectedAppGroups.Count -gt 0){
+        Write-Warning ("Microsoft Graph returned {0} duplicate detected-application key(s); strictly equivalent rows were consolidated."-f$duplicateDetectedAppGroups.Count)
+        $rows['Intune_DetectedApps.csv']=@($detectedAppGroups|Sort-Object Name|ForEach-Object{$_.Group[0]})
+    }
     $rows['Intune_ConfigurationPolicies.csv']=@($policies|ForEach-Object{$id=Get-Text(Get-Value $_ 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Configuration policy response missing id.'};$template=Get-Value $_ 'templateReference';[pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';PolicyId=$id;DisplayName=Get-Text(Get-Value $_ 'name');Description=Get-Text(Get-Value $_ 'description');Platforms=Get-ListText(Get-Value $_ 'platforms');Technologies=Get-ListText(Get-Value $_ 'technologies');TemplateId=Get-Text(Get-Value $template 'templateId');TemplateFamily=Get-Text(Get-Value $template 'templateFamily');CreatedDateTime=Get-DateText (Get-Value $_ 'createdDateTime') 'createdDateTime' $id;LastModifiedDateTime=Get-DateText (Get-Value $_ 'lastModifiedDateTime') 'lastModifiedDateTime' $id;SourceCollectedDateTime=$collected}})
     $updateRows=New-Object System.Collections.Generic.List[object]
     foreach($item in $feature){$id=Get-Text(Get-Value $item 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Feature update policy response missing id.'};$updateRows.Add([pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';PolicyType='Feature';PolicyId=$id;DisplayName=Get-Text(Get-Value $item 'displayName');TargetVersion=Get-Text(Get-Value $item 'featureUpdateVersion');ReleaseDateTime='';DaysUntilForcedReboot='';CreatedDateTime=Get-DateText (Get-Value $item 'createdDateTime') 'createdDateTime' $id;LastModifiedDateTime=Get-DateText (Get-Value $item 'lastModifiedDateTime') 'lastModifiedDateTime' $id;SourceCollectedDateTime=$collected})}
@@ -94,8 +108,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4I/RW4ebKnhVc
-# FPVk2zSlUcUcIEJVYf7xXpnOZ98lKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9S2fXXVUmi3aj
+# 05weenrm7aV5uJO6nEvstMrfrGzqJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -228,31 +242,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDgD6To4sk7fGOvYNmmKVjqFZiTJLy+9xu9tuqZVAWTJMA0GCSqG
-# SIb3DQEBAQUABIIBgJvB/As/qvHcXlebT3EDTwXP23lrqVhFygkY/2UO5ZtPcW/C
-# cReSEG74JzAYj+IYZU6aRWJyD3CqubM7wLkNBZZJ5Dh6TkuUY3zGHeFzvkRBXUlh
-# K+MfuC3VFG4z5z0Dnd5F67lwlBzGz5Irm0PrF10/r0BhYe0AlLxd9kl97vGMMz1T
-# AqySioM8IDglTv8lDD/duMXUSVyJhwDvQ/qAwSbqIGEgxzXQsBLoK3a/sczt62oE
-# 38k3AYfSSXjn87Wt4Z7If01RHoZzxJMfU7tXfDj4nls6FHPmlbHhUWM1ezr36R5D
-# 9J05TkeiiikrjXWlPaH0zvat4YwK7dnN9YdPTV5xjNB4JGR1U7tHA05UqCg9hAOA
-# PU8UKY9qsBlAxpEBPql30kUWPXgcCXYV3HP86xLk0UJY89C5AG+9h3lY9eL7A6hp
-# oiDKCcr5ReQlVla+jjpg9FybK1/hqV8lWUZ30rfRTS9p0B70nxCn5AeIqGxP8oQj
-# 2l2tF3qQG1Ij1ZHxMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJZQxwEwGojI6QYY98i+o0JWrQiCDW/N74UT7ZTHgnOpMA0GCSqG
+# SIb3DQEBAQUABIIBgGLoMtE5+IOoI2cD5vQdwZwvBWooD7HZTPmUUk3CpdPmSmCZ
+# i7yqv5VX/tj8mXyQ2aU+vYypfckbA9LYDa5in5kxRQiFuGrNFK6cG6w/+cmhqWXs
+# 5o0gcuzKoby1De9xxiAzT1iB0K0gArf88qVO/4wUY5HfT7yhcZi/0WVJHO21C7fy
+# y/jPfmcC6vl0cIyDtOvJStaUNX4kHr8A87DEwmfdDRahG1+rzLEkRicJYCQfznvg
+# XgbhMwNWssKs9qs6U6brRjn3OXkQpGn2QvNMaYYKVcc5Lu6h2O5nFPTybTqKuocv
+# F1SVVv5+VT5/SJNyhPzQ8zWyulzM/RVR4bQN8YxeX49gOSWEkYXUO+0ELzVX5qo3
+# JGeE4H8wSTpCQsFEk3Fm7j7oVgopCrlv9TZft5Mi9U9T+VfKcLnJQcQnBjaUI+RC
+# j0S4ktov5mKYVf9ox9YmnMFoc0wPKqHGNh8UrW9ToIhILi1B5cERjETG45YBz00g
+# sxg+TTMasjQEYfMSv6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODIx
-# MTZaMC8GCSqGSIb3DQEJBDEiBCD6jsb3qFuxoQeLbn1qbsQ8egcB2cQcnFAHEViP
-# ij86DTANBgkqhkiG9w0BAQEFAASCAgCLRp6aohZQgG1QBHcO2da3swLpUtgDgS5c
-# Y/1U5NTqKm2RPnogw/0JVQQaK1Qyd516h2FZO8J8FhBfAas0hpISMJ92vkb+kE54
-# fZtKAIc4QdoN3wrYJa86K8NaldYc12Hsxo+ZqPlXZuGqfRVdVc5fMfLhJKi8uLp3
-# m943QqHyLrmI/1fHo1318hAE9MApEcPPLyX4P793UCFyJnwz0+iBKtK5cXiMsrE2
-# +m4BoA53XOzoYYAhHyt1t3zzBD2P05L+RE43a3Ipd3hPC9kOh2LXUYW9smSVrQiy
-# XlV3N8Z+LPmXcuW7AhGx39oKUicb/bZ0SQ7/pmVIMaf2T53G2DnWk4Ia7CbEU/qj
-# 6IinZK90t5ml5XwdCh8LJO7YJtDENZBH+Ut7fxSQ3jTjGpleN9xQN09V2iO+Hki/
-# TH53Mb4VTdSQkxWQVs4ZBXQ8mjuXp1iu8ls+Uh29MPk7Oai6JcB1VKddHeoRuIdo
-# UnrGbhcdDErP1WNws7+VRg/uC9+352/ecutC/Ren/DkE4KkJXKqvF/ncknbuqvgv
-# oJw/3rVHwvMKVjsumpaxdkPSUNdpdYRSIQ72mqBUWGhMH3hGSrN1RYR3PGoe/W1+
-# dewYzP5yXTz8JvlqEWTuJIG5jj8ByFbaXzFMlcGnNhWTL4bCw8U/PVTWUfTgC9Bi
-# MfjNlGNmhg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTA3
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCeVNSUuZqFM4Hk/M91JCg40f22J7/d9TmFkTLj
+# PCf7izANBgkqhkiG9w0BAQEFAASCAgA+d7FeGrihA5L18CNcBoDh3mCsnMibAeAl
+# 58TlYvIOPrAsyvqZOvR0bfatHIzUo5LQ7xGDaJomLnVSYT/3TDMvqnKjtcByWxj5
+# vNog/zr7M67nDjeqFqCztqvyPEHDOaaeUoHip2ydWKrkhnykDDcA+aoyEcZfZg3c
+# iQ/6qNukCa/G11Z4GzoxEBtNcD0kqakgzohuXszQa10TEbUXt5+Fei7X9Cv5hGaY
+# uF0MtfvqmxIW8Es5t/+pUL1sGO2xnlKvxOJ0QP8J4CLY14MeDiIOHwiRb5i8h8vL
+# U7djryoFZAEkEX6OGg/VssQZaSsOh7ISfTy8UCOUQqSX+L8FEVjopcH7tZmoo7pm
+# kQTlWhQaE8vCp9RkIMAp0SiZ37UvkdPSlmSQmOfCHJqNhfHyv5fnJvUd06TBZLr+
+# wztQo7z3FFj5fajiPgvMhIPaQbgI6JtAs0/vMIaoYTa35vePNiUYHKbAIqDtjUvs
+# 0EoTtOvVcIJupvju7q0HlHFNO4P+6sBhLd81h5foqAVOjdAziHNMu9GeyVBsr0iD
+# LgT3HyrfWuuoNGJbs0aK1dHhFj23nq3sZaxx1kmQXF5ba88R8tNyqp3UnaUatvSc
+# KE8280FgNIJNMkyC+j46I/xK1UZgZ1e9stmpdvzfjlfwgQEamnyGMZZy6ryh7eFu
+# 34B+dWlfwA==
 # SIG # End signature block
