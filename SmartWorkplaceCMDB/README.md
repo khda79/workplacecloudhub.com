@@ -1,38 +1,39 @@
 # SmartWorkplaceCMDB
 
-**BETA — not qualified as a stable release.** This status applies to the
-application, documentation, packages, and any future publication. Component
-versions and offline test results do not constitute production qualification.
-
-The locally prepared distribution candidate is **0.3.0-beta.1**. See
+The locally prepared distribution candidate is **1.0.0** on the stable channel.
+It is validated as a reproducible local release; this does not by itself
+constitute tenant, gateway, endpoint or production qualification, and it is not
+a publication approval. See
 [release notes and installation/update guidance](Release/NOTES.md). The package
 builder uses `Release/Files.json` as an explicit public file allowlist and
-refuses a stable channel or unsigned PowerShell files. Preparation is not
-publication approval.
+refuses prerelease metadata or unsigned PowerShell files.
 
 SmartWorkplaceCMDB is an autonomous Workplace configuration management database project for Microsoft workplace environments.
 
 The project collects workplace inventory data, normalizes it into CMDB entities, prepares Power BI-ready tables, and produces local reports without requiring another repository project as a runtime dependency.
 
-## Initial Scope
+## V1 Scope
 
 The first scope is Microsoft workplace inventory across cloud and Active Directory:
 
 - Entra ID users, groups, and devices.
 - Intune managed devices and compliance signals.
+- Intune encryption and source-reported hardware evidence.
 - Microsoft 365 license SKUs and assignments.
 - Exchange Online mailboxes.
 - User-to-device and source-to-entity relationships.
 - Data quality, source freshness, and confidence scoring.
 
 Active Directory users, groups, computers, domains, and direct group
-memberships are included through the native read-only collector. Azure Virtual
-Desktop, Citrix, local endpoint inventory, and external data sources remain
-planned extensions.
+memberships are included through the native read-only collector. Azure is an
+authorized source but V1 deliberately provides no unbounded Azure inventory:
+an authoritative Workplace subscription, resource-group or tag scope is
+required before an opt-in Azure collector can be added. Azure Virtual Desktop,
+Citrix, local endpoint inventory, and external data sources remain V2 items.
 
 ## Current Status
 
-The current beta includes offline-tested guards against relabeling foreign
+The stable V1 includes tested guards against relabeling foreign
 tenant rows during export and reporting on CSV rows from a different tenant.
 CSV exports honor their declared column order and omit undeclared properties;
 the HTML overview counts CSV records, including quoted multiline values.
@@ -45,6 +46,138 @@ inventory Microsoft 365 licensing, correlate Exchange Online mailboxes to
 Entra users, and inventory Active Directory from the same collection host.
 
 ## Design Principles
+
+The [V1 release report](Release/V1-RELEASE-REPORT.md) records the final
+implementation and validation boundary. The
+[table inventory](Schema/Entities/current-table-inventory.md) lists exact CSV
+contracts.
+
+### Common CI registry — V1
+
+`Modules/SmartWorkplaceCMDB.CI` projects the existing User, Device, Group,
+License and Mailbox entities into a common registry. It preserves `Cmdb*Id`
+values as `CI_ID` and validates the existing generic relationships. It does
+not connect to a tenant, alter curated inputs or change the Power BI project.
+
+Example paths and tenant keys below are **fictitious**. InputRootPath must be
+the existing curated `CMDB` directory containing all five entity CSVs and
+`CMDB_Relationships.csv`, with exact current headers.
+
+```powershell
+Import-Module .\SmartWorkplaceCMDB\Modules\SmartWorkplaceCMDB.CI\SmartWorkplaceCMDB.CI.psd1
+$registry = @{
+    InputRootPath = 'C:\Example\DATA-LAST\CMDB'
+    OrganizationKey = 'example'
+    EnvironmentKey = 'test'
+    TenantKey = 'example-test'
+    # Set TenantId if the source rows contain one; it must match exactly.
+}
+Export-SmartWorkplaceCMDBCIRegistry @registry -ValidateOnly
+
+# The parent must exist and the destination must be new, outside the input tree.
+Export-SmartWorkplaceCMDBCIRegistry @registry -OutputDirectory 'C:\Example\CI-Preview'
+```
+
+Outputs: `CMDB_ConfigurationItems.csv`, an unchanged validated copy of
+`CMDB_Relationships.csv`, and `CIRegistry.manifest.json` with input/catalog hashes.
+Invalid inputs fail without publishing a partial destination. Existing output
+directories are never replaced. The exporter streams CSV records and retains
+identity indexes and sparse governance state; memory still grows with the
+number of CIs, source identities, relationships and governance changes.
+
+Without a governance journal, owners remain blank with `OwnershipStatus=NotCollected`; lifecycle is
+`Unknown`. Neither a primary user nor device corporate/personal ownership is an
+accountable business owner. Device `SourceDeviceId` is a curated correlation
+key, so `SourceMappingStatus=RequiresSourceEvidence` rather than an invented
+per-source object mapping. Missing source identifiers are explicit as well.
+Collection completeness/freshness is not certified by this registry; the
+manifest records `SourceCollectionStatus=NotAssessed`. Use existing source
+health and quality evidence separately.
+
+Optional individual source evidence and declared governance are described in
+the [CI governance contract](Schema/Entities/ci-governance.md). The local CI
+component/catalog and application are **1.0.0**.
+The existing CI CSV header is unchanged. Custom catalogs must include the new
+sidecar columns and explicit lifecycle policy from the current catalog.
+
+```powershell
+# Fictitious local paths. Raw must come from the same snapshot as CMDB.
+# governance.csv is the complete retained journal described in the contract.
+$evidence = @{
+    RawRootPath = 'C:\Example\DATA-LAST\Raw'
+    GovernanceJournalPath = 'C:\Example\Private\governance.csv'
+}
+Export-SmartWorkplaceCMDBCIRegistry @registry @evidence -ValidateOnly
+Export-SmartWorkplaceCMDBCIRegistry @registry @evidence -OutputDirectory 'C:\Example\CI-Governed'
+```
+
+Both additions are opt-in and may be supplied independently. Raw evidence adds
+`CMDB_CISources.csv` with each Entra, Intune, subscribed-SKU and mailbox native
+identity. It retains all correlated candidates and does not reselect attribute
+winners. Missing evidence is counted, not interpreted as retirement.
+Governance adds `CMDB_CIGovernanceChanges.csv`: validated changes to business/
+technical owners, support group and lifecycle, with author, reason and UTC date.
+Owner references and transitions are checked before any output is published.
+Journal replay is deterministic; it does not authenticate the declared author
+or detect history removed before it was supplied. Protect and retain the full
+journal and policy outside the repository. See the contract for these boundaries.
+
+This extension does not add AD/cloud reconciliation, authenticated lifecycle
+editing, source-priority policy or graph traversal. The module and tests are
+part of the V1 release allowlist. The package builder requires valid signatures
+for every included PowerShell file; no machine execution-policy change is
+required or performed by this module.
+
+Synthetic validation: `Tests/Test-SmartWorkplaceCMDB-CIRegistry.ps1`.
+
+### Device and organization context — V1
+
+Add `-IncludeContext` to the registry command to create typed user/device context
+tables. Department and job title remain source observations. A device can expose
+the resolved associated user's context, with a separate source date; this does
+not declare device ownership or location. With RawRootPath, native device
+context also retains enrollment, management agent and activity evidence for
+every source candidate. Unqualified date text is retained without guessing UTC.
+
+```powershell
+# Fictitious example paths; use the same existing local snapshot.
+Export-SmartWorkplaceCMDBCIRegistry @registry -IncludeContext `
+    -RawRootPath 'C:\Example\DATA-LAST\Raw' -ValidateOnly
+
+# Optional, reviewed Country -> Entity -> Site reference CSV and complete journal.
+# OrganizationRefId events use the existing governance journal schema.
+Export-SmartWorkplaceCMDBCIRegistry @registry -IncludeContext `
+    -OrganizationReferencePath 'C:\Example\Private\organization.csv' `
+    -GovernanceJournalPath 'C:\Example\Private\governance.csv' `
+    -OutputDirectory 'C:\Example\CI-Context'
+```
+
+The exact additional columns, grain, reference rules and limitations are in the
+[context contract](Schema/Entities/ci-context.md). A missing organization reference
+file/journal yields no declared location; user departments are never converted
+to countries, legal entities or sites. Serial, manufacturer/model and warranty
+data are not present in the current exports and are not fabricated. Existing
+Power BI inputs remain unchanged; report consumption of these optional context
+tables is a separate integration step.
+
+### Intune hardware collector — V1
+
+An additive collector prepares source-reported serial number, manufacturer,
+model and total storage bytes in `Intune_DeviceHardware.csv`. It reuses the
+existing Core/Graph modules and leaves the signed inventory pipeline and its
+CSV headers unchanged. Default invocation validates locally; live collection
+requires explicit `-Collect`. The finalization reused a private read-only
+snapshot as aggregate evidence but did not rerun the live Graph connector; that
+boundary is not represented as fresh tenant qualification. The CI adapter accepts `-HardwareInputPath` together with
+`-RawRootPath`, validates the required source state and exports a separate
+`CMDB_CIDeviceHardware.csv`. See the [CI hardware contract](Schema/Entities/ci-hardware.md).
+The canonical Power BI report consumes the resulting hardware table.
+
+See the [hardware scope, commands and offline evidence](Schema/Entities/intune-hardware.md).
+Missing values remain explicit; RAM, asset tag and warranty are excluded from
+V1. Application status is **1.0.0**.
+
+## Existing design principles
 
 - Keep the project autonomous: own configuration, collectors, schemas, outputs, reports, and Power BI assets.
 - Keep tenant values local: use `*.local.json` files and never commit tenant IDs, app IDs, secrets, certificates, logs, exports, or production identifiers.
@@ -420,11 +553,8 @@ Upload failures preserve the collected files and return
 `CompletedWithWarnings` with upload and failure counts.
 
 After OneDrive synchronizes the SharePoint library on the analysis workstation,
-the published copy is available under:
-
-```text
-C:\Users\<user>\EMEIS\SMART-M365 - Documents\SMART-CMDB\DATA
-```
+the published copy is available in the locally synchronized folder selected by
+the operator. Keep that machine-specific path in the local configuration only.
 
 ## Data Quality Normalization
 

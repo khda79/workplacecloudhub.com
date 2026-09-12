@@ -9,7 +9,7 @@ raw contract is written below DATA-LAST\Raw\Intune. Offline JSON is supported
 for safe tests.
 
 .VERSION
-0.1.1-beta.1
+1.0.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.2-beta.1'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -200,7 +200,7 @@ $sourceDevices = if ($PSCmdlet.ParameterSetName -eq 'Fixture') {
     @($fixtureDevices)
 }
 else {
-    $select = 'id,azureADDeviceId,deviceName,operatingSystem,osVersion,managedDeviceOwnerType,complianceState,managementAgent,userId,lastSyncDateTime,enrolledDateTime,deviceEnrollmentType'
+    $select = 'id,azureADDeviceId,deviceName,operatingSystem,osVersion,managedDeviceOwnerType,complianceState,isEncrypted,managementAgent,userId,lastSyncDateTime,enrolledDateTime,deviceEnrollmentType'
     $uri = 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$select={0}&$top=999' -f $select
     @(Invoke-SmartWorkplaceCMDBGraphPagedRequest `
         -TenantId $paths.TenantId `
@@ -231,6 +231,7 @@ $rawRows = @($sourceDevices | ForEach-Object {
         OperatingSystemVersion = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'osVersion')
         ManagedDeviceOwnerType = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'managedDeviceOwnerType')
         ComplianceState        = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'complianceState')
+        IsEncrypted            = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'isEncrypted')
         ManagementAgent        = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'managementAgent')
         UserId                 = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'userId')
         LastSyncDateTime       = ConvertTo-SmartWorkplaceCMDBUtcDateText `
@@ -309,8 +310,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTr9f5YHf6ZFZm
-# t3EN6wHwOlKYMHFLxCaWYvaQq66CwqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3CD5uzMAacUIV
+# 7iPCajvIz3IsNv0sHwn8tkZ2X3kztKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -443,31 +444,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOk0VR4NwrvTf8od5dvDDfmriEADiHRpwnBE1xuoI+O9MA0GCSqG
-# SIb3DQEBAQUABIIBgKE693/zP14xIBUD6CaVhbMlfZi0UzmKsqXJ1Gj4YjODJfq4
-# F6xSFYjosmSWw7uagqMembLO6qK2nQ/5BiRkCV1e7syU3Q1ghIGYcUYEnCF/1dIU
-# +P+VskgTA2YyJuwAcToPJRLmzLIWF9l0jeEwILatRwWbfK9oaGLPdeEc8Ah9b0iX
-# oTdi8/gCdnVl6WbY9mJl9ZVhcMSeBXQctNlmIIU+J6LR28mV8NPmhsfbZ2BD3/Wz
-# BrKwbxHORTSxjmowRS6z9IcRRgEVcBtTmb2LDXjm4kLDdv06HNXs08sFf1v3jPam
-# EOumNen/UlVhWbnpz02IfQw0cION05+p9ozQ4tTL4dyrA9uwkRNZQBGvbhriTn0S
-# ezJldtbtkDFbhRh5o7zIsya134tnU2yh/Q8ddCtA06BqTk+2mVZk27LOf2CAxjn4
-# K9x/LqPVOSDrxhob6ehMCOFEQkUOQRQA61x2U6bDtz+sWKcHQheixXUrdQgn5jF8
-# mr/8vf++cR5DYI/ILqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHCdO0S5FcEnXLJFHo5ioSpxgC8TA/+TRHgFVyqnZ7gMMA0GCSqG
+# SIb3DQEBAQUABIIBgJBFleYVoBf1vE/fDyx8HmCrelaMCsE8kR1vu4X6P40mKa4D
+# MR5/fRNEQtLLCclme1k3g6u8LBSdyL00yJSNV/k2C8XbnVDKSv8QK1QpjkDO3cGj
+# SksYSbTJ0xytk0sSrhy3opa0aeshvtnoISPjCtj4JBGjRXjHKRrhZ7dhd+lFWC/6
+# Mipm5UZ+fsM2fxdSuG2svUuLZ1YadocytYB4vAuLJohpCksHuYViETgHlF8LUAcU
+# kiXcJ51YUOq6FAvUxXwqlqF172D6eKn9uz66sQFmj+r5046e7q9c2jYc9SB/sLxc
+# QOHnNePL+SJETRJOC/0wCLoBKhUed7mIxxZ2pYyKmbjTcjRTfNbUrB4W2GbMZzQE
+# IBG3uyEWzyYdvOgdpH3r3lMD9SLWIj0DRDLS5xr+8K7+9p0HVDx9Kvk9n3mtg+RN
+# 9m/ZCjtswT/TPlfQ0OrK6W5SdXi63maPnFNlf3BIQTnVHQjM95P/Hcubx0nk2FfV
+# I+mi3M/tKrFEGHdy16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDdaMC8GCSqGSIb3DQEJBDEiBCAKVB5C+K+9t8OCaZ5J8hNsZWd5u8YQhMCVuloo
-# 4tFXEDANBgkqhkiG9w0BAQEFAASCAgBC37l6G8+aE0DIVytJf/SN4z3VfiexN+mt
-# v72fTVUgnTo38+gYmY+xHitQ1Uh8u0bUrjbn69dscT8a6Q5DgyA2vijIQ6VkLIlz
-# xq0X2xXHIcS0+57l1HfoB/T4g35jh8OU5P+KfEQCyagV4kUwo/HZV6K76WEPgSKY
-# meO4T1eLlid9PDV+flu597Eyp44LDT0d+MawVf5w7VDSS9WG5yThi7G7JMrNMCaK
-# fac0eyuh0ekXocoPkBvPhEpT8fSXIZtuZkOf8M1ntpQ6bjV+r136VWL9h3DqIDu1
-# kTTyqTnc3P3e/87jNvioaGtJbFKAux2P5wcpvbCvUcFfK3OJDVsN1nvq6lKbgNBe
-# Oi8EgxN6/Bm1Qx2zTExC8fNjXjh5JMgEG3O+6SDkxUzjT3xFx44Jxe9Ul10mI/ew
-# rRGpmp4ho991c/3Jati0u/TaXDHoyYO9sIrfWIHITsYnZi09vAyDe0pfFTjqcGCr
-# LX+4feoCbzW9tM4v7u+wh8QEku4I++uDXl1eicvGNa6FWT3doqEelk0A69vnrzST
-# hj78DcHLsveZV39IDXo5HTBUSmWmOHsMgZEVU2CCESNX+6dw0zGY7Ag9ohyVC6Sd
-# sVv0+TW56W8mVOHImhR3YlppWeVodxYpMXH6iSx60RPCJ9ETBxyu1f37rzrgrTM/
-# toyHcxPb2A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTNaMC8GCSqGSIb3DQEJBDEiBCCbEBIqIxkwS0yAH85X+DZNk6EydM0HtNvUvGVW
+# pFkBlTANBgkqhkiG9w0BAQEFAASCAgADMm2Jz1Mr+uMV59JyVXdSzOY3NJM8jh1i
+# 0d25zRuyzO9YtovAnudQhz7ZGz6atjQKiEjmmxOODY2QY8+JBCntmEmWsXi4Y69c
+# mViHwFHo5QmQu9pTAYToFTZebqy2JuRTQeqm89n4BzO79l31aAZ6wMi53VKOVNXW
+# 1uyyUBK1N6QoLEJvSNA38Hpd3gYfoI/X4zKTuwtYVw36Y1OqagbYArKMcMC/lyNb
+# 7dB1QubAfm0xFRHc/kJurMfLYnKFR9GZXpW9ZTGUAMc1U1/1F95GoZx5EOr+mLJc
+# zVc/9OmrexIEDuW326Ab1zVf6W62EgkY4iaNzPQay3Kf8qdf0ozSey3yMFeLJqxF
+# S1EUnZ4bEQefXMsED2AXPtTNVL3eFNEOwzZqPlmyjTs/bT1NNWyhWAGKVk918aDW
+# t/VL37qqCFzuPI+ypWmaGu2rp/doSzAWD1gpbX56vzQd5TyPW7cBskMKuGS6w8eJ
+# bkbjONHQJSMKr1vf9QROhdSmxsghqGTgDqndmebwOat1ySGcIF1DxNDdLLr1lQE/
+# WgIVd2sCv+5clnhnCGssmD1tflGg9DBttYuNczCpvDfhXwE+RjpF1HsO+BtOR7KA
+# N8K25jg7NjotmS5gedKBATHgTtu3gtLNnAHHDkB1EC7ahooBzQtSpAN1sVLwCYl7
+# 92hG81ATbg==
 # SIG # End signature block

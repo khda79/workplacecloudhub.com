@@ -148,6 +148,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartWorkplaceCMDB/**/*.psd1
 !/SmartWorkplaceCMDB/**/*.cmd
 !/SmartWorkplaceCMDB/**/*.md
+!/SmartWorkplaceCMDB/**/*.py
 !/SmartWorkplaceCMDB/**/*.json.template
 !/SmartWorkplaceCMDB/Schema/**/*.json
 !/SmartWorkplaceCMDB/RELEASE.json
@@ -245,7 +246,20 @@ SmartAzureVirtualDesktop/Data/**
 SmartCitrix/Data/**
 SmartFinOps/Data/**
 !SmartFinOps/SmartFinOps-Workplace.Release.json
+# SmartWorkplaceCMDB private tenant/runtime and Power BI artifacts.
+# Keep source generators and synthetic JSON fixtures versionable, but never
+# stage collected exports, local PBIP/PBIX projects, semantic-model caches or
+# copied ReportData from a private qualification.
 SmartWorkplaceCMDB/Data/**
+SmartWorkplaceCMDB/PowerBI/CMDB-REPORTS/**
+SmartWorkplaceCMDB/**/ReportData/**
+SmartWorkplaceCMDB/**/.pbi/**
+SmartWorkplaceCMDB/**/*.pbix
+SmartWorkplaceCMDB/**/*.pbip
+SmartWorkplaceCMDB/**/*.abf
+SmartWorkplaceCMDB/**/*.csv
+SmartWorkplaceCMDB/**/*.parquet
+SmartWorkplaceCMDB/FINALIZATION-V1-AUDIT.md
 
 # Temporary
 Temp/

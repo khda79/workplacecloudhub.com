@@ -4,12 +4,13 @@ Publishes autonomous SmartWorkplaceCMDB data-quality findings.
 
 .DESCRIPTION
 Builds CMDB_DataQuality.csv and FactDataQuality.csv from curated local CSV
-outputs. The normalizer performs no tenant connection. It reports orphan
-primary-user references, unlinked mailboxes, missing or invalid collection
-dates, duplicate entity keys, and stale non-empty entity datasets.
+outputs. The normalizer performs no tenant connection. It reports missing or
+invalid source identities and dates, duplicate entity keys, primary-user and
+country coverage gaps, observed license-assignment errors, unlinked mailboxes,
+and stale non-empty entity datasets.
 
 .VERSION
-0.1.1-beta.2
+1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -30,6 +31,7 @@ param(
     [string]$LicenseInputPath,
     [string]$MailboxInputPath,
     [string]$MailboxFactInputPath,
+    [string]$UserLicenseAssignmentInputPath,
     [datetimeoffset]$ReferenceDateTime = [datetimeoffset]::UtcNow,
     [int]$FreshnessWarningHours = -1,
     [int]$FreshnessCriticalHours = -1,
@@ -37,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.1-beta.2'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -169,6 +171,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptRoot
 $coreModulePath = Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
 $contractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.tables.json'
+$rawContractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.raw.tables.json'
 Import-Module $coreModulePath -Force
 
 $boundParameterCopy = @{}
@@ -182,6 +185,7 @@ $context = Resolve-SmartWorkplaceCMDBContext `
     -NoConfigWrite:($ValidateOnly -or $NoConfigWrite)
 $paths = $context.Paths
 $contract = Get-SmartWorkplaceCMDBTableContract -Path $contractPath
+$rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 
 $tableNames = @(
     'CMDB_Users.csv',
@@ -208,6 +212,7 @@ $inputDefinitions = @(
         Path = $UserInputPath
         DefaultPath = Join-Path $paths.CmdbLatestPath 'CMDB_Users.csv'
         KeyColumn = 'CmdbUserId'
+        SourceIdColumn = 'SourceUserId'
         EntityType = 'User'
     },
     [pscustomobject]@{
@@ -215,6 +220,7 @@ $inputDefinitions = @(
         Path = $GroupInputPath
         DefaultPath = Join-Path $paths.CmdbLatestPath 'CMDB_Groups.csv'
         KeyColumn = 'CmdbGroupId'
+        SourceIdColumn = 'SourceGroupId'
         EntityType = 'Group'
     },
     [pscustomobject]@{
@@ -222,6 +228,7 @@ $inputDefinitions = @(
         Path = $DeviceInputPath
         DefaultPath = Join-Path $paths.CmdbLatestPath 'CMDB_Devices.csv'
         KeyColumn = 'CmdbDeviceId'
+        SourceIdColumn = 'SourceDeviceId'
         EntityType = 'Device'
     },
     [pscustomobject]@{
@@ -229,6 +236,7 @@ $inputDefinitions = @(
         Path = $LicenseInputPath
         DefaultPath = Join-Path $paths.CmdbLatestPath 'CMDB_Licenses.csv'
         KeyColumn = 'CmdbLicenseId'
+        SourceIdColumn = 'SkuId'
         EntityType = 'License'
     },
     [pscustomobject]@{
@@ -236,6 +244,7 @@ $inputDefinitions = @(
         Path = $MailboxInputPath
         DefaultPath = Join-Path $paths.CmdbLatestPath 'CMDB_Mailboxes.csv'
         KeyColumn = 'CmdbMailboxId'
+        SourceIdColumn = ''
         EntityType = 'Mailbox'
     },
     [pscustomobject]@{
@@ -243,6 +252,7 @@ $inputDefinitions = @(
         Path = $MailboxFactInputPath
         DefaultPath = Join-Path $paths.PowerBILatestPath 'FactMailbox.csv'
         KeyColumn = 'CmdbMailboxId'
+        SourceIdColumn = ''
         EntityType = 'MailboxFact'
     }
 )
@@ -270,6 +280,44 @@ foreach ($definition in $inputDefinitions) {
         }
     }
     $inputRows[$definition.Name] = $rows
+}
+
+$licenseAssignmentTable = @($rawContract.tables |
+    Where-Object name -eq 'M365_UserLicenseAssignments.csv')
+if ($licenseAssignmentTable.Count -ne 1) {
+    throw "The raw contract must contain exactly one 'M365_UserLicenseAssignments.csv' table."
+}
+$licenseAssignmentPathWasExplicit = -not [string]::IsNullOrWhiteSpace(
+    $UserLicenseAssignmentInputPath
+)
+if (-not $licenseAssignmentPathWasExplicit) {
+    $UserLicenseAssignmentInputPath = Join-Path `
+        $paths.LatestOutputRootPath `
+        (Join-Path `
+            ([string]$licenseAssignmentTable[0].area) `
+            ([string]$licenseAssignmentTable[0].name))
+}
+$licenseAssignmentRows = @()
+if (Test-Path -LiteralPath $UserLicenseAssignmentInputPath -PathType Leaf) {
+    $assignmentHeader = Test-SmartWorkplaceCMDBExactCsvHeader `
+        -Path $UserLicenseAssignmentInputPath `
+        -ExpectedColumns @($licenseAssignmentTable[0].columns |
+            ForEach-Object { [string]$_ })
+    if ($assignmentHeader.Status -ne 'Valid') {
+        throw "Input 'M365_UserLicenseAssignments.csv' is incompatible."
+    }
+    $licenseAssignmentRows = @(Import-Csv -LiteralPath $UserLicenseAssignmentInputPath)
+    foreach ($row in $licenseAssignmentRows) {
+        if ([string]$row.TenantKey -ne [string]$paths.TenantKey -or
+            [string]$row.OrganizationKey -ne [string]$paths.OrganizationKey -or
+            [string]$row.EnvironmentKey -ne [string]$paths.EnvironmentKey -or
+            [string]$row.TenantId -ne [string]$paths.TenantId) {
+            throw "Input 'M365_UserLicenseAssignments.csv' contains a tenant identity mismatch."
+        }
+    }
+}
+elseif ($licenseAssignmentPathWasExplicit) {
+    throw "Input 'M365_UserLicenseAssignments.csv' is missing."
 }
 
 $cmdbOutputPath = Join-Path $paths.CmdbLatestPath 'CMDB_DataQuality.csv'
@@ -309,6 +357,12 @@ if ($ValidateOnly) {
         ScriptVersion = $ScriptVersion
         ContractVersion = [string]$contract.contractVersion
         InputTableCount = $inputDefinitions.Count
+        LicenseAssignmentInputStatus = if ($licenseAssignmentRows.Count -gt 0) {
+            'Valid'
+        }
+        else {
+            'NotProvided'
+        }
         FreshnessWarningHours = $warningHours
         FreshnessCriticalHours = $criticalHours
         CmdbTargetStatus = $cmdbTargetHeader.Status
@@ -335,6 +389,45 @@ $entityDefinitions = @($inputDefinitions |
 
 foreach ($definition in $entityDefinitions) {
     $rows = @($inputRows[$definition.Name])
+    for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+        $row = $rows[$rowIndex]
+        $entityId = [string]$row.($definition.KeyColumn)
+        if ([string]::IsNullOrWhiteSpace($entityId)) {
+            $entityId = '{0}|row-{1}' -f $definition.Name, ($rowIndex + 1)
+            $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+                -Paths $paths `
+                -FindingKey ('missing-entity-key|{0}|{1}' -f
+                    $definition.EntityType,
+                    ($rowIndex + 1)) `
+                -Severity 'Critical' `
+                -EntityType $definition.EntityType `
+                -EntityId $entityId `
+                -FindingType 'MissingEntityKey' `
+                -Description 'The curated entity has no CMDB entity key.' `
+                -SourceSystem 'SmartWorkplaceCMDB' `
+                -DetectedDateTime $detectedDateTime `
+                -RecommendedAction 'Correct source normalization before using this entity downstream.'))
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$definition.SourceIdColumn) -and
+            ([string]::IsNullOrWhiteSpace([string]$row.SourceSystem) -or
+                [string]::IsNullOrWhiteSpace(
+                    [string]$row.($definition.SourceIdColumn)
+                ))) {
+            $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+                -Paths $paths `
+                -FindingKey ('missing-source-identity|{0}|{1}' -f
+                    $definition.EntityType,
+                    $entityId) `
+                -Severity 'Warning' `
+                -EntityType $definition.EntityType `
+                -EntityId $entityId `
+                -FindingType 'MissingSourceIdentity' `
+                -Description 'SourceSystem plus the source-specific identifier is incomplete.' `
+                -SourceSystem 'SmartWorkplaceCMDB' `
+                -DetectedDateTime $detectedDateTime `
+                -RecommendedAction 'Recollect and normalize the source identity without inventing a global SourceID.'))
+        }
+    }
     $duplicates = @($rows |
         Group-Object -Property $definition.KeyColumn |
         Where-Object Count -gt 1)
@@ -420,9 +513,45 @@ foreach ($user in @($inputRows['CMDB_Users.csv'])) {
         [void]$knownSourceUsers.Add([string]$user.SourceUserId)
     }
 }
+$usersBySourceId = @{}
+foreach ($user in @($inputRows['CMDB_Users.csv'])) {
+    $sourceUserId = [string]$user.SourceUserId
+    if (-not [string]::IsNullOrWhiteSpace($sourceUserId) -and
+        -not $usersBySourceId.ContainsKey($sourceUserId)) {
+        $usersBySourceId[$sourceUserId] = $user
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$user.UsageLocation) -or
+        [string]$user.UsageLocationStatus -ine 'Reported') {
+        $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+            -Paths $paths `
+            -FindingKey ('user-country-unknown|{0}' -f [string]$user.CmdbUserId) `
+            -Severity 'Warning' `
+            -EntityType 'User' `
+            -EntityId ([string]$user.CmdbUserId) `
+            -FindingType 'UserCountryUnknown' `
+            -Description 'The user country is not reported by the authoritative user source.' `
+            -SourceSystem ([string]$user.SourceSystem) `
+            -DetectedDateTime $detectedDateTime `
+            -RecommendedAction 'Populate UsageLocation in Entra ID or document the user as Not Reported.'))
+    }
+}
 foreach ($device in @($inputRows['CMDB_Devices.csv'])) {
     $primaryUserId = [string]$device.PrimaryUserId
-    if (-not [string]::IsNullOrWhiteSpace($primaryUserId) -and
+    if ([string]::IsNullOrWhiteSpace($primaryUserId)) {
+        $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+            -Paths $paths `
+            -FindingKey ('device-without-primary-user|{0}' -f
+                [string]$device.CmdbDeviceId) `
+            -Severity 'Warning' `
+            -EntityType 'Device' `
+            -EntityId ([string]$device.CmdbDeviceId) `
+            -FindingType 'DeviceWithoutPrimaryUser' `
+            -Description 'The device has no observed primary user.' `
+            -SourceSystem ([string]$device.SourceSystem) `
+            -DetectedDateTime $detectedDateTime `
+            -RecommendedAction 'Review Intune primary-user assignment; do not infer ownership from device name.'))
+    }
+    elseif (
         -not $knownSourceUsers.Contains($primaryUserId)) {
         $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
             -Paths $paths `
@@ -437,22 +566,97 @@ foreach ($device in @($inputRows['CMDB_Devices.csv'])) {
             -DetectedDateTime $detectedDateTime `
             -RecommendedAction 'Refresh Entra users and Intune devices, then rebuild relationships.'))
     }
+    $userCountryIsKnown = (
+        -not [string]::IsNullOrWhiteSpace($primaryUserId) -and
+        $usersBySourceId.ContainsKey($primaryUserId) -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$usersBySourceId[$primaryUserId].UsageLocation
+        ) -and
+        [string]$usersBySourceId[$primaryUserId].UsageLocationStatus -ieq 'Reported'
+    )
+    if (-not $userCountryIsKnown) {
+        $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+            -Paths $paths `
+            -FindingKey ('device-country-unknown|{0}' -f
+                [string]$device.CmdbDeviceId) `
+            -Severity 'Warning' `
+            -EntityType 'Device' `
+            -EntityId ([string]$device.CmdbDeviceId) `
+            -FindingType 'DeviceCountryUnknown' `
+            -Description 'The device country cannot be derived from a reported primary-user country.' `
+            -SourceSystem ([string]$device.SourceSystem) `
+            -DetectedDateTime $detectedDateTime `
+            -RecommendedAction 'Complete the primary-user link and user UsageLocation; keep country as Not Reported until then.'))
+    }
 }
 
+foreach ($assignment in $licenseAssignmentRows) {
+    $assignmentError = ([string]$assignment.AssignmentError).Trim()
+    if ([string]::IsNullOrWhiteSpace($assignmentError) -or
+        $assignmentError -ieq 'None') {
+        continue
+    }
+    $assignmentKey = [string]$assignment.RawAssignmentKey
+    if ([string]::IsNullOrWhiteSpace($assignmentKey)) {
+        $assignmentKey = '{0}|{1}' -f
+            [string]$assignment.SourceUserId,
+            [string]$assignment.SkuId
+    }
+    $entityId = $assignmentKey
+    if ($usersBySourceId.ContainsKey([string]$assignment.SourceUserId)) {
+        $entityId = [string]$usersBySourceId[[string]$assignment.SourceUserId].CmdbUserId
+    }
+    $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+        -Paths $paths `
+        -FindingKey ('license-assignment-error|{0}' -f $assignmentKey) `
+        -Severity 'Warning' `
+        -EntityType 'UserLicenseAssignment' `
+        -EntityId $entityId `
+        -FindingType 'ObservedLicenseAssignmentError' `
+        -Description ('Microsoft reported license assignment error: {0}.' -f $assignmentError) `
+        -SourceSystem ([string]$assignment.SourceSystem) `
+        -DetectedDateTime $detectedDateTime `
+        -RecommendedAction 'Review the reported license assignment state and source group; do not infer a financial compliance issue.'))
+}
+
+$mailboxesById = @{}
+foreach ($mailbox in @($inputRows['CMDB_Mailboxes.csv'])) {
+    $mailboxId = [string]$mailbox.CmdbMailboxId
+    if (-not $mailboxesById.ContainsKey($mailboxId)) {
+        $mailboxesById[$mailboxId] = @()
+    }
+    $mailboxesById[$mailboxId] += $mailbox
+}
 foreach ($fact in @($inputRows['FactMailbox.csv'])) {
     if ([string]::IsNullOrWhiteSpace([string]$fact.CmdbUserId)) {
+        # Only a corroborated technical type without an external ID is informational.
+        # Keep the record and stable finding key; unresolved ordinary mailboxes remain warnings.
+        $mailboxId = [string]$fact.CmdbMailboxId
+        $mailboxMatches = @(if ($mailboxesById.ContainsKey($mailboxId)) { $mailboxesById[$mailboxId] })
+        $technical = ($mailboxMatches.Count -eq 1 -and
+            ([string]$fact.RecipientTypeDetails).Trim() -ieq 'DiscoveryMailbox' -and
+            ([string]$mailboxMatches[0].RecipientTypeDetails).Trim() -ieq 'DiscoveryMailbox' -and
+            [string]::IsNullOrWhiteSpace([string]$mailboxMatches[0].ExternalDirectoryObjectId))
+        $severity = if ($technical) { 'Information' } else { 'Warning' }
+        $findingType = if ($technical) { 'TechnicalMailboxWithoutUser' } else { 'UnlinkedMailbox' }
+        $description = if ($technical) {
+            'A DiscoveryMailbox without an external directory identifier is retained as a technical mailbox without a user link.'
+        } else { 'The mailbox could not be correlated to a curated Entra user.' }
+        $action = if ($technical) {
+            'Review as a technical mailbox; do not infer a missing user or create an automatic user association.'
+        } else { 'Review mailbox external identifiers and refresh the Entra user inventory.' }
         $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
             -Paths $paths `
             -FindingKey ('unlinked-mailbox|{0}' -f
                 [string]$fact.CmdbMailboxId) `
-            -Severity 'Warning' `
+            -Severity $severity `
             -EntityType 'Mailbox' `
             -EntityId ([string]$fact.CmdbMailboxId) `
-            -FindingType 'UnlinkedMailbox' `
-            -Description 'The mailbox could not be correlated to a curated Entra user.' `
+            -FindingType $findingType `
+            -Description $description `
             -SourceSystem ([string]$fact.SourceSystem) `
             -DetectedDateTime $detectedDateTime `
-            -RecommendedAction 'Review mailbox external identifiers and refresh the Entra user inventory.'))
+            -RecommendedAction $action))
     }
 }
 
@@ -532,8 +736,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbcX40w+P+O6ZH
-# V86m3334+PBnBQVLEMG3eAq4dGCkgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgxdl3Za/euqWZ
+# O0bfJX4o1khaR2aYUGLHFLOh/c9JFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -666,31 +870,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMTE4A+p1dcANWCHufGMRqB9PUioRfbUll8oQL8cOw3MMA0GCSqG
-# SIb3DQEBAQUABIIBgE0nrHSPuZOdRv2WViBDUnCRbae6WtZbnDsq6r2L95vfkmPB
-# JLuWo+3gvZ1xFva+kJy5uCvStkt9Uiva5HIZbznr+O/p7GCWJKat/S9aCJTL94Uk
-# 8mqRQEBGkp3OOrDFZQfX9Qv48HqBj4bne6q8SwGYv/lK8OWhO6er89jGwu8bKJcp
-# kpBpD/BqNEHO/6FCL/SJdoCiR7HnmKesBIrkw7WKIjQjP7+NmcULPY4UjFmbmv7P
-# LT2wGA1YG5xD7ay27B/c3rQUU9LSqJkbMF69KZtItjL6ty4RH89NpNKMIZvWDH6Q
-# 25YdX/NspdXeQ9btjIk6Y9fYZJQVtTFwO/GKrtzz/HYiBmMO5qAI1PGn/GgCZoDa
-# 31xHcCz5InThECk3h2eM1xbMHEyQiwpjNK6HEDK8WUrRuZe3bzq9pC7KcJSifJdc
-# QDp/XBQQJG9LDCxRQSsvI+OrGsnv5bfNM4AYegzdU1ll5fsi0Pa3MuBKYzp7+N0k
-# /69SeZ3af3YUX6mteKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIElZ55jp4M8QhQzm5ynjJgt6vqYMFnZDl3OzLSyk2nDGMA0GCSqG
+# SIb3DQEBAQUABIIBgCqRB2pLuEiRKguf5ZggV7wxmphwt+U5V/KHI5wat7eeLZZS
+# NksSaylxukGe0XqshIfxoIUc9h768dzpoVhTALUUOiQ9bcK1EthlXNq6H1Xjwtia
+# f2enArRtO4HEa0LMLEvZxm5w9NAOkAuKEH0g6txn0Fx7aM/B/1/Pm4Tfm7nrjfq6
+# x+4m08jfmRDw9Bc6vVKRW44b6odgUCCzvVYJPYqpHiPzhRGNsAe0dDlAa/fE6oca
+# IkQMMlEYQQuEFEEDI7j+PQtEJyYRggHuEGyfJjD2nFL9+eFUCYhBLVFOufSQ4lKI
+# v44WAwfsXenfSEtANwy7gTvGgZjY2wIuA1EUpGqIq5uaYXtXQ5ZhMp/bVrYIzyak
+# kq6ei4ULHZDSdEPGlTGIIFeUdZAj5fKDg3y8udgGarKjhN+zHH85wFdCWCXvpn5j
+# 5Samc5vpUpMfcNMWHIouw3u2TFEsdE983K5vC2WunIXTq2WVpQWSvk5pTUCnaXbR
+# XI8Zb99PbShQQsI9VqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAb0gJuYeeQIKa3mDeuG8wpCbVkohsp5dsONyvp
-# xSo7izANBgkqhkiG9w0BAQEFAASCAgAUQJ0iGRnTf6A1Diyv6ox139pUa5tFY7mr
-# e9lGKUmjkfHSU4M6sZgUwWe4PSLrXNFP0eOt2zx0ItsbceOlvvf28Vbzm59FoLp3
-# a8mopg2RvtFtJWPWazZ1JJNdML6YmqawhKxjoqO5WSkb3mcc4UNzMGOQpDxuktv7
-# bHxann6ZRzTmIrahC/ANSEEFmJb8+vBlIO9w6DDezmKkgSm9xYFyDCNhPskhVoca
-# nCH8xnlhCgNf8dDyOLZ8cFqHFeCSe8UW8TVuaKz0g5wxGgiOB2x6DduYNQ6EBTs6
-# uSYY2Vvt+Kda2UsFhLRF3LXVVhSAnOGu9+W4eJZKxTjYRT9sNGZYRTJOtrXInDc9
-# fcWHVSv6TljNh/Qh2GE7BccjygrQUp1AWFY6laSavBCp7KnB8x6mNM5GypViZv2A
-# ghvEr08g6dFfVBydsmLEVJkYTGH4ltmbFCEzVxnkXQEc7KGwN/65QRxjQ8ayoptY
-# DScqhDQJfM6zvdt0terjNMD/pg7X6MG15XVRvh/rdsCAjGJB9+ruuDs5mD3BE9Mx
-# zDrrB0dhtlgtEliPoIyBTC0bGnEZbvdRF8vFm9QBjbqoO/DDnj8UxBWhLAx2mkKw
-# gdjyVp8xv0b/unxIZtpQEeeBYZSACHTHdsHdinHM1YrvKrgPjFgspAbqg51EPtNA
-# tcdkL40LwQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBRsYflElS8q6JAEG6Fjgq0GHUYmJtdzHjpcw/E
+# QNV8UDANBgkqhkiG9w0BAQEFAASCAgA1OBhduHDyyaJebtDNpljdWIpW3SP1+dFV
+# fCRTEAMOi09Wbk+wRnAYFnS7c4ukg8RiGC+7mRAR2+322li9Ah+/eCi1oZzObV9q
+# FFEmDQkpK9FSwn4zVMQ9C4+RQ/PHpv/D+pmSDxisGjLZ+ceJkKbgTRJa6bQFUkD1
+# dQGvFU0w457YRBc6J/Irmsn5tC7fvAJinwfcgo7g9xZ/Ker5QGc+YAm5i0Fd3J4x
+# Ra+QH1aNsJ6giLKTnU6m6VSkR4sUas5Wcl7LeZr5rJuritE2QnhXTmpNw5iExvz2
+# +oyfyB/nSF+y9lNEpcubpVXm8XO/BagDj02lXQJOEGUNj+/dq/fVzk++rkHJZm7F
+# S4zn43Uhyr3skPHbHq11+wOlIb8IhqnmzvlUIKUnyldRm3uTaLPA4/7VvNAYgLdd
+# 4Lfvn0u8REexY0/OSVYvz4NcrRPMHRH9tRIjYm7Jk6/x2K0EwB8Q1HhfkUegOUh1
+# XmiYAl5eToYmvcEi9BvB67Ta/JiGpXxhh5TAnLZDVZi9o2gJV46gNXx8XfR20UUT
+# SnAbBVT6SAe60uov9MpeWc7Qxa7sP2ldVzWXQxQ74ghgUmvLZZdKncIDCmpK9p+V
+# 4oywntf2UQm86zdqynTDkkZsynpJ/qP0Ncr6TQUCZ418mxZVNUoRf1DkcFf5N7iC
+# 2cdW8Ym2vQ==
 # SIG # End signature block

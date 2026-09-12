@@ -1,0 +1,13 @@
+{
+  "contractVersion": "1.0.0",
+  "channel": "stable",
+  "name": "CMDB_CIDeviceHardware.csv",
+  "grain": "One row per tenant and native Intune ManagedDeviceId; multiple records may reference the same CI.",
+  "columns": [
+    "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "CI_ID",
+    "SourceSystem", "ManagedDeviceId", "AzureAdDeviceId",
+    "SerialNumber", "SerialNumberStatus", "Manufacturer", "ManufacturerStatus",
+    "Model", "ModelStatus", "TotalStorageSpaceInBytes", "StorageStatus",
+    "HardwareCollectedDateTime", "InventoryCollectedDateTime", "CollectionCoverage", "CollectionMode"
+  ]
+}

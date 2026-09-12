@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB Entra users collector and normalizer tests.
 
 .VERSION
-0.1.2
+0.1.3
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.2'
+$ScriptVersion = '0.1.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -144,6 +144,10 @@ try {
         Assert-SmartWorkplaceCMDBEntraUserTrue `
             -Condition (@($rows | Where-Object TenantKey -ne 'contoso-prod').Count -eq 0) `
             -Message 'Raw Entra users rows do not carry the expected tenant identity.'
+        $franceRow = @($rows | Where-Object SourceUserId -eq '11111111-1111-1111-1111-111111111111')[0]
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($franceRow.UsageLocation -eq 'fr') `
+            -Message 'Raw Entra users did not preserve usageLocation from the source.'
     }
 
     Invoke-SmartWorkplaceCMDBEntraUserTest -Name 'Honor MaxItems without touching canonical output' -Test {
@@ -184,6 +188,18 @@ try {
         Assert-SmartWorkplaceCMDBEntraUserTrue `
             -Condition ($dimRows[0].TenantUserKey -eq $cmdbRows[0].CmdbUserId) `
             -Message 'DimUser does not preserve the CMDB user key.'
+        $franceUser = @($dimRows | Where-Object CountryCode -eq 'FR')[0]
+        $unknownUser = @($dimRows | Where-Object CountryStatus -eq 'Not provided')[0]
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($franceUser.CountryLabel -eq 'FR' -and $franceUser.CountryStatus -eq 'Reported') `
+            -Message 'DimUser did not normalize the reported usageLocation.'
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($unknownUser.CountryCode -eq '' -and $unknownUser.CountryLabel -eq 'Unknown / unassigned') `
+            -Message 'DimUser did not preserve a missing usageLocation as unknown.'
+        $franceCmdbUser = @($cmdbRows | Where-Object UsageLocation -eq 'FR')[0]
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($franceCmdbUser.UsageLocationStatus -eq 'Reported') `
+            -Message 'CMDB_Users did not retain the normalized usageLocation status.'
 
         $contractResults = @(Test-SmartWorkplaceCMDBCsvContract `
             -LatestOutputRootPath (Join-Path $runtimeRoot 'DATA-LAST') `
@@ -216,6 +232,20 @@ try {
                 -DataRootPath (Join-Path $tempRoot 'DuplicateOutput') `
                 -RawInputPath $duplicatePath | Out-Null
         } -MessagePattern 'duplicate SourceUserId'
+    }
+
+    Invoke-SmartWorkplaceCMDBEntraUserTest -Name 'Classify an invalid usageLocation without fabricating a country' -Test {
+        $invalidPath = Join-Path $tempRoot 'Entra_Users_InvalidUsageLocation.csv'
+        $invalidRows = @(Import-Csv -LiteralPath $script:CollectionResult.RawLatestOutputPath)
+        $invalidRows[0].UsageLocation = 'France'
+        $invalidRows | Export-Csv -LiteralPath $invalidPath -NoTypeInformation -Encoding UTF8
+        $invalidResult = & $normalizerPath @identityParameters `
+            -DataRootPath (Join-Path $tempRoot 'InvalidUsageLocationOutput') `
+            -RawInputPath $invalidPath
+        $invalidUser = @(Import-Csv -LiteralPath $invalidResult.DimUserOutputPath | Where-Object CountryStatus -eq 'Invalid')[0]
+        Assert-SmartWorkplaceCMDBEntraUserTrue `
+            -Condition ($invalidUser.CountryCode -eq '' -and $invalidUser.CountryLabel -eq 'Unknown / unassigned') `
+            -Message 'An invalid usageLocation was converted into a country.'
     }
 
     Invoke-SmartWorkplaceCMDBEntraUserTest -Name 'Validate normalizer without modifying curated outputs' -Test {
@@ -254,8 +284,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsmTb85zqbwJqm
-# 0cbxbJJi05sr9zS//4Je8nFjfB/0fKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAW7lY5kzJUfK3j
+# OruGLmMaZHCj9oS0/3tSYLFcyboLzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -346,25 +376,25 @@ if ($script:Failed -gt 0) {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -372,47 +402,47 @@ if ($script:Failed -gt 0) {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL5M4m6MKn4aZcefE/K6/ln6shWH6LNl/VEHlztnJSuxMA0GCSqG
-# SIb3DQEBAQUABIIBgDtMAThiOMwPoxcmiAXOcNdXAqYBevFx59NXuPjBABJ2eKdf
-# tiQudyk1aYiQhuhPSdCKO11bHnNefBI9zCInz49fCKLCY0JCWBtplDhl53KwyRG/
-# f0KMBMxqTlvPYWOyvJfuhLlq72NgHAh/gBBDpZ/QXjzHhyVJ3Hy9z6yNRYBOVohC
-# dIR4CaAi5E8O1opA/3HSFMF3DKivt2E2C9HSQoGlNOMKQiLf0cucoqXGxpOsaMPb
-# N+x6Ic7HVB3lQjSUDsVSvK4QMRRZ3RzaTyiXOhYCM5srF/lxydtdP06iAwfoc2G5
-# R1tdn4p4T4Hb1A/9LDJZDdt6nFnTDfcFGDEjzaRlxAO3TPyATHJbW8H0zPp9Gmrv
-# OyZismqbbCbShy2+gEpN5eAC+SoZPlFLRBUTywpnJX0fWljK6iqoGIyjQgjqfmT6
-# 2qWKCYx/ikmBN6y7GF1zH/DPNXvL3WjkRJFlSz3pJSFsjREIKJt3J131T2lR949A
-# dJPJyXoinsduGFLw86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE/u7MP5QsqLaYCMDV1QTMVVFjqsoSBaaoynzglkNs3NMA0GCSqG
+# SIb3DQEBAQUABIIBgAYwO885HjeI9QXOpOABaSh/euJqVWV3XDE4FUpLDfAZEmnA
+# yBoFkYTot8IN8J9Z7udoeamcfPokCdj/rlJ/J6riljAZYrGbC7bX9oHf2MmMMpe6
+# E61V3YgvcSkt8BOZK9EO5ae/Nw5rGIEQKCphmrEsT6NMdao/nEu3Nm32bD/bYP7b
+# KfixfQ2dW0ud3EMzHB1e4K86Dt82JGBYxDSy8Dip5Dc09gcpECsxztdV5FHiNd+b
+# HoMpNAUF8SxmVfJe8r9L3JQ3OAECc4X0N/8KxM4m5L0hoAjHwOT7fS8wfXhGbg1z
+# ZxG0LbBxGpundK3x+3a7SYaQDZa2NMUakMYxLV7rbVj++PvdtJ7hmB0yxGgzIAnY
+# 1TJDopWDKoOQRHD8HgjjMk1p0W4l37PinC8UEZTsvGu1C5iSTOJ9IdOiFUVqHsNy
+# Pcy3SzIyXPAKJhzKgKs6IdYnz9xCf9AJwVOqFEDClaacOc67NuYu78B5aXE98Nco
+# SBCWQ38EEa6+ifCHQKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDA1
-# MDNaMC8GCSqGSIb3DQEJBDEiBCBkMIlvxtSkLxac3hhzmUawGqQNEuqV4hTeIpzh
-# 0IRu3TANBgkqhkiG9w0BAQEFAASCAgAevIX3kbuqXu6AxOZqbY9A+8pVuPMCDRnt
-# 1MkvFvz9ZZ5Vq84bnP+xrsNwkE646b/dLVJafqmoKWOgc1JmIzJZkrjg2CmBhxlJ
-# cunsclFtzt0Sc46QBj6xW51oJInZxObiSCbEK0EvzbjNEGIXgJru0sxruCi1A/ru
-# 1yVHSfRC4x1+Ssolt46ORBNCvIcQDgK40TPD2AvoQe799X1mitA/jWQdS5wfpbGj
-# K5hukloCOjddgOPiGOTXnWXTUN0hhYnvO3yFNTJpy4AVMaMr2cobAGRTveKSwtnp
-# MXB6wJaNIUum4+yod2hGfFBOUuuxY+G8YwS7CvO6ROAOi7xpSoqZd8r5sv1DsALK
-# h1Y/spsBt7UW7JZRyI//boql2iVzdJW9RilozBciVIf7TMZ8Fd/pxyBQxdT3zqc2
-# ZUrb6Bn70Hsb083hFm4mdq2RKmk2mHfdCN+ZhJALPLkgbazTGtHWC7iW8IlPpOOX
-# zLFLldL5OiULSxncB4XwnCVXSz1+qTa7qkY+E9khoWZRfFg/iNtrLnX9JqNQW0GM
-# vs3uI7zPG8ENu22U/hbqBya1w1XtmapJrUK5DdJWEbzOBxEGR9ptp9IRJPcWwCS8
-# IZndNO8uvPrIw+WSIc7mw3ySG5z+bVf8APzLTp3T2SPnwutnxS9Xqz5J2tnTfZ69
-# UpQNIcdb+w==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTlaMC8GCSqGSIb3DQEJBDEiBCDOFzLzRWpx1wUd43e/9wp7Ai51alVHP0vFmfDD
+# hJROKTANBgkqhkiG9w0BAQEFAASCAgA34geDeT3RYdbN4a/+y8sAiSrr2MQ1aQXJ
+# zIl8GwyUoPnJ8s4c5Hq6IA1MeFSnKlieR5PiigcWW2EkMYCpG4ffboL76L77xEeK
+# YMVEZYPPZf1lJ1STjZjjqB9saAqu04wdNtQ+CTWMuciXiYoGM21ec5674ENJUDtJ
+# XIrir8EfP6faJdorYHu5X8jiXFd6HxLHHvMZ2WrM9sXQE+QkYz0OQe2jJmAmW+uB
+# PQB9D279qCFOY0VAIPbekaKveDluALbvDETlamsPlBta4Ggqvqs29djN5X9ol6L3
+# 5Xt6pYPWZk+WYUOu8Ix9usgILrmEfsWUiSS+3hfrzPLD8F9lfOUUoFJqdNIHmmpI
+# YGM8akZOjm7hHF0E3IGOaCv32DxWBJqTAmRSbjpyJZLvVt99sQ5P+CLYr7WMXtbQ
+# hEGy4iAgs+FdtGAzl8zTcQn4FX6n2jNdhVofw7pdGFZe/BnioNv0+dUqDFm8GSUG
+# R9ZUX+gcBiGEkYOtvWEuvD/khiaw8PJ58DHUOjdwgx6kyZer9JsSECxsgIkFCcAw
+# 55agW9KOuSeoNbAt9gVbccFbSH6M5gG/x1P+kSpB5b0sTBZFQBEETKgToxD7pd8T
+# KnErqq9hitG5ZOf8VP0boBwEfofPRlcLqVgJfX1/P6+BJ2qyezrb+7tfGwGnSxAE
+# iW0YgUcKWQ==
 # SIG # End signature block

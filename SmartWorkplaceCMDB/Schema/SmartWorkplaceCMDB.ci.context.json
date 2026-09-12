@@ -1,0 +1,100 @@
+{
+  "contractVersion": "1.0.0",
+  "channel": "stable",
+  "referenceColumns": [
+    "TenantKey",
+    "OrganizationKey",
+    "EnvironmentKey",
+    "TenantId",
+    "ReferenceId",
+    "ReferenceType",
+    "Name",
+    "ParentReferenceId"
+  ],
+  "tables": [
+    {
+      "name": "CMDB_CIUserContext.csv",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CI_ID",
+        "Department",
+        "JobTitle",
+        "DepartmentStatus",
+        "SourceSystem",
+        "SourceUserId",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "CMDB_CIDeviceContext.csv",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CI_ID",
+        "DeviceName",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "Ownership",
+        "ComplianceState",
+        "ManagementState",
+        "PrimaryUserSourceId",
+        "AssociatedUserCI_ID",
+        "AssociationStatus",
+        "AssociatedUserDepartment",
+        "AssociatedUserJobTitle",
+        "AssociatedUserCollectedDateTime",
+        "LastSyncRaw",
+        "SourceSystem",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "CMDB_CIDeviceSourceContext.csv",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CI_ID",
+        "SourceSystem",
+        "SourceID",
+        "SourceIDKind",
+        "ManagementAgent",
+        "EnrollmentType",
+        "EnrollmentRaw",
+        "EnrollmentUtcDateTime",
+        "EnrollmentStatus",
+        "ActivityKind",
+        "ActivityRaw",
+        "ActivityUtcDateTime",
+        "ActivityStatus",
+        "SourceCollectedDateTime",
+        "MappingStatus"
+      ]
+    },
+    {
+      "name": "CMDB_CIOrganization.csv",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CI_ID",
+        "OrganizationRefId",
+        "ReferenceType",
+        "CountryRefId",
+        "CountryName",
+        "EntityRefId",
+        "EntityName",
+        "SiteRefId",
+        "SiteName",
+        "AssignmentStatus"
+      ]
+    }
+  ]
+}

@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-0.2.1-beta.2
+1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +47,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '0.2.1-beta.2'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -82,6 +82,11 @@ function Get-SmartWorkplaceCMDBStepParameter {
         $parameters['ValidateOnly'] = $true
     }
     if ($Step.Kind -eq 'Collect') {
+        if ($Mode -eq 'Collect' -and
+            $Step.PSObject.Properties['RequiresExplicitCollect'] -and
+            [bool]$Step.RequiresExplicitCollect) {
+            $parameters['Collect'] = $true
+        }
         if ($Mode -eq 'Fixture' -or
             ($Mode -eq 'Validate' -and
                 -not [string]::IsNullOrWhiteSpace($FixtureRootPath))) {
@@ -334,6 +339,13 @@ $catalog['IntuneDevicesNormalize'] = [pscustomobject]@{
     ScriptPath = Join-Path $projectRoot 'Collectors\Intune\SmartWorkplaceCMDB-IntuneDevices-Normalize.ps1'
     FixtureName = ''
 }
+$catalog['IntuneHardwareCollect'] = [pscustomobject]@{
+    Name = 'Intune device hardware collection'
+    Kind = 'Collect'
+    ScriptPath = Join-Path $projectRoot 'Collectors\Intune\SmartWorkplaceCMDB-IntuneHardware-Collect.ps1'
+    FixtureName = 'IntuneManagedDevices.sample.json'
+    RequiresExplicitCollect = $true
+}
 $catalog['UserDeviceRelationships'] = [pscustomobject]@{
     Name = 'Primary user-device relationships'
     Kind = 'Normalize'
@@ -428,6 +440,7 @@ switch ($Pipeline) {
             'EntraDevicesCollect', 'EntraDevicesNormalize',
             'ActiveDirectoryCollect', 'ActiveDirectoryNormalize',
             'IntuneDevicesCollect', 'IntuneDevicesNormalize',
+            'IntuneHardwareCollect',
             'UserDeviceRelationships',
             'M365SkusCollect', 'M365SkusNormalize',
             'M365LicensesCollect', 'M365LicensesNormalize',
@@ -453,6 +466,7 @@ switch ($Pipeline) {
     'IntuneDevices' {
         Add-SmartWorkplaceCMDBOrchestratorStep $selectedSteps $catalog @(
             'IntuneDevicesCollect', 'IntuneDevicesNormalize',
+            'IntuneHardwareCollect',
             'UserDeviceRelationships'
         )
     }
@@ -715,8 +729,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKdMToD3OTt0pa
-# 9OriQZ1BPQB8ImA+ZuW6ovKzyECxDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmBUxwDCKcBDfS
+# lMcoEzBsI4J5ejyNlxh0OUBv0oHomKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -849,31 +863,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEalfZ71KfYmAAXw3/IbQd3YkWMFmhk+3uQtWbqgO895MA0GCSqG
-# SIb3DQEBAQUABIIBgAvd25qPpbnhNgMXTlRnMnRiN7tGvkiDv5/fK/Th6xee0m7z
-# BctTE85wXiCKEfS8SM4ozWSn6RkQDTlvpR4bqwzJUO5FxjW/M51QjWbgMEjPzQ1x
-# YvAcSH0vp/EcjgnhbK705X8+1rNHT36KxX+G2netja+CaieZcnjXPp6E4MMcrpAk
-# chie1oS7zNqA3gt1iE3namNvxnS5dY+kButL8hsmQKT0fhFAvw1/0dkKPyqp99Z9
-# wZktiFGADqC3xANiYvI3Kh2ydnBo+79+HjWbrfnzVO49S1kYQsQmdTH9X07jtCe7
-# VKGJIZjtf1TuFD9etb6xMwNE/RayTJ3I5kSSLtQglI/YliJjxX2/ol51MuSqamv/
-# NbvX8PWqp1Px/C3cgcnupY0Uo/Kbp6gL+uzGNgMD+mHalUhCDaKPSFYFv4+wd3JT
-# CABAqvsTBQo92jHBM1L0T467H2EIhxho2t0w8oCE/M1Vlj/I9ZLQa3JQ7MD1SDE8
-# WzOL7/Ubd/gjG2Sr5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC941ZRa39Bz99i7TD+8xm4nu1/lqbGfO3UdHES/IVkoMA0GCSqG
+# SIb3DQEBAQUABIIBgKCsCwChSXWnkMsjj0Mls2bwdzqspZWWjpDmk3M0zFrquDS2
+# I3dt8KQHClswZ4FIjzrK1l8HAqOx/EaBeVcHqBc5BvUdY19H4NNqH/4LObnQepiC
+# roQDJDLo6Q0Ny/BI21wHm27wPDje3gCb9pqOzz2vY9d0yfRsJ7pI+rkJyUSUoS1G
+# CfR7CH5VsaqfbTaWLrgya4JQZx8eY3yGL1aVrsH6fB2jRox+fZg9oSrFWpJ2i7Qe
+# apnAVfB5EXC3CT8letPWe49Jc7qJdOTlRC/HZDCvbfuJkaqg7gqTAIpc5djBtRqq
+# ZvXwursdwifwY3CCmBfR58WQG1oCuHEevH8ooRYfZkmCb1D2sx1CGEGRMYOWcJmH
+# t3WAaNpIrQ9UPY5y6W80sMGLSSkMflGRNbnIrqziFsXAaVyB8NnPOT2hxeLPuiwL
+# BuniHRBoKvi1BZqsfvMYxCCKLqnPC8mZyMny9/cnIdTw5o+Y+E6yo0R7g4G//nef
+# RP5g+DrF5HJYWoqDPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDlaMC8GCSqGSIb3DQEJBDEiBCAEgUs5egzq9gXwQZa+9eLnZsYSuV24/niEe2Sj
-# A6NSGjANBgkqhkiG9w0BAQEFAASCAgARTyoiFvvECwBrePC7e6eJKbtIWGj70RB7
-# +3G2kJ6ARuJp7UPcfHvLSrQ2cxqcLwOxLXs0gGQWAQbOet8PeApJBsIqsp8wlQxa
-# hWFGRhmtCFYJZnmU3MfD+aGl+PvyF7Shj92BLwOw+lF0RGF2r7wWY/4hdJrz0wTB
-# qc8/1jarjIiQzYL6KzeDPI9GoW+a/Lj5eMbOCeRkoRHQTTQFef+v4B5D46JJAIa9
-# y4L11XD1/DABIywxcwuKmhvjWNRRW7w3XxorSH7YwsyH+HcxzQB/ieYnqeRUvlWg
-# AaitXTXaTMfIgMaj+3PEOvMbp5HviHY8ogtZP+KAcItpcYNZzulFHD245AGJbNkA
-# EE0DIAsG1KYqe55Iwy+KB6e08oKTg7pjAmZvOszVKBDU68WWw0PWX3owDUoggEjK
-# SNbhdPfiNa8br6OtRs/KZHo/v3GBTjNIg7EbGL1PWbd1B/FClWK9LC4vsDMYMt6d
-# uBhEvb9INtBGXULpt24HX52tJXgm077fkZoWKHsCbN78x67CILkWbO1LPeyy/Cxy
-# mrIXX3nabT2dZZsfrrDegdjRWbHxJjMHxhH5ipuX6XdlOp2syKmiw4ZnK55vutYY
-# YEyIas6XanruXDfkfe7SahQZpWSxLiVX7/Sikk46cTG7IbaA0Y/A5Rk8AMpIjBqg
-# sRttuP8N3A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTdaMC8GCSqGSIb3DQEJBDEiBCDW97816A84sBNGIehEuxVUEXQ+3rQ/FhjSm5Vt
+# NyCkOTANBgkqhkiG9w0BAQEFAASCAgAIhVhI4QVYaoE961U8Ad3kHEfwVRCl3k3t
+# Pf+k8wGF+etSgY+QB8m1aEwXSBzdxoLYOVo5tcrCaBlBUWPXRAPScInladQ6VsCr
+# CsM+e7zbVsIXjxYoCXoFsjbjGbJ7TAqkcQdZBkbCVYSvO0R4enwUOAZsV09RjQPv
+# 3MOokyrVpfq1aI3/+FQ6AVtV0JAA1XTuJA6d5o9Y3SnuXUTPSqufNOwGIOnaRJm6
+# zZyjjqcgq3EFnv3yv6SIqqT+NYj00qRC3BV6y0VtWixqJdco79B/qzV+65Rx88eN
+# 01qyjO1IS/t5wKaV8fJJLLlPuIBDLmMvvqOj0nIs5JnzUrA3s0UtCKrOggTDfwtg
+# 6CD7Ji5izKw5T5Gu7LCXvrnh72DVeXa4RY5sLzKylTxUxZ/zXwyCXtKWs4+30HHe
+# DF8hucqe25pl9oTUQ5KQcd1zC5z0bd6DChA9+RSHO1XeNU1HM148H14INWocHzUV
+# mKBZcmkbm04gt7ZcS1EYbVvgB6UZ8qdQu7oTtKW8y67UCrlhC4S4Kv3JAh4OTf5v
+# sAPvnm6zb8/jf6NejgGzwrgc/C8Ze8LRTsqQb7j0y/AZYY7OCAaaeUIXpowfCEKM
+# 4vag25B45SXoR5OjQYiOecEAgyYeP73EXfAkm+IQMZuj9K2TQiA2o91I3HQ+tpw9
+# 03FyVFEz7Q==
 # SIG # End signature block

@@ -1,7 +1,7 @@
 # SmartWorkplaceCMDB.Graph
-# Version: 0.1.1-beta.1
+# Version: 0.2.0
 
-$script:SmartWorkplaceCMDBGraphVersion = '0.1.1-beta.1'
+$script:SmartWorkplaceCMDBGraphVersion = '0.2.0'
 
 function Get-SmartWorkplaceCMDBGraphObjectValue {
     [CmdletBinding()]
@@ -84,6 +84,104 @@ function Test-SmartWorkplaceCMDBGraphAppOnlyReadiness {
     }
 }
 
+function Get-SmartWorkplaceCMDBGraphRetryStatusCode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    $response = $ErrorRecord.Exception.Response
+    if ($null -ne $response -and $null -ne $response.StatusCode) {
+        try { return [int]$response.StatusCode }
+        catch { }
+    }
+
+    $message = [string]$ErrorRecord.Exception.Message
+    $match = [regex]::Match($message, '(?<!\d)(408|429|500|502|503|504)(?!\d)')
+    if ($match.Success) {
+        return [int]$match.Groups[1].Value
+    }
+    return 0
+}
+
+function Get-SmartWorkplaceCMDBGraphRetryDelaySeconds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [Parameter(Mandatory)][ValidateRange(1, 30)][int]$Attempt,
+        [ValidateRange(1, 60)][int]$BaseDelaySeconds = 2,
+        [ValidateRange(1, 300)][int]$MaximumDelaySeconds = 120
+    )
+
+    $retryAfter = $null
+    if ($null -ne $ErrorRecord.Exception.Data -and
+        $ErrorRecord.Exception.Data.Contains('Retry-After')) {
+        $retryAfter = [string]$ErrorRecord.Exception.Data['Retry-After']
+    }
+    if ([string]::IsNullOrWhiteSpace($retryAfter)) {
+        $response = $ErrorRecord.Exception.Response
+        if ($null -ne $response -and $null -ne $response.Headers) {
+            try { $retryAfter = [string]$response.Headers['Retry-After'] }
+            catch { }
+            if ([string]::IsNullOrWhiteSpace($retryAfter)) {
+                try { $retryAfter = [string]$response.Headers.RetryAfter.Delta.TotalSeconds }
+                catch { }
+            }
+        }
+    }
+
+    $seconds = 0
+    if (-not [string]::IsNullOrWhiteSpace($retryAfter) -and
+        [int]::TryParse($retryAfter.Trim(), [ref]$seconds) -and
+        $seconds -gt 0) {
+        return [Math]::Min($seconds, $MaximumDelaySeconds)
+    }
+
+    $delay = [int]($BaseDelaySeconds * [Math]::Pow(2, $Attempt - 1))
+    return [Math]::Min($delay, $MaximumDelaySeconds)
+}
+
+function Invoke-SmartWorkplaceCMDBGraphRequestWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [ValidateRange(0, 10)][int]$MaximumRetryCount = 5,
+        [ValidateRange(1, 60)][int]$BaseDelaySeconds = 2,
+        [ValidateRange(1, 300)][int]$MaximumDelaySeconds = 120,
+        [scriptblock]$RequestScript = {
+            param($RequestUri)
+            Invoke-MgGraphRequest -Method GET -Uri $RequestUri -ErrorAction Stop
+        },
+        [scriptblock]$SleepScript = {
+            param($Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
+    )
+
+    $attempt = 0
+    while ($true) {
+        try {
+            return & $RequestScript $Uri
+        }
+        catch {
+            $statusCode = Get-SmartWorkplaceCMDBGraphRetryStatusCode -ErrorRecord $_
+            $transient = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $transient -or $attempt -ge $MaximumRetryCount) {
+                throw
+            }
+            $attempt++
+            $delay = Get-SmartWorkplaceCMDBGraphRetryDelaySeconds `
+                -ErrorRecord $_ `
+                -Attempt $attempt `
+                -BaseDelaySeconds $BaseDelaySeconds `
+                -MaximumDelaySeconds $MaximumDelaySeconds
+            Write-Warning (
+                'Microsoft Graph request returned transient status {0}. Retry {1}/{2} in {3} second(s).' -f
+                $statusCode, $attempt, $MaximumRetryCount, $delay
+            )
+            & $SleepScript $delay
+        }
+    }
+}
+
 function Invoke-SmartWorkplaceCMDBGraphPagedRequest {
     [CmdletBinding()]
     param(
@@ -134,7 +232,7 @@ function Invoke-SmartWorkplaceCMDBGraphPagedRequest {
         $nextUri = $Uri
         while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
             try {
-                $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
+                $response = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry -Uri $nextUri
             }
             catch {
                 if ($_.Exception.Message -match '403|Forbidden|Authorization_RequestDenied|Insufficient') {
@@ -173,14 +271,15 @@ function Invoke-SmartWorkplaceCMDBGraphPagedRequest {
 Export-ModuleMember -Function @(
     'Get-SmartWorkplaceCMDBGraphObjectValue',
     'Test-SmartWorkplaceCMDBGraphAppOnlyReadiness',
+    'Invoke-SmartWorkplaceCMDBGraphRequestWithRetry',
     'Invoke-SmartWorkplaceCMDBGraphPagedRequest'
 )
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWDAUOVYh2HI7M
-# zVeOp/BKVVvtvGDaZUprE/kNRelbZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2Hmqy9dF5Ov+2
+# Hgm0AOE7aVAku8PFWz/jzk+F2TqtmqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -313,31 +412,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINdxgWTQFSKVXoo2S45XPV7rFz0aRWRVqsFyYXicPzgwMA0GCSqG
-# SIb3DQEBAQUABIIBgCYKnbyer/x2fwnxCKt5G8nKTAyQIZli6U+nJ0FQRLGiYabb
-# 4wD6iY545yNcheeMu2qU6SJr0+ajQ3XHeQehhj0EjPOJyrCrd04OVoMTUcvDoSEm
-# XlkfAiiRGYmToaw1yuwzSQm2rzqiGmRsuwJGAsTj8DVSeEyRlXqmqNF3gVxER/Mo
-# rqtyuaUq7LxDd8g8KFfsJR/8f7reUM9dxWvneGnY1pK9msAUjWM0OSbi2V5SxkAM
-# /gMdMLvqZg27MN4eYrdNltISlI2Dg+dlALvrQC6H8m5ktsIIqjbWHXNo/YQ1Lxsc
-# YimJPgEVKWvamzL49mzMPw9JjXEiFjvz7hKvpfWkiC+N1Cy02NzlYNib0g5E4f15
-# oXAz2pOGKGPL1mCRcNGm4TZHo8cn1Z5Xwoqzq3v9eL56hhpl913yStbED98GpMrS
-# FVvzE+5kO4ygjZpZ0mBI7VJkFCc7EdGEijIdrReveMs+puhfQy9p4C7Q6/EQ4whE
-# p0ZGh3XvfvJEAlg/26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILtxQYdy8FApBinbowA8i1wT0cDXicr5utoWgRQ5owRDMA0GCSqG
+# SIb3DQEBAQUABIIBgEPiSTYzLAKsh8YUT4FjdagFuh8YOyFpv813u54or6I2b9kr
+# 4sv5LwevW07cURuMhazfw9tka8YLguF2u3NhfA+TbABpsIuuQu3TZ5FA0XzCR91f
+# LGibDYCbLIM+s/z++Vxe4l4FHEAdIFweDGMRuXcq7o+dE8lbBF+UHH7RAjr9C7R8
+# MX39o9rNxdHCzgEDh+z34Hud1hGl4jWQ+TBVSNSvGhOPiuaaS8IwoAfv9dYGHijY
+# GO5stoE8s0MkU7FoeGrwfKxRBooeQdloSernxytGOIaH1PaIbTU3np2AKxHcTcl+
+# E9t/YVCwVWWTSjdc+wXA/qSfFBvngpjsE5kJ5MBCw/jZJs7/Oo3wjtSMv59DceTH
+# f31bSplL5+jUZxFTfeDsRhubN2SsSBPB4SvNN3LmnmiFbqrB0O+W6xmdcf3WwUss
+# xzxNDwi35TaR7eWP9QP4UMBimVT+zyyuYkjP2tN5qx3ZdAGmX0VZgk9OOilV6AOI
+# rcpGs42QW25hkcBGJKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDlaMC8GCSqGSIb3DQEJBDEiBCBFFqHLhfJWK7eKBTBpkQ418EUeHhXiy0lNkrhE
-# 5yZvDTANBgkqhkiG9w0BAQEFAASCAgB7FiodbGu2AklAiDR9OHJtcEz8DIkQLZmF
-# Ow43OtqjA4fe8oAywOw+5AZV9QJwNkQ6e3joavDMyGfosyx81jq/M7VRhCBVW3yp
-# ZTcGTYHPbt1ATCSbWDXaTAp9vLn0TKpVGk79X5nAe/690+av7SZ+KyejmfcMaSko
-# GPBMcPgr92h7CB5xW7kqQDdx4TKBA2TxrEftAGjil5/ToXN9Ru/vNC59xyzVSKsJ
-# XaEViVRe750DJkmQnSci1oUCXyVQn86Ia22oyvNOe3XZ0E18vsiCy9CgTAKaDhwC
-# 0m4Ymjrmfbs+8N+7Lfuc0pPt/mrBDD/0UbHe41ZbB8WqGfCQlSMvRT/blnBgkyTs
-# U9W9Bc0fa87tTfLS6vcJ3zF0vyIPWrJoZcVgoronDd9jfnWybh9j8Tk2sbTpJke/
-# VlmB4LCl+SO3oAw4ulcYIVvrVDItnfvWTOOU8mXlIv83xxl76ZQIt6/qj9Uy0w1H
-# vyJLTNIDZB4sWAddcDVZgy8/URFyYi4VSKiB5P8yoLN5iz0lxCqINCru67BYqtTN
-# Tsrc5cyPXluyB4oFhrN4jfnvQzudKKk0I71HxCaX8Y8qnFnd9TxFSUE8zGcGT1oX
-# qcQTf509pm1S9+jnIgkEy2WDUlpD+iOL1HvpAV+vvlYFr/kpego3+6vQmu64UgZ8
-# Om7HxVXujg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTVaMC8GCSqGSIb3DQEJBDEiBCByV2581n6+y6VKV5mtlBAk1DwNNsLpzTbs+PCa
+# RLpJOTANBgkqhkiG9w0BAQEFAASCAgBpIJQYMOztCprwh/Q8RA/Nt9I4mjYw9oUE
+# kOVY+vW5BgYab9L+AcA16TdZEc+2sjrQztmCi2QUnkJpUmqprHx0r3Qz95c13RQj
+# xJRn/GBk/qHF0nnTcowwTCM8f9h5M7FQb8xNoJeJDDxabl/IIKTqOMWyDdS5lu1r
+# Tf8vzrrfkknVKj0GO4Aanh1GVoTO3J7WgKXrdZM9MSk6v1rO3RtgqsJgKOPID6HN
+# 2cukMaJtczypC4H/RaWyF27vBXhhgKHCNd6BEBvSKqETWc/M5mEVyziy5iKPSYSH
+# S5VVHBM7MdEiupJVZ1X5hkqWP4ArtL8VOfkoDK4iR6OYI10CLBQkQv+ByYLxPFkT
+# yH4e1H5RR8MrVRvXf2vIicmj9zwaaThkhqtcwX8I1D0HY29jRFSofRYhEUUra1+I
+# +7tDlmlzTbTDgffmJhS97JIVJPdYwg69kwTwjypi0uN9ISvS9oSduPWWDc0lqSzS
+# X6ovrXJHSWqXLMlUnysW77yuuU9zb5/7ouCEfSUbdJB6rwxJ4UxkvQlQjV9RjrBf
+# gjHbX+g9aB9W1kZVj7Z7nVeEiJdMclv4zsWh/5r9/NjZgKODDXZq9y8SOGwrRtJD
+# m1+xKKELRUpKdoZCtRP4cxa0aWX59TDOLv01BxfQyYZ2/+y3I9HthmnkaITJQUlG
+# +P1n+MzGiw==
 # SIG # End signature block
