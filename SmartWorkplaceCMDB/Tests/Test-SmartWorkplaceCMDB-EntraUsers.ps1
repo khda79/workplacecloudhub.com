@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB Entra users collector and normalizer tests.
 
 .VERSION
-0.2.0
+0.2.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.2.0'
+$ScriptVersion = '0.2.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -109,6 +109,29 @@ try {
         Assert-SmartWorkplaceCMDBEntraUserTrue `
             -Condition (-not (Test-Path -LiteralPath $validateRoot)) `
             -Message 'Collector ValidateOnly created a runtime output folder.'
+    }
+
+    Invoke-SmartWorkplaceCMDBEntraUserTest -Name 'Bind live Graph settings without an unsupported default argument' -Test {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $collectorPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+        $settingCalls = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst] -and
+                    $node.GetCommandName() -eq 'Get-SmartWorkplaceCMDBGraphSetting'
+                }, $true))
+        foreach ($call in $settingCalls) {
+            $positionalArguments = @($call.CommandElements |
+                Select-Object -Skip 1 |
+                Where-Object { $_ -isnot [System.Management.Automation.Language.CommandParameterAst] })
+            Assert-SmartWorkplaceCMDBEntraUserTrue `
+                -Condition ($positionalArguments.Count -le 2) `
+                -Message "Graph setting call passes an unsupported positional argument: $($call.Extent.Text)"
+        }
     }
 
     $runtimeRoot = Join-Path $tempRoot 'Runtime'
@@ -299,8 +322,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUdwTiZdKv1FuG
-# fHqlsF/E42DVlrfmA8lkOhl5V+dfuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCPK2+yHQYjXzmF
+# g78Tn3gY9erYFr9VnMgDyNXth3TElqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -433,31 +456,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOLxHwoD9F7+lkqrGTmyXhzWShQXB2dW7FN0KM5oH3CGMA0GCSqG
-# SIb3DQEBAQUABIIBgCzzug3zvA+xST7z4Y960dJYTU9nDo/GeRH8g06ofAuZ4bz1
-# CgwWgbBbCIMDH8es1+URtXavXfjtr9QX4TFlOca/+Prg7JqaGMFoiswKTGod0yWW
-# P7pp6IO0NIjb6H5aSse5MO/NdcNgastvxln/WwWQ/weeJNxFIbDvwb0m/PlpgX3J
-# 9+3b/rryzdy8kFyYcpcH75OEnvOxOt22u96p89FxgAbpfSn+BS+Xo7DiQDdiVPRr
-# z4hZ1q03UTAE3aED8ofVh5+ngxoP6P3XBYYsJnu4/5I62HLXUV6zoO3LPqDL5A8N
-# sOhPxcKUk5Ij0a4wg6bzAuQnHkscH/y0XpTg5kcYo08mvE3dRRNXZaR/7PGYHfyx
-# ERy/4Qv54fkoovCV4iJSmBEC8TgEjUiEllROGyVvCq379uqrFS3UwW5PLIVzg4HE
-# tlcg/l8y3I5C0dMLwCHJKMoLwSP8eF7OdQWqts4buAJ4oMTREDoYI/YP8EfPYp64
-# adTmPDVJxK4/mvFC8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP4r1kYnMDwW8Nyn33rQploKvELwAr1HENJRfw7yPePBMA0GCSqG
+# SIb3DQEBAQUABIIBgB7tz6zE+i9T7M/UK70qBThtLrZINN0Z/TwyPSmolnpYItyd
+# Njyy++D4btxAVZRJiosQf8AuPrFI1l3iyCL1lMx5pzetL8gPaN+pclpZkW5r0GcI
+# AwMRlUVVpWQtXjJw5Klli5qYSJrHRbFn5xbgio1gtQOy/UAv6lkQnlAf0qehPj6E
+# /33w3Hn13B2Ob2KWyeTVtC/HDMw3IDnuUQhg+RJgkmNla4dmUXsdnmRd/bjfq8x3
+# 6T02tp0HjRcfD2B/HDgjeRAsMMn5Csa5a07ATYOKBx3/+FLkMcTbSPNRyG0CX182
+# 6rDODCGJKSCBb9VXKEegNYtURS3awvEFNn4fLz4cQfirGT3q7z8yxF4wUlhLXrNU
+# xhpwZPuSEk0XsMZ995xkYAWg6QBlfMLHmpoRdXbzJWoMaVarVjlfhft80hl5zNcE
+# 6EVMhY0QQbJBpPQIMBz/OA+2bmQsGZh3YzgnjoQIgwxallvn5ax5FNDcMAauhIHc
+# dmT/uGAK5wm9VBAwbqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
-# MjlaMC8GCSqGSIb3DQEJBDEiBCC+L0JY8bKwkNQNdqA6MGt/PShsbfWIprzu5vbh
-# eKI79zANBgkqhkiG9w0BAQEFAASCAgCmfVHLhx2NVOXInz/b/NVa25CtBppmUA2L
-# tmpIVPNG03ZdlOXNdWQ+lhzbWRJgeuP/dibbQoe0TddE+3iCBZv5AEKqBFc/tRKB
-# yfECQ9wPNNy56cbU9I/4cOkf9yLmcDgDpD+hq3/y1leLZkVzXOnc7WOGiUQxqEze
-# GsP6MtWQvYcnvB/lopIehoVGFPUJvPHnO/xO+i1SDgTqNmhZM7ocpso2DjiC6oTV
-# rJxOSFu1YE0KLo5wNsdMqdCT0p9on3z849GUaxiya0RYyzpWVHdiyTxLvd7QhCnL
-# H2gJy7qZ9HZvWZNmHAjeiNPVkZxxfRuIMVhsiryQi0aq7n+K0Bflsh2fBjfA8/X2
-# yVJeQB9TGPVTSEM/MYtmoNcIX1YX9z6t4UJF/YnwfJKZQoImlQmTHkHW+2LrWzdl
-# /D68DVR8XSeRyyTW+fkiWNXIScGGxuTV4vGl8A9e04n8uIkdlVrGkgvW9z/UnOIi
-# YkY9iAT7q9HR6NMhl1RhUJb4G+vSEi3bb/9vAgvRjORhO+eEebWbCEKykfgFBzTP
-# TpSRjVHeGFnLSeQQnZWZ1N4+UbvAqsWiDElG9wyIZmgQ7tLwnbSv1uYmW85fdH1R
-# i8sDbbfM8JhhppYl6tqYj2fy9ROuPtm606zOMTcLImvZbpXbUz/ISU6mLJrK0Zny
-# yELLF2IdVA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMDI1
+# MjNaMC8GCSqGSIb3DQEJBDEiBCD9lQD8T86vLzt2bYMVfWv6hLzYN/7aGlQh+N6l
+# 2aKvlzANBgkqhkiG9w0BAQEFAASCAgBZi88QWfdwyRJ3jdFCSqfZrv0K7fm69/Cc
+# evhRUxIYnvxRxGSO1PhSFZUH6RPjDaemhogByIxOqI8tHhuZVGUUv7Ha6qCevPce
+# CHKFenH7NL9HkdD9rdSAPXQ8J0IkX95pNhWTJgzRCC6kXflkv4+D0C2G89+lr3Wm
+# EMtllAfbUjzmRQENQINoQwEUgXaE+TVkc5anOF2LvXvTZG4ZJGLyJTJzhm8X5iqa
+# 8TGDXAwzRHNnzrP+tdXKcp3X4y9OsYiUOIvVbZdEBYaH7R7KYmzpGblO2wZrHmqQ
+# DYmJ3UnM9aaJqK+oYv+srO3LeKfv7kHlADAyOuYVrrKEL7MagAHvm97MA90MmMcM
+# W2I7bot4EswjfgzzAAZc9nd+uhNjeTJ8akDL/n3POZb+XjV3eYfHxkweGwp7czz0
+# fefV5U2Qn9jpoayE9929qsrtJfAQToOk6hc2w8hUFHbbNJX3nibmGpfV6AuoCoIU
+# qmvZo59my6GjYgoOFMUS8V3vL/v9rmkYsu0YeQGgfvBuyYHm5J3XaJ8Q5gVgg7qT
+# 6eSgC5KEXBmypLOfOhqB1mmlAy+8wgNlBVrsvQGkVVZ4k6eOQjG2e0zFSYBlzBZN
+# bD7nJ93vDRh1VrnvWnzNnduIPCwZ/PX3BiVaxfy+tZX436c6fDBC15iJAAuwdwpi
+# 2HQQADTUeQ==
 # SIG # End signature block
