@@ -3,12 +3,12 @@
 Runs offline Microsoft 365 subscribed SKU collector and normalizer tests.
 
 .VERSION
-0.1.0
+0.2.0
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.0'
+$ScriptVersion = '0.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -79,18 +79,20 @@ try {
         $script:Collection = & $collector @identity -DataRootPath $runtime -InputJsonPath $fixture
         $rows = @(Import-Csv $script:Collection.RawLatestOutputPath)
         Assert-SmartWorkplaceCMDBM365SkuTrue (
-            $script:Collection.SkuCount -eq 2 -and $rows.Count -eq 2
-        ) 'Expected two subscribed SKUs.'
+            $script:Collection.SkuCount -eq 2 -and $rows.Count -eq 2 -and
+            $script:Collection.ServicePlanCount -eq 3 -and
+            @(Import-Csv $script:Collection.RawServicePlansLatestOutputPath).Count -eq 3
+        ) 'Expected two subscribed SKUs and three service plans.'
     }
 
     Invoke-SmartWorkplaceCMDBM365SkuTest 'Validate raw contract and MaxItems' {
         $results = @(Test-SmartWorkplaceCMDBCsvContract `
             -LatestOutputRootPath (Join-Path $runtime 'DATA-LAST') `
             -ContractPath $rawContract)
-        $sku = @($results | Where-Object Name -eq 'M365_SubscribedSkus.csv')
+        $sku = @($results | Where-Object Name -in @('M365_SubscribedSkus.csv','M365_ServicePlans.csv'))
         Assert-SmartWorkplaceCMDBM365SkuTrue (
-            $sku.Count -eq 1 -and $sku[0].Status -eq 'Valid'
-        ) 'Raw subscribed SKU contract is invalid.'
+            $sku.Count -eq 2 -and @($sku | Where-Object Status -ne 'Valid').Count -eq 0
+        ) 'Raw subscribed SKU or service-plan contract is invalid.'
         $bounded = & $collector @identity `
             -DataRootPath (Join-Path $tempRoot 'Bounded') `
             -InputJsonPath $fixture `
@@ -104,8 +106,9 @@ try {
         $script:Normalization = & $normalizer @identity -DataRootPath $runtime
         $cmdb = @(Import-Csv $script:Normalization.CmdbLicenseOutputPath)
         $dim = @(Import-Csv $script:Normalization.DimLicenseSkuOutputPath)
+        $servicePlans = @(Import-Csv $script:Normalization.DimLicenseServicePlanOutputPath)
         Assert-SmartWorkplaceCMDBM365SkuTrue (
-            $cmdb.Count -eq 2 -and $dim.Count -eq 2
+            $cmdb.Count -eq 2 -and $dim.Count -eq 2 -and $servicePlans.Count -eq 3
         ) 'Curated license counts are invalid.'
         $enterprise = @($cmdb | Where-Object SkuPartNumber -eq 'EXAMPLE_ENTERPRISE')
         Assert-SmartWorkplaceCMDBM365SkuTrue (
@@ -119,11 +122,11 @@ try {
         $results = @(Test-SmartWorkplaceCMDBCsvContract `
             -LatestOutputRootPath (Join-Path $runtime 'DATA-LAST') `
             -ContractPath $curatedContract)
-        $licenses = @($results | Where-Object Name -in @('CMDB_Licenses.csv', 'DimLicenseSku.csv'))
+        $licenses = @($results | Where-Object Name -in @('CMDB_Licenses.csv', 'DimLicenseSku.csv','DimLicenseServicePlan.csv'))
         $cmdb = @(Import-Csv $script:Normalization.CmdbLicenseOutputPath)
         $dim = @(Import-Csv $script:Normalization.DimLicenseSkuOutputPath)
         Assert-SmartWorkplaceCMDBM365SkuTrue (
-            $licenses.Count -eq 2 -and
+            $licenses.Count -eq 3 -and
             @($licenses | Where-Object Status -ne 'Valid').Count -eq 0
         ) 'Curated license contracts are invalid.'
         Assert-SmartWorkplaceCMDBM365SkuTrue (
@@ -219,8 +222,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCILhWZQxFVOPt7
-# Mg/AHUqHde7jYpNBqKqDYAa3xG72aKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqHVsYfs9GljYy
+# 7JsVZBvrP7eK5RmLtUCFh5LsYCwvEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -353,31 +356,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJdUGGoFIkGa2FIq9Byv6udgvVjIzd/VyTcCV+aNCt9xMA0GCSqG
-# SIb3DQEBAQUABIIBgBv/boSF2Bd11azgWllYIrtzkbWf2Wkf3O3h9nQL9cQ6TEnG
-# WGLQOWeM4YuP22heRJSseAOg1IEKP8V/c2M6McvJYaxmlYyQlrOIOSRmd73ZnCwP
-# +wXqOAjlBSGM2RHlildBCeyOVxp6/0N2UcAhlMNGBQXr8DoJT2E9HrScH5adRIWo
-# zEzbIVaLUXl/NtfJfRANxrj36JblmAaeI/Qr8Ase+lyBm39i2108ZkyiOPtYODNY
-# r3jLDa5pmjy1XCYyHFaGiQkFMcYA2LPXPGvmoZD+jfIgKt+VEcdJeCeYDj7egaUf
-# 75YHrBx4PFUvSQGRiEYZwrpzKlaA9jocI3PONQLeBCocSLkpuq8UBybDrwGUyw7x
-# RLAKktWX5Mzg3g+vEEI574FcBGmZ/QqVlW0+G7kJSUtgMh98OMUq0WyB9jq1d9jb
-# HmA9UPjW41GASw/EGjGqBEm69PFffzYlgfuha0oCc6kClCQLri3lqYFK40mHMGhA
-# dsMdLEwFU2BIeV7IzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMG0M2cNhd6qT9SSue7aBZ2gfst+xu+Z3ihWrczT/FPFMA0GCSqG
+# SIb3DQEBAQUABIIBgJTy1jgnzBbK9vXzXI/8YmT+3YiXf6WiR653b4FihSx+gGl2
+# JlxKXG3T5DBRu1Nv/l11IvsKLHN8qZ4dYkVdWXbjQ/0sykXGax0P6FCIOS50ByeP
+# CYc7UYp89yfHkiBKrnUiqiBAA0zS8/7Tf6aGbQN+I2Y8kX42/0D5R16xoQPUMrgC
+# 56AkMoj62HNgkr/z1+Wfok6IubiACMDlAbe4GrLarZ+I5N5QCDWTMmAm6syQQN8m
+# PfB1rrL59n2Mm25m+NgYG8sS+JcuuUJBQN5ValNrsMnVbAzl/sqzmAKs9P7SfwPb
+# eApyShBawgAI3BB34Y1BDK3ittx+N+QQPeSxmF3pM034BRcSHuBAO0+kKZu/b8H3
+# jw0dAH5SCtSf5kJuD0dSyiw9jE2D4GDC0+CSVtM7P2CPDYTgF1kcgVuCIcWGc31r
+# i84OFeKi7UujCJ1hd0TYpBjM84l1Ud2hCQq58N4/IW0yq4wkRPsKMExS+GEJyzJb
+# VhfBRgEYE32VUFff76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBKb5q+xSnEM2rbzjz3ECuCyj01EsXHmv/+LX7z
-# mKt+fzANBgkqhkiG9w0BAQEFAASCAgCJPAcDLckA/Hk3C0UmS6kKGc7Cq4NDdOaE
-# eHxDpNIBt+TZBaat014tDwyr9rzZqjnteLT054ymZjvjb4MwXwm5hWriEIPIdE+D
-# tCB3cDa1RETgc/+x5hf+JceTQkkgOTB96LTPwdIHQ1bgB8O0wgjFdh1tRJ7JaTG1
-# sNhjNHSVvmMJ3EUZx2RapHzAiFUAAHhD3wTt8ZH60Kcysr+8H8P0WXSAc1kwCGkJ
-# OuWjO0i+OBjhs9wgBJI7FA9PEJCVVUa8on7mJTMEeOYHRFSum2+CQawxOpFSvOa2
-# Uj9W3LAaKG7RjUkzg4g+S0qgbkeCnnu5EFXDaGmVjF5kUotrprbq06bmXWqBPh+r
-# O9doaHuO+dzu3daTfU9dnw5SguXFiCa6C0RglHuMcYUEn40J+cpQEfKMXcBSkedP
-# UAHSNhkK8bPCWrYAfXPgQJldGQ7tTJ4epCUUZ+uQBuE/lmR68K8w1rbdbXATeO2e
-# TmwwbMeTbBch+xWSmiDAQbVMOIG69LgpvBueMZMpEJJsDFZlTd39NIR0I1wKCbz0
-# JBBl/PY5graspVXos/PZsI0HIzU0wm8E6/L7FfMn1TwD9dw93mE85mNrBRVuACcG
-# PJVwXIPNgTM9R/OVDgZORV2d3D+GAbMo5o+bkKxIw3Ormaty9uqIboJpnHXFGGhX
-# ZsvYBVhgaQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjlaMC8GCSqGSIb3DQEJBDEiBCA2i0u+1Tq0skqUrF+JUGXZhLRsex7kcnsy4zXF
+# K2gzODANBgkqhkiG9w0BAQEFAASCAgCM0fQGlT1wF0BStsb/2nh2EeAABZAKHPNU
+# oLFwl8cKPEKzztGtOzWzVM8AoDTODNZX1UkkUqO7h9wNu/B0+NvzSDCfiLSnF/vA
+# ERlG97rrErt/WID+Y/1NyQrKamk4HG10BApgsxT1Uk/ugEvB7m3jr2Zwa5981Bs5
+# S8kGCgDwU/LiTIW86ywnLkr53U62nMh5OzhiVHI9dgjEtBinosfGeFSjoBlgkOXH
+# BgNhNWN1S4bLhDAyKDFnVdjanDTa5HVgxxr02Ji3sdh+TYUJNx1lFbP3SiE4qcYS
+# 2o3iuhq7WA44k74i4Tv+YbZT+Ezp0Br0o44JeuKvCzNb+sFxIOQnaufn2ppWLVdG
+# LDHZfpJkVenWtQ/lAm58QPkAWaTuaA35jpTXH8N45hoPvwaTMp8I2NXxfLbLha+X
+# Iw60SePL/HdAJI0wsokKEiKZHClMJAunK7ZXL+0Yw2e5TGcC/qh9BGz+I5a5hEmt
+# ta8gAoAE/TtFy0NnHakXeuHq+HinN0qBEml/GwrWEmzmErBfyu5AgDFrlIb737Xd
+# I0+ckVSjzYbep5B9ImBTaeCOrfngDjq4qjIvsgAL0V+XckHOy2cuKDzaKn8twX18
+# tWXvkjTXVkaro0JDZJZFigpQP9JXoOmoj3rWA6ByJqoQBUNk+K5HXdT7dgaplv0i
+# 1doh5uey5w==
 # SIG # End signature block

@@ -9,7 +9,7 @@ are written to DATA-ALL and the latest raw contract is written below
 DATA-LAST\Raw\Entra. An offline JSON input is supported for safe tests.
 
 .VERSION
-1.1.2
+1.2.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.1.2'
+$ScriptVersion = '1.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -114,6 +114,20 @@ function ConvertTo-SmartWorkplaceCMDBCleanText {
         return ''
     }
     return ([string]$Value -replace "`r`n|`n|`r", ' ').Trim()
+}
+
+function ConvertTo-SmartWorkplaceCMDBDateTimeText {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetimeoffset]) {
+        return $Value.ToUniversalTime().ToString('o')
+    }
+    if ($Value -is [datetime]) {
+        return ([datetimeoffset]$Value).ToUniversalTime().ToString('o')
+    }
+    return ConvertTo-SmartWorkplaceCMDBCleanText $Value
 }
 
 function Read-SmartWorkplaceCMDBEntraUsersFixture {
@@ -191,14 +205,14 @@ function Get-SmartWorkplaceCMDBEntraUsersFromGraph {
         [int]$Limit = 0
     )
 
-    $select = 'id,userPrincipalName,displayName,accountEnabled,userType,department,jobTitle,usageLocation,createdDateTime'
+    $select = 'id,userPrincipalName,displayName,accountEnabled,userType,department,jobTitle,usageLocation,createdDateTime,signInActivity'
     $uri = 'https://graph.microsoft.com/v1.0/users?$select={0}&$top=999' -f $select
     return @(Invoke-SmartWorkplaceCMDBGraphPagedRequest `
             -TenantId $ResolvedTenantId `
             -ClientId ([string](Get-SmartWorkplaceCMDBGraphSetting $GraphConfiguration 'ClientId' '')) `
             -CertificateThumbprint ([string](Get-SmartWorkplaceCMDBGraphSetting $GraphConfiguration 'CertificateThumbprint' '')) `
             -Uri $uri `
-            -RequiredPermission 'User.Read.All' `
+            -RequiredPermission 'User.Read.All;AuditLog.Read.All' `
             -MaxItems $Limit)
 }
 
@@ -274,7 +288,7 @@ if ($ValidateOnly) {
         FixtureUserCount            = if ($null -ne $fixtureUsers) { $fixtureUsers.Count } else { 0 }
         GraphAuthenticationModule   = if ($null -ne $readiness) { $readiness.AuthenticationModule } else { '' }
         GraphAuthenticationVersion  = if ($null -ne $readiness) { $readiness.AuthenticationModuleVersion } else { '' }
-        RequiredGraphPermission     = 'User.Read.All'
+        RequiredGraphPermission     = 'User.Read.All;AuditLog.Read.All'
         Cloud                       = $cloud
         RawContractVersion          = [string]$rawContract.contractVersion
         RawLatestOutputPath         = $RawLatestOutputPath
@@ -309,6 +323,7 @@ $rawRows = @($sourceUsers | ForEach-Object {
     }
 
     $accountEnabledValue = Get-SmartWorkplaceCMDBObjectValue -InputObject $_ -Name 'accountEnabled'
+    $signInActivity = Get-SmartWorkplaceCMDBObjectValue -InputObject $_ -Name 'signInActivity'
     [pscustomobject][ordered]@{
         SourceSystem           = 'MicrosoftEntraID'
         SourceUserId           = $sourceUserId
@@ -331,8 +346,17 @@ $rawRows = @($sourceUsers | ForEach-Object {
         UsageLocation          = ConvertTo-SmartWorkplaceCMDBCleanText (
             Get-SmartWorkplaceCMDBObjectValue -InputObject $_ -Name 'usageLocation'
         )
-        CreatedDateTime        = ConvertTo-SmartWorkplaceCMDBCleanText (
+        CreatedDateTime        = ConvertTo-SmartWorkplaceCMDBDateTimeText (
             Get-SmartWorkplaceCMDBObjectValue -InputObject $_ -Name 'createdDateTime'
+        )
+        LastSignInDateTime     = ConvertTo-SmartWorkplaceCMDBDateTimeText (
+            Get-SmartWorkplaceCMDBObjectValue -InputObject $signInActivity -Name 'lastSignInDateTime'
+        )
+        LastNonInteractiveSignInDateTime = ConvertTo-SmartWorkplaceCMDBDateTimeText (
+            Get-SmartWorkplaceCMDBObjectValue -InputObject $signInActivity -Name 'lastNonInteractiveSignInDateTime'
+        )
+        LastSuccessfulSignInDateTime = ConvertTo-SmartWorkplaceCMDBDateTimeText (
+            Get-SmartWorkplaceCMDBObjectValue -InputObject $signInActivity -Name 'lastSuccessfulSignInDateTime'
         )
         SourceCollectedDateTime = $collectedDateTime
     }
@@ -377,7 +401,7 @@ Write-Information (
     HistoryPath             = $historyPath
     RawLatestOutputPath     = $RawLatestOutputPath
     RawContractVersion      = [string]$rawContract.contractVersion
-    RequiredGraphPermission = 'User.Read.All'
+    RequiredGraphPermission = 'User.Read.All;AuditLog.Read.All'
 }
 
 } catch {
@@ -391,8 +415,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRM/lc/cdUvemi
-# Td4HAZaoq8AZ9F24dFN1/LuIyU6JQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+9MN3sAGmZvml
+# VhtsFuhGtzEsJ25KArCK/DvRJDDTBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -525,31 +549,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA51xOwwe2P9vcJ8OWE0x8qhMrzi1QRB5BVwx2HV08q+MA0GCSqG
-# SIb3DQEBAQUABIIBgAWW8aWOhi+t11rmuWiLMRLmY7lMHj1aA2MZILYxmV19v6Ts
-# 1sEcYLVSUk9Bj1/F+RvI/32n6hThGt++k7ZdSYbZnOx1I8sqan8tuah0P44i4fCu
-# scI9xNmTZ9WWHxYUSblzwl+TtAibNnbJCLtifuNvZm+IoNUjtPTfBnXhQRmR8GOB
-# T33pKmlU+KBKNkk/8QLTxso+wpvjetas6Kh+gY2J1HznD7WQBw3l5EP1DEv01HHl
-# QQb2GjjT8b6CUUhvYMLKrHhhG+oIPQYV9fmwefCm3Mbvtwq8MVIQ5CejsnmlFvdf
-# dUCgjap4JQRezrB8TtLjV7WQEz3X0b1Rbz05X4/xuwCS6IRLzJiIqgg+OcomWXsb
-# NaTfir0DLdgtOSexFHJ9yxVlnXMjk/Utju3h5H90Kc3VtRNxCiO8P0Oxx8Pchnyw
-# wFK6w4iHH/gHFCzPYzdV9BskBpAdfHNYrmyAX9Tgnxkyb7tAwnscD45yS1h7CKNl
-# qW/1E8fOqGHiYoYmmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBAFMhr8TJpMgwWUXn6rrjNYnpThXKKnIIGAnaHy2XJrMA0GCSqG
+# SIb3DQEBAQUABIIBgGMidi/VtK/tXmfVEM0M5wpQCNsdYCln9BsSfDe6IEx9EnXH
+# MyW/FSjReDEqDg06yyAa9g+4Jw0xok+DUVnUJHw4eYcvcRBQUWX34iWFJ9FQQTyz
+# d6oEbk8csGTUkbhKgpDBjPKNLNCXqw/bRWO/rnyE4jSLO6aKj6+QUHRzMuLKXqcw
+# Nx1Dg+pb5DVTMidwXUoF1jHZ7qhpC2I21h5i7OssbNR6HBsCxXFtAjZCjDp0A76J
+# 6yAd/v49iKDN0eW6Czy5Jr2t8STZYYQf/4CfxB8m9TFTWZUOF7q+pZYMiJfWXofw
+# EBOO5nX3HQKDnwFTQnsjhb+iVIahts+2tRzW//Nwp1TMLmxSSGk+3M6LG9aarLSo
+# 1vMAJKWXmpdLY3QaWSAml29OO/F3gU6j5Mn7a0ZED7eRJ5ZfC3ZTkoqPv34xD2tj
+# /oUNpHPYKT0PsvqZ/B7JPZaw6O0IA/v1n96ohGyR0+3FIWvrpk/9fIv2FGx+GVfW
+# tsbgLtZxxU4hQxisV6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
-# NDBaMC8GCSqGSIb3DQEJBDEiBCAbuKzBB7+1zCD0nPpkwZ2irp/bfdepSlkQOfzs
-# ca1YhDANBgkqhkiG9w0BAQEFAASCAgANYvPVyc5jLeV/lcJbDI/Bd1VBLoyJtFB5
-# QJ1DFAYgX72FAQOaWVy/s6bYDwAQ3qqDQ1OlrI0hhOsDCM9/WWKlp7CtdeLY/5oB
-# 6zDgHqksLfunAwB0V4+GJiDI5z0zq9dy6meqN9sNCdiG58B8yIx7qXR5ummanrJc
-# abzo6M4tOajNpK/SHDW2eEe8qzTrhqRlMaC2I8TpXPFrbl5qmypqqA+7TPBZvbIt
-# AxoOVTOWD7c8TeFRyCv76BsjCryJIEXTs7QjpYQRyetLJxsctMx5zH6wIxD3q0K8
-# plqlRUY6BimkwGPeXHrnSEyPGCpb0vnDNljfa7BlhnbvCzqEluVhjrkxjzTUPUBn
-# +QQ2N5XOgNqkmJbPojDVKiBNLG3EutUWeHgg74N+3D5Pee2d4Q435GTjIIsggrBA
-# 2pFFwFnhIq2Y/EG91WoBRNr7jLUlsPJkxbTgS9BLD26jlm55r/EEXKtNsjdaSA+R
-# OwWgcwmnEeyGO1ggCSkz2XYzatLtDw1y1C4TIgt3ZTY93CJ7yBv3gR6pcOKgsQbn
-# sypuTj+syMhCfepLLwL/GBnsE+WymfI31xPAfL8pyEBPebvpaJ5OSJ+NcD8wITvX
-# b5j27Q60F7uYWVkjPWZqjcxDsYtjw28dtqZYjtyonHRkPguzB8rc5USQqSO96MZp
-# XJb2poM5/g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjdaMC8GCSqGSIb3DQEJBDEiBCA7Ikx/xJUpy9dgAivg0pe03v724pP3TRaQC63k
+# Zwc3ojANBgkqhkiG9w0BAQEFAASCAgA5aFuvVbNp6n7V/CH/H3jNvxns9IYzLOwn
+# 9FgCjYG3I6Qi2a30emN01hcICKLII0CchpXTkcC3o5cx3lBE/v4UEghOe2ovf1Jn
+# 0UqdrDVcfnkI4t1To0U/frtpVdkR9qzuaRTi6qcJ6hUSNrtgNIAm0E/8t7kBVx7V
+# YvbZxd/9yLMrzvU19lowYYkI2gqJUY+6xnXZNWG/cm3hGt0SfG9Jh1zosqOBhFTo
+# bUkbp1ZSu+pNBNFbidK+Q2c/zloaaz0UNJUniEUmXlsjIUmQS1mIvPk5KPKLz1tF
+# dd0tNbrLwTEJ7eHiQ2wWbeSTm/Rlkki+pB7iOsWkM7HjBYtBpD+975zkw/baCvK1
+# wsaRgjDVjmzLk4+YZBk7s7fmWi9N4/JC1WRJBf42e4z18LTm+hefJt147hX0/Gx1
+# A/xH11lWKQl2ouuW/4UhuE5QdNOtXVAbBJAc+6VFIDYY2BNY4lkeizbK/d3CjyZV
+# OWhsbuRmwOSMSt86bbHJEP9K7mcgNKKy5KzszMnB2TwAJtQPAq4hsgmcwnOecZl0
+# 16U/v3gL4TCQMNCneIUrsPGSpYJNuYdKRcSJEPSYvKXnYwoO2EleiQ8ZRDEPA2so
+# ZkiZCdiQdFmmwz0YYfBbU8aavQ66nOMY8vqz/XChrIbxTZD7Uv/sBIw2g9mZUXqq
+# bGrdMYGCXQ==
 # SIG # End signature block

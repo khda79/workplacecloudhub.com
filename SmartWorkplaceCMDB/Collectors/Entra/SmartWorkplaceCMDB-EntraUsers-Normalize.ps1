@@ -8,7 +8,7 @@ and publishes curated CMDB_Users.csv and Power BI DimUser.csv tables. No
 Microsoft Graph connection is performed by this script.
 
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +29,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -133,6 +133,35 @@ function ConvertTo-SmartWorkplaceCMDBUsageLocation {
         CountryLabel = $cleanValue
         CountryStatus = 'Reported'
     }
+}
+
+function Get-SmartWorkplaceCMDBUserActivityState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$AccountEnabled,
+        [AllowEmptyString()][string]$LastSuccessfulSignInDateTime,
+        [AllowEmptyString()][string]$LastSignInDateTime,
+        [AllowEmptyString()][string]$SourceCollectedDateTime
+    )
+
+    if ($AccountEnabled -eq 'False') { return 'Disabled' }
+    $activityText = if (-not [string]::IsNullOrWhiteSpace($LastSuccessfulSignInDateTime)) {
+        $LastSuccessfulSignInDateTime
+    }
+    else { $LastSignInDateTime }
+    if ([string]::IsNullOrWhiteSpace($activityText)) { return 'No observed sign-in' }
+
+    $activity = [datetimeoffset]::MinValue
+    $collected = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse($activityText, [ref]$activity) -or
+        -not [datetimeoffset]::TryParse($SourceCollectedDateTime, [ref]$collected)) {
+        return 'Invalid date'
+    }
+    $ageDays = ($collected.ToUniversalTime() - $activity.ToUniversalTime()).TotalDays
+    if ($ageDays -lt -1) { return 'Future date' }
+    if ($ageDays -le 30) { return 'Active 30d' }
+    if ($ageDays -le 90) { return 'Inactive 31-90d' }
+    return 'Inactive over 90d'
 }
 
 function Get-SmartWorkplaceCMDBDefaultConfidenceScore {
@@ -324,7 +353,9 @@ $cmdbRows = @($rawRows |
             UsageLocationStatus    = $usageLocation.CountryStatus
             ManagerUserId          = ''
             CreatedDateTime        = [string]$_.CreatedDateTime
-            LastSignInDateTime     = ''
+            LastSignInDateTime     = [string]$_.LastSignInDateTime
+            LastNonInteractiveSignInDateTime = [string]$_.LastNonInteractiveSignInDateTime
+            LastSuccessfulSignInDateTime = [string]$_.LastSuccessfulSignInDateTime
             ConfidenceScore        = $confidenceText
             SourceCollectedDateTime = [string]$_.SourceCollectedDateTime
         }
@@ -343,6 +374,14 @@ $dimRows = @($cmdbRows | ForEach-Object {
         CountryCode      = if ($_.UsageLocationStatus -eq 'Reported') { $_.UsageLocation } else { '' }
         CountryLabel     = if ($_.UsageLocationStatus -eq 'Reported') { $_.UsageLocation } else { 'Unknown / unassigned' }
         CountryStatus    = $_.UsageLocationStatus
+        LastSignInDateTime = $_.LastSignInDateTime
+        LastNonInteractiveSignInDateTime = $_.LastNonInteractiveSignInDateTime
+        LastSuccessfulSignInDateTime = $_.LastSuccessfulSignInDateTime
+        ActivityState    = Get-SmartWorkplaceCMDBUserActivityState `
+            -AccountEnabled ([string]$_.AccountEnabled) `
+            -LastSuccessfulSignInDateTime ([string]$_.LastSuccessfulSignInDateTime) `
+            -LastSignInDateTime ([string]$_.LastSignInDateTime) `
+            -SourceCollectedDateTime ([string]$_.SourceCollectedDateTime)
         ConfidenceScore  = $_.ConfidenceScore
     }
 })
@@ -395,8 +434,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQxY7XC9IUdY41
-# 9vfZnhHa6NHpoucGtx6cums29htUWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTQYn2aOfNeduw
+# hBvGt8It9hw3/HozwQC85BAbPZvjJaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -529,31 +568,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINwoa+klfs1ZnZXir0yUdvl0I0wYx2HpzN3wekJ/eauaMA0GCSqG
-# SIb3DQEBAQUABIIBgCa0vIBoNhCLnDkMz9ajDxbjZjh9DJ8ImiVJ8sypnddLBnrC
-# EORc9o6lxednbzxXOIcZGkrUqF1BZGJ4e0PgOsrucJ7eb1FboFatja/N2WIbHpi3
-# WlS4x/RGLQ+rkFGeO3kCcEUmnzOS3wiW6CRCcC+SO6pJfW9nxLr8hvX2jbRaeoIm
-# Up1i5evkY/PkXaUnsV/MqwPQH6xXuxM8PQ5OS1RIZEveECahMEs0t2+3CCKobnRy
-# 0bBTCDLacvNL0yvnOOwJT6WyneundNB/dJozwL7xw2kkK8a9ab+wa0ud5c2QuZ16
-# ML5UHXkryGepyMy+Uo8Xz6uNkQbPDlGW6GKY/VcVNo17giNpPa808ZZYCtWXo0hc
-# sYya20dq9DSNTKM/FgVVoMPBrirArFWXAWB8QylIukYsx4p2rCIY3NY8xITpg/hN
-# +LMNCUxXDfkj7pAYdWVJ1Ir2cQvvVr1ny8TFyFqKw3XUf642iCHiwo6gmrenwVn7
-# YC37c396DKtqDLGN2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP9eYP9ASpv7WuAn6HTzu37GjYhbp3qh1/yrN8D3VHYZMA0GCSqG
+# SIb3DQEBAQUABIIBgKs9D2Ay5cfcdxTSWzWm279zmBe9cYojJKeXSl39tZbqo4wx
+# KUfK9ssZSmcaq4/1sWFCIesFE/RYSHLr8203SiY5KhNACy+WFNVaDJKDUApB/7HY
+# mWzc+fuJNEeBYL3HLmQ2ys49RaM09pNgwB67tgjZ0bb8vo6Go8rkoWyGrF8dFIb6
+# R4u/2l72AWRx3uenSDNwzk/Hb5vRjEqyLHzPcGHFmvUqkw8FPP5IqQGkoDnx0HfP
+# AjUrYueRHMW/BeGfF/36EXlQvAV8LHpvYucfRjGEc5noXMSKFFm58crMstxlWt0M
+# p2kKpAqY0gwEVW6YWX4poPi3pjDU+tkM9eYOjv8cAfvthyZyiNiJS27mPfjywuL/
+# C7FNGron7eiqOOT62WtLD0sJqVvay4cxTOEEECZN8+2shL6n3xl3O7VHJjUYV5ix
+# 5F43dFrjH/dI7qieGZ204u+pN0IhZr2ZTDUIK75MaWLq8FYwBpXCnOiK3ffeTh0O
+# v73eYytVk2ye9c29ZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MTlaMC8GCSqGSIb3DQEJBDEiBCBeweAoXJLg8a6R8Mjax15uHjy0ev2zDTCcOTkM
-# gQUKrTANBgkqhkiG9w0BAQEFAASCAgBfF5lS0jjZjBJ9v4KpGIY0yK/h/y3otE++
-# S7faRtQBSkVYy+AUhZcw8Sv45mc6oBHY5TnT1dZxO4Y3ztuwg1/PGlvLYjiryFdt
-# 6VKjg/vMYP4Qa2eRM8L/wDFZD6rzq8pDOFhrdYTgrqJScSA1XZLAk48OaLO44klT
-# AB07GnUVtaqw1PfYs3npxbQM1ZxlHCnq53NpGGnFYcATbLGPtsoYmYl7s8jiY9pX
-# APQTtN32aPnnvvgBhwWg/5+Cl8C8bDLuqwQLywXhDPzc+DbrqquexECiZOjQGtCq
-# L+cpfIlm8MK72ixMMiV+w0v8xRqyuiZk677bOTsa9jh5Y/dYsE4CjowPeWy6aeat
-# FOI21/IO9tnh5EDWtAdjfKBuzLQWV6QPDw87VGsja61CP22bfcmwNUFGPAW0s4py
-# 8mCzW6r+NxWNXH2yVPL4YJuhy2KWp23trDnH4rnmQeUuPGCw28YTIdAwgGT9csEs
-# i4jcdHr0h1LMZthiSCAzepIxyf7L/dRU5hufy4GMLX6EaI4z66tHa03nrgx7GVpa
-# ppAaWKVp9xo/SSYYNhRaCOL2UHBu3IDywJm4ZKg3CzcguUpVv+BM+GGqSxbos4tm
-# jhQUiT0OoRMljV/Z8P/bVmk18N6yN0MoJWH0/K3QSadRNE4r81Y8ffeY+OCx7CJu
-# Ay97V/rnCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjdaMC8GCSqGSIb3DQEJBDEiBCD+TaxPUUXGubFTo/mB/mOxRDMua/GuvpgxXv8+
+# WrORDTANBgkqhkiG9w0BAQEFAASCAgAKjwpDnPeXjZD8aT7Qzz1MELwTe5vY09bF
+# 9ogMhgsbVrFN9e2IJWUCHxJ2anqyv+pYtElOE/Pj4rJ8TD5MbX4+DtfNVyEomPA3
+# J3NjO/7N9AC8d9dfY7Bzyk2s3boPuTcDLCxBE1wndzhYUBdHSUv9h5P8DiYAKRFW
+# Dh6w8XFreWQjCKvspuijbzU4d+Z/Q7KEyOoW37RiJQ1dc7mO15mCYfLt1ZmxqsUI
+# FusRIY2ze2s3/7w4RLe2w9vzFUNIjWORih59XE/SIxtkPnGdsJk9dyEVl8gpSZQk
+# koerSPkAZMRh4PY+efWLVurYh3A9oCNV3fm05DqhCW4BfuMTUclGEpg/MRD7JH1N
+# JBDq5U0DqqXqj2MIyIEGvhZYrzM9YS/8Ua88vRLBS1BG9eD/a7aIIEMaV5MZEHBd
+# pJy41oNQBljTDTIOFZlkhVqvM+LtkTFnPzoRJ/ukxQ2rvx/cpEVCiALnNFVLrUDJ
+# ZFYZloLggRcOA+Mj46z0pKEom1GfBgp3STOJkaCFxnmLfP7PhjvikoStMXZ3o/FO
+# HIkHSV+K91WJohTf63Y0LnWW6u+qzyqv+GY1gh5X/xGv4JkFEwSnWALlkinncegy
+# nionOMlerquCdE7Lenlmh7MpH1J54ZCOVDyucGfcyNhVJQeUFvNuCVPyxUUPTxh3
+# +IPUHbFwow==
 # SIG # End signature block

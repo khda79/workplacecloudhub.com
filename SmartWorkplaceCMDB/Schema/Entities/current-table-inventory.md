@@ -6,7 +6,7 @@ the V1 additions that affect consumers.
 
 ## Curated and Power BI contracts
 
-`SmartWorkplaceCMDB.tables.json` contract `0.4.0` defines the core curated and
+`SmartWorkplaceCMDB.tables.json` contract `0.6.0` defines the core curated and
 Power BI files:
 
 - `CMDB_Users.csv`: one Entra-derived user CI per `CmdbUserId`; includes
@@ -23,6 +23,9 @@ Power BI files:
 - Power BI dimensions/facts include country fields on `DimUser`, encryption on
   `DimDevice`, and existing license, mailbox, compliance, relationship and
   quality grains.
+- `DimUser` retains observed sign-in timestamps and a deterministic activity
+  state. `DimLicenseServicePlan` and `FactUserServicePlan` keep the service-plan
+  catalog and effective user-plan grain separate from SKU assignments.
 
 Every tenant-scoped table begins with `TenantKey`, `OrganizationKey`,
 `EnvironmentKey`, `TenantId`. `SourceID` is never a global key; source evidence
@@ -30,12 +33,13 @@ uses `SourceSystem + SourceID`.
 
 ## Raw contracts
 
-`SmartWorkplaceCMDB.raw.tables.json` contract `0.12.0` defines AD domains,
+`SmartWorkplaceCMDB.raw.tables.json` contract `0.14.0` defines AD domains,
 users, groups, computers, organizational units and direct memberships; Entra users, groups and
 devices; Intune managed devices; Microsoft 365 subscribed SKUs and assignment
-paths; and Exchange Online mailboxes.
+paths, the Microsoft 365 service-plan catalog, and Exchange Online mailboxes.
 
-V1 adds `UsageLocation` to Entra user observations and `IsEncrypted` to Intune
+The current contract adds `UsageLocation` and three observed sign-in timestamps
+to Entra user observations, and `IsEncrypted` to Intune
 managed-device observations. Active Directory contract `0.12.0` also adds
 country/company/office and account metadata for users, canonical/logon/password
 metadata for computers, governance metadata for groups, and one OU observation
