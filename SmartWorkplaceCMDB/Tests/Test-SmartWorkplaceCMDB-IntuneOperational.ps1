@@ -3,10 +3,10 @@
 Validates Intune operational collection and normalization with synthetic data.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]param()
-$ScriptVersion='1.0.0';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
+$ScriptVersion='1.0.1';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
 $passed=0;$failed=0
 function Invoke-Test{param([string]$Name,[scriptblock]$Test)try{&$Test;$script:passed++;Write-Information "PASS $Name" -InformationAction Continue}catch{$script:failed++;Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue}}
 function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw$Message}}
@@ -39,6 +39,30 @@ try{
         Assert-True ($configuration.Count -eq 1 -and $configuration[0].TemplateFamily -eq 'endpointSecurityAntivirus') 'Configuration policy mapping is invalid.'
         Assert-True ($updates.Count -eq 2 -and (@($updates.PolicyType|Sort-Object) -join ',') -eq 'Feature,Quality') 'Update policy types are invalid.'
     }
+    Invoke-Test 'Consolidate strictly equivalent detected application duplicates' {
+        $duplicateRoot=Join-Path $tempRoot 'EquivalentDuplicate'
+        $duplicateIdentity=@{}+$identity;$duplicateIdentity.DataRootPath=$duplicateRoot
+        $duplicateFixture=Join-Path $tempRoot 'equivalent-duplicate.json'
+        $fixtureObject=Get-Content -Raw -LiteralPath $fixture|ConvertFrom-Json
+        $fixtureApps=[object[]]$fixtureObject.detectedApps
+        $fixtureObject.detectedApps=[object[]]@($fixtureApps+$fixtureApps[0])
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12|Set-Content -LiteralPath $duplicateFixture -Encoding UTF8
+        & $collector @duplicateIdentity -InputJsonPath $duplicateFixture|Out-Null
+        $apps=@(Import-Csv (Join-Path $duplicateRoot 'DATA-LAST\Raw\Intune\Intune_DetectedApps.csv'))
+        Assert-True ($apps.Count -eq 2) 'Equivalent duplicate application rows were not consolidated.'
+    }
+    Invoke-Test 'Reject conflicting detected application duplicates' {
+        $conflictIdentity=@{}+$identity;$conflictIdentity.DataRootPath=Join-Path $tempRoot 'ConflictingDuplicate'
+        $conflictFixture=Join-Path $tempRoot 'conflicting-duplicate.json'
+        $fixtureObject=Get-Content -Raw -LiteralPath $fixture|ConvertFrom-Json
+        $fixtureApps=[object[]]$fixtureObject.detectedApps
+        $conflict=ConvertFrom-Json (ConvertTo-Json -InputObject $fixtureApps[0] -Depth 8)
+        $conflict.deviceCount=99
+        $fixtureObject.detectedApps=[object[]]@($fixtureApps+$conflict)
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12|Set-Content -LiteralPath $conflictFixture -Encoding UTF8
+        $caught=$null;try{&$collector @conflictIdentity -InputJsonPath $conflictFixture|Out-Null}catch{$caught=$_}
+        Assert-True ($null-ne$caught-and$caught.Exception.Message-match'Conflicting duplicate detected application') 'Conflicting duplicate application rows were not rejected.'
+    }
     Invoke-Test 'Bound each source family independently' {
         $bounded=@{}+$identity;$bounded.DataRootPath=Join-Path $tempRoot 'Bounded'
         $result = & $collector @bounded -InputJsonPath $fixture -MaxItems 1
@@ -54,8 +78,8 @@ if($failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyhEGc7H7wlrDe
-# Mi5c4fhfN/+5Aw1v+qN2MiypNwe9m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLPbX0cSGMZm7a
+# IZ/1bvIkP/JjhFc4XyfF8JXiMbKcV6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -188,31 +212,31 @@ if($failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF7tXVTiI8NVduRqkOos1gad3C6C4l2ZflzmUz/lQCGyMA0GCSqG
-# SIb3DQEBAQUABIIBgKGx7F4M7SKWOHy9SPYMrrukr9dumzGnik4vQHSKigSUBkxb
-# r2BaMot60OViS+s1CrYn3U6S/k5ZRkvuAnv31rSJ+kkZZ+nnWJ5O1TBxiM5flEHG
-# JrmIg5q0eEigqvT+RjwTeYKaMvVU993CGcYe6KFFC2Gi9jm1Eqw/c+c31qExuJzk
-# 3NmOoyhSbjtyEjVg1drN+URMbvuzJt5Y2tbsymL4MmJJPumf6zuOt3FdzulXmXjg
-# pVx73JOi1SHmVLReOVlKeqvkoWHRNECjiCaSP1x+RteHh0H8B3ZtAwpkJcgNZbbs
-# gMCBJ6C0yPqEGB2zzyh+Q/LlXO0Sjh7sMePsH2jausrYmAXO+i+zvQF/QMZwNCpJ
-# Z59iMNNHZ4FQo79KtaMCNzzP/ilhHEnYAi7wHJOEN7OhyA6ugRkOV6KMteEmfiQt
-# RMDLUMQqisDb+9p2IrqVwSDRHnXmv8b7zFSfYGRJ9IHIqhdfDrNCCX5Namcudr7L
-# SMZuJc0s8XgsM5Y7G6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO7+piRS5EKDBlxnUmM+US/Ha9TzvmNfLvhL5vd/IIVTMA0GCSqG
+# SIb3DQEBAQUABIIBgIadfaEngNEYs8VUDuSeTz4GF7Cw/ULzf0rkyRUBI8BwjgKR
+# oHZn61paxlj8FyYfCSeBYQuvbA3g4/l7P6Jjb9uFQnjK5onI3eYWsySbKuARgyw+
+# 0P3u5ukzPNl32SA66DHkGbATb+kJJqhzrCZPQQfQaGgSvxUT4evRRbeijUQtGuWm
+# B4ZYJ3v1tVJC2W723Pd5bqADBWTfEVDz4/GCYkPp0mwo+xoJpVfbieLaMCXStuIr
+# I76y1rj3zVNoh7sbaCmptWdCFbna83+29VeJpx6jzIDYygaQPGS8wkVkl8zUzxc1
+# +4U3JRCA3WRVr+TKVEBxLJ8oPFMcHpS2eqVKvoKlWSKhcDCsRZHdEc0uPWVx6zsc
+# bLBlP8NC4u0uAhw3h19P+Xs2R2MR4WUx4qUPM2RlGkpwBaCTUqQejomoKfzKL6cR
+# GXJOiQQcsOCkhzetUHOPEKzdtw359vWshOO5sBbLzdMpIIQNSzu1LA5IlUVTmNyC
+# GqUCxL83p/QeI5ewKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODIy
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBZA33K0fWjfF9+VZ78zk8Errtb+AesGXWG4nUj
-# acJfYTANBgkqhkiG9w0BAQEFAASCAgAU7fwGjqQJwWAWrRkXh1Csco/kJi3lrsrc
-# p6zR+UNXsQbDlvL42P5mEnPTD47r1mcxiti55lMjgntrAPAS4CxX3VIdwBu776Br
-# wQ2JjrbuHJa2r+ro2Sr4CvaMzpYFhA36GmQz9atp5gD3TtrcqX4om6q0prn7yElO
-# 1DANfPCh5zjLT60QnT1KzidAr2e9mNt6uoM09ow3/bwujnf5Tgla4ARmUL2Yg+bG
-# XpBSKpVm2uEDIh3j9kPPXqvIqh2yVIY+scF6HGy737wOizs2XBWEm4Tis7nO9auG
-# QRAokAIYPsCmRoh0V4hSORifOl/cNZTPXDg1gJ8j7Z174IY+g9iPzu2LvcJNjYea
-# cCy8KQ7GOfr99/4Yy9kbHJHLBQrlasenEVne7StRn6RCQvVCRWuDdzirJ3vpgrJN
-# UGiRx2TYRpvbn74pbsy8j4VNw7m+arnOmtzRYy5bT/vl4EgkD8tsAi3t0rBpndhy
-# kbU6qqeADDuZ1XN6nia3g+ZaHp4v4Ml6gyp6yn5M8ExuwywFNUIFS2e3Ntw02Po1
-# 35qajnMd1TwrEOg4oYNm7f9i3ymEe6M3MS56VBqhHKfL8Fk9Jrqacx5GYW0iGt7t
-# cP5WSXAfGZWmwPhOmLBUpWTH33RwgNNqBh95VVrasTf14E9Ff1rrYEcY63NHLtlt
-# AT8I1VnQhw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTA3
+# MjBaMC8GCSqGSIb3DQEJBDEiBCBfG6mBli2QTfEPKF8s3RhnTFtHX5LWPXdZnwWG
+# o3e8EDANBgkqhkiG9w0BAQEFAASCAgBf+1DPGfnIVKgjb9JDRyzWAu9FOezWYjJl
+# xdz6Rp/GPkellyuSTaZwvpmXGWiiuRlma2A0Jath4a3mBsaO2wmvon37CV+pqfFs
+# ynsQsWkgzR965Vy4ZY+G0LO5mnHdxUm/KDRORp1P2bho/yB+eHZY2k0JSBsksiiU
+# WVYsl8UXuerCWYZmmt3AVgXJgVT0xyg88w7Ed4K2foLH554B4hPJBiqhBVKBjYDo
+# Q2OuTIRCV8AoCsJHeyxhbyWn0VWVOg/L6MHeaL+Az1/6+pHE/GYgogeer63rP5fI
+# bf1Q0z/IErjRw8GlM1SD8PE9jUguF/A+h/DJpeYwO/xKg9CCR3U8O6lMm5v12db8
+# 6vwcUcn9nKzL7cqABoyAYlTomvu1IFabggjR7GM7VJow9USkZOtgAht2NcgSnMQh
+# JshRc4c5cSJXXEmHJ4AStxjZBDxWdubCsW2c3MYWd8mzpjH1VQEDJ6+XjXekUG9w
+# 2Uc/Nb2hDq9vp8ALdYxdkxK31AKQXjSru9IAU64Fir3OFtsmYKBcgPEcC8gww1RA
+# YSltoFqgLtiFufqmMcNq8lUxx+rcDlGj1bmaRhe1KlrQ+4uFY5RjfZjxgJwbmECa
+# VHvo9rde06uioPlJ+IeJvONOe05UNtjKG/Yx9oO0/VyztUkj0Byzo+DtvNzfUMtf
+# 7EHwzWTNrA==
 # SIG # End signature block
