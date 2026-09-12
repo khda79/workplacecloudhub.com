@@ -38,6 +38,9 @@ the configured cap; retry exhaustion fails the source rather than publishing a
 partial snapshot.
 
 Entra user activity requires `AuditLog.Read.All` in addition to `User.Read.All`.
+Verified-domain collection requires `Directory.Read.All`; hybrid coverage uses
+only exact normalized keys from completed AD and Entra source snapshots and
+publishes aggregate counts rather than directory identifiers.
 Microsoft 365 license collection writes a separate service-plan catalog and a
 compact effective user/service-plan fact. Missing activity or plan evidence
 remains explicit; it is never converted into zero usage or compliance.
