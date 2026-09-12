@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.5
+1.1.8
 #>
 [CmdletBinding()]
 param(
@@ -50,7 +50,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.7'
+$ScriptVersion = '1.1.8'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -79,6 +79,7 @@ function Add-SmartWorkplaceCMDBBannerLog {
 function Write-SmartWorkplaceCMDBStartupBanner {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string]$Version,
         [AllowEmptyString()][string]$LogPath = '',
         [switch]$NoConsole
     )
@@ -86,6 +87,7 @@ function Write-SmartWorkplaceCMDBStartupBanner {
     $lines = @(
         ('=' * 80),
         ' SmartWorkplaceCMDB by WorkplaceCloudHub',
+        (' Version : {0}' -f $Version),
         ' Website : https://workplacecloudhub.com',
         ' GitHub  : https://github.com/khda79/workplacecloudhub.com',
         ('=' * 80)
@@ -93,9 +95,10 @@ function Write-SmartWorkplaceCMDBStartupBanner {
     if (-not $NoConsole) {
         Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
         Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
-        Microsoft.PowerShell.Utility\Write-Host $lines[2] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $lines[2] -ForegroundColor Green
         Microsoft.PowerShell.Utility\Write-Host $lines[3] -ForegroundColor Yellow
-        Microsoft.PowerShell.Utility\Write-Host $lines[4] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $lines[4] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $lines[5] -ForegroundColor DarkCyan
     }
     Add-SmartWorkplaceCMDBBannerLog -Path $LogPath -Lines $lines
 }
@@ -485,7 +488,7 @@ $script:SmartWorkplaceCMDBCurrentRunId = ''
 $script:SmartWorkplaceCMDBCurrentRunGuard = $null
 $script:SmartWorkplaceCMDBCurrentStepName = ''
 $script:SmartWorkplaceCMDBCurrentTranscriptPath = ''
-Write-SmartWorkplaceCMDBStartupBanner
+Write-SmartWorkplaceCMDBStartupBanner -Version $ScriptVersion
 
 try {
 if ($Collect -and $ValidateOnly) {
@@ -1092,6 +1095,7 @@ Update-SmartWorkplaceCMDBRunState `
 
 if ($loggingEnabled) {
     Write-SmartWorkplaceCMDBStartupBanner `
+        -Version $ScriptVersion `
         -LogPath $orchestratorLogPath -NoConsole
     Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
         'Started orchestration. RunId={0}; Tenant={1}; Pipeline={2}; Mode={3}; Version={4}.' -f
@@ -1595,8 +1599,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtl/mpXv7wFMTg
-# ew134i9O0yBxkJ9v0rPjz7E8ZtPOdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbURtPtnFx2jh6
+# Stz6vNG0zwFGGALkdarqMs1JgCTFcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1729,31 +1733,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFByR9hvWQdFrt9gGQ/Mch0iY0xuxbao2LN0lN+sWFq2MA0GCSqG
-# SIb3DQEBAQUABIIBgCh4sPEBzE4dt54+bgY1wofkE2Y9XLQIfyXuH9emf2L70SbU
-# gB9y3kyOPmTTV6eynYEX6u/O4mFr3hsFsqPneleq5+Lh+Q+lfnexNvDVZRi0prww
-# vOU/hZkkk4ONtGGhe4LkuGs4cj42Y75iEoDWzCStNQyoqI4LUJyrOoE5M7F/ajh+
-# oM72xVVk9P5setOQJJY852NOr2xZhwDyYkg0hCMx/1FOo5Q5yFrA0YoJzWA+ZbHV
-# uQ03Q6lvRwgv1YGI6JTqpaLgoe6hGk6p3tt3zw4gnLI8BY9HljdtrUxJMe2Knkjp
-# JY25cPh2IUbt8E+BIqdx78rLuSjE8yni4GMTcbiiRFlVMBSm03KUru9riFIK3D+3
-# Boe4ffN2BfI5EuqJCgwGC02TLJIB0TPuRcTM/lbsSlpETZii8nrhgUPdnoqkR7tA
-# PQe7v4Yxv0uBIEJiHsU8ZukXLyRYTTYHkcxmn4i5qBX7GFU7AWFLloamdSK49CT+
-# HfJNCM9TX1el2bxNWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGlY808p6DXiXtHFT84SkGNaHXcDLrWQXaFjoB/72AbcMA0GCSqG
+# SIb3DQEBAQUABIIBgHGV8huzVf+Jol7K+v3O5RiOJfUpQ9Lo6d+t+Yxm3BKaOWmc
+# CSJ50T9L0LKTzmkNhUMUEKEgLGeMbKBA5CT8r8VhghQhJOvw6DCjd/4iImSnri4e
+# oRJ4sGqiKTyZ1vIPIxDnXnwy3rhixO1WlTnA99uiSUDZ6BOLLGq/apEkS6ySqQ5Y
+# qna68rd3wz1liXFna4r/urAibC+E+7BMeughyddEZjR0Jzf82K5gFUmJPc7TkJpn
+# Mj6fwWQePUxFlAXCFlmDaFJNYLOZf9fAC41byFFZ9k+yrlkRwgnX3KV5LcHVmwuU
+# lB3kkXa/dkKpB7QY4CTcGirmIS8y11/g28X7GqCeR7VTqaZ3mrjp4EDvIfmJwOqO
+# 3/zqBDfaBYIRfqKiWhY4PJBde9k037nmx3ZRw0qj+FjDiHyNUwHeIcJz/c05+eod
+# 2Uy3Xzyfwmqb4/Sa+imnGxcqP0WrAZzArEkdEnqv1MWtTpMnpPqLPyZWbSpPGl5M
+# O6uj1q34q6fZt5yQM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODM4
-# NDRaMC8GCSqGSIb3DQEJBDEiBCCsF5oKRwmyDUjyZHnv6RCP8DGLeSyqsYBf91z/
-# iO/aODANBgkqhkiG9w0BAQEFAASCAgBFAES8LXTZZHtv3bKnJcHho/IgIlqnfHma
-# JnxDsiTziwoPp583a6p274/JFbMM0VLaUN6uT51fXDO8J/eRgHh7hOHOfOc8a6qI
-# rgYyAHnp7xnuuUyfGeTnHzp7uLExQtrRJrkRfO72BHNm6XI374Jyvvr5MCuh1yG1
-# KKxlo9UFEo+hC5ja8Rwv+Bcc60RIOICUSB3CitHYGwO/Ux+oGEdBLuIIUdgCKaZL
-# zGygKceS/BDk6hTRwUXcJXIzrpTwDihabRsID6gqXoZXYCJOb9QDVncpC3vjiuaP
-# h5w3WY8zYAXJRgl3aEjKF+CMyaugNqmSX/MUr+WJagF64F1nusiqI6vWtfKSZ7x/
-# 1hhLKPkJt9kvCFytziykyn/BT168EDVQyhxE5Y8kh1aB3uaNNRUMxu8GtZrBjJ7+
-# 2tvs3AzqE/A592eXK/PeIFvP0mGbEAxk6D2UszJGyp86pw7JVWo0Zb4ftggeJ9KV
-# FWfchHlfk4seoaba2m1S80jLviAIrjnXmfqmnE/OYkOXmkmuBZb8LmtMHPU/aKkt
-# jxHY0Fudi7bFcs3cb/AE8YnkdxskO29elOYU3Gq1ZrffUD7PSr6VpY1KvKZMCM1q
-# rfUFJZ5VmZviLBStt52KEqJb1cxnswTkBsn/Cvfu/ats0J4+2/llI5qR6TzDG9Sw
-# xbkMJ6hUNA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMDI1
+# MjJaMC8GCSqGSIb3DQEJBDEiBCA/fA6XRe8UwTHjh7akPa2zG/X82UWHS7/eV6X1
+# 3P1mSjANBgkqhkiG9w0BAQEFAASCAgAwssiL4i8sAEVlOR0OAxxqENq3sz+xdgWc
+# FonCiHGOIkC7nyUm0j8E8HMWIly4dYIcXfkOO6yj1bU7RC9Ii974X2bN62zhhpdK
+# t3FhEZM+DHTwAFZXVNXc5TYKdc6GPpolZEcmNd81crYfagUnH3DeTlmTNejkEKra
+# Y/QsUAgsNUvPBGgBbf9sNtmDn6b321C6NCjNsjkCN0ckJql4gcy6SLJ/OnNYmoJy
+# W+eHVw5hGR6kcwgSbCep6/V21yCXmah2U4fb1UnR+T7XUh8Ga5VQOyPXcCYNV8fv
+# 4wmS/3PkcqcxfpJi3ZSrlt/6x+GSi6OOo6aI2bkojLkqgHlmhHKS3X1I4eyQuEgt
+# kb+R1YCDhonQCXUMshOQXenWG/6dGqSqswYxj+0L58JKqzNjDrtlSfr+LhXAC3L8
+# n+WAETGKehztGu4Cc0m1SZZatqFNjd5lG7FfL2FQ7y5hJ0/UlmclKPibL6vQ5c7i
+# MgzxMjdyYaKPgqTZkONWXkwemkoIiSp+VNPxy2U9PTppcaOLgLGbsPGjdJlYhOGW
+# FacHH/OkDDbxY26a5aIn10gl8i+yMmaCj8qZDVa/QC01pxYE38h4MWUEi/3orHGO
+# n11fi+RL3rgGuNX6W4POAoN/3E0kdEqO+Q1gjO1AIJH7EjeuQIIkBnEfK2ha66KV
+# fuvc6vTgnA==
 # SIG # End signature block
