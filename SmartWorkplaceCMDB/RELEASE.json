@@ -1,8 +1,8 @@
 {
   "product": "SmartWorkplaceCMDB",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "channel": "stable",
   "prerelease": false,
   "liveQualified": false,
-  "tag": "smartworkplacecmdb-v1.1.2"
+  "tag": "smartworkplacecmdb-v1.1.3"
 }

@@ -51,16 +51,19 @@ LOG-ALL/
     Runs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.csv
   Jobs/
     <script-name>/<script-name>_<host>_<timestamp>_<sequence>.log
+    <script-name>/<script-name>_<host>_<timestamp>_<sequence>.transcript.txt
 ```
 
 Every operational text-log line is timestamped and classified; lifecycle
-banners remain unprefixed. The run CSV records status, duration, error and the
-dedicated log path for every step. Defaults are 30 days
-and 30 files for orchestrator logs, 30 days and 30 files per script for step
-logs, and 90 days and 90 files for run CSVs. Configure these safeguards under
-the tenant-local `Logging` object. A value of `0` disables the corresponding
-age or count rule. Retention failures are warnings in the orchestrator log and
-never invalidate collected data.
+banners remain unprefixed. Each executed script also has a native PowerShell
+transcript in the same job directory. The run CSV records status, duration,
+error, dedicated log path and transcript path for every step. Defaults are 30
+days and 30 files for orchestrator logs, 30 days and 30 files per script for
+both step logs and transcripts, and 90 days and 90 files for run CSVs. Step logs
+and transcripts are counted independently. Configure these safeguards under the
+tenant-local `Logging` object. A value of `0` disables the corresponding age or
+count rule. Retention failures are warnings in the orchestrator log and never
+invalidate collected data.
 
 The console always shows the WorkplaceCloudHub startup and completion banners.
 Those banner lines are deliberately not timestamped; every operational message
