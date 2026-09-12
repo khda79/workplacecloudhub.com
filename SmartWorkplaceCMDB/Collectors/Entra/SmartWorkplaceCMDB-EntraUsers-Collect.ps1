@@ -9,7 +9,7 @@ are written to DATA-ALL and the latest raw contract is written below
 DATA-LAST\Raw\Entra. An offline JSON input is supported for safe tests.
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -191,72 +191,25 @@ function Get-SmartWorkplaceCMDBEntraUsersFromGraph {
         [int]$Limit = 0
     )
 
-    $readiness = Test-SmartWorkplaceCMDBGraphReadiness -GraphConfiguration $GraphConfiguration -ResolvedTenantId $ResolvedTenantId
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-
-    $connected = $false
-    try {
-        Connect-MgGraph -TenantId $ResolvedTenantId `
-            -ClientId $readiness.ClientId `
-            -CertificateThumbprint $readiness.CertificateThumbprint `
-            -ContextScope Process `
-            -NoWelcome `
-            -ErrorAction Stop | Out-Null
-        $connected = $true
-
-        $context = Get-MgContext -ErrorAction Stop
-        if ($null -eq $context -or
-            [string]::IsNullOrWhiteSpace([string]$context.TenantId) -or
-            [string]$context.TenantId -ne $ResolvedTenantId) {
-            throw 'Microsoft Graph connected to an unexpected tenant.'
-        }
-
-        $select = 'id,userPrincipalName,displayName,accountEnabled,userType,department,jobTitle,usageLocation,createdDateTime'
-        $uri = 'https://graph.microsoft.com/v1.0/users?$select={0}&$top=999' -f $select
-        $users = New-Object System.Collections.Generic.List[object]
-
-        while (-not [string]::IsNullOrWhiteSpace($uri)) {
-            try {
-                $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-            }
-            catch {
-                if ($_.Exception.Message -match '403|Forbidden|Authorization_RequestDenied|Insufficient') {
-                    throw 'Microsoft Graph denied the Entra users query. Grant and admin-consent the User.Read.All application permission.'
-                }
-                throw
-            }
-
-            Assert-SmartWorkplaceCMDBCollectionPage -Response $response
-            foreach ($user in @(Get-SmartWorkplaceCMDBObjectValue -InputObject $response -Name 'value')) {
-                if ($null -ne $user) {
-                    $users.Add($user)
-                    if ($Limit -gt 0 -and $users.Count -ge $Limit) {
-                        break
-                    }
-                }
-            }
-
-            if ($Limit -gt 0 -and $users.Count -ge $Limit) {
-                break
-            }
-            $uri = [string](Get-SmartWorkplaceCMDBObjectValue -InputObject $response -Name '@odata.nextLink')
-        }
-
-        return @($users.ToArray())
-    }
-    finally {
-        if ($connected -and (Get-Command Disconnect-MgGraph -ErrorAction SilentlyContinue)) {
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        }
-    }
+    $select = 'id,userPrincipalName,displayName,accountEnabled,userType,department,jobTitle,usageLocation,createdDateTime'
+    $uri = 'https://graph.microsoft.com/v1.0/users?$select={0}&$top=999' -f $select
+    return @(Invoke-SmartWorkplaceCMDBGraphPagedRequest `
+            -TenantId $ResolvedTenantId `
+            -ClientId ([string](Get-SmartWorkplaceCMDBGraphSetting $GraphConfiguration 'ClientId' '')) `
+            -CertificateThumbprint ([string](Get-SmartWorkplaceCMDBGraphSetting $GraphConfiguration 'CertificateThumbprint' '')) `
+            -Uri $uri `
+            -RequiredPermission 'User.Read.All' `
+            -MaxItems $Limit)
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 $modulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
+$graphModulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMDB.Graph\SmartWorkplaceCMDB.Graph.psd1'
 $rawContractPath = Join-Path -Path $projectRoot -ChildPath 'Schema\SmartWorkplaceCMDB.raw.tables.json'
 
 Import-Module $modulePath -Force
+Import-Module $graphModulePath -Force
 
 $boundParameterCopy = @{}
 foreach ($key in $PSBoundParameters.Keys) {
@@ -395,33 +348,14 @@ $historyFolder = Join-Path -Path $paths.DataAllRootPath -ChildPath (
 )
 $historyName = 'Entra_Users_{0}.csv' -f $historyTimestamp.ToString('yyyyMMdd-HHmmssfff')
 $historyPath = Join-Path -Path $historyFolder -ChildPath $historyName
-$exportParameters = @{
-    InputObject      = $rawRows
-    Columns          = @($rawTable.columns | ForEach-Object { [string]$_ })
-    TenantKey        = $paths.TenantKey
-    OrganizationKey  = $paths.OrganizationKey
-    EnvironmentKey   = $paths.EnvironmentKey
-    TenantId         = $paths.TenantId
-}
-
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $historyPath
-Export-SmartWorkplaceCMDBCsv @exportParameters -Path $RawLatestOutputPath
-
-$validationRoot = $paths.LatestOutputRootPath
-$expectedDefaultLatestPath = Join-Path -Path $validationRoot -ChildPath (
-    Join-Path -Path ([string]$rawTable.area) -ChildPath ([string]$rawTable.name)
-)
-if ([System.IO.Path]::GetFullPath($expectedDefaultLatestPath) -eq $RawLatestOutputPath) {
-    $contractResult = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $validationRoot `
-        -ContractPath $rawContractPath)
-    $userContractResult = @($contractResult | Where-Object Name -eq 'Entra_Users.csv')
-    if ($userContractResult.Count -ne 1 -or $userContractResult[0].Status -ne 'Valid') {
-        throw 'The latest Entra users raw CSV does not satisfy the raw SmartWorkplaceCMDB contract.'
-    }
-}
-
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun
+Publish-SmartWorkplaceCMDBSourceCsv `
+    -Run $sourceRun `
+    -InputObject $rawRows `
+    -Columns @($rawTable.columns | ForEach-Object { [string]$_ }) `
+    -HistoryPath $historyPath `
+    -LatestPath $RawLatestOutputPath `
+    -ContractPath $rawContractPath `
+    -ContractTableName 'Entra_Users.csv' | Out-Null
 
 Write-Information (
     "SmartWorkplaceCMDB Entra users collection completed. Users={0}; history='{1}'; latest='{2}'." -f
@@ -450,8 +384,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzrclZUpWG04x/
-# dr4ER/EDR6GA3jNyW+2L19IbQBZhraCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxTS14hS56NBiS
+# eiztiC8VcukGmgQpU/VyZS6I4rgscaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -584,31 +518,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEING8iUkdOEd+0u2P/OKcda6wvKIoBiHZZHARChpeKfkVMA0GCSqG
-# SIb3DQEBAQUABIIBgBL6Umz3H04Eer01m3VchfHCt9OnEjl0mjdQ42wBXSPNetiQ
-# a7jKMrWKREzI8WL7Uy/mII7yvkOoyXn1p2sNDr/KTeeCZsBLvB36W5EqCj3PE9RB
-# HhQ6PXjaI+/snufMmgoJE4SvZTupchlfXL9/04PqN8zEfD2MlyxvaO+SxfxbgI5/
-# J+NiwiUIxYdCnY0Y53AGDI4qcxax83Rk/zITCaVaaHiRltWZhQoGlgeiWtc0mOiU
-# wwGJVyrvRQaecwIbgSBZ0f1MRNkZnspcHeTmgloHrCQ8nm+xEedA8jC8mkpfGUGH
-# Hbbh73hdT5BwsmgklcwMTiTUqysv6U9/vC8xVOTtHPkc2TUp80pcvXako5qzkVFF
-# +j3UeNufB6nCcVPOFXqGrCKpbw99DCq98lx2kPlBctLeCKHxSqhZOMHBPYoAZpfX
-# 6l/5Y7iiSyIS6MyphWwLxEdn5WCZtvNA+eVlkm346doxJM3k8PVrVvNGdLFmYJbl
-# 06yktvl1hQhHsiSfC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID9S4AWR+fnBb4sY+cW6jiybFCLKUk9CPdM1oSh/zafoMA0GCSqG
+# SIb3DQEBAQUABIIBgKRWAE77M0vBhu7TX8NYyUjui9EjTlFUY6AufRgo0qn/nYsn
+# VSwhs+gNUuc3T5Ranw6KrmXM81Hleb+v//Iv6Fv2Yp1xh54KTSJvnIqQh8vtMWvI
+# PwXA3Nn70Vh9D2aB3PCwGQ4lpkjO8doeoECIfk6+Q+1vmo6BhUy7ANO8rxX/cV/W
+# 0z9s2/oyLlDEmSWpWf1th6yyTYtNQqT4LYnbatWa0HR33Fs35m1dgMvowa+f6pGP
+# I1qjYFYGQ3qK677v5RGzogscl5cZN7I6p4vDhBxKUwLTzT61t9j7JuctmV4uqvDv
+# uqcfsx9tySjKm/VhM/ChWL1+iXZjARI17Kwb+Y0a/eC/BQRu6rt5byE15LL+cf3h
+# DU5hSs9pLSFmAuRew/mJx8ytnh+GnABxDNBMn7+y/2y2Cs1d0BBs+9zXnkKxTnvC
+# oW3c+J5X2SU4AwDVZoi7hQA+jIUr4PrhnXaq30mw7V556NaOSZLFocs9taWCeNux
+# de6Pa9sNycVO1zIXUqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTJaMC8GCSqGSIb3DQEJBDEiBCDNDVczaUmIIX9WdWii8ewVZ51IWZQ461qb3OgM
-# +G5XkjANBgkqhkiG9w0BAQEFAASCAgBpeej4GjmVzk6JshErx9nyi0dZdQRjait3
-# UDsAVnTFfMCBu/DnkLYnk2/zWYPWsOO5iy57HvlWPX5tHl+Xfcr6Dwl0r6MrC3vO
-# UnL26WSbI1wmbQJep3KmgPTEaY6Y97vWJGOgHqKjhnOxOqxpeBR6T60938BLeiHJ
-# BJf0ih5OZJjbKCJotEpAmrgwfIp0xxpqDIcJt/mB80VOCE4aPz2tWWhTXZKNSunt
-# sNcO7Pswqlt6QxAhYAVMuc5VTMRn9YllK2lVLF5ezgMRJ+SGQ3BBAmEwarb5l3oB
-# JKAx4SuNsQzvEIHbPT0wDifqsyOL4JMWvAiuYlOBZkd+CIAHeuZKXqPzsJTbYzFp
-# tNf6AOQ3eKGiq80MLtrfFxm3OVe0RhaRz97bajaxsmOla9hkWH3GsA8dEG6kdm0i
-# yH6oPKCN9mZ/W3Ae11sxicztgTHfBE+qcPNN4j2yJHKMVqnzD1SGXRVo30cq50uf
-# iOQmWyU34q450rYmwcgCCVGoQUPHDcj8GloTQFlS7e1WMgebnQLGLLO8QprijvhI
-# ClzhmrExRw3H177bttK3h2tCuVqsOydZCf72pZ/W8kBEBawRWpdLO0E5zxv/ymza
-# 3QvEYz9XFkZtoxTvVIIfcKyqfNcXv2Vudx4Tl/V5+BEAJf7Gi6f0FzS5qkyBdK8o
-# jKh0zaW+/w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCCsazRR0CYgMHiTDDShLLPH/Pwq1RNvObTKuZaL
+# t18f0zANBgkqhkiG9w0BAQEFAASCAgAgnu8153ceurzhh6zFbF3eoYzM1kHWqEC9
+# T0Qerw/Y8Jh71D4tjnxiZLVwnyr1sg+ks3AK0sib84WyYZcVy0338KTPRToFt+7n
+# mfcpPddIcvWUYwl+e/5bANT6Kv7a8vJxd+7+u86CQiX54ErT6dMqFovNATqI4/kF
+# LUl3QanZ65GMu9Xwf1HNwdK6N619kTwk8C4L3PTZM9staFH3PfWGEVp9fiTUXk3G
+# gzj99HlM/YAhXNbnqK2u4S5P4EpBTi6E9fQgSFoEQrtUR1myqxcheRNd+PSaBzUy
+# VhIeEt9Z0hBL+uVtL6gg3zfksrMoKKcm+fwWXqeavTlPrZRuPhTc0yxkb7IxTFvS
+# MfJtN0k8s6a0f13y/MOoK/bXAQd0Rs9Ucz9Bx7R6LyJr1Ir46HYENfp3793SthvS
+# STxlthjvY51lRkEzoHQT3Xv3Ff4X3DLGt+M6X9Z8oXrTOdGa4XXzQFmunrw4lN3P
+# yEfD145YN1SIpTwVpg1GgiEXGltPy8hlwv+yg7iuxNYNdYycqughQJrpbVksI0ui
+# /MHtusc9Cp76oGXL9w/F/n83KAdBRV3WrDIpynu/b2AObIC1e4Brj40fb83ybWvz
+# t4NlH5WAIDP/NsN7fnZZXoDWU8idxNMZEnN5tejYiWN/J0fjiYMefs/6Qa03XURJ
+# J03Y2tsVAw==
 # SIG # End signature block

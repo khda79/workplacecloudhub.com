@@ -1,5 +1,5 @@
 {
-  "ConfigVersion": "0.3.0",
+  "ConfigVersion": "0.5.1",
   "ProfileKey": "default",
   "OrganizationKey": "organization",
   "EnvironmentKey": "default",
@@ -22,6 +22,10 @@
     "ForestWide": true,
     "Server": "",
     "SearchBase": "",
+    "TargetDomains": "",
+    "DomainRetryCount": 3,
+    "DomainRetryDelaysSeconds": "5,15,30",
+    "DomainParallelThrottleLimit": 1,
     "IncludeGroupMemberships": true
   },
   "Output": {
@@ -36,5 +40,14 @@
     "SitePath": "",
     "LibraryDisplayName": "Documents",
     "TargetFolderPath": "SMART-CMDB/DATA"
+  },
+  "Notifications": {
+    "Enabled": false,
+    "SendMailMode": "Graph",
+    "From": "sender@example.invalid",
+    "To": "recipient@example.invalid",
+    "Cc": "",
+    "Subject": "Smart Workplace CMDB",
+    "MailClientName": "Example tenant"
   }
 }

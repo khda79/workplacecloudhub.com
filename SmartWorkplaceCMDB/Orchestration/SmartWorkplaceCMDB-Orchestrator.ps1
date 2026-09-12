@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.0.0
+1.1.1
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +47,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -158,6 +158,154 @@ function Write-SmartWorkplaceCMDBOrchestratorLog {
         Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
 }
 
+function ConvertTo-SmartWorkplaceCMDBLogName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Value)
+
+    $invalid = [IO.Path]::GetInvalidFileNameChars()
+    $escaped = [regex]::Escape((-join $invalid))
+    $name = [regex]::Replace($Value, "[$escaped]", '-')
+    $name = [regex]::Replace($name, '[^A-Za-z0-9._-]', '-')
+    return $name.Trim('-')
+}
+
+function Write-SmartWorkplaceCMDBTextLog {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowEmptyString()][string]$Message,
+        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR', 'OUTPUT')]
+        [string]$Level = 'INFO'
+    )
+
+    $folder = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $lines = @([string]$Message -split "`r?`n")
+    if ($lines.Count -eq 0) { $lines = @('') }
+    foreach ($line in $lines) {
+        $entry = '[{0}] [{1}] {2}{3}' -f
+            (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'),
+            $Level,
+            $line,
+            [Environment]::NewLine
+        [IO.File]::AppendAllText($Path, $entry, $encoding)
+    }
+}
+
+function Invoke-SmartWorkplaceCMDBLogRetention {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FolderPath,
+        [Parameter(Mandatory)][string]$Filter,
+        [ValidateRange(0, 36500)][int]$RetentionDays,
+        [ValidateRange(0, 100000)][int]$MaxFiles,
+        [switch]$Recurse,
+        [string[]]$ExcludePath = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) {
+        return @()
+    }
+    $excluded = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @($ExcludePath)) {
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            [void]$excluded.Add([IO.Path]::GetFullPath($path))
+        }
+    }
+    $removed = New-Object System.Collections.Generic.List[string]
+    $files = @(Get-ChildItem -LiteralPath $FolderPath -Filter $Filter -File `
+            -Recurse:$Recurse -ErrorAction SilentlyContinue)
+    if ($RetentionDays -gt 0) {
+        $cutoff = (Get-Date).AddDays(-1 * $RetentionDays)
+        foreach ($file in @($files | Where-Object {
+                    $_.LastWriteTime -lt $cutoff -and
+                    -not $excluded.Contains($_.FullName)
+                })) {
+            try {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                $removed.Add("age:$($file.FullName)")
+            }
+            catch {
+                $removed.Add("failed:$($file.FullName):$($_.Exception.Message)")
+            }
+        }
+    }
+    if ($MaxFiles -gt 0) {
+        $remaining = @(Get-ChildItem -LiteralPath $FolderPath -Filter $Filter -File `
+                -Recurse:$Recurse -ErrorAction SilentlyContinue)
+        foreach ($group in @($remaining | Group-Object DirectoryName)) {
+            $overflow = @($group.Group |
+                Sort-Object LastWriteTimeUtc, Name -Descending |
+                Select-Object -Skip $MaxFiles)
+            foreach ($file in $overflow) {
+                if ($excluded.Contains($file.FullName)) { continue }
+                try {
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    $removed.Add("count:$($file.FullName)")
+                }
+                catch {
+                    $removed.Add("failed:$($file.FullName):$($_.Exception.Message)")
+                }
+            }
+        }
+    }
+    return @($removed.ToArray())
+}
+
+function Invoke-SmartWorkplaceCMDBLoggedStep {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Step,
+        [Parameter(Mandatory)][hashtable]$Parameters,
+        [Parameter(Mandatory)][string]$LogPath
+    )
+
+    Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+        "Started step '{0}'. Script='{1}'." -f $Step.Name, $Step.ScriptPath)
+    try {
+        & $Step.ScriptPath @Parameters *>&1 | ForEach-Object {
+            $record = $_
+            $level = if ($record -is [System.Management.Automation.ErrorRecord]) {
+                'ERROR'
+            }
+            elseif ($record -is [System.Management.Automation.WarningRecord]) {
+                'WARN'
+            }
+            elseif ($record -is [System.Management.Automation.DebugRecord]) {
+                'DEBUG'
+            }
+            elseif ($record -is [System.Management.Automation.VerboseRecord]) {
+                'DEBUG'
+            }
+            elseif ($record -is [System.Management.Automation.InformationRecord]) {
+                'INFO'
+            }
+            else {
+                'OUTPUT'
+            }
+            $text = if ($record -is [System.Management.Automation.InformationRecord]) {
+                [string]$record.MessageData
+            }
+            else {
+                [string]$record
+            }
+            Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message $text -Level $level
+        }
+        Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+            "Completed step '{0}'." -f $Step.Name)
+    }
+    catch {
+        Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+            "Failed step '{0}': {1}" -f $Step.Name, $_.Exception.Message) `
+            -Level ERROR
+        throw
+    }
+}
+
 if ($Collect -and $ValidateOnly) {
     throw '-Collect and -ValidateOnly cannot be used together.'
 }
@@ -248,6 +396,36 @@ $graphConfiguration = Get-SmartWorkplaceCMDBOrchestratorSetting `
     -Configuration $context.Configuration `
     -Name 'MicrosoftGraph' `
     -DefaultValue $null
+$notificationConfiguration = Get-SmartWorkplaceCMDBOrchestratorSetting `
+    -Configuration $context.Configuration `
+    -Name 'Notifications' `
+    -DefaultValue $null
+$loggingConfiguration = Get-SmartWorkplaceCMDBOrchestratorSetting `
+    -Configuration $context.Configuration `
+    -Name 'Logging' `
+    -DefaultValue $null
+$activeDirectoryConfiguration = Get-SmartWorkplaceCMDBOrchestratorSetting `
+    -Configuration $context.Configuration `
+    -Name 'ActiveDirectory' `
+    -DefaultValue $null
+$activeDirectoryTargetDomains = [string](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        -Configuration $activeDirectoryConfiguration `
+        -Name 'TargetDomains' `
+        -DefaultValue ''
+)
+$activeDirectoryScoped = $Pipeline -in @('Full', 'ActiveDirectory') -and (
+    -not [bool](Get-SmartWorkplaceCMDBOrchestratorSetting `
+            -Configuration $activeDirectoryConfiguration `
+            -Name 'ForestWide' `
+            -DefaultValue $true) -or
+    -not [string]::IsNullOrWhiteSpace([string](
+            Get-SmartWorkplaceCMDBOrchestratorSetting `
+                -Configuration $activeDirectoryConfiguration `
+                -Name 'SearchBase' `
+                -DefaultValue '')) -or
+    -not [string]::IsNullOrWhiteSpace($activeDirectoryTargetDomains)
+)
 $sharePointEnabled = [bool](Get-SmartWorkplaceCMDBOrchestratorSetting `
         -Configuration $sharePointConfiguration `
         -Name 'Enabled' `
@@ -255,7 +433,70 @@ $sharePointEnabled = [bool](Get-SmartWorkplaceCMDBOrchestratorSetting `
 $sharePointEligible = $mode -eq 'Collect' -and
     $MaxItems -eq 0 -and
     -not $DisableSharePointUpload -and
+    -not $activeDirectoryScoped -and
     $sharePointEnabled
+$summaryEnabled = [bool](Get-SmartWorkplaceCMDBOrchestratorSetting `
+        -Configuration $notificationConfiguration `
+        -Name 'Enabled' `
+        -DefaultValue $false)
+if ($summaryEnabled -and $Pipeline -eq 'Full') {
+    $summaryMode = [string](Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $notificationConfiguration 'SendMailMode' 'Graph')
+    $summaryFrom = [string](Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $notificationConfiguration 'From' '')
+    $summaryTo = [string](Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $notificationConfiguration 'To' '')
+    if ($summaryMode.ToUpperInvariant() -notin @('GRAPH','SMTP','BOTH')) {
+        throw "Unsupported Notifications.SendMailMode '$summaryMode'. Use Graph, SMTP, or Both."
+    }
+    if ([string]::IsNullOrWhiteSpace($summaryFrom) -or
+        [string]::IsNullOrWhiteSpace($summaryTo)) {
+        throw 'Notifications.From and Notifications.To are required when full-collection summaries are enabled.'
+    }
+    $graphMailConfigured = -not [string]::IsNullOrWhiteSpace([string]$paths.TenantId) -and
+        -not [string]::IsNullOrWhiteSpace([string](Get-SmartWorkplaceCMDBOrchestratorSetting `
+                $graphConfiguration 'ClientId' '')) -and
+        -not [string]::IsNullOrWhiteSpace([string](Get-SmartWorkplaceCMDBOrchestratorSetting `
+                $graphConfiguration 'CertificateThumbprint' ''))
+    $smtpMailConfigured = -not [string]::IsNullOrWhiteSpace([string](
+        Get-SmartWorkplaceCMDBOrchestratorSetting $notificationConfiguration 'SmtpServer' ''))
+    if ($summaryMode.ToUpperInvariant() -eq 'GRAPH' -and -not $graphMailConfigured) {
+        throw 'MicrosoftGraph TenantId, ClientId, and CertificateThumbprint are required for Graph summary mail.'
+    }
+    if ($summaryMode.ToUpperInvariant() -eq 'SMTP' -and -not $smtpMailConfigured) {
+        throw 'Notifications.SmtpServer is required for SMTP summary mail.'
+    }
+    if ($summaryMode.ToUpperInvariant() -eq 'BOTH' -and
+        -not ($graphMailConfigured -or $smtpMailConfigured)) {
+        throw 'Graph app-only settings or Notifications.SmtpServer are required for summary mail fallback.'
+    }
+}
+$summaryEligible = $mode -eq 'Collect' -and
+    $Pipeline -eq 'Full' -and
+    $MaxItems -eq 0 -and
+    -not $activeDirectoryScoped -and
+    $summaryEnabled
+$loggingEnabled = $mode -ne 'Validate' -and [bool](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'Enabled' $true)
+$orchestratorLogRetentionDays = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'OrchestratorLogRetentionDays' 30))
+$stepLogRetentionDays = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'StepLogRetentionDays' 30))
+$runCsvRetentionDays = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'RunCsvRetentionDays' 90))
+$maxOrchestratorLogs = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'MaxOrchestratorLogs' 30))
+$maxStepLogsPerScript = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'MaxStepLogsPerScript' 30))
+$maxRunCsvFiles = [math]::Max(0, [int](
+    Get-SmartWorkplaceCMDBOrchestratorSetting `
+        $loggingConfiguration 'MaxRunCsvFiles' 90))
 $sharePointBeforeSnapshot = if ($sharePointEligible) {
     Get-SmartWorkplaceCMDBCsvSnapshot -RootPath @(
         $paths.DataAllRootPath,
@@ -522,17 +763,105 @@ if ($mode -eq 'Validate' -and
 
 $runId = [guid]::NewGuid().ToString('N')
 $runStarted = [datetimeoffset]::UtcNow
+$computerName = if ([string]::IsNullOrWhiteSpace([string]$env:COMPUTERNAME)) {
+    'unknown-host'
+}
+else {
+    ConvertTo-SmartWorkplaceCMDBLogName -Value $env:COMPUTERNAME
+}
+$runStamp = $runStarted.ToString('yyyyMMdd-HHmmssfff')
+$orchestratorLogFolderPath = Join-Path $paths.LogRootPath `
+    'Orchestration\Logs'
+$runCsvFolderPath = Join-Path $paths.LogRootPath 'Orchestration\Runs'
+$stepLogRootPath = Join-Path $paths.LogRootPath 'Jobs'
+$orchestratorLogPath = if ($loggingEnabled) {
+    Join-Path $orchestratorLogFolderPath (
+        'SmartWorkplaceCMDB-Orchestrator_{0}_{1}.log' -f
+        $computerName,
+        $runStamp)
+}
+else { '' }
+$summaryScriptPath = Join-Path $projectRoot 'Reports\SmartWorkplaceCMDB-CollectionSummary.ps1'
+$summaryParameters = @{
+    Tenant = $paths.ProfileKey
+    OrganizationKey = $paths.OrganizationKey
+    EnvironmentKey = $paths.EnvironmentKey
+    TenantKey = $paths.TenantKey
+    TenantId = $paths.TenantId
+    DataRootPath = $paths.DataRootPath
+    DataAllRootPath = $paths.DataAllRootPath
+    LatestOutputRootPath = $paths.LatestOutputRootPath
+    LogRootPath = $paths.LogRootPath
+    RunId = $runId
+    NoConfigWrite = $true
+}
+if (-not [string]::IsNullOrWhiteSpace($GlobalConfigPath)) {
+    $summaryParameters['GlobalConfigPath'] = $GlobalConfigPath
+}
+if (-not [string]::IsNullOrWhiteSpace($TenantConfigPath)) {
+    $summaryParameters['TenantConfigPath'] = $TenantConfigPath
+}
+if ($summaryEligible) {
+    try {
+        @(& $summaryScriptPath @summaryParameters -CaptureBaselineOnly `
+                -SnapshotDateTime $runStarted) | Out-Null
+    }
+    catch {
+        Write-Warning (
+            'The pre-collection summary baseline could not be captured. ' +
+            'The collection will continue and unavailable comparisons will be shown as n/a. ' +
+            $_.Exception.Message)
+    }
+}
 $results = New-Object System.Collections.Generic.List[object]
-$logPath = if ($mode -eq 'Validate') {
+$logPath = if (-not $loggingEnabled) {
     ''
 }
 else {
-    Join-Path $paths.LogRootPath (
-        Join-Path 'Orchestration' (
-            'SmartWorkplaceCMDB-Orchestrator_{0}.csv' -f
-            $runStarted.ToString('yyyyMMdd-HHmmssfff')
-        )
-    )
+    Join-Path $runCsvFolderPath (
+        'SmartWorkplaceCMDB-Orchestrator_{0}_{1}.csv' -f
+        $computerName,
+        $runStamp)
+}
+
+if ($loggingEnabled) {
+    Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+        'Started orchestration. RunId={0}; Tenant={1}; Pipeline={2}; Mode={3}; Version={4}.' -f
+        $runId,
+        $paths.TenantKey,
+        $Pipeline,
+        $mode,
+        $ScriptVersion)
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $orchestratorLogFolderPath `
+            -Filter 'SmartWorkplaceCMDB-Orchestrator_*.log' `
+            -RetentionDays $orchestratorLogRetentionDays `
+            -MaxFiles $maxOrchestratorLogs `
+            -ExcludePath $orchestratorLogPath)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $runCsvFolderPath `
+            -Filter 'SmartWorkplaceCMDB-Orchestrator_*.csv' `
+            -RetentionDays $runCsvRetentionDays `
+            -MaxFiles $maxRunCsvFiles `
+            -ExcludePath $logPath)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $stepLogRootPath `
+            -Filter '*.log' `
+            -RetentionDays $stepLogRetentionDays `
+            -MaxFiles $maxStepLogsPerScript `
+            -Recurse)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
 }
 
 $failedMessage = ''
@@ -561,6 +890,25 @@ try {
         ) -InformationAction Continue
 
         $stepStarted = [datetimeoffset]::UtcNow
+        $stepScriptName = ConvertTo-SmartWorkplaceCMDBLogName -Value (
+            [IO.Path]::GetFileNameWithoutExtension([string]$step.ScriptPath))
+        $stepLogPath = if ($loggingEnabled) {
+            Join-Path (Join-Path $stepLogRootPath $stepScriptName) (
+                '{0}_{1}_{2}_{3:D2}.log' -f
+                $stepScriptName,
+                $computerName,
+                $runStamp,
+                $sequence)
+        }
+        else { '' }
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+                '[{0}/{1}] Started {2}. StepLog={3}' -f
+                $sequence,
+                $executionSteps.Count,
+                $step.Name,
+                $stepLogPath)
+        }
         $status = 'Completed'
         $errorText = ''
         try {
@@ -570,7 +918,15 @@ try {
                 -Mode $mode `
                 -FixtureRootPath $FixtureRootPath `
                 -MaxItems $MaxItems
-            @(& $step.ScriptPath @parameters) | Out-Null
+            if ($loggingEnabled) {
+                Invoke-SmartWorkplaceCMDBLoggedStep `
+                    -Step $step `
+                    -Parameters $parameters `
+                    -LogPath $stepLogPath
+            }
+            else {
+                @(& $step.ScriptPath @parameters) | Out-Null
+            }
             if ($mode -eq 'Validate') {
                 $status = 'Validated'
             }
@@ -578,10 +934,21 @@ try {
         catch {
             $status = 'Failed'
             $errorText = $_.Exception.Message
+            if ($loggingEnabled) {
+                Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+                    -Message ("Failed {0}: {1}" -f $step.Name, $errorText) `
+                    -Level ERROR
+            }
             throw
         }
         finally {
             $stepEnded = [datetimeoffset]::UtcNow
+            if ($loggingEnabled -and $status -ne 'Failed') {
+                Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+                    'Completed {0}. DurationSeconds={1}.' -f
+                    $step.Name,
+                    [math]::Round(($stepEnded - $stepStarted).TotalSeconds, 3))
+            }
             $results.Add([pscustomobject][ordered]@{
                 RunId = $runId
                 Sequence = $sequence
@@ -595,6 +962,7 @@ try {
                     ($stepEnded - $stepStarted).TotalSeconds,
                     3
                 )
+                LogPath = $stepLogPath
                 Error = $errorText
             })
         }
@@ -604,7 +972,7 @@ catch {
     $failedMessage = $_.Exception.Message
 }
 finally {
-    if ($mode -ne 'Validate') {
+    if ($loggingEnabled) {
         Write-SmartWorkplaceCMDBOrchestratorLog `
             -Results $results `
             -Path $logPath
@@ -612,6 +980,10 @@ finally {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($failedMessage)) {
+    if ($loggingEnabled) {
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Orchestration failed: $failedMessage" -Level ERROR
+    }
     throw "SmartWorkplaceCMDB orchestration failed: $failedMessage"
 }
 
@@ -652,11 +1024,20 @@ if ($sharePointEligible) {
     }
     catch {
         $sharePointError = $_.Exception.Message
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+                -Message "SharePoint publication failed: $sharePointError" `
+                -Level WARN
+        }
         Write-Warning "SmartWorkplaceCMDB SharePoint publication failed but collection outputs are preserved: $sharePointError"
     }
 }
 elseif ($mode -eq 'Collect' -and $MaxItems -gt 0 -and $sharePointEnabled) {
     Write-Information 'SharePoint publication skipped for the bounded MaxItems run.' `
+        -InformationAction Continue
+}
+elseif ($mode -eq 'Collect' -and $activeDirectoryScoped -and $sharePointEnabled) {
+    Write-Information 'SharePoint publication skipped for the scoped Active Directory run.' `
         -InformationAction Continue
 }
 
@@ -685,6 +1066,44 @@ elseif ($sharePointFailureCount -gt 0 -or
 else {
     'Completed'
 }
+$summaryResult = $null
+$summaryError = ''
+if ($summaryEligible) {
+    try {
+        $summaryResult = & $summaryScriptPath @summaryParameters `
+            -RunStatus $runStatus `
+            -SnapshotDateTime $runEnded
+        Write-Information (
+            "SmartWorkplaceCMDB full-collection summary email sent. HTML='{0}'." -f
+            $summaryResult.HtmlPath
+        ) -InformationAction Continue
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+                "Full-collection summary email sent. HTML='{0}'." -f
+                $summaryResult.HtmlPath)
+        }
+    }
+    catch {
+        $summaryError = $_.Exception.Message
+        $runStatus = 'CompletedWithWarnings'
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+                -Message "Full-collection summary email failed: $summaryError" `
+                -Level WARN
+        }
+        Write-Warning "SmartWorkplaceCMDB summary email failed but collection outputs are preserved: $summaryError"
+    }
+}
+elseif ($mode -eq 'Collect' -and $Pipeline -eq 'Full' -and
+    $MaxItems -gt 0 -and $summaryEnabled) {
+    Write-Information 'Full-collection summary email skipped for the bounded MaxItems run.' `
+        -InformationAction Continue
+}
+elseif ($mode -eq 'Collect' -and $Pipeline -eq 'Full' -and
+    $activeDirectoryScoped -and $summaryEnabled) {
+    Write-Information 'Full-collection summary email skipped because Active Directory collection is scoped.' `
+        -InformationAction Continue
+}
 Write-Information (
     "SmartWorkplaceCMDB orchestration {0}. Pipeline={1}; Mode={2}; Steps={3}; Duration={4}." -f
     $runStatus.ToLowerInvariant(),
@@ -693,6 +1112,44 @@ Write-Information (
     $results.Count,
     ($runEnded - $runStarted).ToString('hh\:mm\:ss')
 ) -InformationAction Continue
+
+if ($loggingEnabled) {
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $orchestratorLogFolderPath `
+            -Filter 'SmartWorkplaceCMDB-Orchestrator_*.log' `
+            -RetentionDays $orchestratorLogRetentionDays `
+            -MaxFiles $maxOrchestratorLogs `
+            -ExcludePath $orchestratorLogPath)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $runCsvFolderPath `
+            -Filter 'SmartWorkplaceCMDB-Orchestrator_*.csv' `
+            -RetentionDays $runCsvRetentionDays `
+            -MaxFiles $maxRunCsvFiles `
+            -ExcludePath $logPath)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
+    foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
+            -FolderPath $stepLogRootPath `
+            -Filter '*.log' `
+            -RetentionDays $stepLogRetentionDays `
+            -MaxFiles $maxStepLogsPerScript `
+            -Recurse)) {
+        $level = if ($retentionEntry.StartsWith('failed:')) { 'WARN' } else { 'INFO' }
+        Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+            -Message "Retention: $retentionEntry" -Level $level
+    }
+    Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+        'Completed orchestration. Status={0}; Steps={1}; DurationSeconds={2}.' -f
+        $runStatus,
+        $results.Count,
+        [math]::Round(($runEnded - $runStarted).TotalSeconds, 3))
+}
 
 [pscustomobject]@{
     Status = $runStatus
@@ -712,6 +1169,15 @@ Write-Information (
     DataRootPath = $paths.DataRootPath
     LatestOutputRootPath = $paths.LatestOutputRootPath
     LogPath = $logPath
+    OrchestratorLogPath = $orchestratorLogPath
+    StepLogRootPath = if ($loggingEnabled) { $stepLogRootPath } else { '' }
+    LoggingEnabled = $loggingEnabled
+    OrchestratorLogRetentionDays = $orchestratorLogRetentionDays
+    StepLogRetentionDays = $stepLogRetentionDays
+    RunCsvRetentionDays = $runCsvRetentionDays
+    MaxOrchestratorLogs = $maxOrchestratorLogs
+    MaxStepLogsPerScript = $maxStepLogsPerScript
+    MaxRunCsvFiles = $maxRunCsvFiles
     SharePointEnabled = $sharePointEnabled
     SharePointEligible = $sharePointEligible
     SharePointUploadCount = $sharePointUploadCount
@@ -724,13 +1190,18 @@ Write-Information (
             'SMART-CMDB/DATA'
     )
     SharePointError = $sharePointError
+    SummaryEmailEnabled = $summaryEnabled
+    SummaryEmailEligible = $summaryEligible
+    SummaryEmailStatus = if ($summaryResult) { [string]$summaryResult.Status } elseif ($summaryEligible) { 'Failed' } else { 'NotApplicable' }
+    SummaryEmailHtmlPath = if ($summaryResult) { [string]$summaryResult.HtmlPath } else { '' }
+    SummaryEmailError = $summaryError
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmBUxwDCKcBDfS
-# lMcoEzBsI4J5ejyNlxh0OUBv0oHomKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACyrIYeB30uR/C
+# 9BbinCyMP+Y8RkV4dhKNfkBjCMtXs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -863,31 +1334,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC941ZRa39Bz99i7TD+8xm4nu1/lqbGfO3UdHES/IVkoMA0GCSqG
-# SIb3DQEBAQUABIIBgKCsCwChSXWnkMsjj0Mls2bwdzqspZWWjpDmk3M0zFrquDS2
-# I3dt8KQHClswZ4FIjzrK1l8HAqOx/EaBeVcHqBc5BvUdY19H4NNqH/4LObnQepiC
-# roQDJDLo6Q0Ny/BI21wHm27wPDje3gCb9pqOzz2vY9d0yfRsJ7pI+rkJyUSUoS1G
-# CfR7CH5VsaqfbTaWLrgya4JQZx8eY3yGL1aVrsH6fB2jRox+fZg9oSrFWpJ2i7Qe
-# apnAVfB5EXC3CT8letPWe49Jc7qJdOTlRC/HZDCvbfuJkaqg7gqTAIpc5djBtRqq
-# ZvXwursdwifwY3CCmBfR58WQG1oCuHEevH8ooRYfZkmCb1D2sx1CGEGRMYOWcJmH
-# t3WAaNpIrQ9UPY5y6W80sMGLSSkMflGRNbnIrqziFsXAaVyB8NnPOT2hxeLPuiwL
-# BuniHRBoKvi1BZqsfvMYxCCKLqnPC8mZyMny9/cnIdTw5o+Y+E6yo0R7g4G//nef
-# RP5g+DrF5HJYWoqDPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAL62abgSDu9Qzg1MNt6BFKqBinzx9/r2kWODkMPmvbcMA0GCSqG
+# SIb3DQEBAQUABIIBgJ23Pxu8nmYSV5QzIzZwOTjwOxXQeATnX/dsKO53iSiOlJKy
+# /Smx/Vrdp/nmZDMIgkdHFCrzRLLagfXz76v10LAIa1wmeaJcBckh6sEWDAZCO1w8
+# c3ZD5zMRNGFNH1netaYQZxSVpmdDt3gm25CjsvXTD1ZR0ldMhkrW1n5LEvPTFHZv
+# 0Ljzm1m/AqiD4bUjEdcOmzHWVpJzbsvaeBPD2p+ul7hszqOr43rBE6mBtjd7b3zl
+# 6RajsJn8v8PR0W3houTFcCdDDTqNxQTsnxEXVkJflf7vK/m1pM2N2XZKTMmPf8Ts
+# IiLJyZaNl/plw2IPXfJYpXt70cYb8RwY6VYrK4OkW99iQbF9XboV3GmZUo1E1VjH
+# ieMB3h+FgaiBjIarkrgLLjRiIo3/kbF8FSQtBTWpewczrtox9AKIsDz+WAol1NYz
+# bR64c97PKQWYC1oyNTFbuJyFEZgcGtiNAdTm5omCaSV/kLsPJhT+IfwNfc7w2NJG
+# VPHxn1gkuX3dXQkss6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTdaMC8GCSqGSIb3DQEJBDEiBCDW97816A84sBNGIehEuxVUEXQ+3rQ/FhjSm5Vt
-# NyCkOTANBgkqhkiG9w0BAQEFAASCAgAIhVhI4QVYaoE961U8Ad3kHEfwVRCl3k3t
-# Pf+k8wGF+etSgY+QB8m1aEwXSBzdxoLYOVo5tcrCaBlBUWPXRAPScInladQ6VsCr
-# CsM+e7zbVsIXjxYoCXoFsjbjGbJ7TAqkcQdZBkbCVYSvO0R4enwUOAZsV09RjQPv
-# 3MOokyrVpfq1aI3/+FQ6AVtV0JAA1XTuJA6d5o9Y3SnuXUTPSqufNOwGIOnaRJm6
-# zZyjjqcgq3EFnv3yv6SIqqT+NYj00qRC3BV6y0VtWixqJdco79B/qzV+65Rx88eN
-# 01qyjO1IS/t5wKaV8fJJLLlPuIBDLmMvvqOj0nIs5JnzUrA3s0UtCKrOggTDfwtg
-# 6CD7Ji5izKw5T5Gu7LCXvrnh72DVeXa4RY5sLzKylTxUxZ/zXwyCXtKWs4+30HHe
-# DF8hucqe25pl9oTUQ5KQcd1zC5z0bd6DChA9+RSHO1XeNU1HM148H14INWocHzUV
-# mKBZcmkbm04gt7ZcS1EYbVvgB6UZ8qdQu7oTtKW8y67UCrlhC4S4Kv3JAh4OTf5v
-# sAPvnm6zb8/jf6NejgGzwrgc/C8Ze8LRTsqQb7j0y/AZYY7OCAaaeUIXpowfCEKM
-# 4vag25B45SXoR5OjQYiOecEAgyYeP73EXfAkm+IQMZuj9K2TQiA2o91I3HQ+tpw9
-# 03FyVFEz7Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjFaMC8GCSqGSIb3DQEJBDEiBCDOXO70mV7jwlDnxXSfv7bSI5w7dp/YpZsIUCs6
+# YkHbGjANBgkqhkiG9w0BAQEFAASCAgCzQWahBTxoZTXpL4tVYZa2bkFhzoILJjbL
+# NL+LSo5jsiceisEv6UxrZcDpdT41xOGRjpZ+Lv42t4ccFSXyEXCnPu9uUBCEE06U
+# bXZXCW9x6KaoqOwhNHRALNsyU83ImVzM8JcORyfE3ax6yXmH4qeRe1l1jMK2pHzv
+# QLSEGGSDcges40x5X+QKTLwUuvqfm1okzt5rhqBXz7L/qiiENkEreUh5YsQCIWNm
+# y9HKPM4ycFhb1HP04T+Eu2LR+3uIPOmc64q04CONLbkOJf4LNobxwE1yjbdyamMU
+# SjMYbQRD4tppeelMfThgUX6/aq3TwgMBuErF5s9TkahmeFWb64y5oEDTNfERixQC
+# OSiq+n+YWZlOdcdAVDV7GbVBqLnSyV3PEH6p6fyUMJD3QJ5k8r3spIaYbK7/mytE
+# ZTCbMl+Pf2LOPpUtJQM1sY6+jznA1M4Ev+xBIS1bSTwZawLHrf1lvNObFrZDJDF6
+# LiUgtH2cp42YcJLW7I1oNFXuewgy5H5YBFD1skC37+4cmqR2wRiJ53Gtq7niq8Rd
+# RFc7q9M5+mIivm8Gd8NdUUJT3+THie5HifP1g/Elz5r6mxXh1JBA/fbhAjbZwVHa
+# ItqFNqKOd9oVWiyM2PvAEmJy1cYloeO+GdhAt5WajlfTaMe2JBnoPaAbrehkwEwa
+# acVKLFSvlg==
 # SIG # End signature block

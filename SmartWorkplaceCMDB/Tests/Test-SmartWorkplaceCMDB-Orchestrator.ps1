@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB orchestrator and launcher tests.
 
 .VERSION
-1.0.0
+1.1.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -109,7 +109,10 @@ try {
             ($script:FullResult.Status -eq 'Completed' -and
                 $script:FullResult.Mode -eq 'Fixture' -and
                 $script:FullResult.StepCount -eq 23 -and
-                $script:FullResult.FailedStepCount -eq 0) `
+                $script:FullResult.FailedStepCount -eq 0 -and
+                -not $script:FullResult.SummaryEmailEligible -and
+                $script:FullResult.SummaryEmailStatus -eq 'NotApplicable' -and
+                [string]::IsNullOrWhiteSpace($script:FullResult.SummaryEmailHtmlPath)) `
             'Full fixture orchestration status is invalid.'
     }
 
@@ -132,9 +135,9 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($results.Count -eq 20 -and
                 @($results | Where-Object Status -ne 'Valid').Count -eq 0 -and
-                $rawResults.Count -eq 12 -and
+                $rawResults.Count -eq 13 -and
                 @($rawResults | Where-Object Status -ne 'Valid').Count -eq 0 -and
-                $adResults.Count -eq 5 -and
+                $adResults.Count -eq 6 -and
                 @($adResults | Where-Object Status -ne 'Valid').Count -eq 0 -and
                 $hardwareResults.Count -eq 1 -and
                 @($hardwareResults | Where-Object Status -ne 'Valid').Count -eq 0 -and
@@ -144,12 +147,87 @@ try {
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Write auditable step log' {
         $rows = @(Import-Csv $script:FullResult.LogPath)
+        $stepLogs = @($rows | ForEach-Object { $_.LogPath })
+        $invalidLogLines = 0
+        foreach ($stepLog in $stepLogs) {
+            if (-not (Test-Path -LiteralPath $stepLog -PathType Leaf)) {
+                $invalidLogLines++
+                continue
+            }
+            $invalidLogLines += @(Get-Content -LiteralPath $stepLog |
+                Where-Object { $_ -notmatch '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[(DEBUG|INFO|WARN|ERROR|OUTPUT)\] ' }).Count
+        }
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($rows.Count -eq 23 -and
                 @($rows | Where-Object Status -ne 'Completed').Count -eq 0 -and
                 @($rows | Group-Object Sequence |
-                    Where-Object Count -gt 1).Count -eq 0) `
+                    Where-Object Count -gt 1).Count -eq 0 -and
+                $stepLogs.Count -eq 23 -and
+                @($stepLogs | Where-Object {
+                        [string]::IsNullOrWhiteSpace($_) -or
+                        -not $_.StartsWith($script:FullResult.StepLogRootPath, [StringComparison]::OrdinalIgnoreCase)
+                    }).Count -eq 0 -and
+                $invalidLogLines -eq 0 -and
+                (Test-Path -LiteralPath $script:FullResult.OrchestratorLogPath -PathType Leaf)) `
             'Orchestrator step log is incomplete or inconsistent.'
+    }
+
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Purge logs by age and per-script count' {
+        $retentionRoot = Join-Path $tempRoot 'Retention'
+        $retentionLogRoot = Join-Path $retentionRoot 'LOG-ALL'
+        $orchestratorLogFolder = Join-Path $retentionLogRoot 'Orchestration\Logs'
+        $runCsvFolder = Join-Path $retentionLogRoot 'Orchestration\Runs'
+        $collectorLogFolder = Join-Path $retentionLogRoot `
+            'Jobs\SmartWorkplaceCMDB-EntraUsers-Collect'
+        foreach ($folder in @($orchestratorLogFolder, $runCsvFolder, $collectorLogFolder)) {
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        }
+        [ordered]@{
+            Version=1
+            Kind='Fixture'
+            TenantKey='contoso-prod'
+            OrganizationKey='contoso'
+            EnvironmentKey='prod'
+            TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        } | ConvertTo-Json | Set-Content -LiteralPath (
+            Join-Path $retentionRoot '.collection-root.json') -Encoding UTF8
+        $oldLog = Join-Path $orchestratorLogFolder `
+            'SmartWorkplaceCMDB-Orchestrator_HOST_20000101-000000000.log'
+        Set-Content -LiteralPath $oldLog -Value 'old' -Encoding UTF8
+        (Get-Item -LiteralPath $oldLog).LastWriteTime = (Get-Date).AddDays(-10)
+        foreach ($number in 1..5) {
+            $seed = Join-Path $collectorLogFolder (
+                'SmartWorkplaceCMDB-EntraUsers-Collect_HOST_20260912-01010{0}000_01.log' -f $number)
+            Set-Content -LiteralPath $seed -Value "seed $number" -Encoding UTF8
+            (Get-Item -LiteralPath $seed).LastWriteTime = (Get-Date).AddMinutes(-10 + $number)
+        }
+        $loggingConfigPath = Join-Path $tempRoot 'logging.local.json'
+        [ordered]@{
+            ConfigVersion='0.5.1'
+            Logging=[ordered]@{
+                Enabled=$true
+                OrchestratorLogRetentionDays=7
+                StepLogRetentionDays=7
+                RunCsvRetentionDays=7
+                MaxOrchestratorLogs=3
+                MaxStepLogsPerScript=3
+                MaxRunCsvFiles=3
+            }
+        } | ConvertTo-Json -Depth 10 | Set-Content `
+            -LiteralPath $loggingConfigPath -Encoding UTF8
+        $result = & $orchestrator @identity `
+            -TenantConfigPath $loggingConfigPath `
+            -DataRootPath $retentionRoot `
+            -FixtureRootPath $fixtureRoot `
+            -Pipeline EntraUsers
+        $rows = @(Import-Csv -LiteralPath $result.LogPath)
+        Assert-SmartWorkplaceCMDBOrchestratorTrue `
+            (-not (Test-Path -LiteralPath $oldLog) -and
+                @(Get-ChildItem -LiteralPath $collectorLogFolder -Filter '*.log' -File).Count -le 3 -and
+                $rows.Count -eq 2 -and
+                $result.OrchestratorLogRetentionDays -eq 7 -and
+                $result.MaxStepLogsPerScript -eq 3) `
+            'Log retention did not enforce configured age and count safeguards.'
     }
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Run bounded individual pipeline' {
@@ -183,6 +261,28 @@ try {
                 -Pipeline Full `
                 -MaxItems 1 | Out-Null
         } 'requires an individual source pipeline'
+    }
+
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Reject incomplete summary mail configuration before collection' {
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $configPath = Join-Path $tempRoot 'mail-invalid.local.json'
+        [ordered]@{
+            ConfigVersion='0.5.1';ProfileKey='test';OrganizationKey='contoso'
+            EnvironmentKey='prod';TenantKey='contoso-prod'
+            MicrosoftGraph=[ordered]@{
+                TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+                ClientId='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+                CertificateThumbprint='ABCDEF'
+            }
+            Notifications=[ordered]@{
+                Enabled=$true;SendMailMode='Graph';From='sender@example.invalid';To=''
+            }
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding UTF8
+        Assert-SmartWorkplaceCMDBOrchestratorThrow {
+            & $orchestrator @identity -TenantConfigPath $configPath `
+                -DataRootPath (Join-Path $tempRoot 'MailInvalid') `
+                -FixtureRootPath $fixtureRoot -ValidateOnly | Out-Null
+        } 'Notifications.From and Notifications.To are required'
     }
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Reject missing fixtures before output' {
@@ -260,8 +360,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLpReo0KWhN8Uz
-# GK9fQqJKZDA95ntTFRXLFufe4z8D9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTmYv1A5FJ1ofy
+# v8zMmFyt1r7ZUYdYmjIxTaDJRaOigaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -394,31 +494,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMjy/1CqgzsQHa19Kxbq6gGLa43nMtH6ZmPAxSshHYh/MA0GCSqG
-# SIb3DQEBAQUABIIBgBKD/CcThaeuluMmGhonFiZGjrsIIjgXd6o1dDkCOtEw77YJ
-# ZYu9LOlWfl3rRoxQu4UxuLqHWWOrlfWx+9WVldr1My7vSmiw7ZiRxAn10+Y6H2Bo
-# bfsACk3swgWpDn+sQb20MWWz7ZZ8aT9f9LiRmQ7zjMYlzuAOa8jTVbRWCYgsHGEo
-# fY768m8R4P2QEPepcyDob1NIRmG9ypMx8XBpup7HZK45cJmImweP8ClhJZyzkIAC
-# /n5AEzvkth4hWz4B+0lCAmyYISPuMfOlL6IiFVt1LvSz2bUcbBJlJSxD983sBFJn
-# VSir+uU44Xi2dH0po8OqippCDrvHqYXCMDO5vpzy1bzlTq999IJizl7s1lWRJYHb
-# UVVYSkY+L7gOwQlThUmJeOdymSEJtY85VNJAvfZnqPHWMYnwwFUZ5cjAEy3BVq1l
-# 7EfrF9YhlejK8aC/T0buNiFUMqHlWywy108bliQ+XnimTPHM5tKHCCV9jjpgM46L
-# kuD7cr+GseJmzt5QwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICBlujM41rUPHFHmtGA1E8asC1AlXlKvZPNVRM7yBCndMA0GCSqG
+# SIb3DQEBAQUABIIBgI6zh4GKqTiaaVsk8MO8bDK+l/9Nm7bi+Iv4i5v9qNq2/6/o
+# qaiXhkHUT+kx77X5063USIh7rEEwH/15++WGHpKrpZvEwumTpQANAdxvXPRf3L5N
+# 3VYHyStTpQdwr1pVP9ZFNTeSruzYBQV4BaN0jPeJQanD0rWI227t2GSN+HWRlv+a
+# PwN173CKIOjkP02IuU9SMkOh7Ms3OdF0dHjrO214FYaHnxBCfJA/gEdlPJSCSPKW
+# EYGB2wISXQCmcQp85kJWbsMBss7MGI5LWr8ciV+uzp/6hGD1IRliCv7qSMY7Ueym
+# AFIK7LjS34JwnL8pY8xIPythVfzJXYHUJjyod8GBLUs3LJCHdoMuZokwY+dzbems
+# CsAA/8ilUDAsblMyJZkn2+8eDdMMZCEjNB/q+ZFqTNzj+SVb9zs+kwaCpj8p/TEv
+# ghCLHNHsYBQdyJ+hTl6R9lO6I2uV27cyUXRLe96IekDIYd8WMZJPoUgg1MlhC1x/
+# YVrPDlayCEfKrY6+6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCCDLVnv3IDmopNWO1oCw5spN2vf5nfoktXnuEUk
-# bXUFyzANBgkqhkiG9w0BAQEFAASCAgBRBFOTkGsI3BsM//ocfUgmEJLW5fd7En2Q
-# KybnwaLdGql2fWrYBMhPrhu6iiAJ7PrK66qjRxWEFAd0nRM0605iI25WXQ/RvrUq
-# Y21Zn4ASzqBwmxoE6mKB51Pg8ONWy00Qb2Gir3erHiUQWeKcLDnr2Jkfuhz2z5jg
-# QAKYfGXCerYBUnSZN/PyoeQDzXQHlUXSucF4CiHBbuGY5jz7y0uspyPt9iabQMIe
-# lselHAE2q3RQNpRaiL+asFf2MOvzco4qkOZRkDXAfdFdL0sSyXZjdTSCK20lReMM
-# l+MZFUtUhnTIXWgPAItfzhhP5Cdo5uCIb1E5v7ITzogPanVLhi5a7XxyIzKyWM6Q
-# acdcAx2g9xIbIP+n2GYhy3X9CaV0N3WXv5Oum6s+0HEVZ3X8XC608izhbExkAQiC
-# KbKAxaomOBPW4FuP7GdB4VMBAneDtTHlpSzjopfHPaBLgTO3vF4l15voBqBDkJ/G
-# 54PrUMFBlplNbLi8OtqiIQi7tu895hkBAGUyT9p3v7pVrvawrqlLvuQXxMf1/TZv
-# mFU6CQLpgkyDRnpG8DAFHYzvnYHYohqqKlone+YOWNzHZSpeGsItV5V/F/mOxPkj
-# M9D4GPtG+dhx73DllplgOL3wy3+p2RffWpLAvFYhKtppcuC0hdbM3ItjxMCpzzy9
-# Z3yKrkxzjQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjZaMC8GCSqGSIb3DQEJBDEiBCDad2khBW3XBK9tJdkQY79/9Srokr8T3sbu4hpQ
+# iK/gITANBgkqhkiG9w0BAQEFAASCAgBWA4u7NeUFuJXhmRodnJFGb7PVdm8hxBQd
+# G3h+nYH7NlYdj/P9qjELjU1TlAiCoPmWwRWcZQL/QDzGKRFnc5gDvAKhekVFBdDY
+# iAelm6ME2VrSLMIHcUmlOYOg/MgJouLcNnEvl09BGSusZcv4E/BxNeDF32ELXhvQ
+# I/O9XhGdUOlCBiuhYwwTRq4rD6sg8nsTGd0kE4SBlHMuUXkslZb3ssLPstzksMlS
+# dMblgMr7R1JMjrL7IyICcc2QtRme8BcukmwTC+Nc2AUAraHsTNv6I2NS+zu55jjx
+# zehBTTHv4O1rxfvokgicbSX3KJYxBM2YItwUUOGYzEYmSwouSwwkCnrRE+73L6lp
+# xgTQWzZnMXxnj3quuHKBOHXVW/Wk0YCgeA72SWD2IPsjGzU15O/nxT62xXiZMhBH
+# hlwyTDsjH/drUlE7985D01/SwaPcSOqedx59KDLX/H1w//G7vdTRFx36xeYLoA4F
+# pGvVS9AHD7W8DqVf/CfMtjY7gNp33G5f2RRMZu3jeESlPBS2X7kFUDSD1PcVVeiq
+# 8/wA5aCshmeuvQJ09OplX7lmtiTkQG+RMCmH87XahdilHczDQLmncsInsIQ29wP4
+# 5jhO83vni1lk3BFawdnb7m2qrKV5Mp9+yNxekVvadyR3jdrR1IIMqoNBV38OUIJr
+# ZBz2QZNYVw==
 # SIG # End signature block

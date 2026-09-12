@@ -1,6 +1,6 @@
 # SmartWorkplaceCMDB
 
-The locally prepared distribution candidate is **1.0.1** on the stable channel.
+The locally prepared distribution candidate is **1.1.1** on the stable channel.
 It is validated as a reproducible local release; this does not by itself
 constitute tenant, gateway, endpoint or production qualification, and it is not
 a publication approval. See
@@ -24,7 +24,7 @@ The first scope is Microsoft workplace inventory across cloud and Active Directo
 - User-to-device and source-to-entity relationships.
 - Data quality, source freshness, and confidence scoring.
 
-Active Directory users, groups, computers, domains, and direct group
+Active Directory users, groups, computers, organizational units, domains, and direct group
 memberships are included through the native read-only collector. Azure is an
 authorized source but V1 deliberately provides no unbounded Azure inventory:
 an authoritative Workplace subscription, resource-group or tag scope is
@@ -44,6 +44,11 @@ Power BI-ready table definitions. Native pipelines collect and normalize
 Microsoft Entra users, groups, and devices, enrich devices from Intune,
 inventory Microsoft 365 licensing, correlate Exchange Online mailboxes to
 Entra users, and inventory Active Directory from the same collection host.
+
+Every Graph-native collector uses the shared paged request helper with bounded
+transient retry handling. Every source collector stages and contract-validates
+its output before promoting history and `DATA-LAST`; failed promotions retain
+the prior completed source snapshot and evidence.
 
 ## Design Principles
 
@@ -96,7 +101,7 @@ health and quality evidence separately.
 
 Optional individual source evidence and declared governance are described in
 the [CI governance contract](Schema/Entities/ci-governance.md). The local CI
-component and catalog remain **1.0.0**; the application is **1.0.1**.
+component and catalog remain **1.0.0**; the application is **1.1.1**.
 The existing CI CSV header is unchanged. Custom catalogs must include the new
 sidecar columns and explicit lifecycle policy from the current catalog.
 
@@ -175,7 +180,7 @@ The canonical Power BI report consumes the resulting hardware table.
 
 See the [hardware scope, commands and offline evidence](Schema/Entities/intune-hardware.md).
 Missing values remain explicit; RAM, asset tag and warranty are excluded from
-V1. Application status is **1.0.1**.
+V1. Application status is **1.1.1**.
 
 ## Existing design principles
 
@@ -252,11 +257,13 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     Raw/ActiveDirectory/ActiveDirectory_Users.csv
     Raw/ActiveDirectory/ActiveDirectory_Groups.csv
     Raw/ActiveDirectory/ActiveDirectory_Computers.csv
+    Raw/ActiveDirectory/ActiveDirectory_OrganizationalUnits.csv
     Raw/ActiveDirectory/ActiveDirectory_GroupMemberships.csv
     CMDB/ActiveDirectory/CMDB_ActiveDirectoryDomains.csv
     CMDB/ActiveDirectory/CMDB_ActiveDirectoryUsers.csv
     CMDB/ActiveDirectory/CMDB_ActiveDirectoryGroups.csv
     CMDB/ActiveDirectory/CMDB_ActiveDirectoryComputers.csv
+    CMDB/ActiveDirectory/CMDB_ActiveDirectoryOrganizationalUnits.csv
     CMDB/ActiveDirectory/CMDB_ActiveDirectoryGroupMemberships.csv
     CMDB/CMDB_Users.csv
     CMDB/CMDB_Groups.csv
@@ -279,6 +286,11 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     PowerBI/FactMailbox.csv
     PowerBI/FactDataQuality.csv
   LOG-ALL/
+    Orchestration/
+      Logs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.log
+      Runs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.csv
+    Jobs/
+      <script-name>/<script-name>_<host>_<timestamp>_<sequence>.log
 ```
 
 Power BI consumes curated tables from:
@@ -286,6 +298,13 @@ Power BI consumes curated tables from:
 ```text
 SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/DATA-LAST/PowerBI/
 ```
+
+Collection and fixture runs keep one timestamped log per orchestrator run and
+one dedicated log per executed script. Text lines include local timestamp and
+severity; the structured run CSV contains the corresponding step-log path.
+Retention is configurable under `Logging`: logs default to 30 days/30 files per
+scope and run CSVs to 90 days/90 files. `-ValidateOnly` remains read-only and
+does not create logs.
 
 The canonical CSV definitions are stored in:
 
@@ -488,6 +507,10 @@ can define an optional preferred domain controller:
   "ForestWide": true,
   "Server": "",
   "SearchBase": "",
+  "TargetDomains": "",
+  "DomainRetryCount": 3,
+  "DomainRetryDelaysSeconds": "5,15,30",
+  "DomainParallelThrottleLimit": 1,
   "IncludeGroupMemberships": true
 }
 ```
@@ -509,8 +532,8 @@ Run the explicit collection and normalization:
 
 The collector uses `Get-ADForest` to enumerate every domain in the forest, then
 selects an AD Web Services-capable domain controller for each domain and
-publishes domain metadata, users, groups, computers, and direct group
-memberships. Bulk user, group and computer searches use explicit 500-object
+publishes domain metadata, users, groups, computers, organizational units, and
+direct group memberships. Bulk user, group, computer, and organizational-unit searches use explicit 500-object
 server-side pages. Group members are retrieved through LDAP `member;range=`
 windows of at most 1,000 values, then supplemented with user and computer
 primary-group membership; this avoids the ADWS `Get-ADGroupMember` result limit
@@ -518,10 +541,22 @@ without changing a domain-controller policy. `-Server` can set the preferred con
 forest. A non-empty `-SearchBase` is supported only with `ForestWide` set to
 `false`, because one distinguished name cannot safely represent every forest
 domain. `-MaxItems 10` creates an isolated bounded test run. Direct group relationships are preserved without recursively
-flattening nested groups.
+flattening nested groups. Each domain inventory and membership pass retries only
+transient connectivity, server, LDAP timeout, and invalid-enumeration-context
+failures, using delays of 5, 15, and 30 seconds and forcing ADWS rediscovery.
+Authorization, schema, and data errors fail immediately. `TargetDomains` accepts
+a comma- or semicolon-separated diagnostic subset; such runs are marked scoped
+and are never uploaded to SharePoint. Parallel collection is intentionally
+disabled in 1.1.0, so `DomainParallelThrottleLimit` must remain `1`.
+
+All six source CSVs are built and contract-validated in an isolated staging
+directory before a single transactional promotion. Every declared domain must
+complete. If any domain or promotion fails, `DATA-LAST` and its completed source
+evidence retain the previous last-valid snapshot and SharePoint publication is
+not attempted.
 
 The normalizer requires only the raw CSVs, not domain connectivity. It publishes
-five source-specific tables under `DATA-LAST\CMDB\ActiveDirectory`. Cross-source
+six source-specific tables under `DATA-LAST\CMDB\ActiveDirectory`. Cross-source
 reconciliation with the canonical Entra and Intune entity tables is a separate
 curation stage, so uncertain hybrid matches are never created silently.
 
@@ -559,6 +594,46 @@ Upload failures preserve the collected files and return
 After OneDrive synchronizes the SharePoint library on the analysis workstation,
 the published copy is available in the locally synchronized folder selected by
 the operator. Keep that machine-specific path in the local configuration only.
+
+## Full-collection summary email
+
+After a successful live, unbounded and unscoped `Full` collection, the
+orchestrator can send an aggregate HTML summary by Microsoft Graph or SMTP. It
+does not send mail for validation, fixtures, individual pipelines,
+`-MaxItems`, or scoped Active Directory runs. A mail failure preserves all
+collected outputs and changes the orchestration result to
+`CompletedWithWarnings`.
+
+The summary reports current device, user and mailbox populations and the
+assigned/capacity/utilization values for Microsoft 365 F1, F3, E3, E5 and
+Copilot. Each population includes deltas versus the immediately previous full
+collection and the most recent snapshots at or before J-7 and J-30. Microsoft
+365 F1 (`M365_F1`) and F3 (`SPE_F1`) are intentionally distinct. The generated
+mail and its private CSV history contain aggregates only; entity identifiers,
+user names, device names and mailbox addresses are not embedded.
+
+Enable it in the tenant-local configuration, which remains ignored by Git:
+
+```json
+"Notifications": {
+  "Enabled": true,
+  "SendMailMode": "Graph",
+  "From": "sender@example.invalid",
+  "To": "recipient@example.invalid",
+  "Cc": "",
+  "Subject": "Smart Workplace CMDB",
+  "MailClientName": "Example tenant"
+}
+```
+
+Graph mode reuses the CMDB `MicrosoftGraph` tenant ID, client ID and
+certificate and calls `sendMail` directly, without importing SmartM365.
+Transient token and mail failures are retried with bounded exponential delay
+and `Retry-After` support. SMTP supports multiple semicolon- or comma-separated
+recipients and integrated authentication by default. `Both` means Graph first
+with SMTP as a fallback. The first enabled run can show `n/a` for historical
+comparisons; J-7 and J-30 populate as retained full-collection snapshots become
+available under `DATA-ALL\CollectionSummary`.
 
 ## Data Quality Normalization
 
@@ -790,6 +865,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-Sm
 These tests validate path mapping, template safety, the `SMART-CMDB/DATA`
 target, and the live/unbounded publication guards without connecting to Graph or
 SharePoint.
+
+Run the offline full-collection summary tests:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-CollectionSummary.ps1
+```
+
+These tests use fictitious curated rows and temporary private paths. They
+verify all five Microsoft 365 license families, previous/J-7/J-30 baseline
+selection, unchanged-snapshot handling and the absence of entity identifiers
+from the HTML mail. They do not send email or connect to Microsoft Graph.
 
 Run the offline data-quality normalization tests:
 

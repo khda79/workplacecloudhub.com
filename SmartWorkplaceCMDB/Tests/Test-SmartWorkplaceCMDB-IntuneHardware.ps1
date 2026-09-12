@@ -157,7 +157,7 @@ try {
         Assert-True ($out.DeviceCount -eq 0 -and @(Import-Csv $out.RawLatestOutputPath).Count -eq 0 -and $state.Status -ceq 'Completed' -and $state.RowCount -eq 0) 'Empty response handling failed.'
         Assert-True ((Get-Content $out.RawLatestOutputPath -TotalCount 1).Replace('"','') -ceq ($contract.tables[0].columns -join ',')) 'Empty header drift.'
     }
-    Test-Case 'Write failure marks Failed, releases lock, and complete retry recovers' {
+    Test-Case 'Write failure preserves last-valid evidence, releases lock, and retry recovers' {
         Write-Fixture $valid
         $recovery = Join-Path $temp 'Recovery'
         $out = & $collector @identity -DataRootPath $recovery -InputJsonPath $fixture
@@ -167,7 +167,7 @@ try {
         try { Assert-Throw { & $collector @identity -DataRootPath $recovery -InputJsonPath $fixture } '.' }
         finally { $handle.Dispose() }
         $state = Get-Content -Raw ($latest + '.status.json') | ConvertFrom-Json
-        Assert-True ($state.Status -ceq 'Failed') 'Failed write was reported successful.'
+        Assert-True ($state.Status -ceq 'Completed') 'Failed write did not preserve last-valid evidence.'
         $retry = & $collector @identity -DataRootPath $recovery -InputJsonPath $fixture
         $state = Get-Content -Raw ($latest + '.status.json') | ConvertFrom-Json
         Assert-True ($retry.DeviceCount -eq 3 -and $state.Status -ceq 'Completed') 'Retry did not recover.'
@@ -191,8 +191,8 @@ if ($script:failed -gt 0) { throw 'Hardware offline tests failed.' }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAT2238IdjvUFvH
-# AjsGLBu4zX7sRDmFTTmZDybXjnJSsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgQJL3yM7F7a8p
+# bgH/Y2htZt6TB7UIQFCgqOI71rXd+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -325,31 +325,31 @@ if ($script:failed -gt 0) { throw 'Hardware offline tests failed.' }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHJ2mU5inEVJ9xI4h412VmizyPnWn+7Rezu8kMwhFv9iMA0GCSqG
-# SIb3DQEBAQUABIIBgKACTNtpcxOCg/1ENMBbW5oKM84Ig1QjeahfLa5itndy+LOb
-# awuVFYaAbABNKf/758bV38uv9wSMh9BMWHBk1bDcsRT0ELIWk9yeM7tEs8ihwUZC
-# kJh0PiO5m+BDTlB4MGHubSyCzl5A1qzAgc3tx54StTR/vMvd6i5jN8B5qMi1mbOM
-# hrC5gxbRUEUa40IySe09MgXQOeiAhPj31v62xCG00gVQ7hBejSv3u1/rUjd+Wmvs
-# WDAJ03XW/cB4/lwnE2GpDOzaek5sQU8oGS52rwXJfbD9I0imgeNYxAY9znnSaNjq
-# 9co/w8N1BVVUi12PDiPKvv/5TI/cxNAiySLH/s1RIvIOJuFPnHFVo0uSJus3o7H3
-# OiuIHFY76+/Uxuuw0G7MuZ6ntJMjlB3jTK04AG0Eho1RzApe2fCXQerwmsr0ErRj
-# 5kGWqT3UJkJ0C3h8FCWSArqz8EH+/1oANJRRRb72iykMTrWm4P9lCl9tKOo25uWD
-# blJbCgEFDTyzYzvRR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB2HG9yE5X5WFCJi8dTW/X2hArpV7f0sisj2foNvWmV5MA0GCSqG
+# SIb3DQEBAQUABIIBgAd5zW755Dk+0YE7vPasev0wEG1tIy2f4QJ5DgsotShhn/Eu
+# zn+qgw/K79Kzj8FmJ5g02dRjYzTx9CURQKFXFAFMCAyS9y4MVk/jEcNkWYSQ+P4b
+# tS2Rlo9F9whi0pY1FprAdFme8pvG6seyz6qveGYhp0pTUIJtsZsdHgKV8wCwobZ2
+# 7j5NH3m8faEqwH9QXuSjqxjiYxvz7pKIKORcXhbZMBALXVcuF1J2/iwJms+IwV3J
+# GMe4Vo6tBuNBeIN+V8GHh67z1wsSC6sFDY+nVVGbygVG7pDJPEfsPdRehQU9Z1FP
+# E74xBVRUQkDu0mroEVBEdZ67a78f21Q5Fr5aCX4z+7ifQIxo7ylsMEKOTZwQUzcK
+# Tg6PT+/TvTzoUBLuYD1owlIPDIv66bKYchinEBYw3jb28bwXb8z1uuJAkvZaE80G
+# eTaMJORix/+bg8HYasmJOcIyTDadMJwJLC26Yuac4/a3/4wW3kCz0Lu78EZ5l1ie
+# TIt91Ip6sAT0XpH6dKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDaZi+kNkDkPj4BbaEeELqKhW+u+DoNu5SGn8Ca
-# p+5r3jANBgkqhkiG9w0BAQEFAASCAgBajAkw+Wo2ZOSGIpSMZ9LYG7NcLOeIxgS/
-# 8pxbDg2B2yohB5i57atcTJM84uWIefgykcmj5eeci3aCFdEuj5cpWc0QhYB/a8eb
-# d5pIZd8Tlw19zai60/Dkt56VuE1AfUXIrxm8lxbrrvoIa79DlD+1Nxmt8F+4EQFP
-# znae3qGrDGtzoAJszfKPPJA8tmiCe4fS1PBlrsdQFWZut51jX3HM9kXBeNWsXDfX
-# 7ITTz3jJ7q/lc6rPR2F53m5zc8hWiKNoEudvxhYUZ9Xkb5I+i/ABReLSdOlNHCe6
-# lVL3TdrDbP+r6AtgtZb4d6rb0cepGWpnTNayaylWyDsTLjZBQxykhgtszx4TaQ5Z
-# xVbREYJduFenHKLH5LHeoVTsDhXa/rdl86wU/3g9abtZ5rsmTmxmtuMX5j5uGV1N
-# AkcREiawliXm/stGwAaC+CPVvQQ+k2qcJzcGm2EzrkdCkq725mxMCto80ph2HGVF
-# Xw8vNkO1v7sgmfAQzPCFP88Jl2Zs02xPeMRDnFTHw/PjGTrCWMdUI1f2au4Vnk3i
-# TH1DWO462MToJmmpL8Wzw5cxzl2Zvy4OLe5pqmSXfgS9xl640yDuYG4ge5cVa0ie
-# R9uRpKNZl70c+aMOq6u0es7BEFBw8A8SFuw1ROdF3ERrvoWv65VGAiW7pDZ/KczK
-# JqqcyTmK4g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjVaMC8GCSqGSIb3DQEJBDEiBCBzXx0yvTp6w3bNxKnL19P9zKEC+kJj+zB/fkV5
+# qtl1QDANBgkqhkiG9w0BAQEFAASCAgAwBMCz8kE85QvU2/5KuPZYgcLOr87cxidi
+# w2plbI8rPHBM866nJ3RH0g5t/NPdGk3uQPZbSmesVhJ+dZKgAGVUaIx06t6zDJYy
+# fHKG1Gm/G3+NgnZZcsTvNZ54V6z6G0KfCHNwy18kydI6IoIEScOU16iKf3rbx/4z
+# S1cZfDePB1Y+aM/WXRJmg0WIX26852gF5I5Z2bmkM2DitNk895yKCmgKxF/n4PlO
+# Lo3XSguXcgITvnXr8DL4DJYINlowGgQoM1CtXJNBUV/9hRlbNXB6nb4boFBIe1HJ
+# j0QZOZ2WwPrxr55cBb+bCuT26/RXsZP1LoTscL5Yd6LE30gZb0ESPyOamJCxn9NV
+# xQTJbyq+h2iGX1x9GlUUhs7uXIzRCgOmct4665wMguQVarBuzjfnIheAkOgL60aP
+# E3BwF44mKPU3T0KbY602F11OZFzvznMyuRVbW6+PApiVlElLWEwttk7If//RfO9C
+# RQDX//yN+iNXYPrvNAihcCX30wtQX84M6YTR59wzg1swwylILjf7pjvXPhrAuAxY
+# nzj9pvKaufFXBD9zEFf749Tg2ZM0hkHrCVcrOVYxYppuFm19w/9E01Emo5REHVt2
+# VITLbcVqrmlR/7hjfAi32ZnafmFxWXJxyeMC+SrMuOvUZAkIKukHjspga5JOEYtv
+# rqVD9XGNIA==
 # SIG # End signature block

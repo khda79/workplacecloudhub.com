@@ -2,10 +2,10 @@
 .SYNOPSIS
 Offline V1 regressions for direct collection isolation and source evidence.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]param()
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
 $root = Join-Path ([IO.Path]::GetTempPath()) ('CMDB-Evidence-' + [guid]::NewGuid().ToString('N'))
@@ -50,17 +50,19 @@ try {
   Check ($status.Status -eq 'Completed' -and $status.Coverage -eq 'Fixture' -and $status.RowCount -eq 0) 'Empty fixture was not distinguished from live complete collection.'
   Check ($status.SHA256 -eq (Get-FileHash $script:raw).Hash) 'Source evidence does not match CSV bytes.'
  }
- Case 'Failed attempt preserves previous CSV and prevents normalization of it' {
+ Case 'Failed attempt preserves the previous usable snapshot and evidence' {
   $r = & $collector @identity -DataRootPath $runtime -InputJsonPath (Join-Path $PSScriptRoot 'Fixtures/EntraUsers.sample.json')
   $script:raw = $r.RawLatestOutputPath
   $before = (Get-FileHash $script:raw).Hash
+  $statusBefore = (Get-FileHash ($script:raw + '.status.json')).Hash
   $bad = Join-Path $root 'bad.json'; '{broken' | Set-Content $bad
   Reject { & $collector @identity -DataRootPath $runtime -InputJsonPath $bad } '.'
   Check ((Get-FileHash $script:raw).Hash -eq $before) 'Failure replaced the previous CSV.'
   $status = Get-Content ($script:raw + '.status.json') -Raw | ConvertFrom-Json
-  Check ($status.Status -eq 'Failed') 'Failed attempt is not visible.'
-  Reject { & $normalizer @identity -DataRootPath $runtime } 'source snapshot'
-  Reject { & $normalizer @identity -DataRootPath $runtime -ValidateOnly } 'source snapshot'
+  Check ($status.Status -eq 'Completed') 'Previous completed evidence was not restored.'
+  Check ((Get-FileHash ($script:raw + '.status.json')).Hash -eq $statusBefore) 'Failure replaced the previous completed evidence.'
+  & $normalizer @identity -DataRootPath $runtime | Out-Null
+  & $normalizer @identity -DataRootPath $runtime -ValidateOnly | Out-Null
  }
  Case 'Reject missing or malformed pages and preserve true empty arrays' {
   Assert-SmartWorkplaceCMDBCollectionPage -Response @{value=@()}
@@ -93,7 +95,7 @@ try {
   $health=@(Get-SmartWorkplaceCMDBSourceHealth -Paths $paths)
   $user=$health | Where-Object SourceName -eq 'Entra_Users.csv'
   Check ($user.Status -eq 'Complete' -and $user.RowCount -eq 0) 'Mock empty completed source was lost.'
-  Check (@($health | Where-Object Status -eq 'Unknown').Count -eq 11) 'Missing evidence is not unknown.'
+  Check (@($health | Where-Object Status -eq 'Unknown').Count -eq ($health.Count - 1)) 'Missing evidence is not unknown.'
   $state=Get-Content ($raw+'.status.json') -Raw | ConvertFrom-Json
   $state.CompletedUtc='2026-01-01T00:00:00Z'; $state | ConvertTo-Json | Set-Content ($raw+'.status.json')
   $user=Get-SmartWorkplaceCMDBSourceHealth -Paths $paths -ReferenceDateTime '2026-09-09T01:00:00Z' | Where-Object SourceName -eq 'Entra_Users.csv'
@@ -186,8 +188,8 @@ if ($script:failed) {exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8vjIBD+F6Jr0B
-# H47didDgY3SXHh0hNbvslVB42kVpAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDd+qhd6M4unEds
+# eNb9RdnNx0hfxq+1Olqbl6ujy460tqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -320,31 +322,31 @@ if ($script:failed) {exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDgrt2ct9efywtXgCTQpiohmmniGUaCTR20StV1MKDqWMA0GCSqG
-# SIb3DQEBAQUABIIBgF/RbCKwwL6nFqJxT38PxEEf2CQBm2cJQNkgjv6B8zxFxTxK
-# /QtmNbo8MJigk5KcVtFo1CcwlnQLfgpgTkcGkjRtOSBaodDOsZ1KeOf6t9Y8ZYWV
-# 8WpnaYIQkaunVvf99lRHja+anpobrgyl5/GnOpt6dvS9XVS/B5MLIFR20v31oczo
-# rXUhamZwdgR9nMUNvh0oCa+I5n1gZlOW0b0PlfXrvY5s9ys9TmD2XYIQq/2LBkpH
-# aOkSrkAV1I6s76+Wl8PbTAqMPLJBK2ZdlCcDEvQC2ptpi1Z88oZpAnxp5bzkltxh
-# gjtUjdgWnwzJDlu014qIkAJYaYwzPvq19j2fkzTexmCfIP6aWatMM2FBQXxbD/ns
-# PENX/hJHG/wNMM4evqdb2RjscgLxTZNSVHYZufmjo9Dirz7IpfN6NaGaNczVJLcc
-# dLTlRcgfkZTQylw0Q/aUMJOCcI4FC644usmUHslHouZpYxVExQaTubuLeXrLdHIm
-# lGA3lMeUTpo0HO+CiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIdMf0qfDooBPkFDuHekk4fnftlAbEv5Y+jrJr4gZgTAMA0GCSqG
+# SIb3DQEBAQUABIIBgDlMIXUtaFT02sD7/fVK6YmWj3ZmztJo8+khGOvvTMEatDk0
+# hwC3UCHIGCDwWFc5U7NKR/PghcnxLq1ArWcS1Z6UMAfH7KNK4unvbudUp50CBwns
+# OlthrqZugjurvAiMHNOm070oOKF1vzM3klPcvNvhVafhV1/oTtbrCJtoAaVaCM8p
+# fMT+Lgwcy+hgxHE2/y/ZaJXONR1+SsrCvfvkuqOmMMkQNMuG4Bx3ZAZxD8px6orZ
+# 9+67IxEeQbCgP9o9Dpd23CXGECFtDJJ/G7xXBlFQ9vNcSDg7u5RX1H8a6Xaoqb+L
+# OD3beL738LV+7qH8pN9xFEYEHJrGw/It1oFwpooM5pxvkocQcYkzI6TFXz1wA7sZ
+# x1SzuTG/6x+FIXoG6i3M1U7DBpwgoOdWknlrP9ZPgtWsealB+bb+JbWGiczpKLO6
+# ozUU+1pV6cC7vIbMneGnQGwkaSNrIAxGi433NuoRMcy2VTFX/IGnJBlYXMJ7SkPW
+# 3qQvX3/I1vRJzCbqlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MjFaMC8GCSqGSIb3DQEJBDEiBCBrPqMlVGXb7D3XFa0a2gqpyl1+9RXhHr2L48FC
-# l7ry9DANBgkqhkiG9w0BAQEFAASCAgBmsKSqxT6LcD7nLrd9GX0N3j8xws9KaPf/
-# mNH6PRjH0SYXefMQxrqNDMtb0+pqg3nXINtAsb02lk4Isg+q2+goXH8nOBTIEz/y
-# BexYLD6DcHBZlu+6cyW0J9d1SvaiyWCvc6kO7s1bngy+5T54aUZsak75463EFYCh
-# AwLU67l3eS6IEdzFN8rAtLfac3ma7aEmLwUF8RxD2fFm4Xp9kZnjB8i793axNHVQ
-# 7HkP7P+WbvZkEBFr2pHCXugn+rgTwU0FNfB6fUwxkTzHA5NcAL8Wjs8OATzudq+p
-# StasykypTHDVfao505GMqFBa90DZdPUa1JWY/d96GJXmd/hAUDdY8KBk0/SC1Qj9
-# 16lC6HqBJijQB89dJXR3Sni5G4g6KlIN2Q8MSBK0BiUHp83IVZuwhaDOl0MqTEqs
-# K7ESj5XW5OlYsh2Rt6M4sGpREte6Y1qA1KzPZiAvfkdSePUAawHY9A7/2WznMbqH
-# CUP1y/g1Lo1QCSiByTA07vdV7r5ymO7Y9sv1vTrlhr5XIeHdsWfcG1OEge69if2N
-# XL7VtLqXoZiYrcVt3ESpPKuU/IFXupjtJ4hn/UblXFzK1FxMtb1sNKi9akEoTj8N
-# 9R7gQONuLYSpueWKHbCKEkSeGcxTqyDr7f5/wTgmRw0gaaUu0EvmXLjvTjLztNMV
-# +EH9Kofkiw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MjdaMC8GCSqGSIb3DQEJBDEiBCDNGi1HQQNa/ZJdzQjDR7eIj7SF6fZAyiA9bvPM
+# fMHJvDANBgkqhkiG9w0BAQEFAASCAgARrYUHwb6i4evNnHlYko3oUsH4nvXMaF8m
+# sYAb6AoeZxdPt0XM/kJmS9DMZqT4Mu35MNn+GJLn0CEI+tFM7byi67F6E+oIWzY3
+# 7wzb2kBz4J21hJM1y09rZlwSxPC9dy0/2YTnv3Gr/DHSWRbug+ze3Y2hUNPLjw07
+# 1p/65Dr2JG42wTqhbmnHJP5RBCsOlV4wsUWIyae24OsTGtva8u/ElWz8IV/Oi+SW
+# iVhiRzHWVqFqAiHaYUfNbkjZBXeSBQf8VT5RbXeZR60CfAr2iOzij4naNFwPN5gL
+# 0ulJeBm4PK9KhpDddBtUdW27dFm2wfbkRWcrf6QXTHDsiq17/owbc9f/KamMSMkV
+# HkiAeJl6opSZnTkUaPAqVqat5UD1q/H0hFaSnws2JEng/15NXAIulqDrrh/tYqct
+# uicjH8+ka8FsL8/I7pSrG+wPoDYREjV33xCXnGo/rYWJSMaQeE4fIu6Rkh28OFLN
+# AoA+xuPyoXHHoKme7oDHdc/maiaym/20ekjJ/wHIE6WLCIfcbO6eUrONYPASNUJx
+# Ovrh+acUO7OETZbR3Ch4khFlzdC3kwkY0AfOPZbsM/VJ0mX07SPYQApQ6hLRn6nB
+# cLslbLukq/gkI68At+cfygi+iYo4wkO8DPK4B1zs37bTvEYwG9CiPnylzUafIbyE
+# 9MQaTD/qFw==
 # SIG # End signature block

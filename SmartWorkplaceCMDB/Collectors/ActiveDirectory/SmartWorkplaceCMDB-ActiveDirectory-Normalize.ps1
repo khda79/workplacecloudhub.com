@@ -3,13 +3,13 @@
 Normalizes Active Directory raw snapshots for SmartWorkplaceCMDB.
 
 .DESCRIPTION
-Validates the five Active Directory raw CSV contracts and publishes stable,
+Validates the six Active Directory raw CSV contracts and publishes stable,
 tenant-scoped Active Directory source entities and direct group relationships
 below DATA-LAST\CMDB\ActiveDirectory. It does not require domain connectivity
 or the ActiveDirectory PowerShell module.
 
 .VERSION
-1.0.0
+1.0.2
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +29,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -133,6 +133,7 @@ $mapping = @(
     @{ Raw = 'ActiveDirectory_Users.csv'; Curated = 'CMDB_ActiveDirectoryUsers.csv' },
     @{ Raw = 'ActiveDirectory_Groups.csv'; Curated = 'CMDB_ActiveDirectoryGroups.csv' },
     @{ Raw = 'ActiveDirectory_Computers.csv'; Curated = 'CMDB_ActiveDirectoryComputers.csv' },
+    @{ Raw = 'ActiveDirectory_OrganizationalUnits.csv'; Curated = 'CMDB_ActiveDirectoryOrganizationalUnits.csv' },
     @{ Raw = 'ActiveDirectory_GroupMemberships.csv'; Curated = 'CMDB_ActiveDirectoryGroupMemberships.csv' }
 )
 $resolved = @()
@@ -241,6 +242,12 @@ $userRows = @($rawRows['ActiveDirectory_Users.csv'] | ForEach-Object {
         JobTitle = [string]$_.JobTitle
         Mail = [string]$_.Mail
         EmployeeId = [string]$_.EmployeeId
+        Country = [string]$_.Country
+        Company = [string]$_.Company
+        Office = [string]$_.Office
+        AccountExpirationDate = [string]$_.AccountExpirationDate
+        UserAccountControl = [string]$_.UserAccountControl
+        PrimaryGroupId = [string]$_.PrimaryGroupId
         DistinguishedName = [string]$_.DistinguishedName
         OrganizationalUnit = [string]$_.OrganizationalUnit
         ManagerDistinguishedName = [string]$_.ManagerDistinguishedName
@@ -264,6 +271,9 @@ $groupRows = @($rawRows['ActiveDirectory_Groups.csv'] | ForEach-Object {
         GroupCategory = [string]$_.GroupCategory
         GroupScope = [string]$_.GroupScope
         Mail = [string]$_.Mail
+        Description = [string]$_.Description
+        ManagedByDistinguishedName = [string]$_.ManagedByDistinguishedName
+        ProtectedFromAccidentalDeletion = [string]$_.ProtectedFromAccidentalDeletion
         DistinguishedName = [string]$_.DistinguishedName
         OrganizationalUnit = [string]$_.OrganizationalUnit
         WhenCreated = [string]$_.WhenCreated
@@ -286,12 +296,35 @@ $computerRows = @($rawRows['ActiveDirectory_Computers.csv'] | ForEach-Object {
         OperatingSystem = [string]$_.OperatingSystem
         OperatingSystemVersion = [string]$_.OperatingSystemVersion
         IPv4Address = [string]$_.IPv4Address
+        CanonicalName = [string]$_.CanonicalName
         DistinguishedName = [string]$_.DistinguishedName
         OrganizationalUnit = [string]$_.OrganizationalUnit
         ManagedByDistinguishedName = [string]$_.ManagedByDistinguishedName
         WhenCreated = [string]$_.WhenCreated
         WhenChanged = [string]$_.WhenChanged
         LastLogonDate = [string]$_.LastLogonDate
+        LastLogonTimestamp = [string]$_.LastLogonTimestamp
+        PasswordLastSet = [string]$_.PasswordLastSet
+        PrimaryGroupId = [string]$_.PrimaryGroupId
+        SourceCollectedDateTime = [string]$_.SourceCollectedDateTime
+    }
+})
+
+$organizationalUnitRows = @($rawRows['ActiveDirectory_OrganizationalUnits.csv'] | ForEach-Object {
+    [pscustomobject][ordered]@{
+        CmdbAdOrganizationalUnitId = Get-SmartWorkplaceCMDBAdEntityId `
+            $paths.TenantKey 'organizational-unit' ([string]$_.SourceObjectGuid)
+        SourceSystem = [string]$_.SourceSystem
+        DomainDnsRoot = [string]$_.DomainDnsRoot
+        SourceObjectGuid = [string]$_.SourceObjectGuid
+        Name = [string]$_.Name
+        DistinguishedName = [string]$_.DistinguishedName
+        ParentDistinguishedName = [string]$_.ParentDistinguishedName
+        Description = [string]$_.Description
+        ManagedByDistinguishedName = [string]$_.ManagedByDistinguishedName
+        ProtectedFromAccidentalDeletion = [string]$_.ProtectedFromAccidentalDeletion
+        WhenCreated = [string]$_.WhenCreated
+        WhenChanged = [string]$_.WhenChanged
         SourceCollectedDateTime = [string]$_.SourceCollectedDateTime
     }
 })
@@ -329,6 +362,7 @@ $outputRows = @{
     'CMDB_ActiveDirectoryUsers.csv' = $userRows
     'CMDB_ActiveDirectoryGroups.csv' = $groupRows
     'CMDB_ActiveDirectoryComputers.csv' = $computerRows
+    'CMDB_ActiveDirectoryOrganizationalUnits.csv' = $organizationalUnitRows
     'CMDB_ActiveDirectoryGroupMemberships.csv' = $membershipRows
 }
 $identityExport = @{
@@ -355,8 +389,9 @@ if ($validation.Count -ne $mapping.Count -or
 }
 
 Write-Information (
-    "SmartWorkplaceCMDB Active Directory normalization completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; Memberships={4}." -f
-    $domainRows.Count, $userRows.Count, $groupRows.Count, $computerRows.Count, $membershipRows.Count
+    "SmartWorkplaceCMDB Active Directory normalization completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; OrganizationalUnits={4}; Memberships={5}." -f
+    $domainRows.Count, $userRows.Count, $groupRows.Count, $computerRows.Count,
+    $organizationalUnitRows.Count, $membershipRows.Count
 ) -InformationAction Continue
 
 [pscustomobject]@{
@@ -366,6 +401,7 @@ Write-Information (
     UserCount = $userRows.Count
     GroupCount = $groupRows.Count
     ComputerCount = $computerRows.Count
+    OrganizationalUnitCount = $organizationalUnitRows.Count
     GroupMembershipCount = $membershipRows.Count
     CuratedOutputRootPath = Join-Path $paths.LatestOutputRootPath 'CMDB\ActiveDirectory'
     RawContractVersion = [string]$rawContract.contractVersion
@@ -375,8 +411,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvHJLtTmV13dT/
-# lX2PLHC4UoB4Jw3NRAaY4Q+HwOdqc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnY8EZ7gU39tCW
+# f9MPf1vOPFPlIUTsG0KgBQdTy6e1TaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -509,31 +545,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJLyWtrjgFt2JPYM5U9iGJFtZ0gVcot5OJ00iJcqHeKmMA0GCSqG
-# SIb3DQEBAQUABIIBgIVV991djtqrn3o0AD0FJA6XaRnKW375jSYdYXw0mQKGDxNQ
-# vELuE5OYGIhooelwBEpVohEyT5gcd8T5cv1RdtAmeQv5VV+cr++Gt4Tbilb0mZqZ
-# 9CXPEBJGy/QL6NwlW6p9q1m+OKBvgz/S7wLrAmwyzCv1gfOvLmxMXGTaJnNTaikW
-# +XMx2Sbc7XKs8jV/6GiU46yVrlt0v75iPZ5cDB0W2qNcFbCYfxSNj1Ak3deC8UR+
-# g36F4Wm+ZKEtdiC5x4Xi4haMNftkwnf9xaSchb8t9PLT7n1Fk1fAvt0roISjnxOI
-# VWRE02jP4+xXfMci693SyRdC04C8hM4C5cf/tE+yzxakZ9hCZIzuJ4weiSg7yfh+
-# b51g5QU4WTVeLP5CupBULxQn/MckX7tBcicGNLheRD/dL9ElrMTSzZhSnmcEbz/G
-# THIsiLBxX8kMqZKNyY8N8gjr1L1PpNveUqChlsPyk880tTLRR++pNvob9+jLexFS
-# pebHgXX9BI6bzJjYq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN7SDfzcStPDuN9doyEr0jRPnUJXXvsfjvwcEgl6QxEvMA0GCSqG
+# SIb3DQEBAQUABIIBgAWVvfFUCbKkgrMOy7OQrF2FHpy1oQBRp1mNyioHGh2IBg+2
+# 08zhoAnvpG1rDNStJYDy1mx+X+gRfER4fIRUIcu6yds6QG2t6KeD+ou9vivyuMsK
+# ZO9aMss3DXN3UCrrjGtaN/shXo4+jl+GcywaabLiBwdLAr2sV50C2oaQWDeePJRQ
+# Ok3O2eCVmKoiWJjCSSRenAonC8DZTMFxUxzDyVgZXW/SxbdmU8EyatLwKlBvWHg8
+# btCt7myZ27W9lWGM6u2DLu0G1gzbQq4cNviYeTi1PicC5RzCKPDfVx0Q0FlE2HKy
+# t2fX2O+8uZhZRUaY5bhIKjopCc+px23HTH+4tNdJ6RV/rbHhknYbQr7cZ3J2Py99
+# 6yqjq2in3eZMBCKhIeIGeV29hkiu4tPd8Ben66ZYLmLu3ciOiJw+FO0zYNolTzY8
+# 7ojkDi+YHabUa2L8DPtuvLpsygSx5pf4bUJ2xLHe5XwYdwNGmVEHGus0XvBKnwss
+# J/gukQv3Wo4Vv1F426GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTFaMC8GCSqGSIb3DQEJBDEiBCCifAC9oAjs1+FbVq++km1+0cfsdpjy0Nwyp4jf
-# SPeBRzANBgkqhkiG9w0BAQEFAASCAgC1x/9Xng9GNc4wUbWvkLn5+asGUff1SdkB
-# o8TQUmd6hg/YNe52RggpW1fgs5WPNBR2Jvl/OXXEDFPSWcHJy6xplVAxNRHju07H
-# Sl5sb7D7qsY5b5O9KWmp/pEIS6vY62xdUeB6Ibr6B81aztJ2R/P+We+kZdfFxluN
-# edRwHpbaiUeG1j/jZM6QHIycaoyoug+kEfw8ZY7yzqSJ+4Ln77B1DdYAyTR5+X57
-# 8BWJQAPHDK8mXy1kc5T0SkJDaKjIVDE8epKvwpaRzaOvnhIfdT53KdYnubvWA9rj
-# WsthcebTGixIc2eOns1JzvlmNZSkvSoFRnPXNKabKSONvfEKkCxWY8FVZ5Z0MSBr
-# Ws62z2iuf/A8jNrEoFCkx6R2wQwAur0lieQc+juPzKzA6aTKuBojtgbgqmIvJD8g
-# dwuMsoS2RVaaIPkoHdQOIttH949G1SSfr4EI8dEFccdv4ogiB4XPPMKFRroGhRS7
-# Z0n8YuWb61B7/Jbq3M48X1wPWdZ9v09FVE3U24RyZNuSiJRS+h/fJYFcz6l7VDui
-# HAy6ARlNPgGnwKRf2IZO+u7BfDtKY6SDUPbMNp7WdFzK14elHXENu8rbzvjN6APv
-# kPvCTgmjQU0Tar7yi1uQjo3bxjKkUxKq2oxN6AnmsdXFJbGZcIjSCwTjtnnaRUB9
-# /l/XIyPhXQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTRaMC8GCSqGSIb3DQEJBDEiBCABNH9upVkkKBpr2mwjY6r6SEFPNjp6gok8TUsx
+# J0zaKTANBgkqhkiG9w0BAQEFAASCAgBnwI/IKRcIOFW7wvBnJW2Rf6wQZfLbyCLe
+# /93Bg6QCw8nVBFi5VYvF++KqyJWdbjw3h32ReYEKu78U4dychY6y5hHO807YGZ6f
+# cQaHjoVkLn28iFdFzuK0IR33JBl/iOJaIB0rz3lzD25il0c2wkemelDzF0WdANEl
+# b69YazB/yRtHblYO6Y+QiOz2KmAZPkLIbgvo/70MKSkWYFRA+cWWawMWMa4QzLg1
+# JOJhQIiepkwjOlhkGTKhTkDsUVE+n0hwQjhh4Jl8RB28gb6/SKTMoT6cx8QjdxwD
+# oieuR1RArl0DZPkhp0CDNjxE9jlZ4uN/Xot+AvbvzJVVEL5iWeV/+zPM+COYNdCX
+# yIXhXjGM1rW1IBa5vmUcEo5O+UzIjThg9Pe4OwC+YVNll6WgYoQNdAxXoXoo3Whs
+# i7V+yF0rPVsMWsFc1mwUBlQoFegpuQK4pxlLRSoRw+vXLEekgMZCu2XuQLhHk9gE
+# XQ1AtMN1mJWMisGOrYMUb3r9z8PGO9UvZNEETpbrGgVEH+PMVZcHf3OMeDyYvfJu
+# qIKUfiKCaTL5/cC8hmEeSsBR18Mn1KkuvT/6VbfBkYhqKmhc8edAQRX58Stco4b8
+# e2wtJKP0AfrOm/yzv4v1nyAlWag3M60vn/9z8PYmlwon5qfBJudp1wb0S4Pkj+x8
+# BlxyBchWmQ==
 # SIG # End signature block
