@@ -9,6 +9,7 @@
       "userType": "Member",
       "department": "Engineering",
       "jobTitle": "Workplace Engineer",
+      "usageLocation": "fr",
       "createdDateTime": "2025-01-15T08:30:00Z"
     },
     {
@@ -19,6 +20,7 @@
       "userType": "Guest",
       "department": null,
       "jobTitle": "External Consultant",
+      "usageLocation": null,
       "createdDateTime": "2025-02-20T14:45:00Z"
     }
   ]

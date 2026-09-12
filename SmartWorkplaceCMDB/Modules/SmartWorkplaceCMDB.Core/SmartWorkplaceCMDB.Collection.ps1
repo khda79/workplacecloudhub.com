@@ -1,5 +1,5 @@
-# Version: 0.1.0-beta.1
-$script:SmartWorkplaceCMDBCollectionVersion = '0.1.0-beta.1'
+# Version: 1.0.0
+$script:SmartWorkplaceCMDBCollectionVersion = '1.0.0'
 
 function Read-SmartWorkplaceCMDBCollectionFixture {
     [CmdletBinding()]
@@ -137,7 +137,13 @@ function Get-SmartWorkplaceCMDBSourceHealth {
                 foreach ($name in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')) {
                     if ([string]$state.$name -ne [string]$Paths.$name) { throw 'Source evidence identity mismatch.' }
                 }
-                $health=[string]$state.Status; $coverage=[string]$state.Coverage; $completed=[string]$state.CompletedUtc; $rowCount=$state.RowCount
+                $health=[string]$state.Status; $coverage=[string]$state.Coverage; $rowCount=$state.RowCount
+                # PS7 can materialize JSON dates as DateTime; a plain string cast
+                # loses their offset and fractional seconds. Round-trip typed
+                # dates while retaining the string path used by Windows PS5.1.
+                $completed = if ($state.CompletedUtc -is [datetime] -or $state.CompletedUtc -is [datetimeoffset]) {
+                    $state.CompletedUtc.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+                } else { [string]$state.CompletedUtc }
                 if ($health -eq 'Completed') {
                     $snapshotMatches=(Test-Path -LiteralPath $path) -and $state.SHA256 -eq (Get-FileHash -LiteralPath $path).Hash
                     $health=$coverage
@@ -159,8 +165,8 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpjQ5Lm2VdlEZ3
-# YSNS9X/jK38buliB3bJXc3vezmGCo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATEeTZAGqDj1O3
+# 1Ow9SnwRefn5EwHeZCirRp05Pg8dYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -293,31 +299,31 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOF+ceyN4mI2eQ5RHsMC3EjTmIV79/0nomNC+fTxynl8MA0GCSqG
-# SIb3DQEBAQUABIIBgF3dgVTS61h/rrAHGrQY0AO4AYdlY69l+eP6F3FfLbLsGfOH
-# DaAAGdsYi2AUNrWBJEaaHTO76ufb1+mA5psfJTHfgS4fLtopAlTuF6dPLa8L1GLR
-# m6s3haoRjBtjTRtXvFZk0/8G87cG6JelFtiyp8TaYW9YGpFs0Bbf1eSJEFQF2drB
-# ipogqYaZPiHJYoN6LBtrcuWRd8ypPaQMp0oxov+peHYJUI2Sn6HW1BVSwg8wszoh
-# LGyhFr0GPH2WRdlW7KNoRO17zogWrCozD6zVMqvcGmY6e4A4csqO0gH4+pMB6ouq
-# 3nIXaflrZ21pqoXNlbOCblw3YA+mrmIXBtKqz/9DqCVjRKCdmkPsBHOCiHt0KdXh
-# vi/9frGhD4ef2anfEKbSpWL7cexFuoRFceejwdZjPIKmA3TG+UrtfG66DJvU/oOJ
-# lbqEbPj8DkKqkHi0LcoMd5hbW6C3dXK+Eyz6ZB+gaInS+j9SBPsOAvCeeaGiI88Y
-# h9nub3ELAZ0VyozSdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIiRz0ntU3gnTWohXwH1Pt07FpDxctGLXX8O+QNMBdQsMA0GCSqG
+# SIb3DQEBAQUABIIBgDKoDliAiCIaCK6Yk4544Xivj7hQW2pwK4bGnWKjcoirYq8B
+# MLZiULzu0PMCKZdBGiO4MuJJ1qdtfUPo8bGGT/BBLe5ED6IREUOA1p0Y0lnbs2nO
+# 18S/hvKucz3otrNkqzpok49Ru2y1Sj/2ujry1j2moLuOzqkuGDlv/VStZMqHZcv7
+# 8Dd2imdQk7kL84TUBIUxTJDmJoZUwJWN3JpH+bT1i8OREglXk7QmjQ9Yoh8DysDI
+# YZQ+NCu2r9ux779anAibF5HC4DWyA0m3Fxt/q/0/uuC6mVARwU6bJExd5RYfIfU8
+# yMTpzjUZPNQpvAkwNDLEvrAAJ1boydMkwYitZ4KCYfxS3dfsIbVfXUd95+epoC5U
+# h+TwBKSrSAs1vRaGJja1JKpJ201mvR2d+VevqceZ7O4si++gsmlqGOjZWUsrJx9S
+# SH43pPwne/q2ZFvvKY5PRSx+lTFK00cj45Pk44TY1OEXOrLfJQ0aVIn9UFayiGnV
+# A8ImZjuKbiSbIHdMKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAqS2VOem3zzw/eVgLRWhbyTrTwj6WoxYUIFo4J
-# 4UfO9zANBgkqhkiG9w0BAQEFAASCAgAX0wJcSWsm5P/2SAoa33pBO2cohhgS2vYD
-# Yj7oJ25z9jb1usuA+GYmWYSlk/Kb4MzVCxCmvABjDhAnCDeLBPqqasXZtjquyCC3
-# x7z/ozTVU4FPFaHL8gPP40uBIUNc1/sTR7b+HaWy/84YJT6IHZuKghGRuXr0vBU0
-# 3SYxyQrmF+ESFUryc5lW+jKsUCPfys092WuqxvabE9BXMOv1Go9afTmQ+Rfb+tpT
-# Jd55+21i3h4UZlX34S6IU17RI+WDUbmNR3MfLjKWKIaB1UTPf+bFa6OqRaBx6rKk
-# 1AO1s+v3T5lPR9wEfSV2y+zByP0Qa2osb4lMEPAAoIm5vLmrqHj0lA3o+p0Z7XQN
-# 9rk7BZvuLVI+qjQYZfcdmUh1oGjTd4aiSW0BdCTZFs7XG3uM/4noFUz1NAzee4Kx
-# 053f3ISdW+5BJYQse4HNYETbVrDvek3ss9C9dWxqYE97H1Y9kryx3na+leSo/p1L
-# aAbK6S/5RNSjjTUc4wA0E9wNKeRdJ0+pKr9nplchiYyqUsZwBXegVDqDbn6Rfr9k
-# 1oPS+YRx4iZ7IEh5ZLGBScDi7WEMZPc95bgTE5lPH2R0UlLpTjNuRN2i/RyOBBzq
-# D3HAwkKYG19p1Q+Tnn0z0ejKbGqViiiKzIetDyX/yaaTxnGM1+ZUsJtpVEPgGJSE
-# 0B8IDcNwww==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTVaMC8GCSqGSIb3DQEJBDEiBCAywDKxJqjl6S/dE6h2bhyC6wa5FmJBtXl8HZtJ
+# Nxi6jzANBgkqhkiG9w0BAQEFAASCAgBnvH13447UVS3FD5c5iXeV5/YXAEHJ+jmA
+# T89D8dtUZkT//uW5ctR63n5Pnj1TPLixT9WI8Yz7FZ2LFLDTWz0FRAl2vsGb+RXr
+# 9jFo/BCc3VE/PtdTlOtucdijsKPq7YF6lsy50Eh7/UkFrNvPVxGbQD25bCvxGJL5
+# IPDd4ykpwW/5nVf0vfG7V2BaEicCbN6+ScEoGBXkfRAuo5fQxPGKVhFKKTxSYAtC
+# BNxEkdgTSfmydgMAEEYMBRlCrkYbeZDVkqx3wXi2NblV35a0O1FhXJybf88ad+ZY
+# J/Dlv8o6kkQ9h992RttC1wuGNU958g1Y9WHNYAgrh4AJ3AmKYHJj+kGaoN3/SKS2
+# XGWQy7mjRJYFztW7+Wbn0z06D0bDIHTL9Om3nOz/uPiIZX81xBM/ztLvyJXEp1Yw
+# 5o8lyAPpDgrGZbDCcK7WIJJ3AMA1JMRT251KtkQd/xB+55co5HPnVTA6Jz9vPKQ+
+# A8rMkeVqnCp9TWoxmSyf3W8HNOffubViSOt8wCwjBUC3cGwwdspUA03lHAqxpij+
+# uoJ9YzLrefxV5MfdG2pWm7KY5oiRlwbw7Ip1S+UtCpvk6fx/emjRLZsToZTBqC3Q
+# Ei4FNRKAEOu9rq4WDrv4hr/NJyKZisCYLzL0r/v+aDUyKMjYww68pveUyPx/xwfw
+# Fu10BxDpoQ==
 # SIG # End signature block

@@ -8,7 +8,7 @@ and publishes curated CMDB_Users.csv and Power BI DimUser.csv tables. No
 Microsoft Graph connection is performed by this script.
 
 .VERSION
-0.1.1-beta.1
+1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +29,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.1-beta.1'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -101,6 +101,38 @@ function ConvertTo-SmartWorkplaceCMDBNormalizedBoolean {
         throw "$FieldName '$Value' is invalid for source user '$SourceUserId'."
     }
     return $parsed
+}
+
+function ConvertTo-SmartWorkplaceCMDBUsageLocation {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    $cleanValue = $Value.Trim().ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($cleanValue)) {
+        return [pscustomobject]@{
+            UsageLocation = ''
+            CountryCode = ''
+            CountryLabel = 'Unknown / unassigned'
+            CountryStatus = 'Not provided'
+        }
+    }
+    if ($cleanValue -notmatch '^[A-Z]{2}$') {
+        return [pscustomobject]@{
+            UsageLocation = $cleanValue
+            CountryCode = ''
+            CountryLabel = 'Unknown / unassigned'
+            CountryStatus = 'Invalid'
+        }
+    }
+    return [pscustomobject]@{
+        UsageLocation = $cleanValue
+        CountryCode = $cleanValue
+        CountryLabel = $cleanValue
+        CountryStatus = 'Reported'
+    }
 }
 
 function Get-SmartWorkplaceCMDBDefaultConfidenceScore {
@@ -273,6 +305,7 @@ $cmdbRows = @($rawRows |
     Sort-Object UserPrincipalName, SourceUserId |
     ForEach-Object {
         $sourceUserId = [string]$_.SourceUserId
+        $usageLocation = ConvertTo-SmartWorkplaceCMDBUsageLocation -Value ([string]$_.UsageLocation)
         $cmdbUserId = '{0}|entra-user|{1}' -f $paths.TenantKey, $sourceUserId.ToLowerInvariant()
         [pscustomobject][ordered]@{
             CmdbUserId             = $cmdbUserId
@@ -287,6 +320,8 @@ $cmdbRows = @($rawRows |
             UserType               = [string]$_.UserType
             Department             = [string]$_.Department
             JobTitle               = [string]$_.JobTitle
+            UsageLocation          = $usageLocation.UsageLocation
+            UsageLocationStatus    = $usageLocation.CountryStatus
             ManagerUserId          = ''
             CreatedDateTime        = [string]$_.CreatedDateTime
             LastSignInDateTime     = ''
@@ -305,6 +340,9 @@ $dimRows = @($cmdbRows | ForEach-Object {
         UserType         = $_.UserType
         Department       = $_.Department
         JobTitle         = $_.JobTitle
+        CountryCode      = if ($_.UsageLocationStatus -eq 'Reported') { $_.UsageLocation } else { '' }
+        CountryLabel     = if ($_.UsageLocationStatus -eq 'Reported') { $_.UsageLocation } else { 'Unknown / unassigned' }
+        CountryStatus    = $_.UsageLocationStatus
         ConfidenceScore  = $_.ConfidenceScore
     }
 })
@@ -357,8 +395,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+6kQxucp551Tu
-# QYJUgdcMnFrnNBMk27lbcutarXQ+EaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYQGAaH/owrzJZ
+# XQNjRZrtIoanrvl1pk4z7y1d4TyGfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -491,31 +529,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF76QWDIlZiwzrlLRwSe8WBW5uu13Xmotuk3pOUsgJOFMA0GCSqG
-# SIb3DQEBAQUABIIBgJXD4k2EaQq5spjEj8ByyJSouiLK2w94gbiogxBcpJ17WmGj
-# KS+TnAJinEdf+QeSzcwwmp8ZN2Z5HPzPDWNLA7Sdx73EWWFqVJ9sFkzCOtESKVkn
-# exwfDHtA4IVQ5AsoXCfWl9GBHr+TBuqHgNmS71NvOqGhxctKhicWiK67fEaExHYl
-# qbA465U9nswn95NRC8VnEoM3MZ0oWbXUrE5hDTdz4MbjroqC/ehv5tdc1GQvt5Kq
-# tskOGpgdYt4hOTvq0GT1Eg7i9lLxaiE5rCESqcSihKXb/MPmdN3XzLb6VoXxjjl3
-# tlzrpg4KQIkoAyLEGym1D3mYSxVya5KSFvl8truH5D47pK1Hn8QUBRdcmQ6S3Gzz
-# yr0TPi3SUEDteaX/fFvbbV0NXPwvyGevrKQ3cFfIFYfB0nJwx3IvdxWGnhdO73/Q
-# ZdmwFw9FybBFg7yaoEWuqiSzvV5sMWg2VMVHUFejy7PPSOpnlMSnWFRfjkSkdrgs
-# 73ZSUVzfyRL/+2dh0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIObQWQsx4jGYEmgjZIJJmHJzT+quR5yVVa24uaHOlVfAMA0GCSqG
+# SIb3DQEBAQUABIIBgGZHk4RFz65XezuTLtZ/GNVUv/lrlzFJq4duVdq8GQo65E2R
+# BKEmTdSkdvK6q2desrDbhzf8ZJnVgld6xUoLS8I/77TRf1JTcTGUrYE9v2vM8bT6
+# 8f+ls4vR1+LlDOe/SmZjrHW4YwVcQvp4Y0p604uZABNLECq9AMyqUXw2VTLdxr00
+# sm4RTvJYCTj1LVRcQs98ZYCCeGUQtHE0XiRb66c1W2ORBMTF7xHIfF4pfnXWH3St
+# XB9t+ONejG6rwzsXMHfkOx7sseVpfBKAEbWaGuKPQHcmvHeLpq+vUEHR8u26ZnOe
+# EOlCGx1SJOYKDW7EjYSp4PSbN1Py6Cd9ctk0nIZM4i3IdFVG3Is820jIDkzUWZhG
+# H4Ghhb/yB44QFUrRWqy9GbPJx60c4Q9jVEg3op6mL38c6Ali/czGQT3o2OotFza4
+# uARCRIvoDIOhFuGeuOm0j/aICCqOUDDJicH2R6IvfZQCYsDpbNB0TAfOnUUtcY4/
+# g81nVsHoh9tkGUW8u6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDZaMC8GCSqGSIb3DQEJBDEiBCCz93mbRfVGbeVeGgr8dKWOIKFOrAlsrmFWs7is
-# jx+NgTANBgkqhkiG9w0BAQEFAASCAgAj/VS/lZtnh8vzRZWLjshl5P+q7N1FPnv1
-# e9Mq9iagGVyg5koIazhB6ZM7QB/X5Zor2hsGNAmM4lnU+XJN5wPW10O/4j6m/h4d
-# YLtnDF0kXNHRUTjvyAyCS5GmdW4iEz9Q390e+K3rMZtJwzghgxVoPdXRGIdhuqNw
-# qxs/9LT2CLH8br1cj8CJ9RNC/jXwbG3YP1CKLrgl4wDBLh/aNa6tJvH2XTp13EfZ
-# HEVUrEJ/eCqmnpc9UrdzMPpF6pAZr7em+kMd8syQSSZ0cxZJQn7iJyo1RAnvMol7
-# 61MDLHd4e3AcYv1ilWpmbYSy5aPIsn7/vuQNhdjSby90IvM+SbTDrC7XOaqOJjyH
-# adpvPdWK/U+6YLuBIPLKL6HDHVCKoK3TaTsutR9IjV2BHb2gWoz7TPi+bij3VVg3
-# RwkNb6pSbQuAwibudZZwjChoQzs6J6b+bQUBKcFGe8tyazAMvBQngLbw7gJc1oWx
-# blHBdT3sMNJvk6/2tiPQxG3M38VciMlRhfOCzaImH4zD66ruIxJvStJcc26qSNcu
-# hkryVmJgLZxYtzv+gMdsrPohFjnpn5kAK36VFlTiqEopn3Kj7vHTDBaBKkTGKgYz
-# zddEsdocm2jPo6i71YPQML61qsOn9wDi0LSPE7VIknN32L+cRRP3Amr2vdM5ufxj
-# ypIDX47gcg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTJaMC8GCSqGSIb3DQEJBDEiBCA2DiFTUPpSXmnLiAHZ8/Eg6HCfYQqLuETIU+1b
+# PhDQpDANBgkqhkiG9w0BAQEFAASCAgAO2VulPUiNqZU4k0mdKQ1tkWBO1XW6FBMx
+# VMqjaNWTviOV/RQ9IwY3j8SF3Pyd9eGL+iyR7MWEPYvjg7y03Kh7SKID37+JNTIL
+# 5h/O0TCoMc7jP1xan0pZmK5hEio81zE4MwLffx0Gihv4dxI852k/VToklsLKoKAy
+# GWW2dLDQt/kKqXq2rFoeRfFRNd2rwPlyFAyI17N0uZCiyPEJ/GwDVremWWbnyFJf
+# VwWT7yrzaNrttmo72lRNCMx0dtnXdEpP47yncnrm7cNeZJkqd6+zAkMZo6HnTpFB
+# zmtGMmIjwE8Acs4YqZ288Uk4ZS2+ovpC0+2Q+kiMzRu3DoFkuwcdaUlFXyBar3bz
+# VGJlrWDeuGVhduHdutyMP2b17QqZpE37ExzjPGkjYpK/D39bZpxoK2GJniPNVTun
+# ibg6/FSn0haZpkf8+fR6+QN27vgFr0CFyFqcyj077GI83lZDNSyDWTFprxdMq4Xd
+# hYbmutnDBVxSH4mPZKGfBHwmTrgnU19tQU8IrNWw1noulC+sWW+oF7lrMT35JlEz
+# +yVCnF6I6dI7zqWNVKVUJpST8mH5zCwXvIHWOi1M8Yo8pOHOv36tjPYwpKmsINDu
+# OR2S3CBEKdQMa8XOnknkxy90M3M5ncHN8DFgRfMBYhiaESi3O5AbVF0iO0+/LMtB
+# ogwhrn7aXg==
 # SIG # End signature block

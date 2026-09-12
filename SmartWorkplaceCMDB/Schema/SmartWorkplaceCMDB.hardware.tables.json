@@ -1,0 +1,22 @@
+{
+  "contractVersion": "1.0.0",
+  "channel": "stable",
+  "description": "Source-reported Intune hardware for the frozen V1 contract; no inferred values or CI identity changes.",
+  "graphSelect": "id,azureADDeviceId,serialNumber,manufacturer,model,totalStorageSpaceInBytes",
+  "textStatuses": ["Reported", "Missing"],
+  "storageStatuses": ["Reported", "ZeroReported", "Missing"],
+  "tables": [{
+    "area": "Raw\\Intune",
+    "name": "Intune_DeviceHardware.csv",
+    "role": "raw",
+    "source": "MicrosoftIntune",
+    "tenantScoped": true,
+    "columns": [
+      "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+      "SourceSystem", "ManagedDeviceId", "AzureAdDeviceId",
+      "SerialNumber", "SerialNumberStatus", "Manufacturer", "ManufacturerStatus",
+      "Model", "ModelStatus", "TotalStorageSpaceInBytes", "StorageStatus",
+      "SourceCollectedDateTime"
+    ]
+  }]
+}

@@ -3,12 +3,12 @@
 Runs offline tests for SmartWorkplaceCMDB data-quality normalization.
 
 .VERSION
-0.1.0
+1.0.0
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.0'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -93,8 +93,10 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $normalizer = Join-Path $projectRoot 'Collectors\SmartWorkplaceCMDB-DataQuality-Normalize.ps1'
 $modulePath = Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
 $contractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.tables.json'
+$rawContractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.raw.tables.json'
 Import-Module $modulePath -Force
 $contract = Get-SmartWorkplaceCMDBTableContract -Path $contractPath
+$rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 $tables = @{}
 foreach ($name in @(
         'CMDB_Users.csv',
@@ -106,6 +108,8 @@ foreach ($name in @(
     )) {
     $tables[$name] = @($contract.tables | Where-Object name -eq $name)[0]
 }
+$assignmentTable = @($rawContract.tables |
+    Where-Object name -eq 'M365_UserLicenseAssignments.csv')[0]
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'SmartWorkplaceCMDB-DataQuality-Tests-' + [guid]::NewGuid().ToString('N')
@@ -140,6 +144,7 @@ try {
             EnvironmentKey = 'prod'; TenantId = $identity.TenantId
             CmdbUserId = 'contoso-prod|entra-user|user-1'
             SourceSystem = 'MicrosoftEntraID'; SourceUserId = 'user-1'
+            UsageLocation = 'FR'; UsageLocationStatus = 'Reported'
             SourceCollectedDateTime = $collectedDate
         },
         @{
@@ -147,6 +152,7 @@ try {
             EnvironmentKey = 'prod'; TenantId = $identity.TenantId
             CmdbUserId = 'contoso-prod|entra-user|user-2'
             SourceSystem = 'MicrosoftEntraID'; SourceUserId = 'user-2'
+            UsageLocation = 'FR'; UsageLocationStatus = 'Reported'
             SourceCollectedDateTime = $collectedDate
         }
     )
@@ -231,17 +237,19 @@ try {
             -ReferenceDateTime $referenceDate
         $rows = @(Import-Csv $script:Normalization.CmdbOutputPath)
         Assert-SmartWorkplaceCMDBDataQualityTrue `
-            ($script:Normalization.FindingCount -eq 2 -and
-                $script:Normalization.WarningCount -eq 2 -and
-                $rows.Count -eq 2) `
+            ($script:Normalization.FindingCount -eq 3 -and
+                $script:Normalization.WarningCount -eq 3 -and
+                $rows.Count -eq 3) `
             'Reference finding counts are invalid.'
     }
 
-    Invoke-SmartWorkplaceCMDBDataQualityTest 'Map orphan and mailbox findings' {
+    Invoke-SmartWorkplaceCMDBDataQualityTest 'Map orphan, country, and mailbox findings' {
         $rows = @(Import-Csv $script:Normalization.CmdbOutputPath)
         Assert-SmartWorkplaceCMDBDataQualityTrue `
             (@($rows |
                     Where-Object FindingType -eq 'OrphanPrimaryUserReference').Count -eq 1 -and
+                @($rows |
+                    Where-Object FindingType -eq 'DeviceCountryUnknown').Count -eq 1 -and
                 @($rows |
                     Where-Object FindingType -eq 'UnlinkedMailbox').Count -eq 1) `
             'Reference finding types are invalid.'
@@ -257,6 +265,113 @@ try {
                         $_.TenantFindingKey -ne $_.FindingId
                     }).Count -eq 0) `
             'FactDataQuality does not match CMDB findings.'
+    }
+
+    foreach ($scenario in @(
+        @{Name='Discovery without external ID stays visible as information';Type='DiscoveryMailbox';FactType='DiscoveryMailbox';ExternalId='';Linked=$false;Severity='Information';Finding='TechnicalMailboxWithoutUser'},
+        @{Name='Discovery with unresolved external ID remains warning';Type='DiscoveryMailbox';FactType='DiscoveryMailbox';ExternalId='missing-user';Linked=$false;Severity='Warning';Finding='UnlinkedMailbox'},
+        @{Name='Shared mailbox without user remains warning';Type='SharedMailbox';FactType='SharedMailbox';ExternalId='';Linked=$false;Severity='Warning';Finding='UnlinkedMailbox'},
+        @{Name='Room mailbox without user remains warning';Type='RoomMailbox';FactType='RoomMailbox';ExternalId='';Linked=$false;Severity='Warning';Finding='UnlinkedMailbox'},
+        @{Name='Unknown mailbox type remains warning';Type='';FactType='';ExternalId='';Linked=$false;Severity='Warning';Finding='UnlinkedMailbox'},
+        @{Name='Conflicting mailbox types cannot downgrade warning';Type='UserMailbox';FactType='DiscoveryMailbox';ExternalId='';Linked=$false;Severity='Warning';Finding='UnlinkedMailbox'},
+        @{Name='Linked discovery does not emit a finding';Type='DiscoveryMailbox';FactType='DiscoveryMailbox';ExternalId='user-1';Linked=$true;Severity='';Finding=''},
+        @{Name='Discovery classification tolerates case and whitespace';Type=' discoverymailbox ';FactType='DiscoveryMailbox';ExternalId=' ';Linked=$false;Severity='Information';Finding='TechnicalMailboxWithoutUser'}
+    )) {
+        Invoke-SmartWorkplaceCMDBDataQualityTest $scenario.Name {
+            $mailRows = @(Import-Csv $paths.Mailboxes)
+            $factRows = @(Import-Csv $paths.MailboxFact)
+            $mailRows[1].RecipientTypeDetails = $scenario.Type
+            $mailRows[1].ExternalDirectoryObjectId = $scenario.ExternalId
+            $factRows[1].RecipientTypeDetails = $scenario.FactType
+            if ($scenario.Linked) { $factRows[1].CmdbUserId = 'contoso-prod|entra-user|user-1' }
+            $caseRoot = Join-Path $tempRoot ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $caseRoot | Out-Null
+            $mailRows | Export-Csv (Join-Path $caseRoot 'Mailboxes.csv') -NoTypeInformation -Encoding UTF8
+            $factRows | Export-Csv (Join-Path $caseRoot 'Fact.csv') -NoTypeInformation -Encoding UTF8
+            $caseParams = @{} + $sourceParameters
+            $caseParams.MailboxInputPath = Join-Path $caseRoot 'Mailboxes.csv'
+            $caseParams.MailboxFactInputPath = Join-Path $caseRoot 'Fact.csv'
+            $result = & $normalizer @identity @caseParams -DataRootPath (Join-Path $caseRoot 'Output') -ReferenceDateTime $referenceDate
+            $rows = @(Import-Csv $result.CmdbOutputPath | Where-Object EntityType -eq Mailbox)
+            if ($scenario.Linked) {
+                Assert-SmartWorkplaceCMDBDataQualityTrue ($rows.Count -eq 0) 'Linked mailbox emitted an unlinked finding.'
+            } else {
+                Assert-SmartWorkplaceCMDBDataQualityTrue ($rows.Count -eq 1 -and $rows[0].Severity -eq $scenario.Severity -and $rows[0].FindingType -eq $scenario.Finding) 'Mailbox classification does not match the source evidence.'
+                $baseline = @(Import-Csv $script:Normalization.CmdbOutputPath | Where-Object EntityType -eq Mailbox)[0]
+                Assert-SmartWorkplaceCMDBDataQualityTrue ($rows[0].FindingId -eq $baseline.FindingId) 'Classification changed the stable finding key.'
+                $facts = @(Import-Csv $result.FactOutputPath | Where-Object EntityType -eq Mailbox)
+                Assert-SmartWorkplaceCMDBDataQualityTrue ($facts.Count -eq 1 -and $facts[0].Severity -eq $scenario.Severity -and $facts[0].FindingType -eq $scenario.Finding) 'Power BI fact lost the classified finding.'
+            }
+        }
+    }
+
+    Invoke-SmartWorkplaceCMDBDataQualityTest 'Report deterministic coverage gaps' {
+        $caseRoot = Join-Path $tempRoot 'CoverageGaps'
+        New-Item -ItemType Directory -Path $caseRoot | Out-Null
+        $users = @(Import-Csv $paths.Users)
+        $devices = @(Import-Csv $paths.Devices)
+        $users[0].UsageLocation = ''
+        $users[0].UsageLocationStatus = 'Not Reported'
+        $devices[0].PrimaryUserId = ''
+        $devices[0].SourceDeviceId = ''
+        $userPath = Join-Path $caseRoot 'Users.csv'
+        $devicePath = Join-Path $caseRoot 'Devices.csv'
+        $users | Export-Csv $userPath -NoTypeInformation -Encoding UTF8
+        $devices | Export-Csv $devicePath -NoTypeInformation -Encoding UTF8
+        $caseParams = @{} + $sourceParameters
+        $caseParams.UserInputPath = $userPath
+        $caseParams.DeviceInputPath = $devicePath
+        $result = & $normalizer @identity @caseParams `
+            -DataRootPath (Join-Path $caseRoot 'Output') `
+            -ReferenceDateTime $referenceDate
+        $rows = @(Import-Csv $result.CmdbOutputPath)
+        foreach ($findingType in @(
+                'UserCountryUnknown',
+                'DeviceWithoutPrimaryUser',
+                'DeviceCountryUnknown',
+                'MissingSourceIdentity'
+            )) {
+            Assert-SmartWorkplaceCMDBDataQualityTrue `
+                (@($rows | Where-Object FindingType -eq $findingType).Count -ge 1) `
+                "Coverage finding '$findingType' was not reported."
+        }
+    }
+
+    Invoke-SmartWorkplaceCMDBDataQualityTest 'Report observed license assignment errors' {
+        $caseRoot = Join-Path $tempRoot 'LicenseAssignmentError'
+        New-Item -ItemType Directory -Path $caseRoot | Out-Null
+        $assignmentPath = Join-Path $caseRoot 'Assignments.csv'
+        Write-SmartWorkplaceCMDBContractFile $assignmentTable $assignmentPath @(
+            @{
+                TenantKey = 'contoso-prod'; OrganizationKey = 'contoso'
+                EnvironmentKey = 'prod'; TenantId = $identity.TenantId
+                SourceSystem = 'MicrosoftEntraID'
+                RawAssignmentKey = 'assignment-1'; SourceUserId = 'user-1'
+                SkuId = 'sku-1'; AssignmentState = 'Error'
+                AssignmentError = 'CountViolation'
+                SourceCollectedDateTime = $collectedDate
+            },
+            @{
+                TenantKey = 'contoso-prod'; OrganizationKey = 'contoso'
+                EnvironmentKey = 'prod'; TenantId = $identity.TenantId
+                SourceSystem = 'MicrosoftEntraID'
+                RawAssignmentKey = 'assignment-2'; SourceUserId = 'user-2'
+                SkuId = 'sku-2'; AssignmentState = 'Active'
+                AssignmentError = ''
+                SourceCollectedDateTime = $collectedDate
+            }
+        )
+        $caseParams = @{} + $sourceParameters
+        $caseParams.UserLicenseAssignmentInputPath = $assignmentPath
+        $result = & $normalizer @identity @caseParams `
+            -DataRootPath (Join-Path $caseRoot 'Output') `
+            -ReferenceDateTime $referenceDate
+        $rows = @(Import-Csv $result.CmdbOutputPath |
+            Where-Object FindingType -eq 'ObservedLicenseAssignmentError')
+        Assert-SmartWorkplaceCMDBDataQualityTrue `
+            ($rows.Count -eq 1 -and
+                $rows[0].EntityId -eq 'contoso-prod|entra-user|user-1') `
+            'License assignment error mapping is invalid.'
     }
 
     Invoke-SmartWorkplaceCMDBDataQualityTest 'Apply critical freshness threshold' {
@@ -350,8 +465,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMYliVIUFXZOOQ
-# JYffsYjUPPkHkrQKmbMz8vLkfZviyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvlQgE0vIZfkDF
+# GL/V7358znsWgCTywjMLHrBQa/SBC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -442,25 +557,25 @@ if ($script:Failed -gt 0) {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -468,47 +583,47 @@ if ($script:Failed -gt 0) {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILJyBgDJXedS3MizdQwkTfBxubz2jcVpazr6DXbKUIfGMA0GCSqG
-# SIb3DQEBAQUABIIBgEZulL22xre3sJtQ3cVBeRQ7JdbQk92tfyq73fPfdKY+W5xX
-# G2Oa4zmrpPTwF2eI9lNrebpqoMEiBn0A3slkgXV90d3cFiGS2KSvazn+ABd+Z0TK
-# SsehIONkugmPDAEMhE632O4mWlQojcehGdlcxezJ1py3iLzyQxNACMslN0PfN+7j
-# NhyqPCBu0xTc/cRQPIvSEmCRr87/YWkDFKkFXL3LRxf7tQp1cwersPBI6sjwntoe
-# 4q9LqkaZ/Rc46SIji0W+t86KHMT6fnw2HtOUvqJN+zWtn/ZFvImdx/cC+5Wjw0I7
-# joBDIvITpqwo+8bGeqiYQhOkwQP1gybsNjpx5LEUstILTzpjbikzAd9kc6ClKvxF
-# awHpacObgFOsBuX2061L83/w8c8PkI3f3GPnUkLcKKnrxwVYwS8HVtv12lfuX8zW
-# 1y8+QP6ET3mu6fjX8U+OTrGKVtVEwnRoXTGteEvLL/L3ek/IpUed6ydXXrPrZ0YT
-# 3Zergc4G9YtOlzcU3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEPjMJ9Hn740a0OZQ42Zt29ZC+UyHw0VOi0TaNE7TW7GMA0GCSqG
+# SIb3DQEBAQUABIIBgAI+qLwnfCuF8VjC4qQo46+hR/1Jm7R62gtNVlYVzPtXDEbH
+# VIEzKrvKwWBRVloNGsJHW8DUXUoNGsoULGKYrrOhCcjguliBWjg7h42OrwfxA9RY
+# wXoDpJwGkjk7DzrsKeE99Esz1fiTjGdXTkCNGtVNBB8ey4VkKDdSLqXhCVzyqBRI
+# xC/A7/7K03hJkkWvH/hnMOlEtcY1iQq+SNdIVyLRLq8LPKXuHe+96LMqCAW2/Tj+
+# VvAsDt2wX8duukFZQpoPUD/3tbQ8HbSHC9i3Cbn6hBBlBz8Br9rjsoSxz3JUFx8R
+# 2KmtgX8y8W7CtRFR5s5Xmzs7HMkkzBFPXD8CRoUaxv9P1pQjzzkYc1kv01/IjgON
+# k0W36h13EPXDO6kT039Sq2ZloZIT5GqG2wUswSgFnxc5tPOMH79k9tn3ukFvc5ev
+# 6Hjyja0qvxpeD4TNvA15d7s4BZy/vmJlMZk1f4VsqJ81bI8zebv5yzTF2UYA7g/O
+# 85aNIyokvwAQ2lQ056GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTQy
-# MzJaMC8GCSqGSIb3DQEJBDEiBCB1Jr1UlVB1eAi07IVl4R604kjn+yTlquX8sWZX
-# yj7lgzANBgkqhkiG9w0BAQEFAASCAgBm7pCNaGoRymM4hkt5nLF+uBxUnXTW78Wz
-# RE1Ug44U56CQie4hcph/B80bsR6l76PY26+NqpBRmlEj1u6iYupUa5nLoM8VDwpx
-# VcU/MuXynIUzIhnYI8CLWz9euZb2+cWTSK2lGo3ZZm7b3pv8K1xDtVgiiiQPpBCh
-# JY6hI7SbbM9z0sr91QO27yf7/kWZfJG4lJR2azeUNKOsBBVE0XiNORzy2xwMBAjm
-# 7u5N06qPRqE3agnQa/wtTiKMkJMW8dQxuT0ONb6z8e+O5ePiBCwtiODh2NLMz4zF
-# APkj/dWbX9aK3yo6td+SiDT+wOnpZ5cAfTbkQ4bnQg4VshzfqWyGxDZI8jXOeGUV
-# sJ1jAVPcsBtVjOxU8p/qfGXrunTJTRdsBTtZQ6PsfRbX4XZOK0TLy7sqRlA996tm
-# amQIkRk0wi173Q8wqQbAyCIM65bRGwWVEjOj1OFGxPN5g4JZIb/qKYpmU/VITvyO
-# 2bu+EeDDOKEQjJ+M3uOpYOssFGi/bwdilzk/K7AN3a55hjJ2SzQ6TwaP8V/y6T4H
-# KoCvKx+Covzhq6aoi7wxxDtr1yjN/BDWw4OnIoe77z5PGr313Gk2r1d5AcxBtdIN
-# mf9/tlkvZ/JPfNvaxFCNXhj6jgHFjFIYruY1S6vJpUqX4Uurer+aW3sUCyshxooB
-# VWtO90ANUQ==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MThaMC8GCSqGSIb3DQEJBDEiBCDh98s5hgGANRtcPfgU8Y/QkNoT2OgTyP3pKlqD
+# beJ5JjANBgkqhkiG9w0BAQEFAASCAgBiM3VktY48m7aZ+jxsbEBsSmOpTt7VR2Kz
+# nAfDnHkzxO9cA71eSbDAVT7GQ9y54JrG14T+fjJxw71/LrTgZEuJF9PXx8Vf5y7J
+# H3YZ5ggG7yhDQ+pLz9TURL3deWdjgD0wiR7cJmY2SJcUKUUFnjxFlyHT5KTEhSpd
+# UK+d5jpxkFDoLg1b1cfwvWuAYcfq1hWquPrjpNNKrvSKR11T+T+VKY3+eIXttYxZ
+# mNORMshpoq1msspGWUhWURvaJ7RxOfz+pDB+AvfwL84gXft8D4CPqLQe2b8ZBfF2
+# ZLgLbV6G9pxbPEAhWU/sQJAytl6Yjpl/VD0iopwXEsz83e6Qggls1/ErFn9x5QK3
+# QnfhDAV+lP1X+PkTeumJu7v4sS0H91Xj6adxEMLU62OZF7Z3oTsbwLb1bga80XbM
+# WdFh2p6SRDhZk5UVTd/QdPefT5zOCjfO+rKj5kAoiiuPIhMzFYFmnw4h20d38XLY
+# vGv4uZ28ZWelGoCAA2q7rGstJ93oJ3dZnNw3TUYCjWTJYTk5+jr17DalqbaSZsGM
+# UFFRk8bKW2uZsZxkN1+XhjUMtbP/cw+1RaNZW3QU1NYqmNLdAAMbr9ggr4yQ8dxn
+# Nh/bTyViI+QtXWNzFjL9LvW1jiJMHHi/KFRdfVdLCU4AQvEFyZSfNc/IPGznDEKp
+# +ScXOcRW4w==
 # SIG # End signature block
