@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-Offline beta regressions for direct collection isolation and source evidence.
+Offline V1 regressions for direct collection isolation and source evidence.
 .VERSION
-0.1.0-beta.1
+1.0.0
 #>
 [CmdletBinding()]param()
-$ScriptVersion = '0.1.0-beta.1'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
 $root = Join-Path ([IO.Path]::GetTempPath()) ('CMDB-Evidence-' + [guid]::NewGuid().ToString('N'))
@@ -103,6 +103,50 @@ try {
   Check ($user.Status -eq 'SnapshotMismatch') 'Old timestamp masked a tampered snapshot.'
   Reject { Import-SmartWorkplaceCMDBSourceCsv -LiteralPath $raw -Paths $paths } 'source snapshot'
  }
+ # JSON date materialization differs between PS5.1 and PS7. Exercise equivalent
+ # UTC instants through the real sidecar reader, with exact tick boundaries.
+ $datePaths=Resolve-SmartWorkplaceCMDBTenantPath -Tenant test -OrganizationKey example -EnvironmentKey test -TenantId $identity.TenantId -DataRootPath (Join-Path $root 'DateFormats')
+ $dateRaw=Join-Path $datePaths.LatestOutputRootPath 'Raw/Entra/Entra_Users.csv'
+ $dateRun=Start-SmartWorkplaceCMDBSourceCollection -Paths $datePaths -RawPath @($dateRaw) -Fixture -MaxItems 500
+ 'TenantKey,OrganizationKey,EnvironmentKey,TenantId' | Set-Content $dateRaw
+ Complete-SmartWorkplaceCMDBSourceCollection -Run $dateRun
+ $dateState=Get-Content ($dateRaw+'.status.json') -Raw | ConvertFrom-Json
+ $reference=[datetimeoffset]::Parse('2026-09-09T20:00:00.1234567Z',[Globalization.CultureInfo]::InvariantCulture)
+ $tickCases=@(
+  @{Name='fresh';Ticks=[timespan]::FromHours(24).Ticks;Status='Bounded';Severity='Warning'},
+  @{Name='warning-exact';Ticks=[timespan]::FromHours(48).Ticks;Status='Bounded';Severity='Warning'},
+  @{Name='warning-plus-tick';Ticks=([timespan]::FromHours(48).Ticks+1);Status='Stale';Severity='Warning'},
+  @{Name='critical-exact';Ticks=[timespan]::FromHours(168).Ticks;Status='Stale';Severity='Warning'},
+  @{Name='critical-plus-tick';Ticks=([timespan]::FromHours(168).Ticks+1);Status='Stale';Severity='Critical'},
+  @{Name='169-hours';Ticks=[timespan]::FromHours(169).Ticks;Status='Stale';Severity='Critical'},
+  @{Name='future-four-minutes';Ticks=-[timespan]::FromMinutes(4).Ticks;Status='Bounded';Severity='Warning'},
+  @{Name='future-exact';Ticks=-[timespan]::FromMinutes(5).Ticks;Status='Bounded';Severity='Warning'},
+  @{Name='future-plus-tick';Ticks=(-[timespan]::FromMinutes(5).Ticks-1);Status='FutureDate';Severity='Warning'},
+  @{Name='future-six-minutes';Ticks=-[timespan]::FromMinutes(6).Ticks;Status='FutureDate';Severity='Warning'}
+ )
+ $savedCulture=[Threading.Thread]::CurrentThread.CurrentCulture
+ try {
+  foreach($cultureName in @('en-US','fr-FR')) {
+   [Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo($cultureName)
+   foreach($dateFormat in @('Z','Offset00','Offset02')) {
+    foreach($point in $tickCases) {
+     Case ("Exact source date: $cultureName / $dateFormat / $($point.Name)") {
+      $instant=$reference.AddTicks(-[long]$point.Ticks)
+      $dateState.CompletedUtc=switch($dateFormat) {
+       'Z' {$instant.UtcDateTime.ToString('o',[Globalization.CultureInfo]::InvariantCulture)}
+       'Offset00' {$instant.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)}
+       'Offset02' {$instant.ToOffset([timespan]::FromHours(2)).ToString('o',[Globalization.CultureInfo]::InvariantCulture)}
+      }
+      $dateState | ConvertTo-Json -Depth 8 | Set-Content ($dateRaw+'.status.json')
+      $h=Get-SmartWorkplaceCMDBSourceHealth -Paths $datePaths -ReferenceDateTime $reference | Where-Object SourceName -eq 'Entra_Users.csv'
+      Check ($h.Status -eq $point.Status -and $h.Severity -eq $point.Severity) ("Expected $($point.Status)/$($point.Severity), got $($h.Status)/$($h.Severity)")
+      $roundTrip=[datetimeoffset]::Parse($h.CompletedUtc,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal)
+      Check ($roundTrip.UtcTicks -eq $instant.UtcTicks) 'Source completion instant or subsecond precision changed.'
+     }
+    }
+   }
+  }
+ } finally { [Threading.Thread]::CurrentThread.CurrentCulture=$savedCulture }
  Case 'Overlapping collection attempts cannot overwrite source status' {
   $paths=Resolve-SmartWorkplaceCMDBTenantPath -DataRootPath (Join-Path $root 'Lock')
   $raw=Join-Path $paths.LatestOutputRootPath 'Raw/Entra/Entra_Users.csv'
@@ -142,8 +186,8 @@ if ($script:failed) {exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEIf5O70y8fsGr
-# FwKaaB45DQUP5j5fJ1n1MhS9q+3JyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8vjIBD+F6Jr0B
+# H47didDgY3SXHh0hNbvslVB42kVpAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -276,31 +320,31 @@ if ($script:failed) {exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFtUQIRghQZ4ZcpRlfc/HUviAuowkJNhK8pWA0hBHBz2MA0GCSqG
-# SIb3DQEBAQUABIIBgDE89HhdmYMenJiteVWW5nICOzR0PWM7MxyAFHwTZvgaYNZI
-# G8wpagEB3kXp215tt18qcCHmHynck50oZ7Af3bmA74t96S0wkSkVdrP2ZY32tWj+
-# HdhQvwHlbfNjhPhHLMiZ1KdASf9CWSagZ19lPS+XUUpZwmUFcDx8ZI+zh3c3ZPYx
-# IuDcsHst+5qI3MDeRBU1DKjuwXEGy9Sp84SebHbTHFNwGwVaHn1RLHyslk6jS9Y+
-# F1t0SJsjEO1HYKWQkjKg/8/QhxMLxbniOOLOtPd53Vj40HEhnjeARz+MaBkWhKOB
-# e5TE/1pLY4CP/ZOmgGzz0LcLuSp4kNBNhtTvYCAEL1HFfzQjuXdLuMSXCpn6qiXo
-# GbzwOS5tL9oIAOTtMXITNYPLZnYQ9Xw0SSeQj649R/OuBg+EP8d4zIBX56PmaLYC
-# B8ffC9KQbz3ffELaNlMxfhgR912ZQpF4UZ13uTo4FnBVItr/WYXPu0KGbm/RmgIj
-# KU+U+hfHqi7/77VXuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDgrt2ct9efywtXgCTQpiohmmniGUaCTR20StV1MKDqWMA0GCSqG
+# SIb3DQEBAQUABIIBgF/RbCKwwL6nFqJxT38PxEEf2CQBm2cJQNkgjv6B8zxFxTxK
+# /QtmNbo8MJigk5KcVtFo1CcwlnQLfgpgTkcGkjRtOSBaodDOsZ1KeOf6t9Y8ZYWV
+# 8WpnaYIQkaunVvf99lRHja+anpobrgyl5/GnOpt6dvS9XVS/B5MLIFR20v31oczo
+# rXUhamZwdgR9nMUNvh0oCa+I5n1gZlOW0b0PlfXrvY5s9ys9TmD2XYIQq/2LBkpH
+# aOkSrkAV1I6s76+Wl8PbTAqMPLJBK2ZdlCcDEvQC2ptpi1Z88oZpAnxp5bzkltxh
+# gjtUjdgWnwzJDlu014qIkAJYaYwzPvq19j2fkzTexmCfIP6aWatMM2FBQXxbD/ns
+# PENX/hJHG/wNMM4evqdb2RjscgLxTZNSVHYZufmjo9Dirz7IpfN6NaGaNczVJLcc
+# dLTlRcgfkZTQylw0Q/aUMJOCcI4FC644usmUHslHouZpYxVExQaTubuLeXrLdHIm
+# lGA3lMeUTpo0HO+CiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MTBaMC8GCSqGSIb3DQEJBDEiBCBhqN6pHcsl5gtHa7lf3AZir16k3m4sOgWkLhRk
-# ySS4mzANBgkqhkiG9w0BAQEFAASCAgC0KJcZUVSqVSAf1FBUwYyTRcBondn6UcEs
-# JgVb6cpenhbBIJEpWjpJRMl41qmLsPTmWatsT+A42hW/39ioJmvEVHxQ9xve1hvj
-# MvsYo64fWSgc1L1PnIGt1PVNfJxe8JmswewDaHe2J/rG3Xefgt+9AyJlN/RjP7QX
-# 6YmNNDFWNgQ2/femakLd1yj9uROswXDExZDkDgSGeFSru8bz1PhovgnnYdp9zPtK
-# xCGk2WmeXfov6/wIRj6V0+XBSYg7TX0htlIYGLSHd8uwd6Xc9lwAJLZzZ4n/K+xU
-# Q0oxB+caUr3M501Judv+e3OGs0tMoeFPdCC19+ZTQ7IAf9KdhxgO+6VmqZKGhUwJ
-# QKcmWTxEPeCL3LVhcwamDsmdzRgnoMt7KI0wf6NFme+9fTcl0SDzgakemXyWjmyK
-# Y3FbbE/hYLAIitUA+cGXemdb6JJz4o2I7Xdq0GbCdqBG5YNT57aaZSl2YK5vD4i/
-# CYlI+4qM8pYQ4tdGvZRbHNOO6xxzf2IiRqnjjB9X1W3BnlqHG34mw/6zPptPIlUJ
-# XrkAS0EQ5qvmg3b6eRRP9mKhnoaa/nxhMP2oGOYOZzeKPPWSNiCXQ6VcKth8mUl3
-# gS74fCZNbWypFxKoYcxUFVi6O84+sL2GkOI3ULPJzH87sqz+HQXw1YykgdFIvKdt
-# rYqGvDtNIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MjFaMC8GCSqGSIb3DQEJBDEiBCBrPqMlVGXb7D3XFa0a2gqpyl1+9RXhHr2L48FC
+# l7ry9DANBgkqhkiG9w0BAQEFAASCAgBmsKSqxT6LcD7nLrd9GX0N3j8xws9KaPf/
+# mNH6PRjH0SYXefMQxrqNDMtb0+pqg3nXINtAsb02lk4Isg+q2+goXH8nOBTIEz/y
+# BexYLD6DcHBZlu+6cyW0J9d1SvaiyWCvc6kO7s1bngy+5T54aUZsak75463EFYCh
+# AwLU67l3eS6IEdzFN8rAtLfac3ma7aEmLwUF8RxD2fFm4Xp9kZnjB8i793axNHVQ
+# 7HkP7P+WbvZkEBFr2pHCXugn+rgTwU0FNfB6fUwxkTzHA5NcAL8Wjs8OATzudq+p
+# StasykypTHDVfao505GMqFBa90DZdPUa1JWY/d96GJXmd/hAUDdY8KBk0/SC1Qj9
+# 16lC6HqBJijQB89dJXR3Sni5G4g6KlIN2Q8MSBK0BiUHp83IVZuwhaDOl0MqTEqs
+# K7ESj5XW5OlYsh2Rt6M4sGpREte6Y1qA1KzPZiAvfkdSePUAawHY9A7/2WznMbqH
+# CUP1y/g1Lo1QCSiByTA07vdV7r5ymO7Y9sv1vTrlhr5XIeHdsWfcG1OEge69if2N
+# XL7VtLqXoZiYrcVt3ESpPKuU/IFXupjtJ4hn/UblXFzK1FxMtb1sNKi9akEoTj8N
+# 9R7gQONuLYSpueWKHbCKEkSeGcxTqyDr7f5/wTgmRw0gaaUu0EvmXLjvTjLztNMV
+# +EH9Kofkiw==
 # SIG # End signature block

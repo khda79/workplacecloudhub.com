@@ -1,0 +1,34 @@
+{
+  "contractVersion": "1.0.0",
+  "channel": "stable",
+  "unknownLifecycleStatus": "Unknown",
+  "unknownOwnershipStatus": "NotCollected",
+  "lifecycleStatuses": ["Unknown", "Planned", "Active", "Retired"],
+  "lifecycleTransitions": [
+    {"from":"Unknown","to":"Planned"},
+    {"from":"Planned","to":"Active"},
+    {"from":"Planned","to":"Retired"},
+    {"from":"Active","to":"Retired"}
+  ],
+  "lifecycleRequirements": [
+    {"status":"Unknown","fields":[]},
+    {"status":"Planned","fields":[]},
+    {"status":"Active","fields":["BusinessOwner","TechnicalOwner","SupportGroup"]},
+    {"status":"Retired","fields":[]}
+  ],
+  "sourceColumns": ["TenantKey","OrganizationKey","EnvironmentKey","TenantId","CI_ID","SourceSystem","SourceID","SourceIDKind","CorrelationKey","MappingStatus","SourceCollectedDateTime"],
+  "governanceColumns": ["TenantKey","OrganizationKey","EnvironmentKey","TenantId","ChangeId","CI_ID","Field","OldValue","NewValue","EffectiveUtcDateTime","ChangedBy","Reason"],
+  "columns": ["TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "CI_ID", "CI_Name", "CI_Type", "Environment", "BusinessOwner", "TechnicalOwner", "SupportGroup", "OwnershipStatus", "LifecycleStatus", "SourceSystem", "SourceID", "SourceIDKind", "SourceMappingStatus", "SourceCollectedDateTime"],
+  "types": [
+    {"name":"User","file":"CMDB_Users.csv","idColumn":"CmdbUserId","nameColumn":"DisplayName","sourceIdColumn":"SourceUserId","sourceIdKind":"EntraUserObjectId","sourceMappingStatus":"SourceIdentity"},
+    {"name":"Device","file":"CMDB_Devices.csv","idColumn":"CmdbDeviceId","nameColumn":"DeviceName","sourceIdColumn":"SourceDeviceId","sourceIdKind":"CuratedDeviceCorrelationKey","sourceMappingStatus":"RequiresSourceEvidence"},
+    {"name":"Group","file":"CMDB_Groups.csv","idColumn":"CmdbGroupId","nameColumn":"DisplayName","sourceIdColumn":"SourceGroupId","sourceIdKind":"EntraGroupObjectId","sourceMappingStatus":"SourceIdentity"},
+    {"name":"License","file":"CMDB_Licenses.csv","idColumn":"CmdbLicenseId","nameColumn":"SkuPartNumber","sourceIdColumn":"SkuId","sourceIdKind":"SkuId","sourceMappingStatus":"SourceIdentity"},
+    {"name":"Mailbox","file":"CMDB_Mailboxes.csv","idColumn":"CmdbMailboxId","nameColumn":"DisplayName","sourceIdColumn":"ExternalDirectoryObjectId","sourceIdKind":"ExternalDirectoryObjectId","sourceMappingStatus":"SourceIdentity"}
+  ],
+  "relationshipTypes": [
+    {"name":"PrimaryUser","fromType":"User","toType":"Device"},
+    {"name":"HasMailbox","fromType":"User","toType":"Mailbox"},
+    {"name":"AssignedLicense","fromType":"User","toType":"License"}
+  ]
+}

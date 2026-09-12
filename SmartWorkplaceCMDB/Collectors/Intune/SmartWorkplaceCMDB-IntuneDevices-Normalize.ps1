@@ -9,7 +9,7 @@ DimDevice.csv. Intune-only records are retained. When azureADDeviceId is empty,
 the stable fallback source key is "intune:<managedDeviceId>".
 
 .VERSION
-0.1.1-beta.1
+1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -31,7 +31,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.2-beta.1'
+$ScriptVersion = '1.0.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -108,6 +108,21 @@ function ConvertTo-SmartWorkplaceCMDBOwnership {
         'unknown' { return 'Unknown' }
         default { return $Value.Trim() }
     }
+}
+
+function ConvertTo-SmartWorkplaceCMDBEncryptionState {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory)][string]$SourceDeviceId
+    )
+    $normalized = ConvertTo-SmartWorkplaceCMDBNormalizedBoolean `
+        -Value $Value `
+        -FieldName 'IsEncrypted' `
+        -SourceDeviceId $SourceDeviceId
+    if ($normalized -eq $true) { return 'Encrypted' }
+    if ($normalized -eq $false -and $normalized -is [bool]) { return 'NotEncrypted' }
+    return 'Unknown'
 }
 
 function Get-SmartWorkplaceCMDBDefaultConfidenceScore {
@@ -365,6 +380,7 @@ foreach ($entra in @($entraRows | Sort-Object DeviceName, SourceDeviceId)) {
         OperatingSystemVersion = if ($null -ne $intune) { Get-SmartWorkplaceCMDBPreferredText ([string]$intune.OperatingSystemVersion) ([string]$entra.OperatingSystemVersion) } else { [string]$entra.OperatingSystemVersion }
         Ownership = if ($null -ne $intune) { ConvertTo-SmartWorkplaceCMDBOwnership ([string]$intune.ManagedDeviceOwnerType) } else { '' }
         ComplianceState = if ($null -ne $intune) { ConvertTo-SmartWorkplaceCMDBComplianceState ([string]$intune.ComplianceState) } else { $baselineCompliance }
+        EncryptionState = if ($null -ne $intune) { ConvertTo-SmartWorkplaceCMDBEncryptionState ([string]$intune.IsEncrypted) $sourceDeviceId } else { 'Unknown' }
         ManagementState = if ($null -ne $intune) { 'Managed' } else { $baselineManagement }
         PrimaryUserId = if ($null -ne $intune) { [string]$intune.UserId } else { '' }
         LastSyncDateTime = if ($null -ne $intune) { [string]$intune.LastSyncDateTime } else { '' }
@@ -403,6 +419,7 @@ foreach ($intune in @($intuneRows | Sort-Object DeviceName, ManagedDeviceId)) {
         OperatingSystemVersion = [string]$intune.OperatingSystemVersion
         Ownership = ConvertTo-SmartWorkplaceCMDBOwnership ([string]$intune.ManagedDeviceOwnerType)
         ComplianceState = ConvertTo-SmartWorkplaceCMDBComplianceState ([string]$intune.ComplianceState)
+        EncryptionState = ConvertTo-SmartWorkplaceCMDBEncryptionState ([string]$intune.IsEncrypted) $sourceDeviceId
         ManagementState = 'Managed'
         PrimaryUserId = [string]$intune.UserId
         LastSyncDateTime = [string]$intune.LastSyncDateTime
@@ -421,7 +438,8 @@ $dimRows = @($cmdbRows | ForEach-Object {
         TenantDeviceKey = $_.CmdbDeviceId; CmdbDeviceId = $_.CmdbDeviceId
         DeviceName = $_.DeviceName; OperatingSystem = $_.OperatingSystem
         OperatingSystemVersion = $_.OperatingSystemVersion; Ownership = $_.Ownership
-        ComplianceState = $_.ComplianceState; ManagementState = $_.ManagementState
+        ComplianceState = $_.ComplianceState; EncryptionState = $_.EncryptionState
+        ManagementState = $_.ManagementState
         ConfidenceScore = $_.ConfidenceScore
     }
 })
@@ -474,8 +492,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3jsB+o2DUKmhf
-# w+jN8i2m63szFcbJjpEpFOD/e7gM5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3rmTq5aJD3J/Y
+# zIMM5HHAhurz5vjOTQRgbsSKdFbaoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -608,31 +626,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIACqBKg9wdYoT0CnX0p72g5kqD37+sZXbjK0eE+fVJr4MA0GCSqG
-# SIb3DQEBAQUABIIBgAPMNpX/8ZBMZcuJtaIur5rw0CcbrUEm9CNSipcI9aK0oAl9
-# cUISq2oi4sttFkdizkTTIwKOwiXg+SPByz5j5Xol542HGko+/H64k/2/44f0mGS6
-# 29LOMbyYiZTIye3L9fZe0rSnq2AIZi5gKh2LNrMk7ZFWy64562SSJarY0uVhzrGU
-# WloJ3srbdOtd9wePyh5DXImsuKmDnYYI3eFrHixqQtwC6bL4QewZ+lB3fs1xRP/p
-# SIlAd3fI2vibXOzzdk6+haPORp3zeNSDIj9ZjcyHfU4+BxTT1MQYuxj7mNJcfJuw
-# 9Jy/3vStjiGM/6tsq64wf5smmwcMNKl0CIV8D1QpQo0+YyDpJoZMiLSLXytW9Ql1
-# 6reVtwsW/PTqD7COJjKX04RBArRXdMkieeiiMMlN7v+s4kj8owWn+vX6CHdgKhBC
-# 4n63huD+bfoYm5JRliyV7ZmOnVazivwGnEfRH4UVrrfKIgh0vKgtYSmHG0vlHprQ
-# x1ZjqQrZjnrOTHmHWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILBy06k15tIQT9NdO1pR2HQlxmhcc7LKDJRMRWCQu+9iMA0GCSqG
+# SIb3DQEBAQUABIIBgJvHSVhCiF61gN4jQEI7Ow79+VH/eE9Xl+lMYzRtyun6sVoj
+# A2SQHTRW8TbkcQ0mta1/Ntyxe4vdcTIBagLYEflc6smxUyyRI37glwa5y0l+mEGh
+# 9DlXnFcWCiyueqN6adnPHKb3GKGacASpNhJJ59et7OY8FHs5r71RR5mtWuxpcjQa
+# 6b99JIQTzR7+4wPcjefhV9zDspA1MFgb9PXipm1bNOGQmH3NQFxj8U4WNn03WkHc
+# FlZxzhmkdjSeO0v7bc5KDuwAN2S8muNEua2vrhNr3D2Xs2MhdYjRMkj/oDDrpL7s
+# rmWo5xyJiOMXatQIWfVvqtec4OOBzBZB8wIcdZoaA+V/vfA1riXULYMl6yN1awdY
+# dk4lAa+iTmozZYlKWmmiKcIsG4JbZj2TQ0IumIEnymX818vAFbZj6bPgXut8btdY
+# KDTOara5LqF+PtVtC/4EDf5olS4aIT9pJLBYK8hJTEHNGr+GtwKUkCEb3OC6Dph2
+# IhEB5nkZHwkCbuGHGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDIy
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBpuLmleyuEw5WxaCzIDz7b+xRkJEwY3E+PtQnf
-# lEHy3TANBgkqhkiG9w0BAQEFAASCAgAqkzvv6PG6x3nRH6XckKUhkpLJRQiXTZYa
-# w76KoiADMK7Y1+CzoLknevzPTCNGWkqhw+/K0O9+UDYHojixoaWOUZnkuqafjMSi
-# /70NdfuSqRpqxH3BKrm/MBQPiLFKUHd+GvXbzQLa7mqvv6W09qsT5UK14BqzvFfd
-# kjmLJzpflVXbNgTVAbJEF0wXSN0unXVGYlJGW6tGioKhKAHqMVOgeFzXdnQmLSq7
-# OrFZ8fe7Xz+vCRSTfNyyunOFiQhmf+MLICe8iaKCkE/XDSc+amOTDNqSbKi2qkbd
-# Z+zCJkHSChCNx6x57UHkcN4QiiVZ3Z8bP1Qpt0gPaaDD835APosbeOq/AzouXYg8
-# lW3yNGZTMZeVU5PknEYeK5ldwNvS5KZBASwPZI/h08Wrxnlwiovn0o+mFVS6SN3K
-# OJs0K5XyWS3CGLTTqmBtXQlRni4aokVn/a9wzDwI9KGHV+nyon2VJcSbSwh2A2lv
-# k1b6eji2Ke78QRMFGd/0D+bAjbKWwp2Zmfd/OX7qU2zikkh35OKMmw7fNbHJAbLP
-# UP+DbAl6m0HhPLJU5jTV+dD499kwTUDaVpO33Z6dRaTG2ba50/ookMjkFzqEJaId
-# 7EMnMwTKHrSRWByGOx5f4UC+dNBPZYzkDVwdlrzTIc71MKwyfSrzk//znlCifkxJ
-# W7Cz1CIHcA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTNaMC8GCSqGSIb3DQEJBDEiBCBfqHS6VCxFU6yDKpHmoAJKKy9I8fZmvGmTXvhd
+# 5J5n+jANBgkqhkiG9w0BAQEFAASCAgBISLRl6llSJ8tLE17xBMvvzrqYBC07/Ajg
+# UYIAzbDwPtdKW5VeRybwVN2c5O9dBiVzaUuucX6e7WHBJi/klSQpc4LXIXgBO21+
+# CjmEMJqryxXqb+NzCaZDStdchaj0iq3iYeNOlsJVDMNUvXpBzzHVfoOldrtqIvyk
+# D6Fa33topCmL9nczgdQd2wFLzml4052200G/pvFkOImOxO7FOBThsglQFuJqXdCi
+# td85gE34DZ9nbLbfb1v+TiPcAqZHPjX2z+uUf32izP993wg0Mq6glvzYJe/xmmXs
+# HVTqAYIDIZlpzlIq9UJzaD0zjR1nkFWY1+jmRzPDhmp0NJXNC1k0Wb2Yh5tg1Z78
+# hy292ITSjqnFvgfh17/IvYETEPRkmMoaiwOnYXYjJGhjKAFiVON9e6+9s2xW/4hE
+# uqh6z4wRzaQcJodotZr+uJYRLyYXm6/SjdP0yWpG66jPXQD9BoJ+cCPoG+B4cyTO
+# pmvUuDzykhHp6MmqXtnTD051ZvBTVsnnzAUiwdjjaaPxmZ8kbla0sVUoyYWuyMkT
+# 6IEp5f+U3GErz33hVIHqBNaDCb5y4MLT5Bx7paweObkrvhAjZ53/aJBmNuNcpXoj
+# 0dHW11pKY7K6HZpxDTnrPU4VLL/BGp4/M8LrsFOfCLFEe3kv5Z9Qv7SEM4uKXdV4
+# ftc4rfFRDA==
 # SIG # End signature block
