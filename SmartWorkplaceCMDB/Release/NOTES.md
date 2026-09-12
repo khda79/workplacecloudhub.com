@@ -1,7 +1,18 @@
-# SmartWorkplaceCMDB 1.1.2
+# SmartWorkplaceCMDB 1.1.3
 
 **Stable release. Git publication is a separate reviewed action; tenant data,
 local configuration and private report artifacts are never part of this package.**
+
+## 1.1.3 stable patch candidate — 2026-09-12
+
+- Adds one native PowerShell transcript for every executed collector/build/report
+  step in its existing `LOG-ALL\Jobs\<script-name>` directory.
+- Records the exact transcript path next to the structured log path in the run
+  CSV and exposes the shared job root in the orchestration result.
+- Applies `StepLogRetentionDays` and `MaxStepLogsPerScript` independently to
+  `.log` and `.transcript.txt` files, preserving the same age/count policy for
+  both without halving the retained number of executions.
+- Keeps `-ValidateOnly` strictly read-only: no transcript is started.
 
 ## 1.1.2 stable patch candidate — 2026-09-12
 
