@@ -9,7 +9,7 @@ raw contract is written below DATA-LAST\Raw\Intune. Offline JSON is supported
 for safe tests.
 
 .VERSION
-1.1.0
+1.1.2
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.1.0'
+$ScriptVersion = '1.1.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -150,8 +150,12 @@ if (($PSCmdlet.ParameterSetName -eq 'Fixture' -or $MaxItems -gt 0) -and
     -not $RawLatestOutputPath.StartsWith($paths.LatestOutputRootPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'RawLatestOutputPath must stay inside the isolated latest output root.'
 }
-$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath @($RawLatestOutputPath) -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -NoWrite:$ValidateOnly
+$executionMode = if ($ValidateOnly) { 'Validate' } elseif ($PSCmdlet.ParameterSetName -eq 'Fixture') { 'Fixture' } else { 'Collect' }
+$runtimeContext = Start-SmartWorkplaceCMDBExecutionContext -Context $context -ScriptPath $PSCommandPath -ScriptVersion $ScriptVersion -Mode $executionMode -NoWrite:$ValidateOnly
+$executionError = $null
+$sourceRun = $null
 try {
+$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath @($RawLatestOutputPath) -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -NoWrite:$ValidateOnly
 
 
 $graphConfiguration = Get-SmartWorkplaceCMDBConfigSection $context.Configuration 'MicrosoftGraph'
@@ -286,15 +290,18 @@ Write-Information (
 }
 
 } catch {
-    Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed
+    $executionError = $_
+    if ($null -ne $sourceRun) { Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed }
     throw
+} finally {
+    Complete-SmartWorkplaceCMDBExecutionContext -RuntimeContext $runtimeContext -ErrorRecord $executionError
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZlSRVUm6qJ5lP
-# RqI85Ar0g9Q4ExmsWhBJ0vuyy3cxaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUACl9MEHCOgtl
+# PUpYdil+KcV/H0VzN/bKslsGByGlnqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -427,31 +434,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN5YjUGf4GALr88G/CjECKiVTZEpPDkpVf6glIWiMW2bMA0GCSqG
-# SIb3DQEBAQUABIIBgEZrmgTQY8LqjGOFvJKCjJp6lcCM70c2wwHO6whLZp6gfZyo
-# MmIxQWuP8uyRJfgANqNGc6PQkdke1wM/EUyodvXltDI9OYGTy4UDL5CiN3jgTRIj
-# 7lLtCrUCCbNrVYpzi0CubOe+PwXoD/o/OEOQl9Sfcf5vL8ub6td2T91wnO2thu0k
-# QB+iNwhkh731mgih5tJpzS1aRyWRbcasR/O0ltozf5LzjZ1kyTC7lhEHwhYP0C8I
-# QznGEds2Ew9kCt6/slH3/Ju3Zy8ko2jn4QvWJ46s8aPZ9cPTydn/JX9QwRp2rxg8
-# l+YforXT5chcPFH1GwR576eUHY0pY7xz1pprfvP2XfiqUjtr/ngcc8gJ2BpRgsQD
-# h9/QdiGH/3b7is5ljLn93+c9nTRavbLEERF2odaoRSBB/uCx0H9sBTjVONs3F1ow
-# fbx2XFm63mifpvLvB29XSfFwTf5SiOUwjkVCrNMWtBtLX+ePPmcxJ3KU9PGEULAX
-# 4y2y1hh+Ch2KtHQt8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ5lokdStuND5dSNon5y+Y4bIot4c7hgNuYvGXj1IunZMA0GCSqG
+# SIb3DQEBAQUABIIBgDJBw88RUOV0mKeowOnjhZHlBl2xHim71z/oA7eaD/r0wPP9
+# IXNHjDolUvBzzVh3OuXDMB/A9c6scK9MLGReKvAyqn/P3+deBQ9xw26ggY97UX90
+# uEIooTjWNiQWNEPTVNV6iFxtjyGembLvJQjEA5A9LV/dYVxijegRlGKgNRqIUv/M
+# WYn3oIGMPIk067xTEdEs81Z98ncas/uhKxbrIDcE7QuGvK3MlzRLgFoO18rXh0M5
+# JmoPpcJVaA7duy/v9ukanv+cWXgpZlmvmqrJ2iHAHdX4gBDYY3qVn9dcCCoeXUm3
+# +n8wR5FR2qF3HV8oHqgZccoJMliCgzCNdyKo4hpPySyF6rj5ha49UZRPYxbhG31W
+# pi6m9rI0pw4MjlBgAI3ilhlkl5oI0IytS3mJwYhoCK/JcY+XwSI1xPAMWcEHEc/T
+# GN6LBGp2rXGD+s2FBo/wbLr5RZ3noSKysZOBfdcnx3Xig7DbFn1lvwvG2r/t4Lui
+# z5vYaHF/pKZBdd5s/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MTZaMC8GCSqGSIb3DQEJBDEiBCAXwr9JruJ83czYfjjBK2AxXRHy7uj1kJI7dxno
-# imrmXzANBgkqhkiG9w0BAQEFAASCAgCUrtNOSEqNui5zPsSS+R1DVT6S3B0+Tkd+
-# hJuN48PmBJV1EpKGjeSkc7uJnzi17Ojuw5p4xgFkHL6CXtS4qaLitop89nU3FXXR
-# 8PhnY5MQn0XJvZs0gPyI2YXjl/WcVqyO73drkpidj3mxicAPKed3PW9QHvA410jd
-# 1FY0+1RsURWtzyLERGCMAFIb5TFLiykoa4CPebkGrh0mrbeyH8I3d4yWnGqmacGx
-# vD7D1wg49HiNBUrO+D61zRHPDyJE1x9mlGW7TJF9csfs/4454NXikBxCDbc79Pph
-# G1HaDqwWXwCXvRCNdfl+4HK1Tfqk026wDLiyh7R7UPV5O6uPYZVwZc09jwtI7+ED
-# WQgUc6/mzhEP6WYdSnSekvEtRoJFYIUg9CKynswG1jWOlcxhVMyMqstV2PFSaWwN
-# 3tTdiQ35vNGbV0yFmd3MDWmpHqnZUJ5zkYd9/OGJr0I/ClAMtugRxWUwqMmQLJXL
-# v+jbOzVCeloIxLdRye86Jw60F1NM3g2AoiIEbBBMfEAuP75E7wC4nVZF3WKDXlr7
-# wLjIBy3BdZI5yRtjPJvjXKdge6OwEji2W8+uPLnGY8AunsX2mHOqQT+JOmQ7rquo
-# jOUuPzmpJ+Si3DD3LYg9EHCDZ6c7v7vCBZzZ/1T98frxbqGtc0FrcTdFLVoe1dz/
-# aQ9t7aWrug==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
+# NDBaMC8GCSqGSIb3DQEJBDEiBCD4ZnfiCamq+Ie5j5QZPaGMGG0Rx55Apfv8e9yb
+# poQyQDANBgkqhkiG9w0BAQEFAASCAgAppiTrplEYXdcTcOiRtcdpqiBWVpSEP/U8
+# CZX8gO8sVRLkUjT7MKKaOVzE+gueQp3xEGGvpcygUf8wz//sp+r9cSO2v5PE5nQV
+# fAOZajNyAHHkNIvdUgDpCYfo7r6Wr7ImckhpLOFhgjhO1JKDKo0s4v/uUZsm816s
+# cJKAt0i1TFBwcRiFqjwnsgegdGOKjIW92bkgt8aNiyLY6uWBTmlXVvkOFueVXC9O
+# eCsB4XyKJcuRHGoEtZkga5T6GKlIicRy+Id5p1II4HXYP1z3b2wmUgR9y5L34RyW
+# GaU80QveS9e9lIPuc9hlV5/Yg+6YPIhI2Wnpe5+gqwAsHXzFH72aSZqcZbJEoIWW
+# YpG4MKQsi69tkKVr3mrWVnSBNWBX7hceek1SGDX0ampcCxEoKN2r7cMG1UzpSLm2
+# MYN8WG+roX/M8iVNwI5HDQNNMbxhcsKRJaFe2vbqQVITAdX/pcrDr43FUKBg3FtN
+# PTw0AV4jtW6n1xTTIy+3o28FBVRfgDLOzm8ngbItjJeYWPs4jqyPjAmz9BE+QHGx
+# dIPTzMVj/1hLgkZl8Xtc4wyscoXAoi6EPcT+McMpmtkw+AvwE9Gv+dyBCpT2sq1X
+# HQPjZC4KbJv206TihZGZQ1tfsImH7gdpZEzmYlbKGFPjWVFayAEi2cpzui4JF4vz
+# mYsE0NfUAQ==
 # SIG # End signature block

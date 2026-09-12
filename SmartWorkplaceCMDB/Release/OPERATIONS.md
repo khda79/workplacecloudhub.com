@@ -19,6 +19,13 @@ Validation does not authenticate or collect. Fixture runs remain isolated. A
 live run requires explicit `-Collect`; bounded runs must retain their `Bounded`
 coverage label.
 
+Before orchestration starts, the shared preflight checks the PowerShell runtime,
+project path, required modules, tenant credential fields, AD protocol support,
+output write access and configured script-signature policy. `Fixture` skips all
+external dependency and credential checks. `Logging.ScriptSignaturePolicy`
+accepts `Disabled`, `Audit` or `Enforce`; `Audit` records a warning when a
+signature cannot be established, while `Enforce` blocks a live collection.
+
 ## Evidence and failure handling
 
 Every source snapshot has a sidecar describing tenant identity, mode, coverage,
@@ -38,6 +45,19 @@ disabled for fixtures, bounded runs, scoped AD runs and individual pipelines.
 Its private history under `DATA-ALL\CollectionSummary` is required for previous,
 J-7 and J-30 deltas; do not place it in Git. A delivery failure is reported as
 `CompletedWithWarnings` and does not roll back valid collection outputs.
+If a complete live `Full` run fails, the same notification channel sends a
+separate operational failure alert with the failed step and available log and
+transcript paths. That alert does not create or alter business snapshots.
+
+## Concurrency and run state
+
+Only one run for the same tenant and pipeline may write at a time. The
+orchestrator creates an atomic guard before the first step and rejects a second
+overlapping invocation. Its state file records the run identifier, current
+step, completed-step count, start time, latest heartbeat time and final status.
+State is stored under `LOG-ALL\Orchestration\State\<tenant>`; it contains no
+collected business data. A stale guard is not silently removed: review the
+recorded host, process and state before recovery.
 
 ## Logs and retention
 

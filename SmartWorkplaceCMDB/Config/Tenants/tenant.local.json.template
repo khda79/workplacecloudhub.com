@@ -1,5 +1,5 @@
 {
-  "ConfigVersion": "0.5.1",
+  "ConfigVersion": "0.6.0",
   "ProfileKey": "default",
   "OrganizationKey": "organization",
   "EnvironmentKey": "default",
