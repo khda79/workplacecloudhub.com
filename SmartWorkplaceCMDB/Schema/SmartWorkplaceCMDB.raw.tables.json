@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.14.0",
+  "contractVersion": "0.15.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -345,6 +345,28 @@
         "ServicePlanName",
         "ProvisioningStatus",
         "AppliesTo",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Entra",
+      "name": "Entra_VerifiedDomains.csv",
+      "role": "raw",
+      "source": "MicrosoftEntraID",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "SourceSystem",
+        "DomainId",
+        "IsVerified",
+        "IsDefault",
+        "IsInitial",
+        "AuthenticationType",
+        "SupportedServices",
+        "AvailabilityStatus",
         "SourceCollectedDateTime"
       ]
     },

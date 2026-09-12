@@ -1,0 +1,29 @@
+[
+  {
+    "id": "contoso.example",
+    "isVerified": true,
+    "isDefault": true,
+    "isInitial": false,
+    "authenticationType": "Managed",
+    "supportedServices": ["Email", "OfficeCommunicationsOnline"],
+    "availabilityStatus": null
+  },
+  {
+    "id": "contoso.onmicrosoft.com",
+    "isVerified": true,
+    "isDefault": false,
+    "isInitial": true,
+    "authenticationType": "Managed",
+    "supportedServices": ["Email"],
+    "availabilityStatus": null
+  },
+  {
+    "id": "pending.example",
+    "isVerified": false,
+    "isDefault": false,
+    "isInitial": false,
+    "authenticationType": "Managed",
+    "supportedServices": [],
+    "availabilityStatus": "Pending"
+  }
+]

@@ -240,6 +240,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     Entra/Users/<yyyy>/<MM>/Entra_Users_<timestamp>.csv
     Entra/Groups/<yyyy>/<MM>/Entra_Groups_<timestamp>.csv
     Entra/Devices/<yyyy>/<MM>/Entra_Devices_<timestamp>.csv
+    Entra/VerifiedDomains/<yyyy>/<MM>/Entra_VerifiedDomains_<timestamp>.csv
     Intune/ManagedDevices/<yyyy>/<MM>/Intune_ManagedDevices_<timestamp>.csv
     M365/SubscribedSkus/<yyyy>/<MM>/M365_SubscribedSkus_<timestamp>.csv
     M365/SubscribedSkus/<yyyy>/<MM>/M365_ServicePlans_<timestamp>.csv
@@ -250,6 +251,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     Raw/Entra/Entra_Users.csv
     Raw/Entra/Entra_Groups.csv
     Raw/Entra/Entra_Devices.csv
+    Raw/Entra/Entra_VerifiedDomains.csv
     Raw/Intune/Intune_ManagedDevices.csv
     Raw/M365/M365_SubscribedSkus.csv
     Raw/M365/M365_ServicePlans.csv
@@ -277,6 +279,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     CMDB/CMDB_DataQuality.csv
     CMDB/CMDB_BuildManifest.csv
     PowerBI/DimTenant.csv
+    PowerBI/DimVerifiedDomain.csv
     PowerBI/DimDate.csv
     PowerBI/DimUser.csv
     PowerBI/DimGroup.csv
@@ -289,6 +292,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     PowerBI/FactUserServicePlan.csv
     PowerBI/FactMailbox.csv
     PowerBI/FactDataQuality.csv
+    PowerBI/FactHybridIdentityCoverage.csv
   LOG-ALL/
     Orchestration/
       Logs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.log
@@ -381,6 +385,19 @@ Normalize the latest raw snapshot:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\Entra\SmartWorkplaceCMDB-EntraUsers-Normalize.ps1 -Tenant prod
+```
+
+## Verified Domains and Hybrid Identity Coverage
+
+The verified-domain collector requires the read-only `Directory.Read.All`
+application permission. It keeps only domains explicitly marked verified by
+Microsoft Graph. Its normalizer also publishes an aggregate-only hybrid
+coverage fact: exact normalized UPN matches for users and exact normalized
+DNS/device-name matches for devices. Duplicate keys remain visible and no
+user or device identifier is exposed in that fact.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Pipeline TenantIdentityHealth -Collect
 ```
 
 Interactive, non-interactive and last-successful sign-in timestamps are retained
@@ -795,7 +812,7 @@ Run the autonomous test suite:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB.ps1
 ```
 
-The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 22 CSV contracts, preservation of compatible output, and rejection of incompatible output.
+The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 24 CSV contracts, preservation of compatible output, and rejection of incompatible output.
 
 Run the offline Entra users pipeline tests:
 
@@ -818,6 +835,12 @@ Run the offline Entra devices pipeline tests:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-EntraDevices.ps1
+```
+
+Run the offline verified-domain and hybrid identity coverage tests:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-TenantIdentityHealth.ps1
 ```
 
 Run the offline Intune managed devices pipeline tests:
@@ -930,8 +953,8 @@ Run the offline orchestrator and centralized launcher tests:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-Orchestrator.ps1
 ```
 
-These tests execute the complete 22-step pipeline from fictitious fixtures,
-validate 20 canonical and 17 source contracts, verify audit logging and bounded isolation, and inspect
+These tests execute the complete 25-step pipeline from fictitious fixtures,
+validate 24 curated, 15 raw and 10 Active Directory contracts, verify audit logging and bounded isolation, and inspect
 every centralized Cloud launcher.
 
 ## Power BI Direction
