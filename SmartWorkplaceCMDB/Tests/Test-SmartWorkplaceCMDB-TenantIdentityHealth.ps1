@@ -3,12 +3,12 @@
 Validates verified-domain collection and aggregate hybrid identity coverage.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.0.1'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $passed=0;$failed=0
@@ -51,10 +51,22 @@ try {
         Assert-True ($users.MatchedCount -eq '1') 'Expected one exact UPN match.'
         Assert-True ($users.MatchRatio -eq '33.33') 'Expected a 33.33 percent user match ratio.'
     }
+    Invoke-Test 'Publish cloud-only coverage when Active Directory inputs are absent' {
+        $cloudOnlyIdentity=@{}+$identity
+        $cloudOnlyIdentity.DataRootPath=Join-Path $tempRoot 'CloudOnly'
+        & $domainCollector @cloudOnlyIdentity -InputJsonPath (Join-Path $fixtures 'EntraVerifiedDomains.sample.json') | Out-Null
+        & $userCollector @cloudOnlyIdentity -InputJsonPath (Join-Path $fixtures 'EntraUsers.sample.json') | Out-Null
+        & $deviceCollector @cloudOnlyIdentity -InputJsonPath (Join-Path $fixtures 'EntraDevices.sample.json') | Out-Null
+        & $normalizer @cloudOnlyIdentity | Out-Null
+        $coverage=@(Import-Csv (Join-Path $cloudOnlyIdentity.DataRootPath 'DATA-LAST\PowerBI\FactHybridIdentityCoverage.csv'))
+        Assert-True ($coverage.Count -eq 2) 'Expected user and device cloud-only coverage rows.'
+        Assert-True (@($coverage | Where-Object { $_.OnPremisesCount -ne '0' }).Count -eq 0) 'Cloud-only coverage must keep the on-premises population at zero.'
+        Assert-True (@($coverage | Where-Object { [int]$_.CloudCount -le 0 }).Count -eq 0) 'Cloud-only coverage must retain the cloud populations.'
+    }
     Invoke-Test 'Reject duplicate verified domain identities' {
         $duplicateFixture=Join-Path $tempRoot 'duplicate-domains.json'
-        $fixtureRows=@(Get-Content -Raw (Join-Path $fixtures 'EntraVerifiedDomains.sample.json') | ConvertFrom-Json)
-        @($fixtureRows + $fixtureRows[0]) | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $duplicateFixture -Encoding UTF8
+        $fixtureRows=[object[]](Get-Content -Raw (Join-Path $fixtures 'EntraVerifiedDomains.sample.json') | ConvertFrom-Json)
+        ConvertTo-Json -InputObject @($fixtureRows + $fixtureRows[0]) -Depth 8 | Set-Content -LiteralPath $duplicateFixture -Encoding UTF8
         $duplicateIdentity=@{}+$identity
         $duplicateIdentity.DataRootPath=Join-Path $tempRoot 'Duplicate'
         $caught=$null;try { & $domainCollector @duplicateIdentity -InputJsonPath $duplicateFixture | Out-Null } catch { $caught=$_ }
@@ -70,8 +82,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcPXoQNmaRpUcN
-# QXAYXb/qOolHxmry35puq+B/m8Rz/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBw/Smw87ktgoXY
+# rx2W1m2jByWB1jRB4Vm3+qW0umve66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -204,31 +216,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII/x+T9KT7hYgVKmdLU+/7cDb8AN7BaX9Zzut2OdeRVDMA0GCSqG
-# SIb3DQEBAQUABIIBgJDS/6xFP/AfpLYyiXxC+7bu1qXbG3ADYs1GW8bGzwqeouPr
-# 7DPVLiQqH7Wk8vnDL6VS8A6tLy7+OCOX94vxdsjufFx2zreYIXVd4mgolAyxOF7V
-# UVP5ze/5HszVhe15SBZQV2d5Puw/7eVb50SOisTmw3PKI5UCrwVHocQ7lRlvqUdT
-# MRWxhjMJrjNg3MqhFvoYX8SD3fMuqY1j1GE3JMKA+xmt87D//EYZRaaV2eBkYNTJ
-# /MaXwvGhzoRkrYuFu8na2inxRRBBB4lz0g9xfDsrxA3HUHZPJF7xcTdZLcFHt/MT
-# mg8+hTemTArljthENVT2k/RjDBqJpjqYkk+3ZtK5lqgmcj+EzZ5DQhhEYm4rP8mX
-# ZnqsnmDwoo6Z3vwyRHoRPNN5dHtteWlpJ6pjydblrLLH2fhVn6ElFJ3PCV6AYngN
-# Y7Oo4oxeiIgXzTJh9oe5KtwPdvGJhVJNx0xstuqxrAlcTQe3m60sCejOQfhm35xh
-# o4w73m+l9q+2/waHJKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILnipcPdeymIiu1MwZhSqMJ0BiNStHFSrHNIC/MJgyAkMA0GCSqG
+# SIb3DQEBAQUABIIBgHoO/1r4Whge/xkrC0gagPQ3lE9mAZpK8pr549a/FDaXIG16
+# PJ6FIUB4tJ+Si6gLnbS3wV5NgHCS0qR/Ii3Lai7N3houG5s+cbdxgl+ZU+VmbwnQ
+# pxsCNxqWMeVKmzHJFG9Th6VHRGZakEONwakBwGMFKzlBMovh3AZvPha2TcDoyrfn
+# OvQ/hW18X3ly4Mw0kxhkwLCvq4VSWYFK+Axr7g/vk/2efkXD4kbsQj6bpVhIj0Mv
+# 3CiIaX+Q0/270g7rFbAcIc9C/OLDnh/JgIRuhUUVV2G93oygwsKECPXtXOAjYKsM
+# wcfojxSWBvDWIse7lxWXlQxg/tmil5m5RjQFppiE1iwNOb8K4mfjhqLdOsWpXd8i
+# LjTaTgw3usGiVK6Yo8jsDw2HAefPELojtSVgOcBWyZaJnMi1zyOm5vzmhNvTL9OZ
+# e6iJ171UvfQnyVKxRWYA2MyYfDQTS+sybiXgPu4m1Qw9K/4Fab4ZNi4sL84mVb3J
+# eZaMJnRcorjFkgaXxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODA4
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDLpQUkNkCk4bpOdAu0g5Fqgq7Vf6GmGdKmtMJB
-# TXsYajANBgkqhkiG9w0BAQEFAASCAgBj1/QVgesHngGOdQVYeAeQY49rB+DGizjE
-# qOVPQm0+wJ1ajwv3FTKMeymwVmR5s4cCKKUIryF1/7WZAy5lpWHu6lRMD5eDtSf6
-# ARVyEOxbv3FWW+B16KZgtVPLwGZ7LWqHhmjy9WXNd0PcClEVCWrKQsyg2SvCAeK8
-# n4YXbhhz8oCIlC7WfWgyY7OsUHk7/0hi6PFlYsW3gyz0NyljHVuQ/pzhpqLQyDf5
-# NhzPzf0Y9+ueJgcAB4rmH2Fi6qoOLJB+19f20euJ7Kl7cVzOPuVj9hXeOm5kV789
-# Kpd1oKigSFNLx0LQexfuPAN3wgX4P17nY7hQZIm02W1MnO37L58ueru+sRf1uZD5
-# dXhaBen1JzY2R4Mb1XALtH6Q+vcM6KYJ0Mmf2SiFhYCaEB+ivkKJCAd09v9eDWRU
-# X7WbxBoXOJqQs51/x39k0lcPZx4Dw5MwLHT+k4QY0+tO3qEmmyAZ16z2VrUTIQL2
-# gdoVztzoWkGVTVyK+ES3VnkrzI376KCb6jksPIOV3c65s+t87NfxJqUTM54OHDPj
-# ZX3U9UEiZXJvEBfWJdTlcn1PLuZUor88GnnZHewi6dc/PEH56AKm94umvY718RbS
-# 9SUGDdLqYZ54yzp12WWITTb3Ge6f+BxMlL8puXsxK+rxJy4y2wuvuOhUjP5i6tV6
-# 5kUvOn/SZA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMDU1
+# NDRaMC8GCSqGSIb3DQEJBDEiBCANWduMBnzV2E1v6eZkM0UPaaQq8n/lQgzC7CJt
+# 0v7P8zANBgkqhkiG9w0BAQEFAASCAgAU0sGwjeryKDiUSkwqPsrtz/KvOd/9V6Fi
+# rjtUln8b2NVT4aWlKS0Mm+3dD1sMm5XUqWUuND8LtVB8DzovScK21/faDa1R5B0a
+# KLESKxV7TNylMlF3+z4ZWmvLyJoVI6ZHR052hOLIxkVFJQWyeaRCyZCW0cjWi6eQ
+# BmukBak9YnNsX6NLCWGd06UN6V7vutxNg5HmbShssQtYH+aBK3WHlMsJ6fiSg1H0
+# ukAKK/erjGqd+RWo9jw5pcYgWYuZ59MCXwK8qmGSF47zfsJRhdigf+7atGMIZEgX
+# tZ4HS+/I0DUhLJ2FM0c9HL4jwWUfFv6WAffMMqxI370rdo+dtcBiF2N2AURplpDe
+# pMDpWM3e3yUTSOBPOEZGXetp+7pwHifT81syhlSkClvqxvu3oERBlZ8zwirBt8jh
+# wqu8S1nuJ9ev3IacrII4DfXWbDpfYhtWZECxIdwGSiHXTv48uV9ynpLqjJ5i4jcP
+# U/yyMUdCM9nmhSCt0IpTo9d7YpvkXAmTkjjUBvQ+lltpsPZ5IdB6DpiFVwXh3MiI
+# Dvg3m+zqa0nu3CzayDIoITZoybjfwoGiuy4Hn23ir+uJd/MaCkuiPj61DI/vJsOT
+# ZHz0+b0tbvYEYTRtGnqwMI/yQZWt7qxGrN2y579FM12BBSCiva3CIHn+kl/96CtF
+# zsiZZYqLLg==
 # SIG # End signature block
