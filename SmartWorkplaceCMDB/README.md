@@ -242,6 +242,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     Entra/Devices/<yyyy>/<MM>/Entra_Devices_<timestamp>.csv
     Intune/ManagedDevices/<yyyy>/<MM>/Intune_ManagedDevices_<timestamp>.csv
     M365/SubscribedSkus/<yyyy>/<MM>/M365_SubscribedSkus_<timestamp>.csv
+    M365/SubscribedSkus/<yyyy>/<MM>/M365_ServicePlans_<timestamp>.csv
     M365/UserLicenseAssignments/<yyyy>/<MM>/M365_UserLicenseAssignments_<timestamp>.csv
     ExchangeOnline/Mailboxes/<yyyy>/<MM>/ExchangeOnline_Mailboxes_<timestamp>.csv
     ActiveDirectory/<entity>/<yyyy>/<MM>/ActiveDirectory_<entity>_<timestamp>.csv
@@ -251,6 +252,7 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     Raw/Entra/Entra_Devices.csv
     Raw/Intune/Intune_ManagedDevices.csv
     Raw/M365/M365_SubscribedSkus.csv
+    Raw/M365/M365_ServicePlans.csv
     Raw/M365/M365_UserLicenseAssignments.csv
     Raw/ExchangeOnline/ExchangeOnline_Mailboxes.csv
     Raw/ActiveDirectory/ActiveDirectory_Domains.csv
@@ -280,9 +282,11 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
     PowerBI/DimGroup.csv
     PowerBI/DimDevice.csv
     PowerBI/DimLicenseSku.csv
+    PowerBI/DimLicenseServicePlan.csv
     PowerBI/FactDeviceCompliance.csv
     PowerBI/FactUserDeviceRelationship.csv
     PowerBI/FactUserLicense.csv
+    PowerBI/FactUserServicePlan.csv
     PowerBI/FactMailbox.csv
     PowerBI/FactDataQuality.csv
   LOG-ALL/
@@ -355,8 +359,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Build\SmartWo
 
 The native Entra users collector uses read-only Microsoft Graph app-only
 certificate authentication. It requires the `Microsoft.Graph.Authentication`
-PowerShell module and the `User.Read.All` application permission with
-administrator consent.
+PowerShell module plus `User.Read.All` and `AuditLog.Read.All` application
+permissions with administrator consent.
 
 Tenant-specific `TenantId`, `ClientId`, and `CertificateThumbprint` values belong
 only in `Config/Tenants/<ProfileKey>.local.json`.
@@ -379,9 +383,10 @@ Normalize the latest raw snapshot:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\Entra\SmartWorkplaceCMDB-EntraUsers-Normalize.ps1 -Tenant prod
 ```
 
-The initial collector intentionally leaves manager and sign-in activity fields
-empty. These fields require separate Graph queries or additional permissions and
-will be introduced only through a reviewed contract update.
+Interactive, non-interactive and last-successful sign-in timestamps are retained
+when Graph reports them. `DimUser.ActivityState` distinguishes disabled,
+recently active, inactive, missing and invalid evidence; an enabled account is
+never treated as proof of activity.
 
 ## Entra Groups Collector
 
@@ -461,7 +466,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\Sm
 The subscribed SKUs collector uses the least-privileged
 `LicenseAssignment.Read.All` Microsoft Graph application permission. It reads
 commercial subscription capacity and publishes `CMDB_Licenses.csv` and
-`DimLicenseSku.csv`. User-to-SKU assignments are a separate collector.
+`DimLicenseSku.csv`. It also publishes the separate compact service-plan catalog
+`DimLicenseServicePlan.csv`. User-to-SKU assignments are a separate collector.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\M365\SmartWorkplaceCMDB-M365SubscribedSkus-Collect.ps1 -Tenant prod -MaxItems 10
@@ -483,7 +489,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\M3
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Collectors\M365\SmartWorkplaceCMDB-M365UserLicenseAssignments-Normalize.ps1 -Tenant prod
 ```
 
-`FactUserLicense.csv` contains one row per user and SKU. When multiple states
+`FactUserLicense.csv` contains one row per user and SKU.
+`FactUserServicePlan.csv` keeps one row per user, SKU and service plan and
+explicitly identifies enabled versus disabled plans. When multiple states
 exist, the normalizer selects the most critical state and then the newest. Its
 `AssignedDateTime` field stores Graph `lastUpdatedDateTime`; Graph does not
 provide the original license assignment creation time in this resource.
@@ -787,7 +795,7 @@ Run the autonomous test suite:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB.ps1
 ```
 
-The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 20 CSV contracts, preservation of compatible output, and rejection of incompatible output.
+The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 22 CSV contracts, preservation of compatible output, and rejection of incompatible output.
 
 Run the offline Entra users pipeline tests:
 
