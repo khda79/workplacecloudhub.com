@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-Builds a beta-only distribution from an explicit public file allowlist.
+Builds the stable V1 distribution from an explicit public file allowlist.
 .VERSION
-0.1.0-beta.3
+1.0.0
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$OutputDirectory)
-$ScriptVersion='0.1.0-beta.3'
+$ScriptVersion='1.0.0'
 $ErrorActionPreference='Stop'
 $project=Split-Path -Parent $PSScriptRoot
 $release=Get-Content (Join-Path $project 'RELEASE.json') -Raw | ConvertFrom-Json
-if ($release.channel -ne 'beta' -or $release.prerelease -ne $true -or $release.version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$' -or $release.liveQualified -ne $false) {
-    throw 'Only an explicitly unqualified beta package can be prepared.'
+if ($release.channel -ne 'stable' -or $release.prerelease -ne $false -or $release.version -notmatch '^\d+\.\d+\.\d+$' -or $release.liveQualified -isnot [bool]) {
+    throw 'Only the explicit stable semantic-version release can be prepared.'
 }
 $paths=Get-Content (Join-Path $project 'Release/Files.json') -Raw | ConvertFrom-Json
 $sources=@{}
@@ -43,7 +43,7 @@ $records=New-Object 'System.Collections.Generic.List[object]'
 try {
     foreach ($key in @($sources.Keys | Sort-Object)) {
         $entry=$zip.CreateEntry($key,[IO.Compression.CompressionLevel]::Optimal)
-        $entry.LastWriteTime=[datetimeoffset]'2026-09-09T00:00:00Z'
+        $entry.LastWriteTime=[datetimeoffset]'2026-09-11T00:00:00Z'
         $inputStream=[IO.File]::OpenRead($sources[$key])
         $outputStream=$entry.Open()
         try { $inputStream.CopyTo($outputStream) }
@@ -59,13 +59,13 @@ Move-Item -LiteralPath $temp -Destination $zipPath
 $hash=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
 "$hash  $name.zip" | Set-Content -LiteralPath $hashPath -Encoding ASCII
 $records | Export-Csv -LiteralPath $filesPath -NoTypeInformation -Encoding UTF8
-[pscustomobject]@{Version=$release.version;Channel='beta';FileCount=$records.Count;ZipPath=$zipPath;SHA256=$hash;FileManifest=$filesPath}
+[pscustomobject]@{Version=$release.version;Channel='stable';FileCount=$records.Count;ZipPath=$zipPath;SHA256=$hash;FileManifest=$filesPath}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKIwz/9MMCGx3x
-# Is1fVdWfd67l7SLLyOFsMsRY59X2/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiVSknfEJO23Ts
+# 0nS8A2eMdZGGJaDL1zqSv0iKwbHma6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -198,31 +198,31 @@ $records | Export-Csv -LiteralPath $filesPath -NoTypeInformation -Encoding UTF8
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINUvx/iAq9QUFsEQ6GFFCXnYOdwwo+roOnli3gTB3kjGMA0GCSqG
-# SIb3DQEBAQUABIIBgFD5UcR/52zdNsa5vggCYVwTw6LylaperclRcktVvRs4o4PY
-# YQ8vxXi9m00M7CB9dvhFZWzwBrCA0wcvZyasZaCNNuEm2vKT4YI9wQR74l5/+qkd
-# zO1BbtU0HNoMEKJog63o3xq8UQfbGOUcWpeaRrHCAozmrxpD/+YqliTEle/OJRwj
-# vuJc3J1yRC9HSYU7kzosgl6fq4OMt4HzYZt6pSnBS9wmKatXfp4CkaDZvTDctAWU
-# 9LHM99Tstun3U5sK2v9I68dYbyR8q3MBesY9ncb9WaEPRiKTeDt1s1PwR01eDhbe
-# fRk5msUB53kx1buiJOKvBcE1DUbtdPSYDp/yJ3Z7rrRip/0zWqmy5R3C8obzcc/q
-# ofCOTOYIM+O6pmfkjl8nFmUpQ1XL1RSrnhKhC/4ZudF46akEqFNgb3pwHn2IRK3U
-# c732hCqZ7C4f/PO/cuQleSRkD/U6nrpxe8mtaIRkfg9mQZqiUlbxq+O9KzFGQ0Gx
-# fhke9rkeo8CcfBC1tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN6W2mevtJq3gNDcSv4pa8bGrQEa405lmHlAjcG+YJVVMA0GCSqG
+# SIb3DQEBAQUABIIBgI4tKhbVRWUAAq8CVhY+opMUJZe2bCV5DjSqPumrhdUgdJ8R
+# 0TyCGw/qSO/mNq303ydIMyrjEfvOLlmCcgoD/vF8o/b1/feLc9F6fQ4J6L+a2PL9
+# gbbCd0ZZXidKF+CthLMwKaOicwTFJYlD4Baj7CX98G7FJAoZoCoQ8ZJNbH8QTVK4
+# oEjk9PTGRyASRp3XRjJ7EBrc/Nf51wUTV6SjbkLJE41BlW1RPX/BvXOSWAfV5qz5
+# vYEcyaLITDlweVF51zvEnuCCeGcMBootUfhzTDN7W7niW/UYnTrxccMYH/o5uiMo
+# P0a7tM5KZG8AhuWMaqD2PPlN0Ycmhiwqsb96DWIDkongFi6kDioGm3n3g9+0UtEd
+# itbja6EHWONjT3Lj8A81i9B9mEaha18szeWsksvNlygleCaXBit0UViKxxh/7gOv
+# d+HpyPIf1hoDZHNf+i7luQobPGKPsXborzloEdAvixU9fkswgncWt5vVV2ANOo/L
+# FRHIrEODs+iDPv5gYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkxNDI1
-# NDJaMC8GCSqGSIb3DQEJBDEiBCAwcczrWWSZEQuuxj5iUpC459K6OQ600/n9XjE3
-# QKlKLzANBgkqhkiG9w0BAQEFAASCAgCnE8RGxZwPPMTwrp/p/9sqIkip9w02B8/L
-# 3pGmAdaTj2Z62qXLRXhapN/Uh8ZeFNtX0/cg8zWWdChzxmZOtV0MO3w+LyM6CIfp
-# AHpKIz7tEpufHdGmHpIhSRQp91hIPByK/VszKFVEogR6TEb0ydzz4jguzQdbkDpy
-# WgdnBS+zhzinrTAfnq1PL7reWVPScHE2uMoV+ZzR2fH54TupeXEKmZyxgsS42UXT
-# 2YcPtglGnvnlP+2wlcqEZcvgwWi8QuFjrRDtRCtZg8zOFhyJF+Y7iElqXxb7A/ES
-# O6Oo4FqKOwAnWHhLrtMJ4WHOvpDk3E0k2vM20WFpywmqenOMohdhgLXgBIF7AA+8
-# WBhNzhBEtqYic5sd+crSxsJYggrp0CuXIZhLoJGBdC+gm9mVAwe09B6Q1sMamHNL
-# DnRHdmTSMNI/D4gNRPvnKICnaZBfOHQ+kFjTnjAvTO9zdsDXOs8Lc/H5ELQnBhuq
-# mTXWz+ZWFigkIaLwOuWWPqSFsYuhkR4sXE2euOoLcOGTQQFpu1XRwWKOiCbhCIb4
-# yQD9JabAOD3dsc0EMbxlm7jHqiwvaCbVw93WlrxZ7ZoUKHPzidSh45sImlRbeJBF
-# xm0BFFl5MSwqPUWQGuf9fXr55eI3xviYVhXLMAbZPFjo4h97BpQGcnKYoJEPyZlr
-# q7aDmlDtCg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
+# MTFaMC8GCSqGSIb3DQEJBDEiBCDBcY38czPHUpzAsvW6P7GlF+AfMqaePTMk9hBK
+# 6CYzcDANBgkqhkiG9w0BAQEFAASCAgB1g9U0bCl1lXiHq5UpW1G/2Gnzoplw+Dze
+# AQWJwEVP/XKOHryh93arBkRCZDsDaUg0ykRLMFR0B/gZq0/haaHEPaBm1ZCs0+mp
+# ethOOT+JWHKCcKQDZeYCJnB7Y0xR0aJuAOlu0Rx+cXx7pCvXz17fTJwtYU7bWqdq
+# mt+tBEQUxWxrgXGiiou5LaWEBFDZMkZGTP5iMQqtT3HMRhRPEYnsx+i1ZGtF/5qH
+# Vg65mGrlpJXjm/MSjuoNZ00bJFHCj9pMZW/p1QMz7yF6udXNVCrPWZ92rJXj85t2
+# jnrGwmz6xCOOFvPMq54oOHDB2qN0IL1C47XOewiX5Tga7q8vz1EvRJtdYRW89KUI
+# R+5nnawLC6KDGZsgUs9s7vYDhbeBu6Doyx8PBHBf4ykInoAYoW6mPPLcBddw6jsI
+# tLZaYnHdbGOqv3Sft+T6aNhF2FF1k6szMmh1DacdNH8RAjrrUiL/dwpfnFDctQlL
+# cr86chX3CEBoXCP/+CpXvdtXVlP+xyvDkHinBUzfC2Vvfmf8iWIziUzdzJZjRk5D
+# JZjC9vn04P1nSMF2BGNjnOKTPRQHrG3EPakH9PAREj9g5mDIUumFCjQYoTltrUCX
+# 6cJ8dtj2mGD2woD+9DqQ7wWZmW27IIVTAoJyg/W4yEJNar960uyBDbSJLfxU9O3w
+# 24GsGBmjhQ==
 # SIG # End signature block
