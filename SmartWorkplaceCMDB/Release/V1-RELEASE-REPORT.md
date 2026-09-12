@@ -2,7 +2,7 @@
 
 Report date: 2026-09-12
 
-1. **Smart Workplace CMDB Version:** 1.0.0, stable local candidate.
+1. **Smart Workplace CMDB Version:** 1.0.1, stable patch candidate.
 2. **Release status:** Stable V1 code candidate. Private environment qualification evidence is intentionally excluded from Git and the release package.
 3. **Project path:** `SmartWorkplaceCMDB` in the main SmartIntune repository.
 4. **Canonical PBIP path:** private canonical `PowerBI/CMDB-REPORTS/CMDB-REPORTS.pbip`.
@@ -12,18 +12,18 @@ Report date: 2026-09-12
 8. **Main CMDB capabilities:** tenant isolation, typed entities, safe identity correlation, relationships, CI/source lineage, optional governed context, freshness and deterministic data quality.
 9. **Power BI pages:** 10 consolidated pages: Executive Overview, Workplace Health, Transformation & Lifecycle, Licensing & Assignments, Fleet & Hardware, People & Messaging, Services & Impact, Device 360, User 360 and Group 360.
 10. **Power BI model:** 38 tables, 111 measures and 34 relationships in the canonical model.
-11. **Current refresh validation:** 48 Python report tests and five targeted PowerShell suites covering audit regressions, CI registry, Intune hardware, orchestration and SharePoint.
-12. **Tests passed:** all current refresh-validation tests passed; the five targeted PowerShell suites include 122 explicit checks in total.
+11. **Current refresh validation:** Python report tests and the complete PowerShell test set cover reports, audit regressions, CI registry, Intune hardware, orchestration, SharePoint and Active Directory pagination.
+12. **Tests passed:** all current offline validation tests passed, including synthetic retrieval of more than 5,000 direct AD group members.
 13. **Tests failed:** 0 in the current refresh-validation set.
 14. **PBIR validation:** Passed with 0 errors; one non-model warning because external Fabric JSON schema 2.12 could not be fetched.
 15. **DAX validation:** A private full XMLA refresh and KPI read-back completed without query errors; tenant-derived values are intentionally omitted.
 16. **Desktop validation:** Passed on the exact canonical PBIP: all 10 pages were captured after refresh, no capture failed, page names and visible titles contain no BETA label, and Desktop confirms `hasUnsavedChanges: false` after the operator save.
-17. **Non-blocking warnings:** native click/scroll/cross-filter/drill-through behavior is not proved by screenshots; Active Directory live qualification requires a domain-reachable host; PBIR has no RLS.
+17. **Non-blocking warnings:** native click/scroll/cross-filter/drill-through behavior is not proved by screenshots; completion of the patched Active Directory live collection remains pending on the domain-reachable host; PBIR has no RLS.
 18. **Known limitations:** no Autopilot, Intune app/policy inventory, cloud membership expansion, effective plan catalog, AD-Entra reconciliation, authoritative Entity/Site, Business Services/criticality, advanced lifecycle, recursive graph or financial data.
 19. **V2 backlog:** documented in `Release/V2-BACKLOG.md`, including a future allowlist-scoped Azure Workplace collector.
 20. **Documentation updated:** README, Power BI/DSI/hardware contracts, source/schema inventory, operations, release notes, audit and V2 backlog.
 21. **Files modified:** scoped exclusively to `SmartWorkplaceCMDB`; exact Git status is retained as release evidence.
-22. **Git status:** uncommitted local candidate in the main SmartIntune working tree; no add, commit, push, merge, tag or release was performed by this refresh.
+22. **Git status:** publication is performed only through a separately reviewed, source-only Git delta; this report does not authorize tenant data or artifact publication.
 23. **External publication status:** the configured SharePoint upload path was privately validated; no tenant data, Power BI artifact, Power BI Service item, Azure resource, or website content is included in this Git publication.
 24. **Private-artifact boundary:** runtime data, local configuration, PBIP/PBIX files, copied ReportData, semantic-model caches and screenshots remain excluded by `.gitignore` and the release allowlist.
 

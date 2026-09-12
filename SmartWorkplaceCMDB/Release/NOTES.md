@@ -1,7 +1,24 @@
-# SmartWorkplaceCMDB 1.0.0
+# SmartWorkplaceCMDB 1.0.1
 
-**Stable local release candidate. No publication is performed or authorized by
-this preparation.**
+**Stable release. Git publication is a separate reviewed action; tenant data,
+local configuration and private report artifacts are never part of this package.**
+
+## 1.0.1 stable patch candidate — 2026-09-12
+
+- Pages every bulk Active Directory user, group and computer query explicitly,
+  without imposing a result-set limit on complete runs.
+- Replaces the AD Web Services `Get-ADGroupMember` bulk action with LDAP
+  `member;range=` retrieval in safe 1,000-value windows.
+- Preserves direct membership semantics and supplements explicit group members
+  with user and computer primary-group membership.
+- Resolves security principals across the complete forest inventory before
+  querying individual unresolved objects, and rejects malformed or stalled LDAP
+  range responses.
+- Adds synthetic coverage for a group containing more than 5,000 direct members.
+
+The patch avoids changing domain-controller ADWS limits. Runtime tenant names,
+group identities, paths and collected rows remain private and are not included
+in the release package.
 
 ## 1.0.0 stable candidate — 2026-09-11
 
