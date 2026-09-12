@@ -33,6 +33,7 @@ function Get-Text { param([AllowNull()]$Value) if($null-eq $Value){return ''};re
 function Get-DateText { param([AllowNull()]$Value,[string]$Field,[string]$Key) if($null-eq $Value-or[string]::IsNullOrWhiteSpace([string]$Value)){return ''};$date=[datetimeoffset]::MinValue;if(-not[datetimeoffset]::TryParse([string]$Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$date)){throw "$Field '$Value' is invalid for '$Key'."};return $date.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ',[Globalization.CultureInfo]::InvariantCulture) }
 function Get-IntegerText { param([AllowNull()]$Value,[string]$Field,[string]$Key) if($null-eq $Value-or[string]::IsNullOrWhiteSpace([string]$Value)){return ''};$number=0;if(-not[int]::TryParse([string]$Value,[ref]$number)-or$number-lt 0){throw "$Field '$Value' is invalid for '$Key'."};return $number }
 function Get-ListText { param([AllowNull()]$Value) return (@(@($Value)|ForEach-Object{Get-Text $_}|Where-Object{-not[string]::IsNullOrWhiteSpace($_)}|Sort-Object -Unique)-join';') }
+function Get-PreferredText { param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,[Parameter(Mandatory)][string]$Field) $values=@($Rows|ForEach-Object{[string]$_.$Field}|Where-Object{-not[string]::IsNullOrWhiteSpace($_)});if($values.Count-eq 0){return ''};$ranked=@($values|Group-Object{$_.ToLowerInvariant()}|Sort-Object @{Expression='Count';Descending=$true},@{Expression='Name';Ascending=$true});return [string]$ranked[0].Group[0] }
 
 $scriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot=Split-Path -Parent (Split-Path -Parent $scriptRoot)
@@ -78,17 +79,27 @@ try{
     $rows['Intune_DetectedApps.csv']=@($apps|ForEach-Object{$id=Get-Text(Get-Value $_ 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Detected application response missing id.'};[pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';AppId=$id;DisplayName=Get-Text(Get-Value $_ 'displayName');Version=Get-Text(Get-Value $_ 'version');Publisher=Get-Text(Get-Value $_ 'publisher');DeviceCount=Get-IntegerText (Get-Value $_ 'deviceCount') 'deviceCount' $id;Platform=Get-Text(Get-Value $_ 'platform');SourceCollectedDateTime=$collected}})
     $detectedAppGroups=@($rows['Intune_DetectedApps.csv']|Group-Object AppId)
     $duplicateDetectedAppGroups=@($detectedAppGroups|Where-Object Count -gt 1)
-    foreach($group in $duplicateDetectedAppGroups){
-        $reference=$group.Group[0]
-        foreach($candidate in @($group.Group|Select-Object -Skip 1)){
-            foreach($field in @('DisplayName','Version','Publisher','DeviceCount','Platform')){
-                if(([string]$candidate.$field)-cne([string]$reference.$field)){throw "Conflicting duplicate detected application '$($group.Name)' returned by Microsoft Graph. Field='$field'."}
-            }
-        }
-    }
     if($duplicateDetectedAppGroups.Count -gt 0){
-        Write-Warning ("Microsoft Graph returned {0} duplicate detected-application key(s); strictly equivalent rows were consolidated."-f$duplicateDetectedAppGroups.Count)
-        $rows['Intune_DetectedApps.csv']=@($detectedAppGroups|Sort-Object Name|ForEach-Object{$_.Group[0]})
+        $conflictingDetectedAppGroupCount=0
+        $collapsedApps=New-Object System.Collections.Generic.List[object]
+        foreach($group in @($detectedAppGroups|Sort-Object Name)){
+            $metadataConflict=$false
+            foreach($field in @('DisplayName','Version','Publisher','Platform')){$distinct=@($group.Group|ForEach-Object{([string]$_.$field).ToLowerInvariant()}|Sort-Object -Unique);if($distinct.Count-gt 1){$metadataConflict=$true}}
+            $deviceCounts=@($group.Group|ForEach-Object{if(-not[string]::IsNullOrWhiteSpace([string]$_.DeviceCount)){[int]$_.DeviceCount}})
+            if(@($deviceCounts|Sort-Object -Unique).Count-gt 1){$metadataConflict=$true}
+            if($metadataConflict){$conflictingDetectedAppGroupCount++}
+            $collapsedApps.Add([pscustomobject][ordered]@{
+                SourceSystem='MicrosoftIntune';AppId=[string]$group.Name
+                DisplayName=Get-PreferredText -Rows @($group.Group) -Field 'DisplayName'
+                Version=Get-PreferredText -Rows @($group.Group) -Field 'Version'
+                Publisher=Get-PreferredText -Rows @($group.Group) -Field 'Publisher'
+                DeviceCount=if($deviceCounts.Count-gt 0){@($deviceCounts|Measure-Object -Maximum)[0].Maximum}else{''}
+                Platform=Get-PreferredText -Rows @($group.Group) -Field 'Platform'
+                SourceCollectedDateTime=$collected
+            })
+        }
+        Write-Warning ("Microsoft Graph returned {0} duplicate detected-application key(s), including {1} with conflicting attributes. Canonical text values and the maximum DeviceCount were retained."-f$duplicateDetectedAppGroups.Count,$conflictingDetectedAppGroupCount)
+        $rows['Intune_DetectedApps.csv']=@($collapsedApps.ToArray())
     }
     $rows['Intune_ConfigurationPolicies.csv']=@($policies|ForEach-Object{$id=Get-Text(Get-Value $_ 'id');if([string]::IsNullOrWhiteSpace($id)){throw 'Configuration policy response missing id.'};$template=Get-Value $_ 'templateReference';[pscustomobject][ordered]@{SourceSystem='MicrosoftIntune';PolicyId=$id;DisplayName=Get-Text(Get-Value $_ 'name');Description=Get-Text(Get-Value $_ 'description');Platforms=Get-ListText(Get-Value $_ 'platforms');Technologies=Get-ListText(Get-Value $_ 'technologies');TemplateId=Get-Text(Get-Value $template 'templateId');TemplateFamily=Get-Text(Get-Value $template 'templateFamily');CreatedDateTime=Get-DateText (Get-Value $_ 'createdDateTime') 'createdDateTime' $id;LastModifiedDateTime=Get-DateText (Get-Value $_ 'lastModifiedDateTime') 'lastModifiedDateTime' $id;SourceCollectedDateTime=$collected}})
     $updateRows=New-Object System.Collections.Generic.List[object]
@@ -108,8 +119,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9S2fXXVUmi3aj
-# 05weenrm7aV5uJO6nEvstMrfrGzqJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfsS3WahhsOu39
+# g/HssrgrEufsKY7arhi/hwVjh1zm8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -242,31 +253,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJZQxwEwGojI6QYY98i+o0JWrQiCDW/N74UT7ZTHgnOpMA0GCSqG
-# SIb3DQEBAQUABIIBgGLoMtE5+IOoI2cD5vQdwZwvBWooD7HZTPmUUk3CpdPmSmCZ
-# i7yqv5VX/tj8mXyQ2aU+vYypfckbA9LYDa5in5kxRQiFuGrNFK6cG6w/+cmhqWXs
-# 5o0gcuzKoby1De9xxiAzT1iB0K0gArf88qVO/4wUY5HfT7yhcZi/0WVJHO21C7fy
-# y/jPfmcC6vl0cIyDtOvJStaUNX4kHr8A87DEwmfdDRahG1+rzLEkRicJYCQfznvg
-# XgbhMwNWssKs9qs6U6brRjn3OXkQpGn2QvNMaYYKVcc5Lu6h2O5nFPTybTqKuocv
-# F1SVVv5+VT5/SJNyhPzQ8zWyulzM/RVR4bQN8YxeX49gOSWEkYXUO+0ELzVX5qo3
-# JGeE4H8wSTpCQsFEk3Fm7j7oVgopCrlv9TZft5Mi9U9T+VfKcLnJQcQnBjaUI+RC
-# j0S4ktov5mKYVf9ox9YmnMFoc0wPKqHGNh8UrW9ToIhILi1B5cERjETG45YBz00g
-# sxg+TTMasjQEYfMSv6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBj0oVFg9isZNCyUxwAeHuiRi1zPdW72BKk7pFBSl0rWMA0GCSqG
+# SIb3DQEBAQUABIIBgHDVu0/LULJcgxIzpM1WXY9rlsmP8oPWi+A8R+mYW82/ZNGF
+# QQtKLkc9t3Q5WIpcg6euqd5x5Y3T26IDJI2sb8+7axZzOgm/i5VOCC4ZCoQ3CJnT
+# rQBxL6eJST2gEP3/cgp7Md2bhPov5BEoc/6/cTsr0v+JZwP4gDrggQJP2zj8EXHF
+# hwuqwrpM1w4oKdc/5WnNB8sb6epMlsEilnGaEPeVMtYs9qqsS4vqjCtKd9XmqyYj
+# Yv0Q9yaGlBCsQUqMbhesP50v5cHF27gfZVQB4DQKTN7SW+ErsuQPdDn2BJBNYZeX
+# otZQ4qM65ardxFeXMoQHhLZn44YqGPur7Kh2bf0Kg0xOflnhI2t6pj0/pWhVPTM8
+# 5z8aL834oyUFEjqvBKW6pZjctY+3lO97SB44cdvGZ+ULUR9seyup96Nu0aJ+2z1e
+# Hg6EbpIch4wqw995FKIWaWOqlBavr/9au8vn9ZW3W2pyIrKUziYED0TIt4PtozRv
+# hPukCCe+aAQxV19q06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTA3
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCeVNSUuZqFM4Hk/M91JCg40f22J7/d9TmFkTLj
-# PCf7izANBgkqhkiG9w0BAQEFAASCAgA+d7FeGrihA5L18CNcBoDh3mCsnMibAeAl
-# 58TlYvIOPrAsyvqZOvR0bfatHIzUo5LQ7xGDaJomLnVSYT/3TDMvqnKjtcByWxj5
-# vNog/zr7M67nDjeqFqCztqvyPEHDOaaeUoHip2ydWKrkhnykDDcA+aoyEcZfZg3c
-# iQ/6qNukCa/G11Z4GzoxEBtNcD0kqakgzohuXszQa10TEbUXt5+Fei7X9Cv5hGaY
-# uF0MtfvqmxIW8Es5t/+pUL1sGO2xnlKvxOJ0QP8J4CLY14MeDiIOHwiRb5i8h8vL
-# U7djryoFZAEkEX6OGg/VssQZaSsOh7ISfTy8UCOUQqSX+L8FEVjopcH7tZmoo7pm
-# kQTlWhQaE8vCp9RkIMAp0SiZ37UvkdPSlmSQmOfCHJqNhfHyv5fnJvUd06TBZLr+
-# wztQo7z3FFj5fajiPgvMhIPaQbgI6JtAs0/vMIaoYTa35vePNiUYHKbAIqDtjUvs
-# 0EoTtOvVcIJupvju7q0HlHFNO4P+6sBhLd81h5foqAVOjdAziHNMu9GeyVBsr0iD
-# LgT3HyrfWuuoNGJbs0aK1dHhFj23nq3sZaxx1kmQXF5ba88R8tNyqp3UnaUatvSc
-# KE8280FgNIJNMkyC+j46I/xK1UZgZ1e9stmpdvzfjlfwgQEamnyGMZZy6ryh7eFu
-# 34B+dWlfwA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTEy
+# MjlaMC8GCSqGSIb3DQEJBDEiBCDPIEJgq96soB8/MbJoCT2Y+QdkhkMLPMNK+9CO
+# 3HGQnjANBgkqhkiG9w0BAQEFAASCAgC1zeyhKyHFVyMIOKs5NTLzM4hCrWE3zK8f
+# HJia0b+v99HOSzWIlwHAVEpc404ni32w5yPt2EXN6WiECK+YqhlXitwZyPL7di8z
+# TdOdk+4a9iJz9/umTvFsc9OkIQW7zgQbR+4/jTCDUVXYBoCFCq4NFONIFTfaemnr
+# JXLPDcM29zLJNfmsYtjU+xI1xnboWkJ6op8DRtShgZcZpw5ytu5ulRD6k1CwXtHY
+# C+RLbG69yRLUZGNE1UurcRHP4z3+kW9vrFnfDMRHtKMG9MvZkY5qJbzAZldiquPa
+# DbUiY2KBtWHrMSAbAcae2fov17gngxgactyPR7Ky0TheiFNVowiwXV8Lcla10nqw
+# CaEHYKwDmlvS0mZE6qe+0yx6eDWlGa67FznJIBc5Jf2E6BL0rQVHNtH2Xr3vy/il
+# zkj7Q6MFrTFb8AdA4R+waZz9CYUkRlk0emzhiX/3vWG6tUD3PSnzkj9GfXl5MPyI
+# 0lY4XGZppHQ7GNcLMCKLrmGVoVhMIshvym+hKnE69TdNmmyWIuoAbcqCfsTkGY0p
+# oYEfmHR4RePBFmDD9RdVEdmX9fer4m7Fl4myNiNBbexY+QwxAJQ9G7A07OVFq3pu
+# eumlf7yeIV1NAt5OdkQdvE7FS0gWx4uc9KVq00BNQEYzNtpSp/V2H6BHic9hBE2o
+# BfgMbypcNA==
 # SIG # End signature block
