@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.12.0",
+  "contractVersion": "0.14.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -202,6 +202,9 @@
         "JobTitle",
         "UsageLocation",
         "CreatedDateTime",
+        "LastSignInDateTime",
+        "LastNonInteractiveSignInDateTime",
+        "LastSuccessfulSignInDateTime",
         "SourceCollectedDateTime"
       ]
     },
@@ -321,6 +324,27 @@
         "AssignmentError",
         "LastUpdatedDateTime",
         "DisabledPlanIds",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\M365",
+      "name": "M365_ServicePlans.csv",
+      "role": "raw",
+      "source": "MicrosoftGraph",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "SourceSystem",
+        "SkuId",
+        "SkuPartNumber",
+        "ServicePlanId",
+        "ServicePlanName",
+        "ProvisioningStatus",
+        "AppliesTo",
         "SourceCollectedDateTime"
       ]
     },
