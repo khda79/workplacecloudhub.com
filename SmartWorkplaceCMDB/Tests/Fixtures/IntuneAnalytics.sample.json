@@ -1,0 +1,48 @@
+{
+  "windowsUpdateAlerts": [
+    {
+      "sourceReport": "FeatureUpdateDeviceState",
+      "deviceId": "11111111-aaaa-bbbb-cccc-111111111111",
+      "deviceName": "WIN-TEST-01",
+      "policyId": "aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa",
+      "eventDateTimeUTC": "2026-09-10T08:00:00Z",
+      "lastWUScanTimeUTC": "2026-09-10T07:30:00Z",
+      "aggregateState": "error",
+      "currentDeviceUpdateStatus": "installFailed",
+      "latestAlertMessage": "Feature update installation failed"
+    },
+    {
+      "sourceReport": "QualityUpdateDeviceStatusByPolicy",
+      "deviceId": "22222222-aaaa-bbbb-cccc-222222222222",
+      "deviceName": "WIN-TEST-02",
+      "policyId": "bbbbbbbb-1111-2222-3333-bbbbbbbbbbbb",
+      "eventDateTimeUTC": "2026-09-11T09:00:00Z",
+      "lastWUScanTimeUTC": "2026-09-11T08:30:00Z",
+      "aggregateState": "inProgress",
+      "currentDeviceUpdateStatus": "downloadInProgress",
+      "latestAlertMessage": "Quality update delayed"
+    }
+  ],
+  "endpointAnalyticsDeviceScores": [
+    {
+      "deviceId": "11111111-aaaa-bbbb-cccc-111111111111",
+      "deviceName": "WIN-TEST-01",
+      "manufacturer": "Contoso Hardware",
+      "model": "Model A",
+      "endpointAnalyticsScore": 75,
+      "startupPerformanceScore": 70,
+      "appReliabilityScore": 80,
+      "workFromAnywhereScore": 76
+    },
+    {
+      "deviceId": "22222222-aaaa-bbbb-cccc-222222222222",
+      "deviceName": "WIN-TEST-02",
+      "manufacturer": "Fabrikam Devices",
+      "model": "Model B",
+      "endpointAnalyticsScore": 62,
+      "startupPerformanceScore": 58,
+      "appReliabilityScore": 69,
+      "workFromAnywhereScore": 60
+    }
+  ]
+}
