@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.6.0",
+  "contractVersion": "0.7.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -226,6 +226,25 @@
     },
     {
       "area": "PowerBI",
+      "name": "DimVerifiedDomain.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDomainKey",
+        "DomainId",
+        "IsDefault",
+        "IsInitial",
+        "AuthenticationType",
+        "SupportedServices",
+        "AvailabilityStatus"
+      ]
+    },
+    {
+      "area": "PowerBI",
       "name": "DimUser.csv",
       "role": "dimension",
       "tenantScoped": true,
@@ -321,6 +340,29 @@
         "Month",
         "MonthName",
         "Day"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactHybridIdentityCoverage.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "EntityType",
+        "OnPremisesCount",
+        "CloudCount",
+        "MatchedCount",
+        "OnPremisesOnlyCount",
+        "CloudOnlyCount",
+        "DuplicateOnPremisesKeyCount",
+        "DuplicateCloudKeyCount",
+        "MatchRatio",
+        "MatchMethod",
+        "SourceCollectedDateTime"
       ]
     },
     {
