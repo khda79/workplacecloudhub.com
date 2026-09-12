@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.1
+1.1.2
 #>
 [CmdletBinding()]
 param(
@@ -47,9 +47,126 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.1'
+$ScriptVersion = '1.1.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+
+function Add-SmartWorkplaceCMDBBannerLog {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory)][string[]]$Lines
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $folder = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    foreach ($line in $Lines) {
+        [IO.File]::AppendAllText(
+            $Path,
+            ([string]$line + [Environment]::NewLine),
+            $encoding
+        )
+    }
+}
+
+function Write-SmartWorkplaceCMDBStartupBanner {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$LogPath = '',
+        [switch]$NoConsole
+    )
+
+    $lines = @(
+        ('=' * 80),
+        ' SmartWorkplaceCMDB by WorkplaceCloudHub',
+        ' Website : https://workplacecloudhub.com',
+        ' GitHub  : https://github.com/khda79/workplacecloudhub.com',
+        ('=' * 80)
+    )
+    if (-not $NoConsole) {
+        Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+        Microsoft.PowerShell.Utility\Write-Host $lines[2] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $lines[3] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $lines[4] -ForegroundColor DarkCyan
+    }
+    Add-SmartWorkplaceCMDBBannerLog -Path $LogPath -Lines $lines
+}
+
+function Write-SmartWorkplaceCMDBConsole {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Message,
+        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR', 'OUTPUT')]
+        [string]$Level = 'INFO'
+    )
+
+    $color = switch ($Level) {
+        'WARN' { 'Yellow' }
+        'ERROR' { 'Red' }
+        'DEBUG' { 'DarkGray' }
+        'OUTPUT' { 'Gray' }
+        default { 'Gray' }
+    }
+    $lines = @([string]$Message -split "`r?`n")
+    if ($lines.Count -eq 0) { $lines = @('') }
+    foreach ($line in $lines) {
+        Microsoft.PowerShell.Utility\Write-Host (
+            '[{0}] {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $line
+        ) -ForegroundColor $color
+    }
+}
+
+function Write-SmartWorkplaceCMDBCompletionBanner {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Status,
+        [Parameter(Mandatory)][datetimeoffset]$StartedDateTime,
+        [AllowEmptyString()][string]$Pipeline = '',
+        [AllowEmptyString()][string]$Mode = '',
+        [int]$StepCount = 0,
+        [int]$WarningCount = 0,
+        [int]$ErrorCount = 0,
+        [AllowEmptyString()][string]$LogPath = '',
+        [switch]$NoConsole
+    )
+
+    $endedDateTime = [datetimeoffset]::Now
+    $duration = $endedDateTime - $StartedDateTime
+    $lines = @(
+        ('=' * 80),
+        ' SmartWorkplaceCMDB execution summary',
+        (' Status   : {0}' -f $Status),
+        (' Pipeline : {0}' -f $Pipeline),
+        (' Mode     : {0}' -f $Mode),
+        (' Duration : {0}' -f $duration.ToString('hh\:mm\:ss')),
+        (' Steps    : {0}' -f $StepCount),
+        (' Warnings : {0}' -f $WarningCount),
+        (' Errors   : {0}' -f $ErrorCount),
+        (' Log      : {0}' -f $(if ([string]::IsNullOrWhiteSpace($LogPath)) { 'not created' } else { $LogPath })),
+        ('=' * 80)
+    )
+    if (-not $NoConsole) {
+        $statusColor = if ($ErrorCount -gt 0 -or $Status -eq 'Failed') {
+            'Red'
+        }
+        elseif ($WarningCount -gt 0 -or $Status -eq 'CompletedWithWarnings') {
+            'Yellow'
+        }
+        else { 'Green' }
+        Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+        foreach ($line in $lines[2..9]) {
+            Microsoft.PowerShell.Utility\Write-Host $line -ForegroundColor $statusColor
+        }
+        Microsoft.PowerShell.Utility\Write-Host $lines[10] -ForegroundColor DarkCyan
+    }
+    Add-SmartWorkplaceCMDBBannerLog -Path $LogPath -Lines $lines
+}
 
 function Add-SmartWorkplaceCMDBOrchestratorStep {
     [CmdletBinding()]
@@ -261,11 +378,13 @@ function Invoke-SmartWorkplaceCMDBLoggedStep {
     param(
         [Parameter(Mandatory)]$Step,
         [Parameter(Mandatory)][hashtable]$Parameters,
-        [Parameter(Mandatory)][string]$LogPath
+        [AllowEmptyString()][string]$LogPath = ''
     )
 
-    Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
-        "Started step '{0}'. Script='{1}'." -f $Step.Name, $Step.ScriptPath)
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+        Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+            "Started step '{0}'. Script='{1}'." -f $Step.Name, $Step.ScriptPath)
+    }
     try {
         & $Step.ScriptPath @Parameters *>&1 | ForEach-Object {
             $record = $_
@@ -293,19 +412,44 @@ function Invoke-SmartWorkplaceCMDBLoggedStep {
             else {
                 [string]$record
             }
-            Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message $text -Level $level
+            if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+                Write-SmartWorkplaceCMDBTextLog -Path $LogPath `
+                    -Message $text -Level $level
+            }
+            $displayRecord = $record -is [System.Management.Automation.ErrorRecord] -or
+                $record -is [System.Management.Automation.WarningRecord] -or
+                $record -is [System.Management.Automation.DebugRecord] -or
+                $record -is [System.Management.Automation.VerboseRecord] -or
+                $record -is [System.Management.Automation.InformationRecord] -or
+                $record -is [string]
+            if ($displayRecord -and -not [string]::IsNullOrWhiteSpace($text)) {
+                Write-SmartWorkplaceCMDBConsole -Message $text -Level $level
+            }
         }
-        Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
-            "Completed step '{0}'." -f $Step.Name)
+        if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+            Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+                "Completed step '{0}'." -f $Step.Name)
+        }
     }
     catch {
-        Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
-            "Failed step '{0}': {1}" -f $Step.Name, $_.Exception.Message) `
-            -Level ERROR
+        if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+            Write-SmartWorkplaceCMDBTextLog -Path $LogPath -Message (
+                "Failed step '{0}': {1}" -f $Step.Name, $_.Exception.Message) `
+                -Level ERROR
+        }
         throw
     }
 }
 
+$script:SmartWorkplaceCMDBConsoleStarted = [datetimeoffset]::Now
+$script:SmartWorkplaceCMDBCompletionWritten = $false
+$script:SmartWorkplaceCMDBCurrentLogPath = ''
+$script:SmartWorkplaceCMDBCurrentPipeline = $Pipeline
+$script:SmartWorkplaceCMDBCurrentMode = ''
+$script:SmartWorkplaceCMDBCurrentStepCount = 0
+Write-SmartWorkplaceCMDBStartupBanner
+
+try {
 if ($Collect -and $ValidateOnly) {
     throw '-Collect and -ValidateOnly cannot be used together.'
 }
@@ -326,6 +470,7 @@ elseif ($Collect) {
 else {
     'Validate'
 }
+$script:SmartWorkplaceCMDBCurrentMode = $mode
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptRoot
@@ -354,10 +499,10 @@ if ($mode -ne 'Validate' -and $MaxItems -gt 0) {
     $DataAllRootPath = Join-Path $DataRootPath 'DATA-ALL'
     $LatestOutputRootPath = Join-Path $DataRootPath 'DATA-LAST'
     $LogRootPath = Join-Path $DataRootPath 'LOG-ALL'
-    Write-Information (
+    Write-SmartWorkplaceCMDBConsole -Message (
         "Bounded output is isolated from canonical data: '{0}'." -f
         $DataRootPath
-    ) -InformationAction Continue
+    )
 }
 
 $boundParameterCopy = @{}
@@ -781,6 +926,7 @@ $orchestratorLogPath = if ($loggingEnabled) {
         $runStamp)
 }
 else { '' }
+$script:SmartWorkplaceCMDBCurrentLogPath = $orchestratorLogPath
 $summaryScriptPath = Join-Path $projectRoot 'Reports\SmartWorkplaceCMDB-CollectionSummary.ps1'
 $summaryParameters = @{
     Tenant = $paths.ProfileKey
@@ -807,7 +953,7 @@ if ($summaryEligible) {
                 -SnapshotDateTime $runStarted) | Out-Null
     }
     catch {
-        Write-Warning (
+        Write-SmartWorkplaceCMDBConsole -Level WARN -Message (
             'The pre-collection summary baseline could not be captured. ' +
             'The collection will continue and unavailable comparisons will be shown as n/a. ' +
             $_.Exception.Message)
@@ -825,6 +971,8 @@ else {
 }
 
 if ($loggingEnabled) {
+    Write-SmartWorkplaceCMDBStartupBanner `
+        -LogPath $orchestratorLogPath -NoConsole
     Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
         'Started orchestration. RunId={0}; Tenant={1}; Pipeline={2}; Mode={3}; Version={4}.' -f
         $runId,
@@ -880,14 +1028,14 @@ try {
                 [math]::Max(0, $remainingSeconds)
             ).ToString('hh\:mm\:ss')
         }
-        Write-Information (
+        Write-SmartWorkplaceCMDBConsole -Message (
             "[{0}/{1}] {2} (elapsed {3}; ETA {4})" -f
             $sequence,
             $executionSteps.Count,
             $step.Name,
             $elapsed.ToString('hh\:mm\:ss'),
             $etaText
-        ) -InformationAction Continue
+        )
 
         $stepStarted = [datetimeoffset]::UtcNow
         $stepScriptName = ConvertTo-SmartWorkplaceCMDBLogName -Value (
@@ -918,15 +1066,10 @@ try {
                 -Mode $mode `
                 -FixtureRootPath $FixtureRootPath `
                 -MaxItems $MaxItems
-            if ($loggingEnabled) {
-                Invoke-SmartWorkplaceCMDBLoggedStep `
-                    -Step $step `
-                    -Parameters $parameters `
-                    -LogPath $stepLogPath
-            }
-            else {
-                @(& $step.ScriptPath @parameters) | Out-Null
-            }
+            Invoke-SmartWorkplaceCMDBLoggedStep `
+                -Step $step `
+                -Parameters $parameters `
+                -LogPath $stepLogPath
             if ($mode -eq 'Validate') {
                 $status = 'Validated'
             }
@@ -949,6 +1092,16 @@ try {
                     $step.Name,
                     [math]::Round(($stepEnded - $stepStarted).TotalSeconds, 3))
             }
+            if ($status -ne 'Failed') {
+                Write-SmartWorkplaceCMDBConsole -Message (
+                    '[{0}/{1}] {2} {3} (duration {4})' -f
+                    $sequence,
+                    $executionSteps.Count,
+                    $step.Name,
+                    $status.ToLowerInvariant(),
+                    ($stepEnded - $stepStarted).ToString('hh\:mm\:ss')
+                )
+            }
             $results.Add([pscustomobject][ordered]@{
                 RunId = $runId
                 Sequence = $sequence
@@ -967,9 +1120,11 @@ try {
             })
         }
     }
+    $script:SmartWorkplaceCMDBCurrentStepCount = $results.Count
 }
 catch {
     $failedMessage = $_.Exception.Message
+    $script:SmartWorkplaceCMDBCurrentStepCount = $results.Count
 }
 finally {
     if ($loggingEnabled) {
@@ -1029,16 +1184,17 @@ if ($sharePointEligible) {
                 -Message "SharePoint publication failed: $sharePointError" `
                 -Level WARN
         }
-        Write-Warning "SmartWorkplaceCMDB SharePoint publication failed but collection outputs are preserved: $sharePointError"
+        Write-SmartWorkplaceCMDBConsole -Level WARN -Message (
+            "SmartWorkplaceCMDB SharePoint publication failed but collection outputs are preserved: $sharePointError")
     }
 }
 elseif ($mode -eq 'Collect' -and $MaxItems -gt 0 -and $sharePointEnabled) {
-    Write-Information 'SharePoint publication skipped for the bounded MaxItems run.' `
-        -InformationAction Continue
+    Write-SmartWorkplaceCMDBConsole -Message `
+        'SharePoint publication skipped for the bounded MaxItems run.'
 }
 elseif ($mode -eq 'Collect' -and $activeDirectoryScoped -and $sharePointEnabled) {
-    Write-Information 'SharePoint publication skipped for the scoped Active Directory run.' `
-        -InformationAction Continue
+    Write-SmartWorkplaceCMDBConsole -Message `
+        'SharePoint publication skipped for the scoped Active Directory run.'
 }
 
 $sharePointFailureCount = @($sharePointRecords |
@@ -1046,13 +1202,13 @@ $sharePointFailureCount = @($sharePointRecords |
 $sharePointUploadCount = @($sharePointRecords |
     Where-Object Status -eq 'Uploaded').Count
 if ($sharePointEligible) {
-    Write-Information (
+    Write-SmartWorkplaceCMDBConsole -Message (
         'SmartWorkplaceCMDB SharePoint publication completed. Uploaded={0}; Failed={1}; Target={2}.' -f
         $sharePointUploadCount,
         ($sharePointFailureCount + [int](-not [string]::IsNullOrWhiteSpace($sharePointError))),
         ([string](Get-SmartWorkplaceCMDBOrchestratorSetting `
                 $sharePointConfiguration 'TargetFolderPath' 'SMART-CMDB/DATA'))
-    ) -InformationAction Continue
+    )
 }
 
 $runEnded = [datetimeoffset]::UtcNow
@@ -1073,10 +1229,10 @@ if ($summaryEligible) {
         $summaryResult = & $summaryScriptPath @summaryParameters `
             -RunStatus $runStatus `
             -SnapshotDateTime $runEnded
-        Write-Information (
+        Write-SmartWorkplaceCMDBConsole -Message (
             "SmartWorkplaceCMDB full-collection summary email sent. HTML='{0}'." -f
             $summaryResult.HtmlPath
-        ) -InformationAction Continue
+        )
         if ($loggingEnabled) {
             Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
                 "Full-collection summary email sent. HTML='{0}'." -f
@@ -1091,27 +1247,28 @@ if ($summaryEligible) {
                 -Message "Full-collection summary email failed: $summaryError" `
                 -Level WARN
         }
-        Write-Warning "SmartWorkplaceCMDB summary email failed but collection outputs are preserved: $summaryError"
+        Write-SmartWorkplaceCMDBConsole -Level WARN -Message (
+            "SmartWorkplaceCMDB summary email failed but collection outputs are preserved: $summaryError")
     }
 }
 elseif ($mode -eq 'Collect' -and $Pipeline -eq 'Full' -and
     $MaxItems -gt 0 -and $summaryEnabled) {
-    Write-Information 'Full-collection summary email skipped for the bounded MaxItems run.' `
-        -InformationAction Continue
+    Write-SmartWorkplaceCMDBConsole -Message `
+        'Full-collection summary email skipped for the bounded MaxItems run.'
 }
 elseif ($mode -eq 'Collect' -and $Pipeline -eq 'Full' -and
     $activeDirectoryScoped -and $summaryEnabled) {
-    Write-Information 'Full-collection summary email skipped because Active Directory collection is scoped.' `
-        -InformationAction Continue
+    Write-SmartWorkplaceCMDBConsole -Message `
+        'Full-collection summary email skipped because Active Directory collection is scoped.'
 }
-Write-Information (
+Write-SmartWorkplaceCMDBConsole -Message (
     "SmartWorkplaceCMDB orchestration {0}. Pipeline={1}; Mode={2}; Steps={3}; Duration={4}." -f
     $runStatus.ToLowerInvariant(),
     $Pipeline,
     $mode,
     $results.Count,
     ($runEnded - $runStarted).ToString('hh\:mm\:ss')
-) -InformationAction Continue
+)
 
 if ($loggingEnabled) {
     foreach ($retentionEntry in @(Invoke-SmartWorkplaceCMDBLogRetention `
@@ -1150,6 +1307,20 @@ if ($loggingEnabled) {
         $results.Count,
         [math]::Round(($runEnded - $runStarted).TotalSeconds, 3))
 }
+
+$completionWarningCount = $sharePointFailureCount +
+    [int](-not [string]::IsNullOrWhiteSpace($sharePointError)) +
+    [int](-not [string]::IsNullOrWhiteSpace($summaryError))
+Write-SmartWorkplaceCMDBCompletionBanner `
+    -LogPath $orchestratorLogPath `
+    -Status $runStatus `
+    -Pipeline $Pipeline `
+    -Mode $mode `
+    -StartedDateTime $runStarted `
+    -StepCount $results.Count `
+    -WarningCount $completionWarningCount `
+    -ErrorCount 0
+$script:SmartWorkplaceCMDBCompletionWritten = $true
 
 [pscustomobject]@{
     Status = $runStatus
@@ -1196,12 +1367,31 @@ if ($loggingEnabled) {
     SummaryEmailHtmlPath = if ($summaryResult) { [string]$summaryResult.HtmlPath } else { '' }
     SummaryEmailError = $summaryError
 }
+}
+catch {
+    if (-not $script:SmartWorkplaceCMDBCompletionWritten) {
+        $message = $_.Exception.Message
+        Write-SmartWorkplaceCMDBConsole -Level ERROR -Message (
+            "SmartWorkplaceCMDB failed: $message")
+        Write-SmartWorkplaceCMDBCompletionBanner `
+            -LogPath $script:SmartWorkplaceCMDBCurrentLogPath `
+            -Status 'Failed' `
+            -Pipeline $script:SmartWorkplaceCMDBCurrentPipeline `
+            -Mode $script:SmartWorkplaceCMDBCurrentMode `
+            -StartedDateTime $script:SmartWorkplaceCMDBConsoleStarted `
+            -StepCount $script:SmartWorkplaceCMDBCurrentStepCount `
+            -WarningCount 0 `
+            -ErrorCount 1
+        $script:SmartWorkplaceCMDBCompletionWritten = $true
+    }
+    throw
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACyrIYeB30uR/C
-# 9BbinCyMP+Y8RkV4dhKNfkBjCMtXs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpd2C8HUPhODLp
+# M4ExW4aPl/XJHghGFK9w5Q+fBEhAi6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1334,31 +1524,31 @@ if ($loggingEnabled) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAL62abgSDu9Qzg1MNt6BFKqBinzx9/r2kWODkMPmvbcMA0GCSqG
-# SIb3DQEBAQUABIIBgJ23Pxu8nmYSV5QzIzZwOTjwOxXQeATnX/dsKO53iSiOlJKy
-# /Smx/Vrdp/nmZDMIgkdHFCrzRLLagfXz76v10LAIa1wmeaJcBckh6sEWDAZCO1w8
-# c3ZD5zMRNGFNH1netaYQZxSVpmdDt3gm25CjsvXTD1ZR0ldMhkrW1n5LEvPTFHZv
-# 0Ljzm1m/AqiD4bUjEdcOmzHWVpJzbsvaeBPD2p+ul7hszqOr43rBE6mBtjd7b3zl
-# 6RajsJn8v8PR0W3houTFcCdDDTqNxQTsnxEXVkJflf7vK/m1pM2N2XZKTMmPf8Ts
-# IiLJyZaNl/plw2IPXfJYpXt70cYb8RwY6VYrK4OkW99iQbF9XboV3GmZUo1E1VjH
-# ieMB3h+FgaiBjIarkrgLLjRiIo3/kbF8FSQtBTWpewczrtox9AKIsDz+WAol1NYz
-# bR64c97PKQWYC1oyNTFbuJyFEZgcGtiNAdTm5omCaSV/kLsPJhT+IfwNfc7w2NJG
-# VPHxn1gkuX3dXQkss6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIALTNBjtL02u+pFHJTPGNuN7tAPERpP5EosGsyvABmvZMA0GCSqG
+# SIb3DQEBAQUABIIBgJVsFtoI7IIwk7R//GUC2eM4wXwVYTqhowZQysaTiiUALLLJ
+# 6bLW2oLagR8QuhY2rp8cXQIpKCS7+A7FsOp7T4EIWdWgOc+6x29Q/dBZ2Ii7b8Em
+# T0MPru4dqLRpwahAz9bko6pP6I48L0WCpw0k2sFiuNupoqF+ZycaVV+mtJVH/l7K
+# 6Gt5AR1lI0Ka7SQnsc8caepk8JZpOegrefr740nSm0iTMReJe/To2VQPAAdNT3Rn
+# +B+Nlgh9SlN22NL9SLQPPIy9KHgNf2UCBxY0kf13WsEi3hmcXkLOLB1rswUTMANB
+# qId8Ng5Y2scVhQmq3dzWGPZ1zrgYP8OBwrDqrUeP+LyiKPwpxTMZhHYrhPQK8guu
+# Mej7TJCTtWj16gL5/0wo6esYH1cqvCmkxluiIHgCyOlfNk/HSSOiXdfjWDrA5vxs
+# DvLs2XKk58a32vYWFLk/C2fsybq73P02rMFKG9UNePRi0mwZK8ADe+sB7Ju1Mp6a
+# 8qXmYrUSKz62tL6AaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjFaMC8GCSqGSIb3DQEJBDEiBCDOXO70mV7jwlDnxXSfv7bSI5w7dp/YpZsIUCs6
-# YkHbGjANBgkqhkiG9w0BAQEFAASCAgCzQWahBTxoZTXpL4tVYZa2bkFhzoILJjbL
-# NL+LSo5jsiceisEv6UxrZcDpdT41xOGRjpZ+Lv42t4ccFSXyEXCnPu9uUBCEE06U
-# bXZXCW9x6KaoqOwhNHRALNsyU83ImVzM8JcORyfE3ax6yXmH4qeRe1l1jMK2pHzv
-# QLSEGGSDcges40x5X+QKTLwUuvqfm1okzt5rhqBXz7L/qiiENkEreUh5YsQCIWNm
-# y9HKPM4ycFhb1HP04T+Eu2LR+3uIPOmc64q04CONLbkOJf4LNobxwE1yjbdyamMU
-# SjMYbQRD4tppeelMfThgUX6/aq3TwgMBuErF5s9TkahmeFWb64y5oEDTNfERixQC
-# OSiq+n+YWZlOdcdAVDV7GbVBqLnSyV3PEH6p6fyUMJD3QJ5k8r3spIaYbK7/mytE
-# ZTCbMl+Pf2LOPpUtJQM1sY6+jznA1M4Ev+xBIS1bSTwZawLHrf1lvNObFrZDJDF6
-# LiUgtH2cp42YcJLW7I1oNFXuewgy5H5YBFD1skC37+4cmqR2wRiJ53Gtq7niq8Rd
-# RFc7q9M5+mIivm8Gd8NdUUJT3+THie5HifP1g/Elz5r6mxXh1JBA/fbhAjbZwVHa
-# ItqFNqKOd9oVWiyM2PvAEmJy1cYloeO+GdhAt5WajlfTaMe2JBnoPaAbrehkwEwa
-# acVKLFSvlg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNDA4
+# MTdaMC8GCSqGSIb3DQEJBDEiBCAGFSfPhYfrOXspeNW0X3CEyQpOKLwCe/XBqvZJ
+# WYIa7jANBgkqhkiG9w0BAQEFAASCAgAd5ubZlHcBTFyk8WCyVAtFSIlrnJwuS4RF
+# 1Xccl6+fy98AA7vgzPaOA1GxI+6YNnr3+eU7gscV03AvCrBKrhkimp4VQ80QHRBD
+# Run/UwNP0gktHjtDVaNzFhnV6FQhOAsipEL/ayKywDTiI/z/MvmyavCHF/2Xqq7/
+# I4572l0GSMd0PYGFyKFVWsQ1BuUdukhlMF7mkHdMFzfzoLrRF9kr2gLgoxx3F8bZ
+# Cm5gJQPJc70m4Jtat6L1oPOHaj/ZO/AmMh1dG2+ySDC5+yXMVTlJz0srANKMarH0
+# DdzuHrmolGw3vPIpLVkt6g3tu8yXEBBF0B66mG7TTup5jgWTCFePRnpkjNUYOCZI
+# cf/8KBUMLel2UvEeHRENjXcFEZCWXxSFbX8NvEuf/vXMoWWohbHN8GG8cI0emRMe
+# BW91iVtSQ8E5ufV9UlfFEISOb50OuqeVumwonmp7GqiNkzrTUj5xK/4y3tMh9vSp
+# HvCCSQxydzHls4ymFu648IGfl4Q82yga8D2k5KolTgN6LuFqXSvwOe0Zg9/rTXcv
+# kMSwByzuVZxc/r9w6fQepLNLgYUYMIarwlN/e/flgFpbiGP/GG/yohTG9/Rj+oEL
+# E0n1exMAg0/mDMEyNbDIDpAjb38j4SpzmJSgP5ipvojeT6qDGJS5U/49whJ0PZTR
+# IWoV/harrw==
 # SIG # End signature block

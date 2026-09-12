@@ -53,13 +53,20 @@ LOG-ALL/
     <script-name>/<script-name>_<host>_<timestamp>_<sequence>.log
 ```
 
-Every text-log line is timestamped and classified. The run CSV records status,
-duration, error and the dedicated log path for every step. Defaults are 30 days
+Every operational text-log line is timestamped and classified; lifecycle
+banners remain unprefixed. The run CSV records status, duration, error and the
+dedicated log path for every step. Defaults are 30 days
 and 30 files for orchestrator logs, 30 days and 30 files per script for step
 logs, and 90 days and 90 files for run CSVs. Configure these safeguards under
 the tenant-local `Logging` object. A value of `0` disables the corresponding
 age or count rule. Retention failures are warnings in the orchestrator log and
 never invalidate collected data.
+
+The console always shows the WorkplaceCloudHub startup and completion banners.
+Those banner lines are deliberately not timestamped; every operational message
+between them is prefixed with local date and time. Child collector messages use
+the same console convention. `-ValidateOnly` shows the console lifecycle but
+does not create a transcript or any file under `LOG-ALL`.
 
 ## Power BI
 

@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.2
+1.0.3
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -46,7 +46,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.2'
+$ScriptVersion = '1.0.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -750,6 +750,13 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     }
 
     if ($CollectMemberships) {
+        # GetNewClosure() executes in a dynamic module that cannot resolve
+        # functions local to this collector. Capture both LDAP helpers as
+        # scriptblocks before creating the per-domain closure.
+        $ldapConnectionFactory =
+            ${function:New-SmartWorkplaceCMDBActiveDirectoryLdapConnection}
+        $rangedMemberReader =
+            ${function:Get-SmartWorkplaceCMDBActiveDirectoryRangedMember}
         $principalByDistinguishedName = [System.Collections.Generic.Dictionary[string, object]]::new(
             [System.StringComparer]::OrdinalIgnoreCase
         )
@@ -796,7 +803,7 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                 param([string]$SelectedServer)
                 $started = [datetimeoffset]::UtcNow
                 $directMemberships = New-Object System.Collections.Generic.List[object]
-                $domainConnection = New-SmartWorkplaceCMDBActiveDirectoryLdapConnection `
+                $domainConnection = & $ldapConnectionFactory `
                     -Server $SelectedServer
                 try {
                     for ($index = 0; $index -lt $domainGroups.Count; $index++) {
@@ -821,7 +828,7 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                         $directMemberships.Add([pscustomobject]@{
                                 Group = $group
                                 MemberDistinguishedNames = @(
-                                    Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                                    & $rangedMemberReader `
                                         -Server $SelectedServer `
                                         -GroupDistinguishedName $group.DistinguishedName `
                                         -Connection $domainConnection
@@ -1650,8 +1657,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvgiXoWY8iVckS
-# KTxlgiQwIpv/ai4vtak3y7pHybEZBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFg9uOyMD59d7C
+# LaBlqLG13VOXhHO/Z2YEr3WkkpwXtqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1784,31 +1791,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICM6uBJvIBkZEkG3opCaDgT9yB4+uW/xW962Udb/SYYXMA0GCSqG
-# SIb3DQEBAQUABIIBgAIdLeV9dpny8YMpOASP+S31IXr2UJLXyOBnZWUhoYa6wCVX
-# NeEcx68A4h2SzdzvX51iiAxA7vOD2FdoCBoXYBJFyo9ZdEe17gwBIyRGoaptEeL7
-# 46sUOiPdAaROSeXwZMvwjahQQWvWyslJ4Fv16qtULnPuG3Nk1YIfhm6yfu3uGwcx
-# snc1aND9DrNTlSglCfKsqNmoTidl2tV4F1BGGSdZruRehLW1lyeN++2qAR13Cnjd
-# WY6yImQ0RhEjoBKUlDVdDIxeemmNN8obEdV1PfTO1qinwibq9Ryqnae2jWzlBnkS
-# arFWQWAjzNkgfHyg7iasBtfUdkUC9dzGYxpoq02YOIljRhZIdfTFTNs8DvxOI4Vf
-# nc8W7mNDTxxE77bYv2GSJ0Qh/uSQWYAuLWDQzE6hmJrr2M99yICXTe6ibK5Ygcr8
-# rlz74rUydGawT7AHe2gqCiyIH1mDOGxCtS7bRx1+vaqyE2PKN/1pews7s+31zZoc
-# +LMbAx2l7D12+w9gUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILtvyhnqh4kYwiZMzR69WTKQJGBj/owqOS7cyaTCUalvMA0GCSqG
+# SIb3DQEBAQUABIIBgEt5pgfO/iuwJswRen4DTlJkMqpNWYGjPKVoK5SjAkbJluyU
+# eNYXp5ulTqsJxcnJPjVTAoz5yXkDEKEs0e2twDCThGxk9QrSGMwoz9Yv7olbNpA1
+# mr1JkPYSBdUxK63jy19vaHe6rkZWw7pIxjUvWOWecjjKc8CfBYIgcoMWik/M5j3f
+# qp30HCVo6uYmlcc4ltLMUUa9H/FVzesORLWYyoOilpO5UXrH4T+UYdaD6pXS0O3l
+# NIcmStP8vNA65xOBE7PWErJrcSgLx9NGRoexIGxyNyruQpaFOm9F3fMniCL5G43o
+# OEkJ5sxDpCQVB70EAaaZxhYdNrlpc/706W0dtxxWZbvVHI9z3AdyNVRfflxU/zvd
+# Wtkw59CRpvXPz/QA1kDvaNSyM/22e/T3dVorSoP307wIFmyD4oxSRTrwPw4Bx976
+# 0le2sUwtjwvLSpj+V7UhWhdnit5WBQ/vPpITA0UP67KGb13Cc39eK4hWKZbI20OZ
+# hoLBEs8/wj4fTXp4oaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MTNaMC8GCSqGSIb3DQEJBDEiBCDWZeCMszhhKs2bmAyL6TtlfYk68DyxAN25KUbi
-# mCfp1jANBgkqhkiG9w0BAQEFAASCAgANth5fGzy9dvVzzhkyGqGvOyoxQUX4lM9Z
-# 5wP0BV2Un9hHc+hny47xGfXtNNyj+CJS7Sr/1Srsc+uGQIDD+wZ+UWMe05dJz4f0
-# 4LZveSJnCG1CMM+k2awZW0JvudgGzNE7l65D9ByimWAkoJbY9xI8tLhmRYHM9oRO
-# HU7fxW8ZzrvJtqyWevCV/H+dg0ZRyZD98a3aNYYK+EHq/f4qRSlIT1kNg4QJXn/4
-# 2ZgB2xf16+LH1rVMUsf3shCD6JWH2HlIabeM4HzOVIa6qqxF8VeZojez2ipstDQe
-# uvW2sTmCvJgzijuWmM5BCKdb1493Txkv9fhhlzQqLnT8vklb/jttWsSvEKYihHlN
-# ABUYcPXYHLniU6zkZrNoMx0oodfnLAaHO2aQDri/kbKjkNvp6x7rvLTfo5qztBYL
-# VXJGGJfmF+1ecWGAXZx24hylrY9jOEH7cCLPlP7KG9utokhC5EkjhAuQ5jMB8luT
-# tyyUIRPAiqUj5/tBCBmd/+KHuzTKTh12M1TxXnNrbN+UI4070t6L6XOWysE+7O7p
-# oFkrAoWOQM06T9or3rPwOfybBw8Nr05U9fVNIeqTSbyOohEdfa9PQmWrHYEtkkcY
-# Yod4WqXqfvtQz+TKos8DdTrOhZyiZbxlBnS/P8M4a14YlmQBhGIW/k0Yi56zptqc
-# 7cLGkRA06w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNDE4
+# MzJaMC8GCSqGSIb3DQEJBDEiBCD2zWAjKJOZg2htABWnYrD0VYqtaY5V8A4fVYuu
+# xiv4QDANBgkqhkiG9w0BAQEFAASCAgBzvljgHrcA6pF9qWiHR4swlsPMkGU7Mcb9
+# mxYsLezBiQ4IbkBz/UG9lxcDqwRHtgcUAEGiEIVJBqA7ZEJxMhpNL0QgRgK6QrZK
+# I6wMOW2Wo9DT4Sh1BiBJ8ZMnRrw7mhKTh+sLM34Ioh8SYRWGNsV8uiZkgQAN6zCH
+# BrKt9me+XP9DOKezjyfRN/mdLRi0Y5PU4Hw6zkEMltgHeQEdLOHgqmyX6Dh4CARJ
+# gNOJR2lJ1QSOFTHrRnqkkbubct7JiNpOcZwj8VNrPx1rZNqpgkBD7l7ixDquMu7L
+# wEPkCEm1j1HGzC7MVqCVgYlLpr+P7YEn5H5f7AWVFAluG9ZbdsFLiZIIwh5eyLgL
+# b7TwWSaGxP6kesKtxil5qLfa3oibIyb2xyW6z8cwpqSJQrvaE8EUFiSAZOtw8vk8
+# l4qP3K8irjf5y3ey80PzZ1hfW+kVekmjsHC7Sde6prQH9A3xHOGmJ6aEcCuNCeDI
+# +nmaNZpwGBMkQDP/Pl6dmEUm+GAlUg6rvxjK0L8VbM8X65eaVlASgL76KoDe+FtT
+# ce6ySvSYzF+4O+akj38i+s2xTpJ3WfN2cnFswfx4QLH4AglfNHBq9lSawwSd2gme
+# oSK7UjqeO2AI6ARFNolWXdJuvxY9MnT4gAyDbU3VmMn6u6u2FD0LoIgH4iroCyFc
+# 0iRdahjSoA==
 # SIG # End signature block
