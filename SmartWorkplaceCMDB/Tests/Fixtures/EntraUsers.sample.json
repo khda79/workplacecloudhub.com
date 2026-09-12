@@ -10,7 +10,12 @@
       "department": "Engineering",
       "jobTitle": "Workplace Engineer",
       "usageLocation": "fr",
-      "createdDateTime": "2025-01-15T08:30:00Z"
+      "createdDateTime": "2025-01-15T08:30:00Z",
+      "signInActivity": {
+        "lastSignInDateTime": "2026-09-10T08:30:00Z",
+        "lastNonInteractiveSignInDateTime": "2026-09-11T07:00:00Z",
+        "lastSuccessfulSignInDateTime": "2026-09-10T08:30:00Z"
+      }
     },
     {
       "id": "22222222-2222-2222-2222-222222222222",
@@ -21,7 +26,8 @@
       "department": null,
       "jobTitle": "External Consultant",
       "usageLocation": null,
-      "createdDateTime": "2025-02-20T14:45:00Z"
+      "createdDateTime": "2025-02-20T14:45:00Z",
+      "signInActivity": null
     }
   ]
 }

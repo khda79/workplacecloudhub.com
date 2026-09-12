@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.4.0",
+  "contractVersion": "0.6.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -31,6 +31,8 @@
         "ManagerUserId",
         "CreatedDateTime",
         "LastSignInDateTime",
+        "LastNonInteractiveSignInDateTime",
+        "LastSuccessfulSignInDateTime",
         "ConfidenceScore",
         "SourceCollectedDateTime"
       ]
@@ -243,6 +245,10 @@
         "CountryCode",
         "CountryLabel",
         "CountryStatus",
+        "LastSignInDateTime",
+        "LastNonInteractiveSignInDateTime",
+        "LastSuccessfulSignInDateTime",
+        "ActivityState",
         "ConfidenceScore"
       ]
     },
@@ -319,6 +325,26 @@
     },
     {
       "area": "PowerBI",
+      "name": "DimLicenseServicePlan.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantServicePlanKey",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ServicePlanId",
+        "ServicePlanName",
+        "ProvisioningStatus",
+        "AppliesTo"
+      ]
+    },
+    {
+      "area": "PowerBI",
       "name": "FactUserLicense.csv",
       "role": "fact",
       "tenantScoped": true,
@@ -333,6 +359,28 @@
         "SkuId",
         "AssignmentState",
         "AssignedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactUserServicePlan.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "TenantServicePlanKey",
+        "CmdbUserId",
+        "SkuId",
+        "ServicePlanId",
+        "ServicePlanName",
+        "IsEnabled",
+        "AssignmentState",
         "SourceSystem"
       ]
     },

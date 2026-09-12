@@ -19,7 +19,7 @@
           "error": "CountViolation",
           "skuId": "11111111-aaaa-bbbb-cccc-111111111111",
           "disabledPlans": [
-            "aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa"
+            "aaaaaaaa-0000-0000-0000-000000000002"
           ]
         }
       ]

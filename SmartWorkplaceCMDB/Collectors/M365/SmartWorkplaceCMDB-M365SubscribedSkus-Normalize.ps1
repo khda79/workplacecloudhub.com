@@ -5,10 +5,10 @@ Normalizes Microsoft 365 subscribed SKUs for SmartWorkplaceCMDB.
 .DESCRIPTION
 Validates the raw subscribed SKU contract and tenant identity, aggregates any
 duplicate SKU subscriptions by skuId, and publishes CMDB_Licenses.csv plus
-Power BI DimLicenseSku.csv.
+Power BI DimLicenseSku.csv and DimLicenseServicePlan.csv.
 
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -24,11 +24,12 @@ param(
     [string]$GlobalConfigPath,
     [string]$TenantConfigPath,
     [string]$RawInputPath,
+    [string]$RawServicePlansInputPath,
     [switch]$NoConfigWrite,
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -119,12 +120,16 @@ $paths = $context.Paths
 $rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 $curatedContract = Get-SmartWorkplaceCMDBTableContract -Path $curatedContractPath
 $rawTable = @($rawContract.tables | Where-Object name -eq 'M365_SubscribedSkus.csv')
+$rawServicePlanTable = @($rawContract.tables | Where-Object name -eq 'M365_ServicePlans.csv')
 $cmdbTable = @($curatedContract.tables | Where-Object name -eq 'CMDB_Licenses.csv')
 $dimTable = @($curatedContract.tables | Where-Object name -eq 'DimLicenseSku.csv')
-if ($rawTable.Count -ne 1 -or $cmdbTable.Count -ne 1 -or $dimTable.Count -ne 1) {
-    throw 'The contracts must contain one subscribed SKU, CMDB licenses, and DimLicenseSku definition.'
+$dimServicePlanTable = @($curatedContract.tables | Where-Object name -eq 'DimLicenseServicePlan.csv')
+if ($rawTable.Count -ne 1 -or $rawServicePlanTable.Count -ne 1 -or $cmdbTable.Count -ne 1 -or
+    $dimTable.Count -ne 1 -or $dimServicePlanTable.Count -ne 1) {
+    throw 'The contracts must contain the subscribed SKU and service-plan source and dimension definitions.'
 }
-$rawTable = $rawTable[0]; $cmdbTable = $cmdbTable[0]; $dimTable = $dimTable[0]
+$rawTable = $rawTable[0]; $rawServicePlanTable = $rawServicePlanTable[0]
+$cmdbTable = $cmdbTable[0]; $dimTable = $dimTable[0]; $dimServicePlanTable = $dimServicePlanTable[0]
 
 if ([string]::IsNullOrWhiteSpace($RawInputPath)) {
     $RawInputPath = Join-Path $paths.LatestOutputRootPath (
@@ -132,21 +137,29 @@ if ([string]::IsNullOrWhiteSpace($RawInputPath)) {
     )
 }
 $RawInputPath = [IO.Path]::GetFullPath($RawInputPath)
+$RawServicePlansInputPath = if ([string]::IsNullOrWhiteSpace($RawServicePlansInputPath)) {
+    Join-Path $paths.LatestOutputRootPath (Join-Path ([string]$rawServicePlanTable.area) ([string]$rawServicePlanTable.name))
+}
+else { [IO.Path]::GetFullPath($RawServicePlansInputPath) }
 $rawHeader = Test-SmartWorkplaceCMDBExactCsvHeader $RawInputPath @($rawTable.columns | ForEach-Object { [string]$_ })
-if ($rawHeader.Status -eq 'Incompatible') {
-    throw "Raw subscribed SKUs CSV is incompatible."
+$rawServicePlanHeader = Test-SmartWorkplaceCMDBExactCsvHeader $RawServicePlansInputPath @($rawServicePlanTable.columns | ForEach-Object { [string]$_ })
+if ($rawHeader.Status -eq 'Incompatible' -or $rawServicePlanHeader.Status -eq 'Incompatible') {
+    throw 'Raw subscribed SKUs or service-plan CSV is incompatible.'
 }
 if ($rawHeader.Status -eq 'Missing' -and -not $ValidateOnly) {
-    throw "Raw subscribed SKUs CSV was not found: $RawInputPath"
+    throw 'The raw subscribed SKU CSV was not found.'
 }
 
 $cmdbOutputPath = Join-Path $paths.CmdbLatestPath ([string]$cmdbTable.name)
 $dimOutputPath = Join-Path $paths.PowerBILatestPath ([string]$dimTable.name)
+$dimServicePlanOutputPath = Join-Path $paths.PowerBILatestPath ([string]$dimServicePlanTable.name)
 $cmdbHeader = Test-SmartWorkplaceCMDBExactCsvHeader $cmdbOutputPath @($cmdbTable.columns | ForEach-Object { [string]$_ })
 $dimHeader = Test-SmartWorkplaceCMDBExactCsvHeader $dimOutputPath @($dimTable.columns | ForEach-Object { [string]$_ })
+$dimServicePlanHeader = Test-SmartWorkplaceCMDBExactCsvHeader $dimServicePlanOutputPath @($dimServicePlanTable.columns | ForEach-Object { [string]$_ })
 foreach ($target in @(
         [pscustomobject]@{ Name = $cmdbTable.name; Header = $cmdbHeader },
-        [pscustomobject]@{ Name = $dimTable.name; Header = $dimHeader }
+        [pscustomobject]@{ Name = $dimTable.name; Header = $dimHeader },
+        [pscustomobject]@{ Name = $dimServicePlanTable.name; Header = $dimServicePlanHeader }
     )) {
     if ($target.Header.Status -eq 'Incompatible') {
         throw "Existing curated table '$($target.Name)' is incompatible."
@@ -163,17 +176,37 @@ if ($ValidateOnly) {
         RawContractVersion = [string]$rawContract.contractVersion
         CuratedContractVersion = [string]$curatedContract.contractVersion
         RawInputStatus = $rawHeader.Status; RawInputPath = $RawInputPath
+        RawServicePlansInputStatus = $rawServicePlanHeader.Status
         CmdbLicenseTargetStatus = $cmdbHeader.Status
         DimLicenseSkuTargetStatus = $dimHeader.Status
+        DimLicenseServicePlanTargetStatus = $dimServicePlanHeader.Status
         CmdbLicenseOutputPath = $cmdbOutputPath; DimLicenseSkuOutputPath = $dimOutputPath
+        DimLicenseServicePlanOutputPath = $dimServicePlanOutputPath
     } | Format-List
     return
 }
 
 $rawRows = @(Import-SmartWorkplaceCMDBSourceCsv -LiteralPath $RawInputPath -Paths $paths -ErrorAction Stop)
+$rawServicePlanRows = if (Test-Path -LiteralPath $RawServicePlansInputPath -PathType Leaf) {
+    @(Import-SmartWorkplaceCMDBSourceCsv -LiteralPath $RawServicePlansInputPath -Paths $paths -ErrorAction Stop)
+}
+else { @() }
 $identityFields = [ordered]@{
     TenantKey = $paths.TenantKey; OrganizationKey = $paths.OrganizationKey
     EnvironmentKey = $paths.EnvironmentKey; TenantId = $paths.TenantId
+}
+foreach ($row in $rawServicePlanRows) {
+    foreach ($identityName in $identityFields.Keys) {
+        if ([string]$row.$identityName -ne [string]$identityFields[$identityName]) {
+            throw "Raw service-plan identity mismatch for '$identityName'."
+        }
+    }
+}
+$duplicateServicePlanKeys = @($rawServicePlanRows | Group-Object {
+    '{0}|{1}' -f ([string]$_.SkuId).ToLowerInvariant(),([string]$_.ServicePlanId).ToLowerInvariant()
+} | Where-Object Count -gt 1)
+if ($duplicateServicePlanKeys.Count -gt 0) {
+    throw "Raw service-plan data contains duplicate SKU/plan keys: $($duplicateServicePlanKeys.Name -join ', ')"
 }
 foreach ($row in $rawRows) {
     foreach ($identityName in $identityFields.Keys) {
@@ -229,6 +262,23 @@ $dimRows = @($cmdbRows | ForEach-Object {
         EnabledUnits = $_.EnabledUnits
     }
 })
+$dimServicePlanRows = @($rawServicePlanRows | Sort-Object SkuPartNumber,ServicePlanName,ServicePlanId | ForEach-Object {
+    $skuId = ([string]$_.SkuId).Trim()
+    $servicePlanId = ([string]$_.ServicePlanId).Trim()
+    if ([string]::IsNullOrWhiteSpace($skuId) -or [string]::IsNullOrWhiteSpace($servicePlanId)) {
+        throw 'Raw service-plan data contains an empty SkuId or ServicePlanId.'
+    }
+    [pscustomobject][ordered]@{
+        TenantServicePlanKey = ('{0}|service-plan|{1}|{2}' -f $paths.TenantKey,$skuId.ToLowerInvariant(),$servicePlanId.ToLowerInvariant())
+        TenantSkuKey = ('{0}|sku|{1}' -f $paths.TenantKey,$skuId.ToLowerInvariant())
+        SkuId = $skuId
+        SkuPartNumber = [string]$_.SkuPartNumber
+        ServicePlanId = $servicePlanId
+        ServicePlanName = [string]$_.ServicePlanName
+        ProvisioningStatus = [string]$_.ProvisioningStatus
+        AppliesTo = [string]$_.AppliesTo
+    }
+})
 $identityExport = @{
     TenantKey = $paths.TenantKey; OrganizationKey = $paths.OrganizationKey
     EnvironmentKey = $paths.EnvironmentKey; TenantId = $paths.TenantId
@@ -237,21 +287,26 @@ Export-SmartWorkplaceCMDBCsv -InputObject $cmdbRows -Path $cmdbOutputPath `
     -Columns @($cmdbTable.columns | ForEach-Object { [string]$_ }) @identityExport
 Export-SmartWorkplaceCMDBCsv -InputObject $dimRows -Path $dimOutputPath `
     -Columns @($dimTable.columns | ForEach-Object { [string]$_ }) @identityExport
+Export-SmartWorkplaceCMDBCsv -InputObject $dimServicePlanRows -Path $dimServicePlanOutputPath `
+    -Columns @($dimServicePlanTable.columns | ForEach-Object { [string]$_ }) @identityExport
 
 $cmdbValidation = Test-SmartWorkplaceCMDBExactCsvHeader $cmdbOutputPath @($cmdbTable.columns | ForEach-Object { [string]$_ })
 $dimValidation = Test-SmartWorkplaceCMDBExactCsvHeader $dimOutputPath @($dimTable.columns | ForEach-Object { [string]$_ })
-if ($cmdbValidation.Status -ne 'Valid' -or $dimValidation.Status -ne 'Valid') {
+$dimServicePlanValidation = Test-SmartWorkplaceCMDBExactCsvHeader $dimServicePlanOutputPath @($dimServicePlanTable.columns | ForEach-Object { [string]$_ })
+if ($cmdbValidation.Status -ne 'Valid' -or $dimValidation.Status -ne 'Valid' -or $dimServicePlanValidation.Status -ne 'Valid') {
     throw 'Normalized license outputs did not satisfy the curated contracts.'
 }
 Write-Information (
-    "SmartWorkplaceCMDB Microsoft 365 subscribed SKUs normalization completed. RawSKUs={0}; CMDBLicenses={1}." -f
-    $rawRows.Count, $cmdbRows.Count
+    "SmartWorkplaceCMDB Microsoft 365 subscribed SKUs normalization completed. RawSKUs={0}; CMDBLicenses={1}; ServicePlans={2}." -f
+    $rawRows.Count, $cmdbRows.Count, $dimServicePlanRows.Count
 ) -InformationAction Continue
 [pscustomobject]@{
     Status = 'Completed'; ScriptVersion = $ScriptVersion
     RawSkuCount = $rawRows.Count; LicenseCount = $cmdbRows.Count
     RawInputPath = $RawInputPath; CmdbLicenseOutputPath = $cmdbOutputPath
     DimLicenseSkuOutputPath = $dimOutputPath
+    ServicePlanCount = $dimServicePlanRows.Count
+    DimLicenseServicePlanOutputPath = $dimServicePlanOutputPath
     RawContractVersion = [string]$rawContract.contractVersion
     CuratedContractVersion = [string]$curatedContract.contractVersion
 }
@@ -259,8 +314,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEWT650gmIV4Qo
-# I30LDwJ74bddW/NkjJSMQMwyxULGmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDbziGcR5lk3kP
+# AHhrnzPiwCmBTuZaj5prK3IR3IeQMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -393,31 +448,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDJQ5Of9wZk6kXn3jR6AqUnaum18u7Tsx1bwPcyZebiDMA0GCSqG
-# SIb3DQEBAQUABIIBgCBiXqOJhRVfssAS+ORt21jqLs9RYKkQKiprWYA6wBqFGkz8
-# A/FKWfVLcnGKDMi+G94huyW4QxVS11onc0CCmNJb9iv5/ms0CADqLLzHDDDr35+s
-# 0XTdlcBznE3ux+jscWuICFmxoCuXpcH7vHwMeiPAmiUkwXBZjv7LIlZ4P/de1dAx
-# UyhYljC3SB3P5gzz1n724qaxZEUhDNp4enYORSruDCGvL7bAlOOG24DhzKXb+/q2
-# Y2vzLUW86X//3haQ+miIKI4P/F4Pe00GvVzM1Iu7BgRSEHiNA8Fd0uQDSJJ//3G+
-# QhJ481dXIiRZ60Tn4TolEr/16b/TaDXCkzv5aTXjswBmnXLqL8JWcqllj+YpakbT
-# O/iCt7rY4U/iJLsB8Ij0AskkRU+3Sxng4l84NJHAfW8GYb8NnsEHQKO0FLq8YyVA
-# YekAYNc3D+8xogtRGnO/N5dG6rPWQS06J+XZEupXtFcxPH9KZ8aEqJ8vrYu0rjvp
-# l+I6BDc7KcVbrTdqDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDhSiGeNxwUSdTFQMMuxiXePrlye1MCJzYPRbEqMd3yzMA0GCSqG
+# SIb3DQEBAQUABIIBgFU0jq+bv/e9uQ5w0kWt3LswcjOsF7WzvQVuwG5UfiKMMN33
+# GxEX2Hsw2KAu5bdtguUYNmQpPokQdrhUmL+n6Pi5iT6vNqIcV1vCjEN7ymUtj3+o
+# Gt5lw9ScWfClyTffH81/nZUWO/q0aKcNLu7wKzxqBdgDrTzb10nB1h6c8sfvdWI7
+# swiGP815sLtQB9BoTupVGaw+D2DDb+u2/RQIYoGeTrSJ+1GQLf2G0VoUVcDlGYEM
+# mLB8SsgMLaKvCsj89Vpm+isFmZ2BkgiK+frP+YKdJE/TzHshcvo2pvDjaFF4cdho
+# uV/S5Zh0r2tvEAFDsAgFkrF5JoLSkv69YIWS6r9Z45nwv/o4S53i99q/NxOV0zVY
+# HvaU4B1IVPJDNeruIqhcgKgRnzml4X0oCYkzX+qCmRRP0ssi/N31xSxVhwoMJ3Tg
+# Umy8JADy4oGY2eROFe9yYJD2o/q7XyT6dZD0qBFFwvVISRFuPh0YQTokD6qK60/u
+# e1zj/Y2KMBVuPfs0J6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCA/4HrwS9Y0Io/7380MiOt9TAIEP1KSsoqjAIQ7
-# akUbLTANBgkqhkiG9w0BAQEFAASCAgA8nmbyZvri5ftMXKG7AKWRwsBv64UJtvcm
-# RHN8VcoTbpD8CCUA6M8FjI0by7CarXqvKz7qMJeyFqPGbnkCfCZTFpUpBfq3hOwH
-# hzZRlprWSiHMajIhzWvd5HkConLZliacBIClYAyXfDGXg0r3vwZbqgdohdPQQsSa
-# hTX/qY1+uEb4MjutvWDoFIKb4KrSjcHjX4yYmX5xj9HAfsoPfGSn5Z+camuFmfoP
-# acSx5KeLbxl3MKl6O1JpQKihFipqt6u5cBVI29Df1sdvwkZBMjQHIU9EsGRsI+Da
-# G2PpqJo29nnH9GEM7YKnNfxqcyedFqYYszrfzXu0DMY4F1hEwwhyw6u22xFE/fbT
-# 77wzRzSzR/3axlJpdt1vO/2rWvXUc4et2Eg8ilpdIrTFouB/MoRAmTmR4v/MUxus
-# 7TKZ34LEr0FxTQ9hThYn4/HrKpSC7fs7kqc+a/MLjNJ3yau3JjfcoPdSwbLyEKR7
-# WVR7sVYdtQHuIGB2urxiSDmf5ESWGgcI//4QaaUF7PRtxsGDRlKcJkMqEyMzm5eC
-# tEeV+Jk4/DcB0+YTCKVMSXgU+M7YZNACEQ5YL5YiJAKKv2GiWYEbzX0dXRP8OPeu
-# 62e2T93fCTFqSUS22Dzln6w6Ez4IAk+fakBJj46cHS6mCtJgbm0oG+MiwhIg2ZhE
-# PAqNtZKkPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzQ0
+# MjhaMC8GCSqGSIb3DQEJBDEiBCDtJzA5mnOhVcQkUpt+dNfi1ukdFkC6kB9ZTg/X
+# Pv9aQDANBgkqhkiG9w0BAQEFAASCAgCHZOMi/JqCJkd+iDsIYuEVGBC3aeBI0rGx
+# qfD87e5uZ9afYSKDV8VY1AbnL+TUkLxV3ilSA3DVhCGxfPY+K6PTpUxz+BWvDIZq
+# 8s1c2BPyiH7uJ5YhoiH4SXJpYwSrIdz5+d3CxpOO974k8Q/fACWJfG1ZzwZ7j3nA
+# u+vwwfDxfPLcmTz9U0qjzJqsNKEfcsvl3Gw478fD8pYFPUrxcVLsbPw1bIz3yVyn
+# kCWk2wHhIq4cMzcS9HtHosw/YsNC/gOXBeYPiZ1RhWWEnlg3oAvh5wEHCU3u14VA
+# d61M3DQu/1R7qEWTM8yyj58qUdsuvx2hUA1KwynB6HsKvFqfaxWAbD6jhAIIC7Zq
+# hFhN4bv847aS0iucx+FKVTXS1g66noT9KMGGhlYqgrz5MnYh/T6awgyJ5c2siysj
+# pXA4giB+X6iwg19E8xRDXIMU/biD7izJmWDeBqN5yv0sxgpLna76qWfml7xutVDe
+# rmDZHA480ATNNKcgawWwjaUajKl4TV3Ad1zisoNz/Uzp9nK4nOaIa9J3cNzxuDW5
+# WSMK/MepeyC82JLuDtETFXbFa02vJtktcZH1envSuoxRrMJb+P0pVYEhObrAvT/P
+# FyNNUVRST2kryYysXBEWQwW5muSWg6aMdDCCF9vgjoRuP8Cb0N7NNaGWAn2Hr1rO
+# IeXlxpaZ6A==
 # SIG # End signature block

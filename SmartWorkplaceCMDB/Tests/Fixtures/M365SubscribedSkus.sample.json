@@ -13,7 +13,21 @@
         "suspended": 0,
         "warning": 0,
         "lockedOut": 0
-      }
+      },
+      "servicePlans": [
+        {
+          "servicePlanId": "aaaaaaaa-0000-0000-0000-000000000001",
+          "servicePlanName": "EXAMPLE_EXCHANGE",
+          "provisioningStatus": "Success",
+          "appliesTo": "User"
+        },
+        {
+          "servicePlanId": "aaaaaaaa-0000-0000-0000-000000000002",
+          "servicePlanName": "EXAMPLE_TEAMS",
+          "provisioningStatus": "Success",
+          "appliesTo": "User"
+        }
+      ]
     },
     {
       "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa_22222222-aaaa-bbbb-cccc-222222222222",
@@ -27,7 +41,15 @@
         "suspended": 0,
         "warning": 5,
         "lockedOut": 0
-      }
+      },
+      "servicePlans": [
+        {
+          "servicePlanId": "bbbbbbbb-0000-0000-0000-000000000001",
+          "servicePlanName": "EXAMPLE_FRONTLINE_EXCHANGE",
+          "provisioningStatus": "Success",
+          "appliesTo": "User"
+        }
+      ]
     }
   ]
 }

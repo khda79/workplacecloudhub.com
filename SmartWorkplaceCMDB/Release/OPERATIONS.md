@@ -37,6 +37,11 @@ Graph transient responses use bounded retries. `Retry-After` is honored within
 the configured cap; retry exhaustion fails the source rather than publishing a
 partial snapshot.
 
+Entra user activity requires `AuditLog.Read.All` in addition to `User.Read.All`.
+Microsoft 365 license collection writes a separate service-plan catalog and a
+compact effective user/service-plan fact. Missing activity or plan evidence
+remains explicit; it is never converted into zero usage or compliance.
+
 Every source stages and validates its CSV set before promotion. A complete live
 `Full` run can then send the aggregate collection summary configured under the
 tenant-local `Notifications` object. Validate `From`, `To`, the selected Graph
