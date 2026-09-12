@@ -30,6 +30,37 @@ Graph transient responses use bounded retries. `Retry-After` is honored within
 the configured cap; retry exhaustion fails the source rather than publishing a
 partial snapshot.
 
+Every source stages and validates its CSV set before promotion. A complete live
+`Full` run can then send the aggregate collection summary configured under the
+tenant-local `Notifications` object. Validate `From`, `To`, the selected Graph
+or SMTP mode, and certificate access before scheduling the run. Summary mail is
+disabled for fixtures, bounded runs, scoped AD runs and individual pipelines.
+Its private history under `DATA-ALL\CollectionSummary` is required for previous,
+J-7 and J-30 deltas; do not place it in Git. A delivery failure is reported as
+`CompletedWithWarnings` and does not roll back valid collection outputs.
+
+## Logs and retention
+
+Collection and fixture executions use the same bounded logging pattern as
+SmartInventory. Validation remains read-only and creates no log files.
+
+```text
+LOG-ALL/
+  Orchestration/
+    Logs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.log
+    Runs/SmartWorkplaceCMDB-Orchestrator_<host>_<timestamp>.csv
+  Jobs/
+    <script-name>/<script-name>_<host>_<timestamp>_<sequence>.log
+```
+
+Every text-log line is timestamped and classified. The run CSV records status,
+duration, error and the dedicated log path for every step. Defaults are 30 days
+and 30 files for orchestrator logs, 30 days and 30 files per script for step
+logs, and 90 days and 90 files for run CSVs. Configure these safeguards under
+the tenant-local `Logging` object. A value of `0` disables the corresponding
+age or count rule. Retention failures are warnings in the orchestrator log and
+never invalidate collected data.
+
 ## Power BI
 
 The PBIP and ReportData stay private. Apply generators only to an authorized

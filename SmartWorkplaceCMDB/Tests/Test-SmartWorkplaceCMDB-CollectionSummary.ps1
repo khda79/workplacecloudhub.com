@@ -1,192 +1,148 @@
 <#
 .SYNOPSIS
-Runs offline SmartWorkplaceCMDB SharePoint publication contract tests.
+Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-0.1.1
+1.1.0
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.1'
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version 2.0
 $script:Passed = 0
 $script:Failed = 0
 
-function Invoke-SmartWorkplaceCMDBSharePointTest {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][scriptblock]$Test
-    )
-
-    try {
-        & $Test
-        $script:Passed++
-        Write-Information "PASS $Name" -InformationAction Continue
-    }
-    catch {
-        $script:Failed++
-        Write-Information "FAIL $Name - $($_.Exception.Message)" `
-            -InformationAction Continue
-    }
+function Invoke-SummaryTest {
+    param([string]$Name, [scriptblock]$Test)
+    try { & $Test; $script:Passed++; Write-Information "PASS $Name" -InformationAction Continue }
+    catch { $script:Failed++; Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue }
 }
-
-function Assert-SmartWorkplaceCMDBSharePointTrue {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][bool]$Condition,
-        [Parameter(Mandatory)][string]$Message
-    )
-    if (-not $Condition) {
-        throw $Message
-    }
-}
-
-function Assert-SmartWorkplaceCMDBSharePointThrow {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][scriptblock]$Body,
-        [Parameter(Mandatory)][string]$ExpectedText
-    )
-
-    try {
-        & $Body
-    }
-    catch {
-        if ($_.Exception.Message -notlike "*$ExpectedText*") {
-            throw "Unexpected exception: $($_.Exception.Message)"
-        }
-        return
-    }
-    throw "Expected exception containing '$ExpectedText'."
+function Assert-SummaryTrue {
+    param([bool]$Condition, [string]$Message)
+    if (-not $Condition) { throw $Message }
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$modulePath = Join-Path $projectRoot `
-    'Modules\SmartWorkplaceCMDB.SharePoint\SmartWorkplaceCMDB.SharePoint.psd1'
-$orchestratorPath = Join-Path $projectRoot `
-    'Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1'
-$globalTemplatePath = Join-Path $projectRoot `
-    'Config\SmartWorkplaceCMDB.global.local.json.template'
-$tenantTemplatePath = Join-Path $projectRoot `
-    'Config\Tenants\tenant.local.json.template'
-Import-Module $modulePath -Force
+$summaryPath = Join-Path $projectRoot 'Reports\SmartWorkplaceCMDB-CollectionSummary.ps1'
+$tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$tempRoot = Join-Path $tempBase ('SmartWorkplaceCMDB-Summary-Tests-' + [guid]::NewGuid().ToString('N'))
+$latestRoot = Join-Path $tempRoot 'DATA-LAST'
+$cmdbRoot = Join-Path $latestRoot 'CMDB'
+$dataAllRoot = Join-Path $tempRoot 'DATA-ALL'
+$logRoot = Join-Path $tempRoot 'LOG-ALL'
 
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
-    'SmartWorkplaceCMDB-SharePoint-Tests-' +
-    [guid]::NewGuid().ToString('N')
-)
-$dataAll = Join-Path $tempRoot 'DATA-ALL'
-$dataLast = Join-Path $tempRoot 'DATA-LAST'
-$logAll = Join-Path $tempRoot 'LOG-ALL'
+function Write-SummaryFixture {
+    param([int]$DeviceCount, [int]$UserCount, [int]$MailboxCount,
+        [int]$F1Assignments, [int]$F1Capacity,
+        [int]$F3Assignments, [int]$F3Capacity,
+        [int]$E3Assignments, [int]$E3Capacity,
+        [int]$E5Assignments, [int]$E5Capacity,
+        [int]$CopilotAssignments, [int]$CopilotCapacity)
+    New-Item -ItemType Directory -Path $cmdbRoot -Force | Out-Null
+    @(1..$DeviceCount | ForEach-Object {[pscustomobject]@{CmdbDeviceId="device-$_"}}) |
+        Export-Csv (Join-Path $cmdbRoot 'CMDB_Devices.csv') -NoTypeInformation -Encoding UTF8
+    @(1..$UserCount | ForEach-Object {[pscustomobject]@{CmdbUserId="user-$_"}}) |
+        Export-Csv (Join-Path $cmdbRoot 'CMDB_Users.csv') -NoTypeInformation -Encoding UTF8
+    @(1..$MailboxCount | ForEach-Object {[pscustomobject]@{CmdbMailboxId="mailbox-$_"}}) |
+        Export-Csv (Join-Path $cmdbRoot 'CMDB_Mailboxes.csv') -NoTypeInformation -Encoding UTF8
+    @(
+        [pscustomobject]@{CmdbLicenseId='license-f1';SkuPartNumber='M365_F1';EnabledUnits=$F1Capacity},
+        [pscustomobject]@{CmdbLicenseId='license-f3';SkuPartNumber='SPE_F1';EnabledUnits=$F3Capacity},
+        [pscustomobject]@{CmdbLicenseId='license-e3';SkuPartNumber='SPE_E3';EnabledUnits=$E3Capacity},
+        [pscustomobject]@{CmdbLicenseId='license-e5';SkuPartNumber='SPE_E5';EnabledUnits=$E5Capacity},
+        [pscustomobject]@{CmdbLicenseId='license-copilot';SkuPartNumber='Microsoft_365_Copilot';EnabledUnits=$CopilotCapacity},
+        [pscustomobject]@{CmdbLicenseId='license-other';SkuPartNumber='VISIOCLIENT';EnabledUnits=100}
+    ) | Export-Csv (Join-Path $cmdbRoot 'CMDB_Licenses.csv') -NoTypeInformation -Encoding UTF8
+    $relationships = New-Object System.Collections.Generic.List[object]
+    if ($F1Assignments -gt 0) {
+        foreach ($index in 1..$F1Assignments) {
+            $relationships.Add([pscustomobject]@{RelationshipType='AssignedLicense';FromEntityType='User';FromEntityId="user-$index";ToEntityType='License';ToEntityId='license-f1'})
+        }
+    }
+    foreach ($license in @(
+            @{Count=$F3Assignments;Id='license-f3'},
+            @{Count=$E3Assignments;Id='license-e3'},
+            @{Count=$E5Assignments;Id='license-e5'})) {
+        if ($license['Count'] -gt 0) {
+            foreach ($index in 1..$license['Count']) {
+                $relationships.Add([pscustomobject]@{RelationshipType='AssignedLicense';FromEntityType='User';FromEntityId="user-$index";ToEntityType='License';ToEntityId=$license['Id']})
+            }
+        }
+    }
+    if ($CopilotAssignments -gt 0) {
+        foreach ($index in 1..$CopilotAssignments) {
+            $relationships.Add([pscustomobject]@{RelationshipType='AssignedLicense';FromEntityType='User';FromEntityId="user-$index";ToEntityType='License';ToEntityId='license-copilot'})
+        }
+    }
+    $relationships.Add([pscustomobject]@{RelationshipType='PrimaryUser';FromEntityType='User';FromEntityId='user-1';ToEntityType='Device';ToEntityId='device-1'})
+    $relationships | Export-Csv (Join-Path $cmdbRoot 'CMDB_Relationships.csv') -NoTypeInformation -Encoding UTF8
+}
+
+$parameters = @{
+    Tenant='audit';OrganizationKey='contoso';EnvironmentKey='prod';TenantKey='contoso-prod'
+    TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';DataRootPath=$tempRoot
+    DataAllRootPath=$dataAllRoot;LatestOutputRootPath=$latestRoot;LogRootPath=$logRoot
+    NoConfigWrite=$true
+}
 
 try {
-    foreach ($path in @(
-            (Join-Path $dataAll 'Entra\Users\2026\07'),
-            (Join-Path $dataLast 'CMDB'),
-            (Join-Path $logAll 'Orchestration')
-        )) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
-    $history = Join-Path $dataAll `
-        'Entra\Users\2026\07\Entra_Users_20260719.csv'
-    $latest = Join-Path $dataLast 'CMDB\CMDB_Users.csv'
-    $log = Join-Path $logAll `
-        'Orchestration\SmartWorkplaceCMDB-Orchestrator_20260719.csv'
-    foreach ($path in @($history, $latest, $log)) {
-        'TenantKey,Value' | Set-Content -LiteralPath $path -Encoding UTF8
+    Invoke-SummaryTest 'Capture private J-30 and J-7 aggregate baselines' {
+        Write-SummaryFixture 1 1 1 1 10 0 8 1 10 0 12 0 5
+        $first = & $summaryPath @parameters -RunId 'day30' -CaptureBaselineOnly `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddDays(-31))
+        Write-SummaryFixture 2 2 1 1 10 1 8 1 10 1 12 1 5
+        $second = & $summaryPath @parameters -RunId 'day7' -CaptureBaselineOnly `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddDays(-8))
+        Assert-SummaryTrue ($first.Status -eq 'Captured' -and $second.Status -eq 'Captured') `
+            'Historical summary baselines were not captured.'
     }
 
-    Invoke-SmartWorkplaceCMDBSharePointTest `
-        'Preserve DATA-ALL relative structure' {
-        $relative = Get-SmartWorkplaceCMDBSharePointRelativePath `
-            -LocalFilePath $history `
-            -DataAllRootPath $dataAll `
-            -LatestOutputRootPath $dataLast `
-            -LogRootPath $logAll
-        Assert-SmartWorkplaceCMDBSharePointTrue `
-            ($relative -eq
-                'DATA-ALL/Entra/Users/2026/07/Entra_Users_20260719.csv') `
-            'DATA-ALL SharePoint relative path is invalid.'
+    Invoke-SummaryTest 'Render previous, J-7, and J-30 deltas without sending mail' {
+        Write-SummaryFixture 4 3 2 2 10 2 8 3 10 1 12 2 5
+        $result = & $summaryPath @parameters -RunId 'current' -RunStatus 'Completed' `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow) -PreviewOnly
+        Assert-SummaryTrue ($result.Status -eq 'Previewed') 'Preview mode did not complete.'
+        Assert-SummaryTrue ($result.Snapshot.Devices -eq 4 -and $result.Snapshot.Users -eq 3 -and $result.Snapshot.Mailboxes -eq 2) `
+            'Core population counts are incorrect.'
+        Assert-SummaryTrue ($result.Snapshot.M365F1Assigned -eq 2 -and
+            $result.Snapshot.M365F3Assigned -eq 2 -and
+            $result.Snapshot.M365E3Assigned -eq 3 -and
+            $result.Snapshot.M365E5Assigned -eq 1 -and
+            $result.Snapshot.M365CopilotAssigned -eq 2) `
+            'License-family assignments are incorrect.'
+        Assert-SummaryTrue ($result.BodyHtml -match 'Since previous' -and $result.BodyHtml -match 'Since J-7' -and $result.BodyHtml -match 'Since J-30') `
+            'The required comparison columns are missing.'
+        Assert-SummaryTrue ($result.Previous.RunId -match 'day7' -and $result.Day7.RunId -match 'day7' -and $result.Day30.RunId -match 'day30') `
+            'The previous, J-7, or J-30 baseline was selected incorrectly.'
+        Assert-SummaryTrue ($result.BodyHtml -notmatch 'device-1|user-1|mailbox-1') `
+            'The aggregate email exposed an entity identifier.'
     }
 
-    Invoke-SmartWorkplaceCMDBSharePointTest `
-        'Preserve DATA-LAST and LOG-ALL relative structures' {
-        $latestRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
-            $latest $dataAll $dataLast $logAll
-        $logRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
-            $log $dataAll $dataLast $logAll
-        Assert-SmartWorkplaceCMDBSharePointTrue `
-            ($latestRelative -eq 'DATA-LAST/CMDB/CMDB_Users.csv' -and
-                $logRelative -eq
-                'LOG-ALL/Orchestration/SmartWorkplaceCMDB-Orchestrator_20260719.csv') `
-            'Latest or log SharePoint relative path is invalid.'
-    }
-
-    Invoke-SmartWorkplaceCMDBSharePointTest `
-        'Reject files outside CMDB data roots' {
-        $outside = Join-Path $tempRoot 'outside.csv'
-        'Value' | Set-Content -LiteralPath $outside -Encoding UTF8
-        Assert-SmartWorkplaceCMDBSharePointThrow {
-            Get-SmartWorkplaceCMDBSharePointRelativePath `
-                $outside $dataAll $dataLast $logAll | Out-Null
-        } 'outside the configured'
-    }
-
-    Invoke-SmartWorkplaceCMDBSharePointTest `
-        'Keep SharePoint disabled in templates with CMDB target' {
-        $global = Get-Content -Raw -LiteralPath $globalTemplatePath |
-            ConvertFrom-Json
-        $tenant = Get-Content -Raw -LiteralPath $tenantTemplatePath |
-            ConvertFrom-Json
-        Assert-SmartWorkplaceCMDBSharePointTrue `
-            (-not $global.SharePoint.Enabled -and
-                -not $tenant.SharePoint.Enabled -and
-                $global.SharePoint.TargetFolderPath -eq 'SMART-CMDB/DATA' -and
-                $tenant.SharePoint.TargetFolderPath -eq 'SMART-CMDB/DATA') `
-            'SharePoint template safety or target is invalid.'
-    }
-
-    Invoke-SmartWorkplaceCMDBSharePointTest `
-        'Publish only successful unbounded and unscoped live orchestrations' {
-        $content = Get-Content -Raw -LiteralPath $orchestratorPath
-        Assert-SmartWorkplaceCMDBSharePointTrue `
-            ($content.Contains('$mode -eq ''Collect''') -and
-                $content -match '\$MaxItems -eq 0' -and
-                $content -match '\$DisableSharePointUpload' -and
-                $content -match '-not \$activeDirectoryScoped' -and
-                $content -match 'Publish-SmartWorkplaceCMDBSharePointFile') `
-            'Orchestrator SharePoint publication guard is incomplete.'
+    Invoke-SummaryTest 'Use the immediately previous snapshot when the dataset is unchanged' {
+        $result = & $summaryPath @parameters -RunId 'unchanged' -RunStatus 'Completed' `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddMinutes(1)) -PreviewOnly
+        Assert-SummaryTrue ($result.Previous.RunId -eq 'current') `
+            'An unchanged dataset skipped the immediately previous collection.'
+        Assert-SummaryTrue ($result.BodyHtml -match '<td class="number">0</td>') `
+            'An unchanged collection did not render zero deltas.'
     }
 }
 finally {
-    $resolved = [IO.Path]::GetFullPath($tempRoot)
-    $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    if ($resolved.StartsWith(
-            $tempBase,
-            [StringComparison]::OrdinalIgnoreCase
-        ) -and (Test-Path $resolved)) {
-        Remove-Item -LiteralPath $resolved -Recurse -Force
+    if ((Test-Path -LiteralPath $tempRoot) -and
+        $tempRoot.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $tempRoot) -like 'SmartWorkplaceCMDB-Summary-Tests-*') {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }
 }
 
-Write-Information (
-    'SmartWorkplaceCMDB SharePoint tests completed. Version={0}; Passed={1}; Failed={2}' -f
-    $ScriptVersion,
-    $script:Passed,
-    $script:Failed
-) -InformationAction Continue
-if ($script:Failed -gt 0) {
-    exit 1
-}
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.1.0; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBindCPY/sS2GMo
-# ur2ywP9d8GWI2Jni85U+Z0GORE4wKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWZMom9BakPNQP
+# OSwXjiFpD8PPGvs/Fc6zaaHVmqvp0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,31 +275,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGpxhfNN+Pe4n6Ko9tqEEBT8HVO4EyNE7ae7EFJHborTMA0GCSqG
-# SIb3DQEBAQUABIIBgIoUqjmwvUSxX/ocOPaN2fmRUZ2cC4CkMTlm9Yj1q+JwjEsk
-# VJpB5Rab1kS8EbYPxmKtq/XEKV9on8PkFRcWK2J+Comg19NHkd933D/p3SDvCaXL
-# e9ep+oImRt0XECrMyoWuRi1hFjPUv3Rom6ykyz9kduqxNLRezyT6tHs/vAu4BoHA
-# OBTvIhbjaOO/vFE3spUXA5+sTDeOVYntp6qN16CacoT3mJ12Vtu0fvjvlkrSyRba
-# dUJf7EoqBSZm10TwfhqO0glNhNYu6T8mhB5xnXuBW7L+5wgIdNCkRt3FiToxheMz
-# 0zAhV0OwSaABegPk52YZywEZnWfzhSEHy2ZWAWfDqXBVVLU9D2IAPCbkUbcSBy6N
-# uQ9eWCrGc16XDHALFAuePFC27VFpYj0YyiO+XmFF5c4PbztlFVjDvNhDrAkr3dyP
-# P+0sWqhxvYxmRxCFAjKltZBSTBzJAwzEon9uYNuBb3HsIyScXZckd6AGUNGCB2+o
-# KaHbHS5Slbd4dul4saGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID9Q1BAsUpn3pAvbxtSYyBK0QCVdBy7DeS6fg9UNQYEtMA0GCSqG
+# SIb3DQEBAQUABIIBgJvNkZ9+NK6MWibSlPoCAoIfdzKTvjKwtVicr4gjxFg0v6i/
+# 7MPJp8a1yfc2WGVoEyG+BF8UARYCmVErFJzgYqtCou0jvH/UmOyLr98c1QtfHzSa
+# EDnJmVxc7JgbaFYTdMTbVYwQKYOKtb+48qKv6qWpOBmCiLgAwUjQmn1RVgodLSBT
+# PirshqsY6KRHCk60dEtzomNEkLUJYu820P+erQ2JD41XyXmbFXlEYKaWZ2YqaAOl
+# 1aPVGfSx0l40zC4m6JZLsDju/QoY1Wy75TQo7Q8/wtaDPjABYJUPjGaP7MffQmV1
+# xUYabCYRqkb8BqKEfdhoq6MkFM0sAYFpCc2bxfdGKPKV4wll/rq6BwZKjmx8EHro
+# ZZAgi5h4SnGskpv3zwKkjFfe69YM5XyW0PMGmWZyUxFDefSpjbCUpHiQWoMmHUdf
+# cnkYpDiCWMkP6NkCp/i1rlDnLTlYnhF6mjqg7MSsVysVF3Y2OLKcB/Ipq9zLFalq
+# XezcVuDOUd7VlyucQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjZaMC8GCSqGSIb3DQEJBDEiBCDmw/1vWVKEyM3dfglD+vU3HAILjtTRmpkNKWlE
-# dYH9yTANBgkqhkiG9w0BAQEFAASCAgCpc2W4EHplDbxqJrm/puhQ4Oj+Kp6hzsIi
-# ZiOPLXTWKwayUWJ/xxe03W9XXXSbAaoTOV/XTjIXOBuCMIDCWZBZwiNwGixzXWl+
-# 9Z5WGIznpj2ux764xJFYui0NMaCXB7kJRYsmqQ1dru/exNi16tkCK69/irctKBUT
-# c/DRxcsKUt5g4ngwuigJ2eIR/suMBV0aAEv5tD1VOeWzmTQhTyxurClhIRHm4pWh
-# a3AwcS+QL2oJopAncIYun7FJVktac/daXCiydiWexFlY6rBA9FxvAoy7J1GtbLo4
-# aLjhDYcDLDcNyKul1ahtbR5GI+vgw9EahTpSDUy1joJp0ps06BmTmctHwEm/g3Bv
-# Z2AtmfB6MIfqmVGNfP7RhCb7NErd8E3mbWLeoukTPtnoa2tabNQKcmYH0ZG4mFdn
-# lrs/ruCg0r/g+/xPjDiPM8QSL7Xjd0yYxmrhWRz3Z+pbYnGLlcrC3tWFLsaoZzSi
-# yY27gEo12HJcGsETJNP/rR3axJspJNMJKM48P/fDfkPyNk+M6ygl++Lz/sivAZcd
-# v0eOx8Ytvg6y5k6C3gJcgfB7H+MhyoB85k9YJAuvjp+aHOTQ5gs8eecw4Lk2crl3
-# YGDoW+H1SSjclfX6wsxixVKnip2NXKsfmZFQsbOLaHWANlwqnYwmWXJYtwQgTclm
-# hbEvnLjrSQ==
+# MjNaMC8GCSqGSIb3DQEJBDEiBCAqhyupk52itZbUyp2wkiSJ0113OdZP63kM0qAm
+# f+8j5TANBgkqhkiG9w0BAQEFAASCAgA5q6shPdpYlHz+ZD8y1TtUf1Jyi1AqfSyx
+# YhISPkrmfMpU315Dd3lfh6bl6sqsRNBespHVq8RVKpm+DiHQd/fcAuN142ugLtyX
+# AMs0+M2Glh84zZEsvAlhofYYgvk4XqjljRTtBVokRkr5h1TjypbdkpDxqdXdRwow
+# lhmTJbiQv43AawuXM7Zj9YF+zYNkRSzD7tGhEJRUpfpo6IluAjTt5U/oyD/oRgy3
+# Mn/rUUIs+1Xvwwz4S9mWY6NDNnxUmN4qJCmLa2dTjAy5g2rlD5ix+Tk5KD48WWau
+# +pPXUAzZnGT/1Q3CEk0lIl36SOZRGqcaZMxw+Aw37lY2PYNSU3zkmPnF1X8iBwfu
+# jMJCGwu7+R4bU+5Yd/0263I4e7foySzh+KNOZgzbrwqsSXOih9+iFDZFk8a0YP7Z
+# Lk9MPwJQdgGV/t+46E4MATp22us4NG2XP90TBTiNdKjiJPM9nFXBnKf2fErJukm2
+# qxxoU33YLgO6mpPQd5U8+DpMBZf9ZbveaFpMRCkqY1qRMK96Ekuz7E2ovXpDUE2y
+# FOHEBb9s1CoZbSpkMpKD7vEo9zX7rVwwBPDNv7lkAzk8xGJg/RsTl4+4Mr6O9ZKr
+# EtQIIYc+Zt5YHyFp+HEPW4pX7g684Yn7mGCR61hlZQoIcCBOZ/U/2OxGuU+1EPRa
+# yQ32997IRQ==
 # SIG # End signature block
