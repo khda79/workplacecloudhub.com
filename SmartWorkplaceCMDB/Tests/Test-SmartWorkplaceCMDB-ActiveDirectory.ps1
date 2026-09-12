@@ -3,12 +3,12 @@
 Runs offline tests for the SmartWorkplaceCMDB Active Directory collector.
 
 .VERSION
-0.2.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.2.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -28,7 +28,7 @@ function Invoke-SmartWorkplaceCMDBAdTest {
     }
     catch {
         $script:Failed++
-        Write-Error "[FAIL] $Name - $($_.Exception.Message)" -ErrorAction Continue
+        Write-Error "[FAIL] $Name - $($_.Exception.Message)`n$($_.ScriptStackTrace)" -ErrorAction Continue
     }
 }
 
@@ -42,6 +42,32 @@ $rawContractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.raw.tables.
 $curatedContractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.activedirectory.tables.json'
 $coreModulePath = Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
 Import-Module $coreModulePath -Force
+
+$tokens = $null
+$parseErrors = $null
+$collectorAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $collector,
+    [ref]$tokens,
+    [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {
+    throw 'The Active Directory collector cannot be parsed for helper tests.'
+}
+foreach ($functionName in @(
+        'Add-SmartWorkplaceCMDBActiveDirectoryDomainContext',
+        'Get-SmartWorkplaceCMDBActiveDirectoryRangedMember',
+        'Get-SmartWorkplaceCMDBActiveDirectoryLiveData'
+    )) {
+    $functionAst = @($collectorAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq $functionName
+            }, $true) | Select-Object -First 1)
+    if ($functionAst.Count -ne 1) {
+        throw "The Active Directory helper '$functionName' was not found."
+    }
+    Invoke-Expression $functionAst[0].Extent.Text
+}
 
 $tempBase = [IO.Path]::GetTempPath()
 $tempRoot = Join-Path $tempBase (
@@ -60,6 +86,165 @@ $script:Passed = 0
 $script:Failed = 0
 
 try {
+    Invoke-SmartWorkplaceCMDBAdTest 'Page every bulk AD object query explicitly' {
+        $source = Get-Content -LiteralPath $collector -Raw
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $source -match 'ResultPageSize\s*=\s*500' -and
+                $source -match 'Get-ADUser\s+-Filter\s+\*\s+@common' -and
+                $source -match 'Get-ADGroup\s+-Filter\s+\*\s+@common' -and
+                $source -match 'Get-ADComputer\s+-Filter\s+\*\s+@common' -and
+                $source -match "'PrimaryGroupID'" -and
+                $source -notmatch 'Get-ADGroupMember' -and
+                $source -match 'New-SmartWorkplaceCMDBActiveDirectoryLdapConnection' -and
+                $source -match '-Connection\s+\$domainConnection'
+            ) `
+            -Message 'One or more bulk Active Directory queries are not explicitly paged.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Retrieve more than five thousand group members by LDAP ranges' {
+        $largeMembership = @(0..5104 | ForEach-Object {
+                'CN=Member-{0},OU=People,DC=example,DC=invalid' -f $_
+            })
+        $rangeCalls = New-Object System.Collections.Generic.List[string]
+        $reader = {
+            param([string]$AttributeName, [int]$RangeStart, [int]$RangeEnd)
+            $rangeCalls.Add($AttributeName)
+            if ($AttributeName -ne ('member;range={0}-{1}' -f $RangeStart, $RangeEnd)) {
+                throw 'Unexpected requested range name.'
+            }
+            $last = [Math]::Min($RangeEnd, $largeMembership.Count - 1)
+            $name = if ($last -eq ($largeMembership.Count - 1)) {
+                'member;range={0}-*' -f $RangeStart
+            }
+            else {
+                'member;range={0}-{1}' -f $RangeStart, $last
+            }
+            [pscustomobject]@{
+                Name = $name
+                Values = @($largeMembership[$RangeStart..$last])
+            }
+        }.GetNewClosure()
+        $members = @(Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                -Server 'dc.example.invalid' `
+                -GroupDistinguishedName 'CN=Large,DC=example,DC=invalid' `
+                -RangeReader $reader)
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $members.Count -eq 5105 -and
+                $rangeCalls.Count -eq 6 -and
+                $members[0] -eq $largeMembership[0] -and
+                $members[-1] -eq $largeMembership[-1]
+            ) `
+            -Message 'LDAP range retrieval did not return the complete large group.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Reject a repeated LDAP range without looping' {
+        $reader = {
+            param([string]$AttributeName, [int]$RangeStart, [int]$RangeEnd)
+            [pscustomobject]@{
+                Name = 'member;range=0-999'
+                Values = @('CN=One,DC=example,DC=invalid')
+            }
+        }
+        $rejected = $false
+        try {
+            Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                -Server 'dc.example.invalid' `
+                -GroupDistinguishedName 'CN=Broken,DC=example,DC=invalid' `
+                -RangeReader $reader | Out-Null
+        }
+        catch {
+            $rejected = $_.Exception.Message -match 'while .* was requested|made no progress'
+        }
+        Assert-SmartWorkplaceCMDBAdTrue $rejected `
+            'A repeated LDAP range was not rejected.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Accept an empty group as a complete ranged result' {
+        $reader = {
+            param([string]$AttributeName, [int]$RangeStart, [int]$RangeEnd)
+            [pscustomobject]@{ Name = ''; Values = @() }
+        }
+        $members = @(Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                -Server 'dc.example.invalid' `
+                -GroupDistinguishedName 'CN=Empty,DC=example,DC=invalid' `
+                -RangeReader $reader)
+        Assert-SmartWorkplaceCMDBAdTrue ($members.Count -eq 0) `
+            'An empty LDAP group did not produce an empty result.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Page a large domain and preserve primary group semantics' {
+        $queryPageSizes = New-Object System.Collections.Generic.List[int]
+        $counters = [pscustomobject]@{ Connections = 0; Ranges = 0 }
+        $fakeUsers = @(0..5104 | ForEach-Object {
+                [pscustomobject]@{
+                    ObjectGUID = [guid]('00000000-0000-0000-0001-{0:D12}' -f $_)
+                    ObjectSID = 'S-1-5-21-1-2-3-{0}' -f (1000 + $_)
+                    DistinguishedName = 'CN=Member-{0},OU=People,DC=example,DC=invalid' -f $_
+                    PrimaryGroupID = 513
+                }
+            })
+        $fakeGroup = [pscustomobject]@{
+            ObjectGUID = [guid]'00000000-0000-0000-0002-000000000513'
+            ObjectSID = 'S-1-5-21-1-2-3-513'
+            DistinguishedName = 'CN=Domain Users,CN=Users,DC=example,DC=invalid'
+        }
+        function Get-ADUser {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            $queryPageSizes.Add([int]$ResultPageSize)
+            return $fakeUsers
+        }
+        function Get-ADGroup {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            $queryPageSizes.Add([int]$ResultPageSize)
+            return @($fakeGroup)
+        }
+        function Get-ADComputer {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            $queryPageSizes.Add([int]$ResultPageSize)
+            return @()
+        }
+        function New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
+            param([string]$Server)
+            $counters.Connections++
+            return [System.IO.MemoryStream]::new()
+        }
+        function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
+            param([string]$Server, [string]$GroupDistinguishedName,
+                [object]$Connection)
+            $counters.Ranges++
+            return @($fakeUsers.DistinguishedName)
+        }
+        function Get-ADObject { throw 'The complete forest lookup should resolve every test member.' }
+
+        $readiness = [pscustomobject]@{
+            Domains = @([pscustomobject]@{
+                    Domain = [pscustomobject]@{
+                        DNSRoot = 'example.invalid'
+                        NetBIOSName = 'EXAMPLE'
+                    }
+                    Server = 'dc.example.invalid'
+                })
+        }
+        $result = Get-SmartWorkplaceCMDBActiveDirectoryLiveData `
+            -Readiness $readiness -CollectMemberships $true -Limit 0
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $result.users.Count -eq 5105 -and
+                $result.groups.Count -eq 1 -and
+                $result.groupMemberships.Count -eq 5105 -and
+                $queryPageSizes.Count -eq 3 -and
+                @($queryPageSizes | Where-Object { $_ -ne 500 }).Count -eq 0 -and
+                $counters.Connections -eq 1 -and
+                $counters.Ranges -eq 1
+            ) `
+            -Message 'Large-domain paging, connection reuse, or primary-group deduplication failed.'
+    }
+
     Invoke-SmartWorkplaceCMDBAdTest 'Validate fixture mode without AD connectivity' {
         $result = & $collector @identity `
             -DataRootPath $runtimeRoot `
@@ -208,8 +393,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuKDuuoyzYWfMi
-# cgkDFFhE8KwNp9m0pUlZMve1lqaiNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhN95fS9QpNCZM
+# 43cRdsm94WjfaCxBMwTkS/I+0cIVeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -342,31 +527,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBOVNFQRXspxkoNqpxnuLY9PF98MqhHBeIlTnfjC6KHZMA0GCSqG
-# SIb3DQEBAQUABIIBgCDdEYNjnkQdF/vkQ8ppYSi3WrpHzmc080FZicq0BF8sx1Cb
-# hJOhwVsil1IvY1SarAoCFuiBOLthWwm4Ck1w4vXTzR6h6UAokem8bMo4KkAUL07h
-# xcpQVxPxsCxxEo4Vlsf5YIHKJzE+RXPOfYPPUfzHeAXYV1yg2yQChCwYKiYWX/kB
-# mEuntPGQBKzDVJ8HsCW3zeA1CnmFf3GMEdCsZ+VVcP6AE9k6jgI0xWFUp2S0IhIK
-# yZwj2mSN5djlC1Og7byFAT3NhXBsdwYqHQylr0mHXIdE4D6+xHuSHPk0Atm5HLxx
-# K1StIXhV7rlxNmVMJN+YzshEgsT/cThpUwIkhbO/PoBzUz8C1RJFTDeXssZBydu5
-# tcrb5iEodFOKhEBCa+oIuC7uOfN1xfENm1jc9n8CXvBWnBqNhiF5wbW9S0dS8mKg
-# YaDzap0oBzy4qjlMLO9ffE+c7PLvHZYpIRWK1MWQ1k9+eLVJtdMC4aOFUKi/NMaW
-# gvlrLg2lBIrNlc+v0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPjGBWa3OScSsQNz/3/wggRMoO2PieO4oFhMQ0F6KjsFMA0GCSqG
+# SIb3DQEBAQUABIIBgKan8vApfGjQP4VSZ2Xphk0Vzwj4O7fjCqKtz76QCIBeXTwu
+# v98lYM5/c1nWhLHKcO2FVjsaVE1YiSILjUzSRyD0NPZz4SLHQ9RZVi5phrhmOpZQ
+# sjDPne/Qo3qWrMGsCIGdFFmhFV7O4/Y1XT7kdiCfQEiPhE6biEMGm8oFPZSnOTn2
+# OnPc/svDd0Nd6LvydnlN7y0xA98qtUBmmEJRfSTTmJQjYHfz7a1Wd9kP9HRDmoaY
+# UI76Tx7KF2SdOXKfcT1Kd7UZ5zKTtUtaRk9fqH7gXvv7JgK2GXBSwWLWj0qYNPGb
+# x7sFrj+qkERRN8kO5842ULrMSpw+QKix5bYUpXuLPp43XsVJzamZSJbrc0gQTGtv
+# oPZSTbldBysUOwmrtubCF5Pf1pV0rW9towL9/xcsokrCcWbfBjVhP8NByUC1LUa8
+# q5g7MDZOtNU3KzGBaT+vMEdiVdRzZi4coPnH/J64S+ObMOlVtXmbR1q2uZTFcAhY
+# Z+JcdW56p12utQ7zx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MThaMC8GCSqGSIb3DQEJBDEiBCA+miAGhrKsAA9PiaPjKCnBId42AFubcmSBQ6vl
-# EUybXzANBgkqhkiG9w0BAQEFAASCAgADSuHuVOjCbNSXHCAxsN0bqvsuTyK+y1cr
-# Sn9ob9C3QsYhnbYdQFUU9KWGMiVLi4sBTgmYE4fLVZkDJmXSQNd2r5IMrZRNQ1/0
-# pwrXwJDwi5Hm1moVlb9CRMzpFOAE8oZC4xAODzk5cTLHEkNu1XfEc0qsaxAzeDcv
-# BJRhl8xlkK+cpZBgXMEdKGulTFfAAS82+VRaAouW+O45rLFDw/yKDbEq1uv2Y/5b
-# XRWjy7xKUaInsWGNC0YStEKrzg1wc8dwYPEvIFiDoDMWjcnWYj8AHPJdX+cI3mOg
-# oLLlWKrQMZ9QPD3WYx7CR0fkmjZ2I6/P4Q8u1/BsgtMPYLae6Z0NZ4Wf+sxWbA2o
-# 5NJWeOAHlTJAUE0a0SC9h1/aHhGN1QWZ0VSIJbSd+2zGWGNXIbUEmsuooq5uDOeB
-# uPGb+X5FvmPAiy0jsKoKFaHKZVgvslYgWfqODzQtBftjtwmBC57Vpnmc5tu+l0bP
-# CRD5BO9xJSIwwEwKg9Svw7i86z9XUQ1UDFs2OY+0ppqY0TRKIw8ZXwtRTrskRcEx
-# vhuh7g5Rot96tLM2JIv9Rbe+dxHdh7DwStsAD9GGoY4EaBiHkSM4/LxdGb750px5
-# cNVVlIKrj6JGyXRsCc+nSc7d/yBB/Wd1CXu4/gkOwD7S2k+aRxDNpY8iqRQ9+mf1
-# YYrt/5ImXA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMDM5
+# MTJaMC8GCSqGSIb3DQEJBDEiBCB6am9sKd6nQr+GJ9GSqOGaFHqNBdv/H0+YsaLR
+# Ww/ISDANBgkqhkiG9w0BAQEFAASCAgCwDc1KK4FV5Hr93aivYQOLDQnHB9mniXT+
+# 85y7xaeI/5fgsQidlkE1KZx/+F5Z8cfyXAeG52wnauHr5IfLaMmzH5eyyD4GSgaA
+# al7eY4yKemWZjdAwl7Z5rJ+GjWjmWXit3vO4WOZTYj6LAKxOpvLe94sTCKDH4Z9z
+# lY7RUZIjLRORgHND5eS5HoJpINXdKzH294d4hgOnH9Zk6/yBzO2beMT+AlYPIj99
+# 3voNogrcgzeJGspHmmixXexXuQwiNd9qGLTdXd1lE7pT0TXj1+xdQkiz+geiBJVe
+# wTcibztZFa620qzGFr3fhirZkJArK31I9Y0n/5eSzTjYEEFUZPbWSc5Oap+EadHk
+# QcOdNYMYxnE0nJ6pTahJRDS72CD3AY8jODDhcfdshiQZPh68nsnuKO2Bm2JhGtpn
+# hAnmvPd01cwkN4SqQCvZlOOgqcZqxTQeBRz8gE0miMDclp5bKe0VxwzbEozGE3JN
+# pC0zlGkADRKXWPj3ejMOwYcaB6alCPgPXpquRjhGktMdPq3t7kWC96l7QUwlVnAf
+# SCsKTe0eiZpPlAm7eBX8gJrFGH9XpcUT+v1Kx4mnThVqGhJGbeOXsBriHs8wrOSP
+# iU/vL2/gJEBXUh+hZUDPs6jlX+IA8rhYuXy27cAzJxVlFBm6wDkWpXEURZq7kYwj
+# GCKB1gpBzA==
 # SIG # End signature block
