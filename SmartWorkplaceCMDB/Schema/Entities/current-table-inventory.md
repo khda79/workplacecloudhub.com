@@ -6,7 +6,7 @@ the V1 additions that affect consumers.
 
 ## Curated and Power BI contracts
 
-`SmartWorkplaceCMDB.tables.json` contract `0.7.0` defines the core curated and
+`SmartWorkplaceCMDB.tables.json` contract `0.8.0` defines the core curated and
 Power BI files:
 
 - `CMDB_Users.csv`: one Entra-derived user CI per `CmdbUserId`; includes
@@ -29,6 +29,9 @@ Power BI files:
 - `DimVerifiedDomain` retains only Graph-verified tenant domains.
   `FactHybridIdentityCoverage` exposes aggregate AD/Entra match, gap and
   duplicate-key counts without publishing user or device identifiers.
+- `FactAutopilotDevice`, `DimDetectedApplication`,
+  `DimIntuneConfigurationPolicy`, and `DimWindowsUpdatePolicy` keep Intune
+  enrollment, application and policy grains independent from managed devices.
 
 Every tenant-scoped table begins with `TenantKey`, `OrganizationKey`,
 `EnvironmentKey`, `TenantId`. `SourceID` is never a global key; source evidence
@@ -36,11 +39,13 @@ uses `SourceSystem + SourceID`.
 
 ## Raw contracts
 
-`SmartWorkplaceCMDB.raw.tables.json` contract `0.15.0` defines AD domains,
+`SmartWorkplaceCMDB.raw.tables.json` contract `0.16.0` defines AD domains,
 users, groups, computers, organizational units and direct memberships; Entra users, groups and
 devices; Intune managed devices; Microsoft 365 subscribed SKUs and assignment
 paths, the Microsoft 365 service-plan catalog, verified Entra domains, and
-Exchange Online mailboxes.
+Exchange Online mailboxes. It also defines independent Intune source snapshots
+for Autopilot devices, detected applications, configuration policies and
+Windows feature/quality update policies.
 
 The current contract adds `UsageLocation` and three observed sign-in timestamps
 to Entra user observations, and `IsEncrypted` to Intune
