@@ -45,6 +45,14 @@ Microsoft 365 license collection writes a separate service-plan catalog and a
 compact effective user/service-plan fact. Missing activity or plan evidence
 remains explicit; it is never converted into zero usage or compliance.
 
+Intune operational inventory requires the read-only application permissions
+`DeviceManagementServiceConfig.Read.All`, `DeviceManagementApps.Read.All`, and
+`DeviceManagementConfiguration.Read.All`. Autopilot devices, detected
+applications, configuration policies and Windows update policies are published
+as independent source snapshots. Configuration and update policy endpoints use
+Microsoft Graph beta and therefore require tenant qualification before
+production scheduling.
+
 Every source stages and validates its CSV set before promotion. A complete live
 `Full` run can then send the aggregate collection summary configured under the
 tenant-local `Notifications` object. Validate `From`, `To`, the selected Graph

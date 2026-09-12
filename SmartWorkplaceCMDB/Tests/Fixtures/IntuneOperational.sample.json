@@ -1,0 +1,57 @@
+{
+  "autopilotDevices": [
+    {
+      "id": "auto-001",
+      "displayName": "EXAMPLE-WIN-001",
+      "serialNumber": "SYNTHETIC-001",
+      "manufacturer": "Example Manufacturer",
+      "model": "Example Model",
+      "groupTag": "Corporate",
+      "purchaseOrderIdentifier": "PO-SYNTHETIC",
+      "enrollmentState": "enrolled",
+      "lastContactedDateTime": "2026-09-10T08:00:00Z",
+      "userPrincipalName": "alex.taylor@example.invalid",
+      "azureActiveDirectoryDeviceId": "66666666-6666-6666-6666-666666666666",
+      "managedDeviceId": "99999999-9999-9999-9999-999999999999"
+    },
+    {
+      "id": "auto-002",
+      "displayName": "EXAMPLE-WIN-002",
+      "serialNumber": "SYNTHETIC-002",
+      "manufacturer": "Example Manufacturer",
+      "model": "Example Model 2",
+      "groupTag": "Pilot",
+      "purchaseOrderIdentifier": null,
+      "enrollmentState": "notContacted",
+      "lastContactedDateTime": null,
+      "userPrincipalName": null,
+      "azureActiveDirectoryDeviceId": null,
+      "managedDeviceId": null
+    }
+  ],
+  "detectedApps": [
+    {"id":"app-001","displayName":"Example Browser","version":"1.0","publisher":"Example Corp","deviceCount":12,"platform":"windows"},
+    {"id":"app-002","displayName":"Example Agent","version":"2.5","publisher":"Example Corp","deviceCount":4,"platform":"windows"}
+  ],
+  "configurationPolicies": [
+    {
+      "id":"policy-001","name":"Windows Baseline","description":"Synthetic policy",
+      "platforms":"windows10","technologies":"mdm","createdDateTime":"2026-01-01T08:00:00Z",
+      "lastModifiedDateTime":"2026-09-01T09:00:00Z",
+      "templateReference":{"templateId":"template-001","templateFamily":"endpointSecurityAntivirus"}
+    }
+  ],
+  "featureUpdatePolicies": [
+    {
+      "id":"feature-001","displayName":"Windows 11 24H2","featureUpdateVersion":"Windows 11, version 24H2",
+      "installLatestWindows10OnWindows11IneligibleDevice":false,"createdDateTime":"2026-01-15T08:00:00Z",
+      "lastModifiedDateTime":"2026-08-20T08:00:00Z"
+    }
+  ],
+  "qualityUpdatePolicies": [
+    {
+      "id":"quality-001","displayName":"Expedite September quality update","expeditedUpdateReleaseDateTime":"2026-09-08T17:00:00Z",
+      "daysUntilForcedReboot":2,"createdDateTime":"2026-09-08T17:00:00Z","lastModifiedDateTime":"2026-09-08T17:00:00Z"
+    }
+  ]
+}
