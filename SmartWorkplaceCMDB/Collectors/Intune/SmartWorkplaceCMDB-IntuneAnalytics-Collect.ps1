@@ -8,7 +8,7 @@ assignments, baselines, or remediations. Creating the temporary export-job
 resource currently requires DeviceManagementManagedDevices.ReadWrite.All.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding(DefaultParameterSetName = 'Graph')]
 param(
@@ -31,7 +31,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -58,6 +58,21 @@ function Get-CleanText {
     param([AllowNull()]$Value)
     if ($null -eq $Value) { return '' }
     return ([string]$Value -replace "`r`n|`n|`r", ' ').Trim()
+}
+
+function Get-PreferredText {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows, [Parameter(Mandatory)][string]$Field)
+    $values = @($Rows | ForEach-Object { [string]$_.$Field } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($values.Count -eq 0) { return '' }
+    $ranked = @($values | Group-Object { $_.ToLowerInvariant() } | Sort-Object @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Ascending = $true })
+    return [string]$ranked[0].Group[0]
+}
+
+function Get-MaxScoreText {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows, [Parameter(Mandatory)][string]$Field)
+    $scores = @($Rows | ForEach-Object { [string]$_.$Field } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [double]::Parse($_, [Globalization.CultureInfo]::InvariantCulture) })
+    if ($scores.Count -eq 0) { return '' }
+    return (@($scores | Measure-Object -Maximum)[0].Maximum).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture)
 }
 
 function Get-DateText {
@@ -265,6 +280,34 @@ try {
             SourceCollectedDateTime = $collected
         }
     })
+    $analyticsGroups = @($analyticsRows | Group-Object DeviceId)
+    $duplicateAnalyticsGroups = @($analyticsGroups | Where-Object Count -gt 1)
+    if ($duplicateAnalyticsGroups.Count -gt 0) {
+        $conflictingAnalyticsGroupCount = 0
+        $collapsedAnalyticsRows = New-Object System.Collections.Generic.List[object]
+        foreach ($group in @($analyticsGroups | Sort-Object Name)) {
+            $hasConflict = $false
+            foreach ($field in @('DeviceName', 'Manufacturer', 'Model', 'EndpointAnalyticsScore', 'StartupPerformanceScore', 'AppReliabilityScore', 'WorkFromAnywhereScore')) {
+                $distinct = @($group.Group | ForEach-Object { ([string]$_.$field).ToLowerInvariant() } | Sort-Object -Unique)
+                if ($distinct.Count -gt 1) { $hasConflict = $true }
+            }
+            if ($hasConflict) { $conflictingAnalyticsGroupCount++ }
+            $collapsedAnalyticsRows.Add([pscustomobject][ordered]@{
+                    SourceSystem = 'MicrosoftIntuneReports'
+                    DeviceId = [string]$group.Name
+                    DeviceName = Get-PreferredText -Rows @($group.Group) -Field 'DeviceName'
+                    Manufacturer = Get-PreferredText -Rows @($group.Group) -Field 'Manufacturer'
+                    Model = Get-PreferredText -Rows @($group.Group) -Field 'Model'
+                    EndpointAnalyticsScore = Get-MaxScoreText -Rows @($group.Group) -Field 'EndpointAnalyticsScore'
+                    StartupPerformanceScore = Get-MaxScoreText -Rows @($group.Group) -Field 'StartupPerformanceScore'
+                    AppReliabilityScore = Get-MaxScoreText -Rows @($group.Group) -Field 'AppReliabilityScore'
+                    WorkFromAnywhereScore = Get-MaxScoreText -Rows @($group.Group) -Field 'WorkFromAnywhereScore'
+                    SourceCollectedDateTime = $collected
+                })
+        }
+        Write-Warning ("Intune returned {0} duplicate Endpoint Analytics device key(s), including {1} with conflicting attributes. Canonical text values and maximum available scores were retained." -f $duplicateAnalyticsGroups.Count, $conflictingAnalyticsGroupCount)
+        $analyticsRows = @($collapsedAnalyticsRows.ToArray())
+    }
     $rowsByTable = @{
         'Intune_WindowsUpdateAlerts.csv' = $alertRows
         'Intune_EndpointAnalyticsDeviceScores.csv' = $analyticsRows
@@ -312,8 +355,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/if1Zy/kUgR4W
-# BOwhvpF5ISNh0rthMgS9L1skzZI99KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXAXcw8gFXeJGM
+# fzXVyFcBnZndKiq8H4WpqEqovClBRaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -446,31 +489,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILILJ6Rd2WEp/Ar0aoMrPSJZMdHZyhM6PemrPNNoyniGMA0GCSqG
-# SIb3DQEBAQUABIIBgGqvgP3zu6geRWNBBNipP1+BmMq3yyyW/TxWpZiif+UTVhtX
-# 9JzjXcmG1N28Oa3z2IpT9mDiiyP1ZRVsXt3Eh6nE40p4MIz2UD6G0se8lm5YoBlB
-# CJMEMVzYMtZowT5Ud7bXOKT5Jwf6Xt7/bCcN7iS+xg5geZ/3mJ4beWSOO+fBZ74f
-# FzK5KRGOlG3UDD07QqDJEQH4CiSAIBTdjHjpzuZLcDbMDfyaXacdnhwBfpKr62pc
-# RrlOYq9FHGiLek9xhqPK/xFpcr1kE9I+oWsXfBXf4LbHKPdBtpAuYdML0Q8zfT9A
-# DJEchSejFC26hYE/a5HoVTdsO2r+mYGX3J6noisc4MDCk/Y8LknDerXQwyK6G9Lf
-# AL1dTwMpOI/2InQz/rcEKxcIOU9I0QdekMlDKzml/qPmv+HVj2fFUHevH8kvzaNi
-# pf4s1HR0bKI2KLd3rJgB4oW9Wo727fYqOvvHkTfe9QYCG/77AgteIh7ChwSMUgyq
-# oK0b3GkHAo6/LdmbrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILtVBUqee69chkRfI2I+JQ8EFAESnYGwY+iQARRAWizUMA0GCSqG
+# SIb3DQEBAQUABIIBgK+nbQqsZ211aOKnk5qdxX2v6KV7qdOh538gE1MjmO8Rh5qL
+# +DreT9DOn4lY+2fqMYw4xOcK5L3Du1O3JZlwVDJOStyyUGRAPBetQ3dXfEjRPGej
+# 1VV4twcozPt3fyWWG7BeAX0M6EmKCHCo7rXuDHViruKyeGkhw9P4PkwtCs3aHDcb
+# htGCN+u4qRyOuyb0BuqpR5jTXgV06HDI2EV1uLDeH2bhb8M2TTeg7ROw1VWCvMA2
+# wCz5sT/EyQH+9J3iOwG3LKnmH3nfxdbbOvBDC2IEK5Ly/hqtBeNjbxW+LaGBzdKo
+# 7HtDjIVTTivd0wfMojJsLD5rQXS+NHynHASPV1I8yJT47IajzB5tPfRxSFcGkl0N
+# m7SRQhNQCnDKAgcOHnhPFYsVe+qiAjWnWQDBSIRLIHq/FEmQ+jxLc383fIC01shf
+# D+h/D1nalh/xNGL5m68JIGQRNIMBMKERcIJHhHwz096yaXCAUxEyNi6mVgWCYIiT
+# XQ8Ulc6pGUyU4SukeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTIy
-# MzRaMC8GCSqGSIb3DQEJBDEiBCDJbBRK9hEA8iJRLqNFOgTRs7rCeLZymWghRIVn
-# IpsMgTANBgkqhkiG9w0BAQEFAASCAgA79wyNJXKd7/4AZ1utmn+1/5zOhz2HRsQI
-# UKnAMSL15r3gl7Q1knJNyKRmWqZXGbIltqTLhKK6+8h/6BlqB0ZzfQW6TxSMHowo
-# 0t5UFGYI2uxFo+cW3B22EWgtAfeXhxBO0kZNigdPL4MokCPAHA3BEJdl8AxrCuhh
-# 7gW0iBXCl58YgGBq5DehpUAarWTOcPY/0JXIAK4qIGqCIACghku9bFabb3f/GpbA
-# 06Nek+kYcJjYW9ElObbpqBYtg0KOk0I5iyh2VPTy+r+IhCiuDYYuRl9H4Oo+OBGb
-# /Eyi9jUFcMliP3mppt7uFb3oCYasi3VXT/Rr/+c2+pQBagskcOUT3WosjO9oDK0i
-# Ad0BVI1bU4PDEOH+oX0i7nRm/W6z46oKZEvTh9PFigvmJVM47+EnqdnXBZSeHyhv
-# ZzTLJJlawopuc2oFw2LAQTXPgXCKfANSFD2BMGPtbNkH9dZh0x34h3VUOquy+Msm
-# AdYZ9Y3VOZO6GEmrFssGDkC9IogAHPQ4U2YpyKAw2JeCokUJedr37E5560YzwqPX
-# kZsMNnwRUHqs7b7/sYEzFsXIV7Tg3BzWMF+yoqo+PxTjQ+9elYq72znQ74GzICJT
-# QDHXkf9r1JQBCSZpt01gmg6RXlQg6+jm9Pl4W4n/ZNFBKGpvwiw9498PxfnlAVRq
-# PbF3CiQJGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTMw
+# MDVaMC8GCSqGSIb3DQEJBDEiBCA4Rc2SfaOFY0ohd67RdbbTrOFJk45yfyt7Z4DD
+# eIZnBDANBgkqhkiG9w0BAQEFAASCAgCeyBOaKccCUsmViOzt2GPKTUZPtVc/mEq0
+# Go0/OBTFKJqQrlZyuPEfNtojUciksfqo0h+x6ONL4m+VR8tW2Fo/dMIJZRFhnSgW
+# hhFlGr7OVG6FUgq/NgoLe7vx/Lsvy7Lj5ijiy6hM7EvcWfRjR0R1iHOKRVg/txg/
+# cHQizMr/MsRf5GR8lsppo8H/q/jCiJ9l3CqQQwlZLbzoMdh1VpiWga7m/67gaos8
+# wZCWZ/C/aOLWm9u7xUqqn2r9wsa83RpcX8b6c72keQf0E5EYJBuIxarrM+uTSQbU
+# 7moIXbhHVwSVnAjVWtNdsk3OyIIBkDC+leHmxEQdsff3KdMOlctjWUe/j2Z7urxS
+# OUA7x+4DbpkZlDeBqZkR5DHUM0oQJiP02sDAijTz+qA1sNiBOqNxoxnSOTOEovgO
+# g/bdU3Vwnnc3+HK6pbEDHw5jrdMPb/APWaTrvVeaEiA4xNuc0JWQtc7QldjZpksM
+# u5zHR9k76nA63A32ep/xS8gYxMyVuPZJiVwAwE9mBlCGPsF+KWlVmWqYeUEOA5Mg
+# JN+U7PvlklcQj0QqX4vX+7KbjbbsVrDUsfOKAXp2yIXHA5OdWcRqaMCbg/gA8zW3
+# 0eJoXXdp70XFl7mHuAkWLHcVu8ZW5SpDm7ZnauGF+AjempffRJxIuYNZLJ0HoDe4
+# dOw6vQ2wdw==
 # SIG # End signature block
