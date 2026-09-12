@@ -1,7 +1,7 @@
 # Current CSV contracts — V1
 
 This inventory is generated from the supported schema JSON contracts as of
-2026-09-11. JSON is authoritative; this document highlights entity grain and
+2026-09-12. JSON is authoritative; this document highlights entity grain and
 the V1 additions that affect consumers.
 
 ## Curated and Power BI contracts
@@ -30,14 +30,17 @@ uses `SourceSystem + SourceID`.
 
 ## Raw contracts
 
-`SmartWorkplaceCMDB.raw.tables.json` contract `0.11.0` defines AD domains,
-users, groups, computers and direct memberships; Entra users, groups and
+`SmartWorkplaceCMDB.raw.tables.json` contract `0.12.0` defines AD domains,
+users, groups, computers, organizational units and direct memberships; Entra users, groups and
 devices; Intune managed devices; Microsoft 365 subscribed SKUs and assignment
 paths; and Exchange Online mailboxes.
 
 V1 adds `UsageLocation` to Entra user observations and `IsEncrypted` to Intune
-managed-device observations. Existing source identifiers and source collection
-timestamps remain unchanged.
+managed-device observations. Active Directory contract `0.12.0` also adds
+country/company/office and account metadata for users, canonical/logon/password
+metadata for computers, governance metadata for groups, and one OU observation
+per object GUID. Existing source identifiers and source collection timestamps
+remain unchanged.
 
 ## Additive V1 contracts
 
