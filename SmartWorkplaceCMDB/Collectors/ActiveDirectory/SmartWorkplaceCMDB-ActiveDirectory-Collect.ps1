@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.1
+1.0.2
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -34,6 +34,9 @@ param(
     [string]$TenantConfigPath,
     [string]$Server,
     [string]$SearchBase,
+    [string[]]$TargetDomains = @(),
+    [int]$DomainRetryCount = -1,
+    [int[]]$DomainRetryDelaysSeconds = @(),
     [switch]$IncludeGroupMemberships,
     [Parameter(ParameterSetName = 'Fixture', Mandatory)]
     [string]$InputJsonPath,
@@ -43,7 +46,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -235,7 +238,8 @@ function Get-SmartWorkplaceCMDBActiveDirectoryReadiness {
     [CmdletBinding()]
     param(
         [string]$PreferredServer,
-        [bool]$ForestWide
+        [bool]$ForestWide,
+        [string[]]$TargetDomains = @()
     )
 
     $module = Get-Module -ListAvailable -Name ActiveDirectory |
@@ -252,14 +256,37 @@ function Get-SmartWorkplaceCMDBActiveDirectoryReadiness {
     }
     $bootstrapDomain = Get-ADDomain @bootstrapParameters -ErrorAction Stop
     $forest = Get-ADForest @bootstrapParameters -ErrorAction Stop
-    $domainNames = if ($ForestWide) {
+    $forestDomainNames = if ($ForestWide) {
         @($forest.Domains | Sort-Object -Unique)
     }
     else {
         @([string]$bootstrapDomain.DNSRoot)
     }
-    if ($domainNames.Count -eq 0) {
+    if ($forestDomainNames.Count -eq 0) {
         throw 'Active Directory forest discovery returned no domains.'
+    }
+
+    $normalizedTargets = @($TargetDomains | ForEach-Object {
+            ([string]$_).Trim().ToLowerInvariant()
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique)
+    if ($normalizedTargets.Count -gt 0 -and -not $ForestWide) {
+        throw 'ActiveDirectory.TargetDomains requires ForestWide=true.'
+    }
+    $knownDomains = @($forestDomainNames | ForEach-Object {
+            ([string]$_).Trim().ToLowerInvariant()
+        })
+    $unknownTargets = @($normalizedTargets | Where-Object { $_ -notin $knownDomains })
+    if ($unknownTargets.Count -gt 0) {
+        throw "ActiveDirectory.TargetDomains contains domains outside the discovered forest: $($unknownTargets -join ', ')."
+    }
+    $domainNames = if ($normalizedTargets.Count -gt 0) {
+        @($forestDomainNames | Where-Object {
+                ([string]$_).Trim().ToLowerInvariant() -in $normalizedTargets
+            })
+    }
+    else {
+        @($forestDomainNames)
     }
 
     $domainContexts = New-Object System.Collections.Generic.List[object]
@@ -444,13 +471,234 @@ function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
     }
 }
 
+function Test-SmartWorkplaceCMDBTransientActiveDirectoryError {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) {
+        $typeName = $exception.GetType().FullName
+        $message = [string]$exception.Message
+        if ($typeName -eq 'System.DirectoryServices.Protocols.LdapException') {
+            if ($message -imatch 'access is denied|insufficient access|unauthorized|authentication|invalid credentials') {
+                return $false
+            }
+            $ldapErrorCode = [int]$exception.ErrorCode
+            if ($ldapErrorCode -in @(51, 52, 81, 85, 91) -or
+                $message -imatch (
+                    'server.*(unavailable|down|not operational)|' +
+                    'LDAP.*unavailable|operation.*timed out|timeout|' +
+                    'invalid enumeration context|server busy|connection.*(closed|reset)'
+                )) {
+                return $true
+            }
+            return $false
+        }
+        if ($typeName -in @(
+                'Microsoft.ActiveDirectory.Management.ADServerDownException',
+                'System.TimeoutException',
+                'System.Net.Sockets.SocketException',
+                'System.IO.IOException'
+            ) -or $message -imatch (
+                'server.*(unavailable|down|not operational)|' +
+                'LDAP.*unavailable|operation.*timed out|timeout|' +
+                'invalid enumeration context|server busy|connection.*(closed|reset)'
+            )) {
+            if ($message -imatch 'access is denied|insufficient access|unauthorized|authentication') {
+                return $false
+            }
+            return $true
+        }
+        if ($exception -is [System.UnauthorizedAccessException] -or
+            $message -imatch 'access is denied|insufficient access|unauthorized|authentication') {
+            return $false
+        }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
+
+function Get-SmartWorkplaceCMDBActiveDirectoryRetryServer {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DomainDnsRoot,
+        [Parameter(Mandatory)][string]$CurrentServer
+    )
+
+    $fallback = ''
+    for ($discoveryAttempt = 0; $discoveryAttempt -lt 3; $discoveryAttempt++) {
+        $controller = Get-ADDomainController -Discover `
+            -DomainName $DomainDnsRoot `
+            -Service ADWS `
+            -ForceDiscover `
+            -ErrorAction Stop
+        $candidate = [string]$controller.HostName
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $fallback = $candidate
+            if ($candidate -ine $CurrentServer) {
+                return $candidate
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($fallback)) {
+        throw "No replacement Active Directory Web Services domain controller was discovered for '$DomainDnsRoot'."
+    }
+    Write-Warning (
+        "ADWS rediscovery for '$DomainDnsRoot' returned the current server '$CurrentServer'; the retry will revalidate it."
+    )
+    return $fallback
+}
+
+function Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DomainContext,
+        [Parameter(Mandatory)][string]$OperationName,
+        [Parameter(Mandatory)][scriptblock]$Action,
+        [ValidateRange(0, 20)][int]$RetryCount = 3,
+        [int[]]$RetryDelaysSeconds = @(5, 15, 30),
+        [scriptblock]$SleepAction,
+        [scriptblock]$ServerSelector
+    )
+
+    if ($null -eq $SleepAction) {
+        $SleepAction = { param([int]$Seconds) Start-Sleep -Seconds $Seconds }
+    }
+    if ($null -eq $ServerSelector) {
+        $ServerSelector = {
+            param([string]$DomainDnsRoot, [string]$CurrentServer)
+            Get-SmartWorkplaceCMDBActiveDirectoryRetryServer `
+                -DomainDnsRoot $DomainDnsRoot `
+                -CurrentServer $CurrentServer
+        }
+    }
+    if ($RetryCount -gt 0 -and $RetryDelaysSeconds.Count -eq 0) {
+        throw 'ActiveDirectory.DomainRetryDelaysSeconds must contain at least one delay when retries are enabled.'
+    }
+    if (@($RetryDelaysSeconds | Where-Object { $_ -lt 0 }).Count -gt 0) {
+        throw 'ActiveDirectory.DomainRetryDelaysSeconds cannot contain a negative delay.'
+    }
+
+    $domainDnsRoot = [string]$DomainContext.Domain.DNSRoot
+    $server = [string]$DomainContext.Server
+    for ($attempt = 0; $attempt -le $RetryCount; $attempt++) {
+        try {
+            $value = & $Action $server
+            return [pscustomobject]@{
+                Value = $value
+                Server = $server
+                RetryCount = $attempt
+            }
+        }
+        catch {
+            if ($attempt -ge $RetryCount -or
+                -not (Test-SmartWorkplaceCMDBTransientActiveDirectoryError $_)) {
+                throw
+            }
+            $delayIndex = [Math]::Min($attempt, $RetryDelaysSeconds.Count - 1)
+            $delay = [int]$RetryDelaysSeconds[$delayIndex]
+            $replacement = & $ServerSelector $domainDnsRoot $server
+            if (-not [string]::IsNullOrWhiteSpace([string]$replacement)) {
+                $server = [string]$replacement
+            }
+            Write-Warning (
+                "Transient Active Directory failure during {0} for '{1}'. Retry {2}/{3} on '{4}' in {5}s: {6}" -f
+                $OperationName, $domainDnsRoot, ($attempt + 1), $RetryCount,
+                $server, $delay, $_.Exception.Message
+            )
+            & $SleepAction $delay
+        }
+    }
+}
+
+function Invoke-SmartWorkplaceCMDBActiveDirectoryDomainCollection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DomainContext,
+        [string]$PreferredSearchBase,
+        [int]$Limit,
+        [ValidateRange(0, 20)][int]$RetryCount = 3,
+        [int[]]$RetryDelaysSeconds = @(5, 15, 30),
+        [scriptblock]$SleepAction,
+        [scriptblock]$ServerSelector
+    )
+
+    $domain = $DomainContext.Domain
+    $domainDnsRoot = [string]$domain.DNSRoot
+    $domainNetBIOSName = [string]$domain.NetBIOSName
+    $action = {
+        param([string]$SelectedServer)
+        $common = @{
+            Server = $SelectedServer
+            ErrorAction = 'Stop'
+            ResultPageSize = 500
+        }
+        if (-not [string]::IsNullOrWhiteSpace($PreferredSearchBase)) {
+            $common['SearchBase'] = $PreferredSearchBase
+        }
+        if ($Limit -gt 0) {
+            $common['ResultSetSize'] = $Limit
+        }
+        [pscustomobject]@{
+            Users = @(Get-ADUser -Filter * @common -Properties @(
+                    'ObjectGUID', 'ObjectSID', 'SamAccountName', 'UserPrincipalName',
+                    'DisplayName', 'Enabled', 'Department', 'Title', 'Mail',
+                    'EmployeeID', 'Country', 'Company', 'Office',
+                    'AccountExpirationDate', 'UserAccountControl', 'DistinguishedName',
+                    'Manager', 'WhenCreated', 'WhenChanged', 'LastLogonDate',
+                    'PasswordLastSet', 'PrimaryGroupID'
+                ))
+            Groups = @(Get-ADGroup -Filter * @common -Properties @(
+                    'ObjectGUID', 'ObjectSID', 'SamAccountName', 'DisplayName',
+                    'GroupCategory', 'GroupScope', 'Mail', 'Description',
+                    'ManagedBy', 'ProtectedFromAccidentalDeletion',
+                    'DistinguishedName', 'WhenCreated', 'WhenChanged'
+                ))
+            Computers = @(Get-ADComputer -Filter * @common -Properties @(
+                    'ObjectGUID', 'ObjectSID', 'SamAccountName', 'Name',
+                    'DNSHostName', 'Enabled', 'OperatingSystem',
+                    'OperatingSystemVersion', 'IPv4Address', 'CanonicalName',
+                    'DistinguishedName', 'ManagedBy', 'WhenCreated', 'WhenChanged',
+                    'LastLogonDate', 'LastLogonTimestamp', 'PasswordLastSet',
+                    'PrimaryGroupID'
+                ))
+            OrganizationalUnits = @(Get-ADOrganizationalUnit -Filter * @common -Properties @(
+                    'ObjectGUID', 'Name', 'DistinguishedName', 'Description',
+                    'ManagedBy', 'ProtectedFromAccidentalDeletion',
+                    'WhenCreated', 'WhenChanged'
+                ))
+        }
+    }.GetNewClosure()
+    $operation = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
+        -DomainContext $DomainContext `
+        -OperationName 'object inventory' `
+        -Action $action `
+        -RetryCount $RetryCount `
+        -RetryDelaysSeconds $RetryDelaysSeconds `
+        -SleepAction $SleepAction `
+        -ServerSelector $ServerSelector
+
+    return [pscustomobject]@{
+        Context = [pscustomobject]@{ Domain = $domain; Server = $operation.Server }
+        DomainDnsRoot = $domainDnsRoot
+        DomainNetBIOSName = $domainNetBIOSName
+        Users = @($operation.Value.Users)
+        Groups = @($operation.Value.Groups)
+        Computers = @($operation.Value.Computers)
+        OrganizationalUnits = @($operation.Value.OrganizationalUnits)
+        RetryCount = [int]$operation.RetryCount
+    }
+}
+
 function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Readiness,
         [string]$PreferredSearchBase,
         [bool]$CollectMemberships,
-        [int]$Limit
+        [int]$Limit,
+        [ValidateRange(0, 20)][int]$RetryCount = 3,
+        [int[]]$RetryDelaysSeconds = @(5, 15, 30)
     )
 
     if (-not [string]::IsNullOrWhiteSpace($PreferredSearchBase) -and
@@ -461,72 +709,44 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     $users = New-Object System.Collections.Generic.List[object]
     $groups = New-Object System.Collections.Generic.List[object]
     $computers = New-Object System.Collections.Generic.List[object]
+    $organizationalUnits = New-Object System.Collections.Generic.List[object]
     $memberships = New-Object System.Collections.Generic.List[object]
     $domainInventories = New-Object System.Collections.Generic.List[object]
+    $totalRetryCount = 0
 
     $domainIndex = 0
     foreach ($domainContext in @($Readiness.Domains)) {
         $domainIndex++
-        $domain = $domainContext.Domain
-        $domainDnsRoot = [string]$domain.DNSRoot
-        $domainNetBIOSName = [string]$domain.NetBIOSName
+        $domainDnsRoot = [string]$domainContext.Domain.DNSRoot
         Write-Information (
             "Active Directory domain [{0}/{1}] DNS='{2}' Server='{3}'." -f
             $domainIndex, @($Readiness.Domains).Count, $domainDnsRoot, $domainContext.Server
         ) -InformationAction Continue
 
-        $common = @{
-            Server = $domainContext.Server
-            ErrorAction = 'Stop'
-            ResultPageSize = 500
-        }
-        if (-not [string]::IsNullOrWhiteSpace($PreferredSearchBase)) {
-            $common['SearchBase'] = $PreferredSearchBase
-        }
-        if ($Limit -gt 0) {
-            $common['ResultSetSize'] = $Limit
-        }
-
-        $domainUsers = @(Get-ADUser -Filter * @common -Properties @(
-                'ObjectGUID', 'ObjectSID', 'UserPrincipalName', 'DisplayName',
-                'Enabled', 'Department', 'Title', 'Mail', 'EmployeeID',
-                'DistinguishedName', 'Manager', 'WhenCreated', 'WhenChanged',
-                'LastLogonDate', 'PasswordLastSet', 'PrimaryGroupID'
-            ))
-        $domainGroups = @(Get-ADGroup -Filter * @common -Properties @(
-                'ObjectGUID', 'ObjectSID', 'SamAccountName', 'DisplayName',
-                'GroupCategory', 'GroupScope', 'Mail', 'DistinguishedName',
-                'WhenCreated', 'WhenChanged'
-            ))
-        $domainComputers = @(Get-ADComputer -Filter * @common -Properties @(
-                'ObjectGUID', 'ObjectSID', 'SamAccountName', 'Name',
-                'DNSHostName', 'Enabled', 'OperatingSystem',
-                'OperatingSystemVersion', 'IPv4Address', 'DistinguishedName',
-                'ManagedBy', 'WhenCreated', 'WhenChanged', 'LastLogonDate',
-                'PrimaryGroupID'
-            ))
-
-        foreach ($item in $domainUsers) {
+        $inventory = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainCollection `
+            -DomainContext $domainContext `
+            -PreferredSearchBase $PreferredSearchBase `
+            -Limit $Limit `
+            -RetryCount $RetryCount `
+            -RetryDelaysSeconds $RetryDelaysSeconds
+        $totalRetryCount += $inventory.RetryCount
+        foreach ($item in $inventory.Users) {
             $users.Add((Add-SmartWorkplaceCMDBActiveDirectoryDomainContext `
-                    $item $domainDnsRoot $domainNetBIOSName))
+                    $item $inventory.DomainDnsRoot $inventory.DomainNetBIOSName))
         }
-        foreach ($item in $domainGroups) {
+        foreach ($item in $inventory.Groups) {
             $groups.Add((Add-SmartWorkplaceCMDBActiveDirectoryDomainContext `
-                    $item $domainDnsRoot $domainNetBIOSName))
+                    $item $inventory.DomainDnsRoot $inventory.DomainNetBIOSName))
         }
-        foreach ($item in $domainComputers) {
+        foreach ($item in $inventory.Computers) {
             $computers.Add((Add-SmartWorkplaceCMDBActiveDirectoryDomainContext `
-                    $item $domainDnsRoot $domainNetBIOSName))
+                    $item $inventory.DomainDnsRoot $inventory.DomainNetBIOSName))
         }
-
-        $domainInventories.Add([pscustomobject]@{
-            Context = $domainContext
-            DomainDnsRoot = $domainDnsRoot
-            DomainNetBIOSName = $domainNetBIOSName
-            Users = $domainUsers
-            Groups = $domainGroups
-            Computers = $domainComputers
-        })
+        foreach ($item in $inventory.OrganizationalUnits) {
+            $organizationalUnits.Add((Add-SmartWorkplaceCMDBActiveDirectoryDomainContext `
+                    $item $inventory.DomainDnsRoot $inventory.DomainNetBIOSName))
+        }
+        $domainInventories.Add($inventory)
     }
 
     if ($CollectMemberships) {
@@ -572,39 +792,60 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
             $domainDnsRoot = [string]$inventory.DomainDnsRoot
             $domainNetBIOSName = [string]$inventory.DomainNetBIOSName
             $domainGroups = @($inventory.Groups)
-            $started = [datetimeoffset]::UtcNow
-            $domainConnection = New-SmartWorkplaceCMDBActiveDirectoryLdapConnection `
-                -Server $domainContext.Server
-            try {
-                for ($index = 0; $index -lt $domainGroups.Count; $index++) {
-                    $group = $domainGroups[$index]
-                    if ($index -eq 0 -or (($index + 1) % 25) -eq 0 -or
-                        $index -eq ($domainGroups.Count - 1)) {
-                        $elapsed = [datetimeoffset]::UtcNow - $started
-                        $eta = if ($index -gt 0) {
-                            [timespan]::FromSeconds(
-                                ($elapsed.TotalSeconds / $index) * ($domainGroups.Count - $index)
-                            ).ToString('hh\:mm\:ss')
+            $membershipAction = {
+                param([string]$SelectedServer)
+                $started = [datetimeoffset]::UtcNow
+                $directMemberships = New-Object System.Collections.Generic.List[object]
+                $domainConnection = New-SmartWorkplaceCMDBActiveDirectoryLdapConnection `
+                    -Server $SelectedServer
+                try {
+                    for ($index = 0; $index -lt $domainGroups.Count; $index++) {
+                        $group = $domainGroups[$index]
+                        if ($index -eq 0 -or (($index + 1) % 25) -eq 0 -or
+                            $index -eq ($domainGroups.Count - 1)) {
+                            $elapsed = [datetimeoffset]::UtcNow - $started
+                            $eta = if ($index -gt 0) {
+                                [timespan]::FromSeconds(
+                                    ($elapsed.TotalSeconds / $index) * ($domainGroups.Count - $index)
+                                ).ToString('hh\:mm\:ss')
+                            }
+                            else {
+                                'estimating'
+                            }
+                            Write-Information (
+                                "Active Directory memberships '{0}' [{1}/{2}] elapsed={3}; ETA={4}" -f
+                                $domainDnsRoot, ($index + 1), $domainGroups.Count,
+                                $elapsed.ToString('hh\:mm\:ss'), $eta
+                            ) -InformationAction Continue
                         }
-                        else {
-                            'estimating'
-                        }
-                        Write-Information (
-                            "Active Directory memberships '{0}' [{1}/{2}] elapsed={3}; ETA={4}" -f
-                            $domainDnsRoot, ($index + 1), $domainGroups.Count,
-                            $elapsed.ToString('hh\:mm\:ss'), $eta
-                        ) -InformationAction Continue
+                        $directMemberships.Add([pscustomobject]@{
+                                Group = $group
+                                MemberDistinguishedNames = @(
+                                    Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
+                                        -Server $SelectedServer `
+                                        -GroupDistinguishedName $group.DistinguishedName `
+                                        -Connection $domainConnection
+                                )
+                            })
                     }
+                    return @($directMemberships.ToArray())
+                }
+                finally {
+                    $domainConnection.Dispose()
+                }
+            }.GetNewClosure()
+            $membershipOperation = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
+                -DomainContext $domainContext `
+                -OperationName 'group membership inventory' `
+                -Action $membershipAction `
+                -RetryCount $RetryCount `
+                -RetryDelaysSeconds $RetryDelaysSeconds
+            $totalRetryCount += $membershipOperation.RetryCount
+            $domainContext.Server = $membershipOperation.Server
 
-                    try {
-                        $memberDistinguishedNames = @(Get-SmartWorkplaceCMDBActiveDirectoryRangedMember `
-                                -Server $domainContext.Server `
-                                -GroupDistinguishedName $group.DistinguishedName `
-                                -Connection $domainConnection)
-                    }
-                    catch {
-                        throw "Active Directory membership retrieval failed for domain '$domainDnsRoot', group '$($group.DistinguishedName)', server '$($domainContext.Server)': $($_.Exception.Message)"
-                    }
+            foreach ($directMembership in @($membershipOperation.Value)) {
+                    $group = $directMembership.Group
+                    $memberDistinguishedNames = @($directMembership.MemberDistinguishedNames)
                     $groupMembers = New-Object System.Collections.Generic.List[object]
                     foreach ($memberDn in $memberDistinguishedNames) {
                         $member = $null
@@ -612,9 +853,25 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                             $member = $principalByDistinguishedName[$memberDn]
                         }
                         else {
-                            $resolved = Get-ADObject -Identity $memberDn `
-                                -Server $domainContext.Server -ErrorAction Stop `
-                                -Properties @('ObjectGUID', 'ObjectSID', 'ObjectClass', 'DistinguishedName')
+                            $resolveAction = {
+                                param([string]$SelectedServer)
+                                Get-ADObject -Identity $memberDn `
+                                    -Server $SelectedServer `
+                                    -ErrorAction Stop `
+                                    -Properties @(
+                                        'ObjectGUID', 'ObjectSID', 'ObjectClass',
+                                        'DistinguishedName'
+                                    )
+                            }.GetNewClosure()
+                            $resolveOperation = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
+                                -DomainContext $domainContext `
+                                -OperationName "member resolution '$memberDn'" `
+                                -Action $resolveAction `
+                                -RetryCount $RetryCount `
+                                -RetryDelaysSeconds $RetryDelaysSeconds
+                            $totalRetryCount += $resolveOperation.RetryCount
+                            $domainContext.Server = $resolveOperation.Server
+                            $resolved = $resolveOperation.Value
                             if ($null -ne $resolved.ObjectSID) {
                                 $member = [pscustomobject]@{
                                     ObjectGUID = $resolved.ObjectGUID
@@ -658,10 +915,6 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                             MemberObjectClass      = $member.ObjectClass
                         })
                     }
-                }
-            }
-            finally {
-                $domainConnection.Dispose()
             }
         }
     }
@@ -671,7 +924,9 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
         users            = @($users.ToArray())
         groups           = @($groups.ToArray())
         computers        = @($computers.ToArray())
+        organizationalUnits = @($organizationalUnits.ToArray())
         groupMemberships = @($memberships.ToArray())
+        retryCount       = $totalRetryCount
     }
 }
 
@@ -708,6 +963,53 @@ if ([string]::IsNullOrWhiteSpace($Server)) {
 if ([string]::IsNullOrWhiteSpace($SearchBase)) {
     $SearchBase = [string](Get-SmartWorkplaceCMDBSetting $adConfiguration 'SearchBase' '')
 }
+if (-not $PSBoundParameters.ContainsKey('TargetDomains')) {
+    $targetDomainSetting = if ($adConfiguration.Contains('TargetDomains')) {
+        $adConfiguration['TargetDomains']
+    }
+    else {
+        ''
+    }
+    $TargetDomains = @(if ($targetDomainSetting -is [string]) {
+        [string]$targetDomainSetting -split '[,;\s]+' | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_)
+            }
+    }
+    else {
+        $targetDomainSetting | ForEach-Object { [string]$_ }
+    })
+}
+if ($DomainRetryCount -lt 0) {
+    $DomainRetryCount = [int](
+        Get-SmartWorkplaceCMDBSetting $adConfiguration 'DomainRetryCount' 3
+    )
+}
+if (-not $PSBoundParameters.ContainsKey('DomainRetryDelaysSeconds')) {
+    $retryDelaySetting = if ($adConfiguration.Contains('DomainRetryDelaysSeconds')) {
+        $adConfiguration['DomainRetryDelaysSeconds']
+    }
+    else {
+        '5,15,30'
+    }
+    $retryDelayValues = if ($retryDelaySetting -is [string]) {
+        @([string]$retryDelaySetting -split '[,;\s]+' | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_)
+            })
+    }
+    else {
+        @($retryDelaySetting)
+    }
+    $DomainRetryDelaysSeconds = @($retryDelayValues | ForEach-Object { [int]$_ })
+}
+$domainParallelThrottleLimit = [int](
+    Get-SmartWorkplaceCMDBSetting $adConfiguration 'DomainParallelThrottleLimit' 1
+)
+if ($DomainRetryCount -lt 0 -or $DomainRetryCount -gt 20) {
+    throw 'ActiveDirectory.DomainRetryCount must be between 0 and 20.'
+}
+if ($domainParallelThrottleLimit -ne 1) {
+    throw 'ActiveDirectory.DomainParallelThrottleLimit must remain 1 in SmartWorkplaceCMDB 1.0.2.'
+}
 if (-not $PSBoundParameters.ContainsKey('IncludeGroupMemberships')) {
     $IncludeGroupMemberships = [bool](
         Get-SmartWorkplaceCMDBSetting $adConfiguration 'IncludeGroupMemberships' $true
@@ -717,6 +1019,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Live' -and $forestWide -and
     -not [string]::IsNullOrWhiteSpace($SearchBase)) {
     throw 'ActiveDirectory.SearchBase requires ForestWide=false. Leave SearchBase empty to collect every forest domain.'
 }
+if ($PSCmdlet.ParameterSetName -eq 'Live' -and $TargetDomains.Count -gt 0 -and
+    -not $forestWide) {
+    throw 'ActiveDirectory.TargetDomains requires ForestWide=true.'
+}
 
 $rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 $tableNames = @(
@@ -724,6 +1030,7 @@ $tableNames = @(
     'ActiveDirectory_Users.csv',
     'ActiveDirectory_Groups.csv',
     'ActiveDirectory_Computers.csv',
+    'ActiveDirectory_OrganizationalUnits.csv',
     'ActiveDirectory_GroupMemberships.csv'
 )
 $tables = @{}
@@ -736,7 +1043,8 @@ foreach ($name in $tableNames) {
 }
 
 $sourcePaths = @($tableNames | ForEach-Object { Join-Path $paths.LatestOutputRootPath (Join-Path $tables[$_].area $_) })
-$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath $sourcePaths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -Scoped:([bool]$SearchBase -or -not $forestWide) -NoWrite:$ValidateOnly
+$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath $sourcePaths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -Scoped:([bool]$SearchBase -or -not $forestWide -or $TargetDomains.Count -gt 0) -NoWrite:$ValidateOnly
+$sourceRunCompleted = $false
 try {
 $fixture = $null
 $readiness = $null
@@ -750,7 +1058,8 @@ else {
     }
     $readiness = Get-SmartWorkplaceCMDBActiveDirectoryReadiness `
         -PreferredServer $Server `
-        -ForestWide $forestWide
+        -ForestWide $forestWide `
+        -TargetDomains $TargetDomains
     $Server = $readiness.Server
 }
 
@@ -780,6 +1089,10 @@ if ($ValidateOnly) {
         DomainCount              = @($validationDomains).Count
         Domains                  = (@($validationDomains | ForEach-Object { [string]$_.DNSRoot }) -join ';')
         IncludeGroupMemberships   = [bool]$IncludeGroupMemberships
+        TargetDomains             = ($TargetDomains -join ';')
+        DomainRetryCount          = $DomainRetryCount
+        DomainRetryDelaysSeconds  = ($DomainRetryDelaysSeconds -join ';')
+        DomainParallelThrottleLimit = $domainParallelThrottleLimit
         RawContractVersion        = [string]$rawContract.contractVersion
         LatestOutputRootPath      = $paths.LatestOutputRootPath
         ProfileKey                = $paths.ProfileKey
@@ -796,7 +1109,9 @@ else {
         -Readiness $readiness `
         -PreferredSearchBase $SearchBase `
         -CollectMemberships ([bool]$IncludeGroupMemberships) `
-        -Limit $MaxItems
+        -Limit $MaxItems `
+        -RetryCount $DomainRetryCount `
+        -RetryDelaysSeconds $DomainRetryDelaysSeconds
 }
 
 $sourceDomains = @(Get-SmartWorkplaceCMDBObjectValue $source 'domains')
@@ -901,6 +1216,24 @@ $userRows = @($users | ForEach-Object {
         EmployeeId               = ConvertTo-SmartWorkplaceCMDBCleanText (
             Get-SmartWorkplaceCMDBObjectValue $_ 'EmployeeID'
         )
+        Country                  = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Country'
+        )
+        Company                  = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Company'
+        )
+        Office                   = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Office'
+        )
+        AccountExpirationDate    = ConvertTo-SmartWorkplaceCMDBDateText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'AccountExpirationDate'
+        )
+        UserAccountControl       = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'UserAccountControl'
+        )
+        PrimaryGroupId           = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'PrimaryGroupID'
+        )
         DistinguishedName        = $distinguishedName
         OrganizationalUnit       = Get-SmartWorkplaceCMDBOrganizationalUnit $distinguishedName
         ManagerDistinguishedName = ConvertTo-SmartWorkplaceCMDBCleanText (
@@ -963,6 +1296,15 @@ $groupRows = @($groups | ForEach-Object {
         Mail                    = ConvertTo-SmartWorkplaceCMDBCleanText (
             Get-SmartWorkplaceCMDBObjectValue $_ 'Mail'
         )
+        Description             = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Description'
+        )
+        ManagedByDistinguishedName = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'ManagedBy'
+        )
+        ProtectedFromAccidentalDeletion = [string](
+            Get-SmartWorkplaceCMDBObjectValue $_ 'ProtectedFromAccidentalDeletion'
+        )
         DistinguishedName       = $distinguishedName
         OrganizationalUnit      = Get-SmartWorkplaceCMDBOrganizationalUnit $distinguishedName
         WhenCreated             = ConvertTo-SmartWorkplaceCMDBDateText (
@@ -1020,6 +1362,9 @@ $computerRows = @($computers | ForEach-Object {
         IPv4Address             = ConvertTo-SmartWorkplaceCMDBCleanText (
             Get-SmartWorkplaceCMDBObjectValue $_ 'IPv4Address'
         )
+        CanonicalName           = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'CanonicalName'
+        )
         DistinguishedName       = $distinguishedName
         OrganizationalUnit      = Get-SmartWorkplaceCMDBOrganizationalUnit $distinguishedName
         ManagedByDistinguishedName = ConvertTo-SmartWorkplaceCMDBCleanText (
@@ -1033,6 +1378,68 @@ $computerRows = @($computers | ForEach-Object {
         )
         LastLogonDate           = ConvertTo-SmartWorkplaceCMDBDateText (
             Get-SmartWorkplaceCMDBObjectValue $_ 'LastLogonDate'
+        )
+        LastLogonTimestamp      = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'LastLogonTimestamp'
+        )
+        PasswordLastSet         = ConvertTo-SmartWorkplaceCMDBDateText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'PasswordLastSet'
+        )
+        PrimaryGroupId          = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'PrimaryGroupID'
+        )
+        SourceCollectedDateTime = $collectedDateTime
+    }
+})
+
+$organizationalUnitSource = Get-SmartWorkplaceCMDBObjectValue $source 'organizationalUnits'
+$organizationalUnits = if ($null -eq $organizationalUnitSource) {
+    @()
+}
+else {
+    @($organizationalUnitSource)
+}
+if ($MaxItems -gt 0) {
+    $organizationalUnits = @($organizationalUnits | Select-Object -First $MaxItems)
+}
+$organizationalUnitRows = @($organizationalUnits | ForEach-Object {
+    $rowDomainDnsRoot = Get-SmartWorkplaceCMDBActiveDirectoryDomainValue `
+        $_ 'DomainDnsRoot' $defaultDomainDnsRoot
+    $rowDomainNetBiosName = Get-SmartWorkplaceCMDBActiveDirectoryDomainValue `
+        $_ 'DomainNetBIOSName' $defaultDomainNetBiosName
+    $objectGuid = ConvertTo-SmartWorkplaceCMDBGuidText (
+        Get-SmartWorkplaceCMDBObjectValue $_ 'ObjectGUID'
+    )
+    if ([string]::IsNullOrWhiteSpace($objectGuid)) {
+        throw 'An Active Directory organizational unit does not contain ObjectGUID.'
+    }
+    $distinguishedName = ConvertTo-SmartWorkplaceCMDBCleanText (
+        Get-SmartWorkplaceCMDBObjectValue $_ 'DistinguishedName'
+    )
+    [pscustomobject][ordered]@{
+        SourceSystem = 'ActiveDirectory'
+        DomainDnsRoot = $rowDomainDnsRoot
+        DomainNetBIOSName = $rowDomainNetBiosName
+        SourceObjectGuid = $objectGuid
+        Name = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Name'
+        )
+        DistinguishedName = $distinguishedName
+        ParentDistinguishedName = Get-SmartWorkplaceCMDBOrganizationalUnit $distinguishedName
+        Description = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'Description'
+        )
+        ManagedByDistinguishedName = ConvertTo-SmartWorkplaceCMDBCleanText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'ManagedBy'
+        )
+        ProtectedFromAccidentalDeletion = [string](
+            Get-SmartWorkplaceCMDBObjectValue $_ 'ProtectedFromAccidentalDeletion'
+        )
+        WhenCreated = ConvertTo-SmartWorkplaceCMDBDateText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'WhenCreated'
+        )
+        WhenChanged = ConvertTo-SmartWorkplaceCMDBDateText (
+            Get-SmartWorkplaceCMDBObjectValue $_ 'WhenChanged'
         )
         SourceCollectedDateTime = $collectedDateTime
     }
@@ -1086,6 +1493,7 @@ foreach ($set in @(
         @{ Name = 'ActiveDirectory_Users.csv'; Rows = $userRows; Key = 'SourceObjectGuid' },
         @{ Name = 'ActiveDirectory_Groups.csv'; Rows = $groupRows; Key = 'SourceObjectGuid' },
         @{ Name = 'ActiveDirectory_Computers.csv'; Rows = $computerRows; Key = 'SourceObjectGuid' },
+        @{ Name = 'ActiveDirectory_OrganizationalUnits.csv'; Rows = $organizationalUnitRows; Key = 'SourceObjectGuid' },
         @{ Name = 'ActiveDirectory_GroupMemberships.csv'; Rows = $membershipRows; Key = 'RelationshipKey' }
     )) {
     $duplicates = @($set.Rows | Group-Object -Property $set.Key | Where-Object Count -gt 1)
@@ -1099,51 +1507,121 @@ $sets = @(
     @{ Name = 'ActiveDirectory_Users.csv'; Rows = $userRows; HistoryArea = 'Users' },
     @{ Name = 'ActiveDirectory_Groups.csv'; Rows = $groupRows; HistoryArea = 'Groups' },
     @{ Name = 'ActiveDirectory_Computers.csv'; Rows = $computerRows; HistoryArea = 'Computers' },
+    @{ Name = 'ActiveDirectory_OrganizationalUnits.csv'; Rows = $organizationalUnitRows; HistoryArea = 'OrganizationalUnits' },
     @{ Name = 'ActiveDirectory_GroupMemberships.csv'; Rows = $membershipRows; HistoryArea = 'GroupMemberships' }
 )
 $timestamp = [datetime]::UtcNow
 $outputPaths = [ordered]@{}
-foreach ($set in $sets) {
-    $table = $tables[$set.Name]
-    $latestPath = Join-Path $paths.LatestOutputRootPath (
-        Join-Path ([string]$table.area) ([string]$table.name)
-    )
-    $historyFolder = Join-Path $paths.DataAllRootPath (
-        'ActiveDirectory\{0}\{1}\{2}' -f
-        $set.HistoryArea, $timestamp.ToString('yyyy'), $timestamp.ToString('MM')
-    )
-    $historyName = '{0}_{1}.csv' -f
-        [IO.Path]::GetFileNameWithoutExtension($set.Name),
-        $timestamp.ToString('yyyyMMdd-HHmmssfff')
-    $historyPath = Join-Path $historyFolder $historyName
-    $export = @{
-        InputObject     = @($set.Rows)
-        Columns         = @($table.columns | ForEach-Object { [string]$_ })
-        TenantKey       = $paths.TenantKey
-        OrganizationKey = $paths.OrganizationKey
-        EnvironmentKey  = $paths.EnvironmentKey
-        TenantId        = $paths.TenantId
-    }
-    Export-SmartWorkplaceCMDBCsv @export -Path $historyPath
-    Export-SmartWorkplaceCMDBCsv @export -Path $latestPath
-    $outputPaths[$set.Name] = $latestPath
-}
-
-$contractResults = @(Test-SmartWorkplaceCMDBCsvContract `
-        -LatestOutputRootPath $paths.LatestOutputRootPath `
-        -ContractPath $rawContractPath)
-$adResults = @($contractResults | Where-Object Name -in $tableNames)
-if ($adResults.Count -ne $tableNames.Count -or
-    @($adResults | Where-Object Status -ne 'Valid').Count -gt 0) {
-    throw 'An Active Directory raw CSV does not satisfy the SmartWorkplaceCMDB raw contract.'
-}
-
+$transactionRoot = Join-Path $paths.DataRootPath (
+    '.staging\ActiveDirectory\{0}' -f $sourceRun.RunId
+)
+$stagedLatestRoot = Join-Path $transactionRoot 'DATA-LAST'
+$backupRoot = Join-Path $transactionRoot 'backups'
+$promotions = New-Object System.Collections.Generic.List[object]
+$completedPromotions = New-Object System.Collections.Generic.List[object]
 $notCollected = if (-not $IncludeGroupMemberships) { @($sourcePaths | Where-Object { [IO.Path]::GetFileName($_) -eq 'ActiveDirectory_GroupMemberships.csv' }) } else { @() }
-Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -NotCollectedPath $notCollected
+try {
+    foreach ($set in $sets) {
+        $table = $tables[$set.Name]
+        $stagedPath = Join-Path $stagedLatestRoot (
+            Join-Path ([string]$table.area) ([string]$table.name)
+        )
+        $latestPath = Join-Path $paths.LatestOutputRootPath (
+            Join-Path ([string]$table.area) ([string]$table.name)
+        )
+        $historyFolder = Join-Path $paths.DataAllRootPath (
+            'ActiveDirectory\{0}\{1}\{2}' -f
+            $set.HistoryArea, $timestamp.ToString('yyyy'), $timestamp.ToString('MM')
+        )
+        $historyName = '{0}_{1}.csv' -f
+            [IO.Path]::GetFileNameWithoutExtension($set.Name),
+            $timestamp.ToString('yyyyMMdd-HHmmssfff')
+        $historyPath = Join-Path $historyFolder $historyName
+        $export = @{
+            InputObject     = @($set.Rows)
+            Columns         = @($table.columns | ForEach-Object { [string]$_ })
+            TenantKey       = $paths.TenantKey
+            OrganizationKey = $paths.OrganizationKey
+            EnvironmentKey  = $paths.EnvironmentKey
+            TenantId        = $paths.TenantId
+        }
+        Export-SmartWorkplaceCMDBCsv @export -Path $stagedPath
+        $promotions.Add([pscustomobject]@{
+                Source = $stagedPath
+                Destination = $historyPath
+                Backup = Join-Path $backupRoot ('history-' + $historyName)
+            })
+        $promotions.Add([pscustomobject]@{
+                Source = $stagedPath
+                Destination = $latestPath
+                Backup = Join-Path $backupRoot ('latest-' + $set.Name)
+            })
+        $outputPaths[$set.Name] = $latestPath
+    }
+
+    $stagedContractResults = @(Test-SmartWorkplaceCMDBCsvContract `
+            -LatestOutputRootPath $stagedLatestRoot `
+            -ContractPath $rawContractPath)
+    $stagedAdResults = @($stagedContractResults | Where-Object Name -in $tableNames)
+    if ($stagedAdResults.Count -ne $tableNames.Count -or
+        @($stagedAdResults | Where-Object Status -ne 'Valid').Count -gt 0) {
+        throw 'A staged Active Directory raw CSV does not satisfy the SmartWorkplaceCMDB raw contract.'
+    }
+
+    foreach ($promotion in $promotions) {
+        $destinationFolder = Split-Path $promotion.Destination -Parent
+        New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
+        $hadPrevious = Test-Path -LiteralPath $promotion.Destination -PathType Leaf
+        if ($hadPrevious) {
+            New-Item -ItemType Directory -Path (Split-Path $promotion.Backup -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $promotion.Destination -Destination $promotion.Backup -Force
+        }
+        $candidate = $promotion.Destination + '.candidate.' + $sourceRun.RunId
+        Copy-Item -LiteralPath $promotion.Source -Destination $candidate -Force
+        Move-Item -LiteralPath $candidate -Destination $promotion.Destination -Force
+        $completedPromotions.Add([pscustomobject]@{
+                Destination = $promotion.Destination
+                Backup = $promotion.Backup
+                HadPrevious = $hadPrevious
+            })
+    }
+    $contractResults = @(Test-SmartWorkplaceCMDBCsvContract `
+            -LatestOutputRootPath $paths.LatestOutputRootPath `
+            -ContractPath $rawContractPath)
+    $adResults = @($contractResults | Where-Object Name -in $tableNames)
+    if ($adResults.Count -ne $tableNames.Count -or
+        @($adResults | Where-Object Status -ne 'Valid').Count -gt 0) {
+        throw 'An Active Directory raw CSV does not satisfy the SmartWorkplaceCMDB raw contract after promotion.'
+    }
+    Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -NotCollectedPath $notCollected
+    $sourceRunCompleted = $true
+}
+catch {
+    for ($promotionIndex = $completedPromotions.Count - 1;
+        $promotionIndex -ge 0;
+        $promotionIndex--) {
+        $promotion = $completedPromotions[$promotionIndex]
+        if ($promotion.HadPrevious -and
+            (Test-Path -LiteralPath $promotion.Backup -PathType Leaf)) {
+            Copy-Item -LiteralPath $promotion.Backup `
+                -Destination $promotion.Destination -Force
+        }
+        elseif (Test-Path -LiteralPath $promotion.Destination -PathType Leaf) {
+            Remove-Item -LiteralPath $promotion.Destination -Force
+        }
+    }
+    throw
+}
+finally {
+    if (Test-Path -LiteralPath $transactionRoot) {
+        Remove-Item -LiteralPath $transactionRoot -Recurse -Force
+    }
+}
 
 Write-Information (
-    "SmartWorkplaceCMDB Active Directory collection completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; Memberships={4}." -f
-    $domainRows.Count, $userRows.Count, $groupRows.Count, $computerRows.Count, $membershipRows.Count
+    "SmartWorkplaceCMDB Active Directory collection completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; OrganizationalUnits={4}; Memberships={5}." -f
+    $domainRows.Count, $userRows.Count, $groupRows.Count, $computerRows.Count,
+    $organizationalUnitRows.Count, $membershipRows.Count
 ) -InformationAction Continue
 
 [pscustomobject]@{
@@ -1154,22 +1632,26 @@ Write-Information (
     UserCount                 = $userRows.Count
     GroupCount                = $groupRows.Count
     ComputerCount             = $computerRows.Count
+    OrganizationalUnitCount  = $organizationalUnitRows.Count
     GroupMembershipCount      = $membershipRows.Count
+    RetryCount                = [int](Get-SmartWorkplaceCMDBObjectValue $source 'retryCount')
     IncludeGroupMemberships   = [bool]$IncludeGroupMemberships
     RawContractVersion        = [string]$rawContract.contractVersion
     LatestOutputRootPath      = $paths.LatestOutputRootPath
 }
 
 } catch {
-    Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed
+    if (-not $sourceRunCompleted) {
+        Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed
+    }
     throw
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDE5gMpUHZPlijg
-# /zPPmYpFX5q+8Pme+23iTfkVR5KJIqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvgiXoWY8iVckS
+# KTxlgiQwIpv/ai4vtak3y7pHybEZBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1302,31 +1784,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEYV8mzgrD4cZwevWve/2DYcAWN7kjTcucTX403RtFvgMA0GCSqG
-# SIb3DQEBAQUABIIBgH2k5LQyH2DMb2j6QhBQYD+JjNwmSUpPTr85XDWdih0Jo+Sp
-# iEzCZWMuzPsJSDjYsAHFVBIdMQF973SelZm3CkSBbCr40iebl03umU9RubdgIL9/
-# /El5t/Sz6JqqC4wIQHthIO9soGy/xhpdRma2S3xFE7+2HqDYmabZNklwYJifP5g5
-# 1q2Ry171niyY2sNbOmKZDi/TaI0g3CUeFByGuVjqUFWa2vkMGlUhZvn0pxBq03Lr
-# 2xB+ZTSsLi8XQ+I2XBFMC+viv8ape1K8d38HtUCxHFfIq/c3TEOFjaSaHzLQENv4
-# dOJgDJTapbTD9lnGRvkNBNwR4p5CL0ApAra+oiTlnT3ffq6zwU5ofFzjx3J5+gUd
-# el8vo6sEq4L3wBtOxkD9i+AIX8DUkxXvhJjbBRx/3XS7i1t9VeVYoPW+PfccY2Ol
-# dkYK+gBXa/ZQGLUjNBCidyHOcXKJUEePIyqgLKtBEnFKr8RQvOzMaqUvOT3Luiax
-# LYbVsV85su1hGhD5BKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICM6uBJvIBkZEkG3opCaDgT9yB4+uW/xW962Udb/SYYXMA0GCSqG
+# SIb3DQEBAQUABIIBgAIdLeV9dpny8YMpOASP+S31IXr2UJLXyOBnZWUhoYa6wCVX
+# NeEcx68A4h2SzdzvX51iiAxA7vOD2FdoCBoXYBJFyo9ZdEe17gwBIyRGoaptEeL7
+# 46sUOiPdAaROSeXwZMvwjahQQWvWyslJ4Fv16qtULnPuG3Nk1YIfhm6yfu3uGwcx
+# snc1aND9DrNTlSglCfKsqNmoTidl2tV4F1BGGSdZruRehLW1lyeN++2qAR13Cnjd
+# WY6yImQ0RhEjoBKUlDVdDIxeemmNN8obEdV1PfTO1qinwibq9Ryqnae2jWzlBnkS
+# arFWQWAjzNkgfHyg7iasBtfUdkUC9dzGYxpoq02YOIljRhZIdfTFTNs8DvxOI4Vf
+# nc8W7mNDTxxE77bYv2GSJ0Qh/uSQWYAuLWDQzE6hmJrr2M99yICXTe6ibK5Ygcr8
+# rlz74rUydGawT7AHe2gqCiyIH1mDOGxCtS7bRx1+vaqyE2PKN/1pews7s+31zZoc
+# +LMbAx2l7D12+w9gUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMDM5
-# MTJaMC8GCSqGSIb3DQEJBDEiBCACIYyQBjFRXc6Rxaqp22itHqgHnniKNsxgL96L
-# dPtbjDANBgkqhkiG9w0BAQEFAASCAgAJsidAMwdkjzU7EcOnwiLhhJn3xbBcsfqE
-# K4S5UVQaSq2P4hFMBr2OBt2/5I3bgQut1yjbHSLj6Mm3ZQXkgLWT/g2vqy15VnQE
-# 8xarV7hxas9B06IUHyYBgaprEgt1vu4xIjCCPouIWSgo4cjdMYcbFHbuj4rn1Qp6
-# H502P/uGUu2IqE5PZIPIEPr4TGkiUyJXy7mazmXKOkmZOk4Y3AXN8e1xMS22guiL
-# u4ZpSoXdLp7c7boNJlgvsAicSvw4RqtT4GksBOlPL9KnkB+DVrGuLl6Wvwj0uVcF
-# hfIJzMd3X/nVHxQBYECwraQpItixGbopT9/8Yv9cjQMolDANgikZinMlRox/lqUt
-# nxjriEt3wJRJDYKI44qlfckYojOlQN40vgl+Po4iv91bKK32/t2yFZ5FfrZMH2F8
-# nFUdF/gh36gwGUxgBSx1VsNV8vWsJSBAwHXvl19CUsZNXOHZRoRes/D+vXyKueC0
-# f/OEeeThUThSVeFzF1IxRG8CrAUnERK8BTQwy/ciUKIjseaoKRopeo6mFAiLJWxt
-# 1FsHzW36dvuGGOQ50cWv71dVVzVurG9gfcS1xt4TmA6UFPiU5JMgjEaLincixPan
-# SoA4xtkSg953kkUehcW8JDxl0zN0WqDQ2/Es9KTCDCcdftguHXl9mTIvhhWdds5l
-# aJwgZYtISA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTNaMC8GCSqGSIb3DQEJBDEiBCDWZeCMszhhKs2bmAyL6TtlfYk68DyxAN25KUbi
+# mCfp1jANBgkqhkiG9w0BAQEFAASCAgANth5fGzy9dvVzzhkyGqGvOyoxQUX4lM9Z
+# 5wP0BV2Un9hHc+hny47xGfXtNNyj+CJS7Sr/1Srsc+uGQIDD+wZ+UWMe05dJz4f0
+# 4LZveSJnCG1CMM+k2awZW0JvudgGzNE7l65D9ByimWAkoJbY9xI8tLhmRYHM9oRO
+# HU7fxW8ZzrvJtqyWevCV/H+dg0ZRyZD98a3aNYYK+EHq/f4qRSlIT1kNg4QJXn/4
+# 2ZgB2xf16+LH1rVMUsf3shCD6JWH2HlIabeM4HzOVIa6qqxF8VeZojez2ipstDQe
+# uvW2sTmCvJgzijuWmM5BCKdb1493Txkv9fhhlzQqLnT8vklb/jttWsSvEKYihHlN
+# ABUYcPXYHLniU6zkZrNoMx0oodfnLAaHO2aQDri/kbKjkNvp6x7rvLTfo5qztBYL
+# VXJGGJfmF+1ecWGAXZx24hylrY9jOEH7cCLPlP7KG9utokhC5EkjhAuQ5jMB8luT
+# tyyUIRPAiqUj5/tBCBmd/+KHuzTKTh12M1TxXnNrbN+UI4070t6L6XOWysE+7O7p
+# oFkrAoWOQM06T9or3rPwOfybBw8Nr05U9fVNIeqTSbyOohEdfa9PQmWrHYEtkkcY
+# Yod4WqXqfvtQz+TKos8DdTrOhZyiZbxlBnS/P8M4a14YlmQBhGIW/k0Yi56zptqc
+# 7cLGkRA06w==
 # SIG # End signature block

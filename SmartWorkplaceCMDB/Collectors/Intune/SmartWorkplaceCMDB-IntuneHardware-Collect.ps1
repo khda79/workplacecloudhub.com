@@ -7,7 +7,7 @@ Collect explicitly enables Graph collection. InputJsonPath selects offline
 fixtures; ValidateOnly validates their values without writing. Configurations
 are never modified. Existing inventory CSV contracts remain unchanged.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding(DefaultParameterSetName = 'Validate')]
 param(
@@ -138,15 +138,14 @@ try {
     }
     $stamp = [datetime]::UtcNow
     $history = Join-Path $paths.DataAllRootPath ('Intune\DeviceHardware\{0}\{1}\Intune_DeviceHardware_{2}_{3}.csv' -f $stamp.ToString('yyyy'), $stamp.ToString('MM'), $stamp.ToString('yyyyMMdd-HHmmssfff'), $run.RunId)
-    $export = @{
-        InputObject = $rows; Columns = @($table.columns); TenantKey = $paths.TenantKey
-        OrganizationKey = $paths.OrganizationKey; EnvironmentKey = $paths.EnvironmentKey; TenantId = $paths.TenantId
-    }
-    Export-SmartWorkplaceCMDBCsv @export -Path $history
-    Export-SmartWorkplaceCMDBCsv @export -Path $latest
-    $checks = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath $paths.LatestOutputRootPath -ContractPath $contractPath)
-    if ($checks.Count -ne 1 -or $checks[0].Status -ne 'Valid') { throw 'Hardware CSV contract validation failed.' }
-    Complete-SmartWorkplaceCMDBSourceCollection -Run $run
+    Publish-SmartWorkplaceCMDBSourceCsv `
+        -Run $run `
+        -InputObject $rows `
+        -Columns @($table.columns) `
+        -HistoryPath $history `
+        -LatestPath $latest `
+        -ContractPath $contractPath `
+        -ContractTableName 'Intune_DeviceHardware.csv' | Out-Null
     [pscustomobject]@{
         Status = 'Completed'; Channel = 'stable'; ContractVersion = $contract.contractVersion
         SourceMode = if ($fixture) { 'OfflineJson' } else { 'MicrosoftGraphAppOnly' }
@@ -162,8 +161,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxtEJbnjCrpqni
-# +N1gqCRskSoRH9WShrF3YQmTFBOql6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCu5Ysn0BbPlyQx
+# qv+Sla/XugMdwRfDujWl37tvBz4EAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -296,31 +295,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL3lPTfNRqHi/IX0QTD9UznDir3xepJ46DIzO15AnKi1MA0GCSqG
-# SIb3DQEBAQUABIIBgGdTvul5P/TQrsd2zlLx5NAZN5h/LmXuOGMEfCKIXIYHlbXZ
-# kCJE8w+Mt0zjKZ2BlY2XX148Hv36CqCjc1I0hYXxU2RIVFSctAllCcpvPI/AwCzA
-# 2lzyLRFUu4wLOicGmJvPXtEZGn7unYv+XhslWrb3LmObow6w4+L0lD4sfAQSPC1i
-# EYUq60BbpBJWEjoqk6sOjXK1WV4thdjQhzm5LBEPT3ttOycwUPAl9ArN44EdtRjs
-# nsirPOCfRMX7Kot/WsCgKxRi4zftx7jHQHMKSY9qPr4z+ynCl+HI+fDrifRF7SgK
-# JHKZctM8jpqUHihNRLPAZDDoY5XcxlKRjxEimq5QT2MmLuYWd+TKpdX9Sx0Oj5OK
-# 155pjQavdIUJ1v+9RKOWn2mxJOZsenxBQoOBd5+ZVI2sjB4DKzT3GvEP0X7OugYr
-# lmwcF59NhmCdQdhSw+cz/aYW0daC7/ceDpc/Ov0si4cq67dqcqd2fgksLmfeEnbB
-# 02iCKuFqz0fL95sNF6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOMpZYh7b1zo0gXYQvhMEIILJIns4pox6RVwu7FT0xF2MA0GCSqG
+# SIb3DQEBAQUABIIBgGF28Z6BQkhG5p85JNZamifSY2KBGPZy24jl5vVNU0t5DHqq
+# w9PvIC4LX/ueVZsz0F0sZfCLfw+CSZ8nVHyULnMAhefXGe0gg5BIf1cwuI++JgV2
+# 3IJWcifC8lhrJSU/h+HiYrQb+BcGiY+o2ZXm5jzgAHN9c5270HLnI8ZCgXt6aogc
+# ThZdVDxjRzbw2drQdfnV3ZjWL2vgJD4Vbn/4xn5lIfemPjAjalDxq8xDBjlaRw65
+# F6eUKRiiRBcsc78PlT5kWKXidIRTDVSMTg2FvJTbh2Wa5GYdeXiGgZQAGIkYeGWP
+# 8p+lf2RHM/r/4wstjtRl+66oxie8nGI6M6Mdx/Py5K6Kz1n+exARe3wmvO1choDB
+# mmdL/q+Ranxx/2wYEjk2Q+ruTmMXVxfKCxXJ4W8kNfpzZMWtx8+VDh4vxJZMEOpa
+# BlD0eRIUb2HZkwlrOyaVCrrVo627TFJ+MKmlODpBxQ0NF0iYvXN08NwcvmSbN5eU
+# 6ENM0X37/0WDqKpTUqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCAie6+qrlOlFvcyw7QDpMqsmDmxndfv7lUwSCfN
-# uzsxqTANBgkqhkiG9w0BAQEFAASCAgCG5SUe4SBSwh5/MiFNNgreIDLRJ6ntcZvX
-# 1t75jn7OPyJgF4WGD3dVcDq2dWvkwqESX07Y/Y8t81jzwFTe4c5cTQ7XsJPicrXt
-# jiSitI/ISvIQq7bAxz/y9o0l5FwKRaO/4gcjdc1NozIYnVrCoMi83vCDL4aEM/XX
-# 4cIPMoZeW3S5VhubthSybpYgi6ko5zvOqQfSr+utOAQkEm6B5y2q7rKXUYTpUktT
-# e1Csvo0g/xUyqryWCF87DirZOHy6CEW2v2cFDx8fgsAjqKzEfqKIxSYS9MfSTKEj
-# 7DEFXskH1o1HILNo2/6b5YNY36ayl/17swARD5aXpRPdxGbDW1kIKA3oPmeLd1ba
-# UF2QSevN7ArvCovoRPE2LahEBJKLEld7jChlHFRrl718W9m7V/TScVTWDQQLpJoO
-# 5XN2Bgr6RbciCb+aEhGdwQ2In5Q3crud6nL1ih3rrYyN38gnfVv0J5wpv79uCZfT
-# pGKxymwV3a7e+kptDuGtv0tV5o/uYQNBOJSAzerJWtEKSvmrJI6rdTvYzS30GpvZ
-# tldUaX4+dEz4D5YsYS7oWTcW3LmIGEvHh/L4EZ8141SQtPoWzH4zsgd8WcrwzBjM
-# 0qPtoxpJsaa6nR53134BnkBKR7tLUuNVW6r2qPTaMUU6iOf7n2A4b7+aSrjwNguJ
-# M2KbnVWFGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCA7/jzYxjG7X+c4yLKDaTHu/oNUsFDrNNznXPSP
+# SIKOzzANBgkqhkiG9w0BAQEFAASCAgBNCskivSL8IWlAqVxRNazxmVDiqoGR8oLS
+# 1Bz0/M4jEgAhejep5QPgJwi7GwpRK9GFFUlwoHaC+VofrOkoVYa57Qif5aJB1WVA
+# fK11tewg+5dcFrDhPBQ+CPHpIMX6oiZrPnrChPRV7txrUIi4C05Gbv5wndMxQ8b9
+# OzilQnvyAHPmGFyJDYe7RHEw9U0GJpSBibikHoup4qEw2wVpKIZczM2XYcygV4w6
+# eqnfzt0LyGewuBjZWcbmKLSjzcQ/zPZZIj0hifL0ReYZNRUYDQd8KkD7ZffWJTu4
+# xsEVPlR2YZEz5N4zuYaLT1q95X9WEX5brojco2h2eUCcGLWZnBCvXBROiwwJs5jf
+# QP1VboVdnbbxwekAy4poV7IdiGnkPr+PqlxU96iiD7sbTdoP254FKixIjFLNF46H
+# VOhnXE06zmll88RrqwJI8coGPDYFFu4t4v38SVQdeZV97KCyd6SpCNK3b6I5VQyC
+# lpgT6yHz/mbbXOnlSrBbKEsGmb//PK60OVvvMenv7hPomj6pXsaiWgZ80SYGpSuZ
+# yKNcHUTsp5Ou6N/je4SDBrMLajUDAi/uzEZZBnfi1s36hYZhJy8048lLd+pBz8zp
+# QbX4PwOPd5p69uAbGKODQDflPHGxbCas6yX3zoMQSWQuWy5TGecSzuU6SDZ8NwMH
+# MZ5BbpdbxA==
 # SIG # End signature block
