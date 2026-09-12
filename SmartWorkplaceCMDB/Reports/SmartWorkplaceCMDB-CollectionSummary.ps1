@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 [CmdletBinding()]
 param(
@@ -25,6 +25,10 @@ param(
     [string]$TenantConfigPath,
     [string]$RunId = ([guid]::NewGuid().ToString('N')),
     [string]$RunStatus = 'Completed',
+    [string]$OperationalError,
+    [string]$FailedStep,
+    [string]$FailureLogPath,
+    [string]$FailureTranscriptPath,
     [datetimeoffset]$SnapshotDateTime = [datetimeoffset]::UtcNow,
     [switch]$CaptureBaselineOnly,
     [switch]$PreviewOnly,
@@ -32,7 +36,7 @@ param(
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.1.0'
+$ScriptVersion = '1.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -455,6 +459,51 @@ $notifications = Get-SmartWorkplaceCMDBSummarySetting $context.Configuration 'No
 $graph = Get-SmartWorkplaceCMDBSummarySetting $context.Configuration 'MicrosoftGraph' $null
 $historyRoot = Join-Path $paths.DataAllRootPath 'CollectionSummary'
 
+if (-not [string]::IsNullOrWhiteSpace($OperationalError)) {
+    $client = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'MailClientName' $paths.TenantKey)
+    $subjectPrefix = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'Subject' 'Smart Workplace CMDB')
+    $subject = '{0} - collection failed - {1}' -f $subjectPrefix,$SnapshotDateTime.ToString('yyyy-MM-dd HH:mm')
+    $html = @"
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{font-family:Segoe UI,Arial,sans-serif;background:#f4f7fb;color:#172033;padding:24px}.card{max-width:900px;margin:auto;background:white;border:1px solid #d8e2ef;border-radius:12px;overflow:hidden}.header{background:#b42318;color:white;padding:20px}.content{padding:20px}.label{font-weight:600;color:#475467}.value{margin:4px 0 16px;white-space:pre-wrap}
+</style></head><body><div class="card"><div class="header"><h1>Smart Workplace CMDB - collection failed</h1><p>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client)</p></div><div class="content">
+<div class="label">Run</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $RunId)</div>
+<div class="label">Date</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $SnapshotDateTime.ToString('o'))</div>
+<div class="label">Failed step</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $FailedStep)</div>
+<div class="label">Error</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $OperationalError)</div>
+<div class="label">Log</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $FailureLogPath)</div>
+<div class="label">Transcript</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $FailureTranscriptPath)</div>
+</div></div></body></html>
+"@
+    if ($ValidateOnly) {
+        [pscustomobject]@{Status='Validated';Subject=$subject;BodyHtml=$html;HtmlPath=''}
+        return
+    }
+    $htmlFolder = Join-Path $paths.LogRootPath ('OperationalAlerts\{0}\{1}' -f $SnapshotDateTime.ToString('yyyy'),$SnapshotDateTime.ToString('MM'))
+    New-Item -ItemType Directory -Path $htmlFolder -Force | Out-Null
+    $htmlPath = Join-Path $htmlFolder ('SmartWorkplaceCMDB_Failure_{0}_{1}.html' -f $SnapshotDateTime.ToString('yyyyMMdd-HHmmssfff'),$RunId)
+    [IO.File]::WriteAllText($htmlPath, $html, [Text.UTF8Encoding]::new($false))
+    $status = 'Previewed'
+    if (-not $PreviewOnly) {
+        if (-not [bool](Get-SmartWorkplaceCMDBSummarySetting $notifications 'Enabled' $false)) {
+            throw 'Collection failure email notification is not enabled in Notifications.Enabled.'
+        }
+        $mailMode = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'SendMailMode' 'Graph')
+        switch ($mailMode.ToUpperInvariant()) {
+            'GRAPH' { Send-SmartWorkplaceCMDBSummaryGraphMail $notifications $graph $paths.TenantId $subject $html }
+            'SMTP' { Send-SmartWorkplaceCMDBSummarySmtpMail $notifications $subject $html }
+            'BOTH' {
+                try { Send-SmartWorkplaceCMDBSummaryGraphMail $notifications $graph $paths.TenantId $subject $html }
+                catch { Send-SmartWorkplaceCMDBSummarySmtpMail $notifications $subject $html }
+            }
+            default { throw "Unsupported Notifications.SendMailMode '$mailMode'. Use Graph, SMTP, or Both." }
+        }
+        $status = 'AlertSent'
+    }
+    [pscustomobject]@{Status=$status;ScriptVersion=$ScriptVersion;Subject=$subject;HtmlPath=$htmlPath;BodyHtml=$html}
+    return
+}
+
 if ($CaptureBaselineOnly) {
     $saved = $null
     $buildManifestPath = Join-Path $paths.LatestOutputRootPath 'CMDB\CMDB_BuildManifest.csv'
@@ -542,8 +591,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKwJBeDy/rRY6J
-# 1Xn1JojevgyCsKcxCIKmymfLFWPwuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpVlGNzK0E5dWb
+# 6N6S5vg3zskvN/jAXdj+Nkglm6YhbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -676,31 +725,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOGNUfVHftrVWppUjuMl81MqciI6+kMv7IpUW3FvzXVOMA0GCSqG
-# SIb3DQEBAQUABIIBgDqHggHWm4qs3wK2trLt5MA/rda3NmTs7it01ah1K8tfJ5KT
-# SI68TMMEVV8a4Biu3rnltu/IZzwvlZZxJJU+a7t5RI+Mm4z1/r1AoToPiWNOvHji
-# /QavMrJFIchqiUwZYmsaupMn26yvYTmRdRyDe/nphE+HspYUYXdI+aGi/wYZ8krY
-# kcwn9aVWxTy+0iV4S8DyJUUL7+UOI5zziZqxc6ev+HCK4q9TsodGE0eusVXtdOzy
-# uxDFR6PYUaoVFMcSp0vcx/6STczK5Doea+V97qqFg9ojUE4ygLMB2XH3sLpk3oQ5
-# c2+KofYQmUBHlD88+aH4PPVnmLyJNkrz6y4h57uacwuSBiQw3eW3LNtKyPwmTaYn
-# ACoXiJSaQ+IJgPUYaQj+ksPa+d5KBOxqu1byXxHZCrzpyFKzUpsq1ih902Dbo6k1
-# kR8rU54d78goCmQD0i9D+PV8K1EJ1wQxFM5DMaLNOsYdWs4S2xefGW1eQRv+j06C
-# 9sPtEJHGlBh/QJHJVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILnFMKiKDtjYaOW4ThiUTxLCduhstXWjSXGGlhlMYa5SMA0GCSqG
+# SIb3DQEBAQUABIIBgK94F96BROLE4H7oWDXEF+km4yBBCQ3GU1PYiFNcSR2BFo0N
+# jZhTSXqI5a35Y4JTbV4pjl1o51SX6U4ZTHnqWvo/HXdZas04FAAGGOS0I7DslqaF
+# 6chSPZKvYUqMpV+OzQVmGshbL1HWO5JtkVPgiZ9XL0Inlyl83M0VEsIQT6mAOA1L
+# 7Qz/ybJppt0UM66mBk/xZe+5wxLCqph6b5fhwc5rJVimVA2RL2lG7NiEuc5m/cPQ
+# 6wKrKPcCoWi/++zTLcjviR2hXPrff5YXt8zaj5xy7SShxYjchywNP9GprOZfDknE
+# Xm6kSB2sVBRbC/gmI9Ipi+vYfb5QJaoL2Tq4wQtHjP+epsTD3hZLVsiqkJyJROC2
+# FuaR5TTvmn8gFoE3Z9UKm1s8KHI4HpH2CBtpegBGkPZIBAjN8KKHY2hj/3bdP+3/
+# z6ghCrfvysF4e3U+Fyd2K/xkv59aUabDmZ8ovymb9DidsubEjm3eC6JGjcWrjC1W
+# EOvgbUTe3fMBDGjoQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjJaMC8GCSqGSIb3DQEJBDEiBCC5i75R1vT/PlsGNsWJUV2GuIR6AaDtInAkRrHz
-# M/VjIzANBgkqhkiG9w0BAQEFAASCAgAu8VzTEXNnoZEY2QWomLBrSTpuaPvO/lq4
-# xFN1UW3qNpJTPeTXEUVmbj1pWveE8HVUF1bBgwv+rG9SY8P8efPz2y3D7mfNofbv
-# d3Ll0RZZSSAPdGLGnizJFQIgTPBobMIBjbcSCI34jCZD7VdYtspP0bmMnpkSucHw
-# i9pfj1Uloy0vLQB2LNLzdZaKKd1b6j28QvyHbqBg6K1A/LVY2zasaH90qdvu5xlc
-# w20N7JIDXWcD7sYp45tesHmfq36xFdI1fP+qnas/c1xfJUnXLBxoq/RZDy0ml6iz
-# xmwfEBt2ZIN+XlzUT2v37p4Wv7kcT9YIHYMrY5gV9Pw4dW02u6TtirxD6n6uv1r9
-# bPXxFjpxJBUcfhWOT/fGEE0Pf69T8Z9B9/lmJzAZKGSij44t0+ApbRZvG1xnaY4s
-# 4/ExMw4RI2vLTAhUV1hfOBLCcgtTEEESZtsTo0y/iWnMx5W8FZRQPz+knMPWIB+V
-# 2IBTGOhG+io+eqd2tg9JKO2WtRRruHtE3IPuwSAYUDYshQN5FhrC3jyv8D4oRCoD
-# YQDeWFMJJmr/kUwq/MCRXhOT/Vxq34KQZUyyUTXsXbtm2WGB6HY73CQLHl2LYGP4
-# nKhYptoH8W5UePSs6JR30ZHzRllfI6kqzo/a83ZUPLnrxrfAmlDK3O7h98Nj84J+
-# geRuI4VIcw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
+# MzNaMC8GCSqGSIb3DQEJBDEiBCBHJ+VhFY/ufAXQ9cx3Biv/GepGhBAQe90SzjsN
+# tVqwHTANBgkqhkiG9w0BAQEFAASCAgCuE/1gGJ5U24aWfMstmJ8CqU1I8Cj67lH2
+# 1jmM/uqfQZEyUfIjF21x/s6sZdEzzjtf/LNBA9e/mNAmR+i6i1Gqa3Bshuls5mRN
+# zFkB0nN3rlvJ0wL/Kh9sfJVyzPIco4lipS7Eq9jpdOMXTwoFGmTlDM1M0wNVPYH6
+# VOnU0Ge0qwTsqsOiwy7Ru/vBiRpcOvRHMm8DD1EH6x2O6CCgUeoyVmhqTfi41hUS
+# PVayuSP/98VhxQKPLSMbieviI1e9sy3IxhLFYfFThYbj+A0FpVl18efrroI+rVgz
+# 8YsxDCTlAnr3D83gAYf9SU4IUuSOGLIg6ObO0ahHw36czYCOV3GdenGVKjAnz54p
+# AAAZlZkGMP/gAR37dt729pcAXdOwmKaebjS7GeDomxQ7XSbjPFe0I8nv5cdSoEeh
+# Db2ZXq91WP1yDhrYr8F1+Q4NJvXEivZ4Bmn1Xqkf6OIUS2SNUW+SHPuv2gMB3/DX
+# fl4a2dFZNl87w445J75x1yXY79QpeENaFOvvFxOU9JspER15PwXkiaDjRRP+nDLi
+# l8UsSav68FF880Ot3FPgxyGWpCys/5PuhEKOeaqrJMflWRsK4KLDrg+/rS5asirU
+# JC+/+2w3jREoGK4IuzIKb3hJtAzR98iNbQSBRGZ2gCjLYhKMfykpa0IC0z4gMLqS
+# pVqLh1gs9w==
 # SIG # End signature block

@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.4
+1.0.6
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -46,7 +46,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.6'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -1100,9 +1100,13 @@ foreach ($name in $tableNames) {
 }
 
 $sourcePaths = @($tableNames | ForEach-Object { Join-Path $paths.LatestOutputRootPath (Join-Path $tables[$_].area $_) })
-$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath $sourcePaths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -Scoped:([bool]$SearchBase -or -not $forestWide -or $TargetDomains.Count -gt 0) -NoWrite:$ValidateOnly
+$executionMode = if ($ValidateOnly) { 'Validate' } elseif ($PSCmdlet.ParameterSetName -eq 'Fixture') { 'Fixture' } else { 'Collect' }
+$runtimeContext = Start-SmartWorkplaceCMDBExecutionContext -Context $context -ScriptPath $PSCommandPath -ScriptVersion $ScriptVersion -Mode $executionMode -NoWrite:$ValidateOnly
+$executionError = $null
+$sourceRun = $null
 $sourceRunCompleted = $false
 try {
+$sourceRun = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath $sourcePaths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -Scoped:([bool]$SearchBase -or -not $forestWide -or $TargetDomains.Count -gt 0) -NoWrite:$ValidateOnly
 $fixture = $null
 $readiness = $null
 if ($PSCmdlet.ParameterSetName -eq 'Fixture') {
@@ -1698,17 +1702,20 @@ Write-Information (
 }
 
 } catch {
-    if (-not $sourceRunCompleted) {
+    $executionError = $_
+    if ($null -ne $sourceRun -and -not $sourceRunCompleted) {
         Complete-SmartWorkplaceCMDBSourceCollection -Run $sourceRun -Failed
     }
     throw
+} finally {
+    Complete-SmartWorkplaceCMDBExecutionContext -RuntimeContext $runtimeContext -ErrorRecord $executionError
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrV0ZCBlP0wYSs
-# caYFsj8veP0KcUUmDjjpRXQ3Wu5QW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyHtB0HbpXu4us
+# Uu/H8PLnWty3f2ZTaQKRGQTftPFbN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1841,31 +1848,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMlLXnSMnTebcV+TcII2kyk2rQfo/6nvKSG7pEA0eOk0MA0GCSqG
-# SIb3DQEBAQUABIIBgHSaYfO5HmZ2BWIgat3PDHliAH9JtwuK1jRRSPT3loY7s4cj
-# 4sS65vMkJZZaqCQMdNF+u4X5uW0JtOvIAaYyTcuI+MfZpTe0I5j8mMFIEJv3dnjC
-# UXA0wREiQK3F+FNTB0H5Y4vqzq13I3pelrAeYVJdErfJLk5+t+bzGSpb8VUwntTN
-# t0LnM17ZUxjw0l4hMqhE+TBRVxtxY3E7iDZOyYq1vGHDwfV878JAp37kjg1+FgRO
-# aD7UjpDq+NH/i6Vd04jV8kzvFQ6VJ6vMokZxEotPbvf2pBfF2YLUPXam1dWGpnTP
-# uAjxfJyLi+cDpWQmJwhVl2DuYYRl94xLBxDLBudnYBJzYgwGXIcRnY5mcq4cZ7WR
-# 5A6d097/ucXdX1xUsiN6vK83g6tqkjMo5jl08Wfx8LNBGauVmtpqt7dEK6ulI5Cz
-# MiaVjR+w+mhv6eik5IdQ+1aU7JPWalaSPoqf4QZfgtuz0/RG8VRQmaUSJXOCP+Fc
-# K7Ath36QOWC9mMI7QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIg5Zszto3v+1h8c/bP3jcU7EvERWTOahkM28Ymo+RKTMA0GCSqG
+# SIb3DQEBAQUABIIBgGlVsqT9BMH66QFeKgRwh3HM4PAumSYpbfpSW7Hcj/8BUSBX
+# q9b6S+vskP2hfb20F1HZyATHD+AYZcCxR3cawQzOzEGSR+P8bRVQnyk6PevOeifj
+# M6NHA6rIV6VtZPUgKKVQJlaMLJ4B2pJc2lGQmtd9RvWF1ndGFLXEFw5odG5QCV0J
+# 2BWmlJRKUiP+LLiejUUdGcr5x1w0vC03M+O4cjr7OEo16yspAsTgZ4Y60vKQBgBp
+# FX5Tptbic+1QHrvCIXQdNhSRT3aBBzD5f2ttnw8Wc9Mg2thUwxRnUZcXXDl0cJPE
+# LljZDhjZ5xtjMURyoYPKX9O8P2phwbxyJZNL1sN/qR5WdFzcnRuHgQdbs4C2fSAU
+# qn9J0OUa/QM00XvOCHL10nVkhwBqNyv/zwsQnosbwHRmZKCkwbVJET0KncJVNubc
+# ha2yr//MYaowcZENWybeuc7AfqslH7QnPUi5+R5uAsj5IKVHuz1FHs56iyp1bQmZ
+# ESHXbFY/oqgeRG1MBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNTM2
-# MjVaMC8GCSqGSIb3DQEJBDEiBCD4TI4wopGI6Fa0k4FGtTzu2Fn6XpfpUxPOcX52
-# 47znvzANBgkqhkiG9w0BAQEFAASCAgCBkwdu6gmcSfNGd5LHfDjtCtMQvbZqP2BK
-# 8CLBX3sGHnNcttr0Zod1MfX90DTTOoA/Irp7Wt4BvNmzoPXaUG/1hGwwTpjsilDx
-# Zsad2dQTJxGlCF8x78xsPk6e+L8gizicY4wdAXFlQ9bdHBPeB4rur8mtFyWeoNRf
-# H7wXhm5bMPtGvJoYXrYGxiZuPiWYdjN76IZpD3XuC1MSWl1RY119jldcAqehWJTt
-# 53tUuLDTUAqO6UeBklXZ6VgiXH4sjWVdDhr8pvZvFNMp7FE4AR4r6wxWwzC8ZMoI
-# Hhdl2z5R6/ZGGKUWQwQJvQMtaYPudoFbp0VIicOYhGWne2ukRjHsvTLRGd5icKv2
-# v70GZKggG2x33+ZGldXlDV3j3ZnunQg38fnqxkY3DGn8P7HHmHc5MT+XJy2glVvM
-# voYd12ez3+8zsHLIQ/NI/t5WUwMI/KQSp3SoCg13DrgSQa5yZSmd1cZhyoIxI7HL
-# sbmS3MZl40lXc7Md2TW2sCTawqr0VIkPlibsQ2jNjeDz2WG9DSiOR/66DkEPeeTV
-# wF4vgPpFDFvayHl5gRBM4L3UPP3UwrMPEgzfDm2A3z1Wq/uMFfpJL3EJ0o6ITXTi
-# gvzJ79zRoZCJwgr74VNZA5VC00qHkqebdU9zOsHFRWT0v+85BIeklIuZl9bJFoRB
-# kbovSXfpOA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCXk/1UcdgvRbcSh4IhFIuFiuu7ELOZRoPc5rv6
+# 2C54VDANBgkqhkiG9w0BAQEFAASCAgA48nBrkHNAvkK5CUHlLhqqgLBBClx8/1y6
+# xhNI16r1gDgGTf9uTFsnobEgPyL/3ro1vwCSsLZiYDxUTE3t/6/nwfuBHDqy0w3g
+# I77W5Q9V4e637F73oph7+0rAvoWdaL68SHT/WAwzKhkbdSEdFWcReCJ4HjEq+bet
+# gRQ2HbFX1J4RPPsYuh+oJtzysit+r9dKuEMrFf/wpwumVu2kZrsEgVqaH90cLvQO
+# IIz+9J0jf0tY3A2VckGTJafTtjJksmVanrGLZAp0nEyiny2ULzw8Wrq9BOKBqu8X
+# KwjnUX44ikjGlsVoVwiKOsDk0v5fcmnmZFjegR2+omiI6wF6J8ONQgejPI8JCG9A
+# u8uKqA46a1udy2ATPccM1aKWsCowsHPWMZmwCGAuOuSllxuoN34uYUwCwpLagb4x
+# cxsCdKOSAlLLuYdQ65kpvB4aRoO1rv97ujqHE3xbDZN9vZOxLtxRJK7XxmOKH1P6
+# 0QkaoZWlIif+ZmxbfvvxbPuO1h3GyNpm+sGPN2PrS6R5qS7uzWshdt2rujj9Ar15
+# U6E0ynLVCwTmgY7XyZOTlyl51y+KOW3HuG+0EMVxyLc6qRfPt8Ba6a/W3cPa57GP
+# nBnY1dZAOXEmcqidx/glg5t8YXn50smQKl5nIT7yLvGrbSa/0Ji0084DSNnMPTwG
+# fsPE9alqWg==
 # SIG # End signature block

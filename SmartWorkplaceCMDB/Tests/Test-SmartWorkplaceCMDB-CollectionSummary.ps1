@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 [CmdletBinding()]
 param()
@@ -126,6 +126,24 @@ try {
         Assert-SummaryTrue ($result.BodyHtml -match '<td class="number">0</td>') `
             'An unchanged collection did not render zero deltas.'
     }
+
+    Invoke-SummaryTest 'Render a failure alert without creating a business snapshot' {
+        $historyBefore = @(Get-ChildItem -LiteralPath (Join-Path $dataAllRoot 'CollectionSummary') -Filter '*.csv' -File -Recurse).Count
+        $result = & $summaryPath @parameters -RunId 'failed-run' -RunStatus 'Failed' `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddMinutes(2)) `
+            -OperationalError 'Synthetic collector failure' `
+            -FailedStep 'Entra users collection' `
+            -FailureLogPath 'C:\private\orchestrator.log' `
+            -FailureTranscriptPath 'C:\private\collector.transcript.txt' `
+            -PreviewOnly
+        $historyAfter = @(Get-ChildItem -LiteralPath (Join-Path $dataAllRoot 'CollectionSummary') -Filter '*.csv' -File -Recurse).Count
+        Assert-SummaryTrue ($result.Status -eq 'Previewed' -and
+            $result.Subject -match 'collection failed' -and
+            $result.BodyHtml -match 'Synthetic collector failure' -and
+            $result.BodyHtml -match 'Entra users collection' -and
+            $historyBefore -eq $historyAfter) `
+            'The operational failure alert was not isolated from business snapshots.'
+    }
 }
 finally {
     if ((Test-Path -LiteralPath $tempRoot) -and
@@ -135,14 +153,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.1.0; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.0; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWZMom9BakPNQP
-# OSwXjiFpD8PPGvs/Fc6zaaHVmqvp0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmHKWS2RCc0EwG
+# fck8sEH56CqoWcTtZjZpXx0AhJBP/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -275,31 +293,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID9Q1BAsUpn3pAvbxtSYyBK0QCVdBy7DeS6fg9UNQYEtMA0GCSqG
-# SIb3DQEBAQUABIIBgJvNkZ9+NK6MWibSlPoCAoIfdzKTvjKwtVicr4gjxFg0v6i/
-# 7MPJp8a1yfc2WGVoEyG+BF8UARYCmVErFJzgYqtCou0jvH/UmOyLr98c1QtfHzSa
-# EDnJmVxc7JgbaFYTdMTbVYwQKYOKtb+48qKv6qWpOBmCiLgAwUjQmn1RVgodLSBT
-# PirshqsY6KRHCk60dEtzomNEkLUJYu820P+erQ2JD41XyXmbFXlEYKaWZ2YqaAOl
-# 1aPVGfSx0l40zC4m6JZLsDju/QoY1Wy75TQo7Q8/wtaDPjABYJUPjGaP7MffQmV1
-# xUYabCYRqkb8BqKEfdhoq6MkFM0sAYFpCc2bxfdGKPKV4wll/rq6BwZKjmx8EHro
-# ZZAgi5h4SnGskpv3zwKkjFfe69YM5XyW0PMGmWZyUxFDefSpjbCUpHiQWoMmHUdf
-# cnkYpDiCWMkP6NkCp/i1rlDnLTlYnhF6mjqg7MSsVysVF3Y2OLKcB/Ipq9zLFalq
-# XezcVuDOUd7VlyucQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIqHK5EqJg2UXhawt+uKooP2s4//Zgvm7X3wwqk2kVLZMA0GCSqG
+# SIb3DQEBAQUABIIBgIIFnnkY7bqKJkIX4D3uw1z6t1fpgoaF6rhYHR8bcV3GMt6B
+# kNjs44WlGHGHIe7x+MrtiVGwF3qfkoPeH4igsdqkkvuPgxIF11oFS2+DwEO4z82/
+# hYcMvp6EiImWsCSqCQCX8Be8XHGULyIm39e6GyWNFKisO9ossElvRpwC17UbCz1J
+# PGTm2/CvA33kGv+8P/boBD6yZaN+Su0D/md600DVier4tiXykoqg/w0x+qSinEQg
+# Bm8n1z1etueKwy5djqmrtde5SJXtRr8+anzlldol0FPdA2ww6W28AFIG6QJgxrb9
+# uv9o9akRw/sjlkuBZZNLOfEGvBM1Xb1YDTu59W5W5r3OZLen657dP6Z7OQ1FmRwx
+# CwU9PJ6WQVXk1b+vBMf3OtgBxhzADr3WQkE2b1zqn0UOXL/ERGun2uN7n6so/ja1
+# Vhhhz+br6dZC22duyxifJqIY9w4ItSZ/MMPF6dFgBB5MqRKVDeyZ/DmI0mzYJTF2
+# fUk5zm781Vk8pFBJ96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjNaMC8GCSqGSIb3DQEJBDEiBCAqhyupk52itZbUyp2wkiSJ0113OdZP63kM0qAm
-# f+8j5TANBgkqhkiG9w0BAQEFAASCAgA5q6shPdpYlHz+ZD8y1TtUf1Jyi1AqfSyx
-# YhISPkrmfMpU315Dd3lfh6bl6sqsRNBespHVq8RVKpm+DiHQd/fcAuN142ugLtyX
-# AMs0+M2Glh84zZEsvAlhofYYgvk4XqjljRTtBVokRkr5h1TjypbdkpDxqdXdRwow
-# lhmTJbiQv43AawuXM7Zj9YF+zYNkRSzD7tGhEJRUpfpo6IluAjTt5U/oyD/oRgy3
-# Mn/rUUIs+1Xvwwz4S9mWY6NDNnxUmN4qJCmLa2dTjAy5g2rlD5ix+Tk5KD48WWau
-# +pPXUAzZnGT/1Q3CEk0lIl36SOZRGqcaZMxw+Aw37lY2PYNSU3zkmPnF1X8iBwfu
-# jMJCGwu7+R4bU+5Yd/0263I4e7foySzh+KNOZgzbrwqsSXOih9+iFDZFk8a0YP7Z
-# Lk9MPwJQdgGV/t+46E4MATp22us4NG2XP90TBTiNdKjiJPM9nFXBnKf2fErJukm2
-# qxxoU33YLgO6mpPQd5U8+DpMBZf9ZbveaFpMRCkqY1qRMK96Ekuz7E2ovXpDUE2y
-# FOHEBb9s1CoZbSpkMpKD7vEo9zX7rVwwBPDNv7lkAzk8xGJg/RsTl4+4Mr6O9ZKr
-# EtQIIYc+Zt5YHyFp+HEPW4pX7g684Yn7mGCR61hlZQoIcCBOZ/U/2OxGuU+1EPRa
-# yQ32997IRQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
+# MzNaMC8GCSqGSIb3DQEJBDEiBCDqAiaYaXqsep4aQfRFPxBjXnBdKYZJI1+SblnJ
+# WVA1QDANBgkqhkiG9w0BAQEFAASCAgA4mRiOwIJT1vutP06ch/k8llApP10/i2XN
+# LfGxB+uAghnNO/fI0jddo6ueCqHvfg4jd1Pc/aO02vJ+lk0KKTHJCQ6PAeowBfsc
+# hMjl+hPYnU9VL4GPwdts7YprYVHtThSVFaNlhiYOXRWTqM8RN0PU2yN4VSlSKJj/
+# ULRzJCqcDJVXbkgQM+c+spyjslTtOv3TDzYpXfP30NOdnpP00C2jtlAepAeNz88E
+# UclISRY+19+Lne+lM+wgdILUEKrHEX21mzS9dhY0cWJPFzw6iFu/0QcJ+gOOaNI9
+# tivL98p8K6yzg7bzmzJhcaGGc2vzFjJsI7jridwDfvL0wHBg2pfZaActWJfK4P0X
+# MmPyOYZNcin/O+c6nuRnA7dze798CBoIENYlntl1TQxTzL9R/kXj9SRsJEr9kSSz
+# RQ/4qhPa06avkXWvfQY9nBDP5mO7N5jRl67CnzoRSWOwmX92q8csvaxd12XXJWdB
+# Pj05HXuygjvlOErgoXr9YCyuSOslUE/NpbzQtjFmE3PNldjvIsYiuslk7PqQPOKq
+# DYgEiBabZ0gxiU0WJU9KBEuBzRJoZOxP91kRPcHWwYwzNIuy8yW8Deso23whySj9
+# JYgEVPblm8lzVlpmqIPz2GZX8hSi/mMc2bmZfY4ETah45sMDZmWWp3KuBohO6CcP
+# BBapwSIB3g==
 # SIG # End signature block
