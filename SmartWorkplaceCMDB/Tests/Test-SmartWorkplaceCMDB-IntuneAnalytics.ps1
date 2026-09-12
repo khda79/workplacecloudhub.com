@@ -3,12 +3,12 @@
 Validates Intune update reporting and Endpoint Analytics with synthetic data.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $passed = 0
@@ -67,6 +67,17 @@ try {
         Assert-IntuneAnalyticsTrue ($updates.Count -eq 2 -and $updates[0].TenantUpdateAlertKey -match '\|update-alert\|') 'Windows update fact grain is invalid.'
         Assert-IntuneAnalyticsTrue ($analytics.Count -eq 2 -and $analytics[0].EndpointAnalyticsScore -eq '75') 'Endpoint Analytics fact grain is invalid.'
     }
+    Invoke-IntuneAnalyticsTest 'Treat the Intune minus-one score sentinel as unavailable' {
+        $sentinelIdentity = @{} + $identity
+        $sentinelIdentity.DataRootPath = Join-Path $tempRoot 'Sentinel'
+        $sentinelFixture = Join-Path $tempRoot 'sentinel.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $fixtureObject.endpointAnalyticsDeviceScores[0].startupPerformanceScore = -1
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $sentinelFixture -Encoding UTF8
+        & $collector @sentinelIdentity -InputJsonPath $sentinelFixture | Out-Null
+        $scores = @(Import-Csv (Join-Path $sentinelIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_EndpointAnalyticsDeviceScores.csv'))
+        Assert-IntuneAnalyticsTrue ($scores[0].StartupPerformanceScore -eq '') 'The minus-one score sentinel was not published as unavailable.'
+    }
     Invoke-IntuneAnalyticsTest 'Bound both report families independently' {
         $bounded = @{} + $identity
         $bounded.DataRootPath = Join-Path $tempRoot 'Bounded'
@@ -85,8 +96,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzRY2pOcJyT+QX
-# 1Z0k0+ArjMO3sYh4UxVHk6YtVAPqqqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5UOC1BanPhBsj
+# b+hRAtRVJ/VPh2GIJeBxe5V3+CW+5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -219,31 +230,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIE1J5UeP2twTxqdEMWKLDsneozYmXvq16rWYuBpgxa8MA0GCSqG
-# SIb3DQEBAQUABIIBgGUGRixE9RfQKLx5cImZJH0mIXCwquAptj3nj+MTwqc/HOaN
-# hRhpZMfVho6drNYsOF68SHLPuzq8gWoW55LL8iGQgScIWHuW4yzwOg4PBxfKmOFA
-# BIUkfNXlzIiEiuxCdT5hwc7i6ojOyFI7rHtMIVlhClsDg5Reb24dFkjoxyanY472
-# zqXiQ9QgA+AAz5i31WPYO4AuhddyTqbVwuybwaDwlvZ0vtNOCTSwgiFhlAgpdIwq
-# jtrzlBHhaJQ6z7m1r4TvSPbIZZktBe2rSNmF2d7DArQ40lajsCgN0/ioIjHcgZVU
-# SFuE/Y86aIJ4iK4Xn1i7RtsWYc6MpbgcATCDXs9GItL3wTEvRf5jrPKqSYGoldRX
-# SepYtb2rg/GCoAo3aPmZOc1QDYdFov590qKlKAefgIjy53hZXEnJPlXtMRhPvzPl
-# a5ZpXu89yqu262fMq7VxV5AyYgSIPRJTLFeKakUQJQCH1zxldUosiKzbbf+2+Fn8
-# 4M6kSYg7bfEC2xEKkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAMtADVAGBq7kuKIhhkXdR6VA0SzELvllwk0aHJkg7JKMA0GCSqG
+# SIb3DQEBAQUABIIBgC9AMpl4+Ci1cg9RgyZjbWCrE6UoHco31lAGjMq1qENGdVKc
+# Q/sfO4N5QM9M8WM7jVEuQVppSnL9g8bPbTrU0Gfjwwvz0uUtF20upgoTDwIBwyxX
+# P5ITjsRxXnghWD9TC1XbXYPyFHBrWVVDGx7P9/IlNDaCjBHL112A/DuayoTPprjk
+# pCoKuPSe6K5+4HKWZkp5/XhdvC0GvxELrIVu4YZ/ZB29MooMgVoAfb3QBW6Be99K
+# qtX8y0Hq716as+puvFtjmie9bAqovso60/ntiVF2e2Lo1QPmgEBUZ4O0O58aKn/7
+# mtWBRc5FHh+Gi4nrWmarH/pbDsL0GEWtAs1C7d/gJfcFSpx/m14Ev5mR618UKmU9
+# xdSl70AN6U/3XRa+oDbZrXPIgZUzAqJOdCmuIpoPTB3UeIrY0KLAoEswDaMM2ocg
+# xzXEw1uHmrnVbcNEnVsua2bAZCgrkT/NamjRXBggrUNWuobb9HKKq1lGox3JIbtv
+# V/WyH5y8o38SAsk0h6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODM2
-# MzdaMC8GCSqGSIb3DQEJBDEiBCB1ZyvPAR3COMYn7S/i0jVd+fEvvSHtYqTjz+SQ
-# ZJ6I2DANBgkqhkiG9w0BAQEFAASCAgCKHQNNJBR4jGL2Y1jlX79aqpb7+cxaF08P
-# 5POSZuHjcQX8gOfOzY4HavbnFvXjpaS550pWqUS6Xm6hVLqrsA+4iU/NxQeSCEMW
-# 904Dn8IwG3Qip0LqpGhuPPgahcr0TJpJMGgUM6P+iexw9cGYlyKvBRihR1Sabc47
-# nSTkJMmLqm/6L6IHfFdTy0/qdOvq2SfjL0n15FJEpJfeiIUZT9ndsP43qwf3Jin7
-# teUDTk53RbkJc8/hvveLmzq4z42MY+utqYeGKPlI1v/uXzwCQFEATMhbYt3Z2mqT
-# BJJS3Kl3aNkSSDdWYHRa02UU/BMJ/BCaOmL6AFcGS1/J9pUw+iwAqipSMvrGO74P
-# 9b5dP3HR4NoW0cEwfSOILfE0k68wlpd7FLEQEextfsOvgO0GC8aNUm5srQFQD/Ze
-# mFW56Um391ZFjzeJlp2wiceZ2CfTyCRD1XVHt7Dgz0jD2OsiqEjx1yyAQCAPM4Xi
-# S79uKMhX2ENrgwe8PALL5huEs5K7Owu8EtkazNLY94IqbobhJpNKPNceVuPxtJ53
-# p5z7Jv+kqvgyFIltT1pHJLYqHjQ3T1JteubiLIDlaF1XOemRN6JXlGIOTyldIfH8
-# rPwcVz3NsMnO0rnlP/RkGha2W36qKcc5MIk2q7gXXGBkzgHNrnW3cwdWTDBOmZkY
-# xqM2lrRl6w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTIy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCBCoCpQrITBDagS91iDRZjHfshe6pIMJ4wWngYO
+# xW03+jANBgkqhkiG9w0BAQEFAASCAgCp+ZjwBz4n33eQ9St1Ex0oOt44Xh2wHqwq
+# U8BKLzW2PzkXkskpTaaqOjo7HSo4SyR4bt07lvUiDgiHrYnattg3JPMV2UNV7/Wq
+# 8OrKILnsB8FJwuFAwVpW3Bvezxu6uwxbJR5EOeEDxkFZDdzXMGpgYmjk29alMHia
+# bx66gI30yc6A138HEjjG/aoVOj2zi9HHrV7r22Y/8Cs1FT6cR7CF/3qbknHvzYxb
+# dBqN9wKOW9+tl2W3gSrKWfT45zKR44ih1sj4XkoM8Y6aPr5aZPazrJ5Sq0mW5gQF
+# LHfKW4BzjTK0UEfwNmw20o5t3aU3XdNmObBU1GXY/4Z9bEhfg5fSuSVcsfhSLos/
+# R5xAwi6OA0jVKi7Jef9GXOvqD27p1kHysYS3USCcjkLrB7BcVBRNs0pTZLdo4zZW
+# Q7GYoeTWFFy+syurxQK4b/gfnYYolcnrpN8NFnupg7Rw5L7Hm9kfD2xD2drIN5xd
+# +k67EtnpMtgjVE68AobIFrJhcMMT5TbW7laZKWX3vxhdpYtDvUaNTmXkLArh1Xsw
+# bs5+R69CvangJHWS0grLgeUa3VvZh+XfA7dSowxnof5iQAxIZC3wBTV2Ejepqmrf
+# aN1p/q5rVLEl/eZe8Aw/jvNvZwU6ki3Rlw3bFOObAbFZwv6tAwYWW4k+ZbnVIwWK
+# yzuAZxzNfg==
 # SIG # End signature block
