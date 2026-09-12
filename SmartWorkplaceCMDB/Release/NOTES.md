@@ -17,6 +17,9 @@ local configuration and private report artifacts are never part of this package.
 - Fixes live Active Directory membership collection by explicitly capturing
   the LDAP connection and ranged-member helpers before the per-domain closure;
   both helpers now remain callable inside the closure's dynamic module.
+- Routes unresolved cross-domain group members to the domain controller whose
+  naming context matches their distinguished name instead of querying the
+  group domain controller.
 
 ## 1.1.1 stable feature candidate — 2026-09-12
 

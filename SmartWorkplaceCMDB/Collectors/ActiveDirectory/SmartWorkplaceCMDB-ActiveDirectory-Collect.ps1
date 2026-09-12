@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.3
+1.0.4
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -46,7 +46,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -359,6 +359,51 @@ function New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
         $connection.Dispose()
         throw
     }
+}
+
+function Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$MemberDistinguishedName,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DomainInventory,
+        [Parameter(Mandatory)]$DefaultDomainContext
+    )
+
+    $selectedContext = $null
+    $selectedLength = -1
+    foreach ($inventory in @($DomainInventory)) {
+        $contextProperty = $inventory.PSObject.Properties['Context']
+        if ($null -eq $contextProperty -or $null -eq $contextProperty.Value) {
+            continue
+        }
+        $context = $contextProperty.Value
+        $domainProperty = $context.PSObject.Properties['Domain']
+        if ($null -eq $domainProperty -or $null -eq $domainProperty.Value) {
+            continue
+        }
+        $namingContextProperty =
+            $domainProperty.Value.PSObject.Properties['DistinguishedName']
+        if ($null -eq $namingContextProperty) { continue }
+        $namingContext = [string]$namingContextProperty.Value
+        if ([string]::IsNullOrWhiteSpace($namingContext)) { continue }
+
+        $matchesNamingContext =
+            $MemberDistinguishedName.Equals(
+                $namingContext,
+                [StringComparison]::OrdinalIgnoreCase
+            ) -or
+            $MemberDistinguishedName.EndsWith(
+                ',' + $namingContext,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        if ($matchesNamingContext -and $namingContext.Length -gt $selectedLength) {
+            $selectedContext = $context
+            $selectedLength = $namingContext.Length
+        }
+    }
+
+    if ($null -ne $selectedContext) { return $selectedContext }
+    return $DefaultDomainContext
 }
 
 function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
@@ -860,6 +905,11 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                             $member = $principalByDistinguishedName[$memberDn]
                         }
                         else {
+                            $memberDomainContext =
+                                Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext `
+                                    -MemberDistinguishedName $memberDn `
+                                    -DomainInventory $domainInventories.ToArray() `
+                                    -DefaultDomainContext $domainContext
                             $resolveAction = {
                                 param([string]$SelectedServer)
                                 Get-ADObject -Identity $memberDn `
@@ -871,13 +921,13 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                                     )
                             }.GetNewClosure()
                             $resolveOperation = Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation `
-                                -DomainContext $domainContext `
+                                -DomainContext $memberDomainContext `
                                 -OperationName "member resolution '$memberDn'" `
                                 -Action $resolveAction `
                                 -RetryCount $RetryCount `
                                 -RetryDelaysSeconds $RetryDelaysSeconds
                             $totalRetryCount += $resolveOperation.RetryCount
-                            $domainContext.Server = $resolveOperation.Server
+                            $memberDomainContext.Server = $resolveOperation.Server
                             $resolved = $resolveOperation.Value
                             if ($null -ne $resolved.ObjectSID) {
                                 $member = [pscustomobject]@{
@@ -1657,8 +1707,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFg9uOyMD59d7C
-# LaBlqLG13VOXhHO/Z2YEr3WkkpwXtqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrV0ZCBlP0wYSs
+# caYFsj8veP0KcUUmDjjpRXQ3Wu5QW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1791,31 +1841,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILtvyhnqh4kYwiZMzR69WTKQJGBj/owqOS7cyaTCUalvMA0GCSqG
-# SIb3DQEBAQUABIIBgEt5pgfO/iuwJswRen4DTlJkMqpNWYGjPKVoK5SjAkbJluyU
-# eNYXp5ulTqsJxcnJPjVTAoz5yXkDEKEs0e2twDCThGxk9QrSGMwoz9Yv7olbNpA1
-# mr1JkPYSBdUxK63jy19vaHe6rkZWw7pIxjUvWOWecjjKc8CfBYIgcoMWik/M5j3f
-# qp30HCVo6uYmlcc4ltLMUUa9H/FVzesORLWYyoOilpO5UXrH4T+UYdaD6pXS0O3l
-# NIcmStP8vNA65xOBE7PWErJrcSgLx9NGRoexIGxyNyruQpaFOm9F3fMniCL5G43o
-# OEkJ5sxDpCQVB70EAaaZxhYdNrlpc/706W0dtxxWZbvVHI9z3AdyNVRfflxU/zvd
-# Wtkw59CRpvXPz/QA1kDvaNSyM/22e/T3dVorSoP307wIFmyD4oxSRTrwPw4Bx976
-# 0le2sUwtjwvLSpj+V7UhWhdnit5WBQ/vPpITA0UP67KGb13Cc39eK4hWKZbI20OZ
-# hoLBEs8/wj4fTXp4oaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMlLXnSMnTebcV+TcII2kyk2rQfo/6nvKSG7pEA0eOk0MA0GCSqG
+# SIb3DQEBAQUABIIBgHSaYfO5HmZ2BWIgat3PDHliAH9JtwuK1jRRSPT3loY7s4cj
+# 4sS65vMkJZZaqCQMdNF+u4X5uW0JtOvIAaYyTcuI+MfZpTe0I5j8mMFIEJv3dnjC
+# UXA0wREiQK3F+FNTB0H5Y4vqzq13I3pelrAeYVJdErfJLk5+t+bzGSpb8VUwntTN
+# t0LnM17ZUxjw0l4hMqhE+TBRVxtxY3E7iDZOyYq1vGHDwfV878JAp37kjg1+FgRO
+# aD7UjpDq+NH/i6Vd04jV8kzvFQ6VJ6vMokZxEotPbvf2pBfF2YLUPXam1dWGpnTP
+# uAjxfJyLi+cDpWQmJwhVl2DuYYRl94xLBxDLBudnYBJzYgwGXIcRnY5mcq4cZ7WR
+# 5A6d097/ucXdX1xUsiN6vK83g6tqkjMo5jl08Wfx8LNBGauVmtpqt7dEK6ulI5Cz
+# MiaVjR+w+mhv6eik5IdQ+1aU7JPWalaSPoqf4QZfgtuz0/RG8VRQmaUSJXOCP+Fc
+# K7Ath36QOWC9mMI7QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNDE4
-# MzJaMC8GCSqGSIb3DQEJBDEiBCD2zWAjKJOZg2htABWnYrD0VYqtaY5V8A4fVYuu
-# xiv4QDANBgkqhkiG9w0BAQEFAASCAgBzvljgHrcA6pF9qWiHR4swlsPMkGU7Mcb9
-# mxYsLezBiQ4IbkBz/UG9lxcDqwRHtgcUAEGiEIVJBqA7ZEJxMhpNL0QgRgK6QrZK
-# I6wMOW2Wo9DT4Sh1BiBJ8ZMnRrw7mhKTh+sLM34Ioh8SYRWGNsV8uiZkgQAN6zCH
-# BrKt9me+XP9DOKezjyfRN/mdLRi0Y5PU4Hw6zkEMltgHeQEdLOHgqmyX6Dh4CARJ
-# gNOJR2lJ1QSOFTHrRnqkkbubct7JiNpOcZwj8VNrPx1rZNqpgkBD7l7ixDquMu7L
-# wEPkCEm1j1HGzC7MVqCVgYlLpr+P7YEn5H5f7AWVFAluG9ZbdsFLiZIIwh5eyLgL
-# b7TwWSaGxP6kesKtxil5qLfa3oibIyb2xyW6z8cwpqSJQrvaE8EUFiSAZOtw8vk8
-# l4qP3K8irjf5y3ey80PzZ1hfW+kVekmjsHC7Sde6prQH9A3xHOGmJ6aEcCuNCeDI
-# +nmaNZpwGBMkQDP/Pl6dmEUm+GAlUg6rvxjK0L8VbM8X65eaVlASgL76KoDe+FtT
-# ce6ySvSYzF+4O+akj38i+s2xTpJ3WfN2cnFswfx4QLH4AglfNHBq9lSawwSd2gme
-# oSK7UjqeO2AI6ARFNolWXdJuvxY9MnT4gAyDbU3VmMn6u6u2FD0LoIgH4iroCyFc
-# 0iRdahjSoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNTM2
+# MjVaMC8GCSqGSIb3DQEJBDEiBCD4TI4wopGI6Fa0k4FGtTzu2Fn6XpfpUxPOcX52
+# 47znvzANBgkqhkiG9w0BAQEFAASCAgCBkwdu6gmcSfNGd5LHfDjtCtMQvbZqP2BK
+# 8CLBX3sGHnNcttr0Zod1MfX90DTTOoA/Irp7Wt4BvNmzoPXaUG/1hGwwTpjsilDx
+# Zsad2dQTJxGlCF8x78xsPk6e+L8gizicY4wdAXFlQ9bdHBPeB4rur8mtFyWeoNRf
+# H7wXhm5bMPtGvJoYXrYGxiZuPiWYdjN76IZpD3XuC1MSWl1RY119jldcAqehWJTt
+# 53tUuLDTUAqO6UeBklXZ6VgiXH4sjWVdDhr8pvZvFNMp7FE4AR4r6wxWwzC8ZMoI
+# Hhdl2z5R6/ZGGKUWQwQJvQMtaYPudoFbp0VIicOYhGWne2ukRjHsvTLRGd5icKv2
+# v70GZKggG2x33+ZGldXlDV3j3ZnunQg38fnqxkY3DGn8P7HHmHc5MT+XJy2glVvM
+# voYd12ez3+8zsHLIQ/NI/t5WUwMI/KQSp3SoCg13DrgSQa5yZSmd1cZhyoIxI7HL
+# sbmS3MZl40lXc7Md2TW2sCTawqr0VIkPlibsQ2jNjeDz2WG9DSiOR/66DkEPeeTV
+# wF4vgPpFDFvayHl5gRBM4L3UPP3UwrMPEgzfDm2A3z1Wq/uMFfpJL3EJ0o6ITXTi
+# gvzJ79zRoZCJwgr74VNZA5VC00qHkqebdU9zOsHFRWT0v+85BIeklIuZl9bJFoRB
+# kbovSXfpOA==
 # SIG # End signature block
