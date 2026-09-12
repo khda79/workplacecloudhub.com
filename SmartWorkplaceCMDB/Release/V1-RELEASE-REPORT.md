@@ -2,14 +2,14 @@
 
 Report date: 2026-09-12
 
-1. **Smart Workplace CMDB Version:** 1.1.1, stable feature candidate.
+1. **Smart Workplace CMDB Version:** 1.1.2, stable patch candidate.
 2. **Release status:** Stable V1 code candidate. Private environment qualification evidence is intentionally excluded from Git and the release package.
 3. **Project path:** `SmartWorkplaceCMDB` in the main SmartIntune repository.
 4. **Canonical PBIP path:** private canonical `PowerBI/CMDB-REPORTS/CMDB-REPORTS.pbip`.
 5. **Supported sources:** Active Directory, Entra ID, Intune, Microsoft 365 and Exchange Online; Azure is authorized but no unbounded collector is shipped.
 6. **Collectors included:** AD domains/users/groups/computers/organizational units/direct memberships; Entra users/groups/devices; Intune managed devices/hardware; Microsoft 365 SKUs/assignments; Exchange Online mailboxes.
 7. **Collection extensions added for V1:** Intune encryption and list-only hardware; bounded shared Graph paging/retry handling on every Graph-native collector; transactional last-valid publication for every source, including multi-table AD.
-8. **Main CMDB capabilities:** tenant isolation, typed entities, safe identity correlation, relationships, CI/source lineage, optional governed context, freshness, deterministic data quality, per-step logging and bounded log retention.
+8. **Main CMDB capabilities:** tenant isolation, typed entities, safe identity correlation, relationships, CI/source lineage, optional governed context, freshness, deterministic data quality, timestamped lifecycle console output, per-step logging and bounded log retention.
 9. **Power BI pages:** 10 consolidated pages: Executive Overview, Workplace Health, Transformation & Lifecycle, Licensing & Assignments, Fleet & Hardware, People & Messaging, Services & Impact, Device 360, User 360 and Group 360.
 10. **Power BI model:** 38 tables, 111 measures and 34 relationships in the canonical model.
 11. **Current refresh validation:** Python report tests and the complete PowerShell test set cover reports, audit regressions, CI registry, Intune hardware, orchestration, SharePoint, Active Directory pagination, transient retry, last-valid rollback and aggregate collection-summary deltas.
