@@ -3,12 +3,12 @@
 Runs offline tests for the SmartWorkplaceCMDB Active Directory collector.
 
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -55,6 +55,7 @@ if ($parseErrors.Count -gt 0) {
 }
 foreach ($functionName in @(
         'Add-SmartWorkplaceCMDBActiveDirectoryDomainContext',
+        'Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext',
         'Get-SmartWorkplaceCMDBActiveDirectoryRangedMember',
         'Test-SmartWorkplaceCMDBTransientActiveDirectoryError',
         'Get-SmartWorkplaceCMDBActiveDirectoryRetryServer',
@@ -106,6 +107,7 @@ try {
                 $source -match '\$rangedMemberReader\s*=\s*\$\{function:Get-SmartWorkplaceCMDBActiveDirectoryRangedMember\}' -and
                 $source -match '&\s+\$ldapConnectionFactory' -and
                 $source -match '&\s+\$rangedMemberReader' -and
+                $source -match '-DomainContext\s+\$memberDomainContext' -and
                 $source -match '-Connection\s+\$domainConnection'
             ) `
             -Message 'One or more bulk Active Directory queries are not explicitly paged.'
@@ -181,6 +183,43 @@ try {
                 -RangeReader $reader)
         Assert-SmartWorkplaceCMDBAdTrue ($members.Count -eq 0) `
             'An empty LDAP group did not produce an empty result.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Route an unresolved member to its own forest domain' {
+        $esContext = [pscustomobject]@{
+            Domain = [pscustomobject]@{
+                DNSRoot = 'es.example.invalid'
+                DistinguishedName = 'DC=es,DC=example,DC=invalid'
+            }
+            Server = 'dc.es.example.invalid'
+        }
+        $ptContext = [pscustomobject]@{
+            Domain = [pscustomobject]@{
+                DNSRoot = 'pt.example.invalid'
+                DistinguishedName = 'DC=pt,DC=example,DC=invalid'
+            }
+            Server = 'dc.pt.example.invalid'
+        }
+        $inventory = @(
+            [pscustomobject]@{ Context = $esContext },
+            [pscustomobject]@{ Context = $ptContext }
+        )
+        $selected = Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext `
+            -MemberDistinguishedName (
+                'CN=Cross Domain User,OU=Users,DC=pt,DC=example,DC=invalid'
+            ) `
+            -DomainInventory $inventory `
+            -DefaultDomainContext $esContext
+        $fallback = Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext `
+            -MemberDistinguishedName 'CN=Unknown,DC=external,DC=invalid' `
+            -DomainInventory $inventory `
+            -DefaultDomainContext $esContext
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                [object]::ReferenceEquals($selected, $ptContext) -and
+                [object]::ReferenceEquals($fallback, $esContext)
+            ) `
+            -Message 'Cross-domain member resolution selected the wrong domain context.'
     }
 
     Invoke-SmartWorkplaceCMDBAdTest 'Page a large domain and preserve primary group semantics' {
@@ -530,8 +569,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDB1jmfKXLIxnW8
-# VZQvCBfRHccTqkl7O1ndAIW7YPo4IqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkA7/fkyu92H//
+# ii3GrRb4mI5pN/Qx6qQBjGfdPfgzyKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -664,31 +703,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE4l6uScpbWLquejkmuWqfRPHkiQhrUKR/Wnt9b4Lvx4MA0GCSqG
-# SIb3DQEBAQUABIIBgDmMoIXP3cCVK0jK5lzAMT/FgaYb2+9UuMeG25YyRmogSs18
-# 4eKlhgy5oYJ2WS2inBnajZb4lynatr80iwBKs2pyIUZy6y5pIAZPpFN/wZICQGsy
-# bvlMJMLHoUdZl2Sz5rFcJWaM8ck2+/MjlNufqpaLZt/jo+MJbzefZ6urkq+EAmYo
-# ElJ8fhPCz1QDnQttua//Ho8bekgRXHKueNtFA88WnbIyVq9NEovHOO56njDtCG/V
-# 0CrmHohVNADqHkmnz2yoFVpNCoorh81yTKZfY/qFMyXU4ro7bUsB+cuGoNiXPEUN
-# pQ7Y6RYlsx7pq4rEXDYigkhetz4Y+V0Af87ym/0KWirf/ev5vJu3LA56l8SdL6e/
-# ti7kL0qkQmmjGQVH09k4/QHgeEuzHK9mkewJBVDK640NVso8AU0xf53NjV49xpW1
-# UodIPsfUXEUyXoY53tfQQ20vJXKU6do5lFtbeLvbuOAe4Io53movsmpY3ZZncMQ7
-# lmhGgX7U4O1UEybVqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINvBPz2nJCTD50W3BvhS17eqb+YUkj86cvn6NHcbdqbJMA0GCSqG
+# SIb3DQEBAQUABIIBgKJHMd5Vmx2xXHltRxfx9vqhVH5iXZ7z3D4qOhPLmSihUBsf
+# u7X7ud1zgEhoinBasdtU9+kJh/23ULmGCkxw0iNlTwe2K48ATHtmimrTKCLJPnpg
+# au7MbESIAYu8aT7rSjeMoKePme+oeT2AUl28Sqrn9JVEgS9f7m+1MVY6yzNBVFNv
+# 0RcAktsW+AuCHW+wm254eHi7+KLBRG7NsEdwqQJ41480YT0yxxOjI36abOlOx+9j
+# IzNsBJwGZetSuuF4WaaPRnrK8La+r6PE9/BI7Bp42F2Z5JYjeM/1dlwWGUiwBZxp
+# DCLmhroFo6NLBZ1CPsfQUvej2GzLrelvjB45O8LHNNfOSE+5L+7/jAU3Enpp6b+a
+# O7NvWsSmfHW8Nz5Fts9tITkPMIxqHhLg61Rf4v06t0vWGrKqHBSu2LfJZk0RD76U
+# 6pTDABydaL7fkNtr/hzp+y9r3Cy+kmjGeP+j9NZ5Z8+vDTveLBvDkLN2xrqg1nrk
+# 83T0a8kPoWGDQSWIqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNDE4
-# MzRaMC8GCSqGSIb3DQEJBDEiBCBUSaKU0s4xq5YIYs6wFKqag9BEsfC4ViJ6YKoW
-# J39a5DANBgkqhkiG9w0BAQEFAASCAgB1ZUBW5eyEmb40Dtxm9116XAuzBojVotQQ
-# MXTirv53DCV9GyKazOmyMLQIFeq1YWXhUlRlOuNj2Ybb7IZ/Vw054lex8v2jVy9Z
-# 9mqeMGEL9AsG7fypVQCDCWvxDd4kZittc71WBUNVTX/LZO8uHqJinm4roOz4di5U
-# v3DLZ23y6Cz0jLv7E7oAFiLgpAwP8W4lAFk1IPSBw1tF7/4FSLVA3gaVyCB4KCrK
-# VU1HPQ7fC38hdBcY477tli+1RgQQACDkOm7VB7M7w835qo8EvCXnUxHuJq4l9HnC
-# eJpdiMKaPTiH53eD3JrP9Cblnx2hkN3xeMT25C288jNnmNJBaP3Rzf1lt9FSOsY+
-# PHNs7t1XzxmLtZAw2BTfANTnSJnzWMdApvmALnwzFXbGmCD2/g2k/tnBq5SRkzDc
-# UdIXJ6wgyMNtQRt4nmYCPZL3w3AT3dQNRrB37EawJ9969vHuhz4ViUw2Ed/ZdB/K
-# vvPkjCbBNkhoP2oo1MAKleDsRoWQrrMt48ur3GBrTXG7UJESsXV8BeBtlb7mGn01
-# Aj8KQZMncFkZ6L2xD3uD1rzd4CI+BsE7Qgwusz2PYX3SnmTHAoxHitIyj1ep/pQ8
-# lvjTLpJLBPIH0pDSGM+Z8++eNTxl89ZHfCe1AbsK9q/gK0Q34nMZsI28nKA3pDJy
-# EMvZBzRAXQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNTM2
+# MjZaMC8GCSqGSIb3DQEJBDEiBCCybTaF4VfGq4xYGQv+vCrxufu/OFA9iNzreNcU
+# QhxrXDANBgkqhkiG9w0BAQEFAASCAgAj3gjgjGUlYaD6PBA6x7nx0ceyWh4cun/7
+# +6LSghe6V7xaWlQHOtqZTVXqe4PuzhsOZba/uNyeVPlX2jSoFR2OMDpa/R2MDz05
+# YU4RjDslJZIR0vXLEUxMWeMwOV9qfcqWFuBqgdGTerkPgtg2tPwMQCGoYUs5o+Uy
+# DKJEtt1GY3eZzJrAr1dtblefDPmPpkgBFBOZ/mnjyHbDGevF//LqTDI35RLIFmtM
+# y2DIGUomxNL2hfIKQ1VWl3B16bWsnDBWzkTkf4MQeHVCL8LmBEcrybdI2yvdND4c
+# evoK3nXBgDGQhtDWixwdg4XX1qwTUUF5TmlUBE71VCbQ5Hb7yoLN+HmcOboki60i
+# DGRfKlCjQzmwcV7QmLLNibVXjLoCSW0Aj9YihleyXf0I2pnotje5Xb6k9vcHDJ2t
+# 89GVNWCxIkWCsnBzeftqC5bVmbeNBlMLO4P1UjYQv3FhcpS7KcfVBb1m0rwjjVH7
+# TTQHfwCZTSBlZR9mrNr/E8DRH2Dfx4v1w79nFUf8DU356QYGXlIDVsQSHMP8i8OW
+# nJS3KlFbB/HLIy/AwGZ5WWqFiYSmh5TgmAPHOuocBJ623WrDER50LmdlVEYASm/j
+# Siu9afLoHJ9FCWCnS4mDd6mDRZMNhS+UQv7yMm3611vSF5icDNipACKdrovw6Vbc
+# zR1vQNsqpg==
 # SIG # End signature block
