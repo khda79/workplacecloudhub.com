@@ -8,7 +8,7 @@ Runs offline SmartWorkplaceCMDB orchestrator and launcher tests.
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.1.7'
+$ScriptVersion = '1.1.8'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -95,7 +95,7 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($result.Status -eq 'Validated' -and
                 $result.Mode -eq 'Validate' -and
-                $result.StepCount -eq 13 -and
+                $result.StepCount -eq 14 -and
                 -not (Test-Path $validateRoot)) `
             'Default validation mode wrote output or returned invalid status.'
     }
@@ -121,7 +121,7 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($result.Count -eq 1 -and
                 $result[0].Status -eq 'Validated' -and
-                $result[0].ScriptVersion -eq '1.1.6' -and
+                $result[0].ScriptVersion -eq '1.1.7' -and
                 $messages -contains ' SmartWorkplaceCMDB by WorkplaceCloudHub' -and
                 $messages -contains ' SmartWorkplaceCMDB execution summary' -and
                 $messages -contains ' Status   : Validated' -and
@@ -143,7 +143,7 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($script:FullResult.Status -eq 'Completed' -and
                 $script:FullResult.Mode -eq 'Fixture' -and
-                $script:FullResult.StepCount -eq 27 -and
+                $script:FullResult.StepCount -eq 29 -and
                 $script:FullResult.FailedStepCount -eq 0 -and
                 -not $script:FullResult.SummaryEmailEligible -and
                 $script:FullResult.SummaryEmailStatus -eq 'NotApplicable' -and
@@ -168,9 +168,9 @@ try {
             $script:FullResult.LatestOutputRootPath `
             'SmartWorkplaceCMDB-Overview.html'
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
-            ($results.Count -eq 28 -and
+            ($results.Count -eq 30 -and
                 @($results | Where-Object Status -ne 'Valid').Count -eq 0 -and
-                $rawResults.Count -eq 19 -and
+                $rawResults.Count -eq 21 -and
                 @($rawResults | Where-Object Status -ne 'Valid').Count -eq 0 -and
                 $adResults.Count -eq 6 -and
                 @($adResults | Where-Object Status -ne 'Valid').Count -eq 0 -and
@@ -196,11 +196,11 @@ try {
         $orchestratorLog = Get-Content `
             -LiteralPath $script:FullResult.OrchestratorLogPath -Raw
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
-            ($rows.Count -eq 27 -and
+            ($rows.Count -eq 29 -and
                 @($rows | Where-Object Status -ne 'Completed').Count -eq 0 -and
                 @($rows | Group-Object Sequence |
                     Where-Object Count -gt 1).Count -eq 0 -and
-                $stepLogs.Count -eq 27 -and
+                $stepLogs.Count -eq 29 -and
                 @($stepLogs | Where-Object {
                         [string]::IsNullOrWhiteSpace($_) -or
                         -not $_.StartsWith($script:FullResult.StepLogRootPath, [StringComparison]::OrdinalIgnoreCase)
@@ -210,7 +210,7 @@ try {
                 $orchestratorLog -like '*SmartWorkplaceCMDB by WorkplaceCloudHub*' -and
                 $orchestratorLog -like '*SmartWorkplaceCMDB execution summary*' -and
                 $orchestratorLog -like '*Status   : Completed*' -and
-                $stepTranscripts.Count -eq 27 -and
+                $stepTranscripts.Count -eq 29 -and
                 @($stepTranscripts | Where-Object {
                         [string]::IsNullOrWhiteSpace($_) -or
                         -not $_.StartsWith($script:FullResult.StepTranscriptRootPath, [StringComparison]::OrdinalIgnoreCase) -or
@@ -416,8 +416,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCskyVOgnoxFrx2
-# pIamCAptXmydkVoc+Ds8fOVJB0rxVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQ77W27QyLh/qT
+# 3j5kvJtdr9bHjOdQnd3E3u1BvyoWh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -550,31 +550,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM2LJSS2HfnExmt40RU9q+/ePuwCMN9UrDT41RDEE4dQMA0GCSqG
-# SIb3DQEBAQUABIIBgFRFVDI184KxuAyaQ59GJcuEY/1IKt9SaBIrw4D1napZ92PH
-# BnA/yzpe2aZYFhKScN/Sq/E4giBR1LPuxDbzuN1cwIgqbWpTa7AmMUaBHBkDAIXE
-# ltAi6R1OQRF7jgXLdrpaiCxfrLfF5W6lYByUoX110yM07lIRiS0EIQkjr6iRrZDp
-# b2bHfxg4QwvXnsetsJ48dTbxfkl04m3DrC0GALmCsecwy55K0r0+M9gI7Ppj9jBd
-# Cj06irKLMFJMjdwKcl5DTubwgNIL7GicpqfkRpWcrQHjsTCpk3ApiwTQQiseVmCZ
-# KKrZMK0PxdHBS67LEYcMHIGH/ZHPTYZnQHYRGlUM7uoJ9q0vjN3tQoQJwdwknfeP
-# Na/nYAl3YhffgheZqsmK5cmyTL1YEp99Fg0BBEISmDJBF2LIDB5vsmglOeqcDCb4
-# 3Jog9ygYplZ6DZdHLfCJeHlhJbClbhGhFc3Yo0FXfXIa74otoZinAPK1YsSeSR1R
-# CpjDbf1C9L5EQEfm6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC9Aprq/3QS63Tw3890g6JusYNF7l/WCwaqBrG5l9IjTMA0GCSqG
+# SIb3DQEBAQUABIIBgCltjMqWdvpSEM2ny2g1HSLMw6z9i9CyTWDzw9AfHtLEkqPZ
+# gmbMqLB4XfMFDh6aNSJBv+rG2HII4yg6C0LT9kN8j1uKixz/So5yMiWY6lSITid9
+# EIgULazMcVsQbGlDKI0DO0nq5s4vuyMojDsCX2/C9zCC9pL1AzNIPkp+so2jBab9
+# HgYBu6Jm0VQsX2WdMPhqE5dUZTEDFcxRex4BctQcdw2AvTjvyg+hs0WVOVSQcJ5X
+# NLMVrIcaVpf52O7TVVK7TJFJR4LwxgGRw8DhMHUVUjr0w0ntj4RnE62OVJukT2rt
+# VhwdfTqLSqs/gnwnSNQcSijLtA58fACcHrL5j9xb9GPo8v+S4OMoaP91Zw2SEL+g
+# 6r6k0cyBiEsftmAJgpPTMWqx8YCnHGlAjEA9VlvWtd7Px6DgHF+oFfiPKgGK3Cbs
+# dzqaxM6Iq+pm3EXZ+pv0hyzH/biCbao+pmli9XMu4Rzh++LnhCARVQ31ecbKlAy1
+# r6G/uJciYXp6RrR4TqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODI3
-# NDJaMC8GCSqGSIb3DQEJBDEiBCDAtQCudP78sY7AebjCVdRgq9LZ1Pvg6OBGVx2M
-# m3/4CjANBgkqhkiG9w0BAQEFAASCAgBgdC4gdL14yBmm0/hbXHJCt2FJXcP2IZMj
-# pYOQD5qREN7QpNUbhVW7M28mifyCOeLN+92ITlNtsPBRPnRUtUemFku/aC/db4la
-# GUKCyQi8qZIFhS3U2JkwT6azm13k+4L9zpdxYxlZdDj3EgKMuPCTPwlcBQBIhf9e
-# /KK9bc5f8qXODxyvc4cvdUmjLgnykNeAUlGCJvs/kDjw+zf83WVTrGzZ8taP9Ieq
-# JBMSIZoD5gNlq8lFPL/kaKGmp//tmMZHx9/OIk5tAPYzxhqxUIxKFT6mEVolLTtq
-# CHmgCiv7F/Sw9MdUoChks/KcME1arE2QpB+eRuo7MAV8GE8hmhikN3v3qH7St3+Z
-# 9npk1OXJJRc+yDMPI7nkTGdXlFnzFMoQfv6k3hLRo2f7u1BMwI+fyswuwpsTvOZS
-# FCW4LIt++Zs+hryNwYW5ClM2D3u33LPjoMjB/67dS7XJ/CNjlq1IimrW+kLj7HKp
-# +HRaVlOl12/D/SPB/G+swdVEWzudfUkV4f9VfyPOgJ/zurvBNUWhkaJ4L768YJF5
-# mR3dVdyMClLl/i6RixQT/FoEVuL1fUmzF/RxJ6Zjq8A6pyMpN7v0hYKabHCZLta0
-# AQyRVpbmPiXVO1phsrcboyjJY5+um0RqDWE+VzfaEKykB/KBpaLG6tw3N5dZsdSm
-# u8Sb4AIUjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODM4
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCvtjJlKD/RegJYqBx2SKVLf2Mf1lsETgHsPnNI
+# rO839DANBgkqhkiG9w0BAQEFAASCAgA5FJFydVBVpl6PdJGlpogGrEj4BYAu+koQ
+# B9zEpBQpAcekyML7T8anIrY+W5Pz5PEPRXrT79gJDQQd+VUDNyRzycTxDaV+8jBW
+# cRubn9Py2I3j3jp6mKx3yIJijDGLT/z5UFjTVTl0xNJNnia3KyYoeNbGqcdVrttO
+# LL5acsVaBRQyfCeeZ6JUWLoLqbGu7cNk7EghWQRDz6uQOukWntwka+iSHtyWfv8T
+# hjOhHx3Mja3nP2qwUF7QoG7RUDwAb3Eme5KAwPRCX0oULdLFEIAX9sfGt1QhY79S
+# k52djbjrWl3sNukOGnYG5O1523ap4ZowQnCWWLkLsbIokBnkrsdRsbu18H7UXh8q
+# SXfkozcsAy008NMXG1ALzv2tk5r1GDMYxAU/UmxHfzfAgKp9QLkB8wMJ/6GnDSgm
+# cQZnenvonqs6cQNBqxCpIydNJJ7irowyydO1n8qXgfKtO53p0BajDoQZAOcm2mx+
+# OljduodCtrF9J2u1Fai1XbyI8OwwwNOvchVTyjFCb3YiGI7ZfW8aHjda+TlFnZrC
+# c9yzp8DNSCC53O0yaFd8VujUXGpVbQXZK1x9dob4AJfpe84Q1VFm/ORDCY77c3G6
+# JRauoulfbjeRa2rpfnKmdA8HjrBVGTIAZIKWtKJF4DL3fvq4xxuWyWvUntOvFFAd
+# mtFk6yJNxQ==
 # SIG # End signature block
