@@ -53,6 +53,14 @@ as independent source snapshots. Configuration and update policy endpoints use
 Microsoft Graph beta and therefore require tenant qualification before
 production scheduling.
 
+Windows Update device status and standard Endpoint Analytics scores use Intune
+report export jobs. Microsoft currently documents
+`DeviceManagementManagedDevices.ReadWrite.All` for creation of that temporary
+export-job resource; `DeviceManagementConfiguration.Read.All` is also required
+for the update policy/report dependency. The collector does not change devices,
+policies, assignments, baselines, or remediations. Endpoint Analytics report
+names use the Graph beta catalogue and must be qualified in the target tenant.
+
 Every source stages and validates its CSV set before promotion. A complete live
 `Full` run can then send the aggregate collection summary configured under the
 tenant-local `Notifications` object. Validate `From`, `To`, the selected Graph

@@ -470,6 +470,23 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration
 policy and Windows update policy resources use Microsoft Graph beta endpoints;
 validate them against the target tenant before production scheduling.
 
+## Windows Update Reports and Endpoint Analytics
+
+The `IntuneAnalytics` pipeline exports device-level feature/quality update
+status and standard `EADeviceScoresV2` Endpoint Analytics scores. It creates a
+temporary Intune report-export job but does not change devices, policies,
+assignments, baselines, or remediations.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Pipeline IntuneAnalytics -Collect
+```
+
+Microsoft currently documents `DeviceManagementManagedDevices.ReadWrite.All`
+for creating the temporary export-job resource. The update report dependency
+also uses `DeviceManagementConfiguration.Read.All`. Endpoint Analytics uses the
+Graph beta report catalogue; qualify report availability and permission consent
+in the target tenant before production scheduling.
+
 ## Primary User-Device Relationships
 
 The relationship normalizer requires no tenant connection. It correlates
@@ -829,7 +846,7 @@ Run the autonomous test suite:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB.ps1
 ```
 
-The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 28 CSV contracts, preservation of compatible output, and rejection of incompatible output.
+The suite validates safe identity keys, path resolution, runtime JSON synchronization, the 30 CSV contracts, preservation of compatible output, and rejection of incompatible output.
 
 Run the offline Entra users pipeline tests:
 
@@ -872,6 +889,12 @@ Run the offline Intune operational inventory tests:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-IntuneOperational.ps1
+```
+
+Run the offline Windows Update report and Endpoint Analytics tests:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-IntuneAnalytics.ps1
 ```
 
 Run the offline primary user-device relationship tests:
@@ -976,8 +999,8 @@ Run the offline orchestrator and centralized launcher tests:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Tests\Test-SmartWorkplaceCMDB-Orchestrator.ps1
 ```
 
-These tests execute the complete 27-step pipeline from fictitious fixtures,
-validate 28 curated, 19 raw and 10 Active Directory contracts, verify audit logging and bounded isolation, and inspect
+These tests execute the complete 29-step pipeline from fictitious fixtures,
+validate 30 curated, 21 raw and 10 Active Directory contracts, verify audit logging and bounded isolation, and inspect
 every centralized Cloud launcher.
 
 ## Power BI Direction

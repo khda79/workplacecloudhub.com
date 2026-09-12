@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.8.0",
+  "contractVersion": "0.9.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -542,6 +542,32 @@
         "EntityType",
         "FindingType",
         "DetectedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactWindowsUpdateAlert.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantUpdateAlertKey", "SourceReport", "DeviceId", "DeviceName", "PolicyId",
+        "EventDateTimeUTC", "LastWUScanTimeUTC", "AggregateState",
+        "CurrentDeviceUpdateStatus", "LatestAlertMessage", "SourceCollectedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactEndpointAnalyticsDevice.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantEndpointAnalyticsDeviceKey", "DeviceId", "DeviceName", "Manufacturer",
+        "Model", "EndpointAnalyticsScore", "StartupPerformanceScore",
+        "AppReliabilityScore", "WorkFromAnywhereScore", "SourceCollectedDateTime",
         "SourceSystem"
       ]
     }
