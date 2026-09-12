@@ -1,6 +1,6 @@
 # SmartWorkplaceCMDB
 
-The locally prepared distribution candidate is **1.0.0** on the stable channel.
+The locally prepared distribution candidate is **1.0.1** on the stable channel.
 It is validated as a reproducible local release; this does not by itself
 constitute tenant, gateway, endpoint or production qualification, and it is not
 a publication approval. See
@@ -96,7 +96,7 @@ health and quality evidence separately.
 
 Optional individual source evidence and declared governance are described in
 the [CI governance contract](Schema/Entities/ci-governance.md). The local CI
-component/catalog and application are **1.0.0**.
+component and catalog remain **1.0.0**; the application is **1.0.1**.
 The existing CI CSV header is unchanged. Custom catalogs must include the new
 sidecar columns and explicit lifecycle policy from the current catalog.
 
@@ -175,7 +175,7 @@ The canonical Power BI report consumes the resulting hardware table.
 
 See the [hardware scope, commands and offline evidence](Schema/Entities/intune-hardware.md).
 Missing values remain explicit; RAM, asset tag and warranty are excluded from
-V1. Application status is **1.0.0**.
+V1. Application status is **1.0.1**.
 
 ## Existing design principles
 
@@ -510,7 +510,11 @@ Run the explicit collection and normalization:
 The collector uses `Get-ADForest` to enumerate every domain in the forest, then
 selects an AD Web Services-capable domain controller for each domain and
 publishes domain metadata, users, groups, computers, and direct group
-memberships. `-Server` can set the preferred controller used to discover the
+memberships. Bulk user, group and computer searches use explicit 500-object
+server-side pages. Group members are retrieved through LDAP `member;range=`
+windows of at most 1,000 values, then supplemented with user and computer
+primary-group membership; this avoids the ADWS `Get-ADGroupMember` result limit
+without changing a domain-controller policy. `-Server` can set the preferred controller used to discover the
 forest. A non-empty `-SearchBase` is supported only with `ForestWide` set to
 `false`, because one distinguished name cannot safely represent every forest
 domain. `-MaxItems 10` creates an isolated bounded test run. Direct group relationships are preserved without recursively
