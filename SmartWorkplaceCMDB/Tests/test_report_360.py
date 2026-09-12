@@ -163,7 +163,7 @@ class Report360Tests(unittest.TestCase):
         output=self.base/'new'
         with contextlib.redirect_stdout(io.StringIO()):report.build(self.root,output,True)
         model=json.loads((output/'CMDB-REPORTS.SemanticModel/model.bim').read_text())['model']
-        self.assertEqual(len(model['tables']),17)
+        self.assertEqual(len(model['tables']),19)
         self.assertEqual(len(model['relationships']),13)
         self.assertTrue(all(r['crossFilteringBehavior']=='oneDirection' for r in model['relationships']))
         manifest=json.loads((output/'REPORT-MANIFEST.json').read_text())
