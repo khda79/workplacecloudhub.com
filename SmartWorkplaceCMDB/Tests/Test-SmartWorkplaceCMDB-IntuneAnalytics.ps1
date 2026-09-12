@@ -3,12 +3,12 @@
 Validates Intune update reporting and Endpoint Analytics with synthetic data.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $passed = 0
@@ -78,6 +78,24 @@ try {
         $scores = @(Import-Csv (Join-Path $sentinelIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_EndpointAnalyticsDeviceScores.csv'))
         Assert-IntuneAnalyticsTrue ($scores[0].StartupPerformanceScore -eq '') 'The minus-one score sentinel was not published as unavailable.'
     }
+    Invoke-IntuneAnalyticsTest 'Reconcile duplicate Endpoint Analytics device rows' {
+        $duplicateIdentity = @{} + $identity
+        $duplicateIdentity.DataRootPath = Join-Path $tempRoot 'DuplicateDevice'
+        $duplicateFixture = Join-Path $tempRoot 'duplicate-device.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $scoreRows = [object[]]$fixtureObject.endpointAnalyticsDeviceScores
+        $duplicate = ConvertFrom-Json (ConvertTo-Json -InputObject $scoreRows[0] -Depth 8)
+        $duplicate.deviceName = 'Z Device Alias'
+        $duplicate.endpointAnalyticsScore = 80
+        $duplicate.startupPerformanceScore = -1
+        $fixtureObject.endpointAnalyticsDeviceScores = [object[]]@($scoreRows + $duplicate)
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $duplicateFixture -Encoding UTF8
+        & $collector @duplicateIdentity -InputJsonPath $duplicateFixture | Out-Null
+        $scores = @(Import-Csv (Join-Path $duplicateIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_EndpointAnalyticsDeviceScores.csv'))
+        $reconciled = @($scores | Where-Object DeviceId -eq $scoreRows[0].deviceId)[0]
+        Assert-IntuneAnalyticsTrue ($scores.Count -eq 2) 'Duplicate Endpoint Analytics devices were not consolidated.'
+        Assert-IntuneAnalyticsTrue ($reconciled.DeviceName -eq $scoreRows[0].deviceName -and $reconciled.EndpointAnalyticsScore -eq '80' -and $reconciled.StartupPerformanceScore -eq '70') 'Duplicate Endpoint Analytics values were not reconciled deterministically.'
+    }
     Invoke-IntuneAnalyticsTest 'Bound both report families independently' {
         $bounded = @{} + $identity
         $bounded.DataRootPath = Join-Path $tempRoot 'Bounded'
@@ -96,8 +114,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5UOC1BanPhBsj
-# b+hRAtRVJ/VPh2GIJeBxe5V3+CW+5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtv5KiwgV36J+u
+# b9lZAO27nMsWYCu9dabN5BCluJZ69qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -230,31 +248,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAMtADVAGBq7kuKIhhkXdR6VA0SzELvllwk0aHJkg7JKMA0GCSqG
-# SIb3DQEBAQUABIIBgC9AMpl4+Ci1cg9RgyZjbWCrE6UoHco31lAGjMq1qENGdVKc
-# Q/sfO4N5QM9M8WM7jVEuQVppSnL9g8bPbTrU0Gfjwwvz0uUtF20upgoTDwIBwyxX
-# P5ITjsRxXnghWD9TC1XbXYPyFHBrWVVDGx7P9/IlNDaCjBHL112A/DuayoTPprjk
-# pCoKuPSe6K5+4HKWZkp5/XhdvC0GvxELrIVu4YZ/ZB29MooMgVoAfb3QBW6Be99K
-# qtX8y0Hq716as+puvFtjmie9bAqovso60/ntiVF2e2Lo1QPmgEBUZ4O0O58aKn/7
-# mtWBRc5FHh+Gi4nrWmarH/pbDsL0GEWtAs1C7d/gJfcFSpx/m14Ev5mR618UKmU9
-# xdSl70AN6U/3XRa+oDbZrXPIgZUzAqJOdCmuIpoPTB3UeIrY0KLAoEswDaMM2ocg
-# xzXEw1uHmrnVbcNEnVsua2bAZCgrkT/NamjRXBggrUNWuobb9HKKq1lGox3JIbtv
-# V/WyH5y8o38SAsk0h6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDwPhcEt2wpgWiZ4JEP+7tZzGQZ9rAt/fFpbSSnyFxkCMA0GCSqG
+# SIb3DQEBAQUABIIBgHyIv44PNC8wfpbJNQ7mbG/v1XdJHux6HhL5sAUlTq06iIVF
+# mgkQRgY+FZZAiU53O4zyPROlmr/wElizRfDWUxJEtcSvO6aTAw2W3/oyzNRiooWa
+# YmBegEOlWwLI7Z4/CdJhnIlhHazzW18s6arxYH6atUB48DMzxrY4IGOFtcxfLZWk
+# UYy+61XlDy7xeVJq1iHH0uZANOxUO5VUPNj82YqWqAC/CIiSk9x8pZgt330VaXka
+# jKoUd2rCZl3HyDwHZgx/EqTRnmIKV1STdQJczWtkJPqkHiaz+uVd79y1kTZoN4VJ
+# Vt01DgKPXl/QA3x9PBPbnfTldGi1FZg/KqJdaF9X9jtLdv3LiS8fA+iBpj6zMjXm
+# 6RETBlIN5vTmCWxNAtzKs7LLk0nxwSkiAv/jyRh2qqE4JZVpjfA4CXYMc9TEktao
+# f2vSV9lkMPANFvjUKuGDHJlOiiGU9Urj34AS/oTB1z+BLYVhTxsJ53HW8L8yDqkU
+# HsgkSNJBw9H0eHE/TaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTIy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCBCoCpQrITBDagS91iDRZjHfshe6pIMJ4wWngYO
-# xW03+jANBgkqhkiG9w0BAQEFAASCAgCp+ZjwBz4n33eQ9St1Ex0oOt44Xh2wHqwq
-# U8BKLzW2PzkXkskpTaaqOjo7HSo4SyR4bt07lvUiDgiHrYnattg3JPMV2UNV7/Wq
-# 8OrKILnsB8FJwuFAwVpW3Bvezxu6uwxbJR5EOeEDxkFZDdzXMGpgYmjk29alMHia
-# bx66gI30yc6A138HEjjG/aoVOj2zi9HHrV7r22Y/8Cs1FT6cR7CF/3qbknHvzYxb
-# dBqN9wKOW9+tl2W3gSrKWfT45zKR44ih1sj4XkoM8Y6aPr5aZPazrJ5Sq0mW5gQF
-# LHfKW4BzjTK0UEfwNmw20o5t3aU3XdNmObBU1GXY/4Z9bEhfg5fSuSVcsfhSLos/
-# R5xAwi6OA0jVKi7Jef9GXOvqD27p1kHysYS3USCcjkLrB7BcVBRNs0pTZLdo4zZW
-# Q7GYoeTWFFy+syurxQK4b/gfnYYolcnrpN8NFnupg7Rw5L7Hm9kfD2xD2drIN5xd
-# +k67EtnpMtgjVE68AobIFrJhcMMT5TbW7laZKWX3vxhdpYtDvUaNTmXkLArh1Xsw
-# bs5+R69CvangJHWS0grLgeUa3VvZh+XfA7dSowxnof5iQAxIZC3wBTV2Ejepqmrf
-# aN1p/q5rVLEl/eZe8Aw/jvNvZwU6ki3Rlw3bFOObAbFZwv6tAwYWW4k+ZbnVIwWK
-# yzuAZxzNfg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTMw
+# MDdaMC8GCSqGSIb3DQEJBDEiBCCLxjcC9eE0lvxS00hibzl80AyraOp7RmT1q0i8
+# eBBhNzANBgkqhkiG9w0BAQEFAASCAgByewSYSI+hCX6fLxstrtgf3vn+auxJ+VCa
+# JjmL63iA5QkaOt7ecxW48N9jyurKxLHYHYhOGx18vqdyQFHdRMxlESiBdJ4Zbf14
+# tQ6i8g+mnQkI3VjVXCmqK5BIVc9Mq1hjuUD8al3S5UDtwB+aQE92B9eluUGcjFqR
+# sH+V9AmTwwiJO3zihZID0yPAJJYD033+wGOIKiMkEPSLIngwKcydN8iwsFHu2r38
+# ojOwFF6w8Iex5D5NxRaV9ZrfW6uzuEXndi/hqIdJ8ycxEE7dLoWzG5R9Nzkdtu/f
+# +fCtsZ/5eMyI/qGj3W68z1B+T/zpX6qiXm1erFzHSpBOswRg5spQMAHEnA5RcdQ9
+# ovbpxD4Uw79qLwOL12WXJykJevYqiU6x5T/ISaBaVCU25bx3KP+g7CJVaIiuN/lH
+# 2T3KbSV6VIuMPwkNHQF7yKekOTAfMpIFFZq6VCZLgGyW+bRNzRYccLKvLixBDr43
+# Cakzycx7bJJIFEVXyDop9R4QoZDQBj4dN4DUBfBtjwzz+xUTPQNHesuTCONFgt8H
+# GLYMuvyuM87UfP0fGlr+eVWBxdjbooRL8JNl4qwZ79Tc02VviaHfZxdNi7gHhPvp
+# adxYXraSuNIjZ/NVAAKNMNGrnUH3fFP98mU8eaQ+CHS5iOuX/B0eVXuNGqp5IUbH
+# LvMb6XhOnA==
 # SIG # End signature block
