@@ -1,7 +1,22 @@
-# SmartWorkplaceCMDB 1.1.1
+# SmartWorkplaceCMDB 1.1.2
 
 **Stable release. Git publication is a separate reviewed action; tenant data,
 local configuration and private report artifacts are never part of this package.**
+
+## 1.1.2 stable patch candidate — 2026-09-12
+
+- Adds WorkplaceCloudHub startup and completion banners to every orchestrator
+  invocation, including failed preflight validation.
+- Prefixes every operational console line with local date and time, including
+  child collector messages and step completion messages.
+- Preserves read-only validation: `-ValidateOnly` displays the lifecycle and
+  timestamps but creates no data, transcript, text log, or run CSV.
+- Writes the same unprefixed lifecycle banners to collection/fixture
+  orchestrator logs while retaining timestamp and severity on operational log
+  lines and dedicated per-step logs.
+- Fixes live Active Directory membership collection by explicitly capturing
+  the LDAP connection and ranged-member helpers before the per-domain closure;
+  both helpers now remain callable inside the closure's dynamic module.
 
 ## 1.1.1 stable feature candidate — 2026-09-12
 
