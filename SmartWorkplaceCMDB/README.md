@@ -1,6 +1,6 @@
 # SmartWorkplaceCMDB
 
-The locally prepared distribution candidate is **1.1.1** on the stable channel.
+The locally prepared distribution candidate is **1.1.2** on the stable channel.
 It is validated as a reproducible local release; this does not by itself
 constitute tenant, gateway, endpoint or production qualification, and it is not
 a publication approval. See
@@ -101,7 +101,7 @@ health and quality evidence separately.
 
 Optional individual source evidence and declared governance are described in
 the [CI governance contract](Schema/Entities/ci-governance.md). The local CI
-component and catalog remain **1.0.0**; the application is **1.1.1**.
+component and catalog remain **1.0.0**; the application is **1.1.2**.
 The existing CI CSV header is unchanged. Custom catalogs must include the new
 sidecar columns and explicit lifecycle policy from the current catalog.
 
@@ -180,7 +180,7 @@ The canonical Power BI report consumes the resulting hardware table.
 
 See the [hardware scope, commands and offline evidence](Schema/Entities/intune-hardware.md).
 Missing values remain explicit; RAM, asset tag and warranty are excluded from
-V1. Application status is **1.1.1**.
+V1. Application status is **1.1.2**.
 
 ## Existing design principles
 
@@ -301,10 +301,17 @@ SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/DATA-LAST/PowerBI/
 
 Collection and fixture runs keep one timestamped log per orchestrator run and
 one dedicated log per executed script. Text lines include local timestamp and
-severity; the structured run CSV contains the corresponding step-log path.
+severity for operational messages; lifecycle banners remain unprefixed. The
+structured run CSV contains the corresponding step-log path.
 Retention is configurable under `Logging`: logs default to 30 days/30 files per
 scope and run CSVs to 90 days/90 files. `-ValidateOnly` remains read-only and
 does not create logs.
+
+The orchestrator console follows the same lifecycle convention: an unprefixed
+WorkplaceCloudHub banner opens and closes the run, while every operational
+message between those banners starts with local date and time. This includes
+messages emitted by child collectors during `-ValidateOnly`; validation still
+creates no transcript, text log, run CSV, or data output.
 
 The canonical CSV definitions are stored in:
 

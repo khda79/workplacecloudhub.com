@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB orchestrator and launcher tests.
 
 .VERSION
-1.1.1
+1.1.2
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.1.1'
+$ScriptVersion = '1.1.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -100,6 +100,41 @@ try {
             'Default validation mode wrote output or returned invalid status.'
     }
 
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Timestamp console and show lifecycle banners' {
+        $validateRoot = Join-Path $tempRoot 'ConsoleValidation'
+        $captured = @(& $orchestrator @identity `
+                -DataRootPath $validateRoot `
+                -FixtureRootPath $fixtureRoot `
+                -Pipeline ActiveDirectory `
+                -ValidateOnly 6>&1)
+        $result = @($captured | Where-Object {
+                $_ -is [psobject] -and
+                $null -ne $_.PSObject.Properties['ScriptVersion'] -and
+                $null -ne $_.PSObject.Properties['Status']
+            } | Select-Object -Last 1)
+        $messages = @($captured |
+            Where-Object { $_ -is [System.Management.Automation.InformationRecord] } |
+            ForEach-Object { [string]$_.MessageData })
+        $operationalMessages = @($messages | Where-Object {
+                $_ -match '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] '
+            })
+        Assert-SmartWorkplaceCMDBOrchestratorTrue `
+            ($result.Count -eq 1 -and
+                $result[0].Status -eq 'Validated' -and
+                $result[0].ScriptVersion -eq '1.1.2' -and
+                $messages -contains ' SmartWorkplaceCMDB by WorkplaceCloudHub' -and
+                $messages -contains ' SmartWorkplaceCMDB execution summary' -and
+                $messages -contains ' Status   : Validated' -and
+                @($operationalMessages | Where-Object {
+                        $_ -like '*Active Directory collection*'
+                    }).Count -ge 2 -and
+                @($operationalMessages | Where-Object {
+                        $_ -like '*orchestration validated*'
+                    }).Count -eq 1 -and
+                -not (Test-Path $validateRoot)) `
+            'Console timestamps or lifecycle banners are missing or invalid.'
+    }
+
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Run complete offline fixture pipeline' {
         $runtimeRoot = Join-Path $tempRoot 'Runtime'
         $script:FullResult = & $orchestrator @identity `
@@ -157,6 +192,8 @@ try {
             $invalidLogLines += @(Get-Content -LiteralPath $stepLog |
                 Where-Object { $_ -notmatch '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[(DEBUG|INFO|WARN|ERROR|OUTPUT)\] ' }).Count
         }
+        $orchestratorLog = Get-Content `
+            -LiteralPath $script:FullResult.OrchestratorLogPath -Raw
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($rows.Count -eq 23 -and
                 @($rows | Where-Object Status -ne 'Completed').Count -eq 0 -and
@@ -168,7 +205,10 @@ try {
                         -not $_.StartsWith($script:FullResult.StepLogRootPath, [StringComparison]::OrdinalIgnoreCase)
                     }).Count -eq 0 -and
                 $invalidLogLines -eq 0 -and
-                (Test-Path -LiteralPath $script:FullResult.OrchestratorLogPath -PathType Leaf)) `
+                (Test-Path -LiteralPath $script:FullResult.OrchestratorLogPath -PathType Leaf) -and
+                $orchestratorLog -like '*SmartWorkplaceCMDB by WorkplaceCloudHub*' -and
+                $orchestratorLog -like '*SmartWorkplaceCMDB execution summary*' -and
+                $orchestratorLog -like '*Status   : Completed*') `
             'Orchestrator step log is incomplete or inconsistent.'
     }
 
@@ -360,8 +400,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTmYv1A5FJ1ofy
-# v8zMmFyt1r7ZUYdYmjIxTaDJRaOigaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDe76qR89CQ2OBr
+# 8oBt3fQg8evrAli4L7Vpglg2o6Vr7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -494,31 +534,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICBlujM41rUPHFHmtGA1E8asC1AlXlKvZPNVRM7yBCndMA0GCSqG
-# SIb3DQEBAQUABIIBgI6zh4GKqTiaaVsk8MO8bDK+l/9Nm7bi+Iv4i5v9qNq2/6/o
-# qaiXhkHUT+kx77X5063USIh7rEEwH/15++WGHpKrpZvEwumTpQANAdxvXPRf3L5N
-# 3VYHyStTpQdwr1pVP9ZFNTeSruzYBQV4BaN0jPeJQanD0rWI227t2GSN+HWRlv+a
-# PwN173CKIOjkP02IuU9SMkOh7Ms3OdF0dHjrO214FYaHnxBCfJA/gEdlPJSCSPKW
-# EYGB2wISXQCmcQp85kJWbsMBss7MGI5LWr8ciV+uzp/6hGD1IRliCv7qSMY7Ueym
-# AFIK7LjS34JwnL8pY8xIPythVfzJXYHUJjyod8GBLUs3LJCHdoMuZokwY+dzbems
-# CsAA/8ilUDAsblMyJZkn2+8eDdMMZCEjNB/q+ZFqTNzj+SVb9zs+kwaCpj8p/TEv
-# ghCLHNHsYBQdyJ+hTl6R9lO6I2uV27cyUXRLe96IekDIYd8WMZJPoUgg1MlhC1x/
-# YVrPDlayCEfKrY6+6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG5cKcWO05kJVYzDkH7RmC56nM6JUM71rEr8Ggg/BCFUMA0GCSqG
+# SIb3DQEBAQUABIIBgG3Pit6OJ/mB7I/X1FSCvIj3YEGP9hGfpbCakLmE3Lq47ISn
+# f0AmbYXPfcgOSvZ49Qkwcwvucw1sfvj1HMXOMMZ77YOrO3GpcjSF5AosyMYP3/IK
+# hoceTq5Y39Dn6T/SKnlNCJsaCv3JCiGXYPnr6qRSGrmG5CKd0AEGustkO8egp/Nu
+# GZ+jboJrhDJV4kHpEC8j4ThbtB9oZlv7/A1P9aEKpGZ1049E9mX5tWJ+f4Qn5Rpk
+# aAwwbbQZptfISIOCes7sBiguNWFuB7lJr8GTzdQrYSQVrO4hqcwVv7sJ4lUm2rzJ
+# igCFKHw8B0kIJzobHB5OjNBv5bnLBu2HEMCf3DKmcId7wktFkmCgHiCal+Gs78HY
+# Lsm4Ejy3h3n4vQHZDlCccBMth8mJkkf1mI9+GvPGAbNdH/XzBHhm5QonIdjYw8Fv
+# puj7WtLd6tG0/avDPTItzqa4fAv3I/LV1ds6OrW9g6dSmJ40YjZLL0T1IYJAq1oQ
+# 8WcFdiM9bBE/yadU8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjZaMC8GCSqGSIb3DQEJBDEiBCDad2khBW3XBK9tJdkQY79/9Srokr8T3sbu4hpQ
-# iK/gITANBgkqhkiG9w0BAQEFAASCAgBWA4u7NeUFuJXhmRodnJFGb7PVdm8hxBQd
-# G3h+nYH7NlYdj/P9qjELjU1TlAiCoPmWwRWcZQL/QDzGKRFnc5gDvAKhekVFBdDY
-# iAelm6ME2VrSLMIHcUmlOYOg/MgJouLcNnEvl09BGSusZcv4E/BxNeDF32ELXhvQ
-# I/O9XhGdUOlCBiuhYwwTRq4rD6sg8nsTGd0kE4SBlHMuUXkslZb3ssLPstzksMlS
-# dMblgMr7R1JMjrL7IyICcc2QtRme8BcukmwTC+Nc2AUAraHsTNv6I2NS+zu55jjx
-# zehBTTHv4O1rxfvokgicbSX3KJYxBM2YItwUUOGYzEYmSwouSwwkCnrRE+73L6lp
-# xgTQWzZnMXxnj3quuHKBOHXVW/Wk0YCgeA72SWD2IPsjGzU15O/nxT62xXiZMhBH
-# hlwyTDsjH/drUlE7985D01/SwaPcSOqedx59KDLX/H1w//G7vdTRFx36xeYLoA4F
-# pGvVS9AHD7W8DqVf/CfMtjY7gNp33G5f2RRMZu3jeESlPBS2X7kFUDSD1PcVVeiq
-# 8/wA5aCshmeuvQJ09OplX7lmtiTkQG+RMCmH87XahdilHczDQLmncsInsIQ29wP4
-# 5jhO83vni1lk3BFawdnb7m2qrKV5Mp9+yNxekVvadyR3jdrR1IIMqoNBV38OUIJr
-# ZBz2QZNYVw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNDA4
+# MThaMC8GCSqGSIb3DQEJBDEiBCBT6pL/1x7l7WV28wij1ZtrEFd02xvG3i9aT3Zv
+# W94v6zANBgkqhkiG9w0BAQEFAASCAgBjwgICURZLSgmTv71ApqVNjoZrHqn1hzlG
+# btBeUJe2YixJdTmqEPLEb/27n978UKcf16/UVU07Wzj856a1vcZQnCxExw8VoRYk
+# xgFSQmjLZ+X/sz0WUClKxSileQbTtG3haTCu4r89oDaR4TnPIn6+T/X14T55zujY
+# UGSNqYqKl6bINX971M3BzfL5tMqMfkSlgMyya0W4bdFaqoB3RoQPVgjOcTQvj/mH
+# cQbo0y1CStHZ7fs9ZJCE0WLrW3jv+UP09hNRLl/nCw44/KWLEYerZSjIhIaaL1mF
+# j2ozyfnbA5psqewRhDGVmgmaFcOvG4XXFkR8nZtY6bKn12ctFT+b/bugxoqrRmo5
+# +QgSm4PGkgopCWqD5QEqi0mxM/aMq/R7n3+2rptutJ7MCHV3oI4IvXN31x3R+bkF
+# rMJ9QlRZVkcVrW1Of4/upSaXJFtyIEpVxF9XL4zzPAdfNd0gkytRNAj4vODZ648A
+# gOaCpQLx4N8w1rF4QSkbMEOZkbKiaqwMIPb+GbU+o9cLYjOVoG2utXOCKPXh1W05
+# STpqYUdqnEDy+/xjTJWOvCcm9tJt9BIu4pDRbRu5j9iXZItGn1vnh0rs247ibWSu
+# KviNHnw9mDezM0YtG6dKNn+dsdZWWsP8XiTuzWOkO1XIjplAf9U1sadXaHY169Qx
+# loShm6SIDQ==
 # SIG # End signature block
