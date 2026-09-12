@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.16.0",
+  "contractVersion": "0.17.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -416,6 +416,32 @@
         "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
         "PolicyType", "PolicyId", "DisplayName", "TargetVersion", "ReleaseDateTime",
         "DaysUntilForcedReboot", "CreatedDateTime", "LastModifiedDateTime", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_WindowsUpdateAlerts.csv",
+      "role": "raw",
+      "source": "MicrosoftIntuneReports",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "SourceReport", "DeviceId", "DeviceName", "PolicyId", "EventDateTimeUTC",
+        "LastWUScanTimeUTC", "AggregateState", "CurrentDeviceUpdateStatus",
+        "LatestAlertMessage", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_EndpointAnalyticsDeviceScores.csv",
+      "role": "raw",
+      "source": "MicrosoftIntuneReports",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "DeviceId", "DeviceName", "Manufacturer", "Model", "EndpointAnalyticsScore",
+        "StartupPerformanceScore", "AppReliabilityScore", "WorkFromAnywhereScore",
+        "SourceCollectedDateTime"
       ]
     },
     {
