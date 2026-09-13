@@ -63,6 +63,8 @@ class ReportTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             report.build(self.root, output)
         manifest = json.loads((output / "REPORT-MANIFEST.json").read_text(encoding="utf-8"))
+        self.assertTrue((output / "SmartWorkplaceCMDB.pbip").is_file())
+        self.assertFalse((output / "CMDB-REPORTS.pbip").exists())
         self.assertEqual(len(manifest["pages"]), 6)
         self.assertGreater(manifest["visualCount"], 60)
         self.assertEqual(manifest["version"], "1.0.0-local-report")

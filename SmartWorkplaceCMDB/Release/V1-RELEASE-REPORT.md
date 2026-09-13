@@ -5,7 +5,7 @@ Report date: 2026-09-12
 1. **Smart Workplace CMDB Version:** 1.1.3, stable patch candidate.
 2. **Release status:** Stable V1 code candidate. Private environment qualification evidence is intentionally excluded from Git and the release package.
 3. **Project path:** `SmartWorkplaceCMDB` in the main SmartIntune repository.
-4. **Canonical PBIP path:** private canonical `PowerBI/CMDB-REPORTS/CMDB-REPORTS.pbip`.
+4. **Canonical PBIP path:** private canonical `PowerBI/CMDB-REPORTS/SmartWorkplaceCMDB.pbip`.
 5. **Supported sources:** Active Directory, Entra ID, Intune, Microsoft 365 and Exchange Online; Azure is authorized but no unbounded collector is shipped.
 6. **Collectors included:** AD domains/users/groups/computers/organizational units/direct memberships; Entra users/groups/devices; Intune managed devices/hardware; Microsoft 365 SKUs/assignments; Exchange Online mailboxes.
 7. **Collection extensions added for V1:** Intune encryption and list-only hardware; bounded shared Graph paging/retry handling on every Graph-native collector; transactional last-valid publication for every source, including multi-table AD.

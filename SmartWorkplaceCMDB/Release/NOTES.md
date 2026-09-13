@@ -122,7 +122,7 @@ in the release package.
 - Adds deterministic data-quality findings for missing identity, primary user,
   country and observed license-assignment errors.
 - Versions the Power BI generators and tests and consolidates the canonical
-  report into 10 decision-oriented pages under the stable `CMDB-REPORTS` name.
+  report into 10 decision-oriented pages under the stable `SmartWorkplaceCMDB` name.
 - Keeps Autopilot, Intune applications/policies, cloud membership expansion,
   effective service-plan modeling, Azure resource inventory, hybrid identity
   reconciliation, advanced lifecycle, Business Services and recursive impact

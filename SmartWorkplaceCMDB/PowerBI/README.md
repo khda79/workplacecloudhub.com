@@ -6,7 +6,7 @@ detail/drill-through pages. The transformation preserves the three stable
 drill-through identifiers, consolidates overlapping content and retires six
 redundant presentation pages.
 All visible release labels and the canonical project name are V1; the project
-is stored as `PowerBI/CMDB-REPORTS/CMDB-REPORTS.pbip`. See
+is stored as `PowerBI/CMDB-REPORTS/SmartWorkplaceCMDB.pbip`. See
 [COCKPIT-DSI.md](COCKPIT-DSI.md) for metric and source boundaries.
 
 Power BI is a native deliverable of SmartWorkplaceCMDB. The report builder
