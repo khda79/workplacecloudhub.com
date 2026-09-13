@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.9.0",
+  "contractVersion": "0.10.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -569,6 +569,18 @@
         "Model", "EndpointAnalyticsScore", "StartupPerformanceScore",
         "AppReliabilityScore", "WorkFromAnywhereScore", "SourceCollectedDateTime",
         "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactEndpointAnalyticsUpgradeEligibility.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantUpgradeEligibilityDeviceKey", "MetricId", "MetricDeviceId",
+        "DeviceId", "DeviceIdSource", "DeviceName", "UpgradeEligibility",
+        "SourceCollectedDateTime", "SourceSystem"
       ]
     }
   ]

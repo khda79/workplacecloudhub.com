@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +41,43 @@ class CockpitNavigationTests(unittest.TestCase):
     def test_all_three_360_pages_are_managed_by_the_repeatable_restyle(self):
         self.assertTrue(cockpit.DRILLTHROUGH_PAGES.issubset(cockpit.MANAGED_PAGES))
 
+    def test_each_visible_page_has_a_registered_header_icon(self):
+        self.assertEqual(set(cockpit.PAGE_ICON_RESOURCES), set(cockpit.PAGE_ORDER))
+        self.assertTrue(all(name.endswith(".svg") for name in cockpit.PAGE_ICON_RESOURCES.values()))
+
+    def test_each_executive_ratio_card_has_a_distinct_vector_illustration(self):
+        self.assertEqual(
+            set(cockpit.OVERVIEW_RATIO_ICON_RESOURCES),
+            {"formfactor", "ownership", "windows", "accounts", "mailboxes"},
+        )
+        self.assertEqual(
+            len(set(cockpit.OVERVIEW_RATIO_ICON_RESOURCES.values())),
+            len(cockpit.OVERVIEW_RATIO_ICON_RESOURCES),
+        )
+        self.assertTrue(
+            all(name.endswith(".svg") for name in cockpit.OVERVIEW_RATIO_ICON_RESOURCES.values())
+        )
+
+    def test_kpi_and_detail_section_icons_use_the_same_vector_asset_system(self):
+        self.assertEqual(
+            set(cockpit.KPI_ICON_RESOURCES),
+            {"devices", "management", "compliance", "users", "mailboxes", "licenses", "quality", "analytics", "relationships"},
+        )
+        self.assertEqual(
+            set(cockpit.SECTION_ICON_RESOURCES),
+            {"identity", "enrollment", "hardware", "activity", "findings"},
+        )
+        resources = [*cockpit.KPI_ICON_RESOURCES.values(), *cockpit.SECTION_ICON_RESOURCES.values()]
+        self.assertTrue(all(name.endswith(".svg") for name in resources))
+        self.assertEqual(len(resources), len(set(resources)))
+
+    def test_copyright_is_exact_and_targets_the_public_website(self):
+        self.assertEqual(
+            cockpit.COPYRIGHT_TEXT,
+            "© 2026 WorkplaceCloudHub — https://workplacecloudhub.com/",
+        )
+        self.assertEqual(cockpit.COPYRIGHT_URL, "https://workplacecloudhub.com/")
+
     def test_searchable_slicer_keeps_all_as_the_neutral_state(self):
         visual = {"visual": {"objects": {}}}
         cockpit.configure_searchable_slicer(visual)
@@ -49,6 +87,64 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertEqual(objects["general"][0]["properties"]["selfFilterEnabled"]["expr"]["Literal"]["Value"], "true")
         self.assertNotIn("selection", objects)
         self.assertNotIn("filter", objects["general"][0]["properties"])
+
+    def test_default_device_ownership_page_filter_is_corporate_and_repeat_safe(self):
+        page = {
+            "filterConfig": {
+                "filters": [
+                    {"name": "preserved", "type": "Categorical"},
+                    {
+                        "name": cockpit.DEFAULT_OWNERSHIP_FILTER_NAME,
+                        "field": {"Column": {
+                            "Expression": {"SourceRef": {"Entity": "DimDevice"}},
+                            "Property": "OwnershipLabel",
+                        }},
+                        "type": "Categorical",
+                    },
+                ],
+                "filterSortOrder": "Custom",
+            }
+        }
+        for _ in range(2):
+            cockpit.set_page_categorical_filter(
+                page,
+                cockpit.DEFAULT_OWNERSHIP_FILTER_NAME,
+                "DimDevice",
+                "OwnershipLabel",
+                cockpit.DEFAULT_OWNERSHIP,
+            )
+
+        filters = page["filterConfig"]["filters"]
+        self.assertEqual([item["name"] for item in filters], ["preserved", "defaultdeviceownership"])
+        ownership = filters[1]
+        self.assertEqual(ownership["field"]["Column"]["Property"], "OwnershipLabel")
+        predicate = ownership["filter"]["Where"][0]["Condition"]["In"]
+        self.assertEqual(
+            predicate["Expressions"][0]["Column"]["Expression"]["SourceRef"],
+            {"Source": "s"},
+        )
+        self.assertEqual(predicate["Values"][0][0]["Literal"]["Value"], "'Corporate'")
+
+    def test_version_is_centered_in_the_shared_footer(self):
+        with tempfile.TemporaryDirectory() as root:
+            pages = Path(root)
+            path = pages / "risk" / "visuals" / "riskv1" / "visual.json"
+            cockpit.write(path, {
+                "position": {"x": 24, "y": 60, "width": 600, "height": 24},
+                "visual": {"objects": {"general": [{"properties": {
+                    "paragraphs": [{"textRuns": [{"value": "VERSION 1.0.0"}]}]
+                }}]}},
+            })
+
+            cockpit.position_version_in_footer(pages, "risk")
+            version = cockpit.load(path)
+
+        self.assertEqual(
+            {key: version["position"][key] for key in ("x", "y", "width", "height")},
+            {"x": 536, "y": 864, "width": 208, "height": 28},
+        )
+        paragraph = version["visual"]["objects"]["general"][0]["properties"]["paragraphs"][0]
+        self.assertEqual(paragraph["horizontalTextAlignment"], "center")
 
     def test_fleet_inventory_keeps_one_device_grain(self):
         self.assertTrue(cockpit.FLEET_TABLE_FIELDS)
@@ -84,6 +180,50 @@ class CockpitNavigationTests(unittest.TestCase):
             ["F1", "F3", "E3", "E5", "Copilot"],
         )
 
+    def test_executive_country_footprints_use_the_compact_country_label(self):
+        template = {
+            "name": "template",
+            "visual": {
+                "objects": {"labels": [{"properties": {}}]},
+                "visualContainerObjects": {"title": [{"properties": {"text": {}}}]},
+            }
+        }
+        for builder in (cockpit.add_country_bar, cockpit.add_license_country_bar):
+            visuals = []
+            with patch.object(cockpit, "clone_visual_by_type", return_value=template):
+                visual = builder(Path("unused"), visuals, "overview", 0, 0, 100, 100)
+            category = visual["visual"]["query"]["queryState"]["Category"]["projections"][0]
+            self.assertEqual(
+                category["field"]["Column"]["Property"],
+                cockpit.COUNTRY_FOOTPRINT_COLUMN,
+            )
+        self.assertEqual(cockpit.COUNTRY_FOOTPRINT_UNKNOWN, "Unknown")
+
+    def test_country_footprint_label_shortens_only_the_display_value(self):
+        table = {"columns": [{"name": "CountryLabel", "dataType": "string"}]}
+        cockpit.add_or_replace_calculated_column(
+            table,
+            cockpit.COUNTRY_FOOTPRINT_COLUMN,
+            (
+                "IF('DimCountry'[CountryLabel] = \"Unknown / unassigned\", "
+                f'\"{cockpit.COUNTRY_FOOTPRINT_UNKNOWN}\", \'DimCountry\'[CountryLabel])'
+            ),
+            "Compact footprint label.",
+        )
+        compact = next(
+            column for column in table["columns"]
+            if column["name"] == cockpit.COUNTRY_FOOTPRINT_COLUMN
+        )
+        self.assertIn('"Unknown"', compact["expression"])
+        self.assertIn("'DimCountry'[CountryLabel]", compact["expression"])
+
+    def test_refreshable_derived_tables_use_the_private_data_root_parameter(self):
+        source = (PRODUCT / "PowerBI/report_cockpit.py").read_text(encoding="utf-8")
+        self.assertIn('hosting_path = data_dir / "FactMailboxHosting.csv"', source)
+        self.assertIn('country_path = data_dir / "DimCountry.csv"', source)
+        self.assertIn("report, local_path, remote_path, data_dir", source)
+        self.assertIn("File.Contents(CMDBDataRoot &", source)
+
     def test_quality_indicators_are_explicit_and_non_additive(self):
         self.assertEqual(
             [name for name, _expression, _description in cockpit.QUALITY_INDICATORS],
@@ -102,9 +242,9 @@ class CockpitNavigationTests(unittest.TestCase):
         )
         self.assertTrue(all("fill" in entry["properties"] for entry in entries))
 
-    def test_donut_category_colors_use_scope_identity_selectors(self):
+    def test_ratio_category_colors_use_scope_identity_selectors(self):
         visual = {"visual": {}}
-        colors = cockpit.EXECUTIVE_DONUT_CATEGORY_COLORS["accounts"]
+        colors = cockpit.EXECUTIVE_RATIO_CATEGORY_COLORS["accounts"]
         cockpit.set_category_colors(visual, "DimUser", "AccountStatusLabel", colors)
         entries = visual["visual"]["objects"]["dataPoint"]
 
@@ -122,21 +262,125 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertEqual(selected, colors)
         self.assertNotEqual(selected["Enabled"], selected["Disabled"])
 
-    def test_each_executive_donut_category_palette_has_distinct_colors(self):
-        for palette in cockpit.EXECUTIVE_DONUT_CATEGORY_COLORS.values():
+    def test_each_executive_ratio_category_palette_has_distinct_colors(self):
+        for palette in cockpit.EXECUTIVE_RATIO_CATEGORY_COLORS.values():
             self.assertEqual(len(palette), len(set(palette.values())))
 
     def test_executive_measures_add_quality_groups_and_license_country_ratios(self):
         tables = [
             {"name": "DimCountry", "measures": []},
             {"name": "FactDataQuality", "measures": []},
+            {"name": "DimUser", "measures": []},
         ]
         cockpit.add_executive_measures(tables)
         country_measures = {measure["name"]: measure for measure in tables[0]["measures"]}
         quality_measures = {measure["name"]: measure for measure in tables[1]["measures"]}
-        self.assertEqual(set(country_measures), {item[2] for item in cockpit.LICENSE_COUNTRY_SERIES})
-        self.assertIn("REMOVEFILTERS('DimCountry'[CountryLabel])", country_measures["Executive M365 E3 country share"]["expression"])
-        self.assertEqual(set(quality_measures), {item[0] for item in cockpit.QUALITY_INDICATORS})
+        self.assertTrue({item[2] for item in cockpit.LICENSE_COUNTRY_SERIES}.issubset(country_measures))
+        self.assertIn("Executive Windows 10 devices", country_measures)
+        self.assertIn("_build < 22000", country_measures["Executive Windows 10 devices"]["expression"])
+        compatibility_expression = country_measures["Executive Windows 10 not compatible devices"]["expression"]
+        self.assertIn("FactEndpointAnalyticsUpgradeEligibility", compatibility_expression)
+        self.assertIn('= "notCapable"', compatibility_expression)
+        self.assertIn("RETURN IF(_observed = 0, BLANK(), _notCapable)", compatibility_expression)
+        self.assertIn(
+            "unknown is never treated as incompatible",
+            country_measures["Executive Windows 10 not compatible devices"]["description"],
+        )
+        self.assertIn("REMOVEFILTERS('DimCountry')", country_measures["Executive M365 E3 country share"]["expression"])
+        endpoint_score = country_measures["Executive Endpoint Analytics score"]
+        self.assertEqual(endpoint_score["formatString"], "0.0")
+        self.assertIn("not a population percentage", endpoint_score["description"])
+        self.assertEqual(cockpit.ENDPOINT_ANALYTICS_CARD_TITLE, "Endpoint Analytics Score")
+        self.assertTrue({item[0] for item in cockpit.QUALITY_INDICATORS}.issubset(quality_measures))
+        self.assertIn("Data quality score", quality_measures)
+        self.assertIn("Data quality status", quality_measures)
+        self.assertIn("Data quality health", quality_measures)
+        self.assertIn("MINX", quality_measures["Data quality score"]["expression"])
+        self.assertIn("REMOVEFILTERS('DimDevice')", quality_measures["Data quality score"]["expression"])
+        self.assertIn("REMOVEFILTERS('DimUser')", quality_measures["Data quality score"]["expression"])
+        self.assertIn("Overlapping findings", quality_measures["Data quality score"]["description"])
+        self.assertEqual(tables[2]["measures"][0]["name"], "Account status share")
+
+    def test_upgrade_eligibility_source_requires_exact_ids_and_supported_states(self):
+        row = {column: "value" for column in cockpit.UPGRADE_ELIGIBILITY_COLUMNS}
+        row.update({
+            "TenantKey": "tenant",
+            "OrganizationKey": "organization",
+            "EnvironmentKey": "prod",
+            "TenantId": "tenant-id",
+            "DeviceId": "intune-device-id",
+            "UpgradeEligibility": "capable",
+            "SourceCollectedDateTime": "2026-09-13T00:00:00Z",
+        })
+        source = Path("FactEndpointAnalyticsUpgradeEligibility.csv")
+        with patch.object(
+            cockpit, "read_csv", return_value=(cockpit.UPGRADE_ELIGIBILITY_COLUMNS, [row])
+        ):
+            self.assertEqual(len(cockpit.validate_upgrade_eligibility_source(source)), 1)
+
+        invalid = dict(row, UpgradeEligibility="inventedState")
+        with patch.object(
+            cockpit, "read_csv", return_value=(cockpit.UPGRADE_ELIGIBILITY_COLUMNS, [invalid])
+        ):
+            with self.assertRaisesRegex(ValueError, "unsupported state"):
+                cockpit.validate_upgrade_eligibility_source(source)
+
+    def test_upgrade_eligibility_source_rejects_conflicting_exact_device_ids(self):
+        base = {column: "value" for column in cockpit.UPGRADE_ELIGIBILITY_COLUMNS}
+        base.update({
+            "TenantKey": "tenant",
+            "OrganizationKey": "organization",
+            "EnvironmentKey": "prod",
+            "TenantId": "tenant-id",
+            "DeviceId": "intune-device-id",
+            "SourceCollectedDateTime": "2026-09-13T00:00:00Z",
+        })
+        rows = [
+            dict(base, UpgradeEligibility="capable"),
+            dict(base, UpgradeEligibility="notCapable"),
+        ]
+        source = Path("FactEndpointAnalyticsUpgradeEligibility.csv")
+        with patch.object(
+            cockpit, "read_csv", return_value=(cockpit.UPGRADE_ELIGIBILITY_COLUMNS, rows)
+        ):
+            with self.assertRaisesRegex(ValueError, "Conflicting upgrade eligibility"):
+                cockpit.validate_upgrade_eligibility_source(source)
+
+    def test_operational_category_palettes_distinguish_semantic_states(self):
+        compliance = cockpit.BAR_CATEGORY_COLORS[("DimDevice", "ComplianceStateLabel")]
+        updates = cockpit.BAR_CATEGORY_COLORS[("FactWindowsUpdateAlert", "AggregateState")]
+        self.assertNotEqual(compliance["Compliant"], compliance["NonCompliant"])
+        self.assertNotEqual(updates["Success"], updates["Error"])
+        self.assertEqual(compliance["NonCompliant"], updates["Error"])
+
+    def test_mailbox_type_group_preserves_user_shared_and_other_families(self):
+        self.assertEqual(cockpit.mailbox_type_group({"RecipientTypeDetails": "UserMailbox"}), "User mailbox")
+        self.assertEqual(cockpit.mailbox_type_group({"RecipientTypeDetails": "RemoteUserMailbox"}), "User mailbox")
+        self.assertEqual(cockpit.mailbox_type_group({"RecipientTypeDetails": "SharedMailbox"}), "Shared mailbox")
+        self.assertEqual(cockpit.mailbox_type_group({"RecipientTypeDetails": "RemoteSharedMailbox"}), "Shared mailbox")
+        self.assertEqual(cockpit.mailbox_type_group({"RecipientTypeDetails": "RoomMailbox"}), "Other mailbox types")
+
+    def test_ratio_bar_uses_percentage_measure_and_count_tooltip(self):
+        visual = {
+            "name": "testratiobar",
+            "visual": {
+                "objects": {},
+                "visualContainerObjects": {"title": [{"properties": {}}]},
+            }
+        }
+        cockpit.set_ratio_bar(
+            visual,
+            "DimUser", "AccountStatusLabel", "DimUser",
+            "Account status share", "Users", "Enabled vs disabled users",
+        )
+        query = visual["visual"]["query"]["queryState"]
+        self.assertEqual(visual["visual"]["visualType"], "clusteredBarChart")
+        self.assertEqual(query["Y"]["projections"][0]["queryRef"], "DimUser.Account status share")
+        self.assertEqual(query["Tooltips"]["projections"][0]["queryRef"], "DimUser.Users")
+        self.assertEqual(
+            visual["visual"]["objects"]["valueAxis"][0]["properties"]["end"]["expr"]["Literal"]["Value"],
+            "1D",
+        )
 
     def test_page_navigation_targets_workplace_health(self):
         visual = {"visual": {}}
@@ -167,62 +411,73 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertNotIn("PrimarySmtpAddress", rows[0])
         self.assertTrue(all(len(row["MailboxHostingKey"]) == 64 for row in rows))
+        self.assertEqual(
+            {row["RecipientTypeDetails"]: row["MailboxTypeGroup"] for row in rows},
+            {
+                "UserMailbox": "User mailbox",
+                "RemoteUserMailbox": "User mailbox",
+                "SharedMailbox": "Shared mailbox",
+            },
+        )
 
     def test_workplace_health_uses_windows_update_attention_evidence(self):
         with (
             patch.object(cockpit, "new_page", return_value=({}, [])),
             patch.object(cockpit, "add_slicer", return_value={}),
-            patch.object(cockpit, "set_categorical_selection"),
+            patch.object(cockpit, "compact_page_header"),
             patch.object(cockpit, "add_card") as add_card,
-            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_ratio_bar") as add_ratio_bar,
             patch.object(cockpit, "add_table"),
         ):
             cockpit.build_risk(Path("ignored"))
         add_card.assert_any_call(
             Path("ignored"), [], "risk", "FactWindowsUpdateAlert",
-            "Windows update alerts needing attention", "Update alerts needing attention", 336, 232,
+            "Windows update alerts needing attention", "Update alerts needing attention", 336, 136, h=88,
         )
-        add_bar.assert_any_call(
+        add_ratio_bar.assert_any_call(
             Path("ignored"), [], "risk", "FactWindowsUpdateAlert", "AggregateState",
-            "FactWindowsUpdateAlert", "Windows update alert records",
-            "Windows Update records by aggregate state", 648, 340, h=212,
+            "FactWindowsUpdateAlert", "Update aggregate state rate", "Windows update alert records",
+            "Windows Update evidence by state", 648, 240, w=608, h=184,
         )
 
     def test_lifecycle_uses_autopilot_and_endpoint_analytics(self):
         with (
             patch.object(cockpit, "new_page", return_value=({}, [])),
             patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "compact_page_header"),
             patch.object(cockpit, "add_card") as add_card,
-            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_ratio_bar") as add_ratio_bar,
+            patch.object(cockpit, "add_compact_card"),
             patch.object(cockpit, "add_table"),
         ):
             cockpit.build_lifecycle(Path("ignored"))
         add_card.assert_any_call(
             Path("ignored"), [], "lifecycle", "FactAutopilotDevice",
-            "Autopilot devices", "Autopilot devices", 648, 232,
+            "Selected Autopilot devices", "Autopilot · exact matches", 648, 136, h=88,
         )
         add_card.assert_any_call(
             Path("ignored"), [], "lifecycle", "FactEndpointAnalyticsDevice",
-            "Average Endpoint Analytics score", "Average Endpoint Analytics score", 960, 232,
+            "Selected Endpoint Analytics score", "Endpoint Analytics score", 960, 136, h=88,
         )
-        add_bar.assert_any_call(
+        add_ratio_bar.assert_any_call(
             Path("ignored"), [], "lifecycle", "FactAutopilotDevice", "EnrollmentState",
-            "FactAutopilotDevice", "Autopilot devices",
-            "Autopilot devices by enrollment state", 648, 340, h=212,
+            "FactAutopilotDevice", "Autopilot enrollment rate", "Selected Autopilot devices",
+            "Autopilot — exact Intune matches", 960, 240, w=296, h=204,
         )
 
     def test_people_page_uses_collected_activity_state(self):
         with (
             patch.object(cockpit, "new_page", return_value=({}, [])),
             patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "compact_page_header"),
             patch.object(cockpit, "add_card"),
-            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_ratio_bar") as add_ratio_bar,
             patch.object(cockpit, "add_table"),
         ):
             cockpit.build_people_messaging(Path("ignored"))
-        add_bar.assert_any_call(
+        add_ratio_bar.assert_any_call(
             Path("ignored"), [], "users", "DimUser", "ActivityState",
-            "DimUser", "Users", "Users by observed activity state", 24, 340, h=212,
+            "DimUser", "Activity state rate", "Users", "Observed sign-in activity", 336, 240, w=296, h=184,
         )
 
 

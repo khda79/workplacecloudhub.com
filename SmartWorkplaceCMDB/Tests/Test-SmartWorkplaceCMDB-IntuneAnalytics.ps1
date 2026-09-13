@@ -3,12 +3,12 @@
 Validates Intune update reporting and Endpoint Analytics with synthetic data.
 
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.2'
+$ScriptVersion = '1.0.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $passed = 0
@@ -54,18 +54,24 @@ try {
     }
     Invoke-IntuneAnalyticsTest 'Collect independent report snapshots' {
         $result = & $collector @identity -InputJsonPath $fixture
-        Assert-IntuneAnalyticsTrue ($result.WindowsUpdateRowCount -eq 2 -and $result.EndpointAnalyticsDeviceCount -eq 2) 'Unexpected report row counts.'
+        Assert-IntuneAnalyticsTrue ($result.WindowsUpdateRowCount -eq 2 -and $result.EndpointAnalyticsDeviceCount -eq 2 -and $result.UpgradeEligibilityDeviceCount -eq 2) 'Unexpected report row counts.'
         $raw = Join-Path $tempRoot 'DATA-LAST\Raw\Intune'
         Assert-IntuneAnalyticsTrue (@(Import-Csv (Join-Path $raw 'Intune_WindowsUpdateAlerts.csv')).Count -eq 2) 'Windows update report snapshot is invalid.'
         Assert-IntuneAnalyticsTrue (@(Import-Csv (Join-Path $raw 'Intune_EndpointAnalyticsDeviceScores.csv')).Count -eq 2) 'Endpoint Analytics snapshot is invalid.'
+        $eligibility = @(Import-Csv (Join-Path $raw 'Intune_EndpointAnalyticsUpgradeEligibility.csv'))
+        Assert-IntuneAnalyticsTrue ($eligibility.Count -eq 2) 'Upgrade eligibility snapshot is invalid.'
+        Assert-IntuneAnalyticsTrue (@($eligibility.UpgradeEligibility | Sort-Object) -join ',' -eq 'capable,notCapable') 'Upgrade eligibility values were not preserved canonically.'
+        Assert-IntuneAnalyticsTrue (@($eligibility.DeviceIdSource | Sort-Object -Unique) -join ',' -eq 'ReportedDeviceId') 'Upgrade eligibility device ID provenance is invalid.'
     }
     Invoke-IntuneAnalyticsTest 'Normalize dedicated Power BI facts' {
         & $normalizer @identity | Out-Null
         $powerBi = Join-Path $tempRoot 'DATA-LAST\PowerBI'
         $updates = @(Import-Csv (Join-Path $powerBi 'FactWindowsUpdateAlert.csv'))
         $analytics = @(Import-Csv (Join-Path $powerBi 'FactEndpointAnalyticsDevice.csv'))
+        $eligibility = @(Import-Csv (Join-Path $powerBi 'FactEndpointAnalyticsUpgradeEligibility.csv'))
         Assert-IntuneAnalyticsTrue ($updates.Count -eq 2 -and $updates[0].TenantUpdateAlertKey -match '\|update-alert\|') 'Windows update fact grain is invalid.'
         Assert-IntuneAnalyticsTrue ($analytics.Count -eq 2 -and $analytics[0].EndpointAnalyticsScore -eq '75') 'Endpoint Analytics fact grain is invalid.'
+        Assert-IntuneAnalyticsTrue ($eligibility.Count -eq 2 -and $eligibility[0].TenantUpgradeEligibilityDeviceKey -match '\|upgrade-eligibility\|') 'Upgrade eligibility fact grain is invalid.'
     }
     Invoke-IntuneAnalyticsTest 'Treat the Intune minus-one score sentinel as unavailable' {
         $sentinelIdentity = @{} + $identity
@@ -96,6 +102,34 @@ try {
         Assert-IntuneAnalyticsTrue ($scores.Count -eq 2) 'Duplicate Endpoint Analytics devices were not consolidated.'
         Assert-IntuneAnalyticsTrue ($reconciled.DeviceName -eq $scoreRows[0].deviceName -and $reconciled.EndpointAnalyticsScore -eq '80' -and $reconciled.StartupPerformanceScore -eq '70') 'Duplicate Endpoint Analytics values were not reconciled deterministically.'
     }
+    Invoke-IntuneAnalyticsTest 'Canonicalize documented numeric upgrade eligibility values' {
+        $numericIdentity = @{} + $identity
+        $numericIdentity.DataRootPath = Join-Path $tempRoot 'NumericEligibility'
+        $numericFixture = Join-Path $tempRoot 'numeric-eligibility.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $fixtureObject.endpointAnalyticsUpgradeEligibility[0].upgradeEligibility = 2
+        $fixtureObject.endpointAnalyticsUpgradeEligibility[1].upgradeEligibility = 3
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $numericFixture -Encoding UTF8
+        & $collector @numericIdentity -InputJsonPath $numericFixture | Out-Null
+        $eligibility = @(Import-Csv (Join-Path $numericIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_EndpointAnalyticsUpgradeEligibility.csv'))
+        Assert-IntuneAnalyticsTrue (@($eligibility.UpgradeEligibility | Sort-Object) -join ',' -eq 'capable,notCapable') 'Numeric Graph enum values were not mapped to capable and notCapable.'
+    }
+    Invoke-IntuneAnalyticsTest 'Reject conflicting eligibility for the same Intune device ID' {
+        $conflictIdentity = @{} + $identity
+        $conflictIdentity.DataRootPath = Join-Path $tempRoot 'ConflictingEligibility'
+        $conflictFixture = Join-Path $tempRoot 'conflicting-eligibility.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $eligibilityRows = [object[]]$fixtureObject.endpointAnalyticsUpgradeEligibility
+        $duplicate = ConvertFrom-Json (ConvertTo-Json -InputObject $eligibilityRows[0] -Depth 8)
+        $duplicate.id = 'metric-device-conflict'
+        $duplicate.upgradeEligibility = 'capable'
+        $fixtureObject.endpointAnalyticsUpgradeEligibility = [object[]]@($eligibilityRows + $duplicate)
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $conflictFixture -Encoding UTF8
+        $thrown = $false
+        try { & $collector @conflictIdentity -InputJsonPath $conflictFixture | Out-Null } catch { $thrown = $true }
+        Assert-IntuneAnalyticsTrue $thrown 'Conflicting eligibility values did not stop publication.'
+        Assert-IntuneAnalyticsTrue (-not (Test-Path (Join-Path $conflictIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_EndpointAnalyticsUpgradeEligibility.csv'))) 'Conflicting eligibility produced a latest snapshot.'
+    }
     Invoke-IntuneAnalyticsTest 'Bound both report families independently' {
         $bounded = @{} + $identity
         $bounded.DataRootPath = Join-Path $tempRoot 'Bounded'
@@ -114,8 +148,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtv5KiwgV36J+u
-# b9lZAO27nMsWYCu9dabN5BCluJZ69qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8kSi7U1vQByTh
+# DZM/PvyFG8laMbImjvvwcWAFpFBHSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -248,31 +282,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDwPhcEt2wpgWiZ4JEP+7tZzGQZ9rAt/fFpbSSnyFxkCMA0GCSqG
-# SIb3DQEBAQUABIIBgHyIv44PNC8wfpbJNQ7mbG/v1XdJHux6HhL5sAUlTq06iIVF
-# mgkQRgY+FZZAiU53O4zyPROlmr/wElizRfDWUxJEtcSvO6aTAw2W3/oyzNRiooWa
-# YmBegEOlWwLI7Z4/CdJhnIlhHazzW18s6arxYH6atUB48DMzxrY4IGOFtcxfLZWk
-# UYy+61XlDy7xeVJq1iHH0uZANOxUO5VUPNj82YqWqAC/CIiSk9x8pZgt330VaXka
-# jKoUd2rCZl3HyDwHZgx/EqTRnmIKV1STdQJczWtkJPqkHiaz+uVd79y1kTZoN4VJ
-# Vt01DgKPXl/QA3x9PBPbnfTldGi1FZg/KqJdaF9X9jtLdv3LiS8fA+iBpj6zMjXm
-# 6RETBlIN5vTmCWxNAtzKs7LLk0nxwSkiAv/jyRh2qqE4JZVpjfA4CXYMc9TEktao
-# f2vSV9lkMPANFvjUKuGDHJlOiiGU9Urj34AS/oTB1z+BLYVhTxsJ53HW8L8yDqkU
-# HsgkSNJBw9H0eHE/TaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFxnNdqUyMJKmD+eYkRG4k0TmbM77LomD93D6lHsdJ/qMA0GCSqG
+# SIb3DQEBAQUABIIBgEtd8I9E/kO/Hp6c2/ucqa066n1e6krJbQmegGwqg6QyOyct
+# jNFez6lFAoZohVSmvvMHLGI00C0yHX0mY+y7yGaBVaaHGEdu9KlEZAEgaK9oRiuv
+# E3nFUVzMoSDF+sZStA843CpaVl25zQKeqouK9Qqu/tpjwicHYbgxZMleGJZ5wIp0
+# Ifj2Mut5dP0N/L8DeZiQs1TpfH8DcuN776QO/MMd876uPIsQrRTDAr35vWkLrHuB
+# pMl9vTUALzoGEDM3c20DTZunMkUE7atltgfIVJH1DJORuMdRFdoRERgaZsu6SHtn
+# k/BeYGSsw42U5cgv9PfiM/Szym/YMQxe84D+91j6hXhWaVzP//iq6Pt29RzGPd91
+# mEPrvN1JssHZIikWRTgsNDR1H/u5rNL82SUlZQn4XMDPHnFYNlrSccZnwVH47lmU
+# Wj6po7maCCO3Ndbt2D+FCURKSW3dqUHjO5xVCovl8eIL0AvkzP2ZlDgLnvQZqokU
+# aAJDRyFccoPxVFg4uaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTMw
-# MDdaMC8GCSqGSIb3DQEJBDEiBCCLxjcC9eE0lvxS00hibzl80AyraOp7RmT1q0i8
-# eBBhNzANBgkqhkiG9w0BAQEFAASCAgByewSYSI+hCX6fLxstrtgf3vn+auxJ+VCa
-# JjmL63iA5QkaOt7ecxW48N9jyurKxLHYHYhOGx18vqdyQFHdRMxlESiBdJ4Zbf14
-# tQ6i8g+mnQkI3VjVXCmqK5BIVc9Mq1hjuUD8al3S5UDtwB+aQE92B9eluUGcjFqR
-# sH+V9AmTwwiJO3zihZID0yPAJJYD033+wGOIKiMkEPSLIngwKcydN8iwsFHu2r38
-# ojOwFF6w8Iex5D5NxRaV9ZrfW6uzuEXndi/hqIdJ8ycxEE7dLoWzG5R9Nzkdtu/f
-# +fCtsZ/5eMyI/qGj3W68z1B+T/zpX6qiXm1erFzHSpBOswRg5spQMAHEnA5RcdQ9
-# ovbpxD4Uw79qLwOL12WXJykJevYqiU6x5T/ISaBaVCU25bx3KP+g7CJVaIiuN/lH
-# 2T3KbSV6VIuMPwkNHQF7yKekOTAfMpIFFZq6VCZLgGyW+bRNzRYccLKvLixBDr43
-# Cakzycx7bJJIFEVXyDop9R4QoZDQBj4dN4DUBfBtjwzz+xUTPQNHesuTCONFgt8H
-# GLYMuvyuM87UfP0fGlr+eVWBxdjbooRL8JNl4qwZ79Tc02VviaHfZxdNi7gHhPvp
-# adxYXraSuNIjZ/NVAAKNMNGrnUH3fFP98mU8eaQ+CHS5iOuX/B0eVXuNGqp5IUbH
-# LvMb6XhOnA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCA0hTAnbhy+QAr9hTuFqoLyxTRRKRd1ucCKMZkj
+# QBMVoTANBgkqhkiG9w0BAQEFAASCAgAQQB6+eT70BRZ9ObaaRhHSDOeKHAYRdW92
+# Y3CmXIAct92G64/BE9CGuCkC1xWEDB0wW+8PxQCLIItoWSYr81Lh5vSeZDBEYlhX
+# cHGAk180unY5AujvHeJoOCQ9JWC03cLPnZj7snALw+BbUBEDjgEWqbvzQSeyjByY
+# 1y52CdPmwCur2dgQpEf0xXnR4+TjCiT2RPfo/fZzfNSIj0YP3+cGIlJft5a0K/el
+# zil0R7+7yTj3GCQKXRYIWeuib2iQnFcem5VAc3Phx3jH2jhCKGn7nJsFMAjT3rJn
+# 8qy8W7sI7ipH7LEQ5tBDluBngQ32K3jwgNlxzRMYYMEB+Q/hgARljREHjOYoGAS7
+# ucubfJ/3oU160kbcU71nVnGXdaY2kk+28Nip7oCGcLvEB0Oj5jfIjBz0tlVKnDgW
+# gPldKbFlo4d2bzHuWpP+gjWYjtO4YHyNiRxW/9oM6AlZy0BWMtzgLPtw4vvfx1pq
+# LHudIwia7I2XMrK/wzd1LqfCulA4IrUsSVKrmg9gUj/GN9XJBok/WfO1YQ7CXjSC
+# NCVaZuFKJae2yC6UJNMXUDtxjFw7SVd6v0hPl6NFVc2IJesUYqatNhxGb7wK/40Z
+# 6aYwHusrp/t/ofgWaaBL5Hfz6FxaCxRmd6JEjlqSKCMnCKmV3DEshKKhpUE+NpGd
+# PEVSuGI/SQ==
 # SIG # End signature block
