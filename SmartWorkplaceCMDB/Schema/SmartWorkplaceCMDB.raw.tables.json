@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.17.0",
+  "contractVersion": "0.18.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -442,6 +442,18 @@
         "DeviceId", "DeviceName", "Manufacturer", "Model", "EndpointAnalyticsScore",
         "StartupPerformanceScore", "AppReliabilityScore", "WorkFromAnywhereScore",
         "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_EndpointAnalyticsUpgradeEligibility.csv",
+      "role": "raw",
+      "source": "MicrosoftGraphEndpointAnalytics",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "MetricId", "MetricDeviceId", "DeviceId", "DeviceIdSource", "DeviceName",
+        "UpgradeEligibility", "SourceCollectedDateTime"
       ]
     },
     {
