@@ -57,6 +57,40 @@ class ReportTests(unittest.TestCase):
                 r.update(row)
                 writer.writerow(r)
 
+    def write_first_raw_source(self):
+        t = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.raw.tables.json").read_text())["tables"][0]
+        path = self.root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=t["columns"])
+            writer.writeheader()
+            writer.writerow(dict({c: "" for c in t["columns"]}, **self.identity))
+        return path
+
+    def write_snapshot_run(self, build_time="2026-09-13T04:45:22.1961983+02:00",
+                           run_end="2026-09-13T02:45:22.4359793+00:00"):
+        manifest = self.root / "CMDB/CMDB_BuildManifest.csv"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest_fields = list(self.identity) + ["BuildDateTime"]
+        with manifest.open("w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=manifest_fields)
+            writer.writeheader()
+            writer.writerow(dict(self.identity, BuildDateTime=build_time))
+        run_path = self.root.parent / "LOG-ALL/Orchestration/Runs/run.csv"
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        fields = ["RunId", "Pipeline", "Mode", "Step", "Status", "StartedDateTime", "EndedDateTime"]
+        rows = [
+            dict(RunId="synthetic", Pipeline="Full", Mode="Collect", Step="Active Directory collection", Status="Completed",
+                 StartedDateTime="2026-09-13T02:44:00+00:00", EndedDateTime="2026-09-13T02:44:30+00:00"),
+            dict(RunId="synthetic", Pipeline="Full", Mode="Collect", Step="Contract build and manifest", Status="Completed",
+                 StartedDateTime="2026-09-13T02:45:21+00:00", EndedDateTime=run_end),
+        ]
+        with run_path.open("w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+        return run_path
+
     def test_six_pages_have_working_bindings_and_keep_source_immutable(self):
         hashes = {str(p): report.sha(p) for p in self.root.rglob("*.csv")}
         output = self.base / "report"
@@ -166,6 +200,37 @@ class ReportTests(unittest.TestCase):
         _, data, _, _ = report.prepare_data(self.root)
         self.assertEqual(data["SourceHealth"][0]["Evidence"], "Inconsistent")
         self.assertEqual(data["SourceHealth"][0]["SourceRows"], "1")
+
+    def test_matching_full_run_is_used_as_csv_collection_evidence(self):
+        self.write_first_raw_source()
+        run_path = self.write_snapshot_run()
+        _, data, _, hashes = report.prepare_data(self.root)
+        source = data["SourceHealth"][0]
+        self.assertEqual(source["Status"], "Completed")
+        self.assertEqual(source["Coverage"], "Not reported")
+        self.assertEqual(source["Evidence"], "Orchestrator run + CSV")
+        self.assertEqual(source["SourceRows"], "1")
+        self.assertEqual(source["CompletedDateTime"], "2026-09-13T02:44:30+00:00")
+        self.assertIn(str(run_path.relative_to(self.root.parent)), hashes)
+
+    def test_unmatched_full_run_does_not_certify_csv(self):
+        self.write_first_raw_source()
+        self.write_snapshot_run(run_end="2026-09-13T03:45:22.4359793+00:00")
+        _, data, _, _ = report.prepare_data(self.root)
+        source = data["SourceHealth"][0]
+        self.assertEqual(source["Status"], "CSV without evidence")
+        self.assertEqual(source["Evidence"], "Missing")
+
+    def test_sidecar_takes_precedence_over_matching_run(self):
+        path = self.write_first_raw_source()
+        self.write_snapshot_run()
+        sidecar = path.with_name(path.name + ".status.json")
+        sidecar.write_text(json.dumps(dict(self.identity, Status="Partial", Coverage="Partial", SHA256=report.sha(path), RowCount=1)), encoding="utf-8")
+        _, data, _, _ = report.prepare_data(self.root)
+        source = data["SourceHealth"][0]
+        self.assertEqual(source["Status"], "Partial")
+        self.assertEqual(source["Coverage"], "Partial")
+        self.assertEqual(source["Evidence"], "Verified")
 
     def test_source_evidence_foreign_tenant_rejected(self):
         t = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.raw.tables.json").read_text())["tables"][0]
