@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-Normalizes Intune report exports into Power BI facts.
+Normalizes Intune report exports and upgrade eligibility into Power BI facts.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +22,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -55,7 +55,8 @@ $rawContract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
 $curatedContract = Get-SmartWorkplaceCMDBTableContract -Path $curatedContractPath
 $mappings = @(
     @{ Raw = 'Intune_WindowsUpdateAlerts.csv'; Curated = 'FactWindowsUpdateAlert.csv' },
-    @{ Raw = 'Intune_EndpointAnalyticsDeviceScores.csv'; Curated = 'FactEndpointAnalyticsDevice.csv' }
+    @{ Raw = 'Intune_EndpointAnalyticsDeviceScores.csv'; Curated = 'FactEndpointAnalyticsDevice.csv' },
+    @{ Raw = 'Intune_EndpointAnalyticsUpgradeEligibility.csv'; Curated = 'FactEndpointAnalyticsUpgradeEligibility.csv' }
 )
 $definitions = @()
 foreach ($mapping in $mappings) {
@@ -109,7 +110,7 @@ foreach ($definition in $definitions) {
         })
         $duplicates = @($targetRows | Group-Object TenantUpdateAlertKey | Where-Object Count -gt 1)
     }
-    else {
+    elseif ($definition.Mapping.Raw -eq 'Intune_EndpointAnalyticsDeviceScores.csv') {
         $targetRows = @($rows | ForEach-Object {
             $deviceKey = Get-KeyText $_.DeviceId
             if ([string]::IsNullOrWhiteSpace($deviceKey)) { throw 'Endpoint Analytics row has an empty DeviceId.' }
@@ -129,6 +130,24 @@ foreach ($definition in $definitions) {
         })
         $duplicates = @($targetRows | Group-Object TenantEndpointAnalyticsDeviceKey | Where-Object Count -gt 1)
     }
+    else {
+        $targetRows = @($rows | ForEach-Object {
+            $deviceKey = Get-KeyText $_.DeviceId
+            if ([string]::IsNullOrWhiteSpace($deviceKey)) { throw 'Endpoint Analytics upgrade eligibility row has an empty DeviceId.' }
+            [pscustomobject][ordered]@{
+                TenantUpgradeEligibilityDeviceKey = ('{0}|upgrade-eligibility|{1}' -f $paths.TenantKey, $deviceKey)
+                MetricId = [string]$_.MetricId
+                MetricDeviceId = [string]$_.MetricDeviceId
+                DeviceId = [string]$_.DeviceId
+                DeviceIdSource = [string]$_.DeviceIdSource
+                DeviceName = [string]$_.DeviceName
+                UpgradeEligibility = [string]$_.UpgradeEligibility
+                SourceCollectedDateTime = [string]$_.SourceCollectedDateTime
+                SourceSystem = [string]$_.SourceSystem
+            }
+        })
+        $duplicates = @($targetRows | Group-Object TenantUpgradeEligibilityDeviceKey | Where-Object Count -gt 1)
+    }
     if ($duplicates.Count) { throw "Duplicate Intune analytics keys found in $($definition.Mapping.Raw): $($duplicates.Name -join ', ')" }
     Export-SmartWorkplaceCMDBCsv -InputObject $targetRows -Path $definition.Output -Columns @($definition.Target.columns | ForEach-Object { [string]$_ }) @identity
     if ((Get-HeaderStatus $definition.Output @($definition.Target.columns | ForEach-Object { [string]$_ })) -ne 'Valid') { throw "Curated Intune analytics output failed validation: $($definition.Output)" }
@@ -140,8 +159,8 @@ Write-Information ("SmartWorkplaceCMDB Intune analytics normalization completed.
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdUu/l9UOSh3Dl
-# c3NJ3kYZqg2AUFB7lfwPcD/NZYSaEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUWAP0zikaix6V
+# W5VaQ/K3RlCLaukHKpvgEAqeO85vZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -274,31 +293,31 @@ Write-Information ("SmartWorkplaceCMDB Intune analytics normalization completed.
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINPn9f7C+EM/p6yngVUsIJqq/jYLg65GX4nzXM0e/tfVMA0GCSqG
-# SIb3DQEBAQUABIIBgIIzhXMkprpzH7CjdRU9HzrFtGGzpTycUi9Z3088iQkpOyHl
-# dDf0iVqCOfDxyHWc8ihgJEWPqtuFxOz9l8ic3BDkr+6IGhQ+Hy3olcyQow7NXW03
-# 4aJi3Q0krAHc99Wi8BcLg/YgOsuySUwDzQjA23r3RcgxVSLM9aq9Zaug24SjC4WF
-# GQe1dwPoRkALAUV7/tbMmUETHR93ajMoDCaReDUN/5gQ9JnaIr8KRENQgSh2EolZ
-# 3UnkdsgBYjCvcuF1pSvw/ckPC+G68we2ak0dgK4Dsut+R/PS7sv5WEBYqL+M84PD
-# BY1dSuWFq+Yry/dXkB6A/XWjDk6i/ZnDWAx+mx2+PGf3uU1l2ggrkZy0qigrnrx8
-# 0+0brYaVCXNZtw5qWNXh1PO2//9YSTepCgje71BcWbrGvjVc4wpy662kICgif9Fz
-# xj9R4zA8MkDzKmfzdqCCa8+pHrgtzfOLcwbTh34mlHzTG1QDeQQbRwkfBd0sT6Qx
-# edzi/5RzlrhC2QGQ+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPMwtGXd/I9v8N3H8gV2z3vfWDaU1suS2ImYc5uZMwzTMA0GCSqG
+# SIb3DQEBAQUABIIBgEvnGJv4n/tf7QYGfS+xTOqcJC8WVvtWA9iLdK8nT+s/vhe0
+# vOCZaqJUy1opC0djHATKeQ2iDQORa8Uhg4/ro5OFzJ+/kA4GH9JZ5Zb7y2hFoPQL
+# wI+2JhuWgZoh6OFUkztUD2tEl6OyHKgKQDePOJxw23s/XcBP2s1aezjrd9ykb+TA
+# IqM+qvICSMc457FKG90onDfRQpudSpqjIf8hlxt3m9E6xLHfr3ByVGcFMXlePjWP
+# u/HT7EX8BhSVkH/hWFuFvF1mrLFJ39jUMsqlnhCc9e+6wshZ1h9E0Hsa6iTaPRxJ
+# KKq9vq0cQ8IUE6LFQXbdo+EwOTw++OjeEpZprFj5BUChLgg9oOV3QiN84iYNQ8Mv
+# uNsl9k0Jq5/RRvG2O82LdG2WSXCR5v/aYUc09OI0CyDY1ENvosn4KmXyPakHyMKs
+# A9YAxtAjtt+Oi3v0xoTf4ZvDl/zxhtO90rvAekH4R2+YbmTwDh9GYfE2Vc5KAnKr
+# 3qgVOEEwq06Yp76hOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODM2
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCkl5K9bQAKafReyUhGioj+1F8BUPes5iM9Zmja
-# OEaMYDANBgkqhkiG9w0BAQEFAASCAgBYwO5MAMrW1XB6YrPUx9fbxT5cct52PwTF
-# 4j/ogV+FNsPcvEWhSHhx6IXAlJOD+l7gOTln4cLbvNIyFJ6Wp9DoBoU/IWmARCHL
-# fLr9MB2VQN/rSBvTqWUV/P/WJmmWF+ORLvgGcqnU3vxxCzuFX+p00Kvq0cVer11g
-# +XhNRveQQN7alTQIrIiNXaMpjynMjYemEhg2spjmH1NZ/6K3mgoPCL3wLNNrms3g
-# UKfuhUyiHxTzbIbO1wp52UtSCeMTkM3u5Yw0FhI+rOyARchtzoHR0fDVkeaoExRv
-# Dk73H270I+F6jOr6JHEAKvtgKSNj+cLwQK2H+tK7P++59mkUG+AZEMo5DGAjB2Sy
-# MKMM3OkdqpN61Mw3fgxvX78Y7Bq/cBf19J85rYu6ad6gBojlsajk2NQ5e1dqZY5I
-# TX944iUmxHwZs3ZHYwyAJpUeIZ8cgW52ZU2NzRebaIOIRIquxgMzM6BzVxoTYX5Q
-# 3KBY+j/eR0/Dt6UBtTPo0kdbNkRPq1LTJYM4TyvdzwgGXYv8JtMb/e3K5B3GMWjm
-# 6Qsb3M+6GoSXh5JNSmjE3LMSnzJvWJOhv3HrvfXZXywcFol8NISMMulCjn84RPYp
-# 5q3U3dXZrtJt03SQZNlE2r0JrVfuJ8IUwyoAOEpG5ik4sHMlmD/tQRMpjKo9js2y
-# n0a0fxr7EQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCCUgirIfYK88PbH5laL7wtDrxKpLwlMx50cks+S
+# sM2ulDANBgkqhkiG9w0BAQEFAASCAgBQqvdzjaOxTFWCKm8yZqx+EcnrPs/83hOq
+# MRqZRxwzn2hNEVuBhxz7jUY2w8Jcgvtcdm7lBMqgEkJoCyLeiFzwJ5K/qrnScuDO
+# ovaShXyXfGN37BOdjFOwp8fBX9jy8TcnAVikPrxjbvtVWvtCJa9+hGNKrxXuaos8
+# ubiBRGzRnanlSHkEdbtnI4n76e4b26lmQJDsFe0wbCezp/v0pTZD8RD4UweW+P3N
+# 2A5HO3I9sOAE9KSgOneGD1SkM1f/Eh52OW4dai6Wk8XiWAPFZguc7aZ7tLA0rMUX
+# JkkJpkOXW8e2TARiano+U8B7veMXyCZLay7MRzz24ODAdf3+3c6lAIZTlJERZpgf
+# RhFOdfyFPESy76JmRYB9+ggod8k1S8c7dXJ0b9smeuZbrsSZp5BRWBmbHLwieJYZ
+# PFOW/GEk46BWchfAFmcNclXS8rFL+K/cjdSjvu5eBdBBT2QlKxTxj25xHGP+mewn
+# Jv30P5ZFwY52FoS+9TgJyOYl6GrSOJxjcXs6Nfyaj0JTJ9861BUgRVgvoxoPf6jy
+# ULINkZGlYDVI+8/lbf6q0GhRmroeOuLrOIUbX3ZoTV/uyOCd37V4VSM0UGz/Wmjw
+# UyGFFtBg6VdZ560hmuNsESf2OKO1K57o5k5ZiKt9XeTkJEYkhVOvATR+zVg+jGLF
+# KSq/j0iceA==
 # SIG # End signature block

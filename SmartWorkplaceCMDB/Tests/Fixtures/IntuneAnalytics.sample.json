@@ -44,5 +44,21 @@
       "appReliabilityScore": 69,
       "workFromAnywhereScore": 60
     }
+  ],
+  "endpointAnalyticsUpgradeEligibility": [
+    {
+      "sourceMetricId": "allDevices",
+      "id": "metric-device-1111",
+      "deviceId": "11111111-aaaa-bbbb-cccc-111111111111",
+      "deviceName": "WIN-TEST-01",
+      "upgradeEligibility": "notCapable"
+    },
+    {
+      "sourceMetricId": "allDevices",
+      "id": "metric-device-2222",
+      "deviceId": "22222222-aaaa-bbbb-cccc-222222222222",
+      "deviceName": "WIN-TEST-02",
+      "upgradeEligibility": "capable"
+    }
   ]
 }

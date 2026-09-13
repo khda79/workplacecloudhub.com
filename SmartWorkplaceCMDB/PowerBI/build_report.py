@@ -52,6 +52,7 @@ RAW_SOURCE_COLLECTION_STEPS = {
     "Intune_WindowsUpdatePolicies": "Intune update and Endpoint Analytics report collection",
     "Intune_WindowsUpdateAlerts": "Intune update and Endpoint Analytics report collection",
     "Intune_EndpointAnalyticsDeviceScores": "Intune update and Endpoint Analytics report collection",
+    "Intune_EndpointAnalyticsUpgradeEligibility": "Intune update and Endpoint Analytics report collection",
     "M365_SubscribedSkus": "Microsoft 365 subscribed SKUs collection",
     "M365_ServicePlans": "Microsoft 365 subscribed SKUs collection",
     "M365_UserLicenseAssignments": "Microsoft 365 user licenses collection",
@@ -114,13 +115,13 @@ def m_string(value):
     return '"' + str(value).replace('"', '""') + '"'
 
 
-def m_query(path, columns, identity, tenant_scoped=True):
+def m_query(path, columns, identity, tenant_scoped=True, type_overrides=None):
     header = "{" + ",".join(map(m_string, columns)) + "}"
     guard = " and ".join("Record.Field(_, " + m_string(k) + ") = " + m_string(v)
                          for k, v in identity.items()) if tenant_scoped else "true"
     transforms = []
     for c in columns:
-        ty, mt = type_of(c)
+        ty, mt = (type_overrides or {}).get(c, type_of(c))
         convert = {"boolean": "Logical.FromText(_)", "double": 'Number.FromText(_, "en-US")',
                    "int64": 'Int64.From(_, "en-US")', "string": "Text.From(_)"}.get(ty)
         if c == "Date":
