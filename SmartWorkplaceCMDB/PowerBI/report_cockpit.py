@@ -109,7 +109,31 @@ POPULATION_COUNTRY_SERIES = [
     ("DimCountry", "Executive user country share", "Users", "#34495E"),
     ("DimCountry", "Executive mailbox country share", "Mailboxes", "#FF6B6B"),
 ]
-EXECUTIVE_DONUT_COLORS = ["#00A6A6", "#7B61FF", "#2F80ED", "#27AE60", "#F2994A"]
+EXECUTIVE_DONUT_CATEGORY_COLORS = {
+    "form_factor": {
+        "Mobile": "#7B61FF",
+        "PC": "#2F80ED",
+        "Unclassified": "#94A3B8",
+    },
+    "ownership": {
+        "Corporate": "#00A6A6",
+        "Personal": "#F2994A",
+        "Unknown / missing": "#94A3B8",
+    },
+    "windows": {
+        "Windows 11": "#27AE60",
+        "Other Windows": "#D97706",
+        "Unknown version": "#94A3B8",
+    },
+    "accounts": {
+        "Enabled": "#27AE60",
+        "Disabled": "#EB5757",
+    },
+    "mailboxes": {
+        "Exchange Online": "#2F80ED",
+        "Exchange On-premises": "#F2994A",
+    },
+}
 
 
 def load(path: Path):
@@ -250,10 +274,37 @@ def add_donut(pages, visuals, page_id, category_table, category_column, measure_
     return put(visuals, visual, page_id, x, y, w, h)
 
 
-def set_default_color(visual, hex_color):
-    visual["visual"].setdefault("objects", {})["dataPoint"] = [{
-        "properties": {"defaultColor": {"solid": {"color": lit(hex_color)}}}
+def category_scope_selector(table, column, value):
+    return {
+        "data": [{
+            "scopeId": {
+                "Comparison": {
+                    "ComparisonKind": 0,
+                    "Left": {
+                        "Column": {
+                            "Expression": {"SourceRef": {"Entity": table}},
+                            "Property": column,
+                        }
+                    },
+                    "Right": {"Literal": {"Value": f"'{value.replace(chr(39), chr(39) * 2)}'"}},
+                }
+            }
+        }]
+    }
+
+
+def set_category_colors(visual, table, column, value_colors, fallback="#94A3B8"):
+    entries = [{
+        "properties": {"defaultColor": {"solid": {"color": lit(fallback)}}}
     }]
+    entries.extend(
+        {
+            "properties": {"fill": {"solid": {"color": lit(hex_color)}}},
+            "selector": category_scope_selector(table, column, value),
+        }
+        for value, hex_color in value_colors.items()
+    )
+    visual["visual"].setdefault("objects", {})["dataPoint"] = entries
 
 
 def set_series_colors(visual, series):
@@ -1062,11 +1113,26 @@ def update_overview(pages: Path, mailbox_metadata):
     set_single_value_filter(windows, "DimDevice", "OperatingSystem", "Windows", "windows")
     accounts = add_donut(pages, visuals, "overview", "DimUser", "AccountStatusLabel", "DimUser", "Users", "Enabled vs disabled users", 768, 240)
     mailboxes = add_donut(pages, visuals, "overview", "FactMailboxHosting", "HostingLocation", "FactMailboxHosting", "Hosted mailboxes", "Mailbox hosting", 1016, 240)
-    for visual, color in zip(
-        [form_factor, ownership_donut, windows, accounts, mailboxes],
-        EXECUTIVE_DONUT_COLORS,
-    ):
-        set_default_color(visual, color)
+    set_category_colors(
+        form_factor, "DimDevice", "Device form factor",
+        EXECUTIVE_DONUT_CATEGORY_COLORS["form_factor"],
+    )
+    set_category_colors(
+        ownership_donut, "DimDevice", "Device ownership group",
+        EXECUTIVE_DONUT_CATEGORY_COLORS["ownership"],
+    )
+    set_category_colors(
+        windows, "DimDevice", "Windows version group",
+        EXECUTIVE_DONUT_CATEGORY_COLORS["windows"],
+    )
+    set_category_colors(
+        accounts, "DimUser", "AccountStatusLabel",
+        EXECUTIVE_DONUT_CATEGORY_COLORS["accounts"],
+    )
+    set_category_colors(
+        mailboxes, "FactMailboxHosting", "HostingLocation",
+        EXECUTIVE_DONUT_CATEGORY_COLORS["mailboxes"],
+    )
 
     country_bar = add_country_bar(pages, visuals, "overview", 24, 448, 608, 280)
     license_country_bar = add_license_country_bar(pages, visuals, "overview", 648, 448, 608, 280)
