@@ -33,6 +33,30 @@ RELATIONSHIPS = [
     ("FactUserDeviceRelationship", "TenantDeviceKey", "DimDevice", "TenantDeviceKey"),
     ("FactMailbox", "TenantUserKey", "DimUser", "TenantUserKey"),
 ]
+RAW_SOURCE_COLLECTION_STEPS = {
+    "ActiveDirectory_Domains": "Active Directory collection",
+    "ActiveDirectory_Users": "Active Directory collection",
+    "ActiveDirectory_Groups": "Active Directory collection",
+    "ActiveDirectory_Computers": "Active Directory collection",
+    "ActiveDirectory_OrganizationalUnits": "Active Directory collection",
+    "ActiveDirectory_GroupMemberships": "Active Directory collection",
+    "Entra_Users": "Entra users collection",
+    "Entra_Groups": "Entra groups collection",
+    "Entra_Devices": "Entra devices collection",
+    "Entra_VerifiedDomains": "Entra verified domains collection",
+    "Intune_ManagedDevices": "Intune managed devices collection",
+    "Intune_DeviceHardware": "Intune device hardware collection",
+    "Intune_AutopilotDevices": "Intune operational inventory collection",
+    "Intune_DetectedApps": "Intune operational inventory collection",
+    "Intune_ConfigurationPolicies": "Intune operational inventory collection",
+    "Intune_WindowsUpdatePolicies": "Intune update and Endpoint Analytics report collection",
+    "Intune_WindowsUpdateAlerts": "Intune update and Endpoint Analytics report collection",
+    "Intune_EndpointAnalyticsDeviceScores": "Intune update and Endpoint Analytics report collection",
+    "M365_SubscribedSkus": "Microsoft 365 subscribed SKUs collection",
+    "M365_ServicePlans": "Microsoft 365 subscribed SKUs collection",
+    "M365_UserLicenseAssignments": "Microsoft 365 user licenses collection",
+    "ExchangeOnline_Mailboxes": "Exchange Online mailboxes collection",
+}
 
 
 def read_csv(path):
@@ -111,6 +135,84 @@ def m_query(path, columns, identity, tenant_scoped=True):
             " Typed = Table.TransformColumns(Isolated, {" + ",".join(transforms) + "})", "in Typed"]
 
 
+def parse_timestamp(value):
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Missing timestamp timezone: " + value)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def matching_orchestrator_steps(root, identity, tolerance_seconds=5):
+    """Return collection steps only when the run built the current frozen snapshot."""
+    manifest = root / "CMDB/CMDB_BuildManifest.csv"
+    run_root = root.parent / "LOG-ALL/Orchestration/Runs"
+    if not manifest.exists() or not run_root.is_dir():
+        return {}, []
+    _, manifest_rows = read_csv(manifest)
+    if len(manifest_rows) != 1:
+        return {}, []
+    manifest_row = manifest_rows[0]
+    if any(manifest_row.get(k) != v for k, v in identity.items()):
+        raise ValueError("Build manifest tenant identity mismatch")
+    build_time = parse_timestamp(manifest_row.get("BuildDateTime", ""))
+    candidates = []
+    for run_path in run_root.glob("*.csv"):
+        _, rows = read_csv(run_path)
+        contract_rows = [r for r in rows if r.get("Pipeline") == "Full" and r.get("Mode") == "Collect"
+                         and r.get("Step") == "Contract build and manifest" and r.get("Status") == "Completed"]
+        if not contract_rows:
+            continue
+        difference = abs((parse_timestamp(contract_rows[-1]["EndedDateTime"]) - build_time).total_seconds())
+        if difference <= tolerance_seconds:
+            candidates.append((difference, run_path.stat().st_mtime_ns, run_path, rows))
+    if not candidates:
+        return {}, []
+    _, _, run_path, rows = min(candidates, key=lambda item: (item[0], -item[1]))
+    steps = {r["Step"]: r for r in rows if r.get("Pipeline") == "Full" and r.get("Mode") == "Collect"}
+    return steps, [manifest, run_path]
+
+
+def build_source_health(root, identity, source_hashes):
+    raw_contract = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.raw.tables.json").read_text(encoding="utf-8-sig"))
+    missing_mappings = sorted(Path(t["name"]).stem for t in raw_contract["tables"]
+                              if Path(t["name"]).stem not in RAW_SOURCE_COLLECTION_STEPS)
+    if missing_mappings:
+        raise ValueError("Missing raw source collection-step mapping: " + ", ".join(missing_mappings))
+    run_steps, evidence_paths = matching_orchestrator_steps(root, identity)
+    for evidence_path in evidence_paths:
+        source_hashes[str(evidence_path.relative_to(root.parent))] = sha(evidence_path)
+    health = []
+    for t in raw_contract["tables"]:
+        path = root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"])
+        sidecar = path.with_name(path.name + ".status.json")
+        h = dict(identity, SourceName=path.stem, Status="Not collected", Coverage="Unknown", SourceRows="", MaxItems="", StartedDateTime="", CompletedDateTime="", Evidence="Missing")
+        raw = []
+        if path.exists():
+            raw_columns, raw = read_csv(path)
+            if raw_columns != t["columns"]:
+                raise ValueError("Raw CSV contract mismatch: " + path.name)
+            if any(any(r[k] != v for k, v in identity.items()) for r in raw):
+                raise ValueError("Raw CSV tenant mismatch: " + path.name)
+            h.update(SourceRows=str(len(raw)), Status="CSV without evidence")
+            source_hashes[str(path.relative_to(root))] = sha(path)
+        if sidecar.exists():
+            s = json.loads(sidecar.read_text(encoding="utf-8-sig"))
+            if any(s.get(k) != v for k, v in identity.items()):
+                raise ValueError("Source evidence tenant mismatch: " + path.name)
+            valid = path.exists() and s.get("SHA256") == sha(path) and s.get("RowCount") == len(raw)
+            h.update(Status=s.get("Status", "Unknown"), Coverage=s.get("Coverage", "Unknown"),
+                     MaxItems=str(s.get("MaxItems", "")), StartedDateTime=s.get("StartedUtc", ""),
+                     CompletedDateTime=s.get("CompletedUtc", ""), Evidence="Verified" if valid else "Inconsistent")
+            source_hashes[str(sidecar.relative_to(root))] = sha(sidecar)
+        elif path.exists():
+            step = run_steps.get(RAW_SOURCE_COLLECTION_STEPS[path.stem])
+            if step and step.get("Status") == "Completed":
+                h.update(Status="Completed", Coverage="Not reported", StartedDateTime=step.get("StartedDateTime", ""),
+                         CompletedDateTime=step.get("EndedDateTime", ""), Evidence="Orchestrator run + CSV")
+        health.append(h)
+    return health
+
+
 def prepare_data(root):
     contract = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.tables.json").read_text(encoding="utf-8-sig"))
     needed = [t for t in contract["tables"] if t["area"] == "PowerBI" or t["name"] in ("CMDB_Mailboxes.csv", "CMDB_DataQuality.csv")]
@@ -166,30 +268,7 @@ def prepare_data(root):
         columns[name].extend(additions)
         for r in data[name]:
             r.update({c: fn(r) for c, fn in additions.items()})
-    raw_contract = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.raw.tables.json").read_text(encoding="utf-8-sig"))
-    health = []
-    for t in raw_contract["tables"]:
-        path = root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"])
-        sidecar = path.with_name(path.name + ".status.json")
-        h = dict(identity, SourceName=path.stem, Status="Not collected", Coverage="Unknown", SourceRows="", MaxItems="", StartedDateTime="", CompletedDateTime="", Evidence="Missing")
-        if path.exists():
-            raw_columns, raw = read_csv(path)
-            if raw_columns != t["columns"]:
-                raise ValueError("Raw CSV contract mismatch: " + path.name)
-            if any(any(r[k] != v for k, v in identity.items()) for r in raw):
-                raise ValueError("Raw CSV tenant mismatch: " + path.name)
-            h.update(SourceRows=str(len(raw)), Status="CSV without evidence")
-            source_hashes[str(path.relative_to(root))] = sha(path)
-        if sidecar.exists():
-            s = json.loads(sidecar.read_text(encoding="utf-8-sig"))
-            if any(s.get(k) != v for k, v in identity.items()):
-                raise ValueError("Source evidence tenant mismatch: " + path.name)
-            valid = path.exists() and s.get("SHA256") == sha(path) and s.get("RowCount") == len(raw)
-            h.update(Status=s.get("Status", "Unknown"), Coverage=s.get("Coverage", "Unknown"),
-                     MaxItems=str(s.get("MaxItems", "")), StartedDateTime=s.get("StartedUtc", ""),
-                     CompletedDateTime=s.get("CompletedUtc", ""), Evidence="Verified" if valid else "Inconsistent")
-            source_hashes[str(sidecar.relative_to(root))] = sha(sidecar)
-        health.append(h)
+    health = build_source_health(root, identity, source_hashes)
     data["SourceHealth"] = health
     columns["SourceHealth"] = list(health[0])
     validate_types("SourceHealth", columns["SourceHealth"], health)
