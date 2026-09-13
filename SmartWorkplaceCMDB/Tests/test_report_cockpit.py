@@ -89,6 +89,30 @@ class CockpitNavigationTests(unittest.TestCase):
         )
         self.assertTrue(all("fill" in entry["properties"] for entry in entries))
 
+    def test_donut_category_colors_use_scope_identity_selectors(self):
+        visual = {"visual": {}}
+        colors = cockpit.EXECUTIVE_DONUT_CATEGORY_COLORS["accounts"]
+        cockpit.set_category_colors(visual, "DimUser", "AccountStatusLabel", colors)
+        entries = visual["visual"]["objects"]["dataPoint"]
+
+        self.assertIn("defaultColor", entries[0]["properties"])
+        self.assertEqual(len(entries), len(colors) + 1)
+        selected = {}
+        for entry in entries[1:]:
+            comparison = entry["selector"]["data"][0]["scopeId"]["Comparison"]
+            self.assertEqual(comparison["ComparisonKind"], 0)
+            self.assertEqual(comparison["Left"]["Column"]["Expression"]["SourceRef"]["Entity"], "DimUser")
+            self.assertEqual(comparison["Left"]["Column"]["Property"], "AccountStatusLabel")
+            value = comparison["Right"]["Literal"]["Value"].strip("'")
+            selected[value] = entry["properties"]["fill"]["solid"]["color"]["expr"]["Literal"]["Value"].strip("'")
+
+        self.assertEqual(selected, colors)
+        self.assertNotEqual(selected["Enabled"], selected["Disabled"])
+
+    def test_each_executive_donut_category_palette_has_distinct_colors(self):
+        for palette in cockpit.EXECUTIVE_DONUT_CATEGORY_COLORS.values():
+            self.assertEqual(len(palette), len(set(palette.values())))
+
     def test_executive_measures_add_quality_groups_and_license_country_ratios(self):
         tables = [
             {"name": "DimCountry", "measures": []},
