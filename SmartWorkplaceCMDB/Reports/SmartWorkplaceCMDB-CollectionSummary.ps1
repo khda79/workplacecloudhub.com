@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.2.0
+1.2.1
 #>
 [CmdletBinding()]
 param(
@@ -33,10 +33,11 @@ param(
     [switch]$CaptureBaselineOnly,
     [switch]$PreviewOnly,
     [switch]$ValidateOnly,
+    [switch]$SendMailTestOnly,
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.2.0'
+$ScriptVersion = '1.2.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -268,77 +269,6 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f3f7fb;color:#172033;marg
 "@
 }
 
-function ConvertTo-SmartWorkplaceCMDBBase64Url {
-    param([Parameter(Mandatory)][byte[]]$Bytes)
-    return ([Convert]::ToBase64String($Bytes).TrimEnd('=') -replace '\+', '-' -replace '/', '_')
-}
-
-function Get-SmartWorkplaceCMDBSummaryGraphToken {
-    param([string]$ResolvedTenantId, [string]$ClientId, [string]$Thumbprint)
-    $thumb = $Thumbprint.Replace(' ', '').ToUpperInvariant()
-    $certificate = @('Cert:\CurrentUser\My','Cert:\LocalMachine\My') |
-        ForEach-Object { Get-ChildItem -LiteralPath $_ -ErrorAction SilentlyContinue } |
-        Where-Object Thumbprint -eq $thumb | Select-Object -First 1
-    if (-not $certificate -or -not $certificate.HasPrivateKey) {
-        throw 'The configured Graph mail certificate with private key was not found.'
-    }
-    $now = [datetimeoffset]::UtcNow
-    $tokenUri = "https://login.microsoftonline.com/$ResolvedTenantId/oauth2/v2.0/token"
-    $header = [ordered]@{
-        alg = 'RS256'
-        typ = 'JWT'
-        x5t = ConvertTo-SmartWorkplaceCMDBBase64Url -Bytes ($certificate.GetCertHash())
-    }
-    $payload = [ordered]@{aud=$tokenUri;iss=$ClientId;sub=$ClientId;jti=[guid]::NewGuid().Guid;nbf=[int64]$now.AddMinutes(-5).ToUnixTimeSeconds();exp=[int64]$now.AddMinutes(10).ToUnixTimeSeconds()}
-    $encoding = [Text.Encoding]::UTF8
-    $unsigned = '{0}.{1}' -f
-        (ConvertTo-SmartWorkplaceCMDBBase64Url $encoding.GetBytes(($header|ConvertTo-Json -Compress))),
-        (ConvertTo-SmartWorkplaceCMDBBase64Url $encoding.GetBytes(($payload|ConvertTo-Json -Compress)))
-    $rsa = $null
-    try {
-        $rsa = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
-    }
-    catch { $rsa = $null }
-    if ($null -eq $rsa) {
-        try { $rsa = $certificate.PrivateKey }
-        catch { $rsa = $null }
-    }
-    if ($null -eq $rsa) { throw 'The Graph mail certificate RSA private key cannot be opened.' }
-    try {
-        $signature = $rsa.SignData($encoding.GetBytes($unsigned),
-            [Security.Cryptography.HashAlgorithmName]::SHA256,
-            [Security.Cryptography.RSASignaturePadding]::Pkcs1)
-    }
-    catch {
-        $signature = $rsa.SignData($encoding.GetBytes($unsigned), 'SHA256')
-    }
-    $assertion = '{0}.{1}' -f $unsigned,(ConvertTo-SmartWorkplaceCMDBBase64Url $signature)
-    $tokenBody = @{
-        client_id=$ClientId;scope='https://graph.microsoft.com/.default';grant_type='client_credentials';client_assertion_type='urn:ietf:params:oauth:client-assertion-type:jwt-bearer';client_assertion=$assertion
-    }
-    $response = $null
-    for ($attempt = 1; $attempt -le 4; $attempt++) {
-        try {
-            $response = Invoke-RestMethod -Method POST -Uri $tokenUri `
-                -ContentType 'application/x-www-form-urlencoded' -Body $tokenBody `
-                -ErrorAction Stop
-            break
-        }
-        catch {
-            if (-not (Test-SmartWorkplaceCMDBSummaryTransientError -ErrorRecord $_) -or
-                $attempt -ge 4) { throw }
-            $delay = Get-SmartWorkplaceCMDBSummaryRetryDelay -ErrorRecord $_ -Attempt $attempt
-            Write-Warning ("Graph token transient failure; attempt {0}/4; retrying in {1}s." -f
-                $attempt, $delay)
-            Start-Sleep -Seconds $delay
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace([string]$response.access_token)) {
-        throw 'The Graph token endpoint did not return an access token.'
-    }
-    return [string]$response.access_token
-}
-
 function Get-SmartWorkplaceCMDBSummaryRetryDelay {
     param([Parameter(Mandatory)]$ErrorRecord, [int]$Attempt, [int]$MaximumSeconds = 120)
     $value = $null
@@ -382,19 +312,43 @@ function Test-SmartWorkplaceCMDBSummaryTransientError {
 function Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest {
     param(
         [Parameter(Mandatory)][string]$Uri,
-        [Parameter(Mandatory)][string]$Token,
         [Parameter(Mandatory)][string]$Body,
         [int]$MaxAttempts = 4
     )
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
-            Invoke-RestMethod -Method POST -Uri $Uri -Headers @{Authorization="Bearer $Token"} `
-                -ContentType 'application/json; charset=utf-8' -Body $Body | Out-Null
+            Invoke-MgGraphRequest -Method POST -Uri $Uri -Body $Body `
+                -ContentType 'application/json' -ErrorAction Stop | Out-Null
             return
         }
         catch {
             if (-not (Test-SmartWorkplaceCMDBSummaryTransientError -ErrorRecord $_) -or
-                $attempt -ge $MaxAttempts) { throw }
+                $attempt -ge $MaxAttempts) {
+                $statusCode = 0
+                try {
+                    if ($_.Exception.Response) {
+                        $statusCode = [int]$_.Exception.Response.StatusCode
+                    }
+                }
+                catch {}
+                $details = New-Object System.Collections.Generic.List[string]
+                if (-not [string]::IsNullOrWhiteSpace([string]$_.Exception.Message)) {
+                    $details.Add([string]$_.Exception.Message)
+                }
+                if ($_.ErrorDetails -and
+                    -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                    $details.Add([string]$_.ErrorDetails.Message)
+                }
+                try {
+                    $responseContent = [string]$_.Exception.Response.Content
+                    if (-not [string]::IsNullOrWhiteSpace($responseContent)) {
+                        $details.Add($responseContent)
+                    }
+                }
+                catch {}
+                $detailText = @($details | Select-Object -Unique) -join ' | '
+                throw "Graph mail request failed. Status=$statusCode; $detailText"
+            }
             $delay = Get-SmartWorkplaceCMDBSummaryRetryDelay -ErrorRecord $_ -Attempt $attempt
             Write-Warning ("Graph mail transient failure; attempt {0}/{1}; retrying in {2}s." -f
                 $attempt, $MaxAttempts, $delay)
@@ -410,16 +364,33 @@ function Send-SmartWorkplaceCMDBSummaryGraphMail {
     $to = @(([string](Get-SmartWorkplaceCMDBSummarySetting $NotificationConfiguration 'To' '')) -split '[;,]' | Where-Object {$_.Trim()})
     $cc = @(([string](Get-SmartWorkplaceCMDBSummarySetting $NotificationConfiguration 'Cc' '')) -split '[;,]' | Where-Object {$_.Trim()})
     if ([string]::IsNullOrWhiteSpace($from) -or $to.Count -eq 0) { throw 'Notifications.From and Notifications.To are required.' }
-    $token = Get-SmartWorkplaceCMDBSummaryGraphToken `
-        -ResolvedTenantId $ResolvedTenantId `
-        -ClientId ([string](Get-SmartWorkplaceCMDBSummarySetting $GraphConfiguration 'ClientId' '')) `
-        -Thumbprint ([string](Get-SmartWorkplaceCMDBSummarySetting $GraphConfiguration 'CertificateThumbprint' ''))
+    $clientId = [string](Get-SmartWorkplaceCMDBSummarySetting $GraphConfiguration 'ClientId' '')
+    $thumbprint = [string](Get-SmartWorkplaceCMDBSummarySetting $GraphConfiguration 'CertificateThumbprint' '')
+    if ([string]::IsNullOrWhiteSpace($ResolvedTenantId) -or
+        [string]::IsNullOrWhiteSpace($clientId) -or
+        [string]::IsNullOrWhiteSpace($thumbprint)) {
+        throw 'MicrosoftGraph.TenantId, ClientId, and CertificateThumbprint are required for Graph mail.'
+    }
     $recipient = { param($items) @($items | ForEach-Object {@{emailAddress=@{address=$_.Trim()}}}) }
     $message = @{subject=$Subject;body=@{contentType='HTML';content=$BodyHtml};toRecipients=&$recipient $to}
     if ($cc.Count) { $message.ccRecipients = &$recipient $cc }
-    $body = @{message=$message;saveToSentItems=$true} | ConvertTo-Json -Depth 8
+    $body = @{message=$message;saveToSentItems=$false} | ConvertTo-Json -Depth 12
     $uri = 'https://graph.microsoft.com/v1.0/users/{0}/sendMail' -f [uri]::EscapeDataString($from)
-    Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest -Uri $uri -Token $token -Body $body
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    $connected = $false
+    try {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        Connect-MgGraph -TenantId $ResolvedTenantId -ClientId $clientId `
+            -CertificateThumbprint $thumbprint -ContextScope Process -NoWelcome `
+            -ErrorAction Stop | Out-Null
+        $connected = $true
+        Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest -Uri $uri -Body $body
+    }
+    finally {
+        if ($connected) {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
 }
 
 function Send-SmartWorkplaceCMDBSummarySmtpMail {
@@ -452,12 +423,71 @@ $bound = @{}
 foreach ($key in $PSBoundParameters.Keys) { $bound[$key] = $PSBoundParameters[$key] }
 $context = Resolve-SmartWorkplaceCMDBContext -BoundParameters $bound `
     -GlobalConfigPath $GlobalConfigPath -TenantConfigPath $TenantConfigPath `
-    -NoConfigWrite:($NoConfigWrite -or $ValidateOnly -or $PreviewOnly)
+    -NoConfigWrite:($NoConfigWrite -or $ValidateOnly -or $PreviewOnly -or $SendMailTestOnly)
 $paths = Resolve-SmartWorkplaceCMDBCollectionPaths -Paths $context.Paths `
-    -ExplicitDataRoot:([bool]$DataRootPath) -NoWrite:($ValidateOnly -or $PreviewOnly)
+    -ExplicitDataRoot:([bool]$DataRootPath) `
+    -NoWrite:($ValidateOnly -or $PreviewOnly -or $SendMailTestOnly)
 $notifications = Get-SmartWorkplaceCMDBSummarySetting $context.Configuration 'Notifications' $null
 $graph = Get-SmartWorkplaceCMDBSummarySetting $context.Configuration 'MicrosoftGraph' $null
 $historyRoot = Join-Path $paths.DataAllRootPath 'CollectionSummary'
+
+if ($SendMailTestOnly) {
+    $client = [string](Get-SmartWorkplaceCMDBSummarySetting `
+        $notifications 'MailClientName' $paths.TenantKey)
+    $subjectPrefix = [string](Get-SmartWorkplaceCMDBSummarySetting `
+        $notifications 'Subject' 'Smart Workplace CMDB')
+    $subject = '{0} - mail transport test - {1}' -f `
+        $subjectPrefix,$SnapshotDateTime.ToString('yyyy-MM-dd HH:mm')
+    $html = @"
+<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Arial,sans-serif">
+<h1>Smart Workplace CMDB - mail transport test</h1>
+<p>Tenant: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client)</p>
+<p>Run: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $RunId)</p>
+<p>Date: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $SnapshotDateTime.ToString('o'))</p>
+<p>Script version: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $ScriptVersion)</p>
+</body></html>
+"@
+    if ($ValidateOnly) {
+        [pscustomobject]@{
+            Status='Validated';ScriptVersion=$ScriptVersion;Subject=$subject
+            HtmlPath='';BodyHtml=$html
+        }
+        return
+    }
+    if (-not [bool](Get-SmartWorkplaceCMDBSummarySetting `
+            $notifications 'Enabled' $false)) {
+        throw 'Collection summary email notification is not enabled in Notifications.Enabled.'
+    }
+    $mailMode = [string](Get-SmartWorkplaceCMDBSummarySetting `
+        $notifications 'SendMailMode' 'Graph')
+    switch ($mailMode.ToUpperInvariant()) {
+        'GRAPH' {
+            Send-SmartWorkplaceCMDBSummaryGraphMail `
+                $notifications $graph $paths.TenantId $subject $html
+        }
+        'SMTP' {
+            Send-SmartWorkplaceCMDBSummarySmtpMail $notifications $subject $html
+        }
+        'BOTH' {
+            try {
+                Send-SmartWorkplaceCMDBSummaryGraphMail `
+                    $notifications $graph $paths.TenantId $subject $html
+            }
+            catch {
+                Send-SmartWorkplaceCMDBSummarySmtpMail `
+                    $notifications $subject $html
+            }
+        }
+        default {
+            throw "Unsupported Notifications.SendMailMode '$mailMode'. Use Graph, SMTP, or Both."
+        }
+    }
+    [pscustomobject]@{
+        Status='TestSent';ScriptVersion=$ScriptVersion;Subject=$subject
+        HtmlPath='';BodyHtml=$html
+    }
+    return
+}
 
 if (-not [string]::IsNullOrWhiteSpace($OperationalError)) {
     $client = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'MailClientName' $paths.TenantKey)
@@ -591,8 +621,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpVlGNzK0E5dWb
-# 6N6S5vg3zskvN/jAXdj+Nkglm6YhbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTOyrAuGBnsGdO
+# ta8mVmtV/14+/fg9nvoMRK6ooSJqg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -725,31 +755,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILnFMKiKDtjYaOW4ThiUTxLCduhstXWjSXGGlhlMYa5SMA0GCSqG
-# SIb3DQEBAQUABIIBgK94F96BROLE4H7oWDXEF+km4yBBCQ3GU1PYiFNcSR2BFo0N
-# jZhTSXqI5a35Y4JTbV4pjl1o51SX6U4ZTHnqWvo/HXdZas04FAAGGOS0I7DslqaF
-# 6chSPZKvYUqMpV+OzQVmGshbL1HWO5JtkVPgiZ9XL0Inlyl83M0VEsIQT6mAOA1L
-# 7Qz/ybJppt0UM66mBk/xZe+5wxLCqph6b5fhwc5rJVimVA2RL2lG7NiEuc5m/cPQ
-# 6wKrKPcCoWi/++zTLcjviR2hXPrff5YXt8zaj5xy7SShxYjchywNP9GprOZfDknE
-# Xm6kSB2sVBRbC/gmI9Ipi+vYfb5QJaoL2Tq4wQtHjP+epsTD3hZLVsiqkJyJROC2
-# FuaR5TTvmn8gFoE3Z9UKm1s8KHI4HpH2CBtpegBGkPZIBAjN8KKHY2hj/3bdP+3/
-# z6ghCrfvysF4e3U+Fyd2K/xkv59aUabDmZ8ovymb9DidsubEjm3eC6JGjcWrjC1W
-# EOvgbUTe3fMBDGjoQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJg3ZmE1b34bIDKDiimaTksrJzjnhSrkX+oH7/AlzLbIMA0GCSqG
+# SIb3DQEBAQUABIIBgCPi/A8gJUKkIpEFh+9DsV5L+YPwZoeMhC1oWp/kWuWstWG4
+# yMCYraQfmKlyyWTYp8BTGioAyH8xNdsLNyBsMO//DC7qBwBu3ZVFrIC7KuZuIKST
+# siPe89URHobonQ4wqrSzGPpToHNRmHpTe5MX9fbSHt608E2xxbphrfXonFmIq2KL
+# 8XvNhHSsFSxKUSsa0MK/+ARrXTuU846wmKBn/8RX5VL5zYxBaHcWtS+su2l18WjB
+# QHHVOzqn/OugajCQqZTpbvVdkzpMbdL9SCVbkXh1FK/h2Bm5u4c6sm7wZ1ThQweA
+# YZsjfN6IUn0I8EiQVIf3QYJvVMPMa6NMRU4HB0ASIksF7M0G3qM44JNna5Y1nw21
+# +CYIL/FWF+SbrSZSHyEKK5SE+KtwbXohnY2rb3j6AxbF7xZr9jXnjbdswUva1uUK
+# 1zbe9lMuU8CTGdncNMW4zUvLKdbeM1jRE2ZiOOxX2J3qext4tkSZGlw88QoXoV9C
+# UZeieotDYsilRzEHZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBHJ+VhFY/ufAXQ9cx3Biv/GepGhBAQe90SzjsN
-# tVqwHTANBgkqhkiG9w0BAQEFAASCAgCuE/1gGJ5U24aWfMstmJ8CqU1I8Cj67lH2
-# 1jmM/uqfQZEyUfIjF21x/s6sZdEzzjtf/LNBA9e/mNAmR+i6i1Gqa3Bshuls5mRN
-# zFkB0nN3rlvJ0wL/Kh9sfJVyzPIco4lipS7Eq9jpdOMXTwoFGmTlDM1M0wNVPYH6
-# VOnU0Ge0qwTsqsOiwy7Ru/vBiRpcOvRHMm8DD1EH6x2O6CCgUeoyVmhqTfi41hUS
-# PVayuSP/98VhxQKPLSMbieviI1e9sy3IxhLFYfFThYbj+A0FpVl18efrroI+rVgz
-# 8YsxDCTlAnr3D83gAYf9SU4IUuSOGLIg6ObO0ahHw36czYCOV3GdenGVKjAnz54p
-# AAAZlZkGMP/gAR37dt729pcAXdOwmKaebjS7GeDomxQ7XSbjPFe0I8nv5cdSoEeh
-# Db2ZXq91WP1yDhrYr8F1+Q4NJvXEivZ4Bmn1Xqkf6OIUS2SNUW+SHPuv2gMB3/DX
-# fl4a2dFZNl87w445J75x1yXY79QpeENaFOvvFxOU9JspER15PwXkiaDjRRP+nDLi
-# l8UsSav68FF880Ot3FPgxyGWpCys/5PuhEKOeaqrJMflWRsK4KLDrg+/rS5asirU
-# JC+/+2w3jREoGK4IuzIKb3hJtAzR98iNbQSBRGZ2gCjLYhKMfykpa0IC0z4gMLqS
-# pVqLh1gs9w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
+# MjJaMC8GCSqGSIb3DQEJBDEiBCDMeMRyi64an42t3pLqnPPdahusis62jUoFChWg
+# goNMyzANBgkqhkiG9w0BAQEFAASCAgBZEoJT52xur41gt/IgaW42NsIA9dhabQO/
+# I/NlNgmtQy72tBbjOKEWYoAyyj6eLB7ibMFLk0fHNDC3qR0+RYNPKR2VYxsgTfRH
+# YZ1uP63rreC8SlXc+HbGubFXXbzU5KAQZvU1hmc6cExKuMgI6MpkU+DPVOqSD8Qq
+# WJ1hZGzH8QpmZlQci6R+ElmMVpJqULvFv9EQOWsN6aG/n/xG8t0fOEnIK0+/ucDT
+# +kV0bQc12TX3vzYaR2EbZRIMC5zUIM0uHz10nnz6bpE6Y1ZxYMKu+dgfuFUlagud
+# SKilDL3BkktM9P7ld4SD972BKtKe3ItaSkgmcuJjGTs5AsY3hfRRFrRkR25HGuGB
+# 1moCbnbJf17876BDkqPdMkr3sOrBiTiu+0Cuhz8gvLtprnNnKefmUgXKI/CFluPw
+# otcSk0PExR6bZFBnV2cZhQjeVILBuNUoVD4XZrKILE3SatBgL7rfSqFknBg9S6Rb
+# 0zVNeDDV6eKn3QIbxVYH0MoinYG5eCz8vs8Dob5WOivB+ygl1kDimyStgBgONH9j
+# 3az0eyOArSlVRcSNdD4kQWeVs/EyFDDsFXXQ6zRBRr4c7I+hNbsVr4tfiuD+bYe3
+# GZTo263XAagxhIPPl9ZJTeCf4XxXH+ayKMG1SyVHzGcBv13Ds7lKMuv/QCGGWAMS
+# wGXGfF3mJg==
 # SIG # End signature block

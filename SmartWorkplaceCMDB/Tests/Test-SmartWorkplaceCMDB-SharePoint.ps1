@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB SharePoint publication contract tests.
 
 .VERSION
-0.1.2
+0.1.3
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.2'
+$ScriptVersion = '0.1.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -73,6 +73,7 @@ $globalTemplatePath = Join-Path $projectRoot `
 $tenantTemplatePath = Join-Path $projectRoot `
     'Config\Tenants\tenant.local.json.template'
 Import-Module $modulePath -Force
+$sharePointModule = Get-Module -Name SmartWorkplaceCMDB.SharePoint
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'SmartWorkplaceCMDB-SharePoint-Tests-' +
@@ -86,7 +87,8 @@ try {
     foreach ($path in @(
             (Join-Path $dataAll 'Entra\Users\2026\07'),
             (Join-Path $dataLast 'CMDB'),
-            (Join-Path $logAll 'Orchestration')
+            (Join-Path $logAll 'Orchestration'),
+            (Join-Path $logAll 'Jobs\SmartWorkplaceCMDB-EntraUsers-Collect')
         )) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
@@ -95,9 +97,16 @@ try {
     $latest = Join-Path $dataLast 'CMDB\CMDB_Users.csv'
     $log = Join-Path $logAll `
         'Orchestration\SmartWorkplaceCMDB-Orchestrator_20260719.csv'
-    foreach ($path in @($history, $latest, $log)) {
+    $jobLog = Join-Path $logAll `
+        'Jobs\SmartWorkplaceCMDB-EntraUsers-Collect\EntraUsers_20260719.log'
+    $jobTranscript = Join-Path $logAll `
+        'Jobs\SmartWorkplaceCMDB-EntraUsers-Collect\EntraUsers_20260719.transcript.txt'
+    foreach ($path in @($history, $latest, $log, $jobLog, $jobTranscript)) {
         'TenantKey,Value' | Set-Content -LiteralPath $path -Encoding UTF8
     }
+    $arbitraryText = Join-Path $logAll 'Orchestration\state.txt'
+    'not a diagnostic transcript' | Set-Content `
+        -LiteralPath $arbitraryText -Encoding UTF8
 
     Invoke-SmartWorkplaceCMDBSharePointTest `
         'Preserve DATA-ALL relative structure' {
@@ -123,6 +132,51 @@ try {
                 $logRelative -eq
                 'LOG-ALL/Orchestration/SmartWorkplaceCMDB-Orchestrator_20260719.csv') `
             'Latest or log SharePoint relative path is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Preserve LOG-ALL job log and transcript relative structures' {
+        $jobLogRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
+            $jobLog $dataAll $dataLast $logAll
+        $jobTranscriptRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
+            $jobTranscript $dataAll $dataLast $logAll
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            ($jobLogRelative -eq
+                'LOG-ALL/Jobs/SmartWorkplaceCMDB-EntraUsers-Collect/EntraUsers_20260719.log' -and
+                $jobTranscriptRelative -eq
+                'LOG-ALL/Jobs/SmartWorkplaceCMDB-EntraUsers-Collect/EntraUsers_20260719.transcript.txt') `
+            'Job log or transcript SharePoint relative path is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Accept CSV logs and transcripts but reject arbitrary text' {
+        $csvContentType = & $sharePointModule {
+            param($Path)
+            Get-SmartWorkplaceCMDBSharePointContentType `
+                -FileInfo (Get-Item -LiteralPath $Path)
+        } $history
+        $logContentType = & $sharePointModule {
+            param($Path)
+            Get-SmartWorkplaceCMDBSharePointContentType `
+                -FileInfo (Get-Item -LiteralPath $Path)
+        } $jobLog
+        $transcriptContentType = & $sharePointModule {
+            param($Path)
+            Get-SmartWorkplaceCMDBSharePointContentType `
+                -FileInfo (Get-Item -LiteralPath $Path)
+        } $jobTranscript
+        Assert-SmartWorkplaceCMDBSharePointThrow {
+            & $sharePointModule {
+                param($Path)
+                Get-SmartWorkplaceCMDBSharePointContentType `
+                    -FileInfo (Get-Item -LiteralPath $Path)
+            } $arbitraryText
+        } 'Only CSV, LOG, and .transcript.txt files'
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            ($csvContentType -eq 'text/csv' -and
+                $logContentType -eq 'text/plain; charset=utf-8' -and
+                $transcriptContentType -eq 'text/plain; charset=utf-8') `
+            'SharePoint content types are invalid.'
     }
 
     Invoke-SmartWorkplaceCMDBSharePointTest `
@@ -152,6 +206,9 @@ try {
     Invoke-SmartWorkplaceCMDBSharePointTest `
         'Publish only successful unbounded and unscoped live orchestrations' {
         $content = Get-Content -Raw -LiteralPath $orchestratorPath
+        $moduleContent = Get-Content -Raw -LiteralPath `
+            (Join-Path $projectRoot `
+                'Modules\SmartWorkplaceCMDB.SharePoint\SmartWorkplaceCMDB.SharePoint.psm1')
         Assert-SmartWorkplaceCMDBSharePointTrue `
             ($content.Contains('$mode -eq ''Collect''') -and
                 $content -match '\$MaxItems -eq 0' -and
@@ -160,7 +217,14 @@ try {
                 $content -match 'Publish-SmartWorkplaceCMDBSharePointFile' -and
                 $content -match 'SharePoint file publication failed' -and
                 $content -match 'failedUpload\.LocalFilePath' -and
-                $content -match 'failedUpload\.Error') `
+                $content -match 'failedUpload\.Error' -and
+                $content -match "\.Extension -ieq '\.log'" -and
+                $content -match "\.transcript\.txt'" -and
+                $moduleContent -match "\.Extension -ieq '\.csv'" -and
+                $moduleContent -match "\.Extension -ieq '\.log'" -and
+                $moduleContent -match "\.transcript\.txt'" -and
+                $moduleContent -match "text/plain; charset=utf-8" -and
+                $moduleContent -match 'Only CSV, LOG, and \.transcript\.txt files') `
             'Orchestrator SharePoint publication guard is incomplete.'
     }
 }
@@ -188,8 +252,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCy9hzMtlS11tTo
-# kUvJKpt3u5or4gHN23466Y8FMdxHXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpoFd/RfLxLJlA
+# t3C6uLUKJGQxwAKzFe2wzTjKLVcW9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -322,31 +386,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDrqL87c7fp2UWTgGu5ywuAj1Y9GrGTE1lErj+fQ5eHBMA0GCSqG
-# SIb3DQEBAQUABIIBgJvmf34QH5sxGDqEy55Ti4FonNMeiB3g4ODmt7oklEpCduwc
-# Vt3zKxXOKDD0Bgy2jLXPzdlhenuGSVYcjHtbIVNZ3OfNdw3TlFjZNkSp4BTWC6/n
-# Cr7+G8GyVEm2fQ+314vm4EZpOgtMmldCBPy7y4F7kOzOEwBy8zSEnTX28xl6zwGc
-# 8Xv7YcQyivrbxvQXT4wVFs7BxiYf8u6c9B9cvHpXUu+Lrbycy4hsC58GxYzc3li0
-# IHuHGZNCi5XBOLdCENvHis12u98oAuuvYz5qH7ZhHoHIWRLjqoEHdiavPv7yYlK2
-# KuGR7rdsEU7fKJ5rnOURvp2NtOeICVtmP/YEh3wSgxD8FFfbRtWF9HHJiVwfQnPA
-# WnPBTJo+BLaV/ctrFqWAcy16Y2PbcAzQgIeT8mNF4s9PctRHfbMuoVfjWEzjo0kA
-# Vgzha4RflfVS28axxkSWQsO8T+CtCeedIzAPaJrDR3Wzjbn4uGlXnTQ3mxmTLA+z
-# J8pYs7ZybK0yE4Be2aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGEzCyfz7FYzaKVQncMuW5t+5UzWpIJgz+z2v52a3ef+MA0GCSqG
+# SIb3DQEBAQUABIIBgCSbRaWUZ1mJDwh5aoJ2miFAw7ujpMnwbRHBsewsWMX50bxF
+# h4dMjKAEyVl34+sv3OejcUTHdR2DHky2F/oZcpE72ubSDPXGRRrf9FRkSGLVVspd
+# 8eD5v3xTpH3+70j8tyRWooicfyG+NA8GdTqJV+UwIdz2tztruCtYQ6q5s5uC0I2X
+# BpT8rRdCm31CgALNGrvUqyMSOIpkRl/KpdzlaWYkBbnfOXFbkn4qIiNYp/WzL7oR
+# GAQ9DlCES1iR2RlZw6Zzdj8jd2wuGORVxrGsgvRjK8H8dSPSXXooeOmsVtPxvR88
+# J34H1Vm+SYVBWGmoSFBEXEQEyb1Jq/cRuM4l9c+7SFZ2NG7n9b1ML1R3uT6saiSY
+# aX5VZw911ARvcWcTQwXuFCikXEWpKq5VbP+M2t6LjCymAZIv2GORcM6FAnwQp8ME
+# uq6mm1Qxx2cCEp0kmhO4dBZ2GRIphP7wZWmzO2X/wKJZiUXk7vCPnY7HGcfBEVSz
+# WQEZjKRsWyXni6n/cqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMjU3
-# MDNaMC8GCSqGSIb3DQEJBDEiBCA6ECGlTzUAztzy86lUioyfiG5nhuQnd09sPDng
-# l4PCSTANBgkqhkiG9w0BAQEFAASCAgCUab8nWq2U32KVctuVHxZ8Cl5mv/gTMc8A
-# P9qu42AKlhfStPq9Ja9kBimMwJ0CiMWZ8FqFSx5PVWq9awNwlElsM0Yc9qQpu6Nu
-# SHKKgxxHgjPInj/DIPeWpxN59J6b6Fc6UG8NFL6s1M9p/PwvQvGreINj9xm4fFFc
-# 9HlOgzDAMc31V/YSgHH/ycIulno5+shRrzwL8aViC306HIhJlZQg+ZJjyHVzzhef
-# W8Nk9ndrquroBnY374Sw8PGiC8wcjgw6kuu2/VazFbfx84xqfyDPBHKKsLVMqSLw
-# xl8/NP78yvmCuoCbsEVXEFU7SkHGiJpGiM36ViHjLgGIcg4L3hyo3X15piy7Kenp
-# FgjF5X/i3dTNxOhKIsZ6VarrAwINzE9xYtv8BZQFi3xzg74y9LZ/7CXjJg42bjL3
-# utTdeRctDiSEpMKng1hq3TEnyzGFdiolObRaSvHgpnOaOWsJen/bzsiU0enLIL1K
-# PkApaAydIkkrXndwdU2wXLwjdmqOS8z8z1jFSwn5irulsJ0oZipUdlNtsSa15Ogm
-# X9xe/flmsdWpKdaD/1oQM3RcPRjEBJ0480klZ1jv8YXj8DTQPq/wiuTtHETduXZI
-# s6Ebz+mhxHi02AYUmq4/srAuJjoHI+VWaHTeApPt2MY0w/d9YxAHwxPWr0y98syl
-# 9GYaTuiLcA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
+# MjNaMC8GCSqGSIb3DQEJBDEiBCDDnVaB4tfcMRu7B6t5962bG+q/NYP4brWdySDn
+# QEU17TANBgkqhkiG9w0BAQEFAASCAgA25duoPIAGSApokKOtUlV7M6+XaRDsP6F8
+# iNHpMut7a45C/uA/cvAd0WamBHXRyBTUlP5+usFsOqWRR1Tg/krC2Lm/j6Bqjo9I
+# EudYxr+frn7nyuxuT2FbkqheDC96eNUlQAAzPjkpCrC/VYBc95VEQtpoVoAAsQce
+# 0efD1HV3uu+9WZz3y7nrDEcYcMgqjS8EXgfqIi+Wt9JG52Lyzxo4A/+zGTQoy17D
+# 1ndw7+OlCeUmUwx9Jiw+Kzt8icNVzNEStYqndPLXozBgKY2ycn8ATV66yaI/MiTq
+# 65CxD0+dSGYeWR5sOQc1SLa9OH38Ha5r7/2k8j+sUzMF1bP5+VFylMacaNEWOiUP
+# zYGSRSTig1tX/W/Bk6FUSYkFn+uOIl7VIndPIxZThFX88NXwzPupA5oOTBnJjrmT
+# L3mJwvovaOLu5Ni1PKOBTiWasp2MTWRDzC1pE69bN4MZ6stiK++9nbA+3BjpKGO/
+# L67Jh27iNVSu+aWQFKCcEyVaexntFMQGeTXXG2qUqDXisFTe1z/TjJGhvDpYMSE0
+# Wu8FFNQoTd9V4I2UCpsrnMPRSpvtOX1HUGEnvFksOxvbjrYYh0VZ4Arc3c+uEnFb
+# Ie3Qbul7+hDr02YVEyQRSQgSAX4qKwEbhZrJxm9pT+DTd7sMEDwd9v6pKKBouBHu
+# F8OLBBAGiA==
 # SIG # End signature block

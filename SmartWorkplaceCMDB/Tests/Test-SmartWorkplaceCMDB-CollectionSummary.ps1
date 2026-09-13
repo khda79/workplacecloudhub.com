@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.2.0
+1.2.1
 #>
 [CmdletBinding()]
 param()
@@ -144,6 +144,27 @@ try {
             $historyBefore -eq $historyAfter) `
             'The operational failure alert was not isolated from business snapshots.'
     }
+
+    Invoke-SummaryTest 'Use the proven Graph SDK mail transport without touching snapshots' {
+        $content = Get-Content -Raw -LiteralPath $summaryPath
+        $historyBefore = @(Get-ChildItem -LiteralPath `
+                (Join-Path $dataAllRoot 'CollectionSummary') `
+                -Filter '*.csv' -File -Recurse).Count
+        $result = & $summaryPath @parameters -SendMailTestOnly -ValidateOnly
+        $historyAfter = @(Get-ChildItem -LiteralPath `
+                (Join-Path $dataAllRoot 'CollectionSummary') `
+                -Filter '*.csv' -File -Recurse).Count
+        Assert-SummaryTrue ($result.Status -eq 'Validated' -and
+            $result.ScriptVersion -eq '1.2.1' -and
+            $result.Subject -match 'mail transport test' -and
+            $historyBefore -eq $historyAfter -and
+            $content -match 'Connect-MgGraph' -and
+            $content -match 'Invoke-MgGraphRequest' -and
+            $content -match 'saveToSentItems=\$false' -and
+            $content -match 'ConvertTo-Json -Depth 12' -and
+            $content -match 'Graph mail request failed') `
+            'The isolated Graph SDK mail transport contract is incomplete.'
+    }
 }
 finally {
     if ((Test-Path -LiteralPath $tempRoot) -and
@@ -153,14 +174,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.0; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.1; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmHKWS2RCc0EwG
-# fck8sEH56CqoWcTtZjZpXx0AhJBP/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAC/sVAG39Nf8v6
+# /M/CIHRcrobjfd9qHF26Z+0BnvkwvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -293,31 +314,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIqHK5EqJg2UXhawt+uKooP2s4//Zgvm7X3wwqk2kVLZMA0GCSqG
-# SIb3DQEBAQUABIIBgIIFnnkY7bqKJkIX4D3uw1z6t1fpgoaF6rhYHR8bcV3GMt6B
-# kNjs44WlGHGHIe7x+MrtiVGwF3qfkoPeH4igsdqkkvuPgxIF11oFS2+DwEO4z82/
-# hYcMvp6EiImWsCSqCQCX8Be8XHGULyIm39e6GyWNFKisO9ossElvRpwC17UbCz1J
-# PGTm2/CvA33kGv+8P/boBD6yZaN+Su0D/md600DVier4tiXykoqg/w0x+qSinEQg
-# Bm8n1z1etueKwy5djqmrtde5SJXtRr8+anzlldol0FPdA2ww6W28AFIG6QJgxrb9
-# uv9o9akRw/sjlkuBZZNLOfEGvBM1Xb1YDTu59W5W5r3OZLen657dP6Z7OQ1FmRwx
-# CwU9PJ6WQVXk1b+vBMf3OtgBxhzADr3WQkE2b1zqn0UOXL/ERGun2uN7n6so/ja1
-# Vhhhz+br6dZC22duyxifJqIY9w4ItSZ/MMPF6dFgBB5MqRKVDeyZ/DmI0mzYJTF2
-# fUk5zm781Vk8pFBJ96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAuKFuMPqk3o5sjfG3rshXC4JgGe9NOTQy2gA5wNz+skMA0GCSqG
+# SIb3DQEBAQUABIIBgGvIxVpaSf/TpN4JmHYaJnbqn+2rtkkSlpNxoWZwhuIM6Hlw
+# POTeG3ZMPqTcutZVLb3H6c35cY53ZI8zQk9wrzKgmlk40rcUjnwpFbnBZzXZwnZ6
+# YP1MlNoA1C2ZIXp9RmG8ABMYSdTIerOATCMGMWDUnLcz6HDpWPj5r5xW7OXqdGgF
+# s/nrykIT/vto1YDZkN4mgGJBifO7GgBeeB6zCEFl6wEhaw3lwz5fM6kg1HniTTli
+# KqeAs2RvUzems9Ji0iAHAwsMxL9KpXW6KCOqLaMsFKs12dxUm0mQfImUzEwNfEj5
+# zILu0iflrjrQ8FpWTUCP4Z/TrE+3OYRzzjw9h7KQUKn54cQc6K5KZZf0LaKxj3VZ
+# elraX5yd+NMzbrtc+yzEIpRPdHupzRjeB96/Ns9f0QFptkDUUwACbORFGIK+uPmd
+# YmT5LqC3JO+q9IBxaT8a0VF3FzmycvqGDaYcHEhEMFrhh9/lWGQoDfadFiVYUMkr
+# A4TDRIAkh/5pkFd40aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzEz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCDqAiaYaXqsep4aQfRFPxBjXnBdKYZJI1+SblnJ
-# WVA1QDANBgkqhkiG9w0BAQEFAASCAgA4mRiOwIJT1vutP06ch/k8llApP10/i2XN
-# LfGxB+uAghnNO/fI0jddo6ueCqHvfg4jd1Pc/aO02vJ+lk0KKTHJCQ6PAeowBfsc
-# hMjl+hPYnU9VL4GPwdts7YprYVHtThSVFaNlhiYOXRWTqM8RN0PU2yN4VSlSKJj/
-# ULRzJCqcDJVXbkgQM+c+spyjslTtOv3TDzYpXfP30NOdnpP00C2jtlAepAeNz88E
-# UclISRY+19+Lne+lM+wgdILUEKrHEX21mzS9dhY0cWJPFzw6iFu/0QcJ+gOOaNI9
-# tivL98p8K6yzg7bzmzJhcaGGc2vzFjJsI7jridwDfvL0wHBg2pfZaActWJfK4P0X
-# MmPyOYZNcin/O+c6nuRnA7dze798CBoIENYlntl1TQxTzL9R/kXj9SRsJEr9kSSz
-# RQ/4qhPa06avkXWvfQY9nBDP5mO7N5jRl67CnzoRSWOwmX92q8csvaxd12XXJWdB
-# Pj05HXuygjvlOErgoXr9YCyuSOslUE/NpbzQtjFmE3PNldjvIsYiuslk7PqQPOKq
-# DYgEiBabZ0gxiU0WJU9KBEuBzRJoZOxP91kRPcHWwYwzNIuy8yW8Deso23whySj9
-# JYgEVPblm8lzVlpmqIPz2GZX8hSi/mMc2bmZfY4ETah45sMDZmWWp3KuBohO6CcP
-# BBapwSIB3g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
+# MjNaMC8GCSqGSIb3DQEJBDEiBCA0lEF4t58cbBLu9wTgnBn2s2Vvw1cQoPdxpPF7
+# 0n+tLjANBgkqhkiG9w0BAQEFAASCAgCgSI8MeFrRE5wZVE361vJkb04axd+VFylT
+# dBG6cTRADfYEZzU7DqVZiCs2mF3t8h0baMZjRNb2zLU808YSDaOAHQjnuBvj6n2z
+# oAJofsNq+Mh8DXFZNShcvhZlP4B/Gl/3EkFpJ/t9qFdwgx4GpbUKG3qSrXyUsRIv
+# VVY99fU3yb0GB08zaVhS6FOhaxAzHTMQwn0xvzsI/q1LzuX7PTl20oT8WrFDbIg2
+# yGJCzxJKXqgOX4ca3oHi3C8BAuYduCJwllBYrZNxRnfnF7W+7kevvNDIAO4Mb1pE
+# eHhTLu9cgo0piZg3vvxcqaBXYWkL5mlyFyoqADrd52HcmCl0jZKRBL7nP5AUX+JS
+# IDBBIjxKO40p275qM3fMfZ9o6eVbhY56/FnZCWe7pXqrOYeO84sdaqRidgNwT4ak
+# TGlJYp+M4oc6lbOh/XmSHxHdNGihPOJytl+d5dkqWGV3yKcYG/Nw9wVBHHhvRD+9
+# eN3nf82qJmbcUgm7Pb/Idyo3eSOZFTHJ0NQLHILWysI8pTev+1aBR51Kbxh5RTxX
+# uj5D29ek+2QBlpuhq6SnIwYIauvdTc4SDBDwSJEEojYk6gJRuDI1eyjjiFpc6oz9
+# GwR9tQ+ytlVeAxAZzpXbLSTkNHLoyI6FX2UbDVKNS3XJhNLC4eFKNBdelCl6/27P
+# Y/DZ4z7XFA==
 # SIG # End signature block
