@@ -1,8 +1,8 @@
 # SmartWorkplaceCMDB Power BI — V1
 
 The canonical DSI cockpit is maintained in place with `report_cockpit.py`.
-The approved V1 navigation exposes seven decision pages and retains three
-hidden 360 drill-through pages. The transformation preserves the three stable
+The approved V1 navigation exposes seven decision pages and three visible 360
+detail/drill-through pages. The transformation preserves the three stable
 drill-through identifiers, consolidates overlapping content and retires six
 redundant presentation pages.
 All visible release labels and the canonical project name are V1; the project
@@ -169,9 +169,9 @@ pilot includes a validated real hardware snapshot. Devices without a matching
 hardware record still show an explicit unavailable message. The generic six/nine-page generator below remains
 separate from this additive hardware page.
 
-The canonical cockpit also has an additive `10  Hardware fleet` page;
-the source-evidence page is retained as `11  Hardware detail`. The report and
-its visible context labels use V1 and no page title contains BETA. Fleet
+The canonical cockpit integrates hardware into `05  Fleet & Hardware` and
+`08  Device 360`. The report and its visible context labels use V1 and no page
+title contains BETA. Fleet
 coverage uses filtered `DimDevice` rows as its denominator and removes direct
 manufacturer/model/serial/storage filters from its numerator. The distribution
 charts and anomaly cards remain in hardware-record scope. Missing attributes,
