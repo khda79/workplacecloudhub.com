@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.2.1
+1.2.2
 #>
 [CmdletBinding()]
 param()
@@ -147,6 +147,26 @@ try {
 
     Invoke-SummaryTest 'Use the proven Graph SDK mail transport without touching snapshots' {
         $content = Get-Content -Raw -LiteralPath $summaryPath
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            $summaryPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+        $mailBodyFunction = $ast.Find({
+                param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'New-SmartWorkplaceCMDBSummaryGraphMailBody'
+            }, $true)
+        $mailBodyScript = $mailBodyFunction.Body.GetScriptBlock()
+        $singleRecipientBody = & $mailBodyScript `
+            -Subject 'Synthetic subject' `
+            -BodyHtml '<p>Synthetic body</p>' `
+            -ToRecipients @(@{
+                    emailAddress=@{address='recipient@example.invalid'}
+                })
+        $singleRecipientPayload = $singleRecipientBody | ConvertFrom-Json
         $historyBefore = @(Get-ChildItem -LiteralPath `
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
@@ -155,12 +175,18 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.2.1' -and
+            $result.ScriptVersion -eq '1.2.2' -and
             $result.Subject -match 'mail transport test' -and
             $historyBefore -eq $historyAfter -and
+            $parseErrors.Count -eq 0 -and
+            $null -ne $mailBodyFunction -and
+            $singleRecipientPayload.message.toRecipients -is [object[]] -and
+            @($singleRecipientPayload.message.toRecipients).Count -eq 1 -and
+            $singleRecipientPayload.message.toRecipients[0].emailAddress.address -eq
+                'recipient@example.invalid' -and
+            $singleRecipientPayload.saveToSentItems -eq $false -and
             $content -match 'Connect-MgGraph' -and
             $content -match 'Invoke-MgGraphRequest' -and
-            $content -match 'saveToSentItems=\$false' -and
             $content -match 'ConvertTo-Json -Depth 12' -and
             $content -match 'Graph mail request failed') `
             'The isolated Graph SDK mail transport contract is incomplete.'
@@ -174,14 +200,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.1; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.2; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAC/sVAG39Nf8v6
-# /M/CIHRcrobjfd9qHF26Z+0BnvkwvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBL8gaGbeAkDDdY
+# gPLCy3kcdB3kjEmM0KA+keXbdlafcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -314,31 +340,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAuKFuMPqk3o5sjfG3rshXC4JgGe9NOTQy2gA5wNz+skMA0GCSqG
-# SIb3DQEBAQUABIIBgGvIxVpaSf/TpN4JmHYaJnbqn+2rtkkSlpNxoWZwhuIM6Hlw
-# POTeG3ZMPqTcutZVLb3H6c35cY53ZI8zQk9wrzKgmlk40rcUjnwpFbnBZzXZwnZ6
-# YP1MlNoA1C2ZIXp9RmG8ABMYSdTIerOATCMGMWDUnLcz6HDpWPj5r5xW7OXqdGgF
-# s/nrykIT/vto1YDZkN4mgGJBifO7GgBeeB6zCEFl6wEhaw3lwz5fM6kg1HniTTli
-# KqeAs2RvUzems9Ji0iAHAwsMxL9KpXW6KCOqLaMsFKs12dxUm0mQfImUzEwNfEj5
-# zILu0iflrjrQ8FpWTUCP4Z/TrE+3OYRzzjw9h7KQUKn54cQc6K5KZZf0LaKxj3VZ
-# elraX5yd+NMzbrtc+yzEIpRPdHupzRjeB96/Ns9f0QFptkDUUwACbORFGIK+uPmd
-# YmT5LqC3JO+q9IBxaT8a0VF3FzmycvqGDaYcHEhEMFrhh9/lWGQoDfadFiVYUMkr
-# A4TDRIAkh/5pkFd40aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM0crwLdqAkyrS3vX1UKZ24QHA8+WZ03WmCUM4EoHF3pMA0GCSqG
+# SIb3DQEBAQUABIIBgCHB5t/YGWhqGq0l58BNDUxHvKKYFHepSr4NHeoVAnsR/u2h
+# fDTLhPUmS2mB21ju46+u7Kf7u1XIsL9qghxiDjlebyc6NzKKuCMlgiUpG3N+GnVI
+# L8O+0IiJxw8tSHJfgMqRxZm0rsGHlYAwi4Agjyvnrb5lhI1dK1lqcIeBlOnw5bu7
+# jOsi1prspv6RPund1K0URExblD8rwdiwhM0FBb5NytfS6cRw63a11VDGNhi8CIh1
+# dOMOAQ6NnrcTjoCTPAntvp7tKpJKeBUC0B8UcIWtZgT6ppNCCfpCgGZ6pNhludh0
+# 60/HEanhKnW2TYG/Slhm3RVLi8zf/ovkIuknnZyKUTC6RHLwf0g7ixbkjMPWNUHq
+# riDZ+y9LNBytevZqKwI1kdzNkDCPq3JAosd7shvntwLCKNOAVi0yLqZdGTn4u2lo
+# ADztGGK2bDjlPopdEVgBT55oL/7aNzA1gzVahUQ+jrZRhX5RgINXdna05RGy2rLL
+# U2881HNoUp6rBbhdtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
-# MjNaMC8GCSqGSIb3DQEJBDEiBCA0lEF4t58cbBLu9wTgnBn2s2Vvw1cQoPdxpPF7
-# 0n+tLjANBgkqhkiG9w0BAQEFAASCAgCgSI8MeFrRE5wZVE361vJkb04axd+VFylT
-# dBG6cTRADfYEZzU7DqVZiCs2mF3t8h0baMZjRNb2zLU808YSDaOAHQjnuBvj6n2z
-# oAJofsNq+Mh8DXFZNShcvhZlP4B/Gl/3EkFpJ/t9qFdwgx4GpbUKG3qSrXyUsRIv
-# VVY99fU3yb0GB08zaVhS6FOhaxAzHTMQwn0xvzsI/q1LzuX7PTl20oT8WrFDbIg2
-# yGJCzxJKXqgOX4ca3oHi3C8BAuYduCJwllBYrZNxRnfnF7W+7kevvNDIAO4Mb1pE
-# eHhTLu9cgo0piZg3vvxcqaBXYWkL5mlyFyoqADrd52HcmCl0jZKRBL7nP5AUX+JS
-# IDBBIjxKO40p275qM3fMfZ9o6eVbhY56/FnZCWe7pXqrOYeO84sdaqRidgNwT4ak
-# TGlJYp+M4oc6lbOh/XmSHxHdNGihPOJytl+d5dkqWGV3yKcYG/Nw9wVBHHhvRD+9
-# eN3nf82qJmbcUgm7Pb/Idyo3eSOZFTHJ0NQLHILWysI8pTev+1aBR51Kbxh5RTxX
-# uj5D29ek+2QBlpuhq6SnIwYIauvdTc4SDBDwSJEEojYk6gJRuDI1eyjjiFpc6oz9
-# GwR9tQ+ytlVeAxAZzpXbLSTkNHLoyI6FX2UbDVKNS3XJhNLC4eFKNBdelCl6/27P
-# Y/DZ4z7XFA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwOTIz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCB7gxzqWkPH0UqWQJ6GTrp3A7v7ECHFWnl/1IN3
+# dRyskDANBgkqhkiG9w0BAQEFAASCAgBAvK1R/qIBrw4ZZgbDWDxEkL+vZGPHak31
+# /1D5xmVkmtvS2ITXjOSjuOTuk+YpaXaBiiGG1bGRdLX9ibJM1TsMuwB/VRLeb4s3
+# 2JGCJrSi7S179eKq++dr+X45EMiJyBuXMd8BcJNWx/gy68kWm6xxObVv+w6QEyj3
+# jhrxyCjiMhOvorGnknPPJ+9G+5oHcTl6mkEnKX1RBHUZxJNPxAnCQgM5nGCJd/vH
+# ThRHWstBD5IjMfUrWKIFtfnfja0uJ94yk+ttfYHwqrIgRM/xSNYwDBbVYWDx3nih
+# Gv4xK5Kt1xJRcgWwQx7AqYve/4pdJC9O7lprpDQ4Bsuw43WtUtg06XBicWJ3iW3V
+# PQnZPQQGMgA528hr22FGxGoZWzNcOPbF65jLYFFuD/pVkFB9FucBVfDCdEzGqFCZ
+# jLsLhAbcc4I2d5gDwRnCiO/c4lipIiwqdN4ZidHXwSL8JkrEu+iE5VgU++vjddzy
+# x/qjiY66B3unU+Nx9j43lLub3HpPGxx1NCzAOBU2Nik7gB0e14+1PUzAfc8YkOEE
+# kmKfaW+3sBJEVctXmYGw/oMT0+9x7XLnKTgz3+fe6Mgf4a71Qcenz7KPYv52HIdt
+# XJ4OA+hoFAvrU2JRb1fXE83by1WGYeo4W1DVrEThDTiFdFZAvBMr8XH4XctfBl7I
+# TyLyNEjKOg==
 # SIG # End signature block
