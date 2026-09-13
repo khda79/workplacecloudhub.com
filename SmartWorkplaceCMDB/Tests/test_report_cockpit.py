@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 PRODUCT = Path(__file__).resolve().parents[1]
@@ -88,6 +89,63 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertNotIn("PrimarySmtpAddress", rows[0])
         self.assertTrue(all(len(row["MailboxHostingKey"]) == 64 for row in rows))
+
+    def test_workplace_health_uses_windows_update_attention_evidence(self):
+        with (
+            patch.object(cockpit, "new_page", return_value=({}, [])),
+            patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "set_categorical_selection"),
+            patch.object(cockpit, "add_card") as add_card,
+            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_table"),
+        ):
+            cockpit.build_risk(Path("ignored"))
+        add_card.assert_any_call(
+            Path("ignored"), [], "risk", "FactWindowsUpdateAlert",
+            "Windows update alerts needing attention", "Update alerts needing attention", 336, 232,
+        )
+        add_bar.assert_any_call(
+            Path("ignored"), [], "risk", "FactWindowsUpdateAlert", "AggregateState",
+            "FactWindowsUpdateAlert", "Windows update alert records",
+            "Windows Update records by aggregate state", 648, 340, h=212,
+        )
+
+    def test_lifecycle_uses_autopilot_and_endpoint_analytics(self):
+        with (
+            patch.object(cockpit, "new_page", return_value=({}, [])),
+            patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "add_card") as add_card,
+            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_table"),
+        ):
+            cockpit.build_lifecycle(Path("ignored"))
+        add_card.assert_any_call(
+            Path("ignored"), [], "lifecycle", "FactAutopilotDevice",
+            "Autopilot devices", "Autopilot devices", 648, 232,
+        )
+        add_card.assert_any_call(
+            Path("ignored"), [], "lifecycle", "FactEndpointAnalyticsDevice",
+            "Average Endpoint Analytics score", "Average Endpoint Analytics score", 960, 232,
+        )
+        add_bar.assert_any_call(
+            Path("ignored"), [], "lifecycle", "FactAutopilotDevice", "EnrollmentState",
+            "FactAutopilotDevice", "Autopilot devices",
+            "Autopilot devices by enrollment state", 648, 340, h=212,
+        )
+
+    def test_people_page_uses_collected_activity_state(self):
+        with (
+            patch.object(cockpit, "new_page", return_value=({}, [])),
+            patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "add_card"),
+            patch.object(cockpit, "add_bar") as add_bar,
+            patch.object(cockpit, "add_table"),
+        ):
+            cockpit.build_people_messaging(Path("ignored"))
+        add_bar.assert_any_call(
+            Path("ignored"), [], "users", "DimUser", "ActivityState",
+            "DimUser", "Users", "Users by observed activity state", 24, 340, h=212,
+        )
 
 
 if __name__ == "__main__":

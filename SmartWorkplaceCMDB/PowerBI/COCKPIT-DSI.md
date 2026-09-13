@@ -2,32 +2,31 @@
 
 `report_cockpit.py` maintains the reviewed PBIR definition in place. It does
 not rebuild the semantic model. The approved brownfield transformation reduces
-the report to seven visible decision pages plus three hidden 360 drill-through
-pages. Stable page identifiers and drill-through bindings are retained; six
+the report to seven decision pages plus three visible 360 detail and
+drill-through pages. Stable page identifiers and drill-through bindings are retained; six
 redundant presentation pages are retired only after a targeted backup.
 
 ## Navigation and page jobs
 
 1. Executive Overview: inventory, Microsoft 365 license synthesis, compliance,
    management, ownership, Windows 11, device type and country ratios.
-2. Workplace Health: compliance and CMDB-quality exceptions.
-3. Transformation & Lifecycle: observed OS/management state and source
-   readiness, without inventing migration or lifecycle progress.
-4. Licensing & Assignments: SKU-level capacity and assignment evidence.
+2. Workplace Health: compliance, Windows Update alerts and CMDB-quality exceptions.
+3. Transformation & Lifecycle: observed OS/management state, Autopilot,
+   Endpoint Analytics and source readiness, without inventing migration or lifecycle progress.
+4. Licensing & Assignments: SKU-level capacity, assignment and service-plan evidence.
 5. Fleet & Hardware: reconciled asset inventory and hardware coverage.
-6. People & Messaging: accounts, assignments, device links and mailboxes.
+6. People & Messaging: accounts, sign-in-derived activity, assignments, device links and mailboxes.
 7. Services & Impact: bounded current relationships and explicit absence of an
    authoritative business-service/application dependency graph.
 
-Device 360, User 360 and Group 360 remain physical report pages but use
-`visibility: HiddenInViewMode`. Hardware detail is integrated into Device 360.
+Device 360, User 360 and Group 360 remain visible physical report pages and
+valid drill-through targets. Hardware detail is integrated into Device 360.
 The retired page directories are `quality`, `transformation`, `impact`,
 `mailboxes`, `hardwarefleet` and `hardware`; their high-value content is carried
 into the consolidated pages above.
 
-The report opens on Executive Overview. Bottom tabs expose only the seven-page
-decision path in View mode. The three unchanged 360 IDs remain drill-through
-targets.
+The report opens on Executive Overview. Bottom tabs expose the complete
+ten-page path, including the three unchanged 360 IDs.
 
 ## Canonical design contract
 
@@ -40,7 +39,7 @@ Design Brief:
     current_tone: light technical cockpit with repeated domain pages
     current_signature: off-white canvas, white rounded evidence panels, dark-navy table headers
     tone: calm executive Workplace cockpit with progressive disclosure
-    signature: one decision question per visible page, evidence deferred to hidden 360 pages
+    signature: one decision question per page, with focused evidence available on visible 360 pages
   canvas: {width: 1280, height: 900, margin: 24, gutter: 16, snap: 8}
   pages:
     - {name: Executive Overview, role: landing, archetype: Executive, layout_variant: KPI-and-evidence, variant_rationale: "The DSI needs a ten-second tenant snapshot before domain analysis.", regions: [header, filters, kpis, distributions, licensing, footer]}
@@ -50,9 +49,9 @@ Design Brief:
     - {name: Fleet & Hardware, role: detail, archetype: Analytical, layout_variant: filter-rail-with-evidence, variant_rationale: "Device and hardware attributes share the reconciled device grain and a common investigation path.", regions: [header, filters, coverage_kpis, state_and_manufacturer_charts, fleet_table, footer]}
     - {name: People & Messaging, role: detail, archetype: Analytical, layout_variant: paired-domains, variant_rationale: "Accounts and mailboxes are linked but require separate evidence tables.", regions: [header, filters, relationship_kpis, user_and_mailbox_charts, paired_tables, footer]}
     - {name: Services & Impact, role: detail, archetype: Analytical, layout_variant: bounded-paths, variant_rationale: "Only user-device and license paths are authoritative; service readiness stays an explicit limitation.", regions: [header, filters, relationship_kpis, path_charts, evidence_table, footer]}
-    - {name: Device 360, role: drillthrough, archetype: Analytical, layout_variant: two-column-evidence, variant_rationale: "Identity/activity and hardware evidence must remain side by side for one selected device.", visibility: HiddenInViewMode, regions: [header, selector, identity, source_and_hardware, activity_and_hardware_dates, findings, footer]}
-    - {name: User 360, role: drillthrough, archetype: Analytical, layout_variant: existing-detail, variant_rationale: "Focused account evidence remains valid and should not occupy primary navigation.", visibility: HiddenInViewMode, regions: [header, selector, account, relationships, assignments, findings, footer]}
-    - {name: Group 360, role: drillthrough, archetype: Analytical, layout_variant: existing-detail, variant_rationale: "Focused group evidence remains valid and should not occupy primary navigation.", visibility: HiddenInViewMode, regions: [header, selector, group, assignment_paths, findings, footer]}
+    - {name: Device 360, role: detail_and_drillthrough, archetype: Analytical, layout_variant: two-column-evidence, variant_rationale: "Identity/activity and hardware evidence must remain side by side for one selected device.", regions: [header, selector, identity, source_and_hardware, activity_and_hardware_dates, findings, footer]}
+    - {name: User 360, role: detail_and_drillthrough, archetype: Analytical, layout_variant: existing-detail, variant_rationale: "Focused account evidence remains directly accessible and drill-through capable.", regions: [header, selector, account, relationships, assignments, findings, footer]}
+    - {name: Group 360, role: detail_and_drillthrough, archetype: Analytical, layout_variant: existing-detail, variant_rationale: "Focused group evidence remains directly accessible and drill-through capable.", regions: [header, selector, group, assignment_paths, findings, footer]}
   interaction_pattern:
     drill_targets: [Device 360, User 360, Group 360]
     cross_filter_rules: preserve existing filter behavior and exact drill-through bindings
@@ -81,8 +80,15 @@ Design Brief:
 
 V1 has no authoritative business-service/application graph, service owner,
 criticality, acquisition date, warranty, support end date, cost, savings,
-migration plan, Autopilot, VDI or Golden Image source. These values stay
+migration plan, VDI or Golden Image source. These values stay
 unavailable; zero is never substituted.
+
+The current Autopilot and Endpoint Analytics tables are collected evidence,
+not proof of deployment readiness or user experience. Windows Update alerts
+are records, not a distinct-device count unless the corresponding explicit
+device measure is used. Hardware remains the last strictly validated snapshot
+when a fresh hardware state-evidence file is unavailable; its coverage and
+source date stay visible instead of being silently rebuilt from unqualified raw data.
 
 The report is a private V1 artifact. It does not by itself qualify tenant,
 gateway, endpoint or production behavior and must not be published without
