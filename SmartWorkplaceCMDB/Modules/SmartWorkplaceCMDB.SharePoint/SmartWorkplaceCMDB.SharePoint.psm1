@@ -1,7 +1,7 @@
 # SmartWorkplaceCMDB.SharePoint
-# Version: 0.1.0
+# Version: 0.1.1
 
-$script:SmartWorkplaceCMDBSharePointVersion = '0.1.0'
+$script:SmartWorkplaceCMDBSharePointVersion = '0.1.1'
 $script:DriveIdCache = @{}
 $script:FolderCache = @{}
 
@@ -39,6 +39,23 @@ function Get-SmartWorkplaceCMDBSharePointRelativePath {
     }
 
     throw "Local file is outside the configured SmartWorkplaceCMDB data roots: '$LocalFilePath'."
+}
+
+function Get-SmartWorkplaceCMDBSharePointContentType {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][IO.FileInfo]$FileInfo)
+
+    if ($FileInfo.Extension -ieq '.csv') {
+        return 'text/csv'
+    }
+    if ($FileInfo.Extension -ieq '.log' -or
+        $FileInfo.Name.EndsWith(
+            '.transcript.txt',
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+        return 'text/plain; charset=utf-8'
+    }
+    throw 'Only CSV, LOG, and .transcript.txt files can be published by this publisher.'
 }
 
 function Test-SmartWorkplaceCMDBSharePointConfiguration {
@@ -422,9 +439,8 @@ function Publish-SmartWorkplaceCMDBSharePointFile {
             $fileInfo = $null
             try {
                 $fileInfo = Get-Item -LiteralPath $path -ErrorAction Stop
-                if ($fileInfo.Extension -ine '.csv') {
-                    throw 'Only CSV files can be published by this publisher.'
-                }
+                $contentType = Get-SmartWorkplaceCMDBSharePointContentType `
+                    -FileInfo $fileInfo
                 $relativePath = Get-SmartWorkplaceCMDBSharePointRelativePath `
                     -LocalFilePath $fileInfo.FullName `
                     -DataAllRootPath $DataAllRootPath `
@@ -449,7 +465,7 @@ function Publish-SmartWorkplaceCMDBSharePointFile {
                         -Method PUT `
                         -Uri "https://graph.microsoft.com/v1.0/drives/$driveId/root:/${encodedPath}:/content" `
                         -InputFilePath $fileInfo.FullName `
-                        -ContentType 'text/csv' `
+                        -ContentType $contentType `
                         -Operation "Upload '$relativePath'"
                 }
 
@@ -494,8 +510,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMpSHVtO8H+rvH
-# U5Odoi88c0z759SMgfB7yMQM48NxjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArpvn38H7i2tLT
+# FgnVyugt50oRd8ZzywviBpQnQzu7YaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -628,31 +644,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDrt52AiGtjBOZ7UkthNDDsWE6knm4vERORlHdvikyd2MA0GCSqG
-# SIb3DQEBAQUABIIBgKmQApESQjh91w/fG0GYk6Wd8urcwV9O7tXb9lE6rdBdlsSl
-# 9LbC3OTpg8BzfBGv3Gwk+4m+d4jqF3aeZG8fJJm1Ku3KCfNRp516CsHc1TB/6lMC
-# ihOFiDI9kQc14lX3HcZ3QkHLmeE9jfVJ+WC23XuI283kWaazxbFoFyX/WIfdC81R
-# WjLi5vBHUp7ZhKnIW0Hha5W41FmzS3itDyzW0ZjstTdPDL0pHLvTIQkeBll4Y1J+
-# IiKNat/SJBcrL10Y9MpMofpWfTOvtfncVOqSY56rB7+9VlZHHclvFTxIcmlzKnw5
-# zA29eCarxPYf3G08CshPsL03B8XIF2Y8mTtpYr2MGGedCmrqhn3jhFk9DOZkorIk
-# KtzdrJkdF5hF5zsM91MwkOLTwOvmT2REesGaG+6oZgtpPZh7yCIGGjNmGM1wnbmM
-# CnK/wXNUk14SdVPbU31ZiPDwWaMvVoQmqM7sJVHeVYpIwxyIOgH8htxV430hrs0R
-# zwMQgV90+F1KF54Qi6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO+nAoE5Dv1nz47qZ2SLgxycu5v6CTdFks0Woo8SSUt6MA0GCSqG
+# SIb3DQEBAQUABIIBgBrKuO9kNy1yUFIsH17JIWERTOlI8IhJ+Gz1XS2a0xxdAXXH
+# s6IE+qHk6x4t64+ApLsB0I4epIwA90U8vNot9QwNN/hnNfetZS70Enrtd185jqci
+# NgOxyuftA+m1eAa48ChrFDllfcSyZgiv3SD0hp/Kp58Z0rjWgGW97z01rWMVtFbA
+# osUFWW1nI3yMpcuGagKN1o/3BLLw086eh4ebkwvLrrtQx1dNc6+Gk6UbCFN5rjbi
+# BkxE/GNGKwoOjoQmJoI28k2FMuQE5hXg5pDft6eHb+eJbi8DFfkzcGLn72O2fndZ
+# BjvA4OXMq6q0BBpA5g2v6xgPiyCZPtKTvPC3YcRG4VZalfQit4TW/W9VDg2SLhYV
+# PCzW1mGN0WMFU7/Kes7ibSSR+j+CKFsZA3sDYxv3cXh63NNkSv7nZYjKRBv/R9Fl
+# IagX2Rz0nKCYi0TWzAzWoP7EhFo6Sc+vHTLTC0thPlvnJabgAM58xnzkc5Fh8GY5
+# //0bAdeLJMGL9I/idqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTZaMC8GCSqGSIb3DQEJBDEiBCAIqSNzBCMynxnB/RG2IcwIo/ImJz/YpTMV+xv3
-# lsJPLTANBgkqhkiG9w0BAQEFAASCAgCcmZNv58JZmCmTW3ZEkjUOW/Us7l/RbjoX
-# Fi2Er10mDYyunqac7jTjIWKuJw/AUGHzJFhFjyCOphsVuvWgAmSdEvrZys+r+zJk
-# gr09SyOFUVdEequBLhRlYPMy1HWcC81Na0qXxM51hma/y0KisYCXTbPg0/382AO0
-# VtduI5Wl4JINBXOJsJPxHlyFFnh+ohb4JuRkzLbKeVH0Dsi0goJUxnoxmgenhNn6
-# cUneSfGk94TBtJnxHeKmsrclB1iHAiSiLSqH2IyzuKS/boP2UpbHzIn1UzhXAuXf
-# fbjqSfEX+Ye7DPRBWbZGfPWcYkX9VIRbwaSgzNJh7pqrVAOLmE/3kzg16XEVYZea
-# OilWxAnFD5h87pFtCjxCd/Fj4W7LkKwOWFVBmxuqsWJBHhzkTd2reNqSO3E3RWMQ
-# OHmLirxl2tKYE9h2cfpOTMY19ycLonVRewsC9J94cbInADr1VvwzEfexp1Oj75UT
-# 60vgeuZQv2KzTuGaTNSD5tsJvSyi3Pp4Vds7BIEZ2ES1lnr/lZx4iAtQW8LaocEk
-# D18+oanlMEgf52w00BbAkdVE/ToGiqyOwLrwFAsyfcCYkh9EXyGqSo2j/fy3LtKk
-# HcL3cIb3Z6z7E9TqmIydP/S02i4JLu1DwyV1VYqB8DGdwpowk27MJP2MWtFwJXKn
-# KP2PsGywYg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
+# MjJaMC8GCSqGSIb3DQEJBDEiBCAqGDPZ/x8rfelEQmxNf2F8MOR+GYpG917Ro3MT
+# /be8lDANBgkqhkiG9w0BAQEFAASCAgAr6aniacaRSDt6pUFnuixhh20PlCMQ1hLU
+# YfbjXhqEes2iSmRMtKzaT+6FpqqFT+e7M05+pspL4jTS+TlHxjRDCfMuVGUymGtY
+# CyRS2U3PULJBMQLSIukF2xjHJG0S+5aH5lAQwoXyLBdMcUCPMH2cQ04VLoNtFURo
+# qAmFiAvnCpO/kHi6W2ZJhJJ/4YBF0Kh+/6TqB9X/NxzducTy8BU39pJd/bF3FCnt
+# bLTaa77jDc80Em+Tro2N9ytdmhpCg7pPkPvVM9Y89I6/gLRoOztNTdoyImCYK20Y
+# Xs+AlJGqMPEPi05zKI4cZ8nCrasDk5Nrj2fLOFyomFJ4EXdtjepxulMAz8Cxmuf4
+# yui/059U1lEBzxxYV4/IhqyxJ/jKm8UEXn5xnPQX9v0Q7dSvkmY4c6RSlw9DIq8J
+# NjDhA26O4g15FqduiY1xjDofUqwFTMnTqpfuR34r2rLNYH0duc+x8ij/7Lgr6nnD
+# vso943z+tGiFN3ZmN9rkDFNhvANeBQuHpYoZbmPQX7S9a+GIQIvexnQ2ervlPlmp
+# HlpbeX1W052bPD6F8R8AUXQ4dp7V/Q0FD1wSMf/Ai149QaYhYYMZURzrrSAv8ujq
+# yvyFY1f0Tbkp4Pp26SglDfVArxAtYduSsGHnoIiti257rdeJdXEqunnK5mnPQoQ6
+# TIiIfxR8HA==
 # SIG # End signature block

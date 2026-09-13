@@ -642,10 +642,12 @@ curation stage, so uncertain hybrid matches are never created silently.
 
 ## SharePoint Publication
 
-SmartWorkplaceCMDB publishes CSV files autonomously through Microsoft Graph after
-a successful unbounded live orchestration. It does not import or require the
-SmartM365 runtime. Only files created or changed by the current run are uploaded,
-and their relative `DATA-ALL`, `DATA-LAST`, and `LOG-ALL` structure is preserved.
+SmartWorkplaceCMDB publishes changed CSV data plus `.log` and
+`.transcript.txt` diagnostics autonomously through Microsoft Graph after a
+successful unbounded live orchestration. It does not import or require the
+SmartM365 runtime. Only files created or changed by the current run are
+uploaded, and their relative `DATA-ALL`, `DATA-LAST`, and `LOG-ALL` structure
+is preserved. Arbitrary text and status files remain excluded.
 
 The production target is configured in the tenant-local file:
 
@@ -663,7 +665,7 @@ The publisher reuses `MicrosoftGraph.TenantId`, `ClientId`, and
 `CertificateThumbprint`. The application needs write access to the configured
 SharePoint site, preferably through `Sites.Selected` plus a write grant on that
 site. Parent folders are created when missing, files up to 250 MB use direct
-upload, and larger CSV files use a resumable upload session.
+upload, and larger files use a resumable upload session.
 
 Publication runs automatically after `-Collect`. It is skipped for validation,
 offline fixtures, failed pipelines, and every `-MaxItems` run. Use
@@ -707,13 +709,17 @@ Enable it in the tenant-local configuration, which remains ignored by Git:
 ```
 
 Graph mode reuses the CMDB `MicrosoftGraph` tenant ID, client ID and
-certificate and calls `sendMail` directly, without importing SmartM365.
-Transient token and mail failures are retried with bounded exponential delay
-and `Retry-After` support. SMTP supports multiple semicolon- or comma-separated
-recipients and integrated authentication by default. `Both` means Graph first
-with SMTP as a fallback. The first enabled run can show `n/a` for historical
-comparisons; J-7 and J-30 populate as retained full-collection snapshots become
-available under `DATA-ALL\CollectionSummary`.
+certificate and follows the proven SmartInventory transport pattern through
+`Microsoft.Graph.Authentication`, without importing SmartM365. It calls
+`sendMail` with `saveToSentItems=false`, retries transient failures with bounded
+exponential delay and `Retry-After` support, and preserves the detailed Graph
+error response for diagnosis. Use `-SendMailTestOnly` on the collection summary
+script to test this transport without creating a CMDB snapshot or HTML history.
+SMTP supports multiple semicolon- or comma-separated recipients and integrated
+authentication by default. `Both` means Graph first with SMTP as a fallback.
+The first enabled run can show `n/a` for historical comparisons; J-7 and J-30
+populate as retained full-collection snapshots become available under
+`DATA-ALL\CollectionSummary`.
 
 ## Data Quality Normalization
 
@@ -782,8 +788,10 @@ retain the previous raw CSV but block normalization until a successful refresh.
 Per-source locks prevent overlapping writers. Existing CSVs without evidence
 remain readable as legacy inputs; the report shows their source health as
 unknown. Copy evidence with raw CSVs when transferring them to another host.
-The current SharePoint uploader copies CSVs only, so evidence is unavailable in
-a CSV-only synchronized copy. No live completeness claim is made for that copy.
+The current SharePoint uploader copies CSVs plus run logs and transcripts, but
+does not publish `.status.json` evidence. That evidence therefore remains
+unavailable in the synchronized copy. No live completeness claim is made for
+that copy.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Collect -Pipeline EntraUsers -MaxItems 10
