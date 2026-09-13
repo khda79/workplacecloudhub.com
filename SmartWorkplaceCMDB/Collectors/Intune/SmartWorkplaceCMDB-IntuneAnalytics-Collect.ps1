@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-Collects Windows update alert/status and Endpoint Analytics device scores.
+Collects Windows update status, Endpoint Analytics scores, and Windows upgrade eligibility.
 
 .DESCRIPTION
-Uses Microsoft Intune report export jobs without changing devices, policies,
-assignments, baselines, or remediations. Creating the temporary export-job
-resource currently requires DeviceManagementManagedDevices.ReadWrite.All.
+Uses Microsoft Intune report export jobs and the read-only Work From Anywhere
+device API without changing devices, policies, assignments, baselines, or
+remediations. Creating the temporary export-job resource currently requires
+DeviceManagementManagedDevices.ReadWrite.All.
 
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding(DefaultParameterSetName = 'Graph')]
 param(
@@ -31,7 +32,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.2'
+$ScriptVersion = '1.0.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -97,6 +98,73 @@ function Get-ScoreText {
         throw "$Field '$Value' is outside 0..100 for '$Key'."
     }
     return $score.ToString('0.##', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-UpgradeEligibilityText {
+    param([AllowNull()]$Value, [string]$Key)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return '' }
+    switch (([string]$Value).Trim().ToLowerInvariant()) {
+        { $_ -in @('0', 'upgraded') } { return 'upgraded' }
+        { $_ -in @('1', 'unknown', 'undetermined', 'notapplicable') } { return 'unknown' }
+        { $_ -in @('2', 'noteligible', 'notcapable', 'notready') } { return 'notCapable' }
+        { $_ -in @('3', 'eligible', 'capable', 'ready') } { return 'capable' }
+        { $_ -in @('4', 'unknownfuturevalue') } { return 'unknownFutureValue' }
+        default { throw "upgradeEligibility '$Value' is not recognized for '$Key'." }
+    }
+}
+
+function Invoke-GraphCollection {
+    param([Parameter(Mandatory)][string]$Uri)
+    $items = New-Object System.Collections.Generic.List[object]
+    $nextLink = $Uri
+    while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+        $page = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry -Uri $nextLink
+        foreach ($item in @(Get-GraphValue $page 'value')) {
+            if ($null -ne $item) { $items.Add($item) }
+        }
+        $nextLink = Get-CleanText (Get-GraphValue $page '@odata.nextLink')
+    }
+    return @($items.ToArray())
+}
+
+function Get-UpgradeEligibilityGraphRows {
+    $select = 'id,deviceId,deviceName,upgradeEligibility'
+    $primaryError = ''
+    try {
+        $metricsUri = "https://graph.microsoft.com/v1.0/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics?`$select=id"
+        $metrics = @(Invoke-GraphCollection -Uri $metricsUri)
+        $metricIds = @($metrics | ForEach-Object { Get-CleanText (Get-GraphValue $_ 'id') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        if ($metricIds.Count -eq 0) { throw 'Microsoft Graph returned no Work From Anywhere metric identifier.' }
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($metricId in $metricIds) {
+            $escapedMetricId = [uri]::EscapeDataString($metricId)
+            $deviceUri = "https://graph.microsoft.com/v1.0/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics/$escapedMetricId/metricDevices?`$select=$select"
+            foreach ($row in @(Invoke-GraphCollection -Uri $deviceUri)) {
+                $row | Add-Member -NotePropertyName sourceMetricId -NotePropertyValue $metricId -Force
+                $rows.Add($row)
+            }
+        }
+        return [pscustomobject]@{ Status = 'CollectedV1'; Rows = @($rows.ToArray()); Error = '' }
+    }
+    catch {
+        $primaryError = $_.Exception.Message
+        Write-Warning ("The documented Work From Anywhere metric route was unavailable; trying the SmartInventory allDevices beta route. Error: {0}" -f $primaryError)
+    }
+
+    try {
+        $fallbackUri = "https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics('allDevices')/metricDevices?`$select=$select"
+        $rows = @(Invoke-GraphCollection -Uri $fallbackUri)
+        foreach ($row in $rows) {
+            $row | Add-Member -NotePropertyName sourceMetricId -NotePropertyValue 'allDevices' -Force
+        }
+        return [pscustomobject]@{ Status = 'CollectedBetaAllDevices'; Rows = $rows; Error = '' }
+    }
+    catch {
+        $fallbackError = $_.Exception.Message
+        $message = "Work From Anywhere device readiness is unavailable. V1=$primaryError; BetaAllDevices=$fallbackError"
+        Write-Warning $message
+        return [pscustomobject]@{ Status = 'Unavailable'; Rows = @(); Error = $message }
+    }
 }
 
 function Invoke-IntuneReportExport {
@@ -168,7 +236,11 @@ foreach ($key in $PSBoundParameters.Keys) { $boundParameters[$key] = $PSBoundPar
 $context = Resolve-SmartWorkplaceCMDBContext -BoundParameters $boundParameters -GlobalConfigPath $GlobalConfigPath -TenantConfigPath $TenantConfigPath -NoConfigWrite:($ValidateOnly -or $NoConfigWrite -or $PSCmdlet.ParameterSetName -eq 'Fixture')
 $paths = Resolve-SmartWorkplaceCMDBCollectionPaths -Paths $context.Paths -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems -ExplicitDataRoot:([bool]$DataRootPath) -NoWrite:$ValidateOnly
 $contract = Get-SmartWorkplaceCMDBTableContract -Path $rawContractPath
-$tableNames = @('Intune_WindowsUpdateAlerts.csv', 'Intune_EndpointAnalyticsDeviceScores.csv')
+$tableNames = @(
+    'Intune_WindowsUpdateAlerts.csv',
+    'Intune_EndpointAnalyticsDeviceScores.csv',
+    'Intune_EndpointAnalyticsUpgradeEligibility.csv'
+)
 $tables = @{}
 $latestPaths = @{}
 foreach ($name in $tableNames) {
@@ -200,7 +272,7 @@ try {
         [pscustomobject]@{
             Status = 'Valid'
             ScriptVersion = $ScriptVersion
-            SourceMode = if ($null -ne $fixture) { 'OfflineJson' } else { 'MicrosoftGraphExportJobs' }
+            SourceMode = if ($null -ne $fixture) { 'OfflineJson' } else { 'MicrosoftGraphExportJobsAndEndpointAnalytics' }
             RawContractVersion = [string]$contract.contractVersion
             RequiredGraphPermissions = 'DeviceManagementConfiguration.Read.All;DeviceManagementManagedDevices.ReadWrite.All'
             OutputCount = $tableNames.Count
@@ -210,9 +282,13 @@ try {
 
     $alertSourceRows = @()
     $analyticsSourceRows = @()
+    $upgradeEligibilitySourceRows = @()
+    $upgradeEligibilityCollectionStatus = 'NotStarted'
     if ($null -ne $fixture) {
         $alertSourceRows = @($fixture.windowsUpdateAlerts)
         $analyticsSourceRows = @($fixture.endpointAnalyticsDeviceScores)
+        $upgradeEligibilitySourceRows = @($fixture.endpointAnalyticsUpgradeEligibility)
+        $upgradeEligibilityCollectionStatus = 'Fixture'
     }
     else {
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
@@ -238,11 +314,15 @@ try {
             }
         }
         $analyticsSourceRows = @(Invoke-IntuneReportExport -ReportName 'EADeviceScoresV2' -Select @('AppReliabilityScore', 'DeviceId', 'DeviceName', 'EndpointAnalyticsScore', 'Manufacturer', 'Model', 'StartupPerformanceScore', 'WorkFromAnywhereScore') -ApiVersion beta)
+        $upgradeEligibilityResult = Get-UpgradeEligibilityGraphRows
+        $upgradeEligibilitySourceRows = @($upgradeEligibilityResult.Rows)
+        $upgradeEligibilityCollectionStatus = [string]$upgradeEligibilityResult.Status
     }
 
     if ($MaxItems -gt 0) {
         $alertSourceRows = @($alertSourceRows | Select-Object -First $MaxItems)
         $analyticsSourceRows = @($analyticsSourceRows | Select-Object -First $MaxItems)
+        $upgradeEligibilitySourceRows = @($upgradeEligibilitySourceRows | Select-Object -First $MaxItems)
     }
     $collected = [datetime]::UtcNow.ToString('o')
     $alertRows = @($alertSourceRows | ForEach-Object {
@@ -280,6 +360,41 @@ try {
             SourceCollectedDateTime = $collected
         }
     })
+    $upgradeEligibilityRows = @($upgradeEligibilitySourceRows | ForEach-Object {
+        $deviceId = Get-CleanText (Get-GraphValue $_ 'deviceId')
+        $metricDeviceId = Get-CleanText (Get-GraphValue $_ 'id')
+        $metricId = Get-CleanText (Get-GraphValue $_ 'sourceMetricId')
+        $deviceIdSource = 'ReportedDeviceId'
+        if ([string]::IsNullOrWhiteSpace($deviceId) -and $upgradeEligibilityCollectionStatus -eq 'CollectedBetaAllDevices') {
+            $deviceId = $metricDeviceId
+            $deviceIdSource = 'BetaMetricDeviceId'
+        }
+        if ([string]::IsNullOrWhiteSpace($deviceId)) { throw 'Endpoint Analytics upgrade eligibility row has no usable Intune device ID.' }
+        $eligibility = Get-UpgradeEligibilityText (Get-GraphValue $_ 'upgradeEligibility') $deviceId
+        if ([string]::IsNullOrWhiteSpace($eligibility)) { throw "Endpoint Analytics upgrade eligibility is missing for '$deviceId'." }
+        [pscustomobject][ordered]@{
+            SourceSystem = 'MicrosoftGraphEndpointAnalytics'
+            MetricId = $metricId
+            MetricDeviceId = $metricDeviceId
+            DeviceId = $deviceId
+            DeviceIdSource = $deviceIdSource
+            DeviceName = Get-CleanText (Get-GraphValue $_ 'deviceName')
+            UpgradeEligibility = $eligibility
+            SourceCollectedDateTime = $collected
+        }
+    })
+    if ($upgradeEligibilityRows.Count -gt 0) {
+        $collapsedUpgradeEligibilityRows = New-Object System.Collections.Generic.List[object]
+        foreach ($group in @($upgradeEligibilityRows | Group-Object DeviceId | Sort-Object Name)) {
+            $eligibilityValues = @($group.Group | ForEach-Object { [string]$_.UpgradeEligibility } | Sort-Object -Unique)
+            if ($eligibilityValues.Count -gt 1) {
+                throw "Conflicting Endpoint Analytics upgrade eligibility values returned for device '$($group.Name)': $($eligibilityValues -join ', ')."
+            }
+            $selected = @($group.Group | Sort-Object MetricId, MetricDeviceId)[0]
+            $collapsedUpgradeEligibilityRows.Add($selected)
+        }
+        $upgradeEligibilityRows = @($collapsedUpgradeEligibilityRows.ToArray())
+    }
     $analyticsGroups = @($analyticsRows | Group-Object DeviceId)
     $duplicateAnalyticsGroups = @($analyticsGroups | Where-Object Count -gt 1)
     if ($duplicateAnalyticsGroups.Count -gt 0) {
@@ -311,6 +426,7 @@ try {
     $rowsByTable = @{
         'Intune_WindowsUpdateAlerts.csv' = $alertRows
         'Intune_EndpointAnalyticsDeviceScores.csv' = $analyticsRows
+        'Intune_EndpointAnalyticsUpgradeEligibility.csv' = $upgradeEligibilityRows
     }
     foreach ($name in $tableNames) {
         $key = if ($name -eq 'Intune_WindowsUpdateAlerts.csv') { { "$($_.SourceReport)|$($_.PolicyId)|$($_.DeviceId)|$($_.EventDateTimeUTC)" } } else { 'DeviceId' }
@@ -334,12 +450,14 @@ try {
             throw
         }
     }
-    Write-Information ("SmartWorkplaceCMDB Intune analytics collection completed. UpdateRows={0}; EndpointAnalyticsDevices={1}." -f $alertRows.Count, $analyticsRows.Count) -InformationAction Continue
+    Write-Information ("SmartWorkplaceCMDB Intune analytics collection completed. UpdateRows={0}; EndpointAnalyticsDevices={1}; UpgradeEligibilityDevices={2}; UpgradeEligibilityStatus={3}." -f $alertRows.Count, $analyticsRows.Count, $upgradeEligibilityRows.Count, $upgradeEligibilityCollectionStatus) -InformationAction Continue
     [pscustomobject]@{
         Status = 'Completed'
         ScriptVersion = $ScriptVersion
         WindowsUpdateRowCount = $alertRows.Count
         EndpointAnalyticsDeviceCount = $analyticsRows.Count
+        UpgradeEligibilityDeviceCount = $upgradeEligibilityRows.Count
+        UpgradeEligibilityCollectionStatus = $upgradeEligibilityCollectionStatus
         PublishedPath = $published
     }
 }
@@ -355,8 +473,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXAXcw8gFXeJGM
-# fzXVyFcBnZndKiq8H4WpqEqovClBRaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDQoyzRx4w1cOw
+# 7hJJm7F1TqGH6jNwMG8K4HrHZkcWrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -489,31 +607,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILtVBUqee69chkRfI2I+JQ8EFAESnYGwY+iQARRAWizUMA0GCSqG
-# SIb3DQEBAQUABIIBgK+nbQqsZ211aOKnk5qdxX2v6KV7qdOh538gE1MjmO8Rh5qL
-# +DreT9DOn4lY+2fqMYw4xOcK5L3Du1O3JZlwVDJOStyyUGRAPBetQ3dXfEjRPGej
-# 1VV4twcozPt3fyWWG7BeAX0M6EmKCHCo7rXuDHViruKyeGkhw9P4PkwtCs3aHDcb
-# htGCN+u4qRyOuyb0BuqpR5jTXgV06HDI2EV1uLDeH2bhb8M2TTeg7ROw1VWCvMA2
-# wCz5sT/EyQH+9J3iOwG3LKnmH3nfxdbbOvBDC2IEK5Ly/hqtBeNjbxW+LaGBzdKo
-# 7HtDjIVTTivd0wfMojJsLD5rQXS+NHynHASPV1I8yJT47IajzB5tPfRxSFcGkl0N
-# m7SRQhNQCnDKAgcOHnhPFYsVe+qiAjWnWQDBSIRLIHq/FEmQ+jxLc383fIC01shf
-# D+h/D1nalh/xNGL5m68JIGQRNIMBMKERcIJHhHwz096yaXCAUxEyNi6mVgWCYIiT
-# XQ8Ulc6pGUyU4SukeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHCDfsiz4wbpETPn2lPBgBUSiUyeer7VoaTFfS6mpcu9MA0GCSqG
+# SIb3DQEBAQUABIIBgAoc77X2K9QG7f0FBdREhoJAC4KCQoUMPH5sXPWvd91G3Evr
+# 6tBpwjumJS/dxnmYP/OSS9pIz4hiiC7mstIz1/5rhqV4tZ/yxXpwqyqaUcxJgO4i
+# zwFLqE9f4k4q8oFiSUwMdAdZc6us6OVXI8XRK89LfBNrQtg6zBhmBYl4Hbzon+UT
+# NJ9DayE4qw+HNUEtxR05H+BpplsQ5yHAsNgOn9csAbBJkyRH/J5Gq6liL8X+LBri
+# 9XVJKbWshnW6Elmm1/TKxcFdUxplB3xgH1fJCUXlCoeD0DKSh7p3KKlC5gsy34Ty
+# YGhKzU9ab8pFfDM/QzlFy7l79eYCpZPyPPKYJ8YSEsRbkDdx9WTRhKXpWp9C1YsN
+# SEpF7+aq/p8ghcDACTfvzDiLcwqia/usezNxMlIdpbnC8Vtw/fZzTgTCMfI6Ywyu
+# zcjTZtjo+xQDzEjWNizoA8+9IOMIxpKZSt7bXTc0WVgx+Co3TtgpaV9PnzZzNI2t
+# CuPvXGY8qu6N//HUTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTMw
-# MDVaMC8GCSqGSIb3DQEJBDEiBCA4Rc2SfaOFY0ohd67RdbbTrOFJk45yfyt7Z4DD
-# eIZnBDANBgkqhkiG9w0BAQEFAASCAgCeyBOaKccCUsmViOzt2GPKTUZPtVc/mEq0
-# Go0/OBTFKJqQrlZyuPEfNtojUciksfqo0h+x6ONL4m+VR8tW2Fo/dMIJZRFhnSgW
-# hhFlGr7OVG6FUgq/NgoLe7vx/Lsvy7Lj5ijiy6hM7EvcWfRjR0R1iHOKRVg/txg/
-# cHQizMr/MsRf5GR8lsppo8H/q/jCiJ9l3CqQQwlZLbzoMdh1VpiWga7m/67gaos8
-# wZCWZ/C/aOLWm9u7xUqqn2r9wsa83RpcX8b6c72keQf0E5EYJBuIxarrM+uTSQbU
-# 7moIXbhHVwSVnAjVWtNdsk3OyIIBkDC+leHmxEQdsff3KdMOlctjWUe/j2Z7urxS
-# OUA7x+4DbpkZlDeBqZkR5DHUM0oQJiP02sDAijTz+qA1sNiBOqNxoxnSOTOEovgO
-# g/bdU3Vwnnc3+HK6pbEDHw5jrdMPb/APWaTrvVeaEiA4xNuc0JWQtc7QldjZpksM
-# u5zHR9k76nA63A32ep/xS8gYxMyVuPZJiVwAwE9mBlCGPsF+KWlVmWqYeUEOA5Mg
-# JN+U7PvlklcQj0QqX4vX+7KbjbbsVrDUsfOKAXp2yIXHA5OdWcRqaMCbg/gA8zW3
-# 0eJoXXdp70XFl7mHuAkWLHcVu8ZW5SpDm7ZnauGF+AjempffRJxIuYNZLJ0HoDe4
-# dOw6vQ2wdw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
+# MTRaMC8GCSqGSIb3DQEJBDEiBCC2eUxWLrfuhTr+anSL+Z5n7YwUZPD78l866tNn
+# SfmWITANBgkqhkiG9w0BAQEFAASCAgBGocAsp+GUvneZOkomIXH8qrDWDqRlLZQx
+# 0JUyXLMz/DCUuMhaa8RZMfz+Im0swMseA07xsf6cT+PSl+hS6rSgqGkK6vSoZIsE
+# fEO+VYF9kc8NOpj6ilJCB1AIXW2KrkM82GW70qIUL2hpUUqGX2cWeFx87RKoGbTC
+# dHZnzsjeIT3Sy5SR7n4KaXqlEEA6Pk/OexMLIX9zuu7cHg8E7WmCneV2iDUGuNKi
+# iZbWAEVYw8u89wc7qaZ6N4dzU5uvHFNzRzbhCRl4xwEpZELLHw87ze+UYRV4g51T
+# olYkRHvKUCtKFUQkf6Rz8vI5WWmv1FzPksKFd82YvsXrB9Xo10uByvHbdWVIwwpc
+# Ys8moaOsdaIYbuXfcFUxSR/NYV8/lauutcbLOREG6QJsTh1vHd27YO3fRY2uP7Ft
+# nuJiwcEt9b4bzag5JSxQIuHc+17MQCyD1bRD10gvi4o3XC1STxo1TgUpkrpjpCnb
+# m00lkhHtSKl0uQUqNcG/SUlgF8vwH+lXGItUluzZLt4QqqX0VOJ678ErjG2bRG1h
+# kuoFQrfV+wmwSQno1wteynmUPMImIpGIo6V7cj6xFibQxFVS23iiVRQL1k4jrJn4
+# H6Zim1jSL6eRMPvHtES4AqUnwGsZ9Uk35xvKAzPyAz4fqYDVgbyvmoomPimvDNKr
+# kTmFahQsRw==
 # SIG # End signature block
