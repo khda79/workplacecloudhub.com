@@ -3,12 +3,12 @@
 Runs offline tests for SmartWorkplaceCMDB data-quality normalization.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -374,6 +374,43 @@ try {
             'License assignment error mapping is invalid.'
     }
 
+    Invoke-SmartWorkplaceCMDBDataQualityTest 'Report license assignments whose user is outside the current snapshot' {
+        $caseRoot = Join-Path $tempRoot 'OrphanUserLicenseAssignment'
+        New-Item -ItemType Directory -Path $caseRoot | Out-Null
+        $assignmentPath = Join-Path $caseRoot 'Assignments.csv'
+        Write-SmartWorkplaceCMDBContractFile $assignmentTable $assignmentPath @(
+            @{
+                TenantKey = 'contoso-prod'; OrganizationKey = 'contoso'
+                EnvironmentKey = 'prod'; TenantId = $identity.TenantId
+                SourceSystem = 'MicrosoftEntraID'
+                RawAssignmentKey = 'assignment-known'; SourceUserId = 'user-1'
+                SkuId = 'sku-1'; AssignmentState = 'Active'
+                AssignmentError = ''; SourceCollectedDateTime = $collectedDate
+            },
+            @{
+                TenantKey = 'contoso-prod'; OrganizationKey = 'contoso'
+                EnvironmentKey = 'prod'; TenantId = $identity.TenantId
+                SourceSystem = 'MicrosoftEntraID'
+                RawAssignmentKey = 'assignment-orphan'; SourceUserId = 'user-created-after-snapshot'
+                SkuId = 'sku-1'; AssignmentState = 'Active'
+                AssignmentError = ''; SourceCollectedDateTime = $collectedDate
+            }
+        )
+        $caseParams = @{} + $sourceParameters
+        $caseParams.UserLicenseAssignmentInputPath = $assignmentPath
+        $result = & $normalizer @identity @caseParams `
+            -DataRootPath (Join-Path $caseRoot 'Output') `
+            -ReferenceDateTime $referenceDate
+        $rows = @(Import-Csv -LiteralPath $result.CmdbOutputPath |
+            Where-Object FindingType -eq 'OrphanUserLicenseAssignment')
+        Assert-SmartWorkplaceCMDBDataQualityTrue `
+            ($rows.Count -eq 1 -and
+                $rows[0].Severity -eq 'Warning' -and
+                $rows[0].EntityType -eq 'UserLicenseAssignment' -and
+                $rows[0].EntityId -eq 'assignment-orphan') `
+            'Orphan user-license assignment finding is invalid.'
+    }
+
     Invoke-SmartWorkplaceCMDBDataQualityTest 'Apply critical freshness threshold' {
         $staleRoot = Join-Path $tempRoot 'Stale'
         $staleReference = $referenceDate.AddHours(200)
@@ -465,8 +502,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwGvGcTInBPXWs
-# qILKB9z90ZYhzC/p5WvIBTrvFVesiqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSwVNnMjf/ojXZ
+# k7W+hxPHaZ+nefFhzVwpP2/TsRLPcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -599,31 +636,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILlbuXwdJdWaJ0O6AORsaufBayWILgxfpYtrNUwULxigMA0GCSqG
-# SIb3DQEBAQUABIIBgHL7mtDQR4R/OP+SA2ti7fGwPcOOT60UmgGXwvtHzLuLc0u2
-# uwWqpvx3F4L+ZwMTJYk/L5rlazO6E3GcCihNtCcwVsOY1jU6JPfDU8Wh2HYaaT2o
-# u+HHGMnxTnBkQ0KktXVgRSClptBemHmmwNKsM0SZSP9ldEWSPnpnJPnsj0/0MMVk
-# 8ho5qzZh1PmEr/+o1g6zxdUFyJxBab4pCL/ghMK5DCbU6VHvQxQ/CHaM+AQf/Had
-# T9SYjPqkIoUYB0Vu6uqEDBvn9WMmMLDVYBI1g4GcsI5HNUD4jHvbMbBeJvRVIhde
-# V56lJStbF9dTyg7oOZWLLLp5ka0bkKd+mA27OBM+FxzCcKAyo2uIfLEHVvY7MyPI
-# Kf/O+GVhM02B7szkj7B6lrpsOKapoQS5JDDXTBN+izMsIJFs4TPD+uQXEzwWGT+l
-# O/GdtQJrVhPFaIO4zi9L4XmqvW16fjzchjccVXBQEyhGvzSW+Shg6zxy12LibAAr
-# 6HVub6DU31lRYSMFkaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF2rArYxaO1s/MLF+2idQYYRkLc9VkXVu3vwDrO6KBelMA0GCSqG
+# SIb3DQEBAQUABIIBgGKQqQ6vcNJBdsRlmO1nRT0lmfpkBfkjIzApT4InSSaW1WOY
+# xOj1siJsbDzBEj03M4eJKjiY/b4iDl4ndfP6kjD4bA/TD2kLjh1W1FfECxhfqU+p
+# YrAZLKLrgk4Zhu9f/9GSSqIAHNaIFkRW9kGSL97JMzlYHqO8cf9CHfS/zLIymZ9y
+# 5ldVX9HcS8Yw3CrE0+Zmprtelld7IXQBqtcssLMAUhY1i8Yrm7CwbBhwMwPVaBQl
+# i+R76CN9oBEz/CiQG468QADL1mwCv6TaaocH07cQPveUAXqAUH0Fpto5xiUOQQY5
+# zMZNNhgo+Z+DL0Wq2gsLgDN+1pb0Wq6F769J5XSR3J7tP2CbQ0mtqm7PLR3pgb9z
+# SvBPqxJ617CXoXIIH0t6F2BQYi8adJpnhSqn5+Oz6WvslNYn9DypTqQZ/zgPJ7eQ
+# f0yUvcz4Eeis9QsyytliSuBwJ3hgDXnO2FgBS0Qa0IjP5wXvxYREaH96KlaqLUNY
+# QuFoqRRcTlCBR0ztSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAMSLCVulpVjb/K4YC00lyrJwNLDENPzw/s4VTE
-# BOl8IzANBgkqhkiG9w0BAQEFAASCAgAVUA1Fwy4rV9tUs1Wu8vpjXbrUNPQMrYKu
-# wpfRqlZDsfaGFf9QPqDBmt21amhhV6nLlWPIzShxbGLMpCFShIwEnoPr1GMHDAFp
-# GYgp6siWmrzePSSiNCwM5uYoly4r8LCFL59Jy+6bZ4N4L7hEm67fNWUFiuuuL/+B
-# PpxSviBt0AHztyUeV2ApXAW/yjRYNTv+QlDhOzhWTPWR1yCeqojpEAWCcfMSO6N4
-# xO4MTZgQwZ8PTjn+ySr56djsJWtYMOKhxXsuN9B/rE34U2kxLBvmtyO9m8GmRNM6
-# Dj04djaXW7VOg4NK/IPzZu16+jVEoOs27T3X7UcTDL6c1FwQczxgwiznklWj/cay
-# nB3xDa8sU9CzHRej3bOVBy9FtOGZ35dQRhJIcbe7hjiHd7QY/JKTb2WJ1fNt0q3U
-# Xc2Sx/xsCuhO7jZ1LJdvTl9umCwWYjzIwyF22VzQT0D2Ofy2CNkDjXsTB7Hgy3nq
-# 8SlJijZMezkSejLimx2ryyerOLI6E7pO9IQKjks5G4GPtBHHRiayCzkWYvB/atvl
-# xRr2DW9p0EfX7AU8e12SZNH7uGYFsFKqHYTT4IpkwpeGqrl9U3uVab4sWikCHCrU
-# eySWaG6KVEkwFh1msGG1LsbFdu1NHlAwlgEkxIQouy0l7+rf9PwWPwDayZDu9EYe
-# 0Ryzv3ZSeg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE1
+# MzRaMC8GCSqGSIb3DQEJBDEiBCC5m0KifeTVMwfvUm6jJ54EQzFqLEc3gAKbKk+Z
+# qZQCQTANBgkqhkiG9w0BAQEFAASCAgBS7RuelxqAPLgIlQ35w+EeFWovjQGYLDUK
+# 85UZpgRQMrZTyeULFtNaMfotmXBPLUImxY40H0aPsD1xnauixGYtzQ3mFwsNuLSq
+# NivSmKopyBHNwVpQPfbf4sb0CxAb9ZSxbRdd579I06nOfQDV01O1DLvlHV2f0ZZg
+# gJaYPYwWXC9YbrK2D6TvLt0NKqr/48xZUBCaMfxxa9prUHo1Kmwe2v1+kKA0QX4Y
+# cDD1l5DD+O2Dsm0o8aiSWdigCO6kcRq2nae9Up6KC/9fNzzm/ZSIodSpZxJv1bWs
+# 1aWM6EvREAOEN2CpdHmUSF4UfB6rvD04e9XuzsIEsrO7fmyoz2P7OpQOLCecYG9P
+# DrAl2e2Jnx7ZtUjHJESFZ/UV0VPxRmnjiGUUslj3TOwWWyApVd/LVkgGW/mtHNfI
+# yGeDcGCvu/yC0Mg+D96+Ktsl/gq9hLoaaBmJwvWfH6buPmoIaFl3ISGeoVWBszv1
+# iSdAzJdfYqlrYBf+xtj3tEOsly3enbRra00uHkf542e7/YS7sprT0hGdJSUd2Jyy
+# 2jDkuRhhLn5H0Ef7vL4ZuSAzzxiKCDToU0W88rBBp5M+cdw0EEy4Sr1Lyocn+xEJ
+# NVmKCnk1611tLqZ2wwWoVGaEO1AYhXpDGlaICn+9HDk6Xfkpy3qEZX3gOqFzWA08
+# it6jjoODkQ==
 # SIG # End signature block

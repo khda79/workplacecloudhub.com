@@ -10,7 +10,7 @@ country coverage gaps, observed license-assignment errors, unlinked mailboxes,
 and stale non-empty entity datasets.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -591,20 +591,35 @@ foreach ($device in @($inputRows['CMDB_Devices.csv'])) {
 }
 
 foreach ($assignment in $licenseAssignmentRows) {
-    $assignmentError = ([string]$assignment.AssignmentError).Trim()
-    if ([string]::IsNullOrWhiteSpace($assignmentError) -or
-        $assignmentError -ieq 'None') {
-        continue
-    }
     $assignmentKey = [string]$assignment.RawAssignmentKey
     if ([string]::IsNullOrWhiteSpace($assignmentKey)) {
         $assignmentKey = '{0}|{1}' -f
             [string]$assignment.SourceUserId,
             [string]$assignment.SkuId
     }
+    $sourceUserId = ([string]$assignment.SourceUserId).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($sourceUserId) -and
+        -not $usersBySourceId.ContainsKey($sourceUserId)) {
+        $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
+            -Paths $paths `
+            -FindingKey ('orphan-user-license-assignment|{0}' -f $assignmentKey) `
+            -Severity 'Warning' `
+            -EntityType 'UserLicenseAssignment' `
+            -EntityId $assignmentKey `
+            -FindingType 'OrphanUserLicenseAssignment' `
+            -Description 'A collected Microsoft 365 license assignment references a user absent from the current curated Entra user snapshot.' `
+            -SourceSystem ([string]$assignment.SourceSystem) `
+            -DetectedDateTime $detectedDateTime `
+            -RecommendedAction 'Refresh Entra users and Microsoft 365 user-license assignments in the same run, then review whether the user was created or deleted between snapshots.'))
+    }
+    $assignmentError = ([string]$assignment.AssignmentError).Trim()
+    if ([string]::IsNullOrWhiteSpace($assignmentError) -or
+        $assignmentError -ieq 'None') {
+        continue
+    }
     $entityId = $assignmentKey
-    if ($usersBySourceId.ContainsKey([string]$assignment.SourceUserId)) {
-        $entityId = [string]$usersBySourceId[[string]$assignment.SourceUserId].CmdbUserId
+    if ($usersBySourceId.ContainsKey($sourceUserId)) {
+        $entityId = [string]$usersBySourceId[$sourceUserId].CmdbUserId
     }
     $findings.Add((ConvertTo-SmartWorkplaceCMDBFinding `
         -Paths $paths `
@@ -736,8 +751,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgCZ6N1WL3RJoi
-# Nnl/fhcLT83E9PSdVLxP2ZpVHSG83qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/knqvAEBgXU+B
+# xVPT29JlATQ30lBL7reafMrewXOl1qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -870,31 +885,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEdVlRu1+I7UCYuPLCKjpuqPHPGzW1//ayFMeRdeUMJ4MA0GCSqG
-# SIb3DQEBAQUABIIBgA45G3jAIixaAnkhQ7+jx+EdVFgN5gT3WdMn4RlumIbGHuRp
-# o5chNIFUYNyuPRPOB+vBKQcId7lEG/QDuPPi280CwjYU36nfv0RI1HnTbRfvjLuu
-# HfuMGHcV7tDcd25IKCvXOpCdvE4emwBctSVqSCZ3opvDKnUggNQvH33X6pr/7a2P
-# BK5u8QUsJN8LLRcr1G/pXGOdO/OMMDCzxNYQmGaNYwLkvCz5TlsmwD7K7xPU2Txt
-# 2AbEUyCr53iIbcghxfu4AzyYru/Gtqa/3i+w08ruHxORGd1kXePpg6MA+uI7HZ9z
-# PNef60TzDSD+v+HT0FcByFTHOUtNcoMYVoPNwMgUj23HaBH+YwYR9fxVA6JAxcyY
-# tLAST7bdhp3AIVDPd2xOto1ygUkpQxAweDJz1svnXECE+skRHNc5WDLS59EJJtWS
-# n/FqMu7Pe4Mhwhj7E3Z5Tt1Kxm59CP3sFIbMKc1dbyFujqSA8I5PR/x6xFZvSl8W
-# IQt13bljpQVZmb3U3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILzcxYlc5BPyR1JocqTiNbtn7o/DYZqawJybdo9FJySsMA0GCSqG
+# SIb3DQEBAQUABIIBgKwdrVtq7c0oOrQ8gStT9ogv32l93ryT4sFBc2flZvfVPRzL
+# F38nj4WnYBPOJIVTe9WB7akzJLdxq5+0cZmcUOeuXelLIubcIP+kbAymSAMVTU60
+# SmTYbpz4H7TxQVTviQUouOWI8uSBkTq0nWGXeBTvvwkl8uaFd/Jl0bhK00DJ9BOm
+# w/Ulb4K+kiM1B3f8YJmXNto0AKJCS4vzTfC3VC48Njzg8UBhYUbc7gth0L/80tAe
+# 2nAGOIwfq5EO6JG66rryRPa6XmMzpKdvhYOMz+S+lZntOvaclZ0FHXvWOWOzHpDq
+# danvj7r8VflcvlROeYKiks+01KYUtuIUN5rlDQQEKCk3Hp6yhV5h4rtYnEetmBv3
+# yMTPoYBgqDYYxf8FUPqDrlVDVi+a6lGmCr+VHbpUrjfkiqwxUdE5GKLUlGgqNytr
+# ooA2lSh321ClD11wc5Wfcj1fFNeUxuKYvysWxFkglMDkvcqR9WQEyQwYLSAka/BU
+# KocikWVPjfX8GE1GUqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCAVRjzshTm6MA7LRasfMpWNUlkVwr40hnPorktr
-# xQOHKzANBgkqhkiG9w0BAQEFAASCAgCTK//DaAngbPlEkVWUQU+0hrIBSQIbCWIK
-# AeofBwvZRFaJX3fsaT5plWNirUTev1iyVTMZiRKR7okop6d9G4BXVpLFo/BExtlf
-# EhzfQocrLn5Se7jExR+Fd4RJ/eSyZtXn5o7gmCLRZ7s67pQDRe5IPyeQVkroOhcA
-# UUCO5l9SQXcBXSt4edE55VsHLkKJCnrfHYEpxBx1stQeepVicy+GbOBDTK047nO5
-# nyYCkzAZJEt/RBnIAk2VLb1AyODVcyi63YHUuCVkvrmU8+wj7P1QvtVctUW9MYyd
-# zzlfkMHeNPfpsDtqa3y8AbMZPbz5auO1EfNle2BFNyye+O7d5E2ruVRAiCOv/RHi
-# TLCKOIUGU0WWx3s7+PWqV6ClCYutdyS+DHdcTMpE4KHQQvswov2gEklhCqMCNmdZ
-# s3he7ZI57SuBGHCGtOwfGWhIWPc9pFJN1XdeFyx0BlUyYuAJF1+k5O2X9xMOi+3A
-# maYv/agxdBBLMlsQ/JOptx9MsTM4Oi1ydvE+ktLu0WxCFlwFum2hrtV8ob0IK0no
-# 0ZNd5yXwd6tJQlZUuJfBnppFExJhnEGeg4QTSpchvxtIcIG7UNftDSNIgRODRGSA
-# FdtsK6ZDhA4HQ5Cc0VnNIGD08V9PZLzuLkMhSLNxXNVxkE8BJioHXk1ME/axW4i+
-# fMrlaO30gg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE1
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCP5XzIs9xb6dk0FyfFrmMVF6Lns9BHtIs2UpN5
+# QIdDTDANBgkqhkiG9w0BAQEFAASCAgArydDuaxYf82FpY7yOmVPZ2QxPNQQ6LW7X
+# uzFXf2ujKrqsz2fyVTHq3Aey3zEWRyeKoPG/DQtvq5h/EXLN0HIzpqCOt5l2Wn6G
+# 4fC79Ey0o7b0i1vxVAxgXP+7QslDYVRXu3BgcE8iXKpVdSsqnmQgEZI93pnpUjln
+# 0SxFiuzAeOJSDBMcQagVQk7etBBsbkaEfFEk5BKBmGOJinUsoK22V1ebAgtKfmAE
+# SPXi5ysgNzKxReABb4kiMNqBdrs1BxXMpAIPLrKU/Rxn+YvoHkyEDLPIoPk4V3SK
+# My1F6GaWRAW4q9ZB8WkrODfg2em+JkudZWddrNUcBlwX5QukG9jEmnIOP2oh+H2A
+# OlfJ24cLPuJBYRkfXPAwNMzN8eAMBUB17xTGonBZgQWnzhhhZW5TW20NJzU+p+K+
+# 2O5l+bailbNmXRYjXmleFXoyjYOaWRk/cRjrWkELImOggkXwZDI7pGXy6kH4l4ku
+# j8kw8eL7wOVD2qJ4a+i2ll20d/32Woh58ZMFBAOucsTEJYIYXW4H4ktmaaDv5c7H
+# mYe0Bx/iUOXyPaq3go6ncSQAwTHk+yosqQA58WLTOVN7FxIRZNqiB5rj670XI2Ed
+# Rn/bMsTe3itJq3K+zJN/J4jTCEryweetfJZ+NaBuB3PdRP69IioZArHKGQWpiJnV
+# InjIvlSDyg==
 # SIG # End signature block
