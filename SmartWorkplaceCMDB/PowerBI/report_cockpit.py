@@ -193,6 +193,11 @@ def set_single_value_filter(visual, table, column, value, suffix="selection"):
 def set_donut(visual, category_table, category_column, measure_table, measure, title):
     clear_filter(visual)
     visual["visual"]["visualType"] = "donutChart"
+    # The chart templates are cloned from the existing fleet page.  Bar-axis
+    # objects are invalid on a donut visual and must not survive the type swap.
+    objects = visual["visual"].setdefault("objects", {})
+    objects.pop("categoryAxis", None)
+    objects.pop("valueAxis", None)
     visual["visual"]["query"] = {
         "queryState": {
             "Category": {"projections": [projection(category_table, category_column)]},
@@ -553,13 +558,13 @@ def build_risk(pages):
     add_slicer(pages, visuals, "risk", "FactDataQuality", "FindingTypeLabel", "Finding type", 960, w=296)
     for index, item in enumerate([
         ("DimDevice", "Noncompliant devices", "Explicitly noncompliant"),
-        ("DimDevice", "Other or missing compliance devices", "Other / missing compliance"),
+        ("FactWindowsUpdateAlert", "Windows update alerts needing attention", "Update alerts needing attention"),
         ("FactDataQuality", "Critical findings", "Critical findings"),
         ("FactDataQuality", "Warnings", "Data-quality warnings"),
     ]):
         add_card(pages, visuals, "risk", *item, 24 + index * 312, 232)
     add_bar(pages, visuals, "risk", "DimDevice", "ComplianceStateLabel", "DimDevice", "Devices", "Devices by compliance state", 24, 340, h=212)
-    add_bar(pages, visuals, "risk", "DimDevice", "ManagementStateLabel", "DimDevice", "Devices", "Devices by management state", 648, 340, h=212)
+    add_bar(pages, visuals, "risk", "FactWindowsUpdateAlert", "AggregateState", "FactWindowsUpdateAlert", "Windows update alert records", "Windows Update records by aggregate state", 648, 340, h=212)
     add_table(
         pages, visuals, "risk",
         [
@@ -576,19 +581,19 @@ def build_risk(pages):
 def build_lifecycle(pages):
     page, visuals = new_page(
         pages, "lifecycle", "Transformation & Lifecycle",
-        "Assess the observed estate, management coverage and source readiness. No migration plan, purchase date, warranty, support end date or application lifecycle source is present.",
+        "Assess the observed estate, Autopilot footprint, Endpoint Analytics and source readiness. No migration plan, purchase date, warranty, support end date or application lifecycle source is present.",
     )
     add_slicer(pages, visuals, "lifecycle", "DimDevice", "OperatingSystemLabel", "Operating system", 24)
     add_slicer(pages, visuals, "lifecycle", "DimDevice", "ManagementStateLabel", "Management", 648)
     for index, item in enumerate([
         ("DimDevice", "Devices", "Observed devices"),
         ("DimDevice", "Managed device share", "Managed device rate"),
-        ("DeviceHardware", "Hardware coverage rate", "Hardware coverage"),
-        ("SourceHealth", "Source collection coverage", "Source collection coverage"),
+        ("FactAutopilotDevice", "Autopilot devices", "Autopilot devices"),
+        ("FactEndpointAnalyticsDevice", "Average Endpoint Analytics score", "Average Endpoint Analytics score"),
     ]):
         add_card(pages, visuals, "lifecycle", *item, 24 + index * 312, 232)
     add_bar(pages, visuals, "lifecycle", "DimDevice", "OperatingSystemLabel", "DimDevice", "Devices", "Observed operating systems — not an EOL classification", 24, 340, h=212)
-    add_bar(pages, visuals, "lifecycle", "DimDevice", "ManagementStateLabel", "DimDevice", "Devices", "Observed devices by management state", 648, 340, h=212)
+    add_bar(pages, visuals, "lifecycle", "FactAutopilotDevice", "EnrollmentState", "FactAutopilotDevice", "Autopilot devices", "Autopilot devices by enrollment state", 648, 340, h=212)
     add_table(
         pages, visuals, "lifecycle",
         [
@@ -692,7 +697,7 @@ def build_fleet_hardware(pages):
 def build_people_messaging(pages):
     page, visuals = new_page(
         pages, "users", "People & Messaging",
-        "Review accounts, observed assignments, device relationships and mailboxes together. Enabled accounts and assigned licenses do not prove activity.",
+        "Review accounts, sign-in-derived activity, observed assignments, device relationships and mailboxes together. Activity states use the collected sign-in timestamps.",
     )
     add_slicer(pages, visuals, "users", "DimUser", "DepartmentLabel", "Department", 24, w=400)
     add_slicer(pages, visuals, "users", "DimUser", "AccountStatusLabel", "Account status", 440, w=400)
@@ -704,7 +709,7 @@ def build_people_messaging(pages):
         ("FactMailbox", "Mailboxes", "Mailboxes"),
     ]):
         add_card(pages, visuals, "users", *item, 24 + index * 312, 232)
-    add_bar(pages, visuals, "users", "DimUser", "DepartmentLabel", "DimUser", "Users", "Users by department — scroll as needed", 24, 340, h=212)
+    add_bar(pages, visuals, "users", "DimUser", "ActivityState", "DimUser", "Users", "Users by observed activity state", 24, 340, h=212)
     add_bar(pages, visuals, "users", "FactMailbox", "RecipientTypeDetailsLabel", "FactMailbox", "Mailboxes", "Mailboxes by type", 648, 340, h=212)
     add_table(
         pages, visuals, "users",
@@ -728,6 +733,23 @@ def build_people_messaging(pages):
         "Filtered mailboxes — personal data, private use", 648, 568, 608, 276,
     )
     return page, visuals
+
+
+def update_licensing_service_plans(pages: Path):
+    """Use the second comparison chart for the newly collected service plans."""
+    visual_path = pages / "licenses" / "visuals" / "licensesv11" / "visual.json"
+    if not visual_path.is_file():
+        raise ValueError("Expected the reviewed licensing comparison visual")
+    visual = load(visual_path)
+    set_bar(
+        visual,
+        "DimLicenseServicePlan",
+        "ProvisioningStatus",
+        "DimLicenseServicePlan",
+        "License service plans",
+        "License service plans by provisioning status",
+    )
+    write(visual_path, visual)
 
 
 def build_device_360(pages):
@@ -964,6 +986,7 @@ def prepare(report: Path, exchange_onprem_local: Path | None = None, exchange_on
         page, visuals = builder(pages)
         persist_page(pages, page, visuals)
     update_overview(pages, mailbox_metadata)
+    update_licensing_service_plans(pages)
 
     for page_id in RETIRED_PAGES:
         target = pages / page_id
@@ -994,6 +1017,16 @@ def prepare(report: Path, exchange_onprem_local: Path | None = None, exchange_on
             )
             set_text(footer, footer_text)
             write(footer_path, footer)
+
+    user_context_path = pages / "user360" / "visuals" / "user360v2" / "visual.json"
+    if user_context_path.is_file():
+        user_context = load(user_context_path)
+        set_text(
+            user_context,
+            "Select one account. Paths explain assigned licenses, not usage. "
+            "Activity uses collected sign-in timestamps; manager evidence is not collected.",
+        )
+        write(user_context_path, user_context)
 
     metadata_path = pages / "pages.json"
     metadata = load(metadata_path)
