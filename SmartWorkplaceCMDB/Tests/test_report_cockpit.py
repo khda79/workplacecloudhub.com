@@ -60,6 +60,47 @@ class CockpitNavigationTests(unittest.TestCase):
             ],
         )
 
+    def test_license_country_footprint_keeps_five_distinct_products_and_colors(self):
+        self.assertEqual(
+            [(title, sku) for title, sku, _measure, _label, _color in cockpit.LICENSE_COUNTRY_SERIES],
+            cockpit.LICENSE_SUMMARY_SKUS,
+        )
+        self.assertEqual(len({color for *_rest, color in cockpit.LICENSE_COUNTRY_SERIES}), 5)
+        self.assertEqual(
+            [label for _title, _sku, _measure, label, _color in cockpit.LICENSE_COUNTRY_SERIES],
+            ["F1", "F3", "E3", "E5", "Copilot"],
+        )
+
+    def test_quality_indicators_are_explicit_and_non_additive(self):
+        self.assertEqual(
+            [name for name, _expression, _description in cockpit.QUALITY_INDICATORS],
+            ["Integrity issues", "Coverage gaps", "Derived country gaps"],
+        )
+        derived = next(item for item in cockpit.QUALITY_INDICATORS if item[0] == "Derived country gaps")
+        self.assertIn("must not be added", derived[2])
+
+    def test_series_colors_use_metadata_selectors(self):
+        visual = {"visual": {}}
+        cockpit.set_series_colors(visual, cockpit.POPULATION_COUNTRY_SERIES)
+        entries = visual["visual"]["objects"]["dataPoint"]
+        self.assertEqual(
+            [entry["selector"]["metadata"] for entry in entries],
+            [f"{table}.{measure}" for table, measure, _label, _color in cockpit.POPULATION_COUNTRY_SERIES],
+        )
+        self.assertTrue(all("fill" in entry["properties"] for entry in entries))
+
+    def test_executive_measures_add_quality_groups_and_license_country_ratios(self):
+        tables = [
+            {"name": "DimCountry", "measures": []},
+            {"name": "FactDataQuality", "measures": []},
+        ]
+        cockpit.add_executive_measures(tables)
+        country_measures = {measure["name"]: measure for measure in tables[0]["measures"]}
+        quality_measures = {measure["name"]: measure for measure in tables[1]["measures"]}
+        self.assertEqual(set(country_measures), {item[2] for item in cockpit.LICENSE_COUNTRY_SERIES})
+        self.assertIn("REMOVEFILTERS('DimCountry'[CountryLabel])", country_measures["Executive M365 E3 country share"]["expression"])
+        self.assertEqual(set(quality_measures), {item[0] for item in cockpit.QUALITY_INDICATORS})
+
     def test_page_navigation_targets_workplace_health(self):
         visual = {"visual": {}}
         cockpit.set_page_navigation(visual, "risk", "Open warnings")

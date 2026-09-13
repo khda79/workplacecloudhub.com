@@ -67,7 +67,7 @@ class Report360Tests(unittest.TestCase):
         data,cols,rels=self.enriched()
         self.assertEqual(len(data['LicenseAssignmentPath']),2)
         self.assertEqual(len(data['FactUserLicense']),1)
-        self.assertEqual(report.measures(data)[:23],old)
+        self.assertEqual(report.measures(data)[:len(old)],old)
         names = {measure['name'] for measure in report.measures(data)}
         self.assertTrue({'Managed device share', 'Source collection coverage',
                          'Assignment error rate', 'Mailbox link gap rate',
