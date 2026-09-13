@@ -5,10 +5,13 @@ Consolidates SmartWorkplaceCMDB entity relationships.
 .DESCRIPTION
 Publishes CMDB_Relationships.csv from validated primary user-device links,
 mailbox facts, and user-license facts. The normalizer performs no tenant
-connection and rejects broken references in published relationships.
+connection and rejects broken references in published relationships. A
+user-license fact whose user is absent from the current user snapshot is kept
+in its source fact but omitted from the relationship graph and reported as an
+unlinked relationship candidate.
 
 .VERSION
-0.1.0
+0.1.1
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +38,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.0'
+$ScriptVersion = '0.1.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -395,9 +398,11 @@ foreach ($fact in @($inputRows['FactMailbox.csv'])) {
 }
 
 $licenseCount = 0
+$unlinkedUserLicenseCount = 0
 foreach ($fact in @($inputRows['FactUserLicense.csv'])) {
     if (-not $usersById.ContainsKey([string]$fact.CmdbUserId)) {
-        throw 'User-license fact references an unknown CMDB user.'
+        $unlinkedUserLicenseCount++
+        continue
     }
     if (-not $licensesById.ContainsKey([string]$fact.TenantSkuKey)) {
         throw 'User-license fact references an unknown CMDB license.'
@@ -424,6 +429,13 @@ foreach ($fact in @($inputRows['FactUserLicense.csv'])) {
         SourceCollectedDateTime = $assignmentCollectedByUserSku[$assignmentKey]
     })
     $licenseCount++
+}
+
+if ($unlinkedUserLicenseCount -gt 0) {
+    Write-Warning (
+        "Skipped {0} user-license relationship(s) because the referenced user is absent from the current CMDB user snapshot. The source facts are preserved for data-quality review." -f
+        $unlinkedUserLicenseCount
+    )
 }
 
 $relationships = @($rows.ToArray() |
@@ -454,10 +466,11 @@ if ($validation.Status -ne 'Valid') {
 }
 
 Write-Information (
-    "SmartWorkplaceCMDB relationship consolidation completed. UserDevice={0}; Mailbox={1}; License={2}; Total={3}." -f
+    "SmartWorkplaceCMDB relationship consolidation completed. UserDevice={0}; Mailbox={1}; License={2}; UnlinkedUserLicense={3}; Total={4}." -f
     $userDeviceCount,
     $mailboxCount,
     $licenseCount,
+    $unlinkedUserLicenseCount,
     $relationships.Count
 ) -InformationAction Continue
 
@@ -468,6 +481,7 @@ Write-Information (
     MailboxCount           = $mailboxCount
     UnlinkedMailboxCount   = $unlinkedMailboxCount
     UserLicenseCount       = $licenseCount
+    UnlinkedUserLicenseCount = $unlinkedUserLicenseCount
     RelationshipCount      = $relationships.Count
     OutputPath             = $outputPath
     ContractVersion        = [string]$contract.contractVersion
@@ -477,8 +491,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkGmbKfCYWdGdh
-# kiRWHpuP8RqN6wRmVj8ftYNHhUizrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBq0aLI8AOPGljh
+# Aqo9uO3xv5kMSXmNQ4CNaOdeWHGGiKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -611,31 +625,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEFJf/tdk09ZjgnzMcKKbL54tHXUbe+HtoKHsDY0pTcWMA0GCSqG
-# SIb3DQEBAQUABIIBgGCe0IFoAhNWGnKhqO5husioAH6udhxqoysh8/zrThZ2Wgg1
-# /0lD+O7En17h2oxKheRw88X1T6T3VW5aKgZx8g52HbughihClxsZpnZ/3MneSE0o
-# gs1D1YBI/h/6OgYOQfDIh/ev8eFER+fCk1fK8REkVAKsmWAP9gonSickTGpvAu6R
-# SE/F9Mdo+MZDsngbtK11K+UF+t5A+C4NoyqKCLC2rjQ/NbB1Kw9xt/FoUrcPt9yT
-# ri8X1XVyq6TeMbV0T31xdHXfQ2ZN0Unt4sRExG34EsUm1Z8DuOf9gghkzCulnKgp
-# kSRY+CAJTlfy4BI6BWFBAlHiDUhP+nDPh3Xx7h6l54+PDjD3J6e0dbIPyfe8rFxp
-# dS1ekMPfGG5kA5O6l5LQl1iGNBhrvCynb2yQ7z/WcvQkBHiUsAwNy+lg7vEQGbya
-# XuLxGpIJlIeFj7yagEmqGXfosSt/NVDLf9iWJac+teGWmqap8elYOGZ6G8NVbltL
-# /qqlcRxv+XmDl71XIaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA5UZEczWLxwYZg8YhgQrenGqzPgLYeSGIqGY4YAqpB6MA0GCSqG
+# SIb3DQEBAQUABIIBgDcHuvCguluNzGFbNC6L3cqCr37oOkIj397XXLZ+8BxHmC34
+# suMfs+9Gkq4SFlasSorww8SSofu0fE94gbnjyXIorLaNybQsuTqD69Fo9PDaXxNL
+# GXzjtahH/UTUip3Dl1x+SI1vfYAvfDzznLNmY1Rz1qR58k5any40e/ooI5XEFNTH
+# 990taqBcMyluN0T1225BhwrRrfvofbYAKv5stD+UXCgksGN1Wc5osJ+aRNzDFv/G
+# yT3V7XXTvtV6jYLDJcFyrcry+gdFaWEUWIyV1TEv8gAeYp86RwccSOOmMA1vuYto
+# kwwQbutybkzyfUTo4tnAS5DZQZuoFgoY9seziI1Hm5p2KM53bqo5v743HtAllatK
+# C335QFNkezOIV4Ql5iIbIVedf9gbzRnDSY3R29qwP/K1nlNTav6dJJuniUCvyVR+
+# WYU5ZRtFnYdrRDsrCuqtLq/6iszoRUXUodzQ3stZ4tj4SUkHdPIlja7gUIx3ZxCt
+# FQ2huhAZTJJBmY/hkaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDeSlUJSEyEDwPa7cGidZube5GMAC5ETuA0Qo2k
-# 3wU97jANBgkqhkiG9w0BAQEFAASCAgAC4FdmgIZLtFUwtctW5Fa9K47yM3zoaPzT
-# 12gVdQ8dPeFE/0ypB7UTHAVd0vip/Xy7NUrpDiGxPLUmcSoZxodcuPzl+Ofm/O6H
-# fOixnt41DicEpiUEUIN1DpEZAmEu0LytYFT0di92tq6ExcujId/QyhbOYW8dRwZE
-# 1ahHXTZ1e2/3t/mwVqcObl26YvvC6R8BCZ0idCQKQTJBGX9Fr4ARDe7JTON0Xsni
-# 2Il07U494Ard8td0yM0oR/SreiFfPu77DI0VWAEfryG+IulLhOp+lDrYqw+Fan9b
-# qYYOK+upPHetLX1V+A5ogmnTzcbQuADNz3bz1eftyWS5Iyjb12a4tOtV4iopkmBO
-# 8LjHUgcJCt+YG7v1kpUIRVkOmXaENzPHBUB98IHgZEuyc3yd5QmQi6zzsB+E/4I1
-# 3/F3d24I1JTnfAtawQKzLrhgWl3A/VziYoYxbZvPxNy24Or9BCfRSeLB/JmuZKyI
-# BVA2QRrPCIjh/SIZYP4sJId/pwME7KOkdYsHB/wCekeO0+MXwQYsZx95+RGJeih5
-# xUXV8R3vMGNffukbjDOsE8Snb38vJpxvuniC/UOFeOJIkUroqSvcvSkqT6tkhzrP
-# L0j7RY0LYI6HhjdpW3RG72dKVuq2Iq+KXPH8DxTw2xcGtK1qgRXHpphyFOrc7MBQ
-# M9WJnzAytg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE1
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCYE0I5KVVJGijEBEP7/F/TFjDJhxkm58bEs3dP
+# gORqYjANBgkqhkiG9w0BAQEFAASCAgAOdqmsYsF7EWhdKCVaeM/HAQ6jHX242a1C
+# dunntK5vxeXkv+YeMm2zH7GLkjaATP3vcd3mqQsDR9NVLH07Oy8UQ8zA4LRS8N77
+# 6Yf4/9zwkr7O0l89HR/2kMhGrAEwlSKuYrrYHO71ZRQAgPXRxreJOlbTzGC+VJ4E
+# +YwL3myWA1ZfjOMf5BzTPNnh+0kUZzU06hyeYNQbzGfayqbJhqsVnTK/qRpbxIRx
+# 7aDMN3H3ytexjR300GSmN2x2hLCfbmRn9pKwDMzxvzToc1B3VpQ/FIzPDLUpY5Ck
+# 8e/CwiY41PQHGBLvQitSW/30uA2TflBM2fsN/XGynWVxOIWgSbUgoFfk7c2m6rs9
+# FCKCzHpXSIM91mtzbE+W3OFMnDLqVPvl4xJ/93xK2vBWUmd3KsCWfg1ilZlYkKDN
+# OozojPqBNKXqBsA1N06ChcXsdpH6mon3/uXyAmgX9C5CKMgm2CgSfFsO9w3VYObE
+# kcDWs1ixOQMOFv7sbfTqM9HWLnL7dohY8YOtEz+Hn294HzegyWvVUPSRZ8xRJZnR
+# 1eMjtDMrFXSpe3WIqP7TlXYdETh3jskQCOBS/1Q1RhNk/f1TqWxmSJC9BL7l8/mh
+# gzYbu+sQ+Q/iZH+Xzy+KNhoxlpqkpWFFd3+57My0/JU1gpvRFH824b40SN4MIn87
+# EhSqS4wcaQ==
 # SIG # End signature block
