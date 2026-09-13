@@ -37,6 +37,19 @@ class CockpitNavigationTests(unittest.TestCase):
             {"quality", "transformation", "impact", "mailboxes", "hardwarefleet", "hardware"},
         )
 
+    def test_all_three_360_pages_are_managed_by_the_repeatable_restyle(self):
+        self.assertTrue(cockpit.DRILLTHROUGH_PAGES.issubset(cockpit.MANAGED_PAGES))
+
+    def test_searchable_slicer_keeps_all_as_the_neutral_state(self):
+        visual = {"visual": {"objects": {}}}
+        cockpit.configure_searchable_slicer(visual)
+        objects = visual["visual"]["objects"]
+
+        self.assertEqual(objects["data"][0]["properties"]["mode"]["expr"]["Literal"]["Value"], "'Dropdown'")
+        self.assertEqual(objects["general"][0]["properties"]["selfFilterEnabled"]["expr"]["Literal"]["Value"], "true")
+        self.assertNotIn("selection", objects)
+        self.assertNotIn("filter", objects["general"][0]["properties"])
+
     def test_fleet_inventory_keeps_one_device_grain(self):
         self.assertTrue(cockpit.FLEET_TABLE_FIELDS)
         self.assertEqual(
