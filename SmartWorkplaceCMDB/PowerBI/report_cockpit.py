@@ -20,7 +20,10 @@ from pathlib import Path
 from build_report import exclude_synthetic_blank, lit, m_query, projection, type_of
 
 
-MANAGED_PAGES = {"overview", "risk", "lifecycle", "businessservices", "devices", "users", "device360"}
+MANAGED_PAGES = {
+    "overview", "risk", "lifecycle", "businessservices", "devices", "users",
+    "device360", "user360", "group360",
+}
 RETIRED_PAGES = {"quality", "transformation", "impact", "mailboxes", "hardwarefleet", "hardware"}
 DRILLTHROUGH_PAGES = {"device360", "user360", "group360"}
 FLEET_TABLE_FIELDS = [
@@ -686,6 +689,24 @@ def add_slicer(pages, visuals, page_id, table, column, title, x, y=144, w=608, h
     return put(visuals, visual, page_id, x, y, w, h)
 
 
+def configure_searchable_slicer(visual):
+    """Use the native dropdown search without persisting a data selection."""
+    objects = visual["visual"].setdefault("objects", {})
+    objects["data"] = [{"properties": {"mode": lit("Dropdown")}}]
+    general = objects.setdefault("general", [{"properties": {}}])
+    general[0].setdefault("properties", {})["selfFilterEnabled"] = lit(True)
+    # Strict single-select forces the first entity to be selected when the page
+    # opens directly. Keep All as the neutral state; the gated detail measures
+    # render only after one value is selected or supplied by drill-through.
+    objects.pop("selection", None)
+
+
+def compact_detail_header(visuals, width):
+    """Reserve the upper-right canvas for compact detail-page controls."""
+    for visual in visuals[:3]:
+        visual["position"]["width"] = width
+
+
 def add_table(pages, visuals, page_id, fields, title, x, y, w, h):
     # Licensing remains a stable, visible page before and after consolidation,
     # so its table is the durable template for repeatable brownfield runs.
@@ -937,7 +958,17 @@ def build_device_360(pages):
     )
     page["filterConfig"] = copy.deepcopy(load(pages / "device360" / "page.json").get("filterConfig", {}))
     page["pageBinding"] = copy.deepcopy(load(pages / "device360" / "page.json").get("pageBinding", {}))
-    add_slicer(pages, visuals, "device360", "DimDevice", "DeviceSelection", "Search and select one device", 24, w=1232)
+    compact_detail_header(visuals, 720)
+    selector = add_slicer(
+        pages, visuals, "device360", "DimDevice", "DeviceSelection",
+        "Search and select one device", 776, y=14, w=296, h=80,
+    )
+    configure_searchable_slicer(selector)
+    country = add_slicer(
+        pages, visuals, "device360", "DimDevice", "CountryLabel",
+        "Country", 1088, y=14, w=168, h=80,
+    )
+    configure_searchable_slicer(country)
     add_table(
         pages, visuals, "device360",
         [
@@ -950,7 +981,7 @@ def build_device_360(pages):
             ("DimDevice", "AssociationStatus", "Association", False),
             ("DimDevice", "Device details", "Detail rows", True),
         ],
-        "Identity and association", 24, 232, 1232, 100,
+        "Identity and association", 24, 144, 1232, 112,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
     add_table(
@@ -964,7 +995,7 @@ def build_device_360(pages):
             ("DeviceSource", "SourceObjectId", "Source record ID", False),
             ("DeviceSource", "Device source details", "Detail rows", True),
         ],
-        "Enrollment and source identity", 24, 344, 608, 176,
+        "Enrollment and source identity", 24, 268, 608, 184,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
     add_table(
@@ -977,7 +1008,7 @@ def build_device_360(pages):
             ("DeviceHardware", "Storage", "Storage", False),
             ("DeviceHardware", "Hardware detail rows", "Detail rows", True),
         ],
-        "Hardware equipment", 648, 344, 608, 176,
+        "Hardware equipment", 648, 268, 608, 184,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
     add_table(
@@ -991,7 +1022,7 @@ def build_device_360(pages):
             ("DeviceSource", "SourceCollectedDateTime", "Collected UTC", False),
             ("DeviceSource", "Device source details", "Detail rows", True),
         ],
-        "Activity evidence — ambiguous dates remain unqualified", 24, 532, 608, 176,
+        "Activity evidence — ambiguous dates remain unqualified", 24, 464, 608, 184,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
     add_table(
@@ -1004,7 +1035,7 @@ def build_device_360(pages):
             ("DeviceHardware", "CollectionMode", "Mode", False),
             ("DeviceHardware", "Hardware detail rows", "Detail rows", True),
         ],
-        "Hardware source evidence", 648, 532, 608, 176,
+        "Hardware source evidence", 648, 464, 608, 184,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
     add_table(
@@ -1016,9 +1047,185 @@ def build_device_360(pages):
             ("EntityFinding", "RecommendedAction", "Suggested review", False),
             ("EntityFinding", "Device finding details", "Detail rows", True),
         ],
-        "Findings linked to this device", 24, 720, 1232, 124,
+        "Findings linked to this device", 24, 660, 1232, 184,
     )
     visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    return page, visuals
+
+
+def build_user_360(pages):
+    page, visuals = new_page(
+        pages, "user360", "User 360",
+        "Select one account. Paths explain assigned licenses, not usage. Activity uses collected sign-in timestamps; manager evidence is not collected.",
+    )
+    current = load(pages / "user360" / "page.json")
+    page["filterConfig"] = copy.deepcopy(current.get("filterConfig", {}))
+    page["pageBinding"] = copy.deepcopy(current.get("pageBinding", {}))
+    compact_detail_header(visuals, 720)
+    selector = add_slicer(
+        pages, visuals, "user360", "DimUser", "UserSelection",
+        "Search and select one user", 776, y=14, w=296, h=80,
+    )
+    configure_searchable_slicer(selector)
+    country = add_slicer(
+        pages, visuals, "user360", "DimUser", "CountryLabel",
+        "Country", 1088, y=14, w=168, h=80,
+    )
+    configure_searchable_slicer(country)
+    add_table(
+        pages, visuals, "user360",
+        [
+            ("DimUser", "DisplayNameLabel", "Name", False),
+            ("DimUser", "UserPrincipalNameLabel", "Account", False),
+            ("DimUser", "JobTitle", "Job title", False),
+            ("DimUser", "DepartmentLabel", "Department", False),
+            ("DimUser", "AccountStatusLabel", "Status", False),
+            ("DimUser", "CreationRaw", "Creation — original text", False),
+            ("DimUser", "CreationStatus", "Date qualification", False),
+            ("DimUser", "SourceCollectedDateTime", "Collected UTC", False),
+            ("DimUser", "User details", "Detail rows", True),
+        ],
+        "Account profile", 24, 144, 1232, 150,
+    )
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "user360",
+        [
+            ("DimDevice", "DeviceNameLabel", "Device", False),
+            ("DimDevice", "DeviceSelection", "Open Device 360", False),
+            ("FactUserDeviceRelationship", "DeviceCompliance", "Compliance", False),
+            ("FactUserDeviceRelationship", "DeviceSyncStatus", "Sync qualification", False),
+            ("FactUserDeviceRelationship", "User device details", "Detail rows", True),
+        ],
+        "Resolved device associations", 24, 306, 608, 170,
+    )
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][1]["hidden"] = True
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "user360",
+        [
+            ("FactMailbox", "PrimarySmtpAddressLabel", "Mailbox", False),
+            ("FactMailbox", "RecipientTypeDetailsLabel", "Type", False),
+            ("FactMailbox", "ArchiveStatusLabel", "Archive", False),
+            ("FactMailbox", "User mailbox details", "Detail rows", True),
+        ],
+        "Associated mailboxes", 648, 306, 608, 170,
+    )
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "user360",
+        [
+            ("LicenseAssignmentPath", "Product", "Product", False),
+            ("LicenseAssignmentPath", "AssignmentRoute", "Route", False),
+            ("LicenseAssignmentPath", "GroupName", "Group", False),
+            ("DimGroup", "GroupSelection", "Open Group 360", False),
+            ("LicenseAssignmentPath", "AssignmentState", "State", False),
+            ("LicenseAssignmentPath", "AssignmentError", "Reported error", False),
+            ("LicenseAssignmentPath", "AssignmentUpdatedUtcDateTime", "Last updated UTC", False),
+            ("LicenseAssignmentPath", "DisabledPlanIds", "Disabled plan IDs", False),
+            ("LicenseAssignmentPath", "TenantAssignmentPathKey", "Path identity", False),
+            ("LicenseAssignmentPath", "User assignment details", "Detail rows", True),
+        ],
+        "License paths — every route retained; last updated is not initial assignment date", 24, 488, 1232, 202,
+    )
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][3]["hidden"] = True
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-2]["hidden"] = True
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "user360",
+        [
+            ("EntityFinding", "Severity", "Severity", False),
+            ("EntityFinding", "FindingType", "Finding", False),
+            ("EntityFinding", "Description", "Evidence", False),
+            ("EntityFinding", "RecommendedAction", "Suggested review", False),
+            ("EntityFinding", "User finding details", "Detail rows", True),
+        ],
+        "Findings directly linked to this account", 24, 702, 1232, 142,
+    )
+    visuals[-1]["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    return page, visuals
+
+
+def build_group_360(pages):
+    page, visuals = new_page(
+        pages, "group360", "Group 360",
+        "Select one group. License paths are not membership. No observed path does not mean unused or safe to delete.",
+    )
+    current = load(pages / "group360" / "page.json")
+    page["filterConfig"] = copy.deepcopy(current.get("filterConfig", {}))
+    page["pageBinding"] = copy.deepcopy(current.get("pageBinding", {}))
+    compact_detail_header(visuals, 584)
+    selector = add_slicer(
+        pages, visuals, "group360", "DimGroup", "GroupSelection",
+        "Search and select one group", 624, y=14, w=240, h=80,
+    )
+    configure_searchable_slicer(selector)
+    coverage = add_slicer(
+        pages, visuals, "group360", "DimGroup", "ObservedPathStatus",
+        "License path coverage", 880, y=14, w=200, h=80,
+    )
+    configure_searchable_slicer(coverage)
+    country = add_slicer(
+        pages, visuals, "group360", "DimUser", "CountryLabel",
+        "User country", 1096, y=14, w=160, h=80,
+    )
+    configure_searchable_slicer(country)
+    add_table(
+        pages, visuals, "group360",
+        [
+            ("DimGroup", "DisplayName", "Group", False),
+            ("DimGroup", "MailEnabled", "Mail enabled", False),
+            ("DimGroup", "SecurityEnabled", "Security enabled", False),
+            ("DimGroup", "GroupTypes", "Type flags", False),
+            ("DimGroup", "MemberStatus", "Members", False),
+            ("DimGroup", "OwnerStatus", "Owners", False),
+            ("DimGroup", "ObservedPathCount", "Observed paths", False),
+            ("DimGroup", "SourceCollectedDateTime", "Collected UTC", False),
+            ("DimGroup", "Group details", "Detail rows", True),
+        ],
+        "Group profile", 24, 144, 1232, 144,
+    )
+    profile = visuals[-1]
+    profile["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "group360",
+        [
+            ("DimUser", "DisplayNameLabel", "Name", False),
+            ("DimUser", "UserPrincipalNameLabel", "Account", False),
+            ("DimUser", "UserSelection", "Open User 360", False),
+            ("LicenseAssignmentPath", "Product", "Product", False),
+            ("LicenseAssignmentPath", "AssignmentState", "State", False),
+            ("LicenseAssignmentPath", "AssignmentError", "Reported error", False),
+            ("LicenseAssignmentPath", "AssignmentUpdatedUtcDateTime", "Last updated UTC", False),
+            ("LicenseAssignmentPath", "DisabledPlanIds", "Disabled plan IDs", False),
+            ("LicenseAssignmentPath", "TenantAssignmentPathKey", "Path identity", False),
+            ("LicenseAssignmentPath", "Group assignment details", "Detail rows", True),
+        ],
+        "Observed license assignment paths from this group", 24, 300, 1232, 356,
+    )
+    paths = visuals[-1]
+    paths["visual"]["query"]["queryState"]["Values"]["projections"][2]["hidden"] = True
+    paths["visual"]["query"]["queryState"]["Values"]["projections"][-2]["hidden"] = True
+    paths["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    add_table(
+        pages, visuals, "group360",
+        [
+            ("EntityFinding", "Severity", "Severity", False),
+            ("EntityFinding", "FindingType", "Finding", False),
+            ("EntityFinding", "Description", "Evidence", False),
+            ("EntityFinding", "RecommendedAction", "Suggested review", False),
+            ("EntityFinding", "Group finding details", "Detail rows", True),
+        ],
+        "Findings directly linked to this group", 24, 668, 1232, 176,
+    )
+    findings = visuals[-1]
+    findings["visual"]["query"]["queryState"]["Values"]["projections"][-1]["hidden"] = True
+    page["visualInteractions"] = [
+        {"source": country["name"], "target": selector["name"], "type": "NoFilter"},
+        {"source": country["name"], "target": coverage["name"], "type": "NoFilter"},
+        {"source": country["name"], "target": profile["name"], "type": "NoFilter"},
+        {"source": country["name"], "target": findings["name"], "type": "NoFilter"},
+    ]
     return page, visuals
 
 
@@ -1176,7 +1383,8 @@ def prepare(report: Path, exchange_onprem_local: Path | None = None, exchange_on
             raise ValueError(f"Exchange evidence file not found: {source}")
     mailbox_metadata = enrich_semantic_model(report, exchange_onprem_local, exchange_onprem_remote)
     for builder in [build_risk, build_lifecycle, build_fleet_hardware,
-                    build_people_messaging, build_business_services, build_device_360]:
+                    build_people_messaging, build_business_services,
+                    build_device_360, build_user_360, build_group_360]:
         page, visuals = builder(pages)
         persist_page(pages, page, visuals)
     update_overview(pages, mailbox_metadata)
