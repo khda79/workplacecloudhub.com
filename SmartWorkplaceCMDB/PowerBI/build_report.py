@@ -247,6 +247,28 @@ def measures(data):
     filtered("FactDataQuality", "Quality findings", "Warnings", "Severity", "Warning", "Findings classified as Warning by the quality normalizer.")
     filtered("FactDataQuality", "Quality findings", "Information", "Severity", "Information", "Retained information, including technical DiscoveryMailbox findings classified by the local rule.")
     filtered("FactDataQuality", "Quality findings", "Critical findings", "Severity", "Critical", "Findings classified as Critical by the quality normalizer.")
+    def finding_group(name, finding_types, description):
+        expression = " + ".join(
+            f"CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"{finding_type}\"))"
+            for finding_type in finding_types
+        )
+        expected = sum(row["FindingType"] in finding_types for row in data["FactDataQuality"])
+        add("FactDataQuality", name, expression, expected, description)
+    finding_group(
+        "Integrity issues",
+        ("OrphanPrimaryUserReference", "ObservedLicenseAssignmentError"),
+        "Orphan primary-user references plus observed Microsoft 365 license-assignment errors.",
+    )
+    finding_group(
+        "Coverage gaps",
+        ("UserCountryUnknown", "DeviceWithoutPrimaryUser"),
+        "User records without a country plus devices without a primary user; these are coverage gaps, not integrity failures.",
+    )
+    finding_group(
+        "Derived country gaps",
+        ("DeviceCountryUnknown",),
+        "Devices whose country cannot be derived. This overlaps device primary-user findings and must not be added to Coverage gaps.",
+    )
     for table, key, name, definition in [
         ("FactUserLicense", "TenantUserKey", "Users with assignments", "Distinct users with at least one assignment across all states; does not establish an active or used license."),
         ("FactUserDeviceRelationship", "TenantDeviceKey", "Devices with a resolved user", "Distinct devices with a resolved user relationship."),

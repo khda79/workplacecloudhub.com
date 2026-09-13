@@ -78,6 +78,38 @@ LICENSE_SUMMARY_SKUS = [
     ("Microsoft 365 E5", "SPE_E5"),
     ("Microsoft 365 Copilot", "Microsoft_365_Copilot"),
 ]
+LICENSE_COUNTRY_SERIES = [
+    ("Microsoft 365 F1", "M365_F1", "Executive M365 F1 country share", "F1", "#7B61FF"),
+    ("Microsoft 365 F3", "SPE_F1", "Executive M365 F3 country share", "F3", "#00A6A6"),
+    ("Microsoft 365 E3", "SPE_E3", "Executive M365 E3 country share", "E3", "#2F80ED"),
+    ("Microsoft 365 E5", "SPE_E5", "Executive M365 E5 country share", "E5", "#EB5757"),
+    ("Microsoft 365 Copilot", "Microsoft_365_Copilot", "Executive Copilot country share", "Copilot", "#B7791F"),
+]
+QUALITY_INDICATORS = [
+    (
+        "Integrity issues",
+        "CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"OrphanPrimaryUserReference\")) + "
+        "CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"ObservedLicenseAssignmentError\"))",
+        "Orphan primary-user references plus observed Microsoft 365 license-assignment errors.",
+    ),
+    (
+        "Coverage gaps",
+        "CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"UserCountryUnknown\")) + "
+        "CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"DeviceWithoutPrimaryUser\"))",
+        "User records without a country plus devices without a primary user; these are coverage gaps, not integrity failures.",
+    ),
+    (
+        "Derived country gaps",
+        "CALCULATE([Quality findings], KEEPFILTERS('FactDataQuality'[FindingType] == \"DeviceCountryUnknown\"))",
+        "Devices whose country cannot be derived. This overlaps device primary-user findings and must not be added to Coverage gaps.",
+    ),
+]
+POPULATION_COUNTRY_SERIES = [
+    ("DimCountry", "Executive corporate country share", "Corporate devices", "#00A6A6"),
+    ("DimCountry", "Executive user country share", "Users", "#34495E"),
+    ("DimCountry", "Executive mailbox country share", "Mailboxes", "#FF6B6B"),
+]
+EXECUTIVE_DONUT_COLORS = ["#00A6A6", "#7B61FF", "#2F80ED", "#27AE60", "#F2994A"]
 
 
 def load(path: Path):
@@ -218,16 +250,27 @@ def add_donut(pages, visuals, page_id, category_table, category_column, measure_
     return put(visuals, visual, page_id, x, y, w, h)
 
 
+def set_default_color(visual, hex_color):
+    visual["visual"].setdefault("objects", {})["dataPoint"] = [{
+        "properties": {"defaultColor": {"solid": {"color": lit(hex_color)}}}
+    }]
+
+
+def set_series_colors(visual, series):
+    visual["visual"].setdefault("objects", {})["dataPoint"] = [
+        {
+            "properties": {"fill": {"solid": {"color": lit(hex_color)}}},
+            "selector": {"metadata": f"{table}.{measure}"},
+        }
+        for table, measure, _label, hex_color in series
+    ]
+
+
 def add_country_bar(pages, visuals, page_id, x, y, w, h):
     visual = clone_visual(pages, "licenses", "licensesv10")
     clear_filter(visual)
     visual["visual"]["visualType"] = "clusteredBarChart"
-    visual["visual"].get("objects", {}).pop("dataPoint", None)
-    measures = [
-        ("DimCountry", "Executive corporate country share", "Corporate devices"),
-        ("DimCountry", "Executive user country share", "Users"),
-        ("DimCountry", "Executive mailbox country share", "Mailboxes"),
-    ]
+    measures = [(table, measure, label) for table, measure, label, _color in POPULATION_COUNTRY_SERIES]
     visual["visual"]["query"] = {
         "queryState": {
             "Category": {"projections": [projection("DimCountry", "CountryLabel", "Country")]},
@@ -239,9 +282,67 @@ def add_country_bar(pages, visuals, page_id, x, y, w, h):
         },
     }
     set_title(visual, "Country footprint — population distribution")
+    set_series_colors(visual, POPULATION_COUNTRY_SERIES)
     exclude_synthetic_blank(visual, "DimCountry", "CountryLabel")
     for entry in visual["visual"].get("objects", {}).get("labels", []):
         entry.get("properties", {})["labelPrecision"] = lit(1)
+    return put(visuals, visual, page_id, x, y, w, h)
+
+
+def add_license_country_bar(pages, visuals, page_id, x, y, w, h):
+    visual = clone_visual(pages, "licenses", "licensesv10")
+    clear_filter(visual)
+    visual["visual"]["visualType"] = "clusteredBarChart"
+    measures = [
+        ("DimCountry", measure, label, color)
+        for _title, _sku, measure, label, color in LICENSE_COUNTRY_SERIES
+    ]
+    visual["visual"]["query"] = {
+        "queryState": {
+            "Category": {"projections": [projection("DimCountry", "CountryLabel", "Country")]},
+            "Y": {"projections": [projection(table, measure, label, True) for table, measure, label, _color in measures]},
+        },
+        "sortDefinition": {
+            "sort": [{"field": projection("DimCountry", "Executive M365 E3 country share", "E3", True)["field"], "direction": "Descending"}],
+            "isDefaultSort": True,
+        },
+    }
+    set_title(visual, "Country footprint — Microsoft 365 licenses")
+    set_series_colors(visual, measures)
+    exclude_synthetic_blank(visual, "DimCountry", "CountryLabel")
+    for entry in visual["visual"].get("objects", {}).get("labels", []):
+        entry.get("properties", {})["labelPrecision"] = lit(1)
+    return put(visuals, visual, page_id, x, y, w, h)
+
+
+def add_quality_summary_card(pages, visuals, page_id, x, y, w, h):
+    visual = clone_visual(pages, "devices", "devicesv7")
+    clear_filter(visual)
+    visual["visual"]["query"] = {
+        "queryState": {"Data": {"projections": [
+            projection("FactDataQuality", name, name, True)
+            for name, _expression, _description in QUALITY_INDICATORS
+        ]}}
+    }
+    value_props = visual["visual"]["objects"]["value"][0]["properties"]
+    value_props["fontSize"] = lit(15)
+    value_props["labelDisplayUnits"] = lit(1)
+    value_props["labelPrecision"] = lit(0)
+    label_props = visual["visual"]["objects"]["label"][0]["properties"]
+    label_props["show"] = lit(True)
+    label_props["fontSize"] = lit(10)
+    label_props["textWrap"] = lit(True)
+    visual["visual"]["objects"]["cardCalloutArea"] = [{
+        "properties": {
+            "show": lit(True),
+            "paddingUniform": lit(2),
+            "rectangleRoundedCurve": lit(4),
+            "backgroundFillColor": {"solid": {"color": lit("#F8FAFC")}},
+            "backgroundTransparency": lit(0),
+        }
+    }]
+    set_title(visual, "Data quality")
+    set_page_navigation(visual, "risk", "Open Workplace Health for finding details")
     return put(visuals, visual, page_id, x, y, w, h)
 
 
@@ -359,6 +460,31 @@ def add_or_replace_measure(table, name, expression, description, format_string):
     })
 
 
+def add_executive_measures(tables):
+    country_table = next((table for table in tables if table.get("name") == "DimCountry"), None)
+    if not country_table:
+        raise ValueError("Expected DimCountry in the semantic model")
+    for title, sku, measure, _label, _color in LICENSE_COUNTRY_SERIES:
+        add_or_replace_measure(
+            country_table,
+            measure,
+            "VAR _countryAssignments = CALCULATE([License assignments], "
+            f"KEEPFILTERS('DimLicenseSku'[SkuPartNumber] == \"{sku}\")) "
+            "VAR _allAssignments = CALCULATE([License assignments], "
+            f"KEEPFILTERS('DimLicenseSku'[SkuPartNumber] == \"{sku}\"), "
+            "REMOVEFILTERS('DimCountry'[CountryLabel])) "
+            "RETURN DIVIDE(_countryAssignments, _allAssignments)",
+            f"{title} assignments for each country divided by all observed {title} assignments. Assignment does not prove usage.",
+            "0.0%",
+        )
+
+    quality_table = next((table for table in tables if table.get("name") == "FactDataQuality"), None)
+    if not quality_table:
+        raise ValueError("Expected FactDataQuality in the semantic model")
+    for name, expression, description in QUALITY_INDICATORS:
+        add_or_replace_measure(quality_table, name, expression, description, "#,0")
+
+
 def enrich_semantic_model(report: Path, local_path: Path | None, remote_path: Path | None):
     identity, hosting_rows, metadata = mailbox_hosting_rows(report, local_path, remote_path)
     data_dir = report.parent / "ReportData"
@@ -414,6 +540,7 @@ def enrich_semantic_model(report: Path, local_path: Path | None, remote_path: Pa
     add_or_replace_measure(country_table, "Executive corporate country share", "VAR _selected = [Executive corporate devices] VAR _all = CALCULATE([Executive corporate devices], REMOVEFILTERS('DimCountry'[CountryLabel])) RETURN DIVIDE(_selected, _all)", "Corporate devices for each country divided by all corporate devices.", "0.0%")
     add_or_replace_measure(country_table, "Executive user country share", "DIVIDE([Users], CALCULATE([Users], REMOVEFILTERS('DimCountry'[CountryLabel])))", "Users for each country divided by all users, including unknown or unassigned country.", "0.0%")
     add_or_replace_measure(country_table, "Executive mailbox country share", "DIVIDE([Hosted mailboxes], CALCULATE([Hosted mailboxes], REMOVEFILTERS('DimCountry'[CountryLabel])))", "Reconciled mailboxes for each country divided by all reconciled mailboxes, including unknown or unassigned country.", "0.0%")
+    add_executive_measures([country_table, *tables])
 
     tables[:] = [table for table in tables if table.get("name") not in {"DimCountry", "FactMailboxHosting"}]
     tables.extend([country_table, hosting_table])
@@ -920,29 +1047,29 @@ def update_overview(pages: Path, mailbox_metadata):
 
     kpis = [
         ("DimCountry", "Executive workplace devices", "Workplace devices"),
-        ("DimCountry", "Executive managed device share", "Managed device rate"),
-        ("DimCountry", "Executive compliant device share", "Device compliance rate"),
+        ("DimCountry", "Executive managed device share", "Managed rate"),
+        ("DimCountry", "Executive compliant device share", "Compliance rate"),
         ("DimUser", "Users", "Users"),
         ("FactMailboxHosting", "Hosted mailboxes", "Mailboxes"),
-        ("FactDataQuality", "Warnings", "Data-quality warnings"),
     ]
-    warning = None
     for index, item in enumerate(kpis):
-        card = add_card(pages, visuals, "overview", *item, 24 + index * 208, 136, 192, 96)
-        if item[1] == "Warnings":
-            warning = card
-            props = card["visual"]["objects"]["value"][0]["properties"]
-            props["fontColor"] = {"solid": {"color": lit("#B45309")}}
-            set_page_navigation(card, "risk", "Open Workplace Health filtered to Warning findings")
+        add_card(pages, visuals, "overview", *item, 24 + index * 168, 136, 160, 96)
+    add_quality_summary_card(pages, visuals, "overview", 864, 136, 392, 96)
 
     form_factor = add_donut(pages, visuals, "overview", "DimDevice", "Device form factor", "DimDevice", "Devices", "PC vs mobile devices", 24, 240)
     ownership_donut = add_donut(pages, visuals, "overview", "DimDevice", "Device ownership group", "DimDevice", "Devices", "Corporate vs personal", 272, 240)
     windows = add_donut(pages, visuals, "overview", "DimDevice", "Windows version group", "DimDevice", "Devices", "Windows 11 adoption", 520, 240)
     set_single_value_filter(windows, "DimDevice", "OperatingSystem", "Windows", "windows")
     accounts = add_donut(pages, visuals, "overview", "DimUser", "AccountStatusLabel", "DimUser", "Users", "Enabled vs disabled users", 768, 240)
-    mailboxes = add_donut(pages, visuals, "overview", "FactMailboxHosting", "HostingLocation", "FactMailboxHosting", "Hosted mailboxes", "Exchange Online vs on-premises", 1016, 240)
+    mailboxes = add_donut(pages, visuals, "overview", "FactMailboxHosting", "HostingLocation", "FactMailboxHosting", "Hosted mailboxes", "Mailbox hosting", 1016, 240)
+    for visual, color in zip(
+        [form_factor, ownership_donut, windows, accounts, mailboxes],
+        EXECUTIVE_DONUT_COLORS,
+    ):
+        set_default_color(visual, color)
 
-    country_bar = add_country_bar(pages, visuals, "overview", 24, 448, 1232, 280)
+    country_bar = add_country_bar(pages, visuals, "overview", 24, 448, 608, 280)
+    license_country_bar = add_license_country_bar(pages, visuals, "overview", 648, 448, 608, 280)
 
     for index, (title, sku) in enumerate(LICENSE_SUMMARY_SKUS):
         add_license_summary_card(pages, visuals, "overview", title, sku, 24 + index * 248, 736)
@@ -950,6 +1077,7 @@ def update_overview(pages: Path, mailbox_metadata):
     page["visualInteractions"] = [
         {"source": ownership["name"], "target": ownership_donut["name"], "type": "NoFilter"},
         {"source": country["name"], "target": country_bar["name"], "type": "NoFilter"},
+        {"source": country["name"], "target": license_country_bar["name"], "type": "NoFilter"},
     ]
     persist_page(pages, page, visuals)
 

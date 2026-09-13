@@ -88,6 +88,9 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(ms["Compliant device share"], 0.5)
         self.assertEqual(ms["Warnings"], 0)
         self.assertEqual(ms["Information"], 1)
+        self.assertEqual(ms["Integrity issues"], 0)
+        self.assertEqual(ms["Coverage gaps"], 0)
+        self.assertEqual(ms["Derived country gaps"], 0)
         self.assertIsNone(ms["SKU consumed units"])
         self.assertTrue(all(r["Status"] == "Not collected" and r["SourceRows"] == "" for r in data["SourceHealth"]))
 
@@ -96,6 +99,26 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Tenant identity mismatch"):
             report.build(self.root, self.base / "report")
         self.assertFalse((self.base / "report").exists())
+
+    def test_quality_indicators_separate_integrity_coverage_and_derived_gaps(self):
+        findings = [
+            dict(TenantFindingKey="fictional-prod|q1", FindingId="q1", Severity="Warning", FindingType="OrphanPrimaryUserReference"),
+            dict(TenantFindingKey="fictional-prod|q2", FindingId="q2", Severity="Warning", FindingType="ObservedLicenseAssignmentError"),
+            dict(TenantFindingKey="fictional-prod|q3", FindingId="q3", Severity="Warning", FindingType="UserCountryUnknown"),
+            dict(TenantFindingKey="fictional-prod|q4", FindingId="q4", Severity="Warning", FindingType="DeviceWithoutPrimaryUser"),
+            dict(TenantFindingKey="fictional-prod|q5", FindingId="q5", Severity="Warning", FindingType="DeviceCountryUnknown"),
+        ]
+        self.write("FactDataQuality", findings)
+        self.write(
+            "CMDB_DataQuality",
+            [{key: value for key, value in finding.items() if key != "TenantFindingKey"} for finding in findings],
+        )
+        _, data, _, _ = report.prepare_data(self.root)
+        ms = {m["name"]: m for m in report.measures(data)}
+        self.assertEqual(ms["Integrity issues"]["expected"], 2)
+        self.assertEqual(ms["Coverage gaps"]["expected"], 2)
+        self.assertEqual(ms["Derived country gaps"]["expected"], 1)
+        self.assertIn("must not be added", ms["Derived country gaps"]["description"])
 
     def test_duplicate_case_insensitive_key_rejected(self):
         self.write("DimDevice", [dict(TenantDeviceKey="fictional-prod|A"), dict(TenantDeviceKey="FICTIONAL-PROD|a")])
