@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB general relationship consolidation tests.
 
 .VERSION
-0.1.0
+0.1.1
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.1.0'
+$ScriptVersion = '0.1.1'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -189,6 +189,34 @@ try {
             'Relationship dates or stable keys are invalid.'
     }
 
+    Invoke-SmartWorkplaceCMDBRelationshipTest 'Preserve but omit user-license links for users outside the current snapshot' {
+        $caseRoot = Join-Path $tempRoot 'UnlinkedUserLicense'
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $licenseFactPath = Join-Path $runtime 'DATA-LAST\PowerBI\FactUserLicense.csv'
+        $licenseFacts = @(Import-Csv -LiteralPath $licenseFactPath)
+        $licenseFacts[0].TenantUserKey = 'contoso-prod|entra-user|ffffffff-ffff-ffff-ffff-ffffffffffff'
+        $licenseFacts[0].CmdbUserId = 'contoso-prod|entra-user|ffffffff-ffff-ffff-ffff-ffffffffffff'
+        $caseFactPath = Join-Path $caseRoot 'FactUserLicense.csv'
+        $licenseFacts | Export-Csv -LiteralPath $caseFactPath -NoTypeInformation -Encoding UTF8
+        $result = & $normalizer @identity `
+            -DataRootPath (Join-Path $caseRoot 'Output') `
+            -UserInputPath (Join-Path $runtime 'DATA-LAST\CMDB\CMDB_Users.csv') `
+            -DeviceInputPath (Join-Path $runtime 'DATA-LAST\CMDB\CMDB_Devices.csv') `
+            -LicenseInputPath (Join-Path $runtime 'DATA-LAST\CMDB\CMDB_Licenses.csv') `
+            -MailboxInputPath (Join-Path $runtime 'DATA-LAST\CMDB\CMDB_Mailboxes.csv') `
+            -UserDeviceInputPath (Join-Path $runtime 'DATA-LAST\CMDB\CMDB_UserDeviceRelationships.csv') `
+            -MailboxFactInputPath (Join-Path $runtime 'DATA-LAST\PowerBI\FactMailbox.csv') `
+            -UserLicenseFactInputPath $caseFactPath `
+            -RawUserLicenseInputPath (Join-Path $runtime 'DATA-LAST\Raw\M365\M365_UserLicenseAssignments.csv')
+        $rows = @(Import-Csv -LiteralPath $result.OutputPath)
+        Assert-SmartWorkplaceCMDBRelationshipTrue `
+            ($result.UserLicenseCount -eq 1 -and
+                $result.UnlinkedUserLicenseCount -eq 1 -and
+                $result.RelationshipCount -eq 5 -and
+                @($rows | Where-Object FromEntityId -eq 'contoso-prod|entra-user|ffffffff-ffff-ffff-ffff-ffffffffffff').Count -eq 0) `
+            'An unlinked user-license fact was not handled safely.'
+    }
+
     Invoke-SmartWorkplaceCMDBRelationshipTest 'Validate curated relationship contract' {
         $results = @(Test-SmartWorkplaceCMDBCsvContract `
             -LatestOutputRootPath (Join-Path $runtime 'DATA-LAST') `
@@ -292,8 +320,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUXSSBEAgfLGXd
-# 3N6WnM0vVIX2Kc+J7Y2wmxiap+QruaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAw6ASgENdjtwGI
+# HFGhIsTRmsqpB6nO5cepCCzwlxoF36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -426,31 +454,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHham0rvykYriKpan4eaTmG2x4LsvVZF5EjyaO+FV985MA0GCSqG
-# SIb3DQEBAQUABIIBgJfwzhspaoxol2lR0fsHOtj7pyMEnKipUrPpE0XZap5blh57
-# fNXbdyZHaINJrv/dOGKsDMrWWZgeg0TSGyFuPh0+XmEOb8JCIUGpoCtaTyOs9R9a
-# /937KBhm0oM78i05sdOwo0eAzOzBVPBLf4U5onnd0qk7GjVBZuuoRv+n4vhO0bF0
-# A6OjQVjFG9UzDtwi/6tVQVpNKAtrcOdb4q+W+fxH/FucaslUNKD1OaBKFnTlM0vC
-# K7qQH67wIZsFmf3f8VuYqC1qsqEzttdfew3BdDxwCstK0r6GH5gxho8FGD0Y6L24
-# EAYK5CziGKoh+UrhueJzpbnNmg6RIpTnYH8AMn//IhJc94UXYszZ/FooRG8Z3NfX
-# ogWDpWs1s3JE84Kw9pQn+oPLNYeozutgHAPklddPX3uhUOSXamFh+Wp7cMU9LAMa
-# GrNhOP34QB6+erouwxA9UOYHsZwQekBnVcE0xvJ+6/2gG2PBTLGXLNlMtYwwNInD
-# JZHWvswC8he4vBlq4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBInzgR3+BjNvsJd4dnJzpooz1i/S0dtLkyrd0loDWgtMA0GCSqG
+# SIb3DQEBAQUABIIBgHmUAmsNLsn3SZQS1T2kLo2OKNk5o8sOsTcAW68XbOQj44r7
+# gYt/E1ozMlAT71VSD4qZ3U+AowlF/15TsFKkE81mbsuYw2Smq5UYWW/2VwXk55I+
+# k4ot1TxrNT6lcH0l4UNE3JX4OK8Wt2izkrvuYqEDMaRQiEWNHHpGHPUmIrNF8tiL
+# dAG9Wrot5hDEhj8OrU9ho4VOwvKvwzmC044MXXymiR1yYjcq6LWRTo5TmJ1/L4Sh
+# rMymi8jlZOsNQF49n8K5QOvlzYqDh0bEsjKCzjbJeRa+RhnkwHUw28PIjNdIORoS
+# 6Q+/KmdjjOSBBvB7wwT6kILul/3NOgYSN/IkaENJBj0ONVzCwEpGiziaHJi47bih
+# NL7FuFbU8fCs8l5yfK8S7+5/egHTK5SIjvzP7O6A3jITyUZDFYOP7CbVWbzQI6p6
+# ad4XwYvzbwNW+gVnJsa59Mw9iUkooDscWB/gL+5JY44zEiJOiVSBWdMd2Ax0z6jy
+# xZ8D0TEN9tFTEuoczKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTExNTE1
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAurS51qWJ8WV9o6w1t2XWhASgKi4vngbvzeG37
-# qXxTdTANBgkqhkiG9w0BAQEFAASCAgAvT8HlfQc4YhrZxWwAlZ/kX0vSwTcg5OGY
-# K6qffhXAp/kZKQw6brQ5cqm3JEkT90OBJSqU4dN7irsa0yOTuQuc67IqWcLuasY+
-# AalFNv93LQ2+M9bfMTP5dYcFL5qsP2TqjEuCqy703mq/lK4FotcBu1iis4+raOm/
-# 2HzmoGBnr6iZ4k93T2SQCLsapW1wa8hVAV8qdYCY1j6lwNp6dU70bv5/JmmmpLmY
-# 4xW4y48GEzbyp5ek5Md0rO2xDLCFBAMEOB1QMEyDqZ+P+5vc1mbZ8n7na/eYKsUA
-# S3Ydo+kUXAMeyL1HKqHRK7rDp+IgbBQSog5Hf0h0wx1w89T+7IpLw6UdRKw4PvAp
-# 9nWavmEwrmWUU39iZ/pomV1LGaJOHMEN2cdd/6k6Nubs1s8XPWqRu7w3NNVnOogg
-# NHfY60I8p3lob7oQQojsb2rEYqvE8gkiO8tp1ucPC53DYqL+9PmEwz4YmEEppUy1
-# r8YmQUTDXdY72IWGPdwtYWs1TsS+iEWbr5fu9Wqd0fdlRpiVmOsMXrtjt+PTUoB/
-# 1w4USsx/whXd9VFwE/E1+2z+7DaQfWK+PIJMEVu+kApe3lY+wjGeZt5TOmfZyay3
-# 4BJyQZHxIelSk10USLuMt/AIrokYQrl63gDrXiLoyohV5i6S1eaYGpmpublMwWnH
-# i/f5HL0L9Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE1
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCX5kpz5GlR/2B6uW2JhsxBGy5bpXN3E+pn/JrV
+# Owe7VzANBgkqhkiG9w0BAQEFAASCAgBMbOBPoDiQoSye1CAju+sxHpIIQNGvfLya
+# FHFmT3V+ylBXFczitDqU2vAsvv6pGjuUONVsLe2IdVkq4j2o2iyV70TfUjfwZnrk
+# OLxmXjP4w3kc7ErJsweGfMPmqH1toFfr/yX4yNfTPnIeoMFepoXrhbVseOqHlv5X
+# XjUFkiP6AGrZCV1nsBCHhTp68AzPH0WNZZHZ76rSL6lG7k1lkDkMgakoNeR3XiUB
+# FJNZdHBwRHa/gox9ilTDvrJItWabLCky69PXdLmaUXMUsiFMPFGN3gF0tdyGVdAE
+# 8+fVLe6QSZW+jUekjFGt7/rdadDpA0Y3EduAfbtCDPWvtHN+1mJ4xknwBcDgWLJT
+# 6c9WPQUuvqziQCMlOEuICVOjkpbdmW8HKz8QRoXJmL8Aft49FxR7/sdPTo5Er5as
+# bpusf9rbpIBjEo+hoseueelyzqI2B0fVvgCkQrgSwlUIf8ExoHgQsQZhGm1sssf4
+# k4dXKbCoNr4S1JrLsC/+BCWgnkBwO2kbMHGoc5ga25pb3QvIPG/kdFyRpj6ILK75
+# hKg/gi5wVogftiQeOizu1PapN/F0UNTdOB9qEQNlZkeHDCXNInNY31Tm9EEDXjS6
+# lYLAAm4LMcgci1TWEKCr9tsTX8pcSR+kcmtHpNiqGZ5cSx7/K8810yZ+b0/bB7mA
+# ZdoPHt45Ug==
 # SIG # End signature block
