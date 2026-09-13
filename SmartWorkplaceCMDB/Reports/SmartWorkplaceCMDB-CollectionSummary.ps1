@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.2.1
+1.2.2
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +37,7 @@ param(
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.2.1'
+$ScriptVersion = '1.2.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -357,6 +357,29 @@ function Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest {
     }
 }
 
+function New-SmartWorkplaceCMDBSummaryGraphMailBody {
+    param(
+        [Parameter(Mandatory)][string]$Subject,
+        [Parameter(Mandatory)][string]$BodyHtml,
+        [Parameter(Mandatory)][object[]]$ToRecipients,
+        [object[]]$CcRecipients = @()
+    )
+
+    if ($ToRecipients.Count -eq 0) {
+        throw 'At least one Graph mail recipient is required.'
+    }
+    $message = @{
+        subject = $Subject
+        body = @{contentType='HTML';content=$BodyHtml}
+        toRecipients = [object[]]$ToRecipients
+    }
+    if ($CcRecipients.Count -gt 0) {
+        $message.ccRecipients = [object[]]$CcRecipients
+    }
+    return @{message=$message;saveToSentItems=$false} |
+        ConvertTo-Json -Depth 12
+}
+
 function Send-SmartWorkplaceCMDBSummaryGraphMail {
     param($NotificationConfiguration, $GraphConfiguration, [string]$ResolvedTenantId,
         [string]$Subject, [string]$BodyHtml)
@@ -371,10 +394,17 @@ function Send-SmartWorkplaceCMDBSummaryGraphMail {
         [string]::IsNullOrWhiteSpace($thumbprint)) {
         throw 'MicrosoftGraph.TenantId, ClientId, and CertificateThumbprint are required for Graph mail.'
     }
-    $recipient = { param($items) @($items | ForEach-Object {@{emailAddress=@{address=$_.Trim()}}}) }
-    $message = @{subject=$Subject;body=@{contentType='HTML';content=$BodyHtml};toRecipients=&$recipient $to}
-    if ($cc.Count) { $message.ccRecipients = &$recipient $cc }
-    $body = @{message=$message;saveToSentItems=$false} | ConvertTo-Json -Depth 12
+    $toRecipients = @($to | ForEach-Object {
+            @{emailAddress=@{address=$_.Trim()}}
+        })
+    $ccRecipients = @($cc | ForEach-Object {
+            @{emailAddress=@{address=$_.Trim()}}
+        })
+    $body = New-SmartWorkplaceCMDBSummaryGraphMailBody `
+        -Subject $Subject `
+        -BodyHtml $BodyHtml `
+        -ToRecipients $toRecipients `
+        -CcRecipients $ccRecipients
     $uri = 'https://graph.microsoft.com/v1.0/users/{0}/sendMail' -f [uri]::EscapeDataString($from)
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     $connected = $false
@@ -621,8 +651,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTOyrAuGBnsGdO
-# ta8mVmtV/14+/fg9nvoMRK6ooSJqg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi2hvUp4dOVo+7
+# yLZ9m8BpGvB8Mv7HRLhzkyD2f/nwSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -755,31 +785,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJg3ZmE1b34bIDKDiimaTksrJzjnhSrkX+oH7/AlzLbIMA0GCSqG
-# SIb3DQEBAQUABIIBgCPi/A8gJUKkIpEFh+9DsV5L+YPwZoeMhC1oWp/kWuWstWG4
-# yMCYraQfmKlyyWTYp8BTGioAyH8xNdsLNyBsMO//DC7qBwBu3ZVFrIC7KuZuIKST
-# siPe89URHobonQ4wqrSzGPpToHNRmHpTe5MX9fbSHt608E2xxbphrfXonFmIq2KL
-# 8XvNhHSsFSxKUSsa0MK/+ARrXTuU846wmKBn/8RX5VL5zYxBaHcWtS+su2l18WjB
-# QHHVOzqn/OugajCQqZTpbvVdkzpMbdL9SCVbkXh1FK/h2Bm5u4c6sm7wZ1ThQweA
-# YZsjfN6IUn0I8EiQVIf3QYJvVMPMa6NMRU4HB0ASIksF7M0G3qM44JNna5Y1nw21
-# +CYIL/FWF+SbrSZSHyEKK5SE+KtwbXohnY2rb3j6AxbF7xZr9jXnjbdswUva1uUK
-# 1zbe9lMuU8CTGdncNMW4zUvLKdbeM1jRE2ZiOOxX2J3qext4tkSZGlw88QoXoV9C
-# UZeieotDYsilRzEHZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGvWI6NCHMA9ndvAtd2jTEcl6+0X6915C4pgZL9TMrHAMA0GCSqG
+# SIb3DQEBAQUABIIBgIuRLbaVzk3xpLfqCa08pyOBXXyzISxOmneiRvf+S24qIwJY
+# Wsd8Qc56B1LrdeKzrYNW1d8XCNY5EHXquczZfMn7NqG7+QpJ+8wM8odV5S1C13zB
+# 6X7lLQx64EHjIe+goqUEHWCAXN/7963CO7KH32HmpJIFkmwqf54m2dbZj9Yf48j1
+# XOJ9wBwE7355tjCpVvP5ujXxuZFsoNe+5+jiGMdKBKGrFtlZ08HlLS6i86Gc98WZ
+# /YG+9V5n2H1LsROwWSx3QM5MBi+XeyjhnwvexnbqFvs6RlBoGo46RZNgJtMwD55O
+# HvtgcwgX9OVUvICqKAoDh9wjhni3fBOR0jCihW45nRWSFeob8qqe2aF8hwp1r45B
+# dilOmleSMbAzETUcpvGDt6G4fRzsZmVE6eg3uXHqxCvl8x26kgn2GD3QsY84wYuq
+# sVUhpxrgo6V3F1saxwy1olaZz0QC9VyB5stm7G9lxDqnmE8Z+8T907zfMsR4QF6F
+# pzN+NOZqDXMUXjS4sKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwODU0
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDMeMRyi64an42t3pLqnPPdahusis62jUoFChWg
-# goNMyzANBgkqhkiG9w0BAQEFAASCAgBZEoJT52xur41gt/IgaW42NsIA9dhabQO/
-# I/NlNgmtQy72tBbjOKEWYoAyyj6eLB7ibMFLk0fHNDC3qR0+RYNPKR2VYxsgTfRH
-# YZ1uP63rreC8SlXc+HbGubFXXbzU5KAQZvU1hmc6cExKuMgI6MpkU+DPVOqSD8Qq
-# WJ1hZGzH8QpmZlQci6R+ElmMVpJqULvFv9EQOWsN6aG/n/xG8t0fOEnIK0+/ucDT
-# +kV0bQc12TX3vzYaR2EbZRIMC5zUIM0uHz10nnz6bpE6Y1ZxYMKu+dgfuFUlagud
-# SKilDL3BkktM9P7ld4SD972BKtKe3ItaSkgmcuJjGTs5AsY3hfRRFrRkR25HGuGB
-# 1moCbnbJf17876BDkqPdMkr3sOrBiTiu+0Cuhz8gvLtprnNnKefmUgXKI/CFluPw
-# otcSk0PExR6bZFBnV2cZhQjeVILBuNUoVD4XZrKILE3SatBgL7rfSqFknBg9S6Rb
-# 0zVNeDDV6eKn3QIbxVYH0MoinYG5eCz8vs8Dob5WOivB+ygl1kDimyStgBgONH9j
-# 3az0eyOArSlVRcSNdD4kQWeVs/EyFDDsFXXQ6zRBRr4c7I+hNbsVr4tfiuD+bYe3
-# GZTo263XAagxhIPPl9ZJTeCf4XxXH+ayKMG1SyVHzGcBv13Ds7lKMuv/QCGGWAMS
-# wGXGfF3mJg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwOTIz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCDNt5gb/dy4vFFKIkLbOOQMfTgbw4HPR2m39AyN
+# gDbRrTANBgkqhkiG9w0BAQEFAASCAgCtZdpqyxt5yfG3j7aGfzMKk/vvEsCblSiH
+# 2gc1pLlfH7WZoKcJQ7LOvH3H762xBgWfYtnsJZzddv/c+pty+zsVgwaqy07mnlug
+# UfUld1dJKn9iDJuS0zYurrHIyWc8rQz02uFVq7k9TM900an+hrcKN46dyLttbU/Q
+# 6aal5aHnHN1UBUD9ZMQiBnA2zONBDL74iFvUzvsuq42vb4bTcduOj2rzhh+p2Kw5
+# ANaDL++UcxO4MSPWH5tRrpgeKjn9XACzg78oN2AYnrJKEGhLChx6MHVryHVs8xSE
+# 1FULvgOJumo8bru1PvoS9pVAFixcN0jNpqiW9CpI6+lsnvM4oHdoPKO0mq93eEAZ
+# zwrUcewXTuRYHABK6yGGymcg5vcTGVF4M2b5O5WeNAsHuuOvhYE3N1WoeQpdRWX5
+# v4YLutytTtxEOzh6HMkgU2PAKWju4jsed98yiOM9vIVnlaWCqDY83IiI3ug12UJJ
+# 8Rz1SdqPCxqzUfhjidGj6Aq3M0BRne0044Y9FWQIA7jEUGmwfFJa5VHvFaief6b8
+# YLRSsh2srEQRNpvHjlNNXONEZkhBjIybQ95OEVoti8W9y1fXfWFrCfoQ72aYlrxt
+# n+5VVyKhFf9joXYm8lv1ZYPSLt0Rb9SwNH6w75rsNFSvkGuz1zOnF7r7vZt6TnOF
+# 06ITDhSBoA==
 # SIG # End signature block
