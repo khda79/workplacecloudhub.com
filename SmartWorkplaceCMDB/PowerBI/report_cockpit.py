@@ -738,7 +738,7 @@ def build_risk(pages):
         ("DimDevice", "Noncompliant devices", "Explicitly noncompliant"),
         ("FactWindowsUpdateAlert", "Windows update alerts needing attention", "Update alerts needing attention"),
         ("FactDataQuality", "Critical findings", "Critical findings"),
-        ("FactDataQuality", "Warnings", "Data-quality warnings"),
+        ("FactDataQuality", "Warnings", "Warning finding records"),
     ]):
         add_card(pages, visuals, "risk", *item, 24 + index * 312, 232)
     add_bar(pages, visuals, "risk", "DimDevice", "ComplianceStateLabel", "DimDevice", "Devices", "Devices by compliance state", 24, 340, h=212)

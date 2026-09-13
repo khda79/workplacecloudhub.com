@@ -61,8 +61,11 @@ null; timestamp fields require a timezone and are converted to UTC.
 
 The eleven business tables are retained. Mailbox and quality details are joined
 from matching CMDB CSV rows. SourceHealth adds a disconnected source-evidence
-table. No CSV source contract is changed. Source evidence compares local CSV
-hashes and row counts; missing or inconsistent evidence remains visible.
+table. No CSV source contract is changed. Per-source status evidence keeps
+priority and is verified against local CSV hashes and row counts. When those
+sidecars are absent, a completed full-orchestrator run is accepted only if its
+contract-build timestamp matches the current build manifest; otherwise the CSV
+remains explicitly without collection evidence.
 SourceHealth ignores finding filters. DimDate and DimTenant remain hidden and
 disconnected: no historical trend, global tenant selector or RLS is claimed.
 
