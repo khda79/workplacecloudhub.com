@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB orchestrator and launcher tests.
 
 .VERSION
-1.1.13
+1.1.14
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.1.13'
+$ScriptVersion = '1.1.14'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -121,9 +121,9 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($result.Count -eq 1 -and
                 $result[0].Status -eq 'Validated' -and
-                $result[0].ScriptVersion -eq '1.1.13' -and
+                $result[0].ScriptVersion -eq '1.1.14' -and
                 $messages -contains ' SmartWorkplaceCMDB by WorkplaceCloudHub' -and
-                $messages -contains ' Version : 1.1.13' -and
+                $messages -contains ' Version : 1.1.14' -and
                 $messages -contains ' SmartWorkplaceCMDB execution summary' -and
                 $messages -contains ' Status   : Validated' -and
                 @($operationalMessages | Where-Object {
@@ -150,6 +150,48 @@ try {
                 $script:FullResult.SummaryEmailStatus -eq 'NotApplicable' -and
                 [string]::IsNullOrWhiteSpace($script:FullResult.SummaryEmailHtmlPath)) `
             'Full fixture orchestration status is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Finalize without rerunning collection steps' {
+        # The preceding data is synthetic, but FinalizeOnly intentionally accepts
+        # only a live-owned root. Change only the test root marker to exercise
+        # the live finalization path without weakening production isolation.
+        $markerPath = Join-Path $script:FullResult.DataRootPath `
+            '.collection-root.json'
+        $marker = Get-Content -Raw -LiteralPath $markerPath | ConvertFrom-Json
+        $marker.Kind = 'Live'
+        $marker | ConvertTo-Json -Depth 8 | Set-Content `
+            -LiteralPath $markerPath -Encoding UTF8
+        $devicePath = Join-Path $script:FullResult.LatestOutputRootPath `
+            'CMDB\CMDB_Devices.csv'
+        $beforeHash = (Get-FileHash -LiteralPath $devicePath -Algorithm SHA256).Hash
+        $beforeWriteTime = (Get-Item -LiteralPath $devicePath).LastWriteTimeUtc
+        $result = & $orchestrator @identity `
+            -DataRootPath $script:FullResult.DataRootPath `
+            -FinalizeOnly
+        $afterHash = (Get-FileHash -LiteralPath $devicePath -Algorithm SHA256).Hash
+        $afterWriteTime = (Get-Item -LiteralPath $devicePath).LastWriteTimeUtc
+        Assert-SmartWorkplaceCMDBOrchestratorTrue `
+            ($result.Status -eq 'Completed' -and
+                $result.Mode -eq 'Finalize' -and
+                $result.FinalizationOnly -and
+                $result.StepCount -eq 0 -and
+                $result.LoggingEnabled -and
+                $beforeHash -eq $afterHash -and
+                $beforeWriteTime -eq $afterWriteTime) `
+            'Finalization reran or modified a collection output.'
+    }
+
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Publish summary and terminal logs after finalization' {
+        $content = Get-Content -Raw -LiteralPath $orchestrator
+        Assert-SmartWorkplaceCMDBOrchestratorTrue `
+            ($content -match "summaryResult\.HistoryPath" -and
+                $content -match "summaryResult\.LatestPath" -and
+                $content -match "summaryResult\.HtmlPath" -and
+                $content -match "ReuseLatestSnapshot" -and
+                $content -match "terminalFiles" -and
+                $content -match "Terminal log synchronization") `
+            'The post-summary or terminal SharePoint synchronization contract is incomplete.'
     }
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Publish all contracts and report' {
@@ -318,6 +360,16 @@ try {
                 -Pipeline Full `
                 -MaxItems 1 | Out-Null
         } 'requires an individual source pipeline'
+        Assert-SmartWorkplaceCMDBOrchestratorThrow {
+            & $orchestrator @identity `
+                -FinalizeOnly `
+                -Pipeline EntraUsers | Out-Null
+        } 'requires -Pipeline Full'
+        Assert-SmartWorkplaceCMDBOrchestratorThrow {
+            & $orchestrator @identity `
+                -FinalizeOnly `
+                -Collect | Out-Null
+        } '-FinalizeOnly cannot be combined'
     }
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Reject incomplete summary mail configuration before collection' {
@@ -362,6 +414,7 @@ try {
         $expected = [ordered]@{
             'Start-SmartWorkplaceCMDB-Full-Validate.cmd' = '-ValidateOnly'
             'Start-SmartWorkplaceCMDB-Full-Collect.cmd' = '-Collect'
+            'Start-SmartWorkplaceCMDB-Full-Finalize.cmd' = '-FinalizeOnly'
             'Start-SmartWorkplaceCMDB-EntraUsers.cmd' = '-Pipeline EntraUsers'
             'Start-SmartWorkplaceCMDB-EntraGroups.cmd' = '-Pipeline EntraGroups'
             'Start-SmartWorkplaceCMDB-EntraDevices.cmd' = '-Pipeline EntraDevices'
@@ -417,8 +470,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCaiVcJ06eUUNk
-# XQoLyl6K2ePdb5VTLYN3w1q28E3I66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJIE8KrNvrw8kw
+# Q2idQA/m7Vs1xuOpu6zEjnyOJ9WnFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -551,31 +604,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF6+kTlxwwK2cQOycV6N1CvpCmIAlWdPzh/Er5n4sVd5MA0GCSqG
-# SIb3DQEBAQUABIIBgGnxdx9+5AK9X4zCSfql0QOSSP0iWCpSN00UVtRdH1jrmrJp
-# YucbFAL0sz0YLmJZtFwRkgjuRWaxo1sZnwQoKBdy5r4+TKwNUbQ0G5fJAwNeYnGA
-# x0MEdRuCUC2R98cWA6hfz/QA13gaS1OQBCIBUjAMCVGogZVrJ+Q11UV9QveWUpmg
-# VrlOIJWUTC3qhyt8uCKTQliW6MYZPAv+2BRdoRWwRqfTKPNFizciNPR/YzweFmtc
-# 9T72PMOYYlbePICcmGSmircxxorbT+1M7hRAO6KUEFLej+ZupOp0Xb2QobL9oawG
-# us6MVKk3wFsxAxSr0rlk5On15nfQZUQoPBeIVg887hFc4mMeevlzhRXJNoe9/6qo
-# h4w65yYJAEKUkEzJz25T+ZpAxejdTDd7A0jYgO+06dQHxKDCc+Tk8+seZdXlhbsr
-# PJsJEnSEWGQJtqkB6n3MurGlmrlOXt6WvqUe9rvOKV/oXH621iVS4OlqXwExMjWV
-# U8CRRn4sOUy2VUJXjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMCzSg9/pWICZ84QX/Sq8pbgWKDsU+tDov4cZHHQS6BiMA0GCSqG
+# SIb3DQEBAQUABIIBgKPEOLWDrUU1CvCkPQoaObbcc13B1MdboRPBcEq2q4rKClhT
+# pBaUywy296j8nMf3XIVrtAvfsg2q+sTX8695s54NNXhZCV4H4TckAgUc/BGeEzUK
+# LT0ye5l4Vqsnebvp6KXgjFRXBtmFxKumlqwHXYzWofJoJ+p+O5MsOiAaCkn24vMS
+# fuhGn4/OEP3cUexjPMWa7ltuVR2T9blkvOyBQ9JCP7sDA4qwsIH0b/OF2Atmh+hQ
+# Xb4uBod7M5kJM48XgnAEET3nk/d9KExZlg9rK4PzsA21Y0Sk/g1pwDlSUvhwzh6Z
+# njjkSS98IGRUoshaDtAaZEiiwGNjGqF5DE7gm+jegjeODSjMGoGL77iWW6Z1FNEj
+# ByMqZabkzTVsXKSHj5yZ+kUTG/UZw0cGB2x6aBqztq/ZCa44Pe7MENO7X++0NOwo
+# n3xdmvgvDwtymmqS6QSRbKXCtttSSD/hT/fcEcr5LRtfItNgKNet3/4vGfz6jrK2
+# aFk+mXDhphEYYHJHeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxNDU3
-# NTRaMC8GCSqGSIb3DQEJBDEiBCDi5Qx8J0B9YzQfk32NcKrkx9jg1V+drxhTU6nU
-# kmETczANBgkqhkiG9w0BAQEFAASCAgCy78Ltlz6VlsGsfPaSFtpb7S+L+4cSVUpt
-# EINC2NZ4ouAbiR2VyROQTgnJ4mHdMI5lqCsEtAPIO61KgbsukvO+I7hWzA540+ls
-# xevDwsvZhwztySu6g/SeTVJ+pbGVHm0w3/48DnQX5mJSqtLmIOYWglrdcz/ldmfX
-# dpQiDKZ9wvL3X4ZEAGvcIkfyyj6IVLSAgoAn5CVay/FH0j7NmzSHiPVNlOFbM8GA
-# JjS9a9kvpPD7BqpJ4pqvax+ey3O9+SiRUYMX4TBlY+GOAB/8rxf/gW2ap6comeZt
-# ZqwSI0+8omv43K5mRP7gdKTmHygNbd8blETaIBdU6VrxTKsJQ92oD3BL42pyrgFl
-# 2se54sJmpYXIwcAQt8+sKe3q47/rOA+yBpUPObxjEhAiDdnmdWwoyUE9rXPydtYi
-# T0RN7X/X21tegtt1s4735vFXLA5ystE1Z//PZEtn8sseBfbCKxDCwhCVuQ3Cg3I7
-# poSYhxKsi51HP6ZBTWdrW5Nyt3d92+pYzPCK1rzd7q/rXromUqEPiwxsniixGU7T
-# H8Vv4G2vLN9yW3/HfON5KNC25Vj0rlrDInXXUo6OCGdc4+Tg+wJXFgp9csVXg/Tm
-# 0Ql0Au1a4Ublg2o8lfsZHSlQu4/R4UpC0jO0G2f0x+QD/UESCtBihDlUHMd5OVzl
-# r22R9d9AjQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
+# MTFaMC8GCSqGSIb3DQEJBDEiBCA/6VMAmlGyr6AcAmu+4JLrKAV7FVjDROJqEndE
+# 5xEtNTANBgkqhkiG9w0BAQEFAASCAgCMKiuZYwB4+fTo/ogKVctiTV1uMjrS+A6u
+# sfHUkzayEYv/lsfeZCTEUJ31ba4zmAHgOHqDntOdCOukZzYJaCRCHL30rl7N2Sko
+# oLfSKFuk6DeYgNj0f1ymGUPFw3kbGzENX7a87CCkJuNlMsNPgxjT3BxKbqOP487R
+# CD2wHoeqHf6CXe6U+VPDavc5rBZVlMZIKcI/HoZsl8HbFd321EG2FJEc7CixowOV
+# WlgL840nQ+NzJZBHCzJGP50vaR4yhwDAJbsAQBKuo8FCbh44UqMvG77IEalrjMaQ
+# m9dXI37hO6mdtrWvLEzaBXOWMofmXuePDwregP77TAEHYAfubjM4tdAB4NiXjuKG
+# S1okOQn00+3tBGsRnnUIJTxIb0XZnVfpvwtYijh3GFl5HND8Oib/eLWbdcBBmHhr
+# wsj/6ycxjVhtcKI1IlkEmCp0ggUqDyYGsZ1oOzt3xRyOPhSSmD3SsmF79DXMekr5
+# D1Vo4tznFk3yM+RAubX+aUp77KttU/72INrBJGuld+/3ICB2ODD2bVyX0V0VL+78
+# tfNBN8YAoyB4mAwd/gwln8SkXyQeu+f/8OEAWWEsN3b1MswyyINIaupXPt4bbO6w
+# 8m4GqaljCxlUJ2WpqEXrZz7O8GVYxUYm0zeOH7kjOZiJVdYoJANz3q6/JT4iQThh
+# lyv2OShjpA==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.3.4
+1.3.5
 #>
 [CmdletBinding()]
 param()
@@ -159,6 +159,23 @@ try {
             'An unchanged collection did not render zero deltas.'
     }
 
+    Invoke-SummaryTest 'Reuse the matching completed snapshot during finalization' {
+        $historyFolder = Join-Path $dataAllRoot 'CollectionSummary'
+        $historyBefore = @(Get-ChildItem -LiteralPath $historyFolder `
+            -Filter '*.csv' -File -Recurse).Count
+        $result = & $summaryPath @parameters -RunId 'finalize-retry' `
+            -RunStatus 'Completed' `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddMinutes(5)) `
+            -ReuseLatestSnapshot -PreviewOnly
+        $historyAfter = @(Get-ChildItem -LiteralPath $historyFolder `
+            -Filter '*.csv' -File -Recurse).Count
+        Assert-SummaryTrue ($result.SnapshotReused -and
+            $result.Snapshot.RunId -eq 'unchanged' -and
+            $result.Previous.RunId -eq 'current' -and
+            $historyBefore -eq $historyAfter) `
+            'Finalization created a duplicate business snapshot or changed its baseline.'
+    }
+
     Invoke-SummaryTest 'Render a failure alert without creating a business snapshot' {
         $historyBefore = @(Get-ChildItem -LiteralPath (Join-Path $dataAllRoot 'CollectionSummary') -Filter '*.csv' -File -Recurse).Count
         $result = & $summaryPath @parameters -RunId 'failed-run' -RunStatus 'Failed' `
@@ -207,7 +224,7 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.3.4' -and
+            $result.ScriptVersion -eq '1.3.5' -and
             $result.Subject -match 'mail transport test' -and
             $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
             $result.BodyHtml -match 'data:image/png;base64,' -and
@@ -224,6 +241,41 @@ try {
             $content -match 'ConvertTo-Json -Depth 12' -and
             $content -match 'Graph mail request failed') `
             'The isolated Graph SDK mail transport contract is incomplete.'
+    }
+
+    Invoke-SummaryTest 'Stop a stalled Graph mail worker at the configured deadline' {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            $summaryPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+        $definition = $ast.Find({
+                param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Invoke-SmartWorkplaceCMDBSummaryGraphMailWithTimeout'
+            }, $true)
+        $timeoutFunction = $definition.Body.GetScriptBlock()
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $message = ''
+        try {
+            & $timeoutFunction `
+                -TenantId 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' `
+                -ClientId 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' `
+                -CertificateThumbprint 'ABCDEF' `
+                -Uri 'https://graph.microsoft.com/v1.0/users/test/sendMail' `
+                -Body '{}' `
+                -TimeoutSeconds 1 `
+                -WorkerScriptBlock { Start-Sleep -Seconds 5 }
+        }
+        catch { $message = $_.Exception.Message }
+        finally { $watch.Stop() }
+        Assert-SummaryTrue ($parseErrors.Count -eq 0 -and
+            $null -ne $definition -and
+            $message -match 'configured timeout of 1 seconds' -and
+            $watch.Elapsed.TotalSeconds -lt 4) `
+            'The Graph mail deadline did not stop a stalled worker.'
     }
 
     Invoke-SummaryTest 'Prefer the configured client logo over the default brand' {
@@ -276,14 +328,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.4; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.5; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCy5EXS5UH4uEOU
-# hl1+Kg5mdnb2y3FM6pMNktUyJ5xObqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6FDKT2Eahsf5e
+# 2Y6zogm2fWuLVeJ03CGbZw1c713BhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -416,31 +468,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINRkex74PlfLsDWbY0TBun4p5pHKBoZuz4WgbVWfi6yZMA0GCSqG
-# SIb3DQEBAQUABIIBgGFc67V1XSksSovvWqvdilgFhIR0ADcFYIyG+KMor6EsRY1a
-# A3IMxj0jXIy8Ey7GuUu6EMSnMfcUfIlRiO9/Gdm6DB+3tTXE5p/zX3SqSmKwWP5y
-# EmuVV/bPMDK+qoAjocndxp+S2Sk35+CZAZ2xibhEZyeuXV44eRZwE3oqbWmXviep
-# 3ysDyTpLSFW6vR83zjDgHJ/0agC4BdAzn7S1rGZ9/c0wQHIR+LfexFRTUJ2ByJBR
-# mWJUlUKO912jgzMmoduKrDNljLgdm4lqDkZ1uvozgcpQevylF5WsPzmNv0oOauhi
-# iJkkK8rcIKl4n+6SfLqaSLXtWXFDmb02+yOHCHjQwBRE9CYPrmgITkH+wyDBinjQ
-# lc6ZoiBojyxCjUgaRYDeJx1JZOjNlQrXH8M+0Kz2vdyPIkV2m5Vhk7PmwpBkLNuv
-# E7yFreJKgcuWa1NrJomUPkn1OnPmsMKJ9LrI9X4aGqiWRH5e5AJVjWnYxFKAwbu0
-# U2lKu3qxqdm6TIgV46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGbQKPcwRDiRCx14WwoyHBAFL0eKIfkzd2b9whmpKCMSMA0GCSqG
+# SIb3DQEBAQUABIIBgAHj23Ffg00IVA4Q3ZtX3oRptg5ABJM4SHS3j0n6I0Ip/fip
+# JKnnk7NTdgnX3Gcg6P2ws7KnEJ+x3fDVvv4bpOAsi0dmoXsYcRZ4ZRC7HL/2uj1A
+# XieSo0F6PwWc0pHx06B38ogX/9/OcRsnpkg7cpkv+29A4Ma7CPPC3vwYDNfJIWL/
+# gvMJh+EfLyVLslo9DeqOFPl7t4AmtUd4H2PTUedzDSuVQWnaqvrSFcYjfzzIBchL
+# Sf5lJ0/K0PfFDspxLml8BHghOC6CNC34rseqWTumX7NEKlMplU9FtFpizA6U2Qg6
+# Fdk+S+IhyeYyjE2NqklIuoUzK851nCeT/MPy1DSuKYqBJqYBbiu/M8slce9XXOPm
+# ZeOgduYSufZwNSdGvLWtHIcmsRN6M5au9a/gqIQTWDqnwNgaT5inVlSDbUI2DcoW
+# qK0h/V85s1B6qJMMNZxn7RuA/AVfPPzddScENjtWS3llWv0Bd01bugnQWzX9iF+e
+# TFw6vJg7UkcIzN0G36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNzA1
-# NThaMC8GCSqGSIb3DQEJBDEiBCCZD/AYyKS33LIaIxf4jGKw2WWAQDWBI3pZXw5I
-# rh4pvzANBgkqhkiG9w0BAQEFAASCAgCWJYTiXDXtcp8EWN2P5WnqTC4oNyX7nLIJ
-# JBvPh0VHlUexxNHdgTAilkSpCdrc9zO5TXQNxrV3IVfmB61hy0U8SzjZ8WrfZHRD
-# YpKJ2TZWSqzCvUAwhmtuWjUmmKm8PEDQbMT5w9M8VTUzjXzuiPtv6h1rVWm8rj2P
-# 9Kk7h76Nwni1dp/TlFk3tOZNDAFYB5CccniYaV81i+8e11aHEToWd4+b5dC6Z/gL
-# 44/3HPnpn5z4RTpmHDS852cpWIbn2D8ArP66C42SD2fb8329KtHLIuHN9BxfBfkz
-# JODxqvZ/BfsQDe2M6TW6PwrTVfaLj/9odPACPrCsYJaHL0ZK7ivlgklKbA4Myyb6
-# BHa7odAnLtT55/rVVzak//fotF/7UK/kiTSNEzKnxl40ao1O58TP4XodPqFq2iYn
-# iMxbNgK0s/qh7I1rmZRH62z21HuKENzOyUnRYfoFMxImK7RBrknepCOmO/E5Du4P
-# 2nF+IMVJLKC8wTDnYMZmQxBu2mmx+lRRk6LOrVvL1hMPAwl5Kwyu1AaTDp/D2bjp
-# /Y3OS6bL2LERjLfQ9CF6o9kz3c9Auvhl+ylibOYVpftOfOAhrgLJLyVFcP5L+Jz7
-# mHmdw+BMup9w6vpruJKn0UfCb+/SvX29/e3IlZIhWsxWnxdgJLtiFomMofEpS+Y4
-# hzhCJDWdUA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
+# MTBaMC8GCSqGSIb3DQEJBDEiBCDdtSwB0xZ935i2XJZU8bzYbUef7oZCydmo4ejT
+# Q9kvSDANBgkqhkiG9w0BAQEFAASCAgBOyDsqp/439FZB1IY1hb8VF3TTEYejKBqq
+# s9ng7YEvtPYWl/VO3HD4c4k7SJY1kcz5Q6AI/VLmt5VAoYOP/q9Avm5sqag/bunh
+# /suHOT+3AGjoZKrZG8fcWX5i9yVZjfr/oSI7QVSnlz7kvxhV2E5Q3BHMFJDrc3iP
+# ogm0T3HPHeDW2KFUwDVfzw/qeqxKLA0z48lEOdnlSOVp8baLBlpiKhYvXEvLPR4r
+# UAyTnfZeRXOz/fYORJEV4BAQZjGEDe1e3ZMadnlFe/0W154lZpXLx8WT8wmp7NuL
+# 6zJc6+vXN8nRGbWy3N4GQclYeQvocKEc7+sMHxMiR3DVVMxEW0a3+gA+fCvGA/Bx
+# MOzrYWGxzI5P7jWRGdfqktboigXLpvAIASz1FD8jsrT5g6e1xVUha/xTjBRexVBg
+# eY1mXQRJztgy4xuBg1kfpsp4B40glrlP/jc+K7SDfPDAH4bPaUB6nqZ8wxuWOYg7
+# 3HK89Mlqn9jzlLf92xqKNHOorwLEu6tid9q0v5qNn4EgJidzQyFqI4mLd3URFkxh
+# 8APeOeQObqcLgN/hip05tyK/uatBLu0224qKX59NFzwIRiCSdB6lSEmQ/ENxFnCs
+# yjVsfcRCkJtxSANo8T36Y+9Hi6n7UutOW7Q40diQrkkrEaSJPmq1RtQcU6PDDmLc
+# +Ud7zjq4iQ==
 # SIG # End signature block
