@@ -44,6 +44,7 @@
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-EntraUsers.cmd",
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-ExchangeOnlineMailboxes.cmd",
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-Full-Collect.cmd",
+  "Launchers/Cloud/Start-SmartWorkplaceCMDB-Full-Finalize.cmd",
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-Full-Validate.cmd",
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-IntuneDevices.cmd",
   "Launchers/Cloud/Start-SmartWorkplaceCMDB-M365SubscribedSkus.cmd",
