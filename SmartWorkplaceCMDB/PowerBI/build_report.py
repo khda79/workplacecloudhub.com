@@ -13,6 +13,9 @@ import re
 from pathlib import Path
 
 VERSION = "1.0.0-local-report"
+PROJECT_NAME = "SmartWorkplaceCMDB"
+REPORT_ARTIFACT_NAME = f"{PROJECT_NAME}.Report"
+SEMANTIC_MODEL_ARTIFACT_NAME = f"{PROJECT_NAME}.SemanticModel"
 BASE = "https://developer.microsoft.com/json-schemas/"
 IDENTITY = ["TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId"]
 PRODUCT = Path(__file__).resolve().parents[1]
@@ -762,8 +765,8 @@ def build(root, output, include_360=False):
                     t, c = field["Expression"]["SourceRef"]["Entity"], field["Property"]
                     if (typ == "Column" and c not in columns[t]) or (typ == "Measure" and (t, c) not in {(m["table"], m["name"]) for m in ms}):
                         raise ValueError("Unbound visual field")
-    model_dir = output / "CMDB-REPORTS.SemanticModel"
-    report_dir = output / "CMDB-REPORTS.Report"
+    model_dir = output / SEMANTIC_MODEL_ARTIFACT_NAME
+    report_dir = output / REPORT_ARTIFACT_NAME
     tables = []
     for name, rows in data.items():
         path = output / "ReportData" / (name + ".csv")
@@ -788,7 +791,7 @@ def build(root, output, include_360=False):
     write_json(model_dir / "model.bim", {"compatibilityLevel": 1600, "model": {"culture": "en-US", "defaultPowerBIDataSourceVersion": "powerBI_V3", "tables": tables,
                "relationships": [dict(name="cmdb-report-" + str(i), fromTable=f, fromColumn=fk, toTable=d, toColumn=dk, fromCardinality="many", toCardinality="one", crossFilteringBehavior="oneDirection", isActive=True) for i, (f, fk, d, dk) in enumerate(relationships)]}})
     write_json(model_dir / "definition.pbism", {"$schema": BASE + "fabric/item/semanticModel/definitionProperties/1.0.0/schema.json", "version": "4.2", "settings": {"qnaEnabled": False}})
-    write_json(output / "SmartWorkplaceCMDB.pbip", {"$schema": BASE + "fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": report_dir.name}}], "settings": {"enableAutoRecovery": True}})
+    write_json(output / f"{PROJECT_NAME}.pbip", {"$schema": BASE + "fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": report_dir.name}}], "settings": {"enableAutoRecovery": True}})
     write_json(report_dir / "definition.pbir", {"$schema": BASE + "fabric/item/report/definitionProperties/2.0.0/schema.json", "version": "4.0", "datasetReference": {"byPath": {"path": "../" + model_dir.name}}})
     definition = report_dir / "definition"
     write_json(definition / "version.json", {"$schema": BASE + "fabric/item/report/definition/versionMetadata/1.0.0/schema.json", "version": "2.0.0"})
