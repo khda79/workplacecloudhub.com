@@ -592,6 +592,43 @@ class CockpitNavigationTests(unittest.TestCase):
             "Windows Update evidence by state", 648, 240, w=608, h=184,
         )
 
+    def test_card_value_font_override_is_written_to_the_visual(self):
+        template = {
+            "visual": {
+                "visualType": "cardVisual",
+                "objects": {"value": [{"properties": {"fontSize": cockpit.lit(24)}}]},
+            }
+        }
+        with (
+            patch.object(cockpit, "clone_visual_by_type", return_value=template),
+            patch.object(cockpit, "set_card"),
+            patch.object(cockpit, "put", side_effect=lambda _items, visual, *_args: visual),
+        ):
+            visual = cockpit.add_card(
+                Path("ignored"), [], "licenses", "DimLicenseSku", "License SKUs",
+                "Observed SKUs", 24, 136, h=88, value_font_size=21,
+            )
+
+        font_size = visual["visual"]["objects"]["value"][0]["properties"]["fontSize"]
+        self.assertEqual(font_size["expr"]["Literal"]["Value"], "21D")
+
+    def test_licensing_kpis_request_the_compact_value_font(self):
+        with (
+            patch.object(cockpit, "new_page", return_value=({}, [])),
+            patch.object(cockpit, "compact_page_header"),
+            patch.object(cockpit, "add_slicer"),
+            patch.object(cockpit, "add_card") as add_card,
+            patch.object(cockpit, "add_ratio_bar"),
+            patch.object(cockpit, "add_table", return_value={}),
+            patch.object(cockpit, "set_categorical_values_filter"),
+        ):
+            cockpit.build_licensing(Path("ignored"))
+
+        self.assertEqual(add_card.call_count, 4)
+        self.assertTrue(
+            all(call.kwargs.get("value_font_size") == 21 for call in add_card.call_args_list)
+        )
+
     def test_lifecycle_uses_autopilot_and_endpoint_analytics(self):
         with (
             patch.object(cockpit, "new_page", return_value=({}, [])),
