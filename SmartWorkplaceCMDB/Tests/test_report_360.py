@@ -77,6 +77,25 @@ class Report360Tests(unittest.TestCase):
         self.assertEqual(data['LicenseAssignmentPath'][1]['GroupName'],'Fictional group')
         self.assertEqual(data['LicenseAssignmentPath'][1]['DisabledPlanIds'],'plan1;plan2')
 
+    def test_reported_orphan_license_path_stays_unresolved_and_reconciled(self):
+        orphan_key = 'fictional-prod|entra-user|absent'
+        fact_rows = report.read_csv(self.path('FactUserLicense'))[1]
+        fact_rows.append(dict(self.identity, TenantUserKey=orphan_key, CmdbUserId=orphan_key,
+                              TenantSkuKey='fictional-prod|s2', SkuId='s2', AssignmentState='Active'))
+        self.write('FactUserLicense', fact_rows)
+        finding = dict(TenantFindingKey='fictional-prod|q2', FindingId='q2', Severity='Warning',
+                       EntityType='UserLicenseAssignment', FindingType='OrphanUserLicenseAssignment')
+        self.write('FactDataQuality', [finding])
+        self.write('CMDB_DataQuality', [{k:v for k,v in finding.items() if k != 'TenantFindingKey'}])
+        self.paths.append(dict(RawAssignmentKey='path3', SourceUserId='absent', SkuId='s2',
+                               AssignmentState='Active', SourceCollectedDateTime=self.now))
+        self.write_raw('M365_UserLicenseAssignments', self.paths)
+        data,_,_=self.enriched()
+        unresolved=[r for r in data['LicenseAssignmentPath'] if r['UserLinkStatus']=='Unresolved']
+        self.assertEqual(len(unresolved),1)
+        self.assertEqual(unresolved[0]['TenantUserKey'],orphan_key)
+        self.assertEqual(unresolved[0]['Account'],'Unresolved user')
+
     def test_date_ambiguity_offsets_and_sentinel_are_not_guessed(self):
         data,_,_=self.enriched()
         self.assertEqual(data['DimUser'][0]['CreationUtcDateTime'],'')

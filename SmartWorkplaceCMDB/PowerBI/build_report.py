@@ -250,9 +250,32 @@ def prepare_data(root):
     pairs = [(r["TenantUserKey"].casefold(), r["TenantSkuKey"].casefold()) for r in data["FactUserLicense"]]
     if len(pairs) != len(set(pairs)) or any(not all(p) for p in pairs):
         raise ValueError("Blank or duplicate license pair")
+    user_keys = {r["TenantUserKey"].casefold() for r in data["DimUser"]}
+    reported_license_orphans = {
+        r["TenantUserKey"].casefold() for r in data["FactUserLicense"]
+        if r["TenantUserKey"].casefold() not in user_keys
+    }
+    if reported_license_orphans:
+        orphan_rows = [r for r in data["FactUserLicense"]
+                       if r["TenantUserKey"].casefold() in reported_license_orphans]
+        finding_count = sum(r["FindingType"] == "OrphanUserLicenseAssignment"
+                            for r in data["FactDataQuality"])
+        normalized = all(
+            r["TenantUserKey"].casefold() == r["CmdbUserId"].casefold()
+            and r["TenantUserKey"].casefold().startswith(
+                (r["TenantKey"] + "|entra-user|").casefold()
+            )
+            for r in orphan_rows
+        )
+        if not normalized or finding_count != len(reported_license_orphans):
+            raise ValueError("Orphan model relationship: FactUserLicense.TenantUserKey")
     for f, fk, d, dk in RELATIONSHIPS:
         parent = {r[dk].casefold() for r in data[d]}
-        if any(r[fk] and r[fk].casefold() not in parent for r in data[f]):
+        orphan_keys = {r[fk].casefold() for r in data[f]
+                       if r[fk] and r[fk].casefold() not in parent}
+        if (f, fk) == ("FactUserLicense", "TenantUserKey"):
+            orphan_keys -= reported_license_orphans
+        if orphan_keys:
             raise ValueError("Orphan model relationship: " + f + "." + fk)
     for fact, child, fk, ck, extras in [
         ("FactMailbox", "CMDB_Mailboxes", "CmdbMailboxId", "CmdbMailboxId", ["DisplayName", "PrimarySmtpAddress"]),
