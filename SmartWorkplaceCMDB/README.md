@@ -1,9 +1,7 @@
 # SmartWorkplaceCMDB
 
-The locally prepared distribution candidate is **1.1.3** on the stable channel.
-It is validated as a reproducible local release; this does not by itself
-constitute tenant, gateway, endpoint or production qualification, and it is not
-a publication approval. See
+The current stable distribution is **1.1.3**. It is validated as a reproducible
+release; live connector and tenant outcomes remain environment-specific. See
 [release notes and installation/update guidance](Release/NOTES.md). The package
 builder uses `Release/Files.json` as an explicit public file allowlist and
 refuses prerelease metadata or unsigned PowerShell files.
