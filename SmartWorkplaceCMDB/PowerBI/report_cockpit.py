@@ -1688,9 +1688,15 @@ def add_kpi_icon(pages, visuals, page_id, key, x, y, w):
     return icon
 
 
-def add_card(pages, visuals, page_id, table, measure, title, x, y, w=296, h=96, precision=None):
+def add_card(
+    pages, visuals, page_id, table, measure, title, x, y,
+    w=296, h=96, precision=None, value_font_size=None,
+):
     visual = clone_visual_by_type(pages, "devices", ["devicesv8", "devicesv7", "devicesv9"], {"cardVisual"})
     set_card(visual, table, measure, title, precision)
+    if value_font_size is not None:
+        value_props = visual["visual"]["objects"]["value"][0]["properties"]
+        value_props["fontSize"] = lit(value_font_size)
     return put(visuals, visual, page_id, x, y, w, h)
 
 
@@ -2077,7 +2083,10 @@ def build_licensing(pages):
         ("FactUserLicense", "Users with assignments", "Licensed users"),
         ("DimUser", "License review candidates", "Review candidates"),
     ]):
-        add_card(pages, visuals, "licenses", *item, 24 + index * 312, 136, h=88)
+        add_card(
+            pages, visuals, "licenses", *item, 24 + index * 312, 136,
+            h=88, value_font_size=21,
+        )
     add_ratio_bar(pages, visuals, "licenses", "FactUserLicense", "AssignmentStateLabel", "FactUserLicense", "Assignment state rate", "License assignments", "Assignments by state", 24, 240, w=400, h=184)
     add_ratio_bar(pages, visuals, "licenses", "DimLicenseServicePlan", "ProvisioningStatus", "DimLicenseServicePlan", "Service plan provisioning rate", "License service plans", "Service plans by provisioning status", 440, 240, w=400, h=184)
     add_ratio_bar(pages, visuals, "licenses", "LicenseAssignmentPath", "AssignmentRoute", "LicenseAssignmentPath", "Assignment route rate", "Assignment paths", "Direct vs group assignment", 856, 240, w=400, h=184)
