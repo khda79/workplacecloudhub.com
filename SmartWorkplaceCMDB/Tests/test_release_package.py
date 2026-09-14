@@ -62,6 +62,20 @@ class ReleasePackageTests(unittest.TestCase):
         missing = sorted(dependency for dependency in dependencies if dependency not in entries)
         self.assertEqual(missing, [])
 
+    def test_orchestrator_fixtures_are_allowlisted(self):
+        entries = set(load_allowlist())
+        orchestrator = PRODUCT / "Orchestration" / "SmartWorkplaceCMDB-Orchestrator.ps1"
+        fixture_pattern = re.compile(
+            r"FixtureName\s*=\s*['\"]([^'\"]+)['\"]",
+            flags=re.IGNORECASE,
+        )
+        fixture_names = set(
+            fixture_pattern.findall(orchestrator.read_text(encoding="utf-8-sig"))
+        )
+        expected = {f"Tests/Fixtures/{name}" for name in fixture_names}
+        missing = sorted(expected - entries)
+        self.assertEqual(missing, [])
+
 
 if __name__ == "__main__":
     unittest.main()
