@@ -8,6 +8,13 @@ Active Directory inventory and reporting scripts.
 - `SmartM365-ActiveDirectory-HealthCheck.ps1`: AD forest health check across domains and domain controllers, with CSV export, mail report, LOG-ALL log/transcript finalization, and SharePoint upload when enabled.
 - Use `SmartM365-ActiveDirectory-Inventory.ps1 -ReportOnly` to regenerate daily reports from existing consolidated inventory CSV files without a live AD scan.
 
+Versions 1.44 (inventory), 1.0.22 (health check), 1.3 (computer enrichment)
+and 1.6 (user enrichment) publish current CSVs, append histories and manifests
+through same-folder temporary files. A failed domain collection now blocks the
+combined inventory instead of promoting a partial forest result. These changes do
+not alter the existing CSV columns, identity keys, health thresholds or enrichment
+rules. Detailed synthetic audit evidence is retained outside the public repository.
+
 ## Enriched CSV schema
 
 The canonical Active Directory inventory files contain the enriched schema:
