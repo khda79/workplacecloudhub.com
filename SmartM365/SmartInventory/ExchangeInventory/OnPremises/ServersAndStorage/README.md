@@ -5,6 +5,9 @@ Exchange 2016 on-premises infrastructure and migration readiness inventory for s
 ## Scripts
 
 - `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. It does not use WinRM, PowerShell remoting, `Get-CimInstance`, or `New-CimSession`.
+- Version 1.6.1 routes each timestamped/current CSV pair through the shared
+  atomic exporter. A failed current promotion is terminating and does not replace
+  the preceding valid current file. CSV schemas and readiness rules are unchanged.
 
 ## Output
 
