@@ -224,6 +224,31 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertIn("report, local_path, remote_path, data_dir", source)
         self.assertIn("File.Contents(CMDBDataRoot &", source)
 
+    def test_explicit_report_data_directory_precedes_parameter_discovery(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            report = root / "project" / "CMDB-REPORTS.Report"
+            local_data = report.parent / "ReportData"
+            explicit_data = root / "explicit"
+            parameter_root = root / "parameter"
+            parameter_data = parameter_root / "PowerBI" / "CMDB-REPORTS" / "ReportData"
+            for path in (local_data, explicit_data, parameter_data):
+                path.mkdir(parents=True)
+            model = {"expressions": [{
+                "name": "CMDBDataRoot",
+                "expression": f'"{parameter_root}" meta [IsParameterQuery=true]',
+            }]}
+            self.assertEqual(
+                cockpit.resolve_report_data_dir(report, model, explicit_data),
+                explicit_data.resolve(),
+            )
+            self.assertEqual(
+                cockpit.resolve_report_data_dir(report, model),
+                parameter_data,
+            )
+            with self.assertRaisesRegex(ValueError, "Explicit ReportData"):
+                cockpit.resolve_report_data_dir(report, model, root / "missing")
+
     def test_quality_indicators_are_explicit_and_non_additive(self):
         self.assertEqual(
             [name for name, _expression, _description in cockpit.QUALITY_INDICATORS],
