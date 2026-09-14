@@ -146,6 +146,10 @@ writing the generated project. Raw IDs and names remain private in ReportData.
   is not classified as disabled.
 - Users with assignments include all assignment states. This is not a count
   of active or used licenses.
+- A normalized license assignment whose user is absent from the same Entra
+  snapshot is retained only when a matching `OrphanUserLicenseAssignment`
+  quality finding exists. It remains unresolved through the user relationship,
+  is included in global assignment totals and does not create a synthetic user.
 - Capacity is displayed only for a single SKU. Do not sum different products
   as a count of people. The assignment-state filter does not filter capacity.
 - Compliant device share is explicitly compliant devices divided by all
