@@ -47,6 +47,21 @@ class ReleasePackageTests(unittest.TestCase):
                     missing.append(f"{module.relative_to(PRODUCT).as_posix()} -> {package_path}")
         self.assertEqual(missing, [])
 
+    def test_orchestrator_static_project_dependencies_are_allowlisted(self):
+        entries = set(load_allowlist())
+        orchestrator = PRODUCT / "Orchestration" / "SmartWorkplaceCMDB-Orchestrator.ps1"
+        pattern = re.compile(
+            r"Join-Path\s+\$projectRoot\s+['\"]([^'\"]+)['\"]",
+            flags=re.IGNORECASE,
+        )
+        dependencies = {
+            Path(match.replace("\\", "/")).as_posix()
+            for match in pattern.findall(orchestrator.read_text(encoding="utf-8-sig"))
+            if Path(match).suffix.lower() in {".json", ".ps1", ".psd1"}
+        }
+        missing = sorted(dependency for dependency in dependencies if dependency not in entries)
+        self.assertEqual(missing, [])
+
 
 if __name__ == "__main__":
     unittest.main()
