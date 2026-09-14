@@ -1250,19 +1250,13 @@ def validate_upgrade_eligibility_source(path: Path):
     return rows
 
 
-def enrich_semantic_model(
-    report: Path,
-    local_path: Path | None,
-    remote_path: Path | None,
-    upgrade_eligibility_path: Path | None = None,
-):
-    model_path = next(report.parent.glob("*.SemanticModel/model.bim"), None)
-    if not model_path:
-        raise ValueError("Expected one BIM semantic model beside the report")
-    model_json = load(model_path)
-    model = model_json["model"]
-    derived_data_dir = report.parent / "ReportData"
-    data_dir = derived_data_dir
+def resolve_report_data_dir(report: Path, model, report_data_override: Path | None = None):
+    if report_data_override is not None:
+        data_dir = report_data_override.resolve()
+        if not data_dir.is_dir():
+            raise ValueError(f"Explicit ReportData directory not found: {data_dir}")
+        return data_dir
+    data_dir = report.parent / "ReportData"
     parameter = next((item for item in model.get("expressions", []) if item.get("name") == "CMDBDataRoot"), None)
     if parameter and isinstance(parameter.get("expression"), str):
         parts = parameter["expression"].split('"')
@@ -1270,6 +1264,24 @@ def enrich_semantic_model(
             candidate = Path(parts[1]) / "PowerBI" / "CMDB-REPORTS" / "ReportData"
             if candidate.is_dir():
                 data_dir = candidate
+    if not data_dir.is_dir():
+        raise ValueError(f"ReportData directory not found: {data_dir}")
+    return data_dir
+
+
+def enrich_semantic_model(
+    report: Path,
+    local_path: Path | None,
+    remote_path: Path | None,
+    upgrade_eligibility_path: Path | None = None,
+    report_data_override: Path | None = None,
+):
+    model_path = next(report.parent.glob("*.SemanticModel/model.bim"), None)
+    if not model_path:
+        raise ValueError("Expected one BIM semantic model beside the report")
+    model_json = load(model_path)
+    model = model_json["model"]
+    data_dir = resolve_report_data_dir(report, model, report_data_override)
     identity, hosting_rows, metadata = mailbox_hosting_rows(
         report, local_path, remote_path, data_dir
     )
@@ -2691,6 +2703,7 @@ def prepare(
     exchange_onprem_local: Path | None = None,
     exchange_onprem_remote: Path | None = None,
     upgrade_eligibility: Path | None = None,
+    report_data: Path | None = None,
 ):
     report = report.resolve()
     pages = report / "definition" / "pages"
@@ -2710,6 +2723,7 @@ def prepare(
         exchange_onprem_local,
         exchange_onprem_remote,
         upgrade_eligibility,
+        report_data,
     )
     for builder in [build_risk, build_lifecycle, build_licensing, build_fleet_hardware,
                     build_people_messaging, build_business_services,
@@ -2825,10 +2839,12 @@ if __name__ == "__main__":
     parser.add_argument("--exchange-onprem-local", type=Path)
     parser.add_argument("--exchange-onprem-remote", type=Path)
     parser.add_argument("--upgrade-eligibility", type=Path)
+    parser.add_argument("--report-data", type=Path, help="Explicit private ReportData directory; takes precedence over CMDBDataRoot discovery.")
     args = parser.parse_args()
     print(json.dumps(prepare(
         args.report,
         args.exchange_onprem_local,
         args.exchange_onprem_remote,
         args.upgrade_eligibility,
+        args.report_data,
     ), ensure_ascii=False))
