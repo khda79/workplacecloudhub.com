@@ -209,7 +209,7 @@ Run the synthetic offline suite without network access:
 Apply the cockpit only to an authorized private PBIR folder after making a
 backup. The following path is a fictional placeholder:
 
-    python .\SmartWorkplaceCMDB\PowerBI\report_cockpit.py --report ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS\CMDB-REPORTS.Report"
+    python .\SmartWorkplaceCMDB\PowerBI\report_cockpit.py --report ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS\SmartWorkplaceCMDB.Report"
 
 When preparing a replacement snapshot outside the configured `CMDBDataRoot`,
 pass its exact private folder with `--report-data`. This explicit directory

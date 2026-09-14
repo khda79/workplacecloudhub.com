@@ -10,6 +10,7 @@ from pathlib import Path
 
 IDENTITY = ['TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId']
 PRODUCT = Path(__file__).resolve().parents[1]
+REPORT_ARTIFACT_NAME = 'SmartWorkplaceCMDB.Report'
 DETAIL_COLUMNS = IDENTITY + ['TenantDeviceKey', 'ManagedDeviceId', 'SerialNumber', 'Manufacturer', 'Model',
     'Storage', 'HardwareCollectedDateTime', 'InventoryCollectedDateTime', 'CollectionCoverage', 'CollectionMode']
 COVERAGE_COLUMNS = IDENTITY + ['Status', 'Coverage', 'Mode', 'RecordCount']
@@ -341,8 +342,8 @@ def prepare(project, output, hardware_path=None):
     if output.exists():
         raise ValueError('Preparation output must be new')
     identity, rows, coverage, hashes = prepare_data(project / 'ReportData/DimDevice.csv', hardware_path)
-    page, visuals = build_page(project / 'CMDB-REPORTS.Report')
-    fleet_page, fleet_visuals = build_fleet_page(project / 'CMDB-REPORTS.Report')
+    page, visuals = build_page(project / REPORT_ARTIFACT_NAME)
+    fleet_page, fleet_visuals = build_fleet_page(project / REPORT_ARTIFACT_NAME)
     output.mkdir(parents=True)
     write_report_data(output, rows, coverage)
     payload = {'tables': model_definitions(project / 'ReportData', identity), 'measures': measures(),

@@ -181,7 +181,7 @@ class Report360Tests(unittest.TestCase):
         hashes={p:report.sha(p) for p in self.root.rglob('*') if p.is_file()}
         output=self.base/'new'
         with contextlib.redirect_stdout(io.StringIO()):report.build(self.root,output,True)
-        model=json.loads((output/'CMDB-REPORTS.SemanticModel/model.bim').read_text())['model']
+        model=json.loads((output/'SmartWorkplaceCMDB.SemanticModel/model.bim').read_text())['model']
         self.assertEqual(len(model['tables']),32)
         table_names={table['name'] for table in model['tables']}
         self.assertIn('FactEndpointAnalyticsUpgradeEligibility', table_names)
@@ -194,7 +194,7 @@ class Report360Tests(unittest.TestCase):
         manifest=json.loads((output/'REPORT-MANIFEST.json').read_text())
         self.assertEqual(len(manifest['pages']),9)
         for name in ['device360','user360','group360']:
-            page=json.loads((output/f'CMDB-REPORTS.Report/definition/pages/{name}/page.json').read_text())
+            page=json.loads((output/f'SmartWorkplaceCMDB.Report/definition/pages/{name}/page.json').read_text())
             self.assertEqual(page['pageBinding']['type'],'Drillthrough')
             self.assertEqual(page['pageBinding']['parameters'][0]['boundFilter'],page['filterConfig']['filters'][0]['name'])
         self.assertEqual(hashes,{p:report.sha(p) for p in self.root.rglob('*') if p.is_file()})
