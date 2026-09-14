@@ -3,13 +3,13 @@
 Validates Intune operational collection and normalization with synthetic data.
 
 .VERSION
-1.3.1
+1.3.2
 #>
 [CmdletBinding()]param()
-$ScriptVersion='1.3.1';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
+$ScriptVersion='1.3.2';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
 $passed=0;$failed=0
 function Invoke-Test{param([string]$Name,[scriptblock]$Test)try{&$Test;$script:passed++;Write-Information "PASS $Name" -InformationAction Continue}catch{$script:failed++;Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue}}
-function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw$Message}}
+function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw $Message}}
 $projectRoot=Split-Path -Parent $PSScriptRoot
 $collector=Join-Path $projectRoot 'Collectors\Intune\SmartWorkplaceCMDB-IntuneOperational-Collect.ps1'
 $normalizer=Join-Path $projectRoot 'Collectors\Intune\SmartWorkplaceCMDB-IntuneOperational-Normalize.ps1'
@@ -18,6 +18,16 @@ $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('SmartWorkplaceCMDB-IntuneOperat
 $identity=@{Tenant='audit';OrganizationKey='contoso';EnvironmentKey='test';TenantKey='contoso-test';TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';DataRootPath=$tempRoot;NoConfigWrite=$true}
 try{
     New-Item -ItemType Directory -Path $tempRoot -Force|Out-Null
+    Invoke-Test 'Use AppInvRawData as the only complete detected-application source' {
+        $source=Get-Content -Raw -LiteralPath $collector
+        $directCalls=[regex]::Matches($source,"Invoke-SmartWorkplaceCMDBGraphPagedRequest[^\r\n]+deviceManagement/detectedApps\?")
+        Assert-True ($directCalls.Count -eq 1) 'The collector must retain exactly one bounded detectedApps query.'
+        Assert-True ($source -match 'if\(\$MaxItems-gt0\)\{\s*\$apps=@\(Invoke-SmartWorkplaceCMDBGraphPagedRequest[^\r\n]+deviceManagement/detectedApps\?') 'The direct detectedApps query is not restricted to bounded collection.'
+        $completeBranchMatch=[regex]::Match($source,'if\(\$MaxItems\s*-eq\s*0\)\{')
+        $completeBranchIndex=if($completeBranchMatch.Success){$completeBranchMatch.Index}else{-1}
+        $exportCallIndex=$source.IndexOf('$exportCsv=Get-AppInventoryRawExport',[StringComparison]::Ordinal)
+        Assert-True ($completeBranchIndex -ge 0 -and $exportCallIndex -gt $completeBranchIndex) 'Complete collection is not routed through AppInvRawData.'
+    }
     Invoke-Test 'Validate without creating output' {&$collector @identity -InputJsonPath $fixture -ValidateOnly|Out-Null;Assert-True(-not(Test-Path(Join-Path $tempRoot 'DATA-LAST')))'ValidateOnly created output.'}
     Invoke-Test 'Collect five independent source tables' {
         & $collector @identity -InputJsonPath $fixture|Out-Null
@@ -94,8 +104,8 @@ if($failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI3a/OsoD4cB1e
-# pMm7Rtx7KckjbAsQtxoX3d0sRB5OCaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASo1TyPymqb0Da
+# iifLcikHp0G0iGo8UUfZEa+iyxq6KqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -228,31 +238,31 @@ if($failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJFuepl2tvpmQsZPMrVLZoPHVf9nPvnkpyvFPo+GdTVoMA0GCSqG
-# SIb3DQEBAQUABIIBgCBMbG7CNkAp4qqH2SGW/POvFumIno1PqMc498e2gLpoAI2A
-# FbtcTZTpWWZ3Xsm//OBHC79fJPkr/LPpr5MmPFcol9zYRr/jR2kb0RkwjHFxri1r
-# fwLqeyHs5DBtxoD+awwoovj3QvD9Od6JNwP9uATTflu3jjpvbbqBuusc4SZ2ywbo
-# 67zhIKG27FAkKpPfOxpe4gXFj+tfCpEUIIXRZhdNfMMSgn3QiUnKlOBGlrBwQMgf
-# zu814zJYNeAMV887ao6/bWy13BXgRv072M58dCyxXioB3HVArtSYIcjcvRv/y2Io
-# dUwfcstUAUhdsU+hQuMq+3jq+nhS+NdTZd71zuQKiAkP2Lnhv91OR+HvhHz1JnJO
-# 0+1Gl9KRnauWJLmxTHr2bkeht3butIlCHMRWlF+D/Y5cVVLoBkultlonqHQ48wqW
-# rdxx3HCz4vQ5wdZMwzIpFqGu2Ra3VpbZuaKcyWI6jYLAdnlrRSXS+pFDMaPg0laU
-# SIFOBuyQi47Pqs37/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFOeTfbdw6FqqxzpkSgdHKu0GQWX9NtKRU7/QIV8Ie+aMA0GCSqG
+# SIb3DQEBAQUABIIBgG+K6isx3tS7EGxnlSMr3C3MwWMJBCNkNUeEr214Xs6dAxp6
+# f93/lnotOCdw4GBEYZ5GDlRvEHsYTV3OHVLMq7EvSnGHDvrvkPg3ip2L9f4iTUUJ
+# gSwfOtaGEEw64nuU30b5DHfmghvVSEY464fnlhPVIDZjsethrheg4bGYSkxd165t
+# zG9ZfiB9n3mm2+e4P8X0XQxpFqTotPPLYQHG/3AOnuFhCA9Zpe4nytncnjQcIfK9
+# DzZcLpV99mXKkk/HnpDPFykXwZ8wNrBuqW/xD/BxZ2GQxf4ePdmv7kA6CKA71IYP
+# uB8JP76h/u96Dx0ptVma3rtcejYszHjy5NRh3fEI+dyDGeHD+8Gh3JmFcbKecqbP
+# sKlQuhzW+a5qCMExrGGQzhy4TVjNncMuUKGC4i+cyNObCHLADF8ddH3wbo8FVneZ
+# rNgkoeYk1Dyl/xwrF/Gef9Xdgf9rjkx39lNnpguTYn66sZyF1oO0No6bqx3SENHJ
+# fRo+Uwnsml8q0WRZoKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
-# NThaMC8GCSqGSIb3DQEJBDEiBCA7vw7v/7w/YmG0Oi1IcS2aP2J/5su/FXJgajcf
-# 6c3vzzANBgkqhkiG9w0BAQEFAASCAgBZZhUQjhnfwmClDu05oVrfl/3XPAWLR8zM
-# asylsFVBedO6Sl4Y5egTvPiJlGC4gJdiqrvL4I1rt4bWYTQouC+BF1mY717YKDgu
-# JrxfLdok0TtcM0YzGWUyOvkRtVnbH09GeZkA0F+NdiDrLJw6PCXk1YzrpXiRpBr3
-# 4x8bgtoKPYKeBFu/N/oIcLM5f1jRpmcAfxw6mxzSD1LX3IIAvH7KH7oJA/pVX/7i
-# 4RniEIYluv//aFFl25hhr5vavD3N3El00/twLi55Bf2GITqGfpZnYoSBpK94anXP
-# D3DTlZmYAJvkOog9MaYT47+cCXX8sQaIK+o+Knx0G1+3X7e6eOpCLB5qxNPKLSH+
-# 8zHzzQja21iyYIene6u1EK+AdiR2MEme/gFPER7HKWlMe2YLRiNzkZaw9oJQ6mUC
-# XPZJ0nIcBMQdK5VgNoL8MiWBQSXx2vctUVwDU4tIaM95lUk50y87FLXuODawTBxM
-# XVBq3YZtllUAhWTnA0et40AtewDkrwI9ADxiAXTU6vlVQYgYg/EuLO6Y1M+gDLHD
-# LdJbNvNeMTnx/1xrTVMD3aTgh207046TIphj4w+AWwat6m0HFBeAaYZfKIAmVST+
-# rr+VRVUDzGgl5jektCDDAZdqPxCyJ34nBwYJ5jtic2lf2TQzvWAKiBAmYZxkF/2s
-# FuLP/DQRVw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODE3
+# NTlaMC8GCSqGSIb3DQEJBDEiBCA4ZapxgQ+GxnOp1sBp2LoTcEIke77KHsqvbxu1
+# f1EMojANBgkqhkiG9w0BAQEFAASCAgBk8p9tbM1nmmym24CBRSzOca0LkHnVOtdD
+# 90/zoaiuJ7XRriKElvKtZDzCRH22oOOaj/m+sdQOujs3ESkOpEDfXA26fffzKzqm
+# xQDUq4DtxCpEW+40u7bGT3JK6SINRg09aKhpwxKv3sM+V/16zzuWQ3eV2/MCT0Nh
+# oV9Gbd7kMXwHX2UGUEFX6mDMnxOgHdCt3lN0ak81DXunMQEwTKL//v/WKkuzwRhb
+# odNRPK0Ncmy+rZSkhAr0JAW0LZ7owAfvxKDylq7SJ0UWGSXcslQwpuTp5o8SOb1q
+# 6IcGJ1OaYDDqf0DrK73KHpf0u2fRuyQ3VRaDelhz0aaadHXlj5HY/tQqJnKrnNfQ
+# nJOpa6X5KQf2YYW6Ey02FZMYgmWJVkh6iQ8cW5dWeaJ6kMKACX8pOkS3ruXPEW34
+# rx3GcRS7iFtgS597zWUU8cPkowWMZf+8K8D/TrTxPLFLNT4mNqStbs94uLL9IOVC
+# SbaMlipDOCoC9dq9G1v5Xg+TyPrYwxszTm9Dl4SKLSpZcwtGCEZuyjCyWwyrC+yv
+# X3ECF1NQDqL0ey0sOtgYwsHtKXqyHUVwpQmxlDE5Nsw6SALN1QGgj99QvjUPybTC
+# qhzov3tr1N1DPhLMDSZE/vyp8vmfdIZmBIDPS9Lzt5aPkfZHxBVEf7OPp6Eqm7ys
+# 9d58Nwhx6Q==
 # SIG # End signature block

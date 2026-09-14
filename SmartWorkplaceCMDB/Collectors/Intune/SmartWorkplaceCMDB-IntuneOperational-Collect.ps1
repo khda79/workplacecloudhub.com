@@ -9,7 +9,7 @@ collector uses explicit Microsoft Graph fields and supports one synthetic JSON
 fixture containing the four source families.
 
 .VERSION
-1.3.0
+1.3.1
 #>
 [CmdletBinding(DefaultParameterSetName='Graph')]
 param(
@@ -22,7 +22,7 @@ param(
     [switch]$NoConfigWrite,[switch]$ValidateOnly
 )
 
-$ScriptVersion='1.3.0'
+$ScriptVersion='1.3.1'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $script:ExactApplicationIdCache=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
@@ -160,7 +160,13 @@ try{
         foreach($app in $apps){$exactDeviceCounts[(Get-Text(Get-Value $app 'id'))]=0};foreach($group in @($appDeviceRelations|Group-Object{Get-Text(Get-Value $_ 'appId')})){$exactDeviceCounts[[string]$group.Name]=@($group.Group|ForEach-Object{Get-Text(Get-Value $_ 'managedDeviceId')}|Where-Object{$_}|Sort-Object -Unique).Count}
     }else{
         $autopilot=@(Invoke-SmartWorkplaceCMDBGraphPagedRequest -TenantId $paths.TenantId -ClientId $clientId -CertificateThumbprint $thumbprint -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities?$top=999' -RequiredPermission 'DeviceManagementServiceConfig.Read.All' -MaxItems $MaxItems)
-        $apps=@(Invoke-SmartWorkplaceCMDBGraphPagedRequest -TenantId $paths.TenantId -ClientId $clientId -CertificateThumbprint $thumbprint -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$select=id,displayName,version,publisher,deviceCount,platform&$top=999' -RequiredPermission 'DeviceManagementApps.Read.All' -MaxItems $MaxItems)
+        # A complete collection is sourced from AppInvRawData below because it carries
+        # the exact application-device grain. Enumerating detectedApps first would be
+        # redundant, would be discarded, and is heavily throttled on large tenants.
+        $apps=@()
+        if($MaxItems-gt0){
+            $apps=@(Invoke-SmartWorkplaceCMDBGraphPagedRequest -TenantId $paths.TenantId -ClientId $clientId -CertificateThumbprint $thumbprint -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$select=id,displayName,version,publisher,deviceCount,platform&$top=999' -RequiredPermission 'DeviceManagementApps.Read.All' -MaxItems $MaxItems)
+        }
         $preparedFolder=Join-Path ([IO.Path]::GetTempPath()) ('SmartWorkplaceCMDB\Prepared\{0}'-f[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $preparedFolder -Force|Out-Null
         $preparedAppDeviceCsvPath=Join-Path $preparedFolder 'Intune_DetectedAppDeviceRelationships.csv'
         $relationColumns=@($tables['Intune_DetectedAppDeviceRelationships.csv'].columns|ForEach-Object{[string]$_})
@@ -277,8 +283,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBi25veXY98PyiC
-# CMuuXJFcs1GJJfRi1I1VbYFRH9dPP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFNkmWFdM2uW87
+# 1bWL3vPbrHovS1a+rPpDtvKzxz9vdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -411,31 +417,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAY07O/j5u104MNDKnfqBnEz+K/yqS0S8nn0qWFiid6/MA0GCSqG
-# SIb3DQEBAQUABIIBgBobbNPPPYyOXLCM4saLpdfNhBqWVM+oj06N5vU3yee++xEl
-# 1akbeZay9WWRLQFqEn2Mk8WJP3bz2zkZlFQnF/Kpc43FFQ6SX6wR9HIUAcKuGJ51
-# qixMx9f9JC56BR0TXgy3Ozl4yslmIRF3+9/Qj29qSrngJxXVD0BlW9Sqc8sFyzug
-# SfhBb/00eQkxy4Sy2ClEeqsFi9XdpYSK97bOPfShIqjP97M8VOMm3hXt4WqpOTHz
-# +BtKNAmb1dCgZ+kHArJ/LKOG7GgXw97b86D8j+HIBBQkF9Oy2vwFuAK3AKYynfw4
-# uQBjdoiK2QtWJc8dXCMVCx7q3qYgIgWBfAR9YCXRj0drcTv4naJKcXDyai9lovR8
-# HBbPlMkqJQtmwzshiznZjc3LVYFWQm5Ci0hfEgtG9f2yN+C9f79MUtXJrk8ImjwV
-# LIvQozMh2MT3SGjNlfaT1FoYyzzrb5soIMB8uywPTEmQWB7H+bKazc448rIChm8h
-# L2as3QJCSlJcqDJrs6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICYdsxH40GaPgqmuuLxc6D+t/Xhdy+JKa1yk09MacWIeMA0GCSqG
+# SIb3DQEBAQUABIIBgJGlEy6KLlaEbPHpWG+9X40P97lm28k3+VZYHvS/LBnNu6Kl
+# i7BjEKBf4Dzw4b4kbr/NoyNozdGFzVr7JCo2v8GB6aSapFozX/45Ug0k0hlxqKL+
+# MfQ6T4jpC0dOZN6sRlIUtCeTQFTKESD9cKpwqkn+mr0/L7N6wS2g/5x1OoaembCb
+# QeXm1xjr/U3mh1+yKG0Vxm/VZqEORqZQt836DwzdWfb122Z3M+CoF30LqO2SQv+W
+# u+1IihjRQgtSeVcUcDCPuioU8QmFpTEkhtOMC5ZXpn5jVFWiaaQ2TZCWqcMuEATk
+# xH/CDYE936APCXIoGkKeLT8OFw/Pt7N1DASkTaNFoS0fErBWzjGyzxJtVF8+2bHS
+# d+bS6EZCU0qOS3xJHETr3VwWZJkC6QO9t4h+ufY3Dvo1+3xMhTjQfv52OwWV23Zd
+# /rwccmPyKNPdoC83PIRdks06WRzs1nN8/mf6WA71KDPFfD2KGzetwGL9HC60ojpr
+# bMhiaGtb2HqP9Zoz7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBfgn0ttCs/bKpQ9l1E6vTDLVG6EbyBUdJlnCQS
-# JmeI4zANBgkqhkiG9w0BAQEFAASCAgABUqd7ksiG2gFql3td1ACwLRpIm7HFevDq
-# M1m4odlJxEjkY1/hjsbdFjujb8s+OgnwqLOJ5uX25xspjvM1X2HbQhVuMsr4nFn6
-# hLSyKN/4K5i5ykmdLI6sHBW1NT/V4d0a2ZqdCoKGPCN6IZNl8JyR/01yYJHCqkDg
-# n7AvW41L/b/sk8lwYoM49aIkZ+9q9Le4hbKUnHUGJtpz4+cCR88Acn5RiPqXsswm
-# DixnPJ8++pXLwHDEZTEcmYCAbxqSOVOX+wxUca25QrD549Sdv41nAU6s8PVAYn9N
-# DZ+EINMNGKCOOAsk2+/CNnDQgRm5S7U5z64NlU3U/aF9+HUENmEoxgcYhF6zoBSq
-# Stc4eTZ2D2zeAR/r0TIEMZ62W2FIIPOZ4bgVMP8BwjVPgmUImYI1aDGI+4q9yBv2
-# BkSlBWz++WcDlVUXMeAq1I3hencRkukUUkDzp+x3F5UKft2QiO9ukWvJqfvpokEc
-# bgqZDS5i7sBqMQE5OckUnuk7xKpPjS+a3Lgy5HAKYaH2ji7kVL+rwzWoON1OF7Ee
-# Pks4f2vVVgRq1HzUueH/Nfnbj9VoMEsUsM+pBH8QmoeKb9CfXo88nqo5aSP+51K9
-# qqURFsXIzVs+WphjocIp/wZ2s181A3ff0TsS4Rp55DeZo4w73CUJJbRuQE7aGc8v
-# rYrkWEpBdA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODE3
+# NThaMC8GCSqGSIb3DQEJBDEiBCCVHHayGfPVBYm4jmhYnwTUj+xgBOULq/VxysEA
+# tHT1rTANBgkqhkiG9w0BAQEFAASCAgBHpC/5l6p9rb+ZSmy5E21aB2g85D43kRKk
+# z3zKuOKFVS2V1iu1Fl1pT0zva523VTa3l9ZLwrAxV8EnA/xtDcfRjcsMm1BMcvSH
+# tls5F/o2YKCW9HvLY9XU9Q4taWyJcZVUzAnfLV7frcdmfNk7UATOPdxn+ZP/hNic
+# tzhw9L0fa9MSDWBLZ3arDuoZUrTEbZy807f8uHzA+pApAkkK4/x8RvK7NK7SlnUD
+# J1QVv1GZbAyfBVllPGuBLAxvR+WlKidQmqLkBoRaXMTKhJTyr0vWjDpe9HUYg3Q9
+# GXch+cD00jHuncrSKxIv5bEb7w7wTKoKTkU4C/9AGp3RP6cFhrG1Nm+JgnD5zvQa
+# 6VDJPfc8RMpsUugtZMLHyOUxSLqjmjajSgypb/VyC17pTWb3YMe7alXbFeWj7VRf
+# mcU5Ltn15aRHEZ2h/cNuoVjCMxjNcFVBB/gOMdo3R2kZXdXKappG+EGGVh1z5f2m
+# 4xlQxQz/IwUI9Nk8Y2kjzcuslYZP4vvWGPxr38zSjj0Q28UU9b9C7H4PLxx+YZBl
+# jY5Benb9o6XeNyV/N6CxJ+Vpnrr531R0zY8msHpN8C788e/LQ0mF2dnm/9AJjbeu
+# 6I19XpFD6im5ECYIhHpledGzHstWFE9Gse95J7Nh6SwDM9GvxFITITd3cqqYLYjC
+# FW75qTI7uA==
 # SIG # End signature block
