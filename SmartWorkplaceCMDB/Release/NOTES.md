@@ -3,16 +3,33 @@
 **Stable release. Git publication is a separate reviewed action; tenant data,
 local configuration and private report artifacts are never part of this package.**
 
-## 1.1.3 stable patch candidate — 2026-09-12
+## 1.1.3 stable — 2026-09-14
 
+- Finalizes the ten-page Power BI cockpit: Executive Overview, Workplace
+  Health, Transformation & Lifecycle, Licensing & Assignments, Fleet &
+  Hardware, People & Messaging, Services & Impact, and Device/User/Group 360.
+- Adds verified-domain and hybrid-identity coverage; Intune Autopilot,
+  applications, configuration/update policies, Endpoint Analytics and Windows
+  upgrade eligibility; Microsoft 365 activity, SharePoint sites, Teams and
+  exact Teams membership evidence.
+- Distinguishes Microsoft 365 F1, F3, E3, E5 and Copilot assignments and adds
+  aggregate collection-summary deltas against the previous, J-7 and J-30
+  snapshots. The branded HTML mail includes explicit comparison dates.
+- Adds retryable `-FinalizeOnly` processing for SharePoint publication and
+  summary mail without rerunning collectors. Summary HTML/CSV, terminal logs,
+  run CSVs, job logs and transcripts are synchronized to the configured
+  SharePoint destination.
 - Adds one native PowerShell transcript for every executed collector/build/report
-  step in its existing `LOG-ALL\Jobs\<script-name>` directory.
-- Records the exact transcript path next to the structured log path in the run
-  CSV and exposes the shared job root in the orchestration result.
+  step in its existing `LOG-ALL\Jobs\<script-name>` directory and records its
+  exact path next to the structured log path in the run CSV.
 - Applies `StepLogRetentionDays` and `MaxStepLogsPerScript` independently to
-  `.log` and `.transcript.txt` files, preserving the same age/count policy for
-  both without halving the retained number of executions.
-- Keeps `-ValidateOnly` strictly read-only: no transcript is started.
+  `.log` and `.transcript.txt` files. `-ValidateOnly` remains strictly read-only.
+- Completes the release allowlist with every orchestrated collector, synthetic
+  fixture and centralized Cloud launcher. Automated dependency-closure tests
+  now reject an incomplete package before release.
+- Packages code, schemas, documentation and synthetic fixtures only. Tenant
+  data, local configuration, PBIP/PBIX files, report caches, logs, transcripts
+  and private audit evidence remain excluded.
 
 ## 1.1.2 stable patch candidate — 2026-09-12
 
