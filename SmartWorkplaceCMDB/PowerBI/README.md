@@ -211,6 +211,11 @@ backup. The following path is a fictional placeholder:
 
     python .\SmartWorkplaceCMDB\PowerBI\report_cockpit.py --report ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS\CMDB-REPORTS.Report"
 
+When preparing a replacement snapshot outside the configured `CMDBDataRoot`,
+pass its exact private folder with `--report-data`. This explicit directory
+takes precedence over automatic parameter discovery and prevents derived CSVs
+from being written into the previous frozen snapshot.
+
 Schema validation and DAX checks do not prove Desktop rendering. After import,
 check every generated page, visual errors, exact unfiltered totals and one filter on
 each applicable page. Stop on import errors, unexpected sources, another
