@@ -230,7 +230,7 @@ function Save-SmartM365WeeklyInventoryHistory {
         $destinationFile = Join-Path -Path $weekFolder -ChildPath $destinationFileName
         $destinationExists = Test-Path -LiteralPath $destinationFile -PathType Leaf
         if ($destinationExists -and -not $OverwriteExisting) { continue }
-        Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
+        Copy-SmartM365FileAtomically -SourcePath $sourceFile -DestinationPath $destinationFile
         [void]$copiedFiles.Add($destinationFile)
         if ($destinationExists) {
             WriteLog -Message ("Weekly {0} history refreshed for {1}: {2}" -f $HistoryLabel, $weekName, $destinationFile)
@@ -244,7 +244,7 @@ function Save-SmartM365WeeklyInventoryHistory {
         Files           = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
     }
     $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
-    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
     if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} file(s) written in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
     else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
 
@@ -2856,69 +2856,69 @@ function ExportAndCopyCsv {
         $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     }
 
+    $effectiveDelimiter = if ($PSBoundParameters.ContainsKey('Delimiter')) { [string]$Delimiter } else { ',' }
+
     # Export with timestamp
     try {
-        $exportParams = @{
-            Path     = $csvFilePath1
-            Encoding = $Encoding
-        }
-
-        if ($NoTypeInformation) {
-            $exportParams.NoTypeInformation = $true
-        }
-
-        if ($PSBoundParameters.ContainsKey('Delimiter')) {
-            $exportParams.Delimiter = $Delimiter
-        }
-
-        $Data | Export-Csv @exportParams
+        Write-SmartM365CsvAtomically -Data $Data -Path $csvFilePath1 -Encoding $Encoding -Delimiter $effectiveDelimiter -NoTypeInformation:$NoTypeInformation -NoTenantKey
         WriteLog -Message "CSV export to: $csvFilePath1"
         [void]$global:csvGeneratedPaths.Add($csvFilePath1)
     } catch {
         WriteLog -Message "Failed to export to: $csvFilePath1 - $_" -Level Error
+        throw
     }
 
     # Copy to fixed name in output path
     try {
-        Copy-Item -Path $csvFilePath1 -Destination $csvFilePath2 -Force
+        Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath2
         WriteLog -Message "CSV copied to: $csvFilePath2"
         [void]$global:csvGeneratedPaths.Add($csvFilePath2)
     } catch {
         WriteLog -Message "Failed to copy to: $csvFilePath2 - $_" -Level Error
+        throw
     }
 
     # Create global directory if it doesn't exist
     if (-not (Test-Path -Path $GlobalPath)) {
         try {
-            New-Item -Path $GlobalPath -ItemType Directory -Force | Out-Null
+            New-Item -Path $GlobalPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
             WriteLog -Message "Created missing directory: $GlobalPath"
         } catch {
             WriteLog -Message "Failed to create directory: $GlobalPath - $_" -Level Error
-            return
+            throw
         }
     }
 
-    # Copy to global path
-    try {
-        Copy-Item -Path $csvFilePath2 -Destination $csvFilePath3 -Force
-        WriteLog -Message "CSV copied to global path: $csvFilePath3"
-        [void]$global:csvGeneratedPaths.Add($csvFilePath3)
-    } catch {
-        WriteLog -Message "Failed to copy to global path: $csvFilePath3 - $_" -Level Error
+    $maxRetries = 3
+    $retryDelaySec = 10
+    $attempt = 0
+    $globalCopyDone = $false
+    while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
+        $attempt++
+        try {
+            Copy-SmartM365FileAtomically -SourcePath $csvFilePath2 -DestinationPath $csvFilePath3
+            WriteLog -Message "CSV copied to global path: $csvFilePath3"
+            [void]$global:csvGeneratedPaths.Add($csvFilePath3)
+            $globalCopyDone = $true
+        } catch {
+            if ($attempt -lt $maxRetries) {
+                WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
+                Start-Sleep -Seconds $retryDelaySec
+            }
+            else {
+                WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
+                throw
+            }
+        }
     }
 
     if ($global:RetentionMaxCSV -gt 0) {
         RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
     }
 
-    if (Test-Path -LiteralPath $csvFilePath3) {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
-    }
-    else {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
-    }
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
 
-    $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
+    $historySourcePath = $csvFilePath3
     if ($SkipWeeklyHistory) {
         WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
     }
@@ -2987,59 +2987,64 @@ function ExportAndCopyCsvFromConvert {
     }
 
     try {
-        $csvContent = if ($NoTypeInformation) {
-            $Data | ConvertTo-Csv -NoTypeInformation -Delimiter $Delimiter
-        } else {
-            $Data | ConvertTo-Csv -Delimiter $Delimiter
-        }
-
         try {
-            $csvContent | Out-File -FilePath $csvFilePath1 -Encoding $Encoding
+            Write-SmartM365CsvAtomically -Data $Data -Path $csvFilePath1 -Encoding $Encoding -Delimiter $Delimiter -NoTypeInformation:$NoTypeInformation -NoTenantKey
             WriteLog -Message "CSV exported to: $csvFilePath1"
             [void]$global:csvGeneratedPaths.Add($csvFilePath1)
         } catch {
             WriteLog -Message "Failed to export CSV to: $csvFilePath1 - $_" -Level Error
-            return
+            throw
         }
 
         try {
-            Copy-Item -Path $csvFilePath1 -Destination $csvFilePath2 -Force
+            Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath2
             WriteLog -Message "CSV copied to: $csvFilePath2"
             [void]$global:csvGeneratedPaths.Add($csvFilePath2)
         } catch {
             WriteLog -Message "Failed to copy CSV to: $csvFilePath2 - $_" -Level Error
+            throw
         }
 
         if (-not (Test-Path -Path $GlobalPath)) {
             try {
-                New-Item -Path $GlobalPath -ItemType Directory -Force | Out-Null
+                New-Item -Path $GlobalPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
                 WriteLog -Message "Created missing directory: $GlobalPath"
             } catch {
                 WriteLog -Message "Failed to create directory: $GlobalPath - $_" -Level Error
-                return
+                throw
             }
         }
 
-        try {
-            Copy-Item -Path $csvFilePath1 -Destination $csvFilePath3 -Force
-            WriteLog -Message "CSV copied to global path: $csvFilePath3"
-            [void]$global:csvGeneratedPaths.Add($csvFilePath3)
-        } catch {
-            WriteLog -Message "Failed to copy CSV to global path: $csvFilePath3 - $_" -Level Error
+        $maxRetries = 3
+        $retryDelaySec = 10
+        $attempt = 0
+        $globalCopyDone = $false
+        while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
+            $attempt++
+            try {
+                Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath3
+                WriteLog -Message "CSV copied to global path: $csvFilePath3"
+                [void]$global:csvGeneratedPaths.Add($csvFilePath3)
+                $globalCopyDone = $true
+            } catch {
+                if ($attempt -lt $maxRetries) {
+                    WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
+                    Start-Sleep -Seconds $retryDelaySec
+                }
+                else {
+                    WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
+                    throw
+                }
+            }
         }
 
         if ($global:RetentionMaxCSV -gt 0) {
             RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
         }
 
-        if (Test-Path -LiteralPath $csvFilePath3) {
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
-        }
-        else {
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
-        }
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
 
-        $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
+        $historySourcePath = $csvFilePath3
         if ($SkipWeeklyHistory) {
             WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
         }
@@ -3052,6 +3057,7 @@ function ExportAndCopyCsvFromConvert {
 
     } catch {
         WriteLog -Message "Unexpected error during CSV export process: $_" -Level Error
+        throw
     }
 }
 function NewRemoteScheduledTaskAndWait {
@@ -4342,6 +4348,7 @@ function Write-SmartM365CsvAtomically {
         [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ",",
+        [switch]$NoTypeInformation = $true,
         [switch]$NoTenantKey
     )
 
@@ -4368,11 +4375,20 @@ function Write-SmartM365CsvAtomically {
             $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join $Delimiter
             Set-Content -LiteralPath $tempPath -Value $header -Encoding $Encoding -ErrorAction Stop
         }
-        elseif ($Columns.Count -gt 0) {
-            $rows | Select-Object -Property $Columns | Export-Csv -Path $tempPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -ErrorAction Stop
-        }
         else {
-            $rows | Export-Csv -Path $tempPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -ErrorAction Stop
+            $exportParams = @{
+                Path        = $tempPath
+                Encoding    = $Encoding
+                Delimiter   = $Delimiter
+                ErrorAction = 'Stop'
+            }
+            if ($NoTypeInformation) { $exportParams.NoTypeInformation = $true }
+            if ($Columns.Count -gt 0) {
+                $rows | Select-Object -Property $Columns | Export-Csv @exportParams
+            }
+            else {
+                $rows | Export-Csv @exportParams
+            }
         }
 
         Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
@@ -4380,6 +4396,109 @@ function Write-SmartM365CsvAtomically {
     finally {
         if (Test-Path -LiteralPath $tempPath) {
             Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Copy-SmartM365FileAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Atomic copy source file not found: $SourcePath"
+    }
+
+    $destinationParent = Split-Path -Path $DestinationPath -Parent
+    if ([string]::IsNullOrWhiteSpace($destinationParent)) { $destinationParent = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $destinationParent)) {
+        New-Item -Path $destinationParent -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    $destinationLeaf = Split-Path -Path $DestinationPath -Leaf
+    $temporaryPath = Join-Path -Path $destinationParent -ChildPath ("{0}.{1}.tmp" -f $destinationLeaf, [guid]::NewGuid().ToString('N'))
+    try {
+        Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
+        Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Add-SmartM365CsvRowsAtomically {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [switch]$NoTenantKey
+    )
+
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
+    Assert-SmartM365CsvDataCompleteness -Data $Data -TimestampedPath $Path -LatestPath $Path
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Write-SmartM365CsvAtomically -Data $Data -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey
+        return
+    }
+    if (@($Data).Count -eq 0) { return }
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    $leaf = Split-Path -Path $Path -Leaf
+    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    try {
+        $appendRows = if ($Columns.Count -gt 0) { @($Data) | Select-Object -Property $Columns } else { @($Data) }
+        $existingHeader = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
+        $expectedHeader = [string]($appendRows | ConvertTo-Csv -NoTypeInformation -Delimiter $Delimiter | Select-Object -First 1)
+        if ($existingHeader.TrimStart([char]0xFEFF) -cne $expectedHeader.TrimStart([char]0xFEFF)) {
+            throw "CSV append schema differs from the existing header: $Path"
+        }
+        Copy-Item -LiteralPath $Path -Destination $temporaryPath -Force -ErrorAction Stop
+        $appendRows | Export-Csv -LiteralPath $temporaryPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -Append -ErrorAction Stop
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-SmartM365TextAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8"
+    )
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    $leaf = Split-Path -Path $Path -Leaf
+    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    try {
+        Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -4502,10 +4621,10 @@ function Export-SmartM365Csv {
 #endregion
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjDXxvWwzJOfpJ
-# FXHIrauoHg3T9gmYz+t+nQ/olY0rwaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOhDB4t/qX5BBR
+# pzoFMO4aHSaXJvX9vodvG8ecaiGqN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4530,19 +4649,139 @@ function Export-SmartM365Csv {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCtCfAONIG2jHCTtOhgCdfc
-# MZRLfZJh0DFoH3V+n77XmDANBgkqhkiG9w0BAQEFAASCAYCxt4wbyF9QYQzQPRrl
-# alfvls96GeEJf/grGJ4O0ZT/SxpI1Mgj4xuSIDxigBKYbg8y7RVvfDv8pOYWduzv
-# Y9HwfWLUkzwvdQDHfSvlDTAXU7FwA9zbPrAc/uzeE1rwlwQJ1ET5VRE4wr5SCvRx
-# fykeoxQemgJBsIz1DO+KOsT1U5DREmoYUiFxuECpFWqeiYOdNdnNET9m8SNcmJNL
-# lXPKZOKa7rRtWG7Rn2AhmSy7bWWHJ0aMTgKDke9IUmJvFKgJWPGQeM3gl6pWLtyP
-# hh605pLCp/CeEBuC921vS74iQ6/Y90nkvSMFu42Yw5jbQSnEoMfUqI6XUiZF5YEL
-# GDZ5tDJDYQxigXH/0DTnUZEdFlKOmhJrS9vlnnVjLtIoVDqKfZpaxLfE9Stoqf7h
-# HXrZ2KKqrK/Jt2hhIIoWpUrHknjwm185dgFlNrVECFNMzFCmoEx7XxX8omibYI+u
-# beJcIRD71TVwXh8154pRYRaodlUaKsfFbFmyk9jGjfVuImw=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIKE0mMheABHzNQWw9Knue1UHnAbM2i85USZpSNxLbZh+MA0GCSqG
+# SIb3DQEBAQUABIIBgF5kdmB/GIEIwmzAnJ579k34ywQ4Kg0xlpd+UvYllMX4I5tt
+# YcTmdEMd5R+y/TIfynypErn1IlsMdJ/2MYB2SxFJu9lErfuQG0CD1gP6gLfxh5mg
+# 7AOhfh/ZnKtSpdvjI8+kJWpX5uENSvEmEBhk2PYAhU0kYeJlu9Rzhig+RJEdA0GJ
+# FypWiEG0aUKpC20oRltJ1my03vUF2dbLHDd6En+zq9B/MToFEAO94Q+53W7PtzzP
+# XYOFPz6u5Z4W7t086EzU5EiIeoDAXVYs7XyKTxL31sGh8qe2Qir8nPYDiLCEGZb0
+# 3BQHLazCG7+Y4f5BK2PNt95FYYhWBucQumo3w+LYv1W4FnGmeLCNhLUEzHo6Owix
+# HFGQxdk4C+ccU3lipvWZbcWw6ix9/ZUqcb2/zft/h/ipLLgxxvmxSPVqersiWIoj
+# KzRmpu5XYqD2PrNF5+dNJpdWBXA77/rYdlM1HpWIIVfRX54buhJyE1AmBjcbx1C9
+# jymqHzAICYOD4pp//qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
+# MjFaMC8GCSqGSIb3DQEJBDEiBCB2HiERAN/zJ/2u+4OdcvsfW5CV7DdXxhb5Pxey
+# DttRYzANBgkqhkiG9w0BAQEFAASCAgCSyUDClZ2L7WjPEb6iVEjAMmD1bb12Q/86
+# HXJNKwtR3x7mHWMFWXPNsC/iRtujimI8h0aal0VvKl+E8l5k9ZvYsviVG9xoK3sA
+# HV/B8zS4EAw7bxe3DmMghVPRLoKIrRQtoiP/sr2vcRwwcZlC8lTky17wyqxDbWfR
+# w/H6odkrY54O6tSgGjQ7Wuwi0KFAGyvL4IIlblh/VrNXuS1wfb2lKLeq0kQYiru0
+# xW2SadMf30GLPDwx7i4t0onlQ9mwQGfREBQF+BA7ZZZMzrki/Q/X8NRfY9lPq7d8
+# qAuBq3yidMZNbjPQjPpFGiJeRu/qx1dW0ngs4niMbQCNnk0/iXGksMzfQCPehcBT
+# D6tve1JPcaNGGz3t07ch4RncTs3LmsoSKXQcVCS/xr9vrI/ATnNtryehsUqTS2+w
+# gQ5c1RW4Cta0UYvYam9Tp/1d6EA9BCKS77qPxdL074MnK0/VwrvOakIcWXb7Ojcu
+# jc8+pqmBvTqcGNwQIprg/YUXQxv2PEIrdaMK1b3XOEwycgdePWrNCdjms9+gAeM6
+# kSqdhZL6Y0Hm2eMaDyfsw6h43ObmhFgodmUcqsMM1bqbn2hG70zCIM2erMrYSlMz
+# +SyCEVCGtz5C+52yKH439Bt1c4/rx4ttmERyxDikPLRYBuDOKYEadG3dCwZTD9qE
+# pZ0ZC+NjQQ==
 # SIG # End signature block

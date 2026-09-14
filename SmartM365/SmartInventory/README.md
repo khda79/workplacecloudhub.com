@@ -2,21 +2,15 @@
 
 Inventory scripts that can feed Power BI datasets, operational reports, CSV exports, SharePoint publishing, and other downstream consumers.
 
-## Audit status and distribution
+## Reliability and distribution
 
-SmartInventory is a collection of independently versioned scripts and shared modules;
-this README does not assign a suite version or stable qualification. The current
-source audit starts with shared CSV persistence and distributed orchestrator
-persistence. Read [AUDIT-LOT1.md](AUDIT-LOT1.md) for the demonstrated corrections,
-synthetic tests, prerequisites and remaining limits, and
-[INVENTORY-MAP.md](INVENTORY-MAP.md) for collector, job and consumer mappings.
-
-[AUDIT-LOT2.md](AUDIT-LOT2.md) covers the orchestrator timeout
-supervision and recovery corrections. Its synthetic validation is limited to that
-lifecycle scope and does not qualify all collectors or a live deployment.
-
-[AUDIT-LOT3.md](AUDIT-LOT3.md) covers the re-adoption and resident
-lock corrections, with synthetic evidence and explicit deployment limits.
+SmartInventory is a collection of independently versioned scripts and shared
+modules; this README does not assign a suite version or stable qualification.
+Shared CSV persistence, distributed orchestration, Graph collection and the
+bounded AD/Exchange/readiness families have focused synthetic regression coverage.
+Those results do not qualify Microsoft Graph, a tenant, on-premises systems or the
+whole SmartInventory suite. Detailed audit maps, evidence and publication records
+are intentionally retained outside the public repository.
 
 Use a reviewed repository checkout with the required `Config/`, internal module
 manifests and templates. A single copied collector is not a self-contained package.
