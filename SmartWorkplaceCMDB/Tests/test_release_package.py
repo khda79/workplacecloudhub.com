@@ -76,6 +76,15 @@ class ReleasePackageTests(unittest.TestCase):
         missing = sorted(expected - entries)
         self.assertEqual(missing, [])
 
+    def test_cloud_launchers_are_allowlisted(self):
+        entries = set(load_allowlist())
+        launchers = {
+            launcher.relative_to(PRODUCT).as_posix()
+            for launcher in (PRODUCT / "Launchers" / "Cloud").glob("*.cmd")
+        }
+        missing = sorted(launchers - entries)
+        self.assertEqual(missing, [])
+
 
 if __name__ == "__main__":
     unittest.main()
