@@ -53,6 +53,7 @@
     "To": "",
     "Cc": "",
     "Subject": "Smart Workplace CMDB",
+    "MailTimeoutSeconds": 120,
     "SmtpServer": "",
     "SmtpPort": 25,
     "SmtpUseSsl": false,

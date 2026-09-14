@@ -3,12 +3,12 @@
 Runs autonomous SmartWorkplaceCMDB safety and CSV contract tests.
 
 .VERSION
-0.2.1
+0.2.4
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '0.2.3'
+$ScriptVersion = '0.2.4'
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -160,10 +160,10 @@ try {
     }
 
     $dataRoot = Join-Path -Path $resolvedTempRoot -ChildPath 'BuildData'
-    Invoke-SmartWorkplaceCMDBTest -Name 'Create and validate all 30 CSV contracts' -Test {
+    Invoke-SmartWorkplaceCMDBTest -Name 'Create and validate all 37 CSV contracts' -Test {
         & $buildPath -GlobalConfigPath $globalConfigPath -TenantConfigPath $tenantConfigPath -DataRootPath $dataRoot -NoConfigWrite
         $results = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath (Join-Path -Path $dataRoot -ChildPath 'DATA-LAST'))
-        Assert-SmartWorkplaceCMDBTrue -Condition ($results.Count -eq 30) -Message "Expected 30 contract results, got $($results.Count)."
+        Assert-SmartWorkplaceCMDBTrue -Condition ($results.Count -eq 37) -Message "Expected 37 contract results, got $($results.Count)."
         Assert-SmartWorkplaceCMDBTrue -Condition (@($results | Where-Object Status -ne 'Valid').Count -eq 0) -Message 'One or more generated CSV contracts are invalid.'
     }
 
@@ -211,8 +211,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCz51idPXnWuJpK
-# 25KrJVXUEyGysnQJGmeZQjHUnXrVNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwk66UFTm1Lo4h
+# D1wkYaW9ZGXasnx5cxaSlsyix5/fr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -345,31 +345,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAU2g65FYWqFADPih9Ts21EHxvvYLq5sNrj3FGNm9DIGMA0GCSqG
-# SIb3DQEBAQUABIIBgDZsmekOl0/nYT3glWC9KbtrEhSfmK722fWCs93L4+hbFaQV
-# ZzZJCGKMOlAS5tlbghqvkVU5FI4WuM7dVkIJ9biwFOtjeSx4pdxcbKI7TDoRhc+d
-# PwZtAIC3d6e8cYKXZv7mEhcnnDsffmYpVjmYgoGpxp7MZE6U8kp99BW34XVlyHHf
-# AfJqrYF3VleiNcOBJzFFZo6BUtSGGqkAvXlUD+hnlm5+gnR/WnZLVAEjzdI2DRKE
-# qgcy07HrxwlP/m/Ij/ovRgGvKpGTusVwaGZZW74AqQxsJg5pavWsNLCgY5YptGUT
-# 6pZeIUeBmWxB2scE6aZzD+STFB3dRyBXsf8DJyZ0T/QX9g9WHdxC5jp98q7lDKPt
-# VOVAwlxK5vXANZ908S3qGBHW1wqc+ADOABgTRyZh931C940B7pAcFTJsyJuF3uIu
-# LQ9tP4l1SmQF7IVaUX7hT13S8HsrBs6RdC657k5ChZuJHAWGlPAfDQpDUA8sQGRt
-# f5F6iyv7FFPspKBOAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAMXg5mEWnrxg/nMbYwy0kbNm9nz4Rivkh1/3UNy+uwtMA0GCSqG
+# SIb3DQEBAQUABIIBgGKj8qPxH5TKheLTjkkcECgd70+HjTtKO8bbpD/YS08m5auM
+# O8ZIQ42qLVowMswT97f13yTPFwg4xmdvMgPd+RWhRBDUB7ZA2CjAeuHWALln5l8I
+# Vw3itIt8Uf8EK2WMf+wArQZ++dOJ260MHNQUmBABsmgQ5fIEce7VqdD8N1MPIvWF
+# VvQJt4B1Ri4NYsaL/WCa8FgfopaBEKN5qQtJ7wKOJyNBv4agY+5kdhzkqrXBpag8
+# BPG0mQ5JtzNfHO+uy1a2K3eOmLj/q3JParssbzkspWwstlj9PhJjidIcFef6a5ed
+# 6vDfr690rNImAKSrwk7xul+FgsToSM7gu2XPKUq4lL3WiHgQ4xjN0UqhY5PG5sjn
+# 9X8AUIwkPJArMotJNSqbFa99LYVz11waX0rbxJloH1SM21vZ+Ysi8MEsNeoQ/IaB
+# hRcq1cBznNwbb3TidJiPW8B0EI/3j39bS3eehxZ+NKJ6Pw3lHfZ7Q+B0uuIpiY5t
+# hE0qVY+fIT39e+0mPaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODM4
-# NDVaMC8GCSqGSIb3DQEJBDEiBCCFis1KB/exRHPETxIAlvHnf+XjSWLhiTFdAQny
-# DazARDANBgkqhkiG9w0BAQEFAASCAgBTZOQcL0lxXR13rx5b25s3vc5Ese/2oioS
-# G4N8jbvHYT7bN2/CCWByO6n0CBA+W7zMtMo6sJ3082WOb7QZRUBvndJJaJRo8+Fj
-# qldu40nGUT0CBVqpQdJAxW3X7mO+23zFzj7jKL+qY+WQPHZbVKKomKnXl6sYlUnN
-# adGUTpSjZLPIK2XOPLL5m3JryLz/UMDR7xtiXiUgrZ+cP6A5Jd7benhUXCyyucye
-# 3BxjLKZqfr3s1+78ugtQQCyZOK5/AwUcDGfL3vJJF+B4M1xrearDX7KwJ/JtCq9v
-# wpotkm/SnfHreRb3/73y2RDyIieiRVFlhJn1HujG6X0IDbuafdkCm/7WI7bVhzi0
-# UTcClSUQljpgw8IJOxFkIsbcOkCpnsDpiJiyfFEymzYECuABCqGskupoEW+55o8l
-# i8MX1XM0YFXKNc1quHH1+erltzMPuDIuokrHBafLUL3NZCPTN5l5TBJkbqpdFX2q
-# ax1K36gPBTysYuUPOjZICmRTSwPjCAMip9J5sWekIGKSqtcCQwnG8/4D8oTv92HU
-# TU2p4pV1MVx7OMMjpwddyYMC+eJKcy6oCuXI6ysJs3JBIQqyiHOAuARG14HkNiws
-# /QvW2C35/Fa1TGEuqJYnEK/CpLW09VwxBCWcdvL3JKV/x9v1g4Kue0Bzm5sv8WgL
-# /4XDZE8xjA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
+# MTFaMC8GCSqGSIb3DQEJBDEiBCBQSGowDr4mtGNM9EMymi4OfxrOpms7y+b7ant3
+# wpaNGzANBgkqhkiG9w0BAQEFAASCAgCXPE3gNs/h7DWTtsf+3Q28iadXOz3j/rDI
+# cBDK2MVzoVTFM27Y2+f3oATd5tJXDFHon88rBmNOTYTHEM5svECMWYgiHTOKFb9b
+# JHY9MnArQKtCTnQkQv8+m5UaqtsdfCq06ztWh3yGYUEm80LIVZx+Jru7ZfCine1c
+# GIusr7GwvsyS/zRjWvThqe96hZE0XJAG2slxf1Qul+V5OwBi71qo1g3+mN33wcjk
+# tlNaA88aOqJqYNbIiAGLfmq58uUXGCUJCQTAbOhJb3o1y/cokXrIF+ebbWtdksf7
+# hiueAvDVQY1EFajoBt15O9LUjfmcfVOIHwgwBq88tvVCOeEvxsrhq69+CeC2E7qT
+# UVGKmgpav8boIP49z/Soj+CwIIZwinR2mE//JAlYtWg9K//+FnXBECmEm/HZCKos
+# AQGZ3o2mYoJHxsLhBKcqlq1woV5vpzfMKQztcfwZmbcpIbAKqyQ7vUVrWh0V2NgB
+# hVgzS9Emaw4a9OEWwG5VmGZL3oDE5imMWHdxO9wrpTU/3sCsFMTmRugzoM/0u4fl
+# SmfKW8ndsrN2V2kiYrHCJUgKddpfz4sZFW2DdiFTOvppjBXBZUw41JTZiSXAOuEC
+# gZ15Zri7YHb8fCYTE0MzJjd5KjA4GgLr8lLW8CEUdHVjkzuEe19aCHu4E5b6YDpT
+# gTw4awkUNw==
 # SIG # End signature block

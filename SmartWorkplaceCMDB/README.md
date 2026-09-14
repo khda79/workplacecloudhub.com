@@ -704,6 +704,7 @@ Enable it in the tenant-local configuration, which remains ignored by Git:
   "To": "recipient@example.invalid",
   "Cc": "",
   "Subject": "Smart Workplace CMDB",
+  "MailTimeoutSeconds": 120,
   "MailClientName": "Example tenant",
   "MailClientLogoPath": "C:\\Branding\\client-logo.png",
   "MailClientLogoMaxKB": 200
@@ -722,7 +723,9 @@ certificate and follows the proven SmartInventory transport pattern through
 `Microsoft.Graph.Authentication`, without importing SmartM365. It calls
 `sendMail` with `saveToSentItems=false`, retries transient failures with bounded
 exponential delay and `Retry-After` support, and preserves the detailed Graph
-error response for diagnosis. Use `-SendMailTestOnly` on the collection summary
+error response for diagnosis. `MailTimeoutSeconds` bounds the complete Graph
+connection and send operation; accepted values are 15 through 900 seconds and
+the default is 120. Use `-SendMailTestOnly` on the collection summary
 script to test this transport without creating a CMDB snapshot or HTML history.
 SMTP supports multiple semicolon- or comma-separated recipients and integrated
 authentication by default. `Both` means Graph first with SMTP as a fallback.
@@ -775,6 +778,21 @@ Explicit full collection and curation:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Collect
 ```
 
+Retry only the post-collection finalization after a mail or SharePoint problem:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -FinalizeOnly
+```
+
+`-FinalizeOnly` requires the `Full` pipeline, executes no collector, normalizer,
+build, or report step, and uses the existing `DATA-LAST`. When its dataset
+fingerprint already has a completed summary snapshot, it reuses that exact
+snapshot and its original date so the retry does not create a false collection
+or change the previous/J-7/J-30 baselines. The generated summary CSV and HTML,
+then the terminal orchestrator log and run CSV, are synchronized to SharePoint
+after mail processing. The mode is intended for rerunning a failed or
+interrupted finalization, not for refreshing data.
+
 Bounded runs are accepted only for an individual source pipeline. Both live and
 fixture orchestration with `-MaxItems` isolate all history, latest and log
 outputs under `Data/TestRuns/MAXITEMS-<N>_<timestamp>_<id>` by default. An explicit
@@ -808,7 +826,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration
 
 Centralized launchers resolve PowerShell 7 and forward extra command-line
 arguments. `Launchers/Cloud` contains the cloud-source launchers plus the full
-validation and collection launchers. `Launchers/ActiveDirectory` contains the
+validation, collection, and finalization launchers. `Launchers/ActiveDirectory` contains the
 AD-only launchers. All of them are intended for the same collection host.
 
 ### Scheduled Orchestrator Installation
