@@ -213,8 +213,9 @@ def enrich(root, identity, data, columns, hashes, read_csv, sha, product):
     for a in assignments:
         u, g, s = user_by_source.get(key(a['SourceUserId'])), group_by_source.get(key(a['AssignedByGroupId'])), sku_by_source.get(key(a['SkuId']))
         utc, status = timestamp(a['LastUpdatedDateTime'])
+        tenant_user_key = u['TenantUserKey'] if u else identity['TenantKey']+'|entra-user|'+key(a['SourceUserId'])
         paths.append(dict(identity, TenantAssignmentPathKey=identity['TenantKey']+'|path|'+a['RawAssignmentKey'],
-            TenantUserKey=u['TenantUserKey'] if u else '', TenantGroupKey=g['TenantGroupKey'] if g else '',
+            TenantUserKey=tenant_user_key, TenantGroupKey=g['TenantGroupKey'] if g else '',
             TenantSkuKey=s['TenantSkuKey'] if s else '', SourceUserId=a['SourceUserId'], AssignedByGroupId=a['AssignedByGroupId'],
             SkuId=a['SkuId'], Account=u['UserPrincipalName'] if u else 'Unresolved user',
             Product=s['SkuPartNumber'] if s else 'Unresolved SKU',
@@ -270,6 +271,9 @@ def enrich(root, identity, data, columns, hashes, read_csv, sha, product):
                              DeviceSyncStatus=dd[key(r['TenantDeviceKey'])]['SyncStatus']))
     for f, fk, d, dk in EXTRA_RELATIONSHIPS:
         parent = {key(r[dk]) for r in data[d]}
-        if any(r[fk] and key(r[fk]) not in parent for r in data[f]):
+        orphan_rows = [r for r in data[f] if r[fk] and key(r[fk]) not in parent]
+        if (f, fk) == ('LicenseAssignmentPath', 'TenantUserKey'):
+            orphan_rows = [r for r in orphan_rows if r['UserLinkStatus'] != 'Unresolved']
+        if orphan_rows:
             raise ValueError('Orphan 360 model relationship: '+f+'.'+fk)
     return EXTRA_RELATIONSHIPS

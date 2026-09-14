@@ -164,6 +164,19 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Orphan model relationship"):
             report.prepare_data(self.root)
 
+    def test_reported_normalized_orphan_license_assignment_is_preserved(self):
+        orphan_key = "fictional-prod|entra-user|absent"
+        self.write("FactUserLicense", [dict(TenantUserKey=orphan_key, CmdbUserId=orphan_key,
+                                                  TenantSkuKey="fictional-prod|s1", AssignmentState="Active")])
+        finding = dict(TenantFindingKey="fictional-prod|q1", FindingId="q1", Severity="Warning",
+                       EntityType="UserLicenseAssignment", FindingType="OrphanUserLicenseAssignment")
+        self.write("FactDataQuality", [finding])
+        self.write("CMDB_DataQuality", [{k: v for k, v in finding.items() if k != "TenantFindingKey"}])
+        _, data, _, _ = report.prepare_data(self.root)
+        self.assertEqual(len(data["FactUserLicense"]), 1)
+        self.assertEqual(data["FactUserLicense"][0]["TenantUserKey"], orphan_key)
+        self.assertEqual({m["name"]: m["expected"] for m in report.measures(data)}["License assignments"], 1)
+
     def test_duplicate_assignment_rejected(self):
         row = dict(TenantUserKey="fictional-prod|u1", TenantSkuKey="fictional-prod|s1")
         self.write("FactUserLicense", [row, row])
