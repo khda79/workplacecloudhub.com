@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.3.5
+1.3.6
 #>
 [CmdletBinding()]
 param()
@@ -224,7 +224,7 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.3.5' -and
+            $result.ScriptVersion -eq '1.3.6' -and
             $result.Subject -match 'mail transport test' -and
             $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
             $result.BodyHtml -match 'data:image/png;base64,' -and
@@ -273,9 +273,11 @@ try {
         finally { $watch.Stop() }
         Assert-SummaryTrue ($parseErrors.Count -eq 0 -and
             $null -ne $definition -and
+            $definition.Extent.Text -match '\bStart-Job\b' -and
+            $definition.Extent.Text -notmatch 'ThreadJob' -and
             $message -match 'configured timeout of 1 seconds' -and
             $watch.Elapsed.TotalSeconds -lt 4) `
-            'The Graph mail deadline did not stop a stalled worker.'
+            'The portable Graph mail deadline did not stop a stalled worker.'
     }
 
     Invoke-SummaryTest 'Prefer the configured client logo over the default brand' {
@@ -328,14 +330,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.5; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.6; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6FDKT2Eahsf5e
-# 2Y6zogm2fWuLVeJ03CGbZw1c713BhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClZINECh8dud71
+# td3gSPRxXDNOCLncv2C6vmZJR7SN4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -468,31 +470,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGbQKPcwRDiRCx14WwoyHBAFL0eKIfkzd2b9whmpKCMSMA0GCSqG
-# SIb3DQEBAQUABIIBgAHj23Ffg00IVA4Q3ZtX3oRptg5ABJM4SHS3j0n6I0Ip/fip
-# JKnnk7NTdgnX3Gcg6P2ws7KnEJ+x3fDVvv4bpOAsi0dmoXsYcRZ4ZRC7HL/2uj1A
-# XieSo0F6PwWc0pHx06B38ogX/9/OcRsnpkg7cpkv+29A4Ma7CPPC3vwYDNfJIWL/
-# gvMJh+EfLyVLslo9DeqOFPl7t4AmtUd4H2PTUedzDSuVQWnaqvrSFcYjfzzIBchL
-# Sf5lJ0/K0PfFDspxLml8BHghOC6CNC34rseqWTumX7NEKlMplU9FtFpizA6U2Qg6
-# Fdk+S+IhyeYyjE2NqklIuoUzK851nCeT/MPy1DSuKYqBJqYBbiu/M8slce9XXOPm
-# ZeOgduYSufZwNSdGvLWtHIcmsRN6M5au9a/gqIQTWDqnwNgaT5inVlSDbUI2DcoW
-# qK0h/V85s1B6qJMMNZxn7RuA/AVfPPzddScENjtWS3llWv0Bd01bugnQWzX9iF+e
-# TFw6vJg7UkcIzN0G36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEXreiZfllOdyBfkALOqxJXunFUCJU3Vv6gQ/t9puwR3MA0GCSqG
+# SIb3DQEBAQUABIIBgJs5XERffO+tas8o40+U+yfdI7YrJs8WF6Rx0W/mdNu3dLQ+
+# RByDA31HjgM8YWxktbFGMPiMJslVf2f1YvKQVNq1ySXcEqm2xuTWPx++MIJwoxah
+# 51XB2P8JMxvHuCqMkVAjsPZ1kAA/Vn6D0UoshTsyc5VD4v0ay1so2Um486hPYdkN
+# A5Zp++SmO/4SPQIEQrcqW6mg7uv1s2aiHtmUbvA0sVNiLZEUOYqBvOMHpYcn8517
+# kSi741hFXLe1WCl2x+PGGJP8VV4yMheKePzYdFwulx3E5+rEUZ7vuA2xVQ4+bbQa
+# TcI+yDrQlLa/yj6x/IvhQjrFSrCAbifp5H585sXyL19lxCI5o9eSrIN2W5dJEufk
+# RSHStYv3mCsCMOxB5a/5H9enAgElRdnPEXnijniZxGaQLigPDQc49t1qDnUyiv75
+# smmU8ESgEY+f0Qmt5P4kRMUs9dby3RrELTbmbgztyYWpB9n+0vRvBss5GhLvm3Vl
+# U7vvBhSxtOJHOh6ZIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
-# MTBaMC8GCSqGSIb3DQEJBDEiBCDdtSwB0xZ935i2XJZU8bzYbUef7oZCydmo4ejT
-# Q9kvSDANBgkqhkiG9w0BAQEFAASCAgBOyDsqp/439FZB1IY1hb8VF3TTEYejKBqq
-# s9ng7YEvtPYWl/VO3HD4c4k7SJY1kcz5Q6AI/VLmt5VAoYOP/q9Avm5sqag/bunh
-# /suHOT+3AGjoZKrZG8fcWX5i9yVZjfr/oSI7QVSnlz7kvxhV2E5Q3BHMFJDrc3iP
-# ogm0T3HPHeDW2KFUwDVfzw/qeqxKLA0z48lEOdnlSOVp8baLBlpiKhYvXEvLPR4r
-# UAyTnfZeRXOz/fYORJEV4BAQZjGEDe1e3ZMadnlFe/0W154lZpXLx8WT8wmp7NuL
-# 6zJc6+vXN8nRGbWy3N4GQclYeQvocKEc7+sMHxMiR3DVVMxEW0a3+gA+fCvGA/Bx
-# MOzrYWGxzI5P7jWRGdfqktboigXLpvAIASz1FD8jsrT5g6e1xVUha/xTjBRexVBg
-# eY1mXQRJztgy4xuBg1kfpsp4B40glrlP/jc+K7SDfPDAH4bPaUB6nqZ8wxuWOYg7
-# 3HK89Mlqn9jzlLf92xqKNHOorwLEu6tid9q0v5qNn4EgJidzQyFqI4mLd3URFkxh
-# 8APeOeQObqcLgN/hip05tyK/uatBLu0224qKX59NFzwIRiCSdB6lSEmQ/ENxFnCs
-# yjVsfcRCkJtxSANo8T36Y+9Hi6n7UutOW7Q40diQrkkrEaSJPmq1RtQcU6PDDmLc
-# +Ud7zjq4iQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODUy
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDIzfKYcFVAFfTe030Hf7Jp9H0L1++vC6YV2FLN
+# 5ndKNDANBgkqhkiG9w0BAQEFAASCAgCEZoUhZ8AlIrsy7yaM55oeqQNAO+cBfB8P
+# IWgZis8c1bAPze+CIJwNggyE+G5yZeypjEvakBYWhok7J397s2iq7pIzBPLFUezm
+# 6rCmv2Ewo5sGLpIFmvgYctWILq7KBLiTBHC+q797mKM27NAIUZ0xKepRrmon0g5S
+# uxKGC3tUXPVMlpphIXAmEwR/AdaATArcTdnfEWl06TQUR5jKJHgU+ZQKuTV3Trmc
+# yoemdMQQ66XRcz7y78fhB+Q0n+Uql2oJNBwFWzLIHEqnxaA8l3SidHDtUjqgv5/3
+# 9ISyZUAeZZ0RLQ4htmbMQDpxh1h2vWqanoF74Qqnq4OXC25mbDAI7uy27GUvkbLQ
+# jiKa6TmX5vJE7+4HjnGrPpvB7dBdfRdHl+L4TeDPuIeTKSectgOpVNS9X4j6MbU/
+# tj5bW1YbVfxSoazZiU47mL708+rVJeQL4B/1x0sqy3cxuGuXnMVAiAHoJCjiJp6a
+# xxZJUZvkfXGH2Tw8JOuPS5U8l6mNyEs7/5jn6Qfd8IMV2I7Ch6JVzV7HaxnIxAka
+# 8RLDcxVINxxvUxOHF3UyAF54Wi1cyWYg8M27ADdKqxMvogGkEZH0hjjb2248qFqT
+# EroYMnpwmPPdnQ69eFsONAmiXSK6SXM1tqK7+LF/Hs5d905AcOfyaXP6bEnvqeAi
+# 1fns6O1VZg==
 # SIG # End signature block
