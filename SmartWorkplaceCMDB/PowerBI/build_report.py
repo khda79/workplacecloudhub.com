@@ -48,6 +48,7 @@ RAW_SOURCE_COLLECTION_STEPS = {
     "Intune_DeviceHardware": "Intune device hardware collection",
     "Intune_AutopilotDevices": "Intune operational inventory collection",
     "Intune_DetectedApps": "Intune operational inventory collection",
+    "Intune_DetectedAppDeviceRelationships": "Intune operational inventory collection",
     "Intune_ConfigurationPolicies": "Intune operational inventory collection",
     "Intune_WindowsUpdatePolicies": "Intune update and Endpoint Analytics report collection",
     "Intune_WindowsUpdateAlerts": "Intune update and Endpoint Analytics report collection",
@@ -56,6 +57,10 @@ RAW_SOURCE_COLLECTION_STEPS = {
     "M365_SubscribedSkus": "Microsoft 365 subscribed SKUs collection",
     "M365_ServicePlans": "Microsoft 365 subscribed SKUs collection",
     "M365_UserLicenseAssignments": "Microsoft 365 user licenses collection",
+    "M365_UserActivity": "Microsoft 365 user activity collection",
+    "M365_SharePointSites": "Microsoft 365 collaboration collection",
+    "M365_Teams": "Microsoft 365 collaboration collection",
+    "M365_TeamMembers": "Microsoft 365 collaboration collection",
     "ExchangeOnline_Mailboxes": "Exchange Online mailboxes collection",
 }
 
@@ -83,7 +88,7 @@ def type_of(column):
         return "boolean", "type logical"
     if column == "ConfidenceScore":
         return "double", "type number"
-    if column in ("Year", "Month", "Day", "ConsumedUnits", "EnabledUnits", "SourceRows", "MaxItems", "ObservedPathCount"):
+    if column in ("Year", "Month", "Day", "ConsumedUnits", "EnabledUnits", "SourceRows", "MaxItems", "ObservedPathCount", "DeviceCount", "ReportedDeviceCount", "ExactRelatedDeviceCount"):
         return "int64", "Int64.Type"
     if column == "Date":
         return "dateTime", "type date"

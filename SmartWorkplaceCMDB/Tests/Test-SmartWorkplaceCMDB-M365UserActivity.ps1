@@ -1,141 +1,21 @@
-<#
-.SYNOPSIS
-Runs offline SmartWorkplaceCMDB Entra devices collector and normalizer tests.
-
-.VERSION
-0.2.0
-#>
-[CmdletBinding()]
-param()
-
-$ScriptVersion = '0.2.0'
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version 2.0
-$script:Passed = 0
-$script:Failed = 0
-
-function Invoke-SmartWorkplaceCMDBEntraDeviceTest {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][scriptblock]$Test)
-    try {
-        & $Test
-        $script:Passed++
-        Write-Information "PASS $Name" -InformationAction Continue
-    }
-    catch {
-        $script:Failed++
-        Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue
-    }
-}
-function Assert-SmartWorkplaceCMDBEntraDeviceTrue {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
-    if (-not $Condition) { throw $Message }
-}
-function Assert-SmartWorkplaceCMDBEntraDeviceThrow {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][scriptblock]$Action, [Parameter(Mandatory)][string]$MessagePattern)
-    $caught = $null
-    try { & $Action } catch { $caught = $_ }
-    if ($null -eq $caught) { throw "Expected an exception matching '$MessagePattern'." }
-    if ($caught.Exception.Message -notmatch $MessagePattern) { throw "Unexpected exception: $($caught.Exception.Message)" }
-}
-
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$collector = Join-Path $projectRoot 'Collectors\Entra\SmartWorkplaceCMDB-EntraDevices-Collect.ps1'
-$normalizer = Join-Path $projectRoot 'Collectors\Entra\SmartWorkplaceCMDB-EntraDevices-Normalize.ps1'
-$coreModule = Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
-$rawContract = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.raw.tables.json'
-$curatedContract = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.tables.json'
-$fixture = Join-Path $PSScriptRoot 'Fixtures\EntraDevices.sample.json'
-$tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$tempRoot = Join-Path $tempBase ('SmartWorkplaceCMDB-EntraDevices-Tests-{0}' -f [guid]::NewGuid().ToString('N'))
-Import-Module $coreModule -Force
-
-try {
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    $identity = @{
-        Tenant = 'audit'; OrganizationKey = 'contoso'; EnvironmentKey = 'prod'
-        TenantKey = 'contoso-prod'; TenantId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
-        NoConfigWrite = $true
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'ValidateOnly stays read-only' {
-        $root = Join-Path $tempRoot 'Validate'
-        & $collector @identity -DataRootPath $root -InputJsonPath $fixture -ValidateOnly | Out-Null
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue (-not (Test-Path $root)) 'ValidateOnly created output.'
-    }
-    $runtime = Join-Path $tempRoot 'Runtime'
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Collect fixture devices and honor raw contract' {
-        $script:Collection = & $collector @identity -DataRootPath $runtime -InputJsonPath $fixture
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue ($script:Collection.DeviceCount -eq 2) 'Expected two devices.'
-        $results = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath (Join-Path $runtime 'DATA-LAST') -ContractPath $rawContract)
-        $device = @($results | Where-Object Name -eq 'Entra_Devices.csv')
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue ($device.Count -eq 1 -and $device[0].Status -eq 'Valid') 'Raw device contract is invalid.'
-        $rows = @(Import-Csv $script:Collection.RawLatestOutputPath)
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue (
-            $rows[0].OnPremisesSecurityIdentifier -eq 'S-1-5-21-1000-1000-1000-3101'
-        ) 'The exact on-premises SID correlation key was not preserved.'
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Honor MaxItems one' {
-        $bounded = & $collector @identity -DataRootPath (Join-Path $tempRoot 'Bounded') -InputJsonPath $fixture -MaxItems 1
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue (@(Import-Csv $bounded.RawLatestOutputPath).Count -eq 1) 'MaxItems was not honored.'
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Normalize into CMDB_Devices and DimDevice' {
-        $script:Normalization = & $normalizer @identity -DataRootPath $runtime
-        $cmdb = @(Import-Csv $script:Normalization.CmdbDeviceOutputPath)
-        $dim = @(Import-Csv $script:Normalization.DimDeviceOutputPath)
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue ($cmdb.Count -eq 2 -and $dim.Count -eq 2) 'Curated device counts are invalid.'
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue ($cmdb[0].CmdbDeviceId -eq $dim[0].TenantDeviceKey) 'Device keys are inconsistent.'
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue (@($cmdb | Where-Object ManagementState -eq 'Managed').Count -eq 1) 'Managed state mapping is invalid.'
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Validate curated device contracts' {
-        $results = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath (Join-Path $runtime 'DATA-LAST') -ContractPath $curatedContract)
-        $device = @($results | Where-Object Name -in @('CMDB_Devices.csv', 'DimDevice.csv'))
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue ($device.Count -eq 2 -and @($device | Where-Object Status -ne 'Valid').Count -eq 0) 'Curated device contracts are invalid.'
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Reject identity mismatch and duplicate IDs' {
-        $rows = @(Import-Csv $script:Collection.RawLatestOutputPath)
-        $mismatch = Join-Path $tempRoot 'Mismatch.csv'
-        $rows[0].TenantKey = 'other-prod'; $rows | Export-Csv $mismatch -NoTypeInformation -Encoding UTF8
-        Assert-SmartWorkplaceCMDBEntraDeviceThrow {
-            & $normalizer @identity -DataRootPath (Join-Path $tempRoot 'Mismatch') -RawInputPath $mismatch | Out-Null
-        } 'identity mismatch'
-        $rows = @(Import-Csv $script:Collection.RawLatestOutputPath)
-        $duplicate = Join-Path $tempRoot 'Duplicate.csv'
-        $rows[1].SourceDeviceId = $rows[0].SourceDeviceId; $rows | Export-Csv $duplicate -NoTypeInformation -Encoding UTF8
-        Assert-SmartWorkplaceCMDBEntraDeviceThrow {
-            & $normalizer @identity -DataRootPath (Join-Path $tempRoot 'Duplicate') -RawInputPath $duplicate | Out-Null
-        } 'duplicate SourceDeviceId'
-    }
-    Invoke-SmartWorkplaceCMDBEntraDeviceTest 'Normalizer ValidateOnly preserves outputs' {
-        $before1 = (Get-FileHash $script:Normalization.CmdbDeviceOutputPath -Algorithm SHA256).Hash
-        $before2 = (Get-FileHash $script:Normalization.DimDeviceOutputPath -Algorithm SHA256).Hash
-        & $normalizer @identity -DataRootPath $runtime -ValidateOnly | Out-Null
-        Assert-SmartWorkplaceCMDBEntraDeviceTrue (
-            $before1 -eq (Get-FileHash $script:Normalization.CmdbDeviceOutputPath -Algorithm SHA256).Hash -and
-            $before2 -eq (Get-FileHash $script:Normalization.DimDeviceOutputPath -Algorithm SHA256).Hash
-        ) 'ValidateOnly modified device outputs.'
-    }
-}
-finally {
-    $resolved = [IO.Path]::GetFullPath($tempRoot)
-    if ($resolved.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path -Leaf $resolved) -like 'SmartWorkplaceCMDB-EntraDevices-Tests-*' -and
-        (Test-Path $resolved)) {
-        Remove-Item $resolved -Recurse -Force
-    }
-}
-Write-Information (
-    "SmartWorkplaceCMDB Entra devices tests completed. Version={0}; Passed={1}; Failed={2}" -f
-    $ScriptVersion, $script:Passed, $script:Failed
-) -InformationAction Continue
-if ($script:Failed -gt 0) { exit 1 }
+<# .SYNOPSIS Validates Microsoft 365 user activity collection and exact UPN linkage. .VERSION 1.0.0 #>
+[CmdletBinding()]param()
+$ErrorActionPreference='Stop';$passed=0;$failed=0
+function Invoke-Test{param([string]$Name,[scriptblock]$Test)try{&$Test;$script:passed++;Write-Information "PASS $Name" -InformationAction Continue}catch{$script:failed++;Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue}}
+function Assert-True{param([bool]$Condition,[string]$Message)if(-not $Condition){throw $Message}}
+$projectRoot=Split-Path -Parent $PSScriptRoot;$userCollector=Join-Path $projectRoot 'Collectors\Entra\SmartWorkplaceCMDB-EntraUsers-Collect.ps1';$userNormalizer=Join-Path $projectRoot 'Collectors\Entra\SmartWorkplaceCMDB-EntraUsers-Normalize.ps1';$collector=Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365UserActivity-Collect.ps1';$normalizer=Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365UserActivity-Normalize.ps1';$tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('SmartWorkplaceCMDB-UserActivity-Test-'+[guid]::NewGuid().ToString('N'));$identity=@{Tenant='audit';OrganizationKey='contoso';EnvironmentKey='test';TenantKey='contoso-test';TenantId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';DataRootPath=$tempRoot;NoConfigWrite=$true}
+try{
+ Invoke-Test 'Collect workload evidence'{&$collector @identity -InputJsonPath (Join-Path $PSScriptRoot 'Fixtures\M365UserActivity.sample.json')|Out-Null;$rows=@(Import-Csv(Join-Path $tempRoot 'DATA-LAST\Raw\M365\M365_UserActivity.csv'));Assert-True ($rows.Count -eq 2) 'Activity row count is invalid.';Assert-True ($rows[0].LastActivityWorkload -eq 'Teams') 'Latest workload was not derived correctly.'}
+ Invoke-Test 'Link only exact UPN matches'{&$userCollector @identity -InputJsonPath (Join-Path $PSScriptRoot 'Fixtures\EntraUsers.sample.json')|Out-Null;&$userNormalizer @identity|Out-Null;&$normalizer @identity|Out-Null;$rows=@(Import-Csv(Join-Path $tempRoot 'DATA-LAST\PowerBI\FactUserActivity.csv'));Assert-True (@($rows|Where-Object { $_.MatchStatus -eq 'ExactUPN' }).Count -eq 1) 'Exact UPN link count is invalid.';Assert-True (@($rows|Where-Object { $_.MatchStatus -eq 'Unmatched' }).Count -eq 1) 'Unmatched activity evidence was not preserved.'}
+}finally{if((Test-Path -LiteralPath $tempRoot)-and(Split-Path -Leaf $tempRoot)-like'SmartWorkplaceCMDB-UserActivity-Test-*'){Remove-Item -LiteralPath $tempRoot -Recurse -Force}}
+Write-Information "SmartWorkplaceCMDB user activity tests completed. Version=1.0.0; Passed=$passed; Failed=$failed" -InformationAction Continue
+if($failed -gt 0){exit 1}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrzPJRgEmN/Hnq
-# 6ZQTp7TS5gXs3K0tjHZDLVg+N5u1D6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWdrIwokPUkcU/
+# 8sBIyEgGlbNFC3ZBgEOL1KIgQgwJfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -268,31 +148,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMLD/n/s6kIZckXDOmg72fab7VBG6mk8fNv6LSOxqDsCMA0GCSqG
-# SIb3DQEBAQUABIIBgATBrCLogtv/icml8kI8ZMxzm8txmX9M3ySMKtO2R0ymUWGn
-# 5RRyCMKsHJRhhFNafEEzirgQCk/MjOFd3DZswqynBVILbsx/x+sXY0vzQrVWCWZD
-# My7hs1eUyJ2vbcxrKDlltYo2BfPjQmubVleBIfVqxHx2lBXslNXQ8nQf4mdTMWMY
-# 0dJV375BT2A9t89yCuzs9cwZLwvm8m3j9zFotW9szhqqbsnjSMMsiDVbIs3fXuAo
-# mMf1MZZZ5+5v2MG0XFsoF2Scv8IgjuUc7pz9ItASngBgou+MuKne1yNSNKNzPWX4
-# 31yJ4AhR1JKFZhEKUwC564pPLGSjuVjJbvEefeVOYXghHas0hBd8n/UyrZjCWau1
-# T1NnKflJRu+vHe6gkWQW52STh/rVGc/yaJmlr711GKvvP2YH5HNAxfxGM+v6XnJR
-# 8hyXZpL34tF0/GdKYE6C6eMP8AN/6woU9SXEBkXoFndmuMob9W+nM20vkockw/KM
-# IyjxRbOoQsYNScuLTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINs+CxNYCoeDwvVaFKsvyvkMNlBG7H8QF7k61qptpvBAMA0GCSqG
+# SIb3DQEBAQUABIIBgJ8PwfdIgq6XbsksNvVwMYuRljrXtMXqcn+rmUpnm4UGJx46
+# U4lw3Fv3oxYy2wkOMIl4A3TWp5ynOvhO/7PcC0J+WnkowDsS3gXofTIO+1eSxrmg
+# RtOxlW74wZLTp1n2DDCCJeC3Zq4es8sn596lKZSsKx6TXafJCRr87j81ELRqRdOk
+# odbQNfQcyswX4vkBs8Z2H4Y1niKgjtmNvZ2/yHQpvfvASXv/szmYIMDKDkQMXVXW
+# ih8HMZGjWRfucZ08WyShkqhlpx+1yZRtbJXexIEh4LLdAuxphSY6iQzu88+rAb4K
+# 9HG0CIRwZoQfWyb2r0+2Gr0ZoYSCBztkUOvPL2Xfkhe0Gc6unnVS3TMTXdp1FVDA
+# z4WIl1P9TD6MlzPQ3SrlwQHF5TiTokeiFm1kv1ZZo9q8lZF636j3rsv9HdEUV6Qs
+# W0YkI2Q8RA53jrSc63Akt4ZUriAwcg9NY/itWTt0xl6DwkmMCJkGWZ/H7holhkkr
+# eMVBB0/efRIlQwRJoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
-# NThaMC8GCSqGSIb3DQEJBDEiBCATL518PUJijqxItzt0nUUGpuyzOQ5g3KVl2urL
-# x/oHmDANBgkqhkiG9w0BAQEFAASCAgAmpSp9wFqx6bOIdGhKOTwS6dSaVePqfg4M
-# ZiaKkkZuVnqoqVZ+sx3flvunw5FSEeRMmLpX7rW/bDqhO2wKcCDkEUqecwdBlybe
-# IXbZqy9YGHGlkuhqegrFI2R659Qtixj+M2mO6GrlVPn4NEI52AZdM3QIMYTQ5b3B
-# UnRX9I7WurW3jPCMrg9zBLBmOK+mzPMp7BSqMcm3VLCyMhivqm+ihfpmyE8Oy7Om
-# ipxpDrORtA27v9LPTQ9rG8YkXlizxkboBeK8R+Rua4pyCxvVg63dD3seo6yQ/9O/
-# 2FJTQkE4lqsOtoxqLYsqzEolnAXWe2DePXu1Q4kpMAnfIlgGsyLIB1sNUxUZuN0u
-# zyGuRACmBPDxMu+uj8RnqOG5Hz6uN7MsiuupejjBTHhLH9Mfm2pDKR5ZE4peX/Gd
-# pnKO/xcBxs8QXT18GOx+PvL/S5FZrk0y5/I1exQc6QlHokQixPyRtLmotofZApGu
-# XHn4w3mFHhF5zjbG5e3qBLNG+W/xM5titbeuvMdENQ1ByDoVumKeYSXvjIUm03d5
-# /EUOJFW/W1ruoQBmG7vauJABq7XddRDsPBPKas1FLOKSp5AH0Uovbm5rv8Gg+QpA
-# DVuNr/sOB8fVTxkLJ4vVKZAaQMRQAhY02jvT6mgygMqQybtDmv76Q4MSYtNrRElX
-# vJuQy4qxRw==
+# NTlaMC8GCSqGSIb3DQEJBDEiBCA4Mdc5O+npOEMAJ6NUmKeZtqQJBOsJEtZ3h3JD
+# 8GmhLDANBgkqhkiG9w0BAQEFAASCAgAs8J0gzkrrBNdPE4SfsEh1ZB2x3BMprYXc
+# LHuLloTM5CREt/ORGr8fVq00CHwGMCVXC0qxKUDNlGx5aGZ8YsKeZdze8EZtXfQO
+# vlSlML2WwBozfJgsPsaoheEuIn+fmsLB+dcQfXFl0nsfCR+KU7uaGwvjvVdrLmr+
+# vkr/2MhmrYYSKu00a8Gs06soWL4rpFwLEvo35qlKgGohTA6MebHeT1UW2wc4v8RQ
+# SR798zbw4Cjqq3G0S73SE88GJ12FlAzYqEUviym/61v5eIW0D0xq4lInbSqBgeRt
+# 7X58m8HmljavQ5q5GIG3xSDaaKHyizGVd6cvFRi4rOScBZ6AFRj/mEczMwC4K3+/
+# xhALy43ZutNVJZKT1uPdpRmLmlvaavGC5rE5p7ZApMhdQJOkTPufC4Wbkhou4tgV
+# IT0wsU3jeWpzqUFz5jQhoSrMuybi4oc512AcA+FKbq+0flBg6tPwEDIYWgRFQ7Cv
+# Vl4SRGBD9VLeYXDyQkuembgYj6yg2MU1duM4CCb8bROcVBapGw3u28dli4sVpER3
+# nK1i6sFkF0S/KqAxfe3DnpnbCe0DYY3KrlKdriK+49sWV7NXYFM7c6Vi1hnyPvNT
+# 4F0Vz/91swS/rBzACywXO+CJn642nl9K9sJAwRNv/HvrFHwqOGNWxTzQOoT4TTGI
+# aBSk6ri/dw==
 # SIG # End signature block

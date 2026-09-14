@@ -163,8 +163,13 @@ class Report360Tests(unittest.TestCase):
         output=self.base/'new'
         with contextlib.redirect_stdout(io.StringIO()):report.build(self.root,output,True)
         model=json.loads((output/'CMDB-REPORTS.SemanticModel/model.bim').read_text())['model']
-        self.assertEqual(len(model['tables']),26)
-        self.assertIn('FactEndpointAnalyticsUpgradeEligibility', {table['name'] for table in model['tables']})
+        self.assertEqual(len(model['tables']),32)
+        table_names={table['name'] for table in model['tables']}
+        self.assertIn('FactEndpointAnalyticsUpgradeEligibility', table_names)
+        self.assertTrue({
+            'FactDeviceApplication','FactADIntuneCoverage','DimSharePointSite',
+            'DimTeam','FactTeamMember','FactUserActivity',
+        }.issubset(table_names))
         self.assertEqual(len(model['relationships']),13)
         self.assertTrue(all(r['crossFilteringBehavior']=='oneDirection' for r in model['relationships']))
         manifest=json.loads((output/'REPORT-MANIFEST.json').read_text())

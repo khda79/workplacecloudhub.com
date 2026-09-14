@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.18.0",
+  "contractVersion": "0.23.0",
   "description": "Raw collector CSV contracts owned by SmartWorkplaceCMDB.",
   "tables": [
     {
@@ -242,6 +242,7 @@
         "SourceSystem",
         "SourceObjectId",
         "SourceDeviceId",
+        "OnPremisesSecurityIdentifier",
         "DeviceName",
         "OperatingSystem",
         "OperatingSystemVersion",
@@ -391,7 +392,19 @@
       "tenantScoped": true,
       "columns": [
         "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
-        "AppId", "DisplayName", "Version", "Publisher", "DeviceCount", "Platform", "SourceCollectedDateTime"
+        "AppId", "SourceApplicationKey", "DisplayName", "Version", "Publisher", "DeviceCount", "ReportedDeviceCount",
+        "ExactRelatedDeviceCount", "RelationshipCoverageStatus", "Platform", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\Intune",
+      "name": "Intune_DetectedAppDeviceRelationships.csv",
+      "role": "raw",
+      "source": "MicrosoftIntune",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "RelationshipKey", "AppId", "ManagedDeviceId", "SourceCollectedDateTime"
       ]
     },
     {
@@ -454,6 +467,58 @@
         "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
         "MetricId", "MetricDeviceId", "DeviceId", "DeviceIdSource", "DeviceName",
         "UpgradeEligibility", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\M365",
+      "name": "M365_SharePointSites.csv",
+      "role": "raw",
+      "source": "Microsoft365Reports",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "SiteId", "SiteUrl", "SiteName", "OwnerPrincipalName", "LastActivityDate",
+        "StorageUsedBytes", "StorageAllocatedBytes", "RootWebTemplate", "IsDeleted",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\M365",
+      "name": "M365_Teams.csv",
+      "role": "raw",
+      "source": "MicrosoftTeams",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "TeamId", "DisplayName", "Visibility", "CreatedDateTime", "LastActivityDate",
+        "OwnerCount", "MemberCount", "GuestCount", "UnresolvedMemberCount",
+        "MembershipCoverageStatus", "IsArchived", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\M365",
+      "name": "M365_TeamMembers.csv",
+      "role": "raw",
+      "source": "MicrosoftTeams",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "RelationshipKey", "TeamId", "UserId", "UserPrincipalName", "UserType", "Role",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "Raw\\M365",
+      "name": "M365_UserActivity.csv",
+      "role": "raw",
+      "source": "Microsoft365Reports",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "SourceSystem",
+        "ReportRefreshDate", "UserPrincipalName", "DisplayName", "IsDeleted",
+        "ExchangeLastActivityDate", "OneDriveLastActivityDate", "SharePointLastActivityDate",
+        "TeamsLastActivityDate", "LastActivityDate", "LastActivityWorkload",
+        "HasAnyM365Activity", "AssignedProducts", "SourceCollectedDateTime"
       ]
     },
     {
