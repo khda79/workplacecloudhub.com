@@ -268,6 +268,10 @@ SmartWorkplaceCMDB/**/LOCAL-REVIEW*.md
 SmartWorkplaceCMDB/**/*-LOCAL-REVIEW.md
 SmartWorkplaceCMDB/.local-review/**
 
+# Local SmartInventory audit evidence
+/SmartM365/SmartInventory/AUDIT-*.md
+/SmartM365/SmartInventory/INVENTORY-MAP.md
+
 # Temporary
 Temp/
 tmp/

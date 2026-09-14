@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.43
+1.44
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -672,7 +672,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.40' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.49' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.43"
+$ScriptVersion = "1.44"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -1008,7 +1008,7 @@ try {
         )
 
         Invoke-SmartM365AdFileOperationWithRetry -OperationName 'publish file' -Path $DestinationPath -Action {
-            Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
+            Copy-SmartM365FileAtomically -SourcePath $SourcePath -DestinationPath $DestinationPath
         } | Out-Null
     }
 
@@ -1159,7 +1159,7 @@ try {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
             $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $missingFiles -Force
-            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
             WriteLog -Message ("Weekly AD inventory history SharePoint publication postponed because snapshot files are missing for {0}: {1}" -f $WeekName, ($missingFiles -join ', ')) -Level 'WARNING'
             return $false
         }
@@ -1178,7 +1178,7 @@ try {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
             $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $failedFiles.ToArray() -Force
-            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
             WriteLog -Message ("Weekly AD inventory history SharePoint publication incomplete for {0}. Failed files: {1}" -f $WeekName, ($failedFiles -join ', ')) -Level 'WARNING'
             return $false
         }
@@ -1186,14 +1186,14 @@ try {
         $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Complete' -Force
         $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue (Get-Date).ToString('o') -Force
         $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @() -Force
-        $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+        Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
 
         $manifestUploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $ManifestPath
         if (-not $manifestUploadRecord) {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
             $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @('manifest.json') -Force
-            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
             WriteLog -Message ("Weekly AD inventory history data files were published for {0}, but manifest.json upload failed. Publication will be retried." -f $WeekName) -Level 'WARNING'
             return $false
         }
@@ -1289,7 +1289,7 @@ try {
         $copiedFiles = New-Object System.Collections.Generic.List[string]
         foreach ($sourceFile in $existingSourceFiles) {
             $destinationFile = Join-Path -Path $weekFolder -ChildPath ([System.IO.Path]::GetFileName($sourceFile))
-            Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
+            Copy-SmartM365FileAtomically -SourcePath $sourceFile -DestinationPath $destinationFile
             [void]$copiedFiles.Add($destinationFile)
         }
 
@@ -1304,7 +1304,7 @@ try {
             SharePointPublishedAt = $null
             SharePointFailedFiles = @()
         }
-        $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
 
         WriteLog -Message ("Weekly AD inventory history saved for {0}: {1} file(s) in {2}" -f $weekName, $copiedFiles.Count, $weekFolder)
         Publish-WeeklyInventoryHistoryToSharePoint `
@@ -1563,14 +1563,15 @@ try {
             return
         }
 
-        $rowsArray = @($rowsArray | Add-SmartM365TenantKey)
+        $existingDailyReport = Test-Path -LiteralPath $OutputFilePath
         if (Test-Path -LiteralPath $OutputFilePath) {
             Repair-SmartM365CsvTenantKeySchema -Path $OutputFilePath -Delimiter ';' -Encoding UTF8 | Out-Null
-            $rowsArray | ConvertTo-Csv -NoTypeInformation -Delimiter ';' | Select-Object -Skip 1 | Add-Content -Path $OutputFilePath -Encoding UTF8
+        }
+        Add-SmartM365CsvRowsAtomically -Data $rowsArray -Path $OutputFilePath -Encoding UTF8 -Delimiter ';'
+        if ($existingDailyReport) {
             WriteLog -Message ("Daily report rows appended to CSV: {0}" -f $OutputFilePath)
         }
         else {
-            $rowsArray | Add-SmartM365TenantKey | Export-Csv -Path $OutputFilePath -NoTypeInformation -Delimiter ';' -Encoding UTF8
             WriteLog -Message ("Daily report CSV created: {0}" -f $OutputFilePath)
         }
         if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
@@ -1590,7 +1591,7 @@ try {
             }
 
             $latestFilePath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($OutputFilePath))
-            Copy-Item -LiteralPath $OutputFilePath -Destination $latestFilePath -Force -ErrorAction Stop
+            Copy-SmartM365FileAtomically -SourcePath $OutputFilePath -DestinationPath $latestFilePath
             WriteLog -Message ("Daily report CSV copied to LatestCsvFolderPath: {0}" -f $latestFilePath)
             Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestFilePath | Out-Null
         }
@@ -1956,14 +1957,15 @@ try {
         $summaryCsvPath = Join-Path -Path $SummaryOutputPath -ChildPath 'AD_Inventory_DailySummary.csv'
         $previousSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath
 
-        $summarySnapshot = $summarySnapshot | Add-SmartM365TenantKey
+        $existingDailySummary = Test-Path -LiteralPath $summaryCsvPath
         if (Test-Path -LiteralPath $summaryCsvPath) {
             Repair-SmartM365CsvTenantKeySchema -Path $summaryCsvPath -Delimiter ',' -Encoding UTF8 | Out-Null
-            $summarySnapshot | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Add-Content -LiteralPath $summaryCsvPath -Encoding UTF8
+        }
+        Add-SmartM365CsvRowsAtomically -Data @($summarySnapshot) -Path $summaryCsvPath -Encoding UTF8
+        if ($existingDailySummary) {
             WriteLog -Message ("AD daily summary snapshot appended: {0}" -f $summaryCsvPath)
         }
         else {
-            $summarySnapshot | Add-SmartM365TenantKey | Export-Csv -LiteralPath $summaryCsvPath -NoTypeInformation -Encoding UTF8
             WriteLog -Message ("AD daily summary snapshot created: {0}" -f $summaryCsvPath)
         }
 
@@ -1991,7 +1993,7 @@ try {
             }
 
             $latestSummaryPath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($summaryCsvPath))
-            Copy-Item -LiteralPath $summaryCsvPath -Destination $latestSummaryPath -Force -ErrorAction Stop
+            Copy-SmartM365FileAtomically -SourcePath $summaryCsvPath -DestinationPath $latestSummaryPath
             WriteLog -Message ("AD daily summary copied to LatestCsvFolderPath: {0}" -f $latestSummaryPath)
 
             $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestSummaryPath
@@ -2455,6 +2457,7 @@ try {
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("OU inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+            throw
         }
         }
         else {
@@ -2602,6 +2605,7 @@ try {
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Computer inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+            throw
         }
         }
         else {
@@ -2739,6 +2743,7 @@ try {
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("User inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+            throw
         }
         }
         else {
@@ -2790,6 +2795,7 @@ try {
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Group inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+            throw
         }
         }
         else {
@@ -2823,6 +2829,7 @@ try {
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Contact inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+            throw
         }
         }
         else {
@@ -2913,7 +2920,7 @@ try {
             foreach ($combinedCsv in (@($combinedUsersCsv, $combinedUsersEnrichedCsv, $combinedComputersCsv, $combinedComputersEnrichedCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
                 if (Test-Path -Path $combinedCsv) {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
-                    Copy-Item -LiteralPath $combinedCsv -Destination $destinationFile -Force -ErrorAction Stop
+                    Copy-SmartM365FileAtomically -SourcePath $combinedCsv -DestinationPath $destinationFile
                     WriteLog -Message ("Copied combined CSV '{0}' to '{1}'" -f $combinedCsv, $destinationFile)
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $combinedCsv | Out-Null
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile | Out-Null
@@ -3275,7 +3282,7 @@ try {
                         if ($sourceUpload) { $duplicateSharePointUploads += $sourceUpload }
 
                         $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateCsv))
-                        Copy-Item -LiteralPath $duplicateCsv -Destination $destinationFile -Force -ErrorAction Stop
+                        Copy-SmartM365FileAtomically -SourcePath $duplicateCsv -DestinationPath $destinationFile
                         WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateCsv, $destinationFile)
                         $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
                         $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label ("{0} (DATA-LAST)" -f $duplicateLabel)
@@ -3627,8 +3634,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvQLN5wkRbBXa3
-# kV1PvnhT5z0gGRdZ0vxJUAsFsHY63KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApeDZZ7fQ/AugB
+# 4GKjEy7lpdbOqAKxq6UK2ej+cY0zeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3719,25 +3726,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -3745,47 +3752,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINvUPgabXaymKM4enLT9cbBtEcZpZn3TbOtXMhKn0KYpMA0GCSqG
-# SIb3DQEBAQUABIIBgFmG+d6ylNWqvqiqBd9XIGWFyiutyPzrmUUS1bvtZqGmBuRj
-# fq6BD6xa25R246AswaBVIjktwWs7PVZJGByzLx6cKNJtdCj5ln1aNzIxrqCnzQnf
-# +jGxZOiwn0KmnKrBt34YhlMNOgkwJSki+oD8rhPXX1uRLWSB8/x5L/xJdWAahZ2d
-# txMl+Yxr3FBURa0XQFuOqu8HXHTUA05F/10ZgKoOJH/NWoPcif4ch73aSSULX0oc
-# Dr5IzqSCqKoRureBnyO5zlihLjoZyBsAfBcbFjcw+dRhiOn2tAHKnzL42IQjMGZG
-# I0V7/Hk6h30/oRBPg7CIAM5M6xm/tovpe8L2u402Z8vmVhwstL3/TcgnheLOnGfU
-# XCWIrDE5nk3134X7rUhUtwL5PyZsCmMAnGW2VYY7vp/NTMV7P9xDH8Y897iQT7Tg
-# M0jVCwpXuZ5ejzlOSajA7UqHyKdgItNjhEQhb6wkfXLM4qewRKcFAHEWD5IEmvcD
-# XomA3JbE7xaH21cFWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOZ+4ArQoUlnCCtpNxYNitMUbpFbVsM165x1uTzP+mQyMA0GCSqG
+# SIb3DQEBAQUABIIBgJcawaCVB7olI4sqKdozwXxGsY02GlujYRCsX9GPGiqy8814
+# Hw8sjDGLK7U29UR980JAnYeDcptFN6zKKfScAjIKk5VKdW723JvOefZ4LAQyPdH7
+# 1JxN65EuGyIRWHV7JdquG4mqh76/6DI+biZdjtp4o6FteM4pkMClEDZlPKojqNr4
+# FlJryQCzw4RzqfyShDqAprI3z9WiJFIw+kRSF3Y7OuS+gkaPvUlGwEolg5cZYxQ+
+# YbEpVu8VRdtfU5VsBA0dXwWwA51Y6Jl+pc46G8y/WxaSXoKQM5tbRcqch2KmVu7C
+# L2A1CQPjNJnDWDJqfrUHAJ/wIvA+TkOnHHLBUUXjCbccqt49kVQ22ADPDgbgmkSP
+# fkwC87Vk4mjw9p/k/baSSw2yBCg4MtWVH4MpadlIp89vvund3N51cVgHpUutfw8a
+# cOzcfj3yJpYWoijVDMkCrmNe2OfkjZJSFT+Qi26xaBhp3a3zh43L/gx2z0Hz+cC1
+# cL/PzLv75+fiB/mveKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxODI0
-# NDdaMC8GCSqGSIb3DQEJBDEiBCDnXR6C+HMtDa/ACSuQjw+0DtNzQFHPMIwoxNt1
-# FNMrpDANBgkqhkiG9w0BAQEFAASCAgB6qqev2knkglmVBSFl5NtBcybqmwA94Qrv
-# bzyy0txDIxwixaSqOdEjGD3opmQr7/RkhpV7zqOtFcFviLEbllri80T9ZGfHYWjr
-# JtZ0uIw05XvZ1ULdhFw1Y0Qz5hfkZMHn1UtxxCmDL3GXtPhCFBmBaPqyy6AcgZyL
-# OQLNxUpj7Z2Xg8sHnfgOUlGEd0HonK98EH66aAB7/yS6WsLn3FViFFr+0MORwVnO
-# tqEk6m18nrxLa6fJsejbib+GJ9FjDtZuHeotIcF/iizsRjX7TvMyobpHu0PEd91W
-# pXAAxHlqg29sxV5k9vLomrzGzXZCoW7MfewHS5k+9gqkTC3NU13uaFPyruwammKK
-# BdEymVDsmT02Rk8ygI1SSN77bEhHcwbT4TfH8Je5G3fvF0q3THzUPj2Wmsu2gyhl
-# jnRLJissj2KzETwMvxLnX+2EZSvxyyYmIwXpNL74TMeseLeI/a6+oUJhWzxe3UMG
-# lQIiXbjLttRiJ8J8NblLRfZt+CfIQk4FlHsu+kNgGgBewzzuDBmZgmrfxsM8mkv3
-# zMIxoVDn3fQ1FA7/pj94KQ1hLjSx9jMp3Plr+BsUIzUHNCeY7ylOhsYhLoYeNMP/
-# 1gD6J8BXHlxcnzo2/ttv1Ak0OEF/R+EfDNL69G3s5P23gTd+1CVGJ+Gu9xef18h7
-# C6t5mwsMWQ==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
+# MjRaMC8GCSqGSIb3DQEJBDEiBCD43GIczdxp5Yyi/LgVwmhfNnskfR3VDSuqV+ij
+# yLKecTANBgkqhkiG9w0BAQEFAASCAgBQQ2rHPMIoIwV9egKZLps4148BFsWrGlME
+# 9XtS33bSpQnBzA/ZX6DUpX0KCXrROVsGFeOqXXTzYo+C40uDdT7huIvSWBsm2Nh5
+# ntTy0C1COug/RsAJKYNFG1gEV0vfkXIxOFim4b1CEOTw0vAFgw4lcyKyhd8NLIeM
+# 1zPfLq8sIge+Ebj9p1p+dlpvFuU6igtuheCwQiTlV6Ab7CM+jTaQRy0BxZoCZdYk
+# Guhi+TiaygmtzOhFUNK/2bDT2UUCjPBtO5bjGnwkgUECEtw5CONACWRrjxknsdnr
+# eioaUKCFCr1uEMhWRJzXgCKtyrTL4KOY42VsWWPPpXIV7yiKgeJ+D4K5oXkZ6l+7
+# 49OfinUg8B1/5PPuW9/1bctqgiG24hoKMDKixboaKnY3jOhGyn+yztY+6RzRM4dv
+# XQchpgF81Yuiyy7PgtAYhy0ilOO36CekJTb8Wamw+P1uSWkr0JbfCQLXGDNE+vgX
+# QVnTkjiAqYwpJLTONOf4QiEto6hBvTERpDMtXnU8RCdFIFObNeMcn/jedJjA8Myi
+# ZyLTEuIUPdNGl0MXA/LYSvLe197mPTgZd/okNBfjrkapAwar1bHxd2bUKdrPysTN
+# PQ3p/Gmr9moAcjWIu8cxOCGHRFBmBJYOT5jrT6mcEgC4jbg5HZ1meLaoIldfNfYQ
+# i2Lxx3w5oA==
 # SIG # End signature block
