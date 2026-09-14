@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.12
+1.1.14
 #>
 [CmdletBinding()]
 param(
@@ -43,6 +43,7 @@ param(
     )]
     [string]$Pipeline = 'Full',
     [switch]$Collect,
+    [switch]$FinalizeOnly,
     [switch]$ValidateOnly,
     [switch]$ValidateExistingOutputs,
     [string]$FixtureRootPath,
@@ -52,7 +53,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.13'
+$ScriptVersion = '1.1.14'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -509,6 +510,14 @@ try {
 if ($Collect -and $ValidateOnly) {
     throw '-Collect and -ValidateOnly cannot be used together.'
 }
+if ($FinalizeOnly -and ($Collect -or $ValidateOnly -or
+        -not [string]::IsNullOrWhiteSpace($FixtureRootPath))) {
+    throw '-FinalizeOnly cannot be combined with -Collect, -ValidateOnly, or -FixtureRootPath.'
+}
+if ($FinalizeOnly -and ($Pipeline -ne 'Full' -or $MaxItems -gt 0 -or
+        $ValidateExistingOutputs)) {
+    throw '-FinalizeOnly requires -Pipeline Full and cannot use -MaxItems or -ValidateExistingOutputs.'
+}
 if ($Collect -and -not [string]::IsNullOrWhiteSpace($FixtureRootPath)) {
     throw '-Collect cannot be combined with -FixtureRootPath.'
 }
@@ -522,6 +531,9 @@ $mode = if (-not [string]::IsNullOrWhiteSpace($FixtureRootPath) -and
 }
 elseif ($Collect) {
     'Collect'
+}
+elseif ($FinalizeOnly) {
+    'Finalize'
 }
 else {
     'Validate'
@@ -631,7 +643,7 @@ $sharePointEnabled = [bool](Get-SmartWorkplaceCMDBOrchestratorSetting `
         -Configuration $sharePointConfiguration `
         -Name 'Enabled' `
         -DefaultValue $false)
-$sharePointEligible = $mode -eq 'Collect' -and
+$sharePointEligible = $mode -in @('Collect', 'Finalize') -and
     $MaxItems -eq 0 -and
     -not $DisableSharePointUpload -and
     -not $activeDirectoryScoped -and
@@ -672,7 +684,7 @@ if ($summaryEnabled -and $Pipeline -eq 'Full') {
         throw 'Graph app-only settings or Notifications.SmtpServer are required for summary mail fallback.'
     }
 }
-$summaryEligible = $mode -eq 'Collect' -and
+$summaryEligible = $mode -in @('Collect', 'Finalize') -and
     $Pipeline -eq 'Full' -and
     $MaxItems -eq 0 -and
     -not $activeDirectoryScoped -and
@@ -1057,6 +1069,9 @@ foreach ($step in @($selectedSteps.ToArray())) {
 }
 
 $executionSteps = @($selectedSteps.ToArray())
+if ($mode -eq 'Finalize') {
+    $executionSteps = @()
+}
 if ($mode -eq 'Validate' -and
     -not $ValidateExistingOutputs -and
     $Pipeline -ne 'CuratedOnly') {
@@ -1106,7 +1121,7 @@ if (-not [string]::IsNullOrWhiteSpace($GlobalConfigPath)) {
 if (-not [string]::IsNullOrWhiteSpace($TenantConfigPath)) {
     $summaryParameters['TenantConfigPath'] = $TenantConfigPath
 }
-if ($summaryEligible) {
+if ($summaryEligible -and $mode -eq 'Collect') {
     try {
         @(& $summaryScriptPath @summaryParameters -CaptureBaselineOnly `
                 -SnapshotDateTime $runStarted) | Out-Null
@@ -1135,7 +1150,7 @@ $preflight = Test-SmartWorkplaceCMDBPreflight `
     -Pipeline $Pipeline `
     -Mode $mode `
     -ScriptPath @($executionSteps | ForEach-Object { [string]$_.ScriptPath }) `
-    -ThrowOnFailure:($mode -eq 'Collect')
+    -ThrowOnFailure:($mode -in @('Collect', 'Finalize'))
 foreach ($check in @($preflight.Checks | Where-Object Status -in @('Failed','Warning'))) {
     Write-SmartWorkplaceCMDBConsole `
         -Level $(if ($check.Status -eq 'Failed') {'ERROR'} else {'WARN'}) `
@@ -1147,7 +1162,7 @@ $script:SmartWorkplaceCMDBCurrentRunGuard = Enter-SmartWorkplaceCMDBRunGuard `
     -Pipeline $Pipeline `
     -RunId $runId `
     -StartedDateTime $runStarted `
-    -NoWrite:($mode -ne 'Collect')
+    -NoWrite:($mode -notin @('Collect', 'Finalize'))
 Update-SmartWorkplaceCMDBRunState `
     -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
     -Status 'Running' `
@@ -1493,16 +1508,30 @@ $summaryResult = $null
 $summaryError = ''
 if ($summaryEligible) {
     try {
+        Write-SmartWorkplaceCMDBConsole -Message (
+            "SmartWorkplaceCMDB full-collection summary started. Mode={0}." -f
+            $mode)
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
+                "Full-collection summary started. Mode={0}." -f $mode)
+        }
+        $summaryInvocationParameters = @{}
+        if ($mode -eq 'Finalize') {
+            $summaryInvocationParameters['ReuseLatestSnapshot'] = $true
+        }
         $summaryResult = & $summaryScriptPath @summaryParameters `
+            @summaryInvocationParameters `
             -RunStatus $runStatus `
             -SnapshotDateTime $runEnded
         Write-SmartWorkplaceCMDBConsole -Message (
-            "SmartWorkplaceCMDB full-collection summary email sent. HTML='{0}'." -f
+            "SmartWorkplaceCMDB full-collection summary email sent. SnapshotReused={0}; HTML='{1}'." -f
+            [bool]$summaryResult.SnapshotReused,
             $summaryResult.HtmlPath
         )
         if ($loggingEnabled) {
             Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath -Message (
-                "Full-collection summary email sent. HTML='{0}'." -f
+                "Full-collection summary email sent. SnapshotReused={0}; HTML='{1}'." -f
+                [bool]$summaryResult.SnapshotReused,
                 $summaryResult.HtmlPath)
         }
     }
@@ -1528,6 +1557,7 @@ elseif ($mode -eq 'Collect' -and $Pipeline -eq 'Full' -and
     Write-SmartWorkplaceCMDBConsole -Message `
         'Full-collection summary email skipped because Active Directory collection is scoped.'
 }
+$runEnded = [datetimeoffset]::UtcNow
 Write-SmartWorkplaceCMDBConsole -Message (
     "SmartWorkplaceCMDB orchestration {0}. Pipeline={1}; Mode={2}; Steps={3}; Duration={4}." -f
     $runStatus.ToLowerInvariant(),
@@ -1586,21 +1616,39 @@ if ($loggingEnabled) {
 }
 
 # The primary publication necessarily runs before the summary notification so
-# that the email can report its outcome. Publish the log delta once more after
-# the summary and completion record exist; this keeps the SharePoint LOG-ALL
-# copy complete without re-uploading the large DATA-ALL or DATA-LAST payloads.
+# that the email can report its outcome. Publish the generated summary files
+# and the log delta once more after the notification. This keeps SharePoint's
+# DATA-LAST, DATA-ALL, and LOG-ALL copies complete without republishing the
+# entire data roots.
 if ($sharePointEligible -and $sharePointPublishedSnapshot.Count -gt 0) {
     try {
-        $finalLogSnapshot = Get-SmartWorkplaceCMDBSharePointSnapshot `
-            -RootPath @($paths.LogRootPath)
-        $finalLogFiles = @($finalLogSnapshot.Keys | Where-Object {
+        $finalSharePointSnapshot = Get-SmartWorkplaceCMDBSharePointSnapshot `
+            -RootPath @(
+                $paths.DataAllRootPath,
+                $paths.LatestOutputRootPath,
+                $paths.LogRootPath
+            )
+        $finalSharePointFiles = @($finalSharePointSnapshot.Keys | Where-Object {
                 -not $sharePointPublishedSnapshot.ContainsKey($_) -or
-                $sharePointPublishedSnapshot[$_] -ne $finalLogSnapshot[$_]
-            } | Sort-Object)
-        if ($finalLogFiles.Count -gt 0) {
+                $sharePointPublishedSnapshot[$_] -ne
+                    $finalSharePointSnapshot[$_]
+            })
+        if ($summaryResult) {
+            $finalSharePointFiles += @(
+                [string]$summaryResult.HistoryPath,
+                [string]$summaryResult.LatestPath,
+                [string]$summaryResult.HtmlPath
+            )
+        }
+        $finalSharePointFiles = @($finalSharePointFiles |
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string]$_) -and
+                (Test-Path -LiteralPath $_ -PathType Leaf)
+            } | Sort-Object -Unique)
+        if ($finalSharePointFiles.Count -gt 0) {
             $finalSharePointRecords = @(
                 Publish-SmartWorkplaceCMDBSharePointFile `
-                    -LocalFilePath $finalLogFiles `
+                    -LocalFilePath $finalSharePointFiles `
                     @sharePointPublishParameters
             )
             $sharePointRecords = @($sharePointRecords) +
@@ -1608,7 +1656,7 @@ if ($sharePointEligible -and $sharePointPublishedSnapshot.Count -gt 0) {
             $finalSharePointFailureCount = @($finalSharePointRecords |
                 Where-Object Status -eq 'Failed').Count
             Write-SmartWorkplaceCMDBConsole -Message (
-                'SmartWorkplaceCMDB SharePoint final log synchronization completed. Uploaded={0}; Failed={1}.' -f
+                'SmartWorkplaceCMDB SharePoint summary and log synchronization completed. Uploaded={0}; Failed={1}.' -f
                 @($finalSharePointRecords |
                     Where-Object Status -eq 'Uploaded').Count,
                 $finalSharePointFailureCount
@@ -1618,13 +1666,19 @@ if ($sharePointEligible -and $sharePointPublishedSnapshot.Count -gt 0) {
     catch {
         $finalSharePointError = $_.Exception.Message
         $sharePointError = if ([string]::IsNullOrWhiteSpace($sharePointError)) {
-            "Final log synchronization: $finalSharePointError"
+            "Summary and log synchronization: $finalSharePointError"
         }
         else {
-            "$sharePointError | Final log synchronization: $finalSharePointError"
+            "$sharePointError | Summary and log synchronization: $finalSharePointError"
+        }
+        if ($loggingEnabled) {
+            Write-SmartWorkplaceCMDBTextLog -Path $orchestratorLogPath `
+                -Message (
+                    "SharePoint summary and log synchronization failed: $finalSharePointError") `
+                -Level WARN
         }
         Write-SmartWorkplaceCMDBConsole -Level WARN -Message (
-            "SmartWorkplaceCMDB SharePoint final log synchronization failed: $finalSharePointError")
+            "SmartWorkplaceCMDB SharePoint summary and log synchronization failed: $finalSharePointError")
     }
 
     $sharePointFailureCount = @($sharePointRecords |
@@ -1650,6 +1704,44 @@ Write-SmartWorkplaceCMDBCompletionBanner `
     -WarningCount $completionWarningCount `
     -ErrorCount 0
 $script:SmartWorkplaceCMDBCompletionWritten = $true
+
+# The completion banner is appended after the preceding synchronization. Send
+# the exact orchestrator artifacts one final time so the SharePoint LOG-ALL
+# copy ends with the same terminal status as the local log.
+if ($sharePointEligible -and $null -ne $sharePointPublishParameters) {
+    try {
+        $terminalFiles = @(@($orchestratorLogPath, $logPath) | Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string]$_) -and
+                (Test-Path -LiteralPath $_ -PathType Leaf)
+            } | Sort-Object -Unique)
+        if ($terminalFiles.Count -gt 0) {
+            $terminalRecords = @(Publish-SmartWorkplaceCMDBSharePointFile `
+                    -LocalFilePath $terminalFiles `
+                    @sharePointPublishParameters)
+            $sharePointRecords = @($sharePointRecords) + @($terminalRecords)
+            $sharePointFailureCount = @($sharePointRecords |
+                Where-Object Status -eq 'Failed').Count
+            $sharePointUploadCount = @($sharePointRecords |
+                Where-Object Status -eq 'Uploaded').Count
+            if (@($terminalRecords |
+                    Where-Object Status -eq 'Failed').Count -gt 0) {
+                $runStatus = 'CompletedWithWarnings'
+            }
+        }
+    }
+    catch {
+        $terminalSharePointError = $_.Exception.Message
+        $sharePointError = if ([string]::IsNullOrWhiteSpace($sharePointError)) {
+            "Terminal log synchronization: $terminalSharePointError"
+        }
+        else {
+            "$sharePointError | Terminal log synchronization: $terminalSharePointError"
+        }
+        $runStatus = 'CompletedWithWarnings'
+        Write-SmartWorkplaceCMDBConsole -Level WARN -Message (
+            "SmartWorkplaceCMDB SharePoint terminal log synchronization failed: $terminalSharePointError")
+    }
+}
 
 Exit-SmartWorkplaceCMDBRunGuard `
     -RunGuard $script:SmartWorkplaceCMDBCurrentRunGuard `
@@ -1703,7 +1795,9 @@ Exit-SmartWorkplaceCMDBRunGuard `
     SummaryEmailEligible = $summaryEligible
     SummaryEmailStatus = if ($summaryResult) { [string]$summaryResult.Status } elseif ($summaryEligible) { 'Failed' } else { 'NotApplicable' }
     SummaryEmailHtmlPath = if ($summaryResult) { [string]$summaryResult.HtmlPath } else { '' }
+    SummarySnapshotReused = if ($summaryResult) { [bool]$summaryResult.SnapshotReused } else { $false }
     SummaryEmailError = $summaryError
+    FinalizationOnly = $mode -eq 'Finalize'
 }
 }
 catch {
@@ -1732,8 +1826,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYht8vHiDcoBxP
-# TerCm9/bW+j0tfob5byTU4xXPbKUR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTg45Xz52v2iau
+# J7rq4oB8hVx61eq50qtPzCGDqE/r7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1866,31 +1960,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK+667pF0IDfoJ1FaUDeC1KmIuo2+ujkFuSSWoBDRnCAMA0GCSqG
-# SIb3DQEBAQUABIIBgBtNBnYFeMkX7DsAcGYUdgz7eFe2KLmlsSkgZd3KxXJSnaD5
-# FiOE/RPR6OOpwaiy9YOBNALNXncJaZPfGq3SyCH7WBIJnMyhIuG27n8UoE+5tF2W
-# C37DsI6Y6SU2O9xUAycrHwd6Sg6IYa3jMgFwEHKw1B9W0kKEfOvmR7fNzbUEm9NG
-# 6fKHhbmmdvOdqw2z7odkfpUrNiEvgHxcZUuzKa6VUBrUW+Bb3u88iGj/Hzin6ZsW
-# tSoxu3L2/eDtQJU2CPpoxzHbF151UI2J5u3FWx0SNf80Hh5SaGAW5ez/ojol4BNr
-# E9tMJ4HB8NdTCjFEAln4bd5x4hPmIZS1E1KLVCBuqzuQqhtfReEU5WANxJsbY5Ls
-# VUf4Xo0/uE6N4A5VpxuS5glr3sd7qvVN+2dNXD7i9186KFltKeupIkSfnk7bHBN5
-# uHBJHO+1vVjLaw8JpEJsSMJK7W65h3BQ4t62R4erz4ddp/qwN3cfstKUaMzDU8Te
-# yTu1I8JOKBHbl6WlYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIYnCnSq+WC1DzLO3gkoJcLoRh2QdK++6KmzTUHP+kvGMA0GCSqG
+# SIb3DQEBAQUABIIBgG7hZzr2OVC+WsQzdXFfDoxg/8qC8MLVwCDIuy/jv2lw6Ag2
+# L3cG1/4sLQixsCbla+yjnqLbU5Ja5K1I/u/WgrkxN+R4/OfrPpC6Ynpd0QP0BAep
+# oLj8CwYwKlaxpzg6EUYbXcuHJT3ZEK+tJP4Qk6riRxsqQWD32xIpV1rhHu/HUhBi
+# KOrOMKYWpJi9ISlXufevIUTsIlYlrrhixQ9jsKZk6u9Jqk9oLjkGvGehFEksKeQu
+# mpuufMVaLptay12sZuCMtgizq/gsCh8KUjsKkbAVBmGrBY1OXfH4JU1FmIL8sP4E
+# lYrIJiuOy9T2FGSfXGnaT+CR6yKktQeKQ4+N0zNc/lxWhE/fLsxNU6IZ/U1nqJhF
+# IaRuBcMnn53NSUJRmzIkUy6l66AxpoV0fSJIcKBbJGf7wFRTSYntm34hgGvExqrv
+# WfPuwuX2NRyw5nO+Z8aOR55momFK4j63psnrehKjPztRvdoyoBQOH88PBliaqjRO
+# rLNpHwlQbPjRtofoEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxNDU3
-# NTJaMC8GCSqGSIb3DQEJBDEiBCA1StV8JMSWEQOEB1GcotNnWySdAYDyM4IRfyM6
-# aiABKzANBgkqhkiG9w0BAQEFAASCAgAVwY0whB5r0pkDn7Q6aVrPtKv4OsqJBTL7
-# rsmo4nkxg+OkP787rvmHtRexNb1oA+jk5wrTLfy8loUuDgcc60bgwpmVeUScra5T
-# 4ZC4bn532mYE1WLhXNYWIdcibobT22gT5N+FLV5efJcQfsJ/slQQL2VLeD8KojIJ
-# Qsy1cEpWSfW+Df+yiW+irA0RJp5h7MCnc+ECKmPcASwrJsTeT6VaI58+mfnXStVw
-# p1jcMkJpr4FVb2pnfnXN9I6UHyii/3kcVvBN1ULmjQKj8b7CzRPQWvZLETuwpJbX
-# A/fDKwLHwIwIZIRzCgvI9xTLYxs/1bjdLGeOKm4TJlUeE9PTxk8j4lBN1CRF2vYZ
-# pvG6mKIv7oql9rvFRN0BTM0dmyaluDCMtp+o37FD7DagF8dKt0SXVcNyYuRbdOr2
-# 6aBGICvqx1w0lvKSd2UJ9dIC31mKAZlSXfZI8eAI6cRjn6Ba7oK5VMNHfG8dG/9U
-# fJxGWKJSS9j3yorpBxUp3FaUm3oUI+BOh07+boqB5CZsl1pyV1xwFLEREnuS+u+D
-# THPLF7zfLreww0k1LQd3dlONPbaPtdtL0lPwseF1eZPN0uweVTr3xk7BFggm25FJ
-# CvuknqUOfPATRiaB3HocH3XsP7bi3Cy8LOl8nWgHN8xGZMmhVAmCy4eGkCzCmmNW
-# HSF+nMJagA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM3
+# MjFaMC8GCSqGSIb3DQEJBDEiBCAYna4T9mF9KlK0ELoyYEPBjI5bpopznydROKru
+# gZsLjzANBgkqhkiG9w0BAQEFAASCAgBBugppxCwX3pIKU7Ej6rMa+hULeAfLZAKw
+# NiWG13h5FSvurKB2MOe3CTOhG+RxM6a2KFsXAPR/0iOlRC6KO9SexMyuJaU9T1y6
+# wc9Z7resF/DvTdQHFCeluxw29ZT5X35mwICHHnTsHDM/yjr7OaIpX7X/f2SuztuS
+# JbS3V3M1uhhpF8Kre2Qtu47l8TrrXVZd6dfiz1IuMP9sswC046sB/ethKHfeMD2N
+# gbw73WxVbD0INBoIgzo8LfxHFtzjOpWBeyglC8A8tPDeBuZEp7tW1jK4emXN1dKy
+# FMCg2r4ynCv1ZG5+CTZHvVPJscvX/2SRBaDNeRNhrZJmJRjBlWd/fZZIFBKjw5cv
+# pHRDNJXU00YOTolZX3uvBiv98eRANB+Q14je6LJXgNKPv2z0sgTMhp29MhLdZYKT
+# nPBjMExSCX3fab/TKq0VUgUO9ieVAGE6pO6inwS1oaOArvT1ZXSCo3SUKzO7dixs
+# zbd2whYICLfF36mMgBIkpWSjMQrxCgV4Dqkw94H5HvN2juJz0V+lgdFPgitjGRlR
+# yFbTuwKjH+UzZXFQ4FJIVgmmokntYyolXcvIEG/TJWUrvE3fJnUnSZBurW8oyOCy
+# qoEKNbHKK9QTl32dWt352LFIBToJn+AzTueMd+MpuIQqaPeeKbTm400e/jgjFbza
+# KaBiMzRqFw==
 # SIG # End signature block
