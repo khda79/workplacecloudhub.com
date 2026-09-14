@@ -227,7 +227,7 @@ class CockpitNavigationTests(unittest.TestCase):
     def test_explicit_report_data_directory_precedes_parameter_discovery(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
-            report = root / "project" / "CMDB-REPORTS.Report"
+            report = root / "project" / "SmartWorkplaceCMDB.Report"
             local_data = report.parent / "ReportData"
             explicit_data = root / "explicit"
             parameter_root = root / "parameter"
