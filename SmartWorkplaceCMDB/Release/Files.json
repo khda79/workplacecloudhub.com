@@ -49,6 +49,7 @@
   "Modules/SmartWorkplaceCMDB.Core/SmartWorkplaceCMDB.Collection.ps1",
   "Modules/SmartWorkplaceCMDB.Core/SmartWorkplaceCMDB.Core.psd1",
   "Modules/SmartWorkplaceCMDB.Core/SmartWorkplaceCMDB.Core.psm1",
+  "Modules/SmartWorkplaceCMDB.Core/SmartWorkplaceCMDB.Runtime.ps1",
   "Modules/SmartWorkplaceCMDB.Graph/SmartWorkplaceCMDB.Graph.psd1",
   "Modules/SmartWorkplaceCMDB.Graph/SmartWorkplaceCMDB.Graph.psm1",
   "Modules/SmartWorkplaceCMDB.SharePoint/SmartWorkplaceCMDB.SharePoint.psd1",
@@ -133,5 +134,6 @@
   "Tests/test_report_builder.py",
   "Tests/test_report_cockpit.py",
   "Tests/test_report_hardware.py",
+  "Tests/test_release_package.py",
   "Tests/test_report_style.py"
 ]
