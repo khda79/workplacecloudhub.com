@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.15
+    Version : 1.16
 
 .VERSION
-1.15
+1.16
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.15
+    Version : 1.16
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -333,6 +333,7 @@ $script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Co
 $script:PolicyStateFailureCount = 0
 $script:ConsecutivePolicyStateFailures = 0
 $script:PolicyStateCollectionDisabled = -not $script:IncludePolicyStatesEffective
+$script:PolicyDetailCollectionComplete = [bool]$script:IncludePolicyStatesEffective
 $script:ComplianceFatalError = $null
 $script:SettingBatchFallbackCounts = @{}
 $script:SettingBatchFallbackExamples = [System.Collections.Generic.List[string]]::new()
@@ -625,21 +626,26 @@ function Invoke-GraphPagedCollection {
     )
 
     $items = New-Object System.Collections.Generic.List[object]
+    $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $nextLink = $Uri
     $pageNumber = 0
 
     while ($nextLink) {
+        if (-not $visited.Add([string]$nextLink)) {
+            throw "$Operation returned a repeated @odata.nextLink; collection is incomplete."
+        }
         $pageNumber++
         $currentUri = $nextLink
         $page = Invoke-WithRetry -Operation $Operation -Script {
             Invoke-MgGraphRequest -Method GET -Uri $currentUri -ErrorAction Stop
         }
 
-        if ($page -and $page.value) {
-            foreach ($item in @($page.value)) {
-                $items.Add($item) | Out-Null
-                if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
-            }
+        if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) {
+            throw "$Operation page $pageNumber returned an invalid Graph collection response without a value property."
+        }
+        foreach ($item in @($page.value)) {
+            if ($null -ne $item) { $items.Add($item) | Out-Null }
+            if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
         }
 
         Write-Host ("{0}: page {1}, total {2}" -f $Operation, $pageNumber, $items.Count) -ForegroundColor DarkCyan
@@ -723,13 +729,21 @@ function Get-CompliancePolicyStateBatchMap {
             continue
         }
 
+        if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+            $failureCounts['InvalidBody'] = 1 + [int]$failureCounts['InvalidBody']
+            if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($deviceId) }
+            continue
+        }
         $values = [System.Collections.Generic.List[object]]::new()
         foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
         $nextLink = [string]$response.body.'@odata.nextLink'
+        $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+            if (-not $visited.Add($nextLink)) { throw 'Compliance policy-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
             $page = Invoke-WithRetry -Operation 'Get Intune compliance policy-state continuation page' -Script {
                 Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
+            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance policy-state continuation returned an invalid Graph collection response without a value property.' }
             foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
             $nextLink = [string]$page.'@odata.nextLink'
         }
@@ -783,13 +797,21 @@ function Get-ComplianceSettingStateBatchMap {
             continue
         }
 
+        if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+            $failureCounts['InvalidBody'] = 1 + [int]$failureCounts['InvalidBody']
+            if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($policyId) }
+            continue
+        }
         $values = [System.Collections.Generic.List[object]]::new()
         foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
         $nextLink = [string]$response.body.'@odata.nextLink'
+        $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+            if (-not $visited.Add($nextLink)) { throw 'Compliance setting-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
             $page = Invoke-WithRetry -Operation 'Get Intune compliance setting-state continuation page' -Script {
                 Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
+            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance setting-state continuation returned an invalid Graph collection response without a value property.' }
             foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
             $nextLink = [string]$page.'@odata.nextLink'
         }
@@ -1229,9 +1251,12 @@ try {
             } else {
                 $uri  = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates`?$top=200"
                 $vals = @()
+                $visitedPolicyStateUris = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
                 while ($uri) {
+                    if (-not $visitedPolicyStateUris.Add([string]$uri)) { throw 'Compliance policy-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
                     $resp = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
-                    if ($resp -and $resp.value) { $vals += $resp.value }
+                    if ($null -eq $resp -or $null -eq $resp.PSObject.Properties['value']) { throw 'Compliance policy-state page returned an invalid Graph collection response without a value property.' }
+                    if ($resp.value) { $vals += $resp.value }
                     $uri = if ($resp.'@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
                 }
                 if ($vals.Count -gt 0) { $policyStates = $vals }
@@ -1239,6 +1264,7 @@ try {
             }
             $script:ConsecutivePolicyStateFailures = 0
         } catch {
+            $script:PolicyDetailCollectionComplete = $false
             $script:PolicyStateFailureCount++
             $script:ConsecutivePolicyStateFailures++
             $shortPolicyStateError = Get-ShortGraphErrorMessage -ErrorRecord $_
@@ -1291,9 +1317,12 @@ try {
                         }
                         else {
                             $u = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates/$([uri]::EscapeDataString($p.id))/settingStates`?$select=setting,state&`$top=200"
+                        $visitedSettingStateUris = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
                         while ($u) {
+                            if (-not $visitedSettingStateUris.Add([string]$u)) { throw 'Compliance setting-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
                             $page = Invoke-WithRetry -Operation "Get Intune compliance setting states" -Script { Invoke-MgGraphRequest -Method GET -Uri $u -ErrorAction Stop }
-                            if ($page -and $page.value) { $s += $page.value }
+                            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance setting-state page returned an invalid Graph collection response without a value property.' }
+                            if ($page.value) { $s += $page.value }
                             $u = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
                         }
                         }
@@ -1306,6 +1335,7 @@ try {
                             $policyCategoryRollup[$p.displayName][$cat] = 'Fail'
                         }
                     } catch {
+                        $script:PolicyDetailCollectionComplete = $false
                         Write-ComplianceWarning -Message ("Failed to retrieve setting states for '{0}' on device '{1}': {2}" -f $p.displayName, $dev.DeviceName, $_.Exception.Message)
                     }
                 }
@@ -1415,6 +1445,7 @@ try {
             Write-Host "Compliance summary CSV saved: $mainCsv"
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance summary CSVs: $_"
+            throw
         }
     } else {
         Write-Host ""
@@ -1424,6 +1455,8 @@ try {
     if (-not $script:IncludePolicyStatesEffective) {
         Write-Host ""
         Write-Host "Compliance policy detail collection disabled by configuration or parameter. Set IncludePolicyStates to true to generate the detailed per-policy CSV." -ForegroundColor Yellow
+    } elseif (-not $script:PolicyDetailCollectionComplete) {
+        Write-ComplianceWarning -Message 'Compliance policy detail collection was incomplete. Detailed policy CSV publication is skipped so the last valid DATA-LAST export is preserved.'
     } elseif ($polAll.Count -gt 0) {
         Write-Host ""
         Write-Host ("Compliance details per policy: {0} row(s)" -f $polAll.Count) -ForegroundColor Cyan
@@ -1449,6 +1482,7 @@ try {
             Write-Host "Compliance policy CSV saved: $policyMainCsv"
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance policy CSVs: $_"
+            throw
         }
     } else {
         Write-Host ""
@@ -1489,8 +1523,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNBdvkwsYjcH3X
-# XS1p6qK1ioAfjI3+cxngHKpUCR4j7qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYWUiwDJHcCwcA
+# RAlWb8yjb01twP4/nqMQgCUrqSuGpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1581,25 +1615,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -1607,47 +1641,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPzRUiO2XGWfwHNOoG8PhQI3PQc9q50ZTXzVhAkBaFIYMA0GCSqG
-# SIb3DQEBAQUABIIBgGkkPuKHGVCf3PX7sU1eokqxbxclnoQptqKqcLk0asxa/cPN
-# huHEy2v3BZnUaSW4hFdqzQlfnGS4eNEJVQ7pOQ5u0avZ31X4R5S9hY8PSZNeerP0
-# CAIBLf8Ha0+KHj3UAMeMDb4NQnzfN5+KFUzBAkXTM6+03gRhKz2VbQIYGObrlVjF
-# afBI9wG6BnLU0zw+vYeANDzzrHG6Jkw+RV6PpnPk5bH9v6CyVlo611jNQz6R4W/e
-# DX6rVtx6L1fWJBZ4JKBU8mAdlQjmnIrWhXn2MEO4t8fLZwc+LNGpDghGdZizKBpx
-# YFOg7FWSEFxj70vNCez9y+RqxUdHtkGs3xy3mXRJLyG995JgD65sux6nLxLajFlT
-# tRODy0Q+hiBElJokMDXzhSfwJhlPFuqthQN5gO+R3hLKs2YqwyZ3UDNwiq9/6ko5
-# GumDmtX8TOaoayEKKW/iIMlcIiaUZNJWJ/IXHKtGTBVsHLEUmTJve0dIeb/ehTq0
-# Xef6v/Zfb6EWe6Fu0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIH6YqRvAPT5Y/mV7saxfEkVPGoceB6YRnR8TgTaFq8nMA0GCSqG
+# SIb3DQEBAQUABIIBgGO0FYcMMRrkbxaQAsg4A73Yrj6Kz2kUyHSssFtMkZ6uSaej
+# BJEPKN2n7bH7P4T/z0ZT3Ic39YwvrkOtbt3DzpSyNjVA24+XUrThOeDGjhzmB49D
+# 4uloZ6TCM2TiRKECYr5bkN9CGTLYh7CCWbr+fuDxS2iT0uIsguxthEhL/nl5zBwU
+# +VdRxy8YsY8sgKe0c+1sLltwm2a5cPktJdjfbqVuVAdrrHGDZwV+A7FNLob1TymN
+# esgxvaC4KeVp+VTq4JhtEUJZcz37MOGUsCn5/wmZHmcpyIcVQGg9bE2TVfDvobsk
+# YNzd+3TAyTPM2e2K5LlOzdkpHognF+ak1hn+D3kpMv+TgHeju5dCd4twLOHNCSfA
+# 2Q69aiscY5C6UKNtZgcd8PrHLonKri+s14YotiPvhSc6O3m3UulxadhD2jKpZG6P
+# 4ah+lBp+fBCrDH27YicAx9LTX7ZsvRJJfm9FiIMYwgps0eL+ZJ2P2fBMHzomUMLn
+# 8OsfKrtEpDhNY1TD4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcwODQ2
-# MTRaMC8GCSqGSIb3DQEJBDEiBCDenA2Zxg00QGATEbpfnZsF4//8RTcp1wrOQxs8
-# u/tGUzANBgkqhkiG9w0BAQEFAASCAgB8UErbfoawBZ+Kg3knjZDKUQ13Ns3Fcvj8
-# XKl3AW4fuzoqANyDSmbqU2Yd2ZUZSnNma8P62pZjt9idYcXuQlSPjREmHs5ORf83
-# 5z2U518PlPE2XnZpIPE19PymsYKGvUPlmsLdoAGg0CHE1XlDkhSpV7z8gdbFbk85
-# qBdftJqUI1vL7Y0uidmroZUiRyQQY4HO+nm+apn0pkztMrhfsh6tzCl/sebGbVpZ
-# R4RgY3QtorIhHwy63KnSd3kdx6s8C7s0gqHT4L5zANgmTY8YB6jnKYZ6QflIntn5
-# 97nWHCvZkPXpvGKhqcrhzEJn+crX4dTt3qIWhbPq19TJILZN9PYtgCUyXC6hKuEC
-# 7e44OLOT4ZCHmtblSg8S0Ei/H7UcChB7AuyIU67NKNsDDn+YEOwdvY8iDFI7PoR5
-# MM15KTZYcudM/yA1dzJ4hPW9fuDEko7uSRadQQ2UFXcobXSjVa2oTITD9ZYPLCyN
-# VdLQhx6Bu81kcKpImKrW5P4AMleMXrUpRcWuNrDgjuxhualMwlMs31dL4gS6ACGz
-# XLLEqxHJOEV3H2xOgMwg0fJLR0iyDPjhkXjw+s671LMCAjDzqE+a+gF0uV9GD4hR
-# TQftU9lIEMzQR7Acd7croc5KSylldZSw8AFnXPJJ2UK9RFGjLlNn2faPsCMWwcbN
-# F9ktNhm4zQ==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
+# NDRaMC8GCSqGSIb3DQEJBDEiBCAelJiXyTLR9zlbm9yfzk8vzvMuYcxVlzyqBcdu
+# Fal3YzANBgkqhkiG9w0BAQEFAASCAgCNBSAAEjQfdvXQIfH6lB2ikjtnjjaF/H99
+# biAZZ7XP2sIJCxTSIogjIp7k3ag3DRFN7SfmFKxNfLV2GdYT3/rdOXJPD7/7B/xY
+# OjS42UIPspY9A3BtGTKE6l/HPDznKDO67by7oBED1ugZ16LOoablXBP4nww2yoTO
+# 2PsZ3clupB/Feavdihc9ZLPij20Gcqei9CVM1KcemNhNjQ48avhE/0iYEOlQKlsL
+# cUOKKG1opdXiiuplXeSspsHP0SIQST5GCPWaKnR4eZ6Wx6gw6Vy+nGSwo0RufDeJ
+# aW60DN9KwSbnVVzkK2XUxi2tYeaeitr2f1WGY/boaQoNVutE3mw3me3LH7w+3UJs
+# RletBINXQvvIvT2tKdI1sgPTr//4UbsDcOhYDcWZRqKAzwmYJFsocesKoGnDG0Z2
+# rcfsKdVZf5/MkrcTkvbSco2ZvEJNMW7XAUJ5wnwUQ8N7Aktdjyx/ve4mNH/13z9+
+# m3k/V6yDWDyQzcIsRaOzCRQFm+oOteN3hLcEmL3s5hNaYLk2m1QAAz3LIOIfxDhi
+# S+ZTcEA4VPb1pVRI5n5EzZIwu+Yl8dcfHOG2WIq2DBpUbDM3TeFtq8dDu0dcfICR
+# h/oNmhm/HTdZNRUm7Xxel0BbMXDuHQj72qGzH12qQ9lpWa5D+7eRa5cVTbyZSvhY
+# jisUpUIFzg==
 # SIG # End signature block

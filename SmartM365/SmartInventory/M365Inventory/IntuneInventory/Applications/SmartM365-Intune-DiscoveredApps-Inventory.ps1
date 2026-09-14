@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.24
+    Version : 1.25
 
 .VERSION
-1.24
+1.25
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.24
+    Version : 1.25
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -486,9 +486,13 @@ function Invoke-GraphPagedRequest {
 
     if ($MaxRetries -lt 1) { $MaxRetries = 1 }
     $allItems = [System.Collections.Generic.List[psobject]]::new()
+    $visitedUris = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $currentUri = $InitialUri
 
     while ($null -ne $currentUri) {
+        if (-not $visitedUris.Add([string]$currentUri)) {
+            throw "Graph pagination returned a repeated @odata.nextLink; collection is incomplete. Uri=$currentUri"
+        }
         $success = $false
 
         for ($attempt = 1; -not $success -and $attempt -le $MaxRetries; $attempt++) {
@@ -500,7 +504,7 @@ function Invoke-GraphPagedRequest {
                 try { $statusCode = [int]$graphStatusCode } catch {}
                 if ($statusCode -lt 200 -or $statusCode -ge 300) {
                     $message = Get-DiscoveredAppsGraphHttpErrorMessage -Response $response -StatusCode $statusCode
-                    $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                    $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
                     if (-not $isTransient -or $attempt -ge $MaxRetries) {
                         throw ("Graph request failed. Status={0}; Attempts={1}; Uri={2}; Message={3}" -f $statusCode, $attempt, $currentUri, $message)
                     }
@@ -512,9 +516,10 @@ function Invoke-GraphPagedRequest {
                     continue
                 }
 
-                if ($null -ne $response.value) {
-                    foreach ($item in $response.value) { $allItems.Add($item) }
+                if ($null -eq $response -or $null -eq $response.PSObject.Properties['value']) {
+                    throw "Graph collection response is invalid because the value property is missing. Uri=$currentUri"
                 }
+                foreach ($item in @($response.value)) { if ($null -ne $item) { $allItems.Add($item) } }
 
                 $currentUri = if ($response.PSObject.Properties.Name -contains '@odata.nextLink') {
                     $response.'@odata.nextLink'
@@ -526,7 +531,7 @@ function Invoke-GraphPagedRequest {
                 try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
                 $message = Get-ShortGraphErrorMessage -ErrorRecord $_
                 if (-not $statusCode -and $message -match 'TooManyRequests|\b429\b') { $statusCode = 429 }
-                $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
 
                 if (-not $isTransient -or $attempt -ge $MaxRetries) {
                     $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
@@ -618,7 +623,7 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                 $statusCode = $null
                 try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
                 $message = Get-ShortGraphErrorMessage -ErrorRecord $_
-                $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
                 if ($isTransient -and $attempt -lt $MaxRetries) {
                     $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
                     $script:Stat_ThrottleRetries++
@@ -659,6 +664,11 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
 
                 $statusCode = [int]$response.status
                 if ($statusCode -eq 200) {
+                    if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+                        $script:Stat_BatchFallbackApps++
+                        WriteLog -Message ("Discovered Apps relation batch returned an invalid collection body: AppId={0}. Sequential fallback will be used." -f $appId) 'INFO'
+                        continue
+                    }
                     $devices = [System.Collections.Generic.List[object]]::new()
                     foreach ($device in @($response.body.value)) { if ($null -ne $device) { [void]$devices.Add($device) } }
                     $nextLink = [string]$response.body.'@odata.nextLink'
@@ -669,7 +679,7 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                     continue
                 }
 
-                $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504)
+                $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504)
                 if ($isTransient -and $attempt -lt $MaxRetries) {
                     $retryApps += $app
                     $candidateDelay = Get-GraphBatchResponseRetryDelaySeconds -Response $response -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
@@ -1301,6 +1311,38 @@ function Update-DiscoveredAppsSummaryDeviceCounts {
     }
 }
 
+function Copy-DiscoveredAppsFileAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Atomic CSV publication source does not exist: $SourcePath"
+    }
+    $destinationParent = Split-Path -Path $DestinationPath -Parent
+    if ([string]::IsNullOrWhiteSpace($destinationParent)) { $destinationParent = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $destinationParent)) {
+        New-Item -ItemType Directory -Path $destinationParent -Force -ErrorAction Stop | Out-Null
+    }
+    $temporaryPath = Join-Path -Path $destinationParent -ChildPath (
+        '{0}.{1}{2}' -f
+        [IO.Path]::GetFileNameWithoutExtension($DestinationPath),
+        [guid]::NewGuid().ToString('N'),
+        [IO.Path]::GetExtension($DestinationPath)
+    )
+    try {
+        Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
+        Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Complete-DiscoveredAppsStreamExport {
     [CmdletBinding()]
     param(
@@ -1348,11 +1390,11 @@ function Complete-DiscoveredAppsStreamExport {
     }
     WriteLog -Message ("AppDeviceRelations physical row-count validation passed: PhysicalRows={0}." -f $actualDataRows) 'INFO'
 
-    Copy-Item -LiteralPath $PartialPath -Destination $TimestampedPath -Force
+    Copy-DiscoveredAppsFileAtomically -SourcePath $PartialPath -DestinationPath $TimestampedPath
     $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
     $globalLatestPath = Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv")
-    Copy-Item -LiteralPath $TimestampedPath -Destination $localLatestPath -Force
-    Copy-Item -LiteralPath $TimestampedPath -Destination $globalLatestPath -Force
+    Copy-DiscoveredAppsFileAtomically -SourcePath $TimestampedPath -DestinationPath $localLatestPath
+    Copy-DiscoveredAppsFileAtomically -SourcePath $TimestampedPath -DestinationPath $globalLatestPath
 
     if (-not $global:csvGeneratedPaths) {
         $global:csvGeneratedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1983,8 +2025,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4rquxbybkQxzx
-# TUSjjLt+g83hF1Es5uqk2jQpeg189KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEuijGsSxfJqxF
+# gSBo2bc/rijL7rVucM3v4VdYwKT4zaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2075,25 +2117,25 @@ $($global:LogTextFile)
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -2101,47 +2143,47 @@ $($global:LogTextFile)
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGo6cc63YwP6YrRYLX5Guc2EWS/AhXDpUP17/eBYLFv9MA0GCSqG
-# SIb3DQEBAQUABIIBgGw2G/OUegq4tVqpCTCAJ8oZt4XREAUkgq87U8BVmK4AT8bO
-# szDeuHeaWn21vjWmkKwkuQWmSnxyyGIOvONXV0ZtUZxwjUQMreaK7rkbxQSlOP3u
-# AHJGHUyKtEV1fQbgHqWoJGmSHUZuY74vsbIb5tYClFyOWlSGi2H5Oeo+sfZo8VmA
-# S6MFwpjnjVtMmmydQnf0sXh0CDnPYJIgovvfWe4sRqqeuU7yVub7JzBRJT009Hv0
-# +LMXPMdGfs0INJ5k3dS3tNmNdWGMEGesai3WY79AMVnfxkYXx0IKx7jltu21n2e5
-# ttB5sVjmw8XmIY1mtE+WgRSomrRc14WAeWLM3tac7gcRfdjiqpqaei58ZgJz48KW
-# DuQky4M9hR8ON0zJLoaPKTAm7uy0IsGqtfmkblD+9+FGUWlUZvEuYm5Bc2jsdKi2
-# TVKr97uYZg7sW6QWzl7HWFdJ79+r6mO5xUqOQ8BlAOjt1yYM3a2DXvDknVofC8WL
-# Aw4UAfB0lOSWj0i1fqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOr6yUMbdTPLATP5ZVlSQQq/RWw99uc8uRdwL3YUI/48MA0GCSqG
+# SIb3DQEBAQUABIIBgJ8kisTF39JyjtGYldsLYP6cyUVI4PJuhGdEP3/PNvHrFbRd
+# uTHMBb14raL2SWgNPerx3hazZmpy9ztP6tNzRq2rEpjY6SMZXhT28NyZuDxu1yUI
+# UFhCDsmEncNP0GpTwDwD1ZjZitOdRoyAxi0NmykhAV5QzFB24T1+4z6IM1woQSTl
+# jSsAAl61fO34hquzIFjpZ2pD9arIYkPf/dWVORQngVLb30444peQ6qTEhwqp/aHP
+# qAQpnz8NuQETp+1arQW12bDN+yVPHUoDDo7hJ2iym21vyL7M7LeA1oMKfKd1jFp5
+# NliFUEce+loMiTt4zty+SInkKnR384TT9jTvyD0/jt5xmrDRIoPIN/WGzKp2sSos
+# XarJuYZRdjmmnH5bhbchO4e+Oqa0ARZhtCOodt8dAVkMNo6BeWIgEsQamcF5BffZ
+# NBI7OIXSfIVPXOi57rbl9p3ptHbsMnVZaKfrMv/xHtzfPW5v9Z+5piTzZ4XEz4B9
+# Bl4IySGb66+ymSoDSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAyMTAz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCB7+rvlzLzL7SuoPOWuv7j0E2tEE1kWoEr0HqG7
-# rFu+7zANBgkqhkiG9w0BAQEFAASCAgBuO5EjCZh4ipPmr6tuPWu+d2oBBHRsJk17
-# F66Tikfun2jyVlDXy3B/H7qe46JReb4ERALUMYUke8GCv4569b+AaCFQNtK+siLt
-# YTIp3w6G41rIxsfDhWl0G49ixrbmR2qoABlmBEPu/cc8X0JWcMuUTMLxwIZmfiCD
-# cFuFh6MRMW26RDHMCdxTqo58kZAuAWaT3GFiqZphcKjdf/25aQu2jB7o47tpYNGv
-# pddmklZk1nzcrrKlw3xmjGZxYn1DbhN36s49uhZDngIAzVqcZYPfJPMas6zkAC+L
-# mnXUaSNx/MeAppKUIUvA1r5RSdPRavx1X7CUOZ35svG3MlNmnovUpknSr7vSx+Q6
-# 8nPP4PZP0leXsVG/Ag1QVg3OvdqTk1PNzbIOoYUssK392nScXrN41PTVF2c1EXq3
-# XuaDYcRexpzQRQzQQOkTkjzhxcjt4fbP5M9wl3tq8aeTTdErtUzXKmBEOpgFvezp
-# hsZWgcGJXbOZGL5NS8agBsxDNMrSaDKkJt8fPyXCNHyM3UM+LTZu7yC9kU6ZHu05
-# lyg0buqvAhLru/gisP2YQ8vqAAocO7XmkFePObHlifMWGYlh8di4WBiziORR1MBi
-# Ha957YdLpTye1qz6COI8QW1v7nSZS8o4OjjisBaKfRQjQl/Cc565M0cJkPNE4FYr
-# uZpGsCQ5Og==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
+# NDJaMC8GCSqGSIb3DQEJBDEiBCCgazRpo0FfO4LQAlTBYjx0RT/yc4Z9KymINAE3
+# LgWltTANBgkqhkiG9w0BAQEFAASCAgAEDrFRFbLY/ORb45eqtNSBjI6AOjn4z98n
+# JFiB52sFMBHYO1oHk0r2YzzQD0isd519kMwjeSy71o98jPUv03hYS+uGOB5T458A
+# 4HW6y9CqiQXoUNjcojRkVaKYac/j9VErvS3Wqy5OJflO/hWzYQd1IldJnozalq7S
+# 9LplL+rUc4TDTpSF+xoZAJN9y0Eek2EXgjce9Z87cNqu9h3fPVrziW15RrXYbO3e
+# 70ZTS6Q+Bm9x2NkomMx14/BCcXQ5vBBQ64V77Ns7GXiizXkkbR98iVR2gsEcXpXh
+# BiLLHno8v8Xz80irRWR9WHcFvEekzXyRFlkN1lfKCgB6GzUCSNjLxCxgLEWXymgt
+# FMIr8QsHuRejYWgHXtHFWFKqm4iDEL+C/svLLjskJHDbKlr2QqHuO+f0OK77VgqN
+# mQYi3JedsOo3JUjQ0/6evmt2b8Su28Ew8uwPa0XImXNSlFlXChxMbvzjJvsrSq9H
+# IRjdantxBYWe9C3p4VTJL2k5LoKyB362UJyWt+zo1LgiJ7YW3vdxFxnNipXzsMbB
+# n3niRl9AY+fVe+5YiL/Zb5iLzDJQLnGiuuwVeXL43W5X7wTd3nUBuVaiM/9vpI3W
+# z7QIqhz+3VtywMpu7GwLy1TjnvnJANH7SV/sCY++KphlXXQ4SAJhSiA3p3RhfrBZ
+# DQAR66Hugw==
 # SIG # End signature block
