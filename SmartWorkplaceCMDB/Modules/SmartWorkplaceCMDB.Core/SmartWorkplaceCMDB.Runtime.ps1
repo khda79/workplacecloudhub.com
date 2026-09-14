@@ -204,7 +204,7 @@ function Test-SmartWorkplaceCMDBPreflight {
         [Parameter(Mandatory)]$Context,
         [Parameter(Mandatory)][string]$ProjectRoot,
         [Parameter(Mandatory)][string]$Pipeline,
-        [ValidateSet('Validate', 'Collect', 'Fixture')][string]$Mode = 'Validate',
+        [ValidateSet('Validate', 'Collect', 'Finalize', 'Fixture')][string]$Mode = 'Validate',
         [string[]]$ScriptPath = @(),
         [switch]$ThrowOnFailure
     )
@@ -220,9 +220,27 @@ function Test-SmartWorkplaceCMDBPreflight {
     # Fixture tests must remain deterministic and offline: external modules and
     # tenant credentials are validated only for real validate/collect runs.
     $requiresExternalDependency = $Mode -ne 'Fixture'
-    $requiresGraph = $requiresExternalDependency -and $Pipeline -notin @('ActiveDirectory', 'CuratedOnly')
-    $requiresExchange = $requiresExternalDependency -and $Pipeline -in @('Full', 'ExchangeOnlineMailboxes')
-    $requiresAd = $requiresExternalDependency -and $Pipeline -in @('Full', 'ActiveDirectory')
+    $notifications = Get-SmartWorkplaceCMDBRuntimeSetting `
+        $Context.Configuration 'Notifications' $null
+    $sharePoint = Get-SmartWorkplaceCMDBRuntimeSetting `
+        $Context.Configuration 'SharePoint' $null
+    $mailMode = [string](Get-SmartWorkplaceCMDBRuntimeSetting `
+        $notifications 'SendMailMode' 'Graph')
+    $finalizeNeedsGraph = $Mode -eq 'Finalize' -and (
+        [bool](Get-SmartWorkplaceCMDBRuntimeSetting `
+            $sharePoint 'Enabled' $false) -or
+        ([bool](Get-SmartWorkplaceCMDBRuntimeSetting `
+                $notifications 'Enabled' $false) -and
+            $mailMode.ToUpperInvariant() -in @('GRAPH', 'BOTH'))
+    )
+    $requiresGraph = $requiresExternalDependency -and
+        ($finalizeNeedsGraph -or
+            ($Mode -ne 'Finalize' -and
+                $Pipeline -notin @('ActiveDirectory', 'CuratedOnly')))
+    $requiresExchange = $requiresExternalDependency -and $Mode -ne 'Finalize' -and
+        $Pipeline -in @('Full', 'ExchangeOnlineMailboxes')
+    $requiresAd = $requiresExternalDependency -and $Mode -ne 'Finalize' -and
+        $Pipeline -in @('Full', 'ActiveDirectory')
     if ($requiresGraph) {
         $graphModule = Get-Module -ListAvailable Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1
         & $add 'MicrosoftGraphModule' $(if ($graphModule) {'Passed'} else {'Failed'}) $(if ($graphModule) {[string]$graphModule.Version} else {'Not installed'})
@@ -243,7 +261,7 @@ function Test-SmartWorkplaceCMDBPreflight {
         }
         catch { & $add 'ActiveDirectoryProtocols' 'Failed' $_.Exception.Message }
     }
-    if ($Mode -eq 'Collect') {
+    if ($Mode -in @('Collect', 'Finalize')) {
         try {
             Initialize-SmartWorkplaceCMDBTenantFolder -Paths $Context.Paths | Out-Null
             $probe = Join-Path $Context.Paths.LogRootPath ('.preflight-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
@@ -375,8 +393,8 @@ function Exit-SmartWorkplaceCMDBRunGuard {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDv+H9igZWlXWEQ
-# jlhSP4+dykY7BiQIq3nS7/ai91pMw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxPUgMnTk7U1tY
+# nnQL3KQ/aOlbY5Y/oko8N0oYcU9lFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -509,31 +527,31 @@ function Exit-SmartWorkplaceCMDBRunGuard {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ+x9JY61onMk5aCHeaMnuobX25yqgGTCMwaTp/y+To6MA0GCSqG
-# SIb3DQEBAQUABIIBgKPaXszqiod14+p1qnzrzc9Z/8PtH1/ooWsaiI2a/szlx42+
-# zR1LH6/9WnG3sx87yMNU68sEA62CkKZNZqBzLS73MQaFkymC1xnShHMym/PN7/O0
-# TjbfjEgJteUuld4jEjEwHWYeWqEUzX48sv76liCpXGDaIMg/Ui9pIrJIowcY8RZZ
-# FLRauBcWJbuMwjw48DNOgubqswrbxNjecQvNP9OVhWqe34RnRlCv4huD1jrV0wCZ
-# 7Bfl/II6ZPVdzieKPhpSerTwI5rlvOXn0bo8eet6FyRX5dMZJH91rry+OMhgSokO
-# eIOu0124dOzNrnyqNgf7RJs0kV0SeApHRg+WQmsEvEdczw4EYh1SMe1ticCaMzVa
-# YWcHK01hswL5aFac7nJz7+Cexn9xrOh430jHadaBNIeJsmCKQ/6Yxr/LVgk/Dbhd
-# 4UEuptS8ATvXa5V7rvDcRABBONvAHw2YQkNzrju0+trrN1LjDP0PP+NrutFfDcqO
-# 7HHz+3psNOAc6E9p9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN5B5BVbtp7+7SPeGGL6kJMS60KpgYvXuPFhWrRSlhgFMA0GCSqG
+# SIb3DQEBAQUABIIBgGzaEVfTck0+HuTEkEf05FKpOCpzsm2NgHZqpqs3rmpwXQFj
+# KaSi3glGehMqwOXoi2+YNp5lzC69MrVy360dURL330nosoNB1IY0Z6t3NEDYzZfF
+# o4M0A0f/cC1B4eEg+0xS48tN+1ZwOlamPgIKiayHsbakhOeusRdwCmNadDJ5KbpP
+# 9CNIhGackr2KDRHrEPma9NcZyqAUFKhj9IQoiFs1vGQcyx3U308X5a+IagS8beRw
+# zaiSErRMfFfYcO2lt3w8kXDoHr7XwGJ/9VZC/eTdsaEONB7uEr/m8MgX6gDp+usy
+# ehaeMrLrehpMdIQbA44CHLFl8gI+2FNO4bUEvV0M34Djdie1BPfVeX/5lqVCVuQk
+# rg9oP6bZ5t8YBQlzhUDEUm8mL4vxhvFWy6HX3A68zj0dYS5nj11jt2WZl8UW3tTx
+# AbqojRg97EH5msjihRHhUhU0GON3yq8zOPZMBikemFEBhKgDng/MinkA/DNUsgd0
+# oebdSkY5kblCI+AJKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzE4
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAv4M0Z4U/08juKJhQwhAwgSYg4ojE6S3kqn9KK
-# NT6LizANBgkqhkiG9w0BAQEFAASCAgAga95AUthnUlylLjHCOBKZljFxAbSukaO7
-# V7NOQKJk9pBKysCEVPQ4Xh/JQ0Th6NJm1X1obNg/cSQZw54uh2pZ1XlWEJ6TifIN
-# 3RTZ8t1B6I3Acb3w0dgWl4vXiIQBHR/Pf7whVfPt1Ac7ctOJgr2EIAT8o9kjeNna
-# 2xhjrTWDCI2x/9Z1nXBL8EFqvVDhXB3vTEmlGMMh9Aut6d2L+n5i+qeP4Gxpkfqo
-# JMxIl4XODQLXzbh5h4OGy8DtQN75H1yOGm7kRaiy2uvD5628ikLojVRYcxmAWd5s
-# mayC3WtZGkS2b3xhVk/yNj0oJGkq9ojzQJMxngMH76yHRBbP34vdfXepHD8ZSTt1
-# xX2eAQEEs8Yc74rciM/YMWpa23QF2PyygaO9Ehg1+bYp8fq7FMBtBdJUAT6OFc7w
-# 2W8/YAtIY2NbMh1PMu1uV3UE5tmQ88EW+ygX5cL1Z4L9FQN5talPqQbG7Jk1Ap0t
-# GBotuM/VjcyYyD8aYhhLo/tnnmQeonRGwixDxWDscQPKrEfIQXYUMRzVjxIuvbQI
-# gJVcdMfyqcu8zJZND69yl0kGErDaUE/3A9OSmintvAAgrlPRQohjgdpVl0J6OP4b
-# DPqUf5lIWJ/3qDCI2d8Jpa+jAohVlBNnWDm1cg4q0QlPei+upxaC3EHIl6jkcst1
-# kQXEmZNxow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
+# MDlaMC8GCSqGSIb3DQEJBDEiBCBb0ihR/nWVeKEBLzSUwofNgG8dsYvcg7CUgZpm
+# LbMx9TANBgkqhkiG9w0BAQEFAASCAgBFrsyPeXsiFCmvSB3cZswxtdvgFGsCOic3
+# LzKaCtOKcuLu6p6pwEAPTGL+uOTZ09MejF/c9nbCIHzQLCfCClq6/VSFJ8o3/ajq
+# RnTI3xZe+oHrPBRFvyd0cliQkRFNwQkv8eUe0fOuc9k7Rmp6C5ZZQHN90ZxrxGP8
+# dyjYYLiIQsh6n2F1A52UHqi+8pbl2ik32bDVmb5gLwgVw3EFsSGWles6Pz2FW8qk
+# jTPKoIzvGeB7/npyThOwhoqzc8VZPK/Skbya66aLwSQTWeYLrIfBUaqctRjVVwyI
+# v47udPjcdgNJcpiEaVv7RmQBfY1Bxja2U7tAlovYIRv3ZhMTkLX/06swcVv2Ide7
+# Iqpw3xb46/A29dyK20k3/K6VH3Qpcxs9HNr04YTAaLhSQ85ZGm7I8HHw0P78qP4l
+# yAEDVlKcSvxB3MgSd4T/ce3D3tKDo16A3vs4wbzXZGRdWSQFjnlFAzgUrrj8q2iR
+# eo+9ky5M8GZSs2Ry1ZNEe9fsO+S98/9eWJnmLc+C4iv1mSbSm/+d2q9tSUBMKAXT
+# BflGJVt6ZjwpQ4FCgid9GwxvJBL6sctb4brKp8aRu9u/Ao7GWkhI7cQ8r6KE8gvL
+# ausLuHkOF5+G/QlLZV2Qngz0PqqkDa2tQzqOjP97429x1P4lKil8J9NCvlH6XBbf
+# qt4M/R8XSQ==
 # SIG # End signature block

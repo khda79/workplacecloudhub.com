@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.3.4
+1.3.5
 #>
 [CmdletBinding()]
 param(
@@ -34,10 +34,11 @@ param(
     [switch]$PreviewOnly,
     [switch]$ValidateOnly,
     [switch]$SendMailTestOnly,
+    [switch]$ReuseLatestSnapshot,
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.3.4'
+$ScriptVersion = '1.3.5'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -538,6 +539,132 @@ function Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest {
     }
 }
 
+function Invoke-SmartWorkplaceCMDBSummaryGraphMailWithTimeout {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$ClientId,
+        [Parameter(Mandatory)][string]$CertificateThumbprint,
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$Body,
+        [ValidateRange(1, 900)][int]$TimeoutSeconds = 120,
+        [ValidateRange(1, 10)][int]$MaxAttempts = 4,
+        [scriptblock]$WorkerScriptBlock
+    )
+
+    if ($null -eq $WorkerScriptBlock) {
+        $WorkerScriptBlock = {
+            param($WorkerTenantId, $WorkerClientId, $WorkerThumbprint,
+                $WorkerUri, $WorkerBody, $WorkerMaxAttempts)
+
+            $ErrorActionPreference = 'Stop'
+            Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+            $connected = $false
+            try {
+                Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+                Connect-MgGraph -TenantId $WorkerTenantId `
+                    -ClientId $WorkerClientId `
+                    -CertificateThumbprint $WorkerThumbprint `
+                    -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
+                $connected = $true
+                for ($attempt = 1; $attempt -le $WorkerMaxAttempts; $attempt++) {
+                    try {
+                        Invoke-MgGraphRequest -Method POST -Uri $WorkerUri `
+                            -Body $WorkerBody -ContentType 'application/json' `
+                            -ErrorAction Stop | Out-Null
+                        return
+                    }
+                    catch {
+                        $statusCode = 0
+                        try {
+                            if ($_.Exception.Response) {
+                                $statusCode = [int]$_.Exception.Response.StatusCode
+                            }
+                        }
+                        catch {}
+                        $transient = $statusCode -in @(408, 429, 500, 502, 503, 504) -or
+                            [string]$_.Exception.Message -match '(?i)throttl|too many requests|temporar|timeout|timed out|connection.*closed'
+                        if (-not $transient -or $attempt -ge $WorkerMaxAttempts) {
+                            $details = New-Object System.Collections.Generic.List[string]
+                            if (-not [string]::IsNullOrWhiteSpace([string]$_.Exception.Message)) {
+                                $details.Add([string]$_.Exception.Message)
+                            }
+                            if ($_.ErrorDetails -and
+                                -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                                $details.Add([string]$_.ErrorDetails.Message)
+                            }
+                            throw "Graph mail request failed. Status=$statusCode; $(@($details | Select-Object -Unique) -join ' | ')"
+                        }
+                        $retryAfter = $null
+                        try {
+                            if ($_.Exception.Response -and
+                                $_.Exception.Response.Headers) {
+                                try {
+                                    $retryAfter = @(
+                                        $_.Exception.Response.Headers.GetValues(
+                                            'Retry-After') |
+                                            Select-Object -First 1
+                                    )[0]
+                                }
+                                catch {
+                                    try {
+                                        $retryAfter =
+                                            $_.Exception.Response.Headers['Retry-After']
+                                    }
+                                    catch {}
+                                }
+                            }
+                        }
+                        catch {}
+                        $delaySeconds = 0
+                        if ($null -eq $retryAfter -or
+                            -not [int]::TryParse(
+                                [string]$retryAfter,
+                                [ref]$delaySeconds) -or
+                            $delaySeconds -lt 1) {
+                            $delaySeconds = 5 * [Math]::Pow(
+                                2,
+                                [Math]::Max(0, $attempt - 1)
+                            )
+                        }
+                        $delaySeconds = [Math]::Min(120, $delaySeconds)
+                        Start-Sleep -Seconds $delaySeconds
+                    }
+                }
+            }
+            finally {
+                if ($connected) {
+                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+                }
+            }
+        }
+    }
+
+    Import-Module Microsoft.PowerShell.ThreadJob -ErrorAction Stop
+    $job = Start-ThreadJob -ScriptBlock $WorkerScriptBlock -ArgumentList @(
+        $TenantId,
+        $ClientId,
+        $CertificateThumbprint,
+        $Uri,
+        $Body,
+        $MaxAttempts
+    )
+    try {
+        $completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
+        if ($null -eq $completed) {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            throw "Graph mail operation exceeded the configured timeout of $TimeoutSeconds seconds."
+        }
+        Receive-Job -Job $job -ErrorAction Stop | Out-Null
+        if ($job.State -ne 'Completed') {
+            throw "Graph mail worker ended with state '$($job.State)'."
+        }
+    }
+    finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function New-SmartWorkplaceCMDBSummaryGraphMailBody {
     param(
         [Parameter(Mandatory)][string]$Subject,
@@ -587,21 +714,20 @@ function Send-SmartWorkplaceCMDBSummaryGraphMail {
         -ToRecipients $toRecipients `
         -CcRecipients $ccRecipients
     $uri = 'https://graph.microsoft.com/v1.0/users/{0}/sendMail' -f [uri]::EscapeDataString($from)
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    $connected = $false
-    try {
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        Connect-MgGraph -TenantId $ResolvedTenantId -ClientId $clientId `
-            -CertificateThumbprint $thumbprint -ContextScope Process -NoWelcome `
-            -ErrorAction Stop | Out-Null
-        $connected = $true
-        Invoke-SmartWorkplaceCMDBSummaryGraphMailRequest -Uri $uri -Body $body
+    $timeoutSeconds = 0
+    $configuredTimeout = Get-SmartWorkplaceCMDBSummarySetting `
+        $NotificationConfiguration 'MailTimeoutSeconds' 120
+    if (-not [int]::TryParse([string]$configuredTimeout, [ref]$timeoutSeconds) -or
+        $timeoutSeconds -lt 15 -or $timeoutSeconds -gt 900) {
+        throw 'Notifications.MailTimeoutSeconds must be an integer from 15 through 900.'
     }
-    finally {
-        if ($connected) {
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        }
-    }
+    Invoke-SmartWorkplaceCMDBSummaryGraphMailWithTimeout `
+        -TenantId $ResolvedTenantId `
+        -ClientId $clientId `
+        -CertificateThumbprint $thumbprint `
+        -Uri $uri `
+        -Body $body `
+        -TimeoutSeconds $timeoutSeconds
 }
 
 function Send-SmartWorkplaceCMDBSummarySmtpMail {
@@ -765,7 +891,21 @@ if ($CaptureBaselineOnly) {
 }
 
 $current = New-SmartWorkplaceCMDBSummarySnapshot $paths $notifications $RunId $SnapshotDateTime $RunStatus
-$history = @(Get-SmartWorkplaceCMDBSummaryHistory $historyRoot | Where-Object {
+$allHistory = @(Get-SmartWorkplaceCMDBSummaryHistory $historyRoot)
+$snapshotReused = $false
+if ($ReuseLatestSnapshot) {
+    $matchingSnapshot = @($allHistory | Where-Object {
+            $_.DatasetFingerprint -eq $current.DatasetFingerprint -and
+            $_.RunStatus -notin @('Failed', 'PreviousCompleted')
+        } | Select-Object -Last 1)[0]
+    if ($null -ne $matchingSnapshot) {
+        $current = $matchingSnapshot
+        $SnapshotDateTime = [datetimeoffset]::Parse(
+            [string]$current.SnapshotDateTime)
+        $snapshotReused = $true
+    }
+}
+$history = @($allHistory | Where-Object {
         [datetimeoffset]::Parse([string]$_.SnapshotDateTime) -lt $SnapshotDateTime })
 $previous = @($history | Select-Object -Last 1)[0]
 $cutoff7 = $SnapshotDateTime.AddDays(-7)
@@ -778,7 +918,7 @@ $subjectPrefix = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'S
 $subject = '{0} - full collection summary - {1}' -f $subjectPrefix,$SnapshotDateTime.ToString('yyyy-MM-dd')
 
 if ($ValidateOnly) {
-    [pscustomobject]@{Status='Validated';Snapshot=$current;BodyHtml=$html;Previous=$previous;Day7=$day7;Day30=$day30}
+    [pscustomobject]@{Status='Validated';Snapshot=$current;BodyHtml=$html;Previous=$previous;Day7=$day7;Day30=$day30;SnapshotReused=$snapshotReused}
     return
 }
 
@@ -830,13 +970,14 @@ if (-not $PreviewOnly) {
     Status=$status;ScriptVersion=$ScriptVersion;Subject=$subject;Snapshot=$current
     Previous=$previous;Day7=$day7;Day30=$day30;HistoryPath=$saved.HistoryPath
     LatestPath=$saved.LatestPath;HtmlPath=$htmlPath;BodyHtml=$html
+    SnapshotReused=$snapshotReused
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2FWo8Ovzok1xW
-# pJuBJtqGFxFOeRKySLwnE34eJqk9qaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD389azhRoF6HHj
+# m8sTfKuF8/JNS5XQ16hjqnNCX1+FnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -969,31 +1110,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAlVNgNOUac0P0OFYre6Ayh7rpb+RefJ9eI1ID+pPmIWMA0GCSqG
-# SIb3DQEBAQUABIIBgCfl71sqXgdanBzfc18XXURlA+WKAkPHcDHfEbadJ4ERkn9i
-# DoADk7RMETBzNoR94zbqMDDIfQT2XPcQRiZHD0EESyIJlNnXYQcT0U+k+tFg24ih
-# yYZREBEMMmmD1+n1FfODNSOhN8ge6pbL8BfN1xXhrpGMajkrnCWJQxjIoxlN8FSN
-# ghlqLVMHj1cwl8ShpMwwl7b6g2XV41zlcoR9rslrSzFNdfhcsR1aklTaM2GQOEu6
-# EZMmrpcv2S7jcC1wnrcIEeaIIibEDkxb3zcd7qGRKESpjzwlM6jn2vbkjS5YO/6a
-# B2PeeUdeRHS7Bp20xLsNMO4UHMBvM5xMZJHlq6zVJFWafXEIxc2hMTELntx4UWM6
-# 4n8Hry1uQS1BwP2v9uGmH4fetySCLPj/P9ihNsnbLv1yp+yheMTK8o19I9O3juM5
-# ZnYFH8ie+YEqedAQzzdkgjl9/rG3WkSo5FVJwTNACjQZOarJ+pPD6eT60l2YFezd
-# DoW25HkJugP/dWf0vqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILl0FYcDmIV2ReZdw152O//LAREaRWjZvzK9LpptB56yMA0GCSqG
+# SIb3DQEBAQUABIIBgCMkb9BSzTta4cpOyDs9GUN/WmfMgYFNPoJIkdRK3yzONdsT
+# cBr0n/0lvDvYXn47fm/LKNcon1c3O0jj36rXiKmYfoe6e0q3Rwx0Dgtfc3yrB7uK
+# jPHYyPVAFM9NbsGX5drjivSzpz9Zw7cnLZA0yDM011l45Q9dJsOeV3wjpKDk+8b8
+# UgDZ9luaEOhYmyTDbRDC5yHLeQn7j7ZfYDH5vpyOlH69h8pCGXQtRdIKnnjgtm5q
+# 7M+TvTRAzFgVMiK25Zdbkrx/LkOk8/0CiwwbUuVcLQkjt1FsgUTDFRTjWJpl94xA
+# d92Sxvq7Q/K73VinKX78qSBiu4lMtlON6g2LwEsta+/5gedpNpiaXVd8UeWNgX7l
+# LfQP7S3KNSwzCdJtsf9n7k0PriwXn9wY0O4dG5oLTeOC1jVccOiPdRVxUsDTqMPk
+# 2pFDGXU4ZwjB1pulvUWPPfbmgziecYjiCgPoUR802rOa+bxww6qXEI3AazpKVefS
+# u3JRj8m3UVtUxxEHuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNzA1
-# NThaMC8GCSqGSIb3DQEJBDEiBCD710bMlIQMJPZYk02kjgwS7S7Vo0c5kdYrAZl2
-# JkCCAzANBgkqhkiG9w0BAQEFAASCAgAO2a2EShMop22SrWicrON67WsTjfoqnQaH
-# igIPBJwKbg9iODjjZnao/nsePQ80R1yY6/n9mC0hOXOoZqR2Ija3goz+VCwkD8KW
-# /Bfu2nignq+Lh+Gkbd6DfgfnCqZGCKIAikDYUZftRVdcxChgSJZCAGJqO2znn8QF
-# 5xi8EX9JC1XN3UKbOD95SM0Zk4jkDHRvxr3WpTmpQ4GuXPCtuCUyLAwesmJVxGtg
-# MdN7AH+f54C3o+4i5J/FNc8QHtKoQAnI0N2zTUh4Yza0Wxa74zb1vUWN+kwNoxGW
-# FdAXHNlSl5ylSjXXGpbsZ1be2+FlBpRQKMviGKlEaYeZdOTjpwHVJahPSAUyoGDb
-# Zb6pDrrJCOiGJuh8DoLLQ+72zopd/t4z1IX0kqjQFYz5LPNCY/W0GhPakzoGGnTv
-# TLSb3ZTdNOBpNyPXhbBFb2K5hzDEQ/Jtzlrguq+I4ip/98sfIMLlk0YsnE6TD7O5
-# yf/fss4va5MJz11HG/bqUpvFGpw9o2P9knuWKMITh/CdEtTe7Vs8/51qzVmkyObs
-# k2Sh2QDAYlARCz09Nm++kTQxwU8mH3TD4dvLFx4+roeZdIfKOE82eddXWcXlbv/0
-# MIoO0yfHpFoNHQn58Mk4y0aejzj+GF6wJ9PqlwyUF1gYNrMfi15EbNSJoZDAUm/r
-# 0sHotlo+0w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAEB76ERgvK/KsyROvStqPWHEaEp3EKa3sw9CfQ
+# Yx8gTTANBgkqhkiG9w0BAQEFAASCAgBWQsw0017psbNxqqFZfNIc0SGjw/KeIgeS
+# awXTlk4BkY7T8fpXju7E9DokWE+1ffZv8x4Hhj2iyxeg4HiewENF7RDCgvoySSfe
+# geJk+rLtkRQ0IeCfyfBp4f7QJm8+vUzLJ46N7A1MeQyfLicxu11e2NmXX1x/onG+
+# uv1tKOYq1VIUhz9Of2wYVugS4G04jMVsCeSG5yL/N4PDu8tPJF/xaJcRkDunKki5
+# mE06LX9xoX/4J8uX8Ye3iEPB9NiG9cJdi/GqlDfn5m2Hc4i7pxM2qBUE3CO9Lrsv
+# 2ZeehA98jJlFgLgLLJhWca9+lHVlT6Y0y3HfYp+uLXk+18GPLhodTRJg83xBOfvB
+# /w+byVQRd4DVBmChN4HvObroMu5Dm9RRouWb+5ZENtjvAEtDhHJmqGAz1yNe35YG
+# X4N/Uto0jFiSy02RoCtgPkgIC8u/CtKPt92yq1zmH1g+XKk06FHORJNL3dNKRLLf
+# QSzpPFosud6LWP4/KSmsEia5zzKM1tglYTF1/xaACWpXpssYsMtHsCPPKiHa9WDx
+# FQVfOob39P46BLDvAAfdUYmR5wsI1va1hBz4KHO6xobIMGLIQyK4OxS2GnxGeX/H
+# 6j779gTD1C0FyqSLkfcv5g0MfsBOFTqyo7D4ZcsvrQJwCs47gLV+pmUo+RgoN/zH
+# HxKMgQgkTA==
 # SIG # End signature block
