@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.16 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -73,6 +73,36 @@ the compact CSV, allowing valid app relations to be reused while mismatched or
 duplicate app counts are recollected from Graph. Same-week Summary and relation
 snapshots are refreshed, while unchanged legacy WeeklyHistory files remain preserved
 without being uploaded again.
+## Graph collection completeness
+
+The consolidated Graph audit covers all 22 production collectors in this folder.
+Every collector-owned `@odata.nextLink` loop now rejects a missing `value` property
+and a repeated next link. Results remain buffered until the complete page chain is
+available; an exhausted page failure therefore cannot publish an earlier prefix as
+a successful complete collection. SDK-backed list collectors retain their existing
+`-All` paths.
+
+Explicit collector retry wrappers use bounded attempts for HTTP 408, 409, 429,
+500, 502, 503 and 504 and honor integer `Retry-After` when the response exposes it.
+The Microsoft Graph SDK remains responsible for its internal retry policy where a
+collector directly uses an SDK cmdlet.
+
+Canonical `DATA-LAST` files are written with the shared atomic CSV publisher. The
+large Discovered Apps relation is validated first, then copied through a temporary
+file in the destination folder before replacement. SharePoint header-only exports
+use the same atomic writer. Compliance policy detail is not promoted when any
+policy or setting page is incomplete; its independent complete device summary may
+still be published. Atomicity is per file, not across a family of CSV files.
+
+No live Graph or tenant behavior is certified by the focused synthetic regression
+coverage. Detailed audit evidence is retained outside the public repository.
+
+Entra Devices 1.13, Licensing 1.16 and SharePoint 0.26 additionally make
+header-only current publication, weekly manifests and append histories atomic.
+Teams collaboration 0.27 applies the same rule to its optional append histories.
+These persistence-only changes do not change source columns, joins, license
+calculations or collection algorithms.
+
 ## Microsoft 365 Usage Reports
 
 `Usage/SmartM365-M365UserActivity-Inventory.ps1` exports Microsoft Graph Reports data and publishes stable CSV files to the tenant `DATA-LAST` folder.
