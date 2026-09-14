@@ -13,6 +13,29 @@ Latest CSV files:
 | Channels | `M365_Teams_Channels.csv` |
 | Guests | `M365_Teams_Guests.csv` |
 
+## Collection completeness and publication
+
+The Teams inventory follows every Graph `@odata.nextLink` for team groups,
+owners, members and channels. A missing `value` property or a repeated next link
+is treated as an incomplete response. Transient HTTP 408, 409, 429, 500, 502,
+503 and 504 responses are retried up to five attempts; `Retry-After` is honored
+when Graph supplies it.
+
+Team groups, the D180 Teams activity report, team details, owners, members and
+channels are mandatory for publication. If one of those collections still fails
+after retries, the run fails before the four CSV files are written. Exact
+SharePoint drive quota and private/shared channel-owner expansion remain optional
+measurements: unavailable values stay blank or carry `NotMeasured` in their
+documented detail field instead of being invented.
+
+In version 0.27, each complete CSV is first written to its timestamped `DATA-ALL` path and then
+promoted atomically to its canonical `DATA-LAST` path. A failed serialization or
+promotion cannot truncate or replace the previous `DATA-LAST` file. The four
+files share one `RunId`, `RunDateUtc` and filename timestamp. Append history is
+also updated atomically. Weekly history and
+the workbook are produced only after all four CSV publications succeed. This is
+per-file atomicity, not a multi-file filesystem transaction.
+
 Runtime dependency:
 
 - `ImportExcel` builds the timestamped workbook. If it is missing, the script installs it automatically from `PSGallery` for the SmartM365 execution account (`CurrentUser`).
@@ -24,11 +47,11 @@ Required Microsoft Graph application permissions:
 - `Channel.ReadBasic.All`
 - `Group.Read.All`
 - `Reports.Read.All`
+- `Sites.Read.All` (enforced by the current preflight for SharePoint drive quota lookup)
 
 Optional permissions for richer detail:
 
 - `ChannelMember.Read.All` for private/shared channel owner lookup when `-IncludeChannelOwners` is used.
-- `Sites.Read.All` may be required by Graph in some tenants for exact SharePoint drive quota lookup per team.
 
 Examples:
 
@@ -58,6 +81,13 @@ Latest CSV files:
 | Phone assignments | `M365_Teams_PhoneAssignments.csv` | Created only when `-IncludePhoneAssignments` is requested and the supported Teams PowerShell prerequisites are available. |
 
 Dates are normalized to UTC. Ranges longer than the Graph PSTN maximum request window are split into windows of at most 90 days. Every page in `@odata.nextLink` is followed, including result sets larger than 1,000 rows. Transient failures and throttling honor `Retry-After` when available.
+
+Version 1.5 rejects a Graph collection response without `value` and repeated
+`@odata.nextLink` values. A failure on a later page throws without returning the
+earlier pages to the caller. Publication continues to use the shared atomic CSV
+helper, so the existing `DATA-LAST` file is not replaced by an incomplete
+collection. SmartFinOps consumes `M365_Teams_PhoneUserUsage.csv`; it does not
+consume the four Teams collaboration inventory files above.
 
 Examples:
 

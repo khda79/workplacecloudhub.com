@@ -330,8 +330,8 @@ This protection requires accessible state/lease storage and continued supervisio
 It does not fence a partitioned or stopped server, prove that a launcher left no
 detached descendants, or qualify actual Windows process permissions and SMB
 behavior. Initial process identity uncertainty is handled by the follow-up correction
-described below. See [audit lot 2](../AUDIT-LOT2.md) for synthetic evidence
-and remaining boundaries. No new tenant permission or configuration key is needed.
+described below. Focused synthetic regression evidence is retained outside the
+public repository. No new tenant permission or configuration key is needed.
 
 
 ## Re-adoption and resident lock safety
@@ -361,7 +361,7 @@ permissions before repairing corrupt state; never remove a live lock to bypass
 the guard. A valid legacy lock is still checked before acquisition. The guarantee
 requires consistent deployment and filesystem handle-sharing semantics; SMB
 disconnects, mixed versions and lost handles are not production-qualified.
-See [audit lot 3](../AUDIT-LOT3.md). No tenant API permissions or CSV schemas change.
+No tenant API permissions or CSV schemas change.
 
 ## Configuration (`SmartM365-Inventory-Orchestrator.local.json`)
 
