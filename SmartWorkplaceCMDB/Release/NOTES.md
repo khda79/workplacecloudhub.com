@@ -251,5 +251,5 @@ Graph/Exchange/AD/SharePoint behavior remain environment-specific qualification
 activities. The separate SmartWorkplaceDashboard sources are not included in
 this package.
 
-See `AUDIT-BETA.md` for the offline validation evidence. External publication
-requires approval of the concrete beta package, Git delta and site files.
+The detailed offline review for this historical beta is retained locally and
+is intentionally excluded from Git and release packages.

@@ -259,7 +259,14 @@ SmartWorkplaceCMDB/**/*.pbip
 SmartWorkplaceCMDB/**/*.abf
 SmartWorkplaceCMDB/**/*.csv
 SmartWorkplaceCMDB/**/*.parquet
-SmartWorkplaceCMDB/FINALIZATION-V1-AUDIT.md
+
+# SmartWorkplaceCMDB local audit and review notes must never be published.
+# These rules intentionally follow the Markdown re-inclusion rules above.
+SmartWorkplaceCMDB/**/AUDIT-*.md
+SmartWorkplaceCMDB/**/*-AUDIT.md
+SmartWorkplaceCMDB/**/LOCAL-REVIEW*.md
+SmartWorkplaceCMDB/**/*-LOCAL-REVIEW.md
+SmartWorkplaceCMDB/.local-review/**
 
 # Temporary
 Temp/
