@@ -4,6 +4,8 @@
     {
       "id": "55555555-5555-5555-5555-555555555555",
       "deviceId": "66666666-6666-6666-6666-666666666666",
+      "onPremisesSecurityIdentifier": "S-1-5-21-1000-1000-1000-3101",
+      "onPremisesSecurityIdentifier": "S-1-5-21-1000-1000-1000-3101",
       "displayName": "EXAMPLE-WIN-001",
       "operatingSystem": "Windows",
       "operatingSystemVersion": "10.0.26100.1",
@@ -14,6 +16,8 @@
     {
       "id": "77777777-7777-7777-7777-777777777777",
       "deviceId": "88888888-8888-8888-8888-888888888888",
+      "onPremisesSecurityIdentifier": "",
+      "onPremisesSecurityIdentifier": null,
       "displayName": "EXAMPLE-MAC-001",
       "operatingSystem": "MacOS",
       "operatingSystemVersion": "15.5",

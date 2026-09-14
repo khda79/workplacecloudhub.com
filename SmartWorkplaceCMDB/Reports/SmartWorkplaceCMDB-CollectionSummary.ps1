@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.2.2
+1.3.3
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +37,7 @@ param(
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.2.2'
+$ScriptVersion = '1.3.3'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -118,6 +118,9 @@ function New-SmartWorkplaceCMDBSummarySnapshot {
         Mailboxes = Join-Path $cmdbRoot 'CMDB_Mailboxes.csv'
         Licenses = Join-Path $cmdbRoot 'CMDB_Licenses.csv'
         Relationships = Join-Path $cmdbRoot 'CMDB_Relationships.csv'
+        SharePointSites = Join-Path $Paths.LatestOutputRootPath 'PowerBI\DimSharePointSite.csv'
+        Teams = Join-Path $Paths.LatestOutputRootPath 'PowerBI\DimTeam.csv'
+        TeamMembers = Join-Path $Paths.LatestOutputRootPath 'PowerBI\FactTeamMember.csv'
     }
     foreach ($path in $files.Values) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -127,6 +130,9 @@ function New-SmartWorkplaceCMDBSummarySnapshot {
 
     $licenses = @(Import-Csv -LiteralPath $files.Licenses)
     $relationships = @(Import-Csv -LiteralPath $files.Relationships)
+    $sharePointSites = @(Import-Csv -LiteralPath $files.SharePointSites)
+    $teams = @(Import-Csv -LiteralPath $files.Teams)
+    $teamMembers = @(Import-Csv -LiteralPath $files.TeamMembers)
     $familyByLicenseId = @{}
     $capacity = @{F1=0L;F3=0L;E3=0L;E5=0L;Copilot=0L}
     foreach ($license in $licenses) {
@@ -157,8 +163,11 @@ function New-SmartWorkplaceCMDBSummarySnapshot {
         }
     }
 
+    $completeTeams = @($teams | Where-Object MembershipCoverageStatus -eq 'Complete')
+    $sharePointStorageUsedBytes = ($sharePointSites | Measure-Object StorageUsedBytes -Sum).Sum
+    $sharePointStorageAllocatedBytes = ($sharePointSites | Measure-Object StorageAllocatedBytes -Sum).Sum
     return [pscustomobject][ordered]@{
-        Version = 1
+        Version = 2
         RunId = $SnapshotRunId
         RunStatus = $Status
         SnapshotDateTime = $DateTime.ToUniversalTime().ToString('o')
@@ -167,6 +176,24 @@ function New-SmartWorkplaceCMDBSummarySnapshot {
         Devices = @(Import-Csv -LiteralPath $files.Devices).Count
         Users = @(Import-Csv -LiteralPath $files.Users).Count
         Mailboxes = @(Import-Csv -LiteralPath $files.Mailboxes).Count
+        SharePointSites = $sharePointSites.Count
+        SharePointActiveSites = @($sharePointSites | Where-Object ActivityState -eq 'Active (90d)').Count
+        SharePointInactiveSites = @($sharePointSites | Where-Object ActivityState -eq 'Inactive (>90d)').Count
+        SharePointOwnerMissingSites = @($sharePointSites | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.OwnerPrincipalName) }).Count
+        SharePointStorageUsedGB = [Math]::Round(($sharePointStorageUsedBytes / 1GB), 1)
+        SharePointStorageAllocatedGB = [Math]::Round(($sharePointStorageAllocatedBytes / 1GB), 1)
+        SharePointStorageUtilizationPercent = if ($sharePointStorageAllocatedBytes -gt 0) { [Math]::Round((100 * $sharePointStorageUsedBytes / $sharePointStorageAllocatedBytes), 1) } else { $null }
+        SharePointAverageStorageGB = if ($sharePointSites.Count -gt 0) { [Math]::Round((($sharePointSites | Measure-Object StorageUsedBytes -Average).Average / 1GB), 1) } else { 0 }
+        Teams = $teams.Count
+        TeamsActive = @($teams | Where-Object ActivityState -eq 'Active (90d)').Count
+        TeamsInactive = @($teams | Where-Object ActivityState -eq 'Inactive (>90d)').Count
+        TeamsArchived = @($teams | Where-Object IsArchived -eq 'True').Count
+        TeamsWithoutOwner = @($teams | Where-Object { (ConvertTo-SmartWorkplaceCMDBSummaryInt64 $_.OwnerCount) -eq 0 }).Count
+        TeamsWithGuests = @($teams | Where-Object { (ConvertTo-SmartWorkplaceCMDBSummaryInt64 $_.GuestCount) -gt 0 }).Count
+        TeamsMembershipPartial = @($teams | Where-Object MembershipCoverageStatus -eq 'Partial').Count
+        TeamMembers = $teamMembers.Count
+        TeamGuests = @($teamMembers | Where-Object UserType -eq 'Guest').Count
+        TeamAverageMembers = if ($completeTeams.Count -gt 0) { [Math]::Round(((($completeTeams | ForEach-Object { ConvertTo-SmartWorkplaceCMDBSummaryInt64 $_.MemberCount }) | Measure-Object -Sum).Sum / $completeTeams.Count), 1) } else { 0 }
         M365F1Assigned = $assignedUsers.F1.Count
         M365F1Capacity = $capacity.F1
         M365F3Assigned = $assignedUsers.F3.Count
@@ -224,21 +251,73 @@ function Format-SmartWorkplaceCMDBSummaryDelta {
     return Format-SmartWorkplaceCMDBSummaryNumber $delta
 }
 
+function Get-SmartWorkplaceCMDBSummaryProperty {
+    param([AllowNull()]$Snapshot,[Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Snapshot) { return $null }
+    $property = $Snapshot.PSObject.Properties[$Name]
+    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) { return $null }
+    return $property.Value
+}
+
+function Format-SmartWorkplaceCMDBSummaryMetric {
+    param([AllowNull()]$Value,[string]$Format='integer')
+    if ($null -eq $Value) { return 'n/a' }
+    if ($Format -in @('decimal','percent')) {
+        $number = [double]0
+        if (-not [double]::TryParse([string]$Value,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number)) { return 'n/a' }
+        $text=$number.ToString('N1',[Globalization.CultureInfo]::GetCultureInfo('en-US'))
+        if($Format-eq'percent'){return $text+'%'}
+        return $text
+    }
+    return Format-SmartWorkplaceCMDBSummaryNumber $Value
+}
+
+function Format-SmartWorkplaceCMDBSummaryMetricDelta {
+    param([AllowNull()]$Current,[AllowNull()]$Reference,[string]$Format='integer')
+    if ($null -eq $Reference) { return 'n/a' }
+    if ($Format -in @('decimal','percent')) {
+        $currentNumber=[double]0;$referenceNumber=[double]0
+        if (-not [double]::TryParse([string]$Current,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$currentNumber) -or -not [double]::TryParse([string]$Reference,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$referenceNumber)) { return 'n/a' }
+        $delta=$currentNumber-$referenceNumber;$text=[Math]::Round($delta,1).ToString('N1',[Globalization.CultureInfo]::GetCultureInfo('en-US'));if($Format-eq'percent'){$text+=' pp'};if($delta -gt 0){return '+'+$text};return $text
+    }
+    return Format-SmartWorkplaceCMDBSummaryDelta $Current $Reference
+}
+
 function New-SmartWorkplaceCMDBSummaryHtml {
     param($Current, $Previous, $Day7, $Day30, $NotificationConfiguration)
     $metrics = @(
-        @{Label='Devices';Property='Devices';Capacity=''},
-        @{Label='Users';Property='Users';Capacity=''},
-        @{Label='Mailboxes';Property='Mailboxes';Capacity=''},
-        @{Label='Microsoft 365 F1 assignments';Property='M365F1Assigned';Capacity='M365F1Capacity'},
-        @{Label='Microsoft 365 F3 assignments';Property='M365F3Assigned';Capacity='M365F3Capacity'},
-        @{Label='Microsoft 365 E3 assignments';Property='M365E3Assigned';Capacity='M365E3Capacity'},
-        @{Label='Microsoft 365 E5 assignments';Property='M365E5Assigned';Capacity='M365E5Capacity'},
-        @{Label='Microsoft 365 Copilot assignments';Property='M365CopilotAssigned';Capacity='M365CopilotCapacity'}
+        @{Section='Core population';Label='Devices';Property='Devices';Capacity='';Format='integer'},
+        @{Section='Core population';Label='Users';Property='Users';Capacity='';Format='integer'},
+        @{Section='Core population';Label='Mailboxes';Property='Mailboxes';Capacity='';Format='integer'},
+        @{Section='SharePoint';Label='SharePoint sites';Property='SharePointSites';Capacity='';Format='integer'},
+        @{Section='SharePoint';Label='Active sites (90d)';Property='SharePointActiveSites';Capacity='';Format='integer'},
+        @{Section='SharePoint';Label='Inactive sites (>90d)';Property='SharePointInactiveSites';Capacity='';Format='integer'},
+        @{Section='SharePoint';Label='Sites without reported owner';Property='SharePointOwnerMissingSites';Capacity='';Format='integer'},
+        @{Section='SharePoint';Label='Storage used (GB)';Property='SharePointStorageUsedGB';Capacity='';Format='decimal'},
+        @{Section='SharePoint';Label='Storage allocated (GB)';Property='SharePointStorageAllocatedGB';Capacity='';Format='decimal'},
+        @{Section='SharePoint';Label='Storage utilization';Property='SharePointStorageUtilizationPercent';Capacity='';Format='percent'},
+        @{Section='SharePoint';Label='Average storage per site (GB)';Property='SharePointAverageStorageGB';Capacity='';Format='decimal'},
+        @{Section='Teams';Label='Teams';Property='Teams';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Active Teams (90d)';Property='TeamsActive';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Inactive Teams (>90d)';Property='TeamsInactive';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Archived Teams';Property='TeamsArchived';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Teams without owner';Property='TeamsWithoutOwner';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Teams with guests';Property='TeamsWithGuests';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Teams with partial membership coverage';Property='TeamsMembershipPartial';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Unique Team memberships';Property='TeamMembers';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Guest memberships';Property='TeamGuests';Capacity='';Format='integer'},
+        @{Section='Teams';Label='Average members per Team';Property='TeamAverageMembers';Capacity='';Format='decimal'},
+        @{Section='Microsoft 365 licensing';Label='Microsoft 365 F1 assignments';Property='M365F1Assigned';Capacity='M365F1Capacity';Format='integer'},
+        @{Section='Microsoft 365 licensing';Label='Microsoft 365 F3 assignments';Property='M365F3Assigned';Capacity='M365F3Capacity';Format='integer'},
+        @{Section='Microsoft 365 licensing';Label='Microsoft 365 E3 assignments';Property='M365E3Assigned';Capacity='M365E3Capacity';Format='integer'},
+        @{Section='Microsoft 365 licensing';Label='Microsoft 365 E5 assignments';Property='M365E5Assigned';Capacity='M365E5Capacity';Format='integer'},
+        @{Section='Microsoft 365 licensing';Label='Microsoft 365 Copilot assignments';Property='M365CopilotAssigned';Capacity='M365CopilotCapacity';Format='integer'}
     )
+    $section = ''
     $rows = foreach ($metric in $metrics) {
+        if ($metric.Section -ne $section) { $section=$metric.Section;'<tr class="section"><td colspan="5">{0}</td></tr>' -f (ConvertTo-SmartWorkplaceCMDBSummaryHtml $section) }
         $currentValue = $Current.($metric.Property)
-        $currentText = Format-SmartWorkplaceCMDBSummaryNumber $currentValue
+        $currentText = Format-SmartWorkplaceCMDBSummaryMetric $currentValue $metric.Format
         if (-not [string]::IsNullOrWhiteSpace($metric.Capacity)) {
             $capacity = ConvertTo-SmartWorkplaceCMDBSummaryInt64 $Current.($metric.Capacity)
             $ratio = if ($capacity -gt 0) {
@@ -250,22 +329,25 @@ function New-SmartWorkplaceCMDBSummaryHtml {
         '<tr><td>{0}</td><td class="number">{1}</td><td class="number">{2}</td><td class="number">{3}</td><td class="number">{4}</td></tr>' -f
             (ConvertTo-SmartWorkplaceCMDBSummaryHtml $metric.Label),
             (ConvertTo-SmartWorkplaceCMDBSummaryHtml $currentText),
-            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryDelta $currentValue $(if($Previous){$Previous.($metric.Property)}else{$null}))),
-            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryDelta $currentValue $(if($Day7){$Day7.($metric.Property)}else{$null}))),
-            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryDelta $currentValue $(if($Day30){$Day30.($metric.Property)}else{$null})))
+            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryMetricDelta $currentValue (Get-SmartWorkplaceCMDBSummaryProperty $Previous $metric.Property) $metric.Format)),
+            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryMetricDelta $currentValue (Get-SmartWorkplaceCMDBSummaryProperty $Day7 $metric.Property) $metric.Format)),
+            (ConvertTo-SmartWorkplaceCMDBSummaryHtml (Format-SmartWorkplaceCMDBSummaryMetricDelta $currentValue (Get-SmartWorkplaceCMDBSummaryProperty $Day30 $metric.Property) $metric.Format))
     }
     $client = [string](Get-SmartWorkplaceCMDBSummarySetting `
         $NotificationConfiguration 'MailClientName' 'Smart Workplace')
     $previousLabel = if ($Previous) { [datetimeoffset]::Parse([string]$Previous.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC') } else { 'not available' }
+    $currentLabel = [datetimeoffset]::Parse([string]$Current.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC')
     $day7Label = if ($Day7) { [datetimeoffset]::Parse([string]$Day7.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC') } else { 'not available' }
     $day30Label = if ($Day30) { [datetimeoffset]::Parse([string]$Day30.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC') } else { 'not available' }
     return @"
 <!doctype html><html><head><meta charset="utf-8"><style>
-body{font-family:Segoe UI,Arial,sans-serif;background:#f3f7fb;color:#172033;margin:0;padding:24px}.card{max-width:980px;margin:auto;background:#fff;border:1px solid #d9e5f0;border-radius:12px;overflow:hidden}.header{background:#075aa5;color:#fff;padding:24px 28px}.header h1{font-size:23px;margin:0}.header p{margin:7px 0 0;color:#dceeff}.content{padding:24px 28px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#eaf3fb;color:#23415d;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #c7d9e8}td{padding:10px;border-bottom:1px solid #e4edf5;font-size:13px}.number{text-align:right;white-space:nowrap}.meta{font-size:12px;color:#52677b;line-height:1.55}.footer{padding:16px 28px;background:#f7fafc;color:#66788a;font-size:11px}</style></head><body>
-<div class="card"><div class="header"><h1>Smart Workplace CMDB — full collection summary</h1><p>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client) | $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $Current.RunStatus)</p></div><div class="content">
-<div class="meta">Generated: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $Current.SnapshotDateTime)<br>Previous collection: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $previousLabel)<br>J-7 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day7Label)<br>J-30 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day30Label)</div>
-<table><thead><tr><th>Population</th><th class="number">Current</th><th class="number">Since previous</th><th class="number">Since J-7</th><th class="number">Since J-30</th></tr></thead><tbody>$($rows -join "`n")</tbody></table>
-</div><div class="footer">SmartWorkplaceCMDB aggregate notification. No user, device, mailbox address, or tenant row is included.</div></div></body></html>
+body{font-family:Segoe UI,Arial,sans-serif;background:#eef3f8;color:#172033;margin:0;padding:24px}.card{max-width:1040px;margin:auto;background:#fff;border:1px solid #d9e5f0;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.08)}.header{background:linear-gradient(125deg,#0f766e,#2563eb);color:#fff;padding:26px 30px}.header h1{font-size:24px;margin:0}.header p{margin:8px 0 0;color:#e5f4ff}.pill{display:inline-block;background:#107c10;color:#fff;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700}.content{padding:24px 28px}.kpis{width:100%;border-spacing:10px;border-collapse:separate;margin:0 -10px 14px}.kpis td{width:25%;background:#f8fafc;border:1px solid #dde7f0;border-radius:9px;padding:14px}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:23px;font-weight:700;color:#0f4c81;margin-top:4px}table.data{width:100%;border-collapse:collapse;margin-top:18px}table.data th{background:#eaf3fb;color:#23415d;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #c7d9e8}table.data td{padding:9px 10px;border-bottom:1px solid #e4edf5;font-size:13px}.number{text-align:right!important;white-space:nowrap}.section td{background:#f5f8fb;color:#0f4c81;font-weight:700;text-transform:uppercase;font-size:11px!important;letter-spacing:.04em}.meta{font-size:12px;color:#52677b;line-height:1.55}.notice{margin-top:18px;background:#fff7e6;border-left:4px solid #ff8c00;padding:11px 13px;color:#6b4c00;font-size:12px}.footer{padding:16px 28px;background:#f7fafc;color:#66788a;font-size:11px}</style></head><body>
+<div class="card"><div class="header"><h1>Smart Workplace CMDB — full collection summary</h1><p>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client) &nbsp; <span class="pill">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $Current.RunStatus)</span></p></div><div class="content">
+<table class="kpis"><tr><td><div class="kpiLabel">Devices</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Devices)</div></td><td><div class="kpiLabel">Users</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Users)</div></td><td><div class="kpiLabel">SharePoint sites</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.SharePointSites)</div></td><td><div class="kpiLabel">Teams</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Teams)</div></td></tr></table>
+<div class="meta">Current snapshot: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $currentLabel)<br>Previous collection: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $previousLabel)<br>J-7 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day7Label)<br>J-30 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day30Label)</div>
+<table class="data"><thead><tr><th>Metric</th><th class="number">Current<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $currentLabel)</th><th class="number">Since previous<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $previousLabel)</th><th class="number">Since J-7<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day7Label)</th><th class="number">Since J-30<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day30Label)</th></tr></thead><tbody>$($rows -join "`n")</tbody></table>
+<div class="notice"><b>Membership coverage:</b> SharePoint member counts are not present in the Graph site-usage report and are therefore not estimated. The Teams average includes only Teams with complete exact membership enumeration; partial Teams are counted separately. Active means activity reported within 90 days; missing activity remains unknown.</div>
+</div><div class="footer">© 2026 WorkplaceCloudHub — https://workplacecloudhub.com/ · Aggregate notification only; no user, device, mailbox address, or tenant row is included.</div></div></body></html>
 "@
 }
 
@@ -651,8 +733,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi2hvUp4dOVo+7
-# yLZ9m8BpGvB8Mv7HRLhzkyD2f/nwSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUfs7N3rtZfRop
+# yiVcDYuH2vA+YYP2OCoKKA22jixPR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -785,31 +867,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGvWI6NCHMA9ndvAtd2jTEcl6+0X6915C4pgZL9TMrHAMA0GCSqG
-# SIb3DQEBAQUABIIBgIuRLbaVzk3xpLfqCa08pyOBXXyzISxOmneiRvf+S24qIwJY
-# Wsd8Qc56B1LrdeKzrYNW1d8XCNY5EHXquczZfMn7NqG7+QpJ+8wM8odV5S1C13zB
-# 6X7lLQx64EHjIe+goqUEHWCAXN/7963CO7KH32HmpJIFkmwqf54m2dbZj9Yf48j1
-# XOJ9wBwE7355tjCpVvP5ujXxuZFsoNe+5+jiGMdKBKGrFtlZ08HlLS6i86Gc98WZ
-# /YG+9V5n2H1LsROwWSx3QM5MBi+XeyjhnwvexnbqFvs6RlBoGo46RZNgJtMwD55O
-# HvtgcwgX9OVUvICqKAoDh9wjhni3fBOR0jCihW45nRWSFeob8qqe2aF8hwp1r45B
-# dilOmleSMbAzETUcpvGDt6G4fRzsZmVE6eg3uXHqxCvl8x26kgn2GD3QsY84wYuq
-# sVUhpxrgo6V3F1saxwy1olaZz0QC9VyB5stm7G9lxDqnmE8Z+8T907zfMsR4QF6F
-# pzN+NOZqDXMUXjS4sKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILZ3S7YBaGqy0A8qU1nFlpfVYitQbSPfkFm3MLAkJ0IRMA0GCSqG
+# SIb3DQEBAQUABIIBgHtIY3YkESb4sqrefVrFPGb42V0BuTbDDJCddzy49aToU0Ez
+# TUoPCE27c9P+ge/QLx+4Exv4BioGohfgFNRI3I/1f827TOX+vH6mOU44jS4ywRWx
+# Kg+XGhobXoGePS2Fmk21UoQNiwX8Tt+beA/vmvTLE6DPQGuMW2Q3SaWUx4uzGOgq
+# P5/szvdaLlkTp+o+UNk5u2J2auBVrWelEQTcXbtRuFyGevXnrTnNJR2YdOkqYkyB
+# 6YOFz8Ig0DR1H8X+GqcveSIkrRZlYoY9KR5zXtt1u+zFyLiePXqeYI6wUP8K+soC
+# 57JdUOff4jNNPockFtLv8eVXvxKvrx0Ihx3KPYY+G7SBw9DnzQOo769spAQ4UlPL
+# OvXJNNW22SqOxp6D2xaDn3E2d5WFsxm+2nFzNJL2maPnclOvC4wN6siNyM/fHO+P
+# 3R9aBcsZnD6tWhgABFlfXXseQ6qhi/7Oe9CLhrMo92fUMn8cUxmK7aB18uQfApSw
+# kla771YWDxjSTbCaYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwOTIz
-# MzRaMC8GCSqGSIb3DQEJBDEiBCDNt5gb/dy4vFFKIkLbOOQMfTgbw4HPR2m39AyN
-# gDbRrTANBgkqhkiG9w0BAQEFAASCAgCtZdpqyxt5yfG3j7aGfzMKk/vvEsCblSiH
-# 2gc1pLlfH7WZoKcJQ7LOvH3H762xBgWfYtnsJZzddv/c+pty+zsVgwaqy07mnlug
-# UfUld1dJKn9iDJuS0zYurrHIyWc8rQz02uFVq7k9TM900an+hrcKN46dyLttbU/Q
-# 6aal5aHnHN1UBUD9ZMQiBnA2zONBDL74iFvUzvsuq42vb4bTcduOj2rzhh+p2Kw5
-# ANaDL++UcxO4MSPWH5tRrpgeKjn9XACzg78oN2AYnrJKEGhLChx6MHVryHVs8xSE
-# 1FULvgOJumo8bru1PvoS9pVAFixcN0jNpqiW9CpI6+lsnvM4oHdoPKO0mq93eEAZ
-# zwrUcewXTuRYHABK6yGGymcg5vcTGVF4M2b5O5WeNAsHuuOvhYE3N1WoeQpdRWX5
-# v4YLutytTtxEOzh6HMkgU2PAKWju4jsed98yiOM9vIVnlaWCqDY83IiI3ug12UJJ
-# 8Rz1SdqPCxqzUfhjidGj6Aq3M0BRne0044Y9FWQIA7jEUGmwfFJa5VHvFaief6b8
-# YLRSsh2srEQRNpvHjlNNXONEZkhBjIybQ95OEVoti8W9y1fXfWFrCfoQ72aYlrxt
-# n+5VVyKhFf9joXYm8lv1ZYPSLt0Rb9SwNH6w75rsNFSvkGuz1zOnF7r7vZt6TnOF
-# 06ITDhSBoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAwZLG2wodoX0DwUc8Ua7P4d+5dHpMKM8dD8BEf
+# o8Bj2zANBgkqhkiG9w0BAQEFAASCAgB5O8HC9j2rcBb0P+MapCBRusajEgTQM6Q8
+# QxYwLmv/L/wKvd0JF1Blhrilk1ARGy7nlXIj3uxcoroua3sNeVl8q2TFThDxsZ4t
+# ctFAD+yWPWN1rl4UFUB+AwH41W0ILJAlLxrpfY4X1KDZ50NOKfCEeJi/Hafs9OVk
+# mEmu6DKfs3rvv1KuJiP5Ue9AQ97WL97odwQDM3dQEUt2jwonUFNtuVWC3VzfUZa/
+# lzrL2E/j+iBW14bWOkCRTww61PlNuFFMPkFHAuu2+jCkj9ZaUTxmKzCcLRmqXR1F
+# vsW79IOo/DSh95iQZShB5zcBcZ+wrH5XXfX3BZVVpS5IEEOQYoKXJFtbwHDbUa/5
+# aDcUo5tFCR1KRZMPVBSFatDRzDlTWVGbYOq74xv3MvqCUiih5D3wf2n6Ffx9o5OC
+# 8NVUDubAWMkEf1SBx8sxZTqjm0beiaMO8DlbQO9xPVzriFgx6EpMkbbvHrPDL3x2
+# 3FRhnMXWt6stJYmvbP6v7PUANPYgKiZQhoW/cHp47pVYcPdoM3T1dvPfw5/cH+i4
+# RHl8y8YGEizHYC4QVMqF8XKhc2tV6tPQ2ssSiew+rR5u49ORCdYNUWs8/rWG2K4S
+# Kab+wZ2VqCz0s5DG52tpjScZOjNWxuFTGRURlgdcUqGTu6XNzNDoRBdJKQNgQkvn
+# jLgalS0Gjg==
 # SIG # End signature block

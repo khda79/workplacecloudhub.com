@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.10
+1.1.12
 #>
 [CmdletBinding()]
 param(
@@ -35,6 +35,8 @@ param(
         'IntuneAnalytics',
         'M365SubscribedSkus',
         'M365UserLicenses',
+        'M365UserActivity',
+        'M365Collaboration',
         'ExchangeOnlineMailboxes',
         'ActiveDirectory',
         'CuratedOnly'
@@ -50,7 +52,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.10'
+$ScriptVersion = '1.1.12'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -851,6 +853,36 @@ $catalog['M365LicensesNormalize'] = [pscustomobject]@{
     ScriptPath = Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365UserLicenseAssignments-Normalize.ps1'
     FixtureName = ''
 }
+$catalog['ADIntuneCoverageNormalize'] = [pscustomobject]@{
+    Name = 'Exact AD workstation to Intune coverage'
+    Kind = 'Normalize'
+    ScriptPath = Join-Path $projectRoot 'Collectors\Intune\SmartWorkplaceCMDB-ADIntuneCoverage-Normalize.ps1'
+    FixtureName = ''
+}
+$catalog['M365CollaborationCollect'] = [pscustomobject]@{
+    Name = 'Microsoft 365 collaboration collection'
+    Kind = 'Collect'
+    ScriptPath = Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365Collaboration-Collect.ps1'
+    FixtureName = 'M365Collaboration.sample.json'
+}
+$catalog['M365CollaborationNormalize'] = [pscustomobject]@{
+    Name = 'Microsoft 365 collaboration normalization'
+    Kind = 'Normalize'
+    ScriptPath = Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365Collaboration-Normalize.ps1'
+    FixtureName = ''
+}
+$catalog['M365UserActivityCollect'] = [pscustomobject]@{
+    Name = 'Microsoft 365 user activity collection'
+    Kind = 'Collect'
+    ScriptPath = Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365UserActivity-Collect.ps1'
+    FixtureName = 'M365UserActivity.sample.json'
+}
+$catalog['M365UserActivityNormalize'] = [pscustomobject]@{
+    Name = 'Microsoft 365 user activity normalization'
+    Kind = 'Normalize'
+    ScriptPath = Join-Path $projectRoot 'Collectors\M365\SmartWorkplaceCMDB-M365UserActivity-Normalize.ps1'
+    FixtureName = ''
+}
 $catalog['ExchangeMailboxesCollect'] = [pscustomobject]@{
     Name = 'Exchange Online mailboxes collection'
     Kind = 'Collect'
@@ -915,13 +947,15 @@ switch ($Pipeline) {
             'EntraDevicesCollect', 'EntraDevicesNormalize',
             'ActiveDirectoryCollect', 'ActiveDirectoryNormalize',
             'VerifiedDomainsCollect', 'TenantIdentityHealthNormalize',
-            'IntuneDevicesCollect', 'IntuneDevicesNormalize',
+            'IntuneDevicesCollect', 'IntuneDevicesNormalize', 'ADIntuneCoverageNormalize',
             'IntuneHardwareCollect',
             'IntuneOperationalCollect', 'IntuneOperationalNormalize',
             'IntuneAnalyticsCollect', 'IntuneAnalyticsNormalize',
             'UserDeviceRelationships',
             'M365SkusCollect', 'M365SkusNormalize',
             'M365LicensesCollect', 'M365LicensesNormalize',
+            'M365UserActivityCollect', 'M365UserActivityNormalize',
+            'M365CollaborationCollect', 'M365CollaborationNormalize',
             'ExchangeMailboxesCollect', 'ExchangeMailboxesNormalize',
             'Relationships', 'DataQuality', 'Dimensions', 'Build', 'Report'
         )
@@ -973,6 +1007,16 @@ switch ($Pipeline) {
             'M365LicensesCollect', 'M365LicensesNormalize'
         )
     }
+    'M365UserActivity' {
+        Add-SmartWorkplaceCMDBOrchestratorStep $selectedSteps $catalog @(
+            'M365UserActivityCollect', 'M365UserActivityNormalize'
+        )
+    }
+    'M365Collaboration' {
+        Add-SmartWorkplaceCMDBOrchestratorStep $selectedSteps $catalog @(
+            'M365CollaborationCollect', 'M365CollaborationNormalize'
+        )
+    }
     'ExchangeOnlineMailboxes' {
         Add-SmartWorkplaceCMDBOrchestratorStep $selectedSteps $catalog @(
             'ExchangeMailboxesCollect', 'ExchangeMailboxesNormalize'
@@ -986,8 +1030,11 @@ switch ($Pipeline) {
     'CuratedOnly' {
         Add-SmartWorkplaceCMDBOrchestratorStep $selectedSteps $catalog @(
             'TenantIdentityHealthNormalize',
+            'ADIntuneCoverageNormalize',
             'IntuneOperationalNormalize',
             'IntuneAnalyticsNormalize',
+            'M365UserActivityNormalize',
+            'M365CollaborationNormalize',
             'Relationships', 'DataQuality', 'Dimensions', 'Build', 'Report'
         )
     }
@@ -1626,8 +1673,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD31ffapRz+3a2m
-# bAvZgChxyxujTbceQm0e+LY/vc0KIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALWG002JUXH5In
+# oUOO05pdByzP2C848voiDzF8ObeuhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1760,31 +1807,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFb5qWQsYbBwl7zEQXO3VjCG3Vb35nZ9m1tDimsjXdsFMA0GCSqG
-# SIb3DQEBAQUABIIBgFpcbnDe9iMwI9MFi1jY2Mxjx8M6xX9204bDBuEqtm2O+nRF
-# iIsWGzcT8woB2X0X87j9bfj1fhpatt0p/Xpsk3lWw/GLw9XPw6onNcyy2leFSJhp
-# fGDUe19CEI+CLayIrixGXSUbi3OxfPjEoYO+FS6Lk2uTVgjuZ2IsUacvJZb2nTwl
-# gtSoAqQiwjt5NjPQiOfJxpEOR+sCJ1MyAs7SBfShs9y8hhZbRTbbGqsqfydlvgJ6
-# M7ZFsp3emKpwtKtbM6K8ZD0qOuKxoT57ImEcI0YlluoVlSyKSLpQCWhK0cu/S7Lb
-# /37MHKflk82wq3fpLikbe36arqagsIh4u7jfbiKzAvLnXLmHsO10Kb7fIkhdnt0+
-# 1UkkGicxQqaaq67eYEwNPxFZ83tRSBYgG/xyTsPxqlWRgwqqvOLDHqOMaL3X92Ky
-# sypap9ZMWtBWbApsTG+YFM+iPskTa8UUt7MgR3mfpZHYiSjfsLMdmhS3wQJKAfsy
-# l/sER7zHQgaTJIzDTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICScfJB5+BJQItQprn17I9PAeWpKyPWmg+98/h6nDKiIMA0GCSqG
+# SIb3DQEBAQUABIIBgHoHU3DAFv9Wa7xz3ACM0miSjQdwUgJF7Vrg9bgaLuaGliWi
+# /tcZ6xk7PnEYHG1ix7jssrgD/Ic85OM0ItSDKwZwTjidE9FO0b48BwM1fULc96aL
+# RO+Gb6Lov2sOp+2A2F3SzIsGvaJ4cPpA9mNOyxA9niU/vkSAPHJ2jnWfly0EFGOz
+# lHcaus4zmAMRPSzJwwpUylJz0bzzxctqZ1n4VN5EjvSVf1CAuMc45wJgCEMZ68mH
+# R2h5gEsDNKvI5iBn7jCgJm6AO3G5OmD4x0PFpm49pC/v++He0/EQ0D/7Vw+N1615
+# aVifIZUZkf03ZT0yyqitehEPOHyJ527mUfgPV5HkmT9YbTCR8tckVYtsUvTT/9/B
+# Kdf6jOZgnnDSrfn1bmUyQaSrWP7bp8XZRO0gbaGGmYnqqDpX1P3oN1WU+Jul/K/w
+# Fud28D/2g1ocQsGdHXcoh07Mkml3dFLK2srC1+A52SDI5SeV7vQ/5Od20j/aMIIs
+# MjnAhhqBJO5ZoKU7d6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMyMTIw
-# MDdaMC8GCSqGSIb3DQEJBDEiBCDgLl6aeomo7oIB+xaPqfKuLWbOgSpZ06sIyLOP
-# SOVrPjANBgkqhkiG9w0BAQEFAASCAgA0s5juO6KAD84W4EApXLYtyI0sQxSMoXrz
-# qeIusy4S2VKWGi0ISrJiNNjyLQpjy0obS5kG1BGxill+ouaoG5tx8oda8MEglm92
-# 1mUlfelsBvUOleqbVpFh8DW5uqroD8rRU0Id4ITVcRy0J5zM2j0M5h09K6QMk16X
-# UXg1U2lIXhRMgGsNmUymjM2PSXE5P/DJPxsQzqwYaYQ6f/dwIn9fgzNz3DD9HNFW
-# Wgl8096HismFyNmGfJPzVGcgO8MI7/rCh33Sf1jJLn415aJz9Wy8CMl/eb8eRJSh
-# 9l2/jBywl3AhWFTuNY3rVv4lJOw0sCaLpZKaKWdW7oaHkOZvydaAa84VfdqBKNEJ
-# t3IrFFarkITK3wU+AQV4J/Yl4gOSOyq/a9/oJQbgd5pWBjhaDbRC76mV3k01Ognq
-# Uql6VgnOTR7P5WGhywmN88GVG1GxS0bVrS61bDrv+pnBdbqCQop8TN0+CMRgJenX
-# Izzm030d+J/p2v2mAjOFF6FAgqrPZCVP+X0aCYFsEwDNhkqpNBu9uuyzQz3/YFeP
-# MQG3i1HqYyX90TY0gE3GZy8OzVDML2DodF36oAfFXiBAK8yIeshKz6vndWR8rdVi
-# 37/gJdyMbOejoCcE/z6U+IvHuQyAMbDJhpaK/PHYT55+3lxVnH9lXXKAHLTCNO0V
-# rQHEhqPYcw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAHHCgd6sUUPGojwAp76UytVEul6kN6Oz5B2FPo
+# 3Rn/lDANBgkqhkiG9w0BAQEFAASCAgBYmR2CX6TXmyJA9T4QFe6Pg9pvugkl0ERv
+# GN8DfmnWolRg8zqWoghC96bfT5xo1a8C7xvk8s0FCkScDgCpm7vgHMzkLqJzwNpP
+# dUUC1HW2W6OkWhVzyBpuslaSmKySBJIpMMICB4iprAcE2VduFF1gQmcP1VLEGKrI
+# fVDMlLA+XyDyiZi/V9UFly63r1DdNXL83bfdn5kPjz1YZWxx62FxdRFxqtTXQlFU
+# nPGUvD732wJ8dsp0oTuGZGezVMxqe9ZMZ8Den+BYmfotCy4r3Ho/2ig4PTY+UrnV
+# nnr5k3LN5lHoakaiZYGqWCJT7Ris1xSuJQwpawBSunvidsMcYb8hypbdMPgWHj2p
+# tFsLWSLYNTpG2RPp2wT/vxAcY2wqUKZqYajuKHC34mLjPLwwft45o3Y5wjlqd5zs
+# nchcAubSgW6xoeZf5oOHX6CCniTPhaCESi33xMpuOoWD8tY/97ojutGfVBiK3pe+
+# JNccsxjRdi9S3HIhUZOGNTH2xq3KO6smvv4sxUMriwUYss5iCE+GUvQaQaxPkc7d
+# duCu4pgd/oD1htU0EhLTY2FeF7c2yAidIiEDV3TgUhvNS3McjnQWcSSzSkn9t3pO
+# oTP/xhjpoxglKz94MAQ4YPdIhccSNnzZXrqmKiyXem5pAJUHo1l1AkJXm8oLhAw6
+# St7fPR2zOA==
 # SIG # End signature block
