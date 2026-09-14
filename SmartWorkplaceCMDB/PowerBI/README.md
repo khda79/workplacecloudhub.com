@@ -176,6 +176,11 @@ pilot includes a validated real hardware snapshot. Devices without a matching
 hardware record still show an explicit unavailable message. The generic six/nine-page generator below remains
 separate from this additive hardware page.
 
+For an already-finalized cockpit, add `--data-only` to `report_hardware.py`
+to refresh the two validated hardware CSV inputs without rebuilding report
+pages or model payloads. The output must remain a new private directory and
+must be reviewed before it replaces the prior frozen `ReportData` copy.
+
 The canonical cockpit integrates hardware into `05  Fleet & Hardware` and
 `08  Device 360`. The report and its visible context labels use V1 and no page
 title contains BETA. Fleet
