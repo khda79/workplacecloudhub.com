@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.2.2
+1.3.3
 #>
 [CmdletBinding()]
 param()
@@ -76,6 +76,21 @@ function Write-SummaryFixture {
     }
     $relationships.Add([pscustomobject]@{RelationshipType='PrimaryUser';FromEntityType='User';FromEntityId='user-1';ToEntityType='Device';ToEntityId='device-1'})
     $relationships | Export-Csv (Join-Path $cmdbRoot 'CMDB_Relationships.csv') -NoTypeInformation -Encoding UTF8
+    $powerBIRoot = Join-Path $latestRoot 'PowerBI'
+    New-Item -ItemType Directory -Path $powerBIRoot -Force | Out-Null
+    @(
+        [pscustomobject]@{SiteId='site-1';ActivityState='Active (90d)';OwnerPrincipalName='owner@example.invalid';StorageUsedBytes=1073741824;StorageAllocatedBytes=4294967296},
+        [pscustomobject]@{SiteId='site-2';ActivityState='Inactive (>90d)';OwnerPrincipalName='';StorageUsedBytes=2147483648;StorageAllocatedBytes=4294967296}
+    ) | Export-Csv (Join-Path $powerBIRoot 'DimSharePointSite.csv') -NoTypeInformation -Encoding UTF8
+    @(
+        [pscustomobject]@{TeamId='team-1';ActivityState='Active (90d)';IsArchived='False';GuestCount=1;MemberCount=2;OwnerCount=1;MembershipCoverageStatus='Complete'},
+        [pscustomobject]@{TeamId='team-2';ActivityState='Inactive (>90d)';IsArchived='True';GuestCount=0;MemberCount=1;OwnerCount=0;MembershipCoverageStatus='Complete'}
+    ) | Export-Csv (Join-Path $powerBIRoot 'DimTeam.csv') -NoTypeInformation -Encoding UTF8
+    @(
+        [pscustomobject]@{TenantTeamMemberKey='member-1';UserType='Member'},
+        [pscustomobject]@{TenantTeamMemberKey='member-2';UserType='Guest'},
+        [pscustomobject]@{TenantTeamMemberKey='member-3';UserType='Member'}
+    ) | Export-Csv (Join-Path $powerBIRoot 'FactTeamMember.csv') -NoTypeInformation -Encoding UTF8
 }
 
 $parameters = @{
@@ -112,6 +127,19 @@ try {
             'License-family assignments are incorrect.'
         Assert-SummaryTrue ($result.BodyHtml -match 'Since previous' -and $result.BodyHtml -match 'Since J-7' -and $result.BodyHtml -match 'Since J-30') `
             'The required comparison columns are missing.'
+        Assert-SummaryTrue ($result.Snapshot.SharePointSites -eq 2 -and
+            $result.Snapshot.Teams -eq 2 -and
+            $result.Snapshot.TeamMembers -eq 3 -and
+            $result.Snapshot.TeamAverageMembers -eq 1.5 -and
+            $result.Snapshot.SharePointStorageUtilizationPercent -eq 37.5 -and
+            $result.Snapshot.TeamsWithoutOwner -eq 1) `
+            'Collaboration summary metrics are incorrect.'
+        Assert-SummaryTrue ($result.BodyHtml -match 'Current<br>\d{4}-\d{2}-\d{2}' -and
+            $result.BodyHtml -match 'Since previous<br>\d{4}-\d{2}-\d{2}' -and
+            $result.BodyHtml -match 'linear-gradient' -and
+            $result.BodyHtml -match 'Membership coverage' -and
+            $result.BodyHtml -match 'partial Teams are counted separately') `
+            'The dated Smart Inventory visual pattern or source caveat is missing.'
         Assert-SummaryTrue ($result.Previous.RunId -match 'day7' -and $result.Day7.RunId -match 'day7' -and $result.Day30.RunId -match 'day30') `
             'The previous, J-7, or J-30 baseline was selected incorrectly.'
         Assert-SummaryTrue ($result.BodyHtml -notmatch 'device-1|user-1|mailbox-1') `
@@ -175,7 +203,7 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.2.2' -and
+            $result.ScriptVersion -eq '1.3.3' -and
             $result.Subject -match 'mail transport test' -and
             $historyBefore -eq $historyAfter -and
             $parseErrors.Count -eq 0 -and
@@ -200,14 +228,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.2.2; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.3; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBL8gaGbeAkDDdY
-# gPLCy3kcdB3kjEmM0KA+keXbdlafcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrbN41i8xv9FyP
+# PRaKJrORVQ+NWisl0CoPssibxYrLCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -340,31 +368,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM0crwLdqAkyrS3vX1UKZ24QHA8+WZ03WmCUM4EoHF3pMA0GCSqG
-# SIb3DQEBAQUABIIBgCHB5t/YGWhqGq0l58BNDUxHvKKYFHepSr4NHeoVAnsR/u2h
-# fDTLhPUmS2mB21ju46+u7Kf7u1XIsL9qghxiDjlebyc6NzKKuCMlgiUpG3N+GnVI
-# L8O+0IiJxw8tSHJfgMqRxZm0rsGHlYAwi4Agjyvnrb5lhI1dK1lqcIeBlOnw5bu7
-# jOsi1prspv6RPund1K0URExblD8rwdiwhM0FBb5NytfS6cRw63a11VDGNhi8CIh1
-# dOMOAQ6NnrcTjoCTPAntvp7tKpJKeBUC0B8UcIWtZgT6ppNCCfpCgGZ6pNhludh0
-# 60/HEanhKnW2TYG/Slhm3RVLi8zf/ovkIuknnZyKUTC6RHLwf0g7ixbkjMPWNUHq
-# riDZ+y9LNBytevZqKwI1kdzNkDCPq3JAosd7shvntwLCKNOAVi0yLqZdGTn4u2lo
-# ADztGGK2bDjlPopdEVgBT55oL/7aNzA1gzVahUQ+jrZRhX5RgINXdna05RGy2rLL
-# U2881HNoUp6rBbhdtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICF6sd59Pmv27YTMLFd6RCA0rGODpunT/WbWiyWFmzM/MA0GCSqG
+# SIb3DQEBAQUABIIBgKcOku8Mxq2ZbnbN53DX0FXALurTnGdJszecRS2iGw5F/q2Y
+# XFccoLcC4hxdTsz+QIiD3MyAkRV+VffdssDlnvuBDtV2LfZLHNau+zf8rAfRiad0
+# YPNDdTrGrjNJiAvE364dKE96muGIRxUJm3ZKlBK2xnLoNcVlVhJMKkduh09y4Ufw
+# jbhgqSRXWJjy7WWNLcsx14gt4wlg5/OYkofH3I7gSsl8dMUjQKX9dB+5lYQwAlr6
+# 48V1RlIEzBDbMqW4slRm6HZJheDwgt+wAqBUU/x2tyfSXY5nc/+OP1VdiBwml/n+
+# OR4RS3C+8jXazftjYqgc1vCJadQx6WTCAqxHDQI5rnbVfWdq9afiDKVhD7mzwk1A
+# nd+7UTM0GY9nwIHsSS+hU+Y8Vxkbed8w1mOpqIC+nhBcsq3LQR46Khe7qBGhHg+O
+# rpumnBhZ5S9AY/odXRn4CkH3jaHycbCuKsKyKdgAoU5pUyquyPDgksBWUJLAG8Vz
+# L0nfV0mlyKC5cA1fR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMwOTIz
-# MzRaMC8GCSqGSIb3DQEJBDEiBCB7gxzqWkPH0UqWQJ6GTrp3A7v7ECHFWnl/1IN3
-# dRyskDANBgkqhkiG9w0BAQEFAASCAgBAvK1R/qIBrw4ZZgbDWDxEkL+vZGPHak31
-# /1D5xmVkmtvS2ITXjOSjuOTuk+YpaXaBiiGG1bGRdLX9ibJM1TsMuwB/VRLeb4s3
-# 2JGCJrSi7S179eKq++dr+X45EMiJyBuXMd8BcJNWx/gy68kWm6xxObVv+w6QEyj3
-# jhrxyCjiMhOvorGnknPPJ+9G+5oHcTl6mkEnKX1RBHUZxJNPxAnCQgM5nGCJd/vH
-# ThRHWstBD5IjMfUrWKIFtfnfja0uJ94yk+ttfYHwqrIgRM/xSNYwDBbVYWDx3nih
-# Gv4xK5Kt1xJRcgWwQx7AqYve/4pdJC9O7lprpDQ4Bsuw43WtUtg06XBicWJ3iW3V
-# PQnZPQQGMgA528hr22FGxGoZWzNcOPbF65jLYFFuD/pVkFB9FucBVfDCdEzGqFCZ
-# jLsLhAbcc4I2d5gDwRnCiO/c4lipIiwqdN4ZidHXwSL8JkrEu+iE5VgU++vjddzy
-# x/qjiY66B3unU+Nx9j43lLub3HpPGxx1NCzAOBU2Nik7gB0e14+1PUzAfc8YkOEE
-# kmKfaW+3sBJEVctXmYGw/oMT0+9x7XLnKTgz3+fe6Mgf4a71Qcenz7KPYv52HIdt
-# XJ4OA+hoFAvrU2JRb1fXE83by1WGYeo4W1DVrEThDTiFdFZAvBMr8XH4XctfBl7I
-# TyLyNEjKOg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NThaMC8GCSqGSIb3DQEJBDEiBCByTM/36NjlE58SHrc2HIQk+98V16dRB3EY9dya
+# TZJ+yzANBgkqhkiG9w0BAQEFAASCAgBVxrAHIxeTCjcnk+6RZldmFtxU3MkaAU8s
+# /bL97p7xWb+a5Zv58wFh7/IkoOppoxRhwZGcxHpzgdzY/6KETLEkCPS/S9DvQEvv
+# vaTssrPsfvpHQIb230oMr/YFQOHatZ+YmBAp6cZlREsUgP4nXJGRLNRvMOe5dPDp
+# zz5S2OnMOlPfzKUGR7/Y4Y+3wrCBxl7HSUfkSlggqcHlzvXppIx2O98f7Km1RAd/
+# YEMGz3Wc9Jb0it3hvpl0zFBRKiCN9KTuUYK30zEwiGPyTkWNKNxUqWiEBLymtT37
+# WjgXk0zca/sKFbQJhXZO7sRRkq8Enwi3ZyRoOvTuryRSrjkhj76d9Z+co8hz/jen
+# th16RofOxZvr107o4U4TqTHQUJTtzPaslNnICdSUC69ieWQ3Nd2QjbB4/0n0zkbd
+# gd0bgTItSWspWgLcEik8i9CxomIMdoLaYLvfcQDfQlJaUI5I2pOCW9uw6v8f8kay
+# tGkT1CTF0A17XMjZP8o62TzpgjL9PgJdr/EU2DC1sdqyC5AySgbLXvbwuI8m6MiS
+# C44KbfITI3gsw6rY/tjVFagzEJvxBP8M+pkmu1kUZ3K2M4Vpj80zIFo36nJWVN3z
+# vsr/0cr3BrNxOvjeWgl9o4jTTq+bqrVO4m8Jlg5+DkFiXotY6gvfpQfR+W+XY0SR
+# GEkHqIQZUw==
 # SIG # End signature block

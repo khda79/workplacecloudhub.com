@@ -3,7 +3,7 @@
 Runs offline bounded-retry tests for the SmartWorkplaceCMDB Graph helper.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -73,6 +73,25 @@ Invoke-GraphRetryTest 'Use bounded exponential delay for a transient server erro
     Assert-GraphRetryTrue (($script:delays -join ',') -eq '3,5') 'Exponential delays were not bounded as expected.'
 }
 
+Invoke-GraphRetryTest 'Recognize SDK aggregate ServiceUnavailable text without a numeric status' {
+    $script:calls = 0
+    $script:delays = New-Object System.Collections.Generic.List[int]
+    $null = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry `
+        -Uri 'https://graph.microsoft.com/v1.0/example' `
+        -BaseDelaySeconds 1 `
+        -RequestScript {
+            param($uri)
+            $script:calls++
+            if ($script:calls -eq 1) {
+                throw [System.Exception]::new('Too many retries performed. Response status code: ServiceUnavailable.')
+            }
+            return @{ value = @() }
+        } `
+        -SleepScript { param($seconds) $script:delays.Add([int]$seconds) }
+    Assert-GraphRetryTrue ($script:calls -eq 2) 'The SDK aggregate ServiceUnavailable failure was not retried.'
+    Assert-GraphRetryTrue ($script:delays.Count -eq 1) 'The SDK aggregate failure did not use one bounded delay.'
+}
+
 Invoke-GraphRetryTest 'Do not retry a non-transient authorization failure' {
     $script:calls = 0
     $caught = $null
@@ -102,7 +121,7 @@ Invoke-GraphRetryTest 'Stop after the configured retry limit' {
 }
 
 Write-Information (
-    'SmartWorkplaceCMDB Graph retry tests completed. Version=1.0.0; Passed={0}; Failed={1}' -f
+    'SmartWorkplaceCMDB Graph retry tests completed. Version=1.0.1; Passed={0}; Failed={1}' -f
     $script:Passed, $script:Failed
 ) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
@@ -110,8 +129,8 @@ if ($script:Failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTWIlZ10cm5Uno
-# pNm9uHKhWQylv1LV0rDJappTUVzGCaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSqY3cQWG15QOI
+# BMMZBhPwu8O45HEQPeqT1n2QOD1GB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -244,31 +263,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICk3TZPETfY0kUpVSR5JQlmBDKFYbTroHv6lmfktqn9MMA0GCSqG
-# SIb3DQEBAQUABIIBgFXsF2g6UVyuBzAxoPlVcW7XbyMwOwHkCeStBgeU2iLnM36O
-# 9ObzStV/1/Z1dlQKiz/Rtdng523zVf5mE36Tcyk43/qvwpeAqssogU9PA0dIFq1K
-# P4Ye8vpk0dxg8rttEGLAoqB3zXeJd/fBlsBRS9jsUyyYKULBpNirjhLJ/wgbzPNz
-# KH8BqPmXwW2IMv83gDsqWuXAtaacknRnsSy9Vut90tBR/uXQpfde/L6qhBGy2aL2
-# 7kO7MBUQyiYlBd/9VCcC0Em4wOr998Td2O5SAMJ0iYOihB4kKRyp8NDPuxeA002y
-# Ka7Riu+rRxmmfR1z6kPVvqTnUgFg59UOlNYohUgd7YaMzFI16IiNC1sB0dLap3Lu
-# ngbsr0PNxaD6aKFnjMXaLnKbkV3c7wZcyhT7inVPojqrCLWluvdAzbcrCc9rwzhB
-# gAVHhMKXDEYGi+oMsU+tmxCTmnFpouWrAVevc7l1TXY/kCIR/MlCRoLCKu7uQzL6
-# 4KU8A5ik+v6mmA2JIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKW+PsJY7RNxjBKrM/DkMWfbPTcs7KvNWa5oLGM5vHmwMA0GCSqG
+# SIb3DQEBAQUABIIBgDKMNqam75rh0C58MXrF48JJCqjGcHUzjC8nxt/2mduHXx9Z
+# 1LOhDgGp7duC9OIfgn9jmlCBQkh50O+KmAeRgKxXNnrEt1SSwdSHHhNFpkDVrvzx
+# K7wv6WaJc02Jd6QOzF/QR43A+rBlc8yn5PiPWUkMiSgZO40MfbeywoLcEES8ARoh
+# ymugEGXbkbbjvLuU4QYc93/1RYrs7KJLEwAOcYNHDLj0Q+11U82fDk14PW44/svn
+# 2W31g13HvKpO7wIqXUw5/wA0ynCBpTlv1Ib4qMwio7875/Fjjc/uWN8nILEDq53m
+# RWqfswF5cyIQE9tsWJS0EOXjXe/GGLPHcpl0NS9oxbZzGIXD34D4Z1Jkt4zgokih
+# 2HkHsEtzc+3Mp7rA/c4rZ2psjkh18PerPEo1t0vXSfiQXItA1ltrNh+26kxq46w5
+# qf31GXyCBg0yZtvh1thRjSsW3LIHUHkJtEx40oIv796Ta9l4u7DiUbnhLzBiUa9c
+# +t3Hg/CzhBfNZ8uYfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzI1
-# MjRaMC8GCSqGSIb3DQEJBDEiBCDegmcKXUou0qn6aa+fEAVi7Ilkdfzo8xFvDNdq
-# zflqszANBgkqhkiG9w0BAQEFAASCAgBg5nkZ197jY/aTCEvA4v28NmLujh05NE4w
-# eJlLPM2ChsVlouKkNO40Mq3ylcqxveWjJFw7Rvt5En3gv9MA5lMyREtnklrgqpaX
-# 0XIakw4E3fcELWCXNJLHm7nnH66hnWDz1xeesH/1Z1cRn0L+rf0TPfBgzLbuuwtu
-# rBR3xSJ/X02B9JoAuwS0+dBy5mxxqc+JGFwKtoWsFiBbGQPonMJFcn3/Tv2JYueI
-# 8fvwyEla7xQxygADnIJ6L5jh86FExfZouNk0fsE7JSQsyIOJ6sr+Fi/CZDpGk9ov
-# 3x8eFnXXGZJK/7Xjyprq/OEIIBX4zWw3vqyiYrfPILxVrXEJyqAgk9KQ7ROGUZmX
-# lqjXsYaAIrCLUjMEt43Jb/t0i3l9Wsh1A5GdfoYwvjeb747L1xqgkk0J9WruT7yH
-# jbYIg38vFq71Tyy3jytnMDHeW1NxdJBEwB1joVNzmHqdOTl/HCE+qtaoqXFd8HpM
-# dga5mCbJmkpPdGHQcO8BmENTRxlVzsuCJoHWG5mKqhx8m9Dae5M7ce3AxiUZHqrE
-# 85VQdeHlsAWe+1kUEhjHDAXHXVmfyoLmu+E8a9jGPBgnMSKqWVl55hpMWcw4prYE
-# OkSS4WfCfG3zRT1ffeZHhVK8XDkXt/3+HrWUJYD+M/8oA2QQOXtgf1b44aoPTbFC
-# GAPzcUG9ZQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NThaMC8GCSqGSIb3DQEJBDEiBCB4cEOFy5WAGAUEeEQtAjRUqcJjaFg0klM5gY2T
+# 809jqzANBgkqhkiG9w0BAQEFAASCAgA2VhEzy23ekMXrbM2x53izro76df/IonU1
+# 8ReITvZynbqAoaBQzft/15nzgW1Iv1SETdac4zn9K9lppesnmrH4l8y6DIOw+xNe
+# MOrGEn/yXUUX4ntL+Vrq6REK7x0jShfSuYRWb+Ccvm7ACJlpdDUm3Uwz3Uppqf+I
+# fQWOq3+cE2e3UYdiX10Zzl1YTzf1DvqwYGmTmrPbXOK0EuL/hePwhdDjR/rnysT+
+# YmU60BpcbJEmTFcpR23cmRfcQEKbjTAwCVIccAbDXcodqZYVLc+wyQwyU7HqHeqj
+# O8mc//xNlLV61BKUXekXMmZg1i/wbNaMQI8qk3PgC0XYt5FecT/eaivyRiZyemLb
+# lSGMOAZqbGVNBBzxhO9GgHGHNuU1DDOAyn8OjvF4rh8XVt3xeO/TFRBdal35HCUk
+# 8FircBYtVnx7XKBRkUUYUlSZ1cwoQoLexYGzKgiDfO5KgYc2oh1UlmhBTcBhDBHb
+# x0kduuQaglEO4xwduMKX1kxrE2uoU52Qhl+Z6vrL+5Nh23JuE0g/NtV1DYrISjut
+# VYAEVFF7JSkOMQTQzneisjpdQAq9nWCjX4SNNnEoLbebhk4MDhnzEy3ALuXOSIUJ
+# jT6jXbb2PxCSIMcdKylDksQxJXTCIeluYA7O3rwNBCSlDVHT0Vok2+eCaNzCEytq
+# isgeXmzcSw==
 # SIG # End signature block

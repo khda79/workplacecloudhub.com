@@ -9,7 +9,7 @@ the latest raw contract is written below DATA-LAST\Raw\Entra. Offline JSON is
 supported for safe tests.
 
 .VERSION
-1.1.2
+1.2.0
 
 .REQUIREMENTS
 PowerShell 5.1 or later.
@@ -39,7 +39,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.1.2'
+$ScriptVersion = '1.2.0'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -176,7 +176,7 @@ $sourceDevices = if ($PSCmdlet.ParameterSetName -eq 'Fixture') {
     @($fixtureDevices)
 }
 else {
-    $select = 'id,deviceId,displayName,operatingSystem,operatingSystemVersion,isManaged,isCompliant,approximateLastSignInDateTime'
+    $select = 'id,deviceId,onPremisesSecurityIdentifier,displayName,operatingSystem,operatingSystemVersion,isManaged,isCompliant,approximateLastSignInDateTime'
     $uri = 'https://graph.microsoft.com/v1.0/devices?$select={0}&$top=999' -f $select
     @(Invoke-SmartWorkplaceCMDBGraphPagedRequest `
         -TenantId $paths.TenantId `
@@ -208,6 +208,7 @@ $rawRows = @($sourceDevices | ForEach-Object {
         SourceSystem                = 'MicrosoftEntraID'
         SourceObjectId              = $sourceObjectId
         SourceDeviceId              = $sourceDeviceId
+        OnPremisesSecurityIdentifier = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'onPremisesSecurityIdentifier')
         DeviceName                  = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'displayName')
         OperatingSystem             = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'operatingSystem')
         OperatingSystemVersion      = ConvertTo-SmartWorkplaceCMDBCleanText (Get-SmartWorkplaceCMDBGraphObjectValue $_ 'operatingSystemVersion')
@@ -269,8 +270,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf/dHD5PWvLt6+
-# vPpOJAS40l0LdHnsxbCUlwhUt5lflaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALC3EBUVHnslov
+# rJn7J9C4Sp8hltrlUyUNqhq9z10f+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -403,31 +404,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBaZVTXm752xjIDeXwKtCcYX2WqCOpnW0scy+X8B/8tOMA0GCSqG
-# SIb3DQEBAQUABIIBgJKx49VvaC5UnaDfFSK2gQj5l1/C/81v7Obf7uQeDyKXgewA
-# 8qV8X9Ggycm9xAI+GoXZnGP+NktEnUw8NunYGDxouyydC3Kj2Hsa3A2g8bczuQ34
-# mKoSEAOj2DfXTUE+38GYSFe7Z20H4IbjyyGDKdh+SlKq5opRo6sS2VJaJUg5z20y
-# h+6BWln+wh5SCS9aRohJMp8c9+PVXNIkuUc2HXd30zQ6GN/0XgvPBW+mV9k4roN9
-# /UT2/d8snzvvYWIrY5legnldJjkCQUFZy65SwROb1YyXmJ86L8RgZU8kiZqEpJKM
-# dIeXHkS2zhvLhXKuuXDAlQPd1Ef4HFBi+yvxh8yxTvg2+Of3eRdfpAc1QzT6+OUp
-# p/jecPJh20vJPE+HWadviQnVkHuFbQn9sIsq855W6g+nXtTbQ7dgBgI9mTR7Zm0H
-# y1J+B1p2Ax3ETDH0RcM90TR2jPdX9fSDWsT207A0nBgXV3XWmxZZqXP8sq+FtBKm
-# 0txE0JnpOlMkjH4InqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH5E+KQ0wmVVjori5NaoZow608RE5nFI51/QqMLJUh1fMA0GCSqG
+# SIb3DQEBAQUABIIBgIDWh9pwN9xlWlQXJ1o3NIqC/xjwfYS0q5GBh9Z/UYU+U2uX
+# n82QkJlyoIx+DysJ9ikrxR6ubtKDiGzx1cA92uxr5KHVG1uqHSES/MX+7RX4wgVy
+# fFYT0LNZcY1+cRgxFz+S6yrEi7j7ovWfL98M3CByILwKnktdH/a3z5+TFsqd/0x1
+# xOp6h8CER5YDByh73RM1xbcUph2NY+AnrXgeom4XP6A1pTa0lNE/Z6H5cvKAHtX0
+# ngwe2HRvHAq/W4abENla3E9CqGatmLLOUxs5FhBeFJEuDWzrbTcSWIJBZW086aSe
+# 8GgiMSzO6fPz1nZHuPfUWn2mxs3Vujw9HSWXxbcVQ3xHcQ4zqxkrAwDpnLazxzA5
+# sXVT/8SH6RiqkHmSaOSIgcgCAFL3aHCQ+XRvQug1RH6/n75YesuSYi0smU67En2J
+# 6jovOnmnjqByOvLUHvYwXsioOLES8zQPXZAxEm3EIxdCyVUa5feYNMVhVHb3iPBC
+# feehsn+NkYiNip+5faGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCcC+dWkJubCy4x4OXzGyy8E166AHtpSNdjI5+u
-# awMz2zANBgkqhkiG9w0BAQEFAASCAgB9S5CY+lmcF1WPgHKCYU2owIHHPBwOUbN9
-# NOKz8mhb7t0nOyuMWgjNrjd+vVl0aoqPcmWoS0SkkKeWmXeZjXxJBXjgkANy821D
-# n6niQjkekzOKakP5yq5qHFHOn8PytakOylKt1SBuWsJY//EmcdJm3Ej5wp0SlEuS
-# QjNRYL0pFA5T3LNp09I6p57z01fos8Gv35AVM9aUKqVhhNCfBhLVeWHZPzktmwuV
-# EtQ2FJK0w0fDPw2RNPOExcBE3vs91Sw8y/dhyoCunBdosrx1E+qhRTJAjrRBEeFx
-# YxULdxkPS2i4Va5HHCg9Dwb3XpHwVPvQ/LwoCWnX0bA+qpB0bAOmrKLf6+FQSklI
-# QcHl//Ow+1sFGOjLarJ+iOC3a3buMjvetEya8S1zjg69kLG1Y/F63sHvBsLyxiCk
-# 6u51XabGm0nbpztYdcmHrFvdT3GfnPVpYvE8tZb+NoXotsmfCQjyf3mxrjMylMGS
-# /O8mcmz+6qDxS5rvkMowcpjlL0PNJ9/g9cazMmxw7XxoLUkkf57eR8OyVzI/DavN
-# pzdmVMTfQPYAWqMky1aOqm/e/JqqGhGsZy3530bU7EejG05YeFm4poj3LjC6lAxs
-# SrJJGcrkXEm+EGwjOQSnm4Oy7jO3EZyXknoMjyRInez2uzdYyBphV+YjBczPL2v+
-# LF2Qj0GAVw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NTRaMC8GCSqGSIb3DQEJBDEiBCC/B80D05DmvD40vtIRF6SdPPyTD5Byxo584bpE
+# thmb6jANBgkqhkiG9w0BAQEFAASCAgCj0EglMOii/tfSNCaEdlS5AV8LT0Ck0Ur7
+# QwCZQp0VJqmnV03GtdBFV9nCZGFcBIVq2wWADvS0F8CT4grf984TzvfNIXSg6FzE
+# +9SleqKQQjPBhlEAoC/ph3R7dnTG+ciR1IZBIfzk58JJWM9qag4XVSEuQ27mQo8Y
+# /Vz3hmr/pyTXZGSjYzBWhgAAWxwhGESCAWeMUfFh5fhMy2vpCRgse8QPocZBQs4A
+# Uz8U6hxmf0GsdYpNkr4TCM8u0tbeRsH4o7KehxU29tutgqaF8oGlBOs2vBuA4jfQ
+# 2Q8T/I8bRog2wnCzywg8iJ9ObyJovJa1pFoDEfaEovW5YxryEgpjH/jJBHq3UytC
+# ptqG8UaVRQifpOCPuOKu4ApE/Opl29hpZrXj+UZwKvwZEMfELokCWHs2u8BVtNeE
+# kKCHC5QCx4HaB2fmYFpwadPej/vqmdcR+7lWrRtONphqOhr+yvN22THzo08yzzE6
+# nxcROSEdhaaPx9LMoTjH2vtftQL8RRfx/4UpT9kBpXKdGmiyJ2c0gvHS8xSNc57e
+# f3JBvpdyAt5Tyw7oskNSPLa1q0a1RdBFdhnTXlaNKzNNZsmdNcVVqakvbRXUzqHq
+# +s7sM9HJfPNozuzdEleTJd6LD2S5pCM/ZNiTd9NeAVBQnB3Lvo5aDEAqgtjVdPxK
+# zsESUMlD3Q==
 # SIG # End signature block

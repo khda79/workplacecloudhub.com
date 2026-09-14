@@ -14,6 +14,7 @@ import copy
 import csv
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -93,6 +94,51 @@ UPGRADE_ELIGIBILITY_STATES = {
 TOP_APPLICATION_COLUMNS = [
     "ApplicationProduct", "DisplayName", "Publisher", "Platform",
     "VersionCount", "ReportedDeviceCount",
+]
+DIM_DETECTED_APPLICATION_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantApplicationKey", "AppId", "SourceApplicationKey",
+    "DisplayName", "Version", "Publisher", "DeviceCount", "ReportedDeviceCount",
+    "ExactRelatedDeviceCount", "RelationshipCoverageStatus", "Platform",
+    "SourceCollectedDateTime",
+]
+RELATIONSHIP_OVERVIEW_COLUMNS = [
+    "RelationshipType", "RelationshipCount", "EvidenceSource",
+]
+FACT_DEVICE_APPLICATION_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantDeviceApplicationKey", "TenantApplicationKey",
+    "ManagedDeviceId", "AppId", "SourceCollectedDateTime",
+]
+INTUNE_DEVICE_BRIDGE_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantIntuneDeviceKey", "TenantDeviceKey", "ManagedDeviceId",
+]
+FACT_AD_INTUNE_COVERAGE_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantADComputerKey", "CmdbAdComputerId", "DeviceName",
+    "Enabled", "OperatingSystem", "OperatingSystemVersion", "TenantDeviceKey",
+    "EntraDeviceId", "IntuneManagedDeviceId", "CoverageState", "MatchMethod",
+    "SourceCollectedDateTime",
+]
+DIM_SHAREPOINT_SITE_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantSiteKey", "SiteId", "SiteUrl", "SiteName",
+    "OwnerPrincipalName", "LastActivityDate", "ActivityState", "StorageUsedBytes",
+    "StorageAllocatedBytes", "RootWebTemplate", "IsDeleted", "SourceCollectedDateTime",
+]
+DIM_TEAM_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantTeamKey", "TeamId", "DisplayName", "Visibility",
+    "CreatedDateTime", "LastActivityDate", "ActivityState", "OwnerCount",
+    "MemberCount", "GuestCount", "UnresolvedMemberCount", "MembershipCoverageStatus",
+    "IsArchived", "SourceCollectedDateTime",
+]
+FACT_TEAM_MEMBER_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantTeamMemberKey", "TenantTeamKey", "TeamId",
+    "TenantUserKey", "UserId", "UserPrincipalName", "UserType", "Role",
+    "SourceCollectedDateTime",
+]
+FACT_USER_ACTIVITY_COLUMNS = [
+    *IDENTITY_COLUMNS, "TenantUserActivityKey", "TenantUserKey", "UserPrincipalName",
+    "MatchStatus", "ReportRefreshDate", "IsDeleted", "ExchangeLastActivityDate",
+    "OneDriveLastActivityDate", "SharePointLastActivityDate", "TeamsLastActivityDate",
+    "LastActivityDate", "LastActivityWorkload", "HasAnyM365Activity",
+    "AssignedProducts", "SourceCollectedDateTime",
 ]
 LICENSE_SUMMARY_SKUS = [
     ("Microsoft 365 F1", "M365_F1"),
@@ -278,7 +324,17 @@ BAR_CATEGORY_COLORS = {
         "PrimaryUser": "#4D7FB8",
         "HasMailbox": "#2A8C8C",
         "AssignedLicense": "#7567A8",
+        "MemberOfGroup": "#2A8C8C",
+        "DeviceHasApplication": "#A6824A",
+        "DeviceInAutopilot": "#3F8F62",
     },
+    ("DimSharePointSite", "ActivityState"): {
+        "Active (90d)": "#3F8F62", "Inactive (>90d)": "#C96C6C", "Unknown": "#AAB7C4",
+    },
+    ("DimTeam", "ActivityState"): {
+        "Active (90d)": "#3F8F62", "Inactive (>90d)": "#C96C6C", "Unknown": "#AAB7C4",
+    },
+    ("FactTeamMember", "Role"): {"Owner": "#4D7FB8", "Member": "#2A8C8C"},
 }
 
 
@@ -351,6 +407,52 @@ def read_csv(path: Path):
         if not reader.fieldnames or any(None in row for row in rows):
             raise ValueError(f"Malformed CSV: {path}")
         return reader.fieldnames, rows
+
+
+def count_csv_rows(path: Path, predicate=lambda _row: True):
+    """Count large fact rows without materializing the source in memory."""
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames:
+            raise ValueError(f"Malformed CSV: {path}")
+        count = 0
+        for row in reader:
+            if None in row:
+                raise ValueError(f"Malformed CSV: {path}")
+            if predicate(row):
+                count += 1
+        return count
+
+
+def build_intune_device_bridge(rows, identity):
+    """Build one exact Intune managed-device key per report device."""
+    result = []
+    seen = set()
+    for row in rows:
+        if (row.get("SourceSystem") or "").strip() != "Intune":
+            continue
+        if any((row.get(column) or "") != identity[column] for column in IDENTITY_COLUMNS):
+            raise ValueError("Intune device bridge tenant identity mismatch")
+        managed_device_id = (row.get("SourceObjectId") or "").strip()
+        tenant_device_key = (row.get("TenantDeviceKey") or "").strip()
+        if not managed_device_id or not tenant_device_key:
+            raise ValueError("Intune device bridge requires exact managed-device and CMDB device keys")
+        tenant_intune_device_key = (
+            f"{identity['TenantKey']}|intune-device|{managed_device_id.lower()}"
+        )
+        folded = tenant_intune_device_key.casefold()
+        if folded in seen:
+            raise ValueError(f"Duplicate Intune device bridge key: {tenant_intune_device_key}")
+        seen.add(folded)
+        result.append({
+            **identity,
+            "TenantIntuneDeviceKey": tenant_intune_device_key,
+            "TenantDeviceKey": tenant_device_key,
+            "ManagedDeviceId": managed_device_id,
+        })
+    if not result:
+        raise ValueError("No exact Intune device bridge rows were found")
+    return result
 
 
 def write_csv(path: Path, columns, rows):
@@ -905,15 +1007,74 @@ def add_operational_measures(tables):
 
     apps = by_name.get("DimDetectedApplication")
     if apps:
-        add_or_replace_calculated_column(apps, "Application product", "COALESCE('DimDetectedApplication'[DisplayName], \"Unknown application\") & \" · \" & COALESCE('DimDetectedApplication'[Publisher], \"Unknown publisher\") & \" · \" & COALESCE('DimDetectedApplication'[Platform], \"Unknown platform\")", "Normalized product key used to collapse source rows that differ only by application version.")
-        add_or_replace_measure(apps, "Application products", "DISTINCTCOUNT('DimDetectedApplication'[Application product])", "Distinct application products after collapsing versions by display name, publisher and platform.", "#,0")
+        add_or_replace_calculated_column(apps, "Application product", "COALESCE('DimDetectedApplication'[DisplayName], \"Unknown application\") & \" · \" & COALESCE('DimDetectedApplication'[Platform], \"Unknown platform\")", "Readable product label used to group version and publisher-metadata variants in visuals; exact application-device identity remains AppId.")
+        add_or_replace_measure(apps, "Application products", "DISTINCTCOUNT('DimDetectedApplication'[SourceApplicationKey])", "Distinct source application product identifiers. Versions and publisher-metadata variants sharing the same exact Intune ApplicationKey are counted once.", "#,0")
         add_or_replace_measure(apps, "Application version rows", "COUNTROWS('DimDetectedApplication')", "Source-reported application product-version rows.", "#,0")
+        add_or_replace_measure(apps, "Reported application-device occurrences", "SUM('DimDetectedApplication'[ReportedDeviceCount])", "Source-reported application-device occurrences. Exact device-level reporting uses FactDeviceApplication instead.", "#,0")
         add_or_replace_measure(apps, "Application occurrence rate", "DIVIDE([Reported application-device occurrences], CALCULATE([Reported application-device occurrences], REMOVEFILTERS('DimDetectedApplication'[Application product])))", "Share of source-reported application-device occurrences for each product; occurrences are not distinct devices.", "0.0%")
 
+    device_source = by_name.get("DeviceSource")
+    device_app = by_name.get("FactDeviceApplication")
+    if device_source:
+        columns = device_source.setdefault("columns", [])
+        columns[:] = [
+            column for column in device_source.get("columns", [])
+            if column.get("name") != "Tenant Intune device key"
+        ]
+    if device_source and device_app:
+        add_or_replace_calculated_column(device_app, "Tenant Intune device key", "'FactDeviceApplication'[TenantKey] & \"|intune-device|\" & LOWER('FactDeviceApplication'[ManagedDeviceId])", "Exact tenant-scoped Intune managed-device identifier.")
+        add_or_replace_measure(device_app, "Installed application products", "VAR _applicationKeys = VALUES('FactDeviceApplication'[TenantApplicationKey]) RETURN CALCULATE(DISTINCTCOUNT('DimDetectedApplication'[SourceApplicationKey]), TREATAS(_applicationKeys, 'DimDetectedApplication'[TenantApplicationKey]))", "Distinct Intune source application products installed on exact matched devices in the current country and ownership context. Versions and publisher-metadata variants are counted once.", "#,0")
+        add_or_replace_measure(device_app, "Application-device installations", "COUNTROWS('FactDeviceApplication')", "Exact application-to-managed-device relations in the current filter context.", "#,0")
+        add_or_replace_measure(device_app, "Devices reporting applications", "DISTINCTCOUNT('FactDeviceApplication'[ManagedDeviceId])", "Distinct exact Intune managed-device identifiers with the selected application evidence.", "#,0")
+        add_or_replace_measure(device_app, "Application device rate", "DIVIDE([Devices reporting applications], CALCULATE([Devices reporting applications], REMOVEFILTERS('DimDetectedApplication'[Application product])))", "Distinct devices with each normalized application product divided by devices with any collected application relation in the same device context.", "0.0%")
+
+    ad_intune = by_name.get("FactADIntuneCoverage")
+    if ad_intune:
+        add_or_replace_measure(ad_intune, "Enabled AD Windows workstations", "CALCULATE(COUNTROWS('FactADIntuneCoverage'), KEEPFILTERS('FactADIntuneCoverage'[Enabled] = TRUE()))", "Enabled Active Directory Windows 7 through Windows 11 workstation objects. Servers are excluded.", "#,0")
+        add_or_replace_measure(ad_intune, "AD Windows workstations managed in Intune", "CALCULATE([Enabled AD Windows workstations], KEEPFILTERS('FactADIntuneCoverage'[CoverageState] = \"Managed in Intune\"))", "Enabled AD workstations linked exactly through AD ObjectSid to Entra onPremisesSecurityIdentifier, then Entra deviceId to Intune azureADDeviceId.", "#,0")
+        add_or_replace_measure(ad_intune, "AD to Intune coverage rate", "DIVIDE([AD Windows workstations managed in Intune], [Enabled AD Windows workstations])", "Exact Intune coverage of enabled AD Windows workstations. The measure is tenant-wide because unmatched AD devices do not have a defensible country or ownership attribution.", "0.0%")
+        add_or_replace_measure(ad_intune, "AD workstation coverage state rate", "DIVIDE([Enabled AD Windows workstations], CALCULATE([Enabled AD Windows workstations], REMOVEFILTERS('FactADIntuneCoverage'[CoverageState])))", "Share of enabled AD Windows workstations by exact coverage state.", "0.0%")
+
     user = by_name["DimUser"]
-    add_or_replace_calculated_column(user, "License review band", "VAR _last = 'DimUser'[LastSuccessfulSignInDateTime] VAR _days = IF(NOT ISBLANK(_last), DATEDIFF(_last, TODAY(), DAY)) RETURN SWITCH(TRUE(), 'DimUser'[AccountEnabled] = FALSE(), \"Priority · disabled account\", ISBLANK(_last), \"Priority · no successful sign-in observed\", _days > 90, \"Priority · sign-in over 90 days\", _days > 30, \"Watch · sign-in 31–90 days\", \"Recent sign-in\")", "Review prioritization from account status and collected successful-sign-in evidence; it does not prove Microsoft 365 license non-use.")
+    user_activity = by_name.get("FactUserActivity")
+    if user_activity:
+        add_or_replace_measure(user_activity, "Users with exact M365 activity evidence", "CALCULATE(DISTINCTCOUNT('FactUserActivity'[TenantUserKey]), KEEPFILTERS('FactUserActivity'[MatchStatus] = \"ExactUPN\"))", "Users whose Microsoft 365 workload report row was linked to DimUser by exact normalized UPN.", "#,0")
+        review_expression = "VAR _activityMatch = LOOKUPVALUE('FactUserActivity'[MatchStatus], 'FactUserActivity'[TenantUserKey], 'DimUser'[TenantUserKey]) VAR _workloadLast = LOOKUPVALUE('FactUserActivity'[LastActivityDate], 'FactUserActivity'[TenantUserKey], 'DimUser'[TenantUserKey]) VAR _days = IF(NOT ISBLANK(_workloadLast), DATEDIFF(_workloadLast, TODAY(), DAY)) RETURN SWITCH(TRUE(), 'DimUser'[AccountEnabled] = FALSE(), \"Priority · disabled account\", _activityMatch <> \"ExactUPN\", \"Coverage gap · no exact workload row\", ISBLANK(_workloadLast), \"Priority · no M365 activity in D180\", _days > 90, \"Priority · workload over 90 days\", _days > 30, \"Watch · workload 31–90 days\", \"Recent M365 workload activity\")"
+        review_description = "License-review prioritization from exact Office 365 workload activity evidence and account status. It is evidence for review, not proof that a license is unused."
+    else:
+        review_expression = "\"Coverage gap · M365 activity not collected\""
+        review_description = "Microsoft 365 workload activity has not been collected; no license non-use inference is made."
+    add_or_replace_calculated_column(user, "License review band", review_expression, review_description)
     add_or_replace_measure(user, "Activity state rate", "DIVIDE([Users], CALCULATE([Users], REMOVEFILTERS('DimUser'[ActivityState])))", "Share of each observed activity state within the filtered user population.", "0.0%")
-    add_or_replace_measure(user, "License review candidates", "CALCULATE(DISTINCTCOUNT('LicenseAssignmentPath'[TenantUserKey]), KEEPFILTERS('DimUser'[License review band] <> \"Recent sign-in\"))", "Distinct licensed users requiring review based on account status or collected sign-in evidence; not proof of unused licensing.", "#,0")
+    add_or_replace_measure(user, "License review candidates", "CALCULATE(DISTINCTCOUNT('LicenseAssignmentPath'[TenantUserKey]), KEEPFILTERS(FILTER('DimUser', LEFT('DimUser'[License review band], 8) = \"Priority\" || LEFT('DimUser'[License review band], 5) = \"Watch\")))", "Distinct licensed users in priority or watch bands based on exact M365 workload evidence; coverage gaps are excluded and non-use is not asserted.", "#,0")
+
+    sites = by_name.get("DimSharePointSite")
+    if sites:
+        add_or_replace_measure(sites, "SharePoint sites", "DISTINCTCOUNT('DimSharePointSite'[TenantSiteKey])", "Distinct SharePoint sites from the Microsoft 365 D180 site-usage report; OneDrive personal sites are excluded.", "#,0")
+        add_or_replace_measure(sites, "Active SharePoint sites", "CALCULATE([SharePoint sites], KEEPFILTERS('DimSharePointSite'[ActivityState] = \"Active (90d)\"))", "SharePoint sites with activity reported within 90 days.", "#,0")
+        add_or_replace_measure(sites, "SharePoint active rate", "DIVIDE([Active SharePoint sites], [SharePoint sites])", "SharePoint sites active within 90 days divided by all reported SharePoint sites.", "0.0%")
+        add_or_replace_measure(sites, "SharePoint activity state rate", "DIVIDE([SharePoint sites], CALCULATE([SharePoint sites], REMOVEFILTERS('DimSharePointSite'[ActivityState])))", "Share of SharePoint sites by explicit 90-day activity state.", "0.0%")
+        add_or_replace_measure(sites, "SharePoint storage used GB", "DIVIDE(SUM('DimSharePointSite'[StorageUsedBytes]), 1073741824)", "Total reported SharePoint site storage in GiB.", "#,0.0")
+        add_or_replace_measure(sites, "SharePoint storage utilization", "DIVIDE(SUM('DimSharePointSite'[StorageUsedBytes]), SUM('DimSharePointSite'[StorageAllocatedBytes]))", "Reported SharePoint storage used divided by reported allocated storage.", "0.0%")
+    teams = by_name.get("DimTeam")
+    team_members = by_name.get("FactTeamMember")
+    if teams:
+        add_or_replace_measure(teams, "Teams", "DISTINCTCOUNT('DimTeam'[TenantTeamKey])", "Distinct Microsoft 365 groups provisioned as Teams.", "#,0")
+        add_or_replace_measure(teams, "Active Teams", "CALCULATE([Teams], KEEPFILTERS('DimTeam'[ActivityState] = \"Active (90d)\"))", "Teams with activity reported within 90 days.", "#,0")
+        add_or_replace_measure(teams, "Teams active rate", "DIVIDE([Active Teams], [Teams])", "Teams active within 90 days divided by all Teams.", "0.0%")
+        add_or_replace_measure(teams, "Teams activity state rate", "DIVIDE([Teams], CALCULATE([Teams], REMOVEFILTERS('DimTeam'[ActivityState])))", "Share of Teams by explicit 90-day activity state.", "0.0%")
+        add_or_replace_measure(teams, "Average members per Team", "CALCULATE(AVERAGE('DimTeam'[MemberCount]), KEEPFILTERS('DimTeam'[MembershipCoverageStatus] = \"Complete\"))", "Average exact enumerated group-member count across Teams with complete membership coverage. Partial Teams are excluded.", "#,0.0")
+        add_or_replace_measure(teams, "Teams with partial membership coverage", "CALCULATE([Teams], KEEPFILTERS('DimTeam'[MembershipCoverageStatus] = \"Partial\"))", "Teams for which Graph returned one or more member objects without an immutable identifier; exact links are preserved but the member total is incomplete.", "#,0")
+        add_or_replace_measure(teams, "Teams without owner", "CALCULATE([Teams], KEEPFILTERS('DimTeam'[OwnerCount] = 0))", "Teams whose exact owner enumeration returned no owner.", "#,0")
+    if team_members:
+        add_or_replace_measure(team_members, "Team memberships", "COUNTROWS('FactTeamMember')", "Exact group membership edges for Teams.", "#,0")
+        add_or_replace_measure(team_members, "Teams with guests", "CALCULATE(DISTINCTCOUNT('FactTeamMember'[TenantTeamKey]), KEEPFILTERS('FactTeamMember'[UserType] = \"Guest\"))", "Teams containing at least one exact guest membership.", "#,0")
+        add_or_replace_measure(team_members, "Team membership role rate", "DIVIDE([Team memberships], CALCULATE([Team memberships], REMOVEFILTERS('FactTeamMember'[Role])))", "Share of exact Team membership edges by owner/member role.", "0.0%")
+
+    relationship_overview = by_name.get("FactRelationshipOverview")
+    if relationship_overview:
+        add_or_replace_measure(relationship_overview, "Relationship edges", "SUM('FactRelationshipOverview'[RelationshipCount])", "Exact observed relationship edges by supported source type.", "#,0")
+        add_or_replace_measure(relationship_overview, "Relationship type rate", "DIVIDE([Relationship edges], CALCULATE([Relationship edges], REMOVEFILTERS('FactRelationshipOverview'[RelationshipType])))", "Share of exact observed edges by relationship type.", "0.0%")
 
     hosting = by_name["FactMailboxHosting"]
     add_or_replace_measure(hosting, "Mailbox hosting rate", "DIVIDE([Hosted mailboxes], CALCULATE([Hosted mailboxes], REMOVEFILTERS('FactMailboxHosting'[HostingLocation])))", "Share of each mailbox-hosting location within the filtered reconciled mailbox population.", "0.0%")
@@ -937,7 +1098,11 @@ def add_operational_measures(tables):
         add_or_replace_measure(top_apps, "Top application occurrence rate", "DIVIDE([Top application occurrences], CALCULATE([Top application occurrences], REMOVEFILTERS('TopApplication'[ApplicationProduct])))", "Share within the five highest-volume normalized application products; source-reported occurrences are not distinct devices.", "0.0%")
     user_device = by_name.get("FactUserDeviceRelationship")
     if user_device:
-        add_or_replace_measure(user_device, "Relationship type rate", "DIVIDE([User-device links], CALCULATE([User-device links], REMOVEFILTERS('FactUserDeviceRelationship'[RelationshipType])))", "Share of each observed user-device relationship type.", "0.0%")
+        user_device["measures"][:] = [
+            measure for measure in user_device.get("measures", [])
+            if measure.get("name") != "Relationship type rate"
+        ]
+        add_or_replace_measure(user_device, "User-device relationship type rate", "DIVIDE([User-device links], CALCULATE([User-device links], REMOVEFILTERS('FactUserDeviceRelationship'[RelationshipType])))", "Share of each observed user-device relationship type.", "0.0%")
     findings = by_name.get("EntityFinding")
     if findings:
         add_or_replace_measure(findings, "Finding records", "COUNTROWS('EntityFinding')", "Finding evidence records in the current entity and filter context.", "#,0")
@@ -1206,6 +1371,101 @@ def enrich_semantic_model(
     add_or_replace_measure(hosting_table, "Other mailbox type share", "DIVIDE([Other mailbox types], [Hosted mailboxes])", "Other mailbox types divided by all reconciled mailboxes.", "0.0%")
     add_or_replace_measure(hosting_table, "Mailbox type share", "DIVIDE([Hosted mailboxes], CALCULATE([Hosted mailboxes], REMOVEFILTERS('FactMailboxHosting'[MailboxTypeGroup])))", "Share of the current mailbox-type category within the filtered reconciled mailbox population.", "0.0%")
 
+    optional_tables = [
+        ("FactDeviceApplication", FACT_DEVICE_APPLICATION_COLUMNS, {"SourceCollectedDateTime": ("dateTime", "type datetime")}),
+        ("FactADIntuneCoverage", FACT_AD_INTUNE_COVERAGE_COLUMNS, {"Enabled": ("boolean", "type logical"), "SourceCollectedDateTime": ("dateTime", "type datetime")}),
+        ("DimSharePointSite", DIM_SHAREPOINT_SITE_COLUMNS, {"LastActivityDate": ("dateTime", "type datetime"), "StorageUsedBytes": ("int64", "Int64.Type"), "StorageAllocatedBytes": ("int64", "Int64.Type"), "IsDeleted": ("boolean", "type logical"), "SourceCollectedDateTime": ("dateTime", "type datetime")}),
+        ("DimTeam", DIM_TEAM_COLUMNS, {"CreatedDateTime": ("dateTime", "type datetime"), "LastActivityDate": ("dateTime", "type datetime"), "OwnerCount": ("int64", "Int64.Type"), "MemberCount": ("int64", "Int64.Type"), "GuestCount": ("int64", "Int64.Type"), "UnresolvedMemberCount": ("int64", "Int64.Type"), "IsArchived": ("boolean", "type logical"), "SourceCollectedDateTime": ("dateTime", "type datetime")}),
+        ("FactTeamMember", FACT_TEAM_MEMBER_COLUMNS, {"SourceCollectedDateTime": ("dateTime", "type datetime")}),
+        ("FactUserActivity", FACT_USER_ACTIVITY_COLUMNS, {"ReportRefreshDate": ("dateTime", "type datetime"), "ExchangeLastActivityDate": ("dateTime", "type datetime"), "OneDriveLastActivityDate": ("dateTime", "type datetime"), "SharePointLastActivityDate": ("dateTime", "type datetime"), "TeamsLastActivityDate": ("dateTime", "type datetime"), "LastActivityDate": ("dateTime", "type datetime"), "HasAnyM365Activity": ("boolean", "type logical"), "SourceCollectedDateTime": ("dateTime", "type datetime")}),
+    ]
+    for table_name, columns, overrides in optional_tables:
+        source_path = data_dir / f"{table_name}.csv"
+        if not source_path.is_file():
+            # A header-only private source keeps the PBIR refreshable before the
+            # first run of a newly introduced collector. Blank means not
+            # collected; no metric is inferred from another grain.
+            write_csv(source_path, columns, [])
+        imported = import_table(table_name, source_path, columns, True, type_overrides=overrides)
+        tables[:] = [table for table in tables if table.get("name") != table_name]
+        tables.append(imported)
+
+    detected_application_path = data_dir / "DimDetectedApplication.csv"
+    existing_detected_application = next(
+        (table for table in tables if table.get("name") == "DimDetectedApplication"),
+        None,
+    )
+    detected_application_table = import_table(
+        "DimDetectedApplication",
+        detected_application_path,
+        DIM_DETECTED_APPLICATION_COLUMNS,
+        False,
+        type_overrides={
+            "DeviceCount": ("int64", "Int64.Type"),
+            "ReportedDeviceCount": ("int64", "Int64.Type"),
+            "ExactRelatedDeviceCount": ("int64", "Int64.Type"),
+            "SourceCollectedDateTime": ("dateTime", "type datetime"),
+        },
+    )
+    if existing_detected_application:
+        detected_application_table["measures"] = existing_detected_application.get("measures", [])
+    tables[:] = [
+        table for table in tables
+        if table.get("name") != "DimDetectedApplication"
+    ]
+    tables.append(detected_application_table)
+
+    _, device_source_rows = read_csv(data_dir / "DeviceSource.csv")
+    intune_device_bridge_rows = build_intune_device_bridge(device_source_rows, identity)
+    intune_device_bridge_path = data_dir / "DimIntuneManagedDevice.csv"
+    write_csv(
+        intune_device_bridge_path,
+        INTUNE_DEVICE_BRIDGE_COLUMNS,
+        intune_device_bridge_rows,
+    )
+    intune_device_bridge_table = import_table(
+        "DimIntuneManagedDevice",
+        intune_device_bridge_path,
+        INTUNE_DEVICE_BRIDGE_COLUMNS,
+        True,
+    )
+    tables[:] = [
+        table for table in tables
+        if table.get("name") != "DimIntuneManagedDevice"
+    ]
+    tables.append(intune_device_bridge_table)
+
+    relationship_sources = [
+        ("PrimaryUser", "FactUserDeviceRelationship.csv", "Exact curated user-device links", lambda row: True),
+        ("HasMailbox", "FactMailbox.csv", "Exact curated user-mailbox links", lambda row: bool((row.get("CmdbUserId") or "").strip())),
+        ("AssignedLicense", "FactUserLicense.csv", "Exact curated user-SKU assignments", lambda row: True),
+        ("MemberOfGroup", "FactTeamMember.csv", "Exact Microsoft Teams membership enumeration", lambda row: True),
+        ("DeviceHasApplication", "FactDeviceApplication.csv", "Exact Intune detected-app to managed-device links", lambda row: True),
+        ("DeviceInAutopilot", "FactAutopilotDevice.csv", "Exact Intune managed-device to Autopilot links", lambda row: bool((row.get("ManagedDeviceId") or "").strip())),
+    ]
+    relationship_rows = []
+    for relationship_type, file_name, evidence, predicate in relationship_sources:
+        source_path = data_dir / file_name
+        count = 0
+        if source_path.is_file():
+            count = count_csv_rows(source_path, predicate)
+        relationship_rows.append({
+            "RelationshipType": relationship_type,
+            "RelationshipCount": count,
+            "EvidenceSource": evidence,
+        })
+    relationship_overview_path = data_dir / "FactRelationshipOverview.csv"
+    write_csv(relationship_overview_path, RELATIONSHIP_OVERVIEW_COLUMNS, relationship_rows)
+    relationship_overview_table = import_table(
+        "FactRelationshipOverview",
+        relationship_overview_path,
+        RELATIONSHIP_OVERVIEW_COLUMNS,
+        False,
+        type_overrides={"RelationshipCount": ("int64", "Int64.Type")},
+    )
+    tables[:] = [table for table in tables if table.get("name") != "FactRelationshipOverview"]
+    tables.append(relationship_overview_table)
+
     country_table = import_table("DimCountry", country_path, ["CountryLabel"], False)
     add_or_replace_calculated_column(
         country_table,
@@ -1267,7 +1527,7 @@ def enrich_semantic_model(
     relationships = model.setdefault("relationships", [])
     relationships[:] = [
         relationship for relationship in relationships
-        if relationship.get("name") not in {"cmdb-executive-country-user", "cmdb-executive-country-mailbox"}
+        if relationship.get("name") not in {"cmdb-executive-country-user", "cmdb-executive-country-mailbox", "cmdb-app-device", "cmdb-app-device-parent", "cmdb-app-product", "cmdb-user-activity", "cmdb-team-member-team", "cmdb-team-member-user"}
     ]
     relationships.extend([
         {
@@ -1293,6 +1553,18 @@ def enrich_semantic_model(
             "isActive": True,
         },
     ])
+    table_names = {table.get("name") for table in tables}
+    if {"FactDeviceApplication", "DimIntuneManagedDevice", "DimDevice", "DimDetectedApplication"}.issubset(table_names):
+        relationships.extend([
+            {"name":"cmdb-app-device","fromTable":"FactDeviceApplication","fromColumn":"Tenant Intune device key","toTable":"DimIntuneManagedDevice","toColumn":"TenantIntuneDeviceKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True},
+            {"name":"cmdb-app-device-parent","fromTable":"DimIntuneManagedDevice","fromColumn":"TenantDeviceKey","toTable":"DimDevice","toColumn":"TenantDeviceKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True},
+            {"name":"cmdb-app-product","fromTable":"FactDeviceApplication","fromColumn":"TenantApplicationKey","toTable":"DimDetectedApplication","toColumn":"TenantApplicationKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True},
+        ])
+    if "FactUserActivity" in table_names:
+        relationships.append({"name":"cmdb-user-activity","fromTable":"FactUserActivity","fromColumn":"TenantUserKey","toTable":"DimUser","toColumn":"TenantUserKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True})
+    if {"FactTeamMember", "DimTeam"}.issubset(table_names):
+        relationships.append({"name":"cmdb-team-member-team","fromTable":"FactTeamMember","fromColumn":"TenantTeamKey","toTable":"DimTeam","toColumn":"TenantTeamKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True})
+        relationships.append({"name":"cmdb-team-member-user","fromTable":"FactTeamMember","fromColumn":"TenantUserKey","toTable":"DimUser","toColumn":"TenantUserKey","fromCardinality":"many","toCardinality":"one","crossFilteringBehavior":"oneDirection","isActive":True})
     write(model_path, model_json)
     return metadata
 
@@ -1305,7 +1577,14 @@ def set_card(visual, table, measure, title, precision=None):
     }
     set_title(visual, title)
     props = visual["visual"]["objects"]["value"][0]["properties"]
-    props["labelPrecision"] = lit(1 if precision is None and ("share" in measure.lower() or "rate" in measure.lower() or "coverage" in measure.lower()) else (precision or 0))
+    props["labelDisplayUnits"] = lit(1)
+    is_ratio = any(
+        re.search(rf"\b{word}\b", measure, flags=re.IGNORECASE)
+        for word in ("share", "rate", "coverage")
+    )
+    props["labelPrecision"] = lit(
+        1 if precision is None and is_ratio else (precision or 0)
+    )
     props["showBlankAs"] = lit("No value")
 
 
@@ -1686,7 +1965,7 @@ def build_lifecycle(pages):
     add_slicer(pages, visuals, "lifecycle", "DimDevice", "ManagementStateLabel", "Management", 1088, y=14, w=168, h=80)
     for index, item in enumerate([
         ("DimDevice", "Devices", "Observed devices"),
-        ("DimDevice", "Managed device share", "Managed device rate"),
+        ("FactADIntuneCoverage", "AD to Intune coverage rate", "AD → Intune coverage"),
         ("FactAutopilotDevice", "Selected Autopilot devices", "Autopilot · exact matches"),
         ("FactEndpointAnalyticsDevice", "Selected Endpoint Analytics score", "Endpoint Analytics score"),
     ]):
@@ -1792,9 +2071,9 @@ def build_licensing(pages):
         candidates, "DimUser", "License review band",
         [
             "Priority · disabled account",
-            "Priority · no successful sign-in observed",
-            "Priority · sign-in over 90 days",
-            "Watch · sign-in 31–90 days",
+            "Priority · no M365 activity in D180",
+            "Priority · workload over 90 days",
+            "Watch · workload 31–90 days",
         ],
         "review",
     )
@@ -1804,21 +2083,22 @@ def build_licensing(pages):
 def build_business_services(pages):
     page, visuals = new_page(
         pages, "businessservices", "Services & Impact",
-        "Trace the relationships the current CMDB can prove while keeping business-service ownership and criticality explicitly unavailable.",
+        "Trace exact collaboration, application, device and licensing evidence. Business-service ownership and criticality remain explicitly unavailable.",
     )
     compact_page_header(visuals, 712)
     add_slicer(pages, visuals, "businessservices", "DimUser", "CountryLabel", "Country", 752, y=14, w=160, h=80)
-    add_slicer(pages, visuals, "businessservices", "FactUserDeviceRelationship", "RelationshipType", "Relationship type", 920, y=14, w=160, h=80)
+    add_slicer(pages, visuals, "businessservices", "FactRelationshipOverview", "RelationshipType", "Relationship type", 920, y=14, w=160, h=80)
     add_slicer(pages, visuals, "businessservices", "LicenseAssignmentPath", "AssignmentRoute", "Assignment route", 1088, y=14, w=168, h=80)
     for index, item in enumerate([
-        ("FactUserDeviceRelationship", "User-device links", "Resolved user / device links"),
-        ("LicenseAssignmentPath", "Assignment paths", "Observed license paths"),
-        ("FactUserDeviceRelationship", "Device user-link coverage", "Device / user link coverage"),
-        ("SourceHealth", "Source collection coverage", "Source collection coverage"),
+        ("DimSharePointSite", "SharePoint sites", "SharePoint sites"),
+        ("DimTeam", "Teams", "Teams"),
+        ("FactRelationshipOverview", "Relationship edges", "Exact relationships"),
+        ("DimTeam", "Average members per Team", "Avg members / Team"),
     ]):
         add_card(pages, visuals, "businessservices", *item, 24 + index * 312, 136, h=88)
-    add_ratio_bar(pages, visuals, "businessservices", "FactUserDeviceRelationship", "RelationshipType", "FactUserDeviceRelationship", "Relationship type rate", "User-device links", "Primary-user relationships", 24, 240, w=608, h=184)
-    add_ratio_bar(pages, visuals, "businessservices", "LicenseAssignmentPath", "AssignmentRoute", "LicenseAssignmentPath", "Assignment route rate", "Assignment paths", "License assignment paths", 648, 240, w=608, h=184)
+    add_ratio_bar(pages, visuals, "businessservices", "DimSharePointSite", "ActivityState", "DimSharePointSite", "SharePoint activity state rate", "SharePoint sites", "SharePoint activity — site count and rate", 24, 240, w=400, h=184)
+    add_ratio_bar(pages, visuals, "businessservices", "DimTeam", "ActivityState", "DimTeam", "Teams activity state rate", "Teams", "Teams activity — Team count and rate", 440, 240, w=400, h=184)
+    add_ratio_bar(pages, visuals, "businessservices", "FactRelationshipOverview", "RelationshipType", "FactRelationshipOverview", "Relationship type rate", "Relationship edges", "Exact relationship types", 856, 240, w=400, h=184)
     add_table(
         pages, visuals, "businessservices",
         [
@@ -1828,11 +2108,11 @@ def build_business_services(pages):
             ("LicenseAssignmentPath", "GroupName", "Group", False),
             ("LicenseAssignmentPath", "ErrorStatus", "Error status", False),
         ],
-        "Observed AssignedLicense paths — PrimaryUser and HasMailbox remain available in their focused pages", 24, 440, 1232, 320,
+        "Observed license paths — exact collaboration and application edges are summarized above", 24, 440, 1232, 320,
     )
     add_text(
         pages, visuals, "businessservices",
-        "Current proven relationship families: PrimaryUser, HasMailbox and AssignedLicense. MemberOfGroup, DeviceHasApplication and DeviceInAutopilot require explicit source edges before they can be added without inference.",
+        "Exact modeled edges now include PrimaryUser, HasMailbox, AssignedLicense, Teams MemberOfGroup, DeviceHasApplication and DeviceInAutopilot. SharePoint member counts are deliberately not inferred from site-usage reports.",
         24, 776, 1232, 68,
     )
     return page, visuals
@@ -1841,7 +2121,7 @@ def build_business_services(pages):
 def build_fleet_hardware(pages):
     page, visuals = new_page(
         pages, "devices", "Fleet, Hardware & Apps",
-        "Explore reconciled devices, hardware and source-reported applications. Application occurrences are global aggregates, not distinct devices, because no device-application edge is collected.",
+        "Explore reconciled devices, hardware and exact Intune device-application relations. Product counts collapse versions only for presentation; every source version remains available in detail.",
     )
     compact_page_header(visuals, 560)
     add_slicer(pages, visuals, "devices", "DimDevice", "CountryLabel", "Country", 600, y=14, w=152, h=80)
@@ -1858,12 +2138,16 @@ def build_fleet_hardware(pages):
         ("DimDevice", "Devices", "Workplace devices"),
         ("DimDevice", "Compliant device share", "Device compliance rate"),
         ("DeviceHardware", "Hardware coverage rate", "Hardware coverage"),
-        ("DimDetectedApplication", "Application products", "Application products"),
+        ("FactDeviceApplication", "Installed application products", "Application products"),
     ]):
         add_card(pages, visuals, "devices", *item, 24 + index * 312, 136, h=88)
     add_ratio_bar(pages, visuals, "devices", "DimDevice", "ComplianceStateLabel", "DimDevice", "Compliance state rate", "Devices", "Compliance — rate and device count", 24, 240, w=400, h=184)
     add_ratio_bar(pages, visuals, "devices", "DeviceHardware", "Manufacturer", "DeviceHardware", "Manufacturer record rate", "Hardware records", "Hardware records by manufacturer", 440, 240, w=400, h=184)
-    add_ratio_bar(pages, visuals, "devices", "TopApplication", "ApplicationProduct", "TopApplication", "Top application occurrence rate", "Top application occurrences", "Top 5 apps — global occurrences", 856, 240, w=400, h=184)
+    add_ratio_bar(
+        pages, visuals, "devices", "TopApplication", "ApplicationProduct",
+        "TopApplication", "Top application occurrence rate", "Top application occurrences",
+        "Top 5 apps — global collected occurrences", 856, 240, w=400, h=184,
+    )
     add_table(
         pages, visuals, "devices",
         FLEET_TABLE_FIELDS,
@@ -1876,9 +2160,10 @@ def build_fleet_hardware(pages):
             ("DimDetectedApplication", "Version", "Version", False),
             ("DimDetectedApplication", "Publisher", "Publisher", False),
             ("DimDetectedApplication", "Platform", "Platform", False),
-            ("DimDetectedApplication", "DeviceCount", "Reported occurrences", False),
+            ("FactDeviceApplication", "Devices reporting applications", "Exact devices", True),
+            ("FactDeviceApplication", "Application device rate", "Device rate", True),
         ],
-        "Application detail — versions retained; counts are source-reported", 800, 440, 456, 404,
+        "Application detail — versions retained; device links are exact", 800, 440, 456, 404,
     )
     return page, visuals
 
@@ -1886,7 +2171,7 @@ def build_fleet_hardware(pages):
 def build_people_messaging(pages):
     page, visuals = new_page(
         pages, "users", "People & Messaging",
-        "Review accounts, sign-in-derived activity, observed assignments, device relationships and mailboxes together. Activity states use the collected sign-in timestamps.",
+        "Review accounts, exact M365 workload activity, observed assignments, device relationships and mailboxes together. Workload activity is evidence for license review, not proof of non-use.",
     )
     compact_page_header(visuals, 560)
     add_slicer(pages, visuals, "users", "DimUser", "CountryLabel", "Country", 600, y=14, w=152, h=80)
@@ -2305,7 +2590,7 @@ def update_overview(pages: Path, mailbox_metadata):
 
     kpis = [
         ("DimCountry", "Executive workplace devices", "Workplace devices"),
-        ("DimCountry", "Executive managed device share", "Managed rate"),
+        ("FactADIntuneCoverage", "AD to Intune coverage rate", "AD → Intune coverage"),
         ("DimCountry", "Executive compliant device share", "Compliance rate"),
         ("DimUser", "Users", "Users"),
         ("FactMailboxHosting", "Hosted mailboxes", "Mailboxes"),

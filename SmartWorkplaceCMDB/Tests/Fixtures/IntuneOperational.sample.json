@@ -33,6 +33,11 @@
     {"id":"app-001","displayName":"Example Browser","version":"1.0","publisher":"Example Corp","deviceCount":12,"platform":"windows"},
     {"id":"app-002","displayName":"Example Agent","version":"2.5","publisher":"Example Corp","deviceCount":4,"platform":"windows"}
   ],
+  "detectedAppDeviceRelationships": [
+    {"appId":"app-001","managedDeviceId":"99999999-9999-9999-9999-999999999999"},
+    {"appId":"app-001","managedDeviceId":"88888888-8888-8888-8888-888888888888"},
+    {"appId":"app-002","managedDeviceId":"99999999-9999-9999-9999-999999999999"}
+  ],
   "configurationPolicies": [
     {
       "id":"policy-001","name":"Windows Baseline","description":"Synthetic policy",
