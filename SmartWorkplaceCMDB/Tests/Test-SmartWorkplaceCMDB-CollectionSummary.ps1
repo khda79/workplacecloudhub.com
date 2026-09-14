@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.3.3
+1.3.4
 #>
 [CmdletBinding()]
 param()
@@ -137,6 +137,10 @@ try {
         Assert-SummaryTrue ($result.BodyHtml -match 'Current<br>\d{4}-\d{2}-\d{2}' -and
             $result.BodyHtml -match 'Since previous<br>\d{4}-\d{2}-\d{2}' -and
             $result.BodyHtml -match 'linear-gradient' -and
+            $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
+            $result.BodyHtml -match 'data:image/png;base64,' -and
+            $result.BodyHtml -match 'alt="WorkplaceCloudHub"' -and
+            $result.BodyHtml -match 'https://workplacecloudhub.com/' -and
             $result.BodyHtml -match 'Membership coverage' -and
             $result.BodyHtml -match 'partial Teams are counted separately') `
             'The dated Smart Inventory visual pattern or source caveat is missing.'
@@ -203,8 +207,10 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.3.3' -and
+            $result.ScriptVersion -eq '1.3.4' -and
             $result.Subject -match 'mail transport test' -and
+            $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
+            $result.BodyHtml -match 'data:image/png;base64,' -and
             $historyBefore -eq $historyAfter -and
             $parseErrors.Count -eq 0 -and
             $null -ne $mailBodyFunction -and
@@ -219,6 +225,48 @@ try {
             $content -match 'Graph mail request failed') `
             'The isolated Graph SDK mail transport contract is incomplete.'
     }
+
+    Invoke-SummaryTest 'Prefer the configured client logo over the default brand' {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            $summaryPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+        $requiredFunctions = @(
+            'Get-SmartWorkplaceCMDBSummarySetting',
+            'ConvertTo-SmartWorkplaceCMDBSummaryHtml',
+            'Get-SmartWorkplaceCMDBSummaryMailLogo',
+            'Add-SmartWorkplaceCMDBSummaryMailBranding'
+        )
+        $definitions = foreach ($functionName in $requiredFunctions) {
+            $definition = $ast.Find({
+                    param($node)
+                    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq $functionName
+                }, $true)
+            if ($null -eq $definition) { throw "Missing function $functionName." }
+            $definition.Extent.Text
+        }
+        $clientLogoPath = Join-Path $projectRoot 'Assets\WorkplaceCloudHub-mail.png'
+        $branded = & {
+            param($logoPath, $functionDefinitions)
+            Invoke-Expression ($functionDefinitions -join "`n")
+            $configuration = [pscustomobject]@{
+                MailClientName = 'Contoso synthetic'
+                MailClientLogoPath = $logoPath
+                MailClientLogoMaxKB = 200
+            }
+            Add-SmartWorkplaceCMDBSummaryMailBranding `
+                '<html><body><p>Synthetic</p></body></html>' $configuration
+        } $clientLogoPath $definitions
+        Assert-SummaryTrue ($parseErrors.Count -eq 0 -and
+            $branded -match 'data:image/png;base64,' -and
+            $branded -match 'alt="Contoso synthetic"' -and
+            $branded -notmatch '<a href="https://workplacecloudhub.com/"') `
+            'The configured client logo did not take precedence over the default brand.'
+    }
 }
 finally {
     if ((Test-Path -LiteralPath $tempRoot) -and
@@ -228,14 +276,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.3; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.4; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrbN41i8xv9FyP
-# PRaKJrORVQ+NWisl0CoPssibxYrLCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCy5EXS5UH4uEOU
+# hl1+Kg5mdnb2y3FM6pMNktUyJ5xObqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -368,31 +416,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICF6sd59Pmv27YTMLFd6RCA0rGODpunT/WbWiyWFmzM/MA0GCSqG
-# SIb3DQEBAQUABIIBgKcOku8Mxq2ZbnbN53DX0FXALurTnGdJszecRS2iGw5F/q2Y
-# XFccoLcC4hxdTsz+QIiD3MyAkRV+VffdssDlnvuBDtV2LfZLHNau+zf8rAfRiad0
-# YPNDdTrGrjNJiAvE364dKE96muGIRxUJm3ZKlBK2xnLoNcVlVhJMKkduh09y4Ufw
-# jbhgqSRXWJjy7WWNLcsx14gt4wlg5/OYkofH3I7gSsl8dMUjQKX9dB+5lYQwAlr6
-# 48V1RlIEzBDbMqW4slRm6HZJheDwgt+wAqBUU/x2tyfSXY5nc/+OP1VdiBwml/n+
-# OR4RS3C+8jXazftjYqgc1vCJadQx6WTCAqxHDQI5rnbVfWdq9afiDKVhD7mzwk1A
-# nd+7UTM0GY9nwIHsSS+hU+Y8Vxkbed8w1mOpqIC+nhBcsq3LQR46Khe7qBGhHg+O
-# rpumnBhZ5S9AY/odXRn4CkH3jaHycbCuKsKyKdgAoU5pUyquyPDgksBWUJLAG8Vz
-# L0nfV0mlyKC5cA1fR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINRkex74PlfLsDWbY0TBun4p5pHKBoZuz4WgbVWfi6yZMA0GCSqG
+# SIb3DQEBAQUABIIBgGFc67V1XSksSovvWqvdilgFhIR0ADcFYIyG+KMor6EsRY1a
+# A3IMxj0jXIy8Ey7GuUu6EMSnMfcUfIlRiO9/Gdm6DB+3tTXE5p/zX3SqSmKwWP5y
+# EmuVV/bPMDK+qoAjocndxp+S2Sk35+CZAZ2xibhEZyeuXV44eRZwE3oqbWmXviep
+# 3ysDyTpLSFW6vR83zjDgHJ/0agC4BdAzn7S1rGZ9/c0wQHIR+LfexFRTUJ2ByJBR
+# mWJUlUKO912jgzMmoduKrDNljLgdm4lqDkZ1uvozgcpQevylF5WsPzmNv0oOauhi
+# iJkkK8rcIKl4n+6SfLqaSLXtWXFDmb02+yOHCHjQwBRE9CYPrmgITkH+wyDBinjQ
+# lc6ZoiBojyxCjUgaRYDeJx1JZOjNlQrXH8M+0Kz2vdyPIkV2m5Vhk7PmwpBkLNuv
+# E7yFreJKgcuWa1NrJomUPkn1OnPmsMKJ9LrI9X4aGqiWRH5e5AJVjWnYxFKAwbu0
+# U2lKu3qxqdm6TIgV46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
-# NThaMC8GCSqGSIb3DQEJBDEiBCByTM/36NjlE58SHrc2HIQk+98V16dRB3EY9dya
-# TZJ+yzANBgkqhkiG9w0BAQEFAASCAgBVxrAHIxeTCjcnk+6RZldmFtxU3MkaAU8s
-# /bL97p7xWb+a5Zv58wFh7/IkoOppoxRhwZGcxHpzgdzY/6KETLEkCPS/S9DvQEvv
-# vaTssrPsfvpHQIb230oMr/YFQOHatZ+YmBAp6cZlREsUgP4nXJGRLNRvMOe5dPDp
-# zz5S2OnMOlPfzKUGR7/Y4Y+3wrCBxl7HSUfkSlggqcHlzvXppIx2O98f7Km1RAd/
-# YEMGz3Wc9Jb0it3hvpl0zFBRKiCN9KTuUYK30zEwiGPyTkWNKNxUqWiEBLymtT37
-# WjgXk0zca/sKFbQJhXZO7sRRkq8Enwi3ZyRoOvTuryRSrjkhj76d9Z+co8hz/jen
-# th16RofOxZvr107o4U4TqTHQUJTtzPaslNnICdSUC69ieWQ3Nd2QjbB4/0n0zkbd
-# gd0bgTItSWspWgLcEik8i9CxomIMdoLaYLvfcQDfQlJaUI5I2pOCW9uw6v8f8kay
-# tGkT1CTF0A17XMjZP8o62TzpgjL9PgJdr/EU2DC1sdqyC5AySgbLXvbwuI8m6MiS
-# C44KbfITI3gsw6rY/tjVFagzEJvxBP8M+pkmu1kUZ3K2M4Vpj80zIFo36nJWVN3z
-# vsr/0cr3BrNxOvjeWgl9o4jTTq+bqrVO4m8Jlg5+DkFiXotY6gvfpQfR+W+XY0SR
-# GEkHqIQZUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNzA1
+# NThaMC8GCSqGSIb3DQEJBDEiBCCZD/AYyKS33LIaIxf4jGKw2WWAQDWBI3pZXw5I
+# rh4pvzANBgkqhkiG9w0BAQEFAASCAgCWJYTiXDXtcp8EWN2P5WnqTC4oNyX7nLIJ
+# JBvPh0VHlUexxNHdgTAilkSpCdrc9zO5TXQNxrV3IVfmB61hy0U8SzjZ8WrfZHRD
+# YpKJ2TZWSqzCvUAwhmtuWjUmmKm8PEDQbMT5w9M8VTUzjXzuiPtv6h1rVWm8rj2P
+# 9Kk7h76Nwni1dp/TlFk3tOZNDAFYB5CccniYaV81i+8e11aHEToWd4+b5dC6Z/gL
+# 44/3HPnpn5z4RTpmHDS852cpWIbn2D8ArP66C42SD2fb8329KtHLIuHN9BxfBfkz
+# JODxqvZ/BfsQDe2M6TW6PwrTVfaLj/9odPACPrCsYJaHL0ZK7ivlgklKbA4Myyb6
+# BHa7odAnLtT55/rVVzak//fotF/7UK/kiTSNEzKnxl40ao1O58TP4XodPqFq2iYn
+# iMxbNgK0s/qh7I1rmZRH62z21HuKENzOyUnRYfoFMxImK7RBrknepCOmO/E5Du4P
+# 2nF+IMVJLKC8wTDnYMZmQxBu2mmx+lRRk6LOrVvL1hMPAwl5Kwyu1AaTDp/D2bjp
+# /Y3OS6bL2LERjLfQ9CF6o9kz3c9Auvhl+ylibOYVpftOfOAhrgLJLyVFcP5L+Jz7
+# mHmdw+BMup9w6vpruJKn0UfCb+/SvX29/e3IlZIhWsxWnxdgJLtiFomMofEpS+Y4
+# hzhCJDWdUA==
 # SIG # End signature block

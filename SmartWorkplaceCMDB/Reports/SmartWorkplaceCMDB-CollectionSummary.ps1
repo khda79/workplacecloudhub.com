@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.3.3
+1.3.4
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +37,7 @@ param(
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.3.3'
+$ScriptVersion = '1.3.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -55,6 +55,105 @@ function Get-SmartWorkplaceCMDBSummarySetting {
 function ConvertTo-SmartWorkplaceCMDBSummaryHtml {
     param([AllowNull()]$Value)
     return [Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function Get-SmartWorkplaceCMDBSummaryMailLogo {
+    param($NotificationConfiguration)
+
+    $productRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        ''
+    }
+    else {
+        Split-Path -Parent $PSScriptRoot
+    }
+    $configuredPath = [string](Get-SmartWorkplaceCMDBSummarySetting `
+        $NotificationConfiguration 'MailClientLogoPath' '')
+    if ($configuredPath -in @('__USE_GLOBAL__','USE_GLOBAL')) { $configuredPath = '' }
+    $configuredPath = [Environment]::ExpandEnvironmentVariables($configuredPath.Trim())
+    if (-not [string]::IsNullOrWhiteSpace($configuredPath) -and
+        -not [IO.Path]::IsPathRooted($configuredPath)) {
+        $configuredPath = Join-Path $productRoot $configuredPath
+    }
+
+    $maxLogoKB = 200
+    $configuredMaximum = Get-SmartWorkplaceCMDBSummarySetting `
+        $NotificationConfiguration 'MailClientLogoMaxKB' 200
+    [void][int]::TryParse([string]$configuredMaximum, [ref]$maxLogoKB)
+    if ($maxLogoKB -lt 1) { $maxLogoKB = 200 }
+
+    $clientName = [string](Get-SmartWorkplaceCMDBSummarySetting `
+        $NotificationConfiguration 'MailClientName' 'Client')
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($configuredPath)) {
+        $candidates += [pscustomobject]@{
+            Path = $configuredPath
+            Alt = $clientName
+            IsDefault = $false
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($productRoot)) {
+        $candidates += [pscustomobject]@{
+            Path = Join-Path $productRoot 'Assets\WorkplaceCloudHub-mail.png'
+            Alt = 'WorkplaceCloudHub'
+            IsDefault = $true
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate.Path -PathType Leaf)) { continue }
+        $item = Get-Item -LiteralPath $candidate.Path -ErrorAction Stop
+        if ($item.Length -gt ([int64]$maxLogoKB * 1KB)) { continue }
+        $extension = [IO.Path]::GetExtension($item.FullName).ToLowerInvariant()
+        $mediaType = switch ($extension) {
+            '.png'  { 'image/png' }
+            '.jpg'  { 'image/jpeg' }
+            '.jpeg' { 'image/jpeg' }
+            '.gif'  { 'image/gif' }
+            default { '' }
+        }
+        if ([string]::IsNullOrWhiteSpace($mediaType)) { continue }
+        return [pscustomobject]@{
+            Path = $item.FullName
+            Alt = $candidate.Alt
+            IsDefault = $candidate.IsDefault
+            MediaType = $mediaType
+        }
+    }
+    return $null
+}
+
+function Add-SmartWorkplaceCMDBSummaryMailBranding {
+    param(
+        [AllowNull()][string]$BodyHtml,
+        $NotificationConfiguration
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+    if ($BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1') { return $BodyHtml }
+    $logo = Get-SmartWorkplaceCMDBSummaryMailLogo $NotificationConfiguration
+    if ($null -eq $logo) {
+        return $BodyHtml -replace '(?is)(<body\b[^>]*>)', '$1<!-- SmartWorkplaceCMDBMailBranding:v1 -->'
+    }
+
+    $dataUri = 'data:{0};base64,{1}' -f $logo.MediaType,
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($logo.Path))
+    $safeDataUri = ConvertTo-SmartWorkplaceCMDBSummaryHtml $dataUri
+    $safeAlt = ConvertTo-SmartWorkplaceCMDBSummaryHtml $logo.Alt
+    $imageHtml = '<img src="{0}" alt="{1}" width="104" style="display:block;margin:0 auto;width:104px;max-width:104px;height:auto;border:0;outline:none;text-decoration:none;" />' -f `
+        $safeDataUri,$safeAlt
+    if ($logo.IsDefault) {
+        $imageHtml = '<a href="https://workplacecloudhub.com/" style="display:inline-block;text-decoration:none;">{0}</a>' -f $imageHtml
+    }
+    $brandingHtml = @"
+<!-- SmartWorkplaceCMDBMailBranding:v1 -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef3f8;border-collapse:collapse;">
+  <tr><td align="center" style="padding:12px 24px 10px 24px;text-align:center;">$imageHtml</td></tr>
+</table>
+"@
+    if ($BodyHtml -match '(?is)<body\b[^>]*>') {
+        return [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $brandingHtml), 1)
+    }
+    return ($brandingHtml + "`n" + $BodyHtml)
 }
 
 function ConvertTo-SmartWorkplaceCMDBSummaryInt64 {
@@ -559,6 +658,7 @@ if ($SendMailTestOnly) {
 <p>Script version: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $ScriptVersion)</p>
 </body></html>
 "@
+    $html = Add-SmartWorkplaceCMDBSummaryMailBranding $html $notifications
     if ($ValidateOnly) {
         [pscustomobject]@{
             Status='Validated';ScriptVersion=$ScriptVersion;Subject=$subject
@@ -617,6 +717,7 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f4f7fb;color:#172033;padd
 <div class="label">Transcript</div><div class="value">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $FailureTranscriptPath)</div>
 </div></div></body></html>
 "@
+    $html = Add-SmartWorkplaceCMDBSummaryMailBranding $html $notifications
     if ($ValidateOnly) {
         [pscustomobject]@{Status='Validated';Subject=$subject;BodyHtml=$html;HtmlPath=''}
         return
@@ -672,6 +773,7 @@ $cutoff30 = $SnapshotDateTime.AddDays(-30)
 $day7 = @($history | Where-Object {[datetimeoffset]::Parse([string]$_.SnapshotDateTime) -le $cutoff7} | Select-Object -Last 1)[0]
 $day30 = @($history | Where-Object {[datetimeoffset]::Parse([string]$_.SnapshotDateTime) -le $cutoff30} | Select-Object -Last 1)[0]
 $html = New-SmartWorkplaceCMDBSummaryHtml $current $previous $day7 $day30 $notifications
+$html = Add-SmartWorkplaceCMDBSummaryMailBranding $html $notifications
 $subjectPrefix = [string](Get-SmartWorkplaceCMDBSummarySetting $notifications 'Subject' 'Smart Workplace CMDB')
 $subject = '{0} - full collection summary - {1}' -f $subjectPrefix,$SnapshotDateTime.ToString('yyyy-MM-dd')
 
@@ -733,8 +835,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUfs7N3rtZfRop
-# yiVcDYuH2vA+YYP2OCoKKA22jixPR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2FWo8Ovzok1xW
+# pJuBJtqGFxFOeRKySLwnE34eJqk9qaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -867,31 +969,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILZ3S7YBaGqy0A8qU1nFlpfVYitQbSPfkFm3MLAkJ0IRMA0GCSqG
-# SIb3DQEBAQUABIIBgHtIY3YkESb4sqrefVrFPGb42V0BuTbDDJCddzy49aToU0Ez
-# TUoPCE27c9P+ge/QLx+4Exv4BioGohfgFNRI3I/1f827TOX+vH6mOU44jS4ywRWx
-# Kg+XGhobXoGePS2Fmk21UoQNiwX8Tt+beA/vmvTLE6DPQGuMW2Q3SaWUx4uzGOgq
-# P5/szvdaLlkTp+o+UNk5u2J2auBVrWelEQTcXbtRuFyGevXnrTnNJR2YdOkqYkyB
-# 6YOFz8Ig0DR1H8X+GqcveSIkrRZlYoY9KR5zXtt1u+zFyLiePXqeYI6wUP8K+soC
-# 57JdUOff4jNNPockFtLv8eVXvxKvrx0Ihx3KPYY+G7SBw9DnzQOo769spAQ4UlPL
-# OvXJNNW22SqOxp6D2xaDn3E2d5WFsxm+2nFzNJL2maPnclOvC4wN6siNyM/fHO+P
-# 3R9aBcsZnD6tWhgABFlfXXseQ6qhi/7Oe9CLhrMo92fUMn8cUxmK7aB18uQfApSw
-# kla771YWDxjSTbCaYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAlVNgNOUac0P0OFYre6Ayh7rpb+RefJ9eI1ID+pPmIWMA0GCSqG
+# SIb3DQEBAQUABIIBgCfl71sqXgdanBzfc18XXURlA+WKAkPHcDHfEbadJ4ERkn9i
+# DoADk7RMETBzNoR94zbqMDDIfQT2XPcQRiZHD0EESyIJlNnXYQcT0U+k+tFg24ih
+# yYZREBEMMmmD1+n1FfODNSOhN8ge6pbL8BfN1xXhrpGMajkrnCWJQxjIoxlN8FSN
+# ghlqLVMHj1cwl8ShpMwwl7b6g2XV41zlcoR9rslrSzFNdfhcsR1aklTaM2GQOEu6
+# EZMmrpcv2S7jcC1wnrcIEeaIIibEDkxb3zcd7qGRKESpjzwlM6jn2vbkjS5YO/6a
+# B2PeeUdeRHS7Bp20xLsNMO4UHMBvM5xMZJHlq6zVJFWafXEIxc2hMTELntx4UWM6
+# 4n8Hry1uQS1BwP2v9uGmH4fetySCLPj/P9ihNsnbLv1yp+yheMTK8o19I9O3juM5
+# ZnYFH8ie+YEqedAQzzdkgjl9/rG3WkSo5FVJwTNACjQZOarJ+pPD6eT60l2YFezd
+# DoW25HkJugP/dWf0vqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
-# NTdaMC8GCSqGSIb3DQEJBDEiBCAwZLG2wodoX0DwUc8Ua7P4d+5dHpMKM8dD8BEf
-# o8Bj2zANBgkqhkiG9w0BAQEFAASCAgB5O8HC9j2rcBb0P+MapCBRusajEgTQM6Q8
-# QxYwLmv/L/wKvd0JF1Blhrilk1ARGy7nlXIj3uxcoroua3sNeVl8q2TFThDxsZ4t
-# ctFAD+yWPWN1rl4UFUB+AwH41W0ILJAlLxrpfY4X1KDZ50NOKfCEeJi/Hafs9OVk
-# mEmu6DKfs3rvv1KuJiP5Ue9AQ97WL97odwQDM3dQEUt2jwonUFNtuVWC3VzfUZa/
-# lzrL2E/j+iBW14bWOkCRTww61PlNuFFMPkFHAuu2+jCkj9ZaUTxmKzCcLRmqXR1F
-# vsW79IOo/DSh95iQZShB5zcBcZ+wrH5XXfX3BZVVpS5IEEOQYoKXJFtbwHDbUa/5
-# aDcUo5tFCR1KRZMPVBSFatDRzDlTWVGbYOq74xv3MvqCUiih5D3wf2n6Ffx9o5OC
-# 8NVUDubAWMkEf1SBx8sxZTqjm0beiaMO8DlbQO9xPVzriFgx6EpMkbbvHrPDL3x2
-# 3FRhnMXWt6stJYmvbP6v7PUANPYgKiZQhoW/cHp47pVYcPdoM3T1dvPfw5/cH+i4
-# RHl8y8YGEizHYC4QVMqF8XKhc2tV6tPQ2ssSiew+rR5u49ORCdYNUWs8/rWG2K4S
-# Kab+wZ2VqCz0s5DG52tpjScZOjNWxuFTGRURlgdcUqGTu6XNzNDoRBdJKQNgQkvn
-# jLgalS0Gjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNzA1
+# NThaMC8GCSqGSIb3DQEJBDEiBCD710bMlIQMJPZYk02kjgwS7S7Vo0c5kdYrAZl2
+# JkCCAzANBgkqhkiG9w0BAQEFAASCAgAO2a2EShMop22SrWicrON67WsTjfoqnQaH
+# igIPBJwKbg9iODjjZnao/nsePQ80R1yY6/n9mC0hOXOoZqR2Ija3goz+VCwkD8KW
+# /Bfu2nignq+Lh+Gkbd6DfgfnCqZGCKIAikDYUZftRVdcxChgSJZCAGJqO2znn8QF
+# 5xi8EX9JC1XN3UKbOD95SM0Zk4jkDHRvxr3WpTmpQ4GuXPCtuCUyLAwesmJVxGtg
+# MdN7AH+f54C3o+4i5J/FNc8QHtKoQAnI0N2zTUh4Yza0Wxa74zb1vUWN+kwNoxGW
+# FdAXHNlSl5ylSjXXGpbsZ1be2+FlBpRQKMviGKlEaYeZdOTjpwHVJahPSAUyoGDb
+# Zb6pDrrJCOiGJuh8DoLLQ+72zopd/t4z1IX0kqjQFYz5LPNCY/W0GhPakzoGGnTv
+# TLSb3ZTdNOBpNyPXhbBFb2K5hzDEQ/Jtzlrguq+I4ip/98sfIMLlk0YsnE6TD7O5
+# yf/fss4va5MJz11HG/bqUpvFGpw9o2P9knuWKMITh/CdEtTe7Vs8/51qzVmkyObs
+# k2Sh2QDAYlARCz09Nm++kTQxwU8mH3TD4dvLFx4+roeZdIfKOE82eddXWcXlbv/0
+# MIoO0yfHpFoNHQn58Mk4y0aejzj+GF6wJ9PqlwyUF1gYNrMfi15EbNSJoZDAUm/r
+# 0sHotlo+0w==
 # SIG # End signature block

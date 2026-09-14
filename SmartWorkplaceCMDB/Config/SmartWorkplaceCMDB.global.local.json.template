@@ -58,6 +58,8 @@
     "SmtpUseSsl": false,
     "SmtpUseIntegratedAuth": true,
     "MailClientName": "Smart Workplace",
+    "MailClientLogoPath": "",
+    "MailClientLogoMaxKB": 200,
     "LicenseFamilyPatterns": {
       "F1": "^(M365_F1|Microsoft_365_F1)(?:_.*)?$",
       "F3": "^(SPE_F1|SPE_F3|M365_F3|Microsoft_365_F3)(?:_.*)?$",

@@ -704,9 +704,18 @@ Enable it in the tenant-local configuration, which remains ignored by Git:
   "To": "recipient@example.invalid",
   "Cc": "",
   "Subject": "Smart Workplace CMDB",
-  "MailClientName": "Example tenant"
+  "MailClientName": "Example tenant",
+  "MailClientLogoPath": "C:\\Branding\\client-logo.png",
+  "MailClientLogoMaxKB": 200
 }
 ```
+
+The summary embeds the configured PNG, JPEG, or GIF client logo directly in
+the HTML message, following the SmartInventory mail-branding pattern. The path
+may be absolute or relative to the `SmartWorkplaceCMDB` product root. If the
+configured file is missing, unsupported, or larger than the configured limit,
+the bundled WorkplaceCloudHub mail logo is used automatically. No logo path or
+image file is uploaded with the collected tenant data.
 
 Graph mode reuses the CMDB `MicrosoftGraph` tenant ID, client ID and
 certificate and follows the proven SmartInventory transport pattern through
