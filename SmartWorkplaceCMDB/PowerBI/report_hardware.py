@@ -344,9 +344,7 @@ def prepare(project, output, hardware_path=None):
     page, visuals = build_page(project / 'CMDB-REPORTS.Report')
     fleet_page, fleet_visuals = build_fleet_page(project / 'CMDB-REPORTS.Report')
     output.mkdir(parents=True)
-    for name, columns, data in [('DeviceHardware', DETAIL_COLUMNS, rows), ('HardwareCoverage', COVERAGE_COLUMNS, [coverage])]:
-        with (output / (name + '.csv')).open('w', encoding='utf-8-sig', newline='') as stream:
-            writer = csv.DictWriter(stream, columns); writer.writeheader(); writer.writerows(data)
+    write_report_data(output, rows, coverage)
     payload = {'tables': model_definitions(project / 'ReportData', identity), 'measures': measures(),
                'relationship': dict(name='cmdb-hardware-device', fromTable='DeviceHardware', fromColumn='TenantDeviceKey', fromCardinality='Many', toTable='DimDevice', toColumn='TenantDeviceKey', toCardinality='One', crossFilteringBehavior='OneDirection', isActive=True)}
     def write(path, data):
@@ -364,10 +362,33 @@ def prepare(project, output, hardware_path=None):
             'visuals': len(visuals), 'detailVisuals': len(visuals), 'fleetVisuals': len(fleet_visuals)}
 
 
+def write_report_data(output, rows, coverage):
+    for name, columns, data in [('DeviceHardware', DETAIL_COLUMNS, rows), ('HardwareCoverage', COVERAGE_COLUMNS, [coverage])]:
+        with (output / (name + '.csv')).open('w', encoding='utf-8-sig', newline='') as stream:
+            writer = csv.DictWriter(stream, columns); writer.writeheader(); writer.writerows(data)
+
+
+def prepare_report_data(project, output, hardware_path=None):
+    project, output = Path(project), Path(output)
+    if output.exists():
+        raise ValueError('Preparation output must be new')
+    _, rows, coverage, hashes = prepare_data(project / 'ReportData/DimDevice.csv', hardware_path)
+    output.mkdir(parents=True)
+    write_report_data(output, rows, coverage)
+    (output / 'preparation.json').write_text(json.dumps({
+        'channel': 'stable', 'mode': 'data-only', 'project': str(project),
+        'sourceStatus': coverage['Status'], 'hardwareRows': len(rows), 'inputHashes': hashes,
+    }, indent=2, ensure_ascii=False), encoding='utf-8')
+    return {'status': 'PreparedDataOnly', 'hardwareRows': len(rows),
+            'sourceStatus': coverage['Status'], 'files': 2}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--ci-hardware', type=Path)
+    parser.add_argument('--data-only', action='store_true', help='Prepare only validated hardware CSV files; do not rebuild report pages or model payloads.')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.project, args.output, args.ci_hardware)))
+    action = prepare_report_data if args.data_only else prepare
+    print(json.dumps(action(args.project, args.output, args.ci_hardware)))

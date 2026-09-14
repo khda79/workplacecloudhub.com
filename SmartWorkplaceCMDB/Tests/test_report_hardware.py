@@ -59,6 +59,23 @@ class HardwareReport(unittest.TestCase):
         self.assertNotEqual(rows[0]['HardwareCollectedDateTime'], rows[0]['InventoryCollectedDateTime'])
         self.assertEqual(coverage['Coverage'], 'Bounded')
 
+    def test_data_only_preparation_does_not_rebuild_report_pages(self):
+        self.fixture()
+        project = self.root / 'project'
+        report_data = project / 'ReportData'
+        report_data.mkdir(parents=True)
+        self.write(report_data / 'DimDevice.csv', [self.device])
+        output = self.root / 'prepared-data'
+        result = hw.prepare_report_data(project, output, self.ci_path)
+        self.assertEqual(result['status'], 'PreparedDataOnly')
+        self.assertEqual(result['hardwareRows'], 1)
+        self.assertTrue((output / 'DeviceHardware.csv').is_file())
+        self.assertTrue((output / 'HardwareCoverage.csv').is_file())
+        self.assertFalse((output / 'model-payload.json').exists())
+        self.assertFalse((output / 'page').exists())
+        with self.assertRaisesRegex(ValueError, 'must be new'):
+            hw.prepare_report_data(project, output, self.ci_path)
+
     def test_zero_and_missing_capacity(self):
         self.fixture()
         for value, status, expected in [('0', 'ZeroReported', 'Unknown (reported 0)'), ('', 'Missing', 'Not provided')]:
