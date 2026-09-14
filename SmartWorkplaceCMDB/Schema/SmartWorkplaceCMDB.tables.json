@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.10.0",
+  "contractVersion": "0.14.0",
   "identityColumns": [
     "TenantKey",
     "OrganizationKey",
@@ -383,7 +383,81 @@
       "tenantScoped": true,
       "columns": [
         "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantApplicationKey",
-        "AppId", "DisplayName", "Version", "Publisher", "DeviceCount", "Platform", "SourceCollectedDateTime"
+        "AppId", "SourceApplicationKey", "DisplayName", "Version", "Publisher", "DeviceCount", "ReportedDeviceCount",
+        "ExactRelatedDeviceCount", "RelationshipCoverageStatus", "Platform", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactDeviceApplication.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantDeviceApplicationKey", "TenantApplicationKey", "ManagedDeviceId",
+        "AppId", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactADIntuneCoverage.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantADComputerKey", "CmdbAdComputerId", "DeviceName", "Enabled",
+        "OperatingSystem", "OperatingSystemVersion", "TenantDeviceKey",
+        "EntraDeviceId", "IntuneManagedDeviceId", "CoverageState", "MatchMethod",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimSharePointSite.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantSiteKey",
+        "SiteId", "SiteUrl", "SiteName", "OwnerPrincipalName", "LastActivityDate",
+        "ActivityState", "StorageUsedBytes", "StorageAllocatedBytes", "RootWebTemplate",
+        "IsDeleted", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimTeam.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantTeamKey",
+        "TeamId", "DisplayName", "Visibility", "CreatedDateTime", "LastActivityDate",
+        "ActivityState", "OwnerCount", "MemberCount", "GuestCount", "UnresolvedMemberCount",
+        "MembershipCoverageStatus", "IsArchived",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactTeamMember.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId",
+        "TenantTeamMemberKey", "TenantTeamKey", "TeamId", "TenantUserKey", "UserId",
+        "UserPrincipalName", "UserType", "Role", "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactUserActivity.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "TenantUserActivityKey",
+        "TenantUserKey", "UserPrincipalName", "MatchStatus", "ReportRefreshDate", "IsDeleted",
+        "ExchangeLastActivityDate", "OneDriveLastActivityDate", "SharePointLastActivityDate",
+        "TeamsLastActivityDate", "LastActivityDate", "LastActivityWorkload",
+        "HasAnyM365Activity", "AssignedProducts", "SourceCollectedDateTime"
       ]
     },
     {

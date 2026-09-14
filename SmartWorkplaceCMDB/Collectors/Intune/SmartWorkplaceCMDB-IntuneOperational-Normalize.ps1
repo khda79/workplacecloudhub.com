@@ -3,7 +3,7 @@
 Normalizes Intune operational inventory into dedicated Power BI tables.
 
 .VERSION
-1.0.0
+1.3.1
 #>
 [CmdletBinding()]
 param(
@@ -14,12 +14,74 @@ param(
     [switch]$NoConfigWrite,[switch]$ValidateOnly
 )
 
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.3.1'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
 function Get-HeaderStatus { param([string]$Path,[string[]]$Columns) if(-not (Test-Path -LiteralPath $Path -PathType Leaf)){return 'Missing'};$line=Get-Content -LiteralPath $Path -TotalCount 1;$actual=if([string]::IsNullOrWhiteSpace($line)){@()}else{@($line.Split(',') | ForEach-Object {$_.Trim().Trim('"')})};if(($actual -join [char]31) -ceq ($Columns -join [char]31)){return 'Valid'};return 'Incompatible' }
 function Get-KeyText { param([AllowNull()]$Value) if($null -eq $Value){return ''};return ([string]$Value).Trim().ToLowerInvariant() }
+function ConvertTo-CsvField { param([AllowNull()]$Value) return '"'+(([string]$Value)-replace'"','""')+'"' }
+function Assert-SourceSnapshotStatus {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Paths)
+    $statePath=$Path+'.status.json'
+    if(-not(Test-Path -LiteralPath $statePath -PathType Leaf)){return}
+    $state=Get-Content -Raw -LiteralPath $statePath|ConvertFrom-Json
+    foreach($name in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')){if([string]$state.$name-ne[string]$Paths.$name){throw 'Source evidence identity mismatch.'}}
+    if($state.Status-ne'Completed'-or$state.SHA256-ne(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash){throw "Unusable source snapshot: '$Path'. Recollect before normalization."}
+}
+function Export-DeviceApplicationFactStreaming {
+    param(
+        [Parameter(Mandatory)][string]$InputPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string[]]$Columns,
+        [Parameter(Mandatory)]$Paths
+    )
+    Assert-SourceSnapshotStatus -Path $InputPath -Paths $Paths
+    $folder=Split-Path -Parent $OutputPath;if(-not(Test-Path -LiteralPath $folder)){New-Item -ItemType Directory -Path $folder -Force|Out-Null}
+    $tempPath='{0}.tmp.{1}.csv'-f$OutputPath,[guid]::NewGuid().ToString('N')
+    $writer=$null;$count=0;$keys=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    try{
+        $writer=[IO.StreamWriter]::new($tempPath,$false,[Text.UTF8Encoding]::new($true))
+        $writer.WriteLine((@($Columns|ForEach-Object{ConvertTo-CsvField $_})-join','))
+        Import-Csv -LiteralPath $InputPath|ForEach-Object{
+            $row=$_
+            foreach($name in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')){if([string]$row.$name-ne[string]$Paths.$name){throw "CSV tenant identity mismatch for '$name'."}}
+            $appId=Get-KeyText $row.AppId;$managedDeviceId=Get-KeyText $row.ManagedDeviceId
+            if(-not$appId-or-not$managedDeviceId){throw 'Empty AppId or ManagedDeviceId in Intune_DetectedAppDeviceRelationships.csv.'}
+            $relationshipKey=Get-KeyText $row.RelationshipKey;$expectedKey=$appId+'|'+$managedDeviceId
+            if($relationshipKey-cne$expectedKey){throw "RelationshipKey does not match its exact AppId and ManagedDeviceId: '$relationshipKey'."}
+            if(-not$keys.Add($relationshipKey)){throw "Duplicate operational key found in Intune_DetectedAppDeviceRelationships.csv: '$relationshipKey'."}
+            $values=[ordered]@{
+                TenantKey=$Paths.TenantKey;OrganizationKey=$Paths.OrganizationKey;EnvironmentKey=$Paths.EnvironmentKey;TenantId=$Paths.TenantId
+                TenantDeviceApplicationKey=('{0}|device-application|{1}|{2}'-f$Paths.TenantKey,$appId,$managedDeviceId)
+                TenantApplicationKey=('{0}|detected-app|{1}'-f$Paths.TenantKey,$appId)
+                ManagedDeviceId=[string]$row.ManagedDeviceId;AppId=[string]$row.AppId;SourceCollectedDateTime=[string]$row.SourceCollectedDateTime
+            }
+            $writer.WriteLine((@($Columns|ForEach-Object{ConvertTo-CsvField $values[$_]})-join','));$count++
+            if($count%500000-eq 0){Write-Information("Intune application-device normalization: {0} exact relation(s)."-f$count)-InformationAction Continue}
+        }
+        $writer.Dispose();$writer=$null
+        Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
+    }finally{if($writer){$writer.Dispose()};if(Test-Path -LiteralPath $tempPath){Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue}}
+    return $count
+}
+
+function Export-CuratedCsvAtomic {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string[]]$Columns,
+        [Parameter(Mandatory)]$Identity
+    )
+    $folder=Split-Path -Parent $OutputPath
+    if(-not(Test-Path -LiteralPath $folder)){New-Item -ItemType Directory -Path $folder -Force|Out-Null}
+    $tempPath='{0}.tmp.{1}.csv'-f$OutputPath,[guid]::NewGuid().ToString('N')
+    try{
+        Export-SmartWorkplaceCMDBCsv -InputObject $InputObject -Path $tempPath -Columns $Columns @Identity
+        if((Get-HeaderStatus $tempPath $Columns)-ne'Valid'){throw "Curated operational staging output failed validation: $tempPath"}
+        Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
+    }finally{if(Test-Path -LiteralPath $tempPath){Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue}}
+}
 
 $scriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot=Split-Path -Parent (Split-Path -Parent $scriptRoot)
@@ -35,6 +97,7 @@ $curatedContract=Get-SmartWorkplaceCMDBTableContract -Path $curatedContractPath
 $mappings=@(
     @{Raw='Intune_AutopilotDevices.csv';Curated='FactAutopilotDevice.csv';Key='AutopilotDeviceId';Prefix='autopilot'},
     @{Raw='Intune_DetectedApps.csv';Curated='DimDetectedApplication.csv';Key='AppId';Prefix='app'},
+    @{Raw='Intune_DetectedAppDeviceRelationships.csv';Curated='FactDeviceApplication.csv';Key='RelationshipKey';Prefix='device-application'},
     @{Raw='Intune_ConfigurationPolicies.csv';Curated='DimIntuneConfigurationPolicy.csv';Key='PolicyId';Prefix='configuration-policy'},
     @{Raw='Intune_WindowsUpdatePolicies.csv';Curated='DimWindowsUpdatePolicy.csv';Key='PolicyId';Prefix='update-policy'}
 )
@@ -45,7 +108,7 @@ foreach($mapping in $mappings){
     $input=[IO.Path]::GetFullPath((Join-Path $paths.LatestOutputRootPath (Join-Path ([string]$raw[0].area) ([string]$raw[0].name))))
     $output=[IO.Path]::GetFullPath((Join-Path $paths.LatestOutputRootPath (Join-Path ([string]$target[0].area) ([string]$target[0].name))))
     $inputStatus=Get-HeaderStatus $input @($raw[0].columns|ForEach-Object{[string]$_});$outputStatus=Get-HeaderStatus $output @($target[0].columns|ForEach-Object{[string]$_})
-    if($inputStatus -eq 'Incompatible' -or $outputStatus -eq 'Incompatible'){throw "Operational CSV contract is incompatible: $($mapping.Raw) / $($mapping.Curated)"}
+    if($inputStatus -eq 'Incompatible'){throw "Operational source CSV contract is incompatible: $($mapping.Raw)"}
     $definitions+=@{Mapping=$mapping;Raw=$raw[0];Target=$target[0];Input=$input;Output=$output;InputStatus=$inputStatus;OutputStatus=$outputStatus}
 }
 if($ValidateOnly){foreach($definition in $definitions){if($definition.InputStatus -eq 'Valid'){Import-SmartWorkplaceCMDBSourceCsv -LiteralPath $definition.Input -Paths $paths|Out-Null}};[pscustomobject]@{Status='Valid';ScriptVersion=$ScriptVersion;DatasetCount=$definitions.Count;RawContractVersion=[string]$rawContract.contractVersion;CuratedContractVersion=[string]$curatedContract.contractVersion}|Format-List;return}
@@ -53,6 +116,12 @@ $identity=@{TenantKey=$paths.TenantKey;OrganizationKey=$paths.OrganizationKey;En
 $published=@()
 foreach($definition in $definitions){
     if($definition.InputStatus -eq 'Missing'){throw "Required raw operational inventory is missing: $($definition.Input)"}
+    if($definition.Mapping.Raw -eq 'Intune_DetectedAppDeviceRelationships.csv'){
+        $count=Export-DeviceApplicationFactStreaming -InputPath $definition.Input -OutputPath $definition.Output -Columns @($definition.Target.columns|ForEach-Object{[string]$_}) -Paths $paths
+        if((Get-HeaderStatus $definition.Output @($definition.Target.columns|ForEach-Object{[string]$_})) -ne 'Valid'){throw "Curated operational output failed validation: $($definition.Output)"}
+        $published+=[pscustomobject]@{Table=$definition.Mapping.Curated;Count=$count;Path=$definition.Output}
+        continue
+    }
     $rows=@(Import-SmartWorkplaceCMDBSourceCsv -LiteralPath $definition.Input -Paths $paths)
     $keyName=[string]$definition.Mapping.Key
     $duplicates=@(if($definition.Mapping.Raw -eq 'Intune_WindowsUpdatePolicies.csv'){$rows | Group-Object {"$($_.PolicyType)|$($_.PolicyId)"} | Where-Object Count -gt 1}else{$rows | Group-Object $keyName | Where-Object Count -gt 1})
@@ -63,13 +132,14 @@ foreach($definition in $definitions){
         $properties=[ordered]@{}
         switch($definition.Mapping.Raw){
             'Intune_AutopilotDevices.csv'{$properties.TenantAutopilotDeviceKey=('{0}|autopilot|{1}'-f$paths.TenantKey,$key);foreach($name in @('AutopilotDeviceId','DisplayName','SerialNumber','Manufacturer','Model','GroupTag','EnrollmentState','LastContactedDateTime','AzureAdDeviceId','ManagedDeviceId','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
-            'Intune_DetectedApps.csv'{$properties.TenantApplicationKey=('{0}|detected-app|{1}'-f$paths.TenantKey,$key);foreach($name in @('AppId','DisplayName','Version','Publisher','DeviceCount','Platform','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
+            'Intune_DetectedApps.csv'{$properties.TenantApplicationKey=('{0}|detected-app|{1}'-f$paths.TenantKey,$key);foreach($name in @('AppId','SourceApplicationKey','DisplayName','Version','Publisher','DeviceCount','ReportedDeviceCount','ExactRelatedDeviceCount','RelationshipCoverageStatus','Platform','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
+            'Intune_DetectedAppDeviceRelationships.csv'{$appId=Get-KeyText $row.AppId;$managedDeviceId=Get-KeyText $row.ManagedDeviceId;$properties.TenantDeviceApplicationKey=('{0}|device-application|{1}|{2}'-f$paths.TenantKey,$appId,$managedDeviceId);$properties.TenantApplicationKey=('{0}|detected-app|{1}'-f$paths.TenantKey,$appId);foreach($name in @('ManagedDeviceId','AppId','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
             'Intune_ConfigurationPolicies.csv'{$properties.TenantPolicyKey=('{0}|configuration-policy|{1}'-f$paths.TenantKey,$key);foreach($name in @('PolicyId','DisplayName','Description','Platforms','Technologies','TemplateId','TemplateFamily','CreatedDateTime','LastModifiedDateTime','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
             'Intune_WindowsUpdatePolicies.csv'{$type=Get-KeyText $row.PolicyType;$properties.TenantUpdatePolicyKey=('{0}|update-policy|{1}|{2}'-f$paths.TenantKey,$type,$key);foreach($name in @('PolicyType','PolicyId','DisplayName','TargetVersion','ReleaseDateTime','DaysUntilForcedReboot','CreatedDateTime','LastModifiedDateTime','SourceCollectedDateTime')){$properties[$name]=[string]$row.$name}}
         }
         [pscustomobject]$properties
     })
-    Export-SmartWorkplaceCMDBCsv -InputObject $targetRows -Path $definition.Output -Columns @($definition.Target.columns|ForEach-Object{[string]$_}) @identity
+    Export-CuratedCsvAtomic -InputObject $targetRows -OutputPath $definition.Output -Columns @($definition.Target.columns|ForEach-Object{[string]$_}) -Identity $identity
     if((Get-HeaderStatus $definition.Output @($definition.Target.columns|ForEach-Object{[string]$_})) -ne 'Valid'){throw "Curated operational output failed validation: $($definition.Output)"}
     $published+=[pscustomobject]@{Table=$definition.Mapping.Curated;Count=$targetRows.Count;Path=$definition.Output}
 }
@@ -79,8 +149,8 @@ Write-Information ("SmartWorkplaceCMDB Intune operational normalization complete
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4yWSgm+PyR+j9
-# DdYDm+90navEKazE65JXWYN6FakjoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzBn7XL4YHGBsT
+# iVOVn65S/PenRaI5UK5YX9CB8eJ38qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -213,31 +283,31 @@ Write-Information ("SmartWorkplaceCMDB Intune operational normalization complete
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC4/To8iLMhLHnGm0+N7M0LXKSFZvQuioNBaZ2nN1PkoMA0GCSqG
-# SIb3DQEBAQUABIIBgFzMHGWZdlbRoIC8dOHrsDw+d9Mb/Gys0Dct+GGLP4uJ4jq7
-# WW1tAQ5gta9y0/wXaWiUqckSfvy6Qodb4F+W/LdXLe/B8CEmtwNMCR6aMfrIG35V
-# 7cQRWxagVGnln+6yVZWt9ib0GUH+3rBbuFS8mC03ablVrFLiiSMa95fscq2kqtYz
-# d7etmsJQV+NRjtLDu6+zPvxNvOpgOeLPMNBTvn5kSOQOaHYtcUk9B56RuWjnfbF/
-# wpVrsNAPM+uJNImeeYfUk5EoO+b4E9GVuEQmi6OkoGKU8JSG/PvDeGcx3EmHKJ8f
-# PfBgOZy4I4IVFG2HxSVxafVq505W4ZQNiDfP2eeMAaXVabsKYQvG+FlZB+NWtCkF
-# J9ubXOtYr8AtYY2yTe9u3j5bUFgb/MTEKWFaEbPTN4dwsS+kuNzAg5lp4d7GeCFA
-# 8OTUHOpST++fuBDKYz/DWSNtMLNT7+2H5r/gT97s//oQyf3dKLmEgIcTxZRyy6qg
-# SgYO7ehN6GsyKUx+2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINCWzQGfdYoMXV61v2U8yCzXiZz8m+j11g3I+tuuEku2MA0GCSqG
+# SIb3DQEBAQUABIIBgISLhIxOPe/5mKpdqU8lV8FN/eAAgTN5vzmIm0yNXu5lWoqJ
+# EH0ABJZVkLX2KRwzaoXaS/yrGybVkeFuI5w185LZvAq8IIUQmg5OvC/1CDz97n7N
+# PyAt1yHgSsOk3l0QE1llveSVzBlkUu+Bhe+y7lZoSAUknxP0/V1BEVgksOEhJXkZ
+# mF/bw2ykVgd1dD6cSj0REPZLkf5wB9withtdM0yI3r8B2k2sIrGMJ415fDfdlBvz
+# GCM46I3A54AG3N39JpQJw72wWkUGr4ogemFQnjpTWh4HyPbagTSiwnfXNkYvFk6P
+# LsuU97YVp4jXPEuVyFqqcF6zChMzFHKja+H9o4Y/BzJn4fyWrx2fYweFZhUHRpHo
+# GU1Yzw9M9Kz5VbgEpB8eQDiP06fzMFHBbWujhkXS2ZKG58zFpW7Vn98r87thVlN/
+# /nXFmrlmoQCIOLZW+fy83cwnYV8iahUv/EybQ/j5GA8dsE6nAUG/MTBaK+7D2UJi
+# w65U/yVMQan6sP+jWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxODI0
-# NDhaMC8GCSqGSIb3DQEJBDEiBCDIcvt1+U7lRXccODyYGfEpPjy7zboH0rIKlX9b
-# vmLphjANBgkqhkiG9w0BAQEFAASCAgBy9NZGQCIgeopnhOrmeHsxf1de5QCFGZIO
-# WOz9WWXrSEwRFU/j7XKXPwB+s3Lc324QvJJi7z/P80ukdBKx4u2Shtw+ndgWcDhr
-# yL0IH30DZO2PRBF2bzR+JuCzLVXf+22zzUsLKwUR9+v/apiYRwiwdwFIST5s/2GL
-# aT3rNX8/mzDTYp7gxKZXBFLo/+bVMrtvGQpSw1wyjDoSGb0dP96u8lw9OLnvZS9I
-# wm1TFrGZ5n7aA8S9xrCFoUFzwBzYnJjfJ3crGtzwiDG0GpBIXVjeC+qu1erc4sf3
-# j9sUA+yav0pbxRiPyaFM1iGlvppQTM9O7ikoISWby307fpgwrD9kLvStViw54mgI
-# rnt3E2I/gJsbRVQww3zhBegYwCuNmhDK4tuuzoSEpBsnfAY3cTTQlC848yZXSm1h
-# CzsORL0vTChAGIazTuJnst17V87CYiow5rwnLxsUDxsR0Sxk3sgdeElqBzYVMWDW
-# L+sDKhJrmpkPg6PFdh78AJM1/3VcAUdR2a9AhiXjB+qBXtCQ8Yw4cravJZTrVeOd
-# /S2UjVU+GEJPxX7xr5p8jQG/H2Mn1ifEbaFxOdQdG+u5TIVqASI39YQBPmttP9Th
-# 9wI7Zl0Y2FzduJU/o/BJVr29Jtj28gC/Y5nSUGLAI41FbAOVJsMqq18701SQslU9
-# VZBGtrasMQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBhdyRcWsqWhESZgA0KDq1bDaG34ycyOiqbSoD2
+# zBDIKjANBgkqhkiG9w0BAQEFAASCAgAwOBUm+T0KvG3NmrHbTgRgHPxL52Xsh4OK
+# DaNJ6a9S/vog1S0Gmpi1ppEk4e4lkMaBvYopwVpLFBFgBHDUE9qyvNlJiZJ7+Nhq
+# st8CEPLK7Az9MN1/v8NnVHqww+CrqD/0xuWIV2jTrd6B8zE8zv7jD0RKnNNtBOaD
+# I8rUpqhUAR7bI82ZbkNUsYFisIsFwo2My3dExedefxy1cQzZatRcg3J1c20tLipY
+# 8aJBzBOEFjUOkmHOXj7uPydu01rsK5/1n9LeeuLtmIeCKDoeXOGDZdZhIKmUTYSW
+# P8b0mwEr81mvp6uf5nsRRvbFNYF0dD9/V6B0JVs7b+tLeaV4dhez+MvT9t3WuEuZ
+# f2zmio1KurkMHCQPbV2P3fyKZCS1kYrmphxprsMX0G7VvCdw3DM8fNG44g8xv1lL
+# oxmn4as2Zzze1m4rZWj9kB7uP9CIV4FaHmlvVNneijHtjH616toSBnvGAq4khj+8
+# XauRZ1R+INCAnx+4uuBY3+rRMHOhuS/I8V4rRfjw1BNxXiq8Z3ysTMTek+cFcIem
+# FGBR+h1gEmLmQI7qo8ntcP2ILb9vEhB34DH4aq3H9O9uC2sbfSetGjTGGaJ7DxlI
+# npsWDnWLJe8jPuTnpGWEjFyiNxDVCsPxEI49PYIA8aA69c/bWCcODXfAmIVTvHu/
+# C7g3lnRj/g==
 # SIG # End signature block
