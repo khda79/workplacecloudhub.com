@@ -216,6 +216,12 @@ pass its exact private folder with `--report-data`. This explicit directory
 takes precedence over automatic parameter discovery and prevents derived CSVs
 from being written into the previous frozen snapshot.
 
+If fresh local Exchange recipient evidence is unavailable, an explicitly
+reviewed prior `FactMailboxHosting.csv` may be supplied with
+`--mailbox-hosting-baseline`. Only unmatched On-premises rows are retained by
+their address-derived hashed key; current Exchange Online evidence always wins.
+This is dated continuity evidence, not proof of current local completeness.
+
 Schema validation and DAX checks do not prove Desktop rendering. After import,
 check every generated page, visual errors, exact unfiltered totals and one filter on
 each applicable page. Stop on import errors, unexpected sources, another

@@ -548,6 +548,30 @@ class CockpitNavigationTests(unittest.TestCase):
             },
         )
 
+    def test_mailbox_hosting_baseline_retains_only_unmatched_onpremises_rows(self):
+        identity = {
+            "TenantKey": "tenant-key", "OrganizationKey": "org-key",
+            "EnvironmentKey": "env-key", "TenantId": "tenant-id",
+        }
+        def mailbox_key(address):
+            return cockpit.hashlib.sha256((identity["TenantKey"] + "|" + address).encode("utf-8")).hexdigest().upper()
+        baseline = [
+            dict(identity, MailboxHostingKey=mailbox_key("alice@example.test"), CountryLabel="France",
+                 HostingLocation="Exchange On-premises", RecipientTypeDetails="UserMailbox",
+                 MailboxTypeGroup="User mailbox", EvidenceSource="Dated local evidence"),
+            dict(identity, MailboxHostingKey=mailbox_key("carol@example.test"), CountryLabel="France",
+                 HostingLocation="Exchange On-premises", RecipientTypeDetails="SharedMailbox",
+                 MailboxTypeGroup="Shared mailbox", EvidenceSource="Dated local evidence"),
+        ]
+        rows = cockpit.reconcile_mailboxes(
+            [{"PrimarySmtpAddress": "alice@example.test", "RecipientTypeDetails": "UserMailbox"}],
+            [], [], identity, {}, {}, baseline,
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sum(row["HostingLocation"] == "Exchange Online" for row in rows), 1)
+        self.assertEqual(sum(row["HostingLocation"] == "Exchange On-premises" for row in rows), 1)
+        self.assertEqual(next(row for row in rows if row["HostingLocation"] == "Exchange Online")["MailboxHostingKey"], mailbox_key("alice@example.test"))
+
     def test_workplace_health_uses_windows_update_attention_evidence(self):
         with (
             patch.object(cockpit, "new_page", return_value=({}, [])),

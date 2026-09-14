@@ -849,7 +849,8 @@ def set_page_navigation(visual, page_name, tooltip):
     }]
 
 
-def reconcile_mailboxes(fact_mailboxes, remote_rows, local_rows, identity, user_country_by_key, user_country_by_address):
+def reconcile_mailboxes(fact_mailboxes, remote_rows, local_rows, identity, user_country_by_key, user_country_by_address,
+                        baseline_rows=None):
     records = {}
 
     def add(row, hosting, evidence, replace=False):
@@ -870,10 +871,11 @@ def reconcile_mailboxes(fact_mailboxes, remote_rows, local_rows, identity, user_
             "MailboxTypeGroup": mailbox_type_group(row),
             "EvidenceSource": evidence,
         }
-        if replace or address not in records:
-            records[address] = candidate
-        elif records[address]["CountryLabel"] == "Unknown / unassigned" and country != "Unknown / unassigned":
-            records[address]["CountryLabel"] = country
+        mailbox_key = candidate["MailboxHostingKey"]
+        if replace or mailbox_key not in records:
+            records[mailbox_key] = candidate
+        elif records[mailbox_key]["CountryLabel"] == "Unknown / unassigned" and country != "Unknown / unassigned":
+            records[mailbox_key]["CountryLabel"] = country
 
     # The report's FactMailbox export is authoritative Exchange Online evidence.
     for row in fact_mailboxes:
@@ -888,17 +890,30 @@ def reconcile_mailboxes(fact_mailboxes, remote_rows, local_rows, identity, user_
             # Online/Remote evidence wins when an address exists in both exports.
             add(row, "Exchange On-premises", "Exchange local Mailbox")
 
+    for row in baseline_rows or []:
+        if any(row.get(column, "") != identity[column] for column in IDENTITY_COLUMNS):
+            raise ValueError("Mailbox-hosting baseline tenant mismatch")
+        mailbox_key = row.get("MailboxHostingKey", "")
+        if row.get("HostingLocation") != "Exchange On-premises":
+            continue
+        if len(mailbox_key) != 64 or any(char not in "0123456789ABCDEFabcdef" for char in mailbox_key):
+            raise ValueError("Mailbox-hosting baseline contains an invalid hashed key")
+        # Current Exchange Online and explicit current local/remote evidence win.
+        if mailbox_key not in records:
+            records[mailbox_key] = dict(row)
+
     return sorted(records.values(), key=lambda row: (row["HostingLocation"], row["MailboxHostingKey"]))
 
 
-def mailbox_hosting_rows(report: Path, local_path: Path | None, remote_path: Path | None, data_dir: Path | None = None):
+def mailbox_hosting_rows(report: Path, local_path: Path | None, remote_path: Path | None,
+                         data_dir: Path | None = None, baseline_path: Path | None = None):
     data_dir = data_dir or (report.parent / "ReportData")
     _, tenants = read_csv(data_dir / "DimTenant.csv")
     if len(tenants) != 1 or any(not tenants[0].get(column) for column in IDENTITY_COLUMNS):
         raise ValueError("Exactly one complete tenant identity is required")
     identity = {column: tenants[0][column] for column in IDENTITY_COLUMNS}
     existing_hosting_path = data_dir / "FactMailboxHosting.csv"
-    if not local_path and not remote_path and existing_hosting_path.is_file():
+    if not local_path and not remote_path and not baseline_path and existing_hosting_path.is_file():
         columns, rows = read_csv(existing_hosting_path)
         if columns != MAILBOX_HOSTING_COLUMNS:
             raise ValueError("Existing mailbox-hosting CSV schema mismatch")
@@ -922,9 +937,17 @@ def mailbox_hosting_rows(report: Path, local_path: Path | None, remote_path: Pat
     _, fact_mailboxes = read_csv(data_dir / "FactMailbox.csv")
     remote_rows = read_csv(remote_path)[1] if remote_path else []
     local_rows = read_csv(local_path)[1] if local_path else []
+    baseline_rows = []
+    if baseline_path:
+        baseline_columns, baseline_rows = read_csv(baseline_path)
+        if baseline_columns != MAILBOX_HOSTING_COLUMNS:
+            raise ValueError("Mailbox-hosting baseline schema mismatch")
+        baseline_keys = [row["MailboxHostingKey"].casefold() for row in baseline_rows]
+        if not all(baseline_keys) or len(baseline_keys) != len(set(baseline_keys)):
+            raise ValueError("Mailbox-hosting baseline contains blank or duplicate keys")
     rows = reconcile_mailboxes(
         fact_mailboxes, remote_rows, local_rows, identity,
-        user_country_by_key, user_country_by_address,
+        user_country_by_key, user_country_by_address, baseline_rows,
     )
 
     metadata = {
@@ -933,6 +956,7 @@ def mailbox_hosting_rows(report: Path, local_path: Path | None, remote_path: Pat
         "total": len(rows),
         "localEvidenceDate": local_path.stat().st_mtime if local_path else None,
         "remoteEvidenceDate": remote_path.stat().st_mtime if remote_path else None,
+        "baselineEvidenceDate": baseline_path.stat().st_mtime if baseline_path else None,
     }
     return identity, rows, metadata
 
@@ -1275,6 +1299,7 @@ def enrich_semantic_model(
     remote_path: Path | None,
     upgrade_eligibility_path: Path | None = None,
     report_data_override: Path | None = None,
+    mailbox_hosting_baseline: Path | None = None,
 ):
     model_path = next(report.parent.glob("*.SemanticModel/model.bim"), None)
     if not model_path:
@@ -1283,7 +1308,7 @@ def enrich_semantic_model(
     model = model_json["model"]
     data_dir = resolve_report_data_dir(report, model, report_data_override)
     identity, hosting_rows, metadata = mailbox_hosting_rows(
-        report, local_path, remote_path, data_dir
+        report, local_path, remote_path, data_dir, mailbox_hosting_baseline
     )
     upgrade_target = data_dir / "FactEndpointAnalyticsUpgradeEligibility.csv"
     if upgrade_eligibility_path:
@@ -2704,6 +2729,7 @@ def prepare(
     exchange_onprem_remote: Path | None = None,
     upgrade_eligibility: Path | None = None,
     report_data: Path | None = None,
+    mailbox_hosting_baseline: Path | None = None,
 ):
     report = report.resolve()
     pages = report / "definition" / "pages"
@@ -2715,7 +2741,8 @@ def prepare(
 
     exchange_onprem_local = exchange_onprem_local.resolve() if exchange_onprem_local else None
     exchange_onprem_remote = exchange_onprem_remote.resolve() if exchange_onprem_remote else None
-    for source in (exchange_onprem_local, exchange_onprem_remote):
+    mailbox_hosting_baseline = mailbox_hosting_baseline.resolve() if mailbox_hosting_baseline else None
+    for source in (exchange_onprem_local, exchange_onprem_remote, mailbox_hosting_baseline):
         if source and not source.is_file():
             raise ValueError(f"Exchange evidence file not found: {source}")
     mailbox_metadata = enrich_semantic_model(
@@ -2724,6 +2751,7 @@ def prepare(
         exchange_onprem_remote,
         upgrade_eligibility,
         report_data,
+        mailbox_hosting_baseline,
     )
     for builder in [build_risk, build_lifecycle, build_licensing, build_fleet_hardware,
                     build_people_messaging, build_business_services,
@@ -2840,6 +2868,7 @@ if __name__ == "__main__":
     parser.add_argument("--exchange-onprem-remote", type=Path)
     parser.add_argument("--upgrade-eligibility", type=Path)
     parser.add_argument("--report-data", type=Path, help="Explicit private ReportData directory; takes precedence over CMDBDataRoot discovery.")
+    parser.add_argument("--mailbox-hosting-baseline", type=Path, help="Prior reconciled hosting CSV; only unmatched On-premises rows are retained and current Online evidence wins.")
     args = parser.parse_args()
     print(json.dumps(prepare(
         args.report,
@@ -2847,4 +2876,5 @@ if __name__ == "__main__":
         args.exchange_onprem_remote,
         args.upgrade_eligibility,
         args.report_data,
+        args.mailbox_hosting_baseline,
     ), ensure_ascii=False))
