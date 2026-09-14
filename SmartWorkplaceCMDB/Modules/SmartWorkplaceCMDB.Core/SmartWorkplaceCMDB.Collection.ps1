@@ -147,7 +147,8 @@ function Publish-SmartWorkplaceCMDBSourceCsv {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Run,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
+        [Parameter(ParameterSetName = 'Objects', Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
+        [Parameter(ParameterSetName = 'CsvFile', Mandatory)][string]$InputCsvPath,
         [Parameter(Mandatory)][string[]]$Columns,
         [Parameter(Mandatory)][string]$HistoryPath,
         [Parameter(Mandatory)][string]$LatestPath,
@@ -188,14 +189,38 @@ function Publish-SmartWorkplaceCMDBSourceCsv {
     $completedPromotions = New-Object System.Collections.Generic.List[object]
 
     try {
-        Export-SmartWorkplaceCMDBCsv `
-            -InputObject @($InputObject) `
-            -Columns $Columns `
-            -Path $stagedPath `
-            -TenantKey $Run.Paths.TenantKey `
-            -OrganizationKey $Run.Paths.OrganizationKey `
-            -EnvironmentKey $Run.Paths.EnvironmentKey `
-            -TenantId $Run.Paths.TenantId
+        if ($PSCmdlet.ParameterSetName -eq 'CsvFile') {
+            $resolvedInputCsvPath = [IO.Path]::GetFullPath($InputCsvPath)
+            if (-not (Test-Path -LiteralPath $resolvedInputCsvPath -PathType Leaf)) {
+                throw "Prepared source CSV was not found: $resolvedInputCsvPath"
+            }
+
+            $sourceHeader = Get-Content -LiteralPath $resolvedInputCsvPath -TotalCount 1 -ErrorAction Stop
+            $actualColumns = if ([string]::IsNullOrWhiteSpace($sourceHeader)) {
+                @()
+            }
+            else {
+                @($sourceHeader.Split(',') | ForEach-Object { $_.Trim().Trim('"') })
+            }
+            $expectedColumns = @($Columns)
+            if (($actualColumns -join [char]31) -cne ($expectedColumns -join [char]31)) {
+                throw "Prepared source CSV '$resolvedInputCsvPath' does not use the exact contract column order for '$ContractTableName'."
+            }
+
+            $stagedFolder = Split-Path -Path $stagedPath -Parent
+            New-Item -ItemType Directory -Path $stagedFolder -Force | Out-Null
+            Copy-Item -LiteralPath $resolvedInputCsvPath -Destination $stagedPath -Force
+        }
+        else {
+            Export-SmartWorkplaceCMDBCsv `
+                -InputObject @($InputObject) `
+                -Columns $Columns `
+                -Path $stagedPath `
+                -TenantKey $Run.Paths.TenantKey `
+                -OrganizationKey $Run.Paths.OrganizationKey `
+                -EnvironmentKey $Run.Paths.EnvironmentKey `
+                -TenantId $Run.Paths.TenantId
+        }
 
         $stagedResults = @(Test-SmartWorkplaceCMDBCsvContract `
                 -LatestOutputRootPath $stagedLatestRoot `
@@ -337,8 +362,8 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9RwQW159IEgtM
-# 8sO1tbbvt80TGXErc2IWVVuHykFD3aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBT+D9b5F/OzRFL
+# PGmrqK+24Zd60oEg4S59wcqhev+qB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -471,31 +496,31 @@ function Get-SmartWorkplaceCMDBSourceHealth {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOWEDbDSasQwUxoHGsfhixMkhkfZsfomzOPjzPEajFvPMA0GCSqG
-# SIb3DQEBAQUABIIBgB2mjtNBbzrAumiIDUKtbDvIXpt52nOQkVb+zD0H/MkhqI64
-# 2PtGE9431LcAh4zJa+MNk5H11o9rVcyTVKXw6zaHk4SrYZKyrAYHrrfzDE95kMIa
-# Bp3w6hAEpuBN1thYSCNklIgOxAq3IADfknBBuDwVCNCuPzRE7Sd6tOt8Od2Or2y6
-# SAx2/VlMgCSw370nDVCtp5Wmnngr3S4aNqcjySVv9nHoZl1TxAQ6Aw7a7eEWClg+
-# gJ3VPJ7nzk0211pKxLyfyMoCYvKN2IfvdVNQOW0BGm+8Yfcl3f7FWaYlRKbPaKPf
-# atX/3iU8G8mXMYiAt/OPp6dK3ox6C+UsoOz1w/SAzYTAHDgeTskqyG673m3/ssi4
-# RMObGEOPqMMWADbBGL++UvzbWAQPivuQTNvms5aYZWC3wVAjTOu+k1A6lx1nx2dd
-# ut6UiGy4FOeMA7yV16Um/yb4AZyRygOBi7Q/Q7hMscBXFz7o2xU6fteDjj5+dH+q
-# euHMCn/faKrC3MHGTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEcSCe23kbeIMjxdehrENjRY26/Pl0HZ2D5OuH0ct6LlMA0GCSqG
+# SIb3DQEBAQUABIIBgDDyjATM/oGFYFeynLw+ogYz79bVbTGBeqUZFAwS5gy0pPZ1
+# xd+jTHMzcoR/K3sCY6xwV1lC0G5OOBQ1gzLp5/53kwcErOKiHN9gPoCyk7vkhPt9
+# NXjJX5bO4zc2D2Ds/OTAuaRR0W+pQ33KJLK5kv4LM1sTmwkeXp0aPfwSEowW5z3O
+# VEQBbAX4wMJZu/6+mz1X138d3u2ONGi383wPWX9AZDtcnHec/vwRn1TV4Jic5E5e
+# 4EJ92tqeXPoNZsncnec4+ojT4siU++D3H2b5Rb6cLaPMfpsbEYGvtIjkRvGC92+Q
+# ZCIS2UTyWwPysFsyJPT9QpKYGAvx0e2U/I9bUrEhx3a85cHw+6An92EJWI7PanD7
+# GCJCdOBITDTLHyXWmEjG7VHff2XPUfGqtWUf0bocJhdwKgNcWnHngDnTse1GPeKq
+# qK7WzXlokgN0foch5H9MxIWUtpUS2Z6fvHk7G7hR7es2oAbHFWd/XLZpNNSUVdz/
+# sx/+iWqLFAvUX8v6B6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxMzE3
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDkVSdk+0LqnQUSkLuyY3MRuzM5G2zSlWJwHXai
-# euApjTANBgkqhkiG9w0BAQEFAASCAgCMB6PfNMaFSnYVmNgabjfOgnjAVrhN86kM
-# 9ZfVddug1EWqu5gG5ah9uH0f0R7PioG6eYx8zeCfVK0RPWR+/eHZrWB0UwdeQegY
-# +EjdGJ2XBLZcyN4v4PlZBGZSHYqIu7iyOVIBXC5a/Vblv9hl8kIGU2sxOapbVVwt
-# Ajz3us24mNEq6YOHBq4FdgC3j1Ent2/ge6KomfcLZCrI450eSmw+YT8T/C/Nbd8c
-# 9FLYHXNQenCDn31doiz73otFKNDNa91E0DFycXMU1whoKM0uOyEcABowuNFxFs9l
-# VRnuk3KtG4+tgPRzxWh5HHXjEFsBnrcoG9jFNRPSDhpbZUNE99Cdy5NdAmOivhUg
-# EaKC5yv8FfTsVbbVT5Ec3Vh6CXklXhkNLdBByDxatAM5SZ3rzHPU2QQ1vhkb6/zV
-# kvs8/3QijskbgXn7zmWHDBaOx3Gu4zs3kSNn0NaBzEmyI25DhzaWrL7l+Rh1sGsa
-# 7EaqBQ6HLTt3qAaVssvLsDt5W3JscDxMqefReKeBT/4G6yuNhCZQbne65UAL8nat
-# 6wDY87lrZxlo0tv0+uDI1Z5OQs3Kg9jN98gI3OQRc9Pgf1JsXr4uixX+yTV8t1oy
-# kwbq6ohbibYXHnQAjvThSA/ykLU7GOEjqbYEr/o2Traf84TkBOz8VDrC1XsyxjVV
-# /6YuLYthVQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NTZaMC8GCSqGSIb3DQEJBDEiBCAoy8vwkMezvhRZ3Lk97Lfc/ThLpY9Gi7G6kz9+
+# NcmSWjANBgkqhkiG9w0BAQEFAASCAgAaQHTrrmTZ4KiqN32DD5ke9/DOdV+LIMdV
+# Es5QJ1Nj1nTejD+DHGgM6TDNB6zQTOFyC945+bAqQG34VS+/h0ua+zYVftUqH99j
+# ATMBK0BmDeaXI05BVQ63L+Rs8FOP1nFMfSTodt6EI8dzFyRvboctRwc4X0hGYvuT
+# MV2orKUQJ76nv6WSRODBzjwIgUAAoRATt6uxkI5yg+IW/x3CFE9xLUzqOgjOXgsv
+# VJixeUEqUzb5WCPQmLfloE+CyGF1w/Sc0V7xAl2+pxK6hVkyo16PhtS1rKNNEFeE
+# JiQkxZPQitZhkpg2xqxHjwha5LejCkcBf6TfvgHbE9JNkJoPJgrHpYnhzY1MlixU
+# Zsul8Ch4DfYfBzaYwewLVtwWXFy6Wi4QhOXu+9q66pg2v/XTBNH4ThaCB2kx/Ees
+# d9C+BWEqAg1dDkZfziS7Sj+UhhPM8Q37FKLZmEyZLHJgfzkhVchhKh1SieA+OCaA
+# Hf5BXDfRJ9mm9CUeplOTUH1ZrwMCACQZZFLVLV97BctwzAc9uU5aAkmHBxGqx9pH
+# sEJsDu6qSKnh8CQPFtJoSVx/Ec08ubFjUcJpLXSQhojENcxFUZne6YOmSPGXDCS+
+# YqRyVJwOFZR8vjqh8ZmyXEMflA80YFxfBjLRSKewxJANwXUj16KK3a6kSYmwrzlC
+# R8RnoJDAZQ==
 # SIG # End signature block

@@ -301,6 +301,109 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertIn("Overlapping findings", quality_measures["Data quality score"]["description"])
         self.assertEqual(tables[2]["measures"][0]["name"], "Account status share")
 
+    def test_application_measures_distinguish_exact_relations_from_source_counts(self):
+        self.assertTrue(
+            {
+                "SourceApplicationKey",
+                "ReportedDeviceCount",
+                "ExactRelatedDeviceCount",
+                "RelationshipCoverageStatus",
+            }.issubset(cockpit.DIM_DETECTED_APPLICATION_COLUMNS)
+        )
+        tables = [
+            {"name": "DimDevice", "measures": []},
+            {"name": "DimUser", "measures": []},
+            {"name": "FactMailboxHosting", "measures": []},
+            {"name": "DimDetectedApplication", "measures": []},
+            {"name": "DeviceSource", "measures": []},
+            {"name": "FactDeviceApplication", "measures": []},
+        ]
+        cockpit.add_operational_measures(tables)
+        app_measures = {measure["name"]: measure for measure in tables[3]["measures"]}
+        relation_measures = {measure["name"]: measure for measure in tables[5]["measures"]}
+        self.assertIn("SourceApplicationKey", app_measures["Application products"]["expression"])
+        self.assertIn("Reported application-device occurrences", app_measures)
+        self.assertIn("ReportedDeviceCount", app_measures["Reported application-device occurrences"]["expression"])
+        self.assertIn("SourceApplicationKey", relation_measures["Installed application products"]["expression"])
+        self.assertIn("TREATAS", relation_measures["Installed application products"]["expression"])
+        self.assertIn("Application-device installations", relation_measures)
+        self.assertIn("COUNTROWS('FactDeviceApplication')", relation_measures["Application-device installations"]["expression"])
+
+    def test_sharepoint_count_card_is_not_mistaken_for_a_share_metric(self):
+        def card():
+            return {"visual": {
+                "objects": {"value": [{"properties": {}}]},
+                "visualContainerObjects": {
+                    "title": [{"properties": {"text": cockpit.lit("old")}}],
+                },
+            }}
+
+        site_card = card()
+        cockpit.set_card(site_card, "DimSharePointSite", "SharePoint sites", "SharePoint sites")
+        self.assertEqual(
+            site_card["visual"]["objects"]["value"][0]["properties"]["labelDisplayUnits"]["expr"]["Literal"]["Value"],
+            "1D",
+        )
+        self.assertEqual(
+            site_card["visual"]["objects"]["value"][0]["properties"]["labelPrecision"]["expr"]["Literal"]["Value"],
+            "0D",
+        )
+        rate_card = card()
+        cockpit.set_card(rate_card, "DimDevice", "Compliance rate", "Compliance rate")
+        self.assertEqual(
+            rate_card["visual"]["objects"]["value"][0]["properties"]["labelPrecision"]["expr"]["Literal"]["Value"],
+            "1D",
+        )
+
+    def test_large_fact_row_count_is_streamed_and_validated(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "fact.csv"
+            path.write_text("Id,State\n1,Keep\n2,Skip\n3,Keep\n", encoding="utf-8-sig")
+            self.assertEqual(cockpit.count_csv_rows(path, lambda row: row["State"] == "Keep"), 2)
+
+    def test_intune_device_bridge_keeps_one_exact_managed_device_key(self):
+        identity = {
+            "TenantKey": "tenant",
+            "OrganizationKey": "organization",
+            "EnvironmentKey": "prod",
+            "TenantId": "tenant-id",
+        }
+        rows = [
+            {
+                **identity,
+                "SourceSystem": "Entra",
+                "SourceObjectId": "entra-id",
+                "TenantDeviceKey": "tenant|device|one",
+            },
+            {
+                **identity,
+                "SourceSystem": "Intune",
+                "SourceObjectId": "ABC-123",
+                "TenantDeviceKey": "tenant|device|one",
+            },
+        ]
+        bridge = cockpit.build_intune_device_bridge(rows, identity)
+        self.assertEqual(len(bridge), 1)
+        self.assertEqual(bridge[0]["TenantIntuneDeviceKey"], "tenant|intune-device|abc-123")
+        self.assertEqual(bridge[0]["ManagedDeviceId"], "ABC-123")
+        self.assertEqual(bridge[0]["TenantDeviceKey"], "tenant|device|one")
+
+    def test_intune_device_bridge_rejects_duplicate_managed_device_ids(self):
+        identity = {
+            "TenantKey": "tenant",
+            "OrganizationKey": "organization",
+            "EnvironmentKey": "prod",
+            "TenantId": "tenant-id",
+        }
+        row = {
+            **identity,
+            "SourceSystem": "Intune",
+            "SourceObjectId": "ABC-123",
+            "TenantDeviceKey": "tenant|device|one",
+        }
+        with self.assertRaisesRegex(ValueError, "Duplicate Intune device bridge key"):
+            cockpit.build_intune_device_bridge([row, dict(row)], identity)
+
     def test_upgrade_eligibility_source_requires_exact_ids_and_supported_states(self):
         row = {column: "value" for column in cockpit.UPGRADE_ELIGIBILITY_COLUMNS}
         row.update({
@@ -452,6 +555,10 @@ class CockpitNavigationTests(unittest.TestCase):
         ):
             cockpit.build_lifecycle(Path("ignored"))
         add_card.assert_any_call(
+            Path("ignored"), [], "lifecycle", "FactADIntuneCoverage",
+            "AD to Intune coverage rate", "AD → Intune coverage", 336, 136, h=88,
+        )
+        add_card.assert_any_call(
             Path("ignored"), [], "lifecycle", "FactAutopilotDevice",
             "Selected Autopilot devices", "Autopilot · exact matches", 648, 136, h=88,
         )
@@ -463,6 +570,49 @@ class CockpitNavigationTests(unittest.TestCase):
             Path("ignored"), [], "lifecycle", "FactAutopilotDevice", "EnrollmentState",
             "FactAutopilotDevice", "Autopilot enrollment rate", "Selected Autopilot devices",
             "Autopilot — exact Intune matches", 960, 240, w=296, h=204,
+        )
+
+    def test_exact_coverage_and_relationship_measures_are_source_bounded(self):
+        tables = [
+            {"name": "DimDevice", "measures": []},
+            {"name": "DimUser", "measures": []},
+            {"name": "FactADIntuneCoverage", "measures": []},
+            {"name": "FactRelationshipOverview", "measures": []},
+            {"name": "FactMailboxHosting", "measures": []},
+            {
+                "name": "FactUserDeviceRelationship",
+                "measures": [{"name": "Relationship type rate", "expression": "legacy"}],
+            },
+        ]
+        cockpit.add_operational_measures(tables)
+        coverage = {item["name"]: item for item in tables[2]["measures"]}
+        relationships = {item["name"]: item for item in tables[3]["measures"]}
+        user_device = {item["name"]: item for item in tables[5]["measures"]}
+        self.assertIn("AD to Intune coverage rate", coverage)
+        self.assertIn("ObjectSid", coverage["AD Windows workstations managed in Intune"]["description"])
+        self.assertIn("Relationship edges", relationships)
+        self.assertNotIn("Relationship type rate", user_device)
+        self.assertIn("User-device relationship type rate", user_device)
+        self.assertEqual(
+            set(cockpit.BAR_CATEGORY_COLORS[("FactRelationshipOverview", "RelationshipType")]),
+            {"PrimaryUser", "HasMailbox", "AssignedLicense", "MemberOfGroup", "DeviceHasApplication", "DeviceInAutopilot"},
+        )
+
+    def test_fleet_page_uses_a_schema_safe_precomputed_top_five(self):
+        with (
+            patch.object(cockpit, "new_page", return_value=({}, [])),
+            patch.object(cockpit, "add_slicer", return_value={}),
+            patch.object(cockpit, "set_categorical_selection"),
+            patch.object(cockpit, "compact_page_header"),
+            patch.object(cockpit, "add_card"),
+            patch.object(cockpit, "add_ratio_bar") as add_ratio_bar,
+            patch.object(cockpit, "add_table"),
+        ):
+            cockpit.build_fleet_hardware(Path("ignored"))
+        add_ratio_bar.assert_any_call(
+            Path("ignored"), [], "devices", "TopApplication", "ApplicationProduct",
+            "TopApplication", "Top application occurrence rate", "Top application occurrences",
+            "Top 5 apps — global collected occurrences", 856, 240, w=400, h=184,
         )
 
     def test_people_page_uses_collected_activity_state(self):

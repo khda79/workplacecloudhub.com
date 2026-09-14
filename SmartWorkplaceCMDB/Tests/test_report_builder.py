@@ -254,6 +254,10 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the source"):
             report.build(self.root, self.root / "report")
 
+    def test_application_counts_are_imported_as_numbers(self):
+        for column in ("DeviceCount", "ReportedDeviceCount", "ExactRelatedDeviceCount"):
+            self.assertEqual(report.type_of(column), ("int64", "Int64.Type"))
+
 
 if __name__ == "__main__":
     unittest.main()

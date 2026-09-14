@@ -3,10 +3,10 @@
 Validates Intune operational collection and normalization with synthetic data.
 
 .VERSION
-1.0.1
+1.3.1
 #>
 [CmdletBinding()]param()
-$ScriptVersion='1.0.1';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
+$ScriptVersion='1.3.1';$ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
 $passed=0;$failed=0
 function Invoke-Test{param([string]$Name,[scriptblock]$Test)try{&$Test;$script:passed++;Write-Information "PASS $Name" -InformationAction Continue}catch{$script:failed++;Write-Information "FAIL $Name - $($_.Exception.Message)" -InformationAction Continue}}
 function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw$Message}}
@@ -19,11 +19,12 @@ $identity=@{Tenant='audit';OrganizationKey='contoso';EnvironmentKey='test';Tenan
 try{
     New-Item -ItemType Directory -Path $tempRoot -Force|Out-Null
     Invoke-Test 'Validate without creating output' {&$collector @identity -InputJsonPath $fixture -ValidateOnly|Out-Null;Assert-True(-not(Test-Path(Join-Path $tempRoot 'DATA-LAST')))'ValidateOnly created output.'}
-    Invoke-Test 'Collect four independent source tables' {
+    Invoke-Test 'Collect five independent source tables' {
         & $collector @identity -InputJsonPath $fixture|Out-Null
         $root=Join-Path $tempRoot 'DATA-LAST\Raw\Intune'
         Assert-True (@(Import-Csv (Join-Path $root 'Intune_AutopilotDevices.csv')).Count -eq 2) 'Expected two Autopilot rows.'
         Assert-True (@(Import-Csv (Join-Path $root 'Intune_DetectedApps.csv')).Count -eq 2) 'Expected two detected applications.'
+        Assert-True (@(Import-Csv (Join-Path $root 'Intune_DetectedAppDeviceRelationships.csv')).Count -eq 3) 'Expected three exact application-device relationships.'
         Assert-True (@(Import-Csv (Join-Path $root 'Intune_ConfigurationPolicies.csv')).Count -eq 1) 'Expected one configuration policy.'
         Assert-True (@(Import-Csv (Join-Path $root 'Intune_WindowsUpdatePolicies.csv')).Count -eq 2) 'Expected feature and quality update policies.'
     }
@@ -32,12 +33,23 @@ try{
         $root=Join-Path $tempRoot 'DATA-LAST\PowerBI'
         $autopilot=@(Import-Csv(Join-Path $root 'FactAutopilotDevice.csv'))
         $apps=@(Import-Csv(Join-Path $root 'DimDetectedApplication.csv'))
+        $appDevices=@(Import-Csv(Join-Path $root 'FactDeviceApplication.csv'))
         $configuration=@(Import-Csv(Join-Path $root 'DimIntuneConfigurationPolicy.csv'))
         $updates=@(Import-Csv(Join-Path $root 'DimWindowsUpdatePolicy.csv'))
         Assert-True ($autopilot.Count -eq 2 -and $autopilot[0].TenantAutopilotDeviceKey -match '\|autopilot\|') 'Autopilot key or count is invalid.'
-        Assert-True ($apps.Count -eq 2 -and $apps[0].DeviceCount -eq '12') 'Detected application grain is invalid.'
+        Assert-True ($apps.Count -eq 2 -and $apps[0].SourceApplicationKey -eq 'app-001' -and $apps[0].DeviceCount -eq '2' -and $apps[0].ReportedDeviceCount -eq '12' -and $apps[0].RelationshipCoverageStatus -eq 'ReconciledCountMismatch') 'Detected application identity or count reconciliation is invalid.'
+        Assert-True ($appDevices.Count -eq 3 -and @($appDevices.TenantDeviceApplicationKey|Select-Object -Unique).Count -eq 3) 'Application-device fact grain is invalid.'
         Assert-True ($configuration.Count -eq 1 -and $configuration[0].TemplateFamily -eq 'endpointSecurityAntivirus') 'Configuration policy mapping is invalid.'
         Assert-True ($updates.Count -eq 2 -and (@($updates.PolicyType|Sort-Object) -join ',') -eq 'Feature,Quality') 'Update policy types are invalid.'
+    }
+    Invoke-Test 'Upgrade an older curated header without weakening the raw contract guard' {
+        $legacyPath=Join-Path $tempRoot 'DATA-LAST\PowerBI\DimDetectedApplication.csv'
+        $legacyRows=@(Import-Csv -LiteralPath $legacyPath)
+        $legacyRows|Select-Object TenantKey,OrganizationKey,EnvironmentKey,TenantId,TenantApplicationKey,AppId,DisplayName,Version,Publisher,DeviceCount,Platform,SourceCollectedDateTime|Export-Csv -LiteralPath $legacyPath -NoTypeInformation -Encoding UTF8
+        & $normalizer @identity|Out-Null
+        $header=Get-Content -LiteralPath $legacyPath -TotalCount 1
+        Assert-True ($header -match 'SourceApplicationKey' -and $header -match 'RelationshipCoverageStatus') 'The current curated contract did not replace the older header.'
+        Assert-True (-not @(Get-ChildItem -LiteralPath (Split-Path -Parent $legacyPath) -Filter 'DimDetectedApplication.csv.tmp.*.csv').Count) 'A curated staging file was left behind.'
     }
     Invoke-Test 'Consolidate strictly equivalent detected application duplicates' {
         $duplicateRoot=Join-Path $tempRoot 'EquivalentDuplicate'
@@ -65,7 +77,7 @@ try{
         $apps=@(Import-Csv (Join-Path $conflictIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_DetectedApps.csv'))
         $reconciled=@($apps|Where-Object AppId -eq 'app-001')[0]
         Assert-True ($apps.Count -eq 2) 'Conflicting duplicate application rows were not consolidated.'
-        Assert-True ($reconciled.DisplayName -eq 'Example Browser' -and $reconciled.DeviceCount -eq '99') 'Conflicting duplicate application values were not reconciled deterministically.'
+        Assert-True ($reconciled.DisplayName -eq 'Example Browser' -and $reconciled.DeviceCount -eq '2' -and $reconciled.ReportedDeviceCount -eq '99') 'Conflicting duplicate application values were not reconciled deterministically.'
     }
     Invoke-Test 'Bound each source family independently' {
         $bounded=@{}+$identity;$bounded.DataRootPath=Join-Path $tempRoot 'Bounded'
@@ -82,8 +94,8 @@ if($failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCay3D+tfK5QZCW
-# Kd627wKLWbai4bNTiK5sSV44gKynq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI3a/OsoD4cB1e
+# pMm7Rtx7KckjbAsQtxoX3d0sRB5OCaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -216,31 +228,31 @@ if($failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC1b/0eunA7V0RMpMfbXSe9/IH+Jk65/dAlwmygIRMQ1MA0GCSqG
-# SIb3DQEBAQUABIIBgJYO32tUAj3f6rRoAnYB7Z4lf61dED6r7AmIoGpowOtqNUhL
-# w5maiu4fsuO+62hRU2lP4EvECrkYgK5xU9jNUDFuDJ/JBlgSj2pDrbqBywApyWWv
-# X0cgCkjirfmXZJ+k3kgFHDkBv5/pCwFCv5PsQENt6ZMWafOLiM1owGQ9dSZHZG3t
-# NqMPL18iK02oTZmM2PN/zi5skMgCocRohXg9luDlarUlmyzAvKatJIJBlE23RE9b
-# Xb8JxlaO2Uc/zIcKjpbbrdlBxXMhRsbsYIwBp/E6tklMWzhyIObTzFjvIsrUocER
-# n5clCCZeN/SJSehJ5dR/jFBVr1vrUivQa/5N8417s1zYimQ3xSNvWwW6ZGeyU15T
-# q6VWher9YHuyXvMuyejobYBhMCzG1yTHE0tazr1ZVDHC8lPI/FeRlSfJ8YpaTrdk
-# cIeDQDAifu7EVSQt4co4SyTlvtqp/0IPTz1yDtAzFbHn/AqWyxf8jOvIBdJZfmtK
-# /4jNKVZrhndv6JO6qqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJFuepl2tvpmQsZPMrVLZoPHVf9nPvnkpyvFPo+GdTVoMA0GCSqG
+# SIb3DQEBAQUABIIBgCBMbG7CNkAp4qqH2SGW/POvFumIno1PqMc498e2gLpoAI2A
+# FbtcTZTpWWZ3Xsm//OBHC79fJPkr/LPpr5MmPFcol9zYRr/jR2kb0RkwjHFxri1r
+# fwLqeyHs5DBtxoD+awwoovj3QvD9Od6JNwP9uATTflu3jjpvbbqBuusc4SZ2ywbo
+# 67zhIKG27FAkKpPfOxpe4gXFj+tfCpEUIIXRZhdNfMMSgn3QiUnKlOBGlrBwQMgf
+# zu814zJYNeAMV887ao6/bWy13BXgRv072M58dCyxXioB3HVArtSYIcjcvRv/y2Io
+# dUwfcstUAUhdsU+hQuMq+3jq+nhS+NdTZd71zuQKiAkP2Lnhv91OR+HvhHz1JnJO
+# 0+1Gl9KRnauWJLmxTHr2bkeht3butIlCHMRWlF+D/Y5cVVLoBkultlonqHQ48wqW
+# rdxx3HCz4vQ5wdZMwzIpFqGu2Ra3VpbZuaKcyWI6jYLAdnlrRSXS+pFDMaPg0laU
+# SIFOBuyQi47Pqs37/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIyMTEy
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDyRF5dqm+3g0YS49dlA323KCBvQni/ON90LcxV
-# OhlYFjANBgkqhkiG9w0BAQEFAASCAgCc3WjETwMlqpW0Q4bpwmjFVqQZHjM1EPxM
-# 1G9St7kQzSCLD+lpbtHybZSR/uwm4nQXeQbkMPGannde0JEgiNHYCa9Qk7UHP7YX
-# aKres3ZvM2+5UatngeOTDbRW4bN4TVuvJ0oLochhknIcPSlMDiuae3d/zLkqc9lB
-# f5h0eFTz+NxYDBqkQy1XPR2Q5izc7fzQoxCbP6CmvcAdzz5D0Ch8PFY2AXq9EFjd
-# zclvtPcw2dTCCdGrSBNouDo3AuR2ELxXQvjVvIQpX5ackNO4qTsdWzLQKFKPiAnX
-# htPMIJJ6nQ8NnI6DKtpAm0bl8/rpFZS/GSDhCrmrK263K3mUQnyHHY2X+EQ3XSWr
-# AxTuKIdP9+OE1/gFLA3AySN9rqh2vzlk3XJ4zZaqJSxtYC+RSxt6/a8MCsUccXSO
-# ZS5/iO7ujFIecjcTtwa2V+EV7RZPFtgcF9ZcJC5ZHmam2loN+edrTQpCANI5BiOl
-# k7Ah4M/Gxw5n7CgdWnr1B+fR86rhYtPmkrlV95Wkzp8CnX5YDxfV9lcA3C/le8iM
-# Owdskq6an8/pYKZdixnWQLWAx/rMA0hhc1gof1mUyWdyGZHde4iqPUoMDtyzgzb1
-# a8d5y5T+V0J+d7i63s0mwMItJesfd2rGvazxddF1Ld+wBSibPFtVtpawFZ8P5H5I
-# 6yNjPx6aOQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNDI0
+# NThaMC8GCSqGSIb3DQEJBDEiBCA7vw7v/7w/YmG0Oi1IcS2aP2J/5su/FXJgajcf
+# 6c3vzzANBgkqhkiG9w0BAQEFAASCAgBZZhUQjhnfwmClDu05oVrfl/3XPAWLR8zM
+# asylsFVBedO6Sl4Y5egTvPiJlGC4gJdiqrvL4I1rt4bWYTQouC+BF1mY717YKDgu
+# JrxfLdok0TtcM0YzGWUyOvkRtVnbH09GeZkA0F+NdiDrLJw6PCXk1YzrpXiRpBr3
+# 4x8bgtoKPYKeBFu/N/oIcLM5f1jRpmcAfxw6mxzSD1LX3IIAvH7KH7oJA/pVX/7i
+# 4RniEIYluv//aFFl25hhr5vavD3N3El00/twLi55Bf2GITqGfpZnYoSBpK94anXP
+# D3DTlZmYAJvkOog9MaYT47+cCXX8sQaIK+o+Knx0G1+3X7e6eOpCLB5qxNPKLSH+
+# 8zHzzQja21iyYIene6u1EK+AdiR2MEme/gFPER7HKWlMe2YLRiNzkZaw9oJQ6mUC
+# XPZJ0nIcBMQdK5VgNoL8MiWBQSXx2vctUVwDU4tIaM95lUk50y87FLXuODawTBxM
+# XVBq3YZtllUAhWTnA0et40AtewDkrwI9ADxiAXTU6vlVQYgYg/EuLO6Y1M+gDLHD
+# LdJbNvNeMTnx/1xrTVMD3aTgh207046TIphj4w+AWwat6m0HFBeAaYZfKIAmVST+
+# rr+VRVUDzGgl5jektCDDAZdqPxCyJ34nBwYJ5jtic2lf2TQzvWAKiBAmYZxkF/2s
+# FuLP/DQRVw==
 # SIG # End signature block
