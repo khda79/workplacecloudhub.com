@@ -48,6 +48,7 @@
     "To": "recipient@example.invalid",
     "Cc": "",
     "Subject": "Smart Workplace CMDB",
+    "MailTimeoutSeconds": 120,
     "MailClientName": "Example tenant"
   }
 }
