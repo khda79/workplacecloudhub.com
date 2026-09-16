@@ -8,7 +8,7 @@ with the previous full snapshot and the latest snapshots at or before 7 and 30
 days, saves an HTML copy, and sends it through Microsoft Graph or SMTP.
 
 .VERSION
-1.3.6
+1.3.7
 #>
 [CmdletBinding()]
 param(
@@ -38,7 +38,7 @@ param(
     [switch]$NoConfigWrite
 )
 
-$ScriptVersion = '1.3.6'
+$ScriptVersion = '1.3.7'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -439,10 +439,22 @@ function New-SmartWorkplaceCMDBSummaryHtml {
     $currentLabel = [datetimeoffset]::Parse([string]$Current.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC')
     $day7Label = if ($Day7) { [datetimeoffset]::Parse([string]$Day7.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC') } else { 'not available' }
     $day30Label = if ($Day30) { [datetimeoffset]::Parse([string]$Day30.SnapshotDateTime).ToString('yyyy-MM-dd HH:mm UTC') } else { 'not available' }
+    $statusBackground = if ([string]$Current.RunStatus -match 'Warning') {
+        '#b45309'
+    }
+    elseif ([string]$Current.RunStatus -match 'Fail|Error') {
+        '#b42318'
+    }
+    elseif ([string]$Current.RunStatus -eq 'Completed') {
+        '#107c10'
+    }
+    else {
+        '#2563eb'
+    }
     return @"
 <!doctype html><html><head><meta charset="utf-8"><style>
-body{font-family:Segoe UI,Arial,sans-serif;background:#eef3f8;color:#172033;margin:0;padding:24px}.card{max-width:1040px;margin:auto;background:#fff;border:1px solid #d9e5f0;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.08)}.header{background:linear-gradient(125deg,#0f766e,#2563eb);color:#fff;padding:26px 30px}.header h1{font-size:24px;margin:0}.header p{margin:8px 0 0;color:#e5f4ff}.pill{display:inline-block;background:#107c10;color:#fff;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700}.content{padding:24px 28px}.kpis{width:100%;border-spacing:10px;border-collapse:separate;margin:0 -10px 14px}.kpis td{width:25%;background:#f8fafc;border:1px solid #dde7f0;border-radius:9px;padding:14px}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:23px;font-weight:700;color:#0f4c81;margin-top:4px}table.data{width:100%;border-collapse:collapse;margin-top:18px}table.data th{background:#eaf3fb;color:#23415d;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #c7d9e8}table.data td{padding:9px 10px;border-bottom:1px solid #e4edf5;font-size:13px}.number{text-align:right!important;white-space:nowrap}.section td{background:#f5f8fb;color:#0f4c81;font-weight:700;text-transform:uppercase;font-size:11px!important;letter-spacing:.04em}.meta{font-size:12px;color:#52677b;line-height:1.55}.notice{margin-top:18px;background:#fff7e6;border-left:4px solid #ff8c00;padding:11px 13px;color:#6b4c00;font-size:12px}.footer{padding:16px 28px;background:#f7fafc;color:#66788a;font-size:11px}</style></head><body>
-<div class="card"><div class="header"><h1>Smart Workplace CMDB — full collection summary</h1><p>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client) &nbsp; <span class="pill">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $Current.RunStatus)</span></p></div><div class="content">
+body{font-family:Segoe UI,Arial,sans-serif;background:#eef3f8;color:#172033;margin:0;padding:24px}.card{max-width:1040px;margin:auto;background:#fff;border:1px solid #d9e5f0;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.08)}.header{background:#0f172a;background-color:#0f172a;color:#fff;padding:26px 30px}.header h1{font-size:24px;margin:0}.header p{margin:8px 0 0;color:#cbd5e1}.pill{display:inline-block;color:#fff;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700}.content{padding:24px 28px}.kpis{width:100%;border-spacing:10px;border-collapse:separate;margin:0 -10px 14px}.kpis td{width:25%;background:#f8fafc;border:1px solid #dde7f0;border-radius:9px;padding:14px}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:23px;font-weight:700;color:#0f4c81;margin-top:4px}table.data{width:100%;border-collapse:collapse;margin-top:18px}table.data th{background:#eaf3fb;color:#23415d;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #c7d9e8}table.data td{padding:9px 10px;border-bottom:1px solid #e4edf5;font-size:13px}.number{text-align:right!important;white-space:nowrap}.section td{background:#f5f8fb;color:#0f4c81;font-weight:700;text-transform:uppercase;font-size:11px!important;letter-spacing:.04em}.meta{font-size:12px;color:#52677b;line-height:1.55}.notice{margin-top:18px;background:#fff7e6;border-left:4px solid #ff8c00;padding:11px 13px;color:#6b4c00;font-size:12px}.footer{padding:16px 28px;background:#f7fafc;color:#66788a;font-size:11px}</style></head><body>
+<div class="card"><div class="header" style="background:#0f172a;background-color:#0f172a;color:#ffffff;padding:26px 30px;"><h1 style="font-size:24px;line-height:30px;font-weight:700;margin:0;color:#ffffff;">Smart Workplace CMDB — full collection summary</h1><p style="margin:8px 0 0;color:#cbd5e1;">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $client) &nbsp; <span class="pill" style="display:inline-block;background:$statusBackground;background-color:$statusBackground;color:#ffffff;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;">$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $Current.RunStatus)</span></p></div><div class="content">
 <table class="kpis"><tr><td><div class="kpiLabel">Devices</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Devices)</div></td><td><div class="kpiLabel">Users</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Users)</div></td><td><div class="kpiLabel">SharePoint sites</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.SharePointSites)</div></td><td><div class="kpiLabel">Teams</div><div class="kpiValue">$(Format-SmartWorkplaceCMDBSummaryNumber $Current.Teams)</div></td></tr></table>
 <div class="meta">Current snapshot: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $currentLabel)<br>Previous collection: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $previousLabel)<br>J-7 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day7Label)<br>J-30 baseline: $(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day30Label)</div>
 <table class="data"><thead><tr><th>Metric</th><th class="number">Current<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $currentLabel)</th><th class="number">Since previous<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $previousLabel)</th><th class="number">Since J-7<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day7Label)</th><th class="number">Since J-30<br>$(ConvertTo-SmartWorkplaceCMDBSummaryHtml $day30Label)</th></tr></thead><tbody>$($rows -join "`n")</tbody></table>
@@ -977,8 +989,8 @@ if (-not $PreviewOnly) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBskKlUeRiN/dSV
-# pHEZD0U0zbwwoXCZJARUrUezmtnpRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxCqRLpKqQAj+4
+# jEqs8yRa/Jk9xnZG0Z6x4bONyrfUMaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1111,31 +1123,31 @@ if (-not $PreviewOnly) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBequqODQBoLTp9n6nApDMGN3xX2Ph/Y7tW93w1DvQEsMA0GCSqG
-# SIb3DQEBAQUABIIBgIfvmGfTiQ5WJIIJUuc7p/vt+lSFhPB+/IAyvMf1ACnKSW/c
-# BbuzI9ie7nMSrVA/t5ODaqG62C2QFFvLugTShIs14NHOESt1gnwBMMFXZyVOIyF5
-# TXNuySxiQ373BjlYXYQNodRsXN26t7Lm/VHL/6LJSDnU1g40ozfcr+tIz88Fj9Q4
-# mnrhHS9p+y5qgrz4uN/YO0keRb0GP3wrueAElhbTe7zI3hHAFZFqkUcD5qfqK+Bi
-# IZ1rD6fjdjHaAnV/Pp+fRAJ15e157/Vb6tRVvxR9YbnYWL9nbnhbrSrDX5Je5NzX
-# /awWQ++KBh7wyAfd4wU9Y6J+YBUkWuOwfF1jhlnbhgZ/MnDl7BbpmntPZDPQN7rp
-# hct2c3A1m8FU/1LwPL3ElT7DDYgxEXfxZ8EMYBFuxo33TOixmOevXlh7gSsL78HM
-# GJmycdwKPCzGUz4anFNEDx8kBmEVcEhqU0bHUiL9VGdiw8nmD2LpN0vmYz0w00jm
-# eZyUNvKYkcORi3zTraGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF78KV37vFtrbM/cro6I7IG1kQTtOtnsYlNoWLVZe7ehMA0GCSqG
+# SIb3DQEBAQUABIIBgAG1yWTmSJC65SNi22q445OeWlmMWpZxhlRoUE7DNUmmCW0X
+# Zt7YmJtIazk31TpevJI2cK9peeFNiU75NrsJaAy+eh+Q4UDZmxAR2gGYbK8LTELO
+# sF+g35dLF5nWCctSmbGWLkJKrSsHgge1/SlyydbHAFWVs7PtgGrvQOW0eFOZAGu3
+# NRJstvG+G2jKNuMIWCTtZJJFrDlBAb8GlAW0P1xEg9rhua+as2HBqgrJaW0pG9vf
+# RKftJzioDjODN89MAjUl7RGUBN2NtMqdC7ZtsxlvuDGoevql3qConkTlMVo3QVCI
+# n7TnRDiVHb8ceZruy6SMvQ7iLj3I1l0oFNxm2v0lAsBK9ptpC/SijhjbEGFW95Pp
+# BIHRiZxRxFv4uSZMxhFrBNSdpza4KBlq9rz5RZSze6MBTx4aFJAFiCWLP2A/vKgX
+# 0kfAxtJvk3lbF8DrR0ICohMu9KZI6q2i6aeKhl5heFjUqHVydUVdUHjBVhV6LmbS
+# i1/NSF3Tqi4ipmKmmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODUy
-# NTBaMC8GCSqGSIb3DQEJBDEiBCB6GdWgxrlMZ0IMyunAqpa/3ElNomIUYtXyV0Sm
-# xqGNmTANBgkqhkiG9w0BAQEFAASCAgAvgVD4caaBA7WGHsw6aWFJilIXH3BNU4WD
-# wAtI6MokHDtLYbuhS0ApQ2JcvfBiRUER0ohGbL8jv5GwUMx+A9QTEWBLFFuMCAKC
-# 45MRhwnRV+Sj7yjHDYqWNmuhPSccFEYy7gHX4ZA47tmNrkJZyvVsHbvY+yQw0kVK
-# lIRlVDODFbPS8aiuVVw/SNtsVbf6hLjGhwmjXbHl7IvevCflTvinTAAMM/FeQwWs
-# M7GZMCA/9zss8HO9ETy8eByMYA7+GjkoIEjlzy3odNk1MxbwbrWxiUXldfJB7drV
-# BEwM+iOp0gvzcSJkXxSnKK70jFZ7LevULJsvH2Xl1umF5guK0l7nnLrPBCRaHz8I
-# da1wc1DnBBeKzq3+f5RQH2Y59JmMCr/JP0+GAQnvSv822MleuXvwv3foNks6Gf91
-# 7h7dIFMy0BZrLgUh6R309SHTJaBczG7uun9VjcDllIbieI8hmz56Cg+2zVMUKHPN
-# UESUF3/y6Ve2lagWWNJurY5UWKwCC3otOcuFTx6hnsgGS3MULsfkR4fde6sRODla
-# wBqq06SyFzvzp3WFoX8vnDEV7gtlnECg5xK0daK8HmkR6SUwNWSO/2EcNQ8uMOsA
-# LA+r4DBKJHsnMr9H5AP9vT7L/G6oEEhQku2Ck9RlOboWxrAuTtkzBk0DBIH9xcBR
-# bjagHMXOrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYxMjI1
+# MzhaMC8GCSqGSIb3DQEJBDEiBCAtBaqfmm+1mB4JV3mCslnNJTIXRJ0PqrxBQmCI
+# gmOvbjANBgkqhkiG9w0BAQEFAASCAgC2HiEKs2NAdr9OYctP79y2SeaqVlExHYtV
+# YR8gIPQmukzSTzqqGAYsBTEiS1LkxyZGZQX7P8aCdZaqxkpSJbBYechq7DWo1Pyg
+# 53MLkPs+izSL2HjjtqkTkEIFcuctrbAZBCJr8UkglgoG0MWbTejIgy9g7tDmtSsb
+# smuD2v8We6wPP/Y6jn1SQqZDlmYlw/MCPzBGZ5//2WteTbJErNqbT6alC34R7siT
+# N5nh3tBENYj3xPxjEXRwijobTC4aA7kfHc5Yc/VN13dPdhqcn8laRv4bFBbxYdDB
+# CKhy28C1Gu7GC2KVHlKyqRyJanYGd1pTwDTGHFcQvlOO7f44ZnHG0tKiJYuWoUV0
+# n4Ph4izGl+MRdfYCg0QclZKcefGzdlxkUL2iEC/YJH7VhKRvqgzSOZwJW52F0vPD
+# MqK0bB9tEXI1im4qVDTyimeXvGDBc1WMluKzE/GzDFnUxNpxk90OrXrCmF/B+KP2
+# 6ZydytevN54tlYtySa9s6+1mzA7LFyOab8LaJtPXETuPyhCNe7B3UOvEhXaSI/UF
+# ti3+yNsT9orzDcpNH65WmwUGhR9P7IqjVZH033YTGh6IutUvEUoQV+SX00ELxmic
+# v05m4Vz3XInfbg382GtTM4NYcOp9GWYOv1N3qUnmKdjKXaGF2YQ1gPdUgG7rHHF2
+# qm9e6pgNDg==
 # SIG # End signature block
