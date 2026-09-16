@@ -3,7 +3,7 @@
 Runs offline tests for the full-collection summary and delta email renderer.
 
 .VERSION
-1.3.6
+1.3.7
 #>
 [CmdletBinding()]
 param()
@@ -136,7 +136,8 @@ try {
             'Collaboration summary metrics are incorrect.'
         Assert-SummaryTrue ($result.BodyHtml -match 'Current<br>\d{4}-\d{2}-\d{2}' -and
             $result.BodyHtml -match 'Since previous<br>\d{4}-\d{2}-\d{2}' -and
-            $result.BodyHtml -match 'linear-gradient' -and
+            $result.BodyHtml -match 'background:#0f172a;background-color:#0f172a;color:#ffffff' -and
+            $result.BodyHtml -notmatch 'linear-gradient' -and
             $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
             $result.BodyHtml -match 'data:image/png;base64,' -and
             $result.BodyHtml -match 'alt="WorkplaceCloudHub"' -and
@@ -174,6 +175,19 @@ try {
             $result.Previous.RunId -eq 'current' -and
             $historyBefore -eq $historyAfter) `
             'Finalization created a duplicate business snapshot or changed its baseline.'
+    }
+
+    Invoke-SummaryTest 'Render an Outlook-safe warning banner' {
+        $result = & $summaryPath @parameters -RunId 'warning-banner' `
+            -RunStatus 'CompletedWithWarnings' `
+            -SnapshotDateTime ([datetimeoffset]::UtcNow.AddMinutes(6)) `
+            -PreviewOnly
+        Assert-SummaryTrue ($result.BodyHtml -match
+            'background:#0f172a;background-color:#0f172a;color:#ffffff' -and
+            $result.BodyHtml -match
+            'background:#b45309;background-color:#b45309;color:#ffffff' -and
+            $result.BodyHtml -notmatch 'linear-gradient') `
+            'The warning banner is not Outlook-safe or uses the wrong status color.'
     }
 
     Invoke-SummaryTest 'Render a failure alert without creating a business snapshot' {
@@ -224,7 +238,7 @@ try {
                 (Join-Path $dataAllRoot 'CollectionSummary') `
                 -Filter '*.csv' -File -Recurse).Count
         Assert-SummaryTrue ($result.Status -eq 'Validated' -and
-            $result.ScriptVersion -eq '1.3.6' -and
+            $result.ScriptVersion -eq '1.3.7' -and
             $result.Subject -match 'mail transport test' -and
             $result.BodyHtml -match 'SmartWorkplaceCMDBMailBranding:v1' -and
             $result.BodyHtml -match 'data:image/png;base64,' -and
@@ -330,14 +344,14 @@ finally {
     }
 }
 
-Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.6; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
+Write-Information ('SmartWorkplaceCMDB collection summary tests completed. Version=1.3.7; Passed={0}; Failed={1}' -f $script:Passed,$script:Failed) -InformationAction Continue
 if ($script:Failed -gt 0) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClZINECh8dud71
-# td3gSPRxXDNOCLncv2C6vmZJR7SN4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2/kMhGzzSWie9
+# Llp0f2csCp52Csavoue13ghPRTfYeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -470,31 +484,31 @@ if ($script:Failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEXreiZfllOdyBfkALOqxJXunFUCJU3Vv6gQ/t9puwR3MA0GCSqG
-# SIb3DQEBAQUABIIBgJs5XERffO+tas8o40+U+yfdI7YrJs8WF6Rx0W/mdNu3dLQ+
-# RByDA31HjgM8YWxktbFGMPiMJslVf2f1YvKQVNq1ySXcEqm2xuTWPx++MIJwoxah
-# 51XB2P8JMxvHuCqMkVAjsPZ1kAA/Vn6D0UoshTsyc5VD4v0ay1so2Um486hPYdkN
-# A5Zp++SmO/4SPQIEQrcqW6mg7uv1s2aiHtmUbvA0sVNiLZEUOYqBvOMHpYcn8517
-# kSi741hFXLe1WCl2x+PGGJP8VV4yMheKePzYdFwulx3E5+rEUZ7vuA2xVQ4+bbQa
-# TcI+yDrQlLa/yj6x/IvhQjrFSrCAbifp5H585sXyL19lxCI5o9eSrIN2W5dJEufk
-# RSHStYv3mCsCMOxB5a/5H9enAgElRdnPEXnijniZxGaQLigPDQc49t1qDnUyiv75
-# smmU8ESgEY+f0Qmt5P4kRMUs9dby3RrELTbmbgztyYWpB9n+0vRvBss5GhLvm3Vl
-# U7vvBhSxtOJHOh6ZIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGuqgA0xNYO5Zlq8lMHyS01M/KVY1/qPNGt4xQJH0UkSMA0GCSqG
+# SIb3DQEBAQUABIIBgDywg2yk/CLwDmdZFyZpMomw1o6KrbCnkKjJOYpEYeOSXbvi
+# CXvpOyZU+QcmXKjnPBMcXFh4M7VDQdAFhYN9PMRR7RfaZRpOgy5wj5azc4qAI8KD
+# YovgT13coRKXAPQqrlwTle/yzqI0QaE5XVaaYC8nFi0eMhwoZCmeqFEmKV0NfsMz
+# KXIRpZ3GpXUJUqGDwCtviTwroS5ouOdbLkOFXYAIxEWxYggSdTsSrQsX5DYQJuNN
+# QSrpKT2mcddRQn27BtbiM5d0cagE8ewB9gAo+a0YVVoR4REMEm/LdnaVVHKwyO1d
+# f4SSlcQybwQjRhB4WL3+HS8lqkPgtmdtsSkUGEHV4gdEDhQmjZfL9yk80WfQ8dZg
+# 7qHq545e/8Va8pEyepB62+1pPxxqqmcSKOUqB80QccN4LJT7KlINijiDGs3uapnc
+# j3qw8nbyc5Aah5YgwgGy8BYbFTMj6RZdMFjYGYFNClzaaNmys4qKKKC1ixyP2m/a
+# 5PMyiymPkzlDsAPTyqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODUy
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDIzfKYcFVAFfTe030Hf7Jp9H0L1++vC6YV2FLN
-# 5ndKNDANBgkqhkiG9w0BAQEFAASCAgCEZoUhZ8AlIrsy7yaM55oeqQNAO+cBfB8P
-# IWgZis8c1bAPze+CIJwNggyE+G5yZeypjEvakBYWhok7J397s2iq7pIzBPLFUezm
-# 6rCmv2Ewo5sGLpIFmvgYctWILq7KBLiTBHC+q797mKM27NAIUZ0xKepRrmon0g5S
-# uxKGC3tUXPVMlpphIXAmEwR/AdaATArcTdnfEWl06TQUR5jKJHgU+ZQKuTV3Trmc
-# yoemdMQQ66XRcz7y78fhB+Q0n+Uql2oJNBwFWzLIHEqnxaA8l3SidHDtUjqgv5/3
-# 9ISyZUAeZZ0RLQ4htmbMQDpxh1h2vWqanoF74Qqnq4OXC25mbDAI7uy27GUvkbLQ
-# jiKa6TmX5vJE7+4HjnGrPpvB7dBdfRdHl+L4TeDPuIeTKSectgOpVNS9X4j6MbU/
-# tj5bW1YbVfxSoazZiU47mL708+rVJeQL4B/1x0sqy3cxuGuXnMVAiAHoJCjiJp6a
-# xxZJUZvkfXGH2Tw8JOuPS5U8l6mNyEs7/5jn6Qfd8IMV2I7Ch6JVzV7HaxnIxAka
-# 8RLDcxVINxxvUxOHF3UyAF54Wi1cyWYg8M27ADdKqxMvogGkEZH0hjjb2248qFqT
-# EroYMnpwmPPdnQ69eFsONAmiXSK6SXM1tqK7+LF/Hs5d905AcOfyaXP6bEnvqeAi
-# 1fns6O1VZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYxMjI1
+# NDBaMC8GCSqGSIb3DQEJBDEiBCBzVm98utpr/4NvjTAGZ4JHywTbkXpld2tDFWR0
+# Kq9p0TANBgkqhkiG9w0BAQEFAASCAgAh0R8snJ1LaEK7Qpf9w7GByJivlkJO1bpA
+# Yxv4NTKRQggmoahqQqSGvliJnmXPZPRqjHNyWrRZnvg+E7oyI+DP+RWgV4Myp8He
+# Cgq7ZGK9UZOK9S01lx5c/U0zglHP+6rIOAnGM9PLusMNmyPaQJ2B3mP53WDx1GZm
+# +QGqCxbjjR8RnhwsT+x0vWjH0QS9ZpeGsfWt8aecTv4ul3soP2Inpsi0IOjyUijM
+# 3/FEebjceh/aliOjyNdIbY+f83RxFHNmxa0Z0osqMbV3MIVAy22dDdcjR/sz8SZT
+# OFH/hXBiFD4aCoewZgCxRU8rFPZZ/srDUfrrHMVHen52EIQx4g8Ki6KwNlnnKPmv
+# KTJ7fFOpZsN43Ad9xTNbLe4iqTcA2wqixCW1BIYFa0Bov7JtsW8GftknIWP3+1Lc
+# pJduKxOi2RFmU02k5EqU7yGGlzxp0EsPy6qRrjYVN+B9qE7zI2Lnx1p9TbzvtMni
+# W4Dj94wTP9sUDT2ngkK6GNvPStHFLZzOxvl+ebREJ8g3nXw0GWn8cEb4W3+8x8oo
+# f1RBkVvO0BLcRFiWR9SHNYOgrvftAcrOqjcoxmt1ESlkRbSb0/EymZlcOpKPDObh
+# tc9MZzo3z45GAS9a5G2l386nNiGMb3/dvS/1RSpCHGqvlrq21ZScyTPY5o5Hnsk4
+# jNmaz2M05Q==
 # SIG # End signature block
