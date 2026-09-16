@@ -9,7 +9,7 @@ remediations. Creating the temporary export-job resource currently requires
 DeviceManagementManagedDevices.ReadWrite.All.
 
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding(DefaultParameterSetName = 'Graph')]
 param(
@@ -32,7 +32,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -59,6 +59,39 @@ function Get-CleanText {
     param([AllowNull()]$Value)
     if ($null -eq $Value) { return '' }
     return ([string]$Value -replace "`r`n|`n|`r", ' ').Trim()
+}
+
+function Get-UpdateAlertBaseKey {
+    param([Parameter(Mandatory)]$Row)
+    return @(
+        (Get-CleanText $Row.SourceReport).ToLowerInvariant(),
+        (Get-CleanText $Row.PolicyId).ToLowerInvariant(),
+        (Get-CleanText $Row.DeviceId).ToLowerInvariant(),
+        (Get-CleanText $Row.EventDateTimeUTC).ToLowerInvariant()
+    ) -join '|'
+}
+
+function Get-UpdateAlertEvidenceFingerprint {
+    param([Parameter(Mandatory)]$Row)
+    $payload = @(
+        (Get-CleanText $Row.LastWUScanTimeUTC).ToLowerInvariant(),
+        (Get-CleanText $Row.AggregateState).ToLowerInvariant(),
+        (Get-CleanText $Row.CurrentDeviceUpdateStatus).ToLowerInvariant(),
+        (Get-CleanText $Row.LatestAlertMessage).ToLowerInvariant()
+    ) -join [char]31
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+        return ([BitConverter]::ToString($algorithm.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Get-UpdateAlertEvidenceKey {
+    param([Parameter(Mandatory)]$Row)
+    return '{0}|{1}' -f (Get-UpdateAlertBaseKey $Row), (Get-UpdateAlertEvidenceFingerprint $Row)
 }
 
 function Get-PreferredText {
@@ -344,6 +377,25 @@ try {
             SourceCollectedDateTime = $collected
         }
     })
+    $alertGroups = @($alertRows | Group-Object { Get-UpdateAlertEvidenceKey $_ })
+    $duplicateAlertRowCount = 0
+    $collapsedAlertRows = New-Object System.Collections.Generic.List[object]
+    foreach ($group in @($alertGroups | Sort-Object Name)) {
+        if ($group.Count -gt 1) { $duplicateAlertRowCount += $group.Count - 1 }
+        $selected = @($group.Group | Sort-Object DeviceName, SourceReport, PolicyId, DeviceId, EventDateTimeUTC, LastWUScanTimeUTC, AggregateState, CurrentDeviceUpdateStatus, LatestAlertMessage)[0]
+        $collapsedAlertRows.Add($selected)
+    }
+    $alertRows = @($collapsedAlertRows.ToArray())
+    $distinctEvidenceCollisionCount = @($alertRows |
+        Group-Object { Get-UpdateAlertBaseKey $_ } |
+        Where-Object Count -gt 1).Count
+    if ($duplicateAlertRowCount -gt 0 -or $distinctEvidenceCollisionCount -gt 0) {
+        Write-Warning ((
+            'Intune returned {0} repeated Windows update evidence row(s) and {1} event key(s) with distinct evidence. ' +
+            'Repeated evidence was collapsed; distinct source evidence was retained with deterministic fingerprints.') -f
+            $duplicateAlertRowCount,
+            $distinctEvidenceCollisionCount)
+    }
     $analyticsRows = @($analyticsSourceRows | ForEach-Object {
         $deviceId = Get-CleanText (Get-GraphValue $_ 'deviceId')
         if ([string]::IsNullOrWhiteSpace($deviceId)) { throw 'Endpoint Analytics report row is missing deviceId.' }
@@ -429,7 +481,7 @@ try {
         'Intune_EndpointAnalyticsUpgradeEligibility.csv' = $upgradeEligibilityRows
     }
     foreach ($name in $tableNames) {
-        $key = if ($name -eq 'Intune_WindowsUpdateAlerts.csv') { { "$($_.SourceReport)|$($_.PolicyId)|$($_.DeviceId)|$($_.EventDateTimeUTC)" } } else { 'DeviceId' }
+        $key = if ($name -eq 'Intune_WindowsUpdateAlerts.csv') { { Get-UpdateAlertEvidenceKey $_ } } else { 'DeviceId' }
         $duplicates = @($rowsByTable[$name] | Group-Object $key | Where-Object Count -gt 1)
         if ($duplicates.Count) { throw "Duplicate Intune analytics keys returned for ${name}: $($duplicates.Name -join ', ')" }
     }
@@ -473,8 +525,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDQoyzRx4w1cOw
-# 7hJJm7F1TqGH6jNwMG8K4HrHZkcWrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGW72Gu2NIbYAm
+# pEBptli92bi1Sg+8P8jkeMLQXJtUbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -607,31 +659,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHCDfsiz4wbpETPn2lPBgBUSiUyeer7VoaTFfS6mpcu9MA0GCSqG
-# SIb3DQEBAQUABIIBgAoc77X2K9QG7f0FBdREhoJAC4KCQoUMPH5sXPWvd91G3Evr
-# 6tBpwjumJS/dxnmYP/OSS9pIz4hiiC7mstIz1/5rhqV4tZ/yxXpwqyqaUcxJgO4i
-# zwFLqE9f4k4q8oFiSUwMdAdZc6us6OVXI8XRK89LfBNrQtg6zBhmBYl4Hbzon+UT
-# NJ9DayE4qw+HNUEtxR05H+BpplsQ5yHAsNgOn9csAbBJkyRH/J5Gq6liL8X+LBri
-# 9XVJKbWshnW6Elmm1/TKxcFdUxplB3xgH1fJCUXlCoeD0DKSh7p3KKlC5gsy34Ty
-# YGhKzU9ab8pFfDM/QzlFy7l79eYCpZPyPPKYJ8YSEsRbkDdx9WTRhKXpWp9C1YsN
-# SEpF7+aq/p8ghcDACTfvzDiLcwqia/usezNxMlIdpbnC8Vtw/fZzTgTCMfI6Ywyu
-# zcjTZtjo+xQDzEjWNizoA8+9IOMIxpKZSt7bXTc0WVgx+Co3TtgpaV9PnzZzNI2t
-# CuPvXGY8qu6N//HUTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMVrtdBFAVANfeyC4DDHrBGy5kkYIyGSko1/7zgrUgGwMA0GCSqG
+# SIb3DQEBAQUABIIBgHq6whhxAM3hw+wNUqZcg2jKVCibwOAbIEb0PP807DmSescP
+# UG391ONf7YAQisXeMCX+2mi/zJXI+xBkPHzjfO4c8VuzVyDDFsOi6zD3eYYfVZow
+# QH7L+1SxbyhlDrQ/7ZJEA9jw/9qWfWKctiJQol4WMXmXYFi8KiWAkXixBLc8jGGi
+# BUxbuWRC4N1CHsDDmUd0nI4kKhlhAqYpeeyVgGRNek5AjHu+T2GqlNiz1BzU2AuP
+# JZY4kKtCW/F2/WfO/vNMT+RhRJ3YWxV4zxSEBqTsun4QCZyA1Q2+B1PT337tsCAF
+# Dd6rg6wQMvefyHpIP9XyyNLAdSueN1No33sqwxH8+ssVNScPlQj7fys8N/+DC384
+# /y8l/ZNvKEGHRqn+M2qXT0YlgmLzpy7SXbAwmS3ya/I8EON0tJsii1JkvRmgvk7k
+# S8GLfpKigId2GCyzhdTSWPadQ6be2gEi6jZYOKpUz78tjzL3pi9lz7WgBh84MffZ
+# 01CyS5j4B2+9D88az6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
-# MTRaMC8GCSqGSIb3DQEJBDEiBCC2eUxWLrfuhTr+anSL+Z5n7YwUZPD78l866tNn
-# SfmWITANBgkqhkiG9w0BAQEFAASCAgBGocAsp+GUvneZOkomIXH8qrDWDqRlLZQx
-# 0JUyXLMz/DCUuMhaa8RZMfz+Im0swMseA07xsf6cT+PSl+hS6rSgqGkK6vSoZIsE
-# fEO+VYF9kc8NOpj6ilJCB1AIXW2KrkM82GW70qIUL2hpUUqGX2cWeFx87RKoGbTC
-# dHZnzsjeIT3Sy5SR7n4KaXqlEEA6Pk/OexMLIX9zuu7cHg8E7WmCneV2iDUGuNKi
-# iZbWAEVYw8u89wc7qaZ6N4dzU5uvHFNzRzbhCRl4xwEpZELLHw87ze+UYRV4g51T
-# olYkRHvKUCtKFUQkf6Rz8vI5WWmv1FzPksKFd82YvsXrB9Xo10uByvHbdWVIwwpc
-# Ys8moaOsdaIYbuXfcFUxSR/NYV8/lauutcbLOREG6QJsTh1vHd27YO3fRY2uP7Ft
-# nuJiwcEt9b4bzag5JSxQIuHc+17MQCyD1bRD10gvi4o3XC1STxo1TgUpkrpjpCnb
-# m00lkhHtSKl0uQUqNcG/SUlgF8vwH+lXGItUluzZLt4QqqX0VOJ678ErjG2bRG1h
-# kuoFQrfV+wmwSQno1wteynmUPMImIpGIo6V7cj6xFibQxFVS23iiVRQL1k4jrJn4
-# H6Zim1jSL6eRMPvHtES4AqUnwGsZ9Uk35xvKAzPyAz4fqYDVgbyvmoomPimvDNKr
-# kTmFahQsRw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
+# MzhaMC8GCSqGSIb3DQEJBDEiBCBp/qEC2Ui876TpGzvyHDjmnLBOy7/nBvi5J4OA
+# yK2upjANBgkqhkiG9w0BAQEFAASCAgAHMcANyh/4DkTbWQLxHdTob+++AAN3OAl7
+# nRfP4QI40OGqnEZRPL99LtW/IBcXBUgq+czcWy9PhzE4PDeQftWwIfKRF8qGmh+f
+# JFNDFcFohNnPnJQI+80zYxrpKpcWTnpnnq6WWHervvCBof5XC7hDqIf48cn6ipdZ
+# eP4CV7+X0eA3ny8zkoCMP0OuUvZZ+1JqGcQS8vVVk0uO3tms16D8eglX3lkAqx0f
+# RXR1pBVdhHRIH6KuI1gHt6NU8P26XuiXBvCUj/rSmunPCgEnHdM6B+E+Wgbqrpbv
+# Sxl10k/aLX+5b0nr4/s16l8WxCKGHJSbSvmowH3yvv5trnzvcaqY9bYPtgqVOCnn
+# aCvGU38A8j1kJFTh8+tdbp68PxoXrkMyKGqYNgEDwuT4Vqc8Wr5aZ+p3ModKLmaB
+# IXRTpEAZy70EWvzmtCDn6qJgPlO5D0M01zgKtQgpU4rwqFckmf8GwlL/3BhnXZ5a
+# DHa0i5rOChw2OXPCyVq9KJqSXIGeTxNes+2kv82cC7FJjOvzlkcm0VPtZDQhxw6x
+# XtRybq/YVwOuwvU8oz6S9EVIQgTnlH1nSKNQeZKTQM3SseY+vtDp3YtRU6L5qZAC
+# 4NOvTPgooW3d7Rp6bZxHRN5T1iCMOixSq+G5FTBJ+UsCtvNjielI8ahvw5ylR2ck
+# x6oiTHqebg==
 # SIG # End signature block

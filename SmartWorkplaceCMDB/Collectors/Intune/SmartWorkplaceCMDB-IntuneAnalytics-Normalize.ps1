@@ -3,7 +3,7 @@
 Normalizes Intune report exports and upgrade eligibility into Power BI facts.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +22,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -39,6 +39,24 @@ function Get-KeyText {
     param([AllowNull()]$Value)
     if ($null -eq $Value) { return '' }
     return ([string]$Value).Trim().ToLowerInvariant()
+}
+
+function Get-UpdateAlertEvidenceFingerprint {
+    param([Parameter(Mandatory)]$Row)
+    $payload = @(
+        (Get-KeyText $Row.LastWUScanTimeUTC),
+        (Get-KeyText $Row.AggregateState),
+        (Get-KeyText $Row.CurrentDeviceUpdateStatus),
+        (Get-KeyText $Row.LatestAlertMessage)
+    ) -join [char]31
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+        return ([BitConverter]::ToString($algorithm.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -93,8 +111,9 @@ foreach ($definition in $definitions) {
                 (Get-KeyText $_.EventDateTimeUTC)
             )
             if (@($keyParts | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count) { throw 'Windows update alert row has an incomplete stable key.' }
+            $evidenceFingerprint = Get-UpdateAlertEvidenceFingerprint $_
             [pscustomobject][ordered]@{
-                TenantUpdateAlertKey = ('{0}|update-alert|{1}' -f $paths.TenantKey, ($keyParts -join '|'))
+                TenantUpdateAlertKey = ('{0}|update-alert|{1}|{2}' -f $paths.TenantKey, ($keyParts -join '|'), $evidenceFingerprint)
                 SourceReport = [string]$_.SourceReport
                 DeviceId = [string]$_.DeviceId
                 DeviceName = [string]$_.DeviceName
@@ -109,6 +128,18 @@ foreach ($definition in $definitions) {
             }
         })
         $duplicates = @($targetRows | Group-Object TenantUpdateAlertKey | Where-Object Count -gt 1)
+        if ($duplicates.Count -gt 0) {
+            $duplicateRowCount = 0
+            $collapsedRows = New-Object System.Collections.Generic.List[object]
+            foreach ($group in @($targetRows | Group-Object TenantUpdateAlertKey | Sort-Object Name)) {
+                if ($group.Count -gt 1) { $duplicateRowCount += $group.Count - 1 }
+                $selected = @($group.Group | Sort-Object DeviceName, SourceReport, PolicyId, DeviceId, EventDateTimeUTC, LastWUScanTimeUTC, AggregateState, CurrentDeviceUpdateStatus, LatestAlertMessage)[0]
+                $collapsedRows.Add($selected)
+            }
+            Write-Warning ("Collapsed {0} repeated Windows update evidence row(s) from the raw snapshot." -f $duplicateRowCount)
+            $targetRows = @($collapsedRows.ToArray())
+            $duplicates = @()
+        }
     }
     elseif ($definition.Mapping.Raw -eq 'Intune_EndpointAnalyticsDeviceScores.csv') {
         $targetRows = @($rows | ForEach-Object {
@@ -159,8 +190,8 @@ Write-Information ("SmartWorkplaceCMDB Intune analytics normalization completed.
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUWAP0zikaix6V
-# W5VaQ/K3RlCLaukHKpvgEAqeO85vZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjBcUMl+KFwrKv
+# OvKd7m3RpBOQ+0sE+epnSZxzB0lw/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -293,31 +324,31 @@ Write-Information ("SmartWorkplaceCMDB Intune analytics normalization completed.
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPMwtGXd/I9v8N3H8gV2z3vfWDaU1suS2ImYc5uZMwzTMA0GCSqG
-# SIb3DQEBAQUABIIBgEvnGJv4n/tf7QYGfS+xTOqcJC8WVvtWA9iLdK8nT+s/vhe0
-# vOCZaqJUy1opC0djHATKeQ2iDQORa8Uhg4/ro5OFzJ+/kA4GH9JZ5Zb7y2hFoPQL
-# wI+2JhuWgZoh6OFUkztUD2tEl6OyHKgKQDePOJxw23s/XcBP2s1aezjrd9ykb+TA
-# IqM+qvICSMc457FKG90onDfRQpudSpqjIf8hlxt3m9E6xLHfr3ByVGcFMXlePjWP
-# u/HT7EX8BhSVkH/hWFuFvF1mrLFJ39jUMsqlnhCc9e+6wshZ1h9E0Hsa6iTaPRxJ
-# KKq9vq0cQ8IUE6LFQXbdo+EwOTw++OjeEpZprFj5BUChLgg9oOV3QiN84iYNQ8Mv
-# uNsl9k0Jq5/RRvG2O82LdG2WSXCR5v/aYUc09OI0CyDY1ENvosn4KmXyPakHyMKs
-# A9YAxtAjtt+Oi3v0xoTf4ZvDl/zxhtO90rvAekH4R2+YbmTwDh9GYfE2Vc5KAnKr
-# 3qgVOEEwq06Yp76hOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFAHbgbKzgnUopdbVgpRgkGwezpMzB3bUysQhpZWPZxAMA0GCSqG
+# SIb3DQEBAQUABIIBgKM793lG9WHYgjU+3Ks+P9xuGiiT5uGBOq8t/1ntpazb1tg3
+# pz/exaadElQbIw/3WoJFriwUUJwaWXtqxD9EhzmOto1x+zqA7GnfmKjT9WFiDxIa
+# MRLJ4UXsfznkGzVxKKcp585HiqYAo0gWf1ehZTkCq21HV7ddrY89usYJhM8tFV54
+# bmBF2SHxCSQMckslOBlr+Iwb6wb1lZCMqrlJZBNU8amNtuHKkUTXJuPZjR6eIzlc
+# 8/0j28ChERNsmAaW4u0s+v93G2uWp52eronFa1KX785ZlYF5GO+sVKK/FtMdjrNo
+# THjekpotODDsjuDeDXJYLyMcqO1T/qKtaHfPt93SVrR8rnTZGB+xJS7MmsT4xbHH
+# XTk4MGH+4boRXVlOx+FgqnSkvH8ZvHo8raYBSMLEBi5ImR+MDfCEDFBQByleSPfq
+# uoQLALzacIqotYFkLkmRbebr0TMd949afewHzoLHNbjCEqAkogoOanAG2EYiD6IN
+# JVcn+q6LFBgn40ddfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
-# MTVaMC8GCSqGSIb3DQEJBDEiBCCUgirIfYK88PbH5laL7wtDrxKpLwlMx50cks+S
-# sM2ulDANBgkqhkiG9w0BAQEFAASCAgBQqvdzjaOxTFWCKm8yZqx+EcnrPs/83hOq
-# MRqZRxwzn2hNEVuBhxz7jUY2w8Jcgvtcdm7lBMqgEkJoCyLeiFzwJ5K/qrnScuDO
-# ovaShXyXfGN37BOdjFOwp8fBX9jy8TcnAVikPrxjbvtVWvtCJa9+hGNKrxXuaos8
-# ubiBRGzRnanlSHkEdbtnI4n76e4b26lmQJDsFe0wbCezp/v0pTZD8RD4UweW+P3N
-# 2A5HO3I9sOAE9KSgOneGD1SkM1f/Eh52OW4dai6Wk8XiWAPFZguc7aZ7tLA0rMUX
-# JkkJpkOXW8e2TARiano+U8B7veMXyCZLay7MRzz24ODAdf3+3c6lAIZTlJERZpgf
-# RhFOdfyFPESy76JmRYB9+ggod8k1S8c7dXJ0b9smeuZbrsSZp5BRWBmbHLwieJYZ
-# PFOW/GEk46BWchfAFmcNclXS8rFL+K/cjdSjvu5eBdBBT2QlKxTxj25xHGP+mewn
-# Jv30P5ZFwY52FoS+9TgJyOYl6GrSOJxjcXs6Nfyaj0JTJ9861BUgRVgvoxoPf6jy
-# ULINkZGlYDVI+8/lbf6q0GhRmroeOuLrOIUbX3ZoTV/uyOCd37V4VSM0UGz/Wmjw
-# UyGFFtBg6VdZ560hmuNsESf2OKO1K57o5k5ZiKt9XeTkJEYkhVOvATR+zVg+jGLF
-# KSq/j0iceA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
+# MzlaMC8GCSqGSIb3DQEJBDEiBCBpCTT+NwHvcyRANrUAAbwhb2W6KNCT7ZwyO36g
+# wDL7ZzANBgkqhkiG9w0BAQEFAASCAgCgjXXN8TOoh7vN1wm60nFFLAaEF2jmQrpZ
+# DJueTNWpZII8M91q6FvGs0fqfV7p+rGuFMT1yHnA4IXY+1qaO6QsKvERFjmvwPKK
+# 3DcZ9Ui5tRWiHxUOsU8s3yuKalxYJlRJhzKIUpP7K51tlerHCWCbo/T5ezIPI8Ru
+# JFTdO4sRHhrJmA/heb/v318AjRuEFk4J6WaENLAfcPhxqLu3QR6a2y7GLZE5JcTb
+# 1tyO/xuUAZC1D5NQvdSaKTydaDrbIEhUcFgZ6/u2/+xRBoiz1NXW51vCDMNhg8dE
+# waLmT/ZvINegu5cian0qZzNXjeDEXdW0C/8mOsndN0seHuV50Lhrt9m8Cfl4Kk5g
+# DuZ42OPlCwnm8uRuJHikBPEJ/FX0Xhq5Dcqdxx2uTyWwvCpaMp5rXhQo3uwLzQK9
+# bhjOcZ+KpmAsXpkSKjeKIIarBHppaZE/y1vnEudZe1cGeIr8XKyEX+GdkAFkXTmC
+# hfZikgoKQM3/fubU0sWtVJvRZ/VTgll9q4yiG8eOYlUypOvWVRlbHN4SfhnnR5Sq
+# J22RN4+5xAZTM3usOQRD+/laxARix5XB+XqdEfZBbD1otKKwTVCUhHxSK6LpdzJv
+# 4foKMh9j/lCYl1kU1wlLI6PPrBanFk0QALcOZndQkffhRkSoNmlSgGHftRX9WR78
+# vYb628MwJg==
 # SIG # End signature block

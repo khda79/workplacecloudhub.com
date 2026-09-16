@@ -3,12 +3,12 @@
 Runs offline SmartWorkplaceCMDB orchestrator and launcher tests.
 
 .VERSION
-1.1.14
+1.1.15
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.1.14'
+$ScriptVersion = '1.1.15'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $script:Passed = 0
@@ -121,9 +121,9 @@ try {
         Assert-SmartWorkplaceCMDBOrchestratorTrue `
             ($result.Count -eq 1 -and
                 $result[0].Status -eq 'Validated' -and
-                $result[0].ScriptVersion -eq '1.1.14' -and
+                $result[0].ScriptVersion -eq '1.1.15' -and
                 $messages -contains ' SmartWorkplaceCMDB by WorkplaceCloudHub' -and
-                $messages -contains ' Version : 1.1.14' -and
+                $messages -contains ' Version : 1.1.15' -and
                 $messages -contains ' SmartWorkplaceCMDB execution summary' -and
                 $messages -contains ' Status   : Validated' -and
                 @($operationalMessages | Where-Object {
@@ -150,6 +150,28 @@ try {
                 $script:FullResult.SummaryEmailStatus -eq 'NotApplicable' -and
                 [string]::IsNullOrWhiteSpace($script:FullResult.SummaryEmailHtmlPath)) `
             'Full fixture orchestration status is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBOrchestratorTest 'Count collector warnings in the completion summary' {
+        $warningRoot = Join-Path $tempRoot 'WarningSummary'
+        $warningFixtureRoot = Join-Path $tempRoot 'WarningFixtures'
+        New-Item -ItemType Directory -Path $warningFixtureRoot -Force | Out-Null
+        $fixtureObject = Get-Content -Raw -LiteralPath (Join-Path $fixtureRoot 'IntuneAnalytics.sample.json') | ConvertFrom-Json
+        $alertRows = [object[]]$fixtureObject.windowsUpdateAlerts
+        $exactDuplicate = ConvertFrom-Json (ConvertTo-Json -InputObject $alertRows[0] -Depth 8)
+        $fixtureObject.windowsUpdateAlerts = [object[]]@($alertRows + $exactDuplicate)
+        $warningFixturePath = Join-Path $warningFixtureRoot 'IntuneAnalytics.sample.json'
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $warningFixturePath -Encoding UTF8
+        $result = & $orchestrator @identity `
+            -DataRootPath $warningRoot `
+            -FixtureRootPath $warningFixtureRoot `
+            -Pipeline IntuneAnalytics
+        $orchestratorLog = Get-Content -Raw -LiteralPath $result.OrchestratorLogPath
+        Assert-SmartWorkplaceCMDBOrchestratorTrue `
+            ($result.Status -eq 'CompletedWithWarnings' -and
+                $result.WarningCount -ge 1 -and
+                $orchestratorLog -like ("*Warnings : {0}*" -f $result.WarningCount)) `
+            'Collector warnings were not reflected in the completion status and count.'
     }
 
     Invoke-SmartWorkplaceCMDBOrchestratorTest 'Finalize without rerunning collection steps' {
@@ -470,8 +492,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJIE8KrNvrw8kw
-# Q2idQA/m7Vs1xuOpu6zEjnyOJ9WnFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQz8ovYDgNGogn
+# bsFP5dEZiXUNSF3WfhoBnsLiQ0/G9aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -604,31 +626,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMCzSg9/pWICZ84QX/Sq8pbgWKDsU+tDov4cZHHQS6BiMA0GCSqG
-# SIb3DQEBAQUABIIBgKPEOLWDrUU1CvCkPQoaObbcc13B1MdboRPBcEq2q4rKClhT
-# pBaUywy296j8nMf3XIVrtAvfsg2q+sTX8695s54NNXhZCV4H4TckAgUc/BGeEzUK
-# LT0ye5l4Vqsnebvp6KXgjFRXBtmFxKumlqwHXYzWofJoJ+p+O5MsOiAaCkn24vMS
-# fuhGn4/OEP3cUexjPMWa7ltuVR2T9blkvOyBQ9JCP7sDA4qwsIH0b/OF2Atmh+hQ
-# Xb4uBod7M5kJM48XgnAEET3nk/d9KExZlg9rK4PzsA21Y0Sk/g1pwDlSUvhwzh6Z
-# njjkSS98IGRUoshaDtAaZEiiwGNjGqF5DE7gm+jegjeODSjMGoGL77iWW6Z1FNEj
-# ByMqZabkzTVsXKSHj5yZ+kUTG/UZw0cGB2x6aBqztq/ZCa44Pe7MENO7X++0NOwo
-# n3xdmvgvDwtymmqS6QSRbKXCtttSSD/hT/fcEcr5LRtfItNgKNet3/4vGfz6jrK2
-# aFk+mXDhphEYYHJHeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMdREqFlglfNwEVLMVJrZ+gGoqh/kGIdrQdFLvYqlHYKMA0GCSqG
+# SIb3DQEBAQUABIIBgFLrLWSqUy+sf4PbczbSKyYJpQBCFJQS+CAfr5SkWu+TdG1e
+# ShzAvLSveOcKQawWt8/LgKoubkabYRH/jbeWfjdreV4L7UoPuC3OL8y60KbI+9g5
+# 3tWp8GpYa8WPo+7yjm/LQsRtMwnixUKKp4WGJdyd60QfX7m9s9oYIRJAuKq7cRPL
+# f2KsP1nyhersosZaXu4fI87kIKNqDYnda9jau3qy7NOlwoN9r1WFVj0/zL2gicBT
+# IM3ZxMzg7YqMgMY/NHN21eHGUD5wZOb+BMJFRBqALPs+6XmcBB33/ZvvQrgmr+h5
+# 9559hsG09eYr+bDiaEvWrGj4Eixd/woJbTxh3/u4mt0nE4Dy4cih6dGR0seTykvB
+# XJiaEsBg1yuQqT4glLw2jVgzKOuVBoWkdgiVMV4dKH0bIYA70W3yCoH78i8kaYim
+# pjv9eO9e6KBtEbfKpSItS5b9F1hJcAwp3/qtXt14u/BiS0sJPLEfMxXstQuG3AUs
+# LkK+tLPGFUppgQOCfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM1
-# MTFaMC8GCSqGSIb3DQEJBDEiBCA/6VMAmlGyr6AcAmu+4JLrKAV7FVjDROJqEndE
-# 5xEtNTANBgkqhkiG9w0BAQEFAASCAgCMKiuZYwB4+fTo/ogKVctiTV1uMjrS+A6u
-# sfHUkzayEYv/lsfeZCTEUJ31ba4zmAHgOHqDntOdCOukZzYJaCRCHL30rl7N2Sko
-# oLfSKFuk6DeYgNj0f1ymGUPFw3kbGzENX7a87CCkJuNlMsNPgxjT3BxKbqOP487R
-# CD2wHoeqHf6CXe6U+VPDavc5rBZVlMZIKcI/HoZsl8HbFd321EG2FJEc7CixowOV
-# WlgL840nQ+NzJZBHCzJGP50vaR4yhwDAJbsAQBKuo8FCbh44UqMvG77IEalrjMaQ
-# m9dXI37hO6mdtrWvLEzaBXOWMofmXuePDwregP77TAEHYAfubjM4tdAB4NiXjuKG
-# S1okOQn00+3tBGsRnnUIJTxIb0XZnVfpvwtYijh3GFl5HND8Oib/eLWbdcBBmHhr
-# wsj/6ycxjVhtcKI1IlkEmCp0ggUqDyYGsZ1oOzt3xRyOPhSSmD3SsmF79DXMekr5
-# D1Vo4tznFk3yM+RAubX+aUp77KttU/72INrBJGuld+/3ICB2ODD2bVyX0V0VL+78
-# tfNBN8YAoyB4mAwd/gwln8SkXyQeu+f/8OEAWWEsN3b1MswyyINIaupXPt4bbO6w
-# 8m4GqaljCxlUJ2WpqEXrZz7O8GVYxUYm0zeOH7kjOZiJVdYoJANz3q6/JT4iQThh
-# lyv2OShjpA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
+# NDZaMC8GCSqGSIb3DQEJBDEiBCC/Yjj6m6cozlo5QpivW58X3P7mIyvKyeknv+/F
+# F5LM+TANBgkqhkiG9w0BAQEFAASCAgCC63M/WE8g3xhLTdpXxRPrpqR6VMGVOlSJ
+# 8mRmPU7HOjUgvDQVSQk+j03ld+M4sgfDc/uPK8+6jWv8oSjSEVNKrUPpsiUjMyrZ
+# kQIceMNdtBAOZ+yWsmSbGuXDknMi7mLciTtBYt4/HVdh/637Va1WnzVKgpnAwhXs
+# ya3luaQIbdGf4ivgU6c1BjBCXrWCQiMsKbIi7NR3lJzUJxGtB6H7V3aDeo+Ct62B
+# rvkQcCigvO49j/A/4g2y9meO8D2jJqzOXGERyKETU3Yly9+XuV40ypqfOZ/CF/4L
+# VgtgK2uT3j9ZlXJuyqv9XHYytIKFAiXfdBuasIZAi7hTZHdNtWnCyQTfmWyp2j+O
+# zAaaaPb42qM4wpg0qeOEWM2OFUY5RmIRd0S/bE3WQk6P5KkVOnrR/mQxc0ZSUV+k
+# ysoUslKFoDZsS43BwDtzcyB4iMKR1HsypxaxwVF8uUdJcA+AKvVHFiE3XOf2sCeu
+# FEEsXQhbtEN1FTU84X2tJ/VvsFo1LRZd+Q9eZwkoZP5tZXmTGBuF2S26/yMKAjzt
+# Yv9QevqRfQCg66OF0sFf5rHYYXTv7x71Mb7QLhF7U9um0pBirTLu+9b8YVIze5g2
+# I9tyx4VLIdw5wFtmwN059IJ4vzlGM6snx6CNWuHK+85v68qT1bUL9Crrmd2W6yEf
+# LM8X5rtRkw==
 # SIG # End signature block
