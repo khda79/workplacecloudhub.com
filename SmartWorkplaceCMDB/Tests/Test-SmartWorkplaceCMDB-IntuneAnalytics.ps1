@@ -3,12 +3,12 @@
 Validates Intune update reporting and Endpoint Analytics with synthetic data.
 
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $passed = 0
@@ -72,6 +72,72 @@ try {
         Assert-IntuneAnalyticsTrue ($updates.Count -eq 2 -and $updates[0].TenantUpdateAlertKey -match '\|update-alert\|') 'Windows update fact grain is invalid.'
         Assert-IntuneAnalyticsTrue ($analytics.Count -eq 2 -and $analytics[0].EndpointAnalyticsScore -eq '75') 'Endpoint Analytics fact grain is invalid.'
         Assert-IntuneAnalyticsTrue ($eligibility.Count -eq 2 -and $eligibility[0].TenantUpgradeEligibilityDeviceKey -match '\|upgrade-eligibility\|') 'Upgrade eligibility fact grain is invalid.'
+    }
+    Invoke-IntuneAnalyticsTest 'Collapse repeated update evidence without losing distinct states' {
+        $duplicateIdentity = @{} + $identity
+        $duplicateIdentity.DataRootPath = Join-Path $tempRoot 'DuplicateUpdateEvidence'
+        $duplicateFixture = Join-Path $tempRoot 'duplicate-update-evidence.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $alertRows = [object[]]$fixtureObject.windowsUpdateAlerts
+        $exactDuplicate = ConvertFrom-Json (ConvertTo-Json -InputObject $alertRows[0] -Depth 8)
+        $distinctEvidence = ConvertFrom-Json (ConvertTo-Json -InputObject $alertRows[0] -Depth 8)
+        $distinctEvidence.currentDeviceUpdateStatus = 'rollbackInitiated'
+        $distinctEvidence.latestAlertMessage = 'Feature update rollback initiated'
+        $fixtureObject.windowsUpdateAlerts = [object[]]@($alertRows + $exactDuplicate + $distinctEvidence)
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $duplicateFixture -Encoding UTF8
+        $collectorWarnings = @()
+        & $collector @duplicateIdentity -InputJsonPath $duplicateFixture `
+            -WarningVariable collectorWarnings | Out-Null
+        $warningText = @($collectorWarnings | ForEach-Object { [string]$_ }) -join "`n"
+        $rawPath = Join-Path $duplicateIdentity.DataRootPath 'DATA-LAST\Raw\Intune\Intune_WindowsUpdateAlerts.csv'
+        $rawRows = @(Import-Csv -LiteralPath $rawPath)
+        & $normalizer @duplicateIdentity | Out-Null
+        $factRows = @(Import-Csv (Join-Path $duplicateIdentity.DataRootPath 'DATA-LAST\PowerBI\FactWindowsUpdateAlert.csv'))
+        $collidingEvidence = @($factRows | Where-Object {
+                $_.DeviceId -eq $alertRows[0].deviceId -and
+                $_.PolicyId -eq $alertRows[0].policyId -and
+                $_.EventDateTimeUTC -eq '2026-09-10T08:00:00.0000000Z'
+            })
+        Assert-IntuneAnalyticsTrue ($rawRows.Count -eq 3) 'Repeated update evidence was not collapsed at collection time.'
+        Assert-IntuneAnalyticsTrue ($factRows.Count -eq 3 -and $collidingEvidence.Count -eq 2) 'Distinct update evidence sharing an event key was lost.'
+        Assert-IntuneAnalyticsTrue (@($collidingEvidence.TenantUpdateAlertKey | Sort-Object -Unique).Count -eq 2) 'Distinct update evidence keys are not unique.'
+        Assert-IntuneAnalyticsTrue ($warningText -like '*1 repeated Windows update evidence row(s)*1 event key(s) with distinct evidence*') 'Update evidence reconciliation warning is missing.'
+    }
+    Invoke-IntuneAnalyticsTest 'Preserve multiple legitimate events for one device and policy' {
+        $eventIdentity = @{} + $identity
+        $eventIdentity.DataRootPath = Join-Path $tempRoot 'MultipleUpdateEvents'
+        $eventFixture = Join-Path $tempRoot 'multiple-update-events.json'
+        $fixtureObject = Get-Content -Raw -LiteralPath $fixture | ConvertFrom-Json
+        $alertRows = [object[]]$fixtureObject.windowsUpdateAlerts
+        $laterEvent = ConvertFrom-Json (ConvertTo-Json -InputObject $alertRows[0] -Depth 8)
+        $laterEvent.eventDateTimeUTC = '2026-09-12T08:00:00Z'
+        $laterEvent.lastWUScanTimeUTC = '2026-09-12T07:30:00Z'
+        $laterEvent.aggregateState = 'success'
+        $laterEvent.currentDeviceUpdateStatus = 'installed'
+        $laterEvent.latestAlertMessage = 'Feature update installed'
+        $fixtureObject.windowsUpdateAlerts = [object[]]@($alertRows + $laterEvent)
+        ConvertTo-Json -InputObject $fixtureObject -Depth 12 | Set-Content -LiteralPath $eventFixture -Encoding UTF8
+        & $collector @eventIdentity -InputJsonPath $eventFixture | Out-Null
+        & $normalizer @eventIdentity | Out-Null
+        $factRows = @(Import-Csv (Join-Path $eventIdentity.DataRootPath 'DATA-LAST\PowerBI\FactWindowsUpdateAlert.csv'))
+        $devicePolicyRows = @($factRows | Where-Object {
+                $_.DeviceId -eq $alertRows[0].deviceId -and $_.PolicyId -eq $alertRows[0].policyId
+            })
+        Assert-IntuneAnalyticsTrue ($factRows.Count -eq 3 -and $devicePolicyRows.Count -eq 2) 'A legitimate update event was collapsed.'
+    }
+    Invoke-IntuneAnalyticsTest 'Keep update evidence keys stable across collection times' {
+        $firstIdentity = @{} + $identity
+        $firstIdentity.DataRootPath = Join-Path $tempRoot 'StableKeyFirst'
+        $secondIdentity = @{} + $identity
+        $secondIdentity.DataRootPath = Join-Path $tempRoot 'StableKeySecond'
+        & $collector @firstIdentity -InputJsonPath $fixture | Out-Null
+        & $normalizer @firstIdentity | Out-Null
+        Start-Sleep -Milliseconds 25
+        & $collector @secondIdentity -InputJsonPath $fixture | Out-Null
+        & $normalizer @secondIdentity | Out-Null
+        $firstKeys = @(Import-Csv (Join-Path $firstIdentity.DataRootPath 'DATA-LAST\PowerBI\FactWindowsUpdateAlert.csv') | ForEach-Object TenantUpdateAlertKey | Sort-Object)
+        $secondKeys = @(Import-Csv (Join-Path $secondIdentity.DataRootPath 'DATA-LAST\PowerBI\FactWindowsUpdateAlert.csv') | ForEach-Object TenantUpdateAlertKey | Sort-Object)
+        Assert-IntuneAnalyticsTrue (($firstKeys -join "`n") -ceq ($secondKeys -join "`n")) 'Update evidence keys changed with SourceCollectedDateTime.'
     }
     Invoke-IntuneAnalyticsTest 'Treat the Intune minus-one score sentinel as unavailable' {
         $sentinelIdentity = @{} + $identity
@@ -148,8 +214,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8kSi7U1vQByTh
-# DZM/PvyFG8laMbImjvvwcWAFpFBHSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCnkaHwS9Fd33h
+# +Qslu99K+3k8IuuYhEgLDVxbaRx/eqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -282,31 +348,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFxnNdqUyMJKmD+eYkRG4k0TmbM77LomD93D6lHsdJ/qMA0GCSqG
-# SIb3DQEBAQUABIIBgEtd8I9E/kO/Hp6c2/ucqa066n1e6krJbQmegGwqg6QyOyct
-# jNFez6lFAoZohVSmvvMHLGI00C0yHX0mY+y7yGaBVaaHGEdu9KlEZAEgaK9oRiuv
-# E3nFUVzMoSDF+sZStA843CpaVl25zQKeqouK9Qqu/tpjwicHYbgxZMleGJZ5wIp0
-# Ifj2Mut5dP0N/L8DeZiQs1TpfH8DcuN776QO/MMd876uPIsQrRTDAr35vWkLrHuB
-# pMl9vTUALzoGEDM3c20DTZunMkUE7atltgfIVJH1DJORuMdRFdoRERgaZsu6SHtn
-# k/BeYGSsw42U5cgv9PfiM/Szym/YMQxe84D+91j6hXhWaVzP//iq6Pt29RzGPd91
-# mEPrvN1JssHZIikWRTgsNDR1H/u5rNL82SUlZQn4XMDPHnFYNlrSccZnwVH47lmU
-# Wj6po7maCCO3Ndbt2D+FCURKSW3dqUHjO5xVCovl8eIL0AvkzP2ZlDgLnvQZqokU
-# aAJDRyFccoPxVFg4uaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFy/r1tWbD40RSns8a0yvThRv8xTqAahW8Rexfj10HyAMA0GCSqG
+# SIb3DQEBAQUABIIBgBsEioYnbSjtAJX0Vr9ea/c4MA8x5TPQPyUX8Wm/6C6DeaeP
+# v9FCDgaIg/jPKaD1cj+oI5dDwUUtwkm4cRctxepE6t4SOV/lhg6lbWv+2vpPgxRY
+# 5bOmmbbUUYawMTQTsFydhkLGJZDC0VCFSP4g4vlkdJJ3faeZNAMeDU04Aju37Htp
+# avBshF9jcuK7qf8hgpzV84AkyZCuqWCl9FnYpCvtw9WO2BjObCBzymYueEeKXEak
+# oPHqhClharwb5GA+jH5BUk/Yj3XNpfjI+ry+FVMpbkLKagEAaWYFj8ONwYZY9WCQ
+# uX+xNZZ/dy8gnZmaMbri4gkGSzIff/KTldaZp3SKvvuwm9uUg1aIe+EwC5Y+Vzpv
+# hAZh+aya0MDk7Wd25CONrsjviZKECcCAmfi+c93u5wmBBM/iIv0FhIp1LGv/cEjG
+# gAoDNpqp+GQc5FuvtihxCCw8L8zvbxD1QilmPkWG1Prw+A96jOskan5knH5cwO2C
+# HnIA38AAaEfzZNjK7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTMxODE3
-# MTZaMC8GCSqGSIb3DQEJBDEiBCA0hTAnbhy+QAr9hTuFqoLyxTRRKRd1ucCKMZkj
-# QBMVoTANBgkqhkiG9w0BAQEFAASCAgAQQB6+eT70BRZ9ObaaRhHSDOeKHAYRdW92
-# Y3CmXIAct92G64/BE9CGuCkC1xWEDB0wW+8PxQCLIItoWSYr81Lh5vSeZDBEYlhX
-# cHGAk180unY5AujvHeJoOCQ9JWC03cLPnZj7snALw+BbUBEDjgEWqbvzQSeyjByY
-# 1y52CdPmwCur2dgQpEf0xXnR4+TjCiT2RPfo/fZzfNSIj0YP3+cGIlJft5a0K/el
-# zil0R7+7yTj3GCQKXRYIWeuib2iQnFcem5VAc3Phx3jH2jhCKGn7nJsFMAjT3rJn
-# 8qy8W7sI7ipH7LEQ5tBDluBngQ32K3jwgNlxzRMYYMEB+Q/hgARljREHjOYoGAS7
-# ucubfJ/3oU160kbcU71nVnGXdaY2kk+28Nip7oCGcLvEB0Oj5jfIjBz0tlVKnDgW
-# gPldKbFlo4d2bzHuWpP+gjWYjtO4YHyNiRxW/9oM6AlZy0BWMtzgLPtw4vvfx1pq
-# LHudIwia7I2XMrK/wzd1LqfCulA4IrUsSVKrmg9gUj/GN9XJBok/WfO1YQ7CXjSC
-# NCVaZuFKJae2yC6UJNMXUDtxjFw7SVd6v0hPl6NFVc2IJesUYqatNhxGb7wK/40Z
-# 6aYwHusrp/t/ofgWaaBL5Hfz6FxaCxRmd6JEjlqSKCMnCKmV3DEshKKhpUE+NpGd
-# PEVSuGI/SQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
+# NDVaMC8GCSqGSIb3DQEJBDEiBCDBFuptNvyZSk45wSWCilRvyWTAp/veAf7vVwu4
+# oIQW9jANBgkqhkiG9w0BAQEFAASCAgCFJPnqXHfL5hnC+MSgNVLQlUkRkpEpzqyy
+# j27GxlcoJztdlfa7Ni/B8iGCA4DAE1dwaPCEz7Ep09+Qo3/bEmdk/dYpqk5/wLkP
+# irCvXuVqACQsgFCfsBiAoXV4x1/SEN6TzC/U0ikAQSRjed3n/4BmbIly/2DHwspk
+# MFOaZglrmiEV+26OK7TzlbdEQi0wKAFmMmdxkLB3EnXl0MiP+sOQDxaDtsgCbgRS
+# RQ59o5n5QRvIo1bHVbyVWrID564wcM3cz4txHsH+IrSWP05j7y4/k+gXGf/wQ7q6
+# WitqRnxwdUUp31e9rySaXiRx35FEkRFVYJf4238MVTIydpWnMszgs/tgmm8z4+oC
+# y4F1FzPb7w/RkCTJI7Aneprnkfgi/hVVDy5ZnrudxZ7kb0ev02MlmvikHmbfgbfF
+# dvWD40KxvxhFsy7PgLM2HJQE4+etOBLQPwtg5CiPbEDsE6NN9Rvh5ar1vGB6DM84
+# WQV53YWxymtsqrNF7Oj5NcKFwUhf2ogHBeQkusVf17khndYKO9qWgAnk/NAEKEHM
+# isjuN1lHtbZckZLiNiJzeDWlpRlCkKm/3PWrwYuKkSJ1il6YtOmU4Rial1owVcCI
+# n63SXvlhe4z0RbIryUZDbjcVWjj3n9iYMgYkg62bCE3+ZMYjr097ByNhP6+zmY9M
+# mXqEOqtPRA==
 # SIG # End signature block

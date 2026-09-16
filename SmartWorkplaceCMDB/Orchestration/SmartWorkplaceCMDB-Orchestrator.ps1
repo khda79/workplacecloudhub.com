@@ -9,7 +9,7 @@ HTML report. The default mode is read-only validation. Live collection requires
 the explicit -Collect switch. Offline fixture runs never connect to a tenant.
 
 .VERSION
-1.1.14
+1.1.15
 #>
 [CmdletBinding()]
 param(
@@ -53,7 +53,7 @@ param(
     [switch]$DisableSharePointUpload
 )
 
-$ScriptVersion = '1.1.14'
+$ScriptVersion = '1.1.15'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -430,6 +430,7 @@ function Invoke-SmartWorkplaceCMDBLoggedStep {
                 'ERROR'
             }
             elseif ($record -is [System.Management.Automation.WarningRecord]) {
+                $script:SmartWorkplaceCMDBCurrentWarningCount++
                 'WARN'
             }
             elseif ($record -is [System.Management.Automation.DebugRecord]) {
@@ -504,6 +505,7 @@ $script:SmartWorkplaceCMDBCurrentRunId = ''
 $script:SmartWorkplaceCMDBCurrentRunGuard = $null
 $script:SmartWorkplaceCMDBCurrentStepName = ''
 $script:SmartWorkplaceCMDBCurrentTranscriptPath = ''
+$script:SmartWorkplaceCMDBCurrentWarningCount = 0
 Write-SmartWorkplaceCMDBStartupBanner -Version $ScriptVersion
 
 try {
@@ -1151,6 +1153,7 @@ $preflight = Test-SmartWorkplaceCMDBPreflight `
     -Mode $mode `
     -ScriptPath @($executionSteps | ForEach-Object { [string]$_.ScriptPath }) `
     -ThrowOnFailure:($mode -in @('Collect', 'Finalize'))
+$script:SmartWorkplaceCMDBCurrentWarningCount += $preflight.WarningCount
 foreach ($check in @($preflight.Checks | Where-Object Status -in @('Failed','Warning'))) {
     Write-SmartWorkplaceCMDBConsole `
         -Level $(if ($check.Status -eq 'Failed') {'ERROR'} else {'WARN'}) `
@@ -1497,7 +1500,8 @@ $runEnded = [datetimeoffset]::UtcNow
 $runStatus = if ($mode -eq 'Validate') {
     'Validated'
 }
-elseif ($sharePointFailureCount -gt 0 -or
+elseif ($script:SmartWorkplaceCMDBCurrentWarningCount -gt 0 -or
+    $sharePointFailureCount -gt 0 -or
     -not [string]::IsNullOrWhiteSpace($sharePointError)) {
     'CompletedWithWarnings'
 }
@@ -1691,7 +1695,8 @@ if ($sharePointEligible -and $sharePointPublishedSnapshot.Count -gt 0) {
     }
 }
 
-$completionWarningCount = $sharePointFailureCount +
+$completionWarningCount = $script:SmartWorkplaceCMDBCurrentWarningCount +
+    $sharePointFailureCount +
     [int](-not [string]::IsNullOrWhiteSpace($sharePointError)) +
     [int](-not [string]::IsNullOrWhiteSpace($summaryError))
 Write-SmartWorkplaceCMDBCompletionBanner `
@@ -1772,6 +1777,7 @@ Exit-SmartWorkplaceCMDBRunGuard `
     PreflightStatus = $preflight.Status
     PreflightFailedCount = $preflight.FailedCount
     PreflightWarningCount = $preflight.WarningCount
+    WarningCount = $completionWarningCount
     RunStatePath = if ($script:SmartWorkplaceCMDBCurrentRunGuard) { $script:SmartWorkplaceCMDBCurrentRunGuard.StatePath } else { '' }
     OrchestratorLogRetentionDays = $orchestratorLogRetentionDays
     StepLogRetentionDays = $stepLogRetentionDays
@@ -1816,7 +1822,7 @@ catch {
             -Mode $script:SmartWorkplaceCMDBCurrentMode `
             -StartedDateTime $script:SmartWorkplaceCMDBConsoleStarted `
             -StepCount $script:SmartWorkplaceCMDBCurrentStepCount `
-            -WarningCount 0 `
+            -WarningCount $script:SmartWorkplaceCMDBCurrentWarningCount `
             -ErrorCount 1
         $script:SmartWorkplaceCMDBCompletionWritten = $true
     }
@@ -1826,8 +1832,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTg45Xz52v2iau
-# J7rq4oB8hVx61eq50qtPzCGDqE/r7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/LTvpiHTd4t2v
+# U7BiboQLhDO4YWB6IA7NbUOViIw4OaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1960,31 +1966,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIYnCnSq+WC1DzLO3gkoJcLoRh2QdK++6KmzTUHP+kvGMA0GCSqG
-# SIb3DQEBAQUABIIBgG7hZzr2OVC+WsQzdXFfDoxg/8qC8MLVwCDIuy/jv2lw6Ag2
-# L3cG1/4sLQixsCbla+yjnqLbU5Ja5K1I/u/WgrkxN+R4/OfrPpC6Ynpd0QP0BAep
-# oLj8CwYwKlaxpzg6EUYbXcuHJT3ZEK+tJP4Qk6riRxsqQWD32xIpV1rhHu/HUhBi
-# KOrOMKYWpJi9ISlXufevIUTsIlYlrrhixQ9jsKZk6u9Jqk9oLjkGvGehFEksKeQu
-# mpuufMVaLptay12sZuCMtgizq/gsCh8KUjsKkbAVBmGrBY1OXfH4JU1FmIL8sP4E
-# lYrIJiuOy9T2FGSfXGnaT+CR6yKktQeKQ4+N0zNc/lxWhE/fLsxNU6IZ/U1nqJhF
-# IaRuBcMnn53NSUJRmzIkUy6l66AxpoV0fSJIcKBbJGf7wFRTSYntm34hgGvExqrv
-# WfPuwuX2NRyw5nO+Z8aOR55momFK4j63psnrehKjPztRvdoyoBQOH88PBliaqjRO
-# rLNpHwlQbPjRtofoEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKM3jlbyDZTaGFaukXidOOzm5fJFnBlwvsnM0P8viN9qMA0GCSqG
+# SIb3DQEBAQUABIIBgFXyaVtL1l05eMFdJNK4tTmE03Cp6m8dg0DfqIHCGjsO275u
+# +Es6hiGvHHmbgZ6D3f1lSeVV8YVupwRE9wu3LIpM/VYAOnolz16ipnBnMWhPSkhP
+# k5Mw8H9X8nOOp8erVCQnCF/TnZ0oETKiIWlgBKfwvx36X1AhNYkJ+vXoeziSoglP
+# w9RRX1mih7NRmPm7+EQOnv7hTOpd2uM/IjYQ3B6tvoPJGLaOPJuJqPx2Jt37TCSY
+# 3exOXhc/DaItTwqW3XEsMEBMChAj9xcjxAsw+6ttFmLVR3wtEiini5pWQ3y6LxR7
+# GqEk3FnV6JNJNLJBpLSUhXOw5W/EkDQvpk5Iph1Usasw1nSGw6TOMV9XR2Ge8rIp
+# nuX9KEbv5JJGd1nl7P5h9ZfGFG/fZbeho+bpsmtz2Zjfip+f8WdfOvCF4lS3UzsE
+# FvsGwPKz+lRskJyAmgARkRMxp3370Byb6gXZvgu/ldFPPsgVUzJSXZYSrSZ/AgMS
+# chjiPpTyC/1VUjC7WaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQxODM3
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAYna4T9mF9KlK0ELoyYEPBjI5bpopznydROKru
-# gZsLjzANBgkqhkiG9w0BAQEFAASCAgBBugppxCwX3pIKU7Ej6rMa+hULeAfLZAKw
-# NiWG13h5FSvurKB2MOe3CTOhG+RxM6a2KFsXAPR/0iOlRC6KO9SexMyuJaU9T1y6
-# wc9Z7resF/DvTdQHFCeluxw29ZT5X35mwICHHnTsHDM/yjr7OaIpX7X/f2SuztuS
-# JbS3V3M1uhhpF8Kre2Qtu47l8TrrXVZd6dfiz1IuMP9sswC046sB/ethKHfeMD2N
-# gbw73WxVbD0INBoIgzo8LfxHFtzjOpWBeyglC8A8tPDeBuZEp7tW1jK4emXN1dKy
-# FMCg2r4ynCv1ZG5+CTZHvVPJscvX/2SRBaDNeRNhrZJmJRjBlWd/fZZIFBKjw5cv
-# pHRDNJXU00YOTolZX3uvBiv98eRANB+Q14je6LJXgNKPv2z0sgTMhp29MhLdZYKT
-# nPBjMExSCX3fab/TKq0VUgUO9ieVAGE6pO6inwS1oaOArvT1ZXSCo3SUKzO7dixs
-# zbd2whYICLfF36mMgBIkpWSjMQrxCgV4Dqkw94H5HvN2juJz0V+lgdFPgitjGRlR
-# yFbTuwKjH+UzZXFQ4FJIVgmmokntYyolXcvIEG/TJWUrvE3fJnUnSZBurW8oyOCy
-# qoEKNbHKK9QTl32dWt352LFIBToJn+AzTueMd+MpuIQqaPeeKbTm400e/jgjFbza
-# KaBiMzRqFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
+# NDNaMC8GCSqGSIb3DQEJBDEiBCCVdiZebhSb6545076MJj+MpQ7uN/yRyG7y7wd+
+# 3Qgm3DANBgkqhkiG9w0BAQEFAASCAgBlvKnp4krfH9asKKzaI+ZEeyv4oBUZV+JO
+# vjXcfHwSiXY0Z/QtudqWQSppur+m9XGL4Wc2YH1H3VpqDYj1hjyoPN+LNMNtnHFy
+# mv8bJlzrQkhIEwcW6qKhiCvsTLppVv09OuWXywUBMsENz8elHzRQkJPm02iyXmxC
+# g3yhnb7N0qk8Y8IdWCevWmlYhQGX/SSiqHW5ocpSmDiZVT9QAv+2q9h9pn4pzFhs
+# +Zg/8LlScTHA42V1CbjvM5k7Urr/blaSp23tUCSPoU6SZbI739Sek1cnX5tV+qwB
+# fD2Q1JZF+4nGlIaNe4Svzgbqzhuftukr0IBvZumaYfwIsC8ug0QOd3MVXhyV6jbj
+# YzVJgfAv658ixHRt5d8jV0U/ypeqrTZacD6yKl9W4/2WXYDrDEykj5I1ZNJ8nAOs
+# aIr4NSAp6SsfVb7H+/zHaMhnG8RMNKxj6YeKvP9fetF6hqR0K6OA6N+gZEN/qg9J
+# JUe+RdXNTDjrNuhDMvu7rsrAmORSynvRrffL+amTbBhG+4i+z+fyTynBA6OTMGMR
+# Q9JZG6x+DhBd3JrhkLKHKqlwh6P0JFvG5VwaYHfWDHIitAHvjsV3/beM2q5zz+6C
+# nVkZB+9oqS/8HbkvDDlWhm1kUmGiC9rm/+AkQair+IY51xVUSU0kx68Sag1xTwEM
+# UvijuQUKEg==
 # SIG # End signature block
