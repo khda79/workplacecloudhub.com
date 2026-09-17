@@ -273,7 +273,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 | `Schedule.DaysOfWeek` | Weekly only: `["Sunday", ...]`. |
 | `Schedule.MissedRunPolicy` | `RunOnce` (default) or `Skip`. |
 
-The manifest is hot reloaded at every tick when its file changes; an invalid manifest is rejected with an error email and the last valid version stays in effect (no orchestrator restart needed to change the planning).
+The manifest is hot reloaded at every tick when its file changes; an invalid manifest is rejected with an error email and the last valid version stays in effect (no orchestrator restart needed to change the planning). At startup, jobs newly introduced by the committed template are appended to an existing runtime manifest by name. Existing job definitions are never overwritten, so local Enabled flags, schedules and other operational overrides remain authoritative.
 
 The committed template mirrors the validated operational Enabled flags and schedules. Scheduled jobs use `AssignmentMode = "Elected"`; Exchange on-premises jobs require `AD` plus `ExchangeOnPrem`, so they naturally elect only a server that passes both probes. `M365-PowerBIFabricActivity-Inventory` remains disabled with `AssignmentMode = "Manual"` as requested.
 
