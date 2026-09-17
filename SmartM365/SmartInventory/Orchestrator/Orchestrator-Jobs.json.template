@@ -1488,7 +1488,7 @@
       "Name": "M365-LicensePricing-Inventory",
       "ScriptPath": "M365Inventory\\Licensing\\SmartM365-LicensePricing-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],

@@ -33,14 +33,14 @@ completeness. Consumers must still check source dates, schemas and tenant identi
 - `M365Inventory/Security/`: Secure Score, authentication-method registration, and Conditional Access configuration evidence.
 - `M365Inventory/IntuneInventory/Security/`: Defender agent and firewall-health reports exported from Intune without changing device or policy state.
 - `ExchangeInventory/BackupProtection/`: Microsoft 365 Backup protection evidence for mailboxes, SharePoint sites, and OneDrive accounts.
-- `M365Inventory/Licensing/SmartM365-LicensePricing-Inventory.ps1`: normalization of a private governed pricing source; the repository never supplies or guesses customer prices.
+- `M365Inventory/Licensing/SmartM365-LicensePricing-Inventory.ps1`: normalization of a governed pricing source. The default source is the versioned France public-list baseline `M365_License_Prices_Public-France.csv`, with every row marked estimated; a private local configuration can replace it with reviewed customer-contract prices.
 - `Launchers/Cloud/`: production launchers for cloud inventory scripts.
 - `Launchers/OnPremises/`: production launchers for Active Directory and Exchange on-premises inventory scripts.
 - `Launchers/Orchestrator/`: production launchers for orchestrator installation, start, stop, and restart operations.
 
 Launcher names no longer carry a `-Prod` suffix. Test launchers are intentionally not maintained; use the PowerShell script parameters directly for targeted test execution.
 
-The Secure Score, authentication-method registration, Conditional Access, and Intune endpoint-security collectors are enabled once daily in `Orchestrator/Orchestrator-Jobs.json.template`. Microsoft 365 Backup sites/drives and governed license pricing are also scheduled daily but remain disabled until their external prerequisites are available. `Policy.Read.All` and `SecurityEvents.Read.All` are new bootstrap permissions. Authentication registration and Microsoft 365 Backup reuse `AuditLog.Read.All` and `BackupRestore-Configuration.Read.All`. Intune endpoint-security reports reuse the temporary export-job permission `DeviceManagementManagedDevices.ReadWrite.All`.
+The Secure Score, authentication-method registration, Conditional Access, Intune endpoint-security, and governed public-France license-pricing collectors are enabled once daily in `Orchestrator/Orchestrator-Jobs.json.template`. Microsoft 365 Backup collectors remain scheduled but disabled until their service-app/controller prerequisite is available. `Policy.Read.All` and `SecurityEvents.Read.All` are new bootstrap permissions. Authentication registration and Microsoft 365 Backup reuse `AuditLog.Read.All` and `BackupRestore-Configuration.Read.All`. Intune endpoint-security reports reuse the temporary export-job permission `DeviceManagementManagedDevices.ReadWrite.All`.
 
 ## Active Directory launchers
 
