@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.6
+1.7
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -11,7 +11,9 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         [Parameter(Mandatory = $true)][string]$CombinedUsersCsv,
         [Parameter(Mandatory = $true)][string]$OutputFolder,
         [Parameter(Mandatory = $false)][string]$LatestFolderPath,
-        [Parameter(Mandatory = $true)][string]$RemoteRoutingDomain
+        [Parameter(Mandatory = $true)][string]$RemoteRoutingDomain,
+        [Parameter(Mandatory = $false)]
+        [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.psd1')
     )
 
     $RemoteRoutingDomain = $RemoteRoutingDomain.Trim().TrimStart('@').ToLowerInvariant()
@@ -23,6 +25,17 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         WriteLog -Message ("WARNING: AD users enrichment source CSV not found: {0}" -f $CombinedUsersCsv)
         return $null
     }
+
+    if (-not (Test-Path -LiteralPath $AccountClassificationConfigPath -PathType Leaf)) {
+        throw ("Account classification configuration not found: {0}" -f $AccountClassificationConfigPath)
+    }
+    $accountClassificationConfig = Import-PowerShellDataFile -LiteralPath $AccountClassificationConfigPath
+    if ([string]$accountClassificationConfig.SchemaVersion -ne '1.0') {
+        throw ("Unsupported account classification configuration schema: {0}" -f $accountClassificationConfig.SchemaVersion)
+    }
+    $accountTypeRules = $accountClassificationConfig.AccountTypeRules
+    $accountPopulationRules = $accountClassificationConfig.Population
+    $accountClassificationRuleVersion = [string]$accountClassificationConfig.RuleVersion
 
     function Get-OuPathFromDistinguishedName {
         param([string]$DistinguishedName)
@@ -72,22 +85,50 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         }
     }
 
+    function Test-SmartM365TextRule {
+        param(
+            [AllowEmptyString()][string]$Value,
+            [string[]]$StartsWith = @(),
+            [string[]]$EndsWith = @(),
+            [string[]]$Contains = @(),
+            [string[]]$Equals = @()
+        )
+
+        $normalized = ([string]$Value).Trim().ToUpperInvariant()
+        foreach ($candidate in $StartsWith) { if ($normalized.StartsWith(([string]$candidate).ToUpperInvariant())) { return $true } }
+        foreach ($candidate in $EndsWith) { if ($normalized.EndsWith(([string]$candidate).ToUpperInvariant())) { return $true } }
+        foreach ($candidate in $Contains) { if ($normalized.Contains(([string]$candidate).ToUpperInvariant())) { return $true } }
+        foreach ($candidate in $Equals) { if ($normalized -eq ([string]$candidate).ToUpperInvariant()) { return $true } }
+        return $false
+    }
+
     function Get-SmartM365AccountType {
         param([string]$UPN,[string]$SAM,[string]$DN,[string]$RecipientType,[string]$GivenName,[string]$Surname,[string]$GivenNameClean,[string]$SurnameClean)
         $samUc = ([string]$SAM).Trim().ToUpperInvariant(); $samLc = ([string]$SAM).Trim().ToLowerInvariant(); $upnLc = ([string]$UPN).Trim().ToLowerInvariant(); $dnUc = ([string]$DN).ToUpperInvariant(); $rtUc = ([string]$RecipientType).Trim().ToUpperInvariant()
-        if ($rtUc.Contains('SHARED')) { return 'Shared Mailbox' }
-        if ($rtUc.Contains('ROOM')) { return 'Room Mailbox' }
-        if ($upnLc.Contains('.ext@') -or $upnLc.Contains('-ext@')) { return 'Ext Account' }
-        if ($SAM.StartsWith('DefaultAccount') -or $SAM.StartsWith('$') -or $SAM.EndsWith('$') -or $samUc.Contains('HEALTHMAILBOX') -or $SAM.StartsWith('MSOL') -or $SAM.StartsWith('KRBTGT') -or $SAM.StartsWith('ASPNET') -or $SAM.StartsWith('GUEST') -or $SAM.StartsWith('SUPPORT_') -or $SAM.StartsWith('SQL') -or $SAM.StartsWith('__') -or $SAM.StartsWith('SSHD') -or $samUc.Contains('IUSR_')) { return 'System Account' }
-        if ($SAM.StartsWith('SVC_') -or $SAM.StartsWith('SVC-') -or $samLc.StartsWith('svc_') -or $samLc.StartsWith('svc-') -or $SAM.EndsWith('-SVC') -or $SAM.EndsWith('_SVC') -or $samLc.EndsWith('-svc') -or $samLc.EndsWith('_svc') -or $SAM.StartsWith('S_') -or $samLc.StartsWith('s_') -or $dnUc.Contains('SERVICE_ACCOUNTS') -or $dnUc.Contains('SERVICE ACCOUNTS')) { return 'Service Account' }
-        if ($SAM.StartsWith('A_') -or $samLc.StartsWith('a_') -or $samUc.StartsWith('ADMINISTRATOR') -or $samUc.StartsWith('ADMINISTRATEUR') -or $SAM.StartsWith('ADMINDOM') -or $SAM.StartsWith('D_') -or $samLc.StartsWith('d_') -or $SAM.StartsWith('E_') -or $samLc.StartsWith('e_') -or $dnUc.Contains('OU=ADMIN')) { return 'Admin Account' }
-        if (@('SharedMailbox','RoomMailbox') -contains $RecipientType -or $SAM.Contains('TABLET') -or $dnUc.Contains('SHARED MAILBOX') -or $SAM.Contains('WB0') -or $SAM.Contains('ATENDI') -or $samUc.StartsWith('CITRIX_TEST') -or $samUc.Contains('SCANER') -or $samUc.Contains('SCHULUNG') -or ([string]$GivenName).Trim().ToUpperInvariant() -eq 'SCAN' -or $SAM -match '^[0-9]' -or [string]::IsNullOrWhiteSpace($GivenName) -or [string]::IsNullOrWhiteSpace($Surname)) { return 'Generic Account' }
+        if (Test-SmartM365TextRule -Value $rtUc -Contains $accountTypeRules.SharedMailbox.RecipientTypeContains) { return 'Shared Mailbox' }
+        if (Test-SmartM365TextRule -Value $rtUc -Contains $accountTypeRules.RoomMailbox.RecipientTypeContains) { return 'Room Mailbox' }
+        if (Test-SmartM365TextRule -Value $upnLc -Contains $accountTypeRules.ExternalAccount.UpnContains) { return 'Ext Account' }
+        if (Test-SmartM365TextRule -Value $samUc -StartsWith $accountTypeRules.SystemAccount.SamStartsWith -EndsWith $accountTypeRules.SystemAccount.SamEndsWith -Contains $accountTypeRules.SystemAccount.SamContains) { return 'System Account' }
+        if ((Test-SmartM365TextRule -Value $samUc -StartsWith $accountTypeRules.ServiceAccount.SamStartsWith -EndsWith $accountTypeRules.ServiceAccount.SamEndsWith) -or (Test-SmartM365TextRule -Value $dnUc -Contains $accountTypeRules.ServiceAccount.OuContains)) { return 'Service Account' }
+        if ((Test-SmartM365TextRule -Value $samUc -StartsWith $accountTypeRules.AdminAccount.SamStartsWith) -or (Test-SmartM365TextRule -Value $dnUc -Contains $accountTypeRules.AdminAccount.OuContains)) { return 'Admin Account' }
+        if (($accountTypeRules.GenericAccount.RecipientTypes -contains $RecipientType) -or
+            (Test-SmartM365TextRule -Value $samUc -StartsWith $accountTypeRules.GenericAccount.SamStartsWith -Contains $accountTypeRules.GenericAccount.SamContains) -or
+            (Test-SmartM365TextRule -Value $GivenName -Equals $accountTypeRules.GenericAccount.GivenNameEquals) -or
+            ([bool]$accountTypeRules.GenericAccount.SamStartsWithDigit -and $samUc -match '^[0-9]') -or
+            ([bool]$accountTypeRules.GenericAccount.MissingGivenNameOrSurname -and ([string]::IsNullOrWhiteSpace($GivenName) -or [string]::IsNullOrWhiteSpace($Surname)))) { return 'Generic Account' }
         $gnc = ([string]$GivenNameClean).Trim().ToUpperInvariant(); $snc = ([string]$SurnameClean).Trim().ToUpperInvariant()
         if ($gnc.Length -ge 3 -and $snc.Length -ge 3 -and $samUc.StartsWith($gnc.Substring(0,3) + $snc.Substring(0,3))) { return 'Named Account' }
         if ($gnc.Length -eq 2 -and $snc.Length -ge 3 -and $samUc.StartsWith($gnc.Substring(0,2) + $snc.Substring(0,3))) { return 'Named Account' }
         $gn = ([string]$GivenName).Trim(); $sn = ([string]$Surname).Trim(); if ($gn.Length -gt 0 -and $sn.Length -gt 0 -and $upnLc.StartsWith(($gn + '.' + $sn).ToLowerInvariant())) { return 'Named Account' }
-        if ($samUc.Length -ge 10) { $part1 = $samUc.Substring(0,6); $part2 = $samUc.Substring(6,4); if ($part1 -notmatch '[0-9]' -and $part2 -match '^[0-9]+$') { return 'Named Account' } }
+        if ($samUc -match [string]$accountTypeRules.NamedAccount.LongSamNumericSuffixPattern) { return 'Named Account' }
         return 'Unclassified Account'
+    }
+
+    function Get-SmartM365AccountPopulation {
+        param([string]$AccountType)
+        if ($accountPopulationRules.Human -contains $AccountType) { return 'Human' }
+        if ($accountPopulationRules.NonHuman -contains $AccountType) { return 'Non-human' }
+        return 'Review required'
     }
 
     function Get-SmartM365LatestDateText {
@@ -393,6 +434,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         'GivenNameNormalized'
         'SurnameNormalized'
         'AccountType'
+        'AccountPopulation'
+        'AccountClassificationRuleVersion'
         'ExchangeOnlineMappingStatus'
         'SharedMailboxStatus'
         'IsLargeSharedMailbox'
@@ -647,6 +690,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $givenNameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('GivenName'))
         $surnameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('Surname'))
         $accountType = Get-SmartM365AccountType -UPN $userPrincipalName -SAM $samAccountName -DN $distinguishedName -RecipientType $recipientType -GivenName (Get-Value $user @('GivenName')) -Surname (Get-Value $user @('Surname')) -GivenNameClean $givenNameClean -SurnameClean $surnameClean
+        $accountPopulation = Get-SmartM365AccountPopulation -AccountType $accountType
         $jobTitleFromDesc = Get-SmartM365JobTitleFromDescription -Description (Get-Value $user @('Description'))
         $jobTitleFromDesc2 = $jobTitleFromDesc
         $jobTitleNormalized = Normalize-SmartM365JobTitleText -ManagedTitle '' -DescriptionTitle $jobTitleFromDesc
@@ -699,6 +743,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['GivenNameNormalized'] = $givenNameClean
         $out['SurnameNormalized'] = $surnameClean
         $out['AccountType'] = $accountType
+        $out['AccountPopulation'] = $accountPopulation
+        $out['AccountClassificationRuleVersion'] = $accountClassificationRuleVersion
         $out['ExchangeOnlineMappingStatus'] = if ($null -eq $exoMailbox) { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
         $out['SharedMailboxStatus'] = if ($null -eq $localMailbox) { 'NoMailboxes' } else { [string]((Get-Value $localMailbox @('IsShared')) -match '^(?i:true|1)$') }
         $out['IsLargeSharedMailbox'] = [string](($totalSizeMb -gt 40960) -and $recipientType -eq 'SharedMailbox')
@@ -775,7 +821,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
             }
             $out['MigrationIssueScore'] = [string]$issueScore
         }
-        $out['IsLikelyServiceAccount'] = [string]([string]::IsNullOrWhiteSpace($userPrincipalName) -or $distinguishedName.Contains('Service_Accounts') -or $samAccountName.Contains('s_') -or $samAccountNameLower.Contains('svc') -or $samAccountName.Contains('HealthMailbox'))
+        $legacyServiceRules = $accountClassificationConfig.LegacyLikelyServiceAccount
+        $out['IsLikelyServiceAccount'] = [string]((([bool]$legacyServiceRules.UpnMayBeBlank) -and [string]::IsNullOrWhiteSpace($userPrincipalName)) -or (Test-SmartM365TextRule -Value $distinguishedName -Contains $legacyServiceRules.OuContains) -or (Test-SmartM365TextRule -Value $samAccountName -Contains $legacyServiceRules.SamContains))
         $out['IsLikelyPrivilegedOrServiceAccount'] = [string]($samAccountNameLower.StartsWith('a_') -or $samAccountNameLower.Contains('s_') -or $samAccountNameLower.Contains('administrateur') -or $samAccountNameLower.Contains('administrator'))
         $out['IsInTargetHeadquartersOU'] = [string](($typeEtablissementUpper -eq 'HQ') -or $inTargetHqOu)
         $out['IsOutsideTargetHeadquartersOU'] = [string](($typeEtablissementUpper -ne 'HQ') -and -not $inTargetHqOu -and -not $inDisabledObjectsOu)
@@ -864,8 +911,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACA3Be2WSZ6/1e
-# LIwnRPeAGauKJsik2TnZzoGNRb1d6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/VQPA2U1+jxFW
+# cFl+IHtby2hG2cVq0kQa2q5/hWmbzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -998,31 +1045,31 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIObuaJprP5R9GkJbP8LX1GqMPEyPwG5NrdPd8LHYo3VMA0GCSqG
-# SIb3DQEBAQUABIIBgJ8/3r7UqIFRakfVWfc4XJFqF6OGx2BEq53WxslfAjr0xKKm
-# 4XJuFONjlF/444Hkvn6FQsZdhzLipv27VQcMAg8IkRVaQqwGhNET7uXFd5BbtYuq
-# s/ntr4KioDto25XqPb7BAblS6V9wCE8dIce1rQM7i/Abqj9JJ7oM6gQSNmv/whoR
-# W1jPl14eMWBVW0qluzUNNLvwqvrkJ93aOWng5F9HWeXZIOMt/Kq6gq2acthUGgvT
-# ENHQE+aO9/IE3MxIj/XoVQdiyPEkwWsB0AUuOxWECp6BUtZRI2Y+KPTy9NTN7MZR
-# V+fjwLHfnQvG4/FxZ9bDklU6MIycU/qSCLVm1dOzcAer4cRijQWNpBk6q5CfoLus
-# RqqUdL6tUZG29sJDFw4yyv8Ziq4qO0iGNKxoTpimfB2RSN1g+UA7rX9q/aW38KJZ
-# bMYCikkacUAlWRkSsjUmBjYZMyef3g2M8qCUf4cESsmAL7bo1eehRp9mqM6KlNab
-# aFuJekx+tZxhXCEu+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJTRyP4eYHWuqorQ9NJxLspRAlV4ncLogEj0EtdWWUC8MA0GCSqG
+# SIb3DQEBAQUABIIBgK4MhSHN69OEJNcFDbkG5KHiggIIdSl6aFAjvuWRIcI7y1z/
+# Jz5jDOmgIYO8g7J/f5nBIcuq7nb34jLJ7oczvAuospZS+Mkd9ofQJnUY+jWwhS4A
+# 8IlwLArn9C+aEY/Wc01NOqM3t3UL++QiPTJM/aSofKVMNEk4TwvmLiYhE2UUxM26
+# KuK3O80jdrvYgOir58fKtZfuJ0LG/7C3Ow5V9TyN8eJZpMqe/iz6M0N/3SHe+wDa
+# 2sisP1QLV13CIif31VgC/AgQ5jAdq4nzd/ctvMpc7tZHce6xU7x96Oax0EOlVcyw
+# 1eaZpWVIK4gJxQeaVR+KwzbPDPxT9H277gbYykezMUwCsf949smh/m6b1UCVggZc
+# rv9D3aKGVew5dSBhhmVVo9NuvLyQUlldZMuPSDymOpRXTUxHHXVQXRb6N0dYt4wm
+# wMb35oCUJ89sMnorKlOCipY3AGbmnPXHmoBz5g27BvsS+yISX7GaJobDup0RYeAL
+# S2YnDsgJu75XyqM2baGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjVaMC8GCSqGSIb3DQEJBDEiBCBrkgPKrmEGl2gcorOLLLomtzoalfZLWFsoDXHf
-# HTXmFDANBgkqhkiG9w0BAQEFAASCAgCKgvY0uwd50rcE/P4gY0Xy5DToTAh0LaKv
-# 8Ff7Sc01W3oTAlGS+JhLsPh+UmRavYiJ1UoGO4/6vX6D3Ah6IdtntEcDOwgNGyhO
-# U/E1uAJR5xoQaldFOyJGyOmfLVuWVmMXFGyRwbmL3NVQFsYYsIV9fZjw+0LUYNiR
-# 2i3iqblkooC7XOGw13ElEaE4vawHVFGmVciC5acTZ8gCx5Lpc1FljDW5F3n+wm5R
-# MeEo1W8y6MjN8a73/yyAfM1jmLAAs/nTsVe5i0zYLprGy9T37JxVFZociAxxgEF7
-# usSwBe1hNVzYI3ghma+cq7H2pvLsnClCoZHowQ42TEWJfVXPvknur9MX96axxwFr
-# tyxSx61e/q074k0Y9a3/VLcY5GwqGUCFGYg2WOKzrvcPLWhyKZbV1MN4aZnUCAf5
-# LyncOelj07iUpV65/nGcuXOq+oo0rnFuE8uuuysIzZI26PyGU5TTZ0gdefv6ud7D
-# zX1AoKowjrLWOV2QFNxWUDW8WpZjEPZJLtjECXsLJW2bH3y7aunnL7qZNMrByuer
-# VKvHOTOmSIvhGuCybNvw9ofdjGROwz5Z1GgMNEQKPico3GW/5dzyoqC0LWsCqLnT
-# eAczxSaHYO+4pRF9OuAhEYImUvncpY1na6H5jpreDZO723GXm6BTiWDL/ldp98zD
-# QvVKAV4AvA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjQy
+# NTZaMC8GCSqGSIb3DQEJBDEiBCC2CAjwTDx9lXf0PKGMLv20WUY9MESPhqGcR/ST
+# J9PRxjANBgkqhkiG9w0BAQEFAASCAgA3+Hnxpm/OTVMWkQuJsy8XtDcPYbPJY7oE
+# 4srcBupY3G47FRrMzsiSxjX5TOsuzcwqk84MH+PoX5guawKnUImglJMzjJ4m6hlC
+# RII716+JQMEKnFgAz856gxD0Gt7OPNFVRLpsc2geOIRliGG9sEXuygUpOCViMskB
+# AFA9MDqyBDZEaeb4qMLoUxsGqSaToh6zHAd5MQnZADb/3SJMRmES1zKRjd7ELwvI
+# +pFJuU6+HSEQSf5Mn6x6TocKzKSodscl9xSnW9F2tRXKZx3yZSB6zTuqvsjtAEO2
+# 0ZpelfD3KQNrqGgylD2HzYZF2rD9OKNy2jLgG45RuZOd3m4/rq2cDJwhm/Jy7Tx7
+# lp5ysPVajtexHSRRuAdIueKJ8ziQdniOv2f1CccT9g+vOUsDeJlOWIdkdZ0CtWzB
+# i956KDa2Idvk31cxqLScal3NCgp1g0ZEFeZMVXO9lwCQhm4Q6Lm/eIsTSEVosSp3
+# xk279BLBYBm8lqCYst0y0gC9/yqZIiipieA4iXTdL/PS/WzX1RzLIiUYaojdWdvf
+# S1JNUIOIypfefqJyFJ5guKugTFp0a+KMbzYY+7smv6H8w4jB45TSa4RA74Y8NRia
+# 8G65cU7owW15wvuQiGOwaNDPNeJvKFbMwEbd/lsrOp7FgGnsyEvq8GnN5V+wzVeJ
+# 8l7JC1SKuQ==
 # SIG # End signature block
