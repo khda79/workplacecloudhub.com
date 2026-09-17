@@ -3,12 +3,12 @@
 Runs offline tests for the SmartWorkplaceCMDB Active Directory collector.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -57,6 +57,7 @@ foreach ($functionName in @(
         'Add-SmartWorkplaceCMDBActiveDirectoryDomainContext',
         'Get-SmartWorkplaceCMDBActiveDirectoryMemberDomainContext',
         'Get-SmartWorkplaceCMDBActiveDirectoryRangedMember',
+        'Test-SmartWorkplaceCMDBActiveDirectoryObjectNotFoundError',
         'Test-SmartWorkplaceCMDBTransientActiveDirectoryError',
         'Get-SmartWorkplaceCMDBActiveDirectoryRetryServer',
         'Invoke-SmartWorkplaceCMDBActiveDirectoryDomainOperation',
@@ -297,6 +298,134 @@ try {
                 $counters.Ranges -eq 1
             ) `
             -Message 'Large-domain paging, connection reuse, or primary-group deduplication failed.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Classify only Active Directory object disappearance errors' {
+        $missingError = [System.Management.Automation.ErrorRecord]::new(
+            [System.Exception]::new(
+                '0000208D: NameErr: DSID-0310028D, problem 2001 (NO_OBJECT)'
+            ),
+            'ActiveDirectoryObjectMissing',
+            [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+            $null
+        )
+        $authorizationError = [System.Management.Automation.ErrorRecord]::new(
+            [System.UnauthorizedAccessException]::new('Access is denied.'),
+            'ActiveDirectoryAccessDenied',
+            [System.Management.Automation.ErrorCategory]::PermissionDenied,
+            $null
+        )
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                (Test-SmartWorkplaceCMDBActiveDirectoryObjectNotFoundError `
+                    $missingError) -and
+                -not (Test-SmartWorkplaceCMDBActiveDirectoryObjectNotFoundError `
+                    $authorizationError)
+            ) `
+            -Message 'The LDAP no-such-object classifier accepted an unrelated error.'
+    }
+
+    Invoke-SmartWorkplaceCMDBAdTest 'Recover a moved group and exclude a deleted group from one snapshot' {
+        $rangeCalls = New-Object System.Collections.Generic.List[string]
+        $fakeUser = [pscustomobject]@{
+            ObjectGUID = [guid]'00000000-0000-0000-0003-000000000001'
+            ObjectSID = 'S-1-5-21-1-2-3-1101'
+            DistinguishedName = 'CN=Member,OU=People,DC=example,DC=invalid'
+            PrimaryGroupID = $null
+        }
+        $movedGroup = [pscustomobject]@{
+            ObjectGUID = [guid]'00000000-0000-0000-0004-000000000001'
+            ObjectSID = 'S-1-5-21-1-2-3-2101'
+            DistinguishedName = 'CN=Moved,OU=Old,DC=example,DC=invalid'
+        }
+        $deletedGroup = [pscustomobject]@{
+            ObjectGUID = [guid]'00000000-0000-0000-0004-000000000002'
+            ObjectSID = 'S-1-5-21-1-2-3-2102'
+            DistinguishedName = 'CN=Deleted,OU=Old,DC=example,DC=invalid'
+        }
+        $movedCurrentDn = 'CN=Moved,OU=Current,DC=example,DC=invalid'
+        function global:Get-ADUser {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            return @($fakeUser)
+        }
+        function global:Get-ADGroup {
+            param($Filter, $Identity, $Server, $ErrorAction, $ResultPageSize,
+                $Properties, $SearchBase, $ResultSetSize)
+            if ($PSBoundParameters.ContainsKey('Identity')) {
+                if ([string]$Identity -eq [string]$movedGroup.ObjectGUID) {
+                    return [pscustomobject]@{
+                        ObjectGUID = $movedGroup.ObjectGUID
+                        DistinguishedName = $movedCurrentDn
+                    }
+                }
+                throw [System.Exception]::new(
+                    "Cannot find an object with identity '$Identity'."
+                )
+            }
+            return @($movedGroup, $deletedGroup)
+        }
+        function global:Get-ADComputer {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            return @()
+        }
+        function global:Get-ADOrganizationalUnit {
+            param($Filter, $Server, $ErrorAction, $ResultPageSize, $Properties,
+                $SearchBase, $ResultSetSize)
+            return @()
+        }
+        function global:New-SmartWorkplaceCMDBActiveDirectoryLdapConnection {
+            param([string]$Server)
+            return [System.IO.MemoryStream]::new()
+        }
+        function global:Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
+            param([string]$Server, [string]$GroupDistinguishedName,
+                [object]$Connection)
+            $rangeCalls.Add($GroupDistinguishedName)
+            if ($GroupDistinguishedName -eq $movedCurrentDn) {
+                return @($fakeUser.DistinguishedName)
+            }
+            throw [System.Exception]::new(
+                '0000208D: NameErr: DSID-0310028D, problem 2001 (NO_OBJECT)'
+            )
+        }
+        function global:Get-ADObject {
+            throw 'The known member should resolve from the domain inventory.'
+        }
+
+        $readiness = [pscustomobject]@{
+            Domains = @([pscustomobject]@{
+                    Domain = [pscustomobject]@{
+                        DNSRoot = 'example.invalid'
+                        NetBIOSName = 'EXAMPLE'
+                    }
+                    Server = 'dc.example.invalid'
+                })
+        }
+        $warnings = @()
+        $result = Get-SmartWorkplaceCMDBActiveDirectoryLiveData `
+            -Readiness $readiness `
+            -CollectMemberships $true `
+            -Limit 0 `
+            -RetryCount 0 `
+            -WarningVariable warnings
+        $warningText = $warnings -join "`n"
+        Assert-SmartWorkplaceCMDBAdTrue `
+            -Condition (
+                $result.groups.Count -eq 1 -and
+                $result.groups[0].ObjectGUID -eq $movedGroup.ObjectGUID -and
+                $result.groups[0].DistinguishedName -eq $movedCurrentDn -and
+                $result.groupMemberships.Count -eq 1 -and
+                $result.groupMemberships[0].GroupDistinguishedName -eq
+                    $movedCurrentDn -and
+                $result.staleGroupCount -eq 1 -and
+                $rangeCalls.Count -eq 3 -and
+                $rangeCalls.Contains($movedCurrentDn) -and
+                $warningText -match 'moved or was renamed' -and
+                $warningText -match 'disappeared during membership collection'
+            ) `
+            -Message 'A concurrent group move or deletion produced an incomplete current snapshot.'
     }
 
     Invoke-SmartWorkplaceCMDBAdTest 'Retry only a transient domain failure on a newly selected ADWS server' {
@@ -569,8 +698,8 @@ if ($script:Failed -gt 0) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkA7/fkyu92H//
-# ii3GrRb4mI5pN/Qx6qQBjGfdPfgzyKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzXc/mV0muEzlu
+# QA+hvQZoLe691BhirCm66aWheniFfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -703,31 +832,31 @@ if ($script:Failed -gt 0) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINvBPz2nJCTD50W3BvhS17eqb+YUkj86cvn6NHcbdqbJMA0GCSqG
-# SIb3DQEBAQUABIIBgKJHMd5Vmx2xXHltRxfx9vqhVH5iXZ7z3D4qOhPLmSihUBsf
-# u7X7ud1zgEhoinBasdtU9+kJh/23ULmGCkxw0iNlTwe2K48ATHtmimrTKCLJPnpg
-# au7MbESIAYu8aT7rSjeMoKePme+oeT2AUl28Sqrn9JVEgS9f7m+1MVY6yzNBVFNv
-# 0RcAktsW+AuCHW+wm254eHi7+KLBRG7NsEdwqQJ41480YT0yxxOjI36abOlOx+9j
-# IzNsBJwGZetSuuF4WaaPRnrK8La+r6PE9/BI7Bp42F2Z5JYjeM/1dlwWGUiwBZxp
-# DCLmhroFo6NLBZ1CPsfQUvej2GzLrelvjB45O8LHNNfOSE+5L+7/jAU3Enpp6b+a
-# O7NvWsSmfHW8Nz5Fts9tITkPMIxqHhLg61Rf4v06t0vWGrKqHBSu2LfJZk0RD76U
-# 6pTDABydaL7fkNtr/hzp+y9r3Cy+kmjGeP+j9NZ5Z8+vDTveLBvDkLN2xrqg1nrk
-# 83T0a8kPoWGDQSWIqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGM1tRXTdR8yOq95V0R7I/0cN0qQdTbo7ahHg2GeVwV3MA0GCSqG
+# SIb3DQEBAQUABIIBgDIFZwFWnabCqF/Jivj/XbMhGF3mwjw2gLoLXtdFQjrqrrqA
+# 7kDEoVSeBLhEqYM06gvI0cVqao0JakgDtpypN0GNQdbgC0v1mouFfMlACEOeGqKm
+# zO2PTW8zU6Sefo4bwUg48aYBPOpUR7W8ADl2dG0gwVDAX3xLkq1jNU+anZOhkaOV
+# 8UdtqjuywZfuF7/zl/gjlU0SBzvhpQaQl5mNML8I2rMRbf193kkB8PrVVyPGS/GP
+# PYx5PGQckjP4ipuEcwP8/bz6bNiiMGsN4e0NDwBd7XC8i3n9mzpRQNEwqbGyUdhJ
+# fsBdBntKjDrUbw4sJeriGmiTuxGOvH7NZLmcnXJC5goR/B4cmAMKbYdd+wQqxahx
+# K4lOVG+miw7dSw9ggq0/Kd1nyXMlCKX+bX7wlCkHPr8akKKpNavv+Hx252A3UdGq
+# XXftuAAh59QnLO9zrnk0yup2XH0asKmB/BMvZ6eaQqqvZQFMdbgd9v04Rh7v5g1X
+# yBhiGqypgu2pl9959aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNTM2
-# MjZaMC8GCSqGSIb3DQEJBDEiBCCybTaF4VfGq4xYGQv+vCrxufu/OFA9iNzreNcU
-# QhxrXDANBgkqhkiG9w0BAQEFAASCAgAj3gjgjGUlYaD6PBA6x7nx0ceyWh4cun/7
-# +6LSghe6V7xaWlQHOtqZTVXqe4PuzhsOZba/uNyeVPlX2jSoFR2OMDpa/R2MDz05
-# YU4RjDslJZIR0vXLEUxMWeMwOV9qfcqWFuBqgdGTerkPgtg2tPwMQCGoYUs5o+Uy
-# DKJEtt1GY3eZzJrAr1dtblefDPmPpkgBFBOZ/mnjyHbDGevF//LqTDI35RLIFmtM
-# y2DIGUomxNL2hfIKQ1VWl3B16bWsnDBWzkTkf4MQeHVCL8LmBEcrybdI2yvdND4c
-# evoK3nXBgDGQhtDWixwdg4XX1qwTUUF5TmlUBE71VCbQ5Hb7yoLN+HmcOboki60i
-# DGRfKlCjQzmwcV7QmLLNibVXjLoCSW0Aj9YihleyXf0I2pnotje5Xb6k9vcHDJ2t
-# 89GVNWCxIkWCsnBzeftqC5bVmbeNBlMLO4P1UjYQv3FhcpS7KcfVBb1m0rwjjVH7
-# TTQHfwCZTSBlZR9mrNr/E8DRH2Dfx4v1w79nFUf8DU356QYGXlIDVsQSHMP8i8OW
-# nJS3KlFbB/HLIy/AwGZ5WWqFiYSmh5TgmAPHOuocBJ623WrDER50LmdlVEYASm/j
-# Siu9afLoHJ9FCWCnS4mDd6mDRZMNhS+UQv7yMm3611vSF5icDNipACKdrovw6Vbc
-# zR1vQNsqpg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMzEx
+# NDZaMC8GCSqGSIb3DQEJBDEiBCCinl+ulxeETkSNe9NlzHscxXKTDo6q5Wrqmxjg
+# Xo5WPDANBgkqhkiG9w0BAQEFAASCAgB8QXOPqgr0o32n3UJQvClHfKL61rw7oAet
+# BYlXEg4SK2DKkGjtKZ33Pws66lwHBqyjhvWcWjU8PH6dq16ZZmpjE2qVcmKcB9TI
+# TM2X9m6CDimNLyEqSbvrL1ylfE7cv+kwFOO6ryNXbIEqdsDCS7dKonKun3pYja3y
+# rc/qkXfj0VGdngYnjUxQ7KNmZKi22UGSi0p8VoPxNhxhiv3uv/H6p/Enjr4C1Mbg
+# z/WnRjhoEYUPSfg04KvhtdJvT/4NxaSM+Qb2LW68ZVUPNhZnztI4bYD6EbnlBpzm
+# oJut1DBAQIPeyGzLNYUpBzCvnwZqioh7TVxKzHap+ROoh8E1VwSjkH0D6EX5uC/I
+# PlibQuL+edDQbwhbTC9b98loqQbtMtyh0juRgQsIYBYZGs62n4atFoXnXL7Z+v/+
+# wv6yKbpp0cqexD4ua99En8X2O3m3EmSJAuYuwv19n0I6UQq0/PEsjysxVxb26f2Z
+# hHsr347p72KiEzANfy0J/0JW5jrebuzAhT6bFd4briQVBcoYp7xasuf0cIpHO4ql
+# WVclnB95BC3sstC3xxh4592e0yjnmoKzbW5D1fU4C1LyBUU4wL5GsRqbDJ0uu1bl
+# 2Sj4nFSQJ921YprESDr4/YUWRYYQLKSuIbiCHOxWc2uJbQe9tN1c4/jS085J55Ou
+# IDZiEDjv0A==
 # SIG # End signature block
