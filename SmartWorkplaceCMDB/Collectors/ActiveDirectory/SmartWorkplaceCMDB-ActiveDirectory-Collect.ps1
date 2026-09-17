@@ -11,7 +11,7 @@ tenant DATA-ALL and DATA-LAST locations. Offline JSON input is supported for
 development and tests on machines that cannot reach Active Directory.
 
 .VERSION
-1.0.6
+1.0.7
 
 .REQUIREMENTS
 PowerShell 7 on the SmartWorkplaceCMDB collection host.
@@ -46,7 +46,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.6'
+$ScriptVersion = '1.0.7'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -516,6 +516,42 @@ function Get-SmartWorkplaceCMDBActiveDirectoryRangedMember {
     }
 }
 
+function Test-SmartWorkplaceCMDBActiveDirectoryObjectNotFoundError {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) {
+        $typeName = $exception.GetType().FullName
+        $message = [string]$exception.Message
+        if ($typeName -in @(
+                'Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException',
+                'System.DirectoryServices.Protocols.DirectoryOperationException'
+            )) {
+            $responseProperty = $exception.PSObject.Properties['Response']
+            if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+                $resultCodeProperty = $responseProperty.Value.PSObject.Properties['ResultCode']
+                if ($null -ne $resultCodeProperty -and
+                    ([string]$resultCodeProperty.Value -ieq 'NoSuchObject' -or
+                        [int]$resultCodeProperty.Value -eq 32)) {
+                    return $true
+                }
+            }
+            if ($typeName -eq 'Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException') {
+                return $true
+            }
+        }
+        if ($message -imatch (
+                '\b0000208D\b|\bNO_OBJECT\b|\bNoSuchObject\b|' +
+                'the object does not exist|cannot find an object with identity'
+            )) {
+            return $true
+        }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
+
 function Test-SmartWorkplaceCMDBTransientActiveDirectoryError {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$ErrorRecord)
@@ -757,6 +793,9 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
     $organizationalUnits = New-Object System.Collections.Generic.List[object]
     $memberships = New-Object System.Collections.Generic.List[object]
     $domainInventories = New-Object System.Collections.Generic.List[object]
+    $staleGroupObjectGuids = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
     $totalRetryCount = 0
 
     $domainIndex = 0
@@ -802,6 +841,8 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
             ${function:New-SmartWorkplaceCMDBActiveDirectoryLdapConnection}
         $rangedMemberReader =
             ${function:Get-SmartWorkplaceCMDBActiveDirectoryRangedMember}
+        $objectNotFoundClassifier =
+            ${function:Test-SmartWorkplaceCMDBActiveDirectoryObjectNotFoundError}
         $principalByDistinguishedName = [System.Collections.Generic.Dictionary[string, object]]::new(
             [System.StringComparer]::OrdinalIgnoreCase
         )
@@ -870,13 +911,92 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
                                 $elapsed.ToString('hh\:mm\:ss'), $eta
                             ) -InformationAction Continue
                         }
+                        $groupDistinguishedName = [string]$group.DistinguishedName
+                        try {
+                            $memberDistinguishedNames = @(
+                                & $rangedMemberReader `
+                                    -Server $SelectedServer `
+                                    -GroupDistinguishedName $groupDistinguishedName `
+                                    -Connection $domainConnection
+                            )
+                        }
+                        catch {
+                            if (-not (& $objectNotFoundClassifier $_)) { throw }
+
+                            $resolvedGroup = $null
+                            try {
+                                $resolvedGroup = Get-ADGroup `
+                                    -Identity $group.ObjectGUID `
+                                    -Server $SelectedServer `
+                                    -ErrorAction Stop `
+                                    -Properties DistinguishedName
+                            }
+                            catch {
+                                if (-not (& $objectNotFoundClassifier $_)) { throw }
+                            }
+
+                            if ($null -eq $resolvedGroup) {
+                                [void]$staleGroupObjectGuids.Add(
+                                    ([string]$group.ObjectGUID).ToLowerInvariant()
+                                )
+                                Write-Warning (
+                                    "Active Directory group '{0}' ({1}) disappeared during membership collection for '{2}'. The stale group and its relationships are excluded from this snapshot." -f
+                                    $groupDistinguishedName, $group.ObjectGUID,
+                                    $domainDnsRoot
+                                )
+                                continue
+                            }
+
+                            $resolvedDistinguishedName =
+                                [string]$resolvedGroup.DistinguishedName
+                            if ([string]::IsNullOrWhiteSpace(
+                                    $resolvedDistinguishedName
+                                )) {
+                                throw (
+                                    "Active Directory group '{0}' resolved by ObjectGUID without a DistinguishedName." -f
+                                    $group.ObjectGUID
+                                )
+                            }
+                            if ($resolvedDistinguishedName -ine
+                                $groupDistinguishedName) {
+                                Write-Warning (
+                                    "Active Directory group '{0}' ({1}) moved or was renamed to '{2}' during membership collection for '{3}'. Membership collection continues with the current DistinguishedName." -f
+                                    $groupDistinguishedName, $group.ObjectGUID,
+                                    $resolvedDistinguishedName, $domainDnsRoot
+                                )
+                                if ($principalByDistinguishedName.ContainsKey(
+                                        $groupDistinguishedName
+                                    )) {
+                                    $groupPrincipal =
+                                        $principalByDistinguishedName[
+                                            $groupDistinguishedName
+                                        ]
+                                    [void]$principalByDistinguishedName.Remove(
+                                        $groupDistinguishedName
+                                    )
+                                    $groupPrincipal.DistinguishedName =
+                                        $resolvedDistinguishedName
+                                    $principalByDistinguishedName[
+                                        $resolvedDistinguishedName
+                                    ] = $groupPrincipal
+                                }
+                                $group.DistinguishedName =
+                                    $resolvedDistinguishedName
+                                $groupDistinguishedName =
+                                    $resolvedDistinguishedName
+                            }
+                            $memberDistinguishedNames = @(
+                                & $rangedMemberReader `
+                                    -Server $SelectedServer `
+                                    -GroupDistinguishedName $groupDistinguishedName `
+                                    -Connection $domainConnection
+                            )
+                        }
+
                         $directMemberships.Add([pscustomobject]@{
                                 Group = $group
                                 MemberDistinguishedNames = @(
-                                    & $rangedMemberReader `
-                                        -Server $SelectedServer `
-                                        -GroupDistinguishedName $group.DistinguishedName `
-                                        -Connection $domainConnection
+                                    $memberDistinguishedNames
                                 )
                             })
                     }
@@ -976,13 +1096,28 @@ function Get-SmartWorkplaceCMDBActiveDirectoryLiveData {
         }
     }
 
+    $currentGroups = @($groups.ToArray() | Where-Object {
+            -not $staleGroupObjectGuids.Contains(
+                ([string]$_.ObjectGUID).ToLowerInvariant()
+            )
+        })
+    $currentMemberships = @($memberships.ToArray() | Where-Object {
+            -not $staleGroupObjectGuids.Contains(
+                ([string]$_.GroupObjectGuid).ToLowerInvariant()
+            ) -and
+            -not $staleGroupObjectGuids.Contains(
+                ([string]$_.MemberObjectGuid).ToLowerInvariant()
+            )
+        })
+
     return [pscustomobject]@{
         domains          = @($Readiness.Domains | ForEach-Object { $_.Domain })
         users            = @($users.ToArray())
-        groups           = @($groups.ToArray())
+        groups           = $currentGroups
         computers        = @($computers.ToArray())
         organizationalUnits = @($organizationalUnits.ToArray())
-        groupMemberships = @($memberships.ToArray())
+        groupMemberships = $currentMemberships
+        staleGroupCount  = $staleGroupObjectGuids.Count
         retryCount       = $totalRetryCount
     }
 }
@@ -1680,9 +1815,10 @@ finally {
 }
 
 Write-Information (
-    "SmartWorkplaceCMDB Active Directory collection completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; OrganizationalUnits={4}; Memberships={5}." -f
+    "SmartWorkplaceCMDB Active Directory collection completed. Domains={0}; Users={1}; Groups={2}; Computers={3}; OrganizationalUnits={4}; Memberships={5}; StaleGroupsExcluded={6}." -f
     $domainRows.Count, $userRows.Count, $groupRows.Count, $computerRows.Count,
-    $organizationalUnitRows.Count, $membershipRows.Count
+    $organizationalUnitRows.Count, $membershipRows.Count,
+    [int](Get-SmartWorkplaceCMDBObjectValue $source 'staleGroupCount')
 ) -InformationAction Continue
 
 [pscustomobject]@{
@@ -1695,6 +1831,7 @@ Write-Information (
     ComputerCount             = $computerRows.Count
     OrganizationalUnitCount  = $organizationalUnitRows.Count
     GroupMembershipCount      = $membershipRows.Count
+    StaleGroupCount           = [int](Get-SmartWorkplaceCMDBObjectValue $source 'staleGroupCount')
     RetryCount                = [int](Get-SmartWorkplaceCMDBObjectValue $source 'retryCount')
     IncludeGroupMemberships   = [bool]$IncludeGroupMemberships
     RawContractVersion        = [string]$rawContract.contractVersion
@@ -1714,8 +1851,8 @@ Write-Information (
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyHtB0HbpXu4us
-# Uu/H8PLnWty3f2ZTaQKRGQTftPFbN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5US6f/xxbqjIe
+# rXCi2tMsKMOZwdh+qhZfAMrMzuZj/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1848,31 +1985,31 @@ Write-Information (
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIg5Zszto3v+1h8c/bP3jcU7EvERWTOahkM28Ymo+RKTMA0GCSqG
-# SIb3DQEBAQUABIIBgGlVsqT9BMH66QFeKgRwh3HM4PAumSYpbfpSW7Hcj/8BUSBX
-# q9b6S+vskP2hfb20F1HZyATHD+AYZcCxR3cawQzOzEGSR+P8bRVQnyk6PevOeifj
-# M6NHA6rIV6VtZPUgKKVQJlaMLJ4B2pJc2lGQmtd9RvWF1ndGFLXEFw5odG5QCV0J
-# 2BWmlJRKUiP+LLiejUUdGcr5x1w0vC03M+O4cjr7OEo16yspAsTgZ4Y60vKQBgBp
-# FX5Tptbic+1QHrvCIXQdNhSRT3aBBzD5f2ttnw8Wc9Mg2thUwxRnUZcXXDl0cJPE
-# LljZDhjZ5xtjMURyoYPKX9O8P2phwbxyJZNL1sN/qR5WdFzcnRuHgQdbs4C2fSAU
-# qn9J0OUa/QM00XvOCHL10nVkhwBqNyv/zwsQnosbwHRmZKCkwbVJET0KncJVNubc
-# ha2yr//MYaowcZENWybeuc7AfqslH7QnPUi5+R5uAsj5IKVHuz1FHs56iyp1bQmZ
-# ESHXbFY/oqgeRG1MBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA9MzC7+zf0KUV8DMNR3VEH0WnpcJREa53GzeuuiAXiqMA0GCSqG
+# SIb3DQEBAQUABIIBgFh8soGGngwWGNjAI++qvt33K7155jNcQLsL8RbsKujZpHB5
+# KOXIwEfirIsKW7WnwBL/yY3AOOZf7HtJMkCaTgwRG0zW0YvuEoPhLZmfNP+/ezLR
+# cNz/aUW5QJCsczI0a6lmmIY9D4pEJnq319W695WPPRFclSbw3DRV4pnyRSXE85Tc
+# n6wspcpMEMMZrpbo6JTLUHAlhiV1EwpUT/dAY+CgbMexVKxmoylx1ubkItR8g9jS
+# o0TbTxnKPNeAkfzNvPM7s0LPzaeA8vJpyctsM3sqTDymOf9NMkh7tTC9tosyB2sl
+# 9Oi974iTnotv0jYtYaZJFeZmy3iezqTu3zJYwvpwlARgU99ad+eI9cZIIkNHwYq/
+# RqbMUPLLi6cmMQI5aGnSp2W2S3AzN0RhUW+6lqE5Bj9Yymsf9WU8kVwM1EzYPGDZ
+# qt9iUU32ulyHimNsRvjBNsLFh4j/om9mSKpBtcvgq8eaF6LeBtR7pk//j+oIXGw4
+# DVFnFuS5pkBAGSMqUaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTIxNzIy
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCXk/1UcdgvRbcSh4IhFIuFiuu7ELOZRoPc5rv6
-# 2C54VDANBgkqhkiG9w0BAQEFAASCAgA48nBrkHNAvkK5CUHlLhqqgLBBClx8/1y6
-# xhNI16r1gDgGTf9uTFsnobEgPyL/3ro1vwCSsLZiYDxUTE3t/6/nwfuBHDqy0w3g
-# I77W5Q9V4e637F73oph7+0rAvoWdaL68SHT/WAwzKhkbdSEdFWcReCJ4HjEq+bet
-# gRQ2HbFX1J4RPPsYuh+oJtzysit+r9dKuEMrFf/wpwumVu2kZrsEgVqaH90cLvQO
-# IIz+9J0jf0tY3A2VckGTJafTtjJksmVanrGLZAp0nEyiny2ULzw8Wrq9BOKBqu8X
-# KwjnUX44ikjGlsVoVwiKOsDk0v5fcmnmZFjegR2+omiI6wF6J8ONQgejPI8JCG9A
-# u8uKqA46a1udy2ATPccM1aKWsCowsHPWMZmwCGAuOuSllxuoN34uYUwCwpLagb4x
-# cxsCdKOSAlLLuYdQ65kpvB4aRoO1rv97ujqHE3xbDZN9vZOxLtxRJK7XxmOKH1P6
-# 0QkaoZWlIif+ZmxbfvvxbPuO1h3GyNpm+sGPN2PrS6R5qS7uzWshdt2rujj9Ar15
-# U6E0ynLVCwTmgY7XyZOTlyl51y+KOW3HuG+0EMVxyLc6qRfPt8Ba6a/W3cPa57GP
-# nBnY1dZAOXEmcqidx/glg5t8YXn50smQKl5nIT7yLvGrbSa/0Ji0084DSNnMPTwG
-# fsPE9alqWg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMzEx
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDAxwpN2E8VvCUuwiSk/vXv2DCL+zl6ZIVNf9lm
+# dA8S7jANBgkqhkiG9w0BAQEFAASCAgBJ2Z8Zj+Wj3+lf5qOpE5+ukon2o5B0w8UB
+# cQ4BkCLPuLmSgxFFOII55ByiiziNcCOm89SiTmc6kJl3cA+U+0XKfELkdjT1vStO
+# 4rtPnR6BpjSAF7ogROC5G6zE9ZsAJ9fjzB+pSjbGXI0K1EFzC9nZk1e3+tE2micn
+# WI6BBhVauDxz5Mtf+7+FOG+d0n49TDWDv/y1caljlvsXs6dT40+kTQ89w/EQbEEK
+# HxfzWNG+CnbRGHaW4EJrY2+OLBEe0D594oTKbwfiKGX826UwveY9z8ls9JvfcUbS
+# 7ICjn8tns8ssRnFguY7sAfRiXRr3Q32smMzBrvSr6E8qrZtC0QHXHqB7kVXYD7tH
+# eoOGHGx+nqEEOV3883HslT8d5Spd0UpGWsGkzIrBoWQJ8JxgtRf6O519yCstVYdj
+# 1HW45MB3q1C0FPHhNkD2wG2m45XgHzYz7MGwM1F55aXHlHWl3XRJOoaRAEmQY3Ua
+# 2zV5KfiikH7gcZ48bkL80FL46td3Qj//xmYOBtnUcUt4A+XLgwUKirBB2VM+vEkF
+# hgAaNwC5ow8QW3iF1Pz2JRs8wgXiplQtUele9ul7/j7IWvV6Dwi5PSnj3tgydDF6
+# 8SN9bJRUHq+siP5SY7BEx2A5oRiZOwqPP7CjnflOPEXawIv9kWkovK+Shy7R+IdB
+# 6YR3q3x9Ug==
 # SIG # End signature block
