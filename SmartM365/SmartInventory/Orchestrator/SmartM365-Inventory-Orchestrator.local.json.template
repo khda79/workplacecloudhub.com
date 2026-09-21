@@ -42,6 +42,7 @@
   "RuntimeUpdateStableChecks": 2,
   "RuntimeUpdateCooldownMinutes": 10,
   "MonitorCoreModuleVersion": true,
+  "SendRuntimeUpdateEmail": true,
   "DistributedSchedulingEnabled": true,
   "CapabilityProbeMode": "ReadOnly",
   "CapabilityProbeTimeoutSeconds": 90,
