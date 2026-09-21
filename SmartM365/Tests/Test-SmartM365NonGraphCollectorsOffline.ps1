@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param(
@@ -177,6 +177,61 @@ try {
         $source=Get-Content -LiteralPath $path -Raw
         Assert-Offline ($source -notmatch 'Copy-Item\s+-LiteralPath\s+\$(dailyCsv|summaryCsv)') 'Mailbox daily or summary latest copy remains direct.'
     }
+    Test-OfflineCase 'Calendar inventory stops and caches unavailable backends' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/CalendarPermissions/SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
+        $definitions=@(Get-FunctionText -Path $path -Names @('Get-SmartM365CalendarFailureCategory','Get-SmartM365CalendarBackendName','New-SmartM365CalendarLookupException','Get-CalendarFoldersSafe'))
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
+        try {
+            $observed=&$module {
+                function script:Invoke-Quiet {param([scriptblock]$Script)&$Script}
+                function script:Get-MailboxFolderStatistics {
+                    param($Identity,$FolderScope,$ErrorAction)
+                    $script:StatisticsCallCount++
+                    throw "Cannot open mailbox on server 'SYNTHETIC-EX01' through cn=Servers/cn=SYNTHETIC-EX01/cn=Microsoft System Attendant because the Information Store is unavailable."
+                }
+                function script:Get-ExceptionMetadata {
+                    param($ErrorRecord)
+                    $exception=$ErrorRecord.Exception
+                    [pscustomobject]@{
+                        Category=[string]$exception.Data['SmartM365Category']
+                        Attempts=[int]$exception.Data['SmartM365Attempts']
+                        Backend=[string]$exception.Data['SmartM365Backend']
+                    }
+                }
+                $script:UnavailableCalendarBackends=@{}
+                $script:StatisticsCallCount=0
+                $mailbox=[pscustomobject]@{Identity='synthetic-one';UserPrincipalName='synthetic-one@example.test';PrimarySmtpAddress='synthetic-one@example.test';Guid=[guid]::Empty;ServerName='SYNTHETIC-EX01';Database='SYNTHETIC-DB01'}
+                $first=$null
+                try {Get-CalendarFoldersSafe -Mbx $mailbox -PrimaryOnly:$true|Out-Null}catch{$first=Get-ExceptionMetadata $_}
+                $callsAfterFirst=$script:StatisticsCallCount
+                $mailbox.Identity='synthetic-two';$mailbox.UserPrincipalName='synthetic-two@example.test';$mailbox.PrimarySmtpAddress='synthetic-two@example.test';$mailbox.ServerName='SYNTHETIC-EX02'
+                $second=$null
+                try {Get-CalendarFoldersSafe -Mbx $mailbox -PrimaryOnly:$true|Out-Null}catch{$second=Get-ExceptionMetadata $_}
+                [pscustomobject]@{First=$first;Second=$second;CallsAfterFirst=$callsAfterFirst;TotalCalls=$script:StatisticsCallCount}
+            }
+            Assert-Offline ($observed.CallsAfterFirst -eq 1 -and $observed.TotalCalls -eq 1) 'Unavailable backend caused redundant identity or mailbox retries.'
+            Assert-Offline ($observed.First.Category -ceq 'BackendUnavailable' -and $observed.First.Attempts -eq 1) 'First infrastructure failure metadata is incorrect.'
+            Assert-Offline ($observed.Second.Category -ceq 'BackendPreviouslyUnavailable' -and $observed.Second.Attempts -eq 0) 'Cached backend failure did not skip the next mailbox.'
+            Assert-Offline ($observed.First.Backend -ceq 'SYNTHETIC-EX01' -and $observed.Second.Backend -ceq 'SYNTHETIC-EX02') 'Backend name was not preserved in failure metadata.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Exchange local mailbox issues are structured and published' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
+        $definition=@(Get-FunctionText -Path $path -Names @('Add-SmartM365LocalMailboxIssue'))[0]
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definition))
+        try {
+            $issue=&$module {
+                $script:LocalMailboxIssues=New-Object 'System.Collections.Generic.List[object]'
+                $script:LocalMailboxIssueSequence=0
+                Add-SmartM365LocalMailboxIssue -Category 'SyntheticFailure' -Operation 'SyntheticOperation' -MailboxIdentity 'synthetic-mailbox' -Message 'Synthetic message'
+            }
+            Assert-Offline ($issue.IssueIndex -eq 1 -and $issue.Category -ceq 'SyntheticFailure' -and $issue.Operation -ceq 'SyntheticOperation' -and $issue.Message -ceq 'Synthetic message') 'Structured mailbox issue fields changed.'
+        } finally {Remove-Module $module -Force}
+        $source=Get-Content -LiteralPath $path -Raw
+        Assert-Offline ($source -match 'function\s+Export-SmartM365LocalMailboxIssues[\s\S]+Export-SmartM365Csv') 'Mailbox issue CSV does not use the shared publisher.'
+        Assert-Offline ($source -match "-Operation 'Get-MailboxStatistics'" -and $source -match "-Operation 'Get-MobileDevice'" -and $source -match "-Operation 'Get-RemoteMailbox'") 'One or more required mailbox issue sources are not recorded.'
+        Assert-Offline ($source -match 'Export-SmartM365LocalMailboxIssues') 'Mailbox issue export is not invoked.'
+    }
     Test-OfflineCase 'Mailbox inventory summary sends at most once per local day' {
         $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
         $definition=@(Get-FunctionText -Path $path -Names @('Invoke-SmartM365MailboxDailySummaryMail'))[0]
@@ -234,8 +289,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVNpuMA9AjtfoQ
-# IkdYDMHC4GHjOb0oFe4q5kebA2WiIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWy2dEM4t7sPUF
+# 3jWJ78k4bQgyJJm+4XG0KFjYiO89LqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -368,31 +423,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEmJ06hcnby11FFxUdDewlZqZW3kkZMHs/hgUbX66UkVMA0GCSqG
-# SIb3DQEBAQUABIIBgFjaVWXdYUqoCsTnClaFAJqAsAQHCqUFJRx1VdqB8CeBe25S
-# ZoL+UgUcTix+GhL0ASFXsSzxzOW5FeITp3JqNmPDmb2WX8fQOjehvIlYS4MXDqfW
-# QtM5WrduuSFPVNBfEPC7SntE5Ghxyjv3gl3TjgZcjfhJwFZH870imK6a9z6XRie1
-# PmcWLM69uOYNqZ3F/ulcu6xNP2YMOI+20kGNxV13AW21r/keNETqlX5noIuolt/4
-# zFi7TKGcx/JkQM+c62QqNRhEh/1Z31GEAM1GTn9dwFUxo4LG5SZHZK4Ab8fLC7sY
-# tCODwGquh1MhlBp8auclMmcJ5yL/8qkwiH4Vsrzk/hi+NlD9OPsOwORAYJKl9K9q
-# d8id0PWDp7+ZyWAurDcH8tLG27aFdK8E5L4AA7jIBwwZhFxW65RoHFai1uQn3t4l
-# 3xwdgfSwS1sVOB6SGtNQiDex4lqUSAiHJUJ1QiwixsfcNkwpYNKTWTgp6lOPtALq
-# lpPOn1gVV8leASK0maGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHyJztAphgfNWX0cKnfpUJe+dSMidTUVkKzmKMTEfPf5MA0GCSqG
+# SIb3DQEBAQUABIIBgBEGE2FG7gtCCIu/1SNRe2qdvfpHAk2HFl2T8Q9uZjGncizV
+# V9sc2H32fjzh6nNdB+Ja1v4zIkQyXaG8gvBoHLCCZUfORzKIJ7WiVP7mqGY0BoKb
+# kf4czzEmwQUehq69o7r9sTU/KL9e6HCqt9S033uUo8YoTgpe9nYr/34Y5KnPWCTg
+# RHdpU5qTUH52IOWqRD7yPPozx1bgo5CRGD7VcgEgTL+xd+NGjPIXPo7AVqnW0XP7
+# qGJFSWi0hh6AbGTSzp0sXq+b/M7ld1uyZgxBtj1NK7oyQf7J6FcvErjNzOHExiBy
+# uGPaSq7NbG0AEe1QxxIm8L/KUPG5SpvOY2mn/F7DdYbx3y7/Fk/7m3fMGFeqHtyR
+# M24qGmHE/NaSS6MwdHLDhdVeUm3RLCiMAB5sbN49wX5cZSwewJOPyOH10wuflVoq
+# nXMR2V1xddV7JZiK7RSiqqMIHQl5JkKOFBN7JzzsYjtYFuJJQavX6fxboPudnvjo
+# OUbwiBrVW6rSIurysKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTE2
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDm38aQaorMIufWvf/sRWpS5y5nlTteFAGMR+1Y
-# YQXF2jANBgkqhkiG9w0BAQEFAASCAgAXSQSUVUOYspYEtC8BhmGi635Diu/Sf4Sd
-# CxlgHq1ItQhR+9XIwKu0A45u6Uvd63zZqAH/yecvLm3zZu4PS5r7TcKp0DZTBOfF
-# CabuDvNPJQY9tLDfBsTEe21euWkaceWPiMsgP/H4GQLNglGXVSOaYtnFwyLiDFnd
-# tvMuYnYeCpmTa9PesJniti79sqmVlgk1WFdZd+Ck71MzscIVV85FNyvUxQGt3ZhH
-# iUcG7w5q6cIAXtmGlnY0f8vIsrr1MC0/0emXN15y0XKEEOU7GCZyJmMANoBs8h06
-# N4i82fKOwU8TRdFDQMi0R7fpH8o3ZOT9Vc6U3Ps4ccUR1IT7+KeTWW+lqInPl+CQ
-# r1SB5Wl+D6sWEbuFEEqg82W6cunxt20tdcPFW/o07ZgSP9vtUjYd17B2/JKzvALB
-# Ov3TOEny6KQFXi26ZMmzG+1C4s9FVbgSKMwHoDQ3pOK3TTIBAKISm32TpmrldGzR
-# ABOzIG4l9VZfy5dGgc3PVeBHfLbOUUs/AF8ReyN8SK2c6/eLcOP5ftnPO/JYuB6w
-# JnU+PKaV43KHrP1YT/idRzvIwPYsh1mi1dFyjc6mML9WZ9dSeVroWnBmr7rzwBBb
-# v5dL1QEMYidhJ26VcZeF8KWmoY3TiJACO2BaEe7ztiVpoaZVxOrzgoMZmjTh7gCJ
-# isM0MZTY1Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
+# NDhaMC8GCSqGSIb3DQEJBDEiBCDZrVyCdIhvSkYcL+MAfdOmBcemH6SPsfKpHVs8
+# cUlEJzANBgkqhkiG9w0BAQEFAASCAgCF1sCa+3q9YCiofENLfzlxR+o9VI/0+gVp
+# 8MvxwBq6Uc9VgvrWNsdkwLaNjhRCVGJj0xZJzgh3Q9q/3qFrmw91z8myNfyUGlAk
+# oxmYTqmYauCqJvQT5X0dGmV5LOEuBSXEPoNcOfcvDlS1wMxbWyUTwOiKhf8Pom5C
+# JB/8G9zRHuEa5TFCAFpr1gj60NOKXGjG0DKPD/rVb/VG5bifXHHyjdNdaGTQ1QxB
+# zmhobUqtLGwJManM6p9BpAOUvI0Lnmoz0XSnQ6bMp51PVYIZcqsAkFB7LJRo45vW
+# mfZq6CiZDSaIdbx8R6lQVQP3XOIirtStmRfsadkbwWv4oSfQ6FJ1Ey+AZ9SmyV14
+# BH4gsD2QhnZ0nPkBvvAfxdulUYhBCNaArpGHhnbUmPEQVUvzBie7f8BwJrLk1tx6
+# POlVAiB22Ac1Gc5hVgwGCRIHfqCpuSbKHPw4ZoZgoUpJ44tFPm67muEtZqoPBebD
+# 9IsGnfwqAwZb2rxdlOdFZdLdfemnX+4tADEfNA2TULUFWef5/sM8OVwYGIRA2m7m
+# 9EiwpXO/d4uC712PBQqKzcA6gEpNWkS8rTYr4C/PrVIZtNS7ONJPO3Xru8fGgCbZ
+# DMc+69NllEgeZig3GIZsKDKElXNTMZmEpkpKfZDynrDsXs0lMpOAZ8sV9K0X09sO
+# ZiDwvLFHNA==
 # SIG # End signature block

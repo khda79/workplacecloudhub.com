@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.44
+1.45
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.44
+    Version: 1.45
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -257,7 +257,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.44"
+$ScriptVersion = "1.45"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -348,6 +348,8 @@ if ($LimitResultSize) {
 }
 $scriptdatamailbox = $false
 $scriptdatamegewithperm = $true
+$script:LocalMailboxIssues = New-Object 'System.Collections.Generic.List[object]'
+$script:LocalMailboxIssueSequence = 0
 
 
 function Register-SmartM365GeneratedCsv {
@@ -434,6 +436,52 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
         SourceUpload = $sourceUpload
         LatestUpload = $latestUpload
     }
+}
+
+function Add-SmartM365LocalMailboxIssue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Category,
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [AllowEmptyString()][string]$MailboxIdentity = '',
+        [AllowEmptyString()][string]$PrimarySmtpAddress = '',
+        [AllowEmptyString()][string]$DomainName = '',
+        [AllowEmptyString()][string]$ServerName = '',
+        [AllowEmptyString()][string]$Database = '',
+        [Parameter(Mandatory = $true)][string]$Message,
+        [AllowEmptyString()][string]$SuggestedAction = ''
+    )
+
+    $script:LocalMailboxIssueSequence++
+    $issue = [pscustomobject][ordered]@{
+        IssueIndex         = $script:LocalMailboxIssueSequence
+        Category           = $Category
+        Operation          = $Operation
+        MailboxIdentity    = $MailboxIdentity
+        PrimarySmtpAddress = $PrimarySmtpAddress
+        DomainName         = $DomainName
+        ServerName         = $ServerName
+        Database           = $Database
+        Message            = $Message
+        SuggestedAction    = $SuggestedAction
+        DetectedAt         = (Get-Date).ToString('o')
+    }
+    [void]$script:LocalMailboxIssues.Add($issue)
+    return $issue
+}
+
+function Export-SmartM365LocalMailboxIssues {
+    [CmdletBinding()]
+    param()
+
+    $columns = @('IssueIndex','Category','Operation','MailboxIdentity','PrimarySmtpAddress','DomainName','ServerName','Database','Message','SuggestedAction','DetectedAt')
+    $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+    if ([string]::IsNullOrWhiteSpace($latestCsvFolder)) { $latestCsvFolder = $OutputPath }
+    if (-not (Test-Path -LiteralPath $latestCsvFolder)) { New-Item -ItemType Directory -Path $latestCsvFolder -Force | Out-Null }
+
+    $publishResult = Export-SmartM365Csv -BaseFileName 'Exchange_OnPrem_MailboxCollectionIssues' -OutputPath $OutputPath -GlobalPath $latestCsvFolder -Data @($script:LocalMailboxIssues.ToArray()) -Columns $columns -Encoding 'UTF8'
+    WriteLog -Message ("Exchange mailbox collection issue CSV exported. Rows: {0}; Current: {1}" -f $script:LocalMailboxIssues.Count, $publishResult.LatestPath)
+    return $publishResult
 }
 
 function Get-SmartM365SharePointUploadRecordByLocalPath {
@@ -654,7 +702,10 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     $dataQualityWarnings = @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $remoteWarningRecords)
     $Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings = @($dataQualityWarnings)
     if ($dataQualityWarnings.Count -gt 0) {
-        WriteLog -Message ("Exchange remote mailbox data quality warnings captured: {0}" -f $dataQualityWarnings.Count) 'WARN'
+        foreach ($dataQualityWarning in $dataQualityWarnings) {
+            Add-SmartM365LocalMailboxIssue -Category ([string]$dataQualityWarning.Issue) -Operation 'Get-RemoteMailbox' -MailboxIdentity ([string]$dataQualityWarning.ObjectPath) -Message ([string]$dataQualityWarning.Warning) -SuggestedAction ([string]$dataQualityWarning.SuggestedAction) | Out-Null
+        }
+        WriteLog -Message ("Exchange remote mailbox data quality warnings captured: {0}" -f $dataQualityWarnings.Count) 'WARNING'
     }
 
     $seenRemoteGuids = @{}
@@ -1238,7 +1289,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.37' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.40' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 	Start-Transcript -Path $global:logTranscriptFile -Append
 	WriteLog -Message $MyInvocation.MyCommand.Name
@@ -1679,9 +1730,9 @@ try { # Main try block for script execution and interruption handling
         Write-LogMailboxesProcessing "Total number of mailboxes to process for current scope: $totalMailBox"
 
         if ($totalMailBox -eq 0) {
-            $warningMessage = "No mailboxes were found to process for the current scope. $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
-            Write-Warning $warningMessage
-            Write-LogMailboxesProcessing $warningMessage
+            $emptyScopeMessage = "No mailboxes were found to process for the current scope. This is treated as an expected empty scope. $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
+            WriteLog -Message $emptyScopeMessage -Level 'INFO'
+            Write-LogMailboxesProcessing $emptyScopeMessage
         }
         else
         {
@@ -1785,9 +1836,11 @@ try { # Main try block for script execution and interruption handling
                             $ProhibitSendReceiveQuota = $Mbx.ProhibitSendReceiveQuota.Value.ToMB()
                         }
                     } catch {
-                        $warningMessage = "Could not determine ProhibitSendReceiveQuota for $($Mbx.Name): $($_.Exception.Message)"
-                        Write-Warning $warningMessage
+                        $errorDetail = [string]$_.Exception.Message
+                        $warningMessage = "Could not determine ProhibitSendReceiveQuota for $($Mbx.Name): $errorDetail"
+                        WriteLog -Message $warningMessage -Level 'WARNING'
                         Write-LogMailboxesProcessing "WARNING: $warningMessage"
+                        Add-SmartM365LocalMailboxIssue -Category 'MailboxQuotaLookupFailure' -Operation 'Get-MailboxDatabase' -MailboxIdentity ([string]$Mbx.Identity) -PrimarySmtpAddress ([string]$Mbx.PrimarySmtpAddress) -DomainName ([string]$Domain) -ServerName ([string]$Mbx.ServerName) -Database ([string]$Mbx.Database) -Message $errorDetail -SuggestedAction 'Verify that the mailbox database exists and is available from the Exchange management host.' | Out-Null
                         $ProhibitSendReceiveQuota = "Error"
                     }
                     $userObj | Add-Member NoteProperty -Name "ProhibitSendReceiveQuota-In-MB" -Value $ProhibitSendReceiveQuota
@@ -1811,9 +1864,14 @@ try { # Main try block for script execution and interruption handling
                         }
                     }
                     catch {
-                        $warningMessage = "An error occurred while retrieving mailbox statistics for $($Mbx.DistinguishedName)."
-                        Write-Warning $warningMessage
-                        Write-LogMailboxesProcessing "WARNING: $warningMessage Error: $($_.Exception.Message)"
+                        $errorDetail = [string]$_.Exception.Message
+                        $statisticsCategory = 'MailboxStatisticsFailure'
+                        if ($errorDetail -match '(?i)database.*(couldn''t be found|could not be found|not found|does not exist)|cannot find.*database') { $statisticsCategory = 'MissingMailboxDatabase' }
+                        elseif ($errorDetail -match '(?i)information store.*(is not available|inaccessible|unavailable)|cannot open mailbox.*microsoft system attendant') { $statisticsCategory = 'ExchangeStoreUnavailable' }
+                        $warningMessage = "Mailbox statistics failed for $($Mbx.DistinguishedName): $errorDetail"
+                        WriteLog -Message $warningMessage -Level 'WARNING'
+                        Write-LogMailboxesProcessing "WARNING: $warningMessage"
+                        Add-SmartM365LocalMailboxIssue -Category $statisticsCategory -Operation 'Get-MailboxStatistics' -MailboxIdentity ([string]$Mbx.Identity) -PrimarySmtpAddress ([string]$Mbx.PrimarySmtpAddress) -DomainName ([string]$Domain) -ServerName ([string]$Mbx.ServerName) -Database ([string]$Mbx.Database) -Message $errorDetail -SuggestedAction 'Verify mailbox database health and Microsoft Exchange Information Store availability before retrying.' | Out-Null
                         $userObj."LastLogonTime" = "Error"
                         $userObj."TotalItemSize-In-MB" = "Error"
                         $userObj."ItemCount" = "Error"
@@ -1832,9 +1890,14 @@ try { # Main try block for script execution and interruption handling
                             }
                         }
                         catch {
-                            $warningMessage = "An error occurred while retrieving archive mailbox statistics for $($Mbx.DistinguishedName)."
-                            Write-Warning $warningMessage
-                            Write-LogMailboxesProcessing "WARNING: $warningMessage Error: $($_.Exception.Message)"
+                            $errorDetail = [string]$_.Exception.Message
+                            $archiveStatisticsCategory = 'ArchiveMailboxStatisticsFailure'
+                            if ($errorDetail -match '(?i)database.*(couldn''t be found|could not be found|not found|does not exist)|cannot find.*database') { $archiveStatisticsCategory = 'MissingMailboxDatabase' }
+                            elseif ($errorDetail -match '(?i)information store.*(is not available|inaccessible|unavailable)|cannot open mailbox.*microsoft system attendant') { $archiveStatisticsCategory = 'ExchangeStoreUnavailable' }
+                            $warningMessage = "Archive mailbox statistics failed for $($Mbx.DistinguishedName): $errorDetail"
+                            WriteLog -Message $warningMessage -Level 'WARNING'
+                            Write-LogMailboxesProcessing "WARNING: $warningMessage"
+                            Add-SmartM365LocalMailboxIssue -Category $archiveStatisticsCategory -Operation 'Get-MailboxStatistics-Archive' -MailboxIdentity ([string]$Mbx.Identity) -PrimarySmtpAddress ([string]$Mbx.PrimarySmtpAddress) -DomainName ([string]$Domain) -ServerName ([string]$Mbx.ServerName) -Database ([string]$Mbx.Database) -Message $errorDetail -SuggestedAction 'Verify archive mailbox database health and Microsoft Exchange Information Store availability before retrying.' | Out-Null
                             $ArchiveTotalItemSizeMB = "Error"
                             $ArchiveTotalItemCount = "Error"
                         }
@@ -2146,7 +2209,7 @@ try { # Main try block for script execution and interruption handling
                         }
 
                         if ($MobileDeviceIdentity) {
-                            $MobileDevices = Get-MobileDevice -Mailbox $MobileDeviceIdentity -ErrorAction SilentlyContinue
+                            $MobileDevices = Get-MobileDevice -Mailbox $MobileDeviceIdentity -ErrorAction Stop
                             if ($MobileDevices) {
                                  $MobileDevicePresent = $true
                                  $ClientTypes = $MobileDevices.ClientType | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}
@@ -2156,14 +2219,18 @@ try { # Main try block for script execution and interruption handling
                             }
                         } else {
                             $warningMessage = "Could not determine a suitable identity for Get-MobileDevice for $($Mbx.Name)."
-                            Write-Warning $warningMessage
+                            WriteLog -Message $warningMessage -Level 'WARNING'
                             Write-LogMailboxesProcessing "WARNING: $warningMessage"
+                            Add-SmartM365LocalMailboxIssue -Category 'MissingMobileDeviceIdentity' -Operation 'Get-MobileDevice' -MailboxIdentity ([string]$Mbx.Identity) -PrimarySmtpAddress ([string]$Mbx.PrimarySmtpAddress) -DomainName ([string]$Domain) -ServerName ([string]$Mbx.ServerName) -Database ([string]$Mbx.Database) -Message $warningMessage -SuggestedAction 'Populate a unique UPN or sAMAccountName for the mailbox recipient.' | Out-Null
                             $MobileDeviceError = "No Identity"
                         }
                     } catch {
-                        $warningMessage = "An error occurred while retrieving MobileDevice for mailbox $($Mbx.DistinguishedName): $($_.Exception.Message)"
-                        Write-Warning $warningMessage
+                        $errorDetail = [string]$_.Exception.Message
+                        $mobileDeviceCategory = if ($errorDetail -match '(?i)doesn''t represent a unique recipient|isn''t unique|ambiguous') { 'RecipientAmbiguous' } else { 'MobileDeviceLookupFailure' }
+                        $warningMessage = "MobileDevice lookup failed for mailbox $($Mbx.DistinguishedName): $errorDetail"
+                        WriteLog -Message $warningMessage -Level 'WARNING'
                         Write-LogMailboxesProcessing "WARNING: $warningMessage"
+                        Add-SmartM365LocalMailboxIssue -Category $mobileDeviceCategory -Operation 'Get-MobileDevice' -MailboxIdentity ([string]$Mbx.Identity) -PrimarySmtpAddress ([string]$Mbx.PrimarySmtpAddress) -DomainName ([string]$Domain) -ServerName ([string]$Mbx.ServerName) -Database ([string]$Mbx.Database) -Message $errorDetail -SuggestedAction 'Use a unique recipient identity and correct duplicate or ambiguous Exchange recipient objects before retrying.' | Out-Null
                         $MobileDeviceError = "Error"
                     }
                     $userObj | Add-Member NoteProperty -Name "MobileDeviceAssociated" -Value $(if($MobileDeviceError){$MobileDeviceError} else {$MobileDevicePresent})
@@ -3103,6 +3170,15 @@ Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
 }
 Else
 {
+	    try {
+        $issueExportResult = Export-SmartM365LocalMailboxIssues
+        if ($issueExportResult) { WriteLog -Message ("Mailbox collection issue export completed: {0}" -f $issueExportResult.PublishedPath) }
+    }
+    catch {
+        WriteLog -Message ("Mailbox collection issue export failed: {0}" -f $_.Exception.Message) -Level 'ERROR'
+        throw
+    }
+
 	    if ($GenerateReport -and -not $OnlyADPermission) {
         try {
             $reportResult = Invoke-SmartM365ExchangeLocalMailboxReport -UseCurrentInventoryData:$true
@@ -3184,8 +3260,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAy/anHIAms/Y9+
-# z+GXaNWUBPxYMAvIsU3Sbklfd8XKbaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvhnGurNqZvGyK
+# 9iJdYvxZEAmbfVhcWLoMytm+0tdjjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3318,31 +3394,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAV0/mpF0THLqxkHp2iviRmPyQLW5iIGnRc+K9MwrAe/MA0GCSqG
-# SIb3DQEBAQUABIIBgE64jVRaVxhnIUiQHCp5HcHM+qu/HGQCuCI/P4ZrBqHKmLZ1
-# kZJdoSeuVBuAd4FMue5hNBlcIdB1S5VIvBe12MFM+Npe4u1XoYyFQMMrYgyOH9rN
-# xcUdDc2NjKH/OkRmCpuqJVWfPb5iJIcF0QYXTjAb85vuI0jRfkx6czVhfMtDELFk
-# AAEUgFvcnnVEyasw5AOy+48PwvC1tyFiJEkfDYpgGk5hFhPR1wFxcw61duol+pcc
-# fnBHIfUyJR1qQRSLmuX6P0UH78wloeXTipgoCBcZkaJN+stMCtuOGeVDmrxfmGB5
-# zIyFxn9TSt/ZN+3oaIxRekT+RF+HXQu6z2E2K0EAPDwL6bJCyNv6c3/J1zqEAOX3
-# IoPNUd0JsklDjbmxggF4kgcwc6WhYTQPNkbCNDqF19uYyt524zg0pKzVl9GMn4xa
-# 3Jvj1ND47CwwYmoGypib+EZKR3udLX19hYIES+tfDPnxpJUbjM3J6vvNPLYg5m20
-# AD35zMQfTtrQxWj+dKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILfOuKIDOMuUt1lImdewnzdiyWFjGXHl6r42TSlta4bGMA0GCSqG
+# SIb3DQEBAQUABIIBgJ1CzdQ+UD/V0bjkOw0a5VXNblFaiEcRx4pOply8WEge1E9C
+# cOi7MqzM+Kbew0W8OQhwfJvmhCSL05ChyHqzFZbSPUsKxJyKEA3riSm+gbKF+u7U
+# CW+fPO2a8SkmAQfjFvUGFl07OPqECBzu0VPLwc9m+rIQj0ltrGDN7ll+7+QxWgg+
+# f2O34zDpdn2tm9zNw3rx5QpiPl6CJOXDCeJVEsjD35yTFGhoTtEGIU9RixZmNAjo
+# zM16jI9y8P35QpsJw1WW8AtkXNa+QVkXfH+sbyP6pqr5dMGULprxNvQkb2FZjR7+
+# DL1cOo0B69inHMM4Ng5KcbCwNDqdYw6NxjdFa2U4BtivAOar/4rCLa9/TrV0B4+4
+# 7sLh5UpGgsvFUUofV/7N8cmo9zFnYCusNU/RB2KbNZeaBhk/1wQWA9Oz1PD5b+zo
+# 6AiXXJ23HR6r5OqcdpKGWTLOmUNpkkqjQAA5wGnZ0zzk6RSXoCukxtzQaZyg4+42
+# kJzZ/jMoj1flapu/o6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCmYKIw10MWZ/zV+SwSkDxkN2NoMpUiVZl8Op71
-# LJn7CTANBgkqhkiG9w0BAQEFAASCAgCN2a9L4SF53sshnuHrL+Pyh8vw9cO6M+ta
-# 27thBXbJPVpcLO+zk+V7+GmLS2Hncpcz4YBbWmAr5uVlROEIbG4Fhb7T6n6E91Wx
-# k7eay8gkGaRQHxoe4lUBQEb/DsXQv9k9NUXxlsSuhYre2FMpCaXYkCpHLByidw18
-# lLoxK8wR40XSRVfDwP5VqpqPtejODHz/GI4z/IRNxk+/9cnZWdG7xM/rb0qc7JIy
-# nyRRMsBMYavl60NT/slcv8R58mJHUZ8AZb0sFTG2tj89xOJJrWxHAmLXmgeA61QE
-# cL2Z+kF2VrVu4hXPi4BQUD17ft9rVjRAS5zLVMVUzO1PYZcQjq1EpNYLozPj89L4
-# O71sj970ER4TbuHUXDJHSFU7lVQJPQPS+koV0wM96IoktloVC1rZ5Bo7MFQP67Ck
-# HqPDcx7GDtQIrQhmwT/+g+IqfWRuNHn2PVAfK3JPsshfB7WlB2MX7t+D7h7D26bv
-# 7M0B8cvzaLMbVYf+uQjRf2975VqtOniC+UI1N94pVNlLwzzCS0idogZ3GruFVBrm
-# TOfVOeRBZOmmeBIYDXdI8zQSj11Mp6mTx8BdwtryiXXv44drabgsdU5OXtXThJSk
-# x1W90bS9RUhK+zwVOEwPJU9Zg4i9P/3WAA34dr/gyoVdYLkzX8AoUizhpjf7RqS0
-# okVa+cb2Ow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
+# NDZaMC8GCSqGSIb3DQEJBDEiBCAbRhOIlbhdMzibYZHwW9KpNYLo5gmsDIkoxuY4
+# Mt72xTANBgkqhkiG9w0BAQEFAASCAgBdVLU502JUKg+lduGfp553uZbR7CvGI7Bc
+# AVA6lCKpzQ4oIYUQFgzfFT/resEG/v/MG/mQDkkLXiaRV3z29m2Zb9khthxuuD/o
+# CaWSRGUzLuvd0YHwJ34ODYTy6s9O3bu/l55/T/9oLEuCIgKNNT3ndSzQMiXHTbZj
+# 6N/SArlBNT5wHyKabxdom/lD/7e67nTHNT4gow/2k5nullqIwX16fSrJzNax/Q3D
+# OjE85/hZTCLKQKBBPuPCWv+v7PzrjNVyGM/LFrjrYkf3WS+uMceHfLwLL8u0r29u
+# TWvGHKHACpLbj9LRSPAdwfg2RfQSHbrkj9m3P2G0VGLzEz7ImJ4ROGGnZtjMVT49
+# pmEbJoa0E7KxbB97Xu/EHbLdcDM/broOCt6tFumIVwT8wEWCYjo3xvqF4+f7dskm
+# /2ewah7rcvRUmN5/0c4ZCxMI5Smt7kdYNjAXJZ0m3D3it0I9IdGhPGkeOUkFZFlF
+# a6MytFS7gQ5NsxY+ZiY6FgGvxW28Ad5izPDbZod6rs2KIHhsMfcaO8vLNPKayWuC
+# hQwKevHS5t2K7i2abBw2CZqm1Slp52G4WsZNGzC66jdkSvCOdVbvSuHnjQ8ek011
+# dNvdsy0Lui+G0HxZH3vG4wzxhrulWOtB0SdVISYJ/qlZ4QOK1uFVxpokwhccg/27
+# 4uTS7FJLjg==
 # SIG # End signature block
