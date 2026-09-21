@@ -27,7 +27,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.13
+1.14
 
 
 
@@ -37,7 +37,7 @@
     Minimum Graph application permissions: Group.Read.All; GroupMember.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.13
+    Version : 1.14
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
 
@@ -477,6 +477,49 @@ function Invoke-RbacGraphGet {
     }
 }
 
+function Test-RbacGraphProperty {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $false }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject.Contains($Name) }
+    return $null -ne $InputObject.PSObject.Properties[$Name]
+}
+
+function Get-RbacGraphPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject[$Name] }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function Get-RbacGraphPageShape {
+    [CmdletBinding()]
+    param([AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return 'Type=<null>; Keys=<none>' }
+    $typeName = $InputObject.GetType().FullName
+    $names = if ($InputObject -is [System.Collections.IDictionary]) {
+        @($InputObject.Keys | ForEach-Object { [string]$_ })
+    }
+    else {
+        @($InputObject.PSObject.Properties.Name)
+    }
+    $visibleNames = @($names | Select-Object -First 20)
+    $nameText = if ($visibleNames.Count -gt 0) { $visibleNames -join ', ' } else { '<none>' }
+    return "Type=$typeName; Keys=$nameText"
+}
+
 function Get-RbacGraphCollection {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Uri,[string]$Operation='RBAC Graph collection',[scriptblock]$RequestInvoker)
@@ -488,10 +531,12 @@ function Get-RbacGraphCollection {
         if(-not$visited.Add($nextUri)){throw "$Operation returned a repeated @odata.nextLink; collection is incomplete."}
         $pageNumber++
         $page=if($null-ne$RequestInvoker){&$RequestInvoker $nextUri}else{Invoke-RbacGraphGet -Uri $nextUri}
-        if($null-eq$page -or $null-eq$page.PSObject.Properties['value']){throw "$Operation page $pageNumber returned an invalid Graph collection response without a value property."}
-        foreach($item in @($page.value)){if($null-ne$item){[void]$items.Add($item)}}
-        $nextProperty=$page.PSObject.Properties['@odata.nextLink']
-        $nextUri=if($nextProperty){[string]$nextProperty.Value}else{''}
+        if(-not (Test-RbacGraphProperty -InputObject $page -Name 'value')){
+            $pageShape=Get-RbacGraphPageShape -InputObject $page
+            throw "$Operation page $pageNumber returned an invalid Graph collection response without a value property. $pageShape"
+        }
+        foreach($item in @(Get-RbacGraphPropertyValue -InputObject $page -Name 'value')){if($null-ne$item){[void]$items.Add($item)}}
+        $nextUri=if(Test-RbacGraphProperty -InputObject $page -Name '@odata.nextLink'){[string](Get-RbacGraphPropertyValue -InputObject $page -Name '@odata.nextLink')}else{''}
     }
     return $items.ToArray()
 }
@@ -500,7 +545,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -1134,8 +1179,8 @@ if ($global:ScriptFailed) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBADVk4xbAAu+IU
-# ZVP6Dfrwv0zxTR3wVUnaK4pEvOJ/CKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyKLG/r0qw1ayF
+# GZWXxfzSsbRa6OR3qsxnOosG/DsiS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1268,31 +1313,31 @@ if ($global:ScriptFailed) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOsCIymrlXXqcfwJiWrlxQm4yn+aTwnHu3DYrvQ4SnfpMA0GCSqG
-# SIb3DQEBAQUABIIBgKuWs3CnN6BaOK54Hpp/bnz3cPzJ4kdlf9sJCtUxwp/s+BBx
-# HThdsz/nWiP5YPiMN1gALNbX+5618utUFJJzTy33Nbb0jDyiKs51ED8f1G4baLOC
-# iIRzFVyHbMd2TXLONIqpsFFAZ0kzYfN8YFb0rB1p03p7/i8Eemdr2HE+qW3Q7nz/
-# JC3UoX2jSTAxEgVqqqIb6PHbF6ZifQp2COYqG0jgIw42GLX39DEtzjFVRs/H2SCG
-# L6aaaX8LoipEYcDi9pY/1lUCAs9Rbf6pyyiMfp6PAv3Yl7vfVXcE7NyFLBEU3V1s
-# ikq34SzEjgOiQbDhLrM01NxpTbtB1mb52feIx/kFTW/vIvsxu0/M+38bgsnU79LH
-# z9Z6S59N1uT7qDaBvIIcWPFNfC1xwLmIQvKy1JEwuQCgH7C3hLYbgIanlQcvlMQW
-# PD++QyY/gh/b1L9xz/G3WB4thRk7XYXAEy/gDROkgfoXS3l/F1vChzOEo36W1KND
-# uZmC0Zx1fL8/a1raQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ2l4NoKg+k2ZQynsj6PdnyF5eUD/GZ6/8GAqiIjwGvnMA0GCSqG
+# SIb3DQEBAQUABIIBgC4WtiOiYvAXOxUiBvPxAXPnH/HBcF0F1CM310P3DB9PP2PN
+# TdiNaU3G885WzBI9KL61nolr07K6DQMQGkgb6U98v2AEpYaXESGAWQ7UOSEN+P8n
+# ts0mjHU6UYhYDjvxnUZ8MloOazMU7fhtrZdW7MZj03JncNF80J7xmV+O94jE6Mju
+# M3LLl6WQlxx06uSL3pNcmBCfVl7mQacYz2+Sfl8fdjgDvPD9fdA9+DNrYK70WlDu
+# HOOfPUoBiVbYoDpv2+CJi+31GavzCTlDbL/hCpcaOCL4CF6MGc78GMkjAlj6D7J4
+# zGYXXLiCbtBRjdre0HRv0zFADflswASKiNQlC9TqS/VRziRwDCH7xvm/8rJXbpWi
+# f5BJfnkNou5xC/6rM8+5M6jEnYjZcteg4Pp7geq/SjVKETEFBHJ3ZCLp4Kmd0qcE
+# 9pfVGgtSN7iDEt+/bSQaj1oFGzG4mg/ltM/1VtdG7cUfxrKTJUiF4QuSouKC2oe/
+# 2XZ3T70/KTBQHAAvL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCBSFW5MCjgmWBw9+W5UiT0Gt+R+x2sTf672mbWR
-# XFaAgzANBgkqhkiG9w0BAQEFAASCAgBHVaUVdOZxvIFKfxzattq3OMURUJ2YNZx1
-# RKEtQUiUljqerUW0sX+bsLtr0qlAvCr1RYQ+I8k6ocf5KIUrNkFgd8nHmxaj0caj
-# J0ThINo9gModCIPzhZydErIjtE64AwFQx3IV+ss9HfUE8/8fWqykgEB9vhgHyZJd
-# lIdOJ+6R/MBD2ELtSlU7WUt52zl7/Wut8JXzKe+3S4vIBcRrDbNR6kY8cPQH7snx
-# 9GDqmQbmiaz+MoY3/nDJ0mmGlkZHn2rndh6PRurVdAD+kXogyNDmTScpTq6fKaM5
-# epe+JWbjn6/Fn1qX5jr7KRRSMn8CKsIJFz2bL37RTFz3smCGxZ3FW73mQkGkpzbL
-# q9Fsuoh7MytwlftlJmy/1921+3aYAI2nGLp5IHwWwXn5QzakAateGAYHobFr4xbX
-# W9gtGC115gM5YhPkq92v6k4GaQYcS4VFDWbwZ4tPYHLxm4xDJjyWjl3UsvJmbh21
-# K9mSoKh4OoiRofcQEt3gu929d/3LnLVwo6k+wYANaZ/3tGWQkcACwa5t/WQzcTCl
-# wco91UzOegQsW4Ohyv2u6qGEmw/UfDxMHzKYQSEKDZpEHtXJDdmRkq6/RSP7Rldr
-# C+C7QhNDx1fQQZ7RJCthN2EhuAwJk1w4dfNAk3Dq4GlGHZ1Zs8OB5uX8Gti+mcit
-# 5PGN7xPf2g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDUz
+# NDJaMC8GCSqGSIb3DQEJBDEiBCAFpXFsu7TjFygSrKXdo30gOcmUd32vbeQVGROb
+# T3t+RTANBgkqhkiG9w0BAQEFAASCAgAtJyKw7WkQtXpbmNh7u5GuSfROwJVF9HtI
+# dCzE7+UHjQYywk/u+nnRJd7nM+GBbt6xN5tsyhS8seyxse+xpThGdxnRliBuDfdW
+# cFW08wPAwTu6LOlV7RoMmgEc+6jcGSZhFvbhgmYjrlomQ3cL+EIHjQxagbvV6jg3
+# +chOP5C0uxID6UoJTwGw6BGxpRR6eYWh6Hbx3/+D/8BfTiK4HcKRXqyuZoor9443
+# q9iS/DaLuJBFBCoDwCyp7NMbyb61Gqc+cyA4ocTbTqPwKubBptXQpL4TywuuuSNn
+# W9Cx2zvA/j1prSbJyEKFuUPz0K4GpZn5ZfgBg1vGtjApseDw/eLpsIv0gBKo/HCd
+# JOEiddilkfrQfgOUMB1HA+CiQ8oNJ2xdZaqUs5nd2/fuB2Hz83Jy+RwjP/Yg5rg7
+# EtyKAyT/fk1yOt5agZYdyHuhHlCRmZxAFlLWbnJYxngETxMOU/eq6nWqfc3DQu2m
+# OEMRUkdras9z415/JkkyqvFyfHjnnNsTSs+f11Dvyov0HZmzi3DhPN0msHmEL5IG
+# DL3gzWjmdQWlrR4N8bw5rNOLXSYihljGhrnwUYWeK6RkLvzG7433ujBK5bY2Yxqd
+# KZhdwl6WwqtksbeIDTKdnyz4LVoXm0FX2cC+SzbQhRWyZpyGeuov/fKVoCrprfNN
+# 6MrhjnuAvQ==
 # SIG # End signature block
