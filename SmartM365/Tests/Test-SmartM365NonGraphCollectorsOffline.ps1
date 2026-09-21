@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param(
@@ -129,6 +129,20 @@ try {
         Assert-Offline ($text -notmatch '\bCopy-Item\b') 'Infrastructure latest path still uses direct Copy-Item.'
         Assert-Offline ($text -match "-Delimiter\s+';'" ) 'Semicolon delimiter contract changed.'
     }
+    Test-OfflineCase 'Exchange executive summary renders ERROR status in red' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
+        $definitions=@(Get-FunctionText -Path $path -Names @('Format-HtmlValue','New-HtmlExecutiveSummary'))
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
+        $htmlPath=Join-Path $testRoot 'exchange-executive-summary.html'
+        $summary=[pscustomobject]@{ExecutionDate='2026-09-21';RunId='synthetic';ExchangeServersCount=1;TotalLogicalProcessorCount=0;TotalMemoryGB=0;TotalDiskDriveCount=0;TotalDiskDriveSizeTB=0;ExchangeSchemaRangeUpper='N/A';ExchangeOrgObjectVersion='N/A'}
+        $server=[pscustomobject]@{ExchangeServerName='SYNTHETIC-EXCHANGE';ServerRole='Mailbox';LogicalProcessorCount=$null;MemoryGB=$null;DiskDriveCount=0;DiskDriveTotalSizeGB=0;ComputeCollectionStatus='ERROR';DiskDriveCollectionStatus='OK';LogicalDiskCollectionStatus='OK';LowSpaceLogicalDiskCount=0}
+        try {
+            & $module {param($s,$r,$p) New-HtmlExecutiveSummary -Summary $s -PerServerSummary @($r) -ReadinessInventory @() -Path $p} $summary $server $htmlPath
+            $html=[IO.File]::ReadAllText($htmlPath)
+            Assert-Offline ($html -match "class='status status-error'\s+style='font-weight:700;color:#b91c1c;'[^>]*>ERROR</td>") 'Per-server ERROR status is not rendered with an inline red color.'
+        }
+        finally {Remove-Module $module -Force}
+    }
     Test-OfflineCase 'AD full inventory blocks incomplete sequential domains' {
         $path=Join-Path $SourceRoot 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1'
         $source=Get-Content -LiteralPath $path -Raw
@@ -220,8 +234,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs2tzTY6VbJG5f
-# 4+/meUkEodWTpt+vbbHyW0DoMJOofaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVNpuMA9AjtfoQ
+# IkdYDMHC4GHjOb0oFe4q5kebA2WiIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -354,31 +368,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA9Hmb5rDw/SwW9d3au3ETsvYccRvvBHqxSGF2wQ3j8hMA0GCSqG
-# SIb3DQEBAQUABIIBgIl2hHjHv1JDNHKCR6bATTgqKSY7l/paKwUvi2OmaJ5bwUZe
-# Q5qfVCcSHmaPA5kk29PsOkypT3SEPi0XfVmAczwpqdkxQj483cgP0sHdOxIp966+
-# Y/dDQhrEEZ37FkCv3aDfyhepup6X48roC9ZdUsYtEeHpGNboJrhtMMcIckBdudx3
-# j0pCqrxqtEF13gUNdG16J2C6SiIRQaIvjFS2IH7YDNWy/pNnhoA7TxmD5t89Jo00
-# sFs5ZH8EaTJcWaNYWvJw/7DtrayCckdc7KzOSBPvajWjY833Z4HcirMQvVjWaGBN
-# k8reYnIvOfLaVfgjSc9gnvAgl0MTFMCfKi8igFs/Rcm6G8AmnA7G4H1M9vHnjjPr
-# ix7pIviQ2eeB2qJaTf4bxTk8GBQP5TsYIjU7a86EPptqh7bY5eMdK/eG0xHJL1ya
-# NvoD1OwjijnXeaOdEh8qo4nixWusokObgpBgJu+pNoM2d+MjUi84rk7xaHIi2bPH
-# GGtf+mYZXyh65eqJgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEmJ06hcnby11FFxUdDewlZqZW3kkZMHs/hgUbX66UkVMA0GCSqG
+# SIb3DQEBAQUABIIBgFjaVWXdYUqoCsTnClaFAJqAsAQHCqUFJRx1VdqB8CeBe25S
+# ZoL+UgUcTix+GhL0ASFXsSzxzOW5FeITp3JqNmPDmb2WX8fQOjehvIlYS4MXDqfW
+# QtM5WrduuSFPVNBfEPC7SntE5Ghxyjv3gl3TjgZcjfhJwFZH870imK6a9z6XRie1
+# PmcWLM69uOYNqZ3F/ulcu6xNP2YMOI+20kGNxV13AW21r/keNETqlX5noIuolt/4
+# zFi7TKGcx/JkQM+c62QqNRhEh/1Z31GEAM1GTn9dwFUxo4LG5SZHZK4Ab8fLC7sY
+# tCODwGquh1MhlBp8auclMmcJ5yL/8qkwiH4Vsrzk/hi+NlD9OPsOwORAYJKl9K9q
+# d8id0PWDp7+ZyWAurDcH8tLG27aFdK8E5L4AA7jIBwwZhFxW65RoHFai1uQn3t4l
+# 3xwdgfSwS1sVOB6SGtNQiDex4lqUSAiHJUJ1QiwixsfcNkwpYNKTWTgp6lOPtALq
+# lpPOn1gVV8leASK0maGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNzE1
-# MjJaMC8GCSqGSIb3DQEJBDEiBCB7oR8wnqPJzGDU8yK2EjZkkRpBO1PyxpFp2rRt
-# 0k9V9zANBgkqhkiG9w0BAQEFAASCAgBfJpJhAWcVmv8z09SL7748GXZOoMZjbspk
-# v4t6Z0toUSfT2TllKsh3SLuWreHdT3jnYgZ2d/791Id0jPMh/0ZdyL7M1SHAI5ZJ
-# ivXGS0EtBQSL0Gdd6Gn680+UyakL5MqCd6JqCkXw9buftQGNWwTVVVUJBVBjc03u
-# 1Xne1WYQtvORovUrgHp7XVM+Le9W4leuMslM3Fp2mKTUx8EAH1jJTvGHrpZ6rlq5
-# /F0ZDkj1Bdu24mvUjI0FQ2Gz2Tyuqo/lxUQCmJYf3fa3eDBtoUfrbGWcxAGMaqv3
-# /O1W/MLoO2UZlMkUraxmqP1L1fAdEXi7VA3EwXmu8b1ZABnX5x9TTcNkd/+BdHyF
-# QV/s30YEeoaNDKbTcWtSM2tG5NvD571cuZYo0nJyofV96mHW7cx1diuGsg6ZiPOe
-# XyDTVPCubsVGkuTfzCrYRYkxf38/bICkXmvXvYDZzNWfJP9HPf8vpLIMSprz2jeD
-# 676ctgB6soY0QmCJ7ZYWB2N+6qAe5km8Qp02ywu4DsN44Z08iteioAu0VsBiUe0s
-# p5j3IAKM76H6Nw5aIhoJsx/3b8oMfTCQEeIfY0GNKXUnNP/e7/xmMkWptJeC7BmO
-# 2xpU2UFkVtFha4Q8RqNeE818pnMgcQpA3kk1zXCx2ktYhzcdJ6HqA/AsrhYBcBPc
-# mJ8ynXcRWA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTE2
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDm38aQaorMIufWvf/sRWpS5y5nlTteFAGMR+1Y
+# YQXF2jANBgkqhkiG9w0BAQEFAASCAgAXSQSUVUOYspYEtC8BhmGi635Diu/Sf4Sd
+# CxlgHq1ItQhR+9XIwKu0A45u6Uvd63zZqAH/yecvLm3zZu4PS5r7TcKp0DZTBOfF
+# CabuDvNPJQY9tLDfBsTEe21euWkaceWPiMsgP/H4GQLNglGXVSOaYtnFwyLiDFnd
+# tvMuYnYeCpmTa9PesJniti79sqmVlgk1WFdZd+Ck71MzscIVV85FNyvUxQGt3ZhH
+# iUcG7w5q6cIAXtmGlnY0f8vIsrr1MC0/0emXN15y0XKEEOU7GCZyJmMANoBs8h06
+# N4i82fKOwU8TRdFDQMi0R7fpH8o3ZOT9Vc6U3Ps4ccUR1IT7+KeTWW+lqInPl+CQ
+# r1SB5Wl+D6sWEbuFEEqg82W6cunxt20tdcPFW/o07ZgSP9vtUjYd17B2/JKzvALB
+# Ov3TOEny6KQFXi26ZMmzG+1C4s9FVbgSKMwHoDQ3pOK3TTIBAKISm32TpmrldGzR
+# ABOzIG4l9VZfy5dGgc3PVeBHfLbOUUs/AF8ReyN8SK2c6/eLcOP5ftnPO/JYuB6w
+# JnU+PKaV43KHrP1YT/idRzvIwPYsh1mi1dFyjc6mML9WZ9dSeVroWnBmr7rzwBBb
+# v5dL1QEMYidhJ26VcZeF8KWmoY3TiJACO2BaEe7ztiVpoaZVxOrzgoMZmjTh7gCJ
+# isM0MZTY1Q==
 # SIG # End signature block
