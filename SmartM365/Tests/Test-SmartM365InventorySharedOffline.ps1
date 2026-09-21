@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.5
+1.1.6
 #>
 [CmdletBinding()]
 param(
@@ -116,6 +116,41 @@ try {
             $global:SmartM365MailTenantName = 'EMEIS'
             $global:SmartM365ScriptFileName = 'SmartM365-Synthetic-Inventory.ps1'
             $global:SmartM365ScriptVersion = '9.8.7'
+        }
+        $loggerModule = Import-OfflineFunctions (Join-Path $SourceRoot $relative) @('Format-SmartM365LogLine','WriteLog')
+        try {
+            & $loggerModule {
+                function script:Invoke-SmartM365TeamsNotificationFromLog {
+                    param($Message,$Level)
+                    $script:LastTeamsLevel = $Level
+                }
+            }
+            Test-OfflineCase "$variant WARN level is normalized and counted" {
+                $logPath = Join-Path $testRoot "$variant-warn.log"
+                $observed = & $loggerModule {
+                    param($Path)
+                    $global:SmartM365WarningCount = 0
+                    $global:SmartM365ErrorCount = 0
+                    $global:LogTextFile = $Path
+                    $script:LastTeamsLevel = ''
+                    WriteLog -Message 'Synthetic warning' -Level 'WARN'
+                    [pscustomobject]@{
+                        WarningCount = $global:SmartM365WarningCount
+                        ErrorCount   = $global:SmartM365ErrorCount
+                        TeamsLevel   = $script:LastTeamsLevel
+                        LogLine      = [string](Get-Content -LiteralPath $Path -Tail 1)
+                    }
+                } $logPath
+                Assert-Offline ($observed.WarningCount -eq 1 -and $observed.ErrorCount -eq 0) 'WARN did not increment the warning counter exactly once.'
+                Assert-Offline ($observed.TeamsLevel -ceq 'WARNING') 'WARN was not normalized before the Teams notification hook.'
+                Assert-Offline ($observed.LogLine -match '\[WARNING\] Synthetic warning$') 'WARN was not persisted with the WARNING level.'
+            }
+        }
+        finally {
+            $global:LogTextFile = $null
+            $global:SmartM365WarningCount = 0
+            $global:SmartM365ErrorCount = 0
+            Remove-Module $loggerModule -Force
         }
         Test-OfflineCase "$variant mail subjects use the tenant prefix" {
             $general = & $module { Format-SmartM365MailSubject -Subject 'SMART 365 - [CRITICAL] Microsoft Teams Inventory - 2026-09-21T12:12:41Z' }
@@ -466,8 +501,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfL4OqlB+XYuon
-# oHNyOmWhRZ6bpbxBjgpqf3JeJZ9o9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0eexEyBFvj/Tt
+# U8gnMOlsxJCES6yN73o7sPy7SB+826CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -600,31 +635,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJIuxMLa9uSWlPw13vdpIRLQ81CdhrokZOLPzmzSyxdSMA0GCSqG
-# SIb3DQEBAQUABIIBgIU1PIRZSDI/J+TYEfY0RaA5rkfaU6Yw/cVS16F+ubTnfimU
-# OQUsB2oSQRJKM+XPtq/0Utqf3bgEy9RUX6oMtu9Gtepe1fTczzdTvKOvWOGJWKLi
-# DCLExXOqjIT0OMDvsjy/bflK5Gv27kDP5i9JPpoonqLMi1DUDxQwi2dA8cXZtWXM
-# fCm63H5veElRxzBjc7538mfe1WW+6ylto6TcPUBBWEoJip4AWKjZrKOT3f8dBzhF
-# rfkYzQfaLsHPITmLUJTS0YcGZapXieHPA+HUBNesJzcVM33cT6THjnJiopucaB60
-# MvvYy01SDl2jx8WhwiWx0kDvC9xnCBBGSPlvvuGRzx12b1CY1zsJUYuQF22ce0tS
-# qlf7slt4GYIBS7Hvfnm6vqf8VItClwhyGx0ov5Xz+oKQORUwcbQGaFfQKnSaWdC7
-# O3wT1uPTQLVrJgB2N+fLVXb4CvanOVW4PnsQSQWkw30Tuoxy0h5snwmdo6ZioO+7
-# xi9E02kWIpGS+j1CxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICoEOHM8yybz3rx9+ABdcpyimGp6fDfWHSOIjh+Ql61oMA0GCSqG
+# SIb3DQEBAQUABIIBgDAk5U7rcllNa7HDvEz2xzvf36OFQTZ6+XqtFquWPE3J0UQ4
+# 2Bx6lLZXFYGqFo6yYubFJphgoa/CCJtDrzNaD5ro1DdxUSshcd8nWJ6fa4is8g/N
+# K8OtYKsg9653SqXxBX4NCcIQsEFKBMNTQ+/MxsUpTrM3FOl1fRGUuz3X+WxKi9Lk
+# zKvxMIiCW9XCKkj9K5O3Ae5YycgriV5if6G8++ku1NBt67YTiTFCA+/reYLwVH+V
+# JEI/UH0cuJNRQr1Fi95GuZLxX5hKyOdp2A7H2JdiSW5Ysrzr4dMzjIUbgFgK/RZK
+# Xsn4cGqeYBw3mAO5lQgdJciV89MRC2jdnH+HJ/loTkMGg7LITWVymLhYf0aIpXSl
+# 0DoRWZwUHBJWsW9+9icxsHPLQPXSeMNfoonm+LUx7iUxkifDHJdVAacJWCt25n7I
+# XHsWX3U4l1xcfw3bsbFfaI0g4gPUHxywLPNzYNEYsNilmUQWKUxNUP1v+jlOJ8KB
+# 5haqWPMVGsyGhoJpcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCz4rz5H1JFSbJFaB+4HeVwtLevYaLBJWBZSbgw
-# ohuwtzANBgkqhkiG9w0BAQEFAASCAgAoJ9pFFn5ZwMQqthVtNrL8+rv/GJnL41qZ
-# vYT0lK8aFGOfhCPBjsVSXvfNoDiajBj1UcrDNOltG9KME1Xjn9amDHYVOsAIp+aS
-# iJrS7wq1gzXWeGPtUKWaw0B+wxEV0MG0Oe0CfchRm8hcAw3ZDjlXvV62s3fhmm1u
-# /lUspPi/nFoq/Ag/S/c+ZXbRS87AZRFAkRABMkINhmnsn4oVHUjzQS6STjxmkz73
-# Er22ZRUYmQPVKECGh4wQim6zzb7SaeF64g9ADmeqVm0Y9/SnNsXPyxGFuJ6I32gR
-# 2v4lSvFK1C2vLf8D8vvioBZsw/nN1tlTYGmta+HLfeqTTWcJqVD7/tuOGxFlC7Zt
-# JN9Dag84CAllAF93Eu4U5GGYCHZwjD9scExuJGrsv0dyD9/3tNNxp3st1oDmq71F
-# UCyyHLo5CZjyXW+TmuA4hd/ncoOCTqlujSHNokHURgKnXdGkwhw5X1O/MD8wmQkJ
-# SX7T/M8IvgQBffNXqUJpeAMxklAKe/mGMFjSgzO8cOk3AUqDn7u52CPq+nNLbgMU
-# iEb20aOJsf9cswAPKIFKKUi189vdjG/zOr8bUck1y13AgIbJVylwMIbN9QTy/RF9
-# 71DqlcLO/YkasLxgklSJ3KNB9rsurtATgDOLFpHpGMMeWER6hDGOcm+ITyAZMcW8
-# uOUV4700qg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
+# NDhaMC8GCSqGSIb3DQEJBDEiBCAFVGe6N6IPIZP5w1SIkVD7pNPZTlwMXxaXaSH5
+# 5vxvlTANBgkqhkiG9w0BAQEFAASCAgBjALZX2G9z52EGcU5bxUfPb5pNikecxr4r
+# Jxy4LaAc/JsOLDTkXhszhjRm56xfJ7F7gkiFc5+QK5tiwefHU94GQ7wh+KB24obI
+# oxyxQFhaZZcgp8pKq+Dire8IahoJCsJfsjHB8Nxk9fRo18gURj07HXAq2ZBJHIFB
+# dmIEh8nU5Fh3UkX3Oe/KiiyuHP97qWJePFHONcPxJZu7zWa1em/GR+3pe1lgLTKt
+# z2dZUNAguK0fouLdLrRburDJJUVtTgaMRl4YZM6ytMmQJJi9OfgfzMNIsfB/4SJW
+# B3QH0kRF2zTnj52vW0A1mZ+ij79RajuNB3JZFHlc6QbIU8mvqyGaZcfypZP5zh55
+# SHTP2JFejSDTsGnS9mG1V9ohPGvJkuaNY70nQ7Ut24lRQNjKwSdz2TCdp9jnryGC
+# wgDOJQjOIVncnTjWdzZ8HiMBmUCejuLoLatAAX4KnYxhbEsEGOcq3xmAMvBsUjg8
+# qu2djyUhBukRB+PzFSag49ktd91N5v4c/JhLv+RtIWbqW6JYAOOFy7Q5/+3zhCSA
+# NirRmH3wkwcG4tpOUQ6Pxp4mpsYFKcG3iE2qX0XdryoGm0gl7Sydj5bCAkqD4Ktu
+# uW4gWF6NlrI91hSus5Ep0xmMSEkU4q8PPHj/Aw4zJ5R7X/ZTjawxfgfxC/euxk2O
+# T+TtNth7PA==
 # SIG # End signature block

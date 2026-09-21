@@ -18,7 +18,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-1.4
+1.5
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +27,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.4
+    Version : 1.5
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -244,13 +244,13 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.4'
+$ScriptVersion = '1.5'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.29' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.40' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
@@ -313,14 +313,15 @@ catch {
 
 Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem | Out-Null
 $results = New-Object 'System.Collections.Generic.List[object]'
-$errors = @()
+$errors = New-Object 'System.Collections.Generic.List[object]'
+$script:UnavailableCalendarBackends = @{}
 $processed = 0
 
 try {
     $recipientTypes = @('UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox')
     $mailboxes = Invoke-Quiet {
         Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails $recipientTypes -ErrorAction Stop
-    } | Select-Object DisplayName, PrimarySmtpAddress, UserPrincipalName, Identity, Guid
+    } | Select-Object DisplayName, PrimarySmtpAddress, UserPrincipalName, Identity, Guid, ServerName, Database
 }
 catch {
     WriteLog -Message "Mailbox enumeration failed : $($_.Exception.Message)" 'ERROR'
@@ -345,6 +346,90 @@ if ($total -eq 0) {
     exit 0
 }
 
+function Get-SmartM365CalendarFailureCategory {
+    param([AllowEmptyString()][string]$Message)
+
+    if ($Message -match '(?i)information store.*(is not available|inaccessible|unavailable)|cannot open mailbox.*microsoft system attendant') { return 'BackendUnavailable' }
+    if ($Message -match '(?i)couldn''t find.*as a recipient|could not find.*recipient') { return 'RecipientNotFound' }
+    if ($Message -match '(?i)doesn''t represent a unique recipient|isn''t unique|ambiguous') { return 'RecipientAmbiguous' }
+    return 'CalendarFolderStatisticsFailure'
+}
+
+function Get-SmartM365CalendarBackendName {
+    param(
+        [AllowEmptyString()][string]$Message,
+        [AllowNull()]$Mailbox
+    )
+
+    if ($Message -match "(?i)server\s+'(?<Server>[^']+)'" -and -not [string]::IsNullOrWhiteSpace($Matches['Server'])) { return $Matches['Server'] }
+    if ($Message -match '(?i)cn=Servers/cn=(?<Server>[^/,"]+)' -and -not [string]::IsNullOrWhiteSpace($Matches['Server'])) { return $Matches['Server'] }
+    if ($Mailbox -and -not [string]::IsNullOrWhiteSpace([string]$Mailbox.ServerName)) { return [string]$Mailbox.ServerName }
+    return ''
+}
+
+function New-SmartM365CalendarLookupException {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [Parameter(Mandatory = $true)][string]$Category,
+        [Parameter(Mandatory = $true)][int]$Attempts,
+        [Parameter(Mandatory = $true)][double]$DurationSeconds,
+        [AllowEmptyString()][string]$Backend = '',
+        [AllowEmptyString()][string]$Database = '',
+        [AllowNull()][System.Exception]$InnerException
+    )
+
+    $exception = New-Object System.InvalidOperationException($Message, $InnerException)
+    $exception.Data['SmartM365Category'] = $Category
+    $exception.Data['SmartM365Attempts'] = $Attempts
+    $exception.Data['SmartM365DurationSeconds'] = [math]::Round($DurationSeconds, 3)
+    $exception.Data['SmartM365Backend'] = $Backend
+    $exception.Data['SmartM365Database'] = $Database
+    return $exception
+}
+
+function New-SmartM365CalendarErrorRecord {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][string]$Mailbox,
+        [AllowEmptyString()][string]$UPN = '',
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [AllowNull()]$ErrorRecord,
+        [AllowEmptyString()][string]$Category = '',
+        [int]$Attempts = 1,
+        [double]$DurationSeconds = 0,
+        [AllowEmptyString()][string]$Backend = '',
+        [AllowEmptyString()][string]$Database = '',
+        [AllowEmptyString()][string]$Message = ''
+    )
+
+    $exception = $null
+    if ($ErrorRecord) { $exception = $ErrorRecord.Exception }
+    if ($exception) {
+        if ([string]::IsNullOrWhiteSpace($Message)) { $Message = [string]$exception.Message }
+        if ($exception.Data) {
+            if ($exception.Data.Contains('SmartM365Category')) { $Category = [string]$exception.Data['SmartM365Category'] }
+            if ($exception.Data.Contains('SmartM365Attempts')) { $Attempts = [int]$exception.Data['SmartM365Attempts'] }
+            if ($exception.Data.Contains('SmartM365DurationSeconds')) { $DurationSeconds = [double]$exception.Data['SmartM365DurationSeconds'] }
+            if ($exception.Data.Contains('SmartM365Backend')) { $Backend = [string]$exception.Data['SmartM365Backend'] }
+            if ($exception.Data.Contains('SmartM365Database')) { $Database = [string]$exception.Data['SmartM365Database'] }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($Category)) { $Category = Get-SmartM365CalendarFailureCategory -Message $Message }
+
+    return [pscustomobject][ordered]@{
+        Index           = $Index
+        Mailbox         = $Mailbox
+        UPN             = $UPN
+        Category        = $Category
+        Operation       = $Operation
+        Attempts        = $Attempts
+        DurationSeconds = [math]::Round($DurationSeconds, 3)
+        Backend         = $Backend
+        Database        = $Database
+        Message         = $Message
+    }
+}
+
 function Get-CalendarFoldersSafe {
     param(
         [Parameter(Mandatory = $true)]$Mbx,
@@ -358,10 +443,27 @@ function Get-CalendarFoldersSafe {
         if ($Mbx.Guid -and $Mbx.Guid -ne [guid]::Empty) { [string]$Mbx.Guid }
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $attempts = 0
+    $mailboxServer = [string]$Mbx.ServerName
+    $mailboxDatabase = [string]$Mbx.Database
+    $backendCacheKeys = @()
+    if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { $backendCacheKeys += 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
+    if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { $backendCacheKeys += 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
+    $cachedBackendKey = @($backendCacheKeys | Where-Object { $script:UnavailableCalendarBackends.ContainsKey($_) } | Select-Object -First 1)
+    if ($cachedBackendKey.Count -gt 0) {
+        $cachedMessage = "Calendar statistics skipped because backend '$mailboxServer' or database '$mailboxDatabase' was already marked unavailable during this run."
+        $cachedException = New-SmartM365CalendarLookupException -Message $cachedMessage -Category 'BackendPreviouslyUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase
+        throw $cachedException
+    }
+
     $folders = @()
     $statisticsQuerySucceeded = $false
     $lastStatisticsError = $null
+    $lastCategory = 'CalendarFolderStatisticsFailure'
+    $lastBackend = $mailboxServer
     foreach ($id in $identityCandidates) {
+        $attempts++
         try {
             $folders = @(Invoke-Quiet {
                 Get-MailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
@@ -371,11 +473,27 @@ function Get-CalendarFoldersSafe {
         }
         catch {
             $lastStatisticsError = $_
+            $lastCategory = Get-SmartM365CalendarFailureCategory -Message $_.Exception.Message
+            $lastBackend = Get-SmartM365CalendarBackendName -Message $_.Exception.Message -Mailbox $Mbx
+            if ($lastCategory -eq 'BackendUnavailable') {
+                foreach ($backendName in @($lastBackend, $mailboxServer)) {
+                    if (-not [string]::IsNullOrWhiteSpace($backendName)) {
+                        $script:UnavailableCalendarBackends['server:' + $backendName.Trim().ToLowerInvariant()] = [string]$_.Exception.Message
+                    }
+                }
+                if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) {
+                    $script:UnavailableCalendarBackends['database:' + $mailboxDatabase.Trim().ToLowerInvariant()] = [string]$_.Exception.Message
+                }
+                break
+            }
         }
     }
 
     if (-not $statisticsQuerySucceeded) {
-        if ($lastStatisticsError) { throw $lastStatisticsError }
+        if ($lastStatisticsError) {
+            $lookupException = New-SmartM365CalendarLookupException -Message ([string]$lastStatisticsError.Exception.Message) -Category $lastCategory -Attempts $attempts -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $lastBackend -Database $mailboxDatabase -InnerException $lastStatisticsError.Exception
+            throw $lookupException
+        }
         return @()
     }
     if (-not $folders) { return @() }
@@ -522,15 +640,17 @@ foreach ($mbx in $mailboxes) {
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
+                    $errorRow = New-SmartM365CalendarErrorRecord -Index ($errors.Count + 1) -Mailbox $primarySMTP -UPN $upn -Operation 'Get-MailboxFolderPermission' -ErrorRecord $_ -Category 'CalendarPermissionLookupFailure' -Message $_.Exception.Message
                     WriteLog -Message $errMsg "WARNING"
-                    $errors += $errMsg
+                    [void]$errors.Add($errorRow)
                 }
             }
         }
     } catch {
-        $errMsg = "Error for $primarySMTP : $($_.Exception.Message)"
+        $errorRow = New-SmartM365CalendarErrorRecord -Index ($errors.Count + 1) -Mailbox $primarySMTP -UPN $upn -Operation 'Get-MailboxFolderStatistics' -ErrorRecord $_
+        $errMsg = "Calendar lookup error for $primarySMTP (category=$($errorRow.Category); attempts=$($errorRow.Attempts); duration=$($errorRow.DurationSeconds)s; backend=$($errorRow.Backend)) : $($errorRow.Message)"
         WriteLog -Message $errMsg "WARNING"
-        $errors += $errMsg
+        [void]$errors.Add($errorRow)
     }
 }
 Write-Progress -Id 0 -Activity $overallActivity -Completed
@@ -562,14 +682,11 @@ $errorBaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_Errors"
 $errorLatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
 if ($errors.Count -gt 0) {
     Add-Content -Path $logTextFile -Value "`n=== MAILBOX-LEVEL ERRORS ==="
-    $errors | ForEach-Object { Add-Content -Path $logTextFile -Value $_ }
-
-    $errorRows = for ($i = 0; $i -lt $errors.Count; $i++) {
-        [pscustomobject]@{
-            Index   = $i + 1
-            Message = [string]$errors[$i]
-        }
+    $errors | ForEach-Object {
+        Add-Content -Path $logTextFile -Value ("[{0}] {1} | {2} | attempts={3} | duration={4}s | backend={5} | {6}" -f $_.Category, $_.Mailbox, $_.Operation, $_.Attempts, $_.DurationSeconds, $_.Backend, $_.Message)
     }
+
+    $errorRows = @($errors | Select-Object Index,Mailbox,UPN,Category,Operation,Attempts,DurationSeconds,Backend,Database,Message)
 
     ExportAndCopyCsv -BaseFileName $errorBaseFileName `
         -OutputPath $OutputPath `
@@ -578,7 +695,7 @@ if ($errors.Count -gt 0) {
         -Encoding "UTF8" `
         -NoTypeInformation
 
-    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARNING"
+    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced and final status is CompletedWithWarnings." -f $errors.Count) "INFO"
 }
 else {
     $errorRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $errorBaseFileName
@@ -630,8 +747,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3aUuNBjCPGuUc
-# KICxx53BcawT/iCjo1Dqj25wmgEY1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCw3HWzTHPUY5Bz
+# dCflAmgBzWN98NW0Op7KrqlCESbJr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -722,25 +839,25 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -748,47 +865,47 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOhQr6G0Yc3vKCnGNuhqMsTTL2oIeIXOU6n0C6prq0hgMA0GCSqG
-# SIb3DQEBAQUABIIBgJTiDeOvlHnB7ZFOXns3+gP0hdPS7pDJn0+dSZjAYXoSKUTe
-# xeLprMOeZvTdz0LXpHHBDTfctgl9EmEWNVvqtgYh351V+/5W1M5jz8HxH/OcFWz1
-# Y3Wi6XQvZYFNwJJEc+VXEANCItzVynIVmk7CkY4ou1EmOKgyTNzyz5lLomwH6Ygi
-# Bqd+om4uol6WovFapQFfAg6BRKK4TNqlUojFhBwL9A7qLOFdCri1thaA+8mVcwXA
-# v3YuYbMDRrLzMkM3DMZqDVCkK8QviDssnafQsZpEFXlpj5SSLWRQQNYUVgV59Ltm
-# ZyqvJnLFfuxzUwhlIuPgFQvMb7ocsAZL8nb5f6F2e3r69ELfwlIFxO2CQdFY0YuM
-# gxR3UDx22yG2Eb9echHDdWu5R+n+4XHRE3jkWp0RtiO9xioMhIFuRyk59RubiHjv
-# bWjJHnFwcgAAtgnyhDZl1zkvaLukYQ6IxecgGZFwmVZM1d99pFy9BfzDB2Ej0y06
-# ikptZI8HuRWOh48U7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKNluE3GI16ZC7Gs38jFHR2ATHyreLiRXlXzzpuSLN/NMA0GCSqG
+# SIb3DQEBAQUABIIBgB/xr+ZJJ3CNEJ//7f6dPrUXvHkE1+7xWc1s5OB7BklRoiRi
+# ZBSPzhubadhPUi/NsRad1VRo8nK/X0Hn5W2NBsVNTeinpr3h4gpnrFNSRB3pV57h
+# LvGN4V3mwOAc1lQlafjarBATjxrTtLYeKnzKRprAjvBmrIN8aQdpGxJclSzHKYtD
+# p+2dryQMcEN6g8L7Ewp5dV1G8CZiDjQK+QtGRKwAiMtaTZ7igms+PCE1/Xi9z5n7
+# E96uK6aVKZ+BVfxnXJHrNS8PnkWfZF1ypuAr8+HNqlnFIUW18nzBck10uJKrTVqL
+# 4kXTiPlS9eC/ty2eDtf0cVY+sAh08MaFZ+Wuw0GaOIRF2ZK2mWNOIJdjfaDW9s1B
+# Y08TOOnqhdw+IYyJSsB/bwAOCfXsm0YAyrJrRqCxsAwaKnxbtFhrfbemvJk+VytE
+# p2XV9aUL5P488pilJXjm1mwPkv7g+uD7JKPZNLx0ETVnk3mhsuMzeucx/xExAwBb
+# 5HbRhxMfX7Lj5wU3/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMjE3
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDY0h7ZkyVfiW/A4xKNV2PPk0eGcxqYzJ7aAPD2
-# w1mHdzANBgkqhkiG9w0BAQEFAASCAgBFSDCvEBs14dw1XQqd0/MQYnYmBOsFtzaS
-# EQMeFV6dOPHtc3VOKQO0FfVj2WvsDO5z7X4pRpprhLYP8V/Tl71mnkcmLnUqD5Fc
-# gjK46DBdOvmxkcezLJEBBSsRCiFbBfmIbIM9YoOwSiwuBpi6hGsrkFbwEWqmXxQ2
-# 1QJMBgptOSLXsP3D1dnSKIlHRhyzSlw1e2mDzqU3/mI3OQwWPvanJ9Hul4shGUOJ
-# H8K5vMEHxPJu9fYQ0UGEW/OZCPU09CIRnJq1y5iekF1r4rx71flqMMfqJf7EwXAw
-# eQMrVEMOecA6bf1wrZbHG4BJey+vWJm2Yk+neGF6HP+1ncKHRO16sy/ezbOi5UDR
-# txEmCorijr9RTVWGNBeJuELcuF4rf4yg7iSYTyKwJnpD1+VXq2IQYz36t1ydZti6
-# 24gwBwIFPxYHvoDj25JJvmizpeWtdR2wzJCm1chzIvRIXBKjhtJ/M8tj5zoZX75P
-# LfA/gnpzrfFVa4vxzx8CAvrv1WDrYvcMEnW3PMnk+pfRTHU7y2gu8cbkXLpaZIjb
-# da8ekVWyzv+bbYsZX8w6StYeYdrYc7ThXpClGWxuIoXs5u2Yu5nY7QbVqDae2B0h
-# q6/F4sPH0mZGU8E3UquSDe81vO3lPjr7KkBQ43OZKDMGuZXmPhW9vZ8YMeJQYhKh
-# EaKlSGay2g==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
+# NDZaMC8GCSqGSIb3DQEJBDEiBCAauaFFn/4Bk0+W1lRFaDt0PYDGia/g5/8qDF5W
+# Wn7UqTANBgkqhkiG9w0BAQEFAASCAgBZbJRCsxcEZnPaIthOnAAuyebVC2qClEYO
+# cSEkGYekEo8Dx0WLH9+2bAWzFzF8dojrbMZqIZtVOipTiYVj76sbkV/5eQ/kJQBP
+# Xsedhh7OKrrfYhe43eJ0aLJ/vyMsButd/9NQr0Sj96pfzsAFEycDBD91pIgSmfE3
+# jJT5QDsBxrdSs40e91i8Wb8SUegwetwfq1wcC8xMd35nKo+DCpe++QXF1bdE9t+a
+# OySi7q7e58RTtHFivMM36Xs+YjHEbWtpDEqPJxvjuTU8XYID4Elmm3Y+dSvY0X9q
+# PKnERZxSg5YwhLB4isNha9/zEMv77ccYEDC3bifdObVVZufgIcAVjQlAxmYUPjsD
+# GSY5Hs46qYrzpsqHIm3eb9KxGYusCeNcT6muonqxK7lGIDaM6H3klynf4uz0FkZS
+# 9cKLD1OOu4cbKcwM70yMwhqY27aYf43b0hGnTYuw4EnxtlQMlBLoKCtVAjvt102A
+# uadGcVFbQwU6qLGpV15TRbXLAw/wPSKvOTdnrgMXhtz1RJAUNvqqBNraZpUwLvzl
+# T3Z7hTY9deI488RPu7iM1h2T1TTMbP/Z3mkKEHV28NhjbeCmFZFZ69RaGOU6YePX
+# Y0knUoH0AzxuDjRy+3iCLtXjHSwdGbQ6Rji0PrDt7ax5lBQ06+Z8/wyXyEffVhB1
+# yzMvQO4Lbg==
 # SIG # End signature block
