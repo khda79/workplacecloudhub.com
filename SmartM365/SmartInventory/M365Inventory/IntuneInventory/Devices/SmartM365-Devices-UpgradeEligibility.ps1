@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.21
+1.22
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.21
+    Version : 1.22
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.22"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $runId = [guid]::NewGuid().ToString()
 
@@ -557,6 +557,47 @@ function Get-UpgradeEligibilityLabel {
     }
 }
 
+function Export-UpgradeEligibilityDuplicateAudit {
+    param(
+        [AllowNull()][object[]]$Rows,
+        [Parameter(Mandatory = $true)][string]$TimestampedPath,
+        [string]$LatestPath
+    )
+
+    $duplicateColumns = @(
+        'DuplicateKey','DuplicateCount','DeviceName','NormalizedDeviceName','GraphId','Manufacturer','Model','OSVersion',
+        'AzureAdJoinType','UpgradeEligibility','UpgradeEligibilityLabel','RamCheckFailed','StorageCheckFailed',
+        'ProcessorCoreCountCheckFailed','ProcessorSpeedCheckFailed','TPMCheckFailed','SecureBootCheckFailed',
+        'ProcessorFamilyCheckFailed','Processor64BitCheckFailed','OSCheckFailed','ExportDateTime','RunId'
+    )
+    $duplicateGroups = @(
+        @($Rows) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.NormalizedDeviceName) } |
+            Group-Object -Property NormalizedDeviceName |
+            Where-Object { $_.Count -gt 1 }
+    )
+    $duplicateRows = @(
+        foreach ($group in $duplicateGroups) {
+            foreach ($row in $group.Group) {
+                $row | Select-Object @{Name='DuplicateKey';Expression={$group.Name}}, @{Name='DuplicateCount';Expression={$group.Count}}, *
+            }
+        }
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LatestPath)) {
+        Export-SmartM365Csv -Data $duplicateRows -TimestampedPath $TimestampedPath -Columns $duplicateColumns | Out-Null
+    }
+    else {
+        Export-SmartM365Csv -Data $duplicateRows -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $duplicateColumns | Out-Null
+    }
+
+    return [pscustomobject]@{
+        GroupCount = [int]$duplicateGroups.Count
+        RowCount   = [int]$duplicateRows.Count
+        Rows       = @($duplicateRows)
+    }
+}
+
 function Export-HardwareReadinessSummary {
     param(
         [Parameter(Mandatory = $true)][string]$BaseUri,
@@ -763,27 +804,12 @@ try {
     $duplicateCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("{0}_{1}.csv" -f $duplicateReportName, $timestamp)
     $latestDuplicateCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$duplicateReportName.csv" }
 
-    $duplicateGroups = @(
-        $projectedRows |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_.NormalizedDeviceName) } |
-            Group-Object -Property NormalizedDeviceName |
-            Where-Object { $_.Count -gt 1 }
-    )
-
-    if ($duplicateGroups.Count -gt 0) {
-        $duplicateRows = foreach ($group in $duplicateGroups) {
-            foreach ($row in $group.Group) {
-                $row | Select-Object @{Name='DuplicateKey';Expression={$group.Name}}, @{Name='DuplicateCount';Expression={$group.Count}}, *
-            }
-        }
-
-        if ($latestDuplicateCsvPath) {
-            Export-SmartM365Csv -Data @($duplicateRows) -TimestampedPath $duplicateCsvPath -LatestPath $latestDuplicateCsvPath | Out-Null
-        }
-        else {
-            Export-SmartM365Csv -Data @($duplicateRows) -TimestampedPath $duplicateCsvPath | Out-Null
-        }
-        WriteLogSmartM365 -Message ("Duplicate readiness audit exported: {0}; duplicate groups: {1}" -f $duplicateCsvPath, $duplicateGroups.Count) -Level "WARNING"
+    $duplicateAudit = Export-UpgradeEligibilityDuplicateAudit -Rows $projectedRows -TimestampedPath $duplicateCsvPath -LatestPath $latestDuplicateCsvPath
+    if ($duplicateAudit.GroupCount -gt 0) {
+        WriteLogSmartM365 -Message ("Duplicate readiness audit exported: {0}; duplicate groups: {1}; rows: {2}" -f $duplicateCsvPath, $duplicateAudit.GroupCount, $duplicateAudit.RowCount) -Level "WARNING"
+    }
+    else {
+        WriteLogSmartM365 -Message ("No duplicate device names found. Empty current duplicate snapshot published: {0}" -f $duplicateCsvPath) -Level "INFO"
     }
 
     $seenNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -873,8 +899,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAk8vfLX1GFvt7
-# 3lB4hMF90WOLNXHIGOtXeHbGr37FsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBe7K8gCSbfg/sc
+# EB8XDxTpyjwsJjzhSVTvgKEj77n2PKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1007,31 +1033,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBDTofGyC8O9WtRZB5IT1qeT4Gd6SYZstWH3wUJXkwouMA0GCSqG
-# SIb3DQEBAQUABIIBgKOEDvFOT+dsGkg95KrQXm5yejWg9PKX89ytWejxLKCZOZZg
-# JJjVmqZjDl/A3T9cG0RXnRG7x3A9uAwUO2wlnH609FU80zMq9TzXml1qBIkv+Egw
-# Kj9xNEXOEhRZRSyk9+6ZV2CaqpjxBYeKaiwc3WEWXf8BsSnp3icNnGMzqVOuEfjQ
-# INhnUn3pOTTAn4vSMjFf/iBTgs6dlVzcJ3R8cfG7vaMv7lpwUJwl+QO7wwMxg52p
-# zFuDcEIfDcGZw4CPbHcK68XyzdqqF58+0JDmIBswT6kabbRpBE0ocXXM9pd55cgk
-# BvG+65oxBbZ/ZcWm4u8ykAdtYDz7hE8bmeiO7nVu9eno2oKXaASG8uRrb6eH9V/H
-# GKeIHsi3V6Gx1ekdKnMthfuff01plgFyyLJUdhNuR1mm/6sSRo1A73CRjHcv1RRD
-# 5V0VOrHJTM/ypb0hnMgrdhw+0aOex9bamsSzkvaIKxYQz1u3N6jP8IijB7wWhUm6
-# x4iDXXqJ9Ub1i/BuLqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDXb+XDtVgb6Bvwqn0cQaz3/lF/0nnlzQM1gnD1carJLMA0GCSqG
+# SIb3DQEBAQUABIIBgCNhnrmW6efyLWuKVJrGWqNYqQqXKuDu9DpRVHOef6HglyS7
+# Zb3vcakTwgEI5dFvMzjdBxfffKbuB3CUTsdlX7G7BXVRFkahm1QCYqIpu+Ee3216
+# Yl17pacBNQ29DdEYcpiGNFX+D0BRfhvCbYR2ZY/DhS7KvGw4vInsODhFRKacgRBA
+# 2n/LF8XxYHgYn5n/6oohuoYitX7bxb3EBbtyxFhr8zvHpzYq/T1RmPrnTPYtViUJ
+# 7W8kVrT6g5npq+gabVX2dvDUd1pFKgYJCZj1eLIOTu26l0lP5JWISy5d6BI7NzWG
+# CJbrIth26Su52gSAdE8qe20INzdDpVOhPIEf6S6e5+sAUu+Fj6yhTz5mD/6Q55s3
+# Uff1R+vCKbr9F3DPBSAWaortaMGmR6lXZcWSIa3Mvk7Wh3EeC/cJKCUWdiWG+F+W
+# ndBiF3YV93T8Q8hmEwAggY0H1ffdeRc2ivXecZDPR6XJI+vSNG8u2Gl7us2iWjME
+# cOho3PZ093assqSJ+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDQ5
-# MDJaMC8GCSqGSIb3DQEJBDEiBCA2kSm3vADYZN/fA2ByFKRrU524jgRwesGenqRz
-# ESc4OTANBgkqhkiG9w0BAQEFAASCAgBcKvc91JryB07DkzCiAB54orkKDFWLwOfj
-# myBvssPqho7EntEpo2VixQxQlf/w+UFBNpmSWZgfujbXIzefNCxSI2Fzu1DjPX8O
-# A7DxMOPrIWakZj29thwcZkTUAJONTtKi2cUMN+2zB385wwdKehYXwmiNtd3wNIVp
-# gM0OporpFlT/Zwy9b1Q0/vsj55Wfr8z9qm75iEiB7Xa0J5tR9ZlQO1dhQQzPKMmN
-# HVonVfIba2kUVgOFUWgUFQOaBkFcuWF29cyo2UNfegED9PqFIvxZFqjy1cWw3Icv
-# H70Q6G74Ip1lWOirJKvj+9hCzJvTl0Pa36EtOeID1AyzxXolvzgjfD9jMaMZo1W4
-# VYBHV867g6/orcOQ/VdeZJsYuKzgJzd3V12EahVNsOI9F3mXIM5GEDcMfWY8tGCu
-# zQtJpWJULugG9UfqiMvFUAeI5atN2VWGNLQX2uL3rXE0AYpR79c9zF8veqY6MS/a
-# F8yEQUiQn9ywnfjT0EScIhiU5KIJSKgd9YgKDgLNWkbEKg+1hqYrgc+1c4ZGEyQx
-# YONFMOwZmR6T3t75eEw2h67jo5JtNwzh80HtXPN+RnUAuC6qLug6IGpV7k9kWtZJ
-# bgFM1nzKDL/nBnSATimeRvv3k2ePdjlLObifSOOJ7vNc0WL0L3aBH/4NxurUdO80
-# gh7oPvlBkw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCD+aOb4IX/2pFvsxXhNlJJRhCFnl0pbsqWR1E9
+# 5cR8KTANBgkqhkiG9w0BAQEFAASCAgBH251wUL/HZwK7vMbf+zzXDpc+qiQOsg+d
+# Lq5MNpdR7eK3FuMK+MpjSsqXHP9NflJQhnT7ovBwFrRjp+AOy9Zc6LpnmmTlrKdr
+# DU4zzhBjCdWXKlsi9bQbBcFUugSxuYGwKvYG8a3zXa2k1DELVnjXX2QeDqpdn4oY
+# 79PsLXsvtqXhZfV7scxMIiSDuAACK4GSMYAQsuDmuru/A4XzTVDsP2WsK46axPXQ
+# UcXsGahRrP2bncJp5sbRLzYKjkQno3ww7dPCWMNoAUdH8duDoX2T579B2hFeRtXb
+# nn9GNh4dDIW4EsOLfhaMwF6Ey55+5KmgRvK69JlZrZCtNRAVutcwm1P+8ER/K2sq
+# ytAqpKUfmkBadvwvTAH8LOMO8Lfxa6xqUJALxuvpIOOz1SKTd96ugU2g4HET722s
+# /Zy6AgMBpi8Wl+kTfry8kfa/o7FdaF/uVJyEfqknQu35ODPSVKFF3XJ75+QEDcF0
+# SR5Ay8YqbaO8wKyjT16WdPsgti27O74gpFa5w1qvhiEyGsskyJcPLbYKDsmkHLPT
+# dbZGilZBl2JTnvvcsUYDymtWmtQ8U3GGhHOdZH+rqB88xnUx36JDCE7nQUj9inhM
+# +DiTezYfmaXCngM13ajMn0QPu+HwxqzxloUHplk1DkrMUY/D3qo/L8SJNvQ/Awuy
+# /Ln1B4p8BA==
 # SIG # End signature block

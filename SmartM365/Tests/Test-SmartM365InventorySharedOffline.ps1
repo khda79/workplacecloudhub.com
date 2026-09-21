@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.4
+1.1.5
 #>
 [CmdletBinding()]
 param(
@@ -82,7 +82,7 @@ try {
             'Copy-SmartM365FileAtomically', 'Write-SmartM365TextAtomically',
             'Get-SmartM365CoreContextValue', 'Assert-SmartM365CsvDataCompleteness',
             'Get-SmartM365CsvValidationRule', 'Get-SmartM365CsvValidationBaseName',
-            'Publish-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
+            'Publish-SmartM365Csv', 'Export-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
             'Get-SmartM365MaxItemsSuffix', 'Add-SmartM365MaxItemsSuffixToCsvPath',
             'Add-SmartM365MaxItemsSuffixToBaseName', 'Limit-SmartM365RowsForMaxItems',
             'Get-SmartM365MailTenantName', 'Format-SmartM365MailSubject',
@@ -96,7 +96,7 @@ try {
                 'Copy-SmartM365FileAtomically', 'Write-SmartM365TextAtomically',
                 'Get-SmartM365CoreContextValue', 'Assert-SmartM365CsvDataCompleteness',
                 'Get-SmartM365CsvValidationRule', 'Get-SmartM365CsvValidationBaseName',
-                'Publish-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
+                'Publish-SmartM365Csv', 'Export-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
                 'Get-SmartM365MaxItemsSuffix', 'Add-SmartM365MaxItemsSuffixToCsvPath',
                 'Add-SmartM365MaxItemsSuffixToBaseName', 'Limit-SmartM365RowsForMaxItems',
                 'Get-SmartM365MailTenantName', 'Format-SmartM365MailSubject',
@@ -153,6 +153,15 @@ try {
             $path = Join-Path $testRoot "$variant-empty.csv"
             & $module { param($p) Write-SmartM365CsvAtomically -Path $p -Data @() -Columns @('Id','Value') } $path
             Assert-Offline ((Get-Content -LiteralPath $path -TotalCount 1) -eq '"TenantKey","OrganizationKey","EnvironmentKey","TenantId","Id","Value"') 'Empty header changed.'
+        }
+        Test-OfflineCase "$variant public exporter accepts an empty explicit schema" {
+            $history = Join-Path $testRoot "$variant-empty-export-history.csv"
+            $latest = Join-Path $testRoot "$variant-empty-export-latest.csv"
+            & $module { param($h,$l) Export-SmartM365Csv -TimestampedPath $h -LatestPath $l -Data @() -Columns @('Id','Value') -NoSharePointUpload } $history $latest | Out-Null
+            $expectedHeader = '"TenantKey","OrganizationKey","EnvironmentKey","TenantId","Id","Value"'
+            Assert-Offline ((Get-Content -LiteralPath $history -TotalCount 1) -ceq $expectedHeader) 'Empty history export header changed.'
+            Assert-Offline ((Get-Content -LiteralPath $latest -TotalCount 1) -ceq $expectedHeader) 'Empty latest export header changed.'
+            Assert-Offline ((Get-FileHash -LiteralPath $history).Hash -eq (Get-FileHash -LiteralPath $latest).Hash) 'Empty history and latest exports differ.'
         }
         foreach ($field in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')) {
             Test-OfflineCase "$variant reject conflicting $field and preserve last" {
@@ -457,8 +466,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtzbn14IFQQgtp
-# CmZukKYIzGDuoROGssdcKPyi/F8GW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfL4OqlB+XYuon
+# oHNyOmWhRZ6bpbxBjgpqf3JeJZ9o9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -591,31 +600,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAEXMCTx3lpISMm9wKGeZgxtPqDLHAK746LiNPFcNCL8MA0GCSqG
-# SIb3DQEBAQUABIIBgCDcZyUPL9RX8qG4aMGnFNnlnflRCv28K8JJUynwp5Dx2Z7f
-# 9uH1YWvWeAL8jlCOw9NFYUqU2tRvvE/zmfcEah8shwtZ6CZxI9A6sgCyjGXvuyK3
-# 5SQA/YlC9EN9ZpW40LcHdg4zVGrfMXlCKJDVbCAs4zX2ks8+swsG9uh8AOCt3AYs
-# DC8UC45/REvx8oRcgjLJOyEJNKMqJWmJYOtlTB+GfMjIkhPDksfjiqhrCmL8Uvt1
-# 0H9ovPKwvSkyjmWtq1HRSnbWx9wEc9hELKqQmafne1BqGQqFNFe5ze7+Kd7CiXkG
-# C9MBZYomHqmB6QjfIaquEaPMQV34s8Jc/3WlKY4I9Umhv9JG8p90ERch89wWzkeW
-# xObVGt3HEx5fvvF38lx3lJnI0RbYJG3PLqcpK4fhwCb8n3QN7u6HVtiImXMM/r+z
-# wZiNXf03p3l2KxkxbOleNSIGGcvmbcYWjdw65u/NRpr1VuKzBjqnWekx3l6QSV8r
-# WEosH3vPwL2gX5tca6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJIuxMLa9uSWlPw13vdpIRLQ81CdhrokZOLPzmzSyxdSMA0GCSqG
+# SIb3DQEBAQUABIIBgIU1PIRZSDI/J+TYEfY0RaA5rkfaU6Yw/cVS16F+ubTnfimU
+# OQUsB2oSQRJKM+XPtq/0Utqf3bgEy9RUX6oMtu9Gtepe1fTczzdTvKOvWOGJWKLi
+# DCLExXOqjIT0OMDvsjy/bflK5Gv27kDP5i9JPpoonqLMi1DUDxQwi2dA8cXZtWXM
+# fCm63H5veElRxzBjc7538mfe1WW+6ylto6TcPUBBWEoJip4AWKjZrKOT3f8dBzhF
+# rfkYzQfaLsHPITmLUJTS0YcGZapXieHPA+HUBNesJzcVM33cT6THjnJiopucaB60
+# MvvYy01SDl2jx8WhwiWx0kDvC9xnCBBGSPlvvuGRzx12b1CY1zsJUYuQF22ce0tS
+# qlf7slt4GYIBS7Hvfnm6vqf8VItClwhyGx0ov5Xz+oKQORUwcbQGaFfQKnSaWdC7
+# O3wT1uPTQLVrJgB2N+fLVXb4CvanOVW4PnsQSQWkw30Tuoxy0h5snwmdo6ZioO+7
+# xi9E02kWIpGS+j1CxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDUz
-# NDNaMC8GCSqGSIb3DQEJBDEiBCBDoj7i4lXyLOSC/VAT95qBkfkDJQnRb4M4yhl1
-# rTmZBDANBgkqhkiG9w0BAQEFAASCAgCjpWKKeRQSe1tgAc3TGjTLh7B07Ia0F98c
-# ajr4MdlNaG6+4VIciOFx0wtpKRmgPxUNGk9FWesHR4s8Sl3tq6lzY1Zajey9rxn/
-# YpoNHZY2TDinyyg3HdPHMGk7FGbfFEZgtcUGCFMmC/fqhO1VJ6prtQakDfCEn0w5
-# fCI31QEPI/iaU2UqLuna0GY93O6l+baLz9HBqtrQzY0cUIuq6SvD52xdkNLyCn72
-# IXH9RBuigu4nhUkjOT+HrzYi1aUNDtSd6xyarSo6EwKQOHLvf9tXREnM2J1vj/EH
-# yIfDHwMcpsn/WUWfOAXNLeWNd8ZgW9C9iLsrDwBqiW+GppA8HT2EeZTTVpIEv/wM
-# 6HZS2/FvNPa9afrwnIJinUS7mD6YKWKQMVScE2zwJ8Z3w6X2i4MV4WAKObqHYCBk
-# mXpeL3F02Fv+qiyuQZqEiC7VAJ4k07XfylBXYku0zTPmOYs1UbtWtpaZISxOsm4R
-# 2aMpwFIv7X2KvVhrf1M40oYKuMq6sPk6lg36Sgcs4+b50GBAO7jrKFxpvuoXYRoJ
-# clOb2PhJIKWxcmPmR8JqeOKzfWaIZPcDR1M5G0nW8S7GlxNpK4/E1+JjyTZuYKIR
-# 7icFhdX5lBtUF/BYO2kB8k0g1YrCxDgVVAE40ffrdxwyKGwZI+OrQY6JEqCekq/O
-# PUYIoMIVyg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCz4rz5H1JFSbJFaB+4HeVwtLevYaLBJWBZSbgw
+# ohuwtzANBgkqhkiG9w0BAQEFAASCAgAoJ9pFFn5ZwMQqthVtNrL8+rv/GJnL41qZ
+# vYT0lK8aFGOfhCPBjsVSXvfNoDiajBj1UcrDNOltG9KME1Xjn9amDHYVOsAIp+aS
+# iJrS7wq1gzXWeGPtUKWaw0B+wxEV0MG0Oe0CfchRm8hcAw3ZDjlXvV62s3fhmm1u
+# /lUspPi/nFoq/Ag/S/c+ZXbRS87AZRFAkRABMkINhmnsn4oVHUjzQS6STjxmkz73
+# Er22ZRUYmQPVKECGh4wQim6zzb7SaeF64g9ADmeqVm0Y9/SnNsXPyxGFuJ6I32gR
+# 2v4lSvFK1C2vLf8D8vvioBZsw/nN1tlTYGmta+HLfeqTTWcJqVD7/tuOGxFlC7Zt
+# JN9Dag84CAllAF93Eu4U5GGYCHZwjD9scExuJGrsv0dyD9/3tNNxp3st1oDmq71F
+# UCyyHLo5CZjyXW+TmuA4hd/ncoOCTqlujSHNokHURgKnXdGkwhw5X1O/MD8wmQkJ
+# SX7T/M8IvgQBffNXqUJpeAMxklAKe/mGMFjSgzO8cOk3AUqDn7u52CPq+nNLbgMU
+# iEb20aOJsf9cswAPKIFKKUi189vdjG/zOr8bUck1y13AgIbJVylwMIbN9QTy/RF9
+# 71DqlcLO/YkasLxgklSJ3KNB9rsurtATgDOLFpHpGMMeWER6hDGOcm+ITyAZMcW8
+# uOUV4700qg==
 # SIG # End signature block
