@@ -1037,7 +1037,7 @@
     },
     {
       "Name": "Intune-Remediations-Export",
-      "ScriptPath": "M365Inventory\\IntuneInventory\\SmartM365-Export-IntuneRemediations.ps1",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\SmartM365-Intune-ExportRemediationScripts.ps1",
       "Arguments": "",
       "Enabled": true,
       "Group": "Intune",

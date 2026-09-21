@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param(
@@ -62,7 +62,7 @@ $paths=[ordered]@{
     Compliance='SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1'
     Upgrade='SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-UpgradeEligibility.ps1'
     Rbac='SmartInventory/M365Inventory/IntuneInventory/RBAC/SmartM365-Intune-RBAC-GroupMembers.ps1'
-    Remediations='SmartInventory/M365Inventory/IntuneInventory/SmartM365-Export-IntuneRemediations.ps1'
+    Remediations='SmartInventory/M365Inventory/IntuneInventory/SmartM365-Intune-ExportRemediationScripts.ps1'
     WindowsUpdate='SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1'
     Autopatch='SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1'
     SharePoint='SmartInventory/M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1'
@@ -215,6 +215,20 @@ try {
             Assert-Offline ($source -match '\$ManagedDevicePageSize\s*=\s*500' -and $source -match '\$ManagedDevicePagePauseMilliseconds\s*=\s*500' -and $source -match '\$MaxRetries\s*=\s*8') 'Device System bounded throttle settings are missing.'
         }finally{Remove-Module $m -Force}
     }
+    Test-OfflineCase 'BIOS accepts Hashtable and PSCustomObject Graph collection pages' {
+        $m=Import-OfflineFunctions $paths.Bios @('Test-BiosGraphResponseProperty','Get-BiosGraphResponsePropertyValue')
+        try{
+            $hashPage=@{value=@([pscustomobject]@{id='synthetic-bios-1'});'@odata.nextLink'='p2'}
+            $objectPage=[pscustomobject]@{value=@([pscustomobject]@{id='synthetic-bios-2'});'@odata.nextLink'='p3'}
+            $hashValue=&$m {param($p) Get-BiosGraphResponsePropertyValue -Response $p -Name 'value'} $hashPage
+            $objectValue=&$m {param($p) Get-BiosGraphResponsePropertyValue -Response $p -Name 'value'} $objectPage
+            $hashNext=&$m {param($p) Get-BiosGraphResponsePropertyValue -Response $p -Name '@odata.nextLink'} $hashPage
+            Assert-Offline ((&$m {param($p) Test-BiosGraphResponseProperty -Response $p -Name 'value'} $hashPage) -and $hashValue[0].id-eq'synthetic-bios-1' -and $hashNext-eq'p2') 'BIOS rejected a Hashtable Graph collection page.'
+            Assert-Offline ((&$m {param($p) Test-BiosGraphResponseProperty -Response $p -Name 'value'} $objectPage) -and $objectValue[0].id-eq'synthetic-bios-2') 'BIOS rejected a PSCustomObject Graph collection page.'
+            $source=Get-OfflineSourceText $paths.Bios
+            Assert-Offline ($source -match 'Test-BiosGraphResponseProperty\s+-Response\s+\$page\s+-Name\s+''value''' -and $source -match 'Get-BiosGraphResponsePropertyValue\s+-Response\s+\$page\s+-Name\s+''@odata\.nextLink''') 'BIOS managed-device pagination does not use the dictionary-safe accessors.'
+        }finally{Remove-Module $m -Force}
+    }
     Test-OfflineCase 'SharePoint retries transient HTTP 409 and honors Retry-After' {
         $m=Import-OfflineFunctions $paths.SharePoint @('Invoke-SpoWithRetry')
         try{&$m {$script:n=0;$script:slept=0;function script:Start-Sleep{param($Seconds)$script:slept=$Seconds};function script:Write-SpoLog{param($Message,$Level)}};$value=&$m {Invoke-SpoWithRetry -MaxAttempts 3 -ScriptBlock {$script:n++;if($script:n-eq1){$e=[Exception]::new('synthetic 409');$e.Data['StatusCode']=409;$e.Data['Retry-After']=4;throw $e};'ok'}};$state=&$m {[pscustomobject]@{Calls=$script:n;Slept=$script:slept}};Assert-Offline ($value-eq'ok'-and$state.Calls-eq2-and$state.Slept-eq4) 'SharePoint retry did not honor Retry-After.'}finally{Remove-Module $m -Force}
@@ -292,8 +306,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWSateS1Z2Iw+z
-# HY1+BvCuijX0EHOghYcmyHiO/xcFMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6O/q0ZuJpE8xu
+# amTpcRQRrIAqQMXAVvUE+B/xYt+6xaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -426,31 +440,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINgIS47xNpgayF2rAMyMefoiUZaH5OlY6Rm5ADcgFmSfMA0GCSqG
-# SIb3DQEBAQUABIIBgIYq+pXS07wtV9gVW6smzWYQaLCTO389I4zRdpYKzWcowaYj
-# ocYWToPE3u54QZpHh7Kow7GLRsw5AF6m17zjxz6TYTEKAxYRuIPqgDiDPquYwWo1
-# ZGVkQpB4p5C69yKphOZCk+AFHdGhI8ZddHRzKah4Kkd1fD0Jlw/c4xGTB273MwWH
-# wYvukkszmeUFcFWzkfCxPEXQt4xZt4wDBFTykKD9MJhJlbTUzVoCUwN22WtEL57y
-# p8/ejeKoav5F1rIB+6G6xek2PmUoaOonEQGLP2hb272gteS4Wa8gOBSxnRGswmgB
-# d5uFuoUVOE1xpjS5tOtPB3g/vkuvl3il8j/3/8wl8jwpzFFGYEvx5VMxErJnOxJa
-# s9BSDGr/whXA7WK7LRAhOh6o9BAywamqmV/g1p+KF8HGw83r6ZC51g6BwG2izWkw
-# Nw4Wux/bTOvWRqIJNNb67jO437KGA1Y+8s835gSOXwLMbycC5mD5OwDU5BmuEHQ7
-# zSCRmD+uCw2FhPYZn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA3ocJpy22+rU8ICR03wqLsS3SBdWYZke9/Pq12Lq5jWMA0GCSqG
+# SIb3DQEBAQUABIIBgEb2tNDGN2tZ274gGCIAhgyGYGdPN5lLLjGVreYHrVl7rCMU
+# V2LKRCkNcq10w8kd1/fzuVErPvzjUaKe2fXqcy2ySze/2D5/dHdYSwqR1z6ljJXd
+# r4YMrOAYHPlawY0wc2shap117HXy7y5KFD5TcUQyeHt1Mvu4asV7osdzX3kWAoX7
+# r2B9eIdTclvLapoKzXk7nl1BTtcay3/ubMC/SAFssZcXEFBFc6ZgsZ+8JjIvaj+6
+# 8rFBUV+RwGty1bt0qIJXX2GWGn7Phqn+HioSwBIpKUAYHnQYFjeqGFjWru61h7jX
+# 8OXyr3iKaaAVGABsW8LGrZtI/cCu34CXLcIIBUxZcw4yvijYQ6wmLybxU4CvXe+O
+# 4ODWwjGUUdslnsCfVPPHBTbdCH4Us2RXq/vS69bPCjbtAFPkDU6fwik+BuWqQYeg
+# RDsksHZlfzZ++ByUUVksIrSli/cmv5/3L0WBhcYN2ZL9W0h1YHnc/LcnjPek7pEc
+# b6xFtcFxU1U/0yOMf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNjQz
-# NDBaMC8GCSqGSIb3DQEJBDEiBCDGlHbo11ZZjIw5ZHGL17M3DmrLakldZal0iVb+
-# AiExijANBgkqhkiG9w0BAQEFAASCAgA9pssoqDbyU/mHGW8w20RPHXm5k8pypQvE
-# N/gUbm5Bc3uZUlKgCiXS7xFXV/5Rxa+s5wprdgottBH3mYHCmPgibeSl5npyGKzW
-# 2t40fc05bGMSKTKMq9k2zELg2TB1i4ulRj+qnn3rN060QATh2n/PWJbLihYqJpEl
-# crNAcumE3A2LLDz5zMEDY1fvW0RZVXUZqjs2Ubu5lZPYCO7GJre9Kc6nJlpno0K/
-# D4GEFXAvVQZFbFD42RKu7tNdKlDD9hTAkN8dEr8KF7ZRFh/fEVlVwpHrBCp25GDk
-# YSEWij3mP+hRF46buk6ROOf0mcDrsaG6LRy+7XE9/n/nkLfpV2mCmuURRXndUdIU
-# wLg7oyGJlLuG4N8H0+WkWeq4LZ73zUY8jklvJdybzbnoamL7uTgzgmUYcPXbMSyo
-# /2kmrMRzJgniRhGSKnnSLOYxjyJI4pNOzidCA1AWQxtzvmTjM50s+QwsPXyHnAjY
-# ui1c0H06blHFIFFqqN/PfdACHbso2G+mrwEVsi/zFsWrVsVUeIibH53CPj8H+oIG
-# +dtAy8a6DCH5vfRvVnqMDTDlrH+Xmkpqs14/a1X2xzW2A4tEDJtpgxFrkHgLGWld
-# h+lp8QQWJ0D9K9NSDBzzgT1CLZoeMp7NJyiPgpkEIXWMgFODvKVuy59K0Kkl4fTK
-# 30t1qTlu6g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTQy
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCUQ1V/0fea5LRFVYMaBQhxZkytrVshLHc2BQEL
+# kl+4SDANBgkqhkiG9w0BAQEFAASCAgCJlJYFEmcPo3mpLLuk+4DYzyxGDl88zHs7
+# 9PoE8ro6nGTCPjgRqkZ1YZnelf7XB++DLZDwMZmVS2UHNkdsHp5c9QSZmQCMu6Am
+# BDG4b9tA86wnxaC1EYowN47PELGEXPlAWCAgMmIfO/F3Q6JRw3EExKon+EMlqXrE
+# 8JbP1gdLgOsj+zkIZDtFFlj/eoQ5SpsLikeImPChLt8JF4ZbIfvCHBRMxSu6aHpU
+# KNRGN968vznfSxs60KzR4YL3ciYt9QJx2tSxB7rDxXUYDSgg7iSFbcsFNYdK68KQ
+# YAYfnjcx76IwgwQrJMgaC6/uNfhHarioN0vvrafzHrsqyLhhE65hLv21qpVi+yAB
+# issCifDMEhpPszLbFUdYV11iV/5rwy/XSrs44tj35SqRxggzxrhsWEPl8pA9vjmo
+# 3rzXiEf4SRXaVUygggcxD71WedZj+Zrqy1WKKu6y8z/CODBNigAa68qST7L/ITyU
+# 6dv+8J3YG7hITg7duPo03VUvgt1oL18bv8nStCpLSMnvqV2dkFuy0OqNVoBo7Y8s
+# 2Cu4yBHW4fWErdACnR/MLzBV+L/L2AzPgFtnzlMMDZzE9OwSih9tZGMYegNwNzVY
+# dZZkQSdqoBnxbDKe71gzbbQle1ihDzGwH8XqQNAThFweDHGT6a1teXz12xnrccCu
+# 6R39TbFApQ==
 # SIG # End signature block
