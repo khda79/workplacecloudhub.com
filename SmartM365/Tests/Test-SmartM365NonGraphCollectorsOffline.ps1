@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -140,13 +140,18 @@ try {
         Assert-Offline ($copyText -match 'Copy-SmartM365FileAtomically' -and $copyText -notmatch '\bCopy-Item\b') 'AD publication retry does not use atomic copy.'
         Assert-Offline ($source -match 'Add-SmartM365CsvRowsAtomically[\s\S]+AD daily summary snapshot') 'AD daily history append is not atomic.'
     }
-    Test-OfflineCase 'AD enrichment outputs are atomic' {
+    Test-OfflineCase 'AD enrichment generic list publication is atomic and PowerShell 7 safe' {
+        $syntheticRows=New-Object System.Collections.Generic.List[object]
+        [void]$syntheticRows.Add([pscustomobject]@{Id='synthetic'})
+        $syntheticArray=$syntheticRows.ToArray()
+        Assert-Offline ($syntheticArray.Count-eq1 -and $syntheticArray[0].Id-eq'synthetic') 'Generic object list ToArray conversion failed.'
         foreach($relative in @(
             'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Enrichment.ps1',
             'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-UsersEnrichment.ps1'
         )){
             $source=Get-Content -LiteralPath (Join-Path $SourceRoot $relative) -Raw
-            Assert-Offline ($source -match 'Write-SmartM365CsvAtomically\s+-Data\s+@\(\$enrichedRows\)') "$relative does not use atomic CSV publication."
+            Assert-Offline ($source -match 'Write-SmartM365CsvAtomically\s+-Data\s+\$enrichedRows\.ToArray\(\)') "$relative does not publish a PowerShell 7-safe object array atomically."
+            Assert-Offline ($source -notmatch '-Data\s+@\(\$enrichedRows\)') "$relative still uses the failing generic List[object] array-subexpression conversion."
             Assert-Offline ($source -notmatch '\$enrichedRows[\s\S]{0,80}\bExport-Csv\b') "$relative still exports directly."
         }
     }
@@ -215,8 +220,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwxvEs07+WRZA3
-# nQtfcYq3omMNZyRktzTLzEugZyzrt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs2tzTY6VbJG5f
+# 4+/meUkEodWTpt+vbbHyW0DoMJOofaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -349,31 +354,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILZ7fvJqnhA0Qu5pLH5j6pY9rlDnDM+7DFG9XedV/lceMA0GCSqG
-# SIb3DQEBAQUABIIBgKh06L6Xjp9PGa8RV/Jx1LZl76+DYDHBC4VcC4RlFBijO9wv
-# GFXm05mytTmKbVsjv+mNsIxi1HKmMdUh5mvEY1BTWgDZlyeTb3IZ+vebS62UpISi
-# +tovElibif62STFUfkqPEsc4p6Pu4pxhgdZP1++W3KjLLzUA/4FxU4H8Msf20fa5
-# G2Hj302lrIoI3re18DZNY+tRYawPy6qEiI+ByGe5edrNUHfnTXr3JKvIxdTLhRGc
-# N2CtosPumlSBM+b6sbYmvZQ5hfxTJMfUmJLj7utvaQlybAUrwm8s2O/1JuYmHe9s
-# 7uFsUTQIINICDj1/fA68iZR2ltDYCZ0HyX3cn/aHHOTKgEc1T7mNTkex0hcrKhCX
-# PZPrcIYx2CtZyGQ+RJJtwYytJl+9SgdQQbK+20ty0F0mIH/J7ReRlLzOOpv0IjDW
-# jkeWOL0tzwSc7Ot+03j5rQyT3aw79L+6qALfgCSzNrHpENY0KYkBJQ+0htKs2WPp
-# hUos3Q7aCb4fRAWreKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA9Hmb5rDw/SwW9d3au3ETsvYccRvvBHqxSGF2wQ3j8hMA0GCSqG
+# SIb3DQEBAQUABIIBgIl2hHjHv1JDNHKCR6bATTgqKSY7l/paKwUvi2OmaJ5bwUZe
+# Q5qfVCcSHmaPA5kk29PsOkypT3SEPi0XfVmAczwpqdkxQj483cgP0sHdOxIp966+
+# Y/dDQhrEEZ37FkCv3aDfyhepup6X48roC9ZdUsYtEeHpGNboJrhtMMcIckBdudx3
+# j0pCqrxqtEF13gUNdG16J2C6SiIRQaIvjFS2IH7YDNWy/pNnhoA7TxmD5t89Jo00
+# sFs5ZH8EaTJcWaNYWvJw/7DtrayCckdc7KzOSBPvajWjY833Z4HcirMQvVjWaGBN
+# k8reYnIvOfLaVfgjSc9gnvAgl0MTFMCfKi8igFs/Rcm6G8AmnA7G4H1M9vHnjjPr
+# ix7pIviQ2eeB2qJaTf4bxTk8GBQP5TsYIjU7a86EPptqh7bY5eMdK/eG0xHJL1ya
+# NvoD1OwjijnXeaOdEh8qo4nixWusokObgpBgJu+pNoM2d+MjUi84rk7xaHIi2bPH
+# GGtf+mYZXyh65eqJgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDuAHOyT7bn4ql+VmVuXvFK5CLrLhZ//O2nfGhA
-# RwjAbjANBgkqhkiG9w0BAQEFAASCAgALmjggYSvwx6HxXZsCwtmhy7T/nKEqm3g1
-# xBgAvR8WGfxb3E2HuYvJTfSxIuwIQhNXb7H3lVv8LQzrLBErBAE1j2SvXXMZCEZr
-# X0qPbGRJkC6Xaj2MF5kdo1bg0L1BhSdNXzBWRq062qNYTZJN2xcANT8YSZKddqnb
-# R7nZXcz8FRvBxb4tbMAqRwDTr2HNVPoBJPgC4grvEu0XLz+CE317UroHLJtkFFxN
-# S3hflBj1dRFz5H6cxo26B+gflV2Vzc83HdoZObH1Pa+plncHPEYXoqnf36qYo3YM
-# iRxsTR8UmFpuJ7DqMIBSlpvod1fM47a2oT7AKoOmeZFyohTT54km260HnvcdO+0w
-# IQ/DC9Mo0z2KZHSvYTFJ2XqTe0rAWTJywiO6/HsBsyieoqmjbbGoX3MhyT9Il9v1
-# 2yWzzNk93YyyGw4t7urxLheA+7NEt4DQ7FVa1/uW1AfADVCAHq4VkVsHwEul5T8G
-# H77Ly3Dqcd2GQrewixfqpTzzXXkzpZWoJttC1HZ8AALK2x46zYRlS85DAcBHxDYe
-# /FoqmmtHAkMrLm5TsR0rm3wowFzfZxtRF0Hmp1GgoO7GTKoFJu8SkLdu32HmMFIZ
-# Ai90d/DHzsX+RJAxjYEBHaJmJ+csZuvglMpdeDBx1QIe2GvK53uxogJ/llRo2Vlo
-# SrOSPq/azw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNzE1
+# MjJaMC8GCSqGSIb3DQEJBDEiBCB7oR8wnqPJzGDU8yK2EjZkkRpBO1PyxpFp2rRt
+# 0k9V9zANBgkqhkiG9w0BAQEFAASCAgBfJpJhAWcVmv8z09SL7748GXZOoMZjbspk
+# v4t6Z0toUSfT2TllKsh3SLuWreHdT3jnYgZ2d/791Id0jPMh/0ZdyL7M1SHAI5ZJ
+# ivXGS0EtBQSL0Gdd6Gn680+UyakL5MqCd6JqCkXw9buftQGNWwTVVVUJBVBjc03u
+# 1Xne1WYQtvORovUrgHp7XVM+Le9W4leuMslM3Fp2mKTUx8EAH1jJTvGHrpZ6rlq5
+# /F0ZDkj1Bdu24mvUjI0FQ2Gz2Tyuqo/lxUQCmJYf3fa3eDBtoUfrbGWcxAGMaqv3
+# /O1W/MLoO2UZlMkUraxmqP1L1fAdEXi7VA3EwXmu8b1ZABnX5x9TTcNkd/+BdHyF
+# QV/s30YEeoaNDKbTcWtSM2tG5NvD571cuZYo0nJyofV96mHW7cx1diuGsg6ZiPOe
+# XyDTVPCubsVGkuTfzCrYRYkxf38/bICkXmvXvYDZzNWfJP9HPf8vpLIMSprz2jeD
+# 676ctgB6soY0QmCJ7ZYWB2N+6qAe5km8Qp02ywu4DsN44Z08iteioAu0VsBiUe0s
+# p5j3IAKM76H6Nw5aIhoJsx/3b8oMfTCQEeIfY0GNKXUnNP/e7/xmMkWptJeC7BmO
+# 2xpU2UFkVtFha4Q8RqNeE818pnMgcQpA3kk1zXCx2ktYhzcdJ6HqA/AsrhYBcBPc
+# mJ8ynXcRWA==
 # SIG # End signature block
