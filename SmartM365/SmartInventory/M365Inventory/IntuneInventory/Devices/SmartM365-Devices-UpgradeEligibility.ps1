@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.20
+1.21
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.20
+    Version : 1.21
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $runId = [guid]::NewGuid().ToString()
 
@@ -466,6 +466,73 @@ function Invoke-UpgradeEligibilityGraphGet {
     }
 }
 
+function Test-UpgradeEligibilityGraphProperty {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $false }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        foreach ($key in $InputObject.Keys) {
+            if ([string]$key -ceq $Name) { return $true }
+        }
+        return $false
+    }
+    return $null -ne $InputObject.PSObject.Properties[$Name]
+}
+
+function Get-UpgradeEligibilityGraphProperty {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if (Test-UpgradeEligibilityGraphProperty -InputObject $InputObject -Name $Name) { return $InputObject[$Name] }
+        return $null
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-UpgradeEligibilityGraphCollection {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [scriptblock]$Invoker
+    )
+
+    if ($null -eq $Invoker) {
+        $Invoker = { param($RequestUri) Invoke-UpgradeEligibilityGraphGet -Uri $RequestUri }
+    }
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $visitedPageUris = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $nextLink = $Uri
+    $pageNumber = 0
+
+    while (-not [string]::IsNullOrWhiteSpace([string]$nextLink)) {
+        if (-not $visitedPageUris.Add([string]$nextLink)) { throw 'Upgrade eligibility Graph pagination returned a repeated @odata.nextLink; collection is incomplete.' }
+        $pageNumber++
+        WriteLogSmartM365 -Message ("Calling: {0}" -f $nextLink) -Level "DEBUG"
+        $page = & $Invoker ([string]$nextLink)
+        if ($null -eq $page -or -not (Test-UpgradeEligibilityGraphProperty -InputObject $page -Name 'value')) {
+            throw "Upgrade eligibility Graph page $pageNumber returned an invalid collection response without a value property."
+        }
+
+        foreach ($item in @(Get-UpgradeEligibilityGraphProperty -InputObject $page -Name 'value')) {
+            if ($null -ne $item) { $items.Add($item) | Out-Null }
+        }
+
+        $nextLink = [string](Get-UpgradeEligibilityGraphProperty -InputObject $page -Name '@odata.nextLink')
+    }
+
+    return $items.ToArray()
+}
+
 function Normalize-DeviceName {
     param([Parameter(Mandatory = $false)][string]$DeviceName)
 
@@ -621,7 +688,6 @@ try {
 
     WriteLogSmartM365 -Message "Device detail mode enabled: querying the allDevices Work From Anywhere metricDevices route." -Level "INFO"
 
-    $allDevices = @()
     $relative = "$baseUri/userExperienceAnalyticsWorkFromAnywhereMetrics('allDevices')/metricDevices"
     $queryParts = @()
 
@@ -633,28 +699,9 @@ try {
     $queryParts += "`$select=$($wfaSelectProps -join ',')"
     $queryString = $queryParts -join "&"
     $nextLink = "$relative`?$queryString"
-    $visitedPageUris = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    $pageNumber = 0
 
     try {
-        while ($nextLink) {
-            if (-not $visitedPageUris.Add([string]$nextLink)) { throw 'Upgrade eligibility Graph pagination returned a repeated @odata.nextLink; collection is incomplete.' }
-            $pageNumber++
-            WriteLogSmartM365 -Message ("Calling: {0}" -f $nextLink) -Level "DEBUG"
-            $page = Invoke-UpgradeEligibilityGraphGet -Uri $nextLink
-            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw "Upgrade eligibility Graph page $pageNumber returned an invalid collection response without a value property." }
-
-            if ($page.value) {
-                $allDevices += $page.value
-            }
-
-            if ($page.'@odata.nextLink') {
-                $nextLink = $page.'@odata.nextLink'
-            }
-            else {
-                $nextLink = $null
-            }
-        }
+        $allDevices = @(Get-UpgradeEligibilityGraphCollection -Uri $nextLink)
     }
     catch {
         $errText = $_.Exception.Message
@@ -826,8 +873,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALKOasgQKQr90Y
-# jljTxv1A23IfeZryEQ7C126FSyzaLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAk8vfLX1GFvt7
+# 3lB4hMF90WOLNXHIGOtXeHbGr37FsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -960,31 +1007,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJzm6tILXN+JvMtHTZCFvZHSu6dzeXmvJf7nvUYwWt8jMA0GCSqG
-# SIb3DQEBAQUABIIBgERP5aKREn9cF0/yBVo8NwHz7rri5kjhopvO48Zkpe9X99AK
-# eu/DoVb3uAgu8XdIRQJj+hYSOBdfZIpqvCwRHSEwF6NbH0sEajLRR1vPXx//Imfh
-# DHlGfYuJLtYV3d+EN4jswh4byZSjlJyomEBJXq+MITEdRO98xfMbhA088d3oOIXp
-# iB4ySnwpP/sQc3R4mL6sYSqQu3uQuaw1It5EGRrGSyiogWEgWIFHfgwBgEl2sk8C
-# rFjyjUwTshzomBocNBhuo8tT3nxOo0j10hIyCYnbCP8iGYwdZ1OpoJJ+kFJeags8
-# oQsvBl+imr1GiLl+hlvXjOs/4PLITCw4jlAPuHG9l8a94ZzwBfaKLMnkwfcxt9Xk
-# ck5Ei7anr+AMrv9rn+0Tcmaenw4tV3cTKDKhcP8I55hG10N6yKV+xoUzM6iY/87b
-# UVnRS8msxhBOIyCGUZmEzh1OZVG5R0JIlGBILyKTlEvOyNVtaoaEnHgDj4lvF5tC
-# xj4INpyZ3AVYtAwLvaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBDTofGyC8O9WtRZB5IT1qeT4Gd6SYZstWH3wUJXkwouMA0GCSqG
+# SIb3DQEBAQUABIIBgKOEDvFOT+dsGkg95KrQXm5yejWg9PKX89ytWejxLKCZOZZg
+# JJjVmqZjDl/A3T9cG0RXnRG7x3A9uAwUO2wlnH609FU80zMq9TzXml1qBIkv+Egw
+# Kj9xNEXOEhRZRSyk9+6ZV2CaqpjxBYeKaiwc3WEWXf8BsSnp3icNnGMzqVOuEfjQ
+# INhnUn3pOTTAn4vSMjFf/iBTgs6dlVzcJ3R8cfG7vaMv7lpwUJwl+QO7wwMxg52p
+# zFuDcEIfDcGZw4CPbHcK68XyzdqqF58+0JDmIBswT6kabbRpBE0ocXXM9pd55cgk
+# BvG+65oxBbZ/ZcWm4u8ykAdtYDz7hE8bmeiO7nVu9eno2oKXaASG8uRrb6eH9V/H
+# GKeIHsi3V6Gx1ekdKnMthfuff01plgFyyLJUdhNuR1mm/6sSRo1A73CRjHcv1RRD
+# 5V0VOrHJTM/ypb0hnMgrdhw+0aOex9bamsSzkvaIKxYQz1u3N6jP8IijB7wWhUm6
+# x4iDXXqJ9Ub1i/BuLqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNjU1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCAuyniARFGOw9A4Sju0UO+78aqp959OMjOj8uBO
-# hvuTbjANBgkqhkiG9w0BAQEFAASCAgCGvgs4mWvAJcAJ8zeK6kV30shnjAl7yrbv
-# 77odnOXcQDO+tNQNhPD6m/3mM2Rn0bfFtYgFeCLQWhCedEUZvnoDdRWS2VHbCLkk
-# FVFs6K6lNDpV7BLANKjy96LNwjkZSqn54v7AByGhzg/meOsJx1IniDG44YAaPjsL
-# b4Y9mSQDHPOqBlblkvYaum/aHVhDmV8kKj31JXY8rZBLC9wFsBEa4g4iq4qDixRA
-# PFKsZqAEqDP6CA4LNRfOpzGyRXq0PmkfZ8H4Cn2kfHp7b3+c2dz5tdPa7M3GderF
-# 5L5fFKVPB4V8QEo8vA7L8Yj8nCPzJl2EinFJTVY+XfyUD+fmSZphD6HA9sb9t9DB
-# JADY1GS/h3rlHa6jgvXvZFeeEi/rLw7NZErAVWp5ptlf8BwDDVag0BQWqZXHLl1S
-# btIcpP07xvcrJ1bvso3AS4qGgyLkohAza2VJHCSdLdxZxvyBXglTy1g1jlUjN1bB
-# ZvfWN7+kLtjMRjyTt/vfPLeoxuzkwxWYVc7AObKx/64+KEBi24Vplq2hTsMNNOFb
-# zru7gBUYuIxe5s7+9eQG85lYO3oGq2X3OWYqruhCw5Wl5qO5YCN+3iFD5cv1SkZo
-# l0LIwCzXxZDOUcrQb5v+u7gJfanbOnFMXS7cJ+pZ0+mMZFWOiHo9fy+4tIiiM0i7
-# PgGQf83jbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDQ5
+# MDJaMC8GCSqGSIb3DQEJBDEiBCA2kSm3vADYZN/fA2ByFKRrU524jgRwesGenqRz
+# ESc4OTANBgkqhkiG9w0BAQEFAASCAgBcKvc91JryB07DkzCiAB54orkKDFWLwOfj
+# myBvssPqho7EntEpo2VixQxQlf/w+UFBNpmSWZgfujbXIzefNCxSI2Fzu1DjPX8O
+# A7DxMOPrIWakZj29thwcZkTUAJONTtKi2cUMN+2zB385wwdKehYXwmiNtd3wNIVp
+# gM0OporpFlT/Zwy9b1Q0/vsj55Wfr8z9qm75iEiB7Xa0J5tR9ZlQO1dhQQzPKMmN
+# HVonVfIba2kUVgOFUWgUFQOaBkFcuWF29cyo2UNfegED9PqFIvxZFqjy1cWw3Icv
+# H70Q6G74Ip1lWOirJKvj+9hCzJvTl0Pa36EtOeID1AyzxXolvzgjfD9jMaMZo1W4
+# VYBHV867g6/orcOQ/VdeZJsYuKzgJzd3V12EahVNsOI9F3mXIM5GEDcMfWY8tGCu
+# zQtJpWJULugG9UfqiMvFUAeI5atN2VWGNLQX2uL3rXE0AYpR79c9zF8veqY6MS/a
+# F8yEQUiQn9ywnfjT0EScIhiU5KIJSKgd9YgKDgLNWkbEKg+1hqYrgc+1c4ZGEyQx
+# YONFMOwZmR6T3t75eEw2h67jo5JtNwzh80HtXPN+RnUAuC6qLug6IGpV7k9kWtZJ
+# bgFM1nzKDL/nBnSATimeRvv3k2ePdjlLObifSOOJ7vNc0WL0L3aBH/4NxurUdO80
+# gh7oPvlBkw==
 # SIG # End signature block
