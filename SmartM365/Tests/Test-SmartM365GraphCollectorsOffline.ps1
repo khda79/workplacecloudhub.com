@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param(
@@ -135,12 +135,27 @@ try {
     }
 
     Test-OfflineCase 'Compliance pager rejects malformed page' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Invoke-GraphPagedCollection')
-        try{&$m {function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{unexpected=1}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'value'};Assert-Offline $caught 'Malformed compliance page was accepted.'}finally{Remove-Module $m -Force}
+        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{unexpected=1}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'value' -and $_.Exception.Message-match'Type=' -and $_.Exception.Message-match'Keys='};Assert-Offline $caught 'Malformed compliance page was accepted or lacked safe shape diagnostics.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance pager rejects repeated nextLink' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Invoke-GraphPagedCollection')
+        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
         try{&$m {$script:n=0;function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Compliance cycle was not rejected.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance pager accepts multi-page dictionary responses' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {$script:n=0;function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-eq1){return @{value=@(@{id='one'});'@odata.nextLink'='p2'}};return @{value=@(@{id='two'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq2) 'Compliance dictionary pages were not fully collected.';Assert-Offline ($items[0]['id']-eq'one' -and $items[1]['id']-eq'two') 'Compliance dictionary page order or values changed.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance pager retains PSCustomObject compatibility' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{value=@([pscustomobject]@{id='object'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq1 -and $items[0].id-eq'object') 'Compliance PSCustomObject page compatibility regressed.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance collection guards and fatal summary use canonical helpers' {
+        $text=Get-OfflineSourceText $paths.Compliance
+        Assert-Offline ($text -notmatch "PSObject\.Properties\['value'\]") 'Compliance still contains a PSCustomObject-only collection guard.'
+        Assert-Offline ((($text|Select-String -Pattern "Test-ComplianceGraphProperty -InputObject .* -Name 'value'" -AllMatches).Matches.Count)-ge7) 'Compliance does not route every collection response through the canonical property helper.'
+        Assert-Offline ($text.Contains('$global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)')) 'Compliance fatal errors do not increment the execution error count.'
+        Assert-Offline ($text.Contains('Complete-SmartM365ExecutionContext -Status $finalStatus -ErrorRecord $script:ComplianceFatalError')) 'Compliance fatal error details are not passed to the execution summary.'
     }
 
     Test-OfflineCase 'Autopatch pager rejects malformed page' {
@@ -277,8 +292,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCmDM/i4EkBhLK
-# PlIJfM0uASAFM/0t1d5Wooc5jaRF2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWSateS1Z2Iw+z
+# HY1+BvCuijX0EHOghYcmyHiO/xcFMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -411,31 +426,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICh7nCMM8xa5yvLVDHbj6ti55PD8Q/rpqduNaH8xrRJ8MA0GCSqG
-# SIb3DQEBAQUABIIBgA+670aOHn1kMB2041DLpJ6ooK0AeTi+nq8V8/GTWM7Gp1mB
-# Szlg1r0B3HZqh6eL9N5CtWifBQpWL5+jko1veT/qUEmOSCpHom63PVY5V13P2OUZ
-# 31iisfHv+sz4CFStZskOV3nqBvhE5suKoQsbnz2NiMIpLqF8hcqKLQZfOKlY1ncN
-# rlYgQIikOFEAkkCqTVqxHiXgEMt3l/gPYIWmeGX7v41ootl4m5LBJFC+SijwWRyO
-# iHwRjC6L9LuzVClkPC65CF4Wj2kLgrQ50esnf0YtWzPvsvBi+u7BhcaXENVusgT8
-# xrf1NR2eZ5Wm+x5kdzk6DUUkOTOJrAVK0pzEpjQTxQUeUyhKzr8tXWq6JABJIC1z
-# TTQualWjVYlvQxtMMEG7UxKuDnQqdl2nE9pP7d8DEK2JYUUf9MyzQCJQhnqrV/a3
-# NmGhpAHaJltgDyfUybv5MxWmQkeFh2b5dxPLJ2970AWitPlH6C7XmJKYQzjNQO08
-# 8sQf+4hACDzm2q8EdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINgIS47xNpgayF2rAMyMefoiUZaH5OlY6Rm5ADcgFmSfMA0GCSqG
+# SIb3DQEBAQUABIIBgIYq+pXS07wtV9gVW6smzWYQaLCTO389I4zRdpYKzWcowaYj
+# ocYWToPE3u54QZpHh7Kow7GLRsw5AF6m17zjxz6TYTEKAxYRuIPqgDiDPquYwWo1
+# ZGVkQpB4p5C69yKphOZCk+AFHdGhI8ZddHRzKah4Kkd1fD0Jlw/c4xGTB273MwWH
+# wYvukkszmeUFcFWzkfCxPEXQt4xZt4wDBFTykKD9MJhJlbTUzVoCUwN22WtEL57y
+# p8/ejeKoav5F1rIB+6G6xek2PmUoaOonEQGLP2hb272gteS4Wa8gOBSxnRGswmgB
+# d5uFuoUVOE1xpjS5tOtPB3g/vkuvl3il8j/3/8wl8jwpzFFGYEvx5VMxErJnOxJa
+# s9BSDGr/whXA7WK7LRAhOh6o9BAywamqmV/g1p+KF8HGw83r6ZC51g6BwG2izWkw
+# Nw4Wux/bTOvWRqIJNNb67jO437KGA1Y+8s835gSOXwLMbycC5mD5OwDU5BmuEHQ7
+# zSCRmD+uCw2FhPYZn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDUz
-# NDNaMC8GCSqGSIb3DQEJBDEiBCAGDLjUOPWTHxUElqNUi5MnOBIy0xoCGmt0oRZK
-# fwdvZjANBgkqhkiG9w0BAQEFAASCAgBJpTZ3EubLhUDJGQ1WWi1ZqK3yBJBh9PQP
-# DL4OLF5o9j9yTc2+CWXvaQxvpp/qjdj/G9kXNUpvVTAVK6tVl5/RMLX2zmwIQMrP
-# ae86rpKxwlvN30sCGIy6U8tQ3+i8ump7ht8dYv7NL/1TPl/QZafMdb/DmJreT11P
-# aztk/82wWT6IQWqnalYQ07w0rC4a8LgZjM6Ze443QNIc/MjrB/F8WrD4Kl8EJ+/Z
-# U4t34Ny4CbALsbmMPa01vO4uFSkMKMEKNmpU/Rff3H5Ug3bQ9mbbfq06SEBVTJW6
-# OJ6w0i61uK+OEJmvfKIoysHi5b9cA9o3W8xZhwY3WfVohjnnzKGeY4BJY+NmuJ/I
-# VjXAY2Xaj76jFOk5xF2O3a3BdMaw7D0eF5ot6eU9Li2eEhvMvqSfuKPLAqWb687C
-# RAHfZXtk3cvVvsbB42k/uUTAYL21L4/RcvxkISz6DQmTUJmcwQN9ve0YUvZnfVXC
-# 6ZfWKyUE4xEeKinz2VUZaEg82vBTeU/32SWpyDXpi7SL4L2h6p5hg4mfhUYIXRLg
-# 7mrVV8tKJnYpWQCwEWHOnh24ao3e9TnEucgKFTmb69SzelMvuvsTugjlSjffx2qN
-# wIAOpdOeqX3b9s+f0JBOb16FYwYj5O5KBDlNHp0HFYpK94D/GmyUoSIzv1D+CTzY
-# 12ksFXE/Hw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNjQz
+# NDBaMC8GCSqGSIb3DQEJBDEiBCDGlHbo11ZZjIw5ZHGL17M3DmrLakldZal0iVb+
+# AiExijANBgkqhkiG9w0BAQEFAASCAgA9pssoqDbyU/mHGW8w20RPHXm5k8pypQvE
+# N/gUbm5Bc3uZUlKgCiXS7xFXV/5Rxa+s5wprdgottBH3mYHCmPgibeSl5npyGKzW
+# 2t40fc05bGMSKTKMq9k2zELg2TB1i4ulRj+qnn3rN060QATh2n/PWJbLihYqJpEl
+# crNAcumE3A2LLDz5zMEDY1fvW0RZVXUZqjs2Ubu5lZPYCO7GJre9Kc6nJlpno0K/
+# D4GEFXAvVQZFbFD42RKu7tNdKlDD9hTAkN8dEr8KF7ZRFh/fEVlVwpHrBCp25GDk
+# YSEWij3mP+hRF46buk6ROOf0mcDrsaG6LRy+7XE9/n/nkLfpV2mCmuURRXndUdIU
+# wLg7oyGJlLuG4N8H0+WkWeq4LZ73zUY8jklvJdybzbnoamL7uTgzgmUYcPXbMSyo
+# /2kmrMRzJgniRhGSKnnSLOYxjyJI4pNOzidCA1AWQxtzvmTjM50s+QwsPXyHnAjY
+# ui1c0H06blHFIFFqqN/PfdACHbso2G+mrwEVsi/zFsWrVsVUeIibH53CPj8H+oIG
+# +dtAy8a6DCH5vfRvVnqMDTDlrH+Xmkpqs14/a1X2xzW2A4tEDJtpgxFrkHgLGWld
+# h+lp8QQWJ0D9K9NSDBzzgT1CLZoeMp7NJyiPgpkEIXWMgFODvKVuy59K0Kkl4fTK
+# 30t1qTlu6g==
 # SIG # End signature block

@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.16
+    Version : 1.17
 
 .VERSION
-1.16
+1.17
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.16
+    Version : 1.17
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -612,6 +612,49 @@ function Invoke-WithRetry {
 }
 
 
+function Test-ComplianceGraphProperty {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $false }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject.Contains($Name) }
+    return $null -ne $InputObject.PSObject.Properties[$Name]
+}
+
+function Get-ComplianceGraphPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject[$Name] }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function Get-ComplianceGraphPageShape {
+    [CmdletBinding()]
+    param([AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return 'Type=<null>; Keys=<none>' }
+    $typeName = $InputObject.GetType().FullName
+    $names = if ($InputObject -is [System.Collections.IDictionary]) {
+        @($InputObject.Keys | ForEach-Object { [string]$_ })
+    }
+    else {
+        @($InputObject.PSObject.Properties.Name)
+    }
+    $visibleNames = @($names | Select-Object -First 20)
+    $nameText = if ($visibleNames.Count -gt 0) { $visibleNames -join ', ' } else { '<none>' }
+    return "Type=$typeName; Keys=$nameText"
+}
+
 function Invoke-GraphPagedCollection {
     [CmdletBinding()]
     param(
@@ -640,10 +683,11 @@ function Invoke-GraphPagedCollection {
             Invoke-MgGraphRequest -Method GET -Uri $currentUri -ErrorAction Stop
         }
 
-        if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) {
-            throw "$Operation page $pageNumber returned an invalid Graph collection response without a value property."
+        if (-not (Test-ComplianceGraphProperty -InputObject $page -Name 'value')) {
+            $pageShape = Get-ComplianceGraphPageShape -InputObject $page
+            throw "$Operation page $pageNumber returned an invalid Graph collection response without a value property. $pageShape"
         }
-        foreach ($item in @($page.value)) {
+        foreach ($item in @(Get-ComplianceGraphPropertyValue -InputObject $page -Name 'value')) {
             if ($null -ne $item) { $items.Add($item) | Out-Null }
             if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
         }
@@ -651,7 +695,7 @@ function Invoke-GraphPagedCollection {
         Write-Host ("{0}: page {1}, total {2}" -f $Operation, $pageNumber, $items.Count) -ForegroundColor DarkCyan
 
         if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
-        $nextLink = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
+        $nextLink = if (Test-ComplianceGraphProperty -InputObject $page -Name '@odata.nextLink') { [string](Get-ComplianceGraphPropertyValue -InputObject $page -Name '@odata.nextLink') } else { $null }
     }
 
     return $items.ToArray()
@@ -729,23 +773,24 @@ function Get-CompliancePolicyStateBatchMap {
             continue
         }
 
-        if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+        $responseBody = Get-ComplianceGraphPropertyValue -InputObject $response -Name 'body'
+        if (-not (Test-ComplianceGraphProperty -InputObject $responseBody -Name 'value')) {
             $failureCounts['InvalidBody'] = 1 + [int]$failureCounts['InvalidBody']
             if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($deviceId) }
             continue
         }
         $values = [System.Collections.Generic.List[object]]::new()
-        foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-        $nextLink = [string]$response.body.'@odata.nextLink'
+        foreach ($value in @(Get-ComplianceGraphPropertyValue -InputObject $responseBody -Name 'value')) { if ($null -ne $value) { [void]$values.Add($value) } }
+        $nextLink = [string](Get-ComplianceGraphPropertyValue -InputObject $responseBody -Name '@odata.nextLink')
         $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
             if (-not $visited.Add($nextLink)) { throw 'Compliance policy-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
             $page = Invoke-WithRetry -Operation 'Get Intune compliance policy-state continuation page' -Script {
                 Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
-            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance policy-state continuation returned an invalid Graph collection response without a value property.' }
-            foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-            $nextLink = [string]$page.'@odata.nextLink'
+            if (-not (Test-ComplianceGraphProperty -InputObject $page -Name 'value')) { throw 'Compliance policy-state continuation returned an invalid Graph collection response without a value property.' }
+            foreach ($value in @(Get-ComplianceGraphPropertyValue -InputObject $page -Name 'value')) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string](Get-ComplianceGraphPropertyValue -InputObject $page -Name '@odata.nextLink')
         }
         $result[$deviceId] = @($values)
     }
@@ -797,23 +842,24 @@ function Get-ComplianceSettingStateBatchMap {
             continue
         }
 
-        if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+        $responseBody = Get-ComplianceGraphPropertyValue -InputObject $response -Name 'body'
+        if (-not (Test-ComplianceGraphProperty -InputObject $responseBody -Name 'value')) {
             $failureCounts['InvalidBody'] = 1 + [int]$failureCounts['InvalidBody']
             if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($policyId) }
             continue
         }
         $values = [System.Collections.Generic.List[object]]::new()
-        foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-        $nextLink = [string]$response.body.'@odata.nextLink'
+        foreach ($value in @(Get-ComplianceGraphPropertyValue -InputObject $responseBody -Name 'value')) { if ($null -ne $value) { [void]$values.Add($value) } }
+        $nextLink = [string](Get-ComplianceGraphPropertyValue -InputObject $responseBody -Name '@odata.nextLink')
         $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
             if (-not $visited.Add($nextLink)) { throw 'Compliance setting-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
             $page = Invoke-WithRetry -Operation 'Get Intune compliance setting-state continuation page' -Script {
                 Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
-            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance setting-state continuation returned an invalid Graph collection response without a value property.' }
-            foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-            $nextLink = [string]$page.'@odata.nextLink'
+            if (-not (Test-ComplianceGraphProperty -InputObject $page -Name 'value')) { throw 'Compliance setting-state continuation returned an invalid Graph collection response without a value property.' }
+            foreach ($value in @(Get-ComplianceGraphPropertyValue -InputObject $page -Name 'value')) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string](Get-ComplianceGraphPropertyValue -InputObject $page -Name '@odata.nextLink')
         }
         $result[$policyId] = @($values)
     }
@@ -1003,10 +1049,8 @@ function Get-PolicyConfiguredCategories {
             foreach ($entry in $script:PolicyPropertyCategoryMap) {
                 foreach ($prop in $entry.Properties) {
                     $val = $null
-                    if ($policy.ContainsKey($prop)) {
-                        $val = $policy[$prop]
-                    } elseif ($policy.PSObject.Properties[$prop]) {
-                        $val = $policy.PSObject.Properties[$prop].Value
+                    if (Test-ComplianceGraphProperty -InputObject $policy -Name $prop) {
+                        $val = Get-ComplianceGraphPropertyValue -InputObject $policy -Name $prop
                     }
                     # A property is "configured" if it is true, or a non-empty/non-null string
                     $active = ($val -is [bool] -and $val -eq $true) -or
@@ -1255,9 +1299,10 @@ try {
                 while ($uri) {
                     if (-not $visitedPolicyStateUris.Add([string]$uri)) { throw 'Compliance policy-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
                     $resp = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
-                    if ($null -eq $resp -or $null -eq $resp.PSObject.Properties['value']) { throw 'Compliance policy-state page returned an invalid Graph collection response without a value property.' }
-                    if ($resp.value) { $vals += $resp.value }
-                    $uri = if ($resp.'@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
+                    if (-not (Test-ComplianceGraphProperty -InputObject $resp -Name 'value')) { throw 'Compliance policy-state page returned an invalid Graph collection response without a value property.' }
+                    $responseValues = @(Get-ComplianceGraphPropertyValue -InputObject $resp -Name 'value')
+                    if ($responseValues.Count -gt 0) { $vals += $responseValues }
+                    $uri = if (Test-ComplianceGraphProperty -InputObject $resp -Name '@odata.nextLink') { [string](Get-ComplianceGraphPropertyValue -InputObject $resp -Name '@odata.nextLink') } else { $null }
                 }
                 if ($vals.Count -gt 0) { $policyStates = $vals }
             }
@@ -1321,9 +1366,10 @@ try {
                         while ($u) {
                             if (-not $visitedSettingStateUris.Add([string]$u)) { throw 'Compliance setting-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
                             $page = Invoke-WithRetry -Operation "Get Intune compliance setting states" -Script { Invoke-MgGraphRequest -Method GET -Uri $u -ErrorAction Stop }
-                            if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) { throw 'Compliance setting-state page returned an invalid Graph collection response without a value property.' }
-                            if ($page.value) { $s += $page.value }
-                            $u = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
+                            if (-not (Test-ComplianceGraphProperty -InputObject $page -Name 'value')) { throw 'Compliance setting-state page returned an invalid Graph collection response without a value property.' }
+                            $pageValues = @(Get-ComplianceGraphPropertyValue -InputObject $page -Name 'value')
+                            if ($pageValues.Count -gt 0) { $s += $pageValues }
+                            $u = if (Test-ComplianceGraphProperty -InputObject $page -Name '@odata.nextLink') { [string](Get-ComplianceGraphPropertyValue -InputObject $page -Name '@odata.nextLink') } else { $null }
                         }
                         }
 
@@ -1491,6 +1537,7 @@ try {
 }
 catch {
     $script:ComplianceFatalError = $_
+    $global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)
     Write-Host "A global error occurred in M365-Devices-Compliance.ps1 : $($_.Exception.Message)" -ForegroundColor Red
     Write-Error $script:ComplianceFatalError
 }
@@ -1516,15 +1563,15 @@ finally {
 
     try {
         $finalStatus = if ($script:ComplianceFatalError) { 'Failed' } else { 'Auto' }
-        Complete-SmartM365ExecutionContext -Status $finalStatus
+        Complete-SmartM365ExecutionContext -Status $finalStatus -ErrorRecord $script:ComplianceFatalError -FailureStage 'ComplianceInventory'
     } catch { }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYWUiwDJHcCwcA
-# RAlWb8yjb01twP4/nqMQgCUrqSuGpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANsfa9XpWBuLxE
+# 8RUk9zjMpAA37xvZ6J8IOAj4p0vL/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1657,31 +1704,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIH6YqRvAPT5Y/mV7saxfEkVPGoceB6YRnR8TgTaFq8nMA0GCSqG
-# SIb3DQEBAQUABIIBgGO0FYcMMRrkbxaQAsg4A73Yrj6Kz2kUyHSssFtMkZ6uSaej
-# BJEPKN2n7bH7P4T/z0ZT3Ic39YwvrkOtbt3DzpSyNjVA24+XUrThOeDGjhzmB49D
-# 4uloZ6TCM2TiRKECYr5bkN9CGTLYh7CCWbr+fuDxS2iT0uIsguxthEhL/nl5zBwU
-# +VdRxy8YsY8sgKe0c+1sLltwm2a5cPktJdjfbqVuVAdrrHGDZwV+A7FNLob1TymN
-# esgxvaC4KeVp+VTq4JhtEUJZcz37MOGUsCn5/wmZHmcpyIcVQGg9bE2TVfDvobsk
-# YNzd+3TAyTPM2e2K5LlOzdkpHognF+ak1hn+D3kpMv+TgHeju5dCd4twLOHNCSfA
-# 2Q69aiscY5C6UKNtZgcd8PrHLonKri+s14YotiPvhSc6O3m3UulxadhD2jKpZG6P
-# 4ah+lBp+fBCrDH27YicAx9LTX7ZsvRJJfm9FiIMYwgps0eL+ZJ2P2fBMHzomUMLn
-# 8OsfKrtEpDhNY1TD4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDqKwVrEdMpY7ozwqVNjy0jMnybgDAA9u9mrpFjp0F3cMA0GCSqG
+# SIb3DQEBAQUABIIBgCo8CzsziI+QanqZSKOHHk9Opfzq99vcj+KPcJG1onmJyjKe
+# T18BqQwJ7Y2wkbJoMf0w/cKC9CmxtccbyFVMwQ+cOOnseZMT24krA/UvNLIgPVko
+# BDax+7ebDFBmVYmliGmT6uLzyvxMrFACpVkFeoLdgiqEAhdMFkqDZAL9iyv+n4YD
+# hw3tKDdFUl9Zlhmaksr4opcQ15oBuewhOlg8vIa96lUZSqiiTaU2Vk3JCee4owcI
+# 4CoJ8jm95mfZNRUPHlOENIsAAdOQAdAgYr3M+vcy3BcrfHK+ZwcdS3qojEXJ61xh
+# uBcn4TyHOipRyBo1d4CU1DNwIztMJ+71ilhzJJMLKHouqCOPGDes/myn4hMGu6A1
+# AjvwAwdW+SUNd4guHHa6S48ABjq0Q6/TlAYUDis+MWVAIOn82PLuCAlvfI+O5y7G
+# 3gZOIfhnJy6/1BidLtZ2fyZDlGhH8l4ErSDiToBxk8qrWPPPoHIP1Bpsik+//urM
+# 6AE/YqC9cKGs8Xwv2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAelJiXyTLR9zlbm9yfzk8vzvMuYcxVlzyqBcdu
-# Fal3YzANBgkqhkiG9w0BAQEFAASCAgCNBSAAEjQfdvXQIfH6lB2ikjtnjjaF/H99
-# biAZZ7XP2sIJCxTSIogjIp7k3ag3DRFN7SfmFKxNfLV2GdYT3/rdOXJPD7/7B/xY
-# OjS42UIPspY9A3BtGTKE6l/HPDznKDO67by7oBED1ugZ16LOoablXBP4nww2yoTO
-# 2PsZ3clupB/Feavdihc9ZLPij20Gcqei9CVM1KcemNhNjQ48avhE/0iYEOlQKlsL
-# cUOKKG1opdXiiuplXeSspsHP0SIQST5GCPWaKnR4eZ6Wx6gw6Vy+nGSwo0RufDeJ
-# aW60DN9KwSbnVVzkK2XUxi2tYeaeitr2f1WGY/boaQoNVutE3mw3me3LH7w+3UJs
-# RletBINXQvvIvT2tKdI1sgPTr//4UbsDcOhYDcWZRqKAzwmYJFsocesKoGnDG0Z2
-# rcfsKdVZf5/MkrcTkvbSco2ZvEJNMW7XAUJ5wnwUQ8N7Aktdjyx/ve4mNH/13z9+
-# m3k/V6yDWDyQzcIsRaOzCRQFm+oOteN3hLcEmL3s5hNaYLk2m1QAAz3LIOIfxDhi
-# S+ZTcEA4VPb1pVRI5n5EzZIwu+Yl8dcfHOG2WIq2DBpUbDM3TeFtq8dDu0dcfICR
-# h/oNmhm/HTdZNRUm7Xxel0BbMXDuHQj72qGzH12qQ9lpWa5D+7eRa5cVTbyZSvhY
-# jisUpUIFzg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNjQz
+# MzlaMC8GCSqGSIb3DQEJBDEiBCDoJTRMnA/6HngohqU74+sPwzJeVwjMKjhRSD4I
+# 3im92zANBgkqhkiG9w0BAQEFAASCAgA/tt+6LvXEcuw2DT2s1Khys+aShhAXN18V
+# FoctJcqcrSUKM2ygoUUdtR5lOMfMU3ZNbAvMKTmN7bwJwIY6t1ztpvIqyeNaPFY+
+# 09qSxeUVlofW0gBA57jrw0GeX1l9uKoBxUjs5c2PiD0XDUbfpawy+a8+2myIxZeI
+# TS7KesxLvGlRSsIgpVY4VAJ8e2+mOEkEhGxlCPSi84mgh4DGmn/WBktVNVJytnVw
+# ov4XAgn8xyfT06YGmdTvWtDVzUESIlO/tFbJ/rErmVqoze1hnnpr0wTh7qIW8iid
+# DWuKASjxZP8HN+QzLedkTmCRgmZVuouU3VnwKaKgUnXmkVM8/HWLGrHiXhJu0g/y
+# J4juhRAE6b9PujYDqTE6P1U6MkDFm+T8xwoclbkUGPBbDUGgtpsKrVGSNo3xjwaj
+# JRTO2ni80OsGcjzfPrihe09djPpsxK3F82B64qsI3DAzbzLwrhEccHM7xcZowBKe
+# uZXBkA6g6GYgWA82QX5w6s6OGt8XYMKTPbOqYxRqhmT95l3UwNf7PP96mG46Ii7k
+# D7Mb1mKWmuAM/9cQsQ5lcRLIWd8OnnoJ4kT07kheGbHdAC3EOKwoVR6R9MmatDFn
+# MwHsf8r6CqNE/EwZwK18AQnS5PU/hjPV5rFnw3YDnSGBZzB1jIxBzCOtqFFXhMVy
+# QzHoSzijUg==
 # SIG # End signature block
