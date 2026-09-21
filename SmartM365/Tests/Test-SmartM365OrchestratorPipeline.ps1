@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
+.VERSION
+1.0.0
+#>
 #Requires -Version 7.0
 [CmdletBinding()]
 param()
@@ -7,10 +13,11 @@ $ErrorActionPreference = 'Stop'
 
 $smartM365Root = Split-Path -Path $PSScriptRoot -Parent
 $orchestratorRoot = Join-Path -Path $smartM365Root -ChildPath 'SmartInventory\Orchestrator'
-$modulePath = Join-Path -Path $orchestratorRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
+$smartInventoryRoot = Split-Path -Path $orchestratorRoot -Parent
+$pipelineModuleFile = Join-Path -Path $orchestratorRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
 $orchestratorPath = Join-Path -Path $orchestratorRoot -ChildPath 'SmartM365-Inventory-Orchestrator.ps1'
 $jobsTemplatePath = Join-Path -Path $orchestratorRoot -ChildPath 'Orchestrator-Jobs.json.template'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+Import-Module -Name $pipelineModuleFile -Force -ErrorAction Stop
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -142,6 +149,16 @@ try {
     Assert-True ($mailResult.Calls[0].Body -like '*Stable, parser-valid and Authenticode-approved*' -and $mailResult.Calls[0].Body -like '*Detached jobs still supervised*') 'Runtime update mail body is incomplete.'
 
     $productionDocument = Get-Content -LiteralPath $jobsTemplatePath -Raw | ConvertFrom-Json -Depth 100
+    $missingExternalActionOptIns = foreach ($job in @($productionDocument.Jobs)) {
+        if ([string]::IsNullOrWhiteSpace([string]$job.ScriptPath)) { continue }
+        $jobScriptPath = Join-Path -Path $smartInventoryRoot -ChildPath ([string]$job.ScriptPath)
+        if (-not (Test-Path -LiteralPath $jobScriptPath -PathType Leaf)) { continue }
+        $jobScriptSource = Get-Content -LiteralPath $jobScriptPath -Raw
+        $supportsExternalActionOptIn = $jobScriptSource -match '\[switch\]\s*\$EnableConfiguredExternalActions'
+        $enablesExternalActions = [string]$job.Arguments -match '(^|\s)-EnableConfiguredExternalActions(?=\s|$)'
+        if ($supportsExternalActionOptIn -and -not $enablesExternalActions) { [string]$job.Name }
+    }
+    Assert-True (@($missingExternalActionOptIns).Count -eq 0) ("Jobs declaring EnableConfiguredExternalActions must opt in explicitly: {0}" -f (@($missingExternalActionOptIns) -join ', '))
     $productionSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $productionDocument -Pipeline Full
     Assert-True ($productionSelection.SelectedCount -eq 42) 'Published Full selection must contain the 42 enabled non-manual jobs.'
     Assert-True ($productionSelection.ExcludedCount -eq 6) 'Published Full selection must exclude the 6 disabled/manual jobs.'
@@ -181,8 +198,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator pipeline tests passed." -f (Get-Date).
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACX0p5TsJlDC3j
-# GB5wQuL1VbqI4UZNsxU7NRdF9Z2ZFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCoZEkOGeUU78KN
+# hMGa4BTmBhsxFvVM/4cPON9ZlIbljaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -315,31 +332,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator pipeline tests passed." -f (Get-Date).
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA9PASFippP67Ow/zk/q08SoCgfxw6wtZyglSPnKYRgrMA0GCSqG
-# SIb3DQEBAQUABIIBgDic9lMKfq4GcBLuWq73GGj3zTDwhEh23xSMn4bA4Mr9ders
-# D+ZMmbnuM2mI8sdupWzo62gMc8AL9wgfSQYJCIaRIf4NBapRThvUUkVN1ZPOwv9g
-# W/WlyCmqTU/B6p0J0F2VFJVOvkixqh0K+zukBx6/nzfmx+PgM6pZUoMb5WDV6whL
-# mg5FvOEno/EcyF/o6r1jysTbSKPaRPrWKtJ7/NreyZXlh1RTnJhnXpgKXe1yG3nj
-# PKxVjq7nJAXGazTw6BgMwFUoZyMxmaDYvqDMCzbDum1l6VES8m7au14etfINx1WB
-# flbYbw57qn3uKzKC1g5rbxH+jN+GIweurgvcaoPegcdA+LhgeEOD5sdPyl/MqadS
-# byJ3kFN6XTWhSGzxWbHTi7n0hCickBeZ40l1X+IeaixwkY6pSeojEp8albX5FQFi
-# ja+UmeE64wz47lVrCFuRK0hyFlMpqb1Kmjk11Z9bf9AINsQN8NQc5GKpSylDA9Vh
-# dcjeZRIy+lzsvlLajaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILMXddkeN4Dd+1RCMHTVvkyk6RtHei9Vp4Q+23ScciR6MA0GCSqG
+# SIb3DQEBAQUABIIBgB/oiecHjLfDl1AkayEXCTTb6sbX+fXkh6TGAa4lJdt1qKwa
+# jk0d48bFPTEo6zovS2eekwd+D2evcOR6Oy91PhikmCZ0cbshGnvEDP9z5GAUtL6L
+# DtmDGjFXaj6SgLuAu7ktS+bEJgL5VSZ4iahW5vOQhntQaSBXMmwwwTqCrBQgRiMp
+# qZw5lVq3lhM/fhKfmBAYwpit8q1FEwCrebqZItZ4Gy5IVSxqrxpLDcOG5jRcf02H
+# /f78fxXHFVpzz7isIyC1sXHYBdkM+l8PXoftQF3UsdbtHHiTagNkER4dowjSOk0J
+# L+WK06kybLwV/PYebH7+NNoleQlHvLGhxwsy0Sa5Q57DcMpydtLeaGL2f+ZfotB6
+# v+K4V8zbL/Zfsh262CqRS32xtl8mC7FgbFvwuPTJn7rxqTtrWegClr3rW7DjWlnh
+# jdxaKru/QM1K2bByxsjiA4ikK4h7cuLyAPTwtcF38QsxktXxB6IZDAleTP9QEa0b
+# sXGc0K/0eGLlUw8Nn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzQ0
-# MDRaMC8GCSqGSIb3DQEJBDEiBCD60N4gkaJVyAPmVo38BdUFp2dJPaTZxY9IE46H
-# TZf9+jANBgkqhkiG9w0BAQEFAASCAgAK4Oba54sjlqq65ynD57dDMKNDmNu/MXGo
-# +QkCjDU4rvD1SMKHIMqj5STBqUatHoWvxtYZq47HJaCUL+6HY+XfWRmLPHHxvQys
-# 9waex3Vlwk/zd3F5TIIm4bLBXQz5RjTKVxxgghhNXHk///f9exWpejjra+JdVx8p
-# 157Ux72I1TTls4uzUNYN9P1oPp7GpovuxdTRP8IRyq3HR0mCH+dq851p0qfWmivY
-# Zx1V802ar85VkBo6WUEyNAl3i6O0wuxIY6cDTCU1ofo4gmRr79awpzML/WUyi5kx
-# 3YL0jwFmz6AvetOkF/bd3dNbSp1QEeFU/YhieJQrx9P9Yg72+5w2K3XLkuKUfdwr
-# IvhMFBrQEynlfnKKg6x1wahcE146NqXuM0pfmKc1M0/TmXaZSCr5l/8KP4KmAPBn
-# 8jAeS6l+drYPeq63e6b7FitprVqs4g0qv1DHGvUpgVP7TRroJTYtZLkzyl9/Vi6I
-# hV49xLHx/V9f0toGeekmKonjmEVIbGSa82yJlkvqHTgGq0l3dqX4W/HKQyHHUUVY
-# /kn1PwtanA7Ox3g2hNoWd8qF/4dgJ9N5HHLGVGLI0bkDe7ZXXsf1EjPUeDV8oBzH
-# tp6dWAbbn8FmHP+u6+uu+GcAZa8R5f1cir2MPSBvqmHoKU+G77+FFoiP0iTBbQXc
-# lPLuPqDVZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDEz
+# MjBaMC8GCSqGSIb3DQEJBDEiBCBda8xvHHzwMxSlyPeBPxUJvhW+911U2jHRHM/n
+# a88SkTANBgkqhkiG9w0BAQEFAASCAgBVR2IfWQAa2IYtWppVFoTuoIvdOIUcUhQ3
+# eqaf0iNY6JlHzVjAsVHY33S0s1d6JXeh1ty2W/Hs+ghvxN9He9N5Z2QOfOPRDPRL
+# +xe9NazwkvW2kFgFGq4gVTDv6kEmOSPYuMr+zNcRKwuziteik2Zl6aeuYtisvfiE
+# eazqe4mr7I/fTqNrbfkhZdJyYhOYGSrefXsABetZw0bMNfTEMToLhGawdqj+C2Db
+# B/BXsZ4VIFVszvAyG2BqBxyKsEI+ec5mgO2b5+b4R5hBn5J1JoKZvNXDq9fkBzut
+# BIUuI3EsHF2MCcc+S3UKPl+SH1Ped9AcN2MMtaqu821G8+m2j2dnFeIvwQqOuOK+
+# xqJ9/6uqyFt+xyjVGk3XWDgTsA+3Fb0eOxx+FW1YB4KWZ7xzfMB+wwtqWIPgEXG0
+# KXuhiRBLORZgGroG6udrWRFfHCtZ5uYhTo9lVrjw9bbErhWgDdhTWAEg5ko3HM2g
+# 5blDpu86ljOv9L6letbTZrsL2JYqRLQWvmK+UpiiABCPCfDulc/r1BDCVbKv4kQp
+# Rprk7daqK71+5t1jO3svxmDkgrfoQC7t1AJD6mMvK0uIK6qFulHC3WeW2sQfWW0t
+# MaABOJbwP1jhXoxMGeOoE9YMfDlgohsITlE7t574UYQNliYCFSru8ALU7pQLSezi
+# qy9u/BAVmA==
 # SIG # End signature block

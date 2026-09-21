@@ -101,6 +101,7 @@ function Sync-SmartM365OrchestratorJobsManifest {
                 Created = $true
                 Updated = $true
                 AddedJobNames = @($template.Jobs | ForEach-Object { [string]$_.Name })
+                UpdatedJobNames = @()
             }
         }
 
@@ -113,8 +114,26 @@ function Sync-SmartM365OrchestratorJobsManifest {
         $knownNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($job in @($document.Jobs)) { [void]$knownNames.Add([string]$job.Name) }
         $missingJobs = @($template.Jobs | Where-Object { -not $knownNames.Contains([string]$_.Name) })
-        if ($missingJobs.Count -eq 0) {
-            return [pscustomobject]@{ Created = $false; Updated = $false; AddedJobNames = @() }
+
+        $updatedJobNames = [Collections.Generic.List[string]]::new()
+        $requiredExternalActionArgument = '-EnableConfiguredExternalActions'
+        $templateJobsByName = @{}
+        foreach ($templateJob in @($template.Jobs)) { $templateJobsByName[[string]$templateJob.Name] = $templateJob }
+        foreach ($existingJob in @($document.Jobs)) {
+            $jobName = [string]$existingJob.Name
+            if (-not $templateJobsByName.ContainsKey($jobName)) { continue }
+            $templateArguments = [string]$templateJobsByName[$jobName].Arguments
+            $existingArguments = [string]$existingJob.Arguments
+            $templateRequiresExternalActions = $templateArguments -match '(^|\s)-EnableConfiguredExternalActions(?=\s|$)'
+            $existingEnablesExternalActions = $existingArguments -match '(^|\s)-EnableConfiguredExternalActions(?=\s|$)'
+            if ($templateRequiresExternalActions -and -not $existingEnablesExternalActions) {
+                $existingJob.Arguments = (@($existingArguments.Trim(), $requiredExternalActionArgument) | Where-Object { $_ }) -join ' '
+                $updatedJobNames.Add($jobName) | Out-Null
+            }
+        }
+
+        if ($missingJobs.Count -eq 0 -and $updatedJobNames.Count -eq 0) {
+            return [pscustomobject]@{ Created = $false; Updated = $false; AddedJobNames = @(); UpdatedJobNames = @() }
         }
 
         $clonedMissingJobs = @($missingJobs | ForEach-Object {
@@ -130,6 +149,7 @@ function Sync-SmartM365OrchestratorJobsManifest {
             Created = $false
             Updated = $true
             AddedJobNames = @($clonedMissingJobs | ForEach-Object { [string]$_.Name })
+            UpdatedJobNames = @($updatedJobNames)
         }
     }
     finally {
@@ -278,6 +298,7 @@ function Initialize-SmartM365OrchestratorCentralConfiguration {
             Created = [bool]$manifestSync.Created
             Updated = ([bool]$manifestSync.Updated -or [bool]$templateSync.Updated)
             AddedJobNames = @($manifestSync.AddedJobNames) + @($templateSync.AddedJobNames)
+            UpdatedJobNames = @($manifestSync.UpdatedJobNames) + @($templateSync.UpdatedJobNames)
         }
     }
     if (-not (Test-Path -LiteralPath $paths.ClusterPath)) {
@@ -399,8 +420,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNn8M2tMjfS2BU
-# 7cubL5L2ea5Wv+EPyfnhMb6tCbPNxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/CKSjlLtQf47/
+# v8k0lg+o8lT6IdWcRiq7DhUJyU8aKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -533,31 +554,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFZWGDWBAAe3fVyVO9T/4E20hTBhjpYkrCb8+w3UmoqsMA0GCSqG
-# SIb3DQEBAQUABIIBgDGfD8yskxI9LcI6mrbVePhJr7Zl2oTIc1B9CooKdOO6HCZT
-# XzgVinSGPv218SxtRCLa2c2hARAEinupiqcPP4NaObig1j5XkvDNndkshEtDq8nU
-# 1A1Bxc1uWqb5dqmD5Z4pFEgqIvmd5LylUP9snT+kQL5eDyxJadJfnY3sXS7W221O
-# 09UVFnTFjYQ+VLB8u99crCs/biDRTWfVywX51tNylitTFpTGUQmK+FgXZcwPdezs
-# I0ZbbdaJwWjYeF1LXSYXMpcBvPpj5Gb1RkH5RYiv9sQmoO+lWj3GB9yZlPXpoZ3N
-# oGgdy4Yd19s2VC/Szxr08sfo1LVwhs+PKGR5FKWtapIVG2eY9aekBVmMM10TsYD0
-# 4HocmCFQB7qUECL+4IktZgGxUyosQNIrauR52mNUXvj6AgChvBeqUrp9NONzvjd7
-# h/GOo2sq+4nc8Gk9ZkuZoflsgkFVQcNsujbGnSETCtsyRjlNCh3YlW69RsWJJ6qQ
-# D+0WMZBu22qkbRi1UqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINsEwrpGCbZRVkxhR4ZbRC+FJMNJpQUo8Fp8aPOe/XWcMA0GCSqG
+# SIb3DQEBAQUABIIBgD1WaI34DGdcxaiCdUiy19ZQB2seiaMEMGk4wp3fpbMy3l2W
+# ZgCppMhWgrWROiu8qyLGNM0B3kENOWv2lcXbWuWFhiJTw85Y8fHVD0XI5UOmGpol
+# 2y1nPhjyV8kdHQ9xWEj+/KjF482fDWkaFufSxNTv05mCFbQY+EcOBSrLdsDNm6uh
+# jMgeWn5I6pMsoBsPfBVca8kgeTNEaSaUbBRzGN2AV9AIABxClm23PGINJvIbXD8r
+# a9EtjceoJRSCJ6/oTlcUWobHLOLSKnA2rv8B/6RP5Low8VcCQXp/A9+V+bsPEuir
+# +v/xtR8dIP10glkzpshHnd6HiOIJHDNNSa/2cynY1PZB2fyfOOpyN7rfi64VvBFH
+# eCgIPE5TSnnWm7ZB5ccjR3fcWeELDa1S2q4fxKzZFNlJ2HbmwGKLKyJ9RiULJSlA
+# oGh5UqXEj2CtzBQQmsj5alwbS60VWrN56QE04gjDL2HO//2o7GE06Q+MWMQIDmHA
+# +9ST55yztmEKdgW2BKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjUy
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCKEwhQmGz6E81liH6dP4bmK4WKOvG0YFvuYe05
-# rxALUDANBgkqhkiG9w0BAQEFAASCAgCXVnUTZvZMGgs8zK7R/c49olF67NpCxcCU
-# 6xERpK/oxn1A3Kq/gzRFARKhGixbUSHrY6TbRVyAyYPfU/nzre64XOR4dkbKsJVH
-# 8SL7tRVgDjH0FqLEbnnCvBtwHklQz5mNfImKqjkC9vvS8mSQ2Kw7p5N3tsK9eJdQ
-# TYdOcpdLbOJvWrKodwHgpom16T5hmQKU7LwFs2HVF3suv1p3fmAno6jpl/x74sHJ
-# EAGQ9B/tq1Iq/6rrbUNr8xf7cIFZxigRJE+HA8oDN7Bk3wERCtXpSCeyunSo9Cmo
-# /dg31vjTcZo5zjSNx98ZHTxcQZ95b2uEEpckBuUP5gsQCkufeKmVAzx/hNiJ4D1u
-# CTUNyradv1ix2geQJMMVFovmAPzOvg0cfwdtTwonnJD/HpV9VAK1JMA5SyUfYdq3
-# 8Y7FHlCdG8SGzLuXn1MCApJboaih3cODGuoOuG2+phdDrveAN7Xve9SHRugQj//Z
-# 9i4Ls0Mmr7jehShw85A+9U5cfCGt2wJ8Nie9/e/obaKRxJWLt+a2hainbC0/tpro
-# DV6SggKbKrSKP0VLAaTR1YpglBD4PR23msPnkcqR4Plm3MBMAjd6GeEoRsuJyeL0
-# M9OR+KnDO/x9UvynebRUhlH/9op3BUL8TwhPeUJd8Ok5lgWI5HXhQkdAB2AEv9JJ
-# d9BP2Pv9ng==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDA3
+# MDdaMC8GCSqGSIb3DQEJBDEiBCDj7mPg7EgRrs2YVuOaWgh8qrqdp8pmWADleovi
+# HKLWdjANBgkqhkiG9w0BAQEFAASCAgB7ATtbG1HoVhEDNt6tbbZXt34a3fpD/ddg
+# UDv5hnF4X18slo7ytnXLL0r1IBe3gc0HLtiqDtZ+X8z3echmaZpV8sCiaX/wvdaw
+# TngIInYmznvP9J7TESbTcOWAzQLpMK0MTSXVGhpAJxw0na9gX7v6gvZoRMFvWCq6
+# Syq2ssL2l5bka6B9bxYdBHIosTcaLnWyxlR97EnvijqiBu2FDtowqfEKtAT7J+0I
+# RykrwdC0sf1IqRo1NeQSvr6uYGNrYf6ggHjYQL5y2H2XPyrPrICrCi8wi47vZx4v
+# hCh8LXw/4ca/nrsmH1jd8usASBB1wHFGGQR4dbx/zDAlw1pxgfdLl3h1HP94cjpp
+# TAAIyVqnMQu6FHMOAIjX2V09H5koTfdJYRXHzFgUwJBL4rmJH8qsjWKIXmMifePY
+# XjXtmzenNy6GUFu6NneIN32RSG08jGMeniQh4hrFWbRPvp+H7uRkSuY/jZTtymEJ
+# ZBnwCKAhiFMXEMAqJz/2w+hW6qewHV3tBxdpaMNGMAxbLbqT0I9El0kg76YsbC3H
+# t49N869oBEFoKpoUCFj90a8pDP+YE87sJgndzwUhcZKROZi4Xm/JziWQI6xokcm0
+# +sFcHocJMq3p7jkrPA4h135MXmPK2hrc99vkc3yCkoawYdz+eZztg4fi9q9G/n9P
+# 6KeSqDv81w==
 # SIG # End signature block

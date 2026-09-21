@@ -1,8 +1,8 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.15) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.17) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
-Version 1.5.15 standardizes every orchestrator mail subject as `[SMART 365] - [tenant] - [ Orchestrator] - ...` and guarantees that the common mail footer identifies the script and its version. Version 1.5.14 added an atomic distributed pipeline request consumed by the existing
+Version 1.5.17 ensures that collectors requiring explicit external-action opt-in receive `-EnableConfiguredExternalActions`, including an additive migration of existing central manifests that preserves operator arguments and scheduling overrides. Version 1.5.15 standardized every orchestrator mail subject as `[SMART 365] - [tenant] - [ Orchestrator] - ...` and guaranteed that the common mail footer identifies the script and its version. Version 1.5.14 added an atomic distributed pipeline request consumed by the existing
 resident orchestrators. A `Full` request selects every enabled non-manual job from
 the effective shared manifest, includes dependency closure, preserves election,
 claims, locks, dependencies and concurrency, and reports one shared batch status.
