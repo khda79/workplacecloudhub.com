@@ -34,8 +34,12 @@
 
 .PARAMETER RunStatePagePauseMilliseconds
     Delay between Graph pages in milliseconds. Default: 500. Retry/backoff still handles throttling.
+.PARAMETER ManagedDevicePageSize
+    Number of managed devices requested per Graph page. Default: 500. A smaller page limits throttle pressure.
+.PARAMETER ManagedDevicePagePauseMilliseconds
+    Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.4
+2.5
 
 
 
@@ -45,7 +49,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.4
+    Version : 2.5
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -66,6 +70,12 @@ param(
 
     [ValidateRange(0, 5000)]
     [int]$RunStatePagePauseMilliseconds = 500,
+
+    [ValidateRange(1, 1000)]
+    [int]$ManagedDevicePageSize = 500,
+
+    [ValidateRange(0, 5000)]
+    [int]$ManagedDevicePagePauseMilliseconds = 500,
 
     [int]$MaxItems = 0
 )
@@ -385,11 +395,11 @@ try {
 # ==========================================================
 
 # Throttle-aware retry settings
-$MaxRetries        = 5
+$MaxRetries        = 8
 $BaseDelaySeconds  = 2
 
 # Graph API settings - hardwareInformation fields that are actually populated
-$BulkEndpoint = '/beta/deviceManagement/managedDevices?$select=id,deviceName,azureADDeviceId,userPrincipalName,managementState,complianceState,lastSyncDateTime,hardwareInformation&$top=999'
+$BulkEndpoint = "/beta/deviceManagement/managedDevices?`$select=id,deviceName,azureADDeviceId,userPrincipalName,managementState,complianceState,lastSyncDateTime,hardwareInformation&`$top=$ManagedDevicePageSize"
 
 # ==========================================================
 # Helpers
@@ -404,7 +414,7 @@ function Invoke-GraphSafe {
     param(
         [Parameter(Mandatory)][string]$Uri,
         [string]$Method = 'GET',
-        [int]$MaxRetries = 5,
+        [int]$MaxRetries = 8,
         [int]$BaseDelaySeconds = 2
     )
 
@@ -455,6 +465,21 @@ function Invoke-GraphSafe {
     }
 }
 
+function Test-GraphResponseProperty {
+    param([AllowNull()][object]$Response,[Parameter(Mandatory)][string]$Name)
+    if($null-eq$Response){return $false}
+    if($Response -is [System.Collections.IDictionary]){return $Response.Contains($Name)}
+    return $null -ne $Response.PSObject.Properties[$Name]
+}
+function Get-GraphResponsePropertyValue {
+    param([AllowNull()][object]$Response,[Parameter(Mandatory)][string]$Name)
+    if($null-eq$Response){return $null}
+    if($Response -is [System.Collections.IDictionary]){return $Response[$Name]}
+    $property=$Response.PSObject.Properties[$Name]
+    if($property){return $property.Value}
+    return $null
+}
+
 function Get-PlatformScriptRunStates {
     <#
     .SYNOPSIS
@@ -477,10 +502,11 @@ function Get-PlatformScriptRunStates {
         if (-not $visitedRunStateUris.Add([string]$uri)) { throw 'Platform Script run-state pagination returned a repeated @odata.nextLink; collection is incomplete.' }
         $response = Invoke-GraphSafe -Uri $uri -MaxRetries $MaxRetries -BaseDelaySeconds $BaseDelaySeconds
         $pageCount++
-        if ($null -eq $response -or $null -eq $response.PSObject.Properties['value']) { throw "Platform Script run-state page $pageCount returned an invalid Graph collection response without a value property." }
+        if (-not (Test-GraphResponseProperty -Response $response -Name 'value')) { throw "Platform Script run-state page $pageCount returned an invalid Graph collection response without a value property." }
 
-        if ($response.value) {
-            foreach ($runState in $response.value) {
+        $runStates = Get-GraphResponsePropertyValue -Response $response -Name 'value'
+        if ($runStates) {
+            foreach ($runState in $runStates) {
                 $deviceId = $null
                 if ($runState.managedDevice -and $runState.managedDevice.id) {
                     $deviceId = $runState.managedDevice.id
@@ -495,7 +521,7 @@ function Get-PlatformScriptRunStates {
             }
         }
 
-        $uri = $response.'@odata.nextLink'
+        $uri = Get-GraphResponsePropertyValue -Response $response -Name '@odata.nextLink'
         if ($uri) {
             if (($pageCount % 25) -eq 0) {
                 WriteLog -Message ("Paging deviceRunStates... Pages={0}; devices={1}" -f $pageCount, $map.Count) "INFO"
@@ -553,7 +579,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.4"
+$ScriptVersion = "2.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -647,18 +673,20 @@ try {
         if (-not $visitedDeviceUris.Add([string]$uri)) { throw 'Managed-device pagination returned a repeated @odata.nextLink; collection is incomplete.' }
         $devicePageNumber++
         $response = Invoke-GraphSafe -Uri $uri -MaxRetries $MaxRetries -BaseDelaySeconds $BaseDelaySeconds
-        if ($null -eq $response -or $null -eq $response.PSObject.Properties['value']) { throw "Managed-device page $devicePageNumber returned an invalid Graph collection response without a value property." }
-        if ($response.value) {
-            $allDevices.AddRange([PSObject[]]$response.value)
+        if (-not (Test-GraphResponseProperty -Response $response -Name 'value')) { throw "Managed-device page $devicePageNumber returned an invalid Graph collection response without a value property." }
+        $managedDevices = Get-GraphResponsePropertyValue -Response $response -Name 'value'
+        if ($managedDevices) {
+            $allDevices.AddRange([PSObject[]]$managedDevices)
             if ($MaxItems -gt 0 -and $allDevices.Count -ge $MaxItems) {
                 while ($allDevices.Count -gt $MaxItems) { $allDevices.RemoveAt($allDevices.Count - 1) }
                 WriteLog -Message ("MaxItems enabled: restricted managed devices to {0}." -f $allDevices.Count) "WARNING"
                 break
             }
         }
-        $uri = $response.'@odata.nextLink'
+        $uri = Get-GraphResponsePropertyValue -Response $response -Name '@odata.nextLink'
         if ($uri) {
             WriteLog -Message ("Paging... Total devices so far: {0}" -f $allDevices.Count) "INFO"
+            if ($ManagedDevicePagePauseMilliseconds -gt 0) { Start-Sleep -Milliseconds $ManagedDevicePagePauseMilliseconds }
         }
     }
 
@@ -824,8 +852,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeqyXdyPTOhy7b
-# 2nAj3aWkhYghCd5SqtgZbStf15o98aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCundeJNS2kz4xc
+# 8FJGjULtsnMt5keHbycIGPhYi4/Hc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -958,31 +986,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAiDPORYMk6+lcpbHOspFXO332D5RJo1Drs7hHp0Ky/bMA0GCSqG
-# SIb3DQEBAQUABIIBgKkYuVEFsqb004VzU7Wyfj9BDrCpMqi/dLp2Zhk3SoZdBrKR
-# Fa7xGRPqgROz8G8+wsT18WchIgRoeTkgTnT2EeztyH6B9FkfJ+3gEFFsSP4UnC0h
-# fiVkCnD9vvrlcfWCzgG0RSfQxSDaBmF6iZV3FGiryJFAXek/fYfv++aRYMVo/Yjo
-# f5yfaG0jwWF3QzBpgcE+RnmNnfj11XwMP17xWAzHjyKiGs+dCA1V6CIM/XglIF9a
-# bQ57PDQd0t3YjO+TiJt+FFaqULCc1shh79WeqtZFJyTlmXjZbWfRZ/CfeIful2Yc
-# M21I14by5v4Q87rNxXiZhrzxQQuDHdsmojJeeSDoeoAumMnn9CjpDnfi8+VrR6pi
-# p/PRVP4UHWG6mDuE32NHZOkaIdXOiR+kCNrkbAvqvyaDC1HhY3eRR1kToG6UAurA
-# yMITbVgqeL8JPT3ruOm9+d6nU7VB4cCW/xqMvG7UY2U+Sb1MQg1qWKsBzqLj09fU
-# hRLOgyAQ52sOy3h9+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJRy77nPvb3gwQ9uSU5U5qU8+2WOqQX8Uhf/MELNthrkMA0GCSqG
+# SIb3DQEBAQUABIIBgFM8UTQjCRlj/4B1DY8iIYKfHBP105iHCwzbyvmHqAZHcb9C
+# BSZQ7Jc1WnL0jwwZo8lWU08GyDUUe5fnI/FCZg65OUyjDPvBx76b8/qrgm9yy11D
+# yrNqX0qcnskCG/8hitS/B6EI9BbqowQgOB+3dlC92caGPflESom+WIYm6Zcbkd9s
+# 8+FBS3TSZQQHbIUHpNygS4YqzEwOjcMF6Z8JWWGsAdf1x05EXIz19Fu5XSZk7LbM
+# qt0lXwCzqyf4jdVVE9mrwSvRJZ/6UYQzADlI/lQsLwmyzNhpJ6zyLTFrsdOp3MeN
+# DtZn/bfk5f8Hv4DXXk+j0efzaqb21PIy2kJdI6TO/MpwYT+tG+oPbD9S7XWiZ+sp
+# hfW9egbEd6LvLYdD29Kceg8JeKCpZkRiIi3DRnkC0F7iCKS22Us8J8V1Ktv9WwvE
+# kgDJOM81Oe1FO7Y68cpsfed+frzgRaOolkZDk5QwYZqpCfOh0ZyvcMEcK2Iw8CA5
+# YUiZXKzKZVbfSn3iCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
-# NDNaMC8GCSqGSIb3DQEJBDEiBCAbpLYJzjRUekvxhOefQUqtw9LWUUr0XsrsV+zK
-# phQEAzANBgkqhkiG9w0BAQEFAASCAgAp8x0nl6JOeJQ6nO6MDDW4ZTe79ecBUiJ0
-# m3bXcsTlHap/uBzWhptDfkmA6hTcZP8ihWSqcA3NOyJp5HB39CQGqm4qv/IQcj/W
-# 7sw0Sgr2i1ypy1I59pFwivQ0lfc0dPISFXIg4wepus7M2dXlFSyJrUmt59rstu2k
-# bMCZ+sRJR0fN4f/QGVpki3YQEr/04vBjOjSX9TGzqdXaZ/GOZiO3qfJQ6/KakHzx
-# w+huBwyjmjfXCQyjt98cVyUsTtUYLxQU1vyaLqZ0csYq5P79VuAxWflIo+3hb2tp
-# uJiVlwv4JARAvIS2DEKOwbA9evWxZXkPPs1aLCi0vuL4rgIM22ryYTUi8PZ8syYJ
-# gFn0GGxrASyNMhOcSIN59jJ1zVqVmizwerLREyamuSfzp/IItoy2AkL9j/4o8fCE
-# I2GzUd4FmVe144TQzNwCgG4GG7akPegfx01so0BQgfIbdIWYS33Syj2cQGn9vAB0
-# cJ2JYLddIr7viudHWQ+BogC5QPuA6p8fq/FS5aWcTNpV0MdB3cWZqv4Dg8aSAOh6
-# KwM4aWuPowlkll9HNkysyATEYQepIxbs4pp+rmj4nGOxtmnDkGCYXAdpWIsEksS5
-# PFR7LHaadlMRXonOJqNEHXM4CaSGzlq+a8zNKkTLQhDI2BXUZoG75EfQmZXHB/ZZ
-# Ns/J6jYsng==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBNxp31kHmhMq2GHI3jLhmCqO8BPyjE89BdFBQu
+# Iq4LNTANBgkqhkiG9w0BAQEFAASCAgBL5nPh/wGswzbROrRTZa6bPUo5YByOTgJS
+# F4dTaaT1//NsoYoDZ/2z8voEX6V82sWbMPHAEPDdxmebT/yp0oi+jEb5m1Jnbc29
+# LUpUKwJ39CUKsAa+WR3iOUJ3Tk+7yBPEDxQPZ5NDSsR+b7vghIuyf+0bnn49Z9xz
+# Y3qESMrRv5tN3hGEzPd9L0jFWsqOP/tY/6buRII+xzqp1rvP97yvonqGAf/cvaIB
+# iTytAz1n5URv/B27h5qrzN6swnfz/ZTKABvuCYtTwfGczbrn11haW9k1nEKm+wa1
+# HYNzHJe7td40IE4oxo/HLvjjDxIbiTLTEVcEjRFDEeee9mmTjPvOjiqD0HokUQFa
+# kAQno/6L0wpy8rBPQifMc0PGDtQYcAeBb3B/06TPVgRR2s2dsu9oewjuOevk1R2e
+# vYjASMz7JvckSpzTYES5zXLz0eS/1OLVx7RZbIlxSSQGZKxy5c1DgWgYLGItswB8
+# JT7ofPAznLllDs8nnhqYFWHdsTkEOnJWqS8oZG5u+hcCn9/1+/hWzjj7sVJQFLGL
+# eQ5a1N/UudNZarU4NoayFrvjxifVrxAaP7xqbPqMlLu9nWq63zb02jteIRQDZkZt
+# pj9Uqh61Sss28WXV9xa+YyWPixfbAeT39YsVnxqTOwWUa3DZis5T0OQMvziZmgzS
+# 5ymosk0/og==
 # SIG # End signature block

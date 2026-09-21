@@ -158,6 +158,35 @@ try {
         $source=Get-Content -LiteralPath $path -Raw
         Assert-Offline ($source -notmatch 'Copy-Item\s+-LiteralPath\s+\$(dailyCsv|summaryCsv)') 'Mailbox daily or summary latest copy remains direct.'
     }
+    Test-OfflineCase 'Mailbox inventory summary sends at most once per local day' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
+        $definition=@(Get-FunctionText -Path $path -Names @('Invoke-SmartM365MailboxDailySummaryMail'))[0]
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definition))
+        $marker=Join-Path $testRoot 'mailbox-summary.sent'
+        try {
+            &$module { function script:WriteLog { param($Message,$Level) }; $script:SendCount=0 }
+            $first=&$module {param($p)Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $p -SendAction {$script:SendCount++}} $marker
+            $second=&$module {param($p)Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $p -SendAction {$script:SendCount++}} $marker
+            $count=&$module {$script:SendCount}
+            Assert-Offline ($first -and -not $second -and $count -eq 1) 'Mailbox summary was sent more than once on the same day.'
+            Assert-Offline ((Get-Content -LiteralPath $marker -Raw).Trim() -eq (Get-Date).ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)) 'Mailbox summary marker does not store the local send date.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Exchange warnings and alert mail subjects retain their operational contracts' {
+        $exchange=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1') -Raw
+        $mailbox=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1') -Raw
+        $winUpdate=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1') -Raw
+        $adHealth=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-HealthCheck.ps1') -Raw
+        $exchangeCompletionLine = '$completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { ''CompletedWithWarnings'' } else { ''Success'' }'
+        Assert-Offline ([regex]::Matches($exchange,[regex]::Escape($exchangeCompletionLine)).Count -eq 2) 'Exchange completion does not propagate collector warnings.'
+        Assert-Offline ($exchange -match '\$reportedWarningCount\s*=\s+\$exchangeReadinessWarningRows\.Count\s*\+\s*\$lowSpaceRows\.Count') 'Exchange readiness and capacity warnings are not included in completion reporting.'
+        $warningExitPattern = [regex]::Escape('$script:CompletionStatus = $completionStatus') + '[\s\S]{0,180}' + [regex]::Escape('exit 3')
+        Assert-Offline ([regex]::Matches($exchange,$warningExitPattern).Count -eq 2) 'Exchange warnings do not return the orchestrator warning exit code.'
+        Assert-Offline ($mailbox -match 'Invoke-SmartM365MailboxDailySummaryMail\s+-MarkerPath') 'Mailbox summary email is not protected by the daily guard.'
+        Assert-Offline (($winUpdate | Select-String -Pattern 'SMART365 - \[\$reportStatus\] WinUpdate Feature Update' -AllMatches).Matches.Count -eq 2) 'WinUpdate alert subject lacks the SMART365 prefix.'
+        Assert-Offline (($adHealth | Select-String -Pattern 'SMART365 - \[\$\(\$worst\.ToUpperInvariant\(\)\)\] Active Directory Health Check' -AllMatches).Matches.Count -eq 1) 'AD Health alert subject lacks the SMART365 prefix.'
+        Assert-Offline ($adHealth -match 'SMART365 - \[CRITICAL\] Active Directory Health Check failed') 'AD Health failure subject lacks the SMART365 prefix.'
+    }
     Test-OfflineCase 'Weekly CSV histories and manifests use atomic primitives' {
         $teams=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/M365Inventory/Teams/SmartM365-Teams-Inventory.ps1') -Raw
         $spo=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1') -Raw
@@ -186,8 +215,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD15iXTxmL+rEIy
-# cuyX50FbMjFLims2MUs0PiJVXIls5KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwxvEs07+WRZA3
+# nQtfcYq3omMNZyRktzTLzEugZyzrt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -320,31 +349,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGKZcF3413Qw7W+p7t4Oy86GmNzO7H0btLDg7ikIovrVMA0GCSqG
-# SIb3DQEBAQUABIIBgGrpODyDEmSzccOahzDEPgHRxODRW98c4KtryfPB9qQFOkPE
-# DgvWKrLkvg4+Fn3GUUzUDJlzWTbS7zuEfxCatd34NcoN+vpWA+00n+zgayNYLLBy
-# W8/HlsGm/hLXrjsbHnawsCPCQyDPgT0winiL+dUI+70RozAxnhVgRInsVfSbEbO+
-# BmG3Ww2B/0M1r4Z1FESCtPvjZX5KLOssxtLawMvPzQnQ77ae+/cGeyS5cny5fBo3
-# ygw/isQrWGhTar0jB9yyT7weYKvmjvluUvsbD6ytIQKQX/C5rhXMRVEnMvZ1rstw
-# Z3DLOKbiyKvo7VzzoyR6JEQ9LxqbQG/e57K6YpQQGNUmvzbz1ymlgEBocuTir1NF
-# 0/laKp/7ng3ToboVyNidFcLomUYHI+WmkXDa73ZY1VvDsmL5jWfhQeuDhVGN4WDn
-# ifns5GGQiKENY+FVVb5MzHqmZBz+P0atckO9T3d5uHLNMcJqK2l1iZz5s+UqOfaC
-# oORQpXtQn7UJl91NU6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILZ7fvJqnhA0Qu5pLH5j6pY9rlDnDM+7DFG9XedV/lceMA0GCSqG
+# SIb3DQEBAQUABIIBgKh06L6Xjp9PGa8RV/Jx1LZl76+DYDHBC4VcC4RlFBijO9wv
+# GFXm05mytTmKbVsjv+mNsIxi1HKmMdUh5mvEY1BTWgDZlyeTb3IZ+vebS62UpISi
+# +tovElibif62STFUfkqPEsc4p6Pu4pxhgdZP1++W3KjLLzUA/4FxU4H8Msf20fa5
+# G2Hj302lrIoI3re18DZNY+tRYawPy6qEiI+ByGe5edrNUHfnTXr3JKvIxdTLhRGc
+# N2CtosPumlSBM+b6sbYmvZQ5hfxTJMfUmJLj7utvaQlybAUrwm8s2O/1JuYmHe9s
+# 7uFsUTQIINICDj1/fA68iZR2ltDYCZ0HyX3cn/aHHOTKgEc1T7mNTkex0hcrKhCX
+# PZPrcIYx2CtZyGQ+RJJtwYytJl+9SgdQQbK+20ty0F0mIH/J7ReRlLzOOpv0IjDW
+# jkeWOL0tzwSc7Ot+03j5rQyT3aw79L+6qALfgCSzNrHpENY0KYkBJQ+0htKs2WPp
+# hUos3Q7aCb4fRAWreKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBwEeLtZ9YN+SqvCbU1d6kNZL/Bcz3U+RMR2ZD+
-# hDulBTANBgkqhkiG9w0BAQEFAASCAgCH2bcBSWn3sgwn0eDmg3LnE06oafgnnu5Y
-# juolQYgevvPzicpJtdcOW3kRTFl708W0ng1EBpKfdLE8iFmj5bGPw732gtr3R/eg
-# mEge2R5JAvlvPvVH9lc9d9lBG6zmiQz6h8wChac3NdGrdoz6o1KXfSSHt7xIZtem
-# 1awf5hPIFwG7QY0ahrCXVfbno7Hmqg5gi0/ZCchqf+G/tt2eEY/8BS82Nr7/1n26
-# Brgrv4qUz3aOvoW8aCTzzBlLfBwB7rm3UUBMGBDmFNIK1E0YexPjNH1WAvP1KQ+r
-# PzHZJwnK84B9GUupE8txJgpt/wrUkr72yFkPDYbA+Z0VBTaXxaBANfvJyvaRE6Ex
-# XBeGTJCS63VzPyiMH1LNBaIUEXXq75HgTIqGf5LhyoGKVce1MsimoQMX68yseiGr
-# RjWS4d57gg84NIVPKiOj87/TCD6E7XYGZTknZECN/ra5LZlYFK1mv99WjU3QvUIp
-# LMD8nZ+eQqciVYyW5YMVp908uWGD6MPNT5EQRQyWVFKpXFadlzLiGWLL+GywjwUd
-# V7vf90KnsEH3ufAE2+JK8Uxs1PjrXyNMb7lEh5r4gJmguzSt/UpX5hM5Y7AaLgSv
-# b7uAjP8w5BO6G644WFnGf36ul6CKTzBhFfWCkBBXskGyi3wFBtdlqRiy2rG+kb/e
-# R9vvwsbifw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDuAHOyT7bn4ql+VmVuXvFK5CLrLhZ//O2nfGhA
+# RwjAbjANBgkqhkiG9w0BAQEFAASCAgALmjggYSvwx6HxXZsCwtmhy7T/nKEqm3g1
+# xBgAvR8WGfxb3E2HuYvJTfSxIuwIQhNXb7H3lVv8LQzrLBErBAE1j2SvXXMZCEZr
+# X0qPbGRJkC6Xaj2MF5kdo1bg0L1BhSdNXzBWRq062qNYTZJN2xcANT8YSZKddqnb
+# R7nZXcz8FRvBxb4tbMAqRwDTr2HNVPoBJPgC4grvEu0XLz+CE317UroHLJtkFFxN
+# S3hflBj1dRFz5H6cxo26B+gflV2Vzc83HdoZObH1Pa+plncHPEYXoqnf36qYo3YM
+# iRxsTR8UmFpuJ7DqMIBSlpvod1fM47a2oT7AKoOmeZFyohTT54km260HnvcdO+0w
+# IQ/DC9Mo0z2KZHSvYTFJ2XqTe0rAWTJywiO6/HsBsyieoqmjbbGoX3MhyT9Il9v1
+# 2yWzzNk93YyyGw4t7urxLheA+7NEt4DQ7FVa1/uW1AfADVCAHq4VkVsHwEul5T8G
+# H77Ly3Dqcd2GQrewixfqpTzzXXkzpZWoJttC1HZ8AALK2x46zYRlS85DAcBHxDYe
+# /FoqmmtHAkMrLm5TsR0rm3wowFzfZxtRF0Hmp1GgoO7GTKoFJu8SkLdu32HmMFIZ
+# Ai90d/DHzsX+RJAxjYEBHaJmJ+csZuvglMpdeDBx1QIe2GvK53uxogJ/llRo2Vlo
+# SrOSPq/azw==
 # SIG # End signature block

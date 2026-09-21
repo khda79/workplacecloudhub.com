@@ -680,9 +680,11 @@ function Send-JobResultEmail {
         [AllowNull()][AllowEmptyString()][string]$LogPath
     )
 
-    $isFailure = $Status -ne 'Success'
+    $isWarning = $Status -eq 'CompletedWithWarnings'
+    $isFailure = $Status -notin @('Success', 'CompletedWithWarnings')
     $color = '#107C10'
-    if ($isFailure) { $color = '#D13438' }
+    if ($isWarning) { $color = '#FF8C00' }
+    elseif ($isFailure) { $color = '#D13438' }
     $rows = ''
     foreach ($key in $Details.Keys) {
         $rows += "<tr><td style='padding:3px 10px;border:1px solid #DDDDDD;'><b>{0}</b></td><td style='padding:3px 10px;border:1px solid #DDDDDD;'>{1}</td></tr>" -f (ConvertTo-HtmlText -Text $key), (ConvertTo-HtmlText -Text ([string]$Details[$key]))
@@ -695,8 +697,7 @@ $(Get-JobLogTailHtml -LogPath $LogPath)
 <p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $env:COMPUTERNAME) (tenant $(ConvertTo-HtmlText -Text $Tenant)).</p>
 </body></html>
 "@
-    $statusWord = 'succeeded'
-    if ($isFailure) { $statusWord = "failed ($Status)" }
+    $statusWord = if ($isWarning) { 'completed with warnings' } elseif ($isFailure) { "failed ($Status)" } else { 'succeeded' }
     $subject = "[SmartM365 Orchestrator][$Tenant] Job $JobName $statusWord"
     Send-OrchestratorMail -Subject $subject -HtmlBody $body -IsError:$isFailure | Out-Null
 }
@@ -3065,6 +3066,7 @@ function Complete-JobRun {
                 Write-OrchestratorLog -Message ("Job {0}: exit code could not be read; the run is treated as Failed." -f $JobName) -Level ERROR
             }
             elseif ([int]$ExitCode -eq 0) { $status = 'Success' }
+            elseif ([int]$ExitCode -eq 3) { $status = 'CompletedWithWarnings' }
             else { $status = 'Failed' }
         }
     }
@@ -3072,7 +3074,7 @@ function Complete-JobRun {
     $durationSec = [int][math]::Max(0, ($EndTime - [datetime]$RunInfo.StartTime).TotalSeconds)
     $attempt = [int]$RunInfo.Attempt
 
-    if ($status -eq 'Success') {
+    if ($status -in @('Success', 'CompletedWithWarnings')) {
         $evidence = Test-JobRunSuccessEvidence -JobName $JobName -LogPath ([string]$RunInfo.LogPath) -DurationSec $durationSec -ManifestJob $manifestJob
         if (-not $evidence.IsValid) {
             $status = 'Failed'
@@ -3083,7 +3085,7 @@ function Complete-JobRun {
     }
 
     $retryScheduled = $false
-    if ($status -ne 'Success' -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
+    if ($status -notin @('Success', 'CompletedWithWarnings') -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
         $notBefore = $EndTime.AddSeconds($manifestJob.RetryDelaySeconds)
         $state.PendingRetry = @{
             NotBefore = ConvertTo-StateTime -Value $notBefore
@@ -3135,8 +3137,7 @@ function Complete-JobRun {
     Invoke-OrchestratorSharePointUpload -LocalFilePath (Get-JobRunsCsvPath) -Reason 'job-runs CSV' -Force | Out-Null
     $exitText = 'n/a'
     if ($null -ne $ExitCode) { $exitText = [string]$ExitCode }
-    $level = 'INFO'
-    if ($status -ne 'Success') { $level = 'ERROR' }
+    $level = if ($status -eq 'CompletedWithWarnings') { 'WARN' } elseif ($status -ne 'Success') { 'ERROR' } else { 'INFO' }
     Write-OrchestratorLog -Message ("Job {0}: finished with status {1} (exit code {2}, duration {3}s, attempt {4})." -f $JobName, $status, $exitText, $durationSec, $attempt) -Level $level
     if ($retryScheduled) {
         Write-OrchestratorLog -Message ("Job {0}: retry {1}/{2} scheduled after {3}s." -f $JobName, ($attempt + 1), $manifestJob.MaxRetries, $manifestJob.RetryDelaySeconds) -Level WARN
@@ -3145,7 +3146,7 @@ function Complete-JobRun {
     $jobMailMode = $script:Settings.JobMailMode
     $shouldEmail = $false
     if ($jobMailMode -eq 'Always' -and -not $retryScheduled) { $shouldEmail = $true }
-    elseif ($jobMailMode -eq 'OnError' -and $status -ne 'Success' -and -not $retryScheduled) { $shouldEmail = $true }
+    elseif ($jobMailMode -eq 'OnError' -and $status -notin @('Success', 'CompletedWithWarnings') -and -not $retryScheduled) { $shouldEmail = $true }
     if ($shouldEmail) {
         $details = [ordered]@{
             'Job' = $JobName
@@ -4167,7 +4168,7 @@ function Get-OrchestratorJobRunStatistics {
     param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows)
 
     $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
-    $warningStatuses = @('Retried', 'Skipped')
+    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
     return [pscustomobject]@{
         Total = @($Rows).Count
         Success = @($Rows | Where-Object { $_.Status -eq 'Success' }).Count
@@ -4183,7 +4184,7 @@ function Get-OrchestratorJobSummaryRows {
     )
 
     $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
-    $warningStatuses = @('Retried', 'Skipped')
+    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
     $summaryRows = [System.Collections.Generic.List[object]]::new()
 
     foreach ($jobGroup in @($Rows7Days | Group-Object -Property JobName)) {
@@ -4229,7 +4230,7 @@ function New-OrchestratorJobRunsTableHtml {
         $color = '#1F2937'
         if ($row.Status -eq 'Success') { $color = '#107C10' }
         elseif ($row.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')) { $color = '#D13438' }
-        elseif ($row.Status -in @('Skipped', 'Retried')) { $color = '#FF8C00' }
+        elseif ($row.Status -in @('CompletedWithWarnings', 'Skipped', 'Retried')) { $color = '#FF8C00' }
 
         $tableRows += "<tr>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
@@ -5181,8 +5182,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2PSbu95N5SbsO
-# U3KGB1D6yFyNSV2CEnalSITOBfN2vKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcRoDVHyfegawu
+# oC54cvhJvcoXXEjhanyEbQRDQJryoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5315,31 +5316,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKFwCvFjS0WOtz0TWYs3cfg9ms1TL0YXtwHgoycDXskcMA0GCSqG
-# SIb3DQEBAQUABIIBgAAubYi1ZBukWRvDWQtOVG4NsHSG/4l/DshBdUX0UpE6JyDc
-# WNlzauzx2keMY8KHT/vNdEiTvMYT++gYW65lgL1mAXau90op7wNML1BjYUQeXTdP
-# 4KKSryCzRUdvoqwTMY/K2A8efsa7rRrMa4zpAN8y3dxqB44xURVpddrXLZxT2FXL
-# Usk5lgi5M41IFwCnhfCScLTmry0qslVGrWhQhOIFi1QlES7G7aV0fvVZOOeYlIsp
-# FhpPrLDJ2s/Jkbb/lxwDfp6HXu20dt/Y/EOTcHFfLlZc/wAOwNhZUBrkWRn7caQC
-# WMJPGO2zW+yfBeIbuFT+eiJ10rUopNvGe/3WkB983mQLtg++vlGhQOB/nnvGGQqr
-# WXdVjEDnLSv9TMDiXvTEXD+hMw+TtCZ/nIXPsMtlhfqnLe39DLmCzc97yrTAXObA
-# bX81ITcDkJX1tuO66BMgJS9j5PHpSuNqX7iwslQjUd+bTE/bdtVg4ZXq5xzkZN10
-# Oivuce1XOhsw1rMopaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJBt/NSCai1M5YtlLgAwtfhSrsJITd8ue7+Qovy4nmeHMA0GCSqG
+# SIb3DQEBAQUABIIBgEnFf3yFbIgdly/uRAjgjmok2P7iBEL+xrOJ5ZPlnjwLIlB5
+# j6TFjOKLaaEaLxOaG1Ys3RU9CdQ+iAIbr3TABLsedS+OBa3qYTG6nBT3YXBtli1r
+# noJPhI2VdwZzBzwRlcOTlvGy23bU5XQ1JDTCTMQb/nPPJavBnnZ3dbNgARESiEfK
+# 0L9TiTbIS93wj+B5LYJRk7aaf35ZoA9YNMpnY87p7xVxE14/WEHDmUO/sQx1eNvF
+# aOcueRw0URzjgTlEyJFb0N4l3HKZZplXogtxtAPdJ6/lx7Bs8w58DoV8ywASjdI8
+# q2ohP6TJJM4LCXl4DKvxPCDzHjxSJ8qmwn8apA9sVgnN8XovbwpC54o9/44BTUXx
+# R3FWD51PTWFDuAcvhzKGC0ONVSpTpVQqyrI5v9GcPoxMM25c2IW2bby9BaxxOSqc
+# sYSPo5L7zTUBaKKKSIKY8kbJZcnMsGw+YY7thS2YjQ6V8XDIoFbSzMxj0+PbrUCj
+# MlUt0lSZ8eyIjHwrN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjUy
-# MTlaMC8GCSqGSIb3DQEJBDEiBCC2EWMczpvo1DJ3kL+8TlMW/qf26lV2NsurM3jo
-# 8/zNqzANBgkqhkiG9w0BAQEFAASCAgB2PlF+WENgSW2ECs020gzLyx2d5z+J8ryt
-# x9TjN44cM82GEL/8EHH6v6/+VWLlR36el+PYFDSFU22Tt/cAHh55EEqlFSTfvX08
-# Rd4cg1Y80+6LEyTmaNTjnUBYWHHJsqkupYGokvhiJV4qvlrSQkuklpLdmPPKqcnq
-# vyLahjGFTMPtKH+BfugNsl0cfhuC659vWVw8NcNXefo21oiqcvHdYLirceBbTOUD
-# 6CeOCMppnm+xEonBVXpXKZpSEUsF1OAAniEiQgXAtok3ku2EYZi4kpy9L6zrCGLY
-# PaDPtG8xm/RXCWnBZoS0XRTu95Kgl7bqkCdeTQChe903XCzU1rcAFIYBltmQorM/
-# ahjfdF5QPG2ZaFKPNqYvLv9gELzqoJR9xfMjn/TocCdBwGydBgyifDImHE2VYHwd
-# c5G3cX331zy+6TI2tx2yukI42AZsqbWTH49deq48D4bvQDU5AAu1TspmfpPEKj/Q
-# /XQIVA3xIqFw1isVCEfbjvzkEW7dbbZk4PuON+MsFrKj4Vytf5N4WFoi4q+lVDAW
-# uT+hmLYKyIpU9iltz3kxGgJ0Rg/fvRkEs80ScpXiaNvbsLbVJirSPduelMD3ONSj
-# nbn3YvAHoNw1VyvtpQQ92L0a8tgNjv+np6LEAWhXSpy8Jo0rloV6TT5wOe3HzKO4
-# QF5t9nFUvA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDU3
+# MzVaMC8GCSqGSIb3DQEJBDEiBCD+q+PNoGRt/kqknqeJ9po4VoyKe/HTc+f7tWEx
+# hO3aKjANBgkqhkiG9w0BAQEFAASCAgAbZeQ7VKibDfmIpLIFy+s8AHkqYk2his5n
+# ++Z94YnErhi8dnmYeywZcNqhCi3vo6M0VAbJJosi5bRx1bxlFxSbyYcxnm4+4IWe
+# T8pDpwKOjzndb4UYLgx7y/Dwu6NiKRD4quNPZ3W/dJ5IVfO1e4FKJ2RBCZ9t8lVE
+# pPzMDILYrx+32oWFh92vn78eLig6Mc566BHlG3QQAquS7FtwZ37vDpg61z0xBshj
+# jGgfQcSH0QiodNI+/BrCNNIzOA4t72muyNRDFRh9Vh47mbbfOxhrynI3IABZKInY
+# CzE0OYX6K54hfWTEEbPl3rmWSeG3gEqy/K5UClpVBDr0GWnW1zHlTa+OEpj7drz8
+# fCyZFXgSGK3GXhDPqPwdByVIRdTELjSkkkKq/tKuVVnyvrmdOmqnrzRnsIxmOdln
+# ZS5qZ9Uaa+dDKdO8TWZ1LQIulkEr7BrwQQf6YwX7DS1DTvp7t7HEF4Dl2WK0fszE
+# Q0/o0Ftos68AeEhje4aXLPzTcKm2JMsa8RdR2x/xTYQqXNBMqh1sgSvmYyz/TiRV
+# 3AGsgzdqggt+KMk1UnjEH289d0M3Y3L1RTI4Fb/1R6UTNVTu1bntrt0XGBFN257p
+# tPrzfxbGdrmngMSltDyF1CeFRq3sVyPMHPBWE8FwL5IZ5tu3oKMuhXu7uqI5Ixx6
+# S33reoAwLQ==
 # SIG # End signature block

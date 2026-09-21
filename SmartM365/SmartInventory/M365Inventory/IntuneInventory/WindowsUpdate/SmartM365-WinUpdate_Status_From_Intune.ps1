@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.32
+  1.33
 .VERSION
-1.32
+1.33
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.32"
+$ScriptVersion = "1.33"
 
 # ==========================================================
 # App-only authentication parameters
@@ -2057,7 +2057,7 @@ try {
         $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
         $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
         if ($coverageAvailable) {
-            $subject = "[$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
+            $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
             $fleetCoverageSection = @"
 <h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Fleet OS coverage - $(Html-Encode $fleetTargetLabel)+</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Minimum build: $($primaryCoveragePolicy.TargetBuild) | OS coverage uses the current OSVersion, independently of the Intune policy workflow state.</p>
@@ -2072,7 +2072,7 @@ try {
 <p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Coverage among devices with a known OS version: $fleetKnownOsCoveragePct%. Intune policy completion remains visible as a secondary workflow metric.</p>
 "@
         } else {
-            $subject = "[$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
+            $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
             $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
         }
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
@@ -2178,8 +2178,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB4HelNWau8kFR
-# 3+fCkNXlEcf6nNnP0fCb8xPlH+GvlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjeAMlivXFD6ek
+# Yxz8KmCPnCKcV5e2oztaW2eY2LpXKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2312,31 +2312,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINAl6ndyEbilUyR+e0xmSuRMudEec1+0dZkgbeh0JdW/MA0GCSqG
-# SIb3DQEBAQUABIIBgJXZG2EOnvMahitCW4LtCzqSHcPI63NJLajZff1a9utq4+f3
-# U0oqt+4BHqVQwyAsMCS+RwYwEdWSWFFQhIcfsxhxA1CkhzhHr7Gjo4RqQ6E1VkL4
-# woqaoHaeyqqR14HnCGgg2JGwNE1+e9D6NzW2nQHVjZETiVLvR8aN3UpAqC23Rzvc
-# 8EdEgmYzdsXLqi7OGAsu/SL5K/3hsz0hwNsea3aYgvlXtpOnKXdgJOHohQ5asnpB
-# s3HVYCs+YVNUOApdIaxYB3PWtsyF1fR8EZbTz6dAUXDcPWgjLEgkXs9x1JYj+15/
-# cJSX3EKIzIjw/Pid1jBlTRAUW9o2ZgIdZJkGVyP1SQy1VWbB/R6C3l5FfZt3Ssyn
-# JM52dAUSZssn/38wDgGZb3DUsmCZBlmOuo+31M+q+WVzWanqP71ZCrYx8eeuXC5b
-# E6NpdI1/u6n3dNbfH3dxzACHnPlGVcMFLWs3zM30IxENJ5R6re2WPRhsE9Kd6omv
-# 08EKr70D/9afMihmvaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIq/HwX1LyK02jwVrZ53DY2mpZpleE6C9A6459EP+cveMA0GCSqG
+# SIb3DQEBAQUABIIBgCBehF9HX0tD+MBNFsRb1qaSP1zPWE4Yh0M85ZyiAkD2bi5n
+# bJEShl4hwM0OOVS60440Ha6MZz0IotqBykOf4+dSYuuQSPvt1H1Ew1GMsnXimD16
+# xoXQs0FLrnyetyf0zQtUw9CMHKf9EOQTe6KJJRYBqVbQ1Q1sG2KsrBxwQ+J+YWmg
+# Tfxhcn5S9Yd+pJIr76semLVlrxXItshIfBZUE5LQ7ScNY9Eq8t/2iGtAw4BB7J3j
+# 9B16uVAEpYdtwiSfY+kzWeAMOJ16hLfrb4fjsqdYNUXNxhJAu8wWDiqSSHpsY+/2
+# yIfggdutrwctn3wAvEZp5FSBqcciX179D+CSJQaDwFSJSFg4awrlWoE7L57R9VtL
+# BoY+YDSiRFbAyIuphil5RsDfWHZQRQLf+MYrk+bdCP2ryDPgXz3rKSKeHI0iJ5ig
+# BiWQ7/Ou1kFkR1MLyqdY5YE9KKeGudtm7WsxHKiipX0deTwO1hQv9FytzgX5Jf2D
+# QvnVoqIBlrtuxdm6YqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBihzcwpJSkMC/Jah9wjYrYwwAHYaaEosUIiwbK
-# Oj4UsDANBgkqhkiG9w0BAQEFAASCAgBaLxiTy4eFngYmFRmTCDV2vriw1rntlbsG
-# n3WsKrBm5HRr53/TDP13smuG0SliQKOkhVbDQlFQmBoEWhmWRSMfSSj7vJHuiFUD
-# Ma6+3eZi+LBoNgHZF24yzFJl9j9dXUASOGX9x6b/qYhddFfDIUeg13daF/Q4YSdq
-# KuZtfV/Y7APXJSRsM+kzIj8Fghw4MMwEs9+u7Ucs8twwZCLSOTIawiBP/nM/5gw9
-# 9zPiGAGIzIV07PVNbgOrcO1wrEMXm4ghRBl2vEQCj6A45rGs3mSR6pSoQTxzeNrq
-# 966PsEWly3L75G2+Bb1kzjqSxOildbofNYr0hbQ+fuD8VTGuzQ6MliySSejIPSdu
-# WdDlZwJ29VP0i1TKdyoemZnnEW+J710hQYXOva1sLzSVx5K7kMVdv4stHjwkNY0x
-# CzZqQqtkc2hmxIznmPle4XMsPlD3kBQglLyPb0yuLKYCfcI7BjrTyXpMZa4vKeVv
-# 3MQWi6k0rxb6iX3RkSRWS4pDdlJf60CQAd6LVU7En7d9lahJ2/sikS4JBvzGjURP
-# uflYMM+SHDvbIyxEsDx6c1LGCJz3SYTWxYFNySd8wq1d1BY1OT8gtJFs1MY7PFWg
-# lp6Y5ouEFUagwgOmPKPsvEuslECk0Jqp80YYwOG6NiRGZORXYg2SVXgMcdKADqNB
-# CzauAtLT3w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzRaMC8GCSqGSIb3DQEJBDEiBCAx3ZPzz6ihSask/GxNxyfOQeviXWWh6pLKgnpg
+# IPRzaDANBgkqhkiG9w0BAQEFAASCAgAKYrMaGAgqAzT3zvfd0ByX74GwtFVzum9u
+# iOENK7/AjLMX86+u7RdqQ/AiMG28vIeeQSc8ploBRbBSGknR/h0JwSqYtDob9C2V
+# oIQMIq1lnpzfBbqQa2gN/s598N0E21bCuzVh3Xl8pf1m43hGYX7hEzFw4WSqOZwx
+# 24+FgQNFmBfAE4iIThESgSjElODp5HlSF85c+wa453nNFGn9UfRge3C3qp1LhK4t
+# xdXyD/wh84ur6bAUKHrMgxAg8k7DYUbFsLpM1ghlnChOQy+AOciylXBH6VCfJalB
+# ouyGC8T+Lbzqkm7/ooc0sKjIyXD8eahOELdBXjAnzha2h563Ifa1gPeUyx9V6euf
+# Ko0FlHDL+EOTtoBglju7A35yddjVreL8ElUT8lYdiu9U/KX/diBhy0kLMsKf7suR
+# PIGfcFfP4VCFZBGYNlE4+PRQns0LdXIt3VdTlEvmlOfxedi/1PSk1fZMMg0XW2Kk
+# 5xyWxIdlijnV4NGTU+43hAg8J6deVWLMAEAAk4hzkqsb1tZthzYtBI3VL1kcOKj1
+# zbDQUheD7J4LTTcpg1+I9Pg/UenYkJriU99k3W6tcog23c1eQ0+ZWK0mZBeOtcDl
+# a4+buX6CzgZStiZyyh+m66VoFbOxjozHqjAeEYNp4TnM4i8XCeN0c9VbvzYD5PFr
+# 2c9naOk4hg==
 # SIG # End signature block

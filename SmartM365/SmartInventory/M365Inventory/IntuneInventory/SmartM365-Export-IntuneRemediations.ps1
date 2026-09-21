@@ -23,11 +23,11 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.8
+1.9
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.8
+    Version : 1.9
     Minimum application permissions: DeviceManagementScripts.Read.All, Group.Read.All
 #>
 
@@ -70,7 +70,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -370,6 +370,17 @@ function Get-ObjectValue {
     return $null
 }
 
+function Test-ObjectProperty {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $false }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject.Contains($Name) }
+    return $null -ne $InputObject.PSObject.Properties[$Name]
+}
+
 function Get-IntuneRemediationRetryDelaySeconds {
     param(
         [Parameter(Mandatory = $true)]$ErrorRecord,
@@ -439,7 +450,7 @@ function Invoke-GraphGetAllPages {
         }
         $pageNumber++
         $page = Invoke-GraphGet -Uri $nextUri
-        if ($null -eq $page -or $null -eq $page.PSObject.Properties['value']) {
+        if (-not (Test-ObjectProperty -InputObject $page -Name 'value')) {
             throw "Graph page $pageNumber returned an invalid collection response without a value property."
         }
         $value = Get-ObjectValue -InputObject $page -Name "value"
@@ -777,8 +788,8 @@ if ($script:SmartM365TranscriptStarted) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKdLFNq1Fts+ua
-# ntH6z0lgAFfaYsCKUoXCj2meMSAxNKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9ybN0L+Tr4sPz
+# 0PpiixdPdzTPq7BXgpoLf6cuJQYmdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -911,31 +922,31 @@ if ($script:SmartM365TranscriptStarted) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB4oKbyaZjM/nBHRxsa/pWJjanaun5cSEH6rv7eNTQrFMA0GCSqG
-# SIb3DQEBAQUABIIBgCKc5pD9w6uMr+v0UyXn4Ok1PW4gEyCeDLFIVrhbO6UMxoA0
-# RMhYmOOC/xsgLYDhmCYamwOGK5EK0WhVNiXaJbUViA85zNPBjqVK+tjLDFRtkTxh
-# GTMjs0Fq1nXLBM6BqoXpk4mFyEYCSqpe2bIQmT3/kpFnjeQ0rC7uCW4fM5pEcehh
-# mDax2sMA4F9Xa+qjU67+TrkniLfAzou4CqkOfoaRVZQMb7kWyC0cFqMnEK7gjS8h
-# Ctw3059uRNkw05/KrI63ty6G904GyM7mx7zeC3JFtrkCQJLN93xlCeQO1SuRvO++
-# +5DMOdESTdyFZIGLmVUm6VQMiw7Rx6kv2TL0OLgDWpddfIbt/GaD9ZB3mewU5n6D
-# Hg1W6lzaud3seej+GgI4p+C6wraBmMmc5SgjuVSK9p7I/EQzFjGTxY/0WEUeZbyf
-# miufghTSctzar/xglp81K4XJIc8VqvJGBtaf4xwr90955IlJ+Wn0JeopjN5W2vAk
-# YfjbsbAoTHKd+huBLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILkXDUdSMXga0UdbYxLkauAdZHGBpuALs/0tdaDky3MYMA0GCSqG
+# SIb3DQEBAQUABIIBgCY7r/nmJ9HfUPXenDKNMV1jRBHTeGVZ9Ga9FB0bm4N8gQ/T
+# Ux7vRgVYi653SgWCaVerbEQOCc7+X3ypvVverMo9/zICIstJllD5dbaJy70vAXKc
+# i1zYisU5CpdWsozDYCnLksOt4ct8gTd9nmfxLLnxVx4pnUYVixDw7fmvcJHjVOkV
+# gUAKiSBhAZSIDGsdPJDNBiJ6Qvm3cBeHOiJAWsPQLHGDh3ihcah7hm0oZQmRQQ3g
+# P+P/mebwP4l2WK0lUMvp+OOqEXxWADk1F6dh20W78VoJyf42N4TmjapDzLbRRKgq
+# fse6gSu511yHaV+8FfQodaQrAmu0wu2DxpkfBmNKl4rsQUZgdwxwjaBgEjzTiuRg
+# /4+kEoKt0NrehXyeNd4uD71upe71d+Bb9pwLdQQjngSg4QB2YpRk1li8VZoOdAX6
+# 5jlNe984+BUaUXvdbWYRSaUnm6ikOuaCDHY/+5MCa/3XznCG8f/RqgWLRh1aDRFz
+# wLVP+FdPyCfsJPrCcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODI2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAb4GONwUyaZqxGNbyWXdgngqjzd+uUXgPLALii
-# e6tq5zANBgkqhkiG9w0BAQEFAASCAgAMJuMbKadCxKPlJ1jprT74MuZ+LThg+mHa
-# kBzqlszBakYjpn8VD9TBpJ9KuuvQVJBWbpmN7F0XP/qO/PB2S6sv/8PXfw+cCPay
-# zxfcTIf5jWhanIYpIEnhEGbvIvpyYy+1e89a4i/VHLpXoj+H97dHsY15qA+O6G6C
-# sKZDvm6KfE8LY0W3x/24gvphjUGGwDYck3T7zMDKqPEMvcKlJEMM0+aT4OKXPqq7
-# kkLpmaQBKQW0THbcbVJzZIINd+huLl0oP9RrIKnt1Bn9FZi5pAqcGW0OYgoxq5mR
-# tP6rv4nSpaNfc22e4WuB4s9YAtecp5cDOu9XeN66QSXxcA3CZ5PhGaG5SxHki17h
-# A1rHKosOzFhlw3sI6M6yltEMdxVQSySRyfqZxrLLHPnqBhII2SOhjJwOFwtGSGBz
-# XTj2Z9MEaoE5vEj81Di4m8zKwDFseCA9L0xN7m41b5/QE2TXGOWO50b4LJw0V7FH
-# 1FcaXj9mYcd3Svc4nenK7WD9kFm0vhDKFkexIOR1H0AC37MLG3vOQZGmMspGDkSK
-# tyf+5GSxc9fxFuJ/sEQxsAW1X/7S1w2zmAbJjOSwnAQ3ivkdtmMhUooExDGJg1tE
-# hU8AdMkTVQYZN50EEmSSfkqeJLbdQqsCETLZyTL7WdCeaqXSuAkZyq6jqJxcPUy4
-# x3Jkg9z52Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzNaMC8GCSqGSIb3DQEJBDEiBCDrZXtXvAWfDj/Jn7kvEVSkRi5EwqbUQ0ZvLV75
+# 3LXnWjANBgkqhkiG9w0BAQEFAASCAgB0hS6HzmrrhpdjibmtEuXkPEmA4ooTUcTu
+# WepsPRAsnyskjK9NqiiUTXmGHoPtgO9c14oVDJhsVPvtW0UyMhA6VCl7VNmPfOjY
+# iISCzXYZIdFh7az9Qed3O7c7xEzwfuuRED3YAoGFQ3cm8NXL6hSZ9hJuZjVVXRGM
+# r+rE27g+TgDBDu9oN6kAdX0fjNid3BFaiFDGmoJbaJZnE40vPs+z8n43mfpTpYze
+# BY7/43SxMKHiSf5gbz6Ci9f0jjTfrgAHMGbh1n9KBXrF5qTUOaNFJZTJ8h4jL6Aa
+# KBeX/KTW7JgU6BlAnuUtKyYRcGWCoBGjlBgbYikJIx4nxV0DXddCY0civRAdlyZD
+# jAsY+J6BqGvXwLb0WStlolqQa6rga7+faHpppcDHDl2tajOG5QwBrYhHn6prs8w1
+# RHc2IYHP1sAXL8yoeFX1dy59gJqLqycxolD6ykAQRAb4L/wp94iu2FXfgxzpehyG
+# Ml/EGy1Dm4qZfSQt5WAJO0VExKP2DokIVuknJOGy/Q5sn6puTX6ABFiMuzpMtbce
+# wTcLOnQk5L9fTBMYceogtsSh1km5c8Xm7w6vozD8tqeNr9vfLmzRt1R/SkY4/Z4j
+# 4v7l5RA/2vdqRCHggwFMb/ojOMPG1rsYnzPTY6zvUvuruqZqwdSkBfJCAq3NJWBx
+# mydvatxpHw==
 # SIG # End signature block

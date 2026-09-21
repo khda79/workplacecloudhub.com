@@ -105,16 +105,24 @@ try {
     }
 
     Test-OfflineCase 'Remediations pager follows all pages' {
-        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Invoke-GraphGetAllPages')
+        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Test-ObjectProperty','Invoke-GraphGetAllPages')
         try{&$m {$script:n=0;function script:Invoke-GraphGet{param($Uri)$script:n++;if($script:n-eq1){[pscustomobject]@{value=@([pscustomobject]@{id=1});'@odata.nextLink'='p2'}}else{[pscustomobject]@{value=@([pscustomobject]@{id=2})}}}};$items=@(&$m {Invoke-GraphGetAllPages p1});Assert-Offline ($items.Count-eq2) 'Remediations did not return both pages.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Remediations pager rejects malformed page' {
-        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Invoke-GraphGetAllPages')
+        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Test-ObjectProperty','Invoke-GraphGetAllPages')
         try{&$m {function script:Invoke-GraphGet{[pscustomobject]@{unexpected=1}}};$caught=$false;try{&$m {Invoke-GraphGetAllPages p1}|Out-Null}catch{$caught=$_.Exception.Message-match'value'};Assert-Offline $caught 'Malformed remediation page was accepted.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Remediations pager rejects repeated nextLink' {
-        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Invoke-GraphGetAllPages')
+        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Test-ObjectProperty','Invoke-GraphGetAllPages')
         try{&$m {$script:n=0;function script:Invoke-GraphGet{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphGetAllPages p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Remediation cycle was not rejected.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Remediations pager accepts Hashtable Graph pages' {
+        $m=Import-OfflineFunctions $paths.Remediations @('Get-ObjectValue','Test-ObjectProperty','Invoke-GraphGetAllPages')
+        try{
+            &$m {$script:n=0;function script:Invoke-GraphGet{param($Uri)$script:n++;if($script:n-eq1){@{value=@([pscustomobject]@{id='synthetic-remediation-1'});'@odata.nextLink'='p2'}}else{@{value=@([pscustomobject]@{id='synthetic-remediation-2'})}}}}
+            $items=@(&$m {Invoke-GraphGetAllPages p1})
+            Assert-Offline ($items.Count-eq2) 'Hashtable Graph pages were rejected or truncated by Remediations.'
+        }finally{Remove-Module $m -Force}
     }
 
     Test-OfflineCase 'SharePoint pager rejects malformed page' {
@@ -169,6 +177,20 @@ try {
     Test-OfflineCase 'Device System retries transient HTTP 500 and honors Retry-After' {
         $m=Import-OfflineFunctions $paths.DeviceSystem @('Invoke-GraphSafe')
         try{&$m {$script:n=0;$script:slept=0;function script:Start-Sleep{param($Seconds)$script:slept=$Seconds};function script:WriteLog{param($Message,$Level)};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-eq1){$e=[Exception]::new('synthetic 500');$e.Data['StatusCode']=500;$e.Data['Retry-After']=5;throw $e};[pscustomobject]@{value=@()}}};$null=&$m {Invoke-GraphSafe -Uri p1 -MaxRetries 2};$state=&$m {[pscustomobject]@{Calls=$script:n;Slept=$script:slept}};Assert-Offline ($state.Calls-eq2-and$state.Slept-eq5) 'Device System retry did not honor Retry-After.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Device System accepts Hashtable run-state pages and uses bounded pacing defaults' {
+        $m=Import-OfflineFunctions $paths.DeviceSystem @('Test-GraphResponseProperty','Get-GraphResponsePropertyValue','Get-PlatformScriptRunStates')
+        try{
+            &$m {
+                $script:RunStatePageSize=500;$script:RunStatePagePauseMilliseconds=0;$script:n=0
+                function script:WriteLog{param($Message,$Level)}
+                function script:Invoke-GraphSafe{param($Uri,$MaxRetries,$BaseDelaySeconds)$script:n++;if($script:n-eq1){@{value=@([pscustomobject]@{managedDevice=[pscustomobject]@{id='synthetic-device-1'};resultMessage='SecureBoot:True';lastStateUpdateDateTime='2026-01-01T00:00:00Z'});'@odata.nextLink'='p2'}}else{@{value=@([pscustomobject]@{managedDevice=[pscustomobject]@{id='synthetic-device-2'};resultMessage='SecureBoot:False';lastStateUpdateDateTime='2026-01-01T00:00:00Z'})}}}
+            }
+            $result=&$m {Get-PlatformScriptRunStates -ScriptId 'synthetic-script'}
+            Assert-Offline ($result.Count-eq2) 'Device System rejected or truncated Hashtable run-state pages.'
+            $source=Get-OfflineSourceText $paths.DeviceSystem
+            Assert-Offline ($source -match '\$ManagedDevicePageSize\s*=\s*500' -and $source -match '\$ManagedDevicePagePauseMilliseconds\s*=\s*500' -and $source -match '\$MaxRetries\s*=\s*8') 'Device System bounded throttle settings are missing.'
+        }finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'SharePoint retries transient HTTP 409 and honors Retry-After' {
         $m=Import-OfflineFunctions $paths.SharePoint @('Invoke-SpoWithRetry')
@@ -247,8 +269,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCp/ZG6unsy6lcm
-# T41+4V/bWgLI5hghy9nqZWFNCq6+3qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWQN+FLgVK0q0U
+# mrL8S2u0oQmy171xFvlJJ8MrOtTGRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -381,31 +403,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFj9oq0TnaI03LDsZWzJAsZIhk5cks1C9puhgtp8UJh8MA0GCSqG
-# SIb3DQEBAQUABIIBgGim+67LRnN5dGjWDkocvSzVAe7Cf2FxJGD2jk69laqSDo/W
-# BgrozAX8+awZ+b7AjAKIPjbO4F7Bhn4Xq0tfKaSrbq1Ek6ILbLPMzVjupjXoLhcs
-# rKesPhdQE9U0CEl0dCYb4C7IYpPYyd/327KHRj0xjTEGPAQYs05wQkmzRxlI0th8
-# QVbyPgGMeVv/YFJgbMx/QQrxAYLx4foxFtE0Xjiy4zqa/SQmos00rCcNPPOeMNO3
-# FmS5fKOPsSbHmj0N344G5ennSNbbvmK8gTAk0Wi8laMPXWSqDFOdNx5pJN6acJuy
-# WC/Sbr47BXCmQP4YBUMPS0/u1lmDpFcqzIX8kDsHNM6fmJt4Ym7khrvv6UUWlePr
-# wxRbvzWuJVnI5BVjUTit+9kYcBQCIz+MhHPrBgtH3ZuIFGopBL7Lybglu2J/VLDZ
-# yzAvXs5JFaJE5OEvlLogA92SsOWV1kcqbqdh2BnrbjKNZA17qSdOMCLoPcQMfKB7
-# HrGkfESNdt2P/ETrDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKwSWoNnKNJ31NKmXYG1t41C9pJN2RyzoNwV5BTzrz76MA0GCSqG
+# SIb3DQEBAQUABIIBgIkOk+wQrXDa94vEJRRz/X3uyJg1VVGbnlM/dEgO4PIHZGME
+# LEqB0r+J+C7Xr/yZsGrkejVFYXAghQUF1qAHWmnAFGx2gqIYMSoV2AhgxnN/cO/2
+# N9PuKcR3pxdrWuSAFphBWRXXJIXQ5q1Y/eSy1Jg8zZBj8J3lYES5qDOnZ+rP6zFq
+# pAM6ZAUx7EB4fM/S/kgKD4+n8eNMshmOvRd1CPsQZIBcuOqJBBKd9y8q3yMzzWb2
+# G4MJoguh9FzABotEPmlpW88RW+a+py4EMFDaUumvkvkwugfygbx7N0PpdZRDCrF/
+# lKU/KYp1o/l6lhgwkMUyd0XuQAP8CRO1OderuoUdVnzTMnhrAlBWcJHnegLw4E9R
+# udjq8gXxZZCTLm9gjk7i12ewSIxed+U1oyPLQlTzHWxH/JYyNqtCdAU30udvRtXP
+# v6kzuETBSmBQNAXpFpqCc708c7J8TJUN6NDxJffm/UDH+Fh95cHs3crbT5AIkelb
+# ulvwlS5P7/15V1Jg1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwNjU1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCCk1+NGkC2yYS3h3c5ZUjg9LaVxgk61yyo58FGQ
-# 4k2uJDANBgkqhkiG9w0BAQEFAASCAgABIxSYY42GVFT2ndBilFGSluoHkidDwxCN
-# 6A351h4s1azwPFEU9I9iVEPzeo4WHg2vEseTmuO/AmcdafWXsWfYdTFrjLJu9kgy
-# 3Ajn59vmw6G6qDmbocFl00qjaKfeoNsU2WVcPo6xniQNBToitrYCrqWkOyPxNGqD
-# xwVlEXRRcr8mSYaoIFEzdprqK+0B3yHbtIFLYxSnWg8I/mVVX2EQLSeO4dXYZlhm
-# wLXR05P5WlSq9zfX+lIPoONDM4Zg9PoaSIQ06FZ4JmLvn1sLrKXVzMj7oAj/5iXv
-# relOweRfc43qLu6ohkJcOmNmMcKE/PP8Xr0h5Gb/SrNP/V7sZkCbcN3DBYX6bb65
-# /STK4CLpcZt0JwsOiG64xQ9cGu5Ls3iW7sun8meArCNSn5eVUrdYfW8iK0fVRh5F
-# Im4962yKpZWE+RSNdkXAV3qEdTyuCPnuNBCDTT1aPScYJuBsknyNckc9Q3xp6FUi
-# DE4HSP8ZWMD4VOI5eP7gbGgakqrlXR7jPajKLG8y3ptN/wYQozh+EDPb++lEQUVL
-# KYBbk0PzY21azWkln4Fl6w05pSlgiOJdP+qGP5m5uvIfpyHIuFayHluL+W5JQIXs
-# 89i1eofqxpGXEYQQAp/xzAn4ci7FfIptMTiwijWJZDJXjhzbMuglj1qXhZJO+42n
-# Eqq87QOe7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzVaMC8GCSqGSIb3DQEJBDEiBCD7ZPCufDw+WxXL8tfr4cBpR9KEz0vG64Mmrl8z
+# rwxJtzANBgkqhkiG9w0BAQEFAASCAgA+X9eXqZWAGKDzFSoDQx+ZVIIL4GkQfK3g
+# S8iIhuTuqcQiOnPDuTgizwQtnTNY1a6bp3no02DslFvNUS/JYKzHE7wEKzRrUv0i
+# zDmnQ7udjvS1cSz1T1JuJ4lgBlVC4ZXMzUA4C5Mq5w+hP5irGmZh7V/IFRYvYUrw
+# BLGNzhOrAEP948vDGmcTKZLhkzMAf2aoZJpaDC9CixF33twWT4wUbyLYa7yvRgZD
+# gUxbwpv/mtvc0sneQPwjBZoUNmUSdplHxOazgGIbhBvDTFaPuEJOEUHp7PAn3a69
+# EiYIyyezcpxainhju7clhgOjQyJw6o2HST3UA3MAIiYxFJ/UAiidTSDYdzt+ReDb
+# QCG46g5vnN3mQCYPyNGlkwg7QOPtFYQOJh0jixDpwJ/GEVhYp3kVaufzcdn/DTNA
+# GndP0SOeUOw/QVrFi4YxCzlMq3eEQFAfuSN6uHzyDtk7LcIv2CyuPS/BsdAWWLj4
+# mPC/RS3K5Ng/MGYl7DHdZ95q5qLuROcka7W1jGMSO/yblC90L6rNoAXQfa8VIavA
+# f2M1ZZ/3qLauzIsSQwYWX4llx+mQnM8ku5HHkJccUM72CIAcrR884H6aj6qivUzK
+# lprzlBfXtyoVn4SjVxBfQEaOKb+mah6bUeny72A+qi1YmKRyMMlUscJuccAY2mb2
+# Ay8ATQgTLw==
 # SIG # End signature block

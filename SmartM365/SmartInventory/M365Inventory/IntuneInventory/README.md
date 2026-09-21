@@ -17,11 +17,18 @@ Intune-focused inventory and export scripts, grouped under `SmartInventory/M365I
 ## Graph paging and partial-result safeguards
 
 The consolidated Graph candidate updates only transport and publication safety in
-Discovered Apps 1.25, Device System 2.4, BIOS 1.12, Compliance 1.16, Upgrade
-Eligibility 1.20, RBAC 1.13, Remediations export 1.8, Windows Update status 1.32
+Discovered Apps 1.25, Device System 2.5, BIOS 1.12, Compliance 1.16, Upgrade
+Eligibility 1.20, RBAC 1.13, Remediations export 1.9, Windows Update status 1.33
 and Autopatch alerts 1.16. Manual collection pages must expose `value`, repeated
 `@odata.nextLink` values are rejected, and exhausted later-page failures return no
 partial collection.
+
+Device System 2.5 deliberately uses managed-device pages of 500 with a 500 ms
+inter-page pause and permits eight transient retries, each bounded by Graph's
+`Retry-After` value and the existing retry cap. This favors a longer collection
+over an incomplete publication. It does not change Graph permissions, CSV schemas,
+export names, or inventory interpretation; the existing `DeviceManagement*` read
+permissions remain sufficient.
 
 Compliance device summary and policy detail are separate completeness domains. A
 complete device list can still refresh `Intune_Devices_Compliance.csv`; if any

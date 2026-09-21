@@ -77,6 +77,8 @@ $teamsModule = Import-OfflineFunctions -Path $teamsPath -Names @(
     'IsoUtc',
     'Get-TeamsRetryDelay',
     'Invoke-Graph',
+    'Test-TeamsGraphProperty',
+    'Get-TeamsGraphPropertyValue',
     'Get-GraphCollection',
     'Invoke-TeamsGraphBatch',
     'Get-ReportRow',
@@ -89,6 +91,8 @@ function Reset-TeamsOfflineModule {
         'IsoUtc',
         'Get-TeamsRetryDelay',
         'Invoke-Graph',
+        'Test-TeamsGraphProperty',
+        'Get-TeamsGraphPropertyValue',
         'Get-GraphCollection',
         'Invoke-TeamsGraphBatch',
         'Get-ReportRow',
@@ -121,6 +125,23 @@ try {
         $items = @(& $teamsModule { Get-GraphCollection -Uri 'synthetic-page-1' -Operation 'fixture' })
         $requestCount = & $teamsModule { $script:PageRequestCount }
         Assert-Offline ($items.Count -eq 3 -and $requestCount -eq 2) 'Teams pagination did not return all three synthetic rows in two pages.'
+    }
+
+    Test-OfflineCase 'Teams collection accepts Hashtable Graph pages' {
+        Reset-TeamsOfflineModule
+        & $teamsModule {
+            $script:PageRequestCount = 0
+            function script:Invoke-Graph {
+                param($Uri, $Operation, $Headers)
+                $script:PageRequestCount++
+                if ($script:PageRequestCount -eq 1) {
+                    return @{ value = @([pscustomobject]@{ id = 'team-hash-1' }); '@odata.nextLink' = 'synthetic-hash-page-2' }
+                }
+                return @{ value = @([pscustomobject]@{ id = 'team-hash-2' }) }
+            }
+        }
+        $items = @(& $teamsModule { Get-GraphCollection -Uri 'synthetic-hash-page-1' -Operation 'fixture' })
+        Assert-Offline ($items.Count -eq 2) 'Teams rejected or truncated Hashtable Graph pages.'
     }
 
     Test-OfflineCase 'Teams malformed Graph page is rejected' {
@@ -405,8 +426,8 @@ if ($failed.Count -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCj3i2unSdYJYqT
-# uUW5iHT8yEpgquxG+SrePjOxWj/WgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBg86ZTIxDqScDT
+# y0XSvApz/Lz0T5P3FPG9smDoJikTVqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -539,31 +560,31 @@ if ($failed.Count -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII/MjqNLtzf7xBZDZdCbf+rdLVGKvfrEaqti17j6lUhNMA0GCSqG
-# SIb3DQEBAQUABIIBgGOOvwLAW4C/gbY9AvZySvFxLxcPjVMrKzvgF7qq8ifTZSvY
-# Jg5yGa63FyI2ktbtdmDWaUOePpCuTubWa57vqxq8CdFKxU1UDO43HLnrqdFY92L5
-# gH5GJsfgHrcvObqA6UJsLGJo4K5nNOfYMWi24wBJ5hgEMVbghMtch4v+CmtDT9gA
-# BaFDEZ647JmYAjceNwspmC7ZbDrW5tTp0HuaYTUDRrEYOtw9ao59hUefB5fjb3Sr
-# JZ3FITF1GtnQFZ19q4uPSiaQT8WCOKhetyWHMho7rfHpAHQGjcVh4eDHyGHrYP+d
-# qEfjLXuP8QaJIZIKRs19f8mwtM1j3GoTTo89LeAuuoXc0DEAL8QEzPhSYsqQhtB7
-# S3l2EqdBvGuz62aMmrwD7e06sYUNG9XZsFSbNAHRJNIErdhkOVXBB953hC5o3qed
-# 41DHxXSWi3pg9BmNqaC8tz4sI2ayxh8WaG5yNIway2PY3UgkIBAMaytWNWO+84Vq
-# 87VDxNMHu1AyXhGeiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMVEEMwO0dcNv3OeP7kvUgyibVFgxyruzDEeyF3+PzCpMA0GCSqG
+# SIb3DQEBAQUABIIBgBHBDKnZ4Rtq0SQrHTtnR2xXwIFAapFjZ6kRdLDp+U9v+YoI
+# 2QgxxpY7tSgiSYcLRp3TsfuU4Ms8B/4h4oRuO3mFKzKZ2CbqgMHLRaTdIgq2IBrm
+# ND5sDcm2re1eYflNSvmC1HP3iZiWiFT1i0Bv3mxS+3XoSLyOYgXskjF9K+eTwupm
+# 4oiQbDsdVHH0v00Swa0vPLvZ92dF8ALCJnDpbYOlEOHGPe38qkeZKEJq0CvltUQz
+# 5M2R8WUMfWWa0soHKjXatlES4i3xSSZCpXvQgPYfej/I144/B/BPLvEFCtPK2/yh
+# TQbHrbzMoJsYHEzPjdfNUB7qp31tqKKLWT5k7yP1CzmljZLRwLqlJzG03R9lzFv6
+# 5f7rV3T2HGj/zpQOnJGFAi/BKYK/LfWRJV6nXE/S9zJVR7MYbsNbO/R0X3OE2Pwp
+# rGgvg7uTErOgXP26MkoeLXypMOad8Qct3jvNYBqUA9ug/W9d7T6BadXCToTWOX/G
+# ztkuqmwc13qngggoqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTEwODMz
-# NDdaMC8GCSqGSIb3DQEJBDEiBCB+tUsx+2FcoBDj4i35tZyGvMoRT0LUBwgnkA7X
-# H7n1qjANBgkqhkiG9w0BAQEFAASCAgCHKv00/sjuEN5RFMHPK9Gd9QnhSu+MlGU2
-# u7d2uDqPyRebHGhwB0HKZ+nXLXB7hip5uZ7gsBE7DPSwuPbFtUORDxoq6Ps8POwD
-# ubIlDBjYKUoZBPCRDVniNNrjw/0/oGJH5lZcEF7/JmHn8byQh3HLsYeNtEK0V4ZA
-# DW/QedGvpkIYk/vB82aVD0u+n7y7xs19d3B+aUp9bkSlw59fQW3cHhH+sj9nMVPs
-# EGooWIeWxNr1k5FewERrmYzaXqol1qU7EpOt0FrVLot6iay+eAO5vmbOhruQuMwC
-# 4cSz3QXWwG5w3LY88ltQGmszwUe34bxlbWXNpmErHcucNe/lDgHGNtvi5Org/OuA
-# 41jfvNio1L9/FIBnZd62hc1YKTu040TSM7yNbjgS6xNLuKLF/8qeBKD89LvJ0YwM
-# sDN3Mp+LGnhc4WHXOZOy+LqSXxFXHyR1ZauYrFcfxPIgcDOXsiNgtomiImeas6gp
-# +sSfxLHMw7fJaTyh7P/T8aNnLOVbrw1bZTIH/juEKNIk7HyzpnIKfgREkriTjaF2
-# DAhgjbzEpSDp29yEhbje9Vze05nt9/DOqT+xwJ1wAnbS5Nz7ODns76upvtsi9gqi
-# P3u87iHmLl0LZUlziMPQnUEMTekSRF9HQlpjUyitB8cWLWrV2B9KP++KU+qps7nU
-# Kl+W8/xwvQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzdaMC8GCSqGSIb3DQEJBDEiBCA+sdUQJ2Oyg0vgFMi1bSTB/7EDvtqlNt59/35K
+# OpJu0jANBgkqhkiG9w0BAQEFAASCAgBGJANkhp2MHMo+nq6AcPwCD5CTU/eyb5e+
+# UqO3nK/1EE5BsqzTQwA8nWDQCVPbH0SS5/bgnI/fccVazLA2jThmaPu67sy934uk
+# fbMWkJGDZH8LwBds+tKW5u9CEOTgGtYnD2VecoMuVGcymyxOWE19VBT9nb1X8ZTq
+# NgpDXWvBsygDKIYGoiaAtv6ARXEpTAKUAeGfD19HackCSVoXzTqT0mZznQgOTe7Z
+# QokdmULgvyN7+3FHGSwXB9wemYzBognKeFaLMha8xqSGefPYCapgnRstoOBGV0nu
+# V+qa9cqHTYku8WEB/URpa3SIVrHPbf+lyBulShtg4J7xdLwfI9qfwwQTD5A+baYJ
+# XeMrtAfH3d0z+ZYSe7YExKntrtq8dWeWcOiTrewMC0F75aFAEQexxLcS1hvuNQlC
+# Oqydl8djYBJYsnviUvAq0PgmyDs9GqsbWtbCKGjhLRieyzv81jnecN8ZAPUbhJmL
+# mlsRfsCJD8tqvVgUIXxKwdlC3SHMTs1o8RudplZB0oPX7OvKaphyz+QXh47GGexS
+# aLlqZLYxpZOMLdxBw6caZTCQZ9p3orVM7KR7/FvggrWA17urBcOpxVjw78ZL6Ty1
+# pOqm+VIxxp0F7fBpt2khlizV9squ6FnZUMFnpo/hbyGWPFNHyK9tajW9OXeXYApy
+# MtRMLg7WeQ==
 # SIG # End signature block

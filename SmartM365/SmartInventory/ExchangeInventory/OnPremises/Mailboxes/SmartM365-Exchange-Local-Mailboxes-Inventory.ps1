@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.43
+1.44
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.43
+    Version: 1.44
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -257,7 +257,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.43"
+$ScriptVersion = "1.44"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -750,6 +750,47 @@ function Send-SmartM365OptionalEmailHtmlReport {
     }
 }
 
+function Invoke-SmartM365MailboxDailySummaryMail {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$MarkerPath,
+        [Parameter(Mandatory = $true)][scriptblock]$SendAction
+    )
+
+    $today = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    $markerParent = Split-Path -Path $MarkerPath -Parent
+    if (-not (Test-Path -LiteralPath $markerParent -PathType Container)) {
+        New-Item -Path $markerParent -ItemType Directory -Force | Out-Null
+    }
+    $lockPath = "$MarkerPath.lock"
+    $lockStream = $null
+    try {
+        try {
+            $lockStream = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        }
+        catch [IO.IOException] {
+            WriteLog -Message "Daily mailbox summary email is already being evaluated by another run: $lockPath" -Level 'INFO'
+            return $false
+        }
+
+        $lastSentDate = if (Test-Path -LiteralPath $MarkerPath -PathType Leaf) {
+            [string](Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction SilentlyContinue)
+        }
+        else { '' }
+        if ($lastSentDate.Trim() -eq $today) {
+            WriteLog -Message "Daily mailbox summary email already sent for $today; email skipped." -Level 'INFO'
+            return $false
+        }
+
+        $null = & $SendAction
+        [IO.File]::WriteAllText($MarkerPath, $today, [Text.UTF8Encoding]::new($false))
+        return $true
+    }
+    finally {
+        if ($null -ne $lockStream) { $lockStream.Dispose() }
+    }
+}
+
 function Join-ModulePath {
 param([Parameter(Mandatory)][string]$FileName)
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..')).Path
@@ -1184,7 +1225,10 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $remoteMailboxDataQualityWarnings = @($Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings)
     try {
         $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -Title ($TaskName + ' - Mailbox report')
-        Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
+        $mailMarkerPath = Join-Path $reportOutputPath 'SmartM365-ExchangeLocalMailboxSummary.sent'
+        Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $mailMarkerPath -SendAction {
+            Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
+        } | Out-Null
     }
     catch {
         WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'ERROR'
@@ -3140,8 +3184,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqg194hE5oIEf9
-# BvHmtOj3G6hH/UPUSUtpQ14YA5eA66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAy/anHIAms/Y9+
+# z+GXaNWUBPxYMAvIsU3Sbklfd8XKbaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3274,31 +3318,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFHjdG1Cimm3PPCH6p3GKh8s3Pu7vUL7TjkL4Lf12bmHMA0GCSqG
-# SIb3DQEBAQUABIIBgEleeLvzfJhWczs9xdCJMZIeRA1ugAXGzzt2LNXJ4e2Cz66+
-# HfdwZ1m2HShfwYxXmTAsOkOFc3MMDu8nZcF2SI+j9oOm4grLWxL+SQCcCp7QnrVg
-# ZtHc/E2Y4dOoePLQtREzkgZi9ytK+AwOMuaya80QIvO7zFRQmACmvi6o+TPnds2z
-# zDb43iYjOGzjvzR4Xsi8JpIgan1U+I2PSss/xnLC9vxTZZqVRZgFMn2zBDS00hkG
-# gs5y2U/96EsTrUQ46bonlv17AESOvqKOmdLVxd5zWaJcwOpqBjkQ8bubzTm9iN8P
-# BfMip7Qub0UaOIzqE4lODywVP6/5aqSn2Ev6zpmrl+YH+ZYlqcMGmHYYE3NWYtlc
-# mm1FljyXVOlYENPPXz1EQ5uncZ8cCzxUwrOiShq0nHDjqxdsycouWwbqVPOKPsMc
-# wWbx+oGYdJskcffEzREAoxGFWSDYGJgwRYqAl3znOJTR6DDrY53Q/NTgZFpAw0RA
-# hjjE7xD3F8OQJFzWcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAV0/mpF0THLqxkHp2iviRmPyQLW5iIGnRc+K9MwrAe/MA0GCSqG
+# SIb3DQEBAQUABIIBgE64jVRaVxhnIUiQHCp5HcHM+qu/HGQCuCI/P4ZrBqHKmLZ1
+# kZJdoSeuVBuAd4FMue5hNBlcIdB1S5VIvBe12MFM+Npe4u1XoYyFQMMrYgyOH9rN
+# xcUdDc2NjKH/OkRmCpuqJVWfPb5iJIcF0QYXTjAb85vuI0jRfkx6czVhfMtDELFk
+# AAEUgFvcnnVEyasw5AOy+48PwvC1tyFiJEkfDYpgGk5hFhPR1wFxcw61duol+pcc
+# fnBHIfUyJR1qQRSLmuX6P0UH78wloeXTipgoCBcZkaJN+stMCtuOGeVDmrxfmGB5
+# zIyFxn9TSt/ZN+3oaIxRekT+RF+HXQu6z2E2K0EAPDwL6bJCyNv6c3/J1zqEAOX3
+# IoPNUd0JsklDjbmxggF4kgcwc6WhYTQPNkbCNDqF19uYyt524zg0pKzVl9GMn4xa
+# 3Jvj1ND47CwwYmoGypib+EZKR3udLX19hYIES+tfDPnxpJUbjM3J6vvNPLYg5m20
+# AD35zMQfTtrQxWj+dKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjZaMC8GCSqGSIb3DQEJBDEiBCCNOW9enyoiHUtiCPMEROOnmPA356YueDYtmyQz
-# c7P+EzANBgkqhkiG9w0BAQEFAASCAgBOXExLcpZNhmEi5gicORdH7Gx8nK9aLB9h
-# yPSFW4xpocfxkpxUrBQJa+d+nJRA6/Vtfy9wPRf6uPzEhQcJF17qX0VQ1l/kdLHj
-# TBUNZLjrXkbtu9NJoyZ0pEOJgTopX1Pl8K67JeYu+iHklp7HVi4Cz8CkWwys+l/7
-# PVC8W62lHhlLz8MJxnQjWGuUXF/IPKspPPcqTTx/b9jH+zLDC63nqg6ohXMC1IEM
-# 9FkwJ7hgs33cgM1HW3OmVv+fqFB/+E4w1amh2lRUznfeA6YGvXaQr2nIIBq8kv4S
-# Q9BFjVU/w9hwXcQj1nZgiaNOfb/p93tvb32zGkM4+rVRQBBi5kbpXSin2xOm1aqP
-# Vya/LLoEoQW/RjLjN94GjcqGovQxh8cDAZ/CZ4XSxZVTbFNSN1JZv2oiPdWIdgBD
-# 1XUXuhtnU4dVAAegRxLfjjspB2fArtm3iaUPoPsYMmYQEuxRd76FYmC2Z3oJ+LQq
-# 1HdlD8+OXDkC9VwcRgubpFJNZHewCFDfKmKYdAQ67QR5dkWKpoiltksmOoy61srW
-# G2cs7K3JLCSAScv20TxFhlXRoxggWAiAuxxL9WrczFkSw6V/sL9JqXwgPVJVqSTN
-# Lh1kY40uHMkQVBx38Fis858wB6Qe/ALCB6GVRVDgwRUPhe7o31TvXZZxs6leMzAU
-# JWOA1cdE3A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCmYKIw10MWZ/zV+SwSkDxkN2NoMpUiVZl8Op71
+# LJn7CTANBgkqhkiG9w0BAQEFAASCAgCN2a9L4SF53sshnuHrL+Pyh8vw9cO6M+ta
+# 27thBXbJPVpcLO+zk+V7+GmLS2Hncpcz4YBbWmAr5uVlROEIbG4Fhb7T6n6E91Wx
+# k7eay8gkGaRQHxoe4lUBQEb/DsXQv9k9NUXxlsSuhYre2FMpCaXYkCpHLByidw18
+# lLoxK8wR40XSRVfDwP5VqpqPtejODHz/GI4z/IRNxk+/9cnZWdG7xM/rb0qc7JIy
+# nyRRMsBMYavl60NT/slcv8R58mJHUZ8AZb0sFTG2tj89xOJJrWxHAmLXmgeA61QE
+# cL2Z+kF2VrVu4hXPi4BQUD17ft9rVjRAS5zLVMVUzO1PYZcQjq1EpNYLozPj89L4
+# O71sj970ER4TbuHUXDJHSFU7lVQJPQPS+koV0wM96IoktloVC1rZ5Bo7MFQP67Ck
+# HqPDcx7GDtQIrQhmwT/+g+IqfWRuNHn2PVAfK3JPsshfB7WlB2MX7t+D7h7D26bv
+# 7M0B8cvzaLMbVYf+uQjRf2975VqtOniC+UI1N94pVNlLwzzCS0idogZ3GruFVBrm
+# TOfVOeRBZOmmeBIYDXdI8zQSj11Mp6mTx8BdwtryiXXv44drabgsdU5OXtXThJSk
+# x1W90bS9RUhK+zwVOEwPJU9Zg4i9P/3WAA34dr/gyoVdYLkzX8AoUizhpjf7RqS0
+# okVa+cb2Ow==
 # SIG # End signature block
