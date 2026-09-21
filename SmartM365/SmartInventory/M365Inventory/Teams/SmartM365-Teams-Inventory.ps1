@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.28
+0.29
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.28"
+$ScriptVersion="0.29"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -586,7 +586,7 @@ try{
  $teamArray=$TeamsRows.ToArray(); $memberArray=$MembersRows.ToArray(); $channelArray=$ChannelsRows.ToArray(); $guestArray=$GuestsRows.ToArray(); $alertArray=$Alerts.ToArray()
  $summary=@{TotalTeams=$teamArray.Count;ActiveTeams=@($teamArray|Where-Object{$_.IsArchived-ne'True' -and ([string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-or [double]$_.InactiveDays-le$InactiveDays)}).Count;InactiveTeams=@($teamArray|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-and [double]$_.InactiveDays-gt$InactiveDays}).Count;ArchivedTeams=@($teamArray|Where-Object{$_.IsArchived-eq'True'}).Count;PublicTeams=@($teamArray|Where-Object{$_.Visibility-eq'Public'}).Count;PrivateTeams=@($teamArray|Where-Object{$_.Visibility-eq'Private'}).Count;TeamsWithGuests=@($teamArray|Where-Object{[int]$_.GuestCount-gt 0}).Count;CriticalCount=@($alertArray|Where-Object Status -eq Critical).Count;WarningCount=@($alertArray|Where-Object Status -eq Warning).Count;MemberRows=$memberArray.Count;ChannelRows=$channelArray.Count;GuestRows=$guestArray.Count}
  $mailFileLinks=New-TeamsSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path)+@($workbookPath))
- $worst=WorstStatus $alertArray; $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $TenantName - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
+ $worst=WorstStatus $alertArray; $subject="SMART 365 - [$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $TenantName - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
  if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
  $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Write-Host "Teams inventory completed. Status=$worst; $result"; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'})
 }catch{ $err=$_; try{WriteLog -Message ("Teams inventory failed during {0}: {1}" -f $CurrentOperation,$err.Exception.Message) -Level ERROR}catch{$null=$_}; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; try{Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $err -FailureStage $CurrentOperation}catch{$null=$_}; throw }
@@ -594,8 +594,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNSBMko6eDJvnG
-# Fn17dFGtj4IR5U52fLdOz8D1YJ+UvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTR0Jgt2Mr5xuD
+# iB3nqs0HMVZb0S+RRj4j5JA01PTFkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -728,31 +728,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBWdeOfentkg6gKootp5DUziSBoOMSChdQ0c0kK4f84tMA0GCSqG
-# SIb3DQEBAQUABIIBgBloNknJIkALUBQXm4pCuoJUNh2WzyEVgKeUMt1X9XYm1g9Z
-# XPnszkOdmoblcpUAIn3V+mmzzaIZ4zoVrL2+/Sl4zvTdSekAB57smNCO3HL6NyWS
-# kJx2XsJ/z0Tn+Vw3GInu54Jvt2FkEOKu0xkFIxcMclGk0mdazKugTq8ovqSPF8PK
-# sawQclMA2+3cVKVnCts1SK6iGJtjiKjOibaj773f9nGoFnqt2C4QKjPgx+cQ6YsT
-# Hr9/XTZkGs8Qg0j8GbxskAfDNYG7W5/RJ5Nivtjg1AmLIJ9QWW06IDiFH+ATL90H
-# cX6kVmtF+HmlyJNht6dEv6HWrXKBAtwhsn51DXuMQ824FjMKZKS8hsI7fb/qHnjG
-# LpySeI9gBBz/tMVT+ZlK4ay7aiSW1D7EAQxE7u8jj+HMyECN3LRWpGf+YeDYcT1Q
-# gXDNhO8gSvT9LW9VW/biDzzgeGev5fvMkcJZ0yiouKKFq8MOPnVdFRWrXzakadax
-# v/o7I1Bp9p3JOjbsxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII58TUI+OQRCSCQ86IbvMewSMVX50yUivnryMUdEaTIoMA0GCSqG
+# SIb3DQEBAQUABIIBgHjHJLmLpldtl3MNvazlhWVAaWjrsMjwkJJxg5dqypxwLO/5
+# yHeGFxRj7B5JMWLFW434Qos5sZVvSs4JuAuW+M9M0SPvUYDGFoHmyPUdtZo4ZAxa
+# len/ztL//s6sDO8G12oxI/D27SB+nILMvp3C7H6gPSO7NlvaZ2NKYdDWoOKyNgKm
+# wTn6J6LVOiEr36Vb/l9zKOrtPlhHP1yJNQZIRvy08Yvwab+XOZKgWgYP6jb/4a5c
+# r+Bpfjd2AuDxgp7rAXLSV1hgoOQW4IclL/I9VFc4c9bhb/L0ffafD+lBD36SEuMl
+# Y8YvapFjL4OKV7hxwh/D/jmwUL9xZGX6/+Uefd5HA6Nz0j/Qk2u7d7bdBG1nbh/K
+# oBwU9UrJ62b9eUL4kczxQxeaWRsNJohTEDJQVIYlIzWOeX+OLyE7KefLC8P8E49U
+# OPT/8rfQhOb2wmrGxz37IySr7cKBWpcLWTU251kO8qqsjTf+7BnsLGdPsZfLPVcJ
+# 7DTnDrZ5gqe60IVMC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzRaMC8GCSqGSIb3DQEJBDEiBCAJuydp8apxwmZ24Bu2zqFe2yt+nK50R7GoHPdj
-# ywNOFjANBgkqhkiG9w0BAQEFAASCAgB+efKXIP5zSd5OT9XvRAYHOvhA3XPiAkKK
-# dMPCDGRqQxjuyDS7otjLl8ZqD4jh3UsLExl2LI2n7uv3lKlUdACzh/ii3aG7Tmru
-# LQLebap45CRbS8DsIViOvNhukwC8uaOm+NhCJhsxzne5eTTeeOmoJKwxTPYolr4U
-# EC8Q/XTviKDsJbyBmdHFEmq0CDvSSAOxSpBUP4aBWcKbqrAO7lQuPMwDeUP2aH46
-# 1X3E5St/QzmDqe1dIN0fJbKg84hWR4B0bgLIBKd5QCh2bZB9VPqpd0QGnqb+h/iP
-# SjbwpP8339qMVwQZhuhwWkrNga1Br7mJANZhPjdEeGqf162nTyusoYkFFsye/a8f
-# N4zGPM6aJDMa6bQwq/9R0k0kOOgU7RUXCgTiXUnxcOMhNHpXBeEeNbnRo+i3A7jK
-# EuM9bdVWeGy88ABOLvmIQcaeKU0WftGjzipNh3TxX71s2G6Qt55nk1+EdF35WsY6
-# 5uasAjCDvWGTxwcw8hlr9dTBKL/prJb7Qe8yQ8nSimqvv+ACUdjBLFdk0xjvUfXe
-# DFpO7GMGKs4P+Vils9AOrSZmj/R9KYXIb0fQnoZcaoGQDNtEIoT3QtSFCYbLi1Jz
-# jNkLofCAosZEtvWW5hqUj5kbI1viEem3DR+PuGBhEd4ewXIUU4hGaT2Ll4NfHudQ
-# tFcUKZKxMQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzUz
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCb+zPUHS4va+euQIVnzfr207XsjnArlYmBouXh
+# iu41lzANBgkqhkiG9w0BAQEFAASCAgBoaphLbbOjKn3eKVIs7nZcuzmW7m5h/tSx
+# Ym14+hY5AQfFbKaKwKoPzzyAF/eteaVQigek6n8IeeEZhpZTu9QAc6cVqmMztJPF
+# w/sTL22LWJgM2oj5S4nOE2Ajd5NyvTYLKE8l6WWWWVvqLOJz6U+GBwJcVHjojsKd
+# +7kkpi3dv/+gtrWNkx5/IbiHfIhiAoQZUYPFXcJFNxdNRK2ZULDxVcsgcbjxEt9i
+# /6mCAXfUDaJjtx0+NKTRTqXxDT9GuOhp0qXPAHR+sGnVqq8DgtxkhfEJeGXYCZjB
+# qmJNVaRxpDoaIy0Jgk8fEZ2DhdENZ9qxhuHyE2KKzg0etX+UeUwsq07uDCmtOc7K
+# 32NaNNIwcfKI7skxayZ5HLQtUwH8jW1rV5egUtxp2Gvg6mWdnBp707ijP7C/uk3j
+# J7pLQsuyloWYBdU4RdTZb//Yhx1Mv5CA/UFJSRKFT3y7D4QFepVSt5AyVopnH+q5
+# DwdCW1sIEIJBYUJQOtlSMHpyZxBniioXtMkl/Wx1IJRwkblBCc2sdorJ8DbN0jdH
+# sVQQfyjMPd3aHzC19ywPF7Brds+Hyzq2d21kEXW0vBzWq9aLtZEqXOG4UIGSREQd
+# qI8z2hZsKjs+3pU/ymFCWqBwwPKOfHc8bW24J3lIf2vVjjd63rmPvSOZ6LlIZKFp
+# 0mltQKzgnw==
 # SIG # End signature block
