@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.6.2
+    1.6.3
 
 
 .REQUIREMENTS
@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.2
+    Version     : 1.6.3
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -43,6 +43,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.6.3
+      - Renders per-server ERROR status values in red in the HTML report and email body.
+
     1.5.3
       - Stops attaching the HTML report when it is already used as the email body.
       - Uses Outlook-friendly inline/table layout for the report header and KPI cards.
@@ -169,7 +172,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.2"
+$ScriptVersion = "1.6.3"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1329,7 +1332,18 @@ function New-HtmlExecutiveSummary {
     )
 
     $rowsHtml = foreach ($row in ($PerServerSummary | Sort-Object ExchangeServerName)) {
-        "<tr><td>$(Format-HtmlValue $row.ExchangeServerName)</td><td>$(Format-HtmlValue $row.ServerRole)</td><td class='num'>$(Format-HtmlValue $row.LogicalProcessorCount)</td><td class='num'>$(Format-HtmlValue $row.MemoryGB)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveCount)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveTotalSizeGB)</td><td class='status'>$(Format-HtmlValue $row.ComputeCollectionStatus)</td></tr>"
+        $computeStatus = [string]$row.ComputeCollectionStatus
+        $statusClass = switch ($computeStatus) {
+            'ERROR' { 'status-error'; break }
+            'WARNING' { 'status-warning'; break }
+            default { 'status-ok' }
+        }
+        $statusColor = switch ($computeStatus) {
+            'ERROR' { '#b91c1c'; break }
+            'WARNING' { '#9a3412'; break }
+            default { '#047857' }
+        }
+        "<tr><td>$(Format-HtmlValue $row.ExchangeServerName)</td><td>$(Format-HtmlValue $row.ServerRole)</td><td class='num'>$(Format-HtmlValue $row.LogicalProcessorCount)</td><td class='num'>$(Format-HtmlValue $row.MemoryGB)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveCount)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveTotalSizeGB)</td><td class='status $statusClass' style='font-weight:700;color:$statusColor;'>$(Format-HtmlValue $computeStatus)</td></tr>"
     }
 
     $readinessRows = @($ReadinessInventory)
@@ -1916,8 +1930,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDQxbE0oqxXGqv
-# QpRcJAvVuHddl9vuE++V0jqzDtYlv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNJRXcmKGTySB/
+# ehlBC2HJidFTvzvbrTrxOq7hqxpc0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2050,31 +2064,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHwwd5F5Zv6rvbXdQhvcdLcQhBx7ExXlZbUomw1RkGMHMA0GCSqG
-# SIb3DQEBAQUABIIBgDvp+xGOe+JMimLk5uUnDzJpZ70tHyCxh3+KGtcPLvVicfuc
-# IzZLE1P8WozPBWUuXBtoX/9O47BF5emIKO68wv5R4qZiRMWOurUGG2xpMh8U/zqv
-# g8l63HdZV9g9CcoqosIFhaEWcyqRTmBmKh8IPS8Mj0kepDEdIrHRN1it6G7F3Lpb
-# WlcCTWVCfLwS1i+8z5pw68M4y1Pi9ZNa7kVENXBMNgW0CUbvyoo33qnKfUYl/L3H
-# WgBIei0Z/TtL0DnJMQccnyGAU2cDEIGfRtnVVzawy99DtBjDLvkC2EptcDsL6flW
-# abXyx2WDtsOy850P1H9HuhsusuNxM66L261FAGZXAGgqljtMpbQoMxXxE5h0rp9a
-# n23ycJVvlifj9NMyMFWE9AzzM7g+CFZE6mjsmIFXEJ7uy6NvrtkpRwcWjsGD4FRK
-# wg/Tu17UDwuARIDeARjvks7CrQqr/iRiQZTZMxxUGo/GiiMNNCN/DdBMAbo8VNWz
-# opL27aXfoISSRhwyzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILWBvISWgfhutD/GHC7jo7IgNQD7zkBuSEvJ4duqY7mCMA0GCSqG
+# SIb3DQEBAQUABIIBgIdITSpMxoIgPSFJ21Yk0sO/Bku/ESHiNlhk8lnPACRthEM9
+# ft70EyNyvEhtYuFeB476TpSlFd46ThgQihly1cRuTWJiRwqsxUhqjTsiKuxf2EIG
+# qX4+9k/gPAtR28wK/a7eEtIZ7NubuQXwOBMmexq8A1+Ttl5MCEZrlOLBhWHH2vjB
+# qOPNOiUAjeb/wqkcXpysWZOKWesCL08lvlkB16w1k5b6IgNuo3X3oNvkrvpIaE4/
+# etTQHWN7GqFeyNjDRx+Tkhj/wDFZNzNtDhrUOdpg3hhyYLoNjRPeAOOAromNsbqT
+# Ef0kSByx/T7uVwj04bSfpSsq5Y8rigSbZTrRv7uCQ3yrxhjA8J6XxT9+et673xjN
+# EAVb/uwpQ83Yen1UchgoXIHCOvbfEToIGG8pptZLNhJcMP/kcOgX0+BscrdS/RMN
+# LipDV839ETOxyGDxqSuJ3un59wf/F1CRz/kcgwDfEr8ujhoXJrJPjSXZ5ozlk/WW
+# 0QcSDkkRA/+sAEntaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzJaMC8GCSqGSIb3DQEJBDEiBCDftvm1qd952473YtR/qojUTCqE3+0RiZWxtHBN
-# UKwkeDANBgkqhkiG9w0BAQEFAASCAgB+zKGEZcm3r8upGuArQo2iDzP6nr8DaMzi
-# xxgDipt5KgMrU1v44E4leOBa95u7o5ozl+qlLI2T4mPh5GLIvSMz7hyMdjRmY3dZ
-# oTPo3sGR5ImDt72oh6WhIymet8EOFOqLpXZuPd9qEd9bnaK2KtIar1Km5nY7Bwas
-# 99vb/fmUXNou0CgHmiXd2uhpzeGP7jBRcS8ZNXXkI0NID/xgrZKQhFh7X1SWhOxl
-# Ga5y7NcJR46EGA5xo0ruaqIiM4NKsWGcM5F2nzvV6K2g7RISjJzKWuSWW4csx+KJ
-# Odh+AZJ65kM8WpyA9kIl4uUIr08hlDZfPJxjKesnzxEAY3YyL4Gx2Jhvhq9aGJok
-# 2coxwFlOuwN6hbkqPbzxCJpk+fgMsyF0O/0Lug8tqp8KiKDpcu2K5ZKLgAyOGGAZ
-# CsjbcYLWxhLbH66W7W6mQVSOw5U5Jb9a3oIMWEN9CUfsRhlCCYcr3HqZamJ+/3NP
-# DxQgIBAZqOi+uiODHQUJ32v4dtKTz3hBewbzT7/kAuixeWjuQPbTiUQX0Ym4vvzm
-# C6Q6/Yl3EfYqe2zUWTJQpAA8iAdRBxF/PE9dxR4aDEMIqB4ZB95cYz3SRDwNSxPo
-# hOjAlDzaTw1GpRiXQ70WjwLPlTWHj/agAkXpK9PxagrHucR7pZ7doBQN8nx6Ix/j
-# eDyP0JSfpQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTE1
+# NThaMC8GCSqGSIb3DQEJBDEiBCB7OMC333tnls3oQxtvwdBVxPPVdbfjBx0bukBN
+# WwWLWTANBgkqhkiG9w0BAQEFAASCAgAdOyV5w+Irl1NlfFyxo3KrQrWP5KthFZp0
+# nCb/NMU6sG8PJjbbcZOswe8QElO37sA9AvQJoEHwXMvi9CxRJH9OpLK+Gq3xzouq
+# YyPt7Hf/CjoEVdWVxJBETTtUkzbGDrbZ5JoJRxDKCDkgbIRxhPrYy2NqhHxmg3oa
+# wLCj971LRtT2AM/v1M6T1xLxio8Nw0sOR8YFXSDL+XdpM5fMy7vaHl7s3kmlfq2H
+# KlLUrvCvSKylUReGmJjAHv5omxvwyCABuprFh/W6bRTx82JZwCclsFpjRnIKD2DV
+# N/Ojmn74ZHwQTFvRIUrpRpIvK8VvUgGFKLCi2wbJvijRfiL5OnBm5FCpXHXBW7Xw
+# D55bFoIERdhZvb+PX7a4gasw17ylNz/8wTh/HFkwCJbVUizj/3bOSEsiZKl9Yzsv
+# FFNKQstMUqBH9gcRBBpsJ0gt9oXKp0k6UglOpFYf00t57/mSXMe2sX82iSGtBb/U
+# FxVGyPAEZB6Z0Ai/jrO2Tif8XMMVr5HpCqEsOuSjvLYADHodj2lrsblW5JAOiOAW
+# vnFY3mHss9Sg5cILUS8HaHAF2LDO6ufGa+7FdZDWbvnAgYlZH9G7I/xuOCV+37iB
+# yNkIoTn6PnKAwsuzAIuC3KosGz0C98h1eD8tUj9hac4jLIKU5sdG0LaZLQPDEZtP
+# wyHmnyfpAg==
 # SIG # End signature block

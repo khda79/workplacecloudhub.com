@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -200,6 +200,18 @@ try {
         Update-RunningJobs $script:Now
         Assert-Case ($script:State.Jobs.Synthetic.LastStatus -eq 'CompletedWithWarnings' -and $script:State.Jobs.Synthetic.LastExitCode -eq 3 -and $null -eq $script:State.Jobs.Synthetic.PendingRetry) 'Exit code three was not retained as a non-retrying warning result.'
     }
+    Test-LifecycleCase 'Launcher preserves native success warning and failure exit codes' {
+        $orchestratorText=[IO.File]::ReadAllText($script:OrchestratorSource)
+        $launcherContract='`$commandSucceeded = `$?; `$nativeExitCode = `$LASTEXITCODE; '
+        Assert-Case ($orchestratorText.Contains($launcherContract)) 'Launcher child command does not capture native exit state before classification.'
+        foreach($expectedExitCode in @(0,3,1)){
+            & $env:ComSpec /d /c ("exit /b {0}" -f $expectedExitCode)
+            $commandSucceeded=$?
+            $nativeExitCode=$LASTEXITCODE
+            $forwardedExitCode=if($null -ne $nativeExitCode){[int]$nativeExitCode}elseif(-not $commandSucceeded){1}else{0}
+            Assert-Case ($forwardedExitCode -eq $expectedExitCode) ("Launcher exit code {0} was converted to {1}." -f $expectedExitCode,$forwardedExitCode)
+        }
+    }
     Test-LifecycleCase 'Normal nonzero exit keeps failure retry contract' {
         $script:Process.HasExited=$true; $script:Process.ExitCode=7
         Update-RunningJobs $script:Now
@@ -281,8 +293,8 @@ if($failed.Count){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXzYDgBxyEYEkJ
-# AdWBByO/lx6C1bEWNt0od+Y8sspg1KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvfv3JON3kiiNS
+# wlOcZ+aeWHy4Fgt1hnMPyXJ7eYOvWqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -415,31 +427,31 @@ if($failed.Count){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILmci5YFnpX3RPjkqhI0P3V2HGgzE8aRQVqr8n7vFKRjMA0GCSqG
-# SIb3DQEBAQUABIIBgBs/rv0X/aGxKV+AQwobOIVULKZ7IZ1/fKym3SuqbmSIjzLF
-# RNXeKwPUVeWOQneOXvEii2twLzRazx1q6HdHV6FxsqpHzxdlp0YLIrthDzFE+JVd
-# DgTCVectOBRemsgRVgcihsR18FHR8eYAOWGT+u4G1oYxDuKr3+qc0KJLpgovh9w4
-# 000L+Yt+soGNdKOshMDlNtYaeI2f87QeLXnVvIKs2nKu1f7+Zy22DtiXhiV2Bz3V
-# +UVdaJwY5CkDjoX2rLMqw8EJMrb3ZOWnDNNerGbRBA7TsoNAAtZcB5/1rDF4zOie
-# mzh9N/EUBBRfuyTZXKdA8gDuMlEbQ6dD91PGEDc9CsyssvBGJuGz7A3QGmz2qYgy
-# Y/ocIFoC8UJjy/yEJMs0XEqToNdTe0yEkzHFZo+3KZe8YUnxsyJYN9EDM4EXbE40
-# biWOVN1z52EsfU5zqiMJg7AOGf0QB+6DzRMe25wOp00ilZekm6uZ7bIadRKk6x1m
-# jIUY+wX/2HCzve3ahaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFtPdYIBM8CiUhJOhx5OpGq5TajZ07tGw1O02LsRIHOnMA0GCSqG
+# SIb3DQEBAQUABIIBgI5hYbx+zzC4XYtlMW0ISfJYVHBr1ZFAu2VGYOGvtSrbEpRi
+# leG6XFgYP2z1yRmoOqTcllUsxTBNMqnJM/XFTFsveI1Y1ZHxR6+/JUed8QvM3htd
+# WSfJMTcUoEVeKqX6ZOeTFqA6vXo5p/K/lTCM2VSUDIPlNhxyByXgqVHUxdDKOgVP
+# RLfHFTbJAyO9ZDJ2/OU9oIzSBlA450+hBJc7Of5kJ7yOu+fJAXTeA1fyBHXZpVNV
+# 82RRdNqtf5BnsFkkqmXrLH3hvfIWEZ2jzWu11mgy0CJ1bMtae1PkNQM0tXZe7moi
+# e9Nf4v4OiFQPpjqLkTbJNOsFrhlR93O1bV8e/Nqd3IF6UbaghUVURTBc4gl0bC2m
+# tMOHxI3TzszuH1tyorvSE+W2wiDzSxXDCRiUW1GunS4UedMSywLEZTLebxcnY9g2
+# oSLB/U5jbMiWUXHEKT6EGbCq4+wMCi4558up9Q43XwhPYpM+sHmSjPjFw2ChI/rj
+# r0CiuZokf5eMlR0xQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzZaMC8GCSqGSIb3DQEJBDEiBCCSVIYBNjF/OyNyVw2+Ijjpjtkm0hekJIOn2pYs
-# mzBQ7jANBgkqhkiG9w0BAQEFAASCAgAzc9ZndrYq0V2CbuSXIRcrsUWtHKAEA9U/
-# YM6g7nK3yzFAXUNyhC9796/ej8cWuYlFhSULPFuTqr7sEA8iOqOtI4NsfaqJa8AZ
-# J8qypY/lD5fQn07HH/t8IC2EAocS/xobfcQokMvBJfQWAShboVX5sxQmkCYlS3Z2
-# mhWsdSpSPaOar4Q3ZRHShF0XOIrU84jaMaDbcgcktw5Yd85sdI9FoShTmyTNXsdV
-# 49Ca9ho9fSjayHJBUrJqm2taz91pL/lpI0u0Ylne7S/fXxxtkjyhXC/WXggnRNLh
-# VtWsvBN7OdEt3C2AifbOxew3v86Qq2spfpDlvverFJHUVtMKJadJxPThKCRAKqU5
-# GNPmb4mnmbBSphz/XSj0u1rXPrbgo5zZ009z/yS/XDrmCV2sdTJA0Yq13yrGYAt/
-# 91Q4doA9juBAv9IHJJGO8BkfR1YFFYnmb4WA17eZ0Ibi+Pmm2Sg2doinP4HPWV/6
-# 8jlKwgrVvEiDUyaohmpZt4n47SNATzuDN/WW0RhCd+Xs2VoimurNwuo1KBTGaGKd
-# pcFhvTZyscaCO7fRNaOs57fyL7+TKBQb6jbkHt5ed1uSRu6NX1+Iw8M67mcdW2CP
-# paHms0233IK2bqwOKT50gTjgLwvRskzsPuati0GOVSs4rK5GTBGf7IqA3fu/RFAx
-# Nu6DsviyOg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTE1
+# NTlaMC8GCSqGSIb3DQEJBDEiBCDTU1NO8IA8yCAg3v8PeAXSfvrrtIlF3fVz57LF
+# eNZYDTANBgkqhkiG9w0BAQEFAASCAgBUcOwjaJEIHG9H4HPs0rBKYqVE6M7/Almf
+# 6K/8br3LKD45wg0X2jQ6AitvyBKaPvQyBCjCbV7IVlMqP/7McjmF9KBSb/0OAORw
+# 8i6Gc5aRpECQPp2ydbEU8AsWFpme9BXdzMnN6Pc4YlyIt9HmSkeSQuylOVazmB6O
+# DFNeypwbn+FvGyrp49B1qJ7L/hf+Xz4pHs4gJU0jmGxCe0+SLXqO2DYFmZ+5A1Q4
+# OdBB5A1mcbn0lfp6JthWmOUuRFaKyLniTy64Bze5lDHKE9txGwR4xx4jawNK8eqh
+# Aw6E9oFMVeDCst116TPLNQGkzKKM1K6Wog/IFPZrlm+PejRtYiPQg9CywAkB1Rld
+# wECS4WfUgbDV6Nf6/rzpcn51Ws2SjjaPIpKLTiUHp8vaMk9TqP+KmaWSA5p0SJMB
+# RIhq3uT+73VlubMNu+lEnA6ugvvqpIrP4GXX5nkFCt7IXVgdBtBaqk8K6iMCDwi1
+# 6D72c72nggAW2uPIvoXKWURL9Ojs0delm5sr3gVIJoSez4w4os4W6+VCAIHfSDGS
+# OSBtVwNUXtx36UUaMRs8iz+BSGMV4BY01M10YLT1sXnVD03K8FtFvEivT5SJ+jPk
+# teSFOcWGWwHOrM4pm6bIzmcIKxuYSYkwQBOd6UySYfkUrQhkYh8hejn2HF4VtTqv
+# ejwgi/KW1g==
 # SIG # End signature block
