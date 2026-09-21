@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -273,6 +273,41 @@ try {
         } finally {Remove-Module $m -Force}
     }
 
+    Test-OfflineCase 'Upgrade Eligibility accepts dictionary and object Graph pages' {
+        $m=Import-OfflineFunctions $paths.Upgrade @('Test-UpgradeEligibilityGraphProperty','Get-UpgradeEligibilityGraphProperty','Get-UpgradeEligibilityGraphCollection')
+        try {
+            $result=&$m {
+                function script:WriteLogSmartM365 { param($Message,$Level) }
+                $orderedPage=[ordered]@{
+                    value=@([pscustomobject]@{id='ordered-1'})
+                    '@odata.nextLink'='https://example.invalid/page2'
+                }
+                $dictionaryPage=[Collections.Generic.Dictionary[string,object]]::new()
+                $dictionaryPage['value']=@([pscustomobject]@{id='dictionary-2'})
+                $dictionaryPage['@odata.nextLink']='https://example.invalid/page3'
+                $objectPage=[pscustomobject]@{value=@([pscustomobject]@{id='object-3'})}
+                $pages=@{
+                    'https://example.invalid/page1'=$orderedPage
+                    'https://example.invalid/page2'=$dictionaryPage
+                    'https://example.invalid/page3'=$objectPage
+                }
+                @(Get-UpgradeEligibilityGraphCollection -Uri 'https://example.invalid/page1' -Invoker {param($uri)$pages[$uri]})
+            }
+            Assert-Offline (@($result).Count -eq 3) 'Upgrade Eligibility pagination did not retain all dictionary/object rows.'
+            Assert-Offline ((@($result.id) -join ',') -ceq 'ordered-1,dictionary-2,object-3') 'Upgrade Eligibility pagination changed row order.'
+
+            $missingValueRejected=&$m {
+                function script:WriteLogSmartM365 { param($Message,$Level) }
+                try {
+                    Get-UpgradeEligibilityGraphCollection -Uri 'https://example.invalid/malformed' -Invoker {param($uri)[ordered]@{'@odata.context'='synthetic'}} | Out-Null
+                    return $false
+                }
+                catch { return $_.Exception.Message -like '*without a value property*' }
+            }
+            Assert-Offline $missingValueRejected 'Upgrade Eligibility accepted a malformed page without value.'
+        } finally {Remove-Module $m -Force}
+    }
+
     Test-OfflineCase 'Consumer contracts retain required Graph CSV sources' {
         $dashboardSchema=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-schema.json') -Raw|ConvertFrom-Json
         $dashboardSelection=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-selection.json') -Raw|ConvertFrom-Json
@@ -306,8 +341,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6O/q0ZuJpE8xu
-# amTpcRQRrIAqQMXAVvUE+B/xYt+6xaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXKYKYq+LRas2x
+# q/mmtdbgGdr3eEZ/x8RwcA0J/NiBhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -440,31 +475,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA3ocJpy22+rU8ICR03wqLsS3SBdWYZke9/Pq12Lq5jWMA0GCSqG
-# SIb3DQEBAQUABIIBgEb2tNDGN2tZ274gGCIAhgyGYGdPN5lLLjGVreYHrVl7rCMU
-# V2LKRCkNcq10w8kd1/fzuVErPvzjUaKe2fXqcy2ySze/2D5/dHdYSwqR1z6ljJXd
-# r4YMrOAYHPlawY0wc2shap117HXy7y5KFD5TcUQyeHt1Mvu4asV7osdzX3kWAoX7
-# r2B9eIdTclvLapoKzXk7nl1BTtcay3/ubMC/SAFssZcXEFBFc6ZgsZ+8JjIvaj+6
-# 8rFBUV+RwGty1bt0qIJXX2GWGn7Phqn+HioSwBIpKUAYHnQYFjeqGFjWru61h7jX
-# 8OXyr3iKaaAVGABsW8LGrZtI/cCu34CXLcIIBUxZcw4yvijYQ6wmLybxU4CvXe+O
-# 4ODWwjGUUdslnsCfVPPHBTbdCH4Us2RXq/vS69bPCjbtAFPkDU6fwik+BuWqQYeg
-# RDsksHZlfzZ++ByUUVksIrSli/cmv5/3L0WBhcYN2ZL9W0h1YHnc/LcnjPek7pEc
-# b6xFtcFxU1U/0yOMf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP3I/ogt9UIHMjl522V9A182Bj/SQ94BESnxRaM2tA1JMA0GCSqG
+# SIb3DQEBAQUABIIBgJGvfqIOknV1gOnB+agQzatQZpsH2oVEKCScXpcbRvnsC7+3
+# NFrf5qwzPllfV7yh9Kn88bAkrfpRE3FCjigcD3m3SEm6Mh62ZLH81YwNxuG6Gqzj
+# 2p3AygYx9ApI0tpPY6k01irWGaK2KhE4q1FUjGfkwrW1fwAEp4cwPGr5MMzqh0Yj
+# NBYHxwawLrLA4f0jJT2wOYa3I6lu/dmJRNOVE6g9mzXh6dlHT3ZPDxYiOws7MzY3
+# FFSsCJmw4hvAWRRsJNUEQBd3NOjfOUvli6XINmjW1kwulfcmo/IFMXbM3HxzNecQ
+# 4dstfLtuGF0NkTBWzQ4uUHxZSMIfkygFYtg+Ln46Lk8ty4Saha1fuuls1TxVmL/v
+# n/4X3JtYh+EAO3HnLTZiLjITagy9t+dfrDOgg9Oq+J2hGMwtqKjAeDpLZw64RZ4T
+# gWJ7WGFExlp1PSXpsnPKeYXKB1uKKarLt5HdRntOa9/eZv+XWA0C+0zZKVUiCgsK
+# 2H0eTiSvcofVDVJv8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTQy
-# NDVaMC8GCSqGSIb3DQEJBDEiBCCUQ1V/0fea5LRFVYMaBQhxZkytrVshLHc2BQEL
-# kl+4SDANBgkqhkiG9w0BAQEFAASCAgCJlJYFEmcPo3mpLLuk+4DYzyxGDl88zHs7
-# 9PoE8ro6nGTCPjgRqkZ1YZnelf7XB++DLZDwMZmVS2UHNkdsHp5c9QSZmQCMu6Am
-# BDG4b9tA86wnxaC1EYowN47PELGEXPlAWCAgMmIfO/F3Q6JRw3EExKon+EMlqXrE
-# 8JbP1gdLgOsj+zkIZDtFFlj/eoQ5SpsLikeImPChLt8JF4ZbIfvCHBRMxSu6aHpU
-# KNRGN968vznfSxs60KzR4YL3ciYt9QJx2tSxB7rDxXUYDSgg7iSFbcsFNYdK68KQ
-# YAYfnjcx76IwgwQrJMgaC6/uNfhHarioN0vvrafzHrsqyLhhE65hLv21qpVi+yAB
-# issCifDMEhpPszLbFUdYV11iV/5rwy/XSrs44tj35SqRxggzxrhsWEPl8pA9vjmo
-# 3rzXiEf4SRXaVUygggcxD71WedZj+Zrqy1WKKu6y8z/CODBNigAa68qST7L/ITyU
-# 6dv+8J3YG7hITg7duPo03VUvgt1oL18bv8nStCpLSMnvqV2dkFuy0OqNVoBo7Y8s
-# 2Cu4yBHW4fWErdACnR/MLzBV+L/L2AzPgFtnzlMMDZzE9OwSih9tZGMYegNwNzVY
-# dZZkQSdqoBnxbDKe71gzbbQle1ihDzGwH8XqQNAThFweDHGT6a1teXz12xnrccCu
-# 6R39TbFApQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDQ5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBcukXfy6weD+9MljwPDo/GZ6NSKoDzM6QTHCaA
+# Ttx/tjANBgkqhkiG9w0BAQEFAASCAgAHTPFT0WHOi7yX/183mFb9/X98VbCoQqv2
+# pQdz/tGM93O84EDzKQoNf+azX4rnwx/udn/6bPd7oqcmTil0/kb3etadIYzhbfgp
+# xVFleMpkpuIL1VmDeK5LXDDc9w6umJhOz6PuJv3UEnjZt3FAP7P1maovvTnmUF6N
+# sBYsDlOKm8uxKkIpMfx/ntGC/wLn5k+PMuI+CcqJpPyRoYZreYW1o5KyC0ECIA2X
+# n+9aZHgTUaeBOcHznnnczGIyDD5Abo5scJZYdjyZEAlfehyLxfS0MZK7zLWden8S
+# OEiBM3tUIhi098+sN9+s6bYXlZhNKh2snRoasgALf+vwX1LoscJW1q3jE3U+QbHx
+# VMe2QZuuq8Rqy12IsUKvC26xnX/vCseStz7Fc4WVu+lPn4V9+XHVo5ImzpRS6ZNu
+# V+mUWL2AjNuOsFoRiXp7n3oDAY5ofL81ZY9XuNZshzCAg0hKyIWfzA25SmEuPG9l
+# nnESs7CdXosOkidVBb1WqOYduj8A2JOMUW+HHYZBedV5sB5rreGwqxLX+5pyaoQB
+# 6WOfVhAhcoWyydCQpYUu5HPm7jqrychTrjBgnfUTY4/0SfCSO6IqJzGrlTSetpv/
+# G7vNnmmgllnQ0VH1xE0qpqglbJ8AK3fKBtDoUz21rejfQQ6oITqavlfsdZhv/+dS
+# JS4r0Mdymg==
 # SIG # End signature block
