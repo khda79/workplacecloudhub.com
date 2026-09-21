@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -162,8 +162,16 @@ try {
     }
 
     Test-OfflineCase 'RBAC pager follows all pages and rejects cycles' {
-        $m=Import-OfflineFunctions $paths.Rbac @('Get-RbacGraphCollection')
+        $m=Import-OfflineFunctions $paths.Rbac @('Test-RbacGraphProperty','Get-RbacGraphPropertyValue','Get-RbacGraphPageShape','Get-RbacGraphCollection')
         try{$items=@(&$m {Get-RbacGraphCollection p1 -RequestInvoker {param($u)if($u-eq'p1'){[pscustomobject]@{value=@([pscustomobject]@{id=1});'@odata.nextLink'='p2'}}else{[pscustomobject]@{value=@([pscustomobject]@{id=2})}}}});Assert-Offline ($items.Count-eq2) 'RBAC did not return both pages.';$caught=$false;try{&$m {Get-RbacGraphCollection p1 -RequestInvoker {[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'RBAC cycle was not rejected.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'RBAC pager accepts Hashtable Graph pages' {
+        $m=Import-OfflineFunctions $paths.Rbac @('Test-RbacGraphProperty','Get-RbacGraphPropertyValue','Get-RbacGraphPageShape','Get-RbacGraphCollection')
+        try{$items=@(&$m {Get-RbacGraphCollection p1 -RequestInvoker {param($u)if($u-eq'p1'){@{value=@([pscustomobject]@{id='hash-1'});'@odata.nextLink'='p2'}}else{@{value=@([pscustomobject]@{id='hash-2'})}}}});Assert-Offline ($items.Count-eq2 -and $items[0].id-eq'hash-1' -and $items[1].id-eq'hash-2') 'RBAC rejected or truncated Hashtable Graph pages.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'RBAC malformed page reports response shape without values' {
+        $m=Import-OfflineFunctions $paths.Rbac @('Test-RbacGraphProperty','Get-RbacGraphPropertyValue','Get-RbacGraphPageShape','Get-RbacGraphCollection')
+        try{$caught=$false;try{&$m {Get-RbacGraphCollection p1 -RequestInvoker {@{unexpected='secret-value'}}}|Out-Null}catch{$caught=$_.Exception.Message-match'Hashtable' -and $_.Exception.Message-match'unexpected' -and $_.Exception.Message-notmatch'secret-value'};Assert-Offline $caught 'RBAC malformed-page diagnostic omitted its safe response shape or exposed a value.'}finally{Remove-Module $m -Force}
     }
 
     Test-OfflineCase 'Licensing retries transient HTTP 500 and honors Retry-After' {
@@ -269,8 +277,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWQN+FLgVK0q0U
-# mrL8S2u0oQmy171xFvlJJ8MrOtTGRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCmDM/i4EkBhLK
+# PlIJfM0uASAFM/0t1d5Wooc5jaRF2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -403,31 +411,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKwSWoNnKNJ31NKmXYG1t41C9pJN2RyzoNwV5BTzrz76MA0GCSqG
-# SIb3DQEBAQUABIIBgIkOk+wQrXDa94vEJRRz/X3uyJg1VVGbnlM/dEgO4PIHZGME
-# LEqB0r+J+C7Xr/yZsGrkejVFYXAghQUF1qAHWmnAFGx2gqIYMSoV2AhgxnN/cO/2
-# N9PuKcR3pxdrWuSAFphBWRXXJIXQ5q1Y/eSy1Jg8zZBj8J3lYES5qDOnZ+rP6zFq
-# pAM6ZAUx7EB4fM/S/kgKD4+n8eNMshmOvRd1CPsQZIBcuOqJBBKd9y8q3yMzzWb2
-# G4MJoguh9FzABotEPmlpW88RW+a+py4EMFDaUumvkvkwugfygbx7N0PpdZRDCrF/
-# lKU/KYp1o/l6lhgwkMUyd0XuQAP8CRO1OderuoUdVnzTMnhrAlBWcJHnegLw4E9R
-# udjq8gXxZZCTLm9gjk7i12ewSIxed+U1oyPLQlTzHWxH/JYyNqtCdAU30udvRtXP
-# v6kzuETBSmBQNAXpFpqCc708c7J8TJUN6NDxJffm/UDH+Fh95cHs3crbT5AIkelb
-# ulvwlS5P7/15V1Jg1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICh7nCMM8xa5yvLVDHbj6ti55PD8Q/rpqduNaH8xrRJ8MA0GCSqG
+# SIb3DQEBAQUABIIBgA+670aOHn1kMB2041DLpJ6ooK0AeTi+nq8V8/GTWM7Gp1mB
+# Szlg1r0B3HZqh6eL9N5CtWifBQpWL5+jko1veT/qUEmOSCpHom63PVY5V13P2OUZ
+# 31iisfHv+sz4CFStZskOV3nqBvhE5suKoQsbnz2NiMIpLqF8hcqKLQZfOKlY1ncN
+# rlYgQIikOFEAkkCqTVqxHiXgEMt3l/gPYIWmeGX7v41ootl4m5LBJFC+SijwWRyO
+# iHwRjC6L9LuzVClkPC65CF4Wj2kLgrQ50esnf0YtWzPvsvBi+u7BhcaXENVusgT8
+# xrf1NR2eZ5Wm+x5kdzk6DUUkOTOJrAVK0pzEpjQTxQUeUyhKzr8tXWq6JABJIC1z
+# TTQualWjVYlvQxtMMEG7UxKuDnQqdl2nE9pP7d8DEK2JYUUf9MyzQCJQhnqrV/a3
+# NmGhpAHaJltgDyfUybv5MxWmQkeFh2b5dxPLJ2970AWitPlH6C7XmJKYQzjNQO08
+# 8sQf+4hACDzm2q8EdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzVaMC8GCSqGSIb3DQEJBDEiBCD7ZPCufDw+WxXL8tfr4cBpR9KEz0vG64Mmrl8z
-# rwxJtzANBgkqhkiG9w0BAQEFAASCAgA+X9eXqZWAGKDzFSoDQx+ZVIIL4GkQfK3g
-# S8iIhuTuqcQiOnPDuTgizwQtnTNY1a6bp3no02DslFvNUS/JYKzHE7wEKzRrUv0i
-# zDmnQ7udjvS1cSz1T1JuJ4lgBlVC4ZXMzUA4C5Mq5w+hP5irGmZh7V/IFRYvYUrw
-# BLGNzhOrAEP948vDGmcTKZLhkzMAf2aoZJpaDC9CixF33twWT4wUbyLYa7yvRgZD
-# gUxbwpv/mtvc0sneQPwjBZoUNmUSdplHxOazgGIbhBvDTFaPuEJOEUHp7PAn3a69
-# EiYIyyezcpxainhju7clhgOjQyJw6o2HST3UA3MAIiYxFJ/UAiidTSDYdzt+ReDb
-# QCG46g5vnN3mQCYPyNGlkwg7QOPtFYQOJh0jixDpwJ/GEVhYp3kVaufzcdn/DTNA
-# GndP0SOeUOw/QVrFi4YxCzlMq3eEQFAfuSN6uHzyDtk7LcIv2CyuPS/BsdAWWLj4
-# mPC/RS3K5Ng/MGYl7DHdZ95q5qLuROcka7W1jGMSO/yblC90L6rNoAXQfa8VIavA
-# f2M1ZZ/3qLauzIsSQwYWX4llx+mQnM8ku5HHkJccUM72CIAcrR884H6aj6qivUzK
-# lprzlBfXtyoVn4SjVxBfQEaOKb+mah6bUeny72A+qi1YmKRyMMlUscJuccAY2mb2
-# Ay8ATQgTLw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDUz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCAGDLjUOPWTHxUElqNUi5MnOBIy0xoCGmt0oRZK
+# fwdvZjANBgkqhkiG9w0BAQEFAASCAgBJpTZ3EubLhUDJGQ1WWi1ZqK3yBJBh9PQP
+# DL4OLF5o9j9yTc2+CWXvaQxvpp/qjdj/G9kXNUpvVTAVK6tVl5/RMLX2zmwIQMrP
+# ae86rpKxwlvN30sCGIy6U8tQ3+i8ump7ht8dYv7NL/1TPl/QZafMdb/DmJreT11P
+# aztk/82wWT6IQWqnalYQ07w0rC4a8LgZjM6Ze443QNIc/MjrB/F8WrD4Kl8EJ+/Z
+# U4t34Ny4CbALsbmMPa01vO4uFSkMKMEKNmpU/Rff3H5Ug3bQ9mbbfq06SEBVTJW6
+# OJ6w0i61uK+OEJmvfKIoysHi5b9cA9o3W8xZhwY3WfVohjnnzKGeY4BJY+NmuJ/I
+# VjXAY2Xaj76jFOk5xF2O3a3BdMaw7D0eF5ot6eU9Li2eEhvMvqSfuKPLAqWb687C
+# RAHfZXtk3cvVvsbB42k/uUTAYL21L4/RcvxkISz6DQmTUJmcwQN9ve0YUvZnfVXC
+# 6ZfWKyUE4xEeKinz2VUZaEg82vBTeU/32SWpyDXpi7SL4L2h6p5hg4mfhUYIXRLg
+# 7mrVV8tKJnYpWQCwEWHOnh24ao3e9TnEucgKFTmb69SzelMvuvsTugjlSjffx2qN
+# wIAOpdOeqX3b9s+f0JBOb16FYwYj5O5KBDlNHp0HFYpK94D/GmyUoSIzv1D+CTzY
+# 12ksFXE/Hw==
 # SIG # End signature block

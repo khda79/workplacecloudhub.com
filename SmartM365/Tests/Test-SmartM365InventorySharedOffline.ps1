@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.3
+1.1.4
 #>
 [CmdletBinding()]
 param(
@@ -40,6 +40,41 @@ function Import-OfflineFunctions {
 }
 
 try {
+    $tenantContextModule = Import-OfflineFunctions (Join-Path $SourceRoot 'Config/SmartM365-TenantContext.ps1') @('Initialize-SmartM365TenantContext')
+    try {
+        & $tenantContextModule {
+            function script:Write-SmartM365StartupBanner {}
+            function script:Get-SmartM365EffectiveGlobalConfig {
+                param($StartPath, $ProfileKey)
+                return $script:SyntheticEffectiveConfig
+            }
+        }
+        Test-OfflineCase 'Tenant context accepts PSCustomObject without MailClientName' {
+            & $tenantContextModule {
+                $script:SyntheticEffectiveConfig = [pscustomobject]@{
+                    ProfileKey = 'prod'; OrganizationKey = 'emeis'; EnvironmentKey = 'prod'
+                    TenantKey = 'emeis-prod'; TenantId = '00000000-0000-0000-0000-000000000001'
+                }
+                Initialize-SmartM365TenantContext -Tenant prod | Out-Null
+            }
+            Assert-Offline ($global:SmartM365MailTenantName -ceq 'EMEIS') 'PSCustomObject tenant context did not use the organization fallback.'
+        }
+        Test-OfflineCase 'Tenant context accepts dictionary MailClientName override' {
+            & $tenantContextModule {
+                $script:SyntheticEffectiveConfig = @{
+                    ProfileKey = 'prod'; OrganizationKey = 'emeis'; EnvironmentKey = 'prod'
+                    TenantKey = 'emeis-prod'; TenantId = '00000000-0000-0000-0000-000000000001'
+                    MailClientName = 'EMEIS France'
+                }
+                Initialize-SmartM365TenantContext -Tenant prod | Out-Null
+            }
+            Assert-Offline ($global:SmartM365MailTenantName -ceq 'EMEIS France') 'Dictionary tenant context ignored MailClientName.'
+        }
+    }
+    finally {
+        Remove-Module $tenantContextModule -Force
+    }
+
     foreach ($variant in @('Core', 'WindowsPowerShell5')) {
         $relative = if ($variant -eq 'Core') { 'Modules/SmartM365.Core/SmartM365.Core.psm1' } else { 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1' }
         $module = Import-OfflineFunctions (Join-Path $SourceRoot $relative) @(
@@ -422,8 +457,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbWcEylVCAtcoI
-# 3KADcdFRlrA1C9Qzo75eagNXPfiLP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtzbn14IFQQgtp
+# CmZukKYIzGDuoROGssdcKPyi/F8GW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -556,31 +591,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOAXHdOurQDioA8ErZFQp+nRMrz0Ns3z2KX6LC+TgRCYMA0GCSqG
-# SIb3DQEBAQUABIIBgFUzoozeBBFae2cxmgsR+wmAhnzcqXJOWqUM6Tw6lmf2W2/i
-# 4Mfhw8wLYUrhCwMa3/Tr4binZzRxcKMw6UJeX/DoDdMXv9fUh4HR0jMF2iLnVrxO
-# z3rXx9FKbkvplItvpY6kaaGYT73EUQ9pqs/WqrIuSO6aXn9KzgyalXFvFS+Q4Wi8
-# 5M6saMMWJD2A1ZtWP4yBANzVRCwKENYRAOZLuhs2Sr4UGAldkolrKkTdMvGLALaL
-# oWqd84QjHRKQZ841hzJlmRmUhcoeSWkRrkyXJ7/oT1hs8HDoZdKafPakFeUc/FCo
-# +HNg9IYjatwStkCAY0R7iIqD7Do4fmKgn/KD+oGxl1GDBe2CavRVuqrUThiEe4u2
-# lHYoGNewqz0sza8hj3yqGE9P8nK9Ne/D15aT5N4tOamW+kLtXkNZrulDBmXqA5xu
-# h6KKsAbt+P7l309LudYlWmCWMUjS/JJo31R/sl0zLAt7rIuDl+07hfyTll7g6pdL
-# 3lKO5fUIzZ/oaszQ9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAEXMCTx3lpISMm9wKGeZgxtPqDLHAK746LiNPFcNCL8MA0GCSqG
+# SIb3DQEBAQUABIIBgCDcZyUPL9RX8qG4aMGnFNnlnflRCv28K8JJUynwp5Dx2Z7f
+# 9uH1YWvWeAL8jlCOw9NFYUqU2tRvvE/zmfcEah8shwtZ6CZxI9A6sgCyjGXvuyK3
+# 5SQA/YlC9EN9ZpW40LcHdg4zVGrfMXlCKJDVbCAs4zX2ks8+swsG9uh8AOCt3AYs
+# DC8UC45/REvx8oRcgjLJOyEJNKMqJWmJYOtlTB+GfMjIkhPDksfjiqhrCmL8Uvt1
+# 0H9ovPKwvSkyjmWtq1HRSnbWx9wEc9hELKqQmafne1BqGQqFNFe5ze7+Kd7CiXkG
+# C9MBZYomHqmB6QjfIaquEaPMQV34s8Jc/3WlKY4I9Umhv9JG8p90ERch89wWzkeW
+# xObVGt3HEx5fvvF38lx3lJnI0RbYJG3PLqcpK4fhwCb8n3QN7u6HVtiImXMM/r+z
+# wZiNXf03p3l2KxkxbOleNSIGGcvmbcYWjdw65u/NRpr1VuKzBjqnWekx3l6QSV8r
+# WEosH3vPwL2gX5tca6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
-# NTZaMC8GCSqGSIb3DQEJBDEiBCBLqnbr77MjsHjT91/1umLX1L5o54L8ukEB7JB8
-# HiJAxTANBgkqhkiG9w0BAQEFAASCAgBgnX95FocWf7hSfCLyxj4jq4OmSEG8qvmp
-# jpgsjOFmoHQVMSD+41e74TvBHywzpXdRwjEqaQp3AF1WmNxla5cgePs6x0R9JfZd
-# b2beHcyJlwU8o0ktt8+CinSBSN6XRd2Nt4ME6MwzCx+bWWE8Cj9aziCitJYBVuS/
-# ldaf5eDFx6paEkmXC82aMqEb9ZCJ2Z8OQif7nzIL8cvDwMog2NCY0Aw79ZL+HmAI
-# JiYHwDvkRKnLP8kpNf0pObe5FJVLSKYtTS1JH5k2ThQxxmnUyFSeSvDWrukp0wse
-# fI5xBB29+gzOn4v6dkD0c37PJwVAdJPRvujf/0is4gpgmS7vXdLY5LcJFlEBJAHU
-# qz761HWab0cffnqBKjO3+XKcAmZH8RE3sxyUFDhu1WhK6v4G2Yi87hcrFz/Y4gIO
-# mcYjaiweXtRa1uaEiUn6IAeyZeA/oMtAcIog93sPHJdIiAyAy1Iy1R/KdYNaIAxw
-# rpy0A9c2yJlZojwwrzCU3Ig9xBm+BR3t8iBk4dVlOQifd/N/HhbyItpIX5G1oynO
-# 7VdOuZa6799kmYW21i1mGMK2c+bxJ7XVfoKtdHj+L84cIGA9U5Y1wXgaBjZ9D2Pt
-# J91E3nJ4gYJ+Bed0Jco7nm07KxkJZmRmup3hLxZ4nHB6wU+z2MoLTFMoItXIHmc2
-# SPkS7oTSBA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDUz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCBDoj7i4lXyLOSC/VAT95qBkfkDJQnRb4M4yhl1
+# rTmZBDANBgkqhkiG9w0BAQEFAASCAgCjpWKKeRQSe1tgAc3TGjTLh7B07Ia0F98c
+# ajr4MdlNaG6+4VIciOFx0wtpKRmgPxUNGk9FWesHR4s8Sl3tq6lzY1Zajey9rxn/
+# YpoNHZY2TDinyyg3HdPHMGk7FGbfFEZgtcUGCFMmC/fqhO1VJ6prtQakDfCEn0w5
+# fCI31QEPI/iaU2UqLuna0GY93O6l+baLz9HBqtrQzY0cUIuq6SvD52xdkNLyCn72
+# IXH9RBuigu4nhUkjOT+HrzYi1aUNDtSd6xyarSo6EwKQOHLvf9tXREnM2J1vj/EH
+# yIfDHwMcpsn/WUWfOAXNLeWNd8ZgW9C9iLsrDwBqiW+GppA8HT2EeZTTVpIEv/wM
+# 6HZS2/FvNPa9afrwnIJinUS7mD6YKWKQMVScE2zwJ8Z3w6X2i4MV4WAKObqHYCBk
+# mXpeL3F02Fv+qiyuQZqEiC7VAJ4k07XfylBXYku0zTPmOYs1UbtWtpaZISxOsm4R
+# 2aMpwFIv7X2KvVhrf1M40oYKuMq6sPk6lg36Sgcs4+b50GBAO7jrKFxpvuoXYRoJ
+# clOb2PhJIKWxcmPmR8JqeOKzfWaIZPcDR1M5G0nW8S7GlxNpK4/E1+JjyTZuYKIR
+# 7icFhdX5lBtUF/BYO2kB8k0g1YrCxDgVVAE40ffrdxwyKGwZI+OrQY6JEqCekq/O
+# PUYIoMIVyg==
 # SIG # End signature block
