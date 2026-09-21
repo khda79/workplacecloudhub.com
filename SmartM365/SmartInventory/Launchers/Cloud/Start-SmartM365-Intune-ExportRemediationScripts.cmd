@@ -21,6 +21,6 @@ if not defined PWSH (
     pause
     exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Export-IntuneRemediations.ps1" -Tenant prod
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Intune-ExportRemediationScripts.ps1" -Tenant prod
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%
