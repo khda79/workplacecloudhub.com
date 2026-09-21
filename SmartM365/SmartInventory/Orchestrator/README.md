@@ -1,12 +1,11 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.13) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.14) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
-Version 1.5.13 records a child exit code of `3` as `CompletedWithWarnings` rather
-than a failed run. It validates the normal completion evidence, does not schedule
-a retry, surfaces the warning state in summaries, and leaves `OnError` mail for
-actual failures. This is the shared contract used by the Exchange infrastructure
-collector when non-blocking readiness or capacity warnings are detected.
+Version 1.5.14 adds an atomic distributed pipeline request consumed by the existing
+resident orchestrators. A `Full` request selects every enabled non-manual job from
+the effective shared manifest, includes dependency closure, preserves election,
+claims, locks, dependencies and concurrency, and reports one shared batch status.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -17,6 +16,8 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `SmartM365-Inventory-Orchestrator.ps1` | Orchestrator script (PowerShell 7). |
 | `SmartM365.Orchestrator.Distributed.psm1` | Automatic capability probes, weighted election planner and atomic occurrence claims. |
 | `SmartM365.Orchestrator.Management.psm1` | Shared configuration validation, atomic publication, versions, rollback, audit and multi-server history aggregation. |
+| `SmartM365.Orchestrator.Pipeline.psm1` | Full/group selection plus atomic shared pipeline request and per-job batch status management. |
+| `SmartM365-Inventory-Pipeline.ps1` | Read-only pipeline validation or atomic `-Collect` submission, with wait-by-default aggregation. |
 | `SmartM365-Inventory-Orchestrator-GUI.ps1` | Central WPF console for planning, server assignment, election visibility, history and configuration versions. |
 | `Set-SmartM365-OrchestratorTimeoutPolicy.ps1` | Preview-first migration that applies 23-hour daily-once and 6-day weekly-once timeouts to the shared configuration, then publishes through the normal versioned/audited path with `-Execute`. |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
@@ -27,6 +28,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
+| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Full-Collect.cmd` | Submits the prod `Full` pipeline and waits for its shared completion status. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator-GUI.cmd` | Opens the production WPF management console in an STA PowerShell 7 process. |
 | `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod all-server execution-summary email with a consolidated row per job plus separate detailed tables for the last 24 hours and 7 days. |
 
@@ -52,6 +54,7 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Orchestrator-ElectionPlan.json` | `{{DataAllRootPath}}\Orchestrator\Election` | Shared weighted assignment plan generated under an atomic planner lock. |
 | `<Job>\<Occurrence>.json` | `{{DataAllRootPath}}\Orchestrator\Election\Claims` | Atomic cross-server occurrence claim. Prevents duplicate launches and records owner/status through retries and restarts. |
 | `<ConcurrencyKey>.json` | `{{DataAllRootPath}}\Orchestrator\Election\Concurrency` | Atomic cluster-wide lease. Serializes jobs sharing a `ConcurrencyKey`, including jobs elected on different servers. |
+| `<BatchId>\request.json` and `Jobs\<JobName>.json` | `{{DataAllRootPath}}\Orchestrator\PipelineRuns` | Immutable pipeline request plus atomically updated per-job statuses shared by all resident servers. |
 | `Orchestrator-StopRequested.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Temporary manual stop request written by `-Stop`; consumed and removed by the resident instance. |
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
 | `Orchestrator_JobRuns_<yyyyMMdd>.csv` | `{{DataAllRootPath}}\Orchestrator\<Server>\JobRuns` | Daily job-run tracking CSV (atomic writes). |
@@ -73,6 +76,22 @@ Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator la
 - creates before/after versions and an audit row for every publication or rollback.
 
 The GUI deliberately has no start, stop or run-now action. `Elected` ownership is displayed from the generated plan and cannot be edited directly. To choose a fixed owner, set `AssignmentMode` to `Pinned` and select exactly one expected server. `Manual` jobs remain excluded from scheduled election.
+
+### Full and group pipeline collection
+
+Validate the exact effective plan without creating a request or launching a collector:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\SmartM365\SmartInventory\Orchestrator\SmartM365-Inventory-Pipeline.ps1" -Tenant prod -Pipeline Full -ValidateOnly
+```
+
+Submit the same plan to the resident orchestrators and wait for every selected job:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\SmartM365\SmartInventory\Orchestrator\SmartM365-Inventory-Pipeline.ps1" -Tenant prod -Pipeline Full -Collect
+```
+
+`Full`, `AD`, `Exchange`, `Exchange2016`, `M365` and `Intune` are supported. Selection is driven by the current shared manifest: disabled jobs and `AssignmentMode=Manual` jobs are excluded, while required enabled dependencies are added automatically. `-Collect` rejects a second active batch, requires a current elected owner for each elected job, and waits by default; `-NoWait` returns after the atomic request is published. Pipeline occurrences do not update `LastScheduledOccurrence`, so a manual full collection never shifts the normal schedule. Exit code `0` means success, `3` means completed with warnings, and `1` means failure, rejection or wait timeout.
 
 `CentralConfigurationEnabled` defaults to `true`. Local `.local.json` files still own machine/runtime concerns such as tenant authentication, paths, mail transport, capability probing and concurrency. The shared files own job planning and cluster policy. Supplying the CLI `-JobsManifestPath` override disables central configuration for that invocation, which keeps isolated tests and diagnostics possible.
 
@@ -373,7 +392,7 @@ No tenant API permissions or CSV schemas change.
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ServerJobPolicies`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxConcurrencyByServer`, `MaxLifetimeHours`, `AtomicWriteRetrySeconds`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ServerJobPolicies`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxConcurrencyByServer`, `MaxLifetimeHours`, `AtomicWriteRetrySeconds`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `SendRuntimeUpdateEmail`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
@@ -463,7 +482,7 @@ Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it
 
 ## Automatic runtime update recycle
 
-With `AutoRecycleOnRuntimeUpdate=true`, the resident process checks its own script version and, when `MonitorCoreModuleVersion=true`, the `SmartM365.Core` manifest version. The default check interval is 60 seconds. A higher semantic version must remain byte-for-byte stable for two consecutive checks and pass PowerShell parser plus Authenticode signer validation before a recycle is accepted.
+With `AutoRecycleOnRuntimeUpdate=true`, the resident process checks its own script version and, when `MonitorCoreModuleVersion=true`, the `SmartM365.Core` manifest version. The default check interval is 60 seconds. A higher semantic version must remain byte-for-byte stable for two consecutive checks and pass PowerShell parser plus Authenticode signer validation before a recycle is accepted. When `SendRuntimeUpdateEmail=true` (default), the server that accepts the candidate sends one HTML notification with the old/new versions, validation result, server, tenant and recycle action.
 
 A valid update stops the launch phase immediately, saves state, finalizes lifecycle tracking and SharePoint uploads, releases the lock, and exits with code 0 and `StopReason=RuntimeUpdate`. Detached inventory jobs keep running and are re-adopted by the next instance. The five-minute repeating Task Scheduler trigger starts the new version within five minutes; `IgnoreNew` prevents a concurrent instance while the resident process is healthy.
 

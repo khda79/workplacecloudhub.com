@@ -98,19 +98,19 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.13
+1.5.14
 
 .REQUIREMENTS
     PowerShell 7+.
     Config/SmartM365-TenantContext.ps1 (SmartM365 tenant context helper).
-    SmartM365.Core, SmartM365.Orchestrator.Distributed.psm1 and
-    SmartM365.Orchestrator.Management.psm1. Microsoft Graph modules
+    SmartM365.Core, SmartM365.Orchestrator.Distributed.psm1,
+    SmartM365.Orchestrator.Management.psm1 and SmartM365.Orchestrator.Pipeline.psm1. Microsoft Graph modules
     are required when capability probes or the orchestrator mail
     transport is Graph or Both; each job script manages its own inventory connections
     inside its own child process.
 
 .NOTES
-    Version : 1.5.13
+    Version : 1.5.14
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.13"
+$ScriptVersion = "1.5.14"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -2507,6 +2507,7 @@ function Get-OrchestratorRuntimeSnapshot {
     $coreModulePath = Join-Path -Path (Split-Path -Path $coreManifestPath -Parent) -ChildPath 'SmartM365.Core.psm1'
     $distributedModulePath = [string]$script:Settings.DistributedModulePath
     $managementModulePath = [string]$script:Settings.ManagementModulePath
+    $pipelineModulePath = [string]$script:Settings.PipelineModulePath
 
     $distributedTokens = $null
     $distributedParseErrors = $null
@@ -2522,6 +2523,14 @@ function Get-OrchestratorRuntimeSnapshot {
     if (@($managementParseErrors).Count -gt 0) {
         $managementParseSummary = @($managementParseErrors | ForEach-Object { $_.Message }) -join '; '
         throw "Management orchestrator module parser validation failed: $managementParseSummary"
+    }
+
+    $pipelineTokens = $null
+    $pipelineParseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($pipelineModulePath, [ref]$pipelineTokens, [ref]$pipelineParseErrors)
+    if (@($pipelineParseErrors).Count -gt 0) {
+        $pipelineParseSummary = @($pipelineParseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "Pipeline orchestrator module parser validation failed: $pipelineParseSummary"
     }
 
     $tokens = $null
@@ -2546,7 +2555,8 @@ function Get-OrchestratorRuntimeSnapshot {
     $scriptFileFingerprint = Get-OrchestratorFileFingerprint -Path $scriptPath
     $distributedModuleFingerprint = Get-OrchestratorFileFingerprint -Path $distributedModulePath
     $managementModuleFingerprint = Get-OrchestratorFileFingerprint -Path $managementModulePath
-    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint
+    $pipelineModuleFingerprint = Get-OrchestratorFileFingerprint -Path $pipelineModulePath
+    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint + '|' + $pipelineModuleFingerprint
     $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
     $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
     $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
@@ -2560,6 +2570,8 @@ function Get-OrchestratorRuntimeSnapshot {
         DistributedModuleFingerprint = $distributedModuleFingerprint
         ManagementModulePath = $managementModulePath
         ManagementModuleFingerprint = $managementModuleFingerprint
+        PipelineModulePath = $pipelineModulePath
+        PipelineModuleFingerprint = $pipelineModuleFingerprint
         CoreManifestPath = $coreManifestPath
         CoreModulePath = $coreModulePath
         CoreVersion = $coreVersionOnDisk
@@ -2581,6 +2593,52 @@ function Write-OrchestratorRuntimeUpdateWarning {
 
     $script:RuntimeUpdateWarnings[$Key] = $Now
     Write-OrchestratorLog -Message $Message -Level WARN
+}
+
+function Send-OrchestratorRuntimeUpdateEmail {
+    param(
+        [Parameter(Mandatory = $true)]$Candidate,
+        [datetime]$DetectedAt = (Get-Date)
+    )
+
+    if ([string]$script:LastRuntimeUpdateMailIdentity -eq [string]$Candidate.Identity) { return $true }
+
+    $baseline = $script:RuntimeUpdateBaseline
+    $orchestratorChanged = $Candidate.ScriptVersion.CompareTo($baseline.ScriptVersion) -gt 0
+    $coreChanged = $Candidate.CoreVersion.CompareTo($baseline.CoreVersion) -gt 0
+    $changedComponents = @()
+    if ($orchestratorChanged) { $changedComponents += 'SmartM365 Inventory Orchestrator' }
+    if ($coreChanged) { $changedComponents += 'SmartM365.Core' }
+    if ($changedComponents.Count -eq 0) { $changedComponents = @('Runtime files') }
+
+    $rows = @(
+        @('Tenant', $Tenant),
+        @('Detected by server', $env:COMPUTERNAME),
+        @('Detected at', $DetectedAt.ToString('yyyy-MM-dd HH:mm:ss zzz')),
+        @('Changed components', ($changedComponents -join ', ')),
+        @('Orchestrator version', ('{0} -> {1}' -f $baseline.ScriptVersion, $Candidate.ScriptVersion)),
+        @('SmartM365.Core version', ('{0} -> {1}' -f $baseline.CoreVersion, $Candidate.CoreVersion)),
+        @('Validation', 'Stable, parser-valid and Authenticode-approved'),
+        @('Action', 'Clean runtime recycle requested'),
+        @('Detached jobs still supervised', [string]$script:RunningJobs.Count)
+    )
+    $htmlRows = @(
+        foreach ($row in $rows) {
+            '<tr><td style="padding:4px 10px;border:1px solid #DDDDDD;"><b>{0}</b></td><td style="padding:4px 10px;border:1px solid #DDDDDD;">{1}</td></tr>' -f (ConvertTo-HtmlText -Text ([string]$row[0])), (ConvertTo-HtmlText -Text ([string]$row[1]))
+        }
+    ) -join [Environment]::NewLine
+    $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#0078D4;'>New SmartM365 orchestrator runtime version detected</h2>
+<p>The resident process validated a newer signed runtime and will recycle cleanly. Running inventory children remain detached and will be re-adopted by the next instance.</p>
+<table style='border-collapse:collapse;'>$htmlRows</table>
+<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $env:COMPUTERNAME).</p>
+</body></html>
+"@
+    $subject = '[SmartM365 Orchestrator][{0}] Runtime update detected: {1} -> {2}' -f $Tenant, $baseline.ScriptVersion, $Candidate.ScriptVersion
+    $sent = [bool](Send-OrchestratorMail -Subject $subject -HtmlBody $body)
+    if ($sent) { $script:LastRuntimeUpdateMailIdentity = [string]$Candidate.Identity }
+    return $sent
 }
 
 function Test-OrchestratorRuntimeUpdate {
@@ -2651,6 +2709,7 @@ function Test-OrchestratorRuntimeUpdate {
         Test-OrchestratorAuthenticodeFile -Path $candidate.ScriptPath -Role 'Orchestrator runtime update'
         Test-OrchestratorAuthenticodeFile -Path $candidate.DistributedModulePath -Role 'Distributed orchestrator runtime module'
         Test-OrchestratorAuthenticodeFile -Path $candidate.ManagementModulePath -Role 'Management orchestrator runtime module'
+        Test-OrchestratorAuthenticodeFile -Path $candidate.PipelineModulePath -Role 'Pipeline orchestrator runtime module'
     )
     if ($script:Settings.MonitorCoreModuleVersion) {
         $signatureResults += @(
@@ -2666,6 +2725,11 @@ function Test-OrchestratorRuntimeUpdate {
     }
 
     Write-OrchestratorLog -Message ("Validated runtime update is stable and signed. Recycling cleanly so Task Scheduler can start it. Orchestrator {0} -> {1}; SmartM365.Core {2} -> {3}. No detached inventory job will be stopped." -f $script:RuntimeUpdateBaseline.ScriptVersion, $candidate.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion, $candidate.CoreVersion)
+    if ($script:Settings.SendRuntimeUpdateEmail) {
+        if (-not (Send-OrchestratorRuntimeUpdateEmail -Candidate $candidate -DetectedAt $Now)) {
+            Write-OrchestratorLog -Message 'The runtime update notification email could not be sent; the validated clean recycle continues.' -Level WARN
+        }
+    }
     return $true
 }
 
@@ -2832,7 +2896,9 @@ function Start-InventoryJob {
         [int]$Attempt = 0,
         [string]$ClaimPath = '',
         [string]$ConcurrencyLeasePath = '',
-        [string]$ConcurrencyLeaseId = ''
+        [string]$ConcurrencyLeaseId = '',
+        [string]$PipelineBatchId = '',
+        [string]$PipelineStatusPath = ''
     )
 
     $state = Get-JobState -JobName $Job.Name
@@ -2849,14 +2915,14 @@ function Start-InventoryJob {
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Script not found: {0}" -f $scriptFullPath)
         return
     }
 
     if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
         return
     }
@@ -2865,7 +2931,7 @@ function Start-InventoryJob {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
         $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
         try { [System.IO.File]::WriteAllText($logPath, $rejectLine + [Environment]::NewLine) } catch { }
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText ("AuthenticodeRejected: {0}" -f $authenticodeResult.Summary)
         return
     }
@@ -2898,7 +2964,7 @@ function Start-InventoryJob {
         }
         catch {
             Write-OrchestratorLog -Message ("Job {0}: unable to validate supported parameters: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
+            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
             Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
             return
         }
@@ -2940,7 +3006,7 @@ function Start-InventoryJob {
     }
     catch {
         Write-OrchestratorLog -Message ("Job {0}: failed to start child process: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
         return
     }
@@ -2960,6 +3026,8 @@ function Start-InventoryJob {
         ClaimPath = $ClaimPath
         ConcurrencyLeasePath = $ConcurrencyLeasePath
         ConcurrencyLeaseId = $ConcurrencyLeaseId
+        PipelineBatchId = $PipelineBatchId
+        PipelineStatusPath = $PipelineStatusPath
     }
     $state.Running = @{
         Pid = $process.Id
@@ -2972,6 +3040,8 @@ function Start-InventoryJob {
         ClaimPath = $ClaimPath
         ConcurrencyLeasePath = $ConcurrencyLeasePath
         ConcurrencyLeaseId = $ConcurrencyLeaseId
+        PipelineBatchId = $PipelineBatchId
+        PipelineStatusPath = $PipelineStatusPath
     }
     if (-not [string]::IsNullOrWhiteSpace($ClaimPath)) {
         try {
@@ -2986,6 +3056,9 @@ function Start-InventoryJob {
     $state.RetryCount = $Attempt
     $state.PendingRetry = $null
     Save-OrchestratorState
+    if (-not [string]::IsNullOrWhiteSpace($PipelineBatchId)) {
+        Set-OrchestratorPipelineJobStatus -BatchId $PipelineBatchId -JobName $Job.Name -Status Running -Attempt $Attempt
+    }
 
     $launchTarget = if ($useLauncher) { $launcherFullPath } else { $scriptFullPath }
     Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6}, target {7}; command {8})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath, $launchTarget, $command)
@@ -3091,8 +3164,17 @@ function Complete-JobRun {
             NotBefore = ConvertTo-StateTime -Value $notBefore
             Attempt = $attempt + 1
             ScheduledOccurrence = ConvertTo-StateTime -Value ([datetime]$RunInfo.Occurrence)
+            PipelineBatchId = if ($RunInfo.ContainsKey('PipelineBatchId')) { [string]$RunInfo.PipelineBatchId } else { '' }
+            PipelineStatusPath = if ($RunInfo.ContainsKey('PipelineStatusPath')) { [string]$RunInfo.PipelineStatusPath } else { '' }
         }
         $retryScheduled = $true
+    }
+
+    if ($RunInfo.ContainsKey('PipelineBatchId') -and -not [string]::IsNullOrWhiteSpace([string]$RunInfo.PipelineBatchId)) {
+        $pipelineStatus = if ($retryScheduled) { 'RetryScheduled' } else { $status }
+        $pipelineAttempt = if ($retryScheduled) { $attempt + 1 } else { $attempt }
+        $pipelineNotBeforeUtc = if ($retryScheduled) { $notBefore.ToUniversalTime().ToString('o') } else { '' }
+        Set-OrchestratorPipelineJobStatus -BatchId ([string]$RunInfo.PipelineBatchId) -JobName $JobName -Status $pipelineStatus -Attempt $pipelineAttempt -Detail $ErrorText -NotBeforeUtc $pipelineNotBeforeUtc
     }
 
     if ($RunInfo.ContainsKey('ClaimPath') -and -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ClaimPath)) {
@@ -3318,6 +3400,8 @@ function Restore-RunningJobs {
             ClaimPath = if ($record.ContainsKey('ClaimPath')) { [string]$record.ClaimPath } else { '' }
             ConcurrencyLeasePath = if ($record.ContainsKey('ConcurrencyLeasePath')) { [string]$record.ConcurrencyLeasePath } else { '' }
             ConcurrencyLeaseId = if ($record.ContainsKey('ConcurrencyLeaseId')) { [string]$record.ConcurrencyLeaseId } else { '' }
+            PipelineBatchId = if ($record.ContainsKey('PipelineBatchId')) { [string]$record.PipelineBatchId } else { '' }
+            PipelineStatusPath = if ($record.ContainsKey('PipelineStatusPath')) { [string]$record.PipelineStatusPath } else { '' }
         }
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
@@ -3480,6 +3564,91 @@ function Restore-RunningJobs {
 # ==========================================================
 # Launch phase (due occurrences, retries, forced, dependencies)
 # ==========================================================
+function Set-OrchestratorPipelineJobStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$BatchId,
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$Attempt = 0,
+        [string]$Detail = '',
+        [string]$NotBeforeUtc = ''
+    )
+
+    try {
+        Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $BatchId -JobName $JobName -Status $Status -Attempt $Attempt -OwnerServer $env:COMPUTERNAME -Detail $Detail -NotBeforeUtc $NotBeforeUtc | Out-Null
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Pipeline {0}, job {1}: shared status could not be set to {2}: {3}" -f $BatchId, $JobName, $Status, $_.Exception.Message) -Level ERROR
+    }
+}
+
+function Update-OrchestratorPipelineRequests {
+    $pending = @{}
+    $activeRuns = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $script:Settings.SharedDataFolderPath)
+    if ($activeRuns.Count -eq 0) {
+        $script:PipelinePending = $pending
+        return
+    }
+    if ($activeRuns.Count -gt 1) {
+        Write-OrchestratorRuntimeUpdateWarning -Key 'pipeline-multiple-active' -Message ("Multiple active pipeline requests were found ({0}); only the oldest request is processed." -f (@($activeRuns.BatchId) -join ', '))
+    }
+
+    $run = @($activeRuns | Sort-Object CreatedAtUtc | Select-Object -First 1)[0]
+    if ([string]$run.Tenant -ne [string]$Tenant) {
+        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus') })) {
+            Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $jobStatus.JobName -Status Rejected -Detail ("Request tenant '{0}' does not match resident tenant '{1}'." -f $run.Tenant, $Tenant)
+        }
+        $script:PipelinePending = $pending
+        return
+    }
+
+    $currentManifestHash = (Get-FileHash -LiteralPath $script:Settings.JobsManifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::IsNullOrWhiteSpace([string]$run.ManifestHash) -and [string]$run.ManifestHash -ne $currentManifestHash) {
+        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -in @('Pending', 'RetryScheduled') })) {
+            Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $jobStatus.JobName -Status Rejected -Detail 'The effective jobs manifest changed after pipeline submission; submit a new validated request.'
+        }
+        $script:PipelinePending = $pending
+        return
+    }
+
+    $occurrenceValue = $run.Request.OccurrenceUtc
+    $occurrence = if ($occurrenceValue -is [datetime]) { ([datetime]$occurrenceValue).ToLocalTime() } else { [datetime]::Parse([string]$occurrenceValue, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime() }
+    $createdUtc = [datetime]::Parse([string]$run.CreatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    foreach ($jobStatus in @($run.Jobs)) {
+        if ($jobStatus.Status -notin @('Pending', 'RetryScheduled')) { continue }
+        $name = [string]$jobStatus.JobName
+        if (-not $script:Manifest.JobsByName.ContainsKey($name)) {
+            Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $name -Status Rejected -Detail 'The selected job is absent from the effective manifest.'
+            continue
+        }
+        $job = $script:Manifest.JobsByName[$name]
+        if (-not $job.Enabled -or [string]$job.AssignmentMode -eq 'Manual') {
+            Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $name -Status Rejected -Detail 'The selected job became disabled or manual after validation.'
+            continue
+        }
+        if ($jobStatus.Status -eq 'RetryScheduled' -and -not [string]::IsNullOrWhiteSpace([string]$jobStatus.NotBeforeUtc)) {
+            $retryNotBeforeUtc = [datetime]::Parse([string]$jobStatus.NotBeforeUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+            if ([datetime]::UtcNow -lt $retryNotBeforeUtc) { continue }
+        }
+        $pending[$name] = @{
+            BatchId = [string]$run.BatchId
+            Occurrence = $occurrence
+            CreatedAtUtc = $createdUtc
+            StatusPath = [string]$jobStatus.Path
+            Attempt = [int]$jobStatus.Attempt
+        }
+    }
+    $script:PipelinePending = $pending
+}
+
+function Get-OrchestratorPipelineDependencyStatus {
+    param([Parameter(Mandatory = $true)][string]$BatchId, [Parameter(Mandatory = $true)][string]$JobName)
+    $path = Get-SmartM365OrchestratorPipelineJobStatusPath -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $BatchId -JobName $JobName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'MissingStatus' }
+    try { return [string]((Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 20 -ErrorAction Stop).Status) }
+    catch { return 'MissingStatus' }
+}
+
 function Test-JobSelected {
     param([Parameter(Mandatory = $true)][string]$JobName)
 
@@ -3859,6 +4028,8 @@ function Invoke-LaunchPhase {
         $name = $job.Name
         if (-not (Test-JobSelected -JobName $name)) { continue }
         $isForced = ($script:ForcedPending -contains $name)
+        $isPipeline = $null -ne $script:PipelinePending -and $script:PipelinePending.ContainsKey($name)
+        $pipelineInfo = if ($isPipeline) { $script:PipelinePending[$name] } else { $null }
         if (-not (Test-JobAllowedOnServer -Job $job -AllowManual:$isForced)) {
             if ($isForced) {
                 $ownershipReason = if ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
@@ -3888,18 +4059,36 @@ function Invoke-LaunchPhase {
         $attempt = 0
         $reason = ''
         if ($isForced) {
+            $isPipeline = $false
+            $pipelineInfo = $null
             $occurrence = $Now
             $reason = 'forced'
         }
         elseif ($null -ne $state.PendingRetry) {
+            $isPipeline = $false
+            $pipelineInfo = $null
             $notBefore = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.NotBefore)
             if ($null -ne $notBefore -and $notBefore -le $Now) {
                 $occurrence = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.ScheduledOccurrence)
                 if ($null -eq $occurrence) { $occurrence = $Now }
                 $attempt = [int]$state.PendingRetry.Attempt
                 $reason = 'retry'
+                if ($state.PendingRetry.ContainsKey('PipelineBatchId') -and -not [string]::IsNullOrWhiteSpace([string]$state.PendingRetry.PipelineBatchId)) {
+                    $isPipeline = $true
+                    $pipelineInfo = @{
+                        BatchId = [string]$state.PendingRetry.PipelineBatchId
+                        Occurrence = $occurrence
+                        CreatedAtUtc = $occurrence.ToUniversalTime()
+                        StatusPath = if ($state.PendingRetry.ContainsKey('PipelineStatusPath')) { [string]$state.PendingRetry.PipelineStatusPath } else { '' }
+                    }
+                }
             }
             else { continue }
+        }
+        elseif ($isPipeline) {
+            $occurrence = [datetime]$pipelineInfo.Occurrence
+            $attempt = [int]$pipelineInfo.Attempt
+            $reason = 'pipeline'
         }
         elseif ($job.Enabled) {
             $occurrence = Get-DueOccurrence -Job $job -LastOccurrence $lastOccurrence -Now $Now
@@ -3928,9 +4117,45 @@ function Invoke-LaunchPhase {
             continue
         }
 
-        # Dependency gate (not applied to forced runs): wait while a dependency is
+        # Pipeline dependencies are shared across servers and must be evaluated from
+        # the batch status files rather than from this server's scheduled-run state.
+        if (-not $isForced -and $isPipeline) {
+            $pipelineDeferred = $false
+            $pipelineBlockedDependency = ''
+            $pipelineBlockingDependencies = New-Object System.Collections.Generic.List[string]
+            foreach ($dep in $job.DependsOn) {
+                $dependencyStatus = Get-OrchestratorPipelineDependencyStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $dep
+                $dependencyJob = if ($script:Manifest.JobsByName.ContainsKey($dep)) { $script:Manifest.JobsByName[$dep] } else { $null }
+                if ($dependencyStatus -in @('Success', 'CompletedWithWarnings')) { continue }
+                if ($dependencyStatus -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')) {
+                    if ($null -eq $dependencyJob -or -not $dependencyJob.ContinueOnError) { $pipelineBlockedDependency = $dep; break }
+                    continue
+                }
+                $pipelineDeferred = $true
+                $pipelineBlockingDependencies.Add($dep)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($pipelineBlockedDependency)) {
+                Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyFailed -Detail ("Dependency '{0}' failed and ContinueOnError is false." -f $pipelineBlockedDependency)
+                continue
+            }
+            if ($pipelineDeferred) {
+                $dependencyWaitTimeout = [int]$job.DependencyWaitTimeoutMinutes
+                if ($dependencyWaitTimeout -le 0) { $dependencyWaitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+                $waitMinutes = [int]([datetime]::UtcNow - [datetime]$pipelineInfo.CreatedAtUtc).TotalMinutes
+                if ($dependencyWaitTimeout -gt 0 -and $waitMinutes -ge $dependencyWaitTimeout) {
+                    Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyTimeout -Detail ("Dependencies still blocking after {0} min: {1}" -f $waitMinutes, (@($pipelineBlockingDependencies) -join ', '))
+                }
+                else {
+                    Write-DependencyWaitLog -JobName $name -BlockingDependencies @($pipelineBlockingDependencies) -Now $Now
+                }
+                continue
+            }
+            Clear-DependencyWaitLog -JobName $name
+        }
+
+        # Dependency gate (not applied to forced or pipeline runs): wait while a dependency is
         # running, launched earlier in this tick, pending a retry, or itself due.
-        if (-not $isForced) {
+        if (-not $isForced -and -not $isPipeline) {
             $deferred = $false
             $blockedByParent = $false
             $blockedDependency = ''
@@ -4027,9 +4252,12 @@ function Invoke-LaunchPhase {
                     catch {
                         Write-OrchestratorLog -Message ("Job {0}: failed to release ConcurrencyKey '{1}' after occurrence claim refusal: {2}" -f $name, $job.ConcurrencyKey, $_.Exception.Message) -Level ERROR
                     }
-                    $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'Failed', 'TimedOut', 'Interrupted')
+                    $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
                     if ($terminalClaim) {
                         Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim
+                        if ($isPipeline) {
+                            Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status ([string]$claim.Claim.Status) -Attempt $attempt -Detail 'The occurrence was completed through an existing shared claim.'
+                        }
                     }
                     else {
                         Write-OrchestratorRuntimeUpdateWarning -Key ("claim:{0}:{1}:{2}" -f $name, $occurrence.ToUniversalTime().ToString('o'), $claim.Reason) -Message ("Job {0}: occurrence {1} not launched because its atomic claim was refused: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claim.Reason) -Now $Now
@@ -4058,7 +4286,14 @@ function Invoke-LaunchPhase {
             $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             Write-OrchestratorLog -Message ("Job {0}: launching now (forced)." -f $name)
         }
-        Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId
+        $pipelineBatchId = if ($isPipeline) { [string]$pipelineInfo.BatchId } else { '' }
+        $pipelineStatusPath = if ($isPipeline) { [string]$pipelineInfo.StatusPath } else { '' }
+        if ($isPipeline) {
+            Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId -PipelineBatchId $pipelineBatchId -PipelineStatusPath $pipelineStatusPath
+        }
+        else {
+            Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId
+        }
         $launchedThisTick.Add($name)
         if (-not $script:StatePersistenceHealthy) {
             Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
@@ -4649,6 +4884,7 @@ $script:LogReady = $false
 $script:LockOwned = $false
 $script:RunningJobs = @{}
 $script:ForcedPending = @()
+$script:PipelinePending = @{}
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
 $script:State = $null
@@ -4663,6 +4899,7 @@ $script:RuntimeUpdateCandidateIdentity = ''
 $script:RuntimeUpdateCandidateStableCount = 0
 $script:RuntimeUpdateWarnings = @{}
 $script:RuntimeUpdateBaseline = $null
+$script:LastRuntimeUpdateMailIdentity = ''
 $script:StatePersistenceHealthy = $true
 $script:StatePersistenceFailureCount = 0
 $script:StatePersistenceLastError = ''
@@ -4681,6 +4918,8 @@ try {
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
     Import-Module -Name $managementModulePath -Force -ErrorAction Stop
+    $pipelineModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
+    Import-Module -Name $pipelineModulePath -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
@@ -4755,6 +4994,7 @@ try {
     $authenticodeInstallTrustedPublisher = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedPublisher' -DefaultValue $true
     $autoRecycleOnRuntimeUpdate = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AutoRecycleOnRuntimeUpdate' -DefaultValue $true
     $monitorCoreModuleVersion = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'MonitorCoreModuleVersion' -DefaultValue $true
+    $sendRuntimeUpdateEmail = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'SendRuntimeUpdateEmail' -DefaultValue $true
     $centralConfigurationEnabled = (Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'CentralConfigurationEnabled' -DefaultValue $true) -and [string]::IsNullOrWhiteSpace($JobsManifestPath)
     $capabilityProbeMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'CapabilityProbeMode' -DefaultValue 'ReadOnly')
     if ($capabilityProbeMode -notin @('Static', 'ReadOnly')) { throw "CapabilityProbeMode must be 'Static' or 'ReadOnly'." }
@@ -4821,6 +5061,7 @@ try {
         OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
         DistributedModulePath = $distributedModulePath
         ManagementModulePath = $managementModulePath
+        PipelineModulePath = $pipelineModulePath
         CentralConfigurationEnabled = $centralConfigurationEnabled
         CentralClusterPath = ''
         CentralVersionsFolderPath = ''
@@ -4828,6 +5069,7 @@ try {
         ElectionFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election')
         ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
         ConcurrencyLeasesPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Concurrency')
+        PipelineRunsFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'PipelineRuns')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
         ElectionPlanLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.lock')
         CapabilitiesPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator-Capabilities.json')
@@ -4847,6 +5089,7 @@ try {
         RuntimeUpdateStableChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateStableChecks' -DefaultValue 2))
         RuntimeUpdateCooldownMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateCooldownMinutes' -DefaultValue 10))
         MonitorCoreModuleVersion = $monitorCoreModuleVersion
+        SendRuntimeUpdateEmail = $sendRuntimeUpdateEmail
         DistributedSchedulingEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'DistributedSchedulingEnabled' -DefaultValue $true
         CapabilityProbeMode = $capabilityProbeMode
         CapabilityProbeTimeoutSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'CapabilityProbeTimeoutSeconds' -DefaultValue 90))
@@ -4912,7 +5155,7 @@ try {
         MailConfigIssue = $mailConfigIssueText
     }
 
-    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath, $script:Settings.ConcurrencyLeasesPath)) {
+    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath, $script:Settings.ConcurrencyLeasesPath, $script:Settings.PipelineRunsFolderPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
 
@@ -5002,7 +5245,7 @@ try {
     Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}; atomicWriteRetrySeconds={7}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds, $script:Settings.AtomicWriteRetrySeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes)
-    Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; baselineOrchestrator={5}; baselineCore={6}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
+    Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; sendUpdateEmail={5}; baselineOrchestrator={6}; baselineCore={7}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:Settings.SendRuntimeUpdateEmail, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
         Write-OrchestratorLog -Message ("Email notifications are disabled ({0})." -f $script:Settings.MailConfigIssue) -Level WARN
@@ -5072,6 +5315,12 @@ try {
     Invoke-MissedRunCatchUp
     Invoke-RetentionCleanup
     $script:ForcedPending = @($Force | Where-Object { $script:Manifest.JobsByName.ContainsKey($_) })
+    try {
+        Update-OrchestratorPipelineRequests
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Initial pipeline request scan failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+    }
 
     $lastCleanupDate = (Get-Date).Date
     while ($true) {
@@ -5085,6 +5334,12 @@ try {
         Update-OrchestratorServerCapabilities
         Update-OrchestratorElectionPlan
         Update-RunningJobs -Now $now
+        try {
+            Update-OrchestratorPipelineRequests
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Pipeline request scan failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+        }
         if (Test-OrchestratorRuntimeUpdate -Now $now) {
             $script:OrchestratorStopReason = 'RuntimeUpdate'
             break
@@ -5182,8 +5437,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcRoDVHyfegawu
-# oC54cvhJvcoXXEjhanyEbQRDQJryoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMOuim3oBMw/Os
+# bfSyER8Z19XMx4iFxwZ3a8J/wXpj86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5316,31 +5571,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJBt/NSCai1M5YtlLgAwtfhSrsJITd8ue7+Qovy4nmeHMA0GCSqG
-# SIb3DQEBAQUABIIBgEnFf3yFbIgdly/uRAjgjmok2P7iBEL+xrOJ5ZPlnjwLIlB5
-# j6TFjOKLaaEaLxOaG1Ys3RU9CdQ+iAIbr3TABLsedS+OBa3qYTG6nBT3YXBtli1r
-# noJPhI2VdwZzBzwRlcOTlvGy23bU5XQ1JDTCTMQb/nPPJavBnnZ3dbNgARESiEfK
-# 0L9TiTbIS93wj+B5LYJRk7aaf35ZoA9YNMpnY87p7xVxE14/WEHDmUO/sQx1eNvF
-# aOcueRw0URzjgTlEyJFb0N4l3HKZZplXogtxtAPdJ6/lx7Bs8w58DoV8ywASjdI8
-# q2ohP6TJJM4LCXl4DKvxPCDzHjxSJ8qmwn8apA9sVgnN8XovbwpC54o9/44BTUXx
-# R3FWD51PTWFDuAcvhzKGC0ONVSpTpVQqyrI5v9GcPoxMM25c2IW2bby9BaxxOSqc
-# sYSPo5L7zTUBaKKKSIKY8kbJZcnMsGw+YY7thS2YjQ6V8XDIoFbSzMxj0+PbrUCj
-# MlUt0lSZ8eyIjHwrN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINtvMSE8ym0HNgIXAWNh+lfSSjtYhe7QZrCBze27BmmtMA0GCSqG
+# SIb3DQEBAQUABIIBgC+z9jdNVb9jtpp8qMgd+RQ/qSL5K5krITIlDw3FKl/e7BnR
+# y/J66/XIvZ0cmVf8uMcTw+FfINy7yxGsT4/QMFG1aswfVaO83okxGGmi9038F0/3
+# ujEdoKwNujF/xpH/bLY8bDO+QFlHy6ZWdaT2gyPLHVGn9D3o0/94xklGJko0nbXH
+# MuMhEOuIkd0SRXZGyBm2zloSlFRNm1XTg/chxkARsip/6xrWCbMoFHgK9Bvrh+ZD
+# lxiScHSH4TctuWMYDUKFySiBCkrIYeyo0lq7WN9eWuzG7DigqvUG0iL6rJTcmIYL
+# 781PBXM053Ptdd13ev1h0tpQF5cldCjrvitCAR1LmBEiimDkS9Z1wTPpAIqpZE+Z
+# IuiQhcs/QSDMp+LEh4BsDhNkp0SgfkOdreIlJwhbg9+QyH9wYC8vbKxCzfpeF2ZM
+# RE3qC/OMzCNFq8Yv/dgJQ/9nw6IR/M4hQKHKJ6FTAz2k35PBuuM+ETgnkS6KHn48
+# 0eClrRyzwJ9DZC25NKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDU3
-# MzVaMC8GCSqGSIb3DQEJBDEiBCD+q+PNoGRt/kqknqeJ9po4VoyKe/HTc+f7tWEx
-# hO3aKjANBgkqhkiG9w0BAQEFAASCAgAbZeQ7VKibDfmIpLIFy+s8AHkqYk2his5n
-# ++Z94YnErhi8dnmYeywZcNqhCi3vo6M0VAbJJosi5bRx1bxlFxSbyYcxnm4+4IWe
-# T8pDpwKOjzndb4UYLgx7y/Dwu6NiKRD4quNPZ3W/dJ5IVfO1e4FKJ2RBCZ9t8lVE
-# pPzMDILYrx+32oWFh92vn78eLig6Mc566BHlG3QQAquS7FtwZ37vDpg61z0xBshj
-# jGgfQcSH0QiodNI+/BrCNNIzOA4t72muyNRDFRh9Vh47mbbfOxhrynI3IABZKInY
-# CzE0OYX6K54hfWTEEbPl3rmWSeG3gEqy/K5UClpVBDr0GWnW1zHlTa+OEpj7drz8
-# fCyZFXgSGK3GXhDPqPwdByVIRdTELjSkkkKq/tKuVVnyvrmdOmqnrzRnsIxmOdln
-# ZS5qZ9Uaa+dDKdO8TWZ1LQIulkEr7BrwQQf6YwX7DS1DTvp7t7HEF4Dl2WK0fszE
-# Q0/o0Ftos68AeEhje4aXLPzTcKm2JMsa8RdR2x/xTYQqXNBMqh1sgSvmYyz/TiRV
-# 3AGsgzdqggt+KMk1UnjEH289d0M3Y3L1RTI4Fb/1R6UTNVTu1bntrt0XGBFN257p
-# tPrzfxbGdrmngMSltDyF1CeFRq3sVyPMHPBWE8FwL5IZ5tu3oKMuhXu7uqI5Ixx6
-# S33reoAwLQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzQ0
+# MDNaMC8GCSqGSIb3DQEJBDEiBCCrjHEpXLAFAu5KnJxIGDEW1bfuzmUkd27Cw6mk
+# sfpzkTANBgkqhkiG9w0BAQEFAASCAgCOqjgxX+qmGDiwq1DWEsHCrntp9+mib2xQ
+# UvNSmM6h1XHZMPC1wWxQk2RAym6rbWk4ulqeQq73Y5hpJQmJNbztvsob1JAoU0WT
+# yCRezVYvCVny+iODwQfFnAXnE5MOxt/nJsi9Q1sfytPJOlIYEDzEERQqFvTk/9KC
+# SkfYCIVRWjd64uE1WGAZaqq8agMvyKT4xMdD+4vhwNuxfx5yXeiq0uS3e9DeZRPu
+# Bb4Slrh32UX9T6H01/IJmzU+CKW/8IL77tKPSjDv2bS9uTwr34ZHaZIHih1e3Tyo
+# p0bKt60DNYilRdWNDwPDoJ8Cn4Bg2IQ0qS/bMT4v7YGkJ6l5WSPn4eONllJVC7Rg
+# k73mPLyUz+ZmfpmS43F60cDSg3RoHI2Cqw46HIwZUY1/MEa5UxPzrzP9Jx1lp4wu
+# 9kNBOiRzB7rOGBiGJn8Od6Y/AJh5hZhJnKnZDNsYCQK3IcvZpcEdWjf287WbDXov
+# 89MLMRntw8v1Bm02YK4dJXXaw076t7U1vSIF6rPJNNq1DL1kJ/SPwIV+RFLUxR8P
+# mpUy5QPnPhe97+QP0vY7ScQdTbF67QKPzCshh7+b0z5LQKNbEcA6OwRugJqqIjsK
+# uYQ/MIBE8O+kFNKNsUcOFuVuFRlzlbG8bDlOAUgCPDaF5uBTl/289d/kzVq3RUeE
+# SrBp6wrT4g==
 # SIG # End signature block
