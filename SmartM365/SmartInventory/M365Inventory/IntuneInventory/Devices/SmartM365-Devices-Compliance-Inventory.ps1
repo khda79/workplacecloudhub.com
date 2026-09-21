@@ -20,7 +20,10 @@ Optional: limit scope to a specific Windows device name (exact or startswith).
 Fetch and process per-setting noncompliant details to compute category rollup when policy-state detail collection is enabled.
 
 .PARAMETER IncludePolicyStates
-Fetch per-device compliance policy states and optional setting states. This is detailed and can be slow on large tenants.
+    Fetch per-device compliance policy states and optional setting states. Disabled by default because this is expensive on large tenants.
+
+.PARAMETER PolicyStateMaxRuntimeMinutes
+    Maximum wall-clock duration for detailed policy-state collection before the circuit breaker preserves the summary-only result.
 
 .PARAMETER EnableDirectoryEnrichment
 Resolve Entra directory details such as on-premises OU/domain per device. This adds Graph calls and is disabled by default for full-tenant runs.
@@ -36,10 +39,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.17
+    Version : 1.18
 
 .VERSION
-1.17
+1.18
 
 
 .REQUIREMENTS
@@ -49,7 +52,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.17
+    Version : 1.18
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -68,13 +71,16 @@ param(
     [bool]$IncludeComplianceSettings = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$IncludePolicyStates = $true,
+    [bool]$IncludePolicyStates = $false,
 
     [Parameter(Mandatory = $false)]
     [bool]$EnableDirectoryEnrichment = $false,
 
     [Parameter(Mandatory = $false)]
     [int]$MaxDevices = 0,
+
+    [Parameter(Mandatory = $false)]
+    [int]$PolicyStateMaxRuntimeMinutes = 60,
 
     [Parameter(Mandatory = $false)]
     [switch]$AllDevices,
@@ -305,7 +311,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -326,8 +332,15 @@ $script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) 
     [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0)
 }
 if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
-$script:IncludePolicyStatesEffective = if ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $true) }
+$script:IncludePolicyStatesExplicit = $PSBoundParameters.ContainsKey('IncludePolicyStates')
+$script:IncludePolicyStatesEffective = if ($script:IncludePolicyStatesExplicit) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
 $script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
+$script:PolicyStateMaxRuntimeMinutes = if ($PSBoundParameters.ContainsKey('PolicyStateMaxRuntimeMinutes')) { [int]$PolicyStateMaxRuntimeMinutes } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateMaxRuntimeMinutes' -DefaultValue 60) }
+if ($script:PolicyStateMaxRuntimeMinutes -lt 1) { $script:PolicyStateMaxRuntimeMinutes = 60 }
+$script:PolicyStateAutoDisableDeviceThreshold = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateAutoDisableDeviceThreshold' -DefaultValue 5000)
+if ($script:PolicyStateAutoDisableDeviceThreshold -lt 0) { $script:PolicyStateAutoDisableDeviceThreshold = 0 }
+$script:PolicyStateBatchProgressInterval = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateBatchProgressInterval' -DefaultValue 25)
+if ($script:PolicyStateBatchProgressInterval -lt 1) { $script:PolicyStateBatchProgressInterval = 25 }
 $script:MaxPolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxPolicyStateFailures' -DefaultValue 100)
 $script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxConsecutivePolicyStateFailures' -DefaultValue 25)
 $script:PolicyStateFailureCount = 0
@@ -337,6 +350,11 @@ $script:PolicyDetailCollectionComplete = [bool]$script:IncludePolicyStatesEffect
 $script:ComplianceFatalError = $null
 $script:SettingBatchFallbackCounts = @{}
 $script:SettingBatchFallbackExamples = [System.Collections.Generic.List[string]]::new()
+$script:PolicyStateCollectionStartedAt = $null
+$script:PolicyStateDeadlineUtc = $null
+$script:PolicyStateCircuitBreakerLogged = $false
+$script:PolicyStateBatchRetryCount = 0
+$script:PolicyStateBatchThrottleCount = 0
 
 $logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Log"
@@ -374,8 +392,47 @@ function Write-ComplianceWarning {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Message)
 
-    $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1
-    Write-Warning $Message
+    WriteLog -Message $Message -Level 'WARNING'
+}
+
+function Write-ComplianceInfo {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    WriteLog -Message $Message -Level 'INFO'
+}
+
+function Assert-PolicyStateRuntimeAvailable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Operation)
+
+    if ($null -eq $script:PolicyStateDeadlineUtc -or [datetime]::UtcNow -lt $script:PolicyStateDeadlineUtc) {
+        return
+    }
+
+    $script:PolicyStateCollectionDisabled = $true
+    $script:PolicyDetailCollectionComplete = $false
+    $message = "Detailed compliance policy-state collection reached its $($script:PolicyStateMaxRuntimeMinutes)-minute maximum runtime during '$Operation'. Device summary processing will continue and the last valid detailed DATA-LAST export will be preserved."
+    if (-not $script:PolicyStateCircuitBreakerLogged) {
+        Write-ComplianceWarning -Message $message
+        $script:PolicyStateCircuitBreakerLogged = $true
+    }
+
+    $exception = [System.TimeoutException]::new($message)
+    $exception.Data['SmartM365PolicyStateCircuitBreaker'] = $true
+    throw $exception
+}
+
+function Test-PolicyStateCircuitBreakerException {
+    [CmdletBinding()]
+    param([AllowNull()]$ErrorRecord)
+
+    try {
+        return [bool]$ErrorRecord.Exception.Data['SmartM365PolicyStateCircuitBreaker']
+    }
+    catch {
+        return $false
+    }
 }
 
 try {
@@ -502,20 +559,27 @@ function Invoke-GraphBatchWithSubRequestRetry {
     $maxAttempts = [math]::Max(1, $script:GraphMaxRetryAttempts)
     $serverErrorMaxAttempts = [math]::Max(1, [math]::Min($ServerErrorMaxAttempts, $maxAttempts))
     $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+    $totalInitialBatches = if ($Requests.Count -gt 0) { [int][math]::Ceiling($Requests.Count / 20.0) } else { 0 }
+    $batchNumber = 0
+    $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     # Retry each throttled slice before sending the rest of the collection. The former
     # whole-collection retry kept submitting thousands of requests after Graph had
     # started returning 429, then waited only after the throttle storm was complete.
     for ($initialOffset = 0; $initialOffset -lt $Requests.Count; $initialOffset += 20) {
+        Assert-PolicyStateRuntimeAvailable -Operation $Operation
+        $batchNumber++
         $initialLast = [math]::Min($initialOffset + 19, $Requests.Count - 1)
         $pending = @($Requests[$initialOffset..$initialLast])
 
         for ($attempt = 1; $attempt -le $maxAttempts -and $pending.Count -gt 0; $attempt++) {
+            Assert-PolicyStateRuntimeAvailable -Operation $Operation
             $nextPending = [System.Collections.Generic.List[object]]::new()
             $retryResponses = [System.Collections.Generic.List[object]]::new()
             $batchSize = [math]::Max(1, [int][math]::Floor(20 / [math]::Pow(2, $attempt - 1)))
 
             for ($offset = 0; $offset -lt $pending.Count; $offset += $batchSize) {
+                Assert-PolicyStateRuntimeAvailable -Operation $Operation
                 $last = [math]::Min($offset + $batchSize - 1, $pending.Count - 1)
                 $slice = @($pending[$offset..$last])
                 $requestById = @{}
@@ -535,6 +599,8 @@ function Invoke-GraphBatchWithSubRequestRetry {
                     $isServerError = $status -in @(500, 502, 503, 504)
                     $canRetry = ($isThrottle -and $attempt -lt $maxAttempts) -or
                         ($isServerError -and $attempt -lt $serverErrorMaxAttempts)
+
+                    if ($isThrottle) { $script:PolicyStateBatchThrottleCount++ }
 
                     if ($status -eq 200 -or -not $canRetry) {
                         $responseMap[$requestId] = $response
@@ -562,12 +628,25 @@ function Invoke-GraphBatchWithSubRequestRetry {
             }
 
             if ($nextPending.Count -gt 0) {
+                $script:PolicyStateBatchRetryCount++
                 $delay = Get-GraphBatchRetryDelaySeconds -Responses @($retryResponses) -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
+                Write-ComplianceWarning -Message ("{0}: batch {1}/{2} paused for {3}s before retry {4}/{5}; {6} sub-request(s) pending." -f $Operation, $batchNumber, $totalInitialBatches, $delay, ($attempt + 1), $maxAttempts, $nextPending.Count)
                 Start-Sleep -Seconds $delay
+                Assert-PolicyStateRuntimeAvailable -Operation $Operation
+                Write-ComplianceInfo -Message ("{0}: batch {1}/{2} resumed after throttle/transient retry delay." -f $Operation, $batchNumber, $totalInitialBatches)
                 $pending = @($nextPending)
             } else {
                 $pending = @()
             }
+        }
+
+        if ($totalInitialBatches -gt 0 -and ($batchNumber -eq 1 -or $batchNumber -eq $totalInitialBatches -or ($batchNumber % $script:PolicyStateBatchProgressInterval) -eq 0)) {
+            $elapsedSeconds = [math]::Max(0.001, $progressWatch.Elapsed.TotalSeconds)
+            $completedRequests = [math]::Min($Requests.Count, $initialLast + 1)
+            $rate = $completedRequests / $elapsedSeconds
+            $remainingSeconds = if ($rate -gt 0) { [math]::Max(0, ($Requests.Count - $completedRequests) / $rate) } else { 0 }
+            $percent = [math]::Round(100 * $completedRequests / $Requests.Count, 1)
+            Write-ComplianceInfo -Message ("{0}: batch {1}/{2}; sub-requests {3}/{4} ({5}%); elapsed {6}; rate {7:N2}/s; ETA {8}." -f $Operation, $batchNumber, $totalInitialBatches, $completedRequests, $Requests.Count, $percent, $progressWatch.Elapsed.ToString('hh\:mm\:ss'), $rate, ([timespan]::FromSeconds($remainingSeconds).ToString('hh\:mm\:ss')))
         }
     }
 
@@ -692,7 +771,7 @@ function Invoke-GraphPagedCollection {
             if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
         }
 
-        Write-Host ("{0}: page {1}, total {2}" -f $Operation, $pageNumber, $items.Count) -ForegroundColor DarkCyan
+        Write-ComplianceInfo -Message ("{0}: page {1}, total {2}" -f $Operation, $pageNumber, $items.Count)
 
         if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
         $nextLink = if (Test-ComplianceGraphProperty -InputObject $page -Name '@odata.nextLink') { [string](Get-ComplianceGraphPropertyValue -InputObject $page -Name '@odata.nextLink') } else { $null }
@@ -1118,15 +1197,15 @@ try {
     $needConnect = $false
 
     if ($Connect) {
-        Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
+        Write-ComplianceInfo -Message "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected."
         Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
         $needConnect = $true
     } else {
         if ($graphContext -and (Test-GraphConnection)) {
-            Write-Host "Existing Microsoft Graph session detected. Reusing current connection." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Existing Microsoft Graph session detected. Reusing current connection."
             $needConnect = $false
         } else {
-            Write-Host "No existing Graph session detected. Will establish a new connection..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "No existing Graph session detected. Will establish a new connection."
             $needConnect = $true
         }
     }
@@ -1144,9 +1223,9 @@ try {
             $connectParams.Thumbprint   = $Thumb
             $connectParams.TenantId     = $TenantId
             $connectParams.Organization = $OrgDomain
-            Write-Host "Connecting to Microsoft Graph with app-only certificate authentication..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Connecting to Microsoft Graph with app-only certificate authentication."
         } else {
-            Write-Host "Connecting to Microsoft Graph with interactive authentication..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Connecting to Microsoft Graph with interactive authentication."
         }
 
         $connectResult = Connect-SmartM365CloudSession @connectParams
@@ -1175,9 +1254,9 @@ try {
                       ([string]::IsNullOrWhiteSpace($ManagedDeviceId) -and [string]::IsNullOrWhiteSpace($DeviceName))
 
         if ($processAll) {
-            Write-Host "Retrieving all Intune managed Windows devices with explicit Graph paging..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Retrieving all Intune managed Windows devices with explicit Graph paging."
             if ($script:MaxDevicesEffective -gt 0) {
-                Write-Host ("MaxDevices smoke cap active: {0}" -f $script:MaxDevicesEffective) -ForegroundColor Yellow
+                Write-ComplianceWarning -Message ("MaxDevices smoke cap active: {0}" -f $script:MaxDevicesEffective)
             }
             $devices = @(Get-ManagedWindowsDevicesFast -MaxItems $script:MaxDevicesEffective)
             if (-not $devices -or $devices.Count -eq 0) {
@@ -1185,20 +1264,20 @@ try {
                 throw "No Windows managed devices found."
             }
         } elseif (-not [string]::IsNullOrWhiteSpace($ManagedDeviceId)) {
-            Write-Host "Resolving device by ManagedDeviceId '$ManagedDeviceId'..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Resolving device by ManagedDeviceId '$ManagedDeviceId'."
             $devices = @(Get-ManagedWindowsDevicesFast -ManagedDeviceId $ManagedDeviceId -MaxItems 1)
             if (-not $devices -or $devices.Count -eq 0) {
                 throw ("No device found with ManagedDeviceId='{0}'." -f $ManagedDeviceId)
             }
         } else {
-            Write-Host "Resolving device by DeviceName '$DeviceName'..." -ForegroundColor Cyan
+            Write-ComplianceInfo -Message "Resolving device by DeviceName '$DeviceName'."
             $devices = @(Get-ManagedWindowsDevicesFast -DeviceName $DeviceName -MaxItems 1)
             if (-not $devices -or $devices.Count -eq 0) {
                 throw ("No Windows device found for DeviceName='{0}'." -f $DeviceName)
             }
         }
 
-        Write-Host ("Managed Windows devices selected for compliance summary: {0}" -f @($devices).Count) -ForegroundColor Cyan
+        Write-ComplianceInfo -Message ("Managed Windows devices selected for compliance summary: {0}" -f @($devices).Count)
     } catch {
         Write-Error "Failed to resolve target devices. $_"
         throw
@@ -1210,13 +1289,33 @@ try {
     $polAll   = New-Object System.Collections.Generic.List[object]
 
     $policyStateBatchMap = @{}
+    if ($script:IncludePolicyStatesEffective -and -not $script:IncludePolicyStatesExplicit -and
+        $script:PolicyStateAutoDisableDeviceThreshold -gt 0 -and @($devices).Count -gt $script:PolicyStateAutoDisableDeviceThreshold) {
+        $script:IncludePolicyStatesEffective = $false
+        $script:PolicyStateCollectionDisabled = $true
+        $script:PolicyDetailCollectionComplete = $true
+        Write-ComplianceWarning -Message ("Detailed compliance policy-state collection was automatically disabled for {0} devices because the configured threshold is {1}. The device summary will continue. Use -IncludePolicyStates `$true to explicitly request the bounded detailed workflow." -f @($devices).Count, $script:PolicyStateAutoDisableDeviceThreshold)
+    }
+
+    if (-not $script:PolicyStateCollectionDisabled) {
+        $script:PolicyStateCollectionStartedAt = Get-Date
+        $script:PolicyStateDeadlineUtc = [datetime]::UtcNow.AddMinutes($script:PolicyStateMaxRuntimeMinutes)
+        $expectedPolicyStateBatches = [int][math]::Ceiling(@($devices).Count / 20.0)
+        Write-ComplianceInfo -Message ("Detailed compliance policy-state collection started: {0} devices, approximately {1} Graph batches, maximum runtime {2} minute(s)." -f @($devices).Count, $expectedPolicyStateBatches, $script:PolicyStateMaxRuntimeMinutes)
+    }
+
     if (-not $script:PolicyStateCollectionDisabled) {
         try {
             $policyStateBatchMap = Get-CompliancePolicyStateBatchMap -Devices @($devices)
-            Write-Host ("Compliance policy-state batches completed: {0}/{1} devices prefetched." -f $policyStateBatchMap.Count, @($devices).Count) -ForegroundColor Cyan
+            Write-ComplianceInfo -Message ("Compliance policy-state batches completed: {0}/{1} devices prefetched." -f $policyStateBatchMap.Count, @($devices).Count)
         }
         catch {
-            Write-ComplianceWarning -Message ("Compliance policy-state batching failed; sequential retrieval will be used: {0}" -f $_.Exception.Message)
+            if (Test-PolicyStateCircuitBreakerException -ErrorRecord $_) {
+                Write-ComplianceInfo -Message 'Compliance policy-state sequential fallback skipped because the runtime circuit breaker is active.'
+            }
+            else {
+                Write-ComplianceWarning -Message ("Compliance policy-state batching failed; sequential retrieval will be used: {0}" -f $_.Exception.Message)
+            }
             $policyStateBatchMap = @{}
         }
     }
@@ -1283,10 +1382,12 @@ try {
 
         $policyStates = $null
         try {
+            Assert-PolicyStateRuntimeAvailable -Operation 'Process Intune compliance policy states'
             if ($policyStateBatchMap.ContainsKey([string]$dev.Id)) {
                 $policyStates = @($policyStateBatchMap[[string]$dev.Id])
             }
             else {
+                Assert-PolicyStateRuntimeAvailable -Operation 'Get Intune compliance policy states sequential fallback'
                 $cmd = Get-Command -Name Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ErrorAction SilentlyContinue
             if ($cmd) {
                 $policyStates = Invoke-WithRetry -Script {
@@ -1309,6 +1410,9 @@ try {
             }
             $script:ConsecutivePolicyStateFailures = 0
         } catch {
+            if (Test-PolicyStateCircuitBreakerException -ErrorRecord $_) {
+                continue
+            }
             $script:PolicyDetailCollectionComplete = $false
             $script:PolicyStateFailureCount++
             $script:ConsecutivePolicyStateFailures++
@@ -1338,9 +1442,13 @@ try {
                 $settingStateBatchMap = @{}
                 if ($pTot -gt 0) {
                     try {
+                        Assert-PolicyStateRuntimeAvailable -Operation 'Get Intune compliance setting states batch'
                         $settingStateBatchMap = Get-ComplianceSettingStateBatchMap -ManagedDeviceId ([string]$dev.Id) -Policies @($targets)
                     }
                     catch {
+                        if (Test-PolicyStateCircuitBreakerException -ErrorRecord $_) {
+                            continue
+                        }
                         Write-ComplianceWarning -Message ("Compliance setting-state batching failed for device '{0}'; sequential retrieval will be used: {1}" -f $dev.DeviceName, $_.Exception.Message)
                         $settingStateBatchMap = @{}
                     }
@@ -1356,6 +1464,7 @@ try {
                     }
 
                     try {
+                        Assert-PolicyStateRuntimeAvailable -Operation 'Get Intune compliance setting states sequential fallback'
                         $s = @()
                         if ($settingStateBatchMap.ContainsKey([string]$p.id)) {
                             $s = @($settingStateBatchMap[[string]$p.id])
@@ -1381,6 +1490,9 @@ try {
                             $policyCategoryRollup[$p.displayName][$cat] = 'Fail'
                         }
                     } catch {
+                        if (Test-PolicyStateCircuitBreakerException -ErrorRecord $_) {
+                            break
+                        }
                         $script:PolicyDetailCollectionComplete = $false
                         Write-ComplianceWarning -Message ("Failed to retrieve setting states for '{0}' on device '{1}': {2}" -f $p.displayName, $dev.DeviceName, $_.Exception.Message)
                     }
@@ -1458,6 +1570,11 @@ try {
 
     Write-Progress -Id 1 -Activity "Processing devices" -Completed
 
+    if ($script:PolicyStateCollectionStartedAt) {
+        $policyStateElapsed = (Get-Date) - $script:PolicyStateCollectionStartedAt
+        Write-ComplianceInfo -Message ("Detailed compliance policy-state collection finished after {0}; batch retries={1}; throttled sub-responses={2}; circuit breaker={3}." -f $policyStateElapsed.ToString('hh\:mm\:ss'), $script:PolicyStateBatchRetryCount, $script:PolicyStateBatchThrottleCount, $script:PolicyStateCircuitBreakerLogged)
+    }
+
     if ($script:SettingBatchFallbackCounts.Count -gt 0) {
         $fallbackTotal = ($script:SettingBatchFallbackCounts.Values | Measure-Object -Sum).Sum
         $fallbackSummary = (@($script:SettingBatchFallbackCounts.GetEnumerator() |
@@ -1469,8 +1586,7 @@ try {
 
     # 3) Output
     if ($rows.Count -gt 0) {
-        Write-Host ""
-        Write-Host ("Devices compliance summary: {0} row(s)" -f $rows.Count) -ForegroundColor Cyan
+        Write-ComplianceInfo -Message ("Devices compliance summary: {0} row(s)" -f $rows.Count)
 
         $summaryOut = $rows |
             Sort-Object DeviceName |
@@ -1481,31 +1597,28 @@ try {
 
         $summaryOut | Select-Object -First 25 | Format-Table -AutoSize
         if ($summaryOut.Count -gt 25) {
-            Write-Host ("Displayed first 25 of {0} device summary rows." -f $summaryOut.Count) -ForegroundColor DarkCyan
+            Write-ComplianceInfo -Message ("Displayed first 25 of {0} device summary rows." -f $summaryOut.Count)
         }
 
         try {
             Write-SmartM365CsvAtomically -Data @($summaryOut) -Path $mainCsv
             Export-SmartM365Csv -Data @($summaryOut) -TimestampedPath $tsCsv -LatestPath $lastCsv | Out-Null
 
-            Write-Host "Compliance summary CSV saved: $mainCsv"
+            WriteLog -Message "Compliance summary CSV saved: $mainCsv" -Level 'SUCCESS'
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance summary CSVs: $_"
             throw
         }
     } else {
-        Write-Host ""
-        Write-Host "No devices to display or export." -ForegroundColor Yellow
+        Write-ComplianceWarning -Message "No devices to display or export."
     }
 
     if (-not $script:IncludePolicyStatesEffective) {
-        Write-Host ""
-        Write-Host "Compliance policy detail collection disabled by configuration or parameter. Set IncludePolicyStates to true to generate the detailed per-policy CSV." -ForegroundColor Yellow
+        Write-ComplianceInfo -Message "Compliance policy detail collection disabled by configuration, automatic large-tenant safeguard, or parameter. Set IncludePolicyStates to true explicitly to generate the detailed per-policy CSV."
     } elseif (-not $script:PolicyDetailCollectionComplete) {
         Write-ComplianceWarning -Message 'Compliance policy detail collection was incomplete. Detailed policy CSV publication is skipped so the last valid DATA-LAST export is preserved.'
     } elseif ($polAll.Count -gt 0) {
-        Write-Host ""
-        Write-Host ("Compliance details per policy: {0} row(s)" -f $polAll.Count) -ForegroundColor Cyan
+        Write-ComplianceInfo -Message ("Compliance details per policy: {0} row(s)" -f $polAll.Count)
 
         $polOut = $polAll |
             Sort-Object DeviceName, displayName, version |
@@ -1518,37 +1631,36 @@ try {
 
         $polOut | Select-Object -First 50 | Format-Table -AutoSize -Wrap
         if ($polOut.Count -gt 50) {
-            Write-Host ("Displayed first 50 of {0} policy detail rows." -f $polOut.Count) -ForegroundColor DarkCyan
+            Write-ComplianceInfo -Message ("Displayed first 50 of {0} policy detail rows." -f $polOut.Count)
         }
 
         try {
             Write-SmartM365CsvAtomically -Data @($polOut) -Path $policyMainCsv
             Export-SmartM365Csv -Data @($polOut) -TimestampedPath $policyTsCsv -LatestPath $policyLastCsv | Out-Null
 
-            Write-Host "Compliance policy CSV saved: $policyMainCsv"
+            WriteLog -Message "Compliance policy CSV saved: $policyMainCsv" -Level 'SUCCESS'
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance policy CSVs: $_"
             throw
         }
     } else {
-        Write-Host ""
-        Write-Host "Compliance details: no policy states available or calls failed." -ForegroundColor Yellow
+        Write-ComplianceWarning -Message "Compliance details: no policy states available or calls failed."
     }
 }
 catch {
     $script:ComplianceFatalError = $_
+    WriteLog -Message "A global error occurred in SmartM365-Devices-Compliance-Inventory.ps1: $($_.Exception.Message)" -Level 'ERROR'
     $global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)
-    Write-Host "A global error occurred in M365-Devices-Compliance.ps1 : $($_.Exception.Message)" -ForegroundColor Red
     Write-Error $script:ComplianceFatalError
 }
 finally {
     # Disconnect Graph only if we connected it in this run
     if ($connectedGraphInThisRun) {
-        Write-Host "`n--- Disconnect Cloud Services ---"
+        Write-ComplianceInfo -Message 'Disconnecting cloud services.'
         try {
             Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true
         } catch {
-            Write-Host ("Error during Graph disconnect in finally: {0}" -f $_) -ForegroundColor Yellow
+            Write-ComplianceWarning -Message ("Error during Graph disconnect in finally: {0}" -f $_)
         }
     }
 
@@ -1570,8 +1682,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANsfa9XpWBuLxE
-# 8RUk9zjMpAA37xvZ6J8IOAj4p0vL/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsPG4NilpQ6x67
+# lzg4wAzcrDzJua2Cny3f7usZN5i+4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1704,31 +1816,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDqKwVrEdMpY7ozwqVNjy0jMnybgDAA9u9mrpFjp0F3cMA0GCSqG
-# SIb3DQEBAQUABIIBgCo8CzsziI+QanqZSKOHHk9Opfzq99vcj+KPcJG1onmJyjKe
-# T18BqQwJ7Y2wkbJoMf0w/cKC9CmxtccbyFVMwQ+cOOnseZMT24krA/UvNLIgPVko
-# BDax+7ebDFBmVYmliGmT6uLzyvxMrFACpVkFeoLdgiqEAhdMFkqDZAL9iyv+n4YD
-# hw3tKDdFUl9Zlhmaksr4opcQ15oBuewhOlg8vIa96lUZSqiiTaU2Vk3JCee4owcI
-# 4CoJ8jm95mfZNRUPHlOENIsAAdOQAdAgYr3M+vcy3BcrfHK+ZwcdS3qojEXJ61xh
-# uBcn4TyHOipRyBo1d4CU1DNwIztMJ+71ilhzJJMLKHouqCOPGDes/myn4hMGu6A1
-# AjvwAwdW+SUNd4guHHa6S48ABjq0Q6/TlAYUDis+MWVAIOn82PLuCAlvfI+O5y7G
-# 3gZOIfhnJy6/1BidLtZ2fyZDlGhH8l4ErSDiToBxk8qrWPPPoHIP1Bpsik+//urM
-# 6AE/YqC9cKGs8Xwv2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB0OzgH6RGRrOi6bVTjoaQ5f27PmcH07CAk+jwH65o2HMA0GCSqG
+# SIb3DQEBAQUABIIBgJvPiEaDngfmSStBYU0TCYKoBOSC4usNTePN1LMwagsJw8On
+# 1zZ6DBbmNa2dTl69dKB2T/GZVzevnrie2ZZMxYv3+Nb//FlUIcGecsm2Pe4QV3LV
+# 37dxnpAbQeDfAP2rSSEY1NaBiQzYM2COjMYUw1SlCxA5gxGG6EAqdSyhEs6EinmK
+# aFs4aM9MWUgZazL7IowZJzkPDefOSd7SVpEfIbi+huYcK4LSEdk1qPrHH+rbpTa5
+# YTr7RswLQYwlOfAttnb4BR6m8aAK+BA/WAE+XkkiC0EMJl0pR58hlZ1+TTZJP/oi
+# nKJn+w50MsMIPdV7FAPV8Z0hRBPJ/8h+54d9gVXAeNLK7LPW0cHuLQz0q8f8HAwJ
+# OLVI3rHQTEGEaSTLPHczHvDqpfIrRgxUCJQw93A+UQe1IhhnaH3GagamhpVlpqum
+# 4XgQPhhXnvKXqlsZMwoj1WxRvWOfYoo6KnVcyrWFA1TvXKlXX1YtoUJf8mX0sGTg
+# dBB+UEc8OZxLtV4A2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNjQz
-# MzlaMC8GCSqGSIb3DQEJBDEiBCDoJTRMnA/6HngohqU74+sPwzJeVwjMKjhRSD4I
-# 3im92zANBgkqhkiG9w0BAQEFAASCAgA/tt+6LvXEcuw2DT2s1Khys+aShhAXN18V
-# FoctJcqcrSUKM2ygoUUdtR5lOMfMU3ZNbAvMKTmN7bwJwIY6t1ztpvIqyeNaPFY+
-# 09qSxeUVlofW0gBA57jrw0GeX1l9uKoBxUjs5c2PiD0XDUbfpawy+a8+2myIxZeI
-# TS7KesxLvGlRSsIgpVY4VAJ8e2+mOEkEhGxlCPSi84mgh4DGmn/WBktVNVJytnVw
-# ov4XAgn8xyfT06YGmdTvWtDVzUESIlO/tFbJ/rErmVqoze1hnnpr0wTh7qIW8iid
-# DWuKASjxZP8HN+QzLedkTmCRgmZVuouU3VnwKaKgUnXmkVM8/HWLGrHiXhJu0g/y
-# J4juhRAE6b9PujYDqTE6P1U6MkDFm+T8xwoclbkUGPBbDUGgtpsKrVGSNo3xjwaj
-# JRTO2ni80OsGcjzfPrihe09djPpsxK3F82B64qsI3DAzbzLwrhEccHM7xcZowBKe
-# uZXBkA6g6GYgWA82QX5w6s6OGt8XYMKTPbOqYxRqhmT95l3UwNf7PP96mG46Ii7k
-# D7Mb1mKWmuAM/9cQsQ5lcRLIWd8OnnoJ4kT07kheGbHdAC3EOKwoVR6R9MmatDFn
-# MwHsf8r6CqNE/EwZwK18AQnS5PU/hjPV5rFnw3YDnSGBZzB1jIxBzCOtqFFXhMVy
-# QzHoSzijUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMjI1
+# MDVaMC8GCSqGSIb3DQEJBDEiBCCHJIGdACpBXpJEh07Qjn9iW521/Nm8bkjOiRRb
+# MxIqnjANBgkqhkiG9w0BAQEFAASCAgAHbKw1yR46TcIwUBFe0B/vOqskDrSmzEds
+# Im8EJscm69AZiZ2QnmyRqWm8mtlx2+pYQAVjuhE8k/i948iEdvYkSq5SfMEtXJnh
+# YYCcPxcysnILek39HmE6nD9g8oSqyNDbq26mTRzHl0DhUXcl8+Mf9O+5xqh9hP8D
+# d0nB+nido9em2dMp+iWktfVN/sf0479MACE5yLR1BlUcBgXy4dE/f/a+8e5xS3UN
+# x35g/jt3jctHLZU4pt7SGu32dP6ec/YqlTd4uOnNlxRq9uGlFRyxgmq8zdOps6Gt
+# tL62284udcE8Z0auFxqNzW4YW1JCDeERe0w5BxBU/deVWta1JqCPLLYrDXUiIkCB
+# yKvqBYDUw6niXVL6d+OOmSkNvr7D0cl3Tvsky+0LFmB4p25fRj35T2pi8hArq5W8
+# ZXy41lv/k9CdWexatFZKj2HceMp9PMO5rT+Abyvt2K3Z7H7NdO9dli0/QDblsofB
+# kRIbBJRtIfiVVYPDm8ei84BXYnAR0sVbgWg9kIGGZxF8Qnar/jTEaQICnkYTYnEQ
+# idB8TtlFh8SMyhFia4z+bl+ZNoZDDUzoYxit6/CuhxDsOCZLu/invtzzh0A0+pan
+# hIqGvMx8rTaCSCd6h/C87BYhdhwvyK3BM9o9pSSuf9eDfTDs/sTH5ZCplgMX0khu
+# ahN4IS9sIA==
 # SIG # End signature block

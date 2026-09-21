@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param(
@@ -135,20 +135,20 @@ try {
     }
 
     Test-OfflineCase 'Compliance pager rejects malformed page' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        $m=Import-OfflineFunctions $paths.Compliance @('Write-ComplianceInfo','Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
         try{&$m {function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{unexpected=1}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'value' -and $_.Exception.Message-match'Type=' -and $_.Exception.Message-match'Keys='};Assert-Offline $caught 'Malformed compliance page was accepted or lacked safe shape diagnostics.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance pager rejects repeated nextLink' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
-        try{&$m {$script:n=0;function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Compliance cycle was not rejected.'}finally{Remove-Module $m -Force}
+        $m=Import-OfflineFunctions $paths.Compliance @('Write-ComplianceInfo','Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {$script:n=0;function script:WriteLog{param($Message,$Level)};function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphPagedCollection -Uri p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Compliance cycle was not rejected.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance pager accepts multi-page dictionary responses' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
-        try{&$m {$script:n=0;function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-eq1){return @{value=@(@{id='one'});'@odata.nextLink'='p2'}};return @{value=@(@{id='two'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq2) 'Compliance dictionary pages were not fully collected.';Assert-Offline ($items[0]['id']-eq'one' -and $items[1]['id']-eq'two') 'Compliance dictionary page order or values changed.'}finally{Remove-Module $m -Force}
+        $m=Import-OfflineFunctions $paths.Compliance @('Write-ComplianceInfo','Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {$script:n=0;function script:WriteLog{param($Message,$Level)};function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{$script:n++;if($script:n-eq1){return @{value=@(@{id='one'});'@odata.nextLink'='p2'}};return @{value=@(@{id='two'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq2) 'Compliance dictionary pages were not fully collected.';Assert-Offline ($items[0]['id']-eq'one' -and $items[1]['id']-eq'two') 'Compliance dictionary page order or values changed.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance pager retains PSCustomObject compatibility' {
-        $m=Import-OfflineFunctions $paths.Compliance @('Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
-        try{&$m {function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{value=@([pscustomobject]@{id='object'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq1 -and $items[0].id-eq'object') 'Compliance PSCustomObject page compatibility regressed.'}finally{Remove-Module $m -Force}
+        $m=Import-OfflineFunctions $paths.Compliance @('Write-ComplianceInfo','Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
+        try{&$m {function script:WriteLog{param($Message,$Level)};function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{value=@([pscustomobject]@{id='object'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq1 -and $items[0].id-eq'object') 'Compliance PSCustomObject page compatibility regressed.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance collection guards and fatal summary use canonical helpers' {
         $text=Get-OfflineSourceText $paths.Compliance
@@ -156,6 +156,66 @@ try {
         Assert-Offline ((($text|Select-String -Pattern "Test-ComplianceGraphProperty -InputObject .* -Name 'value'" -AllMatches).Matches.Count)-ge7) 'Compliance does not route every collection response through the canonical property helper.'
         Assert-Offline ($text.Contains('$global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)')) 'Compliance fatal errors do not increment the execution error count.'
         Assert-Offline ($text.Contains('Complete-SmartM365ExecutionContext -Status $finalStatus -ErrorRecord $script:ComplianceFatalError')) 'Compliance fatal error details are not passed to the execution summary.'
+    }
+    Test-OfflineCase 'Compliance detailed collection is opt-in and bounded for large tenants' {
+        $text=Get-OfflineSourceText $paths.Compliance
+        $template=Get-OfflineSourceText 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.local.json.template'
+        Assert-Offline ($text -match '\[bool\]\$IncludePolicyStates\s*=\s*\$false') 'Compliance policy-state detail is not disabled by default.'
+        Assert-Offline ($template -match '"IncludePolicyStates"\s*:\s*false') 'Compliance local template still enables policy-state detail by default.'
+        Assert-Offline ($text -match 'PolicyStateAutoDisableDeviceThreshold' -and $text -match 'IncludePolicyStatesExplicit') 'Compliance large-tenant automatic safeguard is missing.'
+        Assert-Offline ($text -match 'PolicyStateMaxRuntimeMinutes' -and $text -match 'Assert-PolicyStateRuntimeAvailable') 'Compliance runtime circuit breaker is missing.'
+        Assert-Offline ($text -match 'Managed Windows devices selected for compliance summary:[^\r\n]+' -and $text -notmatch 'Write-Host \("Managed Windows devices selected') 'The selected-device milestone is still emitted without the timestamped logger.'
+    }
+    Test-OfflineCase 'Compliance batch progress reports rate ETA and completion' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Get-GraphBatchRetryDelaySeconds','Assert-PolicyStateRuntimeAvailable','Invoke-GraphBatchWithSubRequestRetry')
+        try {
+            &$m {
+                $script:GraphMaxRetryAttempts=2
+                $script:GraphRetryMaxSeconds=1
+                $script:PolicyStateDeadlineUtc=[datetime]::UtcNow.AddMinutes(5)
+                $script:PolicyStateMaxRuntimeMinutes=5
+                $script:PolicyStateBatchProgressInterval=1
+                $script:PolicyStateCollectionDisabled=$false
+                $script:PolicyDetailCollectionComplete=$true
+                $script:PolicyStateCircuitBreakerLogged=$false
+                $script:PolicyStateBatchRetryCount=0
+                $script:PolicyStateBatchThrottleCount=0
+                $script:messages=[System.Collections.Generic.List[string]]::new()
+                function script:Write-ComplianceInfo { param($Message) [void]$script:messages.Add([string]$Message) }
+                function script:Write-ComplianceWarning { param($Message) [void]$script:messages.Add([string]$Message) }
+                function script:Invoke-WithRetry { param($Operation,$Script) &$Script }
+                function script:Invoke-MgGraphRequest {
+                    param($Method,$Uri,$Body,$ContentType,$ErrorAction)
+                    $payload=$Body|ConvertFrom-Json
+                    [pscustomobject]@{responses=@($payload.requests|ForEach-Object{[pscustomobject]@{id=[string]$_.id;status=200;body=[pscustomobject]@{value=@()};headers=@{}}})}
+                }
+            }
+            $requests=@(1..45|ForEach-Object{[pscustomobject]@{id=[string]$_;method='GET';url='/synthetic'}})
+            $map=&$m {param($r) Invoke-GraphBatchWithSubRequestRetry -Requests $r -Operation 'Get Intune compliance policy states batch'} $requests
+            $state=&$m {[pscustomobject]@{Messages=@($script:messages);Retries=$script:PolicyStateBatchRetryCount;Throttles=$script:PolicyStateBatchThrottleCount}}
+            $joined=$state.Messages -join "`n"
+            Assert-Offline ($map.Count-eq45) 'Compliance batch fixture did not complete all sub-requests.'
+            Assert-Offline ($joined -match 'batch 1/3' -and $joined -match 'batch 3/3' -and $joined -match 'rate ' -and $joined -match 'ETA ') 'Compliance batch progress is missing batch/rate/ETA details.'
+            Assert-Offline ($state.Retries-eq0 -and $state.Throttles-eq0) 'Compliance batch counters changed on successful responses.'
+        } finally {Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance policy-state circuit breaker preserves summary processing' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Assert-PolicyStateRuntimeAvailable')
+        try {
+            &$m {
+                $script:PolicyStateDeadlineUtc=[datetime]::UtcNow.AddSeconds(-1)
+                $script:PolicyStateMaxRuntimeMinutes=1
+                $script:PolicyStateCollectionDisabled=$false
+                $script:PolicyDetailCollectionComplete=$true
+                $script:PolicyStateCircuitBreakerLogged=$false
+                $script:warnings=0
+                function script:Write-ComplianceWarning { param($Message) $script:warnings++ }
+            }
+            $caught=$false
+            try { &$m {Assert-PolicyStateRuntimeAvailable -Operation fixture} } catch { $caught=[bool]$_.Exception.Data['SmartM365PolicyStateCircuitBreaker'] }
+            $state=&$m {[pscustomobject]@{Disabled=$script:PolicyStateCollectionDisabled;Complete=$script:PolicyDetailCollectionComplete;Logged=$script:PolicyStateCircuitBreakerLogged;Warnings=$script:warnings}}
+            Assert-Offline ($caught -and $state.Disabled -and -not $state.Complete -and $state.Logged -and $state.Warnings-eq1) 'Compliance circuit breaker did not stop details while preserving the summary path.'
+        } finally {Remove-Module $m -Force}
     }
 
     Test-OfflineCase 'Autopatch pager rejects malformed page' {
@@ -376,8 +436,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCP3oRNvYQFYGJI
-# lAsan3gzOAGfmvzV8nVzc8k/zkvw26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMgvQVsSti/9wo
+# EKoMsoNgRu1PzChqvuaxR0q8k9Kgw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -510,31 +570,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPxXOSZXKdOTAEE+I02n/A7Pe3JeA61nRIlIU6XscaprMA0GCSqG
-# SIb3DQEBAQUABIIBgHm7RLrjw7qLtHzCfVwhl2lVB91HOebCh3ud3FLK2ZFp6itz
-# BZxPSyuXqBO/enkqbDzSLLEWJYbFUObP/p9UINfFDyg8UGh9p/7d2Ytra0hBFaeG
-# JiHryf4voNJHMD/XDqOPExSuRQTMzEP4AnxeeUgDFN/H/JM4JPuKnODuXIhXHOpD
-# VySSfK3ciuPG2ErHLgNuNcSMVdgVlW3vTWJk70tb26WlaB1wwQ40rUhUfURdd/j4
-# C0vNGo6RnsFt6qSypkoXMaW3qmSELE4XcYUpbmOt4p846SnBrAAgGcBlOyQ2EKnP
-# lSda2UNqtsMjOkLwg7XKlLT3y5u+/sHqNp3o+9HQxun/dyg0iEXywRzqqpCz23ES
-# MbGao2K3kQcm14QQI99LmvRcuCq34EcNlVyCkYYy8Q4Q+aobHqg71XXIThxJEoKH
-# erFL/F2qw/F2YX12NjokziEvxsjrjigL7Gz88uJMloPslXOyuuIxIovQEQdEEGIx
-# cqq1yq45vLnWklLUoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINMiJ9+mMe13y7KUWf1UbI0SIID9nzrFaan06hOLR6g/MA0GCSqG
+# SIb3DQEBAQUABIIBgHgxdE/PKETceE1c717kYmJbr8zw3MO2/v+rx4lxF+NagGIv
+# CC6IkhREu131Gefkgz0b3oh6jv2T/gyBigaESPWcEStWOSckKc4LJ9lYkt7BCBp6
+# qmEqIXWo1tV3OgWXXLtWr3uX2LqFcDZgsB7P9bR15oI9jv38gkkmprshBtH6S42/
+# 0BnO9cNoWdZd3nVogyT8qPpIIcAZX/dXAzj+fbgcForsA+/6uW7HEWCWnmC+Z0Nl
+# hhOir85QpZGjK2tjqpSBQxTg1nDbJSbXH3baxBPXRps69yvOCooMeUjxKj8kO0mV
+# lZ5FraWEMiZNYKzJ+n16fOMRjvwZjN5buQ0/OB8T3eHENwEffTSrHYmhdZq90zD7
+# j0lOXKyw1QmJjt16dd52/E1HT4oyKSl19MNtO0tD1Ye1tFROZ5+UX3NN+7kKmS0M
+# YEoJKDzgjxCg5mmLRlPu5mLnfzk6WJ21ptH727LfG5aexo7SgVXiBa12bPfjONCm
+# ZvazEL5VeXQbQH6c3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCp7ifXg4oBuHuHUIS4B29h4D3MMu/1rpUEIVlk
-# UKMoyzANBgkqhkiG9w0BAQEFAASCAgCalBNfqn9YpqHEvSMsZsUy27Yd0uot6OtD
-# H35blndtPFkMwWfaZ4IXPYQ15gBIV8iIspIMMuarLWN1d2OSi7Jv67+7zieiOhDT
-# 7ZD83FR8lyZ9kPgEk9HS1aGpMCzdckvCJwk8/qvLwroDogPitoeVb0xDOTSit/tv
-# OHVAO9YU2CceBNCwewfrHcHCqYCn1gQnOn30nlgXzEkDaHjdqbl3i7+ckesPP2hZ
-# mz2Cp1q+jAPIV1JQ6x5uB+/cWIuS/eDNL9qCkdC1wQlMwC/FfbZoKbdvsc6U20Hd
-# BUIA8mbRxp26fw8RcBoQYscGXwq59jm7K4JKOnGjYVgBxYfM3Q+1lDvVOy3HUOGW
-# 6pd35V2VrdQmtYmGfx8XgDUmcASJknR7uWjNFzwaWrwQeHvA5BiwJ2TGvj80uKbW
-# NRqwWyRtcYqq75hCU28Fc4n0UZ3m7DsgiLeCDDrSxQH3ZaHjF1qlvDo67HNDNhCZ
-# vgXNKETVC9GkFkmSLdrnqOP/n10af/nB1WWp9/K5V7ZD97j/HX5TsU5qEPQ7GU4s
-# jeABahm3hrVCKiCPFr3SijH6bjUDGJ7ieDwlqegC5I7R0d8EOgo+PSTb5tPK8yml
-# Hi2U369azT//YqbMBFeTRPrNvU31og3cBX31xHJdpen/CH3gQOgzJojlig9ouEVu
-# HSrRijUHog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMjI1
+# MDdaMC8GCSqGSIb3DQEJBDEiBCD3fsP9sI2jftaCtk7iLo+Q5bQ9T6FPIHK4GAVX
+# jXVOZTANBgkqhkiG9w0BAQEFAASCAgCHGSC7DyM8PmWcmEUMRnldzyeNNwdu5HuZ
+# 9roRdutN78CVgj6fUU+uiEEXwrk7qkPQ+oupK+h8qdlw50Q+bszkPBnj8MJSds0a
+# QjF9UqEcTdvqN0i/a38E1kjSwbo5s2lQ2ZKCZJWjSqTnv7m8IeslwdvgrDYjvtic
+# gTWI+oKeq+6sJemNxuKCrNw6JkQqArnLRy+rP67nuXCzoqidPgNVpFVRLAyNwVba
+# utNzOvzc76htSpSfSSlOXKwLvrgJLIRmTnfhF77PhLoHGSqUhCznX/aSKds9tFH/
+# xFpEVYrord0CdXkeXuiYRKFeCmPa5VyMpkmEcwcPs2iVp+/+a8BRXzFBHewIRcnN
+# 74PJyuh3jeCMxiZ1x0gDQ6ZNLzHzqJWZ4YT6FrSmpM0Ueuj5ifmWs/n5uVU6Xfwm
+# 6A5zcZpBTGyEf9n3rHZGJhqZY+z9FA3ID2U6U7/nRFdx9IJP3gJtUT2BkpVghRLg
+# iGvZxK3ccE+A/3V5eY1nbBVYTdAMESGDVTgN9SeEXo+4OxQqDuXCy20tkbb1jYie
+# LsItiRrxpBA52K+QI4j2t06YUbaCaSk5TCc+i2OWKH0Haas6PTiJAa6c0ju/Rv16
+# HnSowX/m2GK4PoL5EY7riAP6D8LqRNwgO1Nkow8o5MRoyLLKAhGYCybvxzx79nZk
+# RaMwqkzTXA==
 # SIG # End signature block
