@@ -1397,7 +1397,7 @@
     {
       "Name": "M365-SecureScore-Inventory",
       "ScriptPath": "M365Inventory\\Security\\SecureScore\\SmartM365-SecureScore-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1415,7 +1415,7 @@
     {
       "Name": "M365-AuthenticationMethodsRegistration-Inventory",
       "ScriptPath": "M365Inventory\\Security\\AuthenticationMethods\\SmartM365-AuthenticationMethodsRegistration-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1433,7 +1433,7 @@
     {
       "Name": "M365-ConditionalAccess-Inventory",
       "ScriptPath": "M365Inventory\\Security\\ConditionalAccess\\SmartM365-ConditionalAccess-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1451,7 +1451,7 @@
     {
       "Name": "Intune-EndpointSecurityHealth-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Security\\SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1469,7 +1469,7 @@
     {
       "Name": "M365-BackupProtectedSitesAndDrives-Inventory",
       "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupProtectedSitesAndDrives-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": false,
       "Group": "ExchangeOnline",
       "DependsOn": [],
@@ -1487,7 +1487,7 @@
     {
       "Name": "M365-LicensePricing-Inventory",
       "ScriptPath": "M365Inventory\\Licensing\\SmartM365-LicensePricing-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-EnableConfiguredExternalActions",
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],

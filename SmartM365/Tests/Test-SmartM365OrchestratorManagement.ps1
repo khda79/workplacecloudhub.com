@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+Runs offline management and central-manifest migration tests for the SmartM365 orchestrator.
+.VERSION
+1.0.0
+#>
 #Requires -Version 7.0
 [CmdletBinding()]
 param()
@@ -6,9 +12,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $smartM365Root = Split-Path -Path $PSScriptRoot -Parent
-$modulePath = Join-Path -Path $smartM365Root -ChildPath 'SmartInventory\Orchestrator\SmartM365.Orchestrator.Management.psm1'
+$managementModuleFile = Join-Path -Path $smartM365Root -ChildPath 'SmartInventory\Orchestrator\SmartM365.Orchestrator.Management.psm1'
 $jobsTemplatePath = Join-Path -Path $smartM365Root -ChildPath 'SmartInventory\Orchestrator\Orchestrator-Jobs.json.template'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+Import-Module -Name $managementModuleFile -Force -ErrorAction Stop
 
 function Assert-True {
     param(
@@ -50,6 +56,7 @@ try {
     $existingJob = $snapshot.Jobs.Jobs[0] | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
     $existingJob.Enabled = $false
     $existingJob.Schedule.Times = @('23:00')
+    $existingJob.Arguments = '-CustomArgument example'
     $newJob = $snapshot.Jobs.Jobs[1] | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
     $upgradeDocument = [pscustomobject][ordered]@{ SchemaVersion = 1; Jobs = @($existingJob) }
     $upgradeTemplate = [pscustomobject][ordered]@{
@@ -59,6 +66,7 @@ try {
             $newJob
         )
     }
+    $upgradeTemplate.Jobs[0].Arguments = '-EnableConfiguredExternalActions'
     Write-SmartM365OrchestratorJsonAtomically -Path $upgradeManifestPath -Document $upgradeDocument
     Write-SmartM365OrchestratorJsonAtomically -Path $upgradeTemplatePath -Document $upgradeTemplate
     $upgradeResult = Sync-SmartM365OrchestratorJobsManifest -Path $upgradeManifestPath -TemplatePath $upgradeTemplatePath
@@ -68,8 +76,10 @@ try {
     Assert-True -Condition (@($upgradedDocument.Jobs).Count -eq 2) -Message 'The missing job was not appended.'
     Assert-True -Condition (-not [bool]$upgradedDocument.Jobs[0].Enabled) -Message 'The existing Enabled override was overwritten.'
     Assert-True -Condition ($upgradedDocument.Jobs[0].Schedule.Times[0] -eq '23:00') -Message 'The existing schedule override was overwritten.'
+    Assert-True -Condition ([string]$upgradedDocument.Jobs[0].Arguments -eq '-CustomArgument example -EnableConfiguredExternalActions') -Message 'The required external-action opt-in was not merged with existing arguments.'
+    Assert-True -Condition (@($upgradeResult.UpdatedJobNames) -contains $existingJob.Name) -Message 'The external-action argument migration was not reported.'
     $secondUpgradeResult = Sync-SmartM365OrchestratorJobsManifest -Path $upgradeManifestPath -TemplatePath $upgradeTemplatePath
-    Assert-True -Condition (-not $secondUpgradeResult.Updated -and @($secondUpgradeResult.AddedJobNames).Count -eq 0) -Message 'A second manifest synchronization was not idempotent.'
+    Assert-True -Condition (-not $secondUpgradeResult.Updated -and @($secondUpgradeResult.AddedJobNames).Count -eq 0 -and @($secondUpgradeResult.UpdatedJobNames).Count -eq 0) -Message 'A second manifest synchronization was not idempotent.'
     $convertedPolicies = ConvertTo-SmartM365OrchestratorHashtable -InputObject $snapshot.Cluster.ServerJobPolicies
     Assert-True -Condition ($convertedPolicies['SERVER-B']['OnlyJobsRequiring'] -eq 'ExchangeOnPrem') -Message 'String values were corrupted while converting the server policy to a hashtable.'
     $invalidPinnedJobs = $snapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
@@ -160,8 +170,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOGN7rT9499WZy
-# 49r39OeOmiHV+L+ChcD5aYANDt3+FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE86xfCHW6egf1
+# 2ztRn49c+a6Zk1etmfGRa4/I+0gLxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -294,31 +304,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDkrBprh4hRt4GRRRyKsvSDuDA242TtqHGStZ+Gl1Y8PMA0GCSqG
-# SIb3DQEBAQUABIIBgJswGo0mmlFfhc488KBAogetKlvhR9isq8WH6Qg/OcLhQg8H
-# uC/OimvXTZUhvsmswBpZYVB/ZtsHtx+rEl9HJtcc51ao+JopMSx/OuiypgSlUS7C
-# 1uVM+I3+eWQSakt3SEjrDta0iSmGGgl9DywFPqkCCflOu7CEJuZqPvntxRdiz0is
-# ySK4QOHaPY+do35Otys4ow6NYBTmsEtF1k+BBJMnRurZd+w+MTVCwWoMRmjye/GB
-# O+DMV+2m9zdt0F7IyY+1GzN4wQa4NF1J1n3CAGF3NSmDyqYL95fjbjT86IF/+ET8
-# xedUWQB5cIg0QOo9vj+9TT7eVU15jV56CcD5mwXTdpwOCQAAuT/Qvc6T05S24HIx
-# 8sjf1yzVWQGhz01DTN+44j7725SgM2KSNOcTIx/KA9ygsgOyMy1r8GtaibB4eQpJ
-# O166m7/X5cjCSBtO8RyyHsewAwRhI6T7gzEhsXWQQeGt12N5ohAEee6Up3jlLJSl
-# q/DUn240JCsWmWDozqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJFTyeHiJCu0qwWwKIcCWKyMYDbVudFh1E1MYvrJ18VIMA0GCSqG
+# SIb3DQEBAQUABIIBgFTvYtgaSkParLG9kC3i+B68IF7mftzyJmtEu0s2voy1O9ia
+# QPMJb8ZyU95Dw7+EkbBQiBsGf0iiJ07Kh+d7a33+gH6UzsLGojLk23R6zVCIhuaL
+# MtQSRIIVpp9UQPK8skNuIYcpnNiYn/0R3MebVCZsMr8EbsBg9LUNfTBzjLrdojm1
+# ef0H5vLFVbnI+Fb4aDKL2WKGu2MD5ZARI7b2qOh8HIfzWCEqAs26b5BMJGVBDOz8
+# gntKGXBrs9dI++DcHit1jzxwx3F69fS1Z6hsIpltdWIrYXc+7hPAW7HDF2jxQvZs
+# RsWnhUhqw+JgxO+pFYXMlKFLPfoCnNDYDQ/v7Sl4AxJN4yYbxSsI/ZpvmuM2j9pV
+# k12bCzXpOTe5SFMqVQt2YlJDDKcNQKPyeUn0jvJ9AC/anyz4tJEWc0H/KyQcefwa
+# 2VJ+9wUkxO4r58tiusXJ4fs6FBG6Lgnmf6HDc47wYwzh09wiKpAHUNt+4q9Tbl+P
+# sragzD6KBp1YD7jZGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjUy
-# MjBaMC8GCSqGSIb3DQEJBDEiBCC2fyWa2oW2PIMkmmokgAF6M9HH6GXVOwQ0dyyn
-# m/tM9jANBgkqhkiG9w0BAQEFAASCAgCrFKOViffif/dN7wa7lV4Buqk3ZT+fhlrW
-# 0cVbnGFhAU9i+r2lkr5NWUCzhtlqM1gPf4A86Utr4HiSAUfuLPBfP0eIiYykcVW+
-# v6cFpz/ruifVdCN+mUxopszLk4rA6/pa4bE4oXWc65EnZF5GDuJ2FPxMKbi+0lOs
-# YzQVs9/MIKUXfG84dWXSY/3mVYqB02TpUB35PCwYqdCDN8SQnJZiXgrbcQX/kbht
-# f3Cc9NIzM+Ls5SuAZWwY8LHG+cEozKRKsnisav4IrKWG51iAdqhZypP4+3kYyYuh
-# TPV8Uo9BGCurcwS9QjEDqaihExZ5MEs44o5xOhCsadgTsTjKa6RJZB6/Grhop65T
-# aM/vVcF9sem5sLAMB8uvDCPNh0HyYYryTMlU5uLZq4DZE8T6BLQaB4LuK/Hju7cq
-# rDadWJhVcE+FAJ2z5gv5ISrA6MSK6YmsLfgw1mNa7up7UZneVTrVcFq/todlvRPE
-# OVbfDbEfO8NorY6t8cJxDL28GMcAXhEAt52jQnG2QGMeBvg5GfjGamREK8YfyIQd
-# u29S9/aTBugQU/wdEu19TtFIg0Fpl2oM+GwxfcW/0gmX/QKJwFvmXkLB9IUqBx04
-# OeB2HeUzMgeFchHzLUoSq/5uGRU8qUfRZzbrS89wxdv9BsExGddUDl2cAbgRHWz/
-# pDmlLv6uIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDEz
+# MTlaMC8GCSqGSIb3DQEJBDEiBCBQtV3eO3mHw4f32RS/EqpIwc3Zoul26vX2dzBr
+# hVy5FzANBgkqhkiG9w0BAQEFAASCAgAJAZfrHAMlm+HJ7+X1I9OxowopOPqdJgxb
+# k9StCcSVQxvni00sIn6Yxa+R8Wgz3FiGAJPJSlZoY9EQR8gAcn5Za5JSOr7eHvGi
+# s6i086ypui5nRPLbhXa/6DvWgwBsBnWQmKdzhHDlVFcvZq1aVm7EE5Pb9ZoBvrKJ
+# i5t38kRAo1C2XjBEe3sWsqqiQNANiflvMGg9bWhRRxhQuPTuzAXM+otbCXCS1QcB
+# usBUL21sbx/gh8ehrWOICzajcMqL2AEHaxXrIwj+u5uYN5IP83QgrI2zVub6pwwM
+# gcfRDMlzERCvs7bY+vqGxt5zni2hmK6ksWCD1l0tN8GVuYOBfbE+6jE56dNfWPR9
+# Cq/tgFm/mi/ZKeE5z2ymNTvzj1CMbgEwIUyMqfP5NoIq1Ey2OTlwhfOtdQja0nbN
+# OANHGGv8dMumtwQs9N8ExM62SW0hAZ2ukZwRclC+XMpsafVJueC6QZHO/eub41pE
+# xZdJbns7qMbyiG7WiTirsQZhMS7ykxhV+8IyyRsTL7GDN2XlGicScJBlP+SfwdPQ
+# +GURnzW1u9jp+o4+GjT2Q+MYHSzyzc0xvkIJB3uwtsn7k0oi2tzLFGFKiJ/Gnm02
+# Ku5Jy3lLAzbly1A8P5dmwVF33Rl+h0WxHjQFm7PtfH2LWER7dDIMD69SLBkdYgJC
+# PcaGo4E0yA==
 # SIG # End signature block
