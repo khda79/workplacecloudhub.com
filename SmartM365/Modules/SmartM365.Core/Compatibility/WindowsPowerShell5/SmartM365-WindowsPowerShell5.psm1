@@ -410,6 +410,156 @@ function Add-SmartM365MaxItemsSubjectPrefix {
     return ("{0} {1}" -f $prefix, $Subject)
 }
 
+function Get-SmartM365MailTenantName {
+    [CmdletBinding()]
+    param([string]$TenantName = '')
+
+    if (-not [string]::IsNullOrWhiteSpace($TenantName)) {
+        return $TenantName.Trim()
+    }
+
+    $mailTenantVariable = Get-Variable -Name SmartM365MailTenantName -Scope Global -ErrorAction SilentlyContinue
+    if ($mailTenantVariable -and -not [string]::IsNullOrWhiteSpace([string]$mailTenantVariable.Value)) {
+        return ([string]$mailTenantVariable.Value).Trim()
+    }
+
+    $organizationVariable = Get-Variable -Name SmartM365OrganizationKey -Scope Global -ErrorAction SilentlyContinue
+    if ($organizationVariable -and -not [string]::IsNullOrWhiteSpace([string]$organizationVariable.Value)) {
+        return ([string]$organizationVariable.Value).Trim().ToUpperInvariant()
+    }
+
+    foreach ($variableName in @('SmartM365TenantKey', 'SmartM365Tenant', 'SmartM365ProfileKey')) {
+        $variable = Get-Variable -Name $variableName -Scope Global -ErrorAction SilentlyContinue
+        if ($variable -and -not [string]::IsNullOrWhiteSpace([string]$variable.Value)) {
+            return ([string]$variable.Value).Trim()
+        }
+    }
+
+    return 'UNKNOWN TENANT'
+}
+
+function Format-SmartM365MailSubject {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Subject,
+        [string]$TenantName = '',
+        [switch]$Orchestrator
+    )
+
+    $tenantLabel = (Get-SmartM365MailTenantName -TenantName $TenantName) -replace '[\[\]\r\n]+', ' '
+    $tenantLabel = $tenantLabel.Trim()
+    if ([string]::IsNullOrWhiteSpace($tenantLabel)) { $tenantLabel = 'UNKNOWN TENANT' }
+
+    $text = if ([string]::IsNullOrWhiteSpace($Subject)) { 'Notification' } else { $Subject.Trim() }
+    $maxItemsLabel = ''
+    if ($text -match '^(?<MaxItems>\[MAXITEMS-\d+ TEST\])\s*') {
+        $maxItemsLabel = $matches['MaxItems']
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+
+    if ($text -match '^\[SMART 365\]\s*-\s*\[[^\]]+\]\s*-\s*(?<Orchestrator>\[\s*Orchestrator\]\s*-\s*)?') {
+        if (-not [string]::IsNullOrWhiteSpace($matches['Orchestrator'])) { $Orchestrator = $true }
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+    elseif ($text -match '^\[(?<Severity>CRITICAL|ERROR|WARNING|WARN|INFO|OK|SUCCESS)\]\s*\[SmartM365 Orchestrator\]\[[^\]]+\]\s*') {
+        $Orchestrator = $true
+        $text = ('[{0}] {1}' -f $matches['Severity'].ToUpperInvariant(), $text.Substring($matches[0].Length).Trim()).Trim()
+    }
+    elseif ($text -match '^\[SmartM365 Orchestrator\]\[[^\]]+\]\s*') {
+        $Orchestrator = $true
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+    else {
+        $text = [regex]::Replace($text, '^(?i:SMART\s*365|SMART365)\s*-\s*', '')
+        $text = [regex]::Replace($text, '^(?i:\[SmartM365\])\s*', '')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($maxItemsLabel)) {
+        $text = if ([string]::IsNullOrWhiteSpace($text)) { $maxItemsLabel } else { '{0} - {1}' -f $maxItemsLabel, $text }
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) { $text = 'Notification' }
+
+    $prefix = '[SMART 365] - [{0}] - ' -f $tenantLabel
+    if ($Orchestrator) { $prefix += '[ Orchestrator] - ' }
+    return ($prefix + $text)
+}
+
+function Get-SmartM365MailScriptContext {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName = '',
+        [string]$ScriptVersion = '',
+        [string]$ScriptPath = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) {
+        $nameVariable = Get-Variable -Name SmartM365ScriptFileName -Scope Global -ErrorAction SilentlyContinue
+        if ($nameVariable) { $ScriptName = [string]$nameVariable.Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion)) {
+        $versionVariable = Get-Variable -Name SmartM365ScriptVersion -Scope Global -ErrorAction SilentlyContinue
+        if ($versionVariable) { $ScriptVersion = [string]$versionVariable.Value }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+        try {
+            foreach ($frame in (Get-PSCallStack)) {
+                if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+                if ($frame.ScriptName -notlike '*.ps1') { continue }
+                $ScriptPath = [string]$frame.ScriptName
+                break
+            }
+        }
+        catch { $ScriptPath = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName) -and -not [string]::IsNullOrWhiteSpace($ScriptPath)) {
+        $ScriptName = [System.IO.Path]::GetFileName($ScriptPath)
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) {
+        $legacyNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
+        if ($legacyNameVariable) { $ScriptName = [string]$legacyNameVariable.Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion) -and -not [string]::IsNullOrWhiteSpace($ScriptPath)) {
+        $ScriptVersion = Get-SmartM365ScriptVersionFromFile -Path $ScriptPath
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) { $ScriptName = 'SmartM365' }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion)) { $ScriptVersion = 'unknown' }
+
+    return [pscustomobject]@{ ScriptName = $ScriptName.Trim(); ScriptVersion = $ScriptVersion.Trim() }
+}
+
+function Add-SmartM365MailExecutionFooter {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [string]$ScriptName = '',
+        [string]$ScriptVersion = '',
+        [string]$ScriptPath = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+    if ($BodyHtml -match 'SmartM365MailExecutionFooter:v1') { return $BodyHtml }
+
+    $context = Get-SmartM365MailScriptContext -ScriptName $ScriptName -ScriptVersion $ScriptVersion -ScriptPath $ScriptPath
+    $safeScriptName = [System.Net.WebUtility]::HtmlEncode([string]$context.ScriptName)
+    $safeScriptVersion = [System.Net.WebUtility]::HtmlEncode([string]$context.ScriptVersion)
+    $footerHtml = @"
+<!-- SmartM365MailExecutionFooter:v1 -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:0 20px 18px 20px;color:#475569;font-family:Segoe UI,Arial,sans-serif;font-size:11px;line-height:16px;">
+      <strong style="color:#334155;">Script:</strong> $safeScriptName &nbsp;|&nbsp; <strong style="color:#334155;">Version:</strong> $safeScriptVersion
+    </td>
+  </tr>
+</table>
+"@
+
+    if ($BodyHtml -match '(?is)</body>') {
+        return [regex]::Replace($BodyHtml, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+    }
+    return ($BodyHtml + "`n" + $footerHtml)
+}
+
 function Limit-SmartM365RowsForMaxItems {
     [CmdletBinding()]
     param([AllowNull()][object[]]$Data)
@@ -1647,6 +1797,7 @@ function Send-SmartM365GraphMail {
     }
 
     $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
+    $Subject = Format-SmartM365MailSubject -Subject $Subject
     $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
     if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
     $message = @{
@@ -1771,7 +1922,7 @@ function Add-SmartM365MailBranding {
     param([AllowNull()][string]$BodyHtml)
 
     if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
-    if ($BodyHtml -match 'SmartM365MailBranding:v1') { return $BodyHtml }
+    if ($BodyHtml -match 'SmartM365MailBranding:v1') { return Add-SmartM365MailExecutionFooter -BodyHtml $BodyHtml }
 
     $branding = Get-SmartM365MailBrandingConfig
     $clientName = ConvertTo-SmartM365EmailHtmlText $branding.ClientName
@@ -1843,12 +1994,13 @@ function Add-SmartM365MailBranding {
     if ($BodyHtml -match '(?is)<body\b[^>]*>') {
         $branded = [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $headerHtml), 1)
         if ($branded -match '(?is)</body>') {
-            return [regex]::Replace($branded, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+            $branded = [regex]::Replace($branded, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+            return Add-SmartM365MailExecutionFooter -BodyHtml $branded
         }
-        return ($branded + "`n" + $footerHtml)
+        return Add-SmartM365MailExecutionFooter -BodyHtml ($branded + "`n" + $footerHtml)
     }
 
-    return ($headerHtml + "`n" + $BodyHtml + "`n" + $footerHtml)
+    return Add-SmartM365MailExecutionFooter -BodyHtml ($headerHtml + "`n" + $BodyHtml + "`n" + $footerHtml)
 }
 function New-SmartM365EmailBody {
     [CmdletBinding()]
@@ -2274,6 +2426,7 @@ function SendEmailHtmlReport {
 
         # Recipients
         $Subject = Add-SmartM365MaxItemsSubjectPrefix -Subject $Subject
+        $Subject = Format-SmartM365MailSubject -Subject $Subject
         $BodyHtml = Add-SmartM365MaxItemsMailBanner -BodyHtml $BodyHtml
 
         $toArray = ConvertToRecipientArray -Recipients $To
@@ -2789,6 +2942,8 @@ function InitializeScriptEnvironment {
         RemoveOldFiles -FolderPath $global:LogPath -FilePattern "$LogFileName*.log" -MaxFiles $global:RetentionMaxLogs
     }
     $scriptVersion = Get-SmartM365ScriptVersionFromFile -Path $callerScriptPath
+    $global:SmartM365ScriptFileName = if ([string]::IsNullOrWhiteSpace($callerScriptPath)) { $LogFileName } else { [System.IO.Path]::GetFileName($callerScriptPath) }
+    $global:SmartM365ScriptVersion = $scriptVersion
     Write-SmartM365ExecutionContext -ScriptName $LogFileName -ScriptVersion $scriptVersion -OutputPath $OutputPathInit -ScriptPath $callerScriptPath
     Write-host  "Environment initialized successfully."
 
@@ -4623,8 +4778,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOhDB4t/qX5BBR
-# pzoFMO4aHSaXJvX9vodvG8ecaiGqN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApx88obtzi6mkS
+# l/Ua9XxXDpDLpRts8hVhEJX0icB9SqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4757,31 +4912,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKE0mMheABHzNQWw9Knue1UHnAbM2i85USZpSNxLbZh+MA0GCSqG
-# SIb3DQEBAQUABIIBgF5kdmB/GIEIwmzAnJ579k34ywQ4Kg0xlpd+UvYllMX4I5tt
-# YcTmdEMd5R+y/TIfynypErn1IlsMdJ/2MYB2SxFJu9lErfuQG0CD1gP6gLfxh5mg
-# 7AOhfh/ZnKtSpdvjI8+kJWpX5uENSvEmEBhk2PYAhU0kYeJlu9Rzhig+RJEdA0GJ
-# FypWiEG0aUKpC20oRltJ1my03vUF2dbLHDd6En+zq9B/MToFEAO94Q+53W7PtzzP
-# XYOFPz6u5Z4W7t086EzU5EiIeoDAXVYs7XyKTxL31sGh8qe2Qir8nPYDiLCEGZb0
-# 3BQHLazCG7+Y4f5BK2PNt95FYYhWBucQumo3w+LYv1W4FnGmeLCNhLUEzHo6Owix
-# HFGQxdk4C+ccU3lipvWZbcWw6ix9/ZUqcb2/zft/h/ipLLgxxvmxSPVqersiWIoj
-# KzRmpu5XYqD2PrNF5+dNJpdWBXA77/rYdlM1HpWIIVfRX54buhJyE1AmBjcbx1C9
-# jymqHzAICYOD4pp//qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH2a0FKM7bxy74gOrGcEbyIxHu8RT2qg0mF67NdPuoDfMA0GCSqG
+# SIb3DQEBAQUABIIBgDbfpX9SAy5Ot9KFdXSPYP8tnyPh05mp0m541U1a4lfkdoNP
+# p9PiB4VW0hO1e7nrh+Gg/o/pBeQFgd+X4dqu/JYqAptW7SMEzGujI2tRpOQpjGxg
+# 046ukGiqonhKSly1mG9anp20lK2a0NbRp6XWi/znGiF836YruogDooOXaLVv9slR
+# tjr3Xmag3AjBwsv5qSZaPOJYN9d8WGvsF3DMOVf9pfZj2dHtsUmnisN7K+ysTjX8
+# ltFaF8zdvfYi578wweN6jSF/FSpBlA8kEIxuVTPaTChRKtGF/M0q9MelVL+8Ze2e
+# lprBwjEuDE/anDTTgxvtKEZcjOlS2DX6KeZDiHkrvUC95jnjZSCpf/zAzTNHhzVG
+# qXqD3cMUDzL5UQXHStlup2HylkdUzlJkd1RVLXor3QiLSoItpIgHauu0ygHLVUC1
+# +R/vLwNyjOGXgK53PDii6VSmS0j0I4qFxeWs7cM+8iQDXdzmQlkau32W5SdR3sG7
+# +mL58b9G5nAHDBDzeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjFaMC8GCSqGSIb3DQEJBDEiBCB2HiERAN/zJ/2u+4OdcvsfW5CV7DdXxhb5Pxey
-# DttRYzANBgkqhkiG9w0BAQEFAASCAgCSyUDClZ2L7WjPEb6iVEjAMmD1bb12Q/86
-# HXJNKwtR3x7mHWMFWXPNsC/iRtujimI8h0aal0VvKl+E8l5k9ZvYsviVG9xoK3sA
-# HV/B8zS4EAw7bxe3DmMghVPRLoKIrRQtoiP/sr2vcRwwcZlC8lTky17wyqxDbWfR
-# w/H6odkrY54O6tSgGjQ7Wuwi0KFAGyvL4IIlblh/VrNXuS1wfb2lKLeq0kQYiru0
-# xW2SadMf30GLPDwx7i4t0onlQ9mwQGfREBQF+BA7ZZZMzrki/Q/X8NRfY9lPq7d8
-# qAuBq3yidMZNbjPQjPpFGiJeRu/qx1dW0ngs4niMbQCNnk0/iXGksMzfQCPehcBT
-# D6tve1JPcaNGGz3t07ch4RncTs3LmsoSKXQcVCS/xr9vrI/ATnNtryehsUqTS2+w
-# gQ5c1RW4Cta0UYvYam9Tp/1d6EA9BCKS77qPxdL074MnK0/VwrvOakIcWXb7Ojcu
-# jc8+pqmBvTqcGNwQIprg/YUXQxv2PEIrdaMK1b3XOEwycgdePWrNCdjms9+gAeM6
-# kSqdhZL6Y0Hm2eMaDyfsw6h43ObmhFgodmUcqsMM1bqbn2hG70zCIM2erMrYSlMz
-# +SyCEVCGtz5C+52yKH439Bt1c4/rx4ttmERyxDikPLRYBuDOKYEadG3dCwZTD9qE
-# pZ0ZC+NjQQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
+# NTJaMC8GCSqGSIb3DQEJBDEiBCDvud3AR1+1DHZoJFyFyEARwSdroLHvprl2ztar
+# X9D+WDANBgkqhkiG9w0BAQEFAASCAgA43w/iQdSFuBOQ/tw51Ey0veuJmznIgY0k
+# RmL4lhWQuOx9gP4O78nikyF7OAYnlU+f61otjEb2ioZieAiZENVdqe4ZrsxZZs5E
+# zVFpIx9CPwxuHZ2MBGx5g6GxYP0VhjCJei/DqhHkiML+Lw3bhjO+siR+6ch883kW
+# mcZobVn952tbPOrA2Z3puMIS0k2mGjmcszUZzqvQuvNBLIBGXwui3AevWcvkbyLJ
+# glA4SQIJI2wrEiDuR1uY/QKMLmuhRsBda/hKgTPWO6Zaa9gtiYrHPTv0EMMyUQxI
+# Ar/UvFiqC9ex7fl6F6QwcPHBndqlppUeINh9Bpsl9yLbwBa9sA4S6RmeHsNTn7FD
+# 427pii9B5btlWryv8yuZhCFg3hmwk7lzRv8CMdF4wTgNseCPo7arohGZuKJxAz4g
+# TH8zDjfBHq0BR84IfLgQWtVV0h6MGFhhhqRATA4DYfK3A1SYiUcsg274ALTugSS5
+# jfHnJvfyJAOa5FZQlXmQlkW0LAxQG3aEgWxho4PRBckaKjTcAacyNr0w6lD/oT/W
+# yJKsLMIMR8Qi69HxRNq6S3KuveSAAiob4h72f46b+KX/hgGHDhg4JkpqqA/f8CVY
+# ZjFwqEtjylMtkbQytMtzx6YS6lQANoNeDkGCQbI7/UKX3ZAdBzJs3fdP1TNTJGBW
+# tqFcOvoO3Q==
 # SIG # End signature block

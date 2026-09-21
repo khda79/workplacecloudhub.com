@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param(
@@ -326,9 +326,10 @@ try {
         Assert-Offline ($value -eq '2026-09-11T01:15:00Z') 'Teams date normalization no longer produces invariant UTC text.'
     }
 
-    Test-OfflineCase 'Teams alert mail subject retains the SMART 365 prefix' {
+    Test-OfflineCase 'Teams alert mail subject retains its operational payload' {
         $source = Get-Content -LiteralPath $teamsPath -Raw
-        Assert-Offline ($source -match '\$subject="SMART 365 - \[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory - \$TenantName - \$RunDateUtc"') 'Teams alert subject lacks the SMART 365 prefix.'
+        Assert-Offline ($source -match '\$subject="\[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory - \$RunDateUtc"') 'Teams alert subject payload changed.'
+        Assert-Offline ($source -notmatch '\$subject="(?:SMART ?365|\[SmartM365\])') 'Teams alert subject still hard-codes a legacy product prefix.'
     }
 
     Test-OfflineCase 'Teams CSV schemas match Dashboard contracts' {
@@ -431,8 +432,8 @@ if ($failed.Count -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAynsi2VdFaBXoI
-# KYkkorWASn+mZY/7PdyIRTiQiYvni6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNeUKpO0bw8IBw
+# t4dn1ywzeRepcSQYHL0lk9uRJ748hqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -565,31 +566,31 @@ if ($failed.Count -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDisCq4TTx4TZoYoMs0+5rM02sGfQbdPG+ZwUCVtUnIJMA0GCSqG
-# SIb3DQEBAQUABIIBgC8oCqWfq5/jE1MYFKzM2+2WFIsYzFF82NiAG60wgfS3HRd1
-# 5aTIwUJFm8+sOHkSbzcyioceVsCj4jogvkFgbkALAPK3pdDditRdFaeBwYm5TdfC
-# qNEw2PIXiRIjvTHghBSADRvEniRZ9v1k7dy3AR9HohwaWmoG0yclxlAcSQXY2eUc
-# kXfMuTLmxQlV+bEepXD8tYVLBI73E4WWanynn+MBmcR4tGRMTdf56JEWbrTkMIUZ
-# B+ZTS+3TRSvno8KHEk0gX+lGbs2hHikbiz7XyAI9SCFFhzE6TOQgpNWhvsKOYwJ4
-# xzaXjcnNoEMLmF7c4GZz6gKCP3pcBz8Xn8x3r6zKQ6BxRtrREXqRSFUni0yJtKzu
-# WdjsAjqABcIbnujahyq3Grc6Hy9CCV1jDMEMRkXyufekdAvL2HQjEQscGI1nqBVh
-# /8f3WAVZR9T4fJzLbwARinkvwI0KG11UeAtdnXflV6dmqoI159FNhVL6ZwEG+jtT
-# uL+wjJKyZt72ToHG0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICPDLSZpoM5XDROBosBxVtl2ypzZgYEnQzXitTMM7Uz2MA0GCSqG
+# SIb3DQEBAQUABIIBgCqmnanrM6omAMqGRwHiPIEdA35ewMA6cZ4Sx2PsieCI1Ub5
+# qoUyOHO6XOnFIoZtVZmDDQ6Y3UL1KSfptkyR9MHgj7hubUOcvyqaT/TnxYcvp9Xp
+# +xAbgTLXwBnrfjOpVIwwhzRJgpbNsCOvNh+9He/1JgLuVLiUt5LIMDg18rg1K0hH
+# R4xDJjyy6AgUVzvxBaqrnUDbPBkKlDzVmp4P6iBQhWLCypTde5Pj1N18oYRnUmyB
+# 69BYhtanaohaOct635OCViOBQ0Z4JgSDtBmoekkYcIQ13DNF0jowKmGTVY+INnc3
+# D0ukDFn8dVahqRDj1eBid2gB9yY0Fbk524YVIJHzt0FarZLM52IMx6bVLQxnr2vH
+# A5ncIziGFs9m8RAa3OL+zjmlxN3cMOm7Mt8hkXZHZL/O0fQgwOzKgkokSM9LVDRU
+# 62K6Cl5ohBg4HTQuSmAnp8u6Q60YcJ+hqooT2xMq8YYnG/twUppyU7uX1hQi5PFU
+# r7mvxjItXzHtpRdYD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzUz
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDLiZfm+QYZw2zV2/lwW361ecL6KIM9t5lihyPB
-# w+/zHTANBgkqhkiG9w0BAQEFAASCAgB/ppRJJn5ElA1JyF1bL7I3z382DT3c9KTs
-# B6TmlgfLEwXXVvF2RMnnLZkN4p30FGjm6J4AWbPojkEe+yT7h3804WyxDK2IOHIl
-# CFKw4Cei1hIs6qQ6XZUMtmj5yHusOj9gK/rF8h80AFxlBzYgmVILUpYNkk1cREB0
-# 3j/OUC6+Eot5zVT6edNZ8iw8eHJx9ov2xxZbqkOYuB9fdWyZpMAc9rUZJb8uClxu
-# /aU2KSY+o5+hH/ZSUL+FP1Akad80LVr93OB+3pgUICYfBdIt/qoCeHLBwj3uIeFB
-# zOh6ijOgX9vR4m/r6/ul4qv6u4anmVFIZQXZiEDQyoIWfTMirE/SEy0DPV+iR2Nl
-# i1T/kXHEtQyzqtXy7O0iFiwuKy9epc+iqAmfD3ay+afcRILNs2byjJxP0VSyMIIB
-# 7f6ieTbmV5ocSyCYxR/QkxExJiCs9qIko4IpnMvdTzalTbEKDl+2ZpbBGdwSsisd
-# j9zj9Ox/nvP3V9iIkfs5HlARYH5nys8WTBplrMze+3evRVdQVrRTK9ZYBRLzIym9
-# Y4rtsDjRYPeEj8OBSWuBMmCzxzF0ZhJUeFSIW7FN+ezKO9EQoiPpez/PCfIx2SDN
-# 9IL6DZcU1LPxrQa9lU09UEWFDAhVUUTEHT3ujMNd3bPekkEE4v8p1au0kzK1PknJ
-# dQbpZ0Edvg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
+# NTdaMC8GCSqGSIb3DQEJBDEiBCA0UrXPD7ZhuctJlQC5TmRP+vLicZJzaJdPj1Ge
+# DOEvVjANBgkqhkiG9w0BAQEFAASCAgBrggxqbHR5ujMIvVS7+T8CWeJpytNaw3y5
+# 1E6pYlUg+zLpHIgvSj0/5PUfjhJRR8IdnRrM0vWkV7pihWLyG8pAzHzPBVx00s8G
+# ZiqWsFsSBYODR+PRIcnyMrwkQhZOP/y6P2GC+tp4sQ1wPvthJNT2+ENjvO+rKTxQ
+# aEhnWi60hYVdPEt41NhLdz1tPBoEtlRPASfkbSAEsmIYstc7mfor2blnWkmHgKnu
+# cEZ1sLsGpaTnguSmbj4QP6z9jn8X8oJUADDUx6ZbkvfEp2yHSD+gdJqgWQwoIGhP
+# iLwfr5XeRwAN4wqNCRWND2Wl0ik2lDe614Hc0Uwa8On9u0RgvWh1aUpA6HDMGB0h
+# DZ+vg5/XHKImwJi3JcPXguYkGauZxDiuuOWYMz81kk2M+ozMBcyCtiGXE9IVb+Wn
+# n5kfqFdJBohfNMgmKeFL1b325xjoPpXl2kHSNTzZhgB2iTcOC23q/hGaNf2f2kVJ
+# sF2RsM/hhHP2MJONq74mvfUh0bJqx8ykUfTObRHwJWkKNYP08sM6V91X7b05lhWi
+# 1qFeknRtypCU/hlRTFIK5HRb8elwWyeVZB6B4BmUBzgA2/kfPQbfFkCQCgUy0lQ4
+# sD9FtR8ngsknGsiJDWYHHPE9qTFQ0R6gm2WarcijA6+emhRzN7r50eZvlr2RycNU
+# ITyXvIq5Ig==
 # SIG # End signature block

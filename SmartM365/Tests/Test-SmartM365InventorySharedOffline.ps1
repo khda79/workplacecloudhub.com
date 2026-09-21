@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.0
+1.1.3
 #>
 [CmdletBinding()]
 param(
@@ -50,6 +50,8 @@ try {
             'Publish-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
             'Get-SmartM365MaxItemsSuffix', 'Add-SmartM365MaxItemsSuffixToCsvPath',
             'Add-SmartM365MaxItemsSuffixToBaseName', 'Limit-SmartM365RowsForMaxItems',
+            'Get-SmartM365MailTenantName', 'Format-SmartM365MailSubject',
+            'Get-SmartM365ScriptVersionFromFile', 'Get-SmartM365MailScriptContext', 'Add-SmartM365MailExecutionFooter',
             'ExportAndCopyCsv', 'ExportAndCopyCsvFromConvert'
         )
         if ($variant -eq 'Core') {
@@ -62,6 +64,8 @@ try {
                 'Publish-SmartM365Csv', 'Get-SmartM365MaxItemsValue', 'Test-SmartM365MaxItemsMode',
                 'Get-SmartM365MaxItemsSuffix', 'Add-SmartM365MaxItemsSuffixToCsvPath',
                 'Add-SmartM365MaxItemsSuffixToBaseName', 'Limit-SmartM365RowsForMaxItems',
+                'Get-SmartM365MailTenantName', 'Format-SmartM365MailSubject',
+                'Get-SmartM365ScriptVersionFromFile', 'Get-SmartM365MailScriptContext', 'Add-SmartM365MailExecutionFooter',
                 'Export-SmartM365CsvStreamAtomically', 'ExportAndCopyCsv', 'ExportAndCopyCsvFromConvert'
             )
         }
@@ -74,6 +78,33 @@ try {
             $script:SmartM365CoreOrganizationKey = 'synthetic-org'
             $script:SmartM365CoreEnvironmentKey = 'test'
             $script:SmartM365CoreTenantId = '00000000-0000-0000-0000-000000000001'
+            $global:SmartM365MailTenantName = 'EMEIS'
+            $global:SmartM365ScriptFileName = 'SmartM365-Synthetic-Inventory.ps1'
+            $global:SmartM365ScriptVersion = '9.8.7'
+        }
+        Test-OfflineCase "$variant mail subjects use the tenant prefix" {
+            $general = & $module { Format-SmartM365MailSubject -Subject 'SMART 365 - [CRITICAL] Microsoft Teams Inventory - 2026-09-21T12:12:41Z' }
+            $legacy = & $module { Format-SmartM365MailSubject -Subject '[SmartM365] EXO quarantine report - ERROR' }
+            $limited = & $module { Format-SmartM365MailSubject -Subject '[MAXITEMS-5 TEST] SMART365 - [WARNING] WinUpdate Feature Update' }
+            Assert-Offline ($general -ceq '[SMART 365] - [EMEIS] - [CRITICAL] Microsoft Teams Inventory - 2026-09-21T12:12:41Z') 'General subject prefix normalization changed.'
+            Assert-Offline ($legacy -ceq '[SMART 365] - [EMEIS] - EXO quarantine report - ERROR') 'Legacy SmartM365 subject was not normalized.'
+            Assert-Offline ($limited -ceq '[SMART 365] - [EMEIS] - [MAXITEMS-5 TEST] - [WARNING] WinUpdate Feature Update') 'MAXITEMS subject no longer begins with the tenant prefix.'
+        }
+        Test-OfflineCase "$variant orchestrator mail subject uses its dedicated prefix" {
+            $subject = & $module { Format-SmartM365MailSubject -Subject '[SmartM365 Orchestrator][prod] Runtime update detected: 1.5.14 -> 1.5.15' -Orchestrator }
+            $critical = & $module { Format-SmartM365MailSubject -Subject '[CRITICAL][SmartM365 Orchestrator][prod] Authenticode rejected job JobA' -Orchestrator }
+            $again = & $module { param($s) Format-SmartM365MailSubject -Subject $s } $subject
+            Assert-Offline ($subject -ceq '[SMART 365] - [EMEIS] - [ Orchestrator] - Runtime update detected: 1.5.14 -> 1.5.15') 'Orchestrator subject prefix normalization changed.'
+            Assert-Offline ($critical -ceq '[SMART 365] - [EMEIS] - [ Orchestrator] - [CRITICAL] Authenticode rejected job JobA') 'Critical orchestrator subject was not normalized.'
+            Assert-Offline ($again -ceq $subject) 'Subject normalization is not idempotent.'
+        }
+        Test-OfflineCase "$variant mail footer contains script name and version once" {
+            $html = & $module { Add-SmartM365MailExecutionFooter -BodyHtml '<html><body><p>Fixture</p></body></html>' }
+            $again = & $module { param($body) Add-SmartM365MailExecutionFooter -BodyHtml $body } $html
+            Assert-Offline ($html -match 'SmartM365MailExecutionFooter:v1') 'Execution footer marker is missing.'
+            Assert-Offline ($html -match 'SmartM365-Synthetic-Inventory\.ps1' -and $html -match '9\.8\.7') 'Execution footer lacks script name or version.'
+            Assert-Offline (($again | Select-String -Pattern 'SmartM365MailExecutionFooter:v1' -AllMatches).Matches.Count -eq 1) 'Execution footer is not idempotent.'
+            Assert-Offline ($html.IndexOf('SmartM365MailExecutionFooter:v1') -gt $html.IndexOf('<p>Fixture</p>')) 'Execution footer is not at the bottom of the mail body.'
         }
         Test-OfflineCase "$variant identity-first CSV roundtrip" {
             $path = Join-Path $testRoot "$variant-roundtrip.csv"
@@ -311,6 +342,41 @@ try {
         }
         Remove-Module $module
     }
+    Test-OfflineCase 'Every SmartInventory mail sink uses the shared normalization contract' {
+        $inventoryRoot = Join-Path $SourceRoot 'SmartInventory'
+        $mailSinkNames = @('Send-SmartM365Mail', 'SendEmailHtmlReport', 'Send-CoreSmartM365Mail')
+        $mailFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $directBypasses = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($file in Get-ChildItem -LiteralPath $inventoryRoot -Recurse -File -Filter '*.ps1') {
+            $tokens = $null
+            $parseErrors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
+            Assert-Offline (@($parseErrors).Count -eq 0) "SmartInventory mail audit could not parse $($file.FullName)."
+            foreach ($command in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true)) {
+                $commandName = $command.GetCommandName()
+                if ($commandName -in $mailSinkNames) { [void]$mailFiles.Add($file.FullName) }
+                if ($commandName -in @('Send-MailMessage', 'Send-SmartM365GraphMail')) {
+                    $directBypasses.Add(('{0}:{1}:{2}' -f $file.FullName, $command.Extent.StartLineNumber, $commandName))
+                }
+            }
+        }
+        Assert-Offline ($mailFiles.Count -eq 22) "Expected 22 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
+        Assert-Offline ($directBypasses.Count -eq 0) ("Direct mail transports bypass shared normalization: {0}" -f ($directBypasses -join '; '))
+        foreach ($mailFile in $mailFiles) {
+            $mailSource = [IO.File]::ReadAllText($mailFile)
+            Assert-Offline ($mailSource -match '(?im)^\s*\.VERSION\s*\r?\n\s*[^\r\n]+') "Mail-capable script has no .VERSION metadata: $mailFile"
+        }
+
+        $orchestratorSource = [IO.File]::ReadAllText((Join-Path $inventoryRoot 'Orchestrator/SmartM365-Inventory-Orchestrator.ps1'))
+        Assert-Offline (($orchestratorSource | Select-String -Pattern 'Format-SmartM365MailSubject -Subject \$Subject -Orchestrator' -AllMatches).Matches.Count -ge 2) 'Orchestrator mail paths do not enforce the dedicated subject prefix.'
+        Assert-Offline ($orchestratorSource -match 'ConvertTo-SmartM365EmailBody -BodyHtml \$HtmlBody') 'The direct orchestrator SMTP helper does not apply the common footer.'
+
+        foreach ($relativeModulePath in @('Modules/SmartM365.Core/SmartM365.Core.psm1', 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
+            $moduleSource = [IO.File]::ReadAllText((Join-Path $SourceRoot $relativeModulePath))
+            Assert-Offline (($moduleSource | Select-String -Pattern '\$Subject = Format-SmartM365MailSubject -Subject \$Subject' -AllMatches).Matches.Count -ge 2) "$relativeModulePath does not normalize both shared and direct Graph mail subjects."
+            Assert-Offline ($moduleSource -match 'if \(\$BodyHtml -match ''SmartM365MailBranding:v1''\) \{ return Add-SmartM365MailExecutionFooter') "$relativeModulePath does not append execution metadata to pre-branded mail."
+        }
+    }
     $distributed = Import-OfflineFunctions (Join-Path $SourceRoot 'SmartInventory/Orchestrator/SmartM365.Orchestrator.Distributed.psm1') @(
         'Write-JsonAtomically', 'ConvertTo-SafeFileName', 'Enter-SmartM365OrchestratorConcurrencyLease',
         'Set-SmartM365OrchestratorConcurrencyLease', 'Exit-SmartM365OrchestratorConcurrencyLease',
@@ -356,8 +422,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIM7iRXIXv16FI
-# hYZ1yv2y6kTDMTxYC5+ZCaGJkAlmraCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbWcEylVCAtcoI
+# 3KADcdFRlrA1C9Qzo75eagNXPfiLP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -490,31 +556,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKj4sjssP2cptJwauw1AFGQI6wpLEUc4a5bFLEuw8JoYMA0GCSqG
-# SIb3DQEBAQUABIIBgJVq7rxRy5Nc1NLyzlEq22HTbLkSjcu4Zq4m1W2uciLv/wjr
-# SkKn/vcMLmmH9TwiFNPzvI8bCgF0Kx1PxMEGb1Zo2Ah3/c+/pK9/XauxQgmx2SWY
-# key7MGdHuT+N29MUz30q5y7+YJYK/7759QLTkZiUakIXa5c7jNBhK//JClKTO3lY
-# ciIvGhGP0IJHZoHhT02gFAhfXDJb7ciiT17WH7PZQ9v9iIKSMB+8ldkbDXAn2cjn
-# AUy/at0Y3GtrT/wMgXnBBX4quzOiKKUUxQPiba0DAMViilATEG7czOkzOhsA5jJS
-# pItlsrFybCZ4l+b6rnVW0k0vZ3otGY1EqFbWXLiDWg5P8T7wyf+PUeKtPVsiC662
-# OJuUIyP+zvfhEtUEi/4tNRfkWHjWAPf79h/t4YmDP9ufffadXrgF3nHyX8DRpO5P
-# lRbiED5mo29/A4vaB9wGR+V9mAjOSLvUnfcq0e8Gx+5FBeUpK0O9MuodJkd+pO+d
-# 3g/EeyP5UOsA6PNjvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOAXHdOurQDioA8ErZFQp+nRMrz0Ns3z2KX6LC+TgRCYMA0GCSqG
+# SIb3DQEBAQUABIIBgFUzoozeBBFae2cxmgsR+wmAhnzcqXJOWqUM6Tw6lmf2W2/i
+# 4Mfhw8wLYUrhCwMa3/Tr4binZzRxcKMw6UJeX/DoDdMXv9fUh4HR0jMF2iLnVrxO
+# z3rXx9FKbkvplItvpY6kaaGYT73EUQ9pqs/WqrIuSO6aXn9KzgyalXFvFS+Q4Wi8
+# 5M6saMMWJD2A1ZtWP4yBANzVRCwKENYRAOZLuhs2Sr4UGAldkolrKkTdMvGLALaL
+# oWqd84QjHRKQZ841hzJlmRmUhcoeSWkRrkyXJ7/oT1hs8HDoZdKafPakFeUc/FCo
+# +HNg9IYjatwStkCAY0R7iIqD7Do4fmKgn/KD+oGxl1GDBe2CavRVuqrUThiEe4u2
+# lHYoGNewqz0sza8hj3yqGE9P8nK9Ne/D15aT5N4tOamW+kLtXkNZrulDBmXqA5xu
+# h6KKsAbt+P7l309LudYlWmCWMUjS/JJo31R/sl0zLAt7rIuDl+07hfyTll7g6pdL
+# 3lKO5fUIzZ/oaszQ9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCA/N6QQxTW2N17VIe6ru0Nbvi2hHT28SDqvrxE8
-# uwSl6zANBgkqhkiG9w0BAQEFAASCAgAo2QD5pR+LQAPvzDuGc6i+vNIuBwffkZEh
-# 1X4BkjSJASfv3NL+QFvpCi+4uiempc6vDbZ9QsbZLE7Iv+tEKVLV6r/edl2pIQV6
-# 6FmRfCwNac93eFaZ1N+yZxMZEGN3A9TxScVzLg+Eaurp04ka8F5jQQe3HVFykM+B
-# aH4zzCQqfrIQLQXTiiJ/Om/qAl/CNmijB1uBxODIgSjsiWc6DMgNmAR/Mm3vDpOW
-# Jj7ROm6h2x0wMshxK33EphNa19uhD6hMsdXX3UShH/MhbywwgpYdGSSWqKM3BNBY
-# B3r+VtlRtRhM6KkHVY+alU2HpC7tnQB3R53/M6G2XUqJOg+smzEu+AwBdYSE15Kx
-# s3WFBmjCXrFN519D0nbim5nRpTNKDsTTt+aFWra8GSggHNxrD/T+96+kxIFh7Oyp
-# xKoqmQ6c5UCLkHadIcN9lZyrzxmdMugEkDC4NBSQQaUywiAA+FD7X3j60R1YmXyC
-# iiVpWdtbsDzkPsCit5f4dFSowlw56v+ZImluqpU6VlKwO++Oz7SpPvgTsSw4CnvC
-# FDXuqxgTSSWS+L6650c5JacvKhflqhvoKOa5zA/j0F1FJEYgZh+uhYIH1wlIXqwS
-# v/c038ROI9M1Z4eNVy5/+h6viDRJ4ZLQ4vPgwrVzNpQ0CX6Dw1vqCjrLijAl92Ft
-# RHHzrzjAhQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
+# NTZaMC8GCSqGSIb3DQEJBDEiBCBLqnbr77MjsHjT91/1umLX1L5o54L8ukEB7JB8
+# HiJAxTANBgkqhkiG9w0BAQEFAASCAgBgnX95FocWf7hSfCLyxj4jq4OmSEG8qvmp
+# jpgsjOFmoHQVMSD+41e74TvBHywzpXdRwjEqaQp3AF1WmNxla5cgePs6x0R9JfZd
+# b2beHcyJlwU8o0ktt8+CinSBSN6XRd2Nt4ME6MwzCx+bWWE8Cj9aziCitJYBVuS/
+# ldaf5eDFx6paEkmXC82aMqEb9ZCJ2Z8OQif7nzIL8cvDwMog2NCY0Aw79ZL+HmAI
+# JiYHwDvkRKnLP8kpNf0pObe5FJVLSKYtTS1JH5k2ThQxxmnUyFSeSvDWrukp0wse
+# fI5xBB29+gzOn4v6dkD0c37PJwVAdJPRvujf/0is4gpgmS7vXdLY5LcJFlEBJAHU
+# qz761HWab0cffnqBKjO3+XKcAmZH8RE3sxyUFDhu1WhK6v4G2Yi87hcrFz/Y4gIO
+# mcYjaiweXtRa1uaEiUn6IAeyZeA/oMtAcIog93sPHJdIiAyAy1Iy1R/KdYNaIAxw
+# rpy0A9c2yJlZojwwrzCU3Ig9xBm+BR3t8iBk4dVlOQifd/N/HhbyItpIX5G1oynO
+# 7VdOuZa6799kmYW21i1mGMK2c+bxJ7XVfoKtdHj+L84cIGA9U5Y1wXgaBjZ9D2Pt
+# J91E3nJ4gYJ+Bed0Jco7nm07KxkJZmRmup3hLxZ4nHB6wU+z2MoLTFMoItXIHmc2
+# SPkS7oTSBA==
 # SIG # End signature block
