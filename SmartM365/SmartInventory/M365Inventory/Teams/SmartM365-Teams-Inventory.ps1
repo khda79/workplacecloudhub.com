@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.27
+0.28
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.27"
+$ScriptVersion="0.28"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -82,6 +82,21 @@ function IsoUtc {
 function Num{param([AllowNull()][object]$Value) if($null-eq$Value -or [string]::IsNullOrWhiteSpace([string]$Value)){return ''}; try{([double]$Value).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$Value}}
 function Prop{param([AllowNull()][object]$Object,[string[]]$Names) if($null-eq$Object){return $null}; foreach($n in $Names){$p=$Object.PSObject.Properties[$n]; if($p){return $p.Value}}; $null}
 function JoinVals{param([AllowNull()][object[]]$Values) @($Values|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_)}) -join '; '}
+
+function Test-TeamsGraphProperty {
+    param([AllowNull()][object]$Object,[Parameter(Mandatory)][string]$Name)
+    if($null-eq$Object){return $false}
+    if($Object -is [System.Collections.IDictionary]){return $Object.Contains($Name)}
+    return $null -ne $Object.PSObject.Properties[$Name]
+}
+function Get-TeamsGraphPropertyValue {
+    param([AllowNull()][object]$Object,[Parameter(Mandatory)][string]$Name)
+    if($null-eq$Object){return $null}
+    if($Object -is [System.Collections.IDictionary]){return $Object[$Name]}
+    $property=$Object.PSObject.Properties[$Name]
+    if($property){return $property.Value}
+    return $null
+}
 
 function Invoke-TeamsDailySummaryMail {
     [CmdletBinding()]
@@ -212,12 +227,11 @@ function Get-GraphCollection {
         if (-not $visited.Add($next)) { throw "$Operation returned a repeated @odata.nextLink; collection is incomplete." }
         $page++
         $response = if ($null -ne $RequestInvoker) { & $RequestInvoker $next } else { Invoke-Graph -Uri $next -Operation "$Operation page $page" -Headers $Headers }
-        if ($null -eq $response -or $null -eq $response.PSObject.Properties['value']) {
+        if (-not (Test-TeamsGraphProperty -Object $response -Name 'value')) {
             throw "$Operation page $page returned an invalid Graph collection response without a value property."
         }
-        foreach ($item in @($response.value)) { if ($null -ne $item) { [void]$items.Add($item) } }
-        $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-        $next = if ($null -ne $nextLinkProperty) { [string]$nextLinkProperty.Value } else { '' }
+        foreach ($item in @(Get-TeamsGraphPropertyValue -Object $response -Name 'value')) { if ($null -ne $item) { [void]$items.Add($item) } }
+        $next = [string](Get-TeamsGraphPropertyValue -Object $response -Name '@odata.nextLink')
     }
     return $items.ToArray()
 }
@@ -318,14 +332,13 @@ function Get-TeamsBatchSeed {
                 continue
             }
             if ($meta.Kind -in @('Owners','Members','Channels')) {
-                if ($null -eq $response.body -or $null -eq $response.body.PSObject.Properties['value']) {
+                if (-not (Test-TeamsGraphProperty -Object $response.body -Name 'value')) {
                     WriteLog -Message ("Teams Graph batch sub-request returned an invalid collection body: TeamId={0}; Kind={1}. Sequential fallback will be used." -f $meta.TeamId,$meta.Kind) -Level WARNING
                     continue
                 }
                 $items = [System.Collections.Generic.List[object]]::new()
-                foreach ($item in @($response.body.value)) { if ($null -ne $item) { [void]$items.Add($item) } }
-                $nextLinkProperty=$response.body.PSObject.Properties['@odata.nextLink']
-                $nextLink=if($nextLinkProperty){[string]$nextLinkProperty.Value}else{''}
+                foreach ($item in @(Get-TeamsGraphPropertyValue -Object $response.body -Name 'value')) { if ($null -ne $item) { [void]$items.Add($item) } }
+                $nextLink=[string](Get-TeamsGraphPropertyValue -Object $response.body -Name '@odata.nextLink')
                 if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
                     $continuationHeaders=if($meta.Kind-eq'Channels'){$TeamsChannelRequestHeaders}else{@{}}
                     foreach ($item in @(Get-GraphCollection -Uri $nextLink -Operation ("Get Teams {0} continuation" -f $meta.Kind) -Headers $continuationHeaders)) { [void]$items.Add($item) }
@@ -581,8 +594,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9bITmvY/hnI4v
-# g5NnNOd7vNAmgng6wf1b621WPrHyTqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNSBMko6eDJvnG
+# Fn17dFGtj4IR5U52fLdOz8D1YJ+UvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -715,31 +728,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHI6oUaVCALqZQWu0SachOydZmR1KiiTtak2sPUifCQeMA0GCSqG
-# SIb3DQEBAQUABIIBgAovKFT0XngEOy0ZNJKpwXkJFDGQqjgqK1f3lUoIjGWdb5lo
-# ZCVZHuB5hTFHpn7gshQh0zI+J90ZDLn859QdXh5w0MukgCsH+Ni1r5eHR+4DOqLq
-# C7XMLmNQH9Zcwz7UbFoRqEm6rZe1wZnQVVSyABSH2AXib2FmG7nMWCyGIIb9vkE0
-# 2ju78nsDCk889XSYX6azgiun9e3PM647XMaLQAoNhqGhYfT+Vvqa2op6XHqBJ+k5
-# fO1l330coneJW+4F1N1YgMaI6j35VZVxSeBI1c6c+1h/Nnwl7FYK5yLgTkexLLmG
-# 9DqAnBL/QptHLyPUGXoT9Dbz2A8O85CMa21wbXBJtPLlzc5awGMdjqI1OFl6quTF
-# dxPNby2Ksegl089FZh0OPEhxyrAoOAM3vvB8G66+ZTZJRfoBrIKx2pP84/d6mz4P
-# loUMhuHb0gTezRwixmSllg7/CXeaHNIGRV27Q7XVf5NuodJFTDzO9VoKY/hgIQJH
-# dSJYpzMLRIgWPW0lwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBWdeOfentkg6gKootp5DUziSBoOMSChdQ0c0kK4f84tMA0GCSqG
+# SIb3DQEBAQUABIIBgBloNknJIkALUBQXm4pCuoJUNh2WzyEVgKeUMt1X9XYm1g9Z
+# XPnszkOdmoblcpUAIn3V+mmzzaIZ4zoVrL2+/Sl4zvTdSekAB57smNCO3HL6NyWS
+# kJx2XsJ/z0Tn+Vw3GInu54Jvt2FkEOKu0xkFIxcMclGk0mdazKugTq8ovqSPF8PK
+# sawQclMA2+3cVKVnCts1SK6iGJtjiKjOibaj773f9nGoFnqt2C4QKjPgx+cQ6YsT
+# Hr9/XTZkGs8Qg0j8GbxskAfDNYG7W5/RJ5Nivtjg1AmLIJ9QWW06IDiFH+ATL90H
+# cX6kVmtF+HmlyJNht6dEv6HWrXKBAtwhsn51DXuMQ824FjMKZKS8hsI7fb/qHnjG
+# LpySeI9gBBz/tMVT+ZlK4ay7aiSW1D7EAQxE7u8jj+HMyECN3LRWpGf+YeDYcT1Q
+# gXDNhO8gSvT9LW9VW/biDzzgeGev5fvMkcJZ0yiouKKFq8MOPnVdFRWrXzakadax
+# v/o7I1Bp9p3JOjbsxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCA41nwKbx77k8cLkaSmh0wu8D3GLY8QG+tZdJzk
-# uJaO9DANBgkqhkiG9w0BAQEFAASCAgArcMbpnlWVFc3z/g8pr1UQoC41K20UqFWD
-# YyvjJEFmep8VaYzaa3nqo1TjaCTzJ/2jNbgyQQrbAreOO8Z3JZflw9k2h9sPGDhK
-# m326lQGE6dzKKMfLmpl/p1qKuvVJujXOVlFVoDRMZoD5QHcOdtzw47hMiqIyuBGw
-# TSufbosbwbpyqTBpCjxBLweX/uzSs7I35prl7326oHE5w6CCr+Zi5V6A8rEhNgrO
-# WCm5fereTQR5jJhj3HrfspZ0Ce4a658b7LgJ0x/rzIf+r5XiuSfpqCsYwPHiqc4O
-# epXLabp0+Vem566TqYxZKPuK6wmVDSN3BhLlN6DaxFiiMlElC0ZlO6CKZ2McS2nM
-# 76aXCdJE4ufjHhHP+3wFqyxBzv1fsmZHk3rO+kpoglGl55u93oyPmS+N4LkROEd+
-# iCNWUtfriG7ezYb4vuW+j8B/lq6bu0xtOQmIH1ZwjG5j3GBv4lXhkpfjRLZl7Eco
-# uRNGX3HBld8WZ8mLJshO3Xhf3KjIyXjTs4w9i9iRczg7ZLibgq+E50NyHo90DRj+
-# n30ucosAgWUVLkLmkbYGIQupWkV9yxlBxF4ZFG6IpWCqE4EMZv8m7dgnO/Z24VTM
-# 6VHMYMeFEa24kb2OMW6/Ggcl4DnzJBdDKsSl2gWdC/EkYfU93t4qQ4xZoN9fOpBt
-# pLQBiT0YOg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzRaMC8GCSqGSIb3DQEJBDEiBCAJuydp8apxwmZ24Bu2zqFe2yt+nK50R7GoHPdj
+# ywNOFjANBgkqhkiG9w0BAQEFAASCAgB+efKXIP5zSd5OT9XvRAYHOvhA3XPiAkKK
+# dMPCDGRqQxjuyDS7otjLl8ZqD4jh3UsLExl2LI2n7uv3lKlUdACzh/ii3aG7Tmru
+# LQLebap45CRbS8DsIViOvNhukwC8uaOm+NhCJhsxzne5eTTeeOmoJKwxTPYolr4U
+# EC8Q/XTviKDsJbyBmdHFEmq0CDvSSAOxSpBUP4aBWcKbqrAO7lQuPMwDeUP2aH46
+# 1X3E5St/QzmDqe1dIN0fJbKg84hWR4B0bgLIBKd5QCh2bZB9VPqpd0QGnqb+h/iP
+# SjbwpP8339qMVwQZhuhwWkrNga1Br7mJANZhPjdEeGqf162nTyusoYkFFsye/a8f
+# N4zGPM6aJDMa6bQwq/9R0k0kOOgU7RUXCgTiXUnxcOMhNHpXBeEeNbnRo+i3A7jK
+# EuM9bdVWeGy88ABOLvmIQcaeKU0WftGjzipNh3TxX71s2G6Qt55nk1+EdF35WsY6
+# 5uasAjCDvWGTxwcw8hlr9dTBKL/prJb7Qe8yQ8nSimqvv+ACUdjBLFdk0xjvUfXe
+# DFpO7GMGKs4P+Vils9AOrSZmj/R9KYXIb0fQnoZcaoGQDNtEIoT3QtSFCYbLi1Jz
+# jNkLofCAosZEtvWW5hqUj5kbI1viEem3DR+PuGBhEd4ewXIUU4hGaT2Ll4NfHudQ
+# tFcUKZKxMQ==
 # SIG # End signature block

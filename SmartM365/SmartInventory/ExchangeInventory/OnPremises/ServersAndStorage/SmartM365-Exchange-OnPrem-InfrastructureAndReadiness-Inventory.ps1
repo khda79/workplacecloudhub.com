@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.6.1
+    1.6.2
 
 
 .REQUIREMENTS
@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.1
+    Version     : 1.6.2
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -169,7 +169,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.1"
+$ScriptVersion = "1.6.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1666,7 +1666,10 @@ try {
         Write-Log "Mode: HTML report regeneration from existing DATA-ALL CSV files. Exchange collection is skipped."
         Invoke-ServersAndStorageHtmlReportRegeneration -RunFolder $OutputFolder -SendMail:$SendRegeneratedReportMail
         Write-Log "Completed regenerated report workflow."
-        Complete-ServersAndStorageRun -Status 'Success' -Started $StartTime -ErrorMessage $null
+        $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+        $script:CompletionStatus = $completionStatus
+        Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
+        if ($completionStatus -eq 'CompletedWithWarnings') { exit 3 }
         return
     }
     Write-Log "Collection method: WMI/DCOM only"
@@ -1828,6 +1831,10 @@ try {
     $exchangeReadinessRows = @($exchangeReadinessInventory)
     $exchangeReadinessErrorRows = @($exchangeReadinessRows | Where-Object { $_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error" })
     $exchangeReadinessWarningRows = @($exchangeReadinessRows | Where-Object { $_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning" })
+    $reportedWarningCount = $exchangeReadinessWarningRows.Count + $lowSpaceRows.Count
+    if ($reportedWarningCount -gt $script:ServersAndStorageWarningCount) {
+        $script:ServersAndStorageWarningCount = $reportedWarningCount
+    }
     $exchangeSchemaRangeUpperRow = $exchangeReadinessRows | Where-Object { $_.Category -eq "ADSchema" -and $_.Setting -eq "rangeUpper" } | Select-Object -First 1
     $exchangeOrgObjectVersionRow = $exchangeReadinessRows | Where-Object { $_.Category -eq "ADSchema" -and $_.Setting -eq "objectVersion" } | Select-Object -First 1
     $exchangeSchemaRangeUpper = if ($null -ne $exchangeSchemaRangeUpperRow) { $exchangeSchemaRangeUpperRow.Value } else { $null }
@@ -1891,7 +1898,10 @@ try {
     Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
-    Complete-ServersAndStorageRun -Status 'Success' -Started $StartTime -ErrorMessage $null
+    $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    $script:CompletionStatus = $completionStatus
+    Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
+    if ($completionStatus -eq 'CompletedWithWarnings') { exit 3 }
 }
 catch {
     $script:CompletionStatus = 'Failed'
@@ -1901,13 +1911,13 @@ catch {
     throw
 }
 finally {
-    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $StartTime
+    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $StartTime -WarningCount $script:ServersAndStorageWarningCount -ErrorCount $script:ServersAndStorageErrorCount
 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuL3pHKxRt8NC8
-# Jq9YRUp/UZpMuZ9nNFldTjPRT39xgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDQxbE0oqxXGqv
+# QpRcJAvVuHddl9vuE++V0jqzDtYlv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2040,31 +2050,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGQ+vu4cSUW1vQg5RTaFQxouph6iIjD9xzyU9CcuSN9RMA0GCSqG
-# SIb3DQEBAQUABIIBgH71p5EkgjyUQTq9+c/lVkjfaDhsmaL5gwipy3QJTRMliRu4
-# 5/pHf7tSgQNX2X5fYa/fSCZ7msOrQ6SqfkXngziNtE/gn9dZRyPFZ5TYG2MasiJk
-# 3wamtHpqUndPw4lnSlul6sxtlROnSjIAjoPb0mWGnqybjEtNF+55jrXGvgGqpchA
-# B/bAoIIyfJgrZCMVWq+T2oKKZ43jwcjyml8kxJv5EodFQvk6KmL2JehpEOmFPHGF
-# U6smCLWRHUZuXz8rngbK/cwTAQ8btpVBjzSuu0pjGn4osPD9WAnAx+rOjxVpH8hy
-# ekLFhm6PZym4+oLg20egS2AzkHxSIujMNOQEjk/WXJWQkJ692UUrjs5lZAJOwgXB
-# Fh0kBVYJpvParsG5yTwPFXNRpyS3mcLuhQeQ4TDTgYJwuZk48DXj9Ww53wSIxFrw
-# NmKPUHn0T9oa3/UBBnre4hRX1hp8TyNO/uZfcStQP9aBEY1ShwXhEhMfWfeNqziT
-# Xx6ZLucC7Tw6Vq4yd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHwwd5F5Zv6rvbXdQhvcdLcQhBx7ExXlZbUomw1RkGMHMA0GCSqG
+# SIb3DQEBAQUABIIBgDvp+xGOe+JMimLk5uUnDzJpZ70tHyCxh3+KGtcPLvVicfuc
+# IzZLE1P8WozPBWUuXBtoX/9O47BF5emIKO68wv5R4qZiRMWOurUGG2xpMh8U/zqv
+# g8l63HdZV9g9CcoqosIFhaEWcyqRTmBmKh8IPS8Mj0kepDEdIrHRN1it6G7F3Lpb
+# WlcCTWVCfLwS1i+8z5pw68M4y1Pi9ZNa7kVENXBMNgW0CUbvyoo33qnKfUYl/L3H
+# WgBIei0Z/TtL0DnJMQccnyGAU2cDEIGfRtnVVzawy99DtBjDLvkC2EptcDsL6flW
+# abXyx2WDtsOy850P1H9HuhsusuNxM66L261FAGZXAGgqljtMpbQoMxXxE5h0rp9a
+# n23ycJVvlifj9NMyMFWE9AzzM7g+CFZE6mjsmIFXEJ7uy6NvrtkpRwcWjsGD4FRK
+# wg/Tu17UDwuARIDeARjvks7CrQqr/iRiQZTZMxxUGo/GiiMNNCN/DdBMAbo8VNWz
+# opL27aXfoISSRhwyzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjdaMC8GCSqGSIb3DQEJBDEiBCBO47fyKhHD3X0BQQTJPUaNVnpS+lBhsJqN5UeH
-# EP8LWzANBgkqhkiG9w0BAQEFAASCAgBq6d+pK3UBK+CUVkpd2LpkP7dghuyckblk
-# KWg8E4fR95PggodReO1O1VBO9pX5Ufw57g7vQoHah7QZUSPw8zCe60FgsfL7S6aA
-# /8akdAebZEgGANDyRJ+oSi1X9ElVLQUTsLHYpzWfKCcuLJ/yP8SwpmVZSAJHWj6g
-# rwvZj/lcyIy37acEO2CFf+pCHZekLc0nNNWkVD/h8/CGWgTtSLheMGaKKiK1Ngtz
-# MeBET6nGoPVc6MR7ZcARRnsonSBSfwCGYPSjNbRgTGo0+fJh//XSvULSab09mY5V
-# 233TYghD11DH7e/tO9AZ3WDGpMWvt0SKxjbjqXu1dUfPidGiGpijIXUNVmZFKN+C
-# 9XsQ+0MVv3AgaK2PurQ6729P7oOvDn9WE16JCZ7rpdf66R4vNYfeBBn7MctBHauE
-# 0H/DSaY32ar3RG2b9AxzaXktkhrBec8+VqPickJI3svWgSnf39hhs4BU6VczRUia
-# ts2O+4WrzSKjVolPXZ/S7WndDreF7u3uFWZO+BbuAI9MiiDW7hgU+ZR52dsGBnjw
-# 7BmL6POW3N/lJjSxHcT4WYoGCogKZTlFvoF1MHDYFlXtaEw2O4BzqTq8+GrbjL9d
-# U2Fz50jF5TBPaRtA/Sd/PdpVEB0UqGL36hnlM8NlwitmN4CCDNsqJChcU57Sejrj
-# SSKSQuAg1g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDftvm1qd952473YtR/qojUTCqE3+0RiZWxtHBN
+# UKwkeDANBgkqhkiG9w0BAQEFAASCAgB+zKGEZcm3r8upGuArQo2iDzP6nr8DaMzi
+# xxgDipt5KgMrU1v44E4leOBa95u7o5ozl+qlLI2T4mPh5GLIvSMz7hyMdjRmY3dZ
+# oTPo3sGR5ImDt72oh6WhIymet8EOFOqLpXZuPd9qEd9bnaK2KtIar1Km5nY7Bwas
+# 99vb/fmUXNou0CgHmiXd2uhpzeGP7jBRcS8ZNXXkI0NID/xgrZKQhFh7X1SWhOxl
+# Ga5y7NcJR46EGA5xo0ruaqIiM4NKsWGcM5F2nzvV6K2g7RISjJzKWuSWW4csx+KJ
+# Odh+AZJ65kM8WpyA9kIl4uUIr08hlDZfPJxjKesnzxEAY3YyL4Gx2Jhvhq9aGJok
+# 2coxwFlOuwN6hbkqPbzxCJpk+fgMsyF0O/0Lug8tqp8KiKDpcu2K5ZKLgAyOGGAZ
+# CsjbcYLWxhLbH66W7W6mQVSOw5U5Jb9a3oIMWEN9CUfsRhlCCYcr3HqZamJ+/3NP
+# DxQgIBAZqOi+uiODHQUJ32v4dtKTz3hBewbzT7/kAuixeWjuQPbTiUQX0Ym4vvzm
+# C6Q6/Yl3EfYqe2zUWTJQpAA8iAdRBxF/PE9dxR4aDEMIqB4ZB95cYz3SRDwNSxPo
+# hOjAlDzaTw1GpRiXQ70WjwLPlTWHj/agAkXpK9PxagrHucR7pZ7doBQN8nx6Ix/j
+# eDyP0JSfpQ==
 # SIG # End signature block
