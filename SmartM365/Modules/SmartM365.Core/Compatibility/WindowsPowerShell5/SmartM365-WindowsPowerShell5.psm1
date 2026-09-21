@@ -4328,6 +4328,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'Intune_Devices_LocalSystem' @('DeviceName','DeviceId','AzureADDeviceId') $false
     & $add 'Intune_Autopilot_Devices' @('Autopilot ID','Serial number') $false
     & $add 'Intune_Devices_UpgradeEligibility_Summary' @('ReportType','ExportDateTime') $false
+    & $add 'Intune_Devices_UpgradeEligibility_DuplicatesByName' @('DuplicateKey','DuplicateCount','NormalizedDeviceName','ExportDateTime') $true
     & $add 'Intune_Devices_Win11Readiness' @('DeviceName','GraphId','RunId') $false
     & $add 'Intune_WindowsUpdate_Status' @('PolicyId','DeviceId','DeviceName','AggregateState') $false
     & $add 'Intune_AutopatchAlerts_Detail' @('AlertName','Severity','SourceReport') $true
@@ -4755,7 +4756,7 @@ function Export-SmartM365Csv {
         [Parameter(ParameterSetName = 'ByPath')]
         [string]$LatestPath,
         [Parameter(Mandatory)]
-        [AllowNull()][object[]]$Data,
+        [AllowNull()][AllowEmptyCollection()][object[]]$Data,
         [string[]]$Columns = @(),
         [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
         [string]$Encoding = "UTF8",
@@ -4778,8 +4779,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApx88obtzi6mkS
-# l/Ua9XxXDpDLpRts8hVhEJX0icB9SqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjMwOma5/KgUKb
+# Pl6fTKz5ImTTQztFVMutYWfoGZPJIqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4912,31 +4913,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH2a0FKM7bxy74gOrGcEbyIxHu8RT2qg0mF67NdPuoDfMA0GCSqG
-# SIb3DQEBAQUABIIBgDbfpX9SAy5Ot9KFdXSPYP8tnyPh05mp0m541U1a4lfkdoNP
-# p9PiB4VW0hO1e7nrh+Gg/o/pBeQFgd+X4dqu/JYqAptW7SMEzGujI2tRpOQpjGxg
-# 046ukGiqonhKSly1mG9anp20lK2a0NbRp6XWi/znGiF836YruogDooOXaLVv9slR
-# tjr3Xmag3AjBwsv5qSZaPOJYN9d8WGvsF3DMOVf9pfZj2dHtsUmnisN7K+ysTjX8
-# ltFaF8zdvfYi578wweN6jSF/FSpBlA8kEIxuVTPaTChRKtGF/M0q9MelVL+8Ze2e
-# lprBwjEuDE/anDTTgxvtKEZcjOlS2DX6KeZDiHkrvUC95jnjZSCpf/zAzTNHhzVG
-# qXqD3cMUDzL5UQXHStlup2HylkdUzlJkd1RVLXor3QiLSoItpIgHauu0ygHLVUC1
-# +R/vLwNyjOGXgK53PDii6VSmS0j0I4qFxeWs7cM+8iQDXdzmQlkau32W5SdR3sG7
-# +mL58b9G5nAHDBDzeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAxX9b32suthnslbNJD5MMlcyICEZ9/GIb4t3ONe8KWKMA0GCSqG
+# SIb3DQEBAQUABIIBgDgSnnv/a5dNZnoHoPqivGRLptyUSdMK9ynCH3MWUZjhc/lJ
+# Pd+XJzS3mMfZlJusvi31BNANiXTMbSc93fSd7mWjS1ftNyc5b/1r3lBMOOaVsD60
+# 1U3o2MzXL6h3mfsm5/cLF9Ya7yKm+bIwtxZkApAqTWBmhr1VV/KwbP/oHNS5VhJU
+# KQawUYAE8UHf8npd/iFg+IsV3Ow3dbAnY1F6EIhf52Ytn74PZiS5FOgmjIpoCOcr
+# 4+57DDx5xtFTvjl38xCLYAfuBjzHUyBj4qO1/89lLYycrOgCja3cTq5oCU38V0Lw
+# ++K9sRXPt75DgKatS0uwD5TwoSEHcx/ClctrVw3m8Np+GU3RMH2ks/IAHpqfIYFM
+# ufOAgLbnC2pRrJa23Hb8910/wjOpkoMjs/SFUx3VS57FWO7g4XoFS4DZBdro4tPH
+# 9usiWAieAPHLuKRsK3qQ+zEYK68+tYAsVb+lH7GU+s4Hxt1ZRy27RHT+S/OxFtdK
+# YfBwhusR5dMnXz3DdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDvud3AR1+1DHZoJFyFyEARwSdroLHvprl2ztar
-# X9D+WDANBgkqhkiG9w0BAQEFAASCAgA43w/iQdSFuBOQ/tw51Ey0veuJmznIgY0k
-# RmL4lhWQuOx9gP4O78nikyF7OAYnlU+f61otjEb2ioZieAiZENVdqe4ZrsxZZs5E
-# zVFpIx9CPwxuHZ2MBGx5g6GxYP0VhjCJei/DqhHkiML+Lw3bhjO+siR+6ch883kW
-# mcZobVn952tbPOrA2Z3puMIS0k2mGjmcszUZzqvQuvNBLIBGXwui3AevWcvkbyLJ
-# glA4SQIJI2wrEiDuR1uY/QKMLmuhRsBda/hKgTPWO6Zaa9gtiYrHPTv0EMMyUQxI
-# Ar/UvFiqC9ex7fl6F6QwcPHBndqlppUeINh9Bpsl9yLbwBa9sA4S6RmeHsNTn7FD
-# 427pii9B5btlWryv8yuZhCFg3hmwk7lzRv8CMdF4wTgNseCPo7arohGZuKJxAz4g
-# TH8zDjfBHq0BR84IfLgQWtVV0h6MGFhhhqRATA4DYfK3A1SYiUcsg274ALTugSS5
-# jfHnJvfyJAOa5FZQlXmQlkW0LAxQG3aEgWxho4PRBckaKjTcAacyNr0w6lD/oT/W
-# yJKsLMIMR8Qi69HxRNq6S3KuveSAAiob4h72f46b+KX/hgGHDhg4JkpqqA/f8CVY
-# ZjFwqEtjylMtkbQytMtzx6YS6lQANoNeDkGCQbI7/UKX3ZAdBzJs3fdP1TNTJGBW
-# tqFcOvoO3Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
+# MjlaMC8GCSqGSIb3DQEJBDEiBCBGUdukoKTxDr7xLFGIsi/qM2n7m2o1V27dueBV
+# 4fTdszANBgkqhkiG9w0BAQEFAASCAgAHQCo78KvEUQJb6RD5gPE08yVFZtKBV8UJ
+# xAyxECnLPWcxQ38ERfFHDNBp8D8SPoRaI6tungqDiH2oNbpbqomQpOzIhOhleMiJ
+# 7vqP0LB/Qyk5FSGGK2RwYq6sgZPS0HthlTcH5o6NAgc12VA3MAyyy13nbrGUR9WE
+# upF+pokaumdTgAN6SwdhzRxb8vRVknBZt5C+QWoSMtL57DyCjj7ch1A6fZkq8Ml3
+# 5Si80sqcL6aVlK9NbLvSj7cLRpWwYVCWzFAnVKPp0B97TjOndikppNdoXCJqji93
+# K6dMWfhgdvLOD+KTRr3tv+8KGmHfJI7vCIwlLJqRDhi3/lV3DpkFiKNrlo4Al/sW
+# v/qJ5/clibEJL64/Fdli9rt6SCPORULbtbOTESE3qwXyrk+4i1BSh5/+epgJ/hmD
+# M+ryECTnzkgoAYJXlB16ObDp5lb1ufQsFkS3LN9Ca+QO7H/wZwyVbQMVbRiqT5f/
+# 7m7SzF7FKEm8myHhTIo6DfT0onXZpsEDCffobukt5Z722FR4Ly5vJMVUdrl0Xe3F
+# Ugw8ceZbQVeLwjZoRYdq5Wn9CI/BOeASCXTil5OUR1JXUZVOGpMj+JeBg4KYL0pA
+# B+zsuDKD3Y0obJd3kx0iZDCbjwonsvwxlI+Jaq+Z8UA44XpGXRV1odkD1HoW3bSk
+# ywryeP/83Q==
 # SIG # End signature block

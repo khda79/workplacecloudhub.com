@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param(
@@ -308,6 +308,41 @@ try {
         } finally {Remove-Module $m -Force}
     }
 
+    Test-OfflineCase 'Upgrade Eligibility replaces stale duplicate snapshots with an empty current CSV' {
+        $m=Import-OfflineFunctions $paths.Upgrade @('Export-UpgradeEligibilityDuplicateAudit')
+        try {
+            $result=&$m {
+                $script:exports=New-Object 'System.Collections.Generic.List[object]'
+                function script:Export-SmartM365Csv {
+                    param($Data,$TimestampedPath,$LatestPath,$Columns)
+                    $script:exports.Add([pscustomobject]@{
+                        Data=@($Data)
+                        TimestampedPath=[string]$TimestampedPath
+                        LatestPath=[string]$LatestPath
+                        Columns=@($Columns)
+                    }) | Out-Null
+                }
+                $withDuplicates=@(
+                    [pscustomobject]@{DeviceName='DEVICE-01';NormalizedDeviceName='device-01';GraphId='graph-01';RunId='run-1'},
+                    [pscustomobject]@{DeviceName='DEVICE-01.contoso.test';NormalizedDeviceName='device-01';GraphId='graph-02';RunId='run-1'}
+                )
+                $withoutDuplicates=@(
+                    [pscustomobject]@{DeviceName='DEVICE-01';NormalizedDeviceName='device-01';GraphId='graph-01';RunId='run-2'},
+                    [pscustomobject]@{DeviceName='DEVICE-02';NormalizedDeviceName='device-02';GraphId='graph-02';RunId='run-2'}
+                )
+                $first=Export-UpgradeEligibilityDuplicateAudit -Rows $withDuplicates -TimestampedPath 'history-1.csv' -LatestPath 'latest.csv'
+                $second=Export-UpgradeEligibilityDuplicateAudit -Rows $withoutDuplicates -TimestampedPath 'history-2.csv' -LatestPath 'latest.csv'
+                [pscustomobject]@{First=$first;Second=$second;Calls=$script:exports.ToArray()}
+            }
+            Assert-Offline ($result.Calls.Count -eq 2) 'The no-duplicate run did not publish a replacement snapshot.'
+            Assert-Offline ($result.First.GroupCount -eq 1 -and $result.First.RowCount -eq 2) 'The duplicate run audit is incorrect.'
+            Assert-Offline ($result.Second.GroupCount -eq 0 -and $result.Second.RowCount -eq 0) 'The no-duplicate run did not produce an empty audit.'
+            Assert-Offline (@($result.Calls[1].Data).Count -eq 0) 'The replacement duplicate snapshot retained stale rows.'
+            Assert-Offline ($result.Calls[1].LatestPath -ceq 'latest.csv') 'The no-duplicate run did not target the current snapshot.'
+            Assert-Offline (@($result.Calls[1].Columns) -contains 'DuplicateKey' -and @($result.Calls[1].Columns) -contains 'RunId') 'The empty duplicate snapshot schema is incomplete.'
+        } finally {Remove-Module $m -Force}
+    }
+
     Test-OfflineCase 'Consumer contracts retain required Graph CSV sources' {
         $dashboardSchema=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-schema.json') -Raw|ConvertFrom-Json
         $dashboardSelection=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-selection.json') -Raw|ConvertFrom-Json
@@ -341,8 +376,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXKYKYq+LRas2x
-# q/mmtdbgGdr3eEZ/x8RwcA0J/NiBhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCP3oRNvYQFYGJI
+# lAsan3gzOAGfmvzV8nVzc8k/zkvw26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -475,31 +510,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP3I/ogt9UIHMjl522V9A182Bj/SQ94BESnxRaM2tA1JMA0GCSqG
-# SIb3DQEBAQUABIIBgJGvfqIOknV1gOnB+agQzatQZpsH2oVEKCScXpcbRvnsC7+3
-# NFrf5qwzPllfV7yh9Kn88bAkrfpRE3FCjigcD3m3SEm6Mh62ZLH81YwNxuG6Gqzj
-# 2p3AygYx9ApI0tpPY6k01irWGaK2KhE4q1FUjGfkwrW1fwAEp4cwPGr5MMzqh0Yj
-# NBYHxwawLrLA4f0jJT2wOYa3I6lu/dmJRNOVE6g9mzXh6dlHT3ZPDxYiOws7MzY3
-# FFSsCJmw4hvAWRRsJNUEQBd3NOjfOUvli6XINmjW1kwulfcmo/IFMXbM3HxzNecQ
-# 4dstfLtuGF0NkTBWzQ4uUHxZSMIfkygFYtg+Ln46Lk8ty4Saha1fuuls1TxVmL/v
-# n/4X3JtYh+EAO3HnLTZiLjITagy9t+dfrDOgg9Oq+J2hGMwtqKjAeDpLZw64RZ4T
-# gWJ7WGFExlp1PSXpsnPKeYXKB1uKKarLt5HdRntOa9/eZv+XWA0C+0zZKVUiCgsK
-# 2H0eTiSvcofVDVJv8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPxXOSZXKdOTAEE+I02n/A7Pe3JeA61nRIlIU6XscaprMA0GCSqG
+# SIb3DQEBAQUABIIBgHm7RLrjw7qLtHzCfVwhl2lVB91HOebCh3ud3FLK2ZFp6itz
+# BZxPSyuXqBO/enkqbDzSLLEWJYbFUObP/p9UINfFDyg8UGh9p/7d2Ytra0hBFaeG
+# JiHryf4voNJHMD/XDqOPExSuRQTMzEP4AnxeeUgDFN/H/JM4JPuKnODuXIhXHOpD
+# VySSfK3ciuPG2ErHLgNuNcSMVdgVlW3vTWJk70tb26WlaB1wwQ40rUhUfURdd/j4
+# C0vNGo6RnsFt6qSypkoXMaW3qmSELE4XcYUpbmOt4p846SnBrAAgGcBlOyQ2EKnP
+# lSda2UNqtsMjOkLwg7XKlLT3y5u+/sHqNp3o+9HQxun/dyg0iEXywRzqqpCz23ES
+# MbGao2K3kQcm14QQI99LmvRcuCq34EcNlVyCkYYy8Q4Q+aobHqg71XXIThxJEoKH
+# erFL/F2qw/F2YX12NjokziEvxsjrjigL7Gz88uJMloPslXOyuuIxIovQEQdEEGIx
+# cqq1yq45vLnWklLUoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDQ5
-# MDNaMC8GCSqGSIb3DQEJBDEiBCBcukXfy6weD+9MljwPDo/GZ6NSKoDzM6QTHCaA
-# Ttx/tjANBgkqhkiG9w0BAQEFAASCAgAHTPFT0WHOi7yX/183mFb9/X98VbCoQqv2
-# pQdz/tGM93O84EDzKQoNf+azX4rnwx/udn/6bPd7oqcmTil0/kb3etadIYzhbfgp
-# xVFleMpkpuIL1VmDeK5LXDDc9w6umJhOz6PuJv3UEnjZt3FAP7P1maovvTnmUF6N
-# sBYsDlOKm8uxKkIpMfx/ntGC/wLn5k+PMuI+CcqJpPyRoYZreYW1o5KyC0ECIA2X
-# n+9aZHgTUaeBOcHznnnczGIyDD5Abo5scJZYdjyZEAlfehyLxfS0MZK7zLWden8S
-# OEiBM3tUIhi098+sN9+s6bYXlZhNKh2snRoasgALf+vwX1LoscJW1q3jE3U+QbHx
-# VMe2QZuuq8Rqy12IsUKvC26xnX/vCseStz7Fc4WVu+lPn4V9+XHVo5ImzpRS6ZNu
-# V+mUWL2AjNuOsFoRiXp7n3oDAY5ofL81ZY9XuNZshzCAg0hKyIWfzA25SmEuPG9l
-# nnESs7CdXosOkidVBb1WqOYduj8A2JOMUW+HHYZBedV5sB5rreGwqxLX+5pyaoQB
-# 6WOfVhAhcoWyydCQpYUu5HPm7jqrychTrjBgnfUTY4/0SfCSO6IqJzGrlTSetpv/
-# G7vNnmmgllnQ0VH1xE0qpqglbJ8AK3fKBtDoUz21rejfQQ6oITqavlfsdZhv/+dS
-# JS4r0Mdymg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTE0
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCp7ifXg4oBuHuHUIS4B29h4D3MMu/1rpUEIVlk
+# UKMoyzANBgkqhkiG9w0BAQEFAASCAgCalBNfqn9YpqHEvSMsZsUy27Yd0uot6OtD
+# H35blndtPFkMwWfaZ4IXPYQ15gBIV8iIspIMMuarLWN1d2OSi7Jv67+7zieiOhDT
+# 7ZD83FR8lyZ9kPgEk9HS1aGpMCzdckvCJwk8/qvLwroDogPitoeVb0xDOTSit/tv
+# OHVAO9YU2CceBNCwewfrHcHCqYCn1gQnOn30nlgXzEkDaHjdqbl3i7+ckesPP2hZ
+# mz2Cp1q+jAPIV1JQ6x5uB+/cWIuS/eDNL9qCkdC1wQlMwC/FfbZoKbdvsc6U20Hd
+# BUIA8mbRxp26fw8RcBoQYscGXwq59jm7K4JKOnGjYVgBxYfM3Q+1lDvVOy3HUOGW
+# 6pd35V2VrdQmtYmGfx8XgDUmcASJknR7uWjNFzwaWrwQeHvA5BiwJ2TGvj80uKbW
+# NRqwWyRtcYqq75hCU28Fc4n0UZ3m7DsgiLeCDDrSxQH3ZaHjF1qlvDo67HNDNhCZ
+# vgXNKETVC9GkFkmSLdrnqOP/n10af/nB1WWp9/K5V7ZD97j/HX5TsU5qEPQ7GU4s
+# jeABahm3hrVCKiCPFr3SijH6bjUDGJ7ieDwlqegC5I7R0d8EOgo+PSTb5tPK8yml
+# Hi2U369azT//YqbMBFeTRPrNvU31og3cBX31xHJdpen/CH3gQOgzJojlig9ouEVu
+# HSrRijUHog==
 # SIG # End signature block
