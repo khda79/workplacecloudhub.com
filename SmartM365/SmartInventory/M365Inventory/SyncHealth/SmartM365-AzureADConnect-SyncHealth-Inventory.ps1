@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.15
+1.16
 
 
 .REQUIREMENTS
@@ -83,7 +83,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -412,29 +412,10 @@ function Send-SyncHealthMailNotification {
         $validAttachments = @($Attachments | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
         $sendMailMode = Get-SyncHealthSendMailMode -Config $ScriptLocalConfig
 
-        if ($sendMailMode -in @('Graph','Both')) {
-            Send-SmartM365GraphMail -From $from -To $to -Cc $cc -Subject $Title -BodyHtml $bodyHtml -Attachments $validAttachments
-        }
-
-        if ($sendMailMode -in @('SMTP','Both')) {
-            $smtpServer = Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'SmtpServer' -DefaultValue ''
-            if ([string]::IsNullOrWhiteSpace($smtpServer)) { throw 'SmtpServer is required when SendMailMode is SMTP or Both.' }
-            $smtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpPort' -DefaultValue 25)
-            $smtpParams = @{
-                SmtpServer = $smtpServer
-                Port = $smtpPort
-                From = $from
-                To = @($to -split ';' | Where-Object { $_ })
-                Subject = $Title
-                Body = $bodyHtml
-                BodyAsHtml = $true
-                ErrorAction = 'Stop'
-            }
-            if (-not [string]::IsNullOrWhiteSpace($cc)) { $smtpParams['Cc'] = @($cc -split ';' | Where-Object { $_ }) }
-            if ($validAttachments.Count -gt 0) { $smtpParams['Attachments'] = $validAttachments }
-            Send-MailMessage @smtpParams
-            WriteLog -Message ("SMTP mail sent from {0} to {1}" -f $from, $to) -Level SUCCESS
-        }
+        $smtpServer = Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'SmtpServer' -DefaultValue ''
+        $smtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpPort' -DefaultValue 25)
+        Send-SmartM365Mail -SendMailMode $sendMailMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $to -Cc $cc -Subject $Title -BodyHtml $bodyHtml -Attachments $validAttachments -AllowAttachments
+        WriteLog -Message ("Sync Health mail sent from {0} to {1} via {2}" -f $from, $to, $sendMailMode) -Level SUCCESS
     }
     catch {
         WriteLog -Message ("Sync Health email notification failed: {0}" -f $_.Exception.Message) -Level ERROR
@@ -629,8 +610,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8ouepYX5hqhXj
-# /6B9mvGAb4rUCcGA+5pjDqlNXw6CDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmOF1rUmT8piae
+# SUYDQo6kvCClxkc44jhj22rOgv5sw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -721,25 +702,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -747,47 +728,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMyqC07y4MiXEsSMhRBp9zSpIlhP4caUB4FM3C65iiKAMA0GCSqG
-# SIb3DQEBAQUABIIBgAyuTfCy7IXy/9+l7rconB6biUGXE19OCI3iRVswwnIDEkIC
-# 10ES4CzmOKkafdOjJn6EulZzGpMvNshLC20QUSDatiww84kenutav3nJIxbeNIPe
-# vCx9sEwWkwb/PL7RjEkLuzxXhMhjWboHaiJk0e070OxKePmjuYhjjobcu2g7Tc8z
-# EdfY0lmYh2HfXstTstyA11lldAkGY5VMSnV3wVSMjnVKC9JNS7Nd7/C5wJzzmPN8
-# OTMcmkGhUIQRQrFKXideodW5OMNyCLk57pPN96JZEhkEn8G42jzKNj0QuDHROd1Q
-# IL6B0HbbjwwugfHOgkacU5aHNtITphFGUzBlCv/K+2lu3W4tKbgXW+/rEJ95lLqY
-# CZjwgbuESh3HbYHl30M9UcvoYzMMpM7o7HlSllX9eR+AeX7auRmyOiMzM3DN05JL
-# BDBJUe2N7t130WsmOYDp2TIAC5+8yIiasHPRGGMtZIdXEO0kjd4KNo0Fvcy161F8
-# yOkWNFp3b7fqtxQ85qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKITmT/V2f2I8Qvcqq+9E5d2IblPVpt+hCZzaOMyDQJdMA0GCSqG
+# SIb3DQEBAQUABIIBgJM1jlr3CSpkes3xoZ/fRlkxqD9JNN1umJaSmEh6HuaXHvDt
+# lkGWjC7njl6b/AB9nMmnP71wuA7wHFXdxj3buUAzBVwf8GI+X+FgIsIwxCe9CZNZ
+# SNjwaQiv27BiWv0b9ODIvE5Y+VuqVDT/AwEYAkqXz/gJ7fXSp27L4+jKq9FfRDD0
+# YPRZ488Xkgo47QaCaG7JPYiCzuH5oLV8eNojMmNx1/4TiFhDqladPVy9StlAPsv+
+# Nk+iamszus+BWu15iYT2ws7RB77COTF3LNe33KVP4hnchvUwMeIDjPr60614bE3/
+# 5zO8qQeHbu0VVv+Rrh/lriqhwNHqUz+eNOpL1LZdjKx4xgKDFPvl+tSku7e/X9NN
+# hSX1Z/EdoKJR/uiPoTmDKoP/c268qlquFlvp0gmtYLGAL3tVCttG8cMCRbq4jZTZ
+# iNL2MI/xaA7bE/y1h5OVjp0sFF3gFnflZZ3a9v78l6uKWPxoEHOBFF45NEV87H4b
+# SBwMfVXumOyrHpak0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAyMTA5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCABz7vyRbvoOaH9pIJH+vgDwcNL6KhvOs4B4r4t
-# f1zGGDANBgkqhkiG9w0BAQEFAASCAgCgKlJY/g92sNZoKys7oNHyZGFAKpo5XODr
-# RtOlRQMSo5oBpPeK1vpu2oTU+clPTx7SNQMZDPTL0DMbAa0GcScUmWjridr/Vo/y
-# YKAFIK+NeWNX9QGGPRncLZTzBnZ0Eg3VHRKAbL+mYEukksE2yXeE33D1221C9p7N
-# h6BVqKuxaLnE7BB+hn3eBZ/0Iv6OXu22XZXEMk/yZFncIitToluR8mGnUXbSjLyp
-# u74nWpxODbog747UuOB6BoHUQ885jq04ef2FQHygmd0yqO+W/m436KddBll0g7QN
-# C2ht3CuAFEKC5CRxmfgd305+93Cu+0Jh95Z/aTrXFkV67oCYLCgybAUAbfdHDRpq
-# B3vmZiyMJCDWUjylz9mKib0Nz6I41cxFavLvYRZ2Bl6RVl+DXCJ1VzqerNsqsdjZ
-# oRw5yw77AWp0UhziuRIupK/UFzBY0gDhTCHxrT1cRjZ4L/nE2fNo5s6Du0WOeiPD
-# qI+hqPRH3yq/KvqNhpGJTvcvwXhtsI1XPNwIHn57W8K9LWodye4N3nzJcPsU4Y/Y
-# y+FeDevSpDr4fQnj/krCouWbqd6udF9lljOq+i4++uOdUiGv3f280Eu4Ak7+D/gZ
-# aAKPRO4R4zn9pU2NjCf2fDde2N3EodrPV1N0uK1Vz3k4HIldStq/dsNvKcLYYzfF
-# 4/vRwWZX5w==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
+# NTVaMC8GCSqGSIb3DQEJBDEiBCAyVdGORvfHfKL3+mrDd+cBhqBT6lY1yMXskq4q
+# L/HNQDANBgkqhkiG9w0BAQEFAASCAgCsKL69NFP8N9GeGf/ny8lDUNS9fOMT2B0m
+# /8NPfUdtEKMw8FJCTVrMin5EwxIgqdskpY3gm16bcKX5nCLQC7hvsTWmv+vlPmd0
+# aurqROuVLDzcRzRyTbERCJoi/n06a3LWApgK5lA574s4VYSN6g2dUHX0gml7Rg0a
+# /AIoAckaLNosKW8OD+1xkHcEPyleG3HGt4RXrYBRfBUAXeK6U7QnqAPHukyutGgX
+# x+XC69GgMcFDe/XUEtmvaJxV0G2ApvX9dX8qVyqWgdoiXdAU4sMxFGr9xTECvz9G
+# tomjmOf/7A++WnhHqS/W6WkvITc4IDr2V2oKSqvXePqT/niKQaorDzCjdx53DLjY
+# HskTEabbvihBbgKIWncKEVdgzhR9xOltaT2G7cgf1x8K+76i/KdlmUZ5tyxsM2Q1
+# e3LASxuuyUgO7bLq6c3//TnmqluSs54RppBGd6DOW8yMFc9uS55tzJ1kQlFizcIw
+# gu/CO9UU+sgcqtriKSD2yU25zBWa1WJBNrJIgbdhR5XbqgxCoXezlCmFEFMxZJOg
+# V03th+uVDTGsm54W+cKvO0QYCCeUgxIwj+CSvlEbPm5gPh9qVGiQTS1qdtyowXHj
+# 5Tg7BmNHUvoE0IgJLRYtGYtlpXvaz95dcKsLeybkMFJrCMI9UI9APlGNLqviiywf
+# IRbruvgEEA==
 # SIG # End signature block
