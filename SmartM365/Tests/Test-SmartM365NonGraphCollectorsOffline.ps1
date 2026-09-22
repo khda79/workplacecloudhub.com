@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 param(
@@ -140,6 +140,31 @@ try {
             Assert-Offline ($observed.Rows[0].Status -eq 'NotMeasured' -and $observed.Rows[0].TextValue -eq 'NotMeasured') 'An unmeasured check was marked healthy.'
             Assert-Offline ($observed.UnmeasuredWorst -eq 'NotMeasured' -and $observed.MixedWorst -eq 'Warning') 'Health ranking promoted unmeasured status or hid a real warning.'
             Assert-Offline ($observed.RankNotMeasured -gt ( & $module {Rank 'Warning'})) 'Unmeasured health ranking outranks a business warning.'
+        }
+        finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'AD HealthCheck distinguishes DFSR measurements from diagnostic failures' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-HealthCheck.ps1'
+        $definition=@(Get-FunctionText -Path $path -Names @('Get-DfsrBacklog'))[0]
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definition))
+        try {
+            $observed=& $module {
+                function script:dfsrdiag.exe { 'Backlog File Count : 42'; $global:LASTEXITCODE=0 }
+                $measured=Get-DfsrBacklog 'src.test' 'dst.test'
+                function script:dfsrdiag.exe { 'No Backlog'; $global:LASTEXITCODE=0 }
+                $zero=Get-DfsrBacklog 'src.test' 'dst.test'
+                function script:dfsrdiag.exe { 'Backlog File Count : 42'; $global:LASTEXITCODE=5 }
+                $failed=Get-DfsrBacklog 'src.test' 'dst.test'
+                function script:dfsrdiag.exe { 'synthetic unrecognized response'; $global:LASTEXITCODE=0 }
+                $unrecognized=Get-DfsrBacklog 'src.test' 'dst.test'
+                function script:Get-Command { param($Name,$ErrorAction) if($Name -eq 'dfsrdiag.exe'){return $null} }
+                $missing=Get-DfsrBacklog 'src.test' 'dst.test'
+                [pscustomobject]@{Measured=$measured;Zero=$zero;Failed=$failed;Unrecognized=$unrecognized;Missing=$missing}
+            }
+            Assert-Offline ($observed.Measured.Count -eq 42 -and $observed.Zero.Count -eq 0) 'Valid DFSR backlog responses were not measured.'
+            Assert-Offline ($null -eq $observed.Failed.Count -and $observed.Failed.Reason -match 'DfsrdiagExitCode=5') 'A nonzero dfsrdiag exit code was treated as a measurement.'
+            Assert-Offline ($null -eq $observed.Unrecognized.Count -and $observed.Unrecognized.Reason -match 'DfsrdiagOutputUnrecognized') 'Unrecognized DFSR output has no diagnosis.'
+            Assert-Offline ($null -eq $observed.Missing.Count -and $observed.Missing.Reason -match 'DfsrdiagUnavailable') 'A missing dfsrdiag executable has no diagnosis.'
         }
         finally {Remove-Module $module -Force}
     }
@@ -409,8 +434,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1sA19yTad6A/X
-# XeDMMeED7/E6f/ZT+B0/ggVjnaJ5eaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7WMTVQ4TNMiD2
+# BabHEWgwi+HNs7o/SjEj9r4Ff9N7m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -543,31 +568,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAG9EXo5nTHnRB/QQ4NPYUwqSZ9Yzx4oSPW5Dh4zpb1SMA0GCSqG
-# SIb3DQEBAQUABIIBgEJJ9rHu2ZYn7PzHi0fPCFAGnwX6iNdUnXw5dTfEPBZ2GRkF
-# BBUVTG+LssXyyekfE1FonkAJD5Wg+xwS4OQIPslt45rOA2Gp69fYE0vVMhCCxLLU
-# mv2s2rJykUIlFoMVSerSyaCM3yTaFHfsfI2Jjoa03IgBrLemW9tu0rWlf4ipz7XT
-# iGzN0EM8B3KM7XQVoxvWKPcdM5aPDElaypiO8MD8m1Tv74IBPcdChT9qI2b8Lj+D
-# wR+SnUQ64x2KFD0sYXITwe/eX3k3QV1hhANQ7CbUeiqv8s+g1q2sc2NFK0TNAGRq
-# acq/0+OpKydjxi1qiEGqTRw7niiJyILjfbKTPh031yK6FTXDsGq6ZXkpzjG0oLBt
-# QttrwBwFsaQlHE8fyIcu2LIIS+7OiCvOEr5hNxIJNuwqvds5vLpojyKb7ZZsTrC8
-# t1Gs4Usvx+I2xSLTz3LnV9eD1WxWKx4Tsj+PqInNLz5Kfd8TfrG+V/tFQHYpMTm2
-# b+j3wYXo635/8VCotaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHy2jkqed2F+dARo2veUmDh8I6g+cjNsyQ27/JeFF7CTMA0GCSqG
+# SIb3DQEBAQUABIIBgEQzTFqzCGq3FrCZO82WZauLnHBF47tvVbYbBgebiIh8arWw
+# ZWc9DRUb2HiKIgn80prfS4M2qa2sMmle1YNWnYOMhWN3xvKhaJryJvO4PvqTJZut
+# fR5PZyz5f3i7Q2e1RtjAKXANG7tre46Q4ajBl84sukAOmprk/KEif/1BeYjoy2Wb
+# BREmzmwnGw1Mbu+CTIbocW2aFWCxiuK04710aZyQEgFe43u+bO/69VArhFrX0sEK
+# XD2QOxHozOTOrQEFeZTxdhj0XPMHQaXlylW3GQzg2D45OCrnoK2jvPGOBOrvxQ/i
+# 9hZFp+vrH1sDul6Cwqto6hjry8kuKdPFYVHTew8iBMZdlX+gVmk5jeKRNR5RPAe1
+# K1Gfq7yiD3vXWSTrh8uEh8ZQxdogcfEDSnCDsb1ErEjmBW07HqHSnbwCnJwvw0Hw
+# KYiDsdzs4vpKwrg3wNgi/In2E4oLRvpSteGefqsii6w7JOyeERmMG39df8jQc1GO
+# 0H9IdsPhlt5np1P0PKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCB684cQ+DVPPAJ9kRD18WHFeMN24Ypc7YcLSJTM
-# yALxzzANBgkqhkiG9w0BAQEFAASCAgBrwD8CNoKTaC6uT2dD4ZV/fFqFP/tkKIA3
-# loQMZpc5b0S0NflIV4AUU+H3Ynv2o2dVYVM1XIydH/3zg3hblh1L3qLi17oenF4R
-# MpAOyN6fKzf5U4UzYGkMQMUx7izBmwAvo/rf3GlnlPiiVI9l13Q/k/I+4MmDa6HE
-# yb1AkCuIX9FLhDw3Fvj9agCUdOrDpcPgHF1Jq8sfkWQrOoNRuQCPrA9Sy1NHZyou
-# 8aHKe+Yx+iMwqLbotHJGVDANXu7WYHDJ97yOHA/Mu3mKi3IQnFlfZWyKfim6Xymh
-# rhlsNXkB4ZCkj3r3mvzDolTHyPX9iKMMDNe4X4yezrAoEuk19/W6d2c3ET+HSawA
-# NWkg0QvUPx5ItRGaCQ3pi2V4fNQxh1J5+wF82Ncic3hx2R/KerVEN8TWxYNIwZeP
-# gTD5UGPTJY3myNxK1b1h/C+ro07aUkqyAxacomk8iTotHjhjkzCgRmQsFrM4Md7X
-# PEg0YzcqV/HoWK8C2NOMwmL3+K4vznYxNE80PDJ+P+bYSTg/4/VxEIHLOnDccsYz
-# bonOgbo3UfkG/G/1I4l/Sd5njiUaxlG0yG4MsMyNWZgwdjvaAGID3r7j5iPp8oGB
-# FNnSpK8NTXgG76LxmSZOooo2ifU0N1MffxFS2vFRDjzI+PSNgNeYvrm+EuPv2Itk
-# D94pJf758g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTUx
+# MTlaMC8GCSqGSIb3DQEJBDEiBCA55NB9t3SrUNRwSqCpWxcLazhSuz47JYE5zq7r
+# pXqv4zANBgkqhkiG9w0BAQEFAASCAgCBFgkWmvdKJPmzDjlXwczcjK4/vsg7Fgis
+# GckNVLKfVUn2SaWvs8Xd0DIXVDDM3jPqY5vF9cXLtDc4YOUZS4VuUNDC6WZVWBSq
+# ZyTvcJlAgsyxrb7lgBYsMlrWxYVyN+cUOEeXx7Og9eFCZlsZj127alB4KnqCODeK
+# y/jJmvlg9qi7572IomBN3k3KZXIvispWTI0EZPlvlLqpla8M0YqYqnUfB6w6Z0WG
+# G4O32l4oNkNwLQ/pxVq/HqFvS+fgjAbIRdEgPFi/xInX1d/bA9gMrTDTmVYEHATo
+# Ok2hk0/r7NC3+uJ7wNSK6OAzvHUMSTmX6W/qtCH5Avjo7wBSaHDXdaHpNZsHyNZT
+# 5jk4XDrEs8GsfNVTG2Gi9/6N/Yma6VjT+oD9wlbeabeSLM5cNxFulu+dOY38dfmW
+# oB/YQxQfjbLzrlZogUE1EtVapvx4ez5EPoeHX2mGnOJl6Qdar0h1g4vyqb17De0g
+# n7rfivzppfgC5YpuFiJyQi+RhQAZnZuNUCXlTieJBhFTUjVOQMg6qNqyJLzSn/K2
+# IbMWfV2jEQUqPBQXUs2Qy3ETo2p2KSiLERe6+ng2wirlzrVptiYDS3MzmiGFV4Wr
+# 8kUM9BtK7paGZms99rN/AscLr329tmgvh2+yUpKREhEjwwczA7+ZQmKwe8oI29li
+# tqWn2MJdCQ==
 # SIG # End signature block
