@@ -23,6 +23,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "LocalCalendarPermissionsCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\CalendarPermissions",
+  "BackendPreflightTimeoutSeconds": 30,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\CalendarPermissions\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52

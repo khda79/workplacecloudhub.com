@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -179,7 +179,7 @@ try {
     }
     Test-OfflineCase 'Calendar inventory stops and caches unavailable backends' {
         $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/CalendarPermissions/SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
-        $definitions=@(Get-FunctionText -Path $path -Names @('Get-SmartM365CalendarFailureCategory','Get-SmartM365CalendarBackendName','New-SmartM365CalendarLookupException','Get-CalendarFoldersSafe'))
+        $definitions=@(Get-FunctionText -Path $path -Names @('Get-SmartM365CalendarFailureCategory','Get-SmartM365CalendarBackendName','New-SmartM365CalendarLookupException','Test-SmartM365CalendarBackendPreflight','Get-CalendarFoldersSafe'))
         $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
         try {
             $observed=&$module {
@@ -199,6 +199,8 @@ try {
                     }
                 }
                 $script:UnavailableCalendarBackends=@{}
+                $script:CalendarBackendPreflightResults=@{}
+                $script:BackendPreflightTimeoutSeconds=0
                 $script:StatisticsCallCount=0
                 $mailbox=[pscustomobject]@{Identity='synthetic-one';UserPrincipalName='synthetic-one@example.test';PrimarySmtpAddress='synthetic-one@example.test';Guid=[guid]::Empty;ServerName='SYNTHETIC-EX01';Database='SYNTHETIC-DB01'}
                 $first=$null
@@ -213,6 +215,103 @@ try {
             Assert-Offline ($observed.First.Category -ceq 'BackendUnavailable' -and $observed.First.Attempts -eq 1) 'First infrastructure failure metadata is incorrect.'
             Assert-Offline ($observed.Second.Category -ceq 'BackendPreviouslyUnavailable' -and $observed.Second.Attempts -eq 0) 'Cached backend failure did not skip the next mailbox.'
             Assert-Offline ($observed.First.Backend -ceq 'SYNTHETIC-EX01' -and $observed.Second.Backend -ceq 'SYNTHETIC-EX02') 'Backend name was not preserved in failure metadata.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Calendar inventory preflight bounds and caches unavailable databases' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/CalendarPermissions/SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
+        $definitions=@(Get-FunctionText -Path $path -Names @('Get-SmartM365CalendarFailureCategory','Get-SmartM365CalendarBackendName','New-SmartM365CalendarLookupException','Test-SmartM365CalendarBackendPreflight','Get-CalendarFoldersSafe'))
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
+        try {
+            $observed=&$module {
+                function script:Test-HasCommand {param([string]$Name)return $true}
+                function script:Invoke-Quiet {param([scriptblock]$Script)&$Script}
+                function script:WriteLog {param($Message,$Level)}
+                function script:Test-MAPIConnectivity {
+                    param($Database,$Server,$PerConnectionTimeout,$AllConnectionsTimeout,$ErrorAction)
+                    $script:PreflightCallCount++
+                    $script:ObservedPerConnectionTimeout=$PerConnectionTimeout
+                    $script:ObservedAllConnectionsTimeout=$AllConnectionsTimeout
+                    [pscustomobject]@{Result='Failure';Error='Synthetic MAPI information store unavailable.'}
+                }
+                function script:Get-MailboxFolderStatistics {
+                    param($Identity,$FolderScope,$ErrorAction)
+                    $script:StatisticsCallCount++
+                }
+                function script:Get-ExceptionMetadata {
+                    param($ErrorRecord)
+                    $exception=$ErrorRecord.Exception
+                    [pscustomobject]@{
+                        Category=[string]$exception.Data['SmartM365Category']
+                        Attempts=[int]$exception.Data['SmartM365Attempts']
+                    }
+                }
+                $script:UnavailableCalendarBackends=@{}
+                $script:CalendarBackendPreflightResults=@{}
+                $script:BackendPreflightTimeoutSeconds=17
+                $script:PreflightCallCount=0
+                $script:StatisticsCallCount=0
+                $mailbox=[pscustomobject]@{Identity='synthetic-one';UserPrincipalName='synthetic-one@example.test';PrimarySmtpAddress='synthetic-one@example.test';Guid=[guid]::Empty;ServerName='SYNTHETIC-EX01';Database='SYNTHETIC-DB01'}
+                $first=$null
+                try {Get-CalendarFoldersSafe -Mbx $mailbox -PrimaryOnly:$true|Out-Null}catch{$first=Get-ExceptionMetadata $_}
+                $mailbox.Identity='synthetic-two';$mailbox.UserPrincipalName='synthetic-two@example.test';$mailbox.PrimarySmtpAddress='synthetic-two@example.test'
+                $second=$null
+                try {Get-CalendarFoldersSafe -Mbx $mailbox -PrimaryOnly:$true|Out-Null}catch{$second=Get-ExceptionMetadata $_}
+                [pscustomobject]@{
+                    First=$first
+                    Second=$second
+                    PreflightCalls=$script:PreflightCallCount
+                    StatisticsCalls=$script:StatisticsCallCount
+                    PerConnectionTimeout=$script:ObservedPerConnectionTimeout
+                    AllConnectionsTimeout=$script:ObservedAllConnectionsTimeout
+                }
+            }
+            Assert-Offline ($observed.PreflightCalls -eq 1 -and $observed.StatisticsCalls -eq 0) 'Unavailable database was not stopped and cached by the preflight.'
+            Assert-Offline ($observed.PerConnectionTimeout -eq 17 -and $observed.AllConnectionsTimeout -eq 17) 'Configured MAPI preflight timeout was not applied.'
+            Assert-Offline ($observed.First.Category -ceq 'BackendUnavailable' -and $observed.First.Attempts -eq 0) 'Preflight failure metadata is incorrect.'
+            Assert-Offline ($observed.Second.Category -ceq 'BackendPreviouslyUnavailable' -and $observed.Second.Attempts -eq 0) 'Cached preflight failure did not skip the next mailbox.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Calendar weekly history is published once as a validated group' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/CalendarPermissions/SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
+        $source=Get-Content -LiteralPath $path -Raw
+        $tokens=$null;$parseErrors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$parseErrors)
+        if($parseErrors.Count){throw 'Calendar source parse failed.'}
+        $exportCommands=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'ExportAndCopyCsv'},$true))
+        Assert-Offline ($exportCommands.Count -eq 2 -and @($exportCommands|Where-Object{$_.Extent.Text -notmatch '-SkipWeeklyHistory'}).Count -eq 0) 'One or more calendar exports still publish WeeklyHistory independently.'
+        $publishCommands=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Publish-SmartM365CalendarWeeklyHistory'},$true))
+        Assert-Offline ($publishCommands.Count -eq 1) 'Calendar WeeklyHistory group is not published exactly once.'
+
+        $definition=@(Get-FunctionText -Path $path -Names @('Publish-SmartM365CalendarWeeklyHistory'))[0]
+        $module=New-Module -ScriptBlock ([scriptblock]::Create($definition))
+        $mainPath=Join-Path $testRoot 'calendar-main.csv'
+        $errorPath=Join-Path $testRoot 'calendar-errors.csv'
+        Set-Content -LiteralPath $mainPath -Value 'Mailbox' -Encoding UTF8
+        Set-Content -LiteralPath $errorPath -Value 'Mailbox' -Encoding UTF8
+        try {
+            $observed=&$module {
+                param($main,$errors,$root)
+                function script:Test-SmartM365MaxItemsMode {return $false}
+                function script:ConvertTo-SmartM365ConfigBoolean {param($Value,[bool]$DefaultValue)if($Value -is [bool]){return $Value};return $DefaultValue}
+                function script:Get-ScriptLocalConfigValue {
+                    param($Config,[string]$Name,$DefaultValue)
+                    $property=$Config.PSObject.Properties[$Name]
+                    if($property){return $property.Value}
+                    return $DefaultValue
+                }
+                function script:WriteLog {param($Message,$Level)}
+                function script:Add-SmartM365WeeklyHistory {
+                    param([string[]]$SourceCsvPaths,[string]$HistoryRootPath,[int]$RetentionWeeks,[string]$HistoryLabel,[switch]$UploadChangedFilesOnly)
+                    $script:PublishCount++
+                    $script:Published=[pscustomobject]@{Sources=@($SourceCsvPaths);Root=$HistoryRootPath;Retention=$RetentionWeeks;ChangedOnly=[bool]$UploadChangedFilesOnly}
+                }
+                $script:PublishCount=0
+                $config=[pscustomobject]@{EnableWeeklyHistory=$true;WeeklyHistoryFolderPath=(Join-Path $root 'weekly');WeeklyHistoryRetentionWeeks=8}
+                Publish-SmartM365CalendarWeeklyHistory -SourceCsvPaths @($main,$errors,$main) -Config $config -FallbackRootPath $root
+                [pscustomobject]@{Count=$script:PublishCount;Published=$script:Published}
+            } $mainPath $errorPath $testRoot
+            Assert-Offline ($observed.Count -eq 1 -and $observed.Published.Sources.Count -eq 2) 'Calendar WeeklyHistory helper did not group and de-duplicate both CSVs.'
+            Assert-Offline ($observed.Published.Retention -eq 8 -and $observed.Published.ChangedOnly) 'Calendar WeeklyHistory configuration or changed-file upload mode was not preserved.'
         } finally {Remove-Module $module -Force}
     }
     Test-OfflineCase 'Exchange local mailbox issues are structured and published' {
@@ -289,8 +388,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWy2dEM4t7sPUF
-# 3jWJ78k4bQgyJJm+4XG0KFjYiO89LqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMaYsfDPn4PW0D
+# XtZZmAerSILOexsYaEwqYMk0VkatVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -423,31 +522,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHyJztAphgfNWX0cKnfpUJe+dSMidTUVkKzmKMTEfPf5MA0GCSqG
-# SIb3DQEBAQUABIIBgBEGE2FG7gtCCIu/1SNRe2qdvfpHAk2HFl2T8Q9uZjGncizV
-# V9sc2H32fjzh6nNdB+Ja1v4zIkQyXaG8gvBoHLCCZUfORzKIJ7WiVP7mqGY0BoKb
-# kf4czzEmwQUehq69o7r9sTU/KL9e6HCqt9S033uUo8YoTgpe9nYr/34Y5KnPWCTg
-# RHdpU5qTUH52IOWqRD7yPPozx1bgo5CRGD7VcgEgTL+xd+NGjPIXPo7AVqnW0XP7
-# qGJFSWi0hh6AbGTSzp0sXq+b/M7ld1uyZgxBtj1NK7oyQf7J6FcvErjNzOHExiBy
-# uGPaSq7NbG0AEe1QxxIm8L/KUPG5SpvOY2mn/F7DdYbx3y7/Fk/7m3fMGFeqHtyR
-# M24qGmHE/NaSS6MwdHLDhdVeUm3RLCiMAB5sbN49wX5cZSwewJOPyOH10wuflVoq
-# nXMR2V1xddV7JZiK7RSiqqMIHQl5JkKOFBN7JzzsYjtYFuJJQavX6fxboPudnvjo
-# OUbwiBrVW6rSIurysKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBn++WDBMEJcnYmH8T+ElbC3+VYo0Z+jLhI4sx7VsCb8MA0GCSqG
+# SIb3DQEBAQUABIIBgI1SnRzL70wv0hI6XgDQAlTi9MulJEyl5mooJrMwLduFXLrY
+# Abpy4LdFROpips50boQv9Gek01ThxWZtRmk/upCmsiykoDN5H80FBcyWZgnYgwOh
+# 2FWfcwWNWEKuCgzb0Ip7Z/taUhWweQ8T/mNnb+iwNg923uF6HQe1u94nZ1G9PfLR
+# sWpsKVV6I/83LxZdEFJ73urLxaPH2QBTj0o87DNh7fhynDQHJr/ri1PW4FVnNqrd
+# zl6ybZTGJTJOnN/jOPuRy7q2SIGZ8tE4gofeVjIty/TUTGQNx0rFpAKNHvYzlu+q
+# 0GFsAvz+/vWX0qDeGrdUoxUhccR5rPHZyP8tJKct5pZfAOJfLqiw+75DaZo1ZQ5i
+# PK3XFcGyoKVUXh12BOVIm1MGsJRB3gxVSFN9SR/vIB9AJRzrsELxUkcSvz+0cxss
+# b44rp+hTmX5u2xtwEs1Hnwmedgj7TW9OSQjo9D+uch0QXSVtoXl2RmgwqBDxByuD
+# gcpTsJ3igZoKrPyOv6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
-# NDhaMC8GCSqGSIb3DQEJBDEiBCDZrVyCdIhvSkYcL+MAfdOmBcemH6SPsfKpHVs8
-# cUlEJzANBgkqhkiG9w0BAQEFAASCAgCF1sCa+3q9YCiofENLfzlxR+o9VI/0+gVp
-# 8MvxwBq6Uc9VgvrWNsdkwLaNjhRCVGJj0xZJzgh3Q9q/3qFrmw91z8myNfyUGlAk
-# oxmYTqmYauCqJvQT5X0dGmV5LOEuBSXEPoNcOfcvDlS1wMxbWyUTwOiKhf8Pom5C
-# JB/8G9zRHuEa5TFCAFpr1gj60NOKXGjG0DKPD/rVb/VG5bifXHHyjdNdaGTQ1QxB
-# zmhobUqtLGwJManM6p9BpAOUvI0Lnmoz0XSnQ6bMp51PVYIZcqsAkFB7LJRo45vW
-# mfZq6CiZDSaIdbx8R6lQVQP3XOIirtStmRfsadkbwWv4oSfQ6FJ1Ey+AZ9SmyV14
-# BH4gsD2QhnZ0nPkBvvAfxdulUYhBCNaArpGHhnbUmPEQVUvzBie7f8BwJrLk1tx6
-# POlVAiB22Ac1Gc5hVgwGCRIHfqCpuSbKHPw4ZoZgoUpJ44tFPm67muEtZqoPBebD
-# 9IsGnfwqAwZb2rxdlOdFZdLdfemnX+4tADEfNA2TULUFWef5/sM8OVwYGIRA2m7m
-# 9EiwpXO/d4uC712PBQqKzcA6gEpNWkS8rTYr4C/PrVIZtNS7ONJPO3Xru8fGgCbZ
-# DMc+69NllEgeZig3GIZsKDKElXNTMZmEpkpKfZDynrDsXs0lMpOAZ8sV9K0X09sO
-# ZiDwvLFHNA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxODE5
+# MDZaMC8GCSqGSIb3DQEJBDEiBCCwM+K7I1JSg4eue0ik6ODi3JLOZtgmlZa9i7BG
+# wkjxWTANBgkqhkiG9w0BAQEFAASCAgCtI52trZT3r54KAuwvxENL6XRWNoOh9yD0
+# Cq0rHETzPO9kxCGM740KzkBL/2b/OGxjbZXuALsauivn1r58ijl4WvhqbycGRyUV
+# oJDNXK80WpRJCD1LECYibnsQrVypASqmRl1CubK0tyY4at2edAZddnuAkgoSfAE9
+# 2eIAYqWkQaWXuspRMP2IeDLyiwnb9JczKmnnWe6RYToQFYa+omWmJhIx8tKqdOXG
+# MCZuTBVRmUrYfaKUxnJRdAfFi1yKXND/E8GEzXZwH6XZZwNz6BLBpBAvFqe8ROsK
+# jBPjNcGbjd5RrAiGE6us1UFn50gm0zOyp67zSDGLTfW+muUnmJoGCjX0ip7LvfTy
+# 9p9l1N8/CCBqiHZ410CUtnG5ArO6anMbuWOjkzaJhpPktwN44AKA0sq/BxK+IFbU
+# 5flvmQV+ewOzT2OdVk4WoiAXjCA75KvyL8K3derfYbnh0dwfyeNceEDG05Dg+FuA
+# GlpVmHJZ+tqpecEZDiqcvg7lOstn+WQnPYwpBij94rgYPBwY+rfstwzG6Htew4vN
+# C5cBqW5FttGq9bNd9kDm3+UQObQLbj6BpChQ8UaunjXOw8JWKrrfyJ1hOtkT2OCp
+# 0AUYKMP8i6tIYpRNJ3gcX9qFgj8EuXoG9JjUZvuq0f0PPQAkRNTwJ3fNS9KIotyR
+# DVXkePZiow==
 # SIG # End signature block

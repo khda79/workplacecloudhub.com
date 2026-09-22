@@ -17,8 +17,11 @@
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
+.PARAMETER BackendPreflightTimeoutSeconds
+    Bounds the Exchange MAPI connectivity preflight for each mailbox database. Set to 0 to disable it.
+
 .VERSION
-1.5
+1.6
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +30,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.5
+    Version : 1.6
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -38,6 +41,7 @@ param(
     [switch]$PrimaryOnly = $true,
     [switch]$EmitNoPermRow = $true,
     [int]$TopMailboxes = 0,
+    [ValidateRange(0, 300)][int]$BackendPreflightTimeoutSeconds = 30,
     [string]$OutputPath,
     [int]$MaxItems = 0
 )
@@ -220,7 +224,12 @@ function Get-ScriptLocalConfigValue {
 }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
-
+if (-not $PSBoundParameters.ContainsKey('BackendPreflightTimeoutSeconds')) {
+    $BackendPreflightTimeoutSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackendPreflightTimeoutSeconds' -DefaultValue 30)
+    if ($BackendPreflightTimeoutSeconds -lt 0 -or $BackendPreflightTimeoutSeconds -gt 300) {
+        throw "BackendPreflightTimeoutSeconds must be between 0 and 300."
+    }
+}
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -244,7 +253,7 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.5'
+$ScriptVersion = '1.6'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -315,6 +324,7 @@ Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -Req
 $results = New-Object 'System.Collections.Generic.List[object]'
 $errors = New-Object 'System.Collections.Generic.List[object]'
 $script:UnavailableCalendarBackends = @{}
+$script:CalendarBackendPreflightResults = @{}
 $processed = 0
 
 try {
@@ -387,6 +397,92 @@ function New-SmartM365CalendarLookupException {
     return $exception
 }
 
+function Test-SmartM365CalendarBackendPreflight {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Mbx,
+        [ValidateRange(0, 300)][int]$TimeoutSeconds = 30
+    )
+
+    if ($TimeoutSeconds -le 0 -or -not (Test-HasCommand -Name 'Test-MAPIConnectivity')) { return $true }
+
+    $mailboxServer = [string]$Mbx.ServerName
+    $mailboxDatabase = [string]$Mbx.Database
+    $backendKey = if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) {
+        'database:' + $mailboxDatabase.Trim().ToLowerInvariant()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($mailboxServer)) {
+        'server:' + $mailboxServer.Trim().ToLowerInvariant()
+    }
+    else {
+        return $true
+    }
+
+    if ($script:CalendarBackendPreflightResults.ContainsKey($backendKey)) { return $true }
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $probeParams = @{
+        PerConnectionTimeout = $TimeoutSeconds
+        AllConnectionsTimeout = $TimeoutSeconds
+        ErrorAction = 'Stop'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { $probeParams['Database'] = $mailboxDatabase }
+    else { $probeParams['Server'] = $mailboxServer }
+
+    try {
+        $probeRows = @(Invoke-Quiet { Test-MAPIConnectivity @probeParams })
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        $category = Get-SmartM365CalendarFailureCategory -Message $message
+        $isConnectivityFailure = $category -eq 'BackendUnavailable' -or $message -match '(?i)(MAPI|RPC|information store|mailbox database).*(timed out|timeout|not available|unavailable|inaccessible|failed)'
+        if ($isConnectivityFailure) {
+            foreach ($cacheKey in @(
+                if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
+                if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
+            )) {
+                $script:UnavailableCalendarBackends[$cacheKey] = $message
+            }
+            throw (New-SmartM365CalendarLookupException -Message $message -Category 'BackendUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase -InnerException $_.Exception)
+        }
+
+        $script:CalendarBackendPreflightResults[$backendKey] = 'Inconclusive'
+        WriteLog -Message ("MAPI connectivity preflight was inconclusive for backend '{0}' / database '{1}'; continuing with calendar statistics: {2}" -f $mailboxServer, $mailboxDatabase, $message) -Level 'WARNING'
+        return $true
+    }
+
+    $failedProbe = @($probeRows | Where-Object {
+        $errorText = [string]$_.Error
+        $resultProperty = $_.PSObject.Properties['Result']
+        $resultText = if ($resultProperty) { [string]$resultProperty.Value } else { '' }
+        -not [string]::IsNullOrWhiteSpace($errorText) -or
+            (-not [string]::IsNullOrWhiteSpace($resultText) -and $resultText -notmatch '^(?i:success|passed)$')
+    } | Select-Object -First 1)
+
+    if ($failedProbe.Count -gt 0) {
+        $failureMessage = [string]$failedProbe[0].Error
+        if ([string]::IsNullOrWhiteSpace($failureMessage)) {
+            $failureMessage = "MAPI connectivity preflight returned result '$([string]$failedProbe[0].Result)'."
+        }
+        foreach ($cacheKey in @(
+            if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
+            if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
+        )) {
+            $script:UnavailableCalendarBackends[$cacheKey] = $failureMessage
+        }
+        throw (New-SmartM365CalendarLookupException -Message $failureMessage -Category 'BackendUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase)
+    }
+
+    if ($probeRows.Count -eq 0) {
+        WriteLog -Message ("MAPI connectivity preflight returned no result for backend '{0}' / database '{1}'; continuing with calendar statistics." -f $mailboxServer, $mailboxDatabase) -Level 'WARNING'
+        $script:CalendarBackendPreflightResults[$backendKey] = 'Inconclusive'
+    }
+    else {
+        $script:CalendarBackendPreflightResults[$backendKey] = 'Healthy'
+    }
+    return $true
+}
+
 function New-SmartM365CalendarErrorRecord {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
@@ -456,6 +552,8 @@ function Get-CalendarFoldersSafe {
         $cachedException = New-SmartM365CalendarLookupException -Message $cachedMessage -Category 'BackendPreviouslyUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase
         throw $cachedException
     }
+
+    [void](Test-SmartM365CalendarBackendPreflight -Mbx $Mbx -TimeoutSeconds $BackendPreflightTimeoutSeconds)
 
     $folders = @()
     $statisticsQuerySucceeded = $false
@@ -539,6 +637,45 @@ function Try-GetFolderPermission {
         Permissions = @()
         Identity    = $null
     }
+}
+
+function Publish-SmartM365CalendarWeeklyHistory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SourceCsvPaths,
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$FallbackRootPath
+    )
+
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+        return
+    }
+
+    $weeklyHistoryEnabled = ConvertTo-SmartM365ConfigBoolean -Value (Get-ScriptLocalConfigValue -Config $Config -Name 'EnableWeeklyHistory' -DefaultValue $true) -DefaultValue $true
+    if (-not $weeklyHistoryEnabled) {
+        WriteLog -Message 'WeeklyHistory publication is disabled by configuration.' -Level 'INFO'
+        return
+    }
+
+    $validatedSourcePaths = @($SourceCsvPaths |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        Select-Object -Unique)
+    if ($validatedSourcePaths.Count -eq 0) {
+        WriteLog -Message 'WeeklyHistory publication skipped because no current calendar CSV was produced.' -Level 'INFO'
+        return
+    }
+
+    $historyRootPath = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($historyRootPath)) {
+        $historyRootPath = Join-Path -Path $FallbackRootPath -ChildPath 'WeeklyHistory'
+    }
+    $retentionWeeks = [int](Get-ScriptLocalConfigValue -Config $Config -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+    Add-SmartM365WeeklyHistory -SourceCsvPaths $validatedSourcePaths `
+        -HistoryRootPath $historyRootPath `
+        -RetentionWeeks $retentionWeeks `
+        -HistoryLabel 'Exchange on-premises calendar permissions' `
+        -UploadChangedFilesOnly
 }
 
 # Helper: emit a "(none)" row when calendar exists but no explicit permissions
@@ -657,6 +794,7 @@ Write-Progress -Id 0 -Activity $overallActivity -Completed
 
 # ------------------------- Export & Cleanup -------------------------
 $BaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_AllDomains"
+$weeklyHistorySourcePaths = New-Object 'System.Collections.Generic.List[string]'
 
 Write-Host "`n--- Export CSV ---"
 if ($results.Count -gt 0) {
@@ -672,7 +810,11 @@ if ($results.Count -gt 0) {
         -Data $exportRows `
         -Encoding "UTF8" `
         -NoTypeInformation `
-        -NoMaxItemsRowLimit
+        -NoMaxItemsRowLimit `
+        -SkipWeeklyHistory
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:csvFilePath3)) {
+        [void]$weeklyHistorySourcePaths.Add([string]$global:csvFilePath3)
+    }
 } else {
     WriteLog -Message "No data to export (no calendars found or all skipped). Export step skipped." "INFO"
     Write-Host "No data to export. Skipping."
@@ -693,7 +835,11 @@ if ($errors.Count -gt 0) {
         -GlobalPath $errorLatestCsvFolderPath `
         -Data $errorRows `
         -Encoding "UTF8" `
-        -NoTypeInformation
+        -NoTypeInformation `
+        -SkipWeeklyHistory
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:csvFilePath3)) {
+        [void]$weeklyHistorySourcePaths.Add([string]$global:csvFilePath3)
+    }
 
     WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced and final status is CompletedWithWarnings." -f $errors.Count) "INFO"
 }
@@ -725,6 +871,8 @@ else {
     Remove-SmartM365SharePointFile -LocalFilePath $sharePointStaleErrorPath | Out-Null
 }
 
+Publish-SmartM365CalendarWeeklyHistory -SourceCsvPaths $weeklyHistorySourcePaths.ToArray() -Config $ScriptLocalConfig -FallbackRootPath $OutputPath
+
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
 Write-Host "PrimaryOnly mode      : $PrimaryOnly"
 Write-Host "EmitNoPermRow         : $EmitNoPermRow"
@@ -747,8 +895,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCw3HWzTHPUY5Bz
-# dCflAmgBzWN98NW0Op7KrqlCESbJr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlPJYTqrqrIB6H
+# VIcjQMr5l6iffS4OZQ64ps907s1jT6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -881,31 +1029,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKNluE3GI16ZC7Gs38jFHR2ATHyreLiRXlXzzpuSLN/NMA0GCSqG
-# SIb3DQEBAQUABIIBgB/xr+ZJJ3CNEJ//7f6dPrUXvHkE1+7xWc1s5OB7BklRoiRi
-# ZBSPzhubadhPUi/NsRad1VRo8nK/X0Hn5W2NBsVNTeinpr3h4gpnrFNSRB3pV57h
-# LvGN4V3mwOAc1lQlafjarBATjxrTtLYeKnzKRprAjvBmrIN8aQdpGxJclSzHKYtD
-# p+2dryQMcEN6g8L7Ewp5dV1G8CZiDjQK+QtGRKwAiMtaTZ7igms+PCE1/Xi9z5n7
-# E96uK6aVKZ+BVfxnXJHrNS8PnkWfZF1ypuAr8+HNqlnFIUW18nzBck10uJKrTVqL
-# 4kXTiPlS9eC/ty2eDtf0cVY+sAh08MaFZ+Wuw0GaOIRF2ZK2mWNOIJdjfaDW9s1B
-# Y08TOOnqhdw+IYyJSsB/bwAOCfXsm0YAyrJrRqCxsAwaKnxbtFhrfbemvJk+VytE
-# p2XV9aUL5P488pilJXjm1mwPkv7g+uD7JKPZNLx0ETVnk3mhsuMzeucx/xExAwBb
-# 5HbRhxMfX7Lj5wU3/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDUT0yCMPm9KaWuVue1elLulvJ4lxLFdZoXhS18xRWa9MA0GCSqG
+# SIb3DQEBAQUABIIBgG+m8xH7PRVbo5lCGONM9lZ67683U5alyZ/QP8YKfDKkUa4k
+# cc09WB+0G7vmf5wwonYkrqgLtBvr1PW0OIJmn+LpcLYQJ3Rw1XEJT1qhTMjopUdi
+# 0enn8xEG/UAVyKVyNqT9pDq3MeunsKrFd4rY12aA6+ZgKp8S03UkU8COdUpIo2rY
+# S2ixo1jKxlq5ZcHcM7qwgiUu1Sq9DyqE2X4ip4m4a46bUA8xbMv5ygT/CojYJBml
+# M54XS9RecTAe6V/C/TL3jbmX2va9KoPplS+Mjv/6nAGJ93b0QA4oXlv3hL3o3iMS
+# b+H1O5apJ1HmOHv2qXDTd5XQZapLlbyvTAqeTtgcbphh3WqIX840X94o19b75tgJ
+# l8xcmk/OXhVwk1bwr++wWMOtwPV64/YftSx51XdZxIilkBFNAo+dy4jSN0fEOVrc
+# 1oowT+Ti+Nqg+1xjzGVxIYl3eEsAeb9AqjrBqbo9y1TfmHnlhkykwqV/ZRXuPqsi
+# jDMOaYRpHKXdUy5Vc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAauaFFn/4Bk0+W1lRFaDt0PYDGia/g5/8qDF5W
-# Wn7UqTANBgkqhkiG9w0BAQEFAASCAgBZbJRCsxcEZnPaIthOnAAuyebVC2qClEYO
-# cSEkGYekEo8Dx0WLH9+2bAWzFzF8dojrbMZqIZtVOipTiYVj76sbkV/5eQ/kJQBP
-# Xsedhh7OKrrfYhe43eJ0aLJ/vyMsButd/9NQr0Sj96pfzsAFEycDBD91pIgSmfE3
-# jJT5QDsBxrdSs40e91i8Wb8SUegwetwfq1wcC8xMd35nKo+DCpe++QXF1bdE9t+a
-# OySi7q7e58RTtHFivMM36Xs+YjHEbWtpDEqPJxvjuTU8XYID4Elmm3Y+dSvY0X9q
-# PKnERZxSg5YwhLB4isNha9/zEMv77ccYEDC3bifdObVVZufgIcAVjQlAxmYUPjsD
-# GSY5Hs46qYrzpsqHIm3eb9KxGYusCeNcT6muonqxK7lGIDaM6H3klynf4uz0FkZS
-# 9cKLD1OOu4cbKcwM70yMwhqY27aYf43b0hGnTYuw4EnxtlQMlBLoKCtVAjvt102A
-# uadGcVFbQwU6qLGpV15TRbXLAw/wPSKvOTdnrgMXhtz1RJAUNvqqBNraZpUwLvzl
-# T3Z7hTY9deI488RPu7iM1h2T1TTMbP/Z3mkKEHV28NhjbeCmFZFZ69RaGOU6YePX
-# Y0knUoH0AzxuDjRy+3iCLtXjHSwdGbQ6Rji0PrDt7ax5lBQ06+Z8/wyXyEffVhB1
-# yzMvQO4Lbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxODE5
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCbvFOYBk/zNnLsSNQH4Oqy3azE4w29hKTP1kI8
+# Nsr1ITANBgkqhkiG9w0BAQEFAASCAgBO2+JeFHS8zljdLOb2XG5Z1MQZkgGAelZg
+# MG8x5URyQKPeXCzBRHNV6l3b4mlz01599iw7X6UCz2myArzEDSAIvGO3QKhC+OfR
+# ofeyYxuLnK2piqylMF8K4utLrXvmojVAJTD+nhV76oxGEX2bhMhpwOEW99Z5S60Z
+# fe52+2BJVQcJfcReHI/9GQiHG+5VU6jief0sF8S0J6/EY4jG/GH7TuG+Hrbxqa1A
+# nR7PBSJhH6w9C1+j6wX/2ZosHbYh/rpqnURJDdjdL3YHvVUy4glAo/8VBikKEr30
+# /IQkdrVVsZgfL58AROtyLuRZwPcwn1TeKLwRYhkgdoFhftzCD2fFpSWo+AWnDko8
+# +oe2oHUwjEMyZMjydYaCFEP1oZEg6dDy2zuV4ziKhWXQ2cKSOxOGWPz8kvT5fWOA
+# bgwjktTRkCxUANvX9H739d91a+3VtbHUuerOBdGWrI6iW72ywOwjqLxmuwtQgt57
+# aOs5uxBxd9gC0+XOdFkL7QYrHh6ibG+Sy/tTQ+OnrJVx8nR5kz3hlYKCIlM/mPNB
+# BYchGNcnXy1xZCv4Jy9GWxXVv0xiRBssGN5ByvjFCwJI8YGGbSGPuZUCtWghdTdm
+# 6wvyPN1DCFbSZDZgl1TRCiiOVTSq8yDtpbTkJHnBMoBE4l01Sz5eglS8zVPxNrxV
+# XhN0C5Kmcg==
 # SIG # End signature block
