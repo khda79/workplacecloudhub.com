@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.8
+1.0.10
 #>
 [CmdletBinding()]
 param(
@@ -245,6 +245,33 @@ try {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Invoke-GraphGetAllPages')
         try{&$m {$script:n=0;function script:Invoke-GraphRestMethodWithRetry{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphGetAllPages -Uri p1 -Headers @{}}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Windows Update cycle was not rejected.'}finally{Remove-Module $m -Force}
     }
+    Test-OfflineCase 'Windows Update report health uses proportional severity thresholds' {
+        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateReportHealth')
+        try {
+            $currentRun=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 20701 -ActionRequiredCount 132 -Priority0Count 70 -CoverageAvailable $true -KnownOsCoveragePct 93.55 -FleetDevices 19547 -OsVersionUnknownCount 2415}
+            Assert-Offline ($currentRun.Status-eq'WARNING') 'The validated current-run inputs should be WARNING.'
+            Assert-Offline ($currentRun.Priority0Threshold-eq208) 'The proportional P0 threshold should be 208 for 20,701 devices.'
+            Assert-Offline ($currentRun.ActionRequiredRatePct-eq0.64 -and $currentRun.OsVersionUnknownRatePct-eq12.35) 'The severity rates were not calculated as expected.'
+
+            $p0Critical=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 20701 -ActionRequiredCount 208 -Priority0Count 208 -CoverageAvailable $true -KnownOsCoveragePct 99 -FleetDevices 19547 -OsVersionUnknownCount 0}
+            Assert-Offline ($p0Critical.Status-eq'CRITICAL') 'The proportional P0 threshold did not trigger CRITICAL.'
+
+            $actionRateCritical=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 10000 -ActionRequiredCount 100 -Priority0Count 0 -CoverageAvailable $true -KnownOsCoveragePct 99 -FleetDevices 10000 -OsVersionUnknownCount 0}
+            Assert-Offline ($actionRateCritical.Status-eq'CRITICAL') 'A 1 percent action-required rate did not trigger CRITICAL.'
+
+            $coverageCritical=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 10000 -ActionRequiredCount 0 -Priority0Count 0 -CoverageAvailable $true -KnownOsCoveragePct 89.99 -FleetDevices 10000 -OsVersionUnknownCount 0}
+            Assert-Offline ($coverageCritical.Status-eq'CRITICAL') 'Known-OS coverage below 90 percent did not trigger CRITICAL.'
+
+            $unknownCritical=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 10000 -ActionRequiredCount 0 -Priority0Count 0 -CoverageAvailable $true -KnownOsCoveragePct 99 -FleetDevices 10000 -OsVersionUnknownCount 1500}
+            Assert-Offline ($unknownCritical.Status-eq'CRITICAL') 'An OS-unknown rate of 15 percent did not trigger CRITICAL.'
+
+            $healthy=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 10000 -ActionRequiredCount 0 -Priority0Count 0 -CoverageAvailable $true -KnownOsCoveragePct 95 -FleetDevices 10000 -OsVersionUnknownCount 499}
+            Assert-Offline ($healthy.Status-eq'OK') 'Healthy boundary inputs should be OK.'
+
+            $unavailable=&$m {Get-WinUpdateReportHealth -TotalUniqueDevices 10000 -ActionRequiredCount 0 -Priority0Count 0 -CoverageAvailable $false -KnownOsCoveragePct 0 -FleetDevices 0 -OsVersionUnknownCount 0}
+            Assert-Offline ($unavailable.Status-eq'WARNING') 'Unavailable OS coverage should be WARNING.'
+        } finally {Remove-Module $m -Force}
+    }
 
     Test-OfflineCase 'RBAC pager follows all pages and rejects cycles' {
         $m=Import-OfflineFunctions $paths.Rbac @('Test-RbacGraphProperty','Get-RbacGraphPropertyValue','Get-RbacGraphPageShape','Get-RbacGraphCollection')
@@ -446,8 +473,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxvPcRnO9OdvKg
-# vwShb2Eyf6npGcFno4rh99g7UKZxdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvYRvUGYopdKTT
+# xIyqvaVHGnT0+UuJFDbS/uOANpcjEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -580,31 +607,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPdbI6+C6xVVo8KxPN98GwdwfnXcOTLLsQCVkJ8Sks/HMA0GCSqG
-# SIb3DQEBAQUABIIBgKu5SNtNHnxmzfa/+exXFOUhbOQwr/Jhs/t7KX6rBQWp04eP
-# IGNkwDkWgxuJn3kTFfqdCWprbvz37DZ8J68m3G5WQAdKlHgCAmGCQoMExjmWaJvd
-# 7n+t9piTh/6h2En584tpMNXeUohpeXzLfy9Yv3aFEUTnSV2f7NDwXyhfv51/n1la
-# dUmURKgViJ5Hr4y1lnlX21Fq2qceBOc4QwKF5i8BXQq3+VKBg9C4MGrIRXO+i1Qn
-# 8wGH5BVu+xTpiTyItqd1vuV4t4r5nQc40707eWR5KJ+EB3i1C7toReJQuVFKJOQR
-# YwMXm4pmeNixtuwugV8d2WdJKQQ0E/ice8Wt05ohOY9HCAms0hoFNe3W6+zWVYSe
-# /j9EFf5QuUq6jrIAunwvXJ22rFenotuZqmXEX+sdYsALmOayk431Vvy6KNQby/In
-# z90WnUgY8E414Y8eSLlffvi+Ln2CBv1KuzWTo8B3jTDmfAzaVQilLQnzhr9FMLSg
-# 1hQxu4K+YqAXfYwyA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH+tafoyTDE/50k25yCez56tFqKJXaFgLV75sYZK2EtzMA0GCSqG
+# SIb3DQEBAQUABIIBgJrdOhJDNh0ru2KfF2SzBUg2/p+h9PjsgKjGbPE66BXzc7cl
+# TzQQxgN4G7J/sVS0rCFHojtGWuvPXZ1aEQzn02t/WQH9WcMt6i3Zm506xPo+1diV
+# Y+Ne4QOUjpijo+7HiQW9exaQpfeBmDR4BO3KZ8f6ueARWIAMgB2lEO/4nOly4XrL
+# i91RCDtMxjRu9PlzrlBqf9/Ty6seOn2+kwPRgeOrEQ/xAfair0N4ZOPrn2m/oK+z
+# S6Zus12BKO3JBEaOk7Qrhe0j7n52pywX6L1nwDKPQ0ss8bxHS0HcmgwhBrlpDJol
+# 31VJsZsqKoBibs3nl84RM8zCpMMrBegrlTiyfbm/a1ApELLkFJhUBs7H/9eQQIti
+# Jwg8yyRarTHoi6Ocg49toHLjul45Y6u1qeodE3adTf/F7y7s86/ouJaJuTKVCQnP
+# O7wEplpVA24x6FGJhehl8KS7Et6cce+F3rWVvnVYz1oVBx4KbZgnUxgelsYrxSMU
+# 0I5hmNCliVmsjEi3F6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNTA2
-# NTdaMC8GCSqGSIb3DQEJBDEiBCDwGyOxrFlWJdZ2neuAW4ZGQF+THKpx6fcFX9C3
-# VoWPPjANBgkqhkiG9w0BAQEFAASCAgB6+8WbobGfbzzMY7CIKDgcHMuTylkp7l51
-# TgNUIjs8vh0Qt6B6mcVkQxEIvbDonxZta/69qYKb1TrLTysLcqQHz64IjFAiojyh
-# MWwhprVjBxNP4SW3KBZ9Rugf0/3dFDwpL3nzZXvezh+Py9JTjc0L0BB/UiHkZ631
-# hsFbkdKCq3XjNFg+FDinarua52qyeiCqHf8mNKGNnhf+eh3VBnsEO/rSvT8V1MaT
-# fBBUKXGIyH6m6XBoxdnEzG77sQbOi/1t6fKO2ewT3KEU8D7WXhkBAN//ypY3PUQV
-# eDNsbseoqsi0n4Uk+T2dDP4C3c5EEW87KQS5SzHDYoZ2wsoy5Fr6PzIcpyhYMUt8
-# BZGTsYaFiup4hJbVTlFKJOiQG2DPkV4o4+cHu98FGTy5P3ClO6MKlW7LdzGHovDv
-# qBzzv5QOOp2rNHXVssDI5VnVwOHil0xzVU5Fhwzf0qdtFXQ5a5E3twUtCUV69e3L
-# K/MJdTRj8a5EbTK3h9HQ/yZyuEG41LcreNXhhT/hGHE3XV0qsdqOjQK6VNn0g7Qc
-# sbbd9zbe6/1a4anEvIrSXVP/x5Y51ZTPZvJRApznEFacY60dicvICnhiGLt9xYDr
-# FoFsPcoDOsqUgAafvMRD1fKN6qFuBSc+fdmrIrcxwVC5dIs4Mxj5Qu3SeNSEy+Lh
-# xqKakKPb3Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjQx
+# MjFaMC8GCSqGSIb3DQEJBDEiBCATEI+IHeHNunduo+iKe2m/BF3oYjLODDsrF9V0
+# WOh8QDANBgkqhkiG9w0BAQEFAASCAgBqZsfjPIkrR27U5ubl844SPujtr//q2WrF
+# 0NFnxMzR0eC6Mo6Eqk5vuajIkhJwpH0q/uMfdflEgs3ajRIH6rfyuR+8SXLXpR06
+# C24AlMMpyvrPpZ2qxbRdjpCWJBRDLysLBe6ofT645kPYPXgpAPKaOulBuuLixxPI
+# j+GU+MEjoG6xHoMqExjsRJce58PhObFXQXVtQz8D5V50oV8I0hMgXXqqa8iXFsu1
+# 4rSm5DXVVtBYcX9u9YiBsc21mgL0GAIVtzpbXvu5qk0tkFdyGc51trkBYhvgELy8
+# ZolW53fQvKKbd3tSYGdN4m/70R9nspTJxnhOcvsyvzOzqZbqQWWt1FSWLP9otOXm
+# DgDxPVsBCu/oYRbnXs5Z+O4NhGBb66ufQ7KbjGcjgoqBzIDOKHKy8WJ7e4I4CHDQ
+# p5TXuSVixp7TQo72NztGeRgORbi8dp7G7eL09ixFXwv5RWAVVTFiYunmQArbN5g8
+# yhYWzSpxREi2SN+oZxyMLvOI+uUh38iCCJzcyGaye30siKm1vJqCLeE05vIbVAoG
+# 5KFA8h/KISzDTEz/YRPzc7y6oWwR5gwnhKTYQxyl3uwpeNvbOdN7Ys0lQMmb2xcB
+# 6wjeUMOOYqldWXWhXwFxLei+UTtQwohBkfQtR/j918l7cvmYPre4KVELJZPZXV9G
+# N+5eSSnwfQ==
 # SIG # End signature block
