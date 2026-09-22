@@ -26,12 +26,14 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .PARAMETER MaxPages
-    Maximum number of Graph pages to retrieve. Acts as a safety guard against endless pagination and
-    as a quick smoke test limiter (e.g. -MaxPages 3). When the limit is reached the script logs a
-    warning and exports the partial result set. Defaults to 2000.
+    Maximum number of Graph pages to retrieve. Acts as a safety guard against endless pagination.
+    Reaching the limit fails the run before publishing an incomplete inventory. Defaults to 2000.
+
+.PARAMETER MaxItems
+    Limits the number of items for a test run without replacing canonical latest exports.
 
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -42,21 +44,11 @@
     and a supported Microsoft 365 Backup service-app/controller registration.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.13
+    Version : 1.15
     Author: https://github.com/khda79/workplacecloudhub.com
     Required delegated permission by default: BackupRestore-Configuration.Read.All
     Uses the Graph v1.0 Backup Storage API (GA). Note: displayName and email properties of
     mailbox protection units are only returned with delegated permissions, not app-only.
-    v1.5 changes:
-      - Switched Graph endpoint from beta to v1.0.
-      - Replaced Invoke-MgGraphRequest -OutputType PSObject with -OutputType Json plus
-        ConvertFrom-Json to work around the SDK JSON-to-PSObject conversion failure
-        ("Argument types do not match") observed on large result sets.
-      - Added per-page progress logging (page number, page item count, cumulative count).
-      - Added MaxPages pagination guard with graceful partial export.
-      - Added Graph access probe with full error body logging for 403 diagnostics.
-      - StrictMode-safe status property access in protected unit filtering.
-    - v1.6: Return Graph collection as a flat object array to avoid Generic.List output binding failures after pagination.
     Optional app-only permission: BackupRestore-Configuration.Read.All
 #>
 
@@ -102,7 +94,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -298,10 +290,17 @@ function Invoke-SmartM365GraphCollectionRequest {
     $items = New-Object System.Collections.ArrayList
     $nextUri = $Uri
     $pageIndex = 0
+    $seenUris = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
+        if (-not $seenUris.Add($nextUri)) {
+            $message = "Graph pagination encountered a repeated @odata.nextLink after $pageIndex page(s). Refusing to publish a partial inventory."
+            WriteLog -Message $message -Level ERROR
+            throw $message
+        }
         if ($pageIndex -ge $MaxPages) {
-            WriteLog -Message ("Graph pagination stopped at MaxPages limit ({0}). Result set is PARTIAL: {1} items retrieved." -f $MaxPages, $items.Count) -Level WARNING
-            break
+            $message = "Graph pagination reached MaxPages limit ($MaxPages) with an unfinished nextLink after $($items.Count) items. Refusing to publish a partial inventory."
+            WriteLog -Message $message -Level ERROR
+            throw $message
         }
         $pageIndex++
         WriteLog -Message ("Calling Graph (page {0}): {1}" -f $pageIndex, $nextUri) -Level DEBUG
@@ -314,7 +313,13 @@ function Invoke-SmartM365GraphCollectionRequest {
             WriteLog -Message ("Graph request failed on page {0} (cumulative items so far: {1}). Error: {2} Body: {3}" -f $pageIndex, $items.Count, $_.Exception.Message, $errorBody) -Level ERROR
             throw
         }
-        $pageItems = if ($response.PSObject.Properties['value']) { @($response.value) } else { @($response) }
+        $valueProperty = $response.PSObject.Properties['value']
+        if (-not $valueProperty -or $null -eq $valueProperty.Value) {
+            $message = "Graph collection page $pageIndex is malformed: value property is missing. Refusing to publish a partial inventory."
+            WriteLog -Message $message -Level ERROR
+            throw $message
+        }
+        $pageItems = @($valueProperty.Value)
         foreach ($item in $pageItems) {
             if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
             [void]$items.Add($item)
@@ -536,8 +541,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAhJ6oKBTvMlXRZ
-# 6U+BotLPr44NW/Yq/HmcDVQY8DUsGaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBla3UvY3ZJOfvw
+# PCVI66kYms4B+Wg2S8QWP4ngoIZ7a6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -628,25 +633,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -654,47 +659,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIhXHfYFPh54qGDzClwRMfWsL0iVRpAZuq6aZ4H0EvYtMA0GCSqG
-# SIb3DQEBAQUABIIBgDMik9M5sBLHIIr0SMFk1CX/p8qtJQd3MeNf/80GmapWl3eR
-# FnH4ICbHlmjhMl/ni9Sy+HhOWSuGc5fcJhgaDbV5GmKBypw28EpOJ3NQk35+9zKf
-# PTTFxPp5mrhwDjfUk0gX/1isihTYYjcEEuhHgUx5XQ4ctMzW48tXF0Tv7JIp6Ibo
-# UW3kjAR3H1/q3tbFY2HZ8p3AzInSHTJFbt4g0EueJBjnvNJTws9TMGbrQ2U3kw1U
-# f/bLWv+jNSaIhUatC34/HHfUJXl1+buOVgzZ1NWKLZC+tR0ENqbkBDHFxsBmYA2b
-# yJXOlMPm1v9XgLhJkTn7H9VGSfV6PqS/0grTv8w2ygFsKH/8NS8nunX2PVcZN1hk
-# FFF95U7aUKn2bsjfpVcWkwJgBLzil2AFxElUfOmyYqt1JeOnQOTRSCcXL6zFuB7h
-# af/0W96nZ5LN/wdhkUo7BB2wlpPERWZ4McW0dr1CpnO3UZlf8ma0Me7yLd+/jORb
-# ZF3El8F2ypyBzuqRvaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBkZv68YZ6AbHFKgOpy+fhzMQcvTfqVj6pSkHSeNl7cwMA0GCSqG
+# SIb3DQEBAQUABIIBgE6Rc7AqF6nyKRXT65OUz9i7REnQtPDxO5wurE/cbS7w0UMq
+# QroZNCSdaHzJwgTL5vnjX4UgaXDLbRxOqxNhoB+RSXacOUKuwwIMTxKUILLnZjh8
+# mdAoaQYjkc5q5Gp2akGlYtOOTnqci5bwLP/UTqQRAKJ2gvrwZtzwYjMlLWuKsMNJ
+# CHeaF0nK/iuotcoQdYOOV1rBl4djmnwH+KRf1bjJmGniijToSF/yWw01tbecl7Fo
+# trUivrPwg3wZqX+zhm3EGSL7mtcG5CMKmgZ5n+WZZU21SEGe2wvtrwQVz+L9Ufj/
+# IgYvKC/s4kZmMH36Ra5EsuS8FXZpZV37XwSTc/WExhKnVhe7q9AgEniZ99CUJlJS
+# Zqm/u57DJ6VhM47E2QYUFaZ602iD8+h5knE6/WCuvxMiQVlDQ8VJaRnLAucwI6iu
+# Fw+zI+b/lkWNSnsenkhPXWs3SygtF9Lfwacn63Bds5lhTFE51WooCjGJgwPoeTlU
+# Ig4UHUFXWLyKvZX0HqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
-# NTRaMC8GCSqGSIb3DQEJBDEiBCACRxcRmwt++iueebwrtbDU00cnbUT49KmQdRUJ
-# VoqHQjANBgkqhkiG9w0BAQEFAASCAgAiu/i6AsU/C0zFWpMVougjSP9+HWhIs9ch
-# zEFXeggfi4cAnCRlnQYMxOUXJp+XH4ZSWXiK7QqgnCIMyZz/Gmk5tfbCYbSQOI63
-# FZJsJrQr2ClQJDboQzZ+VrLFBdVA+msVFU2dNQtV5c53cQT068HHdFO8+B9NP49b
-# K5bsgF+r/SNuODxlEI02TkmJ34m/b/K+LZUpfYh7QquoN0HMJE0NT7sfjaS/0Ywd
-# 8Id5WAywf6X1/gtBI4jvvV3oFSMdttwzMWUlAFgBfwRNVpHzUQ7dUrQ5qm3YTKE/
-# 52iy2SHACO0c4s3kyiHaQJ5H6Gc7C0Jt+yDSPIo2GuWDJadAaP0g4u+0vgmibPYL
-# ZcY090sd6+3cgMTWswv+hUDfKhip5Dfjc8r2JnY4YQsfP9I1v8qoqmDlZX4HlztN
-# MOrZB4AF/vUwsgr71ln7XGc2TJxymgpwLlXOJVqKLpKaiKNz0I2ivUmOKyHqy2yZ
-# JdXdy3QQUQW/xtmEGVmzbX4w9FkozrxNzLKayKU+ZQMgYYzyd9N5uNSkKk2Po7hd
-# JGpx/l19AnEcbhirG13q9MbYx6XeIcAzpZJVb+JcQJOVzy4J96QHgLWh297lzJhZ
-# 4OBznqgq8wKlXhzg/OehYRor+jayBFASzLPSwBG5zO/nvsP9edx3SN5N186gmVZ4
-# J4mewZjyUA==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
+# MzJaMC8GCSqGSIb3DQEJBDEiBCD3OWnbVSgRsNmwobBhDaxiMWa492IrqdGSgtkB
+# /1NUojANBgkqhkiG9w0BAQEFAASCAgAgwZEST6dmhM3afFQvhXTV7eXl2cc80bBu
+# n2upoagxIP7FMhUzVLw+d3pI09GkbE975umjXR3RM4kBXTmZUq4kZGRucb7wy2E4
+# xm2nVIP6NrZfTlsf5ThbbQWikPF7PbIccQteUJsT8WaPXYiF0HpJZe7MCGW0wnqd
+# 6liXNJTP1ZhOqYxm6B4gu74WCQ5No3gYTt+hfsv7AJi37lUcx0M6kriNGrj925b3
+# dXmod4LsqVldtoRXOANjBHv4w8UjS9KUqu6W+2UB3nq2BiTaLtAHQZQSFbWwIfbb
+# mzWW3FYVD2w5yEWLXWt467kt69FPts7LZy1b4k69gn4kFt0JOLl1suSXGdiP8FE+
+# Wcuu6GIr+MmzUwfoaKqxEDXwPXik4Q57GjyXiaKbCYyLO9cOeTNj93eVc/3AIz3a
+# 0AmwDhsqWLv5xrdzX+Sdv6bAVlL0gA8HgNtfg9L0wPrxmyEBbAJ8hqn+sHSbKJ1g
+# zuBf/kM/IflsRs2rOMcJ7tOYHThvaK/oXCnkQ+h3H5yiIBkrSNbFUTfvaKrCgl3y
+# e3ObVbn+T7PCNln7uXnz2lFHJw3dK7+aHOcEcaORLbNDdFHUkXEif5MjMlGgW9Fl
+# nc9WDxFXLIKfFM611BrzbrgG+emOcVPbyHECKBPxf29UpnI5dS/7lmWrSG62UtJB
+# JEw05jQ7xg==
 # SIG # End signature block

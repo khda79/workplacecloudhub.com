@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.6
+1.1.7
 #>
 [CmdletBinding()]
 param(
@@ -74,6 +74,53 @@ try {
     finally {
         Remove-Module $tenantContextModule -Force
     }
+
+    $completionModule = Import-OfflineFunctions (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1') @('Complete-SmartM365ExecutionContext')
+    try {
+        Test-OfflineCase 'Successful execution omits stale failure stage' {
+            $observed = & $completionModule {
+                function WriteLog {
+                    param([string]$Message,[string]$Level)
+                    $script:SummaryLines.Add($Message) | Out-Null
+                    if ($Level -eq 'ERROR') { $global:SmartM365ErrorCount++ }
+                }
+                function Write-SmartM365CompletionBanner { param($Status,$ScriptName,$StartedAt,$EndedAt,$WarningCount,$ErrorCount,$GeneratedCsvFiles,$LogPath) }
+                $script:SummaryLines = [System.Collections.Generic.List[string]]::new()
+                $global:SmartM365ExecutionSummaryWritten = $false
+                $global:SmartM365WarningCount = 0
+                $global:SmartM365ErrorCount = 0
+                $global:LogTextFile = ''
+                $global:logTranscriptFile = ''
+                $global:SmartM365SharePointUploadedFiles = $null
+                $global:SmartM365MailHtmlFiles = $null
+                Complete-SmartM365ExecutionContext -Status Success -FailureStage 'PreviousPhase'
+                [pscustomobject]@{ Lines=@($script:SummaryLines); Errors=$global:SmartM365ErrorCount }
+            }
+            Assert-Offline (-not (@($observed.Lines) -match 'FailureStage:').Count) 'Successful summary retained FailureStage.'
+            Assert-Offline ($observed.Errors -eq 0) 'Successful completion generated a false error.'
+        }
+        Test-OfflineCase 'Failed execution logs and counts an otherwise silent error' {
+            $observed = & $completionModule {
+                function WriteLog {
+                    param([string]$Message,[string]$Level)
+                    $script:SummaryLines.Add($Message) | Out-Null
+                    if ($Level -eq 'ERROR') { $global:SmartM365ErrorCount++ }
+                }
+                function Write-SmartM365CompletionBanner { param($Status,$ScriptName,$StartedAt,$EndedAt,$WarningCount,$ErrorCount,$GeneratedCsvFiles,$LogPath) }
+                $script:SummaryLines = [System.Collections.Generic.List[string]]::new()
+                $global:SmartM365ExecutionSummaryWritten = $false
+                $global:SmartM365WarningCount = 0
+                $global:SmartM365ErrorCount = 0
+                Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'SyntheticPhase' -ErrorRecord ([pscustomobject]@{Exception=[Exception]::new('Synthetic failure')})
+                [pscustomobject]@{ Lines=@($script:SummaryLines); Errors=$global:SmartM365ErrorCount }
+            }
+            Assert-Offline ($observed.Errors -eq 1) 'Failed completion did not increment Errors exactly once.'
+            Assert-Offline ((@($observed.Lines) -match 'FailureStage: SyntheticPhase').Count -eq 1) 'Failed summary lost FailureStage.'
+            Assert-Offline ((@($observed.Lines) -match 'Execution failed during SyntheticPhase').Count -eq 1) 'Failed completion did not write the missing ERROR entry.'
+            Assert-Offline ((@($observed.Lines) -match 'Synthetic failure').Count -ge 1) 'The failure diagnostic was omitted from the log.'
+        }
+    }
+    finally { Remove-Module $completionModule -Force }
 
     foreach ($variant in @('Core', 'WindowsPowerShell5')) {
         $relative = if ($variant -eq 'Core') { 'Modules/SmartM365.Core/SmartM365.Core.psm1' } else { 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1' }
@@ -501,8 +548,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0eexEyBFvj/Tt
-# U8gnMOlsxJCES6yN73o7sPy7SB+826CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUZQOVpTs64KUZ
+# +gGyzNwxsGJDnXptSuHOe8TIgThBzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -635,31 +682,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICoEOHM8yybz3rx9+ABdcpyimGp6fDfWHSOIjh+Ql61oMA0GCSqG
-# SIb3DQEBAQUABIIBgDAk5U7rcllNa7HDvEz2xzvf36OFQTZ6+XqtFquWPE3J0UQ4
-# 2Bx6lLZXFYGqFo6yYubFJphgoa/CCJtDrzNaD5ro1DdxUSshcd8nWJ6fa4is8g/N
-# K8OtYKsg9653SqXxBX4NCcIQsEFKBMNTQ+/MxsUpTrM3FOl1fRGUuz3X+WxKi9Lk
-# zKvxMIiCW9XCKkj9K5O3Ae5YycgriV5if6G8++ku1NBt67YTiTFCA+/reYLwVH+V
-# JEI/UH0cuJNRQr1Fi95GuZLxX5hKyOdp2A7H2JdiSW5Ysrzr4dMzjIUbgFgK/RZK
-# Xsn4cGqeYBw3mAO5lQgdJciV89MRC2jdnH+HJ/loTkMGg7LITWVymLhYf0aIpXSl
-# 0DoRWZwUHBJWsW9+9icxsHPLQPXSeMNfoonm+LUx7iUxkifDHJdVAacJWCt25n7I
-# XHsWX3U4l1xcfw3bsbFfaI0g4gPUHxywLPNzYNEYsNilmUQWKUxNUP1v+jlOJ8KB
-# 5haqWPMVGsyGhoJpcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIICIlsEa+txCA2cFGfNJSPIKBY87fmVP+W056vfZCguYMA0GCSqG
+# SIb3DQEBAQUABIIBgA2dEgCiSm3FIaZWERMG5f13ywAvyddyUV9+OgztHUIeQAF/
+# Vp+p/VwEO+W85o/ifxziuI46xq5QOPWV/cIne+d+O47qQf3Egb/iwclNLKjWFxFn
+# VFGrXfKpEcXbTC+SpgRy1/pv0NGXcEgAnO1Ois4bPvkrZcD1lklP+oUuD/pZZ6Mn
+# u+DNikIVik1Mh2fMQ8h40oK21rn9c5XsOqiHc5DPCTzGvBr1yi2QXSTMb23EvmXN
+# qdiHlhkkW77VVpC7qgrCU8BmL01nZRWwDgPG6rNrIYX5KBPdmLIuIIIU59pURTJd
+# dg2oQdUCT6/kHJFisSp12iRN95P42FcnDrVOmhVEFZAZzax1vjHMpQZZAoDV1nLx
+# 6P/sEXPMSUwaRJ29ZOruWD4je05CS2mwvt/Ut28jeec+EZ8cwLJaTUbZlQHVQIR7
+# OGg/i9Q9yt4eCMVPG0COjKyVVX6DA1HEKyIM8QnTW5CBwxBtwcbdrvR+VYGLMOl1
+# +3/O3ZHIQcKR08CvpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
-# NDhaMC8GCSqGSIb3DQEJBDEiBCAFVGe6N6IPIZP5w1SIkVD7pNPZTlwMXxaXaSH5
-# 5vxvlTANBgkqhkiG9w0BAQEFAASCAgBjALZX2G9z52EGcU5bxUfPb5pNikecxr4r
-# Jxy4LaAc/JsOLDTkXhszhjRm56xfJ7F7gkiFc5+QK5tiwefHU94GQ7wh+KB24obI
-# oxyxQFhaZZcgp8pKq+Dire8IahoJCsJfsjHB8Nxk9fRo18gURj07HXAq2ZBJHIFB
-# dmIEh8nU5Fh3UkX3Oe/KiiyuHP97qWJePFHONcPxJZu7zWa1em/GR+3pe1lgLTKt
-# z2dZUNAguK0fouLdLrRburDJJUVtTgaMRl4YZM6ytMmQJJi9OfgfzMNIsfB/4SJW
-# B3QH0kRF2zTnj52vW0A1mZ+ij79RajuNB3JZFHlc6QbIU8mvqyGaZcfypZP5zh55
-# SHTP2JFejSDTsGnS9mG1V9ohPGvJkuaNY70nQ7Ut24lRQNjKwSdz2TCdp9jnryGC
-# wgDOJQjOIVncnTjWdzZ8HiMBmUCejuLoLatAAX4KnYxhbEsEGOcq3xmAMvBsUjg8
-# qu2djyUhBukRB+PzFSag49ktd91N5v4c/JhLv+RtIWbqW6JYAOOFy7Q5/+3zhCSA
-# NirRmH3wkwcG4tpOUQ6Pxp4mpsYFKcG3iE2qX0XdryoGm0gl7Sydj5bCAkqD4Ktu
-# uW4gWF6NlrI91hSus5Ep0xmMSEkU4q8PPHj/Aw4zJ5R7X/ZTjawxfgfxC/euxk2O
-# T+TtNth7PA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMw
+# MTdaMC8GCSqGSIb3DQEJBDEiBCCUjvoPWEXhIccml70MIvAyTMobTnfK1b6hazZm
+# 6gs3pjANBgkqhkiG9w0BAQEFAASCAgBnw8XdEF7mV8VLSiJ/dn5edVPL7yT2EcjT
+# usDmoC2REcHaUPmtvp3YZbFPeQfEOL6raZkC09s0h9rYkhtx4VRZGyFI8q7rVctH
+# U6545OXV9j9hRZcGdMan0ft6JlwC+QptLVsFlHVkL1yjenqMEJ/RhUJk2v6nNZfM
+# DRuXCnlBpIOhhk3m24v6yFKfc7iqdag+7HJULV5SjI3/2fCkBVk5FmwKA8/+mhBS
+# AKw+J5jwkMZaKqW4xHm3BG+9uWJ254ksvrMCGNRpetDzNBv+J0pkJD328ZUS7Mi2
+# ajVIWu3JFJCy5XITOdMxMuKbnu6Xfe5tMAitCf6HH2qWek7BylTfGQeQlJW8DM+g
+# aCLt+Xt8SQX5wo3SrQMHixxP+B4TyfujLNFs92xyZ8+ibbDC2xZM8PoHiGA4wT23
+# mceIWVj8VR0xX9IKVYZHStp6JQM2Dy72v9zystC1XJnPWGae1P1t4InITVFP2Zmc
+# wIHc5VgttnNznRpbjQW5O99KIEmrq/yuiJESFXWex4qb7BGNslDoD1+4FFIy53SZ
+# TRTgABFBTeBlbhOsB9Cunhcml+ML+qDlsktK+lC2atBySMZsKl4Dt6R4g434FGuX
+# E/EzZl8tgqrsR860+jnigmSaBcDxnJSOr9wJN9t2pBiqEQ2pg1oBXAS6exNfVraD
+# Txyx6uw9NQ==
 # SIG # End signature block

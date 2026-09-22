@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.15
+1.0.17
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +57,7 @@ function Import-OfflineFunctions {
 
 $paths=[ordered]@{
     Discovered='SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1'
+    BackupMailboxes='SmartInventory/ExchangeInventory/BackupProtection/SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1'
     DeviceSystem='SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Device-System-Inventory.ps1'
     Bios='SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-BIOS-Inventory.ps1'
     Compliance='SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1'
@@ -71,6 +72,38 @@ $paths=[ordered]@{
 }
 
 try {
+    Test-OfflineCase 'Backup mailbox pagination rejects incomplete page-limited inventories' {
+        $m=Import-OfflineFunctions $paths.BackupMailboxes @('Invoke-SmartM365GraphCollectionRequest')
+        try {
+            $all=& $m {
+                function WriteLog { param([string]$Message,[string]$Level) }
+                function Invoke-MgGraphRequest {
+                    [CmdletBinding()]
+                    param([string]$Method,[string]$Uri,[string]$OutputType)
+                    if($Uri -eq 'p1'){return '{"value":[{"id":"one"}],"@odata.nextLink":"p2"}'}
+                    return '{"value":[{"id":"two"}]}'
+                }
+                Invoke-SmartM365GraphCollectionRequest -Uri 'p1' -MaxPages 2
+            }
+            Assert-Offline (@($all).Count -eq 2) 'Complete two-page result was not returned.'
+            $rejected=$false
+            try {
+                & $m {
+                    function WriteLog { param([string]$Message,[string]$Level) }
+                    function Invoke-MgGraphRequest {
+                        [CmdletBinding()]
+                        param([string]$Method,[string]$Uri,[string]$OutputType)
+                        return '{"value":[{"id":"one"}],"@odata.nextLink":"p2"}'
+                    }
+                    Invoke-SmartM365GraphCollectionRequest -Uri 'p1' -MaxPages 1
+                } | Out-Null
+            } catch {
+                $rejected=$_.Exception.Message -match 'Refusing to publish a partial inventory'
+            }
+            Assert-Offline $rejected 'A page-limited partial result was accepted.'
+        } finally {Remove-Module $m -Force}
+    }
+
     Test-OfflineCase 'All manual Graph pagers reject malformed pages and cycles in source' {
         foreach($entry in $paths.GetEnumerator()){
             $text=Get-OfflineSourceText $entry.Value
@@ -342,6 +375,29 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
         $m=Import-OfflineFunctions $paths.Autopatch @('Invoke-GraphGetAll')
         try{&$m {$script:n=0;function script:Invoke-AutopatchGraphRequest{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphGetAll p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Autopatch cycle was not rejected.'}finally{Remove-Module $m -Force}
     }
+    Test-OfflineCase 'Autopatch reports recovered transient retry attempts' {
+        $m=Import-OfflineFunctions $paths.Autopatch @('Get-AutopatchGraphStatusCode','Get-AutopatchGraphRetryDelaySeconds','Invoke-AutopatchGraphRequest')
+        try {
+            $observed=&$m {
+                $script:GraphTransientRetryCount=0
+                $script:requestCount=0
+                function script:Invoke-MgGraphRequest {
+                    [CmdletBinding()]
+                    param($Method,$Uri,$OutputType,$Body,$ContentType)
+                    $script:requestCount++
+                    if($script:requestCount -eq 1){throw 'synthetic HTTP 429'}
+                    [pscustomobject]@{id='recovered'}
+                }
+                function script:Write-Log { param($Message,$Level) }
+                function script:Start-Sleep { param($Seconds) }
+                $response=Invoke-AutopatchGraphRequest -Method GET -Uri 'synthetic://report' -MaxAttempts 2
+                [pscustomobject]@{Id=$response.id;Requests=$script:requestCount;Retries=$script:GraphTransientRetryCount}
+            }
+            Assert-Offline ($observed.Id -eq 'recovered' -and $observed.Requests -eq 2 -and $observed.Retries -eq 1) 'Autopatch did not count a recovered transient attempt.'
+            $text=Get-OfflineSourceText $paths.Autopatch
+            Assert-Offline ($text.Contains('$script:CompletionStatus = ''CompletedWithWarnings''')) 'Autopatch still reports Success after logged warnings.'
+        } finally {Remove-Module $m -Force}
+    }
 
     Test-OfflineCase 'Windows Update pager rejects malformed page' {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Invoke-GraphGetAllPages')
@@ -401,6 +457,13 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
         $rows.Add([pscustomobject]@{DeviceId='managed-1';OSVersion='';ReadinessMatch='NotMatched'})|Out-Null
         $converted=$rows.ToArray()
         Assert-Offline ($converted -is [object[]] -and $converted.Count-eq1) 'Generic row-list conversion did not produce object[].'
+    }
+    Test-OfflineCase 'Windows Update status age uses status dates and reports coverage' {
+        $text=Get-OfflineSourceText $paths.WindowsUpdate
+        Assert-Offline ($text.Contains("'LastUpdateStatusTime'") -and $text.Contains("'LastUpdateStatusDateTime'")) 'Supported last-status dates are missing.'
+        Assert-Offline (-not $text.Contains("'PolicyLastModifiedTime'")) 'Policy modification time must not masquerade as a device status date.'
+        Assert-Offline ($text.Contains('DaysSinceLastStatus coverage:') -and $text.Contains('LastStatusAgeCoverage=')) 'Status-age coverage is not visible in run logs.'
+        Assert-Offline ($text.Contains("Metric='Last-status date source'")) 'The report does not identify the status-age source.'
     }
     Test-OfflineCase 'Windows Update email places the OS distribution before fleet coverage' {
         $text=Get-OfflineSourceText $paths.WindowsUpdate
@@ -639,8 +702,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUZnHTW7tRruT6
-# tKlRu2ZeS6wSCUqPKUhBNtjnsg9vIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZMDQD0xHgWUqv
+# jAF+TjJtjxjNfa6Dw4v5c/2LQFX+U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -773,31 +836,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOhRI/BkUMeu/R4CIj7QnFuy1j4rPLz21rxNFKHtrW3qMA0GCSqG
-# SIb3DQEBAQUABIIBgG9LicKd6ZKXggN6/CWYnJ/mzkTT6KB9vdtzn5Q4q5FuiUx7
-# qhd+HJlcoJhpKpUFx6PjObnpwNLEqvIkPqbOUQRwOVZo599RvXPa7S/rYqSeEcuX
-# UmS0SP03zwp4ayY/+BFcmXWfF2KQ5gVwNv1uARzP8HLyJ1MTk4XAjnEGPyIOt6UW
-# y4q0mXV520qxZuEuX5zGjAhXvZnfFl4iee/Na6m7+qR+6mFf1HzviEBGHQOCiC2I
-# pB6Pj1MzmrHiCLVrg9nLvtCTjFv/13vY3PZp4s3nLknFDF1bo4J+vo5tY3OLK5t1
-# WQ+NU6Zb2L/hO5iwucQmfHr7jGGyy2QGblVXKMk6OQ+6lCyIqQmdB0vMyHGpA1Qu
-# mj/GTdjOHclxs1MPfUGhtBKcWS4aRRXEJTe8QeGOXjXdx2Qf9N8wTJ3FZ8YB27AM
-# WGGbLFXFbw2e94Jnqd6T2cDUTCKOn2h00F2Ff6Xs58Q1jsO+c+RW4iLo7ekKx3Az
-# mr+a2uEfX7OCEkm9ZqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK1DKQOABF8P8UE180P9yE38WnZv9UEFWyA/DjMGT868MA0GCSqG
+# SIb3DQEBAQUABIIBgEovjrAvsS8DX515mRL2beWiGfQL49WO9w1vV1E/GLOxV9P9
+# anE2J22OY3jHqOf0AJOtb3nll9bv5mAYkde10pWk2QFE7BRAXqc2wS//0yoLi2xT
+# OMy7w7C1rLlBNhUHh3m8/Gs6ho0bBWgmYbeba62ZIQuUQylMPvCVrU2gCmJIS/YB
+# RD8MIyDlkIbi4vpbJUvGzko9QIOI4+1HqY6a3Z2l2ZRDYJNA3lgZiSNJD8IB6J35
+# a4yKbAypb77tmjABOoisTOe3jc8A+/S72qfvj1WKOUzHf/Z8QV/rgNEFiHcitOos
+# RKVgCpxo+Twa2Bfue5X1GLcKugCRb/+q49m69/Nz5v4NK2rMw5NdaNCMK2f4SWNK
+# s+t4Cu/MPzBK9tKzpQvqe2mLT7gxks44Qcd2YORljZqkIHNC5PSA0juw+uMvGddm
+# 81ludYK9lgswOv6gynfB0IfHGtDjV54bkAQCs2Xw0y/v1LG9vorbzCSJlOm8axHT
+# BJq1572TIgDg5te756GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNzQ4
-# NTFaMC8GCSqGSIb3DQEJBDEiBCAQU9cQKWcGrK8e8K28PoafuPcHT9xWUDCFU7H9
-# ukVoNDANBgkqhkiG9w0BAQEFAASCAgBXMV6Y5j9ApPyC5YpGfNsGOGMCJHKYTt7L
-# 8n7fQjo+msbKSbHMvFcUiM44L0y40AE6hdcG6mVkOIhpl9e1D9sVD+f5ArMScu1w
-# eSAvIlcM+luXe8t2odOokTOmcnNXGuazrWU8zNePM1+E9+dLkiJX/t8KLYx5tixm
-# RvJhW+O7jl9DvpcUDrppqU7Ys4jEMGCVhizQ4Zol/IxpG1VbQckaYfT6FkrINCCv
-# EbwftRqSbUkf5+tk7hA9n9QKGix2X+yXUED/2W92/O8Wj/xlRY0PLuCp1CYM2W66
-# QoF2E6BihNi+fNnXcvoaqUSmrPaUZV/u38zPrePnkBb72rEuLW2yPxPuPPWOzRje
-# 2ocHML8+gcWE2mJsXaRkGVQBGhqZ5j4W2cO0WvQR0hGn4Z352zrLuKLeA4Hzd+Iv
-# l2lWNAuIN+339vPu+XUS/fJ12okH9dQAVadYD30i5l3KshsPz0uCV79/RtDdQYwH
-# AEx0Tzly90PHoWyGkZV2gIvxCeha/Pn2hBa/EPIgG3C8bJvFjM9gpTwt7BNnisn3
-# xnxdVqQPzLz31KVOT71YhUngLVvarSsWacQqOfNj+vIdKhg0Sftys1GnEZPf2tld
-# krh8l1hKmLALa5PDqaF5GmoTm1SAXFqO6N8wP++xxHBGFrd/W3HrN2Kg/cJOCEgH
-# wCpjPpp5gA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBzUdQ01K5O+op1oSh4zLS8St987jmoadSpEnTO
+# rxK3KTANBgkqhkiG9w0BAQEFAASCAgAFzPT9SbK5vQxzaLTkzmBaBe7nmksPDHIS
+# Dl8ewBcloVJgZ6yHrKx5TRBg5MprbaZrstzmqD0Hq5cY5azDVBMJq5SWMinmcKzk
+# k8n9k55Ib4Jpj1u3cA0F3eaFUn/EWoVBzspOoxFBo7TeGS57yIeDZAmkeWvbbNlN
+# 87FmOzXp3Gmnou1E8Suh4LqkVieaH5Br7pPUL+kcDtDoIQ7oFQXmn0Q4WSV8oTPV
+# bcDA1d/HbEDDTSFbZ8IL9qfcKxaIrDOnVKWRnaWg3bsIzk94GIYdSyGYsgYSwnoO
+# a6ttCeBf6vxrAIMjg+0Q8pd32QaxkfT3uPs5kwCnLfPHt2kBMs98ERbjYyf2N2xj
+# 0HefkjIgv3iNAlxWNGf0KhrZFwGeynj3KLtB2t2/fpaW/7p/tvUS1YcaG4IXeBsr
+# Y3q/MxbjdLhzVhhWWFeO5bKsDsBQUWCBRCqXoPaqyJKMx5ZbjFbytrKa+hU94o9o
+# Du2PFHlw3x2DXtfDvWjLZ8OT078+Nah0/WJZO8xFC/VcM9K2ZNAm3VnsZC5zSffr
+# gpNjH2AUWuql2OS6BaB1se9UdjNoIJN6thivyxY/SMTUo4tuO+ZtiUGm+AZcDRTw
+# 9uTldZrvddUnySvb9Jx89qjyzBWMtjMVHNTBpyFDsxAXIR9FlzMxGpmZZSeBiaqH
+# ldGOZbsDfw==
 # SIG # End signature block

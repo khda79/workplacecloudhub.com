@@ -23,6 +23,13 @@ are preserved. A failed serialization cannot replace the previous valid CSV, but
 this does not establish a transaction across all files or prove collection
 completeness. Consumers must still check source dates, schemas and tenant identity.
 
+Data quality takes precedence over runtime. A page limit reached by the Backup
+Protected Mailboxes collector now fails the run before replacing the latest
+CSV; use `-MaxItems` for a bounded test instead of treating `-MaxPages` as a
+partial-export option. Windows Update reports the source and coverage of
+`DaysSinceLastStatus`; the field remains blank when the export has no suitable
+device-status date. A policy modification date is not substituted for it.
+
 ## Organization
 
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.

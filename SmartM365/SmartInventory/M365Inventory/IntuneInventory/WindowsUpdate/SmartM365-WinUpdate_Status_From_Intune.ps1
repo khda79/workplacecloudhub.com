@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.39
+  1.40
 .VERSION
-1.39
+1.40
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -93,7 +93,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.39"
+$ScriptVersion = "1.40"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1971,8 +1971,7 @@ try {
             Write-Log "Configured LastStatusDateColumn '$effectiveLastStatusDateColumn' is absent from the Graph report." "WARN" "ENRICH"
             $effectiveLastStatusDateColumn = @(
                 'LastUpdateStatusTime',
-                'LastUpdateStatusDateTime',
-                'PolicyLastModifiedTime'
+                'LastUpdateStatusDateTime'
             ) | Where-Object { $availableHeaders -contains $_ } | Select-Object -First 1
             if ([string]::IsNullOrWhiteSpace($effectiveLastStatusDateColumn)) {
                 Write-Log "No supported last-status date column is available; DaysSinceLastStatus will remain empty by design." "WARN" "ENRICH"
@@ -1985,6 +1984,7 @@ try {
     Write-Log "Computing derived columns (RiskBucket, BlockingReason, DaysSinceLastStatus, Action*)..." "INFO" "ENRICH"
 
     $computedRows = New-Object System.Collections.Generic.List[object]
+    $statusAgePopulatedRows = 0
     foreach ($row in $enrichedRows) {
         $o = [ordered]@{}
         foreach ($pp in $row.PSObject.Properties) { $o[$pp.Name] = $pp.Value }
@@ -2004,6 +2004,7 @@ try {
                 $parsedDate = [datetime]::MinValue
                 if ([datetime]::TryParse($lastStatusRaw, [ref]$parsedDate) -and $parsedDate -ne [datetime]::MinValue) {
                     $daysSince = [int]((Get-Date) - $parsedDate).TotalDays
+                    $statusAgePopulatedRows++
                 }
             }
         }
@@ -2033,6 +2034,9 @@ try {
         $computedRows.Add([pscustomobject]$o) | Out-Null
     }
     $computedRowCount = $computedRows.Count
+    $statusAgeCoveragePct = if ($computedRowCount -gt 0) { [math]::Round(100.0 * $statusAgePopulatedRows / $computedRowCount, 2) } else { 0 }
+    $statusAgeSourceColumn = if ([string]::IsNullOrWhiteSpace($effectiveLastStatusDateColumn)) { 'Unavailable' } else { $effectiveLastStatusDateColumn }
+    Write-Log "DaysSinceLastStatus coverage: $statusAgePopulatedRows/$computedRowCount row(s), $statusAgeCoveragePct%; source column: $statusAgeSourceColumn." "INFO" "ENRICH"
     $enrichedRows = @(Select-WinUpdateCanonicalRows -Rows $computedRows.ToArray())
     $duplicateRowsRemoved = $computedRowCount - $enrichedRows.Count
     if ($duplicateRowsRemoved -gt 0) {
@@ -2257,6 +2261,9 @@ try {
             [pscustomobject]@{ Metric='Match percentage'; Value="$summaryReadinessPct%" }
             [pscustomobject]@{ Metric='OS version from Entra fallback'; Value=$summaryEntraOsVersion }
             [pscustomobject]@{ Metric='OS version unavailable after fallback'; Value=$summaryUnavailableOsVersion }
+            [pscustomobject]@{ Metric='Last-status date source'; Value=$statusAgeSourceColumn }
+            [pscustomobject]@{ Metric='Rows with DaysSinceLastStatus'; Value="$statusAgePopulatedRows/$computedRowCount" }
+            [pscustomobject]@{ Metric='DaysSinceLastStatus coverage'; Value="$statusAgeCoveragePct%" }
         )
         $readinessTable = Convert-ObjectsToHtmlTable -Rows $readinessRows -Columns @('Metric','Value') -Title 'Readiness data quality'
 
@@ -2351,7 +2358,7 @@ $fileLinkHtml
         Write-Log "Summary email skipped (Mode=$SummaryEmailMode)." "INFO" "MAIL"
     }
 
-    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count UniqueDevices=$totalUniqueDevices CoverageTarget='$fleetTargetLabel' TargetedDevices=$fleetDevices OsCovered=$fleetOsCovered OsCoverage=$fleetOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct% ActionRequired=$actionRequiredCount" "INFO"
+    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count UniqueDevices=$totalUniqueDevices CoverageTarget='$fleetTargetLabel' TargetedDevices=$fleetDevices OsCovered=$fleetOsCovered OsCoverage=$fleetOsCoveragePct% LastStatusDateSource=$statusAgeSourceColumn LastStatusAgeCoverage=$statusAgePopulatedRows/$computedRowCount ($statusAgeCoveragePct%) IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct% ActionRequired=$actionRequiredCount" "INFO"
 }
 catch {
     $script:CompletionStatus = 'Failed'
@@ -2410,8 +2417,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbF3g4yULF/94Q
-# ldDgfM8YbAkGpC94qOBf/bU1JC4kPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBghfOLYotBGKiX
+# Y7pnqcIl7kMlhmN2FPLIUu+JM8he/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2544,31 +2551,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHKXo8mfcVrG+v7dSwMLzksv/H6TeQuL+r2TFXDq9M7KMA0GCSqG
-# SIb3DQEBAQUABIIBgAUkzHGg7eADsyvTbaxwTWafRYwA0E5WjTL9i25oz4kKLocM
-# Z979rUzhpGbRPr+D4xRJ7F0iKdQMSMcPDakv4Y9zSwd9r84QirVT7ZewHyN9nzLh
-# tHwIr7ojxFzmczLHnDEDB2cno2fciwBas5b1F8HRe/k2dw4O2PZCWNzPYIR4fJIB
-# ElSqdqu/yws234NE7nr6hf0ve5ubQb7WdHR2KW2Jwgn5sc24iJHYCZ4ax7fPkigU
-# S8THO+DSspu/W0EbSmlJEr5M4EfP2b975ba+om/vH8vxvaWwKOqz1hoOvZ3AUgo8
-# clBtlKkeyMVKtaRVXaDE+jP4mArQM0vmnzKKaqgJygnOMCgn8Tcj7vlpk45r/6rr
-# axYDJTV2Q5gPvLbhd/0ApwKqalANLzFGTJsukWt5byYM8EylYnYgtoudqWC/ncWu
-# DY2VabwTOzDrGsAxDPVcnO1qt3/Lb0didCNtspotn4MZpr/811TXRVtn3Ov/mVE+
-# GHadryrBblXnArDF4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM0PrUIYN3j1ljiJ25/+xKVuOmnlfZr8Cz5LfCDSAIoKMA0GCSqG
+# SIb3DQEBAQUABIIBgKmbqwDFgyQjWhsxBG4Uu0C/VICIHDCjJV8dJHGEMPaiJMsD
+# XzuLTysKLccU1xRDCI28Rxh+h8HUXbZHdt9zcIEenBnjo430CoVJSdPh/27cqlyq
+# NHS3e9adZA+qRa4LPB/T7dHSaJD7kE/Jwl5aIEsOu4pRCVgKR2FOyQjD4HskpdIP
+# E1hwPtYKpd8364ZZDN/BcYMv38Tn9ZP9Z92+es3bOd8YpryYm4GlA1+M3Yyl56JV
+# 0iGnwoPXCjwCLGETxCCqKV9Q3xNiuwFsuBWPYPyKh0sVurQEzNCtiLNiwUZjAcC4
+# LwfJq0Zt6Rc/+1ZkoguzPbwUGxCYaUvPA9qrJ4K2Ljlcl5TNacw/Fs58t4X474mp
+# 5hvNTlCg5vCBRNd9QzfwhHlYF3ZdmYMEZTpIgXmRbrJl19FucIbxH/4TEHy+Pdat
+# 2qkmi/DMbvekUjfk8AdRCJSWP0kHvsAp+/A9se04hhPYAyfvM4WlaaZRHZ4YvB+z
+# HnS3Csxsaq58ScTvTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNDU1
-# MDFaMC8GCSqGSIb3DQEJBDEiBCDM70O7Pw0TfcUaMIrb7ZRvj/8zNH+S+HGjDrxB
-# 4gjq1DANBgkqhkiG9w0BAQEFAASCAgAthO70QDb976yx+x0GZpWvHytLlf6E6vn5
-# GPC17quf4/Z6twHTh38SRP9PkZw46jfr2WHJiExevW/uzCEvxzkb6q1SAh7lxwo0
-# GnFLFb2ee+bpZJXuKIlmWIgkqOXVVYj9i8nXtQijUNub0NPsTr/UYjq5wFWLGDEd
-# JC+uwWnZ8PqpqPXnoSuHvTiuyZUdLfcQxBjmx3V3sQMn4WLpvek89ce9fYeCkf2d
-# F6O6fityueZMAyW8xBdafG4QJi9B0avHzRurcYBpdJ4Jwh9c1aC15XXR318jitNS
-# I2jtZ0kWUw53vGf/+GVGeD/DExXZ+1Uw//RVVv6rJLQELazwxl4RfnIk2UmBsxrM
-# e3XBXFK0E93GJvkOUn2I7B2dF9QjWqzalISZxNHpThl9r6Y6RzAeOtu3SH1e9hbo
-# lgmnT1AZx43ylNt/qLOwC7lXGyoT5nofB2M5tQvgqtUrS9jlrJMvR75pLt93ACxW
-# t3PGVsEhvrQUijqvvRgg+D7Js2IjDD8USbZ5SUzHxjtZN5ANfMkxNGBefKgPbc+n
-# i/wFgfe9bFq0iJ9Yo6xInYVWsAH2BG4witSptsjZXyqrRs1PTl9C+QK2ojf8yuOH
-# +BdYM+kur25+cEM9XHWPv11Ize+zG/e4Gl/Kguz9Ce6PVpiQ5CVLcsuiYBfRGiYl
-# NEXRelEsFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCF8gu94rev2QCn6Kn9ltbdIjdKAk08/KUNYc0P
+# pVuOJTANBgkqhkiG9w0BAQEFAASCAgA8JWzpgk8339b++N2BkZBY+vlZp+eHun3y
+# nA5dMSHGrkH+bpRANdssrcoMbxq1sfcmGFaEFwX7+LYsqWtShhahn3l8cMBlXh0P
+# c3koI+nYYgTXh810uW6UxnituiPrb6SuvvJLZds7cK54znOVi2/HOsDPo9CZazoz
+# sDzzJC10Q1ffwK8yEMvh2/NH7j7CnVP5ESFiolMUnmiVd/rftT0heFjed+S7AkpU
+# /aSSkjLz8Hd76W0sH2OAnJqfXANTM9fFb0ktNL5SYX32HF7uuf8UXuzR/LhDilca
+# tJNzFPNe3fj3fUC3nbOcZKH8KT30O5lNUqpldvTMi5JNbCLnZw2fNUCAPQBvf2Hj
+# Us2IZfGR1KoxAw4ngduk+lg9PKC7pxlfZwaKIFjyqh0XUWfVLy2gDdn76f2nNMQP
+# WnRrAZEqDhlBGaCWyJbt1wzN8waP0Z91bKpAitf3XE/Tf0zWa26zycfxNikEMoGF
+# Ez38juuxIMagYFbtvq6Bg05SUjCR/tBF54WdhtNbp7uoq1AoYiGB7nZtxeOsTJkS
+# hlatgGdJmsdzWqFqqN276OL5mLN8pW1IjkfA28/cduKysMTtzmPGShdfphKlzfTb
+# fHdlNh6mK5LNGLQwjK9p/L/WtpOHmEMDH44zQwtIHEkOm3kH6yLPTqbXsK/eYsvQ
+# tugQAjxZhw==
 # SIG # End signature block
