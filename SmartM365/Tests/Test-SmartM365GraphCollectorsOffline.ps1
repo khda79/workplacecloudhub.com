@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 param(
@@ -163,6 +163,7 @@ try {
         Assert-Offline ($text -match '\[bool\]\$IncludePolicyStates\s*=\s*\$false') 'Compliance policy-state detail is not disabled by default.'
         Assert-Offline ($template -match '"IncludePolicyStates"\s*:\s*false') 'Compliance local template still enables policy-state detail by default.'
         Assert-Offline ($text -match 'PolicyStateAutoDisableDeviceThreshold' -and $text -match 'IncludePolicyStatesExplicit') 'Compliance large-tenant automatic safeguard is missing.'
+        Assert-Offline ($text -match 'Write-ComplianceInfo -Message \("Detailed compliance policy-state collection was automatically disabled') 'Compliance automatic large-tenant safeguard still produces a warning status.'
         Assert-Offline ($text -match 'PolicyStateMaxRuntimeMinutes' -and $text -match 'Assert-PolicyStateRuntimeAvailable') 'Compliance runtime circuit breaker is missing.'
         Assert-Offline ($text -match 'Managed Windows devices selected for compliance summary:[^\r\n]+' -and $text -notmatch 'Write-Host \("Managed Windows devices selected') 'The selected-device milestone is still emitted without the timestamped logger.'
     }
@@ -436,8 +437,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMgvQVsSti/9wo
-# EKoMsoNgRu1PzChqvuaxR0q8k9Kgw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEJHFxSMJyONj4
+# 9xMKabaqjXi1KwSYVKxrPnwzTtZEe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -570,31 +571,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINMiJ9+mMe13y7KUWf1UbI0SIID9nzrFaan06hOLR6g/MA0GCSqG
-# SIb3DQEBAQUABIIBgHgxdE/PKETceE1c717kYmJbr8zw3MO2/v+rx4lxF+NagGIv
-# CC6IkhREu131Gefkgz0b3oh6jv2T/gyBigaESPWcEStWOSckKc4LJ9lYkt7BCBp6
-# qmEqIXWo1tV3OgWXXLtWr3uX2LqFcDZgsB7P9bR15oI9jv38gkkmprshBtH6S42/
-# 0BnO9cNoWdZd3nVogyT8qPpIIcAZX/dXAzj+fbgcForsA+/6uW7HEWCWnmC+Z0Nl
-# hhOir85QpZGjK2tjqpSBQxTg1nDbJSbXH3baxBPXRps69yvOCooMeUjxKj8kO0mV
-# lZ5FraWEMiZNYKzJ+n16fOMRjvwZjN5buQ0/OB8T3eHENwEffTSrHYmhdZq90zD7
-# j0lOXKyw1QmJjt16dd52/E1HT4oyKSl19MNtO0tD1Ye1tFROZ5+UX3NN+7kKmS0M
-# YEoJKDzgjxCg5mmLRlPu5mLnfzk6WJ21ptH727LfG5aexo7SgVXiBa12bPfjONCm
-# ZvazEL5VeXQbQH6c3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIGUEnRpxQ4a5o2mI9jN09zxwt1ZVgUrrWfsY6S8Yil5MA0GCSqG
+# SIb3DQEBAQUABIIBgEd/0Yh+mpZvEBj4S/PU0wJVcDIvuzCzXwhe0SKSfhTqIpVe
+# fH/CTV+8heMaeSUD1SUSP1FToCXSW/yscmU1kaFT35Zu99W53bYiLzhsURBPeP7X
+# VeKRuLW7nkXrUoyxQjCEPNchd545vt7WySQvpoFKsbKbhGhvWeizBMNVoiGxvDOm
+# HYJNJUJpwmkPyLQ1auf9oF9oZAJIGErpiJLoaZFqWZ1wQqZRMvqGVvzULrFrutmg
+# IwVahPkoMe6Cm7fI4LnUiJYT30QP1Tt0Z1mXFfreFXFJYRmpRmc7JRo6sO9f1bdi
+# gRfN7tQSzZWopzxtqIoRb8nSTFze0k/qrU2P4lBeuLsvLyQ4PDIb8Omot208VtKi
+# Z1zszX8FUM2Pc2HuGi21vSwTxxelxwctyYQN9S5MdFdt6Qj3puY2pbot4KiTn44Z
+# 22O9Fobi0B4goLMdOojh1EjNbsAauK8/HS3MKc6uY7CjNO+tStduw5qrD8jw3lhD
+# 9V/XZgO2YDIw/0/oQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMjI1
-# MDdaMC8GCSqGSIb3DQEJBDEiBCD3fsP9sI2jftaCtk7iLo+Q5bQ9T6FPIHK4GAVX
-# jXVOZTANBgkqhkiG9w0BAQEFAASCAgCHGSC7DyM8PmWcmEUMRnldzyeNNwdu5HuZ
-# 9roRdutN78CVgj6fUU+uiEEXwrk7qkPQ+oupK+h8qdlw50Q+bszkPBnj8MJSds0a
-# QjF9UqEcTdvqN0i/a38E1kjSwbo5s2lQ2ZKCZJWjSqTnv7m8IeslwdvgrDYjvtic
-# gTWI+oKeq+6sJemNxuKCrNw6JkQqArnLRy+rP67nuXCzoqidPgNVpFVRLAyNwVba
-# utNzOvzc76htSpSfSSlOXKwLvrgJLIRmTnfhF77PhLoHGSqUhCznX/aSKds9tFH/
-# xFpEVYrord0CdXkeXuiYRKFeCmPa5VyMpkmEcwcPs2iVp+/+a8BRXzFBHewIRcnN
-# 74PJyuh3jeCMxiZ1x0gDQ6ZNLzHzqJWZ4YT6FrSmpM0Ueuj5ifmWs/n5uVU6Xfwm
-# 6A5zcZpBTGyEf9n3rHZGJhqZY+z9FA3ID2U6U7/nRFdx9IJP3gJtUT2BkpVghRLg
-# iGvZxK3ccE+A/3V5eY1nbBVYTdAMESGDVTgN9SeEXo+4OxQqDuXCy20tkbb1jYie
-# LsItiRrxpBA52K+QI4j2t06YUbaCaSk5TCc+i2OWKH0Haas6PTiJAa6c0ju/Rv16
-# HnSowX/m2GK4PoL5EY7riAP6D8LqRNwgO1Nkow8o5MRoyLLKAhGYCybvxzx79nZk
-# RaMwqkzTXA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNDU0
+# NDFaMC8GCSqGSIb3DQEJBDEiBCBM4lrdWgaxBs5/72Xpi71bXRdNwQfU1Tx1+CGp
+# uqAxrDANBgkqhkiG9w0BAQEFAASCAgBvnGCURLdJSUBXYdFLJLOIDBPmzfZkjChE
+# +Rj5wi+0hHtzaIPtvfZYSJUE7/jGTVlpPSvL6WcqmKy/Z6ItRZqNF2DIyKWQDRBi
+# w2EdPpHj8FfQBZRR0l1q7/qp5L/lu24BT3Vx3DEBTp34F3KYbs1INWSQZ3YDGwXD
+# 3NovGJ/5wHNRJ1goHWN9zWCKnUNwkd2cEgeMpXNQ+ZMR6k2aV2WddW4UZO0eiJ0t
+# ZkRXKEU3/bt3464oQX/azXHi7uBM5aqx8aYI0DjKiOISqxz67pycwA0NVrEBPd96
+# 8FaQKHym8LB/XgHQxm6WY8P9AxrQI4n1IGKd9VbDDY5ZZZee4A8WUDdLvgebf9WC
+# nhz0mCGPVtbg2yrt5k5XupUS+mMYl39VqKNuyLaVzzkmRIZU9fwEDYyGD6X/qGod
+# OSyYtte4rNbALgyyuSr8mv2AspAmfvccSD72bKK61niS4M9pQ7dOFEoCwNbFX3NG
+# SEMsCJlNMVfdlouG4rlHhGySdI9/Squ0nC+Ab3vL3jvMqUEtrxXtcgdAenD6LJHb
+# kvC2U4mzPQDmXM9OFFmauCABu6dIvaMKhHmntO9ziWFYieu+bB7xYunra1H9hJVe
+# K4cqU92tkPCQ2nr+Mm7mS+TdUIBPv9gcD4KBK23Rzg8Ng3xv3Mmty5h8mg/fQ48r
+# IZJFTiC92w==
 # SIG # End signature block

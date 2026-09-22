@@ -39,10 +39,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.18
+    Version : 1.19
 
 .VERSION
-1.18
+1.19
 
 
 .REQUIREMENTS
@@ -52,7 +52,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.18
+    Version : 1.19
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -311,7 +311,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1294,7 +1294,7 @@ try {
         $script:IncludePolicyStatesEffective = $false
         $script:PolicyStateCollectionDisabled = $true
         $script:PolicyDetailCollectionComplete = $true
-        Write-ComplianceWarning -Message ("Detailed compliance policy-state collection was automatically disabled for {0} devices because the configured threshold is {1}. The device summary will continue. Use -IncludePolicyStates `$true to explicitly request the bounded detailed workflow." -f @($devices).Count, $script:PolicyStateAutoDisableDeviceThreshold)
+        Write-ComplianceInfo -Message ("Detailed compliance policy-state collection was automatically disabled for {0} devices because the configured threshold is {1}. The device summary will continue. Use -IncludePolicyStates `$true to explicitly request the bounded detailed workflow." -f @($devices).Count, $script:PolicyStateAutoDisableDeviceThreshold)
     }
 
     if (-not $script:PolicyStateCollectionDisabled) {
@@ -1682,8 +1682,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsPG4NilpQ6x67
-# lzg4wAzcrDzJua2Cny3f7usZN5i+4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1Fst3xZLiKXxE
+# 2e2l6mgfhV+k2xMDkl5j4blNArZ+U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1816,31 +1816,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB0OzgH6RGRrOi6bVTjoaQ5f27PmcH07CAk+jwH65o2HMA0GCSqG
-# SIb3DQEBAQUABIIBgJvPiEaDngfmSStBYU0TCYKoBOSC4usNTePN1LMwagsJw8On
-# 1zZ6DBbmNa2dTl69dKB2T/GZVzevnrie2ZZMxYv3+Nb//FlUIcGecsm2Pe4QV3LV
-# 37dxnpAbQeDfAP2rSSEY1NaBiQzYM2COjMYUw1SlCxA5gxGG6EAqdSyhEs6EinmK
-# aFs4aM9MWUgZazL7IowZJzkPDefOSd7SVpEfIbi+huYcK4LSEdk1qPrHH+rbpTa5
-# YTr7RswLQYwlOfAttnb4BR6m8aAK+BA/WAE+XkkiC0EMJl0pR58hlZ1+TTZJP/oi
-# nKJn+w50MsMIPdV7FAPV8Z0hRBPJ/8h+54d9gVXAeNLK7LPW0cHuLQz0q8f8HAwJ
-# OLVI3rHQTEGEaSTLPHczHvDqpfIrRgxUCJQw93A+UQe1IhhnaH3GagamhpVlpqum
-# 4XgQPhhXnvKXqlsZMwoj1WxRvWOfYoo6KnVcyrWFA1TvXKlXX1YtoUJf8mX0sGTg
-# dBB+UEc8OZxLtV4A2KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMGb+Bg/Gg+CWjk+yvYB8a248U+a3uhuk4Iyt2lx/Cp8MA0GCSqG
+# SIb3DQEBAQUABIIBgB3QsqQK9SLF3GLyn7MWNSiKtB6GnijWR0w+fdblTrTNT3Qo
+# ZBwF8qJEXRJYgZ5h8vnMhXI+tZYLXqeeR8zefjykZQdMisyd4ksfNpPoGyC8+Ebg
+# BX+hzrep2z6iTrb+pG+TTOKnlU/tKFL0RfvkFgWZv631j1KJ19CT23CeoFkhaB98
+# BPIEPldZcP2VkMaWX+suz1p2vORQnBYC0qv5uLeFvmZxl9h5dxN7Yqhvqy6jlF4f
+# yqptK6wEy3jeK6fMUwlHkYCyT52LFWqPSK7E1RCkIhHrBkj/LAyY6y7Z0oBDH7Aj
+# olQAGt+EGxPUnxCav+sNeHC3YnsBg0/Dq89CF/3ZdXX/rJHsXY/fzJjvkCsdKoaf
+# 6/ekEGKdXVPCVi7SKm6HPr9x5AhqPdnE98e4sqp+TeiN0uoKMXpPeVaBLRbtblV6
+# rOGuv5dpERYC04eRyM6vGqOWRGLX484X/bNnNY3OMxy7dHRFj4QoQ8zEPoiJncV1
+# 5ftEM2XDTHlBVMi5tKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMjI1
-# MDVaMC8GCSqGSIb3DQEJBDEiBCCHJIGdACpBXpJEh07Qjn9iW521/Nm8bkjOiRRb
-# MxIqnjANBgkqhkiG9w0BAQEFAASCAgAHbKw1yR46TcIwUBFe0B/vOqskDrSmzEds
-# Im8EJscm69AZiZ2QnmyRqWm8mtlx2+pYQAVjuhE8k/i948iEdvYkSq5SfMEtXJnh
-# YYCcPxcysnILek39HmE6nD9g8oSqyNDbq26mTRzHl0DhUXcl8+Mf9O+5xqh9hP8D
-# d0nB+nido9em2dMp+iWktfVN/sf0479MACE5yLR1BlUcBgXy4dE/f/a+8e5xS3UN
-# x35g/jt3jctHLZU4pt7SGu32dP6ec/YqlTd4uOnNlxRq9uGlFRyxgmq8zdOps6Gt
-# tL62284udcE8Z0auFxqNzW4YW1JCDeERe0w5BxBU/deVWta1JqCPLLYrDXUiIkCB
-# yKvqBYDUw6niXVL6d+OOmSkNvr7D0cl3Tvsky+0LFmB4p25fRj35T2pi8hArq5W8
-# ZXy41lv/k9CdWexatFZKj2HceMp9PMO5rT+Abyvt2K3Z7H7NdO9dli0/QDblsofB
-# kRIbBJRtIfiVVYPDm8ei84BXYnAR0sVbgWg9kIGGZxF8Qnar/jTEaQICnkYTYnEQ
-# idB8TtlFh8SMyhFia4z+bl+ZNoZDDUzoYxit6/CuhxDsOCZLu/invtzzh0A0+pan
-# hIqGvMx8rTaCSCd6h/C87BYhdhwvyK3BM9o9pSSuf9eDfTDs/sTH5ZCplgMX0khu
-# ahN4IS9sIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNDU0
+# NDBaMC8GCSqGSIb3DQEJBDEiBCDS5MUq+y4LYN9gkHdUtGs7Sh/g2iqgK3cbIAdy
+# AVkRLzANBgkqhkiG9w0BAQEFAASCAgAm0YvvWtEUiIT+H1Tup10gJhK+KkLF7TiY
+# btHPOlG8cQUm5p8zQBYWe9BjUpSrVWiX43yVg+6fermZLkQT9vQAmCgycpmqy4sA
+# 9dhup5/ojKggtotHrFUBI1pyR5jlvQPpeJuMPh1j0nMn9KUyT8+CcnlWRdXjcTP8
+# kQvhOyCW4mqpJ7h1Y8jy31whuKr1k+Lnkzyl3ZuyBb/doJS4tX7T2KWQ0rtAw5dr
+# 6t8e4C+GIIongwy9raG7RvOZMgBJDGEEnp3TiK1HlIrMCe38DkPNugrBfKOzx4OI
+# BPwNAsh+l0YvPqPgE/QcPZip6d2E2C9xSbaC+ObIuatpuf+oStGb94uKIPJxZmo+
+# iLnqHeOAeqhy2mGm7OdyiDdRY4aDDurEwq30kn97QEmmstdDS9wtlKWBBcOXV/DL
+# MQXDH8G+absUNxU0D8qFurbP4FKFZJy35yz89+ZnRvlgRtXSaCeSMTmmr3wHpdQp
+# nZXD2hOcS5KEAfejKcuF0X5PlGN6nWyWX4EwkxHWpfVX7GrKZFHZhkaZwHjU8V/m
+# RRAUhlilC/KhGfCjD5vnYfFLZff/f7CihNPHNxOB6uay0sNU+HFEiztvfjpaTNkH
+# vRG0LHBFE69FeF6um6sgwlb9obOykk3T8RY3SkjfXGyNEwnNyyp4u18jdab1WYfl
+# HuiYf5IC0w==
 # SIG # End signature block
