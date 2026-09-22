@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.35
+  1.36
 .VERSION
-1.35
+1.36
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.35"
+$ScriptVersion = "1.36"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1281,6 +1281,9 @@ function Get-WinUpdateOsCoverageSummary {
     $knownCount = $known.Count
     $unknown = $total - $knownCount
     $below = $knownCount - $covered
+    $windows11 = @($known | Where-Object { $_ -ge 22000 }).Count
+    $windows10 = @($known | Where-Object { $_ -ge 10240 -and $_ -lt 22000 }).Count
+    $unknownOrOther = $total - $windows11 - $windows10
 
     [pscustomobject][ordered]@{
         TotalDevices = $total
@@ -1288,6 +1291,12 @@ function Get-WinUpdateOsCoverageSummary {
         Covered = $covered
         BelowTarget = $below
         UnknownOsVersion = $unknown
+        Windows11 = $windows11
+        Windows10 = $windows10
+        UnknownOrOther = $unknownOrOther
+        Windows11Pct = if ($total -gt 0) { [math]::Round(100.0 * $windows11 / $total,2) } else { 0.0 }
+        Windows10Pct = if ($total -gt 0) { [math]::Round(100.0 * $windows10 / $total,2) } else { 0.0 }
+        UnknownOrOtherPct = if ($total -gt 0) { [math]::Round(100.0 * $unknownOrOther / $total,2) } else { 0.0 }
         CoveragePct = if ($total -gt 0) { [math]::Round(100.0 * $covered / $total,2) } else { 0.0 }
         KnownCoveragePct = if ($knownCount -gt 0) { [math]::Round(100.0 * $covered / $knownCount,2) } else { 0.0 }
     }
@@ -1375,6 +1384,12 @@ function Get-WinUpdatePolicySummary {
             OsCovered = if ($null -ne $coverage) { [int]$coverage.Covered } else { $null }
             OsBelowTarget = if ($null -ne $coverage) { [int]$coverage.BelowTarget } else { $null }
             OsVersionUnknown = if ($null -ne $coverage) { [int]$coverage.UnknownOsVersion } else { $null }
+            Windows11 = if ($null -ne $coverage) { [int]$coverage.Windows11 } else { $null }
+            Windows10 = if ($null -ne $coverage) { [int]$coverage.Windows10 } else { $null }
+            UnknownOrOther = if ($null -ne $coverage) { [int]$coverage.UnknownOrOther } else { $null }
+            Windows11Pct = if ($null -ne $coverage) { [double]$coverage.Windows11Pct } else { $null }
+            Windows10Pct = if ($null -ne $coverage) { [double]$coverage.Windows10Pct } else { $null }
+            UnknownOrOtherPct = if ($null -ne $coverage) { [double]$coverage.UnknownOrOtherPct } else { $null }
             OsCoveragePct = if ($null -ne $coverage) { [double]$coverage.CoveragePct } else { $null }
             KnownOsCoveragePct = if ($null -ne $coverage) { [double]$coverage.KnownCoveragePct } else { $null }
         }
@@ -1997,6 +2012,12 @@ try {
         $fleetOsCovered = [int]$primaryCoveragePolicy.OsCovered
         $fleetOsBelowTarget = [int]$primaryCoveragePolicy.OsBelowTarget
         $fleetOsVersionUnknown = [int]$primaryCoveragePolicy.OsVersionUnknown
+        $fleetWindows11 = [int]$primaryCoveragePolicy.Windows11
+        $fleetWindows10 = [int]$primaryCoveragePolicy.Windows10
+        $fleetUnknownOrOther = [int]$primaryCoveragePolicy.UnknownOrOther
+        $fleetWindows11Pct = [double]$primaryCoveragePolicy.Windows11Pct
+        $fleetWindows10Pct = [double]$primaryCoveragePolicy.Windows10Pct
+        $fleetUnknownOrOtherPct = [double]$primaryCoveragePolicy.UnknownOrOtherPct
         $fleetOsCoveragePct = [double]$primaryCoveragePolicy.OsCoveragePct
         $fleetKnownOsCoveragePct = [double]$primaryCoveragePolicy.KnownOsCoveragePct
         $fleetPolicyCompleted = [int]$primaryCoveragePolicy.Completed
@@ -2009,6 +2030,12 @@ try {
         $fleetOsCovered = 0
         $fleetOsBelowTarget = 0
         $fleetOsVersionUnknown = 0
+        $fleetWindows11 = 0
+        $fleetWindows10 = 0
+        $fleetUnknownOrOther = 0
+        $fleetWindows11Pct = 0.0
+        $fleetWindows10Pct = 0.0
+        $fleetUnknownOrOtherPct = 0.0
         $fleetOsCoveragePct = 0.0
         $fleetKnownOsCoveragePct = 0.0
         $fleetPolicyCompleted = 0
@@ -2026,12 +2053,14 @@ try {
     $summaryState = @(
         $totalUniqueDevices,$completedCount,$inProgressCount,$actionRequiredCount,$priority0Count,$unknownCount,
         $offeringCount,$installingCount,$pendingCount,$otherInProgressCount,
-        $fleetTargetShortLabel,$fleetDevices,$fleetOsCovered,$fleetOsBelowTarget,$fleetOsVersionUnknown,$fleetOsCoveragePct,$fleetPolicyCompleted,$fleetPolicyCompletionPct
+        $fleetTargetShortLabel,$fleetDevices,$fleetOsCovered,$fleetOsBelowTarget,$fleetOsVersionUnknown,
+        $fleetWindows11,$fleetWindows10,$fleetUnknownOrOther,$fleetWindows11Pct,$fleetWindows10Pct,$fleetUnknownOrOtherPct,
+        $fleetOsCoveragePct,$fleetPolicyCompleted,$fleetPolicyCompletionPct
     ) -join '|'
 
     Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount ActionRequiredRate=$($reportHealth.ActionRequiredRatePct)% Priority0=$priority0Count Priority0CriticalThreshold=$($reportHealth.Priority0Threshold) Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
     if ($coverageAvailable) {
-        Write-Log "Fleet OS coverage: ReferencePolicy='$fleetPolicyName' Target='$fleetTargetLabel' Devices=$fleetDevices Covered=$fleetOsCovered BelowTarget=$fleetOsBelowTarget OsVersionUnknown=$fleetOsVersionUnknown Coverage=$fleetOsCoveragePct% KnownOsCoverage=$fleetKnownOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct%" "INFO" "KPI"
+        Write-Log "Fleet OS coverage: ReferencePolicy='$fleetPolicyName' Target='$fleetTargetLabel' Devices=$fleetDevices Windows11=$fleetWindows11 Windows10=$fleetWindows10 UnknownOrOther=$fleetUnknownOrOther Covered=$fleetOsCovered BelowTarget=$fleetOsBelowTarget OsVersionUnknown=$fleetOsVersionUnknown Coverage=$fleetOsCoveragePct% KnownOsCoverage=$fleetKnownOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct%" "INFO" "KPI"
     } else {
         Write-Log "Fleet OS coverage unavailable: no supported Windows version was detected in a policy name." "WARN" "KPI"
     }
@@ -2113,6 +2142,26 @@ try {
         $severityInputsHtml = "<p style='margin:0 0 18px 0;font-size:12px;color:#64748b;'>Severity inputs: actions $($reportHealth.ActionRequiredRatePct)% | P0 blockers $priority0Count/$($reportHealth.Priority0Threshold) critical threshold | known-OS coverage $severityCoverageText | OS unknown $severityUnknownText.</p>"
         if ($coverageAvailable) {
             $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
+            $invariantCulture = [Globalization.CultureInfo]::InvariantCulture
+            $windows11Width = [string]::Format($invariantCulture,'{0:0.##}',$fleetWindows11Pct)
+            $windows10Width = [string]::Format($invariantCulture,'{0:0.##}',$fleetWindows10Pct)
+            $unknownOrOtherWidth = [string]::Format($invariantCulture,'{0:0.##}',$fleetUnknownOrOtherPct)
+            $windows11BelowTarget = [math]::Max(0,$fleetWindows11 - $fleetOsCovered)
+            $windowsVersionDistributionSection = @"
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows version distribution</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Current OSVersion | Each device counted once.</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 10px 0;"><tr>
+<td width="$windows11Width%" style="width:$windows11Width%;height:22px;background:#2563eb;font-size:1px;line-height:22px;">&nbsp;</td>
+<td width="$windows10Width%" style="width:$windows10Width%;height:22px;background:#f59e0b;font-size:1px;line-height:22px;">&nbsp;</td>
+<td width="$unknownOrOtherWidth%" style="width:$unknownOrOtherWidth%;height:22px;background:#94a3b8;font-size:1px;line-height:22px;">&nbsp;</td>
+</tr></table>
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
+<td style="width:33.33%;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">WINDOWS 11</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows11</div><div style="font-size:12px;color:#475569;">$fleetWindows11Pct%</div></td>
+<td style="width:33.33%;padding:12px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#b45309;">WINDOWS 10</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows10</div><div style="font-size:12px;color:#475569;">$fleetWindows10Pct%</div></td>
+<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">UNKNOWN / OTHER</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetUnknownOrOther</div><div style="font-size:12px;color:#475569;">$fleetUnknownOrOtherPct%</div></td>
+</tr></table>
+<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Within Windows 11: $fleetOsCovered on $fleetTargetShortLabel+ | $windows11BelowTarget below $fleetTargetShortLabel.</p>
+"@
             $fleetCoverageSection = @"
 <h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Fleet OS coverage - $(Html-Encode $fleetTargetLabel)+</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Minimum build: $($primaryCoveragePolicy.TargetBuild) | OS coverage uses the current OSVersion, independently of the Intune policy workflow state.</p>
@@ -2128,6 +2177,7 @@ try {
 "@
         } else {
             $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
+            $windowsVersionDistributionSection = ''
             $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
         }
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
@@ -2141,6 +2191,7 @@ try {
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Tenant: $(Html-Encode $OrgDomain) | Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
 <div style="display:inline-block;margin-bottom:18px;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
 $severityInputsHtml
+$windowsVersionDistributionSection
 $fleetCoverageSection
 <h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Operational policy state - all policies</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once across all policies for operational follow-up. The most severe policy state is retained here only for actions and workflow monitoring; it is not used as the fleet OS coverage KPI.</p>
@@ -2234,8 +2285,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9WX13BmBUJ53D
-# gcBo+PnhI1/jCBapv4QIMR3FhEEObKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1SgCsk3RfJkpt
+# aE+RdzHLN32fLe/OK+muz0hj6Z+qe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2368,31 +2419,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC5H7tRpB4sC/D6h2Tpm2IyUD+27JUq0kthIJS9cLxxjMA0GCSqG
-# SIb3DQEBAQUABIIBgBjj/UzZxQfcdWSehxaFITWDTwoTehu8yJ1bLJQTYO0xjOOJ
-# N+5Zxt0cKL7wDvV5mPlEsPdw7Eoymk1uUp37SBRTWE1cbFPDUUZ3K0ULG4w4LSYi
-# DOJ6GnI/GwfyhNuULFDZ1+V6UkVJdYSjPEcYpk63b4VQlGieKCBkoOZOIiZaoeJQ
-# P09QYZzQtWPyikLrs+kbXSmIIDaCUcskC5IL8VdnJYVY5SaVbGzI0vFqry8yW5qE
-# QgPEzr/61Xu3Q6WwxHfevybDe4F2izZM+hok4jyzLUQf0ChtR1WtXKK30vMflcTB
-# CDYymuK2WC3IN2pNLOhze1SmbUH78/qtKekGAtAVPpcMc1ELNgMzPVAmUMmyOlRF
-# eXNtLmHDOuiEPNMl8ehneEG/Kdm9dr0hU8Aj8ok7uRzaUlAPK3K78DtRFcwdQfCR
-# hSwvNhgCh/D/quvuuNj4TGqr7+YfdVMJGzrgVmgIsuPWp8A+i50I8ILdXvM+/gfn
-# BaB63wti3wSY9nrHd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIfz9V2BZb+7ebAyLgpnvOsBZwVrNg5pogWfBF96ZGrZMA0GCSqG
+# SIb3DQEBAQUABIIBgHK0B8EFzNixtKNuPAY4/LULS1q9huNXlHHlYEPOOwZ0vSGS
+# R7BqpMB8/nNEtxMVP0q21TpFmQ/6InsDdKEoxrv0SXCMMMyYGid2i6KD2Uqx1ITJ
+# PHi0sz05c9Yw/Fuw4HpCs1V1zXA7UTD+fHQb7B62CasMlpJcjDoKQwv+Phk/eQB5
+# NNKwnwyvo6paVDeK6jDhJaGBGhSOvufJ4h2gZeQP8Fy7LwIxlWCKqvFR4HO84c/r
+# d5GIV01DTzKE1fluxFgfRWxAgPaZsC6zvZEE8j2x1ybTTkK5426nI9Xn0rwhuOFJ
+# Q9+2ZeOMibuH5BDeXrme38VgI8ZGdnuSnVS4C6koHddqYdmc81WsoGMEurYX2F38
+# IYW658I1p0MtPofnBLUD2pFSuGPZIe2r9ekCcN5AFZdCsmtNQNfoXf+Z+NAK3ESH
+# h1TS1HMCflzeHYprxNSpdJZAIKZ9x08BSoHE74H1eB0Oe+SVzVMjtvqJ5yYC6Sws
+# qLC/mDMYIKsWbJceXqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjQx
-# MTlaMC8GCSqGSIb3DQEJBDEiBCDNoCUlBB0qLn48p7AmvF67xqQDMVl9WUonc71m
-# eHWYyDANBgkqhkiG9w0BAQEFAASCAgC2Yw/ycJiTmZDrvAMcGTXOXMJNhHvs20Ca
-# 0ROspgvIRlzcsSzmArJAl0g5NvwggfRt7yo/Oy4DrOECKnHjybq1Il9MvDV0c4HQ
-# Ma5g1pW/1ndVF82R2LXXDS0aPQBeWE6MDzX7YPGDzDbUQSQo9FTeWxHumrMYZ0m4
-# nL2xTnfhG6kkViMPVxxI3HtGA1ugNM4Ux6tlKYlHPlPjBZdVnBifH79SN/k8YoC8
-# 9i0sRtpu4S/HenrxMvQokgZ98YXI0V0zyRR3SoZ1xCjGbsMuEsjmHEpanuGXB2eT
-# vqvU8NyCeNH5pPZX5bO21X8JzP/CG/tcZZFnhcKGqZFRjlC5MWRDfUetwY+b6bD4
-# bigZis5dpQFa1LqK3WVXvHikwMQUVLvE60KwjGMfljSQjDu09N9sVLf5BP+jcbx8
-# C6NcXIW0S7VKq9pHdSZ7vGtl6iYRTOR92en8JHUSLlJetkDAHTckyyy5arMsgyD/
-# UdNUFK8UQ1CayIVk2hEr8KyBE6gFDo6tOl4XIjTh01mlWFPGMU8xMxA5Ksig3w5u
-# E16x+87+VF1slhX1TcbZisVgY8u+YKt50B016jf5nJuonzEwaOnqGJiE/Tq4/bBy
-# 6OhszrGMadEkir7IMvU/OVq6kwcNFn3XZ7eSzTNAtDw96KSM/NRDjacE01yXIWxD
-# FWwlrn//sg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjU4
+# NTdaMC8GCSqGSIb3DQEJBDEiBCDTUNBtnGf/+vnOl47VpJXKg9NPuP1CJJyqiCQv
+# YBU7dzANBgkqhkiG9w0BAQEFAASCAgCY07/qIXrOKaqdjucx8wFa36763uN4UzsQ
+# R8WKAxhTRbPpuosZn0VssU2X0b6nssYI9fjuXSjvvPYt/a9h7/NssG8dqiG1NIO6
+# 1L/LkCdx5WtB8Z2V3/ApLiikBhFZFhB2bMMOqJBOsTrYDX7pWN9BaJPu/+o+FX0r
+# nZur9p4a2BEAstD4JU1vjkPZr0JaWBlSSL0L9Hxb771bCMfNOWINsr+9WBILQlVs
+# mQxC44TlLSxhwoGkchB/haOM73BDdKst+ukV6p0UTtgB87sq6uGpfB2qqxXFvgf8
+# BwDwkR3G+wHDvD4llfJKOJYRhnJz7TWv3Fr/P2LF3WhhDbmtUCiIJhMpIxchvsmp
+# f5KcBVXX78qtMgw+J8DcP38kZJmAWGgJJaeYOyrRwTTF1XUyFwt0dgipN97THME1
+# H37J8vstSWnkXyOedBBwWoulIahBbZv/atT99NGIZD7s4EQnJe4uC4lyRoP35R5z
+# fTp4ZMruwjtaYs9MKiL35EDozHP0ehXrWzRlKgOHPX65WncVOsbxhKE+3NtzRYwB
+# EwMaYE4D6idGLh5RSTp1Z709A0eyqpKFaMQ4qsdUI5NBhFujO4E0ur7bhUmwKdIS
+# pjF6N8qG8dyfy/dI+yvmZgcd6WIxm8xOOh+I0j8wGOZr9UAgMEacPMBK37aFXMGZ
+# +D0MnrLCMw==
 # SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.10
+1.0.11
 #>
 [CmdletBinding()]
 param(
@@ -245,6 +245,30 @@ try {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Invoke-GraphGetAllPages')
         try{&$m {$script:n=0;function script:Invoke-GraphRestMethodWithRetry{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphGetAllPages -Uri p1 -Headers @{}}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Windows Update cycle was not rejected.'}finally{Remove-Module $m -Force}
     }
+    Test-OfflineCase 'Windows Update OS distribution deduplicates and classifies devices' {
+        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateRowValue','Normalize-DeviceName','Get-WinUpdateOsBuild','Get-WinUpdateOsCoverageSummary')
+        try {
+            $rows=@(
+                [pscustomobject]@{DeviceId='device-1';DeviceName='PC-01';OSVersion='10.0.26100.1'},
+                [pscustomobject]@{DeviceId='device-1';DeviceName='PC-01';OSVersion='10.0.19045.1'},
+                [pscustomobject]@{DeviceId='device-2';DeviceName='PC-02';OSVersion='10.0.22631.1'},
+                [pscustomobject]@{DeviceId='';DeviceName='PC-03';OSVersion='10.0.19045.1'},
+                [pscustomobject]@{DeviceId='';DeviceName='PC-04';OSVersion=''},
+                [pscustomobject]@{DeviceId='device-5';DeviceName='PC-05';OSVersion='6.1.7601.0'}
+            )
+            $coverage=&$m {param($r)Get-WinUpdateOsCoverageSummary -Rows $r -MinimumBuild 26100} $rows
+            Assert-Offline ($coverage.TotalDevices-eq5) 'The OS distribution did not deduplicate devices.'
+            Assert-Offline ($coverage.Windows11-eq2 -and $coverage.Windows10-eq1 -and $coverage.UnknownOrOther-eq2) 'Windows 11, Windows 10, and unknown/other classification is incorrect.'
+            Assert-Offline ($coverage.Windows11Pct-eq40 -and $coverage.Windows10Pct-eq20 -and $coverage.UnknownOrOtherPct-eq40) 'OS distribution percentages are incorrect.'
+            Assert-Offline ($coverage.Covered-eq1 -and $coverage.UnknownOsVersion-eq1) 'Existing OS coverage metrics changed unexpectedly.'
+        } finally {Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Windows Update email places the OS distribution before fleet coverage' {
+        $text=Get-OfflineSourceText $paths.WindowsUpdate
+        Assert-Offline ($text.Contains('Windows version distribution')) 'The Windows version distribution title is missing.'
+        Assert-Offline ($text -match '(?s)\$severityInputsHtml\s+\$windowsVersionDistributionSection\s+\$fleetCoverageSection') 'The Windows version distribution is not placed before fleet OS coverage.'
+        Assert-Offline ($text.Contains('#2563eb') -and $text.Contains('#f59e0b') -and $text.Contains('#94a3b8')) 'The approved Windows distribution colors are missing.'
+    }
     Test-OfflineCase 'Windows Update report health uses proportional severity thresholds' {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateReportHealth')
         try {
@@ -473,8 +497,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvYRvUGYopdKTT
-# xIyqvaVHGnT0+UuJFDbS/uOANpcjEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB7x84ZWChAFgm
+# bsw0fK6cMACgWDUCd9F9HMMmQuaRMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -607,31 +631,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH+tafoyTDE/50k25yCez56tFqKJXaFgLV75sYZK2EtzMA0GCSqG
-# SIb3DQEBAQUABIIBgJrdOhJDNh0ru2KfF2SzBUg2/p+h9PjsgKjGbPE66BXzc7cl
-# TzQQxgN4G7J/sVS0rCFHojtGWuvPXZ1aEQzn02t/WQH9WcMt6i3Zm506xPo+1diV
-# Y+Ne4QOUjpijo+7HiQW9exaQpfeBmDR4BO3KZ8f6ueARWIAMgB2lEO/4nOly4XrL
-# i91RCDtMxjRu9PlzrlBqf9/Ty6seOn2+kwPRgeOrEQ/xAfair0N4ZOPrn2m/oK+z
-# S6Zus12BKO3JBEaOk7Qrhe0j7n52pywX6L1nwDKPQ0ss8bxHS0HcmgwhBrlpDJol
-# 31VJsZsqKoBibs3nl84RM8zCpMMrBegrlTiyfbm/a1ApELLkFJhUBs7H/9eQQIti
-# Jwg8yyRarTHoi6Ocg49toHLjul45Y6u1qeodE3adTf/F7y7s86/ouJaJuTKVCQnP
-# O7wEplpVA24x6FGJhehl8KS7Et6cce+F3rWVvnVYz1oVBx4KbZgnUxgelsYrxSMU
-# 0I5hmNCliVmsjEi3F6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDyuE4xx0T69N+yhqN/Pt9hHr0evGAOJNMoYrO1kcyhbMA0GCSqG
+# SIb3DQEBAQUABIIBgH1liZMvV48EmDuS56GZyWzQXchGhvcBjS5zXH1mvSHkz49k
+# 7mxmnp5ydZBp4MFTrw3dnOAFeyYucGfwqXkWrYsGn8C6XZtbnkxTusHFUlbYGj+x
+# zjU+NRMDv+o8JJVYF8YVSYgQUXqSOipX6GUv1U130bA92SBy8Ckx/R7QeIScr2Ex
+# 1mOhGnmCfBFr4P5/yQ4fwuN3KW84YzKzWHz0kyhxlWKE2gxQbeT66rhZTdcirXGt
+# 6wmh2dP9xl3EjsTGEqOknPKiIF1kjdTlr/rINSX81ISHZFbKWJUdiTJYhWUAvuTi
+# 9O2gofuU2E7uVE6U5pmehXPnLIFYfIVTPbbHoev/R+zvRneK0uO9/bvsmp/wWFJl
+# LYBO81qL5Ez8feTz9pCxnAmLsC4D3w6u7ilvGQ4httuVM7z5D5NVFqe+KK6WZuPb
+# yLyfxJWc/yUoy2CAIKO0Ou3wKF5Ui0lQDRef7TrGa5bXGMLVVmiVGwdCNs4OdfNp
+# /uoTJVdZPvSH1Tp7K6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjQx
-# MjFaMC8GCSqGSIb3DQEJBDEiBCATEI+IHeHNunduo+iKe2m/BF3oYjLODDsrF9V0
-# WOh8QDANBgkqhkiG9w0BAQEFAASCAgBqZsfjPIkrR27U5ubl844SPujtr//q2WrF
-# 0NFnxMzR0eC6Mo6Eqk5vuajIkhJwpH0q/uMfdflEgs3ajRIH6rfyuR+8SXLXpR06
-# C24AlMMpyvrPpZ2qxbRdjpCWJBRDLysLBe6ofT645kPYPXgpAPKaOulBuuLixxPI
-# j+GU+MEjoG6xHoMqExjsRJce58PhObFXQXVtQz8D5V50oV8I0hMgXXqqa8iXFsu1
-# 4rSm5DXVVtBYcX9u9YiBsc21mgL0GAIVtzpbXvu5qk0tkFdyGc51trkBYhvgELy8
-# ZolW53fQvKKbd3tSYGdN4m/70R9nspTJxnhOcvsyvzOzqZbqQWWt1FSWLP9otOXm
-# DgDxPVsBCu/oYRbnXs5Z+O4NhGBb66ufQ7KbjGcjgoqBzIDOKHKy8WJ7e4I4CHDQ
-# p5TXuSVixp7TQo72NztGeRgORbi8dp7G7eL09ixFXwv5RWAVVTFiYunmQArbN5g8
-# yhYWzSpxREi2SN+oZxyMLvOI+uUh38iCCJzcyGaye30siKm1vJqCLeE05vIbVAoG
-# 5KFA8h/KISzDTEz/YRPzc7y6oWwR5gwnhKTYQxyl3uwpeNvbOdN7Ys0lQMmb2xcB
-# 6wjeUMOOYqldWXWhXwFxLei+UTtQwohBkfQtR/j918l7cvmYPre4KVELJZPZXV9G
-# N+5eSSnwfQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjU4
+# NTlaMC8GCSqGSIb3DQEJBDEiBCB+CEJhyV6JR7DihyCLaz67gGyhQwKKJRJZoLMS
+# BsQvnTANBgkqhkiG9w0BAQEFAASCAgCdMwo3aSOa4DruCAyWm0hKzIg/mcVM4AL7
+# DtY119+MDU+D5ZVDiHIGOUWHLUGczsA1hglrTx8sRoESBblPLi/CALdHR06mb1m+
+# bqS+asymt3OoYPtNipWwaLXMdfzFg3eil1p/wbyeBjujiw/moFWfX/EWlLn21WxM
+# 0vE5xd3gnorjhFhGmS0l3xD3Ni0X4IpCDz446NkVRRgVgTOpdDGE5glr+95SuDHh
+# Z43pprbZUyNQP4Xg8KKHbesA4FG1ksu3tNQrzNkAeOd57MPPQ2GjX/bVUioOW36O
+# 2R4peW9GY3HiuryOJM7ESjjIEWhdtLCO0FQ0Hs1yy+gGtXY5bjniwsXQGm1a+7yD
+# iQFHrAuyHbFwsBU1iVwqzxgu/P0wW07cg1MecqbUNa+ObAbegMYu8CyQkP6T+o+0
+# prt2F9zlJkuD1Ql0YQp5g/3la6KBqs8lkIaY2fbZjPOe0Qu1hSNavIhogfiI0xw5
+# QQanEjgAkxNb69MZ0740cTt7G/3+DO3p6lBNEVNasPVlJ6RRg/zOecL3y9gObyHQ
+# 2KxY9Apws71ywDa8ASjcYqFkDLhQgiK2AXNWZuaUhssw4F4o0rh3oSCPgBoSkJj0
+# sb5jFgSTOqD12+0X39paZpOjMRKk4KU/P81nTk9ytgRWPzX8KeQFu039yzSTMQAy
+# dJtG76MK1w==
 # SIG # End signature block
