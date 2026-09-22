@@ -17,13 +17,16 @@ Optional: limit scope to a specific Intune managed device.
 Optional: limit scope to a specific Windows device name (exact or startswith).
 
 .PARAMETER IncludeComplianceSettings
-Fetch and process per-setting noncompliant details to compute category rollup when policy-state detail collection is enabled.
+Retained for command-line compatibility. The canonical export report now supplies setting-level compliance details.
 
 .PARAMETER IncludePolicyStates
-    Fetch per-device compliance policy states and optional setting states. Disabled by default because this is expensive on large tenants.
+    Retained for command-line compatibility. The legacy per-device policy-state workflow is no longer used.
 
 .PARAMETER CollectPolicyDetails
-    Explicitly enables complete per-device policy-state detail collection. Intended for the dedicated detailed compliance launcher.
+    Retained for command-line compatibility. Detailed export collection is now enabled by default.
+
+.PARAMETER SummaryOnly
+    Skips the canonical detailed compliance export and collects only the managed-device compliance summary.
 
 .PARAMETER PolicyStateMaxRuntimeMinutes
     Maximum wall-clock duration for detailed policy-state collection before the circuit breaker preserves the summary-only result.
@@ -42,10 +45,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.20
+    Version : 1.21
 
 .VERSION
-1.20
+1.21
 
 
 .REQUIREMENTS
@@ -55,7 +58,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.20
+    Version : 1.21
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -89,6 +92,9 @@ param(
     [switch]$CollectPolicyDetails,
 
     [Parameter(Mandatory = $false)]
+    [switch]$SummaryOnly,
+
+    [Parameter(Mandatory = $false)]
     [switch]$AllDevices,
 
     [Parameter(Mandatory = $false)]
@@ -110,6 +116,9 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
             Set-Variable -Name $smartM365LimitName -Value ([int]$MaxItems) -Scope Script
         }
     }
+}
+if ($CollectPolicyDetails.IsPresent -and $SummaryOnly.IsPresent) {
+    throw 'CollectPolicyDetails and SummaryOnly are mutually exclusive.'
 }
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -317,7 +326,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -338,8 +347,9 @@ $script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) 
     [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0)
 }
 if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
-$script:IncludePolicyStatesExplicit = $CollectPolicyDetails.IsPresent -or $PSBoundParameters.ContainsKey('IncludePolicyStates')
-$script:IncludePolicyStatesEffective = if ($CollectPolicyDetails.IsPresent) { $true } elseif ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
+$script:PolicyExportEnabled = -not $SummaryOnly.IsPresent
+$script:IncludePolicyStatesExplicit = $false
+$script:IncludePolicyStatesEffective = $false
 $script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
 $script:PolicyStateMaxRuntimeMinutes = if ($PSBoundParameters.ContainsKey('PolicyStateMaxRuntimeMinutes')) { [int]$PolicyStateMaxRuntimeMinutes } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateMaxRuntimeMinutes' -DefaultValue 60) }
 if ($script:PolicyStateMaxRuntimeMinutes -lt 1) { $script:PolicyStateMaxRuntimeMinutes = 60 }
@@ -352,7 +362,7 @@ $script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Co
 $script:PolicyStateFailureCount = 0
 $script:ConsecutivePolicyStateFailures = 0
 $script:PolicyStateCollectionDisabled = -not $script:IncludePolicyStatesEffective
-$script:PolicyDetailCollectionComplete = [bool]$script:IncludePolicyStatesEffective
+$script:PolicyDetailCollectionComplete = $true
 $script:ComplianceFatalError = $null
 $script:SettingBatchFallbackCounts = @{}
 $script:SettingBatchFallbackExamples = [System.Collections.Generic.List[string]]::new()
@@ -361,6 +371,8 @@ $script:PolicyStateDeadlineUtc = $null
 $script:PolicyStateCircuitBreakerLogged = $false
 $script:PolicyStateBatchRetryCount = 0
 $script:PolicyStateBatchThrottleCount = 0
+$script:PolicyExportTimeoutMinutes = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyExportTimeoutMinutes' -DefaultValue 30)
+if ($script:PolicyExportTimeoutMinutes -lt 5) { $script:PolicyExportTimeoutMinutes = 30 }
 
 $logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Log"
@@ -1169,7 +1181,7 @@ function Map-SettingCategory {
     }
 
     $n = $SettingName.ToLowerInvariant()
-    foreach ($rule in $SettingRuleMap) {
+    foreach ($rule in $script:SettingRuleMap) {
         if ($n -match $rule.Pattern) {
             Write-Verbose ("Map-SettingCategory: '{0}' -> '{1}'" -f $SettingName, $rule.Category)
             return $rule.Category
@@ -1177,6 +1189,234 @@ function Map-SettingCategory {
     }
     Write-Verbose ("Map-SettingCategory: '{0}' -> 'Other' (no pattern matched)" -f $SettingName)
     return 'Other'
+}
+
+function Get-ComplianceExportPolicyState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Aggregate)
+
+    if ([bool]$Aggregate.HasError) { return 'error' }
+    if ([bool]$Aggregate.HasNonCompliant) { return 'nonCompliant' }
+    if ([bool]$Aggregate.HasUnknown) { return 'unknown' }
+    if ([bool]$Aggregate.HasCompliant) { return 'compliant' }
+    if ([bool]$Aggregate.HasNotApplicable) { return 'notApplicable' }
+    return 'unknown'
+}
+
+function Invoke-CompliancePolicyExport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object[]]$Devices,
+        [Parameter(Mandatory)][object[]]$SummaryRows,
+        [Parameter(Mandatory)][string]$CanonicalPath,
+        [Parameter(Mandatory)][string]$TimestampedPath,
+        [Parameter(Mandatory)][string]$LatestPath
+    )
+
+    $deviceMap = @{}
+    for ($index = 0; $index -lt $Devices.Count; $index++) {
+        $managedDeviceId = [string](Get-SafeProperty -Object $Devices[$index] -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($managedDeviceId)) { continue }
+        $summaryRow = if ($index -lt $SummaryRows.Count) { $SummaryRows[$index] } else { $null }
+        if ($null -eq $summaryRow) { continue }
+        $deviceMap[$managedDeviceId] = $summaryRow
+    }
+    if ($deviceMap.Count -eq 0) { throw 'No selected managed-device identifiers are available for the canonical policy export join.' }
+
+    $policyUri = 'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=100'
+    $configuredPolicies = @(Invoke-GraphPagedCollection -Uri $policyUri -Operation 'Get configured Intune compliance policies for canonical export')
+    $policyMap = @{}
+    foreach ($policy in $configuredPolicies) {
+        $policyType = [string](Get-SafeProperty -Object $policy -Name '@odata.type')
+        if ($policyType -notmatch 'windows') { continue }
+        $policyId = [string](Get-SafeProperty -Object $policy -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($policyId)) { continue }
+        $policyMap[$policyId] = [pscustomobject]@{
+            Id = $policyId
+            DisplayName = [string](Get-SafeProperty -Object $policy -Name 'displayName')
+            Version = [string](Get-SafeProperty -Object $policy -Name 'version')
+            PlatformType = 'windows10AndLater'
+            ConfiguredCategories = Get-PolicyConfiguredCategories -PolicyId $policyId
+        }
+    }
+    if ($policyMap.Count -eq 0) { throw 'No configured Windows compliance policies were returned for the canonical policy export.' }
+
+    $exportUri = 'https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs'
+    $exportBody = [ordered]@{
+        reportName = 'DevicePolicySettingsComplianceReportV3'
+        format = 'csv'
+        localizationType = 'replaceLocalizableValues'
+    } | ConvertTo-Json -Depth 5 -Compress
+
+    Write-ComplianceInfo -Message ("Starting canonical Intune exportJobs collection for {0} selected Windows devices and {1} configured Windows policies." -f $deviceMap.Count, $policyMap.Count)
+    $job = Invoke-WithRetry -Operation 'Start Intune compliance settings export job' -Script {
+        Invoke-MgGraphRequest -Method POST -Uri $exportUri -Body $exportBody -ContentType 'application/json' -ErrorAction Stop
+    }
+    $jobId = [string](Get-SafeProperty -Object $job -Name 'id')
+    if ([string]::IsNullOrWhiteSpace($jobId)) { throw 'The Intune compliance settings export job returned no id.' }
+
+    $deadlineUtc = [datetime]::UtcNow.AddMinutes($script:PolicyExportTimeoutMinutes)
+    $jobStatus = ''
+    $lastProgressLogUtc = [datetime]::MinValue
+    do {
+        $job = Invoke-WithRetry -Operation 'Poll Intune compliance settings export job' -Script {
+            Invoke-MgGraphRequest -Method GET -Uri "$exportUri/$([uri]::EscapeDataString($jobId))" -ErrorAction Stop
+        }
+        $jobStatus = [string](Get-SafeProperty -Object $job -Name 'status')
+        if ($jobStatus -ieq 'completed') { break }
+        if ($jobStatus -ieq 'failed') { throw 'The Intune compliance settings export job failed.' }
+        if (([datetime]::UtcNow - $lastProgressLogUtc).TotalSeconds -ge 60) {
+            Write-ComplianceInfo -Message ("Intune compliance settings export job status: {0}." -f $jobStatus)
+            $lastProgressLogUtc = [datetime]::UtcNow
+        }
+        Start-Sleep -Seconds 5
+    } while ([datetime]::UtcNow -lt $deadlineUtc)
+    if ($jobStatus -ine 'completed') {
+        throw ("The Intune compliance settings export job did not complete within {0} minute(s)." -f $script:PolicyExportTimeoutMinutes)
+    }
+
+    $downloadUrl = [string](Get-SafeProperty -Object $job -Name 'url')
+    if ([string]::IsNullOrWhiteSpace($downloadUrl)) { throw 'The completed Intune compliance settings export job returned no download URL.' }
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("SmartM365-ComplianceExport-{0}" -f [guid]::NewGuid().ToString('N'))
+    $parser = $null
+    try {
+        $extractPath = Join-Path $tempRoot 'content'
+        $zipPath = Join-Path $tempRoot 'export.zip'
+        New-Item -Path $extractPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -ErrorAction Stop
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
+        $csvFile = Get-ChildItem -LiteralPath $extractPath -Filter '*.csv' -File -Recurse | Select-Object -First 1
+        if (-not $csvFile) { throw 'The Intune compliance settings export contained no CSV file.' }
+
+        Add-Type -AssemblyName Microsoft.VisualBasic.Core
+        $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($csvFile.FullName)
+        $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+        $parser.SetDelimiters(',')
+        $parser.HasFieldsEnclosedInQuotes = $true
+        $headers = [string[]]$parser.ReadFields()
+        $indexes = @{}
+        for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) { $indexes[$headers[$headerIndex]] = $headerIndex }
+        foreach ($requiredColumn in @('DeviceId','PolicyId','SettingId','SettingName','SettingStatus')) {
+            if (-not $indexes.ContainsKey($requiredColumn)) { throw "The Intune compliance settings export is missing required column '$requiredColumn'." }
+        }
+
+        $aggregates = @{}
+        $totalRows = 0L
+        $selectedRows = 0L
+        while (-not $parser.EndOfData) {
+            $fields = [string[]]$parser.ReadFields()
+            $totalRows++
+            $managedDeviceId = [string]$fields[$indexes['DeviceId']]
+            $policyId = [string]$fields[$indexes['PolicyId']]
+            if (-not $deviceMap.ContainsKey($managedDeviceId) -or -not $policyMap.ContainsKey($policyId)) { continue }
+            $selectedRows++
+
+            $aggregateKey = "$managedDeviceId|$policyId"
+            if (-not $aggregates.ContainsKey($aggregateKey)) {
+                $aggregates[$aggregateKey] = [ordered]@{
+                    ManagedDeviceId = $managedDeviceId
+                    PolicyId = $policyId
+                    SettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    NonCompliantSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    FailedCategories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    HasError = $false
+                    HasNonCompliant = $false
+                    HasUnknown = $false
+                    HasCompliant = $false
+                    HasNotApplicable = $false
+                }
+            }
+            $aggregate = $aggregates[$aggregateKey]
+            $settingId = [string]$fields[$indexes['SettingId']]
+            if (-not [string]::IsNullOrWhiteSpace($settingId)) { [void]$aggregate.SettingIds.Add($settingId) }
+            $settingName = [string]$fields[$indexes['SettingName']]
+            if ([string]::IsNullOrWhiteSpace($settingName) -and $indexes.ContainsKey('SettingNm')) {
+                $settingName = [string]$fields[$indexes['SettingNm']]
+            }
+            $settingStatus = [string]$fields[$indexes['SettingStatus']]
+            $normalizedStatus = ($settingStatus -replace '[\s_-]', '').ToLowerInvariant()
+            switch ($normalizedStatus) {
+                'error' { $aggregate.HasError = $true }
+                'conflict' { $aggregate.HasError = $true }
+                'notcompliant' {
+                    $aggregate.HasNonCompliant = $true
+                    if (-not [string]::IsNullOrWhiteSpace($settingId)) { [void]$aggregate.NonCompliantSettingIds.Add($settingId) }
+                    $category = Map-SettingCategory -SettingName $settingName
+                    if ($category -ne 'Other') { [void]$aggregate.FailedCategories.Add($category) }
+                }
+                'compliant' { $aggregate.HasCompliant = $true }
+                'remediated' { $aggregate.HasCompliant = $true }
+                'notapplicable' { $aggregate.HasNotApplicable = $true }
+                default { $aggregate.HasUnknown = $true }
+            }
+            if (($totalRows % 500000) -eq 0) {
+                Write-ComplianceInfo -Message ("Intune compliance settings export stream: {0:N0} rows processed, {1:N0} selected." -f $totalRows, $selectedRows)
+            }
+        }
+
+        if ($aggregates.Count -eq 0) { throw 'The Intune compliance settings export produced no selected device-policy aggregates.' }
+        $exportRows = [System.Collections.Generic.List[object]]::new()
+        foreach ($aggregate in $aggregates.Values) {
+            $device = $deviceMap[[string]$aggregate.ManagedDeviceId]
+            $policy = $policyMap[[string]$aggregate.PolicyId]
+            $state = Get-ComplianceExportPolicyState -Aggregate $aggregate
+            $configuredCategories = $policy.ConfiguredCategories
+            $resolveExportCategory = {
+                param([string]$Category)
+                if ($null -eq $configuredCategories -or -not $configuredCategories.Contains($Category)) { return '' }
+                if ($state -notin @('compliant','nonCompliant')) { return '' }
+                if ($aggregate.FailedCategories.Contains($Category)) { return 'Fail' }
+                return 'Pass'
+            }
+            $exportRows.Add([pscustomobject]@{
+                DeviceName = $device.DeviceName
+                AzureADDeviceId = $device.AzureADDeviceId
+                EntraObjectId = $device.EntraObjectId
+                displayName = $policy.DisplayName
+                state = $state
+                version = $policy.Version
+                platformType = $policy.PlatformType
+                settingCount = $aggregate.SettingIds.Count
+                nonCompliantSettingCount = $aggregate.NonCompliantSettingIds.Count
+                lastReportedDateTime = ''
+                SecureBoot = & $resolveExportCategory 'SecureBoot'
+                'BitLocker/Encryption' = & $resolveExportCategory 'BitLocker'
+                TPM = & $resolveExportCategory 'TPM'
+                'Defender/Antivirus' = & $resolveExportCategory 'Antivirus'
+                Firewall = & $resolveExportCategory 'Firewall'
+                CodeIntegrity = & $resolveExportCategory 'CodeIntegrity'
+                OSVersion = & $resolveExportCategory 'OSVersion'
+                UEFI = & $resolveExportCategory 'UEFI'
+                AD_Domain = $device.AD_Domain
+                AD_OU = $device.AD_OU
+                DirectorySource = $device.DirectorySource
+            }) | Out-Null
+        }
+
+        $exportColumns = @(
+            'DeviceName','AzureADDeviceId','EntraObjectId','displayName','state','version','platformType',
+            'settingCount','nonCompliantSettingCount','lastReportedDateTime','SecureBoot','BitLocker/Encryption',
+            'TPM','Defender/Antivirus','Firewall','CodeIntegrity','OSVersion','UEFI','AD_Domain','AD_OU','DirectorySource'
+        )
+        $exportOutput = @($exportRows | Sort-Object DeviceName, displayName, version)
+        Write-SmartM365CsvAtomically -Data $exportOutput -Path $CanonicalPath -Columns $exportColumns
+        $publication = Export-SmartM365Csv -Data $exportOutput -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $exportColumns
+        WriteLog -Message ("Compliance policy export published: {0} ({1} device-policy rows from {2:N0} selected setting rows; {3:N0} total export rows)." -f $CanonicalPath, $exportOutput.Count, $selectedRows, $totalRows) -Level 'SUCCESS'
+        return [pscustomobject]@{
+            Path = $CanonicalPath
+            RowCount = $exportOutput.Count
+            SelectedSettingRows = $selectedRows
+            TotalSettingRows = $totalRows
+            PolicyCount = $policyMap.Count
+            DeviceCount = @($exportOutput.AzureADDeviceId | Where-Object { $_ } | Sort-Object -Unique).Count
+            Publication = $publication
+        }
+    }
+    finally {
+        if ($parser) { $parser.Dispose() }
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 # ==========================================================
@@ -1619,38 +1859,22 @@ try {
         Write-ComplianceWarning -Message "No devices to display or export."
     }
 
-    if (-not $script:IncludePolicyStatesEffective) {
-        Write-ComplianceInfo -Message "Compliance policy detail collection disabled by configuration, automatic large-tenant safeguard, or parameter. Use -CollectPolicyDetails to generate the detailed per-policy CSV."
-    } elseif (-not $script:PolicyDetailCollectionComplete) {
-        Write-ComplianceWarning -Message 'Compliance policy detail collection was incomplete. Detailed policy CSV publication is skipped so the last valid DATA-LAST export is preserved.'
-    } elseif ($polAll.Count -gt 0) {
-        Write-ComplianceInfo -Message ("Compliance details per policy: {0} row(s)" -f $polAll.Count)
-
-        $polOut = $polAll |
-            Sort-Object DeviceName, displayName, version |
-            Select-Object `
-                DeviceName, AzureADDeviceId, EntraObjectId, displayName, state, version, platformType, `
-                settingCount, nonCompliantSettingCount, lastReportedDateTime, `
-                SecureBoot, 'BitLocker/Encryption', TPM, 'Defender/Antivirus', `
-                Firewall, CodeIntegrity, OSVersion, UEFI, `
-                AD_Domain, AD_OU, DirectorySource
-
-        $polOut | Select-Object -First 50 | Format-Table -AutoSize -Wrap
-        if ($polOut.Count -gt 50) {
-            Write-ComplianceInfo -Message ("Displayed first 50 of {0} policy detail rows." -f $polOut.Count)
-        }
-
+    if ($script:PolicyExportEnabled) {
         try {
-            Write-SmartM365CsvAtomically -Data @($polOut) -Path $policyMainCsv
-            Export-SmartM365Csv -Data @($polOut) -TimestampedPath $policyTsCsv -LatestPath $policyLastCsv | Out-Null
-
-            WriteLog -Message "Compliance policy CSV saved: $policyMainCsv" -Level 'SUCCESS'
-        } catch {
-            Write-ComplianceWarning -Message "Failed to export compliance policy CSVs: $_"
-            throw
+            $policyExportResult = Invoke-CompliancePolicyExport `
+                -Devices @($devices) `
+                -SummaryRows @($rows) `
+                -CanonicalPath $policyMainCsv `
+                -TimestampedPath $policyTsCsv `
+                -LatestPath $policyLastCsv
+            Write-ComplianceInfo -Message ("Canonical compliance policy export completed: {0} device-policy rows across {1} devices and {2} configured Windows policies." -f $policyExportResult.RowCount, $policyExportResult.DeviceCount, $policyExportResult.PolicyCount)
         }
-    } else {
-        Write-ComplianceWarning -Message "Compliance details: no policy states available or calls failed."
+        catch {
+            Write-ComplianceWarning -Message ("Canonical compliance policy export failed. The last valid detailed DATA-LAST and SharePoint files were preserved: {0}" -f $_.Exception.Message)
+        }
+    }
+    else {
+        Write-ComplianceInfo -Message 'SummaryOnly mode requested: canonical compliance policy export was skipped and the last valid detailed files were left unchanged.'
     }
 }
 catch {
@@ -1688,8 +1912,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBe8nVOtHgN+/Wj
-# LqjU7g3DnXNxNomKz/Ix/kxh3qRG0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO63Du2Aox9XvF
+# 3VCQNP7yxCIc6T/p39nz76QVPmt9FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1822,31 +2046,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDgO3xMZqOx8Uvgo4TbXtL8cDEntKnhlc/ktosQ+hGCzMA0GCSqG
-# SIb3DQEBAQUABIIBgEfGPHKBMNu2aEewDXuaLyI440Imawuk98DEIh82bDuY0bZA
-# fvlcw2vZiz3IpXMwFhYoBzb14EbI8Rnj8ylYbTmrbI4p69pLHMOt9Bn4n4PuAXzx
-# KOEknqvt76sGKkwh8vNjAIeVFFjbNC93LjO0oWKrHE/dOKN90CYLpWwK0uQxGwxt
-# JKi1QUUAWE4+P3OyTvSGEHfYGL/Pwu2Jnm+Lz4OM/b1I+q7u9jdG11SpvkVhV3/r
-# qlR0c+j1+BcQnIQOzTDqwJMY9oO30zbWYq6m7LM4Tsm6Aj64u3+t38X9FuesuQbo
-# 9Ab+J6wC3yaCmqouHNln9cBGtT1R6ABnMX9+c3ncqCA306kDxPZCP0t51kRMqwrj
-# SRYdlmhGz0Weg0gkbdh+FOwEcwlJ7wLxO5T7IceLLSkh93QQfpb+AlCQ9tcCGPST
-# 2JBH2yz24DkLm5ioxiTDEm9ywMSg1quGpZl/mg2CbGKJU5eb2cn/66tyYEUTsvL9
-# 6PjJdxe35g6pGKFjB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBi0/IGbyUcqBkQuFNkwoEbS9/1pAZeEDqo1rAOysNaqMA0GCSqG
+# SIb3DQEBAQUABIIBgFAEXtElnU7IElodtX5qqmCsBqmRqrxryKD9fCki5w6YIjrO
+# ugK1xvwKyq/oR23TXV9Wt/fteBW7+BXR2rz4l6TASDloinDuav2uEQgBlKno29++
+# y1VI1ebY9yLwY0d93Mwes7Lh3fffj86STiM+pV5PrB/76cPjdOwR/8SUcXalIiZ9
+# x+bQmZo1hTEVxq4AYtEBhVX1xaXuRkjImZ1n/0lHfF3YNlR9hrnTHqC8ArzjdrBP
+# 1+8GtrQHyTxzRokwDP7TyfTqKcUMD5i7bwQDna6i7ibkF8GLcL1caAS0FEBDmtbW
+# D1jyOEf4I2CoyfUeQ5aTgHIwO79ZV6Eleqi3WQ68T0+SLKvkOVob4opfVPFiKpow
+# mgSKEnWyNgPzRiVCmfcYkveRDfnBggxBXH7ut5yweX5jbJyRgpi2C38IUd1sTjj4
+# 0hNSCtejCpEk0RbDBFeM3sRbzh++jBC5X78Z9ZrNPlvEj6Ex7fuTVHN0MXaSUSCf
+# JewpYU1oXSKitQLQ76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNTA2
-# NTZaMC8GCSqGSIb3DQEJBDEiBCC3uLU/HXVnYPbPxBcNqBpLifVh0J/egrPOLE2J
-# NbmYiTANBgkqhkiG9w0BAQEFAASCAgB01b6H2/QPXmhda+Wge1iviEFILWODDiYk
-# txht/cE7W0bz+LpHaFw+XKfUXAWErXVQyNVCLVM9dWRYhqbNf7OPKSU+cOAkax07
-# cruNfnjeyHT3pfWaGtzk4wBwK5JSqomGUbwYGJ7/5ku11jePlDjZybUzesVznNxK
-# 5F5FTow6oM/NjCDGeEoJ+XNOE0mJQZBCL+aQm5DP9s9h3rRhUD2GcZ33mNFu/U16
-# Eg3UdvDHORrOj6Ng4+/50aDZ1AeAEsTKy4XRf+vQQqKT20d11CKllT/lF5V0C164
-# gBPl6zcU832PrYFq8UqYpJSqw2Qvm3ZWc2V5WVBULEF3XhtLFVgkGiMcptTyDIS2
-# tjPEDQExEplKIUiFy4H0IN066149dLavXt8y1uleVJRfvhOyhsviJNma2fZYRE4p
-# NFKB94cXj24F8ancQIJ2cPryKxlE0zeSizH9NsVqPz8iKpBeq1j6El2FAM048gJ0
-# qXtVwl78/Fmc4tG+17GxUlyTl182bzOfuuq0nOJrCmNds+5dtHLsqT/mV9/oHz2I
-# Gk+Dete9PWBrN/CtGMSm7VSc6FxsXgo0FuhdR0qAENaWbZMv2gCXvEmeJpVIvGET
-# S3mfUjyjAVrnjUjjPKtl27ySq0BswhRpcirxXxBUARWKp99XqDLBQKyaDMbPf3k0
-# dL4BhEs6AQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMzQ1
+# MTRaMC8GCSqGSIb3DQEJBDEiBCDL7XQG3lVHiUqTXK4qcSC6cqQkg6/G1KaRky6e
+# eGxPrTANBgkqhkiG9w0BAQEFAASCAgAbictIWykzvUphKvbHfBzZIyOBaavIN3a/
+# F25cIlWOZQAcegX5vVpril2qW7n+dt+4QuTHjMcBM6KIH4fITwwJb71Dvwe5eKsp
+# qw0joBkYzwiHHKeBZKoOK2jhYUFtM9ArN8lWRjP6fK74BFmpWLcJApqEAdD8HjPh
+# iVCEe0rhoeaYXx42cXYYWm57y2a1QwZazjf7i66ghhaw1fgjudDI2fGoWtzHlkml
+# Xf5BGpybhlJJ7ELbhr0SF+HeaMGO22FHlziaz0lfb+cezO0CyINXsnmO38sXiwOq
+# 8uyjl6ffCqwNlCzupzuC5lKb6hLgqWCcGBMnY8ufKyavuACBUT2SyhFFNHq4SdL1
+# 23qHXwt16y65uXAvsbcCTPZIOuXFOq2CVbl0Cp5vmmvQSqHMKHteYKSqLVq0lAAf
+# R8JMNCsrjbAJDATXE03flxU2ZuauscokAPPBd1C6Rdz3lqwiNTvsKNhtOn7AW5WJ
+# cxb4Q8KT34dY+ox9cW7R7qPETpTE6BugpUJ5NooKf8enlkyyclLhBi0MXG110Uur
+# KACdaoCoGh1t1RIrB6B+xO+KzN/XmZo8RszDvvU6vzY14FUUD3fO8mjzxgj7Axmm
+# goEpTyw46+5rAQZAomWO/SMldnQtxPDfXMsvLadvQbrIUs/f3NerZx7dWS92yVac
+# 9/IECOIQ6Q==
 # SIG # End signature block

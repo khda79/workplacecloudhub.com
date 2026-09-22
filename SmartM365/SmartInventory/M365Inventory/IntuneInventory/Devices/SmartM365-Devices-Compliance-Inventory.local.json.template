@@ -31,6 +31,7 @@
   "GraphMaxRetryAttempts": 6,
   "GraphRetryMaxSeconds": 180,
   "PolicyStateMaxRuntimeMinutes": 60,
+  "PolicyExportTimeoutMinutes": 30,
   "PolicyStateAutoDisableDeviceThreshold": 5000,
   "PolicyStateBatchProgressInterval": 25,
   "MaxConsecutivePolicyStateFailures": 25,
