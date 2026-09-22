@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.0.0
+1.0.1
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -17,7 +17,7 @@ $smartInventoryRoot = Split-Path -Path $orchestratorRoot -Parent
 $pipelineModuleFile = Join-Path -Path $orchestratorRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
 $orchestratorPath = Join-Path -Path $orchestratorRoot -ChildPath 'SmartM365-Inventory-Orchestrator.ps1'
 $jobsTemplatePath = Join-Path -Path $orchestratorRoot -ChildPath 'Orchestrator-Jobs.json.template'
-Import-Module -Name $pipelineModuleFile -Force -ErrorAction Stop
+$pipelineModule = Import-Module -Name $pipelineModuleFile -Force -PassThru -ErrorAction Stop
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -61,6 +61,49 @@ try {
     $request = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $temporaryRoot -Tenant test -Pipeline Intune -Selection $selection -ManifestHash 'ABC123' -RequestedBy 'offline-test' -RequestedFrom 'offline-test'
     Assert-True ($request.OverallStatus -eq 'Running' -and $request.PendingCount -eq 2) 'New request status is incorrect.'
     Assert-True (Test-Path -LiteralPath $request.RequestPath -PathType Leaf) 'Atomic request document is missing.'
+
+    $retrySource = Join-Path -Path $temporaryRoot -ChildPath 'retry-source.tmp'
+    $retryDestination = Join-Path -Path $temporaryRoot -ChildPath 'retry-destination.json'
+    [IO.File]::WriteAllText($retrySource, '{"retry":true}', [Text.UTF8Encoding]::new($false))
+    $retryAttempts = & $pipelineModule {
+        param($SourcePath, $DestinationPath)
+        $state = [pscustomobject]@{ Attempts = 0 }
+        $operation = {
+            param($Source, $Destination)
+            $state.Attempts++
+            if ($state.Attempts -lt 3) { throw [IO.IOException]::new('Synthetic transient move failure.') }
+            [IO.File]::Move($Source, $Destination, $true)
+        }.GetNewClosure()
+        Move-SmartM365OrchestratorPipelineFileWithRetry `
+            -SourcePath $SourcePath `
+            -DestinationPath $DestinationPath `
+            -MaximumAttempts 5 `
+            -RetryDelayMilliseconds 1 `
+            -MoveOperation $operation
+        $state.Attempts
+    } $retrySource $retryDestination
+    Assert-True ($retryAttempts -eq 3 -and (Test-Path -LiteralPath $retryDestination -PathType Leaf)) 'Transient pipeline status replacement was not retried successfully.'
+
+    $boundedRetryAttempts = & $pipelineModule {
+        param($SourcePath, $DestinationPath)
+        $state = [pscustomobject]@{ Attempts = 0 }
+        $operation = {
+            param($Source, $Destination)
+            $state.Attempts++
+            throw [UnauthorizedAccessException]::new('Synthetic persistent access denial.')
+        }.GetNewClosure()
+        try {
+            Move-SmartM365OrchestratorPipelineFileWithRetry `
+                -SourcePath $SourcePath `
+                -DestinationPath $DestinationPath `
+                -MaximumAttempts 2 `
+                -RetryDelayMilliseconds 1 `
+                -MoveOperation $operation
+        }
+        catch [UnauthorizedAccessException] { return $state.Attempts }
+        throw 'Persistent access denial was unexpectedly swallowed.'
+    } $retryDestination (Join-Path -Path $temporaryRoot -ChildPath 'never-created.json')
+    Assert-True ($boundedRetryAttempts -eq 2) 'Persistent pipeline replacement failure did not stop at the configured retry bound.'
 
     $concurrentRejected = $false
     try {
@@ -198,8 +241,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator pipeline tests passed." -f (Get-Date).
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCoZEkOGeUU78KN
-# hMGa4BTmBhsxFvVM/4cPON9ZlIbljaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3+r+uJnKnpJh8
+# AIfxgxLQiMRAcT/0+i6ZkXIxi0U1/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -332,31 +375,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator pipeline tests passed." -f (Get-Date).
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILMXddkeN4Dd+1RCMHTVvkyk6RtHei9Vp4Q+23ScciR6MA0GCSqG
-# SIb3DQEBAQUABIIBgB/oiecHjLfDl1AkayEXCTTb6sbX+fXkh6TGAa4lJdt1qKwa
-# jk0d48bFPTEo6zovS2eekwd+D2evcOR6Oy91PhikmCZ0cbshGnvEDP9z5GAUtL6L
-# DtmDGjFXaj6SgLuAu7ktS+bEJgL5VSZ4iahW5vOQhntQaSBXMmwwwTqCrBQgRiMp
-# qZw5lVq3lhM/fhKfmBAYwpit8q1FEwCrebqZItZ4Gy5IVSxqrxpLDcOG5jRcf02H
-# /f78fxXHFVpzz7isIyC1sXHYBdkM+l8PXoftQF3UsdbtHHiTagNkER4dowjSOk0J
-# L+WK06kybLwV/PYebH7+NNoleQlHvLGhxwsy0Sa5Q57DcMpydtLeaGL2f+ZfotB6
-# v+K4V8zbL/Zfsh262CqRS32xtl8mC7FgbFvwuPTJn7rxqTtrWegClr3rW7DjWlnh
-# jdxaKru/QM1K2bByxsjiA4ikK4h7cuLyAPTwtcF38QsxktXxB6IZDAleTP9QEa0b
-# sXGc0K/0eGLlUw8Nn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII/78ImjwCl79QhQEhqJPd40s5UIyG28svs9dwYGRMAbMA0GCSqG
+# SIb3DQEBAQUABIIBgCXPkSc9gteRvg+gdYuD1NlV2SlXfQ/RxIXY21MIu6A7KVPI
+# pflUCWxbr0eIWDWvAcROzaWnN/LmfbAlsCeBiJGsHyjujyOaVePbBheS7d6B/HeX
+# HD/wOYBiZiMRVkVtjn1lnjWkT23vOkK5+aPoUPQfTkAspw8TjmiECS/Y1b2GeAxa
+# drTUVYBMXKjREKJSDgi3BsMxO2Tq+5lgAp9LnGjXyzPjnWuzr6Zc9IFvcdTydc4Y
+# PK5gx7NeyEgeQg1riYdxW+TGE4waSa8Z5/isSCMMmf75E80rYgmQcGu6DoUcMNki
+# RgGwvhzHkIpPJD9ETVt6uR5poAro8ORuja2HjxkaJXcdfrMYp5f7EqJMPKIE++2C
+# WerxqfvzzZFxIQk52zqg8bw23kuw/wQIhsYYW85lE0CCntbISMqIy6ou4G73+7PA
+# vwmmn2qJVGAK/CaubU4SnDlKGg2Jugw7OKibmbRB2uPS/d1dbnyVyd0ZoZ1RKzer
+# 32MhX2yqG1k9mikVx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDEz
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBda8xvHHzwMxSlyPeBPxUJvhW+911U2jHRHM/n
-# a88SkTANBgkqhkiG9w0BAQEFAASCAgBVR2IfWQAa2IYtWppVFoTuoIvdOIUcUhQ3
-# eqaf0iNY6JlHzVjAsVHY33S0s1d6JXeh1ty2W/Hs+ghvxN9He9N5Z2QOfOPRDPRL
-# +xe9NazwkvW2kFgFGq4gVTDv6kEmOSPYuMr+zNcRKwuziteik2Zl6aeuYtisvfiE
-# eazqe4mr7I/fTqNrbfkhZdJyYhOYGSrefXsABetZw0bMNfTEMToLhGawdqj+C2Db
-# B/BXsZ4VIFVszvAyG2BqBxyKsEI+ec5mgO2b5+b4R5hBn5J1JoKZvNXDq9fkBzut
-# BIUuI3EsHF2MCcc+S3UKPl+SH1Ped9AcN2MMtaqu821G8+m2j2dnFeIvwQqOuOK+
-# xqJ9/6uqyFt+xyjVGk3XWDgTsA+3Fb0eOxx+FW1YB4KWZ7xzfMB+wwtqWIPgEXG0
-# KXuhiRBLORZgGroG6udrWRFfHCtZ5uYhTo9lVrjw9bbErhWgDdhTWAEg5ko3HM2g
-# 5blDpu86ljOv9L6letbTZrsL2JYqRLQWvmK+UpiiABCPCfDulc/r1BDCVbKv4kQp
-# Rprk7daqK71+5t1jO3svxmDkgrfoQC7t1AJD6mMvK0uIK6qFulHC3WeW2sQfWW0t
-# MaABOJbwP1jhXoxMGeOoE9YMfDlgohsITlE7t574UYQNliYCFSru8ALU7pQLSezi
-# qy9u/BAVmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCU6QigtMMNC1V2j31Ysz0Q2uq6kpYZEzfIUOvh
+# V0mhbDANBgkqhkiG9w0BAQEFAASCAgAmrI1CWKtrwdlNFTqE0zbHiXX8deMkFJiF
+# b0V1nvClk21U07m91yJkpGoq/NeFaj4paIJS/ujso1KZCrhQBklVRSHIOx3xvWbK
+# 1hI3IcXGczlgB/S8Io8//Plv6uD+P36efE/Fu4DaGIhiq/zP72ClN/kmGA5WYkzH
+# uoxDH23X8ZPAiIKeuD8ze/+YdieRi7XrQm/8VVYCyhSfDMB1H37ew1df8I1ZUwWr
+# 1cLZRM8iRCh7rkwqOfqlbfJWVauxDm181OeRhgFjSobds8ZJzphW5uCD6ZyoGwR4
+# 8KjNH6UtLSpMBtH/4DitnCStczK17lTQBDCRRiUDAHWZ4LfD2qMb/qhecKRWuNUa
+# vAIl6fqJq/0+OAhcfBVXzmW3EF5IOlUSOGcMKU87u5QSV85BlXFjEq71NkRRwKX8
+# 0tfe4VYGD/CvkAoEuJG993LW0DoOF4wVXaeS88KCyA181nGLsCD+qjQmCXJtDg8g
+# MdONfY18qHL8v3blz5ShuciV++fb8e3hWvt2UnO223NdnG3FgtQZweIMoGRkhX+7
+# NfnkIWQWCf5Y/isa597Y94f+TBevsifAke8WgN1jBZEnUrIYsB8qlt4TjkGScsfj
+# mHnp/3DAGaFuZUVXNV7BBsfwsZ2WgxOgxmig7wLwL+qDFlLpACsLL+DL3q4yGXOe
+# t9cCZMm2yA==
 # SIG # End signature block
