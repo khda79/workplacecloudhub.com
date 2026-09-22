@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.24
+    1.0.25
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -72,7 +72,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.24"
+$ScriptVersion = "1.0.25"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -183,7 +183,7 @@ function Add-Row{
         [AllowNull()][object]$DC,
         [string]$Category,
         [string]$Check,
-        [ValidateSet('OK','Warning','Critical')][string]$Status,
+        [ValidateSet('OK','Warning','Critical','NotMeasured')][string]$Status,
         [AllowNull()][object]$NumericValue,
         [AllowNull()][object]$TextValue,
         [AllowNull()][object]$Threshold,
@@ -218,8 +218,8 @@ function Invoke-Retry([scriptblock]$ScriptBlock){
 function Test-Port([string]$Computer,[int]$Port){
     $c=[Net.Sockets.TcpClient]::new(); try{ $a=$c.BeginConnect($Computer,$Port,$null,$null); if(-not $a.AsyncWaitHandle.WaitOne($TcpTimeoutMs,$false)){return $false}; $c.EndConnect($a); $true }catch{$false}finally{try{$c.Close()}catch{ $null = $_ }}
 }
-function Worst($r){ if($r|Where-Object Status -eq Critical){'Critical'}elseif($r|Where-Object Status -eq Warning){'Warning'}else{'OK'} }
-function Rank($s){ if($s -eq 'Critical'){0}elseif($s -eq 'Warning'){1}else{2} }
+function Worst($r){ if($r|Where-Object Status -eq Critical){'Critical'}elseif($r|Where-Object Status -eq Warning){'Warning'}elseif($r|Where-Object Status -eq NotMeasured){'NotMeasured'}else{'OK'} }
+function Rank($s){ if($s -eq 'Critical'){0}elseif($s -eq 'Warning'){1}elseif($s -eq 'NotMeasured'){2}else{3} }
 function ConvertTo-HtmlSafe($s){ [Net.WebUtility]::HtmlEncode([string]$s) }
 function Get-ObjectPropertyValue([object]$Object,[string[]]$Names){
     foreach($name in $Names){
@@ -303,11 +303,12 @@ function Send-ReportMail([string]$Subject,[string]$Body){
 function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv,[AllowNull()][object]$forestInfo=$null,[bool]$RemoteDcAdminChecksEnabled=$false){
     $r = @($r)
     $facts = @($DomainFacts.ToArray())
-    $c = @{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}[$status]
+    $c = @{OK='#107c10';Warning='#ff8c00';Critical='#d13438';NotMeasured='#667085'}[$status]
     $criticalRows = @($r | Where-Object Status -eq Critical)
     $warningRows = @($r | Where-Object Status -eq Warning)
     $okRows = @($r | Where-Object Status -eq OK)
-    $find = @($r | Where-Object Status -ne OK | Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check | Select-Object -First 200)
+    $notMeasuredRows = @($r | Where-Object Status -eq NotMeasured)
+    $find = @($r | Where-Object { $_.Status -in @('Critical','Warning') } | Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check | Select-Object -First 200)
     $forestName = if ($forestInfo -and $forestInfo.Name) { [string]$forestInfo.Name } else { [string](@($r | Where-Object Forest | Select-Object -ExpandProperty Forest -First 1)[0]) }
     $rootDomain = if ($forestInfo -and $forestInfo.RootDomain) { [string]$forestInfo.RootDomain } else { [string](@($r | Where-Object Domain | Select-Object -ExpandProperty Domain -First 1)[0]) }
     $forestMode = if ($forestInfo -and $forestInfo.ForestMode) { [string]$forestInfo.ForestMode } else { 'NotAvailable' }
@@ -326,10 +327,11 @@ function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[d
     $replicationCritical = @($criticalRows | Where-Object Category -eq Replication).Count
     $sysvolCritical = @($criticalRows | Where-Object { $_.Category -eq 'SYSVOL' -and $_.Check -in @('SYSVOL','NETLOGON') }).Count
     $b = [Text.StringBuilder]::new()
-    [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.muted{color:#52657a}.small{font-size:11px}.metric{font-size:22px;font-weight:700;color:#0f172a}.tag{display:inline-block;border:1px solid #cbd8e6;background:#f8fbfe;border-radius:999px;padding:3px 8px;margin:2px;font-size:11px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.grid{width:100%;border-collapse:separate;border-spacing:8px}.grid td{border:1px solid #dde7f0;background:#f8fbfe;border-radius:6px;padding:10px}.riskCritical{color:#b42318;font-weight:700}.riskWarning{color:#b54708;font-weight:700}.riskOK{color:#067647;font-weight:700}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}</style></head><body>')
+    [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.muted{color:#52657a}.small{font-size:11px}.metric{font-size:22px;font-weight:700;color:#0f172a}.tag{display:inline-block;border:1px solid #cbd8e6;background:#f8fbfe;border-radius:999px;padding:3px 8px;margin:2px;font-size:11px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.grid{width:100%;border-collapse:separate;border-spacing:8px}.grid td{border:1px solid #dde7f0;background:#f8fbfe;border-radius:6px;padding:10px}.riskCritical{color:#b42318;font-weight:700}.riskWarning{color:#b54708;font-weight:700}.riskNotMeasured{color:#667085;font-weight:700}.riskOK{color:#067647;font-weight:700}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}.rowNotMeasured{background:#f2f4f7}</style></head><body>')
     [void]$b.AppendLine(("<div class='card'><h1>Active Directory Health Check <span class='pill' style='background:{0}'>{1}</span></h1><p class='muted'>RunId: {2}<br>Machine: {3}<br>Started UTC: {4}<br>Ended UTC: {5}<br>Duration: {6}</p></div>" -f $c,$status,(ConvertTo-HtmlSafe $RunId),(ConvertTo-HtmlSafe $env:COMPUTERNAME),(ConvertTo-IsoUtc $started),(ConvertTo-IsoUtc $ended),(ConvertTo-HtmlSafe ((New-TimeSpan -Start $started -End $ended).ToString()))))
     [void]$b.AppendLine(("<div class='card'><h2>Forest recap</h2><table><tr><th>Forest</th><td>{0}</td><th>Root domain</th><td>{1}</td></tr><tr><th>Forest mode</th><td>{2}</td><th>Remote DC admin checks</th><td>{3}</td></tr><tr><th>Domains</th><td>{4}</td><th>Domain controllers</th><td>{5}</td></tr><tr><th>Global catalogs</th><td>{6}</td><th>Domains scanned</th><td>{7}</td></tr></table></div>" -f (ConvertTo-HtmlSafe $forestName),(ConvertTo-HtmlSafe $rootDomain),(ConvertTo-HtmlSafe $forestMode),$(if($RemoteDcAdminChecksEnabled){'Enabled'}else{'Disabled'}),@($domains).Count,$dcNames.Count,$gcCount,$domainBadges))
     [void]$b.AppendLine(("<div class='card'><h2>Operational recap</h2><table class='grid'><tr><td><div class='metric'>{0}</div><div>Total checks</div></td><td><div class='metric riskCritical'>{1}</div><div>Critical</div></td><td><div class='metric riskWarning'>{2}</div><div>Warning</div></td><td><div class='metric riskOK'>{3}</div><div>OK</div></td></tr><tr><td><div class='metric'>{4}</div><div>Domains with critical findings</div></td><td><div class='metric'>{5}</div><div>DCs with critical findings</div></td><td><div class='metric'>{6}</div><div>Unreachable DCs</div></td><td><div class='metric'>{7}</div><div>Locked user accounts</div></td></tr><tr><td><div class='metric'>{8}</div><div>Replication critical rows</div></td><td><div class='metric'>{9}</div><div>SYSVOL/NETLOGON critical rows</div></td><td><div class='metric'>{10}</div><div>Total DCs</div></td><td><div class='metric'>{11}</div><div>Domains</div></td></tr></table></div>" -f $r.Count,$criticalRows.Count,$warningRows.Count,$okRows.Count,$domainsWithCritical,$dcsWithCritical,$unreachableDcs,$lockedTotal,$replicationCritical,$sysvolCritical,$dcNames.Count,@($domains).Count))
+    [void]$b.AppendLine(("<div class='card'><h2>Measurement coverage</h2><p><span class='riskNotMeasured'>{0} NotMeasured</span> checks were not executed or could not be measured. They are excluded from the OK count and do not imply healthy results.</p></div>" -f $notMeasuredRows.Count))
     [void]$b.AppendLine('<div class="card"><h2>FSMO roles</h2><table><tr><th>Scope</th><th>Domain</th><th>Role</th><th>Holder</th><th>Status</th></tr>')
     foreach ($x in @($r | Where-Object Category -eq FSMO | Sort-Object Domain,Check)) { $scope = if ($x.Check -in @('SchemaMaster','DomainNamingMaster')) { 'Forest' } else { 'Domain' }; [void]$b.AppendLine(("<tr class='row{0}'><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{0}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $scope),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.DC))) }
     [void]$b.AppendLine('</table></div>')
@@ -339,8 +341,8 @@ function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[d
     $priorityGroups += @($r | Group-Object Category | ForEach-Object { $it = @($_.Group); [pscustomobject]@{ Type='Category'; Name=$_.Name; Critical=@($it | Where-Object Status -eq Critical).Count; Warning=@($it | Where-Object Status -eq Warning).Count } })
     foreach ($g in @($priorityGroups | Where-Object { $_.Critical -gt 0 -or $_.Warning -gt 0 } | Sort-Object @{Expression='Critical';Descending=$true},@{Expression='Warning';Descending=$true},Type,Name | Select-Object -First 20)) { [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td class='riskCritical'>{2}</td><td class='riskWarning'>{3}</td></tr>" -f (ConvertTo-HtmlSafe $g.Type),(ConvertTo-HtmlSafe $g.Name),$g.Critical,$g.Warning)) }
     [void]$b.AppendLine('</table></div>')
-    [void]$b.AppendLine('<div class="card"><h2>Domain status summary</h2><table><tr><th>Domain</th><th>DCs</th><th>OK</th><th>Warning</th><th>Critical</th><th>Locked users</th><th>FSMO</th><th>Replication</th><th>SYSVOL</th></tr>')
-    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) { $it = @($g.Group); $fact = @($facts | Where-Object Domain -eq $g.Name | Select-Object -First 1)[0]; $locked = @($it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1)[0]; $lockedValue = if ($locked) { $locked.NumericValue } else { '' }; $fsmoWorst = Worst @($it | Where-Object Category -eq FSMO); $repWorst = Worst @($it | Where-Object Category -eq Replication); $sysvolWorst = Worst @($it | Where-Object Category -eq SYSVOL); $dcCount = if ($fact) { $fact.DCCount } else { @($it | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count }; [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td class='risk{6}'>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst)) }
+    [void]$b.AppendLine('<div class="card"><h2>Domain status summary</h2><table><tr><th>Domain</th><th>DCs</th><th>OK</th><th>Warning</th><th>Critical</th><th>NotMeasured</th><th>Locked users</th><th>FSMO</th><th>Replication</th><th>SYSVOL</th></tr>')
+    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) { $it = @($g.Group); $fact = @($facts | Where-Object Domain -eq $g.Name | Select-Object -First 1)[0]; $locked = @($it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1)[0]; $lockedValue = if ($locked) { $locked.NumericValue } else { '' }; $fsmoWorst = Worst @($it | Where-Object Category -eq FSMO); $repWorst = Worst @($it | Where-Object Category -eq Replication); $sysvolWorst = Worst @($it | Where-Object Category -eq SYSVOL); $dcCount = if ($fact) { $fact.DCCount } else { @($it | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count }; [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td><td class='risk{9}'>{9}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,@($it | Where-Object Status -eq NotMeasured).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst)) }
     [void]$b.AppendLine('</table></div>')
     [void]$b.AppendLine('<div class="card"><h2>Critical and warning findings</h2><table><tr><th>Status</th><th>Domain</th><th>DC</th><th>Category</th><th>Check</th><th>Value</th><th>Threshold</th><th>Details</th></tr>')
     if ($find.Count -eq 0) { [void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>') }
@@ -359,22 +361,22 @@ function Invoke-DcCheck($ForestName,$DomainName,$DC,$AllDcs){
     }
     else {
         foreach($svcName in 'NTDS','DNS','Netlogon','KDC','W32Time','DFSR') {
-            $s=Get-Date;Add-Row $ForestName $DomainName $dcName Services $svcName OK '' NotMeasured 'Requires T0 remote DC admin' 'Skipped by default to avoid remote service-control access to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+            $s=Get-Date;Add-Row $ForestName $DomainName $dcName Services $svcName NotMeasured '' NotMeasured 'Requires T0 remote DC admin' 'Skipped by default to avoid remote service-control access to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
         }
     }
 $s=Get-Date;$repErrors=$null;$f=@(Get-ADReplicationFailure -Target $dcName -Scope Server -ErrorAction SilentlyContinue -ErrorVariable repErrors);if($repErrors){Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures Critical '' Error 0 ([string]$repErrors[0].Exception.Message) (Ms $s)}else{$det=($f|Select-Object -First 5|ForEach-Object{"$($_.Partner): $($_.FailureCount) since $(ConvertTo-IsoUtc $_.FirstFailureTime)"}) -join '; ';Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures $(if($f.Count -eq 0){'OK'}else{'Critical'}) $f.Count "Failures=$($f.Count)" 0 $det (Ms $s)}
 $s=Get-Date;$metaErrors=$null;$m=@(Get-ADReplicationPartnerMetadata -Target $dcName -Scope Server -ErrorAction SilentlyContinue -ErrorVariable metaErrors);if($metaErrors){Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours Critical '' Error "<= $ReplicationDelayWarningHours hours" ([string]$metaErrors[0].Exception.Message) (Ms $s)}else{$old=@($m|Where-Object{$_.LastReplicationSuccess -and $_.LastReplicationSuccess -ne [datetime]::MinValue}|Sort-Object LastReplicationSuccess|Select-Object -First 1)[0];$max=0;if($old){$max=[math]::Round(((Get-Date).ToUniversalTime()-$old.LastReplicationSuccess.ToUniversalTime()).TotalHours,2)};$stat=if($max -gt $ReplicationDelayWarningHours){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours $stat $max $(if($old){ConvertTo-IsoUtc $old.LastReplicationSuccess}else{''}) "<= $ReplicationDelayWarningHours hours" "Partners=$($m.Count)" (Ms $s)}
     foreach($sh in 'SYSVOL','NETLOGON'){$s=Get-Date;$unc="\\$dcName\$sh";try{$ok=Invoke-Retry {Test-Path -LiteralPath $unc -PathType Container};Add-Row $ForestName $DomainName $dcName SYSVOL $sh $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $unc Available "Share available=$ok" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName SYSVOL $sh Critical 0 $unc Available $_.Exception.Message (Ms $s)}}
-    if(-not $SkipDfsrBacklog -and $AllDcs.Count -gt 1){$src=@($AllDcs|Where-Object{$_ -ine $dcName}|Select-Object -First 1)[0];$s=Get-Date;try{$n=Get-DfsrBacklog $src $dcName;if($null -eq $n){Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog OK '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "Not measurable from $src to $dcName" (Ms $s)}else{$st=if($n -gt $DfsrBacklogCriticalCount){'Critical'}elseif($n -gt $DfsrBacklogWarningCount){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog $st $n "$src->$dcName" "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" 'DFSR backlog measured' (Ms $s)}}catch{Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog OK '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" $_.Exception.Message (Ms $s)}}
+    if(-not $SkipDfsrBacklog -and $AllDcs.Count -gt 1){$src=@($AllDcs|Where-Object{$_ -ine $dcName}|Select-Object -First 1)[0];$s=Get-Date;try{$n=Get-DfsrBacklog $src $dcName;if($null -eq $n){Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "Not measurable from $src to $dcName" (Ms $s)}else{$st=if($n -gt $DfsrBacklogCriticalCount){'Critical'}elseif($n -gt $DfsrBacklogWarningCount){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog $st $n "$src->$dcName" "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" 'DFSR backlog measured' (Ms $s)}}catch{Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" $_.Exception.Message (Ms $s)}}
     $s=Get-Date;try{$r=@(Resolve-DnsName -Name $dcName -ErrorAction Stop);$targets=@($r|Select-Object -First 3|ForEach-Object{$v=Get-ObjectPropertyValue $_ @('IPAddress','NameHost','NameTarget','Target','Name');if($v){$v}});Add-Row $ForestName $DomainName $dcName DNS ResolveDC $(if($r.Count -gt 0){'OK'}else{'Critical'}) $r.Count $dcName '>= 1 record' ($targets -join '; ') (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName DNS ResolveDC Critical 0 $dcName '>= 1 record' $_.Exception.Message (Ms $s)}
-$s=Get-Date;$time=Get-TimeOffsetMinute $dcName;if($null -eq $time.OffsetMinutes){Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes OK '' NotMeasured "<= $TimeOffsetWarningMinutes minutes" $time.Error (Ms $s)}else{Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes $(if($time.OffsetMinutes -gt $TimeOffsetWarningMinutes){'Warning'}else{'OK'}) $time.OffsetMinutes 'Absolute max sample offset' "<= $TimeOffsetWarningMinutes minutes" 'w32tm /stripchart samples=3' (Ms $s)}
+$s=Get-Date;$time=Get-TimeOffsetMinute $dcName;if($null -eq $time.OffsetMinutes){Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes NotMeasured '' NotMeasured "<= $TimeOffsetWarningMinutes minutes" $time.Error (Ms $s)}else{Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes $(if($time.OffsetMinutes -gt $TimeOffsetWarningMinutes){'Warning'}else{'OK'}) $time.OffsetMinutes 'Absolute max sample offset' "<= $TimeOffsetWarningMinutes minutes" 'w32tm /stripchart samples=3' (Ms $s)}
     $s=Get-Date
     if ($EnableRemoteDcAdminChecks) {
         try{$vol=Invoke-Retry {Get-ADDbVolume $dcName};$disk=Invoke-Retry {Get-Disk $dcName $vol};$st=if($disk.FreePct -lt $DiskFreePercentCritical -or $disk.FreeGb -lt $DiskFreeGbCritical){'Critical'}else{'OK'};Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent $st $disk.FreePct "$vol free $($disk.FreeGb) GB" ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'AD DB volume via ntdsutil, fallback system drive' (Ms $s);Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB $st $disk.FreeGb "$vol free $($disk.FreePct) percent" ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Same volume as percent check' (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent Critical '' Error ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" $_.Exception.Message (Ms $s)}
     }
     else {
-        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent OK '' NotMeasured ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
-        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB OK '' NotMeasured ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent NotMeasured '' NotMeasured ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB NotMeasured '' NotMeasured ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
     }
 }
 function Invoke-DomainCheck($ForestName,[string]$DomainName,$ForestInfo){
@@ -449,7 +451,7 @@ try{
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     $businessCriticalCount = @($all | Where-Object Status -eq Critical).Count
     $businessWarningCount = @($all | Where-Object Status -eq Warning).Count
-    $notMeasuredCount = @($all | Where-Object TextValue -eq NotMeasured).Count
+    $notMeasuredCount = @($all | Where-Object Status -eq NotMeasured).Count
     WriteLog -Message ("Health findings: Critical={0}; Warning={1}; NotMeasured={2}; technical log warnings and errors are reported separately in the execution summary." -f $businessCriticalCount,$businessWarningCount,$notMeasuredCount) -Level INFO
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv, $latestCsv)
@@ -476,8 +478,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLNghO65qGHwPv
-# du5jZbDeHNvaC+j9VA0FvizRM6Bec6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBM+qWaUQko9RA+
+# SDRoT4UDEIQ+EPdFzuPekMjKXLHYNKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -610,31 +612,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDyDunr3K47guPvCETe1ysDjp86zBXNrKv5ocHkJHJwuMA0GCSqG
-# SIb3DQEBAQUABIIBgFuRFcG9JeR2C7L2aPBFx5Y5KdYvbEgQi+T1M3IlbAZSgS6j
-# QpJvUVhp11qjyJnoH50mPcGrdLb3zV2MY7k73FzZQQMc5yj1DW8PZEiLiCFe+dGG
-# N8k01JCuX+OFymvboiwHjoNvDf+OFwPpMmQdXNsMOR2UVu4COqueHNI6yOA4w/MS
-# nC5GapiqSupIY7Uka84JVu7+tLx2lxYqxfGNxeodwbIlzNNLJUQVUw2JA5vFRLBJ
-# EstgREx6abMYG4RWcQHhQxDZ6RPHv/8/sg5hsTF+/R46ULqKqgFDGjSbMpgx1osS
-# fH9lGDG1znpPTnu4E0sexnKiNqqpArX8JqJz1zUldXE5AHdtL1Z6Eh1cF8I0Q9Ew
-# zE3SLneDgCg6bIZutIiC1HBvoXx418vAoAKJM/dMJKz2ODzIUMjNOExvMDdUxyw/
-# pJ558ZlMM6VMxPmv6+RpDeoDf4YL5EaOUAbo/z+EX1D/QRa7cXjdHZMUkjNNmFag
-# vN+GLJR73imOdq6Hf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIArrroRdswEZrqLhzOhH5zRnz1PLeQnpsLF4keWR5eRsMA0GCSqG
+# SIb3DQEBAQUABIIBgFvykUszq+FBDnDRUjEBKhpamnpAlkeG4RDOgDwV/shUvEoB
+# j1vq41HafzS9hPtOCAZzrJBdLoW4AiEAocVDAxpKR47+3ZKLMJGiEwZND8XEknAV
+# WAzhPSQuS8AE+zgho6eDLyBPccqR9wD6UFTGyI8a46cLwExMUt3C6RUvMhKMyIsc
+# GFEsmGtY+STGhVoaDlKMUxI6bk29yDNAMVl2ueniauLlyvU0pz2RmAmauRflmzJ+
+# 0mtfUk1CJXwfTeIUcVXkCysNYqTuhLAUEyfibCUSBGsYzvGQXd4sOQZOBr+jYrx+
+# MaP6oKPtaF4yitr5WGf4Ra+NwUl4nuBlnd4giMh9K7mh+C5XL53Ni3eC2ynZPiDx
+# 76Gwa8oL7h2IzIN7Tz217mNJaP5ja3EPsz5CZIzkpCEDCqWl40aZbaNXKbdDnxGr
+# DzeLJrm9pf62FryMs+dvJ8VB2kcKOQMbwtykuTEsJdF/zo27xc0UvC8LPoedO20I
+# Pm3fUDvG27ChJWWQD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCNpgaNkKCiFCahqIp+NHwV5PhFs45T8GnavcqN
-# yf5HQzANBgkqhkiG9w0BAQEFAASCAgCEebAJr0EZLy/Jijd9WguwusBBdP2uPpRx
-# XRaM8Tjr+aNstbssR64kez6Bo1xfEwzfW+gEYiih2nUHXxa4rLEuoJe8Fdfd9gxL
-# sI6Ti32lpEMJl/x5NKheLcq3lEp599POvjigmieneXZpRGbcBgMcAPXIN2jEwE7h
-# uSUgnAZ6hJkmm6/Dw0st39DJZI+GDl67jqJjpCJpVGUNmkqCP/eGe2jZUDcSNoYz
-# r4yboLvthGi8jMwUh3F6DlIGnEOD+FYbQ5kE+d5XYrqhLt19OnploZHh2DnUM9U+
-# t7iuZhp5hHTrm0fNsFeRE85zROB/tkkgo9qbcwb6QDcek3nAQB86wdgCffO3k8Gj
-# +0h8ZrC5Xn3d5oSW9rtlyN0DIjc3kozS+WWtClc6HQ9uSnLpoX4yBRnZ0g4uRduT
-# lFNdmAUEt9um0DdC91zUzMGi/C9zYN1aupMc7QxNfGP6G79NNb/OR5eNwx87pypT
-# Gtt4W614Tc0I7rQva1bbc7Ip7lrYtvIZbtar5+jceIq1z6Gw3dJnZ1d2OEKPfG93
-# +u8+l2LiT/95wnMk1LhyLLh4O4fz8TSwqtA2JPPXLEyy2/50cPzUpsmX4xz4T2Lm
-# aPzVVTfU/2l1AtNyKWnFUDM2DV5neGAV7CplE7uP46tcnde9U8Gy0EpQZ/4nSkab
-# m9/wM8U9/Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
+# MTJaMC8GCSqGSIb3DQEJBDEiBCDOGBpNlUrNJhi5TLLxoH8EGTL9FMGX4uAFerT1
+# 5TMWODANBgkqhkiG9w0BAQEFAASCAgCetWS+wLb260Uqms5jjASPoD8h7twd4x/z
+# diOmnZRFBFOhswRE0gw7gKkaDNekVp9qhFxw8wxsJI3QqBWKL5i1Pm4FzPlA2QC8
+# HDUEn5zxLDMofw5m5WYqll+fQaSVtPCmaTwSQA2CkxVZ7A2JAblam9Ft4SSCuw6L
+# 9xVKgrBfwm+ksCl4/qjMqQf+KsUl5qlFjOycoVgKcTG7eX+fnV7dNm3SBxdz2eYZ
+# BeeLNQOapmR5yKJ6K7gbAsF/a6/qjOwO2n0/LmpAFpaJwLeBSL24oyzp5UCc/T1s
+# 3sERdm0BDxByIVUxSeyosEFVByo0DlngUNArbTEigUTJLMuUmHVKjiemA3AHMjXK
+# 5Ji5S2RpuKAsl9uUI6bZ7Oec8rf/XZiaNogIVZldffXs8H9Rh8Ad8go3ikwrS2YL
+# fPuJnErGXuLD5Mlq69WLWpgYNOcb9Z+8JNAWoUi3vAupg2DGb219aNvw9xqlZafo
+# 9ZUt3WyVvae14Xu5Zdn1voQs+ESj3kAAtrHHbaX+3vzb7joBtlmzrDFSXWe//wmY
+# j4+ZX3qijicvPTJyylwJuuNakEAWrEhjL+IJt+xIxGn2O48hKgiF37IhLPG0qsVY
+# 0ZaYPzRUN5WusBf1ntLO5cllQHMH3lW6xn4Dth58lPDZPzE8O6QWGc9MAGOhhudE
+# Xn8yfG0/ag==
 # SIG # End signature block

@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.17
+1.18
 
 
 
@@ -313,7 +313,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -595,6 +595,13 @@ function Get-QualityUpdatePolicyMap {
     return $map
 }
 
+function Test-AutopatchAlertMessage {
+    param([AllowNull()][object]$Message)
+    # Graph report rows use 0 as the no-alert sentinel. Preserve every other code,
+    # including previously unknown nonzero values, for downstream investigation.
+    return -not ([string]::IsNullOrWhiteSpace([string]$Message) -or ([string]$Message).Trim() -ceq '0')
+}
+
 function Convert-FeatureRowsToAlertDetails {
     param(
         [Parameter(Mandatory)][object[]]$Rows,
@@ -602,7 +609,7 @@ function Convert-FeatureRowsToAlertDetails {
     )
 
     $details = foreach ($row in $Rows) {
-        if ([string]::IsNullOrWhiteSpace($row.LatestAlertMessage)) { continue }
+        if (-not (Test-AutopatchAlertMessage $row.LatestAlertMessage)) { continue }
         [pscustomobject]@{
             AlertName = $row.LatestAlertMessage
             Severity = 'Unknown'
@@ -629,7 +636,7 @@ function Convert-QualityRowsToAlertDetails {
     )
 
     $details = foreach ($row in $Rows) {
-        if ([string]::IsNullOrWhiteSpace($row.LatestAlertMessage)) { continue }
+        if (-not (Test-AutopatchAlertMessage $row.LatestAlertMessage)) { continue }
         [pscustomobject]@{
             AlertName = $row.LatestAlertMessage
             Severity = 'Unknown'
@@ -656,7 +663,7 @@ function Convert-QualityErrorRowsToAlertDetails {
     )
 
     $details = foreach ($row in $Rows) {
-        if ([string]::IsNullOrWhiteSpace($row.AlertMessage)) { continue }
+        if (-not (Test-AutopatchAlertMessage $row.AlertMessage)) { continue }
         [pscustomobject]@{
             AlertName = $row.AlertMessage
             Severity = 'Critical'
@@ -735,6 +742,16 @@ try {
         Write-Log -Message 'Collecting quality update report data.'
         $qualityPolicyMap = Get-QualityUpdatePolicyMap
         $qualitySummaryRows = Import-ExportedCsv -ReportName 'QualityUpdatePolicyStatusSummary' -Select @('PolicyId','PolicyName','ExpediteQUReleaseDate','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus')
+        Write-Log -Message ("Quality update coverage: Graph policy profiles={0}; status summary report rows={1}." -f $qualityPolicyMap.Count, @($qualitySummaryRows).Count)
+        if ($qualityPolicyMap.Count -gt 0 -and @($qualitySummaryRows).Count -eq 0) {
+            Write-Log -Message 'Quality update policy profiles exist, but the status summary report is empty. Check assignments, report availability and export completeness; the policy CSV will remain empty rather than inventing rows.' -Level WARN
+        }
+        elseif ($qualityPolicyMap.Count -eq 0 -and @($qualitySummaryRows).Count -gt 0) {
+            Write-Log -Message 'Quality update status summary has rows, but Graph returned no policy profiles. Report rows are preserved; check the profile lookup and policy-name coverage.' -Level WARN
+        }
+        elseif ($qualityPolicyMap.Count -eq 0 -and @($qualitySummaryRows).Count -eq 0) {
+            Write-Log -Message 'No quality update policy profiles or status summary rows were returned; an empty policy CSV is expected.'
+        }
         $qualityPolicyRows = New-Object System.Collections.Generic.List[object]
         foreach ($policyRow in $qualitySummaryRows) {
             if ([string]::IsNullOrWhiteSpace($policyRow.PolicyId)) { continue }
@@ -795,8 +812,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAp8PNq+KoNM1i3
-# PvxlYvNrYTbBhLiG+Ra6/ybjJh//uKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSSIEgCHWNCO24
+# RA6TuIiRoZJxWulRDsZaNIO5DnMt+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -929,31 +946,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHHR7uPGe1AgrSP5OiY8UbBtuOaJStbo87AsctRzgteFMA0GCSqG
-# SIb3DQEBAQUABIIBgH0nzSptFI0etFsg0nmWuk22r/s/DvGCqTonEWjJE+IKTlJx
-# GJOQ6DxKFwWjXp+KDnOIpwpv71ke7w93awlBMv/T1RSfVW+Vs+dgMkdoFUB37K8f
-# MIDA3Pq4uWAk6pwtv0ar4Rqd2qptq9PiGlkYt0jxOOfgInSPkK3tX6wLuGBaSgul
-# FZkSvC9OMGtTw1Ur6rN7/17CIeV3xTo/f/dDJuaoyKmh4g7NCN0K2XcsKuTfqsoW
-# rsPIFJy1a0FgZu2vWeUb+KfyXEL/gz9WhklcwzMY0hOMQbPC1+UYRxJW2iS9Fueh
-# ru0elZZNwM00nPe4BbaCXzOm3DP3qInVyFJZBP617Cj2STjAQ3/MwunZOtJUpRon
-# n/aJYaBjtnkdntaiB76NuTCsapIBYCSRvAiwA/pfZcKvznMlZzsKT4pkqIRwulvh
-# mm+n9hvmJibxLwoz7y04eVpELRrzY9hVRhlxBrML9bZAbFfnFfe3bgY6Ig4CkM2X
-# 0ny0D8okgaNA7nLt+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGGcy4gRv56vRD79eiD+v6UNkwGGxjyM3/gl0qConop1MA0GCSqG
+# SIb3DQEBAQUABIIBgC5MM9immnuNPCBDYpxKMze2ERz4gY0aUZaNvshYHpUnzt/y
+# rVmT59raWBWiJr3u4egPn2oMynL3Lw+CrGbKR6r3z9pVGjlAQVs2WDHmeVWyU0z6
+# 5uGbT44Bhd2vYcmqnN808h2eJ+k/2ozflHMZkzVWeZBSm+fygRqmJLCMVxtdIVCi
+# 47zqeBwgut4lx8gHeQAmEtKwxfy8fa4Ipu93FrP7+c6d1bgYFx0ufp+ntFYpv0Fd
+# 5Fk7nnmDaazuljr+aZuTWdN7IkQHY5W96QkXciJCTv9NXOBMc+Ch83Rc5bM9hJqQ
+# NcPYs77wCuXeYT23lI83pi9NDA+h1XlV8iEgvyvmPfCucg2kJVZuYiqsqwDDnssP
+# 1R4hLwMzPgK4m0Fm58SRsWCUPx+zjheonNvEwG+UafC5KHuVkmclo3PkKWGZnr2t
+# tstE848nuuYFoYunwUaB0/4JPU0SxfxhaMEMJmXVv6PaKZVQ8gzseAwPOvOzXEOO
+# 1Cgs+33etUdVi2WAfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTM4
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAbviRvPZw62bx0Zh+hgjPTSxtjf0sPF8lBzdgT
-# xtcgzTANBgkqhkiG9w0BAQEFAASCAgCFWuW4dK/ZLWDljwOSc4LiqZ/pSp5tvwMj
-# KxuWOtCRGbLtswGaIxU9LE1toWr9+evFijftfnN0gQGywSJgcmJHDcJO+lin9REI
-# 5UGT2k3DtrVHEflYA8WPUgxhR5DW14Kv31go/DRNn6DDS3Vqgxm0ymO9SiSkf557
-# hbSsLWNEGyhaeRwqbhZkNQTMjR+dMaG2IPFVjvcROSLBVdHFU79J8OTVscVu5Xfx
-# Xevi+mPozfHa8OefZ2nJ7yAFOcDVMmU6eZ6Cw3++6DbD9elC+DeOpRcyv/reBhmP
-# Z0mqO3X4sTaTkUNwlbIGCt08HAay4Sxkv7VNBANnJ94CHdb5Nb17nmMidoNjksWZ
-# N8WsDgFzzRlipGOxkqodtx5qZLAFh1LvAkkGy0Z4OXoFPBIMceFnONi+54gzaBEB
-# 1PE8estUog/KFZmkXX7HzoQA2n6TSVAr0m7kHn0VRkaHu6Ll4WSFpCa+XpbgHO5k
-# X47SRFkZoD6NjO8xK3x34/fxmDbkPLlt+Rc6vOSN7rAJYeeYI64xPj0ia+iD460W
-# ojRj19+yB3odmuN+/qREozmff3IcaevJjSUh3hJ2b3LhFRMmVk6U0mcO0Gw+6cY6
-# lciRAIYfvTnzynGGXzZxll0RHU/syHAdlAMO+JCzf/9GIMnnJYqUU4Sqe/2UPj5f
-# ANKqUi5nBQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTA0
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBZk/swuYP86hKC5KS2WaDLOjyOP2YLyPq5IKXn
+# rPkr7DANBgkqhkiG9w0BAQEFAASCAgAHZ9zct9aVktxD4ONQ9aQL17TEKuuKSJIu
+# 4sVJsuHA/WYr/cQXil2gawUUr989N56xdW8g7TiuXOc+rwXVUFG+FZzHuKHgTRNx
+# 2OH18KI9G1xWtduh7NVYaIuRfk+FvolzPYz3QCkh51gaMcCi3qwvDeiXxNmRlfQC
+# All1B1DrEmh1/4G4FGGJKqQZ21HP+OE4JuYZkOi9KxaDkFSFmHVMmtkp/bU55zx9
+# rVeDmClgO7O2x6x7fgwW6GpB+sArXou2FbjqpzIAFPBGEr4BAr4JTU0ZQzzFs/Mw
+# /5OK4cc4gxSxoCY1RVNCSMcwxTuP7X+q5au72h+NTPEUtHnGPBUybHSmpF0ZUDdP
+# 39Jkx2RhVnUgEURGPw8G5KaxY6OD0Sms56Zgv4yFDni+4qhuOfMiBn/tHRs/hF3E
+# ypLHz0oRnZynR6S7XJtRhE13Qm04H2PdAZ8wvweQswTAKOWVP3j8f30cwI2qQecB
+# HGQ6jjTqwDI/PwSmyE6OxgESKg7hzrXUDPkz6L/o0sa99u13u8FGt8eMUfKvCREg
+# Y/Qcsmi9AXGQJYe/pBCmC8j5Y/njNm0cygMrZTVKaYxnqRlIo/FVI0Bpi+AO56fR
+# MsTa8GI6D8QZS0Vm/sMjgToqZ4pvtjxLSonS03KYLV/EfObBMTsLZDWIKmJEeMhh
+# ORJGqmsu0w==
 # SIG # End signature block

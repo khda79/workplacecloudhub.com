@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.18
+1.0.19
 #>
 [CmdletBinding()]
 param(
@@ -417,6 +417,30 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
         $m=Import-OfflineFunctions $paths.Autopatch @('Invoke-GraphGetAll')
         try{&$m {$script:n=0;function script:Invoke-AutopatchGraphRequest{$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}};$caught=$false;try{&$m {Invoke-GraphGetAll p1}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'Autopatch cycle was not rejected.'}finally{Remove-Module $m -Force}
     }
+    Test-OfflineCase 'Autopatch excludes only no-alert code zero and retains nonzero alerts' {
+        $m=Import-OfflineFunctions $paths.Autopatch @('Test-AutopatchAlertMessage','Convert-FeatureRowsToAlertDetails','Convert-QualityRowsToAlertDetails','Convert-QualityErrorRowsToAlertDetails','Group-AlertSummary')
+        try {
+            $observed=&$m {
+                $rows=@(
+                    [pscustomobject]@{LatestAlertMessage='0';DeviceId='one';PolicyId='policy';DeviceName='PC1'},
+                    [pscustomobject]@{LatestAlertMessage=' 0 ';DeviceId='two';PolicyId='policy';DeviceName='PC2'},
+                    [pscustomobject]@{LatestAlertMessage='42';DeviceId='three';PolicyId='policy';DeviceName='PC3'}
+                )
+                $feature=@(Convert-FeatureRowsToAlertDetails -Rows $rows -PolicyMap @{})
+                $quality=@(Convert-QualityRowsToAlertDetails -Rows $rows -PolicyMap @{})
+                $errors=@(Convert-QualityErrorRowsToAlertDetails -Rows @([pscustomobject]@{AlertMessage='0';PolicyId='policy'},[pscustomobject]@{AlertMessage='nonzero';PolicyId='policy'}) -PolicyMap @{})
+                $summary=@(Group-AlertSummary -Details $feature)
+                [pscustomobject]@{Feature=$feature;Quality=$quality;Errors=$errors;Summary=$summary;Unknown=(Test-AutopatchAlertMessage '987654')}
+            }
+            Assert-Offline ($observed.Feature.Count -eq 1 -and $observed.Feature[0].AlertName -eq '42') 'Feature report retained no-alert zero or lost a nonzero code.'
+            Assert-Offline ($observed.Quality.Count -eq 1 -and $observed.Quality[0].AlertName -eq '42') 'Quality report retained no-alert zero or lost a nonzero code.'
+            Assert-Offline ($observed.Errors.Count -eq 1 -and $observed.Errors[0].AlertName -eq 'nonzero') 'Quality error report mishandled zero or a real alert.'
+            Assert-Offline ($observed.Summary.Count -eq 1 -and $observed.Summary[0].Impact -eq 1 -and $observed.Unknown) 'Autopatch summary or unknown nonzero alert was lost.'
+            $source=Get-OfflineSourceText $paths.Autopatch
+            Assert-Offline ($source -match 'Quality update coverage: Graph policy profiles=') 'Quality policy/report row coverage is not logged.'
+        }
+        finally {Remove-Module $m -Force}
+    }
     Test-OfflineCase 'Autopatch reports recovered transient retry attempts' {
         $m=Import-OfflineFunctions $paths.Autopatch @('Get-AutopatchGraphStatusCode','Get-AutopatchGraphRetryDelaySeconds','Invoke-AutopatchGraphRequest')
         try {
@@ -744,8 +768,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyRvbJWYLSq+Yf
-# fho+5c3HJTH1qXU4SfUG4yfICWPVKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+9e9VjS0fz1O9
+# Qj4pwXuume/VH3XKh3LhdcRLzEXUBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -878,31 +902,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINxF7yFTec4x/tZQ+wBHbGhDvYx8KVd7XqsrdIrq2yoYMA0GCSqG
-# SIb3DQEBAQUABIIBgCLSRcZhHwDbPmf7Ek6svyFrFyUGvHStiUuyUPpdg+tXNng+
-# R8VD48eHSu4I7FANmu7UKr8xpGbNc/L6o1COi6TWN2dCH+j4ErNyHh4X90wIUxEZ
-# kzMT5BtBtH8hYWZ4ZdgmQOKTbFp4AK90dSQeIKqiKYAP12+kGK3VCeiN+K8OsMNU
-# OHpjQEOo5mvbU664etC5DQO4Efx8ZbZtxetSQdUYvGRW4r3oDEs83NevE88ZgGwf
-# 4d3LGngO5HpHPY9adPPHFqIocl8hWsCyUm9gcRiJ8WSQTWYMZNokDM5Hvk9Z/fhx
-# QqE6Zz2RvjhywX52qMfV6Jnl7dEl05plldKWExu+6+NL2QsJW6MdKuK7l0WCDZnl
-# kTBC2JcNYsKk4UKrWjeDXG42Y11yicteOhG5OJ5gIlmnbRMA+rgnsc4bOklAHcqf
-# EepdTKyWTp2lNOSW/KAyBsZbUF9/f6bgOQ+Q95tplJOkKI48s5ixJCmVrovSbqu/
-# OzMJDDucPYp4FLvUT6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMkAhJjYavRw0LovQ29KwsTigfyTGAWPnq962NgTBcQVMA0GCSqG
+# SIb3DQEBAQUABIIBgA8JSgoVF1G15IZ6G7qU9CUBaYm7uWS5tKrWC5cpwjbPqblG
+# Xgpm5Of6ClMtYw2GEYzerI3txeVEhROrLScFrDDIC7fFIOyPlhrxaF3GiW1cAAf+
+# cyn1MJ/+TsJHxE6kQUyn/buy7N+EvxrvmIQpjkG0zBbl+mYILQ4ETQR/gjl5vzv5
+# KoyvQO/OLkEWsy1qnu2vH1gCwVqIA5NJGc4G6t3du7VEp9ID9SZ3UXkFJnLSzVUk
+# 4sRRh4EF5ThnLEFmuoRJbv1uqmpvBqdAsQoKzqa1xQDdKC5dnu7yG6Y+PqXoUUoU
+# 1+ivfXwRzzqUPt8gsPrSR/lX9an7mWU21T2BddZqCY9gim4tE4imk8Ug3NgemzgE
+# CnA7uE/56KQo3skgXqlSsxjDXwfqeyBv4DAV+LKwPC0iMkxoXHHpjA4lY50t2euK
+# UKt3QmYmqE3vOLHBoKW/3N24oIwGIK2pOo1t4vWkWqmMksqIoh5Bcl9lcBswJz5+
+# woNvA3fesSMbBqo9j6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMDIy
-# MzdaMC8GCSqGSIb3DQEJBDEiBCCs1NlyQpq9QPlFZaCgAc+KQtYLP1eiJix+JCsY
-# E8IACjANBgkqhkiG9w0BAQEFAASCAgCeEu95Tj++tPjWns6/H9LyqKgHEGpqciHq
-# cQMYq4Dluj6r9wGYLVaoophaLtQWJxrEDhf1dsIaJE4i4ecgEOkzBZQTI+n4Xr/a
-# +N/HYzh12jmwmNAbQcM5tGDfBxnUyAo76QB5tccD77LHrGO1xy6gaHDp7P7YBoVU
-# USi4tbCt1p7foc+jpInjLJAA+8fzQUjWr+lcMT4Ue5XtIuDbjTzpOBgqgttD7HQi
-# A+4bcF9PfS1cuIOv9W8SwjjA6nPZT9EJWQYFq9/OnjIFChxq+wmGfyaBS2Fb8wU2
-# FoeDemw4hGQhWrIMV2UIKSzVJOO0sF9tkccaEGRmVhKzHMj0c19+XNVl+QqY2HYv
-# HW8kEWWRpNHaLfn+AgCdgGgtjqNe14GOc2IUPupOtOWsDJt4Sj9w5IhbnmKm+zSC
-# t1B0BYbIzVMEH5Or8xRtAQfgvv8iOQlu/7i/Y+48oHHV8FDGp5aqJiJuoB+vqXQG
-# 1GP8s+d5O2A+cwexlNnx1o4HBKfoyrzgDGy9gsQDZpWfRGGYgxjlp3z0ziWR+VEr
-# 5I2udgC9rIYJ6nmC67fiYo7MOX9lZSmY8Y5HN/jBzGpWXNNqdfZs8J9QWmlN8MFI
-# BaunbOQxOWFIU42AytVynvc9I6YojQIR1PSQASr+oPUU1cTsVqAxeff3y1971rMA
-# Dvg54b34aA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
+# MTNaMC8GCSqGSIb3DQEJBDEiBCDj9CZSax6BAty2DRYSEzkM/3oUNCOidJoZNbSt
+# 3xdsyDANBgkqhkiG9w0BAQEFAASCAgA/SkY9Vqd6/AH1sdiZqxu0l4duQi1/xdVF
+# /+b7v2aPrAQZTFNSNbzVRhHl1+JCkYBFuHXFdW+lraPw6OII1RjqlYriZZPqCpCb
+# eqs6nmuqtPeKNG2xS8wYGvlRQYE5GiDvFdgCNp2+0qEFGVp3yb/spHaqWEXOIEZX
+# gNK8e6KdR1Ln/HOM+3GYZC1pfDUrzmexTo04x6DjJkPbq4n75xy8727gdfd6oKZB
+# arcFtuN1ADafQ2IQwL2OR2u4g0z03lxjmcX5zFhXseEv88QoacZaNZe6okN4Bogc
+# xcetwmKEhQ5mK7Y2pT7yBQ0zRuxA+asDjgsMHXAvy65Plxfmsaa+mDgS6ufRutow
+# 137bzG5pI/3go781GhLiz36xQvrrKbIZ7GZy7WOa0u/y+ho2TQ0reWew63gzXmrK
+# v8b2OnsCgGmowFvovV5UflPDWOjEXgNJ6QrMChsJb74lcPcVQ4Mj0IAy1571LLQI
+# hUy1TEyp29O6CR2DcgE6VzvteLn7V27e4bY1r0x8oX/dXSjyoj8m0WTyCVv1cUPe
+# cmSuk1tKqmPxH34NX9t7zcx98jtPZPnzGllFw9hXvC8ASr8SnCFs8Ijd9mgSxYtJ
+# HNfrWefBmny+1bF5Btv8HlxwBqo3hPu9poAZEeEb+poBzSRMHf9rrqVOOGuiVvtE
+# 040DK/Ld5g==
 # SIG # End signature block

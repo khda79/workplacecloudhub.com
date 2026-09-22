@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.7
+1.1.8
 #>
 [CmdletBinding()]
 param(
@@ -121,6 +121,68 @@ try {
         }
     }
     finally { Remove-Module $completionModule -Force }
+
+    $weeklyModule = Import-OfflineFunctions (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1') @('Save-SmartM365WeeklyInventoryHistory')
+    try {
+        & $weeklyModule {
+            function script:Get-SmartM365IsoWeekName { '2026-W39' }
+            function script:Get-SmartM365WeeklyHistoryFileName { param($Path) [IO.Path]::GetFileName($Path) }
+            function script:Copy-SmartM365FileAtomically { param($SourcePath,$DestinationPath) Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force }
+            function script:Write-SmartM365TextAtomically { param($Path,$Content,$Encoding) Set-Content -LiteralPath $Path -Value $Content -Encoding utf8 }
+            function script:Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:Uploads++ }
+            function script:WriteLog { param($Message,$Level) if ($Level -eq 'WARNING') { $script:Warnings++ } }
+            $script:Uploads=0
+            $script:Warnings=0
+        }
+        Test-OfflineCase 'Weekly snapshot keeps first CSV and manifest capture time on rerun' {
+            $root=Join-Path $testRoot 'weekly-fresh'
+            $source=Join-Path $testRoot 'weekly-source.csv'
+            Set-Content -LiteralPath $source -Value 'Id,Value`n1,first' -Encoding utf8
+            & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
+            $snapshot=Join-Path $root '2026-W39/weekly-source.csv'
+            $manifestPath=Join-Path $root '2026-W39/manifest.json'
+            $first=(Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)
+            $firstHash=(Get-FileHash -LiteralPath $manifestPath).Hash
+            Set-Content -LiteralPath $source -Value 'Id,Value`n1,second' -Encoding utf8
+            $uploadsBefore=& $weeklyModule {$script:Uploads}
+            & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
+            Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'first') 'Second run replaced the first weekly CSV.'
+            Assert-Offline ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $firstHash) 'Skipped snapshot rewrote manifest provenance.'
+            Assert-Offline ((& $weeklyModule {$script:Uploads}) -eq $uploadsBefore) 'Skipped snapshot reuploaded unchanged history.'
+            Assert-Offline ($first.SnapshotTimestampStatus -eq 'Recorded' -and $first.SnapshotCreatedAtUtc -and $first.FileSnapshotCreatedAtUtc.'weekly-source.csv') 'New snapshot lacks explicit provenance.'
+        }
+        Test-OfflineCase 'Legacy weekly snapshot remains untouched and its capture time stays unknown' {
+            $root=Join-Path $testRoot 'weekly-legacy'
+            $week=Join-Path $root '2026-W39'
+            New-Item -Path $week -ItemType Directory -Force | Out-Null
+            $source=Join-Path $testRoot 'weekly-legacy.csv'
+            Set-Content -LiteralPath $source -Value 'Id,Value`n1,new' -Encoding utf8
+            $snapshot=Join-Path $week 'weekly-legacy.csv'
+            Set-Content -LiteralPath $snapshot -Value 'Id,Value`n1,old' -Encoding utf8
+            $manifestPath=Join-Path $week 'manifest.json'
+            Set-Content -LiteralPath $manifestPath -Value '{"UpdatedAt":"2026-09-22T00:00:00Z","Files":["weekly-legacy.csv"]}' -Encoding utf8
+            $firstHash=(Get-FileHash -LiteralPath $manifestPath).Hash
+            $warningsBefore=& $weeklyModule {$script:Warnings}
+            & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
+            Assert-Offline ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $firstHash) 'Legacy manifest was mutated on a skipped run.'
+            Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'old') 'Legacy weekly CSV was overwritten.'
+            Assert-Offline ((& $weeklyModule {$script:Warnings}) -gt $warningsBefore) 'Unknown legacy capture time was not reported.'
+        }
+        Test-OfflineCase 'Weekly CSV without manifest never inherits a later capture time' {
+            $root=Join-Path $testRoot 'weekly-no-manifest'
+            $week=Join-Path $root '2026-W39'
+            New-Item -Path $week -ItemType Directory -Force | Out-Null
+            $source=Join-Path $testRoot 'weekly-no-manifest.csv'
+            Set-Content -LiteralPath $source -Value 'Id,Value`n1,new' -Encoding utf8
+            $snapshot=Join-Path $week 'weekly-no-manifest.csv'
+            Set-Content -LiteralPath $snapshot -Value 'Id,Value`n1,old' -Encoding utf8
+            & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
+            $manifest=Get-Content -LiteralPath (Join-Path $week 'manifest.json') -Raw | ConvertFrom-Json
+            Assert-Offline ($manifest.SnapshotTimestampStatus -eq 'UnknownLegacy' -and -not $manifest.SnapshotCreatedAtUtc) 'Existing CSV without manifest was assigned an invented capture date.'
+            Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'old') 'Existing manifest-less CSV was overwritten.'
+        }
+    }
+    finally { Remove-Module $weeklyModule -Force }
 
     foreach ($variant in @('Core', 'WindowsPowerShell5')) {
         $relative = if ($variant -eq 'Core') { 'Modules/SmartM365.Core/SmartM365.Core.psm1' } else { 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1' }
@@ -548,8 +610,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUZQOVpTs64KUZ
-# +gGyzNwxsGJDnXptSuHOe8TIgThBzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLU00UF2J25bZ5
+# lkE0UpagLRX3Hfz+nUhHqLlnm32xV6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -682,31 +744,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIICIlsEa+txCA2cFGfNJSPIKBY87fmVP+W056vfZCguYMA0GCSqG
-# SIb3DQEBAQUABIIBgA2dEgCiSm3FIaZWERMG5f13ywAvyddyUV9+OgztHUIeQAF/
-# Vp+p/VwEO+W85o/ifxziuI46xq5QOPWV/cIne+d+O47qQf3Egb/iwclNLKjWFxFn
-# VFGrXfKpEcXbTC+SpgRy1/pv0NGXcEgAnO1Ois4bPvkrZcD1lklP+oUuD/pZZ6Mn
-# u+DNikIVik1Mh2fMQ8h40oK21rn9c5XsOqiHc5DPCTzGvBr1yi2QXSTMb23EvmXN
-# qdiHlhkkW77VVpC7qgrCU8BmL01nZRWwDgPG6rNrIYX5KBPdmLIuIIIU59pURTJd
-# dg2oQdUCT6/kHJFisSp12iRN95P42FcnDrVOmhVEFZAZzax1vjHMpQZZAoDV1nLx
-# 6P/sEXPMSUwaRJ29ZOruWD4je05CS2mwvt/Ut28jeec+EZ8cwLJaTUbZlQHVQIR7
-# OGg/i9Q9yt4eCMVPG0COjKyVVX6DA1HEKyIM8QnTW5CBwxBtwcbdrvR+VYGLMOl1
-# +3/O3ZHIQcKR08CvpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB1kXiusi2HIGdV8O8zd9y5zs5dhKvISCcenOSyJ4roFMA0GCSqG
+# SIb3DQEBAQUABIIBgK1a1KvmJrCGY6Ps+xypA6yES4pBxcMfwiRvIsHHimGvEW4q
+# A6XUEuAT+vsHKJKFNPdBnn/c6v7kqB9kySLOslN20cCLCJiu+59Cg8tFnZPpH1Tk
+# ZIAA2nusP6PLXtdy0blFhIp5du7yF+ItYWt45gPNeYhLqknxiCSkgRbvDwB6cLtw
+# BExa0qcTRSljRSFcTgDMVJf9NVAA3FR9d4dThmRIf5w+MAayHE8iA2D4KP31gl95
+# hcD37lw2SVjR62QZsYZralzyUYGZoVpYMr/2ayQ7i9oewZK8EenlNVmCVX8eygWC
+# WY22stxr+nLIjwAZ6M9nVkOhgJfYv3ulF15EskhqpvIoWbLm4be+YwSDsNq/GLO2
+# WqzAfnLuPGb+WsMlVlZxX5Sb91YD8zvGvB36erBcTXCzNll23YO8lhJNbOjW+TVD
+# e88wW4iXx0CWI7d9BZEuS/TsZWDyWnEBfNWp5d7o/yaHO3gnoIJXYpnqLy054Ain
+# Z7xSYc3/SAFZ3c+8hKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMw
-# MTdaMC8GCSqGSIb3DQEJBDEiBCCUjvoPWEXhIccml70MIvAyTMobTnfK1b6hazZm
-# 6gs3pjANBgkqhkiG9w0BAQEFAASCAgBnw8XdEF7mV8VLSiJ/dn5edVPL7yT2EcjT
-# usDmoC2REcHaUPmtvp3YZbFPeQfEOL6raZkC09s0h9rYkhtx4VRZGyFI8q7rVctH
-# U6545OXV9j9hRZcGdMan0ft6JlwC+QptLVsFlHVkL1yjenqMEJ/RhUJk2v6nNZfM
-# DRuXCnlBpIOhhk3m24v6yFKfc7iqdag+7HJULV5SjI3/2fCkBVk5FmwKA8/+mhBS
-# AKw+J5jwkMZaKqW4xHm3BG+9uWJ254ksvrMCGNRpetDzNBv+J0pkJD328ZUS7Mi2
-# ajVIWu3JFJCy5XITOdMxMuKbnu6Xfe5tMAitCf6HH2qWek7BylTfGQeQlJW8DM+g
-# aCLt+Xt8SQX5wo3SrQMHixxP+B4TyfujLNFs92xyZ8+ibbDC2xZM8PoHiGA4wT23
-# mceIWVj8VR0xX9IKVYZHStp6JQM2Dy72v9zystC1XJnPWGae1P1t4InITVFP2Zmc
-# wIHc5VgttnNznRpbjQW5O99KIEmrq/yuiJESFXWex4qb7BGNslDoD1+4FFIy53SZ
-# TRTgABFBTeBlbhOsB9Cunhcml+ML+qDlsktK+lC2atBySMZsKl4Dt6R4g434FGuX
-# E/EzZl8tgqrsR860+jnigmSaBcDxnJSOr9wJN9t2pBiqEQ2pg1oBXAS6exNfVraD
-# Txyx6uw9NQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAz
+# NDBaMC8GCSqGSIb3DQEJBDEiBCBO1WNCcZmiRD/06GbXm6P4I7MHgi0cR4nsna81
+# D4e0MjANBgkqhkiG9w0BAQEFAASCAgCL/CvL6XDSvfhv5TcHzx/pohnQ8ZpZT3eZ
+# MDa/21z2oN7Spp4vPuw+FEj87X98A6M6hBBckXwRvaAiXzT0UGiX/HULJ0/bvw60
+# S0g3NN0Q1C5zUXI5gTflTcKQ5L7cWY4CavExiRI7zRF+r+iuTCHoV3R3UbN2Hupq
+# tzjiZIxtAEtRs5zMXK6YX7HSgwke8Ri/CD/1e7imgk8p+H3oDsx5+bsOzj572IPd
+# ITqJ0QCxYJ+ZJBIm3z+4eARtnQOrqiWmiOlj5SuUhc7AWsFy6PR+LdQQ0pX37OhX
+# E9WdUGKEyMkXi4NNx5rZAOcnwJMdCoDcEfuT7YS+xcpuDx0zs9cdNqkc3ZTXiDs1
+# gzdJny9W2z+phABvmJ6FjwcM0HdhoFjQE8KxPU4RbUn9xb+p8jEU1EAYw1DQ7NyE
+# vcBkZ4zVy/VGSTI3XybMggNalEU8UnbX+zDidSBVu5xm0aTm6bT0lAeaLTBHRyUg
+# cd2/KN4FTqyMg799DybRczhFyVEQXMk6EvcBiRAz4Nr6eNT46EQwS6b7FG2c2eub
+# YSQ8WfqbckinmLKucsdKhij1E+rYV78nY1QiuCElvY799Tw/mecJYQwKO+mY0S6f
+# FdtJ8WPcLw8pf3vaHWlIGTXptUPc3t55of9Y1khrOB2DfiNWmz4hJbEOyGVT0kbA
+# 3FmnyGfvCA==
 # SIG # End signature block

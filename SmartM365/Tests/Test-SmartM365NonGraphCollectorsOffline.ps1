@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param(
@@ -122,6 +122,26 @@ try {
         Assert-Offline ($source -notmatch 'Export-Csv\s+\$latestCsv') 'AD latest direct Export-Csv remains.'
         Assert-Offline ($source -match '-Encoding\s+utf8BOM') 'AD HealthCheck encoding contract changed.'
         Assert-Offline ($source.Contains('Health findings: Critical={0}; Warning={1}; NotMeasured={2}')) 'AD HealthCheck does not distinguish business findings and unmeasured checks in its log.'
+    }
+    Test-OfflineCase 'AD HealthCheck keeps unmeasured checks distinct from healthy checks' {
+        $path=Join-Path $SourceRoot 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-HealthCheck.ps1'
+        $definitions=@(Get-FunctionText -Path $path -Names @('Num','Add-Row','Worst','Rank'))
+        $module=New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
+        try {
+            $observed=& $module {
+                $script:Rows=[System.Collections.ArrayList]::new()
+                $script:RunId='synthetic'
+                $script:RunDateUtc='2026-09-22'
+                Add-Row 'forest.test' 'domain.test' 'dc.test' 'Disk' 'FreePercent' 'NotMeasured' '' 'NotMeasured' '>=10' 'No T0 access' 1
+                $unmeasuredWorst=Worst @($script:Rows.ToArray())
+                Add-Row 'forest.test' 'domain.test' 'dc.test' 'DNS' 'Resolve' 'Warning' 0 'Failed' '>=1' 'Synthetic warning' 1
+                [pscustomobject]@{Rows=@($script:Rows.ToArray());UnmeasuredWorst=$unmeasuredWorst;MixedWorst=(Worst @($script:Rows.ToArray()));RankNotMeasured=(Rank 'NotMeasured')}
+            }
+            Assert-Offline ($observed.Rows[0].Status -eq 'NotMeasured' -and $observed.Rows[0].TextValue -eq 'NotMeasured') 'An unmeasured check was marked healthy.'
+            Assert-Offline ($observed.UnmeasuredWorst -eq 'NotMeasured' -and $observed.MixedWorst -eq 'Warning') 'Health ranking promoted unmeasured status or hid a real warning.'
+            Assert-Offline ($observed.RankNotMeasured -gt ( & $module {Rank 'Warning'})) 'Unmeasured health ranking outranks a business warning.'
+        }
+        finally {Remove-Module $module -Force}
     }
     Test-OfflineCase 'Exchange infrastructure uses paired atomic publication' {
         $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
@@ -389,8 +409,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAx1Z7dBwntJ6sQ
-# 2ftX36fK4nvgdtnskSC2v4XsWOBf3KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1sA19yTad6A/X
+# XeDMMeED7/E6f/ZT+B0/ggVjnaJ5eaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -523,31 +543,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGUaQyax4nUGW+dK2vtQCKVnB3AH5KI/DSQq9eThpoOSMA0GCSqG
-# SIb3DQEBAQUABIIBgKiPVwc0iRRgm5Ed6fvFuLlU0iY685BTCyv2MI+hPIG6ahQ7
-# GJ5rvGCcrSda5dH9ZelsvMAm7CGPQa2vNV8RJTlHpumD0GEDngd0AV6PhMpTE7hd
-# OQHHdEdqYi6tVeIgeoSObcR+jk2LCpCvX0G8cQViGq4QjQIy8sridaXoDO5GakvR
-# GpL1+VTEkViqBKl54ST7811TMAswzctZg+W03T8SYODp+C377cbSCKcCk0JVfyq9
-# xZ+2SwEqAveOzVXuFp6HR44NB3bphOZZK18xqT4G+6ryUmtD+J4JB4892scG/kzx
-# c07SDe7U3Nqprr/S7F+vYvwfegMDKV/Cd/LlPHx6hcg2Ve4revqWV/j8lL7Qceit
-# mOCNCyF0qiK904VwjmLoe1e4ly3q/NshWdImRjiTxTCI7bhzNglSEYNLUjz9FZCq
-# Z4iLiw0fFVmnCy/4IsMGtBMjhPMXwopKjVqak1IdlqEU7iux3MbiewUeGZGFPaR9
-# teuwu4u6tusmFzB2XqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAG9EXo5nTHnRB/QQ4NPYUwqSZ9Yzx4oSPW5Dh4zpb1SMA0GCSqG
+# SIb3DQEBAQUABIIBgEJJ9rHu2ZYn7PzHi0fPCFAGnwX6iNdUnXw5dTfEPBZ2GRkF
+# BBUVTG+LssXyyekfE1FonkAJD5Wg+xwS4OQIPslt45rOA2Gp69fYE0vVMhCCxLLU
+# mv2s2rJykUIlFoMVSerSyaCM3yTaFHfsfI2Jjoa03IgBrLemW9tu0rWlf4ipz7XT
+# iGzN0EM8B3KM7XQVoxvWKPcdM5aPDElaypiO8MD8m1Tv74IBPcdChT9qI2b8Lj+D
+# wR+SnUQ64x2KFD0sYXITwe/eX3k3QV1hhANQ7CbUeiqv8s+g1q2sc2NFK0TNAGRq
+# acq/0+OpKydjxi1qiEGqTRw7niiJyILjfbKTPh031yK6FTXDsGq6ZXkpzjG0oLBt
+# QttrwBwFsaQlHE8fyIcu2LIIS+7OiCvOEr5hNxIJNuwqvds5vLpojyKb7ZZsTrC8
+# t1Gs4Usvx+I2xSLTz3LnV9eD1WxWKx4Tsj+PqInNLz5Kfd8TfrG+V/tFQHYpMTm2
+# b+j3wYXo635/8VCotaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCtYoboqzNlVRoa9oDCT3eBwxnUf7Obg7TODwWI
-# HD4p+TANBgkqhkiG9w0BAQEFAASCAgAAty8ZF1jGZMfcrmaTstPGEieaZgDXnTOP
-# 7Ct4xxim7a/u87BEa4XIUksOyCaJPjGtjZHgi4/iZXTaUhsHJbOYpNNSqJF9RPBd
-# FyztdzEq0mZmQU1nJaQB3dEpeSZXyL3tYPZUbfDXe20ngDynGc5YM9GRzgYCwdYa
-# h+fuLz+VxgCOQv1thvxNC80uF4qCS38b3SgE8iYpjsGvlyvGlKLU5yPRPvaTRxg2
-# 9DJpAGq242hfrjUFtBFJxONWmXGMx2TGMjdNF5SiK/QCHnJ/BrP0y3dhZsG5Wvp6
-# QE7oi37/tp/EWrVOUYS64bTB4gioAJJDKfBZlI9ylC+KM3T/09wcuiAPbKLczEru
-# aMUy+QBT+7CFoUnj/Djhbxg9sMA1UpIbgmd2NzIT4/tW8f6QZomUNOoK3ToaPp20
-# 2dO1kyWiMXzMt3G32eF9A7zTRVLVW/Xybnl3ZloKQ8RqLMCk9n2kY0cFxPgAHZPP
-# V8eHhJZO05HPEC4nz8l4eAFtJLGKZ6MJ+HEzjEpE82/5sGmH1DjRymDPVFDIqEta
-# miKUuJQXmlgcXZCPBSOWcd0+MfR/s4GdLlJN56GiUXadmlw8rHgUIcxclqWiBwWI
-# aYzONry473AZyR8UndKclSqUkSFgCDhXI/lQEnicc0WP0P214+NoytplvdkVR1VU
-# sxiSd8r2oQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
+# MTNaMC8GCSqGSIb3DQEJBDEiBCB684cQ+DVPPAJ9kRD18WHFeMN24Ypc7YcLSJTM
+# yALxzzANBgkqhkiG9w0BAQEFAASCAgBrwD8CNoKTaC6uT2dD4ZV/fFqFP/tkKIA3
+# loQMZpc5b0S0NflIV4AUU+H3Ynv2o2dVYVM1XIydH/3zg3hblh1L3qLi17oenF4R
+# MpAOyN6fKzf5U4UzYGkMQMUx7izBmwAvo/rf3GlnlPiiVI9l13Q/k/I+4MmDa6HE
+# yb1AkCuIX9FLhDw3Fvj9agCUdOrDpcPgHF1Jq8sfkWQrOoNRuQCPrA9Sy1NHZyou
+# 8aHKe+Yx+iMwqLbotHJGVDANXu7WYHDJ97yOHA/Mu3mKi3IQnFlfZWyKfim6Xymh
+# rhlsNXkB4ZCkj3r3mvzDolTHyPX9iKMMDNe4X4yezrAoEuk19/W6d2c3ET+HSawA
+# NWkg0QvUPx5ItRGaCQ3pi2V4fNQxh1J5+wF82Ncic3hx2R/KerVEN8TWxYNIwZeP
+# gTD5UGPTJY3myNxK1b1h/C+ro07aUkqyAxacomk8iTotHjhjkzCgRmQsFrM4Md7X
+# PEg0YzcqV/HoWK8C2NOMwmL3+K4vznYxNE80PDJ+P+bYSTg/4/VxEIHLOnDccsYz
+# bonOgbo3UfkG/G/1I4l/Sd5njiUaxlG0yG4MsMyNWZgwdjvaAGID3r7j5iPp8oGB
+# FNnSpK8NTXgG76LxmSZOooo2ifU0N1MffxFS2vFRDjzI+PSNgNeYvrm+EuPv2Itk
+# D94pJf758g==
 # SIG # End signature block
