@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.25
+    1.0.26
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -72,7 +72,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.25"
+$ScriptVersion = "1.0.26"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -285,10 +285,24 @@ function Get-Disk([string]$DC,[string]$DeviceId){
     [pscustomobject]@{FreeGb=[math]::Round(([double]$d.FreeSpace/1GB),2);FreePct=[math]::Round(([double]$d.FreeSpace/[double]$d.Size*100),2);SizeGb=[math]::Round(([double]$d.Size/1GB),2)}
 }
 function Get-DfsrBacklog([string]$Src,[string]$Dst){
-    if(-not (Get-Command dfsrdiag.exe -ErrorAction SilentlyContinue)){return $null}
-    $o=& dfsrdiag.exe backlog /rgname:'Domain System Volume' /rfname:'SYSVOL Share' /smem:$Src /rmem:$Dst 2>&1
-    foreach($l in $o){$t=[string]$l; if($t -match 'Backlog File Count\s*:\s*(\d+)'){return [int]$matches[1]}; if($t -match 'No Backlog'){return 0}}
-    $null
+    if(-not (Get-Command dfsrdiag.exe -ErrorAction SilentlyContinue)){
+        return [pscustomobject]@{Count=$null;Reason='DfsrdiagUnavailable: dfsrdiag.exe was not found on the collector host.'}
+    }
+    try {
+        $output=@(& dfsrdiag.exe backlog /rgname:'Domain System Volume' /rfname:'SYSVOL Share' /smem:$Src /rmem:$Dst 2>&1)
+        $exitCode=[int]$LASTEXITCODE
+    } catch {
+        return [pscustomobject]@{Count=$null;Reason="DfsrdiagInvocationFailed: $($_.Exception.Message)"}
+    }
+    $excerpt=(@($output | ForEach-Object { [string]$_ }) -join ' | ') -replace '\s+', ' '
+    if($excerpt.Length -gt 240){$excerpt=$excerpt.Substring(0,240)+'...'}
+    if($exitCode -ne 0){return [pscustomobject]@{Count=$null;Reason="DfsrdiagExitCode=$exitCode; Output=$excerpt"}}
+    foreach($line in $output){
+        $text=[string]$line
+        if($text -match 'Backlog File Count\s*:\s*(\d+)'){return [pscustomobject]@{Count=[int]$matches[1];Reason=''}}
+        if($text -match 'No Backlog'){return [pscustomobject]@{Count=0;Reason=''}}
+    }
+    return [pscustomobject]@{Count=$null;Reason="DfsrdiagOutputUnrecognized: $excerpt"}
 }
 function Send-ReportMail([string]$Subject,[string]$Body){
     $mailParams = @{ Subject = $Subject; BodyHtml = $Body; VerboseLog = $true }
@@ -367,7 +381,7 @@ function Invoke-DcCheck($ForestName,$DomainName,$DC,$AllDcs){
 $s=Get-Date;$repErrors=$null;$f=@(Get-ADReplicationFailure -Target $dcName -Scope Server -ErrorAction SilentlyContinue -ErrorVariable repErrors);if($repErrors){Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures Critical '' Error 0 ([string]$repErrors[0].Exception.Message) (Ms $s)}else{$det=($f|Select-Object -First 5|ForEach-Object{"$($_.Partner): $($_.FailureCount) since $(ConvertTo-IsoUtc $_.FirstFailureTime)"}) -join '; ';Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures $(if($f.Count -eq 0){'OK'}else{'Critical'}) $f.Count "Failures=$($f.Count)" 0 $det (Ms $s)}
 $s=Get-Date;$metaErrors=$null;$m=@(Get-ADReplicationPartnerMetadata -Target $dcName -Scope Server -ErrorAction SilentlyContinue -ErrorVariable metaErrors);if($metaErrors){Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours Critical '' Error "<= $ReplicationDelayWarningHours hours" ([string]$metaErrors[0].Exception.Message) (Ms $s)}else{$old=@($m|Where-Object{$_.LastReplicationSuccess -and $_.LastReplicationSuccess -ne [datetime]::MinValue}|Sort-Object LastReplicationSuccess|Select-Object -First 1)[0];$max=0;if($old){$max=[math]::Round(((Get-Date).ToUniversalTime()-$old.LastReplicationSuccess.ToUniversalTime()).TotalHours,2)};$stat=if($max -gt $ReplicationDelayWarningHours){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours $stat $max $(if($old){ConvertTo-IsoUtc $old.LastReplicationSuccess}else{''}) "<= $ReplicationDelayWarningHours hours" "Partners=$($m.Count)" (Ms $s)}
     foreach($sh in 'SYSVOL','NETLOGON'){$s=Get-Date;$unc="\\$dcName\$sh";try{$ok=Invoke-Retry {Test-Path -LiteralPath $unc -PathType Container};Add-Row $ForestName $DomainName $dcName SYSVOL $sh $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $unc Available "Share available=$ok" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName SYSVOL $sh Critical 0 $unc Available $_.Exception.Message (Ms $s)}}
-    if(-not $SkipDfsrBacklog -and $AllDcs.Count -gt 1){$src=@($AllDcs|Where-Object{$_ -ine $dcName}|Select-Object -First 1)[0];$s=Get-Date;try{$n=Get-DfsrBacklog $src $dcName;if($null -eq $n){Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "Not measurable from $src to $dcName" (Ms $s)}else{$st=if($n -gt $DfsrBacklogCriticalCount){'Critical'}elseif($n -gt $DfsrBacklogWarningCount){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog $st $n "$src->$dcName" "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" 'DFSR backlog measured' (Ms $s)}}catch{Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" $_.Exception.Message (Ms $s)}}
+    if(-not $SkipDfsrBacklog -and $AllDcs.Count -gt 1){$src=@($AllDcs|Where-Object{$_ -ine $dcName}|Select-Object -First 1)[0];$s=Get-Date;try{$backlog=Get-DfsrBacklog $src $dcName;if($null -eq $backlog.Count){Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "Not measurable from $src to $dcName; $($backlog.Reason)" (Ms $s)}else{$n=[int]$backlog.Count;$st=if($n -gt $DfsrBacklogCriticalCount){'Critical'}elseif($n -gt $DfsrBacklogWarningCount){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog $st $n "$src->$dcName" "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" 'DFSR backlog measured' (Ms $s)}}catch{Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog NotMeasured '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "DfsrdiagUnexpectedError: $($_.Exception.Message)" (Ms $s)}}
     $s=Get-Date;try{$r=@(Resolve-DnsName -Name $dcName -ErrorAction Stop);$targets=@($r|Select-Object -First 3|ForEach-Object{$v=Get-ObjectPropertyValue $_ @('IPAddress','NameHost','NameTarget','Target','Name');if($v){$v}});Add-Row $ForestName $DomainName $dcName DNS ResolveDC $(if($r.Count -gt 0){'OK'}else{'Critical'}) $r.Count $dcName '>= 1 record' ($targets -join '; ') (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName DNS ResolveDC Critical 0 $dcName '>= 1 record' $_.Exception.Message (Ms $s)}
 $s=Get-Date;$time=Get-TimeOffsetMinute $dcName;if($null -eq $time.OffsetMinutes){Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes NotMeasured '' NotMeasured "<= $TimeOffsetWarningMinutes minutes" $time.Error (Ms $s)}else{Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes $(if($time.OffsetMinutes -gt $TimeOffsetWarningMinutes){'Warning'}else{'OK'}) $time.OffsetMinutes 'Absolute max sample offset' "<= $TimeOffsetWarningMinutes minutes" 'w32tm /stripchart samples=3' (Ms $s)}
     $s=Get-Date
@@ -478,8 +492,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBM+qWaUQko9RA+
-# SDRoT4UDEIQ+EPdFzuPekMjKXLHYNKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCV1X/Igck9DQV/
+# 9bDlCoRMisLT1B+3u1dZg4yLsu+WS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -612,31 +626,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIArrroRdswEZrqLhzOhH5zRnz1PLeQnpsLF4keWR5eRsMA0GCSqG
-# SIb3DQEBAQUABIIBgFvykUszq+FBDnDRUjEBKhpamnpAlkeG4RDOgDwV/shUvEoB
-# j1vq41HafzS9hPtOCAZzrJBdLoW4AiEAocVDAxpKR47+3ZKLMJGiEwZND8XEknAV
-# WAzhPSQuS8AE+zgho6eDLyBPccqR9wD6UFTGyI8a46cLwExMUt3C6RUvMhKMyIsc
-# GFEsmGtY+STGhVoaDlKMUxI6bk29yDNAMVl2ueniauLlyvU0pz2RmAmauRflmzJ+
-# 0mtfUk1CJXwfTeIUcVXkCysNYqTuhLAUEyfibCUSBGsYzvGQXd4sOQZOBr+jYrx+
-# MaP6oKPtaF4yitr5WGf4Ra+NwUl4nuBlnd4giMh9K7mh+C5XL53Ni3eC2ynZPiDx
-# 76Gwa8oL7h2IzIN7Tz217mNJaP5ja3EPsz5CZIzkpCEDCqWl40aZbaNXKbdDnxGr
-# DzeLJrm9pf62FryMs+dvJ8VB2kcKOQMbwtykuTEsJdF/zo27xc0UvC8LPoedO20I
-# Pm3fUDvG27ChJWWQD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDDb7zftIiisNOFQkb9ppAinTTsqvM9rZRJuOAil8BbIMA0GCSqG
+# SIb3DQEBAQUABIIBgFajeUIdv/5qp6JTQ4nWlbIRdT4H0Xk98dfq6konJ7opmKZ3
+# aMQu4dhWlWouLfugqaggux35UqkyIZL0i+wXn50Ri2PwCCL0E2KcdU42wz0Y/Wfu
+# 8ApFcmjWA6VbaBQ6luL8B6AMJ58H6BDqFEjqJCDLwIFHZv47mxDsBLtdmN7l27en
+# BI0l4sReGs3yr/4J7u9Moea3PgGs31tYey464UdfGbRSTwB6d9rKMj/e/nww9NeS
+# O/iBnGql/0SSSu3nEWQ/ue1I3P3tOhYzy31wiYZ1DHZABm+mY/gda718lzsXQAEa
+# 9wSVeJlpoBDxE2TkFZGEuZSW+OqKKjYLS0bgJTP72i7J/2aR4X8qs3/chZ6FK/54
+# xWRoqothMkHE6b1sjloCUV/9qrw9wtt55YQ86hRxvUUbRFEMR+UeDTOr7Ve4kpcB
+# pRql4t72RaygGfM9GoiI0f376TUobFw4d0qo+AK7XyMzEdC8S0MeYRhVg3IOUAGp
+# 9Afm+vY9qj8mfQ1W8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
-# MTJaMC8GCSqGSIb3DQEJBDEiBCDOGBpNlUrNJhi5TLLxoH8EGTL9FMGX4uAFerT1
-# 5TMWODANBgkqhkiG9w0BAQEFAASCAgCetWS+wLb260Uqms5jjASPoD8h7twd4x/z
-# diOmnZRFBFOhswRE0gw7gKkaDNekVp9qhFxw8wxsJI3QqBWKL5i1Pm4FzPlA2QC8
-# HDUEn5zxLDMofw5m5WYqll+fQaSVtPCmaTwSQA2CkxVZ7A2JAblam9Ft4SSCuw6L
-# 9xVKgrBfwm+ksCl4/qjMqQf+KsUl5qlFjOycoVgKcTG7eX+fnV7dNm3SBxdz2eYZ
-# BeeLNQOapmR5yKJ6K7gbAsF/a6/qjOwO2n0/LmpAFpaJwLeBSL24oyzp5UCc/T1s
-# 3sERdm0BDxByIVUxSeyosEFVByo0DlngUNArbTEigUTJLMuUmHVKjiemA3AHMjXK
-# 5Ji5S2RpuKAsl9uUI6bZ7Oec8rf/XZiaNogIVZldffXs8H9Rh8Ad8go3ikwrS2YL
-# fPuJnErGXuLD5Mlq69WLWpgYNOcb9Z+8JNAWoUi3vAupg2DGb219aNvw9xqlZafo
-# 9ZUt3WyVvae14Xu5Zdn1voQs+ESj3kAAtrHHbaX+3vzb7joBtlmzrDFSXWe//wmY
-# j4+ZX3qijicvPTJyylwJuuNakEAWrEhjL+IJt+xIxGn2O48hKgiF37IhLPG0qsVY
-# 0ZaYPzRUN5WusBf1ntLO5cllQHMH3lW6xn4Dth58lPDZPzE8O6QWGc9MAGOhhudE
-# Xn8yfG0/ag==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTUx
+# MThaMC8GCSqGSIb3DQEJBDEiBCCUgo0gDU2Hq+ODGKJH7txwk8aon3/wB/YuaZDQ
+# JpKnBTANBgkqhkiG9w0BAQEFAASCAgAnnjGc8yejabpyeE4aNuLfCXGZ335tl9mm
+# U8RGmpjcvxbppeMLoc5vtAJ3Yk8UJcraaqdwlY3XFAEWldLzFv/6MikJVbJRB2fs
+# bKcBbxdN7ANBo8Uh0xuqCEAzTyEDF967KETMIsLpNPqQufxd0TyTDoChpi9NzHEA
+# nx42VtECFvD65vzo5OVBRSwRscVAp27a8fubhz19nUnZfh5bIodLU5ffyZkOc//O
+# tco7cxZN/J8Huhex+x5AAzu70huQvmBFHpZk4MBA41DJHNsL4Ldw7njG7Vrm7Hzi
+# xGvT9JCAYIgo0MZxf5gyLThiufHW3T9lli5LPkokv+mPj/DpjS0fpzkc0lMEEvNV
+# nnbyMuMmy0s1xrNRMmbRHccjj4pt/oOTBtvMIUUGANRMWydephv65ohHX4pSDhF7
+# mVy+9/APVNqaaEfnw0PF1KHR8mlPHw562aT04B/I5dqU0+bXfJ9+Dz3YiLOhFd7r
+# 3CjXPi6sROIwc1jmuOsEAXrvnBZuLSxqr3jjHfcdshLB9zsghEr3+/YaeVXmU0La
+# KK+WjmPJ5beYzbV1xxM0h7pvwF+6xhAoqH+1LQS5oOK2GUjJi00iSTJBV4wrSNYK
+# sKiLoqFpWvav0YzusL0ny+XzskA52ZEky+m7VQ0bjXU6glSWOnzNYVIX7TgjORPW
+# I4fhbDTLTA==
 # SIG # End signature block
