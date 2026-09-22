@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.11
+1.0.13
 #>
 [CmdletBinding()]
 param(
@@ -366,11 +366,36 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
             Assert-Offline ($coverage.Covered-eq1 -and $coverage.UnknownOsVersion-eq1) 'Existing OS coverage metrics changed unexpectedly.'
         } finally {Remove-Module $m -Force}
     }
+    Test-OfflineCase 'Windows Update Entra OS fallback uses the Intune ID bridge' {
+        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateOsBuild','Add-WinUpdateEntraOsVersionFallback')
+        try {
+            $rows=@(
+                [pscustomobject]@{DeviceId='managed-1';DeviceName='PC-01';OSVersion='';ReadinessMatch='NotMatched'},
+                [pscustomobject]@{DeviceId='managed-2';DeviceName='PC-02';OSVersion='10.0.19045.1';ReadinessMatch='Matched'},
+                [pscustomobject]@{DeviceId='managed-3';DeviceName='PC-03';OSVersion='';ReadinessMatch='NotMatched'}
+            )
+            $intune=@(
+                [pscustomobject]@{'Device ID'='managed-1';'Azure AD Device ID'='entra-1'},
+                [pscustomobject]@{'Device ID'='managed-2';'Azure AD Device ID'='entra-2'}
+            )
+            $entra=@(
+                [pscustomobject]@{DeviceId='entra-1';OperatingSystemVersion='10.0.22631.1'},
+                [pscustomobject]@{DeviceId='entra-1';OperatingSystemVersion='10.0.26100.2'},
+                [pscustomobject]@{DeviceId='entra-2';OperatingSystemVersion='10.0.26100.3'}
+            )
+            $result=&$m {param($r,$i,$e)Add-WinUpdateEntraOsVersionFallback -Rows $r -IntuneDeviceRows $i -EntraDeviceRows $e} $rows $intune $entra
+            Assert-Offline ($result.Rows[0].OSVersion-eq'10.0.26100.2' -and $result.Rows[0].OSVersionSource-eq'Entra') 'The Entra fallback did not use the Intune ID bridge or the highest available build.'
+            Assert-Offline ($result.Rows[1].OSVersion-eq'10.0.19045.1' -and $result.Rows[1].OSVersionSource-eq'Readiness') 'An existing OS version was overwritten by the fallback.'
+            Assert-Offline ([string]::IsNullOrWhiteSpace($result.Rows[2].OSVersion) -and $result.Rows[2].OSVersionSource-eq'Unavailable') 'An unmatched device was not retained as unavailable.'
+            Assert-Offline ($result.ExistingVersionRows-eq1 -and $result.EntraVersionRows-eq1 -and $result.UnavailableRows-eq1) 'The Entra fallback counters are incorrect.'
+        } finally {Remove-Module $m -Force}
+    }
     Test-OfflineCase 'Windows Update email places the OS distribution before fleet coverage' {
         $text=Get-OfflineSourceText $paths.WindowsUpdate
         Assert-Offline ($text.Contains('Windows version distribution')) 'The Windows version distribution title is missing.'
         Assert-Offline ($text -match '(?s)\$severityInputsHtml\s+\$windowsVersionDistributionSection\s+\$fleetCoverageSection') 'The Windows version distribution is not placed before fleet OS coverage.'
         Assert-Offline ($text.Contains('#2563eb') -and $text.Contains('#f59e0b') -and $text.Contains('#94a3b8')) 'The approved Windows distribution colors are missing.'
+        Assert-Offline ($text.Contains('OS VERSION UNKNOWN') -and -not $text.Contains('UNKNOWN / OTHER')) 'The OS-version-unavailable label is not explicit.'
     }
     Test-OfflineCase 'Windows Update report health uses proportional severity thresholds' {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateReportHealth')
@@ -602,8 +627,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRFh0/DeBehNkK
-# bsbMd8sDWCXluqeogIMSmtxeVISmA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNQcWPwSNsybcL
+# MSrHBPi+62/Jqd8SgS4Gg5pYK3Gcl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -736,31 +761,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG529eyPb/TakTfAHZtRuLDM8K++tm40ryGSXb27sN3jMA0GCSqG
-# SIb3DQEBAQUABIIBgKunWV8vsdk/ulVvJthyYPhYXFDH74Bb39Ywx127h72nvd8O
-# eu/zbbxCpAFdB9pnZc3U9l3Lhp7i02KH+r+lsJp8Q837THvwNfPPbDOJcN7x5qD/
-# +tF8NrSvePXNKreX1JwBsND90Abcep7haTJ21A4EILttNWi+X4SR438zwhFLW1MA
-# 96akY7piWYm2OtenzO1vzYifu5x2e72Z7VKDtBfXsd5STPZz0bzm2FPgVqsPwCos
-# TGtXoSeWSIp97mLfl4t5i5ckEOIYQR+ofN8RbXJIRLUXHpwTf5cN1xYHEf0W3SDF
-# dnsqr2q6zgIO334qGYjXFs/ngRKf1TDDMpTfcxzK5J48pK253f6dndaN3dHbf8pR
-# sN5l5nl/lLrIVJ9KUL7UGEEkPONS1c2XClQRtR7vOyEiHumB9/TwvJbIHB6xU+4G
-# kvFsRHKsQVC6X9djpNvf+ztCuNY/dS3OVRueRtVYiFYyo0DDcuk4TxIhaHq4MLHI
-# JXzmiBhviKUKKN9W8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILKcMOiZY/Tje4puSyPva7FRmo5hKCK9PECrjOI8/OuUMA0GCSqG
+# SIb3DQEBAQUABIIBgDI107aWRJQgtrYkLFVeMMfI35NXtcnJyqVSczCQ3Cyu1F0N
+# LGxD9Q6+M1N3eRk7TNN7/oHqG022YGoxsIjC/VALFGgW/o3mC6eqJ8LravwZIi63
+# OVe4mkCpX03ZLrBVS5k8Ew6+OHy+CQNInBkT3WM1sWdB2h6/+3jcPo+HypzRbV/d
+# V1Dvv4V88o5Fse7VPXY6ziMNAe5YSACeTsGVIsnrfogqm7EScda4jBj5C/eRPPvk
+# +89F2Mkh/tPEYyp0/jdnB17AA2gPbbIqlE9MNK9B4MRlTftZqDltQroa5wwHclWl
+# +N4vXqIxVe/MoehbeSatm3Z2cZhb2akXL8vvJFCnrUvlwfzDI20g+Up4J+UwkZIx
+# TmUHUf1VJ/vTBf2Nd4nKW7Svm/1346D43CsJqRcsYqxPsQNwq8pROJT7ebUTo+7O
+# hHhUUVIWWmHdnM6dsERjEBDku+53BMN7g0P6ukDNMwH8OzWTVpPqITNOpweAr43B
+# LdrD+Pzl60srIF5ZL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMzU0
-# MTJaMC8GCSqGSIb3DQEJBDEiBCCrEAa2l4LiXib7mmuCzC8uBYwy8sVEWo7x0JWh
-# mrkTKzANBgkqhkiG9w0BAQEFAASCAgCvHNkH4DrWZyzVmRLea70/AH1qrnSCCfwv
-# 3au90WFWXHtSe8Tbhh0QHPqaC7XMI4N5T4S33w3uJyB03o8AoCN/3Pe/Q8cuC3oA
-# EghmW0Lf8qcc4uZ9O9jXx08tKjsvOI4n0CmynrGWjt6glFvcUByOeY2ycvRN8J7Z
-# gSyDu4lXSyHBKQavP2GWk1IsEOM7KSKLJTCgKlMLfjMoQ1zJl0YcnW3YH+0mTvyM
-# mGOdE9PCem2saohUd74valpcSw59LZhyKq6dm5G5v2WSkiDZfmrRHSjkvbJN6Hvi
-# j8iP5Q43309SVRC6g+EYSCIbyBQCZtCfOvOcBiJV8GPI/LjSjP514uhaGWvxLDT3
-# AEf7VQfQQLkPoGG+msa7ijrIGiN5sGdyJJ4QTN6s9SaDPGzU1sKbLNzIS1pciIzr
-# +Cg/SxZd0u/uw62L7Fi2LHsGSL8+pRG5eRqp2xTB1QpprWI456chTQdfevDFt8Zr
-# U8SHA0Y1YjHtokI9wLu0YMmNGDFCKuQ8KZQueXEIE9mCXkGKbHOzXzOgQ/VEdzZx
-# BhcqiRx23lNYcBWGbOsJnQfDZyEoaNvxYygRWb9UDwUIuCbkFHGckUaRafU+vwIr
-# e3/QOlBYxhbw5XWV0TueIbP41716eBsvds75DqRO3F7rf7Kp4FYPKUPdVfIkmsCI
-# muHCOxB94g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNDI0
+# MzNaMC8GCSqGSIb3DQEJBDEiBCD2+M9qCTVJssIN9thubq461P9BoorQVFLWIG2J
+# ssoF6TANBgkqhkiG9w0BAQEFAASCAgCkr9rc4j/81wqRKSZQ4m4G6/5oPFob5FFv
+# kgs6wqLukQnm/HJ7he6QvbiFdclO2jW8ZACE24NaVRk5H/et4KD5xSKDajHmnS9S
+# RpcgUB+S+eyzoP/Gpqkri+AM3+Z/BAMPBBX9yzYcj/vruqp3Q29YsW3HU+u8fhho
+# nSNkXCFnjUxX28uz+lLMIhbJ7WWcfI/DFada6Ccm06nGVFyyjptw8eiSlqzjXOlu
+# MIMQuOeSPRInrn/ugvgaAyzrkQpHZsLi78N8rGbI33Pwo+0YHOKnKx2ebNLtM8+A
+# 9J40ARuXH7m6QZ3pBhPoI6HYZzTXtwWDz6h219S/0/rOcv6OoBm9e6leJoVQ6uy3
+# Lr6F1lFqTh4gXglZK9YNyPnyFgRg1yg9HinLGPB77WtfM8CJAXv6JikQitQYGLxn
+# NxAG/0XKTifnXIDJJsR3U87C4FcBYcfQZ3hxZ+PjhE9hteRk2RijKn5USKqfcLVj
+# CtPZWjaveQWhiOLAESbJMgH6rFEGUQNC7LRJf8VKrwp4z4ddPsnQw6bB8qwhSYNm
+# LDlewkI8Ao4d1AVXEhf49Z50QNsH5zMmhPaSMH0s0MgPkSGD2Y2R78fYBsv1DQew
+# ivM+6BRxLvq0ZgwOpYB8YIxZFLuY3IWmPPpjxz/anSONmGZpPs0WL8Dj/0iAiBUf
+# Tdf5YLbXoA==
 # SIG # End signature block
