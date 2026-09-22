@@ -972,6 +972,18 @@ function Complete-SmartM365ExecutionContext {
 
     $warningCount = if ($null -ne $global:SmartM365WarningCount) { [int]$global:SmartM365WarningCount } else { 0 }
     $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
+    $failureMessage = ''
+    if ($null -ne $ErrorRecord) {
+        $failureMessage = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord] -and $ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        elseif ($ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        else {
+            [string]$ErrorRecord
+        }
+    }
 
     $hasFailure = $null -ne $ErrorRecord -or $errorCount -gt 0
     if ($Status -eq 'Auto') {
@@ -986,6 +998,12 @@ function Complete-SmartM365ExecutionContext {
         }
     }
     $global:SmartM365ExecutionStatus = $Status
+    if ($Status -eq 'Failed' -and $errorCount -eq 0) {
+        $failureContext = if (-not [string]::IsNullOrWhiteSpace($FailureStage)) { " during $FailureStage" } else { '' }
+        $failureDetail = if (-not [string]::IsNullOrWhiteSpace($failureMessage)) { " $failureMessage" } else { '' }
+        WriteLog -Message "Execution failed$failureContext; no earlier ERROR log entry was recorded.$failureDetail" -Level 'ERROR'
+        $errorCount = [int]$global:SmartM365ErrorCount
+    }
 
     $summary = [ordered]@{
         Status            = $Status
@@ -1006,20 +1024,11 @@ function Complete-SmartM365ExecutionContext {
         Errors            = $errorCount
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($FailureStage)) {
+    if ($Status -eq 'Failed' -and -not [string]::IsNullOrWhiteSpace($FailureStage)) {
         $summary['FailureStage'] = $FailureStage
     }
 
-    if ($null -ne $ErrorRecord) {
-        $failureMessage = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord] -and $ErrorRecord.Exception) {
-            $ErrorRecord.Exception.Message
-        }
-        elseif ($ErrorRecord.Exception) {
-            $ErrorRecord.Exception.Message
-        }
-        else {
-            [string]$ErrorRecord
-        }
+    if ($Status -eq 'Failed' -and $null -ne $ErrorRecord) {
         if (-not [string]::IsNullOrWhiteSpace($failureMessage)) {
             $summary['FailureMessage'] = $failureMessage
         }
@@ -5532,8 +5541,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACh1kXX2CTO8fX
-# YhSypqU7IXXx+I4p5V+w3hADNZYGAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaGkFniYufdieP
+# k4Zd4T0TOgvZhI0uJf/zaTIB+GqepKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5666,31 +5675,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHTfR0T2q2yP8xoyNsVO6jRV0CNhywMnlR3qGHfOrVccMA0GCSqG
-# SIb3DQEBAQUABIIBgHDUplNrPTcBuu5mM4iDpuekppY3xXWdkZbL/KDZSO4Ip2c2
-# pdbADZWtkcFmQcSygQTyVISoLxHGwCVTlxGTt7yGmkmhQNCWNrRnmZ4O9/PJrpGn
-# +aU6w8g8f/VQQUU/IJjoGgsldz9G93HrHfx4tXKvvg6Qj3DIFHF1Iqa0EhpA2uIN
-# TBrwyZdbTj62fBRbKAHzerqCkpj0uIIl3B2ePVqR9s3E8Zs/WH06K0Fy/UfPHShK
-# x2BmnZrRvQWHdBsxqwIvctW5N6aApPhTvh4AlMTrsB29c3r9P3ABqNcP0T093o9j
-# 824gDzbBXDFKgtvkp+l+UFpMhfV3s/6P2rCoGteC5Grwyy1Oz8PwHm2jj3fLexDj
-# EmPqbRGSHmKF9cxq3bxqMg6csdRBDrjxgyHnDCV7Y9lZzsoF+xUwCP32hxMzY6xk
-# tzbQMQsk2GGNdmXs4Ywn590WIEEql6pQ/1Qrt4BXUXwdmFz1gZauAdNtOmOOT0LA
-# Xz12sCLftOPuWBBB4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEOgFv3e74CiWOv8DLqiCzdDXitlEZ41dHMuFOvwafEbMA0GCSqG
+# SIb3DQEBAQUABIIBgBXLatZzp20q6OnFW5QC0806XoEtXWFWOBDYY+kxRq455Lhv
+# h3RTvbbSN3Moq3PDdeAhqnHKNOtYBRbPGE2GLqckS7bLq/kEQI6TNa+BDuOPfCaN
+# uRI/b7Wa7iDczLeNd59505D5EoTAHjqPVcSgM+ST2D9gpZK/aw8wt/KEygypPm1B
+# ouQGq41FeBFpNJEy8DAJBw0VKi+GKeT6R9UTGhJ44zZZbGkqvz9kMCBkllCruSy7
+# BnArEdyrZvF1bU0qt5tvUCvl6coWhkV0vow7Yws63kcMuyKuUFMgZ1bVNrrIZrhR
+# QkeKxDMpiTIESUjAbM/RXp7HQhmwJ2b/D6xtKZJnpG0IBJw/WjgTpm1VmTPjj3cz
+# TE4h6TRmzJF0aza/BlIiqWkuer6IjS5NoK/hw4txikPVgkLk4lkJeybZcfRN/oPm
+# 2VOAAbaPhIcxbdsPWBZX+SrqjWCbRMjIwDgiGBNZCtXagBF7IuHnMIg9ep5XM5yU
+# P9HuBDrEfYEtkA/5c6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBIwAhNVCHmx5RE/cyHH4wA9q3fHZRz9/kVArsK
-# S6VoWTANBgkqhkiG9w0BAQEFAASCAgCpjrUQsYUoDejuBImBhAyLTRuwFPAOuC/x
-# uNKghuu7FuwPQ+k9HqnNKMCgAVmx/QR1XxtF6GV5Z6/URnTPHiIdwKFs9MadvY8I
-# PlGDKu5gGS9xZM9xM1lOFQJISYx4F8fH8gQCfMUacveoV0y/KE3RSVzKtZMszhRI
-# mW5QeDB+z6vxTAJ51AsLZ4nLY5qAGurYfoLs3Cu7h4QWq7ohw+6pFpiUXn7dHrxJ
-# LQuOGsbYvbQpMbrOpDgiMrN0POBBp4heQIosoAGd8isd9oXxnZ8+WAc/hBov81BP
-# Y+mRxUYqSJCYCzBOiPpvpfBElRUhrAdAoUTKj5XejTzz9oUkZxGoaL5PgZJYMtVM
-# uLJdUymks501SyuqwwFP7u8bqenon0SjpV5VgxrR6gD17jvSrfUYhuK8u+yQw2v7
-# DKf7s/dsUBI4qJxB47fNcP5io7GGIbRF4nZ2byufbg199VdasZMBuZ71weMhJgZO
-# liUQVoetIcc+I6FQlUkiEYwijamCj4ywlH6nSrvz9ab4/z8jVlkNy/WMT0v+K2R2
-# h7wsZ3FzgNUCoGcBXFpbL6hM4boaCuyMf7qRgNFta4YFhWoJsCWZ60IYHozF8YzR
-# XboRn8zkmgzRiBm8tECRSwipeCP/VKOZwGC2STxv1Nl0wxovVDyum+uCZKEj4gkY
-# UC+jrWWlVg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMw
+# MTdaMC8GCSqGSIb3DQEJBDEiBCDOfuoJRHo9seKVdk1pk/K07BK0nQvBcThSU0YF
+# sxcLcTANBgkqhkiG9w0BAQEFAASCAgCkdqs5jVdG5kKfKiaJtf+jzMmdB5EfXm3n
+# VQLUbmYIF/AGaSETKdHkDgmRHHqIVGIjOB6kVqv08+nEn9+8zndR68HcaQRNKmwm
+# HG+mc7Js84FzebSlTkZf8zYClllsGu0kljmiH+p6UOJHbkkM/RDLPkWr2+S4NLav
+# Y6ILuq5nU7nUiGQiSBWDzQX7bladQMwURh+RcxvS9LqxF/tV3UsgRxJXBHf/rCIN
+# Rpz+M/P2gbeNO/roNxxA1Jv9XkwvyvGaBb2hhnr2sEJ3WDFY1vdX7A6kb3SkR3NT
+# prqhcEOMDaDvc29iGrL4S06rF6UYtKX+xDl1Mvjyz2jgN4gmYIL7QekLbDsX7g7G
+# SJEz73ZJdlWpKGUf6CE93N4ziooBDOb8olUEYW3YNS95PT+4KZZ8LecXOCq8Llq6
+# bmw3LFXtuM/OVtleDePeFI3nQrOFPDcy0UT6P9fTfvr6c70/BKXic9aIRYzDwfDo
+# xX15SBj2wWPVuhhZiupGcOei/3VOluTlFbQ3tWj+1oim0ZC/GZpmsfONbgnOfQ79
+# 1EvD7hgjItHHK4DROcvcCxbL+HkV/6LSdMvDYWKTJ1CAsrn7Lldc/lmqTl8VCouG
+# ZIxadydPWBuxids7+1O0SJoWjzhCReU7fzIk1PvyFr28U7cwNqGQZ8t4Ft+FryYF
+# Zj8w74RsjA==
 # SIG # End signature block

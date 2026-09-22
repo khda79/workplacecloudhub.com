@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.23
+    1.0.24
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -72,7 +72,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.23"
+$ScriptVersion = "1.0.24"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -447,6 +447,10 @@ try{
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
     $end=Get-Date;$worst=Worst $all;$subject="SMART365 - [$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv -forestInfo $forest -RemoteDcAdminChecksEnabled:$EnableRemoteDcAdminChecks;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
+    $businessCriticalCount = @($all | Where-Object Status -eq Critical).Count
+    $businessWarningCount = @($all | Where-Object Status -eq Warning).Count
+    $notMeasuredCount = @($all | Where-Object TextValue -eq NotMeasured).Count
+    WriteLog -Message ("Health findings: Critical={0}; Warning={1}; NotMeasured={2}; technical log warnings and errors are reported separately in the execution summary." -f $businessCriticalCount,$businessWarningCount,$notMeasuredCount) -Level INFO
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv, $latestCsv)
     Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv; Latest=$latestCsv"
@@ -472,8 +476,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXWQgbqVTfHpfK
-# upi4EBEkrskC66ZblQ7p+DdNp/p5+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLNghO65qGHwPv
+# du5jZbDeHNvaC+j9VA0FvizRM6Bec6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -606,31 +610,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBwGoVzAFSySIhlqanXOWrtydjmoEzUQN+FCfs80ZbMiMA0GCSqG
-# SIb3DQEBAQUABIIBgG/qJ90UTYXg4hw/8KdA7TCYGlZImepMjEhu1LdzqIVRMwcJ
-# aQNydP0BULKN8PbaZNLnnWu/d3CWC40bW5erVx6FNWwhBuPbIM1JoghV3JPa526E
-# SEepIRpP61RYoJSnk16fkL8NB/y/SFa9ZlCuha/XPjGdnWS7d7H4B/QqMAfTs1r3
-# JHBOD2VXGIz6mDVC9En29W1V8J0KiUhHfxJ4pLb6XAhgalkuDP6XyqIK0czWNTei
-# h0uDudJfFpQNOGmUU8GAy8UwoBIbHgHJVHnWillNs42McS9ddF1tPY/CZYF2zLq1
-# aEco2wIh3OEqIBcBTHEegnpwqzEdUaQsfvSWXO/XATMabLfebRtlpXqrJqoftpKV
-# zbYKks0h/ddpiq3gXMrIIaHvQofs8cz0GVDKyJF4REvlYWwV/8oUmZibWy9CdUj7
-# jEy7RxwAA8L9tUpMYmUnJbwr0W/qACRHqyI99D0uXgkberCd+UMvSieB5JfBYzHH
-# XBc7y3HC0omi0/p4gqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDyDunr3K47guPvCETe1ysDjp86zBXNrKv5ocHkJHJwuMA0GCSqG
+# SIb3DQEBAQUABIIBgFuRFcG9JeR2C7L2aPBFx5Y5KdYvbEgQi+T1M3IlbAZSgS6j
+# QpJvUVhp11qjyJnoH50mPcGrdLb3zV2MY7k73FzZQQMc5yj1DW8PZEiLiCFe+dGG
+# N8k01JCuX+OFymvboiwHjoNvDf+OFwPpMmQdXNsMOR2UVu4COqueHNI6yOA4w/MS
+# nC5GapiqSupIY7Uka84JVu7+tLx2lxYqxfGNxeodwbIlzNNLJUQVUw2JA5vFRLBJ
+# EstgREx6abMYG4RWcQHhQxDZ6RPHv/8/sg5hsTF+/R46ULqKqgFDGjSbMpgx1osS
+# fH9lGDG1znpPTnu4E0sexnKiNqqpArX8JqJz1zUldXE5AHdtL1Z6Eh1cF8I0Q9Ew
+# zE3SLneDgCg6bIZutIiC1HBvoXx418vAoAKJM/dMJKz2ODzIUMjNOExvMDdUxyw/
+# pJ558ZlMM6VMxPmv6+RpDeoDf4YL5EaOUAbo/z+EX1D/QRa7cXjdHZMUkjNNmFag
+# vN+GLJR73imOdq6Hf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCGSCXCXWiv8Zb2YaItafB+JRrj/WY3mhQmDRVQ
-# hmCcPDANBgkqhkiG9w0BAQEFAASCAgAwWV+dtC9iGgKCpW3Z+7FeifA2ewpzhirr
-# ViqidKATqqr+AZ6TiCLWMsDelo1u872xfoCkTWY/8VMM9Rn7bPbSFMU1MzxtNLuR
-# cKTdOjmM+Y6Meo17ELVKn2Zg/AMssxQ+gKyabKzRVeFhVe133+CZfkZW/3ax0G2u
-# ybUuEvVWWtjOFxNt3RUIS0w0rbDK+4iRBAe6lldtci7DgQL5fxZWfrPwXcb5bSlc
-# Wwix3t01zGqMjIVntOVOfz4TzGmDb/reOzljkN8LonIpQHW3N8iqRJS9mrkf53zY
-# P5PSHiDJIXcGuzp16/0jCNOljBGop9+sLcW8bWp4itqFXIabZ3C1KGJqqFHz6MbC
-# Ujg6ehEVqjVKsyqQL0cfgEnTudJQmlq2xwQ6PLq4pyxy6SxXt/bQMGoaOkCZuF+Z
-# ZLmk8yS6Ug7UURlf0aiS2WMMmQJWeGYhVxdRDy8KN2Mus7NHVLOACbJmRUsDPdAs
-# I5MRQiWh3no2hXQAwmzq3iBjZx/+yYpcmaDmAdSnSYBRAhvYBqKeKli6FHkW9wzn
-# 9SVGMn0yDdObzODGgH4BYfWeuUI/z4K75GITueiDOEt86NtRNzHEUEydIudOD5Pa
-# LxsQf4Cyb3i+5iLAH5zvOvrFlAxKQ5D88NUsJF6vMcyutcopNJaemJnAseJeWIPd
-# sxCaNPuSMA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCNpgaNkKCiFCahqIp+NHwV5PhFs45T8GnavcqN
+# yf5HQzANBgkqhkiG9w0BAQEFAASCAgCEebAJr0EZLy/Jijd9WguwusBBdP2uPpRx
+# XRaM8Tjr+aNstbssR64kez6Bo1xfEwzfW+gEYiih2nUHXxa4rLEuoJe8Fdfd9gxL
+# sI6Ti32lpEMJl/x5NKheLcq3lEp599POvjigmieneXZpRGbcBgMcAPXIN2jEwE7h
+# uSUgnAZ6hJkmm6/Dw0st39DJZI+GDl67jqJjpCJpVGUNmkqCP/eGe2jZUDcSNoYz
+# r4yboLvthGi8jMwUh3F6DlIGnEOD+FYbQ5kE+d5XYrqhLt19OnploZHh2DnUM9U+
+# t7iuZhp5hHTrm0fNsFeRE85zROB/tkkgo9qbcwb6QDcek3nAQB86wdgCffO3k8Gj
+# +0h8ZrC5Xn3d5oSW9rtlyN0DIjc3kozS+WWtClc6HQ9uSnLpoX4yBRnZ0g4uRduT
+# lFNdmAUEt9um0DdC91zUzMGi/C9zYN1aupMc7QxNfGP6G79NNb/OR5eNwx87pypT
+# Gtt4W614Tc0I7rQva1bbc7Ip7lrYtvIZbtar5+jceIq1z6Gw3dJnZ1d2OEKPfG93
+# +u8+l2LiT/95wnMk1LhyLLh4O4fz8TSwqtA2JPPXLEyy2/50cPzUpsmX4xz4T2Lm
+# aPzVVTfU/2l1AtNyKWnFUDM2DV5neGAV7CplE7uP46tcnde9U8Gy0EpQZ/4nSkab
+# m9/wM8U9/Q==
 # SIG # End signature block
