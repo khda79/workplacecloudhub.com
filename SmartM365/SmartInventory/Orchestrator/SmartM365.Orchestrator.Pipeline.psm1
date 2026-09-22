@@ -63,6 +63,34 @@ function Enter-SmartM365OrchestratorPipelineLock {
     throw "Pipeline state is locked by another process: $Path"
 }
 
+function Move-SmartM365OrchestratorPipelineFileWithRetry {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [ValidateRange(1, 20)][int]$MaximumAttempts = 5,
+        [ValidateRange(0, 5000)][int]$RetryDelayMilliseconds = 200,
+        [scriptblock]$MoveOperation
+    )
+
+    if ($null -eq $MoveOperation) {
+        $MoveOperation = { param($Source, $Destination) [IO.File]::Move($Source, $Destination, $true) }
+    }
+
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        try {
+            & $MoveOperation $SourcePath $DestinationPath
+            return
+        }
+        catch [IO.IOException] {
+            if ($attempt -ge $MaximumAttempts) { throw }
+        }
+        catch [UnauthorizedAccessException] {
+            if ($attempt -ge $MaximumAttempts) { throw }
+        }
+        if ($RetryDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $RetryDelayMilliseconds }
+    }
+}
+
 function Write-SmartM365OrchestratorPipelineJsonAtomically {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -83,7 +111,7 @@ function Write-SmartM365OrchestratorPipelineJsonAtomically {
     $temporaryPath = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllText($temporaryPath, $content, [Text.UTF8Encoding]::new($false))
-        [IO.File]::Move($temporaryPath, $Path, $true)
+        Move-SmartM365OrchestratorPipelineFileWithRetry -SourcePath $temporaryPath -DestinationPath $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
@@ -379,8 +407,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1kUpACrcSZpxX
-# X//sWPrjUd2hKFVAhSWpLA6Y6jpGwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgIbQvqCXoKJkb
+# acMCo/NjIG/12Z/cJMQep3H5cWeb+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -513,31 +541,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIADAcDv7kQfnfSYwtW4cp2lJFvzciqP2XarGhcPMcvO4MA0GCSqG
-# SIb3DQEBAQUABIIBgE9A2x8PcGvLBXvYBJ2IXAO7G4a1VQHtprjmo2AmPAkV+YvF
-# wKFfVJdRTcKerGgulqFMsBlr+M4cL5n3ZE4GqCpf2imAcbtSjgc1+l87zcLe32G0
-# XtfazErxiQ3r1N6v/Fwat9JzjlIzUEzvLJBIOKB+j7CaoJ9jSVsSO2uZzab7MmAp
-# 3TUWdwyH1+E+zyll1p6Lo6MKC14rTBBQiYAhpM7x5OcJKcsz1wwh6sabqYATUptH
-# Mlhs7Epdcqci9U39zEP1FB+ZrjWpKtFopj2FsOX4oGmb+wkkIqO1SjE9dIt2p1PF
-# uny4jxKbJ8tiE9H+SQ6hKRSwxFz8jmVUKg3b8Salrm4lMbyCccVj+x0H3h96lHTb
-# XFc01vK4rftEBhzLkM/Ntv6VsPXu9EYwvmxDjCgTnITRYygIoKz0nCgvqTjrPdGV
-# 0eUQyQKqHBNvptQCZj9ragRicsJE2MgYD6QsPFJ8BfiDfEx17qxmTsKIYzAJ5K3j
-# wGUqsQFD1ShIh9fg9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBteV0IZaBBbLqNA6O+MiPdbpvb0B2pxQw0Nla3aJD7SMA0GCSqG
+# SIb3DQEBAQUABIIBgIiNqDcXV6h2pfGPwQG7NMfHEJxabmA7RwwxYFl9Wy9Za1NE
+# WZRvYBrG69/ViRWojJAjiJQyYMT4gYVQ6f9n7+2Q3STZCIK2si2Qwd8v4doDPFsF
+# ghsIo5HxHBLjRMU4tgk9CpWZF8mvV3tpjKLNqUXu4bOqGKpQKvD6/wRdmpl3er6K
+# /oJXYo2lBO+DwdG5Xgf4uHVKukACaAHdAK/es2tKJv2OM226hGkaC31Df7UHCgu1
+# AVL8H6hP2xKNl+IiOVew9T+z80/VY76LA+KqHXDgwx+YOL7Y/Rg1lnZKMhcFzzvl
+# irkfTsjLHrz+SzqMUbJMHsln5iF/0aB78h8IDs3d3C8JpBrgEz3Db4qhqWat0La6
+# HG/u5Hu9UIf5JTJqKawDlszHgxL9UiTq9AHrpkL+Gx0n5lqlQs+/3BMbhTNIVN9a
+# ZBGPKSplhmH1ZvBLfxWb6iD2okN+T2MUUVSArwW4JIZURH4gh9PQ7AaPSCCX1Zdv
+# ysgGOk6Fe4LQNYNkOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzQ0
-# MDNaMC8GCSqGSIb3DQEJBDEiBCCrrharUB7IViTfxEqa2QT8eSjoLbgqHV8QbaUl
-# sg1hwjANBgkqhkiG9w0BAQEFAASCAgBseD7hmHbGvxDOec+P+u4yhSWIGZTm2fdw
-# 36ZKDiOwe2rSjB79lqIc2nbc0Cbcag6m89wtu+ZnUABnmW6NAvdRWfM5JyzV0d5F
-# YbhW7/s8v411xUMl06UETlkcpV/QrXUe4nci1m8wmxNVXDPaIiGKEielHoFeJXR+
-# 861vk2QN/KiO24XeMNsdw+xxXWavVCSj2orPFZ253nJ73FG1xt3APwljDPz0Nqsx
-# xybLIzw3D2MY/XdbKe5r0+tFYw27KSQm9YQCvEmLOyyaodICiY+Q3UoqT0QkEohO
-# rovUrT/yo8Nh0YECC8uarH0vcYr8Xc1BvdvB4srE53sO32q2rYcRHNX8H2uUVd0D
-# sVpjSA8gLCKMK7NZaJ94Ypcd2b8z+hFhwB1q6IvqyHcyWl57ce/xqIjW0REicrVP
-# EKIX0zrdRt1cYuIjurB6RpUzU8ERxFViergb4GTpmEH7tobtdMavZC+L4907QCvi
-# cjVbCFTZ+kAL+5+M9EwiZ/DsP6oqPBPr8H4fCRsdcB1OmVkjhbmWsNTbbH9gNYvK
-# izvWcJmqfdFFA0w9AJebk3aRs1TxXeRjjjXTbMK7j/8B9bDn01KpNqMlOsEIAztv
-# JRQfJVSiIOeor75xwLoME0SIntX/bQF4N12pU17WmlmNRJdfOqWnHxlkGvjk1UH6
-# KXUKGPhcgg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCb6ELK1706R4dEhVUORVzY3/4yoogJJjsxcB6K
+# qFfu0TANBgkqhkiG9w0BAQEFAASCAgB6OQZOoiO8tVLPKKZlExg52rKT5NXsUv5o
+# lt1KzEYRyXV0P/dn/EDjysEQAmd6S9TQbizF2TYDZsuMkIp5aQjFM/N3+2as1kiB
+# 0RRvNxw9EuzJHIjs5hfbYLn8WbEbUecoVA2vAKWJ321NzHqDZypRqct0CYqtmMNX
+# V7rbLwB1ltfDHQu5F1Rsx4GyTvXC0WS3QHeyMFpD/LI1RzZB7Pv0gZPMdGI+62MT
+# 5co1+aKCdtxsGJq1I4HWtOUHseIvjtdPRlUzcCKTP/3IPsia0+3ZrOHd9Jr8QEjU
+# a/zeLEXJbJHZOfm2enhGMQhqcA2CMJ/KyD96Yq+HKSqY+65/sRmEcqvNIbc3Qt5+
+# sawbmD3Tn0doVkcldeVke/+UhW1Dc8wqyOLCkzwXgaiII6Nix0+6FRJUG4MajjAn
+# JoJoA1v+6QewvqAi6Jx/1W7IlQwKBo4GCXX/9PLJpGdey3iHP1gWG+KrVcPJVCXX
+# dOPVYga6VRIGv4mSsDuMpU9JyQ/OI9FIF1eFznoYQktn/Ow2NT/Jtf6jSgZwUEKS
+# dN0OKcAkcfYEgqcTMt6I/DQoy2rDECTWz4lJ3b/l89Lq3IOPehYutf5MoVoCkx6U
+# wRs9sThXO6C/dqQZsMW/FwZ8Ge1Z8hHbQC811uQC80L3Tbg7SYY18bC0SDppCwmM
+# UZuGzemUbg==
 # SIG # End signature block
