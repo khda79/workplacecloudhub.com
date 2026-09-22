@@ -3,12 +3,12 @@
 Validates Intune update reporting and Endpoint Analytics with synthetic data.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param()
 
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $passed = 0
@@ -45,6 +45,16 @@ $identity = @{
     TenantId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
     DataRootPath = $tempRoot
     NoConfigWrite = $true
+}
+$parseTokens = $null
+$parseErrors = $null
+$collectorAst = [System.Management.Automation.Language.Parser]::ParseFile($collector, [ref]$parseTokens, [ref]$parseErrors)
+if (@($parseErrors).Count -gt 0) { throw 'Intune analytics collector has PowerShell parse errors.' }
+foreach ($definition in @($collectorAst.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $_.Name -in @('Get-IntuneExportErrorDetails', 'Invoke-IntuneExportRead', 'Invoke-IntuneReportExport', 'Get-UpgradeEligibilityGraphRows', 'Publish-IntuneAnalyticsBatch')
+})) {
+    . ([scriptblock]::Create($definition.Extent.Text))
 }
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -204,6 +214,116 @@ try {
             Assert-IntuneAnalyticsTrue (@(Import-Csv -LiteralPath $path).Count -eq 1) "$(Split-Path $path -Leaf) was not bounded."
         }
     }
+    Invoke-IntuneAnalyticsTest 'Honor Retry-After while reading the same export job' {
+        $script:readAttempt = 0
+        $script:fakeClock = [datetime]'2026-09-22T12:00:00Z'
+        $script:readDelays = @()
+        $value = Invoke-IntuneExportRead -ReportName 'EADeviceScoresV2' -Operation 'job status' `
+            -RetryWindowSeconds 100 -RequestScript {
+                $script:readAttempt++
+                if ($script:readAttempt -eq 1) {
+                    $error503 = [Exception]::new('503 ServiceUnavailable')
+                    $error503.Data['Retry-After'] = '40'
+                    throw $error503
+                }
+                return 'completed'
+            } -ClockScript { $script:fakeClock } -SleepScript {
+                param($seconds)
+                $script:readDelays += $seconds
+                $script:fakeClock = $script:fakeClock.AddSeconds($seconds)
+            } -WarningAction SilentlyContinue
+        Assert-IntuneAnalyticsTrue ($value -eq 'completed' -and $script:readAttempt -eq 2) 'The same read was not retried.'
+        Assert-IntuneAnalyticsTrue ($script:readDelays.Count -eq 1 -and $script:readDelays[0] -eq 40) 'Retry-After was not honored.'
+    }
+    Invoke-IntuneAnalyticsTest 'Stop when Retry-After exceeds the read window' {
+        $script:readAttempt = 0
+        $script:fakeClock = [datetime]'2026-09-22T12:00:00Z'
+        $thrown = $false
+        try {
+            Invoke-IntuneExportRead -ReportName 'EADeviceScoresV2' -Operation 'archive download' `
+                -RetryWindowSeconds 100 -RequestScript {
+                    $script:readAttempt++
+                    $error503 = [Exception]::new('503 ServiceUnavailable')
+                    $error503.Data['Retry-After'] = '120'
+                    throw $error503
+                } -ClockScript { $script:fakeClock } -SleepScript { throw 'Sleep must not be called.' } | Out-Null
+        }
+        catch { $thrown = $_.Exception.Message -like '*Retry window exhausted*' }
+        Assert-IntuneAnalyticsTrue ($thrown -and $script:readAttempt -eq 1) 'An early retry violated Retry-After.'
+    }
+    Invoke-IntuneAnalyticsTest 'Fail fast on Graph authorization errors' {
+        $script:readAttempt = 0
+        $thrown = $false
+        try {
+            Invoke-IntuneExportRead -ReportName 'EADeviceScoresV2' -Operation 'job status' -RequestScript {
+                $script:readAttempt++
+                throw [Exception]::new('403 Forbidden')
+            } -SleepScript { throw 'Sleep must not be called.' } | Out-Null
+        }
+        catch { $thrown = $_.Exception.Message -like '*Status=403*' }
+        Assert-IntuneAnalyticsTrue ($thrown -and $script:readAttempt -eq 1) 'An authorization failure was retried.'
+    }
+    Invoke-IntuneAnalyticsTest 'Do not retry a failed export-job POST' {
+        $script:postCalls = 0
+        function Invoke-MgGraphRequest {
+            param($Method, $Uri, $Body, $ContentType, $OutputType, $ErrorAction)
+            $script:postCalls++
+            throw [Exception]::new('503 ServiceUnavailable')
+        }
+        $thrown = $false
+        try {
+            Invoke-IntuneReportExport -ReportName 'EADeviceScoresV2' -Select @('DeviceId') | Out-Null
+        }
+        catch { $thrown = $_.Exception.Message -like '*POST outcome is unknown*' }
+        Assert-IntuneAnalyticsTrue ($thrown -and $script:postCalls -eq 1) 'Export job creation was repeated after an ambiguous 503.'
+        Remove-Item Function:\Invoke-MgGraphRequest
+    }
+    Invoke-IntuneAnalyticsTest 'Do not publish empty readiness after two transient route failures' {
+        function Invoke-GraphCollection { param($Uri) throw [Exception]::new('503 ServiceUnavailable') }
+        $thrown = $false
+        try { Get-UpgradeEligibilityGraphRows | Out-Null }
+        catch { $thrown = $_.Exception.Message -like '*must not be published as an empty snapshot*' }
+        Assert-IntuneAnalyticsTrue $thrown 'Two transient Work From Anywhere failures were treated as an empty report.'
+        Remove-Item Function:\Invoke-GraphCollection
+    }
+    Invoke-IntuneAnalyticsTest 'Rollback all three snapshots if batch promotion fails' {
+        Import-Module (Join-Path $projectRoot 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1') -Force
+        $contractPath = Join-Path $projectRoot 'Schema\SmartWorkplaceCMDB.raw.tables.json'
+        $contract = Get-SmartWorkplaceCMDBTableContract -Path $contractPath
+        $names = @('Intune_WindowsUpdateAlerts.csv', 'Intune_EndpointAnalyticsDeviceScores.csv', 'Intune_EndpointAnalyticsUpgradeEligibility.csv')
+        $rawRoot = Join-Path $tempRoot 'DATA-LAST\Raw\Intune'
+        $tables = @{}
+        $latestPaths = @{}
+        $rowsByTable = @{}
+        $before = @{}
+        foreach ($name in $names) {
+            $tables[$name] = @($contract.tables | Where-Object name -eq $name)[0]
+            $latestPaths[$name] = Join-Path $rawRoot $name
+            $rowsByTable[$name] = @(Import-Csv -LiteralPath $latestPaths[$name])
+            $before[$name] = @((Get-FileHash -LiteralPath $latestPaths[$name]).Hash, (Get-FileHash -LiteralPath ($latestPaths[$name] + '.status.json')).Hash)
+        }
+        $paths = [pscustomobject]@{
+            DataRootPath = $tempRoot
+            DataAllRootPath = Join-Path $tempRoot 'DATA-ALL'
+            LatestOutputRootPath = Join-Path $tempRoot 'DATA-LAST'
+            TenantKey = $identity.TenantKey
+            OrganizationKey = $identity.OrganizationKey
+            EnvironmentKey = $identity.EnvironmentKey
+            TenantId = $identity.TenantId
+        }
+        $thrown = $false
+        try {
+            Publish-IntuneAnalyticsBatch -Paths $paths -TableNames $names -Tables $tables `
+                -LatestPaths $latestPaths -RowsByTable $rowsByTable -ContractPath $contractPath `
+                -Fixture -BeforePromotionScript { param($destination, $index) if ($index -eq 3) { throw 'Injected promotion failure.' } } | Out-Null
+        }
+        catch { $thrown = $_.Exception.Message -like '*Injected promotion failure*' }
+        Assert-IntuneAnalyticsTrue $thrown 'The injected promotion failure did not stop the batch.'
+        foreach ($name in $names) {
+            $after = @((Get-FileHash -LiteralPath $latestPaths[$name]).Hash, (Get-FileHash -LiteralPath ($latestPaths[$name] + '.status.json')).Hash)
+            Assert-IntuneAnalyticsTrue (($before[$name] -join '|') -eq ($after -join '|')) "The failed batch changed '$name' or its state."
+        }
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
@@ -214,8 +334,8 @@ if ($failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCnkaHwS9Fd33h
-# +Qslu99K+3k8IuuYhEgLDVxbaRx/eqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/nM+ckWpeGgxZ
+# yL2lMcld5CoiJ6K/907nKMmMldnT/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -348,31 +468,31 @@ if ($failed -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFy/r1tWbD40RSns8a0yvThRv8xTqAahW8Rexfj10HyAMA0GCSqG
-# SIb3DQEBAQUABIIBgBsEioYnbSjtAJX0Vr9ea/c4MA8x5TPQPyUX8Wm/6C6DeaeP
-# v9FCDgaIg/jPKaD1cj+oI5dDwUUtwkm4cRctxepE6t4SOV/lhg6lbWv+2vpPgxRY
-# 5bOmmbbUUYawMTQTsFydhkLGJZDC0VCFSP4g4vlkdJJ3faeZNAMeDU04Aju37Htp
-# avBshF9jcuK7qf8hgpzV84AkyZCuqWCl9FnYpCvtw9WO2BjObCBzymYueEeKXEak
-# oPHqhClharwb5GA+jH5BUk/Yj3XNpfjI+ry+FVMpbkLKagEAaWYFj8ONwYZY9WCQ
-# uX+xNZZ/dy8gnZmaMbri4gkGSzIff/KTldaZp3SKvvuwm9uUg1aIe+EwC5Y+Vzpv
-# hAZh+aya0MDk7Wd25CONrsjviZKECcCAmfi+c93u5wmBBM/iIv0FhIp1LGv/cEjG
-# gAoDNpqp+GQc5FuvtihxCCw8L8zvbxD1QilmPkWG1Prw+A96jOskan5knH5cwO2C
-# HnIA38AAaEfzZNjK7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFjnyEaJSi2ZrytwrYYRtrxKRWcO8KJ0sMAUk9eK6Cs6MA0GCSqG
+# SIb3DQEBAQUABIIBgAzgG9FuaLec0UMP3yXJNxTDDxvy0h1sWzoD+uHOXRqzOoFg
+# vGboxRfGP9Puoi0G+lX7qcM/YqnCrp1MvYm8jZpKD+u2adRYTUuqCaztbYGP1qri
+# V0LHfG2sPTJAHJM3F0bsR/g4xhoxoC1sXbnMGsmbSmT3JT/O/ZrpdylAoX6LiVI5
+# 5/bOm7xnW5lcJTmpbtAX8E5Nmd8CJ+0c7SjTBvHe+Ue2/pdWj43TQ+hVrdBSggZb
+# AnM0jxiMgG4aUAtWF2VPJiIwftTRdn83zLgNMfVmjw78D7KIen/qzL4kr8mCbLMq
+# NL7A7iSmo1EOihtpPzf1xeIL6CK3BnSqeFXbsCoeH72VK+ZGmD+DF43aAccOFX7R
+# 5ZfSypf9m3r5Eel/oT9mHk4ZtNYUndlk2LqNrAqNWUzRZ3Dt/qjnvpxkRixL3M5o
+# M97Ang0JaveZ/dCwnDbx4FHRig69ZmVaFDFlD7NU/TP1/xnz3hZ4ndNuUTaTb4ck
+# nVtrUhbmawM7HvzSBqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDBFuptNvyZSk45wSWCilRvyWTAp/veAf7vVwu4
-# oIQW9jANBgkqhkiG9w0BAQEFAASCAgCFJPnqXHfL5hnC+MSgNVLQlUkRkpEpzqyy
-# j27GxlcoJztdlfa7Ni/B8iGCA4DAE1dwaPCEz7Ep09+Qo3/bEmdk/dYpqk5/wLkP
-# irCvXuVqACQsgFCfsBiAoXV4x1/SEN6TzC/U0ikAQSRjed3n/4BmbIly/2DHwspk
-# MFOaZglrmiEV+26OK7TzlbdEQi0wKAFmMmdxkLB3EnXl0MiP+sOQDxaDtsgCbgRS
-# RQ59o5n5QRvIo1bHVbyVWrID564wcM3cz4txHsH+IrSWP05j7y4/k+gXGf/wQ7q6
-# WitqRnxwdUUp31e9rySaXiRx35FEkRFVYJf4238MVTIydpWnMszgs/tgmm8z4+oC
-# y4F1FzPb7w/RkCTJI7Aneprnkfgi/hVVDy5ZnrudxZ7kb0ev02MlmvikHmbfgbfF
-# dvWD40KxvxhFsy7PgLM2HJQE4+etOBLQPwtg5CiPbEDsE6NN9Rvh5ar1vGB6DM84
-# WQV53YWxymtsqrNF7Oj5NcKFwUhf2ogHBeQkusVf17khndYKO9qWgAnk/NAEKEHM
-# isjuN1lHtbZckZLiNiJzeDWlpRlCkKm/3PWrwYuKkSJ1il6YtOmU4Rial1owVcCI
-# n63SXvlhe4z0RbIryUZDbjcVWjj3n9iYMgYkg62bCE3+ZMYjr097ByNhP6+zmY9M
-# mXqEOqtPRA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxODU0
+# MzFaMC8GCSqGSIb3DQEJBDEiBCByd5qRP9g/Q1dVQfRPzJccgVJAsO110hGOyA/q
+# HZK4/DANBgkqhkiG9w0BAQEFAASCAgBJK/wjjOni4NJeXpx/lVxE/dCOOYiHjS5r
+# UCAKna4cBJTOhhGB0SUmO/WyigCUxA7vaXNo9pvrgZiPVL9bXu4eL5MSmgAaxsm+
+# /Qi4oU0M/I7VD7cqBwUGgTc1JFD2+9hfqg3n/zLvWllfMutfxR6wOZ3oOMzrARqb
+# LFyJG5VlD0VNupJ4mN4M8vhD/V1Ple3Uf6NdfkzWqwAxpm/qa+qRP1BDDSbmtCsw
+# bDZ5gbJ9JnOnVVToETMLXtHQgKJOpqPzcxejECzzhDmsbQqoeQkT2TOa/KlDCHDS
+# h6ZjZfS147Hn4SExKHilsDz0KwfkJIB11MLAzJJP+YM8lb+4BLpslsVD+c7K/Aec
+# HNl5OrNBBEXCZsEw+4/K82kS12Sc4F1VBDdKIoAGdgLOh+e7TIvXu82b6vVIs/7Y
+# PqBIO9XN0a7JqbwZTBuFn/20OHhZaADXUG32Kq4ARCcA8pI02z/pOvhy+PM7MyQK
+# daGV3FJrEet7zSzoW24KtFheZZs3+z7OAmB1WVaAUR75umM+NIznIujkFNBb5i2f
+# LN7BBSrOBmLYA6Py3+LdDFibHsx0nDTYXRjYb24OREiHyDdjhU+u+F21GvLCM/+T
+# 2hdbyjCXwxfk/6aqTFlwsE1HaJtn6hAXna9bs/wzwhZMwSOOgZF2uGOuANTSK0Zf
+# sBjxqSFEJw==
 # SIG # End signature block
