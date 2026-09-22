@@ -157,24 +157,127 @@ try {
         Assert-Offline ($text.Contains('$global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)')) 'Compliance fatal errors do not increment the execution error count.'
         Assert-Offline ($text.Contains('Complete-SmartM365ExecutionContext -Status $finalStatus -ErrorRecord $script:ComplianceFatalError')) 'Compliance fatal error details are not passed to the execution summary.'
     }
-    Test-OfflineCase 'Compliance detailed collection is opt-in and bounded for large tenants' {
+    Test-OfflineCase 'Compliance legacy per-device detail collection remains disabled' {
         $text=Get-OfflineSourceText $paths.Compliance
         $template=Get-OfflineSourceText 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.local.json.template'
         Assert-Offline ($text -match '\[bool\]\$IncludePolicyStates\s*=\s*\$false') 'Compliance policy-state detail is not disabled by default.'
         Assert-Offline ($template -match '"IncludePolicyStates"\s*:\s*false') 'Compliance local template still enables policy-state detail by default.'
+        Assert-Offline ($text -match '\$script:IncludePolicyStatesEffective\s*=\s*\$false') 'The retired per-device policy-state workflow can still be enabled.'
         Assert-Offline ($text -match 'PolicyStateAutoDisableDeviceThreshold' -and $text -match 'IncludePolicyStatesExplicit') 'Compliance large-tenant automatic safeguard is missing.'
         Assert-Offline ($text -match 'Write-ComplianceInfo -Message \("Detailed compliance policy-state collection was automatically disabled') 'Compliance automatic large-tenant safeguard still produces a warning status.'
         Assert-Offline ($text -match 'PolicyStateMaxRuntimeMinutes' -and $text -match 'Assert-PolicyStateRuntimeAvailable') 'Compliance runtime circuit breaker is missing.'
         Assert-Offline ($text -match 'Managed Windows devices selected for compliance summary:[^\r\n]+' -and $text -notmatch 'Write-Host \("Managed Windows devices selected') 'The selected-device milestone is still emitted without the timestamped logger.'
     }
-    Test-OfflineCase 'Compliance detailed launcher explicitly enables policy details' {
+    Test-OfflineCase 'Compliance canonical detail export is default and uses one launcher' {
         $text=Get-OfflineSourceText $paths.Compliance
-        $launcher=Get-OfflineSourceText 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Detailed-Inventory.cmd'
+        $launcher=Get-OfflineSourceText 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Inventory.cmd'
+        $template=Get-OfflineSourceText 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.local.json.template'
+        $orchestrator=Get-OfflineSourceText 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template'
         Assert-Offline ($text -match '\[switch\]\$CollectPolicyDetails') 'Compliance collector does not expose the dedicated detail switch.'
-        Assert-Offline ($text -match '\$CollectPolicyDetails\.IsPresent -or \$PSBoundParameters\.ContainsKey\(''IncludePolicyStates''\)') 'Compliance detail switch does not explicitly bypass the automatic large-tenant threshold.'
-        Assert-Offline ($text -match 'if \(\$CollectPolicyDetails\.IsPresent\) \{ \$true \}') 'Compliance detail switch does not enable policy-state collection.'
-        Assert-Offline ($launcher -match '-File\s+"%SCRIPT_DIR%SmartM365-Devices-Compliance-Inventory\.ps1"\s+-Tenant\s+prod\s+-Connect\s+-CollectPolicyDetails\s+%\*') 'Dedicated compliance launcher does not forward the explicit detail switch and caller arguments.'
-        Assert-Offline ($launcher -notmatch '-IncludePolicyStates\s+\$true') 'Dedicated compliance launcher uses an unreliable CMD-to-Boolean argument.'
+        Assert-Offline ($text -match '\[switch\]\$SummaryOnly') 'Compliance collector does not expose the explicit summary-only escape hatch.'
+        Assert-Offline ($text -match '\$script:PolicyExportEnabled\s*=\s*-not\s+\$SummaryOnly\.IsPresent') 'Canonical compliance detail export is not enabled by default.'
+        Assert-Offline ($launcher -match '-File\s+"%SCRIPT_DIR%SmartM365-Devices-Compliance-Inventory\.ps1"\s+-Tenant\s+prod\s+-Connect\s+%\*') 'Standard compliance launcher does not run the default complete collection.'
+        Assert-Offline (-not (Test-Path -LiteralPath (Join-Path $SourceRoot 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Detailed-Inventory.cmd'))) 'The redundant detailed compliance launcher still exists.'
+        Assert-Offline ($text -match "reportName\s*=\s*'DevicePolicySettingsComplianceReportV3'") 'Canonical compliance export does not use the qualified setting-level report.'
+        Assert-Offline ($text -match '-CanonicalPath\s+\$policyMainCsv' -and $text -match '-TimestampedPath\s+\$policyTsCsv' -and $text -match '-LatestPath\s+\$policyLastCsv') 'Canonical compliance export is not wired to the official DATA-ALL and DATA-LAST paths.'
+        Assert-Offline ($text -match 'Export-SmartM365Csv -Data \$exportOutput' -and $text -match 'last valid detailed DATA-LAST and SharePoint files were preserved') 'Canonical compliance export does not use the guarded publication path.'
+        Assert-Offline ($template -match '"PolicyExportTimeoutMinutes"\s*:\s*30') 'Canonical compliance export timeout is missing from the local template.'
+        Assert-Offline ($orchestrator -match '"Name"\s*:\s*"Intune-Devices-Compliance-Inventory"[\s\S]*?"Arguments"\s*:\s*""[\s\S]*?"EstimatedDurationMinutes"\s*:\s*15') 'Orchestrator compliance job is not aligned with the default complete collection.'
+        Assert-Offline ($text -match "lastReportedDateTime\s*=\s*''") 'Canonical compliance export no longer preserves the empty legacy timestamp contract.'
+    }
+    Test-OfflineCase 'Compliance export derives deterministic policy states' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Get-ComplianceExportPolicyState')
+        try {
+            $errorState=&$m {Get-ComplianceExportPolicyState -Aggregate ([pscustomobject]@{HasError=$true;HasNonCompliant=$true;HasUnknown=$false;HasCompliant=$true;HasNotApplicable=$false})}
+            $nonCompliantState=&$m {Get-ComplianceExportPolicyState -Aggregate ([pscustomobject]@{HasError=$false;HasNonCompliant=$true;HasUnknown=$false;HasCompliant=$true;HasNotApplicable=$false})}
+            $unknownState=&$m {Get-ComplianceExportPolicyState -Aggregate ([pscustomobject]@{HasError=$false;HasNonCompliant=$false;HasUnknown=$true;HasCompliant=$true;HasNotApplicable=$false})}
+            $compliantState=&$m {Get-ComplianceExportPolicyState -Aggregate ([pscustomobject]@{HasError=$false;HasNonCompliant=$false;HasUnknown=$false;HasCompliant=$true;HasNotApplicable=$true})}
+            $notApplicableState=&$m {Get-ComplianceExportPolicyState -Aggregate ([pscustomobject]@{HasError=$false;HasNonCompliant=$false;HasUnknown=$false;HasCompliant=$false;HasNotApplicable=$true})}
+            Assert-Offline ($errorState-eq'error' -and $nonCompliantState-eq'nonCompliant' -and $unknownState-eq'unknown' -and $compliantState-eq'compliant' -and $notApplicableState-eq'notApplicable') 'Compliance export state precedence changed.'
+        } finally {Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance export streams, aggregates, and publishes only validated device-policy rows' {
+        $fixtureCsv=Join-Path $testRoot 'compliance-export-fixture.csv'
+        @'
+DeviceId,PolicyId,SettingId,PolicyVersion,UserId,SettingInstanceId,SettingName,SettingNm,SettingStatus,StateDetails,ErrorCode,ErrorType,SettingValue
+d1,p1,s1,8,u1,i1,secureBootEnabled,,Compliant,,,,
+d1,p1,s2,8,u1,i2,bitLockerEnabled,,Not compliant,,,,
+d2,p1,s1,8,u2,i1,secureBootEnabled,,Error,,,,
+d2,p1,s2,8,u2,i2,bitLockerEnabled,,Compliant,,,,
+d3,p1,s1,8,u3,i1,secureBootEnabled,,Compliant,,,,
+d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
+'@ | Set-Content -LiteralPath $fixtureCsv -Encoding UTF8
+        $m=Import-OfflineFunctions $paths.Compliance @('Get-SafeProperty','Map-SettingCategory','Get-ComplianceExportPolicyState','Invoke-CompliancePolicyExport')
+        try {
+            &$m {
+                param($FixtureCsv)
+                $script:fixtureCsv=$FixtureCsv
+                $script:PolicyExportTimeoutMinutes=5
+                $script:SettingRuleMap=@(
+                    @{Pattern='secureboot(enabled)?';Category='SecureBoot'},
+                    @{Pattern='bitlocker|encrypt';Category='BitLocker'}
+                )
+                $script:capturedRows=@()
+                $script:capturedColumns=@()
+                $script:capturedCanonicalPath=''
+                $script:capturedPublication=$null
+                $script:publishCalls=0
+                function script:Write-ComplianceInfo { param($Message) }
+                function script:WriteLog { param($Message,$Level) }
+                function script:Invoke-WithRetry { param($Operation,$Script) &$Script }
+                function script:Invoke-GraphPagedCollection {
+                    [pscustomobject]@{id='p1';displayName='Synthetic Windows compliance';version=8;'@odata.type'='#microsoft.graph.windows10CompliancePolicy'}
+                }
+                function script:Get-PolicyConfiguredCategories {
+                    $set=[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    [void]$set.Add('SecureBoot');[void]$set.Add('BitLocker');return $set
+                }
+                function script:Invoke-MgGraphRequest {
+                    param($Method,$Uri,$Body,$ContentType,$ErrorAction)
+                    if($Method-eq'POST'){return [pscustomobject]@{id='synthetic-job'}}
+                    return [pscustomobject]@{status='completed';url='https://example.invalid/synthetic.zip'}
+                }
+                function script:Invoke-WebRequest { param($Uri,$OutFile,$ErrorAction) [IO.File]::WriteAllBytes($OutFile,[byte[]]@()) }
+                function script:Expand-Archive { param($LiteralPath,$DestinationPath,[switch]$Force) Copy-Item -LiteralPath $script:fixtureCsv -Destination (Join-Path $DestinationPath 'fixture.csv') -Force }
+                function script:Write-SmartM365CsvAtomically {
+                    param($Data,$Path,$Columns)
+                    $script:capturedRows=@($Data);$script:capturedColumns=@($Columns);$script:capturedCanonicalPath=$Path
+                }
+                function script:Export-SmartM365Csv {
+                    param($Data,$TimestampedPath,$LatestPath,$Columns)
+                    $script:publishCalls++
+                    $script:capturedPublication=[pscustomobject]@{Data=@($Data);TimestampedPath=$TimestampedPath;LatestPath=$LatestPath;Columns=@($Columns)}
+                    return [pscustomobject]@{TimestampedPath=$TimestampedPath;LatestPath=$LatestPath}
+                }
+            } $fixtureCsv
+            $devices=@([pscustomobject]@{id='d1'},[pscustomobject]@{id='d2'})
+            $summary=@(
+                [pscustomobject]@{DeviceName='DEVICE-1';AzureADDeviceId='aad-1';EntraObjectId='entra-1';AD_Domain='example.test';AD_OU='OU=One';DirectorySource='Hybrid'},
+                [pscustomobject]@{DeviceName='DEVICE-2';AzureADDeviceId='aad-2';EntraObjectId='entra-2';AD_Domain='example.test';AD_OU='OU=Two';DirectorySource='Hybrid'}
+            )
+            $canonical=Join-Path $testRoot 'canonical.csv'
+            $timestamped=Join-Path $testRoot 'timestamped.csv'
+            $latest=Join-Path $testRoot 'latest.csv'
+            $exportResult=&$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary $canonical $timestamped $latest
+            $captured=&$m {[pscustomobject]@{Rows=@($script:capturedRows);Columns=@($script:capturedColumns);CanonicalPath=$script:capturedCanonicalPath;Publication=$script:capturedPublication;PublishCalls=$script:publishCalls}}
+            $first=@($captured.Rows|Where-Object DeviceName -eq 'DEVICE-1')[0]
+            $second=@($captured.Rows|Where-Object DeviceName -eq 'DEVICE-2')[0]
+            Assert-Offline ($exportResult.RowCount-eq2 -and $exportResult.SelectedSettingRows-eq4 -and $exportResult.TotalSettingRows-eq6) 'Compliance export row filtering or counters changed.'
+            Assert-Offline ($first.state-eq'nonCompliant' -and $first.settingCount-eq2 -and $first.nonCompliantSettingCount-eq1 -and $first.SecureBoot-eq'Pass' -and $first.'BitLocker/Encryption'-eq'Fail') ("Compliance export did not aggregate noncompliant settings and categories: {0}" -f ($first|ConvertTo-Json -Compress))
+            Assert-Offline ($second.state-eq'error' -and $second.SecureBoot-eq'' -and $second.'BitLocker/Encryption'-eq'' -and $second.lastReportedDateTime-eq'') 'Compliance export did not preserve indeterminate category and timestamp semantics.'
+            Assert-Offline ($captured.Columns -contains 'lastReportedDateTime' -and $captured.Columns -contains 'BitLocker/Encryption') 'Compliance export output contract lost required columns.'
+            Assert-Offline ($captured.CanonicalPath-eq$canonical -and $captured.PublishCalls-eq1 -and $captured.Publication.TimestampedPath-eq$timestamped -and $captured.Publication.LatestPath-eq$latest) 'Validated compliance export was not published to all canonical paths.'
+
+            &$m {
+                $script:publishCalls=0
+                function script:Write-SmartM365CsvAtomically { param($Data,$Path,$Columns) throw 'synthetic canonical write failure' }
+                function script:Export-SmartM365Csv { param($Data,$TimestampedPath,$LatestPath,$Columns) $script:publishCalls++ }
+            }
+            $caught=$false
+            try { &$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary $canonical $timestamped $latest | Out-Null } catch { $caught=$_.Exception.Message-match'synthetic canonical write failure' }
+            $publishCallsAfterFailure=&$m {$script:publishCalls}
+            Assert-Offline ($caught -and $publishCallsAfterFailure-eq0) 'A failed canonical write still attempted to replace DATA-LAST or upload to SharePoint.'
+        } finally {Remove-Module $m -Force}
     }
     Test-OfflineCase 'Compliance batch progress reports rate ETA and completion' {
         $m=Import-OfflineFunctions $paths.Compliance @('Get-GraphBatchRetryDelaySeconds','Assert-PolicyStateRuntimeAvailable','Invoke-GraphBatchWithSubRequestRetry')
@@ -362,12 +465,14 @@ try {
         try{&$m {function script:Move-Item{throw 'synthetic replace failure'}};$caught=$false;try{&$m {param($s,$d)Copy-DiscoveredAppsFileAtomically $s $d} $source $destination}catch{$caught=$true};Assert-Offline $caught 'Synthetic replacement failure was not raised.';Assert-Offline ([IO.File]::ReadAllText($destination)-eq'last-valid') 'Prior latest CSV was modified by a failed replacement.'}finally{Remove-Module $m -Force}
     }
 
-    Test-OfflineCase 'Compliance incomplete policy detail gate precedes publication' {
+    Test-OfflineCase 'Compliance canonical export validation precedes publication' {
         $text=Get-OfflineSourceText $paths.Compliance
-        $gate=$text.IndexOf("elseif (-not `$script:PolicyDetailCollectionComplete)",[StringComparison]::Ordinal)
-        $publish=$text.IndexOf('Export-SmartM365Csv -Data @($polOut)',[StringComparison]::Ordinal)
-        Assert-Offline ($gate-ge0 -and $publish-gt$gate) 'Compliance policy detail can publish before the completeness gate.'
-        Assert-Offline (($text|Select-String -Pattern '\$script:PolicyDetailCollectionComplete = \$false' -AllMatches).Matches.Count -ge 2) 'Compliance failures do not mark policy detail incomplete.'
+        $gate=$text.IndexOf("if (`$aggregates.Count -eq 0)",[StringComparison]::Ordinal)
+        $materialize=$text.IndexOf('$exportOutput = @($exportRows',[StringComparison]::Ordinal)
+        $canonicalWrite=$text.IndexOf('Write-SmartM365CsvAtomically -Data $exportOutput',[StringComparison]::Ordinal)
+        $publish=$text.IndexOf('Export-SmartM365Csv -Data $exportOutput',[StringComparison]::Ordinal)
+        Assert-Offline ($gate-ge0 -and $materialize-gt$gate -and $canonicalWrite-gt$materialize -and $publish-gt$canonicalWrite) 'Compliance export can publish before the complete validated result is materialized.'
+        Assert-Offline ($text -match 'last valid detailed DATA-LAST and SharePoint files were preserved') 'Compliance export failure does not explicitly preserve the last valid published files.'
     }
 
     Test-OfflineCase 'Upgrade Eligibility defers profile identity to the canonical core context' {
@@ -497,8 +602,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB7x84ZWChAFgm
-# bsw0fK6cMACgWDUCd9F9HMMmQuaRMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRFh0/DeBehNkK
+# bsbMd8sDWCXluqeogIMSmtxeVISmA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -631,31 +736,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDyuE4xx0T69N+yhqN/Pt9hHr0evGAOJNMoYrO1kcyhbMA0GCSqG
-# SIb3DQEBAQUABIIBgH1liZMvV48EmDuS56GZyWzQXchGhvcBjS5zXH1mvSHkz49k
-# 7mxmnp5ydZBp4MFTrw3dnOAFeyYucGfwqXkWrYsGn8C6XZtbnkxTusHFUlbYGj+x
-# zjU+NRMDv+o8JJVYF8YVSYgQUXqSOipX6GUv1U130bA92SBy8Ckx/R7QeIScr2Ex
-# 1mOhGnmCfBFr4P5/yQ4fwuN3KW84YzKzWHz0kyhxlWKE2gxQbeT66rhZTdcirXGt
-# 6wmh2dP9xl3EjsTGEqOknPKiIF1kjdTlr/rINSX81ISHZFbKWJUdiTJYhWUAvuTi
-# 9O2gofuU2E7uVE6U5pmehXPnLIFYfIVTPbbHoev/R+zvRneK0uO9/bvsmp/wWFJl
-# LYBO81qL5Ez8feTz9pCxnAmLsC4D3w6u7ilvGQ4httuVM7z5D5NVFqe+KK6WZuPb
-# yLyfxJWc/yUoy2CAIKO0Ou3wKF5Ui0lQDRef7TrGa5bXGMLVVmiVGwdCNs4OdfNp
-# /uoTJVdZPvSH1Tp7K6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG529eyPb/TakTfAHZtRuLDM8K++tm40ryGSXb27sN3jMA0GCSqG
+# SIb3DQEBAQUABIIBgKunWV8vsdk/ulVvJthyYPhYXFDH74Bb39Ywx127h72nvd8O
+# eu/zbbxCpAFdB9pnZc3U9l3Lhp7i02KH+r+lsJp8Q837THvwNfPPbDOJcN7x5qD/
+# +tF8NrSvePXNKreX1JwBsND90Abcep7haTJ21A4EILttNWi+X4SR438zwhFLW1MA
+# 96akY7piWYm2OtenzO1vzYifu5x2e72Z7VKDtBfXsd5STPZz0bzm2FPgVqsPwCos
+# TGtXoSeWSIp97mLfl4t5i5ckEOIYQR+ofN8RbXJIRLUXHpwTf5cN1xYHEf0W3SDF
+# dnsqr2q6zgIO334qGYjXFs/ngRKf1TDDMpTfcxzK5J48pK253f6dndaN3dHbf8pR
+# sN5l5nl/lLrIVJ9KUL7UGEEkPONS1c2XClQRtR7vOyEiHumB9/TwvJbIHB6xU+4G
+# kvFsRHKsQVC6X9djpNvf+ztCuNY/dS3OVRueRtVYiFYyo0DDcuk4TxIhaHq4MLHI
+# JXzmiBhviKUKKN9W8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjU4
-# NTlaMC8GCSqGSIb3DQEJBDEiBCB+CEJhyV6JR7DihyCLaz67gGyhQwKKJRJZoLMS
-# BsQvnTANBgkqhkiG9w0BAQEFAASCAgCdMwo3aSOa4DruCAyWm0hKzIg/mcVM4AL7
-# DtY119+MDU+D5ZVDiHIGOUWHLUGczsA1hglrTx8sRoESBblPLi/CALdHR06mb1m+
-# bqS+asymt3OoYPtNipWwaLXMdfzFg3eil1p/wbyeBjujiw/moFWfX/EWlLn21WxM
-# 0vE5xd3gnorjhFhGmS0l3xD3Ni0X4IpCDz446NkVRRgVgTOpdDGE5glr+95SuDHh
-# Z43pprbZUyNQP4Xg8KKHbesA4FG1ksu3tNQrzNkAeOd57MPPQ2GjX/bVUioOW36O
-# 2R4peW9GY3HiuryOJM7ESjjIEWhdtLCO0FQ0Hs1yy+gGtXY5bjniwsXQGm1a+7yD
-# iQFHrAuyHbFwsBU1iVwqzxgu/P0wW07cg1MecqbUNa+ObAbegMYu8CyQkP6T+o+0
-# prt2F9zlJkuD1Ql0YQp5g/3la6KBqs8lkIaY2fbZjPOe0Qu1hSNavIhogfiI0xw5
-# QQanEjgAkxNb69MZ0740cTt7G/3+DO3p6lBNEVNasPVlJ6RRg/zOecL3y9gObyHQ
-# 2KxY9Apws71ywDa8ASjcYqFkDLhQgiK2AXNWZuaUhssw4F4o0rh3oSCPgBoSkJj0
-# sb5jFgSTOqD12+0X39paZpOjMRKk4KU/P81nTk9ytgRWPzX8KeQFu039yzSTMQAy
-# dJtG76MK1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMzU0
+# MTJaMC8GCSqGSIb3DQEJBDEiBCCrEAa2l4LiXib7mmuCzC8uBYwy8sVEWo7x0JWh
+# mrkTKzANBgkqhkiG9w0BAQEFAASCAgCvHNkH4DrWZyzVmRLea70/AH1qrnSCCfwv
+# 3au90WFWXHtSe8Tbhh0QHPqaC7XMI4N5T4S33w3uJyB03o8AoCN/3Pe/Q8cuC3oA
+# EghmW0Lf8qcc4uZ9O9jXx08tKjsvOI4n0CmynrGWjt6glFvcUByOeY2ycvRN8J7Z
+# gSyDu4lXSyHBKQavP2GWk1IsEOM7KSKLJTCgKlMLfjMoQ1zJl0YcnW3YH+0mTvyM
+# mGOdE9PCem2saohUd74valpcSw59LZhyKq6dm5G5v2WSkiDZfmrRHSjkvbJN6Hvi
+# j8iP5Q43309SVRC6g+EYSCIbyBQCZtCfOvOcBiJV8GPI/LjSjP514uhaGWvxLDT3
+# AEf7VQfQQLkPoGG+msa7ijrIGiN5sGdyJJ4QTN6s9SaDPGzU1sKbLNzIS1pciIzr
+# +Cg/SxZd0u/uw62L7Fi2LHsGSL8+pRG5eRqp2xTB1QpprWI456chTQdfevDFt8Zr
+# U8SHA0Y1YjHtokI9wLu0YMmNGDFCKuQ8KZQueXEIE9mCXkGKbHOzXzOgQ/VEdzZx
+# BhcqiRx23lNYcBWGbOsJnQfDZyEoaNvxYygRWb9UDwUIuCbkFHGckUaRafU+vwIr
+# e3/QOlBYxhbw5XWV0TueIbP41716eBsvds75DqRO3F7rf7Kp4FYPKUPdVfIkmsCI
+# muHCOxB94g==
 # SIG # End signature block
