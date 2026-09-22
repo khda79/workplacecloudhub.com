@@ -8,8 +8,9 @@ and full remediation columns. Single CSV output for Power BI consumption.
 - For each policy: exports Intune report via Graph beta reports/exportJobs (required filter: PolicyId eq '<id>')
 - Downloads ZIP, extracts CSV, consolidates into one dataset
 - Optional enrichment with Win11 Readiness CSV (join by NormalizedDeviceName derived from DeviceName)
+- Missing OSVersion fallback through Intune managed-device ID to Entra device ID
 - Computed columns added on all rows:
-    RiskBucket, BlockingReason, OSVersion, DaysSinceLastStatus,
+    RiskBucket, BlockingReason, OSVersion, OSVersionSource, DaysSinceLastStatus,
     ActionPriority, ActionCode, ActionDescription, ActionOwner
 - Single output CSV (DATA-ALL + DATA-LAST + Archive + SharePoint):
     Intune_WindowsUpdate_Status.csv
@@ -38,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.36
+  1.38
 .VERSION
-1.36
+1.38
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +93,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.36"
+$ScriptVersion = "1.38"
 
 # ==========================================================
 # App-only authentication parameters
@@ -320,6 +321,14 @@ $WorkPath    = Join-Path $ScriptCsvLogFolderPath "Work"
 $LatestCsvFolderPath  = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ""
 $CsvLastFinal  = Join-Path $LatestCsvFolderPath $CsvName
 $CsvLastTemp   = Join-Path $LatestCsvFolderPath "$CsvName.tmp"
+$IntuneDeviceInventoryCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IntuneDeviceInventoryCsvPath' -DefaultValue ""
+$EntraDeviceInventoryCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDeviceInventoryCsvPath' -DefaultValue ""
+if ([string]::IsNullOrWhiteSpace($IntuneDeviceInventoryCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
+    $IntuneDeviceInventoryCsvPath = Join-Path $LatestCsvFolderPath 'Intune_Devices_Inventory.csv'
+}
+if ([string]::IsNullOrWhiteSpace($EntraDeviceInventoryCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
+    $EntraDeviceInventoryCsvPath = Join-Path $LatestCsvFolderPath 'M365_Entra_Devices.csv'
+}
 
 # ==========================================================
 # SharePoint upload
@@ -1076,6 +1085,95 @@ function Build-ReadinessLookup {
     return $lookup
 }
 
+function Add-WinUpdateEntraOsVersionFallback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$EntraDeviceRows
+    )
+
+    $intuneBridge = @{}
+    $ambiguousManagedIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($intuneRow in $IntuneDeviceRows) {
+        $managedDeviceId = [string]$intuneRow.'Device ID'
+        $azureAdDeviceId = [string]$intuneRow.'Azure AD Device ID'
+        if ([string]::IsNullOrWhiteSpace($managedDeviceId) -or [string]::IsNullOrWhiteSpace($azureAdDeviceId)) { continue }
+        $managedKey = $managedDeviceId.Trim().ToLowerInvariant()
+        $azureAdKey = $azureAdDeviceId.Trim().ToLowerInvariant()
+        if ($ambiguousManagedIds.Contains($managedKey)) { continue }
+        if ($intuneBridge.ContainsKey($managedKey) -and $intuneBridge[$managedKey] -ne $azureAdKey) {
+            [void]$intuneBridge.Remove($managedKey)
+            [void]$ambiguousManagedIds.Add($managedKey)
+            continue
+        }
+        $intuneBridge[$managedKey] = $azureAdKey
+    }
+
+    $entraVersionByDeviceId = @{}
+    $entraBuildByDeviceId = @{}
+    foreach ($entraRow in $EntraDeviceRows) {
+        $entraDeviceId = [string]$entraRow.DeviceId
+        $entraOsVersion = [string]$entraRow.OperatingSystemVersion
+        if ([string]::IsNullOrWhiteSpace($entraDeviceId) -or [string]::IsNullOrWhiteSpace($entraOsVersion)) { continue }
+        $entraBuild = Get-WinUpdateOsBuild -Value $entraOsVersion
+        if ($null -eq $entraBuild) { continue }
+        $entraKey = $entraDeviceId.Trim().ToLowerInvariant()
+        if (-not $entraBuildByDeviceId.ContainsKey($entraKey) -or $entraBuild -gt $entraBuildByDeviceId[$entraKey]) {
+            $entraBuildByDeviceId[$entraKey] = $entraBuild
+            $entraVersionByDeviceId[$entraKey] = $entraOsVersion.Trim()
+        }
+    }
+
+    $output = New-Object System.Collections.Generic.List[object]
+    $existingVersionRows = 0
+    $entraVersionRows = 0
+    $unavailableRows = 0
+    foreach ($row in $Rows) {
+        $o = [ordered]@{}
+        foreach ($property in $row.PSObject.Properties) { $o[$property.Name] = $property.Value }
+
+        $currentOsVersion = [string]$row.OSVersion
+        if (-not [string]::IsNullOrWhiteSpace($currentOsVersion)) {
+            $existingVersionRows++
+            $o['OSVersionSource'] = if ([string]$row.ReadinessMatch -eq 'Matched') { 'Readiness' } else { 'Existing' }
+        }
+        else {
+            $managedDeviceId = [string]$row.DeviceId
+            $entraOsVersion = ''
+            if (-not [string]::IsNullOrWhiteSpace($managedDeviceId)) {
+                $managedKey = $managedDeviceId.Trim().ToLowerInvariant()
+                if ($intuneBridge.ContainsKey($managedKey)) {
+                    $entraKey = [string]$intuneBridge[$managedKey]
+                    if ($entraVersionByDeviceId.ContainsKey($entraKey)) {
+                        $entraOsVersion = [string]$entraVersionByDeviceId[$entraKey]
+                    }
+                }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($entraOsVersion)) {
+                $o['OSVersion'] = $entraOsVersion
+                $o['OSVersionSource'] = 'Entra'
+                $entraVersionRows++
+            }
+            else {
+                $o['OSVersionSource'] = 'Unavailable'
+                $unavailableRows++
+            }
+        }
+        $output.Add([pscustomobject]$o) | Out-Null
+    }
+
+    [pscustomobject][ordered]@{
+        Rows = $output.ToArray()
+        ExistingVersionRows = $existingVersionRows
+        EntraVersionRows = $entraVersionRows
+        UnavailableRows = $unavailableRows
+        IntuneBridgeKeys = $intuneBridge.Count
+        AmbiguousIntuneBridgeKeys = $ambiguousManagedIds.Count
+        EntraVersionKeys = $entraVersionByDeviceId.Count
+    }
+}
+
 # ==========================================================
 # Risk + Blocking + Remediation
 # ==========================================================
@@ -1522,6 +1620,7 @@ function Get-WinUpdateDeviceSummaryRows {
             CurrentDeviceUpdateStatus_loc = [string]$selected.CurrentDeviceUpdateStatus_loc
             ProgressPhase = Get-WinUpdateProgressPhase -Row $selected
             OSVersion = [string]$selected.OSVersion
+            OSVersionSource = [string]$selected.OSVersionSource
             LatestAlertMessage = [string]$selected.LatestAlertMessage
             BlockingReason = [string]$selected.BlockingReason
             UpgradeEligibilityLabel = [string]$selected.UpgradeEligibilityLabel
@@ -1839,6 +1938,28 @@ try {
     }
 
     # ----------------------------------------------------------
+    # OS version fallback: Windows Update -> Intune ID bridge -> Entra
+    # ----------------------------------------------------------
+    $intuneDeviceInventoryRows = @()
+    $entraDeviceInventoryRows = @()
+    $intuneDeviceInventoryAvailable = -not [string]::IsNullOrWhiteSpace($IntuneDeviceInventoryCsvPath) -and (Test-Path -LiteralPath $IntuneDeviceInventoryCsvPath)
+    $entraDeviceInventoryAvailable = -not [string]::IsNullOrWhiteSpace($EntraDeviceInventoryCsvPath) -and (Test-Path -LiteralPath $EntraDeviceInventoryCsvPath)
+    if ($intuneDeviceInventoryAvailable -and $entraDeviceInventoryAvailable) {
+        $intuneDeviceInventoryRows = @(Import-Csv -LiteralPath $IntuneDeviceInventoryCsvPath)
+        $entraDeviceInventoryRows = @(Import-Csv -LiteralPath $EntraDeviceInventoryCsvPath)
+        Write-Log "Loading OS version fallback sources: IntuneDevices=$($intuneDeviceInventoryRows.Count) EntraDevices=$($entraDeviceInventoryRows.Count)." "INFO" "ENRICH"
+    }
+    else {
+        Write-Log "OS version fallback sources unavailable: IntuneInventoryAvailable=$intuneDeviceInventoryAvailable EntraInventoryAvailable=$entraDeviceInventoryAvailable. Existing OSVersion values will be preserved." "WARN" "ENRICH"
+    }
+    $entraOsFallback = Add-WinUpdateEntraOsVersionFallback `
+        -Rows @($enrichedRows) `
+        -IntuneDeviceRows $intuneDeviceInventoryRows `
+        -EntraDeviceRows $entraDeviceInventoryRows
+    $enrichedRows = @($entraOsFallback.Rows)
+    Write-Log "OS version fallback completed: ExistingRows=$($entraOsFallback.ExistingVersionRows) EntraRows=$($entraOsFallback.EntraVersionRows) UnavailableRows=$($entraOsFallback.UnavailableRows) IntuneBridgeKeys=$($entraOsFallback.IntuneBridgeKeys) AmbiguousIntuneBridgeKeys=$($entraOsFallback.AmbiguousIntuneBridgeKeys) EntraVersionKeys=$($entraOsFallback.EntraVersionKeys)." "INFO" "ENRICH"
+
+    # ----------------------------------------------------------
     # Computed columns pass:
     #   RiskBucket, BlockingReason, DaysSinceLastStatus,
     #   ActionPriority, ActionCode, ActionDescription, ActionOwner
@@ -2125,6 +2246,8 @@ try {
 
         $summaryMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'Matched').Count
         $summaryNotMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'NotMatched').Count
+        $summaryEntraOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Entra').Count
+        $summaryUnavailableOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Unavailable').Count
         $summaryReadinessPct = if (($summaryMatched+$summaryNotMatched) -gt 0) { [math]::Round(100.0*$summaryMatched/($summaryMatched+$summaryNotMatched),2) } else { 0 }
         $readinessRows = @(
             [pscustomobject]@{ Metric='Enrichment enabled'; Value=$EnableReadinessEnrichment }
@@ -2132,6 +2255,8 @@ try {
             [pscustomobject]@{ Metric='Matched devices'; Value=$summaryMatched }
             [pscustomobject]@{ Metric='Unmatched devices'; Value=$summaryNotMatched }
             [pscustomobject]@{ Metric='Match percentage'; Value="$summaryReadinessPct%" }
+            [pscustomobject]@{ Metric='OS version from Entra fallback'; Value=$summaryEntraOsVersion }
+            [pscustomobject]@{ Metric='OS version unavailable after fallback'; Value=$summaryUnavailableOsVersion }
         )
         $readinessTable = Convert-ObjectsToHtmlTable -Rows $readinessRows -Columns @('Metric','Value') -Title 'Readiness data quality'
 
@@ -2158,7 +2283,7 @@ try {
 <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
 <td style="width:33.33%;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">WINDOWS 11</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows11</div><div style="font-size:12px;color:#475569;">$fleetWindows11Pct%</div></td>
 <td style="width:33.33%;padding:12px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#b45309;">WINDOWS 10</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows10</div><div style="font-size:12px;color:#475569;">$fleetWindows10Pct%</div></td>
-<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">UNKNOWN / OTHER</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetUnknownOrOther</div><div style="font-size:12px;color:#475569;">$fleetUnknownOrOtherPct%</div></td>
+<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">OS VERSION UNKNOWN</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetUnknownOrOther</div><div style="font-size:12px;color:#475569;">$fleetUnknownOrOtherPct%</div></td>
 </tr></table>
 <p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Within Windows 11: $fleetOsCovered on $fleetTargetShortLabel+ | $windows11BelowTarget below $fleetTargetShortLabel.</p>
 "@
@@ -2285,8 +2410,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1SgCsk3RfJkpt
-# aE+RdzHLN32fLe/OK+muz0hj6Z+qe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVWnFKRs/xn4Rf
+# izd446CyslmaBja9N/eEWuwlhmFDeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2419,31 +2544,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIfz9V2BZb+7ebAyLgpnvOsBZwVrNg5pogWfBF96ZGrZMA0GCSqG
-# SIb3DQEBAQUABIIBgHK0B8EFzNixtKNuPAY4/LULS1q9huNXlHHlYEPOOwZ0vSGS
-# R7BqpMB8/nNEtxMVP0q21TpFmQ/6InsDdKEoxrv0SXCMMMyYGid2i6KD2Uqx1ITJ
-# PHi0sz05c9Yw/Fuw4HpCs1V1zXA7UTD+fHQb7B62CasMlpJcjDoKQwv+Phk/eQB5
-# NNKwnwyvo6paVDeK6jDhJaGBGhSOvufJ4h2gZeQP8Fy7LwIxlWCKqvFR4HO84c/r
-# d5GIV01DTzKE1fluxFgfRWxAgPaZsC6zvZEE8j2x1ybTTkK5426nI9Xn0rwhuOFJ
-# Q9+2ZeOMibuH5BDeXrme38VgI8ZGdnuSnVS4C6koHddqYdmc81WsoGMEurYX2F38
-# IYW658I1p0MtPofnBLUD2pFSuGPZIe2r9ekCcN5AFZdCsmtNQNfoXf+Z+NAK3ESH
-# h1TS1HMCflzeHYprxNSpdJZAIKZ9x08BSoHE74H1eB0Oe+SVzVMjtvqJ5yYC6Sws
-# qLC/mDMYIKsWbJceXqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJI2bvKzNmHtWGm2Bqm+ip1fnBB3ODvunpblOmTmW1fNMA0GCSqG
+# SIb3DQEBAQUABIIBgJOuM63zApq4gcCrh6CKwubWzDQIiFlfJZRkvxgdPFdAfhtn
+# I4k/KXXXSbLBDD2JoruJIT0REaN58APmlnSk73BVD0NY4awgWiYxpqv6xUEfx6ha
+# BCupFpuNnNKMXHzXAf709aFVfgGwMoVcFXrzcBUd0N1nDe2xWaXnTVkcLpL46WbK
+# BfFyrcGgBARMjVKO6FeGL6cmj1tBOVKG/wivSGDHsH8ZfCNW3EncFOMJlOppFvDq
+# 0Ppid3CD2ttQKYqKweptfUhPLVvfseb9dhqP9E5Mx4AVzsdy3z2GbFCe16L1YLww
+# yzO8a4xEQg+gX3BG7cjGtdmrcHkjsML1PDeKv+iV15UbiVlPhk6ynWTfvoJHi2CY
+# lsL258iaao5sgUGgL4K2pTS37awwJN/AY6tVVF1EV1Dw6mDI8WKs4Nkkj772KIxS
+# ziWkDywnvIHwJHLVsNWQxbVHsYNMndw6ANktNlgCr0mgZsI0Ov++aHulgA7rrQnc
+# GMj40zrLY8sobbO9aKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjU4
-# NTdaMC8GCSqGSIb3DQEJBDEiBCDTUNBtnGf/+vnOl47VpJXKg9NPuP1CJJyqiCQv
-# YBU7dzANBgkqhkiG9w0BAQEFAASCAgCY07/qIXrOKaqdjucx8wFa36763uN4UzsQ
-# R8WKAxhTRbPpuosZn0VssU2X0b6nssYI9fjuXSjvvPYt/a9h7/NssG8dqiG1NIO6
-# 1L/LkCdx5WtB8Z2V3/ApLiikBhFZFhB2bMMOqJBOsTrYDX7pWN9BaJPu/+o+FX0r
-# nZur9p4a2BEAstD4JU1vjkPZr0JaWBlSSL0L9Hxb771bCMfNOWINsr+9WBILQlVs
-# mQxC44TlLSxhwoGkchB/haOM73BDdKst+ukV6p0UTtgB87sq6uGpfB2qqxXFvgf8
-# BwDwkR3G+wHDvD4llfJKOJYRhnJz7TWv3Fr/P2LF3WhhDbmtUCiIJhMpIxchvsmp
-# f5KcBVXX78qtMgw+J8DcP38kZJmAWGgJJaeYOyrRwTTF1XUyFwt0dgipN97THME1
-# H37J8vstSWnkXyOedBBwWoulIahBbZv/atT99NGIZD7s4EQnJe4uC4lyRoP35R5z
-# fTp4ZMruwjtaYs9MKiL35EDozHP0ehXrWzRlKgOHPX65WncVOsbxhKE+3NtzRYwB
-# EwMaYE4D6idGLh5RSTp1Z709A0eyqpKFaMQ4qsdUI5NBhFujO4E0ur7bhUmwKdIS
-# pjF6N8qG8dyfy/dI+yvmZgcd6WIxm8xOOh+I0j8wGOZr9UAgMEacPMBK37aFXMGZ
-# +D0MnrLCMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNDI0
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDbLaUrFbbpX4JgaItScbW6W9SxLm5htVoFD+qz
+# Qjta7jANBgkqhkiG9w0BAQEFAASCAgAbT/uLwkuSlrLWJlyeFPTHy4ckDr7S2LjZ
+# GqL292AnmMktjCPhGsb90CIP0tu8Trdkl9RaqDbd62qs8GHS/Jbwk7GqpFZ4gcQh
+# 9yKzmJW1Qzyji1oxIuZH6x7pcgZRVYK1GymlXkZb3yzo3CUs6yYz8tA1E8fZHvIc
+# p+JmK28Hr6kRb8aHrbOv3F6IEh/FlmlkjJ/ZsfCPdAQQKuPI+WG+xnv45NuIBq7o
+# pY1c/GdzS5kKLtxLHHbYfDY5h6VTelcWFeYz3jTmr/zQwcswrlJ7SkeGD1YNXYhi
+# HY5tvPcr0Um0kAn1s0pcWyxn+1d3SLDcC5PVEEjaVWmEwdwK3OnI0j0+S4Hvh0d0
+# 0drZRH0vzyYYUacbJF/muBMzC+7/cRWSsnsu/OKCbNdQ7I5I8+XdeWOWTegZaQJh
+# KT8KteJb9ilq14zR6Z01TBWTVxmKtXcel4Ver4oyAXrzsAqejwFTbna9qaLQAhjP
+# lJgA5YHB/XbABnF7s0GnHR7zPqYaZ9jBeCheAoz81QXr4qJSANjLn2SegcdWnIg8
+# h9ZOHtayKaiiYKPsiHFs3tWLod8Tr8P0NWAr9M3Lufoys5/E38b1fveSZ5XK5bFk
+# 9T7iFtPNP7GEUHdUY1T7f01eiFzvaG218Z4oBML5be1RPSSv0Z+Z5NF1HvW8NY0c
+# FG+PCZyBjw==
 # SIG # End signature block
