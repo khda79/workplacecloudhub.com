@@ -25,7 +25,7 @@
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\Compliance",
   "IncludePolicyStates": false,
   "IncludeComplianceSettings": true,
-  "EnableDirectoryEnrichment": false,
+  "EnableDirectoryEnrichment": true,
   "MaxDevices": 0,
   "ManagedDevicePageSize": 999,
   "GraphMaxRetryAttempts": 6,
