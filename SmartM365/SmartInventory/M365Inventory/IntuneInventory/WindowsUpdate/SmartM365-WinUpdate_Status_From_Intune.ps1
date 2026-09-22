@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.33
+  1.35
 .VERSION
-1.33
+1.35
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.33"
+$ScriptVersion = "1.35"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1409,6 +1409,49 @@ function Get-WinUpdatePriorityRank {
     return $priority
 }
 
+function Get-WinUpdateReportHealth {
+    param(
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$TotalUniqueDevices,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$ActionRequiredCount,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$Priority0Count,
+        [Parameter(Mandatory)][bool]$CoverageAvailable,
+        [Parameter(Mandatory)][ValidateRange(0.0,100.0)][double]$KnownOsCoveragePct,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$FleetDevices,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$OsVersionUnknownCount
+    )
+
+    $actionRequiredRatePct = if ($TotalUniqueDevices -gt 0) {
+        [math]::Round(100.0 * $ActionRequiredCount / $TotalUniqueDevices,2)
+    } else { 0.0 }
+    $osVersionUnknownRatePct = if ($FleetDevices -gt 0) {
+        [math]::Round(100.0 * $OsVersionUnknownCount / $FleetDevices,2)
+    } else { 0.0 }
+    $priority0Threshold = [int][math]::Max(10,[math]::Ceiling(0.01 * $TotalUniqueDevices))
+
+    $critical = (
+        $actionRequiredRatePct -ge 1.0 -or
+        $Priority0Count -ge $priority0Threshold -or
+        ($CoverageAvailable -and $KnownOsCoveragePct -lt 90.0) -or
+        ($CoverageAvailable -and $osVersionUnknownRatePct -ge 15.0)
+    )
+    $warning = (
+        $ActionRequiredCount -gt 0 -or
+        -not $CoverageAvailable -or
+        $KnownOsCoveragePct -lt 95.0 -or
+        $osVersionUnknownRatePct -ge 5.0
+    )
+    $status = if ($critical) { 'CRITICAL' } elseif ($warning) { 'WARNING' } else { 'OK' }
+
+    [pscustomobject][ordered]@{
+        Status = $status
+        ActionRequiredRatePct = $actionRequiredRatePct
+        Priority0Count = $Priority0Count
+        Priority0Threshold = $priority0Threshold
+        KnownOsCoveragePct = $KnownOsCoveragePct
+        OsVersionUnknownRatePct = $osVersionUnknownRatePct
+    }
+}
+
 function Get-WinUpdateDeviceSummaryRows {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
 
@@ -1933,6 +1976,7 @@ try {
     $completedCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'Completed').Count
     $inProgressCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'InProgress').Count
     $actionRequiredCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired').Count
+    $priority0Count = @($deviceSummaryRows | Where-Object { $_.OperationalState -eq 'ActionRequired' -and $_.ActionPriority -eq 0 }).Count
     $unknownCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'Unknown').Count
     $completionPct = if ($totalUniqueDevices -gt 0) { [math]::Round((100.0 * $completedCount / $totalUniqueDevices),2) } else { 0.0 }
     $allPolicySummary = @(Get-WinUpdatePolicySummary -Rows $enrichedRows |
@@ -1970,14 +2014,22 @@ try {
         $fleetPolicyCompleted = 0
         $fleetPolicyCompletionPct = 0.0
     }
-    $reportStatus = if ($actionRequiredCount -gt 0) { 'CRITICAL' } elseif ($inProgressCount -gt 0 -or $unknownCount -gt 0) { 'WARNING' } else { 'OK' }
+    $reportHealth = Get-WinUpdateReportHealth `
+        -TotalUniqueDevices $totalUniqueDevices `
+        -ActionRequiredCount $actionRequiredCount `
+        -Priority0Count $priority0Count `
+        -CoverageAvailable $coverageAvailable `
+        -KnownOsCoveragePct $fleetKnownOsCoveragePct `
+        -FleetDevices $fleetDevices `
+        -OsVersionUnknownCount $fleetOsVersionUnknown
+    $reportStatus = $reportHealth.Status
     $summaryState = @(
-        $totalUniqueDevices,$completedCount,$inProgressCount,$actionRequiredCount,$unknownCount,
+        $totalUniqueDevices,$completedCount,$inProgressCount,$actionRequiredCount,$priority0Count,$unknownCount,
         $offeringCount,$installingCount,$pendingCount,$otherInProgressCount,
         $fleetTargetShortLabel,$fleetDevices,$fleetOsCovered,$fleetOsBelowTarget,$fleetOsVersionUnknown,$fleetOsCoveragePct,$fleetPolicyCompleted,$fleetPolicyCompletionPct
     ) -join '|'
 
-    Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
+    Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount ActionRequiredRate=$($reportHealth.ActionRequiredRatePct)% Priority0=$priority0Count Priority0CriticalThreshold=$($reportHealth.Priority0Threshold) Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
     if ($coverageAvailable) {
         Write-Log "Fleet OS coverage: ReferencePolicy='$fleetPolicyName' Target='$fleetTargetLabel' Devices=$fleetDevices Covered=$fleetOsCovered BelowTarget=$fleetOsBelowTarget OsVersionUnknown=$fleetOsVersionUnknown Coverage=$fleetOsCoveragePct% KnownOsCoverage=$fleetKnownOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct%" "INFO" "KPI"
     } else {
@@ -2056,6 +2108,9 @@ try {
 
         $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
         $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
+        $severityCoverageText = if ($coverageAvailable) { "$fleetKnownOsCoveragePct%" } else { 'N/A' }
+        $severityUnknownText = if ($coverageAvailable) { "$($reportHealth.OsVersionUnknownRatePct)%" } else { 'N/A' }
+        $severityInputsHtml = "<p style='margin:0 0 18px 0;font-size:12px;color:#64748b;'>Severity inputs: actions $($reportHealth.ActionRequiredRatePct)% | P0 blockers $priority0Count/$($reportHealth.Priority0Threshold) critical threshold | known-OS coverage $severityCoverageText | OS unknown $severityUnknownText.</p>"
         if ($coverageAvailable) {
             $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
             $fleetCoverageSection = @"
@@ -2085,6 +2140,7 @@ try {
 <div style="font-family:Segoe UI,Arial;color:#1f2937;">
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Tenant: $(Html-Encode $OrgDomain) | Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
 <div style="display:inline-block;margin-bottom:18px;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
+$severityInputsHtml
 $fleetCoverageSection
 <h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Operational policy state - all policies</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once across all policies for operational follow-up. The most severe policy state is retained here only for actions and workflow monitoring; it is not used as the fleet OS coverage KPI.</p>
@@ -2178,8 +2234,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjeAMlivXFD6ek
-# Yxz8KmCPnCKcV5e2oztaW2eY2LpXKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9WX13BmBUJ53D
+# gcBo+PnhI1/jCBapv4QIMR3FhEEObKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2312,31 +2368,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIq/HwX1LyK02jwVrZ53DY2mpZpleE6C9A6459EP+cveMA0GCSqG
-# SIb3DQEBAQUABIIBgCBehF9HX0tD+MBNFsRb1qaSP1zPWE4Yh0M85ZyiAkD2bi5n
-# bJEShl4hwM0OOVS60440Ha6MZz0IotqBykOf4+dSYuuQSPvt1H1Ew1GMsnXimD16
-# xoXQs0FLrnyetyf0zQtUw9CMHKf9EOQTe6KJJRYBqVbQ1Q1sG2KsrBxwQ+J+YWmg
-# Tfxhcn5S9Yd+pJIr76semLVlrxXItshIfBZUE5LQ7ScNY9Eq8t/2iGtAw4BB7J3j
-# 9B16uVAEpYdtwiSfY+kzWeAMOJ16hLfrb4fjsqdYNUXNxhJAu8wWDiqSSHpsY+/2
-# yIfggdutrwctn3wAvEZp5FSBqcciX179D+CSJQaDwFSJSFg4awrlWoE7L57R9VtL
-# BoY+YDSiRFbAyIuphil5RsDfWHZQRQLf+MYrk+bdCP2ryDPgXz3rKSKeHI0iJ5ig
-# BiWQ7/Ou1kFkR1MLyqdY5YE9KKeGudtm7WsxHKiipX0deTwO1hQv9FytzgX5Jf2D
-# QvnVoqIBlrtuxdm6YqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC5H7tRpB4sC/D6h2Tpm2IyUD+27JUq0kthIJS9cLxxjMA0GCSqG
+# SIb3DQEBAQUABIIBgBjj/UzZxQfcdWSehxaFITWDTwoTehu8yJ1bLJQTYO0xjOOJ
+# N+5Zxt0cKL7wDvV5mPlEsPdw7Eoymk1uUp37SBRTWE1cbFPDUUZ3K0ULG4w4LSYi
+# DOJ6GnI/GwfyhNuULFDZ1+V6UkVJdYSjPEcYpk63b4VQlGieKCBkoOZOIiZaoeJQ
+# P09QYZzQtWPyikLrs+kbXSmIIDaCUcskC5IL8VdnJYVY5SaVbGzI0vFqry8yW5qE
+# QgPEzr/61Xu3Q6WwxHfevybDe4F2izZM+hok4jyzLUQf0ChtR1WtXKK30vMflcTB
+# CDYymuK2WC3IN2pNLOhze1SmbUH78/qtKekGAtAVPpcMc1ELNgMzPVAmUMmyOlRF
+# eXNtLmHDOuiEPNMl8ehneEG/Kdm9dr0hU8Aj8ok7uRzaUlAPK3K78DtRFcwdQfCR
+# hSwvNhgCh/D/quvuuNj4TGqr7+YfdVMJGzrgVmgIsuPWp8A+i50I8ILdXvM+/gfn
+# BaB63wti3wSY9nrHd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzRaMC8GCSqGSIb3DQEJBDEiBCAx3ZPzz6ihSask/GxNxyfOQeviXWWh6pLKgnpg
-# IPRzaDANBgkqhkiG9w0BAQEFAASCAgAKYrMaGAgqAzT3zvfd0ByX74GwtFVzum9u
-# iOENK7/AjLMX86+u7RdqQ/AiMG28vIeeQSc8ploBRbBSGknR/h0JwSqYtDob9C2V
-# oIQMIq1lnpzfBbqQa2gN/s598N0E21bCuzVh3Xl8pf1m43hGYX7hEzFw4WSqOZwx
-# 24+FgQNFmBfAE4iIThESgSjElODp5HlSF85c+wa453nNFGn9UfRge3C3qp1LhK4t
-# xdXyD/wh84ur6bAUKHrMgxAg8k7DYUbFsLpM1ghlnChOQy+AOciylXBH6VCfJalB
-# ouyGC8T+Lbzqkm7/ooc0sKjIyXD8eahOELdBXjAnzha2h563Ifa1gPeUyx9V6euf
-# Ko0FlHDL+EOTtoBglju7A35yddjVreL8ElUT8lYdiu9U/KX/diBhy0kLMsKf7suR
-# PIGfcFfP4VCFZBGYNlE4+PRQns0LdXIt3VdTlEvmlOfxedi/1PSk1fZMMg0XW2Kk
-# 5xyWxIdlijnV4NGTU+43hAg8J6deVWLMAEAAk4hzkqsb1tZthzYtBI3VL1kcOKj1
-# zbDQUheD7J4LTTcpg1+I9Pg/UenYkJriU99k3W6tcog23c1eQ0+ZWK0mZBeOtcDl
-# a4+buX6CzgZStiZyyh+m66VoFbOxjozHqjAeEYNp4TnM4i8XCeN0c9VbvzYD5PFr
-# 2c9naOk4hg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjQx
+# MTlaMC8GCSqGSIb3DQEJBDEiBCDNoCUlBB0qLn48p7AmvF67xqQDMVl9WUonc71m
+# eHWYyDANBgkqhkiG9w0BAQEFAASCAgC2Yw/ycJiTmZDrvAMcGTXOXMJNhHvs20Ca
+# 0ROspgvIRlzcsSzmArJAl0g5NvwggfRt7yo/Oy4DrOECKnHjybq1Il9MvDV0c4HQ
+# Ma5g1pW/1ndVF82R2LXXDS0aPQBeWE6MDzX7YPGDzDbUQSQo9FTeWxHumrMYZ0m4
+# nL2xTnfhG6kkViMPVxxI3HtGA1ugNM4Ux6tlKYlHPlPjBZdVnBifH79SN/k8YoC8
+# 9i0sRtpu4S/HenrxMvQokgZ98YXI0V0zyRR3SoZ1xCjGbsMuEsjmHEpanuGXB2eT
+# vqvU8NyCeNH5pPZX5bO21X8JzP/CG/tcZZFnhcKGqZFRjlC5MWRDfUetwY+b6bD4
+# bigZis5dpQFa1LqK3WVXvHikwMQUVLvE60KwjGMfljSQjDu09N9sVLf5BP+jcbx8
+# C6NcXIW0S7VKq9pHdSZ7vGtl6iYRTOR92en8JHUSLlJetkDAHTckyyy5arMsgyD/
+# UdNUFK8UQ1CayIVk2hEr8KyBE6gFDo6tOl4XIjTh01mlWFPGMU8xMxA5Ksig3w5u
+# E16x+87+VF1slhX1TcbZisVgY8u+YKt50B016jf5nJuonzEwaOnqGJiE/Tq4/bBy
+# 6OhszrGMadEkir7IMvU/OVq6kwcNFn3XZ7eSzTNAtDw96KSM/NRDjacE01yXIWxD
+# FWwlrn//sg==
 # SIG # End signature block
