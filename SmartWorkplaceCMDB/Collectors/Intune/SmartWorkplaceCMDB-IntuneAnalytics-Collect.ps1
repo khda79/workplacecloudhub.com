@@ -9,7 +9,7 @@ remediations. Creating the temporary export-job resource currently requires
 DeviceManagementManagedDevices.ReadWrite.All.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding(DefaultParameterSetName = 'Graph')]
 param(
@@ -26,13 +26,13 @@ param(
     [string]$TenantConfigPath,
     [Parameter(ParameterSetName = 'Fixture', Mandatory)][string]$InputJsonPath,
     [ValidateRange(0, 2147483647)][int]$MaxItems = 0,
-    [ValidateRange(30, 1800)][int]$ExportTimeoutSeconds = 300,
+    [ValidateRange(30, 1800)][int]$ExportTimeoutSeconds = 900,
     [ValidateRange(1, 60)][int]$PollSeconds = 5,
     [switch]$NoConfigWrite,
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -151,7 +151,10 @@ function Invoke-GraphCollection {
     $items = New-Object System.Collections.Generic.List[object]
     $nextLink = $Uri
     while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
-        $page = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry -Uri $nextLink
+        $pageUri = $nextLink
+        $page = Invoke-IntuneExportRead -ReportName 'WorkFromAnywhere' -Operation 'metric page read' -RequestScript {
+            Invoke-MgGraphRequest -Method GET -Uri $pageUri -ErrorAction Stop
+        }
         foreach ($item in @(Get-GraphValue $page 'value')) {
             if ($null -ne $item) { $items.Add($item) }
         }
@@ -163,6 +166,7 @@ function Invoke-GraphCollection {
 function Get-UpgradeEligibilityGraphRows {
     $select = 'id,deviceId,deviceName,upgradeEligibility'
     $primaryError = ''
+    $primaryStatus = 0
     try {
         $metricsUri = "https://graph.microsoft.com/v1.0/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics?`$select=id"
         $metrics = @(Invoke-GraphCollection -Uri $metricsUri)
@@ -181,6 +185,7 @@ function Get-UpgradeEligibilityGraphRows {
     }
     catch {
         $primaryError = $_.Exception.Message
+        $primaryStatus = (Get-IntuneExportErrorDetails -ErrorRecord $_).StatusCode
         Write-Warning ("The documented Work From Anywhere metric route was unavailable; trying the SmartInventory allDevices beta route. Error: {0}" -f $primaryError)
     }
 
@@ -194,9 +199,111 @@ function Get-UpgradeEligibilityGraphRows {
     }
     catch {
         $fallbackError = $_.Exception.Message
+        $fallbackStatus = (Get-IntuneExportErrorDetails -ErrorRecord $_).StatusCode
         $message = "Work From Anywhere device readiness is unavailable. V1=$primaryError; BetaAllDevices=$fallbackError"
+        if ($primaryStatus -in @(408, 429, 500, 502, 503, 504) -or
+            $fallbackStatus -in @(408, 429, 500, 502, 503, 504)) {
+            throw "$message. A transient Graph failure must not be published as an empty snapshot."
+        }
         Write-Warning $message
         return [pscustomobject]@{ Status = 'Unavailable'; Rows = @(); Error = $message }
+    }
+}
+
+function Get-IntuneExportErrorDetails {
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    $exception = $ErrorRecord.Exception
+    $response = if ($null -ne $exception.PSObject.Properties['Response']) { $exception.Response } else { $null }
+    $statusCode = 0
+    if ($null -ne $response -and $null -ne $response.PSObject.Properties['StatusCode']) {
+        try { $statusCode = [int]$response.StatusCode } catch { }
+    }
+    $message = [string]$exception.Message
+    if ($statusCode -eq 0) {
+        $match = [regex]::Match($message, '(?<!\d)(400|401|403|404|408|409|429|500|502|503|504)(?!\d)')
+        if ($match.Success) { $statusCode = [int]$match.Groups[1].Value }
+        elseif ($message -match '(?i)\bService\s*Unavailable\b') { $statusCode = 503 }
+        elseif ($message -match '(?i)\bTooManyRequests\b|\bToo\s+Many\s+Requests\b') { $statusCode = 429 }
+    }
+
+    $retryAfter = ''
+    $requestId = ''
+    $clientRequestId = ''
+    if ($null -ne $exception.Data) {
+        if ($exception.Data.Contains('Retry-After')) { $retryAfter = [string]$exception.Data['Retry-After'] }
+        if ($exception.Data.Contains('request-id')) { $requestId = [string]$exception.Data['request-id'] }
+        if ($exception.Data.Contains('client-request-id')) { $clientRequestId = [string]$exception.Data['client-request-id'] }
+    }
+    if ($null -ne $response -and $null -ne $response.PSObject.Properties['Headers']) {
+        $headers = $response.Headers
+        if ([string]::IsNullOrWhiteSpace($retryAfter)) {
+            try { $retryAfter = [string]$headers['Retry-After'] } catch { }
+        }
+        if ([string]::IsNullOrWhiteSpace($requestId)) {
+            try { $requestId = [string]$headers['request-id'] } catch { }
+        }
+        if ([string]::IsNullOrWhiteSpace($clientRequestId)) {
+            try { $clientRequestId = [string]$headers['client-request-id'] } catch { }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($requestId)) {
+        $match = [regex]::Match($message, '(?i)(?<!client-)\brequest-id\s*:\s*([0-9a-f-]{36})')
+        if ($match.Success) { $requestId = $match.Groups[1].Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($clientRequestId)) {
+        $match = [regex]::Match($message, '(?i)\bclient-request-id\s*:\s*([0-9a-f-]{36})')
+        if ($match.Success) { $clientRequestId = $match.Groups[1].Value }
+    }
+    return [pscustomobject]@{
+        StatusCode = $statusCode
+        RetryAfter = $retryAfter
+        RequestId = $requestId
+        ClientRequestId = $clientRequestId
+    }
+}
+
+function Invoke-IntuneExportRead {
+    param(
+        [Parameter(Mandatory)][string]$ReportName,
+        [Parameter(Mandatory)][string]$Operation,
+        [Parameter(Mandatory)][scriptblock]$RequestScript,
+        [ValidateRange(1, 1800)][int]$RetryWindowSeconds = 600,
+        [scriptblock]$SleepScript = { param($Seconds) Start-Sleep -Seconds $Seconds },
+        [scriptblock]$ClockScript = { [datetime]::UtcNow }
+    )
+
+    $deadline = (& $ClockScript).AddSeconds($RetryWindowSeconds)
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try { return & $RequestScript }
+        catch {
+            $details = Get-IntuneExportErrorDetails -ErrorRecord $_
+            $suffix = if ($details.RequestId) { "; RequestId=$($details.RequestId)" } else { '' }
+            if ($details.ClientRequestId) { $suffix += "; ClientRequestId=$($details.ClientRequestId)" }
+            $context = "Intune report '$ReportName' $Operation failed. Status=$($details.StatusCode); Attempt=$attempt$suffix."
+            if ($details.StatusCode -notin @(408, 429, 500, 502, 503, 504)) { throw $context }
+
+            $delay = [Math]::Min(180, [int](15 * [Math]::Pow(2, [Math]::Min($attempt - 1, 4))))
+            if (-not [string]::IsNullOrWhiteSpace($details.RetryAfter)) {
+                $seconds = 0
+                if ([int]::TryParse($details.RetryAfter.Trim(), [ref]$seconds) -and $seconds -gt 0) {
+                    $delay = $seconds
+                }
+                else {
+                    $retryDate = [datetimeoffset]::MinValue
+                    if ([datetimeoffset]::TryParse($details.RetryAfter.Trim(), [ref]$retryDate)) {
+                        $delay = [Math]::Max(1, [int][Math]::Ceiling(($retryDate.UtcDateTime - (& $ClockScript)).TotalSeconds))
+                    }
+                }
+            }
+            if ((& $ClockScript).AddSeconds($delay) -gt $deadline) {
+                throw "$context Retry window exhausted; no incomplete report was published."
+            }
+            Write-Warning "$context Retrying the same read in $delay second(s)."
+            & $SleepScript $delay
+        }
     }
 }
 
@@ -221,14 +328,23 @@ function Invoke-IntuneReportExport {
         param($RequestUri)
         Invoke-MgGraphRequest -Method POST -Uri $RequestUri -Body $bodyJson -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
     }
-    $job = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry -Uri $uri -RequestScript $post
+    Write-Information "Intune report '$ReportName': creating export job ($ApiVersion)." -InformationAction Continue
+    try { $job = & $post $uri }
+    catch {
+        $details = Get-IntuneExportErrorDetails -ErrorRecord $_
+        $suffix = if ($details.RequestId) { "; RequestId=$($details.RequestId)" } else { '' }
+        if ($details.ClientRequestId) { $suffix += "; ClientRequestId=$($details.ClientRequestId)" }
+        throw "Intune report '$ReportName' export job creation failed. Status=$($details.StatusCode)$suffix. The POST outcome is unknown; no collector-level POST retry was attempted."
+    }
     $jobId = Get-CleanText (Get-GraphValue $job 'id')
     if ([string]::IsNullOrWhiteSpace($jobId)) { throw "Intune report '$ReportName' returned no export job ID." }
 
     $deadline = [datetime]::UtcNow.AddSeconds($ExportTimeoutSeconds)
     do {
         $statusUri = "$uri/$([uri]::EscapeDataString($jobId))"
-        $completed = Invoke-SmartWorkplaceCMDBGraphRequestWithRetry -Uri $statusUri
+        $completed = Invoke-IntuneExportRead -ReportName $ReportName -Operation "job status (JobId=$jobId)" -RequestScript {
+            Invoke-MgGraphRequest -Method GET -Uri $statusUri -ErrorAction Stop
+        }
         $status = (Get-CleanText (Get-GraphValue $completed 'status')).ToLowerInvariant()
         if ($status -eq 'completed') { break }
         if ($status -eq 'failed') { throw "Intune report '$ReportName' export job failed: $jobId." }
@@ -243,7 +359,10 @@ function Invoke-IntuneReportExport {
     $extractPath = Join-Path $temporaryRoot 'content'
     try {
         New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -ErrorAction Stop
+        Invoke-IntuneExportRead -ReportName $ReportName -Operation "archive download (JobId=$jobId)" -RequestScript {
+            if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -ErrorAction Stop | Out-Null
+        } | Out-Null
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
         $csv = Get-ChildItem -LiteralPath $extractPath -File -Filter '*.csv' | Select-Object -First 1
         if ($null -eq $csv) { throw "Intune report '$ReportName' archive contains no CSV." }
@@ -252,6 +371,117 @@ function Invoke-IntuneReportExport {
     finally {
         if (Test-Path -LiteralPath $temporaryRoot) {
             Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Publish-IntuneAnalyticsBatch {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string[]]$TableNames,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tables,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$LatestPaths,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$RowsByTable,
+        [Parameter(Mandatory)][string]$ContractPath,
+        [switch]$Fixture,
+        [int]$MaxItems,
+        [scriptblock]$BeforePromotionScript = { param($Destination, $Index) }
+    )
+
+    $batchId = [guid]::NewGuid().ToString('N')
+    $stagingRoot = Join-Path $Paths.DataRootPath ('.staging\IntuneAnalytics\' + $batchId)
+    $stagedLatestRoot = Join-Path $stagingRoot 'DATA-LAST'
+    $backupRoot = Join-Path $stagingRoot 'backups'
+    $stamp = [datetime]::UtcNow
+    $promotions = New-Object System.Collections.Generic.List[object]
+    $completedPromotions = New-Object System.Collections.Generic.List[object]
+    $run = $null
+    $completed = $false
+    try {
+        foreach ($name in $TableNames) {
+            $table = $Tables[$name]
+            $stagedPath = Join-Path $stagedLatestRoot (Join-Path ([string]$table.area) $name)
+            Export-SmartWorkplaceCMDBCsv -InputObject @($RowsByTable[$name]) `
+                -Columns @($table.columns | ForEach-Object { [string]$_ }) `
+                -Path $stagedPath -TenantKey $Paths.TenantKey `
+                -OrganizationKey $Paths.OrganizationKey -EnvironmentKey $Paths.EnvironmentKey `
+                -TenantId $Paths.TenantId
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($name)
+            $history = Join-Path $Paths.DataAllRootPath ('Intune\Analytics\{0}\{1}\{2}_{3}.csv' -f
+                $stamp.ToString('yyyy'), $stamp.ToString('MM'), $baseName, $stamp.ToString('yyyyMMdd-HHmmssfff'))
+            foreach ($destination in @($history, $LatestPaths[$name])) {
+                $promotions.Add([pscustomobject]@{
+                    Source = $stagedPath
+                    Destination = [IO.Path]::GetFullPath($destination)
+                    Backup = Join-Path $backupRoot ([guid]::NewGuid().ToString('N') + '.csv')
+                })
+            }
+        }
+        $results = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath $stagedLatestRoot -ContractPath $ContractPath)
+        foreach ($name in $TableNames) {
+            $result = @($results | Where-Object Name -eq $name)
+            if ($result.Count -ne 1 -or $result[0].Status -ne 'Valid') {
+                throw "Staged Intune analytics CSV '$name' does not satisfy its contract. No output was promoted."
+            }
+        }
+
+        $run = Start-SmartWorkplaceCMDBSourceCollection -Paths $Paths `
+            -RawPath @($TableNames | ForEach-Object { $LatestPaths[$_] }) -Fixture:$Fixture -MaxItems $MaxItems
+        $promotionIndex = 0
+        foreach ($promotion in $promotions) {
+            $promotionIndex++
+            & $BeforePromotionScript $promotion.Destination $promotionIndex
+            $folder = Split-Path $promotion.Destination -Parent
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            $hadPrevious = Test-Path -LiteralPath $promotion.Destination -PathType Leaf
+            if ($hadPrevious) {
+                New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+                Copy-Item -LiteralPath $promotion.Destination -Destination $promotion.Backup -Force
+            }
+            $candidate = $promotion.Destination + '.candidate.' + $batchId
+            try {
+                Copy-Item -LiteralPath $promotion.Source -Destination $candidate -Force
+                Move-Item -LiteralPath $candidate -Destination $promotion.Destination -Force
+            }
+            finally {
+                if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force }
+            }
+            $completedPromotions.Add([pscustomobject]@{
+                Destination = $promotion.Destination
+                Backup = $promotion.Backup
+                HadPrevious = $hadPrevious
+            })
+        }
+        $publishedResults = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath $Paths.LatestOutputRootPath -ContractPath $ContractPath)
+        foreach ($name in $TableNames) {
+            $result = @($publishedResults | Where-Object Name -eq $name)
+            if ($result.Count -ne 1 -or $result[0].Status -ne 'Valid') {
+                throw "Published Intune analytics CSV '$name' does not satisfy its contract."
+            }
+        }
+        Complete-SmartWorkplaceCMDBSourceCollection -Run $run
+        $completed = $true
+        return @($TableNames | ForEach-Object { $LatestPaths[$_] })
+    }
+    catch {
+        $originalError = $_
+        for ($index = $completedPromotions.Count - 1; $index -ge 0; $index--) {
+            $promotion = $completedPromotions[$index]
+            if ($promotion.HadPrevious) {
+                Copy-Item -LiteralPath $promotion.Backup -Destination $promotion.Destination -Force
+            }
+            elseif (Test-Path -LiteralPath $promotion.Destination) {
+                Remove-Item -LiteralPath $promotion.Destination -Force
+            }
+        }
+        if ($null -ne $run -and -not $completed) {
+            Complete-SmartWorkplaceCMDBSourceCollection -Run $run -Failed
+        }
+        throw $originalError
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) {
+            Remove-Item -LiteralPath $stagingRoot -Recurse -Force
         }
     }
 }
@@ -486,22 +716,9 @@ try {
         if ($duplicates.Count) { throw "Duplicate Intune analytics keys returned for ${name}: $($duplicates.Name -join ', ')" }
     }
 
-    $published = @()
-    foreach ($name in $tableNames) {
-        $run = $null
-        try {
-            $run = Start-SmartWorkplaceCMDBSourceCollection -Paths $paths -RawPath @($latestPaths[$name]) -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems
-            $stamp = [datetime]::UtcNow
-            $baseName = [IO.Path]::GetFileNameWithoutExtension($name)
-            $history = Join-Path $paths.DataAllRootPath ('Intune\Analytics\{0}\{1}\{2}_{3}.csv' -f $stamp.ToString('yyyy'), $stamp.ToString('MM'), $baseName, $stamp.ToString('yyyyMMdd-HHmmssfff'))
-            Publish-SmartWorkplaceCMDBSourceCsv -Run $run -InputObject @($rowsByTable[$name]) -Columns @($tables[$name].columns | ForEach-Object { [string]$_ }) -HistoryPath $history -LatestPath $latestPaths[$name] -ContractPath $rawContractPath -ContractTableName $name | Out-Null
-            $published += $latestPaths[$name]
-        }
-        catch {
-            if ($null -ne $run) { Complete-SmartWorkplaceCMDBSourceCollection -Run $run -Failed }
-            throw
-        }
-    }
+    $published = @(Publish-IntuneAnalyticsBatch -Paths $paths -TableNames $tableNames `
+        -Tables $tables -LatestPaths $latestPaths -RowsByTable $rowsByTable `
+        -ContractPath $rawContractPath -Fixture:($PSCmdlet.ParameterSetName -eq 'Fixture') -MaxItems $MaxItems)
     Write-Information ("SmartWorkplaceCMDB Intune analytics collection completed. UpdateRows={0}; EndpointAnalyticsDevices={1}; UpgradeEligibilityDevices={2}; UpgradeEligibilityStatus={3}." -f $alertRows.Count, $analyticsRows.Count, $upgradeEligibilityRows.Count, $upgradeEligibilityCollectionStatus) -InformationAction Continue
     [pscustomobject]@{
         Status = 'Completed'
@@ -525,8 +742,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGW72Gu2NIbYAm
-# pEBptli92bi1Sg+8P8jkeMLQXJtUbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWNtktz2xckR56
+# t2CpePEWZ77NLyTC6/Q20JZmMeJ4+6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -659,31 +876,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMVrtdBFAVANfeyC4DDHrBGy5kkYIyGSko1/7zgrUgGwMA0GCSqG
-# SIb3DQEBAQUABIIBgHq6whhxAM3hw+wNUqZcg2jKVCibwOAbIEb0PP807DmSescP
-# UG391ONf7YAQisXeMCX+2mi/zJXI+xBkPHzjfO4c8VuzVyDDFsOi6zD3eYYfVZow
-# QH7L+1SxbyhlDrQ/7ZJEA9jw/9qWfWKctiJQol4WMXmXYFi8KiWAkXixBLc8jGGi
-# BUxbuWRC4N1CHsDDmUd0nI4kKhlhAqYpeeyVgGRNek5AjHu+T2GqlNiz1BzU2AuP
-# JZY4kKtCW/F2/WfO/vNMT+RhRJ3YWxV4zxSEBqTsun4QCZyA1Q2+B1PT337tsCAF
-# Dd6rg6wQMvefyHpIP9XyyNLAdSueN1No33sqwxH8+ssVNScPlQj7fys8N/+DC384
-# /y8l/ZNvKEGHRqn+M2qXT0YlgmLzpy7SXbAwmS3ya/I8EON0tJsii1JkvRmgvk7k
-# S8GLfpKigId2GCyzhdTSWPadQ6be2gEi6jZYOKpUz78tjzL3pi9lz7WgBh84MffZ
-# 01CyS5j4B2+9D88az6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE8Qn2iuJc8kzgkmuqZG8VRbrqbh7KpdPHJsWgvUIkjRMA0GCSqG
+# SIb3DQEBAQUABIIBgA2yL61DSWXrseTc/QS5Xxap33NWilgvhFDbwhpIUTAz3Ixw
+# BdDdeBuT9LDT5kPpKbRaxKvQgTqxuG0hcDpkefe2lPe+MF7mYwGCF6EmIJM0nssx
+# WRVCXSDfVRBUO5UL8S1gDCQGKy+Xvr1hfehYAMfm+J1HNR1NWb52Vrl+O3gWvKVa
+# n3FLwIR885Ivzb7jUU7nLSnsADFmWJXES6VbBVB0V8AuS5gFmkXKtsjyJiGnlyjs
+# BsLml1kHgGXRL9+R4FgQtt7TkaI5XRBQj93SAXIcHYx4ugvFoCxmDIqB6649q8Vm
+# YmoXPu6KJzuM5/WKQUS+AvQ6SB0B8HFwwWtZ8DV2RQ3Wmtq2QNdNculCI7q6+VH7
+# TDpGlnWliQ+sYT60m3KbjQtNQIeWX6a3HN0l3VFvs4EbBQUctpi+logvou8Vw2z+
+# 3zRyq9ZPEHikhUKvjiOEeVHI2xtD5Owi1UH7WEVOqDcD0oYIYNS/+BLy9vWVwXQv
+# ZeGD2lY+a9p36PNquKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTYwODI1
-# MzhaMC8GCSqGSIb3DQEJBDEiBCBp/qEC2Ui876TpGzvyHDjmnLBOy7/nBvi5J4OA
-# yK2upjANBgkqhkiG9w0BAQEFAASCAgAHMcANyh/4DkTbWQLxHdTob+++AAN3OAl7
-# nRfP4QI40OGqnEZRPL99LtW/IBcXBUgq+czcWy9PhzE4PDeQftWwIfKRF8qGmh+f
-# JFNDFcFohNnPnJQI+80zYxrpKpcWTnpnnq6WWHervvCBof5XC7hDqIf48cn6ipdZ
-# eP4CV7+X0eA3ny8zkoCMP0OuUvZZ+1JqGcQS8vVVk0uO3tms16D8eglX3lkAqx0f
-# RXR1pBVdhHRIH6KuI1gHt6NU8P26XuiXBvCUj/rSmunPCgEnHdM6B+E+Wgbqrpbv
-# Sxl10k/aLX+5b0nr4/s16l8WxCKGHJSbSvmowH3yvv5trnzvcaqY9bYPtgqVOCnn
-# aCvGU38A8j1kJFTh8+tdbp68PxoXrkMyKGqYNgEDwuT4Vqc8Wr5aZ+p3ModKLmaB
-# IXRTpEAZy70EWvzmtCDn6qJgPlO5D0M01zgKtQgpU4rwqFckmf8GwlL/3BhnXZ5a
-# DHa0i5rOChw2OXPCyVq9KJqSXIGeTxNes+2kv82cC7FJjOvzlkcm0VPtZDQhxw6x
-# XtRybq/YVwOuwvU8oz6S9EVIQgTnlH1nSKNQeZKTQM3SseY+vtDp3YtRU6L5qZAC
-# 4NOvTPgooW3d7Rp6bZxHRN5T1iCMOixSq+G5FTBJ+UsCtvNjielI8ahvw5ylR2ck
-# x6oiTHqebg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxODU0
+# MzFaMC8GCSqGSIb3DQEJBDEiBCBGsu1/3kY3/s0hYCfcipsaOiY39FN9L/yI2Ynz
+# /2xwFjANBgkqhkiG9w0BAQEFAASCAgBWPyBetwk/WqYv6QXjmK20J31oyxDbtaOF
+# 0LM5lqZzvm5/lXo8KkAHlaIxLKcEZWRBqqa/sFlV2Fe17XxrHhEBKAWDFBzsKdEb
+# c6yViszDC5xVqZifeB05/wUvreR/6XS7YGdrFX1OwayDng0ywhVTd9Ju9llD7JhI
+# dgWMPqvyk0rDtdNnoh+pbGi+T1zt2CFEKm8GR8i0LI+RuD/v8uFzHWJFqpWKFi5W
+# yO4q0KGzPMflRHTdw6JZ6XHh6NTFv0VBW/9Ojfq83A4K7cv/IfEoZNA/6W8UYzp0
+# cQX1LFrY6DKwur1ChTyV01r4sv4rJZhuw1VnXHu6SVHqM3SOflXtAwh5i64o8l5U
+# MvE4R7UrnQsWYWXEkMd8aM4fayyfzrxcVOYtm2yGIroO4CGVkDux+ZZDG7yZ8SRt
+# OfsMS9jHpqJKVOaL5u5I+mvENkr3++EdFZuHXBtMlh32/t4kWerAECQjjDZ6xA1O
+# BePz8OfUtUTnJITYxVpYuPmExsznoKE7JqX4JFJ6bf/la3lthrkTPtYg43fRzlnV
+# RDuyZmwhToulKt0JMsLkstfCovQ+bmaHLfvoxMz8qBJAqxEpwtf1joKajXODBRRs
+# zxEvtdvevJ1dmA3nPMVewixqnuHdcfdqMhREGyXpIWgQZC5vKXdkYu8MVTxVY9zK
+# AcPRheejxg==
 # SIG # End signature block
