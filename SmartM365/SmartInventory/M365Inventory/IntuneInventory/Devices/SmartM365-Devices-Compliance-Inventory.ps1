@@ -22,6 +22,9 @@ Fetch and process per-setting noncompliant details to compute category rollup wh
 .PARAMETER IncludePolicyStates
     Fetch per-device compliance policy states and optional setting states. Disabled by default because this is expensive on large tenants.
 
+.PARAMETER CollectPolicyDetails
+    Explicitly enables complete per-device policy-state detail collection. Intended for the dedicated detailed compliance launcher.
+
 .PARAMETER PolicyStateMaxRuntimeMinutes
     Maximum wall-clock duration for detailed policy-state collection before the circuit breaker preserves the summary-only result.
 
@@ -39,10 +42,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.19
+    Version : 1.20
 
 .VERSION
-1.19
+1.20
 
 
 .REQUIREMENTS
@@ -52,7 +55,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.19
+    Version : 1.20
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -81,6 +84,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [int]$PolicyStateMaxRuntimeMinutes = 60,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$CollectPolicyDetails,
 
     [Parameter(Mandatory = $false)]
     [switch]$AllDevices,
@@ -311,7 +317,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -332,8 +338,8 @@ $script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) 
     [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0)
 }
 if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
-$script:IncludePolicyStatesExplicit = $PSBoundParameters.ContainsKey('IncludePolicyStates')
-$script:IncludePolicyStatesEffective = if ($script:IncludePolicyStatesExplicit) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
+$script:IncludePolicyStatesExplicit = $CollectPolicyDetails.IsPresent -or $PSBoundParameters.ContainsKey('IncludePolicyStates')
+$script:IncludePolicyStatesEffective = if ($CollectPolicyDetails.IsPresent) { $true } elseif ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
 $script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
 $script:PolicyStateMaxRuntimeMinutes = if ($PSBoundParameters.ContainsKey('PolicyStateMaxRuntimeMinutes')) { [int]$PolicyStateMaxRuntimeMinutes } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateMaxRuntimeMinutes' -DefaultValue 60) }
 if ($script:PolicyStateMaxRuntimeMinutes -lt 1) { $script:PolicyStateMaxRuntimeMinutes = 60 }
@@ -1294,7 +1300,7 @@ try {
         $script:IncludePolicyStatesEffective = $false
         $script:PolicyStateCollectionDisabled = $true
         $script:PolicyDetailCollectionComplete = $true
-        Write-ComplianceInfo -Message ("Detailed compliance policy-state collection was automatically disabled for {0} devices because the configured threshold is {1}. The device summary will continue. Use -IncludePolicyStates `$true to explicitly request the bounded detailed workflow." -f @($devices).Count, $script:PolicyStateAutoDisableDeviceThreshold)
+        Write-ComplianceInfo -Message ("Detailed compliance policy-state collection was automatically disabled for {0} devices because the configured threshold is {1}. The device summary will continue. Use -CollectPolicyDetails to explicitly request the bounded detailed workflow." -f @($devices).Count, $script:PolicyStateAutoDisableDeviceThreshold)
     }
 
     if (-not $script:PolicyStateCollectionDisabled) {
@@ -1614,7 +1620,7 @@ try {
     }
 
     if (-not $script:IncludePolicyStatesEffective) {
-        Write-ComplianceInfo -Message "Compliance policy detail collection disabled by configuration, automatic large-tenant safeguard, or parameter. Set IncludePolicyStates to true explicitly to generate the detailed per-policy CSV."
+        Write-ComplianceInfo -Message "Compliance policy detail collection disabled by configuration, automatic large-tenant safeguard, or parameter. Use -CollectPolicyDetails to generate the detailed per-policy CSV."
     } elseif (-not $script:PolicyDetailCollectionComplete) {
         Write-ComplianceWarning -Message 'Compliance policy detail collection was incomplete. Detailed policy CSV publication is skipped so the last valid DATA-LAST export is preserved.'
     } elseif ($polAll.Count -gt 0) {
@@ -1682,8 +1688,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1Fst3xZLiKXxE
-# 2e2l6mgfhV+k2xMDkl5j4blNArZ+U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBe8nVOtHgN+/Wj
+# LqjU7g3DnXNxNomKz/Ix/kxh3qRG0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1816,31 +1822,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMGb+Bg/Gg+CWjk+yvYB8a248U+a3uhuk4Iyt2lx/Cp8MA0GCSqG
-# SIb3DQEBAQUABIIBgB3QsqQK9SLF3GLyn7MWNSiKtB6GnijWR0w+fdblTrTNT3Qo
-# ZBwF8qJEXRJYgZ5h8vnMhXI+tZYLXqeeR8zefjykZQdMisyd4ksfNpPoGyC8+Ebg
-# BX+hzrep2z6iTrb+pG+TTOKnlU/tKFL0RfvkFgWZv631j1KJ19CT23CeoFkhaB98
-# BPIEPldZcP2VkMaWX+suz1p2vORQnBYC0qv5uLeFvmZxl9h5dxN7Yqhvqy6jlF4f
-# yqptK6wEy3jeK6fMUwlHkYCyT52LFWqPSK7E1RCkIhHrBkj/LAyY6y7Z0oBDH7Aj
-# olQAGt+EGxPUnxCav+sNeHC3YnsBg0/Dq89CF/3ZdXX/rJHsXY/fzJjvkCsdKoaf
-# 6/ekEGKdXVPCVi7SKm6HPr9x5AhqPdnE98e4sqp+TeiN0uoKMXpPeVaBLRbtblV6
-# rOGuv5dpERYC04eRyM6vGqOWRGLX484X/bNnNY3OMxy7dHRFj4QoQ8zEPoiJncV1
-# 5ftEM2XDTHlBVMi5tKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDgO3xMZqOx8Uvgo4TbXtL8cDEntKnhlc/ktosQ+hGCzMA0GCSqG
+# SIb3DQEBAQUABIIBgEfGPHKBMNu2aEewDXuaLyI440Imawuk98DEIh82bDuY0bZA
+# fvlcw2vZiz3IpXMwFhYoBzb14EbI8Rnj8ylYbTmrbI4p69pLHMOt9Bn4n4PuAXzx
+# KOEknqvt76sGKkwh8vNjAIeVFFjbNC93LjO0oWKrHE/dOKN90CYLpWwK0uQxGwxt
+# JKi1QUUAWE4+P3OyTvSGEHfYGL/Pwu2Jnm+Lz4OM/b1I+q7u9jdG11SpvkVhV3/r
+# qlR0c+j1+BcQnIQOzTDqwJMY9oO30zbWYq6m7LM4Tsm6Aj64u3+t38X9FuesuQbo
+# 9Ab+J6wC3yaCmqouHNln9cBGtT1R6ABnMX9+c3ncqCA306kDxPZCP0t51kRMqwrj
+# SRYdlmhGz0Weg0gkbdh+FOwEcwlJ7wLxO5T7IceLLSkh93QQfpb+AlCQ9tcCGPST
+# 2JBH2yz24DkLm5ioxiTDEm9ywMSg1quGpZl/mg2CbGKJU5eb2cn/66tyYEUTsvL9
+# 6PjJdxe35g6pGKFjB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNDU0
-# NDBaMC8GCSqGSIb3DQEJBDEiBCDS5MUq+y4LYN9gkHdUtGs7Sh/g2iqgK3cbIAdy
-# AVkRLzANBgkqhkiG9w0BAQEFAASCAgAm0YvvWtEUiIT+H1Tup10gJhK+KkLF7TiY
-# btHPOlG8cQUm5p8zQBYWe9BjUpSrVWiX43yVg+6fermZLkQT9vQAmCgycpmqy4sA
-# 9dhup5/ojKggtotHrFUBI1pyR5jlvQPpeJuMPh1j0nMn9KUyT8+CcnlWRdXjcTP8
-# kQvhOyCW4mqpJ7h1Y8jy31whuKr1k+Lnkzyl3ZuyBb/doJS4tX7T2KWQ0rtAw5dr
-# 6t8e4C+GIIongwy9raG7RvOZMgBJDGEEnp3TiK1HlIrMCe38DkPNugrBfKOzx4OI
-# BPwNAsh+l0YvPqPgE/QcPZip6d2E2C9xSbaC+ObIuatpuf+oStGb94uKIPJxZmo+
-# iLnqHeOAeqhy2mGm7OdyiDdRY4aDDurEwq30kn97QEmmstdDS9wtlKWBBcOXV/DL
-# MQXDH8G+absUNxU0D8qFurbP4FKFZJy35yz89+ZnRvlgRtXSaCeSMTmmr3wHpdQp
-# nZXD2hOcS5KEAfejKcuF0X5PlGN6nWyWX4EwkxHWpfVX7GrKZFHZhkaZwHjU8V/m
-# RRAUhlilC/KhGfCjD5vnYfFLZff/f7CihNPHNxOB6uay0sNU+HFEiztvfjpaTNkH
-# vRG0LHBFE69FeF6um6sgwlb9obOykk3T8RY3SkjfXGyNEwnNyyp4u18jdab1WYfl
-# HuiYf5IC0w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNTA2
+# NTZaMC8GCSqGSIb3DQEJBDEiBCC3uLU/HXVnYPbPxBcNqBpLifVh0J/egrPOLE2J
+# NbmYiTANBgkqhkiG9w0BAQEFAASCAgB01b6H2/QPXmhda+Wge1iviEFILWODDiYk
+# txht/cE7W0bz+LpHaFw+XKfUXAWErXVQyNVCLVM9dWRYhqbNf7OPKSU+cOAkax07
+# cruNfnjeyHT3pfWaGtzk4wBwK5JSqomGUbwYGJ7/5ku11jePlDjZybUzesVznNxK
+# 5F5FTow6oM/NjCDGeEoJ+XNOE0mJQZBCL+aQm5DP9s9h3rRhUD2GcZ33mNFu/U16
+# Eg3UdvDHORrOj6Ng4+/50aDZ1AeAEsTKy4XRf+vQQqKT20d11CKllT/lF5V0C164
+# gBPl6zcU832PrYFq8UqYpJSqw2Qvm3ZWc2V5WVBULEF3XhtLFVgkGiMcptTyDIS2
+# tjPEDQExEplKIUiFy4H0IN066149dLavXt8y1uleVJRfvhOyhsviJNma2fZYRE4p
+# NFKB94cXj24F8ancQIJ2cPryKxlE0zeSizH9NsVqPz8iKpBeq1j6El2FAM048gJ0
+# qXtVwl78/Fmc4tG+17GxUlyTl182bzOfuuq0nOJrCmNds+5dtHLsqT/mV9/oHz2I
+# Gk+Dete9PWBrN/CtGMSm7VSc6FxsXgo0FuhdR0qAENaWbZMv2gCXvEmeJpVIvGET
+# S3mfUjyjAVrnjUjjPKtl27ySq0BswhRpcirxXxBUARWKp99XqDLBQKyaDMbPf3k0
+# dL4BhEs6AQ==
 # SIG # End signature block

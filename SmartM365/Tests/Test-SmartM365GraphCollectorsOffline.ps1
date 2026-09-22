@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.7
+1.0.8
 #>
 [CmdletBinding()]
 param(
@@ -166,6 +166,15 @@ try {
         Assert-Offline ($text -match 'Write-ComplianceInfo -Message \("Detailed compliance policy-state collection was automatically disabled') 'Compliance automatic large-tenant safeguard still produces a warning status.'
         Assert-Offline ($text -match 'PolicyStateMaxRuntimeMinutes' -and $text -match 'Assert-PolicyStateRuntimeAvailable') 'Compliance runtime circuit breaker is missing.'
         Assert-Offline ($text -match 'Managed Windows devices selected for compliance summary:[^\r\n]+' -and $text -notmatch 'Write-Host \("Managed Windows devices selected') 'The selected-device milestone is still emitted without the timestamped logger.'
+    }
+    Test-OfflineCase 'Compliance detailed launcher explicitly enables policy details' {
+        $text=Get-OfflineSourceText $paths.Compliance
+        $launcher=Get-OfflineSourceText 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Detailed-Inventory.cmd'
+        Assert-Offline ($text -match '\[switch\]\$CollectPolicyDetails') 'Compliance collector does not expose the dedicated detail switch.'
+        Assert-Offline ($text -match '\$CollectPolicyDetails\.IsPresent -or \$PSBoundParameters\.ContainsKey\(''IncludePolicyStates''\)') 'Compliance detail switch does not explicitly bypass the automatic large-tenant threshold.'
+        Assert-Offline ($text -match 'if \(\$CollectPolicyDetails\.IsPresent\) \{ \$true \}') 'Compliance detail switch does not enable policy-state collection.'
+        Assert-Offline ($launcher -match '-File\s+"%SCRIPT_DIR%SmartM365-Devices-Compliance-Inventory\.ps1"\s+-Tenant\s+prod\s+-Connect\s+-CollectPolicyDetails\s+%\*') 'Dedicated compliance launcher does not forward the explicit detail switch and caller arguments.'
+        Assert-Offline ($launcher -notmatch '-IncludePolicyStates\s+\$true') 'Dedicated compliance launcher uses an unreliable CMD-to-Boolean argument.'
     }
     Test-OfflineCase 'Compliance batch progress reports rate ETA and completion' {
         $m=Import-OfflineFunctions $paths.Compliance @('Get-GraphBatchRetryDelaySeconds','Assert-PolicyStateRuntimeAvailable','Invoke-GraphBatchWithSubRequestRetry')
@@ -437,8 +446,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEJHFxSMJyONj4
-# 9xMKabaqjXi1KwSYVKxrPnwzTtZEe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxvPcRnO9OdvKg
+# vwShb2Eyf6npGcFno4rh99g7UKZxdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -571,31 +580,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIGUEnRpxQ4a5o2mI9jN09zxwt1ZVgUrrWfsY6S8Yil5MA0GCSqG
-# SIb3DQEBAQUABIIBgEd/0Yh+mpZvEBj4S/PU0wJVcDIvuzCzXwhe0SKSfhTqIpVe
-# fH/CTV+8heMaeSUD1SUSP1FToCXSW/yscmU1kaFT35Zu99W53bYiLzhsURBPeP7X
-# VeKRuLW7nkXrUoyxQjCEPNchd545vt7WySQvpoFKsbKbhGhvWeizBMNVoiGxvDOm
-# HYJNJUJpwmkPyLQ1auf9oF9oZAJIGErpiJLoaZFqWZ1wQqZRMvqGVvzULrFrutmg
-# IwVahPkoMe6Cm7fI4LnUiJYT30QP1Tt0Z1mXFfreFXFJYRmpRmc7JRo6sO9f1bdi
-# gRfN7tQSzZWopzxtqIoRb8nSTFze0k/qrU2P4lBeuLsvLyQ4PDIb8Omot208VtKi
-# Z1zszX8FUM2Pc2HuGi21vSwTxxelxwctyYQN9S5MdFdt6Qj3puY2pbot4KiTn44Z
-# 22O9Fobi0B4goLMdOojh1EjNbsAauK8/HS3MKc6uY7CjNO+tStduw5qrD8jw3lhD
-# 9V/XZgO2YDIw/0/oQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPdbI6+C6xVVo8KxPN98GwdwfnXcOTLLsQCVkJ8Sks/HMA0GCSqG
+# SIb3DQEBAQUABIIBgKu5SNtNHnxmzfa/+exXFOUhbOQwr/Jhs/t7KX6rBQWp04eP
+# IGNkwDkWgxuJn3kTFfqdCWprbvz37DZ8J68m3G5WQAdKlHgCAmGCQoMExjmWaJvd
+# 7n+t9piTh/6h2En584tpMNXeUohpeXzLfy9Yv3aFEUTnSV2f7NDwXyhfv51/n1la
+# dUmURKgViJ5Hr4y1lnlX21Fq2qceBOc4QwKF5i8BXQq3+VKBg9C4MGrIRXO+i1Qn
+# 8wGH5BVu+xTpiTyItqd1vuV4t4r5nQc40707eWR5KJ+EB3i1C7toReJQuVFKJOQR
+# YwMXm4pmeNixtuwugV8d2WdJKQQ0E/ice8Wt05ohOY9HCAms0hoFNe3W6+zWVYSe
+# /j9EFf5QuUq6jrIAunwvXJ22rFenotuZqmXEX+sdYsALmOayk431Vvy6KNQby/In
+# z90WnUgY8E414Y8eSLlffvi+Ln2CBv1KuzWTo8B3jTDmfAzaVQilLQnzhr9FMLSg
+# 1hQxu4K+YqAXfYwyA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNDU0
-# NDFaMC8GCSqGSIb3DQEJBDEiBCBM4lrdWgaxBs5/72Xpi71bXRdNwQfU1Tx1+CGp
-# uqAxrDANBgkqhkiG9w0BAQEFAASCAgBvnGCURLdJSUBXYdFLJLOIDBPmzfZkjChE
-# +Rj5wi+0hHtzaIPtvfZYSJUE7/jGTVlpPSvL6WcqmKy/Z6ItRZqNF2DIyKWQDRBi
-# w2EdPpHj8FfQBZRR0l1q7/qp5L/lu24BT3Vx3DEBTp34F3KYbs1INWSQZ3YDGwXD
-# 3NovGJ/5wHNRJ1goHWN9zWCKnUNwkd2cEgeMpXNQ+ZMR6k2aV2WddW4UZO0eiJ0t
-# ZkRXKEU3/bt3464oQX/azXHi7uBM5aqx8aYI0DjKiOISqxz67pycwA0NVrEBPd96
-# 8FaQKHym8LB/XgHQxm6WY8P9AxrQI4n1IGKd9VbDDY5ZZZee4A8WUDdLvgebf9WC
-# nhz0mCGPVtbg2yrt5k5XupUS+mMYl39VqKNuyLaVzzkmRIZU9fwEDYyGD6X/qGod
-# OSyYtte4rNbALgyyuSr8mv2AspAmfvccSD72bKK61niS4M9pQ7dOFEoCwNbFX3NG
-# SEMsCJlNMVfdlouG4rlHhGySdI9/Squ0nC+Ab3vL3jvMqUEtrxXtcgdAenD6LJHb
-# kvC2U4mzPQDmXM9OFFmauCABu6dIvaMKhHmntO9ziWFYieu+bB7xYunra1H9hJVe
-# K4cqU92tkPCQ2nr+Mm7mS+TdUIBPv9gcD4KBK23Rzg8Ng3xv3Mmty5h8mg/fQ48r
-# IZJFTiC92w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIwNTA2
+# NTdaMC8GCSqGSIb3DQEJBDEiBCDwGyOxrFlWJdZ2neuAW4ZGQF+THKpx6fcFX9C3
+# VoWPPjANBgkqhkiG9w0BAQEFAASCAgB6+8WbobGfbzzMY7CIKDgcHMuTylkp7l51
+# TgNUIjs8vh0Qt6B6mcVkQxEIvbDonxZta/69qYKb1TrLTysLcqQHz64IjFAiojyh
+# MWwhprVjBxNP4SW3KBZ9Rugf0/3dFDwpL3nzZXvezh+Py9JTjc0L0BB/UiHkZ631
+# hsFbkdKCq3XjNFg+FDinarua52qyeiCqHf8mNKGNnhf+eh3VBnsEO/rSvT8V1MaT
+# fBBUKXGIyH6m6XBoxdnEzG77sQbOi/1t6fKO2ewT3KEU8D7WXhkBAN//ypY3PUQV
+# eDNsbseoqsi0n4Uk+T2dDP4C3c5EEW87KQS5SzHDYoZ2wsoy5Fr6PzIcpyhYMUt8
+# BZGTsYaFiup4hJbVTlFKJOiQG2DPkV4o4+cHu98FGTy5P3ClO6MKlW7LdzGHovDv
+# qBzzv5QOOp2rNHXVssDI5VnVwOHil0xzVU5Fhwzf0qdtFXQ5a5E3twUtCUV69e3L
+# K/MJdTRj8a5EbTK3h9HQ/yZyuEG41LcreNXhhT/hGHE3XV0qsdqOjQK6VNn0g7Qc
+# sbbd9zbe6/1a4anEvIrSXVP/x5Y51ZTPZvJRApznEFacY60dicvICnhiGLt9xYDr
+# FoFsPcoDOsqUgAafvMRD1fKN6qFuBSc+fdmrIrcxwVC5dIs4Mxj5Qu3SeNSEy+Lh
+# xqKakKPb3Q==
 # SIG # End signature block
