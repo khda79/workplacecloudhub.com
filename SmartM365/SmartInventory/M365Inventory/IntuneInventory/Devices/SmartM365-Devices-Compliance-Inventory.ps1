@@ -45,10 +45,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.21
+    Version : 1.22
 
 .VERSION
-1.21
+1.22
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.21
+    Version : 1.22
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -326,7 +326,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.22"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1863,14 +1863,15 @@ try {
         try {
             $policyExportResult = Invoke-CompliancePolicyExport `
                 -Devices @($devices) `
-                -SummaryRows @($rows) `
+                -SummaryRows $rows.ToArray() `
                 -CanonicalPath $policyMainCsv `
                 -TimestampedPath $policyTsCsv `
                 -LatestPath $policyLastCsv
             Write-ComplianceInfo -Message ("Canonical compliance policy export completed: {0} device-policy rows across {1} devices and {2} configured Windows policies." -f $policyExportResult.RowCount, $policyExportResult.DeviceCount, $policyExportResult.PolicyCount)
         }
         catch {
-            Write-ComplianceWarning -Message ("Canonical compliance policy export failed. The last valid detailed DATA-LAST and SharePoint files were preserved: {0}" -f $_.Exception.Message)
+            $policyExportStack = ([string]$_.ScriptStackTrace -replace '\r?\n', ' <- ')
+            Write-ComplianceWarning -Message ("Canonical compliance policy export failed. The last valid detailed DATA-LAST and SharePoint files were preserved. ExceptionType={0}; Message={1}; ScriptStackTrace={2}" -f $_.Exception.GetType().FullName, $_.Exception.Message, $policyExportStack)
         }
     }
     else {
@@ -1912,8 +1913,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO63Du2Aox9XvF
-# 3VCQNP7yxCIc6T/p39nz76QVPmt9FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqIF2FLkhktsfS
+# /9NN/5+uMJGHqdG1cjUgK3+4S1hsdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2046,31 +2047,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBi0/IGbyUcqBkQuFNkwoEbS9/1pAZeEDqo1rAOysNaqMA0GCSqG
-# SIb3DQEBAQUABIIBgFAEXtElnU7IElodtX5qqmCsBqmRqrxryKD9fCki5w6YIjrO
-# ugK1xvwKyq/oR23TXV9Wt/fteBW7+BXR2rz4l6TASDloinDuav2uEQgBlKno29++
-# y1VI1ebY9yLwY0d93Mwes7Lh3fffj86STiM+pV5PrB/76cPjdOwR/8SUcXalIiZ9
-# x+bQmZo1hTEVxq4AYtEBhVX1xaXuRkjImZ1n/0lHfF3YNlR9hrnTHqC8ArzjdrBP
-# 1+8GtrQHyTxzRokwDP7TyfTqKcUMD5i7bwQDna6i7ibkF8GLcL1caAS0FEBDmtbW
-# D1jyOEf4I2CoyfUeQ5aTgHIwO79ZV6Eleqi3WQ68T0+SLKvkOVob4opfVPFiKpow
-# mgSKEnWyNgPzRiVCmfcYkveRDfnBggxBXH7ut5yweX5jbJyRgpi2C38IUd1sTjj4
-# 0hNSCtejCpEk0RbDBFeM3sRbzh++jBC5X78Z9ZrNPlvEj6Ex7fuTVHN0MXaSUSCf
-# JewpYU1oXSKitQLQ76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINcGg7xhGwEN2be7tWJIEhfP0gvCRIZqEFm8UzF6v1cXMA0GCSqG
+# SIb3DQEBAQUABIIBgA84DA1+FPBZYPh5qDwS5ytERhoivUI6db/N/dtNP/ScD6lr
+# UlYchICtULugdTVlAwCtqyrl/DKwfqhHlVYOrSNwoKGpUJMLyjC4jZsazboUk5em
+# n0NxNpN9at++zSBuvRv+pLi3U50EAgF6sLbRlo0M63ZlxR+06qa0WkpTV/vuPu44
+# xZeiAc6OKR+nmP7r/NJh0LupgjwIFjvYQhmiQ1+OTSXPKIU+TFqfEK49ZCesaETr
+# /09wqa49APR484eg3HtwO6nejSYRgd5dIXTR6a1zw4sX5PstqecOXOZBJwbMl/h1
+# kVI05AJNbxBCUeoofDC2sNWGmd6Qcr/8dwmFCGyCByCx28iD2t1p4kP4uqLe2z5E
+# d6XaP0OZhen1JYsjCSvHthF2PTsU5hWrfbNxVMT5d+UX/zXbaGTLSD2LPZZsc4jA
+# YvL/dap3YJvONgKVcHBvwx4B0r1mcRm1n8kbzyvIbFvkwQWt94vUHFfeJEACHdjr
+# 6+/B4EZhzymGXJsKYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMzQ1
-# MTRaMC8GCSqGSIb3DQEJBDEiBCDL7XQG3lVHiUqTXK4qcSC6cqQkg6/G1KaRky6e
-# eGxPrTANBgkqhkiG9w0BAQEFAASCAgAbictIWykzvUphKvbHfBzZIyOBaavIN3a/
-# F25cIlWOZQAcegX5vVpril2qW7n+dt+4QuTHjMcBM6KIH4fITwwJb71Dvwe5eKsp
-# qw0joBkYzwiHHKeBZKoOK2jhYUFtM9ArN8lWRjP6fK74BFmpWLcJApqEAdD8HjPh
-# iVCEe0rhoeaYXx42cXYYWm57y2a1QwZazjf7i66ghhaw1fgjudDI2fGoWtzHlkml
-# Xf5BGpybhlJJ7ELbhr0SF+HeaMGO22FHlziaz0lfb+cezO0CyINXsnmO38sXiwOq
-# 8uyjl6ffCqwNlCzupzuC5lKb6hLgqWCcGBMnY8ufKyavuACBUT2SyhFFNHq4SdL1
-# 23qHXwt16y65uXAvsbcCTPZIOuXFOq2CVbl0Cp5vmmvQSqHMKHteYKSqLVq0lAAf
-# R8JMNCsrjbAJDATXE03flxU2ZuauscokAPPBd1C6Rdz3lqwiNTvsKNhtOn7AW5WJ
-# cxb4Q8KT34dY+ox9cW7R7qPETpTE6BugpUJ5NooKf8enlkyyclLhBi0MXG110Uur
-# KACdaoCoGh1t1RIrB6B+xO+KzN/XmZo8RszDvvU6vzY14FUUD3fO8mjzxgj7Axmm
-# goEpTyw46+5rAQZAomWO/SMldnQtxPDfXMsvLadvQbrIUs/f3NerZx7dWS92yVac
-# 9/IECOIQ6Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNTM3
+# NTJaMC8GCSqGSIb3DQEJBDEiBCCNYFYhZIguGNKGklVHAwSc0zO8KkH6r35ol/oQ
+# 80N+5zANBgkqhkiG9w0BAQEFAASCAgBBOS3JxkIVHFjTIjoRePYFfzB/ih8Ae+Ia
+# oEZXmVs211Dm6LgCyCSUZbpG3CikWDpcDFqVVzM7gE8Rz3Z/P65CzJ6a8SAS+7Kr
+# YPW/yr/r+JjwK6UgIDMYL8ShQ/sEQ4J/FNvvbe3vU/vtRRzjbQsi7O3EyYa35vw0
+# ikCzLxm6R6ET3PJtx976Qt7zCk++KjJlXSaaPdyaXk3bW1TioENS5Ew7NWycsGCm
+# 2BGewDDoSUz7N+wxbPWuU5k1i3dwgWGpfPvwkFoblfpqUgJQeIpLIS8AJlYLDHI4
+# w/bZhY60eg7OtkQ35Uy1Ar15myf9yox0hBZdrz1WB5HcVSYlLbmuz4H2UJsKXR/f
+# 3mDWru/3eZjEKxmJpMMa8EVyB4BwySVCeHp0LJprQLQJqKsZHfdlFjw7ZeWBsYmV
+# op+J3Xo7p8rSN1pKX4MhU6vBTUETtWtQD4CVyW5ZVWzC1plhkgcm50jhNTLP4NXg
+# 6BS0nzEcj6mB6puNM7Ufal+COfMGI151ZNbcrjJ/wBJTDCFVSpMy/rLQh5Vmymz7
+# OzpBIgOXAowCc8t3Rj6x8q/FPzE3wF8UL2gEuyIZ0FiUX8Nwj725u1rHYHRLnMLl
+# 5s+TrdFUN5xMYwiWaOtTr/NTU1KjPiu88kmGYc94pEpNa4nCzosih7Zd5hI+9ujm
+# Jf0mnjtqgg==
 # SIG # End signature block

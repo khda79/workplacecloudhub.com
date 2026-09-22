@@ -180,7 +180,9 @@ try {
         Assert-Offline (-not (Test-Path -LiteralPath (Join-Path $SourceRoot 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Detailed-Inventory.cmd'))) 'The redundant detailed compliance launcher still exists.'
         Assert-Offline ($text -match "reportName\s*=\s*'DevicePolicySettingsComplianceReportV3'") 'Canonical compliance export does not use the qualified setting-level report.'
         Assert-Offline ($text -match '-CanonicalPath\s+\$policyMainCsv' -and $text -match '-TimestampedPath\s+\$policyTsCsv' -and $text -match '-LatestPath\s+\$policyLastCsv') 'Canonical compliance export is not wired to the official DATA-ALL and DATA-LAST paths.'
+        Assert-Offline ($text -match '-SummaryRows\s+\$rows\.ToArray\(\)') 'Canonical compliance export does not safely convert the generic summary list before parameter binding.'
         Assert-Offline ($text -match 'Export-SmartM365Csv -Data \$exportOutput' -and $text -match 'last valid detailed DATA-LAST and SharePoint files were preserved') 'Canonical compliance export does not use the guarded publication path.'
+        Assert-Offline ($text -match 'ExceptionType=\{0\}; Message=\{1\}; ScriptStackTrace=\{2\}') 'Canonical compliance export failure logging does not retain exception type and stack trace.'
         Assert-Offline ($template -match '"PolicyExportTimeoutMinutes"\s*:\s*30') 'Canonical compliance export timeout is missing from the local template.'
         Assert-Offline ($orchestrator -match '"Name"\s*:\s*"Intune-Devices-Compliance-Inventory"[\s\S]*?"Arguments"\s*:\s*""[\s\S]*?"EstimatedDurationMinutes"\s*:\s*15') 'Orchestrator compliance job is not aligned with the default complete collection.'
         Assert-Offline ($text -match "lastReportedDateTime\s*=\s*''") 'Canonical compliance export no longer preserves the empty legacy timestamp contract.'
@@ -251,14 +253,13 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
                 }
             } $fixtureCsv
             $devices=@([pscustomobject]@{id='d1'},[pscustomobject]@{id='d2'})
-            $summary=@(
-                [pscustomobject]@{DeviceName='DEVICE-1';AzureADDeviceId='aad-1';EntraObjectId='entra-1';AD_Domain='example.test';AD_OU='OU=One';DirectorySource='Hybrid'},
-                [pscustomobject]@{DeviceName='DEVICE-2';AzureADDeviceId='aad-2';EntraObjectId='entra-2';AD_Domain='example.test';AD_OU='OU=Two';DirectorySource='Hybrid'}
-            )
+            $summary=New-Object System.Collections.Generic.List[object]
+            $summary.Add([pscustomobject]@{DeviceName='DEVICE-1';AzureADDeviceId='aad-1';EntraObjectId='entra-1';AD_Domain='example.test';AD_OU='OU=One';DirectorySource='Hybrid'})
+            $summary.Add([pscustomobject]@{DeviceName='DEVICE-2';AzureADDeviceId='aad-2';EntraObjectId='entra-2';AD_Domain='example.test';AD_OU='OU=Two';DirectorySource='Hybrid'})
             $canonical=Join-Path $testRoot 'canonical.csv'
             $timestamped=Join-Path $testRoot 'timestamped.csv'
             $latest=Join-Path $testRoot 'latest.csv'
-            $exportResult=&$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary $canonical $timestamped $latest
+            $exportResult=&$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary.ToArray() $canonical $timestamped $latest
             $captured=&$m {[pscustomobject]@{Rows=@($script:capturedRows);Columns=@($script:capturedColumns);CanonicalPath=$script:capturedCanonicalPath;Publication=$script:capturedPublication;PublishCalls=$script:publishCalls}}
             $first=@($captured.Rows|Where-Object DeviceName -eq 'DEVICE-1')[0]
             $second=@($captured.Rows|Where-Object DeviceName -eq 'DEVICE-2')[0]
@@ -274,7 +275,7 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
                 function script:Export-SmartM365Csv { param($Data,$TimestampedPath,$LatestPath,$Columns) $script:publishCalls++ }
             }
             $caught=$false
-            try { &$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary $canonical $timestamped $latest | Out-Null } catch { $caught=$_.Exception.Message-match'synthetic canonical write failure' }
+            try { &$m {param($d,$s,$c,$t,$l) Invoke-CompliancePolicyExport -Devices $d -SummaryRows $s -CanonicalPath $c -TimestampedPath $t -LatestPath $l} $devices $summary.ToArray() $canonical $timestamped $latest | Out-Null } catch { $caught=$_.Exception.Message-match'synthetic canonical write failure' }
             $publishCallsAfterFailure=&$m {$script:publishCalls}
             Assert-Offline ($caught -and $publishCallsAfterFailure-eq0) 'A failed canonical write still attempted to replace DATA-LAST or upload to SharePoint.'
         } finally {Remove-Module $m -Force}
@@ -636,8 +637,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqMwl6L1PFgcTN
-# 0rSP8FqLEs06+dhANCNS3OG1xmGdnqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBTxtTmw5//9th
+# RJI9cqvELslPwv6QDWXkrtzLyxeKAqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -770,31 +771,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILBbHcE/ZUnycVgLAfWLLYXtAYHVz05K4rmBLox4xpCrMA0GCSqG
-# SIb3DQEBAQUABIIBgGTeZEdNSG3QmLPPlDae7leGONcMVIHeVPV9OtO3tMDvVR1p
-# TCf1bZMnyCfaGRn6DHG/AfQJwP8/OiDgrvelYrXh6ypmPWjUvnIS2/m9CGfRHaj+
-# k4TnT0XmoKfu/R2lFSwwIEpV1m7Gn612v74g4aycsbc25kBRZfDKLZOhWef73a3C
-# Fi5Dl+GqidHCqxqJ3y8zruTWkol6PFEEiv/RcltTQDzxU+q7a7Bl8EurPiihv722
-# jJ8VgCV+flzOgOMnGYoblpU+coSM5oaUHU8JlzIWb6uHUa6zzg5PRP+fvcnWHNox
-# Kb1CyMHulyo2088G6R72OtFa8+fsKO1NI4JjqOpSInvhv2yuV885edlhxTyW5GGr
-# TWRIm6IcJGb+ZX9XvgvJtA1wB2pANlyntWbNm7fKcP7IdVMSrenpIauzd74b4LT6
-# wMGOREcRMa9mlv8dEZU4wVIUGOzpo/BKjxJUwbhuhqonaXS84eJqHWpt9lF82BU2
-# HzDSgYyidF9orx0EK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPC52bwok0PmSbu8QNOSefu8PdY2wis3gCZviEuX1Jm0MA0GCSqG
+# SIb3DQEBAQUABIIBgDyQTm7byb6GFfF575J6EO64qn7/jHNTSJMeW4macseGzqNS
+# B58oXecfADOOe2HpdGMdIYYrZIA4YdJqYYd3LvoX+/bMTssmiScHbf8oMerBb0wh
+# guvdH7YuinGTaCupeI3WQ2mqecLu8vxgAKb5QVvFIW9jErMX/NPhXX9cPRoBLkiL
+# 8eplqsvUBGy0z1hu+X5sUafeZjaDvqfIQ2MXDLo8X1/beVqkBpLtsOgvWQs3JDB9
+# ANZpxP8ZQy/SoWONZydMtU9NJXoTFYCydh/7TN0LNEIOQ65KuoVbqTbZs3dRcYFy
+# 1GqG0MtRTml+ISUcmuqKPHHu8d44JrmE8WHJd/xo/7kWpKReosNJ6LkM5O2PBzDr
+# whcqf0H1q9oMhoxTkFWSP+GmTxZ8C3jV9OYl2C4ztj2KvlBRDbLU5hZ0c8va1HBL
+# Qox3lQfoyCvfpHEEmnC6T1I4JFZmgr4MVBPj+LTSHHWfvqiDZF97wF2k/tdh4nuw
+# v+XZxHh+CDkirFo5tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNDU1
-# MDJaMC8GCSqGSIb3DQEJBDEiBCDqqoyEifPPoFMJLB7EuByfISIHEYV+S7Uj0OD5
-# 1KirFDANBgkqhkiG9w0BAQEFAASCAgC2Nl5gN+k4dyvg7xAEZg2Izzt2y73+qAY7
-# /8I6y3PBh7DBu+Tp+dTtX9nstbqyFcx/iB7Ceos1iMHOtSre1UAFfWpc893jqjhq
-# gZZ6Fwp8i6YOtL1zRupltVQMCr3v7d6pMykmpggWswaCVcebEtiA+abtAblMVN1K
-# Uul3T4UJFTzNRZed4KDI136TxuXrlL9ds02AK3nnjTNE/LjzCXTGAsmitnN77R8t
-# xkcX/3FaTT/fLiDcmG8QhRElNMFrLP2NeTbqxK9F5Ce317eeO6oyU5bul+kwaP4S
-# NhTmx7zgLF4oFJoSTtyT2qkCE4YTGgWM+80b7h4b1CtCcE6EVDCqPSWIkEjFtQ2y
-# mc46nsk+Zb/hzOT4sLuTme814PJicNPKWnKV3Ya3a1E3tWNrk31v+I6dGHkZKXrp
-# GxwurNTHiLfJGZ+goyhWuxZB7nw75tcoUb1kslLd4FTQIaysfzpEfLm1GDpw81wM
-# B60U5Hqei2nmVKACAvw7XG9NgFWKl67Kck5aVOEr98V7qHxp2Uzez9wTcMN+8C+1
-# 7oTb8gAw9TZFLQmuwBQt2hg7RdD05QLz5kxH7SqjIg8kSSTjbAy5WCgVLHxUKsNT
-# 9iOtsWkXnSNfKhB/JLKhWUyD70mt5TAu8d0F4XOv0qV/eqQZhfII5U03Hkg8tvja
-# pwKOjR95Wg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNTM3
+# NTVaMC8GCSqGSIb3DQEJBDEiBCBfGjXX9KWEqK5hpMw5N9ReuBohBp0Q0DVLwyBI
+# F0HUDTANBgkqhkiG9w0BAQEFAASCAgBTRsuHyVyzqcd4FdRwyXTO7TaSyAB2tULN
+# 2oOZueTBgSKYJ3gbri8l3zAmPABOaPGVPceefbJNNrHqPfxBGx5pm5UTWXbaWXPV
+# AqY96K8j1xAJaTXBBvmG6UdgtqPp7tMJ9DLGKwKrmiHAjBngwIdfeSRhVDQ/UdVj
+# vM1wS25N0aK0tJTuHd/tLCIWjMkewJxDN/+hgItv89A3qAXAkxFymUdTa0UbIG/3
+# E+Qtc9Fdte0nyx+ltlHYyU5C2mWph104zGZ2ahvjb8H19w0SGrkRnHI/x0rCGmVg
+# PHGoDmUsZjDgOZVfB9cMNBLf2YY8oxaTUegiCdXZqCMZoBbvpq8oH0fm2U+A7FSH
+# cRr8Utsf9pimxPINEg1mhXs4KBDF7QRsQwMQH98qXsQKwRTSeqA6+wGLjrFK5Xka
+# mg3tLMoqpSwH7cuzqIN/udABqu58eD8nBedbx2gbhiCk9O5E45qbC0LFFlXeg+Kf
+# XRW2OyeWQPSUP7zenatmo5WJ7p8XeM2lm2b1UynW8HJk70bi779I1hpbvixk4qLm
+# 0lkHWLSrbAXM3w4tXRZKVbIdanCZyxeZUFHB24O8tU69mJdUlaqXDSwbYnQUYYjC
+# Ba8OV3A77q27ul+4zZy95yZvMNqJsYPL1RDMZnBj7x1BczY4I7jasO0Fo6NsN3f0
+# /0pe1q806Q==
 # SIG # End signature block
