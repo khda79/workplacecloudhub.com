@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline contract tests for the three new Microsoft 365 security evidence collectors.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]param()
 $ErrorActionPreference='Stop'
@@ -33,16 +33,27 @@ $retryResult=Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/
     return [pscustomobject]@{ok=$true}
 }
 if($script:retry-ne 2-or -not $retryResult.ok){throw 'Graph 429 retry simulation failed.'}
+$symbolicThrottleMessage='Too many retries performed. More than 3 retries encountered while sending the request. (HTTP request failed with status code: TooManyRequests.{"error":{"code":"TooManyRequests"}})'
+$symbolicThrottleStatus=0
+try{throw [System.Exception]::new($symbolicThrottleMessage)}catch{$symbolicThrottleStatus=Get-SmartM365EvidenceStatusCode $_}
+if($symbolicThrottleStatus-ne 429){throw "Graph symbolic TooManyRequests classification failed: $symbolicThrottleStatus"}
+$script:symbolicRetry=0
+$symbolicRetryResult=Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/symbolic-retry' -MaxRetryCount 2 -NoSleep -Invoker {
+    $script:symbolicRetry++
+    if($script:symbolicRetry-eq 1){throw [System.Exception]::new($symbolicThrottleMessage)}
+    return [pscustomobject]@{ok=$true}
+}
+if($script:symbolicRetry-ne 2-or -not $symbolicRetryResult.ok){throw 'Graph symbolic TooManyRequests retry simulation failed.'}
 $accessDenied=$false
 try{Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/denied' -NoSleep -Invoker {throw [System.Exception]::new('HTTP 403 forbidden')}|Out-Null}catch{$accessDenied=$true}
 if(-not $accessDenied){throw 'Graph 403 terminal-error simulation failed.'}
-Write-Output 'PASS: pagination, empty, throttling, and access-denied simulations'
+Write-Output 'PASS: pagination, empty, numeric and symbolic throttling, and access-denied simulations'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaH65kedlwk6D2
-# uvJaIWZ3JiFOZ39xl3d+oG27oMwqFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyrRTarGBR/Dd0
+# Bl7egeqFgXuTy/pKtGpCPcHBJuq0l6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -175,31 +186,31 @@ Write-Output 'PASS: pagination, empty, throttling, and access-denied simulations
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILwhqasnzFUkTZY/dHSFU2lr5SAYOpPzKu9zrPO0HXsPMA0GCSqG
-# SIb3DQEBAQUABIIBgEPS9klx1FQNy73gNLGY6F01gEv3DwAFdtQJGTrpgFHsL8v7
-# nroAiuybcSNPRwVgHbAEhcbZmv095jhhdyPs4cssO2rNfjo7sowjlaBY9gjFvrI9
-# C7tKX1UDg6Qa50FIRwYDTCOWJ9LV15lFU2qiol8SH5b0J+4eFa6kFW9/if7SUlbA
-# F+5A7kcN2Db6zDda0mGtJetdVfqItzKNvDa0F4war9d2m/8liM1d9w2V4doTDSez
-# 1whuoyHpdoVOdwYksD63O8nCBG1mwk/CaCzYz2j81CAVOA3q+qixUeYotb/JAE8R
-# 4Ca6fjextT3x+qPtVBrBZj40Uk3g7TeyIb9rFcRsQEw3kjcppgn/SVF4bbUwdGew
-# 2qC8QAnzHR1e3cCJFdFC5o2WegUfrXQlo/Znvg5aktb2Zh8gmeuwB6HV9JtuUrHO
-# duRvwt5m+ThgHLrl7JbsKdLxTGgCoj99CHbBN+A22uz791Wg2LSXr2TLJhEFKMqY
-# DE6Ufdjk7yFWsNBGOKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH4UKq5N4XoYD56EjjoIvNC7IVRI5CHCa1QREYkFpT8NMA0GCSqG
+# SIb3DQEBAQUABIIBgCfUJXST+T/BUx4eactLnYuR+xa7ELGhARePQUL6aDMQcG3/
+# qxuj/6m9yjafcx7pUngmNlCYQtdfsHSRRRZHqqizVwPO3HKP4UJ/P612l5NP08dl
+# ZwZRCwdFPN7l69+GWGrhkxaLVtWype9gCQx5p+XeIseGzos9ejmMonxSXr6jPIHv
+# 0FdGHyYOIuDHziNEegF4GzNzYLaRMpzVHhNCYSm0YQi9q5nWhZB4q8SUWOlc38ST
+# NqLfXmSmSyYpqhwHhBoNtOd+XfeBg60VBX9kCpmjrrnT/c8u3UIG8KMP0xxkXm/3
+# gjZF2Km43e8HUyi40lbAWibHlOBLCP/dbP8l7kgXllubdSZM/n3Iz/3T6xHWDcza
+# N78UgSj5Zvz8tz60xZ/WA8Oc+Le1MhV5T4jLpDiycnFeEeK6oCLk4ADXNpoVsEfo
+# fCULzmLu/xh5fN3WyTbUXlkrxOUQXFszujOtPvHJVDN8tNEjLg0zPzC6/l2IwSow
+# gv1wS5vcIOJ4WsdH1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjQz
-# MDVaMC8GCSqGSIb3DQEJBDEiBCBf1Kf3xDpdFZPZeASwb6P8MKx9t3//yNbgcz+N
-# Xy74RjANBgkqhkiG9w0BAQEFAASCAgAK/MlCCGnKSMuht2SYIiPffmJYBru7OqPL
-# 3D2tXGhxNA4NHbnx1mUXGKG/ZT73nrdiFV5CF3X7IM4Gg4FGgzlym11ryyuo/hZU
-# uHk3IUEdvrq89x81xq0tJmD6ABiW84Pu+FRZZWUldTYHH+YOnSMZQkZvebZVKF5o
-# rC7BgK9CHnVxXr93prDiSn6rz4JDeaOICaQOrAliv46OPniZmhrp9xVukbPhbie+
-# 1F9Lud+42fjswP278c90Zf/HRtpLlXqm9Qa8Be1KIiE1jaKMKUUnwH1/27RNCMN/
-# g5cfyOqBM3FwXzmYWbCyty08duUc1hh98Tjotw5PcL/SKbKyExbSU6ZXgDZH6/f3
-# s8JrDylMZHSxPl38ldlZKAjlMzftiuDAPi5VkMZ20CU4IV/ysQEGXyNSZ5rBh03t
-# tTJrRzGlFLpGSNKeJq0adI7sUzAg+M6gosQYF1UwEE3TnN3tioVpvt/SpDjx2/3b
-# KZ93wds4pbYjk5fylYtxqeqAWJC2srClyhntXXutvuU0Bdar3UTX5PvymLHKnvU+
-# aG6uMAOg1NfBCWfNMyvTixnVJvNW8BGua06jQd+F/yLNfLWnKUmHPYCuALmbtkg1
-# EPKAHB73QTmUEyTRcOT5nyoW1kM5PdZNNQgrqn3HXU36zVijwfrEO2isAZnPCakZ
-# qwjnA2z/uw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjA0
+# MTFaMC8GCSqGSIb3DQEJBDEiBCAkuF0x7b/nSt/7DDCOHdL2XVrWIrr+722wKNEV
+# dxrVTzANBgkqhkiG9w0BAQEFAASCAgBkTJOdfHuv4LN4wo9oQFTy37IMMjmWsSpM
+# PjjoxEcrA5bV3TDjBjBHvkv7NADZgusYVED/Vd1r2K8yAFoVZIq3zpnFKG2fM/ak
+# Zj0HIP0ScXcVcMgxFI0a+wlfoDOfaTMd3JwEiTHeTf62yMXX2RsmbtoIorKz1iUM
+# JGJzR1ZavrUYyP2R6Jm/oR6LcLph/w1UrSfbAhG4ZDPaEkb0ifkyrTzJJEXioSo/
+# uJ1MpXTrkKFCbR3UCiB2ER+sjQltYvtvqpkyacCWcPF4viE0ZO1tcVDRGfgYTYOe
+# 3r6t6Eg3A9gHrkUPaWCo+U1jpnQIO89RcLOCDUpSGpEVLSZmb5xfkg9AT6zbbHnJ
+# V/nbLh6RvLjR9tt4MWwBJDN508tkWftx9Fhh3r5rPHt3vjuZD/PY0sRrG3Y1nsbh
+# xiQk+EymcFJwoR87JeYyBhfl2HKCeMNYF1HBczqiX5KCoF7P3Fclqv/9fU1GRndg
+# YpSu2UW4x5UgjW9+DiPgn1E7BUoLTUg+pcbcAw49bwKArjM0Vcdyrm6MtR1bXNew
+# 1sEPPC/a/RK1h99NNEswZiBgJGjguzDvZPkxP+LSR/OBNPaBsmheLMxINNwBryef
+# 4ff+CS48du5OaweQ5MPFDZRGALz3QOhtjO1tIYBuALiv/ch4x5XGLvi7TPjYUMMk
+# IKA/QuZiEQ==
 # SIG # End signature block
