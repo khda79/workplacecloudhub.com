@@ -226,7 +226,21 @@ function Save-SmartM365WeeklyInventoryHistory {
     $weekName = Get-SmartM365IsoWeekName
     $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
     New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+    $preexistingCsvCount = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue).Count
+    $previousManifest = $null
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try { $previousManifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw "Weekly $HistoryLabel history manifest is invalid: $manifestPath. $($_.Exception.Message)" }
+    }
     $copiedFiles = New-Object System.Collections.Generic.List[string]
+    $capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    $fileSnapshotTimes = [ordered]@{}
+    if ($previousManifest -and $previousManifest.FileSnapshotCreatedAtUtc) {
+        foreach ($property in $previousManifest.FileSnapshotCreatedAtUtc.PSObject.Properties) {
+            $fileSnapshotTimes[$property.Name] = $property.Value
+        }
+    }
     foreach ($sourceFile in $existingSourceFiles) {
         $destinationFileName = Get-SmartM365WeeklyHistoryFileName -Path $sourceFile
         $destinationFile = Join-Path -Path $weekFolder -ChildPath $destinationFileName
@@ -234,25 +248,41 @@ function Save-SmartM365WeeklyInventoryHistory {
         if ($destinationExists -and -not $OverwriteExisting) { continue }
         Copy-SmartM365FileAtomically -SourcePath $sourceFile -DestinationPath $destinationFile
         [void]$copiedFiles.Add($destinationFile)
+        $fileSnapshotTimes[$destinationFileName] = $capturedAtUtc
         if ($destinationExists) {
             WriteLog -Message ("Weekly {0} history refreshed for {1}: {2}" -f $HistoryLabel, $weekName, $destinationFile)
         }
     }
-    $manifest = [pscustomobject][ordered]@{
-        UpdatedAt       = (Get-Date).ToString('o')
-        Week            = $weekName
-        HistoryLabel    = $HistoryLabel
-        HistoryRootPath = $HistoryRootPath
-        Files           = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
+    $manifestChanged = $copiedFiles.Count -gt 0 -or -not $previousManifest
+    if ($manifestChanged) {
+        $snapshotCreatedAtUtc = if ($previousManifest -and $previousManifest.PSObject.Properties['SnapshotCreatedAtUtc']) {
+            $previousManifest.SnapshotCreatedAtUtc
+        } elseif ($previousManifest -or $preexistingCsvCount -gt 0) { $null } else { $capturedAtUtc }
+        $manifest = [pscustomobject][ordered]@{
+            UpdatedAt                   = $capturedAtUtc
+            Week                        = $weekName
+            HistoryLabel                = $HistoryLabel
+            HistoryRootPath             = $HistoryRootPath
+            SnapshotPolicy              = 'FirstSnapshotPerIsoWeekUnlessOverwriteExisting'
+            SnapshotCreatedAtUtc        = $snapshotCreatedAtUtc
+            SnapshotTimestampStatus     = $(if ($snapshotCreatedAtUtc) { 'Recorded' } else { 'UnknownLegacy' })
+            FileSnapshotCreatedAtUtc    = $fileSnapshotTimes
+            Files                       = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
+        }
+        Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 7) -Encoding UTF8
+        if (-not $snapshotCreatedAtUtc) {
+            WriteLog -Message ("Weekly {0} history for {1} contains earlier CSV files without a verified capture time. SnapshotCreatedAtUtc remains null." -f $HistoryLabel, $weekName) -Level 'WARNING'
+        }
     }
-    $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
-    Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
+    elseif (-not $previousManifest.PSObject.Properties['SnapshotCreatedAtUtc']) {
+        WriteLog -Message ("Weekly {0} history for {1} has a legacy manifest without a verified snapshot time; its UpdatedAt must not be interpreted as the CSV capture time." -f $HistoryLabel, $weekName) -Level 'WARNING'
+    }
     if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} file(s) written in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
     else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
 
     $historyUploadCandidates = if ($UploadChangedFilesOnly) {
         @(
-            @($copiedFiles.ToArray()) + @($manifestPath) |
+            @($copiedFiles.ToArray()) + $(if ($manifestChanged) { @($manifestPath) } else { @() }) |
                 Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
                 Sort-Object -Unique |
                 ForEach-Object { Get-Item -LiteralPath $_ }
@@ -5541,8 +5571,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaGkFniYufdieP
-# k4Zd4T0TOgvZhI0uJf/zaTIB+GqepKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWRjW1dgiJ0b8/
+# dBUn4a0sG0u92xpMrEYyfQyL1kKm36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5675,31 +5705,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEOgFv3e74CiWOv8DLqiCzdDXitlEZ41dHMuFOvwafEbMA0GCSqG
-# SIb3DQEBAQUABIIBgBXLatZzp20q6OnFW5QC0806XoEtXWFWOBDYY+kxRq455Lhv
-# h3RTvbbSN3Moq3PDdeAhqnHKNOtYBRbPGE2GLqckS7bLq/kEQI6TNa+BDuOPfCaN
-# uRI/b7Wa7iDczLeNd59505D5EoTAHjqPVcSgM+ST2D9gpZK/aw8wt/KEygypPm1B
-# ouQGq41FeBFpNJEy8DAJBw0VKi+GKeT6R9UTGhJ44zZZbGkqvz9kMCBkllCruSy7
-# BnArEdyrZvF1bU0qt5tvUCvl6coWhkV0vow7Yws63kcMuyKuUFMgZ1bVNrrIZrhR
-# QkeKxDMpiTIESUjAbM/RXp7HQhmwJ2b/D6xtKZJnpG0IBJw/WjgTpm1VmTPjj3cz
-# TE4h6TRmzJF0aza/BlIiqWkuer6IjS5NoK/hw4txikPVgkLk4lkJeybZcfRN/oPm
-# 2VOAAbaPhIcxbdsPWBZX+SrqjWCbRMjIwDgiGBNZCtXagBF7IuHnMIg9ep5XM5yU
-# P9HuBDrEfYEtkA/5c6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMLU0p4Fsr5HS7LsJToMs1zvc9xtifRHVtAVzNxEm5FXMA0GCSqG
+# SIb3DQEBAQUABIIBgCdwPTUE+NCe5G/v/npkApV79itEp34fWCVhaDSm6mcoP9w5
+# FZVIQ37/L4K4me5XMJqpZz95dHol7V12mhOEfvXaFFfyPhLtfhHrAu+KYfqNj1hx
+# Mr8WJive+WB1GtH/aNhJ3Vil9ZN2D0ffS43r/hx8Kv9OTPOHXYpKl0wLUa0Nea7X
+# UsvcDU0gWNcoDZi5gh2owYP+nd7lgpTjKP5uHTzCX9/CxKa/W25uPnKZqN5wfiU4
+# i+59qEYYaAAjsou3c+BXRcVb16/5Aolm32PMfYW6/I9pL4d14hxlsl1Xg1qvSuxd
+# uxKigzds92o+/POKWO+5GoMsvWpE7Lfawzy8tKFe8WZO/GAnetr52jmchi2eb+iu
+# tzpXE97o+NMviPQlf9Q86WG5n3xBSK8RvYF38OUJ82GNYEb1WrXuA+4kEPiDOhf6
+# dQ/2f20tT51htyhVDjukgYCXg59GqPMfJdvTGWxkkyjKl/9LR/dBviubd3XmhcyG
+# tv7VBIpyoHH+I2vYAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMw
-# MTdaMC8GCSqGSIb3DQEJBDEiBCDOfuoJRHo9seKVdk1pk/K07BK0nQvBcThSU0YF
-# sxcLcTANBgkqhkiG9w0BAQEFAASCAgCkdqs5jVdG5kKfKiaJtf+jzMmdB5EfXm3n
-# VQLUbmYIF/AGaSETKdHkDgmRHHqIVGIjOB6kVqv08+nEn9+8zndR68HcaQRNKmwm
-# HG+mc7Js84FzebSlTkZf8zYClllsGu0kljmiH+p6UOJHbkkM/RDLPkWr2+S4NLav
-# Y6ILuq5nU7nUiGQiSBWDzQX7bladQMwURh+RcxvS9LqxF/tV3UsgRxJXBHf/rCIN
-# Rpz+M/P2gbeNO/roNxxA1Jv9XkwvyvGaBb2hhnr2sEJ3WDFY1vdX7A6kb3SkR3NT
-# prqhcEOMDaDvc29iGrL4S06rF6UYtKX+xDl1Mvjyz2jgN4gmYIL7QekLbDsX7g7G
-# SJEz73ZJdlWpKGUf6CE93N4ziooBDOb8olUEYW3YNS95PT+4KZZ8LecXOCq8Llq6
-# bmw3LFXtuM/OVtleDePeFI3nQrOFPDcy0UT6P9fTfvr6c70/BKXic9aIRYzDwfDo
-# xX15SBj2wWPVuhhZiupGcOei/3VOluTlFbQ3tWj+1oim0ZC/GZpmsfONbgnOfQ79
-# 1EvD7hgjItHHK4DROcvcCxbL+HkV/6LSdMvDYWKTJ1CAsrn7Lldc/lmqTl8VCouG
-# ZIxadydPWBuxids7+1O0SJoWjzhCReU7fzIk1PvyFr28U7cwNqGQZ8t4Ft+FryYF
-# Zj8w74RsjA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAz
+# NDBaMC8GCSqGSIb3DQEJBDEiBCDopgiJNeyhkvmqN0CuERgdieojT1/cMF+ySFqI
+# 0zD5rzANBgkqhkiG9w0BAQEFAASCAgCVezoE2H7V5gBqMYiGeRA/5v/jDoJ67Gu5
+# lNEY5JygMhZ86KhkhH3YhbnO4zKQT6feLEEo8tgSv0uKpIEyuTz9unbaDVqC5evQ
+# gNm4gOZqPMTk4G2WdSm1/9OWCCfbAUHcYh5jAqWx9yqeEdbfPJ1Lccrlwg4aPHhc
+# pVMsBLmC2Rn2wggSvclUyWyypRAlSnjAAPDny11SnPqv4fUn1l5PcVHWssSh8AWz
+# 2grpuTwiYEohiS6R/0Y5NQGuqvK6LuC3Hg3RrVDW9Wzo4FOeSrWC+OvfcLS7XnOM
+# p+wgnwmKJ74iYxZjmPdjoeLWKxHwm8vzlhVEu+/+Ebn6D0ikcf9dEHjsPPWs3xrj
+# RCPBOsWT7EYhqTjGiR0wMKAQa8mcmMw167fs6WPaoN4wkWxLDi27cm0B+98FTnAd
+# AQnLXEbq0XiWUlXj2omSTxo6ntASktWFLuyW8r/1VKgEItCbQL0mRYVN+Zcvi4a5
+# CnZpJhRxEsCzi1enwIlhefMf7vUViHqjolEDdhv+jrr2B/H4cUibGwxBjR7iN/26
+# gf4MV3St+2qD8FGEb9Pw15PXphmCts9+XuGa6IqQY52GtVnKrdF9hFUwW/jps7FY
+# aOdI3T314JttI191Tfmhovotad68ujcy/GkpMDlGsHz1ZvAcUjNEZRvlysbzDQEA
+# xnB06Mq4FA==
 # SIG # End signature block
