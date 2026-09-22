@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.14
+1.0.15
 #>
 [CmdletBinding()]
 param(
@@ -155,7 +155,9 @@ try {
         Assert-Offline ($text -notmatch "PSObject\.Properties\['value'\]") 'Compliance still contains a PSCustomObject-only collection guard.'
         Assert-Offline ((($text|Select-String -Pattern "Test-ComplianceGraphProperty -InputObject .* -Name 'value'" -AllMatches).Matches.Count)-ge7) 'Compliance does not route every collection response through the canonical property helper.'
         Assert-Offline ($text.Contains('$global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)')) 'Compliance fatal errors do not increment the execution error count.'
-        Assert-Offline ($text.Contains('Complete-SmartM365ExecutionContext -Status $finalStatus -ErrorRecord $script:ComplianceFatalError')) 'Compliance fatal error details are not passed to the execution summary.'
+        Assert-Offline ($text.Contains("Complete-SmartM365ExecutionContext -Status 'Failed' -ErrorRecord `$script:ComplianceFatalError -FailureStage 'ComplianceInventory'")) 'Compliance fatal error details and failure stage are not passed to the failed execution summary.'
+        Assert-Offline ($text.Contains("Complete-SmartM365ExecutionContext -Status 'Auto'")) 'Compliance successful execution does not use the automatic success summary.'
+        Assert-Offline ($text -notmatch "Complete-SmartM365ExecutionContext -Status 'Auto'[^\r\n]*-FailureStage") 'Compliance successful execution still emits a failure stage.'
     }
     Test-OfflineCase 'Compliance legacy per-device detail collection remains disabled' {
         $text=Get-OfflineSourceText $paths.Compliance
@@ -637,8 +639,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBTxtTmw5//9th
-# RJI9cqvELslPwv6QDWXkrtzLyxeKAqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUZnHTW7tRruT6
+# tKlRu2ZeS6wSCUqPKUhBNtjnsg9vIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -771,31 +773,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPC52bwok0PmSbu8QNOSefu8PdY2wis3gCZviEuX1Jm0MA0GCSqG
-# SIb3DQEBAQUABIIBgDyQTm7byb6GFfF575J6EO64qn7/jHNTSJMeW4macseGzqNS
-# B58oXecfADOOe2HpdGMdIYYrZIA4YdJqYYd3LvoX+/bMTssmiScHbf8oMerBb0wh
-# guvdH7YuinGTaCupeI3WQ2mqecLu8vxgAKb5QVvFIW9jErMX/NPhXX9cPRoBLkiL
-# 8eplqsvUBGy0z1hu+X5sUafeZjaDvqfIQ2MXDLo8X1/beVqkBpLtsOgvWQs3JDB9
-# ANZpxP8ZQy/SoWONZydMtU9NJXoTFYCydh/7TN0LNEIOQ65KuoVbqTbZs3dRcYFy
-# 1GqG0MtRTml+ISUcmuqKPHHu8d44JrmE8WHJd/xo/7kWpKReosNJ6LkM5O2PBzDr
-# whcqf0H1q9oMhoxTkFWSP+GmTxZ8C3jV9OYl2C4ztj2KvlBRDbLU5hZ0c8va1HBL
-# Qox3lQfoyCvfpHEEmnC6T1I4JFZmgr4MVBPj+LTSHHWfvqiDZF97wF2k/tdh4nuw
-# v+XZxHh+CDkirFo5tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOhRI/BkUMeu/R4CIj7QnFuy1j4rPLz21rxNFKHtrW3qMA0GCSqG
+# SIb3DQEBAQUABIIBgG9LicKd6ZKXggN6/CWYnJ/mzkTT6KB9vdtzn5Q4q5FuiUx7
+# qhd+HJlcoJhpKpUFx6PjObnpwNLEqvIkPqbOUQRwOVZo599RvXPa7S/rYqSeEcuX
+# UmS0SP03zwp4ayY/+BFcmXWfF2KQ5gVwNv1uARzP8HLyJ1MTk4XAjnEGPyIOt6UW
+# y4q0mXV520qxZuEuX5zGjAhXvZnfFl4iee/Na6m7+qR+6mFf1HzviEBGHQOCiC2I
+# pB6Pj1MzmrHiCLVrg9nLvtCTjFv/13vY3PZp4s3nLknFDF1bo4J+vo5tY3OLK5t1
+# WQ+NU6Zb2L/hO5iwucQmfHr7jGGyy2QGblVXKMk6OQ+6lCyIqQmdB0vMyHGpA1Qu
+# mj/GTdjOHclxs1MPfUGhtBKcWS4aRRXEJTe8QeGOXjXdx2Qf9N8wTJ3FZ8YB27AM
+# WGGbLFXFbw2e94Jnqd6T2cDUTCKOn2h00F2Ff6Xs58Q1jsO+c+RW4iLo7ekKx3Az
+# mr+a2uEfX7OCEkm9ZqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNTM3
-# NTVaMC8GCSqGSIb3DQEJBDEiBCBfGjXX9KWEqK5hpMw5N9ReuBohBp0Q0DVLwyBI
-# F0HUDTANBgkqhkiG9w0BAQEFAASCAgBTRsuHyVyzqcd4FdRwyXTO7TaSyAB2tULN
-# 2oOZueTBgSKYJ3gbri8l3zAmPABOaPGVPceefbJNNrHqPfxBGx5pm5UTWXbaWXPV
-# AqY96K8j1xAJaTXBBvmG6UdgtqPp7tMJ9DLGKwKrmiHAjBngwIdfeSRhVDQ/UdVj
-# vM1wS25N0aK0tJTuHd/tLCIWjMkewJxDN/+hgItv89A3qAXAkxFymUdTa0UbIG/3
-# E+Qtc9Fdte0nyx+ltlHYyU5C2mWph104zGZ2ahvjb8H19w0SGrkRnHI/x0rCGmVg
-# PHGoDmUsZjDgOZVfB9cMNBLf2YY8oxaTUegiCdXZqCMZoBbvpq8oH0fm2U+A7FSH
-# cRr8Utsf9pimxPINEg1mhXs4KBDF7QRsQwMQH98qXsQKwRTSeqA6+wGLjrFK5Xka
-# mg3tLMoqpSwH7cuzqIN/udABqu58eD8nBedbx2gbhiCk9O5E45qbC0LFFlXeg+Kf
-# XRW2OyeWQPSUP7zenatmo5WJ7p8XeM2lm2b1UynW8HJk70bi779I1hpbvixk4qLm
-# 0lkHWLSrbAXM3w4tXRZKVbIdanCZyxeZUFHB24O8tU69mJdUlaqXDSwbYnQUYYjC
-# Ba8OV3A77q27ul+4zZy95yZvMNqJsYPL1RDMZnBj7x1BczY4I7jasO0Fo6NsN3f0
-# /0pe1q806Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNzQ4
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAQU9cQKWcGrK8e8K28PoafuPcHT9xWUDCFU7H9
+# ukVoNDANBgkqhkiG9w0BAQEFAASCAgBXMV6Y5j9ApPyC5YpGfNsGOGMCJHKYTt7L
+# 8n7fQjo+msbKSbHMvFcUiM44L0y40AE6hdcG6mVkOIhpl9e1D9sVD+f5ArMScu1w
+# eSAvIlcM+luXe8t2odOokTOmcnNXGuazrWU8zNePM1+E9+dLkiJX/t8KLYx5tixm
+# RvJhW+O7jl9DvpcUDrppqU7Ys4jEMGCVhizQ4Zol/IxpG1VbQckaYfT6FkrINCCv
+# EbwftRqSbUkf5+tk7hA9n9QKGix2X+yXUED/2W92/O8Wj/xlRY0PLuCp1CYM2W66
+# QoF2E6BihNi+fNnXcvoaqUSmrPaUZV/u38zPrePnkBb72rEuLW2yPxPuPPWOzRje
+# 2ocHML8+gcWE2mJsXaRkGVQBGhqZ5j4W2cO0WvQR0hGn4Z352zrLuKLeA4Hzd+Iv
+# l2lWNAuIN+339vPu+XUS/fJ12okH9dQAVadYD30i5l3KshsPz0uCV79/RtDdQYwH
+# AEx0Tzly90PHoWyGkZV2gIvxCeha/Pn2hBa/EPIgG3C8bJvFjM9gpTwt7BNnisn3
+# xnxdVqQPzLz31KVOT71YhUngLVvarSsWacQqOfNj+vIdKhg0Sftys1GnEZPf2tld
+# krh8l1hKmLALa5PDqaF5GmoTm1SAXFqO6N8wP++xxHBGFrd/W3HrN2Kg/cJOCEgH
+# wCpjPpp5gA==
 # SIG # End signature block
