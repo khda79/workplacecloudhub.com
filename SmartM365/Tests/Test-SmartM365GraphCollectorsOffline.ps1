@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.17
+1.0.18
 #>
 [CmdletBinding()]
 param(
@@ -182,6 +182,48 @@ try {
     Test-OfflineCase 'Compliance pager retains PSCustomObject compatibility' {
         $m=Import-OfflineFunctions $paths.Compliance @('Write-ComplianceInfo','Test-ComplianceGraphProperty','Get-ComplianceGraphPropertyValue','Get-ComplianceGraphPageShape','Invoke-GraphPagedCollection')
         try{&$m {function script:WriteLog{param($Message,$Level)};function script:Invoke-WithRetry{param($Operation,$Script)&$Script};function script:Invoke-MgGraphRequest{[pscustomobject]@{value=@([pscustomobject]@{id='object'})}}};$items=@(&$m {Invoke-GraphPagedCollection -Uri p1});Assert-Offline ($items.Count-eq1 -and $items[0].id-eq'object') 'Compliance PSCustomObject page compatibility regressed.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance Entra enrichment indexes a paged snapshot and preserves trust types' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Get-ComplianceGraphPropertyValue','Get-EntraDeviceIndex','Resolve-DirInfoFromEntraDevice')
+        try {
+            &$m {
+                function script:Write-ComplianceInfo { param($Message) }
+                function script:Invoke-GraphPagedCollection {
+                    param($Uri,$Operation)
+                    if($Uri -notmatch '/devices\?\$select=id,deviceId,trustType') { throw 'Unexpected Entra query.' }
+                    @(@{id='object-h';deviceId='device-h';trustType='ServerAd'},[pscustomobject]@{id='object-r';deviceId='device-r';trustType='Workplace'},@{id='object-a';deviceId='device-a';trustType='AzureAd'})
+                }
+            }
+            $actual=&$m {
+                $index=Get-EntraDeviceIndex
+                [pscustomobject]@{
+                    Count=$index.Count
+                    Hybrid=Resolve-DirInfoFromEntraDevice -EntraDevice $index['DEVICE-H'] -FallbackUpn 'user@example.test'
+                    Registered=Resolve-DirInfoFromEntraDevice -EntraDevice $index['device-r']
+                    AADOnly=Resolve-DirInfoFromEntraDevice -EntraDevice $index['device-a']
+                    Missing=Resolve-DirInfoFromEntraDevice -EntraDevice $null -FallbackUpn 'user@example.test'
+                }
+            }
+            Assert-Offline ($actual.Count-eq3 -and $actual.Hybrid.EntraObjectId-eq'object-h' -and $actual.Hybrid.DirectorySource-eq'Hybrid') 'Compliance Entra ObjectId or Hybrid classification was lost.'
+            Assert-Offline ($actual.Registered.DirectorySource-eq'Registered' -and $actual.AADOnly.DirectorySource-eq'AADOnly') 'Compliance Entra trust types were not preserved.'
+            Assert-Offline ($actual.Missing.DirectorySource-eq'NotFound' -and -not $actual.Missing.EntraObjectId -and -not $actual.Missing.AD_OU) 'Compliance unmatched device was misclassified or given an invented OU.'
+        } finally {Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance Entra enrichment rejects empty and ambiguous snapshots' {
+        $m=Import-OfflineFunctions $paths.Compliance @('Get-ComplianceGraphPropertyValue','Get-EntraDeviceIndex')
+        try {
+            &$m {function script:Write-ComplianceInfo { param($Message) }; function script:Invoke-GraphPagedCollection { @() }}
+            $emptyRejected=$false;try{&$m {Get-EntraDeviceIndex}|Out-Null}catch{$emptyRejected=$_.Exception.Message -match 'no devices'}
+            &$m {function script:Invoke-GraphPagedCollection { @(@{id='one';deviceId='same'},@{id='two';deviceId='same'}) }}
+            $duplicateRejected=$false;try{&$m {Get-EntraDeviceIndex}|Out-Null}catch{$duplicateRejected=$_.Exception.Message -match 'Multiple Entra objects'}
+            Assert-Offline ($emptyRejected -and $duplicateRejected) 'Compliance accepted an empty or ambiguous Entra snapshot.'
+        } finally {Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'Compliance directory enrichment is default and no longer queries per device' {
+        $text=Get-OfflineSourceText $paths.Compliance
+        $template=Get-OfflineSourceText 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.local.json.template'
+        Assert-Offline ($text -match '\[bool\]\$EnableDirectoryEnrichment\s*=\s*\$true' -and $template -match '"EnableDirectoryEnrichment"\s*:\s*true') 'Compliance Entra enrichment is not enabled by default.'
+        Assert-Offline ($text -notmatch 'Resolve-DirInfoFromGraph|onPremisesDistinguishedName|onPremisesDomainName') 'Compliance still uses the per-device or unsupported directory lookup.'
     }
     Test-OfflineCase 'Compliance collection guards and fatal summary use canonical helpers' {
         $text=Get-OfflineSourceText $paths.Compliance
@@ -702,8 +744,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZMDQD0xHgWUqv
-# jAF+TjJtjxjNfa6Dw4v5c/2LQFX+U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyRvbJWYLSq+Yf
+# fho+5c3HJTH1qXU4SfUG4yfICWPVKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -836,31 +878,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK1DKQOABF8P8UE180P9yE38WnZv9UEFWyA/DjMGT868MA0GCSqG
-# SIb3DQEBAQUABIIBgEovjrAvsS8DX515mRL2beWiGfQL49WO9w1vV1E/GLOxV9P9
-# anE2J22OY3jHqOf0AJOtb3nll9bv5mAYkde10pWk2QFE7BRAXqc2wS//0yoLi2xT
-# OMy7w7C1rLlBNhUHh3m8/Gs6ho0bBWgmYbeba62ZIQuUQylMPvCVrU2gCmJIS/YB
-# RD8MIyDlkIbi4vpbJUvGzko9QIOI4+1HqY6a3Z2l2ZRDYJNA3lgZiSNJD8IB6J35
-# a4yKbAypb77tmjABOoisTOe3jc8A+/S72qfvj1WKOUzHf/Z8QV/rgNEFiHcitOos
-# RKVgCpxo+Twa2Bfue5X1GLcKugCRb/+q49m69/Nz5v4NK2rMw5NdaNCMK2f4SWNK
-# s+t4Cu/MPzBK9tKzpQvqe2mLT7gxks44Qcd2YORljZqkIHNC5PSA0juw+uMvGddm
-# 81ludYK9lgswOv6gynfB0IfHGtDjV54bkAQCs2Xw0y/v1LG9vorbzCSJlOm8axHT
-# BJq1572TIgDg5te756GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINxF7yFTec4x/tZQ+wBHbGhDvYx8KVd7XqsrdIrq2yoYMA0GCSqG
+# SIb3DQEBAQUABIIBgCLSRcZhHwDbPmf7Ek6svyFrFyUGvHStiUuyUPpdg+tXNng+
+# R8VD48eHSu4I7FANmu7UKr8xpGbNc/L6o1COi6TWN2dCH+j4ErNyHh4X90wIUxEZ
+# kzMT5BtBtH8hYWZ4ZdgmQOKTbFp4AK90dSQeIKqiKYAP12+kGK3VCeiN+K8OsMNU
+# OHpjQEOo5mvbU664etC5DQO4Efx8ZbZtxetSQdUYvGRW4r3oDEs83NevE88ZgGwf
+# 4d3LGngO5HpHPY9adPPHFqIocl8hWsCyUm9gcRiJ8WSQTWYMZNokDM5Hvk9Z/fhx
+# QqE6Zz2RvjhywX52qMfV6Jnl7dEl05plldKWExu+6+NL2QsJW6MdKuK7l0WCDZnl
+# kTBC2JcNYsKk4UKrWjeDXG42Y11yicteOhG5OJ5gIlmnbRMA+rgnsc4bOklAHcqf
+# EepdTKyWTp2lNOSW/KAyBsZbUF9/f6bgOQ+Q95tplJOkKI48s5ixJCmVrovSbqu/
+# OzMJDDucPYp4FLvUT6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTMz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBzUdQ01K5O+op1oSh4zLS8St987jmoadSpEnTO
-# rxK3KTANBgkqhkiG9w0BAQEFAASCAgAFzPT9SbK5vQxzaLTkzmBaBe7nmksPDHIS
-# Dl8ewBcloVJgZ6yHrKx5TRBg5MprbaZrstzmqD0Hq5cY5azDVBMJq5SWMinmcKzk
-# k8n9k55Ib4Jpj1u3cA0F3eaFUn/EWoVBzspOoxFBo7TeGS57yIeDZAmkeWvbbNlN
-# 87FmOzXp3Gmnou1E8Suh4LqkVieaH5Br7pPUL+kcDtDoIQ7oFQXmn0Q4WSV8oTPV
-# bcDA1d/HbEDDTSFbZ8IL9qfcKxaIrDOnVKWRnaWg3bsIzk94GIYdSyGYsgYSwnoO
-# a6ttCeBf6vxrAIMjg+0Q8pd32QaxkfT3uPs5kwCnLfPHt2kBMs98ERbjYyf2N2xj
-# 0HefkjIgv3iNAlxWNGf0KhrZFwGeynj3KLtB2t2/fpaW/7p/tvUS1YcaG4IXeBsr
-# Y3q/MxbjdLhzVhhWWFeO5bKsDsBQUWCBRCqXoPaqyJKMx5ZbjFbytrKa+hU94o9o
-# Du2PFHlw3x2DXtfDvWjLZ8OT078+Nah0/WJZO8xFC/VcM9K2ZNAm3VnsZC5zSffr
-# gpNjH2AUWuql2OS6BaB1se9UdjNoIJN6thivyxY/SMTUo4tuO+ZtiUGm+AZcDRTw
-# 9uTldZrvddUnySvb9Jx89qjyzBWMtjMVHNTBpyFDsxAXIR9FlzMxGpmZZSeBiaqH
-# ldGOZbsDfw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMDIy
+# MzdaMC8GCSqGSIb3DQEJBDEiBCCs1NlyQpq9QPlFZaCgAc+KQtYLP1eiJix+JCsY
+# E8IACjANBgkqhkiG9w0BAQEFAASCAgCeEu95Tj++tPjWns6/H9LyqKgHEGpqciHq
+# cQMYq4Dluj6r9wGYLVaoophaLtQWJxrEDhf1dsIaJE4i4ecgEOkzBZQTI+n4Xr/a
+# +N/HYzh12jmwmNAbQcM5tGDfBxnUyAo76QB5tccD77LHrGO1xy6gaHDp7P7YBoVU
+# USi4tbCt1p7foc+jpInjLJAA+8fzQUjWr+lcMT4Ue5XtIuDbjTzpOBgqgttD7HQi
+# A+4bcF9PfS1cuIOv9W8SwjjA6nPZT9EJWQYFq9/OnjIFChxq+wmGfyaBS2Fb8wU2
+# FoeDemw4hGQhWrIMV2UIKSzVJOO0sF9tkccaEGRmVhKzHMj0c19+XNVl+QqY2HYv
+# HW8kEWWRpNHaLfn+AgCdgGgtjqNe14GOc2IUPupOtOWsDJt4Sj9w5IhbnmKm+zSC
+# t1B0BYbIzVMEH5Or8xRtAQfgvv8iOQlu/7i/Y+48oHHV8FDGp5aqJiJuoB+vqXQG
+# 1GP8s+d5O2A+cwexlNnx1o4HBKfoyrzgDGy9gsQDZpWfRGGYgxjlp3z0ziWR+VEr
+# 5I2udgC9rIYJ6nmC67fiYo7MOX9lZSmY8Y5HN/jBzGpWXNNqdfZs8J9QWmlN8MFI
+# BaunbOQxOWFIU42AytVynvc9I6YojQIR1PSQASr+oPUU1cTsVqAxeff3y1971rMA
+# Dvg54b34aA==
 # SIG # End signature block

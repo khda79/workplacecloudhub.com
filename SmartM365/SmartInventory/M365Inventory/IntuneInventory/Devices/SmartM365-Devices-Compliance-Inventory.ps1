@@ -6,9 +6,9 @@ M365 Devices Compliance Inventory (Graph-only, Windows-only).
     - All Windows devices by default (if no filter is supplied)
     - No RAM/Storage/DHA collection
     - Per-policy compliance with fixed category columns (always present, even empty)
-    - AD_Domain / AD_OU / DirectorySource from Entra ID (Graph) only:
-        * AD_OU from onPremisesDistinguishedName (Hybrid only)
-        * AD_Domain from onPremisesDomainName or fallback to UPN suffix
+    - EntraObjectId / DirectorySource from a paged Entra device snapshot
+    - AD_Domain retains the historical primary-user UPN-suffix fallback;
+      AD_OU is not provided by the Graph device resource
 
 .PARAMETER ManagedDeviceId
 Optional: limit scope to a specific Intune managed device.
@@ -32,7 +32,7 @@ Retained for command-line compatibility. The canonical export report now supplie
     Maximum wall-clock duration for detailed policy-state collection before the circuit breaker preserves the summary-only result.
 
 .PARAMETER EnableDirectoryEnrichment
-Resolve Entra directory details such as on-premises OU/domain per device. This adds Graph calls and is disabled by default for full-tenant runs.
+Load the current Entra device directory once to resolve ObjectId and trust type. Enabled by default; AD OU requires a separate AD source.
 
 .PARAMETER MaxDevices
 Optional cap for smoke tests. 0 means no cap.
@@ -45,10 +45,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.23
+    Version : 1.24
 
 .VERSION
-1.23
+1.24
 
 
 .REQUIREMENTS
@@ -58,9 +58,9 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.23
+    Version : 1.24
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
-Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
+Scopes      : DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
 #>
 
@@ -80,7 +80,7 @@ param(
     [bool]$IncludePolicyStates = $false,
 
     [Parameter(Mandatory = $false)]
-    [bool]$EnableDirectoryEnrichment = $false,
+    [bool]$EnableDirectoryEnrichment = $true,
 
     [Parameter(Mandatory = $false)]
     [int]$MaxDevices = 0,
@@ -326,7 +326,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.23"
+$ScriptVersion = "1.24"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -350,7 +350,7 @@ if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
 $script:PolicyExportEnabled = -not $SummaryOnly.IsPresent
 $script:IncludePolicyStatesExplicit = $false
 $script:IncludePolicyStatesEffective = $false
-$script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
+$script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $true) }
 $script:PolicyStateMaxRuntimeMinutes = if ($PSBoundParameters.ContainsKey('PolicyStateMaxRuntimeMinutes')) { [int]$PolicyStateMaxRuntimeMinutes } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateMaxRuntimeMinutes' -DefaultValue 60) }
 if ($script:PolicyStateMaxRuntimeMinutes -lt 1) { $script:PolicyStateMaxRuntimeMinutes = 60 }
 $script:PolicyStateAutoDisableDeviceThreshold = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PolicyStateAutoDisableDeviceThreshold' -DefaultValue 5000)
@@ -1015,82 +1015,73 @@ function Get-ADPartsFromDN {
     }
 }
 
-# Resolve directory info (OU and Domain) from Azure AD / Entra ID only (no on-prem AD calls)
-function Resolve-DirInfoFromGraph {
+# Read the current Entra directory once rather than making one Graph call per
+# Intune device. Graph device v1.0 exposes id, deviceId and trustType; it does
+# not expose an AD distinguished name or OU.
+function Get-EntraDeviceIndex {
+    [CmdletBinding()]
+    param()
+
+    $uri = 'https://graph.microsoft.com/v1.0/devices?$select=id,deviceId,trustType&$top=999'
+    $directoryDevices = @(Invoke-GraphPagedCollection -Uri $uri -Operation 'Get Entra directory devices')
+    if ($directoryDevices.Count -eq 0) {
+        throw 'Entra directory returned no devices; refusing an incomplete Compliance export.'
+    }
+
+    $index = @{}
+    foreach ($device in $directoryDevices) {
+        $deviceId = ([string](Get-ComplianceGraphPropertyValue -InputObject $device -Name 'deviceId')).Trim()
+        if (-not $deviceId) { continue }
+
+        $objectId = ([string](Get-ComplianceGraphPropertyValue -InputObject $device -Name 'id')).Trim()
+        if (-not $objectId) {
+            throw 'An Entra device has a deviceId but no ObjectId; refusing ambiguous enrichment.'
+        }
+        if ($index.ContainsKey($deviceId)) {
+            $existingId = [string](Get-ComplianceGraphPropertyValue -InputObject $index[$deviceId] -Name 'id')
+            if (-not [string]::Equals($existingId, $objectId, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Multiple Entra objects share one deviceId; refusing ambiguous enrichment.'
+            }
+            continue
+        }
+        $index[$deviceId] = $device
+    }
+
+    if ($index.Count -eq 0) {
+        throw 'Entra directory returned no usable deviceId/ObjectId pairs; refusing an incomplete Compliance export.'
+    }
+    Write-ComplianceInfo -Message ("Entra directory enrichment indexed {0} unique device IDs from {1} directory devices." -f $index.Count, $directoryDevices.Count)
+    return $index
+}
+
+function Resolve-DirInfoFromEntraDevice {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$AzureAdDeviceId,
-
-        [Parameter(Mandatory = $false)]
-        [string]$FallbackUpn
+        [AllowNull()][object]$EntraDevice,
+        [AllowNull()][string]$FallbackUpn
     )
 
     $out = [pscustomobject]@{
         AD_OU           = $null
         AD_Domain       = $null
         EntraObjectId   = $null
-        DirectorySource = 'Unknown'
+        DirectorySource = 'NotFound'
     }
 
-    try {
-        if ([string]::IsNullOrWhiteSpace($AzureAdDeviceId)) {
-            if ($FallbackUpn) {
-                $out.AD_Domain = ($FallbackUpn -split '@', 2)[1]
-            }
-
-            $out.DirectorySource = if ($out.AD_Domain) { 'AADOnly' } else { 'Unknown' }
-            return $out
+    # Preserve the historical UPN-suffix fallback in AD_Domain. It is not an
+    # observed computer domain, and AD_OU remains empty without an AD source.
+    if ($FallbackUpn -and $FallbackUpn.Contains('@')) {
+        $out.AD_Domain = ($FallbackUpn -split '@', 2)[1]
+    }
+    if ($null -ne $EntraDevice) {
+        $out.EntraObjectId = Get-ComplianceGraphPropertyValue -InputObject $EntraDevice -Name 'id'
+        $trustType = [string](Get-ComplianceGraphPropertyValue -InputObject $EntraDevice -Name 'trustType')
+        $out.DirectorySource = switch ($trustType) {
+            'ServerAd' { 'Hybrid'; break }
+            'Workplace' { 'Registered'; break }
+            'AzureAd' { 'AADOnly'; break }
+            default { 'Unknown' }
         }
-
-        $uri  = "https://graph.microsoft.com/v1.0/devices?`$filter=deviceId eq '$AzureAdDeviceId'&`$select=id,deviceId,trustType,onPremisesDomainName,onPremisesDistinguishedName"
-        $resp = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
-
-        $dev = $null
-        if ($resp -and $resp.value) {
-            if ($resp.value -is [System.Collections.IDictionary]) {
-                $dev = $resp.value
-            } elseif ($resp.value -is [System.Collections.IEnumerable]) {
-                $dev = ($resp.value | Select-Object -First 1)
-            } elseif ($resp.value -is [object[]]) {
-                $dev = $resp.value[0]
-            }
-        }
-
-        if ($dev) {
-            $dn        = $dev.onPremisesDistinguishedName
-            $domain    = $dev.onPremisesDomainName
-            $trustType = $dev.trustType
-
-            if ($dn) {
-                $parts         = Get-ADPartsFromDN -DN $dn
-                $out.AD_OU     = $parts.OU
-                if (-not $domain -and $parts.Domain) {
-                    $domain = $parts.Domain
-                }
-            }
-
-            if (-not $domain -and $FallbackUpn) {
-                $domain = ($FallbackUpn -split '@', 2)[1]
-            }
-
-            $out.AD_Domain       = $domain
-            $out.EntraObjectId   = $dev.id
-            $out.DirectorySource = if ($trustType -eq 'ServerAd' -or $dn -or $dev.onPremisesDomainName) {
-                'Hybrid'
-            } elseif ($trustType -eq 'Workplace') {
-                'Registered'
-            } elseif ($trustType -eq 'AzureAd' -or $domain) {
-                'AADOnly'
-            } else {
-                'Unknown'
-            }
-        } elseif ($FallbackUpn) {
-            $out.AD_Domain       = ($FallbackUpn -split '@', 2)[1]
-            $out.DirectorySource = 'AADOnly'
-        }
-    } catch {
-        Write-Verbose "Failed to resolve directory info from Graph: $_"
     }
 
     return $out
@@ -1486,7 +1477,8 @@ try {
     # ==========================================================
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All','DeviceManagementConfiguration.Read.All','Device.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1',
-        'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=1'
+        'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=1',
+        'https://graph.microsoft.com/v1.0/devices?$top=1'
     ) | Out-Null
 
     # MAIN LOGIC
@@ -1530,7 +1522,8 @@ try {
     }
 
     # 2) Collect per-device summary rows and per-policy rows
-    $aadCache = @{}
+    $entraDeviceIndex = if ($script:EnableDirectoryEnrichmentEffective) { Get-EntraDeviceIndex } else { @{} }
+    $entraMatchedCount = 0
     $rows     = New-Object System.Collections.Generic.List[object]
     $polAll   = New-Object System.Collections.Generic.List[object]
 
@@ -1579,31 +1572,25 @@ try {
         $azureId    = Get-SafeProperty -Object $dev -Name 'azureADDeviceId'
         $primaryUpn = Get-SafeProperty -Object $dev -Name 'userPrincipalName'
 
-        # Directory info (Graph-only)
+        # Directory info from the current, fully paged Entra device snapshot.
         $adOU         = $null
         $adDomain     = $null
         $dirSource    = $null
         $entraObjId   = $null
 
-        if ($script:EnableDirectoryEnrichmentEffective -and $azureId) {
-            if ($aadCache.ContainsKey($azureId)) {
-                $adOU       = $aadCache[$azureId].AD_OU
-                $adDomain   = $aadCache[$azureId].AD_Domain
-                $dirSource  = $aadCache[$azureId].DirectorySource
-                $entraObjId = $aadCache[$azureId].EntraObjectId
-            } else {
-                $info       = Resolve-DirInfoFromGraph -AzureAdDeviceId $azureId -FallbackUpn $primaryUpn
-                $adOU       = $info.AD_OU
-                $adDomain   = $info.AD_Domain
-                $dirSource  = $info.DirectorySource
-                $entraObjId = $info.EntraObjectId
-                $aadCache[$azureId] = $info
-            }
+        if ($script:EnableDirectoryEnrichmentEffective) {
+            $entraDevice = if ($azureId -and $entraDeviceIndex.ContainsKey([string]$azureId)) { $entraDeviceIndex[[string]$azureId] } else { $null }
+            $info = Resolve-DirInfoFromEntraDevice -EntraDevice $entraDevice -FallbackUpn $primaryUpn
+            $adOU       = $info.AD_OU
+            $adDomain   = $info.AD_Domain
+            $dirSource  = $info.DirectorySource
+            $entraObjId = $info.EntraObjectId
+            if ($entraObjId) { $entraMatchedCount++ }
         } elseif ($primaryUpn) {
             $adDomain  = ($primaryUpn -split '@', 2)[1]
-            $dirSource = if ($script:EnableDirectoryEnrichmentEffective) { 'AADOnly' } else { 'NotEnriched' }
+            $dirSource = 'NotEnriched'
         } else {
-            $dirSource = if ($script:EnableDirectoryEnrichmentEffective) { $null } else { 'NotEnriched' }
+            $dirSource = 'NotEnriched'
         }
 
         # main row
@@ -1815,6 +1802,12 @@ try {
     }
 
     Write-Progress -Id 1 -Activity "Processing devices" -Completed
+    if ($script:EnableDirectoryEnrichmentEffective) {
+        if ($entraMatchedCount -eq 0) {
+            throw 'No selected Intune devices matched the Entra directory; refusing an unenriched Compliance export.'
+        }
+        Write-ComplianceInfo -Message ("Entra directory enrichment matched {0}/{1} selected devices; {2} not found." -f $entraMatchedCount, $rows.Count, ($rows.Count - $entraMatchedCount))
+    }
 
     if ($script:PolicyStateCollectionStartedAt) {
         $policyStateElapsed = (Get-Date) - $script:PolicyStateCollectionStartedAt
@@ -1917,8 +1910,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcn3SL3PHsF1A5
-# GBuZ6wDfq1JMHwkbYxwdeMkZiqRWQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7KZBNGovjaEg1
+# ad1dSeEIgZdFbYaSf0uJKswgMObpoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2051,31 +2044,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ/rdf6wDT2c7VwsArK3PRAY6KqI328EsVeOsgM3NWfyMA0GCSqG
-# SIb3DQEBAQUABIIBgCngRThwK/QkYwl0/9V2Ibv0fQ2t/aPBa3zAl+YGSjVcMv4h
-# c3ZzepTXy33PzVjlBKnpdP7aChnZ7V+SZj1mYcxjk8qXGvo0StgdEpBrIqIvx2bN
-# wQgbBAJGVXZmCk0rpjKlYAHR/kTCbm2Vj0xIC4QzqdgKZYrde9SE9gLZ4PU+DP8E
-# pVnQ1arsxDRR2ldz4KI0m88OGzFdb0Z0nrKm73YYHekSbGYLF82FPzMyKwwyP5W2
-# SACy7FC36mCuhlFht4m1LcOkbpOmoYpRw0hQYFjy0z0m0KdZCIevp8WfnrRAUB6Z
-# ZdaWYiKr3PRxUnBl22rfC5n90WDjuZ/Ur5e7VErU3U8ZJ33DMViPRdtFKPsxfaJF
-# NLw76gKP0yfvvyIqzfvBskBExijJu0uojhJGWg0VyB43G8K6HGHVIR1Ij4JIU+M/
-# TkBxLiXz3Sz1Fde1JKQAbCvb4w3e7NzccK/ha6rRjib0UPm44P4U5z8UsEYjvsNx
-# uY1CNHe6KxS0Q4qRBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKF6e6nuXeT78dgYs0wVtWJP2vFhVtnqacrI4TD3y5V0MA0GCSqG
+# SIb3DQEBAQUABIIBgI4/00IIHd3wFPk6oKszOVkubRdrAbfkIuQwDLpmEG0b3yKf
+# UU+55/xxsJ2CRajnPB8fQXZRrFg3ptWW6sFQG37MM75m088rPUniwzkQOrHfYcpq
+# 8qsT4ZyTWSa+Stfni1WvPaBMC74RBELNvsnePfr1n5uRrLr031JK9xtEG7i5Ekb7
+# +t5vL4jCCyNk6aYe0XPAm8lR+KX/QNaNEMrkbKcRv8yT8bERa19+XVaUNPIFbhsk
+# dlS1uMk4iuP+nx6Pt9jy+Odz0GzXdR/6p+Gou3GffbbHcFZ5YgoUEVgiAwcAtbSq
+# UJyypJsUQA2M4IZSSE7epu7AJ01GHHmipYVZ088UE431QVhh8pOSc20GtavZ0P5T
+# WrhMWmw92z7OHpBtPM7GI5Wkxf+tQQvrDB92iCKQYvk1Hj8BM+i0Uih8AuYcdwRA
+# 7o5iqlrSbSrTL16z+nNK7PUuK2jJ5c0wGLWHh1qpwRJLBGYJ9WnECewge4ObkU0e
+# XNmp1LKzOJ7skjRNMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNzQ4
-# NTBaMC8GCSqGSIb3DQEJBDEiBCCdK1R9nwVr7DRyOOpAD6hnvS14+9GaLk3oncLz
-# SnCi7zANBgkqhkiG9w0BAQEFAASCAgBadGs3mlgdnh07NwvzWrc5ihDYb7AZq79z
-# 9Hta9ytjDCRr2b+Zg3kx2PvTdeR9z0be3BEegELq5QfjL/oKOT2goVlZzh6v6zSv
-# OYMyGrP0do89nUmM4kfalBgD9hd9VUp0nV6TvLAsaAgVcVZLtqalqSPTbKQHlpRY
-# BXJpfuimVi0y/Aqljz+ZHBczz27U7TfovFcKAGZqHbYwxB6LZQ4SWsgkauLaRDEQ
-# h3bNua9+ZJWoePvqrPi719+KsZVW5Q2sGbMNX5rmxkcX8PgpUQyYNq2GuRObZw3O
-# w3vktoxIIpni+cU3jdocDmeeuMkx8AjoywhVChugDfVUkBC9CkzNRRJQAQjzK5i4
-# 2i3H0CunBWIm8nH2G3kltPnsvFh2ZwwJBDPmG5dwHXU4T18DrF/IZXfAh8RqmHTf
-# F7bSR4+1Da/z+1+pXc1BWO11DLp6t2YWLSSJPo5WNOd9J7iEfZ1bcnyv3PwVL0sl
-# nF6amoGivmSw4eqg7L22cXfQz40CeJo3aoD6QY8Fb0kZ9hxWWCjs4As6ysdrQqi4
-# yqYiGx3BZv7tZVERDPFWs0Fxn4NOf7eGWZMxs+cti1YdaUtVODgYvEEa1C3q6BdH
-# +ZFJWXep+7ZYSUogaxPS451hmwja3t68sugGCwvu4H10shDv3LEQiw5hKQITDiNe
-# EMD6Am2rDg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMDI2
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAP/xV91y23UnoGDVAVI/isK4Z9dPWo+nW2tdpX
+# 0xK1ATANBgkqhkiG9w0BAQEFAASCAgBBxcg8oN31gAWgd0iNV1wYmH8SgXOe/1/w
+# 1Hd1IPDRCygVBltJKDF3zdPTsi7poum8uIfudgWaaKP1Ixjy65ZHA5qxv5J3A/s8
+# 741kpv1gRqo5QwZJqMIS/s1nmzuQ0B0LnLNmfKt2kPDnIlVNn7eG+c/x8WEVe8m8
+# eIZ8ERcp7IDYsFa0yr4vScidlYqEK0rPDSDw11bkP6QBvLpr17DBLLf8iwWnG/gF
+# nHJG16zg8SRTtCKi0LiS1QkCODXnI7NjTp7XvZbVGhmVHo91lq4Vq6fCPW4YPs3H
+# IYnuFXWyTnLmqUpcJW03dMkPnoY3PJiOTeACSHJgsKKIpoxoshSFRHM4NNv0ebT3
+# QoN6GyPurEUQ7xA62BwHRqqrUl9YcHlDlJck4y9ppuRl8uNR4dl84cMAQ2yV2VuS
+# zJfKY0Uh/TnMDLo7lpVZyLIpdm8Q9GPDjJJvMmYTwd+SUXtKUCxCxwW4xW4C/SL4
+# cUGJ1EVy6a4zYEffFNtYm0hcvShCKy9c2TD8W+T/Mvr/Zt/Oktd3oYG1vtcX7Tzd
+# oWL+8II6BiS0fiOfTfrlXshxj+5zbiqZiRuszyuQU/+FJy7WQxWBz7swF4tpjagk
+# o6lkG9iXhOsGnux91oQI4XOAvnPg4mnoPuQJRTS/a1pYRz7c3BrROOEeR7NelY0H
+# pwAX2X7+BQ==
 # SIG # End signature block
