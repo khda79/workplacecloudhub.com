@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline management and central-manifest migration tests for the SmartM365 orchestrator.
 .VERSION
-1.0.0
+1.1.0
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -49,6 +49,72 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $snapshot.Paths.ClusterPath) -Message 'Central cluster configuration was not initialized.'
     Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $snapshot.Jobs).Valid) -Message 'Production jobs template failed management validation.'
     Assert-True -Condition ((Test-SmartM365OrchestratorClusterDocument -Document $snapshot.Cluster).Valid) -Message 'Mock cluster configuration failed validation.'
+
+    $managementLogPath = Join-Path -Path $temporaryRoot -ChildPath 'Logs\SmartM365-Orchestrator-GUI_TEST.log'
+    Write-SmartM365OrchestratorManagementLog -Path $managementLogPath -Message "First line`nSecond line" -Level WARN
+    $managementLogLines = @(Get-Content -LiteralPath $managementLogPath)
+    Assert-True -Condition ($managementLogLines.Count -eq 2) -Message 'The persistent GUI log did not preserve one timestamped record per physical line.'
+    Assert-True -Condition ($managementLogLines[0] -match '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\[WARN\] First line$') -Message 'The persistent GUI log prefix is invalid.'
+
+    $readOnlyPath = Join-Path -Path $temporaryRoot -ChildPath 'ReadOnly-Replacement.json'
+    Write-SmartM365OrchestratorJsonAtomically -Path $readOnlyPath -Document ([pscustomobject]@{ Value = 'before' })
+    (Get-Item -LiteralPath $readOnlyPath).IsReadOnly = $true
+    try {
+        Write-SmartM365OrchestratorJsonAtomically -Path $readOnlyPath -Document ([pscustomobject]@{ Value = 'after' }) -RetrySeconds 0
+    }
+    finally {
+        if (Test-Path -LiteralPath $readOnlyPath) { (Get-Item -LiteralPath $readOnlyPath).IsReadOnly = $false }
+    }
+    Assert-True -Condition ((Read-SmartM365OrchestratorJson -Path $readOnlyPath).Value -eq 'after') -Message 'The SMB-compatible replacement did not replace a read-only destination with -Force.'
+
+    $persistentlyLockedPath = Join-Path -Path $temporaryRoot -ChildPath 'Persistently-Locked.json'
+    Write-SmartM365OrchestratorJsonAtomically -Path $persistentlyLockedPath -Document ([pscustomobject]@{ Value = 'preserved' })
+    $lockedHash = Get-SmartM365OrchestratorFileHash -Path $persistentlyLockedPath
+    $persistentLock = [IO.File]::Open($persistentlyLockedPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $persistentLockError = ''
+    try {
+        try {
+            Write-SmartM365OrchestratorJsonAtomically -Path $persistentlyLockedPath -Document ([pscustomobject]@{ Value = 'must-not-publish' }) -RetrySeconds 0
+        }
+        catch {
+            $persistentLockError = $_.Exception.Message
+        }
+    }
+    finally {
+        $persistentLock.Dispose()
+    }
+    Assert-True -Condition ($persistentLockError -like "*Atomic replacement failed for '$persistentlyLockedPath'*") -Message 'A persistent destination lock did not report the exact target path.'
+    Assert-True -Condition ((Get-SmartM365OrchestratorFileHash -Path $persistentlyLockedPath) -eq $lockedHash) -Message 'A failed locked-file replacement changed the valid destination.'
+    Assert-True -Condition (@(Get-ChildItem -LiteralPath $temporaryRoot -Filter 'Persistently-Locked.json.*.tmp' -File).Count -eq 0) -Message 'A failed locked-file replacement left a temporary file behind.'
+
+    $transientlyLockedPath = Join-Path -Path $temporaryRoot -ChildPath 'Transiently-Locked.json'
+    $transientReadyPath = Join-Path -Path $temporaryRoot -ChildPath 'Transiently-Locked.ready'
+    Write-SmartM365OrchestratorJsonAtomically -Path $transientlyLockedPath -Document ([pscustomobject]@{ Value = 'before' })
+    $transientLockJob = Start-Job -ScriptBlock {
+        $lockPath = [string]$args[0]
+        $readySignalPath = [string]$args[1]
+        $stream = [IO.File]::Open($lockPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            [IO.File]::WriteAllText($readySignalPath, 'ready')
+            Start-Sleep -Milliseconds 900
+        }
+        finally {
+            $stream.Dispose()
+        }
+    } -ArgumentList $transientlyLockedPath, $transientReadyPath
+    try {
+        $readyDeadline = (Get-Date).AddSeconds(10)
+        while (-not (Test-Path -LiteralPath $transientReadyPath) -and (Get-Date) -lt $readyDeadline) { Start-Sleep -Milliseconds 50 }
+        Assert-True -Condition (Test-Path -LiteralPath $transientReadyPath) -Message 'The transient-lock test did not acquire its destination handle.'
+        Write-SmartM365OrchestratorJsonAtomically -Path $transientlyLockedPath -Document ([pscustomobject]@{ Value = 'after-retry' }) -RetrySeconds 5
+    }
+    finally {
+        Wait-Job -Job $transientLockJob -Timeout 10 | Out-Null
+        Receive-Job -Job $transientLockJob -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $transientLockJob -Force -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition ((Read-SmartM365OrchestratorJson -Path $transientlyLockedPath).Value -eq 'after-retry') -Message 'The bounded retry did not recover after a transient destination lock.'
+
     $upgradeRoot = Join-Path -Path $temporaryRoot -ChildPath 'ManifestUpgrade'
     New-Item -ItemType Directory -Path $upgradeRoot -Force | Out-Null
     $upgradeManifestPath = Join-Path -Path $upgradeRoot -ChildPath 'Orchestrator-Jobs.json'
@@ -94,15 +160,23 @@ try {
 
     $publishedJobs = $snapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
     $publishedJobs.Jobs[0].Enabled = -not [bool]$publishedJobs.Jobs[0].Enabled
-    $publishResult = Publish-SmartM365OrchestratorConfiguration `
-        -SharedDataFolderPath $temporaryRoot `
-        -JobsDocument $publishedJobs `
-        -ClusterDocument $snapshot.Cluster `
-        -ExpectedJobsHash $snapshot.JobsHash `
-        -ExpectedClusterHash $snapshot.ClusterHash `
-        -ChangeSummary 'Management test'
+    $unchangedClusterLock = [IO.File]::Open($snapshot.Paths.ClusterPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $publishResult = Publish-SmartM365OrchestratorConfiguration `
+            -SharedDataFolderPath $temporaryRoot `
+            -JobsDocument $publishedJobs `
+            -ClusterDocument $snapshot.Cluster `
+            -ExpectedJobsHash $snapshot.JobsHash `
+            -ExpectedClusterHash $snapshot.ClusterHash `
+            -ChangeSummary 'Management test' `
+            -AtomicWriteRetrySeconds 0
+    }
+    finally {
+        $unchangedClusterLock.Dispose()
+    }
     Assert-True -Condition (Test-Path -LiteralPath $publishResult.VersionFolderPath) -Message 'No configuration version was created.'
     Assert-True -Condition (Test-Path -LiteralPath $snapshot.Paths.AuditPath) -Message 'No configuration audit CSV was created.'
+    Assert-True -Condition ($publishResult.JobsChanged -and -not $publishResult.ClusterChanged) -Message 'A jobs-only publication did not skip the unchanged locked cluster document.'
 
     $conflictDetected = $false
     try {
@@ -116,6 +190,40 @@ try {
     }
     catch { $conflictDetected = $_.Exception.Message -like '*changed after it was loaded*' }
     Assert-True -Condition $conflictDetected -Message 'Optimistic concurrency did not reject a stale publication.'
+
+    $rollbackSnapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $temporaryRoot
+    $rollbackJobs = $rollbackSnapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $rollbackJobs.Jobs[1].Enabled = -not [bool]$rollbackJobs.Jobs[1].Enabled
+    $rollbackCluster = $rollbackSnapshot.Cluster | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $rollbackCluster.PeerAlertReminderMinutes = [int]$rollbackCluster.PeerAlertReminderMinutes + 1
+    $versionsBeforeFailure = @(Get-ChildItem -LiteralPath $rollbackSnapshot.Paths.VersionsFolderPath -Directory | ForEach-Object Name)
+    $lockedClusterStream = [IO.File]::Open($rollbackSnapshot.Paths.ClusterPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $rollbackFailureMessage = ''
+    try {
+        try {
+            Publish-SmartM365OrchestratorConfiguration `
+                -SharedDataFolderPath $temporaryRoot `
+                -JobsDocument $rollbackJobs `
+                -ClusterDocument $rollbackCluster `
+                -ExpectedJobsHash $rollbackSnapshot.JobsHash `
+                -ExpectedClusterHash $rollbackSnapshot.ClusterHash `
+                -ChangeSummary 'Expected rollback test' `
+                -AtomicWriteRetrySeconds 0 | Out-Null
+        }
+        catch {
+            $rollbackFailureMessage = $_.Exception.Message
+        }
+    }
+    finally {
+        $lockedClusterStream.Dispose()
+    }
+    $afterRollbackFailure = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $temporaryRoot
+    Assert-True -Condition ($rollbackFailureMessage -like "*failed at 'Orchestrator-Cluster.json'*rolled back*") -Message 'A second-file publication failure did not report successful rollback.'
+    Assert-True -Condition ($afterRollbackFailure.JobsHash -eq $rollbackSnapshot.JobsHash -and $afterRollbackFailure.ClusterHash -eq $rollbackSnapshot.ClusterHash) -Message 'A second-file publication failure did not restore the exact prior shared configuration.'
+    $failedVersionFolder = @(Get-ChildItem -LiteralPath $rollbackSnapshot.Paths.VersionsFolderPath -Directory | Where-Object Name -notin $versionsBeforeFailure | Sort-Object Name -Descending)[0]
+    Assert-True -Condition ($null -ne $failedVersionFolder -and (Test-Path -LiteralPath (Join-Path $failedVersionFolder.FullName 'Publication-Failed.json'))) -Message 'A failed publication did not leave an explicit failure record in its version folder.'
+    $failureRecord = Get-Content -LiteralPath (Join-Path $failedVersionFolder.FullName 'Publication-Failed.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ([bool]$failureRecord.RollbackSucceeded -and [string]$failureRecord.FailedStage -eq 'Orchestrator-Cluster.json') -Message 'The failed-publication record does not describe the rollback outcome.'
 
     $jobRunsFolder = Join-Path -Path $temporaryRoot -ChildPath 'SERVER-A\JobRuns'
     New-Item -ItemType Directory -Path $jobRunsFolder -Force | Out-Null
@@ -170,8 +278,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE86xfCHW6egf1
-# 2ztRn49c+a6Zk1etmfGRa4/I+0gLxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAqTMYm5ugkoqd
+# sidXe4M4CIZleH12OGuAbUhU+PN0b6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -304,31 +412,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJFTyeHiJCu0qwWwKIcCWKyMYDbVudFh1E1MYvrJ18VIMA0GCSqG
-# SIb3DQEBAQUABIIBgFTvYtgaSkParLG9kC3i+B68IF7mftzyJmtEu0s2voy1O9ia
-# QPMJb8ZyU95Dw7+EkbBQiBsGf0iiJ07Kh+d7a33+gH6UzsLGojLk23R6zVCIhuaL
-# MtQSRIIVpp9UQPK8skNuIYcpnNiYn/0R3MebVCZsMr8EbsBg9LUNfTBzjLrdojm1
-# ef0H5vLFVbnI+Fb4aDKL2WKGu2MD5ZARI7b2qOh8HIfzWCEqAs26b5BMJGVBDOz8
-# gntKGXBrs9dI++DcHit1jzxwx3F69fS1Z6hsIpltdWIrYXc+7hPAW7HDF2jxQvZs
-# RsWnhUhqw+JgxO+pFYXMlKFLPfoCnNDYDQ/v7Sl4AxJN4yYbxSsI/ZpvmuM2j9pV
-# k12bCzXpOTe5SFMqVQt2YlJDDKcNQKPyeUn0jvJ9AC/anyz4tJEWc0H/KyQcefwa
-# 2VJ+9wUkxO4r58tiusXJ4fs6FBG6Lgnmf6HDc47wYwzh09wiKpAHUNt+4q9Tbl+P
-# sragzD6KBp1YD7jZGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII+6GhQ1hYIV0+KRJBHlRejFQtrjIxxPfZCNsW9wLGiaMA0GCSqG
+# SIb3DQEBAQUABIIBgHAj82Y9ipCz/P72PoAmxlDf0v4LMBO44mfZEU/FuQK8DIO+
+# r3VTS8toGQ4z415mBif25LPyGBVzpARWhiCybCE7tIfAlYP55JfU9nlgBUXXB4dK
+# 88H6qZFXQ1x9qptBTGXjAKjCiSgf9SgeGp/CngynXQz58l45wMp2s5bGTbOEDNqo
+# wBoKXAD50zCE1FwFQfUaR6wTs7J3Nzs9WtMiX2j+FaPI7t9mgk4LFEdz/QpoY/Ay
+# A50XVQWAfv965CMSBrQ9P3WucjBxvCwRi12TWYADQco6dEE4UvZCmbZAU0iK+kb+
+# dmBzmF9lDhL8AZlVPPbwr2Q8v0/eMml9Z53pH0Ej0DVLZIiuQWVM20FrrcMvSHX2
+# fOOYPiR3zoxg068olPggEGM9qVzPEoaV/aRtGJKtWgmZETo66cMqweEXaBxZME94
+# SW3PGqtcLKH/9Z2a5l1U4u8qF9uKBwUxqqvgMm2wP+WmLq0AyDzNHRwNB/dojI9+
+# Mkud5iB1IajZa4K3MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMDEz
-# MTlaMC8GCSqGSIb3DQEJBDEiBCBQtV3eO3mHw4f32RS/EqpIwc3Zoul26vX2dzBr
-# hVy5FzANBgkqhkiG9w0BAQEFAASCAgAJAZfrHAMlm+HJ7+X1I9OxowopOPqdJgxb
-# k9StCcSVQxvni00sIn6Yxa+R8Wgz3FiGAJPJSlZoY9EQR8gAcn5Za5JSOr7eHvGi
-# s6i086ypui5nRPLbhXa/6DvWgwBsBnWQmKdzhHDlVFcvZq1aVm7EE5Pb9ZoBvrKJ
-# i5t38kRAo1C2XjBEe3sWsqqiQNANiflvMGg9bWhRRxhQuPTuzAXM+otbCXCS1QcB
-# usBUL21sbx/gh8ehrWOICzajcMqL2AEHaxXrIwj+u5uYN5IP83QgrI2zVub6pwwM
-# gcfRDMlzERCvs7bY+vqGxt5zni2hmK6ksWCD1l0tN8GVuYOBfbE+6jE56dNfWPR9
-# Cq/tgFm/mi/ZKeE5z2ymNTvzj1CMbgEwIUyMqfP5NoIq1Ey2OTlwhfOtdQja0nbN
-# OANHGGv8dMumtwQs9N8ExM62SW0hAZ2ukZwRclC+XMpsafVJueC6QZHO/eub41pE
-# xZdJbns7qMbyiG7WiTirsQZhMS7ykxhV+8IyyRsTL7GDN2XlGicScJBlP+SfwdPQ
-# +GURnzW1u9jp+o4+GjT2Q+MYHSzyzc0xvkIJB3uwtsn7k0oi2tzLFGFKiJ/Gnm02
-# Ku5Jy3lLAzbly1A8P5dmwVF33Rl+h0WxHjQFm7PtfH2LWER7dDIMD69SLBkdYgJC
-# PcaGo4E0yA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzU3
+# NTZaMC8GCSqGSIb3DQEJBDEiBCB2zXBRbSGI0M6gWi9wcJwZJE3ug7/8NLeN2ZD+
+# iBqDJDANBgkqhkiG9w0BAQEFAASCAgBSelDa5LtbIArqxuP3CTeeflaIvOT7lGuG
+# 6V6S/xXqO7lONNtw8s4irUXXLtPxB2D1lH42a4CvU7+QvWha3SRgq2i/v04AjvDB
+# O5oV9cITjM7hmkbkZ9emBw7m9BQBKVBkNwu1qvdDXRGnKbm784enKOneVVBo62Ty
+# FVL0mnnwA+az8xkKZ53+gpeC+P0U+K7T++l/rI5ANqHShK7ltKcTA0nxu6LIvHug
+# neXqSXwaux0JY+0aZbTyPgdNrfIZJA5cV+nn1sRCpqQT4oQBMhC76Lv4EaOTIbNQ
+# 244zib9YYDOgkEbRpAWZ6fj4UZ7ysY+eI9lqxEPAL6tYdSQs5543cyKTFSVgHw6t
+# tErxNsdZWriN6W3212CIUcu/6x/k09QLbDYYwHlypTmh+oqioqSyT4IlTBKS5XUU
+# iRrth20iZD76bSmi8IEOWVabCzqnNm6i7Hdxy/caICPlC0CeUMPS5BiCqqfGvED0
+# ltmQlxvR1khc1fD42m1fI3dirahMb8RSH2N5+2eBq/e3VuVXO1VaBOKMzkNem8MR
+# e19N5bIYgjxY1tFRB173tkSyfyq8rhne7QMMZLo44hjtiWyvs5QXFyHGAA1g3Q8x
+# o3PsUmHxNDXV9pxxOrYfc3ebRFG8yFPyJk61RxoQ0JcK9qKafWWMmYOiDBG+A9lG
+# pmVeFXi1vw==
 # SIG # End signature block
