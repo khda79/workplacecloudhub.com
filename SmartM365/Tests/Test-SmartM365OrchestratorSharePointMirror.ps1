@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline tests for the orchestrator SharePoint operational-folder mirror.
 .VERSION
-1.0.0
+1.0.1
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -35,6 +35,7 @@ $functionNames = @(
     'Save-OrchestratorSharePointMirrorState',
     'Enter-OrchestratorSharePointMirrorLock',
     'Exit-OrchestratorSharePointMirrorLock',
+    'Invoke-OrchestratorEnsureSharePointFolder',
     'Invoke-OrchestratorSharePointMirror'
 )
 $definitions = foreach ($name in $functionNames) {
@@ -76,6 +77,33 @@ try {
     Assert-True -Condition (-not ($relativeFiles -match '(?i)\.lock$|\.tmp$|notes\.txt$')) -Message 'Transient or unsupported files were selected.'
     Assert-True -Condition (@($snapshot.Folders | Where-Object RelativePath -eq 'DATA-ALL/Orchestrator/Config').Count -eq 1) -Message 'Config folder was not selected.'
     Assert-True -Condition (@($snapshot.Folders | Where-Object RelativePath -eq 'DATA-ALL/Orchestrator/PipelineRuns').Count -eq 1) -Message 'PipelineRuns folder was not selected.'
+
+    $initializeProbe = & $mirrorModule {
+        $script:Settings = [pscustomobject]@{
+            SharePointSiteHostname = 'tenant.sharepoint.test'
+            SharePointSitePath = '/sites/SMART-M365'
+            SharePointLibraryDisplayName = 'Documents'
+            SharePointTargetFolderPath = 'SMART-M365'
+        }
+        $script:SharePointEnsuredFolderState = @{}
+        $script:InitializedFolders = [Collections.Generic.List[string]]::new()
+        function script:Initialize-SmartM365SharePointFolder {
+            [CmdletBinding()]
+            param(
+                [string]$SharePointRelativeFolderPath,
+                [bool]$Enabled,
+                [string]$SiteHostname,
+                [string]$SitePath,
+                [string]$LibraryDisplayName,
+                [string]$TargetFolderPath
+            )
+            $script:InitializedFolders.Add($SharePointRelativeFolderPath)
+            return $true
+        }
+        $result = Invoke-OrchestratorEnsureSharePointFolder -RelativePath 'DATA-ALL/Orchestrator/Config'
+        [pscustomobject]@{ Result = $result; Calls = @($script:InitializedFolders.ToArray()) }
+    }
+    Assert-True -Condition ($initializeProbe.Result -and $initializeProbe.Calls.Count -eq 1 -and $initializeProbe.Calls[0] -ceq 'DATA-ALL/Orchestrator/Config') -Message 'The orchestrator did not call Initialize-SmartM365SharePointFolder exactly once.'
 
     & $mirrorModule {
         param($Root)
@@ -147,7 +175,15 @@ try {
     Assert-True -Condition ((& $mirrorModule { $script:Deletes.Count }) -eq $deleteCountBeforeFailure) -Message 'Incomplete scan triggered a remote deletion.'
     Assert-True -Condition ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -eq $stateHashBeforeFailure) -Message 'Incomplete scan changed the valid mirror state.'
 
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.55' -Force -ErrorAction Stop
+    $moduleWarnings = @()
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.56' -Force -ErrorAction Stop -WarningVariable moduleWarnings
+    Assert-True -Condition ($moduleWarnings.Count -eq 0) -Message ("SmartM365.Core import emitted warning(s): {0}" -f ($moduleWarnings -join ' | '))
+    $approvedVerbs = @(Get-Verb | Select-Object -ExpandProperty Verb)
+    $unapprovedCommands = @(Get-Command -Module SmartM365.Core | Where-Object { $_.Name -match '-' -and $_.Name.Split('-')[0] -notin $approvedVerbs })
+    $unapprovedCommandNames = @($unapprovedCommands | ForEach-Object { $_.Name } | Sort-Object)
+    Assert-True -Condition ($unapprovedCommands.Count -eq 0) -Message ("SmartM365.Core exports command(s) with unapproved verbs: {0}" -f ($unapprovedCommandNames -join ', '))
+    Assert-True -Condition ($null -ne (Get-Command Initialize-SmartM365SharePointFolder -Module SmartM365.Core -ErrorAction SilentlyContinue)) -Message 'Initialize-SmartM365SharePointFolder is not exported.'
+    Assert-True -Condition ($null -eq (Get-Command Ensure-SmartM365SharePointFolder -Module SmartM365.Core -ErrorAction SilentlyContinue)) -Message 'The obsolete Ensure-SmartM365SharePointFolder command is still exported.'
     $coreModule = Get-Module SmartM365.Core | Select-Object -First 1
     & $coreModule {
         $script:SmartM365SharePointFolderPathCache = @{}
@@ -185,8 +221,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBa2Pv6EZjoVrO1
-# RvU7e8qCsh2ZxUwCRy7sbWLGwM9vnqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtBMqOMG5jXPNh
+# MedhZqzAbcVsmMuklchswwjE2mgVpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,31 +355,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE4qeMThJXchksQkYsNvyJjrGkr8r+Irzxhjik/Jijz0MA0GCSqG
-# SIb3DQEBAQUABIIBgD4ymjj2tAkRHKhxGUcWUNv+aWevASGYbhFiV+M1LP2c414Q
-# me+SOZbe2rYX7/YxBO2ZdFk4/HwhjhXT57CfliGZeHVnrFuk7D+owgXDjhNvH+eH
-# /IQxemq7dNPBi6p7j5XCOQ4X0W8AQaBLY3CVysATqZoHW37JhiW5s2URgkDctTho
-# csMfsja/UFiQohHOfa/U29HcCFVgIQOOhBrrRlNGCcHtxsh/QQo86AFUmvey7UPe
-# i/Uw1Ob9zo9uwfKYVLfolAFrj52mu52iOQhrhGS43hLtcgJIkSlie/8cSHUSGvnQ
-# bmpxqyTAq3FvRT/DB4vF4DKHlK4tf1+/8K+BT6Ix8eMDk4/mKQoUwezVcHKh8Hqw
-# hZ5aHhZcFN98Xn+VkadP9SfKo90cGbHq22A+0nOwzsqvTI/9KWtj2FXUVGSc4/r2
-# jYA88E+Qu1MLD3ZoT6yXGeiIqm14HuQrTLsnhQ74ANwJ3GfwLMNsiLtZjasn9ubr
-# NRKDSoEGJ59ZGNQe0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEoY5R3z/ttiFnLLRE41mxtJdwcj/FZmx1chzTPmT94eMA0GCSqG
+# SIb3DQEBAQUABIIBgKEysfGh8uoXXLzC8kXbNiVhISQjXZwzSzwSO0xNC83AR7l/
+# DIHIMEc6mO/TqR/zhG6axkVgw8y+foR2EEmZ1Lw7Gdivc6WQVtBkkKIPn3QSvyKr
+# u75lhCTgFbRVxlAMZJ6H5RQgyqD+qgivJnZSxxbJg5IYc0zhjMEbnUJ2rltYqkFN
+# Aa1WBhxKceHoH2YQfQKJgW29YAQrrc0x+iQ6d7k8gvC9WgmE6eSV6HCiZI3W2udG
+# QGruVB8C7jvyP8Emi2Im1se5wOJQkz7y7/WjpTQZDXWLu/1uaRdSVUZ/1v/VSqSr
+# fRzXhQ3n3WI7hzqb6CbTdxbHFlDAd8gWG45zpkZrYRofScS76PTAV+kEbWe3frbg
+# sx77PS3NWmAsy4alzXwJkzCsaE1hWXM//TX7RG8MqojriQdVen53fp4JaGw6//8h
+# sOh1j/I6YkorXd6XMSoRbVC3PKVOmqb02Sj2SPTTyCkrEkK7HB15PkRx13wmIfVD
+# d9+bkBPxTDeKNY2Su6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTQ5
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBkOLBPrniaGlIzSkLiffA/wDy6q5qciHp2rpIz
-# 2yJ4fjANBgkqhkiG9w0BAQEFAASCAgBViwQqoFG5ABZos6V5LkeSp2rlot5qm0De
-# 8DHLs53RDIaiAi4TNUoV0erJRdBYCHNaCkWCI7ji7K5eDnIDOsilqA2Qo4/4H1R7
-# 2imvYUnVu4YNCLfjSUAJOEjMdsTi1VCq0Kl4ZXNTyMeQwHfbZjzMtNAFQoQUA2E7
-# mEYQqx2OIFh8yvPeELb+6x2PozBfki21hfP+R/YpCnh2XiezvXVgrhrj3ElWC38h
-# kp09DhSunY8EjIoiagJJSoLKNP8eD5+isozwf6whiTk66Woxl+RzpoPW3qlJAAwk
-# /28wTEBGZEKRse2YSgyEi+H1UWblMCj2mxYhRXFt0lyw04lQp8tlJUxH7Ey4oABz
-# WFBFTA1adfedOjcpsG4h2rb1KpSW0451g5mePD6KQ27S2U5jaog9gFfm3iyBhddM
-# 7WPZ0Pn967ym68AnGB8su+VYTrHbvEInBIjPVb/+YDRj0Gg7LsHxfEDX3x+N2SFi
-# XrvVoDuOFP2llS54OnvD118WG7pAnbQeHbXxQELWnBA7cYnaOODenQBhKg1fxFqK
-# ms/HsO2+bWoha+TE7elTE3k68ur9R4xM4mvybLUgKdqFB5oodk3PCsBSW1tIMrsR
-# 4Oi8WRMtdPlQIo0TDdlxB/8FdNAYzS1VQO4q0BgmPq0+9W1XuufZK9SI2ksbcWkE
-# Jp29xA8png==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNTEz
+# NDBaMC8GCSqGSIb3DQEJBDEiBCCUsBZs3WZUeL5clvM+OsseZK5OHY63kdR8WDUp
+# AN2a7TANBgkqhkiG9w0BAQEFAASCAgCWN+5YRniDWlg+uY0N24Pwtgr3SyI6SYdR
+# YxqRHX7PlVfk3GvJkhkSFIwiZHJr79JL0ArsfmUeDjZ66FO8Jr7INcX3FLxJfDh8
+# we3BECOGI2f2zCy5wGVI9WwfR+PP5PsNqXgyHGFgRbqVVOxoXTvliZumAdnnboP0
+# o6fSAyInO9A7m7ph6hoWctr4iiyXQcHduubL2JkGycTQ3q6AHPYyvDfYvD6HqJTm
+# YpLUEmdaSJOPrx3mafY/hRC+e4iQnJochsT+kAPEdC0ypIv8BxPp26qEiPUmmK/L
+# Dc1R3vwjqpNg0doOcbC+HOzwnnU2MIqk5h4XOvPWosbudG0KuKL7wmQbA4aLKuKi
+# xxtaHwl3iwA4KGDyaKCHuI8NehVdYU00/7qbcEVNy2KIUEciwxxnE/ZfEge8TMuc
+# Wl0ypMslbh9lKCReZ0dHHj7zC/ONEFwJpa77oTUzXxewtUVp7dSXDNOE8sqVNCSd
+# OVUG6+q1mvcQISOSappc7l9Cwr72JCc0UirI0Iw6SN1majZ+kZdmF/u/bhOziLCa
+# M4qPottWpqFNwN1k3vte2NzEo+xS+NczyM7Z39qfksKBalyXyUMH1Wt9gi65D1oj
+# +03sSnw+YJuHYJv1kl5HB2zww5PvNhMfCS6UAh9SrcW1js/lDBbHI7V0aiafWbms
+# b8lgF5HLlw==
 # SIG # End signature block
