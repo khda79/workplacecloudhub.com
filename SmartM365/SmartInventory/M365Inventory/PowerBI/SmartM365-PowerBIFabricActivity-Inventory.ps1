@@ -8,8 +8,11 @@ time, follows continuationUri or continuationToken pagination, enforces the
 200 requests-per-hour limit, and publishes detailed and per-principal CSV
 files for SmartInventory and SmartFinOps.
 
+-NoExternalActions keeps Power BI read requests and local CSV/log output,
+but suppresses SharePoint uploads and Teams notifications during a controlled run.
+
 .VERSION
-1.0.0
+1.0.1
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -39,12 +42,13 @@ param(
     [string]$LatestCsvFolderPath,
     [switch]$InteractiveAuth,
     [switch]$ValidateOnly,
+    [switch]$NoExternalActions,
     [ValidateRange(0, 2147483647)]
     [int]$MaxItems = 0
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $TaskName = "SmartM365-PowerBIFabricActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:PowerBIActivityApiUri = 'https://api.powerbi.com/v1.0/myorg/admin/activityevents'
@@ -158,8 +162,8 @@ $global:SmartM365ExecutionSummaryWritten = $false
 $global:SmartM365ScriptName = $TaskName
 $global:RetentionMaxCSV = [int](Get-PowerBIActivityConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-PowerBIActivityConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
-$global:EnableSharePointUpload = if ($ValidateOnly) { $false } else { [bool](Get-PowerBIActivityConfigValue -Name 'EnableSharePointUpload' -DefaultValue $false) }
-$global:EnableTeamsNotifications = if ($ValidateOnly) { $false } else { [bool](Get-PowerBIActivityConfigValue -Name 'EnableTeamsNotifications' -DefaultValue $false) }
+$global:EnableSharePointUpload = if ($ValidateOnly -or $NoExternalActions) { $false } else { [bool](Get-PowerBIActivityConfigValue -Name 'EnableSharePointUpload' -DefaultValue $false) }
+$global:EnableTeamsNotifications = if ($ValidateOnly -or $NoExternalActions) { $false } else { [bool](Get-PowerBIActivityConfigValue -Name 'EnableTeamsNotifications' -DefaultValue $false) }
 $global:SharePointSiteHostname = Get-PowerBIActivityConfigValue -Name 'SharePointSiteHostname' -DefaultValue ''
 $global:SharePointSitePath = Get-PowerBIActivityConfigValue -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-PowerBIActivityConfigValue -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
@@ -646,6 +650,14 @@ function Assert-PowerBIAccessToken {
         }
     }
     else {
+        $configuredAppId = [string](Get-PowerBIActivityConfigValue -Name 'AppId' -DefaultValue '')
+        $tokenAppIds = @([string]$claims.appid, [string]$claims.azp) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        if ($tokenAppIds.Count -eq 0) {
+            throw 'The service principal token has neither an appid nor an azp claim; its application identity cannot be verified.'
+        }
+        if (@($tokenAppIds | Where-Object { $_ -ine $configuredAppId }).Count -gt 0) {
+            throw "The Power BI token application identity does not match AppId in the selected SmartM365 tenant profile '$Tenant'."
+        }
         $roles = @($claims.roles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
         if ($roles.Count -gt 0) {
             throw "The service principal token contains Power BI application roles ($($roles -join ', ')). Remove admin-consent-required Power BI permissions from the app and use the Fabric tenant setting for read-only admin APIs."
@@ -683,7 +695,14 @@ function Connect-PowerBIActivitySession {
     $headers = Get-PowerBIAccessToken -ErrorAction Stop
     $claims = Assert-PowerBIAccessToken -Headers $headers -IsInteractive ([bool]$InteractiveAuth)
     $script:PowerBIConnected = $true
-    WriteLog -Message ("Power BI authentication validated. Mode={0}; Audience={1}; TenantClaimPresent={2}" -f $(if ($InteractiveAuth) { 'Interactive Fabric Administrator' } else { 'Service principal certificate' }), [string]$claims.aud, (-not [string]::IsNullOrWhiteSpace([string]$claims.tid))) -Level 'SUCCESS'
+    $expiresUtc = 'unknown'
+    $expirationSeconds = [long]0
+    if ([long]::TryParse([string]$claims.exp, [ref]$expirationSeconds)) {
+        $expiresUtc = [DateTimeOffset]::FromUnixTimeSeconds($expirationSeconds).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+    $tokenType = if (-not [string]::IsNullOrWhiteSpace([string]$claims.idtyp)) { [string]$claims.idtyp } elseif ($InteractiveAuth) { 'delegated' } else { 'app-only' }
+    $appIdClaim = if (-not [string]::IsNullOrWhiteSpace([string]$claims.appid)) { [string]$claims.appid } else { [string]$claims.azp }
+    WriteLog -Message ("Power BI authentication validated. Mode={0}; Audience={1}; TenantClaimPresent={2}; AppIdClaim={3}; TokenType={4}; ExpiresUtc={5}" -f $(if ($InteractiveAuth) { 'Interactive Fabric Administrator' } else { 'Service principal certificate' }), [string]$claims.aud, (-not [string]::IsNullOrWhiteSpace([string]$claims.tid)), $appIdClaim, $tokenType, $expiresUtc) -Level 'SUCCESS'
 }
 
 function Get-PowerBIActivityAuthorizationHeaders {
@@ -756,6 +775,25 @@ function Get-PowerBIErrorText {
     try { return ($Response | ConvertTo-Json -Depth 12 -Compress) } catch { return [string]$Response }
 }
 
+function Get-PowerBIAuthDiagnosticHeaders {
+    [CmdletBinding()]
+    param([AllowNull()]$Headers)
+
+    if ($null -eq $Headers) { return 'none' }
+    $parts = foreach ($name in @('request-id', 'x-ms-request-id', 'Date', 'WWW-Authenticate')) {
+        $value = $null
+        try { $value = $Headers[$name] } catch {}
+        if ($null -eq $value) { continue }
+        $text = if ($value -is [string]) { $value } else { @($value) -join ', ' }
+        $text = ([string]$text -replace '[\r\n]+', ' ').Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text.Length -gt 512) { $text = $text.Substring(0, 512) + '...' }
+        '{0}={1}' -f $name, $text
+    }
+    if (@($parts).Count -eq 0) { return 'none' }
+    return ($parts -join '; ')
+}
+
 function Invoke-PowerBIActivityApiRequest {
     [CmdletBinding()]
     param(
@@ -765,7 +803,8 @@ function Invoke-PowerBIActivityApiRequest {
     )
 
     $reauthenticated = $false
-    for ($attempt = 1; $attempt -le $MaxRetryCount; $attempt++) {
+    $maxAttempts = [Math]::Max(2, $MaxRetryCount)
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         Wait-PowerBIActivityRequestSlot
         $headers = Get-PowerBIActivityAuthorizationHeaders
         $statusCode = 0
@@ -774,11 +813,21 @@ function Invoke-PowerBIActivityApiRequest {
         if ($statusCode -ge 200 -and $statusCode -lt 300) { return $response }
 
         $errorText = Get-PowerBIErrorText -Response $response
-        if ($statusCode -eq 401 -and -not $reauthenticated) {
-            WriteLog -Message 'Power BI returned HTTP 401. Refreshing the Power BI authenticated session once.' -Level 'WARNING'
-            Connect-PowerBIActivitySession -Force
-            $reauthenticated = $true
-            continue
+        if ($statusCode -eq 401) {
+            $diagnosticHeaders = Get-PowerBIAuthDiagnosticHeaders -Headers $responseHeaders
+            if (-not $reauthenticated) {
+                WriteLog -Message ("Power BI returned HTTP 401. Refreshing the Power BI authenticated session once. ResponseHeaders={0}" -f $diagnosticHeaders) -Level 'WARNING'
+                Connect-PowerBIActivitySession -Force
+                $reauthenticated = $true
+                continue
+            }
+            $diagnosis = if ($InteractiveAuth) {
+                'Check that the signed-in account is a Fabric Administrator and its delegated Power BI token has Tenant.Read.All or Tenant.ReadWrite.All.'
+            }
+            else {
+                "Check that the Fabric tenant setting 'Service principals can access read-only admin APIs' is enabled for a security group containing this service principal, and that the app has no admin-consent-required Power BI application permissions."
+            }
+            throw "Power BI Activity Events request still returned HTTP 401 after reconnecting. $diagnosis ResponseHeaders=$diagnosticHeaders; Response=$errorText"
         }
         if ($statusCode -eq 429) {
             $delay = Get-PowerBIRetryAfterSeconds -Headers $responseHeaders
@@ -951,7 +1000,7 @@ try {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
     }
     Start-Transcript -Path $transcriptPath -Append | Out-Null
-    WriteLog -Message ("Starting {0}. Tenant={1}; FromDate={2}; ToDate={3}; UtcDays={4}; InteractiveAuth={5}; MaxItems={6}" -f $TaskName, $Tenant, $dateRange.FromDate.ToString('yyyy-MM-dd'), $dateRange.ToDate.ToString('yyyy-MM-dd'), $dateRange.DayCount, [bool]$InteractiveAuth, $MaxItems) -Level 'INFO'
+    WriteLog -Message ("Starting {0}. Tenant={1}; FromDate={2}; ToDate={3}; UtcDays={4}; InteractiveAuth={5}; MaxItems={6}; NoExternalActions={7}" -f $TaskName, $Tenant, $dateRange.FromDate.ToString('yyyy-MM-dd'), $dateRange.ToDate.ToString('yyyy-MM-dd'), $dateRange.DayCount, [bool]$InteractiveAuth, $MaxItems, [bool]$NoExternalActions) -Level 'INFO'
 
     Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('MicrosoftPowerBIMgmt.Profile') -RequiredCommands @('Connect-PowerBIServiceAccount', 'Get-PowerBIAccessToken', 'Disconnect-PowerBIServiceAccount') -OutputPaths @($OutputPath, $LatestCsvFolderPath, $logFolder) | Out-Null
     $requiredPowerBIModuleVersion = [version]'1.2.1111'
@@ -970,20 +1019,22 @@ try {
     $details = @($collection.Details)
     $userActivity = @(ConvertTo-PowerBIUserActivitySummary -Details $details)
 
-    $detailResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_ActivityEvents' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $details -Columns $detailColumns
-    $userResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_UserActivity' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $userActivity -Columns $userActivityColumns
+    $detailResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_ActivityEvents' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $details -Columns $detailColumns -NoSharePointUpload:$NoExternalActions
+    $userResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_UserActivity' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $userActivity -Columns $userActivityColumns -NoSharePointUpload:$NoExternalActions
 
     $summary = "UTC range=$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd')); Events=$($details.Count); Principals=$($userActivity.Count); Pages=$($collection.PageCount); DetailedCsv=$($detailResult.PublishedPath); UserActivityCsv=$($userResult.PublishedPath)"
     WriteLog -Message ("Power BI and Fabric activity inventory completed. {0}" -f $summary) -Level 'SUCCESS'
-    Send-SmartM365TeamsNotification -Level SUCCESS -Channel Infos -Title 'SmartM365 Power BI and Fabric activity inventory completed' -Message $summary -ResultSummary $summary -Facts @{
-        Tenant = $Tenant
-        UtcRange = "$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd'))"
-        Events = $details.Count
-        Principals = $userActivity.Count
-        Pages = $collection.PageCount
-        RunId = $runId
-        OutputPath = $LatestCsvFolderPath
-    } | Out-Null
+    if (-not $NoExternalActions) {
+        Send-SmartM365TeamsNotification -Level SUCCESS -Channel Infos -Title 'SmartM365 Power BI and Fabric activity inventory completed' -Message $summary -ResultSummary $summary -Facts @{
+            Tenant = $Tenant
+            UtcRange = "$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd'))"
+            Events = $details.Count
+            Principals = $userActivity.Count
+            Pages = $collection.PageCount
+            RunId = $runId
+            OutputPath = $LatestCsvFolderPath
+        } | Out-Null
+    }
 
     Stop-PowerBIActivityTranscript
     Complete-SmartM365ExecutionContext -Status Auto
@@ -992,18 +1043,20 @@ catch {
     $failure = $_
     $message = $failure.Exception.Message
     WriteLog -Message ("Power BI and Fabric activity inventory failed: {0}" -f $message) -Level 'ERROR'
-    try {
-        Send-SmartM365TeamsNotification -Level ERROR -Channel Alerts -Title 'SmartM365 Power BI and Fabric activity inventory failed' -Message $message -Facts @{
-            Tenant = $Tenant
-            UtcRange = "$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd'))"
-            RunId = $runId
-            LogPath = $logFilePath
-            TranscriptPath = $transcriptPath
-            OutputPath = $OutputPath
-        } | Out-Null
-    }
-    catch {
-        WriteLog -Message ("Teams alert notification failed: {0}" -f $_.Exception.Message) -Level 'WARNING'
+    if (-not $NoExternalActions) {
+        try {
+            Send-SmartM365TeamsNotification -Level ERROR -Channel Alerts -Title 'SmartM365 Power BI and Fabric activity inventory failed' -Message $message -Facts @{
+                Tenant = $Tenant
+                UtcRange = "$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd'))"
+                RunId = $runId
+                LogPath = $logFilePath
+                TranscriptPath = $transcriptPath
+                OutputPath = $OutputPath
+            } | Out-Null
+        }
+        catch {
+            WriteLog -Message ("Teams alert notification failed: {0}" -f $_.Exception.Message) -Level 'WARNING'
+        }
     }
     Stop-PowerBIActivityTranscript
     try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $failure -FailureStage 'PowerBIFabricActivityInventory' } catch {}
@@ -1020,8 +1073,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCugqB/lIdYWZ0Y
-# QBovWYzVwaAXcv6pdWYFmb3/t8mWFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGyIe39gt0aG+M
+# 3C8JKJNvy0Fz0HrjVYbMnDTd/mbeDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1112,25 +1165,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -1138,47 +1191,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDPTp8dBrQcTdUNhY7a1WwfRqNIyjlrpnpnhcVeoKetHMA0GCSqG
-# SIb3DQEBAQUABIIBgHIbzMKfXFxbEVs9+R3vA/RNes5KnkX4ZqK1pck2wyAQJZdv
-# z2H83CJumcvTM+Zj5CQB/VZItR/PqFkO3FArqMZ6Kpc/+dctKMdU/l8QVSpc1Shq
-# 0hdnp7tGmHhK83Xli+Ybv8FRyuC265w46gudgxF/PIXRH41P8CGYTKCg2DCNYI8U
-# ifZWSdL2asYYJfot3pxo140R7ohjmQMqftrWlIwB2lQNOg6CNkicGsGQ+njEqGGc
-# g1Cmlz/2dAh1/MvIIC2M4T3MNB0vqMXsJ1a1fj9poktuytS5UzzM5auuGYjkKqkH
-# XOjcwluog+CL/3zWaBHoMsKhyOZcQ0BPChc+XAAWjGqJOTjL78KqZZKi77giOVYn
-# E3w7ipfWpdt3Lm8v6vP1r+QBfRk+F2U58KtCukdfgEM8Sgo89YdkD4G0WLH2UgQq
-# j1oyq1uQinOo0SpHQvbtR3REGyoNy5qlMKYgV1uO7YQsBTryYbMiyD1p9lPWvYQu
-# ahGao/7pOSbyK3KS7aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHdjx5QOCWHGgC5ihADlWMCsB/DygMwi+8BwiS7iXDF1MA0GCSqG
+# SIb3DQEBAQUABIIBgDBFgKeBdCh84tzVVlAxkrm91MnE81YpBMJxpTEh9jDBDSu2
+# fh6kxhfDbl4uUEAfz3XVCdx6hc4rzVVtLEGvghmBAZC99wJ3LsVsHJwnn8uX5NOq
+# NtRFwFCMvZwc+utN995hqMylOn8mguwPH1Sw5M3UWC0B+VEjDgK2UPpcNHKlL+Xf
+# +pvPPVjBY2MT1PFNJpObGsTY+AnKs8S2ZKmXNF5E6WOCwY32huDiiXRxHkQQ1ju/
+# GB0Ns1GGSW58xOBNPUd1MMkMLeTJiGd2oY1ue/vVEhzUzqYNKYnxz2nty6lTwmz2
+# SSEXW9S80MLCefidLlt+pipCKd+ai7wZog9Om36BJdQNFt4dAhi2Teym+J7ECSJp
+# vshA5YYGnPgAzAfpPtaRGRBMbYqejIkee4s+KUReCZuf+jw+JDvV6NvyqSdqWXKa
+# lX8TWmaksRz/iLvZD8aalZ+VLLLcIeIhQepUt1w/QMrss4d/hqvQO4n7IwTN7Hdr
+# gaHv9iZ8ZoD6GSPOg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMTMx
-# NTBaMC8GCSqGSIb3DQEJBDEiBCCzw8euepBCBOUW1n83ol1ht0MnAaVJYM6MN1PP
-# 1lZaZjANBgkqhkiG9w0BAQEFAASCAgCeuMDAFoLRQfM75L7RmR6GrNzcrYT9fH6I
-# XUjWLEx1euypHKvHHxUlUXe97zv56i/j8/EwPGV86mnMuZPqedspsWAg5DZx1+6g
-# IWSdU1X+l/K8eYw4iwsNWStScWC+YTssvo3BUW2LSBOhar9bcaru/VQFQkXb+aDU
-# yx+XMvtodIlKJzWdgkUCvfEEO1GdlklSNJfA/hD6nAuGhpodn887B6Ak84PerXsv
-# wVy0LXEpZKrsytunL+hgTHsn6uxSEeY5BuQOkKUPofb2wZoWGlo3IV0YTraCRrfN
-# S/9QWdHbXLvy6akTg8WBK+PG0bYmUHLsAQf4cYbpA0FmcA5RmiWf5wXzKEKhmuJR
-# +ulSspklAfgoHA0tOtSCWIk9rIrwic3B6wIZVWg9gU6obxznyt7/GBZM5Tl3O79w
-# 6NaBDlvTbjt/NiYuinZA55TRkQvgkkY8XUrNvacTtAPd8nZHBLmaeKCRqHSYtdk9
-# oZrFlLn8zlrs9h2gO+tBazXgfci0br4dbQpRrzF4i9qXQQV8GfpkSnW3KR+AhC3b
-# BmT+ekw/gLHvz5wosmSkvg5UQqR+kag+QBTU6i/Fwd/1tODpKNFoCDGpOdzlqw8d
-# YCHQbDYiOOkVn4f83dRo3DiGUGhSCN7RQrVfRFxvZP8vYqjqwFYZhOc+jJq5Q/n2
-# auE12z7k4g==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzAz
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDlM3p/LxjDh2Sw2yvNah7sL2O8kwfYdgVziYN6
+# Zsum4DANBgkqhkiG9w0BAQEFAASCAgCF8Og0lVWCe+Yei5cqh41ZBxf30+RWRRNC
+# jm7HWTrG9UXi8mVTtHlcsL2UEd908mhZVEZIiZkb4sixLXdXLggijHhrLUbUVxAy
+# f4pDz9cJrNy+5R4t5nzPKuroXA4E0ZSdxfnT9IMGLwMogGH3iDjolQS2At35ktyZ
+# nYWs35eAZ5twtYuIXtSQMBKzcA1e7p6HiPTQ75/CbnCTLqr7BzfWUYMFmi6F/DFj
+# yAkyoJTEwJDOGGfkN+MHuqCg7Eio3+pRcXYnd1rrijiRyFTDKObLjkhjKHbVby9L
+# T4J3cHj0DmAnl3InjXC7tDeKtB/KyLtCQXQptxjtDfQ5KI9h4CUk8ucZ5ym1rQHo
+# QeT3CELdh7PZOu6zBTAh2b5TD1ra/KVowToP4P8hQAtKly67+XfCSiJxSaQoKdzH
+# Hd5K1LWkoRsJfotXhOg8iJOShQZiQG03X+2HWXLv4lweZYnHflGRixRtz746/bJg
+# K8/Kvp9Ub4DrMagGc4mu6ZNa8HZpOd8PvBLFvGosZ6pfcrNeZsECchZgQOyVLExd
+# SoKxMbazpZUUa38bh692xfFEdM34TZuj7XBK02dDcItV+qk9lnDQdJApLEPMvUXw
+# yQxD8X4/1WtSUVlr+PFLok2Ttf+ZZXmbq7B1BkiwATrqs0S/YbwJUPq1mp66rZhR
+# BIUJ/Knh9w==
 # SIG # End signature block
