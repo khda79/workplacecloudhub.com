@@ -39,7 +39,7 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.5
+2.6
 
 
 
@@ -49,7 +49,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.5
+    Version : 2.6
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -422,7 +422,7 @@ function Invoke-GraphSafe {
     while ($true) {
         $attempt++
         try {
-            $response = Invoke-MgGraphRequest -Uri $Uri -Method $Method -OutputType PSObject
+            $response = Invoke-MgGraphRequest -Uri $Uri -Method $Method -OutputType PSObject -ErrorAction Stop
             return $response
         }
         catch {
@@ -430,7 +430,13 @@ function Invoke-GraphSafe {
             if ($_.Exception.Response) {
                 $statusCode = [int]$_.Exception.Response.StatusCode
             }
-            if ($null -eq $statusCode) { try { $statusCode = [int]$_.Exception.Data['StatusCode'] } catch {} }
+            if ($null -eq $statusCode -and $_.Exception.Data -and $_.Exception.Data.Contains('StatusCode')) {
+                $rawStatusCode = $_.Exception.Data['StatusCode']
+                $parsedStatusCode = 0
+                if ($null -ne $rawStatusCode -and [int]::TryParse([string]$rawStatusCode, [ref]$parsedStatusCode)) {
+                    $statusCode = $parsedStatusCode
+                }
+            }
 
             # Fallback: detect SDK-wrapped 429 when Response is null (SDK exhausted its own retries)
             $isSdkWrapped429 = ($null -eq $statusCode) -and ($_.Exception.Message -match 'TooManyRequests|too many retries|429')
@@ -579,7 +585,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.5"
+$ScriptVersion = "2.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -852,8 +858,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCundeJNS2kz4xc
-# 8FJGjULtsnMt5keHbycIGPhYi4/Hc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfHUGdqN9eR4Gl
+# W1+ZxjsU/nvJ5sNN72KCiVkSKms1LqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -986,31 +992,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJRy77nPvb3gwQ9uSU5U5qU8+2WOqQX8Uhf/MELNthrkMA0GCSqG
-# SIb3DQEBAQUABIIBgFM8UTQjCRlj/4B1DY8iIYKfHBP105iHCwzbyvmHqAZHcb9C
-# BSZQ7Jc1WnL0jwwZo8lWU08GyDUUe5fnI/FCZg65OUyjDPvBx76b8/qrgm9yy11D
-# yrNqX0qcnskCG/8hitS/B6EI9BbqowQgOB+3dlC92caGPflESom+WIYm6Zcbkd9s
-# 8+FBS3TSZQQHbIUHpNygS4YqzEwOjcMF6Z8JWWGsAdf1x05EXIz19Fu5XSZk7LbM
-# qt0lXwCzqyf4jdVVE9mrwSvRJZ/6UYQzADlI/lQsLwmyzNhpJ6zyLTFrsdOp3MeN
-# DtZn/bfk5f8Hv4DXXk+j0efzaqb21PIy2kJdI6TO/MpwYT+tG+oPbD9S7XWiZ+sp
-# hfW9egbEd6LvLYdD29Kceg8JeKCpZkRiIi3DRnkC0F7iCKS22Us8J8V1Ktv9WwvE
-# kgDJOM81Oe1FO7Y68cpsfed+frzgRaOolkZDk5QwYZqpCfOh0ZyvcMEcK2Iw8CA5
-# YUiZXKzKZVbfSn3iCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE3/9p47wAta5cHtS+ahd0EftpzfJEd/JHDX0oyBUPn+MA0GCSqG
+# SIb3DQEBAQUABIIBgJeH06uClSSfC3iGKws8jDwSexD3rU5QeIHEqb/TSFybuwQI
+# y97ZcTbRyXB7q8+wzjuGxMzLmsrkDDDGb5MyKZQKmjVmW/uigBZhD1a0nChSnNzk
+# 7xF6McxCREQR8SE0B/YuJyjZETJqbDsINUn8uHJiT0lr6tjEFZAxXvZLBToB2Ne1
+# XXo1A7NYnS3/3tudIfEN4wxTT/qc8OjkvqQPx9g9q7lJNXE3PWQeUpTtYkunKOiZ
+# Z9V7kAZzeMdzUIo0ov4qtfyDDU8mO5XgSSAhaUzponiAbc+4sZzBaJbsccaf9O2t
+# P31AZ0Okini+dHcnD3mBpOh+P8krzXugRX3D4VeaPvDQSrUFodhJcyN9VpekH9dm
+# 84fxaH0fuxHUyMRkn/glxwj91YujkRDEsVTNWxlGRej7HoxIzO64KfixLheFkGEE
+# cr7RaUXiU68NfYMqmoA/3vXaMWG5cypK3aqLyrgPV+b6G/J7vPniEoPCZxKcpDQ/
+# Md2AAzaIjBVRERSx5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMDA0
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBNxp31kHmhMq2GHI3jLhmCqO8BPyjE89BdFBQu
-# Iq4LNTANBgkqhkiG9w0BAQEFAASCAgBL5nPh/wGswzbROrRTZa6bPUo5YByOTgJS
-# F4dTaaT1//NsoYoDZ/2z8voEX6V82sWbMPHAEPDdxmebT/yp0oi+jEb5m1Jnbc29
-# LUpUKwJ39CUKsAa+WR3iOUJ3Tk+7yBPEDxQPZ5NDSsR+b7vghIuyf+0bnn49Z9xz
-# Y3qESMrRv5tN3hGEzPd9L0jFWsqOP/tY/6buRII+xzqp1rvP97yvonqGAf/cvaIB
-# iTytAz1n5URv/B27h5qrzN6swnfz/ZTKABvuCYtTwfGczbrn11haW9k1nEKm+wa1
-# HYNzHJe7td40IE4oxo/HLvjjDxIbiTLTEVcEjRFDEeee9mmTjPvOjiqD0HokUQFa
-# kAQno/6L0wpy8rBPQifMc0PGDtQYcAeBb3B/06TPVgRR2s2dsu9oewjuOevk1R2e
-# vYjASMz7JvckSpzTYES5zXLz0eS/1OLVx7RZbIlxSSQGZKxy5c1DgWgYLGItswB8
-# JT7ofPAznLllDs8nnhqYFWHdsTkEOnJWqS8oZG5u+hcCn9/1+/hWzjj7sVJQFLGL
-# eQ5a1N/UudNZarU4NoayFrvjxifVrxAaP7xqbPqMlLu9nWq63zb02jteIRQDZkZt
-# pj9Uqh61Sss28WXV9xa+YyWPixfbAeT39YsVnxqTOwWUa3DZis5T0OQMvziZmgzS
-# 5ymosk0/og==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTU5
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAkZo1RgcgxHDHQSGnEcy6lHvV/ZqVJZIlsrSJ/
+# ERroBTANBgkqhkiG9w0BAQEFAASCAgBvJsZCSpiRu+rNS/dkOGQUD0ryF+MEMmsB
+# 85/teZujGN/duap2DgwnlWSj49GpZMXA8Eiw8t62IUh+W+l7C6w50l97BHBwcPEC
+# nnpuGELqKIdw0L0Iva25xtzH6IEl5/YLWWlQ1k4lFo/wD7FEbCi7+VWv8ItAvXSB
+# FCIhIw3zRZ65UrOI8P5euWoZ+XkaZKjynh6usYqj+Hy0Y+4rGt/NVmIx+BSrqZ4q
+# rMKguoI2NZg00efundhEb9Zvxr+Cur+nDdlpuKtCu0HPnT1HHN6K/rMsTbyaj4Px
+# M3WGc9XB+hIu1IBDGmRva3FQIKx1S8IgIXjoVdTZuV6k3YOX3ckGL61z0L9JshPi
+# 1ZQZvkTIT/zPxChqMfQ9xgWtXBCTQI5jg6CiGXv9zYGrB0OVwFkjy0J1T1zJ6ft5
+# 8YuzyrXfswPVu5CYgkxMpVPz1r1eOMUouYaAZp5UZFjdq3diZbbcUMbaUOm5oVnF
+# 9Dmsa+0aGYH8IKJ7CwIY5NP9M/02VeOXD1GZKYS6jLQ5Hf/W49FZdztLJtqA7aRy
+# 0oG6GXG42uIaCLC4yV/i+RM7wc10vxiUhkevFozHGp/w7MY0uTqi/dp2zQVXkyVk
+# uGR+0mKo6EKVfk0K+GPw3AaoawAPSA3i4ARxYeAFbz2ebWwCZOsp//v7jFNz1CbZ
+# BaMBGkji7g==
 # SIG # End signature block
