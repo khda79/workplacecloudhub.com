@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.18
+1.5.19
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.18
+    Version : 1.5.19
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.18"
+$ScriptVersion = "1.5.19"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -3796,6 +3796,35 @@ function Read-SharedElectionPlan {
     }
 }
 
+function Read-SharedElectionRebalanceRequest {
+    if (-not $script:Settings.DistributedSchedulingEnabled) { return $null }
+    if (-not (Test-Path -LiteralPath $script:Settings.ElectionRebalanceRequestPath -PathType Leaf)) { return $null }
+    try {
+        $request = Get-Content -LiteralPath $script:Settings.ElectionRebalanceRequestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $request.PSObject.Properties['RequestId'] -or [string]::IsNullOrWhiteSpace([string]$request.RequestId)) {
+            throw 'RequestId is missing.'
+        }
+        return $request
+    }
+    catch {
+        Write-OrchestratorRuntimeUpdateWarning -Key ("rebalance-request-read:{0}" -f $_.Exception.Message) -Message ("Shared election rebalance request cannot be read and will be ignored: {0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
+function Test-OrchestratorElectionRebalanceRequestPending {
+    param(
+        [AllowNull()]$Request,
+        [AllowNull()]$Plan
+    )
+
+    if ($null -eq $Request -or -not $Request.PSObject.Properties['RequestId']) { return $false }
+    $requestId = [string]$Request.RequestId
+    if ([string]::IsNullOrWhiteSpace($requestId)) { return $false }
+    if ($null -eq $Plan -or -not $Plan.PSObject.Properties['AppliedRebalanceRequestId']) { return $true }
+    return ([string]$Plan.AppliedRebalanceRequestId -cne $requestId)
+}
+
 function Get-OrchestratorElectionPlanAssignmentSignature {
     param([AllowNull()]$Plan)
 
@@ -3833,7 +3862,9 @@ function Update-OrchestratorElectionPlan {
 
     $nowUtc = [datetime]::UtcNow
     $sharedPlan = Read-SharedElectionPlan
-    if (-not $ForceRefresh -and $null -ne $sharedPlan) {
+    $rebalanceRequest = Read-SharedElectionRebalanceRequest
+    $pendingRebalanceRequest = Test-OrchestratorElectionRebalanceRequestPending -Request $rebalanceRequest -Plan $sharedPlan
+    if (-not $ForceRefresh -and -not $script:ElectionRebalanceRequested -and -not $pendingRebalanceRequest -and $null -ne $sharedPlan) {
         try {
             if ($nowUtc -lt ([datetime]$sharedPlan.GeneratedAtUtc).ToUniversalTime().AddSeconds($script:Settings.ElectionPlanRefreshSeconds)) {
                 $script:ElectionPlan = $sharedPlan
@@ -3848,6 +3879,9 @@ function Update-OrchestratorElectionPlan {
     $lockStream = $null
     try {
         $lockStream = [System.IO.File]::Open($script:Settings.ElectionPlanLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $sharedPlan = Read-SharedElectionPlan
+        $rebalanceRequest = Read-SharedElectionRebalanceRequest
+        $pendingRebalanceRequest = Test-OrchestratorElectionRebalanceRequestPending -Request $rebalanceRequest -Plan $sharedPlan
         $capabilities = @(Get-LiveOrchestratorServerCapabilities)
         if ($capabilities.Count -eq 0) { throw 'No live server has a valid capability document and heartbeat.' }
         $weights = @{}
@@ -3865,11 +3899,21 @@ function Update-OrchestratorElectionPlan {
             }
         }
 
-        $preserveOwners = -not $script:ElectionRebalanceRequested -and
+        $preserveOwners = -not $script:ElectionRebalanceRequested -and -not $pendingRebalanceRequest -and
             (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $sharedPlan -ServerCapabilities $capabilities)
         $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -PreviousPlan $sharedPlan -PreservePreviousOwners:$preserveOwners -NowUtc $nowUtc
         $assignmentsChanged = -not (Test-OrchestratorElectionPlanAssignmentsEqual -Left $sharedPlan -Right $plan)
-        if (-not $assignmentsChanged -and $null -ne $sharedPlan -and $sharedPlan.PSObject.Properties['PlanId'] -and -not [string]::IsNullOrWhiteSpace([string]$sharedPlan.PlanId)) {
+        $rebalanceRequestedBy = '<unknown>'
+        if ($null -ne $rebalanceRequest) {
+            $plan | Add-Member -NotePropertyName AppliedRebalanceRequestId -NotePropertyValue ([string]$rebalanceRequest.RequestId) -Force
+            $appliedAtUtc = if ($pendingRebalanceRequest) { $nowUtc.ToString('o') } elseif ($null -ne $sharedPlan -and $sharedPlan.PSObject.Properties['AppliedRebalanceAtUtc']) { [string]$sharedPlan.AppliedRebalanceAtUtc } else { $nowUtc.ToString('o') }
+            $plan | Add-Member -NotePropertyName AppliedRebalanceAtUtc -NotePropertyValue $appliedAtUtc -Force
+            if ($rebalanceRequest.PSObject.Properties['RequestedBy'] -and -not [string]::IsNullOrWhiteSpace([string]$rebalanceRequest.RequestedBy)) {
+                $rebalanceRequestedBy = [string]$rebalanceRequest.RequestedBy
+                $plan | Add-Member -NotePropertyName RebalanceRequestedBy -NotePropertyValue $rebalanceRequestedBy -Force
+            }
+        }
+        if (-not $assignmentsChanged -and -not $pendingRebalanceRequest -and -not $script:ElectionRebalanceRequested -and $null -ne $sharedPlan -and $sharedPlan.PSObject.Properties['PlanId'] -and -not [string]::IsNullOrWhiteSpace([string]$sharedPlan.PlanId)) {
             $plan.PlanId = [string]$sharedPlan.PlanId
         }
 
@@ -3877,6 +3921,10 @@ function Update-OrchestratorElectionPlan {
         $script:ElectionPlan = $plan
         $script:LastElectionPlanRefreshUtc = $nowUtc
         $script:ElectionRebalanceRequested = $false
+
+        if ($pendingRebalanceRequest) {
+            Write-OrchestratorLog -Message ("Election rebalance request {0} from {1} was applied; assignmentsChanged={2}; planId={3}." -f [string]$rebalanceRequest.RequestId, $rebalanceRequestedBy, $assignmentsChanged, $plan.PlanId)
+        }
 
         if ($assignmentsChanged) {
             $ownerSummary = @(
@@ -5078,6 +5126,7 @@ try {
         PipelineRunsFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'PipelineRuns')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
         ElectionPlanLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.lock')
+        ElectionRebalanceRequestPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-RebalanceRequest.json')
         CapabilitiesPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator-Capabilities.json')
         OrchestratorScriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
         OrchestratorRunsLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.lock')
@@ -5443,8 +5492,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPdkOQhatiiVCb
-# sUVNy7584GmDksU+/488bEkeJLuayKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBST3X0zzxupaUX
+# re0mCvK2T/0vgsfwV3fgGm7BfBxbgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5577,31 +5626,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDIuCmjj8Y26puj5U3t4cG9tsBaUrzo/vOq3WDt/CQNxMA0GCSqG
-# SIb3DQEBAQUABIIBgH1lf8aGNJpBKCj9nFuC9tEgcSuDSkWzH2GroXN8kelaQrrV
-# koYcadsgEVDlBS39YzcamJva2ArtWZjlDXDxZUSmt5gAKCYDY3sisHG9oB7WOQpr
-# oSyB0ItokpKIeOyW/Av9rggo475qkd05EgI4oX5kQuJ2w992zk8oWk+MnaLA/gCl
-# pG2Ah47wx+yYaM2O0wzdBt9YrpKZL4lb59VvmZU4L1FxSUGSCip9gNB261F13ssU
-# fXQsPU6rMPa1PXPpaSyHqalV05D62Lo/PRzopQ/9CMBHijLdA96mNC3P3qrLvoQm
-# uovmm/LY6KnHtxz0vlBkXBKtAUsOg47h/g2MkNRIPjmf/AiAiONQ4mBYXXGN7E/N
-# hrJ4dcCXIz3BVRhleMwDOIixqMDEV96TctiqMU3SR3moFC25M/o15RVMsKJBeLJC
-# kFqOPCrFJbcn9NAk99i9WBwO0nrfMm7i4RZpJVQ5mCTpUjXq/V+zENda1KwxcOnc
-# mxkiA1t6O2y9BRY9J6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICuib/j46IEBNAXcDbFpH5Y70JfjsiCSn2bfTNk3ZixqMA0GCSqG
+# SIb3DQEBAQUABIIBgGYSIYxjnq3b6JOmqwBHTbognGG3HmdIOczjLAp/22QD5btt
+# Skp3fntIF7iywJG0KV23MuTMN7MiUDDnmQwpT/p/CJYNPa6mK5p/DjDvOrWQ4mT8
+# e+Gu1iy0AXcjIxxPbH7Joi6WJTx6utnsJiMjD90Q9ZFBaErXvV3YNijmbvGgq4i7
+# PVugisPcOqG2I0D7dWlSJsGD7UBXc/D05nYQuJ77Oc6hFZceUzvy5Wj5xknL2aKb
+# /TTKwyCVrKUG8Yguc5G1Bi3QiZExpBPCQ6NCd7CLhkfLX+a0fNK1J5tFmaZOGh4c
+# mZA0sVXrlZlcvuvCi1TtSFH1edhX7q6D41X77GO6apNpxpx7YU5Odzio91BfegV4
+# ytyO730wz8zJewfUuMKbpcbdqRx54BPeG7IP9CQZ2j3F/U3pnQlA157Zmr0Ti9Ec
+# Q6nJgA2HuSU1vrFHXrJbvYWWmld+iofZnwAyET87+sYwRhwEiTLbD8Fvm/thWNyJ
+# l/64M8TtQF863UcMWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBb1wBE/RuGGlQ/HuBvbjPYAvedQIIUFkiaU532
-# CqRjlzANBgkqhkiG9w0BAQEFAASCAgBV3RNjwOIoKUNuAunZHZgLmk2XYvWmtM0Y
-# YWURa3c7LCBdCM2h7XkQzNHyeTL7MRcfrQGfqBZcAMNACYPdyZIHQYa/mjHlZul+
-# NurcSa7QJI7GLUvUBlQcYuVIviHF06nmGYZAbQCRxbOIM95B33R0/ST//7+aq7NA
-# Kbxv9njRT324NDuj5Z2tfV8gK+M701GcAaBUkzOFzWaupYUgAy5gRr9cYi9Ru2w1
-# txbzPg1lphoxQBZ8Ebkb5Tvzluqmp8kzomTbQ2CSAkHt3qWIjk6r2qI2TTD7Qq8k
-# zHw2F9zM3OKY+xd9/7iyWGHN8uqLCHGahNfBDk2qRH7sEbliJ7fPfwciq+jiOeRr
-# OBe+m5/FaWD2DJA1kmCKEb/B5PMkK49tCpgj9ry5cywdxc9Gw8EfKT6LWh/Pn/9n
-# PBBCPP+s+PZ/Ut8vxO8t8e8OxaivL5Hm4nUCRoji0zuAax0VW0bqskuYu2tzcv3V
-# ZFWLiyW0ct7CgIkfKVY+dOM6p0AI3R29L+PHUrl51rq+771Io6flvpvdkt3PdgHn
-# ZtG3hKvrZuJcWrmY9saWExAY66maHiKYeSlUYMVV0e8D6KhJ6UGqRRt5Wze3SyZ4
-# VSxmNhA7YRLfEGlOWXF4xP1c8XyMVzVuQXMnvsvlemeBPuHMB+WO2v/2JivF1w93
-# jAsooYeXAA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCByOzHcRAJPqOwsYZpel08rWWoZEsndePvAFTwS
+# so4+6TANBgkqhkiG9w0BAQEFAASCAgA8DM5+YIoo/CORquHRsci6eZCm3dT6cTov
+# 1pBpsVd3yrGWvOdEAAISK0blZ1O6DNVQS0QAc1JeJKh5VF3ndw7GFTAc94LAadce
+# wdQmTXruH6FhAVrRYZqXeLZqO6TDxFDTkaoC2N8YnkpVx2dguFBnSz7dfB3hyeqx
+# JhGxPCAhnyLvjnvrQj8x3+8Sl5X5JvN+z4j89AEferQiERozQywQ/O4um0FMjAIg
+# lTClnEjzvlHif+r6z5gKuHxJQV26zcfXGz9IYludQWKovKe0Jlp+MpivmSP40rOU
+# Dn4lCl3UAdOPBq8xsnRQGNkIHPn4BSYbAri4WSJSaOe8hvvQLy2qKzKvUNMVoH6f
+# ul8vH7LmnjdWJ/nD2IQBxudMeL8txeQn+P/hlp336OYtrki/Ptk8e6Zhq1RP4t24
+# Exn7d8m/UAV/t0IklssLLVx4f12SinqMjl5RIik/9uPuck+TDfhpjnoxv3Djz/KZ
+# qXSGWE9nN01ieRWLof2EVwtumaefOELbvHtaaisrI/xFa0Ok118Nb68xyH/C/wUq
+# lejW+WT8lQNFz8JB1eNGXt3rvYhZzs9QJooMogiP71s/54t+LvHvK7t+lw2tWXPX
+# axj59U2LmQqAWrBnYPjIwF3Pft5RG5iQnJLFwMudRNaUPWj2gsgioOcjlWvd2stJ
+# +whlKx0T2w==
 # SIG # End signature block

@@ -529,6 +529,31 @@ function Restore-SmartM365OrchestratorConfigurationVersion {
     Publish-SmartM365OrchestratorConfiguration $SharedDataFolderPath $jobs $cluster $ExpectedJobsHash $ExpectedClusterHash "Rollback to $(Split-Path $VersionFolderPath -Leaf) ($Snapshot)"
 }
 
+function Request-SmartM365OrchestratorRebalance {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [string]$Reason = 'Requested from SmartM365 Orchestrator GUI',
+        [ValidateRange(0, 300)][int]$AtomicWriteRetrySeconds = 10
+    )
+
+    $requestPath = Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json'
+    $requestedBy = ''
+    try { $requestedBy = [Security.Principal.WindowsIdentity]::GetCurrent().Name }
+    catch { $requestedBy = [Environment]::UserName }
+    $request = [pscustomobject][ordered]@{
+        SchemaVersion = 1
+        RequestId = [guid]::NewGuid().ToString('N')
+        RequestedAtUtc = [datetime]::UtcNow.ToString('o')
+        RequestedBy = $requestedBy
+        RequestedFromServer = [Environment]::MachineName
+        Reason = $Reason
+    }
+    Write-SmartM365OrchestratorJsonAtomically -Path $requestPath -Document $request -RetrySeconds $AtomicWriteRetrySeconds
+    $request | Add-Member -NotePropertyName RequestPath -NotePropertyValue $requestPath
+    return $request
+}
+
 function Get-SmartM365OrchestratorHistory {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath, [datetime]$From = (Get-Date).AddDays(-7), [datetime]$To = (Get-Date), [string]$Server = '', [string]$JobName = '', [string]$Status = '')
@@ -583,14 +608,14 @@ Export-ModuleMember -Function @(
     'Read-SmartM365OrchestratorJson', 'Write-SmartM365OrchestratorJsonAtomically', 'Write-SmartM365OrchestratorManagementLog', 'Sync-SmartM365OrchestratorJobsManifest', 'Test-SmartM365OrchestratorJobsDocument',
     'Test-SmartM365OrchestratorClusterDocument', 'Test-SmartM365OrchestratorConfigurationConsistency', 'Get-SmartM365OrchestratorConfigurationSnapshot', 'Initialize-SmartM365OrchestratorCentralConfiguration',
     'Publish-SmartM365OrchestratorConfiguration', 'Get-SmartM365OrchestratorConfigurationVersions', 'Restore-SmartM365OrchestratorConfigurationVersion',
-    'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus'
+    'Request-SmartM365OrchestratorRebalance', 'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus'
 )
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKi95HV7QkBG5k
-# tZGlINl+4lhaQ47rBHKrLb/alYwgpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBNPkiejg88+FP
+# xr04FXet86mPdA8HXkKnynWRHDINgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -723,31 +748,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBMyTlTM+eDrvUJy5RNZtiB4yzNFaku6GJP7WvIYuuZWMA0GCSqG
-# SIb3DQEBAQUABIIBgJCRzDiCfS4X6NCPxzntXS5JxJM1v92YgXuoVE/0rQt2Cl8R
-# MUVfmi7YwO08gFVmwGjr5wFpKn34Vabv4bgaWDjZGs8baciTiO61BcZl/yK9i3QU
-# 1RYgUaSfTDA2JV3ZeZXOh68chHePrhELSY/2kKTs+UYE3CK9Tey2X5AD4PlJn71p
-# AjCFczEeSLYKhcN9ricOKyu7/jhbspj+B2imvruEjfvbh3i1Tn+i7qfp43N/WZZ6
-# EILlkqyBdK2JeJlpHJdJq1BjxZ9SG/cvK263H52i7AExUbTp3b+6VDopr1iPehvA
-# ZNQs/HWx2fFHOhx47b9iuzueMiJibrDIT3jtV8TdwfuJLsN5vrdWUDAWzr32Vj+g
-# +Gu+ykyzacAoQCTjcyLnmZxErrq9z9/8rLwnK7fxHBg6CoWNnUZWroRSvR7CZ8ap
-# 69EpIb2vnQLs+h4Q5Fyqt2LoN3s6gHlP/MI94lRAVLBPcVm14MsL317DZq3NJWVp
-# trnrLIpot/HzAvOMN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOJGwqElW4duIrCn13GFdEGDkSz62mvn8N3XsGx/xXTuMA0GCSqG
+# SIb3DQEBAQUABIIBgKw6JDMGcpQpgarqEwYrkU6p9fLMpLzWDLQi5I6ha5Vkoj/5
+# nhGmmCoiAEDKEG3NhCDJ97d3f8gQcrF3bObzHQg44d6X4bnRDm6EPZ27jF4WZtpl
+# EEzq1zAKGQynkDLR0OFbmVvHaXvadEh3tBa8Z5qCv++HWVEd/QRfxAqYpdu3BZ/x
+# C8XKJhGjxf9U2+75Xo2ZNIa8d8D44kcJfVoN/iXeygNMgKXFk56ZdPP95W1pcT3o
+# naLFb+scIWsQO0NoqZsmrideGM/ZFVF6QvohCMfKBAB6zG7P5c0l8+wrAMXqWKzo
+# vJeP2+PnIrYObPKeyZslKDGJUgebzueR8lbASGPuxXDXYX5SE3EhDRLLtHYg6hBI
+# 3w7uYVAcm8/VCS9NlORE7VnGuy8UEUEG2SFgGLzPfnHg45eDlZSwk/GhI+J50QJm
+# ygLcaLseCjUJbX/nQk3YaP+5m18AKmjjSe2u3euLVAtYR2TzBkuk6FfsmZSxqKdV
+# O+8dJS9aWLyt3VQ566GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzU3
-# NTVaMC8GCSqGSIb3DQEJBDEiBCB/cd0jwAz4CyCAkfIznui6nBgrM17mrRJJgbDd
-# qiT6zjANBgkqhkiG9w0BAQEFAASCAgCVQ0e9Pzinc2wfEIfKLJQ/54eDxhZj6cUM
-# GTNMjKNBCTZfuM+xXtmRSBOUDpP7W/1OZ6SXg66sZu+4W27Y8wOvYyF4FTHhMWgK
-# 8V0kj+lQFX3uF9pOMVynBTZxepe6IL2HmMMbrVYWxtfTuyrdkyyat+nVYqlySbZi
-# qv6rKR2DMPqzccLZfKMQyci0V2eVCnNSTO3z+mNJdMm1NjbbLop30mobMKduHW8Q
-# ShpwJlFTPSqUWeOMHSZxnhQmSi4sShUoIiSq3kD1jvE9Wt9Qrnqd22tW7BYABZSh
-# Nnn+0b5d4++/j0vsf+q1XyoQlcBkOqCGvr0M6JJhcFnsm0h13cFu3pt7abla9J+/
-# JPKlmaD6EgsMXrcp91pNQ+Gr5LPNm7cK65h/JjtysZqUFwq4JF77Vm3Eehkboa0N
-# o1Xc9nv34yLSFWrDVsp68defFyWdQwGMCTrWcvxIfYeeH6g9mysaOA+6/6yjFLb6
-# q46m6z1TTuWJpbFa26KoEfKFP1Km/S6doHiIvOMbLqH2Skqpt6oh0P0Sdv9aAXJJ
-# DrkgXo55r7E4y6kRzWyKVLxr4JrcltMGPV3fllxieEJ4wPFTXVnQjd5fl8r/S6JF
-# geBNMsYTBIsRsysVFxssanpaWQGo4LxjlhEboKJWLgeyywhzcXkesCCMwr6M54Bu
-# BZCekCfyJw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDknYYywVby2c/qPY+R2pkZ1qjS1Toy9cRllBxm
+# /vsqlTANBgkqhkiG9w0BAQEFAASCAgCkbNAFtk2WQsenVCYOWoxPDy3P09AST2OK
+# /aoJPDT+bb+9lrGoYeb2GsuLipmKYkSB/uSiaJcJGgLmPg41T8oCtex4zFqNUspp
+# XSdIYb7zUuQs4K0Q9SfHdNuy0LAe3RDKsKK7gadqkDQMyHVeXtEyyg981+mUSnMT
+# OPqtQOOrEPSDHZMjs9z6RZ6sO41X02C16ZoiEQV6ZZqokvmpmwgeIHYnzc4rpv5C
+# o1+WVGCKH+g1v19JOCn8n2yoYyWMsUEbxqz2V44bZMB8VpltQyPgGD/AVeSvLOcV
+# U6/oMgbV7ToyWZTvp8zD2Dka8EWwlddRpuGm8E0rXO+usoJfOKJ50q3g9MDYb+Vt
+# TVUu7YzDVJnQYqrQVDkdsqX7gbDOqEygqPpaGT4qdYV/6arjBS7//mbxsDAcfMAv
+# dqg/TNx1tYWCi9ki3dbsxo9B1M7D3PkhwRoLwPatETDVDZzRywjKM9ImuvOpGVtT
+# O/vdy4saO+3mecVBFTcJFRS9Wtcqr8xHLRF6d4dDgFL3IRBEtOu3g2d1gP9Hn6A6
+# ytCXSkjkpwtdi/gjVnTHUZUZ7R918huzWP6o8UKwwrmy/CFr2fhQhsa3QavTzH0V
+# HRbll20JnSA+3O1/OBjdAy4OwBB+rMZz1pwlhfmdFNz4KrCOIpSvlsClPQOeY40b
+# /imCUcAhAQ==
 # SIG # End signature block
