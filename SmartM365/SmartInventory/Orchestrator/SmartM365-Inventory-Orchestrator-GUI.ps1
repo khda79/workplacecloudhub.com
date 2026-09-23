@@ -28,7 +28,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -41,7 +41,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.3'
+$script:AppVersion = '1.0.4'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -174,7 +174,7 @@ $xaml = @'
                     </Grid.ColumnDefinitions>
                     <DataGrid x:Name="PlanningGrid" SelectionMode="Single">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Job" Binding="{Binding Name}" Width="250"/>
+                            <DataGridTextColumn Header="Job" Binding="{Binding Name}" SortMemberPath="Name" SortDirection="Ascending" Width="250"/>
                             <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
                             <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="90"/>
                             <DataGridTextColumn Header="Times" Binding="{Binding Times}" Width="155"/>
@@ -202,7 +202,7 @@ $xaml = @'
                                     <TextBlock Text="Assignment"/>
                                     <ComboBox x:Name="AssignmentCombo"><ComboBoxItem Content="Elected"/><ComboBoxItem Content="Pinned"/><ComboBoxItem Content="Manual"/><ComboBoxItem Content="Legacy"/></ComboBox>
                                     <TextBlock Text="Pinned server"/>
-                                    <ComboBox x:Name="PinnedServerCombo" IsEditable="True"/>
+                                    <ComboBox x:Name="PinnedServerCombo" IsEditable="False" IsEnabled="False"/>
                                     <UniformGrid Columns="2">
                                         <StackPanel Margin="0,0,6,0"><TextBlock Text="Timeout (min)"/><TextBox x:Name="TimeoutBox"/></StackPanel>
                                         <StackPanel Margin="6,0,0,0"><TextBlock Text="Retries"/><TextBox x:Name="RetriesBox"/></StackPanel>
@@ -319,7 +319,7 @@ $xaml = @'
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
-            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.3" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
+            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.4" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
         </Border>
     </Grid>
 </Window>
@@ -535,6 +535,30 @@ function Get-NextRunText {
     return 'No occurrence'
 }
 
+function Set-PlanningDefaultSort {
+    $grid = $script:Controls.PlanningGrid
+    foreach ($column in @($grid.Columns)) { $column.SortDirection = $null }
+    $jobColumn = @($grid.Columns | Where-Object { [string]$_.Header -eq 'Job' })[0]
+    if ($null -ne $jobColumn) { $jobColumn.SortDirection = [System.ComponentModel.ListSortDirection]::Ascending }
+
+    $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($grid.ItemsSource)
+    if ($null -ne $view -and $view.CanSort) {
+        $view.SortDescriptions.Clear()
+        $view.SortDescriptions.Add([System.ComponentModel.SortDescription]::new('Name', [System.ComponentModel.ListSortDirection]::Ascending))
+        $view.Refresh()
+    }
+}
+
+function Update-PinnedServerControlState {
+    $mode = Get-ComboText -Combo $script:Controls.AssignmentCombo
+    $isPinned = $mode -eq 'Pinned'
+    $script:Controls.PinnedServerCombo.IsEnabled = $isPinned
+    if (-not $isPinned) {
+        $script:Controls.PinnedServerCombo.SelectedIndex = -1
+        $script:Controls.PinnedServerCombo.Text = ''
+    }
+}
+
 function Refresh-PlanningView {
     $owners = Get-ElectionOwners
     $rows = foreach ($job in @($script:DraftJobs.Jobs)) {
@@ -558,8 +582,9 @@ function Refresh-PlanningView {
             Group = [string]$job.Group
         }
     }
-    $script:PlanningRows = @($rows)
+    $script:PlanningRows = @($rows | Sort-Object -Property Name)
     $script:Controls.PlanningGrid.ItemsSource = $script:PlanningRows
+    Set-PlanningDefaultSort
 }
 
 function Refresh-ServersView {
@@ -619,6 +644,20 @@ function Apply-SelectedJobToDraft {
     $days = @($script:Controls.DaysBox.Text -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     $mode = Get-ComboText -Combo $script:Controls.AssignmentCombo
     $pinnedServer = Get-ComboText -Combo $script:Controls.PinnedServerCombo
+    $previousMode = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy')
+    $previousAllowedServers = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
+    $newAllowedServers = @()
+
+    if ($mode -eq 'Pinned') {
+        if ([string]::IsNullOrWhiteSpace($pinnedServer)) { throw 'Select exactly one pinned server.' }
+        $matchingServers = @($script:DraftCluster.ExpectedOrchestratorServers | Where-Object { [string]$_ -ieq $pinnedServer })
+        if ($matchingServers.Count -ne 1) { throw "Pinned server '$pinnedServer' is not an expected Orchestrator server." }
+        $pinnedServer = [string]$matchingServers[0]
+        $newAllowedServers = @($pinnedServer)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($pinnedServer)) {
+        throw "Pinned server '$pinnedServer' cannot be used while Assignment is '$mode'. Select Assignment 'Pinned' first."
+    }
 
     Set-JsonProperty -Object $job -Name Enabled -Value ([bool]$script:Controls.JobEnabledCheck.IsChecked)
     Set-JsonProperty -Object $job.Schedule -Name Type -Value $scheduleType
@@ -626,7 +665,7 @@ function Apply-SelectedJobToDraft {
     Set-JsonProperty -Object $job.Schedule -Name DaysOfWeek -Value $(if ($scheduleType -eq 'Weekly') { $days } else { @() })
     Set-JsonProperty -Object $job.Schedule -Name MissedRunPolicy -Value (Get-ComboText -Combo $script:Controls.MissedPolicyCombo)
     Set-JsonProperty -Object $job -Name AssignmentMode -Value $mode
-    Set-JsonProperty -Object $job -Name AllowedServers -Value $(if ($mode -eq 'Pinned') { @($pinnedServer) } else { @() })
+    Set-JsonProperty -Object $job -Name AllowedServers -Value $newAllowedServers
     Set-JsonProperty -Object $job -Name TimeoutMinutes -Value ([int]$script:Controls.TimeoutBox.Text)
     Set-JsonProperty -Object $job -Name MaxRetries -Value ([int]$script:Controls.RetriesBox.Text)
     Set-JsonProperty -Object $job -Name RetryDelaySeconds -Value ([int]$script:Controls.RetryDelayBox.Text)
@@ -636,7 +675,9 @@ function Apply-SelectedJobToDraft {
     Refresh-PlanningView
     $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $job.Name)[0]
     $script:Controls.StatusText.Text = "Draft changed: $($job.Name)"
-    Write-GuiActivity -Message "Job '$($job.Name)' updated in the draft."
+    $previousAllowedText = if ($previousAllowedServers.Count -gt 0) { $previousAllowedServers -join ',' } else { '<none>' }
+    $newAllowedText = if ($newAllowedServers.Count -gt 0) { $newAllowedServers -join ',' } else { '<none>' }
+    Write-GuiActivity -Message ("Job '{0}' updated in the draft. AssignmentMode={1}->{2}; AllowedServers={3}->{4}" -f $job.Name, $previousMode, $mode, $previousAllowedText, $newAllowedText)
 }
 
 function Apply-SelectedServerToDraft {
@@ -796,6 +837,13 @@ $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
 $script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'Failed', 'Timeout', 'Blocked', 'Running')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
+$script:Controls.AssignmentCombo.Add_SelectionChanged({ Update-PinnedServerControlState })
+$script:Controls.PinnedServerCombo.Add_SelectionChanged({
+    if ($null -ne $script:Controls.PinnedServerCombo.SelectedItem -and (Get-ComboText -Combo $script:Controls.AssignmentCombo) -ne 'Pinned') {
+        Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Pinned'
+        Update-PinnedServerControlState
+    }
+})
 $script:Controls.PlanningGrid.Add_SelectionChanged({
     $row = $script:Controls.PlanningGrid.SelectedItem
     if ($null -eq $row) { return }
@@ -806,8 +854,13 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
     $script:Controls.TimesBox.Text = @($job.Schedule.Times) -join ', '
     $script:Controls.DaysBox.Text = @(Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @()) -join ', '
     Select-ComboText -Combo $script:Controls.MissedPolicyCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'MissedRunPolicy' -DefaultValue 'RunOnce'))
-    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy'))
-    $script:Controls.PinnedServerCombo.Text = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @()) -join ', '
+    $assignmentMode = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy')
+    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text $assignmentMode
+    Update-PinnedServerControlState
+    $allowedServers = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
+    if ($assignmentMode -eq 'Pinned' -and $allowedServers.Count -eq 1) {
+        Select-ComboText -Combo $script:Controls.PinnedServerCombo -Text ([string]$allowedServers[0])
+    }
     $script:Controls.TimeoutBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'TimeoutMinutes' -DefaultValue 240)
     $script:Controls.RetriesBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'MaxRetries' -DefaultValue 0)
     $script:Controls.RetryDelayBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'RetryDelaySeconds' -DefaultValue 300)
@@ -897,6 +950,35 @@ $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jo
 $script:Controls.HistoryJobCombo.SelectedIndex = 0
 Refresh-HistoryView
 if ($SmokeTest) {
+    $planningNames = @($script:PlanningRows | ForEach-Object { [string]$_.Name })
+    $sortedPlanningNames = @($planningNames | Sort-Object)
+    if (($planningNames -join "`0") -cne ($sortedPlanningNames -join "`0")) { throw 'Planning rows are not sorted by Job ascending.' }
+    $jobColumn = @($script:Controls.PlanningGrid.Columns | Where-Object { [string]$_.Header -eq 'Job' })[0]
+    if ($null -eq $jobColumn -or $jobColumn.SortDirection -ne [System.ComponentModel.ListSortDirection]::Ascending) { throw 'Planning Job column does not display the default ascending sort.' }
+
+    $smokeServer = @($script:DraftCluster.ExpectedOrchestratorServers | Select-Object -First 1)[0]
+    if ([string]::IsNullOrWhiteSpace([string]$smokeServer)) {
+        $smokeServer = 'SMOKE-SERVER'
+        Set-JsonProperty -Object $script:DraftCluster -Name ExpectedOrchestratorServers -Value @($smokeServer)
+        [void](Refresh-ServersView)
+    }
+    $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
+    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Elected'
+    Update-PinnedServerControlState
+    if ($script:Controls.PinnedServerCombo.IsEnabled) { throw 'Pinned server selector stayed enabled for Elected assignment.' }
+    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Pinned'
+    Update-PinnedServerControlState
+    if (-not $script:Controls.PinnedServerCombo.IsEnabled) { throw 'Pinned server selector did not enable for Pinned assignment.' }
+    $missingPinnedServerRejected = $false
+    try { Apply-SelectedJobToDraft } catch { $missingPinnedServerRejected = $_.Exception.Message -like '*Select exactly one pinned server*' }
+    if (-not $missingPinnedServerRejected) { throw 'Pinned assignment without a server was not rejected.' }
+    Select-ComboText -Combo $script:Controls.PinnedServerCombo -Text ([string]$smokeServer)
+    Apply-SelectedJobToDraft
+    $smokeJob = @($script:DraftJobs.Jobs | Where-Object Name -eq $script:PlanningRows[0].Name)[0]
+    if ([string]$smokeJob.AssignmentMode -ne 'Pinned' -or @($smokeJob.AllowedServers).Count -ne 1 -or [string]$smokeJob.AllowedServers[0] -ine [string]$smokeServer) {
+        throw 'Pinned assignment smoke test did not preserve exactly one expected server.'
+    }
+    Write-GuiActivity -Message ("SMOKE_TEST_PINNED_OK Job={0}; Server={1}; DefaultSort=JobAscending" -f $smokeJob.Name, $smokeServer) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_OK SmartM365 Orchestrator GUI v{0} | Jobs={1} | PlanningRows={2}" -f $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count) -Level SUCCESS
     return
 }
@@ -916,8 +998,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQO1WrGWRMXAof
-# YdZjodfBPo0m/+7d+rxV5SZzii9ZlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpEtVl8eAU94zN
+# eGTq+sRn7OTSTm6G9CQba+oerlkrSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1050,31 +1132,31 @@ $window.Add_Closed({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFuxZelaYQ8VbwJYPGtpyKqGjUCML1gzR8KZMj86M3VWMA0GCSqG
-# SIb3DQEBAQUABIIBgGT7ed4vcmDiZtBE0qxLRVM/ORFMtFJkR0CbfrHYzBXnjk0s
-# 74pzul1s7pc70hp9bkfkvgH5KmQRtBlEVNKZmsU8KglK+1W0oUufecMPUfnEKRcd
-# SxUWZ8FNC3kA0ENoSDqRCMl+dS4UwgrVyRSsToRezNfwuBPp1cMpxVBPr0CuIgyL
-# 90utY78rOvIX/kheDUc1pXzOMvLuHUyIs2o3BnBM1SEW1qXNV7Sl5yrCQljd932h
-# UKREpXUuhPRT6N+LSxRpXk4+zI4hBdh9xWnGTFdH92TcJSFS4Z/0doBXwHstcNvz
-# qXcFosCh1Cq6pVd8lzY45v/RBB6x2C4kQNlBJV+p32Ov6sux+95gpOGfscTBAQry
-# evYCg/BVjQLXWCo6K8wUYSXmMX0Kr2VTQjivWwqogvSs/AG6BksbvXaV6DOY20HR
-# alcgA96zTOuvnnSml/P0X2g7t9mYw37NRqNrpxTffx0g+8rje4LZ8hbToccbJaz0
-# fdUpBa1UWP+jdCtGrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICokF04eTIGIGIz0bai02YuzsmCMXoh/fMuTcy9yE+z5MA0GCSqG
+# SIb3DQEBAQUABIIBgHMERhYyxnE8eYAkIvCYDG59ZM4GsMIhzsaLCtqmjOUOhFl+
+# D6ynM8xtQ2g2ZStsTGG7gt3mOwBGUJM6uarrsGfo0aQ9P+kTrJ7aHsHkoAm4dSXG
+# Z2jJPUh7PFASK1GNXQkglAvAtTvU40SZXUlO4oVaiJ2XaTXIN04KJKXAYyMaboAm
+# 3xGnoekA3YUGCBjItt5+sFPHhuZlm0I+oDID9Y+kHlxY1I3kcq+DedR9j6UYALmr
+# Qd9Lm3Lp1a2qxbryRLKnqmxfOxhxibxopLxe3CNtPFFGoBqU9HhBxMsO/e/d2A13
+# mhctg936eHGWH9Q67KJ1Oa+GcA5tayQPqewYtVah5s5QZtyiagD13wUPCdWmCtwn
+# 4oFjQy5mGkJhqM8rcqMUmSeAAh3qC80UcVv0w3aXlGGnCPxr7MItVQ02+BVext0Y
+# HaqPz2Yje0GJfzqW/xhyiFQdX5cInbHrBncMmBgO0omtbg9P2ol3zZoWkC3nCD7h
+# pPyqYxbbWzgnJsg5QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzU3
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCHto/hRzM1xyrFj1vZISYlLH5M0unTPKlHOWvE
-# 514YczANBgkqhkiG9w0BAQEFAASCAgCeLQKdvG4qA0Awr+tDv/SewsbVxTggdpvu
-# uZHbX5+kgThFnI1CU3ruXd6r6eGfISFJd4iNXNx96w4NeipmnWkWlo1QaFOgz6b4
-# /LIkDTnCDL0wihdWQgjWYDYHR4VPYXKNSPpa6nFPxNEtvFpdvl1HA18BlBIaevVE
-# jK0yx6OTkrsy0TEIMhpoFxu+V3elfVT4nLjRssRg2g8ey8VJtsEdkOE/yWg4lKKS
-# 7luqLHuKrfFQlU9wqdclmgenJyJBWGQbxVHTzRTV6fOKpi8vEJksihvmdg70uwx1
-# TZw8IVgaTP+NiNul+29vRd5b3kV4oF3yQ2yiTMU1kaia7jXbCVfI7RswPIO7V5Si
-# U0vrj7a3TntebURqu+0UnYpnmbo7mZu58VAu+d/mGothRyOgDn2cXQKOH2M2L1Y9
-# UIfn3V+DDhU3+xqV4vaGsefed8+s/SvNSPjKp41rbdaWlmrYeo+SW8L9b+K9ndro
-# IXokhgLq8sru4MuYJ8Z+dS9/z2SCiueSVwpIu97d3BCdjhxVjztZmVwNno9Ko2j3
-# yCB2/rY2QOfq/6iFHt2idauf1HU7foVKL1vZVPSUYJBH7INdF12l5+QXruYIHp/p
-# d0Kog9PSQ1U4FnOVL2Jvu/UBrVbYPDz14u5NxHA9O7LxQieAeU/yg28Awal4hdov
-# mGOqHG7n8A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwODI5
+# NDVaMC8GCSqGSIb3DQEJBDEiBCDjtoHOX81GCU1Dm97eNTT1p+w+GkGDBHNKbcvB
+# M1m4xDANBgkqhkiG9w0BAQEFAASCAgAdp+hLIJ/lxkyvDAcEmnL9LAeNJJNgmArP
+# UwifsvPLveNcoLfa1i307MZ+eUxZlV5y2p3b62c8BGR/RhELIwktpjugw6KX4HOu
+# 2FvOP2Lfa1P4P1kLkOb7tgLCmJZGj/xEAbN8bOWdc2iyuUkf2nY0GPMlThtAGHNG
+# MMpWHuBSzY0YUjAkRB+8z77B2VZR5wKBAfVUWQvOjKgwTP8McxqZIwyts5MY7Onb
+# tGutVwFWVpsolb/tEEKxaUZdMflQc0UI4Ytiu2ilH2ccrl9Tn0UW3b4TDCiboKYC
+# PeCI276As7XscLnKfLJNeMVwfAHiiKjrNYuNZUbmKoqke3UKtD4T33l9djIAXj0S
+# LL7unY7HJxAkeeIfH/e9M8gb+VYnSxs4ipP/j+Yb6a7NBJsDZlNyh+25wA/vgL//
+# QmOTTxrw6kFCkh6Rd55J+PTg3U4F/nHzgHE2DKxwsvsrp8nfGn+YobPRZ5Sb3C0Z
+# PxWAYB3XM9xHHbUNJ3ZNtkxRQ1B8l8aZiDDBqv+qCtivBD/0bYtKNJZKGdxuyj4Z
+# uX/gWsWxumthqs+Ss5cTRIKktR7K29SesuthlEl/ZYJiZeSxpyvugL7cA5OB7Xyq
+# OZQcNA6QwLD4YtLrPnpFdettuT3tcBCfMRLlQuO4s/gWdYR4rqVHhVy1K9LkhAQB
+# o0NX6k184w==
 # SIG # End signature block

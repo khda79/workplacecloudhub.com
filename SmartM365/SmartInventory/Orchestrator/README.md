@@ -73,6 +73,7 @@ Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator la
 - edits the expected server list, election weights and operational server policies;
 - filters the all-server run history by date, server, job and status, with CSV/HTML export and log opening;
 - validates the complete jobs and cluster documents before publication;
+- sorts the Planning grid by job name by default and enables the pinned-server selector only for `Pinned` assignment, where exactly one expected server is required;
 - uses an atomic cross-server lock and hash comparison to reject concurrent/stale edits;
 - replaces shared JSON through a bounded Windows/SMB-compatible retry, skips unchanged files and rolls back an earlier replacement if the second configuration file fails;
 - creates before/after versions and an audit row for every successful publication or rollback;
