@@ -6,7 +6,8 @@
     Retrieves calendar folder permissions for Exchange Online user, shared, room, and equipment mailboxes.
     Primary-calendar mode uses persistent parallel Exchange Online worker sessions; full-folder mode remains sequential.
     The script tries the canonical Calendar name, folder statistics, then common localized names.
-    It exports the stable Mailbox, UPN, CalendarFolder, User, and AccessRights schema.
+    It exports mailbox coverage, collection status, stable permission-principal identifiers when Exchange exposes them,
+    and an explicit diagnostic when a display-name-only principal collision cannot be resolved safely.
 
 .PARAMETER Connect
     Disconnects any existing Exchange Online session before establishing the app-only connection.
@@ -15,13 +16,14 @@
     Scans only the main Calendar folder by default. Disable it to scan every Calendar folder.
 
 .PARAMETER EmitNoPermRow
-    Emits one "(none)" row when a calendar exists but has no explicit permissions.
+    Uses legacy "(none)" values on the mandatory coverage row when a calendar has no explicit permissions.
+    When disabled, the coverage row is still exported with blank User and AccessRights values.
 
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.2
+2.3
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -30,7 +32,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 2.2
+    Version : 2.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange Online
 #>
@@ -258,7 +260,7 @@ function Join-ModulePath {
     throw "SmartM365.Core module file not found: $FileName"
 }
 
-$ScriptVersion = '2.2'
+$ScriptVersion = '2.3'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -330,7 +332,7 @@ catch {
 
 Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -ExchangeOnlineProbeCommands @('Get-Mailbox') | Out-Null
 $results = [System.Collections.Generic.List[object]]::new()
-$errors = @()
+$errorDetails = [System.Collections.Generic.List[object]]::new()
 $processed = 0
 
 try {
@@ -393,6 +395,170 @@ function Get-CalendarFoldersSafe {
     if ($anyCalendar) { return ,$anyCalendar }
     return @()
 }
+function Get-CalendarPermissionPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string[]]$PropertyPaths
+    )
+
+    foreach ($propertyPath in $PropertyPaths) {
+        $current = $InputObject
+        foreach ($segment in ($propertyPath -split '\.')) {
+            if ($null -eq $current) { break }
+            $property = $current.PSObject.Properties[$segment]
+            if ($null -eq $property) {
+                $current = $null
+                break
+            }
+            $current = $property.Value
+        }
+        if ($null -ne $current -and -not [string]::IsNullOrWhiteSpace([string]$current)) {
+            return ([string]$current).Trim()
+        }
+    }
+    return ''
+}
+
+function ConvertTo-CalendarPermissionKeyComponent {
+    [CmdletBinding()]
+    param([AllowNull()][object]$Value)
+
+    $normalized = ([string]$Value).Trim().ToLowerInvariant()
+    return [uri]::EscapeDataString($normalized)
+}
+
+function New-CalendarPermissionRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Mailbox,
+        [Parameter(Mandatory)][string]$UPN,
+        [Parameter(Mandatory)][string]$CalendarFolder,
+        [Parameter(Mandatory)][object]$Permission
+    )
+
+    $principal = $Permission.User
+    $principalDisplay = ([string]$principal).Trim()
+    $principalId = Get-CalendarPermissionPropertyValue -InputObject $principal -PropertyPaths @(
+        'ADRecipient.ExternalDirectoryObjectId','ExternalDirectoryObjectId','ADRecipient.Guid','Guid',
+        'ADRecipient.Sid','Sid','SID'
+    )
+    $principalSmtp = Get-CalendarPermissionPropertyValue -InputObject $principal -PropertyPaths @(
+        'ADRecipient.PrimarySmtpAddress','PrimarySmtpAddress','ADRecipient.WindowsEmailAddress',
+        'WindowsEmailAddress'
+    )
+    $principalType = Get-CalendarPermissionPropertyValue -InputObject $principal -PropertyPaths @(
+        'ADRecipient.RecipientTypeDetails','RecipientTypeDetails','ADRecipient.RecipientType',
+        'RecipientType','UserType','Type'
+    )
+    $principalKeySource = 'DisplayNameFallback'
+    $principalKeyValue = $principalDisplay
+    if (-not [string]::IsNullOrWhiteSpace($principalId)) {
+        $principalKeySource = 'StableId'
+        $principalKeyValue = $principalId
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($principalSmtp)) {
+        $principalKeySource = 'SmtpAddress'
+        $principalKeyValue = $principalSmtp
+    }
+
+    $accessRights = @(
+        $Permission.AccessRights |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    ) -join ','
+    $permissionKey = @(
+        (ConvertTo-CalendarPermissionKeyComponent $Mailbox),
+        (ConvertTo-CalendarPermissionKeyComponent $CalendarFolder),
+        (ConvertTo-CalendarPermissionKeyComponent ("{0}:{1}" -f $principalKeySource, $principalKeyValue)),
+        (ConvertTo-CalendarPermissionKeyComponent $accessRights)
+    ) -join '|'
+
+    return [pscustomobject]@{
+        Mailbox                       = $Mailbox
+        UPN                           = $UPN
+        CalendarFolder                = $CalendarFolder
+        User                          = $principalDisplay
+        AccessRights                  = $accessRights
+        PermissionPrincipalId         = $principalId
+        PermissionPrincipalType       = $principalType
+        PermissionPrincipalSmtpAddress = $principalSmtp
+        PermissionKeySource           = $principalKeySource
+        PermissionKey                 = $permissionKey
+        CollectionStatus              = 'Collected'
+        CollectionMessage             = ''
+    }
+}
+
+function New-CalendarStatusRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Mailbox,
+        [Parameter(Mandatory)][string]$UPN,
+        [AllowEmptyString()][string]$CalendarFolder = '',
+        [Parameter(Mandatory)][ValidateSet('NoExplicitPermissions','NoCalendarFolder')][string]$Status,
+        [AllowEmptyString()][string]$Message = '',
+        [bool]$UseLegacyNoPermissionPlaceholder = $true
+    )
+
+    $userValue = ''
+    $accessRightsValue = ''
+    if ($Status -eq 'NoExplicitPermissions' -and $UseLegacyNoPermissionPlaceholder) {
+        $userValue = '(none)'
+        $accessRightsValue = '(none)'
+    }
+    $permissionKey = @(
+        (ConvertTo-CalendarPermissionKeyComponent $Mailbox),
+        (ConvertTo-CalendarPermissionKeyComponent $CalendarFolder),
+        (ConvertTo-CalendarPermissionKeyComponent $Status)
+    ) -join '|'
+
+    return [pscustomobject]@{
+        Mailbox                        = $Mailbox
+        UPN                            = $UPN
+        CalendarFolder                 = $CalendarFolder
+        User                           = $userValue
+        AccessRights                   = $accessRightsValue
+        PermissionPrincipalId          = ''
+        PermissionPrincipalType        = ''
+        PermissionPrincipalSmtpAddress = ''
+        PermissionKeySource            = 'SystemStatus'
+        PermissionKey                  = $permissionKey
+        CollectionStatus               = $Status
+        CollectionMessage              = $Message
+    }
+}
+
+function Add-CalendarErrorDetail {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Mailbox,
+        [AllowEmptyString()][string]$UPN = '',
+        [AllowEmptyString()][string]$CalendarFolder = '',
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    [void]$errorDetails.Add([pscustomobject]@{
+        Mailbox         = $Mailbox
+        UPN             = $UPN
+        CalendarFolder  = $CalendarFolder
+        CollectionStatus = 'CollectionError'
+        Message         = $Message
+    })
+}
+
+function Get-MailboxCoverageKey {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Mailbox = '',
+        [AllowEmptyString()][string]$UPN = ''
+    )
+
+    $value = if (-not [string]::IsNullOrWhiteSpace($Mailbox)) { $Mailbox } else { $UPN }
+    return $value.Trim().ToLowerInvariant()
+}
+
 function Try-GetFolderPermission {
     param(
         [Parameter(Mandatory)][string[]]$MailboxIds,   # e.g. @($upn, $primarySMTP, $mbx.Identity)
@@ -407,12 +573,10 @@ function Try-GetFolderPermission {
                 $perms = Invoke-Quiet {
                     Get-MailboxFolderPermission -Identity $identity -ErrorAction Stop
                 } |
-                    Where-Object { $_.User -notin @("Default","Anonymous") } |
-                    Select-Object @{Name = "Mailbox";        Expression = { $PrimarySmtpForLog }},
-                                  @{Name = "UPN";            Expression = { $UpnForLog }},
-                                  @{Name = "CalendarFolder"; Expression = { $fname }},
-                                  @{Name = "User";           Expression = { $_.User }},
-                                  @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
+                    Where-Object { [string]$_.User -notin @('Default','Anonymous') } |
+                    ForEach-Object {
+                        New-CalendarPermissionRow -Mailbox $PrimarySmtpForLog -UPN $UpnForLog -CalendarFolder $fname -Permission $_
+                    }
                 return [pscustomobject]@{
                     Ok          = $true
                     Permissions = @($perms)
@@ -430,20 +594,16 @@ function Try-GetFolderPermission {
     }
 }
 
-# Helper: emit a "(none)" row when calendar exists but no explicit permissions
+# Helper: always represent a calendar with no explicit permissions. EmitNoPermRow only controls legacy placeholders.
 function Add-NoPermissionRow {
     param(
         [Parameter(Mandatory)][string]$Mailbox,
         [Parameter(Mandatory)][string]$UPN,
         [Parameter(Mandatory)][string]$CalendarFolder
     )
-    return [pscustomobject]@{
-        Mailbox        = $Mailbox
-        UPN            = $UPN
-        CalendarFolder = $CalendarFolder
-        User           = '(none)'
-        AccessRights   = '(none)'
-    }
+    return New-CalendarStatusRow -Mailbox $Mailbox -UPN $UPN -CalendarFolder $CalendarFolder `
+        -Status 'NoExplicitPermissions' -Message 'Calendar folder exists but has no explicit permissions.' `
+        -UseLegacyNoPermissionPlaceholder ([bool]$EmitNoPermRow)
 }
 
 function Add-CalendarResultRows {
@@ -453,6 +613,166 @@ function Add-CalendarResultRows {
     foreach ($row in @($Rows)) {
         if ($null -ne $row) { [void]$results.Add($row) }
     }
+}
+
+function Resolve-CalendarPermissionExportRows {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Rows)
+
+    $fallbackCollisionCounts = @{}
+    foreach ($row in @($Rows | Where-Object { $_.CollectionStatus -eq 'Collected' -and $_.PermissionKeySource -eq 'DisplayNameFallback' })) {
+        $collisionKey = @(
+            (ConvertTo-CalendarPermissionKeyComponent $row.Mailbox),
+            (ConvertTo-CalendarPermissionKeyComponent $row.CalendarFolder),
+            (ConvertTo-CalendarPermissionKeyComponent $row.User)
+        ) -join '|'
+        if (-not $fallbackCollisionCounts.ContainsKey($collisionKey)) { $fallbackCollisionCounts[$collisionKey] = 0 }
+        $fallbackCollisionCounts[$collisionKey] = [int]$fallbackCollisionCounts[$collisionKey] + 1
+    }
+
+    $stableKeysSeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $resolvedRows = [System.Collections.Generic.List[object]]::new()
+    $diagnosticRows = [System.Collections.Generic.List[object]]::new()
+    $deduplicatedStableRowCount = 0
+
+    foreach ($row in @($Rows)) {
+        $resolved = [pscustomobject]@{
+            Mailbox                        = [string]$row.Mailbox
+            UPN                            = [string]$row.UPN
+            CalendarFolder                 = [string]$row.CalendarFolder
+            User                           = [string]$row.User
+            AccessRights                   = [string]$row.AccessRights
+            PermissionPrincipalId          = [string]$row.PermissionPrincipalId
+            PermissionPrincipalType        = [string]$row.PermissionPrincipalType
+            PermissionPrincipalSmtpAddress = [string]$row.PermissionPrincipalSmtpAddress
+            PermissionKeySource            = [string]$row.PermissionKeySource
+            PermissionKey                  = [string]$row.PermissionKey
+            CollectionStatus               = [string]$row.CollectionStatus
+            CollectionMessage              = [string]$row.CollectionMessage
+        }
+
+        if ($resolved.CollectionStatus -eq 'Collected' -and $resolved.PermissionKeySource -in @('StableId','SmtpAddress')) {
+            if (-not $stableKeysSeen.Add($resolved.PermissionKey)) {
+                $deduplicatedStableRowCount++
+                continue
+            }
+        }
+
+        $fallbackCollisionKey = @(
+            (ConvertTo-CalendarPermissionKeyComponent $resolved.Mailbox),
+            (ConvertTo-CalendarPermissionKeyComponent $resolved.CalendarFolder),
+            (ConvertTo-CalendarPermissionKeyComponent $resolved.User)
+        ) -join '|'
+        if ($resolved.CollectionStatus -eq 'Collected' -and
+            $resolved.PermissionKeySource -eq 'DisplayNameFallback' -and
+            $fallbackCollisionCounts.ContainsKey($fallbackCollisionKey) -and
+            [int]$fallbackCollisionCounts[$fallbackCollisionKey] -gt 1) {
+            $duplicateCount = [int]$fallbackCollisionCounts[$fallbackCollisionKey]
+            $resolved.CollectionStatus = 'AmbiguousPrincipalCollision'
+            $resolved.CollectionMessage = 'Multiple permission rows share only a display-name fallback key; rows were preserved because distinct principals cannot be excluded.'
+            [void]$diagnosticRows.Add([pscustomobject]@{
+                Mailbox                        = $resolved.Mailbox
+                UPN                            = $resolved.UPN
+                CalendarFolder                 = $resolved.CalendarFolder
+                User                           = $resolved.User
+                AccessRights                   = $resolved.AccessRights
+                PermissionPrincipalId          = $resolved.PermissionPrincipalId
+                PermissionPrincipalType        = $resolved.PermissionPrincipalType
+                PermissionPrincipalSmtpAddress = $resolved.PermissionPrincipalSmtpAddress
+                PermissionKeySource            = $resolved.PermissionKeySource
+                PermissionKey                  = $resolved.PermissionKey
+                DuplicateCount                 = $duplicateCount
+                Reason                         = $resolved.CollectionMessage
+            })
+        }
+        [void]$resolvedRows.Add($resolved)
+    }
+
+    return [pscustomobject]@{
+        Rows                         = $resolvedRows.ToArray()
+        Diagnostics                  = $diagnosticRows.ToArray()
+        DeduplicatedStableRowCount   = $deduplicatedStableRowCount
+        AmbiguousPermissionRowCount  = $diagnosticRows.Count
+        AmbiguousPermissionKeyCount  = @($fallbackCollisionCounts.GetEnumerator() | Where-Object { $_.Value -gt 1 }).Count
+    }
+}
+
+function Assert-CalendarPermissionCoverage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object[]]$Mailboxes,
+        [AllowNull()][object[]]$ExportRows,
+        [AllowNull()][object[]]$ErrorRows,
+        [Parameter(Mandatory)][int]$ProcessedCount
+    )
+
+    if ($ProcessedCount -ne $Mailboxes.Count) {
+        throw ("Calendar permissions coverage check failed before publication: processed={0}, enumerated={1}." -f $ProcessedCount, $Mailboxes.Count)
+    }
+    $expectedMailboxKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($mailbox in $Mailboxes) {
+        $coverageKey = Get-MailboxCoverageKey -Mailbox ([string]$mailbox.PrimarySmtpAddress) -UPN ([string]$mailbox.UserPrincipalName)
+        if ([string]::IsNullOrWhiteSpace($coverageKey)) {
+            throw 'Calendar permissions mailbox enumeration contains a mailbox without PrimarySmtpAddress or UPN.'
+        }
+        if (-not $expectedMailboxKeys.Add($coverageKey)) {
+            throw ("Calendar permissions mailbox enumeration contains a duplicate coverage key: {0}" -f $coverageKey)
+        }
+    }
+    $representedMailboxKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in @($ExportRows)) {
+        $coverageKey = Get-MailboxCoverageKey -Mailbox ([string]$row.Mailbox) -UPN ([string]$row.UPN)
+        if (-not [string]::IsNullOrWhiteSpace($coverageKey)) { [void]$representedMailboxKeys.Add($coverageKey) }
+    }
+    foreach ($errorRow in @($ErrorRows)) {
+        $coverageKey = Get-MailboxCoverageKey -Mailbox ([string]$errorRow.Mailbox) -UPN ([string]$errorRow.UPN)
+        if (-not [string]::IsNullOrWhiteSpace($coverageKey)) { [void]$representedMailboxKeys.Add($coverageKey) }
+    }
+    $missingMailboxKeys = @($expectedMailboxKeys | Where-Object { -not $representedMailboxKeys.Contains($_) })
+    $unexpectedMailboxKeys = @($representedMailboxKeys | Where-Object { -not $expectedMailboxKeys.Contains($_) })
+    if ($missingMailboxKeys.Count -gt 0 -or $unexpectedMailboxKeys.Count -gt 0) {
+        throw ("Calendar permissions coverage check refused publication: missing={0} [{1}]; unexpected={2} [{3}]." -f `
+            $missingMailboxKeys.Count, ($missingMailboxKeys -join ', '), $unexpectedMailboxKeys.Count, ($unexpectedMailboxKeys -join ', '))
+    }
+    return [pscustomobject]@{
+        ExpectedCount    = $expectedMailboxKeys.Count
+        RepresentedCount = $representedMailboxKeys.Count
+    }
+}
+
+function Remove-CalendarLatestCsvIfPresent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$BaseFileName,
+        [Parameter(Mandatory)][string]$LocalOutputPath,
+        [AllowEmptyString()][string]$LatestOutputPath = ''
+    )
+
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $latestPaths = @(
+        Join-Path -Path $LocalOutputPath -ChildPath "$runBaseFileName.csv"
+        if (-not [string]::IsNullOrWhiteSpace($LatestOutputPath)) {
+            Join-Path -Path $LatestOutputPath -ChildPath "$runBaseFileName.csv"
+        }
+    ) | Select-Object -Unique
+    foreach ($latestPath in $latestPaths) {
+        if (Test-Path -LiteralPath $latestPath -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $latestPath -Force -ErrorAction Stop
+                WriteLog -Message "Removed stale CSV because the current run produced no matching rows: $latestPath" 'INFO'
+            }
+            catch {
+                WriteLog -Message "Unable to remove stale CSV '$latestPath': $($_.Exception.Message)" 'WARNING'
+            }
+        }
+    }
+    $sharePointPath = if (-not [string]::IsNullOrWhiteSpace($LatestOutputPath)) {
+        Join-Path -Path $LatestOutputPath -ChildPath "$runBaseFileName.csv"
+    }
+    else {
+        Join-Path -Path $LocalOutputPath -ChildPath "$runBaseFileName.csv"
+    }
+    Remove-SmartM365SharePointFile -LocalFilePath $sharePointPath | Out-Null
 }
 
 # ------------------------- Processing Loop -------------------------
@@ -512,6 +832,89 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
             }
         }
 
+        function Get-WorkerPermissionPropertyValue {
+            param([AllowNull()][object]$InputObject, [string[]]$PropertyPaths)
+            foreach ($propertyPath in $PropertyPaths) {
+                $current = $InputObject
+                foreach ($segment in ($propertyPath -split '\.')) {
+                    if ($null -eq $current) { break }
+                    $property = $current.PSObject.Properties[$segment]
+                    if ($null -eq $property) { $current = $null; break }
+                    $current = $property.Value
+                }
+                if ($null -ne $current -and -not [string]::IsNullOrWhiteSpace([string]$current)) {
+                    return ([string]$current).Trim()
+                }
+            }
+            return ''
+        }
+
+        function ConvertTo-WorkerPermissionKeyComponent {
+            param([AllowNull()][object]$Value)
+            return [uri]::EscapeDataString((([string]$Value).Trim().ToLowerInvariant()))
+        }
+
+        function New-WorkerCalendarPermissionRow {
+            param([string]$Mailbox, [string]$UPN, [string]$CalendarFolder, [object]$Permission)
+            $principal = $Permission.User
+            $principalDisplay = ([string]$principal).Trim()
+            $principalId = Get-WorkerPermissionPropertyValue $principal @(
+                'ADRecipient.ExternalDirectoryObjectId','ExternalDirectoryObjectId','ADRecipient.Guid','Guid',
+                'ADRecipient.Sid','Sid','SID'
+            )
+            $principalSmtp = Get-WorkerPermissionPropertyValue $principal @(
+                'ADRecipient.PrimarySmtpAddress','PrimarySmtpAddress','ADRecipient.WindowsEmailAddress',
+                'WindowsEmailAddress'
+            )
+            $principalType = Get-WorkerPermissionPropertyValue $principal @(
+                'ADRecipient.RecipientTypeDetails','RecipientTypeDetails','ADRecipient.RecipientType',
+                'RecipientType','UserType','Type'
+            )
+            $principalKeySource = 'DisplayNameFallback'
+            $principalKeyValue = $principalDisplay
+            if (-not [string]::IsNullOrWhiteSpace($principalId)) {
+                $principalKeySource = 'StableId'; $principalKeyValue = $principalId
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($principalSmtp)) {
+                $principalKeySource = 'SmtpAddress'; $principalKeyValue = $principalSmtp
+            }
+            $accessRights = @(
+                $Permission.AccessRights | ForEach-Object { ([string]$_).Trim() } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+            ) -join ','
+            $permissionKey = @(
+                (ConvertTo-WorkerPermissionKeyComponent $Mailbox),
+                (ConvertTo-WorkerPermissionKeyComponent $CalendarFolder),
+                (ConvertTo-WorkerPermissionKeyComponent ("{0}:{1}" -f $principalKeySource, $principalKeyValue)),
+                (ConvertTo-WorkerPermissionKeyComponent $accessRights)
+            ) -join '|'
+            [pscustomobject]@{
+                Mailbox=$Mailbox; UPN=$UPN; CalendarFolder=$CalendarFolder; User=$principalDisplay; AccessRights=$accessRights
+                PermissionPrincipalId=$principalId; PermissionPrincipalType=$principalType
+                PermissionPrincipalSmtpAddress=$principalSmtp; PermissionKeySource=$principalKeySource; PermissionKey=$permissionKey
+                CollectionStatus='Collected'; CollectionMessage=''
+            }
+        }
+
+        function New-WorkerCalendarStatusRow {
+            param([string]$Mailbox, [string]$UPN, [string]$CalendarFolder, [string]$Status, [string]$Message, [bool]$UseLegacyPlaceholder)
+            $userValue = ''; $accessRightsValue = ''
+            if ($Status -eq 'NoExplicitPermissions' -and $UseLegacyPlaceholder) {
+                $userValue = '(none)'; $accessRightsValue = '(none)'
+            }
+            $permissionKey = @(
+                (ConvertTo-WorkerPermissionKeyComponent $Mailbox),
+                (ConvertTo-WorkerPermissionKeyComponent $CalendarFolder),
+                (ConvertTo-WorkerPermissionKeyComponent $Status)
+            ) -join '|'
+            [pscustomobject]@{
+                Mailbox=$Mailbox; UPN=$UPN; CalendarFolder=$CalendarFolder; User=$userValue; AccessRights=$accessRightsValue
+                PermissionPrincipalId=''; PermissionPrincipalType=''; PermissionPrincipalSmtpAddress=''
+                PermissionKeySource='SystemStatus'; PermissionKey=$permissionKey
+                CollectionStatus=$Status; CollectionMessage=$Message
+            }
+        }
+
         function Invoke-WorkerFolderPermissionQuery {
             param(
                 [string[]]$MailboxIds,
@@ -527,13 +930,7 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
                         $permissionRows = @(Get-MailboxFolderPermission -Identity $identity -ErrorAction Stop -WarningAction SilentlyContinue 6>$null |
                             Where-Object { [string]$_.User -notin @('Default','Anonymous') } |
                             ForEach-Object {
-                                [pscustomobject]@{
-                                    Mailbox        = $PrimarySmtp
-                                    UPN            = $UserPrincipalName
-                                    CalendarFolder = $folderName
-                                    User           = [string]$_.User
-                                    AccessRights   = ($_.AccessRights -join ',')
-                                }
+                                New-WorkerCalendarPermissionRow -Mailbox $PrimarySmtp -UPN $UserPrincipalName -CalendarFolder $folderName -Permission $_
                             })
                         return [pscustomobject]@{ Found = $true; FolderName = $folderName; Rows = $permissionRows }
                     }
@@ -551,6 +948,7 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
                 [pscustomobject]@{
                     WorkerId = $workerId
                     Mailbox = $primarySmtp
+                    UPN = $upn
                     Rows = @()
                     Warning = ''
                     Error = ("Worker {0} EXO connection failed after {1} attempt(s): {2}" -f $workerId, $using:p_ConnectRetries, $connectionError)
@@ -587,22 +985,21 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
 
                 $rows = @($query.Rows)
                 $warning = ''
-                if ($query.Found -and $rows.Count -eq 0 -and $using:p_EmitNoPermRow) {
-                    $rows = @([pscustomobject]@{
-                        Mailbox = $primarySmtp
-                        UPN = $upn
-                        CalendarFolder = [string]$query.FolderName
-                        User = '(none)'
-                        AccessRights = '(none)'
-                    })
+                if ($query.Found -and $rows.Count -eq 0) {
+                    $rows = @(New-WorkerCalendarStatusRow -Mailbox $primarySmtp -UPN $upn -CalendarFolder ([string]$query.FolderName) `
+                        -Status 'NoExplicitPermissions' -Message 'Calendar folder exists but has no explicit permissions.' `
+                        -UseLegacyPlaceholder ([bool]$using:p_EmitNoPermRow))
                 }
                 elseif (-not $query.Found) {
                     $warning = "No calendar folder found for $primarySmtp"
+                    $rows = @(New-WorkerCalendarStatusRow -Mailbox $primarySmtp -UPN $upn -CalendarFolder '' `
+                        -Status 'NoCalendarFolder' -Message $warning -UseLegacyPlaceholder $false)
                 }
 
                 [pscustomobject]@{
                     WorkerId = $workerId
                     Mailbox = $primarySmtp
+                    UPN = $upn
                     Rows = $rows
                     Warning = $warning
                     Error = ''
@@ -613,6 +1010,7 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
                 [pscustomobject]@{
                     WorkerId = $workerId
                     Mailbox = $primarySmtp
+                    UPN = $upn
                     Rows = @()
                     Warning = ''
                     Error = ("Error for {0}: {1}" -f $primarySmtp, $_.Exception.Message)
@@ -640,7 +1038,8 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Error)) {
             WriteLog -Message ([string]$calendarOutput.Error) "WARNING"
-            $errors += [string]$calendarOutput.Error
+            Add-CalendarErrorDetail -Mailbox ([string]$calendarOutput.Mailbox) -UPN ([string]$calendarOutput.UPN) `
+                -Message ([string]$calendarOutput.Error)
         }
     }
     $processed = $parallelCalendarOutput.Count
@@ -668,7 +1067,7 @@ foreach ($mbx in $mailboxes) {
                 WriteLog -Message "Calendar folder found for $primarySMTP (via canonical : $usedIdentity)" "INFO"
                 if ($permissions -and $permissions.Count -gt 0) {
                     Add-CalendarResultRows -Rows $permissions
-                } elseif ($EmitNoPermRow) {
+                } else {
                     Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder 'Calendar')
                 }
             } else {
@@ -684,7 +1083,7 @@ foreach ($mbx in $mailboxes) {
                         WriteLog -Message "Calendar folder found for $primarySMTP (via stats : $usedIdentity2)" "INFO"
                         if ($permissions2 -and $permissions2.Count -gt 0) {
                             Add-CalendarResultRows -Rows $permissions2
-                        } elseif ($EmitNoPermRow) {
+                        } else {
                             Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
                         }
                     } else {
@@ -697,13 +1096,16 @@ foreach ($mbx in $mailboxes) {
                             WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity3)" "INFO"
                             if ($permissions3 -and $permissions3.Count -gt 0) {
                                 Add-CalendarResultRows -Rows $permissions3
-                            } elseif ($EmitNoPermRow) {
+                            } else {
                                 # extract folder name from identity "mbId:\Name"
                                 $folderName = ($usedIdentity3 -split ':\s*',2)[1]
                                 Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                             }
                         } else {
-                            WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
+                            $missingCalendarMessage = "No calendar folder found for $primarySMTP"
+                            WriteLog -Message $missingCalendarMessage "WARNING"
+                            Add-CalendarResultRows -Rows (New-CalendarStatusRow -Mailbox $primarySMTP -UPN $upn `
+                                -Status 'NoCalendarFolder' -Message $missingCalendarMessage)
                         }
                     }
                 } else {
@@ -717,12 +1119,15 @@ foreach ($mbx in $mailboxes) {
                         if ($permissions4 -and $permissions4.Count -gt 0) {
                             Add-CalendarResultRows -Rows $permissions4
                         }
-                        elseif ($EmitNoPermRow) {
+                        else {
                             $folderName = ($usedIdentity4 -split ':\s*',2)[1]
                             Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                         }
                     } else {
-                        WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
+                        $missingCalendarMessage = "No calendar folder found for $primarySMTP"
+                        WriteLog -Message $missingCalendarMessage "WARNING"
+                        Add-CalendarResultRows -Rows (New-CalendarStatusRow -Mailbox $primarySMTP -UPN $upn `
+                            -Status 'NoCalendarFolder' -Message $missingCalendarMessage)
                     }
                 }
             }
@@ -731,6 +1136,13 @@ foreach ($mbx in $mailboxes) {
             $calendarFolders = Get-CalendarFoldersSafe -Mbx $mbx -PrimaryOnly:$false
             $fTotal = $calendarFolders.Count
             $fIndex = 0
+
+            if ($fTotal -eq 0) {
+                $missingCalendarMessage = "No calendar folder found for $primarySMTP"
+                WriteLog -Message $missingCalendarMessage "WARNING"
+                Add-CalendarResultRows -Rows (New-CalendarStatusRow -Mailbox $primarySMTP -UPN $upn `
+                    -Status 'NoCalendarFolder' -Message $missingCalendarMessage)
+            }
 
             foreach ($folder in $calendarFolders) {
                 $fIndex++
@@ -742,28 +1154,26 @@ foreach ($mbx in $mailboxes) {
                     $permissions = Invoke-Quiet {
                         Get-MailboxFolderPermission -Identity $permIdentity -ErrorAction Stop
                     } |
-                        Where-Object { $_.User -notin @("Default","Anonymous") } |
-                        Select-Object @{Name = "Mailbox";        Expression = { $primarySMTP }},
-                                      @{Name = "UPN";            Expression = { $upn }},
-                                      @{Name = "CalendarFolder"; Expression = { $folderPath }},
-                                      @{Name = "User";           Expression = { $_.User }},
-                                      @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
+                        Where-Object { [string]$_.User -notin @('Default','Anonymous') } |
+                        ForEach-Object {
+                            New-CalendarPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath -Permission $_
+                        }
                     if ($permissions -and $permissions.Count -gt 0) {
                         Add-CalendarResultRows -Rows $permissions
-                    } elseif ($EmitNoPermRow) {
+                    } else {
                         Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
                     WriteLog -Message $errMsg "WARNING"
-                    $errors += $errMsg
+                    Add-CalendarErrorDetail -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath -Message $errMsg
                 }
             }
         }
     } catch {
         $errMsg = "Error for $primarySMTP : $($_.Exception.Message)"
         WriteLog -Message $errMsg "WARNING"
-        $errors += $errMsg
+        Add-CalendarErrorDetail -Mailbox $primarySMTP -UPN $upn -Message $errMsg
     }
 }
 }
@@ -771,83 +1181,138 @@ Write-Progress -Id 0 -Activity $overallActivity -Completed
 
 # ------------------------- Export & Cleanup -------------------------
 $BaseFileName = "Exchange_EXO_MailboxCalendarPermissions_AllDomains"
-
-Write-Host "`n--- Export CSV ---"
+$latestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+$requiredColumns = @(
+    'Mailbox','UPN','CalendarFolder','User','AccessRights',
+    'PermissionPrincipalId','PermissionPrincipalType','PermissionPrincipalSmtpAddress',
+    'PermissionKeySource','PermissionKey','CollectionStatus','CollectionMessage'
+)
+$duplicateResolution = [pscustomobject]@{
+    Rows=@(); Diagnostics=@(); DeduplicatedStableRowCount=0; AmbiguousPermissionRowCount=0; AmbiguousPermissionKeyCount=0
+}
 if ($results.Count -gt 0) {
-    $requiredColumns = @('Mailbox','UPN','CalendarFolder','User','AccessRights')
-    $missingColumns = @($requiredColumns | Where-Object { -not $results[0].PSObject.Properties[$_] })
+    $duplicateResolution = Resolve-CalendarPermissionExportRows -Rows $results.ToArray()
+}
+$exportRows = @($duplicateResolution.Rows)
+$duplicateDiagnosticRows = @($duplicateResolution.Diagnostics)
+
+foreach ($row in $exportRows) {
+    $missingColumns = @($requiredColumns | Where-Object { -not $row.PSObject.Properties[$_] })
     if ($missingColumns.Count -gt 0) {
         throw ("Calendar permissions export schema is incomplete. Missing column(s): {0}" -f ($missingColumns -join ', '))
     }
-    $exportRows = @($results | Select-Object $requiredColumns)
-    ExportAndCopyCsv -BaseFileName $BaseFileName `
+    if ([string]::IsNullOrWhiteSpace((Get-MailboxCoverageKey -Mailbox ([string]$row.Mailbox) -UPN ([string]$row.UPN)))) {
+        throw 'Calendar permissions export contains a row without a mailbox identity.'
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$row.PermissionKey) -or [string]::IsNullOrWhiteSpace([string]$row.CollectionStatus)) {
+        throw ("Calendar permissions export contains a row without PermissionKey or CollectionStatus for mailbox '{0}'." -f $row.Mailbox)
+    }
+    if ($row.CollectionStatus -notin @('Collected','AmbiguousPrincipalCollision','NoExplicitPermissions','NoCalendarFolder')) {
+        throw ("Calendar permissions export contains unsupported CollectionStatus '{0}' for mailbox '{1}'." -f $row.CollectionStatus, $row.Mailbox)
+    }
+    if ($row.CollectionStatus -in @('Collected','AmbiguousPrincipalCollision') -and
+        ([string]::IsNullOrWhiteSpace([string]$row.CalendarFolder) -or
+         [string]::IsNullOrWhiteSpace([string]$row.User) -or
+         [string]::IsNullOrWhiteSpace([string]$row.AccessRights))) {
+        throw ("Collected calendar permission row is incomplete for mailbox '{0}', folder '{1}'." -f $row.Mailbox, $row.CalendarFolder)
+    }
+    if ($row.PermissionKeySource -eq 'StableId' -and [string]::IsNullOrWhiteSpace([string]$row.PermissionPrincipalId)) {
+        throw ("Calendar permission row claims a stable principal ID but none is present for mailbox '{0}'." -f $row.Mailbox)
+    }
+    if ($row.PermissionKeySource -eq 'SmtpAddress' -and [string]::IsNullOrWhiteSpace([string]$row.PermissionPrincipalSmtpAddress)) {
+        throw ("Calendar permission row claims a principal SMTP address but none is present for mailbox '{0}'." -f $row.Mailbox)
+    }
+    if ($row.CollectionStatus -eq 'NoExplicitPermissions' -and [string]::IsNullOrWhiteSpace([string]$row.CalendarFolder)) {
+        throw ("NoExplicitPermissions row has no calendar folder for mailbox '{0}'." -f $row.Mailbox)
+    }
+    if ($row.CollectionStatus -eq 'NoCalendarFolder' -and [string]::IsNullOrWhiteSpace([string]$row.CollectionMessage)) {
+        throw ("NoCalendarFolder row has no diagnostic message for mailbox '{0}'." -f $row.Mailbox)
+    }
+}
+
+$remainingStableDuplicates = @(
+    $exportRows |
+        Where-Object { $_.CollectionStatus -eq 'Collected' -and $_.PermissionKeySource -in @('StableId','SmtpAddress') } |
+        Group-Object -Property PermissionKey |
+        Where-Object { $_.Count -gt 1 }
+)
+if ($remainingStableDuplicates.Count -gt 0) {
+    throw ("Calendar permissions stable-key deduplication failed for {0} permission key(s)." -f $remainingStableDuplicates.Count)
+}
+
+$coverage = Assert-CalendarPermissionCoverage -Mailboxes @($mailboxes) -ExportRows $exportRows `
+    -ErrorRows $errorDetails.ToArray() -ProcessedCount $processed
+WriteLog -Message ("Calendar permissions publication coverage validated: {0}/{1} mailbox(es) represented in main or error data." -f `
+    $coverage.RepresentedCount, $coverage.ExpectedCount) 'INFO'
+if ($duplicateResolution.DeduplicatedStableRowCount -gt 0) {
+    WriteLog -Message ("Removed {0} exact duplicate permission row(s) using stable principal keys." -f $duplicateResolution.DeduplicatedStableRowCount) 'INFO'
+}
+
+Write-Host "`n--- Export CSV ---"
+if ($exportRows.Count -eq 0) {
+    throw 'Calendar permissions publication refused: no main export row was produced. Structured error evidence is retained in memory and the previous current CSV will not be presented as proof of this run.'
+}
+ExportAndCopyCsv -BaseFileName $BaseFileName `
+    -OutputPath $OutputPath `
+    -GlobalPath $latestCsvFolderPath `
+    -Data $exportRows `
+    -Encoding "UTF8" `
+    -NoTypeInformation `
+    -NoMaxItemsRowLimit
+
+$duplicateDiagnosticBaseFileName = 'Exchange_EXO_MailboxCalendarPermissions_DuplicateCandidates'
+if ($duplicateDiagnosticRows.Count -gt 0) {
+    ExportAndCopyCsv -BaseFileName $duplicateDiagnosticBaseFileName `
         -OutputPath $OutputPath `
-        -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
-        -Data $exportRows `
-        -Encoding "UTF8" `
+        -GlobalPath $latestCsvFolderPath `
+        -Data $duplicateDiagnosticRows `
+        -Encoding 'UTF8' `
         -NoTypeInformation `
         -NoMaxItemsRowLimit
-} else {
-    WriteLog -Message "No data to export (no calendars found or all skipped). Export step skipped." "INFO"
-    Write-Host "No data to export. Skipping."
+    WriteLog -Message ("Preserved {0} permission row(s) across {1} ambiguous display-name-only key(s); see duplicate-candidate CSV." -f `
+        $duplicateResolution.AmbiguousPermissionRowCount, $duplicateResolution.AmbiguousPermissionKeyCount) 'WARNING'
+}
+else {
+    Remove-CalendarLatestCsvIfPresent -BaseFileName $duplicateDiagnosticBaseFileName -LocalOutputPath $OutputPath -LatestOutputPath $latestCsvFolderPath
 }
 
 $errorBaseFileName = "Exchange_EXO_MailboxCalendarPermissions_Errors"
-$errorLatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
-if ($errors.Count -gt 0) {
+if ($errorDetails.Count -gt 0) {
     Add-Content -Path $logTextFile -Value "`n=== MAILBOX-LEVEL ERRORS ==="
-    $errors | ForEach-Object { Add-Content -Path $logTextFile -Value $_ }
+    $errorDetails | ForEach-Object { Add-Content -Path $logTextFile -Value $_.Message }
 
-    $errorRows = for ($i = 0; $i -lt $errors.Count; $i++) {
+    $errorRows = for ($i = 0; $i -lt $errorDetails.Count; $i++) {
         [pscustomobject]@{
-            Index   = $i + 1
-            Message = [string]$errors[$i]
+            Index            = $i + 1
+            Mailbox          = [string]$errorDetails[$i].Mailbox
+            UPN              = [string]$errorDetails[$i].UPN
+            CalendarFolder   = [string]$errorDetails[$i].CalendarFolder
+            CollectionStatus = [string]$errorDetails[$i].CollectionStatus
+            Message          = [string]$errorDetails[$i].Message
         }
     }
 
     ExportAndCopyCsv -BaseFileName $errorBaseFileName `
         -OutputPath $OutputPath `
-        -GlobalPath $errorLatestCsvFolderPath `
+        -GlobalPath $latestCsvFolderPath `
         -Data $errorRows `
         -Encoding "UTF8" `
         -NoTypeInformation
 
-    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARNING"
+    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errorDetails.Count) "WARNING"
 }
 else {
-    $errorRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $errorBaseFileName
-    $staleErrorLatestPaths = @(
-        Join-Path -Path $OutputPath -ChildPath "$errorRunBaseFileName.csv"
-        if (-not [string]::IsNullOrWhiteSpace($errorLatestCsvFolderPath)) {
-            Join-Path -Path $errorLatestCsvFolderPath -ChildPath "$errorRunBaseFileName.csv"
-        }
-    ) | Select-Object -Unique
-    foreach ($staleErrorLatestPath in $staleErrorLatestPaths) {
-        if (Test-Path -LiteralPath $staleErrorLatestPath -PathType Leaf) {
-            try {
-                Remove-Item -LiteralPath $staleErrorLatestPath -Force -ErrorAction Stop
-                WriteLog -Message "Removed stale error CSV after successful run: $staleErrorLatestPath" "INFO"
-            }
-            catch {
-                WriteLog -Message "Unable to remove stale error CSV '$staleErrorLatestPath': $($_.Exception.Message)" "WARNING"
-            }
-        }
-    }
-    $sharePointStaleErrorPath = if (-not [string]::IsNullOrWhiteSpace($errorLatestCsvFolderPath)) {
-        Join-Path -Path $errorLatestCsvFolderPath -ChildPath "$errorRunBaseFileName.csv"
-    }
-    else {
-        Join-Path -Path $OutputPath -ChildPath "$errorRunBaseFileName.csv"
-    }
-    Remove-SmartM365SharePointFile -LocalFilePath $sharePointStaleErrorPath | Out-Null
+    Remove-CalendarLatestCsvIfPresent -BaseFileName $errorBaseFileName -LocalOutputPath $OutputPath -LatestOutputPath $latestCsvFolderPath
 }
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
 Write-Host "PrimaryOnly mode      : $PrimaryOnly"
 Write-Host "EmitNoPermRow         : $EmitNoPermRow"
 Write-Host "Mailboxes processed   : $processed"
-Write-Host "Permissions rows      : $($results.Count)"
-Write-Host "Errors                : $($errors.Count)"
+Write-Host "Export rows           : $($exportRows.Count)"
+Write-Host "Stable duplicates cut : $($duplicateResolution.DeduplicatedStableRowCount)"
+Write-Host "Ambiguous rows        : $($duplicateResolution.AmbiguousPermissionRowCount)"
+Write-Host "Errors                : $($errorDetails.Count)"
 Write-Host "Export completed (if any)."
 Write-Host "- Log              : $global:logTextFile"
 
@@ -859,14 +1324,14 @@ WriteLog -Message "$TaskName completed."
 Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
 Stop-Transcript | Out-Null
 try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
-$finalStatus = if ($errors.Count -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
+$finalStatus = if ($errorDetails.Count -gt 0 -or $duplicateResolution.AmbiguousPermissionRowCount -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
 Complete-SmartM365ExecutionContext -Status $finalStatus
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJtBiFTTQdgYEB
-# S9FZGiUGhoPysq+Hl3bfIJeECB8vIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCW2qW/b8docnyO
+# TqThzM71j9ktCDhFq+De2sjLFCgBvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -957,25 +1422,25 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -983,47 +1448,47 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOAchulBcrCgt6NsaQeH3FJXEjaOkG/A8LD3CTOduW+5MA0GCSqG
-# SIb3DQEBAQUABIIBgERa0Pd3Wf+fIDlA1LdZa/u5iwlGkYMKl1Tbly0Z+v+4XiBC
-# db8h96gXHocEfDIWJTYlINl/9OhdQZPU722ho7UUWhdH+F8AabTrgJOYmwYAOiDb
-# 1hA0KEnNB6TJ5zA2YCo2oC5OFnq6+RhmZFvRGtRr/aQiftPgHYMPcJ3GZ60Azaf0
-# 3fxKFEAs4bu+RgOK7y/PYolJm7emEAohPeoFimUXP7ypj5GRrdcNFKBn6IJXgVXa
-# l9nTOtOOYuktZnqRd1ZRzg+vfa0RenQzxz2aF4GfutQHcmvJ9JjSf8KVNGIerSk9
-# FiaUXpf5IBlVcoSH7DO6XDqc7Hv+g4QBc6JXJRzVsVPG0ysOjJu9N4bs2k5q/0td
-# qe4jGBqKLMnlrMWvyRlSGlRkIKrxIkDSgkw248f81Pd1aWD+1OYMyOdN+pY3hglT
-# 5cdHw7l/vkUEs3t1qEx/GJ3EumEYLs359OLYfcmatvtaL8LGnQRYkZFVuBT6lx9m
-# wbOEYWImjPX493sv26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGB6xyZYp32sXPDVLN6wz46s+6UUqf5ekvdPdIyPYEVeMA0GCSqG
+# SIb3DQEBAQUABIIBgGvkMAKzrGFcXAsee0hAlNLmKjXN+5YWVSYI9U7+CaBeG2FX
+# yUK6+4L4O2Qfoefw85JoJCiraLUC4DAHQ1nfcAdjVAqF+X29CRPvOn4ZGQ745jY+
+# KKa4e1UJX9ObGoARl5D2NlrU4278SVOltQzqAxIMGQLVTO6RwkiqCm6MTlMOhg3N
+# xEd0IvrDbNRXSqdg1YuTiuWS73oQM08OgoQ8sBA00bWIKPtA/AV+rWA89AJNNPZv
+# QvbNIffPnyLU/pRPaybuNbPZuiSilYScAwBLrQDsoNC/rKiW+a8xsLRumthAQlYL
+# Qls09nWkTIoNc7oqm4kjiZTRvQR9XWPwhIPstpfyiQD8+/Tz3FGi9fXV2+2emXeh
+# gqDJ3XW2CkLice9FMH+BwqHsqEzDjPNmY83jFoDOYENL4qgE7zKxOLuwwDwUrHIW
+# +8YWQXhOB3emqmK69nDXAMtbspXbxMJeO5SYRYAZWYhZg8xw1DDtJmp8Ff5c4oPq
+# y2gh8INhMJ+sAUd4saGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzM2
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDEIyKua80sgHBELbc8+AE2T1i9Pej/RihD8HJf
-# NHFR6TANBgkqhkiG9w0BAQEFAASCAgBCjdLBJmHooZQ5yQwP7/PN14ZQrhkW61EV
-# l2AM96e4Y0rglt0kMB99qoppHoCLVVEwWeXniPAwn3i7m84QTAeQpNXaURtYiHG/
-# 95HJhkcVJPmfKfM/BJYL7HXNNUuDVSJGDmC9K8tpvn1S61A69udxGe3DF1hfnNbS
-# V8RMAknohGkgMQOhnDoaxgYwtt/Vrrt1ByaKrnK+lC7ln0a7aCIMIXcDBskxfRT8
-# LWHlCtmYHHrtdA7nsMk/kQpBgNJK8p+7khgJn/5C6IH/Y3v7qBamIva2MXM3FRFb
-# Im6V7kGjRyzPZ6gNJ/RKhPJRmWSlIJpmmDnmDKD5hIfpU29v3l1nCxvjWWCB83HP
-# +xfwV9fswcIH5/oIefTQThKpjgm0wu7vN4O4xETV021rIwQA/pkHEPtH1+Z4B7ZB
-# UG+TX1CHmvQ0PfjlInAiEp0tilkNv3Ea8AMRLeRn3AsCYucOgJA9rtkXMZXsXPbq
-# X3DC7govyngbU81O4sIHYd0FVr/6HNEPwmA88u/urRmY9/cYbT2txz1eOzTHhC/T
-# 0auH1h1jftJ6wf69nqGwlzrMf9WN9WKjHBGY5lErESq+2oGlwQqLPVL97ZWNEYCY
-# 4MkP2Z0kJ9nbHBK24O/ntCrHu8d+1VwL3KChqeClEOhjbRfjOsTFDMfIhJSub1c3
-# XuVV8yPbkg==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxODE4
+# MzVaMC8GCSqGSIb3DQEJBDEiBCCbZmbz+sNd7+HXtKWGLgJRQk1bM5+gbR/Pm2qU
+# TVmqxDANBgkqhkiG9w0BAQEFAASCAgA9UfS0bbzhLbXB3sIdD69ElCXaLvoOFZeG
+# 9n/jrnku+cq+C35q6GmhtBqvmmYLpBbDT7P1yyMQlrmxodTlhY3TAVIlPOAsI1PB
+# z9W0+xuiDQJFnCt3eLniFGEYTeKeH4T33e/jfQ+iAClos93Qwdo5Ee/0DtCa+Yan
+# jGfEq3GtbVsFILCbGfMeXFD+qyK60ukz57KFlmBzdIlUam5rJBpznONH9XnrQ6nu
+# ohOK0oFE7lQNVBBq/nquIEmdcQsEV3Lp0xvX6dMu1XSQUBe9f9yfqGGPFzBWBV/u
+# bJroYgmFueiAJkUmJRenQXCkQVS1Sod3X1cCpSiRp6rH7Te1QrpHyMyrQmgnc7/A
+# qjjjFeUUL0MS9l9AuI8JIsou6m/DBY0g/2gIJZCRsNfsFgZViPPxMzAj6qNaF3sT
+# VHKJJv3yWdPiAR6/p/TR70kpS2mxYGIJTUr4uAqJV5xcMQB8ZtkxHQEvwWSh4VvY
+# 9xql9ACy5UI0FRsRQSkdOfgjR6wgLkr7zOet9Bl+0rTENQLvuE06IjiyXeabOR9I
+# 1V7ksa/aT8Un0zPQtgYFdXDNWXXEGodrx3VOUhP73+3jclW+jlQ4vomMhZvwisCM
+# Jncx07/RqNOWYX5Q7BZIRfPdgqPXvJTmyFML2UFDeRDavECyteevMvuJpquESjfg
+# s5Jl58mtlA==
 # SIG # End signature block
