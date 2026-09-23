@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.7
+1.0.8
 #>
 [CmdletBinding()]
 param(
@@ -53,6 +53,36 @@ function New-IssueExporterModule {
         $script:SmartM365CoreTenantId='00000000-0000-0000-0000-000000000001'
     }
     $module
+}
+function New-Windows11ReadinessCsvModule {
+    param([string]$CollectorPath)
+    $definitions=@(Get-FunctionText -Path $CollectorPath -Names @('Log','Warn','WarnIfInputCsvStale','Csv','CsvAny','CsvAnyProjected'))
+    New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
+}
+function Invoke-Windows11ReadinessCsvLoad {
+    param(
+        [System.Management.Automation.PSModuleInfo]$Module,
+        [string]$Folder,
+        [datetime]$RunStartedAt,
+        [double]$ThresholdHours,
+        [string[]]$Names,
+        [bool]$Required = $false
+    )
+    & $Module {
+        param($folder,$runStartedAt,$thresholdHours,$names,$required)
+        $script:DataLastFolder=$folder
+        $script:RunStartedAt=$runStartedAt
+        $script:InputCsvFreshnessWarningHours=$thresholdHours
+        $script:WarningCount=0
+        $stream=@(CsvAnyProjected -Names $names -Columns @('Id','Value') -Req:$required 3>&1)
+        $warningRecords=@($stream | Where-Object {$_ -is [Management.Automation.WarningRecord]})
+        $rows=@($stream | Where-Object {$_ -isnot [Management.Automation.WarningRecord]})
+        [pscustomobject]@{
+            Rows=$rows
+            WarningCount=$script:WarningCount
+            WarningMessages=@($warningRecords | ForEach-Object {$_.Message})
+        }
+    } $Folder $RunStartedAt $ThresholdHours $Names $Required
 }
 
 try {
@@ -112,6 +142,108 @@ try {
             } finally {$lock.Dispose();Remove-Module $module}
             Assert-Offline ([IO.File]::ReadAllText($lastDetail) -eq 'LAST VALID SYNTHETIC EXPORT') 'Locked DATA-LAST was modified.'
         }
+    }
+
+    $readinessPath=Join-Path $SourceRoot 'SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-Intune-Windows11-Readiness-Issues-Inventory.ps1'
+    $freshnessRoot=Join-Path $testRoot 'windows11-readiness-input-freshness'
+    [void][IO.Directory]::CreateDirectory($freshnessRoot)
+    $runStartedAt=[datetime]::SpecifyKind([datetime]'2026-09-23T12:00:00',[DateTimeKind]::Utc)
+
+    Test-OfflineCase 'Windows 11 readiness input younger than threshold does not warn' {
+        $folder=Join-Path $freshnessRoot 'younger'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $path=Join-Path $folder 'younger.csv'
+        [IO.File]::WriteAllText($path,"Id,Value`r`n1,young`r`n")
+        [IO.File]::SetLastWriteTimeUtc($path,$runStartedAt.AddHours(-23))
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $observed=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('younger.csv') -Required $true
+            Assert-Offline ($observed.WarningCount -eq 0 -and $observed.WarningMessages.Count -eq 0) 'A CSV younger than 24 hours emitted a freshness warning.'
+            Assert-Offline ($observed.Rows.Count -eq 1 -and $observed.Rows[0].Value -ceq 'young') 'The fresh CSV was not imported.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness input older than threshold warns and remains imported' {
+        $folder=Join-Path $freshnessRoot 'older'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $path=Join-Path $folder 'older.csv'
+        [IO.File]::WriteAllText($path,"Id,Value`r`n2,old`r`n")
+        $lastWriteTimeUtc=$runStartedAt.AddHours(-25)
+        [IO.File]::SetLastWriteTimeUtc($path,$lastWriteTimeUtc)
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $observed=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('older.csv') -Required $true
+            Assert-Offline ($observed.WarningCount -eq 1 -and $observed.WarningMessages.Count -eq 1) 'A CSV older than 24 hours did not emit exactly one warning.'
+            Assert-Offline ($observed.Rows.Count -eq 1 -and $observed.Rows[0].Value -ceq 'old') 'The stale CSV import did not continue.'
+            $message=$observed.WarningMessages[0]
+            Assert-Offline ($message -match [regex]::Escape('older.csv') -and $message -match 'age=25\.00 hour' -and $message -match [regex]::Escape($lastWriteTimeUtc.ToString('o')) -and $message -match 'threshold=24\.00 hour' -and $message -match 'Processing continues\.') 'The stale CSV warning does not contain the required operational details.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness input exactly at threshold does not warn' {
+        $folder=Join-Path $freshnessRoot 'exact'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $path=Join-Path $folder 'exact.csv'
+        [IO.File]::WriteAllText($path,"Id,Value`r`n3,exact`r`n")
+        [IO.File]::SetLastWriteTimeUtc($path,$runStartedAt.AddHours(-24))
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $observed=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('exact.csv') -Required $true
+            Assert-Offline ($observed.WarningCount -eq 0 -and $observed.WarningMessages.Count -eq 0) 'A CSV exactly 24 hours old emitted a freshness warning.'
+            Assert-Offline ($observed.Rows.Count -eq 1) 'The threshold-boundary CSV was not imported.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness required input remains blocking when absent' {
+        $folder=Join-Path $freshnessRoot 'required-absent'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $caught=$null
+            try {Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('required.csv') -Required $true | Out-Null}
+            catch {$caught=$_}
+            Assert-Offline ($null -ne $caught -and $caught.Exception.Message -match 'Required CSV not found') 'An absent required CSV is no longer blocking.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness optional input remains non-blocking when absent' {
+        $folder=Join-Path $freshnessRoot 'optional-absent'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $observed=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('optional.csv')
+            Assert-Offline ($observed.Rows.Count -eq 0 -and $observed.WarningCount -eq 0) 'An absent optional CSV did not retain its empty, non-warning behavior.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness checks only the selected alternative input' {
+        $folder=Join-Path $freshnessRoot 'alternatives'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $preferred=Join-Path $folder 'preferred.csv'
+        $fallback=Join-Path $folder 'fallback.csv'
+        [IO.File]::WriteAllText($preferred,"Id,Value`r`n4,preferred`r`n")
+        [IO.File]::WriteAllText($fallback,"Id,Value`r`n5,fallback`r`n")
+        [IO.File]::SetLastWriteTimeUtc($preferred,$runStartedAt.AddHours(-1))
+        [IO.File]::SetLastWriteTimeUtc($fallback,$runStartedAt.AddHours(-48))
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            $preferredObserved=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('preferred.csv','fallback.csv') -Required $true
+            Assert-Offline ($preferredObserved.WarningCount -eq 0 -and $preferredObserved.Rows[0].Value -ceq 'preferred') 'The unselected stale fallback CSV was checked or imported.'
+            Remove-Item -LiteralPath $preferred -Force
+            $fallbackObserved=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('preferred.csv','fallback.csv') -Required $true
+            Assert-Offline ($fallbackObserved.WarningCount -eq 1 -and $fallbackObserved.WarningMessages[0] -match [regex]::Escape('fallback.csv') -and $fallbackObserved.Rows[0].Value -ceq 'fallback') 'The selected fallback CSV did not receive the freshness check.'
+        } finally {Remove-Module $module -Force}
+    }
+    Test-OfflineCase 'Windows 11 readiness freshness check preserves imported schema and content' {
+        $folder=Join-Path $freshnessRoot 'content-parity'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $path=Join-Path $folder 'parity.csv'
+        [IO.File]::WriteAllText($path,"Id,Value`r`n6,unchanged`r`n7,also-unchanged`r`n")
+        $module=New-Windows11ReadinessCsvModule -CollectorPath $readinessPath
+        try {
+            [IO.File]::SetLastWriteTimeUtc($path,$runStartedAt.AddHours(-1))
+            $fresh=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('parity.csv') -Required $true
+            [IO.File]::SetLastWriteTimeUtc($path,$runStartedAt.AddHours(-48))
+            $stale=Invoke-Windows11ReadinessCsvLoad -Module $module -Folder $folder -RunStartedAt $runStartedAt -ThresholdHours 24 -Names @('parity.csv') -Required $true
+            Assert-Offline (($fresh.Rows[0].PSObject.Properties.Name -join ',') -ceq 'Id,Value') 'The freshness path changed the projected input schema.'
+            Assert-Offline (($fresh.Rows | ConvertTo-Json -Depth 5 -Compress) -ceq ($stale.Rows | ConvertTo-Json -Depth 5 -Compress)) 'Freshness changed imported row content.'
+            Assert-Offline ($fresh.WarningCount -eq 0 -and $stale.WarningCount -eq 1) 'The parity fixture did not exercise both fresh and stale paths.'
+        } finally {Remove-Module $module -Force}
     }
 
     Test-OfflineCase 'AD HealthCheck uses atomic current and append paths' {
@@ -434,8 +566,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7WMTVQ4TNMiD2
-# BabHEWgwi+HNs7o/SjEj9r4Ff9N7m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAp2vKzcCE1pj4t
+# IAWolvwzURCZg6kPSHchCWVlU0LAoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -568,31 +700,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHy2jkqed2F+dARo2veUmDh8I6g+cjNsyQ27/JeFF7CTMA0GCSqG
-# SIb3DQEBAQUABIIBgEQzTFqzCGq3FrCZO82WZauLnHBF47tvVbYbBgebiIh8arWw
-# ZWc9DRUb2HiKIgn80prfS4M2qa2sMmle1YNWnYOMhWN3xvKhaJryJvO4PvqTJZut
-# fR5PZyz5f3i7Q2e1RtjAKXANG7tre46Q4ajBl84sukAOmprk/KEif/1BeYjoy2Wb
-# BREmzmwnGw1Mbu+CTIbocW2aFWCxiuK04710aZyQEgFe43u+bO/69VArhFrX0sEK
-# XD2QOxHozOTOrQEFeZTxdhj0XPMHQaXlylW3GQzg2D45OCrnoK2jvPGOBOrvxQ/i
-# 9hZFp+vrH1sDul6Cwqto6hjry8kuKdPFYVHTew8iBMZdlX+gVmk5jeKRNR5RPAe1
-# K1Gfq7yiD3vXWSTrh8uEh8ZQxdogcfEDSnCDsb1ErEjmBW07HqHSnbwCnJwvw0Hw
-# KYiDsdzs4vpKwrg3wNgi/In2E4oLRvpSteGefqsii6w7JOyeERmMG39df8jQc1GO
-# 0H9IdsPhlt5np1P0PKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII1LhPiC0ZSxuNLyuEl4XAktz4cTeBL5gybCn4iureRGMA0GCSqG
+# SIb3DQEBAQUABIIBgE4ydM+YP8QPHrbLdmWCtvIxzM3OLmxIbUmeEquY3chXZxMe
+# N5TE/1XYjg/kh6ceTMky8Opa+S2AhnXr++D85G6xYaEN9MYXYPRmLdunwAoJ7XDj
+# s5JlR7gLYbJjmbRFpmd48Em8OcmrY1rPehQpxtTcGlLokxef0UYwGlCCU04HFK9b
+# ByT1ILRnqI65JdxvuaRlViy5vR7BMUPWrMGxEe0xS0Bj3yKhYpm6NlZ7IZ4pVXz6
+# ibjqDfJriBSo3PAOoxPx3exG4RhyWI4zNJR3qjtEB0RtmwdY03qqeFSW8GPMLbRa
+# BUu6AYgXLrzEXAjIa/5kUZjNqIEp/nyCD0PImKIlauVD8TFs34R8XR7zIgGjm/Xd
+# accFcAXUE1vl0vleXCOwBaX1aHlGkeHVbSehzln18CdPjm5GN/2HMDtYfpxhkfC2
+# SxYOhX8rAhlJgGjyd1B1HJZVjNW5BDY5euT7YGGTV54CGQaFNT0HKUxmuZa1pifw
+# M8o9paWkTa2SqKYsh6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTUx
-# MTlaMC8GCSqGSIb3DQEJBDEiBCA55NB9t3SrUNRwSqCpWxcLazhSuz47JYE5zq7r
-# pXqv4zANBgkqhkiG9w0BAQEFAASCAgCBFgkWmvdKJPmzDjlXwczcjK4/vsg7Fgis
-# GckNVLKfVUn2SaWvs8Xd0DIXVDDM3jPqY5vF9cXLtDc4YOUZS4VuUNDC6WZVWBSq
-# ZyTvcJlAgsyxrb7lgBYsMlrWxYVyN+cUOEeXx7Og9eFCZlsZj127alB4KnqCODeK
-# y/jJmvlg9qi7572IomBN3k3KZXIvispWTI0EZPlvlLqpla8M0YqYqnUfB6w6Z0WG
-# G4O32l4oNkNwLQ/pxVq/HqFvS+fgjAbIRdEgPFi/xInX1d/bA9gMrTDTmVYEHATo
-# Ok2hk0/r7NC3+uJ7wNSK6OAzvHUMSTmX6W/qtCH5Avjo7wBSaHDXdaHpNZsHyNZT
-# 5jk4XDrEs8GsfNVTG2Gi9/6N/Yma6VjT+oD9wlbeabeSLM5cNxFulu+dOY38dfmW
-# oB/YQxQfjbLzrlZogUE1EtVapvx4ez5EPoeHX2mGnOJl6Qdar0h1g4vyqb17De0g
-# n7rfivzppfgC5YpuFiJyQi+RhQAZnZuNUCXlTieJBhFTUjVOQMg6qNqyJLzSn/K2
-# IbMWfV2jEQUqPBQXUs2Qy3ETo2p2KSiLERe6+ng2wirlzrVptiYDS3MzmiGFV4Wr
-# 8kUM9BtK7paGZms99rN/AscLr329tmgvh2+yUpKREhEjwwczA7+ZQmKwe8oI29li
-# tqWn2MJdCQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNDEx
+# MzlaMC8GCSqGSIb3DQEJBDEiBCASdVWdbx7WHz86NRkhDEIW2pCdWKLNiiZK+RYY
+# JvCWtjANBgkqhkiG9w0BAQEFAASCAgBt6PAr8ysp80I1pcblG+nDF1tyd13SoySO
+# KXJ+QG7zT/kgWcKpUPsfQy0RRd9/zUG3oTLQ9P4vgLqYug4lHZY1QuaJIMuXNf85
+# So1f0tbTONaHsumgtNNpyHpxOqbW1V1blppVC/X9W48sG3116rMho+RhmOj4u+Pv
+# my5PPLN45OdVAuRyFneBk4uUjzW68/LzvW5tIsAfZJf/1WbSrfMF2fMEC43PpLaP
+# UsB2Upo6mXVoK1YOrnQbviJWALwvnMcITXry4G4fp+cTFGRuO6rjS0F0YGWUa3hp
+# t8gtXJir4gN2hUhMy9pj6HCoujZnzPVeGvEs5NQysxNqlReVbU5ANq3FPwdRvnUs
+# Lbpz/bNRs38MA5Uc4ve1qTMH3cD5qPZcq1zqYqnf1yJgtKG16tXbNJs7tdTfcvba
+# 4DNcoimhMZQKXed5W5r9igRSngHgocdbLt3aQ60Qfaxh7pVTnMsv121mY3YFFjME
+# 7B768E7r7TgEf/QHcrhYcg0JYk4kC0NVXQh1UStlZe5C6wTqbrY8iO+V4tkprrwo
+# zfPB0eeBWYD9Nf8HqVO3dBVoTvfPi/fQB4mxhSKdCgQXxZIIcNvzRC9nbHP0MKKA
+# i3/m5k0P4KvGaqUj2koCEu7Z1aKvMbe7Ed64dMqKnFQgKFIYQvDbKzs+g6wfuyaL
+# 2vo3z+Vlzg==
 # SIG # End signature block
