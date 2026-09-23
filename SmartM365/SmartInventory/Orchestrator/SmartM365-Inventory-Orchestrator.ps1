@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.19
+1.5.20
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.19
+    Version : 1.5.20
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.19"
+$ScriptVersion = "1.5.20"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -397,7 +397,7 @@ function Invoke-OrchestratorSharePointUpload {
     }
 
     try {
-        $record = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $fileInfo.FullName -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
+        $record = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $fileInfo.FullName -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -EnsureParentFolders -ErrorAction Stop
         if ($record) {
             $script:SharePointUploadedFileState[$key] = $signature
             $target = if (-not [string]::IsNullOrWhiteSpace([string]$record.WebUrl)) { [string]$record.WebUrl } else { [string]$record.SharePointPath }
@@ -410,6 +410,260 @@ function Invoke-OrchestratorSharePointUpload {
     catch {
         Write-OrchestratorLog -Message ("SharePoint upload failed for {0}: {1}" -f $Reason, $_.Exception.Message) -Level ERROR
         return $false
+    }
+}
+
+function Get-OrchestratorSharePointMirrorRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $sharedRoot = [IO.Path]::GetFullPath($SharedDataFolderPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $targetPath = [IO.Path]::GetFullPath($Path)
+    $rootPrefix = $sharedRoot + [IO.Path]::DirectorySeparatorChar
+    if ($targetPath -ne $sharedRoot -and -not $targetPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "SharePoint mirror path is outside the shared orchestrator root: $targetPath"
+    }
+
+    $dataAllRoot = Split-Path -Path $sharedRoot -Parent
+    $relative = [IO.Path]::GetRelativePath($dataAllRoot, $targetPath)
+    return ('DATA-ALL/' + (($relative -replace '\\', '/').Trim('/')))
+}
+
+function Test-OrchestratorSharePointMirrorFile {
+    param([Parameter(Mandatory = $true)][IO.FileInfo]$File)
+
+    if ($File.Extension -notin @('.json', '.csv')) { return $false }
+    if ($File.Name -match '(?i)(?:\.lock|\.tmp|\.guard)$') { return $false }
+    if ($File.Name -match '(?i)\.takeover\.lock$') { return $false }
+    return $true
+}
+
+function Get-OrchestratorSharePointMirrorSnapshot {
+    param([Parameter(Mandatory = $true)][string]$SharedDataFolderPath)
+
+    $folders = New-Object 'System.Collections.Generic.List[object]'
+    $files = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($rootName in @('Config', 'Audit', 'Election', 'PipelineRuns')) {
+        $rootPath = Join-Path -Path $SharedDataFolderPath -ChildPath $rootName
+        $folders.Add([pscustomobject]@{
+            LocalPath = $rootPath
+            RelativePath = (Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $rootPath)
+        })
+        if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { continue }
+
+        foreach ($item in @(Get-ChildItem -LiteralPath $rootPath -Recurse -Force -ErrorAction Stop)) {
+            if ($item.PSIsContainer) {
+                $folders.Add([pscustomobject]@{
+                    LocalPath = $item.FullName
+                    RelativePath = (Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName)
+                })
+                continue
+            }
+            if (-not (Test-OrchestratorSharePointMirrorFile -File $item)) { continue }
+            $files.Add([pscustomobject]@{
+                LocalFilePath = $item.FullName
+                RelativePath = (Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName)
+                Length = [long]$item.Length
+                LastWriteTimeUtc = $item.LastWriteTimeUtc.ToString('o')
+                Signature = ('{0}|{1}' -f $item.Length, $item.LastWriteTimeUtc.Ticks)
+            })
+        }
+    }
+
+    [pscustomobject]@{
+        Folders = @($folders | Sort-Object RelativePath -Unique)
+        Files = @($files | Sort-Object RelativePath -Unique)
+    }
+}
+
+function Read-OrchestratorSharePointMirrorState {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ SchemaVersion = 1; UpdatedAtUtc = ''; Files = @() }
+    }
+    try {
+        $state = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+        if (-not $state.PSObject.Properties['Files']) { throw 'Files is missing.' }
+        return $state
+    }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint mirror state is invalid; a full safe upload will be attempted without remote deletion: {0}" -f $_.Exception.Message) -Level WARN
+        return [pscustomobject]@{ SchemaVersion = 1; UpdatedAtUtc = ''; Files = @() }
+    }
+}
+
+function Save-OrchestratorSharePointMirrorState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][object[]]$Files
+    )
+
+    $document = [pscustomobject][ordered]@{
+        SchemaVersion = 1
+        UpdatedAtUtc = [datetime]::UtcNow.ToString('o')
+        Files = @($Files | Sort-Object RelativePath)
+    }
+    Write-FileAtomically -Path $Path -Content (($document | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
+}
+
+function Enter-OrchestratorSharePointMirrorLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$StaleMinutes = 120
+    )
+
+    for ($attempt = 0; $attempt -lt 2; $attempt++) {
+        try {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $metadata = [Text.UTF8Encoding]::new($false).GetBytes((([pscustomobject][ordered]@{
+                Server = $env:COMPUTERNAME
+                ProcessId = $PID
+                CreatedAtUtc = [datetime]::UtcNow.ToString('o')
+            } | ConvertTo-Json -Compress) + [Environment]::NewLine))
+            $stream.Write($metadata, 0, $metadata.Length)
+            $stream.Flush()
+            return $stream
+        }
+        catch [IO.IOException] {
+            if ($attempt -gt 0 -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+            $ageMinutes = ([datetime]::UtcNow - (Get-Item -LiteralPath $Path -Force -ErrorAction Stop).LastWriteTimeUtc).TotalMinutes
+            if ($ageMinutes -le [math]::Max(30, $StaleMinutes)) { return $null }
+            try {
+                Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+                Write-OrchestratorLog -Message ("Removed stale SharePoint mirror lock older than {0:N0} minute(s)." -f $ageMinutes) -Level WARN
+            }
+            catch { return $null }
+        }
+    }
+    return $null
+}
+
+function Exit-OrchestratorSharePointMirrorLock {
+    param(
+        [AllowNull()]$LockStream,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($null -ne $LockStream) { $LockStream.Dispose() }
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+}
+
+function Invoke-OrchestratorEnsureSharePointFolder {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+
+    $key = $RelativePath.ToLowerInvariant()
+    if ($script:SharePointEnsuredFolderState.ContainsKey($key)) { return $true }
+    try {
+        $created = Ensure-SmartM365SharePointFolder -SharePointRelativeFolderPath $RelativePath -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
+        if ($created) {
+            $script:SharePointEnsuredFolderState[$key] = $true
+            return $true
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint mirror folder creation failed for {0}: {1}" -f $RelativePath, $_.Exception.Message) -Level ERROR
+    }
+    return $false
+}
+
+function Invoke-OrchestratorSharePointDelete {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalFilePath,
+        [Parameter(Mandatory = $true)][string]$Reason
+    )
+
+    try {
+        $removed = Remove-SmartM365SharePointFile -LocalFilePath $LocalFilePath -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
+        if ($removed) {
+            Write-OrchestratorLog -Message ("SharePoint removal OK ({0}): {1}" -f $Reason, $LocalFilePath)
+            return $true
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint removal failed for {0}: {1}" -f $Reason, $_.Exception.Message) -Level ERROR
+    }
+    return $false
+}
+
+function Invoke-OrchestratorSharePointMirror {
+    param([switch]$Force)
+
+    if (-not (Test-OrchestratorSharePointUploadConfigured)) { return }
+    $staleMinutes = [math]::Max(30, [int]$script:Settings.OrchestratorSharePointUploadIntervalMinutes * 2)
+    $mirrorLock = Enter-OrchestratorSharePointMirrorLock -Path $script:Settings.SharePointMirrorLockPath -StaleMinutes $staleMinutes
+    if ($null -eq $mirrorLock) { return }
+
+    try {
+        $snapshot = Get-OrchestratorSharePointMirrorSnapshot -SharedDataFolderPath $script:Settings.SharedDataFolderPath
+        $previousState = Read-OrchestratorSharePointMirrorState -Path $script:Settings.SharePointMirrorStatePath
+        $previousByPath = @{}
+        foreach ($entry in @($previousState.Files)) {
+            if ($null -ne $entry -and -not [string]::IsNullOrWhiteSpace([string]$entry.RelativePath)) {
+                $previousByPath[[string]$entry.RelativePath] = $entry
+            }
+        }
+
+        $currentByPath = @{}
+        foreach ($entry in @($snapshot.Files)) { $currentByPath[[string]$entry.RelativePath] = $entry }
+        $nextByPath = @{}
+        $folderFailures = 0
+        $uploaded = 0
+        $unchanged = 0
+        $deleted = 0
+        $failed = 0
+
+        foreach ($folder in @($snapshot.Folders)) {
+            if (-not (Invoke-OrchestratorEnsureSharePointFolder -RelativePath ([string]$folder.RelativePath))) { $folderFailures++ }
+        }
+
+        foreach ($entry in @($snapshot.Files)) {
+            $relativePath = [string]$entry.RelativePath
+            $previous = if ($previousByPath.ContainsKey($relativePath)) { $previousByPath[$relativePath] } else { $null }
+            if (-not $Force -and $null -ne $previous -and [string]$previous.Signature -ceq [string]$entry.Signature) {
+                $nextByPath[$relativePath] = $entry
+                $unchanged++
+                continue
+            }
+
+            if (Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$entry.LocalFilePath) -Reason 'operational folder mirror' -Force:$Force) {
+                $nextByPath[$relativePath] = $entry
+                $uploaded++
+            }
+            else {
+                if ($null -ne $previous) { $nextByPath[$relativePath] = $previous }
+                $failed++
+            }
+        }
+
+        foreach ($relativePath in @($previousByPath.Keys)) {
+            if ($currentByPath.ContainsKey($relativePath)) { continue }
+            $previous = $previousByPath[$relativePath]
+            if ($relativePath -like 'DATA-ALL/Orchestrator/Election/Concurrency/*') {
+                if (Invoke-OrchestratorSharePointDelete -LocalFilePath ([string]$previous.LocalFilePath) -Reason 'expired concurrency lease') {
+                    $deleted++
+                }
+                else {
+                    $nextByPath[$relativePath] = $previous
+                    $failed++
+                }
+            }
+            else {
+                $nextByPath[$relativePath] = $previous
+            }
+        }
+
+        Save-OrchestratorSharePointMirrorState -Path $script:Settings.SharePointMirrorStatePath -Files @($nextByPath.Values)
+        $level = if ($failed -gt 0 -or $folderFailures -gt 0) { 'ERROR' } else { 'INFO' }
+        Write-OrchestratorLog -Message ("SharePoint operational mirror complete: folders={0}; files={1}; uploaded={2}; unchanged={3}; expiredLeasesDeleted={4}; folderFailures={5}; fileFailures={6}." -f @($snapshot.Folders).Count, @($snapshot.Files).Count, $uploaded, $unchanged, $deleted, $folderFailures, $failed) -Level $level
+    }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint operational mirror failed safely; no remote cleanup was inferred from the incomplete scan: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+    finally {
+        Exit-OrchestratorSharePointMirrorLock -LockStream $mirrorLock -Path $script:Settings.SharePointMirrorLockPath
     }
 }
 
@@ -454,6 +708,8 @@ function Invoke-OrchestratorPeriodicSharePointUpload {
             Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$file) -Reason 'mail HTML copy' -Force:$Force | Out-Null
         }
     }
+
+    Invoke-OrchestratorSharePointMirror -Force:$Force
 }
 
 function Write-DependencyWaitLog {
@@ -4944,6 +5200,7 @@ $script:Manifest = $null
 $script:State = $null
 $script:DependencyWaitLogState = @{}
 $script:SharePointUploadedFileState = @{}
+$script:SharePointEnsuredFolderState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
@@ -4967,7 +5224,7 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.55' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -5124,6 +5381,8 @@ try {
         ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
         ConcurrencyLeasesPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Concurrency')
         PipelineRunsFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'PipelineRuns')
+        SharePointMirrorStatePath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator-SharePointMirrorState.json')
+        SharePointMirrorLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator-SharePointMirror.lock')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
         ElectionPlanLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.lock')
         ElectionRebalanceRequestPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-RebalanceRequest.json')
@@ -5492,8 +5751,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBST3X0zzxupaUX
-# re0mCvK2T/0vgsfwV3fgGm7BfBxbgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdZ3Kav4WZZwQ3
+# jAnL4//rjmCggM+n3GYr0PvEE7DO/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5626,31 +5885,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICuib/j46IEBNAXcDbFpH5Y70JfjsiCSn2bfTNk3ZixqMA0GCSqG
-# SIb3DQEBAQUABIIBgGYSIYxjnq3b6JOmqwBHTbognGG3HmdIOczjLAp/22QD5btt
-# Skp3fntIF7iywJG0KV23MuTMN7MiUDDnmQwpT/p/CJYNPa6mK5p/DjDvOrWQ4mT8
-# e+Gu1iy0AXcjIxxPbH7Joi6WJTx6utnsJiMjD90Q9ZFBaErXvV3YNijmbvGgq4i7
-# PVugisPcOqG2I0D7dWlSJsGD7UBXc/D05nYQuJ77Oc6hFZceUzvy5Wj5xknL2aKb
-# /TTKwyCVrKUG8Yguc5G1Bi3QiZExpBPCQ6NCd7CLhkfLX+a0fNK1J5tFmaZOGh4c
-# mZA0sVXrlZlcvuvCi1TtSFH1edhX7q6D41X77GO6apNpxpx7YU5Odzio91BfegV4
-# ytyO730wz8zJewfUuMKbpcbdqRx54BPeG7IP9CQZ2j3F/U3pnQlA157Zmr0Ti9Ec
-# Q6nJgA2HuSU1vrFHXrJbvYWWmld+iofZnwAyET87+sYwRhwEiTLbD8Fvm/thWNyJ
-# l/64M8TtQF863UcMWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJlXqTeXM/I7ZB+GVnO+2ML2bqhK8DBXvNaXJGLx4GIcMA0GCSqG
+# SIb3DQEBAQUABIIBgGb0zkX/J4tyg4g9dOx2hBYj65bl9tP8YahTkt/qGXoTBMsQ
+# 4K3e0ZIvxRckTAFyUMqBQkAmNJnwXnvlRsq2hOHNiTNi678bbDUbCVLvAFL4BkwW
+# 25DtZvZmLCityHVfTiHXQRtPTOAkA7yORuQijU2KO6pHloXcdu2KYuZTczZDLuu1
+# 86qazsLel328SSvfYQcn++azuTtUlx7nz+TJ6sQ9H8Pt/XQa02M9K6HoppcvarwI
+# YRoLHSwvmu0yLjJiOjjXIK9J2a0DP7Q2bn4KXzhVDrSIKwWAxx82KxbITm4HMmTw
+# suiHSxRVvTmuhrjP+jQCY619kQ55g9K9GntcMFSKRqADkuP/hQUVKFnSx7hK98pD
+# 1yy3x0G9A7sjd0er21STmiumGggWEcSyPLn1AnOaBJF39dKNNU8CEjGft1BTkwRl
+# ztRKpqRb+ZTYcJRuoYVz1TjWM7Ox0fJ098pW4nZYGXbRcaP3rmcpGKYuR+ZaR94g
+# ijq87Zjh7CqR7MJtYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCByOzHcRAJPqOwsYZpel08rWWoZEsndePvAFTwS
-# so4+6TANBgkqhkiG9w0BAQEFAASCAgA8DM5+YIoo/CORquHRsci6eZCm3dT6cTov
-# 1pBpsVd3yrGWvOdEAAISK0blZ1O6DNVQS0QAc1JeJKh5VF3ndw7GFTAc94LAadce
-# wdQmTXruH6FhAVrRYZqXeLZqO6TDxFDTkaoC2N8YnkpVx2dguFBnSz7dfB3hyeqx
-# JhGxPCAhnyLvjnvrQj8x3+8Sl5X5JvN+z4j89AEferQiERozQywQ/O4um0FMjAIg
-# lTClnEjzvlHif+r6z5gKuHxJQV26zcfXGz9IYludQWKovKe0Jlp+MpivmSP40rOU
-# Dn4lCl3UAdOPBq8xsnRQGNkIHPn4BSYbAri4WSJSaOe8hvvQLy2qKzKvUNMVoH6f
-# ul8vH7LmnjdWJ/nD2IQBxudMeL8txeQn+P/hlp336OYtrki/Ptk8e6Zhq1RP4t24
-# Exn7d8m/UAV/t0IklssLLVx4f12SinqMjl5RIik/9uPuck+TDfhpjnoxv3Djz/KZ
-# qXSGWE9nN01ieRWLof2EVwtumaefOELbvHtaaisrI/xFa0Ok118Nb68xyH/C/wUq
-# lejW+WT8lQNFz8JB1eNGXt3rvYhZzs9QJooMogiP71s/54t+LvHvK7t+lw2tWXPX
-# axj59U2LmQqAWrBnYPjIwF3Pft5RG5iQnJLFwMudRNaUPWj2gsgioOcjlWvd2stJ
-# +whlKx0T2w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTQ5
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBtqNOFtdGci9vaWt2G/tEumLvZHJn9YwfGYomV
+# Xvdh1zANBgkqhkiG9w0BAQEFAASCAgCnIefql8hp1i7musEAympYnNSid5WkSY9q
+# 17mVsTHudgBwxyb9hhX7JKQolKBEXGpyVDDiTeVOrrwn3aP4z7Vby/ZWJt6PvOwp
+# I9Ei8ydighRFdxpvPcQvzQLTGBda2sC4rll+SrkmxEI28hd0iBzrYR3wC4hRh3hg
+# KmCSNj2O2XtT4F+vP6JG3Mx9ObCVfc7x+62Iiif1qvuLjPLlK4O8riqpPoiCnJy6
+# lIzAPx/kTGkaF5kgV+N9QD+0eMGSUhbRnpYKPdoXadiBK9acOo4+QwlyL0IoEdUP
+# Kbpj33oBfIXxLJEEBPfo4q+G3XrN8bFajjkGXIBGQTEwVJlfoAeFscwgO+SsZ7NV
+# pJq+TQE4vselSR41sppJFYAuo33I9fzKxkao4uKikcsXYAjVvjrbegKV1sh0jey2
+# 3dDcvje8aFLAGPGMnGuoB+BepoOBPoUo21+UI8mJCQikgTIWXEsdeoU8Q6PSKdz1
+# 8IH/2xIIB8aRGCHcnWq5pHDo/jinWhzRg7S2/+Lp3H5aNvOSh03sNiB7exz9aFzE
+# 9XWCz7ZSe8gBcOGFbgN/7h2OrXI0DAxU1m2AzLaYWxAz8vH1/jSNqO/rTsBQRtUs
+# 8zE8rQAk0DbYcrhTYjlU1vIsvBBcWnn9DbmbqIwZOcQfL1YeKIoz7SQN/IAZlQnM
+# MTLoLNVPkw==
 # SIG # End signature block

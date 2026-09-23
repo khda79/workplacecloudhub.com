@@ -4151,6 +4151,105 @@ function Get-SmartM365SharePointRelativeFilePath {
     return [System.IO.Path]::GetFileName($LocalFilePath)
 }
 
+function Ensure-SmartM365SharePointDriveFolderPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DriveId,
+        [Parameter(Mandatory)][string]$FolderPath
+    )
+
+    $segments = @($FolderPath -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($segments.Count -eq 0) { return $true }
+    if ($null -eq $script:SmartM365SharePointFolderPathCache) { $script:SmartM365SharePointFolderPathCache = @{} }
+
+    $parentPath = ''
+    foreach ($segment in $segments) {
+        $currentPath = if ([string]::IsNullOrWhiteSpace($parentPath)) { [string]$segment } else { $parentPath + '/' + [string]$segment }
+        $cacheKey = ('{0}|{1}' -f $DriveId, $currentPath).ToLowerInvariant()
+        if ($script:SmartM365SharePointFolderPathCache.ContainsKey($cacheKey)) {
+            $parentPath = $currentPath
+            continue
+        }
+
+        $childrenUri = if ([string]::IsNullOrWhiteSpace($parentPath)) {
+            'https://graph.microsoft.com/v1.0/drives/{0}/root/children' -f $DriveId
+        }
+        else {
+            'https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/children' -f $DriveId, (ConvertTo-GraphDrivePath $parentPath)
+        }
+        $body = [ordered]@{
+            name = [string]$segment
+            folder = [ordered]@{}
+            '@microsoft.graph.conflictBehavior' = 'fail'
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        try {
+            Invoke-SmartM365GraphRestWithRetry -Method POST -Uri $childrenUri -Body $body -ContentType 'application/json' -Operation 'Ensure SharePoint folder' | Out-Null
+        }
+        catch {
+            $detail = [string]$_.Exception.Message
+            if ($detail -notmatch '(?i)Status=409|nameAlreadyExists|already exists') { throw }
+        }
+
+        $script:SmartM365SharePointFolderPathCache[$cacheKey] = $true
+        $parentPath = $currentPath
+    }
+
+    return $true
+}
+
+function Ensure-SmartM365SharePointFolder {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharePointRelativeFolderPath,
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    if (-not $Enabled) { return $false }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
+        WriteLog -Message 'SharePoint folder creation skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing.' -Level 'WARNING'
+        return $false
+    }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) { return $false }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site for folder creation'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries for folder creation'
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) { throw "Document library '$LibraryDisplayName' not found." }
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $folderPath = (($targetRootPath.TrimEnd('/')) + '/' + (($SharePointRelativeFolderPath -replace '\\', '/').Trim('/')))
+        return [bool](Ensure-SmartM365SharePointDriveFolderPath -DriveId $driveId -FolderPath $folderPath)
+    }
+    catch {
+        WriteLog -Message ("SharePoint folder creation failed but script continues: {0}" -f $_.Exception.Message) -Level 'WARNING'
+        return $false
+    }
+}
+
 function Add-SmartM365SharePointUploadRecord {
     [CmdletBinding()]
     param(
@@ -4190,7 +4289,8 @@ function Invoke-SmartM365SharePointCsvUpload {
         [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
         [string]$AppId = $global:AppId,
         [string]$TenantId = $global:TenantId,
-        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }),
+        [switch]$EnsureParentFolders
     )
 
     if (-not $Enabled) { return }
@@ -4237,6 +4337,13 @@ function Invoke-SmartM365SharePointCsvUpload {
         $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $fileInfo.FullName
         $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
         $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        if ($EnsureParentFolders) {
+            $pathSegments = @($sharePointPath -split '/' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if ($pathSegments.Count -gt 1) {
+                $parentFolderPath = ($pathSegments[0..($pathSegments.Count - 2)] -join '/')
+                Ensure-SmartM365SharePointDriveFolderPath -DriveId $driveId -FolderPath $parentFolderPath | Out-Null
+            }
+        }
         $largeUploadThresholdBytes = 250MB
         $uploadedItem = $null
 
@@ -5563,7 +5670,7 @@ Export-ModuleMember -Function `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
-    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
+    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Ensure-SmartM365SharePointFolder, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
@@ -5571,8 +5678,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWRjW1dgiJ0b8/
-# dBUn4a0sG0u92xpMrEYyfQyL1kKm36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9Eh2Ao3tr8GuN
+# qMNW7YlB9+kQOHVSL2azFTjnOHULX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5705,31 +5812,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMLU0p4Fsr5HS7LsJToMs1zvc9xtifRHVtAVzNxEm5FXMA0GCSqG
-# SIb3DQEBAQUABIIBgCdwPTUE+NCe5G/v/npkApV79itEp34fWCVhaDSm6mcoP9w5
-# FZVIQ37/L4K4me5XMJqpZz95dHol7V12mhOEfvXaFFfyPhLtfhHrAu+KYfqNj1hx
-# Mr8WJive+WB1GtH/aNhJ3Vil9ZN2D0ffS43r/hx8Kv9OTPOHXYpKl0wLUa0Nea7X
-# UsvcDU0gWNcoDZi5gh2owYP+nd7lgpTjKP5uHTzCX9/CxKa/W25uPnKZqN5wfiU4
-# i+59qEYYaAAjsou3c+BXRcVb16/5Aolm32PMfYW6/I9pL4d14hxlsl1Xg1qvSuxd
-# uxKigzds92o+/POKWO+5GoMsvWpE7Lfawzy8tKFe8WZO/GAnetr52jmchi2eb+iu
-# tzpXE97o+NMviPQlf9Q86WG5n3xBSK8RvYF38OUJ82GNYEb1WrXuA+4kEPiDOhf6
-# dQ/2f20tT51htyhVDjukgYCXg59GqPMfJdvTGWxkkyjKl/9LR/dBviubd3XmhcyG
-# tv7VBIpyoHH+I2vYAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGCDjy4Do8DkvHtzyB3A2pAIU6L0cTRX4tFvs0dgBdo8MA0GCSqG
+# SIb3DQEBAQUABIIBgEUtt2Kg8EnYXmyjfPF6T9OMb8nyBqJxgYvcLDTDUadSOnSE
+# 2tCLjx9mW6pd4od+eFEIytLW1fldWN6mSxoGccK503SwMnfaSjBlhnW4CZvkUvgG
+# CpodSnK27dMSsAIcqNQ0sg5KK9CsSDN8jVang6bbj5got7GDBjLMOemCDjL6+UI/
+# 4A+L9CN7J/huNlEIbMB3WPoAPwDnVkafeJ+bsCk5LiUtQHfQdiBg2kjFOWZ7lU9n
+# bIwa9Mu62+YLWlJPTNvgUSAJ5yzPiTQJaUUtn7rS+2iPwG0ALag3j0kks3a74aYu
+# /98HVmjIjLb43H3E+BCZiWWMQXTk1kOaGNEF72uEQPEXHHMgHU6cIKfHUbvlcmmn
+# 4Q11LfcrYuAyUKCSksmhac+2ZbR/6eObV8Hsn2i1DwU1WZ07ref81ba2+QPzFLx3
+# O6afWo3msMqbX2/w+jGWCRYEDm4QygOgzLplTeSDY3y2wKkW91XtZloSIKVc/7tc
+# /DVfbreJR49TNiEzaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAz
-# NDBaMC8GCSqGSIb3DQEJBDEiBCDopgiJNeyhkvmqN0CuERgdieojT1/cMF+ySFqI
-# 0zD5rzANBgkqhkiG9w0BAQEFAASCAgCVezoE2H7V5gBqMYiGeRA/5v/jDoJ67Gu5
-# lNEY5JygMhZ86KhkhH3YhbnO4zKQT6feLEEo8tgSv0uKpIEyuTz9unbaDVqC5evQ
-# gNm4gOZqPMTk4G2WdSm1/9OWCCfbAUHcYh5jAqWx9yqeEdbfPJ1Lccrlwg4aPHhc
-# pVMsBLmC2Rn2wggSvclUyWyypRAlSnjAAPDny11SnPqv4fUn1l5PcVHWssSh8AWz
-# 2grpuTwiYEohiS6R/0Y5NQGuqvK6LuC3Hg3RrVDW9Wzo4FOeSrWC+OvfcLS7XnOM
-# p+wgnwmKJ74iYxZjmPdjoeLWKxHwm8vzlhVEu+/+Ebn6D0ikcf9dEHjsPPWs3xrj
-# RCPBOsWT7EYhqTjGiR0wMKAQa8mcmMw167fs6WPaoN4wkWxLDi27cm0B+98FTnAd
-# AQnLXEbq0XiWUlXj2omSTxo6ntASktWFLuyW8r/1VKgEItCbQL0mRYVN+Zcvi4a5
-# CnZpJhRxEsCzi1enwIlhefMf7vUViHqjolEDdhv+jrr2B/H4cUibGwxBjR7iN/26
-# gf4MV3St+2qD8FGEb9Pw15PXphmCts9+XuGa6IqQY52GtVnKrdF9hFUwW/jps7FY
-# aOdI3T314JttI191Tfmhovotad68ujcy/GkpMDlGsHz1ZvAcUjNEZRvlysbzDQEA
-# xnB06Mq4FA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTQ3
+# NDVaMC8GCSqGSIb3DQEJBDEiBCB1+AnGBRZOHO2Jhv15bkOGbtVSKxFP8sCrRHof
+# yO8NyTANBgkqhkiG9w0BAQEFAASCAgCFOi7qsP0fRf197xovU/VF3QNhAeAQGcxR
+# 2IJ7EzFuCGehDoTFfauRYQyICaymZvytjZyXwh7qV5sSUExT/nKQL54VtixBDm4P
+# QUeZ+zOOpVEe7dAoDqcglBMAxarhWfvrwxj64gCEFI65yKZn/z+r51yTmgoMEwfa
+# 1XYT2uxjG53O4UzRftrlWasLWjKR0HWNm17mW6T/6pNAA/og+2aVrlLU6X5pFPRX
+# eEaGg9bVo4GSKOJUTiYLe3a3mm0da3y1UHhNlRbDeE4SwRfjsAmIFpjhnQAopPsC
+# wcAMMbQ1Hu8D1aGlT3+mKz204HwqaKgt9GxvR+S/MwhCjgX3qe1IAjtwH9kMopuj
+# xH64600Bq9Cs1H0AWxtf7XgFsAJKEaFqmQTVne7SZ+iUXO1BhPCbtRrnGBf+iA12
+# XOlslgl251eioIhXSID+s9tn6esOtsqoR6AhrggoPy5zGDLO08wsPr6J8gdJC7pk
+# EpQQvoU2dGUBpnG+XOEvrOye9cxQffkm0y1brsdRnIZxV+Q39NZDcVshYXQkiwta
+# BPZm/YuDenCXyiuq23uCzB2pq+CR3jIHUt/uKP3CZQuHsCEe0TkAxlPgz0mREix4
+# VKO/i166c4VSmR4CFLbIYaNJKwPNze0f623asvjWM5/ow+55WMYPiSu2UL/3KenU
+# Twczd3qywg==
 # SIG # End signature block
