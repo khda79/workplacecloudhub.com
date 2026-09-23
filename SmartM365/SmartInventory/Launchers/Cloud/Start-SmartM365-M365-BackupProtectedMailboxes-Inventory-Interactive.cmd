@@ -21,6 +21,6 @@ if not defined PWSH (
     pause
     exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1" -Tenant prod
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1" -Tenant prod -InteractiveAuth
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%
