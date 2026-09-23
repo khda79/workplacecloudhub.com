@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.40
+  1.41
 .VERSION
-1.40
+1.41
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -58,6 +58,7 @@ param(
     [bool]$EnableSummaryEmail = $true,
     [bool]$EnableErrorEmail = $true,
     [int]$RiskTopN = 10,
+    [ValidateRange(1,3650)][int]$DetailedArchiveRetentionDays = 7,
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -93,7 +94,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.40"
+$ScriptVersion = "1.41"
 
 # ==========================================================
 # App-only authentication parameters
@@ -260,8 +261,10 @@ function Get-ScriptLocalConfigValue {
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
 
-$global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+if (-not $PSBoundParameters.ContainsKey('DetailedArchiveRetentionDays')) {
+    $DetailedArchiveRetentionDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DetailedArchiveRetentionDays' -DefaultValue 7)
+}
 
 $global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
 $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
@@ -476,6 +479,43 @@ function Prune-Files {
         catch {
             Write-Log "Failed to prune file: $($f.FullName). Error: $($_.Exception.Message)" "WARN" "PRUNE"
         }
+    }
+}
+
+function Remove-DetailedArchiveFilesOlderThan {
+    param(
+        [Parameter(Mandatory=$true)][string]$Folder,
+        [Parameter(Mandatory=$true)][string]$BaseNameWithoutExt,
+        [ValidateRange(1,3650)][int]$RetentionDays = 7,
+        [datetime]$ReferenceTime = (Get-Date)
+    )
+
+    if (-not (Test-Path -LiteralPath $Folder -PathType Container)) { return }
+    $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+    $namePattern = '^' + [regex]::Escape($BaseNameWithoutExt) + '_(?<stamp>\d{8}[-_]\d{6})\.csv$'
+    $removedCount = 0
+    $removedBytes = [int64]0
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $Folder -File -ErrorAction SilentlyContinue)) {
+        if ($file.Name -notmatch $namePattern) { continue }
+        $stampText = $Matches['stamp']
+        $stamp = [datetime]::MinValue
+        $format = if ($stampText.Contains('-')) { 'yyyyMMdd-HHmmss' } else { 'yyyyMMdd_HHmmss' }
+        if (-not [datetime]::TryParseExact($stampText, $format, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeLocal, [ref]$stamp)) { continue }
+        if ($stamp -ge $cutoff) { continue }
+
+        try {
+            $removedBytes += $file.Length
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            $removedCount++
+        }
+        catch {
+            Write-Log "Detailed archive retention could not remove '$($file.FullName)': $($_.Exception.Message)" "WARN" "PRUNE"
+        }
+    }
+
+    if ($removedCount -gt 0) {
+        Write-Log "Detailed archive retention removed $removedCount file(s), $removedBytes byte(s), older than $($cutoff.ToString('o')) from $Folder." "INFO" "PRUNE"
     }
 }
 
@@ -1010,7 +1050,7 @@ function Write-ArchiveCopyAndPrune {
         [Parameter(Mandatory=$true)][string]$ArchiveFolder,
         [Parameter(Mandatory=$true)][string]$BaseNameWithoutExt,
         [Parameter(Mandatory=$true)][string]$RunStamp,
-        [Parameter(Mandatory=$true)][int]$Keep
+        [ValidateRange(1,3650)][int]$RetentionDays = 7
     )
 
     Ensure-Directory -Path $ArchiveFolder
@@ -1018,7 +1058,7 @@ function Write-ArchiveCopyAndPrune {
     $archiveTemp  = Join-Path $ArchiveFolder ("{0}_{1}.csv.tmp" -f $BaseNameWithoutExt, $RunStamp)
     Copy-FileAtomic -SourcePath $SourceCsv -DestinationFinal $archiveFinal -DestinationTemp $archiveTemp
     Write-Log "Archive CSV created: $archiveFinal" "INFO" "DATA"
-    Prune-Files -Folder $ArchiveFolder -Filter ("{0}_*.csv" -f $BaseNameWithoutExt) -Keep $Keep
+    Remove-DetailedArchiveFilesOlderThan -Folder $ArchiveFolder -BaseNameWithoutExt $BaseNameWithoutExt -RetentionDays $RetentionDays
 }
 
 # ==========================================================
@@ -2064,7 +2104,7 @@ try {
         Write-Log "DATA-LAST updated: $CsvLastFinal" "INFO" "DATA"
 
         $archiveBase = [System.IO.Path]::GetFileNameWithoutExtension($CsvName)
-        Write-ArchiveCopyAndPrune -SourceCsv $CsvFinal -ArchiveFolder $ArchivePath -BaseNameWithoutExt $archiveBase -RunStamp $RunStamp -Keep $global:RetentionMaxCSV
+        Write-ArchiveCopyAndPrune -SourceCsv $CsvFinal -ArchiveFolder $ArchivePath -BaseNameWithoutExt $archiveBase -RunStamp $RunStamp -RetentionDays $DetailedArchiveRetentionDays
 
         # ----------------------------------------------------------
         # SharePoint upload (non-blocking, latest CSV)
@@ -2417,8 +2457,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBghfOLYotBGKiX
-# Y7pnqcIl7kMlhmN2FPLIUu+JM8he/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfGVwt1vGcn+qq
+# MRHgYycatbmbddgV69M/L9trYWVkuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2551,31 +2591,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM0PrUIYN3j1ljiJ25/+xKVuOmnlfZr8Cz5LfCDSAIoKMA0GCSqG
-# SIb3DQEBAQUABIIBgKmbqwDFgyQjWhsxBG4Uu0C/VICIHDCjJV8dJHGEMPaiJMsD
-# XzuLTysKLccU1xRDCI28Rxh+h8HUXbZHdt9zcIEenBnjo430CoVJSdPh/27cqlyq
-# NHS3e9adZA+qRa4LPB/T7dHSaJD7kE/Jwl5aIEsOu4pRCVgKR2FOyQjD4HskpdIP
-# E1hwPtYKpd8364ZZDN/BcYMv38Tn9ZP9Z92+es3bOd8YpryYm4GlA1+M3Yyl56JV
-# 0iGnwoPXCjwCLGETxCCqKV9Q3xNiuwFsuBWPYPyKh0sVurQEzNCtiLNiwUZjAcC4
-# LwfJq0Zt6Rc/+1ZkoguzPbwUGxCYaUvPA9qrJ4K2Ljlcl5TNacw/Fs58t4X474mp
-# 5hvNTlCg5vCBRNd9QzfwhHlYF3ZdmYMEZTpIgXmRbrJl19FucIbxH/4TEHy+Pdat
-# 2qkmi/DMbvekUjfk8AdRCJSWP0kHvsAp+/A9se04hhPYAyfvM4WlaaZRHZ4YvB+z
-# HnS3Csxsaq58ScTvTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIVYGi1dY3wgIPDC3u+u4mso9BeP7/lG4Xx8+6ChyUtlMA0GCSqG
+# SIb3DQEBAQUABIIBgCaHkrwjW54ABaVewKmaoi6AhIRq5HBdy3WkVNdT12fzNKN3
+# 1LHbjQx57ubpFKOUz3i6dcjSoGEBp7YC8DSr7un4gCfg+rHydV2TDMm/b0Wh72th
+# WqrREUNE3dcUfFGDvM8aas/Fn1iv/WjtzKlWFj+HiVlkhqazml63WX+RiDAa5PYF
+# YBonPb8ziViWH1Bv3xVX+y23okfszmvL37F5lkORk1DjYiHrIBacBQXCwxT9eir9
+# h1T3eKAZEHidEXIcQPqVrJZm8ijBew1pnmUvJGizGv6LV0lG5ltOvbNfNcf7oSi/
+# mj5ZcPml6BPNs7R9VqM5Zy5BJRFR3Et8fkO8MhRbus7/psV0uUcW3w7QYljVMCo0
+# QcEE7f2T6a9TfYAGq6W3zDfxzjLCA83UGo1JeOvITpTTjXA7hynFc4ro419pygQv
+# ll/lbVB4fbYJy9TrDrl6Z3zgMNKhswUJNk0TzYF8Kfk0CbRNSIPt7P/S6+y59+8o
+# FqgfpE3Fm5mcZYQlDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxOTI3
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCF8gu94rev2QCn6Kn9ltbdIjdKAk08/KUNYc0P
-# pVuOJTANBgkqhkiG9w0BAQEFAASCAgA8JWzpgk8339b++N2BkZBY+vlZp+eHun3y
-# nA5dMSHGrkH+bpRANdssrcoMbxq1sfcmGFaEFwX7+LYsqWtShhahn3l8cMBlXh0P
-# c3koI+nYYgTXh810uW6UxnituiPrb6SuvvJLZds7cK54znOVi2/HOsDPo9CZazoz
-# sDzzJC10Q1ffwK8yEMvh2/NH7j7CnVP5ESFiolMUnmiVd/rftT0heFjed+S7AkpU
-# /aSSkjLz8Hd76W0sH2OAnJqfXANTM9fFb0ktNL5SYX32HF7uuf8UXuzR/LhDilca
-# tJNzFPNe3fj3fUC3nbOcZKH8KT30O5lNUqpldvTMi5JNbCLnZw2fNUCAPQBvf2Hj
-# Us2IZfGR1KoxAw4ngduk+lg9PKC7pxlfZwaKIFjyqh0XUWfVLy2gDdn76f2nNMQP
-# WnRrAZEqDhlBGaCWyJbt1wzN8waP0Z91bKpAitf3XE/Tf0zWa26zycfxNikEMoGF
-# Ez38juuxIMagYFbtvq6Bg05SUjCR/tBF54WdhtNbp7uoq1AoYiGB7nZtxeOsTJkS
-# hlatgGdJmsdzWqFqqN276OL5mLN8pW1IjkfA28/cduKysMTtzmPGShdfphKlzfTb
-# fHdlNh6mK5LNGLQwjK9p/L/WtpOHmEMDH44zQwtIHEkOm3kH6yLPTqbXsK/eYsvQ
-# tugQAjxZhw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMyMTM0
+# MjlaMC8GCSqGSIb3DQEJBDEiBCAmA70p4EyGBHKhqqCmk9OrI2gHVu+LxymdM3CK
+# ZD5LPDANBgkqhkiG9w0BAQEFAASCAgAlqUYJTXJp1rmfzzl8vqjFy5/vUbcpBE/5
+# ItSKaswjorL8qMAKpv5IqEWovT6D28TZPyfnJ0kFxJ4rxhzSFY2U+SWkmtOUVzMU
+# AUxbEVobR1vCit88aMQyg3vejRjldaIdOpYVAcP6NBK1qPvrEGdXvskPKclwGFTc
+# Q3Wfo4Mwv9ih0l/T2xb1GhuJHWv+Fx6ZEepsvKh/uCJuKmJ6fkLqEfcidvfSsK29
+# Z0zyJbpM1Fo/Tl8kBV3rjB2fs1JLRs8Uety4V8tRYYs9R+wGFpY/IzUg2lH3Mixs
+# k9ze46aiRAnw7pPgNzDGAPIZJIysERoRCpbcWv2yUPnfiHeGxc9vEr2uk0K06zXy
+# UyF2QKZ+tzCFzGHaApmfeWwlA/5UbkyKI+gIc7LFyv3dM+LDWW8/K2UtmtTDUsQi
+# SKFP6d+1ZBchvoqwSImzhWJmF8+YTgh2SSzesmzLiuU1xi3U0z8GhAbnnyqFX0f+
+# gcX25uQUAh6UHo80xUOCFmAuUSAbKeDOxeQHYH6lpLwCr0CYkPXNs4m5zSmeg3Dl
+# AQPjPCbsJVvTP3SBP7dSXSHQUFyFLzGuuHgULAekqrBTczGw+7nJuPpdZ2U+l29v
+# Wi9Y9IZbjuVMddVxlPRBcirUbkSp1Aa72vIkX+HOdeG0et8eZF+tyY9rfPZFxipA
+# 4WMlPyg/wQ==
 # SIG # End signature block

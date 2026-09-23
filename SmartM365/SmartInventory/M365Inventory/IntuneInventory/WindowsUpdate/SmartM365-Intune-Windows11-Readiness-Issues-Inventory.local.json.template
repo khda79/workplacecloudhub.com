@@ -8,7 +8,7 @@
   "OrgDomain": "__USE_GLOBAL__",
   "Thumb": "__USE_GLOBAL__",
   "Thumbprint": "__USE_GLOBAL__",
-  "RetentionMaxCSV": "__USE_GLOBAL__",
+  "DetailedArchiveRetentionDays": 7,
   "RetentionMaxLogs": "__USE_GLOBAL__",
   "ErrorMailTo": "__USE_GLOBAL__",
   "To": "__USE_GLOBAL__",
