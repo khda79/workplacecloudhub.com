@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.21
+1.22
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -23,6 +23,8 @@ param(
   [string]$OutputFolder='',
   [string]$LatestFolder='',
   [switch]$DisableSharePointUpload,
+  [ValidateRange(1, 8760)]
+  [double]$InputCsvFreshnessWarningHours = 24,
   [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -42,7 +44,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.21"
+$ScriptVersion="1.22"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -70,12 +72,24 @@ function B($v){(K $v) -in @('true','1','yes','y','enabled','compliant')}
 function CB($c,$n,[bool]$d){$v=Cfg $c $n $d; if($v -is [bool]){return $v}; if($null -eq $v){return $d}; $s=K $v; if(!$s){return $d}; $s -in @('true','1','yes','y','enabled')}
 function Num($v){$s=(T $v)-replace ',','.'; $o=0.0; if([double]::TryParse($s,[Globalization.NumberStyles]::Any,[Globalization.CultureInfo]::InvariantCulture,[ref]$o)){$o}else{$null}}
 function Dt($v){$s=T $v; if(!$s){return $null}; foreach($c in @([Globalization.CultureInfo]::InvariantCulture,[Globalization.CultureInfo]::GetCultureInfo('fr-FR'),[Globalization.CultureInfo]::GetCultureInfo('en-US'))){$d=[datetime]::MinValue; if([datetime]::TryParse($s,$c,[Globalization.DateTimeStyles]::AssumeLocal,[ref]$d)){return $d}}; $null}
-function Csv($name,[switch]$Req){$p=Join-Path $DataLastFolder $name; if(!(Test-Path $p)){if($Req){throw "Required CSV not found: $p"}; Log "Optional CSV not found: $p"; return @()}; $r=@(Import-Csv $p); Log "Loaded $name : $($r.Count) row(s)"; $r}
+function WarnIfInputCsvStale([string]$Path){
+  $file=Get-Item -LiteralPath $Path
+  $lastWriteTimeUtc=$file.LastWriteTimeUtc
+  $ageHours=($RunStartedAt.ToUniversalTime()-$lastWriteTimeUtc).TotalHours
+  if($ageHours -gt $InputCsvFreshnessWarningHours){
+    Warn ([string]::Format(
+      [Globalization.CultureInfo]::InvariantCulture,
+      "Input CSV '{0}' is stale: age={1:F2} hour(s); LastWriteTimeUtc={2:o}; threshold={3:F2} hour(s). Processing continues.",
+      $file.Name,$ageHours,$lastWriteTimeUtc,$InputCsvFreshnessWarningHours
+    ))
+  }
+}
+function Csv($name,[switch]$Req){$p=Join-Path $DataLastFolder $name; if(!(Test-Path $p)){if($Req){throw "Required CSV not found: $p"}; Log "Optional CSV not found: $p"; return @()}; $r=@(Import-Csv $p); WarnIfInputCsvStale $p; Log "Loaded $name : $($r.Count) row(s)"; $r}
 
 function CsvAny([string[]]$Names,[switch]$Req){
   foreach($name in $Names){
     $path=Join-Path $DataLastFolder $name
-    if(Test-Path -LiteralPath $path){$rows=@(Import-Csv -LiteralPath $path); Log "Loaded $name : $($rows.Count) row(s)"; return $rows}
+    if(Test-Path -LiteralPath $path){$rows=@(Import-Csv -LiteralPath $path); WarnIfInputCsvStale $path; Log "Loaded $name : $($rows.Count) row(s)"; return $rows}
   }
   if($Req){throw "Required CSV not found. Checked: $($Names -join ', ') in $DataLastFolder"}
   Log "Optional CSV not found. Checked: $($Names -join ', ') in $DataLastFolder"
@@ -89,6 +103,7 @@ function CsvAnyProjected([string[]]$Names,[string[]]$Columns,[switch]$Req){
     $path=Join-Path $DataLastFolder $name
     if(Test-Path -LiteralPath $path){
       $rows=@(Import-Csv -LiteralPath $path | Select-Object -Property $uniqueColumns.ToArray())
+      WarnIfInputCsvStale $path
       Log "Loaded $name : $($rows.Count) row(s), projected to $($uniqueColumns.Count) column(s)"
       return $rows
     }
@@ -787,8 +802,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEhLRsi7DuzdNE
-# M2YQ8EYit4b0eXq3ph+TSy/TLJkkUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZfbFcszLDPZBc
+# LSeu2M/OiCv7DAj2U3RRIaxNXmDwUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -921,31 +936,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILcodd0If3m0oS7CAn8Pw3qp642yd+DZgFh6kD7NGk/SMA0GCSqG
-# SIb3DQEBAQUABIIBgDGmrRgy8c/sPCMcWbXwt3bz5M0i/pR232oL+sC2kgNZQ1GO
-# k2eqIkc70yKUUNB0k8EvJ0Ccc30Qs/KbOG9qUg2MA+8Q/jFRUI34Vtj9LkRcdbtM
-# E1/97bsJf6CI/c6nzhBkQB/6gktPKLE6Ppcou2G7+0kHh7mfHqTwXWZVsxCqRxxg
-# DW8JUhEjGnOHYJwENFuh1P8YKAvkR/+TfBmxKVxkzdOYejO9RgT9gq63Jj/7/P2V
-# 3Cxw/JlxDYu+c1m2CPhiz4xGEYmrrybHQTbH5NUflNkw2tqJ3cIWufTe+tLgaHmI
-# PxF4fFHYz/W+3wVQ54FgJo4foB1KZBRymW0FERBFI1ggkk6BwGtPrtch1Pd/Ddr5
-# Z2iDVWSRNZJiErMZhdDZKB9XTK2kK6t6fTFB/73Kbyu6p7YzcZcG8/0bV9NhrTKt
-# Oxr+MsNRSuDYWzAoHhRjsEYpAd2tjNrCtJ6MSy2H3g4XpmYLEhV2ZBqUU165FPuC
-# fHTGfy97lWFfgdQyDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIARvMbXRBWv5GCjIg5Q5rydLng8ySPXU4EHKm8RrAPBUMA0GCSqG
+# SIb3DQEBAQUABIIBgFVo1gn/quNyCrWogv4aAS9qkgM9SNvL+tXu/qk5bnnZCHfI
+# QIwoBx5v3wQBxCEogvcJbWurDpEz2Bx7Bkk5iCGWHxnNg4oRIuhCdo1zPaJxr704
+# A6rBc6HB5NI/irvc4CDSqaAMwycaTHtS4qcOfXDNcK1w8+yezXoIKgEsc1j6QpEN
+# 87XUE7nQiPkEw84cb+zVa8XU4JlgOWx3CeWqu1F6ci6bhZriFNug8yp95PscAbhL
+# Uz5n5u5xGhflFtrHHAY4sPoMaouVBGJELFIkZVcauJy3JdobpAx2SLHyBy0qF4hY
+# SL8PMVcJAoVGTUq5Uwg6yFCLuxLzcY3R9KIrH99IonyMvEM8nKFSkQmwsANXb8JN
+# /sPK7V4Pt8DMaLdYpcsKU6deOniZp3pesE6f2/Dn75se4iJIEzP58gCsZrMThUk5
+# +aI6B0XQxJvm5LZzTBGf8wvI9sifdjD0+sXFwnh56phAQlQlwMRTwv3wE2GMcvYp
+# 5gAtEwGw+axaobm9MaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjhaMC8GCSqGSIb3DQEJBDEiBCD5Vif+GFln3WmQak3XayYOyjAdP/97WWZ9Syo2
-# 9E5/2jANBgkqhkiG9w0BAQEFAASCAgBL1ymRWLVRbKtI91M3kBzjxb3Omx30LWLo
-# DBMUETv0ebmgT/GBqhjrxp7189RhXaIgetcaU4qUlJNPlCHNqAozRyNF8O2Vqtuq
-# P5/1QhWmfoSTAUAlOE/iRXLQkdu2deI2dxGMOFvAs/8vuGTEk3zMjjHXK8hGzOkm
-# tQ+/YZx64x6XgZ3bUSHgei0ZdqFUZpam1JiR1KfcrUHRcquIlIDNB0+3odcsCcoU
-# XDavR8O/cVztr1ijjmeownNYI/ft0XemMMS4t8vDRoZ3HAYuCcSs4tNWjeVEnAot
-# B0ub2ovBYJbx0eAnRuNCCNZvjPXMtT4FfUFXL3mO1p/mfibwGOMADhI5Svv1K3jA
-# bMTWgE0zsZnZB965JtMHorCeNqynGr5lMFouke3yCsnRwUjgxz/t3Vx32iMg1ZOr
-# tqtXcrjcD5sqmamjA16x03X0+5ooJEzM1tCfEUtbsWzt2DDPhkQkxV0KE+mXwCY5
-# Cp+4K6wZoprYuUi7qYWcyyeCLu+sw4K8QDkVCG0gDY8K7jdFAZwWwvdOvrnAyrvO
-# Pf+N5fjyNjcuTNKZN9cblSq4oKovsQ3DoyC/r1AaJAZvDqtbK9e622yhjRrnw5eU
-# Kg3gP9ISKoRyj6QPEDigvKUdtRE0EEFYheT972EK0Z7rTqlSufn72EF4C2DlgMw3
-# lPxS+yT2lA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNDEx
+# MzlaMC8GCSqGSIb3DQEJBDEiBCBh+mmzlgU76s66uRwsTUFoKe/qg+E37MzqKgo0
+# ns8bxjANBgkqhkiG9w0BAQEFAASCAgCvso5gffkVyZLW6XMEoVF4bBcJ0dd5YfmD
+# tcZHU6MHaxCBbVp6knxhArUz75Gs2/E0VUTt64uViHbHqM17+PkHM0BPoscAbyMf
+# ldy+ukaaZkBtQnhWv9dJiurSPfntFEIuVTRNPmjqvPAGE8P1oc335qh1bis4lJ7i
+# YAeNi3kfLkapop0erGhu0K8y6o/tVXpD9AYKIqESLswkZZlecSCpi7lxOJ19oVgA
+# KqRzgKkIvCRmLu+YhzZKT15lb0jDzp7BCEd8nHtMLfLAm8D9fOS04BjzTa6IzNgC
+# x0SmNI/knWp5F2LyuI61yk4c5/6sjrjEjIZ4ZBiCu9CpXpdSdrQkcKJ0wZx9I2j1
+# yKWITJyw0rJMN/kDQfgpVp4Pse3NinpyNEXBaPlxiMEdeVCyIaTyd4hCClYxobsF
+# km3WYVMh4xHog7No3u0hyoZQ2tOpwOt+2+ZIAS3CnJ4PqfU0lpNT5gnCAUU7i7V1
+# dL6nexfHT2q6vXwu7v/PZP9amrC2WcK/BFnRFMWIzRAvBFHDkNC1oTu+nu1WE7XQ
+# K8uIFKgsXLMvc7j77rZ/uJatDgzVb36ap2VwZMufKHlcil82h0QYCRw9GJOLQ83h
+# ZleLfOjdhMLOppoHECTB0na6Fjwckn5a5qtilTX/lmEIh6uQiBzoXYfxuGkjUTNM
+# e0u7KlWYRQ==
 # SIG # End signature block
