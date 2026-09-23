@@ -28,7 +28,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param(
@@ -41,7 +41,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.5'
+$script:AppVersion = '1.0.6'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -196,8 +196,16 @@ $xaml = @'
                                     <ComboBox x:Name="ScheduleTypeCombo"><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
                                     <TextBlock Text="Times (HH:mm, comma separated)"/>
                                     <TextBox x:Name="TimesBox"/>
-                                    <TextBlock Text="Days (English, comma separated)"/>
-                                    <TextBox x:Name="DaysBox"/>
+                                    <TextBlock Text="Days"/>
+                                    <UniformGrid x:Name="DaysPanel" Columns="2" Margin="0,3,0,8">
+                                        <CheckBox x:Name="MondayCheck" Content="Monday" Margin="0,3"/>
+                                        <CheckBox x:Name="TuesdayCheck" Content="Tuesday" Margin="0,3"/>
+                                        <CheckBox x:Name="WednesdayCheck" Content="Wednesday" Margin="0,3"/>
+                                        <CheckBox x:Name="ThursdayCheck" Content="Thursday" Margin="0,3"/>
+                                        <CheckBox x:Name="FridayCheck" Content="Friday" Margin="0,3"/>
+                                        <CheckBox x:Name="SaturdayCheck" Content="Saturday" Margin="0,3"/>
+                                        <CheckBox x:Name="SundayCheck" Content="Sunday" Margin="0,3"/>
+                                    </UniformGrid>
                                     <TextBlock Text="Missed run policy"/>
                                     <ComboBox x:Name="MissedPolicyCombo"><ComboBoxItem Content="RunOnce"/><ComboBoxItem Content="Skip"/></ComboBox>
                                     <TextBlock Text="Assignment"/>
@@ -348,7 +356,7 @@ Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton')) {
+    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $jobsTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template')
@@ -560,6 +568,40 @@ function Update-PinnedServerControlState {
     }
 }
 
+function Get-ScheduleDayDefinitions {
+    return @(
+        [pscustomobject]@{ Day = 'Monday'; Control = 'MondayCheck' }
+        [pscustomobject]@{ Day = 'Tuesday'; Control = 'TuesdayCheck' }
+        [pscustomobject]@{ Day = 'Wednesday'; Control = 'WednesdayCheck' }
+        [pscustomobject]@{ Day = 'Thursday'; Control = 'ThursdayCheck' }
+        [pscustomobject]@{ Day = 'Friday'; Control = 'FridayCheck' }
+        [pscustomobject]@{ Day = 'Saturday'; Control = 'SaturdayCheck' }
+        [pscustomobject]@{ Day = 'Sunday'; Control = 'SundayCheck' }
+    )
+}
+
+function Get-SelectedScheduleDays {
+    return @(
+        foreach ($definition in @(Get-ScheduleDayDefinitions)) {
+            if ([bool]$script:Controls[$definition.Control].IsChecked) { [string]$definition.Day }
+        }
+    )
+}
+
+function Set-SelectedScheduleDays {
+    param([string[]]$Days = @())
+
+    foreach ($definition in @(Get-ScheduleDayDefinitions)) {
+        $script:Controls[$definition.Control].IsChecked = [string]$definition.Day -in @($Days)
+    }
+}
+
+function Update-ScheduleDaysControlState {
+    $isWeekly = (Get-ComboText -Combo $script:Controls.ScheduleTypeCombo) -eq 'Weekly'
+    $script:Controls.DaysPanel.IsEnabled = $isWeekly
+    if (-not $isWeekly) { Set-SelectedScheduleDays -Days @() }
+}
+
 function Refresh-PlanningView {
     $owners = Get-ElectionOwners
     $rows = foreach ($job in @($script:DraftJobs.Jobs)) {
@@ -642,7 +684,11 @@ function Apply-SelectedJobToDraft {
     $job = @($script:DraftJobs.Jobs | Where-Object { [string]$_.Name -eq [string]$row.Name })[0]
     $scheduleType = Get-ComboText -Combo $script:Controls.ScheduleTypeCombo
     $times = @($script:Controls.TimesBox.Text -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
-    $days = @($script:Controls.DaysBox.Text -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    $days = @(Get-SelectedScheduleDays)
+    if ($scheduleType -eq 'Weekly' -and $days.Count -eq 0) { throw 'Select at least one day for a Weekly schedule.' }
+    if ($scheduleType -ne 'Weekly') { $days = @() }
+    [object]$scheduleDays = [string[]]@()
+    if ($scheduleType -eq 'Weekly') { [object]$scheduleDays = [string[]]$days }
     $mode = Get-ComboText -Combo $script:Controls.AssignmentCombo
     $pinnedServer = Get-ComboText -Combo $script:Controls.PinnedServerCombo
     $previousMode = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy')
@@ -663,7 +709,7 @@ function Apply-SelectedJobToDraft {
     Set-JsonProperty -Object $job -Name Enabled -Value ([bool]$script:Controls.JobEnabledCheck.IsChecked)
     Set-JsonProperty -Object $job.Schedule -Name Type -Value $scheduleType
     Set-JsonProperty -Object $job.Schedule -Name Times -Value $times
-    Set-JsonProperty -Object $job.Schedule -Name DaysOfWeek -Value $(if ($scheduleType -eq 'Weekly') { $days } else { @() })
+    Set-JsonProperty -Object $job.Schedule -Name DaysOfWeek -Value $scheduleDays
     Set-JsonProperty -Object $job.Schedule -Name MissedRunPolicy -Value (Get-ComboText -Combo $script:Controls.MissedPolicyCombo)
     Set-JsonProperty -Object $job -Name AssignmentMode -Value $mode
     Set-JsonProperty -Object $job -Name AllowedServers -Value $newAllowedServers
@@ -836,7 +882,8 @@ $script:Controls = @{}
 foreach ($name in @(
     'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
     'JobsCountText', 'EnabledCountText', 'OnlineServersText', 'SuccessCountText', 'FailureCountText', 'DashboardGrid',
-    'PlanningGrid', 'SelectedJobText', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysBox', 'MissedPolicyCombo',
+    'PlanningGrid', 'SelectedJobText', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
+    'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
@@ -862,6 +909,7 @@ $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
 $script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'Failed', 'Timeout', 'Blocked', 'Running')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
+$script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })
 $script:Controls.AssignmentCombo.Add_SelectionChanged({ Update-PinnedServerControlState })
 $script:Controls.PinnedServerCombo.Add_SelectionChanged({
     if ($null -ne $script:Controls.PinnedServerCombo.SelectedItem -and (Get-ComboText -Combo $script:Controls.AssignmentCombo) -ne 'Pinned') {
@@ -877,7 +925,8 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
     $script:Controls.JobEnabledCheck.IsChecked = [bool]$job.Enabled
     Select-ComboText -Combo $script:Controls.ScheduleTypeCombo -Text ([string]$job.Schedule.Type)
     $script:Controls.TimesBox.Text = @($job.Schedule.Times) -join ', '
-    $script:Controls.DaysBox.Text = @(Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @()) -join ', '
+    Set-SelectedScheduleDays -Days @(Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @())
+    Update-ScheduleDaysControlState
     Select-ComboText -Combo $script:Controls.MissedPolicyCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'MissedRunPolicy' -DefaultValue 'RunOnce'))
     $assignmentMode = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy')
     Select-ComboText -Combo $script:Controls.AssignmentCombo -Text $assignmentMode
@@ -992,6 +1041,29 @@ if ($SmokeTest) {
     Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Elected'
     Update-PinnedServerControlState
     if ($script:Controls.PinnedServerCombo.IsEnabled) { throw 'Pinned server selector stayed enabled for Elected assignment.' }
+
+    Select-ComboText -Combo $script:Controls.ScheduleTypeCombo -Text 'Weekly'
+    Update-ScheduleDaysControlState
+    if (-not $script:Controls.DaysPanel.IsEnabled) { throw 'Weekday checkboxes did not enable for a Weekly schedule.' }
+    $missingWeeklyDayRejected = $false
+    try { Apply-SelectedJobToDraft } catch { $missingWeeklyDayRejected = $_.Exception.Message -like '*Select at least one day*' }
+    if (-not $missingWeeklyDayRejected) { throw 'A Weekly schedule without a selected day was not rejected.' }
+    Set-SelectedScheduleDays -Days @('Tuesday', 'Thursday')
+    Apply-SelectedJobToDraft
+    $smokeJob = @($script:DraftJobs.Jobs | Where-Object Name -eq $script:PlanningRows[0].Name)[0]
+    if ([string]$smokeJob.Schedule.Type -ne 'Weekly' -or (@($smokeJob.Schedule.DaysOfWeek) -join ',') -cne 'Tuesday,Thursday') {
+        throw 'Weekday checkbox selections did not round-trip to the Weekly schedule.'
+    }
+    Select-ComboText -Combo $script:Controls.ScheduleTypeCombo -Text 'Daily'
+    Update-ScheduleDaysControlState
+    if ($script:Controls.DaysPanel.IsEnabled -or @(Get-SelectedScheduleDays).Count -ne 0) { throw 'Weekday checkboxes were not disabled and cleared for a Daily schedule.' }
+    Apply-SelectedJobToDraft
+    $smokeJob = @($script:DraftJobs.Jobs | Where-Object Name -eq $script:PlanningRows[0].Name)[0]
+    if ([string]$smokeJob.Schedule.Type -ne 'Daily' -or @($smokeJob.Schedule.DaysOfWeek).Count -ne 0) {
+        throw ("Daily schedule retained weekday selections. Type={0}; Days={1}" -f [string]$smokeJob.Schedule.Type, (@($smokeJob.Schedule.DaysOfWeek) -join ','))
+    }
+    Write-GuiActivity -Message 'SMOKE_TEST_SCHEDULE_DAYS_OK Weekly=Tuesday,Thursday; DailyDays=0' -Level SUCCESS
+
     Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Pinned'
     Update-PinnedServerControlState
     if (-not $script:Controls.PinnedServerCombo.IsEnabled) { throw 'Pinned server selector did not enable for Pinned assignment.' }
@@ -1032,8 +1104,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpBPa868XMMXv6
-# L6hWX6kafcutmj1yIdACU7TrVkx9h6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWuJZL4TzD/Vfv
+# BHsWvTlphQBI+m/tAUi31Kb+9PEC9aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1166,31 +1238,31 @@ $window.Add_Closed({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOoCldprydXZanHos4iRZyVDQzKAStmTOJURdw6ayMs1MA0GCSqG
-# SIb3DQEBAQUABIIBgHMOq6WRMZ4ljggsrxuAb0DmRH9/kcYA3yS1iriUktJNEUjp
-# ViNDMcYkivz+FUhrvO+nOiC5j51Bjg4iy98yfBQZdYvlp5RJ0CsmsbrjWPqpd4uH
-# bs+7QKHc2DtnpZoX0b9lneDLI6rS5y662lm//9W+u9GiZVugtEAgcDmebh8K4NcQ
-# m1egrYGLh9gFPZGI+R2otutlr5jhfKbrnUJCpGbGTq9/oIkzaMKsdcKIjmKS1mKm
-# 0AJAxGTuvhNeqeRgVz+U1nuHxMJf8WhHcgWR/6d+MD7ogR3v91aqkFIreGiX0FKW
-# VZfbXzpsjtI0bxO8UQfmARvX4i3m31gJd8A7O8UHhJ0W/oXynaEyApLdySE7+hwY
-# uEkX8mZPpYUGeb4Ce7iLH6Ow+IYn7hOxvXDbQpkWM0Rd4ecAMUdNevrHYTid/ZCG
-# JhimkQj5fF95TijNRaZH+yfLZeQX7pJPb6/Gfh7wn/XRy6Vj440OC0rcHoDAAjcw
-# J7+4j7OT2NtdKAWcw6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIdypwDOIeUtcCx97VvwEJtm4cEgKLi04fQu3ojDWEgyMA0GCSqG
+# SIb3DQEBAQUABIIBgFZI6AILNIazpPmeeL2WudGghnwWnONbx4R/lWX1Q6oPoeSo
+# fgOEEfnoSPxh3Bw0eLZVx+d/aAUvsJkDoqguQNPZWEfDkIQZGc09KEHMejZxzNJ5
+# WUfg7MyEtdonUndQIb7w8xVJ3CCo19VTmdI4rw83WPApKMom2t1XD9KkC9yUVdcc
+# l86gDkFWF1JaOKGK4CAn9tXGJOybae7xp7UjvQ6U6advBWg5cV59/06W4JjmTBgs
+# H8lqV/b4EJEMniMKn4k+BrDl2Sh6UuJg9t8DPGG2fvlRBa9BJ7fEpziSrklKo3+I
+# QLFJ1zTjSPMr2hrp+dBJn5pnIwSAuYTMvWjrgU/XT3Q2MrvXkPqzYGzRuji7E+Cg
+# dWHzCTWTBCGMLauYFnjn/hiwz6M5B/bI3SiNcYbcwY9KTgFEwSVFauWtrp0YLY/o
+# ZEI93hCiAJq3vubJET3Tk9/KNsICCrQEbRvnFU0J1DTxTLwudOi+Wh3FKii2o/gX
+# R2qUifOIGEmC5Bf5YKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAohdgBXXOyqorWVRhCkGEBFr+9ycMGuGEZcRuy
-# Ivf8TTANBgkqhkiG9w0BAQEFAASCAgBA39uaadioShsXD21SPDBlZyHbEfzlj9Tc
-# ydzubtpoOA88wlTo3gU2jDANhBKS/jvp6lH9ZV85oglL5BxWbG83rieBzrkfBGxE
-# BlfRtVQDK5pPawJimrppVvZ1kXwU46Sa4gOG1664yZEQJD8zmqarQtxID2tHX4hL
-# wvP7cjjj4KkvUZYtzB7svMH+jpq1m31Z+4WGBEWosqiY67i1DOrZVW5wE5T3mrEb
-# kHbo+GYT8/5zFkQWt4zQ0l1pvxx6MuzsV82QSWyhwQdG5dcLTlTP4us0ezti3kFn
-# ugUwtB7pFCMprqltK9vYjDE4XtvL6XeyH/MEpSeB5WDmn8fXlxTs9lPSeQJQ8mtK
-# r1e7yP+j97X/hBjSHgB0g0EYA3Jyiy8VoDuvIPOiSjNCT4ybzPpEV6PmN1zDTQGp
-# sTYPBifxBXtzcDZJABFVA9hODqgqqh9mvZSqbbPD+ylXj/erGvB3s6H4m4w5Mt2/
-# 42he5dyDXYAsrHOWTmaVSyMxxMSesHIi9Ilvjhwz+a+fwyWfwT7DhtMJVn2S48dN
-# KjxpQSGXu9/qUplXZVhY/RtJGyy8NKaDWwUq/4j/RMBkaiEPmwvs/XLBc8YbXUaQ
-# SepujNrpyePOlxQIXioFcR00pU3ItyiliMzeHE1hdNK8ZTKN1V3MR4r6whFGZbFF
-# 3e4H5+snFQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTAx
+# NDRaMC8GCSqGSIb3DQEJBDEiBCAOoSRNd6eVrRJXsBrxflVwc8eVJImQbh3KA6bh
+# GxkoKjANBgkqhkiG9w0BAQEFAASCAgAQXngPzRuRDUkuYkNMj+bvQ04VWXlI99rJ
+# pgyEO6V0ynwFJwLqp95cM/4Sn4R1UeIWPVGB+BKyXLJaG/u7+qTy+tzbeViE2XfR
+# QYOU1pOi8WguAg3stiKrh6YC8WEqjf+wFArRattXTrlBVZ5eWeKUtw9xJerdQKX1
+# kzSILjXBwypeCAuIR5Xv/qf7LLWoMUSohMl/EHBxkIdXqE5HRNXDtftw6pzmfDLq
+# GXAQaOmfIAxWcoufbhM9e1CKvU6HdurqO0FR2TJA9qpy9t9AN/Gzah6GHN7sqkqx
+# 8Ed/Ns8ErDaHEHAwC3nqB6GpxOfC3rQPIAQn1DGHp3kAHMAJ++28L4Z45bzbvyZ0
+# ebnhKYa9B3bC9S8fWAqUZZL9ivlZVFSLgisMXyn5PJdY/ELtKJVZUf2n1V8BDcvL
+# jZ2on+VpTr9VpTsahNkEp38b4AOoWa1bXHheVVPS+14jNLwTzKoVxRU7E40tUZRa
+# ICdsXDnXrB0wVJpdww5Jq1+nvp+KIImRJs0uhFDyNs/nRRfz2bkfrukdgy679g8Y
+# C/0vnCFUd6ctp/Uhx0Tls9mSlAQEzY9pYemfqgRLeNjXaBn2S3w7e38mr7NNUn5c
+# mYXkiZQGHCsBjToXZ+muToKBvUMszLjyWnkX/ezjh58A8BT8lKxy+VO5ErYpkkVT
+# 2ez5dMtBug==
 # SIG # End signature block
