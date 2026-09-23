@@ -28,7 +28,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param(
@@ -41,7 +41,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.4'
+$script:AppVersion = '1.0.5'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -134,6 +134,7 @@ $xaml = @'
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <Button x:Name="RefreshButton" Content="Refresh"/>
                 <Button x:Name="ValidateButton" Content="Validate draft"/>
+                <Button x:Name="RebalanceButton" Content="Rebalance now" Background="#FFF4CE"/>
                 <Button x:Name="PublishButton" Content="Publish changes" Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
             </StackPanel>
         </Grid>
@@ -347,7 +348,7 @@ Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton')) {
+    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $jobsTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template')
@@ -748,6 +749,30 @@ function Publish-Draft {
     }
 }
 
+function Request-ElectionRebalance {
+    param([switch]$SkipConfirmation)
+
+    if (-not $SkipConfirmation) {
+        $confirmation = "Recalculate elected job owners now?`n`nThe active published configuration, current live capabilities, server weights, policies and duration history will be used.`nPinned and Manual jobs are not changed.`n`nUnsaved draft changes are not included; publish them first if they must affect this rebalance."
+        if ([System.Windows.MessageBox]::Show($confirmation, 'Rebalance elected jobs', 'YesNo', 'Warning') -ne 'Yes') { return $null }
+    }
+    try {
+        $result = Request-SmartM365OrchestratorRebalance -SharedDataFolderPath $script:SharedDataFolderPath
+        $script:Controls.StatusText.Text = "Rebalance requested: $($result.RequestId)"
+        Write-GuiActivity -Message ("Election rebalance requested. RequestId={0}; RequestPath={1}" -f $result.RequestId, $result.RequestPath) -Level SUCCESS
+        if (-not $SkipConfirmation) {
+            [System.Windows.MessageBox]::Show("Rebalance request submitted successfully.`nRequest: $($result.RequestId)`n`nA resident Orchestrator will apply it on its next tick. Refresh the GUI to see the new owners.", 'Rebalance requested', 'OK', 'Information') | Out-Null
+        }
+        return $result
+    }
+    catch {
+        Write-GuiException -Context 'Election rebalance request failed' -ErrorRecord $_
+        if ($SkipConfirmation) { throw }
+        [System.Windows.MessageBox]::Show($_.Exception.Message, 'Rebalance failed', 'OK', 'Error') | Out-Null
+        return $null
+    }
+}
+
 $smartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
 $tenantContextPath = Join-Path -Path $smartM365Root -ChildPath 'Config\SmartM365-TenantContext.ps1'
 . $tenantContextPath
@@ -809,7 +834,7 @@ if (-not $SmokeTest -and (Test-Path -LiteralPath $splashPath)) {
 $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
-    'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'PublishButton',
+    'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
     'JobsCountText', 'EnabledCountText', 'OnlineServersText', 'SuccessCountText', 'FailureCountText', 'DashboardGrid',
     'PlanningGrid', 'SelectedJobText', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysBox', 'MissedPolicyCombo',
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
@@ -877,6 +902,7 @@ $script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } cat
 $script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
 $script:Controls.RefreshButton.Add_Click({ Refresh-AllViews })
 $script:Controls.ValidateButton.Add_Click({ [void](Show-DraftValidation) })
+$script:Controls.RebalanceButton.Add_Click({ [void](Request-ElectionRebalance) })
 $script:Controls.PublishButton.Add_Click({ Publish-Draft })
 $script:Controls.HistoryRefreshButton.Add_Click({ Refresh-HistoryView })
 $script:Controls.HistoryGrid.Add_MouseDoubleClick({
@@ -978,6 +1004,14 @@ if ($SmokeTest) {
     if ([string]$smokeJob.AssignmentMode -ne 'Pinned' -or @($smokeJob.AllowedServers).Count -ne 1 -or [string]$smokeJob.AllowedServers[0] -ine [string]$smokeServer) {
         throw 'Pinned assignment smoke test did not preserve exactly one expected server.'
     }
+    $rebalanceRequest = Request-ElectionRebalance -SkipConfirmation
+    $rebalanceRequestPath = Join-Path -Path $script:SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json'
+    $savedRebalanceRequest = Read-SmartM365OrchestratorJson -Path $rebalanceRequestPath
+    if ($null -eq $script:Controls.RebalanceButton -or [string]$script:Controls.RebalanceButton.Content -ne 'Rebalance now') { throw 'Rebalance now button is missing.' }
+    if ([string]::IsNullOrWhiteSpace([string]$rebalanceRequest.RequestId) -or [string]$savedRebalanceRequest.RequestId -cne [string]$rebalanceRequest.RequestId) {
+        throw 'Rebalance request smoke test did not persist the submitted request atomically.'
+    }
+    Write-GuiActivity -Message ("SMOKE_TEST_REBALANCE_OK RequestId={0}" -f $rebalanceRequest.RequestId) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_PINNED_OK Job={0}; Server={1}; DefaultSort=JobAscending" -f $smokeJob.Name, $smokeServer) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_OK SmartM365 Orchestrator GUI v{0} | Jobs={1} | PlanningRows={2}" -f $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count) -Level SUCCESS
     return
@@ -998,8 +1032,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpEtVl8eAU94zN
-# eGTq+sRn7OTSTm6G9CQba+oerlkrSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpBPa868XMMXv6
+# L6hWX6kafcutmj1yIdACU7TrVkx9h6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1132,31 +1166,31 @@ $window.Add_Closed({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICokF04eTIGIGIz0bai02YuzsmCMXoh/fMuTcy9yE+z5MA0GCSqG
-# SIb3DQEBAQUABIIBgHMERhYyxnE8eYAkIvCYDG59ZM4GsMIhzsaLCtqmjOUOhFl+
-# D6ynM8xtQ2g2ZStsTGG7gt3mOwBGUJM6uarrsGfo0aQ9P+kTrJ7aHsHkoAm4dSXG
-# Z2jJPUh7PFASK1GNXQkglAvAtTvU40SZXUlO4oVaiJ2XaTXIN04KJKXAYyMaboAm
-# 3xGnoekA3YUGCBjItt5+sFPHhuZlm0I+oDID9Y+kHlxY1I3kcq+DedR9j6UYALmr
-# Qd9Lm3Lp1a2qxbryRLKnqmxfOxhxibxopLxe3CNtPFFGoBqU9HhBxMsO/e/d2A13
-# mhctg936eHGWH9Q67KJ1Oa+GcA5tayQPqewYtVah5s5QZtyiagD13wUPCdWmCtwn
-# 4oFjQy5mGkJhqM8rcqMUmSeAAh3qC80UcVv0w3aXlGGnCPxr7MItVQ02+BVext0Y
-# HaqPz2Yje0GJfzqW/xhyiFQdX5cInbHrBncMmBgO0omtbg9P2ol3zZoWkC3nCD7h
-# pPyqYxbbWzgnJsg5QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOoCldprydXZanHos4iRZyVDQzKAStmTOJURdw6ayMs1MA0GCSqG
+# SIb3DQEBAQUABIIBgHMOq6WRMZ4ljggsrxuAb0DmRH9/kcYA3yS1iriUktJNEUjp
+# ViNDMcYkivz+FUhrvO+nOiC5j51Bjg4iy98yfBQZdYvlp5RJ0CsmsbrjWPqpd4uH
+# bs+7QKHc2DtnpZoX0b9lneDLI6rS5y662lm//9W+u9GiZVugtEAgcDmebh8K4NcQ
+# m1egrYGLh9gFPZGI+R2otutlr5jhfKbrnUJCpGbGTq9/oIkzaMKsdcKIjmKS1mKm
+# 0AJAxGTuvhNeqeRgVz+U1nuHxMJf8WhHcgWR/6d+MD7ogR3v91aqkFIreGiX0FKW
+# VZfbXzpsjtI0bxO8UQfmARvX4i3m31gJd8A7O8UHhJ0W/oXynaEyApLdySE7+hwY
+# uEkX8mZPpYUGeb4Ce7iLH6Ow+IYn7hOxvXDbQpkWM0Rd4ecAMUdNevrHYTid/ZCG
+# JhimkQj5fF95TijNRaZH+yfLZeQX7pJPb6/Gfh7wn/XRy6Vj440OC0rcHoDAAjcw
+# J7+4j7OT2NtdKAWcw6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwODI5
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDjtoHOX81GCU1Dm97eNTT1p+w+GkGDBHNKbcvB
-# M1m4xDANBgkqhkiG9w0BAQEFAASCAgAdp+hLIJ/lxkyvDAcEmnL9LAeNJJNgmArP
-# UwifsvPLveNcoLfa1i307MZ+eUxZlV5y2p3b62c8BGR/RhELIwktpjugw6KX4HOu
-# 2FvOP2Lfa1P4P1kLkOb7tgLCmJZGj/xEAbN8bOWdc2iyuUkf2nY0GPMlThtAGHNG
-# MMpWHuBSzY0YUjAkRB+8z77B2VZR5wKBAfVUWQvOjKgwTP8McxqZIwyts5MY7Onb
-# tGutVwFWVpsolb/tEEKxaUZdMflQc0UI4Ytiu2ilH2ccrl9Tn0UW3b4TDCiboKYC
-# PeCI276As7XscLnKfLJNeMVwfAHiiKjrNYuNZUbmKoqke3UKtD4T33l9djIAXj0S
-# LL7unY7HJxAkeeIfH/e9M8gb+VYnSxs4ipP/j+Yb6a7NBJsDZlNyh+25wA/vgL//
-# QmOTTxrw6kFCkh6Rd55J+PTg3U4F/nHzgHE2DKxwsvsrp8nfGn+YobPRZ5Sb3C0Z
-# PxWAYB3XM9xHHbUNJ3ZNtkxRQ1B8l8aZiDDBqv+qCtivBD/0bYtKNJZKGdxuyj4Z
-# uX/gWsWxumthqs+Ss5cTRIKktR7K29SesuthlEl/ZYJiZeSxpyvugL7cA5OB7Xyq
-# OZQcNA6QwLD4YtLrPnpFdettuT3tcBCfMRLlQuO4s/gWdYR4rqVHhVy1K9LkhAQB
-# o0NX6k184w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCAohdgBXXOyqorWVRhCkGEBFr+9ycMGuGEZcRuy
+# Ivf8TTANBgkqhkiG9w0BAQEFAASCAgBA39uaadioShsXD21SPDBlZyHbEfzlj9Tc
+# ydzubtpoOA88wlTo3gU2jDANhBKS/jvp6lH9ZV85oglL5BxWbG83rieBzrkfBGxE
+# BlfRtVQDK5pPawJimrppVvZ1kXwU46Sa4gOG1664yZEQJD8zmqarQtxID2tHX4hL
+# wvP7cjjj4KkvUZYtzB7svMH+jpq1m31Z+4WGBEWosqiY67i1DOrZVW5wE5T3mrEb
+# kHbo+GYT8/5zFkQWt4zQ0l1pvxx6MuzsV82QSWyhwQdG5dcLTlTP4us0ezti3kFn
+# ugUwtB7pFCMprqltK9vYjDE4XtvL6XeyH/MEpSeB5WDmn8fXlxTs9lPSeQJQ8mtK
+# r1e7yP+j97X/hBjSHgB0g0EYA3Jyiy8VoDuvIPOiSjNCT4ybzPpEV6PmN1zDTQGp
+# sTYPBifxBXtzcDZJABFVA9hODqgqqh9mvZSqbbPD+ylXj/erGvB3s6H4m4w5Mt2/
+# 42he5dyDXYAsrHOWTmaVSyMxxMSesHIi9Ilvjhwz+a+fwyWfwT7DhtMJVn2S48dN
+# KjxpQSGXu9/qUplXZVhY/RtJGyy8NKaDWwUq/4j/RMBkaiEPmwvs/XLBc8YbXUaQ
+# SepujNrpyePOlxQIXioFcR00pU3ItyiliMzeHE1hdNK8ZTKN1V3MR4r6whFGZbFF
+# 3e4H5+snFQ==
 # SIG # End signature block

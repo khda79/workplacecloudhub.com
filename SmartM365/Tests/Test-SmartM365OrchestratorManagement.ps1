@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline management and central-manifest migration tests for the SmartM365 orchestrator.
 .VERSION
-1.1.0
+1.1.1
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -49,6 +49,14 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $snapshot.Paths.ClusterPath) -Message 'Central cluster configuration was not initialized.'
     Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $snapshot.Jobs).Valid) -Message 'Production jobs template failed management validation.'
     Assert-True -Condition ((Test-SmartM365OrchestratorClusterDocument -Document $snapshot.Cluster).Valid) -Message 'Mock cluster configuration failed validation.'
+
+    $firstRebalanceRequest = Request-SmartM365OrchestratorRebalance -SharedDataFolderPath $temporaryRoot -Reason 'Management test'
+    $savedRebalanceRequest = Read-SmartM365OrchestratorJson -Path $firstRebalanceRequest.RequestPath
+    Assert-True -Condition ([string]$savedRebalanceRequest.RequestId -ceq [string]$firstRebalanceRequest.RequestId) -Message 'The rebalance request was not persisted atomically.'
+    Assert-True -Condition ([string]$savedRebalanceRequest.Reason -eq 'Management test') -Message 'The rebalance request reason was not preserved.'
+    $secondRebalanceRequest = Request-SmartM365OrchestratorRebalance -SharedDataFolderPath $temporaryRoot -Reason 'Second management test'
+    Assert-True -Condition ([string]$secondRebalanceRequest.RequestId -cne [string]$firstRebalanceRequest.RequestId) -Message 'A second rebalance request did not receive a unique identifier.'
+    Assert-True -Condition ([string](Read-SmartM365OrchestratorJson -Path $secondRebalanceRequest.RequestPath).RequestId -ceq [string]$secondRebalanceRequest.RequestId) -Message 'The latest rebalance request did not replace the earlier request.'
 
     $managementLogPath = Join-Path -Path $temporaryRoot -ChildPath 'Logs\SmartM365-Orchestrator-GUI_TEST.log'
     Write-SmartM365OrchestratorManagementLog -Path $managementLogPath -Message "First line`nSecond line" -Level WARN
@@ -278,8 +286,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAqTMYm5ugkoqd
-# sidXe4M4CIZleH12OGuAbUhU+PN0b6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAz8VwUsO/GnVQo
+# X1gwheXag0AEMH17wHE3fI0NS26AbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -412,31 +420,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII+6GhQ1hYIV0+KRJBHlRejFQtrjIxxPfZCNsW9wLGiaMA0GCSqG
-# SIb3DQEBAQUABIIBgHAj82Y9ipCz/P72PoAmxlDf0v4LMBO44mfZEU/FuQK8DIO+
-# r3VTS8toGQ4z415mBif25LPyGBVzpARWhiCybCE7tIfAlYP55JfU9nlgBUXXB4dK
-# 88H6qZFXQ1x9qptBTGXjAKjCiSgf9SgeGp/CngynXQz58l45wMp2s5bGTbOEDNqo
-# wBoKXAD50zCE1FwFQfUaR6wTs7J3Nzs9WtMiX2j+FaPI7t9mgk4LFEdz/QpoY/Ay
-# A50XVQWAfv965CMSBrQ9P3WucjBxvCwRi12TWYADQco6dEE4UvZCmbZAU0iK+kb+
-# dmBzmF9lDhL8AZlVPPbwr2Q8v0/eMml9Z53pH0Ej0DVLZIiuQWVM20FrrcMvSHX2
-# fOOYPiR3zoxg068olPggEGM9qVzPEoaV/aRtGJKtWgmZETo66cMqweEXaBxZME94
-# SW3PGqtcLKH/9Z2a5l1U4u8qF9uKBwUxqqvgMm2wP+WmLq0AyDzNHRwNB/dojI9+
-# Mkud5iB1IajZa4K3MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHb7PfOlrXlG1aKsj96IUt7VT3TacWvDUjJrUZFgukl3MA0GCSqG
+# SIb3DQEBAQUABIIBgAjGzPBJXRKJqSHMR2cBQPz+SUyV96xY6/A2is5z2UkhnfES
+# Z56bUfBD9HmsXHgsUiEm8rIe3xM7PJPAsMBaAvTBleinSYhJEn30+oe+FY/ZRtiL
+# Yqm4BMv7i5CIwPhaUhOjyMOo9q4nK87E0+uhMn6wjTq+FIDO9jYOeaGVJo3HUDO1
+# OjciuYFngAWfVxdyYI/JG7hgnxKVRW6PBFwQraeRl4yXYsMLAEeC0s05ZnH+7Jwe
+# jh1ZfVlCpKLBUO3u6O2m2OttR2gI9+W5eTKDAbEFVJNZU/KkMwh4qQk34ETx9BIX
+# nmDQiSdNiD/7A7knnNcUAQebuA26nsye5Dq7GN20AYsh1IggaOZJ54v+lqCWYB9L
+# sBlB9ytuPrm8sbP48J3VCEVHx5xwWjZQ+LEclWr6qUzvLvnF7Pt59aOOtlAidM2Z
+# w3MlM8kx4Qb14xfV/z14bPUIusNBhoie+s9Pr2phP+jGRDuAskNCJMDWtXa+Rd+l
+# TTPA+pHyReSbkNI6KqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzU3
-# NTZaMC8GCSqGSIb3DQEJBDEiBCB2zXBRbSGI0M6gWi9wcJwZJE3ug7/8NLeN2ZD+
-# iBqDJDANBgkqhkiG9w0BAQEFAASCAgBSelDa5LtbIArqxuP3CTeeflaIvOT7lGuG
-# 6V6S/xXqO7lONNtw8s4irUXXLtPxB2D1lH42a4CvU7+QvWha3SRgq2i/v04AjvDB
-# O5oV9cITjM7hmkbkZ9emBw7m9BQBKVBkNwu1qvdDXRGnKbm784enKOneVVBo62Ty
-# FVL0mnnwA+az8xkKZ53+gpeC+P0U+K7T++l/rI5ANqHShK7ltKcTA0nxu6LIvHug
-# neXqSXwaux0JY+0aZbTyPgdNrfIZJA5cV+nn1sRCpqQT4oQBMhC76Lv4EaOTIbNQ
-# 244zib9YYDOgkEbRpAWZ6fj4UZ7ysY+eI9lqxEPAL6tYdSQs5543cyKTFSVgHw6t
-# tErxNsdZWriN6W3212CIUcu/6x/k09QLbDYYwHlypTmh+oqioqSyT4IlTBKS5XUU
-# iRrth20iZD76bSmi8IEOWVabCzqnNm6i7Hdxy/caICPlC0CeUMPS5BiCqqfGvED0
-# ltmQlxvR1khc1fD42m1fI3dirahMb8RSH2N5+2eBq/e3VuVXO1VaBOKMzkNem8MR
-# e19N5bIYgjxY1tFRB173tkSyfyq8rhne7QMMZLo44hjtiWyvs5QXFyHGAA1g3Q8x
-# o3PsUmHxNDXV9pxxOrYfc3ebRFG8yFPyJk61RxoQ0JcK9qKafWWMmYOiDBG+A9lG
-# pmVeFXi1vw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCAj9HqjqG00EBU/xfKmz2SjuMLGb70o6CYtHEnA
+# QAlHhjANBgkqhkiG9w0BAQEFAASCAgAUCVVuGUCCGGhqUUqXEZuz2cgjOicbwD8Y
+# +1sAoJ1Hvr2yjs57ybyt/9GkvrU7B23mW/Ii/TaGiaLhBNBfetNH7OuAMJWamZKH
+# XGBs3PtbHRREJBTEzCPbiOQM78PW3JSEkcmKTmsgt4KEIJlSZOo8WVdHBBcUbU/B
+# HaHFMThnlnT3w/PQPX/sDnJve86zXd3vWipRkubwZcsnk3+YI1nY4Nz7NFTmf9t6
+# 8ZdBPBrUfpIkw+8GvLTPtq9KmfQaw0UGiJUutKGsYRX66j6wbHNxT4lh4q4dtWbY
+# Q6JCx3LAQoET0YChoYIyf6tNGZQhxHlkhYisilUB50Nn0KA7q1xa69b5LtmgZ/j5
+# Hpiyr3jX7H3hDWxshVB+NSCoipVUZ9cIiy7ArdxUtEBp6/6NAObsWOKghh/kgIer
+# /iWqlDIUjXs0uyvmtMkUY5pHFkI/xHx+4J2fw3q6cNoDQBtsmBgay9msynOYHqla
+# FFhXgBKX0Lv40xHJcy+ULviU7Dp0JMTByeEC6i1xtC92zOrZb1yFStfXXJVkxK9h
+# ndljS3V9s9PjaT1Bwy8vxnabG59ODh7bI0ZqHCrLStPPv+R+JjRMZrwMkiZm4IFa
+# 8aETrIHkHlUlGrHAd+st2sqKZKYuFWo4JgrQ6IKURWnHaWGOPrlfPIkLnGmjiBKI
+# UXjs16evkA==
 # SIG # End signature block

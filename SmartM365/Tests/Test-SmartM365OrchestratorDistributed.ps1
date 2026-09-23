@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.3
+1.0.4
 #>
 
 #Requires -Version 7.0
@@ -278,7 +278,7 @@ try {
         [ref]$orchestratorErrors
     )
     Assert-True -Condition ($orchestratorErrors.Count -eq 0) -Message 'The orchestrator could not be parsed for the Restore-RunningJobs regression test.'
-    foreach ($functionName in @('Get-RunningJobTimeoutWindow', 'Restore-RunningJobs', 'ConvertTo-OrchestratorUtcTime', 'Get-OrchestratorConcurrencyBlockState')) {
+    foreach ($functionName in @('Get-RunningJobTimeoutWindow', 'Restore-RunningJobs', 'ConvertTo-OrchestratorUtcTime', 'Get-OrchestratorConcurrencyBlockState', 'Test-OrchestratorElectionRebalanceRequestPending', 'Update-OrchestratorElectionPlan')) {
         $functionAst = $orchestratorAst.Find(
             {
                 param($node)
@@ -290,6 +290,73 @@ try {
         Assert-True -Condition ($null -ne $functionAst) -Message ("{0} was not found in the orchestrator." -f $functionName)
         . ([scriptblock]::Create($functionAst.Extent.Text))
     }
+
+    $syntheticRebalanceRequest = [pscustomobject]@{ RequestId = 'request-001' }
+    $unappliedPlan = [pscustomobject]@{ PlanId = 'plan-before' }
+    $appliedPlan = [pscustomobject]@{ PlanId = 'plan-after'; AppliedRebalanceRequestId = 'request-001' }
+    Assert-True -Condition (Test-OrchestratorElectionRebalanceRequestPending -Request $syntheticRebalanceRequest -Plan $unappliedPlan) -Message 'A new rebalance request was not detected as pending.'
+    Assert-True -Condition (-not (Test-OrchestratorElectionRebalanceRequestPending -Request $syntheticRebalanceRequest -Plan $appliedPlan)) -Message 'An already applied rebalance request remained pending.'
+    Assert-True -Condition (-not (Test-OrchestratorElectionRebalanceRequestPending -Request $null -Plan $unappliedPlan)) -Message 'A missing rebalance request was considered pending.'
+
+    $script:SyntheticSharedPlan = [pscustomobject]@{
+        PlanId = 'plan-before'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        Assignments = @([pscustomobject]@{ JobName = 'GraphHeavy'; OwnerServer = 'SERVER-A'; GroupKey = 'GraphHeavy' })
+        UnassignedGroups = @()
+        AppliedRebalanceRequestId = 'request-before'
+    }
+    $script:SyntheticRebalanceRequest = [pscustomobject]@{ RequestId = 'request-001'; RequestedBy = 'SyntheticUser' }
+    $script:SyntheticAssignmentsEqual = $false
+    $script:LastPreserveOwners = $true
+    $script:WrittenElectionPlan = $null
+    $script:Settings = [pscustomobject]@{
+        DistributedSchedulingEnabled = $true
+        ElectionPlanPath = Join-Path -Path $temporaryRoot -ChildPath 'Synthetic-ElectionPlan.json'
+        ElectionPlanLockPath = Join-Path -Path $temporaryRoot -ChildPath 'Synthetic-ElectionPlan.lock'
+        ServerJobPolicies = @{}
+    }
+    $script:Manifest = [pscustomobject]@{
+        OrderedJobs = @([pscustomobject]@{ Name = 'GraphHeavy'; Enabled = $true; AssignmentMode = 'Elected' })
+    }
+    $script:ElectionRebalanceRequested = $false
+    function Read-SharedElectionPlan { return $script:SyntheticSharedPlan }
+    function Read-SharedElectionRebalanceRequest { return $script:SyntheticRebalanceRequest }
+    function Get-LiveOrchestratorServerCapabilities {
+        return @([pscustomobject]@{ ServerName = 'SERVER-A'; ElectionWeight = 1.0; ServerJobPolicy = $null })
+    }
+    function Test-SmartM365OrchestratorCanPreserveOwners { return $true }
+    function Get-OrchestratorDurationMedians { return @{} }
+    function Get-SmartM365OrchestratorElectionPlan {
+        param($Jobs, $ServerCapabilities, $ServerWeights, $ServerJobPolicies, $DurationMinutesByJob, $PreviousPlan, [switch]$PreservePreviousOwners, $NowUtc)
+        $script:LastPreserveOwners = [bool]$PreservePreviousOwners
+        return [pscustomobject]@{
+            SchemaVersion = 2
+            PlanId = 'plan-recalculated'
+            GeneratedAtUtc = ([datetime]$NowUtc).ToString('o')
+            EligibleServers = @('SERVER-A')
+            Assignments = @([pscustomobject]@{ JobName = 'GraphHeavy'; OwnerServer = 'SERVER-A'; GroupKey = 'GraphHeavy'; LoadMinutesPerDay = 10 })
+            UnassignedGroups = @()
+            ServerLoads = @([pscustomobject]@{ ServerName = 'SERVER-A'; Weight = 1.0; LoadMinutesPerDay = 10 })
+        }
+    }
+    function Test-OrchestratorElectionPlanAssignmentsEqual { return [bool]$script:SyntheticAssignmentsEqual }
+    function Write-FileAtomically {
+        param([string]$Path, [string]$Content)
+        $script:WrittenElectionPlan = $Content | ConvertFrom-Json
+        $script:SyntheticSharedPlan = $script:WrittenElectionPlan
+    }
+    function Write-OrchestratorLog { param([string]$Message, [string]$Level = 'INFO') }
+    function Write-ServerAllowlistSummary {}
+
+    Update-OrchestratorElectionPlan -ForceRefresh
+    Assert-True -Condition (-not $script:LastPreserveOwners) -Message 'A pending explicit rebalance request preserved sticky owners.'
+    Assert-True -Condition ([string]$script:WrittenElectionPlan.AppliedRebalanceRequestId -eq 'request-001') -Message 'The applied rebalance request identifier was not recorded in the plan.'
+    Assert-True -Condition ([string]$script:WrittenElectionPlan.PlanId -eq 'plan-recalculated') -Message 'An explicit rebalance did not keep its new plan identifier.'
+    $script:SyntheticAssignmentsEqual = $true
+    $script:LastPreserveOwners = $false
+    Update-OrchestratorElectionPlan -ForceRefresh
+    Assert-True -Condition $script:LastPreserveOwners -Message 'An acknowledged rebalance request disabled normal sticky ownership on the next refresh.'
+    Assert-True -Condition ([string]$script:WrittenElectionPlan.PlanId -eq 'plan-recalculated') -Message 'An acknowledged request caused an unchanged plan identifier to rotate again.'
 
     function ConvertFrom-StateTime {
         param([string]$Text)
@@ -405,8 +472,8 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEebJvR9mguXrZ
-# YS+XbxcryRQbMy3pbGiu6kYo0rVuq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLj0R2hrKfSAAW
+# SRI0Pp264qHLE0+HCohNutKAyx7G8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -539,31 +606,31 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFGMD7mwGqbuF4uxjn6mPNbgumFRNkKYhdPTxs9UUNXpMA0GCSqG
-# SIb3DQEBAQUABIIBgKxE0iC5EJ0tuAFD2Z1BwIXFmAv0SCjMjk9zL8+UoUcLmOhx
-# 8EuwfcXaAxzUEHlwkdtVu0BVCKXINMhth80Di16jThadBBsIxen7lCkbvX2pLj5k
-# N5+ESMeW/fEGMJqhgwm301D17/BgmM0BI7QJY4NSqevbr1ZyI+j4MxKgkYlWobzy
-# QbIUBOOjXVlFlj/nWO/H0NfiDYhmUQT2+D4NZyuTz7QdJAKuSFIfv/qP5BeWdzeN
-# kAqT4t83elbbtod/5olMStlt2d6KyZDPYD548K1mlCDnlicQOZxMIpAqK2zwANa3
-# h/K+rQRgVHxVNyGqI3xT73JKZOqew1E6sjd6XLFxp57/O4T3DQVVymrN5q5OE6d+
-# Ap2OMkCuq2TrmgcCFjmv9dkPrsq6Zr7hkGMMItFogtunB9Rj5GxNdXOVc/WV65hj
-# nvrKSiWkqJPf9EQe30hWKApvN9XPczqAEI8LqMAxlL4dfsCBe2w3LiqSbw0ZgPuL
-# Hzq8OEJlvHNpPQ4yRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEwPZW1zvOll/ItmFzj07XE/SVQjleWPCXpODIJfNoBFMA0GCSqG
+# SIb3DQEBAQUABIIBgBU95uMjkVPuj9Q5zKUYjReyt7CRrvlSdYAVWFkTApthWQ6t
+# MVfDxC0V/lU0ouQLqoFSmDrX1Vr7InUFackQ1/l1y1FyDgMY2lpGVoMN7vwq3U3r
+# FqveEH97T0mWcmWrfU/1lcmhEKNf77hBNvUdAakBPF912o6XH7J5hNv2/q0T21/r
+# w36CPvyn1CSRd7lN+VBPs3X+BNNpkv7RkY6toSDjWSQ3E5SzisSyncRQLavIkJQO
+# swoTGvrZBgGni737wL96x65SKfYbMERoQO/H/PBjbMRZbs0IbmHLswAUCh0U6VjS
+# LS974pkISlFWSE1dvFBojM+kEOtbc6EqgoORTC3wXQMlp9RVg2FQoOrcW007PJQt
+# WILa00HMsY7wtezIL5pjemMgkxLrjeMxn8TdWo0bKQLZEft0nXc9K7o74vAdr9O6
+# hHhkyChiteppjtlqo0bbqhtmOAuHmclGc0gGLgrCnbvKPYVvqWzatTvb9Y76Mxbi
+# 82HcC6HGeg6DiKcGVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
-# MzFaMC8GCSqGSIb3DQEJBDEiBCBDntEtMhDoZS59sw9s4FoZjWL6yqT0gUySeimn
-# Y8LaGTANBgkqhkiG9w0BAQEFAASCAgA3SNrje6PuKdrwDOj17IZKbKP5/d7raT1b
-# OebNCC1+79nDQA8orkHUoyBkj5AAtiFt0NNgTCrkV+aJ1/DK/Rvqc89NxlRAo6bS
-# jqns907GMR7NJBwBvhQYOYz24tS5joiBmXtELa+HNxGt8gXM6wvXdGs7vgRJoV/K
-# 2AsmfM6JLT0TyCAjfoRDDK6IBKvowHpBEDANM3Yd6FEmgvMHaLdNkjnYLARjIB0l
-# VZgjTrIdIYf7FyjZZSWrv7qqGyVsUcy9v8n3Vg98afuQzLBWQkdrOOc+dbbKReje
-# 5QgBaSs8mtuJcsDzgojPoJ/TQbG4ZIoa1sJyZhwA2bIs9wRuYI0JGj40dqNnCqbG
-# 0GaKoqRIIRw3JGnXfHdvipSRWmHwzRduA4N5AeZhuMaWgubdMPah5qW0j8rzmdHa
-# xUZv76WSyf+pIMGc4m3QInx+XY26w/QkZNKX4vuWWwTOLrGBlnpOT+jBSMyYF9gJ
-# OXEhvX/l4AMO1in9/nlBtpJZy4+V00gw1hmsHK3T2NdocvqK69vuzt23xsSXRyDT
-# qrsUaf50j2uatT2kGK4uOLD8u9zRFmh3DLdM6OWyqmKHiZkbaV7Eq2gWOVFYXcdf
-# MSVgtYlm5KdGTOkxOHjqA6PWoO6zvsemIG+ZuDHX0fjpsrEi/NRujUn6sx7AQc0v
-# NOA+SVcOcQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCArwbMjAhpxCa3/a2MjyVskhP233vLMnehoqvdq
+# 8PngQTANBgkqhkiG9w0BAQEFAASCAgB06G8G/AMujj9v2bxi8LhZUV2W5WlrPbrZ
+# sDUGVa/68uYiAHVk9oTbQPhgkwENGbJnq41MW9hVgYw5Cr3dtBtItWiCnAGYC1s8
+# kANVH1qIDX+hYzys9NG0WxxN62xxpEWPVjb6z31rkSTquNz304Sm1Oi+SuOg3Lsv
+# 3R8Xbg2a7zDb2bSOqiDHsBQr3NpuW/QJbb/NcydE4kmU2lzA8LuM3P2yBZc2RBe0
+# aDFCgE5jK6Y5ysNmwcq8GqwDTd1QH44GNaJWb1KN6HS4yfGus93hHVXMHacWPwUK
+# 3NkyyjWpkR0qGEq7ngMCUH9QEcJKdZvCUgo/UGORtzSCJFdwOLpSwkSAJzCK9sfu
+# u661ixLvjUGPQ6Jytb2oInDBPnrHccwoo0C3qUWxiuV4GqYKahZLroxjc1c52HV4
+# v/fu5ui8S8w10ptPAkaXNNtzeozKs27QJhlHOwftU0l0shTW0BzLdEeKWRtnymgk
+# 1LIqNED9ziOTmIK2mrHKgENXh7VBQVK15k2gVZ+ULzW0CxDyYgArlCj194JiiP5i
+# 1iSppXQQUWYUCVriXrFEh5I5K4Z5WGFce377hc6lKz0PUrUaXvn9ZMibI4ScMqH8
+# Jr4yDQHGeYqfljNVdQvvt/49iEqzfdx3acblmpWfTXk5+MgbQQ8PS15PROGJ3SV7
+# 0K1e5dxRNQ==
 # SIG # End signature block
