@@ -46,6 +46,7 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Config\Orchestrator-Cluster.json` | `{{DataAllRootPath}}\Orchestrator` | Shared expected-server list, election weights, server policies and peer-monitoring settings. |
 | `Config\Versions\<VersionId>` | `{{DataAllRootPath}}\Orchestrator` | Immutable before/after snapshots created for every publication and rollback. |
 | `Audit\Orchestrator_ConfigChanges.csv` | `{{DataAllRootPath}}\Orchestrator` | User, source server, timestamp, hashes, version ID and change summary for every publication. |
+| `SmartM365-Orchestrator-GUI\<Server>\SmartM365-Orchestrator-GUI_<yyyyMMdd>.log` | `{{LogAllRootPath}}` | Persistent GUI activity and technical error details. A local `%LOCALAPPDATA%\SmartM365\Logs` fallback is used only when the central log root is unavailable. |
 | `Orchestrator_Runs.csv` | `{{DataAllRootPath}}\Orchestrator` | Tenant-wide lifecycle history: one row per orchestrator process, shared across servers and retained indefinitely. |
 | `Orchestrator_Runs.lock` | `{{DataAllRootPath}}\Orchestrator` | Cross-process file lock serializing lifecycle CSV updates from all servers. |
 | `Orchestrator-State.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Per-job state (last occurrence, last run, running PID). Atomic writes. |
@@ -73,7 +74,9 @@ Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator la
 - filters the all-server run history by date, server, job and status, with CSV/HTML export and log opening;
 - validates the complete jobs and cluster documents before publication;
 - uses an atomic cross-server lock and hash comparison to reject concurrent/stale edits;
-- creates before/after versions and an audit row for every publication or rollback.
+- replaces shared JSON through a bounded Windows/SMB-compatible retry, skips unchanged files and rolls back an earlier replacement if the second configuration file fails;
+- creates before/after versions and an audit row for every successful publication or rollback;
+- writes timestamped activity and full technical error details to the daily GUI log under `LogAllRootPath`.
 
 The GUI deliberately has no start, stop or run-now action. `Elected` ownership is displayed from the generated plan and cannot be edited directly. To choose a fixed owner, set `AssignmentMode` to `Pinned` and select exactly one expected server. `Manual` jobs remain excluded from scheduled election.
 

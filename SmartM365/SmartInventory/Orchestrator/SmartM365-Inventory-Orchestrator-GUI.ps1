@@ -15,6 +15,10 @@ SmartM365 tenant profile. Defaults to test.
 Optional direct path to the shared Orchestrator data folder. When omitted,
 the path is resolved from the tenant and local Orchestrator configuration.
 
+.PARAMETER GuiLogFolderPath
+Optional direct folder for persistent GUI logs. When omitted, logs are written
+under LogAllRootPath\SmartM365-Orchestrator-GUI\<computer>.
+
 .PARAMETER ValidateOnly
 Parses the XAML, imports the management module and validates the committed
 configuration templates without opening a window or touching runtime data.
@@ -24,24 +28,28 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
     [string]$SharedDataFolderPath = '',
+    [string]$GuiLogFolderPath = '',
     [switch]$ValidateOnly,
     [switch]$SmokeTest
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.2'
+$script:AppVersion = '1.0.3'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
 $script:PlanningRows = @()
 $script:HistoryRows = @()
+$script:Controls = $null
+$script:GuiLogPath = ''
+$script:GuiLogWriteWarningShown = $false
 
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
@@ -311,7 +319,7 @@ $xaml = @'
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
-            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.2" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
+            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.3" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
         </Border>
     </Grid>
 </Window>
@@ -367,12 +375,69 @@ function Write-GuiActivity {
         [Parameter(Mandatory = $true)][string]$Message,
         [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS')][string]$Level = 'INFO'
     )
-    $line = '[{0}][{1}] {2}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Level, $Message
-    if ($script:Controls -and $script:Controls.ActivityBox) {
-        $script:Controls.ActivityBox.AppendText($line + [Environment]::NewLine)
-        $script:Controls.ActivityBox.ScrollToEnd()
+    foreach ($physicalLine in @($Message -split '\r?\n')) {
+        $line = '[{0}][{1}] {2}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Level, $physicalLine
+        if ($script:Controls -and $script:Controls.ActivityBox) {
+            $script:Controls.ActivityBox.AppendText($line + [Environment]::NewLine)
+            $script:Controls.ActivityBox.ScrollToEnd()
+        }
+        Microsoft.PowerShell.Utility\Write-Host $line
+        if (-not [string]::IsNullOrWhiteSpace($script:GuiLogPath)) {
+            try {
+                Write-SmartM365OrchestratorManagementLog -Path $script:GuiLogPath -Message $physicalLine -Level $Level
+            }
+            catch {
+                if (-not $script:GuiLogWriteWarningShown) {
+                    $script:GuiLogWriteWarningShown = $true
+                    Microsoft.PowerShell.Utility\Write-Host ("[{0}][WARN] Persistent GUI log write failed for '{1}': {2}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $script:GuiLogPath, $_.Exception.Message)
+                }
+            }
+        }
     }
-    Microsoft.PowerShell.Utility\Write-Host $line
+}
+
+function Write-GuiException {
+    param(
+        [Parameter(Mandatory = $true)][string]$Context,
+        [Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    Write-GuiActivity -Message ("{0}: {1}" -f $Context, $ErrorRecord.Exception.Message) -Level ERROR
+    $hresult = '0x{0:X8}' -f ($ErrorRecord.Exception.HResult -band 0xffffffffL)
+    Write-GuiActivity -Message ("ExceptionType={0}; HResult={1}" -f $ErrorRecord.Exception.GetType().FullName, $hresult) -Level ERROR
+    if ($ErrorRecord.Exception.InnerException) {
+        Write-GuiActivity -Message ("InnerException={0}: {1}" -f $ErrorRecord.Exception.InnerException.GetType().FullName, $ErrorRecord.Exception.InnerException.Message) -Level ERROR
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ScriptStackTrace)) {
+        Write-GuiActivity -Message ("ScriptStackTrace={0}" -f ([string]$ErrorRecord.ScriptStackTrace -replace '\r?\n', ' | ')) -Level ERROR
+    }
+}
+
+function Initialize-GuiLogPath {
+    param([string]$PreferredFolderPath)
+
+    $folders = [Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($PreferredFolderPath)) { $folders.Add($PreferredFolderPath) | Out-Null }
+    $localFallback = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'SmartM365\Logs\SmartM365-Orchestrator-GUI'
+    if ($localFallback -notin $folders) { $folders.Add($localFallback) | Out-Null }
+
+    foreach ($folder in $folders) {
+        try {
+            New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop | Out-Null
+            $probePath = Join-Path -Path $folder -ChildPath ('.write-probe-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+            try {
+                [IO.File]::WriteAllText($probePath, 'probe', [Text.UTF8Encoding]::new($false))
+            }
+            finally {
+                Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+            }
+            return Join-Path -Path $folder -ChildPath ('SmartM365-Orchestrator-GUI_{0}.log' -f (Get-Date).ToString('yyyyMMdd'))
+        }
+        catch {
+            Microsoft.PowerShell.Utility\Write-Host ("[{0}][WARN] GUI log folder is unavailable: {1}; {2}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $folder, $_.Exception.Message)
+        }
+    }
+    return ''
 }
 
 function Set-JsonProperty {
@@ -446,7 +511,7 @@ function Get-ElectionOwners {
         $plan = Read-SmartM365OrchestratorJson -Path $planPath
         foreach ($assignment in @($plan.Assignments)) { $owners[[string]$assignment.JobName] = [string]$assignment.OwnerServer }
     }
-    catch { Write-GuiActivity -Message "Election plan could not be read: $($_.Exception.Message)" -Level WARN }
+    catch { Write-GuiException -Context 'Election plan could not be read' -ErrorRecord $_ }
     return $owners
 }
 
@@ -540,7 +605,7 @@ function Refresh-AllViews {
     }
     catch {
         $script:Controls.StatusText.Text = 'Refresh failed'
-        Write-GuiActivity -Message $_.Exception.Message -Level ERROR
+        Write-GuiException -Context 'Refresh failed' -ErrorRecord $_
         [System.Windows.MessageBox]::Show($_.Exception.Message, 'Refresh failed', 'OK', 'Error') | Out-Null
     }
 }
@@ -624,6 +689,7 @@ function Publish-Draft {
     $confirmation = "Publish the shared configuration?`n`nJobs: $(@($script:DraftJobs.Jobs).Count) ($enabled enabled)`nServers: $(@($script:DraftCluster.ExpectedOrchestratorServers).Count)`n`nEvery Orchestrator server will reload it automatically."
     if ([System.Windows.MessageBox]::Show($confirmation, 'Publish shared configuration', 'YesNo', 'Warning') -ne 'Yes') { return }
     try {
+        Write-GuiActivity -Message ("Publication requested. ExpectedJobsHash={0}; ExpectedClusterHash={1}" -f $script:Snapshot.JobsHash, $script:Snapshot.ClusterHash)
         $result = Publish-SmartM365OrchestratorConfiguration `
             -SharedDataFolderPath $script:SharedDataFolderPath `
             -JobsDocument $script:DraftJobs `
@@ -636,7 +702,7 @@ function Publish-Draft {
         Refresh-AllViews
     }
     catch {
-        Write-GuiActivity -Message $_.Exception.Message -Level ERROR
+        Write-GuiException -Context 'Publication failed' -ErrorRecord $_
         [System.Windows.MessageBox]::Show($_.Exception.Message, 'Publication failed', 'OK', 'Error') | Out-Null
     }
 }
@@ -659,6 +725,15 @@ if ([string]::IsNullOrWhiteSpace($SharedDataFolderPath)) {
     $SharedDataFolderPath = $dataFolder
 }
 $script:SharedDataFolderPath = [System.IO.Path]::GetFullPath($SharedDataFolderPath)
+$resolvedGuiLogFolderPath = if (-not [string]::IsNullOrWhiteSpace($GuiLogFolderPath)) {
+    [System.IO.Path]::GetFullPath((Resolve-ConfigTokens -Value $GuiLogFolderPath))
+}
+else {
+    $logAllRootPath = Resolve-ConfigTokens -Value (Get-ConfigValue -Config $localConfig -Name 'LogAllRootPath' -DefaultValue (Join-Path $PSScriptRoot 'Logs'))
+    Join-Path -Path $logAllRootPath -ChildPath (Join-Path 'SmartM365-Orchestrator-GUI' $env:COMPUTERNAME)
+}
+$script:GuiLogPath = Initialize-GuiLogPath -PreferredFolderPath $resolvedGuiLogFolderPath
+Write-GuiActivity -Message ("GUI session started. Version={0}; Tenant={1}; User={2}; Computer={3}; SharedDataFolderPath={4}; LogPath={5}" -f $script:AppVersion, $Tenant, [Security.Principal.WindowsIdentity]::GetCurrent().Name, $env:COMPUTERNAME, $script:SharedDataFolderPath, $script:GuiLogPath)
 
 $bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json'
 if (-not (Test-Path -LiteralPath $bootstrapJobsPath)) { $bootstrapJobsPath += '.template' }
@@ -745,8 +820,8 @@ $script:Controls.ServersGrid.Add_SelectionChanged({
     $script:Controls.ServerWeightBox.Text = ([double]$row.Weight).ToString([System.Globalization.CultureInfo]::InvariantCulture)
     Select-ComboText -Combo $script:Controls.ServerPolicyCombo -Text ([string]$row.Policy)
 })
-$script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
-$script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
+$script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { Write-GuiException -Context 'Invalid job draft' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
+$script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
 $script:Controls.RefreshButton.Add_Click({ Refresh-AllViews })
 $script:Controls.ValidateButton.Add_Click({ [void](Show-DraftValidation) })
 $script:Controls.PublishButton.Add_Click({ Publish-Draft })
@@ -766,7 +841,7 @@ $script:Controls.AddServerButton.Add_Click({
         Refresh-ServersView | Out-Null
         Write-GuiActivity -Message "Server '$server' added to the draft."
     }
-    catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Add server failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RemoveServerButton.Add_Click({
     $row = $script:Controls.ServersGrid.SelectedItem
@@ -793,7 +868,7 @@ $script:Controls.RollbackButton.Add_Click({
         Write-GuiActivity -Message "Rollback published as $($result.VersionId)." -Level SUCCESS
         Refresh-AllViews
     }
-    catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Rollback failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Rollback failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Rollback failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.ExportCsvButton.Add_Click({
     $dialog = [Microsoft.Win32.SaveFileDialog]::new()
@@ -822,7 +897,7 @@ $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jo
 $script:Controls.HistoryJobCombo.SelectedIndex = 0
 Refresh-HistoryView
 if ($SmokeTest) {
-    "[{0}] SMOKE_TEST_OK SmartM365 Orchestrator GUI v{1} | Jobs={2} | PlanningRows={3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count
+    Write-GuiActivity -Message ("SMOKE_TEST_OK SmartM365 Orchestrator GUI v{0} | Jobs={1} | PlanningRows={2}" -f $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count) -Level SUCCESS
     return
 }
 
@@ -833,6 +908,7 @@ $window.Add_ContentRendered({
     }
 })
 $window.Add_Closed({
+    Write-GuiActivity -Message 'GUI session closed.'
     if ($script:GuiSplash) { Close-SmartM365GuiSplash -Splash $script:GuiSplash }
 })
 [void]$window.ShowDialog()
@@ -840,8 +916,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbiY63K7LlZJJ2
-# HEsH3i3Z7NGjjAt90f8qJ7eU2xYZk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQO1WrGWRMXAof
+# YdZjodfBPo0m/+7d+rxV5SZzii9ZlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -932,25 +1008,25 @@ $window.Add_Closed({
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -958,47 +1034,47 @@ $window.Add_Closed({
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOu6z0cv84kFZkxhphq6619rUc5q4ys5t6sd2uXAS7jjMA0GCSqG
-# SIb3DQEBAQUABIIBgGa6fybDjPdatsBXkr/ywtopZ8cARSeP04255BianZNtmsTu
-# Ift3ezf8enLQq4JDcRHwR8wddTuvHt3XTHUSMXrffX+qFUoZBf47INZdX5C7WRqK
-# ZTchYG9S8n5hneTdvDF21/UrIMgOWJrPa8ANInt0XXN7I6PoY0+qDbP+0b1ci61Y
-# Tjz4SDwQdaRTDD1iYMIcv5A1oOMQ/DybiUrV8E++bfsDkA0saXQCJXaYivr8hc+j
-# WpAHh/dklE2STsIuDDm76S+95NgCZsdmrXNEgmaCKxfV7mb7fq8Dmh3ffYlxdp/k
-# G0iRWLZ+ap7ryNci/+7ersZ3hT8dto4B6vJ9Bl+RQ46u80LOebwgblfovXHFUmsC
-# 2LzSnsDS/wcI6Pd+wjIqj9nQtgROr0VuB8YU3pILr2w5gLJGastCOOv+BgWdQF54
-# QsvIdqGTi7n/goQ+fwhWkruTxYp6IEWbu/OP7l5q7j8UWw/wpKZUTPoFXP+hDs24
-# X9ihHnx58UYArBdReKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFuxZelaYQ8VbwJYPGtpyKqGjUCML1gzR8KZMj86M3VWMA0GCSqG
+# SIb3DQEBAQUABIIBgGT7ed4vcmDiZtBE0qxLRVM/ORFMtFJkR0CbfrHYzBXnjk0s
+# 74pzul1s7pc70hp9bkfkvgH5KmQRtBlEVNKZmsU8KglK+1W0oUufecMPUfnEKRcd
+# SxUWZ8FNC3kA0ENoSDqRCMl+dS4UwgrVyRSsToRezNfwuBPp1cMpxVBPr0CuIgyL
+# 90utY78rOvIX/kheDUc1pXzOMvLuHUyIs2o3BnBM1SEW1qXNV7Sl5yrCQljd932h
+# UKREpXUuhPRT6N+LSxRpXk4+zI4hBdh9xWnGTFdH92TcJSFS4Z/0doBXwHstcNvz
+# qXcFosCh1Cq6pVd8lzY45v/RBB6x2C4kQNlBJV+p32Ov6sux+95gpOGfscTBAQry
+# evYCg/BVjQLXWCo6K8wUYSXmMX0Kr2VTQjivWwqogvSs/AG6BksbvXaV6DOY20HR
+# alcgA96zTOuvnnSml/P0X2g7t9mYw37NRqNrpxTffx0g+8rje4LZ8hbToccbJaz0
+# fdUpBa1UWP+jdCtGrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMDQ3
-# MTJaMC8GCSqGSIb3DQEJBDEiBCBNbFxJLBuLqfbpvIsMXyVUcJHwLmsw3qboPBtr
-# 3z8/kzANBgkqhkiG9w0BAQEFAASCAgAfh91EOLGBayjwOgiPH/JKpZkKBSHv1CHO
-# D9TvZYADVZQtf5ZXuzTAx5szQHtbf4q1PbGtAHn+TSVI72k+pYW3ga+330abDjwZ
-# FSC1jS20EC7qDB1E0OUHeknw2QvQOLQvuTNv/+ZPa7jv7F/679bJDAN/19SdvWyV
-# 5efg8L2ZCLqXRn3wXYv/TBsmdTV+8uA40y1pM8FrvDOF09QiOIYReO0MAIsTIWtE
-# tmi3KStle6qrNwPWWJf9ZC+5Qp0YaoWQNg6bDNKLvpTnsCFX5NtOeA9O2Z0VH2aG
-# 6Xx7A0SCvHzF25Ip2rXaVQNL+gb1SM2oDDLTOBz6x30y65YIhr8/BYPoy+e7eLRP
-# bXXySpmMbhhz+NFTMtjzRuWc60UZQo6y2bbdYQyI/K5omgU8q0uU0ifvDnj8U6L4
-# qbLwYOXFK7q5u47kwwlPbPA2/PJrwGG4E7ixZFKMiUuFZtXGh4pz6hWBwHHvGpPn
-# IxbA2w6UJ+9tYkWD+Ald4UG/Pz5ZlkmfwppCEF4KwkpsR/JHsv5aWf3VLdcyWI4x
-# EK6FO6f5J/+pcEYFPdezai6aD0ZrgWNHrtm4cZl6/34fJXap1uKuWY3KV8bhaXmq
-# xv+2wfFiCTrgBUCPQHzwj6UgqTH4aM93aSSHu2J1dPzOXtn4Lv+ySyDEOAeN+WP8
-# /mlMOF9yNw==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzU3
+# NTZaMC8GCSqGSIb3DQEJBDEiBCCHto/hRzM1xyrFj1vZISYlLH5M0unTPKlHOWvE
+# 514YczANBgkqhkiG9w0BAQEFAASCAgCeLQKdvG4qA0Awr+tDv/SewsbVxTggdpvu
+# uZHbX5+kgThFnI1CU3ruXd6r6eGfISFJd4iNXNx96w4NeipmnWkWlo1QaFOgz6b4
+# /LIkDTnCDL0wihdWQgjWYDYHR4VPYXKNSPpa6nFPxNEtvFpdvl1HA18BlBIaevVE
+# jK0yx6OTkrsy0TEIMhpoFxu+V3elfVT4nLjRssRg2g8ey8VJtsEdkOE/yWg4lKKS
+# 7luqLHuKrfFQlU9wqdclmgenJyJBWGQbxVHTzRTV6fOKpi8vEJksihvmdg70uwx1
+# TZw8IVgaTP+NiNul+29vRd5b3kV4oF3yQ2yiTMU1kaia7jXbCVfI7RswPIO7V5Si
+# U0vrj7a3TntebURqu+0UnYpnmbo7mZu58VAu+d/mGothRyOgDn2cXQKOH2M2L1Y9
+# UIfn3V+DDhU3+xqV4vaGsefed8+s/SvNSPjKp41rbdaWlmrYeo+SW8L9b+K9ndro
+# IXokhgLq8sru4MuYJ8Z+dS9/z2SCiueSVwpIu97d3BCdjhxVjztZmVwNno9Ko2j3
+# yCB2/rY2QOfq/6iFHt2idauf1HU7foVKL1vZVPSUYJBH7INdF12l5+QXruYIHp/p
+# d0Kog9PSQ1U4FnOVL2Jvu/UBrVbYPDz14u5NxHA9O7LxQieAeU/yg28Awal4hdov
+# mGOqHG7n8A==
 # SIG # End signature block
