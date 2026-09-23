@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.20
+1.5.21
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.20
+    Version : 1.5.21
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.20"
+$ScriptVersion = "1.5.21"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -557,7 +557,7 @@ function Invoke-OrchestratorEnsureSharePointFolder {
     $key = $RelativePath.ToLowerInvariant()
     if ($script:SharePointEnsuredFolderState.ContainsKey($key)) { return $true }
     try {
-        $created = Ensure-SmartM365SharePointFolder -SharePointRelativeFolderPath $RelativePath -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
+        $created = Initialize-SmartM365SharePointFolder -SharePointRelativeFolderPath $RelativePath -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
         if ($created) {
             $script:SharePointEnsuredFolderState[$key] = $true
             return $true
@@ -5224,7 +5224,7 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.55' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.56' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -5751,8 +5751,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdZ3Kav4WZZwQ3
-# jAnL4//rjmCggM+n3GYr0PvEE7DO/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJBILuR3CeuD9C
+# NCXo6LQLW+cy6RH/22S+MH3rUnGEGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5885,31 +5885,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJlXqTeXM/I7ZB+GVnO+2ML2bqhK8DBXvNaXJGLx4GIcMA0GCSqG
-# SIb3DQEBAQUABIIBgGb0zkX/J4tyg4g9dOx2hBYj65bl9tP8YahTkt/qGXoTBMsQ
-# 4K3e0ZIvxRckTAFyUMqBQkAmNJnwXnvlRsq2hOHNiTNi678bbDUbCVLvAFL4BkwW
-# 25DtZvZmLCityHVfTiHXQRtPTOAkA7yORuQijU2KO6pHloXcdu2KYuZTczZDLuu1
-# 86qazsLel328SSvfYQcn++azuTtUlx7nz+TJ6sQ9H8Pt/XQa02M9K6HoppcvarwI
-# YRoLHSwvmu0yLjJiOjjXIK9J2a0DP7Q2bn4KXzhVDrSIKwWAxx82KxbITm4HMmTw
-# suiHSxRVvTmuhrjP+jQCY619kQ55g9K9GntcMFSKRqADkuP/hQUVKFnSx7hK98pD
-# 1yy3x0G9A7sjd0er21STmiumGggWEcSyPLn1AnOaBJF39dKNNU8CEjGft1BTkwRl
-# ztRKpqRb+ZTYcJRuoYVz1TjWM7Ox0fJ098pW4nZYGXbRcaP3rmcpGKYuR+ZaR94g
-# ijq87Zjh7CqR7MJtYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII4JXWMPD+xVGpPWwQbfMnXJ1ul4dgW9jjwZrcYknTXPMA0GCSqG
+# SIb3DQEBAQUABIIBgC430wO+9RWbqcUgSDqqIpBoWB+WiHEMqfuoE8iaTBmzmEcg
+# K0HKAjXuiWfDPYlwwykCUIXcHm3N6XSh4gv/1Q4u5rJO7JwaLZZcaFzycb4hyI6/
+# lwikVxui5Hc3So1DoTiCuxLYZKtuRt/AQ68wRihC5qPC+5NnMJlC25J/U3KQudgQ
+# Kby8D5oqmWd3hMmMBOXp3MGaNd9wxLTIJYNmDyjiZicRFruGb0O76WA6l/GctXoO
+# cYhu+D7qx6kRSUwSimQOJ1vkELIS6E6h0EhTFoCTKcFrMX0P+aMz1gLQP2CrvOMK
+# nFTpFhZiYc7ZENopTM3jRey2hIA4brmOugvOIin38nm9MBvxaDrI8upU7eY6G17h
+# Y6HGs6oVvC8Oj2zbP33qiL9gXlpq8xaTgG1ZZyLsCdwCl84g0EFz8l+uAQ/x98p2
+# JH/t128E2Y5vsdOEzBoJZ2vSOyFm9tzP1h6gcUIod4pNCNeCREjNAwwiYqSnx/hO
+# YdFWD5tt2hzXI8Ake6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMTQ5
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBtqNOFtdGci9vaWt2G/tEumLvZHJn9YwfGYomV
-# Xvdh1zANBgkqhkiG9w0BAQEFAASCAgCnIefql8hp1i7musEAympYnNSid5WkSY9q
-# 17mVsTHudgBwxyb9hhX7JKQolKBEXGpyVDDiTeVOrrwn3aP4z7Vby/ZWJt6PvOwp
-# I9Ei8ydighRFdxpvPcQvzQLTGBda2sC4rll+SrkmxEI28hd0iBzrYR3wC4hRh3hg
-# KmCSNj2O2XtT4F+vP6JG3Mx9ObCVfc7x+62Iiif1qvuLjPLlK4O8riqpPoiCnJy6
-# lIzAPx/kTGkaF5kgV+N9QD+0eMGSUhbRnpYKPdoXadiBK9acOo4+QwlyL0IoEdUP
-# Kbpj33oBfIXxLJEEBPfo4q+G3XrN8bFajjkGXIBGQTEwVJlfoAeFscwgO+SsZ7NV
-# pJq+TQE4vselSR41sppJFYAuo33I9fzKxkao4uKikcsXYAjVvjrbegKV1sh0jey2
-# 3dDcvje8aFLAGPGMnGuoB+BepoOBPoUo21+UI8mJCQikgTIWXEsdeoU8Q6PSKdz1
-# 8IH/2xIIB8aRGCHcnWq5pHDo/jinWhzRg7S2/+Lp3H5aNvOSh03sNiB7exz9aFzE
-# 9XWCz7ZSe8gBcOGFbgN/7h2OrXI0DAxU1m2AzLaYWxAz8vH1/jSNqO/rTsBQRtUs
-# 8zE8rQAk0DbYcrhTYjlU1vIsvBBcWnn9DbmbqIwZOcQfL1YeKIoz7SQN/IAZlQnM
-# MTLoLNVPkw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNTEz
+# MzlaMC8GCSqGSIb3DQEJBDEiBCBOW7tBEzB5TPHkaaXHnRalEKaWDsxTv0FtTfze
+# xi586DANBgkqhkiG9w0BAQEFAASCAgAc8zHO3iSUHcregvHtERv4jBb6L3eNuroM
+# +XxVS31dYauAk8hMGPVxEHhDd6VJx5eHNderjra4uuviiQjKyCynxQ9kmzGHhGDL
+# wJ58zRkpgz01t5fzakmj1kwt449n1BxRcSKc9e12s2qC3yucIZwfIuHJggx0dIV3
+# wIyZ0joMJXm90W6lUR8F7fTIk+vgrblJKhgih9GMco5bX6wEaIpwpahG8AGVLPjD
+# hegnH3kthiPCFblbGqI21IF2cQxH6QO4z0MXPQpx88/hAv+penOG43vMFH8lhcIK
+# Wvn7PhRRGTPbLP4gJ89sXwQ/Uya6CTs7YHkx06KDZN0CGDmbHrQmmMZwPfSCvwze
+# 1cGjzlwpWmp4auArPT651eIsUpyWj+Og8ZnzCNEeg1hFG1+v8fVchKaWxkyVbQLJ
+# Z72Cgy+7lsVmw4teEnakFyUJCyvAPSNOJmB1KH/OcvhcqN3fckxlzIdNCbxe7Fbm
+# kl6wt+cndjpdwzeGpOTO/GNKi98GsoIeoIWQ88NdOlFnkyqYKw9qj6gtxR+8x80H
+# rCsBzLPbkgzbqVp8/CWgwh3qoR1X/GUf7C24DjpnykeX3Rb3bnmMWSVrrWh0aN8a
+# fMVnNeeCL6sEa74FUzqYhhhTDAUdoa0SoGxQQRJKEFoNxOTKU/KGS8sHEQ8qvcy/
+# vZ51AHuCZg==
 # SIG # End signature block
