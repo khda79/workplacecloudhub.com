@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.16
+1.17
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -23,7 +23,9 @@ param(
   [string]$OutputFolder='',
   [string]$LatestFolder='',
   [switch]$DisableSharePointUpload,
-    [int]$MaxItems = 0
+  [ValidateRange(1,3650)]
+  [int]$DetailedArchiveRetentionDays = 7,
+  [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
@@ -42,7 +44,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.16"
+$ScriptVersion="1.17"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -133,10 +135,32 @@ function CopyCsv($s,$d){
     }
   }
 }
+function Remove-DetailedArchiveFilesOlderThan {
+  param(
+    [Parameter(Mandatory=$true)][string]$Folder,
+    [Parameter(Mandatory=$true)][string]$BaseNameWithoutExt,
+    [ValidateRange(1,3650)][int]$RetentionDays=7,
+    [datetime]$ReferenceTime=(Get-Date)
+  )
+  if(!(Test-Path -LiteralPath $Folder -PathType Container)){return}
+  $cutoff=$ReferenceTime.AddDays(-$RetentionDays)
+  $namePattern='^'+[regex]::Escape($BaseNameWithoutExt)+'_(?<stamp>\d{8}[-_]\d{6})\.csv$'
+  $removedCount=0; $removedBytes=[int64]0
+  foreach($file in @(Get-ChildItem -LiteralPath $Folder -File -ErrorAction SilentlyContinue)){
+    if($file.Name -notmatch $namePattern){continue}
+    $stampText=$Matches['stamp']; $stamp=[datetime]::MinValue; $format=if($stampText.Contains('-')){'yyyyMMdd-HHmmss'}else{'yyyyMMdd_HHmmss'}
+    if(![datetime]::TryParseExact($stampText,$format,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeLocal,[ref]$stamp)){continue}
+    if($stamp -ge $cutoff){continue}
+    try{$removedBytes+=$file.Length; Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $removedCount++}
+    catch{Warn "Detailed archive retention could not remove '$($file.FullName)': $($_.Exception.Message)"}
+  }
+  if($removedCount -gt 0){Log "Detailed archive retention removed $removedCount file(s), $removedBytes byte(s), older than $($cutoff.ToString('o')) from $Folder."}
+}
 function ExportIssues($rows){
   foreach($f in @($OutputFolder,$LatestFolder,(Join-Path $OutputFolder 'Archive'))){ if(!(Test-Path $f)){New-Item -ItemType Directory -Path $f -Force|Out-Null} }
   $main=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues.csv'; $latest=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Exchange_HybridIdentity_Issues_$RunStamp.csv"
   $sortedRows=@($rows|Sort-Object IssueNumber,ObjectGUID,Potential_Issue); Assert-SmartM365CsvDataCompleteness -Data $sortedRows -TimestampedPath $main -LatestPath $latest; Write-SmartM365CsvAtomically -Data $sortedRows -Path $main -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
+  Remove-DetailedArchiveFilesOlderThan -Folder (Join-Path $OutputFolder 'Archive') -BaseNameWithoutExt 'Exchange_HybridIdentity_Issues' -RetentionDays $DetailedArchiveRetentionDays
   $summary=@($rows|Group-Object IssueNumber,Potential_Issue,IssueCategory|Sort-Object Count -Descending|%{ $p=$_.Name -split ', ',3; [pscustomobject]@{IssueNumber=[int]$p[0];Potential_Issue=$p[1];IssueCategory=$p[2];Count=$_.Count} })
   $sm=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; Write-SmartM365CsvAtomically -Data $summary -Path $sm -Encoding UTF8; CopyCsv $sm $sl
   $files=@($main,$latest,$archive,$sm,$sl)
@@ -188,6 +212,7 @@ try{
   Log "Starting $ScriptName v$ScriptVersion"
   $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.49' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
+  if(!$PSBoundParameters.ContainsKey('DetailedArchiveRetentionDays')){$DetailedArchiveRetentionDays=[int](Cfg $lc 'DetailedArchiveRetentionDays' 7)}
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Exchange\Issues\HybridIdentity')}
   if(!$LatestFolder){$LatestFolder=Cfg $lc 'LatestCsvFolderPath' $OutputFolder}
@@ -313,8 +338,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmcsbiqQqpqNlg
-# 4ymQONGSFWB/U8Wx9Vr0ay5Kvr7Av6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDB8Bf6BdykF5qF
+# InVcmQWCtJ6xurLc7j1esodtujflQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -447,31 +472,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICPe3TcR7k69n9fM/17exf/TLRXmOZeIFnljpxv/BVRQMA0GCSqG
-# SIb3DQEBAQUABIIBgIY8XjOLG90eZAxQvyRmmRWILpsObG9cqaLNr+NYIXuNqKcW
-# JFTivEPJlwLcb3fDdauyIzhHrj+aiRowUjbNRDOqdTAWBjo1d/tij7COaq0rcGQk
-# jwR3Ti12i/1zgneqUFxdM3Yhhawg61Lfh4Gdg7uL41hTdeztu1qpwpv1K4AkDdqd
-# 6PmrjokFe2CBFenGKwJCoVYaK2SNy08p/clmsxpZdP0mywjpjDT2T+mT8QqWZ0jx
-# JQMWvr9yelNSWROVz84ob9ocZsWOJ/Bgscf4BI+IxVUpyPIx4cfSOlZSiXVNBubm
-# w56MrQeMoGYzBMvFc72C+M3veI3+BX/DU637B51XRvNjx4dg0l9Y0lGPpA6Ok4YX
-# q3e5Qg8pQ31Ctd2bHSiWG8xI8QFykcIgnRA98GtgLuN57+hD1Vbt5vwZ0kBruQgM
-# DHicKX93J4sXl8F3m2vxhqAdGN77oZRAnbmkL6Rv6RIIhZKYuoWvhBTr8Os25WSR
-# Obw3ydzUtarPGoqBZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG+ygv34mFlFNl8I01qsNeTbfnuKQpxGeJ5lLmVOw32HMA0GCSqG
+# SIb3DQEBAQUABIIBgEH8klGDyNH1EM/xzjkgcHY0vUdDB+pS2A1jY5jd3rlh78/R
+# xokAawNZ61IrFi+T+5UUCQrUk5EjEqq4OsIKhHc+x5g5u9RhUfrvJs4IplgSZt92
+# 4D6Wh+oQ1CvYsAvsFzk00/uqmM9rLp4LhUn9vyNGsZbxeQfbysI0GWh9v3iU1g1j
+# mCvduh9Amu518icV9g/fEn4z9Ech/MUiuL3Rau6fUKPyF9Fg49qtirEgBb7MzVjd
+# fgUZXrYHze+ToGwHEPTqfFyaLc+lD0YDwnweUWNmYuloWvrCMrc6NObANws7zBvj
+# Qn7bzpSORHvx2/TAmLadgdKY2GkAKTdPc275/BQAoK/MPNWtBTlqzqRAgm1ivYBP
+# S3+TVUQl8ylag5TFr/1eZHq++MB64G6emU5wRPF6vAyOpwE6bX+mbJVhUqSlRpFO
+# 7eaS07xbpADeAqVimKUiY0bsNBODiPT7eQ4Jmm1TXONGX2CgKvi4meGyZUWo9TCx
+# 38kSueRIRIIU81xI4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjVaMC8GCSqGSIb3DQEJBDEiBCC9/9Mu9xIM425iqSVXt9J9QIKZrEApFCjNQcw1
-# Uq2SKzANBgkqhkiG9w0BAQEFAASCAgBPiD5I8MIe2DCBUKJkH2sp/TBTLLLQTVOz
-# 3K2YLYUsGW8Lc/KKPKEWOiKXCOLKJDgGejpZ9UC4wdBVAbv0IBgmREGmzHftynpA
-# xB+W5pInBcQ1QPWIWR2T8twDnyU24HG96bR920je95jX2k4pX88+iEWRcdRAbus8
-# ds7nWXuAEUQ6ZHe68VWd6TYwpWzUZqCamerlbIOeaVuoP6QW5JjS5ruunC2q6NnH
-# otVlI4JVguSyIcPbQsX0eAcp4TZWWKcNJnt+/WKQn4nd+SuNZD/oY0WfcMpI7io3
-# On2iX2l3eKDRFGzC51j9SJvT1+C7HVaGR4xmVR8BaUA6ZcgmQjxQy+nWmJUFxIic
-# QhFebpnR02H9/fahdWBr24d+3h2mWAhJV2CYQNXfWFTCTY5OPUDU3roD0FjBiRiH
-# UtWxtITTqf6KNAZ48Wcxn20o+fpctwLwsyTgtMAJTb0nPTWr//XMqKN4pdba68UT
-# ZexRSX5Tglo5yogRPfb/jYdNkGflRDbzl88ytHlNBQqSob155y4Bjcqy4IQaEYZp
-# ZY2m6QgJGfN7GLec67gUBFOedAizGdl5Ab2RiNT9G8K9Ze5ZY+wmzlx8DGo+HhWX
-# qs4xmjd+O/sMugnWu5R8WzxroPnbMilLtvPD3NSW6X6qJhuV5m7UxMZj1YCC4OMt
-# v8vg/hkiIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMyMTM0
+# MjZaMC8GCSqGSIb3DQEJBDEiBCAmG/e2Kh47SWROMz6os1Be8Qd/9EAk5S8lbeGY
+# dOIQxTANBgkqhkiG9w0BAQEFAASCAgBA1AGg/BnvN5eMOMNKhsXhi4IDtcRbzYdS
+# YBGHyhZMxn2zK3ipjF7kv4bPEOpKIPHcneWQRsZWZ46UeDuJHRrozJ2wV/4AO0QB
+# JW4nPZO4SfVSh5VAdksGIqfg/Do4tiJa8zYw8lQBMGjPqxurSStJWpvqsbhYKFdk
+# b/xSedHBDFeL2iuQiPGNelKLgUsNxnTHB8IFMNRrHAb77reKMBuPl22nexFvf/Ll
+# RnUtbfZfqK9QbmjGc7dZY5fYIuJLLKeysSHSp4KGdgQ9Do1MLDK3s58aDY2Aurmz
+# +bjEXCdk3b47lFI7Z5XuB+4D9fpi2DVgw//DAXslPxNm0RszYhh4/outdllFEVkN
+# ZsrUtWK1nvSj9xetBx4x5YWCLiZEP7B0jYt8E9cfNOWlfV8r4EPv5KOmTRar5b/c
+# Zw8b/SilsZdFj+KKbDqszNBCSuJEHtNeMHw2GeImuAM3RCYcrayyPPZJ46v1oQXj
+# Su422JwjEt51PNHaKJpvVq9u1IroowPEzbWTbD2zbRBnOuyEDmJ2N8pebQh37P6c
+# aCjzW9ZGXYja4gA1/bRob06hIDT3nnQGwYZe98W8iffrc5AeOGlmf3J4rv+wYNuu
+# DMf4eX92NiVOl0l8ofpU6XpqDxvA4j4+6X21AKc4JAuZaOBkoewxpS55F6vJm1Uv
+# ZOQGT2pL0Q==
 # SIG # End signature block
