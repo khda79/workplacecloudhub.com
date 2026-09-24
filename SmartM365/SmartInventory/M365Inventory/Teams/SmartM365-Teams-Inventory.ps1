@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.30
+0.31
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.30"
+$ScriptVersion="0.31"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -56,7 +56,7 @@ $tenantContextPath=&{ $d=$PSScriptRoot; while($d){ foreach($c in @((Join-Path $d
 . $tenantContextPath
 $TenantContext=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 $ctxDir=Split-Path $tenantContextPath -Parent; $SmartM365Root=if((Split-Path $ctxDir -Leaf)-ieq 'Config'){Split-Path $ctxDir -Parent}else{$ctxDir}
-Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.49' -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.57' -Force -ErrorAction Stop
 $LocalConfigPath=Join-Path $PSScriptRoot "$ScriptBaseName.local.json"; $LocalTemplatePath="$LocalConfigPath.template"
 if(-not(Test-Path -LiteralPath $LocalConfigPath)){Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration'|Out-Null}
 $ScriptConfig=Get-Content -LiteralPath $LocalConfigPath -Raw|ConvertFrom-Json
@@ -580,7 +580,7 @@ try{
   [pscustomobject]@{Path=$channelsTimestampedPath;WorksheetName='Channels';TableName='TeamsChannels'},
   [pscustomobject]@{Path=$guestsTimestampedPath;WorksheetName='Guests';TableName='TeamsGuests'}
  )
- $workbookPath=Join-Path $OutputPath "M365_Teams_Inventory_$stamp.xlsx"; New-TeamsTimestampedWorkbook -CsvFiles $timestampedCsvFiles -Path $workbookPath|Out-Null; if($global:RetentionMaxCSV-gt 0){RemoveOldFiles -Path $OutputPath -Filter 'M365_Teams_Inventory_*.xlsx' -KeepCount $global:RetentionMaxCSV}
+ $workbookPath=Join-Path $OutputPath "M365_Teams_Inventory_$stamp.xlsx"; New-TeamsTimestampedWorkbook -CsvFiles $timestampedCsvFiles -Path $workbookPath|Out-Null; Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern 'M365_Teams_Inventory_*.xlsx' -RetentionDays 7 -LogFile $global:LogTextFile
  if(-not$DryRun){Invoke-SmartM365SharePointCsvUpload -LocalFilePath $workbookPath|Out-Null}
  if($EnableWeeklyHistory-and-not$DryRun){Add-SmartM365WeeklyHistory -SourceCsvPaths $GeneratedCsvPaths.ToArray() -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Microsoft Teams inventory'|Out-Null}elseif($DryRun){WriteLog -Message 'DryRun enabled: WeeklyHistory skipped.' -Level INFO}
  $teamArray=$TeamsRows.ToArray(); $memberArray=$MembersRows.ToArray(); $channelArray=$ChannelsRows.ToArray(); $guestArray=$GuestsRows.ToArray(); $alertArray=$Alerts.ToArray()
@@ -594,8 +594,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkenEm/rNd/TTk
-# v5PSIQYijog242ZC/XdOy45u74RNLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCerUYNJULFdA6n
+# /e34XaJDXO/lPCfx0MUAV2t57xcJCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -728,31 +728,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEnpqaJyVpwZO7lqcSrRJhTagjzbMj1aLtsACPHUOtPRMA0GCSqG
-# SIb3DQEBAQUABIIBgDl9dW59ol52k1+n3XbP3sv9JdzV9wjlYoDThL7JuA9FLWfY
-# o5v8bZ97dO8igntTWPHvPPQltMNQ1jT8XmrXAvyO10NNsTVTwhozl7iwOXZLq8yB
-# cHVIbTbFx5KYifkF1JLfFs6SGl4hyAB1hyQgOo/OTOaHBXLJgOzkxOI8nvOaXT+f
-# Hw8ShoI1jjDt5lH3+KuSlBLsPjvdjksdB1N4MP9S/lW2c22aOajYGRirARLZll9k
-# +DHG/qsj63NjoerHwY15g74vir3pBU49siHTMn9Ybrz/EsVVWSP1WZ0KXIaZedjR
-# cCJr14JeA3+kN3P5ybHAP/ESSoG2eU2V6/9b+QF3usa3/1tQqiMOkeLsJJwkKVBJ
-# CZC6KbuIKm89X2oZU6RqYGg1rwa6pHzOM+cdlGlW30p8sPaa6kEZoEnvE4JLhnTn
-# MpI///M7mSOLAdRHxix6um5WizvylewJjTSoam0ieH5I142gDEXHn79gazj9YrLN
-# YHoWlKRkEjhDaAPfY6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA76UEqZx7Xb/z4K4oKjImvhjp+j5VWthcVWIcm+N3tOMA0GCSqG
+# SIb3DQEBAQUABIIBgFDf/ndualRNyRgLDUAvs1NLFel42RU36Ph8wmR12R5E9t8w
+# E1nqGK6vyLf1xEIx+TRKwLcfmCID2/JoUtXpPGFvojUdNF2TpwLi8jf0YQhAKU0v
+# GpgnuhGurGvI6YDhThj+NVL+icbhaVzhbZ1UWV7RV0kheNeL6wy9dkAS0DWdbZda
+# /l1tthv2aXXUvlqSetT4B24jBhs0n2uf4+BOhXT7ugNzhCmRSSdZSbMMKiNPlx5V
+# 7CG7pWAfBJ9dd/4NaGZCISVQbxPlki51ALOlFUUmwvqjEyY4Hs4vNPNt0xiBvuoB
+# b0QXS558CLwfq/jKRkwXqoJF0tifUfhCPRpaYh2lyBvpkFLxyEaoea2XEtKkG01E
+# ZYdJqAJs7kcbcs4uryWGH4enJVKktNrDC/NE3x9eJUiq8MtpuYgqWqQRhplA2CTQ
+# X1JnEsOG/iIzVcoz/sbq+Njzm/Sz7hFreDZWux0E6jkTgQw+H0N6wQdXGROwEiEt
+# LfqEyTzuMxOVBPCjpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
-# NTVaMC8GCSqGSIb3DQEJBDEiBCDsorbfAGzmQrdX7QtNUyC9dNhwexrBuAZUOL9X
-# cD775jANBgkqhkiG9w0BAQEFAASCAgCpoLG1Odv0hDmuwA3J2ClVnhBLWBH0KV9N
-# GnI2dPh0I2R1D7/TI+YoolHbc5BFuHOymYcOkPYfskqLiSMNQvgu0iqlqfKxPI7k
-# jrg0CRufx0PZoY7ImTm4mXuPUizYsznkax2uqR6SvZvfjOUl3/+eKhh+BKvunaXI
-# mVhcpChQZ1t49SO6MfwuEl6C1s+PCRCOBUkTfvfBhZTie0+jD/1hjqJjeJNXgyPI
-# P2Yug9USd5vTrj/nIkOydfjXBsjMW4rlB9krHOE3cC52YYVxCfUTy/FNHOzLwBnj
-# E3/oliMnrJDBrSV5IIODS9eY8Kmg0UBsbX/d1A+dw5fDkVHwm0NyHaanijv/6h+x
-# c2Fz1F7bjoia4NBkESA7P935JgeTW64Rq9BEwJ1jPiDBx+CgNZaL62h2zrTDsIND
-# GlWGHFoemvj3kDCkwx8Uj3TiRtRL9zfI/GQkuYJ7Y777+ZmwD0xfa7sqwbyN+daY
-# G96G38RGMcv0JvvH7Z4a6U6hxpHtCazcR7VJtLqOM7k9YZgdwoacjSZNJf7i93cm
-# FCupvod6s+PyRiz7LZR8IdUF+DdxcRFNGRy/o04mT3SpT7BIFAXis/rghiRz54nY
-# 6M1nFuBXEEfrBCPWLCOCImeOi2HzkLnl5AsOgD0PW/rp2lvGJkFcHt4CQowcXwV4
-# cInbUJhxMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
+# MTdaMC8GCSqGSIb3DQEJBDEiBCA4lIKjat6/iVoluEypxUxG/U1Qkb2It4WVZnxU
+# /az+EzANBgkqhkiG9w0BAQEFAASCAgACDL2FcvOnpQLi1Z5MyZjoXPUb/+oFAapQ
+# s+03gekQlVABqmjw8gucL7sfAgBwjVwyQ4+KURnsIdmtP+9i5Rx3YQxQEAHhRoZD
+# exeXcnxStfcMAz6V9kfdn4NEmx9JVkd5lno5oHC8kXByYA0sieTM47l73iuQAUiS
+# Mu94fK0hVbYdx9QBl/hMhxImJ8+0+LNCUfqgJA3u+Pdg0fBzvwvg6d0W+GLkLhbL
+# 6zl7PMoIlwZgTYxi8i6zIbeZHlxYgTksEYjXcyFbx6idxbeafCvNjd+qP0i+gIrk
+# CbBWj4nkg8Ff+obP2Yl0m4E0qpVFw6tah1gJnPCjxo4k4K/hU3oNaKQ9fkaDoqwy
+# dftxO7fs3nz89F8WO4Cta13/gm28lifynGis5c1DswrTDaftCEVFjfV338hGx5xV
+# zFXsF+e9vVeVybbqVbjSz2L2Tt1XFKbGlFzJmovVEYhe0YaTxlXVlz2jxkEywvME
+# QCVxt5fX4+KTc97THpV6H0YeAnRqkE7RVBMdNNLUMeoQYwvvI6LbHqGtNhfC22OA
+# EhuYpFhjnGn73X14G/rmJyd88sBfXlWJfjFhbN/3uNPSMcCMDwuKq7HZkL8um4xP
+# ZlP+r17UFIA6XuY25w2yD3ucV1SpiFG+6JH6AorqHnWCVhoAegK5UFdnI153rbrp
+# 34ljFKmHpQ==
 # SIG # End signature block

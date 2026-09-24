@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.6.3
+1.6.4
 
 
 .REQUIREMENTS
@@ -172,7 +172,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.3"
+$ScriptVersion = "1.6.4"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -366,7 +366,7 @@ function Import-SmartM365CoreModule {
 
         foreach ($modulePath in $moduleCandidates) {
             if (Test-Path -LiteralPath $modulePath) {
-                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.37' } else { '1.0.49' }
+                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.41' } else { '1.0.57' }
                 Import-Module -Name $modulePath -MinimumVersion $minimumVersion -Prefix Core -ErrorAction Stop
                 return
             }
@@ -1900,6 +1900,7 @@ try {
     Write-Log "HTML executive summary exported to: $htmlSummaryPath"
     Invoke-ServersAndStorageSharePointUpload -LocalFilePath $htmlSummaryPath
     Save-ServersAndStorageWeeklyHistory
+    Remove-CoreSmartM365TimestampedDirectoriesOlderThan -RootPath $OutputRoot -RetentionDays 7 -ExcludeDirectories @($OutputFolder) -LogFile $LogFile
 
     $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $RunId"
     Send-ServersAndStorageHtmlReport `
@@ -1930,8 +1931,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNJRXcmKGTySB/
-# ehlBC2HJidFTvzvbrTrxOq7hqxpc0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/qHpDq688HhL4
+# w6LA4A4mM4V706GC7hZyImaDVHv866CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2064,31 +2065,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILWBvISWgfhutD/GHC7jo7IgNQD7zkBuSEvJ4duqY7mCMA0GCSqG
-# SIb3DQEBAQUABIIBgIdITSpMxoIgPSFJ21Yk0sO/Bku/ESHiNlhk8lnPACRthEM9
-# ft70EyNyvEhtYuFeB476TpSlFd46ThgQihly1cRuTWJiRwqsxUhqjTsiKuxf2EIG
-# qX4+9k/gPAtR28wK/a7eEtIZ7NubuQXwOBMmexq8A1+Ttl5MCEZrlOLBhWHH2vjB
-# qOPNOiUAjeb/wqkcXpysWZOKWesCL08lvlkB16w1k5b6IgNuo3X3oNvkrvpIaE4/
-# etTQHWN7GqFeyNjDRx+Tkhj/wDFZNzNtDhrUOdpg3hhyYLoNjRPeAOOAromNsbqT
-# Ef0kSByx/T7uVwj04bSfpSsq5Y8rigSbZTrRv7uCQ3yrxhjA8J6XxT9+et673xjN
-# EAVb/uwpQ83Yen1UchgoXIHCOvbfEToIGG8pptZLNhJcMP/kcOgX0+BscrdS/RMN
-# LipDV839ETOxyGDxqSuJ3un59wf/F1CRz/kcgwDfEr8ujhoXJrJPjSXZ5ozlk/WW
-# 0QcSDkkRA/+sAEntaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICglWqOCbe8LWK1FCoEpNoUK+Aq9YXaAW4o2g5c7hbyLMA0GCSqG
+# SIb3DQEBAQUABIIBgE8EehPpDOF0/RoNujWzrZwlY5yNO9LMVHDwC5XxLIYfIcwm
+# I+IZlj9/Y3Gqj58p0vfQVx2v6vHVTEc1V+Uhi4CY1OrAUNCBe7miNR78Htv+1TxO
+# km6xx/oKu4NFXTI07NeAgmKAYxp2qCn2wj/nBKQnUXM/sn3BKfKz/VuOiVAaQZvz
+# 7dgeGORVdH0ibxwlWBi9COtujR9HTvtlJnhSQfW2qsqQOsQPFgpowIMrRGM7SaQr
+# +vHlL/2gNuBYJyeOmBXN0qAWX5nHEAUctmQiG9N3PMMV7ryAQXG5DQVqDWa0vnUr
+# o4k1kYDC5LdSQEe6EOg/AskjQjYF1HQbUed8KqbKLP/PMlqbaHfZonnDHNpXCLQP
+# n3G0f+rEGm50Ru64QgbrJoCHnJ4NXmzvJ0A+NBQnDnddO5h+wTGXxxhRQOLl5psK
+# v0F03GKkNPTrkyxj9gvsQmIvoLNaLMf9a8xzoQPWz/H8ifDeCCnrCMzNPmtr0oKO
+# pU6Y7URxBSOZUr4w7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTE1
-# NThaMC8GCSqGSIb3DQEJBDEiBCB7OMC333tnls3oQxtvwdBVxPPVdbfjBx0bukBN
-# WwWLWTANBgkqhkiG9w0BAQEFAASCAgAdOyV5w+Irl1NlfFyxo3KrQrWP5KthFZp0
-# nCb/NMU6sG8PJjbbcZOswe8QElO37sA9AvQJoEHwXMvi9CxRJH9OpLK+Gq3xzouq
-# YyPt7Hf/CjoEVdWVxJBETTtUkzbGDrbZ5JoJRxDKCDkgbIRxhPrYy2NqhHxmg3oa
-# wLCj971LRtT2AM/v1M6T1xLxio8Nw0sOR8YFXSDL+XdpM5fMy7vaHl7s3kmlfq2H
-# KlLUrvCvSKylUReGmJjAHv5omxvwyCABuprFh/W6bRTx82JZwCclsFpjRnIKD2DV
-# N/Ojmn74ZHwQTFvRIUrpRpIvK8VvUgGFKLCi2wbJvijRfiL5OnBm5FCpXHXBW7Xw
-# D55bFoIERdhZvb+PX7a4gasw17ylNz/8wTh/HFkwCJbVUizj/3bOSEsiZKl9Yzsv
-# FFNKQstMUqBH9gcRBBpsJ0gt9oXKp0k6UglOpFYf00t57/mSXMe2sX82iSGtBb/U
-# FxVGyPAEZB6Z0Ai/jrO2Tif8XMMVr5HpCqEsOuSjvLYADHodj2lrsblW5JAOiOAW
-# vnFY3mHss9Sg5cILUS8HaHAF2LDO6ufGa+7FdZDWbvnAgYlZH9G7I/xuOCV+37iB
-# yNkIoTn6PnKAwsuzAIuC3KosGz0C98h1eD8tUj9hac4jLIKU5sdG0LaZLQPDEZtP
-# wyHmnyfpAg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAsFHC2MVFhp2j6+wJt5/CtFutdtGbjAWSJnFTX
+# D9dBDzANBgkqhkiG9w0BAQEFAASCAgCkYfh8mcsV6jERahXpX0ny67z39l3dcBBH
+# SAIkFZuL/AlIjfaFSTMWfrB/7gwzIQoxJebY7oGBGN+FL6h9JwNQs9+AhMN/LToG
+# uusH6Eo55RlUd6ikk+vCCxsY5sRDTPIIDE2ePLMkApcVrKBa7xeRt2YZAvW0tprc
+# SDDNhEaBuZB8G1uT3Oc20cs0noPgExhRdmG6VEId8U1wSIQvZUqs338GUkBJYJsS
+# spsE0lwZDUyFWuY5HGsxgKEv8RyBrZ7rbf5LYcp9NqRsDvyueZUVd+3PQhhRFZkO
+# wbtSRdj15/0/VettWG/3t8R+z/6BrL7/Ss6jUpdmXghXpEnVzRgV673U84DHM/5v
+# 4fGrAT7KlriViRkeLiyQYdR5phUvP5ULe4aS9phXzoRSmkRfJ40ONX/Q+qY+RasS
+# 1HZzy4QdDjykc+ADL+5ZoUlep86sTAtUVU3gbGe2t9gT+mi29Z/Zf034+DP+rhCS
+# YXS0x+PrslM6aA3/PobN226rIO5uYuBolhxcrrKuMr1oOi3IZd0OPO4cBaZivAv+
+# GwtNewmNkyqmK9BmdFFvMLE6V/To6K4lArepg1ATiKOysmIHPmDd8KAWdiVCLLiI
+# 2fO0oMkef1S4ASKg5QMmlLSFQsyni67klxYV1xyjLPKhzSKP2SRIQfmgZtY2WdCe
+# iespXfCSIA==
 # SIG # End signature block

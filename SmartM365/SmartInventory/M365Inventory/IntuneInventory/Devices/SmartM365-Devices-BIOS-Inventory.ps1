@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -273,7 +273,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $ModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $ModulePath -MinimumVersion '1.0.24' -ErrorAction Stop
+    Import-Module -Name $ModulePath -MinimumVersion '1.0.57' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$ModulePath' : $_" -ForegroundColor Red
     exit 1
@@ -611,7 +611,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -908,7 +908,7 @@ finally {
     }
 
     try {
-        RemoveOldFiles -Path $OutputPath     -Filter "*.csv" -KeepCount 150 -LogFile $global:LogTextFile
+        Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile
         RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs  -LogFile $global:LogTextFile
     } catch {
         WriteLog -Message ("Error during cleanup in finally: {0}" -f $_) "WARNING"
@@ -922,8 +922,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7ymMGM4ZrDn++
-# 6+kHB2TpDFvfZwBZt38b2o1apovCXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBQxNeDxD1+BL/
+# dmH+K++3bvkgGxoB5TBZNqvU2gAUhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1056,31 +1056,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPfsxiO2ktGUUCtnXr/aTeOhLkitUCtXoz7aZaIisT2GMA0GCSqG
-# SIb3DQEBAQUABIIBgGttUGQP56knl75jqbSEZDXLCe3BLfyTVcG+uQvP62iF3JgR
-# mpT84PxR1PL8/2cvJJv+RmeNhoS8KeAxutMGMhCSohLbbiTtuYuOpO6pUS1ZzxHe
-# jbBRiS8nO/Eyz2I1EBpYKK33hmrQ53PwToPLW4+/54COxoz1+orL+jjXmwD4tLN/
-# NLMgOnUcteqwp2H4GX1WGaLk+wE16D71WmhQHd1kvCnsUhLl6mAiSsSYWEQW3YI8
-# 8XHgGg7bWWViUe/gO9gJMaOuwEU62MH2wiNulz2L4zkIXJsMOpoErVv3dElyIi50
-# jEanDBJFL/B+GEMzVpfzlUGrch3IXrg/JelSe92Aor1xbCZH+C2fT0CZQ+O3r15D
-# TbUllGuBgRwytwLUeI4SQtVz0ej1UV0C81s1FemYlWEPS95bZQo9t/xkErSg2Esf
-# zSwlZFheZYFSBXIzrvdN5bxhAqWhU6QxPV1wj7NznW1GkP1pez2O/pIPNct37QQ0
-# 2wC1Aobgxnfzh7oQqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF8ki57wr3GVmoCuMyRLUkq/Jl/tGoDnVl2Lr8pFOS62MA0GCSqG
+# SIb3DQEBAQUABIIBgHdJAoCMHH3hLrBQESrIrK4IUCEWAkc0RlM2/6uOFX1Y0BpK
+# 340qErHg91lpIj5wFRqhGix3pR1MeBTRKlIIMAC88pKLdyE39gYxmj7mCxt7HfGu
+# tAQbGf7gO75dD7TmWqa+qCLD07ssYOQBXdMWvqGwsuPqye2I6P0IR64mDL+FEJOt
+# zeeZE0+Hby5RfZyPNtf1cH5uQ/Y2kitP5wRUgkZIwdS4l2X+Bt4bzxEDnvYznrhm
+# QLT7iPq8M/BuiU9kofmdvNyZJGGyc7tJU6p3BK+VneMWixm0/AGszIzsZZ7OTr8D
+# FMZoOtm/xxjAc9KImsDQxpLhm8k7QC3bRbJdOnHypL0Luzssqd9cPB9RMXpuy3Bk
+# XGvOnQEC0JX9lqUFFaYuTsKMkpDOWN1Q7HGj1Tc/wfryTKusi3b5ZdCKYHkvXzGg
+# zsHzJdceIIpSvpyNPNBSWH31zUpZ2yawQUUhQfVT6j7kpcN53nroTYwVbzsmBM/z
+# ru7m6oD68Qc9mSPKGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExOTQy
-# NDVaMC8GCSqGSIb3DQEJBDEiBCAgE9Q7c0ytM6PAHCQixC1qVAJcwxN2PK5lruRj
-# /bqEuTANBgkqhkiG9w0BAQEFAASCAgCz5K+lUyu9bkvLtTaAnr42gl8DMWm2M/n0
-# EZ4VpAomIOKQYP6ZKrozGflxW/SWVZL17ET6iuP2JEGKPeR+weKN6sjTVS/oUq6C
-# zLYYQaSy8PpWtkeaTKqPumK2Z5VhxMTSM/B6oi7mdaF3dKJOJr9UKpNFerdrpvWJ
-# /dOio7v49iuY9n92xTX3ER+qbpO9S3j+fK4Et0y0N3akS+L4TJRAxMDlYj8oMhF+
-# GN/NGLzgUC/u9RQSzritSWQLvYQ/48hKR3ele70so12vPgHOGXqueao3Ng1aTp/Z
-# bXtRxlwBYUpOuejXxb3k+uOQrQq9TukMLz+CUuwSmVkcrKGZrxuIKdQkm7BcgC/C
-# NODgomlW8fv+kXYyNPq+dCW/waWzJ6t/Vx1idxvPn0vtealjN9YsBIfwmMuKz+i3
-# ft/HPN2VOlig91RFcB3oHYdeEH5VEcc3b63RuSvBLvY1gNjGvli/2QqhvKchoame
-# wX9D+YsGguqIH6BtpT+WL7qrxXK+4yuJQU8fyMepPX6iIp/d1IdOFnkfHqsyj+Yv
-# VzPafjoprL6onq2w/KU4zSzRjsy/IV1YckezD6Hq99mTwWHjdFNvAH9mfQShTm8T
-# 4mCIfhvAkniU4nj8yKYdNJMhW+llYp8kjIdYX8LBP6OcQruAsl4sEBVXh/Y0BiGS
-# FKHtBUPsGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
+# MDFaMC8GCSqGSIb3DQEJBDEiBCBrhQBDx/X2WuDEPA6y3gh/Tj8IDJuBqggO0LKC
+# M+FlcTANBgkqhkiG9w0BAQEFAASCAgAE0iHSV5ze8JdpiSYuW4yf8u5Pb3XUnaCi
+# s9Q3zIuo/7j1Gj/btjwqiMNzQ2JaBiaMjuJ7Ww5owvrxip82UfH+kUoB8BBXmq+r
+# LAndLrv/IpQFepOGoIi3ZvXLC2mxhDvg77Xhf9VuM6iBpAi1K6sTGlI50CPcwNm7
+# 2oxgms7W8jk/vO9WKer9zh/uag4iDGiUiZ9I840yfXz4fg0hnQMcHPychpteL6y1
+# ECqNnPgYh2a1xpA3PhHDNS29b/aQHr8IlYDVgvlEaaZsQyqoqNZhYDKYZTOUL38a
+# 4asrEk3dFpfRjdYfZRAH+lW78dT3bCDnWavDRngIGpiZbdBmaRgV/uQ9h0YMGPof
+# eSE4xiuuWHOPoBrBmb+1KsQh/JT0i+VChmlTTZOUGspWlwfPTqCsaW5e4FMSZJPp
+# aR5+gyVe5RKWFa0jCy5fK3kXUWky8T0HxiazP1TbacuacFP0v8VoUfRIYYvjtM9V
+# rK87gAXYC+ILyk66e2ADhi6fnEDZv1HeBql1OjB3cKesgugatIAxORvh/cRE+2kp
+# f+0JAxifQ/Re6LYLalIqX5u5pt+DmWiNomFU9ir+h0ypsBfyqrcqhiafi8B6OTRU
+# Dq4xicNESxv5HzMtfCOudG4tgu3I2oj87xZHpJAMN5Jj25dHmgyMbkwQmqS9N9HI
+# 6aUhD2qbmQ==
 # SIG # End signature block

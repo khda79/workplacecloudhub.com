@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the seven-day detailed archive retention policy.
 .VERSION
-1.0.0
+1.1.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -39,6 +39,7 @@ function Import-FunctionFromScript {
 function Log { param([string]$Message) }
 function Warn { param([string]$Message) }
 function Write-Log { param([string]$Message, [string]$Level, [string]$Stage) }
+function Test-FileLocked { param([string]$Path) return $false }
 
 $cases = @(
     [pscustomobject]@{
@@ -123,13 +124,143 @@ $statusSource = Get-Content -LiteralPath $cases[2].Path -Raw
 Assert-True (-not $statusSource.Contains('$global:RetentionMaxCSV')) 'Windows Update Status no longer applies count-based CSV archive retention'
 Assert-True ($statusSource.Contains('Prune-Files -Folder $LogsPath')) 'Windows Update Status keeps the independent log-count retention'
 
-Write-Host "Detailed archive retention tests passed for $($cases.Count) collectors." -ForegroundColor Green
+$sharedModuleCases = @(
+    [pscustomobject]@{
+        Name = 'SmartM365.Core'
+        Path = Join-Path $smartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psm1'
+        ManifestPath = Join-Path $smartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
+        ExpectedVersion = '1.0.57'
+        ExplicitExport = $false
+    },
+    [pscustomobject]@{
+        Name = 'SmartM365 Windows PowerShell 5 compatibility module'
+        Path = Join-Path $smartM365Root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psm1'
+        ManifestPath = Join-Path $smartM365Root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
+        ExpectedVersion = '1.0.41'
+        ExplicitExport = $true
+    }
+)
+
+foreach ($moduleCase in $sharedModuleCases) {
+    $manifest = Import-PowerShellDataFile -LiteralPath $moduleCase.ManifestPath
+    Assert-True ([string]$manifest.ModuleVersion -eq $moduleCase.ExpectedVersion) "$($moduleCase.Name) version"
+    if ($moduleCase.ExplicitExport) {
+        Assert-True ($manifest.FunctionsToExport -contains 'Remove-SmartM365TimestampedFilesOlderThan') "$($moduleCase.Name) exports the timestamp retention helper"
+        Assert-True ($manifest.FunctionsToExport -contains 'Remove-SmartM365TimestampedDirectoriesOlderThan') "$($moduleCase.Name) exports the timestamp directory retention helper"
+    }
+
+    $retentionFunction = Import-FunctionFromScript -Path $moduleCase.Path -Name 'Remove-SmartM365TimestampedFilesOlderThan'
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-SharedArchiveRetention-' + [guid]::NewGuid().ToString('N'))
+    $archiveFolder = Join-Path $tempRoot 'Archive'
+    $weeklyFolder = Join-Path $archiveFolder 'WeeklyHistory\2026-W39'
+    New-Item -ItemType Directory -Path $archiveFolder,$weeklyFolder -Force | Out-Null
+
+    try {
+        $global:csvGeneratedPaths = @()
+        $paths = [ordered]@{
+            OldUnderscoreSeconds = Join-Path $archiveFolder 'Collector_20260916_115959.csv'
+            OldHyphenSeconds = Join-Path $archiveFolder 'Collector_20260916-115959.csv'
+            OldUnderscoreMinutes = Join-Path $archiveFolder 'Collector_20260916_1159.csv'
+            OldHyphenMinutes = Join-Path $archiveFolder 'Collector_20260916-1159.csv'
+            ExactCutoff = Join-Path $archiveFolder 'Collector_20260916_120000.csv'
+            Fresh = Join-Path $archiveFolder 'Collector_20260923-110000.csv'
+            Canonical = Join-Path $archiveFolder 'Collector.csv'
+            InvalidDate = Join-Path $archiveFolder 'Collector_20261340_250000.csv'
+            History = Join-Path $archiveFolder 'Collector_History_20260901_000000.csv'
+            Cache = Join-Path $archiveFolder 'Collector_Cache_20260901_000000.csv'
+            Resume = Join-Path $archiveFolder 'Collector_Resume_20260901_000000.csv'
+            Excluded = Join-Path $archiveFolder 'Collector_20260901_000000.csv'
+            Weekly = Join-Path $weeklyFolder 'Collector_20260901_000000.csv'
+        }
+        foreach ($path in $paths.Values) { Set-Content -LiteralPath $path -Value 'test' -Encoding utf8 }
+
+        & $retentionFunction -FolderPath $archiveFolder -FilePattern '*.csv' -RetentionDays 7 -ExcludeFiles @($paths.Excluded) -ReferenceTime $referenceTime
+
+        foreach ($key in @('OldUnderscoreSeconds','OldHyphenSeconds','OldUnderscoreMinutes','OldHyphenMinutes')) {
+            Assert-True (-not (Test-Path -LiteralPath $paths[$key])) "$($moduleCase.Name) removes $key"
+        }
+        foreach ($key in @('ExactCutoff','Fresh','Canonical','InvalidDate','History','Cache','Resume','Excluded','Weekly')) {
+            Assert-True (Test-Path -LiteralPath $paths[$key]) "$($moduleCase.Name) preserves $key"
+        }
+
+        $guardedOldPath = Join-Path $archiveFolder 'Collector_Guarded_20260901_000000.csv'
+        Set-Content -LiteralPath $guardedOldPath -Value 'test' -Encoding utf8
+        & $retentionFunction -FolderPath $archiveFolder -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -ReferenceTime $referenceTime
+        Assert-True (Test-Path -LiteralPath $guardedOldPath) "$($moduleCase.Name) skips failed-run cleanup without publication evidence"
+
+        $currentPublicationPath = Join-Path $archiveFolder 'Collector_Current.csv'
+        Set-Content -LiteralPath $currentPublicationPath -Value 'test' -Encoding utf8
+        $global:csvGeneratedPaths = @($currentPublicationPath)
+        & $retentionFunction -FolderPath $archiveFolder -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -ReferenceTime $referenceTime
+        Assert-True (-not (Test-Path -LiteralPath $guardedOldPath)) "$($moduleCase.Name) cleans old files after current-run publication evidence"
+
+        $directoryRetentionFunction = Import-FunctionFromScript -Path $moduleCase.Path -Name 'Remove-SmartM365TimestampedDirectoriesOlderThan'
+        $directoryRoot = Join-Path $tempRoot 'RunDirectories'
+        $runDirectories = [ordered]@{
+            Old = Join-Path $directoryRoot '20260916-115959'
+            OldWithCollisionSuffix = Join-Path $directoryRoot '20260916-115959-2'
+            ExactCutoff = Join-Path $directoryRoot '20260916-120000'
+            Fresh = Join-Path $directoryRoot '20260923_110000'
+            Invalid = Join-Path $directoryRoot '20261340-250000'
+            WeeklyHistory = Join-Path $directoryRoot 'WeeklyHistory'
+            Excluded = Join-Path $directoryRoot '20260901-000000'
+        }
+        foreach ($directoryPath in $runDirectories.Values) {
+            New-Item -ItemType Directory -Path $directoryPath -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $directoryPath 'evidence.txt') -Value 'test' -Encoding utf8
+        }
+
+        & $directoryRetentionFunction -RootPath $directoryRoot -RetentionDays 7 -ExcludeDirectories @($runDirectories.Excluded) -ReferenceTime $referenceTime
+
+        foreach ($key in @('Old','OldWithCollisionSuffix')) {
+            Assert-True (-not (Test-Path -LiteralPath $runDirectories[$key])) "$($moduleCase.Name) removes timestamped directory $key"
+        }
+        foreach ($key in @('ExactCutoff','Fresh','Invalid','WeeklyHistory','Excluded')) {
+            Assert-True (Test-Path -LiteralPath $runDirectories[$key]) "$($moduleCase.Name) preserves timestamped directory $key"
+        }
+    }
+    finally {
+        $global:csvGeneratedPaths = @()
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+    }
+}
+
+$inventoryRoot = Join-Path $smartM365Root 'SmartInventory'
+$additionalRetentionCollectors = @(
+    'ActiveDirectoryInventory\SmartM365-ActiveDirectory-HealthCheck.ps1',
+    'ExchangeInventory\BackupProtection\SmartM365-M365-BackupPolicyScope-Inventory.ps1',
+    'ExchangeInventory\OnPremises\ServersAndStorage\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1',
+    'M365Inventory\IntuneInventory\Devices\SmartM365-Devices-Compliance-Inventory.ps1',
+    'M365Inventory\IntuneInventory\Devices\SmartM365-Devices-UpgradeEligibility.ps1',
+    'M365Inventory\IntuneInventory\EndpointAnalytics\SmartM365-EndpointAnalytics-Inventory.ps1',
+    'M365Inventory\IntuneInventory\SmartM365-Intune-ExportRemediationScripts.ps1',
+    'M365Inventory\IntuneInventory\WindowsUpdate\AutopatchAlerts\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1',
+    'M365Inventory\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1'
+)
+foreach ($relativePath in $additionalRetentionCollectors) {
+    $source = Get-Content -LiteralPath (Join-Path $inventoryRoot $relativePath) -Raw
+    Assert-True ($source -match 'Remove-(?:Core)?SmartM365Timestamped(?:Files|Directories)OlderThan') "$relativePath applies seven-day timestamp retention"
+}
+
+$legacyDataRetentionCalls = foreach ($scriptPath in Get-ChildItem -LiteralPath $inventoryRoot -Filter '*.ps1' -Recurse) {
+    $lineNumber = 0
+    foreach ($line in Get-Content -LiteralPath $scriptPath.FullName) {
+        $lineNumber++
+        if ($line -match '(?:RemoveOldFiles|Remove-OldFiles).*?(?:\.csv|\.xlsx|RetentionMaxCSV)' -and
+            $line -notmatch 'Remove-SmartM365TimestampedFilesOlderThan') {
+            '{0}:{1}: {2}' -f $scriptPath.FullName,$lineNumber,$line.Trim()
+        }
+    }
+}
+Assert-True (@($legacyDataRetentionCalls).Count -eq 0) ("No collector keeps count-based CSV/XLSX retention. Found: {0}" -f (@($legacyDataRetentionCalls) -join ' | '))
+
+Write-Host "Detailed archive retention tests passed for $($cases.Count) dedicated collectors and $($sharedModuleCases.Count) shared modules." -ForegroundColor Green
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChBl9mk3eQVk6P
-# 4//eOp76jALqvKMijMD4GN1hq0qnS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBG1MUz4fNjYAco
+# /sAKo6mQ3c8EBmf5kKUjec0zp6gD56CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -262,31 +393,31 @@ Write-Host "Detailed archive retention tests passed for $($cases.Count) collecto
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGc4Q7M0JcEPCZMM3P7gAKB9oWHtTc8P3HpE8Zcto/bPMA0GCSqG
-# SIb3DQEBAQUABIIBgFom8z+eZWYBirkoPyBJyo+FYurQRFN/4nnb5MmyBz7GYqpA
-# UaPYn+dOvOF4r3mjdbhbNfZmmUWgN/y1WSqXSiTt6ntNYJDPV1AxVZcEGbaL0wvz
-# s4RKKzW/7IxBqfqvLJsaebN3JYCAz9UkXB4MgTjdGPeJDlElmTItEFlg8WJlCITn
-# VS5rLlqRCM6FJiMi9Yb74Qe8vxXabthG/Gjeq5df0Ue8kaFgxmkCL6If9JTAaV/i
-# I+Fv3MHGuqduWaR6PYQ/JaiUC1rzea0m38dw4PRs5aK1sh/zrMFHWKfAOz6JvWkG
-# ltFci1hjKUQ7ZWEH8GKo9blS3CgWUEnJ1BPKeQMp6y6BYeoKEBqexv00a2r+P58N
-# UVxlWIJo1Jt4+HiH9AY735Vq96jCNZNU6/Fpr9zHpDcTWYHG+2bUO7YhqbUJJ3zM
-# q8y9zwYXNBtKvLsUQoLN0npbyxPj55+g8daq4FsGz5FFmmsovaA5blURL3y8s1Ki
-# U9QdkTbBjVREDneZ5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDsez1PvQyajh39HQvMPakQA4rdszMUDKNlkBsQdXFEZMA0GCSqG
+# SIb3DQEBAQUABIIBgC2JBqOrXhuAa0kdnAalHt70emmTDVm0UBv6UzeaJhFkN1NU
+# pHbNITVFm8eW4RJK7IbSP7EK+7bVHusJpXkRLRb5gw75Aa7zqv5bShn1xJwJAAwi
+# 0ktyN6oUSW5pFL7RkFjieCcjKRKlmYJ5K7Hu9kVUB/XNE+fVSDxK45ZzbpQ9WKcJ
+# e0VJ1pY07rHdoQoeUriJEBV8eYSnTGMThF3mpkh2jUiwd7L9fDlCl5DVdCKu0TVb
+# r3Dq6r+DX5ZKemNvqEsTwNYcZgnqSxkogYDozPqHpG9M6iEU28rQ7ZYjjZkDDFEW
+# 1zfPnkNVqwFfEMA3Uq15NhAPfBTC1XojWU+NuIEl0p66wqDlmZgO3M9w7aep7cWu
+# fRsAdxnenTwuf+StJVUKQGfcPINM6+p/w0kIcpb0Out0jU1zAdKtbm8bQo5BbKOH
+# ur9tHEZW7ISXq5s4IF1FqKAhARzWzJvjsYsldvgzHqVZ1tkZ/nbzE7zJps28CiQ0
+# J+QfGnFnaUv00hx1XKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMyMTM1
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDxFkePfB+bF5qN+q72esQ32UCFzTpO+5sD5hWo
-# cjXQqzANBgkqhkiG9w0BAQEFAASCAgArcSHzfk300Fwh2GpiY1iyx+U0Vt4py0tQ
-# MCPu0hNgj2yCj18oA0KCjxW0aEQBdAD9NtJvuuzJZpE6QU38IFrv6SoWqEbSiHnS
-# /A3NoO+mXgyTDCdGHsUlFZCIQycRhlWqhem1iton3wk5rxfOiY5+BkP7+F4Fa10N
-# N1NzQqUQpECv04UItITdtfSDhdCCdCkBtn4kW2LBerdzdRlNqpoJ1oHCRldkIvaa
-# WQHWTDWf/OKYM3hxqAkZlmZiC6zEoQ5QuUJ8pefbHjpzXvu1Y1d/0FjXA7hUitgS
-# WDe6kRXNjyh0/2Ntd+IbFBIdB/Z0vhLGicr9cPiO1FFi9bXUOPUfcWae/AQKWnFq
-# VZkpEIyqgAOYJVmrOgORVHuSEVQKWQQE9gb1TlWXaumtnrsI23Pl6Wyi5UuSzQCo
-# mE8BjE8u4F/1wURbq1NRRIEACERGN1uglKP4TovOTxdeE53x/cvqOVaI1hz12Lzf
-# 8ty+k69+9LuzNWwwy0oUYgKaU9tTIqsLayQNHyE6TQQi5RqVZBtk/zpm0cScFXwy
-# Fu8ZV4Mghll3CmXTuWJq98lH/oizrxG0RoQJmXzWigA7YoTG0+Wnjl9chRDLQl+a
-# LiF3SJimooVsXVQepfRXVgeL4rjNbJ3NZxnBwxrp7xAljZ7NJ+t12larU1Vi0hmF
-# DUTenEIBjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
+# MjVaMC8GCSqGSIb3DQEJBDEiBCCiN16+2nN7RObMSNUhXvCH5pTibJjRCpazXeT+
+# lTKRbjANBgkqhkiG9w0BAQEFAASCAgB8vav63ifoMv+Ouw3oyVVuciEEEVX3c1RA
+# TTe5k6QQqILzkYrxQferF0wNvqZ4r2TnuOfQTDDBhy/EUV3lkRD9SujV7JFz3hHr
+# /tB9auFznFqIEZzDUcQ4V8Q5EszK1K/sUg0lA18GYHbVo9yXfYNKL47dZvuBLuI4
+# tVdFu4FaYH1+EEeACPY+jhnoItlBjBvAjw8JQRAxt5UmLBsaEDlZ49pqoiuF7/No
+# aneLP1ecip5DYQ6YwrVgyYWsO62CdtRBJYWAe/roTw0gD/ktC/HVdwHZReeH8L+V
+# FCky9KFC9wsszG6JJLYR59xwJCyIuEEyi8MMjY/ceoWevYILH9VjmhDBLJuzZMk+
+# QEQMiJOyV3mCmPxbF6K360UTKIbawxwVo+TNBQK6xSojYUb+XrzsG2YHX1ReROHQ
+# Y0JIX2PanXGFYLKt9AStwXH2g++eRH16qepjYJl8gIwj+JAu/QlAB6UdQxP1GsQx
+# nQ3TAbrvOVe2OfPmwXFZyGuWlQJvkTdncEc9ryd7iN53QdWMMORSz4Ni7pjXWIgu
+# Pl5kJIRaEwbN++dbMgxaFwN7eyLCdz0NGPND+i6mQgD/NpiJ+amHOos4TdfkzyYC
+# sPpRgvYIG3UGsVz4VZn0dvD918ihKxPxglnjcXU6t6pIhCk6ZvWjDeSJ3//YwW5J
+# F+zrl6DHog==
 # SIG # End signature block
