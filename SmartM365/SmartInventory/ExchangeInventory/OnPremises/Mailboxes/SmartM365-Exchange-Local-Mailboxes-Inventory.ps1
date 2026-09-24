@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.45
+1.46
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.45
+Version: 1.46
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -257,7 +257,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.45"
+$ScriptVersion = "1.46"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1267,7 +1267,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $historySummarySource) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
     }
-    RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+    Remove-SmartM365TimestampedFilesOlderThan -FolderPath $reportOutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
     $localMailboxUpload = if ($latestLocalCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestLocalCsv } else { $null }
     if (-not $localMailboxUpload) { $localMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $localCsv }
     $remoteMailboxUpload = if ($latestRemoteCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestRemoteCsv } else { $null }
@@ -1289,7 +1289,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.40' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.41' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 	Start-Transcript -Path $global:logTranscriptFile -Append
 	WriteLog -Message $MyInvocation.MyCommand.Name
@@ -3245,9 +3245,9 @@ Else
 	#region Cleanup
 	# Clean up old CSV files + old log files
 	# Automatically excludes all generated CSVs via global:csvGeneratedPaths + current transcript and log files via global variables
-	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+	Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
     if ($IncludeRemoteMailboxes -and -not [string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath) -and (Test-Path -LiteralPath $RemoteMailboxOutputPath)) {
-        RemoveOldFiles -Path $RemoteMailboxOutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+        Remove-SmartM365TimestampedFilesOlderThan -FolderPath $RemoteMailboxOutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
     }
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
@@ -3260,8 +3260,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvhnGurNqZvGyK
-# 9iJdYvxZEAmbfVhcWLoMytm+0tdjjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnJG1gTNCfUM9e
+# iXnFtN+7ULsG0n71g+9aNVM6t9ztLqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3394,31 +3394,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILfOuKIDOMuUt1lImdewnzdiyWFjGXHl6r42TSlta4bGMA0GCSqG
-# SIb3DQEBAQUABIIBgJ1CzdQ+UD/V0bjkOw0a5VXNblFaiEcRx4pOply8WEge1E9C
-# cOi7MqzM+Kbew0W8OQhwfJvmhCSL05ChyHqzFZbSPUsKxJyKEA3riSm+gbKF+u7U
-# CW+fPO2a8SkmAQfjFvUGFl07OPqECBzu0VPLwc9m+rIQj0ltrGDN7ll+7+QxWgg+
-# f2O34zDpdn2tm9zNw3rx5QpiPl6CJOXDCeJVEsjD35yTFGhoTtEGIU9RixZmNAjo
-# zM16jI9y8P35QpsJw1WW8AtkXNa+QVkXfH+sbyP6pqr5dMGULprxNvQkb2FZjR7+
-# DL1cOo0B69inHMM4Ng5KcbCwNDqdYw6NxjdFa2U4BtivAOar/4rCLa9/TrV0B4+4
-# 7sLh5UpGgsvFUUofV/7N8cmo9zFnYCusNU/RB2KbNZeaBhk/1wQWA9Oz1PD5b+zo
-# 6AiXXJ23HR6r5OqcdpKGWTLOmUNpkkqjQAA5wGnZ0zzk6RSXoCukxtzQaZyg4+42
-# kJzZ/jMoj1flapu/o6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGvjz6GL3BdM2AJcggUNVdgZfDK7yg5BZuxKZUZDpde6MA0GCSqG
+# SIb3DQEBAQUABIIBgHmJyYC9iPL4bBO8Fp8dv0D/2k8gESFwoND5Jnr045e72njC
+# KQcuIC7dkzf+hPpP2XtiQV8k/J0Z6jJ7Jig454H30HNHAQ+tyfnaX7cLi0pXIk5M
+# oZcWcVqF803MFJRcaZHjQV9PRJ+pf6D5jHdhDfNvfH0XhJwAXpSfcorn5eS+oZQP
+# rxnf2wDCbgGRrfx5+Q5IyRuSitLQuDiiA0Q8IkNEoDSSWmbrP60nn3f7NgVBLz/X
+# o+dwavKFGLYHFSWInpFn8cjvQpCHsGPAX0p4mLiPGlZEAkT2HyhzIQAAXVbhJ03W
+# ofQivt6BobeV8GdcGsVXWzNLTViLpAHZtcByoGhCPUfke529iR0brbYnvZMGqLTA
+# N2qjlduPSANc3vujMk3tsNFSVLdI2gHr7IOkV7N1nMtoeTaVAfS7RzoRbaQfDfE4
+# eYDsfI6hsdh4dBdpsazvfbIG13mDEJKFYXfXzS5DMziYEEMiFApq3bKEheuej9XK
+# Jlt73+DPuxv1b3YgtKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTU2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAbRhOIlbhdMzibYZHwW9KpNYLo5gmsDIkoxuY4
-# Mt72xTANBgkqhkiG9w0BAQEFAASCAgBdVLU502JUKg+lduGfp553uZbR7CvGI7Bc
-# AVA6lCKpzQ4oIYUQFgzfFT/resEG/v/MG/mQDkkLXiaRV3z29m2Zb9khthxuuD/o
-# CaWSRGUzLuvd0YHwJ34ODYTy6s9O3bu/l55/T/9oLEuCIgKNNT3ndSzQMiXHTbZj
-# 6N/SArlBNT5wHyKabxdom/lD/7e67nTHNT4gow/2k5nullqIwX16fSrJzNax/Q3D
-# OjE85/hZTCLKQKBBPuPCWv+v7PzrjNVyGM/LFrjrYkf3WS+uMceHfLwLL8u0r29u
-# TWvGHKHACpLbj9LRSPAdwfg2RfQSHbrkj9m3P2G0VGLzEz7ImJ4ROGGnZtjMVT49
-# pmEbJoa0E7KxbB97Xu/EHbLdcDM/broOCt6tFumIVwT8wEWCYjo3xvqF4+f7dskm
-# /2ewah7rcvRUmN5/0c4ZCxMI5Smt7kdYNjAXJZ0m3D3it0I9IdGhPGkeOUkFZFlF
-# a6MytFS7gQ5NsxY+ZiY6FgGvxW28Ad5izPDbZod6rs2KIHhsMfcaO8vLNPKayWuC
-# hQwKevHS5t2K7i2abBw2CZqm1Slp52G4WsZNGzC66jdkSvCOdVbvSuHnjQ8ek011
-# dNvdsy0Lui+G0HxZH3vG4wzxhrulWOtB0SdVISYJ/qlZ4QOK1uFVxpokwhccg/27
-# 4uTS7FJLjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQ1
+# MjhaMC8GCSqGSIb3DQEJBDEiBCAcay7k+sL2IHCWN5O3oD21VA4PW3WgQuISsDZz
+# j67Q8TANBgkqhkiG9w0BAQEFAASCAgBanoVnbM7MKdMrPDzmY7aFlvHBrnPecwbj
+# 3S10p0vqUJT/36t8tyGWN8oTpTPFuih2aQPbQ29e/ViLtZq1zixeMpQvTPB4tVDv
+# v3XKtBCiZm6zryRITJ9EeFQ0O1KbJT/XFkxoOrA2gjkRRICIspz7B1YDSvz0hGon
+# qZMbyPsFhB93wkdNkYwE10fQhF+dupHG+WahZx66uPstwx5NezM8IN6bP107ZXCq
+# boR0zCZua8xvyW7UVrty1LeoZt2Y+fKlGLWUYDZAc4qtpcKMhB5qBk+x3KcrWqob
+# QfnZkEpsHG1iON5IHTI6s0bK1R9E8hM9mzh4wWBeIrKGM9PzmDy9k/1AwMJ2+zQw
+# sM0PbQefmGvc+Rb2pff4OvTISXJE3npOHcM0ciHxy7xaS40TERmOFwZvjEJWR4xN
+# UoLQzytwR3+0OrlDXbqcUefaS5Chl5vnpGdT/PasvYGnyaAG0uWsnTetiN91O9aB
+# IWstwN+F52GqIdEtnONO2Ib9suj5RExPKL6/ClDeWTGRhf0Vsqg0v+/xClID8pHX
+# o2sIxr04IeiE+s4gq3lvkQGJ0FVYmoT9lRjCronkQBNCcpojpFS6I3XqhdXfkmA3
+# cyrCvt9Xl9VvBVthBJmj6a+Sl82GvI8jdOxFpjWbQzVry9PnIS9/bMxJdsU6U93s
+# VXlWjVzKkA==
 # SIG # End signature block

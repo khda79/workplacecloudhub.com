@@ -48,7 +48,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.24
 
 .VERSION
-1.24
+1.25
 
 
 .REQUIREMENTS
@@ -317,7 +317,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -326,7 +326,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1870,6 +1870,9 @@ try {
     else {
         Write-ComplianceInfo -Message 'SummaryOnly mode requested: canonical compliance policy export was skipped and the last valid detailed files were left unchanged.'
     }
+    if ((Test-Path -LiteralPath $tsCsv -PathType Leaf) -or (Test-Path -LiteralPath $policyTsCsv -PathType Leaf)) {
+        Remove-SmartM365TimestampedFilesOlderThan -FolderPath $ScriptCsvLogFolderPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
+    }
 }
 catch {
     $script:ComplianceFatalError = $_
@@ -1910,8 +1913,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7KZBNGovjaEg1
-# ad1dSeEIgZdFbYaSf0uJKswgMObpoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUr5mZ2ZcEjKFN
+# 8wdXglDkeFtTDnqrhIZXg0Qpo6PagaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2044,31 +2047,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKF6e6nuXeT78dgYs0wVtWJP2vFhVtnqacrI4TD3y5V0MA0GCSqG
-# SIb3DQEBAQUABIIBgI4/00IIHd3wFPk6oKszOVkubRdrAbfkIuQwDLpmEG0b3yKf
-# UU+55/xxsJ2CRajnPB8fQXZRrFg3ptWW6sFQG37MM75m088rPUniwzkQOrHfYcpq
-# 8qsT4ZyTWSa+Stfni1WvPaBMC74RBELNvsnePfr1n5uRrLr031JK9xtEG7i5Ekb7
-# +t5vL4jCCyNk6aYe0XPAm8lR+KX/QNaNEMrkbKcRv8yT8bERa19+XVaUNPIFbhsk
-# dlS1uMk4iuP+nx6Pt9jy+Odz0GzXdR/6p+Gou3GffbbHcFZ5YgoUEVgiAwcAtbSq
-# UJyypJsUQA2M4IZSSE7epu7AJ01GHHmipYVZ088UE431QVhh8pOSc20GtavZ0P5T
-# WrhMWmw92z7OHpBtPM7GI5Wkxf+tQQvrDB92iCKQYvk1Hj8BM+i0Uih8AuYcdwRA
-# 7o5iqlrSbSrTL16z+nNK7PUuK2jJ5c0wGLWHh1qpwRJLBGYJ9WnECewge4ObkU0e
-# XNmp1LKzOJ7skjRNMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMxmD++dQB8+dAzbLvzuEP1LE6h5AfJ2n7W4OBrwR1lzMA0GCSqG
+# SIb3DQEBAQUABIIBgGbKDUpg/DOAsGmRt3fAh61VFl5SCnWIk313KR9R3t6gi9dk
+# ppLRQacTHPWSys2WAqQtZflLyGUASX1G/e2+jKUuD+4l6+9lbmY+/t0SmjTC200K
+# z9j6FEo8G2A7IMqwzcTdea/8+xrbUL+D3FlyPu2ffOvH22ySg8/FASKe03jA0giB
+# Gdmk5cE44Wt1AR5vzzwgx8ITzn88tjpmeO/PHw6vxDJGrFV2uo+72LeT+FykcvH9
+# Ne33iSRm4poaQFr/Q4y+agA3cgoUg5RWrtOI1XBI3J3E98vgEq94VQHqUsndtS5b
+# FZZK3J9HcCAwrJn1OJi/P8sJiYELlEbZNauBlIdcIUJizKJbJa8vegZZPiCvYJoo
+# Jc8IFWzN2Aiv0n/LzWdphKDenqErhObkMi9WrnzGvTtjKllLi5SnVJitdyd76DMC
+# UMOAyUesl7Ergg2QFG+UaPoFkPtZyEMKPDBhDoRrWNcioqf/4csdJntym9Ou7ege
+# PC0KLHPyD1sHVOSraaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMDI2
-# NTFaMC8GCSqGSIb3DQEJBDEiBCAP/xV91y23UnoGDVAVI/isK4Z9dPWo+nW2tdpX
-# 0xK1ATANBgkqhkiG9w0BAQEFAASCAgBBxcg8oN31gAWgd0iNV1wYmH8SgXOe/1/w
-# 1Hd1IPDRCygVBltJKDF3zdPTsi7poum8uIfudgWaaKP1Ixjy65ZHA5qxv5J3A/s8
-# 741kpv1gRqo5QwZJqMIS/s1nmzuQ0B0LnLNmfKt2kPDnIlVNn7eG+c/x8WEVe8m8
-# eIZ8ERcp7IDYsFa0yr4vScidlYqEK0rPDSDw11bkP6QBvLpr17DBLLf8iwWnG/gF
-# nHJG16zg8SRTtCKi0LiS1QkCODXnI7NjTp7XvZbVGhmVHo91lq4Vq6fCPW4YPs3H
-# IYnuFXWyTnLmqUpcJW03dMkPnoY3PJiOTeACSHJgsKKIpoxoshSFRHM4NNv0ebT3
-# QoN6GyPurEUQ7xA62BwHRqqrUl9YcHlDlJck4y9ppuRl8uNR4dl84cMAQ2yV2VuS
-# zJfKY0Uh/TnMDLo7lpVZyLIpdm8Q9GPDjJJvMmYTwd+SUXtKUCxCxwW4xW4C/SL4
-# cUGJ1EVy6a4zYEffFNtYm0hcvShCKy9c2TD8W+T/Mvr/Zt/Oktd3oYG1vtcX7Tzd
-# oWL+8II6BiS0fiOfTfrlXshxj+5zbiqZiRuszyuQU/+FJy7WQxWBz7swF4tpjagk
-# o6lkG9iXhOsGnux91oQI4XOAvnPg4mnoPuQJRTS/a1pYRz7c3BrROOEeR7NelY0H
-# pwAX2X7+BQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
+# MDJaMC8GCSqGSIb3DQEJBDEiBCDNWyOqdqd0i4AFaBzXHt5iWcMNYQ8t2UmunKlm
+# 2i8nbjANBgkqhkiG9w0BAQEFAASCAgADdn3769mej228mD3h61Hlubcdaix6T6C4
+# bASBuXEGJTK6LBnAvkdjCtFdBHKTFOoLM6sQJm1b/Hyn1o5Swj3LXgWhzgB7TW7F
+# A8DBrbFaQvcbZphK+39ec9bKDkmiBSDCz3PNLTZlTcC4G9QSDsg/KSxL6FBw3IbV
+# KPAQfYy/DzoD9Z8+QTY7c1WuolOj/m0CT3hExQfQN466I5rDCSXaKe6O4AK7gj0P
+# HXpeAuHXncNEDHqv04ulPIJtoVFbW0966ZMpv6DZmEXrquPVC/6VrMHyvfyawBZ4
+# es9ARCcwQ18Wl7bQCNO7z02sRQM9kdYoHI1MdSUt8+453DFm2E3YUU+8HrL1BD8z
+# KAcyvvht99t60DNCKg0sXwm9AB8KNG56bJA6B1ToAxjHiberc6NnJHQ8FjW1q69K
+# I68TJ17UJzWQMDp5nkmi8tG/nx+nu81+dVvqvfRaCrXGugGuu5TbXF9rsSYyYhwT
+# ZAoVHaOlx61G7XvSr6yQoX8i9yf/3WJW/jplcXCl/4jDKuUge9THkYv9kyGZqMg+
+# b5hyNNs57LmNCyO7xM8DjEzVH71FtXIfbXEA8vtUJER8EtsjEmQ8OpO0LphzoYte
+# //32+/3Ytp0FDwCBDNuXlyTqi8T/wp0MBNBAinR+maEZBvyI/XyaneuXLNlS/haW
+# oIk1Pz+niw==
 # SIG # End signature block

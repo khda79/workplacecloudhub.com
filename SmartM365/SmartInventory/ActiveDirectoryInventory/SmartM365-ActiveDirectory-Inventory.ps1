@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.45
+1.46
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -672,7 +672,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.49' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.45"
+$ScriptVersion = "1.46"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -2318,7 +2318,7 @@ try {
             WriteLog -Message ("Active Directory daily summary email failed in ReportOnly mode: {0}" -f $_) -Level 'WARNING'
         }
 
-        Remove-OldFiles -Path $OutputPath -Filter "*.csv" -OlderThanDays 30
+        Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
         Remove-OldFiles -Path $OutputPath -Filter "*.log" -OlderThanDays 30
         WriteLog -Message ("{0} completed successfully in ReportOnly mode." -f $TaskName)
         return
@@ -3543,7 +3543,7 @@ try {
     # ------------------------------------------------------
     # CLEANUP OLD FILES
     # ------------------------------------------------------
-    Remove-OldFiles -Path $OutputPath -Filter "*.csv" -OlderThanDays 30
+    Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
     Remove-OldFiles -Path $OutputPath -Filter "*.log" -OlderThanDays 30
 
     if ([int]$global:SmartM365ErrorCount -gt 0) {
@@ -3634,8 +3634,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAIa56C3hnGzi9s
-# 758+OG9ibxs4D85GVlmIBrvQYhhG7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZ13SOT3ANsqR5
+# qyG3WlianYjORuw3H7lghlq34xZVnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3768,31 +3768,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHAQhXcLHGhJ+YBD88P97aVHM/JQK/XySKGAEr4Iskt+MA0GCSqG
-# SIb3DQEBAQUABIIBgJu5nnr/qNWf4y5gKsaS9MxmF4mZD/q96NuL8/+Oyr0e+XkX
-# L7pbKNbwb+joI36BYOAKbf5ObBO8jDbyKv+DljKdhO2+caBSqv3BHJ+LpNMjWVZD
-# BBwPjOjAQ2EF8Knv/+S+QtJ+60oX7JT9Sm1ISOaJzrHHbW37/rWFSpDJdFG3wEG+
-# ynoDzrBEaCSXlLrxzcSDivrXepiD8aRtDUX9OPQ+QsA+UXJHZEDYz3FGe6AS83Nm
-# eYANQToIZMoKnSPLq/paQtHafSBBg55GkJz2+U0k9J4fGtVQVZFj19aZ4j6ZKWOu
-# 8TcGpFCykHHwhECUwmqb/mgBk8XJbY3Beq4k3seO+RgHwtbKMp+q6OkLMPTxRtqy
-# q4vMUUiRELaXstx//ZuBaAMfBQuJGckRghVmVe7Km8G1HehuY8cbjI/DKYU5tqGG
-# 09Qw9zP+O4yon29KXM80gLiC3o7Kkl7a+S/OyFYdrGcG4mfnXmyahBFiynfh2cEl
-# orWh5xvSHH78p7n/PaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGAqxC7Q4yHiW+dJvrcLvvNWzIbEH04QksZ/BtFLeU60MA0GCSqG
+# SIb3DQEBAQUABIIBgKbl+X4J13XKnhjnnt6WJlB9/3IaN6j44+iDdinbiIr9mhhz
+# JWzSKrCIhrZImL255Cjvk05C5+nTpPjDzD4rSbVLsGGA279XaFdv3ZfhgVT0qkd3
+# ebvOynKgeDU1BwQbIq5IdP4pbwqWMtaDTPOvegEp0RQBK3MoVCyAVHgbSDuUPFFW
+# oZkr4SpLWo393LJlbzeZs+obU+YNkGEAoJs6vuDjfiooil04fwlppgOGT1bE0Tnr
+# 0MxkAilOyiHOy5inJJSi5xgOe5WLnjyHiwvRyU17Z3cnmVKBowdUKfJBOQfVB9/H
+# pZfX7TB21Pmmn+BooGjkdaca5qjHw5/47eS/10pxtxrHwgw7L8+xFVVYpfl9ERDP
+# YJMQc9LlRc6zZ/7P3XehuPW5S4l7h+CKji90v96js7RP8fReVLiH6E5nFj/hDF+T
+# 1IGfXTvQveHwYluPBvH9toh2YiM81ktPHAEoOx3axCzoFaykDtrFmahKiSW+ZbeE
+# GIslWWpEOinRrco+N6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNzE1
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBOu/EpxqLJufTy6qA2u/M2tbiR0vWpz1YGsvtq
-# yp1RwTANBgkqhkiG9w0BAQEFAASCAgARD/cI7SB33FTesMq7stJTPybJTkAoBqj0
-# kmitOyCEPwqaK38Z4INXMlEY4S2T7TGk2nKdioCYNaVUdKLL6B5Izknn4vBL18iX
-# /bK5HbmTxKoXy3xwt1oIJfQRkHFuqIAjN+hmSxxiATkC8aJ80kzzAXlda54MuAJo
-# FUoGMSvsbQu0QDW69dmXiq8Ss8HnqppmWwdmCgS710A9H2qGDe67wkc9nhZkYUPQ
-# NMJ/w1j3xV4C5XW3JpGE+SzOYP9eXXomYiVnv8+hUhHSTf+yMytjgvjnUMQWJ0TZ
-# nBPZBMUJBFZGpn+RY4e1RMTDu7TuySvgmDiVOCnc7TP2EJ+8FilI60DvHj/aszYj
-# vPwTP9TNERpHwRbruFbeC4GkaVNibsRXBXygCebPe/GQhnXhI1wWEa5sfGvajooV
-# aVryi6jeqh6b/q32ofVQ4lZpyf6kQEQxcG6Ms3JvSiV4W547h/O/Mw/CxOL0n2Wi
-# gCawIlFZUZJW5KFz1pWZoUL6Ka1PRD1IXiEvZRekL24ftZRpgJBwKJLzI4XMf8qT
-# JcAEuYL/jwi2TCiYKe9SmXMCLz6HzgyK2b0uE8kSKARZ7yW8wgZ5Jd+FTvCPHntv
-# FZvQ/755DuOa1zLrtyCAJEwxyOdNRD8WTPCVLcKbRASZ7qcFbJeFhOXdn3tmI0LK
-# itsAimRetg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCC1rPJw8bvV/6SdQRUTroMOnpjQqVnC6YH18B4o
+# 9i0ZdTANBgkqhkiG9w0BAQEFAASCAgBWs4o8HrWi2tqwElLo3mdDxw/AkJIBjjZ2
+# vrt3G5pNLBef19QjNxLiM2/cKqqpPmj+lWaPIAUUzOgip6/rKImpHg2YJ/sjApNv
+# wCRJi0FDXUZMuC8Cxb4k9ffIaWWjBa9Z7Uzesae543Ki77O2GP67RUdnSyGPEepj
+# YgGobdyCOFkto9JeWDev2n5ovHf2Eh4+HYUAxUkNk9hKqfG8v5lLxc5ASH345aRF
+# V+Xyhb8NB1rZ8S+Aq1x7yFzBtFdwEd8s4Qjh8h8AO6RiE1jzXMfLlz1fxw5ojkCP
+# qMXE1W3rezTLnx9NasR2jKu2/HKKDuSA5gJgxw335zEeuC2fs3ufe09RqSlXAeAw
+# XSm67gIko2E55OKaxhkqJ0KYGXt7sZYz+lIfsrEUZjZWI5OG1UEyaNszNO21nJTy
+# cXKoxh64T/e8shT7JVj5uGYO300KJ6DfvS6O7jjJ5H+vvZr0jUHH2v1VBVD5LE6z
+# z4jbB4eLOZa6BbbbTZK4fnRMJcNYrTpA07KkKZ6woeEr50r9BRgUMpMT2vfpavTw
+# BN9jtaR8UpyVVkApc2/STpWALdBfgIOlQnp1GM6oaNsVvdflL9OciV+KVpFwu1+t
+# Ck2SwBbEUrAMMPk+zNWN0tiS/mRoYGb22XnnwSus+k2AXlhyGqNcSwPSGihM3Tyr
+# sGz0A0SHQw==
 # SIG # End signature block

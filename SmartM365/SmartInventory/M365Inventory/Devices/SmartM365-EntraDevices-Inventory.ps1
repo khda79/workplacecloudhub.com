@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.13
+1.14
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -276,7 +276,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.49' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -574,7 +574,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -1353,7 +1353,7 @@ finally {
     }
 
     try {
-        RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile
+        Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile
         RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile
     } catch {
         WriteLog -Message ("Error during cleanup in finally: {0}" -f $_) "WARNING"
@@ -1374,8 +1374,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJNy+t22wCxXRj
-# x3CrbMdeMrXo9qeE3BaWuvKfxhNeAqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDWO3L8Tdnr2Ir
+# 6KBsJlVMRjjuTKGfgLCJ2195NmeINKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1508,31 +1508,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOHtNHQ0vGh+B6sRws9otQO07vHuJ+KzyueEwvQ/mcoPMA0GCSqG
-# SIb3DQEBAQUABIIBgCq0ZKQjGkb9YOYQ7qg5y4hobKnrKMYk+TuJCKS98VHxaKpF
-# 1PfXzjx9nVK1lZVMoYFxOQzcLNiiz1yFDo3HMCY1sDV+94zWnBF2H0ZvdtvbsIMm
-# fKfu17zxlm1iHYsyBRp30Q/tRV/qPBxMJuBjTe07cAOfDz0YxDIjgullVkxSpwn9
-# MxYTnXF3zvPMpRMejAXkyaZMhM/htkySkUhFxpwEiVl6sEzmEeRbO6tM6etE8S1i
-# CigNoSZCQF2QNUd+WyoUPPFnd1XvH1M171kPUN3GlNCpYGgYROUcdKPHwHfplZo+
-# 0p2eLPtqr/orCFw3THR/SsG/kDr/kI9IXsNF1xg1kUsaJLLoVv9uHuGqZ06rgoYJ
-# NokmPYWO/zUrE4tQpNlzK7mryhyPgfi9gjIG1YImrFEqS/MAkyTtrfqQQxakDWe+
-# Laloyj0F6VoHb+23eKXTVbjrKCgjbJgm9FsC+Uva1NBAlXJVFqMmvaiT9gzoweG4
-# mqh+SzmG990SSsUvJ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH71dKDB3qvT0c5b2ko3jnhthj+lkFvHJgC9xT5vVX6gMA0GCSqG
+# SIb3DQEBAQUABIIBgG2z/xZNQ+IUlazbjBZfS9GpvUCq/gYlvvFS4vi3HaXTiMLM
+# r2PZ1Mahy3wBFWt/pwOBz5AVYv5aHedc5QLOttH3g1VmaV2CGKVMKiquT0tP5qEN
+# PceEG/3QGXEuxKPXMaUsb/iMEPC1caOr+8RWIN+alc1WX3VoMGzB0+HL+IjxXM4k
+# EBBswl+/rhmUJsuxdl6ODcZGNBpN77/0NTEpMDCERqgrVjXbmm2RpBP87ICtmJdT
+# QZNlsqu7RZPfWeKdAtHnayzTi19mRTgpEg+rZu36ikb1n0VD6HjyPlc4uIqMHiBW
+# eSe57jbskjTdS1FoL89Dj6e7eSSpqgoP0joIYdwuVi1wUrDvioE4E9VuF2WLcggf
+# ZXDQHg8qRBDEG3b2npR/G5DADBIP2vqFGnq6L4xcjVwjdKOJptE0yIsCbF+T6YN8
+# uWtMsCYbU3e4FfN5AGPVdyljuqj4kZXw4MNOWbjwQwPsThTPndX8DM+uY1VuCl2P
+# NypsLdfslNdIvgysW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTQwODAw
-# MjhaMC8GCSqGSIb3DQEJBDEiBCC9eJ7lwjPk6bqMQHsmX0ROltfilgdX7gfkby5T
-# 3VMsKjANBgkqhkiG9w0BAQEFAASCAgCGp7MwX0T9SNTxnORI/a936be5mInNw4w9
-# dKh+fkGD74bu9j7pVPvceDB1Oy2Pp6O1lYfNqmQsaYbaIAINorqUt5RUOsPcZKn/
-# +Es7Iaz9aLezCTran3/GW1OKO/yHj7TRPQ+WE2Ar/uyM2Dj8d3xw504dVWj0AF3y
-# 2tDmZ3CDos30DhJ2hxrCp0YRjOhywuu1vvGIKVztMvi/ElUsZFyKkMBRgBfLBl8z
-# KgTJER0PQbse5bE7Afwmf2SkwT/aDsNeHcdpEfxMBPTYo4hVRE9vayN+9x7TgetF
-# 5Gy9ID3nkXfQJUCheIRS0Bdp24b8WlqiHy1Ohhwc30tlOC3EZht/sJ5yYfs7HymX
-# 2u5wyge+qwZlw64yG4LOVOaIh3qH8e/TCp5C918TH8AY6ug3axcIhPpEYfSbXJqD
-# DYknUXvlGhmXcMcbowhuNx3SdW1B5y3depAeNSYEoDiGeCh07x7/kf8o9cTSO1FB
-# 8FaOa4ZseXb6R/TfEl82uYKZD+UhrHfjpG0/cCY5RTSB1jQeEGkwF/S3x0x2yO4X
-# fmKZCw4ylQcxKu+kMuuRVU1Kqrn4IGez6ZUTAH0k4q87FUmH01JlvaiqlNCXHJHx
-# jqh7ZbZywXrAAXd7LBUE4GhIqvrAvKx7dS8QTzErv/9ZCdYgFxVcq3XHjedNMJDn
-# Zff4XvoLzg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
+# NTRaMC8GCSqGSIb3DQEJBDEiBCAof/IDHXIV5XAlGR5nuDTP8Aa6JEBUimtMG/Ug
+# W02nUTANBgkqhkiG9w0BAQEFAASCAgBdNSBV/DUGEYfjXDzlIXE1zaYaQ6jgx0zk
+# yP0ZuRg5xnHHI8UmFAoCIL8Lsd1LTUylVsSSYCcpr3vLVLMFIHpL2NHgD+jObNOv
+# WkOgnsZo7sklMiH/MDPsbYzBBbVyCxg+UpRePG4LjWd+kL6QTlt/n1bom/ipfEKs
+# dBV8MBZoWMt6Ej9zHgcHT9iPwwfnyxfNnYOhwB0LyfXxv6998ulPp/weYNrWCCcn
+# /aLZ3E02vK/NHqVSyV6Rbf9muca5wYhbbnMisiqAe0dcVZ4SThYRazfwQZYI3SHr
+# 0Wee/JNUNk2cT7sWOWPY9vt58d+zAnNTA+RVDyIW4ud2yg1mUM540Q1h5ZKFuNMS
+# 80qv1haTTdHtOP9c0QDjEURfvookgSwudSYMzpkOZRk8+Y96xl9ddHbX5PvXR/Nm
+# yB47e1NcpJlHNfCt7R2NtAZNH6V85z13Szo/Cj++AMypGTLzq9Z6AhvnLM9hl54q
+# OzQcrne914KmTCkS9+NVK3YDkE7s2KCGVEY8GFtwRMj0tvkJFXZ398GW8u6OEM/3
+# PtkZZG4HbAnRjHkDkQeqmDRJs1Fi0xdTpAwB9YEei4/06QE7gCL7StWmYrwjGGp+
+# c1GwNXUPQbfoMcKcdaMzuAdKb79fuqFpbfFsvVzNxYyqgq08d/Rn+k+M6BtzaTDF
+# Q2j9rer40Q==
 # SIG # End signature block

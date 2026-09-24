@@ -12,7 +12,7 @@ files for SmartInventory and SmartFinOps.
 but suppresses SharePoint uploads and Teams notifications during a controlled run.
 
 .VERSION
-1.0.1
+1.0.2
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -48,7 +48,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $TaskName = "SmartM365-PowerBIFabricActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:PowerBIActivityApiUri = 'https://api.powerbi.com/v1.0/myorg/admin/activityevents'
@@ -155,7 +155,7 @@ function Get-PowerBIActivityConfigValue {
 
 $smartM365RootPath = [string](Get-PowerBIActivityConfigValue -Name 'SmartM365RootPath' -DefaultValue '')
 $coreModulePath = Join-Path -Path $smartM365RootPath -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.41' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.57' -Force -ErrorAction Stop
 
 $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
@@ -1021,6 +1021,7 @@ try {
 
     $detailResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_ActivityEvents' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $details -Columns $detailColumns -NoSharePointUpload:$NoExternalActions
     $userResult = Export-SmartM365Csv -BaseFileName 'M365_PowerBI_Fabric_UserActivity' -OutputPath $OutputPath -GlobalPath $LatestCsvFolderPath -Data $userActivity -Columns $userActivityColumns -NoSharePointUpload:$NoExternalActions
+    Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
 
     $summary = "UTC range=$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd')); Events=$($details.Count); Principals=$($userActivity.Count); Pages=$($collection.PageCount); DetailedCsv=$($detailResult.PublishedPath); UserActivityCsv=$($userResult.PublishedPath)"
     WriteLog -Message ("Power BI and Fabric activity inventory completed. {0}" -f $summary) -Level 'SUCCESS'
@@ -1073,8 +1074,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGyIe39gt0aG+M
-# 3C8JKJNvy0Fz0HrjVYbMnDTd/mbeDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAhMVBiAhZSLJm8
+# neQ7nfUOs7keb251Nv7QvJaPYzWzN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1207,31 +1208,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHdjx5QOCWHGgC5ihADlWMCsB/DygMwi+8BwiS7iXDF1MA0GCSqG
-# SIb3DQEBAQUABIIBgDBFgKeBdCh84tzVVlAxkrm91MnE81YpBMJxpTEh9jDBDSu2
-# fh6kxhfDbl4uUEAfz3XVCdx6hc4rzVVtLEGvghmBAZC99wJ3LsVsHJwnn8uX5NOq
-# NtRFwFCMvZwc+utN995hqMylOn8mguwPH1Sw5M3UWC0B+VEjDgK2UPpcNHKlL+Xf
-# +pvPPVjBY2MT1PFNJpObGsTY+AnKs8S2ZKmXNF5E6WOCwY32huDiiXRxHkQQ1ju/
-# GB0Ns1GGSW58xOBNPUd1MMkMLeTJiGd2oY1ue/vVEhzUzqYNKYnxz2nty6lTwmz2
-# SSEXW9S80MLCefidLlt+pipCKd+ai7wZog9Om36BJdQNFt4dAhi2Teym+J7ECSJp
-# vshA5YYGnPgAzAfpPtaRGRBMbYqejIkee4s+KUReCZuf+jw+JDvV6NvyqSdqWXKa
-# lX8TWmaksRz/iLvZD8aalZ+VLLLcIeIhQepUt1w/QMrss4d/hqvQO4n7IwTN7Hdr
-# gaHv9iZ8ZoD6GSPOg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBlowynQfpSAxx7meBPbDQzuReY1TXg50AA3QOFuSCQ9MA0GCSqG
+# SIb3DQEBAQUABIIBgEYJHLMsXMODysbrRSysvTlFJRo6MGIu5LkNyCFSEKRNMjbX
+# prsR1/Y9qSjWKDCYjGrpS08t+F7Ll8VgJ6lBZZ9ZunVVP9dWIBPo4nPsPMWhCC4X
+# Mtwn5q+5ykhFasv5zI5C2ZcAc4gACfpWZhryGUD0lim0LNZ+Bk9tQc+CSFJ0YN/T
+# TMqPWT8ZFDhCkfWqay6Zx3lyeiSD1aEjAHb9deD21DaYq6Q6BoD1c9pKHs45TsWu
+# KEp14/8wHfZvJnyD2rRHXV2RM3dN0FeyNFDkXQBIz/OVoA+2kXIfRkp+ymBPpTjZ
+# cMPDNYaGSksq1iUsQB4t6iu6oTHExVjmQcAOgHFgsidjDyROZRxiPrbOwR74sUP6
+# rffGDgFR+AD7DB/I+3PIyDQLCHtdg90TscJp5qtL9Pb13OqhD9MS6Go1PrZ7bYol
+# qw4jNZJLu/HNTSe0taFMeU5K3i4IAo/XW/Fd6g+Wmk4j+DfJjMkLslfHQAfa0YAh
+# 1ufJ9nji/9J8D3udAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMwNzAz
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDlM3p/LxjDh2Sw2yvNah7sL2O8kwfYdgVziYN6
-# Zsum4DANBgkqhkiG9w0BAQEFAASCAgCF8Og0lVWCe+Yei5cqh41ZBxf30+RWRRNC
-# jm7HWTrG9UXi8mVTtHlcsL2UEd908mhZVEZIiZkb4sixLXdXLggijHhrLUbUVxAy
-# f4pDz9cJrNy+5R4t5nzPKuroXA4E0ZSdxfnT9IMGLwMogGH3iDjolQS2At35ktyZ
-# nYWs35eAZ5twtYuIXtSQMBKzcA1e7p6HiPTQ75/CbnCTLqr7BzfWUYMFmi6F/DFj
-# yAkyoJTEwJDOGGfkN+MHuqCg7Eio3+pRcXYnd1rrijiRyFTDKObLjkhjKHbVby9L
-# T4J3cHj0DmAnl3InjXC7tDeKtB/KyLtCQXQptxjtDfQ5KI9h4CUk8ucZ5ym1rQHo
-# QeT3CELdh7PZOu6zBTAh2b5TD1ra/KVowToP4P8hQAtKly67+XfCSiJxSaQoKdzH
-# Hd5K1LWkoRsJfotXhOg8iJOShQZiQG03X+2HWXLv4lweZYnHflGRixRtz746/bJg
-# K8/Kvp9Ub4DrMagGc4mu6ZNa8HZpOd8PvBLFvGosZ6pfcrNeZsECchZgQOyVLExd
-# SoKxMbazpZUUa38bh692xfFEdM34TZuj7XBK02dDcItV+qk9lnDQdJApLEPMvUXw
-# yQxD8X4/1WtSUVlr+PFLok2Ttf+ZZXmbq7B1BkiwATrqs0S/YbwJUPq1mp66rZhR
-# BIUJ/Knh9w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
+# MTJaMC8GCSqGSIb3DQEJBDEiBCAymXqbNdDMwzbyeSDNrwD0u+ZkXXUCdwMT9/7J
+# Qmd+7TANBgkqhkiG9w0BAQEFAASCAgBPMc14US0P+Ob5g7h8Dj6U/ye893FLMDuV
+# bgQUOMvOJp3fBpocphJPBUpijGq1VU1Wybw0cHzj3KOax9Vf+t4JiRZGngG8vdYx
+# EjTwRJxxWV/FTq576+/eDsfj4kVbpnDNIHwQ9BT4yIx/KOhIKPOZLIaUwMwAKSnP
+# 1W1ej/PIAbpflr07bw1AsMqgpJL071LtOq52v4lZ1/MawQP17wUCTho/2fq1GMEU
+# BgKn79T60djrGQcRtC0ZoVB1HcsOFJvUAaSH+nyapA95sR5WzorGuHLDfanczgrx
+# tZlOxnIHjtfPv8/qUMnGM5IyiOPMkApyYsiGC8lLzGRxY39oL4g2tKiMWklP0fxF
+# QIfxh+mTX1LwX+fHqSCY46QP0LS9Iijl0WxSI7N/HSI2EKLgjTIa5ptuvwaNIaxn
+# E03hHEUws714FHEzPgN/XCyPxBUewwdG/R23Um9CMyFBYFQ7IJ8wLdCqeV3wJRE4
+# X4KJejQy0VI4gxopQkxZ696RcHqAC43j7/4HTAaAdU+Rf+rGreAg1dWS2tcZsxUr
+# EMi4kicoarKPHh/jgJf4V3lnn3aA/pohQ4nyZe1htouCF75JgKH+j4M8flUKCjRy
+# UOOAjg6nLI16OUrhDztzwX35N9fvJNior+ajzJJ4AT0Cdv6gLCUfF7/C99tB7Ore
+# VQKNe9P+Cg==
 # SIG # End signature block

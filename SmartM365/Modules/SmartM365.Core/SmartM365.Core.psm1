@@ -1287,6 +1287,189 @@ function RemoveOldFiles {
     }
 }
 
+function Remove-SmartM365TimestampedFilesOlderThan {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][Alias('Path')][string]$FolderPath,
+        [Alias('Filter')][string]$FilePattern = '*',
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [string[]]$ExcludeFiles = @(),
+        [switch]$RequireCurrentRunPublication,
+        [datetime]$ReferenceTime = (Get-Date),
+        [string]$LogFile
+    )
+
+    if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try {
+            Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose ("Timestamp retention log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message)
+        }
+    }
+
+    $generatedCsvPaths = @()
+    $generatedPathsVariable = Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue
+    if ($generatedPathsVariable -and $generatedPathsVariable.Value) { $generatedCsvPaths = @($generatedPathsVariable.Value) }
+    $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($excludedPath in @($ExcludeFiles) + $generatedCsvPaths) {
+        if ([string]::IsNullOrWhiteSpace([string]$excludedPath)) { continue }
+        try {
+            $resolvedPath = (Resolve-Path -LiteralPath $excludedPath -ErrorAction Stop).ProviderPath
+            [void]$excludeSet.Add($resolvedPath)
+        }
+        catch {
+            try { [void]$excludeSet.Add([IO.Path]::GetFullPath([string]$excludedPath)) }
+            catch { [void]$excludeSet.Add([string]$excludedPath) }
+        }
+    }
+
+    if ($RequireCurrentRunPublication) {
+        $resolvedFolderPath = [IO.Path]::GetFullPath($FolderPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $currentRunPublicationFound = $false
+        foreach ($publishedPath in $generatedCsvPaths) {
+            if ([string]::IsNullOrWhiteSpace([string]$publishedPath) -or -not (Test-Path -LiteralPath $publishedPath -PathType Leaf)) { continue }
+            $publishedDirectory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$publishedPath)).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            if ([string]::Equals($publishedDirectory, $resolvedFolderPath, [StringComparison]::OrdinalIgnoreCase)) {
+                $currentRunPublicationFound = $true
+                break
+            }
+        }
+        if (-not $currentRunPublicationFound) {
+            & $writeCleanupLog ("Timestamp retention skipped: no current-run published CSV was registered in '{0}'." -f $FolderPath)
+            return
+        }
+    }
+
+    $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+    $timestampPattern = '(?<!\d)(?<Timestamp>\d{8}[-_]\d{4}(?:\d{2})?)(?!\d)'
+    [string[]]$timestampFormats = @('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss', 'yyyyMMdd_HHmm', 'yyyyMMdd-HHmm')
+    $deletedCount = 0
+    $deletedBytes = [int64]0
+    $skippedWithoutTimestamp = 0
+    $failedCount = 0
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $FolderPath -Filter $FilePattern -File -ErrorAction SilentlyContinue)) {
+        if ($excludeSet.Contains($file.FullName)) { continue }
+        if ($file.BaseName -match '(?i)(?:^|[_-])(?:History|Cache|Resume)(?:[_-]|$)') { continue }
+
+        $fileTimestamp = [datetime]::MinValue
+        $timestampFound = $false
+        $matches = [regex]::Matches($file.BaseName, $timestampPattern)
+        for ($index = $matches.Count - 1; $index -ge 0; $index--) {
+            $candidateTimestamp = [datetime]::MinValue
+            if ([datetime]::TryParseExact(
+                    $matches[$index].Groups['Timestamp'].Value,
+                    $timestampFormats,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::None,
+                    [ref]$candidateTimestamp)) {
+                $fileTimestamp = $candidateTimestamp
+                $timestampFound = $true
+                break
+            }
+        }
+
+        if (-not $timestampFound) {
+            $skippedWithoutTimestamp++
+            continue
+        }
+        if ($fileTimestamp -ge $cutoff) { continue }
+
+        if (Test-FileLocked -Path $file.FullName) {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Locked timestamped file: {0}" -f $file.Name)
+            continue
+        }
+
+        try {
+            if ($file.Attributes -band [IO.FileAttributes]::ReadOnly) {
+                $file.Attributes = $file.Attributes -bxor [IO.FileAttributes]::ReadOnly
+            }
+            if ($PSCmdlet.ShouldProcess($file.FullName, "Delete timestamped file older than $RetentionDays day(s)")) {
+                $fileLength = [int64]$file.Length
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                $deletedCount++
+                $deletedBytes += $fileLength
+            }
+        }
+        catch {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Failed to delete timestamped file {0}: {1}" -f $file.Name, $_.Exception.Message)
+        }
+    }
+
+    & $writeCleanupLog ("Timestamp retention completed: folder='{0}'; pattern='{1}'; retentionDays={2}; deleted={3}; deletedBytes={4}; skippedWithoutValidTimestamp={5}; failures={6}." -f $FolderPath, $FilePattern, $RetentionDays, $deletedCount, $deletedBytes, $skippedWithoutTimestamp, $failedCount)
+}
+
+function Remove-SmartM365TimestampedDirectoriesOlderThan {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$RootPath,
+        [string]$DirectoryPattern = '*',
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [string[]]$ExcludeDirectories = @(),
+        [datetime]$ReferenceTime = (Get-Date),
+        [string]$LogFile
+    )
+
+    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try { Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop }
+        catch { Write-Verbose ("Timestamp directory retention log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message) }
+    }
+
+    $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($excludedPath in $ExcludeDirectories) {
+        if ([string]::IsNullOrWhiteSpace([string]$excludedPath)) { continue }
+        try { [void]$excludeSet.Add((Resolve-Path -LiteralPath $excludedPath -ErrorAction Stop).ProviderPath) }
+        catch {
+            try { [void]$excludeSet.Add([IO.Path]::GetFullPath([string]$excludedPath)) }
+            catch { [void]$excludeSet.Add([string]$excludedPath) }
+        }
+    }
+
+    $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+    [string[]]$timestampFormats = @('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss')
+    $directoryNamePattern = '^(?<Timestamp>\d{8}[-_]\d{6})(?:-\d+)?$'
+    $deletedCount = 0
+    $failedCount = 0
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $RootPath -Filter $DirectoryPattern -Directory -ErrorAction SilentlyContinue)) {
+        if ($excludeSet.Contains($directory.FullName)) { continue }
+        $match = [regex]::Match($directory.Name, $directoryNamePattern)
+        if (-not $match.Success) { continue }
+        $directoryTimestamp = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact($match.Groups['Timestamp'].Value, $timestampFormats, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$directoryTimestamp)) { continue }
+        if ($directoryTimestamp -ge $cutoff) { continue }
+
+        try {
+            if ($PSCmdlet.ShouldProcess($directory.FullName, "Delete timestamped directory older than $RetentionDays day(s)")) {
+                Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction Stop
+                $deletedCount++
+            }
+        }
+        catch {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Failed to delete timestamped directory {0}: {1}" -f $directory.Name, $_.Exception.Message)
+        }
+    }
+
+    & $writeCleanupLog ("Timestamp directory retention completed: root='{0}'; pattern='{1}'; retentionDays={2}; deleted={3}; failures={4}." -f $RootPath, $DirectoryPattern, $RetentionDays, $deletedCount, $failedCount)
+}
+
 # Backward compatible wrapper for old scripts
 function Remove-OldFiles {
     param (
@@ -5666,7 +5849,7 @@ function Disconnect-SmartM365CloudSession {
 #endregion
 
 Export-ModuleMember -Function `
-    Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
+    Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
@@ -5678,8 +5861,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0QQ8CNHaR7s3t
-# LZycVfBSySeFmfFMYGsPFhZmPppkrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNyW9AbDO5H43q
+# iNE9soBd9BMeBFt9q1XMYh/rojBqGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5812,31 +5995,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICVxPG7dcDAoIMJAXvRjrL78pVwPaQNIqa48UdqRWhu6MA0GCSqG
-# SIb3DQEBAQUABIIBgBOAIIogOi0zg6QbBoU2q6grB+G5a8r3QosZFVxvC0lp9QTi
-# k8BjBh/Du7FuU+73iFJO90ui4uv5CuQ4Y+GnaXrfrVaXfjI/4JU1znPYo9BgPYfI
-# dOCsrEpHl789Xj/jlOLFmz4BPlMyzZv/I0zZMXJA+DjTxuVVlCLG6UioaPs/3HMN
-# biHZ1UT5lcVZ67CUZ2wYnTmtO6QL67uGmGEWNIn5rGA2z/+ZPdXhNQugLFoLmU9j
-# 5KMUj4EaXNp8H6BdrCsUsWVZK9FPF0vFIxbLk56P2W8fiMpwntxYuXWbIi/y5nxY
-# C7Bpziw8GmGStgtcqLRmAIES6szLHna8DBv0NtytT+AyPpMmDXdMVp16vL3ApaFL
-# XA9nwTeimhNxbQD69YL/+5a8sDkBvx6BU0zj2AYJL1MtkDcvgQHdI2OFL8zeQZ8o
-# SEZte27hiCSJwNB5dFY1ME8/lK8ibmAQGPiI3bjNKNpt176XxdXAnJD6HMVkuILx
-# lbQRUbFcMh7VF160GaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILG0Nr1xYty6Nkz+3McoGYhJYd3flyhf2XB7J6fjGy2CMA0GCSqG
+# SIb3DQEBAQUABIIBgB9ykKsGmgIYtwbJqWgthYKCDs9J1EuABLgE1Sm4Zc3uCksI
+# ZfmdwDeTCamDCJUnjiOiJxGf0AEsd1QK8lh6TggTHrxaEEQsI+/UxIGTnOp+4n33
+# cgQjaO2p9HtsPC92i+azCWldHOqZITNae4nasY8JGL01V15pHe455IGjme0SBf5s
+# qJcr4QOpTxqO5pVigf5aK0yb373Xkj0H5e9WzjrWnGn3szhY6NT7aSPQYLSXLhRP
+# P/+NzE7RvBAORkIXo2ZhEzDYBzmudFnvHMYt9Hv5Em96sQuUTUc2kNY5JRwPI7sp
+# zSuV7sVDID+cA1gMkx/qkKD7jjwDDI09vjQs9mFct6xJPv9arTcJj6I7TlA4X6GK
+# W1OoWQHPG1RWv1NGNEcVzD+NqDT2EllpKZLuhwkkQexfwTzI/PFtF7fHwPvQnBpb
+# Ex2w5shp/J6IXd3w3LBgS036t3s5MWz1x+lOM51a8VciBiWgief5fm2W+WWkt5kI
+# r0VWtHOiDNz5+AEL3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNTEz
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCkBenFzgcdPWMKuXc7SuOOUU+c4d3yt6bkoR86
-# s/PqrTANBgkqhkiG9w0BAQEFAASCAgAQOdodtfA1PaQGOW6HTMX4VCtZHscDrWdu
-# EJQZjqkYCDKc7ZhlZuyhGJLbdHXWs+GlH5RdUCXQowrrgUwLd65Vfn9raOUghIxt
-# QuySq7Gaurc9AZr66Oboi3AyKXrS4wJ1UTjSQH3MxhxPbFFqoiMdYKyJr+HP6ijT
-# DP5M3mF1WVWeJR86u43eYBKIq+15FZARvZXXA4EQfiPG7WAKRGqlGtHaTLutuq2U
-# t5fqUSBOePv7U9V+Sl+mhF1hs13XXcrvPlkYLzb8KrfXQFwYg5VLz9MaLe19tVxA
-# zLg7rTeTgJExqhpHjBLzFXt7sOhoqbp7q/n8c3GaXQSbmBdkVYr099X7C0NusIiA
-# 6ayAIeWXQ5IcbROubWeDqSExh4VDEyk+zWHePjPNKbRpELm7HNxgwDsJOe34RxcG
-# +7wx2pEniSDWCXJzk6hd5hhe/ykrhD+ty7WwCFi6/0AFW0yzJvXNv5+2shZALOnI
-# ImA+hTrj+tFXOPs8JAV9NsEmCvaQ3hFEvxmUhbr9cyhlwMXojWYdaRAsmm2wMnXG
-# SAjzsu/gov8mGhHbPNrXVK5ULDPIa5REg4QDMzSXgNDHTyseIj6A3c7hO9b3DzM8
-# L4mgVLGBC8e20Jba8ag6ayo+0yZHj+4LlNDve2Y/YA9PdcO5G9rN4UHZEJtglyQB
-# kLNUu96LlQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQ2
+# NDdaMC8GCSqGSIb3DQEJBDEiBCBsXSyKcyenH/rHEgsQ3+vE8ONWC93CCNzTmJB4
+# 7ovZqTANBgkqhkiG9w0BAQEFAASCAgBSeuEhZOZkgmyU7zKBONicU3sf3w2nGf4M
+# fD78iZSVTbPfAXJ0T/9KMw16wpJhrGACimsTi1yTx8Yzc5VKWL/gWWdF4AEd0Gck
+# 7/5D+pkcC5f+7RQloASAux29M4kw94Z4SW5Qk87p1phvo3MAotOsN95vSo1vSsbZ
+# KE20oIcRWC10II/nzWTDf+5oCZhsowyDwHJuSSClXYJkQ//Yumyc7bGliK3AAq9B
+# sdE6FdasDqAR+7AQPjjN3T7ZFtRqBFqNEGtvq43fOsrXxvt7uhSKAZKg+PjncmK4
+# QaLOEbOmAEGoG1OJrA1J4hVvG/UBFwdNTXi9az0M58z0SVUlb8xf85cw9Gc6POOS
+# Zw1nL0Bo2FYVwV7MUd76oaZDMt4a8YdAEpJbk2ICo5zz5YlNPg8F5Ibq8zGdZ1kK
+# 6Vf+naFN1lypUEUwZV3PkI4ehyCzF3lUy++sMRhs+/rIrg1jZZ/YUNYhJejw5JHh
+# ZEGvQ6fR43tLCGKM4HTHJBNc0AdsS6lqy3rQsWn+Sd1sXrJ8YHv+Vka2bWGSXT05
+# zV90gUn2Gdeb6nJH1aP9hEirA2GYOclZjViVYuOttqD2v/QokQ3OF/ybhZnqkoAu
+# jeXCt1UoVtq5ZfUBXlUd7VlqdXPu9XxnH49PojRmgf4wXeMq9JvDFsKkLtU/LSt0
+# CK7Ug9Kqfg==
 # SIG # End signature block

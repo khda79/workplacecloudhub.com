@@ -23,7 +23,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.3
+2.4
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -32,7 +32,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 2.3
+    Version : 2.4
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange Online
 #>
@@ -260,13 +260,13 @@ function Join-ModulePath {
     throw "SmartM365.Core module file not found: $FileName"
 }
 
-$ScriptVersion = '2.3'
+$ScriptVersion = '2.4'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365.Core.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.36' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.57' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-EXO-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
@@ -1318,7 +1318,7 @@ Write-Host "- Log              : $global:logTextFile"
 
 # Clean up old CSV files + old log files
 # Automatically excludes all generated CSVs via global:csvGeneratedPaths + current transcript and log files via global variables
-RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
 Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
@@ -1330,8 +1330,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCW2qW/b8docnyO
-# TqThzM71j9ktCDhFq+De2sjLFCgBvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDlYpahpkeIdEQ
+# MXThp8P/ANkSPdPOT0gphYSijWkinqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1464,31 +1464,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGB6xyZYp32sXPDVLN6wz46s+6UUqf5ekvdPdIyPYEVeMA0GCSqG
-# SIb3DQEBAQUABIIBgGvkMAKzrGFcXAsee0hAlNLmKjXN+5YWVSYI9U7+CaBeG2FX
-# yUK6+4L4O2Qfoefw85JoJCiraLUC4DAHQ1nfcAdjVAqF+X29CRPvOn4ZGQ745jY+
-# KKa4e1UJX9ObGoARl5D2NlrU4278SVOltQzqAxIMGQLVTO6RwkiqCm6MTlMOhg3N
-# xEd0IvrDbNRXSqdg1YuTiuWS73oQM08OgoQ8sBA00bWIKPtA/AV+rWA89AJNNPZv
-# QvbNIffPnyLU/pRPaybuNbPZuiSilYScAwBLrQDsoNC/rKiW+a8xsLRumthAQlYL
-# Qls09nWkTIoNc7oqm4kjiZTRvQR9XWPwhIPstpfyiQD8+/Tz3FGi9fXV2+2emXeh
-# gqDJ3XW2CkLice9FMH+BwqHsqEzDjPNmY83jFoDOYENL4qgE7zKxOLuwwDwUrHIW
-# +8YWQXhOB3emqmK69nDXAMtbspXbxMJeO5SYRYAZWYhZg8xw1DDtJmp8Ff5c4oPq
-# y2gh8INhMJ+sAUd4saGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGshtzbM+OnuxUiYiqSjjYAtsqNPRfBuTFVuoQMy8ZsMMA0GCSqG
+# SIb3DQEBAQUABIIBgBXJx+gonMj0VPEy9QeU3CVHMLIOFrorevhu7gMfAC/i7W9b
+# drbZSDyhJtIQrBQ1hI8aENsXBXn05/AJKy3U6+GfyAO8WfQcYKvGSQgZ0KB7DP7X
+# 1VZg/6iYGJCd2M7NG7JQc869kaCP6WLfA0zEJ6sO8boxv2vJ1wJNvNqgncsaDl8t
+# I77Acg1UUyis//2eTzdmo48zEApPoKJC03Ca8NykvZMn7+iSggSr2Xw53mcIVw+n
+# /f8hGZ+tvq9KizuvQ6R+lw+unR8dHIZr/wVFV2CBjkZg+yhfyV+LKVVkd6VStgq5
+# D/a7gIiJFzM4zgjs+qtLpf3iMcF7Sd0xb4bfZ3VHHFnH6SMQqNWsNxU1KUJTyxwF
+# VoJNYj943a8jXAtz3NQkTqR+yachPe/Zy/c6ZVnUlmCaVYOSkSefvKSeD8IXTGnk
+# BnuT8MAmVeqvEAOqvs+f0fUefE44hBGwuFjaJNAIBsEZwaXSsYlDfHa9tf541+bE
+# 5eHLqWTbuqYUKivQ9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxODE4
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCbZmbz+sNd7+HXtKWGLgJRQk1bM5+gbR/Pm2qU
-# TVmqxDANBgkqhkiG9w0BAQEFAASCAgA9UfS0bbzhLbXB3sIdD69ElCXaLvoOFZeG
-# 9n/jrnku+cq+C35q6GmhtBqvmmYLpBbDT7P1yyMQlrmxodTlhY3TAVIlPOAsI1PB
-# z9W0+xuiDQJFnCt3eLniFGEYTeKeH4T33e/jfQ+iAClos93Qwdo5Ee/0DtCa+Yan
-# jGfEq3GtbVsFILCbGfMeXFD+qyK60ukz57KFlmBzdIlUam5rJBpznONH9XnrQ6nu
-# ohOK0oFE7lQNVBBq/nquIEmdcQsEV3Lp0xvX6dMu1XSQUBe9f9yfqGGPFzBWBV/u
-# bJroYgmFueiAJkUmJRenQXCkQVS1Sod3X1cCpSiRp6rH7Te1QrpHyMyrQmgnc7/A
-# qjjjFeUUL0MS9l9AuI8JIsou6m/DBY0g/2gIJZCRsNfsFgZViPPxMzAj6qNaF3sT
-# VHKJJv3yWdPiAR6/p/TR70kpS2mxYGIJTUr4uAqJV5xcMQB8ZtkxHQEvwWSh4VvY
-# 9xql9ACy5UI0FRsRQSkdOfgjR6wgLkr7zOet9Bl+0rTENQLvuE06IjiyXeabOR9I
-# 1V7ksa/aT8Un0zPQtgYFdXDNWXXEGodrx3VOUhP73+3jclW+jlQ4vomMhZvwisCM
-# Jncx07/RqNOWYX5Q7BZIRfPdgqPXvJTmyFML2UFDeRDavECyteevMvuJpquESjfg
-# s5Jl58mtlA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
+# NDJaMC8GCSqGSIb3DQEJBDEiBCDMrEj5caC/46tU0HEesIov1yX/eZM2Uxxsl7U+
+# e/8pqzANBgkqhkiG9w0BAQEFAASCAgBN/6POsr2fE7IqQKl6JUZqDwVVnmJkX9Ez
+# rziVgk7WFGl+AwIniFzpt1/2Yy/AniFnxrZAF7GgiKNdFV6ZhD4KhYvjUDC9u2jw
+# 3+gtFf+bW1YHN89b8Ekcwn8uyyiAw6Urq638iT0U0ZkRXX75Ry2CiVZr+fxNLvOJ
+# ANSxXJ1knGlsbs5+Tk3Tz8mUITHPglVoSxan78Qr+z+GQO6OufS4xy0qD8qBTdSF
+# /4Me9dyMuac/Hk4FV6a6DtAGgLweG948Zwpm5XA+b6ail6U9S6ahGFn7lFYUhNFp
+# p2aP2IEflmp8ew1ZbMwDmTG5JvTu0MHNDHMJklBddt5R6NSFrr6NyenlUqpZWMxo
+# og05Gm03ynC7Hf+FcV2yb5pgvVciK9U9qGnBOUUQJIP4uwkb829MJjc2HrEghXAL
+# z2B4bllu3ReFcjuCC849/IsTFX3vtSksgIZG+QHiFbFr+jVS+0/alMV8c97eb0No
+# 7albv0gVpTdOATbKBYAadQcqPRD07vOzjdKjLS505R/M3DQG6uZdX3W7JKMqh2Z7
+# dAFnWRowUQ8Vtxu1S1UyD5SbyQjYh+HA0s/apRTn1cC+EsqoTuCCcTRZ+ISe95Lg
+# O6wQcsKknGW5s1fH7cTCbQL1eCkytL2FDST9m4XYjU+9hDL5CyrG9fdS1dNb97+R
+# JIpcUNB0Eg==
 # SIG # End signature block
