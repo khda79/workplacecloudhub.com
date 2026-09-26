@@ -1,0 +1,19 @@
+{
+  "LatestCsvFolderPath": "__USE_GLOBAL__",
+  "DataAllRootPath": "__USE_GLOBAL__",
+  "LogAllRootPath": "__USE_GLOBAL__",
+  "WorkplaceIntelligenceRootPath": "",
+  "PreparedWorkRootPath": "",
+  "PreparedMaxSourceAgeHours": 168,
+  "PreparedSourceAgeOverrides": {"M365_License_Prices.csv": 744},
+  "PreparedAllowLegacyTenantless": false,
+  "PreparedAllowEmptyTables": [],
+  "EnableSharePointUpload": false,
+  "PreparedSharePointFolderPath": "",
+  "SharePointSiteHostname": "__USE_GLOBAL__",
+  "SharePointSitePath": "__USE_GLOBAL__",
+  "SharePointLibraryDisplayName": "__USE_GLOBAL__",
+  "AppId": "__USE_GLOBAL__",
+  "Thumb": "__USE_GLOBAL__",
+  "ErrorMailTo": "__USE_GLOBAL__"
+}
