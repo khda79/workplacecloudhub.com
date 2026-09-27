@@ -2,9 +2,13 @@
 
 27 septembre 2026. Candidat local fondé sur `b1ef27654e0fff2e9deb498fa733be4e264cc9c6`, préparé pour publication Git sur main ; aucun déploiement ni migration réelle. Le checkout d'origine et ses changements concurrents sont préservés. L'ancien candidat `smartinventory-json-txt` est obsolète ; seul `json-txt-current` porte cette implémentation.
 
-L'implémentation et les tests synthétiques sont réalisés. La qualification UNC, SharePoint, OneDrive et Power BI reste à effectuer. Les sources PowerShell du lot sont signées avant publication et vérifiées sur une extraction Git. À la demande explicite de Khaled, la politique est désormais `JsonText`. Les listes UNC et SharePoint restent vides faute de résultats de qualification réelle : ces destinations restent bloquées. Aucun script propriétaire ni migration réelle exécuté par Codex. Après récupération Git, les propriétaires exécutés peuvent migrer leurs fichiers locaux admissibles.
+L'implémentation et les tests synthétiques sont réalisés. La qualification UNC, SharePoint, OneDrive et Power BI reste à effectuer. Les sources PowerShell du lot sont signées avant publication et vérifiées sur une extraction Git. À la demande explicite de Khaled, la politique est désormais `JsonText`. Les listes publiques restent vides : les destinations effectivement qualifiées sont déclarées dans la configuration locale privée décrite ci-dessous. Aucun script propriétaire ni migration réelle exécuté par Codex. Après récupération Git, les propriétaires exécutés peuvent migrer leurs fichiers locaux admissibles.
 
 ## Règles communes
+
+Qualification opérateur reçue : les deux emplacements UNC ont passé 14 contrôles sur chacun des trois serveurs ; le test SharePoint a confirmé octets, identifiants et versions préservés, sans suppression. La copie OneDrive du fichier et de son archive a été vérifiée localement avec le SHA-256 attendu. Cela ne constitue pas un lancement réel des collecteurs ni une mesure de leur fraîcheur.
+
+Les destinations qualifiées se configurent maintenant dans `Config/SmartM365-JsonTransport.policy.local.json.txt`, ignoré par Git, pour préserver les chemins et identifiants privés. Ce fichier accepte uniquement `QualifiedUncRoots` et `QualifiedSharePointDrives` et ne peut pas changer le mode public. Il est lu sans migration ni réécriture ; nouveau invalide ou doublons divergents restent bloquants. Aucun chemin réseau n'est accédé pour charger cette liste.
 
 - `Readers` reconnaît les deux noms ; `JsonText` active les nouvelles écritures et la transition intégrée à chaque propriétaire. Aucune conversion manuelle préalable imposée.
 - `.json.txt` prioritaire ; repli uniquement en son absence. Nouveau fichier invalide, inaccessible, répertoire à sa place ou doublon divergent : erreur explicite, sans reprise silencieuse de l'ancien.
@@ -79,6 +83,6 @@ L'activation de `JsonText` a depuis été approuvée explicitement. Cela ne conf
 - Aucune connexion Graph réelle, collecte, migration privée, observation de synchronisation OneDrive ou exécution Power Query dans Power BI. Aucun accès au serveur ni au partage de production.
 - Les tests synthétiques ne prouvent pas la couverture ni la fraîcheur des collectes réelles.
 
-[Liste fermée et empreintes du candidat du lot Git signé](JsonTransport-CandidateFiles.csv) : 78 modifications, 28 ajouts, 2 anciens chemins de contrats retirés (contenu conservé dans les deux nouveaux noms). Le manifeste lui-même est exclu de ses propres empreintes. Le manifeste décrit les octets attendus après extraction Git ; aucun fichier privé inclus.
+[Liste fermée et empreintes du candidat du lot Git signé](JsonTransport-CandidateFiles.csv) : 78 modifications, 29 ajouts, 2 anciens chemins de contrats retirés (contenu conservé dans les deux nouveaux noms). Le manifeste lui-même est exclu de ses propres empreintes. Le manifeste décrit les octets attendus après extraction Git ; aucun fichier privé inclus.
 
 La revue automatique avait refusé une tentative de rétablir la suppression du CSV partiel DiscoveredApps en cas de checkpoint incompatible, pour risque de perte irréversible. La solution appliquée conserve le CSV et archive le checkpoint par empreinte ; aucune autorisation de suppression n'est demandée.
