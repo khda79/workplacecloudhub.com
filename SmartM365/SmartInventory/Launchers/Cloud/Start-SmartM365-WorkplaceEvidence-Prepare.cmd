@@ -6,7 +6,7 @@ if not exist "%PWSH%" (
     exit /b 1
 )
 pushd "%~dp0..\..\PreparedEvidence" || exit /b 1
-"%PWSH%" -NoProfile -File "SmartM365-WorkplaceEvidence-Prepare.ps1" -Tenant prod -ValidateOnly %*
+"%PWSH%" -NoProfile -File "SmartM365-WorkplaceEvidence-Prepare.ps1" -Tenant prod %*
 set "RESULT=%ERRORLEVEL%"
 popd
 exit /b %RESULT%

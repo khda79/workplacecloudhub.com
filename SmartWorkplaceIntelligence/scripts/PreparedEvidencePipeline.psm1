@@ -16,12 +16,50 @@ function Write-PreparedJson([string]$Path, $Value) {
     [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 }
 
+function Receive-PreparedMappingWorkbooks {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$WorkRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
+    $folder = Join-Path ([IO.Path]::GetFullPath($WorkRoot)) ('mappings/'+[guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    $required = [ordered]@{
+        'SmartWorkplaceIntelligence-PersonaClassification.xlsx' = @('Personas','Rules','Exclusions')
+        'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
+    }
+    foreach ($name in $required.Keys) {
+        $path = Join-Path $folder $name
+        $receipt = & $DownloadFile $path $name
+        if (-not $receipt -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+            throw "Required SharePoint mapping download failed: $name. No cached fallback is allowed."
+        }
+        $archive = $null
+        try {
+            $archive = [IO.Compression.ZipFile]::OpenRead($path)
+            $entry = $archive.GetEntry('xl/workbook.xml')
+            if (-not $entry -or $entry.Length -gt 1048576) { throw 'Missing or oversized workbook metadata.' }
+            $reader = [IO.StreamReader]::new($entry.Open())
+            try { $xml = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            $settings = [Xml.XmlReaderSettings]::new()
+            $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+            $settings.XmlResolver = $null
+            $xmlReader = [Xml.XmlReader]::Create([IO.StringReader]::new($xml), $settings)
+            $document = [Xml.XmlDocument]::new()
+            $document.XmlResolver = $null
+            try { $document.Load($xmlReader) } finally { $xmlReader.Dispose() }
+            $sheets = @($document.SelectNodes("//*[local-name()='sheet']") | ForEach-Object { $_.GetAttribute('name') })
+            foreach ($sheet in $required[$name]) { if ($sheet -notin $sheets) { throw "Required worksheet missing: $sheet" } }
+        } catch { throw "Invalid SharePoint mapping workbook '$name': $($_.Exception.Message)" }
+        finally { if ($archive) { $archive.Dispose() } }
+    }
+    # Return only after both files passed; a partial download never reaches source planning.
+    $folder
+}
+
 function Get-PreparedSourcePlan {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$DataRoot,
         [string]$SourceContractPath = (Join-Path $script:ProductRoot 'config/prepared-source-contract.json'),
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
-        [hashtable]$AgeOverrides = @{})
+        [hashtable]$AgeOverrides = @{}, [string]$MappingRoot)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = Get-Content -LiteralPath $SourceContractPath -Raw | ConvertFrom-Json
     $items = [Collections.Generic.List[object]]::new()
@@ -36,7 +74,8 @@ function Get-PreparedSourcePlan {
         foreach ($file in $files) { $items.Add(@{Relative=[IO.Path]::GetRelativePath($root,$file.FullName);Kind='History'}) }
     }
     foreach ($item in $items | Sort-Object Relative -Unique) {
-        $path = Get-PreparedChildPath $root $item.Relative
+        $sourceRoot = if ($item.Kind -eq 'Mapping' -and $MappingRoot) { $MappingRoot } else { $root }
+        $path = Get-PreparedChildPath $sourceRoot $item.Relative
         $file = Get-Item -LiteralPath $path -ErrorAction Stop
         if ($file.Length -eq 0) { throw "Empty input file: $($item.Relative)" }
         # Transport freshness only; business report timestamps remain in Data Trust.
@@ -46,7 +85,7 @@ function Get-PreparedSourcePlan {
                 throw "Input exceeds configured publication-age limit: $($item.Relative)" }
             if ($file.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw "Future input timestamp: $($item.Relative)" }
         }
-        [pscustomobject]@{Relative=$item.Relative;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=(Get-FileHash -LiteralPath $path).Hash}
+        [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=(Get-FileHash -LiteralPath $path).Hash}
     }
 }
 
@@ -157,11 +196,11 @@ function Invoke-PreparedEvidencePipeline {
         [Parameter(Mandatory)][string]$WorkRoot, [Parameter(Mandatory)][string]$TenantKey,
         [Parameter(Mandatory)][string]$AccountClassificationConfigPath,
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
-        [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly)
+        [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $work = [IO.Path]::GetFullPath($WorkRoot)
     if ($work.TrimEnd('\') -eq $root.TrimEnd('\') -or $work.StartsWith($root.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'WorkRoot must be outside raw/synchronized DataRoot.' }
-    $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides)
+    $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
     if ($ValidateOnly) { return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourceExistenceAndTransportAgeOnly';Publication=$false} }
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $lock = [IO.File]::Open((Join-Path $work '.preparation.lock'),'OpenOrCreate','ReadWrite','None')
@@ -170,7 +209,7 @@ function Invoke-PreparedEvidencePipeline {
         $snapshot = Join-Path $run 'source'
         $staging = Join-Path $run 'prepared'
         foreach ($entry in $plan) {
-            $from = Get-PreparedChildPath $root $entry.Relative
+            $from = $entry.SourcePath
             $to = Get-PreparedChildPath $snapshot $entry.Relative
             New-Item -ItemType Directory -Path (Split-Path $to -Parent) -Force | Out-Null
             Copy-Item -LiteralPath $from -Destination $to
@@ -178,7 +217,7 @@ function Invoke-PreparedEvidencePipeline {
             if ($to -like '*.csv') { Test-PreparedTenant -Path $to -TenantKey $TenantKey -AllowLegacyTenantless:$AllowLegacyTenantless }
         }
         # Detect added/removed/changed history or concurrent collectors while making the snapshot.
-        $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides)
+        $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
         if (Compare-Object ($plan | ForEach-Object { $_.Relative+'|'+$_.SHA256 }) ($after | ForEach-Object { $_.Relative+'|'+$_.SHA256 })) { throw 'Sources changed during capture. Retry after collectors finish.' }
         $rules = Join-Path $run 'AccountClassification.psd1'
         Copy-Item -LiteralPath $AccountClassificationConfigPath -Destination $rules
@@ -190,13 +229,13 @@ function Invoke-PreparedEvidencePipeline {
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
     } finally { $lock.Dispose() }
 }
-Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch
+Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch, Receive-PreparedMappingWorkbooks
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLgJX6Sr8+ldIW
-# SRqQqiKjbNAXuUbzO6Y5H5VEpmTGLKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzrw3zqFq/UT1V
+# TRs8MFqXGgK3lHiHp+hF7EocgnlQt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -329,31 +368,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJnsiyz/F6hXv9yKpBfOf6BqE18vzdrV8wudfsYMtTvoMA0GCSqG
-# SIb3DQEBAQUABIIBgHIlXJkmBg+3X6yW2WSlDrRf+4Jo2cL4InNwfIpdVL68RncV
-# rOCQNKPkZzR3QfjYOOjuMwCEOqK87MZlKkZ7g2UxeIzKnvMku6cvL0nk4teI9iUD
-# BBYIJVmMQlsq58Wr6cXYLvUArPFiTyIVV+p8wnEj58jkBwbH4JSnA/JrKoy3gsYw
-# G6Vn79flOqhQvjbYf27RyuMKzE4cM2bVbrApqXUPBe0/173blpr2/4bANZ6c9Lhy
-# qEkdB4ENDetXmq/M9Ymo18XqdQqAIeZ4l7FpdZCpNcIKLTSoZGx8j8xXCI/fBrbO
-# vEYQhu5Z4XW1gLuSNvzZ7C4K0eABpHmCjYNFwKY2UuX9N8+aoyhibItw1qu6nZls
-# Z2ChE7SwicDuSMjH27hHpRT6VGIhM8B3l2boFGOWgTdbU2Z0YdL3LjfrapnCLhQE
-# 1Sb2I78zmu9qcX1YvmErbz0UPBmA8fBxhr5eE7jZ65gYnB7aVoqhRG01vHYosu/t
-# wxOrWTyJ36zyItR+maGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILfQn93UkjEaut0Vzo8nIORK3BX21pxA5ulH/wKFkHSsMA0GCSqG
+# SIb3DQEBAQUABIIBgD7jXL/QVu6nQEXQo95bn0U75jKZmbAohYhUh4/7KeIlT6ej
+# +EN/FR1p+wg207dJOrNscxUdmfSCrldAHBZ0qyGy/T3A0US00htS535sxQxB8ivF
+# DVjW+3ga1IM3ZkIBNkIta/npHxXlPIANRM/2Ipctfh5vUDypEfsqcJcW0BN7/bZS
+# qlxFMWBiI51KjC+YgbCoDvwwsZlDNowWnRWVFdk1UAOFz1Lof+gPjImdbAnTwsKF
+# fcgAm+UbtnLpIFHiBogJkdF52QUR+zcMGC6Q8i87IhyybFtB4/Q4/oZG1F+P3amr
+# 2whipuxrq1wczk/+CVxMuP27S8rmHYdGBAqwMVbSBljzwsNm5XbNC++7bonqdaN1
+# 04PneIt2tpizhm779Y221RWG31eemHYCpmR4l2FUjsVU+AmTImMjTBsiA9krf6Wz
+# bc21fR8vggpU6Gwp3+lYMZgj64/xuV/uOtvD+B2a48bg7wXtxW4Ory19dsZpg7r6
+# a+a81SoufUpUuv/HMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDAw
-# MDVaMC8GCSqGSIb3DQEJBDEiBCArTrVBtI9ID7WZjbtxjIBp4HzhmwRQE6b70qwm
-# FWGN3TANBgkqhkiG9w0BAQEFAASCAgCnseuyZ0wMcQNh0+qbc08eSBorgxPEVLUr
-# cx+taA0CAgBAY8/3LnLWhoMF+8mcClK2o5bVXwbZgposwYHuPapmohKcLYBghrqK
-# SnRJovhUp1FWM801d4TxSSHAZJigtac6dQ0YFdIenLmGQJ/kIpXisTOju+mhzU8K
-# O4kcFTAgEmj7nYS7wUTdNFR2dUculMykM3JNTsUQeZldA2EUmL5XX2enxEbHSssL
-# RcnHPpN6VnyPYQxoJqHFyOvyv42cDAQBowjUeSyJMDBf7JOV64l2enUs77BvY5MG
-# c9A76q51Gk/DN+tR2wZbrWADvUA0L7ftZ8SXtOFoqRqz/oa6mSgOZT/aM6EaDnnv
-# hhkiHKPrtbuTvj/2HBz5gKL73V2qnQ7FiSBfOMsG8yX9b2mU7yi6eXTGUsn/OvEw
-# ayd+WHKP0J0Kgwbz1iuHtLR7cihLmJp1g2TuSrDJlB5WO9EvITff8NYL4zDjGjdi
-# 7+GkSdTD1KJvhxKLqrDrlgS/Y3/3n4E+gzX8byMnlKCNaNBITComhspNCC7jnF9y
-# 0hO6d6n2OJYESAWNTMLt9eJLbrLM6k5dC+zylUxHs+coPjmu7ZJeWLyZIdQ0jSFY
-# d3U5lfg4zdLNH9t9uoKYx+yMn1IPqNjERV4x0dNgcXPKpu4u16333zpTvkK4sIZM
-# oJH40WBfvA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDA2
+# MjFaMC8GCSqGSIb3DQEJBDEiBCBOEl2yAE5oIx//foVn9DqdeiTaG21m6/2sHVRS
+# 8sca9jANBgkqhkiG9w0BAQEFAASCAgBxgES82SG80NhAwewlGf3U3pHQpl4bpGiK
+# acw8ApYNzGOZXXJO7oGK6kusC5DHFpaqOnz5CK1mC7KlkXIDI2dOsYq2WJdboSPr
+# BH6EsP4xynzvRsveVXacu2LRw+vGWU8vQERpMSFn8ny9Hn2/MG5TJp3MP6QwB4im
+# kZS1REc8nSfgGMtWX5mEPiMOW0Yd/lwwiaX/3obRF//Z5AkcfrBzIWXWWef1dnRF
+# ICHvHMTF6GCxa9ZIEqpKxHK8PCtjy3sRCDnPWHA0bx9CKAwye9toh8p+r+GtwWHW
+# O+X/6fn6w+rjdys3D3VjYn9hrjMDtVHTOQQu3B+tm/YBQeqQatWcPIv1nJziXmd8
+# mXo1sKP9ppwOj8ZDOHNmL+gQzyn4DVAE+d3aiXDehHsBv6ND6ILyNhFDa1EtD0uL
+# qR3ZsnuBEg7QIYEYKqueLsAdkWeH5FvlneByzGd/bEmcWmDdAjQGhgl0PQOSv2Dp
+# SOAyGNkpgFsSh8FlqV6oQv/h1Xts5fFaRKQHJFqfGkM/+urCL314bt0Eyq0zRu3W
+# IZ5nWmcg2dAt0Fl7fnaCMFwqCTNvjnVv9cZXgFUD0UO98DSTfnTPCTGElH855a5w
+# OpfYTASM8xuQRUUz2I3Te/sgtREOoOZ/oek/4NVz7Ruas09tYQ1m6R2lYdr4yNvD
+# l4SKnoj7FQ==
 # SIG # End signature block
