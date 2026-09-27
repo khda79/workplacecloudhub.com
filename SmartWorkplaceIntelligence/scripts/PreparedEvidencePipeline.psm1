@@ -22,7 +22,7 @@ function Get-PreparedSourcePlan {
         [string]$SourceContractPath = (Join-Path $script:ProductRoot 'config/prepared-source-contract.json'),
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
         [hashtable]$AgeOverrides = @{})
-    $root = (Resolve-Path -LiteralPath $DataRoot).Path
+    $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = Get-Content -LiteralPath $SourceContractPath -Raw | ConvertFrom-Json
     $items = [Collections.Generic.List[object]]::new()
     foreach ($name in $spec.currentFiles) { $items.Add(@{Relative="DATA-LAST/$name";Kind='Current'}) }
@@ -82,7 +82,7 @@ function Publish-PreparedEvidenceBatch {
         [string[]]$AllowEmptyTables = @())
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
     $output = [IO.Path]::GetFullPath($OutputRoot)
-    $staging = (Resolve-Path -LiteralPath $StagingRoot).Path
+    $staging = (Resolve-Path -LiteralPath $StagingRoot).ProviderPath
     if ($output.TrimEnd('\') -eq $staging.TrimEnd('\')) { throw 'Staging and publication roots must differ.' }
     if ((Split-Path $output -Leaf) -ne 'DATA-POWERBI') { throw 'Publication root must be a dedicated DATA-POWERBI directory.' }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
@@ -158,7 +158,7 @@ function Invoke-PreparedEvidencePipeline {
         [Parameter(Mandatory)][string]$AccountClassificationConfigPath,
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
         [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly)
-    $root = (Resolve-Path -LiteralPath $DataRoot).Path
+    $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $work = [IO.Path]::GetFullPath($WorkRoot)
     if ($work.TrimEnd('\') -eq $root.TrimEnd('\') -or $work.StartsWith($root.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'WorkRoot must be outside raw/synchronized DataRoot.' }
     $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides)
@@ -195,8 +195,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBd+xDOCT5w/IDl
-# sGolhFiEouRh5SebXExiKtj8ojPGKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLgJX6Sr8+ldIW
+# SRqQqiKjbNAXuUbzO6Y5H5VEpmTGLKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -329,31 +329,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAtdeOdoJa5EojSv6o+RRmx0UMMcIrUFKqMxAo/ZOqKOMA0GCSqG
-# SIb3DQEBAQUABIIBgEpwOqqffCT8RUWerkcvNyKK1E2sllyW2CILaXMNE5TDR61/
-# 4Kmpo90rL4oKjonvGFDXHUVPK5UM/OH7v+afLce3MIwv2jzPCvkAbVUvKKMF8pya
-# xpz36267HEYlmKPbJi7ZMKjkb2qJ5I3zXztl/LeIv/D8bH8c+zWwcynVyJcrLq74
-# ZSTOSIpYFGzzO5OOkPPuOcshEcdRSTrPVsrKuCE1w73IO/BqwRiAVpfAdsuBf8xq
-# eKdBmxquXclgCthWKDdkFiyfDJVSAWGArg/MnaLFDckWr6HTWwwhNQTCCx+gulja
-# CGeh9ho2HU683Jg7t1bpG2FfTvX//vkyZ4PxPXuC2PrjFlu7Gg+saDEHWspUyhQU
-# TOdKb5dOsfKbR76PyYZZNiuu4dnbidZsLUrV8YlYzzRb0ntD/7y3QYpnbiSFKDZ6
-# f+krHkuv+bPZKoaxJsI2VA7VThXJpk9YatQ/DxlLOr+R0orDaRaI5jSHVkP/upfc
-# jhntL3Lo24cR4VTPFKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJnsiyz/F6hXv9yKpBfOf6BqE18vzdrV8wudfsYMtTvoMA0GCSqG
+# SIb3DQEBAQUABIIBgHIlXJkmBg+3X6yW2WSlDrRf+4Jo2cL4InNwfIpdVL68RncV
+# rOCQNKPkZzR3QfjYOOjuMwCEOqK87MZlKkZ7g2UxeIzKnvMku6cvL0nk4teI9iUD
+# BBYIJVmMQlsq58Wr6cXYLvUArPFiTyIVV+p8wnEj58jkBwbH4JSnA/JrKoy3gsYw
+# G6Vn79flOqhQvjbYf27RyuMKzE4cM2bVbrApqXUPBe0/173blpr2/4bANZ6c9Lhy
+# qEkdB4ENDetXmq/M9Ymo18XqdQqAIeZ4l7FpdZCpNcIKLTSoZGx8j8xXCI/fBrbO
+# vEYQhu5Z4XW1gLuSNvzZ7C4K0eABpHmCjYNFwKY2UuX9N8+aoyhibItw1qu6nZls
+# Z2ChE7SwicDuSMjH27hHpRT6VGIhM8B3l2boFGOWgTdbU2Z0YdL3LjfrapnCLhQE
+# 1Sb2I78zmu9qcX1YvmErbz0UPBmA8fBxhr5eE7jZ65gYnB7aVoqhRG01vHYosu/t
+# wxOrWTyJ36zyItR+maGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjYyMzUw
-# MDJaMC8GCSqGSIb3DQEJBDEiBCBJNohlNSs2/ejxKyFkFb4YagxaK3YdcuyTFTxF
-# zujIezANBgkqhkiG9w0BAQEFAASCAgA3KAPxIqznrnmv9BqX5xe+AZ8nPF1ypI4S
-# 0YbIxbvrD9t69gp+sns9m9SEmwK2Iqv/ccbXKJvzxaEtquQ6klQq+fpX/wrh9NKO
-# EJZOcuikE+IyGGkJfSVyDQMg4CRHDJ3jOfLxZMv2d6uVS9/DaDJIPGnf6+hy0IBW
-# zjNyiAQ1uN1ctYjE/Jhxtt2qF12sIhEg3Jq/PHG3V11g7ARwBjp8JCRNpJ6oUFB+
-# 7uSUG1inAHfMwcxvNS4OC6w87xDQxL6EC5IUC4KtlaLYO7JcOdeso6YBX66vdAVp
-# d4hycyCVikg1X+l5sGdj0EiTOdPdkzwoIV15kEQlz6+zfNfUC+IUxRQESq+W65rY
-# /PliOP0U+tTBLyM1dMQNlXMLszQPwWXZyZRpLTa1QULGkzh3mC8cnn641Sy6KCVI
-# DnLz8Qv2GqC7yfPlQ3N1CKQ20DSPQnjc76UiwfywQDCgJ+aQTWKtbtb24peL+LQC
-# sNXu/ru2xm6QvE0RGdoVeGaA3kOOxEM+WSU/yOOeJZKTN+JQesllAT67FUG5EgZ9
-# MpZWb2cGKWN6HsiYqQ0L+nUIdKKY4+aSLKfJY9hECz4QGE35kBXnFPejpnFQ4ZFM
-# gcJQxJL2dWTOuY2b1gLbzlZyjX5WA01b2ZuDDjKKN0UhzqrMe8Kdrspbm4F1POBx
-# RFCvLcqSZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDAw
+# MDVaMC8GCSqGSIb3DQEJBDEiBCArTrVBtI9ID7WZjbtxjIBp4HzhmwRQE6b70qwm
+# FWGN3TANBgkqhkiG9w0BAQEFAASCAgCnseuyZ0wMcQNh0+qbc08eSBorgxPEVLUr
+# cx+taA0CAgBAY8/3LnLWhoMF+8mcClK2o5bVXwbZgposwYHuPapmohKcLYBghrqK
+# SnRJovhUp1FWM801d4TxSSHAZJigtac6dQ0YFdIenLmGQJ/kIpXisTOju+mhzU8K
+# O4kcFTAgEmj7nYS7wUTdNFR2dUculMykM3JNTsUQeZldA2EUmL5XX2enxEbHSssL
+# RcnHPpN6VnyPYQxoJqHFyOvyv42cDAQBowjUeSyJMDBf7JOV64l2enUs77BvY5MG
+# c9A76q51Gk/DN+tR2wZbrWADvUA0L7ftZ8SXtOFoqRqz/oa6mSgOZT/aM6EaDnnv
+# hhkiHKPrtbuTvj/2HBz5gKL73V2qnQ7FiSBfOMsG8yX9b2mU7yi6eXTGUsn/OvEw
+# ayd+WHKP0J0Kgwbz1iuHtLR7cihLmJp1g2TuSrDJlB5WO9EvITff8NYL4zDjGjdi
+# 7+GkSdTD1KJvhxKLqrDrlgS/Y3/3n4E+gzX8byMnlKCNaNBITComhspNCC7jnF9y
+# 0hO6d6n2OJYESAWNTMLt9eJLbrLM6k5dC+zylUxHs+coPjmu7ZJeWLyZIdQ0jSFY
+# d3U5lfg4zdLNH9t9uoKYx+yMn1IPqNjERV4x0dNgcXPKpu4u16333zpTvkK4sIZM
+# oJH40WBfvA==
 # SIG # End signature block

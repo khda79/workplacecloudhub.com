@@ -1,62 +1,56 @@
 ﻿[CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$DataRoot,
-    [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Workforce','Devices','Applications','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
-    [string]$Only = 'All',
-    [switch]$SkipWorkforceHistory,
-    [switch]$ReuseStagedWorkforce,
-    [string]$AccountClassificationConfigPath
-)
-
-# Offline preparation only. No collection, upload, Desktop control or promotion.
-# Each child process releases its memory before the next domain starts.
-$ErrorActionPreference = 'Stop'
-$DataRoot = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
-$last = Join-Path $DataRoot 'DATA-LAST'
-if (-not (Test-Path -LiteralPath $last -PathType Container)) { throw 'DATA-LAST is required.' }
-$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
-if ($OutputRoot.TrimEnd('\') -eq $DataRoot.TrimEnd('\') -or $OutputRoot.TrimEnd('\') -eq $last.TrimEnd('\')) {
-    throw 'Outputs must use a dedicated staging directory, never the raw source root.'
-}
-New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
-$shell = (Get-Process -Id $PID).Path
-if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
-function OutPath([string]$Name) { Join-Path $OutputRoot ($Name + '.csv') }
-function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
-    if ($Only -ne 'All' -and $Only -ne $Domain) { return }
-    $started = [datetime]::UtcNow
-    Write-Host ('[{0:O}] Starting {1}' -f $started, $Domain)
-    & $shell -NoProfile -File (Join-Path $PSScriptRoot $Script) @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Preparation failed: $Domain (exit $LASTEXITCODE). Nothing was published." }
-    Write-Host ('[{0:O}] Completed {1}: {2:n1} seconds' -f [datetime]::UtcNow, $Domain, ([datetime]::UtcNow - $started).TotalSeconds)
-}
-$wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'),'-HistoryOutputPath',(OutPath 'UserActivityHistoryEvidence'),'-TrendOutputPath',(OutPath 'WorkforceTrendEvidence'),'-IdentityOutputPath',(OutPath 'IdentityReconciliationEvidence'),'-SignalsOutputPath',(OutPath 'WorkforceOperationalSignals'))
-if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
-if ($SkipWorkforceHistory) { $wf += '-SkipHistory' }
-if ($ReuseStagedWorkforce) {
-    foreach ($name in @('UserInventoryEvidence','IdentityReconciliationEvidence','WorkforceOperationalSignals')) {
-        if (-not (Test-Path -LiteralPath (OutPath $name))) { throw "Missing staged workforce output: $name" }
+param([Parameter(Mandatory)][string]$TestRoot)
+# Local fixture and provider-path simulation only. No network/share access.
+$ErrorActionPreference='Stop'
+$fixture=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
+$source=Join-Path $fixture 'source'
+$weekly=Join-Path $source 'DATA-ALL/Example/WeeklyHistory/2026-W39'
+New-Item -ItemType Directory -Path $weekly -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $source 'DATA-LAST') -Force | Out-Null
+@([pscustomobject]@{TenantKey='synthetic-test';Value=1}) | Export-Csv -LiteralPath (Join-Path $source 'DATA-LAST/Example.csv') -NoTypeInformation
+Copy-Item -LiteralPath (Join-Path $source 'DATA-LAST/Example.csv') -Destination (Join-Path $weekly 'Example.csv')
+$contract=Join-Path $fixture 'source-contract.json'
+@{currentFiles=@('Example.csv');mappingFiles=@();dailyFiles=@();history=@(@{root='DATA-ALL/Example';file='Example.csv'})} |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contract
+$module=Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force -PassThru
+$baseline=@(Get-PreparedSourcePlan -DataRoot $source -SourceContractPath $contract)
+if($baseline.Count -ne 2){throw 'Baseline source plan failed'}
+$qualified=@(Get-PreparedSourcePlan -DataRoot ('Microsoft.PowerShell.Core\FileSystem::'+$source) -SourceContractPath $contract)
+if(Compare-Object ($baseline | ForEach-Object {$_.Relative+'|'+$_.SHA256}) ($qualified | ForEach-Object {$_.Relative+'|'+$_.SHA256})){throw 'Provider-qualified input changed the plan'}
+$drive='PreparedTest'+[guid]::NewGuid().ToString('N').Substring(0,8)
+New-PSDrive -Name $drive -PSProvider FileSystem -Root $source -Scope Global | Out-Null
+try {
+    $mapped=@(Get-PreparedSourcePlan -DataRoot (${drive}+':\') -SourceContractPath $contract)
+    if(Compare-Object $baseline.Relative $mapped.Relative){throw 'PSDrive path changed the plan'}
+} finally {Remove-PSDrive -Name $drive -Scope Global}
+# Reproduce UNC Resolve-Path shape while all actual I/O remains on the local fixture.
+& $module {
+    function script:Resolve-Path {
+        param([string]$LiteralPath)
+        $native=Microsoft.PowerShell.Management\Resolve-Path -LiteralPath $LiteralPath
+        [pscustomobject]@{Path=('Microsoft.PowerShell.Core\FileSystem::'+$native.ProviderPath);ProviderPath=$native.ProviderPath}
     }
-} else { Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf }
-Run 'Devices' 'New-DeviceInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'))
-Run 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
-Run 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
-Run 'Collaboration' 'New-CollaborationEvidence.ps1' @('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))
-Run 'Content' 'New-ContentStorageEvidence.ps1' @('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))
-Run 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence'))
-Run 'Licensing' 'New-LicensingEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-MailboxEvidencePath',(OutPath 'MailboxEvidence'),'-OutputPath',(OutPath 'LicenseEvidence'),'-OptimizationOutputPath',(OutPath 'LicenseOptimizationEvidence'))
-Run 'Security' 'New-SecurityEvidence.ps1' @('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))
-Run 'Backup' 'New-BackupResilienceEvidence.ps1' @('-DataRoot',$last,'-OutputRoot',$OutputRoot)
-Run 'Trust' 'New-DataTrustEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
-Run 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
-Write-Host 'Preparation finished. Outputs are staging only; schema/data validation and promotion are separate steps.'
+}
+try {
+    $simulated=@(Get-PreparedSourcePlan -DataRoot $source -SourceContractPath $contract)
+    if(Compare-Object ($baseline | ForEach-Object {$_.Relative+'|'+$_.SHA256}) ($simulated | ForEach-Object {$_.Relative+'|'+$_.SHA256})){throw 'UNC-shaped resolver result corrupted paths'}
+    # Force the real pipeline to use the same minimal source contract in ValidateOnly mode.
+    & $module {param($path) $script:ProductRoot=$path} $fixture
+    New-Item -ItemType Directory -Path (Join-Path $fixture 'config') | Out-Null
+    Copy-Item -LiteralPath $contract -Destination (Join-Path $fixture 'config/prepared-source-contract.json')
+    $result=Invoke-PreparedEvidencePipeline -DataRoot $source -OutputRoot (Join-Path $source 'DATA-POWERBI') -WorkRoot (Join-Path $fixture 'work') -TenantKey 'synthetic-test' -AccountClassificationConfigPath (Join-Path $fixture 'unused.psd1') -ValidateOnly
+    if($result.SourceFiles -ne 2 -or $result.Publication){throw 'ValidateOnly pipeline path failed'}
+} finally {Remove-Module $module}
+foreach($file in 'PreparedEvidencePipeline.psm1','Invoke-PreparedEvidenceBuild.ps1') {
+    if([IO.File]::ReadAllText((Join-Path $PSScriptRoot $file)) -match 'Resolve-Path[^\r\n]+\)\.Path\b'){throw "Provider-qualified Path still used: $file"}
+}
+Write-Host 'PASS: local, provider-qualified, PSDrive, simulated UNC resolver and ValidateOnly pipeline paths. No network access.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDG/zL9ZRNWKw6I
-# x4YAv88kfsw0pBaOOPQF8j8CPo/tA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACnKVIvDHOBTN9
+# +uyWcllMKb4bP69wkkRR0SzWoGKEGKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -189,31 +183,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPqpZ/435JQfQsMjvivDMukRsKR1nIXU6cwh9gPbsl0OMA0GCSqG
-# SIb3DQEBAQUABIIBgE/rTg+LbT3ksNhrT2RKx2WXS3RZCKXJC+rirF3QBnFZ7Pqg
-# vWumN4fUdWvTDP/6v1tcvry9h//tRTLWLVGMXwP+lZ+lAKt1Dzv65Tjkj8briHgB
-# Rh0BKxms+oZozkk2FDRhPoN9fGe5IG8nT828nPOmZSmRjjIwvIxNYCK1kFh+yNzO
-# iocLzbE5j108Wbq40wLQRtl3EvqvlK0kBD4iA1GJ5yQsJAy4gPJ6oJS2sLxyjf1J
-# 3lZPxQ1ubJdfdWrnPS2Kfige5hV+aHB1pW3THnjFA+R+nJ/AhOSFMMu376SQju+t
-# aa6G6myGjzvVcdpt2NLeuRlx/gtCwzFYmPhGZ0bGCuVpNENPY1Qng9b75U5J4yax
-# +3NcUkU5+gVVMu2kRGt2GcxRATDuq7BjCTy90pL6Dl/QWOn9jO3X9EGjNzIPdRYf
-# kw/+oby96+iGo7vXWAu7ydq3cT2xQFieQ2ObcgY9RKOegEVYKQQozpp/0sToVgiS
-# p2psMKy6ZrrWavGpaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAdioWv5ima4ZxiHhETi14HhNHljnwCyvU3yNp3a/uFeMA0GCSqG
+# SIb3DQEBAQUABIIBgFPFSaseKp8tpeUwXFzFzNsfhYReZKCwQUp3MeB7rvWNwakD
+# lnR/sOzYCpZEhVkkzaiBhoGvekaMDg/hlHiKJWLxrsopUxdYRzGut5bTOl+4CI6z
+# xqGVU5fqmduAShQ9R8K8FRMuBVCpPjrSB9odfYYW5kXHnnXKpqO8ZG6tTQ4Yd2+E
+# 9JipEM6KN1AAqVIvXWX8cjzDGtTneWtVp0PERGNRh6vnBv/keZcbROzIrmTFeqle
+# a2Zjr0sU1gBNdyqPCpxuLCWvvvQU0V1SAI97OAnvsyBF+RCGvRHawYjnPbZicYBZ
+# eyfZrNa0LfKx0dSkCk4WeoGywSyS5DeMdBiU2DP3VkZP1rhwdJCcfKco84fECP1j
+# seTofQBFAizbMVA7Wumait7VFV4BniWzyrdEGpeFNDfmorFq+R/qTDasGqjKHFLt
+# bbtoflTIBDrkV1Z/nlubMfJBUpy8Cm+4QZUGpQILwW6tYrI/Q86q4a5Svi4Msjut
+# stGDdNAQ5aSQQjualqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDAw
-# MDVaMC8GCSqGSIb3DQEJBDEiBCAJesAeVytoiMTytsljaxsf8lFPqClTLvKp0fKs
-# gOHVNTANBgkqhkiG9w0BAQEFAASCAgAnvDFibA48SKoSXQMFIs6NjWMJODYii9ia
-# W7bu3PGD88xdOt3xUEVxMBnRqqbzRgUofEZoJXcFvRt20gDnFADEMX8w/0GyP4PJ
-# sNekZv695myrhvgDdof2u7qIRHGQCBEM9o6Bvo3mFhAUrnWIVtJwtDmKZQIXEm4Y
-# WnquIfFybuVgfkZT8BsJKAgSypWzkdx0P+YcEXF6y7H3Qhu6k5zyYRRrsP8ekH+x
-# BR9p5NuvjAt6OzU1gq0vMbHeP3/CVodlyUylyzYyqX6zC+nFi2xIj+5glTgOloe8
-# 0aUpVLxgNBCtAl42x9HspJ6++iC2ehi9WfPG+/Hxpae81258E28ceD8FF+fFcRE5
-# F3g2Nxw89yoao83tSBB6L8TObvIMBxXJ2NtJuFltNYqD57/Dk2QBhHyaBrhjYW61
-# 5EtIYAoqwhrTTEJ4QadfdobfTJuOUlWB/iJGlD8GxAxnTyqdjLeLhRUg/uzrGNRw
-# IhtoclLIavs/U4/GnX6Y70IONLVWn8XfAO5oZbKKo0XtvYndnuuUK5GiGA4JycRT
-# Sr55iIL8ToG/dhJQ/z6C4txeOzK8vFoJkY2RVJDCwBSf7kMjmfdOgyDJNJby6TXS
-# FtSV8bNFYzQUtLv6Ht7swF6mxLa48Q7isoe9i8VGliReT06PfoMJNCgmklFq+AkB
-# WRMdIpF4CQ==
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBPCe311VrjXRmCyga25ipjdagJzbtn7WCll5JJ
+# Nk0xwzANBgkqhkiG9w0BAQEFAASCAgBgZ/qOYKtQRIZZS2R+Z/vCujN6jHxPQiWY
+# ctl/gMRDshSbR+yr0VnAIGQ+QiwbLWO1+HOyl7LGvPNNrvQNj6lBF5Udy/aXwzBm
+# Mu1VAg5cGqCiGbKNUIgZK5WCJ4oqyW6Z1v3W3bNscBWoOK894uuH7id+7KTFRYFL
+# aVM9AT5L+uwKOwgsdQpKAPQpfpIf4cAaGZa/73kMwhF4FZOxqUt3Vcoh3lfsh8JT
+# HhWEDG4l52c4qcEurtKCwUOqy8AEhwnOE9Eb83osSnsDWURa6otPGWtzw6Z3NDQR
+# 43iq/8UnSRFTNkgV37HD4v4Fq0aE93RuNoOsnPYsv70/+bWMqCBBAJQBLPfsRQu5
+# Jn6pbNnsdbTcNxkKpZVYkfabvkUCd7Vt7i/R0x0Hf7MEYK6M/lFfM4g9as4f1Cz9
+# oGjP1kT1GKFut2E6taqkp781K54585SFt/KPX9hKR66gh+hvynE5m4Tuy2qeHOcY
+# 21jbcY9re0L40NCkoEyImeD287b/rL58uV69QDwn8cBeulV6Rp2vvXIB3hLtAFkb
+# U4RBuJgyTFyYmywPGz0z8fM8tow70OUErwIr0JFjb2fPGcY7d0hqD5fEBHdfhlzD
+# zndLrM8lDzZ8blvpjWUubfctUz9JUJ3igw38To1FjWNYM73OGM4cunnQ7ZMHpjvM
+# 48Sre9k/BA==
 # SIG # End signature block
