@@ -1,54 +1,105 @@
-﻿[CmdletBinding()]
-param([Parameter(Mandatory)][string]$TestRoot)
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force
-$root=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
-$staging=Join-Path $root 'staging'
-$output=Join-Path $root 'DATA-POWERBI'
-New-Item -ItemType Directory -Path $staging -Force | Out-Null
-$contract=Join-Path $root 'contract.json'
-@{tables=@(@{table='Test Trend';file='Trend.csv';uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
-function Fixture($Rows) { $Rows | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation }
-function ExpectFailure([string]$Name,[scriptblock]$Action) {
-    $before=(Get-FileHash (Join-Path $output 'current.json.txt')).Hash
-    $failed=$false
-    try { & $Action | Out-Null } catch { $failed=$true }
-    if (-not $failed) { throw "Expected rejection: $Name" }
-    if ((Get-FileHash (Join-Path $output 'current.json.txt')).Hash -ne $before) { throw "Last good pointer changed: $Name" }
-    Write-Host "PASS: $Name rejected; last good batch preserved."
+
+function Get-PreparedMetadataPath {
+    param([string]$Folder,[ValidateSet('current','batch','validation')][string]$Name,[switch]$Optional)
+    # Prefer the new transport name. Never fall back after a read/parse failure.
+    foreach($suffix in '.json.txt','.json'){
+        $path=Join-Path $Folder ($Name+$suffix)
+        if(Test-Path -LiteralPath $path -PathType Leaf){return $path}
+    }
+    if(-not $Optional){throw "Missing prepared metadata: $Name in $Folder"}
 }
-$argsForPublish=@{StagingRoot=$staging;OutputRoot=$output;TenantKey='synthetic-test';Provenance=@{Mode='SyntheticTest'};ContractPath=$contract}
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note="comma, quote `" and`nnewline"})
-$first=Publish-PreparedEvidenceBatch @argsForPublish
-$row=Import-Csv (Join-Path $first.BatchPath 'Trend.csv')
-if ($row.TenantKey -ne 'synthetic-test' -or $row.Note -notmatch "`n") { throw 'CSV roundtrip failed.' }
-Write-Host 'PASS: logical CSV records and tenant prefix preserved.'
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='invalid';Note='x'})
-ExpectFailure 'Invalid numeric value' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-02';Value='2';Note='x'})
-ExpectFailure 'Historical date regression' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'},[pscustomobject]@{Date='2026-01-01';Value='3';Note='x'})
-ExpectFailure 'Duplicate keys' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'})
-$argsForPublish.TenantKey='another-test'
-ExpectFailure 'Cross-tenant output' { Publish-PreparedEvidenceBatch @argsForPublish }
-$argsForPublish.TenantKey='synthetic-test'
-$lock=[IO.File]::Open((Join-Path $output '.publication.lock'),'OpenOrCreate','ReadWrite','None')
-try { ExpectFailure 'Concurrent publisher' { Publish-PreparedEvidenceBatch @argsForPublish } } finally {$lock.Dispose()}
-[IO.File]::WriteAllText((Join-Path $staging 'Trend.csv'),'"Date","Value","Note"'+[Environment]::NewLine)
-ExpectFailure 'Unexpected empty table' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'},[pscustomobject]@{Date='2026-01-02';Value='3';Note='x'})
-$next=Publish-PreparedEvidenceBatch @argsForPublish
-$pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
-if ($pointer.PreviousBatchId -ne $first.BatchId -or -not(Test-Path $first.BatchPath)) {throw 'Previous version lost.'}
-Write-Host 'PASS: complete replacement retains previous batch.'
-Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
+
+function Assert-PreparedUnlinkedPath([string]$Path){
+    $cursor=[IO.Path]::GetFullPath($Path)
+    while($cursor){
+        if((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Metadata conversion refuses linked paths.'}
+        $parent=Split-Path $cursor -Parent
+        if($parent -eq $cursor){break};$cursor=$parent
+    }
+}
+
+function Convert-PreparedMetadataNames {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey,[switch]$Apply)
+    $root=(Resolve-Path -LiteralPath $OutputRoot).ProviderPath.TrimEnd('\','/')
+    if((Split-Path $root -Leaf) -ne 'DATA-POWERBI'){throw 'Conversion requires a dedicated DATA-POWERBI directory.'}
+    Assert-PreparedUnlinkedPath $root
+    $lock=[IO.File]::Open((Join-Path $root '.publication.lock'),'OpenOrCreate','ReadWrite','None')
+    try {
+        $plan=[Collections.Generic.List[object]]::new()
+        $checkedCsv=0
+        function Plan-Name([string]$folder,[string]$name){
+            $path=Get-PreparedMetadataPath $folder $name
+            Assert-PreparedUnlinkedPath $path
+            $legacy=Join-Path $folder ($name+'.json');$new=Join-Path $folder ($name+'.json.txt')
+            if((Test-Path -LiteralPath $legacy) -and (Test-Path -LiteralPath $new)){throw 'Both metadata names exist; resolve the ambiguity before conversion.'}
+            if($path -eq $legacy){$plan.Add([pscustomobject]@{From=$legacy;To=$new;SHA256=(Get-FileHash -LiteralPath $legacy).Hash})}
+            return $path
+        }
+        $rootPointerPath=Get-PreparedMetadataPath $root 'current'
+        Assert-PreparedUnlinkedPath $rootPointerPath
+        $pointer=Get-Content -LiteralPath $rootPointerPath -Raw | ConvertFrom-Json
+        if($pointer.SchemaVersion -ne 1 -or $pointer.TenantKey -ne $TenantKey){throw 'Root pointer schema/tenant mismatch.'}
+        $expected=$pointer;$seen=[Collections.Generic.HashSet[string]]::new()
+        while($null -ne $expected){
+            $id=[string]$expected.BatchId
+            if($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or -not $seen.Add($id)){throw 'Invalid or cyclic batch ID.'}
+            $folder=Join-Path $root ('batches/'+$id)
+            Assert-PreparedUnlinkedPath $folder
+            $manifestPath=Plan-Name $folder 'batch'
+            $validationPath=Plan-Name $folder 'validation'
+            $receiptPath=Plan-Name $folder 'current'
+            $manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            $validation=Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
+            $manifestHash=(Get-FileHash -LiteralPath $manifestPath).Hash
+            if($receipt.SchemaVersion -ne 1 -or $manifest.SchemaVersion -ne 1 -or $receipt.BatchId -ne $id -or $manifest.BatchId -ne $id -or $receipt.TenantKey -ne $TenantKey -or $manifest.TenantKey -ne $TenantKey -or $receipt.ManifestSHA256 -ne $manifestHash -or $expected.ManifestSHA256 -ne $manifestHash -or $receipt.PreviousBatchId -ne $expected.PreviousBatchId){throw 'Batch identity or manifest hash mismatch.'}
+            if($validation.Passed -ne $true -or $validation.SchemaOnly -ne $false -or @($manifest.Files).Count -eq 0 -or @($validation.Files).Count -ne @($manifest.Files).Count){throw 'Batch validation receipt is incomplete or failed.'}
+            $fileNames=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach($file in $manifest.Files){
+                $name=[string]$file.File
+                if($name -notmatch '^[A-Za-z0-9_-]+\.csv$' -or -not $fileNames.Add($name)){throw 'Invalid or duplicate CSV filename.'}
+                $path=Join-Path $folder $name;Assert-PreparedUnlinkedPath $path
+                $validationRows=@($validation.Files | Where-Object File -CEQ $name)
+                if($validationRows.Count -ne 1 -or $validationRows[0].SHA256 -ne $file.SHA256 -or $validationRows[0].Rows -ne $file.Rows -or (Get-Item -LiteralPath $path).Length -ne $file.Bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $file.SHA256){throw 'CSV integrity or validation receipt mismatch.'}
+                $checkedCsv++
+            }
+            $expected=$null
+            if($receipt.PreviousBatchId){
+                $previousId=[string]$receipt.PreviousBatchId
+                if($previousId -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){throw 'Invalid previous batch ID.'}
+                $previousFolder=Join-Path $root ('batches/'+$previousId)
+                # Older retired payloads are not recreated or traversed.
+                if(Test-Path -LiteralPath $previousFolder){
+                    Assert-PreparedUnlinkedPath $previousFolder
+                    $previousReceipt=Get-PreparedMetadataPath $previousFolder 'current'
+                    Assert-PreparedUnlinkedPath $previousReceipt
+                    $expected=Get-Content -LiteralPath $previousReceipt -Raw | ConvertFrom-Json
+                    if($expected.BatchId -ne $previousId){throw 'Previous batch identity mismatch.'}
+                }
+            }
+        }
+        $null=Plan-Name $root 'current' # Publish the renamed root pointer LAST.
+        foreach($item in $plan){
+            if((Get-FileHash -LiteralPath $item.From).Hash -ne $item.SHA256 -or (Test-Path -LiteralPath $item.To)){throw 'Metadata changed during conversion planning.'}
+        }
+        if($Apply){foreach($item in $plan){
+            if((Get-FileHash -LiteralPath $item.From).Hash -ne $item.SHA256){throw 'Metadata changed before rename.'}
+            [IO.File]::Move($item.From,$item.To,$false)
+            if((Get-FileHash -LiteralPath $item.To).Hash -ne $item.SHA256){throw 'Renamed metadata hash mismatch.'}
+        }}
+        [pscustomobject]@{Applied=[bool]$Apply;BatchId=$pointer.BatchId;Batches=$seen.Count;CheckedCsvFiles=$checkedCsv;MetadataFiles=$plan.Count;CsvRecalculated=$false;Files=@($plan)}
+    } finally {$lock.Dispose()}
+}
+Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataNames
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyQHQxmKdLZrnw
-# dymbpLbPD/LDeh4LiSMSxzPt5QKrAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvl5Nyu8Bzfcxl
+# DDsv+fMLu59XQWa/zzRdecnMe2LWY6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -181,31 +232,31 @@ Write-Host 'All synthetic publication tests passed. No tenant API or Power BI ac
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGpiS7t/265+AFH9osQSFBmWNLjC94Z01SAno3cqJhXvMA0GCSqG
-# SIb3DQEBAQUABIIBgApJgBWqOZzY8algCJu29oybcApXHBIPycI5Y1OytTcNO7Pz
-# W/WvJlMHvs/+KnT8RQhmoaofFrOMr03lTAsrME2+mTUQsVclkQmwLTUKRy65EYAE
-# ZriyhMAUsFX7MM8ey7ex9ZsmgoiZXKQZX9sqs0lqImZJEsNEy/ZRJX+veb/Q3tJ6
-# j8jwOvpu3RfMOp0Jze2+vZqLj9S1RCTeiB77iCmuRdNQEpsw/5G1/8Yc7mSJ65Ka
-# R8yW4qZmZi77nSYn7htti8lPL39zPn2w585O2hZJaPFWqukZeXD/nWeW6NDm575P
-# XSLQxZdJ1aQPLi72fEdMYZKssl+J4iboyLKgFKLxzYkXREUxpXHYEPWVM3Gcya10
-# BBbIM0yqNxlMAoLmpxQlHwujCKuuBADDopKMRh5Hc5LpHXWINvyNEmwmnc/MgRxq
-# N3leVv/V4duepux0l4bZrGUii6xo4Ok3kFWcdCQzTgwKrVMrGsvRXskxJOeTNxSQ
-# fiB97aOxV9U2jvcdcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOlrIIE6XxL7A20qUT2dQcCWTP4ZZZDsO+YvyN7ZbUXMMA0GCSqG
+# SIb3DQEBAQUABIIBgFK38xVO3Odl+oAtkLNcw0wyg75OX01weMsxMf7a7HLCf4It
+# f+joNMukUm5JJDC/4kDyW0+9bIjCrqASMAsNnHEDhHNnjSEFOv2f0z1aShCKckG7
+# sOv5iGi2yomni2TwFCYdxvc+MWF9AdnXLEny3AonqiTQjB0jIJf7qVwDhRcUTSr1
+# izwHytKtwbZvPkB7hFLk6ok53mAOptTXaQIPSrvhhOenq5o/z2/Xt1lLLH96PkbG
+# ldnt+jvbA1bgsqRsFqy+38++IsucFV66Qx0LM+n+0xs/m5DINL5MmBI15i60v1Pr
+# r62OkXY7drwipjYNhq1uyEnfFShzeuFAl8FBx9NcGQJhHMScm+E+mU9hEAsOYL1y
+# PpMLZmGDaP3uQfBpTvxGaINlBgCKFD7ly5pay8mv6F+NYku+HCWi+lA2sKS9jSNA
+# I/VRYInlrSQiLh9tkdDAqnemuv1rdWlTiKoOpsmlqEVnSI6zsdX+5UahEHUt14YJ
+# NDTqptW5Fc2f5BoFWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBpUTe63Hl/L/0Klto6RLxIQf8l21RDvW4lDKXP
-# KO9ieTANBgkqhkiG9w0BAQEFAASCAgBr606bIwa8vkVgeLkY0NrUtBjw/xTY3pQ4
-# SaxcqUzEmYcyy629PLTd5cdT+WTsr4YIlstKNrkmW07ORMZp/GUKMBjLwngVZw+H
-# UBfhZghLH+ac76EVtw7OxBJ25VK/t0chV0rr8IsS/sjIlkx+pqc2S4/fbnRqgnOk
-# wy668mBHC+YuzLdps7U8veaPQDa9sB7UJag7Ga9PCCOqX6DmUcfyktZnvYkr77qX
-# rDlVEE79LC/PuhEODXnQbARCG5oPczmr6pswqo3TOu8ptIt5RR+nttEJb1xEouQn
-# x9eS7PWKRFjJ7BiEcJ07XsVjmljJS+xhi/Y5th3YPcflh0j+Q9llGD4Ji27cpMhk
-# bhIaKlP0W2nmrKd3HR6s2v4WPS+LkPqKUjuF6OGYW9tgy0eL0nHgIAYnZIcm2GTk
-# PsUKn6Jb6ArlbEcP7EGXLd6Q6i4uTKJNTKaxVQWamr7YgCHOO5jHe6ToDYiKa88+
-# 33Gk/aMauAXUO9EVWv3EltaMlusmpzdlHhn40YidNtN+J6op5eG6qLL2MBjEq4Vo
-# tC3DMa6IXzccqfXWomM9iQ4DKlNe2EYZ0hV5dwuVtlHtMVQuYm6TBNPoDlKSkaXj
-# 244GEewqSuCvJizQNTOIlNmF1NNOfcBUhKSnS3bOP5RzpRDBP4BDt4sgfT3Lze8S
-# 5eCCvKXkwA==
+# MzNaMC8GCSqGSIb3DQEJBDEiBCBJY5gANQgDT72yTjuhQDL+34B6i7f7XrnBNzXV
+# MRxXDzANBgkqhkiG9w0BAQEFAASCAgAV5iMLleFYPtjAOr3Aubey9Dyd3WpAINbv
+# pEVPf/foy7EwT4HbN37+RfYpUAXAQ3u8rTcEPJV6MR6wMUky8ggOh3A/+eK2TJbB
+# F/TjU9GR4KcMC89rAcBpKnDTVrEkACTMbJLcTe9A+z/agpLSTZTEWxewLSZZDBFc
+# i9RnvHqdEWamsLKBHJOMWlKHUqx7O9v9jo8t1c8qrZvUwcVdAq4fAOVRs0gnt3a6
+# Zd1hx8ovtagt+AsE3oyPIGGY2MTWr/l5Qv08txbJYw5l4lNjt67ZdelQUveVdvZf
+# Yso+s8iHidMhqoNGhy8BvnV2vK1CveNXcGAvxpftkP1vhb4ypRlPt3hmDx6zncfk
+# 4qZjKOthF6BplCCYWpa4lePKcwX4a8xadSvE15Vopn0gdcKePE5y+8Cfc6WiUv2s
+# 3FhUXn0XVmCe/omBftHXkYuNLHDroSL6YLgdsg4OG9lEmkVJ9HiSiCYh74FgxK+K
+# lNhKRbd2GaB9o7R/xiI3jpjskiryZAr95TQEaKE/1CMNxI4TLZs/iiB0VPR6za/f
+# rM4Ypr7ZU4uNxUAweFFVLr23wQdeFwgKKrZYO4DzqitujzMUtwGKXjpQut2Tw8Cm
+# 2OqnXDbJDQFKUbvOPxIsWP1jL0YLcX2OJypMV0iwAbISOui2gWl+U/yELDWKTRMO
+# apjOeoGQAw==
 # SIG # End signature block

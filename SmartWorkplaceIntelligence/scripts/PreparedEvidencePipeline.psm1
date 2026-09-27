@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 
 function Get-PreparedChildPath([string]$Root, [string]$Relative) {
     $base = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -97,8 +98,8 @@ function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
     $keep = @($Pointer.BatchId,$Pointer.PreviousBatchId)
     if (-not $Pointer.PreviousBatchId) { return }
     foreach ($id in $keep) { if ($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$') { throw 'Invalid protected batch ID.' } }
-    $previousPath = Get-PreparedChildPath $OutputRoot "batches/$($Pointer.PreviousBatchId)/current.json"
-    if (-not (Test-Path -LiteralPath $previousPath)) { return }
+    $previousPath = Get-PreparedMetadataPath (Get-PreparedChildPath $OutputRoot "batches/$($Pointer.PreviousBatchId)") 'current' -Optional
+    if (-not $previousPath) { return }
     $previous = Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json
     if ($previous.BatchId -ne $Pointer.PreviousBatchId -or $previous.TenantKey -ne $Pointer.TenantKey) { throw 'Previous batch receipt mismatch.' }
     $candidate = $previous.PreviousBatchId
@@ -108,17 +109,16 @@ function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
         $relative = "batches/$candidate"
         $folder = Get-PreparedChildPath $OutputRoot $relative
         if (-not (Test-Path -LiteralPath $folder)) { break } # Already retired on an earlier run.
-        $receiptPath = Join-Path $folder 'current.json'
-        if (-not (Test-Path -LiteralPath $receiptPath)) { throw "No publication receipt for old batch $candidate; retained." }
+        $receiptPath = Get-PreparedMetadataPath $folder 'current'
         $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
-        $manifestPath = Join-Path $folder 'batch.json'
+        $manifestPath = Get-PreparedMetadataPath $folder 'batch'
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         if ($receipt.BatchId -ne $candidate -or $manifest.BatchId -ne $candidate -or $receipt.TenantKey -ne $Pointer.TenantKey -or $manifest.TenantKey -ne $Pointer.TenantKey -or (Get-FileHash -LiteralPath $manifestPath).Hash -ne $receipt.ManifestSHA256) { throw 'Old batch ownership/hash mismatch; retained.' }
         $candidate = $receipt.PreviousBatchId
         # Preserve small audit receipts, but not duplicate historical CSV payloads.
         $audit = Get-PreparedChildPath $OutputRoot "retired/$($receipt.BatchId)"
         New-Item -ItemType Directory -Path $audit -Force | Out-Null
-        foreach ($name in 'current.json','batch.json','validation.json') { Copy-Item -LiteralPath (Join-Path $folder $name) -Destination (Join-Path $audit $name) -ErrorAction Stop }
+        foreach ($name in 'current','batch','validation') { Copy-Item -LiteralPath (Get-PreparedMetadataPath $folder $name) -Destination (Join-Path $audit ($name+'.json.txt')) -ErrorAction Stop }
         Remove-PreparedOwnedPath $OutputRoot $relative
         Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Retired prepared batch {1}; audit retained, raw history untouched.' -f (Get-Date),$receipt.BatchId)
     }
@@ -263,8 +263,10 @@ function Publish-PreparedEvidenceBatch {
     $lock = [IO.File]::Open((Join-Path $output '.publication.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
     $batch=$null; $committed=$false
     try {
-        $currentPath = Join-Path $output 'current.json'
-        $previous = if (Test-Path -LiteralPath $currentPath) { Get-Content -LiteralPath $currentPath -Raw | ConvertFrom-Json } else { $null }
+        $currentPath = Join-Path $output 'current.json.txt'
+        if (Test-Path -LiteralPath (Join-Path $output 'current.json')) { throw 'Convert existing metadata with Convert-SmartM365-WorkplaceEvidence-Metadata.cmd before publishing another batch.' }
+        $previousPath = Get-PreparedMetadataPath $output 'current' -Optional
+        $previous = if ($previousPath) { Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json } else { $null }
         if ($previous -and $previous.TenantKey -ne $TenantKey) { throw 'Output root belongs to another tenant.' }
         $contract = Get-Content -LiteralPath $ContractPath -Raw | ConvertFrom-Json
         foreach ($name in $AllowEmptyTables) { if ($name -notin $contract.tables.table) { throw "Unknown empty-table exception: $name" } }
@@ -292,7 +294,7 @@ function Publish-PreparedEvidenceBatch {
             }
             [IO.File]::Move($temp,$destination,$true)
         }
-        $validationPath = Join-Path $batch 'validation.json'
+        $validationPath = Join-Path $batch 'validation.json.txt'
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Test-PreparedEvidence.ps1') -Root $batch -ContractPath $ContractPath -ReportPath $validationPath | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Batch validation failed; current.json was not changed.' }
         $validation = Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
@@ -314,12 +316,12 @@ function Publish-PreparedEvidenceBatch {
             }
         }
         $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
-        Write-PreparedJson (Join-Path $batch 'batch.json') $manifest
-        $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
+        Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
+        $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
         $pointerTemp = Join-Path $output ('current.'+$batchId+'.tmp')
         Write-PreparedJson $pointerTemp $pointer
         # Immutable copy used by a delayed/cloud transfer; never upload a newer run's pointer.
-        Write-PreparedJson (Join-Path $batch 'current.json') $pointer
+        Write-PreparedJson (Join-Path $batch 'current.json.txt') $pointer
         [IO.File]::Move($pointerTemp,$currentPath,$true)
         $committed=$true
         try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" }
@@ -330,8 +332,8 @@ function Publish-PreparedEvidenceBatch {
             try {
                 $audit=Get-PreparedChildPath $output "failed/$batchId"
                 New-Item -ItemType Directory -Path $audit -Force | Out-Null
-                Write-PreparedJson (Join-Path $audit 'failure.json') @{BatchId=$batchId;TenantKey=$TenantKey;Error=$failureMessage;Utc=[datetime]::UtcNow.ToString('O')}
-                if (Test-Path -LiteralPath (Join-Path $batch 'validation.json')) { Copy-Item -LiteralPath (Join-Path $batch 'validation.json') -Destination (Join-Path $audit 'validation.json') }
+                Write-PreparedJson (Join-Path $audit 'failure.json.txt') @{BatchId=$batchId;TenantKey=$TenantKey;Error=$failureMessage;Utc=[datetime]::UtcNow.ToString('O')}
+                if (Test-Path -LiteralPath (Join-Path $batch 'validation.json.txt')) { Copy-Item -LiteralPath (Join-Path $batch 'validation.json.txt') -Destination (Join-Path $audit 'validation.json.txt') }
                 Remove-PreparedOwnedPath $output "batches/$batchId"
                 Remove-PreparedOwnedPath $output "current.$batchId.tmp"
             } catch { Write-Warning "Failed batch cleanup incomplete: $($_.Exception.Message)" }
@@ -402,8 +404,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD3Xgg+QEY1Uh3
-# P/MyPb3XhcqHuf9u6acm0BtqpVp9nqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6Q770ip1ZXeOg
+# 2o1/CmJD0V9X2ta56BnVqwlO7OlczqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -536,31 +538,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC2u3OOl+mGPDA579ATLKCfha1oaAeRxa1pO+njYBb2dMA0GCSqG
-# SIb3DQEBAQUABIIBgF3mAu55bK3k/2z18TNXerwz4+1DW2FE2h7IhPl0gTRDOtFQ
-# t+BnhYGD6FgXKVXpyt7+NGv9tz49/8Ys73gdTUHvQb5SkD99FuL2UugVvkabawPz
-# vdQHg53CnYAsvCznmkMImSvcqAxQo5IK1uaQjNcrYmGKrbwK0yWa5uDN0pvtHVOw
-# 18Oh+q8y+iM5DwbnH4CgGMu9ydd421LQ6F18Yz0TGvsILI3N3bzyGyPiQdkMDrXL
-# np/1V8m/v1NBHexC+0uDg8YB8RXACak7c2UANE1mHlphRdcbNEruKS+1nNCE9xgR
-# T5DERiOBxU08Ug9asYGeMhYOdru8PaT5ZY77cqhpKxqPxvXBAK4xhlVFmMY1SYsY
-# OHtqGZkWe+1nX35lJZ5lNtsLaFXPHE0BjoonnVV2jQtI6YRn/arULBisPRU1Cxt6
-# 038hF2TumhaaJTvnf6GcBGQycW+hSiWvoOAjSuT+W3JX84jAfMk7Tgk+/x/tE/1n
-# 0Ys6oa445qxmLVAneKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICtSmAr33ip6bKETTz4sTDNKExKd6ixbe6uDnKdEc0deMA0GCSqG
+# SIb3DQEBAQUABIIBgCorYJpzYYaZYoj/Xo0eWmGoZ5kBvjiIZlNsVnwcuhmyAwtM
+# JRbD6UGZyu4mcQ6FUVkzDtGX2Q12MossFEYJqCMovjC3wB0dr6rqht+N8if0+1QV
+# wEBXrmMkm0TUUEyXG09IF3h/31X/1Mbu0/LPRB5gKnNVpPVj4bpAWXzXwMP86BF+
+# Re6dJfcxDzVXMz1VSDxYk0eSXA96B/FiR7LdbJS1AuL5kz7agp/q+SXOKBWkXLDq
+# 78/BUt7W6g6k9Nm/KrifRa3I2PlH7Y3awJb2c3ihIjeAJqXuEioDZZrPkaOG6oZo
+# St5zXuLkhL26a9b2aoNDMe3Bc/7DyG2LuezWyUvZxFuMZRExy6nWpXvK6C5X1K5a
+# v4rCIx2VcwOP6h0Awg4OQFjDzBF4axKIcteXWkfHAmoXv0kJJq2ouZMEWKFGJORb
+# okxm3TyjP1xhbCYW0In2XPJrjH9ke4A4lY7s1jEbP4cMUsbsZPAeC6f0rwraYWww
+# asMQJXGvlpAg8voMyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMTI2
-# NTZaMC8GCSqGSIb3DQEJBDEiBCBjxoQNhsXnpakwSfEiY20uYc8LKInlJAgqKpq/
-# kqfLzjANBgkqhkiG9w0BAQEFAASCAgB1SkbE5hgR//3ueuEhStbAvJ8Sc6vOoRjE
-# BufiddWyYqJnHtJXVlZp4nzvGjpmOAnKZInLP8mHvDWhhn3qBfwzSY7oe4WCVkIs
-# CgRAURDXozadethwnBwt1rruL+cbk/iBBk25WmNc2iUihtq7yOj/15pEV8tXXJkC
-# tvZ2/RZYDmO+qVhNbrC47zrioYzBPf+OCXUxya5kVeVfDpXrf2NNXpRP843EdQL+
-# HLcojDoFvJY6pk88QTuGFptqcchbF8XlbSLJy/2J8JVg5qWKqXekZdHgY3AKMx7q
-# eNsihIzMDL9Di5WyfLgN439hKLWcfsyweYF14jMzDNAX0L3dMKscNrmx+XlIHqMc
-# ulYD17DbU5Ab6ddoN9KDo9HYr+HG2Q6xoWcAt4B/smn1HavSKJkrxs3L9QP3blow
-# G6CCUDXtbolur9lpcNlWi+Ce+Fo3ttAluoDrP2JSOEl+Hh3p4SYF+ZKmiB/zVlWt
-# hYI8vxioBwtILvzxYpzO/PiCLsbuGYw/QFEQ0ZKiPSF2Q90N5Wo1FuUoGowTt/cO
-# PgUStLjVvJMkeKZ/9I21bvGtL8nmbVxtu/5KXx1x4SanTxXZxz/X+yOeC6ZJ9Qhr
-# GKcQpjK9TcOiAWWMYlK2pTnsua4n0u3epDp6IZG/VPpSVqSwvZnZXOWsN+qV3Mp0
-# 2pNnjISdWA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
+# MzJaMC8GCSqGSIb3DQEJBDEiBCChSu0s/JuW0yjUT3P2tklpOKkJ6nTUtBlIWzvv
+# xm9jrzANBgkqhkiG9w0BAQEFAASCAgA+MviLfPWD4XytHcnm8vQIPXXOcXNvlXeQ
+# OGqM7cH9utXnIFYNvYlzVeJyIWwzd9zdqUGqZidfW7mcRKK8HTyooSCe+Y2c1hfa
+# bIkUX16I07nfTUEZzk+BYWkdPudA2uAn4JaGGgI4VusM1ZI3ig9NqdKK4VwTWhrh
+# 9FSESzMkpX+PFKZ5uFa/VAymUe6E9uuEA8vXz49bdvhuM5lW8mM4Gh7CEcDh6s7e
+# p4vm3C78e1W9vKpjNzTneMAhZb0Qw662qxOsY8S++TV4dsjYeH6L+5pqftPq3SH3
+# iMlb4EmfKAR5jg1D8AE/qrfYhcgA6w+vZPZs3ts77GM7t5Z3UMqG/YtdWuqvGGXy
+# zHCwbKd/LZa5X/07dg3lBDvhoa246Pdxq7Oa85GJFzIBKXkRugpeyzcNzS8a5mQ/
+# yph7ezlK0m3/RjhdWAbxiFKEwAoF/hParjiPKCQ7kcJnkx+g02GJ3nMPlT08Cj91
+# ltSp/9tfbkE4B95Hmg39qwpN5bLw7inqgPaMBC+y9VqinQVLNZi6ZP8XgSvPCfFQ
+# uiMRYW0JLeruzEyBpaKBb/vN6r6nuIJMpAlzt11NE/u1lu4os4ZxomhTftLMWJem
+# TL5/5H4TfFOrzrEKxlEy1tJ7LZHMYS/P6TAxnTeA+X4RmLS28dVfem22pHxemuwk
+# MGIQm/3rnQ==
 # SIG # End signature block
