@@ -2,7 +2,7 @@
 
 27 septembre 2026. Candidat local fondé sur `b1ef27654e0fff2e9deb498fa733be4e264cc9c6`, préparé pour publication Git sur main ; aucun déploiement ni migration réelle. Le checkout d'origine et ses changements concurrents sont préservés. L'ancien candidat `smartinventory-json-txt` est obsolète ; seul `json-txt-current` porte cette implémentation.
 
-L'implémentation et les tests synthétiques sont réalisés. La qualification UNC, SharePoint, OneDrive et Power BI reste à effectuer. Les sources PowerShell du lot sont signées avant publication et vérifiées sur une extraction Git. La politique reste `Readers`, avec listes UNC et SharePoint vides. Aucune migration réelle activée.
+L'implémentation et les tests synthétiques sont réalisés. La qualification UNC, SharePoint, OneDrive et Power BI reste à effectuer. Les sources PowerShell du lot sont signées avant publication et vérifiées sur une extraction Git. À la demande explicite de Khaled, la politique est désormais `JsonText`. Les listes UNC et SharePoint restent vides faute de résultats de qualification réelle : ces destinations restent bloquées. Aucun script propriétaire ni migration réelle exécuté par Codex. Après récupération Git, les propriétaires exécutés peuvent migrer leurs fichiers locaux admissibles.
 
 ## Règles communes
 
@@ -57,7 +57,9 @@ Le dépôt ne permet pas de déterminer si ces situations existent sur les serve
 
 La seule exception technique approuvée concerne les fichiers natifs Power BI : [documentation Microsoft](https://learn.microsoft.com/power-bi/developer/projects/projects-report). Elle ne couvre pas données, contrats ou audits.
 
-## Ordre de déploiement, approbation séparée requise
+## Ordre de déploiement proposé initialement
+
+L'activation de `JsonText` a depuis été approuvée explicitement. Cela ne confirme ni la qualification des destinations distantes ni le lancement des collectes. Les étapes ci-dessous restent la référence de qualification ; le mode du dépôt est maintenant actif.
 
 1. Conserver les tâches désactivées et les trois machines sans écrivain Orchestrator/collecteur, y compris lancements manuels et consommateurs externes.
 2. Examiner la liste de fichiers et empreintes ; préparer signatures et paquet isolé approuvé, sans configurations privées. Ne pas déployer l'ancien candidat.
