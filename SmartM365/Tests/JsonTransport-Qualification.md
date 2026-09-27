@@ -139,6 +139,17 @@ Dans une copie de qualification Power BI : intégrer le lecteur `.pq` adapté, c
 
 ## 5. Critères de feu vert et éléments à retourner
 
+Après réussite, enregistrer les seuls chemins et drives effectivement qualifiés dans `Config/SmartM365-JsonTransport.policy.local.json.txt` à côté de la politique publique signée. Le module transport 1.0.1 fusionne ces listes privées avec la politique de déploiement ; ne pas modifier le fichier `.psd1` signé. Structure :
+
+```json
+{
+  "QualifiedUncRoots": [],
+  "QualifiedSharePointDrives": []
+}
+```
+
+Remplacer les tableaux vides par les destinations vérifiées sur le site concerné. Ce fichier reste hors Git, comme toutes les configurations `.local.json.txt`. La lecture n'effectue aucune écriture ni accès aux destinations déclarées. Contrôle en session neuve : importer `SmartM365.JsonTransport.psd1`, puis appeler `Get-SmartM365JsonTransportPolicy`.
+
 Conserver résultats CSV/logs, versions PowerShell et OS, empreintes du paquet signé, preuves des signatures, trois états de tâches et processus, rapports UNC/SharePoint, contrôles de propagation OneDrive et qualification Power Query. Ne pas transmettre de secrets de configuration.
 
 Le feu vert demande aussi la validation des lecteurs externes de Remediations, des éventuelles copies distantes sans propriétaire local et des historiques incomplets. Aucune perte d'historique, baisse de couverture ou reprise de données périmées ne peut être acceptée pour faire passer les tests.

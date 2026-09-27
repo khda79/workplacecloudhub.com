@@ -1,20 +1,57 @@
-@{
-    RootModule = 'SmartM365.JsonTransport.psm1'
-    ModuleVersion = '1.0.1'
-    GUID = 'ccf5a4b1-c253-4e30-98a8-d794f1ad995e'
-    Author = 'WorkplaceCloudHub'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @('Get-SmartM365JsonNames','Get-SmartM365JsonReadPath','Read-SmartM365JsonDocument','Move-SmartM365OwnedJsonFile','Resolve-SmartM365JsonConfigurationPath','Get-SmartM365JsonTransportPolicy','Get-SmartM365JsonTemplateName','Resolve-SmartM365OwnedJsonPath','Write-SmartM365JsonBytesAtomically','Resolve-SmartM365WeeklyManifestPaths','Publish-SmartM365RegeneratedJsonBytes','Complete-SmartM365JsonConsumption')
-    CmdletsToExport = @()
-    VariablesToExport = @()
-    AliasesToExport = @()
+[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+$root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-PrivatePolicy-'+[guid]::NewGuid().ToString('N'))
+$moduleRoot=Join-Path $root 'Modules/SmartM365.Core'
+$configRoot=Join-Path $root 'Config'
+New-Item -ItemType Directory $moduleRoot,$configRoot -Force | Out-Null
+foreach($name in 'SmartM365.JsonTransport.psm1','SmartM365.JsonTransport.psd1') {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../Modules/SmartM365.Core/'+$name)) -Destination $moduleRoot
 }
+[IO.File]::WriteAllText((Join-Path $configRoot 'SmartM365-JsonTransport.policy.psd1'),"@{Mode='JsonText';QualifiedUncRoots=@();QualifiedSharePointDrives=@()}")
+Import-Module (Join-Path $moduleRoot 'SmartM365.JsonTransport.psd1') -Force
+$module=Get-Module SmartM365.JsonTransport
+$old=Join-Path $configRoot 'SmartM365-JsonTransport.policy.local.json'
+$new=$old+'.txt'
+$script:passed=0
+function Check([bool]$condition,[string]$message){if(-not $condition){throw $message};$script:passed++}
+function Reject([scriptblock]$action,[string]$message){$caught=$false;try{& $action | Out-Null}catch{$caught=$true};Check $caught $message}
+try {
+    $policy=Get-SmartM365JsonTransportPolicy
+    Check ($policy.Mode -eq 'JsonText' -and $policy.QualifiedUncRoots.Count -eq 0) 'Missing local policy changed defaults.'
+    $json='{"QualifiedUncRoots":["\\\\synthetic\\share\\data"],"QualifiedSharePointDrives":["synthetic-drive"]}'
+    [IO.File]::WriteAllText($new,$json)
+    $before=(Get-FileHash -LiteralPath $new).Hash
+    $policy=Get-SmartM365JsonTransportPolicy
+    Check ($policy.QualifiedUncRoots[0] -eq '\\synthetic\share\data' -and $policy.QualifiedSharePointDrives[0] -eq 'synthetic-drive') 'Private qualification not loaded.'
+    Check ((Get-FileHash -LiteralPath $new).Hash -eq $before -and -not(Test-Path $old)) 'Policy loading mutated files.'
+    Copy-Item $new $old
+    Check ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') 'Identical pair failed.'
+    [IO.File]::WriteAllText($new,'{')
+    Reject {Get-SmartM365JsonTransportPolicy} 'Invalid preferred policy fell back.'
+    [IO.File]::WriteAllText($new,'{"QualifiedUncRoots":[]}')
+    Reject {Get-SmartM365JsonTransportPolicy} 'Divergent policy pair accepted.'
+    Remove-Item -LiteralPath $new
+    Check ((Get-SmartM365JsonTransportPolicy).QualifiedSharePointDrives[0] -eq 'synthetic-drive') 'Absent preferred did not read legacy policy.'
+    Remove-Item -LiteralPath $old
+    foreach($invalid in @(
+        '{"Mode":"Readers"}',
+        '{"QualifiedUncRoots":["C:\\data"]}',
+        '{"QualifiedUncRoots":["\\\\synthetic\\share\\..\\other"]}',
+        '{"QualifiedUncRoots":["\\\\synthetic\\*"]}',
+        '{"QualifiedSharePointDrives":[null]}'
+    )) {
+        [IO.File]::WriteAllText($new,$invalid)
+        Reject {Get-SmartM365JsonTransportPolicy} 'Invalid local qualification accepted.'
+    }
+    [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Local synthetic fixtures only; no UNC or Graph access'}
+} finally {Remove-Module $module -Force}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClcBJaSyhUVpxV
-# lQ88ELIaAzsmYXnPe6LJPPTuNF0GBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjlgF/9FDZTs9k
+# hiJi6Rucjy3VPCitlsxrwPAy1BrF/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -147,31 +184,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID4IdTkqHaFP5KFxU/2maX9sz9gR7QxCkGrnVFM7qj58MA0GCSqG
-# SIb3DQEBAQUABIIBgLHUdJ7mXyrI+jjziPzisBc3WwbqfBkJKFDX3ofEXv7wXmDE
-# az4SQj4f2giMWIt7tNZG/h2az6gxXZlMxc5SS/bwGd2V9rMb6U9dvNSrjRlCDvv1
-# FHfm9hrrJ3YJ5V+I88+ww5ieeT1Sg/HW3rqci6BaXfriDB4o567JB/9i/SrA2EwU
-# G16Cz9zyhtolthh4pYP1ajQ92U/XU+JE0m5X77FPHBRwmvp1mG5gSldbAIOLmLnR
-# gmS/2wJvU1O/Qv5ukweWZDRQCP6P5M3QcMzPDW4juYB9qS3UqkW172tN1ooL0DaM
-# 8fx1IaGvyWFtKe+sC6q4DeGp9ah4vowsTF6O77cfdxPSBDYjmn8tOr5qeCdUkDFo
-# 4y9cW9M4uoejmXWly1i1Jtb6KIg5TQyKmDd0V/EmzA5nv6lppyl7LJykH0eUGd55
-# I1S+4PO499WBKxZtVCvabYja732H0lQwNZD5YljXKrojhLrsVFcBQz1G1wsdKPPY
-# MHKtvIheH8FTyk8X6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPYTJtpz119h/RzB3SeOwPSaqXIUFhZG1TNCRsSgKFsIMA0GCSqG
+# SIb3DQEBAQUABIIBgG/d8qwdwDrTSlJAtKNaItnbzJXqzDBoTgOs1uwNesdHhorH
+# DDkdB3fGMHljhSHR+j2GGOGZierYVfeg+877CUTmj7dkBZ9VrLBwwutkNXXZ6zd2
+# efqRh0I7wgZ5crzyPwr+CI/ITHDqBKqwuuT5wCkaB6xqURkFmB1cz08hldtQZIay
+# JezXzk/ASyMySIs/q570rtITn83qn7tgipSk/J+7nx9ujMoF9TaL/V7us5dxAqGE
+# aEsnW7e3cKAw6Ofq8ylCc7S86dlUZVpQ5tQhaegveGvLC4voCK51W4kpl4H1BfcC
+# z1eRodjs2S9a64ATOsWtQciy2qZY10kTzmhb26OsqPZ9Omcp/cP7a80ahsyjTAVa
+# QYyPfmXVlYiZNMaIx0e5Qe6ZAADUGl/mtpsq2lb4XeY59EUqRJ0F9ScETjsiCXJH
+# Vkxdn/JQDGwrN/nKha0UObO6elPS/iSWzsVVebpsOW4YzNK0tGR1orRg7Gf82DPZ
+# fGVy5kcSrAwZIS8cWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNzI0
-# NDdaMC8GCSqGSIb3DQEJBDEiBCAaAsZBsbmup0QZ/rko3wkP05uuLJxjM9BUK/uO
-# yRjnnzANBgkqhkiG9w0BAQEFAASCAgBWpiXDnPbZevkyN1S+Yf2WNOToaWzM0OVL
-# zIqgJhuv6adUyNE2g/n062RyfAkxaSuvV6QW3EDSVBdNHL6Ezn6OwoNPQ6SsK8nX
-# CgHWA7cd7IqkPWoAPqnnWDjWzoBNCCrfM+6UFkczGqKkAjTlzGG656C8xpvr16jg
-# rPLocTTuPMsqhaRo/R4MXPKAKb/awrif57gCCKqorYXqi+Nr8vYeoQ3uI7TRzMqN
-# WFW1zUdkVjXg8TO29YFYu31lXCklZrh1irIMUHFo9SVKv16k53PBlbEGG5Qr0qWI
-# eU2VJJXiAyzd48PnZ8uqbb/kGomma8qTBH4xlv1JQur6K4c/Ev1+tqHn5GWsyKmv
-# RceTZx+Kqe9G/5flAsc+tU6W3wV9uQzHXhSM5Xu/i1irYa/p1wFhaVchwl2IbyIC
-# tVa+wPQBaHpkwTlKyG2lqFqC6PZ2wUYV8ztKpA66JUvERY0/Es//vv1qI2+dOmgs
-# tmVpW511opvBdMQiaCpl3xw4pWZKkbhOn24IYxIIEq37Zg/VkVgUNCdvc3Ul2eaY
-# 2erpDpssPyRIaqu9JKCLVj75St0/qwtJ/OsU0gLtaWKnClTO/Jy2ecLakGi2wFjZ
-# N6HDsK6q6JQQXiAZR/m4jxd+KLc5Z9uhh43shzWyj1jTGW9wgOX2c5+7ef27W2Nl
-# pWXXi90veA==
+# NDhaMC8GCSqGSIb3DQEJBDEiBCADmWxXAuqqpvPhHZpFdgR8kFJ1K8mfs6ooDvmX
+# wLBLKTANBgkqhkiG9w0BAQEFAASCAgAmN8wxbyLRBBMCpNi3BlxjPTB7yOnIC4Xz
+# YQ6h9Dhb+Pz0DLAMgVs4i3rBeYR50DKJfLlut0LJ07ZNgwj1qxzrO7MNEDfd4pw1
+# t8ptYe+SyINnvhYk5NIYIRlEWGIMOlSnfP2zeEhL8YERFnbYMwFANGC3NVY0C+Dh
+# IdY6nbKaDZys4OPltAebUnKmIxbTXymk/VPP06nIH46pMBYGNS98frfbMmVvFsCn
+# TCdu12IYmW0xoDV4lgIb/3QSspjrc569dA5MPI5JMHH+XkGROLQRDkAfzQJGM86a
+# eDbA0kY8FDNiqNFSgCi4asSg9Jb4xWlrWHbR3FipXNxRA92z4SPx9HpxjCkGcGgF
+# x9MT4PDzxR4cbYHEbA4/h7+pjQucTWlIGDvEVmeaFafNCG+jtv7dlDRWkr0JfhPE
+# utkmEBo94RG3wtI4kndutVZ3ESyA9Z7FNP9CwZ50XE15xmgB9mcQnfyW26W4HWl0
+# 8QC87JqtETwJEV4AtlAk5ZHs8NYvmVD9AyziSRPxiGwVogz0VcBT3L97ogZpb7aQ
+# Cqf+U7iwbKy4actLuPeHhyonTDJlDMRQ6iLUa3HhTKJqwYPlbKUjZbOOLbXvGSAV
+# TmMm2q/r4bqQkjnrEzGZOTvlWkdFxbBuWr4zdnUTByANrlBF3RsKtb8+c5W6WQsJ
+# aj0kz9gHQA==
 # SIG # End signature block
