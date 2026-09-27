@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Generates Windows 11 readiness issue tables from SmartInventory CSV exports using the legacy Power BI rule set.
 
@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.23
+1.24
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -46,7 +46,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.23"
+$ScriptVersion="1.24"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -55,7 +55,7 @@ $script:GeneratedFileCount=0
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){$script:WarningCount++;Write-Warning $m}
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
-function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); if(!(Test-Path $p)){ $t="$p.template"; if(!(Test-Path $t)){throw "Missing config template: $t"}; Copy-Item $t $p; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
+function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); $p = Resolve-SmartM365JsonConfigurationPath -Path $p; if(!(Test-Path $p)){ $t=(Get-SmartM365JsonTemplateName -Path $p); if(!(Test-Path $t)){throw "Missing config template: $t"}; Write-SmartM365JsonBytesAtomically -Path $p -Bytes ([IO.File]::ReadAllBytes($t)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
 function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){$pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}}}; if(!$changed){break} }; return $r }
 function AssertResolvedPath([string]$Name,[string]$Path){ if([string]::IsNullOrWhiteSpace($Path)){throw "Configuration path '$Name' is empty."}; if($Path -match '\{\{[A-Za-z0-9_.-]+\}\}'){throw "Configuration path '$Name' contains an unresolved token: $Path"}; if(([regex]::Matches($Path,'(?i)(?:[A-Z]:\\|\\\\)').Count) -gt 1){throw "Configuration path '$Name' contains multiple path roots: $Path"} }
 function Cfg($c,$n,$d){ $p=$c.PSObject.Properties[$n]; if($p -and $null -ne $p.Value){ if($p.Value -isnot [string]){return ResolveToken $p.Value}; $txt=$p.Value.Trim(); if($txt -and $txt -notin @('__USE_GLOBAL__','USE_GLOBAL')){return ResolveToken $p.Value} }; $gp=$script:Cfg.PSObject.Properties[$n]; if($gp -and $null -ne $gp.Value){ if($gp.Value -is [string] -and [string]::IsNullOrWhiteSpace($gp.Value)){return $d}; return ResolveToken $gp.Value}; $d }
@@ -248,7 +248,12 @@ function PublishWeeklyHistory($files){
   }
   if($sourceByLeaf.Count -eq 0){return @()}
 
-  $manifest=Join-Path $folder 'manifest.json'
+  $validateHistoryOwner = {
+    param($document)
+    if ($document.ScriptName -ne $ScriptName -or $document.Tenant -ne $Tenant) { throw 'Weekly manifest script/tenant mismatch.' }
+  }.GetNewClosure()
+  $historyManifests = @(Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $base -HistoryLabel $ScriptName -ValidateOwner $validateHistoryOwner)
+  $manifest=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $folder 'manifest.json') -Owner $ScriptName -Validate $validateHistoryOwner
   $snapshotComplete=(Test-Path -LiteralPath $manifest)
   if($snapshotComplete){
     foreach($leaf in $sourceByLeaf.Keys){
@@ -256,8 +261,8 @@ function PublishWeeklyHistory($files){
     }
   }
   if($snapshotComplete){
-    Log "Weekly history already complete for $weekName. Snapshot and SharePoint republication skipped."
-    return @()
+    Log "Weekly history already complete for $weekName. Existing snapshot preserved."
+    return @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path })
   }
 
   $published=[Collections.Generic.List[string]]::new()
@@ -267,14 +272,15 @@ function PublishWeeklyHistory($files){
     [void]$published.Add($dest)
   }
   $manifestContent=[pscustomobject]@{ScriptName=$ScriptName;ScriptVersion=$ScriptVersion;Tenant=$Tenant;GeneratedOn=(Get-Date).ToString('o');Week=$weekName;Files=@($published|ForEach-Object{Split-Path $_ -Leaf})} | ConvertTo-Json -Depth 5
-  Write-SmartM365TextAtomically -Path $manifest -Content $manifestContent -Encoding UTF8
+  $expectedHash = if (Test-Path -LiteralPath $manifest) { (Read-SmartM365JsonDocument $manifest -Validate $validateHistoryOwner).SHA256 } else { 'ABSENT' }
+  $null = Write-SmartM365JsonBytesAtomically -Path $manifest -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($manifestContent)) -ExpectedSHA256 $expectedHash -Validate $validateHistoryOwner
   [void]$published.Add($manifest)
-  @($published)
+  @(@($published) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path }) | Sort-Object -Unique)
 }
 $script:CompletionStatus = 'Auto'
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.49' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.58' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   if(!$PSBoundParameters.ContainsKey('DetailedArchiveRetentionDays')){$DetailedArchiveRetentionDays=[int](Cfg $lc 'DetailedArchiveRetentionDays' 7)}
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
@@ -827,8 +833,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCat39GyCzv3udc
-# Ko1Oh5LT57Bfp88KTwUynOPaiFU9WaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtSWG4xOCC/kUG
+# yRB+AlJCn7GfBHCxqzxBPUc8FJFqq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -961,31 +967,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF8u82keP3FoTbwnNrAFGLWywGuwLU/Gtulvmo5w8SHOMA0GCSqG
-# SIb3DQEBAQUABIIBgB94cjmMby4NgVSWbPAaG8zZJcYK4subKWxGr4RGIhXrjfkP
-# el37FKmahzw4FdKtNOPoXlGwJ4/liwpbqcSr1AxCvVsXadnsjCpyri5ioNCv7YfJ
-# bRLpew6hqhrr6ZipGrPsT28x2EJsNHgrUGd7Fd1evCUD+fWujb1Q0OMy2zAk5htb
-# 6cnIOLBtGbqSbsp7BNH5H/8bhUjcJG3OwiZbstvxoiDS+kuwW5DlKbj2N+e+7e00
-# yjLFRsjvak3ZCBkNju2LNjoqZrqfm1PS/KpJRq9vvb65xpQOf2L2yE2JxEuGSHUP
-# /ftRHVlrJc2d3U6LoEOslcAizZDLdkKsoxqI++KWjS+g/hW6O4ugQm6736+Wg9Ex
-# BtnBsHnFq2+TnmXLpgqif2b1OvMDhKx/r3kRTo46Axwc172W9y3YhbVZxtsz14yM
-# 3HJONs12fLuIVGWtZSKg8UWYm3F72gKLfRYtevwkJGWgf3jZArW+xQc66YdkyvgT
-# njgZy1jcTSjUbKFl3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID6vjMtvuhNHTOT5uhALoQGF/b8yUmQF+B3IIP1iIkVzMA0GCSqG
+# SIb3DQEBAQUABIIBgAmDzeJh+uIoa4RCT7ffbRcXiDBiJLYczi8y5W34Em3NoRfx
+# CQFa8lnP9dYOCAwgjBuOi51OGx4Vw44NuAyzp1A2PTtxkyim7OI0asqARdsPR1gt
+# uRm/YXVbJ/nF1btl4QIsBKgqoRPE1+dEOQmbv0a1MRE7YutDi1eQlbuYlHEUEKqx
+# xsbaLvj0AXqpk1KehScl0+wQ1Ie3/pdVBUj6b/vuWi+co2hlwMugO2ugfKkglIk1
+# 6Wr1c3njcTKPBrXI+Ui+tf45fssN3Uoi5LUybCtxJSATtUV8lTbqMFpFUv1dAeGH
+# 7XiIk6o7pS9MINGvNvQTklGTL2j6JgCA2hoCEPTq6u+WTeXWO03KQhMRfNuHekEA
+# dauXmXAswy7cihqv1d1W1VtDtZgxUxAMVnd4L9VL9DLwm4HjP2kd7Zox739Z1bjF
+# lu/nV3TTdZgo4p31ZmxTRXW0tD5cXHP9WiG0xiRdbqUCojOz5s1WvKfagScjdn/T
+# xX97wWCIrL9IVM77U6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMyMTM0
-# MjhaMC8GCSqGSIb3DQEJBDEiBCC5XGBG6oeTILYCD9avgn+C/pb/tgW+6UkEAZ5A
-# HksDejANBgkqhkiG9w0BAQEFAASCAgCY/HQbbQq6alUCZrDEZgAcMuGulXWi19hM
-# 1ymIs2N4DQ6dUFHpuuXOFIvyie+YKkgGw9DZTCJK/9UIPLVeJuX0t9RrbfntzvO9
-# sxvKpYkdrg8Wk0BMtDScn9umWVsjg8s4AKLHsAwKvz4MlRcsTbiEkSkT08QEngXW
-# GxCpVkDMWxMOPuT0umayMX983jROZzhdyhPX86HKeZLBj62ZlKxR65met3x0weSc
-# esjBTTnHBINJOYUSUg1IYDs/P/3rP0cONrRZn/ExOVR19wILotd5l6NICf9G43Mh
-# 8o14Zk9S+2Bj+agXnJdpMypsH5MS1z4aJo8tVy1ab862aVQ2oBG7u6ZSMlRweU8r
-# sAxAzCbG2uOvBTBtzd3WRKs5X5zYT08reVbsEoUqrg4sf3E4bqzIIhb3Dq7u9yP0
-# PTimG69/hbaXUqobWR/MJgSK0I8Bb7x4nfCsjEnDfngM8Za/FnGSShv/ot7nRt4h
-# xsoclnIFldgX0D1Y/5NKYHBRsguxjpAptJjuuh7zRjzp+mOa33/S83JeDMY1Inhe
-# phhJ65CUA9lg7XVX/MCGM9LlHiZOdhGLgue1vw/9sbs+4uJl4dN+uXIInW6qPG05
-# Mhe9YBY3QNJKMbU4a4W3e9cb/lzagGurCMCTim4r6zKBZ8jiV5STp7+57EVZKQeH
-# DxILl8/MyA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDhaMC8GCSqGSIb3DQEJBDEiBCB6CnrAxAVfDRiv0UWH71Fe/E2sFVy+74rGGaeL
+# OBfJnjANBgkqhkiG9w0BAQEFAASCAgBfA5HD6O2S4rRaOUCi9qJ4u+IploWTVRKr
+# jga88tUmmiYmCKFXvy9nXt/dle4NqctdHvDhI3F/2qnP0Ol7+Hiua5o3NgaoJVSz
+# OSK+puRnDlwKV6XMOler4D7AYHfmVonRw3Xw6873ykDo1WRU/F69/kMiS3exvy+V
+# dTaLOuAf7vTKqZHkqfvGRXluUHAY9IbAEUeUqAgjKdo86Aw/C7hiJawIuVcbyU9f
+# ubaJ7WC/dLjaT0aQ+2EkM4YGr7QCTxYPTPXrx8TXBVLk/JwvGz/v9bh/kqqtxp94
+# sITf5XJymbCQDsvWGM5qrq291wPsaGZjXg+HvomTNmzR0Td94lRt22ssdLjGEaNM
+# orScWqYVlXEuTNp7EytnWi4SEOR/5MGSLU3AFmFwfP2zmfrU3xcRTqI3eCxjnrrI
+# M6R3LmrhIG5UwMOLOvFGuZYZTXcCeYr1EmI5ev6Qf9XrWDEBMWstRc5/88Uo3ehK
+# PGf8aEZ/+3mMJE+5q6bCDyLu3tZEPU2S4G4QR7Ca+NJvuYuLRo3S+PawOtFRkOYo
+# H1MZfu78GkUQXWJMm7drXiEXaRg9T1wCwJ4Umu1qR7QG0PaUa6itI0HKZSOxln9S
+# 9QJXIBb/Zo21GZ+/af6zsiJsgF5+KITKpRTi37+WBX1Qf/Bxyit6oijLzyn6A+pj
+# /elgR52aXQ==
 # SIG # End signature block

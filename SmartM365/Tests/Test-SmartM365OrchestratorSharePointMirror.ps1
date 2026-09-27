@@ -10,6 +10,7 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
 
 function Assert-True {
     param(
@@ -161,6 +162,13 @@ try {
     & $mirrorModule { Invoke-OrchestratorSharePointMirror }
     Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq ($firstUploadCount + 1)) -Message 'Changed configuration was not uploaded exactly once.'
 
+    Copy-Item -LiteralPath $leasePath -Destination ($leasePath+'.txt')
+    $pairedSnapshot=& $mirrorModule {param($Root)Get-OrchestratorSharePointMirrorSnapshot -SharedDataFolderPath $Root} $sharedRoot
+    Assert-True -Condition (@($pairedSnapshot.Files | Where-Object RelativePath -like '*/Concurrency/SharedRuntime*').Count -eq 1) -Message 'Identical JSON pair mirrored twice.'
+    & $mirrorModule { Invoke-OrchestratorSharePointMirror }
+    Assert-True -Condition ((& $mirrorModule {$script:Deletes.Count}) -eq 0) -Message 'Renamed lease triggered remote deletion.'
+    Remove-Item -LiteralPath $leasePath -Force
+    $leasePath += '.txt'
     Remove-Item -LiteralPath $leasePath -Force
     & $mirrorModule { Invoke-OrchestratorSharePointMirror }
     Assert-True -Condition ((& $mirrorModule { $script:Deletes.Count }) -eq 1) -Message 'Expired concurrency lease was not removed from SharePoint.'
@@ -221,8 +229,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtBMqOMG5jXPNh
-# MedhZqzAbcVsmMuklchswwjE2mgVpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKY172+Kc+ccPm
+# xIfMCyEDjyiWDl0VozZjxGWbJ9D3k6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -355,31 +363,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEoY5R3z/ttiFnLLRE41mxtJdwcj/FZmx1chzTPmT94eMA0GCSqG
-# SIb3DQEBAQUABIIBgKEysfGh8uoXXLzC8kXbNiVhISQjXZwzSzwSO0xNC83AR7l/
-# DIHIMEc6mO/TqR/zhG6axkVgw8y+foR2EEmZ1Lw7Gdivc6WQVtBkkKIPn3QSvyKr
-# u75lhCTgFbRVxlAMZJ6H5RQgyqD+qgivJnZSxxbJg5IYc0zhjMEbnUJ2rltYqkFN
-# Aa1WBhxKceHoH2YQfQKJgW29YAQrrc0x+iQ6d7k8gvC9WgmE6eSV6HCiZI3W2udG
-# QGruVB8C7jvyP8Emi2Im1se5wOJQkz7y7/WjpTQZDXWLu/1uaRdSVUZ/1v/VSqSr
-# fRzXhQ3n3WI7hzqb6CbTdxbHFlDAd8gWG45zpkZrYRofScS76PTAV+kEbWe3frbg
-# sx77PS3NWmAsy4alzXwJkzCsaE1hWXM//TX7RG8MqojriQdVen53fp4JaGw6//8h
-# sOh1j/I6YkorXd6XMSoRbVC3PKVOmqb02Sj2SPTTyCkrEkK7HB15PkRx13wmIfVD
-# d9+bkBPxTDeKNY2Su6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILtQ+23W4inRv27CASFyGwo53VQo8m1i8hAijwTch+KMMA0GCSqG
+# SIb3DQEBAQUABIIBgC1L60bv5krdE3VYk7NpjcxZJHa75ifJ7pysnWBhtUNMOjsp
+# e3BnGgPkG1ChZsCRoOml0yYhoM4QmGuTSBXqC5pSQ3V/F8E+pSkrK1OUyll7XRJK
+# 3elgfA081UrqYaF7P/ZDrpUJFrVMr8Hi10OMFTlbz/axKjtPo2KmtxFPHElbHt+W
+# qT/gQXeyQtFai1aEujWgdgQLSH79Dh+qsTaXStb0mZin7n1BaFTCNUV3lNDojClG
+# HcFtA+PvaW6d/gNd1W6/frYhRy4t6xwezHMcS0ojNTc17mQ1RUCNOv0l5gJl8Hul
+# Y9WnKuUWVMjqAv6iFZBTGUFo0E/bo7TM0B9bhF1C/DnFZ1ngbXyXCU+EZQWOfgBQ
+# dZZuzyU+Wzr9PMF1fAUCE0MTBep1e1f2nodlR6K8Q2QYNQSOicxfjDZVzXKG0dpR
+# E560bdwkQxmCLEZ2G+z2nxJpT4hmcdQjakAZF7G0oA9iENmz+86pLJxcRkTpoyd3
+# kra0uzXnQ2F08T5HVaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNTEz
-# NDBaMC8GCSqGSIb3DQEJBDEiBCCUsBZs3WZUeL5clvM+OsseZK5OHY63kdR8WDUp
-# AN2a7TANBgkqhkiG9w0BAQEFAASCAgCWN+5YRniDWlg+uY0N24Pwtgr3SyI6SYdR
-# YxqRHX7PlVfk3GvJkhkSFIwiZHJr79JL0ArsfmUeDjZ66FO8Jr7INcX3FLxJfDh8
-# we3BECOGI2f2zCy5wGVI9WwfR+PP5PsNqXgyHGFgRbqVVOxoXTvliZumAdnnboP0
-# o6fSAyInO9A7m7ph6hoWctr4iiyXQcHduubL2JkGycTQ3q6AHPYyvDfYvD6HqJTm
-# YpLUEmdaSJOPrx3mafY/hRC+e4iQnJochsT+kAPEdC0ypIv8BxPp26qEiPUmmK/L
-# Dc1R3vwjqpNg0doOcbC+HOzwnnU2MIqk5h4XOvPWosbudG0KuKL7wmQbA4aLKuKi
-# xxtaHwl3iwA4KGDyaKCHuI8NehVdYU00/7qbcEVNy2KIUEciwxxnE/ZfEge8TMuc
-# Wl0ypMslbh9lKCReZ0dHHj7zC/ONEFwJpa77oTUzXxewtUVp7dSXDNOE8sqVNCSd
-# OVUG6+q1mvcQISOSappc7l9Cwr72JCc0UirI0Iw6SN1majZ+kZdmF/u/bhOziLCa
-# M4qPottWpqFNwN1k3vte2NzEo+xS+NczyM7Z39qfksKBalyXyUMH1Wt9gi65D1oj
-# +03sSnw+YJuHYJv1kl5HB2zww5PvNhMfCS6UAh9SrcW1js/lDBbHI7V0aiafWbms
-# b8lgF5HLlw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTlaMC8GCSqGSIb3DQEJBDEiBCB9iDmuaWboWANMpxvHoLc+0cp2w3vhVX84ZXx9
+# HmNbjjANBgkqhkiG9w0BAQEFAASCAgCDGc8MbOz5drlCekiyQ/fpPxovYrzbddK7
+# CMvySPtaRexrmJc99H8eKMoRnnXob2/2/s2rmvxg1lqWDsMyVfrQ2LDM93ZGLWbz
+# CUQdklQRw+j8CiekAIlKaXjzKxnhHZXwmCUPxW48uQDDQx0ewn7NRM5iN+WVbLWq
+# qNbNoPMCbbwjN8lK2gHvw+fL10nZDl2BC51EG8s6FWrQQio/HkIxjR30d6k2/ZDN
+# 7yPHBL4MXBFOIG57EQ4ewXGUe0jtm22ObVIXBuwMJLiV/dL6gwH9awQMX80InpqR
+# ux0ayQ4OegHqmtX8lvzPIUbPLm0HaJTPL7QSuCFv9NzXRYtv9zopy46nwTKsH7iP
+# TaGJp/TZ+L9mqvnyHHBUAzwCdNdX7jbgHyCV53Y15JLOL0REyyVn1KpcZSAyQ589
+# CnlNmmv9+a4uUm8/p6rDf1cLKOwpSQe9Z7Nft10ZFZ0IieXFNGUz/Z60nNsMpGEq
+# WFE4i8PGJFv43n5VROXVt+fmQLipeZPdDYOu9egfpGhGMAl8UUAdU7nAY+RqtpfO
+# SxWLpo54xrRzC0MJlUKc+oE2FbTtf3EfIzhNBBhicvptr7gsDqmZLj8g/GdADxgG
+# 32XDCHVyn85WlqmlXj+l/GxlijhngmRTiB1xkJIboA6LxC7HGMuQOJfmt6dj6xnf
+# 2L6dDSVcZg==
 # SIG # End signature block

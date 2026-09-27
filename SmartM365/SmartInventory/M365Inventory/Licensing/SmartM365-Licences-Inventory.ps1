@@ -1,13 +1,11 @@
-<#
+﻿<#
 .SYNOPSIS
   Export M365 license assignments with Users/Tenant/Groups plus compact user service-plan state codes and a service-plan catalog.
   WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.17
-
-
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -90,9 +88,9 @@ function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
 
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = '{0}.template' -f $configPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
         if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
             Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null
         }
@@ -106,7 +104,7 @@ function Get-ScriptLocalConfig {
                 throw $message
             }
 
-            Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+            Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
             Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
@@ -136,7 +134,7 @@ function Resolve-SmartM365ConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -201,7 +199,7 @@ function Get-ScriptLocalConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -248,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -979,6 +977,14 @@ function Remove-LegacyWeeklyServicePlanStateDuplicates {
       continue
     }
 
+    # Resolve and validate before deleting any duplicate CSV. A corrupt preferred
+    # manifest must not be replaced with freshly calculated historical metadata.
+    $manifestPath = Resolve-SmartM365OwnedJsonPath -Path (Join-Path $weekFolder.FullName 'manifest.json') -Owner 'M365 licenses inventory' -Validate {
+      param($document)
+      if ($document.HistoryLabel -ne 'M365 licenses inventory' -or $document.Week -ne $weekFolder.Name) { throw 'Licensing weekly manifest owner/week mismatch.' }
+    }
+    $previousManifestDocument = if (Test-Path -LiteralPath $manifestPath) { Read-SmartM365JsonDocument $manifestPath } else { $null }
+
     if ($global:EnableSharePointUpload) {
       $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyPath
       if (-not $removedFromSharePoint) {
@@ -990,15 +996,18 @@ function Remove-LegacyWeeklyServicePlanStateDuplicates {
     $removedCount++
     WriteLog -Message ("Legacy WeeklyHistory service-plan duplicate removed: {0}" -f $legacyPath) 'INFO'
 
-    $manifestPath = Join-Path -Path $weekFolder.FullName -ChildPath 'manifest.json'
-    $manifestContent = [pscustomobject][ordered]@{
+    $manifestObject = if ($previousManifestDocument) { $previousManifestDocument.Document } else { [pscustomobject][ordered]@{
       UpdatedAt       = (Get-Date).ToString('o')
       Week            = $weekFolder.Name
       HistoryLabel    = 'M365 licenses inventory'
       HistoryRootPath = $HistoryRootPath
       Files           = @(Get-ChildItem -LiteralPath $weekFolder.FullName -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
-    } | ConvertTo-Json -Depth 5
-    Write-SmartM365TextAtomically -Path $manifestPath -Content $manifestContent -Encoding UTF8
+    } }
+    $manifestObject | Add-Member -NotePropertyName Files -NotePropertyValue @(Get-ChildItem -LiteralPath $weekFolder.FullName -Filter '*.csv' -File -ErrorAction Stop | Sort-Object Name | ForEach-Object { $_.Name }) -Force
+    $manifestObject | Add-Member -NotePropertyName UpdatedAt -NotePropertyValue (Get-Date).ToString('o') -Force
+    $manifestContent = $manifestObject | ConvertTo-Json -Depth 7
+    $expectedHash = if ($previousManifestDocument) { $previousManifestDocument.SHA256 } else { 'ABSENT' }
+    $null = Write-SmartM365JsonBytesAtomically -Path $manifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($manifestContent)) -ExpectedSHA256 $expectedHash -Validate { param($document) if (-not $document.PSObject.Properties['Files']) { throw 'Licensing manifest Files missing.' } }
     if ($global:EnableSharePointUpload) {
       Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifestPath | Out-Null
     }
@@ -1081,7 +1090,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -1645,8 +1654,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCT0tPXPU0lzgZs
-# JeVYgQ6VF9HwYAkH/xS0N4fWMoMshaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPyGw65NU83aKU
+# QEGaVc+TMP9NivlXH9p0STvnFwWV36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1779,31 +1788,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID9OJ5vW1lASqLAQNetn3y/71Ne1OdI2b9dY0ojcl1MYMA0GCSqG
-# SIb3DQEBAQUABIIBgG6luNbEXEwdwbsEYsqvyBCvi+DJr48gYMBoB/6d2yD5ElnM
-# kzYOVFKcroGQHID+MPlBr/Sygmh40drTq+6VLNSZ1HicU1AoqKTHJ3dilrWg7Woh
-# aAzMJOMN8HUsE84vc5/zLcq+v8A5TRmmWb5Hizfjj7M5XxQhZ0y1ttvYeSzunWDg
-# DJQ/cC4sFli31nE/evJ5HeBNBnztTlTKz59rMglG7R1fAWUMuMUYzNuzGOlACWSs
-# bLn02pF7RfRqqFKXJEHyJZWJ7O0SmjmUS2ZOpNLm8EYDwCzCjUNY1BlHl0y0jN8e
-# 97rJsdhnkKT2ttAPehq5hrbHUS5D5lBUVLHl76IwiInUvXI9IS7+UbvpxbNCN0gm
-# LznFGbK50sVU5uvAgEruMEvg99Jl3u2ZZ3xxpprN7Fx2l7Ot9hipKsrfSbVa93fl
-# f5oJWxIdM0StRV+rtMXGqtFWpEwZZjYNcUrhNJVA+bSJcw1uw9LDuQe7MAn3pQDf
-# J6mLx1jaeRH2qZv/6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN+gKHa/Ku3S2D8cKkPKa3wMjucno6Ldf/VU2W0bmU0oMA0GCSqG
+# SIb3DQEBAQUABIIBgG1LXkmNd+usKl0GZKRtfoeEAtw7p0jWO24KOta9xgx6UJ2T
+# cHtmCuNNOl/EGCliOUY42M6l9npSZaziotQPASeYqcZ/T85HPRmAysc3esykL9Tf
+# SCWRSIYbUaG/dymR68q0uvSMVlpxn5LSogjmyEMKQR6RZVZ084vnFMJW30hAuzL1
+# 3O6/6XrI+WtRY+k5/8M7bPaUx1NTe8WTYSEHNalyGtR2mKbA7/5T3DZrGQ9Ge95d
+# 2sBUC9j1AGJj9D+58y6+pniGYbYv6vHAS9P/LiFcRdPI7PwtrMv/ZjdfU9bxLfmx
+# cRSx1LufDA6mk4pK42cdbiqVBabC3JbBtaqvBKvhJzmg0g6ni50CQYmn1IE8Y3vJ
+# YBMDKDgjs6SGUl/U3mLQswGjeWuJpW1DlM2WoTw/RpfKpf+nQuECdjXhwuN9oB7F
+# 3pBTcw2Wzc5AB00taMEjUYPXGX9KkmmMEtmLiwatGdZdMXq5qoOaw7CJx24e5Fe+
+# 8Nbyu1g4Wq3dQY3EDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBNdm88JseYhpsJ3pCoCi6BbIVNMqnDSiVnt4Ew
-# D1L1CDANBgkqhkiG9w0BAQEFAASCAgBo7T6dHPAc3iFiuW6hyKrJjsH69Fzy3BKk
-# Uq22mE+nEN1eRVssZqiZpJ9G8rkKziztfgAkUWSgyJ5eOjqDG4BaTTjkm1au3Wo6
-# 7qD42pJ6K/ZDcMJdCF5b2baw3sYhyHH+hWg6lQG3yymUfidWMEmEdpnovjkSv7Sw
-# A420h5Pn54mZbC4M9uLpaiPMKJQ0gq71ZbdsM222mA0TWUfz+cGgEsa5W8jY87cu
-# g9tfwVspYEWINjViRiUkdJyFaoQ6En8t6ZyTVF6oe0Op5R4uk9v+90wOHiiR39e6
-# ACBGRrzAPNmwCM/yGXaQfi2ZtQjJ7ZgygMCXmQytRG+k27a9Sy/51uBUpLJfWX8e
-# PfHQE0wCYBRi5Le9EloaVse3r2WV0xdxDVfh51lFjVBxxvMqqcny7pPeHNGNDaYO
-# RrCH/k1SpzvNeC0FGjYf9LXoOD5I8I+qHcQfc0/SndzFh4q7YfdT5e041SpBX1Vv
-# X2/K4M3NsPvadsjbPJ7/Ag26VOLic09Ezq9s7bSi41WqypMypC9+jadbWUPGXfCv
-# ioetIXkJJVgSRNwtRDOyx5KQQ5CJngbwPHEpCpzYxyyjzNaA+8/XlaU7097TstTt
-# iaDCnhZRPwUJv2tGcNVgE4qVm2yWAoQhw6Ou1p5xaOZIikbwolF/muOmmbsGT1Rb
-# DkEtjgUOSQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDlaMC8GCSqGSIb3DQEJBDEiBCAy2var+2LDyTuAXkbB6ZQr2GtaJvt90yrVHuPX
+# QbKZBTANBgkqhkiG9w0BAQEFAASCAgArkCo/6pCWKXocgWMuzQuBrPP8WfckzRFv
+# HJDZKdNpZ85txsxzkz8WPq7WOP6pTPnmeIIsLcAyX6kYyxpXad22RE0IKxlvF2sg
+# 3Q364e9dw9Wl3OGdcf2HtxynSmN0rDzCFBWm5iux5FORbmVF4OXwtwhIzy2WSayn
+# UOVMNXwJVrQOEMPpW0gFOjWdQwRp7NvzM0osdbKEZSIn+kHHTuNehsRqB+SK2kBB
+# tVqACnplkNqTf50BgqXtyT4Rg4n3ZZYeLXJgp0u2lKOVBAEGTSxpT/RPxIBd6MXa
+# NGUUW5jzsRqRiw/fLwS5WzRnSdIMgivR1OxTfdBUX4Tcjnf/nYQ8tg63quXOob/k
+# BMPlqG/bsD4aNV6e+XwsBRemHYOx0Hh3KHlZDAW3meJx/UQDLfmnsAHqEbLSCOXF
+# gkUQtSQc1fiH3AlfQJjnIgWIasz5c+TPo4L+OBWyRUfC/PV4oLMbWN/MYqilbYEx
+# 7MkccMX841B9oTk6LJI5hYeCKBsKbj06cPlKchu2tA3K8yJpoa6XVqfM2NrZ6jR/
+# xccGV1P/lixwzdhKxm60DwTUEwiZPx7Gr7NBnNDX/MzBFnZo+QAuL+zz7eQ1d+qA
+# U7zHkKl+cdLJMGxaibGZDuRz+wp4F8zF7vL90lqqX0jEol2eeL1TrLq5p3kAFflF
+# 7HxquKrlqQ==
 # SIG # End signature block

@@ -17,7 +17,7 @@ columns remain empty after a v1 fallback.
 This collector never requests or exports prompt text.
 
 .VERSION
-1.0.1
+1.0.2
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -54,7 +54,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 $TaskName = "SmartM365-CopilotUsage-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $rawReportPath = $null
@@ -83,8 +83,8 @@ $tenantContextPath = & {
 . $tenantContextPath
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
-$localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-CopilotUsage-Inventory.local.json'
-$localConfigTemplatePath = "$localConfigPath.template"
+$localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-CopilotUsage-Inventory.local.json'; $localConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $localConfigPath
+$localConfigTemplatePath = (Get-SmartM365JsonTemplateName -Path $localConfigPath)
 Initialize-SmartM365LocalJsonFromTemplate `
     -Path $localConfigPath `
     -TemplatePath $localConfigTemplatePath `
@@ -443,7 +443,7 @@ $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseN
 $rawReportPath = Join-Path -Path $runOutputRoot -ChildPath ("M365_Copilot_UserUsage_Source_{0}.csv" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.57' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -625,8 +625,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC40FyCBPNH8pBn
-# eeEpqORgxvlj0TMTvy3arO9MYIYaw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnisTRuY4txtMq
+# Ei0uRtfFYgZ4VrXkaD24hzWvf8g/0KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -759,31 +759,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGm7hZW0fxHODdFbYW12A2Rpr12S3WW0zPgsllQ3p2tmMA0GCSqG
-# SIb3DQEBAQUABIIBgDu+Zmrx+rc/szZdgOhTJlNqCwjZHiRyl0uIpSC7x+cKPJw9
-# I4B+5qU/DYHBpUIYQtM90QpW3hvNMJjTHTecgJGnmxTqowJvLU/qnoj4n2X2GAnn
-# YSenb/JmmUrmge0AUqpe4Yvt6BKOLM7pnjGr3mwV5FN7/EBfrmwkWxOwOtn+3qKB
-# N8yP5m3UUE4CQlSvI6Id0t+/jDc8Ho7crwQz/sYclqEO/elGI2KQPqyerq0rdSbI
-# vYOJ5up2gaEgpipm4Jx1ZJdyikKeLU1tEF3T7vNbY4QXgLr9QWxoAYKn5rhZHDSs
-# uZ8+RORet85poRYP/vajIOTWD7l0rWyJmblrDDkMwG7HlS5qOfKgKaG367wN72rS
-# 9yqh4V+eGJnZEfxwBBvckTcV8xlKAeGyZNxE5bnIaphE4KuE1YhF0IPF0J+pMUXw
-# 02+rb+Rb28diX5LRhJNOyUlvqYByAfsUHHRufCX40SRqncdCg80MXZ8x5uel6JRE
-# B3w41KKU34f/6eXStKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPSHd3KHS3pZzcOIFaeVBgOz0XKhvBl7cN3g3HbaAhcbMA0GCSqG
+# SIb3DQEBAQUABIIBgKRx/Fo2iKSgIm1xe7i+Mz8/8DN6oMYrlMptHQQTdJVIa/fn
+# 5OBvG4FuBLbmTOAsSF5XjHHZY2LgUNIODN4ox3a4umUP6MKXrebXjlk+/LKNUFD7
+# 2+mc08nPSGd5ldGMLirnfQqLmg0LG8vvltPajpRYM/y7FyFadjbejLIzyaJ/p7yD
+# xO4Oh+P/Pk1rNiukBp+8HFydN7htWysg4rxdXscwl3LnT3tg13Gj+Cek948ZW3mH
+# feUjOLiINKkf4TqKNgyl7wQzUzLZb+gI2L6ry3SC0gmJNTWEYqP/6A+LZOwqfcnp
+# iF/Qpg3AZIeOjtddqO+4cFYLMe+R7j+152TuFkYjSXvPvMzpSQhHtVtmVr1Yd4/f
+# I78PYIkqnjn64xB1Z73HcaZRBtWUDRCjF9cby57XioxVCLR73K+Df43ESceh/9Uj
+# RUp5r88HzkeK4Br+BwGmfaMSIl45wZZWgwhqqsegFNf7AELbt3Sdrv+C6NU/+ZAk
+# iPJA09V/rkcJoMn0+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
-# MTlaMC8GCSqGSIb3DQEJBDEiBCAkPuoI8Z1qJgIFpUMuX4Wh8esihSCCoysRK8+K
-# 1+tA/TANBgkqhkiG9w0BAQEFAASCAgB+9naqVREXCwEma5LO2xpKVFvrYGlXhPvj
-# RbiSqnW/OjH9wxYIA0vKr5I0UUmqbAncMSj6QnxPX1qX+63yG4uCNoqThlAIsWFB
-# ve6f0p5aGQb/vPIY1UIiaMcQfKiTQkjhWejJ67pb1NlSPX1wR644uvCwVOZb9c8X
-# exTBQOavZjQIvNnIFhbFFK80nHXjccnDcnXst4tN8gfzb9YlXDwk64SQSJY58ehh
-# v7/vwzKXflfv3XUr1zdKY9r0A4qUd+Dx/4XokuYCUC8uuquwol+d3wzhY1mqWgoW
-# jYw9InHUqAB/ArmsTJUZL94CzJF6xO4WN35C1LNfQdO7rTbN2wKJpu86GX6jR2sv
-# ELs7BkQza90W5FT6jXkckMIdAt5oHrgORqKJNvy0hsnBgnYyRnH7Ard5/v9/sLD9
-# QL8wNkdeNdb3JIlE2JcREMpzMVXDdW5WTZ8u2MdqXj8b7TMRZcNr4jnpCpmKFgEe
-# BC17Or3V+PT7dUm7wMoOknsch6T3mTg6IWoQK+xZWe35HAVCOwIvUr8I/O1XISzK
-# spxxwfjs/eUXQZfIQZAGBUyvLh04rRwFTUcS9UfWLV5ispI48zHazMd/08kfMJC4
-# 6ChdvkjwGekeXcfUnYn9/DM9HYuiH3AoQxnHLxhHFe66hdsx89AbVsXx6DLhl9KG
-# 9E8MLmaizw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTFaMC8GCSqGSIb3DQEJBDEiBCBN3vvudbxUgFADHr2+NzfzHRWVEnCfpvMILU6k
+# yYbjgTANBgkqhkiG9w0BAQEFAASCAgABGqa5Ysnj6cZgV5mUbRSlzuKAadhgl/GL
+# jzKhOG9vi7YqorJCWTWhSuAM7m3tWbNH6Fb2vJ0BQDwtBfuz43eUR4d1+mhuWYmd
+# QPoxbeipEfVT5uESwWlwetz4JWXpN2Yc2LP2P4X7YAKRULN4qGlcYKjhbt1QezES
+# 7IwSBW+xU1KSvdD/CYKYYqJQoTJbEtXnM0fwXHYtxPkyOm9IyVr2tqQ5zOnLCASt
+# S4itvScV6AHgNoAj9/Z1jCi6ZsuLC7qaKTPoWWn9V50LWhh88pomG8EW7Y3TCqjb
+# LDQOwCmqXhVZITjM0kYA0gTaIp1TzOQcpZ501OjKWg0cwJuXREYIZdZFbKPN1ALm
+# 9ek5rk2ImITartEvHiWCCchFVddHFI/sMFzEGvqNQGw57U8uR7xSl8Mzu1QyGIT5
+# 8sV/ibU/BoFxZrkno3lHRTuQDkG1yK/3RZ+NROwrB2VjVsdDSvQwkttvvFPcdJbl
+# /cm99yC0sX3HKsHrQ43/EmK7T1YTFs14uoWhf1nDpyuGZ7bSWiRex8gYqEH9s3hs
+# g5aspCs7KZAawbEs2dGEDMtuH6FY2YzbaiH0zf9Q5XF9cyh4yyWuYkegB0NdQmGs
+# 50/KAb5ax9NAyDXHqDw17jDOSj4fn1EyJPfbAH7hf5ibweP8PMhpCsYqURor61GP
+# rY4MA2we2w==
 # SIG # End signature block

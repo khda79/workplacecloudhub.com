@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Intune-DiscoveredApps-Inventory
     Retrieves discovered Windows applications from Intune via Microsoft Graph API.
@@ -31,9 +31,7 @@
     Version : 1.25
 
 .VERSION
-1.26
-
-
+1.27
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -135,9 +133,9 @@ function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
 
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = '{0}.template' -f $configPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
         if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
             Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null
         }
@@ -151,7 +149,7 @@ function Get-ScriptLocalConfig {
                 throw $message
             }
 
-            Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+            Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
             Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
@@ -181,7 +179,7 @@ function Resolve-SmartM365ConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -246,7 +244,7 @@ function Get-ScriptLocalConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -292,7 +290,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +299,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -840,6 +838,12 @@ function Read-DiscoveredAppsDeviceDetailCacheManifest {
     param([Parameter(Mandatory = $true)][string]$CachePath)
 
     $manifestPath = Get-DiscoveredAppsDeviceDetailCacheManifestPath -CsvPath $CachePath
+    $selectedManifest = Get-SmartM365JsonReadPath -Path $manifestPath -Optional
+    if ($selectedManifest) {
+        # Parse and resolve conflicting names before cache business-validation catches.
+        $manifestDocument = Read-SmartM365JsonDocument -Path $manifestPath
+        $manifestPath = $manifestDocument.Path
+    }
     $result = [ordered]@{
         Used   = $false
         Path   = $manifestPath
@@ -854,7 +858,7 @@ function Read-DiscoveredAppsDeviceDetailCacheManifest {
 
     try {
         $cacheItem = Get-Item -LiteralPath $CachePath -ErrorAction Stop
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $manifest = $manifestDocument.Document
         if ([int]$manifest.CacheManifestVersion -notin @(1, 2, 3)) {
             $result.Reason = "unsupported manifest version: $($manifest.CacheManifestVersion)"
             return [pscustomobject]$result
@@ -924,7 +928,11 @@ function Write-DiscoveredAppsDeviceDetailCacheManifest {
         Stats                   = $stats
     }
 
-    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    $receipt = Publish-SmartM365RegeneratedJsonBytes -Path $manifestPath -Owner 'DiscoveredApps cache' -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 6))) -Validate {
+        param($document)
+        if ([int]$document.CacheManifestVersion -notin @(1,2,3)) { throw 'Unsupported DiscoveredApps cache manifest version.' }
+    }
+    $manifestPath = $receipt.Path
     WriteLog -Message ("DeviceDetail cache manifest written: {0}; Apps={1}; Rows={2}" -f $manifestPath, $manifest.AppCount, $manifest.TotalRows) 'INFO'
     return $manifestPath
 }
@@ -1148,13 +1156,45 @@ function Get-DiscoveredAppsResumeState {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
 
+    $Path = Resolve-DiscoveredAppsResumePath -Path $Path
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    try {
-        return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
-    } catch {
-        WriteLog -Message "Ignoring unreadable resume state '$Path': $_" "WARNING"
-        return $null
+    return (Read-SmartM365JsonDocument -Path $Path).Document
+}
+
+function Resolve-DiscoveredAppsResumePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $ownerRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    $validate = {
+        param($document)
+        if ([string]$document.Script -notmatch '^SmartM365-Intune-DiscoveredApps-Inventory v') { throw 'Resume checkpoint belongs to another script.' }
+        foreach ($property in @('PartialPath','TimestampedPath')) {
+            if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$document.$property)) -ne $ownerRoot) { throw 'Resume checkpoint references another output root.' }
+        }
+        foreach ($property in @('ProcessedAppIds','ProcessedCount','PartialLength','TargetAppIdsHash','ResumeContractVersion')) {
+            if (-not $document.PSObject.Properties[$property]) { throw "Resume checkpoint field missing: $property" }
+        }
+    }.GetNewClosure()
+    Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'DiscoveredApps checkpoint' -Validate $validate
+}
+
+function Save-DiscoveredAppsPreviousCheckpoint {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $resolved = Resolve-DiscoveredAppsResumePath -Path $Path
+    $document = Read-SmartM365JsonDocument $resolved
+    $folder = Join-Path ([IO.Path]::GetDirectoryName($resolved)) 'ResumeHistory'
+    $null = New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop
+    $archive = Join-Path $folder ($document.SHA256 + '.json.txt')
+    if (Test-Path -LiteralPath $archive) {
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $document.SHA256) { throw 'Conflicting saved checkpoint; existing state preserved.' }
+    } else {
+        $bytes = [IO.File]::ReadAllBytes($resolved)
+        $receipt = Write-SmartM365JsonBytesAtomically -Path $archive -Bytes $bytes -ExpectedSHA256 'ABSENT' -Validate { param($state) if (-not $state.PSObject.Properties['ProcessedAppIds']) { throw 'Saved checkpoint lacks processed IDs.' } }
+        if ($receipt.SHA256 -ne $document.SHA256) { throw 'Checkpoint changed while preserving prior state.' }
     }
+    WriteLog -Message "Previous checkpoint preserved: $archive. Its partial CSV remains in place." 'INFO'
+    return $archive
 }
 
 function Test-DiscoveredAppsResumeStateCompatible {
@@ -1266,7 +1306,10 @@ function Save-DiscoveredAppsResumeState {
     if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
-    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+    $Path = Resolve-DiscoveredAppsResumePath -Path $Path
+    $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($state | ConvertTo-Json -Depth 5))) -Validate {
+        param($document) if (-not $document.PSObject.Properties['ProcessedAppIds']) { throw 'Resume checkpoint lacks processed IDs.' }
+    }
 }
 
 function Update-DiscoveredAppsSummaryDeviceCounts {
@@ -1588,6 +1631,7 @@ try {
         $detailTargetAppIdsHash = Get-DiscoveredAppsTargetAppIdsHash -AppIds @($detailApps | ForEach-Object { [string]$_.id })
         $detailTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:DeviceDetailResumePath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.resume.json"
+        if (-not $DryRun) { $script:DeviceDetailResumePath = Resolve-DiscoveredAppsResumePath -Path $script:DeviceDetailResumePath }
         $processedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $cachedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $streamingEnabled = -not $DryRun
@@ -1618,13 +1662,13 @@ try {
             WriteLog -Message "Resuming DeviceDetail export from $($processedAppIds.Count) processed app ids; partial CSV: $script:DeviceDetailPartialPath" "INFO"
         } else {
             if ($resumeState) {
-                WriteLog -Message "Existing DeviceDetail resume state is incompatible with the current contract or target app set; starting a new DeviceDetail export." "WARNING"
-                if ($resumeState.PartialPath) { Remove-Item -LiteralPath ([string]$resumeState.PartialPath) -Force -ErrorAction SilentlyContinue }
+                $null = Save-DiscoveredAppsPreviousCheckpoint -Path $script:DeviceDetailResumePath
+                WriteLog -Message 'Previous DeviceDetail checkpoint and partial CSV preserved. Preparing a new export for the current app set.' 'WARNING'
             }
             $script:DeviceDetailPartialPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.partial.csv"
             $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
-            Remove-Item -LiteralPath $script:DeviceDetailPartialPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $script:DeviceDetailPartialPath) { throw 'New partial CSV path already exists; preserving it instead of overwriting.' }
+            # The old checkpoint remains until the first atomic new checkpoint publication.
             if ($streamingEnabled) {
                 Write-DiscoveredAppsCsvRows -Path $script:DeviceDetailPartialPath -Rows @()
             }
@@ -2025,8 +2069,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkwf0ww0bkCZIo
-# xxVaZUH7Hyiz41OBuuylWPYCtkTjWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0UvaEsvAZ/8SO
+# pjMwiGFkFdLf06we7umE8m+w+2vjMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2159,31 +2203,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOmscysGQv0H2rdE5GDOrQEO0u+JbFPvIdYm7U+xpy2bMA0GCSqG
-# SIb3DQEBAQUABIIBgCH9gq1UvbzLRxEUJTrn6ZdKr71UZxe9fH8X6YRoqNtz0Jl9
-# +6TZIxd9DnDvuLflC1DrILBiqJotuLjEbNLmY2aE6c26IiwGWe0OidzQUh15hmA/
-# e2cUZUv9kp3QCStoojcpRy+0fbuelMbkQUIekVuIyYB8LNdOKoZNpb7ehkJjkf19
-# 7mRx8PGxK9+2rqHi+SjA3oghCCzCyA/FIanvQI6/cMZFJI0g/MCHRIE43YUQABL9
-# KpL8Omzd0QP8QJoGWtX62UZS8nX54+haL2589MeDJ26EbGkgye4GJaxRXDiyllF1
-# DK+con6c5ib9qgt09s090yr+VNUhGChCr55MKPdk0qGEy2WYcaDkgp45QlJnB6KJ
-# eqPGcDoYmRKys7FGjw9dS/7P6fvS1iaJUGCv9iWYKA6JQtjwcwVsxKpAHIlCzhYn
-# yMPGxSu3KmcFVPkVuqwUkQeFQctheQ3jIgki2cOyHuQ2n+yLZyz7o4M1sVpMTAKe
-# EI9CTMa6sEkAIQ6/i6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOnIPcdL9gQVqtjehh38g9FKFDluy4XZ2WfyiVfdg4GkMA0GCSqG
+# SIb3DQEBAQUABIIBgE6qkDszzbXojZohMxA/LWKZKblBVyzNqdOMq67BzjJUEPKP
+# l9pRRwZBYOQcI79N6yJz87KwAkwZeUhUbnEud+R7ndGEMBVfKTOzY+3zaWAPsRVi
+# 4JEfK1QBE3P9vW9fS24+g4HdKh2GWGoNjl6oIJqamoMdZIWa1ySFOX3BcedAz7jZ
+# B/BWDaqA5IGgsXxqXNtE1ceBRb1zr86+YAbllyBavixWmffwgw2FkDa+6E2LXAJ0
+# xChoadWz9DlBxzPefURwFsYbO/MV3b5NMqU5nv7zyk/t/dX3clSxnrybuaIrJoua
+# JN3fwnP1mgv2rByxDMC1ZhSHUZwKNGvkvdHgL6Lzpbpkn1auH/q1oO90EAzFnSIb
+# XPZfxMo3Ls9oNoWU3aHRS6GWfzCs7Y7/jrlbVMhWctInvj/RFyJowYIcDj3jLlZJ
+# r6ozpK5PcbCYBePFhg0id1J2Ql98RtcW298V8abwUERWcvmylUS86UmdV5NXc8oL
+# JBwLgMzoXz6A0cAp46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
-# NTdaMC8GCSqGSIb3DQEJBDEiBCB+1WjMoAGBQ4PlNoRg0Zdhy4+xwAYpmQ+iCx2J
-# Vw61WzANBgkqhkiG9w0BAQEFAASCAgA7Chr4kcwAN/j1yWdMOJTal1R6GHS0OXZo
-# HsjQ4PKphl7GFBw2m3tUyQOKEh4TIEdBCGerIc6VklehwUsW38OuVwu66x2pvQgU
-# XDQJWHCSsLTvr/PmG/It6SHiNttvWEzSR3AchIXACLyEC5b4qTt9bTs2ctcX+TOR
-# 2RW+JkkGvFom2Xk1G/gSzzDK/iUwzDOJ16R4HSAkps9/kdUFY6om5/jqro4UJThk
-# MbKaFN/2YQsnWkpxbOIZ3Nw2fR1vZhO4b57XvkJouYfHtkN7d5Kg05fYrE+S8xLd
-# AJKA//R9OGgt3eSIF1hy8RItEjhsz1kW8zlwyveF8YJ31VfD4jyc5vI1tavUy9QQ
-# 0MVnTRkrrgb9UHHiMXTP3szXn9m+owuhHYx1JVxA93bYJkcaOLggxURyljwmcEle
-# Ut64pap8jz0BPMQ4AtULlGHTlXt8QAVyYwNlyl0XM8wOBiWQuTT0SMOWLv9hHnCL
-# 2LJ63XcnS/3JRZVMvNaE3GMaav74KbP8qsA2Ca+9hX5Xv+1RS1Hi+Bp3ekezLE4P
-# 0eyhBMvgDs7UjvE5tr/O5oYL2etGHmSsWY8ohzX55oZh19nHGQGQ6dZk6+v+/X4c
-# KilHLjrUfUKRBOn1bRFafXQ9IK6+LgLiQJ6f67OZNO3UivvQmCDNzLv4KEPH+E6+
-# SU2iQFZ2fQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDVaMC8GCSqGSIb3DQEJBDEiBCAz3DnOBia2VskFRPkLaDWg+Z8k3q4vIhdNYHWK
+# hB9xhjANBgkqhkiG9w0BAQEFAASCAgAWbFyZsR0EiY5YPJwTB/EzTqOaxrvIxkCI
+# 6PJ3XdtRkD1OuyXQZaYIwtbuRINQe/VQ/0HN5I5S88S6BK9xbHD7Re64oX36pze1
+# CmriLpTgfc1xqh6n1DL+WHvzL1fUIrtqGgiMiErBK49QXNNl0yQ8o3V1tQ8vF1BC
+# 7Ok1ZADMgp4ugd4/f5f2gG6YKQAD/5Yvk7bDrqWfu6ZiI5Q4VwCKoEz4j5xgG34A
+# yv4jL0K5MCNymwp7Qi+WTqnloRvQVXV3fu3bR8HKLVF4TJbl12F82ktanAJ/RT7Y
+# NueKoZejh/Aow2rudInOR8oB+qpvtQ6+uWLbCE+hCqC5g0NNHdhFAiBmkROfQX5K
+# /OxDgwNmQl0xXausVd7PpeEa2CyigNDZ5mQTbxkJvfO4wJQGNsNgQpd3/yI+uXE6
+# vZcr6HDXlZwoh4sn4EeOG+bcN5dHn7NSYvLjoIu3J1iEzk1eO2XedE3m2XdII5q3
+# tewuH31HnSjOBuOZ1OzftWf7OjbA6UgR7CyMrZW86jvISvUFgctvody77Uh8unSI
+# Rc5z3PrZ+FuX2fNL0BtRew5kAjLCuYsxLKzE9t+LaofOxzicLG10A4D134GkZI/5
+# 4YQQIvEgNL86nbrHoFTzUgHmFresf/awwDbjSxVYypSwB4tEYJ8N5zkT6+mM3QCB
+# iny06ly1QQ==
 # SIG # End signature block

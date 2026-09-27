@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -53,8 +54,8 @@ function Get-SmartM365EvidenceConfig {
     )
     $base = [System.IO.Path]::GetFileNameWithoutExtension($ScriptPath)
     $folder = Split-Path -Path $ScriptPath -Parent
-    $localPath = Join-Path $folder "$base.local.json"
-    $templatePath = "$localPath.template"
+    $localPath = Join-Path $folder "$base.local.json"; $localPath = Resolve-SmartM365JsonConfigurationPath -Path $localPath
+    $templatePath = (Get-SmartM365JsonTemplateName -Path $localPath)
     $sourcePath = if (Test-Path -LiteralPath $localPath -PathType Leaf) { $localPath } else { $templatePath }
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Collector configuration template not found: $templatePath" }
     $local = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json -ErrorAction Stop
@@ -81,7 +82,7 @@ function Initialize-SmartM365EvidenceRuntime {
     $config = Get-SmartM365EvidenceConfig -ScriptPath $ScriptPath -EffectiveConfig $EffectiveConfig
     $root = [string](Get-SmartM365EvidenceProperty $EffectiveConfig @('SmartM365RootPath'))
     $coreManifest = Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.24' -Force -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.58' -Force -ErrorAction Stop
     $dataAllRoot = [string](Get-SmartM365EvidenceProperty $config @('DataAllRootPath'))
     $resolvedOutput = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } elseif (-not [string]::IsNullOrWhiteSpace([string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')))) { [string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')) } else { Join-Path $dataAllRoot $DefaultOutputRelativePath }
     $resolvedLatest = if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $LatestCsvFolderPath } else { [string](Get-SmartM365EvidenceProperty $config @('LatestCsvFolderPath')) }
@@ -229,8 +230,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7jihaApNYnnxm
-# DM6eM3I0n1Pq+gP9a6u/N23F1IvYR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3TRyn1V1cDCyb
+# yh7c87q5hi71yqztgGwyKj2nvMJ3HKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -363,31 +364,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJKY82PexzyDu044dNIyabWE3L1uOYXCXNJkKlG4TD7/MA0GCSqG
-# SIb3DQEBAQUABIIBgE1tUamErTj1dsN1XAEUvUuGCtTrTWd2KL95lY6khABdjADl
-# 6KrGywyXpowgfd3fkCxgnyv6+WwDJZJsCqFzo6UiRR4v18QU+VSzhATviXbkVEsU
-# MmNLoXeLvftKeliO+SaeUco+IkLt0XAG56aFEAudm1nOV2uL0iY5GvOVLRuU0UVK
-# fPu8QMiWlRVzUzt35l7renxErUZyDs9kYUbz4AyJWpZUUGyfqGOQALOqRzkJdwVn
-# TuZstyBLuTF/ksQAf0YFPOPR4FG4PEm7/HYezUZrjQ7fEVzXNB6cbgLghM619zeO
-# 7K2eKNjQ7MI/tQ3zS5AToagnfeluxpUIpQrnF8gV7b/SCG0IMiQw2vp3BxmesbTP
-# Bj5QU1dUbHxx00LeI7VeTnQ3yBS3C1qGYxzpTa3AOuwCFS2PyL2DhSyMmglfKx5Q
-# p3C4CAAt76ZNQ3Tnji5tFtm3sXGUtt5s6Y2z0L7nXoZdAI81LizHjjRpXejAd4Wy
-# Ar1joYxOFa0PUdQdnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHFBn8EElQw7SZQAlm9GMDum6jy1h6kxwFgW31rBLNQ4MA0GCSqG
+# SIb3DQEBAQUABIIBgCKnoDZJq67RxTyrmQUEZlTev7rBjSt8biNG0GURk5BynXyz
+# m6bk5I4DS6KMccmLS0PPJZWbQplYAtMyVBAjpUAvOuWGklzh8evGo3rvM80/rag9
+# XY2Rez7s1OjnMDvCekKx+lndHNLl7VZurgym4VY91d1b2C4mzlFD7E/QeYzI6yd4
+# d12G9GB0KPRvs+U+StRGogKAUlUDBkhBqEmuSRd+2F0QH6jGrkcnSt1ZTLa69fJ2
+# YpR4PUo9QtHymxTVUB2KP4OH7tQlCfh1IweEVs2AB1LeVTp3/qtD4Pj3KSyj+3oO
+# WECLqUS+E5OYCA39rYtcJhMOnYfYwtubo9a4SnDmbWrnhSR8QGCvnjlfSJwyaE4A
+# 6UNQ/rd59OcWZ8TzhxqgZhfEbOlpL2yZwMwbSRvx36ddZ9evWGRnqGo1vhfesCV3
+# w9Ibatx4YgLJ3yA5te+zT+0CKY643P2YiJ+F0t9JfvsUI7ZLE2fM3cClnddpaQfr
+# yOANdPeFedEPwSTQeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjAx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCCwUTqoLOwIm4voNteMTlJIIg/GBd/R7VZsGVlR
-# cfqnUjANBgkqhkiG9w0BAQEFAASCAgAP4eJt10ehq4HRkEkc7blDDvCdLM/ArGCP
-# Phl13cG0mqOTrt5Tfly8KjnTjbuqQU3gxV/WRFLnMzTjpKBUH+gz5wM+3carFV9o
-# Sl6o9Zqgs8EZtjlW3KGncp1ZpkhfdChx7PgEPNfl+DUsEnfczjubrg6yO8BvUUJO
-# X7nOt6/wrmT3JJeXENWMK/pBWPLrSl6ZN+ATHdgOI3ranhpdT/1J7PI874Jo9CEl
-# GJp68J2Uz1q99KuQPIw+6mjzZGAhe5h8Ggrs1f2T+9/lFiDNwunpVxMGl4fX+GuL
-# qLwFbAaHGipxl8vNHDw2zRnXlUMYWANEIvDJuq/wNQO7QgaL6tHUMq8OIeGik0rr
-# r2MVdtX42EIo31P8sdbHAyeyNNwv9fhz+r+AJ8vCREMEe0gHblTRhdw92nPiixbw
-# K4JcwZTYaB5rCv9wjgNEYMj1+HkfJc0TbLp0Ca4GUkZyDhZiidQDGtHvQhyaP5F8
-# NihKV1/yBpqWr8QjtFBIPzfJAaIzSf7JzKes+VNp3uv1HAM4dYxp2ke149wokqII
-# i1ytX8CXgqMzQh0lGYWZ9tAdCRCRQQatFsFtT1BMw654xamAY8WOlY57n3t7unaa
-# zRE7BLIjYHoAA3n95BSrPEgtVhFmnnWVMawiIqW0syTL0tD5KaQg551FIZbfT1NY
-# t8AUTh72ag==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDBaMC8GCSqGSIb3DQEJBDEiBCBmoFNXgmHqKGZqXhcdXDTkRj6bGq9XKvKUnFzQ
+# L+ZAVTANBgkqhkiG9w0BAQEFAASCAgCX6DxNuHIsSskqIIfqIQ5s3DZS5zi7ndnM
+# qXBBXOB3fnpRgmyaj89V7fTdTr4syGoDNUF1EW+BqFVpHVvuWnLEWWg6ISIN647x
+# slnmbeoUvvB0E/WpARSnaxKP8OYCQnl3xQUu21D0lwhMRDAsaTrebikNzLDpuJhx
+# qj2xoSgOHnaodLOB/0WOtgGn3oEKHgyigTH+Rv84ZUh2ajd5qr2Sr6yTj2UvXKoY
+# IYKtKy9yzg+mxoV82w7W4L9BxWzIQ3ArcDNQ14WStpFuRwrHzJU7JyCrMiA5DSdA
+# A3bYaBcnBx5WhMJkIloVYX/apYgzCrzEowUGk1zbhfHMkZYC/iLfPAjh3whcP62H
+# mNk3cti8tT9MsKjrcNcb4mpNs6XHx+YxRREnY3vukaN2DXi+kx42mQCGaII+zA9J
+# +fXYdIIVE8kEtvJMHzUiC9aazZHwqI8k9p9O/9xTjODiSR+QtggMe+RzDvquvBgq
+# n7B27chy5WAtlN0R146o+Moo+0B1o9sLcR8tGRLaF7Fh87Nn7WoxSwvLR1uoSmsJ
+# ++qtOqi+OBnKcUrFEpo2p9hWdwQdSstIU4mXWw9O0p7LFYhImhinEOL8xe1vis69
+# 76cEeTFeKBMOmDwunHa68vlbMxlWJHReYGulD7ZEXS/gkP5/mx8W+CDr1NCeEY81
+# oFw/T43CMg==
 # SIG # End signature block

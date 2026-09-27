@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Exports Exchange Online quarantined email metadata and sends an Excel report.
@@ -31,7 +31,7 @@
     Generates and publishes the report without sending the report email.
 
 .VERSION
-1.0.3
+1.0.4
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -58,7 +58,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ScriptVersion = '1.0.3'
+$script:ScriptVersion = '1.0.4'
 $script:ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:TaskName = "$script:ScriptBaseName v$script:ScriptVersion"
 $script:CurrentOperation = 'Initialize'
@@ -105,10 +105,10 @@ else {
 }
 
 $coreModulePath = Join-Path -Path $script:SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.57' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
 
-$script:LocalConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "$script:ScriptBaseName.local.json"
-$script:LocalTemplatePath = "$script:LocalConfigPath.template"
+$script:LocalConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "$script:ScriptBaseName.local.json"; $script:LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $script:LocalConfigPath
+$script:LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $script:LocalConfigPath)
 if (-not (Test-Path -LiteralPath $script:LocalConfigPath)) {
     Initialize-SmartM365LocalJsonFromTemplate `
         -Path $script:LocalConfigPath `
@@ -943,8 +943,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvnmN4iwM8rlbv
-# ho/jlUtieDR8Cdu6fmRJkihjcbzhHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCn9UAK3dz920XH
+# G01uwrDzlN3n+2+KHNgmAuXfhIdRPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1077,31 +1077,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPsh35UnD3S49LJ7SLblVHTNZtP/f6LNSHW6LcZt/N4fMA0GCSqG
-# SIb3DQEBAQUABIIBgBpQZEETl5VUowtmjbzqZqV45y0FRk+5KX9Tn5tWLy1X61C3
-# TCs7q8xLD+se5+9K/bctQv/WRzCloeorK9N//xskBiFRL/Xr+BI/cgZEzoWXEfpv
-# 6MFqx0IwRZr5jAucxX9kyWO5SMRbUJ0hS4EgHYOZLuq7ahdxGFahW28+ieTcgmgU
-# voXXB0ZwPn2pZqZY/WFZiAwEcmdSGRWuQMRI7XZNVUWgu+bSGanYfbBZE8s5NYM9
-# P7ZrzhpNQWJOBAcgmgkuag0uiHJXdVL4i7VIePdvXz6MUKTgdu9su46caC4/DLVG
-# SuHDsIVlfEMXcEPD1oalxnFgECNAoQ8HEZmE/rD+xN/aU4raXe0Nk7QdvIKwVz3u
-# lSwXQV7YhXuIOUKZJBFnE32zD93cmsUnouV9NUvcS/mSMCTyGCdOIs/7Cqjmtj7b
-# /OS4VYcYPxrlZCXj6GbsVpcvbuomxclTBgI461VNChX6J5pTiMGTwqP4QnXq+Say
-# d9vfMB1nk359/0CsK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBxnkbCBcJQnrU2WXUeaaakMUrMm6G6jQO6+UT78xwhTMA0GCSqG
+# SIb3DQEBAQUABIIBgBq59GPrP3xSUk2nZAQARAqKwC8ku3ddFJb0zo50HyIa7Tod
+# Lzn6M3iufnvEMDgbwk2Sp6mdEVqEY0w8HcnjHpd3HlqxqvhKiZD8R14lCToOmIFC
+# eBYFT1kYBpM+sAAy3X/1KzpId96sOTLPynN242rfHsn+GrIQU0o0NlD3bKrkTvDU
+# IaJfZHzhkg+PN+v3mMk10i0uvZMhtn8D9Eua474cmSz2VovX9wWYWOcHb3NePIA7
+# Gp51pfAni3P8xUxp1upaGluDCu0Zmy5mlh8vR+DKagCRqHRaTdDkBn8idGLCITf9
+# Q47wFZfBD7WIFNhdBI7velwbAMyxMgQwbpvQiSFSQ5Qg9tdfqnM+Y8il91uhcAlj
+# 98eNuLURJRwPTLUaoRQBDfVjuu56aA7Y9Gia/tv9GLpEIdChS7UWYor+F0s1sDFq
+# hlg/Pj/3CSXrR/rlm1hCDH9kJfUZzgO1hGzPXNGAf24shRq3tcauRcu0LZN5lGkj
+# IT6As/dMt43njG/qjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCBQ1fNDHMcDzhnfEV8Uyg+sVlj52KD/U8AK+l5
-# Ka31dzANBgkqhkiG9w0BAQEFAASCAgBbDEnnTfHytDicFaOxB5YvgrJQpwfwVT8O
-# RnkhgJAYx0zjrDqPsGCWdIMQHXZFKR96MLsLy8wkaS9xfnZkDJA9e4BuYiqSPxp6
-# HC9U9TMNln08GjlZMHCLln0P0iqm9T+YHEhuCtFreLCcQu7CGW0P2fcUAaUMKIxU
-# FuumY1vkc3C4i5VNRo0qC5F4puBcaBc1Z7pAluLbwE0IvolGNpxk/9BXUN/QN/zK
-# v9Ad0IuFg7pLJRNrgKAEQkP5sR/iJ0tH4TiszDWDs0+RIG8S/z9GV0XfT8nQ7KQo
-# 7BKjxD4Md0L4JK96KgdbHxglntZPxhIf+PUwTwj+nHK7xR3GZ9aylcezcuAhZxNo
-# Q9N8lxOIGHkibhuJCLtdEFCXij7L+J9hRyQ5Di9/hf3CcU0d+vegqHRGFvyTsei+
-# 7zz+U9Xc2JiMC3NDVzstMOWwf3l6rtTgcOC5tRtNQSP2X5xG4Q+4haWUoD8grHor
-# iQTYNjgkLmR8yqzLiHV/iyoQy47JPSl5ZA4CWM3k1s0+vzu+XXCEjkzsCy8RnOQL
-# ekv8A0T3+ChKB9jDJB/M48WPCgctq1Zlv1zuvXJDXQ36kMp7ppYrcoAgsqlWOctE
-# PvRZ8Pc/5J77H3mB++l3DtI4gdVRlhU/9KaO13c0N75DkfKPZ4GuT8DPz4XOxY+W
-# ekAXk+x1Kw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDRaMC8GCSqGSIb3DQEJBDEiBCBrKBRnEIS20HO/gkOzD8Ml6MEMSGakxk+Qw08D
+# 4OMaqzANBgkqhkiG9w0BAQEFAASCAgBt6Sp0A6GYsRPbpi7fXhwaTBZr9uGeZiCZ
+# HNYvf+xhnfoIYNb6BlI0pqGxw2h0uJBDUPHW7jfGdhQpmE/49+BgV5SuN6wG3SYq
+# NbQoJ2EOfaSyfXyFKd+cRj8L0w+zLRMIEzpuhjUL58M8WQDuGZ3qK1bI02muu3SF
+# yabr0eTXgI8qXfqPKrno2U8XYva7f5XbFgoVBJhXxVhWhJfMvTp5GM8EAVTtKw0+
+# 2TMFSYn+suCcE1jsAL3cpj6mAlnYOmdzJ+w2+GIO2lquHx3UBwMff906achcGiK9
+# amWaNrKXGRKcFTaTQrre3tV1K9B9IsIviuyP4FWUnwP96Rl3tsqyweSYQ1oGflvp
+# q52InPlnl7GMHG8F7rRpYl06Yzt8CqU9dBoCi2OLB+Q0QRM1Mgh6lvzUta72XVAc
+# hz8FTaNU2xJHehR6OR8dwM+bRcnZCpVrm4s9aa4y+D27VRFXnX01RTlz19TK/kwF
+# gEXvKxhU05SHsOY6FGr9M4rQuU2KGSZCYhjyzGpS5j4Fo3GPW77RZpBRlmOgiUnW
+# 63+/YX4eQ/ucgE3n3rbH8dI/qwNIpmlEgO8jfkudtcPFxkKpTayCVGtdL6Q7t3wR
+# WqMZ9tpaTBc3r9eXLMifBQbk2SGPiuLkvrBohwreq7iwHoCg8fv0+C8DvuFgn3/9
+# t1K7FHBgvg==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 
 <#
 .SYNOPSIS
@@ -106,7 +106,7 @@
     Runtime app permissions created: see SmartM365-AppRegistration-Permissions.md and Get-RequiredApiResource.
 
 .VERSION
-1.3
+1.4
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -1716,8 +1716,10 @@ function Set-SmartM365MailLocalConfig {
         [Parameter(Mandatory)][string]$ScopeGroupAddress
     )
 
+    $ConfigPath=Resolve-SmartM365JsonConfigurationPath $ConfigPath
+    $configReceipt=$null
     if (Test-Path -LiteralPath $ConfigPath) {
-        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $configReceipt=Read-SmartM365JsonDocument $ConfigPath; $config=$configReceipt.Document
     }
     else {
         $config = [pscustomobject]@{}
@@ -1739,7 +1741,7 @@ function Set-SmartM365MailLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SmartM365 mail local configuration')) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
+        Write-SmartM365JsonBytesAtomically -Path $ConfigPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 8))) -ExpectedSHA256 $(if($configReceipt){$configReceipt.SHA256}else{'ABSENT'}) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
         Write-SmartM365SetupStatus -Message ("Updated mail settings in {0}." -f $ConfigPath) -Level OK
     }
 }
@@ -1792,8 +1794,10 @@ function Set-SmartM365SharePointLocalConfig {
         [Parameter(Mandatory)][string]$ConfigPath
     )
 
+    $ConfigPath=Resolve-SmartM365JsonConfigurationPath $ConfigPath
+    $configReceipt=$null
     if (Test-Path -LiteralPath $ConfigPath) {
-        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $configReceipt=Read-SmartM365JsonDocument $ConfigPath; $config=$configReceipt.Document
     }
     else {
         $config = [pscustomobject]@{}
@@ -1809,7 +1813,7 @@ function Set-SmartM365SharePointLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SharePoint local configuration')) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
+        Write-SmartM365JsonBytesAtomically -Path $ConfigPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 8))) -ExpectedSHA256 $(if($configReceipt){$configReceipt.SHA256}else{'ABSENT'}) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
     }
 }
 
@@ -1822,8 +1826,10 @@ function Set-SmartM365AuthLocalConfig {
         [Parameter(Mandatory)][string]$ConfigPath
     )
 
+    $ConfigPath=Resolve-SmartM365JsonConfigurationPath $ConfigPath
+    $configReceipt=$null
     if (Test-Path -LiteralPath $ConfigPath) {
-        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $configReceipt=Read-SmartM365JsonDocument $ConfigPath; $config=$configReceipt.Document
     }
     else {
         $config = [pscustomobject]@{}
@@ -1846,7 +1852,7 @@ function Set-SmartM365AuthLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SmartM365 app authentication local configuration')) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
+        Write-SmartM365JsonBytesAtomically -Path $ConfigPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 8))) -ExpectedSHA256 $(if($configReceipt){$configReceipt.SHA256}else{'ABSENT'}) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
     }
 }
 
@@ -1856,11 +1862,13 @@ function Clear-SmartM365AuthLocalConfig {
         [Parameter(Mandatory)][string]$ConfigPath
     )
 
+    $ConfigPath=Resolve-SmartM365JsonConfigurationPath $ConfigPath
+    $configReceipt=$null
     if (-not (Test-Path -LiteralPath $ConfigPath)) {
         return
     }
 
-    $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $configReceipt=Read-SmartM365JsonDocument $ConfigPath; $config=$configReceipt.Document
     $removedProperties = @()
 
     foreach ($propertyName in @('AppId', 'TenantId', 'Thumb', 'Thumbprint')) {
@@ -1876,7 +1884,7 @@ function Clear-SmartM365AuthLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, ("Clear SmartM365 app authentication settings: {0}" -f ($removedProperties -join ', ')))) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
+        Write-SmartM365JsonBytesAtomically -Path $ConfigPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 8))) -ExpectedSHA256 $(if($configReceipt){$configReceipt.SHA256}else{'ABSENT'}) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
         Write-SmartM365SetupStatus -Message ("Cleared app authentication settings in {0}: {1}." -f $ConfigPath, ($removedProperties -join ', ')) -Level OK
     }
 }
@@ -1911,16 +1919,18 @@ function Get-SmartM365LocalConfigCertificateThumbprint {
         [Parameter(Mandatory)][string]$ConfigPath
     )
 
+    $ConfigPath=Resolve-SmartM365JsonConfigurationPath $ConfigPath
+    $configReceipt=$null
     if (-not (Test-Path -LiteralPath $ConfigPath)) {
         return $null
     }
 
     try {
-        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $configReceipt=Read-SmartM365JsonDocument $ConfigPath; $config=$configReceipt.Document
     }
     catch {
         Write-SmartM365SetupStatus -Level WARN -Message ("Could not read local config for certificate reuse: {0}" -f $_.Exception.Message)
-        return $null
+        throw
     }
 
     foreach ($propertyName in @('Thumbprint', 'Thumb')) {
@@ -2208,8 +2218,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCq3XtWvOIoWNvx
-# RAJz5Uo37or0sXy4ceHtlQs2V5nwTqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ543sS1sXPlAv
+# uYqHvoHbP9CXmM/twE2wndFeOps1TaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2342,31 +2352,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEetd/Kel391UH3K0Jkp+I3p1e+2cCqEyRwdsMCvpJH4MA0GCSqG
-# SIb3DQEBAQUABIIBgH4A7hE7x1yHiduJgYqHi8Sp6ZZgjTE5/YDJlwrSP0Nl5WVH
-# vakqIzkm4/PlrqSsPKytDrFkNm7IDehR1G+OspsdG6OqVbMfnKras5pN7qCnf3vX
-# zg1wet8SNPFln/e8piB8Xa/9C/2boXJGv6g1imLumAWX9JT40o7FD0qAgtQjM7fi
-# 1tSmJUIQz1iR5U7YXPpHGQCqkxsbLcxT/r+C9u0lMPsd2UC2JSsEA3ICRPUt3K0X
-# Mm2MOur1Mve6ccNcQf5VWQgy847u8pVdZtp9QyaYLGbX4HDBYg6XAcnKZZDEc80h
-# IE4zdEKBqmN7N5iSfHm5qt8wd1mCKUNhQAe6TxVrtRHC3+yge10kndg0bhy5Mh4v
-# 4RvW/ytNwLrEoQW4rEbD6iC1RJ19QXemAWQi6OAX3g0t+3yTeVlRLUESlt2Wysf9
-# AtcZdl2KULF5jtT66wOMerEtGMe40fKKmNMVqkoQn67W8qfiavFhsOoNqu4cBEp6
-# fiBjTJCO3z7D1vZFTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMBMLulD3w+aeO6BSw53m0O4foRnbxTVxrlbcf7Ep9nFMA0GCSqG
+# SIb3DQEBAQUABIIBgDfs7dIDiycdG2kwVMDitNsFFljkuxRI+8Ld2BawH+2Zwxtt
+# o/0dfP3nk8aRSab/cpt55hBiYvZ6lnrFjALvj7yIkNCxhSijqHAHjlTluG7YCM6v
+# 6babR005A7YEQPQkBPNWxeY+Asdyxilh+MU/7A7WgD/0o94J/mS69sNcb6Zp6ohj
+# YQSD1MXZnajJDBlhn8rbnfjTXs5wpGiKWAErZKxAhOuoMr0r3ziMUDYepBefDvov
+# d7oOEV2SnRY71UtzcN78zpQie5dzLTTmH73kRzBRSciyx5z7lILkGTtot0zIYoQp
+# Db5Kokbv1TS9NRhGYYyiB7HHko7y2UKQVeCvzv7EhgIUjs03CFhwyJzuo9s3f0cf
+# ZV8zMRtOxJJJZ0zexvJFoxpMDqfmyx3XXm4l4SVyY7+aYhIC+/+hi2eMYQcw/23B
+# uDZOsGSXZb0WApcZ1yWSoKtdlMCcAkHDlpd+P8R+gMUUZu7p2D57frD0CgGUziDM
+# I4zVZtyacx9FcTI1UqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjQy
-# NTNaMC8GCSqGSIb3DQEJBDEiBCDUDDEsfufe2WiZS0dgAe1AptZw2g08qqnlsctO
-# mk/AfTANBgkqhkiG9w0BAQEFAASCAgBhTkKXkfTBbzu4Q3YZpzRw7XVLYTz55blS
-# +xWG7wm04o5w3YWLYxOD9etwYb3cTi/KrA6QckXVDrcIsNc1x8E/bh+cZYvuUnnH
-# tEtxL1pYLe8rnKhvMUGWfC1fD+ixgcJeJp1q0v9BnqmvG7tbER1Yf/OkXU8hk1h2
-# 6nhTzR/i0fpATlBqPaGijEL4HYQiZgXorV2vo8nzq/6ubCl0dKO/Ksl4PObZpEVA
-# zpPf3RrEiSfKg4lw3dSU/5jsIKOpokkH7OhuXHylW3wyp62OSRpbnrLTiLEOYdj3
-# HOziUPe3ruFX5wnRgiF61tr5CWw0AMHQospJ7HLhD3N6hHILfSSK/E05C/VNnSrt
-# HgYjbuwYSllljaI953zfpmtsqB2E6Qt2GpAMBbSJIN8u9RcX+haIOizNISq8E/6G
-# teTUOLrjlVsczf/s0EojDKFHW05VjChIxxQnhV0yr6RxD7HkLZXZT5QS/eu6Njr6
-# xrU6QfK26mi3JhiyaoNHYQPkNqR+IZQK0eEmjze1PmThfsrjSg0oStC2dKuHV+iF
-# fVI581Fiwwid8iTYKE+7ieFx0DcIsFfXixb1Ax779ZOklnIOB65yZRWeXW706S0m
-# VHhHFTrcNC/h9rIsQ9jB60BroK4y7DJgAWtNeJ5lN8roXhKAaP54/yp3CVKnxuYf
-# /T1cDPop0A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# MzhaMC8GCSqGSIb3DQEJBDEiBCBcorkqsg22gn69fa1Vr1EV+gEPtLjaSYLFc426
+# rHp9kjANBgkqhkiG9w0BAQEFAASCAgA6b3nuxaXuCyatZL4+SVqAzRZtjgkrw1EQ
+# KRowdRHyIdQyuJUPj9xJcgurrQMHuAqYnvnVlvD9ahl+HvQhwMf1am38dvFiJEtV
+# 6YE24nEBT6IOSfYtS+/5JZiEUZd/HjNXgqOeM06IW/ChTI6/3Tp6NMlKMbf321Is
+# r0VvSoITfCeM4ZYeJz1bsnNcOrfhrNX4BS1F35kprkdibcP8aNfVSr826ybhuVDu
+# x2DmKvI7Td/EQaHTCCacFrpTcvfaN4Lxtgb3ziLhvN202pGoreTAMwgtKU106cZ2
+# XjUJsj8MtVjhyVKcXDO8R6aXBdvRtw2vr5hvkF+9WfC7XDCErYnMX4+EuDxpenF7
+# KhFbOtvCCy5E3Qkkwaw6pV8agX0qJ1DKE63y1n3uhQjH9MzrKQGRqwo9tBZDL3db
+# 1NKcouxVgFMs6DnbyZXcT6+GYNZScQgLWVM6zaZSJI1DJy7HyYst9NtiQRa5/8V9
+# Im2d459cgn+snRVULo2eS+Z/o9Rdze4Yz7c4/FHiOij0pbcEcDccBvvHiTY+UCD2
+# 9GuG2hwf+y7bN9TKYwKJW2i/1DWdPFhr2O6tqeEq97tdw4ZH3W1ysgaQ1xjS4hPg
+# RIgZTLE6wUx6JdJXc/0ZkuDssMHi8E0wbP7N2uE8450EQS8AJJyk35ec6DaArRrF
+# TaRKypP3zA==
 # SIG # End signature block

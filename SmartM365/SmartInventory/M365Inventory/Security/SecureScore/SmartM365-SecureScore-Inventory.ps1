@@ -1,9 +1,9 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
 Collects Microsoft Secure Score evidence and control-level score evidence.
 .VERSION
-1.0.0
+1.0.1
 .REQUIREMENTS
 Microsoft Graph application or delegated permission SecurityEvents.Read.All.
 #>
@@ -12,7 +12,7 @@ param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$ValidateOnly,[swi
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.0.1'
 $script:CompletionStatus='Success'; $script:CompletionError=$null; $script:Runtime=$null
 
 function ConvertTo-SecureScoreRows {
@@ -29,7 +29,7 @@ function ConvertTo-SecureScoreRows {
 }
 
 if($SelfTest){
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.0' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.3' -Force
     $sample=[pscustomobject]@{createdDateTime='2026-09-01';currentScore=50;maxScore=100;enabledServices=@('AAD');licensedUserCount=10;activeUserCount=8;controlScores=@([pscustomobject]@{controlName='MFA';score=5})}
     $test=ConvertTo-SecureScoreRows @($sample) 'run' 'now'
     if($test.Summary.Count-ne 1 -or $test.Controls.Count-ne 1 -or $test.Summary[0].ScorePercentage-ne 50){throw 'Secure Score self-test failed.'}
@@ -40,7 +40,7 @@ try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1'
     . $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.0' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.3' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Security\SecureScore' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Connect-SmartM365EvidenceGraph -Runtime $script:Runtime -Scopes @('SecurityEvents.Read.All') -InteractiveAuth:$InteractiveAuth
     $scores=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/security/secureScores?$top=100' -MaxItems $MaxItems)
@@ -55,8 +55,8 @@ finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLkIDOQ1iWvbQ0
-# j/XbvHS5ehlnKsiWML2SWCdCSqYmzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDR/6hJ181cJlDi
+# P3CmlVHOsrXovTCb0IlLf3xH7VhkHaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -189,31 +189,31 @@ finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIItJ/OOgXeMaTHHn3nyO2s//jnNDKW6Qf18Al3Zlw+ySMA0GCSqG
-# SIb3DQEBAQUABIIBgEGagpjlD4QyPigQvcYsQX+2Fp1yCCMpF32msCVrnSv1KB+Z
-# eQmKIAjuJNfiVWtQ/GvQQHdLuFMj+lpG2/1eZqxIKcU/+aIB6f1c/cPWjPInlgEQ
-# kAYUchHkkOZ1gOVD7Elos4i+Y4bjk8AC+gS+m8LjHKUrBKd1MizxwzDQXIEiiNjk
-# wShh+daaGNa8jxnU+ItgoLGDqffDTzOJ9mJ+BMv1PW6u/Q3hOnuPPE/DoH1xTxLf
-# hNu61sSLoIhfJrdl7RAnYvvQAC+p+GQzmrV6MJVNUF/QgOZR5SLzh203AXcBNo9R
-# QwMtfIt8PmiKeyv9TQweFOT3Nbi0J+1/YKIYVh3ZBc+aJvrbm+roFhFkhCL9I12s
-# MRBu9fOHvZi1BlaVVwzpxAhfz7K3GIybK/hjuHm6qIMkXjqt9QkoXZJx2Ti+TtkD
-# gWLrdrnar9fkznDYzKn4FVHUInOgHtiqKgImkqlJ8/lzQGu46O+mwTOKqEfb/2xf
-# Nygz0n1/jLWCZIbuNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGAUuz1ztus+MqF7bmg3lgqViwSKr4sXWaPN8opLMHh8MA0GCSqG
+# SIb3DQEBAQUABIIBgIbFyAN3P20VzjcxKAiyR8Ci61/kd4hn0NFS27Gce8Zh+D5x
+# S95NGPvQkzufJ/CG6E6TRL9TVFnTu6Tf/2R4aL2FIJHWXrMpHSHoAC+tGtzweDpn
+# 8oC8gKZV889V9ulDlOSCDd9KsVYwxSlHDDZ0dEfCVHUN+nBwdArt1Edf+ZVXaiXJ
+# rYt0D4twgm3DG2Jz+14f0zTXpoynRPo4QYKFbBIAxmidp5S8I74pRI9FptV/G22e
+# pUSsh604EWMNwGvBCwm2+yeQCz/tAEiCKfaTkt+p+RtmLtgXjNIfGPwCgIC1eHem
+# 64iHgvu9HRqQdNRi8vMCbteOjFPRSleuw08tU3cbnT/YAbeUn9jOnQnup4KheH8n
+# 9+LSYnban6NgX2IAStQbCiPwY4EzjWe3fgT8bKReOzfhP1fMusx2avzqJXn1LErw
+# piOhJ0GgLQqdOip1ULoTytRkHPdUnpdpaJe3ZWaiVQahHHJhph32tmF12XK50xVH
+# C5D3NlbxDFZrdsK8zaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjQz
-# MDJaMC8GCSqGSIb3DQEJBDEiBCDP4A3VO8DbUHKOoHlUWlRCdpOVh+TKdY08B8CN
-# yZtURzANBgkqhkiG9w0BAQEFAASCAgAdrX9DsubsMXladqigzFNPXV95AWZnpuVC
-# tTcOphPg8bw4/EVhni8fkGhsN9gFiiGyj6voBK/dbtTQv/DwtZrvB1nJpxlj940I
-# vKPx9gXmOjiNaplER0HeY1C87oU2UaZOvyX6oLyR0OMZIbrkgipAKiJbk4NQ305h
-# fpXVtu4cw8n/6jzwvtFnLH/wn80MMgEH6YDmXwcSpqinWzNZwIBDSArES0flfmzg
-# T9/BqJDvq/mIgKYmYoitgPgFFXPH0Qsc3uBsnT+OTpLoeb/zRZd+UpUc6ZWVXVtA
-# 8ewMITU7up9H1YBXTrSpRYlk44J+HJVJPcOat4kxmuAiqK6Bpiipfu8utyuytfrs
-# 6P24ejA3QF7CuUwKa4gn4ms8RfKKXlo9A9KsSzsGSOy+GXjxWdCeB/i4wXG/8IM2
-# fbsnqZIdLFZP1zWKeSwGMQ4osI+Ww1oQpKxlHuV0suHhuTZRusUCqcA4BoZOwIoE
-# /ej25XT7BfIT3YQPJHuUkDq1IFh0tT1cQs+Xsrec/uzj7USzXlodvSAnN4+Z6/nY
-# k2lM1mPsGslzkHUUbU38zp0Ej+2nbW0H/7HG0NbbQx/L+fVLg77qp9H4gcijcHSH
-# N28infjWv3HHtI5tapc8+gS39t4/JZyCIhomdaW7LEjQzoeolLyv39ifK7e8CVkV
-# JtMf2IMHDA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTBaMC8GCSqGSIb3DQEJBDEiBCBPD68LGe0aSAUfIx4NTFXMR5YXP77NfA2k32RG
+# cbYwYDANBgkqhkiG9w0BAQEFAASCAgCmOZlMMTKZBgzqA4YpehECFd4YuefTFwkH
+# /KD98SPMNcowLE2WRJ1OCT/69zvN02FDzWY/o2bWuqJ52tvqP3lgz242dhquuReG
+# o/G0TfE7iaFt6TetwXINrBW8iuOZlcwWbNRqwcGCllqb0c7UJrIn4qvWlmWxb5OC
+# mfla7x95e+O4G+etygM5pM7G13DSFldo5SZsGWz7YOUGxNwe0lJkdN1j8IWgV+ju
+# jLSt+Anrcx0ZhFd2cvEQvUB/ZMsXlyLxBMj4cEIFeJHw466CkCQZdB6Lkvj8W3z3
+# maYU/aOEWOPkmW/LvDLIZNFkcmQhN/iugTFWJP+fbUeEZ3xdFLHCpAmG8UQX2BVk
+# P/N4n9jwGZzxyJU3httqUQHjCo9PLpL2OU82T7Ssee4JjmQbjYrk+64gxyn6z+fe
+# kQVZ63GV95ekXWtS0b+DTscuJ7txm9kKyci18gTvPfpyYMLNpDNo68YKu7dDrfAR
+# 8yPCryW5Uyw0bmm4ngQncaiOkLmhbESEAtgRcIkqUKJcI7Wqt0/BMkci6tbt/49U
+# eqsnDjvi8TRq8md5eTB8LQjjjJ6fERX8anulrMFAlAWC9e5bEM5X8sOxYq6f316x
+# n9IvxhVZiVz9kbJzi7IS22PZp3IDyBaD0wfOBi6mHRfWAp8aaIxDybJEYY5ddr6N
+# HXwCoCfpqA==
 # SIG # End signature block

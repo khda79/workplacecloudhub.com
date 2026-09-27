@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Exports Microsoft Intune remediation scripts with Microsoft Graph PowerShell.
 
@@ -23,8 +23,7 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.11
-
+1.12
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.10
@@ -70,7 +69,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -95,9 +94,9 @@ function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
 
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = '{0}.template' -f $configPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
         if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
             Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null
         }
@@ -111,7 +110,7 @@ function Get-ScriptLocalConfig {
                 throw $message
             }
 
-            Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+            Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
             Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
@@ -142,7 +141,7 @@ function Resolve-SmartM365ConfigValue {
             $scriptRootValue = Get-Variable -Name ScriptRoot -ValueOnly -ErrorAction SilentlyContinue
     $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($scriptRootValue) { $scriptRootValue } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -207,7 +206,7 @@ function Get-ScriptLocalConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -255,7 +254,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.57' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.58' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -550,6 +549,58 @@ function Save-Utf8NoBom {
     [IO.File]::WriteAllText($fullPath, $Content, $utf8NoBom)
 }
 
+function Save-RemediationJson {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Content)
+    if (Get-SmartM365JsonReadPath $Path -Optional) { throw 'Remediation export target already exists; previous run preserved.' }
+    $target = Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'Intune Remediation export' -Validate { param($document) if ($null -eq $document) { throw 'Empty remediation JSON.' } }
+    $null = Write-SmartM365JsonBytesAtomically -Path $target -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($Content)) -ExpectedSHA256 'ABSENT' -Validate { param($document) if ($null -eq $document) { throw 'Empty remediation JSON.' } }
+    return $target
+}
+
+function Convert-OwnedRemediationExportHistory {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$ExpectedTenant)
+    $script:JsonUnqualifiedExportFolders = @()
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
+    $plans = @()
+    foreach ($run in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\d{8}-\d{6}$' })) {
+        $infoPath = Join-Path $run.FullName 'ExportInfo.json'
+        if (-not (Get-SmartM365JsonReadPath $infoPath -Optional)) {
+            $script:JsonUnqualifiedExportFolders += $run.FullName
+            Write-Warning "Incomplete export has no ownership manifest and is preserved for qualification: $($run.FullName)"
+            continue
+        }
+        $runPath = $run.FullName
+        $runName = $run.Name
+        $validateInfo = {
+            param($document)
+            if ($document.Timestamp -ne $runName -or $document.TenantId -ne $ExpectedTenant -or [IO.Path]::GetFullPath([string]$document.ExportPath) -ne $runPath) { throw 'Remediation export owner/tenant/run mismatch.' }
+        }.GetNewClosure()
+        $null = Read-SmartM365JsonDocument $infoPath -Validate $validateInfo
+        $inventoryPath = Join-Path $run.FullName 'IntuneRemediations.json'
+        $inventory = Read-SmartM365JsonDocument $inventoryPath
+        $plans += [pscustomobject]@{Path=$inventoryPath;Validate={param($document) foreach($item in @($document)){if (-not $item.PSObject.Properties['Id']){throw 'Remediation export identifier missing.'}}}}
+        foreach ($item in @($inventory.Document)) {
+            $id = [string]$item.Id
+            if ($id -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Unexpected remediation identifier; history preserved.' }
+            $folder = [IO.Path]::GetFullPath([string]$item.Folder)
+            $scripts = [IO.Path]::GetFullPath((Join-Path $run.FullName 'Scripts')).TrimEnd('\') + '\'
+            if (-not $folder.StartsWith($scripts,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($folder) -notlike "*_$id") { throw 'Remediation export script folder ownership mismatch.' }
+            foreach ($leaf in @('Metadata.json','Assignments.json')) {
+                $path = Join-Path $folder $leaf
+                if (-not (Get-SmartM365JsonReadPath $path -Optional)) { continue }
+                $validate = if ($leaf -eq 'Metadata.json') { {param($document) if ($document.id -ne $id) {throw 'Remediation metadata identifier mismatch.'}}.GetNewClosure() } else { {param($document) foreach($assignment in @($document)){if (-not $assignment.PSObject.Properties['id']){throw 'Assignment identifier missing.'}}} }
+                $null = Read-SmartM365JsonDocument $path -Validate $validate
+                $plans += [pscustomobject]@{Path=$path;Validate=$validate}
+            }
+        }
+        $plans += [pscustomobject]@{Path=$infoPath;Validate=$validateInfo}
+    }
+    foreach ($plan in $plans) {
+        $resolved = Resolve-SmartM365OwnedJsonPath -Path $plan.Path -Owner 'Intune Remediation export history' -Validate $plan.Validate
+        if ($resolved -ne $plan.Path) { Write-Output "Remediation JSON history available: $resolved" }
+    }
+}
+
 function Initialize-ExportFolders {
     param(
         [Parameter(Mandatory = $true)]
@@ -625,6 +676,7 @@ trap {
 $tenantForConnection = if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $TenantId } else { $OrgDomain }
 $graphBaseUri = "https://graph.microsoft.com/$GraphApiVersion"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+Convert-OwnedRemediationExportHistory -Root $OutputRoot -ExpectedTenant $tenantForConnection
 $exportFolders = Initialize-ExportFolders -OutputRoot $OutputRoot -Timestamp $timestamp
 $exportRoot = $exportFolders.Run
 $scriptsRoot = Join-Path -Path $exportRoot -ChildPath "Scripts"
@@ -693,7 +745,7 @@ foreach ($remediation in @($remediationList)) {
             $assignments = Invoke-GraphGetAllPages -Uri $assignmentsUri
             $assignmentCount = @($assignments).Count
             $assignmentsPath = Join-Path -Path $scriptFolder -ChildPath "Assignments.json"
-            Save-Utf8NoBom -Path $assignmentsPath -Content (ConvertTo-Json -InputObject @($assignments) -Depth 20)
+            $assignmentsPath = Save-RemediationJson -Path $assignmentsPath -Content (ConvertTo-Json -InputObject @($assignments) -Depth 20)
         }
         catch {
             $assignmentCount = "Error"
@@ -702,7 +754,7 @@ foreach ($remediation in @($remediationList)) {
     }
 
     $metadataPath = Join-Path -Path $scriptFolder -ChildPath "Metadata.json"
-    Save-Utf8NoBom -Path $metadataPath -Content ($detail | ConvertTo-Json -Depth 20)
+    $metadataPath = Save-RemediationJson -Path $metadataPath -Content ($detail | ConvertTo-Json -Depth 20)
 
     $roleScopeTagIds = Get-ObjectValue -InputObject $detail -Name "roleScopeTagIds"
 
@@ -753,7 +805,7 @@ $sortedInventory = @($inventory | Sort-Object DisplayName)
 
 Publish-CoreSmartM365Csv -Data $sortedInventory -TimestampedPath $csvPath -Columns $inventoryColumns | Out-Null
 
-Save-Utf8NoBom -Path $jsonPath -Content (ConvertTo-Json -InputObject $sortedInventory -Depth 20)
+$jsonPath = Save-RemediationJson -Path $jsonPath -Content (ConvertTo-Json -InputObject $sortedInventory -Depth 20)
 
 $exportInfo = [ordered]@{
     Timestamp             = $timestamp
@@ -769,8 +821,8 @@ $exportInfo = [ordered]@{
     AuthenticationMode    = if ($InteractiveAuth) { "Interactive" } elseif ($DeviceCodeAuth) { "DeviceCode" } else { "Certificate" }
 }
 
-Save-Utf8NoBom -Path $exportInfoPath -Content ($exportInfo | ConvertTo-Json -Depth 5)
-Remove-CoreSmartM365TimestampedDirectoriesOlderThan -RootPath $exportFolders.Root -RetentionDays 7 -ExcludeDirectories @($exportRoot) -LogFile $global:LogTextFile
+$exportInfoPath = Save-RemediationJson -Path $exportInfoPath -Content ($exportInfo | ConvertTo-Json -Depth 5)
+Remove-CoreSmartM365TimestampedDirectoriesOlderThan -RootPath $exportFolders.Root -RetentionDays 7 -ExcludeDirectories (@($exportRoot) + @($script:JsonUnqualifiedExportFolders)) -LogFile $global:LogTextFile
 
 Write-Output ""
 Write-Output "Export completed."
@@ -789,8 +841,8 @@ if ($script:SmartM365TranscriptStarted) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAf5j3o/RANPE8Z
-# Lm4XDyOlkdgYAiaOICn/UyYLocblqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChOuNv3Q6DsDjn
+# Dm+HFBRw1cgadN3A1Xv4Q85htGO1I6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -923,31 +975,31 @@ if ($script:SmartM365TranscriptStarted) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIF1BXkN1uTOvJ79U4XAbr3uRKNd9Xr1OaIOoHnQO3GsMA0GCSqG
-# SIb3DQEBAQUABIIBgCzf/QdMli7vK1xROX/aFZ+bciQmkAmIT723t2n8Rpg23oTn
-# 9N5rCbzpj5duy9Q+SMMsUhpCXs4cTuafNN9L1Gp3jkLj1K7Z/kN2yZf2+YJiijaV
-# CIkl9C8te85hJh1Xod52SNHfaStW/cj4c/IVuJFTJ8hY1qkwCgkCz6oGbOTPnz/O
-# 265m2B2AkkJUxbZoTONbLyuHAJ70kOChQtO+qOv7rBRn5iL0gOFDL36R7PUHXdwp
-# Ke0Xv7z3//XZOn+SJo+jtEdQNkD/k8mLDEHgxYoDfLgYn8qOfJV8f6VnKkqq3b8U
-# rHfZDIAjKRjIdQrm24kYdAllL/hpzkGurOIxy83agp0g/LfGoB6fOdD19OYTlUww
-# XLU+LKE+qs1HDtNWHK61AZatFsxx7kHfvMDd5mkOQrJGGcs8T+15U4n1QbPp1u1s
-# MDkMznYtosD41U5AiYQuhsagc41cjMHeg/81wGD7vRwSmBJ8Oo3B6clgvXUFlN5P
-# sEW/Ww1CcxCOM6KWLKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMAu1ooiWIzM9wwr8BIn/ZZIKYV3SfYAjnxANIN3ZgdRMA0GCSqG
+# SIb3DQEBAQUABIIBgBcgfKpLxfoNMYJ+6DFfVUlNhf5kbqmItizEyomyJIkBL7pB
+# FzKKFueHqQgmLL6JlXckWx6FSxULhkB/Md8plLEiEb/xIU6tf+D+tF2JApnJ1P4m
+# DwocxiLUm0zbqbKk3XHUwO2n4TgKs9hFW8fKtv7vTHLgyLssNxJLNPjccDaXPOQA
+# E+cJa235YtchdvxBf2sj56hcquMVZ3EsPsa+WAjijdykBCJObZYrsNwicKiMIzKl
+# /hpNCd5wmGL85kQqvMDHOk7KLtGoEsruFJQFSGw5G20arU/xnM+gk1uBgrPv52TU
+# 8NuJfFIp5QToqZx8cUkrPUfegc4/bV8E6mRwS5sZDR1F/IQvLcAXAFQK3B4ObOhk
+# t6DXjiLqJumBnlVE4ZXU0HoPsOBWPZe45kj7LZDLrlAAnqs4RZLuGmxMiCbUJHfW
+# pzJ7Bjnjq8XNpSyO1MEClly78goSHUWp7hTWeiiZV8x5Whfh0vjyyMu7UT4yw1o4
+# FOjH6yqbT2005T827aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQz
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAu12hM8uEjvR3HpNwreQLGsk9vhwkRI2mNPLfg
-# /eKg5jANBgkqhkiG9w0BAQEFAASCAgAgKsd/zr8BKXwYIIzEX2gW68mBRRP6fJAA
-# Rt4EP2OG/LSBmW8pot3o+ancHW7uQwwLg9c3vI/w5ITeKfvb9m++dubajAO2ZVy1
-# jSzycjPg5ytWoCK5UrP4OeODN8stIfML5NGap8xUSkCT4bn7UKnV+5rgM5iaYI9u
-# lEB0ZKs1DkIpfaqSOmprWz6q9ry7m6M7LPOsnmJcEp2eLO+/kF/9cn89e4+p4JWl
-# Fe9uBuLf3ARnBW7fkaIRzjF0+oU9byRJ3ikZuhRDf0F0KbMeHc2/nu9gvvuy4PZs
-# XLnIbZEzS0gwNLMS++MZA1bP7xsEBbVYXs2Tclx4LzhUuMhwERZZBuzbLtrzfxm7
-# LmpoJb2CBC9+FddcYmobMMHC7sXMOgNTKGxKGQ6TeSk9YKA4Zv4EGANjC2PSWG/M
-# WzQHhTqAveEyQkBNixMw/qz74Q5dAY4k74frDU5RcnqEDRE2o6cX+sjOBMGcRNj8
-# NwcNbrp/CU2UCS3Bme899vOihQRVT1c/wIA4CEXb27KEG4LKFa3hWMLbFDm2vOpo
-# Q3XvG3lSLhjuFknj5nahcYmJLnNf+F+CKR6dTuSgA/uP4bA1e8KsC5sjGvPPW/6g
-# DJqSpe56M7cQp9Jsi1n8Vh9knS57qA00zqABsjXeyuzYPUOr3RqXHzYVP+glABzD
-# v47zODz//Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NDhaMC8GCSqGSIb3DQEJBDEiBCCIP/cra2N12b2lEJHYskAJqqcFS13c8x3OI8sd
+# sc3C/zANBgkqhkiG9w0BAQEFAASCAgBAn0pGgqTwHCnRUfinqApLEa/FQ12oVxfT
+# i6Hz57jhdM9IYGjJnKR/dhk7lTIaSQSAeW5K2B/w7RiVYFNP+50cU57qvoelLWIz
+# T5slhy5QtZhhosLVHDtAJbgtYS9w9ZCp+oHteEVNFgNrHLMAnx5TASrtF+5pxcHc
+# nhtLyfcCsdFfJkPouVihSFO8mP1+9vyc9rMFDHy0VBNXz9BKuru4WZhyh3heDOk7
+# ReRdU6I/hGh1b9JryqVt7gRHgqOFCWIqJ7LB6GTlW7IakrHafDCSIOw9aHjObZT3
+# MvxvsSOcWPX5LpOroq3E4Aq2F18oAynhSeuWdVv0fQCJEHATs5Wpl4/YCnFdrF15
+# K+Ag3PXZiUyFrMNgDwVzKEFYXpcLYVjCv3AJgZthsjJD9EvPuG0ek1UcmyHP7PfO
+# EZrxnfD/2PR7FWmSF6hVRIvIUfUImaWEsyBEL7ASgj9pch3ddjaBlfrEgTOOgwNB
+# BpYJ70qacvXjShfLEhcdDyZHAU59QzS8ynjn3NFsHd8Vz7MV15BLNDX1zBMcYDdy
+# 4C/bBw9D0969EoVq9kc5xmvHHXg/hN2U0Y2odV/uQJWaoR8DcgoQotRGq40F9FRq
+# seW2KFt0koQIIueO3C4ZPkzqglqOy52Zpi0l/Gsx0P0RgAwIOlTd3YHtfKytGhKM
+# qMIg7knGng==
 # SIG # End signature block

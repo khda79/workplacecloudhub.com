@@ -290,3 +290,17 @@ setup.rpt
 # Windows
 Thumbs.db
 desktop.ini
+
+# Private JSON transport configurations and recovery artifacts.
+*.local.json.txt
+*.json.transport.lock
+*.json.migration.log
+*.local.json.*.pending
+*.local.json.*.previous
+*.json.txt.*.pending
+*.json.txt.*.previous
+*.sharepoint-transition.log
+*.sharepoint-transition.lock
+
+# Reviewed public qualification manifest (no operational data).
+!/SmartM365/Tests/JsonTransport-CandidateFiles.csv
