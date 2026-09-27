@@ -1,6 +1,44 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.5'
+$script:DistributedModuleVersion = '1.1.6'
+
+function Resolve-DistributedJsonPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $names = Get-SmartM365JsonNames $Path
+    $leaf = [IO.Path]::GetFileName($names.Legacy)
+    $parent = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($names.Legacy))
+    Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'Orchestrator distributed state' -Validate {
+        param($document)
+        if (-not $document.PSObject.Properties['JobName'] -or -not $document.PSObject.Properties['OwnerServer'] -or
+            (-not $document.PSObject.Properties['ClaimId'] -and -not $document.PSObject.Properties['LeaseId'])) { throw 'Distributed state owner/schema mismatch.' }
+        if ($document.PSObject.Properties['ClaimId']) {
+            $expectedLeaf = ([datetime]$document.OccurrenceUtc).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '.json'
+            if ($parent -ne (ConvertTo-SafeFileName $document.JobName) -or ($leaf -ne $expectedLeaf -and $leaf -ne ($expectedLeaf + '.stale.' + $document.ClaimId + '.json'))) { throw 'Distributed claim filename/identity mismatch.' }
+        } else {
+            $expectedLeaf = (ConvertTo-SafeFileName $document.ConcurrencyKey) + '.json'
+            if ($leaf -ne $expectedLeaf -and $leaf -ne ($expectedLeaf + '.stale.' + $document.LeaseId + '.json')) { throw 'Distributed lease filename/identity mismatch.' }
+        }
+    }
+}
+
+function Convert-SmartM365OrchestratorDistributedHistory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ClaimsRootPath,[Parameter(Mandatory)][string]$LeasesRootPath)
+    if ((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText') { return }
+    $paths = @()
+    if (Test-Path -LiteralPath $ClaimsRootPath) {
+        foreach ($folder in @(Get-ChildItem -LiteralPath $ClaimsRootPath -Directory -ErrorAction Stop)) {
+            $paths += @(Get-ChildItem -LiteralPath $folder.FullName -File -ErrorAction Stop | Where-Object { $_.Name -match '^\d{8}T\d{9}Z\.json(?:\.stale\.[0-9a-f]{32}\.json)?(?:\.txt)?$' } | ForEach-Object { $_.FullName })
+        }
+    }
+    if (Test-Path -LiteralPath $LeasesRootPath) {
+        $paths += @(Get-ChildItem -LiteralPath $LeasesRootPath -File -ErrorAction Stop | Where-Object { $_.Name -match '\.json(?:\.txt)?$' } | ForEach-Object { $_.FullName })
+    }
+    foreach ($path in @($paths | ForEach-Object { (Get-SmartM365JsonNames $_).Legacy } | Sort-Object -Unique)) {
+        $null = Resolve-DistributedJsonPath $path
+    }
+}
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -16,7 +54,8 @@ function Write-JsonAtomically {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)]$Value,
-        [int]$Depth = 12
+        [int]$Depth = 12,
+        [string]$ExpectedSHA256 = ''
     )
 
     $parent = Split-Path -Path $Path -Parent
@@ -24,16 +63,10 @@ function Write-JsonAtomically {
         [void](New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop)
     }
 
-    $temporaryPath = '{0}.{1}.{2}.tmp' -f $Path, $PID, [guid]::NewGuid().ToString('N')
-    try {
-        $json = $Value | ConvertTo-Json -Depth $Depth
-        [System.IO.File]::WriteAllText($temporaryPath, $json, [System.Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
-    }
-    finally {
-        if (Test-Path -LiteralPath $temporaryPath) {
-            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
-        }
+    $Path = Resolve-DistributedJsonPath $Path
+    $json = $Value | ConvertTo-Json -Depth $Depth
+    $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json)) -ExpectedSHA256 $ExpectedSHA256 -Validate {
+        param($document) if ($document -isnot [pscustomobject]) { throw 'Distributed state must be an object.' }
     }
 }
 
@@ -546,9 +579,9 @@ function Get-SmartM365OrchestratorOccurrenceClaim {
 
     $jobFolder = Join-Path -Path $ClaimsRootPath -ChildPath (ConvertTo-SafeFileName $JobName)
     $occurrenceUtc = $Occurrence.ToUniversalTime()
-    $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json')
+    $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json'); $claimPath = Resolve-DistributedJsonPath $claimPath
     if (-not (Test-Path -LiteralPath $claimPath -PathType Leaf)) { return $null }
-    $claim = Get-Content -LiteralPath $claimPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $claim = (Read-SmartM365JsonDocument $claimPath).Document
     return [pscustomobject]@{
         ClaimPath = $claimPath
         Claim = $claim
@@ -571,7 +604,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
     $jobFolder = Join-Path -Path $ClaimsRootPath -ChildPath (ConvertTo-SafeFileName $JobName)
     [void](New-Item -ItemType Directory -Path $jobFolder -Force)
     $occurrenceUtc = $Occurrence.ToUniversalTime()
-    $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json')
+    $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json'); $claimPath = Resolve-DistributedJsonPath $claimPath
     $claim = [ordered]@{
         SchemaVersion = 1
         ClaimId = [guid]::NewGuid().ToString('N')
@@ -589,18 +622,12 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
     $json = $claim | ConvertTo-Json -Depth 6
 
     try {
-        $stream = [System.IO.File]::Open($claimPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-        try {
-            $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
-            $stream.Write($bytes, 0, $bytes.Length)
-            $stream.Flush($true)
-        }
-        finally { $stream.Dispose() }
+        $null = Write-SmartM365JsonBytesAtomically -Path $claimPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json)) -ExpectedSHA256 'ABSENT' -Validate { param($document) if (-not $document.PSObject.Properties['ClaimId']) { throw 'ClaimId missing.' } }
         return [pscustomobject]@{ Acquired = $true; Reused = $false; ClaimPath = $claimPath; Claim = [pscustomobject]$claim; Reason = '' }
     }
     catch [System.IO.IOException] {
         try {
-            $existing = Get-Content -LiteralPath $claimPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $existing = (Read-SmartM365JsonDocument $claimPath).Document
             $sameOwner = [string]$existing.OwnerServer -eq $OwnerServer.ToUpperInvariant()
             $sameOrchestratorProcess = $false
             try { $sameOrchestratorProcess = [int]$existing.OrchestratorPid -eq $PID } catch { $sameOrchestratorProcess = $false }
@@ -617,26 +644,27 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
                 $heartbeatFresh = $false
                 try {
                     $heartbeatPath = Join-Path -Path (Join-Path -Path $HeartbeatRootPath -ChildPath ([string]$existing.OwnerServer)) -ChildPath 'Orchestrator-Heartbeat.json'
-                    $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                    $heartbeatAgeMinutes = ([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
+                    $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-SmartM365JsonDocument $heartbeatPath).Document}else{$null}
+                    $heartbeatAgeMinutes = if($heartbeat){([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes}else{[double]::PositiveInfinity}
                     $heartbeatFresh = $heartbeatAgeMinutes -le [math]::Max(1, $HeartbeatStaleMinutes)
                 }
-                catch { $heartbeatFresh = $false }
+                catch { throw ('Cannot determine peer liveness; existing coordination state preserved: ' + $_.Exception.Message) }
                 # A restarted orchestrator on the same server may replace its own
                 # expired claim even though its new heartbeat is healthy.
                 if ($sameOwner) { $heartbeatFresh = $false }
 
                 if (-not $heartbeatFresh) {
-                    $takeoverLockPath = $claimPath + '.takeover.lock'
+                    $takeoverLockPath = (Get-SmartM365JsonNames $claimPath).Legacy + '.takeover.lock'
                     $takeoverStream = $null
                     try {
                         $takeoverStream = [System.IO.File]::Open($takeoverLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                        $confirmed = Get-Content -LiteralPath $claimPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                        $confirmed = (Read-SmartM365JsonDocument $claimPath).Document
                         $confirmedSafeUntilUtc = ([datetime]$confirmed.SafeUntilUtc).ToUniversalTime()
                         if ([string]$confirmed.ClaimId -eq [string]$existing.ClaimId -and
                             [string]$confirmed.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted') -and
                             [datetime]::UtcNow -gt $confirmedSafeUntilUtc) {
-                            $archivePath = '{0}.stale.{1}.json' -f $claimPath, [string]$confirmed.ClaimId
+                            $archivePath = '{0}.stale.{1}.json' -f (Get-SmartM365JsonNames $claimPath).Legacy, [string]$confirmed.ClaimId
+                            if ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') { $archivePath += '.txt' }
                             Move-Item -LiteralPath $claimPath -Destination $archivePath -ErrorAction Stop
                         }
                     }
@@ -673,7 +701,9 @@ function Set-SmartM365OrchestratorOccurrenceClaim {
         [string]$Detail = ''
     )
 
-    $claim = Get-Content -LiteralPath $ClaimPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $ClaimPath = Resolve-DistributedJsonPath $ClaimPath
+    $claimDocument = Read-SmartM365JsonDocument $ClaimPath
+    $claim = $claimDocument.Document
     if ([string]$claim.OwnerServer -ne $OwnerServer) {
         throw "Claim owner mismatch for $ClaimPath. Expected $OwnerServer, found $($claim.OwnerServer)."
     }
@@ -686,7 +716,7 @@ function Set-SmartM365OrchestratorOccurrenceClaim {
         else { $claim | Add-Member -NotePropertyName Detail -NotePropertyValue $Detail }
     }
     if ($PSCmdlet.ShouldProcess($ClaimPath, "Set occurrence claim status to $Status")) {
-        Write-JsonAtomically -Path $ClaimPath -Value $claim
+        Write-JsonAtomically -Path $ClaimPath -Value $claim -ExpectedSHA256 $claimDocument.SHA256
     }
     return $claim
 }
@@ -698,9 +728,9 @@ function Get-SmartM365OrchestratorConcurrencyLease {
         [Parameter(Mandatory = $true)][string]$ConcurrencyKey
     )
 
-    $leasePath = Join-Path -Path $LeasesRootPath -ChildPath ((ConvertTo-SafeFileName $ConcurrencyKey) + '.json')
+    $leasePath = Join-Path -Path $LeasesRootPath -ChildPath ((ConvertTo-SafeFileName $ConcurrencyKey) + '.json'); $leasePath = Resolve-DistributedJsonPath $leasePath
     if (-not (Test-Path -LiteralPath $leasePath -PathType Leaf)) { return $null }
-    $lease = Get-Content -LiteralPath $leasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $lease = (Read-SmartM365JsonDocument $leasePath).Document
     return [pscustomobject]@{
         LeasePath = $leasePath
         Lease = $lease
@@ -721,7 +751,7 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
     )
 
     [void](New-Item -ItemType Directory -Path $LeasesRootPath -Force)
-    $leasePath = Join-Path -Path $LeasesRootPath -ChildPath ((ConvertTo-SafeFileName $ConcurrencyKey) + '.json')
+    $leasePath = Join-Path -Path $LeasesRootPath -ChildPath ((ConvertTo-SafeFileName $ConcurrencyKey) + '.json'); $leasePath = Resolve-DistributedJsonPath $leasePath
     $owner = $OwnerServer.ToUpperInvariant()
     $occurrenceUtc = $Occurrence.ToUniversalTime()
     $lease = [ordered]@{
@@ -739,18 +769,12 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
     $json = $lease | ConvertTo-Json -Depth 6
 
     try {
-        $stream = [System.IO.File]::Open($leasePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-        try {
-            $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
-            $stream.Write($bytes, 0, $bytes.Length)
-            $stream.Flush($true)
-        }
-        finally { $stream.Dispose() }
+        $null = Write-SmartM365JsonBytesAtomically -Path $leasePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json)) -ExpectedSHA256 'ABSENT' -Validate { param($document) if (-not $document.PSObject.Properties['LeaseId']) { throw 'LeaseId missing.' } }
         return [pscustomobject]@{ Acquired = $true; Reused = $false; LeasePath = $leasePath; Lease = [pscustomobject]$lease; Reason = '' }
     }
     catch [System.IO.IOException] {
         try {
-            $existing = Get-Content -LiteralPath $leasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $existing = (Read-SmartM365JsonDocument $leasePath).Document
             $sameOwner = [string]$existing.OwnerServer -eq $owner
             $sameProcess = $false
             try { $sameProcess = [int]$existing.OrchestratorPid -eq $PID } catch { $sameProcess = $false }
@@ -768,16 +792,16 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
                 if (-not [string]::IsNullOrWhiteSpace($HeartbeatRootPath)) {
                     try {
                         $heartbeatPath = Join-Path -Path (Join-Path -Path $HeartbeatRootPath -ChildPath ([string]$existing.OwnerServer)) -ChildPath 'Orchestrator-Heartbeat.json'
-                        $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                        $heartbeatAgeMinutes = ([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
+                        $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-SmartM365JsonDocument $heartbeatPath).Document}else{$null}
+                        $heartbeatAgeMinutes = if($heartbeat){([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes}else{[double]::PositiveInfinity}
                         $heartbeatFresh = $heartbeatAgeMinutes -le [math]::Max(1, $HeartbeatStaleMinutes)
                     }
-                    catch { $heartbeatFresh = $false }
+                    catch { throw ('Cannot determine peer liveness; existing coordination state preserved: ' + $_.Exception.Message) }
                 }
                 if ($sameOwner) { $heartbeatFresh = $false }
 
                 if (-not $heartbeatFresh) {
-                    $takeoverLockPath = $leasePath + '.takeover.lock'
+                    $takeoverLockPath = (Get-SmartM365JsonNames $leasePath).Legacy + '.takeover.lock'
                     $takeoverStream = $null
                     try {
                         if ((Test-Path -LiteralPath $takeoverLockPath -PathType Leaf) -and
@@ -785,10 +809,11 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
                             Remove-Item -LiteralPath $takeoverLockPath -Force -ErrorAction SilentlyContinue
                         }
                         $takeoverStream = [System.IO.File]::Open($takeoverLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                        $confirmed = Get-Content -LiteralPath $leasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                        $confirmed = (Read-SmartM365JsonDocument $leasePath).Document
                         $confirmedSafeUntilUtc = ([datetime]$confirmed.SafeUntilUtc).ToUniversalTime()
                         if ([string]$confirmed.LeaseId -eq [string]$existing.LeaseId -and [datetime]::UtcNow -gt $confirmedSafeUntilUtc) {
-                            $archivePath = '{0}.stale.{1}.json' -f $leasePath, [string]$confirmed.LeaseId
+                            $archivePath = '{0}.stale.{1}.json' -f (Get-SmartM365JsonNames $leasePath).Legacy, [string]$confirmed.LeaseId
+                            if ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') { $archivePath += '.txt' }
                             Move-Item -LiteralPath $leasePath -Destination $archivePath -ErrorAction Stop
                         }
                     }
@@ -824,8 +849,9 @@ function Set-SmartM365OrchestratorConcurrencyLease {
         [Parameter(Mandatory = $true)][datetime]$SafeUntilUtc
     )
 
+    $LeasePath = Resolve-DistributedJsonPath $LeasePath
     if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $false }
-    $takeoverLockPath = $LeasePath + '.takeover.lock'
+    $takeoverLockPath = (Get-SmartM365JsonNames $LeasePath).Legacy + '.takeover.lock'
     $lockStream = $null
     try {
         for ($attempt = 1; $attempt -le 10 -and $null -eq $lockStream; $attempt++) {
@@ -839,7 +865,7 @@ function Set-SmartM365OrchestratorConcurrencyLease {
         }
 
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $false }
-        $current = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $current = (Read-SmartM365JsonDocument $LeasePath).Document
         if ([string]$current.LeaseId -ne $LeaseId -or [string]$current.OwnerServer -ne $OwnerServer.ToUpperInvariant()) {
             return $false
         }
@@ -880,8 +906,9 @@ function Exit-SmartM365OrchestratorConcurrencyLease {
         [Parameter(Mandatory = $true)][string]$OwnerServer
     )
 
+    $LeasePath = Resolve-DistributedJsonPath $LeasePath
     if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $true }
-    $takeoverLockPath = $LeasePath + '.takeover.lock'
+    $takeoverLockPath = (Get-SmartM365JsonNames $LeasePath).Legacy + '.takeover.lock'
     $lockStream = $null
     try {
         for ($attempt = 1; $attempt -le 10 -and $null -eq $lockStream; $attempt++) {
@@ -894,11 +921,13 @@ function Exit-SmartM365OrchestratorConcurrencyLease {
             }
         }
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $true }
-        $current = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $current = (Read-SmartM365JsonDocument $LeasePath).Document
         if ([string]$current.LeaseId -ne $LeaseId -or [string]$current.OwnerServer -ne $OwnerServer.ToUpperInvariant()) {
             return $false
         }
-        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction Stop
+        $consumedLease = Read-SmartM365JsonDocument $LeasePath
+        if ($consumedLease.Document.LeaseId -ne $LeaseId -or $consumedLease.Document.OwnerServer -ne $OwnerServer.ToUpperInvariant()) { return $false }
+        Complete-SmartM365JsonConsumption -Path $LeasePath -Owner 'Orchestrator concurrency lease' -ExpectedSHA256 $consumedLease.SHA256
         return $true
     }
     finally {
@@ -920,14 +949,15 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorConcurrencyLease',
     'Enter-SmartM365OrchestratorConcurrencyLease',
     'Set-SmartM365OrchestratorConcurrencyLease',
-    'Exit-SmartM365OrchestratorConcurrencyLease'
+    'Exit-SmartM365OrchestratorConcurrencyLease',
+    'Convert-SmartM365OrchestratorDistributedHistory'
 )
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxX041+k5grCQw
-# eaFFXUqouyfJ4nFxqphKcWeAbS1sKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi0OVR2RLgNxVD
+# Rf8vczok4mRs2PJY7Fz1XfSBOFdMjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1060,31 +1090,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKF7Q6stN9uHrQb3XE1BD2Av2NylGPZToz7hfRk3kH9+MA0GCSqG
-# SIb3DQEBAQUABIIBgJZr1cMN+g+Qnbj1NbK3Qpoi3P3+pzFb/CUmqjgrAwEK7zWq
-# QoieUZaVn5dFchtTHpSxfXNdU1xCjvvaBtanN/sRmLMoV1Sf+ynrrSqr863wuY40
-# 78r4N3IbCHuET5H1joUhj5KFdPeAg7S8fCZwZ5EUBy8hP5J9B9UBwW8vhvewSNY1
-# v1FKuv6JH0R6t376oSSuPgwBQ3XoEFd2nFsN4Fa1jytCdhr4FA7fBkfRfnHaujTV
-# k/kOxvDbirnPggCa0X6nqKnZgednbE5XivOLQXKJtFIl3CEnGidYwIkEYTx7jY54
-# UdONkGNep1SG4bY1x014/P+xGFXqhZMBO4ADjsn1dcrtZ4GipupVlt6oDh8XVhyh
-# OOjAaqLq+IEtanO1A7Tm9mETZHkd02KqENngLGGodwer/p2YpqYjbD1/FiRVTXDd
-# BgsKnrNjcvaXxdBIbeWWj0kiS6iK7vloY23lqK8z/9+b6B4iXVUpl2Kd8FJjvjqv
-# DKL5g10whXXOO1yHcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHXvdYP9aPtlLL/JqUzs+eoM6umGQCbE0924m936bMp1MA0GCSqG
+# SIb3DQEBAQUABIIBgJ3euft1WEcNxYBOTUCdhmCTdEP6DSuWIWRh19BVMQhuIIL3
+# LMC8CymaoqOoJ0PMitDEnpNvB+KBs0p4RdXA63fHL7XJ0CgY1KkdHOZVpSbYa/Dh
+# br3zgWiUgUqQWkeOiYy1rf8TyEcif+RhdnCACH7Uo3lnq/UpWu1DBhHikHVxFxix
+# rV74VxpafpwADYxiWGUJJk7SYOIfQyfZAP/01JRyf2a2FuQc4bpBkrNRaUXCDXAz
+# SmTQy+i/MAKeHegxsFV/HxokwZ8cakKpRbr9M0wk++1MGejBO7rm6ZzTTx46xjgU
+# gT/nGJGWnWGPjeXgMkLFbHTrjp5dSQicyckQFF4xuKNnfpY9gZVXwFLlAouRz+jU
+# ZuV7uH01o91g/0AIRoCesHzWz8aGMnqgReCZzQ3JOoFWeSmLyIarkLoLNORx8G0h
+# TtOBKyQlxjvoUPjhaxFOwAGzz131MDpErvb3JOmuY8IbvhT6hZg61SAHIJ9w7yCL
+# ildiCgrHZ0B7ZGkyrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDFLRVSgqa2Ee3P/YwFRJ3dwh8BqA8vLm0o79PQ
-# pH0E1jANBgkqhkiG9w0BAQEFAASCAgAFkxlHaKieiID7UlexGMC06OFZZ14n5eoG
-# 6hmalP9Aipfv83lpaw4PSWi8C7gq65IVtPuRqADTBTspT2iSB9tktd7E0bb6s1CK
-# KNJk1QGg5XIgXW0CWkIqVuu+V/NVOTvgov52dMzVhIIzNpy05i7aGyhXJLas/sJU
-# rAEZhN5kNuKD/H7JgV3yZdpFZA6DAPWHmIbFUXdZWtOleYfudjATXPOufLk57jPO
-# 6C6T5SYcrHozrD9RiurfmZYwt43VmouhxTbfTsVdK93dkad/kGdHi2TOZNfHZVoG
-# Et9QslNu/TjnvkztQe/Skc8PFViQuJa/T42jdmBFmec9kCmvukOPgnuWc+NdSf2K
-# QaQUAsrEvYX+1SCUoRokm1PlVyd0ODn9RYjxtQHvgQwF7LYvAUlNenYM6pQgIOjO
-# SQLuNF3iTbqVX/pqCvg9YzjOXAHGNc8tBoODtdLroI9RKQaANF7Ij5qhbs5kfZQ1
-# Lboy+nPk5ohqaSA8fXeiA8/ksz8swjnQ3h+0mInVLMxhulgcYZseZ0VjPyWRENRZ
-# ZMlJtQg5hs1gUs9gCNTA9A7NvuTk73RKqnmUR4ESdAOp+LlHJA4KXvTsqL+wzf40
-# JmJpAE+P9dffrS0WuzVAqPThFjsq5EFR4tk/acqTeLJHgd5pwFTESlZ/3N9dtH8Q
-# +wcYRLTeUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTNaMC8GCSqGSIb3DQEJBDEiBCDk8SkEVXLSWxB4qr3qQHgPAYuDCO2YXAZgQRCg
+# AZe/mzANBgkqhkiG9w0BAQEFAASCAgBOaRsgA+svYpnAI97/6KA8/16ayO0TVFhT
+# 7mb7RovvdkDGviETd3uVTYEV+XRjOxnmVRXLNsrk+UCN8mhaM1zRilgEYtFhKCaN
+# EgV2CrQQlim0+srSZOyz0FLRVPunwtV7tp1fG6cQLE3OUCbvYIU4sao+t17kE3Qu
+# d6F3KHFdoRlmcMYWAR6R2gw9GoXQFjLMFozQxtUVB5z0n2Zc1fUKR/hlMrsOKbpS
+# 20WMEwiRJwHgymxuVjopL541nTiZ3UqYuxzfi+FOldzPIlOifxVUfIGxpc3r4WZb
+# ZccdS/ioT8qYi+B0SD44BgJFZ9ls3r7U/LutJAqDm0RPte4uWkG3n6+yi2gRmw9L
+# 0QJ1t2Q02/QnAOsUDvc43Qu5mT5onMKGo4p+SmgnZNxzvkADRg5YtDDFuV5L3sdT
+# lkawQ7S+tV+pc5MEdn0ZjjfuXBUcfGuFB62J9DvELbzjSDxoPcSQCUk5YiVm4MOb
+# UYdbLZCYNjgjik1sIUlFTgZttZ+FXAAGiP6/P9uR8ZXynHXsLRsQzsHwtaaLrt2E
+# TX8rff6MZjsSbOAL0+jxRHTpnBe5z2QwX0zHADAn7CSZlxpOwk52WqIbOaxkZyZe
+# g4sY3mW7NktgErF0NT3/T2oqk8sGegEdmMcoyzKkT8BMGiy/98NTh6zZnWMuwrcM
+# suEjhJ1spg==
 # SIG # End signature block

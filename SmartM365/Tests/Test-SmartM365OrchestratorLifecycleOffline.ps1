@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
@@ -7,6 +7,7 @@ Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
 if (-not $SourceRoot) { $SourceRoot = Split-Path $PSScriptRoot -Parent }
 $source = Join-Path $SourceRoot 'SmartInventory/Orchestrator/SmartM365-Inventory-Orchestrator.ps1'
 $tokens = $null; $parseErrors = $null
@@ -40,9 +41,9 @@ $results = New-Object 'System.Collections.Generic.List[object]'
         $script:Process | Add-Member ScriptMethod Refresh { if ($this.RefreshFails) { throw 'Synthetic process access failure' } }
         $script:Process | Add-Member ScriptMethod WaitForExit { param($Milliseconds) if($this.WaitFails){throw 'Synthetic wait failure'}; return $this.HasExited }
         $start = $script:Now.AddMinutes(-10)
-        $info = @{Process=$script:Process;StartTime=$start;Occurrence=$start;LogPath='synthetic.log';Attempt=0;TimeoutMinutes=1;ClaimPath='synthetic-claim';ConcurrencyLeasePath='synthetic-lease';ConcurrencyLeaseId='synthetic-id'}
+        $info = @{Process=$script:Process;StartTime=$start;Occurrence=$start;LogPath='synthetic.log';Attempt=0;TimeoutMinutes=1;ClaimPath='synthetic-claim';ConcurrencyLeasePath='synthetic-lease.json';ConcurrencyLeaseId='synthetic-id'}
         $script:RunningJobs = @{Synthetic=$info}
-        $script:State = @{Jobs=@{Synthetic=@{Running=@{Pid=987654;StartTime=$start.ToString('o');ScheduledOccurrence=$start.ToString('o');LogPath='synthetic.log';Attempt=0;TimeoutMinutes=1;ClaimPath='synthetic-claim';ConcurrencyLeasePath='synthetic-lease';ConcurrencyLeaseId='synthetic-id'};PendingRetry=$null;LastStatus='Running';LastScheduledOccurrence=$start.ToString('o')}}}
+        $script:State = @{Jobs=@{Synthetic=@{Running=@{Pid=987654;StartTime=$start.ToString('o');ScheduledOccurrence=$start.ToString('o');LogPath='synthetic.log';Attempt=0;TimeoutMinutes=1;ClaimPath='synthetic-claim';ConcurrencyLeasePath='synthetic-lease.json';ConcurrencyLeaseId='synthetic-id'};PendingRetry=$null;LastStatus='Running';LastScheduledOccurrence=$start.ToString('o')}}}
         $script:ForcedPending = @()
         $script:StatePersistenceHealthy = $true
     }
@@ -82,7 +83,7 @@ $results = New-Object 'System.Collections.Generic.List[object]'
     function script:Test-Path { param($LiteralPath,$PathType) return $false }
     function script:Enter-SmartM365OrchestratorConcurrencyLease {
         param($LeasesRootPath,$ConcurrencyKey,$JobName,$Occurrence,$OwnerServer,$SafeMinutes,$HeartbeatRootPath,$HeartbeatStaleMinutes)
-        return @{Acquired=$true;LeasePath='synthetic-lease';Lease=@{LeaseId='synthetic-id'}}
+        return @{Acquired=$true;LeasePath='synthetic-lease.json';Lease=@{LeaseId='synthetic-id'}}
     }
     function script:Test-JobSelected { param($JobName) return $true }
     function script:Test-JobAllowedOnServer { param($Job,[switch]$AllowManual) return $true }
@@ -244,7 +245,7 @@ try {
         $dt=$null; $de=$null
         $distributedAst=[Management.Automation.Language.Parser]::ParseFile($distributedPath,[ref]$dt,[ref]$de)
         if($de.Count){throw 'Distributed module parse failed.'}
-        $leaseDefinitions=foreach($functionName in @('ConvertTo-SafeFileName','Write-JsonAtomically','Enter-SmartM365OrchestratorConcurrencyLease','Set-SmartM365OrchestratorConcurrencyLease','Exit-SmartM365OrchestratorConcurrencyLease')){
+        $leaseDefinitions=foreach($functionName in @('ConvertTo-SafeFileName','Resolve-DistributedJsonPath','Write-JsonAtomically','Enter-SmartM365OrchestratorConcurrencyLease','Set-SmartM365OrchestratorConcurrencyLease','Exit-SmartM365OrchestratorConcurrencyLease')){
             $fn=$distributedAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $functionName},$true)
             if(-not $fn){throw "Missing lease function $functionName"}
             $fn.Extent.Text
@@ -294,8 +295,8 @@ if($failed.Count){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6HkGnQqv2FKj1
-# BN3y3zRicdLDhbKmA7sEuIE9yGAkHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbawvBdnmVx3Zk
+# Wx3tTojXiVShWI2mWeacvxuJyL/UiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -428,31 +429,31 @@ if($failed.Count){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG8/xQnTZHd3gRs3JgUNqZdc9KY6zokSxIdNzi4MVR2EMA0GCSqG
-# SIb3DQEBAQUABIIBgBk3Ks/MKvhV5baJbEVx92uiTIhbRkotl2SPM9Jg6XBd+nCM
-# A5+wvYaqN6+o3jiD8Uf60iJs6CpufpJUshPbZMzPrhWWo27uk1GKPTBeq47bX1DV
-# +tBsFdEgeC9R5re4Z8VSMic3ggZvnpxadlor3sqLGaBUfz47TjnGKjgIlfn6Pc3T
-# SxS8wF8si8cKYtg0SElCc6QLFbPbImlumwWabsHjY4WS/JLIZMtdAiQONT3fGKSO
-# dnzpvVWF4A6gEUYx81jUC48rrriKGl+s+lIBEI++Ly/1MbFIQRV9ED3yEi7Y6yQ5
-# +avHwHmweBptjVZbTOBP0JPgwDyaSNQB9jVb0NQRoP/vxFPm+b+sqNExFj/Eww+h
-# PHnRiAghvO1eikVUHw+9OQjmiCQIRQ7WVrlJJk2sRLUpKPLsLMf8Wq6VIqjyzPF6
-# Xel1y7nYd4laFWrlYMcwaypFfQND6Ivo5mKpyaAmrKOlzxUZtJmncrNHm5mV87WS
-# hGH0PZ6YQ7M1lKYD6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOgziI7268ITu6XWYSyDyy9iW7QnsErNCINYeX9ILTHEMA0GCSqG
+# SIb3DQEBAQUABIIBgCmL9iWp1gsUJcC1PRWpSrQRf3xiZTVxARuuH0zKZTQularw
+# /0wpdbAONNyt+Ec7U5fcjkYTDbhCRfUl6kyupHGtvJc3O8rAk+3LMwE4awYYrd9O
+# A1iSpinszDWa8oQC86PlOa6JraxaTEQHkdGlz4YzBGEaHiwvYzcqeSsgiDp+eq2E
+# 3t8DocbGv+p5G9kQp+/SqXCVOBab/4f4aMhku2mot1LrFnNFj4nQjGu0kNr8Gjad
+# BxvlnQTV7ILNVArTj6gVDEiSdjBciX6qd1aHaEIN+3l9nK9vAGyWAfRQ/PI0hdIr
+# g6+VftFSVf+cs7i8mTJQ1FM/Nu7LEk4L2GZHZogg6gU4CADRZfyghMFs7jbpR1Gb
+# VVDi1A+rNzYHFWCdk5vC+VYr+dPlOfWI+t6cZUzavfJ0PsiJI5HQZLVSjmWH4E/J
+# rnUrqNuSEobjiceBCx/wsDQZy+95E7rRB8jeV8Cs/aSB8QVxNANlmOsL/UO+d6V2
+# A9WiLjEaTHk4QNo4e6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxNjA3
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCPEa7DAqVVjSJFwfwVnjqdHJvXyvKRAmAd/DJM
-# ihyxoDANBgkqhkiG9w0BAQEFAASCAgBJ3Xq/LnQa8+tWzEH03OKLeHAPaWc0DlwM
-# C9ZxqrHa9Iz7zZy8TOkmk2G4IwzLf27VpgyB+3n9YfANGMCWCAlVbAhljTLF2U27
-# 1fxNxaOaizi2JOTOMRPQSssY4MIQ+QPWUqh0n9TAOON080A/0/QirYMy72oyscs4
-# boGmcvFYSVLTz4tZ5eASL9wn1CKnrU0pmRiBTAfdp1dbFOoqJXagF7biA80x7E7H
-# zmD/MjbgqgZc+4Q6oLomLQn05PWYO7xLisc5tzzq8zgsDK/gsi7NnuSBhKjwOUnX
-# lUbEiLbTZRKaA8DYRCD4VKP12I9oBvzBhpId/LTXO59yVPleQ0UUUG7WdWPTu+QC
-# IYvAGGEnsackgO6T3taqTj8Rxi0QIOu8lynJoFAdjXnfThAbIuGFBSHRQfKBqepJ
-# DQwUElab7jM8kxV9/uFTeOqxm0n7jWZUjYnN8AqDCC7hVK9ll8np77ESjZYIkR9l
-# r35JtnZ0GlxQGwxohFvqb9u8JqseS0VTKaRY7eAXqC1IBLTj1DBuk9q3uZnkQj/s
-# MKKwD18irnM225vl+/UR1BIhreWgARrfLD17GnrvNqXXt/l5frJJnawcVPCtqz2T
-# A2NsP+Ghk7FXpgUNxmr/WNNiEcBPRWj3J5QeSyatYIwAJ04Yf4fW7oDgCeuHCmf0
-# jfFjsD0Ixg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NThaMC8GCSqGSIb3DQEJBDEiBCA+oFmZQOXHnok7hJFm9YRtP72UnMI7wrqBIobX
+# ybp05zANBgkqhkiG9w0BAQEFAASCAgCD1jt/iPZTj6lOZmvIsJpGyl2VWvHQrfwb
+# C8N/Z1lamzzc6Mn7XLjlzfOSOgwD9OO6BDDupZl4pV4RjV+QxfHJs9B8sDUZCqjO
+# bq6u+YuDK/ywukx1Sm0eLkOOtu/KEgPS9CVGYapCH4K3LkCxS5b7O7q9hy7jGzZ/
+# knvowGnv8eiSf7+kIOW/VUNkULeThj5gK21RSfBllqxP1yM+ibuFmoSr+qN4yigQ
+# Y82urSgKKMPSLBwYyi2qwt11LHQDVSP6LcNcdzxqiBfGliboXhsOLd4DhOmo51sd
+# gEsjn6JVgmVGSC/ZTLwcd533usJfKgeDeQPofCbIe3vCrMN077IucGcuVvO278Rs
+# JIRrWnr1izcSTzK+fXIV6AU3sjKZ6LFr5w5U1s9gvAIetdXz0LUEmwEyefIu2CSI
+# tcPHITM016IWKd7gRT6kjcYgJfLL4Q8k0F/GLWGahGcqGNZCi1mMrLkCm1gjgA76
+# RxYh84ETBSTqLHN7+fKBIZhtLo5renHyCWViuCtvCoWS8Kw+xDqKt0aFHtzvJYcN
+# bIPRxjSKL53Rn/cMDU2ENpwS2b3gmiT+00QJiTXI9ti9FC/bXPNg7bclNjighPop
+# BvYuzdUbJY5ANkmkwCFC+5AlJbjbnQBzvrWbFXij3hHt4sFcpki9WS9dOMrYFxJZ
+# 4F1nEGgy4w==
 # SIG # End signature block

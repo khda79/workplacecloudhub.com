@@ -1,6 +1,7 @@
 ﻿# Manual opt-in diagnostic only. No collector, publisher, cleanup or model access.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 
 function Get-WorkforceSystemMemory {
     try {
@@ -22,7 +23,8 @@ function Invoke-MonitoredWorkforceProcess {
     $started=[datetime]::UtcNow
     $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 2 -ErrorAction SilentlyContinue
     $hostInfo=@{StartedUtc=$started.ToString('O');ParentProcessId=$PID;PowerShellVersion=$PSVersionTable.PSVersion.ToString();Is64BitProcess=[Environment]::Is64BitProcess;TotalPhysicalBytes=if($os){[long]$os.TotalVisibleMemorySize*1024}else{$null};SampleIntervalSeconds=5;WorkerSHA256=(Get-FileHash -LiteralPath $WorkerPath).Hash;MonitorSHA256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;Publication=$false;InputMode='Existing raw exports, read only; no atomic snapshot claimed'}
-    [IO.File]::WriteAllText((Join-Path $RunRoot 'environment.json'),($hostInfo | ConvertTo-Json))
+    $environmentPath=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $RunRoot 'environment.json') -Owner 'WorkplaceEvidence-Prepare/diagnostic' -Validate {param($document) if($document.Publication -ne $false){throw 'Invalid diagnostic audit.'}}
+    Write-SmartM365JsonBytesAtomically -Path $environmentPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($hostInfo | ConvertTo-Json))) -Validate {param($document) if($document.Publication -ne $false){throw 'Invalid diagnostic audit.'}} | Out-Null
     $worker=Start-Process -FilePath $shell -ArgumentList $quoted -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $lastStage='Worker startup';$announcedStage='';$samples=0;$sampleErrors=0;$peakPrivate=0L;$minimumAvailable=$null;$maximumCommitted=$null;$peakWorkingSet=0L
     try {
@@ -48,7 +50,8 @@ function Invoke-MonitoredWorkforceProcess {
         } while($true)
         $worker.WaitForExit()
         $result=[pscustomobject]@{RunRoot=$RunRoot;WorkerProcessId=$worker.Id;ExitCode=$worker.ExitCode;LastStage=$lastStage;DurationSeconds=[math]::Round(([datetime]::UtcNow-$started).TotalSeconds,1);Samples=$samples;SampleErrors=$sampleErrors;SampledPeakPrivateBytes=$peakPrivate;ObservedPeakWorkingSetBytes=$peakWorkingSet;MinimumAvailablePhysicalBytes=$minimumAvailable;MaximumSystemCommittedBytes=$maximumCommitted;Publication=$false}
-        [IO.File]::WriteAllText((Join-Path $RunRoot 'result.json'),($result | ConvertTo-Json))
+        $resultPath=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $RunRoot 'result.json') -Owner 'WorkplaceEvidence-Prepare/diagnostic' -Validate {param($document) if($document.RunRoot -ne $RunRoot){throw 'Diagnostic run mismatch.'}}
+        Write-SmartM365JsonBytesAtomically -Path $resultPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($result | ConvertTo-Json))) -Validate {param($document) if($document.RunRoot -ne $RunRoot){throw 'Diagnostic run mismatch.'}} | Out-Null
         $result
     } finally {
         # Never automatically cancel or kill a workload being measured.
@@ -72,6 +75,7 @@ function Invoke-WorkforceMemoryDiagnostic {
     $sourceLock=$null
     try {
         $sourceLock=[IO.File]::Open((Join-Path $raw '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
+        Convert-PreparedAuditNames -Root $work -Family workforce-diagnostics
         $run=Join-Path $work ('workforce-diagnostics/'+[datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
         $outputs=Join-Path $run 'outputs';New-Item -ItemType Directory -Path $outputs -Force | Out-Null
         Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Workforce-only diagnostic. Private logs/output: {1}. No DATA-POWERBI publication; no collectors.' -f (Get-Date),$run)
@@ -88,8 +92,8 @@ Export-ModuleMember -Function Invoke-WorkforceMemoryDiagnostic
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIb69G0S08BTdc
-# xXTgghr2w/MBke92VPFE1qWiEaPWIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDM0+RXL13MXrQ
+# L/8CeOIlzVhizGgWMG+j63GezyN2IaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -222,31 +226,31 @@ Export-ModuleMember -Function Invoke-WorkforceMemoryDiagnostic
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBfDIAGCS7wzg9Cww4BNVMkygUVlTN+hZeT/eOO9fX/UMA0GCSqG
-# SIb3DQEBAQUABIIBgFub/pbaC7XmWiSpFaKoS75rebppIlW8uOULX89j2Q8LFTVq
-# fCKA08Tf2tVnuyPgWe5FYOrqOUN1k+qpWxXyPFTN2/oIJPxzocy0FUXcDhPWthor
-# HxvvI8BE0xDatXsUWAbqSeweslbkzgZ7sUT8TwVWMXBCGU8EvOM3gr0UT2s4kgRq
-# rIWi+ybEu+cKxv3wt42wFyc2n1OyiKBx/E1gFZmpd+iGdSniZJQfz9Kgxj1HlBdK
-# xBZx7W2+6xvWqZQ8BcDt62MqGYFZnqjZM7KzrL6okgBl7retrHNBam0JBBDnpxvS
-# MuwXex+UzkVPI7oP0ffXfO9cBOw286JowkecgwTLOharz79K5lBYysDOvGypudsb
-# ChwTEG5ufVjXndn/LCesQ99kLquDFvi71O0xFkG+DDlrcF4J00KxMARQZwS63kio
-# ESbvVzm8ljvD1pFbOgeAehI3xiB0WGECwAAWUmS0SQar1DtXGQGLplFydDURlQlU
-# irp4TSQ9Ymv/yTlkHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMlpPdCgrk58BloMYM7RZRqmovP29IqSibKXfBZIXmsuMA0GCSqG
+# SIb3DQEBAQUABIIBgE3amVYtGbw3mZInG6HGIePGqujj1eJOU2YqgoGfOVNAP0gm
+# ivdh6dyP4SXSGpb+ElRRn0WPicNmj2ijAdlHGZJ4XBNj8kZZ6U9u+ML4UOCpja1C
+# Blv7vjEZ8ynVSkxq4Xltj8J8kqMYwFYAfJSe31myf82kCEhewmYq7pbFlS0mxnjU
+# kYe69xrC4v2HI54y0YVXt6127T+uVLZKS5EyEFpJ7xIJEdvl9zYfDoqicsMwjyo5
+# WN01u/Eunux8RX1X5/yvxoa2DIt9I7Zl1AoEO5NJ6DKj//+7r1DRVFHayk4dAVHo
+# odMfPYWVXHgqObWnxvzVffPGRiCmhJhtOGQZXDrk3j1qJUMaGptKF41IHBIbtWqK
+# Rj7QHAq5AlTrzIqxcDUEw2ULWP8SNfxcGJILslWoi5OQV+5/ovr8aaJzbwJ7HDLd
+# BIExnQ7j9zf+93BZoJ+p0GNhTsSMk6h6wNsRDKiEZKq7VMT18B5KJlx2TAE0utWB
+# HCARp//jOyYMOY80ZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwODEx
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBfvUxuzunuywuZyJ6WqntS4RNnmzthwsqVBe59
-# LWBY8jANBgkqhkiG9w0BAQEFAASCAgBc5NybgZ1pDGTf9cAjAiEbZP17yP0Dl2cW
-# JAKZpC42uIqSjZD6qCVnSZb1ryqE0t5+taw/t8jFZ2iNZ6eioAQd3LBW0ZtKZw8Q
-# 11skYpnzcHEXwD0vGt2bDXzuwkkB0TAFcyGS8NBjuyDifadJ3SB+xE8urcXfglvb
-# GOsrENaVVh1mph16o0pflOpcSRF6ZZuU2wq/D+3tBVvdM63ghX8p4VOPa0Mr/h8m
-# J6Lf4tBLtnM9fbsWU/SrMptOofXdUgd1Uj3J8C2yw04JqmRGwZIUdlJp6Rv3M04u
-# /5Ts5hGsOxUeddrQm9j0T+ANJvdRVQzT6+RA8kuq5nLc34gLvJDlx48EOB48qKbq
-# AffI2ledxuCNa/R+pviLXWLU8x9H4SEKVTgnI4Ra6tksxbRtI6m2j42sdgdbtbQx
-# 7DAEejJwGIlb0xP8b3+fdNH2MUJZZl0jY9EMfOxS6LEI4G31qTpkqo46ZA2RULVe
-# XEBH3+llAuESALzWodoFXKVUVAjXsfB9MEFdQreLVI+WbmQYRxhIE8vKzjVjiNN4
-# lAbEftUDjMJFO4roON1hSibVZSu8T1OZBvxNVPF86hAH16XJItpftxEMZIpAF9PH
-# gn6BQE1y24he+zPXNSwG+EYMjl/SnpwfhaNK3z3XMimUFMoRoMqN2a8a0r6/E5Qk
-# BAteXvninQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
+# MDBaMC8GCSqGSIb3DQEJBDEiBCCAQ+b/fFtKv/Cf3Y/xS7y5piWcAvo4kAqrKYJK
+# gNrmxTANBgkqhkiG9w0BAQEFAASCAgAJ6LRJw+2hDEo9502ns5aIC6KgtgtmPLPK
+# YtSDsWKl16Eo7PgsaaHiY4WKJ5PFDUr6LC2tiCUTrg1fZjOHXtaotkTAXrV3SqrQ
+# 6Bz1+2MuI3l+GNDyyO8JEibtXys39ac4AhdBuJvWiYCHKBOvNwaQ4smvv+EmWeVp
+# fMBdMEVYAkkF3GiQb91NNygz+b69Rjo8+HhHU1U449fROsCDvnDLBVCqdMo7Qe85
+# Uvn+S0Dj1hpfS2TyY2BGw1VUU7yj4D/dTVLUrFgnAlcvfOf+NBYmJuLd2eEwlQyA
+# Aipz90Cd/rwynD0ZX8KfwshCr7nERCchwFjkfRgX792FUqNvPXC93kQ87mKZmDFR
+# GeCD/rXsrjhk86ZB4nMm5Ve3/8x1xmUHbsFz5thUOTqL7LlzJqDK43hOyoNLexFz
+# 9bR0zc2snpguEXzlOtTAKEENNZFwIT8y5aAuqjBOpQXTMvsuxqVhaay4pSiFWRJA
+# LrupWj8XHqJA5nYVU1yDZgm1AjS84gVRhu0vCH/EIPUgT2veI0irQQI6vVcgj0z3
+# rDoOVfLvgl+5Chsmas1S5ySYbfjAU/QmTv7MphaM+2PzMOIFbWjWe8SC4u1i2aS1
+# b+u4Up246TjuLWIrZ92lFMn+AfUYkZ+jjGUJdV7pKIdvZUtViUiCr4iuye3V3VrU
+# mf5+8yYQUQ==
 # SIG # End signature block

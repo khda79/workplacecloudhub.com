@@ -1,14 +1,20 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot '../../SmartM365/Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Global
 
 function Get-PreparedMetadataPath {
     param([string]$Folder,[ValidateSet('current','batch','validation')][string]$Name,[switch]$Optional)
-    # Prefer the new transport name. Never fall back after a read/parse failure.
-    foreach($suffix in '.json.txt','.json'){
-        $path=Join-Path $Folder ($Name+$suffix)
-        if(Test-Path -LiteralPath $path -PathType Leaf){return $path}
+    $path=Get-SmartM365JsonReadPath (Join-Path $Folder ($Name+'.json')) -Optional:$Optional
+    if($path){return (Read-SmartM365JsonDocument $path).Path}
+}
+
+function Initialize-PreparedMetadataNames {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey)
+    if((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText'){return}
+    if(Get-SmartM365JsonReadPath (Join-Path $OutputRoot 'current.json') -Optional){
+        Convert-PreparedMetadataNames -OutputRoot $OutputRoot -TenantKey $TenantKey -Apply | Out-Null
     }
-    if(-not $Optional){throw "Missing prepared metadata: $Name in $Folder"}
 }
 
 function Assert-PreparedUnlinkedPath([string]$Path){
@@ -26,6 +32,12 @@ function Assert-PreparedUnlinkedPath([string]$Path){
 function Convert-PreparedMetadataNames {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey,[switch]$Apply)
+    $qualifiedUnc=$false
+    if($Apply -and [IO.Path]::GetFullPath($OutputRoot).StartsWith('\\')){
+        $policy=Get-SmartM365JsonTransportPolicy
+        $qualifiedUnc=@($policy.QualifiedUncRoots | Where-Object { [IO.Path]::GetFullPath($OutputRoot).StartsWith(([IO.Path]::GetFullPath($_).TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if(-not $qualifiedUnc){throw 'Prepared metadata UNC migration requires qualification before activation.'}
+    }
     $root=(Resolve-Path -LiteralPath $OutputRoot).ProviderPath.TrimEnd('\','/')
     if((Split-Path $root -Leaf) -ne 'DATA-POWERBI'){throw 'Conversion requires a dedicated DATA-POWERBI directory.'}
     Assert-PreparedUnlinkedPath $root
@@ -37,8 +49,7 @@ function Convert-PreparedMetadataNames {
             $path=Get-PreparedMetadataPath $folder $name
             Assert-PreparedUnlinkedPath $path
             $legacy=Join-Path $folder ($name+'.json');$new=Join-Path $folder ($name+'.json.txt')
-            if((Test-Path -LiteralPath $legacy) -and (Test-Path -LiteralPath $new)){throw 'Both metadata names exist; resolve the ambiguity before conversion.'}
-            if($path -eq $legacy){$plan.Add([pscustomobject]@{From=$legacy;To=$new;SHA256=(Get-FileHash -LiteralPath $legacy).Hash})}
+            if(Test-Path -LiteralPath $legacy){$plan.Add([pscustomobject]@{From=$legacy;To=$new;SHA256=(Get-FileHash -LiteralPath $legacy).Hash})}
             return $path
         }
         $rootPointerPath=Get-PreparedMetadataPath $root 'current'
@@ -46,9 +57,15 @@ function Convert-PreparedMetadataNames {
         $pointer=Get-Content -LiteralPath $rootPointerPath -Raw | ConvertFrom-Json
         if($pointer.SchemaVersion -ne 1 -or $pointer.TenantKey -ne $TenantKey){throw 'Root pointer schema/tenant mismatch.'}
         $expected=$pointer;$seen=[Collections.Generic.HashSet[string]]::new()
+        $chainSeen=[Collections.Generic.HashSet[string]]::new()
+        $pending=[Collections.Generic.Queue[string]]::new()
+        foreach($batchFolder in Get-ChildItem -LiteralPath (Join-Path $root 'batches') -Directory){
+            if($batchFolder.Name -match '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){$pending.Enqueue($batchFolder.FullName)}
+        }
         while($null -ne $expected){
             $id=[string]$expected.BatchId
             if($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or -not $seen.Add($id)){throw 'Invalid or cyclic batch ID.'}
+            $null=$chainSeen.Add($id)
             $folder=Join-Path $root ('batches/'+$id)
             Assert-PreparedUnlinkedPath $folder
             $manifestPath=Plan-Name $folder 'batch'
@@ -73,9 +90,10 @@ function Convert-PreparedMetadataNames {
             if($receipt.PreviousBatchId){
                 $previousId=[string]$receipt.PreviousBatchId
                 if($previousId -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){throw 'Invalid previous batch ID.'}
+                if($chainSeen.Contains($previousId)){throw 'Cyclic previous batch identity.'}
                 $previousFolder=Join-Path $root ('batches/'+$previousId)
                 # Older retired payloads are not recreated or traversed.
-                if(Test-Path -LiteralPath $previousFolder){
+                if(-not $seen.Contains($previousId) -and (Test-Path -LiteralPath $previousFolder)){
                     Assert-PreparedUnlinkedPath $previousFolder
                     $previousReceipt=Get-PreparedMetadataPath $previousFolder 'current'
                     Assert-PreparedUnlinkedPath $previousReceipt
@@ -83,26 +101,98 @@ function Convert-PreparedMetadataNames {
                     if($expected.BatchId -ne $previousId){throw 'Previous batch identity mismatch.'}
                 }
             }
+            while($null -eq $expected -and $pending.Count -gt 0){
+                $other=$pending.Dequeue()
+                if($seen.Contains((Split-Path $other -Leaf))){continue}
+                $otherReceipt=Get-PreparedMetadataPath $other 'current' -Optional
+                if(-not $otherReceipt){Write-Warning "Uncommitted prepared batch preserved; owner receipt missing: $other";continue}
+                $expected=(Read-SmartM365JsonDocument $otherReceipt).Document
+                $chainSeen.Clear()
+                if($expected.BatchId -ne (Split-Path $other -Leaf)){throw 'Unreferenced batch ownership mismatch.'}
+            }
+        }
+        foreach($kind in 'retired','failed'){
+            $archiveRoot=Join-Path $root $kind
+            if(-not(Test-Path -LiteralPath $archiveRoot -PathType Container)){continue}
+            foreach($archive in Get-ChildItem -LiteralPath $archiveRoot -Directory){
+                if($archive.Name -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){continue}
+                Assert-PreparedUnlinkedPath $archive.FullName
+                if($kind -eq 'retired'){
+                    $archivedReceipt=(Read-SmartM365JsonDocument (Plan-Name $archive.FullName 'current')).Document
+                    $archivedManifest=Read-SmartM365JsonDocument (Plan-Name $archive.FullName 'batch')
+                    $archivedValidation=(Read-SmartM365JsonDocument (Plan-Name $archive.FullName 'validation')).Document
+                    if($archivedReceipt.TenantKey -ne $TenantKey -or $archivedManifest.Document.TenantKey -ne $TenantKey -or $archivedReceipt.BatchId -ne $archive.Name -or $archivedManifest.Document.BatchId -ne $archive.Name -or $archivedReceipt.ManifestSHA256 -ne $archivedManifest.SHA256 -or $archivedValidation.Passed -ne $true){throw 'Retired prepared receipts do not establish ownership and integrity.'}
+                }else{
+                    $failurePath=Get-SmartM365JsonReadPath (Join-Path $archive.FullName 'failure.json') -Optional
+                    if(-not $failurePath){Write-Warning "Failed batch without owner receipt preserved: $($archive.FullName)";continue}
+                    $failure=(Read-SmartM365JsonDocument $failurePath).Document
+                    if($failure.TenantKey -ne $TenantKey -or $failure.BatchId -ne $archive.Name){throw 'Failed prepared receipt ownership mismatch.'}
+                    $legacy=Join-Path $archive.FullName 'failure.json'
+                    if(Test-Path -LiteralPath $legacy){$plan.Add([pscustomobject]@{From=$legacy;To=$legacy+'.txt';SHA256=(Get-FileHash -LiteralPath $legacy).Hash})}
+                    if(Get-PreparedMetadataPath $archive.FullName 'validation' -Optional){$null=Plan-Name $archive.FullName 'validation'}
+                }
+            }
         }
         $null=Plan-Name $root 'current' # Publish the renamed root pointer LAST.
         foreach($item in $plan){
-            if((Get-FileHash -LiteralPath $item.From).Hash -ne $item.SHA256 -or (Test-Path -LiteralPath $item.To)){throw 'Metadata changed during conversion planning.'}
+            if((Read-SmartM365JsonDocument $item.From).SHA256 -ne $item.SHA256){throw 'Metadata changed during conversion planning.'}
         }
         if($Apply){foreach($item in $plan){
             if((Get-FileHash -LiteralPath $item.From).Hash -ne $item.SHA256){throw 'Metadata changed before rename.'}
-            [IO.File]::Move($item.From,$item.To,$false)
+            $validate={param($document) if($document -isnot [pscustomobject]){throw 'Prepared metadata must be a JSON object.'}}
+            # Publication lock spans all receipts; the shared per-file lock and journal
+            # make a partly completed chain resumable without recalculation.
+            Move-SmartM365OwnedJsonFile -Root (Split-Path $item.From -Parent) -RelativePath (Split-Path $item.From -Leaf) -Owner 'WorkplaceEvidence-Prepare' -Validate $validate -QualifiedUnc:$qualifiedUnc -RemoveIdenticalLegacy | Out-Null
             if((Get-FileHash -LiteralPath $item.To).Hash -ne $item.SHA256){throw 'Renamed metadata hash mismatch.'}
         }}
         [pscustomobject]@{Applied=[bool]$Apply;BatchId=$pointer.BatchId;Batches=$seen.Count;CheckedCsvFiles=$checkedCsv;MetadataFiles=$plan.Count;CsvRecalculated=$false;Files=@($plan)}
     } finally {$lock.Dispose()}
 }
-Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataNames
+function Convert-PreparedAuditNames {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][ValidateSet('transfers','workforce-diagnostics','DATA-REPAIR-BACKUPS')][string]$Family,[string]$TenantKey)
+    if((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText'){return}
+    $folder=Join-Path $Root $Family
+    if(-not(Test-Path -LiteralPath $folder -PathType Container)){return}
+    Assert-PreparedUnlinkedPath $folder
+    $plans=[Collections.Generic.List[object]]::new()
+    foreach($entry in Get-ChildItem -LiteralPath $folder -Directory){
+        $pattern=if($Family -eq 'transfers'){'^[a-f0-9]{32}$'}else{'^\d{8}T\d{9}Z-[a-f0-9]{8}$'}
+        if($entry.Name -notmatch $pattern){continue}
+        Assert-PreparedUnlinkedPath $entry.FullName
+        $markerName=switch($Family){'transfers'{'transfer'} 'DATA-REPAIR-BACKUPS'{'repair'} default{'environment'}}
+        $markerPath=Get-SmartM365JsonReadPath (Join-Path $entry.FullName ($markerName+'.json')) -Optional
+        if(-not $markerPath){Write-Warning "Audit folder without owner receipt preserved: $($entry.FullName)";continue}
+        $marker=(Read-SmartM365JsonDocument $markerPath).Document
+        if($Family -eq 'workforce-diagnostics'){
+            if($marker.Publication -ne $false -or $marker.WorkerSHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or $marker.MonitorSHA256 -notmatch '^[A-Fa-f0-9]{64}$'){throw 'Diagnostic audit ownership incomplete.'}
+            $names=@('environment','result')
+        }else{
+            if([string]::IsNullOrWhiteSpace($TenantKey) -or $marker.TenantKey -ne $TenantKey){throw 'Audit tenant ownership mismatch.'}
+            if($Family -eq 'transfers' -and $marker.BatchId -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){throw 'Invalid transfer batch identity.'}
+            if($Family -eq 'DATA-REPAIR-BACKUPS' -and ($marker.SchemaVersion -ne 1 -or -not $marker.PSObject.Properties['Files'])){throw 'Repair audit ownership incomplete.'}
+            $names=@($markerName)
+        }
+        foreach($name in $names){
+            $path=Get-SmartM365JsonReadPath (Join-Path $entry.FullName ($name+'.json')) -Optional
+            if(-not $path){continue}
+            $receipt=Read-SmartM365JsonDocument $path
+            if($name -eq 'result' -and ([IO.Path]::GetFullPath([string]$receipt.Document.RunRoot) -ne $entry.FullName -or $receipt.Document.Publication -ne $false)){throw 'Diagnostic result belongs to another run.'}
+            $plans.Add([pscustomobject]@{Path=$path;SHA256=$receipt.SHA256})
+        }
+    }
+    foreach($plan in $plans){
+        if((Read-SmartM365JsonDocument $plan.Path).SHA256 -ne $plan.SHA256){throw 'Audit changed during migration planning.'}
+        Resolve-SmartM365OwnedJsonPath -Path $plan.Path -Owner ('WorkplaceEvidence-Prepare/'+$Family) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Audit must be an object.'}} | Out-Null
+    }
+}
+Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataNames,Initialize-PreparedMetadataNames,Convert-PreparedAuditNames
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAo4btaEVDjTZcV
-# u0sgP5Ht5rZPUiSThQC9bqOFkmdvoaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBim3LDfzK9bu2w
+# yifzuPMwR39/Yv2sCvGU3o6Q+FFznqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -235,31 +325,31 @@ Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataN
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPLB/pRII0fThoBgQMhZLHRCAWCdMCqgrEsIytYmTt7aMA0GCSqG
-# SIb3DQEBAQUABIIBgKUKATDgSdH4aksokJXJMC9ZpmwIrhsW+KeT7Ih2l1suNCIB
-# bNPAbuqcDihwx/jh6rSeAyW5fiKLQkVy2I+z6pbqgtHpxZ6G7UhIrdzxMfDLfDm8
-# dpO1v5xscQB7zBJOe1n7RmGbcdd188dB8s2i7OXnEWbGaYzqB48f8qm7Zirdsuqo
-# 3/ggskiSFFMDdJHplgMQXkM2OmtCYwUUYajKz46w8E4N8ERRLZmYApdxVFN6ln2T
-# SlLVc4AP5ggqXwBWJ88mXWwSazkrKuESLrlQQye+o7Sce6RgsTUt2JB7ISeGGMgl
-# uYTkb4pEcIerEkDkXJot3+sP1cfLLScCLQLMc1JlMxLy+tkFtACs/8vPwL55LGof
-# nAFKTTFfc8odnDtW3V5BmLYtvv3TNw9pRHA45rrpTn/RyoxskLgAlHILV2TygP8g
-# nRlkt76CzwA0Q8SatxmmEfxkVuatIAq2kAnWHyfCdnpYDk1YGJi424iNk0JyB1BI
-# LLO7Qjyd0GjZlzmTmKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOYcE9XOBYfi1oyJt5hEGEr/Mumrs+8UtzZBDABUPpU8MA0GCSqG
+# SIb3DQEBAQUABIIBgIro6fre7tMIyFikwzk47XC6nvAjeRPuucBEHPGJSCiM96aw
+# RUqeQmgjzHkcgL1jT7KNswVLajr6Rhc8eQrDJzQ4pQTS9kCf+TISzTGwpsvTZ7iR
+# vJO6Fdu+7tfzFE+tzDA9H6NLFFLxsz7hd5+ws++WrXak2YmwpBpWizJBfN7hD0lj
+# L2Vkv4Mirhp1xslUUE6ZqErNi1RLFAuu4DtUA+7tLs9cLte3vbCRAtgtXVESgMVc
+# Z238z0UlubOnLhem2g+xr8zXgyfNko5xusRp7FozIJ99M/mvfs6BNFFulQdNBqoH
+# kR7zvdMARldFjEgUHGSmlmx6gtNpSkqyZA32NaBEcLVhoPKvqhB0dwSAJwYxeNw+
+# 8Qsbj4HsNbRsjl4MJSqI5YxfFOlBXA7GNuSCasdBCjKBNK7J5o/dfGRkRDSzoEvX
+# wAgfM4cOVkQO15j+Tt035WFzQNpUviAO00Ikln85MAAOgxqRV9Mnhza2seZA5mrP
+# hfp0AsyXRdUQlBrFqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzMy
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCHSFIZks0g0WCdINPUh8OWUdJXQX77n8sB9hgt
-# kQ3/DDANBgkqhkiG9w0BAQEFAASCAgBvDrVWwq94dMjHYXALprkbpiNV/HVaIIpk
-# 2ksAOTupds+LPNgK5zqWpiM/P6f20wYHIs6hwq40ndAH1LJCvDzH1qob8WQhNzWn
-# M4zxiAKIwch0TOrKlI1wUYuIRBdVkh41QUtbnmJtIluGDZJyhK3g54t2iK1N+zuV
-# P4e8G9o3+5HsiXVh+sfqU5t2iuQXWL31owov5FlitV1uGTU4g4wTGCUvVl2dt8sW
-# WYHp/btn0S8/nfWOCi5T5qpne/GUUN15xhaap09g4oXk+pg+ELjoxhbLc8zMoXU7
-# QY41Jnqe/p4xGdi+4rQG4F9/hwKVkJdfvldxKkGLa2g5Nc+6dNi4T11bfn66sXLt
-# JLtFMHmfpsIZHuM2MQ+bAKg1GqaMQ1GxTGk2t/MlSQuhqY+FxO6/V3XQChMHvYA2
-# VeQFRSrFTxqXIKvUvdKD5GMhXcaC7VBwlYveMt1QfjVgIgtY1yxN17o1zk8Jqnbr
-# gqd7vSkjX0XJr54aINJCTGLe5TQXjvDtfg03eEcRkT4z6ID/yTWQLdU7XVvCGaVf
-# 9aho9yglPw/affdAXhq3v8dYN6QkHDVaOEyX1JiWxvgHU9yI/FhGBUHnYFJhIinz
-# XQibRs6F4iuYNZ7OSS4xr9im6VdA3yxFHCwJkRDVLm7m7PJgCbSfKSNhop7AdeZy
-# k1IMtRlL6A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTlaMC8GCSqGSIb3DQEJBDEiBCCsRjGY/crD7Y2ZoRZVswwS1Mc1qYMB1nQFPkW2
+# IkQaXDANBgkqhkiG9w0BAQEFAASCAgCs9mh1QSsUmel/Hdf2nj1z1e1S7qvC1uo6
+# USz1KnyEI2aeGQiqioHPGZgcf3LCn4kglGxUx5YCYjzNcJOKRfQIxi0H+S7LqcAZ
+# cx4gTvNRzYOk8D1lb45yoCt+shnbQQadTOFKtIm+8BF/I7VBgP9m8G6Etifsw8Ub
+# 7y7Q1MtHyF6i+cF6PXsGugeJ5YkXPjrMutEb/2LNXpT0lGEYjkZ34azARdQL5eJE
+# xNOtuLkGx6daaTJONByqwTYPbvr0eWfXiceQnY6AfurxN9XIuJu550EbkJHavBWF
+# +NyV9ZS3X0g+whrLxRyvdONU4qLkbAluH+QRiKGwyPGNMRDK7uvqr+WeBJN67YUJ
+# kOjOYUvZqVIJ76HTFmooCCh79TPGwsqW0Yk+9lc1wG4HhTiESD3bdtvauXPZ8Iud
+# wPFxnK4z64AfZnnRXlSlp8+hqFHrcmLr8wfmIKvhmOxpSDG2sUFgi7xy3jQG2i5C
+# aNiRRY9Clmaqx4w1IL4HW98NeYpnDwmx46+yVl3x2dEY6HHtEuL70zS1xTSe0d/Q
+# soukbvfWUFaaAbw/+qEBzRPdUVo+5qOUa9niPerm6u3sx7KBiXYb+J6QKSc5qe0a
+# oUo+0eRa2gsWhLJWvA4bGwq1PZ3wVBJVZJhvvdCeA80OcnzArLFUgPDzzU5P1Ikp
+# XlvboA+nMw==
 # SIG # End signature block

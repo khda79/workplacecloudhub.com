@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.21
+1.5.22
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.21"
+$ScriptVersion = "1.5.22"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -235,13 +235,13 @@ function Find-SmartM365CoreModulePath {
     throw 'SmartM365.Core module manifest not found.'
 }
 function Get-SmartM365ScriptLocalConfig {
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ('{0}.local.json' -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ('{0}.local.json' -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = '{0}.template' -f $configPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
         if (-not (Test-Path -LiteralPath $templatePath)) {
             throw "Local configuration file not found and template is missing: $configPath"
         }
-        Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+        Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null
         Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
         Write-Host "Review the new .local.json values; the orchestrator continues with template defaults." -ForegroundColor Yellow
     }
@@ -434,7 +434,7 @@ function Get-OrchestratorSharePointMirrorRelativePath {
 function Test-OrchestratorSharePointMirrorFile {
     param([Parameter(Mandatory = $true)][IO.FileInfo]$File)
 
-    if ($File.Extension -notin @('.json', '.csv')) { return $false }
+    if ($File.Extension -notin @('.json', '.csv') -and $File.Name -notmatch '(?i)\.json\.txt$') { return $false }
     if ($File.Name -match '(?i)(?:\.lock|\.tmp|\.guard)$') { return $false }
     if ($File.Name -match '(?i)\.takeover\.lock$') { return $false }
     return $true
@@ -462,6 +462,10 @@ function Get-OrchestratorSharePointMirrorSnapshot {
                 continue
             }
             if (-not (Test-OrchestratorSharePointMirrorFile -File $item)) { continue }
+            if($item.Name -match '\.json(?:\.txt)?$'){
+                $json=Read-SmartM365JsonDocument $item.FullName
+                if($json.Path -ne $item.FullName){continue}
+            }
             $files.Add([pscustomobject]@{
                 LocalFilePath = $item.FullName
                 RelativePath = (Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName)
@@ -481,17 +485,17 @@ function Get-OrchestratorSharePointMirrorSnapshot {
 function Read-OrchestratorSharePointMirrorState {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    $selected = Get-SmartM365JsonReadPath $Path -Optional
+    if (-not $selected) {
         return [pscustomobject]@{ SchemaVersion = 1; UpdatedAtUtc = ''; Files = @() }
     }
     try {
-        $state = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+        $state = (Read-SmartM365JsonDocument $Path).Document
         if (-not $state.PSObject.Properties['Files']) { throw 'Files is missing.' }
         return $state
     }
     catch {
-        Write-OrchestratorLog -Message ("SharePoint mirror state is invalid; a full safe upload will be attempted without remote deletion: {0}" -f $_.Exception.Message) -Level WARN
-        return [pscustomobject]@{ SchemaVersion = 1; UpdatedAtUtc = ''; Files = @() }
+        throw "SharePoint mirror state is invalid; preserving prior state and remote files: $($_.Exception.Message)"
     }
 }
 
@@ -641,6 +645,19 @@ function Invoke-OrchestratorSharePointMirror {
         foreach ($relativePath in @($previousByPath.Keys)) {
             if ($currentByPath.ContainsKey($relativePath)) { continue }
             $previous = $previousByPath[$relativePath]
+            if($relativePath.EndsWith('.json',[StringComparison]::OrdinalIgnoreCase)){
+                $preferredRelative=$relativePath+'.txt'
+                if($nextByPath.ContainsKey($preferredRelative)){
+                    # Verified preferred upload has handled the exact old remote item.
+                    # Remove only the obsolete local mirror-index entry, never the cloud item.
+                    continue
+                }
+                if($currentByPath.ContainsKey($preferredRelative) -or (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText'){
+                    $nextByPath[$relativePath]=$previous
+                    Write-OrchestratorLog -Message ("Legacy remote item retained pending verified transition: {0}" -f $relativePath) -Level WARN
+                    continue
+                }
+            }
             if ($relativePath -like 'DATA-ALL/Orchestrator/Election/Concurrency/*') {
                 if (Invoke-OrchestratorSharePointDelete -LocalFilePath ([string]$previous.LocalFilePath) -Reason 'expired concurrency lease') {
                     $deleted++
@@ -772,6 +789,16 @@ function Write-FileAtomically {
     $folder = Split-Path -Path $Path -Parent
     if ($folder -and -not (Test-Path -LiteralPath $folder)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+    if ($Path -match '(?i)\.json(?:\.txt)?$') {
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+        $validate = { param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator JSON must be an object.' } }
+        if ([IO.Path]::GetFileName($Path) -match '^Orchestrator-(Heartbeat|Capabilities|ElectionPlan)\.json(?:\.txt)?$') {
+            $null = Publish-SmartM365RegeneratedJsonBytes -Path $Path -Owner 'Orchestrator operational snapshot' -Bytes $bytes -Validate $validate
+        } else {
+            $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -Validate $validate -LockTimeoutSeconds $script:Settings.AtomicWriteRetrySeconds
+        }
+        return
     }
     $temp = "{0}.{1}.{2}.tmp" -f $Path, $PID, ([guid]::NewGuid().ToString('N'))
     try {
@@ -1276,14 +1303,14 @@ function Update-JobsManifestIfChanged {
 # State file
 # ==========================================================
 function Read-OrchestratorState {
-    if (Test-Path -LiteralPath $script:Settings.StatePath) {
+    if (Get-SmartM365JsonReadPath $script:Settings.StatePath -Optional) {
         try {
-            $state = Get-Content -LiteralPath $script:Settings.StatePath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            $state = ConvertTo-SmartM365OrchestratorHashtable (Read-SmartM365JsonDocument $script:Settings.StatePath).Document
             if ($state -is [hashtable] -and $state.ContainsKey('Jobs')) { return $state }
-            Write-OrchestratorLog -Message "State file has an unexpected shape; starting with a fresh state." -Level WARN
+            throw 'State file has an unexpected shape; existing state preserved.'
         }
         catch {
-            Write-OrchestratorLog -Message ("Failed to read state file '{0}': {1}; starting with a fresh state." -f $script:Settings.StatePath, $_.Exception.Message) -Level WARN
+            throw "Failed to read state file '$($script:Settings.StatePath)'; existing state preserved: $($_.Exception.Message)"
         }
     }
     return @{
@@ -1907,8 +1934,9 @@ function Request-OrchestratorStop {
 
     $owner = Get-OrchestratorLockOwner
     if (-not $owner) {
-        if (Test-Path -LiteralPath $script:Settings.StopRequestPath) {
-            try { Remove-Item -LiteralPath $script:Settings.StopRequestPath -Force -ErrorAction Stop } catch { }
+        if (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional) {
+            $staleRequest=Read-SmartM365JsonDocument $script:Settings.StopRequestPath
+            Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator stop request' -ExpectedSHA256 $staleRequest.SHA256
         }
 
         $candidates = @(Get-OrchestratorProcessCandidate)
@@ -1939,7 +1967,7 @@ function Request-OrchestratorStop {
         Tenant = $Tenant
         Reason = 'ManualStopRequest'
     }
-    $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:Settings.StopRequestPath -Encoding UTF8
+    Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($payload | ConvertTo-Json -Depth 5)
     Write-OrchestratorLog -Message ("Stop request written for orchestrator PID {0}: {1}" -f $owner.Pid, $script:Settings.StopRequestPath)
     Write-Host ("Stop request written for orchestrator PID {0}. Waiting up to {1} second(s)..." -f $owner.Pid, $TimeoutSeconds) -ForegroundColor Cyan
 
@@ -1962,24 +1990,21 @@ function Request-OrchestratorStop {
 }
 
 function Test-OrchestratorStopRequested {
-    if (-not (Test-Path -LiteralPath $script:Settings.StopRequestPath)) { return $false }
-
-    $requestText = ''
-    try { $requestText = Get-Content -LiteralPath $script:Settings.StopRequestPath -Raw -ErrorAction Stop }
-    catch { }
-
-    try { Remove-Item -LiteralPath $script:Settings.StopRequestPath -Force -ErrorAction Stop } catch { }
+    if (-not (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional)) { return $false }
+    $requestDocument = Read-SmartM365JsonDocument $script:Settings.StopRequestPath
+    $request = $requestDocument.Document
 
     $requestedBy = 'unknown'
     $requestedFrom = 'unknown'
     $requestedAt = 'unknown'
     try {
-        $request = $requestText | ConvertFrom-Json -ErrorAction Stop
         if ($request.PSObject.Properties['RequestedBy']) { $requestedBy = [string]$request.RequestedBy }
         if ($request.PSObject.Properties['RequestedFrom']) { $requestedFrom = [string]$request.RequestedFrom }
         if ($request.PSObject.Properties['RequestedAtLocal']) { $requestedAt = [string]$request.RequestedAtLocal }
     }
     catch { }
+
+    Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator stop request' -ExpectedSHA256 $requestDocument.SHA256
 
     Write-OrchestratorLog -Message ("Manual stop request consumed. RequestedBy={0}; RequestedFrom={1}; RequestedAt={2}. No running inventory child job will be killed." -f $requestedBy, $requestedFrom, $requestedAt)
     return $true
@@ -2265,7 +2290,7 @@ function Get-OrchestratorPeerHealthSnapshot {
     foreach ($peerServerValue in $expectedPeers) {
         $peerServer = [string]$peerServerValue
         $peerFolder = Join-Path -Path $sharedRoot -ChildPath $peerServer
-        $heartbeatPath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-Heartbeat.json'
+        $heartbeatPath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-Heartbeat.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $heartbeatPath -Optional; if ($selectedPeerPath) { $heartbeatPath = $selectedPeerPath }
         if (-not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) {
             $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatMissing|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatMissing' -Server $peerServer -Status 'Missing' -Details "No heartbeat file was found at $heartbeatPath"))
             continue
@@ -2274,7 +2299,7 @@ function Get-OrchestratorPeerHealthSnapshot {
         $heartbeat = $null
         $heartbeatTime = [datetimeoffset]::MinValue
         try {
-            $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
             if (-not $heartbeat.PSObject.Properties['Timestamp']) { throw 'Heartbeat Timestamp is missing.' }
             $timestampValue = $heartbeat.Timestamp
             if ($timestampValue -is [datetimeoffset]) {
@@ -2322,7 +2347,7 @@ function Get-OrchestratorPeerHealthSnapshot {
         }
 
         if (-not $script:Settings.PeerJobMonitoringEnabled) { continue }
-        $peerStatePath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-State.json'
+        $peerStatePath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-State.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $peerStatePath -Optional; if ($selectedPeerPath) { $peerStatePath = $selectedPeerPath }
         if (-not (Test-Path -LiteralPath $peerStatePath -PathType Leaf)) {
             $issues.Add((New-OrchestratorPeerIssue -Key ("StateMissing|{0}" -f $peerServer.ToUpperInvariant()) -Type 'StateMissing' -Server $peerServer -Status 'Missing' -LastSeen $lastSeenText -Details "Heartbeat is healthy but no orchestrator state file was found at $peerStatePath"))
             continue
@@ -2330,7 +2355,7 @@ function Get-OrchestratorPeerHealthSnapshot {
 
         $peerState = $null
         try {
-            $peerState = Get-Content -LiteralPath $peerStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            $peerState = ConvertTo-SmartM365OrchestratorHashtable (Read-SmartM365JsonDocument $peerStatePath).Document
             if ($peerState -isnot [hashtable] -or -not $peerState.ContainsKey('Jobs')) { throw 'State file has an unexpected shape.' }
         }
         catch {
@@ -3745,9 +3770,9 @@ function Restore-RunningJobs {
             $leaseIsCurrent = $false
             if (-not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeasePath) -and
                 -not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeaseId) -and
-                (Test-Path -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -PathType Leaf)) {
+                (Get-SmartM365JsonReadPath ([string]$runInfo.ConcurrencyLeasePath) -Optional)) {
                 try {
-                    $currentLease = Get-Content -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $currentLease = (Read-SmartM365JsonDocument ([string]$runInfo.ConcurrencyLeasePath)).Document
                     $leaseIsCurrent = [string]$currentLease.LeaseId -eq [string]$runInfo.ConcurrencyLeaseId -and
                         [string]$currentLease.OwnerServer -eq $env:COMPUTERNAME.ToUpperInvariant()
                 }
@@ -4024,12 +4049,12 @@ function Get-LiveOrchestratorServerCapabilities {
             continue
         }
         $serverFolder = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath $serverName
-        $capabilityPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Capabilities.json'
-        $heartbeatPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Heartbeat.json'
+        $capabilityPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Capabilities.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $capabilityPath -Optional; if ($selectedPeerPath) { $capabilityPath = $selectedPeerPath }
+        $heartbeatPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Heartbeat.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $heartbeatPath -Optional; if ($selectedPeerPath) { $heartbeatPath = $selectedPeerPath }
         try {
             if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf) -or -not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) { continue }
-            $capabilities = Get-Content -LiteralPath $capabilityPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $capabilities = (Read-SmartM365JsonDocument $capabilityPath).Document
+            $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
             $capabilityAge = ($nowUtc - ([datetime]$capabilities.GeneratedAtUtc).ToUniversalTime()).TotalMinutes
             $heartbeatAge = ($nowUtc - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
             if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $script:Settings.PeerHeartbeatStaleMinutes) { continue }
@@ -4044,8 +4069,8 @@ function Get-LiveOrchestratorServerCapabilities {
 
 function Read-SharedElectionPlan {
     if (-not $script:Settings.DistributedSchedulingEnabled) { return $null }
-    if (-not (Test-Path -LiteralPath $script:Settings.ElectionPlanPath -PathType Leaf)) { return $null }
-    try { return Get-Content -LiteralPath $script:Settings.ElectionPlanPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    if (-not (Get-SmartM365JsonReadPath $script:Settings.ElectionPlanPath -Optional)) { return $null }
+    try { return (Read-SmartM365JsonDocument $script:Settings.ElectionPlanPath).Document }
     catch {
         Write-OrchestratorRuntimeUpdateWarning -Key ("plan-read:{0}" -f $_.Exception.Message) -Message ("Shared election plan cannot be read; elected jobs fail closed: {0}" -f $_.Exception.Message)
         return $null
@@ -4054,9 +4079,9 @@ function Read-SharedElectionPlan {
 
 function Read-SharedElectionRebalanceRequest {
     if (-not $script:Settings.DistributedSchedulingEnabled) { return $null }
-    if (-not (Test-Path -LiteralPath $script:Settings.ElectionRebalanceRequestPath -PathType Leaf)) { return $null }
+    if (-not (Get-SmartM365JsonReadPath $script:Settings.ElectionRebalanceRequestPath -Optional)) { return $null }
     try {
-        $request = Get-Content -LiteralPath $script:Settings.ElectionRebalanceRequestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $request = (Read-SmartM365JsonDocument $script:Settings.ElectionRebalanceRequestPath).Document
         if (-not $request.PSObject.Properties['RequestId'] -or [string]::IsNullOrWhiteSpace([string]$request.RequestId)) {
             throw 'RequestId is missing.'
         }
@@ -5224,7 +5249,7 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.56' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -5473,8 +5498,30 @@ try {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
 
+    foreach ($property in @('StatePath','SharePointMirrorStatePath','StopRequestPath','ElectionRebalanceRequestPath','JobsManifestPath')) {
+        $script:Settings.$property = Resolve-SmartM365OwnedJsonPath -Path $script:Settings.$property -Owner ('Orchestrator:' + $property) -Validate {
+            param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator persistent JSON must be an object.' }
+            $required=switch($property){
+                'StatePath'{@('Jobs')}
+                'JobsManifestPath'{@('Jobs')}
+                'SharePointMirrorStatePath'{@('Files')}
+                'StopRequestPath'{@('RequestedAtUtc','RequestedBy','RequestedFrom')}
+                'ElectionRebalanceRequestPath'{@('RequestId','RequestedAtUtc')}
+            }
+            foreach($field in $required){if(-not $document.PSObject.Properties[$field]){throw "Orchestrator $property ownership/schema missing $field."}}
+        }
+    }
+    foreach ($property in @('HeartbeatPath','CapabilitiesPath','ElectionPlanPath')) {
+        $names = Get-SmartM365JsonNames $script:Settings.$property
+        if ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') { $script:Settings.$property = $names.Preferred }
+        else {
+            $selected = Get-SmartM365JsonReadPath $names.Legacy -Optional
+            if ($selected) { $script:Settings.$property = $selected }
+        }
+    }
+
     if ($script:Settings.CentralConfigurationEnabled) {
-        $bootstrapJobsPath = $effectiveManifestPath
+        $bootstrapJobsPath = $script:Settings.JobsManifestPath
         if (-not (Test-Path -LiteralPath $bootstrapJobsPath -PathType Leaf)) {
             $bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json.template'
         }
@@ -5569,7 +5616,7 @@ try {
         $centralSnapshot.ManifestSync
     }
     else {
-        $manifestTemplatePath = '{0}.template' -f $script:Settings.JobsManifestPath
+        $manifestTemplatePath = Get-SmartM365JsonTemplateName $script:Settings.JobsManifestPath
         if (Test-Path -LiteralPath $manifestTemplatePath) {
             Sync-SmartM365OrchestratorJobsManifest -Path $script:Settings.JobsManifestPath -TemplatePath $manifestTemplatePath
         }
@@ -5620,6 +5667,8 @@ try {
         exit 3
     }
     $script:LockOwned = $true
+
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $script:Settings.ElectionClaimsPath -LeasesRootPath $script:Settings.ConcurrencyLeasesPath
 
     Update-OrchestratorServerCapabilities -ForceRefresh
     Update-OrchestratorElectionPlan -ForceRefresh
@@ -5751,8 +5800,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJBILuR3CeuD9C
-# NCXo6LQLW+cy6RH/22S+MH3rUnGEGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVymcD3/KA5SYy
+# /DPmb3Pq6lZch015tOHnuekX/o2Kk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5885,31 +5934,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII4JXWMPD+xVGpPWwQbfMnXJ1ul4dgW9jjwZrcYknTXPMA0GCSqG
-# SIb3DQEBAQUABIIBgC430wO+9RWbqcUgSDqqIpBoWB+WiHEMqfuoE8iaTBmzmEcg
-# K0HKAjXuiWfDPYlwwykCUIXcHm3N6XSh4gv/1Q4u5rJO7JwaLZZcaFzycb4hyI6/
-# lwikVxui5Hc3So1DoTiCuxLYZKtuRt/AQ68wRihC5qPC+5NnMJlC25J/U3KQudgQ
-# Kby8D5oqmWd3hMmMBOXp3MGaNd9wxLTIJYNmDyjiZicRFruGb0O76WA6l/GctXoO
-# cYhu+D7qx6kRSUwSimQOJ1vkELIS6E6h0EhTFoCTKcFrMX0P+aMz1gLQP2CrvOMK
-# nFTpFhZiYc7ZENopTM3jRey2hIA4brmOugvOIin38nm9MBvxaDrI8upU7eY6G17h
-# Y6HGs6oVvC8Oj2zbP33qiL9gXlpq8xaTgG1ZZyLsCdwCl84g0EFz8l+uAQ/x98p2
-# JH/t128E2Y5vsdOEzBoJZ2vSOyFm9tzP1h6gcUIod4pNCNeCREjNAwwiYqSnx/hO
-# YdFWD5tt2hzXI8Ake6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIHboMpF4mgDIxtvv4TdMYs+pFpZonFvj6tLCP6icRuuMA0GCSqG
+# SIb3DQEBAQUABIIBgC7PZvhtyF/pzBJNidiL4wGTLGgCOjJYkfW/0cJNPvSIOwCs
+# iJ/6eQMakkfiHHfYMkMmr3Aw8PtEn79NTV5ROS7pXo+LHAdJn5DgsJIxltkY/47k
+# i0m7XqEc0sZwszqqJW9CxW9XOpBRF9NELua/5123soaGHln8eUMXGbfXkIxqA3Rj
+# uqH2yRMhl5ulA7L5LFsmK6F8Cs/8Xt9oK07GGm/KytzIpgMGriBd0IWwV//4L0og
+# 5QvHPJMgN86rPUlPoZjJND5C1b5JLVESNKWxy4HjywfGlg4UWfSy/FTROqzRhk00
+# JUuWWsb7OWjhDPxlIA7byfKFheOMfxuexGPU1dRe5WKSwV7THX36VuuIrIYx4bSH
+# ZFPNwek7AYWdqHCWIZ+iTlrmvtzFnDfWomHiZCC1AS5vlw05h99Tfq0JeLisgjUq
+# P15qJWmUsWlNPn2XNpKs0NylT0hZaGATCoHnqiV4C8DoTC1f3pbFPldV9A3/sL23
+# d/YQpeykjIlCzTm8TaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxNTEz
-# MzlaMC8GCSqGSIb3DQEJBDEiBCBOW7tBEzB5TPHkaaXHnRalEKaWDsxTv0FtTfze
-# xi586DANBgkqhkiG9w0BAQEFAASCAgAc8zHO3iSUHcregvHtERv4jBb6L3eNuroM
-# +XxVS31dYauAk8hMGPVxEHhDd6VJx5eHNderjra4uuviiQjKyCynxQ9kmzGHhGDL
-# wJ58zRkpgz01t5fzakmj1kwt449n1BxRcSKc9e12s2qC3yucIZwfIuHJggx0dIV3
-# wIyZ0joMJXm90W6lUR8F7fTIk+vgrblJKhgih9GMco5bX6wEaIpwpahG8AGVLPjD
-# hegnH3kthiPCFblbGqI21IF2cQxH6QO4z0MXPQpx88/hAv+penOG43vMFH8lhcIK
-# Wvn7PhRRGTPbLP4gJ89sXwQ/Uya6CTs7YHkx06KDZN0CGDmbHrQmmMZwPfSCvwze
-# 1cGjzlwpWmp4auArPT651eIsUpyWj+Og8ZnzCNEeg1hFG1+v8fVchKaWxkyVbQLJ
-# Z72Cgy+7lsVmw4teEnakFyUJCyvAPSNOJmB1KH/OcvhcqN3fckxlzIdNCbxe7Fbm
-# kl6wt+cndjpdwzeGpOTO/GNKi98GsoIeoIWQ88NdOlFnkyqYKw9qj6gtxR+8x80H
-# rCsBzLPbkgzbqVp8/CWgwh3qoR1X/GUf7C24DjpnykeX3Rb3bnmMWSVrrWh0aN8a
-# fMVnNeeCL6sEa74FUzqYhhhTDAUdoa0SoGxQQRJKEFoNxOTKU/KGS8sHEQ8qvcy/
-# vZ51AHuCZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCmP+O2nbJQ7QfOS+NWcQx3Rpv/3hEhvOX0MBUw
+# PhmLIDANBgkqhkiG9w0BAQEFAASCAgA0vKcZUEDEheKpJXpQOgl0LPkHWcccf17M
+# G752cf+I+sqZQrSFdZxzZAcqvxRODs2+tgnU92I4z597jR+xDTY9303MEi/5637G
+# k0hOyWZ4WyKss1E3hadoVxiQzRyNLUcmgZXzOoenj+7RQtlpS4PlaB91IBf1H978
+# f+ZM9jL/pu/AHq6cldtiaokjTYghxrcr1A3EYD27JCQz2sFAS9c/Mr0dIu3OPay2
+# /MaMb1Dn+hQjrpKwJthNhDYIDxJSy1fcLrYGGa3ttiqV1m9K3P49i1t4t4tKamLN
+# A6sVUqCW/33kwYL5QGpJ9yA684feiJjJGT3GXDKFaRVu+lixrJI07t7QVsmM1w3P
+# hAlNJeqeiKPjmnDH7qFeUlae3xgbzpQyjC48Tq/vYTPf2w1GRRBnSTCqBto/0Q25
+# Stphig6T8/OKiMZm/GW/mxaLL0XraZB5PXRpq2+dQS2tbf6KMVT/dUFZlxw26XSg
+# q3jSbf03rZ146WAQJNmJWbnTCDB2Fe1l2MIxaBaqbwDUOWjNVshiGPZ/YPJ857o/
+# w3Hys0jqBz5b30jmlRYaQx87wSXi7gSQnXOsmhNZgP1Au3azoUN7ypuktaM94+2V
+# jLTqHTHWHESKcU4aBFpGzHNKerusplezaSD9h3VR7mQ/1kbGiGaflvaiALmVT1Rq
+# aXVt2nWFmA==
 # SIG # End signature block

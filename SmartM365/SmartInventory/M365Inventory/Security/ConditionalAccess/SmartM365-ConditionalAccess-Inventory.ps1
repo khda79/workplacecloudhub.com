@@ -1,16 +1,16 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
 Collects Conditional Access policy configuration and normalized target evidence.
 .VERSION
-1.0.0
+1.0.1
 .REQUIREMENTS
 Microsoft Graph application or delegated permission Policy.Read.All.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,1000000)][int]$MaxItems=0)
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.0';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.1';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-ConditionalAccessRows{
     param([object[]]$Policies,[string]$RunId,[string]$CollectedAtUtc)
@@ -23,11 +23,11 @@ function ConvertTo-ConditionalAccessRows{
     }
     return [pscustomobject]@{Policies=@($policyRows);Targets=@($targetRows)}
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psm1') -Force;$sample=[pscustomobject]@{id='p';displayName='Require MFA';state='enabled';conditions=[pscustomobject]@{users=[pscustomobject]@{includeUsers=@('All');excludeUsers=@();includeGroups=@();excludeGroups=@()};applications=[pscustomobject]@{includeApplications=@('All');excludeApplications=@()}}};$test=ConvertTo-ConditionalAccessRows @($sample) r n;if($test.Policies.Count-ne 1 -or $test.Targets.Count-ne 2){throw 'Conditional Access self-test failed.'};'PASS: Conditional Access offline contract';return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.3' -Force;$sample=[pscustomobject]@{id='p';displayName='Require MFA';state='enabled';conditions=[pscustomobject]@{users=[pscustomobject]@{includeUsers=@('All');excludeUsers=@();includeGroups=@();excludeGroups=@()};applications=[pscustomobject]@{includeApplications=@('All');excludeApplications=@()}}};$test=ConvertTo-ConditionalAccessRows @($sample) r n;if($test.Policies.Count-ne 1 -or $test.Targets.Count-ne 2){throw 'Conditional Access self-test failed.'};'PASS: Conditional Access offline contract';return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.3' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Security\ConditionalAccess' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Connect-SmartM365EvidenceGraph $script:Runtime @('Policy.Read.All') -InteractiveAuth:$InteractiveAuth
     $raw=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies' -MaxItems $MaxItems)
@@ -40,8 +40,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwm7D7T+HI4sD9
-# GDuBMJp3KDFQwt5yQ7vXQwUOr8C8MKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUAXNofWKf5DgX
+# bPCtO4El+moyXlWgD2m4C5BNljHD3aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -174,31 +174,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIECwfv3rLJR9ujhPTQhiIqmezGDMOIhPn9Ijw+ObeAFiMA0GCSqG
-# SIb3DQEBAQUABIIBgKvQUzdZq3irBn7pSFAvXmApEQYMP6zzS3N+rCvbIpyMlzRR
-# WpvDqQys+mjq8b8ri58Z+ck6W/IGlo7zdN7bbt6enWmNe4AFxIOBBzacYe1kAnbR
-# SPQ/agGD4mL1ASDXeDdrUq75pvKKAOcb9t75RQI7sKR6vZNF+QIv409E4sLor8/n
-# HcyhnzYMg4QlnM+mO4GluCkMLEgAcGqZPjLSzsdYMeOuyNpcYweecnvEvgFs8oW7
-# czL9vOmI3ZdMkb142ueKBWA3Bovf3SsCaaAurgPvHA6kli/rXqB40a2OaEkXdhrP
-# gT5QwuxUL0j1wdSYtc5jdilubDe2MUQIpn2RYlEqgZQz2EtDJZQU6KBxcRrb6qz/
-# Rf/WriIqIBzNy/lBJf/6fa6QFQDahL/fLOILfPawqr6wdo1X6wHz2c7BkpCNEMxK
-# ii8KzgObNlgSAJ089K6cuIfSMv5pg9aWdtpL2xYGoqok+ULZwY9LgkQzbBEaINk5
-# qMzsvpFqRcUNAwW0QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB4X4KotYSzj47RCOZkY+lMl6gMkoeczAmvvbdTpxeQkMA0GCSqG
+# SIb3DQEBAQUABIIBgF8La6l7BPTeX8FnmzDwVxLLgLtQBnFmHx9+6/CyRMeBXhJ3
+# bAeNRUlVLweGu68ymMZyXAo/1assjBwrczMUNfLEyOaIJiM/Ixuvuq8H51/WF9F9
+# 36aEHmfH/nPwtp5Q4oAv+G0TUUMW77OLIZTV8zMLMD4bv7tZUxCTmtN5r4oEqXOE
+# 1VZKIyr4G4RWqOIo1fz9H/FqBdMZ34v4zaVX+Ni6Kt2t1HWFEautfnaOlK9VQVCu
+# XQTQzqa7mhIecsa5xILVt9lQf71528Nrtrp9mdURA8ksx37psJ8tM20rB/4AINu3
+# JZUUxct066YoFhwZNJHrwLVl0oYDjYsb9Wlf5HXdzHjFxX/CxSAdKvLHCYdSI8NM
+# sOP9qgGmZ1az0EDTNXTWKFcQbR5TZmJZqWel63VFA3eADEzxwohA/kg9+E88VYTs
+# JmYtx2ybLX7OQVOc40sf4E13fo26SvCz24smrhVrj/3AmeUwZELlKu6Eug0PVWNb
+# JycR4wCpgmLya9SVPaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MTcxMjQz
-# MDJaMC8GCSqGSIb3DQEJBDEiBCCmqiZDAzCTZ+ihF3IcooAlc4JjFibQnYH7tTDh
-# ZNZz7TANBgkqhkiG9w0BAQEFAASCAgCMEE/cxTzpyJaovpbjkd6luBNUSty5NIaH
-# fSboRg/pvT/7LjgBRHEKQWy0h04bJ9QIl1MaGpwAGfHbwhiIrrhzS6aqhP2wlkBc
-# 7iRofDbl9CN4gKFN888847sPTXPHyr49Vq83CMEUwRs+J4CIKqPMn7Ql1lGEkIZK
-# 9MPn22KSevdP1ZP7ho/FmkIzDUR3b+t1JPClNE/mh/EywqEf01N9ZwVzNnToLGTl
-# aZo/pMwoqSwqtylcbtfth35NayxdV/gpqZO5iuXwFRgz61qC2HrQi0KZGqL7iO8U
-# UqDTRHvvPDhKaWcZe4lpOUlvHjeamCN2AoDcZAjfSka1wnbFtTCfPZMFdet7PiOf
-# IMfATVaINKErawE/6QKaPdZNDibWkcM6SyZmpKo+Ou7AnRaeljhG+/t4p7mQeGda
-# 3FYq9SV/ZWcyHQ7HoLiQM3ONUv8KtSRtOBp14w11qkpKKvISYoKb0YQsPChFVmnp
-# rs+aU1RC4mK8mQmROi/DUPe8FxFZDQ31D9xrS0kQabpAKsifblQDSpnApFAF1g3E
-# egqPO4HtA2lxVZc+hqvIbHMNEDZXRB+GJQBS9yPvWC7uunmcI0MX3tamb0cLG/Lm
-# xvRXISzQ54NyVRaBSV+iCWFW1527tE18mUczpkVKXtypgk8u0Ef+tRo6cDwoOVpM
-# NDBOeqM7iw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTBaMC8GCSqGSIb3DQEJBDEiBCBTBt2ZB17MAuJEY3O+HwzogNaw5iQrJU5zM9wt
+# TurfCTANBgkqhkiG9w0BAQEFAASCAgAMCiS8uRp05NoqjfJB/whfmebTVW5lhrSX
+# +kIZIgr48mG8CPLBiAzkW+Ip6Qrl2NPWK2PVuu+1VQPPq5bUGpCKpQPJZW0mfJ66
+# HwL5VupNNHr53r5OJlsdjb3rC7wq7VCvM0fM58SWjrFUajxKxHk+HSK3S7bARALR
+# 6InngFvsY2SoLxPbYGUR2AxvMJYylM2sMQ8rdZNy4lr+bWArRwU1E8gv6oCepKQq
+# REpGvTC1TvflNFLCC3CD8atKmI428ljLgt3Hq189WEIwIkWu9YoSmZarwbJUoACE
+# UPPDA3D6gL6fLdve3T/03zejO/A4SAbVd/hzGuoLviwueEAl//XOV6kO22JTn3V1
+# XH67oxerVps3+T34l0F5qgs3Y38O3DSWqm1XPIT4BM27fBa8UvskiF08fmfpdolh
+# PkwuaZh59/6GM4Qu9LOksaDKzOdRna1uTxLA0npov94yVBVeVdBtFDh6fS8p/5lP
+# g7jwq45l4c5Sf9fJSuK/2XXV56R/lseqhGZqzohtLeQzRBftyQAAqmcD+nbrEmiK
+# Hd3JPJ1PNBThE+pSGHWxEWexWlHDG/EK9yiSihYfuI7NyfsmmeeTV/pZmNvxuALD
+# lsqobs+FVWQWS8GR8HnwkcBdkcknPVledZ0V5e/8f9qT+kPCrfViMm5WD3sk5O8w
+# riTmOrVw2Q==
 # SIG # End signature block

@@ -14,7 +14,12 @@ function Get-PreparedChildPath([string]$Root, [string]$Relative) {
 }
 
 function Write-PreparedJson([string]$Path, $Value) {
-    [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 20))
+    if($Path.EndsWith('.json',[StringComparison]::OrdinalIgnoreCase)){
+        $Path=Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'WorkplaceEvidence-Prepare' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Prepared audit must be an object.'}}
+    }
+    if($Path -match '\.json(?:\.txt)?$'){Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Prepared metadata must be an object.'}} | Out-Null}
+    else{[IO.File]::WriteAllBytes($Path,$bytes)}
 }
 
 function Remove-PreparedOwnedPath([string]$Root, [string]$Relative) {
@@ -38,8 +43,14 @@ function Remove-PreparedOwnedPath([string]$Root, [string]$Relative) {
 function Clear-PreparedRunPayload([string]$WorkRoot, [string]$RunId, [string]$DataRoot, [string]$TenantKey) {
     if ($RunId -notmatch '^[a-f0-9]{32}$') { throw 'Invalid owned run ID.' }
     $run = Get-PreparedChildPath $WorkRoot $RunId
-    $marker = Get-Content -LiteralPath (Join-Path $run 'run.json') -Raw | ConvertFrom-Json
+    $marker = (Read-SmartM365JsonDocument (Join-Path $run 'run.json')).Document
     if ($marker.Owner -ne 'PreparedEvidencePipeline/v1' -or $marker.RunId -ne $RunId -or $marker.DataRoot -ne $DataRoot -or $marker.TenantKey -ne $TenantKey) { throw 'Run ownership mismatch; no cleanup performed.' }
+    foreach($name in 'run','capture','failure'){
+        $path=Join-Path $run ($name+'.json')
+        if(Get-SmartM365JsonReadPath $path -Optional){
+            Resolve-SmartM365OwnedJsonPath -Path $path -Owner 'WorkplaceEvidence-Prepare/run' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Invalid prepared run audit.'}} | Out-Null
+        }
+    }
     foreach ($name in 'source','prepared','AccountClassification.psd1') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
 }
 
@@ -172,7 +183,7 @@ function Get-PreparedSourcePlan {
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
         [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
-    $spec = Get-Content -LiteralPath $SourceContractPath -Raw | ConvertFrom-Json
+    $spec = (Read-SmartM365JsonDocument $SourceContractPath).Document
     $items = [Collections.Generic.List[object]]::new()
     foreach ($name in $spec.currentFiles) { $items.Add(@{Relative="DATA-LAST/$name";Kind='Current'}) }
     foreach ($name in $spec.mappingFiles) { $items.Add(@{Relative=$name;Kind='Mapping'}) }
@@ -259,16 +270,19 @@ function Publish-PreparedEvidenceBatch {
     if ($output.TrimEnd('\') -eq $staging.TrimEnd('\')) { throw 'Staging and publication roots must differ.' }
     if ((Split-Path $output -Leaf) -ne 'DATA-POWERBI') { throw 'Publication root must be a dedicated DATA-POWERBI directory.' }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
+    Initialize-PreparedMetadataNames -OutputRoot $output -TenantKey $TenantKey
     # Held throughout validation and commit; a failed process releases the OS lock.
     $lock = [IO.File]::Open((Join-Path $output '.publication.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
     $batch=$null; $committed=$false
     try {
         $currentPath = Join-Path $output 'current.json.txt'
-        if (Test-Path -LiteralPath (Join-Path $output 'current.json')) { throw 'Convert existing metadata with Convert-SmartM365-WorkplaceEvidence-Metadata.cmd before publishing another batch.' }
+        if (Test-Path -LiteralPath (Join-Path $output 'current.json')) { throw 'Legacy prepared metadata is preserved while JSON transport policy is Readers. Activate the approved JsonText deployment before publication.' }
         $previousPath = Get-PreparedMetadataPath $output 'current' -Optional
         $previous = if ($previousPath) { Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json } else { $null }
         if ($previous -and $previous.TenantKey -ne $TenantKey) { throw 'Output root belongs to another tenant.' }
-        $contract = Get-Content -LiteralPath $ContractPath -Raw | ConvertFrom-Json
+        $contractReceipt = Read-SmartM365JsonDocument $ContractPath
+        $ContractPath = $contractReceipt.Path
+        $contract = $contractReceipt.Document
         foreach ($name in $AllowEmptyTables) { if ($name -notin $contract.tables.table) { throw "Unknown empty-table exception: $name" } }
         $batchId = [datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
         $batch = Get-PreparedChildPath $output "batches/$batchId"
@@ -362,7 +376,7 @@ function Invoke-PreparedEvidencePipeline {
         # Recover payloads from interrupted v0.1.6+ runs only, under both locks.
         # Unmarked legacy folders and another tenant's folders are never swept.
         foreach ($prior in Get-ChildItem -LiteralPath $work -Directory | Where-Object { $_.Name -match '^[a-f0-9]{32}$' }) {
-            if (Test-Path -LiteralPath (Join-Path $prior.FullName 'run.json')) { Clear-PreparedRunPayload $work $prior.Name $root $TenantKey }
+            if (Get-SmartM365JsonReadPath (Join-Path $prior.FullName 'run.json') -Optional) { Clear-PreparedRunPayload $work $prior.Name $root $TenantKey }
         }
         $selectedUtc=[datetime]::UtcNow.ToString('O')
         $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly)
@@ -404,8 +418,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6Q770ip1ZXeOg
-# 2o1/CmJD0V9X2ta56BnVqwlO7OlczqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaG9+UxILBmVhu
+# bfTF1kWerMmc8zD0kshcSRbKr+ml7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -538,31 +552,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICtSmAr33ip6bKETTz4sTDNKExKd6ixbe6uDnKdEc0deMA0GCSqG
-# SIb3DQEBAQUABIIBgCorYJpzYYaZYoj/Xo0eWmGoZ5kBvjiIZlNsVnwcuhmyAwtM
-# JRbD6UGZyu4mcQ6FUVkzDtGX2Q12MossFEYJqCMovjC3wB0dr6rqht+N8if0+1QV
-# wEBXrmMkm0TUUEyXG09IF3h/31X/1Mbu0/LPRB5gKnNVpPVj4bpAWXzXwMP86BF+
-# Re6dJfcxDzVXMz1VSDxYk0eSXA96B/FiR7LdbJS1AuL5kz7agp/q+SXOKBWkXLDq
-# 78/BUt7W6g6k9Nm/KrifRa3I2PlH7Y3awJb2c3ihIjeAJqXuEioDZZrPkaOG6oZo
-# St5zXuLkhL26a9b2aoNDMe3Bc/7DyG2LuezWyUvZxFuMZRExy6nWpXvK6C5X1K5a
-# v4rCIx2VcwOP6h0Awg4OQFjDzBF4axKIcteXWkfHAmoXv0kJJq2ouZMEWKFGJORb
-# okxm3TyjP1xhbCYW0In2XPJrjH9ke4A4lY7s1jEbP4cMUsbsZPAeC6f0rwraYWww
-# asMQJXGvlpAg8voMyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHEjqkaEaqRwDVmilT5M3flFMVEBB/aM04BYhcc17JOxMA0GCSqG
+# SIb3DQEBAQUABIIBgH1rSUiCqhv+aSCWU1qjke2R9hkIsuQ09iIJbDLMdak+sGxO
+# kvo5mKaMIpyBn+1uy4UC+52MXonluJbLk5bFB/+1OtQd+m+VP93b7ROEEpDMOJQB
+# qw9nm2EtMl9cx6NAJNDClDp/YbGb4vzysnu6RPbksnUaU5VYSN8CQjY2UZpF12bM
+# V9uYMXMBA8jhEoUMM3uFMQGiM/GmJH6MUfn0FgXiSrN94iH1vsD1wq7waJ+IOVgj
+# hliEd5NC/3LaihPbCEHVSBiX+l8m1LPbJDNPFQFMgR9q85AipW3aYs48M0tcuykq
+# jX4BTE/Kl/dcsRFc8MVRwl57uMM2pP9a/QZUm6PuBn4asqKMHVP2QrAFb52Za3+Z
+# PAqZ+VKtQ9kFjBQmvWPoL3hSnDFa9sSySxj5l0/BRrrzQ9GfUFm1XmZMrVMF/RuD
+# kkiKbZ4GHfg3/IkaCRm3n91F+/h446n4GoISgHeHg8/vzPuZFJ1rfVUI/JD6YqsG
+# ynh0nHXwVzaDDgBO6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
-# MzJaMC8GCSqGSIb3DQEJBDEiBCChSu0s/JuW0yjUT3P2tklpOKkJ6nTUtBlIWzvv
-# xm9jrzANBgkqhkiG9w0BAQEFAASCAgA+MviLfPWD4XytHcnm8vQIPXXOcXNvlXeQ
-# OGqM7cH9utXnIFYNvYlzVeJyIWwzd9zdqUGqZidfW7mcRKK8HTyooSCe+Y2c1hfa
-# bIkUX16I07nfTUEZzk+BYWkdPudA2uAn4JaGGgI4VusM1ZI3ig9NqdKK4VwTWhrh
-# 9FSESzMkpX+PFKZ5uFa/VAymUe6E9uuEA8vXz49bdvhuM5lW8mM4Gh7CEcDh6s7e
-# p4vm3C78e1W9vKpjNzTneMAhZb0Qw662qxOsY8S++TV4dsjYeH6L+5pqftPq3SH3
-# iMlb4EmfKAR5jg1D8AE/qrfYhcgA6w+vZPZs3ts77GM7t5Z3UMqG/YtdWuqvGGXy
-# zHCwbKd/LZa5X/07dg3lBDvhoa246Pdxq7Oa85GJFzIBKXkRugpeyzcNzS8a5mQ/
-# yph7ezlK0m3/RjhdWAbxiFKEwAoF/hParjiPKCQ7kcJnkx+g02GJ3nMPlT08Cj91
-# ltSp/9tfbkE4B95Hmg39qwpN5bLw7inqgPaMBC+y9VqinQVLNZi6ZP8XgSvPCfFQ
-# uiMRYW0JLeruzEyBpaKBb/vN6r6nuIJMpAlzt11NE/u1lu4os4ZxomhTftLMWJem
-# TL5/5H4TfFOrzrEKxlEy1tJ7LZHMYS/P6TAxnTeA+X4RmLS28dVfem22pHxemuwk
-# MGIQm/3rnQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTlaMC8GCSqGSIb3DQEJBDEiBCCfeNCGu7tiG8i96f+jeONYQbWf5YBeW7ne+uyX
+# QqX60DANBgkqhkiG9w0BAQEFAASCAgB5A8Wusjvt6j0ZVdeF/FTms08TKmRFVyQ+
+# ouw046xM3HsftxxlwokTSc94uLxYw3WM0Ge611dU5vyNOyc/lriqMJ3n4BRF5LSB
+# 7qBdz3iSD8sEKAobQozjPl8N/HdySZY5igLbDwv3Z9rFlv2tCnCXq5IGFspL6Gg/
+# uYcIbYiSTd3AGG9Bqp6X1sJ14yX8bFsmUwdBTIoKd2hCDBlUfQSqK5vCyvZKnBwa
+# lOfThnqVEfBOfOTkGaBFubt0dtI+x4oUYtHFOGkaqAr+YsrCHNK/IzcdtjZaD9C6
+# GpxWmWvcCYCWedkzlQiZgXtXVMmo/2VIw8tfdP+uVIGhn7OWixSdfA4MXj9zppL1
+# s3v9ywiPskKU/JeQL4j0HyTnhKnhgbnuWqVvaIlCqOLOCL8ZdOVQ1xTqI676SRxj
+# Jyu9fXN3GUq24ZpyOPEnPHmWTjuLfkcuTVqYexldAlhaUHXCVUGXiMfOy6aubiS6
+# 3TcEOw0SmctibzIwrouiGsIY5zvJ4PCQrcfyESsb1S3Zaz9Ijgbk+KrM1NNROiJc
+# H3GmfFYLZodebZPpZIb12WiiFL/4+7tvvwgvkYUZYY4fB7xmDpHKLvjfQ8A7bELS
+# UzF0Oc5wuMcgwVE5FA55tuDCNOpF5hzZNc9y0x0Y2wmyHhclLaAMMf1+wlXhxvdz
+# Bs10oESzEA==
 # SIG # End signature block

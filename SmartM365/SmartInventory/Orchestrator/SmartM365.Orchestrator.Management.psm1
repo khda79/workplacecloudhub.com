@@ -1,4 +1,33 @@
 Set-StrictMode -Version 2.0
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+$script:JsonVersionRoots = @{}
+
+function Resolve-OrchestratorConfigurationJsonPath {
+    param([Parameter(Mandatory)][string]$Path)
+    Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'Orchestrator configuration' -Validate {
+        param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator configuration must be an object.' }
+    }
+}
+
+function Convert-OrchestratorConfigurationVersions {
+    param([Parameter(Mandatory)][string]$Root)
+    if ((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText' -or $script:JsonVersionRoots.ContainsKey($Root) -or -not (Test-Path -LiteralPath $Root)) { return }
+    foreach ($folder in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\d{8}T\d{9}Z_[0-9a-f]{8}$' })) {
+        foreach ($leaf in @('Orchestrator-Jobs.before.json','Orchestrator-Cluster.before.json','Orchestrator-Jobs.after.json','Orchestrator-Cluster.after.json','Publication-Failed.json')) {
+            $path = Join-Path $folder.FullName $leaf
+            if (Get-SmartM365JsonReadPath $path -Optional) { $null = Resolve-OrchestratorConfigurationJsonPath $path }
+        }
+    }
+    $script:JsonVersionRoots[$Root] = $true
+}
+
+function Copy-OrchestratorConfigurationSnapshot {
+    param([Parameter(Mandatory)][string]$Source,[Parameter(Mandatory)][string]$Destination)
+    $sourceDocument = Read-SmartM365JsonDocument $Source
+    $bytes = [IO.File]::ReadAllBytes($sourceDocument.Path)
+    $receipt = Write-SmartM365JsonBytesAtomically -Path $Destination -Bytes $bytes -ExpectedSHA256 'ABSENT' -Validate { param($document) if ($document -isnot [pscustomobject]) { throw 'Configuration snapshot must be an object.' } }
+    if ($receipt.SHA256 -ne $sourceDocument.SHA256) { throw 'Configuration source changed while saving version snapshot.' }
+}
 
 $script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
 $script:ValidDays = @('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')
@@ -26,11 +55,12 @@ function Get-SmartM365OrchestratorConfigurationPaths {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath)
     $configFolder = Join-Path $SharedDataFolderPath 'Config'
+    Convert-OrchestratorConfigurationVersions -Root (Join-Path $configFolder 'Versions')
     [pscustomobject]@{
         SharedDataFolderPath = $SharedDataFolderPath
         ConfigFolderPath = $configFolder
-        JobsPath = Join-Path $configFolder 'Orchestrator-Jobs.json'
-        ClusterPath = Join-Path $configFolder 'Orchestrator-Cluster.json'
+        JobsPath = Resolve-OrchestratorConfigurationJsonPath (Join-Path $configFolder 'Orchestrator-Jobs.json')
+        ClusterPath = Resolve-OrchestratorConfigurationJsonPath (Join-Path $configFolder 'Orchestrator-Cluster.json')
         VersionsFolderPath = Join-Path $configFolder 'Versions'
         AuditFolderPath = Join-Path $SharedDataFolderPath 'Audit'
         AuditPath = Join-Path $SharedDataFolderPath 'Audit\Orchestrator_ConfigChanges.csv'
@@ -48,8 +78,10 @@ function Get-SmartM365OrchestratorFileHash {
 function Read-SmartM365OrchestratorJson {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "JSON configuration file not found: $Path" }
-    Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 100 -ErrorAction Stop
+    if ($Path.EndsWith('.template', [StringComparison]::OrdinalIgnoreCase)) {
+        return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 100 -ErrorAction Stop)
+    }
+    (Read-SmartM365JsonDocument -Path $Path).Document
 }
 
 function Get-SmartM365OrchestratorJsonContent {
@@ -115,6 +147,10 @@ function Write-SmartM365OrchestratorTextAtomically {
 
     $folder = Split-Path -Path $Path -Parent
     if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+    if ($Path -match '(?i)\.json(?:\.txt)?$') {
+        $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($Content)) -LockTimeoutSeconds $RetrySeconds -Validate { param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator JSON must be an object.' } }
+        return
+    }
     $temporaryPath = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllText($temporaryPath, $Content, [Text.UTF8Encoding]::new($false))
@@ -138,8 +174,7 @@ function Write-SmartM365OrchestratorJsonAtomically {
     $content = Get-SmartM365OrchestratorJsonContent -Document $Document
     if ($CreateNew) {
         $bytes = [Text.UTF8Encoding]::new($false).GetBytes($content)
-        $stream = [IO.File]::Open($Path, 'CreateNew', 'Write', 'Read')
-        try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+        $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -ExpectedSHA256 'ABSENT' -LockTimeoutSeconds $RetrySeconds -Validate { param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator JSON must be an object.' } }
         return
     }
     Write-SmartM365OrchestratorTextAtomically -Path $Path -Content $content -RetrySeconds $RetrySeconds
@@ -436,10 +471,10 @@ function Publish-SmartM365OrchestratorConfiguration {
         $clusterChanged = $desiredClusterHash -ne $currentClusterHash
         $versionId = '{0}_{1}' -f [datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0, 8)
         $versionFolder = Join-Path $paths.VersionsFolderPath $versionId; New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
-        $jobsBeforePath = Join-Path $versionFolder 'Orchestrator-Jobs.before.json'
-        $clusterBeforePath = Join-Path $versionFolder 'Orchestrator-Cluster.before.json'
-        Copy-Item $paths.JobsPath $jobsBeforePath
-        Copy-Item $paths.ClusterPath $clusterBeforePath
+        $jobsBeforePath = Resolve-OrchestratorConfigurationJsonPath (Join-Path $versionFolder 'Orchestrator-Jobs.before.json')
+        $clusterBeforePath = Resolve-OrchestratorConfigurationJsonPath (Join-Path $versionFolder 'Orchestrator-Cluster.before.json')
+        Copy-OrchestratorConfigurationSnapshot $paths.JobsPath $jobsBeforePath
+        Copy-OrchestratorConfigurationSnapshot $paths.ClusterPath $clusterBeforePath
         $completedWrites = [Collections.Generic.List[string]]::new()
         $failedStage = ''
         try {
@@ -486,11 +521,8 @@ function Publish-SmartM365OrchestratorConfiguration {
             }
             $failureRecordWriteError = ''
             try {
-                [IO.File]::WriteAllText(
-                    (Join-Path $versionFolder 'Publication-Failed.json'),
-                    (($failureRecord | ConvertTo-Json -Depth 10) + [Environment]::NewLine),
-                    [Text.UTF8Encoding]::new($false)
-                )
+                $failurePath = Resolve-OrchestratorConfigurationJsonPath (Join-Path $versionFolder 'Publication-Failed.json')
+                Write-SmartM365OrchestratorJsonAtomically -Path $failurePath -Document $failureRecord -CreateNew -RetrySeconds $AtomicWriteRetrySeconds
             }
             catch {
                 $failureRecordWriteError = $_.Exception.Message
@@ -504,7 +536,8 @@ function Publish-SmartM365OrchestratorConfiguration {
             }
             throw [IO.IOException]::new("Configuration publication failed at '$failedStage'. Any earlier file replacement was rolled back. $($publicationError.Exception.Message)$failureRecordNote", $publicationError.Exception)
         }
-        Copy-Item $paths.JobsPath (Join-Path $versionFolder 'Orchestrator-Jobs.after.json'); Copy-Item $paths.ClusterPath (Join-Path $versionFolder 'Orchestrator-Cluster.after.json')
+        Copy-OrchestratorConfigurationSnapshot $paths.JobsPath (Resolve-OrchestratorConfigurationJsonPath (Join-Path $versionFolder 'Orchestrator-Jobs.after.json'))
+        Copy-OrchestratorConfigurationSnapshot $paths.ClusterPath (Resolve-OrchestratorConfigurationJsonPath (Join-Path $versionFolder 'Orchestrator-Cluster.after.json'))
         $newJobsHash = Get-SmartM365OrchestratorFileHash $paths.JobsPath; $newClusterHash = Get-SmartM365OrchestratorFileHash $paths.ClusterPath
         $audit = [pscustomobject][ordered]@{ ChangedUtc = [datetime]::UtcNow.ToString('o'); ChangedBy = [Security.Principal.WindowsIdentity]::GetCurrent().Name; ChangedFromServer = $env:COMPUTERNAME; VersionId = $versionId; Summary = $ChangeSummary; PreviousJobsHash = $currentJobsHash; NewJobsHash = $newJobsHash; PreviousClusterHash = $currentClusterHash; NewClusterHash = $newClusterHash }
         if (Test-Path $paths.AuditPath) { $audit | Export-Csv $paths.AuditPath -NoTypeInformation -Append -Encoding utf8 } else { $audit | Export-Csv $paths.AuditPath -NoTypeInformation -Encoding utf8 }
@@ -537,7 +570,7 @@ function Request-SmartM365OrchestratorRebalance {
         [ValidateRange(0, 300)][int]$AtomicWriteRetrySeconds = 10
     )
 
-    $requestPath = Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json'
+    $requestPath = Resolve-OrchestratorConfigurationJsonPath (Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json')
     $requestedBy = ''
     try { $requestedBy = [Security.Principal.WindowsIdentity]::GetCurrent().Name }
     catch { $requestedBy = [Environment]::UserName }
@@ -577,11 +610,17 @@ function Get-SmartM365OrchestratorServerStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)]$ClusterDocument)
     $assignments = @{}; $planPath = Join-Path $SharedDataFolderPath 'Election\Orchestrator-ElectionPlan.json'
+    $selectedPlan = Get-SmartM365JsonReadPath $planPath -Optional
+    if ($selectedPlan) { $planPath = $selectedPlan }
     if (Test-Path $planPath) { try { $plan = Read-SmartM365OrchestratorJson $planPath; foreach ($assignment in @($plan.Assignments)) { $assignments[[string]$assignment.JobName] = [string]$assignment.OwnerServer } } catch {} }
     $weights = ConvertTo-SmartM365OrchestratorHashtable $ClusterDocument.ElectionWeightsByServer; $policies = ConvertTo-SmartM365OrchestratorHashtable $ClusterDocument.ServerJobPolicies
     $result = foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | Sort-Object -Unique)) {
         $serverName = ([string]$server).ToUpperInvariant(); $serverFolder = Join-Path $SharedDataFolderPath $server
         $heartbeatPath = Join-Path $serverFolder 'Orchestrator-Heartbeat.json'; $capabilitiesPath = Join-Path $serverFolder 'Orchestrator-Capabilities.json'; $heartbeatTime = [datetime]::MinValue
+        $selectedHeartbeat = Get-SmartM365JsonReadPath $heartbeatPath -Optional
+        $selectedCapabilities = Get-SmartM365JsonReadPath $capabilitiesPath -Optional
+        if ($selectedHeartbeat) { $heartbeatPath = $selectedHeartbeat }
+        if ($selectedCapabilities) { $capabilitiesPath = $selectedCapabilities }
         if (Test-Path $heartbeatPath) {
             $heartbeat = Read-SmartM365OrchestratorJson $heartbeatPath
             foreach ($name in @('Timestamp', 'TimestampUtc', 'HeartbeatUtc', 'UpdatedUtc')) {
@@ -614,8 +653,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBNPkiejg88+FP
-# xr04FXet86mPdA8HXkKnynWRHDINgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjNrQ/xPpcRzT2
+# DGrviduJA/MAXFE0zymbb15u3XkPE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -748,31 +787,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOJGwqElW4duIrCn13GFdEGDkSz62mvn8N3XsGx/xXTuMA0GCSqG
-# SIb3DQEBAQUABIIBgKw6JDMGcpQpgarqEwYrkU6p9fLMpLzWDLQi5I6ha5Vkoj/5
-# nhGmmCoiAEDKEG3NhCDJ97d3f8gQcrF3bObzHQg44d6X4bnRDm6EPZ27jF4WZtpl
-# EEzq1zAKGQynkDLR0OFbmVvHaXvadEh3tBa8Z5qCv++HWVEd/QRfxAqYpdu3BZ/x
-# C8XKJhGjxf9U2+75Xo2ZNIa8d8D44kcJfVoN/iXeygNMgKXFk56ZdPP95W1pcT3o
-# naLFb+scIWsQO0NoqZsmrideGM/ZFVF6QvohCMfKBAB6zG7P5c0l8+wrAMXqWKzo
-# vJeP2+PnIrYObPKeyZslKDGJUgebzueR8lbASGPuxXDXYX5SE3EhDRLLtHYg6hBI
-# 3w7uYVAcm8/VCS9NlORE7VnGuy8UEUEG2SFgGLzPfnHg45eDlZSwk/GhI+J50QJm
-# ygLcaLseCjUJbX/nQk3YaP+5m18AKmjjSe2u3euLVAtYR2TzBkuk6FfsmZSxqKdV
-# O+8dJS9aWLyt3VQ566GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL6pozv/6Vl8p2Wxej6uWwA8rda22KyRRHYEDAxfBsvEMA0GCSqG
+# SIb3DQEBAQUABIIBgCcs7u0d7YiTsxwLx85NaSSIUl5IfYOMX9Dlb1q4r2Fr9yd6
+# 9+dR8ApRVSDZL4AwsxbBjz7CYGnLae1OX7HWdCpivw57AVi0k8EMd5Z6ktcm89D0
+# kmZzf5pwI8MPtcOc+aKMJM9+xWfR2d7+H18AsJFb1QY179M+NzwkYyBIxCOIVynI
+# jAVvum4JeccFTGQah1Kms/qaSOolQTinftrR+moPs3YZw7DVApv51CkM6cJwG4VK
+# GNnZARLkChlMkqP1QjMOFGui5D8f8GtUshEOjFZU6Zf50/92h1tYvLlv8q4Tp2Te
+# /C7J4Z9eShPBuY2DNpA9W8d/IGpy+l3nGS46CFjFaSl+QOhoOhHzNawz4+xJ44bA
+# Q749bjAKW3sjfOcg3Dcpop0Rm93HSm5cs4OQggtxl0/eyEbe7jHmRLC+K108wF/0
+# MKLMyfsxG95zy+Ww6eNh9lQEpCe89pwNcHsc8+5l5SdV6kCG3Qnh8WW+lb0CjLc+
+# d/46F5ZshK2u6eIHNqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDknYYywVby2c/qPY+R2pkZ1qjS1Toy9cRllBxm
-# /vsqlTANBgkqhkiG9w0BAQEFAASCAgCkbNAFtk2WQsenVCYOWoxPDy3P09AST2OK
-# /aoJPDT+bb+9lrGoYeb2GsuLipmKYkSB/uSiaJcJGgLmPg41T8oCtex4zFqNUspp
-# XSdIYb7zUuQs4K0Q9SfHdNuy0LAe3RDKsKK7gadqkDQMyHVeXtEyyg981+mUSnMT
-# OPqtQOOrEPSDHZMjs9z6RZ6sO41X02C16ZoiEQV6ZZqokvmpmwgeIHYnzc4rpv5C
-# o1+WVGCKH+g1v19JOCn8n2yoYyWMsUEbxqz2V44bZMB8VpltQyPgGD/AVeSvLOcV
-# U6/oMgbV7ToyWZTvp8zD2Dka8EWwlddRpuGm8E0rXO+usoJfOKJ50q3g9MDYb+Vt
-# TVUu7YzDVJnQYqrQVDkdsqX7gbDOqEygqPpaGT4qdYV/6arjBS7//mbxsDAcfMAv
-# dqg/TNx1tYWCi9ki3dbsxo9B1M7D3PkhwRoLwPatETDVDZzRywjKM9ImuvOpGVtT
-# O/vdy4saO+3mecVBFTcJFRS9Wtcqr8xHLRF6d4dDgFL3IRBEtOu3g2d1gP9Hn6A6
-# ytCXSkjkpwtdi/gjVnTHUZUZ7R918huzWP6o8UKwwrmy/CFr2fhQhsa3QavTzH0V
-# HRbll20JnSA+3O1/OBjdAy4OwBB+rMZz1pwlhfmdFNz4KrCOIpSvlsClPQOeY40b
-# /imCUcAhAQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTNaMC8GCSqGSIb3DQEJBDEiBCAxwk+rRHFkb2PDr08n94GoIVs45qCOxj5lFizP
+# 5yxbITANBgkqhkiG9w0BAQEFAASCAgADabMTSO7+flRJXIzSwhurJwCTHTo4bfo5
+# Hdo4Fzzo3/ch0Ihq7MbCSyo1ViWP3NiYXTE130OGjQ5nqScq8WnMCq4JBoxiDSHC
+# 7IA6+XunDymn0nyrTQ+YtBOOSGiI5HTPruo3tNqTDFqC4tcWeP9/k7ovzaGk90i7
+# sNrZ25E6Q0yG5DYritG4VhU/udfqWjz1LyE+uqjDKsULPQm/KDIDC2IgVaJv0KMg
+# rwrQMPvRtlyjEtZ/pYWPHVJYpVgiHes3uQ6HenQWVfC1hlEb6ys5KwS/TuUjJvEl
+# EZLR/dCJw8a2FSI3lqNhkFCd6zckihdZRpHaibew0CMbVemYlOBXiFHOfkUlYC36
+# 1sTqIzmQEI/fEtf+efaKh/g3VZG/uCNpvYKzBynHoKjLvf97XxG+M+Kfm24d0lc5
+# n+J0FsI1A00g+8uJVAmMWLO/Y5yqx96T6tljHub/c5NWc5dMsgMM/E/8Niqej0HR
+# RL10/eLCuPLy76+nPlSEuvnX8ctK4LUwogeD2nh/vJte9Qr0mi1kAKH2mkU61t19
+# s1ncp/nqA8NOT/lT/Dr3jZpJnOAm2KWtP2+4ocdGv1VoEa1v/MFAf2GZ1UaqBRyz
+# dxCaCwlEes2kIfiCpX+BJqOfPUP/xCJhmr1WNDuAyqU5CRE02g1T0qdL1IhKHfEQ
+# T1K3v/ZJtg==
 # SIG # End signature block

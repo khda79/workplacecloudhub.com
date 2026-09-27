@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.27
+1.0.28
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -72,7 +72,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.27"
+$ScriptVersion = "1.0.28"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -96,13 +96,13 @@ else {
     $TenantContextDirectory
 }
 $CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $CoreModulePath -MinimumVersion '1.0.57' -Force -ErrorAction Stop
-$LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json")
-$LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'
-$LocalTemplatePath = "$LocalConfigPath.template"
+Import-Module -Name $CoreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+$LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json"); $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath
+$LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'; $LegacyLocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LegacyLocalConfigPath
+$LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
 if (-not (Test-Path -LiteralPath $LocalConfigPath) -and (Test-Path -LiteralPath $LegacyLocalConfigPath)) {
     $LocalConfigPath = $LegacyLocalConfigPath
-    $LocalTemplatePath = "$LocalConfigPath.template"
+    $LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
 }
 if (-not (Test-Path -LiteralPath $LocalConfigPath)) {
     if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
@@ -493,8 +493,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC85bK02EvxO5XL
-# h6PExiQU2tE6lOjNT8T6su1mz3Wa+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRLShINXjofCS3
+# 3lBFT4GrjFy53y2pysPG1iVbOykVaaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -627,31 +627,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAwoE6QjTzWPB1zaLHfyNvDi92Tkeqnj67IFg8ZVMJ/4MA0GCSqG
-# SIb3DQEBAQUABIIBgDt9ipA+r108tW6pJdEVg4gOu9HBfHGT/E5lVvzwWFLu6qXv
-# Ij1SdGBXoygPTKDPFHa3p1IjJW3/qMePxbRf0//PKPEMnzPK2irSZGdVYL7Ujl7g
-# wqpEcMPIKIHUmgvYeIQEMp0+5dGs65vbB3uR+PhRrslz1W1nVLWmer0pbLRecLjQ
-# o7Dd7SWV4sXq3eSs4bQt5ujFg6eVmFs5u3pVakwTSs/Nwe3M/kNdVmt2FPbE0zsk
-# To5PEW1CTpTn1knudyEu2pxYmwNBF0g2ZhlYoKfTbYmOq4er5wQIX9R/8NFWiNdV
-# 9AN5gM+BWqZaUyLwE2fptPUEOFeVOiNIXRP1jLOPhItPwE/BwXHhQLIHL9K4yw30
-# CpXj8S7qFmD5fivTk34pMBH7ieIFVt0Rb/y4t7IcExdzf3JA9QaMbsCWcyOxhGVf
-# mvKv+xKVFD9uBoMm7Kx69qU8fru4lf70ZseVWMDu0x5Wim0TCFgFp3OArVf1OljV
-# 8NezaulSawlUD6Q/6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPqx0wboGyfj84rhqANZ0IFAeVjr//4q/915bmNARDyzMA0GCSqG
+# SIb3DQEBAQUABIIBgArWD3aLicD3pahOZXhicxEq8Npy1NdoiiPv07JWjwtUrZG3
+# JfR3ZTzs1/crCMsgk2ZscvaseGgu8Il6wsRGMuF7GTpLpMJfDxPkCeRfbxKemRor
+# t7tGkwIp0jJRiC4rL4Ma3HuiOxqlI9ukbmK7DhgMIVavQPeMzdZ2wRba/9Tqr4DP
+# wcVfB0XEtrG0ExQspkRaXnThT3/CJvnFKhte0M6FnZiPko1AcWsRAL3X0Mp0HJil
+# vqwo7sV8/OCOPvPn6iTFH8ak0x29wftaoUjq3HlXZvOWYdPg3RB5zwu5xhD5jfov
+# VZ9gYA7xAyTIVbu8WkbAkp7iJEQBMmZBT4wtKfof6SRWl1pY12WhYkbz8Cm4fUdl
+# QZhfFTs4UaLnsbPJ54kBSa2K9WQTTaTOtX38+4s0PqbgOk6tvv/nMc91M/pw7K9O
+# pNQe3fdocA7WOH9nhrtPwFCSGnc1xitG1PeIQpUtlI0GIKMjNdeS4kI3Olf7/1D+
+# 1iLFusMgctl7/Up/DqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBYjlYWKMcuSuOjviT87L7F42BUj5j4mbb9eFy1
-# 4ZcX7jANBgkqhkiG9w0BAQEFAASCAgAcuQEF6BiMrDZ1bRkOpQoDUjqAnUjtgZlF
-# tJsshDkXEiVG6Kc3OVBB7eiNMfqy8lE86vapJnQuEI8dQdH330jYVkdWUhaWf94C
-# NJAodwLaHNfdO4eFjDt8kISMsv7as3hL1fyI73KdlcWb2cCIVIwuP24YmQJHqHdA
-# 8xcFkEK9/Lbe9f/Qej6i9DIlyesYuyCcv4kzIDtMuvOz1ANZ7kZP+nCitNk8ogFI
-# ETawbLrVgyh71L0s0nt3WN2ydvZXupsq5zFAmp/xDRe+44irGOHPejm+KfCuPgZg
-# 9BHTzJb4zn6qsUqzRYkfUlqLYGRYd3/pAZdtbBwSmWPIduc3Fw5DvnQs5lk7tMZf
-# j2pH7bhf7lUMnOOkVQdrfNxAyaeDq2acyNDRrE8sOJMyNz0xKuDQw1VQTMBup/nr
-# lp5dtR9kw31QWaDPPy1t8E4Gckhp1DdAN4rc5Y8n2W6OyR5CT/5jSnOc+eDoN2dj
-# soCScb+MVAt4XEJ5V4xNW6pOrwvOmjqgC/5TO/eJM6Qd6tbGmjzrJVZpUkKv1yxj
-# yong9Ka+Tw3Aj8yfSPhHBRpwDtvHguT+zew+wsj6AldD3Lfl+dfca6eoT8SRFwBf
-# +/uDqwipVxr6R5oF6h4inhHbr5081VfkGzn0zBf6YZNkJQvOkUL5ngs0Y//AIYKd
-# cniQB5PMrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCiVdfYlsr/mQCobrLxTXToMJtuFn8tGof2NING
+# 09UDDzANBgkqhkiG9w0BAQEFAASCAgBSy9ozA/5dYTszzqee9puV/BL7t5OrRRNu
+# mJVIT3hVZPp6Fe5bxtrkQQQj3d6QoxVjExZjRU/kkoxPSfq487LaNEB8V1B/ZlcA
+# wg+ICkZSn47RMyOiQsGrvnt9hS3EUB5KseLf4bbgzqLXzc8mK6IpvmsFM48BjIli
+# bFSTBlcz6WV2Td7al/g8YJ7O1eos3h1sjl4wOOZmJiOCNEkL8+YCIRTBRbrBnR1x
+# gYSfSCwPlu6yc7vwCObA+PAc7nkrRoFXb0u4K5BAJuT8xAC/7c2CqCrZx41PE5O2
+# r3hXt2ZiXWwBd52ePTB8HbDpAJv5ym2eyild0WgXwrU3G1q2XhoaqlmMMzkHWPXG
+# YZKe0Yhpofp/nhkaeLWU9YaZF3uN4rLlLbQnHHpUxpmrhZTLoups/KsE3RhyPzkz
+# EKilu2kUvahMnS7QXjT8WNUf4jGWfSt8FIxhUIcnl4XLSaOtJ4YP+44Np655FYdR
+# TTOlC9Ydm1CLERqS6mZMnRpmAVpKz8UfiuAYaZeq1ZpuB8r9oBH+kSP8WopPDA5r
+# dqJnyvZVZ5LCwbm5bYBXb/h6QzNf81616SwXyx2j7Wc13B9QpPA9dKAEnC3ooZq7
+# +Gczemr3u3wTU6Kw/Ojr7kY5mbxx5XubPnajZ5AUUrn4MDIJKxh75sy1RmfLgHN2
+# B29tynNAJA==
 # SIG # End signature block

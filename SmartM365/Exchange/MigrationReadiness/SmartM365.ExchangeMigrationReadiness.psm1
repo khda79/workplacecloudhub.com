@@ -1,6 +1,7 @@
 ﻿Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.17'
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Global -ErrorAction Stop
+$script:SemrVersion = '1.11.18'
 $script:ActiveDirectoryDomains = @()
 $script:ExchangeOnPremEvidenceByEmail = @{}
 $script:ExchangeOnPremHybridEvidence = $null
@@ -210,6 +211,10 @@ function Find-SemrUpwardFile {
     $current = $StartPath
     while ($current) {
         $candidate = Join-Path -Path $current -ChildPath $RelativePath
+        if($RelativePath -eq 'Config\SmartM365.global.local.json'){
+            $selected=Get-SmartM365JsonReadPath $candidate -Optional
+            if($selected){return (Read-SmartM365JsonDocument $selected).Path}
+        }
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
         $parent = Split-Path -Path $current -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
@@ -224,7 +229,7 @@ function Import-SemrSmartM365TenantProfile {
     $globalPath = Find-SemrUpwardFile -RelativePath 'Config\SmartM365.global.local.json' -StartPath $PSScriptRoot
     if ([string]::IsNullOrWhiteSpace($globalPath)) { return $false }
 
-    $globalConfig = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $globalPath -Raw | ConvertFrom-Json)
+    $globalConfig = ConvertTo-SemrHashtable -InputObject (Read-SmartM365JsonDocument $globalPath).Document
     $tenantProfile = $Runtime['TenantProfile']
     $profileKey = [string]$tenantProfile['ProfileKey']
     if ([string]::IsNullOrWhiteSpace($profileKey) -or $profileKey -eq 'tenant') {
@@ -233,9 +238,10 @@ function Import-SemrSmartM365TenantProfile {
     if ([string]::IsNullOrWhiteSpace($profileKey) -or $profileKey -notmatch '^[a-zA-Z0-9-]+$') { return $false }
 
     $tenantPath = Join-Path -Path (Split-Path -Path $globalPath -Parent) -ChildPath ("Tenants\{0}.local.json" -f $profileKey)
-    if (-not (Test-Path -LiteralPath $tenantPath -PathType Leaf)) { return $false }
+    $tenantPath=Get-SmartM365JsonReadPath $tenantPath -Optional
+    if (-not $tenantPath) { return $false }
 
-    $smartM365Profile = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $tenantPath -Raw | ConvertFrom-Json)
+    $smartM365Profile = ConvertTo-SemrHashtable -InputObject (Read-SmartM365JsonDocument $tenantPath).Document
     $tenantId = [string]$smartM365Profile['TenantId']
     if ([string]::IsNullOrWhiteSpace($tenantId)) { return $false }
 
@@ -4051,8 +4057,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+vttqsD/8x97+
-# eFJ+zkKzHgs7DFHeuIFQAyuTarpWa6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6Aryksa0HUWM+
+# vCUNgv4qXk9OYz0WGdjUwyH7TrPodaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4185,31 +4191,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPqsxaBQEpx4aVCoZbWGf7gbdTdFAh6GlB9tHIPgQlrIMA0GCSqG
-# SIb3DQEBAQUABIIBgJrlrtOjj//nrnV0Aia9/BfTefUKx77gjsAjln9LyTDRxyWs
-# flQX899KG+0s0fYIa7nnX6UDVr7MyzBeURHS83VhfiodzEd4/2SMx1a3KKtEF1DJ
-# Yzqvk9zCqMOQI+0Ltj+mIU4552iAe92qdISd4U/4thuZxev5e1hOMFKCKZgCIQku
-# qVlt0Ev6P4kwry2d0Ra+Muuda3LyIgkQiRf1GLyKyFm1HoLmLNNxOd+Q3/sdL222
-# /YyLJ27mMnX7BGZE3RWbQ7qW3xLW9hhubQxDH4qLO4ZL+8QQCW6fiWw0PikgqVTe
-# R2Ww7rQcXbbZJvWVAD608kQIpR+3YvBwGZjUFgmf11sqEfDiW1Gf8/IVigKk/D05
-# rP9BUh3yk7x5jVq3yiOFr2QorJSp9Ui6OOvIXFXSrdV87geZSqXpMviIqbdWH6uu
-# nIKQIZ7JMHV0s7qYskvej6h4y2o4zAAR4yhFBLTy5A8hO169AX7faMfQ4DxMrU0A
-# D2wactnUfx+7FrEBwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDpwFWQmhjuPsmJjVv2KqBIZD3r0D1RPgiUu2E7wD1qxMA0GCSqG
+# SIb3DQEBAQUABIIBgDNG3O2MMtqKT2VXi3VoYrPv81x/6FvAVhPdNkjjCgH9d6gy
+# sM3iLQ7efwMYWcobJ2rfUuzB9nTjg+GL6/a0rKKQAnrFtM3TYgcZp8vXVs5SzznC
+# wFX2/Uk7LBDge7Po0xloaEgCgGV993PY+7P/XEgtwDJiPElbmpFr/z61v3XFKCjs
+# LCP1V3yo3BYNQa71kluHkz9N8WoxYYRAQE7yqbZsUrBiKxI0fQ/CVAv9ZBi83UCq
+# vXRqRJ489VstVbltou4G9XyapLKuvMWrR1b606xt28uhWSajAXuHD/7vVnM5pReD
+# UlzTfHaeiNFB/421bJGvyfSGpF3FPJcBbnLB/n8jnxX4Ev42xqfXwwIJpdFybAqp
+# r5c9SFRFOT6+th6SSIS81vG1HdsOTp6msb0RCFooWrkRltELPJvtc32eGDD+bCHY
+# 9kz9MCbEXmgxe6czzzacvz6+g1AzZ6FuETrbJnaC6YyvDz1ybmuTrHfGAfU1T7Rf
+# nhETSoqT5WV7asduBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDgyMTQ5
-# MjhaMC8GCSqGSIb3DQEJBDEiBCD+QpmXj2C4oc/r4HYErtk2ME/gYVlXlW6iP+JI
-# dv6RpzANBgkqhkiG9w0BAQEFAASCAgBmK0ykpARQ0YWdHDHkSeE63+Dur0kG76Zc
-# 4veHxTpn0Mz+FrhMRn+Rwqi54lTVm5CKGLneaYTu4RocA9E1LqNM5Kt3dBnQqSw6
-# a4YbORCw/jIxcepErGXFZFmX4E4BeclqqLNlrtpVdJlJQpNVAnc1sbfAU/c85TDm
-# Q6MWd/7bKT/i8IUhjtliHSgqGoemtpIeWjWm+B+yObyItpf9GpnnoY1WgEPGarCp
-# awNRpSW1spE1k5AXlWXKQp6La4iS44DBP/lG05uvhaVu+X65NIr02ugK9yjvQLeA
-# JbwlGZe9Xqa04V/SqRafX9swJnHdP5qTrUYjkYyBRSwbTwWbKEiOqy5FqDuEYKnJ
-# jBTzUGaXuhwsSkQTK2r+27j4uqMeBk2e/NgbVJJmfCxSRmlpLqVeu7yFwW7WbBxb
-# SYcePOls7/qabv4OHLCOnpq1k+4mVLSKsvfvLcCPNddTY8iwt4PTR0DOiweRx1DN
-# x6KWOe68cmA3hFJwNBIGJ+SZU/4Ex6nuPKbwfJMZ1d08guldGwcXb2calftsNAal
-# PvFIEK0Ys/K9pACM9xAXjlgbtlGxxZqHToz1pLGWe9qHOfpP3jBmwIqMNhous/L/
-# NiNopYz7TQNin5fwNeV3+a5PXAJl9x9MNU6GpQENLHwzLZZn5YZPUhs/G/BNL+8k
-# KUGO0ja33g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# MzZaMC8GCSqGSIb3DQEJBDEiBCCZ95Vdydk09xXK9BLaN94WTj48pibk7EZUnhNV
+# BbkV7jANBgkqhkiG9w0BAQEFAASCAgB2Gs/rln8k3RuLRKUQbPv6PlZcZc5FJ3Cz
+# A/XqzVgE7x0mxHxM4G/8nd4Ke3+X5ZEwKLLhL+TJp/IC3Y1CXw+DEf4IzCB8/HzW
+# XjSyT5NwnKFEsm3NC+Svi/vUcpJ2AbfARGrNfuBQWjwQsLiLBBoduACX2AePA9x9
+# CeCzx9I2GngPygmiyMEOPvbs2fSCGPBQ90NpsbOPCMI+K372nODjKQY+CCHWrcmM
+# Ghzm2HnDOMf01eGt95lxAUGiMrpsBjK7/Y5ar0CUM+oSbuG+6kAPnxgTmSxi6bOF
+# 66axodki64i3p0LOoKT8pIemJfdS9uNocjQ26+9LhjUpAA0v0W6qSxfrUFbtTRS3
+# 3gwplubURY+YTPPkT4Pwd7I1R7q3RZquo3V8MCHtKhlgqeTfriG8u+1GfCozQ77c
+# lsrxU9FFK5XGzGmLBkkENHU/9mX2uW2NcDHycVRMuQMiHNuT1nWRFF/jhanBoj+J
+# YTrSS+xpXSDTks5eGG/R4NkituFA7E0/MyJk7TgVbguNccGhrj89f/6MErIh9aj+
+# 4iYtnJQYS5Jc38OFqRf1QrJmrEDVk9IZYSwcOLI1vJaYoLAdS28z9Wm3m4FnjQvK
+# 6/Ok2/ROkQw0mjIAdNlxiiffwWSE1tlemGWgoR7YFRVilmunwbTENwqCf8FKIi3v
+# kdD1BnVKEA==
 # SIG # End signature block

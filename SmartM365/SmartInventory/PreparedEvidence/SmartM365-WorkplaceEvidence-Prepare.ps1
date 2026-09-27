@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.10
+    0.1.11
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
@@ -96,8 +96,10 @@ try {
         $conversion | ConvertTo-Json -Depth 5 | Write-Host
         return
     }
-    if (-not $ValidateOnly -and -not $RepairLegacyHistory -and -not $WorkforceDiagnostic -and (Test-Path -LiteralPath (Join-Path $output 'current.json'))) {
-        throw 'Convert existing metadata with Convert-SmartM365-WorkplaceEvidence-Metadata.cmd before preparing another batch. No calculations started.'
+    if (-not $ValidateOnly -and -not $RepairLegacyHistory -and -not $WorkforceDiagnostic) {
+        Import-Module (Join-Path $product 'scripts/PreparedMetadata.psm1') -Force
+        Initialize-PreparedMetadataNames -OutputRoot $output -TenantKey $effective.TenantKey
+        if(Test-Path -LiteralPath (Join-Path $output 'current.json')){throw 'Legacy prepared metadata is preserved while JSON transport policy is Readers. Activate the approved JsonText deployment before preparation or transfer.'}
     }
     # Fail before downloads/copying/calculations when cloud publication is enabled but incomplete.
     if ($global:EnableSharePointUpload) {
@@ -215,8 +217,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaR1arWEOCxfcW
-# ylQ5bL/P0+NPIG6j1+5ubwkqAvD0maCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYgOHkKr0nMQjC
+# RQ5SvEgoFztt4PJbowJXP917DbS/CqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -349,31 +351,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICQLeirrkpXWBK3o38FV4zQnA1UMHYfQFmer9hqYXPiGMA0GCSqG
-# SIb3DQEBAQUABIIBgIFQXQe3HFOi7kVAJBusioRJ4b4Ch6YBiZY6mJu29jWkoSmb
-# iI2V10WIpIIVnWkJuptRimHLr00/6IH0s+VvNk3gdTF69DDGYf3oHt52oKwRcFP6
-# OW+1ph1lChGGoW2pcecwBJBfQ3Yl9DGMHML4BsCsSGEZiUQHU7BvnJlgPTXSf8It
-# p4DUBmdubwm4OGnl3nJSdJAx2XKe8CuiHoPPjwdxhkkLXmo7RR5an4lV2t/ZT2Uw
-# iJd0n4+PWlTpD4AGTWYXARU06ZvkZBvppO7H5INcKjFwDojGzN04UJLf45xrva4c
-# zYvalG4seKP1rZVvzUjxdZQLzPLBE9nl5YnrbRNWRXmCRIvXlFYrTRsgYd75EzF7
-# kYnnYojbRPdK1r7HooRdGpukM1OeZR4d4/9E3hHlHAq+xibxhieb0IzrGanIHgVf
-# y3cCBgCm/D/vpEWUQGR+CFOHrr2rynmHj0yOnkroMJL9A3dwCxsobwf1HHpiDPxc
-# BETnEwGnDY2syJcE46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMw8X8ZuqYheak1khpjVhQ9tWjB597OInxfhUIOf1W2IMA0GCSqG
+# SIb3DQEBAQUABIIBgKRXzN1pw5d7l6v/UwiDxCRD+WrJGDaSGwo6AZDURzOpz3gT
+# CkFmwWnO+qLWyp4NH9be16PqMOWtIlrFGhPrwapS/LFSroTOBgVpJCIMlpwUOiA9
+# vPAIQE6/mZcQHEF8NWu3Q37MPM1Zx1DblvR5hSqm3q/jodNBs8kPrSrESqnkiNio
+# wZstllH3uxgbFeo9UPxMSER4tYDIM+5jS4ibEV+0g5xF9MiTIlicKDFBASoWiHkJ
+# HyPl3aOAhl+XVzcr2gY0Dwam4SfGHdaPibWa+HWHRex8pUVW6y0MyumRY+o+DzU5
+# bDhDPn/EPqtuuIG33c+ERfpszBqK7Mezwmf8KkTTywckG24c/cZEgQFrOG/dwy/b
+# KzEM5WY1yFChBEKSDiF7dz/mM1fTESn9/22TYIMXuhmM46cCuMgpxllralvIW/XX
+# 1tssSqBpwUWVbGJOCJYwoCe4E6nDXK4t5wA3/iqonO7brETnEJPOKhe7hwWczbNM
+# TKBPP4aqapSog9hpf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzU0
-# MDlaMC8GCSqGSIb3DQEJBDEiBCAprMmwtrY3EMMhUXF9eXH0/nu4mSd1gkuK/qGf
-# ovH42TANBgkqhkiG9w0BAQEFAASCAgAS2Kxz1ZxWgLa06Oyro3r9jjVpeqF4gy+G
-# Ssp6fAsceag1jjeMOPUL8Qns0RH0L5cxJneEhHVznn7N03grW7XdatNFWT2I+Czx
-# tWXBs14IO3Qq7K9jBtU0K3OBuXPNSh5pcJj1fGl03E4BOCmNlbk2U0deK8/cNf+T
-# 6nnySVnvTO8w2T+xQ91Sb4TCF4ilahZmaMHVJqlEX5qTKKE885ikJSgA5UCIoJRU
-# +yAG0/GpDB0t+QDNRwkyhD3Zlo0n2zE9en5vuuSIaqS6K9R6l/pXOPuTCAb7k/ea
-# 3LDre8cH7sGQcFe/i8EcRHk4Z1roz/oKwbQruUKYiFJ3UZmquihCCrBIOELayt0a
-# 36yWPI+g+kzxBb3SlIAeKED0gl5fZurvYLRQkGgd/HxlWfwPjUy7ogsjZXIs6VN+
-# m/jpqFQZdPalqbgAJVXxIWrVRcn25TkCgXz4WJf/jfKonKMJM4Jz7zRpgkvqDm2l
-# W6yXIb3yJbJTTEOPn4gs+7Mm+au5Wv2aSYn1KZYRsLaYI4qP4QIaLnsjA559OhXE
-# KtdRu32Q91Nfzmty9ZNCuEJ87OqDGrNsOnC3ZvQkOsLUOdGKrih/aTAZ4I4qfUAZ
-# 7cVcoMbzswYC6tYeUbFsy+MSlXxoPrRNJrdsXbnDJeLhdiAZGxVWVPQl6XqnVycq
-# l4wQm1zBXA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBn4Rwh/sQAGkYrK50avMlTWNuZ9Y3gmuqZPbKO
+# Fi/GujANBgkqhkiG9w0BAQEFAASCAgA3S1+jXHD235BXcHYGoArZpVjQ37FGyJRK
+# ZIAvytEMqgAS7Z99/6aw4Sw2Ac8MXlL++ji+5U3n+WOfy9QjlX00KWq18Xn9jenx
+# 23KxeeOo2FzaTlB9EJ7lkJ3/J2XalYMm+g70/fKYOaAfl2+sibm3DeJvPqCPsoX2
+# POhz43Fn+ZBE8sSPgWjG+zxHdvwisKCMByv8XkQhhjqFSVTnUBPzqLLgCCj76FnF
+# U7O3y/6UQFA/MJvVagw/yIKSEouGUb/xNaG5iKGNYWmLtZsdbgi3Kg32DkEcEQpj
+# 2V8Gv0na+MdH2es6mkt5xPiQ3BRG5lngx4i7dDAY7orj+xt9bf2JeEZ4kXUHieQ2
+# HCV7Yc6Krs+7v9y/HdnW9Llf80Nt0Yo8GQUpTaTZB6XHQCdPq1di6ZOipG7TdqXw
+# qiJITv9xVwUea+5DMop8swri5drr/XMUCOksI0ACvO77MqwUadl0ETnbAcifIsnh
+# 4CzUyHG0YWOBjI3PMXtUPt+bDPHiwpuIwkRboqcMwopsM9MZ/KxTrPlB076KPxAR
+# A9eD1JXPi/+1zvsT81mc+fVTEO7Cq3KBjhfb0U7cSahNm18xdWEnr4ANFIQc2Dox
+# 83W+XGM2jN+0dIdt5lWfl+enkflGDYM7RnsVdVxgUUxK62NW7RThTslc1NALdYiF
+# ZOMruPLZzg==
 # SIG # End signature block

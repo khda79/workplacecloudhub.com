@@ -1,3 +1,5 @@
+Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
 # SmartM365.Core.psm1
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
@@ -6,7 +8,7 @@ function Get-ModuleLocalConfig {
     param()
 
     $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
-    $configPath = Join-Path -Path (Split-Path -Parent $modulePath) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($modulePath))
+    $configPath = Join-Path -Path (Split-Path -Parent $modulePath) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($modulePath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
         return [pscustomobject]@{}
     }
@@ -78,7 +80,7 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
         }
         if ($null -ne $script:SmartM365GlobalConfig -and $script:SmartM365GlobalConfig.PSObject.Properties.Count -gt 0) { break }
 
-        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
         $globalTemplatePath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json.template'
         if (-not (Test-Path -LiteralPath $globalConfigPath)) { Initialize-SmartM365ModuleGlobalConfigFromTemplate -Path $globalConfigPath -TemplatePath $globalTemplatePath | Out-Null }
         if (Test-Path -LiteralPath $globalConfigPath) {
@@ -175,7 +177,7 @@ function Get-SmartM365CallerLocalConfig {
     foreach ($frame in Get-PSCallStack) {
         $scriptPath = $frame.ScriptName
         if ([string]::IsNullOrWhiteSpace($scriptPath) -or $scriptPath -notmatch '\.ps1$') { continue }
-        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath))
+        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
         if (-not (Test-Path -LiteralPath $configPath)) { continue }
         try { return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
         catch {
@@ -226,17 +228,21 @@ function Save-SmartM365WeeklyInventoryHistory {
     $weekName = Get-SmartM365IsoWeekName
     $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
     New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
-    $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+    $historyManifests = @(Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $HistoryRootPath -HistoryLabel $HistoryLabel)
+    $manifestPath = Resolve-SmartM365OwnedJsonPath -Path (Join-Path $weekFolder 'manifest.json') -Owner ('WeeklyHistory:' + $HistoryLabel) -Validate {
+        param($document)
+        if ($document -isnot [pscustomobject]) { throw 'Weekly manifest must be an object.' }
+    }
     $preexistingCsvCount = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue).Count
     $previousManifest = $null
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-        try { $previousManifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        try { $manifestDocument = Read-SmartM365JsonDocument $manifestPath; $previousManifest = $manifestDocument.Document }
         catch { throw "Weekly $HistoryLabel history manifest is invalid: $manifestPath. $($_.Exception.Message)" }
     }
     $copiedFiles = New-Object System.Collections.Generic.List[string]
     $capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     $fileSnapshotTimes = [ordered]@{}
-    if ($previousManifest -and $previousManifest.FileSnapshotCreatedAtUtc) {
+    if ($previousManifest -and $previousManifest.PSObject.Properties['FileSnapshotCreatedAtUtc'] -and $previousManifest.FileSnapshotCreatedAtUtc) {
         foreach ($property in $previousManifest.FileSnapshotCreatedAtUtc.PSObject.Properties) {
             $fileSnapshotTimes[$property.Name] = $property.Value
         }
@@ -269,7 +275,11 @@ function Save-SmartM365WeeklyInventoryHistory {
             FileSnapshotCreatedAtUtc    = $fileSnapshotTimes
             Files                       = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
         }
-        Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 7) -Encoding UTF8
+        $expectedManifestHash = if ($previousManifest) { $manifestDocument.SHA256 } else { 'ABSENT' }
+        $manifestBytes = [Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 7))
+        $null = Write-SmartM365JsonBytesAtomically -Path $manifestPath -Bytes $manifestBytes -ExpectedSHA256 $expectedManifestHash -Validate {
+            param($document) if (-not $document.PSObject.Properties['Week']) { throw 'Weekly manifest Week missing.' }
+        }
         if (-not $snapshotCreatedAtUtc) {
             WriteLog -Message ("Weekly {0} history for {1} contains earlier CSV files without a verified capture time. SnapshotCreatedAtUtc remains null." -f $HistoryLabel, $weekName) -Level 'WARNING'
         }
@@ -289,10 +299,17 @@ function Save-SmartM365WeeklyInventoryHistory {
         )
     }
     else {
-        @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.csv', '.json') } | Sort-Object Name)
+        @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.csv' -or $_.FullName -eq $manifestPath } | Sort-Object Name)
     }
+    # Include every preferred manifest on retries, including a prior interrupted rename.
+    # Remote legacy-item handling is separate from this byte-preserving local transition.
+    $historyUploadCandidates = @(@($historyUploadCandidates) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Item -LiteralPath $_.Path }) | Sort-Object FullName -Unique)
     foreach ($historyUploadCandidate in $historyUploadCandidates) {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName | Out-Null
+        $uploadReceipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName
+        $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+        if ($uploadSetting -and $uploadSetting.Value -and -not $uploadReceipt) {
+            throw 'Weekly history publication failed; snapshots are preserved and retention is deferred.'
+        }
     }
 
     if ($RetentionWeeks -gt 0) {
@@ -3830,8 +3847,8 @@ function InitializeScriptEnvironment {
     if (-not [string]::IsNullOrWhiteSpace($callerScriptPath)) {
         $callerScriptName = [System.IO.Path]::GetFileNameWithoutExtension($callerScriptPath)
         $callerScriptDirectory = Split-Path -Path $callerScriptPath -Parent
-        $expectedLocalConfigPath = Join-Path -Path $callerScriptDirectory -ChildPath ("{0}.local.json" -f $callerScriptName)
-        $expectedTemplatePath = "{0}.template" -f $expectedLocalConfigPath
+        $expectedLocalConfigPath = Join-Path -Path $callerScriptDirectory -ChildPath ("{0}.local.json" -f $callerScriptName); $expectedLocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $expectedLocalConfigPath
+        $expectedTemplatePath = (Get-SmartM365JsonTemplateName -Path $expectedLocalConfigPath)
     }
 
     if ([string]::IsNullOrWhiteSpace($OutputPathInit) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -4111,7 +4128,8 @@ function Invoke-SmartM365GraphRestWithRetry {
         [int]$MaxAttempts = 4,
         [int]$DefaultRetrySeconds = 15,
         [int]$MaximumRetrySeconds = 300,
-        [string]$Operation = 'Graph request'
+        [string]$Operation = 'Graph request',
+        [hashtable]$AdditionalHeaders = @{}
     )
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -4122,6 +4140,11 @@ function Invoke-SmartM365GraphRestWithRetry {
                 Uri         = $Uri
                 Headers     = @{ Authorization = "Bearer $token" }
                 ErrorAction = 'Stop'
+            }
+            if (-not $params.ContainsKey('Headers')) { $params.Headers = @{} }
+            foreach ($header in $AdditionalHeaders.Keys) {
+                if ($header -ieq 'Authorization') { throw 'Authorization cannot be overridden by transition headers.' }
+                $params.Headers[$header] = $AdditionalHeaders[$header]
             }
             if ($null -ne $Body) { $params.Body = $Body }
             if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params.ContentType = $ContentType }
@@ -4155,10 +4178,12 @@ function Invoke-SmartM365GraphRestWithRetry {
                     }
                 } catch {}
                 $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
-                if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
-                    throw ("{0} failed. Method={1}; Status={2}; Error={3}; Body={4}" -f $Operation, $Method, $statusText, $message, $responseBody)
-                }
-                throw ("{0} failed. Method={1}; Status={2}; Error={3}. No response body was returned." -f $Operation, $Method, $statusText, $message)
+                $errorText = if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                    "{0} failed. Method={1}; Status={2}; Error={3}; Body={4}" -f $Operation, $Method, $statusText, $message, $responseBody
+                } else { "{0} failed. Method={1}; Status={2}; Error={3}. No response body was returned." -f $Operation, $Method, $statusText, $message }
+                $failure = [IO.IOException]::new($errorText, $_.Exception)
+                if ($statusCode) { $failure.Data['StatusCode'] = $statusCode }
+                throw $failure
             }
 
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
@@ -4527,6 +4552,19 @@ function Invoke-SmartM365SharePointCsvUpload {
                 Ensure-SmartM365SharePointDriveFolderPath -DriveId $driveId -FolderPath $parentFolderPath | Out-Null
             }
         }
+        if ($fileInfo.Name.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
+            $null = Read-SmartM365JsonDocument -Path $fileInfo.FullName
+            $transition = Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $fileInfo.FullName -DriveId $driveId -EncodedTargetPath $targetPath -Request {
+                param($method,$uri,$body,$headers)
+                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $uri -Body $body -AdditionalHeaders $headers -Operation 'Transition SharePoint JSON name'
+            } -Download {
+                param($uri,$destination)
+                Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $destination -Operation 'Verify SharePoint JSON rename' | Out-Null
+            }
+            WriteLog -Message ("SharePoint JSON name transition: {0}; {1}" -f $transition.Status, $sharePointPath) -Level 'INFO'
+        } elseif ($fileInfo.Extension -eq '.json' -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
+            throw 'Legacy JSON upload refused during JsonText deployment; the owning producer must publish its preferred file first.'
+        }
         $largeUploadThresholdBytes = 250MB
         $uploadedItem = $null
 
@@ -4779,7 +4817,22 @@ function Invoke-SmartM365SharePointFileDownload {
         }
 
         $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
-        Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $LocalFilePath -Operation 'Download SharePoint file' | Out-Null
+        if($targetPath -match '\.json(?:\.txt)?$'){
+            $bytes=Receive-SmartM365SharePointJsonBytes -DriveId $driveId -EncodedTargetPath $targetPath -Request {
+                param($method,$requestUri,$body,$headers)
+                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $requestUri -Operation 'Resolve JSON download'
+            } -Download {
+                param($downloadUri,$temporaryPath)
+                Invoke-SmartM365GraphFileDownloadWithRetry -Uri $downloadUri -OutputFilePath $temporaryPath -Operation 'Download JSON bytes'
+            }
+            # Validate the remote document before touching any last valid local copy.
+            $temporary=$LocalFilePath+'.'+[guid]::NewGuid().ToString('N')+'.download'
+            [IO.File]::WriteAllBytes($temporary,$bytes)
+            if([IO.File]::Exists($LocalFilePath)){[IO.File]::Replace($temporary,$LocalFilePath,$null)}
+            else{[IO.File]::Move($temporary,$LocalFilePath)}
+        }else{
+            Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $LocalFilePath -Operation 'Download SharePoint file' | Out-Null
+        }
         if (Test-Path -LiteralPath $LocalFilePath -PathType Leaf) {
             $item = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
             WriteLog -Message ("SharePoint file downloaded: {0} -> {1}" -f $sharePointPath, $item.FullName) -Level "INFO"
@@ -5861,8 +5914,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNyW9AbDO5H43q
-# iNE9soBd9BMeBFt9q1XMYh/rojBqGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDmr2nil0n5LpS
+# Ks6n/D9uQpJ7bQm0uYWt76uD8H1NgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5995,31 +6048,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILG0Nr1xYty6Nkz+3McoGYhJYd3flyhf2XB7J6fjGy2CMA0GCSqG
-# SIb3DQEBAQUABIIBgB9ykKsGmgIYtwbJqWgthYKCDs9J1EuABLgE1Sm4Zc3uCksI
-# ZfmdwDeTCamDCJUnjiOiJxGf0AEsd1QK8lh6TggTHrxaEEQsI+/UxIGTnOp+4n33
-# cgQjaO2p9HtsPC92i+azCWldHOqZITNae4nasY8JGL01V15pHe455IGjme0SBf5s
-# qJcr4QOpTxqO5pVigf5aK0yb373Xkj0H5e9WzjrWnGn3szhY6NT7aSPQYLSXLhRP
-# P/+NzE7RvBAORkIXo2ZhEzDYBzmudFnvHMYt9Hv5Em96sQuUTUc2kNY5JRwPI7sp
-# zSuV7sVDID+cA1gMkx/qkKD7jjwDDI09vjQs9mFct6xJPv9arTcJj6I7TlA4X6GK
-# W1OoWQHPG1RWv1NGNEcVzD+NqDT2EllpKZLuhwkkQexfwTzI/PFtF7fHwPvQnBpb
-# Ex2w5shp/J6IXd3w3LBgS036t3s5MWz1x+lOM51a8VciBiWgief5fm2W+WWkt5kI
-# r0VWtHOiDNz5+AEL3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJbNeakvG1XUZXNo5FTwfgnrlLmSP7W4bCkJI79zkWLaMA0GCSqG
+# SIb3DQEBAQUABIIBgCYpbMQrjtGVVMj7jG8npk4A5zN8ECbJBiWFiZpEPjLmXDmN
+# GeS37y8eJs4f5IiWdgPPuTfpArCeO2R9v7e+fDrjJLRqMDnMDA3UpIs2JpNQXx4a
+# jGZrb3JiDBGf3ppHbWs9sxxeKr1Tyxc5qzraIf62yjKX9agIG+Bxdwi6TJAwOUgg
+# cTFr7QAwWKIg8W9pxf147uZspaN/FNbDEUszjjtarooJxvnwbvhWu51vNu+IYZKj
+# Y5Vcajd4yLO8EeP7OUUItZlpxIvez31ph9wI6Xnx469vJtPixV+ahh2puM0ovrgX
+# +OKgAIqpJQOJwdycuwoS9sgx1Xc/yIMm+jxFrzRvkvanw60LJ/PrkNGA8l5ciuYZ
+# j7yKwEuyWIrr5D8gUC6PYxZyMa/xJuyjPKsYUa1/KNPI6HblMo/YZsk0uJAzfId9
+# U+hX9S0EXyzR/eigk8FI5Tb/N2U+VaivP9WmfihRyKlrSplHCamIVKjW9CyhDt2f
+# 2kkpXir5gbaf0J6b/aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQ2
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBsXSyKcyenH/rHEgsQ3+vE8ONWC93CCNzTmJB4
-# 7ovZqTANBgkqhkiG9w0BAQEFAASCAgBSeuEhZOZkgmyU7zKBONicU3sf3w2nGf4M
-# fD78iZSVTbPfAXJ0T/9KMw16wpJhrGACimsTi1yTx8Yzc5VKWL/gWWdF4AEd0Gck
-# 7/5D+pkcC5f+7RQloASAux29M4kw94Z4SW5Qk87p1phvo3MAotOsN95vSo1vSsbZ
-# KE20oIcRWC10II/nzWTDf+5oCZhsowyDwHJuSSClXYJkQ//Yumyc7bGliK3AAq9B
-# sdE6FdasDqAR+7AQPjjN3T7ZFtRqBFqNEGtvq43fOsrXxvt7uhSKAZKg+PjncmK4
-# QaLOEbOmAEGoG1OJrA1J4hVvG/UBFwdNTXi9az0M58z0SVUlb8xf85cw9Gc6POOS
-# Zw1nL0Bo2FYVwV7MUd76oaZDMt4a8YdAEpJbk2ICo5zz5YlNPg8F5Ibq8zGdZ1kK
-# 6Vf+naFN1lypUEUwZV3PkI4ehyCzF3lUy++sMRhs+/rIrg1jZZ/YUNYhJejw5JHh
-# ZEGvQ6fR43tLCGKM4HTHJBNc0AdsS6lqy3rQsWn+Sd1sXrJ8YHv+Vka2bWGSXT05
-# zV90gUn2Gdeb6nJH1aP9hEirA2GYOclZjViVYuOttqD2v/QokQ3OF/ybhZnqkoAu
-# jeXCt1UoVtq5ZfUBXlUd7VlqdXPu9XxnH49PojRmgf4wXeMq9JvDFsKkLtU/LSt0
-# CK7Ug9Kqfg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# MzdaMC8GCSqGSIb3DQEJBDEiBCBKmIg5Kyq5ZpxiRu9ENFCGT3o/Mcpl0Sqz3Y+7
+# nczQwzANBgkqhkiG9w0BAQEFAASCAgBvu8a+MHpMNc7+wNtJCCbp+3Uz4DnLsRnw
+# +NlAMtc2PvdvU3WegoTHOhjxI/cCWHhZX752iGg6Oc0Jo5B5wYFr2UyfMimEX1lM
+# hI0IQedfhMwBobXQT0IvGaZWR57F1aAkcubOLFSmXOe10zV6lDR4KYBkNKaX22sp
+# IybGiWJGvcJIM4j2Gqf7D3ARRmkSpOsf0WA8nGRn8vI3LIZP2oKi5SFhE0RSm+3L
+# 5PtqBZpnLebYhcXdI1J/PWFzK99R0WrvaA+DRXhKNeFCI7SNrk0+Hy2kn8+QdwmR
+# yjaMxqwJ0jlsncg7X+hsocA7mXuIu0V+C9igxF2x9XssIXjztUIUjF9TjqFukYSX
+# zJC7mEhdt9kjtq8tP6sHj4Q8IvIODosCYCFhRZu+Gat7jYbmBbMdwf/Qc26B6rlI
+# IGD1hiPLZx2mqkrXT+zCFCc7LEwqczJOqU3gQAoKwpTGJysF4Cr6J6eFsR12FyHq
+# g/BcI3S9dpuSFLdX9Ps5aXWF4kHLvylQBGJV+FC8oMWA/emmyBQ3VIFvw53b7gYj
+# ZdatDltIJ7qG1P62A5RfONRIXTa8ybQfan0fTQrVwY1WZDj8nwrbCXlz59m2K1/k
+# /WdX2gBmpOEkkBAoJkAPhPpc/ty4XHhmB7dYR6m8se76/wUsL9x4yqaMfR4HWoD7
+# Vj1dDkfOWw==
 # SIG # End signature block

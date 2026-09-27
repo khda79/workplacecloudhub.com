@@ -14,7 +14,7 @@ ownership, capability, dependency, claim, lock and concurrency controls.
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant prod -Pipeline Full -Collect
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -120,8 +120,8 @@ try {
 
     if ([string]::IsNullOrWhiteSpace($JobsManifestPath)) {
         $script:EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-        $localPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-Inventory-Orchestrator.local.json'
-        $templatePath = "$localPath.template"
+        $localPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-Inventory-Orchestrator.local.json'; $localPath = Resolve-SmartM365JsonConfigurationPath -Path $localPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $localPath)
         $configPath = if (Test-Path -LiteralPath $localPath -PathType Leaf) { $localPath } else { $templatePath }
         if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "Orchestrator local configuration not found: $localPath" }
         $localConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -Depth 100
@@ -138,17 +138,17 @@ try {
     }
 
     $SharedDataFolderPath = [IO.Path]::GetFullPath($SharedDataFolderPath)
-    $JobsManifestPath = [IO.Path]::GetFullPath($JobsManifestPath)
+    $JobsManifestPath = Get-SmartM365JsonReadPath ([IO.Path]::GetFullPath($JobsManifestPath))
     if (-not (Test-Path -LiteralPath $JobsManifestPath -PathType Leaf)) { throw "Effective jobs manifest not found: $JobsManifestPath" }
     if ($Collect -and -not (Test-Path -LiteralPath $SharedDataFolderPath -PathType Container)) { throw "Shared orchestrator data folder not found: $SharedDataFolderPath" }
 
-    $jobsDocument = Get-Content -LiteralPath $JobsManifestPath -Raw | ConvertFrom-Json -Depth 100
+    $jobsDocument = (Read-SmartM365JsonDocument $JobsManifestPath).Document
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $jobsDocument
     if (-not $validation.Valid) { throw "Invalid jobs manifest: $($validation.Errors -join '; ')" }
     $selection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $jobsDocument -Pipeline $Pipeline
 
     $electionPlanPath = Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Orchestrator-ElectionPlan.json'
-    $electionPlan = if (Test-Path -LiteralPath $electionPlanPath -PathType Leaf) { Get-Content -LiteralPath $electionPlanPath -Raw | ConvertFrom-Json -Depth 100 } else { $null }
+    $electionPlan = if (Get-SmartM365JsonReadPath $electionPlanPath -Optional) { (Read-SmartM365JsonDocument $electionPlanPath).Document } else { $null }
     $planRows = foreach ($job in @($selection.SelectedJobs)) {
         $source = @($jobsDocument.Jobs | Where-Object { [string]$_.Name -eq [string]$job.Name } | Select-Object -First 1)[0]
         $owner = switch ([string]$job.AssignmentMode) {
@@ -222,8 +222,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCROQ8TeFTIE5ww
-# S9Wcrq/M8YsfxHf+3jRhaO9BsZ2r4qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJRk0vGkvK/GZ3
+# cVUJULRkmSNhu6dQiZr2xSvcA0SIfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -356,31 +356,31 @@ exit $exitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPHwdtDjMLgc/fWrPfGDVbob8OQ3kcp4wwgUun3WbwHLMA0GCSqG
-# SIb3DQEBAQUABIIBgKTzbbzHmON8LRX2fpgzlTvrp+kTU7tiz82m9fp/WE8hKeFU
-# 520yLVCiX7K6WIm2Xhi4GDJkmU/EUhIoWchYMnHUnFKgnsD0y6bf1ykftnk+ofyO
-# z7+XzpDV44WVx8bvIVtRVFdOKpeX58ayCfQJZiYbqupPgu5dWO0Fu2TA+HoH0xXC
-# 8tx0mVo7NKjJadUqkRIZGgXOy3QmvPejMUZQJZPu5W+2N8J6oRi5zGN7KAFG6t9T
-# 4qWoE4gNy/8McRF5lrtHopcmKktokvLYUnLG1zR4876+MltG15TDbLJj3NwU/+3T
-# 2R2oZqZw2t2O8lY6tDIJRD5lbIgDQG1sJ1AGWi0/9W5ltSsfwTg05VTTDwUQdGdV
-# EXp+L46/C4dS26oYX6QJK9io4YM0TPkEAp85IxxvPFP5Dw07DOdXtTXZlW8XmdtU
-# hIGwSvq3jI6YgreGSA/t6BGCb6bToFmbvVf9KElcY/clZWnTF2y5svgnZLSaZJ6V
-# 4oNdXYJ+hrv+sfBfSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEiZQpn6I0j8zQD/w8tjklwkpnoo3vYsR5fpQHTdPjklMA0GCSqG
+# SIb3DQEBAQUABIIBgHCDJMtpo0oC/8U6u7r4TPO9FjBx4k7jBM7f4drOs3w81N6v
+# ox7Obs3lxmH7a5uocrIcoDFeNNBlZ+9/eetCBIkgSLleO760IklN2qLtUJLb+BMO
+# WUHttS6qXsopLGPBBM5Xdi4edgbZEgbJcYDbKX8VVD7eRW6EQI4aNWeV8qktZ4Re
+# GkbpekLh1+MqyloFjDqH7YF7kGUBbuQZ/62ABc6pYh/LQ299UmlS6lTQkwTov0Wv
+# q5rS7VUQOIH0BU8gCWQ6QGQCVmTNSf2swQLml9iP3H5n6ijfTGhzvi7gRSWKHIq2
+# LgPzR6Ko7bbaoMv5JJGmV8zBXzlqF2eYRxu4K/lIqMYimUE8uOaZL068UTpJx+UM
+# 4hzf+Gi4Dia5WcMT3zYYJh6h/Bje+diqWgdYmL/XLhkxziyuAg98dqB5LZlF0UV+
+# fXmc6fUv+iDdvrH0H4oqsi4KQI2/LZDMNL264044puHzDPYffSypBbKgNDKFwiEI
+# JmonQX2YgIV/EphRo6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExMzQ0
-# MDNaMC8GCSqGSIb3DQEJBDEiBCCb47jk+zm3+YIYaEKdCU1gmtO0Yxc+kC3tGaW/
-# ZvbO+zANBgkqhkiG9w0BAQEFAASCAgBEYF1wCB7TgVNy6d+MIRjw9Kk3mmqkf5bh
-# rkBJiXIbO/Z52l3XG4Wbrhm51b9w7Zdr351ZFvHqo/O1zsKXcRHzaI4aE2NHvrea
-# 9yhyruN8ATT9RjnmW09FPFOmket3SX/iMfjLIqmVOBB9DT8co+oLK+VRIL2VdlbT
-# 9H43aA8sk3Z70CjgrVzSpEZcNVY0RtJghlPXFk3WBsLsOL2LyJXXOItjMoi6yAgd
-# AAzrjTjDk3kSt791XNy/o9YuBpmbh1qk2Qaff/gm9MQeNI7acpuJsYJRj/eoxKJ6
-# 66KkchPyCxvOsmDlT1aIbVubbPOWZgG17CGjpqMqW7lgK1pf96qkrSjm1lypwtTR
-# b91O7+URtSG+vUj4Blul1e8lCuxKe5yQzDDkMOVb81LdQKjiJOzzdbXE1SyB7dOb
-# FORGta1idPaoqPeQ3wl23AniiqqZF1fyd2D4V3jjZ8l7yRHLpON8y1zgA/nvQOuo
-# 1PT/9k7MldPa8BfTwdnN1BsqXLdzCkksY8uFZZgCzvAqou6o0lTIrQZIdSCCv0L8
-# 7Ol6EsCxclfQ9VqSWMitlC7wy4UfndR5rNUemmGCDiYZRCRN/pdztt/BLigFK871
-# aMzvbIz1Yj52Inu3z0hsmYVvgEVJt2Or0j+bsQPdopfQ/92GixjSjUkdtBW6Mc4w
-# 1gXRyHEJOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBUY7q7+cadJL+E4i7X9hm8HDjhJoL0eOVb6lI9
+# UW8r7zANBgkqhkiG9w0BAQEFAASCAgCM/M5U6IgwwJ7UzZRTqZGRvdsX2iQrxQLk
+# YMOEdsxx1VckAOKZKLibwuz58WvxSsb78uqWc0u0hmQMZmZkLGLJ7mzjecqlVfEi
+# IYMFyGvC3SwBgmjVAOcXHthOnrX2b2M4v6WBrTZIj23Mw88Qb+GaaVul5NrArADq
+# hF3Tacl9L3FCuFGLExxisop5Jn0pcSnaKBhHcYExe/3zu4H2dDytFSkvHkHlr85h
+# /vWs78iJhxtqL4EwhKEeVQS9JY5cqW4zrrMRhQhH0fDV+iAbXK0AF2Gp05HjBfEz
+# L5cl1OUlB4Prie8PXMe0JHiZ18yGJbL2q0mwnGN4pxLzJ3zKOXgHmOfK5ZFomfvP
+# V3v7WcVb0mCnpkcUuxkoSSslFZbnu697LRGGzdKHXDZQGOvE3OfiyFG80HTSP5CY
+# L3106TopwwPA5b3xnkrtSoTCFe2E6XnLWdz7EwBlZUCWs3HIk2YsoRc7VulBtmCO
+# VaE3Yvk4xSYqtGQ4SiZ6lcVd5jMnDEJPbuUqsq3Q+W/KGZI+LKAWmbUUlZ0I7cB5
+# NLC9LeHgbT8WimSdImdWph3Q+CdWx1AKHCjGZHxjG/Qi2s7QUF458VCYJfQwYo6W
+# jcvkIJh3G/oY7521ptF5t+Gj6SnkDyTgd3G8cnYjMELnh7nIQMaXxZ75O9XVH/eQ
+# RwRGliFsrQ==
 # SIG # End signature block

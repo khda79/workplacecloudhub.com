@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Active Directory full inventory (OUs, Computers, Users, Groups, Contacts) across one or multiple domains.
 
@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.46
+1.47
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -106,9 +106,9 @@ function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
 
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
     if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = '{0}.template' -f $configPath
+        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
         if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
             Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null
         }
@@ -122,7 +122,7 @@ function Get-ScriptLocalConfig {
                 throw $message
             }
 
-            Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+            Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
             Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
@@ -156,7 +156,7 @@ function Resolve-SmartM365ConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -231,7 +231,7 @@ function Get-ScriptLocalConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -672,7 +672,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.57' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.46"
+$ScriptVersion = "1.47"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -1159,7 +1159,7 @@ try {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
             $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $missingFiles -Force
-            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
+            $null = Write-SmartM365JsonBytesAtomically -Path $ManifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Manifest | ConvertTo-Json -Depth 5))) -Validate { param($document) if (-not $document.PSObject.Properties['Status']) { throw 'AD weekly manifest Status missing.' } }
             WriteLog -Message ("Weekly AD inventory history SharePoint publication postponed because snapshot files are missing for {0}: {1}" -f $WeekName, ($missingFiles -join ', ')) -Level 'WARNING'
             return $false
         }
@@ -1178,7 +1178,7 @@ try {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
             $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $failedFiles.ToArray() -Force
-            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
+            $null = Write-SmartM365JsonBytesAtomically -Path $ManifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Manifest | ConvertTo-Json -Depth 5))) -Validate { param($document) if (-not $document.PSObject.Properties['Status']) { throw 'AD weekly manifest Status missing.' } }
             WriteLog -Message ("Weekly AD inventory history SharePoint publication incomplete for {0}. Failed files: {1}" -f $WeekName, ($failedFiles -join ', ')) -Level 'WARNING'
             return $false
         }
@@ -1186,15 +1186,15 @@ try {
         $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Complete' -Force
         $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue (Get-Date).ToString('o') -Force
         $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @() -Force
-        Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
+        $null = Write-SmartM365JsonBytesAtomically -Path $ManifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Manifest | ConvertTo-Json -Depth 5))) -Validate { param($document) if (-not $document.PSObject.Properties['Status']) { throw 'AD weekly manifest Status missing.' } }
 
         $manifestUploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $ManifestPath
         if (-not $manifestUploadRecord) {
             $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
             $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
-            $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @('manifest.json') -Force
-            Write-SmartM365TextAtomically -Path $ManifestPath -Content ($Manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
-            WriteLog -Message ("Weekly AD inventory history data files were published for {0}, but manifest.json upload failed. Publication will be retried." -f $WeekName) -Level 'WARNING'
+            $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @([IO.Path]::GetFileName($ManifestPath)) -Force
+            $null = Write-SmartM365JsonBytesAtomically -Path $ManifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Manifest | ConvertTo-Json -Depth 5))) -Validate { param($document) if (-not $document.PSObject.Properties['Status']) { throw 'AD weekly manifest Status missing.' } }
+            WriteLog -Message ("Weekly AD inventory history data files were published for {0}, but manifest upload failed: {1}. Publication will be retried." -f $WeekName, $ManifestPath) -Level 'WARNING'
             return $false
         }
 
@@ -1244,17 +1244,32 @@ try {
         $isoWeek = [System.Globalization.ISOWeek]::GetWeekOfYear($now)
         $weekName = "{0}-W{1:00}" -f $isoYear, $isoWeek
         $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
-        $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+        $validateHistoryOwner = {
+            param($document)
+            if ([IO.Path]::GetFullPath([string]$document.SourceOutputPath).TrimEnd('\') -ne [IO.Path]::GetFullPath($OutputPath).TrimEnd('\')) { throw 'AD weekly manifest source owner mismatch.' }
+            if (-not $document.PSObject.Properties['Status'] -or -not $document.PSObject.Properties['RequiredFiles']) { throw 'AD weekly manifest schema is incomplete.' }
+            foreach ($name in @($document.Files) + @($document.RequiredFiles)) {
+                if ($name -notmatch '^AD_[^\\/]+\.csv$') { throw 'AD weekly manifest contains a foreign file.' }
+            }
+        }.GetNewClosure()
+        New-Item -Path $HistoryRootPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        $historyManifests = @(Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $HistoryRootPath -HistoryLabel 'AD inventory' -ValidateOwner $validateHistoryOwner)
+        foreach ($historyManifest in $historyManifests) {
+            if ($global:EnableSharePointUpload -and $historyManifest.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase)) {
+                if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyManifest.Path)) { throw 'AD converted historical manifest publication failed; history retention is deferred.' }
+            }
+        }
+        $manifestPath = Resolve-SmartM365OwnedJsonPath -Path (Join-Path $weekFolder 'manifest.json') -Owner 'AD inventory' -Validate $validateHistoryOwner
         $requiredFileNames = @($RequiredSourceFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -Unique)
 
         if (Test-Path -LiteralPath $weekFolder) {
             $manifest = $null
             if (Test-Path -LiteralPath $manifestPath) {
                 try {
-                    $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $manifest = (Read-SmartM365JsonDocument $manifestPath -Validate $validateHistoryOwner).Document
                 }
                 catch {
-                    WriteLog -Message ("Existing weekly manifest is unreadable and will be rebuilt: {0}" -f $manifestPath) -Level 'WARNING'
+                    throw "Existing weekly manifest is unreadable; preserving history: $manifestPath. $($_.Exception.Message)"
                 }
             }
 
@@ -1273,9 +1288,7 @@ try {
             }
 
             WriteLog -Message ("Weekly AD inventory history for {0} is incomplete and will be rebuilt: {1}" -f $weekName, $weekFolder) -Level 'WARNING'
-            if (Test-Path -LiteralPath $manifestPath) {
-                Remove-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
-            }
+            # Keep the previous manifest until the replacement has been written successfully.
         }
 
         New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -1304,15 +1317,17 @@ try {
             SharePointPublishedAt = $null
             SharePointFailedFiles = @()
         }
-        Write-SmartM365TextAtomically -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 5) -Encoding UTF8
+        $null = Write-SmartM365JsonBytesAtomically -Path $manifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 5))) -Validate { param($document) if (-not $document.PSObject.Properties['Status']) { throw 'AD weekly manifest Status missing.' } }
 
         WriteLog -Message ("Weekly AD inventory history saved for {0}: {1} file(s) in {2}" -f $weekName, $copiedFiles.Count, $weekFolder)
-        Publish-WeeklyInventoryHistoryToSharePoint `
+        $historyPublished = Publish-WeeklyInventoryHistoryToSharePoint `
             -WeekName $weekName `
             -WeekFolder $weekFolder `
             -ManifestPath $manifestPath `
             -Manifest $manifest `
-            -RequiredFileNames $requiredFileNames | Out-Null
+            -RequiredFileNames $requiredFileNames
+
+        if ($global:EnableSharePointUpload -and -not $historyPublished) { throw 'Weekly AD history publication incomplete; retention is deferred.' }
 
         if ($RetentionWeeks -gt 0) {
             $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue |
@@ -3634,8 +3649,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZ13SOT3ANsqR5
-# qyG3WlianYjORuw3H7lghlq34xZVnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAw5zKvnTRN8gTc
+# hngihuYRSnXE6RJ9y7iavj1IVGbznqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3768,31 +3783,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGAqxC7Q4yHiW+dJvrcLvvNWzIbEH04QksZ/BtFLeU60MA0GCSqG
-# SIb3DQEBAQUABIIBgKbl+X4J13XKnhjnnt6WJlB9/3IaN6j44+iDdinbiIr9mhhz
-# JWzSKrCIhrZImL255Cjvk05C5+nTpPjDzD4rSbVLsGGA279XaFdv3ZfhgVT0qkd3
-# ebvOynKgeDU1BwQbIq5IdP4pbwqWMtaDTPOvegEp0RQBK3MoVCyAVHgbSDuUPFFW
-# oZkr4SpLWo393LJlbzeZs+obU+YNkGEAoJs6vuDjfiooil04fwlppgOGT1bE0Tnr
-# 0MxkAilOyiHOy5inJJSi5xgOe5WLnjyHiwvRyU17Z3cnmVKBowdUKfJBOQfVB9/H
-# pZfX7TB21Pmmn+BooGjkdaca5qjHw5/47eS/10pxtxrHwgw7L8+xFVVYpfl9ERDP
-# YJMQc9LlRc6zZ/7P3XehuPW5S4l7h+CKji90v96js7RP8fReVLiH6E5nFj/hDF+T
-# 1IGfXTvQveHwYluPBvH9toh2YiM81ktPHAEoOx3axCzoFaykDtrFmahKiSW+ZbeE
-# GIslWWpEOinRrco+N6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGBCa5dJCNLHIh6TRaCjs7KyJc/UixUl8rD9azPyoS0sMA0GCSqG
+# SIb3DQEBAQUABIIBgJf71ScL5e/5SPdlQci81Uy2Fw/Mwk67dMYEh67ii3iWpxYl
+# 2G60aWntLCc4HUKmU6f+0EoA9rfU0GCqatJ0IeFYBgAZw0HXQGYbNTFENI/heDJu
+# yPvk1VP/FJ5HrqbCLgVf0/tPv133ArN0N3IjnzUM931FI6XYcMhfJuv4e3D3+GCU
+# 1dF5QDgWTAz31hQjiO7Heg305ZMqt+pdwj1wWjVSDWr/M8lK00ckZUxRkGeXH9jd
+# wwZFvLgDSNywPmL3xhl1cTuF2Scibq9Vi7Y0bQsVrf0J+LtHiRyLgVx2krJcvART
+# FmXwygWwT3r62OSvSIctouo3zipncvemIHEj0rZzusmX/3mM4ClrzfWa1vSwB7Nl
+# Th+B9TP6uczRyc+pZCdU7B083YuBNorwEWUkN/XLy3RhvcJGNy8qzi6kp2F0DeDW
+# fghrVXT+LnmF3uXwPxm/yC0s8bS8TKp41YZa6GyRc3EuQ8C/4zSJOOsgcEwhWPkV
+# rmuOSE6WzRJqvsJef6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjQwODQy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCC1rPJw8bvV/6SdQRUTroMOnpjQqVnC6YH18B4o
-# 9i0ZdTANBgkqhkiG9w0BAQEFAASCAgBWs4o8HrWi2tqwElLo3mdDxw/AkJIBjjZ2
-# vrt3G5pNLBef19QjNxLiM2/cKqqpPmj+lWaPIAUUzOgip6/rKImpHg2YJ/sjApNv
-# wCRJi0FDXUZMuC8Cxb4k9ffIaWWjBa9Z7Uzesae543Ki77O2GP67RUdnSyGPEepj
-# YgGobdyCOFkto9JeWDev2n5ovHf2Eh4+HYUAxUkNk9hKqfG8v5lLxc5ASH345aRF
-# V+Xyhb8NB1rZ8S+Aq1x7yFzBtFdwEd8s4Qjh8h8AO6RiE1jzXMfLlz1fxw5ojkCP
-# qMXE1W3rezTLnx9NasR2jKu2/HKKDuSA5gJgxw335zEeuC2fs3ufe09RqSlXAeAw
-# XSm67gIko2E55OKaxhkqJ0KYGXt7sZYz+lIfsrEUZjZWI5OG1UEyaNszNO21nJTy
-# cXKoxh64T/e8shT7JVj5uGYO300KJ6DfvS6O7jjJ5H+vvZr0jUHH2v1VBVD5LE6z
-# z4jbB4eLOZa6BbbbTZK4fnRMJcNYrTpA07KkKZ6woeEr50r9BRgUMpMT2vfpavTw
-# BN9jtaR8UpyVVkApc2/STpWALdBfgIOlQnp1GM6oaNsVvdflL9OciV+KVpFwu1+t
-# Ck2SwBbEUrAMMPk+zNWN0tiS/mRoYGb22XnnwSus+k2AXlhyGqNcSwPSGihM3Tyr
-# sGz0A0SHQw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCSg/F4lkNRY6WV+uFwjHHY/7GrhnEExiDEuTuK
+# Y/KWMTANBgkqhkiG9w0BAQEFAASCAgCmsk9cZ7uVo7TIdzCj5ykzxMc96A+zWOdc
+# Z2FBmFImroOJVAVoPbA2vohqH8TRJ3i/2/Wv0V1PlXuL++QKjsbgywWtQ66ibYXS
+# XkMVLZ+mbXj4Ehojv30vmbUX6JzuM0D8+FgD+GaZetH2vpDJcZsWyuLAPFUULQ/A
+# pePZuTfLZ1+4FLGPxKNoj1mikMhTxCjsuhjjN3vrkOpd+e3OhJpXFOT+Sem+2DTO
+# tN3s9ZEpARMebWBduYK5tDiPDqLOVtEgCSzRI9Ny8DNBLkpkgddZOqSa8CADwxWs
+# 0j6u5EhZnvExx78IN/ZHXtS9OXGyUwDrq2zTV88Pi4r+D9rkiOc95swfu90ZKFH3
+# lXAk+MT2oiNn/NOuW0JrzCycsBtjnUZIKB8F8y9F+QbQu06YbPsYi4X5RQlYj/Rr
+# Yv1oRfhUoMbjeqPUoZfIUgTAl+nJEZLHFeLXwiqGK87Bk5AlOLEpyZhzv4ciX3yn
+# tHMPUs3JyJddqhNLpJedDsDohnt6KYXLcWiA2b0IWcyE0jb7Qq8ZtQiFb9cEFpYV
+# hbCZs8uig0PzkCHekzHA5KwdxGI2bWCdS+V346yhxKLQThr5KBkqYDT0BEp2CgRs
+# QGE20a85Q1x7j+8yMSK0l21FgWSJdtmq4NiiMTEmNFUIDdl6bRcO8OvtMT3V++5l
+# Ue9qYmezyw==
 # SIG # End signature block
