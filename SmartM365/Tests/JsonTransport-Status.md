@@ -75,6 +75,12 @@ L'activation de `JsonText` a depuis été approuvée explicitement. Cela ne conf
 
 ## Preuves et limites
 
+Correctif après premier démarrage réel : la libération puis réutilisation d'une même clé de concurrence utilisait deux libellés de propriétaire de journal. Le propriétaire des leases est unifié, avec reconnaissance explicite du seul ancien libellé après validation du schéma et du chemin ; les journaux étrangers restent refusés et inchangés, même après plusieurs essais. Les anciens journaux d'échec correspondants sont repris automatiquement, sans suppression manuelle.
+
+La pagination des versions SharePoint ne compare plus le préfixe textuel encodé de l'URL. Elle vérifie HTTPS, hôte Graph, drive et item exacts après décodage, accepte les routes équivalentes avec segments ou clés OData et conserve le lien de pagination intact. Les boucles et changements de destination restent refusés. Cette correction cible le refus observé sur les fichiers possédant un historique paginé ; sa confirmation réelle nécessite le chargement du correctif et une nouvelle publication réussie de l'état et du heartbeat.
+
+Validation ciblée du correctif : Distributed 17, SharePoint simulé 38 sous PS7 et PS5, transport PS5 34, lifecycle 22 et recovery 17, plus régression du miroir. Core 1.0.59, compatibilité PS5 1.0.43, JsonTransport 1.0.2, SharePointJsonTransition 1.0.1, Distributed 1.1.7. Arrêter proprement les processus avant mise à jour des sources partagées ; ne pas effacer leurs fichiers de coordination.
+
 - Campagne consolidée : **35 suites / 35 réussies**, dont 7 sous Windows PowerShell 5.1. Les résultats détaillés sont conservés localement, hors Git.
 - Recontrôles après corrections : lecteurs collecteurs **93**, SharePoint simulé **26 par moteur**, lifecycle Orchestrator **22/22**, recovery **17/17**. Le journal tronqué et la réponse Graph perdue sont couverts.
 - Filesystem **sur disque local seulement** : **14 contrôles par moteur**. Cela ne qualifie pas SMB, OneDrive ni un lecteur distant concurrent.

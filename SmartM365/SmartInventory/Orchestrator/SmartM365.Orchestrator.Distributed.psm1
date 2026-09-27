@@ -1,14 +1,19 @@
 ﻿Set-StrictMode -Version Latest
-Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.6'
+$script:DistributedModuleVersion = '1.1.7'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
     $names = Get-SmartM365JsonNames $Path
     $leaf = [IO.Path]::GetFileName($names.Legacy)
     $parent = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($names.Legacy))
-    Resolve-SmartM365OwnedJsonPath -Path $Path -Owner 'Orchestrator distributed state' -Validate {
+    $existing = Get-SmartM365JsonReadPath -Path $Path -Optional
+    $isLease = $false
+    if ($existing) { $isLease = $null -ne (Read-SmartM365JsonDocument $Path).Document.PSObject.Properties['LeaseId'] }
+    $owner = if ($isLease) { 'Orchestrator concurrency lease' } else { 'Orchestrator distributed state' }
+    $compatibleOwners = if ($isLease) { @('Orchestrator distributed state') } else { @() }
+    Resolve-SmartM365OwnedJsonPath -Path $Path -Owner $owner -CompatibleJournalOwners $compatibleOwners -Validate {
         param($document)
         if (-not $document.PSObject.Properties['JobName'] -or -not $document.PSObject.Properties['OwnerServer'] -or
             (-not $document.PSObject.Properties['ClaimId'] -and -not $document.PSObject.Properties['LeaseId'])) { throw 'Distributed state owner/schema mismatch.' }
@@ -956,8 +961,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi0OVR2RLgNxVD
-# Rf8vczok4mRs2PJY7Fz1XfSBOFdMjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFvrkmU5wsERvM
+# WNEELefiizit83M7smX1O4EYiL+HpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1090,31 +1095,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHXvdYP9aPtlLL/JqUzs+eoM6umGQCbE0924m936bMp1MA0GCSqG
-# SIb3DQEBAQUABIIBgJ3euft1WEcNxYBOTUCdhmCTdEP6DSuWIWRh19BVMQhuIIL3
-# LMC8CymaoqOoJ0PMitDEnpNvB+KBs0p4RdXA63fHL7XJ0CgY1KkdHOZVpSbYa/Dh
-# br3zgWiUgUqQWkeOiYy1rf8TyEcif+RhdnCACH7Uo3lnq/UpWu1DBhHikHVxFxix
-# rV74VxpafpwADYxiWGUJJk7SYOIfQyfZAP/01JRyf2a2FuQc4bpBkrNRaUXCDXAz
-# SmTQy+i/MAKeHegxsFV/HxokwZ8cakKpRbr9M0wk++1MGejBO7rm6ZzTTx46xjgU
-# gT/nGJGWnWGPjeXgMkLFbHTrjp5dSQicyckQFF4xuKNnfpY9gZVXwFLlAouRz+jU
-# ZuV7uH01o91g/0AIRoCesHzWz8aGMnqgReCZzQ3JOoFWeSmLyIarkLoLNORx8G0h
-# TtOBKyQlxjvoUPjhaxFOwAGzz131MDpErvb3JOmuY8IbvhT6hZg61SAHIJ9w7yCL
-# ildiCgrHZ0B7ZGkyrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICEnvujxYHlGf2RLk6VCi48an56R+pGRZNO/HkjgfVjgMA0GCSqG
+# SIb3DQEBAQUABIIBgB9fuuMu1WkiFTOc0TrwDZH21TSDjfv/K7IZkCt+wW0/HW0t
+# Ep4wjwafoOSqDCxojz9zOH0NXDgQmz/s52mqlycxzQSxIvi+w9UW+ig6mt3NgDo3
+# WpchrY83bNQ/4+HmEvGYRPuwJYjqpYB6yxFjsHXzocDIQ3wHGSQ0McELtsdg9Xju
+# W7IOA66JC5OrifU5NMOz/esNLp/PI6hiWc7e5PSgwOAhbId8XDm1zoVvdmw8teF+
+# z9SB/svgC4N1FPQZ9+9YDGjTgXjupRou5UBTDtpOtfAfM/bc4amUCSrWHiHPep96
+# AheU+o8a9Lx8oHX/5wjyXnr84ewsVNG1p/zoboyNWCQweIFT4s38Zv4a5n7hV1wb
+# U/mDa7FdK91rWbpk0Mk+GSj8Sq1UOq9S+9B7ogbPH/W6U5esFLVufD8roh6GTcXK
+# qvQaJ5Ze8O90+ABrXTTxkN3EX84YE6zB28V9XUKU5r7084wNMedPp32Kd1kGGPQa
+# yNxkgnoSz4ueJTWeoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCDk8SkEVXLSWxB4qr3qQHgPAYuDCO2YXAZgQRCg
-# AZe/mzANBgkqhkiG9w0BAQEFAASCAgBOaRsgA+svYpnAI97/6KA8/16ayO0TVFhT
-# 7mb7RovvdkDGviETd3uVTYEV+XRjOxnmVRXLNsrk+UCN8mhaM1zRilgEYtFhKCaN
-# EgV2CrQQlim0+srSZOyz0FLRVPunwtV7tp1fG6cQLE3OUCbvYIU4sao+t17kE3Qu
-# d6F3KHFdoRlmcMYWAR6R2gw9GoXQFjLMFozQxtUVB5z0n2Zc1fUKR/hlMrsOKbpS
-# 20WMEwiRJwHgymxuVjopL541nTiZ3UqYuxzfi+FOldzPIlOifxVUfIGxpc3r4WZb
-# ZccdS/ioT8qYi+B0SD44BgJFZ9ls3r7U/LutJAqDm0RPte4uWkG3n6+yi2gRmw9L
-# 0QJ1t2Q02/QnAOsUDvc43Qu5mT5onMKGo4p+SmgnZNxzvkADRg5YtDDFuV5L3sdT
-# lkawQ7S+tV+pc5MEdn0ZjjfuXBUcfGuFB62J9DvELbzjSDxoPcSQCUk5YiVm4MOb
-# UYdbLZCYNjgjik1sIUlFTgZttZ+FXAAGiP6/P9uR8ZXynHXsLRsQzsHwtaaLrt2E
-# TX8rff6MZjsSbOAL0+jxRHTpnBe5z2QwX0zHADAn7CSZlxpOwk52WqIbOaxkZyZe
-# g4sY3mW7NktgErF0NT3/T2oqk8sGegEdmMcoyzKkT8BMGiy/98NTh6zZnWMuwrcM
-# suEjhJ1spg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
+# NTVaMC8GCSqGSIb3DQEJBDEiBCA+nNHkGc8FD9o0mroCenf2csRKzGMxDodzSdqc
+# tldzGDANBgkqhkiG9w0BAQEFAASCAgCaqTCw7JsKd/GFHgZOcBiRL3JbfejbEf4r
+# Zjc7iDI3pc3+N1UuDlH6N4fb2J48XZuC6tTW5lf4jWWlg/wflE0qiyACDkJ28R9I
+# qcvruhc0uMTQ1Dhn1t0W4T/0oXOlDtgOHzTubrKD89AOZOLtyvoOPV+UrF+CQB4b
+# BO7n7iO5OrShaRuUl3WgMi5/inC6/6eBuf23MiD1dAd7FQdXaTW4rwCfw5n+EcPv
+# NOrkqNRqX2kyQ29dQPW0vnr2oUXh/Ntd1hQPH50KN1nx2WENd0xTtNxvH0qHYp+L
+# dxGrDI+Yiz1zMGYyEqxKw6RufxNF9UhScPKFvKROhV7s3ZtcKivcbnBVqTV2qOKs
+# NCJLUC7jkj46Zq7NOa7KfqJRr9/IrzEOAH6Brcy6XwVZ4xQZacaRX2/LUraBpU+R
+# +tz3EcHb2niAiz+ZsNv2m2TtlPVYzqkG+hOx4be56RXFIPDvlTANJhd6ta0SrfUZ
+# IvpRwvPc9hhfyrH27mtFJgdcd+r9ro2O1RowG+h9KIzHLJ3fpJm8RChsY8RdNABH
+# bdmcSA6ctOYp4zbiqLDNG+XLeDY5hcgTj+QtnrjLm9VcdJSfXuHTiNpnR0I+SUDy
+# aGtLxfpM58WrsCs6eZOd2ZJXhdTA9zlukswWAmeXGq8+46Xu4Yamx8cB6MrXPhuQ
+# VBw3niXfqA==
 # SIG # End signature block

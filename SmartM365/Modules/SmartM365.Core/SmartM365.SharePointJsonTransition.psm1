@@ -1,6 +1,17 @@
 Set-StrictMode -Version 2.0
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
 
+function Assert-SmartM365VersionsPageUri {
+    param([string]$Uri,[string]$DriveId,[string]$ItemId)
+    $parsed=$null
+    if (-not [uri]::TryCreate($Uri,[UriKind]::Absolute,[ref]$parsed) -or $parsed.Scheme -ne 'https' -or $parsed.Host -ne 'graph.microsoft.com' -or $parsed.Port -ne 443 -or $parsed.UserInfo -or $parsed.Fragment) { throw 'Unexpected versions continuation origin.' }
+    $path=[uri]::UnescapeDataString($parsed.AbsolutePath)
+    $normal='^/v1\.0/drives/(?<drive>[^/]+)/items/(?<item>[^/]+)/versions/?$'
+    $odata="^/v1\.0/drives\('(?<drive>[^']+)'\)/items\('(?<item>[^']+)'\)/versions/?$"
+    if ($path -notmatch $normal -and $path -notmatch $odata) { throw 'Unexpected versions continuation route.' }
+    if ($Matches['drive'] -cne $DriveId -or $Matches['item'] -cne $ItemId) { throw 'Versions continuation targets another drive or item.' }
+}
+
 function Invoke-SmartM365SharePointJsonNameTransition {
     [CmdletBinding()]
     param(
@@ -46,7 +57,8 @@ function Invoke-SmartM365SharePointJsonNameTransition {
         $versions = @()
         $seen = @{}
         while ($uri) {
-            if ($seen.ContainsKey($uri) -or -not $uri.StartsWith($baseUri + '/', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected or repeated versions continuation link.' }
+            if ($seen.ContainsKey($uri)) { throw 'Repeated versions continuation link.' }
+            Assert-SmartM365VersionsPageUri -Uri $uri -DriveId $DriveId -ItemId $ItemId
             $seen[$uri]=$true
             $page = & $Request 'GET' $uri $null @{}
             if ($page -is [Collections.IDictionary]) { $page = [pscustomobject]$page }
@@ -168,8 +180,8 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApJO2v+77qoEaZ
-# aK7ftP6wXrqOgx1x8Pi8xtVFZOkI/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATrCUmPnzQOQZf
+# QSDV3Gz883jZOJRDQgBBGhjil3MBsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -302,31 +314,31 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFSdtbveyYUydP0ZYcduVOCiXDqYFMwgo6lpvS53Qm/GMA0GCSqG
-# SIb3DQEBAQUABIIBgGZkiFc3JjqSy+FRl9EjsvdwcRdweod00cnmxlWSI9z8M3tN
-# 9tuxkMvBBP8jpUXSCqIrKUMagLTIGzjl2yQWwDb7bO36kC5Qdb4S2CRnyC9j1neJ
-# SWGll4YW+OhD5RlHVyccqArfkqskIBCLHvH0BdntQd2xFhuR8LKaN9wLoMl4f5uy
-# MfEpmbKR/UmDbGp2wiyZVVrSSUqT//AsXR0VJbByOe03Bt1vPfdMC3fKQFV08pHj
-# 7cCeebNJYdiEPBwfo9E/6tW6xWFszI4kbybVe1E5hBD1lZar0WBLuu+WBrv6ujXV
-# H3UQTFvRGO/MZ9WPrSZNDLCszZ4uJumeqgv07MtvJ+WhGBAQfuRpv6IgHj4RwXcL
-# 0bnJ3q//WkbZ6kcfjpdI35kLcE9ftPm5qlfs/a/OAkZ1JUkOUmOS1RP0tjREeago
-# lX6IeV8rS3BIJmkT3yCDNvAGa58unc/fr8YMYgAh0U0PZbUoiuALYLqVkpaPWo4q
-# WgDOWqByoUbfM+JZ06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIkTykvB5zgAqgtstyidTn36RE2stubCpxmMJh82/EwrMA0GCSqG
+# SIb3DQEBAQUABIIBgCbrh141bj8xU1LykjjbRS4AdCny1rf4AfzkoIdeNrBIxt+b
+# FTNo0AJ7Jik5LT2Qjju5Ms14p/dsdt57MLMuDX0i7n8ZoEzJoLjWcubOgZuB+aU8
+# IJeG1NjHhaefwBoG6vMm8Nd19odvK60Yl3prCJ7kiYL8NXfWbV3zpPtlIPA5vWDk
+# fyb9SUebuATP6gYnyOP8CeCdPVbhjD/qv1fo7fxh88lQ+GqLQZeO3kd+LGv2pQ76
+# 9/0WFBFQq0+KRC4P94fcIZR3ZZcxL7BIkJcAM+/x8BBO2GTbcsNIR/UOlycYzEpj
+# vhvOnhAYDuShAxBWaT/l1eDDV3W312DJifRRJdCRUE9vxrhfCivm2nyyx+yD/xvM
+# +6fyulDN2QTCkXSL8Cda+9lCVhJbjex+jqb+tlo2BkhDTxzKHy7SOrcPyxcSS663
+# aO1kA6mKjoE2IG7bz2ouSNwyqur35TDVkXPVL7jlIZEsWo+MQoZBfZ4y25LBKtI9
+# D0A/cY+9V0wiqRtNp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# MzhaMC8GCSqGSIb3DQEJBDEiBCAQUXjVZq1nvUP3vRLSAUhFtmAySyYV0FQgHeHQ
-# czz7UTANBgkqhkiG9w0BAQEFAASCAgAqstdBjpBVSztuhbfacBaT+FQEDGPLXNd7
-# y0Pd1/JK/ak4J3GppuHItK6ZGlzH00VPuOYd28N6ZVjeKTvz/RjjamZ8SOnJHUXz
-# MVAV/lqPR1xbG3virBMjdEeMDlXj7DaTY60JWFEH2ADIDFrtCy9bMSy2+VDTOZ2E
-# 8guvWpNOnjIj4Tk4QwaPzB4eTMGOabk56xq4Bhi+PiQB1YuTy3JODbIRHxNRQqUB
-# 2JjFAc21h/BtZ653R0GAQ048e/1y9sAtnoMXaOv1TqwUmr9RMtlCP5THKfOYhtQT
-# RnNTVTEL6dHfHYjat37jlTj/d+Q/pQwkVP2Wo+1ZVEJk6aYrjzPjuR0nRuuZs0Yw
-# l5PsWRdWNa2pD0N88j6JsX3ybw8AQ81rzlMSjqukOwith47hYTAVaAQ6DO37b9Bn
-# dVVCh3wYpS6HzfJxfTvX2b9pWv7v+AS7vLqojWjThQ/6f0mausipU1/0DYkuPjut
-# FT3iyGbh6kAJEtlb598m20kl2MIRHPqggWhe/D81ArMhgeBnLqrdn3JM6OsFvlEB
-# iiI4ny8o7S1oNkdPfGizV+tXI5Nl8HujhSZPIl9RmFJ/8cMj06eS+huZgJ2Q3wBD
-# E6SR3OjL/Mg8mMDcZOpOJ/mfq/JvA5I1f+BE+aG+AOm478ZZH02RPhD0Jwf6r84f
-# 36JcMQ2Now==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBaZtjYjhGsRMmEHTTtKAFgMxddukUXmEwP2J92
+# vIWnlDANBgkqhkiG9w0BAQEFAASCAgBfGCcKYd5chOe95W+dUcdaOEJ1FAT8A/Zg
+# EoliLNKNqmDvtibmNvnHg/rSXKC7oNJwRGr8D8E86gMzfRtale0/uP0h1WfjcGR/
+# ee7/ef9Uyw8qZr0OsAcNDwBEB7bBGG69K7+g+yGpaYU58t8XxORBKeGe406BSPGd
+# gOtgt3t+0RI1zuZmImuU68jxRoAU8lyx0by+RPwMq4480CWMCAHEifnT009j5e8Q
+# Z+aoflqUmQ/63NEqnPvGjosuUquVQRVqOOnledbcbABCJLi9xRMRS1RaIjHKocVP
+# yAEhhsXsKsndoCF2GVkB2emmyN7GZnT4w6DqZFW/t25Yy5E+BAK0iY5OT4lofw3k
+# 1g/d9omS0dInI/ZMDMRqLyzcsWSzyC546J1lQbnpxqCWLRnBj1R5GLWYNUmugzei
+# Hy1tlQQFPyDZUBGL7J3eItBkK60jD4GTv9EfZV+Sa2ROWJZHF7Dc+/EdUJvZlhXr
+# b1+WPWuoB/wpJ+OFHNCUsdMZz4ve/nM7ms2BqXpEKpBvBtTzgpjFRdYXVLdn6nyL
+# j8Ev8fFS5CwzO/DST4ghRJe4/FFSeBt1c7B5yPMPYpNuFisJ5jOK2w2W5kFTCc67
+# ynWVnfaXlbHVsxRhsiYU9LDLCCZNmm8Ya0uRhJfMV9Te4XpvX7WU5BysJ+N/PxNM
+# D81JzCVo7A==
 # SIG # End signature block

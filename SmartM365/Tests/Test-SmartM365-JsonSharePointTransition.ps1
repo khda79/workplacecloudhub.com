@@ -10,6 +10,7 @@ function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$scrip
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 function Reset-Fixture([string]$Name) {
     $script:items=@{};$script:patches=0;$script:interrupt=$false;$script:etagConflict=$false;$script:forbidden=$false
+    $script:pagination=$false;$script:badPageUri='';$script:versionPages=0
     $script:local=Join-Path $root ($Name+'.json.txt')
     [IO.File]::WriteAllText($script:local,'{"Generation":2}')
 }
@@ -21,6 +22,14 @@ $request={
     if($method -notin @('GET','PATCH')){throw 'Unexpected remote mutation; no deletion is allowed.'}
     if($script:forbidden){$e=[IO.IOException]::new('Synthetic forbidden');$e.Data['StatusCode']=403;throw $e}
     $item=$null
+    if($uri -match '/versions(?:\?|$)' -and $script:pagination) {
+        $script:versionPages++
+        $id=if($uri -match "/items\('([^']+)'\)/versions"){$Matches[1]}elseif($uri -match '/items/([^/]+)/versions'){$Matches[1]}else{throw 'Unexpected paged mock route'}
+        $item=$script:items[$id]
+        if($uri -match 'skiptoken=page2'){return [pscustomobject]@{value=@($item.Versions[1])}}
+        $next=if($script:badPageUri){$script:badPageUri}else{"https://graph.microsoft.com/v1.0/drives('synthetic')/items('$id')/versions?`$skiptoken=page2"}
+        return [pscustomobject]@{value=@($item.Versions[0]);'@odata.nextLink'=$next}
+    }
     if($uri -match '/root:/(.+)$') {
         $name=[uri]::UnescapeDataString(($Matches[1] -split '/')[-1])
         $item=@($script:items.Values|Where-Object name -eq $name)|Select-Object -First 1
@@ -50,6 +59,19 @@ function Invoke-Fixture {
 }
 try {
     & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedSharePointDrives=@('synthetic')} } }
+    foreach($uri in @('https://graph.microsoft.com/v1.0/drives/b!synthetic/items/item/versions?$skiptoken=opaque','https://graph.microsoft.com/v1.0/drives/b%21synthetic/items/item/versions?$skiptoken=opaque',"https://graph.microsoft.com/v1.0/drives('b!synthetic')/items('item')/versions?`$skiptoken=opaque")) {
+        & $module {param($u)Assert-SmartM365VersionsPageUri $u 'b!synthetic' 'item'} $uri
+        Check $true 'Equivalent Graph route rejected.'
+    }
+    foreach($uri in @('http://graph.microsoft.com/v1.0/drives/b!synthetic/items/item/versions','https://example.invalid/v1.0/drives/b!synthetic/items/item/versions','https://graph.microsoft.com/v1.0/drives/other/items/item/versions','https://graph.microsoft.com/v1.0/drives/b!synthetic/items/other/versions','https://graph.microsoft.com/v1.0/drives/b!synthetic/items/item/content')) {
+        Reject {& $module {param($u)Assert-SmartM365VersionsPageUri $u 'b!synthetic' 'item'} $uri} 'Unsafe versions route accepted.'
+    }
+    Reset-Fixture paged;Add-Remote old 'state.json' '{"Generation":1}';$script:pagination=$true
+    $result=Invoke-Fixture
+    Check ($result.Status -eq 'Renamed' -and $script:versionPages -eq 4) 'Both version pages were not checked before and after rename.'
+    Reset-Fixture repeated;Add-Remote old 'state.json' '{"Generation":1}';$script:pagination=$true;$script:badPageUri='https://graph.microsoft.com/v1.0/drives/synthetic/items/old/versions'
+    Reject {Invoke-Fixture} 'Repeated continuation was accepted.'
+    Check ($script:patches -eq 0) 'Repeated continuation performed a rename.'
     Reset-Fixture onlyold;Add-Remote old 'state.json' '{"Generation":1}'
     $result=Invoke-Fixture
     Check ($result.Status -eq 'Renamed' -and $script:items.old.name -eq 'state.json.txt') 'Old remote item not renamed.'
@@ -100,8 +122,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjS+B6t1a+xm6A
-# kM+kMwcCvZ27fZqOv0FOyH9JiigSWqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3aLKUOsFVwygu
+# EOZ2i7mLFyXZ34xreWge1eNovNBK66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +256,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICLc6nWqhx8BmkJ5lsyU4bmf7eFeJ4+qGVctjchrAE4YMA0GCSqG
-# SIb3DQEBAQUABIIBgEhwOf+6xsB6D/kHut2DXcJLt+L+Pa/XW4oT4CUC6YoMGSyB
-# 5VJAgSEpkM8Z8kgN3k5U4dBV+XH215FQijwry45KIupAMdynxyjtmlDrSPEnUCDM
-# RWXQ7ibDBDh85NCdLqOwPhhz9MayzHV1a7b0AW9Wd51nFIUE//1qIKwF/wYxLwnQ
-# t8kLkr7L+NhCFWDFTlj/evLYtozFuL3+GloJOYuxLtSeVe3mpG6a2drG1tb02kjm
-# mLmVfLEVtnEcAHSURQ8/k+6LOW+AhsLiSNbZh/pvdEfg3AUev+Q8xdQfqBfGenkW
-# WaTPA5WoDNukEB20JkIsIBX0Lgrvx+2SPbOTJal3AvNvBqE8KYX+oxDhlgMfIvR1
-# ZkizMwHkfbAFwjtPahr/fW6nzktLT44Iqm5XGNnqohoE+7YbPQ35P8zbcdw4TvpH
-# qe6Sw/CwiF4ckf0F+bDCbid9NduinrOUOxWl+j8ifa5NbTzGK4KjR9tzlsBrwLI2
-# padasRHUXQMeVvQ1HqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKNg1hmzJLnwtzG7c3KFqjEEXUjHCLQKuG7/qQeODSAaMA0GCSqG
+# SIb3DQEBAQUABIIBgIodmJgEusleEgzCrBR2ZkZArHKMRfbHzlRjb5VkNKm2iMFO
+# 5e7qQQ0FI3HqffRPe9UBKu0q+fHw81yV5J/FVvU2DmJe3LOaOy1TEhTdm/fJx0J8
+# KlRVmwVT3i56Soi75WutL41tv414Gg/0zNTxXI9Uz7zbTkQ3lbDDuIYFvJsz1tFu
+# /ENw9t3N+5kQw9pmAC9Q0FPW+zuzDboewfwrVEpUkQ7eQYXXUHdCOVamquWdZl7o
+# HqwJ9sbOu2i35Y+QBSWWdAzRmTTowg4X7wwm53a9OquQelR4Nzxivo3AbvPxLfuv
+# 2kFNaW+xqshWkDXeOG9FCfCxxr/PiWNDp2KpSqCC39bkFrnhhwGlu74zlRhVOOo/
+# x3Lwa6DUOsv0ukGbI4S96sHlYX/v7NtqnATwgL7U+k2PnOy9eNTaCC46iKDJSJyJ
+# Az/HbPZoW0XwPwE+LnIPnSiQoPiVItD14buBlmTxSr9aI+xfde6EcT27InHrFgwU
+# u2S45xfoIclHMDzwjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTdaMC8GCSqGSIb3DQEJBDEiBCA/geevce03eOCT4RCp+v1UgTr2assNJdMCBycr
-# BuufTDANBgkqhkiG9w0BAQEFAASCAgBR1bcgIlny92+WdBbmQTr2tyJWCZzcBELL
-# JYHMaqe6NRSjw6GAgjAHfNqMuiCFJytN0r4lTujMONYtR/bmr1t59jlyqetsZaTd
-# nqTYLPKw1ZjHginOsOoQck4LmCqMxalYz8uiXvfaEg0Az5G8rOirotDs0P4nlxWW
-# rh0vl62T6UISgvssUdA/iQlwM+rtIXlu+ueJIW17pXMd7VASWbQ3IcvaCh5ciyZB
-# f90zu4GamnKNfgEbIWhYt7rHegQmQ8zNh75VH4J0zruLXTelpwCqbA3NzC63K8yN
-# kKIU32+BvhZOzIGnPXa5DPsnri1VLm7So9nt62e4Oyb3q5VCz39AiVruhudwhWWj
-# hALWrqmlVJt694opRMcLt3q3+hLXNGaegB13kgGXltP0WCaFAAea9seaYWZ4IJkj
-# RxVvwH/yBrHQGCN6YOQCGNdfU7FyXuj7/y5NNeCTXRt0exKkd6H89TX8xTWciP97
-# +hIk66HvFrZnmLmiCxRiphcTuBXM/1XeuT/tu3FNSqHK1HZmRvvxv+0OEy/es7jE
-# niVEx90DhmPqXxC5dwBlkAZyPDgtcbKiYX+7yZUSRLGW0DUAghAAw5Mx6/bbOrqi
-# I2Vt7qtz+TSy/s26wRSc4q8MVc21G+rbSqjeDZeA01CsFyyC2er16o8c3KphLtrG
-# yvQOh7YVrQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
+# NTZaMC8GCSqGSIb3DQEJBDEiBCA9EqxvxE/87wgezTmSOLrGIahlTWxcZtR12P1Q
+# LdtY0zANBgkqhkiG9w0BAQEFAASCAgALbDJZ4YRdcP/Qrmq+61oDDlMxFAOoVOon
+# 0SKegQUYrUMqmR3EiHFkVztG0NdpFlJb204iXB8MzLY917NxnV/8nKJo3EM9r/KB
+# 7kHq1LQazRmYk1/HC9rNuAWdrWO6yOkpSOfj7Hd56fiTubgYmbcLsPmfIKugaYmp
+# slHjQnVzP1VRjHaWDI3xL23VlS79Y0AHXnhWXz63wWDHmxJCBt2vxCHPsc7fPzis
+# 99F19HyVkV+eMlhWIWakNu6FHxzIeej3sasGHkbZE80OdGBsb7kA/Jd8+JruLX3g
+# aJ0yUgw7C9AKpYWeAxtgbjxl2C3S/5gjKk/F3low+4ILOAau5lFK2IoGemyODaBa
+# NgDDb04kFR9m48fe9cYFMfWKPyw7avO5ASSbSlbGPopWbUD7yOYJmoMVKhTlN+Gi
+# YW6o0jP3qcPsLtivgR67/8OhxOMwTYCDg0o0fx6tdK10yrtNObnX04JGShXZANNC
+# ZCVMmHdXK74y7T0WiXuS3CBMk+4ZBQzIyScnjIiDfS9JUaNT9NE3pvqd8xKn+D+A
+# n7WpW6tcewnw0kcbg5BbfTsdITlu8QT4YGyvGPP804CTTzDE8UHnk6WPnFBoAP2G
+# eHa4my178KSy+KngV+7Yyli01ShRapEgcHVfuIcjbmckWlb/QlY229FR+OAsbU96
+# G58wZseFaQ==
 # SIG # End signature block
