@@ -31,7 +31,7 @@ The Cloud launchers follow the existing prod convention:
 - Start-SmartM365-WorkplaceEvidence-Prepare.cmd: full preparation with SharePoint mapping reads.
 - Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd: full local preparation.
 
-ValidateOnly downloads/structurally checks the two workbooks and checks source existence, fingerprints and transport age. It does not generate prepared CSVs, upload or notify, nor certify row-level tenant identity, collection success or business completeness. Offline suppresses all SharePoint access and notifications: it requires the two workbooks already present in the tenant data root and never downloads missing files. A full offline run still writes logs, snapshots, prepared CSVs and the validated local pointer.
+ValidateOnly downloads/structurally checks the two workbooks and checks source existence, fingerprints, transport age, CSV record shape and every row TenantKey. It aggregates failures with relative paths, including history, and rejects source changes during validation. It does not generate prepared CSVs, upload or notify, nor certify collection success or business completeness. Offline suppresses all SharePoint access and notifications: it requires the two workbooks already present in the tenant data root and never downloads missing files. A full offline run still writes logs, snapshots, prepared CSVs and the validated local pointer.
 
 The normal orchestrator job uses neither switch. Existing configured notifications apply. SharePoint mapping reads are independent of EnableSharePointUpload; direct output upload remains disabled by default. Read access requires the existing app's Sites.Selected role and a read (or existing write) grant on the selected site. No permission or tenant grant is changed by this code.
 
@@ -39,7 +39,19 @@ The normal orchestrator job uses neither switch. Existing configured notificatio
 
 The contract requires 47 current CSVs, two mapping workbooks, daily AD statistics and 12 historical source families. Missing required sources/history fail rather than become zeros. Current-file transport-age limit defaults to 168 hours, with 744 hours for license prices. These configurable limits are not a guarantee of business freshness or collector success.
 
-Every present TenantKey must match the active tenant. Legacy tenantless CSVs are refused unless their origin has been reviewed and PreparedAllowLegacyTenantless explicitly enabled. No such exception is enabled by this release. Unexpected empty tables are rejected unless explicitly named in PreparedAllowEmptyTables.
+Every source CSV must contain TenantKey and all rows must match the active tenant, including history. PreparedAllowLegacyTenantless must remain false: the global bypass is rejected as of v0.1.4. There is no exception registry. Unexpected empty output tables are rejected unless explicitly named in PreparedAllowEmptyTables.
+
+### One-time repair of reviewed historical exports
+
+Older weekly CSVs can predate the tenant column. Only after the operator has confirmed their ownership, use Repair-SmartM365-WorkplaceEvidence-TenantKeys.cmd -RepairWeeks "YYYY-Www,YYYY-Www" -ExpectedRepairFileCount N. This is a preview by default. Add -ApplyRepair to perform the approved repair. Both week values and the exact expected count must be supplied; nothing client-specific is committed. The tenant value comes from the same effective profile as other launchers (prod for the Cloud launcher). Do not put repair arguments in the orchestrator.
+
+The tool selects only historical families in the source contract, in the exact named weeks. It does not touch DATA-LAST, daily statistics or files outside those weeks. Existing TenantKey values are checked, never overwritten. Malformed rows, a conflicting tenant or a different nonzero candidate count stop the repair. A repeat run with no missing columns reports NoMissingTenantKey. Stop collectors/synchronization and avoid Power BI refresh during maintenance; the preparation and repair modes share a data-root lock, but other raw collectors do not use it.
+
+Before any source replacement, all originals are copied and hash-verified under DATA-REPAIR-BACKUPS/<run>/originals, outside the folders read by preparation/Power BI. Repaired copies add only TenantKey as the first column; every original parsed field, header, record order and row count is compared exactly, including whitespace and multiline fields. CSV serialization is normalized to quoted UTF-8 BOM/CRLF, not byte-identical; original bytes remain backed up. Original LastWriteTimeUtc is restored to avoid misrepresenting old data as a new collection.
+
+Source replacements are atomic per file, not one transaction across the whole set. A failure can leave a partially repaired set: stop and inspect the private repair.json journal and verified backups before resuming. There is no automatic deletion or rollback that could overwrite concurrent changes. The journal records paths, original/repaired SHA256, row counts, operator, time and per-file status; keep backups and journal private. The added tenant identity is operator-attested, not reconstructed historical collection evidence.
+
+Repair mode makes no SharePoint calls, sends no notifications, does not generate prepared CSVs and never changes DATA-POWERBI/current.json. After successful repair, run the normal Test launcher; only a passing complete preflight should be followed by full Start. The hourly job never repairs sources automatically.
 
 Inputs are snapshotted into PreparedWorkRootPath outside synchronized DATA (default OS temp, separated by profile). All generators run sequentially. Validation covers output schemas, types, declared unique keys and loss of historical date/service/metric/country coverage compared with the last accepted batch. Workforce history is the current approved cohort viewed over observed snapshots, not an independently classified historic headcount census.
 

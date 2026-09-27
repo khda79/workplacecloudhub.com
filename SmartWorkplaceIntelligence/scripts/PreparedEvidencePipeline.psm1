@@ -90,25 +90,45 @@ function Get-PreparedSourcePlan {
 }
 
 function Test-PreparedTenant {
-    param([string]$Path, [string]$TenantKey, [switch]$AllowLegacyTenantless)
+    param([string]$Path, [string]$TenantKey)
     $delimiter = if ([IO.Path]::GetFileName($Path) -like '*DailyStats.csv') { ';' } else { ',' }
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
     try {
         $parser.SetDelimiters([string]$delimiter)
         $parser.HasFieldsEnclosedInQuotes = $true
+        $parser.TrimWhiteSpace = $false
         $header = $parser.ReadFields()
+        if (-not $header -or @($header | Sort-Object -Unique).Count -ne $header.Length -or @($header | Where-Object {[string]::IsNullOrWhiteSpace($_)}).Count) { throw 'Empty or duplicate CSV header.' }
         $index = [array]::IndexOf($header,'TenantKey')
-        if ($index -lt 0) {
-            if (-not $AllowLegacyTenantless) { throw "TenantKey missing in source: $([IO.Path]::GetFileName($Path))" }
-            return
-        }
+        if ($index -lt 0) { throw 'TenantKey column missing.' }
+        $rows = 0L
         while (-not $parser.EndOfData) {
             $fields = $parser.ReadFields()
-            if ($fields.Length -ne $header.Length -or [string]::IsNullOrWhiteSpace($fields[$index]) -or $fields[$index] -ne $TenantKey) {
-                throw "Malformed CSV or incompatible TenantKey: $([IO.Path]::GetFileName($Path))"
+            $rows++
+            if ($fields.Length -ne $header.Length) { throw "Malformed CSV at record $rows." }
+            if ($index -ge 0 -and ([string]::IsNullOrWhiteSpace($fields[$index]) -or $fields[$index] -ne $TenantKey)) {
+                throw "Empty or incompatible TenantKey at record $rows."
             }
         }
+        [pscustomobject]@{Rows=$rows;HasTenantKey=($index -ge 0)}
     } finally { $parser.Dispose() }
+}
+
+function Test-PreparedSourceTenants {
+    param([object[]]$Plan, [string]$TenantKey, [string]$SnapshotRoot)
+    $errors = [Collections.Generic.List[string]]::new()
+    $rows = 0L; $files = 0
+    foreach ($entry in $Plan | Where-Object { $_.Relative -like '*.csv' }) {
+        $relative = $entry.Relative.Replace('\','/')
+        $path = if ($SnapshotRoot) { Get-PreparedChildPath $SnapshotRoot $relative } else { $entry.SourcePath }
+        try {
+            $check = Test-PreparedTenant -Path $path -TenantKey $TenantKey
+            $rows += $check.Rows; $files++
+        } catch { $errors.Add("${relative}: $($_.Exception.Message)") }
+        if ($files -gt 0 -and $files % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Source tenant validation: {1} CSVs checked.' -f (Get-Date),$files) }
+    }
+    if ($errors.Count) { throw ("Source tenant validation failed ($($errors.Count) files):`n" + ($errors -join "`n")) }
+    [pscustomobject]@{CsvFiles=$files;Rows=$rows}
 }
 
 function Publish-PreparedEvidenceBatch {
@@ -197,14 +217,22 @@ function Invoke-PreparedEvidencePipeline {
         [Parameter(Mandatory)][string]$AccountClassificationConfigPath,
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
         [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot)
+    if ($AllowLegacyTenantless) { throw 'Global tenantless bypass is no longer supported. Repair reviewed historical sources instead.' }
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $work = [IO.Path]::GetFullPath($WorkRoot)
     if ($work.TrimEnd('\') -eq $root.TrimEnd('\') -or $work.StartsWith($root.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'WorkRoot must be outside raw/synchronized DataRoot.' }
     $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
-    if ($ValidateOnly) { return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourceExistenceAndTransportAgeOnly';Publication=$false} }
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $lock = [IO.File]::Open((Join-Path $work '.preparation.lock'),'OpenOrCreate','ReadWrite','None')
+    $sourceLock = $null
     try {
+        $sourceLock = [IO.File]::Open((Join-Path $root '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
+        if ($ValidateOnly) {
+            $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey
+            $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
+            if (Compare-Object ($plan | ForEach-Object { $_.Relative+'|'+$_.SHA256 }) ($after | ForEach-Object { $_.Relative+'|'+$_.SHA256 })) { throw 'Sources changed during preflight; retry after collectors finish.' }
+            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity}
+        }
         $run = Get-PreparedChildPath $work ([guid]::NewGuid().ToString('N'))
         $snapshot = Join-Path $run 'source'
         $staging = Join-Path $run 'prepared'
@@ -214,8 +242,8 @@ function Invoke-PreparedEvidencePipeline {
             New-Item -ItemType Directory -Path (Split-Path $to -Parent) -Force | Out-Null
             Copy-Item -LiteralPath $from -Destination $to
             if ((Get-FileHash -LiteralPath $to).Hash -ne $entry.SHA256) { throw "Source changed while snapshotting: $($entry.Relative)" }
-            if ($to -like '*.csv') { Test-PreparedTenant -Path $to -TenantKey $TenantKey -AllowLegacyTenantless:$AllowLegacyTenantless }
         }
+        $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey -SnapshotRoot $snapshot
         # Detect added/removed/changed history or concurrent collectors while making the snapshot.
         $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
         if (Compare-Object ($plan | ForEach-Object { $_.Relative+'|'+$_.SHA256 }) ($after | ForEach-Object { $_.Relative+'|'+$_.SHA256 })) { throw 'Sources changed during capture. Retry after collectors finish.' }
@@ -225,17 +253,17 @@ function Invoke-PreparedEvidencePipeline {
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained work/logs: $run" }
-        $provenance = @{Mode='RebuiltFromSnapshot';Sources=$plan;LegacyTenantlessAllowed=[bool]$AllowLegacyTenantless;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
+        $provenance = @{Mode='RebuiltFromSnapshot';Sources=$plan;TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
-    } finally { $lock.Dispose() }
+    } finally { if ($sourceLock) { $sourceLock.Dispose() }; $lock.Dispose() }
 }
 Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch, Receive-PreparedMappingWorkbooks
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzrw3zqFq/UT1V
-# TRs8MFqXGgK3lHiHp+hF7EocgnlQt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2pms25WBnDXWl
+# j58zRUYgJ13TUkgCKObIW/vWRiM+96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -368,31 +396,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILfQn93UkjEaut0Vzo8nIORK3BX21pxA5ulH/wKFkHSsMA0GCSqG
-# SIb3DQEBAQUABIIBgD7jXL/QVu6nQEXQo95bn0U75jKZmbAohYhUh4/7KeIlT6ej
-# +EN/FR1p+wg207dJOrNscxUdmfSCrldAHBZ0qyGy/T3A0US00htS535sxQxB8ivF
-# DVjW+3ga1IM3ZkIBNkIta/npHxXlPIANRM/2Ipctfh5vUDypEfsqcJcW0BN7/bZS
-# qlxFMWBiI51KjC+YgbCoDvwwsZlDNowWnRWVFdk1UAOFz1Lof+gPjImdbAnTwsKF
-# fcgAm+UbtnLpIFHiBogJkdF52QUR+zcMGC6Q8i87IhyybFtB4/Q4/oZG1F+P3amr
-# 2whipuxrq1wczk/+CVxMuP27S8rmHYdGBAqwMVbSBljzwsNm5XbNC++7bonqdaN1
-# 04PneIt2tpizhm779Y221RWG31eemHYCpmR4l2FUjsVU+AmTImMjTBsiA9krf6Wz
-# bc21fR8vggpU6Gwp3+lYMZgj64/xuV/uOtvD+B2a48bg7wXtxW4Ory19dsZpg7r6
-# a+a81SoufUpUuv/HMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOyTrXiTbNcnXuf6P5ZUJ/9WFpN4+ULL/Rbfgwo8it+KMA0GCSqG
+# SIb3DQEBAQUABIIBgH37FvjGGScwv9tDD9ZP0LVM7bGcpYxAxP/miAIpAqh1z3XE
+# otuEO4FyRlPXE1iBJ1Y1y5QNaEtSjhI4jSj2MwKjbA1wNk6VZMdGHotcOZeWQrrI
+# EpfC1WXV58DDqos49eChDFyCOqldMz2OKxbFyY0pbBkQv5ezxhUafOY6lrlfPwYL
+# E1l25Vf1jMDPlWfskV/IyOJ5H4KEDTiuBkqpa2ocOzB9fCnzngy1HLUqyUbsJdxk
+# z8yXVoXTu5UiNHv2u6B+z2c/zzn+7Zhb+eukXgqnNJErpH2t+RsY2959v6Cq2IHu
+# iix6JPOkxn/mNjMQgTWsQzJzQR8MRbbgiV3G+y4Upf1wNG9IkBy90TKzzfPx1uT9
+# vgdQOsGEMiWfm4jpR96NiA81VtqhQSCXuzhx5KDO6VQpmF4wvX8nywf3VJgOjJ4t
+# 9555vwJ/hIzb7MLt2cxLqMdnRkyhiu0Af1l5How+TU1/aLY5A7XDx6Uvs2ocJGxv
+# U6jUfSWyxeb7s4f4HqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDA2
-# MjFaMC8GCSqGSIb3DQEJBDEiBCBOEl2yAE5oIx//foVn9DqdeiTaG21m6/2sHVRS
-# 8sca9jANBgkqhkiG9w0BAQEFAASCAgBxgES82SG80NhAwewlGf3U3pHQpl4bpGiK
-# acw8ApYNzGOZXXJO7oGK6kusC5DHFpaqOnz5CK1mC7KlkXIDI2dOsYq2WJdboSPr
-# BH6EsP4xynzvRsveVXacu2LRw+vGWU8vQERpMSFn8ny9Hn2/MG5TJp3MP6QwB4im
-# kZS1REc8nSfgGMtWX5mEPiMOW0Yd/lwwiaX/3obRF//Z5AkcfrBzIWXWWef1dnRF
-# ICHvHMTF6GCxa9ZIEqpKxHK8PCtjy3sRCDnPWHA0bx9CKAwye9toh8p+r+GtwWHW
-# O+X/6fn6w+rjdys3D3VjYn9hrjMDtVHTOQQu3B+tm/YBQeqQatWcPIv1nJziXmd8
-# mXo1sKP9ppwOj8ZDOHNmL+gQzyn4DVAE+d3aiXDehHsBv6ND6ILyNhFDa1EtD0uL
-# qR3ZsnuBEg7QIYEYKqueLsAdkWeH5FvlneByzGd/bEmcWmDdAjQGhgl0PQOSv2Dp
-# SOAyGNkpgFsSh8FlqV6oQv/h1Xts5fFaRKQHJFqfGkM/+urCL314bt0Eyq0zRu3W
-# IZ5nWmcg2dAt0Fl7fnaCMFwqCTNvjnVv9cZXgFUD0UO98DSTfnTPCTGElH855a5w
-# OpfYTASM8xuQRUUz2I3Te/sgtREOoOZ/oek/4NVz7Ruas09tYQ1m6R2lYdr4yNvD
-# l4SKnoj7FQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDMz
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAWNJwpxrH5y3/sG/UwzWmIphjfs/4v5Gn04FRQ
+# O6bfYjANBgkqhkiG9w0BAQEFAASCAgAJjhXF+qoaeSd5gUpjFdZ/rDlxBrEKG6v4
+# bwGeohrS9H32ltCdFg84MoF7pRZdvPUWXW1zG2gUOoX8ruM7CQZaUN3hkhiUmBa6
+# ezqESHpWGauXN8qCdEtdUUreW4pqhOCOX/Wyghxet3pRtDxA5JqnfPPcKki9mn76
+# q18Xu1BvSlZE3ElIJ+PR1WWEPu4XK52XLxphMpRJOJRUVbtHA/7ZUcTN4TZATrDj
+# K4EP6R14JqdFvXaqFWZUXTzl1RDQ02Wrmg2s6p0ykWIQR2Xo/sKHTmXRASXNlQ4A
+# /dbobf8IddFO/f/2715rbiLtaE2W4Dgpu/SBgnEooz8W+WM/QvhTWT4S76wcJ2O0
+# dMDAXYzADI5pNDWjRD3J7h1WpQdX5KuMf8lJ9SL+sLFLwMJUvxryZ4Dt2iuYpUD7
+# TwYVSB4jMRuEhmsHhvLkk7x3BOx4MJclekn0OcQ/BGunOkj3qBv0WiJzueUv2Rvi
+# 5mftIAKOykzWPUyz4J5xZrkCKmoROw+iJDVHntsSyv7ofFXeY3od8/JVn3E5sqcw
+# bz61RZDPlmMMWGRsfXIzgqTJ0rKKdwulTAR0mVPYve1W5EZ1hN8fImT21ucfK/G8
+# wq26Rutj1xPOP8wZXJimMhLgrC9Gu/esZ7zKCDXfUDhO1MRY5ghoohksCxKybTAw
+# 6Zg5bV69gA==
 # SIG # End signature block
