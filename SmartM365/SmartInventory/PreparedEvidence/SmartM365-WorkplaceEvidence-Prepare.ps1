@@ -2,14 +2,16 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.3
+    0.1.4
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
 #>
 [CmdletBinding()]
-param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline)
+param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline,
+    [switch]$RepairLegacyHistory, [string]$RepairWeeks, [int]$ExpectedRepairFileCount=0, [switch]$ApplyRepair)
 $ErrorActionPreference='Stop'
+if ($RepairLegacyHistory) { $Offline=$true }
 $tenantContext = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Config/SmartM365-TenantContext.ps1'
 . $tenantContext
 $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -40,6 +42,10 @@ function ConvertTo-PreparedAgeOverrides {
 }
 try {
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
+    if (($ApplyRepair -or $RepairWeeks -or $ExpectedRepairFileCount) -and -not $RepairLegacyHistory) { throw 'Repair arguments require the manual RepairLegacyHistory mode.' }
+    if ($RepairLegacyHistory -and ($ValidateOnly -or -not $RepairWeeks -or $ExpectedRepairFileCount -lt 1)) {
+        throw 'Manual repair requires RepairWeeks and ExpectedRepairFileCount, without ValidateOnly. Preview is default; ApplyRepair enables writes.'
+    }
     $config = Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot "$scriptName.local.json") -Required
     function ConfigValue([string]$Name) {
         $value = $config[$Name]
@@ -74,6 +80,13 @@ try {
     Import-Module $pipeline -Force
     $work = ConfigValue 'PreparedWorkRootPath'
     if ([string]::IsNullOrWhiteSpace($work)) { $work=Join-Path ([IO.Path]::GetTempPath()) "SmartWorkplaceIntelligence/$($effective.ProfileKey)" }
+    if ($RepairLegacyHistory) {
+        $phase='Repair historical TenantKey columns'
+        Import-Module (Join-Path $product 'scripts/Repair-PreparedHistoryTenantKeys.psm1') -Force
+        $repair = Invoke-PreparedHistoryTenantRepair -DataRoot $data -TenantKey $effective.TenantKey -Weeks @($RepairWeeks.Split(',') | ForEach-Object {$_.Trim()}) -ExpectedFileCount $ExpectedRepairFileCount -Apply:$ApplyRepair
+        WriteLog -Message "Historical TenantKey repair: $($repair.Status); files=$($repair.Files); applied=$($repair.Applied); backup=$($repair.BackupPath). No prepared CSV generation or SharePoint access." -Level INFO
+        return
+    }
     $mappingRoot = ''
     if (-not $Offline) {
         $phase='Download SharePoint classification workbooks'
@@ -124,7 +137,7 @@ try {
         $receipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath (Join-Path $result.BatchPath 'current.json') -TargetFolderPath $cloudRoot @cloud
         if (-not $receipt) { throw 'SharePoint current.json transfer failed. Local batch remains valid; cloud qualification failed.' }
     }
-    $recap = if ($ValidateOnly) { "Source preflight only: $($result.SourceFiles) files; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
+    $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
     WriteLog -Message $recap -Level INFO
     if (-not ($Offline -or $ValidateOnly)) {
         Send-SmartM365TeamsNotification -Title $scriptName -Message 'Preparation completed.' -Level SUCCESS -Channel Infos -ResultSummary $recap -Facts @{Tenant=$effective.TenantKey;Output=$output} | Out-Null
@@ -149,8 +162,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi55/AgPFaoT+X
-# Eq8iZGhj0SJjFDfRZqEVbl/BQypnk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAupltZNnmGWs9
+# SrYulC/+1LZ8pHN8HT+jJSm3avuat6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -283,31 +296,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICGbOGlrH4TsvAjHMtDKcfz8JmkvdXmSrxvOwcVy22kXMA0GCSqG
-# SIb3DQEBAQUABIIBgJIQ3EmwIVIPUWrbgMyBq0YiAWKuHYUqnSXsJy9OPnnHoG5n
-# SVA6dTRYTYSgg7+tWKRjHlx4jY8fn3lmRLd7++ipAqH3CVEvMqVGipO8dpRdZ1wy
-# ni7NKNf6rZ7/KGxlt4KXz8jAajaRCpR7x9rqKWuDFGYz8GnwFe5KqAEYCyr2lYnY
-# 3VO3/Hfrwz/YsSVxGM8ezR/2qi1VYgpVf7fcscmVcbVCACTi0qloDZvzt30wWMS1
-# cUqmOQ2Epj6mA3chWyA8Oc6T4kID7RNlP0b3vtXnM2PNn4oUq5CS0Ywq6JOnR7c/
-# 4LHiqXyfzt33Ro1L0GawL4sYqNt2JZr0SEdiVc0IQOXdrfSpP0rJzeBCzFPbl955
-# qrUeFsjVpZxhHr/Pe2j6U4rFeNPwt9MYWMkvUT+C7xQMF77OxCoFa5e9of2VGSMw
-# mw6uUBM5vPbFMu6wWhoKWGr5tkg/rJNULmcxXZrIqivl+LqlHVN56HCqgYm8A44F
-# wFee2zTK2P8UPJgfjaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJZOrHBWwjAQPnGEetJbP0T/nUSEZfoZ/aTa5y/1Ns68MA0GCSqG
+# SIb3DQEBAQUABIIBgFRNQ86YUdX4A+3DrTPTvCm+I/CoYf6JQZgKUwCOg6EwyJQm
+# aj7B8qBF+Wnix4bRcml/PXL7qMDgHgZHx1YlRTZHb16F+TTAMUgDIW7ORnq+QlFp
+# h9TW/I+/VoIK75liPe2QPzUXAjc3KRZPEz0iU7K3C9Sq4E3OWoqYLoEWI7lBRR+S
+# hslDbNQScgMw6PYTQ9o7rvRYDKu8GZfQoGfPOfGLs1JAEfKBVKeyPNPiiYCY8R+b
+# fsi1cw/9WMXmiwQ+r0GcVxFv2jrG9z4GObjnxwVkfSfLiGFlQJEPvTlrAkZbnsIV
+# KmAvyoVeQIhaVm1fNSNlmU0UxYqq4mQDdlKHalLwNo6T1zYIuX2Vm93KbFJX09tB
+# gHv3qHWS6zX1YNmwWL5C3LcxZRP9tp6aEQrRkreHfY9oinu0+GU3anKqNzifHrmd
+# jpBmstU1T6Iy4h2v+AKK3AaSbMq34KYx1x9sunckRwMdyz4gL+3/HKhFJWgBuoeA
+# oH6kIy2MU/+mR1valqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDA2
-# MjFaMC8GCSqGSIb3DQEJBDEiBCCxqvLpbqHQwmoOrWrLQNhHxLRr/uTnmfuUHKE/
-# lMxp2jANBgkqhkiG9w0BAQEFAASCAgCOjHfHKv7wR2DbTccyxtYUtnolVowG3tCD
-# RZ8fkEnUyUX193/crwRYf+3CgjAUxUjj7hFZydynsuvUuYBpAgmYnP0aqmvdqjEA
-# LEANPYwpnSHpMsMf32An2IQkkACgfmfsOcdo2AdOhqnO79ZSKTxsqhPdy25ImsRF
-# Q8F3T9N/rK/mal6TY16DBR4QvAmHJGdSS89hlQi+KgKqFB/h/EHwRQ4EFwTl3ypP
-# OXtevcSab5YIAH2sfIMroTHcCxNKs/tI0c53abO4HiWQH6EsgVQ3772nJ1EKB/V5
-# lb44msjalrTNFleYxO0MHD1wK+jQJscsjaYCCf7D9e26M9x7njd7HExF+m7hT+3R
-# NNIRqsF5SM1TQlV8vNhkSG6IBn3Tq0cV70lbidbxWCK0SpWDWJduJtAs3CLPkIqy
-# ZaaOhHMDLjtSe91w5CpscEnbibZJfI26ugwn8Jp7avPPrKQ0I9NaMCnpqYnyp0hG
-# 2AKHjtE7utaHYJVXrm06l6BnpagALOHaP7xOSP9CaZSPiLop/MN6gbIYGiNYY/V2
-# OHY63L6KrQB8cTMUDAlW3KzYotpbc1I7KK5JxGEwUaqyPpfYSQ63lTh8N1TNIrIY
-# aFjnmTnzbpqEo3FVrdEqwxqUKfTR6mJ447jb2MVIeLxGqnscTwwdB508B2TIDGrZ
-# YztA/n6JAA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDMz
+# NTBaMC8GCSqGSIb3DQEJBDEiBCBkrVNYBSHm675lA7PMyVypjLA1Ef6jWIkZZz06
+# augxSTANBgkqhkiG9w0BAQEFAASCAgAdNV6rNIRUpVkxy9cgCCYUTE3SCc5GSzQZ
+# L24rM3aNydyS/Fzxs70huJE4icAwusz9pr495m2PsxDNxjakr7qDDntvHsWp9gvg
+# DWtfTM1XVhBgoMNtweNO45ovAuzfg/cm7eFX/Sh+wHu8ncepdni35jnaqMaRTEn7
+# eKq+m0pL+o0UjqePDflDhkVNTR0vNRa9VYq6wQFBNsBBxBk3bSNmZw838GD+E9sm
+# lEkLz6czfNOsBqetHWkfvXNrVVNP3xjEN1aVynJtuQ1qHHm5lE58OlozQNgk5fpr
+# 8qSy+dn3LVGZ9WVL/1MNSffXaT+3AEq41xZSSNbJgppTGbAU4vD2YRkGuJHbyGzP
+# /iwfpaIXUwy52yP+iJreAuo017yc6hCaay5M9PvqAGqyMB8aiKessXXX77Ah+ME9
+# 5XFPNx3hwxdccPL/wqF/c7aju5wWtLD2SXkgx9Wr5GrosvJc0SyMZMe7DCiPAzgM
+# 7S5gXNqgeJYhwtb+fNosH8lBhbPjp4G8RPPn+K8wST30rdJi8W2ex25FMRUF+gR6
+# magGXMaa50ZsRFnpjIDZhCnQwOO8uKBJoVt4wk93uYRUKHv1HZwfk0mlsibqCI00
+# q2HzKTDTcmcgqMZgCi/zm0iIj136+K4+AF1WtWf17DSFX6qF+unKLVEHqi/xgcYe
+# EAFHfRoQLw==
 # SIG # End signature block
