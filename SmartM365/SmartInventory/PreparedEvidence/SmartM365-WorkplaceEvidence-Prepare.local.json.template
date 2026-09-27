@@ -10,6 +10,8 @@
   "PreparedAllowEmptyTables": [],
   "EnableSharePointUpload": false,
   "PreparedSharePointFolderPath": "",
+  "PreparedMappingSharePointFolderPath": "",
+  "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",

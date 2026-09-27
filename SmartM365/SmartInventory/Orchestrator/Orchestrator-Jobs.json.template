@@ -1576,9 +1576,10 @@
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
-        "SharedRuntime"
+        "SharedRuntime",
+        "Graph"
       ],
-      "RequiredGraphAppRoles": [],
+      "RequiredGraphAppRoles": ["Sites.Selected"],
       "EstimatedDurationMinutes": 30,
       "ConcurrencyKey": "WorkplaceEvidence-Prepare"
     }

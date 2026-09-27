@@ -8,11 +8,17 @@ Pull the approved commit into the existing repository. Keep SmartM365 and SmartW
 
 The job uses the same explicit tenant profile as other jobs. Missing per-script configuration is created from its template; missing keys are merged without overwriting existing values. Required runtime dependencies are PowerShell 7, ImportExcel, the existing SmartM365 Core/TenantContext and SmartInventory/Config/AccountClassification.psd1.
 
-The effective LatestCsvFolderPath and DataAllRootPath must be sibling DATA-LAST and DATA-ALL directories. Their parent also contains the two private persona/site classification workbooks. Output is the sibling DATA-POWERBI folder. No developer-machine paths are hard-coded.
+The effective LatestCsvFolderPath and DataAllRootPath must be sibling DATA-LAST and DATA-ALL directories. Output is the sibling DATA-POWERBI folder. No developer-machine paths are hard-coded.
+
+Normal and ValidateOnly runs download the private persona/site classification workbooks from SharePoint on every run, using the existing tenant site, library, app and certificate configuration. PreparedMappingSharePointFolderPath optionally overrides the source folder; otherwise SharePointTargetFolderPath is used, with the shared CSV-to-DATA normalization. The two standard workbook filenames are relative to that folder. No client URL or classification data is committed.
+
+Both downloads must succeed and contain the expected worksheets before source planning begins. They are isolated under a unique scratch directory and copied into the run snapshot with hashes; no raw-root workbook is overwritten, and a failed download never silently falls back to cached data. Structural workbook checks do not substitute for later classification-rule validation.
 
 ## Hourly orchestration
 
 WorkplaceEvidence-Prepare is enabled in the job template at 00:00 through 23:00, every day (orchestrator local time), with MissedRunPolicy=Skip. An elected owner and the WorkplaceEvidence-Prepare concurrency key prevent overlapping instances. Required collector dependencies remain configured; ordering alone does not prove successful or complete collection.
+
+The elected owner must advertise SharedRuntime and Graph with Sites.Selected for the mapping downloads. This eligibility requirement does not grant permissions; the existing site-level grant must already allow the two reads.
 
 Git updates the template, not an existing central runtime manifest. The active shared Orchestrator/Config/Orchestrator-Jobs.json must contain this same job; use the orchestrator management publication mechanism to preserve other jobs and record before/after versions. Its hot reload avoids restarting the scheduler. Do not replace the full runtime manifest with the template.
 
@@ -21,12 +27,13 @@ A run exceeding one hour must not overlap another occurrence. The 180-minute tim
 ## Manual diagnostics
 
 The Cloud launchers follow the existing prod convention:
-- Test-SmartM365-WorkplaceEvidence-Prepare.cmd: ValidateOnly and Offline.
+- Test-SmartM365-WorkplaceEvidence-Prepare.cmd: ValidateOnly, with SharePoint mapping reads.
+- Start-SmartM365-WorkplaceEvidence-Prepare.cmd: full preparation with SharePoint mapping reads.
 - Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd: full local preparation.
 
-ValidateOnly checks source existence, fingerprints and transport age; it does not generate CSVs or certify row-level tenant identity, collection success or business completeness. Offline suppresses upload and notifications, but a full offline run writes logs, snapshots, prepared CSVs and the validated local pointer.
+ValidateOnly downloads/structurally checks the two workbooks and checks source existence, fingerprints and transport age. It does not generate prepared CSVs, upload or notify, nor certify row-level tenant identity, collection success or business completeness. Offline suppresses all SharePoint access and notifications: it requires the two workbooks already present in the tenant data root and never downloads missing files. A full offline run still writes logs, snapshots, prepared CSVs and the validated local pointer.
 
-The normal orchestrator job uses neither switch. Existing configured notifications apply. Direct SharePoint upload remains disabled by default and was not enabled by this change.
+The normal orchestrator job uses neither switch. Existing configured notifications apply. SharePoint mapping reads are independent of EnableSharePointUpload; direct output upload remains disabled by default. Read access requires the existing app's Sites.Selected role and a read (or existing write) grant on the selected site. No permission or tenant grant is changed by this code.
 
 ## Validation and history
 
