@@ -1,54 +1,79 @@
 ﻿[CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
+Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 $root=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
-$staging=Join-Path $root 'staging'
-$output=Join-Path $root 'DATA-POWERBI'
-New-Item -ItemType Directory -Path $staging -Force | Out-Null
-$contract=Join-Path $root 'contract.json'
-@{tables=@(@{table='Test Trend';file='Trend.csv';uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
-function Fixture($Rows) { $Rows | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation }
-function ExpectFailure([string]$Name,[scriptblock]$Action) {
-    $before=(Get-FileHash (Join-Path $output 'current.json.txt')).Hash
-    $failed=$false
-    try { & $Action | Out-Null } catch { $failed=$true }
-    if (-not $failed) { throw "Expected rejection: $Name" }
-    if ((Get-FileHash (Join-Path $output 'current.json.txt')).Hash -ne $before) { throw "Last good pointer changed: $Name" }
-    Write-Host "PASS: $Name rejected; last good batch preserved."
+New-Item -ItemType Directory -Path $root -Force | Out-Null
+$script:checks=0
+function Check($condition,[string]$message){if(-not $condition){throw $message};$script:checks++}
+function Reject([scriptblock]$action){$failed=$false;try{& $action | Out-Null}catch{$failed=$true};Check $failed 'Expected rejection'}
+function Fixture([string]$name){
+    $output=Join-Path $root ($name+'/DATA-POWERBI')
+    $id='20260101T010101001Z-1234abcd';$folder=Join-Path $output ('batches/'+$id)
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    $csv=Join-Path $folder 'Trend.csv'
+    [pscustomobject]@{TenantKey='synthetic';Date='2026-01-01';Value=1} | Export-Csv -LiteralPath $csv -NoTypeInformation
+    $file=@{File='Trend.csv';Rows=1;Bytes=(Get-Item $csv).Length;SHA256=(Get-FileHash $csv).Hash}
+    @{SchemaVersion=1;TenantKey='synthetic';BatchId=$id;Files=@($file)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $folder 'batch.json')
+    @{Passed=$true;SchemaOnly=$false;Files=@($file);Errors=@()} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $folder 'validation.json')
+    $pointer=@{SchemaVersion=1;TenantKey='synthetic';BatchId=$id;PreviousBatchId=$null;ManifestSHA256=(Get-FileHash (Join-Path $folder 'batch.json')).Hash}
+    $pointer | ConvertTo-Json | Set-Content (Join-Path $folder 'current.json')
+    Copy-Item (Join-Path $folder 'current.json') (Join-Path $output 'current.json')
+    [pscustomobject]@{Root=$output;Folder=$folder;Csv=$csv}
 }
-$argsForPublish=@{StagingRoot=$staging;OutputRoot=$output;TenantKey='synthetic-test';Provenance=@{Mode='SyntheticTest'};ContractPath=$contract}
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note="comma, quote `" and`nnewline"})
-$first=Publish-PreparedEvidenceBatch @argsForPublish
-$row=Import-Csv (Join-Path $first.BatchPath 'Trend.csv')
-if ($row.TenantKey -ne 'synthetic-test' -or $row.Note -notmatch "`n") { throw 'CSV roundtrip failed.' }
-Write-Host 'PASS: logical CSV records and tenant prefix preserved.'
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='invalid';Note='x'})
-ExpectFailure 'Invalid numeric value' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-02';Value='2';Note='x'})
-ExpectFailure 'Historical date regression' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'},[pscustomobject]@{Date='2026-01-01';Value='3';Note='x'})
-ExpectFailure 'Duplicate keys' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'})
-$argsForPublish.TenantKey='another-test'
-ExpectFailure 'Cross-tenant output' { Publish-PreparedEvidenceBatch @argsForPublish }
-$argsForPublish.TenantKey='synthetic-test'
-$lock=[IO.File]::Open((Join-Path $output '.publication.lock'),'OpenOrCreate','ReadWrite','None')
-try { ExpectFailure 'Concurrent publisher' { Publish-PreparedEvidenceBatch @argsForPublish } } finally {$lock.Dispose()}
-[IO.File]::WriteAllText((Join-Path $staging 'Trend.csv'),'"Date","Value","Note"'+[Environment]::NewLine)
-ExpectFailure 'Unexpected empty table' { Publish-PreparedEvidenceBatch @argsForPublish }
-Fixture @([pscustomobject]@{Date='2026-01-01';Value='2';Note='x'},[pscustomobject]@{Date='2026-01-02';Value='3';Note='x'})
-$next=Publish-PreparedEvidenceBatch @argsForPublish
-$pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
-if ($pointer.PreviousBatchId -ne $first.BatchId -or -not(Test-Path $first.BatchPath)) {throw 'Previous version lost.'}
-Write-Host 'PASS: complete replacement retains previous batch.'
-Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
+$fixture=Fixture 'success';$hash=(Get-FileHash $fixture.Csv).Hash
+$before=@(Get-ChildItem $fixture.Root -Recurse -Filter '*.json' | ForEach-Object {[pscustomobject]@{Path=$_.FullName;Hash=(Get-FileHash $_.FullName).Hash}})
+$preview=Convert-PreparedMetadataNames $fixture.Root 'synthetic'
+Check (-not $preview.Applied -and $preview.MetadataFiles -eq 4 -and $preview.CheckedCsvFiles -eq 1) 'Preview result'
+Check (@(Get-ChildItem $fixture.Root -Recurse -Filter '*.json.txt').Count -eq 0) 'Preview changed metadata'
+$applied=Convert-PreparedMetadataNames $fixture.Root 'synthetic' -Apply
+Check ($applied.Applied -and $applied.MetadataFiles -eq 4) 'Conversion result'
+foreach($item in $before){Check ((Get-FileHash ($item.Path+'.txt')).Hash -eq $item.Hash) 'Metadata bytes changed';Check (-not(Test-Path $item.Path)) 'Legacy name retained'}
+Check ((Get-FileHash $fixture.Csv).Hash -eq $hash) 'CSV changed'
+Check ((Convert-PreparedMetadataNames $fixture.Root 'synthetic' -Apply).MetadataFiles -eq 0) 'Not idempotent'
+Check ((Get-PreparedMetadataPath $fixture.Root 'current') -eq (Join-Path $fixture.Root 'current.json.txt')) 'New name not preferred'
+Reject {Convert-PreparedMetadataNames $fixture.Root 'other' -Apply}
+$lock=[IO.File]::Open((Join-Path $fixture.Root '.publication.lock'),'OpenOrCreate','ReadWrite','None')
+try{Reject {Convert-PreparedMetadataNames $fixture.Root 'synthetic' -Apply}}finally{$lock.Dispose()}
+$bad=Fixture 'tampered';Add-Content -LiteralPath $bad.Csv -Value 'corrupt'
+Reject {Convert-PreparedMetadataNames $bad.Root 'synthetic' -Apply}
+Check (Test-Path (Join-Path $bad.Root 'current.json')) 'Failure changed root'
+Check (@(Get-ChildItem $bad.Root -Recurse -Filter '*.json.txt').Count -eq 0) 'Failure partly renamed metadata'
+$mixed=Fixture 'resume';Move-Item (Join-Path $mixed.Folder 'batch.json') (Join-Path $mixed.Folder 'batch.json.txt')
+Check ((Convert-PreparedMetadataNames $mixed.Root 'synthetic' -Apply).MetadataFiles -eq 3) 'Interrupted conversion could not resume'
+$both=Fixture 'ambiguous';Copy-Item (Join-Path $both.Root 'current.json') (Join-Path $both.Root 'current.json.txt')
+Reject {Convert-PreparedMetadataNames $both.Root 'synthetic' -Apply}
+$malformed=Fixture 'malformed';[IO.File]::WriteAllText((Join-Path $malformed.Root 'current.json.txt'),'invalid')
+Reject {Convert-PreparedMetadataNames $malformed.Root 'synthetic' -Apply}
+Check ((Get-PreparedMetadataPath $malformed.Root 'current').EndsWith('.json.txt')) 'Invalid new metadata fell back to old'
+Reject {Convert-PreparedMetadataNames $root 'synthetic' -Apply}
+$chain=Fixture 'chain';$previousId='20251201T010101001Z-1234abcd'
+$previousFolder=Join-Path $chain.Root ('batches/'+$previousId)
+Copy-Item $chain.Folder $previousFolder -Recurse
+$manifestPath=Join-Path $previousFolder 'batch.json'
+$manifest=Get-Content $manifestPath -Raw | ConvertFrom-Json
+$manifest.BatchId=$previousId;$manifest | ConvertTo-Json -Depth 8 | Set-Content $manifestPath
+$receipt=Get-Content (Join-Path $previousFolder 'current.json') -Raw | ConvertFrom-Json
+$receipt.BatchId=$previousId;$receipt.ManifestSHA256=(Get-FileHash $manifestPath).Hash
+$receipt | ConvertTo-Json | Set-Content (Join-Path $previousFolder 'current.json')
+$pointer=Get-Content (Join-Path $chain.Root 'current.json') -Raw | ConvertFrom-Json
+$pointer.PreviousBatchId=$previousId
+$pointer | ConvertTo-Json | Set-Content (Join-Path $chain.Root 'current.json')
+$pointer | ConvertTo-Json | Set-Content (Join-Path $chain.Folder 'current.json')
+$result=Convert-PreparedMetadataNames $chain.Root 'synthetic' -Apply
+Check ($result.Batches -eq 2 -and $result.MetadataFiles -eq 7 -and $result.CheckedCsvFiles -eq 2) 'Retained history chain not migrated'
+Check ($result.Files[-1].To -eq (Join-Path $chain.Root 'current.json.txt')) 'Root pointer not last'
+$hashBad=Fixture 'manifest-tampered';Add-Content (Join-Path $hashBad.Folder 'batch.json') ' '
+Reject {Convert-PreparedMetadataNames $hashBad.Root 'synthetic' -Apply}
+Check (Test-Path (Join-Path $hashBad.Root 'current.json')) 'Manifest mismatch changed pointer'
+Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, preview, idempotence and safety checks. Synthetic data only."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyQHQxmKdLZrnw
-# dymbpLbPD/LDeh4LiSMSxzPt5QKrAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCp9B97NF9LZEsV
+# 4QdmVUSPWd8XY2BlENxwc4XPrKCKLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -181,31 +206,31 @@ Write-Host 'All synthetic publication tests passed. No tenant API or Power BI ac
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGpiS7t/265+AFH9osQSFBmWNLjC94Z01SAno3cqJhXvMA0GCSqG
-# SIb3DQEBAQUABIIBgApJgBWqOZzY8algCJu29oybcApXHBIPycI5Y1OytTcNO7Pz
-# W/WvJlMHvs/+KnT8RQhmoaofFrOMr03lTAsrME2+mTUQsVclkQmwLTUKRy65EYAE
-# ZriyhMAUsFX7MM8ey7ex9ZsmgoiZXKQZX9sqs0lqImZJEsNEy/ZRJX+veb/Q3tJ6
-# j8jwOvpu3RfMOp0Jze2+vZqLj9S1RCTeiB77iCmuRdNQEpsw/5G1/8Yc7mSJ65Ka
-# R8yW4qZmZi77nSYn7htti8lPL39zPn2w585O2hZJaPFWqukZeXD/nWeW6NDm575P
-# XSLQxZdJ1aQPLi72fEdMYZKssl+J4iboyLKgFKLxzYkXREUxpXHYEPWVM3Gcya10
-# BBbIM0yqNxlMAoLmpxQlHwujCKuuBADDopKMRh5Hc5LpHXWINvyNEmwmnc/MgRxq
-# N3leVv/V4duepux0l4bZrGUii6xo4Ok3kFWcdCQzTgwKrVMrGsvRXskxJOeTNxSQ
-# fiB97aOxV9U2jvcdcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAd0BIII/GMou++RkPlYJ9b0L1bsC7NOXRZ9WLEUH6geMA0GCSqG
+# SIb3DQEBAQUABIIBgFKDnYd0lzbLA7C+LtwP5juVp+62hj97gUsHpgCSIu1lmZ25
+# AlzC73OOik6o7sFubS08CAPoKoH5QHrMl/Yjt04lgDNy7Cf+uFdvFVP5tJZZ+6Iy
+# 8qAlrcgWV+sNCytVDw4PFiaYiuClHftMczDfC8cbnKPV3ixOzbrgzVIobr/pJpMm
+# T+dC7uMtu/DMYtL43NEdD/5K6ZePQF2n6BVs0ZugGtG8IsWoxVP+JRvePQ/aZOiW
+# z0wVqZVYGY1zfSwYVeZfL862nrP3z0VKrSX4OCnOFJkAAMfoW6QizI5raSGPeIhC
+# pfqvKINiy/QhGMzIWjhR6ERwuc/vdoxY2hk4EIA0ZPpRlO0NF3r0XqmMeYnJ+Euu
+# rlGtc8oEzsHzmX8Exfo2wcA73rA/Xp4gnwsrezDzrFp7m0oNLU+Avdn08l9elZJK
+# PddIA/zTSze+RTOad0Rq1z8aYSqJXzD3v4UuXeUwKOVcYLVxnHUQajYiGrSZOdPF
+# rOuQ54DssVMp1s+gDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBpUTe63Hl/L/0Klto6RLxIQf8l21RDvW4lDKXP
-# KO9ieTANBgkqhkiG9w0BAQEFAASCAgBr606bIwa8vkVgeLkY0NrUtBjw/xTY3pQ4
-# SaxcqUzEmYcyy629PLTd5cdT+WTsr4YIlstKNrkmW07ORMZp/GUKMBjLwngVZw+H
-# UBfhZghLH+ac76EVtw7OxBJ25VK/t0chV0rr8IsS/sjIlkx+pqc2S4/fbnRqgnOk
-# wy668mBHC+YuzLdps7U8veaPQDa9sB7UJag7Ga9PCCOqX6DmUcfyktZnvYkr77qX
-# rDlVEE79LC/PuhEODXnQbARCG5oPczmr6pswqo3TOu8ptIt5RR+nttEJb1xEouQn
-# x9eS7PWKRFjJ7BiEcJ07XsVjmljJS+xhi/Y5th3YPcflh0j+Q9llGD4Ji27cpMhk
-# bhIaKlP0W2nmrKd3HR6s2v4WPS+LkPqKUjuF6OGYW9tgy0eL0nHgIAYnZIcm2GTk
-# PsUKn6Jb6ArlbEcP7EGXLd6Q6i4uTKJNTKaxVQWamr7YgCHOO5jHe6ToDYiKa88+
-# 33Gk/aMauAXUO9EVWv3EltaMlusmpzdlHhn40YidNtN+J6op5eG6qLL2MBjEq4Vo
-# tC3DMa6IXzccqfXWomM9iQ4DKlNe2EYZ0hV5dwuVtlHtMVQuYm6TBNPoDlKSkaXj
-# 244GEewqSuCvJizQNTOIlNmF1NNOfcBUhKSnS3bOP5RzpRDBP4BDt4sgfT3Lze8S
-# 5eCCvKXkwA==
+# MzNaMC8GCSqGSIb3DQEJBDEiBCAxb2k9cV5Xj2ZZM0iqrQglN+atovuFOP4KFoEj
+# O1muAjANBgkqhkiG9w0BAQEFAASCAgAfv2V/rv5umigdpE4G8T9qXUY0wKLNHgoD
+# 1xmq/qVD1GHnw3Iy+3reHVHdQXncj8yV/4h//Ui17e7lu3Q6i1miSOUCmQLbin8S
+# b7pIw8iak6sL2UNK+4GZkmvdTreCWOcR00hqgZE5U71qpOoLs5RXkQt1QBou93tb
+# TF6vskNazzz9TbmY/s/80D8WW8lUA8zPlz6F5IUlIPvtYETP2RdrMpNDDWG68JPA
+# ynkVmA3KNvAZz7CNimjnm+0tI0L+AE/Soc8REubS/C19oxv/TWFbXlykrJ3zk/vc
+# AJaiEKbkblFiO0JoffMhZp6A7xg6gncbDRcy5X3/dwHJFaFe15BZtPt0Cklbm9sE
+# DNa+jvBFqaJJWNl7cDxHmBhZePgEkgMg+J3MbKO9L0Oof+G1Zsdm5O+VITCBP2Y8
+# TmPw3ijsOX3E/Ck8OvS3U7Yeo0MUF4Do4BWHCrZ4gGgnjhVrPz3ek2A6zNIVNxap
+# EyQ1RXA3BqPKPd/hBclubxQaxSs78nqjr9OHDDEMF4Ouvzd0AQdZhA3cK0mtjJAg
+# SKzGxa9hE9Zk1yvuIui/vXItrcHOT05NlEh1kH7r/cddCu0sP4WekyC6PuBdOlY2
+# FA3z2bnucIShES4OcoQPC0ADOWJJWzxu4+vjjIwALe6eMLUjeoeWNXRThs8os7FR
+# DyhdYDBROA==
 # SIG # End signature block

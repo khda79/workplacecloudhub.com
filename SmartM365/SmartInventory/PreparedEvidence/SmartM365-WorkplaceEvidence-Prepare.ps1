@@ -2,16 +2,17 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.8
+    0.1.9
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline, [switch]$WorkforceDiagnostic,
-    [switch]$RepairLegacyHistory, [string]$RepairWeeks, [int]$ExpectedRepairFileCount=0, [switch]$ApplyRepair)
+    [switch]$RepairLegacyHistory, [string]$RepairWeeks, [int]$ExpectedRepairFileCount=0, [switch]$ApplyRepair,
+    [switch]$ConvertMetadata, [switch]$ApplyMetadataConversion)
 $ErrorActionPreference='Stop'
-if ($RepairLegacyHistory) { $Offline=$true }
+if ($RepairLegacyHistory -or $ConvertMetadata) { $Offline=$true }
 $tenantContext = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Config/SmartM365-TenantContext.ps1'
 . $tenantContext
 $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -43,6 +44,8 @@ function ConvertTo-PreparedAgeOverrides {
 }
 try {
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
+    if ($ConvertMetadata -and ($ValidateOnly -or $RepairLegacyHistory -or $WorkforceDiagnostic)) { throw 'ConvertMetadata is a separate manual mode.' }
+    if ($ApplyMetadataConversion -and -not $ConvertMetadata) { throw 'ApplyMetadataConversion requires ConvertMetadata.' }
     if ($WorkforceDiagnostic -and ($ValidateOnly -or $RepairLegacyHistory)) { throw 'WorkforceDiagnostic cannot be combined with ValidateOnly or RepairLegacyHistory.' }
     if (($ApplyRepair -or $RepairWeeks -or $ExpectedRepairFileCount) -and -not $RepairLegacyHistory) { throw 'Repair arguments require the manual RepairLegacyHistory mode.' }
     if ($RepairLegacyHistory -and ($ValidateOnly -or -not $RepairWeeks -or $ExpectedRepairFileCount -lt 1)) {
@@ -83,6 +86,23 @@ try {
     if ($WorkforceDiagnostic) { $output=Join-Path $work 'workforce-diagnostics' }
     InitializeScriptEnvironment -OutputPath $output -LogFileName $scriptName -CallerScriptPath $PSCommandPath | Out-Null
     Import-Module $pipeline -Force
+    if ($ConvertMetadata) {
+        $phase='Convert prepared metadata names'
+        Import-Module (Join-Path $product 'scripts/PreparedMetadata.psm1') -Force
+        $conversion=Convert-PreparedMetadataNames -OutputRoot $output -TenantKey $effective.TenantKey -Apply:$ApplyMetadataConversion
+        WriteLog -Message "Metadata conversion: applied=$($conversion.Applied); batches=$($conversion.Batches); checked CSVs=$($conversion.CheckedCsvFiles); metadata files=$($conversion.MetadataFiles); current batch=$($conversion.BatchId). No CSV recalculation or SharePoint transfer." -Level INFO
+        $conversion | ConvertTo-Json -Depth 5 | Write-Host
+        return
+    }
+    if (-not $ValidateOnly -and -not $RepairLegacyHistory -and -not $WorkforceDiagnostic -and (Test-Path -LiteralPath (Join-Path $output 'current.json'))) {
+        throw 'Convert existing metadata with Convert-SmartM365-WorkplaceEvidence-Metadata.cmd before preparing another batch. No calculations started.'
+    }
+    # Fail before downloads/copying/calculations when cloud publication is enabled but incomplete.
+    if ($global:EnableSharePointUpload) {
+        foreach($key in 'PreparedSharePointFolderPath','SharePointSiteHostname','SharePointSitePath','SharePointLibraryDisplayName','AppId','Thumb') {
+            if ([string]::IsNullOrWhiteSpace([string](ConfigValue $key))) { throw "SharePoint publication configuration missing: $key. No prepared calculations started." }
+        }
+    }
     if ($RepairLegacyHistory) {
         $phase='Repair historical TenantKey columns'
         Import-Module (Join-Path $product 'scripts/Repair-PreparedHistoryTenantKeys.psm1') -Force
@@ -131,6 +151,7 @@ try {
         MappingRoot=$mappingRoot
     }
     $result = Invoke-PreparedEvidencePipeline @params
+    if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }
     if (-not $ValidateOnly -and $global:EnableSharePointUpload) {
         $phase='SharePoint batch transfer'
         $cloudRoot = [string](ConfigValue 'PreparedSharePointFolderPath')
@@ -141,13 +162,13 @@ try {
             TenantId=$effective.TenantId;Thumbprint=(ConfigValue 'Thumb')
         }
         # Shared upload returns null on failure: explicitly block the pointer in that case.
-        foreach ($file in Get-ChildItem -LiteralPath $result.BatchPath -File | Where-Object Name -NE 'current.json') {
+        foreach ($file in Get-ChildItem -LiteralPath $result.BatchPath -File | Where-Object { $_.Extension -eq '.csv' -or $_.Name -in @('batch.json.txt','validation.json.txt') }) {
             if ((Get-SmartM365SharePointRelativeFilePath $file.FullName) -ne $file.Name) { throw 'Publication folder must not be nested under DATA-LAST, DATA-ALL or LOG-ALL.' }
             $receipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $file.FullName -TargetFolderPath ($cloudRoot.TrimEnd('/')+'/batches/'+$result.BatchId) @cloud
             if (-not $receipt) { throw "SharePoint transfer failed: $($file.Name). Remote current.json was not advanced." }
         }
-        $receipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath (Join-Path $result.BatchPath 'current.json') -TargetFolderPath $cloudRoot @cloud
-        if (-not $receipt) { throw 'SharePoint current.json transfer failed. Local batch remains valid; cloud qualification failed.' }
+        $receipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath (Join-Path $result.BatchPath 'current.json.txt') -TargetFolderPath $cloudRoot @cloud
+        if (-not $receipt) { throw 'SharePoint current.json.txt transfer failed. Local batch remains valid; cloud qualification failed.' }
     }
     $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
     WriteLog -Message $recap -Level INFO
@@ -175,8 +196,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3KGQfOpJrSh37
-# rL/3bwbQY20Y8iRmVWfT03Q5WmoRyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4rkGbAqZ0cpxV
+# ZG3org4GnGaHQOjwD3BAprSWO4aCbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -309,31 +330,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOTNpWvm93l+L/tpxwaDXEpOrb+5ypeDfEVjbp2gpmtBMA0GCSqG
-# SIb3DQEBAQUABIIBgKR4mt29aAVPJDZxIng+l1pLbo+NfewIQM8oPzKjDMAr/6jv
-# Fg1pXXCBNXnDEFFFJ2N4QLxTRunyQ+ujr+WCQDFsnC8b1Osrvo0Wn0yX6oCRtva2
-# 3/jBV97o1AomoXa/87Wdsi3BcWd+cSvKtGpoySEBYGPuylOaZyuNgH0R6M2Wfh7a
-# HC4U9Da8+WkAwWKVYmZP02a8RNuIZqAyz2xnTTNbPE+g7WBiSAwjABqytAvj63hU
-# r6HD//syd6feOnySFS1eAx/C0A+VWkLT1OSWKucFN/YKezqggcq5gDKpAVK6L8Zu
-# ocXuYBsDSSBWag370UcRNX/lWSdPjHrrNeQ+SkjvxrElHWhuayal7ZASRfU3nYt/
-# hSYQedw7hPtIYMPbGucd7nrCM/1REi8bOT9kYwDMY+9AEYT8Iuf7PiPzrNiPB/R5
-# Mhf56qeWHziZglCaQjuBhmtQTqC5ljuorlYVaoOHMtLkS48ku+J9VGhCfIc3GXkD
-# NKKkJ0Po4ZNZBklO5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA3b5IBdAR0g8pLUSu2ECWzxHIEZ4GxIpVpiWlwdw2KGMA0GCSqG
+# SIb3DQEBAQUABIIBgKD2iiFVUlET+lm4nJYcBSjtWecO1GfUe5u2B4FuPecjjU6b
+# dzyG3YYEgtcM2KIge4AaiVdN2wSwTZgPC8i2W7lLBeLGCTA3WMgg8bxF7EbvXpC8
+# HcV9Nt946c7pPvvtxIJNVmlVArIBkUbEBrqPnW1EwGB3TcjHN40pTOK0E7ucunqr
+# heKZCvtShf2hjQ9+JvKKsbd79fvKxwTMrtysm2New7KnF1ALSDP3OVXjZhR5RLu1
+# 3aITMk30hdpbVKGX7WkvccN9Y4QXzMeomymy6e0xAAqOXiUh6zpYAn5eCT8K9qsa
+# g+o634NXiULq3uV/mmt7peHzElZLv8VEzYmk/GCqAE75joVBMozkwIS/oUFsosQk
+# StuDVvf8HS37kNgYH+CNeFMG0vOfinlMUjg05xt/csE4XWqhddnGjS/rEPNXUOHJ
+# A+ckLL4o7Y2fIYW6V34myn/Ur7N6MtdvH0ay5WBAaTcB2eEQtFpsl4yjxsKflGv7
+# lCSmT9gk0KjgO/wJfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwODE4
-# MTRaMC8GCSqGSIb3DQEJBDEiBCCFxDf0b4mY9F2l/qEbk7srIR1DI9jfXrwPxSlL
-# A6QkdDANBgkqhkiG9w0BAQEFAASCAgA6Tb0pqkOm0/viRJnC5B7BjI3FI/ZUFi5I
-# sPWY6i1fdpGFiRE6V7Q+9c+XZ13SV02T0E4lhnEeTppCTapIvptBTl5Hxhpay8lO
-# 0omC56KK7GA9plDHkFk7T3yxotA4rwjFHApz+hXoFDjIkeK9lwfujfCsAJQDsY+z
-# cSKh3uErlS/jj8oan4ff6/UlMemQ+CsiE9sJLfr2lKhmePWLk8I2lypfaahNON7S
-# QPoRZw0v9Ei4Knxz1Fsa47bYE0xf7yg3+q5yTwhJrTlYYo96Y2km0t80IXRQbnH+
-# jnnIEgfJA1uRgt+JBeoTtr0Xp8MGFsX13CnhtYs6RChdmZmhGyrRI9JUuRs2kDSd
-# kTGZOx7XtMuuOg/+uwdC1TdJIvnqOWDIKq4BeLM2d1BeFEqqU/h1yphQOLDg57kd
-# 2HPRBc8g748so0mOy6T8lDnVIfI+SWN8NtcERGsHtTjA/bz+GVy5YAczKH7lhaNd
-# PIwYJRKvlnH94lL4AZKc8W0z/GzeSvX+C+k8EPXj2eN95PrQQkbZu2IXCuoP1tJk
-# h3jCx/JoRTufupcs+dkKlmVBUa9ngRZ1/1Vr6l02Yt8ie59rKnjOaDAz42KaZ2cJ
-# H18DGL/M0MNy63rBojVRyuPDF3AjMH7fGfHE7p7Bg2S2lsL61/MU+KJvrjngGOps
-# S/WNgwkkEg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
+# MzJaMC8GCSqGSIb3DQEJBDEiBCAZJJxdcK+PY63/pNvFrMeA16bag9gR9Moa3LVy
+# PAnm+zANBgkqhkiG9w0BAQEFAASCAgBin1KsAs96ogENrlSfOrrxNOLApElCz8cT
+# izAwbyfkoL2fIpKt12GwphUUVwv5US/5n5doLNBhjK1dHYKSt6SI75pfroKthnLf
+# 2JibX3Y4oupeB3FZzjqVW28nRa+KXIePeQWNgZHqvPdxFo5XSF/Ns3rgUQ2uvudp
+# j+rP8PDGVnWYPHgsqmY9BKinNcqetIpmsf2TqO7Uj3YG3EaRs15vhVff6pavFkI+
+# FTZMAlxwB7yYmgGhyhCXz1H5I1ZRPPythkN5e0iQZSBB15rFlIPooprwFxQLIwbj
+# 8Jc/vTCWAxl1wCWE8NWfCDtLFN7Xlf/KYzvXaA/fxYDxSzM7Wa96VRbT2QVUnYzj
+# I9c+skj2nl8NapbMoEumZwB5RcF8qe3ChA7X44KkdDxYScTs+onpcDMHJaowWwbP
+# SNTHQNtamOPp8h38qBAE5E72nA6/TdPGiBNDCTaivCZYI+HdYnNeUfi2SzOELRoe
+# +1mEvC4wfQJBoWXqsrZ6juaGOdN9gsETabqtqX/riR95DnSad0s1HCmK+eeKMZg9
+# iCw7bYE+SUZNVeidOShLJho0oa1msvcVLK9dHi1ExaW5e+d3rrlVBTVY+kJQWgif
+# 8K4TcGH4ksAnm6acR3du7By3WMtLzZZLxW9Tm3nGC98Nl58zhcMEyJO9TnoYgSJj
+# Un9WmvodoA==
 # SIG # End signature block

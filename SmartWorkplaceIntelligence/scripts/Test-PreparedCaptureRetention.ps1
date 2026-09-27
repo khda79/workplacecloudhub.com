@@ -102,18 +102,18 @@ try {
     $pub=@{StagingRoot=$staging;OutputRoot=$output;TenantKey='synthetic-test';Provenance=@{Mode='SyntheticTest'};ContractPath=$contract}
     $rawHash=(Get-FileHash $csv).Hash
     $published=@(foreach($i in 1..4){@([pscustomobject]@{Date='2026-01-01';Value=$i}) | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation;Publish-PreparedEvidenceBatch @pub})
-    $pointer=Get-Content (Join-Path $output 'current.json') -Raw | ConvertFrom-Json
+    $pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
     Check ($pointer.BatchId -eq $published[3].BatchId -and $pointer.PreviousBatchId -eq $published[2].BatchId) 'Wrong protected batch pair'
     Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 2) 'Retention did not keep exactly two batches'
     Check (@(Get-ChildItem (Join-Path $output 'retired') -Directory).Count -eq 2) 'Retired audit missing'
     Check (@(Get-ChildItem (Join-Path $output 'retired') -Recurse -Filter '*.csv').Count -eq 0) 'Retired CSV payload retained'
     Check ((Get-FileHash $csv).Hash -eq $rawHash) 'Retention changed raw data'
-    $pointerHash=(Get-FileHash (Join-Path $output 'current.json')).Hash
+    $pointerHash=(Get-FileHash (Join-Path $output 'current.json.txt')).Hash
     @([pscustomobject]@{Date='2026-01-01';Value='bad'}) | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation
     Reject {Publish-PreparedEvidenceBatch @pub} 'Batch validation failed'
-    Check ((Get-FileHash (Join-Path $output 'current.json')).Hash -eq $pointerHash) 'Failure advanced current pointer'
+    Check ((Get-FileHash (Join-Path $output 'current.json.txt')).Hash -eq $pointerHash) 'Failure advanced current pointer'
     Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 2) 'Failure removed a good batch or leaked CSVs'
-    Check (@(Get-ChildItem (Join-Path $output 'failed') -Recurse -Filter failure.json).Count -eq 1) 'Publication failure diagnostic missing'
+    Check (@(Get-ChildItem (Join-Path $output 'failed') -Recurse -Filter failure.json.txt).Count -eq 1) 'Publication failure diagnostic missing'
     $unknown=Join-Path $output 'batches/unowned'
     New-Item -ItemType Directory -Path $unknown | Out-Null
     [IO.File]::WriteAllText((Join-Path $unknown 'keep.csv'),'keep')
@@ -132,8 +132,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChXTB1tfZPVUH9
-# fA1tKgXeTt0IH7pZceORbNpUIKCKdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABBTh41MQAoStq
+# l2sVjtr/nvhc4yqtKLAwT8cKSL2Cr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -266,31 +266,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOpyplM/GuF2b8HjIif/x4H4aO8nLQ9VMC6vMWcxkipcMA0GCSqG
-# SIb3DQEBAQUABIIBgD8Q/ir7jMORVj2DjPfjIIoqF1tVAE9F08HaNdsPg7emKW2H
-# eMsNkpgdJSOd7goh2qGjpY2fcs9dwYXezKQk8melnIPJfEkAPhOK5mpaxU7QxKws
-# cRmZOTSXV1tF9oxWz4jwTVg7DJZWyC7CQEI0iWECngRxOjKkAAXC8mPLqnsl+DwQ
-# EyRiGM0jm19u3A/KE1O/m+25/3fPryZSgv3exQlIze23wdzOKJXHaY+Xkc4qq5hg
-# gM75ktpm01kqn49c2q/S2VEC9QrGmZ2I9O0lmCeelR7IBSS+JVHa30AoDjkzwZf3
-# RF293xnIcxqZY+Q97PlxLiCjlksPAvMMyWIuWBQRJqAu/yR420b5EVrtbSPvLrqt
-# cL4QXsGCNuKTE/hi0yD42pPBdfci56knrIAoNvVWgH6wWTXz5g5BLM7IpdnvsEZp
-# ZZPKoZBRlVUv/t+DKk88sT611QIwEri86aSjs7mi2kKNmECk1/PlS95cfmLLTs0A
-# sgT5flmNFA75rZW5xaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOO4ahC4hypLHUznBYvHUSBTgDPNEA4Rn49yl3MK1k+gMA0GCSqG
+# SIb3DQEBAQUABIIBgKzwrDMcb2aeyzidbPmDiLiCWeX1FXeN3FYakkBempUMYqgV
+# UxNYFK3dFldWRejZ5SHFEshCdthd8GFfIq4U05jORRVlCQ1z8e6idsLQTOsjJVgH
+# RQiosc14n3V753mxuipSRM5ddFVXjMN5/A2ZROUBP4JCQEe6Vr93IuZ3dctQ/12v
+# HHEeif/s5d0kdRJIex5OiutPdPXaysn4G3DMi99N+rk0Z4GZNbXs97RZsNBbyMMR
+# BOmQHYVyqJ3NBJNv0vHYwUZ84G5/nWnNUjEoG9f7XJ5IZDGU7w8ERaJN94Wp+567
+# ETPoaKpgjN7XTlnXI4M8gaeRAE1hX+IzRSj/VNlP7QrHV6hXrodhZPvm9raesX66
+# wj2ST8EZFjf6C1He2isNTLDWKUYwTNdxV3jLEInLtXUZ6Rnv9N6C+AP+BCId8fb+
+# 8YtgHcrb1c7ARG5KZ874sowd2eojlPAKMTqOzQVCVTc/gT+WPh1AICw4yDpSfItn
+# TCXFBjowpqYWEJFzKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMTI2
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCD7bjy3elJ2KMizCZaEsn7tuQcZftNImsNimeX
-# gA/wfTANBgkqhkiG9w0BAQEFAASCAgAWJ+7MaVi8Fl02OsLcHSC6H9firiG8An2v
-# GkSuaqtMNY3p990Qcx68jf/PUjRuur3KvVGUPYyG1pMKdg1M1fBNP3Xpfg92DEVW
-# EADhUVEHp9D6jO+TO9+M060+lN4ocedsDD7qDIWpvVyVRAJddcCaHLVP7RcKhwTL
-# N5y7My1KzLOzy2KmwgZdKIQ54Zp/CKVPwgCR/iGtQt/WUQMlCdss76KEn//8zZSz
-# ZAOdg6DTm06MVX1b4ZdULBSDfkrOkJaKW0/8n6foivDj09FVMqb9iZo6KKGnO7oy
-# h6LIZB9PqKOrAPVVYLfOU/+rIOUxorw7wCq3b33TGVn7AqJ28wljJX0XvTcTtyMB
-# xPv/LhfO7T9E0XDXantThYp18v9uS45ftCuu/TOxiZbHBL6vxv3WxuzTXXrwbBXK
-# OisdVcGL/LMtp2XVTSlQFTsY6ljhZ8h4w6Qv0jfRVhBKM6TG/mKFeQbvPUL3mf4/
-# rrF7Tpn+3zXZuVJsCAy8viTFIWiKjoWDlyYyY2c9PRoTCFwaDCt9pBkAt6kOboI3
-# NGlvmTnH2oXgbNefBa/+1ba1hzz3HF8NPFgMw3EJ9UNjvtKcAyIJ9u/9KNRCYfBY
-# EWVSun3DehQLDB9G7fYjVJ2MvyP76dEKGSTVW773R0GZ+AVSvQYCBEgsbMFdb31r
-# bPbEWDvIvw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
+# MzNaMC8GCSqGSIb3DQEJBDEiBCBl78i0DXPnrXyyNN6U8UwYxDiOOz8VsM/OEq0o
+# iHaEVjANBgkqhkiG9w0BAQEFAASCAgCoR+9QZeAdYycr7bBHnNcpu7ziQl5xaEka
+# Q6+emKj4KRE/PkHiEN6qiy7ST0i++KURz+oWT7voM/DKcbQa/KmvBYMAiv9ThMDC
+# oA6EGu15F6GVapErcfpoh0DzkHErByXHkzEvmD/aMPNIHJ1q5OuonJF37BCHHQDW
+# rFNnhp5jDYiOQwf5wK+SCnBTmcw94WW1bb50gj+q/xDn7fQp/cQMzSHWXWimE2LU
+# qty9WL5fpBAzhTy5eFZsixMfvqC4N4nPSijhd1q8NaN48pYnr/a6a6M2DiB8Zofi
+# PykoM6AlCOS8kLljntHRJwnMSv47WPb4DbVLl/V7TIfAxkG62wCef8Hjj8Gfbmmt
+# TtTx2nL5JgVgyAKCvaOWl/RmGjbpiREtI4vZb0wwQGXwDUzV9Z+Vlz3HNFpyN91C
+# ClHqB1SIVHlQWpURmC2w1ZHZ5/+VyP8SMSOWDUF4rzfK5F21xOtPgS1NksFGycFE
+# 7kR5jtUi+OzBEPANs1c2jJs9c6bztyqdcXOizrSbmxeXMbMIdXyXHD/Am1OdGmG4
+# RolHGyLUBi+MgoNP3zNdQ/DcnXfhSgqmmT95F1GEyec9Q+w00r95cnt7IXPyqeaj
+# rCPPtD+3D7FciiOv4ys4WLddtAkIXU2kkoLOlF+7ml0SSITGf9Qvi058UDsbMUH+
+# SBouc/VuVQ==
 # SIG # End signature block
