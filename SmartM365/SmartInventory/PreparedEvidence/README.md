@@ -81,4 +81,6 @@ Optional direct SharePoint transfer uses the shared Core uploader, uploads batch
 
 ## Qualification boundary
 
+Version 0.1.8 fixes fresh Workforce history initialization: absent, empty and single-row staging files remain arrays under strict mode. Existing rows and the obsolete-schema rejection are preserved. Synthetic regression tests exercise the actual initialization statements; a complete production run is still required.
+
 Local prepared-file refresh and synthetic publication safety tests passed. The complete job still needs a successful post-collection run on the collecting machine, followed by log, source coverage, business-count and history checks. Do not equate a scheduler entry, Git publication or local tests with that production evidence. All output logs/manifests are private.
