@@ -41,6 +41,8 @@ The contract requires 47 current CSVs, two mapping workbooks, daily AD statistic
 
 Every source CSV must contain TenantKey and all rows must match the active tenant, including history. PreparedAllowLegacyTenantless must remain false: the global bypass is rejected as of v0.1.4. There is no exception registry. Unexpected empty output tables are rejected unless explicitly named in PreparedAllowEmptyTables.
 
+As of v0.1.5, source validation uses semicolons for Exchange_OnPrem_Servers_Inventory.csv as well as daily statistics, matching the evidence generators. Other source CSVs use commas. The same strict record-shape and tenant checks apply to both formats; malformed files are not retried with a different separator. No source CSV conversion is needed.
+
 ### One-time repair of reviewed historical exports
 
 Older weekly CSVs can predate the tenant column. Only after the operator has confirmed their ownership, use Repair-SmartM365-WorkplaceEvidence-TenantKeys.cmd -RepairWeeks "YYYY-Www,YYYY-Www" -ExpectedRepairFileCount N. This is a preview by default. Add -ApplyRepair to perform the approved repair. Both week values and the exact expected count must be supplied; nothing client-specific is committed. The tenant value comes from the same effective profile as other launchers (prod for the Cloud launcher). Do not put repair arguments in the orchestrator.
