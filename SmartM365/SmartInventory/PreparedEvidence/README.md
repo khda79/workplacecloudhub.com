@@ -37,6 +37,16 @@ The normal orchestrator job uses neither switch. Existing configured notificatio
 
 ## Validation and history
 
+### Manual Workforce memory diagnostic (v0.1.7)
+
+Run Test-SmartM365-WorkplaceEvidence-WorkforceMemory.cmd on the collecting machine to execute only the unchanged Workforce calculations, including all available history. Do not add this mode to the hourly orchestrator. It uses the same prod profile/configuration and downloads the two mapping workbooks from SharePoint unless explicitly Offline. No raw collector, DATA-POWERBI publication, Power BI operation, output upload or notification is performed. Diagnostic and normal preparation runs share the existing preparation locks.
+
+The child process runs New-WorkforceIdentityEvidence.ps1 directly against existing raw exports (read-only, not an atomic snapshot). All five output paths are redirected to a unique private PreparedWorkRootPath/workforce-diagnostics/<run>/outputs folder; no production CSV is overwritten. There is no extra full source copy and no automatic cancellation or memory-setting change. Avoid a simultaneous normal preparation run, but leave other machine activity representative when investigating global memory pressure.
+
+The parent process samples worker private bytes/working set and system available physical memory, committed bytes and commit limit approximately every five seconds. The worker writes opt-in stage boundaries with managed-memory measurements without forced garbage collection. Stages cover individual imports, indexes, identities, personas, exports and each historical week. The parent captures stdout/stderr and exit code even when the worker exits abnormally. A whole-machine crash can still prevent final reporting. Missing system counters are recorded as unavailable, not zero; the sampled private-byte maximum may miss peaks between samples.
+
+Keep memory.csv, stages.ndjson, environment.json and result.json for diagnosis. Worker stdout/stderr are separate private logs and can include file paths/error details. Diagnostic outputs contain client data and must never be committed or uploaded publicly. Diagnostic artifacts are retained intentionally for inspection, not swept by normal run cleanup. An isolated success does not prove production publication or output equivalence. The previous locally qualified recovery batch reused verified history; it was not an identical full fresh run. No column reduction, account exclusion, history truncation or business-rule optimization is introduced by this instrumentation.
+
 The contract requires 47 current CSVs, two mapping workbooks, daily AD statistics and 12 historical source families. Missing required sources/history fail rather than become zeros. Current-file transport-age limit defaults to 168 hours, with 744 hours for license prices. These configurable limits are not a guarantee of business freshness or collector success.
 
 Every source CSV must contain TenantKey and all rows must match the active tenant, including history. PreparedAllowLegacyTenantless must remain false: the global bypass is rejected as of v0.1.4. There is no exception registry. Unexpected empty output tables are rejected unless explicitly named in PreparedAllowEmptyTables.

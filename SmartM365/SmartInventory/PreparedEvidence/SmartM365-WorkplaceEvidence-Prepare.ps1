@@ -2,13 +2,13 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.6
+    0.1.7
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
 #>
 [CmdletBinding()]
-param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline,
+param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline, [switch]$WorkforceDiagnostic,
     [switch]$RepairLegacyHistory, [string]$RepairWeeks, [int]$ExpectedRepairFileCount=0, [switch]$ApplyRepair)
 $ErrorActionPreference='Stop'
 if ($RepairLegacyHistory) { $Offline=$true }
@@ -43,6 +43,7 @@ function ConvertTo-PreparedAgeOverrides {
 }
 try {
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
+    if ($WorkforceDiagnostic -and ($ValidateOnly -or $RepairLegacyHistory)) { throw 'WorkforceDiagnostic cannot be combined with ValidateOnly or RepairLegacyHistory.' }
     if (($ApplyRepair -or $RepairWeeks -or $ExpectedRepairFileCount) -and -not $RepairLegacyHistory) { throw 'Repair arguments require the manual RepairLegacyHistory mode.' }
     if ($RepairLegacyHistory -and ($ValidateOnly -or -not $RepairWeeks -or $ExpectedRepairFileCount -lt 1)) {
         throw 'Manual repair requires RepairWeeks and ExpectedRepairFileCount, without ValidateOnly. Preview is default; ApplyRepair enables writes.'
@@ -76,11 +77,12 @@ try {
     Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -ErrorAction Stop
     $coreLoaded=$true
     # Never inherit an enabled global upload during an offline/local qualification.
-    $global:EnableSharePointUpload = -not ($Offline -or $ValidateOnly) -and [bool](ConfigValue 'EnableSharePointUpload')
-    InitializeScriptEnvironment -OutputPath $output -LogFileName $scriptName -CallerScriptPath $PSCommandPath | Out-Null
-    Import-Module $pipeline -Force
+    $global:EnableSharePointUpload = -not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic) -and [bool](ConfigValue 'EnableSharePointUpload')
     $work = ConfigValue 'PreparedWorkRootPath'
     if ([string]::IsNullOrWhiteSpace($work)) { $work=Join-Path ([IO.Path]::GetTempPath()) "SmartWorkplaceIntelligence/$($effective.ProfileKey)" }
+    if ($WorkforceDiagnostic) { $output=Join-Path $work 'workforce-diagnostics' }
+    InitializeScriptEnvironment -OutputPath $output -LogFileName $scriptName -CallerScriptPath $PSCommandPath | Out-Null
+    Import-Module $pipeline -Force
     if ($RepairLegacyHistory) {
         $phase='Repair historical TenantKey columns'
         Import-Module (Join-Path $product 'scripts/Repair-PreparedHistoryTenantKeys.psm1') -Force
@@ -107,6 +109,15 @@ try {
         }.GetNewClosure()
         $mappingRoot = Receive-PreparedMappingWorkbooks -WorkRoot $work -DownloadFile $downloadMapping
         WriteLog -Message 'Both classification workbooks downloaded and structurally validated from configured SharePoint source.' -Level INFO
+    }
+    if ($WorkforceDiagnostic) {
+        $phase='Workforce memory diagnostic'
+        Import-Module (Join-Path $product 'scripts/WorkforceMemoryDiagnostic.psm1') -Force
+        $diagnostic=Invoke-WorkforceMemoryDiagnostic -DataRoot $data -WorkRoot $work -MappingRoot $mappingRoot -AccountClassificationConfigPath (Join-Path $smartRoot 'SmartInventory/Config/AccountClassification.psd1')
+        WriteLog -Message "Workforce diagnostic: exit=$($diagnostic.ExitCode); last stage=$($diagnostic.LastStage); samples=$($diagnostic.Samples); sample errors=$($diagnostic.SampleErrors); sampled peak private MiB=$([math]::Round($diagnostic.SampledPeakPrivateBytes/1MB,1)); private logs=$($diagnostic.RunRoot). No prepared publication." -Level INFO
+        if ($diagnostic.SampleErrors -gt 0) { WriteLog -Message 'Some memory measurements were unavailable. Inspect memory.csv; this diagnostic is not a complete memory profile.' -Level WARNING }
+        if ($diagnostic.ExitCode -ne 0) { throw "Workforce diagnostic worker failed (exit $($diagnostic.ExitCode)); last stage: $($diagnostic.LastStage). Logs: $($diagnostic.RunRoot)" }
+        return
     }
     $phase='Prepare and validate'
     $params = @{
@@ -140,14 +151,14 @@ try {
     }
     $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
     WriteLog -Message $recap -Level INFO
-    if (-not ($Offline -or $ValidateOnly)) {
+    if (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic)) {
         Send-SmartM365TeamsNotification -Title $scriptName -Message 'Preparation completed.' -Level SUCCESS -Channel Infos -ResultSummary $recap -Facts @{Tenant=$effective.TenantKey;Output=$output} | Out-Null
     }
 } catch {
     $failure=$_
     if ($coreLoaded) {
         WriteLog -Message "$phase failed: $($_.Exception.Message)" -Level ERROR
-        if (-not ($Offline -or $ValidateOnly)) {
+        if (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic)) {
             $message=$_.Exception.Message
             $help='https://chatgpt.com/?q='+[uri]::EscapeDataString("Explain SmartM365 preparation failure in phase ${phase}: $message")
             Send-SmartM365TeamsNotification -Title $scriptName -Message $message -Level ERROR -Channel Alerts -HelpUrl $help -Facts @{Tenant=$effective.TenantKey;Phase=$phase;Output=$output;Log=$global:LogTextFile;InnerException=[string]$_.Exception.InnerException} | Out-Null
@@ -164,8 +175,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtHN5HfGnXguvL
-# lceqjT9QQcW7E82W4kMCO9sv414tyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ89YG96lqsLvH
+# Y8q65yYvba1cIFsHNMfqQ5L5om8DpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -298,31 +309,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFXQbCHAywMYrR/x2w1bAIVWHjTzga8ukC8eAKJ7+AFTMA0GCSqG
-# SIb3DQEBAQUABIIBgFXt//CigdYVVp2foCJ+uASS2PoQgMjmF0CKidRmKudPZHgc
-# xgbHjg+76fWvXqEovQ9soq9nCJJ0g5s5lNIZem1pOHP8UUUpdjIfmWs3uZRGqSxl
-# UK84j9QmnZzzY/SUHnQ/U60m08UppOEIAyqNRl7yb/fGXBxIqV6EL30WPm3WN2KE
-# HxJ9NK1NrfZoc3RK3o7bZoBQN0lJ5wfkHpIP48FLebRmZ0N/XV583zGy74WTc8Fq
-# e7gP0kPzdxawuwd9UTsetj0sgNUb+OQTKAWTfZMQpHDBfYRBEC+L0TQ5i/hwKc/S
-# 5nNWsH/jn80I4NDDCjgOJGyGJ1dwEpADOqYAcWqMyq6ADQNsqmlooDtoyqg+X+km
-# SdKAz2W959gQVOkT0opl7QELuoN4yyiv2aDSQ1X3ploqaUjq9ztXa2Vm6cTsO3/j
-# 1k1A6erF1RFenDlL0lFXIQlXhyIaicrwtuz5whTiRaTt0ifJzeGcUig88TO9b0ct
-# zbOO08EgVWIPjFRr46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAerKqC2U2L3Y2f8pEwaGuHSuppMKxtCedLbDTOP1iu7MA0GCSqG
+# SIb3DQEBAQUABIIBgBmNWTNxou5se044DOURAX3v2dEZ/9/UOmExvG5SJ55eXKyH
+# 8VvCXDGU46VYV2rFEQoycTr3/i56wjXaJtvVmRxeRYepF7gkYA34ctBSRKM/lxib
+# FJd6yUE28U5URoo8qYdM97n8+psm7GRWuAjZLAPstS7QpzTNzBpbPNPGFk1wEto0
+# yuOJ0SMwSzDGfSPQRgL2ZMxR/pC4cqUbBMnAWE7BH47jXpdz0UZksDitXC1djpbr
+# UKEQQeHPDnsrvk+TI99BY4k2LXw/R7UeGKkLMahiJRodK+u0cy8tFNhqzWTdcZ9M
+# xfKJ0iHkTQhDBW2gUizGrAIy1j4UwHOOVWn9eVq0tOMu+0z2uq/UdcjBKcYc3mRM
+# 8/WcPnglBLnX5wQ8pcshB6YK6PWIRb2K03/vs/3ADRD4KNMdyI515IJzBi/adRDZ
+# jYlY3ngxyKXB4nlU6kLjBFVHNBMLli7PEThn3JphYXSiX1/aiIA/rGnGhbLFYe4z
+# nyRp/UUe/OuVTB3B+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMTI2
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDXt4N07fBOwg/NjUz2CeUpZ91KTT2qrzotpM4C
-# hU7XbjANBgkqhkiG9w0BAQEFAASCAgB0D5o7KWFjAfMKaK+N75NM2r/0qYMbHCsz
-# QfbxTLVNOCpMHwNTLDqgrZyA+X1SC4wlL7OLhqw38gy02Ud3/EEpe4fmP5nrfM4F
-# WyNzONwpxiZpiOBDSp2ymI6RTZYMBYkk4Czcp9TkjWkTGxZhBoT1COjdUYjzYPkU
-# /7fUkPtS1DRUb8zad5z2pPvk5B/pxgkOLXETkCpJgHLTAWBD1AMrybDqCofCnFcQ
-# PjJRgPxsJzyvZNHuNmHKZkDIba2Ul6+n7XWbn85S5geKFoP38EWjopFZGoXxmaeO
-# HGtNPKFsAVg2OWWga6BOhROmJk6IZXHgq3GwSTIQNh/4djGHKAu78Spcs20HiROU
-# a5cXXs03eS7LZWHrlo8Q9Caa7Rq8iWKsnq8TUPeSzZ47UsQzw5XeaUN2L2qKrCtf
-# vP2R8RK7C6BR9RlrKnDI8L3ehI9uTBwLr1mcDZttmPCxDX225u0K6kFVB57xcDBw
-# DxOnswuLRiJIla6pAnTxxjnEE45NwROOlucmwGGX2dN1T3DJJvtRd8DR3kLcLUkt
-# oiTMLw29cb1oWvKNegJa0mcu5h8a/yJYV4p6J/QiPyhxJhFdlI0sx9cHcF+/F3cH
-# e5sGifJ1IW0Kar3TZUJ4cOkHnUd9nW3wNPlxFLNZWIx2dduz20W1n8Fx5pSKa+Wj
-# eXLqAlDsNg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwODEx
+# MTNaMC8GCSqGSIb3DQEJBDEiBCBnJQBU+jkH80q/z/9g1Qa6ApNsEHdNQl3SBkBc
+# UDjG4DANBgkqhkiG9w0BAQEFAASCAgAn0mJRGSRTrmMg2TMkxLEEAb3nE+wvrMRX
+# S9uEmBNGntPYa/GMuQd6F5NZPB7rHHXOZJ4rori36+pk+zV6eeE0V/eSMCAmTkAt
+# SuPj3NdJQ0Tn4cbNxiGR2rMoFQMaSTsTPgD7tfHGlwjFSlXjqbYLOmbmWcB8YirE
+# o6MbdBvllE7t3yoQxAHUklK2urs2PrIhpSRE/iRkW4rjuirZ+sxObtsCvtL7Y094
+# MOkUh4dJXqIlocdIJBq1JBwPMaZHINwrBQdZlKF8NskI5QH4kCKI7UC18ttrhFhS
+# +9gQCLml6H725BYy9OpweuMBGF0a1jMVUcuK22NhNg9JTiBcBhOXA5cL2bV7Tcls
+# /g4nDjjeM4XKfWhJKXnv+tyBl/KzUpfjzxBloUR9NlYnFK+CAlF2XDBIL3nYC6Q/
+# tPsjD2s5hVIYAuix4Mvba9PnGa/oyxxOXePuaYjOS2gGOS7yBIq/i1FUDpJB8+5D
+# Y4k0OD9vDZEV476n/H86I6lT5/EIhBz0dmP7zTZ2UewbG55xCGsTdHYwSCamo3PF
+# MnoRlBxM7CbseXKfrLOkIb28eJU8w2bUO2qlGHdEU8HMynnYKQjeSE0PUMHojtdI
+# b6kidh9Gu0C/tjnWV+gjs9StbpErCTPZH5bmJ3CBeUbzLIbl8Mli4f0aQDoZXvDy
+# nqRifv/BGQ==
 # SIG # End signature block

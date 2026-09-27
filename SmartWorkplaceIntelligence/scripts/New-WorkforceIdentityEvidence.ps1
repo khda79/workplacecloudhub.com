@@ -21,11 +21,25 @@ param(
 
     [switch]$SkipHistory,
 
+    [string]$DiagnosticStagePath,
+
     [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Config\AccountClassification.psd1')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+function Write-WorkforceDiagnostic {
+    param([string]$Stage)
+    if (-not $DiagnosticStagePath) { return }
+    # Opt-in observations only: no forced GC, row values or business-rule changes.
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try {
+        $process.Refresh()
+        $event = [ordered]@{Utc=[datetime]::UtcNow.ToString('O');Stage=$Stage;ProcessId=$PID;WorkingSetBytes=$process.WorkingSet64;PrivateBytes=$process.PrivateMemorySize64;ManagedBytes=[GC]::GetTotalMemory($false)}
+        [IO.File]::AppendAllText($DiagnosticStagePath,($event | ConvertTo-Json -Compress)+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+    } finally { $process.Dispose() }
+}
+Write-WorkforceDiagnostic 'Initialize'
 if (-not $PersonaClassificationPath) {
     $PersonaClassificationPath = Join-Path $DataRoot 'SmartWorkplaceIntelligence-PersonaClassification.xlsx'
 }
@@ -439,9 +453,13 @@ if (-not (Test-Path -LiteralPath $SiteClassificationPath -PathType Leaf)) { thro
 if (-not (Get-Module -ListAvailable -Name ImportExcel)) { throw 'ImportExcel PowerShell module is required to read the persona classification workbook.' }
 
 Write-Verbose 'Loading current identity and activity sources.'
+Write-WorkforceDiagnostic 'Load Entra users'
 $entraUsers = @(Import-Csv -LiteralPath $activeUsersPath)
+Write-WorkforceDiagnostic 'Load M365 activity'
 $activityRows = @(Import-Csv -LiteralPath $activityPath)
+Write-WorkforceDiagnostic 'Load AD users'
 $adUsers = @(Import-Csv -LiteralPath $adUsersPath)
+Write-WorkforceDiagnostic 'Load site classification'
 $siteSettings = @{}
 foreach ($row in @(Import-Excel -Path $SiteClassificationPath -WorksheetName 'Settings')) {
     $siteSettings[([string]$row.Parameter).Trim()] = ([string]$row.Value).Trim()
@@ -469,10 +487,15 @@ foreach ($row in @(Import-Excel -Path $SiteClassificationPath -WorksheetName 'Si
     if (-not $allowedSiteTypes.Contains($siteType)) { throw "Unsupported Site Type for $code`: $siteType" }
     $siteByCode[$code] = [pscustomobject]@{ Type = $siteType; Name = ([string]$row.'Site Display Name').Trim() }
 }
+Write-WorkforceDiagnostic 'Load duplicate UPN evidence'
 $duplicateUpnRows = @(Import-Csv -LiteralPath $duplicateUpnPath)
+Write-WorkforceDiagnostic 'Load hybrid identity issues'
 $hybridIssueRows = @(Import-Csv -LiteralPath $hybridIssuesPath)
+Write-WorkforceDiagnostic 'Load user licenses'
 $licenseRows = @(Import-Csv -LiteralPath $licenseUsersPath)
+Write-WorkforceDiagnostic 'Load Office activation evidence'
 $officeActivationRows = @(Import-Csv -LiteralPath $officeActivationsPath)
+Write-WorkforceDiagnostic 'Load Office usage'
 $officeUsageByUpn = @{}
 foreach ($row in @(Import-Csv -LiteralPath $officeUsagePath)) {
     if (([string](Get-PropertyValue $row 'ReportPeriodRequested')).Trim() -ne 'D30') { throw 'M365_Apps_Usage_30D.csv does not contain the expected D30 report period.' }
@@ -483,6 +506,7 @@ foreach ($row in @(Import-Csv -LiteralPath $officeUsagePath)) {
         $officeUsageByUpn[$usageUpn] = [pscustomobject]@{ ReportDate = $usageDate; Row = $row }
     }
 }
+Write-WorkforceDiagnostic 'Load authentication methods'
 $authenticationMethods = @(Import-Csv -LiteralPath $authenticationMethodsPath)
 $authenticationByUserId = Get-UniqueIndex $authenticationMethods 'UserId'
 $officeActivationByUpn = @{}
@@ -497,6 +521,7 @@ foreach ($row in $officeActivationRows) {
         $officeActivationByUpn[$activationUpn] = [pscustomobject]@{ ReportDate = $reportDate; LastActivationDate = Convert-ToDateTimeOrNull (Get-PropertyValue $row 'Last Activated Date'); PcCount = [int](Get-PropertyValue $row 'Windows') + [int](Get-PropertyValue $row 'Mac') }
     }
 }
+Write-WorkforceDiagnostic 'Load persona classification'
 $personaCountryCodes = @{ France = 'FR'; Germany = 'DE'; Spain = 'ES'; Belgium = 'BE'; Poland = 'PL'; Switzerland = 'CH'; Portugal = 'PT'; Italy = 'IT'; Austria = 'AT'; Ireland = 'IE'; Luxembourg = 'LU'; Netherlands = 'NL' }
 $personaCache = @{}
 $personaTextCache = @{}
@@ -547,6 +572,7 @@ $enabledMemberUsers = @($entraUsers | Where-Object {
 })
 $activityByUpn = Get-LatestIndex $activityRows 'UserPrincipalName' 'ReportRefreshDate'
 $adByDn = Get-UniqueIndex $adUsers 'DistinguishedName'
+Write-WorkforceDiagnostic 'Build identity indexes'
 $entraBySid = Get-MultiIndex $entraUsers 'OnPremisesSecurityIdentifier'
 $entraByImmutableId = Get-MultiIndex $entraUsers 'OnPremisesImmutableId'
 $entraByUpn = Get-MultiIndex $entraUsers 'User principal name'
@@ -558,6 +584,7 @@ $accountPopulationByEntraId = @{}
 $accountTypeByEntraId = @{}
 $matchedAnyAdEntraIds = [System.Collections.Generic.HashSet[string]]::new()
 $explicitNonHumanEntraIds = [System.Collections.Generic.HashSet[string]]::new()
+Write-WorkforceDiagnostic 'Resolve account populations'
 foreach ($adUser in $adUsers) {
     $accountType = ([string](Get-PropertyValue $adUser 'AccountType')).Trim()
     if (-not $accountType) { $accountType = 'Unclassified Account' }
@@ -618,6 +645,7 @@ $enabledWorkforceUsers = @($workforceUserList)
 $excludedNonHumanAccounts = $populationCounts['Non-human']
 $reviewRequiredAccounts = $populationCounts['Review required']
 
+Write-WorkforceDiagnostic 'Build license indexes'
 $licenseSkuByUpn = @{}
 $m365PlanByUpn = @{}
 foreach ($row in $licenseRows) {
@@ -641,6 +669,7 @@ $matchMethodByEntraId = @{}
 $conflictEntraIds = [System.Collections.Generic.HashSet[string]]::new()
 $identityCounts = [ordered]@{ Matched = 0; Conflict = 0; Unmatched = 0 }
 
+Write-WorkforceDiagnostic 'Reconcile AD and Entra identities'
 foreach ($adUser in $eligibleAdUsers) {
     $candidates = @{}
     $candidateMethods = @{}
@@ -683,6 +712,7 @@ foreach ($row in $duplicateUpnRows) {
 }
 
 $evidenceDate = (Get-Item -LiteralPath $activityPath).LastWriteTime.Date
+Write-WorkforceDiagnostic 'Calculate users, activity and personas'
 $userOutput = [System.Collections.Generic.List[object]]::new()
 $activityStateCounts = @{
     'Active <=30D' = 0
@@ -822,6 +852,7 @@ foreach ($user in $enabledWorkforceUsers) {
     })
 }
 
+Write-WorkforceDiagnostic 'Sort and export current workforce'
 $userOutputSorted = @($userOutput | Sort-Object 'User Principal Name')
 $officeUsageCovered = @($userOutputSorted | Where-Object { $_.'Office Desktop Usage State (30D)' -in @('Used on PC in 30D', 'No PC app use in 30D') }).Count
 if ($officeUsageCovered -eq 0) { throw 'The D30 Apps usage report has no usable, non-anonymized workforce matches. Check report refresh, UPN privacy settings and source schema before generating evidence.' }
@@ -875,6 +906,7 @@ function New-SignalRow {
     }
 }
 
+Write-WorkforceDiagnostic 'Calculate workforce signals'
 $signalRows = @(
     New-SignalRow 'High' 'Accounts without activity for more than 30 days' 'Activity hygiene' $inactiveOver30 $coveredUsers 'Observed' 'Review ownership, disable obsolete accounts, and reclaim licenses where appropriate.' 'Combined AD and Microsoft 365 activity for enabled workforce accounts'
     New-SignalRow 'High' 'Observed never-used accounts' 'Activity hygiene' $activityStateCounts['Observed never used'] $coveredUsers 'Observed' 'Confirm ownership and business need before disabling or licensing changes.' 'Combined AD and Microsoft 365 activity for enabled workforce accounts'
@@ -905,6 +937,7 @@ if ($SkipHistory) {
     return
 }
 
+Write-WorkforceDiagnostic 'Initialize workforce history'
 $historyDirectory = Split-Path -Parent $HistoryOutputPath
 if (-not (Test-Path -LiteralPath $historyDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $historyDirectory -Force | Out-Null
@@ -983,6 +1016,7 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
     if (-not $latestActivityByWeek.ContainsKey($week)) { continue }
     if ($completedHistoryWeeks.Contains($week)) { continue }
     Write-Verbose "Building user activity history for $week."
+    Write-WorkforceDiagnostic "History $week - load users"
     $weekActiveRows = @(Import-SelectedCsvColumns -Path $latestActiveByWeek[$week].FullName -Columns @('Object Id', 'User principal name', 'AccountEnabled', 'UserType') | Where-Object {
         $candidateId = Get-NormalizedKey (Get-PropertyValue $_ 'Object Id')
         $candidateUpn = Get-NormalizedKey (Get-PropertyValue $_ 'User principal name')
@@ -991,10 +1025,12 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
         (($candidateId -and $workforceEntraIds.Contains($candidateId)) -or
          ($candidateUpn -and $workforceUpns.Contains($candidateUpn)))
     })
+    Write-WorkforceDiagnostic "History $week - load activity"
     $weekActivityRows = @(Import-SelectedCsvColumns -Path $latestActivityByWeek[$week].FullName -Columns @('UserPrincipalName', 'ReportRefreshDate', 'LastActivityDate', 'HasAnyM365Activity', 'LastActivityWorkload'))
     $weekActivityByUpn = Get-LatestIndex $weekActivityRows 'UserPrincipalName' 'ReportRefreshDate'
     # AD snapshots are wide enriched exports. Keep only the two columns required
     # for the historical activity calculation to bound memory usage.
+    Write-WorkforceDiagnostic "History $week - load AD"
     $weekAdRows = if ($latestAdByWeek.ContainsKey($week)) {
         @(Import-SelectedCsvColumns -Path $latestAdByWeek[$week].FullName -Columns @('UserPrincipalName', 'LastLogonDate'))
     } else { @() }
@@ -1004,6 +1040,7 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
     $weekRows = [System.Collections.Generic.List[object]]::new()
     $weekCounts = @{ Active = 0; InactiveOver30 = 0; Covered = 0 }
 
+    Write-WorkforceDiagnostic "History $week - calculate"
     foreach ($weekUser in $weekActiveRows) {
         $upn = Get-NormalizedKey (Get-PropertyValue $weekUser 'User principal name')
         $userId = Get-NormalizedKey (Get-PropertyValue $weekUser 'Object Id')
@@ -1032,6 +1069,7 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
         })
     }
 
+    Write-WorkforceDiagnostic "History $week - export"
     if (-not $historyHeaderWritten) {
         $weekRows | Export-Csv -LiteralPath $historyTemporaryPath -NoTypeInformation -Encoding utf8 -UseQuotes AsNeeded
         $historyHeaderWritten = $true
@@ -1061,6 +1099,7 @@ if (-not $historyHeaderWritten) { throw 'No compatible weekly user and activity 
 Move-Item -LiteralPath $historyTemporaryPath -Destination $HistoryOutputPath -Force
 Write-CsvAtomically @($trendRows) $TrendOutputPath
 
+Write-WorkforceDiagnostic 'Completed'
 $summary = [pscustomobject][ordered]@{
     EnabledMemberAccounts = $enabledMemberUsers.Count
     EnabledWorkforceAccounts = $enabledWorkforceUsers.Count
@@ -1091,8 +1130,8 @@ $summary | ConvertTo-Json -Depth 4
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVDy/BRrltE8nb
-# EV13JaH06lGnNSTfX/ZHKRC2YodQRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUlXd6pw+/Qo5d
+# 9IJFvvwCMkuHB7b/+fjVQvqEdJptUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1225,31 +1264,31 @@ $summary | ConvertTo-Json -Depth 4
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID/6K0s4krF+hZKZc42qvtUPPQil0IRLmvXvPArsxi+sMA0GCSqG
-# SIb3DQEBAQUABIIBgFXvv4OOsTigN89UAcOWM+tBFdh1u99+8DAbZCIw7G8+nOWJ
-# A/RtcUwRSzrvfcy+PDSVvL5Qs8oGmxWqjeZpCrz0eLqW6g+obxlYq54x962ekX3l
-# 9RbchuaSSGyP/FiVr9KyL9lm4m1RO9plQAgMSAaPEc48/QGRwlZRkYgoJFdy0DQh
-# eMsGI1lQMas3MkOdxLl9YnM0IdcZTO2FkbgFChA1rba6z6XooMxHx9LnWTPPA2xf
-# xNMtvMrRMbp6/OEnUkMY4NTiAYgmKJ8lMKSlPwIIw1NgV02kz/bYeI3fSsJNL09v
-# 85qWp+BSyYvOqXtq40Y4q/0MFEm2dTorcPeEJ3N2jcE27ZkmHZf1ygNSc/f6eIlc
-# Ankz7InpvgKOnUt9fZ4Fob+1sBghTCRcm13A8ySqEoCqaReWg14ybOv/V9TCtjx5
-# Ewsl8sgJnT4NTQ7GIQuaJBMcIa9CG9NqHZ8zzl1W+2CfVTw3urnZNMRukfnLhyaB
-# +CvcdaQKn1OLFDDZqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIb/vjWQsVhfI/WifIWz5yq7WIlx8KEGAm4M453rarLCMA0GCSqG
+# SIb3DQEBAQUABIIBgIDURPqahRYxBALpCfeoJu/IV+EvXhI8AWHaDRoTAZ5kRcIt
+# Il7CGCNcvAfa8vlUb6b27VLtg3qDkiKuTZ7ObCG1xMvioEvXSpmKKaHgCSVYINjL
+# Rbdc4fbXSwqE6yfcxy4W2vePQkh0LfP5BNXaCFwaIzCYQGyCe8q/GwVXHTdTaLpo
+# VMg5xI/b8wTFTajYenzMZMA8O9rA/qcELhSsBiLxS1MvasffH8fC4ET04JStonc/
+# Jo0gVpyqlEhKtRFJxY3oex/F5zeCVHN5fxroUsEv7FKJODY0BqEeuTqw/zECEjk+
+# O5Jwq7RuxaggAtwfq6MJGUz1O1uJoaHFCCj1JKbdaCI4t62vW8kdkeVJSr7qzsQi
+# Aojx7GA8+2HU6ibkROGR7nHqNvjLMKtjkOfPOqZU/SH5CpGwc7oXxbaFd40qOrkm
+# uRglsDUY1ilhmUCwDFOKcPavhXpEGo0BGJnoCmfQw9oLvOvuJSPd/xI3Nq1iMlFq
+# +khw6Z/qPGboMKGud6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjYyMzUw
-# MDJaMC8GCSqGSIb3DQEJBDEiBCBl4InczuKZmW9jKoIql1bt+H3DO+DWYqzrDhTJ
-# VpctTTANBgkqhkiG9w0BAQEFAASCAgBowyEaXEDD+W8JMs/H/4N1HaLi2khZs2Tu
-# DZKypBBJLmZXGMaDWn1OmVHXiuGtIF/+1SS4kqB5lp5xOJ2OKyqdJPLsJ8W8I0S2
-# VIiIXAkgviUg9nktK1XfNzK64XlwVtYZ3C3lVDG4aXsXA8MtiWG0iBih80PMvBSv
-# k+DIbyJnQ17DPomdpu2YeHrt3VhI+tsEGr7YqN0OljGWYaBYxYI+I4W8T98cDdPe
-# RGZamFEZZZZzpDcT9tZp+gmGclDtUWrTFe8vrN3yLd7a9NoqFZiDDKcbO7GUqRn0
-# JBR6uhwGy3iRokzOp+rrfO7dXkgb2a1WlD4MuPuyH3Er14VPtAJm5+wGgMkLwRzt
-# zLDbU/+UAssy6w4GgmD3BfN7clbcyfm0jehPbOSeo3J0Ql63SqwoZDyFPZjMPWwY
-# Vd8UFNlFfB8nuO0pfAo80rI89znnalazcjubMNSQ/hfXbkt2fVuZ74jwYKt6uy/q
-# Bp2xYyltSGmjlYzzavKJQ/vdQJtqLj58HBZGIDfHAHaXsfn/7IhC2vq6FqBGC0HK
-# yfRYvXrvoko95dImq+9iCM1RGzufjeCovYFz5/L98Ai3hGwZfzR/I3ptZ2cwPck5
-# PR88/4GiyviEaBAq7/GDO/L56brZjgwNJb+x65i0RQuskrWqvN+LuJOvbXSy05Ks
-# gal0uApWsQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwODEx
+# MTNaMC8GCSqGSIb3DQEJBDEiBCB7B9sTeURR0Qm3u+x9keIeYRIWklHjotBDFzZ4
+# fCdMfzANBgkqhkiG9w0BAQEFAASCAgBZTciRndG4qpJw37pxNQII/Jt0AJar/SRL
+# yBacIWlqSNN21MPUqh5Pvv2N9Oflv8jGNGidzQSjV7jEzP8IBBlHF9enVE2kE+vv
+# drXi03SDLkoulJnDPTSM1m9TDPdUEGwPWqELmFm0/2XPFjaX6XK1XzaTl8pzER0O
+# b+Yzd0QGjt1Hr3q/S97tG6DnOyMy2CjYSjQzlCM8FPMEPs6RLU4Dj+oFwxV4KBUf
+# 0yjw0jsybOZ+7hn5E5TA4DNSst660O491DzbSOCgqOYWIY88NLx3A/Wr+T7egeIg
+# rSIfJUgq7Cz/g24F/rMW1/D4OOaj99VoocguQA5hiUxlO4bmLtxMxcG7ESA70nQe
+# 2TG7QEuKzWM0KSdjIC8FBQsXJ6B5BACv0TGueSWii+14VX7O1w61WRiHp2AoyxOT
+# r1SMMKmFHFPONJw2PRty8iab5dLKWsDVhfMIifqLC5bzFAQflCYne8PzTsfH/i1t
+# r7Gmm9o3TJAM9FjW+H35XeaTkKsTMZPpJyaTkMEphYWs2/+D6kpoieR0jaBHQATP
+# jEHnbYmHVpLTHqSn833CQrztUG2vYqLHpgRe4ug6G8ATdjpBCy3aCwuAl5zAnSQ6
+# iJoyXCY6V29rkSjiw1yLxQvAar8yb2tZwMigb5itxSU8PyItn8sBuZB6vpiFx75A
+# gqJFj1B/yQ==
 # SIG # End signature block
