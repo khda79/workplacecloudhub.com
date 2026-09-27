@@ -38,7 +38,8 @@ Ouvrir PowerShell 7 dans une session dédiée. Fournir la racine du checkout Git
     })
     if ($running.Count) { $running | Select-Object ProcessId,ParentProcessId,CommandLine; throw 'Processus a examiner avant qualification' }
     $policy = Import-PowerShellDataFile (Join-Path $package 'SmartM365\Config\SmartM365-JsonTransport.policy.psd1')
-    if ($policy.Mode -ne 'Readers') { throw 'La qualification exige encore Readers' }
+    if ($policy.Mode -notin @('Readers','JsonText')) { throw 'Mode de politique inconnu' }
+    Write-Host ('Mode du checkout : ' + $policy.Mode + ' ; tests synthetiques uniquement')
     & (Join-Path $package 'SmartM365\Tests\Invoke-SmartM365JsonSyntheticQualification.ps1') -IncludeWindowsPowerShell
     if ($LASTEXITCODE -ne 0) { throw 'Echec de qualification synthetique' }
 }
@@ -142,4 +143,4 @@ Conserver résultats CSV/logs, versions PowerShell et OS, empreintes du paquet s
 
 Le feu vert demande aussi la validation des lecteurs externes de Remediations, des éventuelles copies distantes sans propriétaire local et des historiques incomplets. Aucune perte d'historique, baisse de couverture ou reprise de données périmées ne peut être acceptée pour faire passer les tests.
 
-Ces commandes ne signent, ne déploient, n'activent `JsonText`, ne démarrent de collecte et ne réactivent de tâche. Ces actions restent soumises à l'accord séparé de Khaled.
+Ces commandes ne signent, ne déploient, ne démarrent de collecte et ne réactivent de tâche. `JsonText` est maintenant activé dans Git sur demande explicite. Les lancements réels, qualifications distantes et réactivation des tâches restent des opérations séparées.
