@@ -16,6 +16,114 @@ function Write-PreparedJson([string]$Path, $Value) {
     [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 }
 
+function Remove-PreparedOwnedPath([string]$Root, [string]$Relative) {
+    # Only callers with an ownership marker/receipt may use this helper.
+    $target = Get-PreparedChildPath $Root $Relative
+    if (-not (Test-Path -LiteralPath $target)) { return }
+    $cursor = $target
+    $volumeRoot = [IO.Path]::GetPathRoot($target).TrimEnd('\','/')
+    while ($cursor) {
+        if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Cleanup refused linked path: $cursor" }
+        if ($cursor.TrimEnd('\','/') -eq $volumeRoot) { break }
+        $cursor = Split-Path $cursor -Parent
+    }
+    if ((Get-Item -LiteralPath $target).PSIsContainer) {
+        $linked = @(Get-ChildItem -LiteralPath $target -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+        if ($linked.Count) { throw "Cleanup refused linked content: $target" }
+    }
+    Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+}
+
+function Clear-PreparedRunPayload([string]$WorkRoot, [string]$RunId, [string]$DataRoot, [string]$TenantKey) {
+    if ($RunId -notmatch '^[a-f0-9]{32}$') { throw 'Invalid owned run ID.' }
+    $run = Get-PreparedChildPath $WorkRoot $RunId
+    $marker = Get-Content -LiteralPath (Join-Path $run 'run.json') -Raw | ConvertFrom-Json
+    if ($marker.Owner -ne 'PreparedEvidencePipeline/v1' -or $marker.RunId -ne $RunId -or $marker.DataRoot -ne $DataRoot -or $marker.TenantKey -ne $TenantKey) { throw 'Run ownership mismatch; no cleanup performed.' }
+    foreach ($name in 'source','prepared','AccountClassification.psd1') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
+}
+
+function Copy-PreparedStableSource {
+    param($Entry, [string]$SnapshotRoot, [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{},
+        [ValidateRange(1,3)][int]$Attempts=3, [ValidateRange(0,2000)][int]$RetryDelayMs=1000)
+    $to = Get-PreparedChildPath $SnapshotRoot $Entry.Relative
+    New-Item -ItemType Directory -Path (Split-Path $to -Parent) -Force | Out-Null
+    for ($attempt=1; $attempt -le $Attempts; $attempt++) {
+        $inputStream=$null; $outputStream=$null; $hash=$null; $verifyStream=$null; $sha=$null
+        try {
+            $before = Get-Item -LiteralPath $Entry.SourcePath -ErrorAction Stop
+            if ($before.Length -eq 0) { throw 'Empty input file.' }
+            if ($Entry.Kind -eq 'Current') {
+                $limit = if ($AgeOverrides.ContainsKey($before.Name)) { [int]$AgeOverrides[$before.Name] } else { $MaxSourceAgeHours }
+                if ($limit -lt 1 -or ([datetime]::UtcNow-$before.LastWriteTimeUtc).TotalHours -gt $limit -or $before.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw 'Input publication-age limit or future timestamp violated.' }
+            }
+            # Do not lock out raw collectors. Verify the bytes against a fresh source
+            # read after copying; retry only this file if it changed during capture.
+            $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+            $inputStream = [IO.File]::Open($Entry.SourcePath,'Open','Read',$share)
+            $outputStream = [IO.File]::Open($to,'Create','Write','None')
+            $hash = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
+            $buffer = [byte[]]::new(1048576)
+            while (($count=$inputStream.Read($buffer,0,$buffer.Length)) -gt 0) { $outputStream.Write($buffer,0,$count); $hash.AppendData($buffer,0,$count) }
+            $capturedHash = [Convert]::ToHexString($hash.GetHashAndReset())
+            $inputStream.Dispose(); $inputStream=$null
+            $outputStream.Dispose(); $outputStream=$null
+            $verifyStream = [IO.File]::Open($Entry.SourcePath,'Open','Read',$share)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            $sourceHash = [Convert]::ToHexString($sha.ComputeHash($verifyStream))
+            $verifyStream.Dispose(); $verifyStream=$null
+            $after = Get-Item -LiteralPath $Entry.SourcePath -ErrorAction Stop
+            $copy = Get-Item -LiteralPath $to
+            if ($before.Length -ne $after.Length -or $before.LastWriteTimeUtc -ne $after.LastWriteTimeUtc -or $copy.Length -ne $after.Length -or $capturedHash -ne $sourceHash -or (Get-FileHash -LiteralPath $to).Hash -ne $capturedHash) { throw 'Source changed during capture or copy integrity check failed.' }
+            [IO.File]::SetLastWriteTimeUtc($to,$after.LastWriteTimeUtc)
+            return [pscustomobject]@{Relative=$Entry.Relative;SourcePath=$Entry.SourcePath;Kind=$Entry.Kind;Bytes=$copy.Length;ModifiedUtc=$after.LastWriteTimeUtc.ToString('O');SHA256=$capturedHash;CapturedUtc=[datetime]::UtcNow.ToString('O');CaptureAttempts=$attempt}
+        } catch {
+            if ($attempt -eq $Attempts) { throw "Capture failed after $attempt attempts: $($Entry.Relative): $($_.Exception.Message)" }
+            Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Capture retry {1}/{2}: {3}: {4}' -f (Get-Date),($attempt+1),$Attempts,$Entry.Relative,$_.Exception.Message)
+        } finally {
+            foreach ($resource in $inputStream,$outputStream,$hash,$verifyStream,$sha) { if ($null -ne $resource) { $resource.Dispose() } }
+        }
+        if ($RetryDelayMs) { Start-Sleep -Milliseconds $RetryDelayMs }
+    }
+}
+
+function Remove-PreparedMappingWorkbooks([string]$WorkRoot, [string]$MappingRoot) {
+    $relative = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($WorkRoot),[IO.Path]::GetFullPath($MappingRoot)).Replace('\','/')
+    if ($relative -notmatch '^mappings/[a-f0-9]{32}$') { throw 'Mapping cleanup requires the exact run-owned download folder.' }
+    Remove-PreparedOwnedPath $WorkRoot $relative
+}
+
+function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
+    # Follow only the published chain, never sweep arbitrary or failed folders.
+    $keep = @($Pointer.BatchId,$Pointer.PreviousBatchId)
+    if (-not $Pointer.PreviousBatchId) { return }
+    foreach ($id in $keep) { if ($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$') { throw 'Invalid protected batch ID.' } }
+    $previousPath = Get-PreparedChildPath $OutputRoot "batches/$($Pointer.PreviousBatchId)/current.json"
+    if (-not (Test-Path -LiteralPath $previousPath)) { return }
+    $previous = Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json
+    if ($previous.BatchId -ne $Pointer.PreviousBatchId -or $previous.TenantKey -ne $Pointer.TenantKey) { throw 'Previous batch receipt mismatch.' }
+    $candidate = $previous.PreviousBatchId
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    while ($candidate) {
+        if ($candidate -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or $candidate -in $keep -or -not $seen.Add($candidate)) { throw 'Invalid or cyclic batch retention chain.' }
+        $relative = "batches/$candidate"
+        $folder = Get-PreparedChildPath $OutputRoot $relative
+        if (-not (Test-Path -LiteralPath $folder)) { break } # Already retired on an earlier run.
+        $receiptPath = Join-Path $folder 'current.json'
+        if (-not (Test-Path -LiteralPath $receiptPath)) { throw "No publication receipt for old batch $candidate; retained." }
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        $manifestPath = Join-Path $folder 'batch.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ($receipt.BatchId -ne $candidate -or $manifest.BatchId -ne $candidate -or $receipt.TenantKey -ne $Pointer.TenantKey -or $manifest.TenantKey -ne $Pointer.TenantKey -or (Get-FileHash -LiteralPath $manifestPath).Hash -ne $receipt.ManifestSHA256) { throw 'Old batch ownership/hash mismatch; retained.' }
+        $candidate = $receipt.PreviousBatchId
+        # Preserve small audit receipts, but not duplicate historical CSV payloads.
+        $audit = Get-PreparedChildPath $OutputRoot "retired/$($receipt.BatchId)"
+        New-Item -ItemType Directory -Path $audit -Force | Out-Null
+        foreach ($name in 'current.json','batch.json','validation.json') { Copy-Item -LiteralPath (Join-Path $folder $name) -Destination (Join-Path $audit $name) -ErrorAction Stop }
+        Remove-PreparedOwnedPath $OutputRoot $relative
+        Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Retired prepared batch {1}; audit retained, raw history untouched.' -f (Get-Date),$receipt.BatchId)
+    }
+}
+
 function Receive-PreparedMappingWorkbooks {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$WorkRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
@@ -25,7 +133,7 @@ function Receive-PreparedMappingWorkbooks {
         'SmartWorkplaceIntelligence-PersonaClassification.xlsx' = @('Personas','Rules','Exclusions')
         'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
     }
-    foreach ($name in $required.Keys) {
+    try { foreach ($name in $required.Keys) {
         $path = Join-Path $folder $name
         $receipt = & $DownloadFile $path $name
         if (-not $receipt -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
@@ -49,6 +157,9 @@ function Receive-PreparedMappingWorkbooks {
             foreach ($sheet in $required[$name]) { if ($sheet -notin $sheets) { throw "Required worksheet missing: $sheet" } }
         } catch { throw "Invalid SharePoint mapping workbook '$name': $($_.Exception.Message)" }
         finally { if ($archive) { $archive.Dispose() } }
+    } } catch {
+        try { Remove-PreparedMappingWorkbooks $WorkRoot $folder } catch { Write-Warning "Mapping cleanup failed: $($_.Exception.Message)" }
+        throw
     }
     # Return only after both files passed; a partial download never reaches source planning.
     $folder
@@ -59,7 +170,7 @@ function Get-PreparedSourcePlan {
     param([Parameter(Mandatory)][string]$DataRoot,
         [string]$SourceContractPath = (Join-Path $script:ProductRoot 'config/prepared-source-contract.json'),
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
-        [hashtable]$AgeOverrides = @{}, [string]$MappingRoot)
+        [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = Get-Content -LiteralPath $SourceContractPath -Raw | ConvertFrom-Json
     $items = [Collections.Generic.List[object]]::new()
@@ -85,7 +196,7 @@ function Get-PreparedSourcePlan {
                 throw "Input exceeds configured publication-age limit: $($item.Relative)" }
             if ($file.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw "Future input timestamp: $($item.Relative)" }
         }
-        [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=(Get-FileHash -LiteralPath $path).Hash}
+        [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=$(if($MetadataOnly){$null}else{(Get-FileHash -LiteralPath $path).Hash})}
     }
 }
 
@@ -150,6 +261,7 @@ function Publish-PreparedEvidenceBatch {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     # Held throughout validation and commit; a failed process releases the OS lock.
     $lock = [IO.File]::Open((Join-Path $output '.publication.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    $batch=$null; $committed=$false
     try {
         $currentPath = Join-Path $output 'current.json'
         $previous = if (Test-Path -LiteralPath $currentPath) { Get-Content -LiteralPath $currentPath -Raw | ConvertFrom-Json } else { $null }
@@ -209,7 +321,22 @@ function Publish-PreparedEvidenceBatch {
         # Immutable copy used by a delayed/cloud transfer; never upload a newer run's pointer.
         Write-PreparedJson (Join-Path $batch 'current.json') $pointer
         [IO.File]::Move($pointerTemp,$currentPath,$true)
+        $committed=$true
+        try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" }
         [pscustomobject]@{BatchId=$batchId;BatchPath=$batch;Files=$validation.Files.Count;CurrentPath=$currentPath}
+    } catch {
+        if ($batch -and -not $committed) {
+            $failureMessage=$_.Exception.Message
+            try {
+                $audit=Get-PreparedChildPath $output "failed/$batchId"
+                New-Item -ItemType Directory -Path $audit -Force | Out-Null
+                Write-PreparedJson (Join-Path $audit 'failure.json') @{BatchId=$batchId;TenantKey=$TenantKey;Error=$failureMessage;Utc=[datetime]::UtcNow.ToString('O')}
+                if (Test-Path -LiteralPath (Join-Path $batch 'validation.json')) { Copy-Item -LiteralPath (Join-Path $batch 'validation.json') -Destination (Join-Path $audit 'validation.json') }
+                Remove-PreparedOwnedPath $output "batches/$batchId"
+                Remove-PreparedOwnedPath $output "current.$batchId.tmp"
+            } catch { Write-Warning "Failed batch cleanup incomplete: $($_.Exception.Message)" }
+        }
+        throw
     } finally { $lock.Dispose() }
 }
 
@@ -224,49 +351,59 @@ function Invoke-PreparedEvidencePipeline {
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $work = [IO.Path]::GetFullPath($WorkRoot)
     if ($work.TrimEnd('\') -eq $root.TrimEnd('\') -or $work.StartsWith($root.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'WorkRoot must be outside raw/synchronized DataRoot.' }
-    $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
+    if ($root.StartsWith($work.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'WorkRoot must not contain DataRoot.' }
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $lock = [IO.File]::Open((Join-Path $work '.preparation.lock'),'OpenOrCreate','ReadWrite','None')
-    $sourceLock = $null
+    $sourceLock = $null; $run=$null; $runId=$null
     try {
         $sourceLock = [IO.File]::Open((Join-Path $root '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
-        if ($ValidateOnly) {
-            $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey
-            $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
-            if (Compare-Object ($plan | ForEach-Object { $_.Relative+'|'+$_.SHA256 }) ($after | ForEach-Object { $_.Relative+'|'+$_.SHA256 })) { throw 'Sources changed during preflight; retry after collectors finish.' }
-            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity}
+        # Recover payloads from interrupted v0.1.6+ runs only, under both locks.
+        # Unmarked legacy folders and another tenant's folders are never swept.
+        foreach ($prior in Get-ChildItem -LiteralPath $work -Directory | Where-Object { $_.Name -match '^[a-f0-9]{32}$' }) {
+            if (Test-Path -LiteralPath (Join-Path $prior.FullName 'run.json')) { Clear-PreparedRunPayload $work $prior.Name $root $TenantKey }
         }
-        $run = Get-PreparedChildPath $work ([guid]::NewGuid().ToString('N'))
+        $selectedUtc=[datetime]::UtcNow.ToString('O')
+        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly)
+        $runId=[guid]::NewGuid().ToString('N')
+        $run = Get-PreparedChildPath $work $runId
+        New-Item -ItemType Directory -Path $run -Force | Out-Null
+        Write-PreparedJson (Join-Path $run 'run.json') @{Owner='PreparedEvidencePipeline/v1';RunId=$runId;TenantKey=$TenantKey;DataRoot=$root;SelectedUtc=$selectedUtc}
         $snapshot = Join-Path $run 'source'
         $staging = Join-Path $run 'prepared'
+        $captured=[Collections.Generic.List[object]]::new()
         foreach ($entry in $plan) {
-            $from = $entry.SourcePath
-            $to = Get-PreparedChildPath $snapshot $entry.Relative
-            New-Item -ItemType Directory -Path (Split-Path $to -Parent) -Force | Out-Null
-            Copy-Item -LiteralPath $from -Destination $to
-            if ((Get-FileHash -LiteralPath $to).Hash -ne $entry.SHA256) { throw "Source changed while snapshotting: $($entry.Relative)" }
+            $captured.Add((Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides))
+            if ($captured.Count % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Stable source copies: {1}/{2}.' -f (Get-Date),$captured.Count,$plan.Count) }
         }
+        $plan=$captured.ToArray()
+        Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;Policy='Per-file verified capture; later raw updates belong to the next run, not an atomic collector-wide snapshot.'}
         $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey -SnapshotRoot $snapshot
-        # Detect added/removed/changed history or concurrent collectors while making the snapshot.
-        $after = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot)
-        if (Compare-Object ($plan | ForEach-Object { $_.Relative+'|'+$_.SHA256 }) ($after | ForEach-Object { $_.Relative+'|'+$_.SHA256 })) { throw 'Sources changed during capture. Retry after collectors finish.' }
+        if ($ValidateOnly) {
+            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity;DiagnosticPath=$run}
+        }
         $rules = Join-Path $run 'AccountClassification.psd1'
         Copy-Item -LiteralPath $AccountClassificationConfigPath -Destination $rules
         $log = Join-Path $run 'preparation.log'
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
-        if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained work/logs: $run" }
-        $provenance = @{Mode='RebuiltFromSnapshot';Sources=$plan;TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
+        if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
+        $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
-    } finally { if ($sourceLock) { $sourceLock.Dispose() }; $lock.Dispose() }
+    } catch {
+        if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
+        throw
+    } finally {
+        if ($run) { try { Clear-PreparedRunPayload $work $runId $root $TenantKey } catch { Write-Warning "Temporary cleanup incomplete: $($_.Exception.Message)" } }
+        if ($sourceLock) { $sourceLock.Dispose() }; $lock.Dispose()
+    }
 }
-Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch, Receive-PreparedMappingWorkbooks
+Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch, Receive-PreparedMappingWorkbooks, Remove-PreparedMappingWorkbooks
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzDIhSKpEqJqrf
-# U8MdgW9HY3BhI5OHm341EPjae0Y7A6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD3Xgg+QEY1Uh3
+# P/MyPb3XhcqHuf9u6acm0BtqpVp9nqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -399,31 +536,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDaotN1Dn7Ncf4hXlpeFDRfxWk3x5iMPTN66Fh00mLULMA0GCSqG
-# SIb3DQEBAQUABIIBgJObVTHzZnFjHmGF+pk8C/MzlVuAfjnwgs9HdCErHoKYo0gr
-# kkLYKmw95NIx+ccp/8MTAU3vStL++TNSsE/2uigqAMQ3NfNfvlaPGsJ7/+bgiPID
-# u5CqaI1U2D8ZD1GqzdXxw0xX7x25GJDaohLdENBlyMuKp3QjtHgMYIk06BgLL2BF
-# Uf1hz2OD6aVUHrhCuXkpCY/RXOR1p13AIDcrOpGZX7DOIUL1UzItk3eJ6RFwgmce
-# 0lmehxuqLRNkmWskI6T2G/GQ+x/yhCPDjmFAtcvwDks6gOaczm79I5r2yNnFwwa6
-# yLUhL9lLwdXy3dcYTuLKXmzNPl+eeSTc5gm+LlsHDLA7o4C2RBl46w221YF4JItd
-# cQvpPwaS2ED9NKYD0Y6h6Wi58X9v6e+7J7riQz6HO8/nBpVp4UzVMxu0Gr3EUCsM
-# JW4zS3vFoxq/oRWhWNmnU05vs4Zyx/tro5Ns4soRgqMF0uwHF8krOmyLL19ockyb
-# vFjDNnHPPx5ZP1HwDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC2u3OOl+mGPDA579ATLKCfha1oaAeRxa1pO+njYBb2dMA0GCSqG
+# SIb3DQEBAQUABIIBgF3mAu55bK3k/2z18TNXerwz4+1DW2FE2h7IhPl0gTRDOtFQ
+# t+BnhYGD6FgXKVXpyt7+NGv9tz49/8Ys73gdTUHvQb5SkD99FuL2UugVvkabawPz
+# vdQHg53CnYAsvCznmkMImSvcqAxQo5IK1uaQjNcrYmGKrbwK0yWa5uDN0pvtHVOw
+# 18Oh+q8y+iM5DwbnH4CgGMu9ydd421LQ6F18Yz0TGvsILI3N3bzyGyPiQdkMDrXL
+# np/1V8m/v1NBHexC+0uDg8YB8RXACak7c2UANE1mHlphRdcbNEruKS+1nNCE9xgR
+# T5DERiOBxU08Ug9asYGeMhYOdru8PaT5ZY77cqhpKxqPxvXBAK4xhlVFmMY1SYsY
+# OHtqGZkWe+1nX35lJZ5lNtsLaFXPHE0BjoonnVV2jQtI6YRn/arULBisPRU1Cxt6
+# 038hF2TumhaaJTvnf6GcBGQycW+hSiWvoOAjSuT+W3JX84jAfMk7Tgk+/x/tE/1n
+# 0Ys6oa445qxmLVAneKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDU3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCANNIFdo4/vmrjivxobvgcARq9yL0Hik7Iu3KT7
-# QcobhDANBgkqhkiG9w0BAQEFAASCAgA8N7Mryp7fiVZzfJNOS6b2lCya4D+8tmm2
-# c4CkfdTDu2l3mxS1cLSs9GZcrW0lz/CZ3GDkodToU7aOctXufLHk2oIyCh0orxbY
-# BdkCUr1vvZ+RcOKHCumGqt3z4JbxYTDWCGsbbeyuqTA+KriW0gsCgZQt8yuZlnME
-# cooi/KxQODtaCjvWNzL/L2FAjQXTf+kR1v08qjXxwXuVgG3cWhQjpisEufFqoNQ0
-# mgVvzOcRYGzsATVyUVfYClggOo4Pblwn4mHAebCh71/VT2gFaiHqayGg5nvKrMUS
-# ng2qU8iNehMRKatrvN3u+26ekmt0lmAOuyscmT7eRh+7kFIF9PXA4/dnaZFKZduC
-# NixoFwoNy5TiipDk/rluYLGi85SFhV9kC37B6JyxBPmnNx2wNawbNAtL5RbBVNSk
-# GYoGshFaHzi1Qeh4RX32pCC1f7MJd2+UzMzBESypRH8yUpFLMbffQofPLcNYWJWD
-# 383RqcjWgu8JSxX8VyvKr9dB0XVA1nQdZ9yrSLsHtbM6db1XeExG9ZMREhymCvXc
-# P2qLXkuC4hYQdrCQKBPhmanznS4kKJAtUyJjBWVL07cSm84L8diHNR3Gocm2gdV3
-# mLBfqMkypPzVOvko7d06ZDhgimDc/2Tb7An/b0XOGF7E3ds64rVcYI7CxVVjfqUr
-# 1eqIFgVvFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMTI2
+# NTZaMC8GCSqGSIb3DQEJBDEiBCBjxoQNhsXnpakwSfEiY20uYc8LKInlJAgqKpq/
+# kqfLzjANBgkqhkiG9w0BAQEFAASCAgB1SkbE5hgR//3ueuEhStbAvJ8Sc6vOoRjE
+# BufiddWyYqJnHtJXVlZp4nzvGjpmOAnKZInLP8mHvDWhhn3qBfwzSY7oe4WCVkIs
+# CgRAURDXozadethwnBwt1rruL+cbk/iBBk25WmNc2iUihtq7yOj/15pEV8tXXJkC
+# tvZ2/RZYDmO+qVhNbrC47zrioYzBPf+OCXUxya5kVeVfDpXrf2NNXpRP843EdQL+
+# HLcojDoFvJY6pk88QTuGFptqcchbF8XlbSLJy/2J8JVg5qWKqXekZdHgY3AKMx7q
+# eNsihIzMDL9Di5WyfLgN439hKLWcfsyweYF14jMzDNAX0L3dMKscNrmx+XlIHqMc
+# ulYD17DbU5Ab6ddoN9KDo9HYr+HG2Q6xoWcAt4B/smn1HavSKJkrxs3L9QP3blow
+# G6CCUDXtbolur9lpcNlWi+Ce+Fo3ttAluoDrP2JSOEl+Hh3p4SYF+ZKmiB/zVlWt
+# hYI8vxioBwtILvzxYpzO/PiCLsbuGYw/QFEQ0ZKiPSF2Q90N5Wo1FuUoGowTt/cO
+# PgUStLjVvJMkeKZ/9I21bvGtL8nmbVxtu/5KXx1x4SanTxXZxz/X+yOeC6ZJ9Qhr
+# GKcQpjK9TcOiAWWMYlK2pTnsua4n0u3epDp6IZG/VPpSVqSwvZnZXOWsN+qV3Mp0
+# 2pNnjISdWA==
 # SIG # End signature block
