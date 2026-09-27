@@ -33,6 +33,22 @@ try {
     Check ((Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claims -JobName Fixture -Occurrence $occurrence).Claim.Status -eq 'Success') 'Persisted legacy path reference did not resolve after migration.'
     Check (Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $lease.LeasePath -LeaseId $lease.Lease.LeaseId -OwnerServer SYNTHETIC-A) 'Lease could not be released using persisted legacy path.'
     Check (!(Test-Path $readLease.LeasePath)) 'Released preferred lease remains.'
+    foreach ($cycle in 1..2) {
+        $again=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture -JobName Fixture -Occurrence $occurrence.AddMinutes($cycle) -OwnerServer SYNTHETIC-A
+        Check $again.Acquired 'Released key could not be acquired again.'
+        if ($cycle -eq 1) {
+            # Journal left by 1.1.6 after refusing a release of a reused key.
+            $journal=(Get-SmartM365JsonNames $again.LeasePath).Journal
+            [IO.File]::AppendAllText($journal,(@{Owner='Orchestrator distributed state';Phase='Failed';SHA256='';Detail='Migration journal belongs to another owner.'}|ConvertTo-Json -Compress)+[Environment]::NewLine)
+        }
+        Check (Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $again.LeasePath -LeaseId $again.Lease.LeaseId -OwnerServer SYNTHETIC-A) 'Repeated release or existing failed-journal recovery failed.'
+    }
+    $foreign=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture -JobName Fixture -Occurrence $occurrence.AddMinutes(3) -OwnerServer SYNTHETIC-A
+    $journal=(Get-SmartM365JsonNames $foreign.LeasePath).Journal
+    [IO.File]::AppendAllText($journal,(@{Owner='Unrelated owner';Phase='Failed';SHA256='';Detail='Synthetic'}|ConvertTo-Json -Compress)+[Environment]::NewLine)
+    $foreignHash=(Get-FileHash $journal).Hash
+    foreach ($retry in 1..2) { Reject {Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture} 'Foreign owner accepted during recovery.' }
+    Check ((Get-FileHash $journal).Hash -eq $foreignHash -and (Test-Path $foreign.LeasePath)) 'Foreign journal or lease changed on rejection.'
     Copy-Item $readClaim.ClaimPath $claim.ClaimPath
     [IO.File]::WriteAllText($readClaim.ClaimPath,'{')
     Reject {Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claims -JobName Fixture -Occurrence $occurrence} 'Invalid preferred claim fell back.'
@@ -63,8 +79,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBysgvEn293jpJy
-# lwveIq5AKQMWjABV+H9ytqgPuiO4R6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuzeGa+FNq0HIA
+# THNFbwpnATUcyeEYAsT2hxl2VFpxF6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -197,31 +213,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBZ6/AlE5256bTdl+GV3zyAxCLcyuOBYi+WfhtgBPe2aMA0GCSqG
-# SIb3DQEBAQUABIIBgAL9bQQ2iCINhaORXvZN6o3sdFr5knZ+lLUaMq9fQsE9tnuM
-# M2ZOXInNpF3NveTulaj0O30X8G3SWuGJ9VJoyq8vZDku68JB/yLAUqkeEJ50M0KT
-# xcL9LL6/IHjwCL02G5APDKSE81n9YXpxuSsrjy5Hmt/DvLA4rCwVYb4aWDx59DCn
-# B0dFpo6nIbgK9w2wL40kLmKDM5oPdu+g5fqkqS3SAAmU1sgtqCMEV298NmByg7DW
-# EGA0bCk38lAr1MRcJ4qS6nPfauG84mg1IA2tY8eTos+m/4iwi1RdhN/qaQzBYIlB
-# PoQY465ar2VVcYglqUXPPp25UVrvKgDJxXhJIzLFXUPr5h2tuZv5txX3EwijqgYk
-# Ql5PJ7wWHAueveHcbzb2jx3ol6CshMuS6ATG2rIMw5Blt9kTo/lWLS4QfI4rRIWu
-# Bjsp3rzE1brxAWQ6vyrtU3eiV7M0TKlucQQvQY1IZjyQ3KYAoNzDHM3VdUok49yv
-# 7J53sAIdb2RobsWOTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJZacMuCjtovzTHVL6PGsuya+fEGtyuFk7AQxMmYQP9OMA0GCSqG
+# SIb3DQEBAQUABIIBgJYjrBCZNpA2zOJzYnnaZCcBTWiLFRJ75wotuaNzfZOLBZlD
+# +Qv096exlPvYHwtNKckhOPg1fzh5Bsm/E628cPnFh89J7a7edvXCTOyDDUGpBTMb
+# 7djPgUcbPo5zwubk9NuStEG2o6irWIETXEkmlvrwrmu3nWbaQc4v+Je57x3Gf7wM
+# fnMbMO3G7vERH/K89rWF4bkL+RsQSS/PKjR2vIhTfNVhkCnSDqaC9RksSfNrTmiY
+# FNCWIaX0LbfbLL++RR9y1td1VkBRW3GIge6rkYb3ruBRQ6OJF/wt4GIb7+IuFBvA
+# Zv9MBVG9JE/QkIe4kPUqpRenXi392qTIaH9MQ26sB6ULwAMlzFw8EFQMn5ZKgslo
+# wPTM5/f0pSbu0RGNGuozKoTBkXihkavaVU1wWlggWX/Kck/GfS2fpaZFu1k9a96i
+# 1Q5G/74yn9snFdHVR1ompUqqVrEwzbIznO9j3TTVfBd3jVopHyhRnGLqGoVGzf7P
+# EBvM2GFHluEqt0Wjt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTVaMC8GCSqGSIb3DQEJBDEiBCA6HtX4QfuNqMEXFZN9hIiSZInvviP7LACTiCyQ
-# hg2CITANBgkqhkiG9w0BAQEFAASCAgBVhCFnboJGfqgCMeUVOEgnYhuF+ld1H6lK
-# Vfe1IMzlsoaIMoeDYEakqoPpKq3udEdxUr7D0U82+xxJwI5x9lJKM+LManVOibsh
-# gtho0P7outw3BS2nr0GlfOphh2sc3X/ux+W//4vXUx8MoKhr7vf3yanaDs92gS94
-# Sdmt9DmOpgDmeLdejSbZVIzwiXzbQPuIBsjack1qivIe0p8bXvmrr3tZFVhIh+Fk
-# cbrFNeTh7xSGFpfA86KjHuate7u0QomBFiMim5eStTv+SnUpdb96+ccxjJwMjB5o
-# LhCX9EC7bcb7lutOxgoDTppfz9sYNlUL+uwvF/+IeIpSNWYUUhCmcZW9sXo6RuTi
-# H7IS7LZ378MYOcTHG+XeQ6hgnEjOUal8lqkXUNg4TIYHZHJfjKSVA+50JesZbQiA
-# AdcxBb9QzNKO7TVWwAu6pvFqkWlr+j8MeuhGs9p3bUOEbxCsG9ApGPmf0TMikIb/
-# LI5ys1PD0ibAhPK1mhVNpqFRyYzkjCdKUzBgZQl2QxcZsfVAjd5Hrjms/4BHUDWl
-# OSwkY96dmmDzBgSPbSoFcIUQFWJHTkDNPREQX1c+VNgTfQULGqpDAgcwggVlVHUt
-# sVY3xRkWAdUWVsWsCEl3CF77rTuySmzDhCzqYEyrLCi970pPoLTXCxMMG9LIlduj
-# ZVvQVuGdsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
+# NTVaMC8GCSqGSIb3DQEJBDEiBCAyVMauz3d0DPkmN7y6J4WskIleJUHM76faKmUX
+# 39n8CjANBgkqhkiG9w0BAQEFAASCAgCScTS77lJ5HdnHZx9pRvgRXrQ/b7dnpVll
+# iD8jk5ggo/f5OajBwgk/hFA2gPGnPZ+y0iLwF20Q2DxxoySG1qkhM3Hzm9K9Mtx0
+# aDT9q53TKZPGTrAmaJSikpIjOi+n9FJ/ucNv3kjftxmHvDwOnJ/bz4Go9cFHNC7x
+# VTZ3cGIlgvmq9QEtrO28k3upCmHEW+rnDtv+Ep1iWCu94IfRm76zzRZFfCnu6L3D
+# PhPSoz93N6Pf/NW6OQVrz44pQE2cQRySueQ7qXabr7IIqTuJhk0p285/urXthcQ0
+# 04BLANXuEkZ2uecuFBJxSnrEbhUipN8vKnk9DarzZR96P6zaYU6aJIPzd7cTsA1a
+# lCJLHz4yXlqAtEwzGcOg0aPiKGst91KIPXSE5cTzUiT7qWUPEx6+jqIWPynmBHVl
+# 6vHHCmrifwk7lGJ0TUaItHzB1TQEKYtgLtGqiuKQvIbYghvAI5Ju8St9pg/TBWX8
+# DZICCEA+AMCRBPPwp1CmxvNAeLrn6ZI67FZ8+IlTSc3ifd+5ihakR/I/h23HiZQC
+# qkzH3qGi7DuREh4proDHMHn/jKxm4LHtqDEpUiT9Gm/62Lcf91aO+LkYrPKkz9nv
+# giNeuVkk22d3FzMXmVvh0RiJvSZaylPk0lj7ixFFebMcBAmoN2gl8D28yt114Re9
+# FNMVCIrvSA==
 # SIG # End signature block

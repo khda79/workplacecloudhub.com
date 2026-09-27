@@ -135,6 +135,7 @@ function Move-SmartM365OwnedJsonFile {
         [Parameter(Mandatory)][string]$RelativePath,
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][scriptblock]$Validate,
+        [string[]]$CompatibleJournalOwners = @(),
         [switch]$QualifiedUnc,
         [switch]$RemoveIdenticalLegacy,
         [int]$LockTimeoutSeconds = 10
@@ -148,6 +149,7 @@ function Move-SmartM365OwnedJsonFile {
     $selected = Get-SmartM365JsonReadPath $names.Legacy -Optional
     if (-not $selected) { return [pscustomobject]@{ Status = 'Absent'; Path = $names.Preferred; SHA256 = '' } }
     $lock = Enter-SmartM365JsonTransportLock $names.Lock $LockTimeoutSeconds
+    $journalOwnerRejected = $false
     try {
         $current = Read-SmartM365JsonDocument $names.Legacy -Validate $Validate
         $hash = $current.SHA256
@@ -164,7 +166,7 @@ function Move-SmartM365OwnedJsonFile {
             } else {
                 $last=Get-SmartM365LastJsonMigrationEvent $names.Journal
                 if($last -and $last.Phase -ne 'Completed'){
-                    if($last.Owner -ne $Owner){throw 'Migration journal belongs to another owner.'}
+                    if($last.Owner -ne $Owner -and $last.Owner -notin $CompatibleJournalOwners){$journalOwnerRejected=$true;throw 'Migration journal belongs to another owner.'}
                     Write-SmartM365JsonMigrationEvent $names.Journal $Owner 'Completed' $hash 'Resumed after rename'
                 }
             }
@@ -179,7 +181,9 @@ function Move-SmartM365OwnedJsonFile {
         [pscustomobject]@{ Status = 'Completed'; Path = $names.Preferred; SHA256 = $hash }
     } catch {
         $failure = $_
-        try { Write-SmartM365JsonMigrationEvent $names.Journal $Owner 'Failed' '' $failure.Exception.Message } catch { Write-Warning 'Could not persist JSON migration failure journal.' }
+        if (-not $journalOwnerRejected) {
+            try { Write-SmartM365JsonMigrationEvent $names.Journal $Owner 'Failed' '' $failure.Exception.Message } catch { Write-Warning 'Could not persist JSON migration failure journal.' }
+        }
         throw $failure
     } finally { $lock.Dispose() }
 }
@@ -353,7 +357,8 @@ function Resolve-SmartM365OwnedJsonPath {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Owner,
-        [Parameter(Mandatory)][scriptblock]$Validate
+        [Parameter(Mandatory)][scriptblock]$Validate,
+        [string[]]$CompatibleJournalOwners = @()
     )
     $names = Get-SmartM365JsonNames $Path
     $policy = Get-SmartM365JsonTransportPolicy
@@ -369,7 +374,7 @@ function Resolve-SmartM365OwnedJsonPath {
             foreach ($root in @($policy.QualifiedUncRoots)) {
                 if ($names.Legacy.StartsWith(([IO.Path]::GetFullPath($root).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { $qualified = $true }
             }
-            $result = Move-SmartM365OwnedJsonFile -Root ([IO.Path]::GetDirectoryName($names.Legacy)) -RelativePath ([IO.Path]::GetFileName($names.Legacy)) -Owner $Owner -Validate $Validate -QualifiedUnc:$qualified -RemoveIdenticalLegacy
+            $result = Move-SmartM365OwnedJsonFile -Root ([IO.Path]::GetDirectoryName($names.Legacy)) -RelativePath ([IO.Path]::GetFileName($names.Legacy)) -Owner $Owner -Validate $Validate -CompatibleJournalOwners $CompatibleJournalOwners -QualifiedUnc:$qualified -RemoveIdenticalLegacy
             return $result.Path
         }
         return $existing
@@ -427,8 +432,8 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5rF/5wSHpHiex
-# eeCWhliMeDGrMqSOWjypr9xVba8EE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxW9GFkJ3ng+ht
+# t23r7kFop8/0MWQy3TlJ/BlG3qWne6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -561,31 +566,31 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFNGG135ZKsLOh5t3pJ2dSrfT0RwSioXWsRSuYziXCm/MA0GCSqG
-# SIb3DQEBAQUABIIBgAfn/FlDa1DvHVYeynAWGnd/5+8aSl0oONJP3H8HcVjcUMBM
-# t+rVx1IZVnChPHNAV396w5gpz7jIFhSnXW/i1R8rIaijjxvBXN0DXMeKPaCF+WPF
-# sMkhIx7XAQQjzb0PNigB5rmjaHUmcHPor2Sndnjx2Bc8lPWEWuLh60tShoFSKVh9
-# g6tqA69Tyz/KODdFYIy+rtYimSpJv13lB4TOLxxVuYjF3FFR3rBhXrRLkQ7euns7
-# OCPJ1KYGDyjLFHJDlKq4RP4viTB7T5RH86ow28epxgItV0P9WFAgkInFyRVSeXlM
-# +twhwLNzNAxnDd2UiW5x9MkNRTzZWToARNHrpR2rZpvbX2ICksM9NP3jRe1NX+Ef
-# 56kESHxXf1mEuKTMyiV+DCsVc2kkJB+W8b+RfZ3Nr6/tx/UNRUiYFKMocIIOP7c0
-# Q2xmHWLN9duSRSSdWOFUDZ3rHvtwsPAzEMqPbk/LiVhmYpCW+EzCAR8yqaMZbwJk
-# LwdVRACDroAQMp0ouqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOLd4FHweyAGirN3+T9IyKk90dgMxvUGQbjeq6A5DGH0MA0GCSqG
+# SIb3DQEBAQUABIIBgB27ZckUtP4M/X+jkZGaFJ4yHTkmbFJ7sPgU29lXNWLT1Ik4
+# CoWk3i8C0Sd28oQZaE322+bjNvl8L+GZ6gpxpsHXxkwDa9oeFkEoNt5qM7Kx/zt+
+# h/kQFIg4X/EbqaybRetkvoGM8Tm5qt1kMAW4mwnU1LpEoPd0eXEFH0fZXwLB3POX
+# 8b/1azWu72wbOwut962XqvgMttXWNhp8hBMfiB++UzoSCD6TMbPCg9z5hhne2K0s
+# k4pvCaN8TYk1tEK4IdbMWvh7/iLMpfLEKp0bXHES/DIVpnOeHwu3A0Tz+lOU1E8v
+# Us/bcNA4iO8jXUGk3Qmnd5F5T2wwGKtaMaUs8p2xrX0Sm1WeL7tQEkKKh5QbQJnB
+# NZ8sRB3Mzlx/bjxFRux/tr1q63IMoE+BgkxD3TWsJkI7pEKEA0krxqAlJoJpxTpc
+# 0nAUXvJhoAa4ZUJpq44hzR1QGJa0ErTAC3Rvkj32TjN0eOYc2f4rhVTh4tTQvYan
+# rsMMGJnkBiK8MBeXWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNzI0
-# NDdaMC8GCSqGSIb3DQEJBDEiBCDrkSuiFiRbk6djQU6fbbmCQnSt7DOiQeo0z3fm
-# S7LezjANBgkqhkiG9w0BAQEFAASCAgByLpU/onCdUUKMfpzktOhQXPVtHJEnTQny
-# e5xSfi8D2A2IuJtuGkYItwGjol6Q+dX8Mt5mwxE6v0vanIDMdbZhYvR+v9frGCFQ
-# CDzSM44RWR+iC6JQfj3hbSL2ZmP6qgw+foFNoKTpsP1b9mnllNG13gqaDmjtYr/h
-# owVWu9yKqDSxlV6nd3EevQbKonYNbDPq2tLfclP1V3qmLaq10Q/BQQAIeSVte09U
-# Rlybnxgzm2vroDZWft26nQKsZbz5zzB15iA2PKaCgQt8eQkpaAHf935o+vU0VOvY
-# 316wKQUSeEeesd5xjxihNcHwg8HiL0RjJJGohEgVUjws79S1oZERxKQT4tdmkabR
-# PWyM+1bdNEE8g3YVWYSVF2vSvf2Ix/OA0ccs7oJ2dt03RaG1N1Go3t9gfie0Dfya
-# B8ipp269AwBst440nQR28amxoKFBc07EkGKgCiLUnsGPogtyBAV1hvLaYX3hB2j9
-# qoNwgqGn6THeDNc7v6oA+NTFrH8OvzjQZgirrp6JZerJFspY3ZjB3MFqo2Zq5tu6
-# 2ClxSG9kjUYCMKvGS1BsoJWBrAZsrAyJ6r+wUP9Dk7mAfK5AIgWEMYVmKmsD9Aq3
-# ZfrzaKoCuBDMQ2zPuD6HyJRp8KQqQ7RSwyrYSKeianRaMa+yRRq/x/gUYOScM2+W
-# fN8wKN03og==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCC4VyULyTnvY4EB7bjl/Tggkzo4C2COpPEEHBQC
+# t+kWGDANBgkqhkiG9w0BAQEFAASCAgB3S+2lPTRHKQh1qGXn7+HDFNwf4jfPicz4
+# CsKI4RhlY/OGoibJvrth6FnSUDX6zTPU3GK6LPOu/xeG5eEZxyXKxa4EypXUbfl1
+# J8pG0ZG6/jN6ThJywZlZLfPmyCBrCSL5W7v6snTXyl7H2OOZdqvA0ta13qC1VVTd
+# 9e9UNs9QREoGLfdDzgeqtXETuvRmtc5XqY0Fj4Go5PkiejaMyL8Dk8COMiVAPH6B
+# dK7/Mr/Oz+Gkp/OUtz1IE3FgVb5h9XoqvyQxXmMpGaqCuZKJrxl8pBPZKrk9K9jJ
+# 40q5GIU3ZnLU0aTpDdwFsPW8VW+wVyoV/XhOZ5U2/MjXge7FT52SSUXsgyLBFryh
+# dGYH6tJttCTBDp3QjYlChcIsglfXixXy03AivOZ41rLAW6ogGN7pr08Db1G977Vs
+# c0U6mGeqtXxjE8tF7lz7Y86hEygGCRMTApnXrjcUI4ffvcEvgCfzZWSuhFQM4lqo
+# 4hUxyQNlmcBn4te491Bd8yIaECds/x0U4DJtNbu0MR3cQUVdYabBdKTmXn5VH3tS
+# c2ngRB4wYjyUVuHbFRi2TJrOyQj5VDOCAuEDI9Tij/3lKjSGQrsExkqhb+WmGPAz
+# Ex23wLqw8hIg1G7xtuIpMd1qLnLYIZ+7QGpOsbB/kISWLcKIVkeWVdeyZN/d79A+
+# O47FJlsdRg==
 # SIG # End signature block
