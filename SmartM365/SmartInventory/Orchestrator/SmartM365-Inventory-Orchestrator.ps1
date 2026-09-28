@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.26
+1.5.27
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.26
+    Version : 1.5.27
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.26"
+$ScriptVersion = "1.5.27"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1779,7 +1779,7 @@ function Enter-OrchestratorLock {
             Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop
         }
         $stream = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        $payload = @{ Pid = $PID; StartTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); ComputerName = $env:COMPUTERNAME } | ConvertTo-Json
+        $payload = @{ Pid = $PID; StartTimeUtc = [Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToString('o'); ComputerName = $env:COMPUTERNAME } | ConvertTo-Json
         $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
         $stream.Write($bytes, 0, $bytes.Length)
         $stream.Flush($true)
@@ -1823,6 +1823,12 @@ function Exit-OrchestratorLock {
     }
 }
 
+function Test-OrchestratorProcessStartTime {
+    param([Parameter(Mandatory)][datetime]$Actual,[Parameter(Mandatory)][datetime]$Expected)
+    # CIM truncates native 100-nanosecond timestamps to microseconds.
+    return [math]::Abs(($Actual.ToUniversalTime() - $Expected.ToUniversalTime()).Ticks) -le 9
+}
+
 function Get-OrchestratorLockOwner {
     if (-not (Test-Path -LiteralPath $script:Settings.LockPath)) { return $null }
 
@@ -1852,11 +1858,11 @@ function Get-OrchestratorLockOwner {
     if (-not $commandLine -or $commandLine -notmatch 'SmartM365-Inventory-Orchestrator\.ps1') { return $null }
     $tenantPattern = '(?i)(^|\s)-Tenant\s+[''\"]?{0}(?=[''\"\s]|$)' -f [regex]::Escape($Tenant)
     if ($commandLine -notmatch $tenantPattern) { return $null }
-    if ($ownerStartTimeUtc -and $process.StartTime.ToUniversalTime() -ne ([datetime]$ownerStartTimeUtc).ToUniversalTime()) { return $null }
+    if ($ownerStartTimeUtc -and -not (Test-OrchestratorProcessStartTime -Actual $process.StartTime -Expected ([datetime]$ownerStartTimeUtc))) { return $null }
 
     return [pscustomobject]@{
         Pid = $ownerPid
-        StartTimeUtc = $ownerStartTimeUtc
+        StartTimeUtc = $process.StartTime.ToUniversalTime().ToString('o')
         Process = $process
         CommandLine = $commandLine
     }
@@ -1974,7 +1980,9 @@ function Request-OrchestratorStop {
         }
         $candidate = $candidates[0]
         if (-not $candidate.CreationDate) { throw 'Orchestrator candidate start time unavailable; no stop request changed.' }
-        $owner = [pscustomobject]@{ Pid = $candidate.ProcessId; StartTimeUtc = $candidate.CreationDate.ToUniversalTime().ToString('o') }
+        $candidateProcess = Get-Process -Id $candidate.ProcessId -ErrorAction Stop
+        if (-not (Test-OrchestratorProcessStartTime -Actual $candidateProcess.StartTime -Expected $candidate.CreationDate)) { throw 'Candidate process identity changed; no request written.' }
+        $owner = [pscustomobject]@{ Pid = $candidate.ProcessId; StartTimeUtc = $candidateProcess.StartTime.ToUniversalTime().ToString('o') }
         Write-OrchestratorLog -Message ("Resident lock unavailable; requesting graceful stop of verified process candidate PID {0}." -f $owner.Pid) -Level WARN
     }
 
@@ -1993,8 +2001,12 @@ function Request-OrchestratorStop {
         $existingRequest = (Read-SmartM365JsonDocument $script:Settings.StopRequestPath).Document
         if (-not $existingRequest.PSObject.Properties['TargetPid'] -or $existingRequest.TargetPid -ne $owner.Pid -or
             -not $existingRequest.PSObject.Properties['TargetStartTimeUtc'] -or
-            ([datetime]$existingRequest.TargetStartTimeUtc).ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime()) {
+            -not (Test-OrchestratorProcessStartTime -Actual ([datetime]$owner.StartTimeUtc) -Expected ([datetime]$existingRequest.TargetStartTimeUtc))) {
             throw 'Existing stop request targets another or unspecified process; preserved for review.'
+        }
+        if (([datetime]$existingRequest.TargetStartTimeUtc).ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime()) {
+            $existingRequest.TargetStartTimeUtc = $owner.StartTimeUtc
+            Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($existingRequest | ConvertTo-Json -Depth 5)
         }
     } else {
         Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($payload | ConvertTo-Json -Depth 5)
@@ -2006,7 +2018,7 @@ function Request-OrchestratorStop {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 2
         $stillRunning = Get-Process -Id $owner.Pid -ErrorAction SilentlyContinue
-        if (-not $stillRunning -or ($owner.StartTimeUtc -and $stillRunning.StartTime.ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime())) {
+        if (-not $stillRunning) {
             Write-OrchestratorLog -Message ("Orchestrator PID {0} stopped after manual stop request." -f $owner.Pid)
             Write-Host ("Orchestrator PID {0} stopped." -f $owner.Pid) -ForegroundColor Green
             return 0
@@ -2026,7 +2038,7 @@ function Test-OrchestratorStopRequested {
     if ($request.PSObject.Properties['TargetPid'] -and $request.TargetPid -ne $PID) { return $false }
     if ($request.PSObject.Properties['TargetStartTimeUtc'] -and $request.TargetStartTimeUtc) {
         $currentStart = (Get-Process -Id $PID -ErrorAction Stop).StartTime.ToUniversalTime()
-        if ($currentStart -ne ([datetime]$request.TargetStartTimeUtc).ToUniversalTime()) { return $false }
+        if (-not (Test-OrchestratorProcessStartTime -Actual $currentStart -Expected ([datetime]$request.TargetStartTimeUtc))) { return $false }
     }
 
     $requestedBy = 'unknown'
@@ -5850,8 +5862,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1REU/5aFuhrDy
-# ZFCPG4viw5lWV2uE2kq17WNlaMwCHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+e7NLrJ1HkHpa
+# IpwAaVn+Jxf2EH810iT5HWHYTWs0FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5984,31 +5996,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEe91yFAwmc/WZoKBntfIBEIysoqRVCZwGPNvZhe3E6xMA0GCSqG
-# SIb3DQEBAQUABIIBgGCb02X8UIo41oDBj/ZVULRhMAkTJZQcd4focUEX6OUCWOnd
-# hYOfGJIf2umYkBMKtk6Ju1ecLY+ZZtxB5aNr4rgf/qAGQmO/YwtXPDwGPoQIk7A0
-# IHpqb5mfxoS/vzYU9O1y3NkEJPT9YqUvuiaIoOZEIAyKuFXM7X7ZORVatKHZhKgI
-# jNaEcu2uCALJeVL0/pqJ0SWnTHIoCDeviQO9MBXPolmmservrpBFhqGAmP62XQ84
-# 4S7at2c3uoessgl4J8AJN643N3OFwAj/HtonlwIuMzNgSeyozwe/nQ3Iuz4ggi1d
-# oicNF9xOTG+/SghVBknY8blH1vMdBHtyMw6sE+sXIDM7928Ch22Uhpj8C5QZ/w2V
-# UOYueMnSKBuKGmR/C+Pt8a07nqneRd/GCa4IvWVqksrd+jTJlxHFfab9yWxlyZiF
-# Q+pZV6NMZ77LZU4NdNx20QeIie3Mtwu2K1UIJFV6ASb2A9z6JMfNRDeXumfby7Ch
-# mxCyLuoalvWhstNQ+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGB5YOZx88CQ2orioCCZUJoAAhCVg/uTh2Czz5+p3EhVMA0GCSqG
+# SIb3DQEBAQUABIIBgCaRVMdSZVkuUfBhQKyYmpbDT/NtiwASezfzAtLpVF9q0AJA
+# sf+hEfE6756Qa2TCcoYp9Fn+b5eYn5GXhTx6yy9TVMjo6D6u6YdMqn/Fpx9iAvy8
+# pXhyBxV+T4iIWrZhy4OgpqBMszIJpyHgJSDOJ+eqj5P2hpKEAdWUsED0/FxtEeKI
+# HN594L+fe7xRyitxK5239jKHSOXluet2I6F2HmNtiIG37OZiphIsYtQDiJXFMcRN
+# UDcn64FfX/h7qhulttwc2S0fKM8KjziVtGCwt3Me1+JmoRgUjGieIh5manjxuvOS
+# /IpecV2nvldSGou2FxiQf6AwhWr727Lter2a2QE3Efhyx0TKh+tdTTiVYs6cFDSA
+# 56996HogY91aQTfkRNe0xzp5g2goSY6ptypRTWO5VoBlkU5kkBykRRxmfkaS4Pvn
+# vZzCaCmtiyIX8+uw6A7AzqU9hQmq4V3d+8vrVLFV08LT6BeKlyUObedroRHVy4Z5
+# Tk4fL622ROLPQBgjOKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxNDM5
-# MDJaMC8GCSqGSIb3DQEJBDEiBCAH+zZgsXGLl5oLWHudNdrGgVqMymLcr3/Fzh5f
-# yyeTTTANBgkqhkiG9w0BAQEFAASCAgBZ+tirm8MYDmyeW+5wUZPYnRojMDfOwjua
-# Ha/Up2erJFFHH2Mq1dfbtmGJ/QvKJRfhBApwI46YBdKLLeaC9pVaonjOh2Vadp6l
-# OHJc2TvChtCJapqzPutQC5+D1s/TPAUEnewxN0aonJ0rfSV6aV+q2LKu6Tt0M0VA
-# FOn5dHs2Ah3Ouv2eUzQ4g+fM9if8abvFpXFAxH6frm1jyIYHX7KBVj7DXglKHPuP
-# 19VcFHu9VxdaqIfCphFMsYw01182mks+S9mZaVV0RzBLldAOEvHvql/tJ/rb0CZF
-# KVihPay2sUbTI6GJyhbNIKiz6LpXr+Cwrnl2tKSGtldOKOy2j6ws+NZGAFR62XCj
-# aF6Ua7T92x1A7ddyxNvFkkhFAxpClhROO+dwyBtfNNef+aleLzXu/sXufrllVU/e
-# nCgw8ZWnpg1NX0F+DkjSNDqrgritJAPjdsYqn5eD66RgnpR3z8PNO1mmPq05wejm
-# vKyn6CvK5tBPaVwlTWTo26s41E79V+21tkVV+cHaQZokworoi52FxMXqe48zjXlQ
-# KSQfn/A2uCTxcZW/3HyWvXPoszzDqYZrfRS3IF/9L2inbnPc+ThEpNZLGNahjqeN
-# CWmp8WCqdzySA6UHGJl7JChbmRx4GuzLmqPL7aDdIUqDI5zRyfKEYzwy1/FmgbWk
-# V/JZtgaAsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxOTMw
+# MDZaMC8GCSqGSIb3DQEJBDEiBCBW9MduUm06glLYxBioSa1vPN8p/DGDIMZKUvK6
+# SXq4rDANBgkqhkiG9w0BAQEFAASCAgA9qZ/DcdH/cZHKtzk585blfaO6tn2BKcfY
+# HL5LQehEvzF6JoyiInL2xjeOfQ9BZz25Uy8E8oH4dRuyQxcFY68esOqhYbJyWnMx
+# y8xkAvkprDVGvCIk9c1598xjQt+Rbo/8dMNBWd+FyTPM0WumtCOq9xoL/j4iDkIE
+# LNeWgk1upSvfGDdH6tdcRjHqng9m4tq3meEvSvTLUVrc+bD9eSPs+qjszM5anQSb
+# B11MHMuxD0Jek/dWqsfQHe736e2sAvN8XzlWcPeu4kRhsEbzHzb+RSxwm2vim6yN
+# w5wUMzx9US+o1eoP+YUiDanbRknR9OHAXjqT9/AWf6Blq5QjRFYLJ2F1Cp78+Wq7
+# JAffhENhjgvlhVEG8olitoaLHODbBjj1ux0m9jVxWWdgoJCj/IEGdddLKc+EEn0F
+# guUs9UB5urKvErvhv4dUZWeOknhPigPQU1w1P23RxbKfrNvJrIqsloZJKCnn4pji
+# nKlt86h5xRoobL9SS3HkNPwPjk3G/Kr8ng+8w4TNpWWy5ERkNeP3wSWgWLwD/TEL
+# 5V4kiIZOLgQ/Q1Q03X3K1rjQtYc9pE05ERKKbehB2IqZBKUnlDQ8dsrrJiKjsEd8
+# QBZZHaMb/vGI/tj+M2H2UWeUwW/tEOm8tqWE4ituuKVqy9RDfycQ36vPzVYz8+wj
+# IUgFFw6uUw==
 # SIG # End signature block
