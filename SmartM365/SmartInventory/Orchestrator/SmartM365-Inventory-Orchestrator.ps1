@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.23
+1.5.24
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.23
+    Version : 1.5.24
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.23"
+$ScriptVersion = "1.5.24"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -5670,7 +5670,7 @@ try {
     }
     $script:LockOwned = $true
 
-    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $script:Settings.ElectionClaimsPath -LeasesRootPath $script:Settings.ConcurrencyLeasesPath
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $script:Settings.ElectionClaimsPath -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -OnProgress { param($message) Write-OrchestratorLog -Message $message }
 
     Update-OrchestratorServerCapabilities -ForceRefresh
     Update-OrchestratorElectionPlan -ForceRefresh
@@ -5802,8 +5802,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3NnK61Vy1/5H8
-# QHsIJ3O2h1j+dEaRll8BUhiFHlzZHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDynNfbGEOJLv4
+# ehx2/eHPEFjA6Yyof9yLVwBRMGqkBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5936,31 +5936,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFvFmWNPmbdLvl1K7KWqNj9qSebZsOoi3hu3+3iS5EAmMA0GCSqG
-# SIb3DQEBAQUABIIBgFeGTxOoVNZeWT1/rhw+mNDO2lsKiLU+YOHsVf2LnX2BhcWq
-# 0D9ZhVTL+b711dlZhN+64W99iTf/DF2gop+dZw/YySEwVwdTaPihNlNZoVFMPmsT
-# cZQMKt7LNJKXhysfdR4MYaiU7PjAkqospFXBofl7SOfld0jnsUJYrwTatVQ4x8Mb
-# szM4PzaicNjavrL+b5f6SrEADwihNqRGaB10jvhkUtdO18QGvcGv5nEx6Pbxvowj
-# rfD8q6OvFoQtM46z0EeDjldHBLr19fbgS4aOpLYZnoE072itra9IRGbpjaPmx2gR
-# JNl6gd82nBmO0Q4W3V3P+rpAX1pShO5HBTApz27o9fsqEyw7gyblqsslhz9Hzrx1
-# cnjrHybGRNX1aJKo98X9Q28fGpya3o5I8xwEYKsS45/Q4/2F/6gjYQIyeb9kOSb5
-# Izok3+1qJ0H/r3j9+4XegFYm2a6xUW4XIdAY6YoTwDR6SqB228I0R+U5UZYC05It
-# SWyxeYIPxxGEHGJFW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDCXpcDSHO6I/75BOs9vqSXgr5OU14Fk1yWYIyuddKbwMA0GCSqG
+# SIb3DQEBAQUABIIBgJKGrgZG3JaPYoUeLUcSDjyFbhx35+PnuG2UVHaFwMTEAaKz
+# bsLWHbny2SvhI0j20YMMfA5dVZ5WadAQgBE9daUijOMpcTWB/22sYE2M0iUI/YKJ
+# yoJoo5xWE87jANzaheRyjc6AfqQ/3iAd13hVK/LTxCXuDnoHofuGat19sMIly6SG
+# C+qKrQsMH2du1V32BNsGRfhyiJVQQXtpWMAcGLvV5V8O1IhSNVYtCH9TiCgyGvtu
+# T/oFJ6aMJYCJGREq2m5pugQoU9P0ZRnAZuSNXE/c4XLXlswdWJ94gGvZ/n5iqF2s
+# +h4El5li6u02y3p1rRg/e0+hftyTOx2cze/4FN6Ncia459C2bsas6h2uLn3gu08r
+# 4y0pME9WuXJ51Wmzld77qUidtNRfny562DpFKQ4lY9ZKiJ6vrwilq0q2oPU/U/d4
+# oVqRLnqV5pGMmfXeExTRaqZXmf3AgGCjT3NBHji5DBiJan3P+VqOpjuaHk7rXr89
+# VKaKNKTtNEw1sYeBtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgwNjIz
-# MzhaMC8GCSqGSIb3DQEJBDEiBCDCAVBXlPrxE53wC6kiBR6YvXOPS0+ht5Forml/
-# MPgExzANBgkqhkiG9w0BAQEFAASCAgBFR3JwvME+5tnqvDkXJU49iZewrAkwp95d
-# 47vXorMhQrcNI1SRLhr84KJRiZfvVo/zmQTT1eQYnDgxHB3/miAoxIDoP/TGz3zI
-# yYpOpxG7xozoYxag0dJdcuA2JkQYKj66Dv0l8IXWjnvKRqfa1strpfLFks5Q5bv8
-# h7JX8jhfmhh901r82YFaKpKNewjelVJ1B3kaUWMZzV1LhEoX/dsp6ZasP/5V2/0v
-# 6E8H2ETAXrGg2Pbc1RTYh1TNU4TXbXe4FRXYPJSi4kK9ijfasmnD/7ZEnAQPig2M
-# Vx5iyYn6kO01a925bbUcaG4ZsZCqhFY552Zsf810QYJiXoBwet0ptUh3MfIIGTIU
-# EDC+OWBnr3q0JQ9Ubm9DmWqPts5ywHLeCz9NFLIhfC4kha7mRxCfuTa023AyMOj4
-# CPxBRouiHD+ynLIcmIfZIzYPKAov8hlWo5MiJKYuXDY9X1r5sR6YouD0gJJEOGqK
-# 9uPofJm61ss3TFHuw1hBamh86aNhvAyIQCkjAUlPEZYEJDpnuiKIx+oByAiQhFlR
-# 117DE3SWaiRBjeLAFAyG4wwZKbTbzgmNxvhczydLe1dghueWkyD3IveHQWfKReF5
-# RViaFfOOiG/6zbyOkZQDkm8TIC7aaKOrbiQJWZJxgRdJAUNHf0jrK2pZLVn3hzTi
-# 1uV+0KM7hg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzA0
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBb2f6/xAZVHdDkp2IeX3YtKw7jcy9/LsdVNxqT
+# IH1N6TANBgkqhkiG9w0BAQEFAASCAgAQjv5N/ZvZPqTOcGkb028FjAs6rUbSVvUR
+# pIIhZ8hU7oYrOTM06FVt/EfjiwqZsLSq6nXYPvZbThMt5xxqpxOexqLPV1Ilu7QE
+# H41BLGYToLgtw928LNMe6Y0098jcyCxzScv8A3+t5b0+A+xPLbJZIo5vpRNpwS62
+# HLTDUNwOuIWEDAssnNrFW4wDCJsJ3dX0k7ngPvSF5ar2/HLKH9L9T2yCXHdqQkRL
+# 2ZRkQOLWHUENwO1ooiFsa7DhdOkQT7Us3vAl0gWgEJv5/cLIy7XwBkpn1k37A6jM
+# BioX+gJXoqIKqY9YFVhG2qM+fZZOpeRvZcmCTtLwwvDTiMS5XQW32BS8vHCKsXri
+# 0i9uaH6AzsclPBONVtBbGpZMFsoBQXntz4OH6d6ZKvqtgS9d0WsxBy7OypuK0bT4
+# 8uQ/DLlkHECMspeSOiVdihBqhr6HBSVjPz8tQhyQq1ODcJPUij8+HkHoqr7DNpTU
+# TvlueSeQVWvYOOxSAUcj+W5xqC4sD6J66RQ38gAahQx2haJyi02O6BKP5WRwDoxj
+# kw6alJRvA7Kjmt/RQrVdP1eWOMjb6SZkCrwvKCLkElknAxptlsf1SPbFf7DgdOO5
+# a8EA3mq3Ykb+JABqqZpUXqRV+ET0nqAJYzFNLvwtmo6PFPS+XoYnCpnklCRcSa/E
+# Pm0rhEscUQ==
 # SIG # End signature block

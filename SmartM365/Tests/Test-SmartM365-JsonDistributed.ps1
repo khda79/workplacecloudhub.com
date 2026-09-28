@@ -27,6 +27,52 @@ try {
     Check ($readClaim.Claim.ClaimId -eq $claim.Claim.ClaimId -and (Get-FileHash $readClaim.ClaimPath).Hash -eq $claimHash) 'Claim migration changed identifier or content.'
     Check ($readLease.Lease.LeaseId -eq $lease.Lease.LeaseId -and (Get-FileHash $readLease.LeasePath).Hash -eq $leaseHash) 'Lease migration changed identifier or content.'
     Check (!(Test-Path $claim.ClaimPath) -and !(Test-Path $lease.LeasePath)) 'Distributed migration retained legacy outputs.'
+    & $distributed {
+        $script:OriginalResolver = (Get-Command Resolve-DistributedJsonPath).ScriptBlock
+        $script:ResolvedPaths = [Collections.Generic.List[string]]::new()
+        function script:Resolve-DistributedJsonPath {
+            param([string]$Path)
+            $script:ResolvedPaths.Add($Path)
+            & $script:OriginalResolver -Path $Path
+        }
+    }
+    $progress = [Collections.Generic.List[string]]::new()
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases -OnProgress {param($message) $progress.Add($message)}
+    $resolved = @(& $distributed {$script:ResolvedPaths.ToArray()})
+    Check ($resolved.Count -eq 1 -and $resolved[0] -eq $lease.LeasePath) 'Completed claim was reprocessed or live lease skipped.'
+    Check ($progress.Count -ge 2 -and $progress[-1] -match 'scan complete') 'Startup progress missing.'
+    $claimJournal=(Get-SmartM365JsonNames $claim.ClaimPath).Journal
+    $journalBytes=[IO.File]::ReadAllBytes($claimJournal)
+    $claimBytes=[IO.File]::ReadAllBytes($readClaim.ClaimPath)
+    [IO.File]::AppendAllText($claimJournal,(@{Owner='Orchestrator distributed state';Phase='Prepared';SHA256=$claimHash}|ConvertTo-Json -Compress)+[Environment]::NewLine)
+    & $distributed {$script:ResolvedPaths.Clear()}
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases
+    Check (($claim.ClaimPath -in @(& $distributed {$script:ResolvedPaths.ToArray()})) -and (Get-Content $claimJournal -Tail 1 | ConvertFrom-Json).Phase -eq 'Completed') 'Interrupted rename was not resumed.'
+    Check ((Get-FileHash $readClaim.ClaimPath).Hash -eq $claimHash) 'Recovery changed historical bytes.'
+    [IO.File]::AppendAllText($claimJournal,'{"Phase":')
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases -WarningAction SilentlyContinue
+    Check ((Get-FileHash $readClaim.ClaimPath).Hash -eq $claimHash) 'Truncated receipt recovery changed claim.'
+    [IO.File]::WriteAllBytes($claimJournal,$journalBytes)
+    Copy-Item $readClaim.ClaimPath $claim.ClaimPath
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases
+    Check (!(Test-Path $claim.ClaimPath)) 'Identical duplicate was skipped.'
+    [IO.File]::WriteAllBytes($claim.ClaimPath,$claimBytes)
+    [IO.File]::WriteAllText($readClaim.ClaimPath,'{"different":true}')
+    Reject {Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases} 'Divergent pair was skipped.'
+    [IO.File]::WriteAllBytes($readClaim.ClaimPath,$claimBytes)
+    Remove-Item -LiteralPath $claim.ClaimPath
+    [IO.File]::WriteAllBytes($claimJournal,$journalBytes)
+    [IO.File]::WriteAllText($readClaim.ClaimPath,'{')
+    Reject {Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claims -JobName Fixture -Occurrence $occurrence} 'Invalid completed claim accepted by consumer.'
+    [IO.File]::WriteAllBytes($readClaim.ClaimPath,$claimBytes)
+    [IO.File]::WriteAllBytes($claimJournal,$journalBytes)
+    # A natively produced JSON-text claim has no migration receipt to repair.
+    Remove-Item -LiteralPath $claimJournal
+    & $distributed {$script:ResolvedPaths.Clear()}
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases
+    Check ($claim.ClaimPath -notin @(& $distributed {$script:ResolvedPaths.ToArray()})) 'Native JSON-text claim unnecessarily migrated.'
+    [IO.File]::WriteAllBytes($claimJournal,$journalBytes)
+    & $distributed {Set-Item Function:script:Resolve-DistributedJsonPath $script:OriginalResolver}
     $competitor=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture -JobName Other -Occurrence $occurrence -OwnerServer SYNTHETIC-B
     Check (!$competitor.Acquired) 'Migration allowed a competing lease.'
     $null=Set-SmartM365OrchestratorOccurrenceClaim -ClaimPath $claim.ClaimPath -OwnerServer SYNTHETIC-A -Status Success
@@ -79,8 +125,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuzeGa+FNq0HIA
-# THNFbwpnATUcyeEYAsT2hxl2VFpxF6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHNV9JyJMY3Ptk
+# yTmtlKIJ0SgDZH59nV4pSXyrxdCB4qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -213,31 +259,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJZacMuCjtovzTHVL6PGsuya+fEGtyuFk7AQxMmYQP9OMA0GCSqG
-# SIb3DQEBAQUABIIBgJYjrBCZNpA2zOJzYnnaZCcBTWiLFRJ75wotuaNzfZOLBZlD
-# +Qv096exlPvYHwtNKckhOPg1fzh5Bsm/E628cPnFh89J7a7edvXCTOyDDUGpBTMb
-# 7djPgUcbPo5zwubk9NuStEG2o6irWIETXEkmlvrwrmu3nWbaQc4v+Je57x3Gf7wM
-# fnMbMO3G7vERH/K89rWF4bkL+RsQSS/PKjR2vIhTfNVhkCnSDqaC9RksSfNrTmiY
-# FNCWIaX0LbfbLL++RR9y1td1VkBRW3GIge6rkYb3ruBRQ6OJF/wt4GIb7+IuFBvA
-# Zv9MBVG9JE/QkIe4kPUqpRenXi392qTIaH9MQ26sB6ULwAMlzFw8EFQMn5ZKgslo
-# wPTM5/f0pSbu0RGNGuozKoTBkXihkavaVU1wWlggWX/Kck/GfS2fpaZFu1k9a96i
-# 1Q5G/74yn9snFdHVR1ompUqqVrEwzbIznO9j3TTVfBd3jVopHyhRnGLqGoVGzf7P
-# EBvM2GFHluEqt0Wjt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMT48buzr2MAGcmJiu3XRis8Br0Y2DlXQe8B9QK+AUPzMA0GCSqG
+# SIb3DQEBAQUABIIBgADHU0kX9DBRjb/t71D6/oeHh2FB7NuYPoscK2muU2jwNrdu
+# 9tdoYf5VCv9iLtoieHRq/T6HQ8hAxyoj9SVXDErn1jSaxQVDjhfw3CSFfHt+AYQ1
+# BIegwKPE8J6E1MtFMYyYkPNsUBVNKWUzkAo4j0E9Qqia5IzQT3hi9IAT8c2K3WUW
+# oHpelF3hWYGxuFfeiu7G3a0PjmwJUqVL8tbtV/2U1bkdZHtXzypCVdzV2B74L1e5
+# ba8cl1/AlZLjzKTKmvkpTfPFK9cANEnTPA6iHCoDAMpWYzojTG8ynvO3Ah86XhDu
+# 7Xi6nA95AVepnE6Zcl+iFO4eILRLaFzl8lACdNHeXotVvbYbPZeBjgKgKmPL2qL2
+# UCGfGIosjtdNlwWD3a0qyOC/oB+qvatagY2cz+NoXUVkrTK8G4sztRK83YYEmK3q
+# 4XAzrrJ0n+BF6MYWDuzSnm/NG/68ivN5Q5VjkJnstw03ll5QJG+4EKZ+MOqbHfj5
+# jzBjI1Hx8hN/57xx4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
-# NTVaMC8GCSqGSIb3DQEJBDEiBCAyVMauz3d0DPkmN7y6J4WskIleJUHM76faKmUX
-# 39n8CjANBgkqhkiG9w0BAQEFAASCAgCScTS77lJ5HdnHZx9pRvgRXrQ/b7dnpVll
-# iD8jk5ggo/f5OajBwgk/hFA2gPGnPZ+y0iLwF20Q2DxxoySG1qkhM3Hzm9K9Mtx0
-# aDT9q53TKZPGTrAmaJSikpIjOi+n9FJ/ucNv3kjftxmHvDwOnJ/bz4Go9cFHNC7x
-# VTZ3cGIlgvmq9QEtrO28k3upCmHEW+rnDtv+Ep1iWCu94IfRm76zzRZFfCnu6L3D
-# PhPSoz93N6Pf/NW6OQVrz44pQE2cQRySueQ7qXabr7IIqTuJhk0p285/urXthcQ0
-# 04BLANXuEkZ2uecuFBJxSnrEbhUipN8vKnk9DarzZR96P6zaYU6aJIPzd7cTsA1a
-# lCJLHz4yXlqAtEwzGcOg0aPiKGst91KIPXSE5cTzUiT7qWUPEx6+jqIWPynmBHVl
-# 6vHHCmrifwk7lGJ0TUaItHzB1TQEKYtgLtGqiuKQvIbYghvAI5Ju8St9pg/TBWX8
-# DZICCEA+AMCRBPPwp1CmxvNAeLrn6ZI67FZ8+IlTSc3ifd+5ihakR/I/h23HiZQC
-# qkzH3qGi7DuREh4proDHMHn/jKxm4LHtqDEpUiT9Gm/62Lcf91aO+LkYrPKkz9nv
-# giNeuVkk22d3FzMXmVvh0RiJvSZaylPk0lj7ixFFebMcBAmoN2gl8D28yt114Re9
-# FNMVCIrvSA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzA0
+# MTdaMC8GCSqGSIb3DQEJBDEiBCArEAAKpRqzfseZnRigQK0ymmZdm1AkdGAR45mX
+# C3SYQTANBgkqhkiG9w0BAQEFAASCAgAB99mFwl88qs6HW3s7T4iugVpoURvAuG9y
+# 42q8sSj2+E2D+aI0+F6SXgBMfek8DmhSEM+tUBBwQvxm44Y7GG614QG2yMSOirrp
+# 9YMabfQQgU3M3SfGDF+qR+NyiJz5XduBfZJPhbeoJ0qQ1lniB/QFQ7m3XEMdACl2
+# ci88Ccy9r7mbZRI4oHZtS0WMLBXnyDcqyUMT9h5GL3NE65i7AdyBzeOcmVQGnS7r
+# qHMKPrpXyQh77SDPskQoQLuFIEvsQ1sa1RcBa8Dr07JDTTFQQcEYhcZVLarZkt1t
+# m1SNqjxO0+0DpSKOymTFzwHeM/NHGitOlx99P4Cp2M+uqKJB+X72KtygPJijv9UI
+# quLFJUB4vCswX1S0RkizXskprqhwm67zCoSG5DB+P2Dz7N/vjtdRd8e+/c2dYfZZ
+# gYwHWTbre8bpRjD7Xw37OrQ2BE+xwQLhVdanO3aEhSQGzC26WXy/pDOUe21CoeX/
+# 1vLQ7v256TovEG7O6vJ26f9p7DqFe1Fed1aSzEEF+yXSotG0u2P0+YYndlCWIh+x
+# PMyjh0K0eG3kpEMXqrYA0MOGiXTT5Aj+sDfM0XaHnGNn6TDcC1sP+V0X0D9Itw1t
+# RktNYD2DNxUa4vKsIvknO/LeSWYCJvUMSUA0ZjkcLx9KhFFEjUo2Mc1NWQNEP8AQ
+# kMSIVQgghQ==
 # SIG # End signature block

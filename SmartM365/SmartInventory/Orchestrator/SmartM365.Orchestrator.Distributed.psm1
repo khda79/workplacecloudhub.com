@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.7'
+$script:DistributedModuleVersion = '1.1.8'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -29,12 +29,56 @@ function Resolve-DistributedJsonPath {
 
 function Convert-SmartM365OrchestratorDistributedHistory {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ClaimsRootPath,[Parameter(Mandatory)][string]$LeasesRootPath)
+    param([Parameter(Mandatory)][string]$ClaimsRootPath,[Parameter(Mandatory)][string]$LeasesRootPath,[scriptblock]$OnProgress)
     if ((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText') { return }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $lastReport = 0.0
+    $checked = 0; $skipped = 0; $resolved = 0
+    if ($OnProgress) { & $OnProgress 'Distributed JSON history scan started.' | Out-Null }
+    $entries = @{}
+    $claimPaths = [Collections.Generic.List[string]]::new()
     $paths = @()
     if (Test-Path -LiteralPath $ClaimsRootPath) {
         foreach ($folder in @(Get-ChildItem -LiteralPath $ClaimsRootPath -Directory -ErrorAction Stop)) {
-            $paths += @(Get-ChildItem -LiteralPath $folder.FullName -File -ErrorAction Stop | Where-Object { $_.Name -match '^\d{8}T\d{9}Z\.json(?:\.stale\.[0-9a-f]{32}\.json)?(?:\.txt)?$' } | ForEach-Object { $_.FullName })
+            if ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Distributed history folder is a reparse point.' }
+            foreach ($file in @(Get-ChildItem -LiteralPath $folder.FullName -File -ErrorAction Stop)) {
+                $entries[$file.FullName] = $file
+                if ($file.Name -match '^\d{8}T\d{9}Z\.json(?:\.stale\.[0-9a-f]{32}\.json)?(?:\.txt)?$') { $claimPaths.Add($file.FullName) }
+            }
+            if ($OnProgress -and ($timer.Elapsed.TotalSeconds - $lastReport) -ge 5) {
+                & $OnProgress ("Distributed JSON history listing: claims={0}; folder={1}." -f $claimPaths.Count,$folder.Name) | Out-Null
+                $lastReport = $timer.Elapsed.TotalSeconds
+            }
+        }
+    }
+    foreach ($path in $claimPaths) {
+        $checked++
+        $completed = $false
+        if ($path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase)) {
+            $legacy = $path.Substring(0, $path.Length - 4)
+            $journal = $legacy + '.migration.log'
+            # Only historical claims qualify. Live leases always use the locked resolver.
+            # Readers still validate the current JSON whenever a claim is consumed.
+            if (-not $entries.ContainsKey($legacy) -and -not ($entries[$path].Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                if (-not $entries.ContainsKey($journal)) { $completed = $true }
+                elseif (-not ($entries[$journal].Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                    # One sequential receipt read replaces repeated JSON reads, hashes,
+                    # policy loads and lock operations for an already completed migration.
+                    $lastLine = $null
+                    foreach ($line in [IO.File]::ReadLines($journal)) {
+                        if (-not [string]::IsNullOrWhiteSpace($line)) { $lastLine = $line }
+                    }
+                    try {
+                        $receipt = ConvertFrom-Json -InputObject $lastLine -ErrorAction Stop
+                        $completed = $receipt.Phase -eq 'Completed' -and $receipt.Owner -eq 'Orchestrator distributed state'
+                    } catch { $completed = $false }
+                }
+            }
+        }
+        if ($completed) { $skipped++ } else { $paths += $path }
+        if ($OnProgress -and ($timer.Elapsed.TotalSeconds - $lastReport) -ge 5) {
+            & $OnProgress ("Distributed JSON history scan: checked={0}/{1}; alreadyCurrent={2}; pending={3}." -f $checked,$claimPaths.Count,$skipped,$paths.Count) | Out-Null
+            $lastReport = $timer.Elapsed.TotalSeconds
         }
     }
     if (Test-Path -LiteralPath $LeasesRootPath) {
@@ -42,7 +86,13 @@ function Convert-SmartM365OrchestratorDistributedHistory {
     }
     foreach ($path in @($paths | ForEach-Object { (Get-SmartM365JsonNames $_).Legacy } | Sort-Object -Unique)) {
         $null = Resolve-DistributedJsonPath $path
+        $resolved++
+        if ($OnProgress -and ($timer.Elapsed.TotalSeconds - $lastReport) -ge 5) {
+            & $OnProgress ("Distributed JSON history recovery: resolved={0}; alreadyCurrent={1}; current={2}." -f $resolved,$skipped,[IO.Path]::GetFileName($path)) | Out-Null
+            $lastReport = $timer.Elapsed.TotalSeconds
+        }
     }
+    if ($OnProgress) { & $OnProgress ("Distributed JSON history scan complete: checked={0}; alreadyCurrent={1}; resolved={2}; seconds={3:N1}." -f $checked,$skipped,$resolved,$timer.Elapsed.TotalSeconds) | Out-Null }
 }
 
 function ConvertTo-SafeFileName {
@@ -961,8 +1011,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFvrkmU5wsERvM
-# WNEELefiizit83M7smX1O4EYiL+HpaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCF25IarLyaPhhG
+# sniYiSRZTbZ7ThyPuvMxGyX+yupZKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1095,31 +1145,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICEnvujxYHlGf2RLk6VCi48an56R+pGRZNO/HkjgfVjgMA0GCSqG
-# SIb3DQEBAQUABIIBgB9fuuMu1WkiFTOc0TrwDZH21TSDjfv/K7IZkCt+wW0/HW0t
-# Ep4wjwafoOSqDCxojz9zOH0NXDgQmz/s52mqlycxzQSxIvi+w9UW+ig6mt3NgDo3
-# WpchrY83bNQ/4+HmEvGYRPuwJYjqpYB6yxFjsHXzocDIQ3wHGSQ0McELtsdg9Xju
-# W7IOA66JC5OrifU5NMOz/esNLp/PI6hiWc7e5PSgwOAhbId8XDm1zoVvdmw8teF+
-# z9SB/svgC4N1FPQZ9+9YDGjTgXjupRou5UBTDtpOtfAfM/bc4amUCSrWHiHPep96
-# AheU+o8a9Lx8oHX/5wjyXnr84ewsVNG1p/zoboyNWCQweIFT4s38Zv4a5n7hV1wb
-# U/mDa7FdK91rWbpk0Mk+GSj8Sq1UOq9S+9B7ogbPH/W6U5esFLVufD8roh6GTcXK
-# qvQaJ5Ze8O90+ABrXTTxkN3EX84YE6zB28V9XUKU5r7084wNMedPp32Kd1kGGPQa
-# yNxkgnoSz4ueJTWeoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII/ka5iI3TMZZXTPIIkz8cxU3TpuAym09GIQ5odoyaTyMA0GCSqG
+# SIb3DQEBAQUABIIBgG9FPJhKpzzxXlcMExFle7bv1zIaEMfc5LIFQsWkRRsDoM/H
+# pDJZZ8s4k/MwITVC/nkFEVgPbTYyZj3Tjnxmnl5mWWMuuq720gm/tbdLloYL7pa7
+# 6CIKbqeN4kw/Y1a5hHCbEuCxLAxo/3Oy2+t8gKe8vco2gVIdKB7k3dbTbL0k9gmC
+# 3Ih7yzqGvwnXuCdtbJZRuQGZT7BI7g+teBMPzwcGNfSYop/J1dY3mKP/W7FHHpg4
+# jpPHLY9VOPg+TCSSS/VpM+h4UAkPvtIwWQhEJfMdjtJBXc2GzUroyKtaFAyf6Aes
+# SMGvIcnQKoQwuk0nsi6ZhUsJX64f0vvPizePqze4iPFl1lsDDsiJ0mFUpAY+ikOY
+# LzxMVodlTfxGaa5OkAcSOQC+GIf5USBQQ6o3Y4ImgIbtvuEASUYNUvhEbewWgPFf
+# E9205E2ZaQ25J0FD8ngpAAKAszIrCofvudxkoKUO9DSBBkk+DL0XN+OcfDbKhAEW
+# iNnsAsM3LoeXVwLQDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
-# NTVaMC8GCSqGSIb3DQEJBDEiBCA+nNHkGc8FD9o0mroCenf2csRKzGMxDodzSdqc
-# tldzGDANBgkqhkiG9w0BAQEFAASCAgCaqTCw7JsKd/GFHgZOcBiRL3JbfejbEf4r
-# Zjc7iDI3pc3+N1UuDlH6N4fb2J48XZuC6tTW5lf4jWWlg/wflE0qiyACDkJ28R9I
-# qcvruhc0uMTQ1Dhn1t0W4T/0oXOlDtgOHzTubrKD89AOZOLtyvoOPV+UrF+CQB4b
-# BO7n7iO5OrShaRuUl3WgMi5/inC6/6eBuf23MiD1dAd7FQdXaTW4rwCfw5n+EcPv
-# NOrkqNRqX2kyQ29dQPW0vnr2oUXh/Ntd1hQPH50KN1nx2WENd0xTtNxvH0qHYp+L
-# dxGrDI+Yiz1zMGYyEqxKw6RufxNF9UhScPKFvKROhV7s3ZtcKivcbnBVqTV2qOKs
-# NCJLUC7jkj46Zq7NOa7KfqJRr9/IrzEOAH6Brcy6XwVZ4xQZacaRX2/LUraBpU+R
-# +tz3EcHb2niAiz+ZsNv2m2TtlPVYzqkG+hOx4be56RXFIPDvlTANJhd6ta0SrfUZ
-# IvpRwvPc9hhfyrH27mtFJgdcd+r9ro2O1RowG+h9KIzHLJ3fpJm8RChsY8RdNABH
-# bdmcSA6ctOYp4zbiqLDNG+XLeDY5hcgTj+QtnrjLm9VcdJSfXuHTiNpnR0I+SUDy
-# aGtLxfpM58WrsCs6eZOd2ZJXhdTA9zlukswWAmeXGq8+46Xu4Yamx8cB6MrXPhuQ
-# VBw3niXfqA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzA0
+# MTZaMC8GCSqGSIb3DQEJBDEiBCCFWUlH7qNhcR7U4hmE8JP4iCvWAMMBOnndCjLL
+# BBOPYjANBgkqhkiG9w0BAQEFAASCAgAz4f8XnyIbn357lXHmQB/s5LLbPTyfT5zf
+# qkX2kLViEiqrswqhl90L6BlWCNgxaCNLoQUsFxZ6QerUE6+ktOyizVG9h3AffkhZ
+# rmwGN6zwwEBrBHjTJCrjhdYEuNcaJRdQcF9bXXTQS5HnHMu7SdR+bcqGSTKYAJTN
+# PxfzQguGOfw4R6OBL41r2K6V+06PQCUNDmmUkoVj3WAbgxPrIKua6FFc0j65ccmA
+# C8ozySwZkrqBpEWvd8VDLjvQf1oqLpcgi4dlLPMkbSkr7gykjiRwQiTUbUnvrBDf
+# Sogmc551TJO1uzGSbKnuPjJuY8gb1az4EugqYQ7ZlF6cgkml7vv3EOUyivHkSUBp
+# 3IH/quN2OthGlx7k/nY/VDUnLDryfSQAcLZnVAl24fm5dzHmQ074MvEZpUh28Wpy
+# drutZK95p3Y6MBiIKPipGh3jnA0cij2/zBTl0s+azizgWTysJwmyXxGnKOg+X6U+
+# 9+xCSeRGlxzRyjFdfkTTDToTJdNBkktTjxKSZRmMcipAYaszo2IzzrikjEAjgREO
+# SabTVtp7CjII3Z+Qk9WlSoC+8GEKhLORq/p4oqeQn5OOFwqtyckHw3UHbcbBvnfP
+# c+uqjXIZ57YF6nBux77JLRByypHB3jySMVhzsR+2E4yKC+UCzUHq/Ed9cNZlrb0W
+# WA2tjKshbA==
 # SIG # End signature block
