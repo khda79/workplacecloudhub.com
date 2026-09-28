@@ -75,6 +75,8 @@ L'activation de `JsonText` a depuis été approuvée explicitement. Cela ne conf
 
 ## Preuves et limites
 
+Orchestrator 1.5.23 : la synchronisation finale utilise `RunNow` pour ignorer uniquement l'intervalle périodique, au lieu de propager `Force` à tout le miroir. Les fichiers inchangés restent ignorés ; les fichiers nouveaux, modifiés et les transferts précédemment échoués restent sélectionnés. Le test hors ligne du miroir exécute l'appel réel de finalisation extrait du script et vérifie ces cas, sa répétition et un intervalle désactivé. Cette correction ne modifie pas un processus déjà démarré et doit encore être confirmée sur serveur après son redémarrage approuvé.
+
 Correctif après premier démarrage réel : la libération puis réutilisation d'une même clé de concurrence utilisait deux libellés de propriétaire de journal. Le propriétaire des leases est unifié, avec reconnaissance explicite du seul ancien libellé après validation du schéma et du chemin ; les journaux étrangers restent refusés et inchangés, même après plusieurs essais. Les anciens journaux d'échec correspondants sont repris automatiquement, sans suppression manuelle.
 
 La pagination des versions SharePoint ne compare plus le préfixe textuel encodé de l'URL. Elle vérifie HTTPS, hôte Graph, drive et item exacts après décodage, accepte les routes équivalentes avec segments ou clés OData et conserve le lien de pagination intact. Les boucles et changements de destination restent refusés. Cette correction cible le refus observé sur les fichiers possédant un historique paginé ; sa confirmation réelle nécessite le chargement du correctif et une nouvelle publication réussie de l'état et du heartbeat.

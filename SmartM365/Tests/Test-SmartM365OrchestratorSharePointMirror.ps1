@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline tests for the orchestrator SharePoint operational-folder mirror.
 .VERSION
-1.0.1
+1.0.2
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -37,7 +37,8 @@ $functionNames = @(
     'Enter-OrchestratorSharePointMirrorLock',
     'Exit-OrchestratorSharePointMirrorLock',
     'Invoke-OrchestratorEnsureSharePointFolder',
-    'Invoke-OrchestratorSharePointMirror'
+    'Invoke-OrchestratorSharePointMirror',
+    'Invoke-OrchestratorPeriodicSharePointUpload'
 )
 $definitions = foreach ($name in $functionNames) {
     $node = $ast.Find({ param($candidate) $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $name }, $true)
@@ -120,6 +121,7 @@ try {
         $script:EnsuredFolders = [Collections.Generic.List[string]]::new()
         $script:Logs = [Collections.Generic.List[string]]::new()
         $script:ThrowSnapshot = $false
+        $script:FailUploadPath = ''
         $script:OriginalSnapshot = (Get-Command Get-OrchestratorSharePointMirrorSnapshot -CommandType Function).ScriptBlock
 
         function script:Get-OrchestratorSharePointMirrorSnapshot {
@@ -136,6 +138,7 @@ try {
         function script:Invoke-OrchestratorSharePointUpload {
             param([string]$LocalFilePath, [string]$Reason, [switch]$Force)
             $script:Uploads.Add($LocalFilePath)
+            if ($LocalFilePath -eq $script:FailUploadPath) { return $false }
             return $true
         }
         function script:Invoke-OrchestratorSharePointDelete {
@@ -183,6 +186,43 @@ try {
     Assert-True -Condition ((& $mirrorModule { $script:Deletes.Count }) -eq $deleteCountBeforeFailure) -Message 'Incomplete scan triggered a remote deletion.'
     Assert-True -Condition ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -eq $stateHashBeforeFailure) -Message 'Incomplete scan changed the valid mirror state.'
 
+    # Execute the actual finalization call, with only remote operations mocked.
+    $finalCall = $ast.FindAll({ param($node)
+        $node -is [Management.Automation.Language.CommandAst] -and
+        $node.GetCommandName() -eq 'Invoke-OrchestratorPeriodicSharePointUpload'
+    }, $true) | Where-Object { $_.Extent.Text -match '\(Get-Date\)' } | Select-Object -Last 1
+    Assert-True -Condition ($null -ne $finalCall) -Message 'Final synchronization call missing.'
+    $finalScript = [scriptblock]::Create($finalCall.Extent.Text)
+    & $mirrorModule {
+        $script:Settings | Add-Member NoteProperty OrchestratorRunsCsvPath ''
+        $script:Settings | Add-Member NoteProperty StatePath ''
+        $script:Settings | Add-Member NoteProperty HeartbeatPath ''
+        $script:LastSharePointUploadAttempt = Get-Date
+        function script:Get-OrchestratorLogPath { param($Date) return '' }
+        function script:Get-JobRunsCsvPath { return '' }
+        $script:Uploads.Clear()
+    }
+    $changedPath = Join-Path $sharedRoot 'Config\Orchestrator-Jobs.json'
+    $newPath = Join-Path $sharedRoot 'Audit\new.json.txt'
+    $retryPath = Join-Path $sharedRoot 'Audit\retry.json.txt'
+    Set-Content -LiteralPath $retryPath -Value '{"Retry":true}' -Encoding utf8
+    & $mirrorModule { param($Path) $script:FailUploadPath = $Path; Invoke-OrchestratorSharePointMirror; $script:Uploads.Clear() } $retryPath
+    Set-Content -LiteralPath $changedPath -Value '{"Jobs":[{"Name":"FinalChanged"}]}' -Encoding utf8
+    Set-Content -LiteralPath $newPath -Value '{"New":true}' -Encoding utf8
+    & $mirrorModule { Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) }
+    Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 0) -Message 'Normal interval gate was bypassed.'
+    & $mirrorModule { param($Call) $script:FailUploadPath = ''; & $Call } $finalScript
+    $finalUploads = @(& $mirrorModule { $script:Uploads.ToArray() })
+    Assert-True -Condition ($finalUploads.Count -eq 3) -Message 'Final synchronization resent unchanged files or missed pending files.'
+    foreach ($expected in @($changedPath, $newPath, $retryPath)) {
+        Assert-True -Condition ($expected -in $finalUploads) -Message "Final synchronization omitted $expected."
+    }
+    & $mirrorModule { param($Call) $script:Uploads.Clear(); $script:Settings.OrchestratorSharePointUploadIntervalMinutes = 0; & $Call } $finalScript
+    Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 0) -Message 'Repeated finalization resent unchanged files.'
+    Set-Content -LiteralPath $newPath -Value '{"New":"changed with interval disabled"}' -Encoding utf8
+    & $mirrorModule { param($Call) & $Call } $finalScript
+    Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 1) -Message 'Finalization did not run with periodic uploads disabled.'
+
     $moduleWarnings = @()
     Import-Module -Name $coreModulePath -MinimumVersion '1.0.56' -Force -ErrorAction Stop -WarningVariable moduleWarnings
     Assert-True -Condition ($moduleWarnings.Count -eq 0) -Message ("SmartM365.Core import emitted warning(s): {0}" -f ($moduleWarnings -join ' | '))
@@ -229,8 +269,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKY172+Kc+ccPm
-# xIfMCyEDjyiWDl0VozZjxGWbJ9D3k6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPldZ8ucvsOMzQ
+# NmxIyc45SB47kTwteeR+hM38fLLwWqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -363,31 +403,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILtQ+23W4inRv27CASFyGwo53VQo8m1i8hAijwTch+KMMA0GCSqG
-# SIb3DQEBAQUABIIBgC1L60bv5krdE3VYk7NpjcxZJHa75ifJ7pysnWBhtUNMOjsp
-# e3BnGgPkG1ChZsCRoOml0yYhoM4QmGuTSBXqC5pSQ3V/F8E+pSkrK1OUyll7XRJK
-# 3elgfA081UrqYaF7P/ZDrpUJFrVMr8Hi10OMFTlbz/axKjtPo2KmtxFPHElbHt+W
-# qT/gQXeyQtFai1aEujWgdgQLSH79Dh+qsTaXStb0mZin7n1BaFTCNUV3lNDojClG
-# HcFtA+PvaW6d/gNd1W6/frYhRy4t6xwezHMcS0ojNTc17mQ1RUCNOv0l5gJl8Hul
-# Y9WnKuUWVMjqAv6iFZBTGUFo0E/bo7TM0B9bhF1C/DnFZ1ngbXyXCU+EZQWOfgBQ
-# dZZuzyU+Wzr9PMF1fAUCE0MTBep1e1f2nodlR6K8Q2QYNQSOicxfjDZVzXKG0dpR
-# E560bdwkQxmCLEZ2G+z2nxJpT4hmcdQjakAZF7G0oA9iENmz+86pLJxcRkTpoyd3
-# kra0uzXnQ2F08T5HVaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINLX9I8NxcWDB5RHMUGZgwAy93e2DRk/hyJ7qYbu7t9wMA0GCSqG
+# SIb3DQEBAQUABIIBgEY4q0YLgeyxvXyuBYNtbpVEPfriPNJBZVfMIUsE+OsaAvRU
+# f5By9tFM9tprZXMkzeEOMBXvr8cy0dA23hdD10r1ECIFS/h3/no6WeQ6GJkDHBn5
+# xTVqoYecLVy285n0fnDm9d9FeicLUgiww+AUkh+0B3yJC61pS0yshXO9kOj/DYF8
+# XdqZJy29je4Odq9nn/mA7zq6YlfG481Wwgml7ckux/G70w1Ul3tdxq5X9NWo3CLV
+# hkkEO6kX4lbqqGPJ8sFKQiOVkj/0WvRB6m6vTgBiKPtis2Siz7xsfdHdlcJheF72
+# loPejVCymRrd8sZgC3A0qQSWW6UCuOnaEhsieYzzkLGwikEj1IBrZ+BL1YIrACIH
+# COnR1V4Skdqd9bAkHNmpxBCK2wjpaliSyXYnN2ajtwhsTjzKzN0BdlLvRTxK/703
+# gGBwCSC+QZxFXp2hIrJPdqm9hq6o8USeA5lC+o6Bx3ZQOZ1ckThA/fYckyfA1QKJ
+# NQnM/xmImzdU91kbhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTlaMC8GCSqGSIb3DQEJBDEiBCB9iDmuaWboWANMpxvHoLc+0cp2w3vhVX84ZXx9
-# HmNbjjANBgkqhkiG9w0BAQEFAASCAgCDGc8MbOz5drlCekiyQ/fpPxovYrzbddK7
-# CMvySPtaRexrmJc99H8eKMoRnnXob2/2/s2rmvxg1lqWDsMyVfrQ2LDM93ZGLWbz
-# CUQdklQRw+j8CiekAIlKaXjzKxnhHZXwmCUPxW48uQDDQx0ewn7NRM5iN+WVbLWq
-# qNbNoPMCbbwjN8lK2gHvw+fL10nZDl2BC51EG8s6FWrQQio/HkIxjR30d6k2/ZDN
-# 7yPHBL4MXBFOIG57EQ4ewXGUe0jtm22ObVIXBuwMJLiV/dL6gwH9awQMX80InpqR
-# ux0ayQ4OegHqmtX8lvzPIUbPLm0HaJTPL7QSuCFv9NzXRYtv9zopy46nwTKsH7iP
-# TaGJp/TZ+L9mqvnyHHBUAzwCdNdX7jbgHyCV53Y15JLOL0REyyVn1KpcZSAyQ589
-# CnlNmmv9+a4uUm8/p6rDf1cLKOwpSQe9Z7Nft10ZFZ0IieXFNGUz/Z60nNsMpGEq
-# WFE4i8PGJFv43n5VROXVt+fmQLipeZPdDYOu9egfpGhGMAl8UUAdU7nAY+RqtpfO
-# SxWLpo54xrRzC0MJlUKc+oE2FbTtf3EfIzhNBBhicvptr7gsDqmZLj8g/GdADxgG
-# 32XDCHVyn85WlqmlXj+l/GxlijhngmRTiB1xkJIboA6LxC7HGMuQOJfmt6dj6xnf
-# 2L6dDSVcZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgwNjIz
+# MzhaMC8GCSqGSIb3DQEJBDEiBCAuRdM60kAll1rdYvwtZ2OMfNijYMYUxrOWFKGc
+# H2UTKDANBgkqhkiG9w0BAQEFAASCAgBwGeOi1ujZyYNLmeOcehDKKurpX6C6+P/I
+# VSVxICM/bzI34cNE8qSO2l6J6dNzMjBI2XROi0nNuzLzv5kqTUTM3NUGEFBC9E8i
+# 9awkWueQR/L84JVHIz/Oqiv2sjdvKHQAT6/yRrz5RPKhQ2/K5gRg+GhjD7ZzSEMv
+# Yh4klHgUdXGOURp1p15rEw8PizFKGbommIOKv1asjIjnB3HrdQi3IMJW8cAmeQmn
+# RIk+/htu2h7w1EhqS47MLl+TEnw2nd4JrIg0B3DruDPwa4UK08zWw4MR/Aypsv/r
+# 9nHJAACxkPFIFwx08xwtJj8uokgsQQi8c44LCmNzo62kLRuJ+/X/m/yUI9epOaye
+# B8FHRlIznYGyorE8v+D1ULznu7+XhuI0IycnzNYheON0KPNVo53KlmByjJZf3c2f
+# T8KI3SBW8uuErxU2jrSNilANUQo5m0fc4CZL7vai7AY93KnUnb5LcKVbBRyOUhYN
+# p41y9ArWoYp5RV2xlTenJhAOXujFJSS3zmS50OGBg/ylDtosjiJMs451oEgdo6T+
+# k4qXPcfIznTyAcybF/BQ39etlUc+TXNlM6xr4+VcwxMZISqJkrXE0jHYH8GfUUDD
+# 0u2Ktm9OMMZx1nNC2lChWzNgLiDffeqN/weSYeLGat/i4GQKpS2gFfgVYqyT9O6C
+# zaXy2jO6Dg==
 # SIG # End signature block

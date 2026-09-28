@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.22
+1.5.23
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.21
+    Version : 1.5.23
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.22"
+$ScriptVersion = "1.5.23"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -698,10 +698,12 @@ function Invoke-OrchestratorMailHtmlUploads {
 function Invoke-OrchestratorPeriodicSharePointUpload {
     param(
         [Parameter(Mandatory = $true)][datetime]$Now,
+        [switch]$RunNow,
         [switch]$Force
     )
 
-    if (-not $Force) {
+    # Scheduling bypass is independent of forcing unchanged files to upload again.
+    if (-not $RunNow -and -not $Force) {
         $interval = [int]$script:Settings.OrchestratorSharePointUploadIntervalMinutes
         if ($interval -le 0) { return }
         if ($script:LastSharePointUploadAttempt -ne [datetime]::MinValue -and ($Now - $script:LastSharePointUploadAttempt).TotalMinutes -lt $interval) { return }
@@ -5779,7 +5781,7 @@ finally {
     }
     if (-not $DryRun -and -not $Stop -and -not $SendExecutionSummary) {
         try {
-            Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -Force
+            Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -RunNow
         }
         catch {
             Write-OrchestratorLog -Message ("Final orchestrator SharePoint upload failed: {0}" -f $_.Exception.Message) -Level ERROR
@@ -5800,8 +5802,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVymcD3/KA5SYy
-# /DPmb3Pq6lZch015tOHnuekX/o2Kk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3NnK61Vy1/5H8
+# QHsIJ3O2h1j+dEaRll8BUhiFHlzZHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5934,31 +5936,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIHboMpF4mgDIxtvv4TdMYs+pFpZonFvj6tLCP6icRuuMA0GCSqG
-# SIb3DQEBAQUABIIBgC7PZvhtyF/pzBJNidiL4wGTLGgCOjJYkfW/0cJNPvSIOwCs
-# iJ/6eQMakkfiHHfYMkMmr3Aw8PtEn79NTV5ROS7pXo+LHAdJn5DgsJIxltkY/47k
-# i0m7XqEc0sZwszqqJW9CxW9XOpBRF9NELua/5123soaGHln8eUMXGbfXkIxqA3Rj
-# uqH2yRMhl5ulA7L5LFsmK6F8Cs/8Xt9oK07GGm/KytzIpgMGriBd0IWwV//4L0og
-# 5QvHPJMgN86rPUlPoZjJND5C1b5JLVESNKWxy4HjywfGlg4UWfSy/FTROqzRhk00
-# JUuWWsb7OWjhDPxlIA7byfKFheOMfxuexGPU1dRe5WKSwV7THX36VuuIrIYx4bSH
-# ZFPNwek7AYWdqHCWIZ+iTlrmvtzFnDfWomHiZCC1AS5vlw05h99Tfq0JeLisgjUq
-# P15qJWmUsWlNPn2XNpKs0NylT0hZaGATCoHnqiV4C8DoTC1f3pbFPldV9A3/sL23
-# d/YQpeykjIlCzTm8TaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFvFmWNPmbdLvl1K7KWqNj9qSebZsOoi3hu3+3iS5EAmMA0GCSqG
+# SIb3DQEBAQUABIIBgFeGTxOoVNZeWT1/rhw+mNDO2lsKiLU+YOHsVf2LnX2BhcWq
+# 0D9ZhVTL+b711dlZhN+64W99iTf/DF2gop+dZw/YySEwVwdTaPihNlNZoVFMPmsT
+# cZQMKt7LNJKXhysfdR4MYaiU7PjAkqospFXBofl7SOfld0jnsUJYrwTatVQ4x8Mb
+# szM4PzaicNjavrL+b5f6SrEADwihNqRGaB10jvhkUtdO18QGvcGv5nEx6Pbxvowj
+# rfD8q6OvFoQtM46z0EeDjldHBLr19fbgS4aOpLYZnoE072itra9IRGbpjaPmx2gR
+# JNl6gd82nBmO0Q4W3V3P+rpAX1pShO5HBTApz27o9fsqEyw7gyblqsslhz9Hzrx1
+# cnjrHybGRNX1aJKo98X9Q28fGpya3o5I8xwEYKsS45/Q4/2F/6gjYQIyeb9kOSb5
+# Izok3+1qJ0H/r3j9+4XegFYm2a6xUW4XIdAY6YoTwDR6SqB228I0R+U5UZYC05It
+# SWyxeYIPxxGEHGJFW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCmP+O2nbJQ7QfOS+NWcQx3Rpv/3hEhvOX0MBUw
-# PhmLIDANBgkqhkiG9w0BAQEFAASCAgA0vKcZUEDEheKpJXpQOgl0LPkHWcccf17M
-# G752cf+I+sqZQrSFdZxzZAcqvxRODs2+tgnU92I4z597jR+xDTY9303MEi/5637G
-# k0hOyWZ4WyKss1E3hadoVxiQzRyNLUcmgZXzOoenj+7RQtlpS4PlaB91IBf1H978
-# f+ZM9jL/pu/AHq6cldtiaokjTYghxrcr1A3EYD27JCQz2sFAS9c/Mr0dIu3OPay2
-# /MaMb1Dn+hQjrpKwJthNhDYIDxJSy1fcLrYGGa3ttiqV1m9K3P49i1t4t4tKamLN
-# A6sVUqCW/33kwYL5QGpJ9yA684feiJjJGT3GXDKFaRVu+lixrJI07t7QVsmM1w3P
-# hAlNJeqeiKPjmnDH7qFeUlae3xgbzpQyjC48Tq/vYTPf2w1GRRBnSTCqBto/0Q25
-# Stphig6T8/OKiMZm/GW/mxaLL0XraZB5PXRpq2+dQS2tbf6KMVT/dUFZlxw26XSg
-# q3jSbf03rZ146WAQJNmJWbnTCDB2Fe1l2MIxaBaqbwDUOWjNVshiGPZ/YPJ857o/
-# w3Hys0jqBz5b30jmlRYaQx87wSXi7gSQnXOsmhNZgP1Au3azoUN7ypuktaM94+2V
-# jLTqHTHWHESKcU4aBFpGzHNKerusplezaSD9h3VR7mQ/1kbGiGaflvaiALmVT1Rq
-# aXVt2nWFmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgwNjIz
+# MzhaMC8GCSqGSIb3DQEJBDEiBCDCAVBXlPrxE53wC6kiBR6YvXOPS0+ht5Forml/
+# MPgExzANBgkqhkiG9w0BAQEFAASCAgBFR3JwvME+5tnqvDkXJU49iZewrAkwp95d
+# 47vXorMhQrcNI1SRLhr84KJRiZfvVo/zmQTT1eQYnDgxHB3/miAoxIDoP/TGz3zI
+# yYpOpxG7xozoYxag0dJdcuA2JkQYKj66Dv0l8IXWjnvKRqfa1strpfLFks5Q5bv8
+# h7JX8jhfmhh901r82YFaKpKNewjelVJ1B3kaUWMZzV1LhEoX/dsp6ZasP/5V2/0v
+# 6E8H2ETAXrGg2Pbc1RTYh1TNU4TXbXe4FRXYPJSi4kK9ijfasmnD/7ZEnAQPig2M
+# Vx5iyYn6kO01a925bbUcaG4ZsZCqhFY552Zsf810QYJiXoBwet0ptUh3MfIIGTIU
+# EDC+OWBnr3q0JQ9Ubm9DmWqPts5ywHLeCz9NFLIhfC4kha7mRxCfuTa023AyMOj4
+# CPxBRouiHD+ynLIcmIfZIzYPKAov8hlWo5MiJKYuXDY9X1r5sR6YouD0gJJEOGqK
+# 9uPofJm61ss3TFHuw1hBamh86aNhvAyIQCkjAUlPEZYEJDpnuiKIx+oByAiQhFlR
+# 117DE3SWaiRBjeLAFAyG4wwZKbTbzgmNxvhczydLe1dghueWkyD3IveHQWfKReF5
+# RViaFfOOiG/6zbyOkZQDkm8TIC7aaKOrbiQJWZJxgRdJAUNHf0jrK2pZLVn3hzTi
+# 1uV+0KM7hg==
 # SIG # End signature block
