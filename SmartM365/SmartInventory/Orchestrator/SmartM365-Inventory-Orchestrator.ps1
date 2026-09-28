@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.25
+1.5.26
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.25
+    Version : 1.5.26
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.25"
+$ScriptVersion = "1.5.26"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1414,6 +1414,29 @@ function Get-DueOccurrence {
     $occurrences = Get-JobOccurrencesInWindow -Job $Job -WindowStart $windowStart -WindowEnd $Now
     if ($occurrences.Count -eq 0) { return $null }
     return $occurrences[$occurrences.Count - 1]
+}
+
+function Get-OrchestratorSharedDependencyStatus {
+    param([Parameter(Mandatory)]$Job,[Parameter(Mandatory)][datetime]$Now)
+    # Require the latest scheduled occurrence, never any older successful run.
+    $expected = Get-LatestPastOccurrence -Job $Job -Now $Now
+    if ($null -eq $expected) { return 'Waiting' }
+    $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $expected
+    if ($null -eq $record -or $null -eq $record.Claim) { return 'Waiting' }
+    $claim = $record.Claim
+    if ([string]$claim.JobName -ne [string]$Job.Name -or
+        ([datetime]$claim.OccurrenceUtc).ToUniversalTime() -ne $expected.ToUniversalTime()) {
+        throw 'Dependency claim identity or scheduled occurrence mismatch.'
+    }
+    if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) {
+        if ($Job.PSObject.Properties['ConcurrencyKey'] -and $Job.ConcurrencyKey) {
+            $lease = Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -ConcurrencyKey $Job.ConcurrencyKey
+            if ($null -ne $lease -and $null -ne $lease.Lease -and [string]$lease.Lease.JobName -eq [string]$Job.Name) { return 'Waiting' }
+        }
+        return 'Ready'
+    }
+    if ([string]$claim.Status -in @('Failed','TimedOut','Interrupted')) { return 'Failed' }
+    return 'Waiting'
 }
 
 function Get-LatestPastOccurrence {
@@ -4512,6 +4535,21 @@ function Invoke-LaunchPhase {
                 $depJob = $null
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
 
+                if ($script:Settings.DistributedSchedulingEnabled -and $null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Elected') {
+                    # The owner may be another host, or may have changed since our last run.
+                    # Shared claims also expose remote retries and in-progress executions.
+                    $sharedDependencyStatus = Get-OrchestratorSharedDependencyStatus -Job $depJob -Now $Now
+                    if ($sharedDependencyStatus -eq 'Ready') { continue }
+                    if ($sharedDependencyStatus -eq 'Failed' -and -not $depJob.ContinueOnError) {
+                        $blockedByParent = $true; $blockedDependency = $dep; break
+                    }
+                    # Even with ContinueOnError, do not consume stale data silently.
+                    # Wait for recovery; the existing dependency timeout remains authoritative.
+                    $deferred = $true
+                    $blockingDependencies.Add($dep)
+                    continue
+                }
+
                 if ($script:RunningJobs.ContainsKey($dep) -or $launchedThisTick -contains $dep) {
                     $deferred = $true
                     $blockingDependencies.Add($dep)
@@ -5812,8 +5850,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAu/APdn/ZtF5Zd
-# 2s2NujPk0Zkk17DJknaal1w/bYtwBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1REU/5aFuhrDy
+# ZFCPG4viw5lWV2uE2kq17WNlaMwCHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5946,31 +5984,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGDLSbLvx+gr5i13I92dfmftDPhRYicaYYLXPcj+yahsMA0GCSqG
-# SIb3DQEBAQUABIIBgII5mc3hDf76sJb40QPSJKrObugREifSzMzYKVzt8TBbdTHO
-# 05bmZ6cWxMhe4MCfqLmZ4ehAK79ToBFMol2A3oi7PhWKUpWyam7/Nk7YLJZq+1yo
-# yTurnBwHB0Ef7cuHr+Xtx6hLv1l86cwuo57im46vQNWE3ZF77kXOlk52ivJgTIuW
-# +iqc5KlfSHOAKant/J1z3KFjU1KCnu38VtxJFWOc29bpTt7m9yDqvtIELryFSFOE
-# 4ZG/WiDp6F/dWzf4USTN5TxFTtmF79gezY7ysWqfsFNbJv75gAS/h8RJXcbayMOz
-# ELf9I0mxSktvxthUrNmTJbncCa291nhTIKe0UCKZd/uSbyHxon79Gsm/4TcADuni
-# gxKKQZei9P81CpV3FfJCho+6xKISKzSmOIqY6puagn1AzdEamVTiB9Y3SoksTYnB
-# ya1HQ8OFK1cd9XYCg7hgbft8tzywF0w6K1+zm+asxI0JuFrgsaPQHJPRNTunUEGV
-# FcEbg+A9I79R8PJ4gaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEe91yFAwmc/WZoKBntfIBEIysoqRVCZwGPNvZhe3E6xMA0GCSqG
+# SIb3DQEBAQUABIIBgGCb02X8UIo41oDBj/ZVULRhMAkTJZQcd4focUEX6OUCWOnd
+# hYOfGJIf2umYkBMKtk6Ju1ecLY+ZZtxB5aNr4rgf/qAGQmO/YwtXPDwGPoQIk7A0
+# IHpqb5mfxoS/vzYU9O1y3NkEJPT9YqUvuiaIoOZEIAyKuFXM7X7ZORVatKHZhKgI
+# jNaEcu2uCALJeVL0/pqJ0SWnTHIoCDeviQO9MBXPolmmservrpBFhqGAmP62XQ84
+# 4S7at2c3uoessgl4J8AJN643N3OFwAj/HtonlwIuMzNgSeyozwe/nQ3Iuz4ggi1d
+# oicNF9xOTG+/SghVBknY8blH1vMdBHtyMw6sE+sXIDM7928Ch22Uhpj8C5QZ/w2V
+# UOYueMnSKBuKGmR/C+Pt8a07nqneRd/GCa4IvWVqksrd+jTJlxHFfab9yWxlyZiF
+# Q+pZV6NMZ77LZU4NdNx20QeIie3Mtwu2K1UIJFV6ASb2A9z6JMfNRDeXumfby7Ch
+# mxCyLuoalvWhstNQ+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzQ1
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBo/vqrjB3ImSxf8UTMJg/vTF9ZkmvDt/tFOkLN
-# hbbe9DANBgkqhkiG9w0BAQEFAASCAgCn5oQPNNtQou+f72bcmDFLgFv1d40DVsb6
-# CHMJf+dpm9rGZHj8nMvtX3n/ZbuIoKtWTCm7TnFk1XpiWJ52DgkS1ORUVNdBfswl
-# CT6gZijRlyq+akqAJK7nhd7Qnpbd4lQF/1cIcHO/EtkEcJG6ajSpBiDJfx+kJD3X
-# 1mJ2L45g/JUVrjCjMsld1065fgS8aO6FJyGyL7RCA7n+1l1D0xsH6uOlQnMuRTj5
-# 6nXkWLPQS4PaHfHGCxRcNl+2Pd2oa/HHNJ+kS59lhpe2knMb6AIq3KrxCSgjvMGj
-# FsskPmNveOw5Wrtn9BxIHjXboIZkHMoLBvVR4kYm2LPMmnApKKWPtFEdd3urn2nW
-# HRqYn6ePJPEiodmu5bKs3bM8glk2da9KrumL54Z71h+zecO7wXuqA4cDN2l6urqR
-# zh0HqF3Dny3rpfFYaFL8+Fab7ivbg5g+b0/BWImt7jPH72YK1RtyJpZcUYotIZ4a
-# rS4sHeFb2FmImCxpKQD4j1wLQvHhijKSci6K4oJYaZi/N8DhVYafdrr4p6m3jQyO
-# DpXT1jahEvQ4HGL0mhC6bphYhv01H44ujH2mHxmnFB3VYtz3TEKjREbyQuwiwmPD
-# C7f4imgG6joc+Ayqa4ExgQm6GCBJKu3Lij64NND/xYSotTIipoN30WwH4xQeIgPW
-# NSmRmtchGQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxNDM5
+# MDJaMC8GCSqGSIb3DQEJBDEiBCAH+zZgsXGLl5oLWHudNdrGgVqMymLcr3/Fzh5f
+# yyeTTTANBgkqhkiG9w0BAQEFAASCAgBZ+tirm8MYDmyeW+5wUZPYnRojMDfOwjua
+# Ha/Up2erJFFHH2Mq1dfbtmGJ/QvKJRfhBApwI46YBdKLLeaC9pVaonjOh2Vadp6l
+# OHJc2TvChtCJapqzPutQC5+D1s/TPAUEnewxN0aonJ0rfSV6aV+q2LKu6Tt0M0VA
+# FOn5dHs2Ah3Ouv2eUzQ4g+fM9if8abvFpXFAxH6frm1jyIYHX7KBVj7DXglKHPuP
+# 19VcFHu9VxdaqIfCphFMsYw01182mks+S9mZaVV0RzBLldAOEvHvql/tJ/rb0CZF
+# KVihPay2sUbTI6GJyhbNIKiz6LpXr+Cwrnl2tKSGtldOKOy2j6ws+NZGAFR62XCj
+# aF6Ua7T92x1A7ddyxNvFkkhFAxpClhROO+dwyBtfNNef+aleLzXu/sXufrllVU/e
+# nCgw8ZWnpg1NX0F+DkjSNDqrgritJAPjdsYqn5eD66RgnpR3z8PNO1mmPq05wejm
+# vKyn6CvK5tBPaVwlTWTo26s41E79V+21tkVV+cHaQZokworoi52FxMXqe48zjXlQ
+# KSQfn/A2uCTxcZW/3HyWvXPoszzDqYZrfRS3IF/9L2inbnPc+ThEpNZLGNahjqeN
+# CWmp8WCqdzySA6UHGJl7JChbmRx4GuzLmqPL7aDdIUqDI5zRyfKEYzwy1/FmgbWk
+# V/JZtgaAsg==
 # SIG # End signature block
