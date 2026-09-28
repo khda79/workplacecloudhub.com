@@ -1,5 +1,10 @@
 # JSON transport names are independent from the JSON payload. Import has no side effects.
 Set-StrictMode -Version 2.0
+# PS7 can launch Windows PowerShell with a module path that excludes its native modules.
+# Load this engine's trusted built-in module, never a caller-provided module search result.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Global -ErrorAction Stop
+}
 
 function Get-SmartM365JsonNames {
     [CmdletBinding()]
@@ -403,7 +408,23 @@ function Resolve-SmartM365WeeklyManifestPaths {
             if ($ValidateOwner) { & $ValidateOwner $document | Out-Null }
             else {
                 if ($document.HistoryLabel -ne $HistoryLabel) { throw 'Weekly manifest owner mismatch.' }
-                if ([IO.Path]::GetFullPath([string]$document.HistoryRootPath).TrimEnd('\', '/') -ne $rootFull) { throw 'Weekly manifest history root mismatch.' }
+                $recordedRoot = [IO.Path]::GetFullPath([string]$document.HistoryRootPath).TrimEnd('\', '/')
+                if ($recordedRoot -ne $rootFull) {
+                    # A relocated workspace keeps the tenant and collector-relative history identity.
+                    # Do not dereference the historical path or rewrite the historical payload.
+                    $identityPattern = '(?i)[\\/]Tenants[\\/](?<identity>[^\\/]+[\\/]DATA-ALL[\\/].+[\\/]WeeklyHistory)$'
+                    $recordedIdentity = [regex]::Match($recordedRoot, $identityPattern)
+                    $currentIdentity = [regex]::Match($rootFull, $identityPattern)
+                    if (-not $recordedIdentity.Success -or -not $currentIdentity.Success -or
+                        $recordedIdentity.Groups['identity'].Value.Replace('/', '\') -ine $currentIdentity.Groups['identity'].Value.Replace('/', '\')) {
+                        throw 'Weekly manifest history root mismatch (tenant/collector identity differs).'
+                    }
+                    foreach ($csv in @($document.Files)) {
+                        if ([IO.Path]::GetFileName([string]$csv) -ne $csv -or -not [IO.File]::Exists((Join-Path $folder.FullName $csv))) {
+                            throw 'Relocated weekly manifest snapshot is incomplete.'
+                        }
+                    }
+                }
             }
             if (-not $document.PSObject.Properties['Files']) { throw 'Weekly manifest Files is missing.' }
             foreach ($name in @($document.Files)) {
@@ -432,8 +453,8 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxW9GFkJ3ng+ht
-# t23r7kFop8/0MWQy3TlJ/BlG3qWne6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxtmrAIqRez7BI
+# 7CAI6Q530g2o80HuEijxBptEknhcVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -566,31 +587,31 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOLd4FHweyAGirN3+T9IyKk90dgMxvUGQbjeq6A5DGH0MA0GCSqG
-# SIb3DQEBAQUABIIBgB27ZckUtP4M/X+jkZGaFJ4yHTkmbFJ7sPgU29lXNWLT1Ik4
-# CoWk3i8C0Sd28oQZaE322+bjNvl8L+GZ6gpxpsHXxkwDa9oeFkEoNt5qM7Kx/zt+
-# h/kQFIg4X/EbqaybRetkvoGM8Tm5qt1kMAW4mwnU1LpEoPd0eXEFH0fZXwLB3POX
-# 8b/1azWu72wbOwut962XqvgMttXWNhp8hBMfiB++UzoSCD6TMbPCg9z5hhne2K0s
-# k4pvCaN8TYk1tEK4IdbMWvh7/iLMpfLEKp0bXHES/DIVpnOeHwu3A0Tz+lOU1E8v
-# Us/bcNA4iO8jXUGk3Qmnd5F5T2wwGKtaMaUs8p2xrX0Sm1WeL7tQEkKKh5QbQJnB
-# NZ8sRB3Mzlx/bjxFRux/tr1q63IMoE+BgkxD3TWsJkI7pEKEA0krxqAlJoJpxTpc
-# 0nAUXvJhoAa4ZUJpq44hzR1QGJa0ErTAC3Rvkj32TjN0eOYc2f4rhVTh4tTQvYan
-# rsMMGJnkBiK8MBeXWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJzodSy/PMGan7iyb8gcQc4ymfcwB0KH/mwgY2Pitg1/MA0GCSqG
+# SIb3DQEBAQUABIIBgAX6qDU9SWbNZK2k7znN3D5u5lhs9scAPy5iwrcDexQEjgcE
+# +tt2A57OqtZVbB3tpo5+NXX7vfwWUtnRKYh/A+VqY8PGptX39O2LKalhOe5a83Y8
+# 9bJrM7mWosuSQgWaTCvr/QVJB62j3GNlGuMpDxm8IqLMxA50RJ5XU9S60AMrs58k
+# 9waoQiwaS2b+Mb2T4Dsst9u3hM0l3eru9TBfWUJ9j2vn4FD7WlwPq5GGytui0xiA
+# 8vb+rjA+LHCvehMzUxRWnxxGkpXX7qKQM2PdaAkkd8xo8l5cf1VcpE4H8rcAG4dv
+# xu0sNAxJdpfZR0LATLu3StR5wKiA12g9a3aRt2h4bHMGdHBPq+UsTw3dZLMiOGWU
+# oYHf3J1CgncAK2sCxmyhNj0dhD3JXURtLIouDYihGK0A05N52GLsO0sA4i0LiT/+
+# JBMpmM2ImL3T+Dg00DuWl0eEVDmSr9A5MTz5YFVxweoBZBpjnVOxyZKurWsfGM3Z
+# j1CCRh8HIvsHrd/w4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
-# NTNaMC8GCSqGSIb3DQEJBDEiBCC4VyULyTnvY4EB7bjl/Tggkzo4C2COpPEEHBQC
-# t+kWGDANBgkqhkiG9w0BAQEFAASCAgB3S+2lPTRHKQh1qGXn7+HDFNwf4jfPicz4
-# CsKI4RhlY/OGoibJvrth6FnSUDX6zTPU3GK6LPOu/xeG5eEZxyXKxa4EypXUbfl1
-# J8pG0ZG6/jN6ThJywZlZLfPmyCBrCSL5W7v6snTXyl7H2OOZdqvA0ta13qC1VVTd
-# 9e9UNs9QREoGLfdDzgeqtXETuvRmtc5XqY0Fj4Go5PkiejaMyL8Dk8COMiVAPH6B
-# dK7/Mr/Oz+Gkp/OUtz1IE3FgVb5h9XoqvyQxXmMpGaqCuZKJrxl8pBPZKrk9K9jJ
-# 40q5GIU3ZnLU0aTpDdwFsPW8VW+wVyoV/XhOZ5U2/MjXge7FT52SSUXsgyLBFryh
-# dGYH6tJttCTBDp3QjYlChcIsglfXixXy03AivOZ41rLAW6ogGN7pr08Db1G977Vs
-# c0U6mGeqtXxjE8tF7lz7Y86hEygGCRMTApnXrjcUI4ffvcEvgCfzZWSuhFQM4lqo
-# 4hUxyQNlmcBn4te491Bd8yIaECds/x0U4DJtNbu0MR3cQUVdYabBdKTmXn5VH3tS
-# c2ngRB4wYjyUVuHbFRi2TJrOyQj5VDOCAuEDI9Tij/3lKjSGQrsExkqhb+WmGPAz
-# Ex23wLqw8hIg1G7xtuIpMd1qLnLYIZ+7QGpOsbB/kISWLcKIVkeWVdeyZN/d79A+
-# O47FJlsdRg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDE3
+# MTJaMC8GCSqGSIb3DQEJBDEiBCDQUn9dknK3qPsW91/Xrr/XPJ58178iCHzinvN3
+# dWac6TANBgkqhkiG9w0BAQEFAASCAgAKxfk+qPeyGq1su8oCQ1dKqaJm3BuyiKFg
+# sNQ7CXd08+adElcvSDSl3EFHRBJIBTTz1OwlQenAurACZhxGoOJa0xf4J2suDhsc
+# fncGklLmQnZEnnuQHwB1SCdvK85ANXj6zb2HLufaknP3ycDj21ORLh0nsmbTDJN0
+# R0pKGZqDEzhG7F07Nh5G+ryxC7Poae4EaIU32Ao3TVdDIyrkvf/+zGYo3sIfZAUC
+# AhJHewYAeS07bBq3Geak8gWwR81WPTpZZSd2RB0irNfNse8APB5QmO9cl/a1zdiH
+# UpbRv8l5MeZIW/ujALJRjNgP1DjYr0AlIAP8COW3p7Av9lBW2VFwB1hrYkjPRoqE
+# bADIu0wn7lCpoKzp/xVEOjgeT5X/V2Fi6G4Vs2j1mBkSGUJ0b/OGICKAMz3SXomT
+# eIegNocpPYVRFEV6E3PqUeCrDn9lEgE4oJFm6TxBsPKFn7Xix5dv5YomHtdRz9wW
+# I2YiJ+T4Cx3catzRlUv0UuqbI9c30LnoPi1iz5OLiWqZe9ETV4GW1LRKPobV3SH5
+# xinQMRk5knvpc0M1buhKAl6Pw9G/30LnsVSzYAxfQhhYhn0zgrjOtolloAW+5Y4V
+# p9TTxg3k1TndYA/m8PsGzYej30cz2zNjGrh6jlOSJ8ZnSyCwFAOv1DOskkDsgwJV
+# UkdUIsVFFQ==
 # SIG # End signature block

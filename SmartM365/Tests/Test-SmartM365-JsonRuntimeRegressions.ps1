@@ -1,20 +1,82 @@
-@{
-    RootModule = 'SmartM365.JsonTransport.psm1'
-    ModuleVersion = '1.0.3'
-    GUID = 'ccf5a4b1-c253-4e30-98a8-d794f1ad995e'
-    Author = 'WorkplaceCloudHub'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @('Get-SmartM365JsonNames','Get-SmartM365JsonReadPath','Read-SmartM365JsonDocument','Move-SmartM365OwnedJsonFile','Resolve-SmartM365JsonConfigurationPath','Get-SmartM365JsonTransportPolicy','Get-SmartM365JsonTemplateName','Resolve-SmartM365OwnedJsonPath','Write-SmartM365JsonBytesAtomically','Resolve-SmartM365WeeklyManifestPaths','Publish-SmartM365RegeneratedJsonBytes','Complete-SmartM365JsonConsumption')
-    CmdletsToExport = @()
-    VariablesToExport = @()
-    AliasesToExport = @()
+﻿[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
+$module=Get-Module SmartM365.JsonTransport
+$root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Runtime-' + [guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory $root
+$script:passed=0
+function Check($value,$message) { if(-not $value){throw $message}; $script:passed++ }
+function Reject($action,$message) { $failed=$false; try { & $action | Out-Null } catch {$failed=$true}; Check $failed $message }
+& $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+foreach($case in @('valid','tenant','collector','incomplete','conflict','invalid')) {
+    $history=Join-Path $root "$case/Tenants/fixture/DATA-ALL/Intune/Autopilot/Devices/WeeklyHistory"
+    $week=Join-Path $history '2026-W28'; $null=New-Item -ItemType Directory $week -Force
+    $oldRoot='C:\previous\SMART-M365\Tenants\fixture\DATA-ALL\Intune\Autopilot\Devices\WeeklyHistory'
+    if($case -eq 'tenant'){$oldRoot=$oldRoot.Replace('\fixture\','\other\')}
+    if($case -eq 'collector'){$oldRoot=$oldRoot.Replace('\Autopilot\','\BIOS\')}
+    $doc=[ordered]@{Week='2026-W28';HistoryLabel='SmartM365 inventory';HistoryRootPath=$oldRoot;Files=@('Inventory.csv');UpdatedAt='2026-07-10T00:00:00Z'}
+    $old=Join-Path $week 'manifest.json'
+    [IO.File]::WriteAllText($old,($doc|ConvertTo-Json),[Text.UTF8Encoding]::new($true))
+    $hash=(Get-FileHash $old).Hash
+    if($case -ne 'incomplete'){[IO.File]::WriteAllText((Join-Path $week 'Inventory.csv'),"Id`r`n42`r`n")}
+    if($case -eq 'conflict'){[IO.File]::WriteAllText("$old.txt",(($doc|ConvertTo-Json).Replace('2026-07-10','2026-07-11')))}
+    if($case -eq 'invalid'){[IO.File]::WriteAllText("$old.txt",'{')}
+    if($case -eq 'valid') {
+        $null=Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $history -HistoryLabel 'SmartM365 inventory'
+        Check ((Get-FileHash "$old.txt").Hash -eq $hash -and -not (Test-Path $old)) 'Relocation changed bytes or retained legacy.'
+        $null=Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $history -HistoryLabel 'SmartM365 inventory'
+        Check ((Get-FileHash "$old.txt").Hash -eq $hash) 'Resume rewrote relocated history.'
+    } else {
+        Reject { Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $history -HistoryLabel 'SmartM365 inventory' } "Unsafe $case accepted."
+        Check ((Get-FileHash $old).Hash -eq $hash) "Failure damaged legacy $case."
+    }
 }
-
+# Load just collector functions and its in-memory comparison phase; never run tenant startup.
+$source=Join-Path $PSScriptRoot '../SmartInventory/ExchangeInventory/Migration/SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+Check ($errors.Count -eq 0) 'Collector syntax failed.'
+foreach($fn in $ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$false)){. ([scriptblock]::Create($fn.Extent.Text))}
+function Csv {
+    param($name,[switch]$Req)
+    if($name -eq 'AD_Users_AllDomains.csv'){return [pscustomobject]@{ObjectGUID='synthetic-id';UserPrincipalName='user@example.test';EmailAddress='user@example.test';Enabled='True';DisplayName='Synthetic';ProxyAddresses='SMTP:user@example.test'}}
+    if($name -eq 'Exchange_EXO_Mailboxes_AllDomains.csv'){return [pscustomobject]@{UserPrincipalName='user@example.test';PrimarySmtpAddress='user@example.test';RecipientTypeDetails='UserMailbox'}}
+    @()
+}
+function ExportIssues { param($rows) $script:captured=@($rows); @() }
+function PublishWeeklyHistory { param($files) @() }
+function Log { param($message) }
+$text=[IO.File]::ReadAllText($source)
+$start=$text.IndexOf("  `$ad=Csv ")
+$end=$text.IndexOf('  $script:GeneratedFileCount=', $start)
+. ([scriptblock]::Create($text.Substring($start,$end-$start)))
+Check ($captured.Count -gt 0) 'Synthetic identity issues missing.'
+Check (@($captured | Where-Object ObjectGUID -ne 'synthetic-id').Count -eq 0) 'Identity changed.'
+Check (@($captured | Where-Object IssueNumber -eq 1).Count -eq 1) 'Missing cloud user detection regressed.'
+# Simulate inherited restricted PSModulePath and disabled autoload in a separate PS5 process.
+$child=Join-Path $root 'NativeRuntime.ps1'
+$manifest=(Resolve-Path (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1')).Path.Replace("'","''")
+$policy=(Resolve-Path (Join-Path $PSScriptRoot '../Config/SmartM365-JsonTransport.policy.psd1')).Path.Replace("'","''")
+$body=@"
+`$ErrorActionPreference='Stop'
+`$env:PSModulePath='C:\synthetic-no-modules'
+`$PSModuleAutoLoadingPreference='None'
+Import-Module (`$PSHOME + '/Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1') -Global
+Import-Module '$manifest' -Force
+`$p=Import-PowerShellDataFile -LiteralPath '$policy'
+if(`$p.Mode -notin @('Readers','JsonText')){throw 'Policy not loaded'}
+if(-not (Get-FileHash -LiteralPath '$policy').Hash){throw 'Hash unavailable'}
+"@
+[IO.File]::WriteAllText($child,$body)
+& "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $child
+Check ($LASTEXITCODE -eq 0) 'Native PS5 utility commands unavailable.'
+[pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Synthetic only; no tenant startup, collection or remote access'}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLv1AMiw4Bdq2u
-# 77ZyPI1aRipMTTGPoEl53huAWesEM6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIKW+m5HR5VjFE
+# 7gIhFg2MZ7H/XMFFdZjc83DgkZ7h5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -147,31 +209,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOY4TN2huFd6XlvznsLDKMy8dL2I8qZYbT9nv0Ypc/+/MA0GCSqG
-# SIb3DQEBAQUABIIBgG+NrdQKjUxjMujApOxG7cI7XUZJ85IBe3x3vNfuYA5nB4Kr
-# JIlkmvxvUr0Jh66oC/6aRMu5WvjldI7fYdAi817XjGOnWGgkim6Dpj+rnQcXrr7+
-# sDRERrRogvkWx52d4bvqPLb+tExCyBPk5Cs+XdeAavwzmLl8ShJA3HNgmww1FyB1
-# siG4XPnl6cxJnnFB/jV4fZzwGCR9KcYdPHX9a+MmrF/P6neGOsbJI8tHkPTm40G2
-# PCoW7kDbG3s1sfM+HTqF9ioaqDelQPIKAvjxjL03Dp1Clh1jZCO1x9gTvAl0IWv3
-# jx01P+UVFWQLk8e2GtAscrqeG3xWzgBXbF3rNmpNgNbtzwbcpVq5VfPSKNKtbdhS
-# oDudCyylPhGgX/l0bfA9IUs+dvAa5mB2g6cLx0ipZCCdhuNZTY9UIU9E1fHzqE70
-# 46PRuD2LBPTKNPmeNELmHibbFOrDmAF+llN9T9V3lI2E7Mq86nR2QEeL8Xu118TH
-# MUWenHFVQ7AaySYtzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF5gZ48rolT2jdC9K0NOqRRkp15g7XxWLai69rL77YbZMA0GCSqG
+# SIb3DQEBAQUABIIBgAe7dLOnwVpyxO/Tdial4BtqRPORyVixiRiuzPnmPrQzXjef
+# khx+4QAybM++paherYTosN0G5MBD+yZjqmohcebYnU96gI5PyIDBCiCKwGWO6LYf
+# 1K8ib5sLdA2mh41cs42NQtTia4uIQF/iE7DKaRCNqozUe9N1MWivoyVTxranwijq
+# 55u1YSUMbjHxe20LFA3EFFXgmzuYYoHMRVSHKamViL8pwU5XYdcYxXOc3wLDGCzX
+# f6g3EqyaK9788fxsH+tv4itjeA4FEAsFhNsuvbInzzP9Jv35ARnOGseHz8sBg9a6
+# O0v4JbwUctwegBxDDndN3ahF2aacxC7QKeAG4qzV1qiJpy5CTgKZms7XiRyBI9oU
+# TLRnVLanBVp2ErS9CEvTcjgWWUBmtGyvrAyjDPHUzHRnJF/Ww3GU5gC9UJbITwyS
+# sE5JMYGS42i5MD1PCNnBkg1QutRaxQoMufcCG/g7ZiawRdbuWEpLF6TYCcdxdYRr
+# O2T9qC/wwgvp4GL11KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDE3
-# MTJaMC8GCSqGSIb3DQEJBDEiBCCaW28Y2ORa8PIWbFIyRHbnTuOogOEs28+Q0RTl
-# hsglBjANBgkqhkiG9w0BAQEFAASCAgAU8+P7/nM83vWwNAhM/T1gN//gVpfBmoDQ
-# pMWIIjc2oOSlK2HfzwKKe5oEnASpLRgn2g4onEKTCR/2ePjjqxMvrw3clambmqmJ
-# d4HARPbxQHyn+xv8MScPeT8MfzTmaDD6W+QtZPFFHTqim4QOP5OXHFfC2gNKqYTF
-# JzQQKzDks1vZCJsOdCVJvGsTkol5sT1msWCtz1ptqb5mtLLk8lEV0LxKztb8Vav+
-# P1usfsdPWIsRWTbl8Kk0FpMnfgoGS22Zbcv1hX1XQn6HheM/7w8Na5VsjNDhzp4i
-# 2D6Fp9s51dARRkmtyhBZIwJVtxlzBjkdINE2VBk8BcKKLlFApGAKUBXjy/CuGHRn
-# JxZ4qST0uZ9CvG4eKlzRv9JJu3ylzuPpdg24MNTUJQ8w8TbHzhdkhv0J1XpYLHoC
-# fNGncmxfzX83aP0rNi1TGt03oGAQqMkNCsmnNvUFd5AkiM9mzAVG5n4cXJTD+mN4
-# xwqJ4/Y9yXe6bVLF2VE+0fnZGwqR5Tp9gLqgQEWXd+rTy+7+e1eNxGHzL+5xvEoy
-# EgvgER622FbHfGqdPvjfWcINHusXpw9v0rR9S9cu22U/1TJukDZ9+s6FEb5M0ZN0
-# LyN+K4n2CkE7Vdo3SF/QH4kESeMu+XAKeTX/kVbMitMwQ0s/lRFzGtLSSsxa/vHC
-# C3L6cxuOjw==
+# MTNaMC8GCSqGSIb3DQEJBDEiBCC83IuGYvUDYa/nEeOr/gGKaABVjP1SZ9qDc+nA
+# 6pCwpDANBgkqhkiG9w0BAQEFAASCAgAr/9+dqhznm092Fz4lPGOD1Pe4yKPZgj71
+# qe+go4cnc1eNyEOYHTEFNjwZpaoUtktRIdVMjoFOw4apiAWwG3aSqwuxKwRgVykc
+# JX7bVpGccFaYAe6IaCr4hL2lcl6sA002strnuTEsvEW9YgDHEFPaRB5O/6Kyu6cb
+# tA82e3kpCLDEZWZU3gs5Lf/Ue5GVjohAye2oNLBWx2q6YXexRtKyfp5otH1K4yMe
+# r3aqmoldkT9DcDhcOj5IGFJvR4N6S1TzYCeNON/vfgzGEuvxukJsYvTMO/E/bOUc
+# xW/c72N9f1x8oQO5wwMgzr7hcFwUPqmjt/MP59ECh/EM/wZgxqLRDVJttVPw/aPW
+# xHH10xnY4hzEZ5U0YSDjJ0wzj0AAPoWusyeGmUnPKkPBewSBT2adHdw5lh2n6LQt
+# 9gSWYALA6oCJfR58h/wdoSZskGysLCrBtdVXmSjXfL+cvA+mVzMmew8fPdsD19Vn
+# VlgbhSJkfloQ+qwQMJcDlFrbI4EBM3ANh8igxpHuXwtOgaevCMCWj8YCcAK3jMnQ
+# z2V4ABvKysVPgfTyVewopb5bf7O+vqkBmrJSLVUGB7gfvfaAeqIKzJZRdJ11kKFm
+# Qah/avDEpd3uCjZkGJ901nCpqAM5zqMWS5fEwVijqdNv2hFMN2dAkOJQ7KNtfY8x
+# Um5qVRQLcA==
 # SIG # End signature block

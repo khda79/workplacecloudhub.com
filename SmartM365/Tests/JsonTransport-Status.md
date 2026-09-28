@@ -102,3 +102,13 @@ Validation ciblée du correctif : Distributed 17, SharePoint simulé 38 sous PS7
 [Liste fermée et empreintes du candidat du lot Git signé](JsonTransport-CandidateFiles.csv) : 78 modifications, 29 ajouts, 2 anciens chemins de contrats retirés (contenu conservé dans les deux nouveaux noms). Le manifeste lui-même est exclu de ses propres empreintes. Le manifeste décrit les octets attendus après extraction Git ; aucun fichier privé inclus.
 
 La revue automatique avait refusé une tentative de rétablir la suppression du CSV partiel DiscoveredApps en cas de checkpoint incompatible, pour risque de perte irréversible. La solution appliquée conserve le CSV et archive le checkpoint par empreinte ; aucune autorisation de suppression n'est demandée.
+
+## Correctifs des incidents du 28 septembre
+
+JsonTransport 1.0.3 charge explicitement le module natif Microsoft.PowerShell.Utility sous Windows PowerShell, depuis PSHOME. Cela rend Import-PowerShellDataFile et Get-FileHash disponibles dans les processus enfants avec un chemin de modules restreint, sans modifier les politiques de la machine.
+
+La migration des manifestes hebdomadaires accepte un changement du préfixe de stockage uniquement lorsque le tenant et tout le chemin DATA-ALL du collecteur jusqu'à WeeklyHistory correspondent. Les CSV du manifeste déplacé doivent être présents. Les octets, empreintes et anciennes racines enregistrées sont préservés. Tenant/collecteur différent, snapshot incomplet, JSON invalide et doublons divergents restent bloquants.
+
+HybridIdentity 1.19 utilise ToArray pour ses listes et écrit le message, l'identifiant, la position et la pile de l'exception dans le flux hôte avant de propager l'échec. Le calcul synthétique conserve les identifiants et les détections. La cause exacte de l'échec observé sur le serveur n'est pas encore reproduite : le prochain run réel doit confirmer la correction ou fournir l'exception maintenant visible.
+
+Qualification : tests locaux synthétiques Transport, Configuration, WeeklyHistory et Concurrency sur PS7 et PS5.1, IssueHistory sur PS7 et JsonRuntimeRegressions. Aucun accès serveur, aucune collecte, migration réelle ou modification des données privées par Codex.

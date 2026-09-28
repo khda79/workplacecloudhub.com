@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.18
+1.19
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -44,7 +44,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.18"
+$ScriptVersion="1.19"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -211,7 +211,7 @@ function PublishWeeklyHistory($files){
   $expectedHash = if (Test-Path -LiteralPath $manifest) { (Read-SmartM365JsonDocument $manifest -Validate $validateHistoryOwner).SHA256 } else { 'ABSENT' }
   $null = Write-SmartM365JsonBytesAtomically -Path $manifest -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($manifestContent)) -ExpectedSHA256 $expectedHash -Validate $validateHistoryOwner
   [void]$published.Add($manifest)
-  @(@($published) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path }) | Sort-Object -Unique)
+  @(@($published.ToArray()) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path }) | Sort-Object -Unique)
 }
 $script:CompletionStatus = 'Auto'
 try{
@@ -323,7 +323,7 @@ try{
     $adRow=if($imm -and $adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]}elseif($adUpn.ContainsKey((K $u))){T(P $adUpn[(K $u)] ObjectGUID)}elseif($adSmtp.ContainsKey((K $s))){T(P $adSmtp[(K $s)] ObjectGUID)}else{''}
     if($adRow){AddIssue $issues 54 $adRow 'EXO-only mailbox with AD account (no local or remote mailbox on-premises)' '1.Critical' 'AD account exists but has no on-premises mailbox counterpart (UserMailbox or RemoteMailbox) - verify if migration is complete or if RemoteMailbox conversion was skipped'}
   }
-  $files=ExportIssues -rows @($issues)
+  $files=ExportIssues -rows $issues.ToArray()
   $files += PublishWeeklyHistory -files $files
   $script:GeneratedFileCount=@($files).Count
   Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
@@ -333,7 +333,11 @@ try{
 catch {
   $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
-  Write-Error $_
+  $failure = $_
+  Write-Host ("{0} [ERROR] {1}: {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $failure.FullyQualifiedErrorId, $failure.Exception.Message)
+  Write-Host $failure.InvocationInfo.PositionMessage
+  Write-Host $failure.ScriptStackTrace
+  if ($failure.Exception.InnerException) { Write-Host $failure.Exception.InnerException.ToString() }
   throw
 }
 finally {
@@ -344,8 +348,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUEkBtD7Xxtg4C
-# F65lyuh3K9na0ImyZaXKTSdw9UtszaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAN+QpBzsOYvygR
+# 4spKL/jxxPuQgc6wD5ZwNMATvO4B26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -478,31 +482,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICrWhjRSpl3G99QRH9uEoodtEj9Hs5bGmwZfrF/lrOWyMA0GCSqG
-# SIb3DQEBAQUABIIBgB6XinR6i9poIX3pRJnD3dlgJqjvfsr0pW9ohOyRxqnB8fE9
-# 0zwFTPyDFhODc0cf7NyvSw3kx/6VKu0dEfOsFufTXYhAU356c83P5RWKeWdBPYx3
-# KQYvqHy1/TnYK54IBrHkWME8/6FLZSSa3PmFxH6nSpkI+QIuYlRLE/wwp+2Ot6QI
-# /0odVzCv0jFZCzzdudJsaHMyUEG+J2Un/GQEoQcJwYBNyZbPrIH36feU29VA97a2
-# BfjSYSJXM/gghMtMygh4iB9Nnnv9pQgcqpwFLY3wbBEJ4fOuO9/WDCptxJoURgdf
-# iLmBqhfHhM8hZ1mv7m308DM83mOV/Z+OwT00zgFmpx01TzE10mMM8jhEdisSeIiv
-# YrNYaYqv+fkY3U4pJDHnqNCgImseYqHxqdtW4VzkA5lzj7KwEnn0/+laif5lerWj
-# pLa2ZAHCxZOIRxKCpdVxDnBU3SOLc03QZsH1epdLAgklTwPxcmsH5xnRFgf7q4Ar
-# gd2rhUm8L2TN6y4MxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMr+08kIyOqksL6TT41fiHNKITJegkchsJVlTcm3BU5GMA0GCSqG
+# SIb3DQEBAQUABIIBgGTWMrDBz0fdehReVmiQEgQ4U2uneqI6wicHKdtC4jAXFNea
+# /Mg9JtqSyCSmh0bF6asB5wmdopQRfP+jy/w5YFVkN7j1J0wMyirM/w7uJJHSkt9x
+# PtJvKXwaQlsv7q2teqvxEq9L9RtC/YRgjjmLBuk163ow/+C+OPe0Lnu11HXBag/+
+# W8mEsa8gboS+9liRmVoaKGpNAxGhKdPTemf+Ir0mN6cewNTWFfy6DbvsAGAIs8Jn
+# 7G1M2NQtMnP+jTsDobjF7qiVF8DTqhAn0hp3I0lds0EX7W6SbsJRE5QhROtxtbcK
+# fIV0Ia2pn7WC7kCBY6R02HMAkZGgdU7pygFfNJ5HC/1lRx3r+eeDIK39zEyIJtzL
+# vHf/S7vO0otbZeMgTaREAFDLGnL+tU89c/80ot5YgPP1NJrBkqcdaBK8jTDVssMH
+# qVUxeKnwdts+I6oL7COXkeAdLLpzIXe5MPC+l5BOvFHjXFUPBXhSySKVCHzfbB78
+# pEU/+G1bqtWh2GHjw6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDJaMC8GCSqGSIb3DQEJBDEiBCAk9BDj+cnAYFvJg42HPAP497cHE28Pq0gqIN9Z
-# eTZNpzANBgkqhkiG9w0BAQEFAASCAgBAkE328FqLE3+dwLCBLPmAcp8LF9XRNmdM
-# 7bJ1pVkbhmUKk9v9k5kXs0e7l8J0KJyy0H2fB1E2HMhRkTkOXTc3/YcPkoufYSko
-# xp9H+3E1NTvefZAh4/pxyc16B7NiGay1rdZ5tcZbt6AZf5q+QvzVOU6pD37X8QVa
-# HnuxnFTTLpJLkmM5mRGQFMeANgb+EMrzpBSTuzhcNvfk/QNXzdw+PRZlevvpQ4xF
-# z5EHb3d6c5B1s02EFKwCY+wNz1uFGWnSI5seO4JJ/8OixwJ4E/IIb8LskgbW3J9W
-# 8qNws/VH6dwkkB0YMkDTxX4v4qU07Hvbb7FaRFnar1mAEZuFSB+DgkTJ1z5CgdWJ
-# TiCHaioC67/AWVv+WuTFItRveuSptxFZ2/RNNy7l7pEoIs/e7W245sKeqLFSTYZT
-# r14YxQz5lFLLY9ep0hpy0lbxWe/jJ1mVstCGyjAfyBlZa+Ul2dp823rIZ9UsWN+L
-# 5p5tT75FPI41+KgGdP6gg3zNUkPiaGFUKdnVZCidIMvJKhP4zSUnQLr/HWi8UaP1
-# I9CkFw02/wVwQnk3Xa/yAil+6AZnyvON83MEJtU+uiOtoSL3QNPKAWn6BFL2hdU6
-# ZYWLGQRlyeYhc/7ZP/fXMpgc79dSZZiagez7FIJJ+ndX9jv8HIRg+kEceZj9w1+n
-# g750V5/f5Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDE3
+# MTJaMC8GCSqGSIb3DQEJBDEiBCB8pDbCM8JS72pG+vH8WJ4DtfKrnruPARk0JvD/
+# eip2FjANBgkqhkiG9w0BAQEFAASCAgCeYDGEgphSuBz0AXNyeVyamdjDiZfUqWpn
+# +1N1vzjq2m+fqAPoaqhRZdL6+SLa+ybDHEQge+jeUKiz6hfL1J02xg7aRBBPPdF2
+# ERn6Fx8kRmdoKBFDO0mNNI55oyCD9qU7CKWbUq8kjFyXaDFgfK38M0a25yRFC430
+# 3ATEeFcF4dDGVHvzcCGoAmVqhgxdU6mIBjgcDTta+HTgtuyh4cJM03Mw94795jtH
+# z2/9MdjMKfaePip9+oL5AE80RoSAiN02cnk6HbNm1iZgPncIq5hkN+EMdW3ad8gU
+# PSm+MA2M6vGnwKwLr6NNX0+XS657Y1PJRyS/HZfvab8LCfKTkzx6x2DeY6bl9sDt
+# kRLth1u/mgLUQZNtqErQlhT6dP033BMRPjUvx3w29DCp9J66Eyir7TkergqO7HFX
+# WhokIXg2wOPmBy0zHvdqnXE0wLZGgyzA3UvsRqDn8zJvoh0prAr4SL6IxKYEbRd7
+# 1vmiiI2pogQBb3MIdt+wS/5jBa9IYndUAnG8XfBaGMoHbAABQTzFwbiOdZ4th1LX
+# gPeyCCBmNu73T5tZPnomsoH3OV7FHRRul9MhLhWkmeerx680iaRUwPcMXPlTaNfy
+# C7YUnrBufhnpZPyhFIHmdE8GoJHX7LaX8Y/3N276OlLvTKrsd1awaQDFMffilABC
+# eMb4Z603sA==
 # SIG # End signature block
