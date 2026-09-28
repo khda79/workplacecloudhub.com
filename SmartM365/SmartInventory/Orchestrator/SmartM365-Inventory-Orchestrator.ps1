@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.24
+1.5.25
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.24
+    Version : 1.5.25
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.24"
+$ScriptVersion = "1.5.25"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1808,7 +1808,7 @@ function Get-OrchestratorLockOwner {
     try {
         $existing = Get-Content -LiteralPath $script:Settings.LockPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($existing.PSObject.Properties['Pid']) { $ownerPid = [int]$existing.Pid }
-        if ($existing.PSObject.Properties['StartTimeUtc']) { $ownerStartTimeUtc = [string]$existing.StartTimeUtc }
+        if ($existing.PSObject.Properties['StartTimeUtc'] -and $existing.StartTimeUtc) { $ownerStartTimeUtc = ([datetime]$existing.StartTimeUtc).ToUniversalTime().ToString('o') }
     }
     catch {
         return $null
@@ -1826,7 +1826,10 @@ function Get-OrchestratorLockOwner {
     }
     catch { }
 
-    if ($commandLine -and $commandLine -notmatch 'SmartM365-Inventory-Orchestrator\\.ps1') { return $null }
+    if (-not $commandLine -or $commandLine -notmatch 'SmartM365-Inventory-Orchestrator\.ps1') { return $null }
+    $tenantPattern = '(?i)(^|\s)-Tenant\s+[''\"]?{0}(?=[''\"\s]|$)' -f [regex]::Escape($Tenant)
+    if ($commandLine -notmatch $tenantPattern) { return $null }
+    if ($ownerStartTimeUtc -and $process.StartTime.ToUniversalTime() -ne ([datetime]$ownerStartTimeUtc).ToUniversalTime()) { return $null }
 
     return [pscustomobject]@{
         Pid = $ownerPid
@@ -1844,10 +1847,11 @@ function Get-OrchestratorScheduledTaskIdentity {
 }
 
 function Get-OrchestratorProcessCandidate {
-    $tenantPattern = '(?i)(^|\s)-Tenant\s+[''\"]?{0}([''\"]?|\s|$)' -f [regex]::Escape($Tenant)
+    $tenantPattern = '(?i)(^|\s)-Tenant\s+[''\"]?{0}(?=[''\"\s]|$)' -f [regex]::Escape($Tenant)
     try {
         $items = Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object {
             $_.CommandLine -and
+            $_.Name -in @('pwsh.exe', 'powershell.exe') -and
             $_.CommandLine -match 'SmartM365-Inventory-Orchestrator\.ps1' -and
             $_.CommandLine -match $tenantPattern -and
             $_.ProcessId -ne $PID -and
@@ -1857,7 +1861,7 @@ function Get-OrchestratorProcessCandidate {
     }
     catch {
         Write-OrchestratorLog -Message ("Unable to enumerate orchestrator processes for stop diagnostics. {0}" -f $_.Exception.Message) -Level WARN
-        return @()
+        throw
     }
 }
 
@@ -1936,26 +1940,19 @@ function Request-OrchestratorStop {
 
     $owner = Get-OrchestratorLockOwner
     if (-not $owner) {
-        if (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional) {
-            $staleRequest=Read-SmartM365JsonDocument $script:Settings.StopRequestPath
-            Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator stop request' -ExpectedSHA256 $staleRequest.SHA256
-        }
-
         $candidates = @(Get-OrchestratorProcessCandidate)
-        if ($candidates.Count -gt 0) {
-            $candidateText = ($candidates | ForEach-Object { "PID={0}; ParentPID={1}; Started={2}; Name={3}" -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate, $_.Name }) -join ' | '
-            Write-OrchestratorLog -Message ("No live orchestrator lock found for tenant {0} on {1}, but orchestrator process candidate(s) exist: {2}. Stopping the scheduled task to clear the orphaned Task Scheduler state." -f $Tenant, $env:COMPUTERNAME, $candidateText) -Level WARN
-            Write-Host ("No live orchestrator lock found, but orchestrator process candidate(s) exist: {0}" -f $candidateText) -ForegroundColor Yellow
-            $taskStopped = Stop-OrchestratorScheduledTaskIfRunning -Reason 'orchestrator process exists without a live lock' -WaitSeconds 30
-            if ($taskStopped) { return 0 }
+        if ($candidates.Count -gt 1) {
+            Write-OrchestratorLog -Message 'Multiple orchestrator candidates found; stop target is ambiguous. Existing request preserved; no process stopped.' -Level ERROR
             return 1
         }
-
-        Write-OrchestratorLog -Message ("No live orchestrator instance found for tenant {0} on {1}; no stop request was left pending. Checking the scheduled task state." -f $Tenant, $env:COMPUTERNAME) -Level WARN
-        Write-Host ("No live orchestrator instance found for tenant {0} on {1}; checking scheduled task state." -f $Tenant, $env:COMPUTERNAME) -ForegroundColor Yellow
-        $taskStopped = Stop-OrchestratorScheduledTaskIfRunning -Reason 'no live orchestrator lock found' -WaitSeconds 30
-        if ($taskStopped) { return 0 }
-        return 1
+        if ($candidates.Count -eq 0) {
+            Write-OrchestratorLog -Message 'No orchestrator process found. Existing stop request preserved; no scheduled task stopped.'
+            return 0
+        }
+        $candidate = $candidates[0]
+        if (-not $candidate.CreationDate) { throw 'Orchestrator candidate start time unavailable; no stop request changed.' }
+        $owner = [pscustomobject]@{ Pid = $candidate.ProcessId; StartTimeUtc = $candidate.CreationDate.ToUniversalTime().ToString('o') }
+        Write-OrchestratorLog -Message ("Resident lock unavailable; requesting graceful stop of verified process candidate PID {0}." -f $owner.Pid) -Level WARN
     }
 
     $payload = [pscustomobject]@{
@@ -1969,7 +1966,16 @@ function Request-OrchestratorStop {
         Tenant = $Tenant
         Reason = 'ManualStopRequest'
     }
-    Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($payload | ConvertTo-Json -Depth 5)
+    if (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional) {
+        $existingRequest = (Read-SmartM365JsonDocument $script:Settings.StopRequestPath).Document
+        if (-not $existingRequest.PSObject.Properties['TargetPid'] -or $existingRequest.TargetPid -ne $owner.Pid -or
+            -not $existingRequest.PSObject.Properties['TargetStartTimeUtc'] -or
+            ([datetime]$existingRequest.TargetStartTimeUtc).ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime()) {
+            throw 'Existing stop request targets another or unspecified process; preserved for review.'
+        }
+    } else {
+        Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($payload | ConvertTo-Json -Depth 5)
+    }
     Write-OrchestratorLog -Message ("Stop request written for orchestrator PID {0}: {1}" -f $owner.Pid, $script:Settings.StopRequestPath)
     Write-Host ("Stop request written for orchestrator PID {0}. Waiting up to {1} second(s)..." -f $owner.Pid, $TimeoutSeconds) -ForegroundColor Cyan
 
@@ -1977,17 +1983,15 @@ function Request-OrchestratorStop {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 2
         $stillRunning = Get-Process -Id $owner.Pid -ErrorAction SilentlyContinue
-        if (-not $stillRunning -or -not (Test-Path -LiteralPath $script:Settings.LockPath)) {
+        if (-not $stillRunning -or ($owner.StartTimeUtc -and $stillRunning.StartTime.ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime())) {
             Write-OrchestratorLog -Message ("Orchestrator PID {0} stopped after manual stop request." -f $owner.Pid)
             Write-Host ("Orchestrator PID {0} stopped." -f $owner.Pid) -ForegroundColor Green
-            Stop-OrchestratorScheduledTaskIfRunning -Reason 'manual stop request completed' -WaitSeconds 30 | Out-Null
             return 0
         }
     }
 
     Write-OrchestratorLog -Message ("Timed out waiting for orchestrator PID {0} to stop after {1} second(s). Stop request remains at {2}." -f $owner.Pid, $TimeoutSeconds, $script:Settings.StopRequestPath) -Level ERROR
     Write-Host ("Timed out waiting for orchestrator PID {0}. Stop request remains at {1}." -f $owner.Pid, $script:Settings.StopRequestPath) -ForegroundColor Red
-    Stop-OrchestratorScheduledTaskIfRunning -Reason 'manual stop request timed out' -WaitSeconds 30 | Out-Null
     return 1
 }
 
@@ -1995,6 +1999,12 @@ function Test-OrchestratorStopRequested {
     if (-not (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional)) { return $false }
     $requestDocument = Read-SmartM365JsonDocument $script:Settings.StopRequestPath
     $request = $requestDocument.Document
+
+    if ($request.PSObject.Properties['TargetPid'] -and $request.TargetPid -ne $PID) { return $false }
+    if ($request.PSObject.Properties['TargetStartTimeUtc'] -and $request.TargetStartTimeUtc) {
+        $currentStart = (Get-Process -Id $PID -ErrorAction Stop).StartTime.ToUniversalTime()
+        if ($currentStart -ne ([datetime]$request.TargetStartTimeUtc).ToUniversalTime()) { return $false }
+    }
 
     $requestedBy = 'unknown'
     $requestedFrom = 'unknown'
@@ -5802,8 +5812,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDynNfbGEOJLv4
-# ehx2/eHPEFjA6Yyof9yLVwBRMGqkBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAu/APdn/ZtF5Zd
+# 2s2NujPk0Zkk17DJknaal1w/bYtwBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5936,31 +5946,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDCXpcDSHO6I/75BOs9vqSXgr5OU14Fk1yWYIyuddKbwMA0GCSqG
-# SIb3DQEBAQUABIIBgJKGrgZG3JaPYoUeLUcSDjyFbhx35+PnuG2UVHaFwMTEAaKz
-# bsLWHbny2SvhI0j20YMMfA5dVZ5WadAQgBE9daUijOMpcTWB/22sYE2M0iUI/YKJ
-# yoJoo5xWE87jANzaheRyjc6AfqQ/3iAd13hVK/LTxCXuDnoHofuGat19sMIly6SG
-# C+qKrQsMH2du1V32BNsGRfhyiJVQQXtpWMAcGLvV5V8O1IhSNVYtCH9TiCgyGvtu
-# T/oFJ6aMJYCJGREq2m5pugQoU9P0ZRnAZuSNXE/c4XLXlswdWJ94gGvZ/n5iqF2s
-# +h4El5li6u02y3p1rRg/e0+hftyTOx2cze/4FN6Ncia459C2bsas6h2uLn3gu08r
-# 4y0pME9WuXJ51Wmzld77qUidtNRfny562DpFKQ4lY9ZKiJ6vrwilq0q2oPU/U/d4
-# oVqRLnqV5pGMmfXeExTRaqZXmf3AgGCjT3NBHji5DBiJan3P+VqOpjuaHk7rXr89
-# VKaKNKTtNEw1sYeBtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGDLSbLvx+gr5i13I92dfmftDPhRYicaYYLXPcj+yahsMA0GCSqG
+# SIb3DQEBAQUABIIBgII5mc3hDf76sJb40QPSJKrObugREifSzMzYKVzt8TBbdTHO
+# 05bmZ6cWxMhe4MCfqLmZ4ehAK79ToBFMol2A3oi7PhWKUpWyam7/Nk7YLJZq+1yo
+# yTurnBwHB0Ef7cuHr+Xtx6hLv1l86cwuo57im46vQNWE3ZF77kXOlk52ivJgTIuW
+# +iqc5KlfSHOAKant/J1z3KFjU1KCnu38VtxJFWOc29bpTt7m9yDqvtIELryFSFOE
+# 4ZG/WiDp6F/dWzf4USTN5TxFTtmF79gezY7ysWqfsFNbJv75gAS/h8RJXcbayMOz
+# ELf9I0mxSktvxthUrNmTJbncCa291nhTIKe0UCKZd/uSbyHxon79Gsm/4TcADuni
+# gxKKQZei9P81CpV3FfJCho+6xKISKzSmOIqY6puagn1AzdEamVTiB9Y3SoksTYnB
+# ya1HQ8OFK1cd9XYCg7hgbft8tzywF0w6K1+zm+asxI0JuFrgsaPQHJPRNTunUEGV
+# FcEbg+A9I79R8PJ4gaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzA0
-# MTZaMC8GCSqGSIb3DQEJBDEiBCBb2f6/xAZVHdDkp2IeX3YtKw7jcy9/LsdVNxqT
-# IH1N6TANBgkqhkiG9w0BAQEFAASCAgAQjv5N/ZvZPqTOcGkb028FjAs6rUbSVvUR
-# pIIhZ8hU7oYrOTM06FVt/EfjiwqZsLSq6nXYPvZbThMt5xxqpxOexqLPV1Ilu7QE
-# H41BLGYToLgtw928LNMe6Y0098jcyCxzScv8A3+t5b0+A+xPLbJZIo5vpRNpwS62
-# HLTDUNwOuIWEDAssnNrFW4wDCJsJ3dX0k7ngPvSF5ar2/HLKH9L9T2yCXHdqQkRL
-# 2ZRkQOLWHUENwO1ooiFsa7DhdOkQT7Us3vAl0gWgEJv5/cLIy7XwBkpn1k37A6jM
-# BioX+gJXoqIKqY9YFVhG2qM+fZZOpeRvZcmCTtLwwvDTiMS5XQW32BS8vHCKsXri
-# 0i9uaH6AzsclPBONVtBbGpZMFsoBQXntz4OH6d6ZKvqtgS9d0WsxBy7OypuK0bT4
-# 8uQ/DLlkHECMspeSOiVdihBqhr6HBSVjPz8tQhyQq1ODcJPUij8+HkHoqr7DNpTU
-# TvlueSeQVWvYOOxSAUcj+W5xqC4sD6J66RQ38gAahQx2haJyi02O6BKP5WRwDoxj
-# kw6alJRvA7Kjmt/RQrVdP1eWOMjb6SZkCrwvKCLkElknAxptlsf1SPbFf7DgdOO5
-# a8EA3mq3Ykb+JABqqZpUXqRV+ET0nqAJYzFNLvwtmo6PFPS+XoYnCpnklCRcSa/E
-# Pm0rhEscUQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzQ1
+# MDdaMC8GCSqGSIb3DQEJBDEiBCBo/vqrjB3ImSxf8UTMJg/vTF9ZkmvDt/tFOkLN
+# hbbe9DANBgkqhkiG9w0BAQEFAASCAgCn5oQPNNtQou+f72bcmDFLgFv1d40DVsb6
+# CHMJf+dpm9rGZHj8nMvtX3n/ZbuIoKtWTCm7TnFk1XpiWJ52DgkS1ORUVNdBfswl
+# CT6gZijRlyq+akqAJK7nhd7Qnpbd4lQF/1cIcHO/EtkEcJG6ajSpBiDJfx+kJD3X
+# 1mJ2L45g/JUVrjCjMsld1065fgS8aO6FJyGyL7RCA7n+1l1D0xsH6uOlQnMuRTj5
+# 6nXkWLPQS4PaHfHGCxRcNl+2Pd2oa/HHNJ+kS59lhpe2knMb6AIq3KrxCSgjvMGj
+# FsskPmNveOw5Wrtn9BxIHjXboIZkHMoLBvVR4kYm2LPMmnApKKWPtFEdd3urn2nW
+# HRqYn6ePJPEiodmu5bKs3bM8glk2da9KrumL54Z71h+zecO7wXuqA4cDN2l6urqR
+# zh0HqF3Dny3rpfFYaFL8+Fab7ivbg5g+b0/BWImt7jPH72YK1RtyJpZcUYotIZ4a
+# rS4sHeFb2FmImCxpKQD4j1wLQvHhijKSci6K4oJYaZi/N8DhVYafdrr4p6m3jQyO
+# DpXT1jahEvQ4HGL0mhC6bphYhv01H44ujH2mHxmnFB3VYtz3TEKjREbyQuwiwmPD
+# C7f4imgG6joc+Ayqa4ExgQm6GCBJKu3Lij64NND/xYSotTIipoN30WwH4xQeIgPW
+# NSmRmtchGQ==
 # SIG # End signature block
