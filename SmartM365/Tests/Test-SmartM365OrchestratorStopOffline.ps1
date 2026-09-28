@@ -6,7 +6,7 @@ $source = Join-Path $PSScriptRoot '../SmartInventory/Orchestrator/SmartM365-Inve
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source,[ref]$null,[ref]$errors)
 if ($errors.Count) { throw 'Source parsing failed.' }
-$definitions = foreach ($name in @('Get-OrchestratorLockOwner','Get-OrchestratorProcessCandidate','Request-OrchestratorStop','Test-OrchestratorStopRequested')) {
+$definitions = foreach ($name in @('Test-OrchestratorProcessStartTime','Get-OrchestratorLockOwner','Get-OrchestratorProcessCandidate','Request-OrchestratorStop','Test-OrchestratorStopRequested')) {
     $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if (-not $node) { throw "Missing $name" }
     $node.Extent.Text
@@ -51,6 +51,11 @@ try {
     Check ((& $module {Request-OrchestratorStop -TimeoutSeconds 1}) -eq 1) 'Missing lock falsely reported stopped process.'
     Check ((& $module {$script:Writes}) -eq 2) 'Existing matching request was rewritten.'
     Check ((& $module {$null -ne $script:Request}) ) 'Timeout removed request.'
+    & $module {$script:Candidate.CreationDate=$script:When.AddTicks(-6);$script:Request.TargetStartTimeUtc=$script:When.AddTicks(-6).ToString('o')}
+    Check ((& $module {Request-OrchestratorStop -TimeoutSeconds 1}) -eq 1) 'CIM precision mismatch falsely reported process exit.'
+    Check ((& $module {([datetime]$script:Request.TargetStartTimeUtc).ToUniversalTime() -eq $script:When.ToUniversalTime()})) 'CIM request was not normalized for old consumers.'
+    # Keep the existing assertions relative to their earlier publication count.
+    & $module {$script:Writes=2;$script:Candidate.CreationDate=$script:When}
     & $module {$script:Request.TargetPid=99999}
     $rejected=$false
     try { & $module {Request-OrchestratorStop -TimeoutSeconds 1} } catch {$rejected=$true}
@@ -74,18 +79,24 @@ try {
     Check (-not (& $module {Test-OrchestratorStopRequested})) 'Reused PID consumed stale request.'
     & $module {$script:Request=[pscustomobject]@{TargetPid=$PID;TargetStartTimeUtc=$script:When.ToString('o')}}
     Check (& $module {Test-OrchestratorStopRequested}) 'Matching request was not consumed.'
+    & $module {$script:Request=[pscustomobject]@{TargetPid=$PID;TargetStartTimeUtc=$script:When.AddTicks(-6).ToString('o')}}
+    Check (& $module {Test-OrchestratorStopRequested}) 'CIM precision request was not consumed.'
+    Check (-not (& $module {Test-OrchestratorProcessStartTime -Actual $script:When -Expected $script:When.AddMilliseconds(-1)})) 'Tolerance accepted a different process start.'
+    $realProcess=Get-Process -Id $PID
+    $realCim=Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+    Check (& $module {param($a,$e) Test-OrchestratorProcessStartTime -Actual $a -Expected $e} $realProcess.StartTime $realCim.CreationDate) 'Actual local CIM/native process identity mismatch.'
     & $module {function script:Get-CimInstance {throw 'Synthetic process enumeration failure.'};$script:LockExists=$false}
     $rejected=$false
     try { & $module {Request-OrchestratorStop -TimeoutSeconds 1} } catch {$rejected=$true}
     Check $rejected 'Process enumeration failure reported success.'
-    [pscustomobject]@{Passed=$passed;Scope='Synthetic process and filesystem mocks only; no real process or task stopped'}
+    [pscustomobject]@{Passed=$passed;Scope='Synthetic stop scenarios plus read-only local CIM identity check; no real process or task stopped'}
 } finally { Remove-Module $module -Force }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/JvrumUntRiEC
-# LetZNZyW4agbrUvcKyvfq/Jjd0TdzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKkL+usUlDHHg9
+# yl4zgcQXBUGjx7efS5eD41Ag/qbxl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -218,31 +229,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID4ALNT093yiGTRYioO4xmmH+ZQXJQNEpAgut+r+RvdDMA0GCSqG
-# SIb3DQEBAQUABIIBgCRBLTk1N1umUSWpFlOBITwaMoRNhCxl+cYJBmLCnPzttjzT
-# cyJuEQeQhRZcYYfMFPCJSSW38mpKPR/LcW+/N4J6yxRC72N3CG6M0XQGnODX9Ymb
-# qt1kxYWU7vDECekSGYNUMb6Ne2Hr0GhSl4BYpU86RZmZoyzgf/z6/qkC1OGmHuql
-# tdbxefoC1GaGnid78VcHRrPcUC5rxLrvIP4x7rl2XJ/MCXN1sY0aPon5MvEZDpBf
-# hnhAJQCyS+28OQPS19jYSy9kc/7CUDtk8yun9w68tkkk6TkPQwb55nFDRAagyJDG
-# On8wD04Eph5U7Wcb9N8aMq/k4K8WnyTxtXcnnZ/JHjza3ZOAXQ78WH1fRRv5pt7C
-# SN9/rwYZqIX7TCj6qciX9raVLBcuG1KBC7knRVvJThjCnB1dwoEp4ij6ZLhmGmx6
-# E7fN4QGlCOw4EGNZXWA8yNvDRKBKk1mLnSosgyaJjNhRcIsrd+LZm8hH9IaQnUCa
-# 175nXFXi/C2YJEaLb6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIESlacUqeCMQyQitqx3mBANpQgDjEXLwuU17eYSnMz6UMA0GCSqG
+# SIb3DQEBAQUABIIBgJ/4hft7n69lhsXQXCggl9MdI5yxP95wQFS4unFbyuR3etS9
+# /NQmyhP7/eeiIOhHtWKXoZN0BSY8d5rdI+R1kPvVppEefY6agFzV8fvav4+ALs0K
+# pQWWxD30q7UDs7K4FowE9EUYT6Hvz2ww7mGugQXfrG6V3S2ZCUVWzeTd9kTLSnql
+# tCx4r/iS2lb4CJ51+8lLcyoJSUTnyX3OFZeXEmwQXeaSxz2dE5UlvEKWG7+d+KXb
+# j1O1t1kKWdgaWiHhaF2s4ZvmRX6f4NLiZVFFntNEFb4kZzz/BDD0hDI6KbKq0uDr
+# 78Kb9cNsTsBBwqakDkRmHX9YrBldQvLDpAiGbyVtiDwCYyipoY0MPeGLx+EwbMBR
+# Hi2818icWQIR3eCzqjF+YzL9iZwdHnPGWVY3XnuELy+JExoNs3KKHjCmH1hAeoKu
+# 8xpgjf51bWf81d3Qv8jGyUXySRQzrz+DuhtyvRLOmZNKiUwPri7r5JBRFPR33buF
+# 3jYymN+0lvADWOB6OqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxMzQ1
-# MDdaMC8GCSqGSIb3DQEJBDEiBCABEtSHWP7dOpAQJMy3MMP0F0bqCCcoYxCNrwzG
-# tlZeKDANBgkqhkiG9w0BAQEFAASCAgBavtGDDlcYnrDuknCxeRsYahYp2UiZuNIQ
-# Rgx9hfyy470bHuif0aN32OZqmoU1xGZe+yGEVY7SBwXkzXxx11bsq+7X28UA6AtW
-# yZdqvVVnIM0uDWJk2aieWXtT5ZXeLCEnpRrnBdcBYYjG7ellA0ZLMx/Sa/0ScIr8
-# 556LDbgkOwOXIozD0rRcq10Vn5L6K+aq4x8+WbkZiGsanvwrbqZGpNyv2s3c3K2V
-# atuqY1YBmrAZ1x8TKgzdgbuXsh1YceqJJ9khfGiIWrtuV5v9r46PSUmyPcLj0NIM
-# pQgcBqP1mBULwdL2vuYU+SWDOGhC84PSXW+B9POckxBDRDigCVz8Hu1FhcJM0HzN
-# 3Eww0jMMuzuRTKgZ02E/E2KBtkwzsTcAc7l5p5SnLg2gFn5bF37E6ztE6le05vBf
-# FBzRo21NnT1RkX8whTKUYcYOnxLa+/Cn5D5t5MCF11R3UIn4VkThvl6fME0S73eJ
-# indnlJHnv0mPFRPxfr0Or6y6CSUi3Ec3VdiTvCskMJ9Qsd8BGBq1TF8IpCZuYF7Q
-# gro0gV0MJtbQuYQVpI99W/Yyodsb4YGN8dcRy6j1Wbtognda6ZRcHmJeF6OCNFJg
-# VjFk+9qHAFsAcVmWoRmJcLhxE+ilWwBlcNdENkLq4pD71xAuTwfxxEv62opHz6sj
-# 6/nlOR8yjQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxOTI5
+# MDVaMC8GCSqGSIb3DQEJBDEiBCDF31hDuZieRysbRQ8Use1yS5uRh1CtwPuoCOWW
+# wNjcyTANBgkqhkiG9w0BAQEFAASCAgB5M76XNHQz6gl5WZWUGf/R29A3uDe2D/2q
+# 6yBpJydm6HZuP+6ZE/WrsBFo1Kp4ZnF/n3n84zCejfhJ+FoExzuBTrmwi23PHKoW
+# gQeQBLu7J3aMkhTtw0JazSJPPKvKYlL1P37u7qEeDMGWJtE5E5QbHI/dib3PP+JS
+# X7hmAnSUDH5SFYWSiMd5VWSl6YbElfQMlLY4YelY6eufrWFH09oebg+lywK6mJ5p
+# YNH+YFXEU72uff+uD7kP1xSKs7zanKFDQZunlEGWwFFy+tH/UuOZJZAr63z3f605
+# LqcQN/vmYt5PRXJS+SCWxDi5MaLbxTT3bsKUXsxW1D5gYuZC9PrMqQImLZHN0PBU
+# U5BjcLZb/FPDNZDIU/FzCZr5tZpP9nlUCaFHRNqC4f2npMRsUOfhB5mCHUtk/7Fc
+# Ofr1KjXY6vD/l4ifTkedd2PYZTHhIDc99yKBH8JUGhbCFhfFeKHCy+i3a9X4jp8w
+# QRTK8F57+iqT4JR93so/ixbv7+5KmK2/91U02jm2UKFy5E6HBY1sdnJFpiL8yWzB
+# ILfJwyWw5WPOODNYYE0jOylzz9xWA/LpGy6eT77wgE9M2jxHH5AGLLVL2KYdzRet
+# hy9BY0y3cGyIr5tPMUleMr/vtvsJAoCF6RyFyBNZLYradlm2eSkxrnz/kXwj8PdT
+# PFY/DWHOSQ==
 # SIG # End signature block
