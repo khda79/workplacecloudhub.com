@@ -119,3 +119,8 @@ Le résumé Windows11 lit les valeurs du groupe plutôt que de découper son nom
 Le miroir reporte un bail Concurrency disparu entre énumération et lecture uniquement après confirmation que les deux noms JSON sont absents. Les deux entrées de son index distant sont préservées pendant ce passage ; le suivant réconcilie la disparition. Une erreur de lecture, un bail invalide ou la disparition d'un fichier persistant restent bloquants. Aucun nettoyage distant n'est déduit de cette course.
 
 Tests synthétiques : Windows11MirrorRegressions (10 contrôles), IssueHistory (16), LifecycleOffline (22), SharePointMirror avec trois assertions supplémentaires de conservation/reprise. Aucun run de collecteur ou accès distant réel.
+## Orchestrator 1.5.29 : reprise des demandes d'arrêt
+
+Le journal d'une demande précédemment consommée porte historiquement Owner=Orchestrator stop request. Une nouvelle demande au même chemin échouait au démarrage, qui attendait Orchestrator:StopRequestPath. Le démarrage accepte ce seul alias pour StopRequestPath, après validation du schéma ; les nouvelles consommations utilisent désormais le nom canonique. Les autres propriétaires restent refusés et les octets de la nouvelle demande ainsi que l'historique sont conservés.
+
+Reproduction synthétique avant correction : Migration journal belongs to another owner. Après correction : StopRequestOwner 12 contrôles, StopOffline 25, JsonResume 9 réussis. Le test Management existant échoue sur Publication-Failed.json également dans une extraction de bf094e6b non modifiée ; ce test n'est pas annoncé comme réussi. Aucun processus réel arrêté, aucune demande réelle consommée par Codex.
