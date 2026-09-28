@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.27
+1.5.28
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.27
+    Version : 1.5.28
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.27"
+$ScriptVersion = "1.5.28"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -445,6 +445,7 @@ function Get-OrchestratorSharePointMirrorSnapshot {
 
     $folders = New-Object 'System.Collections.Generic.List[object]'
     $files = New-Object 'System.Collections.Generic.List[object]'
+    $deferredPaths = [Collections.Generic.List[string]]::new()
     foreach ($rootName in @('Config', 'Audit', 'Election', 'PipelineRuns')) {
         $rootPath = Join-Path -Path $SharedDataFolderPath -ChildPath $rootName
         $folders.Add([pscustomobject]@{
@@ -463,7 +464,21 @@ function Get-OrchestratorSharePointMirrorSnapshot {
             }
             if (-not (Test-OrchestratorSharePointMirrorFile -File $item)) { continue }
             if($item.Name -match '\.json(?:\.txt)?$'){
-                $json=Read-SmartM365JsonDocument $item.FullName
+                try { $json=Read-SmartM365JsonDocument $item.FullName }
+                catch {
+                    $relative = Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName
+                    $missing = $_.Exception.Message -like 'JSON file missing:*' -or $_.Exception.InnerException -is [IO.FileNotFoundException] -or $_.Exception -is [IO.FileNotFoundException]
+                    if ($missing -and $relative -match '^DATA-ALL/Orchestrator/Election/Concurrency/[^/]+\.json(?:\.txt)?$' -and
+                        -not (Get-SmartM365JsonReadPath $item.FullName -Optional)) {
+                        $names = Get-SmartM365JsonNames $item.FullName
+                        foreach ($path in @($names.Legacy,$names.Preferred)) {
+                            $deferredPaths.Add((Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $path))
+                        }
+                        Write-OrchestratorLog -Message ("Concurrency lease disappeared during mirror scan; retaining remote state until next scan: {0}" -f $relative) -Level INFO
+                        continue
+                    }
+                    throw
+                }
                 if($json.Path -ne $item.FullName){continue}
             }
             $files.Add([pscustomobject]@{
@@ -479,6 +494,7 @@ function Get-OrchestratorSharePointMirrorSnapshot {
     [pscustomobject]@{
         Folders = @($folders | Sort-Object RelativePath -Unique)
         Files = @($files | Sort-Object RelativePath -Unique)
+        DeferredPaths = $deferredPaths.ToArray()
     }
 }
 
@@ -645,6 +661,7 @@ function Invoke-OrchestratorSharePointMirror {
         foreach ($relativePath in @($previousByPath.Keys)) {
             if ($currentByPath.ContainsKey($relativePath)) { continue }
             $previous = $previousByPath[$relativePath]
+            if ($snapshot.DeferredPaths -contains $relativePath) { $nextByPath[$relativePath] = $previous; continue }
             if($relativePath.EndsWith('.json',[StringComparison]::OrdinalIgnoreCase)){
                 $preferredRelative=$relativePath+'.txt'
                 if($nextByPath.ContainsKey($preferredRelative)){
@@ -5862,8 +5879,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+e7NLrJ1HkHpa
-# IpwAaVn+Jxf2EH810iT5HWHYTWs0FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/GBTRqox7VtXx
+# ybv8rGArTwlBNScnNKSvsBU8fGYuh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5996,31 +6013,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGB5YOZx88CQ2orioCCZUJoAAhCVg/uTh2Czz5+p3EhVMA0GCSqG
-# SIb3DQEBAQUABIIBgCaRVMdSZVkuUfBhQKyYmpbDT/NtiwASezfzAtLpVF9q0AJA
-# sf+hEfE6756Qa2TCcoYp9Fn+b5eYn5GXhTx6yy9TVMjo6D6u6YdMqn/Fpx9iAvy8
-# pXhyBxV+T4iIWrZhy4OgpqBMszIJpyHgJSDOJ+eqj5P2hpKEAdWUsED0/FxtEeKI
-# HN594L+fe7xRyitxK5239jKHSOXluet2I6F2HmNtiIG37OZiphIsYtQDiJXFMcRN
-# UDcn64FfX/h7qhulttwc2S0fKM8KjziVtGCwt3Me1+JmoRgUjGieIh5manjxuvOS
-# /IpecV2nvldSGou2FxiQf6AwhWr727Lter2a2QE3Efhyx0TKh+tdTTiVYs6cFDSA
-# 56996HogY91aQTfkRNe0xzp5g2goSY6ptypRTWO5VoBlkU5kkBykRRxmfkaS4Pvn
-# vZzCaCmtiyIX8+uw6A7AzqU9hQmq4V3d+8vrVLFV08LT6BeKlyUObedroRHVy4Z5
-# Tk4fL622ROLPQBgjOKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJJXowD3i6IXmI11y62/alysReHnaxFW6XO/8c4fTybpMA0GCSqG
+# SIb3DQEBAQUABIIBgGmo0SDe3T+lvhrf15T844fv5yR2Pf4pGoKhV449jSJ+lmft
+# cjCZM0Hln6FRmyIlquIM04WbCuenhWLCoQkBVnVLtcGVDG2nm98aSo5YLJOoJ+tR
+# faqbgPySjnbz/+FiDwIZulv6zFcFZIjFojssC9OztpXAW+k/hzmGnBQ72Y2Ks6m7
+# BD9GiIHo6RoWzC5nhrDhPC7YiBoYuoaY9BQHtluxicz6Zd7lcxrRdyvH23P/QHHn
+# yEb3QV6m5uW3ovIUhnXtfwjQwoIp6XU7D7e+B2yJRm80LIzQI82q4440VnHt0Kkh
+# sPy/FXOW1FqW0/SNNOuciIpuw50e+k5Ov/6bHy61eGkR/vZPCcqpjCWbrbpTwdNj
+# P6YS51VnYi+JmJ9FZSt6R5zBRrq7BjdoWNKVKI2IIpl30FufJNbl83LVJunziRla
+# BH8Faz0Qv8on2cbSMDPGi5srxQCO2kIZiHIoxOUdtnry+kJaLWZ2BF+rKuS+odOs
+# uH24o8Y9CIVs8nVJJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxOTMw
-# MDZaMC8GCSqGSIb3DQEJBDEiBCBW9MduUm06glLYxBioSa1vPN8p/DGDIMZKUvK6
-# SXq4rDANBgkqhkiG9w0BAQEFAASCAgA9qZ/DcdH/cZHKtzk585blfaO6tn2BKcfY
-# HL5LQehEvzF6JoyiInL2xjeOfQ9BZz25Uy8E8oH4dRuyQxcFY68esOqhYbJyWnMx
-# y8xkAvkprDVGvCIk9c1598xjQt+Rbo/8dMNBWd+FyTPM0WumtCOq9xoL/j4iDkIE
-# LNeWgk1upSvfGDdH6tdcRjHqng9m4tq3meEvSvTLUVrc+bD9eSPs+qjszM5anQSb
-# B11MHMuxD0Jek/dWqsfQHe736e2sAvN8XzlWcPeu4kRhsEbzHzb+RSxwm2vim6yN
-# w5wUMzx9US+o1eoP+YUiDanbRknR9OHAXjqT9/AWf6Blq5QjRFYLJ2F1Cp78+Wq7
-# JAffhENhjgvlhVEG8olitoaLHODbBjj1ux0m9jVxWWdgoJCj/IEGdddLKc+EEn0F
-# guUs9UB5urKvErvhv4dUZWeOknhPigPQU1w1P23RxbKfrNvJrIqsloZJKCnn4pji
-# nKlt86h5xRoobL9SS3HkNPwPjk3G/Kr8ng+8w4TNpWWy5ERkNeP3wSWgWLwD/TEL
-# 5V4kiIZOLgQ/Q1Q03X3K1rjQtYc9pE05ERKKbehB2IqZBKUnlDQ8dsrrJiKjsEd8
-# QBZZHaMb/vGI/tj+M2H2UWeUwW/tEOm8tqWE4ituuKVqy9RDfycQ36vPzVYz8+wj
-# IUgFFw6uUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDU2
+# NDhaMC8GCSqGSIb3DQEJBDEiBCCkmpmUJE0B+yQ8P67N3LDGWcn0jvtyFMyQXzZ8
+# F1y4sDANBgkqhkiG9w0BAQEFAASCAgBA4ibpH5Ki6oXshRwBZjtfUkBRh3Kj2zFP
+# 6cHe+A8BG3RHam8mEqdsLcnjs7yCSOZPNkEvvjdy2KJu7xjaZYPVAx3CFpGPl8CU
+# 7azTo32/jUECnqzsdBAfDO5ya+t6qFFn88K7q6NSFYRxKQxJhARjAByN6Yak8Dsd
+# PvP7tow6Vt+LSJkb7Zcnd1B2qn+gepRWgsqW87bnTC+U90Emz8Qr+JD/r5MErUAm
+# 3+VuKkECfb2USLedXP8QH0sx5Ghq7WNy3F5xCdaRDeNeIi1nK8u4SlzhWcEm/saM
+# aj9dpcm5WQbOz68q3eBex07j4LUs5IbaZnA9PEu2vYLBPDS1ZVBFSyKussraGYZj
+# EpkDIVOF/pqVrjuaBvnk4AxB7uoVWzlYp7J55bXJD+Z0kUu0pdGl30ZKV6U0Tyfs
+# QnTSKN8pZKPD1xwUqv1nqcQSzVDrLp0TtuF4YJP98rTt40xd8Ti0HJYmk0536xaK
+# ij89sDjZKvM0ri/ioMzo4IGa+KOiZZQfblWjvXkWDHS4SKcaPDevg9e5z5Dxhh2/
+# wP2z13fKN33hLAST4b7C0enpn0zoYEg/I7SMPTKzsG+BFqv24OkO/xkDBGgFH8xZ
+# dGVv0ILpEFOs1rXKzpX+d9gza1+2ruQk4CchTu4otwtb/zTZI1aQezeWyv8McXc8
+# qgz8rPwvZw==
 # SIG # End signature block

@@ -112,3 +112,10 @@ La migration des manifestes hebdomadaires accepte un changement du préfixe de s
 HybridIdentity 1.19 utilise ToArray pour ses listes et écrit le message, l'identifiant, la position et la pile de l'exception dans le flux hôte avant de propager l'échec. Le calcul synthétique conserve les identifiants et les détections. La cause exacte de l'échec observé sur le serveur n'est pas encore reproduite : le prochain run réel doit confirmer la correction ou fournir l'exception maintenant visible.
 
 Qualification : tests locaux synthétiques Transport, Configuration, WeeklyHistory et Concurrency sur PS7 et PS5.1, IssueHistory sur PS7 et JsonRuntimeRegressions. Aucun accès serveur, aucune collecte, migration réelle ou modification des données privées par Codex.
+## Windows11 1.25 et Orchestrator 1.5.28
+
+Le résumé Windows11 lit les valeurs du groupe plutôt que de découper son nom sur des virgules ; les libellés avec virgules ne décalent plus les champs numériques et booléens. Les listes sont converties explicitement en tableaux. Les exceptions incluent désormais message, identifiant, position et pile dans le journal hôte. Le défaut du résumé est couvert par une fixture ; la qualification du run serveur reste requise.
+
+Le miroir reporte un bail Concurrency disparu entre énumération et lecture uniquement après confirmation que les deux noms JSON sont absents. Les deux entrées de son index distant sont préservées pendant ce passage ; le suivant réconcilie la disparition. Une erreur de lecture, un bail invalide ou la disparition d'un fichier persistant restent bloquants. Aucun nettoyage distant n'est déduit de cette course.
+
+Tests synthétiques : Windows11MirrorRegressions (10 contrôles), IssueHistory (16), LifecycleOffline (22), SharePointMirror avec trois assertions supplémentaires de conservation/reprise. Aucun run de collecteur ou accès distant réel.
