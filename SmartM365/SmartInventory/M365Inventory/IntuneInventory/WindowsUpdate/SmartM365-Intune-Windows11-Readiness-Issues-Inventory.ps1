@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.24
+1.25
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -46,7 +46,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.24"
+$ScriptVersion="1.25"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -226,7 +226,7 @@ function ExportIssues($rows){
   $main=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues.csv'; $latest=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Intune_Windows11_Readiness_Issues_$RunStamp.csv"
   $sortedRows=@($rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm); Assert-SmartM365CsvDataCompleteness -Data $sortedRows -TimestampedPath $main -LatestPath $latest; Write-SmartM365CsvAtomically -Data $sortedRows -Path $main -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
   Remove-DetailedArchiveFilesOlderThan -Folder (Join-Path $OutputFolder 'Archive') -BaseNameWithoutExt 'Intune_Windows11_Readiness_Issues' -RetentionDays $DetailedArchiveRetentionDays
-  $summary=@($rows|Group-Object IssueCode,Area,Potential_Issue,IssueCategory,PriorityScore,IsBlocking|Sort-Object Count -Descending|%{$p=$_.Name -split ', ',6; [pscustomobject]@{IssueCode=$p[0];Area=$p[1];Potential_Issue=$p[2];IssueCategory=$p[3];PriorityScore=[int]$p[4];IsBlocking=[bool]::Parse($p[5]);Count=$_.Count}})
+  $summary=@($rows|Group-Object IssueCode,Area,Potential_Issue,IssueCategory,PriorityScore,IsBlocking|Sort-Object Count -Descending|%{$row=$_.Group[0]; [pscustomobject]@{IssueCode=$row.IssueCode;Area=$row.Area;Potential_Issue=$row.Potential_Issue;IssueCategory=$row.IssueCategory;PriorityScore=[int]$row.PriorityScore;IsBlocking=[bool]$row.IsBlocking;Count=$_.Count}})
   $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; Write-SmartM365CsvAtomically -Data $summary -Path $sm -Encoding UTF8; CopyCsv $sm $sl
   @($main,$latest,$archive,$sm,$sl)
 }
@@ -275,7 +275,7 @@ function PublishWeeklyHistory($files){
   $expectedHash = if (Test-Path -LiteralPath $manifest) { (Read-SmartM365JsonDocument $manifest -Validate $validateHistoryOwner).SHA256 } else { 'ABSENT' }
   $null = Write-SmartM365JsonBytesAtomically -Path $manifest -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($manifestContent)) -ExpectedSHA256 $expectedHash -Validate $validateHistoryOwner
   [void]$published.Add($manifest)
-  @(@($published) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path }) | Sort-Object -Unique)
+  @(@($published.ToArray()) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Path }) | Sort-Object -Unique)
 }
 $script:CompletionStatus = 'Auto'
 try{
@@ -813,7 +813,7 @@ try{
     }
 
   Log ("Windows 11 issue analysis completed: {0}/{1} AD rows; issues={2}; elapsed={3:n1}s" -f $processedAdRows,$totalAdRows,$issues.Count,$analysisStopwatch.Elapsed.TotalSeconds)
-  $files=ExportIssues -rows @($issues)
+  $files=ExportIssues -rows $issues.ToArray()
   $files += PublishWeeklyHistory -files $files
   $script:GeneratedFileCount=@($files).Count
   Log "Generated Windows 11 readiness issues: $($issues.Count) row(s)"
@@ -823,7 +823,11 @@ try{
 catch {
   $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
-  Write-Error $_
+  $failure = $_
+  Write-Host ("{0} [ERROR] {1}: {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $failure.FullyQualifiedErrorId, $failure.Exception.Message)
+  Write-Host $failure.InvocationInfo.PositionMessage
+  Write-Host $failure.ScriptStackTrace
+  if ($failure.Exception.InnerException) { Write-Host $failure.Exception.InnerException.ToString() }
   throw
 }
 finally {
@@ -833,8 +837,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtSWG4xOCC/kUG
-# yRB+AlJCn7GfBHCxqzxBPUc8FJFqq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmHXOCGmorKwEU
+# wxSKkaOfquUe8HZrpnoTazRYTwrpJqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -967,31 +971,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID6vjMtvuhNHTOT5uhALoQGF/b8yUmQF+B3IIP1iIkVzMA0GCSqG
-# SIb3DQEBAQUABIIBgAmDzeJh+uIoa4RCT7ffbRcXiDBiJLYczi8y5W34Em3NoRfx
-# CQFa8lnP9dYOCAwgjBuOi51OGx4Vw44NuAyzp1A2PTtxkyim7OI0asqARdsPR1gt
-# uRm/YXVbJ/nF1btl4QIsBKgqoRPE1+dEOQmbv0a1MRE7YutDi1eQlbuYlHEUEKqx
-# xsbaLvj0AXqpk1KehScl0+wQ1Ie3/pdVBUj6b/vuWi+co2hlwMugO2ugfKkglIk1
-# 6Wr1c3njcTKPBrXI+Ui+tf45fssN3Uoi5LUybCtxJSATtUV8lTbqMFpFUv1dAeGH
-# 7XiIk6o7pS9MINGvNvQTklGTL2j6JgCA2hoCEPTq6u+WTeXWO03KQhMRfNuHekEA
-# dauXmXAswy7cihqv1d1W1VtDtZgxUxAMVnd4L9VL9DLwm4HjP2kd7Zox739Z1bjF
-# lu/nV3TTdZgo4p31ZmxTRXW0tD5cXHP9WiG0xiRdbqUCojOz5s1WvKfagScjdn/T
-# xX97wWCIrL9IVM77U6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOzjCvlXd69IATSButWjgAm22CZ/BZlzwe3J988L2o1pMA0GCSqG
+# SIb3DQEBAQUABIIBgAcPDJ7fjDUCyl46cmeLeZs8ve/GBG+OliFq7oH+/NbFh61s
+# 0kAeflcFRGPRuFyLD5VWRGO+Z5PQ+NwJE39rOD4wapp07E/cDkq7S+s1qSxkMSrx
+# MRSFkoXqOPWgZVhAUSKdNz+5cnMGp+YM2ybmNKJ08dGiFBDprHK9HJLl09r3ftYq
+# d8ZQ/Q89aTZwYIUwhC5Ccra29/MUka622UhzIEbNnTUvt8XXlhqY16ed1O4IpYEs
+# Tn45rzM/bJ4aOOq0oSERQucSbRSBelvlwOWPokJiQH9kuvg3k32B+Pxuys/k9ZSh
+# O2+E9L8ZtnGkXbZwwKEMDNfusUO04ema5/t12LF210yeGAf3VhXDa304ud4SRuE2
+# /J4wzvvk8Y3RRoPOVuf7mXZwP1i6b4QQ3/ntHjCe0wHbcvhaRBjhI0U5kSbYmMA3
+# XTFOtBxjrZFMcamGHuHYBhzEGdI63QETLcjSxdIhLDWi8vMEpORQhd96fM9TOZ6e
+# OsZQNquZp9H6RyLi+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDhaMC8GCSqGSIb3DQEJBDEiBCB6CnrAxAVfDRiv0UWH71Fe/E2sFVy+74rGGaeL
-# OBfJnjANBgkqhkiG9w0BAQEFAASCAgBfA5HD6O2S4rRaOUCi9qJ4u+IploWTVRKr
-# jga88tUmmiYmCKFXvy9nXt/dle4NqctdHvDhI3F/2qnP0Ol7+Hiua5o3NgaoJVSz
-# OSK+puRnDlwKV6XMOler4D7AYHfmVonRw3Xw6873ykDo1WRU/F69/kMiS3exvy+V
-# dTaLOuAf7vTKqZHkqfvGRXluUHAY9IbAEUeUqAgjKdo86Aw/C7hiJawIuVcbyU9f
-# ubaJ7WC/dLjaT0aQ+2EkM4YGr7QCTxYPTPXrx8TXBVLk/JwvGz/v9bh/kqqtxp94
-# sITf5XJymbCQDsvWGM5qrq291wPsaGZjXg+HvomTNmzR0Td94lRt22ssdLjGEaNM
-# orScWqYVlXEuTNp7EytnWi4SEOR/5MGSLU3AFmFwfP2zmfrU3xcRTqI3eCxjnrrI
-# M6R3LmrhIG5UwMOLOvFGuZYZTXcCeYr1EmI5ev6Qf9XrWDEBMWstRc5/88Uo3ehK
-# PGf8aEZ/+3mMJE+5q6bCDyLu3tZEPU2S4G4QR7Ca+NJvuYuLRo3S+PawOtFRkOYo
-# H1MZfu78GkUQXWJMm7drXiEXaRg9T1wCwJ4Umu1qR7QG0PaUa6itI0HKZSOxln9S
-# 9QJXIBb/Zo21GZ+/af6zsiJsgF5+KITKpRTi37+WBX1Qf/Bxyit6oijLzyn6A+pj
-# /elgR52aXQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDU2
+# NDhaMC8GCSqGSIb3DQEJBDEiBCCRO7fzcevxYYGUg3rChSZrGpDHY4wEYy61X505
+# Azat6TANBgkqhkiG9w0BAQEFAASCAgCnQo7yhxGrbTFrI892OIT79E6wu1Fy+Fbz
+# gJle0pOeufoC6f+PJt1xA9C05wagc0cYJeVPLeiFlxywtB9+/z6YTEl4h+/k37Dn
+# QMqLC2kBVsUYELFKeLOeaZMjSfKoexZ4ttbqSBqvdw7xcf9L7umLJNuq/9xeOkHF
+# n8cniYc+3kV3wH8iq6UMweZACIcr3JTMRRqkC4z+RXlfcFTIAOR49ef2cfe7yM+Z
+# HlHEjCk3QAdp+poZDluT+IaGeAa31izJLYWvPk59btEVfvpqi8JLG/NAKfs+WjB4
+# mDjLVV3RQ45W5T8V52ReNVM12Ne9f3fxG8/nL7pvQt28g9eNVrl5bXnx/otS+uhD
+# piQRLTsNwTdzTpf+KnQkOdP9onulgqYVB+Y757FRihMZj06cajvdt55YEr2wcUPS
+# CNOtUc1q7LiP/Juu35NEl9VTmtoqiNbP2aTEnygouDMBfBizJgIfvttSKzKsnSOm
+# 1AqhnI4Xunqvk6yOcbYYiWpCBKLMOvUSh/c050HsedpGVj4G98vKL8FzARbtcNbf
+# nWxQfmFWMCh2Ez+8A7MNhte5addsu9lOro6tWeVXvi2VCVnUmw5dkdNIo8rk1f5w
+# 2STIwvem4/Kaepx73yVlXBf4n03VWvTMwyqZu6jrv+thzaa2GtV9t2RBPFDRkvcS
+# fSJ6LbCl9w==
 # SIG # End signature block

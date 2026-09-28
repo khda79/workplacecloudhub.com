@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Runs offline tests for the orchestrator SharePoint operational-folder mirror.
 .VERSION
@@ -258,6 +258,28 @@ try {
         }
     }
 
+    # A transiently missing lease must not turn this scan into a remote deletion.
+    Set-Content -LiteralPath $leasePath -Value '{"LeaseId":"deferred"}' -Encoding utf8
+    & $mirrorModule { Invoke-OrchestratorSharePointMirror }
+    Remove-Item -LiteralPath $leasePath -Force
+    $beforeDeferredDeletes = & $mirrorModule { $script:Deletes.Count }
+    & $mirrorModule {
+        function script:Get-OrchestratorSharePointMirrorSnapshot {
+            param([string]$SharedDataFolderPath)
+            $result = & $script:OriginalSnapshot -SharedDataFolderPath $SharedDataFolderPath
+            $result.DeferredPaths = @('DATA-ALL/Orchestrator/Election/Concurrency/SharedRuntime.json.txt','DATA-ALL/Orchestrator/Election/Concurrency/SharedRuntime.json')
+            $result
+        }
+        Invoke-OrchestratorSharePointMirror
+    }
+    Assert-True -Condition ((& $mirrorModule {$script:Deletes.Count}) -eq $beforeDeferredDeletes) -Message 'Deferred scan deleted remote lease.'
+    $deferredState = & $mirrorModule { Read-OrchestratorSharePointMirrorState $script:Settings.SharePointMirrorStatePath }
+    Assert-True -Condition (@($deferredState.Files | Where-Object RelativePath -like '*/Concurrency/SharedRuntime.json.txt').Count -eq 1) -Message 'Deferred scan lost previous mirror entry.'
+    & $mirrorModule {
+        Set-Item Function:script:Get-OrchestratorSharePointMirrorSnapshot -Value $script:OriginalSnapshot
+        Invoke-OrchestratorSharePointMirror
+    }
+    Assert-True -Condition ((& $mirrorModule {$script:Deletes.Count}) -eq ($beforeDeferredDeletes + 1)) -Message 'Next complete scan did not reconcile expired lease.'
     "ORCHESTRATOR_SHAREPOINT_MIRROR_TEST_OK Files=$($relativeFiles.Count); InitialUploads=$firstUploadCount; ExpiredLeaseDeletes=1"
 }
 finally {
@@ -269,8 +291,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPldZ8ucvsOMzQ
-# NmxIyc45SB47kTwteeR+hM38fLLwWqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCsRo1qqlUPV2C
+# WiQ1Thy766Whr8HHj6LWI3g58xVIoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -403,31 +425,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINLX9I8NxcWDB5RHMUGZgwAy93e2DRk/hyJ7qYbu7t9wMA0GCSqG
-# SIb3DQEBAQUABIIBgEY4q0YLgeyxvXyuBYNtbpVEPfriPNJBZVfMIUsE+OsaAvRU
-# f5By9tFM9tprZXMkzeEOMBXvr8cy0dA23hdD10r1ECIFS/h3/no6WeQ6GJkDHBn5
-# xTVqoYecLVy285n0fnDm9d9FeicLUgiww+AUkh+0B3yJC61pS0yshXO9kOj/DYF8
-# XdqZJy29je4Odq9nn/mA7zq6YlfG481Wwgml7ckux/G70w1Ul3tdxq5X9NWo3CLV
-# hkkEO6kX4lbqqGPJ8sFKQiOVkj/0WvRB6m6vTgBiKPtis2Siz7xsfdHdlcJheF72
-# loPejVCymRrd8sZgC3A0qQSWW6UCuOnaEhsieYzzkLGwikEj1IBrZ+BL1YIrACIH
-# COnR1V4Skdqd9bAkHNmpxBCK2wjpaliSyXYnN2ajtwhsTjzKzN0BdlLvRTxK/703
-# gGBwCSC+QZxFXp2hIrJPdqm9hq6o8USeA5lC+o6Bx3ZQOZ1ckThA/fYckyfA1QKJ
-# NQnM/xmImzdU91kbhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGD8Bt677K2ed8FxCWL5Hq9l7OioEkFkqrlUgtYdWVTQMA0GCSqG
+# SIb3DQEBAQUABIIBgD5aTo2KOk56NS0FTy05FYA7oRBohwdQsKkydkG3WS7LQvVQ
+# uzfph/+wmhRIsGVg5JKG/WHW8OGZa0taUPwpI6PXEShcWIXFcsGqiF/m3bXB13Ef
+# kliXpu7f+Yw94D2qni8AA+b6EPyn55OCP/Ou1bT/oUURYfENtidwCIAHnSsxBUVm
+# maE767m34SY9v5JnphIx3Z23rZFWCNTxN7ilaJyKG+9Bmg/PFVVIhXIbLLq3DGbq
+# N+qmYqBo/UtlxbMZgvtbh6oMF1SHwd25m4PoG/6DXYb0vQxfC24ZjwOS11gIjHpJ
+# ZXTOsjFOmi7JI/gYdZO/OXzanAfKQtbbrbkkmcEkIzXdyqk0ixxCf+Cr5gdDqtXf
+# Qt9prPMGiT8ipE4/yKwFxH1mMlR0Bga1mu4NPH3ZQBdNGykV8paa0fe8XkT77IcH
+# 6g6WY0UI+52pl4i/B+4gPvV9qRCt7dXisVc67l3eqEM6RBdifoGDWxhNchVPkKGD
+# MmTT/PgK+DAQV7eHp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgwNjIz
-# MzhaMC8GCSqGSIb3DQEJBDEiBCAuRdM60kAll1rdYvwtZ2OMfNijYMYUxrOWFKGc
-# H2UTKDANBgkqhkiG9w0BAQEFAASCAgBwGeOi1ujZyYNLmeOcehDKKurpX6C6+P/I
-# VSVxICM/bzI34cNE8qSO2l6J6dNzMjBI2XROi0nNuzLzv5kqTUTM3NUGEFBC9E8i
-# 9awkWueQR/L84JVHIz/Oqiv2sjdvKHQAT6/yRrz5RPKhQ2/K5gRg+GhjD7ZzSEMv
-# Yh4klHgUdXGOURp1p15rEw8PizFKGbommIOKv1asjIjnB3HrdQi3IMJW8cAmeQmn
-# RIk+/htu2h7w1EhqS47MLl+TEnw2nd4JrIg0B3DruDPwa4UK08zWw4MR/Aypsv/r
-# 9nHJAACxkPFIFwx08xwtJj8uokgsQQi8c44LCmNzo62kLRuJ+/X/m/yUI9epOaye
-# B8FHRlIznYGyorE8v+D1ULznu7+XhuI0IycnzNYheON0KPNVo53KlmByjJZf3c2f
-# T8KI3SBW8uuErxU2jrSNilANUQo5m0fc4CZL7vai7AY93KnUnb5LcKVbBRyOUhYN
-# p41y9ArWoYp5RV2xlTenJhAOXujFJSS3zmS50OGBg/ylDtosjiJMs451oEgdo6T+
-# k4qXPcfIznTyAcybF/BQ39etlUc+TXNlM6xr4+VcwxMZISqJkrXE0jHYH8GfUUDD
-# 0u2Ktm9OMMZx1nNC2lChWzNgLiDffeqN/weSYeLGat/i4GQKpS2gFfgVYqyT9O6C
-# zaXy2jO6Dg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDU2
+# NDlaMC8GCSqGSIb3DQEJBDEiBCDnR3zRxLqmFHAotwbWFfs1UXLLeNhxO4n9g8sc
+# SFlFtjANBgkqhkiG9w0BAQEFAASCAgBQvVmwQ2P9RSb+nNJKjIFMnpePSRSHq/HZ
+# 7Z3DKoLLcZhnjt2090brk77dGJC0TKwsLz8OCHcw/5jWAeePU3AeJU35296B4WZW
+# zP/14/YFpgzVHZk7hfmMxwnzaHUvMv3G7csHchB3rgabz76jyGPejuOz7fPKVQOf
+# MXRIztPWtgneLASULL1qGAC28k62k1bAAHP5BPZPMfUs39/6DEWe0c8Fvr9kfOVb
+# cmTySeQKw1xVlJdxfZJArWnrwVudTgG/rtkxFYTLTICsnkgF5K0rExtlO8nq6+LK
+# tVlXSThFwNWmDt+ezy3IODRBMyU8zO/aIMk1pLAWHEzO7jKcKOr7XOL3mQlnDcL2
+# s2PbMu4uN4Ur+nzQSUYhmNjCn1IUJmIJe1VeAf+pcRzj+goDR703z/ObJRdTxgux
+# oqmrsR8uacDQhku/CFlUyI1IThgLi/frffpSF1Kp/iIq6312jrvs5vJMnk8SqC0C
+# vDy1z3yXKbQsoY5ertdaGAHNcBYL6uCWj13U4QqdOOe6VQxMDmr+ftEFDpwIkf6g
+# 5qW2YGQSsaQqixRqO1MtkkehwgVKAK01+zwDjLsG3D4UksCDSnUIrNKYHPdkI795
+# OT0LJercOjHCG/61FjY9jDCtKrOOa/wpMnprLcJ8WYgA7ylBGBK8B2MwParrF+39
+# e0/slyaPbg==
 # SIG # End signature block
