@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.28
+1.5.29
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.28
+    Version : 1.5.29
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.28"
+$ScriptVersion = "1.5.29"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2068,7 +2068,7 @@ function Test-OrchestratorStopRequested {
     }
     catch { }
 
-    Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator stop request' -ExpectedSHA256 $requestDocument.SHA256
+    Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator:StopRequestPath' -ExpectedSHA256 $requestDocument.SHA256
 
     Write-OrchestratorLog -Message ("Manual stop request consumed. RequestedBy={0}; RequestedFrom={1}; RequestedAt={2}. No running inventory child job will be killed." -f $requestedBy, $requestedFrom, $requestedAt)
     return $true
@@ -5578,7 +5578,7 @@ try {
     }
 
     foreach ($property in @('StatePath','SharePointMirrorStatePath','StopRequestPath','ElectionRebalanceRequestPath','JobsManifestPath')) {
-        $script:Settings.$property = Resolve-SmartM365OwnedJsonPath -Path $script:Settings.$property -Owner ('Orchestrator:' + $property) -Validate {
+        $script:Settings.$property = Resolve-SmartM365OwnedJsonPath -Path $script:Settings.$property -Owner ('Orchestrator:' + $property) -CompatibleJournalOwners @($(if ($property -eq 'StopRequestPath') { 'Orchestrator stop request' })) -Validate {
             param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator persistent JSON must be an object.' }
             $required=switch($property){
                 'StatePath'{@('Jobs')}
@@ -5879,8 +5879,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/GBTRqox7VtXx
-# ybv8rGArTwlBNScnNKSvsBU8fGYuh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3wcfDxeGWqKdr
+# 05d75nR/Zbyv2gumvo/3H7jlkHZJ7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6013,31 +6013,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJJXowD3i6IXmI11y62/alysReHnaxFW6XO/8c4fTybpMA0GCSqG
-# SIb3DQEBAQUABIIBgGmo0SDe3T+lvhrf15T844fv5yR2Pf4pGoKhV449jSJ+lmft
-# cjCZM0Hln6FRmyIlquIM04WbCuenhWLCoQkBVnVLtcGVDG2nm98aSo5YLJOoJ+tR
-# faqbgPySjnbz/+FiDwIZulv6zFcFZIjFojssC9OztpXAW+k/hzmGnBQ72Y2Ks6m7
-# BD9GiIHo6RoWzC5nhrDhPC7YiBoYuoaY9BQHtluxicz6Zd7lcxrRdyvH23P/QHHn
-# yEb3QV6m5uW3ovIUhnXtfwjQwoIp6XU7D7e+B2yJRm80LIzQI82q4440VnHt0Kkh
-# sPy/FXOW1FqW0/SNNOuciIpuw50e+k5Ov/6bHy61eGkR/vZPCcqpjCWbrbpTwdNj
-# P6YS51VnYi+JmJ9FZSt6R5zBRrq7BjdoWNKVKI2IIpl30FufJNbl83LVJunziRla
-# BH8Faz0Qv8on2cbSMDPGi5srxQCO2kIZiHIoxOUdtnry+kJaLWZ2BF+rKuS+odOs
-# uH24o8Y9CIVs8nVJJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPNUMHW610Fo2KetvrVllIuaXEbmHbOj9GWkhQRbYrruMA0GCSqG
+# SIb3DQEBAQUABIIBgIZy5gJbY148PZj4m9iEyhQuKHh3XMmta65RtsLJDqzqOFY6
+# Kml22AHhPrDkBR3Y+oq9p/KAq0k/ayEX6guO7OKptb4AV2zPz/nWNRYaFydKSiGn
+# 2/kElq2v9UpDyvOaJYrnylTKSXb13FqCiD6PmVxl3i2uv3yiua3IYoIrQxwVuTm0
+# BFlpD5/LZY3Ssb18DBqmP+dx/5Xm50bfC1mAGglOzf7BmjlU9QhfD2HLOi2bcpvt
+# PYg5DfYANymVBwQSFKD432HtDfz/zeJLrrrWfJqXbSMPNHG61U+hLZ+WrpRfWTdB
+# b55WsJ9NsTdFakg83DabAEv3cl6rifEJmyJLkTtu57tyqbwzrUleaNZNMqkKNfw/
+# M8XmIhkgKzA17oEyA3ozVPiOOqEF1aFYwh3cR11PHzuJjH7iwQcfC34BdFvEw+cO
+# uUMps5C7VOpqOGa8gyUxMzXtMwQSKPPFNJFbra/qFAa8HkagD2whdyppRbTEE/0h
+# hOOnyRFSnniPsdUH9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDU2
-# NDhaMC8GCSqGSIb3DQEJBDEiBCCkmpmUJE0B+yQ8P67N3LDGWcn0jvtyFMyQXzZ8
-# F1y4sDANBgkqhkiG9w0BAQEFAASCAgBA4ibpH5Ki6oXshRwBZjtfUkBRh3Kj2zFP
-# 6cHe+A8BG3RHam8mEqdsLcnjs7yCSOZPNkEvvjdy2KJu7xjaZYPVAx3CFpGPl8CU
-# 7azTo32/jUECnqzsdBAfDO5ya+t6qFFn88K7q6NSFYRxKQxJhARjAByN6Yak8Dsd
-# PvP7tow6Vt+LSJkb7Zcnd1B2qn+gepRWgsqW87bnTC+U90Emz8Qr+JD/r5MErUAm
-# 3+VuKkECfb2USLedXP8QH0sx5Ghq7WNy3F5xCdaRDeNeIi1nK8u4SlzhWcEm/saM
-# aj9dpcm5WQbOz68q3eBex07j4LUs5IbaZnA9PEu2vYLBPDS1ZVBFSyKussraGYZj
-# EpkDIVOF/pqVrjuaBvnk4AxB7uoVWzlYp7J55bXJD+Z0kUu0pdGl30ZKV6U0Tyfs
-# QnTSKN8pZKPD1xwUqv1nqcQSzVDrLp0TtuF4YJP98rTt40xd8Ti0HJYmk0536xaK
-# ij89sDjZKvM0ri/ioMzo4IGa+KOiZZQfblWjvXkWDHS4SKcaPDevg9e5z5Dxhh2/
-# wP2z13fKN33hLAST4b7C0enpn0zoYEg/I7SMPTKzsG+BFqv24OkO/xkDBGgFH8xZ
-# dGVv0ILpEFOs1rXKzpX+d9gza1+2ruQk4CchTu4otwtb/zTZI1aQezeWyv8McXc8
-# qgz8rPwvZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMTI1
+# MzdaMC8GCSqGSIb3DQEJBDEiBCBqc2IzrDPbLFqcBUr7Ph+fZbe44GQ6ITL1jqLn
+# a2jcnzANBgkqhkiG9w0BAQEFAASCAgBtmiiVsPJe4Fr1a9lZrk2lXNMOByKDZ1kv
+# DFHZt4PXtDM8gOcnVnKECvA3ZrwA0/lPyw6HMypR3eH/Md8QJoW6dxUJ8TtVPlCw
+# dktPPaxlpqmGk9RYXteXHtciM0myAkQv4//gyA5bJ3ZbswQ20fhoadgRZloFSksL
+# JoOrm6bONy5bWBOFrsRlFYOq/+NJ+Df/P6xiWy96DNFJpVyZaheRg+H7hxt0Fvg9
+# 46ZoMlztvR9jeiaygxaQKdlHBlOvuFTEMAsL11BptBw3zswMn0qEZarBiQTUVcZd
+# iY47qg8C5hGjupwoUS84gUX8UA7HilM7Cs4cyr1CXH4Q9oi6bPNLn4x7ZDx9qJ6l
+# dW/2t+XfSHPOr8jaajbCUbfETfe/X5O8eE6NMlHRp63qlRTq8APATiAHlaA/ihoO
+# bz3RkZ9RnKWDP3GqIEaxn6dLKJOwsNxRKgYhxLVTdM0Led1txgHuAOgzDLr69+uq
+# D9hn/BLJYQo4CWOU0yuPtJOk+4OZDYx61YkECFxnG1vPgqyD2qX66RDDi822wcvi
+# jkhHOsaWQgAXrS1f/zdJ4HqWRellnEpqISZTuthJmlzrvkWlpYMuapIhihg80cG2
+# teALVI4dv0wNGSmJHPMKXGUGEAu9i0qNXsKU9JULQRHjIeOoI41RWcipRubgZHho
+# au9uYOn5Pg==
 # SIG # End signature block
