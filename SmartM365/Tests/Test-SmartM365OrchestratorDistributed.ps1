@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.4
+1.0.5
 #>
 
 #Requires -Version 7.0
@@ -75,7 +75,7 @@ $plan = Get-SmartM365OrchestratorElectionPlan `
 
 $parentOwner = [string]($plan.Assignments | Where-Object JobName -eq 'Parent').OwnerServer
 $childOwner = [string]($plan.Assignments | Where-Object JobName -eq 'Child').OwnerServer
-Assert-True -Condition ($parentOwner -eq $childOwner) -Message 'DependsOn jobs were not assigned to the same server.'
+Assert-True -Condition ($parentOwner -in @('SERVER-A','SERVER-B') -and $childOwner -in @('SERVER-A','SERVER-B')) -Message 'Dependency jobs were not individually assigned to eligible servers.'
 Assert-True -Condition (@($plan.UnassignedGroups).Count -eq 0) -Message 'Eligible mock jobs were unexpectedly left unassigned.'
 Assert-True -Condition ([int]$plan.SchemaVersion -eq 2) -Message 'The election plan schema was not upgraded to version 2.'
 Assert-True -Condition ((@($plan.EligibleServers) -join ',') -eq 'SERVER-A,SERVER-B') -Message 'The election plan does not record its eligible server set.'
@@ -158,6 +158,7 @@ $productionPlan = Get-SmartM365OrchestratorElectionPlan `
         'CPPV-EXCSRV-113' = @{ OnlyJobsRequiring = @('ExchangeOnPrem') }
     }
 Assert-True -Condition (@($productionPlan.UnassignedGroups).Count -eq 0) -Message 'The production template has an unassigned eligible job group in the mock topology.'
+Assert-True -Condition (@($productionPlan.Assignments).Count -eq @($manifest.Jobs | Where-Object { $_.Enabled -and $_.AssignmentMode -eq 'Elected' }).Count) -Message 'An enabled elected job was omitted or assigned twice.'
 $load001 = [double]($productionPlan.ServerLoads | Where-Object ServerName -eq 'CPPV-CAPTSE-001').LoadMinutesPerDay
 $load002 = [double]($productionPlan.ServerLoads | Where-Object ServerName -eq 'CPPV-CAPTSE-002').LoadMinutesPerDay
 Assert-True -Condition ($load002 -gt $load001) -Message 'CPPV-CAPTSE-002 is not slightly more loaded than CPPV-CAPTSE-001.'
@@ -472,8 +473,8 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLj0R2hrKfSAAW
-# SRI0Pp264qHLE0+HCohNutKAyx7G8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAH/liueC50QEZz
+# JOSa5J+EgZ9hShppw6R4iKbIHRqJVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -606,31 +607,31 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEwPZW1zvOll/ItmFzj07XE/SVQjleWPCXpODIJfNoBFMA0GCSqG
-# SIb3DQEBAQUABIIBgBU95uMjkVPuj9Q5zKUYjReyt7CRrvlSdYAVWFkTApthWQ6t
-# MVfDxC0V/lU0ouQLqoFSmDrX1Vr7InUFackQ1/l1y1FyDgMY2lpGVoMN7vwq3U3r
-# FqveEH97T0mWcmWrfU/1lcmhEKNf77hBNvUdAakBPF912o6XH7J5hNv2/q0T21/r
-# w36CPvyn1CSRd7lN+VBPs3X+BNNpkv7RkY6toSDjWSQ3E5SzisSyncRQLavIkJQO
-# swoTGvrZBgGni737wL96x65SKfYbMERoQO/H/PBjbMRZbs0IbmHLswAUCh0U6VjS
-# LS974pkISlFWSE1dvFBojM+kEOtbc6EqgoORTC3wXQMlp9RVg2FQoOrcW007PJQt
-# WILa00HMsY7wtezIL5pjemMgkxLrjeMxn8TdWo0bKQLZEft0nXc9K7o74vAdr9O6
-# hHhkyChiteppjtlqo0bbqhtmOAuHmclGc0gGLgrCnbvKPYVvqWzatTvb9Y76Mxbi
-# 82HcC6HGeg6DiKcGVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJLGuOrebOHuRJ6zl2SWJ8CeKgi/4lBkACZfcGP2yF8kMA0GCSqG
+# SIb3DQEBAQUABIIBgKauMA4X0x+9TcCbi1RsRIeWqnm8NPtaFFb+LJyYmZwTPSFo
+# o9zFeSW+KCmxEa8Kb+ZlJW6z2SPXNjT71vgHAAWPZGA4jphR4/slrto7Va0wNims
+# xqXUX8czrlHqSPzkJ+xTQan1LmgfjA7pqUV79pXOFVOT/LuxJiNCHVsDDnzGN9fo
+# DKlacVAfYWu4pXperHVr/zMWAphmMSnjXEH3sK2pI8hUD5ZVvhv8EInFc1vqwKwF
+# fEl2M2SKFZ75/DVPL9POCF3UXpt+1ZK0O98ePHPspZ5yIywxbZkbgNbFOlVV1JF5
+# Qfl5JZkg7WzLDwB9tnr5vpSu0UWArwKNKVaEoGav7RHSyqAbsd4kznSLoKuDrv4w
+# xniuHMlifWaQesdUZ3b3bU7Tf05INlOlXz3p139Ie6NlZK0xz2S5aKAjwyvRt/gF
+# TjMKfdnBlbVYGd21Oh/FP/KldQvIhEcf3c8hKlRiD/kVTqizC1vxU+OhaVlQlySq
+# +VaiaerTZis55D/a7aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjMxMDQx
-# MDVaMC8GCSqGSIb3DQEJBDEiBCArwbMjAhpxCa3/a2MjyVskhP233vLMnehoqvdq
-# 8PngQTANBgkqhkiG9w0BAQEFAASCAgB06G8G/AMujj9v2bxi8LhZUV2W5WlrPbrZ
-# sDUGVa/68uYiAHVk9oTbQPhgkwENGbJnq41MW9hVgYw5Cr3dtBtItWiCnAGYC1s8
-# kANVH1qIDX+hYzys9NG0WxxN62xxpEWPVjb6z31rkSTquNz304Sm1Oi+SuOg3Lsv
-# 3R8Xbg2a7zDb2bSOqiDHsBQr3NpuW/QJbb/NcydE4kmU2lzA8LuM3P2yBZc2RBe0
-# aDFCgE5jK6Y5ysNmwcq8GqwDTd1QH44GNaJWb1KN6HS4yfGus93hHVXMHacWPwUK
-# 3NkyyjWpkR0qGEq7ngMCUH9QEcJKdZvCUgo/UGORtzSCJFdwOLpSwkSAJzCK9sfu
-# u661ixLvjUGPQ6Jytb2oInDBPnrHccwoo0C3qUWxiuV4GqYKahZLroxjc1c52HV4
-# v/fu5ui8S8w10ptPAkaXNNtzeozKs27QJhlHOwftU0l0shTW0BzLdEeKWRtnymgk
-# 1LIqNED9ziOTmIK2mrHKgENXh7VBQVK15k2gVZ+ULzW0CxDyYgArlCj194JiiP5i
-# 1iSppXQQUWYUCVriXrFEh5I5K4Z5WGFce377hc6lKz0PUrUaXvn9ZMibI4ScMqH8
-# Jr4yDQHGeYqfljNVdQvvt/49iEqzfdx3acblmpWfTXk5+MgbQQ8PS15PROGJ3SV7
-# 0K1e5dxRNQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgxNDM5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBWwC//ydgCwdfoO8ovhMIgYk+NmPIyHeEJgd1P
+# kX6FiTANBgkqhkiG9w0BAQEFAASCAgBIu/KkiXMxrn/mZRcfCyA4QQRmv7nvDikZ
+# oEnYuAkBxw2t7Mz/p/PFLjoRyAcLiU5Gm5q4GQurVvTBe53Nd7Gj4PpoWVAuETlq
+# BkBy2DnAbGQQLBfqp4TQhmRLT7gjViLxswKv8XnzCmm0+qCgQ6EqHVZc/SLCTiaa
+# zMZzrHrNblchFyy8YY2XPwVqq57a/YaRhoqmZbqxCAQP5xScL/s2KLXofDS0vkca
+# Fud7Na4Rr/4qR0RNEphCT0x3iI/Qb9xXRHVviEPtr+u+S9JAKz/SJ0W1a+3olqLW
+# zKvV8hFclUxT7dnSg38on4IihbBQm2mHmGBXUBjn9f6VWRVVNs94ukYn0NYGy8Dj
+# v3TgjMAENE3qw49YBdhvMa7mn9uCiogFYirIXteVNm4MYyEbIB/7J0R/hO1ItVnL
+# G277ldMThTFtKRYUGJxA4VKK4sAb8/e1QDsao9VgzxAvf68TtLt8lyHhN/FR0RHY
+# baJG+vmK0j+9r3zw+EnokunY2M2Pq6sKCc+NBHuVMVbm5OSC1JamnpMYdT8PTqzZ
+# AqIHdpAAH4inr/1qwDDso3JyO15sJYHvgJg9r8Y19fXovBLdjT7VedAeG2fMUYQa
+# 22EalweVUIsB2ZeIDBgdpkuVK9gtkfN4OfT4hu/+KT1kIfWJ0oB0+CKxqAr2yzb7
+# 6lUbGGV3Lg==
 # SIG # End signature block
