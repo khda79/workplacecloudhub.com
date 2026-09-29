@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.31
+1.5.32
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.31"
+$ScriptVersion = "1.5.32"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2427,7 +2427,9 @@ function Get-OrchestratorPeerHealthSnapshot {
             continue
         }
 
-        $ageMinutes = ($Now.ToUniversalTime() - $heartbeatTime.UtcDateTime).TotalMinutes
+        # Measure against the read time, not the tick start: earlier steps of a slow tick would
+        # otherwise make a peer heartbeat written meanwhile look "in the future".
+        $ageMinutes = ([datetime]::UtcNow - $heartbeatTime.UtcDateTime).TotalMinutes
         $lastSeenText = $heartbeatTime.LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss')
         if ($ageMinutes -lt -2) {
             $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatFuture|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatInvalid' -Server $peerServer -Status 'Future timestamp' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details 'The peer heartbeat timestamp is more than two minutes in the future. Check clock synchronization.'))
