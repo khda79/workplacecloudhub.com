@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.29
+1.5.31
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.29"
+$ScriptVersion = "1.5.31"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -440,8 +440,19 @@ function Test-OrchestratorSharePointMirrorFile {
     return $true
 }
 
+function Update-OrchestratorHeartbeatDuringLongOperation {
+    # Keeps the shared heartbeat fresh while a long synchronous step blocks the tick loop.
+    $now = Get-Date
+    if ($script:LastLongOperationHeartbeat -ne [datetime]::MinValue -and ($now - $script:LastLongOperationHeartbeat).TotalSeconds -lt 60) { return }
+    $script:LastLongOperationHeartbeat = $now
+    Write-OrchestratorHeartbeat
+}
+
 function Get-OrchestratorSharePointMirrorSnapshot {
-    param([Parameter(Mandatory = $true)][string]$SharedDataFolderPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$SharedDataFolderPath,
+        [hashtable]$KnownSignatures = @{}
+    )
 
     $folders = New-Object 'System.Collections.Generic.List[object]'
     $files = New-Object 'System.Collections.Generic.List[object]'
@@ -454,7 +465,13 @@ function Get-OrchestratorSharePointMirrorSnapshot {
         })
         if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { continue }
 
-        foreach ($item in @(Get-ChildItem -LiteralPath $rootPath -Recurse -Force -ErrorAction Stop)) {
+        $items = @(Get-ChildItem -LiteralPath $rootPath -Recurse -Force -ErrorAction Stop)
+        Update-OrchestratorHeartbeatDuringLongOperation
+        $filePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($candidate in $items) { if (-not $candidate.PSIsContainer) { [void]$filePaths.Add($candidate.FullName) } }
+
+        foreach ($item in $items) {
+            Update-OrchestratorHeartbeatDuringLongOperation
             if ($item.PSIsContainer) {
                 $folders.Add([pscustomobject]@{
                     LocalPath = $item.FullName
@@ -463,7 +480,15 @@ function Get-OrchestratorSharePointMirrorSnapshot {
                 continue
             }
             if (-not (Test-OrchestratorSharePointMirrorFile -File $item)) { continue }
-            if($item.Name -match '\.json(?:\.txt)?$'){
+            $itemRelativePath = Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName
+            $itemSignature = '{0}|{1}' -f $item.Length, $item.LastWriteTimeUtc.Ticks
+            $jsonReadRequired = $item.Name -match '\.json(?:\.txt)?$'
+            if ($jsonReadRequired -and $KnownSignatures.ContainsKey($itemRelativePath) -and [string]$KnownSignatures[$itemRelativePath] -ceq $itemSignature) {
+                # Unchanged file already mirrored: its preferred-name resolution only changes when a JSON twin exists.
+                $twinPath = if ($item.Name -match '\.json\.txt$') { $item.FullName.Substring(0, $item.FullName.Length - 4) } else { $item.FullName + '.txt' }
+                if (-not $filePaths.Contains($twinPath)) { $jsonReadRequired = $false }
+            }
+            if($jsonReadRequired){
                 try { $json=Read-SmartM365JsonDocument $item.FullName }
                 catch {
                     $relative = Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName
@@ -483,10 +508,10 @@ function Get-OrchestratorSharePointMirrorSnapshot {
             }
             $files.Add([pscustomobject]@{
                 LocalFilePath = $item.FullName
-                RelativePath = (Get-OrchestratorSharePointMirrorRelativePath -SharedDataFolderPath $SharedDataFolderPath -Path $item.FullName)
+                RelativePath = $itemRelativePath
                 Length = [long]$item.Length
                 LastWriteTimeUtc = $item.LastWriteTimeUtc.ToString('o')
-                Signature = ('{0}|{1}' -f $item.Length, $item.LastWriteTimeUtc.Ticks)
+                Signature = $itemSignature
             })
         }
     }
@@ -617,14 +642,16 @@ function Invoke-OrchestratorSharePointMirror {
     if ($null -eq $mirrorLock) { return }
 
     try {
-        $snapshot = Get-OrchestratorSharePointMirrorSnapshot -SharedDataFolderPath $script:Settings.SharedDataFolderPath
         $previousState = Read-OrchestratorSharePointMirrorState -Path $script:Settings.SharePointMirrorStatePath
         $previousByPath = @{}
+        $knownSignatures = @{}
         foreach ($entry in @($previousState.Files)) {
             if ($null -ne $entry -and -not [string]::IsNullOrWhiteSpace([string]$entry.RelativePath)) {
                 $previousByPath[[string]$entry.RelativePath] = $entry
+                if (-not $Force) { $knownSignatures[[string]$entry.RelativePath] = [string]$entry.Signature }
             }
         }
+        $snapshot = Get-OrchestratorSharePointMirrorSnapshot -SharedDataFolderPath $script:Settings.SharedDataFolderPath -KnownSignatures $knownSignatures
 
         $currentByPath = @{}
         foreach ($entry in @($snapshot.Files)) { $currentByPath[[string]$entry.RelativePath] = $entry }
@@ -640,6 +667,7 @@ function Invoke-OrchestratorSharePointMirror {
         }
 
         foreach ($entry in @($snapshot.Files)) {
+            Update-OrchestratorHeartbeatDuringLongOperation
             $relativePath = [string]$entry.RelativePath
             $previous = if ($previousByPath.ContainsKey($relativePath)) { $previousByPath[$relativePath] } else { $null }
             if (-not $Force -and $null -ne $previous -and [string]$previous.Signature -ceq [string]$entry.Signature) {
@@ -658,10 +686,28 @@ function Invoke-OrchestratorSharePointMirror {
             }
         }
 
+        $claimRetentionDays = [int]$script:Settings.ElectionClaimRetentionDays
+        $claimCutoffUtc = if ($claimRetentionDays -gt 0) { (Get-Date).ToUniversalTime().AddDays(-1 * $claimRetentionDays) } else { [datetime]::MinValue }
+        $claimPurgeDeadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
+        $claimsDeleted = 0
+        $claimsDeferred = 0
         foreach ($relativePath in @($previousByPath.Keys)) {
             if ($currentByPath.ContainsKey($relativePath)) { continue }
             $previous = $previousByPath[$relativePath]
             if ($snapshot.DeferredPaths -contains $relativePath) { $nextByPath[$relativePath] = $previous; continue }
+            if ($claimRetentionDays -gt 0 -and (Test-OrchestratorExpiredClaimRelativePath -RelativePath $relativePath -CutoffUtc $claimCutoffUtc)) {
+                # The local claim was removed by claim retention: remove the mirrored copy too, within a time budget.
+                Update-OrchestratorHeartbeatDuringLongOperation
+                if ((Get-Date) -ge $claimPurgeDeadline) { $nextByPath[$relativePath] = $previous; $claimsDeferred++; continue }
+                if (Invoke-OrchestratorSharePointDelete -LocalFilePath ([string]$previous.LocalFilePath) -Reason 'expired occurrence claim') {
+                    $claimsDeleted++
+                }
+                else {
+                    $nextByPath[$relativePath] = $previous
+                    $failed++
+                }
+                continue
+            }
             if($relativePath.EndsWith('.json',[StringComparison]::OrdinalIgnoreCase)){
                 $preferredRelative=$relativePath+'.txt'
                 if($nextByPath.ContainsKey($preferredRelative)){
@@ -691,7 +737,7 @@ function Invoke-OrchestratorSharePointMirror {
 
         Save-OrchestratorSharePointMirrorState -Path $script:Settings.SharePointMirrorStatePath -Files @($nextByPath.Values)
         $level = if ($failed -gt 0 -or $folderFailures -gt 0) { 'ERROR' } else { 'INFO' }
-        Write-OrchestratorLog -Message ("SharePoint operational mirror complete: folders={0}; files={1}; uploaded={2}; unchanged={3}; expiredLeasesDeleted={4}; folderFailures={5}; fileFailures={6}." -f @($snapshot.Folders).Count, @($snapshot.Files).Count, $uploaded, $unchanged, $deleted, $folderFailures, $failed) -Level $level
+        Write-OrchestratorLog -Message ("SharePoint operational mirror complete: folders={0}; files={1}; uploaded={2}; unchanged={3}; expiredLeasesDeleted={4}; expiredClaimsDeleted={5}; expiredClaimsDeferred={6}; folderFailures={7}; fileFailures={8}." -f @($snapshot.Folders).Count, @($snapshot.Files).Count, $uploaded, $unchanged, $deleted, $claimsDeleted, $claimsDeferred, $folderFailures, $failed) -Level $level
     }
     catch {
         Write-OrchestratorLog -Message ("SharePoint operational mirror failed safely; no remote cleanup was inferred from the incomplete scan: {0}" -f $_.Exception.Message) -Level ERROR
@@ -5170,6 +5216,104 @@ function Invoke-RetentionCleanup {
     }
 }
 
+function Get-OrchestratorClaimOccurrenceUtc {
+    # Claim files are named from their scheduled occurrence: yyyyMMddTHHmmssfffZ[.suffixes].
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    if ($FileName -notmatch '^(\d{8}T\d{9}Z)(?:\.|$)') { return $null }
+    return [datetime]::ParseExact($Matches[1], 'yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+}
+
+function Test-OrchestratorExpiredClaimRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][datetime]$CutoffUtc
+    )
+
+    if ($RelativePath -notmatch '^DATA-ALL/Orchestrator/Election/Claims/[^/]+/([^/]+)$') { return $false }
+    $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $Matches[1]
+    return ($null -ne $occurrenceUtc -and $occurrenceUtc -lt $CutoffUtc)
+}
+
+function Invoke-OrchestratorClaimRetention {
+    # Removes terminal occurrence claims older than ElectionClaimRetentionDays. Claims are coordination
+    # state only (anti-duplicate launch, 8-day catch-up/dependency lookback, peer monitoring); run history
+    # lives in the JobRuns and lifecycle CSV files. Non-terminal or still-safe claims are always kept.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $retentionDays = [int]$script:Settings.ElectionClaimRetentionDays
+    if ($retentionDays -le 0) { return }
+    if ($script:LastClaimRetentionRun -ne [datetime]::MinValue -and ($Now - $script:LastClaimRetentionRun).TotalMinutes -lt 60) { return }
+    $script:LastClaimRetentionRun = $Now
+    if (-not (Test-Path -LiteralPath $script:Settings.ElectionClaimsPath -PathType Container)) { return }
+
+    $lockPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-ClaimRetention.lock'
+    $lock = Enter-OrchestratorSharePointMirrorLock -Path $lockPath -StaleMinutes 120
+    if ($null -eq $lock) { return }
+
+    $terminalStatuses = @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
+    $cutoffUtc = $Now.ToUniversalTime().AddDays(-1 * $retentionDays)
+    $deadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
+    $removedClaims = 0
+    $removedFiles = 0
+    $keptActive = 0
+    $keptUnreadable = 0
+    $failures = 0
+    $budgetExhausted = $false
+    try {
+        foreach ($jobFolder in @(Get-ChildItem -LiteralPath $script:Settings.ElectionClaimsPath -Directory -Force -ErrorAction Stop)) {
+            if ($budgetExhausted) { break }
+            $groups = @(Get-ChildItem -LiteralPath $jobFolder.FullName -File -Force -ErrorAction Stop |
+                ForEach-Object {
+                    $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name
+                    if ($null -ne $occurrenceUtc -and $occurrenceUtc -lt $cutoffUtc) { [pscustomobject]@{ Stamp = $_.Name.Substring(0, 19); File = $_ } }
+                } |
+                Group-Object -Property Stamp)
+
+            foreach ($group in $groups) {
+                Update-OrchestratorHeartbeatDuringLongOperation
+                if ((Get-Date) -ge $deadline) { $budgetExhausted = $true; break }
+
+                $claimBasePath = Join-Path -Path $jobFolder.FullName -ChildPath ($group.Name + '.json')
+                if (Get-SmartM365JsonReadPath $claimBasePath -Optional) {
+                    try { $claim = (Read-SmartM365JsonDocument $claimBasePath).Document }
+                    catch { $keptUnreadable++; continue }
+                    $safeUntilUtc = [datetime]::MaxValue
+                    try { $safeUntilUtc = ([datetime]$claim.SafeUntilUtc).ToUniversalTime() } catch { $safeUntilUtc = [datetime]::MaxValue }
+                    if ([string]$claim.Status -notin $terminalStatuses -or $safeUntilUtc -ge $Now.ToUniversalTime()) { $keptActive++; continue }
+                }
+
+                # Claim, expired-claim archives and transport journal of the same occurrence.
+                $groupFailed = $false
+                foreach ($item in @($group.Group | ForEach-Object { $_.File })) {
+                    try {
+                        Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
+                        $removedFiles++
+                    }
+                    catch [System.Management.Automation.ItemNotFoundException] { continue }
+                    catch {
+                        $groupFailed = $true
+                        $failures++
+                        Write-OrchestratorLog -Message ("Claim retention: failed to remove {0}: {1}" -f $item.FullName, $_.Exception.Message) -Level WARN
+                    }
+                }
+                if (-not $groupFailed) { $removedClaims++ }
+            }
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Claim retention stopped safely without further deletion: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+    finally {
+        Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $lockPath
+    }
+
+    if ($removedFiles -gt 0 -or $keptActive -gt 0 -or $keptUnreadable -gt 0 -or $failures -gt 0 -or $budgetExhausted) {
+        $level = if ($failures -gt 0 -or $keptUnreadable -gt 0) { 'WARN' } else { 'INFO' }
+        Write-OrchestratorLog -Message ("Claim retention ({0} days, cutoff {1}): occurrences removed={2}; files removed={3}; kept non-terminal/still-safe={4}; kept unreadable={5}; failures={6}; budget exhausted={7}." -f $retentionDays, $cutoffUtc.ToString('o'), $removedClaims, $removedFiles, $keptActive, $keptUnreadable, $failures, $budgetExhausted) -Level $level
+    }
+}
+
 # ==========================================================
 # Dry run plan
 # ==========================================================
@@ -5307,6 +5451,8 @@ $script:SharePointUploadedFileState = @{}
 $script:SharePointEnsuredFolderState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
+$script:LastLongOperationHeartbeat = [datetime]::MinValue
+$script:LastClaimRetentionRun = [datetime]::MinValue
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
 $script:LastRuntimeUpdateCheckUtc = [datetime]::MinValue
@@ -5516,6 +5662,12 @@ try {
         ElectionPlanRefreshSeconds = [math]::Max(30, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionPlanRefreshSeconds' -DefaultValue 60))
         ElectionClaimGraceMinutes = [math]::Max(5, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimGraceMinutes' -DefaultValue 15))
         ElectionHistoryDays = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionHistoryDays' -DefaultValue 14))
+        # 0 disables claim retention; enabled values never go below the 8-day occurrence lookback plus one day.
+        ElectionClaimRetentionDays = $(
+            $claimRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimRetentionDays' -DefaultValue 14
+            if ($claimRetentionDays -le 0) { 0 } else { [math]::Max(9, $claimRetentionDays) }
+        )
+        ElectionClaimRetentionMaxSecondsPerRun = [math]::Max(30, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimRetentionMaxSecondsPerRun' -DefaultValue 120))
         ElectionWeight = $electionWeight
         ServerJobPolicies = $serverJobPolicies
         ExchangeOnlineOrganization = $exchangeOnlineOrganization
@@ -5799,6 +5951,12 @@ try {
         }
         Save-OrchestratorState
 
+        try {
+            Invoke-OrchestratorClaimRetention -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Claim retention failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+        }
         Invoke-OrchestratorPeriodicSharePointUpload -Now $now
         if ($now.Date -ne $lastCleanupDate) {
             $previousLogDate = $lastCleanupDate

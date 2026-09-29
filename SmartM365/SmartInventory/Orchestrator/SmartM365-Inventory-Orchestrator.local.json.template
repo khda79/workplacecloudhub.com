@@ -51,6 +51,8 @@
   "ElectionPlanRefreshSeconds": 60,
   "ElectionClaimGraceMinutes": 15,
   "ElectionHistoryDays": 14,
+  "ElectionClaimRetentionDays": 14,
+  "ElectionClaimRetentionMaxSecondsPerRun": 120,
   "ElectionWeight": 1.0,
   "ElectionWeightsByServer": {},
   "ServerJobPolicies": {},
