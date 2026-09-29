@@ -565,7 +565,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd",
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-MailboxCalendarPermissions-Inventory.cmd",
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
         "AD",
