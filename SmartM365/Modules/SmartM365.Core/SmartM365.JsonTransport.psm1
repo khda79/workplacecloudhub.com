@@ -397,12 +397,25 @@ function Resolve-SmartM365WeeklyManifestPaths {
     )
     # The owner supplies its exact history root. Never recurse into arbitrary JSON.
     $rootFull = [IO.Path]::GetFullPath($HistoryRootPath).TrimEnd('\', '/')
-    # HistoryLabel was a display label, including the shared helper's old default.
-    # Three phases of the on-prem mailbox collector also share the same history root.
-    $compatibleLabels = @($HistoryLabel, 'SmartM365 inventory')
-    $mailboxLabels = @('Exchange on-prem mailboxes', 'Exchange on-prem remote mailboxes', 'Exchange on-prem mailbox daily stats')
-    if ($HistoryLabel -in $mailboxLabels -and $rootFull -match '(?i)[\\/]Exchange[\\/]OnPrem[\\/]Mailboxes[\\/]WeeklyHistory$') {
-        $compatibleLabels += $mailboxLabels
+    # Automatic CSV publication uses the generic label; explicit saves use a family label.
+    # Permit both directions only for the documented collector-relative history root.
+    $genericLabel = 'SmartM365 inventory'
+    $compatibleLabels = @($HistoryLabel, $genericLabel)
+    $familyLabelsByRoot = @{
+        'Exchange\OnPrem\ServersAndStorage\WeeklyHistory' = @('Exchange on-prem infrastructure and readiness')
+        'Exchange\OnPrem\Mailboxes\WeeklyHistory' = @('Exchange on-prem mailboxes', 'Exchange on-prem remote mailboxes', 'Exchange on-prem mailbox daily stats')
+        'Exchange\OnPrem\CalendarPermissions\WeeklyHistory' = @('Exchange on-premises calendar permissions')
+        'M365\Licensing\Licenses\WeeklyHistory' = @('M365 licenses inventory')
+        'M365\Backup\PolicyScope\WeeklyHistory' = @('M365 Backup policy scope inventory')
+        'M365\Teams\Inventory\WeeklyHistory' = @('Microsoft Teams inventory')
+        'M365\SharePoint\Inventory\WeeklyHistory' = @('SmartM365 SharePoint Online inventory')
+    }
+    $relativeMatch = [regex]::Match($rootFull, '(?i)[\\/]DATA-ALL[\\/](?<relative>.+[\\/]WeeklyHistory)$')
+    if ($relativeMatch.Success) {
+        $familyLabels = $familyLabelsByRoot[$relativeMatch.Groups['relative'].Value.Replace('/', '\')]
+        if ($familyLabels -and ($HistoryLabel -eq $genericLabel -or $HistoryLabel -in $familyLabels)) {
+            $compatibleLabels += $familyLabels
+        }
     }
     $journalLabels = if ($ValidateOwner) { @($HistoryLabel) } else { $compatibleLabels }
     $compatibleJournalOwners = @($journalLabels | Sort-Object -Unique | ForEach-Object { 'WeeklyHistory:' + $_ })
@@ -466,8 +479,8 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZKFzpnF88+8mN
-# 3LmKGDs6K8lGGm9NwzdLtuVPlxbJWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJ/4XEJFk924/J
+# iph2bghrJTiNOst152aUkAyIjGk4BKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -600,31 +613,31 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPG6jURnpOKImG0aY0zoVde0yspouxFEfVxjTKTEKMvsMA0GCSqG
-# SIb3DQEBAQUABIIBgHSnOl/S6wn3Ott30uXB3Q8CEMybM6KOalUleAUin1oqD3Rv
-# +BwD/8KJNQlvl+GSD/XeWnl17K0GHgX39j2ecFIhqiOyB1J540SSOkQhPk5pDW3v
-# K2PeA8n9fiR8ebRXsFdzBKUeEk+goN2OHDjp9mvqIC4dyK/NJMxnvAz8xEw17QW9
-# BQNQ2rQK+cpMi36r8u9o0qSb+Ag97BzV7dCYr/BuFTA+RAXoFHWabhYFpSOGr7Zt
-# WTgwwE2WUVxi5nB+I/gubqiOGNp8np9r6eY3L9k3K4xWPFeqE9IpbtXBDCXZsiEc
-# 2XAcefb/Gw26olRzsVcIsLPQ5APxS92lYK4XNHKSGEU2AjvTfId+EIoC1rKyUCo3
-# 7KP9x1Ket3NERGRNt2NtkZZSWPf+9ywXm+eT1TGfueAlLQlk6ByLgDjiT2MtjUKM
-# xhSvJstohiwjI0Cv8C+Y04VJDpZrdwfHHr/wWCgs6sgk0iO7NU5cvkOZRKhF7HcK
-# u6a2y4MRZUZCUVEdD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFZUF7HSmOkZtbnf1ZgRa94tlCfFnyBTw8Y7VBgv3D9EMA0GCSqG
+# SIb3DQEBAQUABIIBgK1NY1VjKX6aDRCbbbaUmx8Jj6vHVaapsOtKYWlGQyPoewiU
+# 421QnSQZ2sDqacj2FvgDG/QRo8ujMHOPPTlcxNFi1PoU4kbKtLaceG7kOckl2CjO
+# Ug9lvLVRcft8Nq21s0DZ/BczL1j2qHVlB6F9snv5hUxokRBf+pd3ctV4aD4fjAx5
+# sob4DxhzVuvNJEvESHa9/VCSFre6IHk2KhRmyQh0e6qbwxWTj7M/+InwcOexlq+i
+# +z7ateH0JD/joZDRgRatDEP8cdQIHpFvL8rhcZm/ZlsHSoS1RSXLCl7PaJqCC2Oa
+# oI9ld8DxDL0tnXUGUEqyLRngFCswnVUU4YUr2bBQoIJjoizUKBMLzWBu2veGTUBb
+# fQ9HJuppfaLV+WN4or/5mJD3joA2y+w0rnw4oYJMXQSRlkKJdxolnM1dOBVzcK3i
+# ug4/jYjJcf+7Ta0k/s7SgYJRv0UnRSxxrbTKcNDO7mHhgtks+FTWyIP0JEGEMTBD
+# S6BnpGF9amtzT3i1WqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwNzM3
-# MTZaMC8GCSqGSIb3DQEJBDEiBCD5QEoMPIaSZbGlk0cHf4i+z5SgcDHBjV4ZbL8M
-# UC9fJjANBgkqhkiG9w0BAQEFAASCAgAk6/Nu2iD/4rE9v+UKtEldMjefjQzYW6G/
-# hmeCpT1Zap/B4y3ytxt01rizIXhavYBDit6rbqBg+AkYBcY/vsF3BdM+jHOpYVuy
-# jehLSoPBhEe9pHx+McTMxAkoG0k7o7eTk5Bp4Q8U5R2IwmQhetJ5O5REwRQV+9al
-# SBaQPTfQIPYWxHwt4r0WtHIFJG32jGE7N0YoL3xufSABS28bA0yBeEbq3pMcL+1D
-# KBvyqB6Rk9FEbvY1QJvsqdNdFgqFZZ3EsPiAm5Ent2HuNDVkEuIyPgpIpGCGWBEF
-# DZ17qR3E08yNSsZ2L4cEUNMab3cKkuwDPdHNhM8gmOALqCU1XK0XmY8NeGvpZ6dp
-# a5kijS2xCy/gaXEk2gzjxhukuuvPaXVjY2ANhACTtCDbc7qpO0/AxzxMEHV6IYU6
-# zMCiQndu1msfr0X20OLdFkiShsZ7gKORyVEkS6DnkOfa8jXWrZEFcJOiSghY2Goy
-# eHPvrNuNWLWnhVbm0PFMBW/lTMtRLmZbKqEu0/O/ArIsg8oC0KU5O9nQVo0O5q1N
-# lCpJ2nlGCmx3e1yRFO0Y/tp0AIWyC8J6gkqvgn3mqWSWu+rl9wMAPszuCLNw9sOG
-# uTZEz5JUkezIYP3BGk/e7M6n2SU7A7Mo9Q/5YK5kvaUF1Sr63j0KxcFof+TW8pzj
-# 5xaIJhl82g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwODEz
+# MTNaMC8GCSqGSIb3DQEJBDEiBCAiL+goWhyPR5NXRi4a5nC76X3UMQ0/JixnAM1+
+# 9qWtozANBgkqhkiG9w0BAQEFAASCAgCIYBAZtdN0QAV6/yfN+wsV7MjdMIobCb0Q
+# kOiJXOCKRrONF0wAnCJ3o4X4N3DMQQRpx/86rwDU6TxwamssW1ODxUpYMOMimOSw
+# wtTaqRGGpPsMl2PMayKp1aJ4gkg1Rb+HlvPCEk+RyYiSpnbSD2e9VfhH5O1WW0r6
+# nVLDiunPEC3kmGamOiZOAppY32ya9FKjIHhy/MkX+y7Kod0AgIpvWbRseaiNiHjC
+# k4eR4TP76+rwFE148ZCjdjmnEI1thDi5qjoQUQ2kLNepO9mDWYKOwFi1JvKbwk4A
+# 81bFlrz1q5Pgz6EI24te6cZFdnmIeffx14OllnHlbaSuxhXyOXRiDN9WwXO1xkiz
+# /Ih5PaHTrzkMDICzWoQLoc3kkuV9z+dlIHjuxryTLMgTfWnhk/Qb2NTykVY4AkwU
+# sFBnbCBZAuCnMuk93YHMmPaiz/xpe33olSRKWM/wsouGWhyiif3hXqNAF0u2vhsQ
+# i1P0ENiw1x0IP3tazv1qDzet8sVRgvsy755kJLB0X23Nz5dj0ZHx1OvHrbATJ+dN
+# xRJpfBI0zIwyd0WxSzTU466HpQCM1yZBjxyt9JI/WxrxVhxMlg8aLhlGXMFnKqjz
+# TaC9DsjbEx4zu0LQQEwPzDZLn0069zvt63dvWZVuIkonnyFNZ1ICz3g9fIAYldkx
+# hncvrWzRmw==
 # SIG # End signature block

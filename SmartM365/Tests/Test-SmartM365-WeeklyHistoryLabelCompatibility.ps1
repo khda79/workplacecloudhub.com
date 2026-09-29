@@ -1,20 +1,96 @@
-﻿@{
-    RootModule = 'SmartM365.JsonTransport.psm1'
-    ModuleVersion = '1.0.5'
-    GUID = 'ccf5a4b1-c253-4e30-98a8-d794f1ad995e'
-    Author = 'WorkplaceCloudHub'
-    PowerShellVersion = '5.1'
-    FunctionsToExport = @('Get-SmartM365JsonNames','Get-SmartM365JsonReadPath','Read-SmartM365JsonDocument','Move-SmartM365OwnedJsonFile','Resolve-SmartM365JsonConfigurationPath','Get-SmartM365JsonTransportPolicy','Get-SmartM365JsonTemplateName','Resolve-SmartM365OwnedJsonPath','Write-SmartM365JsonBytesAtomically','Resolve-SmartM365WeeklyManifestPaths','Publish-SmartM365RegeneratedJsonBytes','Complete-SmartM365JsonConsumption')
-    CmdletsToExport = @()
-    VariablesToExport = @()
-    AliasesToExport = @()
+﻿[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
+$transport=Get-Module SmartM365.JsonTransport
+$policy=& $transport {(Get-Command Get-SmartM365JsonTransportPolicy).ScriptBlock}
+$root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-WeeklyLabels-'+[guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory $root
+$script:passed=0
+function Check($Value,$Message){if(-not $Value){throw $Message};$script:passed++}
+function Reject($Action,$Message){$rejected=$false;try{& $Action|Out-Null}catch{$rejected=$true};Check $rejected $Message}
+function WriteLog {param($Message,$Level)}
+function Get-SmartM365IsoWeekName {'2026-W40'}
+function Get-SmartM365WeeklyHistoryFileName {param($Path)[IO.Path]::GetFileName($Path)}
+function Copy-SmartM365FileAtomically {param($SourcePath,$DestinationPath)Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath}
+function Invoke-SmartM365SharePointCsvUpload {param($LocalFilePath)$script:uploads+=$LocalFilePath}
+$families=@(
+    @{Path='Exchange/OnPrem/ServersAndStorage';Labels=@('Exchange on-prem infrastructure and readiness')}
+    @{Path='Exchange/OnPrem/Mailboxes';Labels=@('Exchange on-prem mailboxes','Exchange on-prem remote mailboxes','Exchange on-prem mailbox daily stats')}
+    @{Path='Exchange/OnPrem/CalendarPermissions';Labels=@('Exchange on-premises calendar permissions')}
+    @{Path='M365/Licensing/Licenses';Labels=@('M365 licenses inventory')}
+    @{Path='M365/Backup/PolicyScope';Labels=@('M365 Backup policy scope inventory')}
+    @{Path='M365/Teams/Inventory';Labels=@('Microsoft Teams inventory')}
+    @{Path='M365/SharePoint/Inventory';Labels=@('SmartM365 SharePoint Online inventory')}
+)
+function Fixture($Name,$Relative,$Label) {
+    $history=Join-Path $root "$Name/Tenants/fixture/DATA-ALL/$Relative/WeeklyHistory"
+    $week=Join-Path $history '2026-W29';$null=New-Item -ItemType Directory $week -Force
+    $csv=Join-Path $week 'Inventory.csv';[IO.File]::WriteAllText($csv,"Id`r`n42`r`n")
+    $doc=[ordered]@{Week='2026-W29';HistoryRootPath=$history;HistoryLabel=$Label;Files=@('Inventory.csv');UpdatedAt='2026-07-15T00:00:00Z'}
+    $legacy=Join-Path $week 'manifest.json';[IO.File]::WriteAllText($legacy,($doc|ConvertTo-Json),[Text.UTF8Encoding]::new($true))
+    @{Root=$history;Legacy=$legacy;Document=$doc;Hash=(Get-FileHash $legacy).Hash;Csv=$csv;CsvHash=(Get-FileHash $csv).Hash}
 }
+try {
+    & $transport {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedUncRoots=@()}}}
+    # Start with the production failure: a named historical manifest read by the generic CSV helper.
+    foreach($family in $families) {
+        foreach($stored in @($family.Labels)+@('SmartM365 inventory')) {
+            foreach($requested in @('SmartM365 inventory')+@($family.Labels)) {
+                $f=Fixture ([guid]::NewGuid().ToString('N')) $family.Path $stored
+                $null=Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $f.Root -HistoryLabel $requested
+                Check ((Get-FileHash ($f.Legacy+'.txt')).Hash -eq $f.Hash -and -not(Test-Path $f.Legacy)) "Label compatibility failed: $stored -> $requested"
+                Check ((Get-FileHash $f.Csv).Hash -eq $f.CsvHash) 'Historical CSV changed.'
+            }
+        }
+    }
+    foreach($scenario in @('wrongFolder','wrongLabel','wrongTenant','incomplete','invalid','different','resume')) {
+        $relative=if($scenario -eq 'wrongFolder'){'M365/Licensing/Licenses'}else{'Exchange/OnPrem/ServersAndStorage'}
+        $f=Fixture $scenario $relative 'Exchange on-prem infrastructure and readiness'
+        if($scenario -eq 'wrongLabel'){$f.Document.HistoryLabel='Microsoft Teams inventory'}
+        if($scenario -eq 'wrongTenant'){$f.Document.HistoryRootPath=$f.Root.Replace('\fixture\','\foreign\').Replace('/fixture/','/foreign/')}
+        if($scenario -in 'wrongLabel','wrongTenant'){[IO.File]::WriteAllText($f.Legacy,($f.Document|ConvertTo-Json));$f.Hash=(Get-FileHash $f.Legacy).Hash}
+        if($scenario -eq 'incomplete'){[IO.File]::Move($f.Csv,($f.Csv+'.retained'))}
+        if($scenario -eq 'invalid'){[IO.File]::WriteAllText(($f.Legacy+'.txt'),'{')}
+        if($scenario -eq 'different'){[IO.File]::WriteAllText(($f.Legacy+'.txt'),(($f.Document|ConvertTo-Json)+"`n"))}
+        if($scenario -eq 'resume') {
+            Copy-Item -LiteralPath $f.Legacy -Destination ($f.Legacy+'.txt')
+            $journal=@{Owner='WeeklyHistory:Exchange on-prem infrastructure and readiness';Phase='Prepared';SHA256=$f.Hash}|ConvertTo-Json -Compress
+            [IO.File]::WriteAllText(($f.Legacy+'.migration.log'),($journal+"`n"))
+            $null=Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $f.Root -HistoryLabel 'SmartM365 inventory'
+            Check ((Get-FileHash ($f.Legacy+'.txt')).Hash -eq $f.Hash) 'Journal recovery changed payload.'
+        } else {
+            Reject {Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $f.Root -HistoryLabel 'SmartM365 inventory'} "Unsafe $scenario accepted."
+            Check ((Get-FileHash $f.Legacy).Hash -eq $f.Hash) 'Rejected history lost its bytes.'
+        }
+    }
+    # Exercise alternating automatic and explicit saves in both shared helper implementations.
+    foreach($source in @('../Modules/SmartM365.Core/SmartM365.Core.psm1','../Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $source),[ref]$tokens,[ref]$errors)
+        if($errors.Count){throw ($errors|Out-String)}
+        $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-SmartM365WeeklyInventoryHistory'},$true)
+        . ([scriptblock]::Create($fn.Extent.Text))
+        $f=Fixture ([guid]::NewGuid().ToString('N')) 'Exchange/OnPrem/ServersAndStorage' 'Exchange on-prem infrastructure and readiness'
+        $script:uploads=@();$step=0
+        foreach($label in @('SmartM365 inventory','Exchange on-prem infrastructure and readiness','SmartM365 inventory')) {
+            $step++;$csv=Join-Path $root "Source-$step.csv";[IO.File]::WriteAllText($csv,"Id`r`n$step`r`n")
+            Save-SmartM365WeeklyInventoryHistory -SourceFiles $csv -HistoryRootPath $f.Root -HistoryLabel $label -RetentionWeeks 0
+            Check ((Get-FileHash ($f.Legacy+'.txt')).Hash -eq $f.Hash) 'Alternating saves rewrote an older week.'
+        }
+        $current=Join-Path $f.Root '2026-W40/manifest.json.txt'
+        $doc=Get-Content $current -Raw|ConvertFrom-Json
+        Check (@($doc.Files).Count -eq 3) 'Alternating saves lost current-week CSVs.'
+        Check ($script:uploads -contains ($f.Legacy+'.txt')) 'Historical manifest omitted from publication.'
+    }
+    [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Synthetic local history only; uploads mocked; no collector or remote access'}
+} finally {& $transport {param($p)Set-Item Function:script:Get-SmartM365JsonTransportPolicy -Value $p} $policy}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvMd3vJRFKucYx
-# 1KA30mnWqyExqe7+wUccXspovbf1lKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB03xScdJcAioAb
+# Hy27EQnsSBJDy1Lde1uu9GM4xtQrTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -147,31 +223,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIy3MhSKPo1LGf0BKq8asR/7pATZBSx8skT0mWK/Ni8kMA0GCSqG
-# SIb3DQEBAQUABIIBgH0A+yAy4tytkXH5NaSBBCbttEAKmHci9KnJJ6Z32mxwyEdd
-# BR4WD5Kwrf2CjeeR1qQY9IwSIker3kXCz/bebsxD25BTSmIzpy4saeKAgiDnMe6Q
-# dI79S9GPV9ZEAkw7FvR9dRN7M1ENH1n2CG5sNGGxK9y87+mq0IaUsrYz2FClZDJd
-# sPsnF/RFvrLmTCYDHAcKcFamgZ0DV14UBnzvB1CXDDZBBKjcCsomqeCNdd6WWNoy
-# 33d+xRog8Zwidv0jKUNO9bbuoPz66TP483H1sSxcp9aYiTliJrt5nFiw53ezlZga
-# HwVFurQ7SyXerpLh/xFezRX7S1xpnZWxJFbUw6f7SQk5VMYZF+cGhCIp3ZKHXCaV
-# 1oHoS63LiT0U0jc26jlWzrtblEK3TuTWw9QG2+YQwjbOdRqXB0JN+S1PNqJckBm0
-# 80mqcSldpxCbQOh/dsdIqOiyRyr50X+kFhSxzske+Wq2W5+dpD2d5mzOgerYvCOC
-# if0B51Qb3tdtkAUpHKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINlRzH8qtv5n0qECZQJ+mL02zd9EMXUJJyeD4PZZDyEDMA0GCSqG
+# SIb3DQEBAQUABIIBgFa93J68wQKnlXK5PXWU3Bph/ur5LQ4AVJcER6BOL/r8Ue1f
+# xnv8kzHRu3FjF2YSeMh4RDPOvFlIyuTugUZrpJ7iLDc2dEAOI08QorMeAJ+qGsLO
+# Xpj+pPJKNlhPYDWJC9VEWQnT2AqUDjJUqoUNWN1tMAC+qp48RJbnoIpSZZnrys41
+# ZWjJGsUYwZr/bK7LClO5rbq5zJ5d9HUsD6M/UGikAsOok13ttaCwnWzyaED5llfx
+# W4N/5akc8SoVMyRMfl7Fp4rwR8FNJTIJSQThjKxA8MIOevsw6B66NT1Ld7l5nJJB
+# worsfOkca09SGZM5FD+01sI09cnlfuCEozSKeIRwatq2RhIj+RKq57hIoiZENs9v
+# +sP67ALgMXmqgyvkTEYqiABhxONjxWO7sO+jU1D0RQmiRb8mHGAmSOxcbVNpVx4J
+# VGARBnE0dFcJxT1+xPY18mJZrHs7Ubm9uksTYdvBnIGyWJ8i/1wf9jicmuteLFiC
+# bIkqu1JRvO0V+Og/caGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwODEz
-# MTNaMC8GCSqGSIb3DQEJBDEiBCAZumpZXdqSZSwl728bKTfVA1ZTYEBkSnnnOon+
-# 6L6rAzANBgkqhkiG9w0BAQEFAASCAgAIHSm3EaJP7x9rrjGVxMDFFqUj0T4E5VnV
-# sdjzaOBjs+z0+8IwrJfwKAsjnD40+v/57wdGqdxMC3KS7+p62vLlPvPOVXjqKrg3
-# TS9c5UREAsm5Mkd6/l3jzJQcm6ThQrTDBLoJiRzry+IJQ154GDfnXO5Cai8gW0nr
-# kbHxtzI6X1Icp0Mnzf4EP6Jxrn1B5WFUYYJLxv5lnLWHiDRXFVewJK20jBT0dVwE
-# 22aYUdlzL/qHV+Y91Q9+wdl9pPQtznRFOoTd4jG0rEjgG8TeMzONF38xsm+Wb5Qo
-# 1ylgkIzABuZV2xluyfHyzteFIATPC0Vg7wH6ySab7A0Nork+ecQnaUgBPgcpcNw4
-# 6/pVecEfTdOkxIxgyY4aLAJLAut1sWd1/9P6X1qF8QW+k+hqVmM2nsxRSZVPdg+p
-# gk9b7+ojmfCe5Zx8TmOxveP6rPR/QtGF0zlS6mFeHkY9jPL7CzdQCwGE51jYBVki
-# UqNgIh5wkd+DryqSpnBu1GlevAcBLIBzhw6eHf/KJeyM9slQw221GCxtJ7geYJ/d
-# QRo0bCucNadJ/7f6UgLUfqwNHg/2+21UkC9ZbNOjWMGenzgCG5RFL/rh9NNI9IKk
-# IWN1NOovX5jAOwxXOIGj0mamAfJe97qmPuIe/SkBecItkwnSaIDq0ep+N2Mmv2rE
-# sfJo+pGn2Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwODE0
+# MjFaMC8GCSqGSIb3DQEJBDEiBCCAqr3L6gzErm/qzJb54/RFf8R/HXkhtjPD2RWa
+# LgCCHzANBgkqhkiG9w0BAQEFAASCAgAB5EdCrFH3RzLSE9KhHxiY+dW8+zu/POSD
+# Pi5qcfQ0wqDv6UZcIIAXkHjMR1OFDhf27TUJxRJT/sr8HDfbmQjSDTcaWM4qip4b
+# lyExLn5H+vDdl3OWYrFkekdOmBYPXZrnxuVOf4VfPx2UHHl9aNcc3CKUkWLR5jeA
+# /88liSLLUzB9LV2PtQ13TDw7q05hJPbmuSZNQh+4l/P/MndsRDlnYf6VrnKhZ3UG
+# 8fO3K36vRsDYxz+Tl2HgUyNQ9ROX70+lxj5X0BMcC6ZgoABO8t6PpB51pWJ67/Ee
+# 7AwoRrZGwBWae/J0hViEltjlLbPF1nYKOisCmiSftYmJ/Ty8yDCMzAoUd0tp83WV
+# ZmXO8irYKKFKB65CqhoStCBSCyTibJvdPOV3EJBUD4VcktXc4UBJZ+Z8Df4SgG1M
+# 7cZqeGFVnC4KsTDayfppK9w8lHRDTJhBO9JmWYwbccQ+j7rgLvGQqzle7l3gCisP
+# inT6QMNVdaGvX0H26gSmLu0K7ZijyEYAmLE8ctL5dlqMmdYTPjCBkT03ujRJGjcT
+# jDcpFQB6sD6ODCSslyv5yONPFdeiOnkS+9N6U04h6ScTbLeFnOILr75r3qyiiLb4
+# g6lqCDmTm5C8dN3AOHH77P1lmMNvTVkrvUDX5x/7R/nkxvN03qATmcC/AilmJDTM
+# tNxGQSTrfg==
 # SIG # End signature block
