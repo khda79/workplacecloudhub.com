@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.47
+1.48
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.46
+Version: 1.48
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.47"
+$ScriptVersion = "1.48"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -3165,6 +3165,9 @@ Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
         if ($InventoryFailureRecord) { $completionParameters.ErrorRecord = $InventoryFailureRecord }
         Complete-SmartM365ExecutionContext @completionParameters
     } catch {}
+    # Preserve the failure after final logs/notifications so launchers return a nonzero exit code.
+    if ($InventoryFailureRecord) { throw $InventoryFailureRecord }
+    throw 'Mailbox inventory did not complete successfully.'
 }
 Else
 {
@@ -3255,11 +3258,12 @@ Else
 }
 }
 #End of script
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdva0I5gnvndYh
-# ije/CyA9vLiOAESzdTkNJ7bjCHidC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6/hdrYFmOo1Ab
+# sadkhv0lgy4ycTG5m8dD+NpV9pQvP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3392,31 +3396,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC4KLl/yOp64MNoSzntJahVJpESGN+dV9MoZXJ+4eQpcMA0GCSqG
-# SIb3DQEBAQUABIIBgKJPQ0e687JOHnfFCcLuaK0xagO0XGItQLZvI8lLY6tFvjjd
-# mMiOfa0oWqSOgpy3rG7JC0Y/PKo7VLf67JVEmqafrtEMxbkkqj/R34QSf3P5/8SK
-# jHJmUYSOLBshinZUXsacPDetp4SwlsTouUejtA4aGXHiUD93Yjmlafusqxzpkhw8
-# 0gg/woahrS2/JnV461pWL5lk4TZTCzofVtXXPuhNd4sz+h5rA9D4ZMs5ILny1btD
-# PvS857mcyqGh84vn5MdX6/2wYCm60wCjFT7NsR0l//BS03nki0bxta0hpBd6AmDB
-# /g27Kzpk8EIi6rlBsf0dIddlpau3kI2Cn0Oq3gPcWfxiRToIGcRHIjN/E0PlUrM8
-# 06br63sYTaLEMDmkvGzaB+ay4l4L0GitYIGeUIr+duGCjuWDsFxg1fNuqEfii5L0
-# 4XzXQXIrkpQw0tI9jn87dFNkKl9hUbSObfXVBNq/rS2R+89GaVUe+U8AHCaZIvMx
-# SES8uCfkz4FPCVMEGKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIALgjRyQN9lQXoIJemEcZhY8CBl4lcWwoVT2BDqAi+NBMA0GCSqG
+# SIb3DQEBAQUABIIBgDe5mdC0DY3CCuumFg5EqH2la6vLJcqLY+GGeuHZyHIE3FYO
+# A5F5IkNqhZUWUMb/PWR1IdthgVrigEfrcP/FT4blqZgnFvT0+b1iCvJe4JXsei3F
+# Ja5AiKBmKl/eXbKejnGn9PWgu4hc48xyfvZJbUjV2jE1EaN5WWYvVMlLS8eLz+Kj
+# 0N8XmXdqcKvIHvVVRiQLfUOJCLLLrOrn0Bde5qgnom/+LJXyHNekJ+VVNSvw0s2u
+# mqKiegrIurB4ovWDuRGsvlwPJE9AXaP3+lXOoyLzp/k8Te1gLQT9rZSJJxoIiHQv
+# gVnZ1FIW/8x6unfLyxWyJ5uOqIiuNNKcdQcSAYPhZ2vqWw0RVimig9C0ib6H7jr7
+# QnIhgRsLOTQYo9g5hsa7yow+lRjSMu6SRaAo+8mvRZjFQN0U36s6WIPPd0Il+rpo
+# gLKRWHvSvP0L1iShOu9OqJ8FRlYkriD+6dBZS/5QH7l1/pZDgGQdEknvw7T14Zah
+# m6HcWAAYPox51QP/bKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDNaMC8GCSqGSIb3DQEJBDEiBCBtuVRWJu/nCeYCKEraJKxMJ3RznE8du24OFVzY
-# LtovgTANBgkqhkiG9w0BAQEFAASCAgCgYTHCIS9WbI1Y1bO0T04CEKkC5RHIODZj
-# kiWlMPX9flUTAIli79628u1AR2zP1xeZcewnbjJ1warCwTXaO5yc1K1YqNzdWPDa
-# DM0W11A0sqjzYlOcywuCAR6aQadK48F+WeZthMI1IL5PcJoxR/+cPK/GmCTk2tcn
-# zxGw+hmdTEpUj5slpeOYu9OT6p7PNoWvc/UIv7PACdiR4nXL+7UgIluBSiP6ZGW5
-# 9baX3DTOinFHRGO41+t7ebGu9SL1sepHvFz9wreMcc76MFrSCaksNF56SnDqLYSj
-# yBJg504qiKYjIn/EUFU2XUeld6DvkmVNVdtcX3wDSH4E82viL8TsPebpBagj2b2X
-# BsfRR26aw8n0LOuJ9uj2ZUM0Rw1A2J8p+816yxECTbrO7qmV1iacGIH0Lagb/be5
-# k8kUSCKFDGz+i+7CGmKVwjZwrhDEXRVL0lcvbHlEcOQU6EVuAZnmySunueHci1Fc
-# CO6Mu5gW7NqM9m/wjOh9r0CXAzyZ/e1j878YcsPWfU7ve9CYnwXcXr2ms5IuY8he
-# LjrAjhWNukeUIo93dHAcj12Eoguo3MM+eekirforqdjwxnpjalMbc3hB61ieGQ2s
-# PqyM15vlhPTmHHFNqZyuoyLw8l06ZdNOeBCv3nscmcwQGqFvunp3QC5njSo+RHhx
-# d2XUkqlVog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwNzM3
+# MTdaMC8GCSqGSIb3DQEJBDEiBCDSEWwVZpbAN7iY0czKroz/S2Zb1m8sjuBcqvEE
+# OrwNgzANBgkqhkiG9w0BAQEFAASCAgCVhKPYB3gRn8ahGhEg3zO/KRpa/3QQgVyp
+# B/gImRFjwKJx6TI5zuacZbnl4IK5TXtKFZfCIRhlU2ors3VMHTakthO4szgmwP1G
+# PyWk66xJzzuCYmExULOFTyY6qTfDEBffY/L+KKtVkjaCSqX3WJC9oIVMMocsgZus
+# 6VX3NR14XQV0MKPQIshGZWfjlVMbO5+39qswXl/ypeYWwTTjDA3g68in2VLCQhtp
+# 0zcOaOpOss/fZWJNx5umqjI1r339/dBWf73u3LPpuWw23z5OAg2SI+CoHrlcch0m
+# TSHf6f6gVZPPlbyKWklWfXUBpmJWufts1UiQ4HB0+z+CG1cXrqKuDMa6CJv/69AQ
+# pglSV5TJaoxkXWzSiC+WEX3Vj9nQ5wE4beQRViNT/EAi+JxoLXF7gZt2AdGiYPbV
+# VlToKV3OZSs2RAYjBJL03vkimaQ5JYEm0Mv5QAeN13BQIpz3Flbb33ocK1C0U8t/
+# r9AU/M6UPEf2uJUSyp1grpI5np2J37hlVyqB8vURqfWX/+i0Hs+7OmQiLp6SkEyP
+# BlsGxX/EaRY3syQ3sUxNaKsRpOQGkQMwWYgy7bYy4nc06XsrCFYJWcRmxCuuIhLl
+# Z2PoMeZ7aJQjSkKKF02KH0+/0jZpFCXhKU4Gl8cOL2gmEAnW+l870X7t7VMF5Aes
+# lt4JkKEjRw==
 # SIG # End signature block

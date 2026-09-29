@@ -1,4 +1,4 @@
-# JSON transport names are independent from the JSON payload. Import has no side effects.
+﻿# JSON transport names are independent from the JSON payload. Import has no side effects.
 Set-StrictMode -Version 2.0
 # PS7 can launch Windows PowerShell with a module path that excludes its native modules.
 # Load this engine's trusted built-in module, never a caller-provided module search result.
@@ -397,6 +397,15 @@ function Resolve-SmartM365WeeklyManifestPaths {
     )
     # The owner supplies its exact history root. Never recurse into arbitrary JSON.
     $rootFull = [IO.Path]::GetFullPath($HistoryRootPath).TrimEnd('\', '/')
+    # HistoryLabel was a display label, including the shared helper's old default.
+    # Three phases of the on-prem mailbox collector also share the same history root.
+    $compatibleLabels = @($HistoryLabel, 'SmartM365 inventory')
+    $mailboxLabels = @('Exchange on-prem mailboxes', 'Exchange on-prem remote mailboxes', 'Exchange on-prem mailbox daily stats')
+    if ($HistoryLabel -in $mailboxLabels -and $rootFull -match '(?i)[\\/]Exchange[\\/]OnPrem[\\/]Mailboxes[\\/]WeeklyHistory$') {
+        $compatibleLabels += $mailboxLabels
+    }
+    $journalLabels = if ($ValidateOwner) { @($HistoryLabel) } else { $compatibleLabels }
+    $compatibleJournalOwners = @($journalLabels | Sort-Object -Unique | ForEach-Object { 'WeeklyHistory:' + $_ })
     $plans = @()
     foreach ($folder in @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$' })) {
         $legacy = Join-Path $folder.FullName 'manifest.json'
@@ -407,7 +416,8 @@ function Resolve-SmartM365WeeklyManifestPaths {
             if ($document.Week -ne $week) { throw 'Weekly manifest week mismatch.' }
             if ($ValidateOwner) { & $ValidateOwner $document | Out-Null }
             else {
-                if ($document.HistoryLabel -ne $HistoryLabel) { throw 'Weekly manifest owner mismatch.' }
+                if ($document.HistoryLabel -notin $compatibleLabels) { throw "Weekly manifest owner mismatch: $legacy (expected '$HistoryLabel', found '$($document.HistoryLabel)')." }
+                $labelChanged = $document.HistoryLabel -ne $HistoryLabel
                 $recordedRoot = [IO.Path]::GetFullPath([string]$document.HistoryRootPath).TrimEnd('\', '/')
                 if ($recordedRoot -ne $rootFull) {
                     # A relocated workspace keeps the tenant and collector-relative history identity.
@@ -419,9 +429,12 @@ function Resolve-SmartM365WeeklyManifestPaths {
                         $recordedIdentity.Groups['identity'].Value.Replace('/', '\') -ine $currentIdentity.Groups['identity'].Value.Replace('/', '\')) {
                         throw 'Weekly manifest history root mismatch (tenant/collector identity differs).'
                     }
+                }
+                # Aliases never bypass tenant/root identity or completeness validation.
+                if ($recordedRoot -ne $rootFull -or $labelChanged) {
                     foreach ($csv in @($document.Files)) {
-                        if ([IO.Path]::GetFileName([string]$csv) -ne $csv -or -not [IO.File]::Exists((Join-Path $folder.FullName $csv))) {
-                            throw 'Relocated weekly manifest snapshot is incomplete.'
+                        if ([string]::IsNullOrWhiteSpace([string]$csv) -or [IO.Path]::GetFileName([string]$csv) -ne $csv -or -not [IO.File]::Exists((Join-Path $folder.FullName $csv))) {
+                            throw 'Relocated or relabelled weekly manifest snapshot is incomplete.'
                         }
                     }
                 }
@@ -436,7 +449,7 @@ function Resolve-SmartM365WeeklyManifestPaths {
     }
     # Preflight all existing weeks before mutating any; divergent pairs fail closed.
     foreach ($plan in $plans) {
-        $resolved = Resolve-SmartM365OwnedJsonPath -Path $plan.Legacy -Owner ('WeeklyHistory:' + $HistoryLabel) -Validate $plan.Validate
+        $resolved = Resolve-SmartM365OwnedJsonPath -Path $plan.Legacy -Owner ('WeeklyHistory:' + $HistoryLabel) -CompatibleJournalOwners $compatibleJournalOwners -Validate $plan.Validate
         [pscustomobject]@{ Path=$resolved; Renamed=($resolved -ne $plan.Before) }
     }
 }
@@ -453,8 +466,8 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxtmrAIqRez7BI
-# 7CAI6Q530g2o80HuEijxBptEknhcVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZKFzpnF88+8mN
+# 3LmKGDs6K8lGGm9NwzdLtuVPlxbJWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -587,31 +600,31 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJzodSy/PMGan7iyb8gcQc4ymfcwB0KH/mwgY2Pitg1/MA0GCSqG
-# SIb3DQEBAQUABIIBgAX6qDU9SWbNZK2k7znN3D5u5lhs9scAPy5iwrcDexQEjgcE
-# +tt2A57OqtZVbB3tpo5+NXX7vfwWUtnRKYh/A+VqY8PGptX39O2LKalhOe5a83Y8
-# 9bJrM7mWosuSQgWaTCvr/QVJB62j3GNlGuMpDxm8IqLMxA50RJ5XU9S60AMrs58k
-# 9waoQiwaS2b+Mb2T4Dsst9u3hM0l3eru9TBfWUJ9j2vn4FD7WlwPq5GGytui0xiA
-# 8vb+rjA+LHCvehMzUxRWnxxGkpXX7qKQM2PdaAkkd8xo8l5cf1VcpE4H8rcAG4dv
-# xu0sNAxJdpfZR0LATLu3StR5wKiA12g9a3aRt2h4bHMGdHBPq+UsTw3dZLMiOGWU
-# oYHf3J1CgncAK2sCxmyhNj0dhD3JXURtLIouDYihGK0A05N52GLsO0sA4i0LiT/+
-# JBMpmM2ImL3T+Dg00DuWl0eEVDmSr9A5MTz5YFVxweoBZBpjnVOxyZKurWsfGM3Z
-# j1CCRh8HIvsHrd/w4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPG6jURnpOKImG0aY0zoVde0yspouxFEfVxjTKTEKMvsMA0GCSqG
+# SIb3DQEBAQUABIIBgHSnOl/S6wn3Ott30uXB3Q8CEMybM6KOalUleAUin1oqD3Rv
+# +BwD/8KJNQlvl+GSD/XeWnl17K0GHgX39j2ecFIhqiOyB1J540SSOkQhPk5pDW3v
+# K2PeA8n9fiR8ebRXsFdzBKUeEk+goN2OHDjp9mvqIC4dyK/NJMxnvAz8xEw17QW9
+# BQNQ2rQK+cpMi36r8u9o0qSb+Ag97BzV7dCYr/BuFTA+RAXoFHWabhYFpSOGr7Zt
+# WTgwwE2WUVxi5nB+I/gubqiOGNp8np9r6eY3L9k3K4xWPFeqE9IpbtXBDCXZsiEc
+# 2XAcefb/Gw26olRzsVcIsLPQ5APxS92lYK4XNHKSGEU2AjvTfId+EIoC1rKyUCo3
+# 7KP9x1Ket3NERGRNt2NtkZZSWPf+9ywXm+eT1TGfueAlLQlk6ByLgDjiT2MtjUKM
+# xhSvJstohiwjI0Cv8C+Y04VJDpZrdwfHHr/wWCgs6sgk0iO7NU5cvkOZRKhF7HcK
+# u6a2y4MRZUZCUVEdD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjgyMDE3
-# MTJaMC8GCSqGSIb3DQEJBDEiBCDQUn9dknK3qPsW91/Xrr/XPJ58178iCHzinvN3
-# dWac6TANBgkqhkiG9w0BAQEFAASCAgAKxfk+qPeyGq1su8oCQ1dKqaJm3BuyiKFg
-# sNQ7CXd08+adElcvSDSl3EFHRBJIBTTz1OwlQenAurACZhxGoOJa0xf4J2suDhsc
-# fncGklLmQnZEnnuQHwB1SCdvK85ANXj6zb2HLufaknP3ycDj21ORLh0nsmbTDJN0
-# R0pKGZqDEzhG7F07Nh5G+ryxC7Poae4EaIU32Ao3TVdDIyrkvf/+zGYo3sIfZAUC
-# AhJHewYAeS07bBq3Geak8gWwR81WPTpZZSd2RB0irNfNse8APB5QmO9cl/a1zdiH
-# UpbRv8l5MeZIW/ujALJRjNgP1DjYr0AlIAP8COW3p7Av9lBW2VFwB1hrYkjPRoqE
-# bADIu0wn7lCpoKzp/xVEOjgeT5X/V2Fi6G4Vs2j1mBkSGUJ0b/OGICKAMz3SXomT
-# eIegNocpPYVRFEV6E3PqUeCrDn9lEgE4oJFm6TxBsPKFn7Xix5dv5YomHtdRz9wW
-# I2YiJ+T4Cx3catzRlUv0UuqbI9c30LnoPi1iz5OLiWqZe9ETV4GW1LRKPobV3SH5
-# xinQMRk5knvpc0M1buhKAl6Pw9G/30LnsVSzYAxfQhhYhn0zgrjOtolloAW+5Y4V
-# p9TTxg3k1TndYA/m8PsGzYej30cz2zNjGrh6jlOSJ8ZnSyCwFAOv1DOskkDsgwJV
-# UkdUIsVFFQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwNzM3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCD5QEoMPIaSZbGlk0cHf4i+z5SgcDHBjV4ZbL8M
+# UC9fJjANBgkqhkiG9w0BAQEFAASCAgAk6/Nu2iD/4rE9v+UKtEldMjefjQzYW6G/
+# hmeCpT1Zap/B4y3ytxt01rizIXhavYBDit6rbqBg+AkYBcY/vsF3BdM+jHOpYVuy
+# jehLSoPBhEe9pHx+McTMxAkoG0k7o7eTk5Bp4Q8U5R2IwmQhetJ5O5REwRQV+9al
+# SBaQPTfQIPYWxHwt4r0WtHIFJG32jGE7N0YoL3xufSABS28bA0yBeEbq3pMcL+1D
+# KBvyqB6Rk9FEbvY1QJvsqdNdFgqFZZ3EsPiAm5Ent2HuNDVkEuIyPgpIpGCGWBEF
+# DZ17qR3E08yNSsZ2L4cEUNMab3cKkuwDPdHNhM8gmOALqCU1XK0XmY8NeGvpZ6dp
+# a5kijS2xCy/gaXEk2gzjxhukuuvPaXVjY2ANhACTtCDbc7qpO0/AxzxMEHV6IYU6
+# zMCiQndu1msfr0X20OLdFkiShsZ7gKORyVEkS6DnkOfa8jXWrZEFcJOiSghY2Goy
+# eHPvrNuNWLWnhVbm0PFMBW/lTMtRLmZbKqEu0/O/ArIsg8oC0KU5O9nQVo0O5q1N
+# lCpJ2nlGCmx3e1yRFO0Y/tp0AIWyC8J6gkqvgn3mqWSWu+rl9wMAPszuCLNw9sOG
+# uTZEz5JUkezIYP3BGk/e7M6n2SU7A7Mo9Q/5YK5kvaUF1Sr63j0KxcFof+TW8pzj
+# 5xaIJhl82g==
 # SIG # End signature block
