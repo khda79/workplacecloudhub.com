@@ -196,7 +196,7 @@ Official documentation:
 
 ## SharePoint Online Inventory
 
-`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph for the default site/list inventory. This Graph-only mode does not call `Get-PnPTenant` and does not require SharePoint `Sites.FullControl.All`. The tenant CSV still exports storage used from the site inventory; licensed capacity fields remain blank and SmartWorkplaceDashboard estimates capacity from `M365_Licenses_Tenant.csv`. Fields not exposed by Graph are exported as `NotAvailableGraphOnly` instead of failing the run.
+`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph for the default site/list inventory. This Graph-only mode does not call `Get-PnPTenant` and does not require SharePoint `Sites.FullControl.All`. The tenant CSV still exports storage used from the site inventory; licensed capacity fields remain blank and SmartWorkplaceIntelligence estimates capacity from `M365_Licenses_Tenant.csv`. Fields not exposed by Graph are exported as `NotAvailableGraphOnly` instead of failing the run.
 
 Main exports:
 
