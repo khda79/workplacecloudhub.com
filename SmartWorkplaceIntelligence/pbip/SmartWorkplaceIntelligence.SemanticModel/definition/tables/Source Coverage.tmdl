@@ -1,0 +1,105 @@
+/// Materialized required-source matrix including failed and stale sources.
+table 'Source Coverage'
+	lineageTag: 500d9ccb-cef7-4472-969a-ecb6a5686d2f
+
+	/// Required sources within target divided by all required sources.
+	measure 'Source Freshness Compliance (%)' = DIVIDE(CALCULATE(COUNTROWS('Source Coverage'), KEEPFILTERS('Source Coverage'[Required Flag] = TRUE()), KEEPFILTERS('Source Coverage'[Freshness State] = "Within Target")), CALCULATE(COUNTROWS('Source Coverage'), KEEPFILTERS('Source Coverage'[Required Flag] = TRUE())))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: ddc59d29-d650-4688-85ae-a0da4c12430b
+
+	/// Required sources with no accepted qualifying run.
+	measure '# Missing Required Sources' = CALCULATE(COUNTROWS('Source Coverage'), KEEPFILTERS('Source Coverage'[Required Flag] = TRUE()), KEEPFILTERS('Source Coverage'[Freshness State] IN {"Missing", "Source Error"}))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 9e0518ac-154d-4cb8-a60d-3ff6edef0dbd
+
+	/// Required logical source entities in scope.
+	measure '# Sources' = CALCULATE(COUNTROWS('Source Coverage'), KEEPFILTERS('Source Coverage'[Required Flag] = TRUE()))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 57951787-9df7-4ccd-9d95-fc7802a5297c
+
+	/// Evidence-aware overall source status label.
+	measure 'Data Status Label' = VAR _missing = [# Missing Required Sources] VAR _freshness = [Source Freshness Compliance (%)] RETURN IF(ISBLANK(_freshness), "Not Collected", IF(_missing > 0, "Attention Required", IF(_freshness = 1, "Current", "Stale or Partial")))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: edf3ac48-6c3f-486b-bdfb-a694ad0a662e
+
+	/// Compact disclosure of synthetic detail data, current status, and source freshness.
+	measure 'Evidence Ribbon Text' =
+			VAR _status = [Data Status Label]
+			VAR _shortStatus = SWITCH(_status, "Attention Required", "Attention", "Stale or Partial", "Partial", _status)
+			RETURN "Synthetic · " & _shortStatus & " · Fresh " & FORMAT([Source Freshness Compliance (%)], "0%")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 5f6959d2-1376-4681-92bc-f1645bbcc9ed
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1124f7e8-a43f-40c5-9edc-7fa652542568
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 18d770f9-d29b-498a-a4da-67988560a39c
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 49864d6b-278e-4197-b7f1-e48324e57fa5
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Data Source Key.
+	column 'Data Source Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: de5b3216-0651-40f6-b874-665e751a14ff
+		summarizeBy: none
+		sourceColumn: Data Source Key
+
+	/// Business attribute Required Flag.
+	column 'Required Flag'
+		dataType: boolean
+		lineageTag: 2b6120dc-6b6d-456e-a214-af6a1702902d
+		sourceColumn: Required Flag
+
+	/// Business attribute Freshness State.
+	column 'Freshness State'
+		dataType: string
+		lineageTag: b78c18aa-f002-44d6-8b0c-a93a356c9b35
+		sourceColumn: Freshness State
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: b05c60c5-9aef-4626-b1a9-d34e5ac0ae01
+		sourceColumn: Evidence Status
+
+	partition 'Source Coverage Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Data Source Key" = Int64.Type, #"Required Flag" = nullable logical, #"Freshness State" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, true, "Within Target", "Observed"},
+				        {20260915, 1, 1, 2, true, "Within Target", "Observed"},
+				        {20260915, 1, 1, 3, true, "Stale", "Unknown"},
+				        {20260915, 1, 1, 4, true, "Partial", "Unknown"},
+				        {20260915, 1, 1, 5, true, "Source Error", "Source Error"}
+				    })
+				in
+				    Source
+

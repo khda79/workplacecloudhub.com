@@ -1,0 +1,92 @@
+/// Private aggregate workforce and identity risk signals, each with coverage, evidence status, and recommended action.
+table 'Workforce Operational Signals'
+	lineageTag: a7506e6f-4239-4397-aa5b-2bf9ee24e40d
+
+	measure 'Workforce Signal Affected Users' = SUM ( 'Workforce Operational Signals'[Affected Users] )
+		formatString: #,0
+		displayFolder: Workforce | Signals
+		lineageTag: 83815fc9-b352-40e4-a95a-7bda2f61365d
+
+	measure 'Workforce Signal Covered Population' = MAX ( 'Workforce Operational Signals'[Covered Population] )
+		formatString: #,0
+		displayFolder: Workforce | Signals
+		lineageTag: 81bd2856-f5e2-431e-aa3f-008d5fc49759
+
+	measure 'Workforce Signal Affected Estate' = MAX ( 'Workforce Operational Signals'[Affected Estate (%)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Signals
+		lineageTag: c0cbf8e1-b107-43d9-ab59-6aa71d407d41
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 665ad785-013e-4c4f-b3a2-4c5b19dd7d07
+		summarizeBy: none
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: ec2d23d5-f5cc-47b9-8046-f4368f959adc
+		summarizeBy: none
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: f174e049-86c4-4578-bc45-f13878e35ad7
+		summarizeBy: none
+		sourceColumn: Risk Category
+
+	column 'Affected Users'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: f8f636cb-a0f8-4f26-aa2b-a20e2ab34ad7
+		summarizeBy: none
+		sourceColumn: Affected Users
+
+	column 'Covered Population'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: b1537d0a-1e08-4605-a1d6-2376c28b36e9
+		summarizeBy: none
+		sourceColumn: Covered Population
+
+	column 'Affected Estate (%)'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: c9cd06e3-aa5e-4b7c-b96b-86883f3b9682
+		summarizeBy: sum
+		sourceColumn: Affected Estate (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 678987d4-d1d7-4159-8e4c-b2ab9be12053
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 3b32dee2-a371-4a58-84f0-121ea462f7a1
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Source Scope'
+		dataType: string
+		lineageTag: b4d059c1-f481-410d-b135-5e261d362133
+		summarizeBy: none
+		sourceColumn: Source Scope
+
+	partition 'Workforce Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WorkforceOperationalSignals.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Severity Label", "Signal", "Risk Category", "Affected Users", "Covered Population", "Affected Estate (%)", "Evidence Status", "Recommended Action", "Source Scope"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Affected Users", "Covered Population", "Affected Estate (%)"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Severity Label", type text}, {"Signal", type text}, {"Risk Category", type text}, {"Affected Users", Int64.Type}, {"Covered Population", Int64.Type}, {"Affected Estate (%)", type number}, {"Evidence Status", type text}, {"Recommended Action", type text}, {"Source Scope", type text}}, "en-US")
+				in
+				    Typed
+

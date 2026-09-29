@@ -1,0 +1,112 @@
+/// Private local SmartM365 evidence root. Local-only parameter; never publish or commit its value.
+expression DataRoot = "C:\SmartM365\DATA" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: c4217e45-94b0-45ec-b187-ed7bbe02035b
+
+	annotation PBI_ResultType = Text
+
+/// Deployment parameter. Replace this client's value with an example before publishing a reusable PBIP template.
+expression SharePointSiteUrl = "https://contoso.sharepoint.com/sites/SMART-M365" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: ab3aa36b-3a32-472a-bf59-a75f8944dce5
+
+	annotation PBI_ResultType = Text
+
+/// Display name of the SharePoint document library containing SmartInventory evidence.
+expression SharePointLibraryName = "Documents partages" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 08e0c7c7-6007-4f99-a8e0-8e0bde7c0799
+
+	annotation PBI_ResultType = Text
+
+/// Folder containing DATA-LAST and DATA-ALL beneath the selected document library.
+expression SharePointDataFolder = "SMART-M365/DATA" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 94af717e-65af-47fa-8205-02aeeb95dff7
+
+	annotation PBI_ResultType = Text
+
+/// Local Desktop current-state source. Non-recursive DATA-LAST or root configuration only; DATA-ALL is explicitly rejected.
+expression GetSmartInventoryFolder =
+		(Subfolders as list) as table =>
+		let
+		    Allowed = List.IsEmpty(Subfolders) or (List.Count(Subfolders) = 1 and Subfolders{0} = "DATA-LAST"),
+		    Relative = if Allowed then Text.Combine(Subfolders, "\") else error Error.Record("SmartInventory scope", "Only DATA-LAST and root configuration files are allowed in current-state mode.", Subfolders),
+		    Path = Text.TrimEnd(DataRoot, {"\", "/"}) & (if Relative = "" then "" else "\" & Relative),
+		    Folder = Folder.Contents(Path)
+		in
+		    Folder
+	lineageTag: a87b1f01-13d8-4d8b-88a5-3e290d083b82
+
+/// Read one exact local source file with its modification time; no fallback or historical search.
+expression GetSmartInventoryFile =
+		(Subfolders as list, FileName as text) as record =>
+			let
+				Folder = GetSmartInventoryFolder(Subfolders),
+				Matches = Table.SelectRows(Folder, each [Name] = FileName),
+				Selected = if Table.RowCount(Matches) = 1 and Value.Is(Matches{0}[Content], type binary)
+					then [Content = Matches{0}[Content], Modified = Matches{0}[#"Date modified"]]
+					else error Error.Record("SmartInventory file", "Missing or ambiguous local source file", FileName)
+			in
+				Selected
+	lineageTag: e1c0464a-0d57-4c77-9e11-80c0c3c575a8
+
+/// Local for Desktop validation; SharePoint for the published prepared dataset.
+expression PreparedSourceMode = "Local" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 4ed43701-3685-428f-a9d4-32b65616deb6
+
+/// Private synchronized local DATA-POWERBI root. Do not publish tenant runtime values to GitHub.
+expression PreparedEvidenceRoot = "C:\SmartM365\DATA\DATA-POWERBI" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: a27274ad-f065-4462-af3e-51eaaef0c51b
+
+/// Prepared batch folder relative to SharePoint DATA. Cloud deployment unqualified.
+expression PreparedSharePointFolder = "DATA-POWERBI" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: a534194b-79d0-466f-a96c-0ea15cdea611
+
+/// Versioned single-tenant CSV reader. Prefers .json.txt metadata, with legacy .json fallback only on absence. Checks manifest identity and file size. Refresh after publication/synchronization; optional immutable batch pin.
+expression GetPreparedEvidenceFile =
+		(fileName as text) as binary =>
+		let
+		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
+		    ReadFolder = (segments as list) as table =>
+		        if PreparedSourceMode = "Local" then
+		            Folder.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & (if List.IsEmpty(segments) then "" else "\" & Text.Combine(List.Transform(segments, SafeSegment), "\")))
+		        else if PreparedSourceMode = "SharePoint" then
+		            let
+		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & List.Transform(segments, SafeSegment),
+		                Content = List.Accumulate(Path, Root, (parent, segment) =>
+		                    let found = Table.SelectRows(parent, each [Name] = segment)
+		                    in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment))
+		            in Content
+		        else error "PreparedSourceMode must be Local or SharePoint",
+		    ReadBinary = (segments as list) as binary =>
+		        if PreparedSourceMode = "Local" then
+		            File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\" & Text.Combine(List.Transform(segments, SafeSegment), "\"))
+		        else
+		            let
+		                Parent = ReadFolder(List.RemoveLastN(segments, 1)),
+		                Found = Table.SelectRows(Parent, each [Name] = SafeSegment(List.Last(segments)))
+		            in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file",
+		    ReadMetadata = (segments as list, name as text) as binary =>
+		        let
+		            Parent = ReadFolder(segments),
+		            Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
+		            Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
+		            // Fallback only on ABSENCE, never after a read or JSON parse error.
+		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
+		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
+		    PointerBytes = ReadMetadata({}, "current"),
+		    Pointer = Json.Document(PointerBytes),
+		    BatchId = SafeSegment(if PreparedBatchId = "" then Text.From(Pointer[BatchId]) else PreparedBatchId),
+		    Manifest = Json.Document(ReadMetadata({"batches", BatchId}, "batch")),
+		    Selected = List.Select(Manifest[Files], each [File] = SafeSegment(fileName)),
+		    Entry = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> BatchId or Manifest[TenantKey] <> Pointer[TenantKey] or List.Count(Selected) <> 1 then error "Invalid prepared batch manifest" else Selected{0},
+		    Content = Binary.Buffer(ReadBinary({"batches", BatchId, SafeSegment(fileName)})),
+		    // Size guard rejects incomplete synchronized files. SHA256 is checked by the publisher, not by M.
+		    Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared CSV transfer incomplete; previous imported model must be retained" else Content,
+		    StablePointer = if PreparedBatchId <> "" or Binary.ToText(PointerBytes, BinaryEncoding.Base64) = Binary.ToText(ReadMetadata({}, "current"), BinaryEncoding.Base64) then Checked else error "Prepared batch changed during read; refresh after preparation finishes"
+		in
+		    StablePointer
+	lineageTag: 1a2449ff-1655-4999-b5f5-61649746d24f
+
+/// Optional immutable prepared batch ID. Empty reads current.json; preparation and synchronization must finish before refresh.
+expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=false]
+	lineageTag: 340fbb26-2a1c-4c79-a41c-3e024ed2a776
+

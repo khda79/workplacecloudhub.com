@@ -1,0 +1,148 @@
+/// Synthetic Windows adoption, readiness, and lifecycle assessments.
+table 'Windows Lifecycle Assessments'
+	lineageTag: fdafd7ae-43ca-449a-bdf9-6ea1de895cdb
+
+	/// Active Windows devices with qualified lifecycle evidence.
+	measure '# Active Windows Devices' = CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] IN {"Windows 10", "Windows 11"}), KEEPFILTERS('Windows Lifecycle Assessments'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 1428ab39-eeda-4145-8a24-9cde06590204
+
+	/// Windows 11 devices divided by assessed Windows 10 and Windows 11 devices.
+	measure 'Windows 11 Adoption (%)' = DIVIDE(CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] = "Windows 11")), CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] IN {"Windows 10", "Windows 11"})))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 0dbc9a4e-1b44-48fe-90cb-af483d393839
+
+	/// Ready Windows 10 devices divided by assessed Windows 10 devices with a known result.
+	measure 'Windows 11 Readiness (%)' = DIVIDE(CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] = "Windows 10"), KEEPFILTERS('Windows Lifecycle Assessments'[Readiness State] = "Ready")), CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] = "Windows 10"), KEEPFILTERS('Windows Lifecycle Assessments'[Readiness State] IN {"Ready", "Blocked"})))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 3f6f41eb-7e8b-40fe-ba0f-c3cc49fa453a
+
+	/// Devices at or within one year of end of support in the selected scope.
+	measure '# End-of-Support Devices' = VAR _warningDate = MAX('Date'[Date]) + 365 RETURN CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[End Of Support Date] <= _warningDate))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 188f8292-02e8-4b8b-a48f-7b8f4b67fcd2
+
+	/// Devices with a qualified readiness assessment.
+	measure '# Assessed Devices' = CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Readiness State] IN {"Ready", "Blocked"}))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: cc1b3273-e4db-493c-b037-05718e4dbd9a
+
+	/// Observed Windows 10 devices remaining in the assessed Windows estate.
+	measure '# Windows 10 Remaining' = CALCULATE(DISTINCTCOUNT('Windows Lifecycle Assessments'[Device Key]), KEEPFILTERS('Windows Lifecycle Assessments'[Operating System Family] = "Windows 10"), KEEPFILTERS('Windows Lifecycle Assessments'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 5fb84c3e-6020-48e0-8e1a-7d2000ca0af0
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6262160a-b6c4-4d6c-95b6-4954aeb089f2
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 31e1216b-97bc-4bb5-9f84-734f00676964
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 59fd4ffe-8ed0-4c29-bbc1-9e6cb10e7f4f
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Geography Key.
+	column 'Geography Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 604ff6ae-01ed-4899-ac30-ce80b7e0ecd2
+		summarizeBy: none
+		sourceColumn: Geography Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e823135b-319b-4bc8-8191-5aa0dc6e952b
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Operating System Family.
+	column 'Operating System Family'
+		dataType: string
+		lineageTag: 6d902693-71e0-4e65-905b-5303e44d636f
+		summarizeBy: none
+		sourceColumn: Operating System Family
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Readiness State.
+	column 'Readiness State'
+		dataType: string
+		lineageTag: 8e4b3cca-e573-4c7c-9818-fd4698e8e3c4
+		summarizeBy: none
+		sourceColumn: Readiness State
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Blocker Category.
+	column 'Blocker Category'
+		dataType: string
+		lineageTag: c58b7dae-fe5d-4d2d-bfad-4227851f070f
+		summarizeBy: none
+		sourceColumn: Blocker Category
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute End Of Support Date.
+	column 'End Of Support Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: f3b73ddd-7070-455e-bd5c-1a32f841ca08
+		summarizeBy: none
+		sourceColumn: End Of Support Date
+
+		variation Variation
+			isDefault
+			relationship: ff024808-4f95-4d25-959b-f02349daec62
+			defaultHierarchy: LocalDateTable_224137e9-4fb1-4b15-8c63-ab2635f24d56.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 7f485b59-9e1b-4066-918b-78617fa1df44
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Windows Lifecycle Assessments Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Geography Key" = Int64.Type, #"Device Key" = Int64.Type, #"Operating System Family" = nullable text, #"Readiness State" = nullable text, #"Blocker Category" = nullable text, #"End Of Support Date" = nullable datetime, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, 1, "Windows 11", "Adopted", "None", #datetime(2027, 11, 9, 0, 0, 0), "Observed"},
+				        {20260915, 1, 1, 1, 2, "Windows 10", "Ready", "None", #datetime(2025, 10, 14, 0, 0, 0), "Observed"},
+				        {20260915, 1, 1, 2, 3, "Windows 11", "Adopted", "None", #datetime(2027, 11, 9, 0, 0, 0), "Observed"}
+				    })
+				in
+				    Source
+

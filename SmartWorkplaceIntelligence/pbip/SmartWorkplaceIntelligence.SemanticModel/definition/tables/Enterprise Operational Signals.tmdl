@@ -1,0 +1,141 @@
+/// Disconnected cross-domain operational signal catalog. Labels are static; every affected and covered value is calculated from current private evidence tables.
+table 'Enterprise Operational Signals'
+	lineageTag: 0be3cfee-97c1-44dd-9d2d-a1fbf97340e3
+
+	/// Sum of affected observations across selected operational signals. The same device, user, or mailbox may appear in multiple signals; this is not a distinct-entity count.
+	measure 'Affected Signal Observations' =
+			SUMX(
+			    VALUES('Enterprise Operational Signals'[Signal Sort]),
+			    VAR _s = 'Enterprise Operational Signals'[Signal Sort]
+			    RETURN SWITCH(_s,
+			        1, [Observed Potentially Reclaimable Assignments],
+			        2, [Underused Governed License Products],
+			        3, [Large Mailboxes Without Archive],
+			        4, [Mailboxes With Extensive Delegation],
+			        5, [Mailboxes Inactive 180D+],
+			        6, [Mailboxes With Forwarding],
+			        7, [On-premises Mailboxes],
+			        8, [Noncompliant Devices],
+			        9, CALCULATE([Security Affected Entities], 'Security Control Evidence'[Control Name] = "Secure Boot"),
+			        10, CALCULATE([Security Affected Entities], 'Security Control Evidence'[Control Name] = "Disk encryption"),
+			        11, CALCULATE([Security Affected Entities], 'Security Control Evidence'[Control Name] = "Code integrity"),
+			        12, CALCULATE([Security Affected Entities], 'Security Control Evidence'[Control Name] = "Active Directory health checks"),
+			        13, CALCULATE([Security Affected Entities], 'Security Control Evidence'[Control Name] = "Entra Connect synchronization health"),
+			        14, [Workforce Without MFA Registration (#)],
+			        15, [Sources Requiring Refresh],
+			        16, [Blocked Sources],
+			        17, [Accounts Stale >90D],
+			        18, [Highly Fragmented Applications],
+			        19, [Containers at 80%+ Quota],
+			        20, [Expected Mailboxes Not Protected],
+			        21, [Devices Without Active Defender Protection (#)],
+			        22, [Devices Without Enabled Firewall (#)],
+			        23, [Conditional Access Policies Not Enforced (#)]
+			    )
+			)
+		formatString: #,0
+		displayFolder: Enterprise Signals
+		lineageTag: ec55ec4c-fbd0-4268-9f96-e0218f34223c
+
+	/// Relevant covered population calculated from current source-backed evidence for the selected enterprise operational signal.
+	measure 'Enterprise Signal Covered' =
+			SUMX(
+			    VALUES('Enterprise Operational Signals'[Signal Sort]),
+			    VAR _s = 'Enterprise Operational Signals'[Signal Sort]
+			    RETURN SWITCH(_s,
+			        1, [Enabled Workforce Accounts], 2, [Governed License Products], 3, [Mailboxes], 4, [Mailboxes],
+			        5, [Mailboxes], 6, [Mailboxes], 7, [Mailboxes], 8, [Managed Devices],
+			        9, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Secure Boot"),
+			        10, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Disk encryption"),
+			        11, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Code integrity"),
+			        12, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Active Directory health checks"),
+			        13, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Entra Connect synchronization health"),
+			        14, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "MFA capability"),
+			        15, [Evidence Sources], 16, [Evidence Sources], 17, [Enabled Workforce Accounts], 18, [Applications],
+			        19, [Content Containers], 20, [Expected Mailboxes],
+			        21, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Defender protection active"),
+			        22, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Firewall enabled"),
+			        23, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Conditional Access enforcement")
+			    )
+			)
+		formatString: #,0
+		displayFolder: Enterprise Signals
+		lineageTag: e4fae115-20e4-4ce6-b187-e15270bce24f
+
+	measure 'Enterprise Signal Affected (%)' = DIVIDE([Affected Signal Observations], [Enterprise Signal Covered])
+		formatString: 0.0%
+		displayFolder: Enterprise Signals
+		lineageTag: 2cb0a942-41f5-4b11-897a-5aca2eea0089
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: adf280aa-f647-4771-be31-c9cf6b305464
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column Domain
+		dataType: string
+		lineageTag: 9b6fd565-d7ab-449b-91e5-7039c1543fd4
+		sourceColumn: Domain
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: f8f156f5-62e9-46ed-969b-4fa8c8995b93
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: 29b4cd1f-3830-4b12-9902-3330f8b5df8d
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: 92f2eb62-6697-462c-bdca-a666e87e89b5
+		sourceColumn: Risk Category
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 975217bd-4717-41d6-bf77-e223508f5fa5
+		sourceColumn: Evidence Status
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 77952d48-b586-432c-9bc3-ea595f4369f0
+		sourceColumn: Recommended Action
+
+	partition 'Enterprise Operational Signals Values' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, Domain = text, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Evidence Status" = text, #"Recommended Action" = text],
+				        {
+				            {1, "Licensing", "High", "Potentially reclaimable license assignments", "License optimization", "Observed", "Validate business need, then reclaim or reassign licenses from stale and never-used accounts."},
+				            {2, "Licensing", "Medium", "Underused governed license products", "Capacity optimization", "Observed", "Review renewal quantity and assignment policy before the next purchasing cycle."},
+				            {3, "Messaging", "High", "Large mailboxes without archive", "Capacity and retention", "Observed", "Enable or validate archive and retention before quota pressure causes disruption."},
+				            {4, "Messaging", "High", "Mailboxes with extensive delegation", "Access governance", "Observed", "Review Full Access, Send As, and Send on Behalf assignments with mailbox owners."},
+				            {5, "Messaging", "Medium", "Mailboxes inactive for more than 180 days", "Lifecycle", "Observed", "Confirm ownership and retention requirements before deprovisioning or migration action."},
+				            {6, "Messaging", "Medium", "Mailboxes with forwarding configured", "Data movement", "Observed", "Validate forwarding destination, business need, and data-loss prevention controls."},
+				            {7, "Messaging", "Medium", "On-premises mailboxes", "Migration", "Observed", "Validate migration readiness and prioritize supported Exchange hosting targets."},
+				            {8, "Devices", "High", "Noncompliant devices", "Compliance", "Observed", "Remediate failed compliance policies and validate exceptions."},
+				            {9, "Security", "High", "Secure Boot gaps", "Device security", "Observed", "Enable Secure Boot on supported devices and investigate collection errors."},
+				            {10, "Security", "High", "Disk encryption gaps", "Device security", "Observed", "Remediate BitLocker or encryption policy failures and increase evidence coverage."},
+				            {11, "Security", "High", "Code integrity gaps", "Device security", "Observed", "Investigate code-integrity failures and close devices without observed policy evidence."},
+				            {12, "Security", "Critical", "Active Directory health warnings or critical checks", "Identity infrastructure", "Observed", "Resolve critical and warning checks before relying on directory services."},
+				            {13, "Security", "Critical", "Entra Connect synchronization health issues", "Identity infrastructure", "Observed", "Restore synchronization health and confirm the next successful cycle."},
+				            {14, "Security", "High", "Workforce without MFA registration", "Identity protection", "Observed", "Complete MFA method registration for covered workforce accounts; assess Conditional Access enforcement separately."},
+				            {15, "Data Trust", "High", "Stale evidence sources", "Freshness", "Observed", "Refresh stale exports before current operational decisions."},
+				            {16, "Data Trust", "Critical", "Blocked or missing evidence sources", "Availability", "Observed", "Restore or repair blocked sources before using dependent KPIs."},
+				            {17, "Workforce", "High", "Accounts stale for more than 90 days", "Identity lifecycle", "Observed", "Review account ownership and disable or remediate stale accounts."},
+				            {18, "Applications", "High", "Highly fragmented applications", "Version fragmentation", "Observed", "Prioritize packaging and migration to a smaller approved version set."},
+				            {19, "Content", "High", "Content containers at 80 percent or more of quota", "Storage", "Observed", "Reclaim storage, adjust quota, or move content before capacity pressure becomes critical."},
+				            {20, "Backup", "High", "Expected mailboxes not protected", "Protection gap", "Observed", "Add each mailbox to a protection policy and verify a successful protection unit."},
+				            {21, "Security", "Critical", "Devices without active Defender protection", "Endpoint protection", "Observed", "Restore malware and real-time protection, then update overdue signatures."},
+				            {22, "Security", "High", "Devices without enabled firewall", "Endpoint protection", "Observed", "Enable the firewall on disabled or limited devices and investigate policy drift."},
+				            {23, "Security", "High", "Conditional Access policies not enforced", "Access protection", "Observed", "Review report-only or disabled policies and complete staged enforcement."}
+				        }
+				    )
+				in
+				    Source
+

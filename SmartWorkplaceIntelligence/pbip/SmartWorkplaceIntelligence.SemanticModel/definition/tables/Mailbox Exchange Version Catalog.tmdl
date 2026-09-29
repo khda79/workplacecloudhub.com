@@ -1,0 +1,37 @@
+table 'Mailbox Exchange Version Catalog'
+	lineageTag: d8afb313-ad07-4824-a227-fd53f3262d20
+
+	measure 'Mailboxes by Exchange Version' =
+			SUMX(
+			    VALUES('Mailbox Exchange Version Catalog'[Exchange Version]),
+			    VAR SelectedVersion = 'Mailbox Exchange Version Catalog'[Exchange Version]
+			    RETURN
+			        COALESCE(
+			            CALCULATE(
+			                [Mailboxes],
+			                TREATAS({ SelectedVersion }, 'Mailbox Evidence'[Exchange Version])
+			            ),
+			            0
+			        )
+			)
+		formatString: #,0
+		lineageTag: 8f687fc1-6530-4810-9eca-769c2f5bf2e1
+
+	column 'Exchange Version'
+		lineageTag: 0b105b13-bb73-4399-b968-0dabbb76f0c8
+		isNameInferred
+		sourceColumn: [Exchange Version]
+
+	partition 'Mailbox Exchange Version Catalog' = calculated
+		mode: import
+		source =
+				DATATABLE(
+				    "Exchange Version", STRING,
+				    {
+				        { "Exchange Online" },
+				        { "Exchange Server 2016" },
+				        { "Exchange Server 2019" },
+				        { "Exchange Server SE" }
+				    }
+				)
+

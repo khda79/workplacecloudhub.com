@@ -1,0 +1,84 @@
+/// One mailbox reconciliation candidate per synthetic run.
+table 'Mailbox Matches'
+	lineageTag: a8b15f1c-7d3c-483f-a176-fa8a9f80b4b1
+
+	/// Eligible directory-to-mailbox reconciliation candidates matched unambiguously divided by eligible mailbox candidates; conflicts and unmatched candidates remain in the denominator.
+	measure 'AD to Mailboxes Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Mailbox Matches'), KEEPFILTERS('Mailbox Matches'[Match Status] = "Matched")), CALCULATE(COUNTROWS('Mailbox Matches'), KEEPFILTERS('Mailbox Matches'[Match Status] <> "NotApplicable")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 2f037360-a902-41b3-ab53-e5c141511bd0
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ff6b1fae-1dbe-42c1-b4a2-4487299a7f04
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6bd0b55e-eb4e-4a22-81a8-3e369a89fa0e
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 79188cdb-c575-4c41-90c1-3eceaf3ee958
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Mailbox Key.
+	column 'Mailbox Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3780235d-a55d-45ab-bafd-60b3c5f7b442
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+	/// Business attribute Match Status.
+	column 'Match Status'
+		dataType: string
+		lineageTag: 3b5bad34-1911-414e-8772-511dd1165bc6
+		sourceColumn: Match Status
+
+	/// Business attribute Match Method.
+	column 'Match Method'
+		dataType: string
+		lineageTag: f418d310-21be-498a-bcb0-e9c5d81984df
+		sourceColumn: Match Method
+
+	/// Business attribute Candidate Count.
+	column 'Candidate Count'
+		dataType: int64
+		lineageTag: f157f4a7-00a8-4769-b41e-1e32b9a934bd
+		summarizeBy: none
+		sourceColumn: Candidate Count
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 2299b63e-6b40-4fd8-8d05-33b945a6fd2c
+		sourceColumn: Evidence Status
+
+	partition 'Mailbox Matches Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Mailbox Key" = Int64.Type, #"Match Status" = nullable text, #"Match Method" = nullable text, #"Candidate Count" = Int64.Type, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "Matched", "ImmutableId", 1, "Observed"},
+				        {20260915, 1, 1, 2, "Matched", "ImmutableId", 1, "Observed"},
+				        {20260915, 1, 1, 3, "Unmatched", "None", 0, "Observed"},
+				        {20260915, 1, 1, 4, "Conflict", "AddressAndImmutableId", 2, "Observed"}
+				    })
+				in
+				    Source
+

@@ -1,0 +1,94 @@
+/// Enabled and consumed synthetic license capacity by product.
+table 'License Capacity'
+	lineageTag: 26ccbe75-8c5d-4fef-851f-b0ce4b8e65cb
+
+	/// Enabled synthetic license units.
+	measure '# Enabled License Units' = SUM('License Capacity'[Enabled Units])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 7fbd25e8-ca9c-446b-950d-37476db9336f
+
+	/// Consumed synthetic license units.
+	measure '# Consumed License Units' = SUM('License Capacity'[Consumed Units])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: ded02c9e-a3fb-44d1-91dc-2680e168e0c8
+
+	/// Consumed divided by enabled license units.
+	measure 'License Capacity Utilization (%)' = DIVIDE([# Consumed License Units], [# Enabled License Units])
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: ec8f94ed-b1f4-4c15-bd9e-13204ed3cb2e
+
+	/// Consumed divided by enabled license units for Microsoft 365 F1, F3, E3, E5, and E7 products only.
+	measure 'M365 License Capacity Utilization (%)' = VAR _m365Products = FILTER('License Product', 'License Product'[License Family] IN {"Workplace Suite", "Frontline Suite", "Microsoft 365"} && RIGHT('License Product'[License Product], 2) IN {"F1", "F3", "E3", "E5", "E7"}) VAR _enabled = CALCULATE(SUM('License Capacity'[Enabled Units]), KEEPFILTERS(_m365Products)) VAR _consumed = CALCULATE(SUM('License Capacity'[Consumed Units]), KEEPFILTERS(_m365Products)) RETURN DIVIDE(_consumed, _enabled)
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 6d5aae72-c0f6-4729-8780-e1583b0ae141
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 55135689-8c9f-48b2-80fc-f8302bd5c119
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: cd13cfd4-3a48-4189-9d75-532b46bc898a
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2d11f6ff-e384-4651-9549-3b2942850786
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute License Product Key.
+	column 'License Product Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2c77c102-f90b-4da5-b038-0888fe2f6e1f
+		summarizeBy: none
+		sourceColumn: License Product Key
+
+	/// Business attribute Enabled Units.
+	column 'Enabled Units'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 38d26907-b57b-41b9-99fc-2d70b857bf32
+		summarizeBy: none
+		sourceColumn: Enabled Units
+
+	/// Business attribute Consumed Units.
+	column 'Consumed Units'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1ac835b5-7422-428e-889a-0d5eb2c8bf2f
+		summarizeBy: none
+		sourceColumn: Consumed Units
+
+	partition 'License Capacity Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"License Product Key" = Int64.Type, #"Enabled Units" = Int64.Type, #"Consumed Units" = Int64.Type], {
+				        {20260915, 1, 1, 1, 10, 6},
+				        {20260915, 1, 1, 2, 4, 3},
+				        {20260915, 1, 1, 3, 5, 2}
+				    })
+				in
+				    Source
+

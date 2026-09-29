@@ -1,0 +1,76 @@
+/// Disconnected application-standardization signal catalog backed by current private Intune discovered-application evidence.
+table 'Application Operational Signals'
+	lineageTag: 30f7adea-6b30-4d57-83b4-c1d7d36d9d8b
+
+	/// Affected application, installation-observation, or version count for the selected signal.
+	measure 'Application Signal Affected' = VAR _signal = SELECTEDVALUE('Application Operational Signals'[Signal Sort]) RETURN SWITCH(_signal, 1, [Highly Fragmented Applications], 2, [Fragmented Applications], 3, [Installations Outside Dominant Version], 4, [Long Tail Versions], 5, [Unknown Publisher Versions])
+		formatString: #,0
+		displayFolder: Applications | Signals
+		lineageTag: 9e694246-ffe8-49c5-b1b8-b7ffe254ce63
+
+	/// Relevant covered population for the selected application signal.
+	measure 'Application Signal Covered' = VAR _signal = SELECTEDVALUE('Application Operational Signals'[Signal Sort]) RETURN SWITCH(_signal, 1, [Applications], 2, [Applications], 3, [Application Install Observations], 4, [Application Versions], 5, [Application Versions])
+		formatString: #,0
+		displayFolder: Applications | Signals
+		lineageTag: ccb086f6-c2a1-49e5-af3f-f6c23d113da9
+
+	/// Share of the relevant application evidence population affected by the selected signal.
+	measure 'Application Signal Affected (%)' = DIVIDE([Application Signal Affected], [Application Signal Covered])
+		formatString: 0.0%
+		displayFolder: Applications | Signals
+		lineageTag: eb28a0c9-5c54-4e92-9d6b-e06d82e63d41
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: e604a34e-90bc-4084-8b96-107c0dd2ed57
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 1c3a247d-29e7-4943-86e2-5c088e9832ae
+		summarizeBy: none
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: 072364a1-6310-41c0-98f8-5ecf3279521a
+		summarizeBy: none
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: 710e3019-101f-4e3d-845f-41c9fed7baf4
+		summarizeBy: none
+		sourceColumn: Risk Category
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 9935af6f-adbc-4ab7-a5fc-278d4be2fabf
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: 48b2af0c-a1f9-478d-8a75-035cfa094cbb
+		summarizeBy: none
+		sourceColumn: Evidence Source
+
+	partition 'Application Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Recommended Action" = text, #"Evidence Source" = text],
+				        {
+				            {1, "High", "Applications with 20+ observed versions", "Version fragmentation", "Prioritize packaging and migration to a smaller approved version set.", "Intune discovered applications"},
+				            {2, "Medium", "Applications with multiple observed versions", "Standardization", "Confirm the preferred version and reduce avoidable deployment-ring spread.", "Intune discovered applications"},
+				            {3, "High", "Installations outside the dominant version", "Version concentration", "Target secondary versions for upgrade, removal, or approved exception.", "Intune discovered applications"},
+				            {4, "Medium", "Long-tail versions on five or fewer devices", "Inventory hygiene", "Validate business need, then retire or consolidate low-footprint versions.", "Intune discovered applications"},
+				            {5, "Medium", "Versions with an unknown publisher", "Data trust", "Identify the publisher and validate the application before standardization decisions.", "Intune discovered applications"}
+				        }
+				    )
+				in
+				    Source
+

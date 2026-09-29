@@ -1,0 +1,8 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,UserId,LicenseProductId,AssignmentState,InactivityEvidenceState,ApprovedExclusion
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-001,LIC-SYNTH-001,Assigned,Active,false
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-002,LIC-SYNTH-001,Assigned,Inactive,false
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-003,LIC-SYNTH-003,Assigned,Inactive,true
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-004,LIC-SYNTH-002,Assigned,Active,false
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-005,LIC-SYNTH-001,Assigned,Unknown,false
+1.0.0,Licensing,LicenseAssignments,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-006,LIC-SYNTH-002,Assigned,Active,false
+

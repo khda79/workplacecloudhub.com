@@ -1,0 +1,96 @@
+/// Accepted typed relationships between governed synthetic entities.
+table 'Service Relationships'
+	lineageTag: 38aa8f75-1ecc-4b6d-bcd3-940bf566586c
+
+	/// Accepted typed relationships in scope.
+	measure '# Relationships' = COUNTROWS('Service Relationships')
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 7f640162-6771-4e7e-8f16-166fd9701f60
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b786686a-a3e7-49ae-834f-f923d4164971
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a69042bd-18b0-4363-8ae8-dde982bf3f6d
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 196c6c9e-f36e-47df-a139-22ac4b7e8ac9
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d4dbe4ca-7ef3-42d4-9b7f-2d1909c2738d
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Relationship Type.
+	column 'Relationship Type'
+		dataType: string
+		lineageTag: b1e67a96-92fa-43e4-903c-9d72d6a00692
+		sourceColumn: Relationship Type
+
+	/// Business attribute From Entity Type.
+	column 'From Entity Type'
+		dataType: string
+		lineageTag: 4bb26ed3-35cc-4e00-adfd-13a04ba87c6a
+		sourceColumn: From Entity Type
+
+	/// Business attribute From Entity Key.
+	column 'From Entity Key'
+		dataType: string
+		lineageTag: 53463566-63a4-46b8-a66c-1ec017a46d26
+		sourceColumn: From Entity Key
+
+	/// Business attribute To Entity Type.
+	column 'To Entity Type'
+		dataType: string
+		lineageTag: dca7b2b3-07b4-4653-85d8-36c8645ee44f
+		sourceColumn: To Entity Type
+
+	/// Business attribute To Entity Key.
+	column 'To Entity Key'
+		dataType: string
+		lineageTag: a3e82fb7-2780-4fa0-aaa5-6c5f2cd4eb27
+		sourceColumn: To Entity Key
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 03dd0aff-b182-44f8-91ff-e70cae27b21a
+		sourceColumn: Evidence Status
+
+	partition 'Service Relationships Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Service Key" = Int64.Type, #"Relationship Type" = nullable text, #"From Entity Type" = nullable text, #"From Entity Key" = nullable text, #"To Entity Type" = nullable text, #"To Entity Key" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 3, "PrimaryUser", "User", "USR-SYNTH-001", "Device", "DEV-SYNTH-001", "Observed"},
+				        {20260915, 1, 1, 3, "PrimaryUser", "User", "USR-SYNTH-002", "Device", "DEV-SYNTH-002", "Observed"},
+				        {20260915, 1, 1, 9, "MailboxOwner", "User", "USR-SYNTH-001", "Mailbox", "MBX-SYNTH-001", "Observed"},
+				        {20260915, 1, 1, 12, "SiteOwner", "User", "USR-SYNTH-006", "Site", "SITE-SYNTH-001", "Observed"},
+				        {20260915, 1, 1, 2, "LicenseAssignment", "User", "USR-SYNTH-002", "LicenseProduct", "LIC-SYNTH-001", "Observed"}
+				    })
+				in
+				    Source
+

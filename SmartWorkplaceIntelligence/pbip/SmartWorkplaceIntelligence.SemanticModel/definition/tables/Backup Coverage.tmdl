@@ -1,0 +1,131 @@
+/// Synthetic policy eligibility and protection evidence.
+table 'Backup Coverage'
+	lineageTag: 8af38ee8-f60d-48b5-85f3-bf296a98433e
+
+	/// Protected eligible mailboxes divided by eligible mailboxes.
+	measure 'Mailbox Backup Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "Mailbox"), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible"), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected")), CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "Mailbox"), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 15e220a2-20ea-43ff-834f-0d8c852667fe
+
+	/// Protected eligible objects divided by eligible objects.
+	measure 'Backup Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible"), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected")), CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: fade985c-4cab-4d35-bcd3-9b3315879c0c
+
+	/// Protected in-scope objects divided by the governed eligible population.
+	measure 'Backup Policy Scope Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible"), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected"), KEEPFILTERS('Backup Coverage'[Policy Scope] = "InScope")), CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 57f75405-13b9-4620-8563-0578ceb09b4b
+
+	/// Protected eligible user accounts divided by eligible user accounts.
+	measure 'Protected Account Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "UserAccount"), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected")), CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "UserAccount"), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: c1565807-c412-4a83-aaa8-4aa45b0b8764
+
+	/// Protected eligible sites divided by eligible sites.
+	measure 'Site Backup Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "Site"), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected")), CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Entity Type] = "Site"), KEEPFILTERS('Backup Coverage'[Eligibility State] = "Eligible")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: e477bfd4-149c-4cf8-8336-4b3f2d70b570
+
+	/// Distinct protected entities in scope.
+	measure '# Protected Entities' = CALCULATE(DISTINCTCOUNT('Backup Coverage'[Entity Surrogate Key]), KEEPFILTERS('Backup Coverage'[Coverage State] = "Protected"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: ae21cfc5-7e69-4484-942d-e17fbeab3f4f
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: fd5772d4-f7a2-4669-b415-6c20249a0b9d
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 34c83d7f-290a-4ae3-8a59-f913b012eec4
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b447d536-3bcb-4367-af13-a8e60ae50890
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 47e72823-b7a3-48c9-8115-8d7e60f19d09
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Entity Type.
+	column 'Entity Type'
+		dataType: string
+		lineageTag: 9da94473-635b-4f2e-a625-dc21fb7156e8
+		sourceColumn: Entity Type
+
+	/// Business attribute Entity Surrogate Key.
+	column 'Entity Surrogate Key'
+		dataType: string
+		lineageTag: 529ea6cb-8c3c-435b-b8a6-ed151ee59bd5
+		sourceColumn: Entity Surrogate Key
+
+	/// Business attribute Eligibility State.
+	column 'Eligibility State'
+		dataType: string
+		lineageTag: e0d85536-a1f0-40cf-9e9d-7f5e118428a9
+		sourceColumn: Eligibility State
+
+	/// Business attribute Coverage State.
+	column 'Coverage State'
+		dataType: string
+		lineageTag: 2e59e988-8c15-4766-aaa6-efa00592d0d3
+		sourceColumn: Coverage State
+
+	/// Business attribute Policy Scope.
+	column 'Policy Scope'
+		dataType: string
+		lineageTag: c94d3b4b-bb86-4a12-a6a7-41e7c5f32179
+		sourceColumn: Policy Scope
+
+	/// Business attribute Exclusion Reason.
+	column 'Exclusion Reason'
+		dataType: string
+		lineageTag: de8df3e6-f771-43ca-bd18-1ec2960ad602
+		sourceColumn: Exclusion Reason
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: dde7870e-940c-481d-b8f6-9907270d8303
+		sourceColumn: Evidence Status
+
+	partition 'Backup Coverage Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Service Key" = Int64.Type, #"Entity Type" = nullable text, #"Entity Surrogate Key" = nullable text, #"Eligibility State" = nullable text, #"Coverage State" = nullable text, #"Policy Scope" = nullable text, #"Exclusion Reason" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, null, "Mailbox", "MBX-SYNTH-001", "Eligible", "Protected", "InScope", null, "Observed"},
+				        {20260915, 1, 1, null, "Mailbox", "MBX-SYNTH-002", "Eligible", "Unprotected", "InScope", null, "Observed"},
+				        {20260915, 1, 1, 10, "Site", "SITE-SYNTH-001", "Eligible", "Protected", "InScope", null, "Observed"},
+				        {20260915, 1, 1, 1, "UserAccount", "USR-SYNTH-003", "Excluded", "NotApplicable", "OutOfScope", "DisabledAccount", "Not Applicable"}
+				    })
+				in
+				    Source
+

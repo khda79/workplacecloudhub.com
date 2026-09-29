@@ -1,0 +1,8 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,UserId,Country,Department,UserType,AccountState,WorkforceStatus,LastActivityUtc
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-001,France,Engineering,Member,Enabled,Active,2026-09-14T12:00:00Z
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-002,France,Finance,Member,Enabled,Inactive,2026-06-01T10:00:00Z
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-003,Germany,Operations,Member,Disabled,Inactive,2026-01-10T09:00:00Z
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-004,Germany,External,Guest,Enabled,Active,2026-09-15T07:00:00Z
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-005,Spain,Sales,Member,Enabled,Unknown,
+1.0.0,Identity,DirectoryUsers,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-006,Spain,Engineering,Member,Enabled,Active,2026-09-13T16:00:00Z
+

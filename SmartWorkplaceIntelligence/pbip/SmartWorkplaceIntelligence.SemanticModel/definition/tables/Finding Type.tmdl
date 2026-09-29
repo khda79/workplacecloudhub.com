@@ -1,0 +1,71 @@
+/// Governed current-issue and risk-signal definitions.
+table 'Finding Type'
+	lineageTag: c47ac8df-04a2-4e61-b2fa-1126889124e3
+
+	/// Business attribute Finding Type Key.
+	column 'Finding Type Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 74e0fb78-450f-4cec-bced-172b2cf5cdb3
+		summarizeBy: none
+		sourceColumn: Finding Type Key
+
+	/// Business attribute Finding Category.
+	column 'Finding Category'
+		dataType: string
+		lineageTag: c444be5e-6bd9-49ce-8123-c3f47673b3cc
+		sourceColumn: Finding Category
+
+	/// Business attribute Finding Title.
+	column 'Finding Title'
+		dataType: string
+		lineageTag: 3d1d7b40-fd63-4a92-89d5-26963eb160ca
+		sourceColumn: Finding Title
+
+	/// Business attribute Default Severity Label.
+	column 'Default Severity Label'
+		dataType: string
+		lineageTag: b2155c5d-9f05-432a-8068-31ace6eef9b6
+		sourceColumn: Default Severity Label
+
+	/// Business attribute Finding Owner.
+	column 'Finding Owner'
+		dataType: string
+		lineageTag: 692cb00c-1288-4e79-8d02-26d6d57267aa
+		sourceColumn: Finding Owner
+
+	/// Business attribute Signal Type.
+	column 'Signal Type'
+		dataType: string
+		lineageTag: b386500f-24a3-40e0-b91b-c0f43b200b15
+		sourceColumn: Signal Type
+
+	/// Business attribute Signal Confidence.
+	column 'Signal Confidence'
+		dataType: string
+		lineageTag: 515ed903-46de-484d-94ad-cf3c7420b423
+		sourceColumn: Signal Confidence
+
+	/// Business attribute Potential Impact.
+	column 'Potential Impact'
+		dataType: string
+		lineageTag: d6169987-a6ce-4f41-8483-c6cd49e75fa1
+		sourceColumn: Potential Impact
+
+	partition 'Finding Type Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Finding Type Key" = Int64.Type, #"Finding Category" = nullable text, #"Finding Title" = nullable text, #"Default Severity Label" = nullable text, #"Finding Owner" = nullable text, #"Signal Type" = nullable text, #"Signal Confidence" = nullable text, #"Potential Impact" = nullable text], {
+				        {1, "Identity Hygiene", "Enabled inactive account", "High", "Digital Workplace", "Current Issue", "High", "Access exposure, ownership gaps, or license waste"},
+				        {2, "Device Compliance", "Noncompliant managed device", "Critical", "Digital Workplace", "Current Issue", "High", "Endpoint access or security incidents"},
+				        {3, "Backup Coverage", "Eligible mailbox is not protected", "High", "Digital Workplace", "Current Issue", "High", "Recovery exposure for eligible workplace objects"},
+				        {4, "Security Evidence", "Control evidence was not collected", "Medium", "Digital Workplace", "Current Issue", "Low", "Unqualified security decisions"},
+				        {5, "Identity Synchronization", "AD account missing in Entra", "High", "Digital Workplace", "Current Issue", "High", "Cloud access and Microsoft 365 provisioning incidents"},
+				        {6, "Identity Hygiene", "Enabled account was never used", "Medium", "Digital Workplace", "Risk Signal", "High", "Unnecessary access exposure and license waste"},
+				        {7, "Ownership", "Enabled workforce account has no manager", "Medium", "Digital Workplace", "Risk Signal", "High", "Delayed approval, review, and offboarding decisions"}
+				    })
+				in
+				    Source
+

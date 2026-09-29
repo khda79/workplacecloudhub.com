@@ -1,5 +1,5 @@
 'use strict';
-// Version: 3.8.0-beta.2 BETA. Generates in-memory M tests; no data-source calls.
+// Version: 3.8.0-beta.3 BETA. Generates in-memory M tests; no data-source calls.
 const fs=require('fs'),path=require('path');
 const app=path.resolve(process.argv[2]||path.join(__dirname,'..')),out=process.argv[3];
 if(!out)throw Error('Usage: node New-SyntheticQuery.cjs <app> <output.pq>');
@@ -28,6 +28,8 @@ add('decimal comma and dot','fnToNumber("1,25")=1.25 and fnToNumber("1.25")=1.25
 add('invalid and nonfinite numeric unknown','fnToNumber("invalid")=null and fnToNumber("NaN")=null and fnToNumber("Infinity")=null');
 add('fractional integer unknown','fnToInt64("1.5")=null and fnToInt64("-1.5")=null and fnToInt64("12")=12');
 add('invalid date unknown','fnToDateTime("invalid")=null and fnToDateTime("")=null');
+add('AD-style text threshold is preserved beside numeric value',load('TenantKey,Threshold,NumericValue\ntenant-a,At least synthetic baseline,12.5','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","string"},{"NumericValue","number"}}')+'{0}[Threshold]="At least synthetic baseline" and Value.Is('+load('TenantKey,Threshold,NumericValue\ntenant-a,At least synthetic baseline,12.5','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","string"},{"NumericValue","number"}}')+'{0}[Threshold],type text) and '+load('TenantKey,Threshold,NumericValue\ntenant-a,At least synthetic baseline,12.5','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","string"},{"NumericValue","number"}}')+'{0}[NumericValue]=12.5');
+add('backup-style text threshold is preserved beside numeric value',load('TenantKey,Threshold,NumericValue\ntenant-a,All synthetic members,7','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","text"},{"NumericValue","number"}}')+'{0}[Threshold]="All synthetic members" and Value.Is('+load('TenantKey,Threshold,NumericValue\ntenant-a,All synthetic members,7','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","text"},{"NumericValue","number"}}')+'{0}[Threshold],type text) and '+load('TenantKey,Threshold,NumericValue\ntenant-a,All synthetic members,7','{"TenantKey","Threshold","NumericValue"}','{{"Threshold","text"},{"NumericValue","number"}}')+'{0}[NumericValue]=7');
 add('comma import',load(basic)+'{0}[Value]=1');
 add('semicolon import',load('TenantKey;Value\ntenant-a;2')+'{0}[Value]=2');
 add('quoted numeric comma import',load('TenantKey,Value\ntenant-a,"1,25"','{"TenantKey","Value"}','{{"Value","number"}}')+'{0}[Value]=1.25');
@@ -65,6 +67,7 @@ add('empty DeviceDetail',detail('DeviceDetail',{},'Table.RowCount(Result)=0'));
 add('unmatched users retained',detail('UserDetail',{'M365_Users_Active':[{'Object Id':'u-a','User principal name':'a@example.invalid',AccountEnabled:'true'}]},'Table.RowCount(Result)=1 and Result{0}[InEntra]=true and Result{0}[InAD]=false'));
 add('Base64 immutable IDs remain distinct',detail('UserDetail',{'M365_Users_Active':[{'Object Id':'u-a',OnPremisesImmutableId:'AbCd=='},{'Object Id':'u-b',OnPremisesImmutableId:'abcd=='}],'AD_Users_AllDomains':[{ObjectGUID:'ad-a',ImmutableId_AD:'AbCd=='}]},'Table.RowCount(Result)=2 and Table.RowCount(Table.SelectRows(Result,each [InAD]=true and [EntraObjectId]="u-a"))=1'));
 add('conflicting user identifiers rejected',err(detail('UserDetail',{'M365_Users_Active':[{'Object Id':'u-a',OnPremisesImmutableId:'AbCd==','User principal name':'a@example.invalid'},{'Object Id':'u-b','User principal name':'b@example.invalid'}],'AD_Users_AllDomains':[{ObjectGUID:'ad-a',ImmutableId_AD:'AbCd==',UserPrincipalName:'b@example.invalid'}]},'Result'),'SmartInventoryIdentityConflict'));
+add('concordant immutable ID and SID retain user while conflicting UPN stays critical',detail('UserDetail',{'M365_Users_Active':[{'Object Id':'u-a',OnPremisesImmutableId:'AbCd==',OnPremisesSecurityIdentifier:'S-1-SYNTHETIC-A','User principal name':'a@example.invalid'},{'Object Id':'u-b','User principal name':'b@example.invalid'}],'AD_Users_AllDomains':[{ObjectGUID:'ad-a',ImmutableId_AD:'AbCd==',ObjectSID:'S-1-SYNTHETIC-A',UserPrincipalName:'b@example.invalid'}]},'Table.RowCount(Table.SelectRows(Result,each [InAD]=true and [EntraObjectId]="u-a" and [IdentityMatchStatus]="Matched Entra; conflicting UPN" and [ActionSeverity]="Critical"))=1'));
 add('blank user canonical ID rejected',err(detail('UserDetail',{'M365_Users_Active':[{'User principal name':'a@example.invalid'}]},'Result'),'SmartInventoryIdentityMissing'));
 add('unknown user activity is not healthy',detail('UserDetail',{'M365_Users_Active':[{'Object Id':'u-a'}]},'Result{0}[ActionSeverity]<>"Healthy"'));
 add('unmatched device retained',detail('DeviceDetail',{'M365_Entra_Devices':[{ObjectId:'e-a',DeviceId:'d-a'}]},'Table.RowCount(Result)=1 and Result{0}[InEntra]=true'));

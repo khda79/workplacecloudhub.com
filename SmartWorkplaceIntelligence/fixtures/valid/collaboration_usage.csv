@@ -1,0 +1,5 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,UsageDate,ServiceName,ObjectId,ObjectType,EligibleUserCount,ActiveUserCount,ObjectCount
+1.0.0,Collaboration,CollaborationUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,Teams,TEAM-SYNTH-001,Team,5,3,2
+1.0.0,Collaboration,CollaborationUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,Meetings,SVC-SYNTH-001,Service,5,2,1
+1.0.0,Collaboration,CollaborationUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,Messaging,SVC-SYNTH-002,Service,5,4,1
+

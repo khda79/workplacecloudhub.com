@@ -1,0 +1,66 @@
+/// Shared country slicer for current workforce and managed devices. One row per distinct source-country value; Country unifies standard country-code aliases and English labels. Preserves unknown and unmapped values. Calculated from loaded evidence only; no additional SharePoint or local-file source.
+table 'Country Selection'
+	lineageTag: 622691c4-eb99-47fa-b24d-bd6e553efa70
+
+	/// Distinct country value as stored in current workforce or device evidence. Relationship key; preserves source values without rewriting evidence.
+	column 'Source Country'
+		isHidden
+		lineageTag: 63b8259e-c631-4659-bcd7-01cbdd61cc5b
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Source Country]
+
+	/// Shared English country label. Selecting a country filters workforce and devices together, merging standard code aliases such as FR and France. Unknown remains selectable.
+	column Country
+		lineageTag: c02b2de3-94b1-43e5-ba35-b4f47f7ebaf0
+		dataCategory: Country
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Country]
+
+	partition 'Country Selection' = calculated
+		mode: import
+		source =
+				VAR _sourceCountries =
+				    DISTINCT (
+				        UNION (
+				            SELECTCOLUMNS ( DISTINCT ( 'User Inventory Evidence'[Country] ), "Source Country", 'User Inventory Evidence'[Country] ),
+				            SELECTCOLUMNS ( DISTINCT ( 'Device Inventory Evidence'[Country] ), "Source Country", 'Device Inventory Evidence'[Country] )
+				        )
+				    )
+				RETURN
+				    ADDCOLUMNS (
+				        _sourceCountries,
+				        "Country",
+				            VAR _rawCountry = [Source Country]
+				            VAR _countryCode = UPPER ( TRIM ( _rawCountry ) )
+				            RETURN
+				                SWITCH (
+				                    _countryCode,
+				                    "", "Unknown",
+				                    "UNKNOWN", "Unknown",
+				                    "AT", "Austria",
+				                    "BE", "Belgium",
+				                    "BR", "Brazil",
+				                    "CH", "Switzerland",
+				                    "CN", "China",
+				                    "HR", "Croatia",
+				                    "DE", "Germany",
+				                    "ES", "Spain",
+				                    "FR", "France",
+				                    "IE", "Ireland",
+				                    "IT", "Italy",
+				                    "LU", "Luxembourg",
+				                    "MX", "Mexico",
+				                    "NL", "Netherlands",
+				                    "PL", "Poland",
+				                    "PT", "Portugal",
+				                    "SI", "Slovenia",
+				                    "AE", "United Arab Emirates",
+				                    "GB", "United Kingdom",
+				                    "UK", "United Kingdom",
+				                    "US", "United States",
+				                    TRIM ( _rawCountry )
+				                )
+				    )
+

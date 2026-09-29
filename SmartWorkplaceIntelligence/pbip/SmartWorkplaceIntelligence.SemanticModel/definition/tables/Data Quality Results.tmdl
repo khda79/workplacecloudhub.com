@@ -1,0 +1,110 @@
+/// Synthetic source-contract and data-quality rule results.
+table 'Data Quality Results'
+	lineageTag: 2e75efa0-9f14-4268-b6c7-a7396237f27e
+
+	/// Passed required rules divided by executed required rules.
+	measure 'Data Quality Pass (%)' = DIVIDE(CALCULATE(COUNTROWS('Data Quality Results'), KEEPFILTERS('Data Quality Results'[Required Rule] = TRUE()), KEEPFILTERS('Data Quality Results'[Status Label] = "Passed")), CALCULATE(COUNTROWS('Data Quality Results'), KEEPFILTERS('Data Quality Results'[Required Rule] = TRUE()), KEEPFILTERS('Data Quality Results'[Status Label] IN {"Passed", "Failed"})))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: e5d22e04-42e2-43b5-b808-d86a6130e0e7
+
+	/// Accepted diagnostic count of affected rows.
+	measure '# Affected Rows' = SUM('Data Quality Results'[Affected Row Count])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: f11c343b-a88e-4468-9294-57386c4d5d1e
+
+	/// Required schema checks passing divided by required schema checks executed.
+	measure 'Schema Compliance (%)' = DIVIDE(CALCULATE(COUNTROWS('Data Quality Results'), KEEPFILTERS('Data Quality Results'[Rule Name] = "Required Columns Present"), KEEPFILTERS('Data Quality Results'[Status Label] = "Passed")), CALCULATE(COUNTROWS('Data Quality Results'), KEEPFILTERS('Data Quality Results'[Rule Name] = "Required Columns Present"), KEEPFILTERS('Data Quality Results'[Status Label] IN {"Passed", "Failed"})))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 343a052a-f6ff-497b-bc92-f82ae2ccf26e
+
+	/// Evidence-aware data quality status label.
+	measure 'Data Quality Status Label' = VAR _pass = [Data Quality Pass (%)] RETURN IF(ISBLANK(_pass), "Not Collected", IF(_pass = 1, "Passed", "Review Required"))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 1329aab7-54d8-406c-a8ba-3e95af337345
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: abddb509-5cf6-4f6b-8f26-f81195726cb5
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c5de42bd-706e-4d60-b69c-0258e96f9982
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8478b08f-7bd4-4fe6-9736-01ee6d64197c
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Data Source Key.
+	column 'Data Source Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: db5ebdb1-e7ab-460d-9663-72a479ac3cd3
+		summarizeBy: none
+		sourceColumn: Data Source Key
+
+	/// Business attribute Rule Name.
+	column 'Rule Name'
+		dataType: string
+		lineageTag: 730bb15f-d50c-44b4-a341-ea1e12e88aa9
+		sourceColumn: Rule Name
+
+	/// Business attribute Severity Label.
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 77d75cd0-d546-42fc-b633-a4543a0da022
+		sourceColumn: Severity Label
+
+	/// Business attribute Status Label.
+	column 'Status Label'
+		dataType: string
+		lineageTag: dbc4172a-25fb-4ad5-bac9-8b4221186c6a
+		sourceColumn: Status Label
+
+	/// Business attribute Affected Row Count.
+	column 'Affected Row Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c5c69af1-8d0b-43cb-b250-8af8cac8dde5
+		summarizeBy: none
+		sourceColumn: Affected Row Count
+
+	/// Business attribute Required Rule.
+	column 'Required Rule'
+		dataType: boolean
+		lineageTag: 0297887e-5144-42a1-a98f-a6e21c7c6b81
+		sourceColumn: Required Rule
+
+	partition 'Data Quality Results Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Data Source Key" = Int64.Type, #"Rule Name" = nullable text, #"Severity Label" = nullable text, #"Status Label" = nullable text, #"Affected Row Count" = Int64.Type, #"Required Rule" = nullable logical], {
+				        {20260915, 1, 1, 1, "Required Columns Present", "Critical", "Passed", 0, true},
+				        {20260915, 1, 1, 1, "Natural Key Unique", "High", "Failed", 2, true},
+				        {20260915, 1, 1, 1, "UTC Timestamp Valid", "High", "Passed", 0, true},
+				        {20260915, 1, 1, 1, "Partial Inventory Declared", "High", "NotExecuted", 0, true}
+				    })
+				in
+				    Source
+

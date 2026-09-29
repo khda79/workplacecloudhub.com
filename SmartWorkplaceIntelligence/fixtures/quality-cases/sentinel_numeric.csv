@@ -1,0 +1,4 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,EntityId,RawValue,NumericValue,ParseStatus
+1.0.0,Messaging,SentinelNumeric,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-SENTINEL-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,ENTITY-SYNTH-001,Unlimited,,Sentinel
+1.0.0,Messaging,SentinelNumeric,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-SENTINEL-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,ENTITY-SYNTH-002,SourceError,,SourceError
+1.0.0,Messaging,SentinelNumeric,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-SENTINEL-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,ENTITY-SYNTH-003,25,25,Parsed

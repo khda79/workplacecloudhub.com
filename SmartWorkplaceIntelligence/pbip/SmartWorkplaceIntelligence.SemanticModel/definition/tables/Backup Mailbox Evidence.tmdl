@@ -1,0 +1,323 @@
+/// Private current mailbox protection and expected policy-scope reconciliation evidence. SharePoint and OneDrive protection units are observed, but their eligible policy scopes are unavailable for coverage assessment.
+table 'Backup Mailbox Evidence'
+	lineageTag: d4c72786-c27c-488b-8519-157ea9664749
+
+	/// Directory members in the expected mailbox backup policy scope.
+	measure 'Expected Policy Scope Members' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Expected Scope State] = "In expected scope"))
+		formatString: #,0
+		displayFolder: Backup | Scope
+		lineageTag: 8f409a2c-0ee6-43a9-a312-620641eab591
+
+	/// Mailbox and policy-scope reconciliation records in current private backup evidence.
+	measure 'Backup Evidence Records' = COUNTROWS('Backup Mailbox Evidence')
+		formatString: #,0
+		displayFolder: Backup | Current
+		lineageTag: d0804c1d-df37-436c-885a-a23d36f695c5
+
+	/// Expected policy-scope members reconciled to mailbox inventory.
+	measure 'Expected Mailboxes' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Expected Scope State] = "In expected scope"), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] <> "Scope member without mailbox"))
+		formatString: #,0
+		displayFolder: Backup | Scope
+		lineageTag: f11c677a-4119-488a-9917-9f4de96a9175
+
+	/// Expected mailboxes present in protected-mailbox evidence.
+	measure 'Protected Expected Mailboxes' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] = "Expected and protected"))
+		formatString: #,0
+		displayFolder: Backup | Protection
+		lineageTag: a3d7ce08-9e23-405e-94f8-3fbd982f6110
+
+	/// Expected mailboxes protected according to reconciled protection-unit evidence.
+	measure 'Expected Mailboxes Protected (%)' = DIVIDE([Protected Expected Mailboxes], [Expected Mailboxes])
+		formatString: 0.0%
+		displayFolder: Backup | Protection
+		lineageTag: 5b4b6680-876b-4556-85fb-1f8eccd4306d
+
+	/// Expected mailboxes absent from protected-mailbox evidence.
+	measure 'Expected Mailboxes Not Protected' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] = "Expected not protected"))
+		formatString: #,0
+		displayFolder: Backup | Risk
+		lineageTag: c4171ea3-3905-46ee-8d7d-3854ff397467
+
+	/// Protected mailboxes in current private protection evidence.
+	measure 'Protected Mailboxes' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Protection State] = "Protected"))
+		formatString: #,0
+		displayFolder: Backup | Protection
+		lineageTag: ba82f794-e59b-4b44-a50f-5aabfe779e05
+
+	/// Protected mailboxes not represented in the expected policy scope.
+	measure 'Protected Outside Expected Scope' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] = "Protected outside expected scope"))
+		formatString: #,0
+		displayFolder: Backup | Risk
+		lineageTag: 5e142f04-4221-4bcc-a557-8bd8e36bef25
+
+	/// Expected policy-scope members without a matching mailbox inventory record.
+	measure 'Scope Members Without Mailbox' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] = "Scope member without mailbox"))
+		formatString: #,0
+		displayFolder: Backup | Risk
+		lineageTag: df2ff548-9f5d-4712-a2ea-b0742c0f108c
+
+	/// Disabled directory accounts retained in the expected mailbox protection scope.
+	measure 'Disabled Scope Members' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Expected Scope State] = "In expected scope"), KEEPFILTERS('Backup Mailbox Evidence'[Account State] = "Disabled"))
+		formatString: #,0
+		displayFolder: Backup | Risk
+		lineageTag: ede6ae77-83c4-49fc-81c5-0b7fa2c06728
+
+	/// Observed mailbox protection units with an error code or message.
+	measure 'Protection Units With Errors' = COALESCE(CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Error State] = "Error")), 0)
+		formatString: #,0
+		displayFolder: Backup | Health
+		lineageTag: 98a9daed-d33d-494d-9840-428e4a8e66f6
+
+	/// Mailbox protection and expected policy-scope reconciliation anomalies.
+	measure 'Backup Policy Scope Anomalies' = [Expected Mailboxes Not Protected] + [Protected Outside Expected Scope] + [Scope Members Without Mailbox]
+		formatString: #,0
+		displayFolder: Backup | Risk
+		lineageTag: 4ab0b014-36b8-43b0-bb19-b6c1c2b4f071
+
+	/// Mailbox backup evidence sources older than 30 days.
+	measure 'Stale Backup Sources' = IF(MAX('Backup Mailbox Evidence'[Protection Evidence Age Days]) > 30, 1, 0) + IF(MAX('Backup Mailbox Evidence'[Policy Evidence Age Days]) > 30, 1, 0)
+		formatString: #,0
+		displayFolder: Backup | Evidence
+		lineageTag: 7648c732-3934-4c70-8ec3-6c649f513e91
+
+	/// Backup workloads whose eligible policy scope is unavailable for coverage assessment: SharePoint and OneDrive.
+	measure 'Backup Workload Evidence Gaps' = 2
+		formatString: #,0
+		displayFolder: Backup | Evidence
+		lineageTag: c7c2581e-4564-4cb7-984f-d72685077cde
+
+	/// Compact disclosure of assessed mailbox coverage, unavailable workload scopes, and evidence freshness.
+	measure 'Backup Evidence Ribbon Text' = "Mailbox coverage assessed · " & FORMAT([Backup Workload Evidence Gaps], "0") & " workload scope gaps · oldest " & FORMAT(MAX('Backup Mailbox Evidence'[Evidence Age Days]), "0") & "d"
+		formatString: @
+		displayFolder: Backup | Evidence
+		lineageTag: 02ef5bc5-a64d-4f7a-8502-c373cd15542b
+
+	/// Backup workloads whose eligible policy scope is unavailable for coverage assessment.
+	measure 'Backup Scope Assessment Gaps' = [Backup Workload Evidence Gaps]
+		formatString: #,0
+		displayFolder: Backup | Evidence
+		lineageTag: 442ca619-7d66-46ca-943b-eb8953da73d7
+
+	column 'Backup Entity Key'
+		dataType: string
+		isHidden
+		lineageTag: f127b6ab-84ce-4972-ab0e-6e84178cb4df
+		summarizeBy: none
+		sourceColumn: Backup Entity Key
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 881dac99-fd48-4c6c-8456-ab1c0077b572
+		summarizeBy: none
+		sourceColumn: Display Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Primary Address'
+		dataType: string
+		lineageTag: f5ee3c76-374f-4d2f-8198-0b7606ba8125
+		summarizeBy: none
+		sourceColumn: Primary Address
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Entity Type'
+		dataType: string
+		lineageTag: c8cb9fc9-8ec1-43ac-be4b-9db16344ec60
+		summarizeBy: none
+		sourceColumn: Entity Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: 110d7a83-b275-4151-be74-8f0624b4b77f
+		summarizeBy: none
+		sourceColumn: Mailbox Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Account State'
+		dataType: string
+		lineageTag: 49c7cbb8-6245-4826-9623-a5e3ba8b99e3
+		summarizeBy: none
+		sourceColumn: Account State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Expected Scope State'
+		dataType: string
+		lineageTag: 68df42cc-5ea5-45e2-aef9-52406248ec97
+		summarizeBy: none
+		sourceColumn: Expected Scope State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Protection State'
+		dataType: string
+		lineageTag: 2b48c50f-d417-4d03-b0e1-5e345ad7d1bf
+		summarizeBy: none
+		sourceColumn: Protection State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Reconciliation State'
+		dataType: string
+		lineageTag: 9422280e-c383-41ff-b406-c2b0fa090474
+		summarizeBy: none
+		sourceColumn: Reconciliation State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Protection Status'
+		dataType: string
+		lineageTag: 3bd31f4b-629c-473b-b116-f0d2b4771ebe
+		summarizeBy: none
+		sourceColumn: Protection Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Policy Scope Group'
+		dataType: string
+		lineageTag: 7e5dec4c-f4aa-4df8-9cec-410986e4cd98
+		summarizeBy: none
+		sourceColumn: Policy Scope Group
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Protection Policy'
+		dataType: string
+		lineageTag: 60469a40-6ff9-4829-a457-2b738f436354
+		summarizeBy: none
+		sourceColumn: Protection Policy
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Error State'
+		dataType: string
+		lineageTag: bd256496-c148-4946-9297-240d40a57035
+		summarizeBy: none
+		sourceColumn: Error State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Error Code'
+		dataType: string
+		lineageTag: 18ffec87-246f-4d83-ad0d-8213bf52cf0b
+		summarizeBy: none
+		sourceColumn: Error Code
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: 95f0f443-e895-42e0-b540-929ec42c52d0
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: 33446173-d251-4597-9118-7fbdb82d38d5
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 0a5e6199-f57b-4f22-9f61-9e88a92d2ad6
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Protection Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 5a1f4a1f-084c-461b-94fe-b0641067c3c5
+		summarizeBy: none
+		sourceColumn: Protection Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: b05a65f0-0620-4dd4-8e57-7cd83dd12c0c
+			defaultHierarchy: LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Policy Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: c575eb31-0f17-4428-a679-947b51b637b8
+		summarizeBy: none
+		sourceColumn: Policy Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 29d9fc6b-0fd4-4253-9c75-eaa229ba63f5
+			defaultHierarchy: LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Protection Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: c3124c1d-c6b4-4258-8832-3423a6a2b72b
+		summarizeBy: sum
+		sourceColumn: Protection Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Policy Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: ec5dd9dc-19b0-45f9-8b57-689f4891dd62
+		summarizeBy: sum
+		sourceColumn: Policy Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 21614e88-e5a7-4f63-999d-58a72671f0bd
+		summarizeBy: sum
+		sourceColumn: Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: b8d8245d-06b8-4185-b62b-7d691ded90a1
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 7e1eef15-716e-4ed9-a325-40cbee8e9b62
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Backup Mailbox Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("BackupMailboxEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Backup Entity Key", "Display Name", "Primary Address", "Entity Type", "Mailbox Type", "Account State", "Expected Scope State", "Protection State", "Reconciliation State", "Protection Status", "Policy Scope Group", "Protection Policy", "Error State", "Error Code", "Risk Priority", "Risk Signal", "Recommended Action", "Protection Snapshot Date", "Policy Snapshot Date", "Protection Evidence Age Days", "Policy Evidence Age Days", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Protection Snapshot Date", "Policy Snapshot Date", "Protection Evidence Age Days", "Policy Evidence Age Days", "Evidence Age Days"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Backup Entity Key", type text}, {"Display Name", type text}, {"Primary Address", type text}, {"Entity Type", type text}, {"Mailbox Type", type text}, {"Account State", type text}, {"Expected Scope State", type text}, {"Protection State", type text}, {"Reconciliation State", type text}, {"Protection Status", type text}, {"Policy Scope Group", type text}, {"Protection Policy", type text}, {"Error State", type text}, {"Error Code", type text}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Protection Snapshot Date", type datetime}, {"Policy Snapshot Date", type datetime}, {"Protection Evidence Age Days", Int64.Type}, {"Policy Evidence Age Days", Int64.Type}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

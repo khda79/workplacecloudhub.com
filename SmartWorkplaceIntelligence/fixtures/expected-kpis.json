@@ -1,0 +1,42 @@
+{
+  "fixtureSet": "smart-workplace-intelligence-synthetic-v1",
+  "asOfUtc": "2026-09-15T08:00:00Z",
+  "values": {
+    "manufacturers": 3,
+    "models": 5,
+    "deviceCategories": ["Mac", "Mobile Android/iOS", "PC Windows"],
+    "windows11Versions": ["23H2", "24H2"],
+    "devicesLowOnDiskSpace": 2,
+    "activeWorkforce": 3,
+    "enabledInactiveAccounts": 1,
+    "identityMatchPercentage": 50.0,
+    "licenseCapacityUtilizationPercentage": 57.9,
+    "potentiallyReclaimableAssignments": 1,
+    "deviceCompliancePercentage": 66.7,
+    "deviceReconciliationPercentage": 50.0,
+    "windows11AdoptionPercentage": 66.7,
+    "windows11ReadinessPercentage": 100.0,
+    "endpointAnalyticsCoveragePercentage": 60.0,
+    "mailboxBackupCoveragePercentage": 50.0,
+    "secureScorePercentage": 81.7,
+    "mfaCapableUsersPercentage": 75.0,
+    "conditionalAccessApplicationCoveragePercentage": 80.0,
+    "privilegedAccountsProtectedPercentage": 50.0,
+    "defenderHealthyEndpointsPercentage": 75.0,
+    "diskEncryptionCoveragePercentage": 75.0,
+    "firewallHealthyPercentage": 75.0,
+    "antivirusHealthyPercentage": 75.0,
+    "passwordlessCapableUsersPercentage": 25.0,
+    "mfaChallengeSuccessRatePercentage": 92.9,
+    "sourceFreshnessCompliancePercentage": 40.0
+  },
+  "policies": {
+    "lowDiskSpace": "Latest qualified system-drive evidence is Low when free space is below 20 GB or below 15 percent; missing capacity evidence remains Unknown.",
+    "identityMatch": "NotApplicable is excluded; unmatched and conflicting candidates remain in the denominator.",
+    "deviceCompliance": "Unknown compliance is excluded from the rate and remains visible as a separate state.",
+    "windowsAdoption": "Only Windows 10 and Windows 11 assessed devices are eligible.",
+    "windowsReadiness": "Only Windows 10 devices with Ready or Blocked results are eligible.",
+    "secureScore": "Only observations with qualified evidence contribute to numerator and maximum score.",
+    "sourceFreshness": "All required sources remain in the denominator; failed, partial, stale, and missing sources do not pass."
+  }
+}

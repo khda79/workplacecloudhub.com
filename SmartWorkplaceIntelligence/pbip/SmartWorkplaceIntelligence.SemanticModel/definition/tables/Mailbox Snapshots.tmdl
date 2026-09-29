@@ -1,0 +1,194 @@
+/// One synthetic mailbox per reporting snapshot.
+table 'Mailbox Snapshots'
+	lineageTag: 3c7b81ad-062e-4506-9fa8-e84a2d986c2e
+
+	/// Distinct mailboxes with an accepted synthetic snapshot.
+	measure '# Mailboxes' = DISTINCTCOUNT('Mailbox Snapshots'[Mailbox Key])
+		formatString: #,0
+		displayFolder: Hosting
+		lineageTag: 03ffd067-44dc-4122-8332-023a58ff304c
+
+	/// Exchange Online mailboxes divided by mailboxes with an explicit Exchange Online or on-premises hosting location.
+	measure 'Exchange Online Adoption (%)' = DIVIDE([# Exchange Online Mailboxes], [# Exchange Online Mailboxes] + [# On-premises Mailboxes])
+		formatString: 0.0%
+		displayFolder: Hosting
+		lineageTag: beed85ec-ddf3-461c-b83a-10cfcdf8ab4e
+
+	/// Distinct mailboxes explicitly observed as hosted in Exchange Online.
+	measure '# Exchange Online Mailboxes' = CALCULATE([# Mailboxes], KEEPFILTERS('Mailbox Snapshots'[Hosting Location] = "Exchange Online"))
+		formatString: #,0
+		displayFolder: Hosting
+		lineageTag: 441ffeaf-ff01-4e3e-89e2-dda9907e8b25
+
+	/// Distinct mailboxes explicitly observed as hosted on-premises, including Exchange Server 2016, 2019, and Subscription Edition.
+	measure '# On-premises Mailboxes' = CALCULATE([# Mailboxes], KEEPFILTERS('Mailbox Snapshots'[Hosting Location] = "On-premises"))
+		formatString: #,0
+		displayFolder: Hosting
+		lineageTag: 927a63fb-ba34-47e1-b751-a879c42c78c7
+
+	/// Distinct mailboxes with an enabled archive in the accepted snapshot.
+	measure '# Mailboxes with Archive' = CALCULATE([# Mailboxes], KEEPFILTERS('Mailbox Snapshots'[Archive State] = "Enabled"))
+		formatString: #,0
+		displayFolder: Archive and Delegation
+		lineageTag: 82ce4ba5-bd24-4e10-aee6-abb213047416
+
+	/// Distinct mailboxes with at least one accepted Full Access, Send As, or Send on Behalf delegation.
+	measure '# Mailboxes with Delegations' = CALCULATE([# Mailboxes], KEEPFILTERS('Mailbox Snapshots'[Delegation Count] > 0))
+		formatString: #,0
+		displayFolder: Archive and Delegation
+		lineageTag: 34c2b1e7-a713-492c-b7bb-abfd5a8464e7
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a9b4c519-79f8-4f38-8690-ecfb3fdd70bb
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 62d0ae60-19f0-4369-bb16-cc2cd3cfe3d3
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 479cc4ab-bab6-429f-8b22-44de5e1030f0
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Organization Key.
+	column 'Organization Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9a189566-9eda-4630-abf9-9c7eb7e09157
+		summarizeBy: none
+		sourceColumn: Organization Key
+
+	/// Business attribute Geography Key.
+	column 'Geography Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 35010a95-4efa-4df0-82af-d5637449f4cb
+		summarizeBy: none
+		sourceColumn: Geography Key
+
+	/// Business attribute Mailbox Key.
+	column 'Mailbox Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f60e7195-eb3f-4136-881d-1d7a5f2a2b96
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+	/// Business attribute Migration State.
+	column 'Migration State'
+		dataType: string
+		lineageTag: 7f98461c-0b13-410f-aa6a-b2077f42f6c6
+		sourceColumn: Migration State
+
+	/// Business attribute Quota Raw.
+	column 'Quota Raw'
+		dataType: string
+		lineageTag: a0992be8-ddbe-46f2-9962-67ed3aee7b76
+		sourceColumn: Quota Raw
+
+	/// Business attribute Quota GB.
+	column 'Quota GB'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e8579a03-e3c4-43de-b3a9-03c3666a3d87
+		summarizeBy: sum
+		sourceColumn: Quota GB
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Business attribute Quota Parse Status.
+	column 'Quota Parse Status'
+		dataType: string
+		lineageTag: 34fc8ed7-b603-4ab9-acaa-e8a36620cb72
+		sourceColumn: Quota Parse Status
+
+	/// Explicit hosting location: Exchange Online or On-premises.
+	column 'Hosting Location'
+		dataType: string
+		lineageTag: 22070369-c5b8-40e6-84a5-a47ccb4f2070
+		summarizeBy: none
+		sourceColumn: Hosting Location
+
+	/// Observed on-premises Exchange Server generation: 2016, 2019, or Subscription Edition; not applicable for Exchange Online.
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: 61a18cdf-8082-4bfa-848d-ffca2064e423
+		summarizeBy: none
+		sourceColumn: Exchange Version
+
+	/// Observed primary mailbox size in gigabytes.
+	column 'Mailbox Size GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: fc7e313f-1d09-4c6a-94ac-d375c65e4e91
+		summarizeBy: sum
+		sourceColumn: Mailbox Size GB
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Whether an archive mailbox is enabled for the mailbox.
+	column 'Archive State'
+		dataType: string
+		lineageTag: 5c0083c8-f7be-429c-b2df-835afb842018
+		summarizeBy: none
+		sourceColumn: Archive State
+
+	/// Observed archive mailbox size in gigabytes; zero when archive is disabled.
+	column 'Archive Size GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 354109f9-0d3a-40eb-abcb-28eaed62bf2c
+		summarizeBy: sum
+		sourceColumn: Archive Size GB
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Number of accepted mailbox delegations across Full Access, Send As, and Send on Behalf.
+	column 'Delegation Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 0d35b413-9519-44b1-94af-973310c3a403
+		summarizeBy: none
+		sourceColumn: Delegation Count
+
+	/// Semicolon-delimited summary of accepted delegation types; None when no delegation exists.
+	column 'Delegation Types'
+		dataType: string
+		lineageTag: 72dd2bef-a77a-451d-8916-2293a07a1bd2
+		summarizeBy: none
+		sourceColumn: Delegation Types
+
+	partition 'Mailbox Snapshots Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Organization Key" = Int64.Type, #"Geography Key" = Int64.Type, #"Mailbox Key" = Int64.Type, #"Hosting Location" = nullable text, #"Exchange Version" = nullable text, #"Mailbox Size GB" = nullable number, #"Archive State" = nullable text, #"Archive Size GB" = nullable number, #"Delegation Count" = Int64.Type, #"Delegation Types" = nullable text, #"Migration State" = nullable text, #"Quota Raw" = nullable text, #"Quota GB" = nullable number, #"Quota Parse Status" = nullable text], {
+				        {20260915, 1, 1, 1, 1, 1, "Exchange Online", "Exchange Online", 32.4, "Enabled", 8.6, 0, "None", "Completed", "50 GB", 50, "Parsed"},
+				        {20260915, 1, 1, 2, 1, 2, "On-premises", "Exchange Server 2019", 68.2, "Enabled", 12.5, 2, "Full Access; Send As", "Planned", "Unlimited", null, "Sentinel"},
+				        {20260915, 1, 1, 3, 2, 3, "On-premises", "Exchange Server 2016", 23.8, "Disabled", 0, 0, "None", "Blocked", "25 GB", 25, "Parsed"},
+				        {20260915, 1, 1, 5, 3, 4, "On-premises", "Exchange Server SE", 14.6, "Enabled", 4.2, 1, "Send on Behalf", "NotStarted", "Error", null, "SourceError"}
+				    })
+				in
+				    Source
+

@@ -1,0 +1,118 @@
+/// Synthetic collaboration service usage.
+table 'Collaboration Usage'
+	lineageTag: ad1b3e85-f817-43ec-9e6b-baa9a515a900
+
+	/// Qualified active users divided by eligible users for the selected service.
+	measure 'Service Active User (%)' = DIVIDE(SUM('Collaboration Usage'[Active User Count]), SUM('Collaboration Usage'[Eligible User Count]))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 92cc48d8-17ef-485f-b12a-8e693a8f9e15
+
+	/// Governed collaboration objects in scope.
+	measure '# Service Objects' = SUM('Collaboration Usage'[Object Count])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: dc9fda69-0574-4025-8140-f0da0d0b49bb
+
+	/// Qualified active Teams users divided by eligible Teams users.
+	measure 'Teams Active User (%)' = CALCULATE([Service Active User (%)], KEEPFILTERS('Service'[Service Name] = "Teams"))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 71e68ee0-b86e-4812-bd4c-1c0cac78c591
+
+	/// Latest accepted usage period in the visible collaboration scope.
+	measure 'Latest Usage Period' = FORMAT(MAXX('Collaboration Usage', RELATED('Date'[Date])), "yyyy-MM")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: fba375e9-cc96-4d8b-89ef-6d0650946ba8
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 18d51d8c-2072-4a6a-9ec8-781d1f3dd501
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 55b65189-e980-4291-9612-82cb769ba0a9
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f9d755a0-2d8b-4979-ba01-a65bcedaf150
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7b5752d6-8748-4a8a-86da-4134607e7aa5
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Team Key.
+	column 'Team Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4efea2e5-d5c5-43e0-8b99-ba8157adeb35
+		summarizeBy: none
+		sourceColumn: Team Key
+
+	/// Business attribute Eligible User Count.
+	column 'Eligible User Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 13b34d70-a0c0-4ddb-b013-1bc10fe22eaa
+		summarizeBy: none
+		sourceColumn: Eligible User Count
+
+	/// Business attribute Active User Count.
+	column 'Active User Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f013709b-082d-42f4-a362-a17a794ac350
+		summarizeBy: none
+		sourceColumn: Active User Count
+
+	/// Business attribute Object Count.
+	column 'Object Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 897b8140-79d5-436b-a31a-35e6b2fa54ef
+		summarizeBy: none
+		sourceColumn: Object Count
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: d07e4e99-ec84-41b8-92a9-673c30a74ce4
+		sourceColumn: Evidence Status
+
+	partition 'Collaboration Usage Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Service Key" = Int64.Type, #"Team Key" = Int64.Type, #"Eligible User Count" = Int64.Type, #"Active User Count" = Int64.Type, #"Object Count" = Int64.Type, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 7, 1, 5, 3, 2, "Observed"},
+				        {20260915, 1, 1, 8, null, 5, 2, 1, "Observed"},
+				        {20260915, 1, 1, 9, null, 5, 4, 1, "Observed"}
+				    })
+				in
+				    Source
+

@@ -1,0 +1,90 @@
+/// One synthetic compliance observation per device and date.
+table 'Device Compliance Snapshots'
+	lineageTag: bb9609bb-229b-43ca-9029-cc584cae999f
+
+	/// Compliant devices divided by devices with known compliance.
+	measure 'Device Compliance (%)' = DIVIDE(CALCULATE(DISTINCTCOUNT('Device Compliance Snapshots'[Device Key]), KEEPFILTERS('Device Compliance Snapshots'[Compliance State] = "Compliant")), CALCULATE(DISTINCTCOUNT('Device Compliance Snapshots'[Device Key]), KEEPFILTERS('Device Compliance Snapshots'[Compliance State] IN {"Compliant", "Noncompliant"})))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 0504b494-ff38-4f1d-a68c-eaaa7b81c141
+
+	/// Devices with a qualified blocked state.
+	measure '# Blocked Devices' = CALCULATE(DISTINCTCOUNT('Device Compliance Snapshots'[Device Key]), KEEPFILTERS('Device Compliance Snapshots'[Blocked State] = TRUE()))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: bc317fe3-c709-4423-ad8e-7989a1dfe322
+
+	/// Devices with a qualified noncompliant state.
+	measure '# Noncompliant Devices' = CALCULATE(DISTINCTCOUNT('Device Compliance Snapshots'[Device Key]), KEEPFILTERS('Device Compliance Snapshots'[Compliance State] = "Noncompliant"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 84c2c01d-4afe-457f-aa76-00c0bdbc8b0c
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a78bf6e9-9114-47c1-b7b8-3494bce7898a
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d18dc1ac-2b6d-4884-857c-fba35d59eef0
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4344c4a9-dc97-4289-a006-e99f84aaf6ec
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5ef255e6-b79f-4427-a719-691a8192a540
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Compliance State.
+	column 'Compliance State'
+		dataType: string
+		lineageTag: 985f2200-6fd2-428f-a86c-fc59dd776b88
+		sourceColumn: Compliance State
+
+	/// Business attribute Blocked State.
+	column 'Blocked State'
+		dataType: boolean
+		lineageTag: e7c3db07-6cae-44ac-854c-b91031894bfa
+		sourceColumn: Blocked State
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 06ecfb4b-31f4-4f29-9f85-13f39ad2c7bf
+		sourceColumn: Evidence Status
+
+	partition 'Device Compliance Snapshots Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Device Key" = Int64.Type, #"Compliance State" = nullable text, #"Blocked State" = nullable logical, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "Compliant", false, "Observed"},
+				        {20260915, 1, 1, 2, "Noncompliant", false, "Observed"},
+				        {20260915, 1, 1, 3, "Unknown", true, "Unknown"},
+				        {20260915, 1, 1, 4, "Compliant", false, "Observed"},
+				        {20260915, 1, 1, 5, "Unknown", false, "Unknown"}
+				    })
+				in
+				    Source
+

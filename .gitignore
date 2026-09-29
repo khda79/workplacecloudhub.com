@@ -259,6 +259,18 @@ SmartWorkplaceCMDB/**/*.pbip
 SmartWorkplaceCMDB/**/*.abf
 SmartWorkplaceCMDB/**/*.csv
 SmartWorkplaceCMDB/**/*.parquet
+SmartWorkplaceCMDB/**/__pycache__/
+SmartWorkplaceCMDB/**/*.pyc
+
+# SmartWorkplaceIntelligence private, locally consolidated evidence.
+SmartWorkplaceIntelligence/_private/**
+SmartWorkplaceIntelligence/_review/**
+SmartWorkplaceIntelligence/**/.pbi/**
+SmartWorkplaceIntelligence/**/*.abf
+SmartWorkplaceIntelligence/**/*.pbix
+SmartWorkplaceIntelligence/**/SmartWorkplaceIntelligence-PersonaClassification.xlsx
+SmartWorkplaceIntelligence/**/Personae-Keywords.xlsx
+*.inspect.ndjson
 
 # SmartWorkplaceCMDB local audit and review notes must never be published.
 # These rules intentionally follow the Markdown re-inclusion rules above.

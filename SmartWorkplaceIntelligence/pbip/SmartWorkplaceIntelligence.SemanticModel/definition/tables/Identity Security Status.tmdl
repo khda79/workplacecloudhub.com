@@ -1,0 +1,149 @@
+/// One synthetic user security capability and privileged-access protection observation per reporting date.
+table 'Identity Security Status'
+	lineageTag: 7e03211b-05b6-493a-8e47-e3e009d5ec98
+
+	/// Enabled human users recorded as MFA capable divided by the observed MFA-eligible enabled human population.
+	measure 'MFA-capable users (%)' = VAR _capableUsers = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('Identity Security Status'[MFA Capable] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) VAR _eligibleUsers = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) RETURN DIVIDE(_capableUsers, _eligibleUsers)
+		formatString: 0.0%
+		displayFolder: Security Coverage
+		lineageTag: 65733388-7d9d-4ee8-b520-1696b61d634e
+
+	/// Observed privileged enabled human accounts protected by both MFA capability and PIM divided by the governed privileged population.
+	measure 'Privileged accounts protected (%)' = VAR _protectedAccounts = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('Identity Security Status'[Privileged Account] = TRUE()), KEEPFILTERS('Identity Security Status'[MFA Capable] = TRUE()), KEEPFILTERS('Identity Security Status'[PIM Protected] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) VAR _privilegedAccounts = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('Identity Security Status'[Privileged Account] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) RETURN DIVIDE(_protectedAccounts, _privilegedAccounts)
+		formatString: 0.0%
+		displayFolder: Security Coverage
+		lineageTag: 8083ced7-57df-44f7-ac3a-2d330ac53b47
+
+	/// Enabled human users recorded as passwordless capable divided by the observed MFA-eligible enabled human population.
+	measure 'Passwordless-capable users (%)' = VAR _capableUsers = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('Identity Security Status'[Passwordless Capable] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) VAR _eligibleUsers = CALCULATE(DISTINCTCOUNT('Identity Security Status'[User Key]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) RETURN DIVIDE(_capableUsers, _eligibleUsers)
+		formatString: 0.0%
+		displayFolder: Secondary Security Indicators
+		lineageTag: 750e8dc5-684f-41a3-902d-f21582863b2a
+
+	/// Successful MFA challenges divided by observed MFA challenges for the eligible enabled human population.
+	measure 'MFA challenge success rate (%)' = VAR _successfulChallenges = CALCULATE(SUM('Identity Security Status'[MFA Successful Challenge Count]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) VAR _challengeCount = CALCULATE(SUM('Identity Security Status'[MFA Challenge Count]), KEEPFILTERS('Identity Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Identity Security Status'[Security Population] = "Human"), KEEPFILTERS('Identity Security Status'[MFA Eligible] = TRUE()), KEEPFILTERS('User'[Account State] = "Enabled")) RETURN DIVIDE(_successfulChallenges, _challengeCount)
+		formatString: 0.0%
+		displayFolder: Secondary Security Indicators
+		lineageTag: 4a1ebcd9-0269-4967-8264-a71b6d041cf2
+
+	/// Reporting-date key for the observation.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a4809ade-820b-4e62-b72a-201fcf3781fe
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Synthetic tenant key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 25c7074f-eec5-464e-a131-0cc747cc7edf
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Synthetic environment key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ce1d4597-20d0-4497-b987-48639970aac1
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Synthetic user key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0278351f-2742-4ea3-b2a7-0629ae55fe02
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Governed user population for denominator eligibility.
+	column 'Security Population'
+		dataType: string
+		lineageTag: 69fff41e-f687-4d88-837a-69494543e313
+		sourceColumn: Security Population
+
+	/// Indicates whether the user belongs to the MFA-eligible population.
+	column 'MFA Eligible'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6d253b4e-dccc-44b9-b284-0f7d22bba669
+		sourceColumn: MFA Eligible
+
+	/// Indicates whether an eligible user has an MFA method available.
+	column 'MFA Capable'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ba771918-a7b1-4b18-b91b-a265e7c405f0
+		sourceColumn: MFA Capable
+
+	/// Indicates whether an eligible user has a passwordless method available.
+	column 'Passwordless Capable'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 72e68d78-f347-4f39-968b-25ec1700c264
+		sourceColumn: Passwordless Capable
+
+	/// Indicates whether the account is in the governed privileged population.
+	column 'Privileged Account'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8e39aa05-3477-4e8f-9b66-99a9d7f18cd6
+		sourceColumn: Privileged Account
+
+	/// Indicates whether privileged access is protected through governed PIM controls.
+	column 'PIM Protected'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1d2c2711-73b8-4909-a00b-8b1c35f5b033
+		sourceColumn: PIM Protected
+
+	/// Observed MFA challenges for the reporting period.
+	column 'MFA Challenge Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0e8df311-ef36-4b41-adb3-50612e0d9212
+		summarizeBy: none
+		sourceColumn: MFA Challenge Count
+
+	/// Successful observed MFA challenges for the reporting period.
+	column 'MFA Successful Challenge Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c8700184-c812-44c8-9db5-1980277b5aa8
+		summarizeBy: none
+		sourceColumn: MFA Successful Challenge Count
+
+	/// Qualification state for the security observation.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 2e092ea3-a187-4bb0-ab72-10be7fdfe3fb
+		sourceColumn: Evidence Status
+
+	partition 'Identity Security Status Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Security Population" = nullable text, #"MFA Eligible" = nullable logical, #"MFA Capable" = nullable logical, #"Passwordless Capable" = nullable logical, #"Privileged Account" = nullable logical, #"PIM Protected" = nullable logical, #"MFA Challenge Count" = Int64.Type, #"MFA Successful Challenge Count" = Int64.Type, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "Human", true, true, true, true, true, 12, 12, "Observed"},
+				        {20260915, 1, 1, 2, "Human", true, true, false, false, false, 6, 5, "Observed"},
+				        {20260915, 1, 1, 3, "Human", false, false, false, false, false, 0, 0, "Observed"},
+				        {20260915, 1, 1, 4, "External", true, true, true, false, false, 10, 10, "Observed"},
+				        {20260915, 1, 1, 5, "Human", true, false, false, true, false, 2, 1, "Observed"},
+				        {20260915, 1, 1, 6, "Human", true, true, false, false, false, 8, 8, "Observed"}
+				    })
+				in
+				    Source
+

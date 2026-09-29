@@ -1,0 +1,68 @@
+/// Conformed Digital Workplace service domains and concrete services.
+table Service
+	lineageTag: 56db469e-5a6c-45e8-8bde-33fb13b938fd
+
+	/// Evidence-aware headline KPI text for each service row in the executive domain pulse.
+	measure 'Service Headline KPI' = VAR ServiceName = SELECTEDVALUE('Service'[Service Name]) RETURN IF(ISBLANK(ServiceName), BLANK(), SWITCH(ServiceName, "Identity", FORMAT(CALCULATE([Identity Match (%)], REMOVEFILTERS('Service')), "0.0%"), "Licensing", FORMAT(CALCULATE([License Capacity Utilization (%)], REMOVEFILTERS('Service')), "0.0%"), "Device Management", FORMAT(CALCULATE([Device Compliance (%)], REMOVEFILTERS('Service')), "0.0%"), "Windows Lifecycle", FORMAT(CALCULATE([Windows 11 Adoption (%)], REMOVEFILTERS('Service')), "0.0%"), "Endpoint Analytics", FORMAT(CALCULATE([Endpoint Analytics Score], REMOVEFILTERS('Service')), "0.0"), "Applications", FORMAT(CALCULATE([# Application Installs], REMOVEFILTERS('Service')), "#,0"), "Teams", FORMAT([Service Active User (%)], "0.0%"), "Meetings", FORMAT([Service Active User (%)], "0.0%"), "Mailbox", FORMAT(CALCULATE([# Mailboxes], REMOVEFILTERS('Service')), "#,0"), "SharePoint", FORMAT(CALCULATE([Active Content Site (%)], REMOVEFILTERS('Service'), KEEPFILTERS('Site'[Workload] = "SharePoint")), "0.0%"), "OneDrive", FORMAT(CALCULATE([Active Content Site (%)], REMOVEFILTERS('Service'), KEEPFILTERS('Site'[Workload] = "OneDrive")), "0.0%"), "Content Services", FORMAT(CALCULATE([Active Content Site (%)], REMOVEFILTERS('Service')), "0.0%"), "Backup", FORMAT([Backup Coverage (%)], "0.0%"), "Security", FORMAT([Secure Score (%)], "0.0%"), "Operations", FORMAT(CALCULATE([Source Freshness Compliance (%)], REMOVEFILTERS('Service')), "0.0%"), "Collaboration", FORMAT(CALCULATE([Service Active User (%)], REMOVEFILTERS('Service')), "0.0%"), "Not Collected"))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 46be7ed1-6b5d-4d86-b5b0-ff3f393b064f
+
+	/// Observed when the selected service has qualified synthetic evidence; otherwise Not Collected.
+	measure 'Service Evidence Status' = VAR ServiceName = SELECTEDVALUE('Service'[Service Name]) VAR HasObservedEvidence = SWITCH(ServiceName, "Identity", CALCULATE(COUNTROWS('User Snapshots'), REMOVEFILTERS('Service')) > 0, "Licensing", CALCULATE(COUNTROWS('License Capacity'), REMOVEFILTERS('Service')) > 0, "Device Management", CALCULATE(COUNTROWS('Device Snapshots'), REMOVEFILTERS('Service')) > 0, "Windows Lifecycle", CALCULATE(COUNTROWS('Windows Lifecycle Assessments'), REMOVEFILTERS('Service')) > 0, "Endpoint Analytics", CALCULATE(COUNTROWS('Endpoint Experience Measurements'), REMOVEFILTERS('Service'), KEEPFILTERS('Endpoint Experience Measurements'[Metric Name] = "EndpointAnalyticsScore"), KEEPFILTERS('Endpoint Experience Measurements'[Evidence Status] = "Observed")) > 0, "Applications", CALCULATE(COUNTROWS('Application Installations'), REMOVEFILTERS('Service')) > 0, "Teams", CALCULATE(COUNTROWS('Collaboration Usage'), KEEPFILTERS('Collaboration Usage'[Evidence Status] = "Observed")) > 0, "Meetings", CALCULATE(COUNTROWS('Collaboration Usage'), KEEPFILTERS('Collaboration Usage'[Evidence Status] = "Observed")) > 0, "Mailbox", CALCULATE(COUNTROWS('Mailbox Snapshots'), REMOVEFILTERS('Service')) > 0, "SharePoint", CALCULATE(COUNTROWS('Content Usage'), REMOVEFILTERS('Service'), KEEPFILTERS('Site'[Workload] = "SharePoint")) > 0, "OneDrive", CALCULATE(COUNTROWS('Content Usage'), REMOVEFILTERS('Service'), KEEPFILTERS('Site'[Workload] = "OneDrive")) > 0, "Content Services", CALCULATE(COUNTROWS('Content Usage'), REMOVEFILTERS('Service')) > 0, "Backup", CALCULATE(COUNTROWS('Backup Coverage'), KEEPFILTERS('Backup Coverage'[Evidence Status] = "Observed")) > 0, "Security", CALCULATE(COUNTROWS('Security Posture Observations'), KEEPFILTERS('Security Posture Observations'[Evidence Status] = "Observed")) > 0, "Operations", CALCULATE(COUNTROWS('Source Coverage'), REMOVEFILTERS('Service')) > 0, "Collaboration", CALCULATE(COUNTROWS('Collaboration Usage'), REMOVEFILTERS('Service'), KEEPFILTERS('Collaboration Usage'[Evidence Status] = "Observed")) > 0, FALSE()) RETURN IF(ISBLANK(ServiceName), BLANK(), IF(HasObservedEvidence, "Observed", "Not Collected"))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 20c07838-e495-44a8-85e4-9788d9099f21
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5908cae5-abc9-4c28-ba2b-3c8629d6a2a9
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Service Name.
+	column 'Service Name'
+		dataType: string
+		lineageTag: 788758f2-a480-4007-bf33-e168b3b40f14
+		sourceColumn: Service Name
+
+	/// Business attribute Service Domain.
+	column 'Service Domain'
+		dataType: string
+		lineageTag: b351cd87-7169-40ae-92ae-ccc543f1f255
+		sourceColumn: Service Domain
+
+	/// Business attribute Service Category.
+	column 'Service Category'
+		dataType: string
+		lineageTag: a28eb7fd-76f4-488e-8b34-b0e0be80a37e
+		sourceColumn: Service Category
+
+	partition 'Service Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Service Key" = Int64.Type, #"Service Name" = nullable text, #"Service Domain" = nullable text, #"Service Category" = nullable text], {
+				        {1, "Identity", "Identity", "Governance"},
+				        {2, "Licensing", "Licensing", "Workplace"},
+				        {3, "Device Management", "Endpoint", "Workplace"},
+				        {4, "Windows Lifecycle", "Endpoint", "Workplace"},
+				        {5, "Endpoint Analytics", "Endpoint", "Workplace"},
+				        {6, "Applications", "Applications", "Workplace"},
+				        {7, "Teams", "Collaboration", "Workplace"},
+				        {8, "Meetings", "Collaboration", "Workplace"},
+				        {9, "Mailbox", "Messaging", "Workplace"},
+				        {10, "SharePoint", "Content", "Workplace"},
+				        {11, "OneDrive", "Content", "Workplace"},
+				        {12, "Content Services", "Content", "Workplace"},
+				        {13, "Backup", "Resilience", "Workplace"},
+				        {14, "Security", "Security", "Governance"},
+				        {15, "Operations", "Operations", "Governance"},
+				        {16, "Collaboration", "Collaboration", "Workplace"}
+				    })
+				in
+				    Source
+

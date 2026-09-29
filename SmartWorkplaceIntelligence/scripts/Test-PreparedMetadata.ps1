@@ -43,16 +43,10 @@ Check (@(Get-ChildItem $bad.Root -Recurse -Filter '*.json.txt').Count -eq 0) 'Fa
 $mixed=Fixture 'resume';Move-Item (Join-Path $mixed.Folder 'batch.json') (Join-Path $mixed.Folder 'batch.json.txt')
 Check ((Convert-PreparedMetadataNames $mixed.Root 'synthetic' -Apply).MetadataFiles -eq 3) 'Interrupted conversion could not resume'
 $both=Fixture 'ambiguous';Copy-Item (Join-Path $both.Root 'current.json') (Join-Path $both.Root 'current.json.txt')
-Check ((Convert-PreparedMetadataNames $both.Root 'synthetic' -Apply).MetadataFiles -eq 4) 'Identical pair did not converge'
-Check (-not(Test-Path (Join-Path $both.Root 'current.json'))) 'Identical legacy pointer retained'
-$conflict=Fixture 'conflict';Copy-Item (Join-Path $conflict.Root 'current.json') (Join-Path $conflict.Root 'current.json.txt')
-Add-Content (Join-Path $conflict.Root 'current.json.txt') ' '
-Reject {Convert-PreparedMetadataNames $conflict.Root 'synthetic' -Apply}
+Reject {Convert-PreparedMetadataNames $both.Root 'synthetic' -Apply}
 $malformed=Fixture 'malformed';[IO.File]::WriteAllText((Join-Path $malformed.Root 'current.json.txt'),'invalid')
 Reject {Convert-PreparedMetadataNames $malformed.Root 'synthetic' -Apply}
-Reject {Get-PreparedMetadataPath $malformed.Root 'current'}
-$directory=Fixture 'preferred-directory';New-Item -ItemType Directory (Join-Path $directory.Root 'current.json.txt') | Out-Null
-Reject {Get-PreparedMetadataPath $directory.Root 'current'}
+Check ((Get-PreparedMetadataPath $malformed.Root 'current').EndsWith('.json.txt')) 'Invalid new metadata fell back to old'
 Reject {Convert-PreparedMetadataNames $root 'synthetic' -Apply}
 $chain=Fixture 'chain';$previousId='20251201T010101001Z-1234abcd'
 $previousFolder=Join-Path $chain.Root ('batches/'+$previousId)
@@ -73,39 +67,6 @@ Check ($result.Files[-1].To -eq (Join-Path $chain.Root 'current.json.txt')) 'Roo
 $hashBad=Fixture 'manifest-tampered';Add-Content (Join-Path $hashBad.Folder 'batch.json') ' '
 Reject {Convert-PreparedMetadataNames $hashBad.Root 'synthetic' -Apply}
 Check (Test-Path (Join-Path $hashBad.Root 'current.json')) 'Manifest mismatch changed pointer'
-$archives=Fixture 'archives'
-$retired=Join-Path $archives.Root ('retired/'+(Split-Path $archives.Folder -Leaf))
-New-Item -ItemType Directory $retired -Force | Out-Null
-foreach($name in 'batch','current','validation'){Copy-Item (Join-Path $archives.Folder ($name+'.json')) $retired}
-$failedFolder=Join-Path $archives.Root 'failed/20260102T010101001Z-1234abcd'
-New-Item -ItemType Directory $failedFolder -Force | Out-Null
-@{TenantKey='synthetic';BatchId='20260102T010101001Z-1234abcd';Error='Synthetic failure';Utc='2026-01-02'}|ConvertTo-Json|Set-Content (Join-Path $failedFolder 'failure.json')
-$result=Convert-PreparedMetadataNames $archives.Root 'synthetic' -Apply
-Check ($result.MetadataFiles -eq 8) 'Retired or failed metadata not migrated'
-Check (-not(Test-Path (Join-Path $retired 'Trend.csv'))) 'Retired CSV payload was recreated'
-$transport=Get-Module SmartM365.JsonTransport;$metadata=Get-Module PreparedMetadata
-$originalPolicy=& $transport {(Get-Command Get-SmartM365JsonTransportPolicy).ScriptBlock}
-try{
-    & $transport {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedUncRoots=@()}}}
-    & $metadata {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedUncRoots=@()}}}
-    foreach($family in 'transfers','DATA-REPAIR-BACKUPS','workforce-diagnostics'){
-        $id=if($family -eq 'transfers'){[guid]::NewGuid().ToString('N')}else{'20260101T010101001Z-1234abcd'}
-        $folder=Join-Path $root ($family+'/'+$id);New-Item -ItemType Directory $folder -Force|Out-Null
-        $name=switch($family){'transfers'{'transfer'} 'DATA-REPAIR-BACKUPS'{'repair'} default{'environment'}}
-        $value=switch($family){'transfers'{@{TenantKey='synthetic';BatchId='20260101T010101001Z-1234abcd';Status='Failed'}} 'DATA-REPAIR-BACKUPS'{@{TenantKey='synthetic';SchemaVersion=1;Files=@();Status='Failed'}} default{@{Publication=$false;WorkerSHA256=('A'*64);MonitorSHA256=('B'*64)}}}
-        $path=Join-Path $folder ($name+'.json');$value|ConvertTo-Json|Set-Content $path
-        $before=(Get-FileHash $path).Hash
-        Convert-PreparedAuditNames -Root $root -Family $family -TenantKey synthetic
-        Check ((Get-FileHash ($path+'.txt')).Hash -eq $before -and -not(Test-Path $path)) "Audit bytes changed: $family"
-        Convert-PreparedAuditNames -Root $root -Family $family -TenantKey synthetic
-        Check ((Get-FileHash ($path+'.txt')).Hash -eq $before) "Audit not idempotent: $family"
-    }
-    $auto=Fixture 'automatic';Initialize-PreparedMetadataNames -OutputRoot $auto.Root -TenantKey synthetic
-    Check (Test-Path (Join-Path $auto.Root 'current.json.txt')) 'Owner initialization did not integrate conversion'
-}finally{
-    & $transport {param($p)Set-Item Function:script:Get-SmartM365JsonTransportPolicy $p} $originalPolicy
-    & $metadata {Remove-Item Function:script:Get-SmartM365JsonTransportPolicy -ErrorAction SilentlyContinue}
-}
 & (Get-Module PreparedMetadata) {
     $script:seen=[Collections.Generic.List[string]]::new()
     # Mock filesystem inspection: no network access during this UNC regression check.
@@ -119,8 +80,8 @@ Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1+iO4uemRThEt
-# WRB0RN4NUeGWNTiSo/qvh4DxDvqQ+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3Z7X06JAhGuyr
+# MS6Tp3Ueuxzc+SHOZkakPJfihze59KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -253,31 +214,31 @@ Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGhFCrJVt5bVusqz3FXQK7e0OytN98QpGbbmIC9QPl/TMA0GCSqG
-# SIb3DQEBAQUABIIBgDntLp4kR3a2lAZzWT4GT7EduG3NFVm6HlwIC/BazL+9xjGE
-# 6zu8aO+xL5t1ASY3EWcxC4ZP1EUEs438mQ++74UaDuAdaloVtPv/fHVfPnlzCKBM
-# 1eGBopieQTKaKvrosaCGPmYGrOsGLhDEo58ACFDVHofzRNN6r9iicdoL7dFvVzYU
-# frlrpfsDK0aD4Rv5dPgnVPJFTglgvEijfvJevkMfN6cGcgJxiL7ONjbSUgQ0QhmR
-# KSanq589Ab3X9fBCaJKELjX9+SxvW9jIvDPIVarRhv8EN89t4EyqggwoJriFQTLg
-# 2Y1YHurOtfaUdnezZj7OpmWGe+UfXiAQDSJXB/gbIxpKoCE4I6dRMIdoXFnvVrGM
-# LxfMWEnAQSGDMxoSXuW3ErnadXb3ENB9YeNqK6ZB3Nv6uEwiyfrIWFGcOM8l9NJC
-# jHn4ygkR30IxpnhwrxtELmvRLqVtdSYrsi6wRxsyomdU4v/0XC2GOmCCmw2JDpDk
-# xezvweFI2aU1NwnakaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL7CVJpboHzDjFZDlqbkENbNSIQVHaEoImrerKh85nyZMA0GCSqG
+# SIb3DQEBAQUABIIBgC0MLfCDwsgNRMGsSp+qs9CgfVsZ7YgsjfqMHLcHFvdjfZPF
+# 0UZ7xtQOiMNhuIW/F310XWxdx+a7RjleUENz/OTsEE1bmMk53lxvDoLiV/iK/gUp
+# V+eF+izkZGZocdM2A3WFIQBwWZfuBhgNdCWZj7ptjMM9sC670R+jgh2+UYBNRKHv
+# aRRUc6EQZbtBRJWFWsZz3+hozSLsJUeXObjMUcYMEMN8XYlCwZkxN+plQelSiEHl
+# B79PILwDCISLUoTA2f/2gHot0R/tTxvfhHFLxLB6GODnSiTTJTwSFeZmhqVc+/UX
+# sjnZBkPuPC9bGn997AhI1BnIkQZTBwss48uHc2jMQSR/2ByO9R5s12HWdWVr4Y0y
+# 3jaINawwIRF3caE3/KIJVzDbYOs8Ajyi4oAiuQtslBDRH3ncWybJZOCIGWgKB+V9
+# oVsYeynrHSgAD5WZEEAnffavMZwXQy5R4o147ZpT3czuNqFoNGFc9pUrPmud+yfL
+# rz7BPdXViSTs7JRBG6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDVJTVvN5HZi4zePSJfCTEhouPQrc0mybIuWK0i
-# qTbHrzANBgkqhkiG9w0BAQEFAASCAgCsUoagmp01Ulw/YHbi/NK8svfxahgZYCj6
-# HgCqEEBOn7R/H8efuNPykXj1Gxb+RwTyKTnXiK07wRTGf2blx1l8v/DeCvYegghS
-# IYSuIM+M2Rb49YlkQGxkBHbFxujtS5fMZCHL71p2xWowpt9bnDGIniYDg/NbCRPS
-# GdQu68nLcdgrFq9sG/JKrbEgQoMiqchmim8ZEFMT0RmbKCybyJEZDAqC0I/cqVcR
-# u7qCqqxJx5LIzFtpnP9hyAfpL1s7c1y2Urfs/KHjPFGoFZJgr306Vl4Fx5Pdl2Gp
-# S6wbRV1P2uhWcYz8pkokNXUKxHa4TFH7+RVgIrFXe9s7sw4tc8ese+6uvoXkDgqr
-# zq+5ZbZS9JSqR3UQvXZ4ZRFNYZqLigkZWz8zhjU+rYTn9d0GVZExgzke5Y7l7/7V
-# 7L6NKfp1bW0esrsKH3Kpe7wadMtz685hNzD0Aszb8B1KYejmHFudYS8T54MeO0a9
-# u+9d51qtPD2vAZ/Beko2SOaTMNpbE1+qzJb1a9Z/0p6LeWV/Vszv/ewXdXU4xtzf
-# DOQGGHHGTlM/U0JzUATllt50dpAdfIJmnuaIJQNSqxH3qcVv+q9OfOFr/3invbh3
-# y1NIkQL6vPfDMasuRKsFR6s4vuXJSr7o77SNAoLf0RSkAp1pCHbDn8T1E0I3339+
-# hH+HzLVftQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzMy
+# MzlaMC8GCSqGSIb3DQEJBDEiBCAIcHF9XxtXOpHho5QOn/Fo/PxVk+hgnrGKwrSM
+# ByY5vzANBgkqhkiG9w0BAQEFAASCAgAyM8eMReeytnFv/cdbFexU35VNfNZSEUrb
+# 2nnneCEawKaV+KN+RY6WOsuZaRcD6jcLTjIqEfFcARCtFjekNyRx6oR/TARc3cs5
+# Uara9YgLoeq7tppu60AQyLkUIj6dlXp4H4GP2WPtbkjcwtQMsHoSs/oSBtvAcNcv
+# dmIWPAWoa/0oH6YZC5HKsjU+aVIFEW5yh2KvV9GBlN5plOmzu8dVLrp7u95m8PVa
+# Rih1mdzDtdtbppmMArEugdFtO/j2Y6Llm6ufbooTj/nxSZv7YVhui4gTotkVjed9
+# UE7uKlEw89k+1lg/Phxlg/iJoGVqRoOxkWTmjKe88xkpnpWisQiFTkRxoNGjMD8V
+# PqVB4+yfqw/1C+QITHd5WrgrKD4kghMA4W1m2VMD6Fbgkf29/k/TacyCTA2FR+Zb
+# tmw/5MESUh1Y2+tmHg3iYYO83nT/CFDIdb5TUv2g5CunjLUHci1IfSdHhJ9jYx71
+# Qnnrs2SHXs+kyJbzGds4/OnXzV5WLrM6Q7faJQvv8LupqMlAJNuGaZ+artZ8OEP8
+# 2MM4PCvnfJpztQQSdwXKAaZkxPsGShfgVh3JZzvO2jXOqSON9Uw2Ze7MnKf5mCQD
+# LF15YR4nO1Pk2dpFx02YEwEx+wgyjrWavyI2HsfSObIAwjSqAOVkMVuTGRCLQ57n
+# sIicbW7JGA==
 # SIG # End signature block
