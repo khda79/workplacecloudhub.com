@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.20
+1.21
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.17
+    Version : 1.21
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
@@ -310,7 +310,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -564,7 +564,12 @@ function Import-ExportedCsv {
         $csvFile = Get-ChildItem -Path $tempFolder -Filter '*.csv' -File | Select-Object -First 1
         if (-not $csvFile) { throw "No CSV file found in exported package for report [$ReportName]." }
         Write-Log -Message ("Imported CSV for report [{0}] from [{1}]" -f $ReportName, $csvFile.FullName)
-        return @(Import-Csv -Path $csvFile.FullName)
+        if ([string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $csvFile.FullName -TotalCount 1 -ErrorAction Stop))) {
+            throw "Empty CSV payload without a header for report [$ReportName]."
+        }
+        $rows = @(Import-Csv -LiteralPath $csvFile.FullName -ErrorAction Stop)
+        Write-Log -Message ("Report [{0}] returned {1} row(s); filter [{2}]." -f $ReportName, $rows.Count, $Filter)
+        return $rows
     }
     finally {
         if (Test-Path -Path $tempZip) { Remove-Item -Path $tempZip -Force -ErrorAction SilentlyContinue }
@@ -601,7 +606,7 @@ function Test-AutopatchAlertMessage {
 
 function Convert-FeatureRowsToAlertDetails {
     param(
-        [Parameter(Mandatory)][object[]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
         [Parameter(Mandatory)][hashtable]$PolicyMap
     )
 
@@ -623,12 +628,12 @@ function Convert-FeatureRowsToAlertDetails {
             SourceReport = 'FeatureUpdateDeviceState'
         }
     }
-    return @($details)
+    return $details
 }
 
 function Convert-QualityRowsToAlertDetails {
     param(
-        [Parameter(Mandatory)][object[]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
         [Parameter(Mandatory)][hashtable]$PolicyMap
     )
 
@@ -650,12 +655,12 @@ function Convert-QualityRowsToAlertDetails {
             SourceReport = 'QualityUpdateDeviceStatusByPolicy'
         }
     }
-    return @($details)
+    return $details
 }
 
 function Convert-QualityErrorRowsToAlertDetails {
     param(
-        [Parameter(Mandatory)][object[]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
         [Parameter(Mandatory)][hashtable]$PolicyMap
     )
 
@@ -677,11 +682,11 @@ function Convert-QualityErrorRowsToAlertDetails {
             SourceReport = 'QualityUpdateDeviceErrorsByPolicy'
         }
     }
-    return @($details)
+    return $details
 }
 
 function Group-AlertSummary {
-    param([Parameter(Mandatory)][object[]]$Details)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Details)
 
     $summary = $Details | Group-Object -Property AlertName,Severity,Category,AffectedUpdateType,SourceReport | ForEach-Object {
         $first = $_.Group | Sort-Object -Property EventDateUtc | Select-Object -First 1
@@ -726,11 +731,11 @@ try {
     if ($IncludeFeatureUpdates) {
         Write-Log -Message 'Collecting feature update report data.'
         $featurePolicyMap = Get-FeatureUpdatePolicyMap
-        $featureSummaryRows = Import-ExportedCsv -ReportName 'FeatureUpdatePolicyStatusSummary' -Select @('PolicyId','PolicyName','FeatureUpdateVersion','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus')
+        $featureSummaryRows = @(Import-ExportedCsv -ReportName 'FeatureUpdatePolicyStatusSummary' -Select @('PolicyId','PolicyName','FeatureUpdateVersion','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus'))
         foreach ($policyRow in $featureSummaryRows) {
             if ([string]::IsNullOrWhiteSpace($policyRow.PolicyId)) { continue }
             $filter = "PolicyId eq '{0}'" -f $policyRow.PolicyId
-            $featureRows = Import-ExportedCsv -ReportName 'FeatureUpdateDeviceState' -Select @('DeviceId','DeviceName','PolicyId','EventDateTimeUTC','LastWUScanTimeUTC','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage') -Filter $filter
+            $featureRows = @(Import-ExportedCsv -ReportName 'FeatureUpdateDeviceState' -Select @('DeviceId','DeviceName','PolicyId','EventDateTimeUTC','LastWUScanTimeUTC','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage') -Filter $filter)
             foreach ($item in (Convert-FeatureRowsToAlertDetails -Rows $featureRows -PolicyMap $featurePolicyMap)) { $detailRows.Add($item) }
         }
     }
@@ -738,7 +743,7 @@ try {
     if ($IncludeQualityUpdates) {
         Write-Log -Message 'Collecting quality update report data.'
         $qualityPolicyMap = Get-QualityUpdatePolicyMap
-        $qualitySummaryRows = Import-ExportedCsv -ReportName 'QualityUpdatePolicyStatusSummary' -Select @('PolicyId','PolicyName','ExpediteQUReleaseDate','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus')
+        $qualitySummaryRows = @(Import-ExportedCsv -ReportName 'QualityUpdatePolicyStatusSummary' -Select @('PolicyId','PolicyName','ExpediteQUReleaseDate','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus'))
         Write-Log -Message ("Quality update coverage: Graph policy profiles={0}; status summary report rows={1}." -f $qualityPolicyMap.Count, @($qualitySummaryRows).Count)
         if ($qualityPolicyMap.Count -gt 0 -and @($qualitySummaryRows).Count -eq 0) {
             Write-Log -Message 'Quality update policy profiles exist, but the status summary report is empty. Check assignments, report availability and export completeness; the policy CSV will remain empty rather than inventing rows.' -Level WARN
@@ -762,10 +767,10 @@ try {
             })
 
             $filter = "PolicyId eq '{0}'" -f $policyRow.PolicyId
-            $qualityRows = Import-ExportedCsv -ReportName 'QualityUpdateDeviceStatusByPolicy' -Select @('DeviceId','DeviceName','PolicyId','EventDateTimeUTC','LastWUScanTimeUTC','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage') -Filter $filter
+            $qualityRows = @(Import-ExportedCsv -ReportName 'QualityUpdateDeviceStatusByPolicy' -Select @('DeviceId','DeviceName','PolicyId','EventDateTimeUTC','LastWUScanTimeUTC','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage') -Filter $filter)
             foreach ($item in (Convert-QualityRowsToAlertDetails -Rows $qualityRows -PolicyMap $qualityPolicyMap)) { $detailRows.Add($item) }
 
-            $qualityErrorRows = Import-ExportedCsv -ReportName 'QualityUpdateDeviceErrorsByPolicy' -Select @('DeviceId','DeviceName','PolicyId','ExpediteQUReleaseDate','AlertMessage','Win32ErrorCode') -Filter $filter
+            $qualityErrorRows = @(Import-ExportedCsv -ReportName 'QualityUpdateDeviceErrorsByPolicy' -Select @('DeviceId','DeviceName','PolicyId','ExpediteQUReleaseDate','AlertMessage','Win32ErrorCode') -Filter $filter)
             foreach ($item in (Convert-QualityErrorRowsToAlertDetails -Rows $qualityErrorRows -PolicyMap $qualityPolicyMap)) { $detailRows.Add($item) }
         }
         Publish-CoreSmartM365Csv -Data $qualityPolicyRows.ToArray() -TimestampedPath $PolicyCsvPath -LatestPath $PolicyLatestCsvPath -Columns $PolicyColumns | Out-Null
@@ -777,7 +782,7 @@ try {
         Write-Log -Message ("MaxItems enabled: restricted Autopatch alert details from {0} to {1} before summary calculation." -f $detailOutput.Count, $MaxItems) -Level WARN
         $detailOutput = @($detailOutput | Select-Object -First $MaxItems)
     }
-    $summaryOutput = Group-AlertSummary -Details $detailOutput
+    $summaryOutput = @(Group-AlertSummary -Details $detailOutput)
 
     Publish-CoreSmartM365Csv -Data $detailOutput -TimestampedPath $DetailCsvPath -LatestPath $DetailLatestCsvPath -Columns $DetailColumns | Out-Null
     Publish-CoreSmartM365Csv -Data $summaryOutput -TimestampedPath $SummaryCsvPath -LatestPath $SummaryLatestCsvPath -Columns $SummaryColumns | Out-Null
@@ -807,11 +812,12 @@ finally {
         Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError
     }
 }
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAE9JxRfIuYelcA
-# SCG0S/2MQwOQtasLfoqqF9V0dGShg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfGvSFUKdDv/os
+# UKfwBvsf6heftbPLk96iM6mMwjNKVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -944,31 +950,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAYAvvEo4SIE81hOuLIVCV57HfGnAjPCaLFcnCdVH/1OMA0GCSqG
-# SIb3DQEBAQUABIIBgJFy0KgueEkgpIE2yST3hSEXsB8EtvRDf+cc4hXVbBPAdrT5
-# A1xu2SFYFacCu4wMJ/VzdmAyAaS0TFz92NX1yKQuHZdvygyFlG/Jwjy2dhAFh2I9
-# T9GiojPAubkSo/oQag6Qtc5T44Kj+lXW3E5mo7mG3F/QTxTwmBZ1EnFwGRnxX1fd
-# IkgnAI27d2iRQWRNlkck0XDnZaThy0Unx3a8w8d5ZIUbI2dSVkL3q8C68VNbmez9
-# fzj90g+4+vr/Sjmv/1Ma7xhvMKXSK4TMBw12A6XBhuk8XoXxXEUrj3azVOTNXg+a
-# mTI7XxKIe3fjbyoCvq8MlUE1p64FQ9c0/Il0H993MEEyP4djLlkD73oa+ryxmrv0
-# MJu+e2utm7h4FOAkLXUscvf3Q/NPgtlrzFEhr0vwC1HQCKDic3/+huyxZojAasj8
-# aYNZCNmjZgq9lWOANYwSsUkaZAo+hT+7R4F09S/WyJ4Q0tMxKZgqM9tT3VNSPTzp
-# 7xRXW0Dpna0ja7G22KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHQUBz06M4zXVVikFJJi1UPzg8gfrM5f5oR98dF+rN4yMA0GCSqG
+# SIb3DQEBAQUABIIBgErMg28tvERvA9ro2N18BbX7VNtJxI2zcorjqAFJk7AbxpIA
+# m+LwtXM5ae7viYp9hhs8zvrnx0CllZoCse3xnGhkJ7M1Mqyf7o9e1PRu65j9ZtuA
+# zBLJGfmpkl2nCEYMCuMN9oFxzpO6mke/WCXukC3R2vONuoBUayjyEXJ0K9kvkKup
+# jyAFUwd0HIwudJ6AQ81hID6b2XwSAqPUeoTGRTb9t/zbW2XJIhjIRhn3DkaZOZ3R
+# JhMTL6mbISQGewlN37dg1szHwnowA7QKmO0wrUrqwNFEfs5t5CWaibLvO33fWv1P
+# SMVv8JM6hGY+1NUhxZ+21CTY7BK9HvK5hU0FBy8XPj7GCs4S+pJgaptuMeMgU/n8
+# 4Lqp7LzYRR5C0nHUyEUm30PHF/2pxaL6e39o+gDo/FQxWGMis5EcOCKCsnPKLZvb
+# c7hjzRIF1Uiz+QCalT0MleGXPVx0iCYTYhThNysxlBAruRorE8xP77ilYEIC/G1W
+# Z81eNehZZky/hjDfOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDhaMC8GCSqGSIb3DQEJBDEiBCBB2z7NsjOP6HgVQr+iBy1lSrn8pPiVUFKYK5xy
-# h6h26jANBgkqhkiG9w0BAQEFAASCAgAQhQqZlLtiNYE7gpDnCZcT7gdmj7o0c1T3
-# 12CW5bapplVAUzYjE2oZG+RtzzRwuVOAfhW8wTnG38gjUix8tnXxK/MEsmYmCF4q
-# fZ9y1NTcir+MQ9tZ3HX3uUID7Y7Cv6neI4fCKflOkUbyRr+D1ZUZQPp/fRAbrEH0
-# KatWoiUORq4xXa3sWoVOTY+T4OnJ+bsy+bpJnlzPc4JxU/a5kYLnxORfiyuqLLKb
-# HTLWV1dkVrBdi+Hd1o2iUdtMpRAtpbaeq5K7dYzhVZ8V3G4yVZK5l6nIMNej6rE6
-# joRLk/eXxOtxwEFFgu50YHyMoyKUWDIlYnJDxlhsCKTiMURo6DAHy0qDXqA6HMRF
-# VzadPh2DcYvO8/J5kHH0UnPXSR+VLMienhEHWIyIxhjWZYTvM37NJ9u4UuLcOBaP
-# nQNKu3xNKmKvoNGFN0Y9sZYFquSYjy6oJFfD09cPu0hAq9Fuayr2cdQYptEvvLZn
-# C7wqqunubbEeJmOBG5ul+zrymkUOmdmY+oQ7MR2ka0FYoJmiopOrT7PXmruNsx/j
-# FYD+NjzxMvnYyKjBrRXOR+hHl71QezLpNEbo78IVd9mf+lNWnYGLjGWop6gkCzZ7
-# KgM5Bv+9382Wh6Er6SENA+kEBvZ2YJz6v4bX3Md1x0seXvYft92w2tuZizpCRJO9
-# IWd6NJC0Rg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwNzM3
+# MTdaMC8GCSqGSIb3DQEJBDEiBCDuEt9pDZGdWwuHq/MYQNI/aNW6JgHqbJo2Np3u
+# JG9u5zANBgkqhkiG9w0BAQEFAASCAgCCnlV2zyLOsTBJ6MZCowaJ7wl9+3AlGzyB
+# R+Bqk1Rl++i5nqKP3wttszfJRkB1mvSwonXw76GUaYOSFTt1dpKX1Upo7SzBYH8F
+# s+/OlDcqsEvJnLgcwQuXERLuB/NC+qZdHo/5hWOK7NcswjMnL7w5zT+7zOWBIIiB
+# /iS6HkmDT9P7P121DtduBB+jyz8dk3s3NgDHdQ+6RvBz+7DVNejYDYucn6djzZiq
+# Qs9kaO/SWGniAGEU0z/aaKR7PkYSvxO1oeR800huEFxxFQLj7pOPqCRYK2y0I0PC
+# vgVIWb0yc5sWphvGjmcYwtyAOtA0NkdKOKE+TKbnymf9qrkRXKYIx33FWo9OgGkq
+# m4eCm7pcqFyknsRDGY6+9HyILiiwQ6xsxNOMiFZp8/6nPjMK0VD5ldFRrZhkCTA9
+# CI4bMeaHA/u7mmfQQrAylp2/P8XFZoIOulnDikNzAWEUNqXTO/rU+8Aa4HqxxpRN
+# +6q8exccsNGRvG672yLlB6rdghBsFKKD7KM8IqH+GxrL8beYYZ2hh5hlit6JJIBv
+# nxQtIY3qP2Ek40POqIyTZ1iswh1t0D/+K4SBULDxCzX1K2P674ahXdYFJScx0Y8t
+# fsM9f/ymI28264nqG6JQ1r4McYeKDmjSWDQuSafPF26GVe5OBigxWv1S6i0G0L8T
+# EAJ7IN6uNA==
 # SIG # End signature block
