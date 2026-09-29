@@ -69,7 +69,14 @@ foreach ($entry in $manifest.files) {
 
     $header = $lines[0]
     $schemaHash = [Convert]::ToHexString($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($header)))
-    $fileHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
+    # Git checks fixture CSVs out as CRLF on Windows. Hash canonical LF content so
+    # the manifest validates the same fixture bytes across operating systems.
+    $fileBytes = [IO.File]::ReadAllBytes($path)
+    $fileText = [Text.Encoding]::UTF8.GetString($fileBytes)
+    $canonicalFileText = $fileText.Replace("`r`n", "`n").Replace("`r", "`n")
+    $fileHash = [Convert]::ToHexString(
+        $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonicalFileText))
+    )
     $rows = @(Import-Csv -LiteralPath $path)
 
     if ($schemaHash -ne $entry.schemaSha256) {
@@ -150,8 +157,8 @@ foreach ($entry in $manifest.files) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMS4ZOWMDFVVJZ
-# dSVBARrYXOSfpsvIA3UUgu8bPZkzrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZBCNGkmpk1hC/
+# 9+2hfUXOZnXbTR/fnAiE037vGfvL3qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -284,31 +291,31 @@ foreach ($entry in $manifest.files) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDiuzmnoeJh+7lfo385pq9v14JAdSEJqlnDztXSeGSu2MA0GCSqG
-# SIb3DQEBAQUABIIBgKWJkNFoozuO836vEGW30X26ASHjayHzRSuvLUMHuqkqGmIi
-# 7sAyMweG4xm39MN8j4k92y5E0uiIdoWCeCu9cDi9fcG/oxKkTRcb1Tjt1lZ9J7s9
-# I3feQxT1JxArg8UE5xQAS9zU/r7cOyctpQ9LKT6cQtVPwjL/9b2zpkSzSSIZ4seh
-# P4Qthf8gUxhA+bn+UHfJThDJRvj0rkrOvp52pUjjO6uRvYhxSZxBN7bpawxZQ8dX
-# IbCDRO2Pj9vNdiKxjArp8F9+Cyaksw5vzGvWKT6E5p7VXLd5Gu45kiITW2459Jgi
-# zKGNVkpp7mnQgER+iRceBxOg1eaqxzunQkmGGcqXPLDd98pSgPXSnyHp7NbFpbcR
-# ZVKhr7MyiGxe3GsdTXG6+dhRGd0meOvGePV5HJndOviQiVGzwIt0OAOw3TYqJZMk
-# 6751gGVvzA9lBQHH/YcRf2bnSbHfSMxgS37urJ+JeL9vqLpCwkZUbtC4y2j9WvVW
-# pJKDQF/h0OzYdq+hq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBOZVtC7l4n4D2e+SYZulK0Ubmf8or6caTe352C6YCngMA0GCSqG
+# SIb3DQEBAQUABIIBgJFgaj0Q0EdETK/L6x7hbGGoXDTPkgd7K6Dunjap2nYWHsf+
+# ohX9JL8l2maoZpk/k2uvK6OTe1hI8AH6Hy5mriTWP5LZmp39GpRZQaectj3HIIm9
+# 6s4D5cK4IhPdwGdnxGZrgahDmuodA88Z/cq+PLN5rQWVTioULMge+Nc8Eiyr77o5
+# On7OostBPBTqAqXF7wwcprr0E/LHd6k6qTygDXseR9cNTF4+RSXLqPMJIcSTxPHu
+# EDvl6DGGtn8e1GBIv0F4PHk1FDOf3qtPQcnv7l3prBoYwTDVL5DS3J3agLVu67c6
+# Xvb1oGKkB8uv7sfXyA8FcUvoy0QtPgS4MZ0XLqein+4QEmF7F6j46MnAJyM3sMr7
+# pnyCoCWALaReVjSV8osRBWNXfqIuSC4E9rpemHXVpkoY2aTbCmIPQ2ME8Y/2Q7Go
+# vHR/YUhiUZYfQwn38oNBenR0jDI2OXqyFZLdY8OE27d36jPo1if/+YdsAYZkIoCC
+# Da53xff99Y+4xcNNmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MjdaMC8GCSqGSIb3DQEJBDEiBCBIQzT2PJpBhK4fkKT0/+71DP5m3STrpv7GusWT
-# zlAEzzANBgkqhkiG9w0BAQEFAASCAgAY1lZUOFlAP0ptt8KR9wDKaGttXm36r4J+
-# QWL120vZzbGcRr7JSTEFK0mLqgcH1lpzL5fIdK/u/8R88IRpCetQK7QwEtgKaAwA
-# zBjN4AsZfhrQV9gacWG98PCVQGc/Z4RDSelkRc0juhpOqc0s+ihyH2wz9wItYN9y
-# QBkN2pLcQcXPdvb8tjyfsCC+Auhy0OvwycEaq0u9/VJR3kisw5nDDwjagcmhwDjo
-# MM9Y/1wwK2k1ZDeJfSOt8uaK8ay+bxBD5txD7lBxQe8LiUV6qeYhAKJNFqRfNZyv
-# JQbN2hRFOm+V20zJBkZyoADoelM1cV8hHPolyiU3HsaJqGrP/si4euIwZE9xGDhK
-# HoNNTutG60JykLWLS54tQEcLdo0O8oRLO2wQUifMST6MXcqPGraUvqiwpzHIBfeK
-# qVXIK7JcGRyqtPqDGJpd9aHh3GQzMYZWVgkoyFpqd58tJ633XrPnsm2ckALvu9mW
-# 3OPZ36UBajf0RriiY8A6w7XMrvCiHYdCwzA6wSHPVJEyXQXYC3EOiVP6+EG+v4dS
-# /kBvUHpR8cLiI153jnhF1j6ycxm5ba7bu8dPU7ChZjQtLpFyaYq3MMhf2vo8qcN+
-# ry/2k+Dp+UpT9rwtRomJUN7XqJj9Ap3bFpPIYKK9S1cRH+sNzgZOoGtk1tTCAKpy
-# rDN9pBvRtQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTU2
+# MDdaMC8GCSqGSIb3DQEJBDEiBCAitLXKZAKAz+Sw3HO2YVYz7qIaB96CwHxofnzx
+# //n2bDANBgkqhkiG9w0BAQEFAASCAgCDHIfDN5oto4AgDeyWTGtg4K4qVh3qGbVd
+# QPvcw4kTnTJqEkRWmvWtL4InNuq9KeatKZsciB5CCksD2iavuJiyRyhPcEni4wbQ
+# kmez8EOnFN6igBxnNPvYgT/BtEnd3TJtDsNKeovYv9hTIxj4BFfBdQ9Dhl4gBbbb
+# j8SW/z+1dF4L7AfMWwXQpmljFwgwZoFcIz9rDL0oEBwvkFgdQOwCLnmos6EIcfrY
+# kSUbwUuWvwpcB/SVYjQyrDq8xP8xqB6ldnIqtsWfJ5VZx2IEs47dOK6LklqAwI3C
+# KJVisoQr81ul3ncXbfkVipC1B7a2kRZ2Vd/S0NxBPFQsZL0kMJ9OcSKjMZJ3nOc2
+# hu3ptqqt8O2gdkO9DaPH98K/L13IJo1vOaEz9C3uwfyJgyzBKB3dhZI8z571TpwK
+# OYOcz6ayLNx/2f+pE9xsTGyCjWhe7MsQexHcGfn2HMI3uPXpgvbq+pSjpUqGzP7E
+# sasOr5M9kLvpwtckXlH4a6KqGhiNJYO4aPWJrCM759W/ImBFbl9fkcWz7fsbxaoY
+# A39tBYGLyRLMttrTkNn+6V2/DaCQmxlrW74GjgOpbGnInHSZabmpO1lJ+2LwiBv8
+# z9fGWy2PTx3XhCal1hzOyyLDK4IueDhWA9NOCtVROhnj4yOoRWZemAXSk5l1teoS
+# dyB/aoEeWg==
 # SIG # End signature block
