@@ -1,0 +1,45 @@
+/// Synthetic organizational structure at department grain.
+table Organization
+	lineageTag: 0033f5ad-aa2d-49b2-b942-6d8b12d192dd
+
+	/// Business attribute Organization Key.
+	column 'Organization Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 90696cea-4699-4892-b315-e069c7ebab25
+		summarizeBy: none
+		sourceColumn: Organization Key
+
+	/// Business attribute Organization.
+	column Organization
+		dataType: string
+		lineageTag: 335ae89e-f541-40a7-8004-090dd0a13955
+		sourceColumn: Organization
+
+	/// Business attribute Department.
+	column Department
+		dataType: string
+		lineageTag: ab6941bb-a179-4ed6-b85b-838f84393a50
+		sourceColumn: Department
+
+	/// Business attribute Business Unit.
+	column 'Business Unit'
+		dataType: string
+		lineageTag: 6accc775-92ea-4aa1-831c-e1774e8eba46
+		sourceColumn: Business Unit
+
+	partition 'Organization Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Organization Key" = Int64.Type, #"Organization" = nullable text, #"Department" = nullable text, #"Business Unit" = nullable text], {
+				        {1, "Synthetic Organization", "Engineering", "Engineering"},
+				        {2, "Synthetic Organization", "Finance", "Finance"},
+				        {3, "Synthetic Organization", "Operations", "Operations"},
+				        {4, "Synthetic Organization", "External", "External"},
+				        {5, "Synthetic Organization", "Sales", "Sales"}
+				    })
+				in
+				    Source
+

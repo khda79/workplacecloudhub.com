@@ -1,0 +1,317 @@
+/// Private current SharePoint and OneDrive object-level storage, activity, ownership, capacity, freshness, risk, and recommended-action evidence.
+table 'Content Storage Evidence'
+	lineageTag: cab6aba2-0edc-44ee-a0be-a78901981abd
+
+	/// Current SharePoint sites and OneDrive accounts in scope.
+	measure 'Content Containers' = COUNTROWS('Content Storage Evidence')
+		formatString: #,0
+		displayFolder: Content | Current
+		lineageTag: 14efbcb0-cef1-4ad9-a745-6d7a7854ae9b
+
+	/// Current SharePoint sites in scope.
+	measure 'SharePoint Sites' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Service] = "SharePoint"))
+		formatString: #,0
+		displayFolder: Content | Current
+		lineageTag: e190e9ab-0547-4a73-90bc-4faff8b66fdc
+
+	/// Current OneDrive accounts in scope.
+	measure 'OneDrive Accounts' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Service] = "OneDrive"))
+		formatString: #,0
+		displayFolder: Content | Current
+		lineageTag: 353154f7-65fb-4ade-bebb-07056008f46c
+
+	/// Observed SharePoint and OneDrive storage used in gigabytes.
+	measure 'Content Storage Used (GB)' = SUM('Content Storage Evidence'[Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Content | Storage
+		lineageTag: 6fb7a3c0-4271-4a0a-8297-333880c8424d
+
+	/// Observed SharePoint and OneDrive storage used in tebibytes.
+	measure 'Content Storage Used (TB)' = DIVIDE([Content Storage Used (GB)], 1024)
+		formatString: #,0.00
+		displayFolder: Content | Storage
+		lineageTag: ed221052-a78f-4c8e-897f-be26669a8894
+
+	/// Storage used by content inactive for more than 180 days.
+	measure 'Inactive Content Storage (TB)' = DIVIDE(CALCULATE([Content Storage Used (GB)], KEEPFILTERS('Content Storage Evidence'[Activity State] = "Inactive 180D+")), 1024)
+		formatString: #,0.00
+		displayFolder: Content | Risk
+		lineageTag: 6c97a57b-a560-49f4-8170-833de50c7755
+
+	/// Observed used storage divided by observed allocated storage.
+	measure 'Content Storage Utilization (%)' = DIVIDE(SUM('Content Storage Evidence'[Storage Used GB]), SUM('Content Storage Evidence'[Storage Allocated GB]))
+		formatString: 0.0%
+		displayFolder: Content | Storage
+		lineageTag: 1ba19a54-b106-49a5-8431-054c4d210d3d
+
+	/// Content containers using at least 80 percent of their observed quota.
+	measure 'Containers at 80%+ Quota' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Storage Pressure] IN {"Critical 90%+", "High 80-90%"}))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: 2730347b-3dba-4dfd-87a0-74a8747eebb4
+
+	/// Content containers inactive for more than 180 days.
+	measure 'Inactive Content Containers' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Activity State] = "Inactive 180D+"))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: cf118cba-5f04-4f7c-b85e-5eb8415995a8
+
+	/// SharePoint sites without observed owner evidence.
+	measure 'Orphaned SharePoint Sites' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Service] = "SharePoint"), KEEPFILTERS('Content Storage Evidence'[Owner State] = "Missing"))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: 76436d60-d96d-464b-b489-e9e29540bde3
+
+	/// OneDrive accounts whose usage export has no last activity date.
+	measure 'OneDrive Accounts Without Activity Evidence' = CALCULATE([Content Containers], KEEPFILTERS('Content Storage Evidence'[Service] = "OneDrive"), KEEPFILTERS('Content Storage Evidence'[Activity State] = "No activity evidence"))
+		formatString: #,0
+		displayFolder: Content | Evidence
+		lineageTag: ccbca12a-5fde-49a9-a5a7-1b646945d84d
+
+	/// Content services whose current usage evidence is stale.
+	measure 'Stale Content Sources' = CALCULATE(DISTINCTCOUNT('Content Storage Evidence'[Service]), KEEPFILTERS('Content Storage Evidence'[Freshness State] = "Stale"))
+		formatString: #,0
+		displayFolder: Content | Evidence
+		lineageTag: a54f3f10-268f-465b-afa3-db5888c303d6
+
+	/// Content services represented by current evidence.
+	measure 'Content Services' = DISTINCTCOUNT('Content Storage Evidence'[Service])
+		formatString: #,0
+		displayFolder: Content | Evidence
+		lineageTag: 6a51337c-654f-4fb0-9cb3-6b141dba658e
+
+	/// Compact disclosure of current content evidence coverage and freshness.
+	measure 'Content Evidence Ribbon Text' = "Observed · " & FORMAT([Content Services], "0") & " services · " & FORMAT([Stale Content Sources], "0") & " stale · oldest " & FORMAT(MAX('Content Storage Evidence'[Evidence Age Days]), "0") & "d"
+		formatString: @
+		displayFolder: Content | Evidence
+		lineageTag: 2a1f2dc8-20ab-4a60-adc2-0ed437d51537
+
+	measure 'Messaging and Collaboration Storage (TB)' = [Total Mailbox Storage (TB)] + [Content Storage Used (TB)]
+		formatString: #,0.0
+		displayFolder: Content | Executive
+		lineageTag: 0a31c5c5-b9a6-4d5e-a7d8-ffc2fd2a5072
+
+	measure 'Messaging and Collaboration Storage per Workforce Account (GB)' = DIVIDE ( [Total Mailbox Storage (TB)] * 1024 + [Content Storage Used (GB)], [Enabled Workforce Accounts] )
+		formatString: #,0.0
+		displayFolder: Content | Executive
+		lineageTag: 2576b30b-04e8-4588-802c-a0a1531d1bd0
+
+	column 'Content Object Key'
+		dataType: string
+		isHidden
+		lineageTag: 7c567917-ffcf-4fc8-9c56-d96d51d4109d
+		summarizeBy: none
+		sourceColumn: Content Object Key
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Content Object Name'
+		dataType: string
+		lineageTag: f740568a-4393-4c7b-99ab-51208973ec62
+		summarizeBy: none
+		sourceColumn: Content Object Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column Service
+		dataType: string
+		lineageTag: b5538880-1c73-4852-8851-be2580da72cb
+		summarizeBy: none
+		sourceColumn: Service
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Object Type'
+		dataType: string
+		lineageTag: 171dd54f-722e-408f-8b59-9caa517e2bbd
+		summarizeBy: none
+		sourceColumn: Object Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column Owner
+		dataType: string
+		lineageTag: 9de17d24-35c6-4d76-bef6-eb391fa88879
+		summarizeBy: none
+		sourceColumn: Owner
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Owner State'
+		dataType: string
+		lineageTag: 0cfc33d6-48a2-4ead-8b5a-0d0db5098542
+		summarizeBy: none
+		sourceColumn: Owner State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: c259eadd-53dd-4a5f-9bfd-1b09154fd5e0
+		summarizeBy: none
+		sourceColumn: Activity State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 93869493-b2cc-44b1-96ef-6ed075e45761
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: 3b2bd393-27ba-4570-8069-2b721ee98199
+			defaultHierarchy: LocalDateTable_b62f6adb-63eb-4a4b-ad79-834b3e451455.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 8cb29248-5ba8-4909-8602-d87d22241a25
+		summarizeBy: sum
+		sourceColumn: Days Since Last Activity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Used GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 6f806352-64f3-4dd4-8121-6012974b22d3
+		summarizeBy: sum
+		sourceColumn: Storage Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Allocated GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 70d3c123-64eb-48f3-aecb-9a45ec94c754
+		summarizeBy: sum
+		sourceColumn: Storage Allocated GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Utilization (%)'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 8d380ff2-74a4-4fea-94a8-6e4bbb956d20
+		summarizeBy: sum
+		sourceColumn: Storage Utilization (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Pressure'
+		dataType: string
+		lineageTag: 5ac9032b-f453-44f7-8efd-8e4239077269
+		summarizeBy: none
+		sourceColumn: Storage Pressure
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'File Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: c6333dcd-4c10-477a-b304-d294483b1b97
+		summarizeBy: sum
+		sourceColumn: File Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active File Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: b11677ce-0ea3-4c2a-98ef-2351c355c58a
+		summarizeBy: sum
+		sourceColumn: Active File Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Deleted State'
+		dataType: string
+		lineageTag: 9cf0a771-42fb-4a7a-a848-ddef261f4a96
+		summarizeBy: none
+		sourceColumn: Deleted State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: e049650b-b40d-4353-af6f-63c1547d6165
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: c3b98c92-dabf-43d5-b616-e98f156dc9fb
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 1fcfbda2-7d84-40de-86d8-710724320f35
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 9f75868a-c94a-4b0f-9d2d-cf7b906794aa
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 5c2998eb-91ec-43aa-ae33-df38a4b8b9fd
+			defaultHierarchy: LocalDateTable_36a66c53-7233-45f9-aae9-44d7dc6b9397.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a130f3a5-f385-4920-80be-090987f374e1
+		summarizeBy: sum
+		sourceColumn: Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: 9ac11bbd-b55f-47fc-871a-c7f5d6e1f603
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 3e71b89f-dbd2-4df1-8a36-84c5f74e4abd
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Content Storage Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ContentStorageEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Content Object Key", "Content Object Name", "Service", "Object Type", "Owner", "Owner State", "Activity State", "Last Activity Date", "Days Since Last Activity", "Storage Used GB", "Storage Allocated GB", "Storage Utilization (%)", "Storage Pressure", "File Count", "Active File Count", "Deleted State", "Risk Priority", "Risk Signal", "Recommended Action", "Snapshot Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Last Activity Date", "Days Since Last Activity", "Storage Used GB", "Storage Allocated GB", "Storage Utilization (%)", "File Count", "Active File Count", "Snapshot Date", "Evidence Age Days"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Content Object Key", type text}, {"Content Object Name", type text}, {"Service", type text}, {"Object Type", type text}, {"Owner", type text}, {"Owner State", type text}, {"Activity State", type text}, {"Last Activity Date", type datetime}, {"Days Since Last Activity", Int64.Type}, {"Storage Used GB", type number}, {"Storage Allocated GB", type number}, {"Storage Utilization (%)", type number}, {"Storage Pressure", type text}, {"File Count", Int64.Type}, {"Active File Count", Int64.Type}, {"Deleted State", type text}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

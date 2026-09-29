@@ -1,0 +1,6 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,MailboxId,MatchStatus,MatchMethod,CandidateCount
+1.0.0,Messaging,MailboxMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-001,Matched,ImmutableId,1
+1.0.0,Messaging,MailboxMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-002,Matched,ImmutableId,1
+1.0.0,Messaging,MailboxMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-003,Unmatched,None,0
+1.0.0,Messaging,MailboxMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-004,Conflict,AddressAndImmutableId,2
+

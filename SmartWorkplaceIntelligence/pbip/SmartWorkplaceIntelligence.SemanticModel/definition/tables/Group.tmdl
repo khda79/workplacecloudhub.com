@@ -1,0 +1,33 @@
+/// Synthetic group catalogue.
+table Group
+	lineageTag: 7da1d7be-8902-48a4-b472-8c27e365fc0b
+
+	/// Business attribute Group Key.
+	column 'Group Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9a1e9983-039e-4045-8a2f-8edcb378e780
+		summarizeBy: none
+		sourceColumn: Group Key
+
+	/// Business attribute Group Surrogate Key.
+	column 'Group Surrogate Key'
+		dataType: string
+		lineageTag: 4ccfa9c0-4810-42de-869a-1e6860dfe7e2
+		sourceColumn: Group Surrogate Key
+
+	/// Business attribute Group Type.
+	column 'Group Type'
+		dataType: string
+		lineageTag: 5b518e7c-341e-4cde-9fa9-b0f843ad79f3
+		sourceColumn: Group Type
+
+	partition 'Group Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Group Key" = Int64.Type, #"Group Surrogate Key" = nullable text, #"Group Type" = nullable text], {})
+				in
+				    Source
+

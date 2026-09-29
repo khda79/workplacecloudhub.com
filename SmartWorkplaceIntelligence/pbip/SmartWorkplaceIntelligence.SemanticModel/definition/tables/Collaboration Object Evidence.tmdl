@@ -1,0 +1,233 @@
+/// Private current Teams, SharePoint, and OneDrive object-level governance, activity, ownership, access, storage, and action evidence.
+table 'Collaboration Object Evidence'
+	lineageTag: bb87500a-254c-4697-ac42-a88328c91b25
+
+	/// Current Teams, SharePoint, and OneDrive objects in scope.
+	measure 'Collaboration Objects' = COUNTROWS('Collaboration Object Evidence')
+		formatString: #,0
+		displayFolder: Content | Current
+		lineageTag: 3b4a239a-1aba-4ee5-92bb-18a87f965eb0
+
+	/// Objects active in the last 30 days relative to their source snapshot.
+	measure 'Active Collaboration Objects 30D' = CALCULATE([Collaboration Objects], KEEPFILTERS('Collaboration Object Evidence'[Activity State] = "Active 30D"))
+		formatString: #,0
+		displayFolder: Content | Current
+		lineageTag: 898a8b67-4053-4a2d-bbd2-650bc41154f4
+
+	/// Objects inactive for more than 180 days or without activity evidence.
+	measure 'Inactive Collaboration Objects' = CALCULATE([Collaboration Objects], KEEPFILTERS('Collaboration Object Evidence'[Activity State] IN {"Inactive 180D+", "No activity evidence"}))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: febbf59a-8ed6-4930-8402-76534b89aac6
+
+	/// Objects without an observed owner.
+	measure 'Orphaned Collaboration Objects' = CALCULATE([Collaboration Objects], KEEPFILTERS('Collaboration Object Evidence'[Owner State] = "No owner"))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: c24f4d1c-4d6f-4893-8096-154a605ef9fb
+
+	/// Objects with observed guests or external sharing.
+	measure 'Collaboration Objects with External Access' = CALCULATE([Collaboration Objects], KEEPFILTERS('Collaboration Object Evidence'[External Access State] IN {"Guests present", "External sharing enabled"}))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: b2b41f66-d8a2-435c-8b46-fd700eac7fc5
+
+	/// Objects with a current high or medium operational signal.
+	measure 'At-Risk Collaboration Objects' = CALCULATE([Collaboration Objects], KEEPFILTERS('Collaboration Object Evidence'[Risk Priority] IN {"High", "Medium"}))
+		formatString: #,0
+		displayFolder: Content | Risk
+		lineageTag: 0468658b-c96f-4496-ab43-a0d82e5079d9
+
+	/// Share of current collaboration objects with a high or medium operational signal.
+	measure 'At-Risk Collaboration Object Rate (%)' = DIVIDE([At-Risk Collaboration Objects], [Collaboration Objects])
+		formatString: 0.0%
+		displayFolder: Content | Risk
+		lineageTag: c704b8d4-33b7-483e-852a-89fd27ed1339
+
+	/// Observed Teams, SharePoint, and OneDrive storage used in gigabytes.
+	measure 'Collaboration Storage Used (GB)' = SUM('Collaboration Object Evidence'[Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Content | Storage
+		lineageTag: dc113fc2-b9c2-4157-b3d0-7e2d0c13624d
+
+	column 'Object ID'
+		dataType: string
+		isHidden
+		lineageTag: 8dd1dd22-a705-4e1b-ad08-9837adada9c1
+		summarizeBy: none
+		sourceColumn: Object ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Object Name'
+		dataType: string
+		lineageTag: 51bbe7b0-160e-4f0a-b50d-15fb77f1b112
+		summarizeBy: none
+		sourceColumn: Object Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column Service
+		dataType: string
+		lineageTag: 8b0d7720-328f-489e-ae0d-451a4dd05ae3
+		summarizeBy: none
+		sourceColumn: Service
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Object Type'
+		dataType: string
+		lineageTag: 023a7981-ee5f-4a6e-823f-f376244a341e
+		summarizeBy: none
+		sourceColumn: Object Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column Visibility
+		dataType: string
+		lineageTag: f30e172f-13fc-4c8b-b7bd-8ddf43e181eb
+		summarizeBy: none
+		sourceColumn: Visibility
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: cc0d1387-fbc7-4a50-8041-e448920205c8
+		summarizeBy: none
+		sourceColumn: Activity State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 6aaf1d15-2471-4e27-add2-89ae36bb5ae9
+		summarizeBy: sum
+		sourceColumn: Days Since Last Activity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 8d3d3934-51f1-4aa4-99e2-6a19cab92f7f
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: 696d3894-6d81-4fbc-980b-c7d794d16702
+			defaultHierarchy: LocalDateTable_3a66da98-0fbc-42b3-89df-31d1353178bb.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Owner State'
+		dataType: string
+		lineageTag: 8ec3edbd-2611-4631-9cd3-7021183b21d7
+		summarizeBy: none
+		sourceColumn: Owner State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Owner Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 8af7048c-bdce-4f90-8daf-3b008ffe2f8b
+		summarizeBy: sum
+		sourceColumn: Owner Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Member Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 17af2a08-4223-450b-9cae-30efe19e4a6d
+		summarizeBy: sum
+		sourceColumn: Member Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Guest Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 3c47f055-1fe5-4502-a37f-459f8d8e6931
+		summarizeBy: sum
+		sourceColumn: Guest Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'External Access State'
+		dataType: string
+		lineageTag: c16ffdbe-dd9e-4cd5-ab06-730422f63cd7
+		summarizeBy: none
+		sourceColumn: External Access State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Used GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 8e76f484-e13c-4607-b147-74d2fe81f597
+		summarizeBy: sum
+		sourceColumn: Storage Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: bd23edbe-f712-4b4d-9dd4-31a8c2df53e4
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: c2b38dea-5715-4bde-a2b8-2a2d9cae5fd1
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 12340f65-8320-4042-95f2-da77953b7819
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: ed4e2f0c-4df5-4794-b039-6db5fca947b9
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: ca194499-edb9-4349-b904-eaaacbe755a4
+			defaultHierarchy: LocalDateTable_63d8f937-1415-4f4a-b264-72221c118188.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 667cb9f0-dea9-443d-b130-ae9d7056b40b
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Collaboration Object Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationObjectEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Object ID", "Object Name", "Service", "Object Type", "Visibility", "Activity State", "Days Since Last Activity", "Last Activity Date", "Owner State", "Owner Count", "Member Count", "Guest Count", "External Access State", "Storage Used GB", "Risk Priority", "Risk Signal", "Recommended Action", "Snapshot Date", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "Owner Count", "Member Count", "Guest Count", "Storage Used GB", "Snapshot Date"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Object ID", type text}, {"Object Name", type text}, {"Service", type text}, {"Object Type", type text}, {"Visibility", type text}, {"Activity State", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Owner State", type text}, {"Owner Count", Int64.Type}, {"Member Count", Int64.Type}, {"Guest Count", Int64.Type}, {"External Access State", type text}, {"Storage Used GB", type number}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

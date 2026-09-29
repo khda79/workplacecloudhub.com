@@ -1,0 +1,5 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,UsageDate,SiteId,SiteType,Workload,ActivityState,StorageUsedGb,OwnerEvidenceStatus
+1.0.0,Content,ContentUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,SITE-SYNTH-001,TeamSite,SharePoint,Active,125.5,Observed
+1.0.0,Content,ContentUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,SITE-SYNTH-002,CommunicationSite,SharePoint,Inactive,48.2,Unknown
+1.0.0,Content,ContentUsage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,2026-09-15,SITE-SYNTH-003,PersonalSite,OneDrive,Active,17.8,Observed
+

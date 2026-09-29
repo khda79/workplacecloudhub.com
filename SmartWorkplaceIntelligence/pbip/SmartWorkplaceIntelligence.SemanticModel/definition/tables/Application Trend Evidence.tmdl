@@ -1,0 +1,183 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Application Trend Evidence'
+	lineageTag: 3ab5c146-ffaa-4c55-88b7-3389d51b811f
+
+	/// Weekly summed device-count observations across discovered application versions.
+	measure 'Trend Application Install Observations' = SUM('Application Trend Evidence'[Application Install Observations])
+		formatString: #,0
+		displayFolder: Applications | Trend
+		lineageTag: f7ec9cf7-8650-4e82-94e9-0996171918c0
+
+	/// Weekly count of applications with more than one observed version.
+	measure 'Trend Fragmented Applications' = SUM('Application Trend Evidence'[Fragmented Applications])
+		formatString: #,0
+		displayFolder: Applications | Trend
+		lineageTag: 46a01163-4d9c-477b-a331-1cacaaae96ec
+
+	/// Weekly share of application observations on each product dominant version.
+	measure 'Trend Dominant Version Coverage (%)' = MAX('Application Trend Evidence'[Dominant Version Coverage (%)])
+		formatString: 0.0%
+		displayFolder: Applications | Trend
+		lineageTag: ed8d4912-fe5d-4a48-8597-6c5169f4a806
+
+	/// Percentage-point change in dominant-version coverage across the observed weekly history.
+	measure 'Dominant Version Coverage Period Change' = VAR _FirstObservedDate = MINX(ALLSELECTED('Application Trend Evidence'[Snapshot Date]), 'Application Trend Evidence'[Snapshot Date]) VAR _LastObservedDate = MAXX(ALLSELECTED('Application Trend Evidence'[Snapshot Date]), 'Application Trend Evidence'[Snapshot Date]) VAR _FirstObservedValue = CALCULATE([Trend Dominant Version Coverage (%)], 'Application Trend Evidence'[Snapshot Date] = _FirstObservedDate) VAR _LastObservedValue = CALCULATE([Trend Dominant Version Coverage (%)], 'Application Trend Evidence'[Snapshot Date] = _LastObservedDate) RETURN IF(ISBLANK(_FirstObservedValue) || ISBLANK(_LastObservedValue), "--", FORMAT((_LastObservedValue - _FirstObservedValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Applications | Trend
+		lineageTag: 1273ad15-1459-497b-97eb-aec6ff46ac1c
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 048dfe06-9afc-4c59-ab9d-52bcab18d9cf
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 0f2508f5-3317-4474-97d9-1287acfc99a0
+			defaultHierarchy: LocalDateTable_fff5b984-93b9-400c-b9b1-816638dc659b.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 7d59a96a-736b-414d-bca5-a437a5c05f73
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 4941edd0-f120-4911-920a-02cf0e622025
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+	column Applications
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: f7ce61fa-7cc1-44c4-8a09-d22c39c250c6
+		summarizeBy: sum
+		sourceColumn: Applications
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Application Versions'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 743b9319-c3a0-415d-a356-a7107c5ade34
+		summarizeBy: sum
+		sourceColumn: Application Versions
+
+		annotation SummarizationSetBy = Automatic
+
+	column Publishers
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: fa7fe643-67fe-49b7-af8c-55841004086c
+		summarizeBy: sum
+		sourceColumn: Publishers
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Application Install Observations'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: ec68acc9-3687-438a-9334-7f7156f30144
+		summarizeBy: sum
+		sourceColumn: Application Install Observations
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Fragmented Applications'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 456d0089-5468-4fce-b975-20e7879e40bb
+		summarizeBy: sum
+		sourceColumn: Fragmented Applications
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Highly Fragmented Applications'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: bcc14224-8bbb-4c74-9590-39ad24250f61
+		summarizeBy: sum
+		sourceColumn: Highly Fragmented Applications
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Installations Outside Dominant Version'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: d0852b16-7565-47f3-bb55-e20327b7527c
+		summarizeBy: sum
+		sourceColumn: Installations Outside Dominant Version
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Long Tail Versions'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: b2790b08-ef07-4c2c-bd6b-2074db0efe45
+		summarizeBy: sum
+		sourceColumn: Long Tail Versions
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Unknown Publisher Versions'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6e799d27-96f2-444c-b204-06d027157284
+		summarizeBy: sum
+		sourceColumn: Unknown Publisher Versions
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Standardization Opportunity Rate (%)'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: ba15e94b-523b-4f2c-89be-4ce4790c0a4b
+		summarizeBy: sum
+		sourceColumn: Standardization Opportunity Rate (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dominant Version Coverage (%)'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: 715a4c90-d044-4516-b702-3aba5792ee85
+		summarizeBy: sum
+		sourceColumn: Dominant Version Coverage (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 5cdca199-f42b-4f60-ba21-e7a959c6ea65
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	partition 'Application Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ApplicationTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Snapshot Week", "Applications", "Application Versions", "Publishers", "Application Install Observations", "Fragmented Applications", "Highly Fragmented Applications", "Installations Outside Dominant Version", "Long Tail Versions", "Unknown Publisher Versions", "Standardization Opportunity Rate (%)", "Dominant Version Coverage (%)", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Applications", "Application Versions", "Publishers", "Application Install Observations", "Fragmented Applications", "Highly Fragmented Applications", "Installations Outside Dominant Version", "Long Tail Versions", "Unknown Publisher Versions", "Standardization Opportunity Rate (%)", "Dominant Version Coverage (%)"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Snapshot Week", type text}, {"Applications", Int64.Type}, {"Application Versions", Int64.Type}, {"Publishers", Int64.Type}, {"Application Install Observations", Int64.Type}, {"Fragmented Applications", Int64.Type}, {"Highly Fragmented Applications", Int64.Type}, {"Installations Outside Dominant Version", Int64.Type}, {"Long Tail Versions", Int64.Type}, {"Unknown Publisher Versions", Int64.Type}, {"Standardization Opportunity Rate (%)", type number}, {"Dominant Version Coverage (%)", type number}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

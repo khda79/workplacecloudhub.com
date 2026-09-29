@@ -1,0 +1,141 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Workforce Trend Evidence'
+	lineageTag: d4c58804-4124-4eec-b703-2081088d13cc
+
+	measure 'Trend Enabled Workforce Accounts' = SUM ( 'Workforce Trend Evidence'[Enabled Workforce Accounts] )
+		formatString: #,0
+		displayFolder: Workforce | Trend
+		lineageTag: 88b698e7-9601-4c78-8515-64616cb7192b
+
+	measure 'Trend Active Workforce' = SUM ( 'Workforce Trend Evidence'[Active Workforce] )
+		formatString: #,0
+		displayFolder: Workforce | Trend
+		lineageTag: fa225d16-f9ff-4b39-b077-e48d6db5c691
+
+	measure 'Trend Accounts Without Activity >30D' = SUM ( 'Workforce Trend Evidence'[Accounts Without Activity >30D] )
+		formatString: #,0
+		displayFolder: Workforce | Trend
+		lineageTag: 1a73a5db-0110-47ab-bfa6-609bdb9371fb
+
+	measure 'Trend Activity Evidence Coverage' = MAX ( 'Workforce Trend Evidence'[Activity Evidence Coverage] )
+		formatString: 0.0%
+		displayFolder: Workforce | Trend
+		lineageTag: 6feb8d6d-22c0-42f1-8ca5-41b6222b6f8d
+
+	measure 'Active Workforce Period Change' =
+			VAR _FirstObservedDate = MINX ( ALLSELECTED ( 'Workforce Trend Evidence'[Snapshot Date] ), 'Workforce Trend Evidence'[Snapshot Date] )
+			VAR _LastObservedDate = MAXX ( ALLSELECTED ( 'Workforce Trend Evidence'[Snapshot Date] ), 'Workforce Trend Evidence'[Snapshot Date] )
+			VAR _FirstObservedValue = CALCULATE ( [Trend Active Workforce], 'Workforce Trend Evidence'[Snapshot Date] = _FirstObservedDate )
+			VAR _LastObservedValue = CALCULATE ( [Trend Active Workforce], 'Workforce Trend Evidence'[Snapshot Date] = _LastObservedDate )
+			RETURN DIVIDE ( _LastObservedValue - _FirstObservedValue, _FirstObservedValue )
+		formatString: +0.0%;-0.0%;--
+		displayFolder: Workforce | Trend
+		lineageTag: 0c757835-59fd-41cf-89da-45d35afa46b3
+
+	measure 'Trend Confirmed Human Users' = SUM ( 'Workforce Trend Evidence'[Confirmed Human Users] )
+		formatString: #,0
+		displayFolder: Workforce | Trend
+		lineageTag: e74d4d2d-6b3c-4152-a369-e4d55cdbef45
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 96cc5d23-c4c4-48b9-8d4a-26e08d501ff1
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: dffe9089-38e6-4808-8d01-05543499391f
+			defaultHierarchy: LocalDateTable_e444bea0-7cd3-4554-903e-4527328b5859.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: daa9afd3-925c-4bbb-b6bd-0e47ccd3a1da
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column 'Week Label'
+		dataType: string
+		lineageTag: f3f576b1-dc75-4c80-a588-a7c4579b1419
+		summarizeBy: none
+		sourceColumn: Week Label
+
+	column 'Enabled Workforce Accounts'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 05fc47e5-3305-4140-9bee-d39f53061bfb
+		summarizeBy: sum
+		sourceColumn: Enabled Workforce Accounts
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Activity Covered Users'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 8d04b6c7-776c-49fa-9b3f-7f6a3e3a04b3
+		summarizeBy: sum
+		sourceColumn: Activity Covered Users
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Activity Evidence Coverage'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: cdeeec56-77d9-4049-8a51-6dee5d281cd0
+		summarizeBy: sum
+		sourceColumn: Activity Evidence Coverage
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active Workforce'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 7953ac7a-b2b5-43f2-9304-391ccd97fcfe
+		summarizeBy: sum
+		sourceColumn: Active Workforce
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Accounts Without Activity >30D'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 15b211ab-db4a-446e-b804-a609e9f281d7
+		summarizeBy: sum
+		sourceColumn: Accounts Without Activity >30D
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 87a63389-e916-4af0-9af9-94522207a354
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Confirmed Human Users'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a5a1e503-e851-48a5-ba66-f47b7f320d13
+		summarizeBy: sum
+		sourceColumn: Confirmed Human Users
+
+	partition 'Workforce Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WorkforceTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Week Label", "Enabled Workforce Accounts", "Activity Covered Users", "Activity Evidence Coverage", "Active Workforce", "Accounts Without Activity >30D", "Evidence Status", "Confirmed Human Users"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Enabled Workforce Accounts", "Activity Covered Users", "Activity Evidence Coverage", "Active Workforce", "Accounts Without Activity >30D", "Confirmed Human Users"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Week Label", type text}, {"Enabled Workforce Accounts", Int64.Type}, {"Activity Covered Users", Int64.Type}, {"Activity Evidence Coverage", type number}, {"Active Workforce", Int64.Type}, {"Accounts Without Activity >30D", Int64.Type}, {"Evidence Status", type text}, {"Confirmed Human Users", Int64.Type}}, "en-US")
+				in
+				    Typed
+

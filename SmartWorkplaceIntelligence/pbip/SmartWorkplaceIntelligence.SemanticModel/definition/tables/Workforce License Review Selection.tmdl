@@ -1,0 +1,58 @@
+/// User-level bridge for the two review filters on Workforce Personas. A user can belong to both categories. These are review candidates, not automatic license changes.
+table 'Workforce License Review Selection'
+	lineageTag: 7faa9f21-9a55-45dc-8985-2554986e1aa1
+
+	/// Stable Entra user identifier used to filter the governed workforce population.
+	column 'User Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 907e40dc-a4a4-4bdc-9d4f-16a45b9321ed
+		summarizeBy: none
+		sourceColumn: [User Source ID]
+
+	/// Review class; only explicit, covered no-use evidence or the existing E3-to-F3 optimization rule qualifies.
+	column 'Review Type'
+		dataType: string
+		lineageTag: 3b44c04b-0344-4889-bc6e-5841c0ae0ead
+		summarizeBy: none
+		sourceColumn: [Review Type]
+
+	partition 'Workforce License Review Selection' = calculated
+		mode: import
+		source =
+				VAR _e3Users =
+				    CALCULATETABLE (
+				        VALUES ( 'License Optimization Evidence'[User Principal Name] ),
+				        'License Optimization Evidence'[Optimization Opportunity] = "E3 to F3 review candidate"
+				    )
+				VAR _e3Review =
+				    SELECTCOLUMNS (
+				        FILTER (
+				            'User Inventory Evidence',
+				            'User Inventory Evidence'[User Principal Name] IN _e3Users
+				        ),
+				        "User Source ID", 'User Inventory Evidence'[User Source ID],
+				        "Review Type", "E3 to F3 review"
+				    )
+				VAR _noUseReview =
+				    SELECTCOLUMNS (
+				        FILTER (
+				            'User Inventory Evidence',
+				            ( 'User Inventory Evidence'[Has Microsoft 365 F3] = "Yes"
+				                || 'User Inventory Evidence'[Has Microsoft 365 E3] = "Yes"
+				                || 'User Inventory Evidence'[Has Microsoft 365 E5] = "Yes" )
+				                && 'User Inventory Evidence'[Exchange Usage State (30D)] <> "Active in 30D"
+				                && 'User Inventory Evidence'[Teams Usage State (30D)] <> "Active in 30D"
+				                && 'User Inventory Evidence'[SharePoint Usage State (30D)] <> "Active in 30D"
+				                && 'User Inventory Evidence'[OneDrive Usage State (30D)] <> "Active in 30D"
+				                && 'User Inventory Evidence'[Office Desktop Usage State (30D)] = "No PC app use in 30D"
+				                && ( 'User Inventory Evidence'[Exchange Usage State (30D)] = "No activity in 30D"
+				                    || 'User Inventory Evidence'[Teams Usage State (30D)] = "No activity in 30D"
+				                    || 'User Inventory Evidence'[SharePoint Usage State (30D)] = "No activity in 30D"
+				                    || 'User Inventory Evidence'[OneDrive Usage State (30D)] = "No activity in 30D" )
+				        ),
+				        "User Source ID", 'User Inventory Evidence'[User Source ID],
+				        "Review Type", "No use - review"
+				    )
+				RETURN DISTINCT ( UNION ( _e3Review, _noUseReview ) )
+

@@ -1,0 +1,138 @@
+/// One synthetic directory-presence and activity observation per user, source, and reporting date.
+table 'User Directory Observations'
+	lineageTag: 9fb00228-bed6-4977-951d-6e56ff0d8b0a
+
+	/// Observed workforce accounts present in AD and absent from Entra in the same reporting scope.
+	measure '# AD Accounts Missing in Entra' = VAR _adUsers = CALCULATETABLE(VALUES('User Directory Observations'[User Key]), KEEPFILTERS('User Directory Observations'[Directory Source] = "AD"), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed"), KEEPFILTERS('User'[Identity Scope] = "Workforce")) VAR _entraUsers = CALCULATETABLE(VALUES('User Directory Observations'[User Key]), KEEPFILTERS('User Directory Observations'[Directory Source] = "Entra"), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed"), KEEPFILTERS('User'[Identity Scope] = "Workforce")) RETURN COUNTROWS(EXCEPT(_adUsers, _entraUsers))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: 1583a65f-622e-4a45-9f1b-c073d5ef99f3
+
+	/// Enabled workforce accounts with complete observed directory evidence and no AD or Entra activity timestamp.
+	measure '# Never Used Accounts' = COUNTROWS(FILTER(VALUES('User'[User Key]), VAR _accountState = CALCULATE(SELECTEDVALUE('User'[Account State])) VAR _identityScope = CALCULATE(SELECTEDVALUE('User'[Identity Scope])) VAR _presentSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present")) VAR _observedSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) VAR _lastActivity = CALCULATE(MAX('User Directory Observations'[Last Activity UTC]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) RETURN _accountState = "Enabled" && _identityScope = "Workforce" && _presentSources > 0 && _presentSources = _observedSources && ISBLANK(_lastActivity)))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: 93bed1d9-4251-422c-826d-b6218a32b16b
+
+	/// Enabled workforce accounts with complete observed directory evidence and no AD or Entra activity during the trailing 30 days; never-used accounts are included. The window anchors to the latest accepted directory observation in filter context.
+	measure '# Accounts Without Activity in 30D' = VAR _asOfKey = MAX('User Directory Observations'[Date Key]) VAR _asOf = IF(ISBLANK(_asOfKey), BLANK(), DATE(QUOTIENT(_asOfKey, 10000), QUOTIENT(MOD(_asOfKey, 10000), 100), MOD(_asOfKey, 100))) RETURN IF(ISBLANK(_asOf), BLANK(), COUNTROWS(FILTER(VALUES('User'[User Key]), VAR _accountState = CALCULATE(SELECTEDVALUE('User'[Account State])) VAR _identityScope = CALCULATE(SELECTEDVALUE('User'[Identity Scope])) VAR _presentSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present")) VAR _observedSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) VAR _lastActivity = CALCULATE(MAX('User Directory Observations'[Last Activity UTC]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) RETURN _accountState = "Enabled" && _identityScope = "Workforce" && _presentSources > 0 && _presentSources = _observedSources && (ISBLANK(_lastActivity) || _lastActivity <= _asOf - 30))))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: b61e96b8-c8fa-4dae-88a3-f449bd21ab93
+
+	/// Enabled workforce accounts with complete observed directory evidence and no AD or Entra activity during the trailing 90 days; never-used accounts are included. The window anchors to the latest accepted directory observation in filter context.
+	measure '# Accounts Without Activity in 90D' = VAR _asOfKey = MAX('User Directory Observations'[Date Key]) VAR _asOf = IF(ISBLANK(_asOfKey), BLANK(), DATE(QUOTIENT(_asOfKey, 10000), QUOTIENT(MOD(_asOfKey, 10000), 100), MOD(_asOfKey, 100))) RETURN IF(ISBLANK(_asOf), BLANK(), COUNTROWS(FILTER(VALUES('User'[User Key]), VAR _accountState = CALCULATE(SELECTEDVALUE('User'[Account State])) VAR _identityScope = CALCULATE(SELECTEDVALUE('User'[Identity Scope])) VAR _presentSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present")) VAR _observedSources = CALCULATE(DISTINCTCOUNT('User Directory Observations'[Directory Source]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) VAR _lastActivity = CALCULATE(MAX('User Directory Observations'[Last Activity UTC]), KEEPFILTERS('User Directory Observations'[Presence State] = "Present"), KEEPFILTERS('User Directory Observations'[Activity Evidence Status] = "Observed")) RETURN _accountState = "Enabled" && _identityScope = "Workforce" && _presentSources > 0 && _presentSources = _observedSources && (ISBLANK(_lastActivity) || _lastActivity <= _asOf - 90))))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: a82dc571-9e42-4b1b-b0b6-86373ae10b3d
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 838271bf-d8e6-4924-a642-56dbbc2bffd7
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4d7f2741-563b-4b93-8b48-7a87f7ea4474
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e2658c9f-9543-4ac9-b273-83bb0d0050c3
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0dfc5b2e-d9ff-4633-b57e-8f17aa0a4e7a
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Directory Source.
+	column 'Directory Source'
+		dataType: string
+		lineageTag: 1feeac10-4a50-4025-8cdf-cb4a4216e4ba
+		summarizeBy: none
+		sourceColumn: Directory Source
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Presence State.
+	column 'Presence State'
+		dataType: string
+		lineageTag: 354754a6-912e-4dd3-b92c-ef778290984f
+		summarizeBy: none
+		sourceColumn: Presence State
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Account State.
+	column 'Account State'
+		dataType: string
+		lineageTag: 3e9f4d4a-968e-476c-9660-7333d1b1f488
+		summarizeBy: none
+		sourceColumn: Account State
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Last Activity UTC.
+	column 'Last Activity UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd
+		isAvailableInMdx: false
+		lineageTag: de47cd72-2fc2-440b-8bb3-736c2fb3b003
+		summarizeBy: none
+		sourceColumn: Last Activity UTC
+
+		variation Variation
+			isDefault
+			relationship: c665ed82-aad0-4fe1-bb8e-e7efa804cb52
+			defaultHierarchy: LocalDateTable_c9c293c5-cf73-4433-897e-aa085f83eb42.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Activity Evidence Status.
+	column 'Activity Evidence Status'
+		dataType: string
+		lineageTag: dbd54784-06d2-4e93-b5e8-be92ae5fe6f5
+		summarizeBy: none
+		sourceColumn: Activity Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'User Directory Observations Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Directory Source" = nullable text, #"Presence State" = nullable text, #"Account State" = nullable text, #"Last Activity UTC" = nullable datetime, #"Activity Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "AD", "Present", "Enabled", #datetime(2026, 9, 14, 8, 0, 0), "Observed"},
+				        {20260915, 1, 1, 1, "Entra", "Present", "Enabled", #datetime(2026, 9, 14, 12, 0, 0), "Observed"},
+				        {20260915, 1, 1, 2, "AD", "Present", "Enabled", #datetime(2026, 6, 1, 8, 0, 0), "Observed"},
+				        {20260915, 1, 1, 2, "Entra", "Present", "Enabled", #datetime(2026, 6, 1, 10, 0, 0), "Observed"},
+				        {20260915, 1, 1, 3, "AD", "Present", "Disabled", #datetime(2026, 1, 10, 9, 0, 0), "Observed"},
+				        {20260915, 1, 1, 3, "Entra", "Absent", "Disabled", null, "Observed"},
+				        {20260915, 1, 1, 4, "AD", "Absent", "Enabled", null, "Observed"},
+				        {20260915, 1, 1, 4, "Entra", "Present", "Enabled", #datetime(2026, 9, 15, 7, 0, 0), "Observed"},
+				        {20260915, 1, 1, 5, "AD", "Present", "Enabled", null, "Observed"},
+				        {20260915, 1, 1, 5, "Entra", "Present", "Enabled", null, "Observed"},
+				        {20260915, 1, 1, 6, "AD", "Present", "Enabled", #datetime(2026, 9, 13, 14, 0, 0), "Observed"},
+				        {20260915, 1, 1, 6, "Entra", "Present", "Enabled", #datetime(2026, 9, 13, 16, 0, 0), "Observed"}
+				    })
+				in
+				    Source
+

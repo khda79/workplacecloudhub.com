@@ -1,0 +1,723 @@
+/// Private current workforce evidence built from enabled AD-linked Entra member accounts excluding governed non-human types and cloud-only accounts; AD and M365 activity are combined.
+table 'User Inventory Evidence'
+	lineageTag: df26e7e4-eb8d-421b-a918-ac6b09df54fb
+
+	/// Enabled non-guest Entra workforce users in the current private evidence snapshot.
+	measure 'Enabled Workforce Accounts' = DISTINCTCOUNT ( 'User Inventory Evidence'[User Source ID] )
+		formatString: #,0
+		displayFolder: Workforce | Current
+		lineageTag: 0cbd7b34-7544-4f67-8be9-0621ffbbc7a0
+
+	/// Enabled workforce accounts with observed AD or Microsoft 365 activity in the last 30 days.
+	measure 'Active Workforce' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] = "Active <=30D" )
+		formatString: #,0
+		displayFolder: Workforce | Current
+		lineageTag: c731eb5c-9800-4a4b-a214-6e2b1ba81941
+
+	/// Activity-covered enabled workforce accounts without observed AD or Microsoft 365 activity for more than 30 days, including never-used accounts.
+	measure 'Accounts Without Activity >30D' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] IN { "Dormant 31-90D", "Stale >90D", "Observed never used" } )
+		formatString: #,0
+		displayFolder: Workforce | Risk
+		lineageTag: 26f66cf1-3655-4eb4-af79-e9137a48f91c
+
+	/// Enabled workforce accounts with observed AD or Microsoft 365 activity evidence.
+	measure 'Activity Covered Users' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity Evidence Status] = "Observed" )
+		formatString: #,0
+		displayFolder: Workforce | Coverage
+		lineageTag: c369ac33-b93c-42e5-ab06-9428fba00a3f
+
+	/// Share of enabled workforce accounts covered by AD or Microsoft 365 activity evidence.
+	measure 'Activity Evidence Coverage' = DIVIDE ( [Activity Covered Users], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Coverage
+		lineageTag: ce6ebc2a-dda3-4ee5-bbee-97eda9347693
+
+	measure 'Missing Activity Evidence' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity Evidence Status] = "Unknown" )
+		formatString: #,0
+		displayFolder: Workforce | Coverage
+		lineageTag: b02d36e2-d12b-4d7a-b61e-aa2b6e899481
+
+	measure 'Observed Never Used Accounts' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] = "Observed never used" )
+		formatString: #,0
+		displayFolder: Workforce | Risk
+		lineageTag: 0a1c5961-e76d-440c-85da-df7f30b220af
+
+	measure 'Accounts Stale >90D' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] = "Stale >90D" )
+		formatString: #,0
+		displayFolder: Workforce | Risk
+		lineageTag: ddcb623b-ff35-4574-9f39-16e54fc4778c
+
+	measure 'Users With Missing Manager' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Manager Evidence State] = "Missing" )
+		formatString: #,0
+		displayFolder: Workforce | Risk
+		lineageTag: cca345fa-a3e8-4370-8acc-5aae47925902
+
+	measure 'Department Completeness' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Department Evidence State] = "Observed" ), [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Coverage
+		lineageTag: 65fcb01f-a10a-4481-891f-5a497023aeab
+
+	measure 'Licensed Workforce Users' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Has M365 License] = "Yes" )
+		formatString: #,0
+		displayFolder: Workforce | Current
+		lineageTag: be7652fc-54f5-4510-aae5-db02069a23f2
+
+	/// Accounts still classified explicitly as Human by the governed AD rules.
+	measure 'Confirmed Human Users' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Account Population] = "Human" )
+		formatString: #,0
+		displayFolder: Workforce | Coverage
+		lineageTag: 55d9d87e-25dd-44ca-bc21-c35d4d071fc0
+
+	measure 'Job Title Completeness' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Job Title Evidence State] = "Observed" ), [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Coverage
+		lineageTag: 8765bfa8-2411-4c96-b533-dd95bb15b9f2
+
+	measure 'Classified Workforce Accounts' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Persona Match State] = "Classified" )
+		formatString: #,0
+		displayFolder: Workforce | Personas
+		lineageTag: 942b5a15-20d8-44ff-9f39-5cfceb24d16c
+
+	measure 'Persona Classification Coverage (%)' = DIVIDE ( [Classified Workforce Accounts], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas
+		lineageTag: 133dd440-b2c8-4b35-a71c-ee44264fad08
+
+	measure 'Workforce Accounts Requiring Persona Review' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Persona Match State] IN { "Ambiguous", "Non-human keyword" } )
+		formatString: #,0
+		displayFolder: Workforce | Personas
+		lineageTag: 7836577f-815b-4f44-83b1-fc227f3096b7
+
+	measure 'Unclassified Workforce Accounts' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Persona Match State] IN { "Missing job title", "Unmatched" } )
+		formatString: #,0
+		displayFolder: Workforce | Personas
+		lineageTag: 8347d7ca-516e-4fe9-8f29-fb17ebf36aab
+
+	measure 'Workforce MFA Registration Covered' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[MFA Registration State] IN { "Registered", "Not registered" } )
+		formatString: #,0
+		displayFolder: Workforce | MFA
+		lineageTag: f3b5e3bd-71ab-4d1c-8792-a9531ac72ce1
+
+	measure 'Workforce MFA Registration Rate (%)' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[MFA Registration State] = "Registered" ), [Workforce MFA Registration Covered] )
+		formatString: 0.0%
+		displayFolder: Workforce | MFA
+		lineageTag: 5bb2dedd-5bda-4767-a62b-34bbe81f4bc5
+
+	measure 'Workforce MFA Registration Coverage (%)' = DIVIDE ( [Workforce MFA Registration Covered], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | MFA
+		lineageTag: 2fc4b8f6-3c9b-494a-8a78-545a18a8600a
+
+	/// Distinct enabled workforce accounts assigned Microsoft 365 F3 (SPE_F1); users with more than one plan appear in each applicable count.
+	measure 'M365 F3 Assigned' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Has Microsoft 365 F3] = "Yes" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 9336c541-b393-4388-b6aa-66cb01b53ef7
+
+	/// Share of enabled workforce accounts in the current persona/filter context assigned Microsoft 365 F3.
+	measure 'M365 F3 Assigned (%)' = DIVIDE ( [M365 F3 Assigned], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: b46683a5-92bd-4e5f-9d56-be9e5b94f209
+
+	/// Distinct enabled workforce accounts assigned Microsoft 365 E3 (SPE_E3); users with more than one plan appear in each applicable count.
+	measure 'M365 E3 Assigned' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Has Microsoft 365 E3] = "Yes" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: f30c90b7-8ff1-4a16-81b3-2e97b59e96ea
+
+	/// Share of enabled workforce accounts in the current persona/filter context assigned Microsoft 365 E3.
+	measure 'M365 E3 Assigned (%)' = DIVIDE ( [M365 E3 Assigned], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 08d68a72-1c90-4f3c-be92-8211ad47a2df
+
+	/// Distinct enabled workforce accounts assigned Microsoft 365 E5 (SPE_E5); users with more than one plan appear in each applicable count.
+	measure 'M365 E5 Assigned' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Has Microsoft 365 E5] = "Yes" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: c5367697-2ea6-43df-aaf7-8f4abf92ebe2
+
+	/// Share of enabled workforce accounts in the current persona/filter context assigned Microsoft 365 E5.
+	measure 'M365 E5 Assigned (%)' = DIVIDE ( [M365 E5 Assigned], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 0aa6a944-8b6b-4a66-b5f9-679fd7714d2f
+
+	/// Entitled workforce accounts with observed Exchange activity in the 30 days before report refresh.
+	measure 'Exchange Active Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Exchange Usage State (30D)] = "Active in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 433ba5b2-f939-4840-800d-21a8d3841e1f
+
+	/// Entitled workforce accounts with a report row but no observed Exchange activity in the prior 30 days.
+	measure 'Exchange No Activity Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Exchange Usage State (30D)] = "No activity in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 9c7c3255-3cee-43a2-9710-f2e2b444b708
+
+	/// Workforce accounts without trustworthy Exchange usage evidence; not counted as no activity.
+	measure 'Exchange Unknown Usage Users' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Exchange Usage State (30D)] IN { "Unknown — no current report row", "Unknown — missing report date" } ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 6ca74ce9-98c9-4f4e-9e81-fa0cc2e8a69d
+
+	/// Share active in 30 days among Exchange-entitled workforce accounts covered by the Graph D180 usage report. No report row and not entitled are excluded.
+	measure 'Exchange Usage (30D %)' = DIVIDE ( [Exchange Active Users (30D)], [Exchange Active Users (30D)] + [Exchange No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 3af74b24-084c-4ad2-a20b-baded40b791d
+
+	/// Entitled workforce accounts with observed Teams activity in the 30 days before report refresh.
+	measure 'Teams Active Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Teams Usage State (30D)] = "Active in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 2dfefe00-0e0f-4a67-97d2-88db444528f4
+
+	/// Entitled workforce accounts with a report row but no observed Teams activity in the prior 30 days.
+	measure 'Teams No Activity Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Teams Usage State (30D)] = "No activity in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 02849abf-68f9-4417-b670-ac348769c145
+
+	/// Workforce accounts without trustworthy Teams usage evidence; not counted as no activity.
+	measure 'Teams Unknown Usage Users' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Teams Usage State (30D)] IN { "Unknown — no current report row", "Unknown — missing report date" } ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 30b940db-c467-4ed7-b02d-b0106f43c822
+
+	/// Share active in 30 days among Teams-entitled workforce accounts covered by the Graph D180 usage report. No report row and not entitled are excluded.
+	measure 'Teams Usage (30D %)' = DIVIDE ( [Teams Active Users (30D)], [Teams Active Users (30D)] + [Teams No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 4a33d10b-fa70-43d3-b6ba-b65b1d713549
+
+	/// Entitled workforce accounts with observed SharePoint activity in the 30 days before report refresh.
+	measure 'SharePoint Active Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[SharePoint Usage State (30D)] = "Active in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 17f26dd6-e3f3-487c-84e2-de3410059284
+
+	/// Entitled workforce accounts with a report row but no observed SharePoint activity in the prior 30 days.
+	measure 'SharePoint No Activity Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[SharePoint Usage State (30D)] = "No activity in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 0acc9b9e-34b0-489a-900b-11ecc382038a
+
+	/// Workforce accounts without trustworthy SharePoint usage evidence; not counted as no activity.
+	measure 'SharePoint Unknown Usage Users' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[SharePoint Usage State (30D)] IN { "Unknown — no current report row", "Unknown — missing report date" } ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: ba72ccd4-f46d-499a-a043-5f19cbd70bb4
+
+	/// Share active in 30 days among SharePoint-entitled workforce accounts covered by the Graph D180 usage report. No report row and not entitled are excluded.
+	measure 'SharePoint Usage (30D %)' = DIVIDE ( [SharePoint Active Users (30D)], [SharePoint Active Users (30D)] + [SharePoint No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: a17635fa-e9db-440f-8756-e6fbcc1cd3e8
+
+	/// Entitled workforce accounts with observed OneDrive activity in the 30 days before report refresh.
+	measure 'OneDrive Active Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[OneDrive Usage State (30D)] = "Active in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: d3926e8e-4756-4d07-a115-b678a27736a5
+
+	/// Entitled workforce accounts with a report row but no observed OneDrive activity in the prior 30 days.
+	measure 'OneDrive No Activity Users (30D)' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[OneDrive Usage State (30D)] = "No activity in 30D" ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 8935fb08-9a9c-4d03-a6af-146a6fe5b838
+
+	/// Workforce accounts without trustworthy OneDrive usage evidence; not counted as no activity.
+	measure 'OneDrive Unknown Usage Users' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[OneDrive Usage State (30D)] IN { "Unknown — no current report row", "Unknown — missing report date" } ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 60820885-d50e-41a3-a2ee-8d1103078f96
+
+	/// Share active in 30 days among OneDrive-entitled workforce accounts covered by the Graph D180 usage report. No report row and not entitled are excluded.
+	measure 'OneDrive Usage (30D %)' = DIVIDE ( [OneDrive Active Users (30D)], [OneDrive Active Users (30D)] + [OneDrive No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 948213c9-42b4-486a-a47a-1bd74accbf38
+
+	/// Enabled workforce accounts without a usable current per-user Microsoft 365 activity report row. This is an evidence gap, not zero usage.
+	measure 'Workforce Accounts Without M365 Usage Report' = CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( 'User Inventory Evidence'[Exchange Usage State (30D)] IN { "Unknown — no current report row", "Unknown — missing report date" } ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 23c3b23c-d925-451f-a90b-5576b3e6dcc7
+
+	/// Share without observed Exchange activity in the prior 30 days among entitled workforce accounts covered by the Graph usage report. Missing evidence and not-entitled accounts are excluded.
+	measure 'Exchange No Activity (30D %)' = DIVIDE ( [Exchange No Activity Users (30D)], [Exchange Active Users (30D)] + [Exchange No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 45bff87a-c318-42ad-b2e2-26604e4a46cb
+
+	/// Share without observed Teams activity in the prior 30 days among entitled workforce accounts covered by the Graph usage report. Missing evidence and not-entitled accounts are excluded.
+	measure 'Teams No Activity (30D %)' = DIVIDE ( [Teams No Activity Users (30D)], [Teams Active Users (30D)] + [Teams No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 4c5e8ef7-3eee-47c4-b1f1-b21c9d2eb1e4
+
+	/// Share without observed SharePoint activity in the prior 30 days among entitled workforce accounts covered by the Graph usage report. Missing evidence and not-entitled accounts are excluded.
+	measure 'SharePoint No Activity (30D %)' = DIVIDE ( [SharePoint No Activity Users (30D)], [SharePoint Active Users (30D)] + [SharePoint No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 1e37e8a2-de38-438b-a7df-bd5b89f2cc10
+
+	/// Share without observed OneDrive activity in the prior 30 days among entitled workforce accounts covered by the Graph usage report. Missing evidence and not-entitled accounts are excluded.
+	measure 'OneDrive No Activity (30D %)' = DIVIDE ( [OneDrive No Activity Users (30D)], [OneDrive Active Users (30D)] + [OneDrive No Activity Users (30D)] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 5bc82cd9-99ae-4f00-9728-8baaf26a9d7c
+
+	/// Share of all F3 users in the remaining report filter context who belong to the current persona; persona filter is removed only for the denominator.
+	measure 'M365 F3 Persona Share of All Assigned (%)' = DIVIDE ( [M365 F3 Assigned], CALCULATE ( [M365 F3 Assigned], REMOVEFILTERS ( 'User Inventory Evidence'[Workforce Persona] ) ) )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 673ef5af-4c06-4dca-b29f-4c47ee99e2ba
+
+	/// Share of all E3 users in the remaining report filter context who belong to the current persona; persona filter is removed only for the denominator.
+	measure 'M365 E3 Persona Share of All Assigned (%)' = DIVIDE ( [M365 E3 Assigned], CALCULATE ( [M365 E3 Assigned], REMOVEFILTERS ( 'User Inventory Evidence'[Workforce Persona] ) ) )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 04b1aa05-7013-49b4-91a8-e4fe46231bed
+
+	/// Share of all E5 users in the remaining report filter context who belong to the current persona; persona filter is removed only for the denominator.
+	measure 'M365 E5 Persona Share of All Assigned (%)' = DIVIDE ( [M365 E5 Assigned], CALCULATE ( [M365 E5 Assigned], REMOVEFILTERS ( 'User Inventory Evidence'[Workforce Persona] ) ) )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 9f698a4a-13e9-4ac5-8010-6f8cffa7823c
+
+	/// Distinct enabled workforce accounts whose UPN is observed as the Intune primary user of at least one Windows PC. Multiple PCs count once. No observed association does not prove the person has no PC; coverage is limited to current Intune device evidence.
+	measure 'Primary PC Users' = VAR _pcUsers = CALCULATETABLE ( VALUES ( 'Device Inventory Evidence'[Primary User UPN] ), 'Device Inventory Evidence'[Device Category] = "PC Windows", 'Device Inventory Evidence'[Primary User UPN] <> BLANK () ) RETURN CALCULATE ( [Enabled Workforce Accounts], KEEPFILTERS ( TREATAS ( _pcUsers, 'User Inventory Evidence'[User Principal Name] ) ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Device association
+		lineageTag: 66cb17a1-7f81-448e-883f-c2134c6e1358
+
+	/// Share of enabled workforce accounts in the current persona/user filter context observed as the Intune primary user of at least one Windows PC. Absence is not evidence of no PC.
+	measure 'Primary PC Users (%)' = DIVIDE ( [Primary PC Users], [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Device association
+		lineageTag: e42bcaf3-a739-4c8f-82cf-a0c75358ee22
+
+	/// Share of covered workforce accounts active in at least one of Exchange, Teams, SharePoint or OneDrive during the last 30 days. Accounts without a covered workload are excluded.
+	measure 'Any M365 Service Usage (30D %)' = VAR _covered = FILTER ( 'User Inventory Evidence', 'User Inventory Evidence'[Exchange Usage State (30D)] IN { "Active in 30D", "No activity in 30D" } || 'User Inventory Evidence'[Teams Usage State (30D)] IN { "Active in 30D", "No activity in 30D" } || 'User Inventory Evidence'[SharePoint Usage State (30D)] IN { "Active in 30D", "No activity in 30D" } || 'User Inventory Evidence'[OneDrive Usage State (30D)] IN { "Active in 30D", "No activity in 30D" } ) RETURN DIVIDE ( COUNTROWS ( FILTER ( _covered, 'User Inventory Evidence'[Exchange Usage State (30D)] = "Active in 30D" || 'User Inventory Evidence'[Teams Usage State (30D)] = "Active in 30D" || 'User Inventory Evidence'[SharePoint Usage State (30D)] = "Active in 30D" || 'User Inventory Evidence'[OneDrive Usage State (30D)] = "Active in 30D" ) ), COUNTROWS ( _covered ) )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 131e1bfd-c54c-4d61-9054-637d0a4642ba
+
+	/// Recent Microsoft 365 Apps for enterprise Windows or Mac activation among workforce accounts with an Apps activation report row. Activation is not proof of app usage.
+	measure 'Office Desktop Activation (30D %)' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Office Desktop Activation State (30D)] = "Activated on PC in 30D" ), CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Office Desktop Activation State (30D)] IN { "Activated on PC in 30D", "No PC activation in 30D" } ) )
+		formatString: 0.0%
+		isHidden
+		displayFolder: Activation diagnostics
+		lineageTag: fa8f8904-d70d-4c24-82db-a401aa947be2
+
+	/// F3/E3/E5 assignments with no active four-service signal, at least one explicit no-activity workload, and explicit no Office PC app use in the covered 30-day report. Review candidates only.
+	measure 'M365 Assignments Without Observed Use (30D)' = SUMX ( FILTER ( 'User Inventory Evidence', 'User Inventory Evidence'[Exchange Usage State (30D)] <> "Active in 30D" && 'User Inventory Evidence'[Teams Usage State (30D)] <> "Active in 30D" && 'User Inventory Evidence'[SharePoint Usage State (30D)] <> "Active in 30D" && 'User Inventory Evidence'[OneDrive Usage State (30D)] <> "Active in 30D" && 'User Inventory Evidence'[Office Desktop Usage State (30D)] = "No PC app use in 30D" && ( 'User Inventory Evidence'[Exchange Usage State (30D)] = "No activity in 30D" || 'User Inventory Evidence'[Teams Usage State (30D)] = "No activity in 30D" || 'User Inventory Evidence'[SharePoint Usage State (30D)] = "No activity in 30D" || 'User Inventory Evidence'[OneDrive Usage State (30D)] = "No activity in 30D" ) ), IF ( 'User Inventory Evidence'[Has Microsoft 365 F3] = "Yes", 1, 0 ) + IF ( 'User Inventory Evidence'[Has Microsoft 365 E3] = "Yes", 1, 0 ) + IF ( 'User Inventory Evidence'[Has Microsoft 365 E5] = "Yes", 1, 0 ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 4fc5756f-1bd3-44ea-9dce-ff35d933f6af
+
+	/// Existing E3-to-F3 review candidate assignments attributed to the current workforce persona by UPN. No E5 downgrade rule is applied.
+	measure 'E3 to F3 Review Candidates by Persona' = CALCULATE ( COUNTROWS ( 'License Optimization Evidence' ), 'License Optimization Evidence'[Optimization Opportunity] = "E3 to F3 review candidate", TREATAS ( VALUES ( 'User Inventory Evidence'[User Principal Name] ), 'License Optimization Evidence'[User Principal Name] ) )
+		formatString: #,0
+		displayFolder: Workforce | Personas | Licenses
+		lineageTag: 5ec09db8-3b26-4255-9281-20abb0f1b757
+
+	/// Share of covered workforce accounts with intentional Outlook, Word, Excel, PowerPoint or OneNote activity on Windows or Mac in the 30-day Apps report.
+	measure 'Office Desktop Usage (30D %)' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Office Desktop Usage State (30D)] = "Used on PC in 30D" ), CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Office Desktop Usage State (30D)] IN { "Used on PC in 30D", "No PC app use in 30D" } ) )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Service use
+		lineageTag: 7882c11c-89ef-4276-8e77-25386aba5f6e
+
+	/// Share of enabled workforce accounts with a governed AD site code matched to the private site mapping.
+	measure 'Workforce Site Classification Coverage (%)' = DIVIDE ( CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Site Match State] = "Mapped" ), [Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | Personas | Coverage
+		lineageTag: cd3d7e9b-4756-418d-93be-6cb5b771a439
+
+	column 'User Source ID'
+		dataType: string
+		isHidden
+		isKey
+		lineageTag: 89e4863d-0135-4e4d-8a6f-f0448375b1ec
+		summarizeBy: none
+		sourceColumn: User Source ID
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 0ef2b5e1-5849-494f-9a3c-d9503148bcfd
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 0e85fa37-945a-47e4-9ca5-cc822e9c30a5
+		summarizeBy: none
+		sourceColumn: Display Name
+
+	column Country
+		dataType: string
+		lineageTag: 001fa80e-2c04-4558-aa72-a47a724d816f
+		dataCategory: Country
+		summarizeBy: none
+		sourceColumn: Country
+
+	column Department
+		dataType: string
+		lineageTag: 4b89717e-ea09-4c55-89c6-8242d3b19ce4
+		summarizeBy: none
+		sourceColumn: Department
+
+	column 'Department Evidence State'
+		dataType: string
+		lineageTag: a282b3b7-6544-4512-bf67-b62d62012a0c
+		summarizeBy: none
+		sourceColumn: Department Evidence State
+
+	column Manager
+		dataType: string
+		lineageTag: cff7bf25-c755-4f11-9805-5fff912cd8be
+		summarizeBy: none
+		sourceColumn: Manager
+
+	column 'Manager Evidence State'
+		dataType: string
+		lineageTag: 038e3244-018f-4bdb-8586-39b73d4eb61e
+		summarizeBy: none
+		sourceColumn: Manager Evidence State
+
+	column 'Account State'
+		dataType: string
+		lineageTag: 1b718015-227a-4e65-a309-fe9bc207994a
+		summarizeBy: none
+		sourceColumn: Account State
+
+	column 'User Type'
+		dataType: string
+		lineageTag: 18f2f2c2-ef97-4417-8537-598e4206f12a
+		summarizeBy: none
+		sourceColumn: User Type
+
+	column 'Workforce Status'
+		dataType: string
+		lineageTag: b267f90c-1b2c-4bec-bdcb-39790ed715b3
+		summarizeBy: none
+		sourceColumn: Workforce Status
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: 866e6489-3e52-4987-8301-54b893624f4e
+		summarizeBy: none
+		sourceColumn: Activity State
+
+	column 'Activity Evidence Status'
+		dataType: string
+		lineageTag: 43ffdbfb-0dbb-4467-bb3b-3466ba55addd
+		summarizeBy: none
+		sourceColumn: Activity Evidence Status
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 89a81d27-55b0-47d1-8059-16ca3f785e6e
+		summarizeBy: sum
+		sourceColumn: Days Since Last Activity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 0fb59597-0d04-4967-814d-a0248139723b
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: d8de528d-fe71-42de-bf5f-dd1e90ccaae6
+			defaultHierarchy: LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Last Activity Workload'
+		dataType: string
+		lineageTag: 8ab1967f-0243-45fd-b0ad-d33e1a3aff21
+		summarizeBy: none
+		sourceColumn: Last Activity Workload
+
+	column 'Identity Match Status'
+		dataType: string
+		lineageTag: c25f8a10-342f-43da-aadd-8a5b5beec51d
+		summarizeBy: none
+		sourceColumn: Identity Match Status
+
+	column 'Identity Match Method'
+		dataType: string
+		lineageTag: e3108149-3a17-492b-9e23-a6b03dba9aeb
+		summarizeBy: none
+		sourceColumn: Identity Match Method
+
+	column 'M365 License Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 8b4b3ab5-9f87-4e34-bce0-b3f97867eb43
+		summarizeBy: sum
+		sourceColumn: M365 License Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Has M365 License'
+		dataType: string
+		lineageTag: f81f7625-1314-440b-9958-232c635eb7e6
+		summarizeBy: none
+		sourceColumn: Has M365 License
+
+	column 'Duplicate UPN State'
+		dataType: string
+		lineageTag: fcd678bc-2029-41a9-990a-c1be7e2fc77f
+		summarizeBy: none
+		sourceColumn: Duplicate UPN State
+
+	column 'Attention Priority'
+		dataType: string
+		lineageTag: 4b0af288-108f-4e46-8602-aae9273675ff
+		summarizeBy: none
+		sourceColumn: Attention Priority
+
+	column 'Evidence Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: c39dba5b-13dd-4d9d-9491-027a21e94e3f
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+		variation Variation
+			isDefault
+			relationship: 9187c498-78ab-4b52-ad4d-af3185bc6817
+			defaultHierarchy: LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Governed AD account type resolved through strong identity keys.
+	column 'Account Type'
+		dataType: string
+		lineageTag: c60e0338-5d38-4738-8fff-16f0d0530c25
+		summarizeBy: none
+		sourceColumn: Account Type
+
+	/// Governed population classification. Rows include governed Human accounts and AD-linked review classifications; explicit non-human and cloud-only accounts are excluded.
+	column 'Account Population'
+		dataType: string
+		lineageTag: 753af640-d254-4a1e-baec-fdedbea0a51e
+		summarizeBy: none
+		sourceColumn: Account Population
+
+	/// Version of the governed account-classification configuration used to build the row.
+	column 'Account Classification Rule Version'
+		dataType: string
+		isHidden
+		lineageTag: 9fde22be-2284-4c74-8430-53f4a082a7d2
+		summarizeBy: none
+		sourceColumn: Account Classification Rule Version
+
+	column 'Job Title'
+		dataType: string
+		lineageTag: ba4d7454-427d-484e-8874-79f95a4361d5
+		summarizeBy: none
+		sourceColumn: Job Title
+
+	column 'Job Title Evidence State'
+		dataType: string
+		lineageTag: ffda51ee-952c-4832-946f-4e22ce794d15
+		summarizeBy: none
+		sourceColumn: Job Title Evidence State
+
+	column 'AD Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 3d727aef-5094-4056-9896-bf6081b407cd
+		summarizeBy: none
+		sourceColumn: AD Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: af25d72b-f474-4d3f-a099-a855a6159f66
+			defaultHierarchy: LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'M365 Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 4f4e04c9-a2a1-47ab-bc5c-c23fc00629dc
+		summarizeBy: none
+		sourceColumn: M365 Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: cf8775ad-03fc-454c-a4ea-923e741dc3d4
+			defaultHierarchy: LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Activity Source'
+		dataType: string
+		lineageTag: 18f9ac70-4df4-469b-8f28-2abccb55e88d
+		summarizeBy: none
+		sourceColumn: Activity Source
+
+	column 'Workforce Persona'
+		dataType: string
+		lineageTag: fa674e72-bb7c-4781-bd7e-2d44f998d5f6
+		summarizeBy: none
+		sourceColumn: Workforce Persona
+
+	column 'Persona Match State'
+		dataType: string
+		lineageTag: 78d54b4b-9810-4008-a812-8efa42b0f765
+		summarizeBy: none
+		sourceColumn: Persona Match State
+
+	column 'Persona Matched Keywords'
+		dataType: string
+		lineageTag: b9612c35-76c7-4c1b-8eb7-189316ff9065
+		summarizeBy: none
+		sourceColumn: Persona Matched Keywords
+
+	column 'MFA Registration State'
+		dataType: string
+		lineageTag: 363f85ef-186f-4326-b3d7-0896d99416e1
+		summarizeBy: none
+		sourceColumn: MFA Registration State
+
+	/// Distinct user assignment in the current Microsoft 365 license export.
+	column 'Has Microsoft 365 F3'
+		dataType: string
+		lineageTag: 3fc0dd3e-855c-4670-a8d9-d9bb8d73befa
+		summarizeBy: none
+		sourceColumn: Has Microsoft 365 F3
+
+	/// Distinct user assignment in the current Microsoft 365 license export.
+	column 'Has Microsoft 365 E3'
+		dataType: string
+		lineageTag: 23899b9d-65db-4f92-91b5-72638c826fac
+		summarizeBy: none
+		sourceColumn: Has Microsoft 365 E3
+
+	/// Distinct user assignment in the current Microsoft 365 license export.
+	column 'Has Microsoft 365 E5'
+		dataType: string
+		lineageTag: 87e3af30-ea14-417a-8369-fa57e24c19fe
+		summarizeBy: none
+		sourceColumn: Has Microsoft 365 E5
+
+	/// Per-user workload usage state for the 30 days before the Graph report refresh date; no report row is unknown, not no activity.
+	column 'Exchange Usage State (30D)'
+		dataType: string
+		lineageTag: ec049eed-0858-4e04-b2ed-c0c5c5af878b
+		summarizeBy: none
+		sourceColumn: Exchange Usage State (30D)
+
+	/// Per-user workload usage state for the 30 days before the Graph report refresh date; no report row is unknown, not no activity.
+	column 'Teams Usage State (30D)'
+		dataType: string
+		lineageTag: eee71e6c-47fb-45f1-99c3-b1aa9a0b9b9b
+		summarizeBy: none
+		sourceColumn: Teams Usage State (30D)
+
+	/// Per-user workload usage state for the 30 days before the Graph report refresh date; no report row is unknown, not no activity.
+	column 'SharePoint Usage State (30D)'
+		dataType: string
+		lineageTag: b720139c-9777-4c34-9cfd-2b43389152b3
+		summarizeBy: none
+		sourceColumn: SharePoint Usage State (30D)
+
+	/// Per-user workload usage state for the 30 days before the Graph report refresh date; no report row is unknown, not no activity.
+	column 'OneDrive Usage State (30D)'
+		dataType: string
+		lineageTag: cb9008bd-d6d2-48bc-bbd8-dfd62096aaae
+		summarizeBy: none
+		sourceColumn: OneDrive Usage State (30D)
+
+	column 'M365 Usage Report Date'
+		dataType: dateTime
+		isHidden
+		formatString: Long Date
+		lineageTag: fcfa9542-005f-46d5-ba87-9e0f4f454f30
+		summarizeBy: none
+		sourceColumn: M365 Usage Report Date
+
+		variation Variation
+			isDefault
+			relationship: b76347bc-6359-4e8f-9618-c13519b9d16b
+			defaultHierarchy: LocalDateTable_992ffd8b-7f92-4f3a-bd88-9b41a35b51d2.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Office Desktop Activation State (30D)'
+		dataType: string
+		lineageTag: 0d0d5979-641e-4799-8f90-48a2db2bd445
+		summarizeBy: none
+		sourceColumn: Office Desktop Activation State (30D)
+
+	/// Graph D180 report refresh date used as reference for 30-day service activity.
+	column 'Office Desktop Usage State (30D)'
+		dataType: string
+		lineageTag: a89e7b0b-15c3-44d1-ad68-d6d8ba07120a
+		summarizeBy: none
+		sourceColumn: Office Desktop Usage State (30D)
+
+	column 'Office Desktop Usage Report Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 1bab9ad7-4d14-4986-8273-e3e33aaf3fed
+		summarizeBy: none
+		sourceColumn: Office Desktop Usage Report Date
+
+		variation Variation
+			isDefault
+			relationship: 860d3156-60bd-4d7c-946f-616889068225
+			defaultHierarchy: LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Site code from the configured AD user attribute, preserved as text including leading zeroes.
+	column 'Directory Site Code'
+		dataType: string
+		lineageTag: ff4a3d92-919b-49aa-a19a-8d69d56c75dc
+		summarizeBy: none
+		sourceColumn: Directory Site Code
+
+	/// Mutually exclusive site category from the private governed site mapping.
+	column 'Site Type'
+		dataType: string
+		lineageTag: 95c78f4d-cb92-4eaa-900f-d7259ba9b6e1
+		summarizeBy: none
+		sourceColumn: Site Type
+
+	column 'Site Match State'
+		dataType: string
+		lineageTag: 1e6f95f3-03a5-4684-8156-f8924247e66d
+		summarizeBy: none
+		sourceColumn: Site Match State
+
+	/// Provenance of the final persona decision: site, job title, or AD description fallback.
+	column 'Persona Classification Source'
+		dataType: string
+		lineageTag: 16ed1ba3-c1c4-459a-8542-12dc622f2860
+		summarizeBy: none
+		sourceColumn: Persona Classification Source
+
+	partition 'User Inventory Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("UserInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"User Source ID", "User Principal Name", "Display Name", "Country", "Department", "Department Evidence State", "Manager", "Manager Evidence State", "Account State", "User Type", "Workforce Status", "Activity State", "Activity Evidence Status", "Days Since Last Activity", "Last Activity Date", "Last Activity Workload", "Identity Match Status", "Identity Match Method", "M365 License Count", "Has M365 License", "Duplicate UPN State", "Attention Priority", "Evidence Date", "Account Type", "Account Population", "Account Classification Rule Version", "Job Title", "Job Title Evidence State", "AD Last Activity Date", "M365 Last Activity Date", "Activity Source", "Workforce Persona", "Persona Match State", "Persona Matched Keywords", "MFA Registration State", "Has Microsoft 365 F3", "Has Microsoft 365 E3", "Has Microsoft 365 E5", "Exchange Usage State (30D)", "Teams Usage State (30D)", "SharePoint Usage State (30D)", "OneDrive Usage State (30D)", "M365 Usage Report Date", "Office Desktop Activation State (30D)", "Office Desktop Usage State (30D)", "Office Desktop Usage Report Date", "Directory Site Code", "Site Type", "Site Match State", "Persona Classification Source"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "M365 License Count", "Evidence Date", "AD Last Activity Date", "M365 Last Activity Date", "M365 Usage Report Date", "Office Desktop Usage Report Date"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"User Source ID", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Country", type text}, {"Department", type text}, {"Department Evidence State", type text}, {"Manager", type text}, {"Manager Evidence State", type text}, {"Account State", type text}, {"User Type", type text}, {"Workforce Status", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Last Activity Workload", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"M365 License Count", Int64.Type}, {"Has M365 License", type text}, {"Duplicate UPN State", type text}, {"Attention Priority", type text}, {"Evidence Date", type datetime}, {"Account Type", type text}, {"Account Population", type text}, {"Account Classification Rule Version", type text}, {"Job Title", type text}, {"Job Title Evidence State", type text}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"Workforce Persona", type text}, {"Persona Match State", type text}, {"Persona Matched Keywords", type text}, {"MFA Registration State", type text}, {"Has Microsoft 365 F3", type text}, {"Has Microsoft 365 E3", type text}, {"Has Microsoft 365 E5", type text}, {"Exchange Usage State (30D)", type text}, {"Teams Usage State (30D)", type text}, {"SharePoint Usage State (30D)", type text}, {"OneDrive Usage State (30D)", type text}, {"M365 Usage Report Date", type datetime}, {"Office Desktop Activation State (30D)", type text}, {"Office Desktop Usage State (30D)", type text}, {"Office Desktop Usage Report Date", type datetime}, {"Directory Site Code", type text}, {"Site Type", type text}, {"Site Match State", type text}, {"Persona Classification Source", type text}}, "en-US")
+				in
+				    Typed
+

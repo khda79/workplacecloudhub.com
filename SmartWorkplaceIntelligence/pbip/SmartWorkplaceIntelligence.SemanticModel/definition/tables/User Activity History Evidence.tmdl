@@ -1,0 +1,172 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'User Activity History Evidence'
+	lineageTag: c16b5f47-d55c-4328-ad87-f4602ccded60
+
+	measure 'Historical Enabled Workforce Accounts' = DISTINCTCOUNT ( 'User Activity History Evidence'[User Source ID] )
+		formatString: #,0
+		displayFolder: Workforce | History
+		lineageTag: 93e5e0bb-1bf0-4023-97d7-4869add55f1c
+
+	measure 'Historical Active Workforce' = CALCULATE ( [Historical Enabled Workforce Accounts], 'User Activity History Evidence'[Activity State] = "Active <=30D" )
+		formatString: #,0
+		displayFolder: Workforce | History
+		lineageTag: 0dd11786-5a8d-4ac0-9d90-6fc425b5c4c6
+
+	measure 'Historical Activity Covered Users' = CALCULATE ( [Historical Enabled Workforce Accounts], 'User Activity History Evidence'[Activity Evidence Status] = "Observed" )
+		formatString: #,0
+		displayFolder: Workforce | History
+		lineageTag: 83e88106-722b-4caa-88b4-f620ded7103a
+
+	measure 'Historical Activity Evidence Coverage' = DIVIDE ( [Historical Activity Covered Users], [Historical Enabled Workforce Accounts] )
+		formatString: 0.0%
+		displayFolder: Workforce | History
+		lineageTag: 470d3327-0785-42f2-842a-39a0ee7e491b
+
+	measure 'Historical Accounts Without Activity >30D' = CALCULATE ( [Historical Enabled Workforce Accounts], 'User Activity History Evidence'[Activity State] IN { "Dormant 31-90D", "Stale >90D", "Observed never used" } )
+		formatString: #,0
+		displayFolder: Workforce | History
+		lineageTag: c9743bb0-5906-4745-af0a-90185ce54e61
+
+	measure 'Days Since Last Workforce Activity' = MAX ( 'User Activity History Evidence'[Days Since Last Activity] )
+		formatString: #,0
+		displayFolder: Workforce | History
+		lineageTag: 9e606637-804b-42fa-ae12-114ab5eb9127
+
+	/// Change in selected-scope active workforce between the first and last observed weekly activity snapshots.
+	measure 'Historical Active Workforce Period Change' =
+			VAR _FirstObservedDate = MINX ( ALLSELECTED ( 'User Activity History Evidence'[Snapshot Date] ), 'User Activity History Evidence'[Snapshot Date] )
+			VAR _LastObservedDate = MAXX ( ALLSELECTED ( 'User Activity History Evidence'[Snapshot Date] ), 'User Activity History Evidence'[Snapshot Date] )
+			VAR _FirstObservedValue = CALCULATE ( [Historical Active Workforce], 'User Activity History Evidence'[Snapshot Date] = _FirstObservedDate )
+			VAR _LastObservedValue = CALCULATE ( [Historical Active Workforce], 'User Activity History Evidence'[Snapshot Date] = _LastObservedDate )
+			RETURN DIVIDE ( _LastObservedValue - _FirstObservedValue, _FirstObservedValue )
+		formatString: +0.0%;-0.0%;--
+		displayFolder: Workforce | History
+		lineageTag: 54bb2625-6169-4da0-a714-dbc86af15e92
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 9935acb8-7d59-45ba-975c-ffa9eb3cd9be
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: b6a44913-a444-4fcd-b9cf-5f11c9ca63cb
+			defaultHierarchy: LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 83040ddc-31c8-47c5-bffe-51a5443e8848
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column 'Week Label'
+		dataType: string
+		lineageTag: b1780ee2-4867-492b-8f2d-2fabc360fda3
+		summarizeBy: none
+		sourceColumn: Week Label
+
+	column 'User Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 2be8cfa9-69fa-40d9-9c9c-6fb48329c4b0
+		summarizeBy: none
+		sourceColumn: User Source ID
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: 0f77f650-5e44-4246-88b9-f7bb0246d511
+		summarizeBy: none
+		sourceColumn: Activity State
+
+	column 'Activity Evidence Status'
+		dataType: string
+		lineageTag: f0a0ef14-eee8-4e89-94fa-fbbe7e0019af
+		summarizeBy: none
+		sourceColumn: Activity Evidence Status
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 6b257e48-4c5c-4d0b-bbb4-ba99a08af197
+		summarizeBy: sum
+		sourceColumn: Days Since Last Activity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: dc1bbc0d-5fc4-42e0-b0ce-c63d8a221d57
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: 42c5ef6f-19ab-45f7-8b2d-90de5dbc46c8
+			defaultHierarchy: LocalDateTable_34c9943b-b627-41a6-892f-38af610aa3ab.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'AD Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: d297975b-3b23-493e-b217-911d68652eb2
+		summarizeBy: none
+		sourceColumn: AD Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: aeadbb30-a64a-46e6-8830-ad10d63bdb7e
+			defaultHierarchy: LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'M365 Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 70a2031b-3487-47f9-a595-48c0a3ea61de
+		summarizeBy: none
+		sourceColumn: M365 Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: de341192-97a0-4903-ae1b-8008d5143e3b
+			defaultHierarchy: LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Activity Source'
+		dataType: string
+		lineageTag: 96eab5a2-e8a3-436a-8c0d-202b6dccbd9b
+		summarizeBy: none
+		sourceColumn: Activity Source
+
+	column 'User Principal Name'
+		dataType: string
+		isHidden
+		lineageTag: 602ef711-57cf-4cdd-8faa-fcc36f19df37
+		sourceColumn: User Principal Name
+
+	column 'Confirmed Human'
+		dataType: boolean
+		isHidden
+		lineageTag: 3e853ce0-a172-4fdd-a488-2704bbb8f719
+		sourceColumn: Confirmed Human
+
+	partition 'User Activity History Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("UserActivityHistoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Week Label", "User Source ID", "Activity State", "Activity Evidence Status", "Days Since Last Activity", "Last Activity Date", "AD Last Activity Date", "M365 Last Activity Date", "Activity Source", "User Principal Name", "Confirmed Human"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Days Since Last Activity", "Last Activity Date", "AD Last Activity Date", "M365 Last Activity Date", "Confirmed Human"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Week Label", type text}, {"User Source ID", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"User Principal Name", type text}, {"Confirmed Human", type logical}}, "en-US")
+				in
+				    Typed
+

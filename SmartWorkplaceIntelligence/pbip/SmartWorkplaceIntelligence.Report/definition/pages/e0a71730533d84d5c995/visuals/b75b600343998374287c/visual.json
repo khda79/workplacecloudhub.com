@@ -1,0 +1,684 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "b75b600343998374287c",
+  "position": {
+    "x": 616,
+    "y": 256,
+    "z": 110,
+    "height": 400,
+    "width": 760,
+    "tabOrder": 110
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "License Product"
+                }
+              },
+              "queryRef": "License Evidence.License Product",
+              "nativeQueryRef": "License Product"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "SKU Part Number"
+                }
+              },
+              "queryRef": "License Evidence.SKU Part Number",
+              "nativeQueryRef": "SKU"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Capacity Class"
+                }
+              },
+              "queryRef": "License Evidence.Capacity Class",
+              "nativeQueryRef": "Capacity Class"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Enabled Units"
+                }
+              },
+              "queryRef": "License Evidence.Enabled Units",
+              "nativeQueryRef": "Enabled Units"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Consumed Units"
+                }
+              },
+              "queryRef": "License Evidence.Consumed Units",
+              "nativeQueryRef": "Consumed Units"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Available Units"
+                }
+              },
+              "queryRef": "License Evidence.Available Units",
+              "nativeQueryRef": "Available Units"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Capacity Utilization"
+                }
+              },
+              "queryRef": "License Evidence.Capacity Utilization",
+              "nativeQueryRef": "Capacity Utilization"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Assigned Users"
+                }
+              },
+              "queryRef": "License Evidence.Assigned Users",
+              "nativeQueryRef": "Assigned Users"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Potentially Reclaimable Assignments"
+                }
+              },
+              "queryRef": "License Evidence.Potentially Reclaimable Assignments",
+              "nativeQueryRef": "Reclaim Candidates"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Risk Priority"
+                }
+              },
+              "queryRef": "License Evidence.Risk Priority",
+              "nativeQueryRef": "Risk Priority"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Evidence"
+                    }
+                  },
+                  "Property": "Recommended Action"
+                }
+              },
+              "queryRef": "License Evidence.Recommended Action",
+              "nativeQueryRef": "Recommended Action"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "License Evidence"
+                  }
+                },
+                "Property": "Enabled Units"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#005A9E'"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F3F7FA'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "9D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "total": [
+        {
+          "properties": {
+            "totals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Licensing & Cost detail. Detailed records for the current filter context.'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Licensing & Cost detail'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "13D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CBD8E5'"
+                    }
+                  }
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "1946dece018207c00387",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "License Product"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "a5c33affec68c4ee5500",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "SKU Part Number"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "193ef27002d01d28d301",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Capacity Class"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "b9b1462f46c4de954d9a",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Enabled Units"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "2abaaef6cd3449e38501",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Consumed Units"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "1779a1c27028de0c3a9d",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Available Units"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "a18f2e1f600480891e1a",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Capacity Utilization"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "a7d1d1666856060a9494",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Assigned Users"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "051d113fb4658b15638c",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Potentially Reclaimable Assignments"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "49bf73c5a2e7d9a2a313",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Risk Priority"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "ad86a174bd2a0b2b59db",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Recommended Action"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

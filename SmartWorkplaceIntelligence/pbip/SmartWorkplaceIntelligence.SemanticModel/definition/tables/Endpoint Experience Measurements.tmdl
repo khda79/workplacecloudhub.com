@@ -1,0 +1,134 @@
+/// Synthetic endpoint experience measurements.
+table 'Endpoint Experience Measurements'
+	lineageTag: ffb67e36-61ed-499f-afa7-1b79ff5a9e56
+
+	/// Eligible managed devices with a qualified endpoint measurement.
+	measure 'Endpoint Analytics Coverage (%)' = DIVIDE(DISTINCTCOUNT('Endpoint Experience Measurements'[Device Key]), [# Devices])
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 84ca62a0-09e0-472b-89a6-8de00cc0be8f
+
+	/// Average observed Endpoint Analytics score for the governed metric only; blank when that metric is not collected.
+	measure 'Endpoint Analytics Score' = CALCULATE(AVERAGE('Endpoint Experience Measurements'[Metric Value]), KEEPFILTERS('Endpoint Experience Measurements'[Metric Name] = "EndpointAnalyticsScore"), KEEPFILTERS('Endpoint Experience Measurements'[Evidence Status] = "Observed"))
+		formatString: 0.0
+		displayFolder: Measures
+		lineageTag: d1488adc-e8f0-455f-9922-2025d4ccff33
+
+	/// Accepted measurements with valid timestamps.
+	measure 'Endpoint Timestamp Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Endpoint Experience Measurements'), KEEPFILTERS(NOT ISBLANK('Endpoint Experience Measurements'[Measurement Date UTC]))), COUNTROWS('Endpoint Experience Measurements'))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: d48c41ba-2820-4c0f-8506-978d4b7c7090
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a5b1cb97-dd51-4ad0-a42b-1e6292ce2ac6
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5444555e-e905-4fd2-92ec-75d5661d9ab2
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d5b93ba4-fc9c-47df-8afd-805681cdd934
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3266da71-786c-446c-bccf-dd9e295baff8
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Measurement Date UTC.
+	column 'Measurement Date UTC'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: a7430924-fb47-47e8-a71e-00d1eec1151c
+		summarizeBy: none
+		sourceColumn: Measurement Date UTC
+
+		variation Variation
+			isDefault
+			relationship: d11a1024-03d3-4fff-bb8f-00f04976694c
+			defaultHierarchy: LocalDateTable_db4727be-32c4-4cef-85a9-8b3b83f7f111.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Metric Name.
+	column 'Metric Name'
+		dataType: string
+		lineageTag: be27704e-bf04-4fd5-826d-e01f2f06e94b
+		summarizeBy: none
+		sourceColumn: Metric Name
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Metric Value.
+	column 'Metric Value'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 401ffa2e-7245-4115-89a3-e3ef86be2d59
+		summarizeBy: sum
+		sourceColumn: Metric Value
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Business attribute Metric Unit.
+	column 'Metric Unit'
+		dataType: string
+		lineageTag: bb4b00b1-c8f5-4529-9f6d-6d0e7d32af1c
+		summarizeBy: none
+		sourceColumn: Metric Unit
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Metric Version.
+	column 'Metric Version'
+		dataType: string
+		lineageTag: 2b242f98-0220-47ea-b72c-1adef1f2b9fe
+		summarizeBy: none
+		sourceColumn: Metric Version
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 9ac3c90e-1797-4ae6-a3e3-dbdb053466b4
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Endpoint Experience Measurements Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Device Key" = Int64.Type, #"Measurement Date UTC" = nullable datetime, #"Metric Name" = nullable text, #"Metric Value" = nullable number, #"Metric Unit" = nullable text, #"Metric Version" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, #datetime(2026, 9, 15, 6, 0, 0), "EndpointAnalyticsScore", 82, "Score", "1.0", "Observed"},
+				        {20260914, 1, 1, 2, #datetime(2026, 9, 14, 6, 0, 0), "EndpointAnalyticsScore", 64, "Score", "1.0", "Observed"},
+				        {20260913, 1, 1, 3, #datetime(2026, 9, 13, 6, 0, 0), "EndpointAnalyticsScore", 51, "Score", "1.0", "Observed"}
+				    })
+				in
+				    Source
+

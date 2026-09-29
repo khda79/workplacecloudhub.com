@@ -1,0 +1,105 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Windows Lifecycle Trend Evidence'
+	lineageTag: a70bbe52-9195-425b-ba55-077605c3cb39
+
+	/// Windows 11 adoption in the weekly DATA-ALL inventory aggregate.
+	measure 'Trend Windows 11 Adoption' = MAX('Windows Lifecycle Trend Evidence'[Windows 11 Adoption (%)])
+		formatString: 0.0%
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: 5ae58682-6b6d-4b97-be3d-d2e72db6c83e
+
+	/// Windows 10 devices remaining in the weekly DATA-ALL inventory aggregate.
+	measure 'Trend Windows 10 Devices' = SUM('Windows Lifecycle Trend Evidence'[Windows 10 Devices])
+		formatString: #,0
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: e0b0e5c1-952b-46b9-b082-8b46b9f66a04
+
+	/// Windows 11 devices in the weekly DATA-ALL inventory aggregate.
+	measure 'Trend Windows 11 Devices' = SUM('Windows Lifecycle Trend Evidence'[Windows 11 Devices])
+		formatString: #,0
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: e1bf5dbf-a1f2-40b8-a061-be87077da5d4
+
+	/// Percentage-point change in Windows 11 adoption between the first and last observed weekly snapshots.
+	measure 'Windows 11 Adoption Period Change' = VAR _FirstObservedDate = MINX(ALLSELECTED('Windows Lifecycle Trend Evidence'[Snapshot Date]), 'Windows Lifecycle Trend Evidence'[Snapshot Date]) VAR _LastObservedDate = MAXX(ALLSELECTED('Windows Lifecycle Trend Evidence'[Snapshot Date]), 'Windows Lifecycle Trend Evidence'[Snapshot Date]) VAR _FirstObservedValue = CALCULATE([Trend Windows 11 Adoption], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _FirstObservedDate) VAR _LastObservedValue = CALCULATE([Trend Windows 11 Adoption], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _LastObservedDate) RETURN IF(ISBLANK(_FirstObservedValue) || ISBLANK(_LastObservedValue), "--", FORMAT((_LastObservedValue - _FirstObservedValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: c24919a3-0826-401c-9bb0-a024d7705483
+
+	/// Managed devices in each observed Windows lifecycle inventory snapshot.
+	measure 'Trend Managed Devices' = MAX('Windows Lifecycle Trend Evidence'[Managed Devices])
+		formatString: #,0
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: f52d96d6-4c42-42bd-993a-636077c940d1
+
+	/// Change in managed device count between the first and last displayed Windows lifecycle snapshots.
+	measure 'Managed Devices Period Change' = VAR _FirstObservedDate = MINX(ALLSELECTED('Windows Lifecycle Trend Evidence'[Snapshot Date]), 'Windows Lifecycle Trend Evidence'[Snapshot Date]) VAR _LastObservedDate = MAXX(ALLSELECTED('Windows Lifecycle Trend Evidence'[Snapshot Date]), 'Windows Lifecycle Trend Evidence'[Snapshot Date]) VAR _FirstObservedValue = CALCULATE([Trend Managed Devices], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _FirstObservedDate) VAR _LastObservedValue = CALCULATE([Trend Managed Devices], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _LastObservedDate) RETURN IF(ISBLANK(_FirstObservedValue) || ISBLANK(_LastObservedValue), "--", FORMAT(_LastObservedValue - _FirstObservedValue, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: bb553ab3-7dd9-4a18-b939-ff8a7a4dd095
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 7b2900a3-0b2e-4a2a-aebd-38b1dd0784b2
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 95ccda30-fd24-4331-ae0a-e780a12b319b
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+	column 'Managed Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 35931bfa-d82c-427d-8a54-cd74c7ec4034
+		summarizeBy: none
+		sourceColumn: Managed Devices
+
+	column 'Windows Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 7d119d03-b8c8-4396-8bb2-1ba29990f742
+		summarizeBy: none
+		sourceColumn: Windows Devices
+
+	column 'Windows 10 Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: d4449a54-f65a-4c88-bd23-c2744089fa70
+		summarizeBy: none
+		sourceColumn: Windows 10 Devices
+
+	column 'Windows 11 Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 4731e9b9-d6b7-4f4a-b44e-48e49d2e5c6a
+		summarizeBy: none
+		sourceColumn: Windows 11 Devices
+
+	column 'Windows 11 Adoption (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 79c1f1e7-5f15-438c-81c8-23c2a7d775aa
+		summarizeBy: none
+		sourceColumn: Windows 11 Adoption (%)
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: f7b1c039-98f5-4e55-adaf-2d327f333d1d
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	partition 'Windows Lifecycle Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WindowsLifecycleTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Snapshot Week", "Managed Devices", "Windows Devices", "Windows 10 Devices", "Windows 11 Devices", "Windows 11 Adoption (%)", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Managed Devices", "Windows Devices", "Windows 10 Devices", "Windows 11 Devices", "Windows 11 Adoption (%)"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Snapshot Week", type text}, {"Managed Devices", Int64.Type}, {"Windows Devices", Int64.Type}, {"Windows 10 Devices", Int64.Type}, {"Windows 11 Devices", Int64.Type}, {"Windows 11 Adoption (%)", type number}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

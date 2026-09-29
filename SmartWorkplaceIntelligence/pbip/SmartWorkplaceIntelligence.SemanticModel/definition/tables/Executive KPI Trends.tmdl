@@ -1,0 +1,186 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Executive KPI Trends'
+	lineageTag: 5233c9b0-939a-49f5-abc0-f94987d47561
+
+	/// Observed user count over available DATA-ALL and DATA-LAST Active Directory history.
+	measure '# Users Trend' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Executive Trends
+		lineageTag: 61c63093-8a68-4e58-970d-7cdee98b5dc8
+
+	/// Absolute change from the prior observed Active Directory user history point.
+	measure '# Users Monthly Delta' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +#,0;-#,0;0
+		displayFolder: Executive Trends
+		lineageTag: 38fad648-f4fa-4132-9ec6-5977734d27fc
+
+	/// Observed computer count over available DATA-ALL and DATA-LAST Active Directory history.
+	measure '# Devices Trend' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Executive Trends
+		lineageTag: 1ace56c5-5a10-494b-8cc6-d672d2725325
+
+	/// Absolute change from the prior observed Active Directory computer history point.
+	measure '# Devices Monthly Delta' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +#,0;-#,0;0
+		displayFolder: Executive Trends
+		lineageTag: 5ed626e0-67dc-40e9-b885-8aa0acb16353
+
+	/// Observed active-user share from the latest qualified M365 user-activity snapshot retained for each available week.
+	measure 'M365 Active Use (30D) Trend (%)' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: 0.0%
+		displayFolder: Executive Trends
+		lineageTag: 761e2446-685d-4143-af19-59d68cdecb82
+
+	/// Change from the prior observed Microsoft 365 active-user history point.
+	measure 'M365 Active Use Monthly Delta (pp)' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Executive Trends
+		lineageTag: 1599594c-a07b-43b0-adbc-78c7487297b8
+
+	/// Observed Windows 11 share of enabled computer accounts over available Active Directory history.
+	measure 'Windows 11 Adoption Trend (%)' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: 0.0%
+		displayFolder: Executive Trends
+		lineageTag: 83fb2159-898e-4b73-921e-9ce3bd9c1a11
+
+	/// Change from the prior observed Windows 11 adoption history point, in percentage points.
+	measure 'Windows 11 Adoption Monthly Delta (pp)' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Executive Trends
+		lineageTag: 3d0d9dd2-6683-424f-9408-b56311e10d63
+
+	/// Observed Exchange Online share of combined Exchange Online and on-premises mailbox snapshots.
+	measure 'Exchange Online Adoption Trend (%)' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: 0.0%
+		displayFolder: Executive Trends
+		lineageTag: 2a841406-4e2b-4e37-9e27-879ed165d014
+
+	/// Change from the prior observed combined Exchange mailbox history point.
+	measure 'Exchange Online Adoption Monthly Delta (pp)' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Executive Trends
+		lineageTag: 275a07e9-b4e9-4ea7-81f4-b00ccb1f4e0d
+
+	/// Returns blank because no qualified Secure Score history is currently available; values are not synthesized.
+	measure 'Secure Score Trend (%)' = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+		formatString: 0.0%
+		displayFolder: Executive Trends
+		lineageTag: 935cb2a5-aa39-4202-9c68-df36c3f54ea5
+
+	/// Returns blank because no qualified Secure Score history is currently available.
+	measure 'Secure Score Monthly Delta (pp)' = VAR _currentDateKey = MAX('Executive KPI Trends'[Date Key]) VAR _currentValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _previousDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] < _currentDateKey) VAR _previousValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _previousDateKey) RETURN IF(ISBLANK(_previousValue), BLANK(), _currentValue - _previousValue)
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Executive Trends
+		lineageTag: 4f93b18f-9885-4d69-9461-d4b37725ca04
+
+	/// Evidence status for the visible trend point; missing qualified history remains Not Collected.
+	measure 'Executive Trend Evidence Status' = SELECTEDVALUE('Executive KPI Trends'[Evidence Status], "Not Collected")
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: 705dddc0-ad82-4b52-ba91-edc0f3eeb926
+
+	/// Relative change between the first and latest available observed user history points.
+	measure '# Users 12M Change' = VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey) VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Users"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey) RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), BLANK(), FORMAT(DIVIDE(_lastValue - _firstValue, _firstValue), "+0.0%;-0.0%;0.0%"))
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: 42165ce0-65b7-4e59-b30e-a1d4d4ed9c36
+
+	/// Relative change between the first and latest available observed device history points.
+	measure '# Devices 12M Change' = VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey) VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "# Devices"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey) RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), BLANK(), FORMAT(DIVIDE(_lastValue - _firstValue, _firstValue), "+0.0%;-0.0%;0.0%"))
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: bc9787af-e1f6-4839-ac32-e5a22ae017d9
+
+	/// Percentage-point change between the first and latest available observed Microsoft 365 active-user history points.
+	measure 'M365 Active Use 12M Change' = VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey) VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "M365 Active Use (30D) (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey) RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), BLANK(), FORMAT((_lastValue - _firstValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: 4f9e1de9-b2fe-4938-8f21-1be8159cd29c
+
+	/// Percentage-point change between the first and latest available observed Windows 11 adoption history points.
+	measure 'Windows 11 Adoption 12M Change' = VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey) VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Windows 11 Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey) RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), BLANK(), FORMAT((_lastValue - _firstValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: 484b2a4c-c162-4db4-b025-a20234369167
+
+	/// Percentage-point change between the first and latest available observed combined Exchange mailbox history points.
+	measure 'Exchange Online Adoption 12M Change' = VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed")) VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey) VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Exchange Online Adoption (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey) RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), BLANK(), FORMAT((_lastValue - _firstValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: f2fe8405-aa2c-4790-893b-b4c267943dfe
+
+	/// Shows an explicit no-history status until qualified Secure Score history is available.
+	measure 'Secure Score 12M Change' =
+			VAR _firstDateKey = CALCULATE(MIN('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+			VAR _lastDateKey = CALCULATE(MAX('Executive KPI Trends'[Date Key]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"))
+			VAR _firstValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _firstDateKey)
+			VAR _lastValue = CALCULATE(MAX('Executive KPI Trends'[Metric Value]), REMOVEFILTERS('Date'), KEEPFILTERS('Executive KPI Trends'[Metric Name] = "Secure Score (%)"), KEEPFILTERS('Executive KPI Trends'[Evidence Status] = "Observed"), 'Executive KPI Trends'[Date Key] = _lastDateKey)
+			RETURN IF(ISBLANK(_firstValue) || ISBLANK(_lastValue), "No history", FORMAT((_lastValue - _firstValue) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Executive Trends
+		lineageTag: 816fb361-2873-4efc-ad20-1fbe967e41de
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6d67bb6f-bdb1-4549-8726-06c6b43ad2ad
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 02b8dcc7-9488-485c-8430-6db04f0bcc86
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ef4593bf-aa7a-4c8c-b80b-df9f6048a132
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Metric Name.
+	column 'Metric Name'
+		dataType: string
+		lineageTag: 49dc728c-c831-4cca-9f4c-772cb10bdd2c
+		sourceColumn: Metric Name
+
+	/// Business attribute Metric Value.
+	column 'Metric Value'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e012b295-f821-497c-8af3-e7c9d09666a3
+		summarizeBy: sum
+		sourceColumn: Metric Value
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: b35f83bf-60f3-491a-b916-88f71e7fa117
+		sourceColumn: Evidence Status
+
+	partition 'Executive KPI Trends Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ExecutiveKPITrends.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Date Key", "Tenant Key", "Environment Key", "Metric Name", "Metric Value", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date Key", "Tenant Key", "Environment Key", "Metric Value"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Date Key", Int64.Type}, {"Tenant Key", Int64.Type}, {"Environment Key", Int64.Type}, {"Metric Name", type text}, {"Metric Value", type number}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

@@ -1,0 +1,100 @@
+/// One synthetic user and license assignment per snapshot.
+table 'User License Assignments'
+	lineageTag: 36c595cb-740c-4ae0-a3de-38e2b3f33adf
+
+	/// Assigned licenses with qualified inactivity and no approved exclusion; not a monetary claim.
+	measure '# Potentially Reclaimable Assignments' = CALCULATE(COUNTROWS('User License Assignments'), KEEPFILTERS('User License Assignments'[Assignment State] = "Assigned"), KEEPFILTERS('User License Assignments'[Inactivity Evidence State] = "Inactive"), KEEPFILTERS('User License Assignments'[Approved Exclusion] = FALSE()))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 0e860665-5b65-4ca8-9181-97e28aade8db
+
+	/// Distinct eligible inactive users supporting reclaimability.
+	measure '# Inactive Eligible Users' = CALCULATE(DISTINCTCOUNT('User License Assignments'[User Key]), KEEPFILTERS('User License Assignments'[Inactivity Evidence State] = "Inactive"), KEEPFILTERS('User License Assignments'[Approved Exclusion] = FALSE()))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 1b54e301-0976-4366-9921-67014c72c8d6
+
+	/// Disabled user accounts that still have at least one assigned license.
+	measure '# Disabled Licensed Accounts' = CALCULATE(DISTINCTCOUNT('User License Assignments'[User Key]), KEEPFILTERS('User License Assignments'[Assignment State] = "Assigned"), KEEPFILTERS('User'[Account State] = "Disabled"))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: 648ddc46-c742-4917-9f41-d13550e3de9d
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ebad6097-7cb1-4221-9dba-8b1d0d3384da
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 137fa1b3-60be-4fc5-ac8c-f2101207307e
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2216eb9b-2860-4580-a9e4-2b0e570ca9a0
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d86d2bad-9d16-4481-ae10-f4d3a6fe6430
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute License Product Key.
+	column 'License Product Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e7728de1-5cc9-4448-aa07-870e4a54eed0
+		summarizeBy: none
+		sourceColumn: License Product Key
+
+	/// Business attribute Assignment State.
+	column 'Assignment State'
+		dataType: string
+		lineageTag: fd2c0345-535a-48c7-9283-2489c07e1759
+		sourceColumn: Assignment State
+
+	/// Business attribute Inactivity Evidence State.
+	column 'Inactivity Evidence State'
+		dataType: string
+		lineageTag: e74e432b-aa6c-4661-84a3-d402a0107695
+		sourceColumn: Inactivity Evidence State
+
+	/// Business attribute Approved Exclusion.
+	column 'Approved Exclusion'
+		dataType: boolean
+		lineageTag: 0d0c1c99-1f3b-49a1-b8fd-882cc29b9049
+		sourceColumn: Approved Exclusion
+
+	partition 'User License Assignments Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"License Product Key" = Int64.Type, #"Assignment State" = nullable text, #"Inactivity Evidence State" = nullable text, #"Approved Exclusion" = nullable logical], {
+				        {20260915, 1, 1, 1, 1, "Assigned", "Active", false},
+				        {20260915, 1, 1, 2, 1, "Assigned", "Inactive", false},
+				        {20260915, 1, 1, 3, 3, "Assigned", "Inactive", true},
+				        {20260915, 1, 1, 4, 2, "Assigned", "Active", false},
+				        {20260915, 1, 1, 5, 1, "Assigned", "Unknown", false},
+				        {20260915, 1, 1, 6, 2, "Assigned", "Active", false}
+				    })
+				in
+				    Source
+

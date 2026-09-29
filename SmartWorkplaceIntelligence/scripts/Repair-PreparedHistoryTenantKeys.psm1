@@ -1,10 +1,6 @@
-# One-time, explicitly scoped historical source repair. No network APIs or deletions.
+﻿# One-time, explicitly scoped historical source repair. No network APIs or deletions.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
-function Write-PreparedRepairAudit([string]$Path,$Document){
-    Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Document | ConvertTo-Json -Depth 8))) -Validate {param($value) if($value.SchemaVersion -ne 1 -or -not $value.PSObject.Properties['Files']){throw 'Invalid repair audit.'}} | Out-Null
-}
 function Get-RepairChildPath([string]$Root,[string]$Relative) {
     $base=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
     $path=[IO.Path]::GetFullPath((Join-Path $base $Relative))
@@ -70,11 +66,10 @@ function Invoke-PreparedHistoryTenantRepair {
         [switch]$Apply)
     if(-not $Weeks.Count -or @($Weeks | Where-Object {$_ -notmatch '^\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$'}).Count){throw 'Explicit valid YYYY-Www weeks are required.'}
     $root=(Resolve-Path -LiteralPath $DataRoot).ProviderPath
-    $contract=(Read-SmartM365JsonDocument $SourceContractPath).Document
+    $contract=Get-Content -LiteralPath $SourceContractPath -Raw | ConvertFrom-Json
     $lock=[IO.File]::Open((Join-Path $root '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
     $manifest=$null;$auditPath=$null
     try {
-        if($Apply){Convert-PreparedAuditNames -Root $root -Family DATA-REPAIR-BACKUPS -TenantKey $TenantKey}
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $candidates=[Collections.Generic.List[object]]::new()
         foreach($family in $contract.history) {
@@ -102,9 +97,9 @@ function Invoke-PreparedHistoryTenantRepair {
         if(-not $Apply){return [pscustomobject]@{Status='PreviewOnly';Files=$candidates.Count;Applied=$false;BackupPath=''}}
         $backupRoot=Get-RepairChildPath $root ('DATA-REPAIR-BACKUPS/'+[datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
         New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-        $auditPath=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $backupRoot 'repair.json') -Owner 'WorkplaceEvidence-Prepare/repair' -Validate {param($document) if($document.TenantKey -ne $TenantKey){throw 'Repair audit tenant mismatch.'}}
+        $auditPath=Join-Path $backupRoot 'repair.json'
         $manifest=@{SchemaVersion=1;TenantKey=$TenantKey;Weeks=$Weeks;Operator=[Environment]::UserName;StartedUtc=[datetime]::UtcNow.ToString('O');Status='Preparing';Files=@($candidates.ToArray())}
-        Write-PreparedRepairAudit -Path $auditPath -Document $manifest
+        $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $auditPath -Encoding utf8
         # Stage and validate ALL files before replacing any source.
         foreach($item in $candidates) {
             $original=Get-RepairChildPath $backupRoot ('originals/'+$item.Relative)
@@ -117,7 +112,7 @@ function Invoke-PreparedHistoryTenantRepair {
             $item.RepairedSHA256=(Get-FileHash $repaired).Hash;$item.Status='Verified'
         }
         foreach($item in $candidates){if((Get-FileHash $item.Source).Hash -ne $item.OriginalSHA256){throw "Source changed before replacement: $($item.Relative)"}}
-        $manifest.Status='Replacing';Write-PreparedRepairAudit -Path $auditPath -Document $manifest
+        $manifest.Status='Replacing';$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $auditPath -Encoding utf8
         foreach($item in $candidates) {
             $repaired=Get-RepairChildPath $backupRoot ('repaired/'+$item.Relative)
             $replaced=Get-RepairChildPath $backupRoot ('replaced/'+$item.Relative)
@@ -129,12 +124,12 @@ function Invoke-PreparedHistoryTenantRepair {
             [IO.File]::SetLastWriteTimeUtc($item.Source,[datetime]::Parse($item.OriginalLastWriteUtc).ToUniversalTime())
             if((Get-FileHash $item.Source).Hash -ne $item.RepairedSHA256){throw 'Repaired source hash mismatch.'}
             $item.Status='Repaired'
-            Write-PreparedRepairAudit -Path $auditPath -Document $manifest
+            $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $auditPath -Encoding utf8
         }
-        $manifest.Status='Completed';$manifest.CompletedUtc=[datetime]::UtcNow.ToString('O');Write-PreparedRepairAudit -Path $auditPath -Document $manifest
+        $manifest.Status='Completed';$manifest.CompletedUtc=[datetime]::UtcNow.ToString('O');$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $auditPath -Encoding utf8
         [pscustomobject]@{Status='Completed';Files=$candidates.Count;Applied=$true;BackupPath=$backupRoot}
     } catch {
-        if($manifest -and $auditPath){$manifest.Status='Failed';$manifest.Error=$_.Exception.Message;Write-PreparedRepairAudit -Path $auditPath -Document $manifest}
+        if($manifest -and $auditPath){$manifest.Status='Failed';$manifest.Error=$_.Exception.Message;$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $auditPath -Encoding utf8}
         throw
     } finally {$lock.Dispose()}
 }
@@ -143,8 +138,8 @@ Export-ModuleMember -Function Invoke-PreparedHistoryTenantRepair
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAK5cPmd84CYp8B
-# 6jzdmx5TfkuP3kT5QQIDAz+C4ViUNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAh0zEpuJYVpcXM
+# IwWBFpdg70CoB/YsoFah0AD25zivYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -277,31 +272,31 @@ Export-ModuleMember -Function Invoke-PreparedHistoryTenantRepair
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINRdJrtjdikPFb4CV4VixWnA7bD/9Oq+pJ8byeneAUasMA0GCSqG
-# SIb3DQEBAQUABIIBgK4L+R7CGmfLpdW6k4+dhHzgEA+DY/X3tUmroj6n+IUbbOoC
-# t9Y4b3qDN/CpI01odVOkzM0KyCSbgMKuA0gjxbPeW3XTnMsQMWNcO8Zm7wDeRhf/
-# hrWsxYGcrdNh8HT79Q5EB0tZoAtXpYN9RYsKyL2DxRtvU2A1cW2YrdajLYGDkRex
-# d7mWGJCMPZRWP3d1DCELlSNY5/RCVxk5QA+Pf2OgmdlZEImIXaisYqAyVtM/sqKd
-# HDzNkjDENxCrl8HTuTZiKx5CJBVg7n586upre8KejrQqUXXUe5UjyAd5OH2Vgu/t
-# vooIrH+LEV4+vsVDGnxLFbolh437X5WHqpKN60yURfBGxXkYGmOXVDqZDr7mZaTV
-# 8xF7N2xpIb74U0kFCNQ6U+r2u4CTMO2wMgUGTL6ubSLw2WUfIts+ZcjvbtLvZcVl
-# EicmLbM2z+1LIFQ4v3swmtWUe7boEfngp095nxDftihDxXBDMiU4btbjxfmE3pVc
-# byf/VxNJ1DpSqJTmGKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOrVvAgUgUpJ8RUIt7WKwUvOaD4+Fn+u8w7rp07yhGV5MA0GCSqG
+# SIb3DQEBAQUABIIBgFwKtZto9RQEFW5u4m4ZuEK1tu+qqmQuLx/vOsM9cEY+rbge
+# nVQKMneooRGEKorv94lzf6w7bjwaNTVQmU1fSHhdE3AscLPAuwCOel9EQdVFeYRp
+# /6xCsFbe1KOooLdo008c4eP9J/1uno/1x/ZAytVtliiDOtQ5r5LW+HAGGVo0I3S5
+# VGEX9PcBYJ8S0ug1K3xlRhMumaWs0ALp/zDF0EYJrX7CmhBcsiTnW74cpamWxvJZ
+# QBf0P/QLf7CnV4bth4x7BP1OnpGfS7/Zz1YCp+JyWmwCkolF8jREuHa9/HPO4yap
+# jBiRJxE1oV1VanFHogcbaWKLjOYi9qBUkiy5eelo+7fwTBQuBr56ecqKln6yPzKO
+# 3r9YIWtOeLngOeD+aV96Isx2ihWbRDdaZxFjHtDW8Fmh2TIKhLy8NQ9eveTlz/1E
+# e22KMgsrhfmbadSOK59FKjh1HgSxo/o4uurmdhfgyLR72O7aGsGR/PMFPrRpko6G
+# un0SM1VMpLLoMOz36qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
-# MDBaMC8GCSqGSIb3DQEJBDEiBCD4VhBNU0ERbNTYFZqTtRlA/LMx8M6+qcj1Wi8k
-# 9BMArTANBgkqhkiG9w0BAQEFAASCAgATvcfuCTwqyKH3ywi3ZCJJLAk78VnqYFQ+
-# WNIPhM5JSWtD7eT/HUN/HmgdgoYvrj0xoE0lv5LuAfkxUM8WSLxWStkkM4NKSctz
-# LKcZd/+UtxnTzjLRv60tJiprNa09Q34sGtaht7wZBhziTFhiQFLfdqr6r8yLoI10
-# rXPNS4jGN87d5wfwvE8TYnGQxkZ+PZuAzFmVqLqQI+h5Op0l5b1tXiFvemASNaBy
-# iLECkNGFexHLrn8PMIS0Zr8NkFoXpNMmVtLnjR82CJpTxNjJam93Ed5iDaJLofWo
-# 02ra7uongLE10nLPvh/WasB1t6XO7Eb5o3s0xY+u9GuNKbysE0zAUoFzwynkdhQ5
-# uDZ2W3uCmewkBh2sUz7Px2np8ycN0hsEycokw35EW5TiTDTyqMjILmZL2yLpdh94
-# 9xaPzB5TtFEzijzTAyWFOKkzQODBH4s48ePFcgJ//BT1ncgLB4nHonMjBsanhLlv
-# ak6bZ4LKW28g2fTrJS42nAhgWLYyWw+65qFzMUZ8ojrQvykSPecEayFJy4je1YN7
-# YhNQfgIl6jePWQlijNEFlUtzgJwgBJ6GV26qfhGNs7Ma6syxmGNJkE/VtDVSbKeq
-# nNkBF80RjA1SWn/SUkrva94lzQ53iuYFp/yMg/hF3h7eIMY4wwcs7ytyolTdQ+JW
-# AMBgBMUt5w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDMz
+# NTFaMC8GCSqGSIb3DQEJBDEiBCBystXSAtboLerNgDo50pRpPjtIETZ2WIrq+QGY
+# Dw/08DANBgkqhkiG9w0BAQEFAASCAgCypUXfYMRrS05t2sz1IXwjXkUdVc8Uu6+F
+# CW6y7b3fXKPHgGUsYY3dxoYzAD7pbHu4Q47OXTQGvb7YIE+pBIQ80qCUF7vu/ez8
+# svseIV7hZ4Ig+/nv/zyCy7YqPq/irvcsqYT2jxXKO63vP2xwgv2t2WyMCHDPyNjr
+# P+iugXj8dVfVAJN35qk1NL0KbV8SAxhkG57+2xGG37Y7jbr7t3LDp+TAqlG5XgUw
+# /CcrX2Q5qpYtE/07qtQWKg63AhKFY3H88pIlm6x3Vl5rgDeElpNdwZvvjRzFjXJQ
+# NUsIc7MBP561WYiS/sXiZ5IMj1kZBueuQQSbVDl6bpPLulKMll1ZkSUgcqhgZjTY
+# ZGa2LJ5wrFoJOFQR4g2hGqX9ssXMwB0StDtzv64X86zQZy3WM0fOIjcov9Zh4XFX
+# fdTfh2rn8FPD6xsK3P+VciT8bkWZYIDEpp7Mgt80RGHVzY/sVQYetDvG5pXOS1/S
+# U4WHTxegG/SSB6xOJsDp+a4Z98BMwIq0tG0thubgKk2ku1oghfBbulhMverJVAoR
+# WHHuQyEq9tPFqLdrcy838ogUxKGxGdwLfojmZlUmgs9i/sJ00rQXWpefU8guG3Ro
+# RSUVGoMhLeVCC0kMts8tqvaeRpj4cv0H2rzSqvGfwoq/t4WldcWhFe24JPqWJj8r
+# bdjvD59b+w==
 # SIG # End signature block

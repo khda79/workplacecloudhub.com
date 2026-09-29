@@ -1,0 +1,273 @@
+/// Private source-level inventory of report inputs with schema qualification, business snapshot freshness, volume, and decision-readiness status.
+table 'Data Trust Evidence'
+	lineageTag: 3ad9a955-34a0-421e-a2b2-c75b31374705
+
+	/// Qualified source files inventoried for the report.
+	measure 'Evidence Sources' = COUNTROWS('Data Trust Evidence')
+		formatString: #,0
+		displayFolder: Data Trust | Current
+		lineageTag: 55aee4b8-6776-4add-b5d0-305ab7c97921
+
+	/// Sources with qualified schema and evidence no older than 30 days.
+	measure 'Decision Ready Sources' = CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Decision Readiness] = "Ready"))
+		formatString: #,0
+		displayFolder: Data Trust | Readiness
+		lineageTag: 99a41201-8ae7-4424-ba7e-0124fb16ccb2
+
+	/// Share of inventoried report sources ready for current decisions.
+	measure 'Decision Ready Sources (%)' = DIVIDE([Decision Ready Sources], [Evidence Sources])
+		formatString: 0.0%
+		displayFolder: Data Trust | Readiness
+		lineageTag: 9ff3bc42-fb89-4477-84fd-53664cd63ae0
+
+	/// Qualified source exports whose business snapshot is older than 30 days.
+	measure 'Sources Requiring Refresh' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Decision Readiness] = "Refresh required")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Freshness
+		lineageTag: a8bd0536-bdd6-4ca1-8ec3-74f459be5921
+
+	/// Missing, unreadable, schema-mismatched, or unexpectedly empty required sources.
+	measure 'Blocked Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Decision Readiness] = "Blocked")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Risk
+		lineageTag: d268fbae-39aa-434d-b0d3-9a34be490280
+
+	/// Source snapshots no older than seven days.
+	measure 'Fresh Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Freshness State] = "Fresh")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Freshness
+		lineageTag: ce7dcdb7-06bc-4b14-9181-444a43f3a441
+
+	/// Source snapshots eight to thirty days old.
+	measure 'Aging Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Freshness State] = "Aging")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Freshness
+		lineageTag: fc865d46-1310-4254-a96c-2196def3ba51
+
+	/// Source snapshots older than thirty days.
+	measure 'Stale Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Freshness State] = "Stale")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Freshness
+		lineageTag: 2e903f0b-0be7-4acd-b3e4-5600ae5b2b13
+
+	/// Source exports that are unreadable or do not match the expected schema.
+	measure 'Schema Issue Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Schema State] <> "Qualified")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Risk
+		lineageTag: 43be46f2-e2a0-45df-96ba-3ee36b6b6fff
+
+	/// Share of inventoried source exports matching their expected schema contract.
+	measure 'Source Schema Compliance (%)' = DIVIDE([Evidence Sources] - [Schema Issue Sources], [Evidence Sources])
+		formatString: 0.0%
+		displayFolder: Data Trust | Quality
+		lineageTag: d34d0b08-ede7-42de-b311-0953a2c5e919
+
+	/// Required source files absent from DATA-LAST.
+	measure 'Missing Source Files' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[File State] = "Missing")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Risk
+		lineageTag: de53cb14-3c62-4eed-9e2d-f2a1aef466a1
+
+	/// Required source files with headers but no expected data rows.
+	measure 'Unexpected Empty Sources' = COALESCE(CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[File State] = "Unexpected empty")), 0)
+		formatString: #,0
+		displayFolder: Data Trust | Risk
+		lineageTag: db204608-ac11-40df-9f61-bb89cbf6933d
+
+	/// Total rows across the inventoried source files.
+	measure 'Source Rows' = SUM('Data Trust Evidence'[Row Count])
+		formatString: #,0
+		displayFolder: Data Trust | Volume
+		lineageTag: b72ca03c-c013-4629-bcb1-54bb276514e4
+
+	/// Business domains represented by inventoried sources.
+	measure 'Evidence Domains' = DISTINCTCOUNT('Data Trust Evidence'[Evidence Domain])
+		formatString: #,0
+		displayFolder: Data Trust | Current
+		lineageTag: b59a219e-1bc8-4aee-acbf-84ee769d48a9
+
+	/// Compact disclosure of source coverage, readiness, freshness, and blocking issues.
+	measure 'Data Trust Evidence Ribbon Text' = FORMAT([Evidence Sources], "0") & " sources · " & FORMAT([Decision Ready Sources (%)], "0%") & " ready · " & FORMAT([Stale Sources], "0") & " stale · " & FORMAT([Blocked Sources], "0") & " blocked"
+		formatString: @
+		displayFolder: Data Trust | Evidence
+		lineageTag: fd7b6004-aea4-4dbb-aa92-3321d80650ac
+
+	/// Entra source devices implicated in hardware-ID conflict groups.
+	measure 'Entra Devices in Hardware ID Conflicts' = CALCULATE([Affected Devices], 'Device Operational Signals'[Signal Sort] = 12)
+		formatString: #,0
+		displayFolder: Data Trust | Entity Integrity
+		lineageTag: 9f6ab0a7-598c-4076-8ea4-2c135d8076d8
+
+	/// Entra source devices identified as removal candidates.
+	measure 'Entra Device Removal Candidates' = CALCULATE([Affected Devices], 'Device Operational Signals'[Signal Sort] = 13)
+		formatString: #,0
+		displayFolder: Data Trust | Entity Integrity
+		lineageTag: 961d18e6-00d9-4ac2-927e-51e79b58c975
+
+	column 'Source Key'
+		dataType: string
+		isHidden
+		lineageTag: b0c3ea81-3f67-45d1-a717-a7587dedb11e
+		summarizeBy: none
+		sourceColumn: Source Key
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Domain'
+		dataType: string
+		lineageTag: 0a7d2d03-9dec-4b50-bce0-956a9a9f93e2
+		summarizeBy: none
+		sourceColumn: Evidence Domain
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Source Name'
+		dataType: string
+		lineageTag: 1b443dd2-cd21-4afb-a1a8-1e6b0af4b0ae
+		summarizeBy: none
+		sourceColumn: Source Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'File Name'
+		dataType: string
+		lineageTag: 8ff4b877-2f05-4b94-a431-3a905881c533
+		summarizeBy: none
+		sourceColumn: File Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'File State'
+		dataType: string
+		lineageTag: cbe5ce0f-ff42-4994-8715-7f44dac8e28e
+		summarizeBy: none
+		sourceColumn: File State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Schema State'
+		dataType: string
+		lineageTag: caf3ec34-bb1b-4bcc-8ee3-b36f849aba5b
+		summarizeBy: none
+		sourceColumn: Schema State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Expected Columns'
+		dataType: string
+		lineageTag: ec4e527b-34de-45db-bc18-e836676fab09
+		summarizeBy: none
+		sourceColumn: Expected Columns
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Missing Columns'
+		dataType: string
+		lineageTag: 15798268-ae3c-40ef-a1fc-2e7cffdfa9e1
+		summarizeBy: none
+		sourceColumn: Missing Columns
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Row Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: f276c21b-5440-4039-b01c-61b2d31e3cdf
+		summarizeBy: sum
+		sourceColumn: Row Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Column Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 14551e5c-68c4-4d18-ab51-29683caad344
+		summarizeBy: sum
+		sourceColumn: Column Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: e2e2a111-216b-4f5e-86ff-c526b96289b1
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 2a9a07c1-3508-4ab9-a944-d1349047df9e
+			defaultHierarchy: LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Basis'
+		dataType: string
+		lineageTag: 3ced5a71-4ffa-4bae-8e43-f9f75b72ed57
+		summarizeBy: none
+		sourceColumn: Snapshot Basis
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 4432483b-ebfd-40e5-a361-ebfb2663a5b1
+		summarizeBy: sum
+		sourceColumn: Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: d0e2c281-f14e-4091-9af5-0f100d83de2e
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Decision Readiness'
+		dataType: string
+		lineageTag: 3f6aa7d4-75a9-49bf-a11a-808c3910e436
+		summarizeBy: none
+		sourceColumn: Decision Readiness
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 82d249c5-5b9d-49f7-8db3-214c131483d1
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: dc598452-9ba5-4b27-b0a8-6589ad4a6eb0
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Read Error'
+		dataType: string
+		lineageTag: a76383c0-578a-47db-b107-6e3eb65b0533
+		summarizeBy: none
+		sourceColumn: Read Error
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Data Trust Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DataTrustEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Source Key", "Evidence Domain", "Source Name", "File Name", "File State", "Schema State", "Expected Columns", "Missing Columns", "Row Count", "Column Count", "Snapshot Date", "Snapshot Basis", "Evidence Age Days", "Freshness State", "Decision Readiness", "Evidence Status", "Recommended Action", "Read Error"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Row Count", "Column Count", "Snapshot Date", "Evidence Age Days"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Source Key", type text}, {"Evidence Domain", type text}, {"Source Name", type text}, {"File Name", type text}, {"File State", type text}, {"Schema State", type text}, {"Expected Columns", type text}, {"Missing Columns", type text}, {"Row Count", Int64.Type}, {"Column Count", Int64.Type}, {"Snapshot Date", type datetime}, {"Snapshot Basis", type text}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Decision Readiness", type text}, {"Evidence Status", type text}, {"Recommended Action", type text}, {"Read Error", type text}}, "en-US")
+				in
+				    Typed
+

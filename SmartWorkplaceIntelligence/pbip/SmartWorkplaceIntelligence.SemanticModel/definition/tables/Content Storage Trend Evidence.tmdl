@@ -1,0 +1,144 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Content Storage Trend Evidence'
+	lineageTag: c3bffb82-aa23-45f2-80c7-81f896627f0b
+
+	/// Weekly observed SharePoint storage used in gigabytes.
+	measure 'Trend SharePoint Storage Used (GB)' = SUM('Content Storage Trend Evidence'[SharePoint Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Content | Trend
+		lineageTag: 9554f775-01cd-4c96-8ce9-d551110ff032
+
+	/// Weekly observed SharePoint site count.
+	measure 'Trend SharePoint Sites' = SUM('Content Storage Trend Evidence'[SharePoint Sites])
+		formatString: #,0
+		displayFolder: Content | Trend
+		lineageTag: 74dd80bd-99c9-4ec9-bf22-a78ae80fcd2e
+
+	/// Weekly SharePoint sites marked inactive by the inventory.
+	measure 'Trend Inactive SharePoint Sites' = SUM('Content Storage Trend Evidence'[Inactive SharePoint Sites])
+		formatString: #,0
+		displayFolder: Content | Trend
+		lineageTag: 26d9d715-f5c3-43d9-880b-37623ec1e2b3
+
+	/// Relative SharePoint storage growth between the first and last selected observed snapshots.
+	measure 'SharePoint Storage Period Change' = VAR _FirstDate = MINX(ALLSELECTED('Content Storage Trend Evidence'[Snapshot Date]), 'Content Storage Trend Evidence'[Snapshot Date]) VAR _LastDate = MAXX(ALLSELECTED('Content Storage Trend Evidence'[Snapshot Date]), 'Content Storage Trend Evidence'[Snapshot Date]) VAR _First = CALCULATE([Trend SharePoint Storage Used (GB)], 'Content Storage Trend Evidence'[Snapshot Date] = _FirstDate) VAR _Last = CALCULATE([Trend SharePoint Storage Used (GB)], 'Content Storage Trend Evidence'[Snapshot Date] = _LastDate) RETURN IF(ISBLANK(_First) || ISBLANK(_Last) || _First = 0, "--", FORMAT(DIVIDE(_Last - _First, _First), "+0.0%;-0.0%;0.0%"))
+		formatString: @
+		displayFolder: Content | Trend
+		lineageTag: 647ce1d2-25b6-470f-b2f1-56a9638a8050
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: c3d71584-82aa-422e-a58a-7658161c7de0
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: dbb5ebb0-940f-48f8-b83e-a114cf438aac
+			defaultHierarchy: LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 37e32b13-ff04-4669-a166-8f3e2acfd1f6
+		summarizeBy: count
+		sourceColumn: Date Key
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 53d59344-e8ec-4371-b758-ac44a716e4d3
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SharePoint Sites'
+		dataType: int64
+		formatString: #,0
+		lineageTag: f085d603-b75c-4884-9c36-4f04ba57d18e
+		summarizeBy: sum
+		sourceColumn: SharePoint Sites
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SharePoint Storage Used GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 9b78271b-8a21-43d0-9865-781ef00b7263
+		summarizeBy: sum
+		sourceColumn: SharePoint Storage Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SharePoint Storage Allocated GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: d5af654d-9f01-4b10-b530-273b8ae6d8dd
+		summarizeBy: sum
+		sourceColumn: SharePoint Storage Allocated GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SharePoint Storage Utilization (%)'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 421987df-3e29-4ee5-8255-44fb339d18d9
+		summarizeBy: sum
+		sourceColumn: SharePoint Storage Utilization (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Inactive SharePoint Sites'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 01c842c1-73c1-4d0c-a4e6-4016d7a13941
+		summarizeBy: sum
+		sourceColumn: Inactive SharePoint Sites
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Orphaned SharePoint Sites'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 07e5b1cb-aa13-46e9-b627-dbc9c6d71201
+		summarizeBy: sum
+		sourceColumn: Orphaned SharePoint Sites
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Sites at 80%+ Quota'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 178faaa8-9543-43e3-9d22-e4e8fe57c02f
+		summarizeBy: sum
+		sourceColumn: Sites at 80%+ Quota
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 1e92087f-e1cc-440a-9fae-22572b917764
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Content Storage Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ContentStorageTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Snapshot Week", "SharePoint Sites", "SharePoint Storage Used GB", "SharePoint Storage Allocated GB", "SharePoint Storage Utilization (%)", "Inactive SharePoint Sites", "Orphaned SharePoint Sites", "Sites at 80%+ Quota", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "SharePoint Sites", "SharePoint Storage Used GB", "SharePoint Storage Allocated GB", "SharePoint Storage Utilization (%)", "Inactive SharePoint Sites", "Orphaned SharePoint Sites", "Sites at 80%+ Quota"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Snapshot Week", type text}, {"SharePoint Sites", Int64.Type}, {"SharePoint Storage Used GB", type number}, {"SharePoint Storage Allocated GB", type number}, {"SharePoint Storage Utilization (%)", type number}, {"Inactive SharePoint Sites", Int64.Type}, {"Orphaned SharePoint Sites", Int64.Type}, {"Sites at 80%+ Quota", Int64.Type}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

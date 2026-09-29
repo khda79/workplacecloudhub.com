@@ -1,0 +1,60 @@
+/// Accepted user-team membership relationships.
+table 'Team Memberships'
+	lineageTag: 09b2b436-6080-439e-8284-305a17169fad
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9bedca31-9042-4116-9c88-dd632527bbc2
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 62514d5e-9b4e-45bf-9ae8-257c4fb34e6d
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b9609e9c-6567-4fdf-8c79-e64b2afae1fd
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Team Key.
+	column 'Team Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 78926513-2db7-448a-a4dc-c31c9ad7770b
+		summarizeBy: none
+		sourceColumn: Team Key
+
+	/// Business attribute Relationship Type.
+	column 'Relationship Type'
+		dataType: string
+		lineageTag: b66c2994-4c30-4c23-bea3-45e2d8d06690
+		sourceColumn: Relationship Type
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 9e499bfb-8d25-44b8-bb3d-3ce3acf30f03
+		sourceColumn: Evidence Status
+
+	partition 'Team Memberships Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Team Key" = Int64.Type, #"Relationship Type" = nullable text, #"Evidence Status" = nullable text], {})
+				in
+				    Source
+

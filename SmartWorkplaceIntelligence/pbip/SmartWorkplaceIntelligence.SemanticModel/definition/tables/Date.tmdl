@@ -1,0 +1,93 @@
+/// Contiguous reporting calendar used by every dated fact.
+table Date
+	lineageTag: 7a5944be-4e33-435f-aa86-8419f4bf51c1
+	dataCategory: Time
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7c19e517-bdee-4900-bed1-4ca2731975ef
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Date.
+	column Date
+		dataType: dateTime
+		isUnique
+		formatString: yyyy-MM-dd
+		lineageTag: b64d9519-1954-4bb3-ae27-97af9a839848
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Month Start.
+	column 'Month Start'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 49ab9040-bde7-42d1-9470-2f7aad197e0f
+		summarizeBy: none
+		sourceColumn: Month Start
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Month.
+	column Month
+		dataType: string
+		lineageTag: db80ffd9-e5bd-4878-a18b-d838cbf0ec76
+		sourceColumn: Month
+
+	/// Business attribute Month Number.
+	column 'Month Number'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e93fa7c7-4738-49a3-997b-e3246cd1bda1
+		summarizeBy: none
+		sourceColumn: Month Number
+
+	/// Business attribute Quarter.
+	column Quarter
+		dataType: string
+		lineageTag: f57782d2-032e-46cc-82b8-67ea5aebdcd5
+		sourceColumn: Quarter
+
+	/// Business attribute Year.
+	column Year
+		dataType: int64
+		lineageTag: d4b09579-571f-4577-b265-e3f50981e9ff
+		summarizeBy: none
+		sourceColumn: Year
+
+	/// Business attribute Reporting Period.
+	column 'Reporting Period'
+		dataType: string
+		lineageTag: defc7ec3-7d17-4e95-ace0-34425301050a
+		sourceColumn: Reporting Period
+
+	partition 'Date Import' = m
+		mode: import
+		source =
+				let
+				    StartDate = #date(2025, 10, 1),
+				    EndDate = #date(2027, 11, 9),
+				    Dates = List.Dates(StartDate, Duration.Days(EndDate - StartDate) + 1, #duration(1, 0, 0, 0)),
+				    Base = Table.FromList(Dates, Splitter.SplitByNothing(), {"Date"}),
+				    Typed = Table.TransformColumnTypes(Base, {{"Date", type date}}),
+				    AddDateKey = Table.AddColumn(Typed, "Date Key", each Date.Year([Date]) * 10000 + Date.Month([Date]) * 100 + Date.Day([Date]), Int64.Type),
+				    AddMonthStart = Table.AddColumn(AddDateKey, "Month Start", each Date.StartOfMonth([Date]), type date),
+				    AddMonth = Table.AddColumn(AddMonthStart, "Month", each Date.MonthName([Date], "en-US"), type text),
+				    AddMonthNumber = Table.AddColumn(AddMonth, "Month Number", each Date.Month([Date]), Int64.Type),
+				    AddQuarter = Table.AddColumn(AddMonthNumber, "Quarter", each "Q" & Text.From(Date.QuarterOfYear([Date])), type text),
+				    AddYear = Table.AddColumn(AddQuarter, "Year", each Date.Year([Date]), Int64.Type),
+				    AddReportingPeriod = Table.AddColumn(AddYear, "Reporting Period", each Date.ToText([Date], "yyyy-MM", "en-US"), type text),
+				    Reordered = Table.ReorderColumns(AddReportingPeriod, {"Date Key", "Date", "Month Start", "Month", "Month Number", "Quarter", "Year", "Reporting Period"})
+				in
+				    Reordered
+

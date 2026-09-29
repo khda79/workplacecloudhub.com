@@ -1,0 +1,356 @@
+cultureInfo en-US
+
+	linguisticMetadata =
+			{
+			  "Version": "2.0.0",
+			  "Language": "en-US",
+			  "Entities": {
+			    "user_inventory_evidence.any_m365_service_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Any M365 Service Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Any service %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.office_desktop_activation_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Office Desktop Activation (30D %)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "user_inventory_evidence.primary_pc_users": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Primary PC Users"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Primary PC users": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.primary_pc_users_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Primary PC Users (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Primary PC %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.exchange_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Exchange Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Exchange %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.teams_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Teams Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Teams %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.sharepoint_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "SharePoint Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "SharePoint %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.onedrive_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "OneDrive Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "OneDrive %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_assignments_without_observed_use_30d": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 Assignments Without Observed Use (30D)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "No use · review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.e3_to_f3_review_candidates_by_persona": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "E3 to F3 Review Candidates by Persona"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "E3 to F3 review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_f3_assigned": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 F3 Assigned"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "F3 assigned": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_f3_persona_share_of_all_assigned_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 F3 Persona Share of All Assigned (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "F3 share %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_e3_assigned": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 E3 Assigned"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "E3 assigned": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_e3_persona_share_of_all_assigned_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 E3 Persona Share of All Assigned (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "E3 share %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_e5_assigned": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 E5 Assigned"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "E5 assigned": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.m365_e5_persona_share_of_all_assigned_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "M365 E5 Persona Share of All Assigned (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "E5 share %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.office_desktop_usage_30d_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Office Desktop Usage (30D %)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Office PC use %": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    }
+			  }
+			}
+		contentType: json
+

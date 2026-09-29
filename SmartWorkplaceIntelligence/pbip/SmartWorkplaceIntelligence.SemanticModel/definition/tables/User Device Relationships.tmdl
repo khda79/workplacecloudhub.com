@@ -1,0 +1,63 @@
+/// Accepted user-device relationships.
+table 'User Device Relationships'
+	lineageTag: 21afd481-d2b4-4eec-aaec-9d8a7932d0b9
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 65a4e351-22fb-474e-9566-ec6f33307a6b
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a6b33f86-e8f6-4c87-83e4-7f28c346fbb6
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b66c450a-3129-40b7-a742-8887c7bb657d
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 182ca00a-9315-49a9-9db7-ef90273c0142
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Relationship Type.
+	column 'Relationship Type'
+		dataType: string
+		lineageTag: 36b99afd-890e-4e08-9d2f-db49da484e71
+		sourceColumn: Relationship Type
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 3f5dc28f-455f-407b-b85c-a8d9c4a19e44
+		sourceColumn: Evidence Status
+
+	partition 'User Device Relationships Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Device Key" = Int64.Type, #"Relationship Type" = nullable text, #"Evidence Status" = nullable text], {
+				        {1, 1, 1, 1, "PrimaryUser", "Observed"},
+				        {1, 1, 2, 2, "PrimaryUser", "Observed"}
+				    })
+				in
+				    Source
+

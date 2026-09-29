@@ -1,0 +1,735 @@
+/// One row per current Intune device, enriched by unique Entra device, Active Directory computer, and Entra primary-user location matches. This real private evidence table is intentionally disconnected from the synthetic model to prevent unsupported joins. Managed tenure is an observed-management proxy, not physical device age.
+table 'Device Inventory Evidence'
+	lineageTag: 7172354c-9d28-4805-8c11-47658af15753
+
+	/// Current number of real Intune device rows in the active filter context.
+	measure 'Managed Devices' = COUNTROWS('Device Inventory Evidence')
+		formatString: #,##0
+		displayFolder: Core KPIs
+		lineageTag: 6c7daae1-5c36-41f4-8824-08a7b644dab6
+
+	/// Distinct known hardware manufacturers in the current real device scope.
+	measure 'Device Manufacturers' = CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Manufacturer]), KEEPFILTERS('Device Inventory Evidence'[Manufacturer] <> "Unknown"))
+		formatString: #,##0
+		displayFolder: Core KPIs
+		lineageTag: 26c88e19-6d76-4690-ae94-0afefda8f799
+
+	/// Distinct known hardware models in the current real device scope.
+	measure 'Device Models' = CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Model]), KEEPFILTERS('Device Inventory Evidence'[Model] <> "Unknown"))
+		formatString: #,##0
+		displayFolder: Core KPIs
+		lineageTag: 96a864aa-1caa-4752-a3c1-737400f4b088
+
+	/// Share of devices with a known compliance state that are currently compliant.
+	measure 'Device Compliance Rate' =
+			VAR _knownDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] <> "Unknown"))
+			VAR _compliantDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Compliant"))
+			RETURN DIVIDE(_compliantDevices, _knownDevices)
+		formatString: 0.0%
+		displayFolder: Core KPIs
+		lineageTag: ace20702-b204-49c3-a762-7d75cb3472c1
+
+	/// Current number of real Intune devices reported as noncompliant.
+	measure 'Noncompliant Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Noncompliant"))
+		formatString: #,##0
+		displayFolder: Core KPIs
+		lineageTag: 1f1bdd6b-21fc-4bd9-bd85-579e32e6cf62
+
+	/// Share of current Intune devices with one unique Active Directory computer match.
+	measure 'AD to Intune Match Rate' =
+			VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[AD to Intune Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])
+		formatString: 0.0%
+		displayFolder: Coverage
+		lineageTag: 3ee17ca5-94a1-45e8-b05a-3774f0e216a3
+
+	/// Share of current Intune devices with one unique Entra device match.
+	measure 'Entra Match Rate' =
+			VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Entra Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])
+		formatString: 0.0%
+		displayFolder: Coverage
+		lineageTag: 842e4b93-dad4-45dc-b154-0a42be5d5a04
+
+	/// Devices below 20 GiB free or below 15 percent free system-drive capacity.
+	measure 'Devices Low on Disk' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Low"))
+		formatString: #,##0
+		displayFolder: Operational Attention
+		lineageTag: 10af3fd1-de67-4019-8b6a-f3806c357562
+
+	/// Share of real managed devices attributed to the current manufacturer while preserving other filters.
+	measure 'Device Share by Manufacturer' = DIVIDE([Managed Devices], CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Manufacturer])))
+		formatString: 0.0%
+		displayFolder: Distribution
+		lineageTag: 5fc51857-d260-4850-8347-ec75117a4ab4
+
+	/// Share of Windows 11 devices for each short Windows release label while preserving other real-estate filters.
+	measure 'Windows 11 Device Share by Release' =
+			VAR _devicesForRelease = CALCULATE([Managed Devices], KEEPFILTERS(FILTER('Device Inventory Evidence', LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11")))
+			VAR _allWindows11Devices = CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Windows Release Short]), REMOVEFILTERS('Device Inventory Evidence'[Windows Release]), FILTER(ALL('Device Inventory Evidence'[Windows Release]), LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11"))
+			RETURN IF(_devicesForRelease > 0, DIVIDE(_devicesForRelease, _allWindows11Devices))
+		formatString: 0.0%
+		displayFolder: Distribution
+		lineageTag: 8edb38e7-ca64-4080-9aed-2c86c588bf32
+
+	/// Average observed management tenure. This is not physical or purchase age.
+	measure 'Average Observed Tenure (Years)' = AVERAGE('Device Inventory Evidence'[Managed Tenure (Years)])
+		formatString: 0.0
+		displayFolder: Lifecycle Proxy
+		lineageTag: d495bc32-4d36-4d43-823f-60fe0395e6d2
+
+	/// Devices whose earliest observed Intune, Entra, or AD date is at least four years old; not a hardware-age measure.
+	measure 'Devices Observed 4+ Years' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Tenure Bucket] = "4+ years"))
+		formatString: #,##0
+		displayFolder: Lifecycle Proxy
+		lineageTag: 2ab7ae8d-af9a-49a6-bf89-e3f42801a616
+
+	/// Count of managed devices still running Windows 10 based on the collected operating system build.
+	measure 'Windows 10 Devices Remaining' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"))
+		formatString: #,0
+		displayFolder: Real Device Estate
+		lineageTag: 52b097b1-e54a-4fd5-8848-950653788719
+
+	/// Count of Windows 10 devices explicitly assessed as not capable of upgrading to Windows 11. Unknown and unassessed devices are excluded.
+	measure 'Windows 10 Devices Not Capable' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"), KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Not capable"))
+		formatString: #,0
+		displayFolder: Real Device Estate
+		lineageTag: 5f9cd5f8-8ea7-45db-843d-c1e1bf259b5f
+
+	/// Managed devices not yet Low whose reported free system-drive space is below 40 GiB.
+	measure 'Devices Approaching Low Disk' =
+			CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Approaching Low")
+			)
+		formatString: #,##0
+		displayFolder: Operational Attention
+		lineageTag: e202dbee-0432-47e1-9a1e-26c92a4f082c
+
+	/// Managed devices with a known Intune last-sync timestamp older than 30 days.
+	measure 'Devices Not Synced 30+ Days' =
+			CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS(
+			        NOT ISBLANK('Device Inventory Evidence'[Last Sync DateTime])
+			            && 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() - 30
+			    )
+			)
+		formatString: #,##0
+		displayFolder: Operational Attention
+		lineageTag: dbb598e0-8560-4103-9db8-8207ca257983
+
+	/// Managed devices whose selected current Windows Update aggregate state is Error or Rollback.
+	measure 'Windows Update Hard Failures' =
+			CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Update State] IN {"Error", "Rollback"})
+			)
+		formatString: #,##0
+		displayFolder: Operational Attention
+		lineageTag: 953872a4-59bd-498d-9619-f347add70e15
+
+	/// Windows 10 devices assessed as capable of upgrading to Windows 11.
+	measure 'Windows 10 Devices Capable' =
+			CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
+			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Capable")
+			)
+		formatString: #,##0
+		displayFolder: Windows 11 Readiness
+		lineageTag: 67f99dbf-adec-4be8-a3bb-d2049009632d
+
+	/// Windows 10 devices whose Windows 11 eligibility is not assessed or remains unknown.
+	measure 'Windows 10 Eligibility Not Assessed' =
+			CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
+			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] IN {"Not assessed", "Unknown"})
+			)
+		formatString: #,##0
+		displayFolder: Windows 11 Readiness
+		lineageTag: 20c1f654-ad44-4355-9762-f7626de6cf51
+
+	/// Managed devices with source-backed Secure Boot disabled evidence.
+	measure 'Secure Boot Disabled Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Secure Boot State] = "Disabled")
+		formatString: #,##0
+		lineageTag: 699006a1-6964-4496-a6fb-13a8eaf745e3
+
+	/// Managed devices whose latest available Endpoint Analytics score is below 50.
+	measure 'Endpoint Analytics Below 50 Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Endpoint Analytics State] = "Below 50")
+		formatString: #,##0
+		lineageTag: 59754e8f-431b-457b-b009-41ec99877967
+
+	/// Managed devices with one or more current Endpoint Analytics stop errors.
+	measure 'Devices with Stop Errors' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Stop Error State] = "Stop errors observed")
+		formatString: #,##0
+		lineageTag: 72f6a682-2fe2-403f-8bae-a87ee53ecc3d
+
+	/// Managed devices implicated in an Entra hardware-ID conflict group.
+	measure 'Managed Devices with Hardware ID Conflict' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Entra Hardware ID Conflict] = "Yes")
+		formatString: #,##0
+		lineageTag: 8fdc56a2-ef11-41a8-9b4f-d359998d95fa
+
+	/// Managed devices also listed as Entra device-removal candidates.
+	measure 'Managed Device Removal Candidates' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Removal Candidate] = "Yes")
+		formatString: #,##0
+		lineageTag: 3740acd8-b1ea-4559-9c69-0bcfefcd438c
+
+	/// Managed Windows 11 devices on 21H2, 22H2, or 23H2.
+	measure 'Older Windows 11 Release Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows 11 Release State] = "Older release")
+		formatString: #,##0
+		lineageTag: 70de76e9-af63-4274-8eb0-8c1a55cbd744
+
+	/// Current managed devices without a unique Active Directory computer match.
+	measure 'AD-to-Intune Unmatched Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[AD to Intune Match] = "Unmatched")
+		formatString: #,##0
+		lineageTag: eb1c76da-0b92-40f1-8e38-868688601ec9
+
+	/// Share of current managed devices identified as Windows 11.
+	measure 'Current Windows 11 Adoption (%)' =
+			DIVIDE(
+			    CALCULATE(
+			        [Managed Devices],
+			        'Device Inventory Evidence'[Windows Generation] = "Windows 11"
+			    ),
+			    [Managed Devices]
+			)
+		formatString: 0.0%
+		lineageTag: 6922ca2e-12b3-4e25-9025-025a594506c9
+
+	/// Share of remaining Windows 10 devices with a recorded Windows 11 capability assessment.
+	measure 'Windows 10 Readiness Assessed (%)' =
+			DIVIDE(
+			    [Windows 10 Devices Not Capable] + [Windows 10 Devices Capable],
+			    [Windows 10 Devices Remaining]
+			)
+		formatString: 0.0%
+		lineageTag: 583edf7a-86eb-4f39-85f2-de6745a93f50
+
+	/// Share of current managed devices covered by Endpoint Analytics evidence.
+	measure 'Endpoint Analytics Managed Coverage (%)' =
+			VAR Covered =
+			    CALCULATE(
+			        MAX('Device Risk Evidence Summary'[Managed Devices Covered]),
+			        'Device Risk Evidence Summary'[Signal] = "Endpoint Analytics score below 50"
+			    )
+			RETURN
+			    DIVIDE(Covered, [Managed Devices])
+		formatString: 0.0%
+		lineageTag: ffdeb9a6-2dba-413a-930c-9ff95015e1e0
+
+	/// Share of current managed devices without an observed Entra hardware ID conflict.
+	measure 'Devices without Hardware ID Conflict (%)' =
+			DIVIDE(
+			    [Managed Devices] - [Managed Devices with Hardware ID Conflict],
+			    [Managed Devices]
+			)
+		formatString: 0.0%
+		lineageTag: db1851cb-87ba-4621-8be1-805ce6d40f03
+
+	/// Share of current managed devices identified as removal candidates.
+	measure 'Managed Device Removal Candidate Rate (%)' =
+			DIVIDE(
+			    [Managed Device Removal Candidates],
+			    [Managed Devices]
+			)
+		formatString: 0.0%
+		lineageTag: 3c066eba-a914-4ecb-8836-caf3063c2b79
+
+	/// Average current Endpoint Analytics score among covered managed devices.
+	measure 'Current Endpoint Analytics Score' = AVERAGE('Device Inventory Evidence'[Endpoint Analytics Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience
+		lineageTag: 83c5a228-d319-46bd-8043-e329bb5fc23c
+
+	/// Average current Endpoint Analytics startup score among covered managed devices.
+	measure 'Current Startup Score' = AVERAGE('Device Inventory Evidence'[Startup Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience
+		lineageTag: bcdec1cf-cee2-4e8d-9c31-68bb23558b13
+
+	/// Managed devices whose latest available startup score is below 50.
+	measure 'Startup Score Below 50 Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] = "Below 50"))
+		formatString: #,0
+		displayFolder: Endpoint Experience
+		lineageTag: e0ad4639-ea3d-4b3a-ba11-4536c185976c
+
+	/// Average current application reliability score among covered managed devices.
+	measure 'Current App Reliability Score' = AVERAGE('Device Inventory Evidence'[App Reliability Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience
+		lineageTag: 022465d1-e628-4b9d-816b-6cf0ab5f2992
+
+	/// Managed devices whose latest application reliability score is below 50.
+	measure 'App Reliability Below 50 Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[App Reliability State] = "Below 50"))
+		formatString: #,0
+		displayFolder: Endpoint Experience
+		lineageTag: 479cd524-9746-4350-b290-c27ffd953f70
+
+	/// Managed devices with an observed core boot time above 60 seconds.
+	measure 'Devices with Boot Time over 60s' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Boot Time (s)] > 60))
+		formatString: #,0
+		displayFolder: Endpoint Experience
+		lineageTag: e88a9bb5-4f01-49e4-a238-bae91720b4f5
+
+	/// Managed devices with an observed core sign-in time above 30 seconds.
+	measure 'Devices with Sign-in Time over 30s' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Sign-in Time (s)] > 30))
+		formatString: #,0
+		displayFolder: Endpoint Experience
+		lineageTag: 37b794c4-0762-44fc-a87b-afb193eef45b
+
+	/// Share of current managed devices covered by Endpoint Analytics startup evidence.
+	measure 'Startup Score Managed Coverage (%)' = DIVIDE(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] <> "Not observed")), [Managed Devices])
+		formatString: 0.0%
+		displayFolder: Endpoint Experience
+		lineageTag: 762f0fd0-a38c-40e0-9e9e-75b94f35e25c
+
+	/// Stable Intune device identifier retained only for row identity and technical troubleshooting.
+	measure 'Intune Devices Not Synced 30+ Days' = [Devices Not Synced 30+ Days]
+		formatString: #,0
+		displayFolder: Device | Risk
+		lineageTag: 8f33b37a-cf6b-45b2-bdef-6aaf0bd412ba
+
+	measure 'Disabled Entra Managed Devices' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Entra Account State] = "Disabled" )
+		formatString: #,0
+		displayFolder: Device | Risk
+		lineageTag: fa5267f6-75de-4460-ba1d-c60d02b3277a
+
+	/// Devices with Encrypted=True in the current Intune managed-device export. This does not prove BitLocker recovery-key escrow.
+	measure 'Devices Encrypted According to Intune' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted" )
+		formatString: #,0
+		displayFolder: Device | Security
+		lineageTag: 2e9e5873-ab3d-49ee-b7ce-42dcb0454490
+
+	/// Share of managed Intune devices with a known encryption state that are marked Encrypted. This does not prove BitLocker key escrow.
+	measure 'Encrypted Devices Among Known Intune State (%)' = DIVIDE ( [Devices Encrypted According to Intune], CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ) )
+		formatString: 0.0%
+		displayFolder: Device | Security
+		lineageTag: dd59f585-70ce-4023-b2ff-bc0b997ce1e9
+
+	measure 'Known Intune Encryption State Coverage (%)' = DIVIDE ( CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ), [Managed Devices] )
+		formatString: 0.0%
+		displayFolder: Device | Security
+		lineageTag: 9162bc4e-28cf-4185-af0e-a58211d3e811
+
+	/// Share of managed Intune devices for which the collected encryption state is known.
+	/// Intune devices with a known encryption state and a last sync within the trailing 30 calendar days.
+	measure 'Devices With Recent Intune Encryption Evidence' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" }, 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )
+		formatString: #,0
+		displayFolder: Device | Security
+		lineageTag: b1e29c49-4dc1-4fae-9ba7-e87450967802
+
+	/// Recently synced Intune devices marked Encrypted; not proof of BitLocker recovery-key escrow.
+	measure 'Recently Synced Devices Encrypted According to Intune' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted", 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )
+		formatString: #,0
+		displayFolder: Device | Security
+		lineageTag: 274be0e1-10a0-4664-ae18-2d663254f01e
+
+	/// Share of all Intune devices with a known encryption state updated within the trailing 30 calendar days.
+	measure 'Recent Intune Encryption Evidence Coverage (%)' = DIVIDE ( [Devices With Recent Intune Encryption Evidence], [Managed Devices] )
+		formatString: 0.0%
+		displayFolder: Device | Security
+		lineageTag: 02b8344a-5208-452d-815d-12f9af116f60
+
+	/// Share encrypted among Intune devices with a known encryption state updated within the trailing 30 calendar days.
+	measure 'Encrypted Recently Synced Intune Devices (%)' = DIVIDE ( [Recently Synced Devices Encrypted According to Intune], [Devices With Recent Intune Encryption Evidence] )
+		formatString: 0.0%
+		displayFolder: Device | Security
+		lineageTag: 82b838ba-7ed5-43df-b2bf-93b20a5685c2
+
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		isUnique
+		isNullable: false
+		isAvailableInMdx: false
+		lineageTag: 8227fbbf-3fd4-4dc6-babb-031947ffe59e
+		sourceColumn: Device Source ID
+
+	/// Current device display name reported by Intune.
+	column 'Device Name'
+		dataType: string
+		lineageTag: 89b45d53-c659-4f60-98e3-764835cae1a5
+		sourceColumn: Device Name
+
+	/// Primary user principal name reported for the device; private local evidence.
+	column 'Primary User UPN'
+		dataType: string
+		lineageTag: 0e9c063c-0b75-4d23-a2e5-4af2f7112625
+		sourceColumn: Primary User UPN
+
+	/// Country inferred from the uniquely matched Entra primary user, otherwise Unknown.
+	column Country
+		dataType: string
+		lineageTag: 975637f8-55ca-45e6-8752-c5ae9c1ffd32
+		dataCategory: Country
+		sourceColumn: Country
+
+	/// Normalized operating-system platform.
+	column Platform
+		dataType: string
+		lineageTag: ee73a7dc-b025-4210-a5c7-fb2001d55a1c
+		sourceColumn: Platform
+
+	/// Normalized device class: PC Windows, MAC, Mobile Android/iOS, or Other.
+	column 'Device Category'
+		dataType: string
+		lineageTag: 2070b847-fecc-40b2-911e-ea3e0e31f644
+		sourceColumn: Device Category
+
+	/// Normalized corporate, personal, or unknown ownership.
+	column Ownership
+		dataType: string
+		lineageTag: ce50e818-e9ed-4d77-8d16-43592a6d4dfb
+		sourceColumn: Ownership
+
+	/// Normalized Intune management state.
+	column 'Management State'
+		dataType: string
+		lineageTag: 4c908370-f2c7-44bf-abfa-ce68ba53004c
+		sourceColumn: Management State
+
+	/// Normalized current Intune compliance state.
+	column 'Compliance State'
+		dataType: string
+		lineageTag: ec58cc38-45ce-4135-808f-7c6d98fb43bb
+		sourceColumn: Compliance State
+
+	/// Hardware manufacturer reported by Intune.
+	column Manufacturer
+		dataType: string
+		lineageTag: 0e746cb6-a7ba-4244-b150-d853fefbdc9f
+		sourceColumn: Manufacturer
+
+	/// Hardware model reported by Intune.
+	column Model
+		dataType: string
+		lineageTag: d09b5d46-a70d-4bed-9054-35185f4376ae
+		sourceColumn: Model
+
+	/// Normalized operating-system family.
+	column 'Operating System Family'
+		dataType: string
+		lineageTag: 667c340f-6200-4835-847e-75b387c8be3b
+		sourceColumn: Operating System Family
+
+	/// Full operating-system version reported by Intune.
+	column 'Operating System Version'
+		dataType: string
+		lineageTag: 02a4ec31-0978-4055-875b-9aa04b2597c0
+		sourceColumn: Operating System Version
+
+	/// Windows release inferred from the operating-system build using the local collector mapping.
+	column 'Windows Release'
+		dataType: string
+		lineageTag: 0143116f-831f-4dec-aae0-cc52987b27de
+		sourceColumn: Windows Release
+
+	/// Reported system-drive capacity in GiB.
+	column 'System Drive Capacity (GB)'
+		dataType: double
+		lineageTag: 8d5f9408-3481-4cb1-8230-8a3889138fa4
+		summarizeBy: sum
+		sourceColumn: System Drive Capacity (GB)
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Reported free system-drive space in GiB.
+	column 'Free Disk Space (GB)'
+		dataType: double
+		lineageTag: d8a91df8-1b79-4d4a-a327-bec6da9ab86d
+		summarizeBy: sum
+		sourceColumn: Free Disk Space (GB)
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Reported free system-drive space as a percentage of total capacity.
+	column 'Free Disk Space (%)'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 5670049c-a5b1-449a-9c13-82669747711a
+		summarizeBy: sum
+		sourceColumn: Free Disk Space (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Low when free space is below 20 GiB or below 15 percent; Approaching Low when it is not Low and free space is below 40 GiB; otherwise Healthy or Unknown.
+	column 'Disk Space State'
+		dataType: string
+		lineageTag: 2e2536e4-35ef-401c-9c0e-36a1b09e60d5
+		sourceColumn: Disk Space State
+
+	/// Whether the Intune device has one unique Active Directory computer match.
+	column 'AD to Intune Match'
+		dataType: string
+		lineageTag: d79db3ba-414b-488c-a0bc-42ca19ecba20
+		sourceColumn: AD to Intune Match
+
+	/// Whether the Intune device has one unique Entra device match.
+	column 'Entra Match'
+		dataType: string
+		lineageTag: 5278af13-2415-424e-99bf-3b20aef7580b
+		sourceColumn: Entra Match
+
+	column 'Enrollment DateTime'
+		dataType: dateTime
+		lineageTag: 171e3b39-163d-450e-b02a-2ca6f07465ab
+		summarizeBy: none
+		sourceColumn: Enrollment DateTime
+
+	/// Most recent Intune synchronization timestamp.
+	column 'Last Sync DateTime'
+		dataType: dateTime
+		lineageTag: 182d580f-9153-43f5-8bee-1b60f74701d3
+		summarizeBy: none
+		sourceColumn: Last Sync DateTime
+
+	/// Earliest available Intune enrollment, Entra registration, or AD creation timestamp.
+	column 'Observed Since'
+		dataType: dateTime
+		lineageTag: 3a48c039-5ee2-42c0-8a5d-5a1a22ee40cd
+		summarizeBy: none
+		sourceColumn: Observed Since
+
+	/// Management-tenure proxy in years; it is not physical or purchase age.
+	column 'Managed Tenure (Years)'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 342539c0-f26f-499f-955c-d32547bb04fd
+		summarizeBy: sum
+		sourceColumn: Managed Tenure (Years)
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Bucketed management-tenure proxy.
+	column 'Tenure Bucket'
+		dataType: string
+		lineageTag: b2aad875-2161-4750-b93a-b7c5d1c8462c
+		sourceColumn: Tenure Bucket
+
+	/// Confidence based on the count of available Intune, Entra, and AD start dates.
+	column 'Tenure Confidence'
+		dataType: string
+		lineageTag: 7634d63d-5e9c-460c-bad7-4388d4c6dc6e
+		sourceColumn: Tenure Confidence
+
+	/// Qualified source systems matched for this device row.
+	column 'Source Scope'
+		dataType: string
+		lineageTag: 87b57100-8e7c-4812-a3a1-3c81aec6a9e0
+		sourceColumn: Source Scope
+
+	/// Short Windows release label used on chart axes, for example 24H2.
+	column 'Windows Release Short' = SUBSTITUTE('Device Inventory Evidence'[Windows Release], "Windows 11 ", "")
+		dataType: string
+		lineageTag: b2f5807b-f758-4b4e-9707-ec4aac3dafe4
+		summarizeBy: none
+
+	/// Windows generation derived from the collected operating system build: Windows 10, Windows 11, or Not applicable.
+	column 'Windows Generation'
+		dataType: string
+		lineageTag: bf479a3c-5c87-4018-b8ff-04beec165ea3
+		summarizeBy: none
+		sourceColumn: Windows Generation
+
+	/// Collected Windows 11 upgrade eligibility. Not capable is source-backed; unknown and not assessed are kept distinct.
+	column 'Windows 11 Upgrade Eligibility'
+		dataType: string
+		lineageTag: 7cd5f0da-3dab-41bb-83e1-4b8caef664b7
+		summarizeBy: none
+		sourceColumn: Windows 11 Upgrade Eligibility
+
+	/// Collected reasons preventing Windows 11 eligibility, such as TPM, Secure Boot, processor, RAM, or storage.
+	column 'Windows 11 Blocking Reasons'
+		dataType: string
+		lineageTag: 0dc5dc48-65af-4e07-9383-6c137e798962
+		summarizeBy: none
+		sourceColumn: Windows 11 Blocking Reasons
+
+	/// Highest-priority current Windows Update aggregate state observed for the device.
+	column 'Windows Update State'
+		dataType: string
+		lineageTag: 3d5b5ad1-398b-4306-885c-12ab0bfd7d18
+		summarizeBy: none
+		sourceColumn: Windows Update State
+
+	/// Windows Update risk bucket associated with the selected current aggregate state.
+	column 'Windows Update Risk'
+		dataType: string
+		lineageTag: 7897970f-03f2-4fde-82a5-695e9c5272e1
+		summarizeBy: none
+		sourceColumn: Windows Update Risk
+
+	/// Recommended Windows Update action code associated with the selected current aggregate state.
+	column 'Windows Update Action Code'
+		dataType: string
+		lineageTag: 07dfb1e0-5fd7-4228-ba2e-e60d2b33f630
+		summarizeBy: none
+		sourceColumn: Windows Update Action Code
+
+	/// Secure Boot state reported by the uniquely matched Active Directory computer evidence.
+	column 'Secure Boot State'
+		dataType: string
+		lineageTag: 21ecab5a-4e05-49f2-8e8a-dc4165ef2be5
+		summarizeBy: none
+		sourceColumn: Secure Boot State
+
+	/// Latest available Endpoint Analytics device score for the managed device.
+	column 'Endpoint Analytics Score'
+		dataType: double
+		formatString: 0.0
+		lineageTag: a007e604-ffd2-4d24-9b3c-fe6c0a3391b1
+		summarizeBy: sum
+		sourceColumn: Endpoint Analytics Score
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Whether the latest available Endpoint Analytics score is below 50, at least 50, or not observed.
+	column 'Endpoint Analytics State'
+		dataType: string
+		lineageTag: 57a7fcd1-b240-46b2-a7ac-e015dd2f8d88
+		summarizeBy: none
+		sourceColumn: Endpoint Analytics State
+
+	/// Stop-error count from the current Endpoint Analytics startup-device evidence.
+	column 'Stop Error Count'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: 7a076072-61f2-4fcc-aa46-93d358b88236
+		summarizeBy: none
+		sourceColumn: Stop Error Count
+
+	/// Whether Endpoint Analytics reports one or more stop errors for the managed device.
+	column 'Stop Error State'
+		dataType: string
+		lineageTag: 70b38e10-00a5-479d-8721-f5f89d0d3d19
+		summarizeBy: none
+		sourceColumn: Stop Error State
+
+	/// Whether the managed device identifier appears in an Entra hardware-ID conflict group.
+	column 'Entra Hardware ID Conflict'
+		dataType: string
+		lineageTag: ccf4d216-ae48-47e6-adde-0e8f451eda3e
+		summarizeBy: none
+		sourceColumn: Entra Hardware ID Conflict
+
+	/// Whether the managed device is also listed as an Entra device-removal candidate.
+	column 'Removal Candidate'
+		dataType: string
+		lineageTag: ed76ebf5-841e-4cdf-a198-8b3639c6d5a2
+		summarizeBy: none
+		sourceColumn: Removal Candidate
+
+	/// Older release for Windows 11 21H2, 22H2, or 23H2; current release for later Windows 11 builds.
+	column 'Windows 11 Release State'
+		dataType: string
+		lineageTag: b4555629-7992-4bd1-8da5-3f2510674289
+		summarizeBy: none
+		sourceColumn: Windows 11 Release State
+
+	column 'Startup Score'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: e06e5cc5-3feb-4e44-9187-e19a28c4d8c0
+		summarizeBy: none
+		sourceColumn: Startup Score
+
+	column 'Startup Score State'
+		dataType: string
+		lineageTag: 2197337f-8631-46ed-a3bf-d4dcda6ad541
+		summarizeBy: none
+		sourceColumn: Startup Score State
+
+	column 'App Reliability Score'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: a8d25945-6efb-4576-8f74-4b63e3224770
+		summarizeBy: none
+		sourceColumn: App Reliability Score
+
+	column 'App Reliability State'
+		dataType: string
+		lineageTag: 5b0e73e6-9102-44af-b100-2b707b649447
+		summarizeBy: none
+		sourceColumn: App Reliability State
+
+	column 'Boot Score'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: d0c979f7-e3da-47df-bf59-f59ad266a7da
+		summarizeBy: none
+		sourceColumn: Boot Score
+
+	column 'Sign-in Score'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 6adf36cb-d559-4cc5-84b5-fa0a1d98385a
+		summarizeBy: none
+		sourceColumn: Sign-in Score
+
+	column 'Core Boot Time (s)'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: ca0ed3eb-3910-4590-8047-77d7f785ecb9
+		summarizeBy: none
+		sourceColumn: Core Boot Time (s)
+
+	column 'Core Sign-in Time (s)'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: f512d61c-1c0d-4a2c-869a-c5128c18df20
+		summarizeBy: none
+		sourceColumn: Core Sign-in Time (s)
+
+	column 'Restart Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 7a3b1c80-43ab-4333-8812-451341b8a2e6
+		summarizeBy: none
+		sourceColumn: Restart Count
+
+	column 'Crash Count'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6238008a-fc42-43da-976b-24ac766720e4
+		summarizeBy: none
+		sourceColumn: Crash Count
+
+	column 'Crash State'
+		dataType: string
+		isHidden
+		lineageTag: 9918aa11-d316-4511-ba10-37e15582e1be
+		summarizeBy: none
+		sourceColumn: Crash State
+
+	column 'Entra Account State'
+		dataType: string
+		lineageTag: d1cd17d2-0ec0-40e6-a2ba-a014f056bb56
+		summarizeBy: none
+		sourceColumn: Entra Account State
+
+	/// Intune enrollment timestamp.
+	column 'Intune Encryption State'
+		dataType: string
+		lineageTag: 74d1c1e3-e7f1-49c6-86cb-d825fd59d2fb
+		summarizeBy: none
+		sourceColumn: Intune Encryption State
+
+	/// Imports the pre-consolidated private device evidence cache to avoid repeated multi-source joins in Power Query.
+	partition 'Device Inventory Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Device Source ID", "Device Name", "Primary User UPN", "Country", "Platform", "Device Category", "Ownership", "Management State", "Compliance State", "Manufacturer", "Model", "Operating System Family", "Operating System Version", "Windows Release", "System Drive Capacity (GB)", "Free Disk Space (GB)", "Free Disk Space (%)", "Disk Space State", "AD to Intune Match", "Entra Match", "Enrollment DateTime", "Last Sync DateTime", "Observed Since", "Managed Tenure (Years)", "Tenure Bucket", "Tenure Confidence", "Source Scope", "Windows Generation", "Windows 11 Upgrade Eligibility", "Windows 11 Blocking Reasons", "Windows Update State", "Windows Update Risk", "Windows Update Action Code", "Secure Boot State", "Endpoint Analytics Score", "Endpoint Analytics State", "Stop Error Count", "Stop Error State", "Entra Hardware ID Conflict", "Removal Candidate", "Windows 11 Release State", "Startup Score", "Startup Score State", "App Reliability Score", "App Reliability State", "Boot Score", "Sign-in Score", "Core Boot Time (s)", "Core Sign-in Time (s)", "Restart Count", "Crash Count", "Crash State", "Entra Account State", "Intune Encryption State"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"System Drive Capacity (GB)", "Free Disk Space (GB)", "Free Disk Space (%)", "Enrollment DateTime", "Last Sync DateTime", "Observed Since", "Managed Tenure (Years)", "Endpoint Analytics Score", "Stop Error Count", "Startup Score", "App Reliability Score", "Boot Score", "Sign-in Score", "Core Boot Time (s)", "Core Sign-in Time (s)", "Restart Count", "Crash Count"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Device Source ID", type text}, {"Device Name", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Platform", type text}, {"Device Category", type text}, {"Ownership", type text}, {"Management State", type text}, {"Compliance State", type text}, {"Manufacturer", type text}, {"Model", type text}, {"Operating System Family", type text}, {"Operating System Version", type text}, {"Windows Release", type text}, {"System Drive Capacity (GB)", type number}, {"Free Disk Space (GB)", type number}, {"Free Disk Space (%)", type number}, {"Disk Space State", type text}, {"AD to Intune Match", type text}, {"Entra Match", type text}, {"Enrollment DateTime", type datetime}, {"Last Sync DateTime", type datetime}, {"Observed Since", type datetime}, {"Managed Tenure (Years)", type number}, {"Tenure Bucket", type text}, {"Tenure Confidence", type text}, {"Source Scope", type text}, {"Windows Generation", type text}, {"Windows 11 Upgrade Eligibility", type text}, {"Windows 11 Blocking Reasons", type text}, {"Windows Update State", type text}, {"Windows Update Risk", type text}, {"Windows Update Action Code", type text}, {"Secure Boot State", type text}, {"Endpoint Analytics Score", type number}, {"Endpoint Analytics State", type text}, {"Stop Error Count", Int64.Type}, {"Stop Error State", type text}, {"Entra Hardware ID Conflict", type text}, {"Removal Candidate", type text}, {"Windows 11 Release State", type text}, {"Startup Score", type number}, {"Startup Score State", type text}, {"App Reliability Score", type number}, {"App Reliability State", type text}, {"Boot Score", type number}, {"Sign-in Score", type number}, {"Core Boot Time (s)", type number}, {"Core Sign-in Time (s)", type number}, {"Restart Count", Int64.Type}, {"Crash Count", Int64.Type}, {"Crash State", type text}, {"Entra Account State", type text}, {"Intune Encryption State", type text}}, "en-US")
+				in
+				    Typed
+
