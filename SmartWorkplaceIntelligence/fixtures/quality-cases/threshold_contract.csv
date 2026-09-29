@@ -1,0 +1,4 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,RuleId,Threshold,NumericValue,ParseStatus
+1.0.0,Operations,ThresholdContract,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-THRESHOLD-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,RULE-SYNTH-TEXT-001,Enabled accounts require recent activity,,TextCondition
+1.0.0,Operations,ThresholdContract,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-THRESHOLD-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,RULE-SYNTH-NUMERIC-001,Maximum age days,30,Numeric
+

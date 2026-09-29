@@ -1,0 +1,75 @@
+/// Hidden product and evidence metadata utility table.
+table 'Report Metadata'
+	isHidden
+	lineageTag: 96c75a83-a101-4521-83c4-4fc2b02b7d79
+
+	/// Text summary of active reporting-period and geography filters.
+	measure 'Active Filter Summary' = "Reporting period: " & COALESCE(SELECTEDVALUE('Date'[Reporting Period]), "All") & " · Country: " & COALESCE(SELECTEDVALUE('Geography'[Country]), "All")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 014cd9aa-8e27-4292-9607-547258ebf9d1
+
+	/// Current local beta product version.
+	measure 'Report Version' = SELECTEDVALUE('Report Metadata'[Product Version], "1.0.0-beta.1")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: e196a172-7d71-4269-ba98-2d17908225e2
+
+	/// Disabled until a separately approved versioned composite-index definition exists.
+	measure 'Workplace Health Index' = BLANK()
+		formatString: 0.0
+		displayFolder: Measures
+		lineageTag: 05967176-9c28-41de-9904-6556a6861ec1
+
+	/// Device-page evidence and active-scope summary.
+	measure 'Device Evidence Ribbon Text' = "Private current device evidence · Windows history " & FORMAT(DISTINCTCOUNT('Windows Lifecycle Trend Evidence'[Snapshot Week]), "0") & " weeks · Endpoint history " & FORMAT(DISTINCTCOUNT('Endpoint Experience Trend Evidence'[Snapshot Week]), "0") & " weeks"
+		formatString: @
+		displayFolder: Measures
+		lineageTag: b4aa9299-265f-4200-b64a-53fb5aaf3e07
+
+	/// Security-page evidence and active-scope summary.
+	measure 'Security Evidence Ribbon Text' = "Synthetic security evidence · " & [Active Filter Summary]
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 1c3efa02-0071-4c48-b168-05c3ba7b4663
+
+	/// Service-page evidence and active-scope summary.
+	measure 'Service Evidence Ribbon Text' = "Synthetic service evidence · " & [Active Filter Summary]
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 0276a36d-a2d7-4476-bcc9-248dd818dd2e
+
+	/// Evidence ribbon for the real private workforce and identity evidence domain.
+	measure 'User Evidence Ribbon Text' = "Private current workforce evidence · Activity coverage " & FORMAT ( [Activity Evidence Coverage], "0.0%" ) & " · " & FORMAT ( DISTINCTCOUNT ( 'User Activity History Evidence'[Week Label] ), "0" ) & " observed weeks"
+		formatString: @
+		displayFolder: Measures
+		lineageTag: c8e6518d-d602-4c03-b849-97e76d638287
+
+	/// Business attribute Product Version.
+	column 'Product Version'
+		dataType: string
+		lineageTag: d246ddf8-9091-47ed-8183-5b2de994069a
+		sourceColumn: Product Version
+
+	/// Business attribute Evidence Disclaimer.
+	column 'Evidence Disclaimer'
+		dataType: string
+		lineageTag: 49977362-4315-4bc3-b2a1-d40fd9d3f17e
+		sourceColumn: Evidence Disclaimer
+
+	/// Business attribute Copyright Notice.
+	column 'Copyright Notice'
+		dataType: string
+		lineageTag: 1d7c1a9d-1bca-4d9b-bf53-e5822c67d97f
+		sourceColumn: Copyright Notice
+
+	partition 'Report Metadata Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Product Version" = nullable text, #"Evidence Disclaimer" = nullable text, #"Copyright Notice" = nullable text], {
+				        {"1.0.0-beta.1", "Synthetic evidence only. No tenant or production qualification.", "© 2026 WorkplaceCloudHub"}
+				    })
+				in
+				    Source
+

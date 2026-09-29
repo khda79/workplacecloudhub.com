@@ -1,0 +1,152 @@
+table 'Device Directory Summary'
+	lineageTag: 26cca125-2f1b-4005-a4c1-f87dc2f26b39
+
+	measure 'Enabled AD Windows PCs' = MAX ( 'Device Directory Summary'[Enabled AD Windows PCs Value] )
+		formatString: #,0
+		lineageTag: e488964a-e8ca-4369-8d09-d064a43e66e4
+
+	measure 'Enabled AD Windows PCs Managed by Intune' = MAX ( 'Device Directory Summary'[Enabled AD Windows PCs Managed by Intune Value] )
+		formatString: #,0
+		lineageTag: f95f31c6-c726-42e2-b0fd-1da0c0b1fa9f
+
+	measure 'Enabled AD Windows PCs Unmanaged' = MAX ( 'Device Directory Summary'[Enabled AD Windows PCs Unmanaged Value] )
+		formatString: #,0
+		lineageTag: 2a585f2e-9598-4979-b239-98ebb7e4dbfc
+
+	measure 'Enabled AD PCs Managed by Intune (%)' = MAX ( 'Device Directory Summary'[Enabled AD PCs Managed by Intune Value] )
+		formatString: 0.0%
+		lineageTag: ec443078-336c-4131-9e67-0fb27078a92b
+
+	measure 'Disabled AD Computer Objects' = MAX ( 'Device Directory Summary'[Disabled AD Computer Objects Value] )
+		formatString: #,0
+		lineageTag: 83e01200-9c1e-456e-bbb6-595a77592995
+
+	measure 'Disabled Entra Devices' = MAX ( 'Device Directory Summary'[Disabled Entra Devices Value] )
+		formatString: #,0
+		lineageTag: 759ca7b5-7c5f-4066-9275-9596e42d62fc
+
+	measure 'Enabled AD Windows 10 PCs' = MAX ( 'Device Directory Summary'[Enabled AD Windows 10 PCs Value] )
+		formatString: #,0
+		lineageTag: cd461c56-2d97-4c46-bc41-719b163a7ed0
+
+	measure 'Enabled AD Windows 10 PCs Without Intune' = MAX ( 'Device Directory Summary'[Enabled AD Windows 10 PCs Without Intune Value] )
+		formatString: #,0
+		lineageTag: eabed8c1-2662-47e3-920a-9b458ef9f6c9
+
+	measure 'AD Windows 10 Ambiguous Intune Matches' = MAX ( 'Device Directory Summary'[AD Windows 10 Ambiguous Intune Matches Value] )
+		formatString: #,0
+		lineageTag: 7e404c08-eb48-4edd-8edd-a08d8908ca2f
+
+	measure 'Intune Windows 10 Eligibility Undetermined' = MAX ( 'Device Directory Summary'[Intune Windows 10 Eligibility Undetermined Value] )
+		formatString: #,0
+		lineageTag: 8dfa6ee5-1a59-49df-9491-919a9d73de02
+
+	/// Intune Windows 10 devices without a known readiness result, plus enabled AD Windows 10 PCs without an Intune match. Ambiguous matches are kept separate.
+	measure 'Windows 10 Eligibility Undetermined' = MAX ( 'Device Directory Summary'[Windows 10 Eligibility Undetermined Value] )
+		formatString: #,0
+		lineageTag: 1daf24fe-40b0-49b7-9862-9796af93abe6
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 4f91e802-a540-4a0d-a801-aa02495665cd
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 9e058c03-fdc3-4d80-80fa-fbe2ca4315e3
+			defaultHierarchy: LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Enabled AD Windows PCs Value'
+		dataType: int64
+		lineageTag: 2e004d29-6e5e-4fe5-894f-1e93e3f9a04c
+		summarizeBy: sum
+		sourceColumn: Enabled AD Windows PCs
+
+	column 'Enabled AD Windows PCs Managed by Intune Value'
+		dataType: int64
+		lineageTag: e4deabc4-fdf3-4d94-a282-ca45fda84234
+		summarizeBy: sum
+		sourceColumn: Enabled AD Windows PCs Managed by Intune
+
+	column 'Enabled AD Windows PCs Unmanaged Value'
+		dataType: int64
+		lineageTag: dd4a3208-281a-4eb0-be3a-8e70f0006e51
+		summarizeBy: sum
+		sourceColumn: Enabled AD Windows PCs Unmanaged
+
+	column 'Enabled AD PCs Managed by Intune Value'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 0f9d558b-7c25-43b8-bbb8-5c916c473fc5
+		summarizeBy: sum
+		sourceColumn: Enabled AD PCs Managed by Intune (%)
+
+	column 'Disabled AD Computer Objects Value'
+		dataType: int64
+		lineageTag: ce3f883e-9f79-4a90-96f4-ead0d8bcd18d
+		summarizeBy: sum
+		sourceColumn: Disabled AD Computer Objects
+
+	column 'Disabled Entra Devices Value'
+		dataType: int64
+		lineageTag: a0b2aa6a-3a42-44a7-84dd-c472bce7e549
+		summarizeBy: sum
+		sourceColumn: Disabled Entra Devices
+
+	column 'Country Definition'
+		dataType: string
+		lineageTag: 0a60b962-4a1c-46ea-9553-9a73c9852db3
+		summarizeBy: none
+		sourceColumn: Country Definition
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: be922c64-aef1-4b2f-8e29-11c418cb692a
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Enabled AD Windows 10 PCs Value'
+		dataType: int64
+		lineageTag: affbf003-1629-4f08-b822-a2a9a25d4590
+		summarizeBy: sum
+		sourceColumn: Enabled AD Windows 10 PCs
+
+	column 'Enabled AD Windows 10 PCs Without Intune Value'
+		dataType: int64
+		lineageTag: e8eaa40c-8585-4cff-a9d9-96489a898541
+		summarizeBy: sum
+		sourceColumn: Enabled AD Windows 10 PCs Without Intune
+
+	column 'AD Windows 10 Ambiguous Intune Matches Value'
+		dataType: int64
+		lineageTag: d378d3c5-f0ce-40e6-ace7-4679cbdd9bfd
+		summarizeBy: sum
+		sourceColumn: AD Windows 10 Ambiguous Intune Matches
+
+	column 'Intune Windows 10 Eligibility Undetermined Value'
+		dataType: int64
+		lineageTag: 718a5d10-47ae-4c7c-842c-f2a7562cf795
+		summarizeBy: sum
+		sourceColumn: Intune Windows 10 Eligibility Undetermined
+
+	column 'Windows 10 Eligibility Undetermined Value'
+		dataType: int64
+		lineageTag: 5473c1f7-e1be-47e1-a8ad-57a9a6f6bee2
+		summarizeBy: sum
+		sourceColumn: Windows 10 Eligibility Undetermined
+
+	partition 'Device Directory Summary Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceDirectorySummary.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Enabled AD Windows PCs", "Enabled AD Windows PCs Managed by Intune", "Enabled AD Windows PCs Unmanaged", "Enabled AD PCs Managed by Intune (%)", "Disabled AD Computer Objects", "Disabled Entra Devices", "Country Definition", "Evidence Status", "Enabled AD Windows 10 PCs", "Enabled AD Windows 10 PCs Without Intune", "AD Windows 10 Ambiguous Intune Matches", "Intune Windows 10 Eligibility Undetermined", "Windows 10 Eligibility Undetermined"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Enabled AD Windows PCs", "Enabled AD Windows PCs Managed by Intune", "Enabled AD Windows PCs Unmanaged", "Enabled AD PCs Managed by Intune (%)", "Disabled AD Computer Objects", "Disabled Entra Devices", "Enabled AD Windows 10 PCs", "Enabled AD Windows 10 PCs Without Intune", "AD Windows 10 Ambiguous Intune Matches", "Intune Windows 10 Eligibility Undetermined", "Windows 10 Eligibility Undetermined"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Enabled AD Windows PCs", Int64.Type}, {"Enabled AD Windows PCs Managed by Intune", Int64.Type}, {"Enabled AD Windows PCs Unmanaged", Int64.Type}, {"Enabled AD PCs Managed by Intune (%)", type number}, {"Disabled AD Computer Objects", Int64.Type}, {"Disabled Entra Devices", Int64.Type}, {"Country Definition", type text}, {"Evidence Status", type text}, {"Enabled AD Windows 10 PCs", Int64.Type}, {"Enabled AD Windows 10 PCs Without Intune", Int64.Type}, {"AD Windows 10 Ambiguous Intune Matches", Int64.Type}, {"Intune Windows 10 Eligibility Undetermined", Int64.Type}, {"Windows 10 Eligibility Undetermined", Int64.Type}}, "en-US")
+				in
+				    Typed
+

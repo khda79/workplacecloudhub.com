@@ -1,0 +1,98 @@
+/// Synthetic device-application installations.
+table 'Application Installations'
+	lineageTag: 96df9dad-3a66-43c4-bda9-6986b4c518d8
+
+	/// Accepted synthetic device-application installations.
+	measure '# Application Installs' = COUNTROWS('Application Installations')
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: b115a2ad-f95f-48e9-93f6-67b974ce60e9
+
+	/// Application products with more than one significant synthetic version.
+	measure '# Fragmented Applications' = COUNTROWS(FILTER(VALUES('Application'[Normalized Product]), CALCULATE(DISTINCTCOUNT('Application'[Normalized Version])) > 1))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 86040e54-6e21-4905-a8cb-812a44284868
+
+	/// Running share of installs after descending application ranking.
+	measure 'Cumulative Install Share (%)' = VAR _installs = [# Application Installs] VAR _rank = RANKX(ALLSELECTED('Application'[Normalized Product]), [# Application Installs],, DESC, Dense) VAR _cumulative = SUMX(TOPN(_rank, ALLSELECTED('Application'[Normalized Product]), [# Application Installs], DESC), [# Application Installs]) RETURN DIVIDE(_cumulative, CALCULATE(_installs, ALLSELECTED('Application'[Normalized Product])))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: b84a3737-4c85-4ab8-81bf-d4b25ff101b5
+
+	/// Qualified normalized versions in the selected application scope.
+	measure '# Significant Versions' = DISTINCTCOUNT('Application'[Normalized Version])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 8f8f48d0-7e0d-436f-bac4-256cab4cf85a
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d2ade68a-2cd9-44e6-aacb-4448b91a2c25
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b66baa68-f03b-4afd-a738-a02b63f1f6f8
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 57765d08-852d-46c4-92fe-591c0d46e19b
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d7020720-7eb1-49a3-b499-2e5127a3fb67
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Application Key.
+	column 'Application Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: bcb28f37-b086-47c6-aaa5-5b937216c91b
+		summarizeBy: none
+		sourceColumn: Application Key
+
+	/// Business attribute Version Status.
+	column 'Version Status'
+		dataType: string
+		lineageTag: d379a79d-5ba7-4c99-b2d4-67b105564659
+		sourceColumn: Version Status
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 631954ca-f90b-4b0b-aacf-d10a357c369f
+		sourceColumn: Evidence Status
+
+	partition 'Application Installations Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Device Key" = Int64.Type, #"Application Key" = Int64.Type, #"Version Status" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, 1, "Current", "Observed"},
+				        {20260915, 1, 1, 2, 2, "Outdated", "Observed"},
+				        {20260915, 1, 1, 3, 3, "Current", "Observed"},
+				        {20260915, 1, 1, 4, 4, "Current", "Observed"}
+				    })
+				in
+				    Source
+

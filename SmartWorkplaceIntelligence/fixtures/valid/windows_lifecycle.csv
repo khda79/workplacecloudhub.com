@@ -1,0 +1,4 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,DeviceId,AssessmentDate,OperatingSystemFamily,ReadinessState,BlockerCategory,EndOfSupportDate
+1.0.0,Devices,WindowsLifecycle,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-001,2026-09-15,Windows 11,Adopted,None,2027-11-09
+1.0.0,Devices,WindowsLifecycle,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-002,2026-09-15,Windows 10,Ready,None,2025-10-14
+1.0.0,Devices,WindowsLifecycle,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-003,2026-09-15,Windows 11,Adopted,None,2027-11-09

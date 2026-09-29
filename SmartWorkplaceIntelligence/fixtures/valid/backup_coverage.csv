@@ -1,0 +1,6 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,EntityId,EntityType,ServiceName,EligibilityState,CoverageState,PolicyScope,ExclusionReason
+1.0.0,Backup,BackupCoverage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-001,Mailbox,Exchange,Eligible,Protected,InScope,
+1.0.0,Backup,BackupCoverage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,MBX-SYNTH-002,Mailbox,Exchange,Eligible,Unprotected,InScope,
+1.0.0,Backup,BackupCoverage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,SITE-SYNTH-001,Site,SharePoint,Eligible,Protected,InScope,
+1.0.0,Backup,BackupCoverage,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-003,UserAccount,Identity,Excluded,NotApplicable,OutOfScope,DisabledAccount
+

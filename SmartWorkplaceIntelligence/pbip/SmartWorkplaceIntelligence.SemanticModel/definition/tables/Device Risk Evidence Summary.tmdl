@@ -1,0 +1,63 @@
+/// Private aggregate-only source and managed-estate coverage for the approved second-wave device risk signals.
+table 'Device Risk Evidence Summary'
+	lineageTag: f11530d1-4ce3-4cd9-853c-807d6752dcb0
+
+	column 'Signal Sort'
+		dataType: int64
+		isHidden
+		lineageTag: a4323fb4-7425-45bf-8288-aeb0fe56ada0
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column Signal
+		dataType: string
+		lineageTag: 77b89168-2e90-4c21-ad76-4e615101f1ed
+		summarizeBy: none
+		sourceColumn: Signal
+
+	column 'Affected Devices'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: a016bffc-3b2c-4724-9c33-5f72163ea4ac
+		summarizeBy: sum
+		sourceColumn: Affected Devices
+
+	column 'Covered Devices'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: e5fb8695-1748-4aa9-b1b6-ff9fbef74b29
+		summarizeBy: sum
+		sourceColumn: Covered Devices
+
+	column 'Managed Devices Affected'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: 23e72eb3-eedb-42e0-a6be-5c474591962a
+		summarizeBy: sum
+		sourceColumn: Managed Devices Affected
+
+	column 'Managed Devices Covered'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: 3c334146-d241-485c-b171-edfd836862fa
+		summarizeBy: sum
+		sourceColumn: Managed Devices Covered
+
+	column 'Source Findings'
+		dataType: int64
+		formatString: #,##0
+		lineageTag: d026b45d-1699-4775-bc3b-80a262c58286
+		summarizeBy: sum
+		sourceColumn: Source Findings
+
+	partition 'Device Risk Evidence Summary Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceRiskEvidenceSummary.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Signal Sort", "Signal", "Affected Devices", "Covered Devices", "Managed Devices Affected", "Managed Devices Covered", "Source Findings"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Signal Sort", "Affected Devices", "Covered Devices", "Managed Devices Affected", "Managed Devices Covered", "Source Findings"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Signal Sort", Int64.Type}, {"Signal", type text}, {"Affected Devices", Int64.Type}, {"Covered Devices", Int64.Type}, {"Managed Devices Affected", Int64.Type}, {"Managed Devices Covered", Int64.Type}, {"Source Findings", Int64.Type}}, "en-US")
+				in
+				    Typed
+

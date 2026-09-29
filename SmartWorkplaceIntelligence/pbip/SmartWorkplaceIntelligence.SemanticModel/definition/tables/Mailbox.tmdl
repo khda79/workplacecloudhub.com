@@ -1,0 +1,57 @@
+/// Synthetic mailbox catalogue.
+table Mailbox
+	lineageTag: 83c5c0b2-18b4-4ee2-a27b-df06af1ca075
+
+	/// Business attribute Mailbox Key.
+	column 'Mailbox Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ecfb3ecb-d46f-46ee-b862-0465b4520653
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+	/// Business attribute Mailbox Surrogate Key.
+	column 'Mailbox Surrogate Key'
+		dataType: string
+		lineageTag: 6bcf4dda-b9d9-4a68-8cbd-60b748a88030
+		sourceColumn: Mailbox Surrogate Key
+
+	/// Business attribute Mailbox Type.
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: f0cea387-0fa1-4d4a-afcd-04b2a3381180
+		sourceColumn: Mailbox Type
+
+	/// Business attribute Recipient Type.
+	column 'Recipient Type'
+		dataType: string
+		lineageTag: 108f5ef4-71e9-47de-974f-a04b54f7d198
+		sourceColumn: Recipient Type
+
+	/// Business attribute Operational State.
+	column 'Operational State'
+		dataType: string
+		lineageTag: 41764aa1-ed6e-4317-9ed8-1ca8e47972db
+		sourceColumn: Operational State
+
+	/// Anonymized synthetic primary SMTP address for mailbox search and detail.
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: ef4cb147-639a-4482-a521-1070dc0193d6
+		summarizeBy: none
+		sourceColumn: Primary SMTP Address
+
+	partition 'Mailbox Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Mailbox Key" = Int64.Type, #"Mailbox Surrogate Key" = nullable text, #"Primary SMTP Address" = nullable text, #"Mailbox Type" = nullable text, #"Recipient Type" = nullable text, #"Operational State" = nullable text], {
+				        {1, "Mailbox 001", "mailbox001@example.invalid", "UserMailbox", "UserMailbox", "Active"},
+				        {2, "Mailbox 002", "mailbox002@example.invalid", "SharedMailbox", "SharedMailbox", "Active"},
+				        {3, "Mailbox 003", "mailbox003@example.invalid", "UserMailbox", "UserMailbox", "Inactive"},
+				        {4, "Mailbox 004", "mailbox004@example.invalid", "UserMailbox", "UserMailbox", "Active"}
+				    })
+				in
+				    Source
+

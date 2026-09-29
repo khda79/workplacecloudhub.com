@@ -1,0 +1,271 @@
+/// Unified current private Exchange Online and on-premises mailbox evidence with observed size, archive, delegation, hosting, version, activity, and forwarding state.
+table 'Mailbox Evidence'
+	lineageTag: b52a10cc-35d2-4d9d-b246-011c49231393
+
+	measure Mailboxes = COUNTROWS('Mailbox Evidence')
+		formatString: #,0
+		displayFolder: Messaging | Estate
+		lineageTag: 7fae2a8a-d346-45d6-91a8-2b0db5a72389
+
+	measure 'Exchange Online Mailboxes' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Hosting Location] = "Exchange Online"))
+		formatString: #,0
+		displayFolder: Messaging | Estate
+		lineageTag: 3fa86411-1a7e-416f-9dc5-963fb61744e2
+
+	measure 'On-premises Mailboxes' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Hosting Location] = "On-premises"))
+		formatString: #,0
+		displayFolder: Messaging | Estate
+		lineageTag: 9d4c0825-e0f0-4fe3-80b0-91b1c39de5ca
+
+	measure 'Observed Exchange Online Adoption (%)' = DIVIDE([Exchange Online Mailboxes], [Mailboxes])
+		formatString: 0.0%
+		displayFolder: Messaging | Estate
+		lineageTag: 9d5c5fdc-5011-40e6-baa5-c983f82d0f82
+
+	measure 'Mailboxes with Archive' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Archive State] = "Enabled"))
+		formatString: #,0
+		displayFolder: Messaging | Archive
+		lineageTag: 07c5d219-60ba-4df4-bb15-8829694d5763
+
+	measure 'Mailboxes with Delegations' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Delegation Count] > 0))
+		formatString: #,0
+		displayFolder: Messaging | Delegation
+		lineageTag: c48bc21f-4392-4592-9a65-7d1aa3919249
+
+	measure 'Total Mailbox Size (TB)' = DIVIDE(SUM('Mailbox Evidence'[Mailbox Size GB]), 1024)
+		formatString: #,0.0
+		displayFolder: Messaging | Capacity
+		lineageTag: f01c409d-bba7-46ba-a2ca-d12ab5a85425
+
+	measure 'Total Archive Size (TB)' = DIVIDE(SUM('Mailbox Evidence'[Archive Size GB]), 1024)
+		formatString: #,0.0
+		displayFolder: Messaging | Capacity
+		lineageTag: 8b70969c-09af-439d-b7d5-3df825db58fe
+
+	measure 'Large Mailboxes Without Archive' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] >= 45), KEEPFILTERS('Mailbox Evidence'[Archive State] <> "Enabled"))
+		formatString: #,0
+		displayFolder: Messaging | Attention
+		lineageTag: b2e7b129-6cc1-4bed-9741-68167ec5d11f
+
+	measure 'Mailboxes With Extensive Delegation' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Delegation Count] >= 10))
+		formatString: #,0
+		displayFolder: Messaging | Attention
+		lineageTag: aa912aea-6455-463d-82e5-74c188f4f23f
+
+	measure 'Mailboxes Inactive 180D+' = CALCULATE([Mailboxes], KEEPFILTERS(NOT ISBLANK('Mailbox Evidence'[Last Activity Date]) && 'Mailbox Evidence'[Last Activity Date] < TODAY() - 180))
+		formatString: #,0
+		displayFolder: Messaging | Attention
+		lineageTag: d4b2b9d4-1378-4882-ae43-ea238dca3891
+
+	measure 'Mailboxes With Forwarding' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Forwarding State] = "Configured"))
+		formatString: #,0
+		displayFolder: Messaging | Attention
+		lineageTag: 2efae0d3-acde-4fd9-9671-cd066dc09f08
+
+	measure 'Mailbox Evidence Ribbon Text' = FORMAT([Mailboxes], "#,0") & " observed · " & FORMAT([Observed Exchange Online Adoption (%)], "0.0%") & " online · " & FORMAT([Mailboxes with Archive], "#,0") & " archived"
+		formatString: @
+		displayFolder: Messaging | Evidence
+		lineageTag: 0dcb1021-38c6-422e-a274-93ac381e1090
+
+	/// Primary mailbox plus archive storage.
+	measure 'Total Mailbox Storage (TB)' = DIVIDE ( SUM ( 'Mailbox Evidence'[Total Storage GB] ), 1024 )
+		formatString: #,0.0
+		displayFolder: Messaging | Capacity
+		lineageTag: 1a508650-f2d5-4736-87f8-54ca5a2d918c
+
+	measure 'Mailboxes >=45 GB Without Archive' = CALCULATE ( [Mailboxes], KEEPFILTERS ( 'Mailbox Evidence'[Mailbox Size GB] >= 45 ), KEEPFILTERS ( 'Mailbox Evidence'[Archive State] <> "Enabled" ) )
+		formatString: #,0
+		displayFolder: Messaging | Risk
+		lineageTag: 9aca1b27-baff-4123-9fa8-8c93c4967ff5
+
+	column 'Mailbox Key'
+		dataType: string
+		lineageTag: 5e78b588-aea8-45c0-a90e-c7eb193f0059
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: 8dbd143e-2325-4449-a6f8-8f25cc2afe66
+		summarizeBy: none
+		sourceColumn: Primary SMTP Address
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: f14d2bb4-031d-4738-bab1-5a4e5b5cadc1
+		summarizeBy: none
+		sourceColumn: Display Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column Country
+		dataType: string
+		lineageTag: b20cdd73-445d-435d-95e9-7d54aa352cae
+		summarizeBy: none
+		sourceColumn: Country
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Hosting Location'
+		dataType: string
+		lineageTag: 5527628a-8cab-4ad0-8cf1-c4b8ce32528b
+		summarizeBy: none
+		sourceColumn: Hosting Location
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: 99f85b62-e3b3-4783-8e14-2505a0ce64d7
+		summarizeBy: none
+		sourceColumn: Exchange Version
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: 7d52a0cc-b9b7-4742-9ba4-3ee4e1ea1af0
+		summarizeBy: none
+		sourceColumn: Mailbox Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recipient Type'
+		dataType: string
+		lineageTag: 130b8864-e3aa-4fb3-80ea-df6b3d77e5b6
+		summarizeBy: none
+		sourceColumn: Recipient Type
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Operational State'
+		dataType: string
+		lineageTag: 2b4d8cdc-dca0-4b89-9f5b-14576bf0aa86
+		summarizeBy: none
+		sourceColumn: Operational State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mailbox Size GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: e73a4cc2-e1e5-46e4-8aaa-bfb52ca387e8
+		summarizeBy: sum
+		sourceColumn: Mailbox Size GB
+
+	column 'Archive State'
+		dataType: string
+		lineageTag: c928a380-f747-4fe1-83ab-27d571936034
+		summarizeBy: none
+		sourceColumn: Archive State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Archive Size GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 73d77735-cb00-47f1-a7cb-c0b67c08cfc8
+		summarizeBy: sum
+		sourceColumn: Archive Size GB
+
+	column 'Delegation Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a3d0515d-09aa-405d-a09d-c161ec3b4ffc
+		summarizeBy: sum
+		sourceColumn: Delegation Count
+
+	column 'Delegation Types'
+		dataType: string
+		lineageTag: 421215b2-413c-445d-8364-a2f71d8522b0
+		summarizeBy: none
+		sourceColumn: Delegation Types
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Forwarding State'
+		dataType: string
+		lineageTag: 1bb3fc1a-285c-4f7d-a2cf-958fb4750c2e
+		summarizeBy: none
+		sourceColumn: Forwarding State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: b3ed2cf3-6916-4ae2-adf8-4705bcfe4246
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: 4fac74b3-c3f1-403f-80da-f825f9c641c6
+			defaultHierarchy: LocalDateTable_64fabb92-bcfd-4bf8-bc58-fac647b4b957.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Hosting State'
+		dataType: string
+		lineageTag: d41c06f5-acde-449d-a439-899051dc6898
+		summarizeBy: none
+		sourceColumn: Hosting State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: 5b1bfa53-e2e0-4458-a855-079ff626b0ac
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: 8a6eb46f-2bca-4dbd-a6f7-981970974fd3
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: a0e40717-1572-4e5e-96cc-f00825db4457
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 9e0519bc-dc18-4600-a077-e862e2428d43
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Total Storage GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 59823c56-8dc3-451d-966d-272cbe9d4728
+		summarizeBy: sum
+		sourceColumn: Total Storage GB
+
+	partition 'Mailbox Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("MailboxEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Mailbox Key", "Primary SMTP Address", "Display Name", "Country", "Hosting Location", "Exchange Version", "Mailbox Type", "Recipient Type", "Operational State", "Mailbox Size GB", "Archive State", "Archive Size GB", "Delegation Count", "Delegation Types", "Forwarding State", "Last Activity Date", "Hosting State", "Risk Priority", "Risk Signal", "Recommended Action", "Evidence Status", "Total Storage GB"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Mailbox Size GB", "Archive Size GB", "Delegation Count", "Last Activity Date", "Total Storage GB"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Mailbox Key", type text}, {"Primary SMTP Address", type text}, {"Display Name", type text}, {"Country", type text}, {"Hosting Location", type text}, {"Exchange Version", type text}, {"Mailbox Type", type text}, {"Recipient Type", type text}, {"Operational State", type text}, {"Mailbox Size GB", type number}, {"Archive State", type text}, {"Archive Size GB", type number}, {"Delegation Count", Int64.Type}, {"Delegation Types", type text}, {"Forwarding State", type text}, {"Last Activity Date", type datetime}, {"Hosting State", type text}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Evidence Status", type text}, {"Total Storage GB", type number}}, "en-US")
+				in
+				    Typed
+

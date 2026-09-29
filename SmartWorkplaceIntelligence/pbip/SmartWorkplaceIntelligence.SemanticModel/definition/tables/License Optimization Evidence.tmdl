@@ -1,0 +1,139 @@
+table 'License Optimization Evidence'
+	lineageTag: 7c8e28c1-8d0b-4046-96ea-4e02ed064be2
+
+	measure 'License Optimization Candidates' = COUNTROWS ( 'License Optimization Evidence' )
+		formatString: #,0
+		lineageTag: 0771b36e-d5a6-431d-849e-1be4878ab025
+
+	measure 'Immediate Reclaim Review Candidates' = CALCULATE ( [License Optimization Candidates], 'License Optimization Evidence'[Optimization Opportunity] = "Immediate reclaim review" )
+		formatString: #,0
+		lineageTag: 354f56ea-b795-443e-b21a-c0abb2d0733a
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 91a1c07c-0232-4452-96c1-5d3af9231956
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	column 'SKU Part Number'
+		dataType: string
+		lineageTag: a257a192-258b-4dc2-a18e-5c026c94e82f
+		summarizeBy: none
+		sourceColumn: SKU Part Number
+
+	column 'License Product'
+		dataType: string
+		lineageTag: a8be9edb-38a3-4746-93e8-dae8d2caf1ae
+		summarizeBy: none
+		sourceColumn: License Product
+
+	column 'Microsoft 365 Plan'
+		dataType: string
+		lineageTag: 81ae5a09-883c-4ff4-8a0e-43840e01a0c2
+		summarizeBy: none
+		sourceColumn: Microsoft 365 Plan
+
+	column 'Account State'
+		dataType: string
+		lineageTag: a77a30fd-343a-4b3d-aefc-c0e1301ca7bd
+		summarizeBy: none
+		sourceColumn: Account State
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: a8857d8c-b867-4779-beaa-8dbdce4cccd5
+		summarizeBy: none
+		sourceColumn: Activity State
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: d2f2dcbd-3e80-4423-bf4c-34534a52634f
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+		variation Variation
+			isDefault
+			relationship: a8ffeee3-5c94-4d3b-a29c-a0797ac5f7ea
+			defaultHierarchy: LocalDateTable_623a6266-3731-4f68-93d0-284adc5d666e.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Last Office Desktop Activation Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: f1cf63ef-e753-4afe-a030-3a331ea414dc
+		summarizeBy: none
+		sourceColumn: Last Office Desktop Activation Date
+
+		variation Variation
+			isDefault
+			relationship: f595e7d9-5845-4f20-aa6a-b7e4757074d9
+			defaultHierarchy: LocalDateTable_f6ef3481-f74c-4978-a1ae-1f67540b1732.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Mailbox Size GB'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 5a391f36-09e6-4925-ac4f-36be4343765d
+		summarizeBy: sum
+		sourceColumn: Mailbox Size GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Archive State'
+		dataType: string
+		lineageTag: 0162c2c3-457f-43a3-b086-2503585aff29
+		summarizeBy: none
+		sourceColumn: Archive State
+
+	column 'Optimization Opportunity'
+		dataType: string
+		lineageTag: 0f26b3d0-0a8f-4dd7-bcef-0865d90baeb8
+		summarizeBy: none
+		sourceColumn: Optimization Opportunity
+
+	column 'Optimization Reason'
+		dataType: string
+		lineageTag: b66ecd13-8e49-492f-b8c4-661362f0a849
+		summarizeBy: none
+		sourceColumn: Optimization Reason
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: c03d483f-d0b4-4a8b-9fda-cb60c9bca259
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 9a298574-f982-4262-a87f-7f7c7a32402f
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 2a6573a3-43f1-4781-9c2d-4f4e74353598
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 7047d62c-e8ae-4866-a17c-d56696eb5b2e
+			defaultHierarchy: LocalDateTable_28a09470-b7cb-47dd-b260-23fa1d527587.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	partition 'License Optimization Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("LicenseOptimizationEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"User Principal Name", "SKU Part Number", "License Product", "Microsoft 365 Plan", "Account State", "Activity State", "Last Activity Date", "Last Office Desktop Activation Date", "Mailbox Size GB", "Archive State", "Optimization Opportunity", "Optimization Reason", "Recommended Action", "Evidence Status", "Snapshot Date"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Last Activity Date", "Last Office Desktop Activation Date", "Mailbox Size GB", "Snapshot Date"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"User Principal Name", type text}, {"SKU Part Number", type text}, {"License Product", type text}, {"Microsoft 365 Plan", type text}, {"Account State", type text}, {"Activity State", type text}, {"Last Activity Date", type datetime}, {"Last Office Desktop Activation Date", type datetime}, {"Mailbox Size GB", type number}, {"Archive State", type text}, {"Optimization Opportunity", type text}, {"Optimization Reason", type text}, {"Recommended Action", type text}, {"Evidence Status", type text}, {"Snapshot Date", type datetime}}, "en-US")
+				in
+				    Typed
+

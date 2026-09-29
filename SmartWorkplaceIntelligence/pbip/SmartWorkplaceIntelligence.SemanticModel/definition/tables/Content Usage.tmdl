@@ -1,0 +1,104 @@
+/// Synthetic content-site usage and storage.
+table 'Content Usage'
+	lineageTag: f7832e21-fb35-4a6e-a9d6-b766b2fd9a75
+
+	/// Active sites divided by eligible sites.
+	measure 'Active Content Site (%)' = DIVIDE(CALCULATE(DISTINCTCOUNT('Content Usage'[Site Key]), KEEPFILTERS('Content Usage'[Activity State] = "Active")), DISTINCTCOUNT('Content Usage'[Site Key]))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: dab84e5c-de1f-43f3-8540-c42a802d88d9
+
+	/// Qualified site storage in gigabytes.
+	measure 'Site Storage Used (GB)' = SUM('Content Usage'[Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Measures
+		lineageTag: 06711035-016d-4044-bc9e-ead14df70534
+
+	/// Label describing whether qualified site-owner evidence exists.
+	measure 'Site Owner Evidence Status' = VAR _observed = CALCULATE(COUNTROWS('Content Usage'), KEEPFILTERS('Content Usage'[Owner Evidence Status] = "Observed")) VAR _total = COUNTROWS('Content Usage') RETURN IF(_total = 0, "Not Collected", IF(_observed = _total, "Observed", "Partial"))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 4b46f899-c6c5-48d8-9a4b-66c9dc6ca5aa
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: bc8ebc75-364b-4646-b649-b7f4123b0d6c
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ff32d4f9-4f49-49a5-a48f-1df32a4434d3
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: be68b41a-baae-493c-853b-a286ac0cd653
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: dee8e388-3fcb-4852-8d52-d8d3ddcceedf
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Site Key.
+	column 'Site Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 24e4978b-70d0-4514-8e79-7935d6cf62bd
+		summarizeBy: none
+		sourceColumn: Site Key
+
+	/// Business attribute Activity State.
+	column 'Activity State'
+		dataType: string
+		lineageTag: c12fe139-9700-4170-a4a7-8eb5e434b238
+		sourceColumn: Activity State
+
+	/// Business attribute Storage Used GB.
+	column 'Storage Used GB'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 33f1064d-9393-4557-b3ae-b3c509463c1c
+		summarizeBy: sum
+		sourceColumn: Storage Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Business attribute Owner Evidence Status.
+	column 'Owner Evidence Status'
+		dataType: string
+		lineageTag: bb7ab73d-dab9-4874-9661-d3c1650be897
+		sourceColumn: Owner Evidence Status
+
+	partition 'Content Usage Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Service Key" = Int64.Type, #"Site Key" = Int64.Type, #"Activity State" = nullable text, #"Storage Used GB" = nullable number, #"Owner Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 10, 1, "Active", 125.5, "Observed"},
+				        {20260915, 1, 1, 10, 2, "Inactive", 48.2, "Unknown"},
+				        {20260915, 1, 1, 11, 3, "Active", 17.8, "Observed"}
+				    })
+				in
+				    Source
+

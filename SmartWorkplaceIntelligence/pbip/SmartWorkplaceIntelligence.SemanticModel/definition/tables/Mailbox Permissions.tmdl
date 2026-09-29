@@ -1,0 +1,78 @@
+/// Accepted principal-mailbox permissions.
+table 'Mailbox Permissions'
+	lineageTag: 51be8047-a57b-4e3f-a3a9-3066988b0036
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 88172890-7220-495e-9b28-3acf2ec3b20a
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 60270587-44e5-4246-b448-5bb1bffe1007
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: dea51597-956e-4ee5-8a84-8b02aa430928
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Mailbox Key.
+	column 'Mailbox Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2c1f516a-8d3f-43e3-9740-21e10eefa02c
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 775b77d4-a87c-480d-a555-bcff1dc779db
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Group Key.
+	column 'Group Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: fc3bb072-0301-47d5-843a-f0d6c805c150
+		summarizeBy: none
+		sourceColumn: Group Key
+
+	/// Business attribute Permission Type.
+	column 'Permission Type'
+		dataType: string
+		lineageTag: 9aebbbae-2f79-4f35-afe0-36147c311ce3
+		sourceColumn: Permission Type
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 6d4765aa-3d11-4ef7-a42e-1f0704baa814
+		sourceColumn: Evidence Status
+
+	partition 'Mailbox Permissions Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Mailbox Key" = Int64.Type, #"User Key" = Int64.Type, #"Group Key" = Int64.Type, #"Permission Type" = nullable text, #"Evidence Status" = nullable text], {})
+				in
+				    Source
+

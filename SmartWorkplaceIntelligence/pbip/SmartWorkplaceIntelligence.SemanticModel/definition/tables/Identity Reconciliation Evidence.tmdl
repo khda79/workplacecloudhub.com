@@ -1,0 +1,93 @@
+/// Private aggregate AD-to-Entra identity reconciliation evidence with explicit method and recommended action.
+table 'Identity Reconciliation Evidence'
+	lineageTag: 93db9102-fc4b-4beb-a439-4c9a7913db59
+
+	measure 'Eligible AD Identities' = MAX ( 'Identity Reconciliation Evidence'[Eligible Identities] )
+		formatString: #,0
+		displayFolder: Identity | Current
+		lineageTag: 3ddeaca8-2e1a-43bf-bc28-e03028970e20
+
+	measure 'Matched AD Identities' = CALCULATE ( SUM ( 'Identity Reconciliation Evidence'[Identities] ), 'Identity Reconciliation Evidence'[Match Status] = "Matched" )
+		formatString: #,0
+		displayFolder: Identity | Current
+		lineageTag: ffbdf9ba-b678-4f80-bb9e-f52b96b723d9
+
+	measure 'AD to Entra Coverage' = DIVIDE ( [Matched AD Identities], [Eligible AD Identities] )
+		formatString: 0.0%
+		displayFolder: Identity | Coverage
+		lineageTag: 2074cda3-2a28-4f70-a368-17bb03debb6f
+
+	measure 'Identity Conflicts' = CALCULATE ( SUM ( 'Identity Reconciliation Evidence'[Identities] ), 'Identity Reconciliation Evidence'[Match Status] = "Conflict" )
+		formatString: #,0
+		displayFolder: Identity | Risk
+		lineageTag: 0c21c5f6-c4bc-4903-b4ff-2e1efeda8512
+
+	column 'Evidence Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: ef539ee2-a4e7-405d-af4f-bc39460f4d24
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+		variation Variation
+			isDefault
+			relationship: 180e0e7e-0b5a-4497-b1b8-6600de8a84c3
+			defaultHierarchy: LocalDateTable_07dba14d-5771-4b27-9d12-29e8f8909a2e.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Match Status'
+		dataType: string
+		lineageTag: 0aafe52b-91eb-4662-92c0-40dbf109e888
+		summarizeBy: none
+		sourceColumn: Match Status
+
+	column 'Match Method'
+		dataType: string
+		lineageTag: 558b2d3e-aabd-4928-a7da-96deb1b5d2a6
+		summarizeBy: none
+		sourceColumn: Match Method
+
+	column Identities
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6f75ac82-b92e-48e0-b564-f87a2242dd71
+		summarizeBy: sum
+		sourceColumn: Identities
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Eligible Identities'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 0e9b2a0e-38fe-4811-afc3-94e6234b585a
+		summarizeBy: sum
+		sourceColumn: Eligible Identities
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 616c747d-824a-4bdc-89c8-ba6eb8e64c36
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 87e11119-ed85-42b6-9687-028abe944551
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	partition 'Identity Reconciliation Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("IdentityReconciliationEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Evidence Date", "Match Status", "Match Method", "Identities", "Eligible Identities", "Evidence Status", "Recommended Action"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Evidence Date", "Identities", "Eligible Identities"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Evidence Date", type datetime}, {"Match Status", type text}, {"Match Method", type text}, {"Identities", Int64.Type}, {"Eligible Identities", Int64.Type}, {"Evidence Status", type text}, {"Recommended Action", type text}}, "en-US")
+				in
+				    Typed
+

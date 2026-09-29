@@ -1,0 +1,149 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.3.0/schema.json",
+  "themeCollection": {
+    "baseTheme": {
+      "name": "CY24SU06",
+      "reportVersionAtImport": {
+        "visual": "1.8.92",
+        "report": "2.0.92",
+        "page": "1.3.92"
+      },
+      "type": "SharedResources"
+    },
+    "customTheme": {
+      "name": "SmartWorkplaceIntelligence-CorporateCool-8f4e1c.json",
+      "reportVersionAtImport": {
+        "visual": "2.6.0",
+        "report": "3.1.0",
+        "page": "2.3.0"
+      },
+      "type": "RegisteredResources"
+    }
+  },
+  "filterConfig": {
+    "filterSortOrder": "Custom"
+  },
+  "resourcePackages": [
+    {
+      "name": "SharedResources",
+      "type": "SharedResources",
+      "items": [
+        {
+          "name": "CY24SU06",
+          "path": "BaseThemes/CY24SU06.json",
+          "type": "BaseTheme"
+        }
+      ]
+    },
+    {
+      "name": "RegisteredResources",
+      "type": "RegisteredResources",
+      "items": [
+        {
+          "name": "smartworkplace-device-20260913.svg",
+          "path": "smartworkplace-device-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-health-20260913.svg",
+          "path": "smartworkplace-health-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-analytics-20260913.svg",
+          "path": "smartworkplace-kpi-analytics-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-devices-20260913.svg",
+          "path": "smartworkplace-kpi-devices-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-licenses-20260913.svg",
+          "path": "smartworkplace-kpi-licenses-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-quality-20260913.svg",
+          "path": "smartworkplace-kpi-quality-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-relationships-20260913.svg",
+          "path": "smartworkplace-kpi-relationships-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-licenses-20260913.svg",
+          "path": "smartworkplace-licenses-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-lifecycle-20260913.svg",
+          "path": "smartworkplace-lifecycle-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-overview-20260913.svg",
+          "path": "smartworkplace-overview-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-people-20260913.svg",
+          "path": "smartworkplace-people-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-mailboxes-20260913.svg",
+          "path": "smartworkplace-ratio-mailboxes-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-activity-20260913.svg",
+          "path": "smartworkplace-section-activity-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-findings-20260913.svg",
+          "path": "smartworkplace-section-findings-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-hardware-20260913.svg",
+          "path": "smartworkplace-section-hardware-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-services-20260913.svg",
+          "path": "smartworkplace-services-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "SmartWorkplaceIntelligence-CorporateCool-8f4e1c.json",
+          "path": "SmartWorkplaceIntelligence-CorporateCool-8f4e1c.json",
+          "type": "CustomTheme"
+        },
+        {
+          "name": "WorkplaceCloudHub-lockup-WPF-20260924.png",
+          "path": "WorkplaceCloudHub-lockup-WPF-20260924.png",
+          "type": "Image"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "useStylableVisualContainerHeader": true,
+    "defaultDrillFilterOtherVisuals": true,
+    "allowChangeFilterTypes": true,
+    "useEnhancedTooltips": true,
+    "pagesPosition": "Bottom",
+    "useDefaultAggregateDisplayName": true
+  },
+  "annotations": [
+    {
+      "name": "defaultPage",
+      "value": "74096d393d05fa994d48"
+    }
+  ]
+}

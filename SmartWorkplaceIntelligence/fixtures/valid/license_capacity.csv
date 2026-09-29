@@ -1,0 +1,5 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,LicenseProductId,LicenseProduct,LicenseFamily,EnabledUnits,ConsumedUnits
+1.0.0,Licensing,LicenseCapacity,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,LIC-SYNTH-001,Workplace Suite E3,Workplace Suite,10,6
+1.0.0,Licensing,LicenseCapacity,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,LIC-SYNTH-002,Workplace Suite E5,Workplace Suite,4,3
+1.0.0,Licensing,LicenseCapacity,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,LIC-SYNTH-003,Frontline Suite F3,Frontline Suite,5,2
+

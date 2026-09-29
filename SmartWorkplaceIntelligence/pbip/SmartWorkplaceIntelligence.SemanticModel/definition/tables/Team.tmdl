@@ -1,0 +1,35 @@
+/// Synthetic collaboration team catalogue.
+table Team
+	lineageTag: 16c570e7-0f8f-438c-a452-0f44bd9ee8b0
+
+	/// Business attribute Team Key.
+	column 'Team Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c70ec36e-bcbd-4563-9261-a76d8ea31feb
+		summarizeBy: none
+		sourceColumn: Team Key
+
+	/// Business attribute Team Surrogate Key.
+	column 'Team Surrogate Key'
+		dataType: string
+		lineageTag: 86401bb0-c2bc-4186-a8bb-5116ff0d899a
+		sourceColumn: Team Surrogate Key
+
+	/// Business attribute Team Type.
+	column 'Team Type'
+		dataType: string
+		lineageTag: 8ea707fb-6648-43ed-891b-596d23228fb4
+		sourceColumn: Team Type
+
+	partition 'Team Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Team Key" = Int64.Type, #"Team Surrogate Key" = nullable text, #"Team Type" = nullable text], {
+				        {1, "Team 001", "Team"}
+				    })
+				in
+				    Source
+

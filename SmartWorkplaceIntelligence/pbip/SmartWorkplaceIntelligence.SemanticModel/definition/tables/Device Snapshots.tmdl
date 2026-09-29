@@ -1,0 +1,116 @@
+/// One synthetic device per reporting snapshot.
+table 'Device Snapshots'
+	lineageTag: d54d7bc3-460b-4bdc-ab4b-a16ae3e774cd
+
+	/// Distinct reconciled synthetic devices in scope.
+	measure '# Devices' = DISTINCTCOUNT('Device Snapshots'[Device Key])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 85838fd6-0cfb-4d87-9254-4c277c777baa
+
+	/// Days from latest qualified device activity to the reporting date.
+	measure 'Device Activity Age Days' = VAR _lastActivity = MAX('Device Snapshots'[Last Activity UTC]) VAR _reportingDate = MAX('Date'[Date]) RETURN IF(ISBLANK(_lastActivity), BLANK(), DATEDIFF(_lastActivity, _reportingDate, DAY))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 661b1684-804c-49be-ab0c-5c3f2b519ac8
+
+	/// Accepted device health observations.
+	measure '# Device Health Signals' = COUNTROWS('Device Snapshots')
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 5969f04f-090e-4933-bd78-f796ba3b27b7
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0013f2d1-c747-48b3-bf84-d9ef37f9c832
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 896e60b4-8b0e-4158-968f-4692e0d2f2dd
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3ef3ee99-f721-41e5-afa3-a4b9ae2dd202
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Organization Key.
+	column 'Organization Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7982449e-7597-4e46-8e04-54a1c6dac0d9
+		summarizeBy: none
+		sourceColumn: Organization Key
+
+	/// Business attribute Geography Key.
+	column 'Geography Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7bea147f-2ec6-4121-aa85-6ef8ecdd3ad1
+		summarizeBy: none
+		sourceColumn: Geography Key
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d7c10bcb-0054-439d-bfeb-25e07d3c7686
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Last Activity UTC.
+	column 'Last Activity UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd
+		isAvailableInMdx: false
+		lineageTag: 71193ae2-730b-4e64-9a6f-5cfb5e8e1363
+		summarizeBy: none
+		sourceColumn: Last Activity UTC
+
+		variation Variation
+			isDefault
+			relationship: 4b51ff80-f219-41dd-9988-bf83e55298c6
+			defaultHierarchy: LocalDateTable_0e067407-fa48-4653-bed4-bd560ca242d8.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: bbee30e9-8e84-4496-b478-f149b622af62
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Device Snapshots Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Organization Key" = Int64.Type, #"Geography Key" = Int64.Type, #"Device Key" = Int64.Type, #"Last Activity UTC" = nullable datetime, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, 1, 1, #datetime(2026, 9, 15, 6, 30, 0), "Observed"},
+				        {20260915, 1, 1, 2, 1, 2, #datetime(2026, 9, 12, 14, 0, 0), "Observed"},
+				        {20260915, 1, 1, 3, 2, 3, #datetime(2026, 8, 20, 9, 0, 0), "Observed"},
+				        {20260915, 1, 1, 5, 3, 4, #datetime(2026, 9, 14, 11, 0, 0), "Observed"},
+				        {20260915, 1, 1, 5, 1, 5, #datetime(2026, 9, 15, 5, 45, 0), "Observed"}
+				    })
+				in
+				    Source
+

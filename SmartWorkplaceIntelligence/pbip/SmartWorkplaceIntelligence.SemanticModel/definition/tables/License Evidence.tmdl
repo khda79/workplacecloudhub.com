@@ -1,0 +1,274 @@
+/// Current private tenant license capacity and assignment evidence. Capacity KPIs exclude non-finite, free, trial, viral, and tenant-wide placeholder entitlements.
+table 'License Evidence'
+	lineageTag: 0e6b7ab3-2bd8-4c0e-b0c3-898abfa29bb1
+
+	measure 'License Products' = COUNTROWS('License Evidence')
+		formatString: #,0
+		displayFolder: Licensing | Inventory
+		lineageTag: 9f42d3b4-15a8-4d5f-9d8e-f8b8b9a2d0c1
+
+	measure 'Governed License Products' = CALCULATE([License Products], KEEPFILTERS('License Evidence'[Capacity Class] = "Governed capacity"))
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 2d97f474-1d41-48de-868e-7232cdb71df4
+
+	measure 'Enabled License Units' = CALCULATE(SUM('License Evidence'[Enabled Units]), KEEPFILTERS('License Evidence'[Capacity Class] = "Governed capacity"))
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 6b417ad3-18c2-460f-8a78-2ed4c342eebf
+
+	measure 'Consumed License Units' = CALCULATE(SUM('License Evidence'[Consumed Units]), KEEPFILTERS('License Evidence'[Capacity Class] = "Governed capacity"))
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 88188bf9-f058-4181-a05d-0da79aa7b18e
+
+	measure 'Available License Units' = CALCULATE(SUM('License Evidence'[Available Units]), KEEPFILTERS('License Evidence'[Capacity Class] = "Governed capacity"))
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 66847c47-61cc-4a7b-850d-18817be7e756
+
+	measure 'Observed License Capacity Utilization (%)' = DIVIDE([Consumed License Units], [Enabled License Units])
+		formatString: 0.0%
+		displayFolder: Licensing | Capacity
+		lineageTag: 3a34d8d2-c7b8-455f-a8d9-79ea4608c67d
+
+	measure 'Observed Potentially Reclaimable Assignments' = SUM('License Evidence'[Potentially Reclaimable Assignments])
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: c63d9d98-46cf-42d2-a7bc-119688956a6d
+
+	measure 'Observed Dormant 31-90D Assignments' = SUM('License Evidence'[Dormant 31-90D Assignments])
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: 9a24b2f7-bdec-4c3f-ae5a-58e2d00baf8a
+
+	measure 'Underused Governed License Products' = CALCULATE([License Products], KEEPFILTERS('License Evidence'[Capacity Class] = "Governed capacity"), KEEPFILTERS('License Evidence'[Capacity Utilization] < 0.5))
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: 90ac5acb-10d2-444e-b9ef-c0c1fdb0a5c9
+
+	measure 'License Evidence Ribbon Text' = FORMAT([Governed License Products], "0") & " governed products · " & FORMAT([Observed License Capacity Utilization (%)], "0.0%") & " used · " & FORMAT([Observed Potentially Reclaimable Assignments], "#,0") & " reclaim candidates"
+		formatString: @
+		displayFolder: Licensing | Evidence
+		lineageTag: 5cc9d953-acbb-48a8-8b10-4d89b40d489c
+
+	measure 'Microsoft 365 Enabled Units' = CALCULATE ( SUM ( 'License Evidence'[Enabled Units] ), 'License Evidence'[Microsoft 365 Plan] IN { "F3", "E3", "E5" } )
+		formatString: #,0
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: ab61b7ea-fd17-44be-ae46-1146b1873f37
+
+	measure 'Microsoft 365 Consumed Units' = CALCULATE ( SUM ( 'License Evidence'[Consumed Units] ), 'License Evidence'[Microsoft 365 Plan] IN { "F3", "E3", "E5" } )
+		formatString: #,0
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: 6d8a72ff-af96-41b2-919a-6ac54186e1bf
+
+	measure 'Microsoft 365 Utilization (%)' = DIVIDE ( [Microsoft 365 Consumed Units], [Microsoft 365 Enabled Units] )
+		formatString: 0.0%
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: b0f195fe-ac36-448f-829b-a771e63b659b
+
+	measure 'F3 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "F3" ), 0 )
+		formatString: #,0
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: fa70c748-4552-4812-9db4-1f3121f9d86a
+
+	measure 'E3 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "E3" ), 0 )
+		formatString: #,0
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: b4e25a48-7dbf-4f6e-99b6-0c500e5872ba
+
+	measure 'E5 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "E5" ), 0 )
+		formatString: #,0
+		displayFolder: Licensing | Microsoft 365
+		lineageTag: 539b6d11-7c27-4596-95fe-e14926d88bdb
+
+	measure 'E3 to F3 Review Candidates' = SUM ( 'License Evidence'[E3 to F3 Review Candidate Assignments] )
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: 326209b1-71ea-4ff6-bdcb-6887d8a4a9df
+
+	measure 'Immediate Reclaimable Assignments' = SUM ( 'License Evidence'[Potentially Reclaimable Assignments] )
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: 6f5d6136-4e81-46df-b2e8-c7a4d3c07ec6
+
+	measure 'Dormant 31-90D Review Assignments' = SUM ( 'License Evidence'[Dormant 31-90D Assignments] )
+		formatString: #,0
+		displayFolder: Licensing | Optimization
+		lineageTag: 08b1ab40-08c0-4939-a551-c52424a0c7cd
+
+	column 'License Product'
+		dataType: string
+		lineageTag: aeb56ac8-ac30-446a-9a96-16cfa7c763d4
+		summarizeBy: none
+		sourceColumn: License Product
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SKU Part Number'
+		dataType: string
+		lineageTag: f173208a-5cf1-4b27-9efe-53f666dd6237
+		summarizeBy: none
+		sourceColumn: SKU Part Number
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Capacity Class'
+		dataType: string
+		lineageTag: 52b64b9e-0382-4ba9-801f-280f3dbb241c
+		summarizeBy: none
+		sourceColumn: Capacity Class
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Enabled Units'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 6b825314-20f8-4264-a767-bcf3a9abf2d0
+		summarizeBy: sum
+		sourceColumn: Enabled Units
+
+	column 'Consumed Units'
+		dataType: int64
+		formatString: #,0
+		lineageTag: bd6811d6-ccbd-48fc-a0fc-4309c7f104fc
+		summarizeBy: sum
+		sourceColumn: Consumed Units
+
+	column 'Available Units'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 98e53250-11f6-4507-8d44-aa6c206f8e52
+		summarizeBy: sum
+		sourceColumn: Available Units
+
+	column 'Capacity Utilization'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 5137e9a5-1467-4f07-8dc0-74a693e22e6e
+		summarizeBy: sum
+		sourceColumn: Capacity Utilization
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Assigned Users'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 154df2ca-f045-45c3-a53d-cef14ad3e0cc
+		summarizeBy: sum
+		sourceColumn: Assigned Users
+
+	column 'Direct Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 3049986e-6d8c-4696-b5cb-96052fa0ea8e
+		summarizeBy: sum
+		sourceColumn: Direct Assignments
+
+	column 'Group Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: d5845366-1f8f-4d36-b0ba-88c727f102d3
+		summarizeBy: sum
+		sourceColumn: Group Assignments
+
+	column 'Direct and Group Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a8580506-0fd0-430f-8735-528ee9c53478
+		summarizeBy: sum
+		sourceColumn: Direct and Group Assignments
+
+	column 'Potentially Reclaimable Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 6044a889-3c98-4275-b864-f603a279f401
+		summarizeBy: sum
+		sourceColumn: Potentially Reclaimable Assignments
+
+	column 'Dormant 31-90D Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 438fc7cf-6419-4748-a196-763f28ce83c5
+		summarizeBy: sum
+		sourceColumn: Dormant 31-90D Assignments
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: f245042d-39c4-456b-86f1-e0944465923d
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: e95195cf-c2cb-4b57-aed3-5a2ded0960d4
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 4fa142e2-d88b-44c4-ac9e-c218814c020b
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 0d24b8e9-bbc5-453d-8cec-13fdc096f636
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: ad7cd566-97b6-4435-97f9-e92dc29ea499
+			defaultHierarchy: LocalDateTable_317cc133-7d7e-48f1-9f84-06cddef33d30.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 5320d725-144c-4fc3-98c3-0a407e94c436
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Microsoft 365 Plan'
+		dataType: string
+		lineageTag: 194a7432-6975-4fbf-b5c1-d9d8eee32d0c
+		summarizeBy: none
+		sourceColumn: Microsoft 365 Plan
+
+	column 'Disabled Reclaimable Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 19612acc-0de5-44a1-a601-f16515a57058
+		summarizeBy: sum
+		sourceColumn: Disabled Reclaimable Assignments
+
+	column 'E3 to F3 Review Candidate Assignments'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 94cc6e75-a6f1-45ac-b79e-0dd10eae4cd9
+		summarizeBy: sum
+		sourceColumn: E3 to F3 Review Candidates
+
+	partition 'License Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("LicenseEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"License Product", "SKU Part Number", "Capacity Class", "Enabled Units", "Consumed Units", "Available Units", "Capacity Utilization", "Assigned Users", "Direct Assignments", "Group Assignments", "Direct and Group Assignments", "Potentially Reclaimable Assignments", "Dormant 31-90D Assignments", "Risk Priority", "Risk Signal", "Recommended Action", "Snapshot Date", "Evidence Status", "Microsoft 365 Plan", "Disabled Reclaimable Assignments", "E3 to F3 Review Candidates"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Enabled Units", "Consumed Units", "Available Units", "Capacity Utilization", "Assigned Users", "Direct Assignments", "Group Assignments", "Direct and Group Assignments", "Potentially Reclaimable Assignments", "Dormant 31-90D Assignments", "Snapshot Date", "Disabled Reclaimable Assignments", "E3 to F3 Review Candidates"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"License Product", type text}, {"SKU Part Number", type text}, {"Capacity Class", type text}, {"Enabled Units", Int64.Type}, {"Consumed Units", Int64.Type}, {"Available Units", Int64.Type}, {"Capacity Utilization", type number}, {"Assigned Users", Int64.Type}, {"Direct Assignments", Int64.Type}, {"Group Assignments", Int64.Type}, {"Direct and Group Assignments", Int64.Type}, {"Potentially Reclaimable Assignments", Int64.Type}, {"Dormant 31-90D Assignments", Int64.Type}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Status", type text}, {"Microsoft 365 Plan", type text}, {"Disabled Reclaimable Assignments", Int64.Type}, {"E3 to F3 Review Candidates", Int64.Type}}, "en-US")
+				in
+				    Typed
+

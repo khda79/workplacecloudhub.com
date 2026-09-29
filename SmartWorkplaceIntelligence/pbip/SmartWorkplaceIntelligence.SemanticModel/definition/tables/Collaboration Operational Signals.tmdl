@@ -1,0 +1,75 @@
+/// Disconnected collaboration and content operational signal catalog backed by current private Teams, SharePoint, OneDrive, and Copilot evidence.
+table 'Collaboration Operational Signals'
+	lineageTag: fb2c5226-0ce5-4ce8-99dc-d4ae6de1bf7c
+
+	/// Affected object, service, or user count for the selected collaboration signal.
+	measure 'Collaboration Signal Affected' = VAR _s = SELECTEDVALUE('Collaboration Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams", 'Collaboration Object Evidence'[Owner State] = "No owner"), 2, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams", 'Collaboration Object Evidence'[Activity State] IN {"Inactive 180D+", "No activity evidence"}), 3, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams", 'Collaboration Object Evidence'[Guest Count] > 0), 4, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "SharePoint", 'Collaboration Object Evidence'[Owner State] = "No owner"), 5, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "SharePoint", 'Collaboration Object Evidence'[Activity State] IN {"Inactive 180D+", "No activity evidence"}), 6, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "OneDrive", 'Collaboration Object Evidence'[Activity State] = "No activity evidence"), 7, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "OneDrive", 'Collaboration Object Evidence'[Activity State] = "Inactive 180D+"), 8, [Stale Collaboration Sources], 9, CALCULATE(SUM('Collaboration Adoption Evidence'[Eligible Users]) - SUM('Collaboration Adoption Evidence'[Active Users 30D]), 'Collaboration Adoption Evidence'[Service] = "Copilot"))
+		formatString: #,0
+		displayFolder: Collaboration | Signals
+		lineageTag: 583bdaad-7c4b-452a-a85b-be8dde2cbb82
+
+	/// Relevant covered population for the selected collaboration signal.
+	measure 'Collaboration Signal Covered' = VAR _s = SELECTEDVALUE('Collaboration Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams"), 2, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams"), 3, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "Teams"), 4, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "SharePoint"), 5, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "SharePoint"), 6, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "OneDrive"), 7, CALCULATE([Collaboration Objects], 'Collaboration Object Evidence'[Service] = "OneDrive"), 8, [Collaboration Services], 9, CALCULATE([Collaboration Eligible Users], 'Collaboration Adoption Evidence'[Service] = "Copilot"))
+		formatString: #,0
+		displayFolder: Collaboration | Signals
+		lineageTag: 732569b2-bc57-49c0-86ac-0f3dc1b06739
+
+	/// Affected share of the covered population for the selected collaboration signal.
+	measure 'Collaboration Signal Affected (%)' = DIVIDE([Collaboration Signal Affected], [Collaboration Signal Covered])
+		formatString: 0.0%
+		displayFolder: Collaboration | Signals
+		lineageTag: 9a99fb77-9ecf-40b3-8662-bc6ff97f5c44
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 8d31cc3e-e6af-4d35-9d7c-24c6d97b81ee
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: f3f74853-3aaa-494b-a9e3-05b0296c303b
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: 684958e7-8452-4964-a03c-a3863fb5bf4b
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: 67188577-a57e-4e1a-b369-515b13748abb
+		sourceColumn: Risk Category
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 3e344b30-5551-44c5-8452-6ceb4bb52fbe
+		sourceColumn: Recommended Action
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: e7d6395d-e69e-4b9f-915e-37591cc22c11
+		sourceColumn: Evidence Source
+
+	partition 'Collaboration Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Recommended Action" = text, #"Evidence Source" = text],
+				        {
+				            {1, "High", "Teams without an owner", "Ownership", "Assign at least two accountable owners or retire the team.", "Teams inventory"},
+				            {2, "Medium", "Teams inactive for more than 180 days", "Lifecycle", "Confirm business need, then archive or retire inactive teams.", "Teams inventory"},
+				            {3, "Medium", "Teams with guest members", "External access", "Review guest access, ownership, and lifecycle policy.", "Teams inventory"},
+				            {4, "High", "SharePoint sites without an owner", "Ownership", "Assign an accountable owner before lifecycle or sharing decisions.", "SharePoint inventory"},
+				            {5, "Medium", "SharePoint sites inactive for more than 180 days", "Lifecycle", "Confirm business need, then archive or retire inactive sites.", "SharePoint inventory"},
+				            {6, "Medium", "OneDrive accounts without activity evidence", "Evidence gap", "Validate licensing and usage before lifecycle action.", "OneDrive usage"},
+				            {7, "Medium", "OneDrive accounts inactive for more than 180 days", "Lifecycle", "Review owner status, retention, and deprovisioning eligibility.", "OneDrive usage"},
+				            {8, "Medium", "Stale collaboration usage sources", "Data freshness", "Refresh usage exports before making adoption decisions.", "M365 usage reports"},
+				            {9, "Medium", "Copilot users inactive for 30 days", "Adoption", "Target enablement and investigate adoption barriers for inactive licensed users.", "Copilot usage"}
+				        }
+				    )
+				in
+				    Source
+

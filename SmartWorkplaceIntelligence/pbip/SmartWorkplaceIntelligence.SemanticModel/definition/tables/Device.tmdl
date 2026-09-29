@@ -1,0 +1,176 @@
+/// One row per anonymized synthetic device identity.
+table Device
+	lineageTag: 727871f1-74b6-4a17-9fb1-f8da19d5d392
+
+	/// Distinct observed device manufacturers in the selected estate.
+	measure '# Manufacturers' = CALCULATE(DISTINCTCOUNT('Device'[Manufacturer]), KEEPFILTERS(NOT ISBLANK('Device'[Manufacturer])))
+		formatString: #,0
+		displayFolder: Estate Composition
+		lineageTag: 6fbccb98-85e1-4749-9d1b-7029bdba6f8f
+
+	/// Distinct observed device models in the selected estate.
+	measure '# Models' = CALCULATE(DISTINCTCOUNT('Device'[Model]), KEEPFILTERS(NOT ISBLANK('Device'[Model])))
+		formatString: #,0
+		displayFolder: Estate Composition
+		lineageTag: 1fbac655-40dc-454c-86d7-b0e39967499e
+
+	/// Share of selected devices for each manufacturer while preserving all other report filters.
+	measure 'Devices by Manufacturer (%)' = DIVIDE([# Devices], CALCULATE([# Devices], REMOVEFILTERS('Device'[Manufacturer])))
+		formatString: 0.0%
+		displayFolder: Estate Composition
+		lineageTag: c0789c55-75b2-460e-a4d0-ab25c25a59e2
+
+	/// Devices whose latest qualified system-drive observation has less than 20 GB free or less than 15 percent free.
+	measure '# Devices Low on Disk Space' = CALCULATE([# Devices], KEEPFILTERS('Device'[Disk Space State] = "Low"))
+		formatString: #,0
+		displayFolder: Storage Health
+		lineageTag: 16d4c2a8-259e-4c8a-96c3-e3e94cd2e340
+
+	/// Share of Windows 11 devices for each observed Windows 11 version while preserving the selected device scope.
+	measure 'Windows 11 devices by version (%)' = VAR _devicesForVersion = CALCULATE([# Devices], KEEPFILTERS('Device'[Operating System Family] = "Windows 11")) VAR _allWindows11Devices = CALCULATE([# Devices], REMOVEFILTERS('Device'[Operating System Version]), KEEPFILTERS('Device'[Operating System Family] = "Windows 11")) RETURN DIVIDE(_devicesForVersion, _allWindows11Devices)
+		formatString: 0.0%
+		displayFolder: Estate Composition
+		lineageTag: 0bd8bb72-9f58-4d54-8946-bf4be465f75b
+
+	/// Business attribute Device Key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 74565963-e4d6-453c-9c15-8065fa10aec4
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Business attribute Device Surrogate Key.
+	column 'Device Surrogate Key'
+		dataType: string
+		lineageTag: fe333705-ac82-4910-8d72-a0f5b1c17c2a
+		sourceColumn: Device Surrogate Key
+
+	/// Business attribute Platform.
+	column Platform
+		dataType: string
+		lineageTag: acbf6153-98b9-4444-a6b9-63097546f5f7
+		sourceColumn: Platform
+
+	/// Business attribute Ownership.
+	column Ownership
+		dataType: string
+		lineageTag: de2ef96f-57be-4db9-8e82-4974812ba2aa
+		sourceColumn: Ownership
+
+	/// Business attribute Management State.
+	column 'Management State'
+		dataType: string
+		lineageTag: 5393513b-774d-4d2c-b75b-49dc1a84da41
+		sourceColumn: Management State
+
+	/// Business attribute Compliance State.
+	column 'Compliance State'
+		dataType: string
+		lineageTag: e8953baa-2524-4c55-bf91-556c16a1eba4
+		sourceColumn: Compliance State
+
+	/// Business attribute Manufacturer.
+	column Manufacturer
+		dataType: string
+		lineageTag: 5b61fa80-41b5-4b11-ad14-a030852683c6
+		sourceColumn: Manufacturer
+
+	/// Business attribute Model.
+	column Model
+		dataType: string
+		lineageTag: a2cf64c3-1655-4225-a5a4-5e8ddefec9a5
+		sourceColumn: Model
+
+	/// Business attribute Operating System Family.
+	column 'Operating System Family'
+		dataType: string
+		lineageTag: 803a197d-1e52-45df-93e9-6bf77abfded3
+		sourceColumn: Operating System Family
+
+	/// Business attribute Readiness State.
+	column 'Readiness State'
+		dataType: string
+		lineageTag: 287cf22a-8282-41ec-a4c4-33d9adec2229
+		sourceColumn: Readiness State
+
+	/// Business attribute Source Scope.
+	column 'Source Scope'
+		dataType: string
+		lineageTag: c01d6d87-50eb-45de-8514-299debdc7350
+		sourceColumn: Source Scope
+
+	/// Business attribute Device Source ID.
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e4879cb0-5c73-4127-b295-3053578d0d9b
+		sourceColumn: Device Source ID
+
+	/// Latest qualified synthetic system-drive capacity in gigabytes.
+	column 'System Drive Capacity (GB)'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: 47c716eb-5c2e-4cb4-815c-cac766441e00
+		summarizeBy: sum
+		sourceColumn: System Drive Capacity (GB)
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Latest qualified synthetic system-drive free space in gigabytes.
+	column 'Free Disk Space (GB)'
+		dataType: double
+		formatString: #,0.0
+		lineageTag: ae08631e-7219-4ed3-825a-89642052891d
+		summarizeBy: sum
+		sourceColumn: Free Disk Space (GB)
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Latest qualified synthetic free-space ratio for the system drive.
+	column 'Free Disk Space (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: ce32705e-2b9d-4e1e-8295-e364f9d59745
+		summarizeBy: sum
+		sourceColumn: Free Disk Space (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Low below 20 GB free or 15 percent free; missing or invalid evidence is Unknown.
+	column 'Disk Space State'
+		dataType: string
+		lineageTag: 77de23d2-bea4-4e93-9aeb-21f5a184a629
+		summarizeBy: none
+		sourceColumn: Disk Space State
+
+	/// Business category used to filter Windows PCs, Macs, and Android or iOS mobile devices.
+	column 'Device Category'
+		dataType: string
+		lineageTag: cbf18239-4399-4a7f-8237-97575fdc1566
+		summarizeBy: none
+		sourceColumn: Device Category
+
+	/// Observed operating-system release or feature version for the device.
+	column 'Operating System Version'
+		dataType: string
+		lineageTag: 6e3e3b13-350e-4f77-9dde-c724960dddad
+		summarizeBy: none
+		sourceColumn: Operating System Version
+
+	partition 'Device Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Device Key" = Int64.Type, #"Device Surrogate Key" = nullable text, #"Platform" = nullable text, #"Device Category" = nullable text, #"Ownership" = nullable text, #"Management State" = nullable text, #"Compliance State" = nullable text, #"Manufacturer" = nullable text, #"Model" = nullable text, #"Operating System Family" = nullable text, #"Operating System Version" = nullable text, #"Readiness State" = nullable text, #"System Drive Capacity (GB)" = nullable number, #"Free Disk Space (GB)" = nullable number, #"Free Disk Space (%)" = nullable number, #"Disk Space State" = nullable text, #"Source Scope" = nullable text, #"Device Source ID" = nullable text], {
+				        {1, "Device 001", "Windows", "PC Windows", "Corporate", "Managed", "Compliant", "Fabrikam", "Model A", "Windows 11", "24H2", "Adopted", 512, 180, 0.3515625, "Healthy", "Synthetic Inventory", "DEV-SYNTH-001"},
+				        {2, "Device 002", "Windows", "PC Windows", "Corporate", "Managed", "Noncompliant", "Contoso", "Model B", "Windows 10", "22H2", "Ready", 256, 36, 0.140625, "Low", "Synthetic Inventory", "DEV-SYNTH-002"},
+				        {3, "Device 003", "Windows", "PC Windows", "Corporate", "CoManaged", "Unknown", "Fabrikam", "Model C", "Windows 11", "23H2", "Adopted", 256, 12, 0.046875, "Low", "Synthetic Inventory", "DEV-SYNTH-003"},
+				        {4, "Device 004", "macOS", "Mac", "Personal", "Managed", "Compliant", "Northwind", "Model D", "macOS", "15.0", "NotApplicable", 512, 220, 0.4296875, "Healthy", "Synthetic Inventory", "DEV-SYNTH-004"},
+				        {5, "Device 005", "Android", "Mobile Android/iOS", "Corporate", "Managed", "Unknown", "Contoso", "Model E", "Android", "15", "NotApplicable", 128, 64, 0.5, "Healthy", "Synthetic Inventory", "DEV-SYNTH-005"}
+				    })
+				in
+				    Source
+

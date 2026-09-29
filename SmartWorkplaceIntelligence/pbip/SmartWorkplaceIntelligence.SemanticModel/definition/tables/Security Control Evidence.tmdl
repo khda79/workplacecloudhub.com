@@ -1,0 +1,266 @@
+/// Current private security-control evidence. Missing Conditional Access, MFA, Defender, Firewall, and Secure Score sources are explicitly represented as not collected rather than estimated.
+table 'Security Control Evidence'
+	lineageTag: 06aa535a-bf95-4f60-895d-b44c449429ca
+
+	measure 'Security Controls' = COUNTROWS('Security Control Evidence')
+		formatString: #,0
+		displayFolder: Security | Evidence
+		lineageTag: 26593e64-1906-47f9-841d-d1ff2baa23d3
+
+	measure 'Observed Security Controls' = CALCULATE([Security Controls], KEEPFILTERS('Security Control Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Security | Evidence
+		lineageTag: 240a3db5-9339-4992-8d66-e9bd6a1d68a8
+
+	/// Number of security controls whose required evidence source is not collected.
+	measure 'Security Controls Without Evidence' = COALESCE(CALCULATE([Security Controls], KEEPFILTERS('Security Control Evidence'[Evidence Status] = "Not collected")), 0)
+		formatString: #,0
+		displayFolder: Security | Evidence
+		lineageTag: 8171b2bd-2f33-471e-9a19-97a4569cd905
+
+	measure 'Observed Security Evidence Coverage (%)' = DIVIDE([Observed Security Controls], [Security Controls])
+		formatString: 0.0%
+		displayFolder: Security | Evidence
+		lineageTag: 904c7753-8782-4e9a-baa9-c3c37bf8d319
+
+	/// Number of observed security controls with at least one affected entity or an observed posture gap.
+	measure 'Security Gaps' = COALESCE(CALCULATE([Security Controls], KEEPFILTERS('Security Control Evidence'[Gap State] = "Gap observed")), 0)
+		formatString: #,0
+		displayFolder: Security | Attention
+		lineageTag: 8a8941af-3a18-41dd-bddb-703a5118c9ea
+
+	/// Affected count only when the filter context contains one metric unit. Returns blank across mixed units to prevent invalid aggregation.
+	measure 'Security Affected Entities' = IF(HASONEVALUE('Security Control Evidence'[Metric Unit]), SUM('Security Control Evidence'[Affected Entities]), BLANK())
+		formatString: #,0
+		displayFolder: Security | Attention
+		lineageTag: 28d4a9dd-646a-4cbd-be31-a072e1c32fb3
+
+	/// Unweighted average health rate across observed controls. This avoids combining device, user, policy, check, connector, and score volumes as if they shared one unit.
+	measure 'Observed Security Health (%)' = AVERAGEX(FILTER('Security Control Evidence', 'Security Control Evidence'[Evidence Status] = "Observed" && NOT ISBLANK('Security Control Evidence'[Health Rate])), 'Security Control Evidence'[Health Rate])
+		formatString: 0.0%
+		displayFolder: Security | Health
+		lineageTag: 82588725-6518-4a5f-8e50-26affb904bcb
+
+	measure 'Device Compliance Healthy (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), 'Security Control Evidence'[Control Name] = "Device compliance")
+		formatString: 0.0%
+		displayFolder: Security | Device
+		lineageTag: 199bdce8-f1f6-44b4-a879-53674831d736
+
+	measure 'Secure Boot Healthy (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), 'Security Control Evidence'[Control Name] = "Secure Boot")
+		formatString: 0.0%
+		displayFolder: Security | Device
+		lineageTag: e8fc5df4-bd83-4cf1-b916-f6094030ad25
+
+	measure 'Disk Encryption Healthy (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), 'Security Control Evidence'[Control Name] = "Disk encryption")
+		formatString: 0.0%
+		displayFolder: Security | Device
+		lineageTag: 82f71979-01f9-44ee-96f2-0039298eddd6
+
+	measure 'Code Integrity Healthy (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), 'Security Control Evidence'[Control Name] = "Code integrity")
+		formatString: 0.0%
+		displayFolder: Security | Device
+		lineageTag: c0688073-d210-442e-9fc0-e117d75412c7
+
+	/// Compact evidence-status summary for the Security Posture page.
+	measure 'Observed Security Evidence Ribbon Text' = FORMAT([Observed Security Controls], "0") & "/" & FORMAT([Security Controls], "0") & " controls observed · " & FORMAT([Security Controls Without Evidence], "0") & " not collected · " & FORMAT([Security Gaps], "0") & " gaps"
+		formatString: @
+		displayFolder: Security | Evidence
+		lineageTag: 96a8fd39-f109-464b-a12c-6eff4f4d3ab1
+
+	/// Share of observed Conditional Access policies in the enabled state.
+	measure 'Conditional Access Enforcement (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Conditional Access enforcement"))
+		formatString: 0.0%
+		displayFolder: Security | Access
+		lineageTag: d6d2b185-50ca-4b7c-9b5f-15905e2d87de
+
+	/// Share of covered enabled workforce accounts with an MFA method registered in Entra. Conditional Access enforcement is a separate control.
+	measure 'Workforce MFA Registered (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), KEEPFILTERS('Security Control Evidence'[Control Name] = "MFA registered among workforce"))
+		formatString: 0.0%
+		displayFolder: Security | Identity
+		lineageTag: 4f55937c-7683-475b-8da2-277e681d61a9
+
+	/// Share of observed devices with malware protection and real-time protection enabled and no overdue signature update.
+	measure 'Defender Protection Active (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Defender protection active"))
+		formatString: 0.0%
+		displayFolder: Security | Endpoint
+		lineageTag: 80f6df16-59af-4aa4-8796-48879804ec52
+
+	/// Share of observed devices whose Intune endpoint-security firewall status is Enabled.
+	measure 'Firewall Enabled (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Firewall enabled"))
+		formatString: 0.0%
+		displayFolder: Security | Endpoint
+		lineageTag: f97bce7c-8a3e-4fd2-b90b-3f7af3f34079
+
+	/// Latest observed Microsoft Secure Score percentage from Microsoft Graph.
+	measure 'Microsoft Secure Score (%)' = CALCULATE(MAX('Security Control Evidence'[Health Rate]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Microsoft Secure Score"))
+		formatString: 0.0%
+		displayFolder: Security | Posture
+		lineageTag: 9fc80015-ae10-4c62-9e95-c3c3438b0340
+
+	/// Observed devices reported as noncompliant or in a grace-period state.
+	measure 'Noncompliant Devices (#)' = CALCULATE(MAX('Security Control Evidence'[Affected Entities]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Device compliance"))
+		formatString: #,0
+		displayFolder: Security | Device
+		lineageTag: 9df21170-9367-44f9-9102-3270d27259db
+
+	/// Covered enabled workforce accounts without a registered MFA method.
+	measure 'Workforce Without MFA Registration (#)' = CALCULATE(MAX('Security Control Evidence'[Affected Entities]), KEEPFILTERS('Security Control Evidence'[Control Name] = "MFA registered among workforce"))
+		formatString: #,0
+		displayFolder: Security | Identity
+		lineageTag: c3440113-b8fe-4249-a6a7-3cf72f30c96e
+
+	/// Observed devices that do not meet the active Defender protection definition.
+	measure 'Devices Without Active Defender Protection (#)' = CALCULATE(MAX('Security Control Evidence'[Affected Entities]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Defender protection active"))
+		formatString: #,0
+		displayFolder: Security | Endpoint
+		lineageTag: 5db3ded9-56e6-40ec-92d6-a1511a6a8515
+
+	/// Observed devices whose firewall status is Disabled or Limited.
+	measure 'Devices Without Enabled Firewall (#)' = CALCULATE(MAX('Security Control Evidence'[Affected Entities]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Firewall enabled"))
+		formatString: #,0
+		displayFolder: Security | Endpoint
+		lineageTag: 21435917-3fbc-424d-8970-5ef4b66ef24a
+
+	/// Observed Conditional Access policies that are disabled or report-only.
+	measure 'Conditional Access Policies Not Enforced (#)' = CALCULATE(MAX('Security Control Evidence'[Affected Entities]), KEEPFILTERS('Security Control Evidence'[Control Name] = "Conditional Access enforcement"))
+		formatString: #,0
+		displayFolder: Security | Access
+		lineageTag: fb3a4c9e-1039-41c3-932d-80249eaf4f18
+
+	column 'Control Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: b5b04dcf-02a7-486a-90c8-acde8624a72d
+		summarizeBy: sum
+		sourceColumn: Control Sort
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Security Domain'
+		dataType: string
+		lineageTag: e0f6c4fb-18f8-4f3f-b22d-29c7dab1e824
+		summarizeBy: none
+		sourceColumn: Security Domain
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Control Name'
+		dataType: string
+		lineageTag: 5788f357-c634-4c4d-9312-4b5a729231ef
+		summarizeBy: none
+		sourceColumn: Control Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: e5d4367d-f84f-46fd-ab07-84c9ca393f1a
+		summarizeBy: none
+		sourceColumn: Severity Label
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: cbb7a801-2458-4a68-9c35-46d71047f56f
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Coverage State'
+		dataType: string
+		lineageTag: 71ef0dc0-5322-4be9-a9d6-c98f63664c7a
+		summarizeBy: none
+		sourceColumn: Coverage State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Covered Entities'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 48f38c30-2e87-4f89-83a0-f5ed3f5d254c
+		summarizeBy: sum
+		sourceColumn: Covered Entities
+
+	column 'Healthy Entities'
+		dataType: int64
+		formatString: #,0
+		lineageTag: ad21b5ab-4751-4175-9c9b-27d005a363b1
+		summarizeBy: sum
+		sourceColumn: Healthy Entities
+
+	column 'Affected Entities'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 49685a63-28e1-432d-9b43-bfb1872fac2b
+		summarizeBy: sum
+		sourceColumn: Affected Entities
+
+	column 'Health Rate'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 7caf2dcd-62e0-4644-beb7-95d0e76b380e
+		summarizeBy: sum
+		sourceColumn: Health Rate
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Gap State'
+		dataType: string
+		lineageTag: e4096298-3a66-4503-96db-27c1915b4d24
+		summarizeBy: none
+		sourceColumn: Gap State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: bb542cca-8ed2-4e60-a11c-a9d2c8d25260
+		summarizeBy: none
+		sourceColumn: Evidence Source
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: d7d45163-0926-4e72-81ba-df19dc835279
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 548db468-a925-4b23-aa8b-e789afca0def
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 81e59377-f0f1-4fa5-b2bf-d01399d45ce5
+			defaultHierarchy: LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Unit used by the control counts (Devices, Users, Policies, Checks, Connectors, or Score). Do not sum affected values across different units.
+	column 'Metric Unit'
+		dataType: string
+		lineageTag: 5ecfeffa-e91d-47ee-aa38-ae4b7619e333
+		summarizeBy: none
+		sourceColumn: Metric Unit
+
+	partition 'Security Control Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SecurityControlEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Control Sort", "Security Domain", "Control Name", "Severity Label", "Evidence Status", "Coverage State", "Covered Entities", "Healthy Entities", "Affected Entities", "Health Rate", "Gap State", "Evidence Source", "Recommended Action", "Snapshot Date", "Metric Unit"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Control Sort", "Covered Entities", "Healthy Entities", "Affected Entities", "Health Rate", "Snapshot Date"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Control Sort", Int64.Type}, {"Security Domain", type text}, {"Control Name", type text}, {"Severity Label", type text}, {"Evidence Status", type text}, {"Coverage State", type text}, {"Covered Entities", Int64.Type}, {"Healthy Entities", Int64.Type}, {"Affected Entities", Int64.Type}, {"Health Rate", type number}, {"Gap State", type text}, {"Evidence Source", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Metric Unit", type text}}, "en-US")
+				in
+				    Typed
+

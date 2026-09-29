@@ -1,0 +1,38 @@
+/// Synthetic conformed geography.
+table Geography
+	lineageTag: 6f717040-0690-4185-a087-652d3aaf3295
+
+	/// Business attribute Geography Key.
+	column 'Geography Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e706557f-4aac-453b-9c7b-245eb3110900
+		summarizeBy: none
+		sourceColumn: Geography Key
+
+	/// Business attribute Country.
+	column Country
+		dataType: string
+		lineageTag: 731db2ed-aa9a-4f57-84c9-c3ec097f8897
+		dataCategory: Country
+		sourceColumn: Country
+
+	/// Business attribute Region.
+	column Region
+		dataType: string
+		lineageTag: fcf2fbdb-271e-44cb-ace2-acaeb4bc185e
+		sourceColumn: Region
+
+	partition 'Geography Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Geography Key" = Int64.Type, #"Country" = nullable text, #"Region" = nullable text], {
+				        {1, "France", "Europe"},
+				        {2, "Germany", "Europe"},
+				        {3, "Spain", "Europe"}
+				    })
+				in
+				    Source
+

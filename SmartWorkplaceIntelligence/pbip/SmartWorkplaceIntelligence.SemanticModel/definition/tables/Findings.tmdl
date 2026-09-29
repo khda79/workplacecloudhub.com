@@ -1,0 +1,229 @@
+/// Synthetic governed current issues and evidence-backed risk signals.
+table Findings
+	lineageTag: b1b8e433-dcb5-47da-8646-095d446f2569
+
+	/// Open findings with qualified evidence and actionable severity.
+	measure '# Actionable Findings' = CALCULATE(COUNTROWS('Findings'), KEEPFILTERS('Findings'[Finding Status] = "Open"), KEEPFILTERS('Findings'[Evidence Status] = "Observed"), KEEPFILTERS('Findings'[Severity Label] IN {"Critical", "High", "Medium"}))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 6ce3dd84-bf6d-434d-b320-77da18e48f1b
+
+	/// Distinct entity-type-aware keys affected by visible findings.
+	measure '# Affected Entities' = DISTINCTCOUNT('Findings'[Affected Entity Key])
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 5232b6e0-d786-40c8-8a24-1e3929b1b493
+
+	/// Distinct devices affected by visible findings.
+	measure '# Affected Devices' = CALCULATE(DISTINCTCOUNT('Findings'[Affected Entity Key]), KEEPFILTERS('Findings'[Affected Entity Type] = "Device"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 8dcce063-2273-429b-996c-58525e851769
+
+	/// Open qualified critical findings.
+	measure '# Critical Findings' = CALCULATE(COUNTROWS('Findings'), KEEPFILTERS('Findings'[Finding Status] = "Open"), KEEPFILTERS('Findings'[Evidence Status] = "Observed"), KEEPFILTERS('Findings'[Severity Label] = "Critical"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 8b99cc2c-68a8-4ffb-8d23-2f7b5dfc4973
+
+	/// Open qualified high findings.
+	measure '# High Findings' = CALCULATE(COUNTROWS('Findings'), KEEPFILTERS('Findings'[Finding Status] = "Open"), KEEPFILTERS('Findings'[Evidence Status] = "Observed"), KEEPFILTERS('Findings'[Severity Label] = "High"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 3886b5f2-99f2-46e7-8aef-5e2f6af728ed
+
+	/// Open qualified medium findings.
+	measure '# Medium Findings' = CALCULATE(COUNTROWS('Findings'), KEEPFILTERS('Findings'[Finding Status] = "Open"), KEEPFILTERS('Findings'[Evidence Status] = "Observed"), KEEPFILTERS('Findings'[Severity Label] = "Medium"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 9608d8af-7fd4-4bc2-b9ff-f428f7475036
+
+	/// Findings blocked by unavailable or invalid evidence.
+	measure '# Evidence-Blocked Findings' = CALCULATE(COUNTROWS('Findings'), KEEPFILTERS('Findings'[Evidence Status] IN {"Not Collected", "Source Error", "Unknown"}))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 8bdf8912-a6f3-48c9-9660-4bc5bdc2f6ca
+
+	/// Days between reporting date and latest qualified finding evidence.
+	measure 'Evidence Age Days' = VAR _evidenceDate = MAX('Findings'[Evidence Date]) VAR _reportingDate = MAX('Date'[Date]) RETURN IF(ISBLANK(_evidenceDate), BLANK(), DATEDIFF(_evidenceDate, _reportingDate, DAY))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 9698a351-12e8-4241-9b92-829f21a0c3be
+
+	/// Overall evidence status for visible findings.
+	measure 'Finding Evidence Status' = VAR _blocked = [# Evidence-Blocked Findings] RETURN IF(_blocked > 0, "Evidence Blocked", "Evidence Qualified")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 36526777-a459-4d91-bb34-8b8eb6cca959
+
+	/// Open evidence-backed current issues and risk signals affecting users.
+	measure '# User Risk Signals' = CALCULATE([# Actionable Findings], KEEPFILTERS('Findings'[Affected Entity Type] = "User"))
+		formatString: #,0
+		displayFolder: Risk Signals
+		lineageTag: 172d5716-8813-4848-95d3-baf0c9a052c8
+
+	/// Compact summary used when a page has no or few evidence-backed risk and incident signals.
+	measure 'Risk and Incident Summary' =
+			VAR _count = COALESCE([# Actionable Findings], 0)
+			RETURN IF(_count = 0, "No open evidence-backed signals", FORMAT(_count, "#,0") & " actionable evidence-backed signals")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: dfb29626-de06-45f9-8ebf-631234426a4d
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9abec1dc-0c68-4f2b-8aa8-18d28c83c7d8
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c4c92ddc-1ed0-4460-8612-7b52a3c6987c
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 290c0db4-5635-40c7-bf8a-47d4f9af3839
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 96eac9ba-5c4c-4a69-aef5-a1b92c72d3af
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Finding Type Key.
+	column 'Finding Type Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f096c172-06b6-4f17-b7cf-f0e05213d668
+		summarizeBy: none
+		sourceColumn: Finding Type Key
+
+	/// Business attribute Severity Label.
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 66e32f1a-df45-48e4-a5b7-8cadcb81f7d9
+		summarizeBy: none
+		sourceColumn: Severity Label
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Finding Category.
+	column 'Finding Category'
+		dataType: string
+		lineageTag: 1c9c5140-be8d-4c0b-9681-7c595b2b40ff
+		summarizeBy: none
+		sourceColumn: Finding Category
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 30edc44c-4ea3-447f-bead-deb9fe02792e
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Affected Entity Type.
+	column 'Affected Entity Type'
+		dataType: string
+		lineageTag: b4cfa2a6-db48-4ec7-855b-1f9554734212
+		summarizeBy: none
+		sourceColumn: Affected Entity Type
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Affected Entity Key.
+	column 'Affected Entity Key'
+		dataType: string
+		lineageTag: 8b355c37-af72-4624-9925-475adfe4f4fe
+		summarizeBy: none
+		sourceColumn: Affected Entity Key
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Recommended Action.
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 74b4e5d1-1ba7-4606-9adc-614dfcd5c795
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Source Contract.
+	column 'Source Contract'
+		dataType: string
+		lineageTag: abb16800-8c67-4f70-891f-fba94b3cbd49
+		summarizeBy: none
+		sourceColumn: Source Contract
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Finding Status.
+	column 'Finding Status'
+		dataType: string
+		lineageTag: 76324146-f735-4b5e-92bd-5a6ca7435bfa
+		summarizeBy: none
+		sourceColumn: Finding Status
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Date.
+	column 'Evidence Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: bf26a452-704e-4fe3-a9f9-a444e008a163
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+		variation Variation
+			isDefault
+			relationship: b28477eb-88ed-45b0-a707-231148632d2e
+			defaultHierarchy: LocalDateTable_a7b04572-0e01-4ac5-b43f-70dfcc411998.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: bd8ff3e6-e4a6-470c-98d3-d0c658cea987
+		summarizeBy: none
+		sourceColumn: User Key
+
+	partition 'Findings Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Service Key" = Int64.Type, #"Finding Type Key" = Int64.Type, #"User Key" = Int64.Type, #"Severity Label" = nullable text, #"Finding Category" = nullable text, #"Evidence Status" = nullable text, #"Affected Entity Type" = nullable text, #"Affected Entity Key" = nullable text, #"Recommended Action" = nullable text, #"Source Contract" = nullable text, #"Finding Status" = nullable text, #"Evidence Date" = nullable datetime], {
+				        {20260915, 1, 1, 1, 1, 2, "High", "Identity Hygiene", "Observed", "User", "USR-SYNTH-002", "Review account need and ownership", "DirectoryUsers/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 3, 2, null, "Critical", "Device Compliance", "Observed", "Device", "DEV-SYNTH-002", "Investigate policy and remediation state", "DeviceCompliance/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 13, 3, null, "High", "Backup Coverage", "Observed", "Mailbox", "MBX-SYNTH-002", "Validate policy scope and protection assignment", "BackupCoverage/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 14, 4, null, "Medium", "Security Evidence", "Not Collected", "Control", "CTRL-SYNTH-004", "Restore qualified collection before decision", "SecurityPosture/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 1, 5, 3, "High", "Identity Synchronization", "Observed", "User", "USR-SYNTH-003", "Validate synchronization scope and resolve the directory-to-cloud identity gap", "IdentityMatches/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 1, 6, 5, "Medium", "Identity Hygiene", "Observed", "User", "USR-SYNTH-005", "Confirm business ownership before enabling access or reclaiming licenses", "DirectoryActivity/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)},
+				        {20260915, 1, 1, 1, 7, 5, "Medium", "Ownership", "Observed", "User", "USR-SYNTH-005", "Assign an accountable manager and validate the joiner-mover-leaver record", "DirectoryUsers/1.0.0", "Open", #datetime(2026, 9, 15, 0, 0, 0)}
+				    })
+				in
+				    Source
+

@@ -1,0 +1,228 @@
+/// Private current Intune discovered-application evidence at application-version grain. Installation counts are source observations and do not represent distinct devices across products.
+table 'Application Inventory Evidence'
+	lineageTag: 39ee45a0-a8af-475c-8a44-bff960dde0a8
+
+	/// Distinct applications in the current Intune discovered-application evidence.
+	measure Applications = DISTINCTCOUNT('Application Inventory Evidence'[Application Name])
+		formatString: #,0
+		displayFolder: Applications | Current
+		lineageTag: 88d60a26-3497-4a1c-bfee-d188e1e4b39f
+
+	/// Distinct source application-version records in the current evidence.
+	measure 'Application Versions' = COUNTROWS('Application Inventory Evidence')
+		formatString: #,0
+		displayFolder: Applications | Current
+		lineageTag: 42f94dd9-def9-4a78-9be5-86dfa909f7a6
+
+	/// Distinct known publishers in the current evidence.
+	measure 'Application Publishers' = CALCULATE(DISTINCTCOUNT('Application Inventory Evidence'[Publisher]), KEEPFILTERS('Application Inventory Evidence'[Publisher State] = "Known"))
+		formatString: #,0
+		displayFolder: Applications | Current
+		lineageTag: 75d473d5-ff99-4e59-a251-407550a76a9e
+
+	/// Summed device-count observations across discovered application versions; not a distinct-device count across products.
+	measure 'Application Install Observations' = SUM('Application Inventory Evidence'[Device Count])
+		formatString: #,0
+		displayFolder: Applications | Current
+		lineageTag: 1dac7acc-68c5-4844-8791-90d6cb5e50c8
+
+	/// Applications with more than one observed version.
+	measure 'Fragmented Applications' = CALCULATE(DISTINCTCOUNT('Application Inventory Evidence'[Application Name]), KEEPFILTERS('Application Inventory Evidence'[Standardization State] IN {"Fragmented", "Highly fragmented"}))
+		formatString: #,0
+		displayFolder: Applications | Risk
+		lineageTag: a8a890da-9efc-4fc6-8988-dcdca2cf7c0c
+
+	/// Applications with at least twenty observed versions.
+	measure 'Highly Fragmented Applications' = CALCULATE(DISTINCTCOUNT('Application Inventory Evidence'[Application Name]), KEEPFILTERS('Application Inventory Evidence'[Risk Priority] = "High"))
+		formatString: #,0
+		displayFolder: Applications | Risk
+		lineageTag: 14428a0c-b9f8-4500-89d0-dd63e9e5a84f
+
+	/// Summed application observations that are not on the most prevalent version for their product.
+	measure 'Installations Outside Dominant Version' = SUM('Application Inventory Evidence'[Installs Outside Dominant Version])
+		formatString: #,0
+		displayFolder: Applications | Risk
+		lineageTag: 0e423a4f-30e1-4a7f-9d85-a96223835035
+
+	/// Share of application observations on the dominant version for each selected product scope.
+	measure 'Dominant Version Coverage (%)' = DIVIDE([Application Install Observations] - [Installations Outside Dominant Version], [Application Install Observations])
+		formatString: 0.0%
+		displayFolder: Applications | Standardization
+		lineageTag: a0c6b066-4dbf-4c7e-b78e-ef946986b177
+
+	/// Share of discovered applications with multiple observed versions.
+	measure 'Standardization Opportunity Rate (%)' = DIVIDE([Fragmented Applications], [Applications])
+		formatString: 0.0%
+		displayFolder: Applications | Standardization
+		lineageTag: a5a8ee6c-d323-4d82-8aa2-1b88e1518b0d
+
+	/// Secondary versions observed on five or fewer devices.
+	measure 'Long Tail Versions' = CALCULATE([Application Versions], KEEPFILTERS('Application Inventory Evidence'[Version Footprint State] = "Long tail version"))
+		formatString: #,0
+		displayFolder: Applications | Risk
+		lineageTag: d7a79991-1f8d-4d37-b0ae-adeb1162bdf4
+
+	/// Application-version records without a known publisher.
+	measure 'Unknown Publisher Versions' = CALCULATE([Application Versions], KEEPFILTERS('Application Inventory Evidence'[Publisher State] = "Unknown"))
+		formatString: #,0
+		displayFolder: Applications | Data Quality
+		lineageTag: c03ea25d-9ae2-4c87-afdb-01284a520476
+
+	/// Share of selected application observations represented by each application.
+	measure 'Application Install Share (%)' = DIVIDE([Application Install Observations], CALCULATE([Application Install Observations], REMOVEFILTERS('Application Inventory Evidence'[Application Name])))
+		formatString: 0.0%
+		displayFolder: Applications | Current
+		lineageTag: 6566ea2f-282c-4e56-89f3-df659c2f56ac
+
+	/// Compact evidence disclosure for application pages.
+	measure 'Application Evidence Ribbon Text' = VAR _Weeks = CALCULATE(DISTINCTCOUNT('Application Trend Evidence'[Snapshot Week]), REMOVEFILTERS('Application Trend Evidence')) RETURN "Observed apps · " & FORMAT(_Weeks, "0") & " weeks · Current " & FORMAT(MAX('Application Inventory Evidence'[Snapshot Date]), "yyyy-MM-dd")
+		formatString: @
+		displayFolder: Applications | Evidence
+		lineageTag: 517e8156-3947-4667-b1f9-0bc05b4afc32
+
+	column 'Application Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 8646f263-0819-45a5-9a5d-33b81c4eba0c
+		summarizeBy: none
+		sourceColumn: Application Source ID
+
+	column 'Application Name'
+		dataType: string
+		lineageTag: 56c2d058-4bdb-4ace-bf1b-1e905de188ad
+		summarizeBy: none
+		sourceColumn: Application Name
+
+	column 'Application Version'
+		dataType: string
+		lineageTag: b726abae-f2dc-4a4a-81af-dd273d06c9ef
+		summarizeBy: none
+		sourceColumn: Application Version
+
+	column Publisher
+		dataType: string
+		lineageTag: a16ff5e1-865c-4de6-9145-5eb09be41a7e
+		summarizeBy: none
+		sourceColumn: Publisher
+
+	column 'Publisher State'
+		dataType: string
+		lineageTag: adb2ae98-27c4-433b-a421-a46a80da9356
+		summarizeBy: none
+		sourceColumn: Publisher State
+
+	column Platform
+		dataType: string
+		lineageTag: 36f73bb8-6715-4d4e-8c2d-c588be4db3c1
+		summarizeBy: none
+		sourceColumn: Platform
+
+	column 'Device Count'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 3bbca05f-331d-40db-90b3-bcbefffa0a62
+		summarizeBy: sum
+		sourceColumn: Device Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Product Total Installs'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: bb08e7a1-ee01-40d2-ac0a-e317b6448529
+		summarizeBy: sum
+		sourceColumn: Product Total Installs
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Product Version Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 089d6bc7-bcd9-41f7-b286-92e10354fccd
+		summarizeBy: sum
+		sourceColumn: Product Version Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dominant Version Share (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 878989cb-1d6a-4076-86c3-da1533c203c7
+		summarizeBy: sum
+		sourceColumn: Dominant Version Share (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Installs Outside Dominant Version'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: e1d6b422-401f-4508-9447-42450c567d3e
+		summarizeBy: sum
+		sourceColumn: Installs Outside Dominant Version
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Standardization State'
+		dataType: string
+		lineageTag: 53acd067-e308-4727-afd0-9ec861e34de7
+		summarizeBy: none
+		sourceColumn: Standardization State
+
+	column 'Version Footprint State'
+		dataType: string
+		lineageTag: d5ad21a1-f62c-4184-afe4-a21af82a86f2
+		summarizeBy: none
+		sourceColumn: Version Footprint State
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: f204fac0-e341-4144-8054-b3c7618adbfc
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: c0f24646-5738-4501-aba5-b2abfe367253
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 50c0dba2-835f-467a-9c7f-4688c64fe935
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: fb74ea06-15bb-4aff-9b4e-c1419788d31c
+			defaultHierarchy: LocalDateTable_907dcf50-c645-4908-abf0-a270c18cfb44.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 6585ced0-cb13-4f45-bdff-d1d00bfc02cb
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: bb793505-d403-4c86-b9d9-eb10e4258cb9
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	partition 'Application Inventory Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ApplicationInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Application Source ID", "Application Name", "Application Version", "Publisher", "Publisher State", "Platform", "Device Count", "Product Total Installs", "Product Version Count", "Dominant Version Share (%)", "Installs Outside Dominant Version", "Standardization State", "Version Footprint State", "Risk Priority", "Recommended Action", "Snapshot Date", "Snapshot Week", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Device Count", "Product Total Installs", "Product Version Count", "Dominant Version Share (%)", "Installs Outside Dominant Version", "Snapshot Date"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Application Source ID", type text}, {"Application Name", type text}, {"Application Version", type text}, {"Publisher", type text}, {"Publisher State", type text}, {"Platform", type text}, {"Device Count", Int64.Type}, {"Product Total Installs", Int64.Type}, {"Product Version Count", Int64.Type}, {"Dominant Version Share (%)", type number}, {"Installs Outside Dominant Version", Int64.Type}, {"Standardization State", type text}, {"Version Footprint State", type text}, {"Risk Priority", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Snapshot Week", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

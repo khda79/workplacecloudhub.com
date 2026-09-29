@@ -1,0 +1,155 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Collaboration Trend Evidence'
+	lineageTag: c9714337-06cf-4d24-8d91-d4499d9ad95a
+
+	/// Weekly share of objects active in the last 30 days.
+	measure 'Trend Active Object Rate (%)' = DIVIDE(SUM('Collaboration Trend Evidence'[Active Objects 30D]), SUM('Collaboration Trend Evidence'[Total Objects]))
+		formatString: 0.0%
+		displayFolder: Collaboration | Trend
+		lineageTag: 15952f36-b27b-421c-a86f-146bfc6cef17
+
+	/// Weekly thirty-day active-user rate where user history exists.
+	measure 'Trend Adoption Rate (%)' = DIVIDE(SUM('Collaboration Trend Evidence'[Active Users 30D]), SUM('Collaboration Trend Evidence'[Eligible Users]))
+		formatString: 0.0%
+		displayFolder: Collaboration | Trend
+		lineageTag: fcf3f4ed-1c7d-4bd5-92a2-41427afe3a1c
+
+	/// Weekly collaboration-object count.
+	measure 'Trend Collaboration Objects' = SUM('Collaboration Trend Evidence'[Total Objects])
+		formatString: #,0
+		displayFolder: Collaboration | Trend
+		lineageTag: 022f6dae-a013-4635-beb7-a3e3cd4c3c94
+
+	/// Percentage-point change in the consolidated active-object rate between the first and last selected observed weeks.
+	measure 'Active Object Rate Period Change' = VAR _FirstWeek = MINX(ALLSELECTED('Collaboration Trend Evidence'[Snapshot Week]), 'Collaboration Trend Evidence'[Snapshot Week]) VAR _LastWeek = MAXX(ALLSELECTED('Collaboration Trend Evidence'[Snapshot Week]), 'Collaboration Trend Evidence'[Snapshot Week]) VAR _First = CALCULATE([Trend Active Object Rate (%)], REMOVEFILTERS('Collaboration Trend Evidence'[Snapshot Week]), 'Collaboration Trend Evidence'[Snapshot Week] = _FirstWeek) VAR _Last = CALCULATE([Trend Active Object Rate (%)], REMOVEFILTERS('Collaboration Trend Evidence'[Snapshot Week]), 'Collaboration Trend Evidence'[Snapshot Week] = _LastWeek) RETURN IF(ISBLANK(_First) || ISBLANK(_Last), "--", FORMAT((_Last - _First) * 100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Collaboration | Trend
+		lineageTag: 694d582c-ca1d-4973-8bbf-7175a8c363f8
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 2dfe1dbf-149b-461f-b632-fd68a2420de1
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 0741e885-869b-471d-916d-7ca9dc4e235b
+			defaultHierarchy: LocalDateTable_23ebdc86-a087-40cc-9e59-977a41aaba93.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: e59523c5-20bf-474f-a52d-5103719c991f
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 68b049f2-479e-4d0e-8358-c5156ab12639
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+		annotation SummarizationSetBy = Automatic
+
+	column Service
+		dataType: string
+		lineageTag: 9868c54a-88c4-48a9-9dc2-516e5e7a5210
+		summarizeBy: none
+		sourceColumn: Service
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Total Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 4789c7b6-aa66-4cb0-b155-08104ab985c6
+		summarizeBy: sum
+		sourceColumn: Total Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active Objects 30D'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: a380d595-a2fa-4d5d-851d-6439f7ae238d
+		summarizeBy: sum
+		sourceColumn: Active Objects 30D
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Inactive Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6202e3ce-d2f5-48dc-97f8-989d5215cc82
+		summarizeBy: sum
+		sourceColumn: Inactive Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Orphaned Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 130a6c89-6348-4c62-a26d-3e6329659b95
+		summarizeBy: sum
+		sourceColumn: Orphaned Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Eligible Users'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 40d7df34-b95a-414e-acdf-57d01c68e51a
+		summarizeBy: sum
+		sourceColumn: Eligible Users
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active Users 30D'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: b29a2d2d-ce1f-47b9-ae5c-238f07dcbdc5
+		summarizeBy: sum
+		sourceColumn: Active Users 30D
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Adoption Rate (%)'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: 4410f6e2-5c3f-48c4-a9c2-82c873c14a70
+		summarizeBy: sum
+		sourceColumn: Adoption Rate (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 4d56ca9f-d805-4fde-92df-2cb925ac355d
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Collaboration Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Snapshot Week", "Service", "Total Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Eligible Users", "Active Users 30D", "Adoption Rate (%)", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Total Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Eligible Users", "Active Users 30D", "Adoption Rate (%)"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Snapshot Week", type text}, {"Service", type text}, {"Total Objects", Int64.Type}, {"Active Objects 30D", Int64.Type}, {"Inactive Objects", Int64.Type}, {"Orphaned Objects", Int64.Type}, {"Eligible Users", Int64.Type}, {"Active Users 30D", Int64.Type}, {"Adoption Rate (%)", type number}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

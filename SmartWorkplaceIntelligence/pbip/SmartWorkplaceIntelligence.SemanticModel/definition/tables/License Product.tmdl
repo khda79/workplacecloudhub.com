@@ -1,0 +1,43 @@
+/// Synthetic license product catalogue.
+table 'License Product'
+	lineageTag: fb6cfc91-5ce4-40cf-ba1b-ddbed9e971ab
+
+	/// Business attribute License Product Key.
+	column 'License Product Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9a67a28d-c2ef-46da-8bcb-d916ee3c28e4
+		summarizeBy: none
+		sourceColumn: License Product Key
+
+	/// Business attribute License Product.
+	column 'License Product'
+		dataType: string
+		lineageTag: 9bbfbbb9-5a26-45ea-82bb-03733e8416f7
+		sourceColumn: License Product
+
+	/// Business attribute License Family.
+	column 'License Family'
+		dataType: string
+		lineageTag: 65c040ae-569e-4401-82ef-ba337bf2b038
+		sourceColumn: License Family
+
+	/// Business attribute Service Plan Family.
+	column 'Service Plan Family'
+		dataType: string
+		lineageTag: eedeaf21-4dfe-4681-973d-86a25d22ddf7
+		sourceColumn: Service Plan Family
+
+	partition 'License Product Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"License Product Key" = Int64.Type, #"License Product" = nullable text, #"License Family" = nullable text, #"Service Plan Family" = nullable text], {
+				        {1, "Workplace Suite E3", "Workplace Suite", "Workplace Suite"},
+				        {2, "Workplace Suite E5", "Workplace Suite", "Workplace Suite"},
+				        {3, "Frontline Suite F3", "Frontline Suite", "Frontline Suite"}
+				    })
+				in
+				    Source
+

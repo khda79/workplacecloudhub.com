@@ -1,0 +1,153 @@
+/// History disabled in current-state-only mode. Empty compatibility schema retained for existing model dependencies.
+table 'Endpoint Experience Trend Evidence'
+	lineageTag: 65e78def-8d34-4d60-86ca-0cf95418e599
+
+	/// Average Endpoint Analytics score in the weekly DATA-ALL aggregate.
+	measure 'Trend Endpoint Analytics Score' = MAX('Endpoint Experience Trend Evidence'[Endpoint Analytics Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: a7751fff-47f8-49ee-a3e2-6bd9d328edc7
+
+	/// Average startup score in the weekly DATA-ALL aggregate.
+	measure 'Trend Startup Score' = MAX('Endpoint Experience Trend Evidence'[Startup Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: b9b28e40-e1bc-464b-ac97-6b9c03e262fe
+
+	/// Average application reliability score in the weekly DATA-ALL aggregate.
+	measure 'Trend App Reliability Score' = MAX('Endpoint Experience Trend Evidence'[App Reliability Score])
+		formatString: 0.0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: a41d2979-97a3-412c-9563-39fd1eb53c28
+
+	/// Endpoint Analytics covered devices in the weekly DATA-ALL aggregate.
+	measure 'Trend Endpoint Analytics Covered Devices' = SUM('Endpoint Experience Trend Evidence'[Endpoint Analytics Covered Devices])
+		formatString: #,0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: 3e44ef70-ca11-45ea-8327-e9b9bcd7ea7d
+
+	/// Devices below an Endpoint Analytics score of 50 in the weekly DATA-ALL aggregate.
+	measure 'Trend Endpoint Analytics Below 50 Devices' = SUM('Endpoint Experience Trend Evidence'[Endpoint Analytics Below 50 Devices])
+		formatString: #,0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: 090ca9af-bc8a-450f-b34a-196ee58c2052
+
+	/// Devices with stop errors in the weekly DATA-ALL aggregate.
+	measure 'Trend Devices with Stop Errors' = SUM('Endpoint Experience Trend Evidence'[Devices with Stop Errors])
+		formatString: #,0
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: 19170ff8-df1a-4969-968a-7a721a901d3f
+
+	/// Score change between the first and last observed Endpoint Analytics weekly snapshots.
+	measure 'Endpoint Analytics Score Period Change' = VAR _FirstObservedDate = MINX(ALLSELECTED('Endpoint Experience Trend Evidence'[Snapshot Date]), 'Endpoint Experience Trend Evidence'[Snapshot Date]) VAR _LastObservedDate = MAXX(ALLSELECTED('Endpoint Experience Trend Evidence'[Snapshot Date]), 'Endpoint Experience Trend Evidence'[Snapshot Date]) VAR _FirstObservedValue = CALCULATE([Trend Endpoint Analytics Score], 'Endpoint Experience Trend Evidence'[Snapshot Date] = _FirstObservedDate) VAR _LastObservedValue = CALCULATE([Trend Endpoint Analytics Score], 'Endpoint Experience Trend Evidence'[Snapshot Date] = _LastObservedDate) RETURN IF(ISBLANK(_FirstObservedValue) || ISBLANK(_LastObservedValue), "--", FORMAT(_LastObservedValue - _FirstObservedValue, "+0.0;-0.0;0.0"))
+		formatString: @
+		displayFolder: Endpoint Experience | Trend
+		lineageTag: 465b13d8-81a7-46db-971e-98856d8c716e
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 3d80c4b1-fa8f-49a2-b5de-8e2431dee5b7
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: c30a3e94-64e0-4a8a-99b9-e2af3f53cede
+		summarizeBy: none
+		sourceColumn: Snapshot Week
+
+	column 'Endpoint Analytics Covered Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 8c388f27-cbba-41e2-987d-2b7892ad4cf3
+		summarizeBy: none
+		sourceColumn: Endpoint Analytics Covered Devices
+
+	column 'Endpoint Analytics Score'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 9aec3423-6daf-432d-89c3-c8eb2adefbfc
+		summarizeBy: none
+		sourceColumn: Endpoint Analytics Score
+
+	column 'Endpoint Analytics Below 50 Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 4aa7727b-b324-4f69-9fdd-b84d2e82e19f
+		summarizeBy: none
+		sourceColumn: Endpoint Analytics Below 50 Devices
+
+	column 'Startup Covered Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 037880fa-fbaa-4d23-a486-7ee369a6ba75
+		summarizeBy: none
+		sourceColumn: Startup Covered Devices
+
+	column 'Startup Score'
+		dataType: double
+		formatString: 0.0
+		lineageTag: ffeb9ad9-def7-4baa-9a60-147e9e4f6ed4
+		summarizeBy: none
+		sourceColumn: Startup Score
+
+	column 'Startup Below 50 Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a1f8dc8d-523d-4970-b5fe-33501ad2cc1d
+		summarizeBy: none
+		sourceColumn: Startup Below 50 Devices
+
+	column 'App Reliability Covered Devices'
+		dataType: int64
+		formatString: #,0
+		lineageTag: f36ca7a5-d60d-494b-8006-8325490a2884
+		summarizeBy: none
+		sourceColumn: App Reliability Covered Devices
+
+	column 'App Reliability Score'
+		dataType: double
+		formatString: 0.0
+		lineageTag: 342e99bb-a7f3-4933-873d-df2b46a4d9ea
+		summarizeBy: none
+		sourceColumn: App Reliability Score
+
+	column 'Devices with Stop Errors'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 0dd388f0-a2a0-4f80-8724-1abce6565451
+		summarizeBy: none
+		sourceColumn: Devices with Stop Errors
+
+	column 'Devices with Boot Time over 60s'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 986bf903-0e1a-4ac7-8dbd-28345598e455
+		summarizeBy: none
+		sourceColumn: Devices with Boot Time over 60s
+
+	column 'Devices with Sign-in Time over 30s'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 3cd6d957-aae5-4742-8f9d-53a516512a80
+		summarizeBy: none
+		sourceColumn: Devices with Sign-in Time over 30s
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 6f88a32e-ba54-4590-8308-96593d6156ef
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	partition 'Endpoint Experience Trend Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EndpointExperienceTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Snapshot Week", "Endpoint Analytics Covered Devices", "Endpoint Analytics Score", "Endpoint Analytics Below 50 Devices", "Startup Covered Devices", "Startup Score", "Startup Below 50 Devices", "App Reliability Covered Devices", "App Reliability Score", "Devices with Stop Errors", "Devices with Boot Time over 60s", "Devices with Sign-in Time over 30s", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Endpoint Analytics Covered Devices", "Endpoint Analytics Score", "Endpoint Analytics Below 50 Devices", "Startup Covered Devices", "Startup Score", "Startup Below 50 Devices", "App Reliability Covered Devices", "App Reliability Score", "Devices with Stop Errors", "Devices with Boot Time over 60s", "Devices with Sign-in Time over 30s"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Snapshot Week", type text}, {"Endpoint Analytics Covered Devices", Int64.Type}, {"Endpoint Analytics Score", type number}, {"Endpoint Analytics Below 50 Devices", Int64.Type}, {"Startup Covered Devices", Int64.Type}, {"Startup Score", type number}, {"Startup Below 50 Devices", Int64.Type}, {"App Reliability Covered Devices", Int64.Type}, {"App Reliability Score", type number}, {"Devices with Stop Errors", Int64.Type}, {"Devices with Boot Time over 60s", Int64.Type}, {"Devices with Sign-in Time over 30s", Int64.Type}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+

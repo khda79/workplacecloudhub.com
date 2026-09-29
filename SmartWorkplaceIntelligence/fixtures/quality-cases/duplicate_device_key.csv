@@ -1,0 +1,4 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,DeviceId,SnapshotDate,Platform
+1.0.0,Devices,ManagedDevices,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-DUPLICATE-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-DUPLICATE,2026-09-15,Windows
+1.0.0,Devices,ManagedDevices,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-QUALITY-DUPLICATE-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-DUPLICATE,2026-09-15,Windows
+
