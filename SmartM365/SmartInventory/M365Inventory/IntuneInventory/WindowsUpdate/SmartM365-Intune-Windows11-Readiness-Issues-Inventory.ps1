@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.26
+1.27
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -46,14 +46,16 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.26"
+$ScriptVersion="1.27"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
+$script:LogReady=$false
+$failure=$null
 $script:ErrorCount=0
 $script:GeneratedFileCount=0
-function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
-function Warn([string]$m){$script:WarningCount++;Write-Warning $m}
+function Log([string]$m){ if($script:LogReady){ WriteLog -Message $m -Level INFO } else { Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) } }
+function Warn([string]$m){ $script:WarningCount++; if($script:LogReady){ WriteLog -Message $m -Level WARNING } else { Write-Warning $m } }
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
 function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); $p = Resolve-SmartM365JsonConfigurationPath -Path $p; if(!(Test-Path $p)){ $t=(Get-SmartM365JsonTemplateName -Path $p); if(!(Test-Path $t)){throw "Missing config template: $t"}; Write-SmartM365JsonBytesAtomically -Path $p -Bytes ([IO.File]::ReadAllBytes($t)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
 function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){$pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}}}; if(!$changed){break} }; return $r }
@@ -292,8 +294,12 @@ try{
   AssertResolvedPath 'DataLastFolder' $DataLastFolder
   AssertResolvedPath 'OutputFolder' $OutputFolder
   AssertResolvedPath 'LatestFolder' $LatestFolder
-  $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}
+  $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $true; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
+  InitializeScriptEnvironment -OutputPath $OutputFolder -LogFileName $ScriptName -CallerScriptPath $PSCommandPath | Out-Null
+  Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+  $script:LogReady=$true
+  Log "Log environment initialized for $ScriptName v$ScriptVersion (EnableSharePointUpload=$($global:EnableSharePointUpload))."
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
 
@@ -819,6 +825,7 @@ try{
   $files=ExportIssues -rows $issues.ToArray()
   $files += PublishWeeklyHistory -files $files
   $script:GeneratedFileCount=@($files).Count
+  if($global:csvGeneratedPaths){ foreach($f in @($files)){ if($f){ [void]$global:csvGeneratedPaths.Add([string]$f) } } }
   Log "Generated Windows 11 readiness issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
@@ -827,14 +834,21 @@ catch {
   $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
   $failure = $_
-  Write-Host ("{0} [ERROR] {1}: {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $failure.FullyQualifiedErrorId, $failure.Exception.Message)
+  if($script:LogReady){ WriteLog -Message ("{0}: {1}" -f $failure.FullyQualifiedErrorId, $failure.Exception.Message) -Level ERROR } else {
+    Write-Host ("{0} [ERROR] {1}: {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $failure.FullyQualifiedErrorId, $failure.Exception.Message)
+  }
   Write-Host $failure.InvocationInfo.PositionMessage
   Write-Host $failure.ScriptStackTrace
   if ($failure.Exception.InnerException) { Write-Host $failure.Exception.InnerException.ToString() }
   throw
 }
 finally {
-  Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
+  if($script:LogReady){
+    try{ Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile }catch{ Write-Warning ("Transcript finalization failed: {0}" -f $_.Exception.Message) }
+    Complete-SmartM365ExecutionContext -Status $(if($script:CompletionStatus -eq 'Failed'){'Failed'}else{'Auto'}) -ErrorRecord $failure -FailureStage $(if($failure){'Inventory'}else{''})
+  } else {
+    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
+  }
 }
 
 # SIG # Begin signature block
