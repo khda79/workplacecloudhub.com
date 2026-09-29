@@ -25,7 +25,7 @@ Run `SmartM365\SmartInventory\Launchers\Cloud\Test-SmartM365-WorkplaceEvidence-P
 
 Verify the effective production profile points to the intended sibling DATA-LAST and DATA-ALL. DATA-POWERBI is derived from their parent, not hard-coded. The two private classification workbooks must already exist in that parent. Preserve all weekly history. Do not copy client mappings into the code package.
 
-Keep EnableSharePointUpload=false. Keep legacy tenantless evidence refused unless its origin is explicitly approved. Do not weaken age, missing-source, tenant or empty-table checks merely to pass preflight. Provision scratch disk outside synchronized DATA for source snapshots, intermediate outputs and retained diagnostics. No full-run duration estimate has yet been qualified.
+For this first qualification, set EnableSharePointUpload=false in the runtime JSON (the template default is true since v0.1.12) so the batch stays local; run logs are still uploaded except in Offline mode. Keep legacy tenantless evidence refused unless its origin is explicitly approved. Do not weaken age, missing-source, tenant or empty-table checks merely to pass preflight. Provision scratch disk outside synchronized DATA for source snapshots, intermediate outputs and retained diagnostics. No full-run duration estimate has yet been qualified.
 
 ## 3. Full run after collection
 

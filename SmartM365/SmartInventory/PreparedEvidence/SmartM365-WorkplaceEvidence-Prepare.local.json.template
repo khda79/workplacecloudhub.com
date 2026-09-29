@@ -8,7 +8,7 @@
   "PreparedSourceAgeOverrides": {"M365_License_Prices.csv": 744},
   "PreparedAllowLegacyTenantless": false,
   "PreparedAllowEmptyTables": [],
-  "EnableSharePointUpload": false,
+  "EnableSharePointUpload": true,
   "PreparedSharePointFolderPath": "",
   "PreparedMappingSharePointFolderPath": "",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",

@@ -34,7 +34,7 @@ The Cloud launchers follow the existing prod convention:
 
 ValidateOnly downloads/structurally checks the two workbooks, captures the required sources and checks transport age, CSV record shape and every row TenantKey on the verified copies. It aggregates validation failures with relative paths, including history. Later live-source changes do not invalidate these copies. It writes temporary source copies and small private audit files but does not generate prepared CSVs, upload or notify, nor certify collection success or business completeness. Offline suppresses all SharePoint access and notifications: it requires the two workbooks already present in the tenant data root and never downloads missing files. A full offline run still writes logs, temporary snapshots, prepared CSVs and the validated local pointer.
 
-The normal orchestrator job uses neither switch. Existing configured notifications apply. SharePoint mapping reads are independent of EnableSharePointUpload; direct output upload remains disabled by default. Read access requires the existing app's Sites.Selected role and a read (or existing write) grant on the selected site. No permission or tenant grant is changed by this code.
+The normal orchestrator job uses neither switch. Existing configured notifications apply. SharePoint mapping reads are independent of EnableSharePointUpload. Since v0.1.12, EnableSharePointUpload defaults to true in the template, so normal runs transfer the validated batch; set it to false in the runtime JSON to keep the batch local. Run logs and transcripts are written to LOG-ALL and uploaded to SharePoint in every mode except Offline, independently of the batch transfer setting. Read access requires the existing app's Sites.Selected role and a read (or existing write) grant on the selected site. No permission or tenant grant is changed by this code.
 
 ## Validation and history
 
@@ -94,7 +94,7 @@ Version 0.1.10 uses the same transfer implementation for normal enabled publicat
 
 The local publication lock is held during transfer to block replacement/retirement by publishers sharing the same DATA-POWERBI root. It is not a distributed SharePoint lock: all writers for a tenant must use that shared root and avoid unrelated simultaneous cloud publication. Readers must wait for verified completion and synchronization; pointer-last publication is not an atomic OneDrive synchronization or a transaction across Power BI queries. An upload/read-back failure before pointer publication leaves the old root pointer untouched by this run. If pointer upload was attempted but its verification fails, activation is uncertain and the script explicitly reports failure; do not refresh until a successful retry. Retrying resends the same immutable files, with no recalculation or remote deletion.
 
-Normal runs transfer when EnableSharePointUpload is enabled. The hourly scheduler entry alone does not change that setting. TransferOnly is a manual recovery mode, not a replacement hourly job. Remote end-to-end qualification is still required; synthetic transport tests do not establish live SharePoint success.
+Normal runs transfer when EnableSharePointUpload is enabled (template default true since v0.1.12; an existing runtime JSON keeps its local value). The hourly scheduler entry alone does not change that setting. TransferOnly is a manual recovery mode, not a replacement hourly job. Remote end-to-end qualification is still required; synthetic transport tests do not establish live SharePoint success.
 
 ## Qualification boundary
 

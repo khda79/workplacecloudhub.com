@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.11
+    0.1.12
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
@@ -23,6 +23,8 @@ $coreLoaded = $false
 $phase = 'Configuration'
 $output = ''
 $mappingRoot = ''
+$batchUploadEnabled = $false
+$transcriptStarted = $false
 function ConvertTo-PreparedAgeOverrides {
     param([AllowNull()]$InputObject)
     $result = @{}
@@ -79,14 +81,28 @@ try {
     if ([string]::IsNullOrWhiteSpace($product)) { $product = Join-Path (Split-Path $smartRoot -Parent) 'SmartWorkplaceIntelligence' }
     $pipeline = Join-Path $product 'scripts/PreparedEvidencePipeline.psm1'
     if (-not (Test-Path -LiteralPath $pipeline)) { throw 'Deploy SmartWorkplaceIntelligence scripts/config beside SmartM365, or configure WorkplaceIntelligenceRootPath.' }
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.58' -ErrorAction Stop
     $coreLoaded=$true
-    # Never inherit an enabled global upload during an offline/local qualification.
-    $global:EnableSharePointUpload = $TransferOnly -or (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic) -and [bool](ConfigValue 'EnableSharePointUpload'))
+    # Prepared batch transfer: explicit TransferOnly, or a normal run with EnableSharePointUpload (default true).
+    $batchUploadEnabled = $TransferOnly -or (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic) -and [bool](ConfigValue 'EnableSharePointUpload'))
+    # Run logs and transcript are uploaded by the shared completion step in every mode except Offline,
+    # independently of the prepared batch transfer. Offline never contacts SharePoint.
+    $global:EnableSharePointUpload = -not $Offline
+    $global:SharePointSiteHostname = [string](ConfigValue 'SharePointSiteHostname')
+    $global:SharePointSitePath = [string](ConfigValue 'SharePointSitePath')
+    $global:SharePointLibraryDisplayName = [string](ConfigValue 'SharePointLibraryDisplayName')
+    $global:SharePointTargetFolderPath = [string](ConfigValue 'SharePointTargetFolderPath')
+    $global:AppId = [string](ConfigValue 'AppId')
+    $global:TenantId = [string]$effective.TenantId
+    $global:Thumb = [string](ConfigValue 'Thumb')
+    $global:Thumbprint = $global:Thumb
     $work = ConfigValue 'PreparedWorkRootPath'
     if ([string]::IsNullOrWhiteSpace($work)) { $work=Join-Path ([IO.Path]::GetTempPath()) "SmartWorkplaceIntelligence/$($effective.ProfileKey)" }
     if ($WorkforceDiagnostic) { $output=Join-Path $work 'workforce-diagnostics' }
     InitializeScriptEnvironment -OutputPath $output -LogFileName $scriptName -CallerScriptPath $PSCommandPath | Out-Null
+    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+    $transcriptStarted = $true
+    WriteLog -Message "Prepared batch SharePoint transfer enabled: $batchUploadEnabled; run log SharePoint upload enabled: $($global:EnableSharePointUpload)." -Level INFO
     Import-Module $pipeline -Force
     if ($ConvertMetadata) {
         $phase='Convert prepared metadata names'
@@ -102,7 +118,7 @@ try {
         if(Test-Path -LiteralPath (Join-Path $output 'current.json')){throw 'Legacy prepared metadata is preserved while JSON transport policy is Readers. Activate the approved JsonText deployment before preparation or transfer.'}
     }
     # Fail before downloads/copying/calculations when cloud publication is enabled but incomplete.
-    if ($global:EnableSharePointUpload) {
+    if ($batchUploadEnabled) {
         Import-Module (Join-Path $product 'scripts/PreparedSharePointTransfer.psm1') -Force
         $dataCloudRoot=ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath (ConfigValue 'SharePointTargetFolderPath')
         $cloudRoot=Resolve-PreparedSharePointFolder -ConfiguredPath (ConfigValue 'PreparedSharePointFolderPath') -NormalizedDataRoot $dataCloudRoot
@@ -186,7 +202,7 @@ try {
     }
     $result = Invoke-PreparedEvidencePipeline @params
     if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }
-    if (-not $ValidateOnly -and $global:EnableSharePointUpload) {
+    if (-not $ValidateOnly -and $batchUploadEnabled) {
         $phase='SharePoint batch transfer'
         $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $result.BatchId
         WriteLog -Message "SharePoint batch and pointer verified: $($transfer.BatchId); files=$($transfer.VerifiedFiles); audit=$($transfer.AuditPath)." -Level INFO
@@ -209,6 +225,7 @@ try {
     } else { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$_.Exception.Message) }
 } finally {
     if ($mappingRoot) { try { Remove-PreparedMappingWorkbooks -WorkRoot $work -MappingRoot $mappingRoot } catch { Write-Warning "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" } }
+    if ($transcriptStarted) { try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { Write-Warning "Transcript finalization failed: $($_.Exception.Message)" } }
     if ($coreLoaded) { Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Success'}) -ErrorRecord $failure -FailureStage $(if($failure){$phase}else{''}) }
     else { Write-SmartM365CompletionBanner -Status 'Failed' }
 }
