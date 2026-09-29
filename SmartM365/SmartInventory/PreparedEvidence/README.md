@@ -16,7 +16,7 @@ Both downloads must succeed and contain the expected worksheets before source pl
 
 ## Hourly orchestration
 
-WorkplaceEvidence-Prepare is enabled in the job template at 00:00 through 23:00, every day (orchestrator local time), with MissedRunPolicy=Skip. An elected owner and the WorkplaceEvidence-Prepare concurrency key prevent overlapping instances. Required collector dependencies remain configured; ordering alone does not prove successful or complete collection.
+WorkplaceEvidence-Prepare is enabled in the job template at 00:00 through 23:00, every day (orchestrator local time), with MissedRunPolicy=Skip. An elected owner and the WorkplaceEvidence-Prepare concurrency key prevent overlapping instances. Required collector dependencies remain configured; ordering alone does not prove successful or complete collection. The job uses `DependencyMode=FreshSuccess`: each enabled scheduled dependency must have a successful run that finished within its automatic freshness window (about 3 h hourly, 26 h daily, 170 h weekly), even while a newer occurrence is running or after it failed; otherwise the occurrence waits.
 
 The elected owner must advertise SharedRuntime and Graph with Sites.Selected for the mapping downloads. This eligibility requirement does not grant permissions; the existing site-level grant must already allow the two reads.
 

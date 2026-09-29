@@ -255,6 +255,13 @@ function Sync-SmartM365OrchestratorJobsManifest {
                 $existingJob.Arguments = (@($existingArguments.Trim(), $requiredExternalActionArgument) | Where-Object { $_ }) -join ' '
                 $updatedJobNames.Add($jobName) | Out-Null
             }
+            # Add dependency-policy keys introduced by the template; never overwrite an existing value.
+            foreach ($policyKey in @('DependencyMode', 'DependencyMaxAgeHours')) {
+                if ($templateJobsByName[$jobName].PSObject.Properties[$policyKey] -and -not $existingJob.PSObject.Properties[$policyKey]) {
+                    $existingJob | Add-Member -NotePropertyName $policyKey -NotePropertyValue $templateJobsByName[$jobName].$policyKey
+                    if (-not $updatedJobNames.Contains($jobName)) { $updatedJobNames.Add($jobName) | Out-Null }
+                }
+            }
         }
 
         if ($missingJobs.Count -eq 0 -and $updatedJobNames.Count -eq 0) {
@@ -314,7 +321,8 @@ function Test-SmartM365OrchestratorJobsDocument {
         $roles = if ($job.PSObject.Properties['RequiredGraphAppRoles']) { @($job.RequiredGraphAppRoles) } else { @() }
         if (@($roles).Count -gt 0 -and 'Graph' -notin $capabilities) { $errors.Add("Job '$name': RequiredGraphAppRoles requires Graph.") }
         if ($job.PSObject.Properties['EstimatedDurationMinutes'] -and [double]$job.EstimatedDurationMinutes -le 0) { $errors.Add("Job '$name': EstimatedDurationMinutes must be greater than zero.") }
-        foreach ($propertyName in @('TimeoutMinutes', 'MaxRetries', 'RetryDelaySeconds', 'MinimumSuccessDurationSeconds', 'DependencyWaitTimeoutMinutes')) {
+        if ($job.PSObject.Properties['DependencyMode'] -and $job.DependencyMode -and [string]$job.DependencyMode -notin @('LatestOccurrence', 'FreshSuccess')) { $errors.Add("Job '$name': DependencyMode must be LatestOccurrence or FreshSuccess.") }
+        foreach ($propertyName in @('TimeoutMinutes', 'MaxRetries', 'RetryDelaySeconds', 'MinimumSuccessDurationSeconds', 'DependencyWaitTimeoutMinutes', 'DependencyMaxAgeHours')) {
             if ($job.PSObject.Properties[$propertyName] -and [double]$job.$propertyName -lt 0) { $errors.Add("Job '$name': $propertyName cannot be negative.") }
         }
         if (-not $job.PSObject.Properties['Schedule'] -or $null -eq $job.Schedule) { $errors.Add("Job '$name': Schedule is required.") }

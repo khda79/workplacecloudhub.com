@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.32
+1.5.33
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.32"
+$ScriptVersion = "1.5.33"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1172,6 +1172,16 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['DependencyWaitTimeoutMinutes'] -and $null -ne $RawJob.DependencyWaitTimeoutMinutes) {
         $dependencyWaitTimeoutMinutes = [int]$RawJob.DependencyWaitTimeoutMinutes
     }
+    $dependencyMode = 'LatestOccurrence'
+    if ($RawJob.PSObject.Properties['DependencyMode'] -and $RawJob.DependencyMode) { $dependencyMode = [string]$RawJob.DependencyMode }
+    if ($dependencyMode -notin @('LatestOccurrence', 'FreshSuccess')) {
+        $Errors.Add("Job '$name': DependencyMode must be 'LatestOccurrence' or 'FreshSuccess'.")
+    }
+    $dependencyMaxAgeHours = 0
+    if ($RawJob.PSObject.Properties['DependencyMaxAgeHours'] -and $null -ne $RawJob.DependencyMaxAgeHours) {
+        $dependencyMaxAgeHours = [int]$RawJob.DependencyMaxAgeHours
+        if ($dependencyMaxAgeHours -lt 0) { $Errors.Add("Job '$name': DependencyMaxAgeHours cannot be negative.") }
+    }
     $powerShellEdition = 'PowerShell7'
     if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
     if ($powerShellEdition -notin @('PowerShell7', 'WindowsPowerShell')) {
@@ -1229,6 +1239,8 @@ function ConvertTo-NormalizedJob {
         RequiredLogPatterns = $requiredLogPatterns
         MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
         DependencyWaitTimeoutMinutes = $dependencyWaitTimeoutMinutes
+        DependencyMode = $dependencyMode
+        DependencyMaxAgeHours = $dependencyMaxAgeHours
         PowerShellEdition = $powerShellEdition
         Schedule = [pscustomobject]@{
             Type = $scheduleType
@@ -1511,6 +1523,77 @@ function Get-LatestPastOccurrence {
     $occurrences = Get-JobOccurrencesInWindow -Job $Job -WindowStart $Now.Date.AddDays(-8) -WindowEnd $Now
     if ($occurrences.Count -eq 0) { return $null }
     return $occurrences[$occurrences.Count - 1]
+}
+
+function Get-OrchestratorDependencyMaxAge {
+    # Explicit override, otherwise the longest gap between two scheduled occurrences plus 2 hours:
+    # about 3 h for hourly, 26 h for once-daily and 170 h for once-weekly dependencies.
+    param(
+        [Parameter(Mandatory = $true)]$DependencyJob,
+        [int]$OverrideHours = 0,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    if ($OverrideHours -gt 0) { return [double]$OverrideHours }
+    $occurrences = @(Get-JobOccurrencesInWindow -Job $DependencyJob -WindowStart $Now.Date.AddDays(-15) -WindowEnd $Now)
+    $maxGapHours = 24.0
+    if ($occurrences.Count -ge 2) {
+        $maxGapHours = 0.0
+        for ($index = 1; $index -lt $occurrences.Count; $index++) {
+            $gapHours = ($occurrences[$index] - $occurrences[$index - 1]).TotalHours
+            if ($gapHours -gt $maxGapHours) { $maxGapHours = $gapHours }
+        }
+    }
+    return ($maxGapHours + 2.0)
+}
+
+function Get-OrchestratorDependencyFreshStatus {
+    # FreshSuccess dependency rule: Ready when the dependency's most recent Success or
+    # CompletedWithWarnings claim finished within the allowed age, even if a newer occurrence
+    # is running or failed. No fresh success means Waiting; stale data is never accepted.
+    param(
+        [Parameter(Mandatory = $true)]$DependencyJob,
+        [Parameter(Mandatory = $true)][double]$MaxAgeHours,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    # Evaluated every tick while a dependent waits: cache results to limit shared-storage reads.
+    $cacheKey = '{0}|{1}' -f $DependencyJob.Name, $MaxAgeHours
+    if ($script:DependencyFreshCache.ContainsKey($cacheKey) -and $Now -lt $script:DependencyFreshCache[$cacheKey].Until) {
+        return $script:DependencyFreshCache[$cacheKey].Status
+    }
+    $script:DependencyFreshCache[$cacheKey] = @{ Status = 'Waiting'; Until = $Now.AddMinutes(2) }
+
+    $jobFolder = Join-Path -Path $script:Settings.ElectionClaimsPath -ChildPath ([string]$DependencyJob.Name)
+    if (-not (Test-Path -LiteralPath $jobFolder -PathType Container)) { return 'Waiting' }
+    $nowUtc = $Now.ToUniversalTime()
+    $freshnessCutoffUtc = $nowUtc.AddHours(-1 * $MaxAgeHours)
+    # A claim's occurrence precedes its completion by at most the job timeout.
+    $occurrenceCutoffUtc = $freshnessCutoffUtc.AddMinutes(-1 * [math]::Max(0, [int]$DependencyJob.TimeoutMinutes))
+    $stamps = @(Get-ChildItem -LiteralPath $jobFolder -File -Force -ErrorAction Stop |
+        ForEach-Object {
+            $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name
+            if ($null -ne $occurrenceUtc -and $occurrenceUtc -ge $occurrenceCutoffUtc -and $occurrenceUtc -le $nowUtc) { $_.Name.Substring(0, 19) }
+        } |
+        Sort-Object -Unique -Descending)
+
+    foreach ($stamp in $stamps) {
+        $claimPath = Join-Path -Path $jobFolder -ChildPath ($stamp + '.json')
+        if (-not (Get-SmartM365JsonReadPath $claimPath -Optional)) { continue }
+        try { $claim = (Read-SmartM365JsonDocument $claimPath).Document }
+        catch { continue }
+        if ([string]$claim.JobName -ne [string]$DependencyJob.Name -or [string]$claim.Status -notin @('Success', 'CompletedWithWarnings')) { continue }
+        $completedUtc = ConvertTo-OrchestratorUtcTime -Value $claim.UpdatedAtUtc
+        if ($null -eq $completedUtc) { continue }
+        if ($completedUtc.UtcDateTime -ge $freshnessCutoffUtc) {
+            $readyUntil = $Now.AddMinutes(10)
+            $expiresAt = $completedUtc.UtcDateTime.AddHours($MaxAgeHours).ToLocalTime()
+            if ($expiresAt -lt $readyUntil) { $readyUntil = $expiresAt }
+            $script:DependencyFreshCache[$cacheKey] = @{ Status = 'Ready'; Until = $readyUntil }
+            return 'Ready'
+        }
+    }
+    return 'Waiting'
 }
 
 # ==========================================================
@@ -2519,7 +2602,8 @@ function Get-OrchestratorPeerHealthSnapshot {
                 $pendingJobs | Where-Object {
                     if ([string]$_.Name -ine [string]$job.Name) { return $false }
                     $pendingOccurrence = ConvertFrom-StateTime -Text ([string]$_.ScheduledOccurrence)
-                    return $null -ne $pendingOccurrence -and [math]::Abs(($pendingOccurrence - $expectedOccurrence).TotalSeconds) -le 60
+                    # A newer due occurrence supersedes the expected one (frequent schedules during the launch grace).
+                    return $null -ne $pendingOccurrence -and ($pendingOccurrence - $expectedOccurrence).TotalSeconds -ge -60
                 } | Select-Object -First 1
             )
             if ($pendingMatch.Count -eq 1) {
@@ -4613,6 +4697,16 @@ function Invoke-LaunchPhase {
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
 
                 if ($script:Settings.DistributedSchedulingEnabled -and $null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Elected') {
+                    if ($job.DependencyMode -eq 'FreshSuccess') {
+                        $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $depJob -OverrideHours ([int]$job.DependencyMaxAgeHours) -Now $Now
+                        $freshStatus = 'Waiting'
+                        try { $freshStatus = Get-OrchestratorDependencyFreshStatus -DependencyJob $depJob -MaxAgeHours $maxAgeHours -Now $Now }
+                        catch { Write-OrchestratorRuntimeUpdateWarning -Key ("fresh-dependency:{0}:{1}" -f $name, $dep) -Message ("Job {0}: freshness of dependency {1} could not be read; waiting: {2}" -f $name, $dep, $_.Exception.Message) -Now $Now }
+                        if ($freshStatus -eq 'Ready') { continue }
+                        $deferred = $true
+                        $blockingDependencies.Add(("{0} (no success within {1} h)" -f $dep, [math]::Round($maxAgeHours, 1)))
+                        continue
+                    }
                     # The owner may be another host, or may have changed since our last run.
                     # Shared claims also expose remote retries and in-progress executions.
                     $sharedDependencyStatus = Get-OrchestratorSharedDependencyStatus -Job $depJob -Now $Now
@@ -5455,6 +5549,7 @@ $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastLongOperationHeartbeat = [datetime]::MinValue
 $script:LastClaimRetentionRun = [datetime]::MinValue
+$script:DependencyFreshCache = @{}
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
 $script:LastRuntimeUpdateCheckUtc = [datetime]::MinValue

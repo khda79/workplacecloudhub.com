@@ -1581,7 +1581,8 @@
       ],
       "RequiredGraphAppRoles": ["Sites.Selected"],
       "EstimatedDurationMinutes": 30,
-      "ConcurrencyKey": "WorkplaceEvidence-Prepare"
+      "ConcurrencyKey": "WorkplaceEvidence-Prepare",
+      "DependencyMode": "FreshSuccess"
     }
   ]
 }
