@@ -248,7 +248,7 @@ source means completion of that collector's requested scope, not universal
 inventory coverage. AD search-base/domain restrictions and disabled membership
 collection are explicitly partial. Power BI Desktop refresh and real
 Graph/Exchange/AD/SharePoint behavior remain environment-specific qualification
-activities. The separate SmartWorkplaceDashboard sources are not included in
+activities. The separate SmartWorkplaceIntelligence sources are not included in
 this package.
 
 The detailed offline review for this historical beta is retained locally and

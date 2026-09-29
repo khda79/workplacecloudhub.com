@@ -69,8 +69,8 @@ function Get-LiteralArrayAssignment {
 
 $teamsPath = Join-Path $SourceRoot 'SmartInventory/M365Inventory/Teams/SmartM365-Teams-Inventory.ps1'
 $teamsPhonePath = Join-Path $SourceRoot 'SmartInventory/M365Inventory/Teams/SmartM365-TeamsPhonePstnUsage-Inventory.ps1'
-$dashboardSchemaPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-schema.json'
-$dashboardSelectionPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-selection.json'
+$intelligenceSchemaPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-schema.json'
+$intelligenceSelectionPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-selection.json'
 $finOpsContractPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json'
 
 $teamsModule = Import-OfflineFunctions -Path $teamsPath -Names @(
@@ -332,8 +332,8 @@ try {
         Assert-Offline ($source -notmatch '\$subject="(?:SMART ?365|\[SmartM365\])') 'Teams alert subject still hard-codes a legacy product prefix.'
     }
 
-    Test-OfflineCase 'Teams CSV schemas match Dashboard contracts' {
-        $schema = Get-Content -LiteralPath $dashboardSchemaPath -Raw | ConvertFrom-Json
+    Test-OfflineCase 'Teams CSV schemas match Intelligence contracts' {
+        $schema = Get-Content -LiteralPath $intelligenceSchemaPath -Raw | ConvertFrom-Json
         $identity = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId')
         $pairs = @(
             @{ Variable = 'teamColumns'; File = 'M365_Teams_Teams.csv' },
@@ -399,9 +399,9 @@ try {
     }
 
     Test-OfflineCase 'Teams consumers keep selected source contracts' {
-        $selection = Get-Content -LiteralPath $dashboardSelectionPath -Raw | ConvertFrom-Json
+        $selection = Get-Content -LiteralPath $intelligenceSelectionPath -Raw | ConvertFrom-Json
         foreach ($file in @('M365_Teams_Teams.csv', 'M365_Teams_Members.csv', 'M365_Teams_Channels.csv', 'M365_Teams_Guests.csv', 'M365_Teams_PhoneUserUsage.csv')) {
-            Assert-Offline ($selection.includedFiles -contains $file) "Dashboard no longer selects $file."
+            Assert-Offline ($selection.includedFiles -contains $file) "Intelligence no longer selects $file."
         }
         $contract = Get-Content -LiteralPath $finOpsContractPath -Raw | ConvertFrom-Json
         $phone = @($contract.Sources | Where-Object Key -eq 'M365TeamsPhoneUserUsage')
@@ -432,8 +432,8 @@ if ($failed.Count -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNeUKpO0bw8IBw
-# t4dn1ywzeRepcSQYHL0lk9uRJ748hqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5WjaEHmE7P6iG
+# GJKpSQrAtCO6gRgLayfZdUFDK1K6JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -566,31 +566,31 @@ if ($failed.Count -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICPDLSZpoM5XDROBosBxVtl2ypzZgYEnQzXitTMM7Uz2MA0GCSqG
-# SIb3DQEBAQUABIIBgCqmnanrM6omAMqGRwHiPIEdA35ewMA6cZ4Sx2PsieCI1Ub5
-# qoUyOHO6XOnFIoZtVZmDDQ6Y3UL1KSfptkyR9MHgj7hubUOcvyqaT/TnxYcvp9Xp
-# +xAbgTLXwBnrfjOpVIwwhzRJgpbNsCOvNh+9He/1JgLuVLiUt5LIMDg18rg1K0hH
-# R4xDJjyy6AgUVzvxBaqrnUDbPBkKlDzVmp4P6iBQhWLCypTde5Pj1N18oYRnUmyB
-# 69BYhtanaohaOct635OCViOBQ0Z4JgSDtBmoekkYcIQ13DNF0jowKmGTVY+INnc3
-# D0ukDFn8dVahqRDj1eBid2gB9yY0Fbk524YVIJHzt0FarZLM52IMx6bVLQxnr2vH
-# A5ncIziGFs9m8RAa3OL+zjmlxN3cMOm7Mt8hkXZHZL/O0fQgwOzKgkokSM9LVDRU
-# 62K6Cl5ohBg4HTQuSmAnp8u6Q60YcJ+hqooT2xMq8YYnG/twUppyU7uX1hQi5PFU
-# r7mvxjItXzHtpRdYD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK3xSEvSa1E/KnWzGUqDjV1GHXYmSEnCX2sQLzaGI7BWMA0GCSqG
+# SIb3DQEBAQUABIIBgAo0UJb4O8BidkeOEdGxMBdhOcK10l2Wq5EPXLkk7lJIr+Ga
+# xgEpyjXFPHoGF7kilOZAV3C1kqDFxKh7+WI5z30cpy6k9NJN8B0eddeLJjtPLcwb
+# im7DAbuQKwC+nul32t1KtqrqLyHZcWqw36KwQPDxMydQC4qfcT3QB45R3D3aRIwq
+# aLSa70fh0Oo4P9s/iPM0fhAEngqIq/VlfmbOiTy1mBcNnFl1uahJGr0ngnd8Zk/H
+# lg1nOCb3RDN9dbLeTOetQgPNcLPCXLOVwFf49+UNYLMx7GPvPiAZZnZGkwpyFwm7
+# nMzAjnH0M8pvyv7YaOePAQRvt33QtQwmHB/+P8NfqJ6iYYQIgbMYu0B2voI97VyG
+# e7GbI/FckJoKRruLHBhYOVnKjrLkWd14QekymDQsdzY0oam5xpZdpXuCs31OwS9n
+# QH8sv9oHxZjff97dsKxF3P1kk3E4PcRGB+2MIAi5o7gQjVD7sWt2zrQOSmDNP/ZV
+# QYT0UZ0x17JPy+1kqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjExNDE5
-# NTdaMC8GCSqGSIb3DQEJBDEiBCA0UrXPD7ZhuctJlQC5TmRP+vLicZJzaJdPj1Ge
-# DOEvVjANBgkqhkiG9w0BAQEFAASCAgBrggxqbHR5ujMIvVS7+T8CWeJpytNaw3y5
-# 1E6pYlUg+zLpHIgvSj0/5PUfjhJRR8IdnRrM0vWkV7pihWLyG8pAzHzPBVx00s8G
-# ZiqWsFsSBYODR+PRIcnyMrwkQhZOP/y6P2GC+tp4sQ1wPvthJNT2+ENjvO+rKTxQ
-# aEhnWi60hYVdPEt41NhLdz1tPBoEtlRPASfkbSAEsmIYstc7mfor2blnWkmHgKnu
-# cEZ1sLsGpaTnguSmbj4QP6z9jn8X8oJUADDUx6ZbkvfEp2yHSD+gdJqgWQwoIGhP
-# iLwfr5XeRwAN4wqNCRWND2Wl0ik2lDe614Hc0Uwa8On9u0RgvWh1aUpA6HDMGB0h
-# DZ+vg5/XHKImwJi3JcPXguYkGauZxDiuuOWYMz81kk2M+ozMBcyCtiGXE9IVb+Wn
-# n5kfqFdJBohfNMgmKeFL1b325xjoPpXl2kHSNTzZhgB2iTcOC23q/hGaNf2f2kVJ
-# sF2RsM/hhHP2MJONq74mvfUh0bJqx8ykUfTObRHwJWkKNYP08sM6V91X7b05lhWi
-# 1qFeknRtypCU/hlRTFIK5HRb8elwWyeVZB6B4BmUBzgA2/kfPQbfFkCQCgUy0lQ4
-# sD9FtR8ngsknGsiJDWYHHPE9qTFQ0R6gm2WarcijA6+emhRzN7r50eZvlr2RycNU
-# ITyXvIq5Ig==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkyMjM2
+# NDZaMC8GCSqGSIb3DQEJBDEiBCCLMhk2niDj4T736ULUKkAZQEGz1pqJnEEMmMYd
+# LILyFzANBgkqhkiG9w0BAQEFAASCAgCn6tOckb1RnU74XB2TvG+4hYDeYSAZLqbp
+# X7Cmltivf0VoBsdzZxaiAD09mR3ioC33AUYtvLwg3bb8jDIcK1FkEk8MAwFLaNs5
+# tAbwF9ySxYXGahpbYYPZqftzF9zuSASViZa8tNNnXQxmyVE3soTSZoLQCNmdOhS0
+# Qssv8GxxyRWigz0564oICYP5wzeq0JSUzbV375Fd7CP9IF79AYT2rHXgwOqHmKdB
+# e7ovO2WjcU7N2m0UHOw24onigoQMbI4a6+wC06wp9V0p/jgKWWsyybUHaknqhamI
+# ZCWXU7Q+uc52i0p21e/gPFZmN5s7pRQwMlJj6rtpvS3SGIYIeKTll4dl3yYWqIeT
+# tVi/A5Y9aPajm4RM+csIZx12AxMP//dRhjSabQMEBJAURjeZPeEi2mEt4hVg3IqV
+# FfzegTTeMmTHM4vg1zUX2IlBYn5jwCf7ixUrSDrMEIlJAtDKwky7Xz9qW177M2mv
+# tQMlW/ABu412NebPdKudy6Q0+ry4eW+Ii2nc3KpRYhaRObo0WRg9hP51nYmS6o6R
+# bawYtBxuRxXTviDAOAHbO5xBdSk8iQOsc0kqcBMPev7bZL7lC4zxEsWDbIZzAVBO
+# zUXJ5gtRTbBaSeoAYBXytYdEPDsCqSJU4feJEv1e4offvbE0ZYuH7EPdbIBnfNvo
+# ga2rftN04w==
 # SIG # End signature block

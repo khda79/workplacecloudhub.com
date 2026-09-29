@@ -736,11 +736,11 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
     }
 
     Test-OfflineCase 'Consumer contracts retain required Graph CSV sources' {
-        $dashboardSchema=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-schema.json') -Raw|ConvertFrom-Json
-        $dashboardSelection=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceDashboard/source-selection.json') -Raw|ConvertFrom-Json
+        $intelligenceSchema=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-schema.json') -Raw|ConvertFrom-Json
+        $intelligenceSelection=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-selection.json') -Raw|ConvertFrom-Json
         $finops=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json') -Raw|ConvertFrom-Json
         $required=@('M365_Users_Active.csv','M365_Users_Activity.csv','M365_Licenses_Users.csv','M365_Entra_Devices.csv','Intune_Devices_Inventory.csv','Intune_Devices_Compliance.csv','Intune_Devices_UpgradeEligibility.csv','Intune_WindowsUpdate_Status.csv','M365_Teams_Teams.csv','M365_Teams_PhoneUserUsage.csv','M365_Copilot_UserUsage.csv')
-        $serialized=(ConvertTo-Json @($dashboardSchema,$dashboardSelection,$finops) -Depth 30)
+        $serialized=(ConvertTo-Json @($intelligenceSchema,$intelligenceSelection,$finops) -Depth 30)
         foreach($file in $required){Assert-Offline ($serialized.Contains($file)) "Consumer contract missing $file."}
     }
 
@@ -768,8 +768,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+9e9VjS0fz1O9
-# Qj4pwXuume/VH3XKh3LhdcRLzEXUBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZSXwmE3JWWOnE
+# AHi62eJ8FLAmTQvA/wu1FIveCLaF26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -902,31 +902,31 @@ if($summary.Failed -gt 0){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMkAhJjYavRw0LovQ29KwsTigfyTGAWPnq962NgTBcQVMA0GCSqG
-# SIb3DQEBAQUABIIBgA8JSgoVF1G15IZ6G7qU9CUBaYm7uWS5tKrWC5cpwjbPqblG
-# Xgpm5Of6ClMtYw2GEYzerI3txeVEhROrLScFrDDIC7fFIOyPlhrxaF3GiW1cAAf+
-# cyn1MJ/+TsJHxE6kQUyn/buy7N+EvxrvmIQpjkG0zBbl+mYILQ4ETQR/gjl5vzv5
-# KoyvQO/OLkEWsy1qnu2vH1gCwVqIA5NJGc4G6t3du7VEp9ID9SZ3UXkFJnLSzVUk
-# 4sRRh4EF5ThnLEFmuoRJbv1uqmpvBqdAsQoKzqa1xQDdKC5dnu7yG6Y+PqXoUUoU
-# 1+ivfXwRzzqUPt8gsPrSR/lX9an7mWU21T2BddZqCY9gim4tE4imk8Ug3NgemzgE
-# CnA7uE/56KQo3skgXqlSsxjDXwfqeyBv4DAV+LKwPC0iMkxoXHHpjA4lY50t2euK
-# UKt3QmYmqE3vOLHBoKW/3N24oIwGIK2pOo1t4vWkWqmMksqIoh5Bcl9lcBswJz5+
-# woNvA3fesSMbBqo9j6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAixRny+Lq5hLhzgMxPoDZasofmj7LmAFMffjESPbzlBMA0GCSqG
+# SIb3DQEBAQUABIIBgC0TfO3b5FMmUuERmUIAaZpuHU6w0+bjhXeSjIls112zzIV8
+# zxdn6kWEji2Pzbcw90UTDdbJw60bP59+WHOg0m57DIp6GQ/Skxt4WnKxMkc5vtKl
+# pIn4e7RfoQrZjYgdducsDRCcNnX3x8ucBk2DoApOyPG1C4XuNHw4chaJPeyOVuFx
+# 9WEN/zSTgRWrhoiSGGn/fY04h6oPmfqwIAgFBXY3THDCfEqrauEk7pLT/QWAx47J
+# WkYLsGdxsGSqrzKosiob+tR4mC4mvA5rqU+HObw4zmqhpmRXf1BX0p4OzZM6ShJn
+# jqSu1cPyGJzsnWg1xkL+sq0i3sBQ0/Y4iNTQwDbe1xKH8ZQ/1wN7oWzDI/XLkkcu
+# oIMiUXNvxcM31rwrKTLe/AB9Skkr9LVCykJ0js7Oz2gFZF+ECSF92nlu2fmDJNXH
+# 4/WEikyOV9g9KyuXaBHmvN62qOozLqwnMm89zPY3q3GhIeGfRBbv94CHg0FtvenR
+# urf+ToIfMsPbG4u6G6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCDj9CZSax6BAty2DRYSEzkM/3oUNCOidJoZNbSt
-# 3xdsyDANBgkqhkiG9w0BAQEFAASCAgA/SkY9Vqd6/AH1sdiZqxu0l4duQi1/xdVF
-# /+b7v2aPrAQZTFNSNbzVRhHl1+JCkYBFuHXFdW+lraPw6OII1RjqlYriZZPqCpCb
-# eqs6nmuqtPeKNG2xS8wYGvlRQYE5GiDvFdgCNp2+0qEFGVp3yb/spHaqWEXOIEZX
-# gNK8e6KdR1Ln/HOM+3GYZC1pfDUrzmexTo04x6DjJkPbq4n75xy8727gdfd6oKZB
-# arcFtuN1ADafQ2IQwL2OR2u4g0z03lxjmcX5zFhXseEv88QoacZaNZe6okN4Bogc
-# xcetwmKEhQ5mK7Y2pT7yBQ0zRuxA+asDjgsMHXAvy65Plxfmsaa+mDgS6ufRutow
-# 137bzG5pI/3go781GhLiz36xQvrrKbIZ7GZy7WOa0u/y+ho2TQ0reWew63gzXmrK
-# v8b2OnsCgGmowFvovV5UflPDWOjEXgNJ6QrMChsJb74lcPcVQ4Mj0IAy1571LLQI
-# hUy1TEyp29O6CR2DcgE6VzvteLn7V27e4bY1r0x8oX/dXSjyoj8m0WTyCVv1cUPe
-# cmSuk1tKqmPxH34NX9t7zcx98jtPZPnzGllFw9hXvC8ASr8SnCFs8Ijd9mgSxYtJ
-# HNfrWefBmny+1bF5Btv8HlxwBqo3hPu9poAZEeEb+poBzSRMHf9rrqVOOGuiVvtE
-# 040DK/Ld5g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkyMjM2
+# NDVaMC8GCSqGSIb3DQEJBDEiBCB26TWf7uzR5MAqQGwIk1GEOtGMDpmROTdsX4zb
+# izEU8DANBgkqhkiG9w0BAQEFAASCAgBgHZAsrw1vbjX17zE3R1MUKjXlQLp+PaHP
+# rRSRZtzhyd3Yji7sGp2j3QWGw4whnZ0ecYISIikUiY2b4unClRYReF3Udl3mQ8fE
+# QDVNbR7ECYfoEdwgfDThEpI9LIcHIUOr3Qrzbzaue/DiwBTVMISV3eBtrBvURUsb
+# 1iah7XxXYyNGG4rakltCj7xz30mOI33xvZwgNLbPVqm4j3M5RHZ7jZDGDXtJ98UK
+# LSm3DP7kUjLyWtCFyuvJ5Z7Ds2yOR5UZI0Rw1HYROhx2t0hferIfb19bx+Fytd+y
+# wEjrz1oSz73Xoaj7fJnuTckQsJCQKuYBwXVxZVxawJJrhgUBUqZ7dvEE4tKcA++K
+# Z38654I+cvt7xKCoyddqZVHSS8a41CjDgO68re+qYUQoAoTl09eimlZti7mBpYN8
+# gdK3CjK2MABblf9N5Ay9KKAm3lYLtvDpd8m/bLrgJyl4/puy03i1aPeKz8VgR0+l
+# sLORMKZEbZaUBSbGvb8f78T7t7/oIHii+47eig0DRMGhHKapIL+mrLyB4ZxwJr6p
+# 584qskzRJKb7Gb1T5C2Rht/akNIEAwZBqPELG834y0y4I96tlYtKlI18faxg3xLK
+# YGNwltWom3jySMsmeDlYOflzLlAvoBQI1847oMs86mXes3asx04NrdDEUyOr/G1m
+# rYMV0EM+uw==
 # SIG # End signature block
