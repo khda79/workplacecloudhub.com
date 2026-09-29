@@ -1,0 +1,64 @@
+/// Governed logical source entity catalogue.
+table 'Data Source'
+	lineageTag: b38db3bd-67ff-4430-b407-529694ca5687
+
+	/// Business attribute Data Source Key.
+	column 'Data Source Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0a3824a3-1bd1-44f2-b527-0a5bc3434cd5
+		summarizeBy: none
+		sourceColumn: Data Source Key
+
+	/// Business attribute Source Domain.
+	column 'Source Domain'
+		dataType: string
+		lineageTag: f2ae5bef-686b-4f00-afae-3bda62ca0f04
+		sourceColumn: Source Domain
+
+	/// Business attribute Source Name.
+	column 'Source Name'
+		dataType: string
+		lineageTag: 5d46e4e8-2a1f-4dc6-968a-7501ff523af5
+		sourceColumn: Source Name
+
+	/// Business attribute Source Family.
+	column 'Source Family'
+		dataType: string
+		lineageTag: d87dea6a-a25c-4eab-8c9f-9be4bec7d315
+		sourceColumn: Source Family
+
+	/// Business attribute Source Entity.
+	column 'Source Entity'
+		dataType: string
+		lineageTag: ce56f6ed-9ab7-4de5-8a1b-4e32b9f7ac6f
+		sourceColumn: Source Entity
+
+	/// Business attribute Freshness Target Hours.
+	column 'Freshness Target Hours'
+		dataType: int64
+		lineageTag: 6ab87ca9-2a5f-406a-a3bc-9707ba620408
+		summarizeBy: none
+		sourceColumn: Freshness Target Hours
+
+	/// Business attribute Required Flag.
+	column 'Required Flag'
+		dataType: boolean
+		lineageTag: d0d9c758-2cf7-4917-9801-2314c6d77db6
+		sourceColumn: Required Flag
+
+	partition 'Data Source Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Data Source Key" = Int64.Type, #"Source Domain" = nullable text, #"Source Name" = nullable text, #"Source Family" = nullable text, #"Source Entity" = nullable text, #"Freshness Target Hours" = Int64.Type, #"Required Flag" = nullable logical], {
+				        {1, "Operations", "DirectoryUsers", "Operations", "DirectoryUsers", 24, true},
+				        {2, "Operations", "ManagedDevices", "Operations", "ManagedDevices", 24, true},
+				        {3, "Operations", "EndpointMeasurements", "Operations", "EndpointMeasurements", 24, true},
+				        {4, "Operations", "SecurityPosture", "Operations", "SecurityPosture", 24, true},
+				        {5, "Operations", "BackupCoverage", "Operations", "BackupCoverage", 24, true}
+				    })
+				in
+				    Source
+

@@ -1,0 +1,141 @@
+/// Business-facing semantic model backed by current private SmartM365 evidence and observed DATA-ALL histories. Legacy synthetic tables remain temporarily for compatibility but are not used by report pages.
+model SmartWorkplaceIntelligence
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	discourageImplicitMeasures
+	sourceQueryCulture: en-US
+	maxParallelismPerRefresh: 1
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
+
+annotation PBI_QueryOrder = ["Date","Tenant","Environment","Organization","Geography","User","Device","Application","License Product","Service","Group","Team","Site","Mailbox","Data Source","Finding Type","Report Metadata","User Snapshots","User Activities","Identity Matches","User License Assignments","License Capacity","Device Snapshots","Device Compliance Snapshots","Device Matches","Windows Lifecycle Assessments","Endpoint Experience Measurements","Application Installations","Collaboration Usage","Content Usage","Mailbox Snapshots","Mailbox Matches","Backup Coverage","Security Posture Observations","Source Runs","Source Coverage","Data Quality Results","Findings","User Device Relationships","User Group Memberships","Team Memberships","Mailbox Permissions","Service Relationships","Executive KPI Trends","User Directory Observations","Identity Security Status","Conditional Access Coverage","Endpoint Security Status","Device Inventory Evidence","User Inventory Evidence","License Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","License Optimization Evidence","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","GetSmartInventoryFolder","GetSmartInventoryFile"]
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+ref table Date
+ref table Tenant
+ref table Environment
+ref table Organization
+ref table Geography
+ref table User
+ref table Device
+ref table Application
+ref table 'License Product'
+ref table Service
+ref table Group
+ref table Team
+ref table Site
+ref table Mailbox
+ref table 'Data Source'
+ref table 'Finding Type'
+ref table 'Report Metadata'
+ref table 'User Snapshots'
+ref table 'User Activities'
+ref table 'Identity Matches'
+ref table 'User License Assignments'
+ref table 'License Capacity'
+ref table 'Device Snapshots'
+ref table 'Device Compliance Snapshots'
+ref table 'Device Matches'
+ref table 'Windows Lifecycle Assessments'
+ref table 'Endpoint Experience Measurements'
+ref table 'Application Installations'
+ref table 'Collaboration Usage'
+ref table 'Content Usage'
+ref table 'Mailbox Snapshots'
+ref table 'Mailbox Matches'
+ref table 'Backup Coverage'
+ref table 'Security Posture Observations'
+ref table 'Source Runs'
+ref table 'Source Coverage'
+ref table 'Data Quality Results'
+ref table Findings
+ref table 'User Device Relationships'
+ref table 'User Group Memberships'
+ref table 'Team Memberships'
+ref table 'Mailbox Permissions'
+ref table 'Service Relationships'
+ref table 'Executive KPI Trends'
+ref table 'User Directory Observations'
+ref table 'Identity Security Status'
+ref table 'Conditional Access Coverage'
+ref table 'Endpoint Security Status'
+ref table DateTableTemplate_b24e4abb-ee4b-49b2-9882-957599ce3aa1
+ref table LocalDateTable_975b6c35-8bb1-4f3d-a39b-7f73fb68c00e
+ref table LocalDateTable_ab3547e2-cc3e-4859-b585-ddc0b959c470
+ref table LocalDateTable_0e067407-fa48-4653-bed4-bd560ca242d8
+ref table LocalDateTable_224137e9-4fb1-4b15-8c63-ab2635f24d56
+ref table LocalDateTable_db4727be-32c4-4cef-85a9-8b3b83f7f111
+ref table LocalDateTable_0a080a09-8c9b-4ecd-b1d6-928b95ea4abf
+ref table LocalDateTable_a7b04572-0e01-4ac5-b43f-70dfcc411998
+ref table LocalDateTable_c9c293c5-cf73-4433-897e-aa085f83eb42
+ref table 'Device Inventory Evidence'
+ref table 'Device Operational Signals'
+ref table 'Device Risk Evidence Summary'
+ref table 'User Inventory Evidence'
+ref table 'User Activity History Evidence'
+ref table 'Workforce Trend Evidence'
+ref table 'Identity Reconciliation Evidence'
+ref table 'Workforce Operational Signals'
+ref table 'Windows Lifecycle Trend Evidence'
+ref table 'Endpoint Experience Trend Evidence'
+ref table 'Application Inventory Evidence'
+ref table 'Application Trend Evidence'
+ref table 'Application Operational Signals'
+ref table 'Collaboration Adoption Evidence'
+ref table 'Collaboration Object Evidence'
+ref table 'Collaboration Trend Evidence'
+ref table 'Collaboration Operational Signals'
+ref table 'Content Storage Evidence'
+ref table 'Content Storage Trend Evidence'
+ref table 'Content Storage Operational Signals'
+ref table 'Backup Mailbox Evidence'
+ref table 'Backup Operational Signals'
+ref table 'Data Trust Evidence'
+ref table 'Data Trust Operational Signals'
+ref table 'License Evidence'
+ref table 'Mailbox Evidence'
+ref table 'Security Control Evidence'
+ref table 'Enterprise Operational Signals'
+ref table 'Mailbox Exchange Version Catalog'
+ref table LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b
+ref table LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a
+ref table LocalDateTable_317cc133-7d7e-48f1-9f84-06cddef33d30
+ref table LocalDateTable_64fabb92-bcfd-4bf8-bc58-fac647b4b957
+ref table LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629
+ref table LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1
+ref table LocalDateTable_34c9943b-b627-41a6-892f-38af610aa3ab
+ref table LocalDateTable_e444bea0-7cd3-4554-903e-4527328b5859
+ref table LocalDateTable_07dba14d-5771-4b27-9d12-29e8f8909a2e
+ref table LocalDateTable_907dcf50-c645-4908-abf0-a270c18cfb44
+ref table LocalDateTable_fff5b984-93b9-400c-b9b1-816638dc659b
+ref table LocalDateTable_092d7bca-578d-4359-9d57-7785e5c19297
+ref table LocalDateTable_3a66da98-0fbc-42b3-89df-31d1353178bb
+ref table LocalDateTable_63d8f937-1415-4f4a-b264-72221c118188
+ref table LocalDateTable_23ebdc86-a087-40cc-9e59-977a41aaba93
+ref table LocalDateTable_b62f6adb-63eb-4a4b-ad79-834b3e451455
+ref table LocalDateTable_36a66c53-7233-45f9-aae9-44d7dc6b9397
+ref table LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4
+ref table LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888
+ref table LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30
+ref table LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e
+ref table 'License Optimization Evidence'
+ref table 'Device Directory Summary'
+ref table LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f
+ref table LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2
+ref table LocalDateTable_992ffd8b-7f92-4f3a-bd88-9b41a35b51d2
+ref table 'Workforce License Review Selection'
+ref table LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d
+ref table LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3
+ref table LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58
+ref table LocalDateTable_623a6266-3731-4f68-93d0-284adc5d666e
+ref table LocalDateTable_f6ef3481-f74c-4978-a1ae-1f67540b1732
+ref table LocalDateTable_28a09470-b7cb-47dd-b260-23fa1d527587
+ref table LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5
+ref table 'Country Selection'
+
+ref cultureInfo en-US
+

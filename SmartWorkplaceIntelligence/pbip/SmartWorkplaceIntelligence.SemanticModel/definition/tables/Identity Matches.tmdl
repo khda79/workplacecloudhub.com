@@ -1,0 +1,109 @@
+/// One identity reconciliation candidate per synthetic run.
+table 'Identity Matches'
+	lineageTag: b91c5249-3e2f-4f1b-b6e5-1bd622f2ae70
+
+	/// Eligible identity candidates in the reconciliation scope.
+	measure '# Identities' = CALCULATE(DISTINCTCOUNT('Identity Matches'[User Key]), KEEPFILTERS('Identity Matches'[Match Status] <> "NotApplicable"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 2e3111f8-d26b-4c9d-b0d6-8a811765b7e4
+
+	/// Unambiguous matches divided by eligible identity candidates.
+	measure 'Identity Match (%)' = DIVIDE(CALCULATE(COUNTROWS('Identity Matches'), KEEPFILTERS('Identity Matches'[Match Status] = "Matched")), [# Identities])
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 4382d150-2675-4738-b85e-7ec30b2491e8
+
+	/// Identity candidates with more than one valid match.
+	measure '# Identity Conflicts' = CALCULATE(COUNTROWS('Identity Matches'), KEEPFILTERS('Identity Matches'[Match Status] = "Conflict"))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: b26e8bf1-d611-4a84-9452-41accae4bc62
+
+	/// Eligible directory identity candidates matched unambiguously to cloud identity records divided by eligible directory identity candidates.
+	measure 'AD to Entra Coverage (%)' = DIVIDE(CALCULATE(COUNTROWS('Identity Matches'), KEEPFILTERS('Identity Matches'[Match Status] = "Matched")), CALCULATE(COUNTROWS('Identity Matches'), KEEPFILTERS('Identity Matches'[Match Status] <> "NotApplicable")))
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: eca14409-8705-43e7-9fcb-e635994f5f94
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 343d132d-1334-4ce4-9d8d-e1739b4beb93
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: bdbb9539-5a30-4124-9eae-c128380c6f5d
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d8638d00-f25d-401f-8056-e2ed3dfe30c4
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ffe2729c-1619-44c0-9555-4e6dd3f61606
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Match Status.
+	column 'Match Status'
+		dataType: string
+		lineageTag: fbfbe495-32d9-4efb-becb-af90c5bf8532
+		sourceColumn: Match Status
+
+	/// Business attribute Match Method.
+	column 'Match Method'
+		dataType: string
+		lineageTag: 1f2c30f6-f981-4e57-b8a4-a3478216dd23
+		sourceColumn: Match Method
+
+	/// Business attribute Candidate Count.
+	column 'Candidate Count'
+		dataType: int64
+		lineageTag: 17cf268e-0308-4e9e-b64a-38565e286ffc
+		summarizeBy: none
+		sourceColumn: Candidate Count
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: a1941e61-eac8-4aa0-bfa7-b0cb8a7794a1
+		sourceColumn: Evidence Status
+
+	/// Business attribute Source Scope.
+	column 'Source Scope'
+		dataType: string
+		lineageTag: 09e54a03-3022-4f4d-86ca-1b1c2e89533e
+		sourceColumn: Source Scope
+
+	partition 'Identity Matches Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Source Scope" = nullable text, #"Match Status" = nullable text, #"Match Method" = nullable text, #"Candidate Count" = Int64.Type, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "Hybrid", "Matched", "ImmutableId", 1, "Observed"},
+				        {20260915, 1, 1, 2, "Hybrid", "Matched", "ImmutableId", 1, "Observed"},
+				        {20260915, 1, 1, 3, "Hybrid", "Unmatched", "None", 0, "Observed"},
+				        {20260915, 1, 1, 4, "CloudOnly", "NotApplicable", "None", 0, "Observed"},
+				        {20260915, 1, 1, 6, "Hybrid", "Conflict", "ImmutableId", 2, "Observed"}
+				    })
+				in
+				    Source
+

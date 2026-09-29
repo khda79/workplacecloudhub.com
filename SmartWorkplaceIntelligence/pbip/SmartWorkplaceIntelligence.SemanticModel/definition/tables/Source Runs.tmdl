@@ -1,0 +1,115 @@
+/// Synthetic collection-run freshness and completeness evidence.
+table 'Source Runs'
+	lineageTag: 78dac2ce-28e6-408f-bb26-a04ea50b6c61
+
+	/// Latest accepted collection timestamp in UTC.
+	measure 'Latest Collection Time UTC' = MAX('Source Runs'[Latest Accepted Run UTC])
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Measures
+		lineageTag: 0c234414-4890-4c7b-b737-a5a1b8942cca
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7fc3728d-a51d-4cdb-9d63-6e2264ce5d06
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0c063360-da34-4967-a3f5-cd753ae63542
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 812cf150-0ef4-43fe-ae57-bf61d3fe20fe
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Data Source Key.
+	column 'Data Source Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7f3ad987-bb00-4d4c-bcad-7d02c73ae0d5
+		summarizeBy: none
+		sourceColumn: Data Source Key
+
+	/// Business attribute Collection Status.
+	column 'Collection Status'
+		dataType: string
+		lineageTag: c10a5757-37c2-47f3-9c14-9ea1b08c20df
+		summarizeBy: none
+		sourceColumn: Collection Status
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Is Partial Inventory.
+	column 'Is Partial Inventory'
+		dataType: boolean
+		lineageTag: 3e0896a6-dbf1-45ab-a5f5-4e4bdb760ea2
+		summarizeBy: none
+		sourceColumn: Is Partial Inventory
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Latest Accepted Run UTC.
+	column 'Latest Accepted Run UTC'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 2db827b2-e825-4c66-8585-d1ed6d0c27e9
+		summarizeBy: none
+		sourceColumn: Latest Accepted Run UTC
+
+		variation Variation
+			isDefault
+			relationship: 8e9b707f-7ed3-43f1-86ea-68f7c929b1d4
+			defaultHierarchy: LocalDateTable_0a080a09-8c9b-4ecd-b1d6-928b95ea4abf.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Actual Row Count.
+	column 'Actual Row Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 42708470-8700-4347-8e5d-3d8f9ad4832b
+		summarizeBy: sum
+		sourceColumn: Actual Row Count
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Reject Row Count.
+	column 'Reject Row Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1cbb5a3c-bebf-412c-a5c1-b1f6653f003d
+		summarizeBy: sum
+		sourceColumn: Reject Row Count
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Source Runs Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Data Source Key" = Int64.Type, #"Collection Status" = nullable text, #"Is Partial Inventory" = nullable logical, #"Latest Accepted Run UTC" = nullable datetime, #"Actual Row Count" = Int64.Type, #"Reject Row Count" = Int64.Type], {
+				        {20260915, 1, 1, 1, "Succeeded", false, #datetime(2026, 9, 15, 8, 0, 0), 6, 0},
+				        {20260915, 1, 1, 2, "Succeeded", false, #datetime(2026, 9, 15, 7, 45, 0), 5, 0},
+				        {20260913, 1, 1, 3, "Succeeded", false, #datetime(2026, 9, 13, 8, 0, 0), 3, 0},
+				        {20260915, 1, 1, 4, "Partial", true, #datetime(2026, 9, 15, 7, 30, 0), 2, 1},
+				        {20260915, 1, 1, 5, "Failed", false, null, 0, 1}
+				    })
+				in
+				    Source
+

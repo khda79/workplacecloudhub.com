@@ -1,0 +1,49 @@
+/// Synthetic content site catalogue.
+table Site
+	lineageTag: 828d85ae-7841-4aba-8b91-d246a489babb
+
+	/// Business attribute Site Key.
+	column 'Site Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5874a67f-b48b-45dc-887c-400f7adf17b9
+		summarizeBy: none
+		sourceColumn: Site Key
+
+	/// Business attribute Site Surrogate Key.
+	column 'Site Surrogate Key'
+		dataType: string
+		lineageTag: be26089f-6031-4f6e-96e7-ab98135dcf27
+		sourceColumn: Site Surrogate Key
+
+	/// Business attribute Site Type.
+	column 'Site Type'
+		dataType: string
+		lineageTag: 58147683-dd0b-4d3f-ad78-b70110f8d9e7
+		sourceColumn: Site Type
+
+	/// Business attribute Workload.
+	column Workload
+		dataType: string
+		lineageTag: 358a1342-74bc-4214-83b7-02ad027bfcc1
+		sourceColumn: Workload
+
+	/// Business attribute Activity State.
+	column 'Activity State'
+		dataType: string
+		lineageTag: 233b8ab4-9703-4132-b7a0-568f7f07b010
+		sourceColumn: Activity State
+
+	partition 'Site Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Site Key" = Int64.Type, #"Site Surrogate Key" = nullable text, #"Site Type" = nullable text, #"Workload" = nullable text, #"Activity State" = nullable text], {
+				        {1, "Site 001", "TeamSite", "SharePoint", "Active"},
+				        {2, "Site 002", "CommunicationSite", "SharePoint", "Inactive"},
+				        {3, "Site 003", "PersonalSite", "OneDrive", "Active"}
+				    })
+				in
+				    Source
+

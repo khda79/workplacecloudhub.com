@@ -1,0 +1,60 @@
+/// Accepted user-group membership relationships.
+table 'User Group Memberships'
+	lineageTag: 747b7e76-bb90-406c-8eca-67915e580413
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8a78d2d3-9cd2-4f49-8056-d56f6b89c55f
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 28713746-2b56-42b6-ab77-ac11844d2409
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 81e8bc50-5021-4052-8614-b1e3c66ef2a7
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Group Key.
+	column 'Group Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2115a557-5cbe-4c60-a081-4df19f0179cf
+		summarizeBy: none
+		sourceColumn: Group Key
+
+	/// Business attribute Relationship Type.
+	column 'Relationship Type'
+		dataType: string
+		lineageTag: cac0ae89-4296-407a-bf13-f9059e390ac8
+		sourceColumn: Relationship Type
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 958cb3f8-a7f3-4ee8-bbfe-e919f82cdc1b
+		sourceColumn: Evidence Status
+
+	partition 'User Group Memberships Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Group Key" = Int64.Type, #"Relationship Type" = nullable text, #"Evidence Status" = nullable text], {})
+				in
+				    Source
+

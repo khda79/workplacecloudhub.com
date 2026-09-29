@@ -1,6 +1,5 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 
 function Resolve-PreparedSharePointFolder {
     param([string]$ConfiguredPath,[string]$NormalizedDataRoot)
@@ -25,7 +24,8 @@ function Assert-TransferPath([string]$Path){
 
 function Get-PreparedTransferPlan {
     param([string]$Root,[string]$TenantKey,[string]$ContractPath,[string]$ExpectedBatchId)
-    $pointerPath=Get-PreparedMetadataPath $Root 'current';Assert-TransferPath $pointerPath
+    if(Test-Path -LiteralPath (Join-Path $Root 'current.json')){throw 'Convert legacy metadata before transfer.'}
+    $pointerPath=Join-Path $Root 'current.json.txt';Assert-TransferPath $pointerPath
     $pointer=Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
     $id=[string]$pointer.BatchId
     if($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or $pointer.SchemaVersion -ne 1 -or $pointer.TenantKey -ne $TenantKey){throw 'Invalid local pointer identity.'}
@@ -33,13 +33,13 @@ function Get-PreparedTransferPlan {
     $folder=Join-Path $Root ('batches/'+$id);Assert-TransferPath $folder
     $metadata=@{}
     foreach($name in 'batch','validation','current'){
-        $path=Get-PreparedMetadataPath $folder $name;Assert-TransferPath $path
+        $path=Join-Path $folder ($name+'.json.txt');Assert-TransferPath $path
         $metadata[$name]=[pscustomobject]@{Path=$path;Bytes=(Get-Item -LiteralPath $path).Length;SHA256=(Get-FileHash -LiteralPath $path).Hash;Value=(Get-Content -LiteralPath $path -Raw | ConvertFrom-Json)}
     }
     $manifest=$metadata.batch.Value;$validation=$metadata.validation.Value;$receipt=$metadata.current.Value
     if($manifest.SchemaVersion -ne 1 -or $manifest.TenantKey -ne $TenantKey -or $manifest.BatchId -ne $id -or $metadata.batch.SHA256 -ne $pointer.ManifestSHA256 -or $metadata.current.SHA256 -ne (Get-FileHash -LiteralPath $pointerPath).Hash){throw 'Manifest or publication receipt mismatch.'}
     if($receipt.SchemaVersion -ne 1 -or $validation.Passed -ne $true -or $validation.SchemaOnly -ne $false){throw 'Batch lacks a successful full validation receipt.'}
-    $contract=(Read-SmartM365JsonDocument $ContractPath).Document
+    $contract=Get-Content -LiteralPath $ContractPath -Raw | ConvertFrom-Json
     $expected=@($contract.tables.file)
     if(@($manifest.Files).Count -ne $expected.Count -or @($validation.Files).Count -ne $expected.Count -or $expected.Count -eq 0){throw 'Prepared file count differs from the contract.'}
     $files=[Collections.Generic.List[object]]::new();$seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -73,15 +73,12 @@ function Send-PreparedEvidenceBatch {
     if($scratch -eq $data -or $scratch.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase) -or $data.StartsWith($scratch+'\',[StringComparison]::OrdinalIgnoreCase)){
         throw 'Transfer scratch must be outside the tenant DATA tree and not its ancestor.'
     }
-    Initialize-PreparedMetadataNames -OutputRoot $root -TenantKey $TenantKey
     $lock=[IO.File]::Open((Join-Path $root '.publication.lock'),'OpenOrCreate','ReadWrite','None')
     $run=$null;$temp=$null;$journal=$null
     try {
-        Convert-PreparedAuditNames -Root $scratch -Family transfers -TenantKey $TenantKey
         $plan=Get-PreparedTransferPlan $root $TenantKey $ContractPath $ExpectedBatchId
         $run=Join-Path $scratch ('transfers/'+[guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $run -Force | Out-Null;Assert-TransferPath $run
-        $auditPath=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $run 'transfer.json') -Owner 'WorkplaceEvidence-Prepare/transfer' -Validate {param($document) if($document.TenantKey -ne $TenantKey){throw 'Transfer audit tenant mismatch.'}}
         $temp=Join-Path $run 'readback.tmp'
         $journal=[ordered]@{TenantKey=$TenantKey;BatchId=$plan.BatchId;StartedUtc=[datetime]::UtcNow.ToString('O');Status='Transferring';PointerAttempted=$false;VerifiedFiles=[Collections.Generic.List[string]]::new();Error=$null}
         foreach($file in $plan.Files){
@@ -101,7 +98,7 @@ function Send-PreparedEvidenceBatch {
             Write-Host ('SharePoint verified {0}/{1}: {2}' -f $journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative)
         }
         $journal.Status='Success'
-        [pscustomobject]@{BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
+        [pscustomobject]@{BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;PointerVerified=$true;CsvRecalculated=$false;AuditPath=(Join-Path $run 'transfer.json')}
     } catch {
         if($journal){$journal.Status='Failed';$journal.Error=$_.Exception.Message}
         if($journal -and $journal.PointerAttempted){throw "Cloud pointer publication was attempted but completion is not confirmed. Do not refresh Power BI; retry the same batch. $($_.Exception.Message)"}
@@ -109,7 +106,7 @@ function Send-PreparedEvidenceBatch {
     } finally {
         try{
             if($temp -and (Test-Path -LiteralPath $temp)){Assert-TransferPath $temp;Remove-Item -LiteralPath $temp -Force}
-            if($journal){$journal['EndedUtc']=[datetime]::UtcNow.ToString('O');Write-SmartM365JsonBytesAtomically -Path $auditPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($journal | ConvertTo-Json -Depth 6))) -Validate {param($document) if($document.TenantKey -ne $TenantKey){throw 'Transfer audit tenant mismatch.'}} | Out-Null}
+            if($journal){$journal['EndedUtc']=[datetime]::UtcNow.ToString('O');$journal | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $run 'transfer.json') -Encoding utf8}
         }finally{$lock.Dispose()}
     }
 }
@@ -118,8 +115,8 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBG3mWGr1QaKBM
-# 9rXO30gOG79vWSAtTxvMpNMnkgz8/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeLmzlgec442rk
+# WRlasOua4OUSMXSX5Y12hEGPwKnnxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -252,31 +249,31 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF1F1D9Z1Wz4m92Bfgs4CBT7qFABU6SoOxMaf72DRKt/MA0GCSqG
-# SIb3DQEBAQUABIIBgDezYLphTMnQhDlHdvcww3cwGBJYRBRSLB3tZaZuPP6Ez14o
-# 01saFJYerGj7881+7x+E0lIoFqAt8gXZ2noaQbvcG68NIFRNlQRwKTdxx1DGzSdi
-# kDoNvZO+3DcnQFwVMYRhXC2ND3Q33waTc38YBdr5SHOTJ3eWvkWF2sFp41k36jvV
-# m1Ch/icMYX2BCPvH2Q5/qmGZuJ0us0HV/f9njtU5w1+SLBmHf1tWH0nyf9PYg/NI
-# ueEpUAgoCguokego/c5WnFGBj12Hh+xsv12GGVsJ+6QM1jtz7ewpC7kUudEGiGYD
-# 9NvWX50Zz6u1GPx54g4LKzH/wyztxLBGyHLMAdxqFEMdqhshUUaPOY2HbSAM7MTf
-# y2iGbkoAxwKuaEkM75G4iLEGlLMQ9KsCTm12O6hwv6HlljkcbZWE7pa0L53+arks
-# LKeNdQ5o3Kt3dsI5JkZVUV5MAzX0m0ANVQSdUYmQbzmZlKNwCJxFHTl1jQO2zXz/
-# B8AO/HzDs1DlHezj1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFKvSIzvIoAZ+o1foZawnfhZcdaE/OGZGhYzjT3bRMmCMA0GCSqG
+# SIb3DQEBAQUABIIBgJmJtPkV4EKLTMqUUU8vceoEZiCTIr8z4dQqGam1xOa+pLDG
+# QFUc6ANGRMk8zfznHyIyfWHGZ2Jut3nGqeSKacdhU/SRH01eplG7vQpnj901of3T
+# rbZy5cl6l8swyEZCIOkajbj1KP+WLTCqGReOYnmm4RDErkzxnDzYSH0XqCwHdVpo
+# mvB6jCtEHn4wmGDWB8ZO7UsAvay46uPbsEFkuTN5Ag/XgWbNXlx2wOO6A9QtWjf8
+# ESaRNNcfKuojiRhEJVILQSAYA8aXgFwEV0feQzRvMvHngyS1YMD5KMZGBPvAhEMJ
+# dEhtmZBte1VURLz82MvCvNRrdyZ4ggP60qeTLKwV415G1Wyc2hU3vkMwVJkktnr4
+# laEjgDsDezKOxx9Dbe6SE/kFNiQjeFRnv0kFhUDrX+XA/iJLcy8TyXaQDoAkSaVn
+# ejlpy408HNDPIFQ2lVY8VJZBfqZoykjfMPWSY2Ex4u4EoRPJzH8nd1aawA6MG9Nd
+# STn2b1WEH27qPhrQ+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTlaMC8GCSqGSIb3DQEJBDEiBCD7o687jpk+nzjq3Vsj00br/OWMA9aD2fvRzmiL
-# dIqNMTANBgkqhkiG9w0BAQEFAASCAgBdU4lrpzYT+PMOfuDtCtws1Aysx4Unp8pZ
-# tTwOMfdtzZS5EcLyBxt1rjVhAz5ZVQ4fOaCII2bqiRujESt4zpljDmna7a5iT6q9
-# fkelv/C9xh9ldq3mYJMGntmIoTtP75dZlzqVOsu0r2Bl3k8i7v3LATGBVVhBnvkc
-# xD1OWXnBn4EwdVdIb4VqghEzUHgSSGLpfilkVk+cqMZLRLxe19WDmdCbUhtKNrNo
-# YQo4hM3TlZ9DJsV0srwppDnnGTme+KYGrlkvzF+UaM5T7Y1N8nHOGFeKspQx6n/J
-# 8lk7CH+a9vCLFUOZ4acCyCqqcJh99zDngeIspoJCQztfk2c0Ze9qkvAC9vDsPYhZ
-# +Jir2T+2Vso6qBNTWUuXCe+32LMNPwX0EMuu/bsQQOrJ+T+yFc9Y/INoFyYjGa1C
-# kpiKM2/fjDs+mlVyaBA+JVRGRgoi2BnWaPRlLIiIzJW9O7jRox5ZMZ3vzegckbcm
-# igLW3qQ2JTiFk/L19z7lv9U61zv1Jz9XQBpo28ae04PqfvItQnyVrPdJtNwRxbLe
-# kc4UyV6DO9/RMeKt+iONZhSeZMhnSW8KnJM2/2bGVVCLl5ImDbnTj6JVgU1XBAC0
-# S+lMwtv1yxMtc2SZARXs3GKrfeDRcgeGXROapEyHebVROrO9+aon6cEx1B6qpb7u
-# 3Bb+D09MGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzU0
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAFqMcgbeVPxSyArVzqalUINpBC9VGRSlbjh/Mq
+# jB/cZzANBgkqhkiG9w0BAQEFAASCAgBCuR6NFkEggsFo59VGxb769LmHDRhSZCLh
+# d3H1bePMNeLdJjzWkXqE20wNVFgihYCbu/FzBV5MqYgkm8pGV4CrTXKPek9wao2+
+# QGiNqeIKgOAgnFhUHuKsHOPoFquCkO5KjaGTpMPn6KFdvKgrILQNBeSzFRP1tpKf
+# jH9kObcIGIW91EJUmAJbx9V2lM5FVgvL4UrePnb5MzTFvEEJBm4DKPV73h4CBogX
+# VSc5GhokHP/8ObvgRbc63MOpfsipLDkwUXwFSlJndlqOhmFHbOJt8tko6Tl0XLFs
+# ycDbFmEaMs8rIp/v+3G+FAkvz7wx0WxR2CYvvJ3oUExSVKLUcSGzWtObr9iLcPV4
+# FKC2yA85vWCwJ1hzlRStQD9UcpZHnBUHPXCidDg+GNn7zX7tY3XZBO0a7SEzy4V3
+# jhAqeBIEXFUYYSy7KDJPsDJNcCJ9FQhJWwd5Ed3ot4kVcYetA6SGbA4kFFHiNHjR
+# CCy24MWyHjFtnqxM5kjWX71sGSJoJ2LZ8yX/r8OY6JR/BoToKwizinSUmbB/E6mp
+# 3f+GF+eV9e590UokYSEjNm8FHphThB0Jj1zQQh6/ki/1FeICJti/K960E0nJaj0/
+# OWOExtFdylFdWT1L9R1SKf7hsD9xhTujSU6EmHHn0jAZOXUFnu9WaMvBOTcmJjfR
+# 5PWnyhojXg==
 # SIG # End signature block

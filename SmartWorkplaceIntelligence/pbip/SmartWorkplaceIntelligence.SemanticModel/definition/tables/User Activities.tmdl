@@ -1,0 +1,130 @@
+/// Accepted user activity observations.
+table 'User Activities'
+	lineageTag: a96dafaf-12c0-4fe7-aec8-f15e8d6b0582
+
+	/// Users with accepted activity evidence divided by qualified users.
+	measure 'Activity Evidence Coverage (%)' = DIVIDE(DISTINCTCOUNT('User Activities'[User Key]), [# Users])
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: 464da633-082a-4a7e-bab5-fb6f8f32af54
+
+	/// Accepted user activity observations.
+	measure '# User Activity Signals' = COUNTROWS('User Activities')
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 719e9bea-4a9a-4178-a162-37e0e6f3588c
+
+	/// Distinct enabled active-workforce users assigned an eligible Microsoft 365 F1, F3, E3, E5, or E7 license at the latest accepted activity date.
+	measure '# M365 Eligible Active Workforce' = VAR _asOf = CALCULATE(MAX('User Activities'[Activity Date UTC]), KEEPFILTERS('User Activities'[Activity Signal] = "ActiveUse"), KEEPFILTERS('User Activities'[Evidence Status] = "Observed"), KEEPFILTERS('Service'[Service Name] IN {"Teams", "Meetings", "Mailbox", "SharePoint", "OneDrive"})) VAR _asOfKey = IF(ISBLANK(_asOf), BLANK(), YEAR(_asOf) * 10000 + MONTH(_asOf) * 100 + DAY(_asOf)) VAR _userSnapshotKey = CALCULATE(MAX('User Snapshots'[Date Key]), REMOVEFILTERS('Date'), 'User Snapshots'[Date Key] <= _asOfKey) VAR _licenseSnapshotKey = CALCULATE(MAX('User License Assignments'[Date Key]), REMOVEFILTERS('Date'), 'User License Assignments'[Date Key] <= _asOfKey) VAR _licensedUsers = CALCULATETABLE(VALUES('User License Assignments'[User Key]), REMOVEFILTERS('Date'), TREATAS({_licenseSnapshotKey}, 'User License Assignments'[Date Key]), KEEPFILTERS('User License Assignments'[Assignment State] = "Assigned"), KEEPFILTERS('User License Assignments'[Approved Exclusion] = FALSE()), KEEPFILTERS('License Product'[License Family] IN {"Workplace Suite", "Frontline Suite", "Microsoft 365"}), KEEPFILTERS(RIGHT('License Product'[License Product], 2) IN {"F1", "F3", "E3", "E5", "E7"})) RETURN IF(ISBLANK(_asOf), BLANK(), CALCULATE(DISTINCTCOUNT('User Snapshots'[User Key]), REMOVEFILTERS('Date'), TREATAS({_userSnapshotKey}, 'User Snapshots'[Date Key]), KEEPFILTERS('User Snapshots'[Account State] = "Enabled"), KEEPFILTERS('User Snapshots'[Workforce Status] = "Active"), KEEPFILTERS('User Snapshots'[Activity Evidence Status] = "Observed"), TREATAS(_licensedUsers, 'User Snapshots'[User Key])))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: b3f33710-c961-4ba0-a792-878580fc79f9
+
+	/// Distinct eligible active-workforce users with at least one qualified Microsoft 365 ActiveUse signal in the trailing 30 days, counted once.
+	measure '# M365 Active Users (30D)' = VAR _asOf = CALCULATE(MAX('User Activities'[Activity Date UTC]), KEEPFILTERS('User Activities'[Activity Signal] = "ActiveUse"), KEEPFILTERS('User Activities'[Evidence Status] = "Observed"), KEEPFILTERS('Service'[Service Name] IN {"Teams", "Meetings", "Mailbox", "SharePoint", "OneDrive"})) VAR _asOfKey = IF(ISBLANK(_asOf), BLANK(), YEAR(_asOf) * 10000 + MONTH(_asOf) * 100 + DAY(_asOf)) VAR _userSnapshotKey = CALCULATE(MAX('User Snapshots'[Date Key]), REMOVEFILTERS('Date'), 'User Snapshots'[Date Key] <= _asOfKey) VAR _licenseSnapshotKey = CALCULATE(MAX('User License Assignments'[Date Key]), REMOVEFILTERS('Date'), 'User License Assignments'[Date Key] <= _asOfKey) VAR _licensedUsers = CALCULATETABLE(VALUES('User License Assignments'[User Key]), REMOVEFILTERS('Date'), TREATAS({_licenseSnapshotKey}, 'User License Assignments'[Date Key]), KEEPFILTERS('User License Assignments'[Assignment State] = "Assigned"), KEEPFILTERS('User License Assignments'[Approved Exclusion] = FALSE()), KEEPFILTERS('License Product'[License Family] IN {"Workplace Suite", "Frontline Suite", "Microsoft 365"}), KEEPFILTERS(RIGHT('License Product'[License Product], 2) IN {"F1", "F3", "E3", "E5", "E7"})) VAR _eligibleUsers = CALCULATETABLE(VALUES('User Snapshots'[User Key]), REMOVEFILTERS('Date'), TREATAS({_userSnapshotKey}, 'User Snapshots'[Date Key]), KEEPFILTERS('User Snapshots'[Account State] = "Enabled"), KEEPFILTERS('User Snapshots'[Workforce Status] = "Active"), KEEPFILTERS('User Snapshots'[Activity Evidence Status] = "Observed"), TREATAS(_licensedUsers, 'User Snapshots'[User Key])) RETURN IF(ISBLANK(_asOf), BLANK(), CALCULATE(DISTINCTCOUNT('User Activities'[User Key]), REMOVEFILTERS('Date'), KEEPFILTERS('User Activities'[Activity Date UTC] > _asOf - 30), KEEPFILTERS('User Activities'[Activity Date UTC] <= _asOf), KEEPFILTERS('User Activities'[Activity Signal] = "ActiveUse"), KEEPFILTERS('User Activities'[Evidence Status] = "Observed"), KEEPFILTERS('Service'[Service Name] IN {"Teams", "Meetings", "Mailbox", "SharePoint", "OneDrive"}), TREATAS(_eligibleUsers, 'User Activities'[User Key])))
+		formatString: #,0
+		displayFolder: Measures
+		lineageTag: 39eff002-b292-4274-a178-b67134a41486
+
+	/// Distinct eligible active-workforce users with qualified Teams, Exchange Online, SharePoint Online, or OneDrive for Business use in the trailing 30 days divided by the eligible active workforce; Meetings is folded into Teams.
+	measure 'M365 Active Use (30D) (%)' = DIVIDE([# M365 Active Users (30D)], [# M365 Eligible Active Workforce])
+		formatString: 0.0%
+		displayFolder: Measures
+		lineageTag: d4ce99b2-f3f4-4e0a-b156-f916806aff8e
+
+	/// Evidence status for the 30-day Microsoft 365 active-use KPI.
+	measure 'M365 Active Use Evidence Status' = VAR _eligible = [# M365 Eligible Active Workforce] VAR _active = [# M365 Active Users (30D)] RETURN IF(ISBLANK(_eligible), "Not Collected", IF(ISBLANK(_active), "Partial", "Observed"))
+		formatString: @
+		displayFolder: Measures
+		lineageTag: b9ae739e-ff69-4017-8876-fe8c42f7f287
+
+	/// Business attribute Date Key.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 289ec29b-fdf7-414f-91b8-1e8a8c564fe7
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c2528aa6-1055-4d04-b9ec-2b2b4bccddfe
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e1e11d81-132d-4bb4-b9b8-6e6ee9984041
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: dc0f2440-0452-436d-a4d1-b7b6dde1b063
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute Service Key.
+	column 'Service Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 10c90c7d-6cda-4c1b-b543-fdd8c35bb3b3
+		summarizeBy: none
+		sourceColumn: Service Key
+
+	/// Business attribute Activity Date UTC.
+	column 'Activity Date UTC'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: ff6797ba-9e4a-4d72-80bf-c4ffce6ebb4a
+		summarizeBy: none
+		sourceColumn: Activity Date UTC
+
+		variation Variation
+			isDefault
+			relationship: ad7963ba-888f-4a86-8447-f24952f00930
+			defaultHierarchy: LocalDateTable_ab3547e2-cc3e-4859-b585-ddc0b959c470.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Activity Signal.
+	column 'Activity Signal'
+		dataType: string
+		lineageTag: f8d67074-e482-49f3-8f45-80178d554e41
+		summarizeBy: none
+		sourceColumn: Activity Signal
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Business attribute Evidence Status.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: b72fd94f-a496-42d1-83f0-abc57ff66e95
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'User Activities Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"User Key" = Int64.Type, #"Service Key" = Int64.Type, #"Activity Date UTC" = nullable datetime, #"Activity Signal" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260914, 1, 1, 1, 7, #datetime(2026, 9, 14, 12, 0, 0), "ActiveUse", "Observed"},
+				        {20260915, 1, 1, 4, 7, #datetime(2026, 9, 15, 7, 0, 0), "ActiveUse", "Observed"},
+				        {20260913, 1, 1, 6, 9, #datetime(2026, 9, 13, 16, 0, 0), "ActiveUse", "Observed"}
+				    })
+				in
+				    Source
+

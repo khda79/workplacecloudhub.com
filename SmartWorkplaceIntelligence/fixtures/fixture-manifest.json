@@ -1,0 +1,322 @@
+{
+  "contractVersion": "1.0.0",
+  "fixtureSet": "smart-workplace-intelligence-synthetic-v1",
+  "generatedAtUtc": "2026-09-29T18:57:13Z",
+  "syntheticOnly": true,
+  "defaultContext": {
+    "tenantId": "00000000-0000-4000-8000-000000000001",
+    "organizationId": "ORG-SYNTH-001",
+    "environmentId": "ENV-SYNTH-LAB",
+    "runId": "RUN-SYNTH-20260915-001",
+    "collectedAtUtc": "2026-09-15T08:00:00Z",
+    "sourceScriptVersion": "synthetic-fixture-1.0.0"
+  },
+  "files": [
+    {
+      "path": "quality-cases/duplicate_device_key.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "ManagedDevices",
+      "grain": "One device per tenant, environment, and snapshot date",
+      "expectedOutcome": "Reject",
+      "expectedReason": "Duplicate natural key",
+      "expectedRows": 2,
+      "schemaSha256": "5F6E5C39C46D1D0CAF5E585003C2565A72411CBCCEF152389BC38DFD29C50A56",
+      "fileSha256": "3C49D371E0E99CC148161E0AA767E4B7A7EE7C4D06364EFAB5A67208650FDF5E"
+    },
+    {
+      "path": "quality-cases/invalid_timestamp.csv",
+      "sourceFamily": "Operations",
+      "sourceEntity": "InvalidTimestamp",
+      "grain": "One deliberately invalid source row",
+      "expectedOutcome": "Reject",
+      "expectedReason": "Timestamp has neither UTC marker, explicit offset, nor declared source timezone",
+      "expectedRows": 1,
+      "schemaSha256": "F38ACD6C31559EAB8FEC7819A8C88C59CB769217EE0F3FA33CDB7A35392D823C",
+      "fileSha256": "2143ABB3332FE2BCEEBE2A5D60285F6BF45B70B05AEF8AFB98FFB277BE7F91D0"
+    },
+    {
+      "path": "quality-cases/partial_inventory.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "ManagedDevices",
+      "grain": "One partial device inventory row",
+      "expectedOutcome": "Reject",
+      "expectedReason": "Partial inventory is rejected when Allow Partial Inventory is false",
+      "expectedRows": 1,
+      "schemaSha256": "F38ACD6C31559EAB8FEC7819A8C88C59CB769217EE0F3FA33CDB7A35392D823C",
+      "fileSha256": "075E8E8C7CDF08C90E9A7AAA88EE5192E5CE5AE053AAA6AE36FD2AABD3D1CA87"
+    },
+    {
+      "path": "quality-cases/schema_drift.csv",
+      "sourceFamily": "Identity",
+      "sourceEntity": "DirectoryUsers",
+      "grain": "One deliberately malformed user row",
+      "expectedOutcome": "Reject",
+      "expectedReason": "Required SourceScriptVersion is missing and an unexpected column is present",
+      "expectedRows": 1,
+      "schemaSha256": "02CDE68FB7311AB85F166C3038EF2B9E82D65D220CE8CBA3F18BADE5BB553875",
+      "fileSha256": "4D13F56E933600DBEADDD2FD2CB1C2EE3AFC86C3BA682F6C6E85DAC904A13953"
+    },
+    {
+      "path": "quality-cases/sentinel_numeric.csv",
+      "sourceFamily": "Messaging",
+      "sourceEntity": "SentinelNumeric",
+      "grain": "One raw numeric-or-sentinel value per entity",
+      "expectedOutcome": "Accept",
+      "expectedReason": "Raw, parsed, and parse-status fields preserve sentinel semantics",
+      "expectedRows": 3,
+      "schemaSha256": "F65E3CD0A3C6E90ED4218C3C59C3B1CBC8258649BEE9FDA1C60C6FE1D353DFC1",
+      "fileSha256": "45A9B88B539ED54CA3DABB5B89CB425BCE087409F50EB095D6875EA8B6CC3783"
+    },
+    {
+      "path": "quality-cases/threshold_contract.csv",
+      "sourceFamily": "Operations",
+      "sourceEntity": "ThresholdContract",
+      "grain": "One governed threshold rule",
+      "expectedOutcome": "Accept",
+      "expectedReason": "Text Threshold and decimal NumericValue remain separate",
+      "expectedRows": 2,
+      "schemaSha256": "D0EF49B5F227478A9190F06B4A38E4BC9F7D7F22ADF4D480B724A148F566EA3B",
+      "fileSha256": "4C8B37EF987FCF062BFF61FEB36D2D91A494B1F92EC4034A575F249E9A5FF38C"
+    },
+    {
+      "path": "valid/application_installations.csv",
+      "sourceFamily": "Applications",
+      "sourceEntity": "ApplicationInstallations",
+      "grain": "One device, normalized application, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "33E39E26A46ADF3536B0AC5C54F370898083B7D4CCC101E149125068A49B7143",
+      "fileSha256": "6E3DF1C398B46FBB0BA226B1D0B0CF34F5381CB7C418861F3A0C9FBDEC69C1C8"
+    },
+    {
+      "path": "valid/backup_coverage.csv",
+      "sourceFamily": "Backup",
+      "sourceEntity": "BackupCoverage",
+      "grain": "One governed entity, workload, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "18E10BD7EF5240C4C3881FBEA73BB7CE34F71680535F041128353E7B91199047",
+      "fileSha256": "55326979724D713A31C4841C8F2D47CE3424EB9E14A35CCB6379A355E99D6051"
+    },
+    {
+      "path": "valid/collaboration_usage.csv",
+      "sourceFamily": "Collaboration",
+      "sourceEntity": "CollaborationUsage",
+      "grain": "One service object and usage date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "F658A37D35D7A244B5D3964073F787E68C2DB49E5BCB318CB840285E005FE9B4",
+      "fileSha256": "BC4631B76772278B83321101E7949CF1C6F7C94CDDB4CD501B4312BAB5871CA4"
+    },
+    {
+      "path": "valid/conditional_access_coverage.csv",
+      "sourceFamily": "Security",
+      "sourceEntity": "ConditionalAccessCoverage",
+      "grain": "One active application coverage observation per date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "06F0E07A48CBC825AE6A25FC389A3E63921D258104F33CCBEAEAB5F74E149273",
+      "fileSha256": "CFBEB4D72014AE5E254C632798F6CDEDF3C5B655103455C51A982891A129788B"
+    },
+    {
+      "path": "valid/content_usage.csv",
+      "sourceFamily": "Content",
+      "sourceEntity": "ContentUsage",
+      "grain": "One site, metric set, and usage date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "07CA5935EF1A576EDBC1022BCAC9BFE5D9FE3DE264FE31D372109AA143301985",
+      "fileSha256": "1ED9DA59FD2C022A54949CA307050C586A1919AE74C9E5F39F8DD50417D0CB39"
+    },
+    {
+      "path": "valid/data_quality_results.csv",
+      "sourceFamily": "Operations",
+      "sourceEntity": "DataQualityResults",
+      "grain": "One quality rule, source entity, and collection run",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "16DB2DE2EAD0938382B61470419B39C22575C27E2AAF663574A7346C60CD4BCF",
+      "fileSha256": "0B58D35907140AFDFA652BFD7BF50D9B4F1710DAE30B57F746C79303F02BDD33"
+    },
+    {
+      "path": "valid/device_compliance.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "DeviceCompliance",
+      "grain": "One device compliance observation per date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "58D085518BD6D7099015774A14E8A6DAAED1E680A173CDA1C6314954570572B5",
+      "fileSha256": "52A8079B6E408C258E3969A17C57F5D29D16E1275E04118D533312B370649464"
+    },
+    {
+      "path": "valid/device_matches.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "DeviceMatches",
+      "grain": "One device identity candidate per reconciliation run",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "CE617466B74731D806A82800D70DAD02DD3C95DF955B8009FB8B6C90F52FEC20",
+      "fileSha256": "D48CF6D4117B135AC0FD471E91A15155976E8B050960457B96920722C53B6549"
+    },
+    {
+      "path": "valid/devices.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "ManagedDevices",
+      "grain": "One device per tenant, environment, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "35DDA2F65A5565452ADC24C9D7DE9847868282923FB25E3EDBD9B3A899382810",
+      "fileSha256": "3BBE14FC27AB30A662441E2D83E3DDEAE92BBD543B58861F153EEB64E788BF88"
+    },
+    {
+      "path": "valid/endpoint_experience.csv",
+      "sourceFamily": "EndpointExperience",
+      "sourceEntity": "EndpointMeasurements",
+      "grain": "One device and metric per measurement timestamp",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "5B3221F5B502AE92FBB536045CA61B4232CC3806BE2F7EEA9CC650B1053E5691",
+      "fileSha256": "51CFE3DDAB72D34DAB53D72622F1C2F07ACD15887E10435D3B87C002F970B3A1"
+    },
+    {
+      "path": "valid/endpoint_security_status.csv",
+      "sourceFamily": "Security",
+      "sourceEntity": "EndpointSecurityStatus",
+      "grain": "One eligible endpoint security observation per device and date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "DEC6EDF12910F88DA481FC841EE0E921154D79484AD99B6979315088EA71062F",
+      "fileSha256": "768BE215B15DC6B5E80AAC42BF996BE961515E2D03154C70ACEEA447AE2C196F"
+    },
+    {
+      "path": "valid/findings.csv",
+      "sourceFamily": "Governance",
+      "sourceEntity": "Findings",
+      "grain": "One governed finding occurrence per affected entity and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "4F4159EDFF282B75829FA2DA5C063DEC366171B1EEDFB23E2C1FB08CA1E43B94",
+      "fileSha256": "5F2421AFC93CCDDCBF29A91E507817071B06C7F19806B57AA82797B8D67C13C0"
+    },
+    {
+      "path": "valid/identity_matches.csv",
+      "sourceFamily": "Identity",
+      "sourceEntity": "IdentityMatches",
+      "grain": "One source identity candidate per reconciliation run",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "BF21ED8A3D86EE202C3588E3D44020FABD2FBBE1AEF06B855A558ABDF1C98143",
+      "fileSha256": "9C036A8649B6328DDF653ABCCD0F7A5C37FC7AB55FA437F5E1C0D6108926DE50"
+    },
+    {
+      "path": "valid/identity_security_status.csv",
+      "sourceFamily": "Security",
+      "sourceEntity": "IdentitySecurityStatus",
+      "grain": "One user security capability and protection observation per date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 6,
+      "schemaSha256": "4BCFA0E0D944AF81E2EF2272C070CBC650EFAC349E0C7877FF63502EFD6686B8",
+      "fileSha256": "7BEE12A03C19DB26E3739C3DBEA214E2B938A808C44A0E32106C196F49EF2AFF"
+    },
+    {
+      "path": "valid/license_assignments.csv",
+      "sourceFamily": "Licensing",
+      "sourceEntity": "LicenseAssignments",
+      "grain": "One user, license product, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 6,
+      "schemaSha256": "078094F6DF74A3CD2302EE1EB6416E6D56F0067EC15582B5928301373BD91B80",
+      "fileSha256": "47161747987838C1DBADB73619A53FA13E7D9FE8FD10ED633459ADB3764894E9"
+    },
+    {
+      "path": "valid/license_capacity.csv",
+      "sourceFamily": "Licensing",
+      "sourceEntity": "LicenseCapacity",
+      "grain": "One license product per tenant, environment, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "A0D73E8E1949B4C4B776D755C5EF8A885A94F4C3FF67164F0E9E3F704523C657",
+      "fileSha256": "E8CC2C3912D4BDDE3F1EA284C7D22C06F21B77E6F89A8B1517B93315CA73E74A"
+    },
+    {
+      "path": "valid/mailbox_matches.csv",
+      "sourceFamily": "Messaging",
+      "sourceEntity": "MailboxMatches",
+      "grain": "One mailbox identity candidate per reconciliation run",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "839A4D48E6411884F39D56B61096CAB8F8A9C7E403F406882A0F02B83A0F5FCA",
+      "fileSha256": "01509F5BF8F4A96A398C60943049E82E5C58DDCAAA13D7E78F54959CBDDF6DA7"
+    },
+    {
+      "path": "valid/mailboxes.csv",
+      "sourceFamily": "Messaging",
+      "sourceEntity": "MailboxInventory",
+      "grain": "One mailbox per tenant, environment, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "488314CE2C051C27D05AB49E51807AE57C9958EC2473B0BCB261BA3EDB3F1FCA",
+      "fileSha256": "933E458B440AF8C8778467D0A029307376A3EBD3E23C8CA42CB012801A7C53F5"
+    },
+    {
+      "path": "valid/relationships.csv",
+      "sourceFamily": "Relationships",
+      "sourceEntity": "ServiceRelationships",
+      "grain": "One typed relationship between governed entities per snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "60B4BC125C1FF7A22B0D1CB2498FB4F4481C15C315DDD7A43C26E55EE784B5E2",
+      "fileSha256": "2B428682CAE77FF98848020466F2647D8D643B2312B7ABC3F2CA2127DA069525"
+    },
+    {
+      "path": "valid/security_posture.csv",
+      "sourceFamily": "Security",
+      "sourceEntity": "SecurityPosture",
+      "grain": "One governed control observation per date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 4,
+      "schemaSha256": "0D033395A0EEE1C83B22805E557E2D2F688276C0EEE1AC8173460C210B3439DA",
+      "fileSha256": "A49B0BBA05A7AE8F5E4FC1913C623E40F71042F4F1D06B468B2F811F5C44B57F"
+    },
+    {
+      "path": "valid/source_runs.csv",
+      "sourceFamily": "Operations",
+      "sourceEntity": "SourceRuns",
+      "grain": "One logical source entity per collection run",
+      "expectedOutcome": "Accept",
+      "expectedRows": 5,
+      "schemaSha256": "B12F42BCAC6EE4035148DAD0E91144C2521E5FE16391C1DF9E386036EE17E228",
+      "fileSha256": "55AD5F5FABC11FB696DAB25E7D25E8F2169A7647ACA764858F1A4CED9A1736E7"
+    },
+    {
+      "path": "valid/user_activity.csv",
+      "sourceFamily": "Identity",
+      "sourceEntity": "UserActivity",
+      "grain": "One user, activity workload, and activity timestamp",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "85113E78B6299F94EE2F66CE0F25F7D0B4103B97D4B1662302F97EAEF39F4B10",
+      "fileSha256": "58C5BF7476570C8C4DBC8B6F7FCFA3EC5AF64DDCFA823DADA5444C171698219A"
+    },
+    {
+      "path": "valid/users.csv",
+      "sourceFamily": "Identity",
+      "sourceEntity": "DirectoryUsers",
+      "grain": "One reconciled account identity per tenant, environment, and snapshot date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 6,
+      "schemaSha256": "85AD6D2D4C5EB6333EFA3D85208E0871CD58D76051D0B7627689AA9200B21135",
+      "fileSha256": "C24265FBF1A6CC2B9732402F6855F2AADC92D86C2E251A9AEBBE51E9D0081F43"
+    },
+    {
+      "path": "valid/windows_lifecycle.csv",
+      "sourceFamily": "Devices",
+      "sourceEntity": "WindowsLifecycle",
+      "grain": "One Windows device per assessment date",
+      "expectedOutcome": "Accept",
+      "expectedRows": 3,
+      "schemaSha256": "2E8B64E7BEE496B8D9A0DCB0125B67293ED0193E2E179E06FEEA4D694F1CA92A",
+      "fileSha256": "7DAB2599C307568956FF2C26673DEBC5F564696B16494F4E5FE4D3C11861E4C3"
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+/// One row per anonymized synthetic account identity with private-workflow search and ownership attributes.
+table User
+	lineageTag: e9f7a367-7445-423b-bfa5-8af2ce0c79db
+
+	/// Enabled workforce users without a qualified manager value.
+	measure '# Users Without Manager' = CALCULATE(DISTINCTCOUNT('User'[User Key]), KEEPFILTERS('User'[Account State] = "Enabled"), KEEPFILTERS('User'[Identity Scope] = "Workforce"), KEEPFILTERS(ISBLANK('User'[Manager])))
+		formatString: #,0
+		displayFolder: Identity Health
+		lineageTag: 38bee270-33ae-4294-9361-eec3e2cffd04
+
+	/// Business attribute User Key.
+	column 'User Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: cf9b08fe-3b38-46ea-b3a4-08ed108f0299
+		summarizeBy: none
+		sourceColumn: User Key
+
+	/// Business attribute User Surrogate Key.
+	column 'User Surrogate Key'
+		dataType: string
+		lineageTag: a3e87c55-a01b-4938-9ec5-f47735ad4b7d
+		sourceColumn: User Surrogate Key
+
+	/// Business attribute User Type.
+	column 'User Type'
+		dataType: string
+		lineageTag: 8fe8125b-c599-4023-a99a-03919bd514f7
+		sourceColumn: User Type
+
+	/// Business attribute Account State.
+	column 'Account State'
+		dataType: string
+		lineageTag: a2cef685-7ac1-4fb0-ab70-ffe5b7366dc2
+		sourceColumn: Account State
+
+	/// Business attribute Workforce Status.
+	column 'Workforce Status'
+		dataType: string
+		lineageTag: 574e7a21-7af5-4fc5-a587-e74b9d3503fe
+		sourceColumn: Workforce Status
+
+	/// Business attribute Identity Scope.
+	column 'Identity Scope'
+		dataType: string
+		lineageTag: 178fa85a-5aee-480e-b399-3748ee952164
+		sourceColumn: Identity Scope
+
+	/// Business attribute User Source ID.
+	column 'User Source ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8a5a218e-b80e-46a1-b802-8e39a2127fbd
+		sourceColumn: User Source ID
+
+	/// Business attribute User ID.
+	column 'User ID'
+		dataType: string
+		lineageTag: 4a1468cf-208d-43d9-b912-ca3491fde348
+		sourceColumn: User ID
+
+	/// Business attribute User Mail.
+	column 'User Mail'
+		dataType: string
+		lineageTag: 6b4ac933-305b-4216-8ae6-c2842780a609
+		sourceColumn: User Mail
+
+	/// Business attribute User Search.
+	column 'User Search'
+		dataType: string
+		lineageTag: f631856e-6d61-4b69-a472-2a07363944a9
+		sourceColumn: User Search
+
+	/// Business attribute Department.
+	column Department
+		dataType: string
+		lineageTag: 02377cb6-6a11-4437-9360-afd66ac0e2fb
+		sourceColumn: Department
+
+	/// Business attribute Manager.
+	column Manager
+		dataType: string
+		lineageTag: 262e54c1-2b8d-4d3c-a2ba-f58ff36753f6
+		sourceColumn: Manager
+
+	/// Business attribute Country.
+	column Country
+		dataType: string
+		lineageTag: 66c56a48-1c95-4048-b1f3-74e0ae33c3d7
+		dataCategory: Country
+		sourceColumn: Country
+
+	/// Business attribute Activity Age Bucket.
+	column 'Activity Age Bucket'
+		dataType: string
+		lineageTag: 880d99fd-1405-4ab6-ba10-0ddd65f3d656
+		sourceColumn: Activity Age Bucket
+
+	partition 'User Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"User Key" = Int64.Type, #"User Surrogate Key" = nullable text, #"User ID" = nullable text, #"User Mail" = nullable text, #"User Search" = nullable text, #"User Type" = nullable text, #"Account State" = nullable text, #"Workforce Status" = nullable text, #"Identity Scope" = nullable text, #"Department" = nullable text, #"Manager" = nullable text, #"Country" = nullable text, #"Activity Age Bucket" = nullable text, #"User Source ID" = nullable text], {
+				        {1, "User 001", "USR-SYNTH-001", "user001@example.invalid", "user001@example.invalid | USR-SYNTH-001", "Member", "Enabled", "Active", "Workforce", "Engineering", "Manager 001", "France", "Active <=30D", "USR-SYNTH-001"},
+				        {2, "User 002", "USR-SYNTH-002", "user002@example.invalid", "user002@example.invalid | USR-SYNTH-002", "Member", "Enabled", "Inactive", "Workforce", "Finance", "Manager 001", "France", "Dormant >90D", "USR-SYNTH-002"},
+				        {3, "User 003", "USR-SYNTH-003", "user003@example.invalid", "user003@example.invalid | USR-SYNTH-003", "Member", "Disabled", "Inactive", "Workforce", "Operations", "Manager 002", "Germany", "Dormant >90D", "USR-SYNTH-003"},
+				        {4, "User 004", "USR-SYNTH-004", "guest004@example.invalid", "guest004@example.invalid | USR-SYNTH-004", "Guest", "Enabled", "Active", "External", "External", "External Manager", "Germany", "Active <=30D", "USR-SYNTH-004"},
+				        {5, "User 005", "USR-SYNTH-005", "user005@example.invalid", "user005@example.invalid | USR-SYNTH-005", "Member", "Enabled", "Unknown", "Workforce", "Sales", null, "Spain", "Never Used", "USR-SYNTH-005"},
+				        {6, "User 006", "USR-SYNTH-006", "user006@example.invalid", "user006@example.invalid | USR-SYNTH-006", "Member", "Enabled", "Active", "Workforce", "Engineering", "Manager 003", "Spain", "Active <=30D", "USR-SYNTH-006"}
+				    })
+				in
+				    Source
+

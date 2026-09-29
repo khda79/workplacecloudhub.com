@@ -27,10 +27,8 @@ let
             Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
             Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
             // Fallback only on ABSENCE, never after a read or JSON parse error.
-            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred,
-            Bytes = if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
-            IdenticalPair = if Table.RowCount(Preferred) = 1 and Table.RowCount(Legacy) = 1 then Binary.ToText(Bytes, BinaryEncoding.Base64) = Binary.ToText(Binary.Buffer(Legacy{0}[Content]), BinaryEncoding.Base64) else Table.RowCount(Legacy) <= 1
-        in if IdenticalPair then Bytes else error "Conflicting prepared metadata names; preserve both files and resolve before refresh",
+            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
+        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
     PointerBytes = ReadMetadata({}, "current"),
     Pointer = Json.Document(PointerBytes),
     BatchId = SafeSegment(if PreparedBatchId = "" then Text.From(Pointer[BatchId]) else PreparedBatchId),

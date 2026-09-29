@@ -1,0 +1,7 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,UserId,SourceScope,MatchStatus,MatchMethod,CandidateCount
+1.0.0,Identity,IdentityMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-001,Hybrid,Matched,ImmutableId,1
+1.0.0,Identity,IdentityMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-002,Hybrid,Matched,ImmutableId,1
+1.0.0,Identity,IdentityMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-003,Hybrid,Unmatched,None,0
+1.0.0,Identity,IdentityMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-004,CloudOnly,NotApplicable,None,0
+1.0.0,Identity,IdentityMatches,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,USR-SYNTH-006,Hybrid,Conflict,ImmutableId,2
+

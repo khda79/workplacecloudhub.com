@@ -1,0 +1,122 @@
+/// One synthetic eligible-endpoint security health observation per device and reporting date.
+table 'Endpoint Security Status'
+	lineageTag: cc9d8297-9e58-4144-9ab5-b0f1f41fbe01
+
+	/// Eligible endpoints with observed healthy Defender status divided by eligible endpoints with qualified evidence.
+	measure 'Defender healthy endpoints (%)' = VAR _healthyDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible"), KEEPFILTERS('Endpoint Security Status'[Defender Healthy] = TRUE())) VAR _eligibleDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible")) RETURN DIVIDE(_healthyDevices, _eligibleDevices)
+		formatString: 0.0%
+		displayFolder: Security Coverage
+		lineageTag: 6e849fe6-71a7-449e-8236-77686d623f81
+
+	/// Eligible endpoints with observed disk encryption divided by eligible endpoints with qualified evidence.
+	measure 'Disk encryption coverage (%)' = VAR _encryptedDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible"), KEEPFILTERS('Endpoint Security Status'[Disk Encrypted] = TRUE())) VAR _eligibleDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible")) RETURN DIVIDE(_encryptedDevices, _eligibleDevices)
+		formatString: 0.0%
+		displayFolder: Secondary Security Indicators
+		lineageTag: 14adaf1e-9f80-462f-9d5c-f82779f00953
+
+	/// Eligible endpoints with observed healthy firewall status divided by eligible endpoints with qualified evidence.
+	measure 'Firewall healthy (%)' = VAR _healthyDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible"), KEEPFILTERS('Endpoint Security Status'[Firewall Healthy] = TRUE())) VAR _eligibleDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible")) RETURN DIVIDE(_healthyDevices, _eligibleDevices)
+		formatString: 0.0%
+		displayFolder: Secondary Security Indicators
+		lineageTag: b3f92142-ba7e-4bfe-9d06-1ea610a2f7e8
+
+	/// Eligible endpoints with observed healthy antivirus status divided by eligible endpoints with qualified evidence.
+	measure 'Antivirus healthy (%)' = VAR _healthyDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible"), KEEPFILTERS('Endpoint Security Status'[Antivirus Healthy] = TRUE())) VAR _eligibleDevices = CALCULATE(DISTINCTCOUNT('Endpoint Security Status'[Device Key]), KEEPFILTERS('Endpoint Security Status'[Evidence Status] = "Observed"), KEEPFILTERS('Endpoint Security Status'[Security Eligibility State] = "Eligible")) RETURN DIVIDE(_healthyDevices, _eligibleDevices)
+		formatString: 0.0%
+		displayFolder: Secondary Security Indicators
+		lineageTag: e42fbb27-d8ba-486e-841d-8e517a47ff4f
+
+	/// Reporting-date key for the observation.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 2ebebaf4-6cd7-4d5f-bddc-ec3d808d37ba
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Synthetic tenant key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0ec4a093-8a8e-422f-becc-6bda2a27a9fa
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Synthetic environment key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0fd30e3b-84a6-4f6d-b548-3c58f3cff47e
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Synthetic device key.
+	column 'Device Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5159bde5-9b6a-479d-871a-28eacdb9c8ad
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	/// Governs endpoint eligibility for each security denominator.
+	column 'Security Eligibility State'
+		dataType: string
+		lineageTag: 76d35f9a-f52a-4f98-b3a4-6b8dc26d0730
+		sourceColumn: Security Eligibility State
+
+	/// Indicates whether Defender reports a healthy state.
+	column 'Defender Healthy'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a766aac0-0084-44cf-8ec5-bca833d8f12d
+		sourceColumn: Defender Healthy
+
+	/// Indicates whether disk encryption is observed.
+	column 'Disk Encrypted'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 92654f60-9235-4753-840e-6380f1e5e021
+		sourceColumn: Disk Encrypted
+
+	/// Indicates whether the host firewall reports a healthy state.
+	column 'Firewall Healthy'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 77e1ad21-dda1-492d-b48d-67c2a681b4db
+		sourceColumn: Firewall Healthy
+
+	/// Indicates whether antivirus reports a healthy state.
+	column 'Antivirus Healthy'
+		dataType: boolean
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1053a069-c272-4d76-818c-b0aa25a458ef
+		sourceColumn: Antivirus Healthy
+
+	/// Qualification state for the endpoint security observation.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: cf12ffb0-a946-4805-8aa1-dec0e1b14277
+		sourceColumn: Evidence Status
+
+	partition 'Endpoint Security Status Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Device Key" = Int64.Type, #"Security Eligibility State" = nullable text, #"Defender Healthy" = nullable logical, #"Disk Encrypted" = nullable logical, #"Firewall Healthy" = nullable logical, #"Antivirus Healthy" = nullable logical, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, 1, "Eligible", true, true, true, true, "Observed"},
+				        {20260915, 1, 1, 2, "Eligible", true, true, false, true, "Observed"},
+				        {20260915, 1, 1, 3, "Eligible", false, false, true, false, "Observed"},
+				        {20260915, 1, 1, 4, "Eligible", true, true, true, true, "Observed"},
+				        {20260915, 1, 1, 5, "NotApplicable", false, false, false, false, "NotApplicable"}
+				    })
+				in
+				    Source
+

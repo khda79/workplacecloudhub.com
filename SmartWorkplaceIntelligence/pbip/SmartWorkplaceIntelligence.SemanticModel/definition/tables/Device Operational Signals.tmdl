@@ -1,0 +1,219 @@
+/// Disconnected operational signal catalog used to present real device risks and recommended actions from private inventory and Windows Update evidence.
+table 'Device Operational Signals'
+	lineageTag: b5fb22df-19b9-4db4-9631-6a30eff36315
+
+	/// Affected source-device count for the selected signal. For Entra hardware ID conflicts, this is the number of implicated device records; Source Findings is the number of conflict groups.
+	measure 'Affected Devices' =
+			VAR _signal = SELECTEDVALUE('Device Operational Signals'[Signal Sort])
+			VAR _sourceAffected =
+			    LOOKUPVALUE(
+			        'Device Risk Evidence Summary'[Affected Devices],
+			        'Device Risk Evidence Summary'[Signal Sort], _signal
+			    )
+			RETURN
+			    SWITCH(
+			        _signal,
+			        1, [Windows 10 Devices Not Capable],
+			        2, [Noncompliant Devices],
+			        3, [Devices Low on Disk],
+			        4, [Devices Approaching Low Disk],
+			        5, [Devices Not Synced 30+ Days],
+			        6, [Windows Update Hard Failures],
+			        7, [Windows 10 Devices Capable],
+			        8, [Windows 10 Eligibility Not Assessed],
+			        _sourceAffected
+			    )
+		formatString: #,##0
+		lineageTag: 53feac99-7d9a-462a-96b3-3aa07bdc93e6
+
+	/// Share of the current managed-device estate affected by the selected operational signal.
+	measure 'Affected Estate (%)' =
+			DIVIDE(
+			    [Managed Devices Affected],
+			    CALCULATE([Managed Devices], REMOVEFILTERS('Device Operational Signals'))
+			)
+		formatString: 0.0%
+		lineageTag: a63bd673-f7e4-4bc2-98ff-3efc21285187
+
+	/// Source-device population covered by the evidence for the selected signal.
+	measure 'Covered Devices' =
+			VAR _signal = SELECTEDVALUE('Device Operational Signals'[Signal Sort])
+			VAR _sourceCovered =
+			    LOOKUPVALUE(
+			        'Device Risk Evidence Summary'[Covered Devices],
+			        'Device Risk Evidence Summary'[Signal Sort], _signal
+			    )
+			RETURN
+			    SWITCH(
+			        _signal,
+			        1, [Windows 10 Devices Remaining],
+			        2, [Managed Devices],
+			        3, [Managed Devices],
+			        4, [Managed Devices],
+			        5, [Managed Devices],
+			        6, CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows Update State] <> "Not observed"),
+			        7, [Windows 10 Devices Remaining],
+			        8, [Windows 10 Devices Remaining],
+			        _sourceCovered
+			    )
+		formatString: #,##0
+		lineageTag: 4fca630a-1182-45ab-af9b-8c5f960f0a4a
+
+	/// Affected devices intersected with the current managed Intune estate.
+	measure 'Managed Devices Affected' =
+			VAR _signal = SELECTEDVALUE('Device Operational Signals'[Signal Sort])
+			VAR _managedAffected =
+			    LOOKUPVALUE(
+			        'Device Risk Evidence Summary'[Managed Devices Affected],
+			        'Device Risk Evidence Summary'[Signal Sort], _signal
+			    )
+			RETURN IF(_signal <= 8, [Affected Devices], _managedAffected)
+		formatString: #,##0
+		lineageTag: cccec6c3-cfeb-4272-9ca7-4eb9320a152b
+
+	/// Current managed-device population covered by the evidence for the selected signal.
+	measure 'Managed Devices Covered' =
+			VAR _signal = SELECTEDVALUE('Device Operational Signals'[Signal Sort])
+			VAR _managedCovered =
+			    LOOKUPVALUE(
+			        'Device Risk Evidence Summary'[Managed Devices Covered],
+			        'Device Risk Evidence Summary'[Signal Sort], _signal
+			    )
+			RETURN
+			    SWITCH(
+			        _signal,
+			        1, [Windows 10 Devices Remaining],
+			        2, [Managed Devices],
+			        3, [Managed Devices],
+			        4, [Managed Devices],
+			        5, [Managed Devices],
+			        6, CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows Update State] <> "Not observed"),
+			        7, [Windows 10 Devices Remaining],
+			        8, [Windows 10 Devices Remaining],
+			        _managedCovered
+			    )
+		formatString: #,##0
+		lineageTag: d8ae96fd-7f91-4c35-a4a7-eac35819a63e
+
+	/// Affected source devices as a share of covered source devices.
+	measure 'Affected Among Covered (%)' = DIVIDE([Affected Devices], [Covered Devices])
+		formatString: 0.0%
+		lineageTag: a834997a-f13c-4aa8-9928-ec84968437d4
+
+	/// Managed devices covered by the selected evidence source as a share of the current managed estate.
+	measure 'Source Coverage vs Managed Estate (%)' =
+			DIVIDE(
+			    [Managed Devices Covered],
+			    CALCULATE([Managed Devices], REMOVEFILTERS('Device Operational Signals'))
+			)
+		formatString: 0.0%
+		lineageTag: 21f0aac8-672c-492e-97ba-c9969ebed07a
+
+	/// Source finding count; for hardware ID conflicts this counts conflict groups rather than implicated device records.
+	measure 'Source Findings' =
+			VAR _signal = SELECTEDVALUE('Device Operational Signals'[Signal Sort])
+			VAR _findings =
+			    LOOKUPVALUE(
+			        'Device Risk Evidence Summary'[Source Findings],
+			        'Device Risk Evidence Summary'[Signal Sort], _signal
+			    )
+			RETURN IF(_signal <= 8, [Affected Devices], _findings)
+		formatString: #,##0
+		lineageTag: 56300f36-588f-4ca5-8f66-4301d56a430e
+
+	/// Share of covered managed devices affected by the current operational signal.
+	measure 'Managed Affected Among Covered (%)' =
+			DIVIDE(
+			    [Managed Devices Affected],
+			    [Managed Devices Covered]
+			)
+		formatString: 0.0%
+		lineageTag: f2723e89-a1a8-4584-bc9c-f05b10ca2c8a
+
+	/// Managed devices affected by the current operational signal; short display measure for page-level risk tables.
+	measure Affected = [Managed Devices Affected]
+		formatString: #,0
+		lineageTag: a5463c19-7773-4a91-885b-0a9c96ae6121
+
+	/// Managed devices covered by the current operational signal; short display measure for page-level risk tables.
+	measure Covered = [Managed Devices Covered]
+		formatString: #,0
+		lineageTag: 2fd47c66-01c4-43b3-bde4-9da5a5596cc4
+
+	/// Share of covered managed devices affected by the current operational signal; short display measure for page-level risk tables.
+	measure 'Affected (%)' = [Managed Affected Among Covered (%)]
+		formatString: 0.0%
+		lineageTag: d4ccbead-eda5-4e7e-adc3-bfda8706a5ee
+
+	/// Display order for device operational signals.
+	column 'Signal Sort'
+		isHidden
+		lineageTag: 20f1f729-cb66-4e13-bd7b-badc21d85306
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Signal Sort]
+
+	/// Operational severity assigned to the device signal.
+	column 'Severity Label'
+		lineageTag: beba8fde-56bb-4bf0-b02d-76c0865f1e7a
+		isNameInferred
+		sourceColumn: [Severity Label]
+
+	/// Evidence-backed device operational risk or attention signal.
+	column Signal
+		lineageTag: 0215a903-b47a-4d1c-8e8b-8a87f637db8a
+		isNameInferred
+		sourceColumn: [Signal]
+		sortByColumn: 'Signal Sort'
+
+	/// Decision category for the device signal.
+	column 'Risk Category'
+		lineageTag: d6d7feeb-052c-4fb8-8c72-86d74e0eae2b
+		isNameInferred
+		sourceColumn: [Risk Category]
+
+	/// Recommended operational response for the device signal.
+	column 'Recommended Action'
+		lineageTag: e274fb8c-93f8-4bb8-be9c-d022f3222ffc
+		isNameInferred
+		sourceColumn: [Recommended Action]
+
+	/// Qualified private evidence sources supporting the signal.
+	column 'Evidence Source'
+		lineageTag: 5775efe3-d7fe-435c-a577-7eec7525a84e
+		isNameInferred
+		sourceColumn: [Evidence Source]
+
+	partition 'Device Operational Signals' = calculated
+		mode: import
+		source =
+				DATATABLE(
+				    "Signal Sort", INTEGER,
+				    "Severity Label", STRING,
+				    "Signal", STRING,
+				    "Risk Category", STRING,
+				    "Recommended Action", STRING,
+				    "Evidence Source", STRING,
+				    {
+				        {1, "High", "Windows 10 devices not capable of Windows 11", "Lifecycle", "Replace or reassign incompatible devices and complete the Windows 11 migration plan.", "Intune inventory + Windows 11 readiness"},
+				        {2, "High", "Noncompliant devices", "Compliance", "Remediate failed compliance policies and track return to compliance.", "Intune inventory"},
+				        {3, "High", "Devices low on disk space", "Storage", "Reclaim storage and investigate recurring capacity issues.", "Intune inventory"},
+				        {4, "Medium", "Devices approaching low disk threshold", "Storage", "Schedule proactive cleanup before the critical threshold.", "Intune inventory"},
+				        {5, "High", "Devices not synced with Intune for more than 30 days", "Management", "Restore management connectivity or retire stale records after ownership review.", "Intune inventory"},
+				        {6, "High", "Windows Update hard failures", "Updates", "Resolve update errors, disk failures, and rollback conditions before the next deployment ring.", "Windows Update status"},
+				        {7, "Medium", "Windows 10 devices capable but not migrated", "Lifecycle", "Schedule the Windows 11 upgrade and monitor completion.", "Intune inventory + Windows 11 readiness"},
+				        {8, "Medium", "Windows 11 eligibility not assessed", "Evidence gap", "Run or reconcile readiness assessment before migration or replacement decisions.", "Intune inventory + Windows 11 readiness"},
+				        {9, "High", "Secure Boot disabled", "Security", "Enable Secure Boot where supported; remediate firmware or replace unsupported hardware.", "AD computer inventory"},
+				        {10, "Medium", "Endpoint Analytics score below 50", "Experience", "Investigate boot, responsiveness, and application reliability drivers; assign remediation.", "Endpoint Analytics device performance"},
+				        {11, "High", "Devices with stop errors", "Reliability", "Review crash drivers and firmware, then remediate recurring stop-error devices.", "Endpoint Analytics startup devices"},
+				        {12, "High", "Entra hardware ID conflicts", "Data trust", "Resolve duplicate identifiers before enrollment, ownership, or lifecycle decisions.", "Entra device inventory"},
+				        {13, "Medium", "Device removal candidates", "Lifecycle hygiene", "Confirm owner and usage, then retire stale device records through the approved process.", "Entra device inventory"},
+				        {14, "Medium", "Older Windows 11 releases", "Lifecycle", "Move devices to a supported Windows 11 release through managed deployment rings.", "Intune inventory"},
+				        {15, "Medium", "AD-to-Intune unmatched devices", "Data trust", "Reconcile AD and Intune identity or retire orphaned device records.", "AD + Intune inventory"},
+				        {16, "High", "Startup score below 50", "Experience", "Investigate boot and sign-in drivers and prioritize the lowest-scoring devices.", "Endpoint Analytics startup devices"},
+				        {17, "High", "Boot time over 60 seconds", "Experience", "Investigate firmware, drivers, startup services, and storage on slow-boot devices.", "Endpoint Analytics startup devices"},
+				        {18, "Medium", "Sign-in time over 30 seconds", "Experience", "Review sign-in policies, profiles, scripts, and network dependencies.", "Endpoint Analytics startup devices"},
+				        {19, "Medium", "App reliability score below 50", "Reliability", "Identify unstable applications and versions, then target remediation or standardization.", "Endpoint Analytics device performance"}
+				    }
+				)
+

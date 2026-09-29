@@ -1,0 +1,84 @@
+/// One synthetic active-application Conditional Access coverage observation per reporting date.
+table 'Conditional Access Coverage'
+	lineageTag: ba1602a6-0b68-4512-a39f-34ce00390a3c
+
+	/// Observed active applications protected by at least one governed Conditional Access policy divided by observed active applications.
+	measure 'Conditional Access application coverage (%)' = VAR _coveredApplications = CALCULATE(DISTINCTCOUNT('Conditional Access Coverage'[Application Name]), KEEPFILTERS('Conditional Access Coverage'[Evidence Status] = "Observed"), KEEPFILTERS('Conditional Access Coverage'[Active Sign In Count] > 0), KEEPFILTERS('Conditional Access Coverage'[Coverage State] = "Covered")) VAR _activeApplications = CALCULATE(DISTINCTCOUNT('Conditional Access Coverage'[Application Name]), KEEPFILTERS('Conditional Access Coverage'[Evidence Status] = "Observed"), KEEPFILTERS('Conditional Access Coverage'[Active Sign In Count] > 0)) RETURN DIVIDE(_coveredApplications, _activeApplications)
+		formatString: 0.0%
+		displayFolder: Security Coverage
+		lineageTag: 80c9f4de-f51c-40a5-9a80-4dfba3439cc3
+
+	/// Reporting-date key for the observation.
+	column 'Date Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4057614a-c94e-4b19-ac13-0da6d21cd8e5
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	/// Synthetic tenant key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b261829f-6d84-4754-a6dc-3fcc10260043
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Synthetic environment key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c28a1298-8deb-4281-a9f1-b6cc6613bc9d
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Active application represented by the coverage observation.
+	column 'Application Name'
+		dataType: string
+		lineageTag: 107b993a-a74e-411f-9b38-a85a052d2982
+		sourceColumn: Application Name
+
+	/// Business category of the application.
+	column 'Application Category'
+		dataType: string
+		lineageTag: 06355e48-c8f2-434a-93df-d5933a763bb5
+		sourceColumn: Application Category
+
+	/// Qualified active sign-ins supporting denominator eligibility.
+	column 'Active Sign In Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 106ccfc7-25ff-48a6-a460-6e5bcbf18b53
+		summarizeBy: none
+		sourceColumn: Active Sign In Count
+
+	/// Governed Conditional Access coverage state.
+	column 'Coverage State'
+		dataType: string
+		lineageTag: 0f259d8d-7719-466a-b5e2-7279e122ae2f
+		sourceColumn: Coverage State
+
+	/// Qualification state for the coverage observation.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: eec86773-409b-4313-9231-ac6272c67f4c
+		sourceColumn: Evidence Status
+
+	partition 'Conditional Access Coverage Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Date Key" = Int64.Type, #"Tenant Key" = Int64.Type, #"Environment Key" = Int64.Type, #"Application Name" = nullable text, #"Application Category" = nullable text, #"Active Sign In Count" = Int64.Type, #"Coverage State" = nullable text, #"Evidence Status" = nullable text], {
+				        {20260915, 1, 1, "Microsoft Teams", "Collaboration", 180, "Covered", "Observed"},
+				        {20260915, 1, 1, "Exchange Online", "Messaging", 240, "Covered", "Observed"},
+				        {20260915, 1, 1, "SharePoint Online", "Content", 130, "Covered", "Observed"},
+				        {20260915, 1, 1, "OneDrive for Business", "Content", 120, "Not Covered", "Observed"},
+				        {20260915, 1, 1, "Power BI", "Analytics", 90, "Covered", "Observed"}
+				    })
+				in
+				    Source
+

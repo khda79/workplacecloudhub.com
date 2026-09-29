@@ -1,0 +1,41 @@
+/// Governed synthetic environment scope.
+table Environment
+	lineageTag: e7ee10b4-c92a-4a1b-9a9e-54b2b0af6084
+
+	/// Business attribute Environment Key.
+	column 'Environment Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5b100537-c22b-40b3-9a71-5a5209633f63
+		summarizeBy: none
+		sourceColumn: Environment Key
+
+	/// Business attribute Environment.
+	column Environment
+		dataType: string
+		lineageTag: 28d6bf15-c1d2-43de-b3df-301c15894baa
+		sourceColumn: Environment
+
+	/// Business attribute Environment Type.
+	column 'Environment Type'
+		dataType: string
+		lineageTag: e67fb6bf-512e-42d6-b2d9-d6517e5ce64d
+		sourceColumn: Environment Type
+
+	/// Business attribute Environment Status.
+	column 'Environment Status'
+		dataType: string
+		lineageTag: 80a15b1f-053e-4ec9-ba1d-cc8ca65241b7
+		sourceColumn: Environment Status
+
+	partition 'Environment Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Environment Key" = Int64.Type, #"Environment" = nullable text, #"Environment Type" = nullable text, #"Environment Status" = nullable text], {
+				        {1, "Synthetic Lab", "Test", "Active"}
+				    })
+				in
+				    Source
+

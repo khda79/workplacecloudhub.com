@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:workplacecloudhub:smart-workplace-intelligence:fixtures:1.0.0",
+  "title": "Smart Workplace Intelligence Fixture Manifest Contract",
+  "type": "object",
+  "required": ["contractVersion", "fixtureSet", "generatedAtUtc", "syntheticOnly", "files"],
+  "properties": {
+    "contractVersion": { "const": "1.0.0" },
+    "fixtureSet": { "type": "string", "minLength": 1 },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "syntheticOnly": { "const": true },
+    "defaultContext": {
+      "type": "object",
+      "required": ["tenantId", "organizationId", "environmentId", "runId", "collectedAtUtc", "sourceScriptVersion"],
+      "properties": {
+        "tenantId": { "type": "string", "minLength": 1 },
+        "organizationId": { "type": "string", "minLength": 1 },
+        "environmentId": { "type": "string", "minLength": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "collectedAtUtc": { "type": "string", "format": "date-time" },
+        "sourceScriptVersion": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sourceFamily", "sourceEntity", "grain", "expectedOutcome", "expectedRows", "schemaSha256", "fileSha256"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[a-z0-9_\\-/]+\\.csv$" },
+          "sourceFamily": { "type": "string", "minLength": 1 },
+          "sourceEntity": { "type": "string", "minLength": 1 },
+          "grain": { "type": "string", "minLength": 1 },
+          "expectedOutcome": { "enum": ["Accept", "Reject"] },
+          "expectedReason": { "type": "string" },
+          "expectedRows": { "type": "integer", "minimum": 0 },
+          "schemaSha256": { "type": "string", "pattern": "^[A-F0-9]{64}$" },
+          "fileSha256": { "type": "string", "pattern": "^[A-F0-9]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

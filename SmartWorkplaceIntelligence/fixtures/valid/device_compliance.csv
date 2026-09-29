@@ -1,0 +1,6 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,DeviceId,ObservationDate,ComplianceState,BlockedState
+1.0.0,Devices,DeviceCompliance,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-001,2026-09-15,Compliant,false
+1.0.0,Devices,DeviceCompliance,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-002,2026-09-15,Noncompliant,false
+1.0.0,Devices,DeviceCompliance,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-003,2026-09-15,Unknown,true
+1.0.0,Devices,DeviceCompliance,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-004,2026-09-15,Compliant,false
+1.0.0,Devices,DeviceCompliance,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DEV-SYNTH-005,2026-09-15,Unknown,false

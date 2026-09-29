@@ -1,0 +1,6 @@
+ContractVersion,SourceFamily,SourceEntity,TenantId,OrganizationId,EnvironmentId,RunId,CollectedAtUtc,CollectionStatus,IsPartialInventory,SourceScriptVersion,DataSourceName,RequiredSource,FreshnessTargetHours,LatestAcceptedRunUtc,ActualRowCount,RejectRowCount
+1.0.0,Operations,SourceRuns,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-001,2026-09-15T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,DirectoryUsers,true,24,2026-09-15T08:00:00Z,6,0
+1.0.0,Operations,SourceRuns,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-002,2026-09-15T07:45:00Z,Succeeded,false,synthetic-fixture-1.0.0,ManagedDevices,true,24,2026-09-15T07:45:00Z,5,0
+1.0.0,Operations,SourceRuns,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-003,2026-09-13T08:00:00Z,Succeeded,false,synthetic-fixture-1.0.0,EndpointMeasurements,true,24,2026-09-13T08:00:00Z,3,0
+1.0.0,Operations,SourceRuns,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-004,2026-09-15T07:30:00Z,Partial,true,synthetic-fixture-1.0.0,SecurityPosture,true,24,2026-09-15T07:30:00Z,2,1
+1.0.0,Operations,SourceRuns,00000000-0000-4000-8000-000000000001,ORG-SYNTH-001,ENV-SYNTH-LAB,RUN-SYNTH-20260915-005,2026-09-15T07:15:00Z,Failed,false,synthetic-fixture-1.0.0,BackupCoverage,true,24,,0,1

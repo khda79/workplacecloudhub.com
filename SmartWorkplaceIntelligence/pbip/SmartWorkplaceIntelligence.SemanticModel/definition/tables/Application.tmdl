@@ -1,0 +1,62 @@
+/// Normalized synthetic application and version catalogue.
+table Application
+	lineageTag: 5b337ec8-f5a8-4036-a35c-b3d2beaf0052
+
+	/// Business attribute Application Key.
+	column 'Application Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: e380fc21-6592-4c7c-a8d3-4dd40a9e1591
+		summarizeBy: none
+		sourceColumn: Application Key
+
+	/// Business attribute Normalized Product.
+	column 'Normalized Product'
+		dataType: string
+		lineageTag: 21f2a6e3-038e-4829-890d-f2bdad16c8c6
+		sourceColumn: Normalized Product
+
+	/// Business attribute Publisher.
+	column Publisher
+		dataType: string
+		lineageTag: 38f145f0-c9ff-4e59-b9c0-d7d9fe8e278b
+		sourceColumn: Publisher
+
+	/// Business attribute Normalized Version.
+	column 'Normalized Version'
+		dataType: string
+		lineageTag: 3b88f85c-6109-49fa-8e31-28e596874e39
+		sourceColumn: Normalized Version
+
+	/// Business attribute Platform.
+	column Platform
+		dataType: string
+		lineageTag: dec06876-edc9-4676-8d84-fe45cda9bf97
+		sourceColumn: Platform
+
+	/// Business attribute Application Family.
+	column 'Application Family'
+		dataType: string
+		lineageTag: f89a6fa3-256f-44af-8d20-371066d3dbb9
+		sourceColumn: Application Family
+
+	/// Business attribute Version Status.
+	column 'Version Status'
+		dataType: string
+		lineageTag: f4116ee3-0632-4851-8e6a-75d1d34b212f
+		sourceColumn: Version Status
+
+	partition 'Application Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Application Key" = Int64.Type, #"Normalized Product" = nullable text, #"Publisher" = nullable text, #"Normalized Version" = nullable text, #"Platform" = nullable text, #"Application Family" = nullable text, #"Version Status" = nullable text], {
+				        {1, "Contoso Browser", "Contoso", "10.2.0", "Windows", "Contoso Browser", "Current"},
+				        {2, "Contoso Browser", "Contoso", "9.8.0", "Windows", "Contoso Browser", "Outdated"},
+				        {3, "Fabrikam Editor", "Fabrikam", "5.1.0", "Windows", "Fabrikam Editor", "Current"},
+				        {4, "Northwind Connect", "Northwind", "3.0.0", "macOS", "Northwind Connect", "Current"}
+				    })
+				in
+				    Source
+

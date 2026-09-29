@@ -1,0 +1,35 @@
+/// Synthetic tenant scope used as a report filter, never as a security boundary.
+table Tenant
+	lineageTag: d2249305-b16f-48a1-8394-44668562d760
+
+	/// Business attribute Tenant Key.
+	column 'Tenant Key'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 38928acf-7f6a-4480-bd49-9f02d207891b
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Business attribute Tenant Name.
+	column 'Tenant Name'
+		dataType: string
+		lineageTag: 0c35e552-2668-4843-a7d3-76c46adcbd98
+		sourceColumn: Tenant Name
+
+	/// Business attribute Tenant Status.
+	column 'Tenant Status'
+		dataType: string
+		lineageTag: 13a6b4b2-10b5-4cf2-b812-4ff3a87830f7
+		sourceColumn: Tenant Status
+
+	partition 'Tenant Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Tenant Key" = Int64.Type, #"Tenant Name" = nullable text, #"Tenant Status" = nullable text], {
+				        {1, "Synthetic Tenant", "Active"}
+				    })
+				in
+				    Source
+

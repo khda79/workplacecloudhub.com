@@ -1,0 +1,206 @@
+/// Private current user-adoption and object-governance aggregates for Teams, SharePoint, OneDrive, and Copilot with explicit source freshness.
+table 'Collaboration Adoption Evidence'
+	lineageTag: 7b50f6ea-d68c-4be2-9fd0-b87503ea0cca
+
+	/// Eligible users in the selected collaboration-service scope.
+	measure 'Collaboration Eligible Users' = SUM('Collaboration Adoption Evidence'[Eligible Users])
+		formatString: #,0
+		displayFolder: Collaboration | Adoption
+		lineageTag: 15014d18-dded-4651-917c-6652ecca6c5b
+
+	/// Sum of 30-day active-user counts across selected collaboration services. One person can contribute an observation to more than one service.
+	measure 'Active User-Service Observations 30D' = SUM('Collaboration Adoption Evidence'[Active Users 30D])
+		formatString: #,0
+		displayFolder: Collaboration | Adoption
+		lineageTag: 678c602f-592c-44cb-8b9d-f889ba15cad7
+
+	/// Ratio of summed active-user-service observations to summed eligible-user-service observations; not a distinct-user rate across services.
+	measure 'Service-weighted Activity Rate (%)' = DIVIDE([Active User-Service Observations 30D], [Collaboration Eligible Users])
+		formatString: 0.0%
+		displayFolder: Collaboration | Adoption
+		lineageTag: 3ad7a069-6d3d-4d5c-9064-dd5ac870973a
+
+	/// Collaboration services with current source evidence.
+	measure 'Collaboration Services' = DISTINCTCOUNT('Collaboration Adoption Evidence'[Service])
+		formatString: #,0
+		displayFolder: Collaboration | Current
+		lineageTag: 9b37cc8c-57f8-493a-a907-6b5bc56669c6
+
+	/// Service objects or licensed user objects in the selected service scope.
+	measure 'Collaboration Service Objects' = SUM('Collaboration Adoption Evidence'[Service Objects])
+		formatString: #,0
+		displayFolder: Collaboration | Current
+		lineageTag: 541e1d09-1fc7-4013-bdaa-50035404f277
+
+	/// Objects inactive for more than 180 days or without activity evidence.
+	measure 'Collaboration Inactive Objects' = SUM('Collaboration Adoption Evidence'[Inactive Objects])
+		formatString: #,0
+		displayFolder: Collaboration | Risk
+		lineageTag: 79fc3536-213d-4b95-97ec-20aa107bc463
+
+	/// Objects without an observed accountable owner.
+	measure 'Collaboration Orphaned Objects' = SUM('Collaboration Adoption Evidence'[Orphaned Objects])
+		formatString: #,0
+		displayFolder: Collaboration | Risk
+		lineageTag: 55bbb7f7-3bd6-41fb-b741-de726ff220f7
+
+	/// Services whose usage evidence is older than 45 days.
+	measure 'Stale Collaboration Sources' = CALCULATE(DISTINCTCOUNT('Collaboration Adoption Evidence'[Service]), KEEPFILTERS('Collaboration Adoption Evidence'[Freshness State] = "Stale"))
+		formatString: #,0
+		displayFolder: Collaboration | Evidence
+		lineageTag: e6210096-f6dd-4dad-884b-60f662e2e827
+
+	/// Compact disclosure of collaboration coverage and source freshness.
+	measure 'Collaboration Evidence Ribbon Text' = "Observed collaboration evidence · " & FORMAT([Collaboration Services], "0") & " services · " & FORMAT([Stale Collaboration Sources], "0") & " stale usage sources"
+		formatString: @
+		displayFolder: Collaboration | Evidence
+		lineageTag: a97a405c-6660-4bd6-be66-323a3512bfc0
+
+	column Service
+		dataType: string
+		lineageTag: 878a91d8-b602-484a-bc71-f9414c4ff7be
+		summarizeBy: none
+		sourceColumn: Service
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Eligible Users'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: c95449f8-7bc0-41fe-8997-ec87cb1edd92
+		summarizeBy: sum
+		sourceColumn: Eligible Users
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active Users 30D'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: bef8e4e1-f61d-494c-8e20-7e237e439d9b
+		summarizeBy: sum
+		sourceColumn: Active Users 30D
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active User Rate (%)'
+		dataType: double
+		isHidden
+		formatString: 0.0%
+		lineageTag: 99ee3557-557e-4e7a-bc87-785a9179ea31
+		summarizeBy: sum
+		sourceColumn: Active User Rate (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Service Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 543b53f6-a62d-4473-aac3-b7fc8a169984
+		summarizeBy: sum
+		sourceColumn: Service Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Active Objects 30D'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 71a25770-8b76-474c-a69f-1a44b8da9bc0
+		summarizeBy: sum
+		sourceColumn: Active Objects 30D
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Inactive Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 05585fe0-199c-4eda-a4ad-c0dc026e237c
+		summarizeBy: sum
+		sourceColumn: Inactive Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Orphaned Objects'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 407b64d8-5a28-46bc-b59d-539a59bcd77b
+		summarizeBy: sum
+		sourceColumn: Orphaned Objects
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Objects with External Access'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6877fe21-bf32-4b35-84e4-88d5133e1a72
+		summarizeBy: sum
+		sourceColumn: Objects with External Access
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Storage Used GB'
+		dataType: double
+		isHidden
+		formatString: #,0.0
+		lineageTag: af74b201-b8c1-4702-b3c3-7ae2a3c34991
+		summarizeBy: sum
+		sourceColumn: Storage Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Usage Refresh Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: d41cd8ee-8dd4-4a55-b870-71d9128a0c19
+		summarizeBy: none
+		sourceColumn: Usage Refresh Date
+
+		variation Variation
+			isDefault
+			relationship: 1ed3a234-0fd6-44c0-a312-d960ad470074
+			defaultHierarchy: LocalDateTable_092d7bca-578d-4359-9d57-7785e5c19297.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'Evidence Age Days'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 29002b71-91fc-48c6-8354-116c390da480
+		summarizeBy: sum
+		sourceColumn: Evidence Age Days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: 9a0836ef-1375-4cc2-9f61-8dfe0f637d77
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: f5b92dfc-2f74-4041-9a7d-46b3b5578dd7
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Collaboration Adoption Evidence Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationAdoptionEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Selected = Table.SelectColumns(Raw, {"Service", "Eligible Users", "Active Users 30D", "Active User Rate (%)", "Service Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Objects with External Access", "Storage Used GB", "Usage Refresh Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Eligible Users", "Active Users 30D", "Active User Rate (%)", "Service Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Objects with External Access", "Storage Used GB", "Usage Refresh Date", "Evidence Age Days"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Service", type text}, {"Eligible Users", Int64.Type}, {"Active Users 30D", Int64.Type}, {"Active User Rate (%)", type number}, {"Service Objects", Int64.Type}, {"Active Objects 30D", Int64.Type}, {"Inactive Objects", Int64.Type}, {"Orphaned Objects", Int64.Type}, {"Objects with External Access", Int64.Type}, {"Storage Used GB", type number}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				    Typed
+
