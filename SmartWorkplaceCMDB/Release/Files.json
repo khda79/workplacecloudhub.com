@@ -2,6 +2,7 @@
   "Assets/WorkplaceCloudHub-mail.png",
   "Build/SmartWorkplaceCMDB-Build.ps1",
   "Build/SmartWorkplaceCMDB-Package.ps1",
+  "Build/SmartWorkplaceCMDB-ReportData.ps1",
   "Collectors/ActiveDirectory/SmartWorkplaceCMDB-ActiveDirectory-Collect.ps1",
   "Collectors/ActiveDirectory/SmartWorkplaceCMDB-ActiveDirectory-Normalize.ps1",
   "Collectors/Entra/SmartWorkplaceCMDB-EntraDevices-Collect.ps1",
@@ -67,6 +68,7 @@
   "PowerBI/Queries/powerquery.md",
   "PowerBI/README.md",
   "PowerBI/build_report.py",
+  "PowerBI/prepare_current_report_data.py",
   "PowerBI/report_360.py",
   "PowerBI/report_cockpit.py",
   "PowerBI/report_hardware.py",
@@ -132,6 +134,7 @@
   "Tests/test_report_360.py",
   "Tests/test_report_builder.py",
   "Tests/test_report_cockpit.py",
+  "Tests/test_report_current_data.py",
   "Tests/test_report_hardware.py",
   "Tests/test_report_style.py"
 ]

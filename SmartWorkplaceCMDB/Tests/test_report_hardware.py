@@ -43,7 +43,7 @@ class HardwareReport(unittest.TestCase):
         cols = hw.load_json(hw.PRODUCT / 'Schema/SmartWorkplaceCMDB.ci.hardware.json')['columns']
         self.write(self.ci_path, [self.ci], cols)
         manifest = dict(Channel='stable', Status='Exported', Hardware=dict(Status='Validated', RowCount=1, Coverage='Bounded', Mode='Fixture', InputHashes={str(self.raw_path): hw.sha(self.raw_path)}), SourceEvidence=dict(InputHashes={str(self.inv_path): hw.sha(self.inv_path)}))
-        (self.root / 'CIRegistry.manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'CIRegistry.manifest.json.txt').write_text(json.dumps(manifest))
 
     def test_missing_source_has_no_fake_rows(self):
         identity, rows, coverage, _ = hw.prepare_data(self.dim)
@@ -107,7 +107,7 @@ class HardwareReport(unittest.TestCase):
     def test_empty_validated_snapshot_remains_empty(self):
         self.fixture()
         self.write(self.raw_path, [], list(self.raw)); self.write(self.ci_path, [], hw.load_json(hw.PRODUCT / 'Schema/SmartWorkplaceCMDB.ci.hardware.json')['columns'])
-        path = self.root / 'CIRegistry.manifest.json'; manifest = hw.load_json(path)
+        path = self.root / 'CIRegistry.manifest.json.txt'; manifest = hw.load_json(path)
         manifest['Hardware'].update(RowCount=0, InputHashes={str(self.raw_path): hw.sha(self.raw_path)})
         path.write_text(json.dumps(manifest))
         _, rows, coverage, _ = hw.prepare_data(self.dim, self.ci_path)

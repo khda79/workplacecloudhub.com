@@ -1,6 +1,7 @@
 """Offline navigation-contract tests for the compact V1 Power BI cockpit."""
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -223,6 +224,21 @@ class CockpitNavigationTests(unittest.TestCase):
         self.assertIn('country_path = data_dir / "DimCountry.csv"', source)
         self.assertIn("report, local_path, remote_path, data_dir", source)
         self.assertIn("File.Contents(CMDBDataRoot &", source)
+
+    def test_legacy_cockpit_rewriter_rejects_current_collection_model(self):
+        with tempfile.TemporaryDirectory() as root:
+            project = Path(root)
+            report = project / "SmartWorkplaceCMDB.Report"
+            report.mkdir()
+            model_dir = project / "SmartWorkplaceCMDB.SemanticModel"
+            model_dir.mkdir()
+            (model_dir / "model.bim").write_text(
+                json.dumps({"model": {"expressions": [
+                    {"name": "CMDBReportDataRoot", "expression": '"Derived"'},
+                ]}}), encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "current DATA-LAST"):
+                cockpit.enrich_semantic_model(report, None, None)
 
     def test_explicit_report_data_directory_precedes_parameter_discovery(self):
         with tempfile.TemporaryDirectory() as root:

@@ -78,7 +78,29 @@ def read_csv(path):
 
 
 def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def scan_csv(path, expected_columns, identity=None, validate=False):
+    """Validate a large CSV without retaining its rows in memory."""
+    count = 0
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if reader.fieldnames != expected_columns:
+            raise ValueError("CSV contract mismatch: " + path.name)
+        for row in reader:
+            if None in row or any(value is None for value in row.values()):
+                raise ValueError("Malformed CSV row: " + path.name)
+            if identity and any(row[key] != value for key, value in identity.items()):
+                raise ValueError("Raw CSV tenant mismatch: " + path.name)
+            if validate:
+                validate_types(path.stem, expected_columns, (row,))
+            count += 1
+    return count
 
 
 def write_json(path, obj):
@@ -193,22 +215,20 @@ def build_source_health(root, identity, source_hashes):
     health = []
     for t in raw_contract["tables"]:
         path = root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"])
-        sidecar = path.with_name(path.name + ".status.json")
+        sidecar = path.with_name(path.name + ".status.json.txt")
+        if not sidecar.is_file():
+            sidecar = path.with_name(path.name + ".status.json")
         h = dict(identity, SourceName=path.stem, Status="Not collected", Coverage="Unknown", SourceRows="", MaxItems="", StartedDateTime="", CompletedDateTime="", Evidence="Missing")
-        raw = []
+        raw_count = 0
         if path.exists():
-            raw_columns, raw = read_csv(path)
-            if raw_columns != t["columns"]:
-                raise ValueError("Raw CSV contract mismatch: " + path.name)
-            if any(any(r[k] != v for k, v in identity.items()) for r in raw):
-                raise ValueError("Raw CSV tenant mismatch: " + path.name)
-            h.update(SourceRows=str(len(raw)), Status="CSV without evidence")
+            raw_count = scan_csv(path, t["columns"], identity)
+            h.update(SourceRows=str(raw_count), Status="CSV without evidence")
             source_hashes[str(path.relative_to(root))] = sha(path)
         if sidecar.exists():
             s = json.loads(sidecar.read_text(encoding="utf-8-sig"))
             if any(s.get(k) != v for k, v in identity.items()):
                 raise ValueError("Source evidence tenant mismatch: " + path.name)
-            valid = path.exists() and s.get("SHA256") == sha(path) and s.get("RowCount") == len(raw)
+            valid = path.exists() and s.get("SHA256") == sha(path) and s.get("RowCount") == raw_count
             h.update(Status=s.get("Status", "Unknown"), Coverage=s.get("Coverage", "Unknown"),
                      MaxItems=str(s.get("MaxItems", "")), StartedDateTime=s.get("StartedUtc", ""),
                      CompletedDateTime=s.get("CompletedUtc", ""), Evidence="Verified" if valid else "Inconsistent")
@@ -222,7 +242,7 @@ def build_source_health(root, identity, source_hashes):
     return health
 
 
-def prepare_data(root):
+def prepare_data(root, rowless_tables=()):
     contract = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.tables.json").read_text(encoding="utf-8-sig"))
     needed = [t for t in contract["tables"] if t["area"] == "PowerBI" or t["name"] in ("CMDB_Mailboxes.csv", "CMDB_DataQuality.csv")]
     _, tenants = read_csv(root / "PowerBI/DimTenant.csv")
@@ -230,15 +250,20 @@ def prepare_data(root):
         raise ValueError("Exactly one complete tenant identity is required")
     identity = {k: tenants[0][k] for k in IDENTITY}
     data, columns, source_hashes = {}, {}, {}
+    rowless_tables = set(rowless_tables)
     for t in needed:
         name = Path(t["name"]).stem
         path = root / t["area"] / t["name"]
-        cols, rows = read_csv(path)
-        if cols != t["columns"]:
-            raise ValueError("CSV contract mismatch: " + name)
-        if t.get("tenantScoped", True) and any(any(r[k] != v for k, v in identity.items()) for r in rows):
-            raise ValueError("Tenant identity mismatch: " + name)
-        validate_types(name, cols, rows)
+        if name in rowless_tables:
+            cols, rows = t["columns"], []
+            scan_csv(path, cols, identity if t.get("tenantScoped", True) else None, validate=True)
+        else:
+            cols, rows = read_csv(path)
+            if cols != t["columns"]:
+                raise ValueError("CSV contract mismatch: " + name)
+            if t.get("tenantScoped", True) and any(any(r[k] != v for k, v in identity.items()) for r in rows):
+                raise ValueError("Tenant identity mismatch: " + name)
+            validate_types(name, cols, rows)
         data[name], columns[name] = rows, cols[:]
         source_hashes[str(path.relative_to(root))] = sha(path)
     keys = {"DimUser": "TenantUserKey", "DimDevice": "TenantDeviceKey", "DimLicenseSku": "TenantSkuKey",

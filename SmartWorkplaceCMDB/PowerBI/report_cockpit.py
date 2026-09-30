@@ -1305,6 +1305,12 @@ def enrich_semantic_model(
         raise ValueError("Expected one BIM semantic model beside the report")
     model_json = load(model_path)
     model = model_json["model"]
+    if any(item.get("name") == "CMDBReportDataRoot" for item in model.get("expressions", [])):
+        raise ValueError(
+            "This report reads the current DATA-LAST plus a validated Derived sidecar. "
+            "Rebuild that sidecar with prepare_current_report_data.py; the frozen-snapshot "
+            "cockpit rewriter must not be run on this model."
+        )
     data_dir = resolve_report_data_dir(report, model, report_data_override)
     identity, hosting_rows, metadata = mailbox_hosting_rows(
         report, local_path, remote_path, data_dir, mailbox_hosting_baseline

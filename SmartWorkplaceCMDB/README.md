@@ -84,7 +84,7 @@ Export-SmartWorkplaceCMDBCIRegistry @registry -OutputDirectory 'C:\Example\CI-Pr
 ```
 
 Outputs: `CMDB_ConfigurationItems.csv`, an unchanged validated copy of
-`CMDB_Relationships.csv`, and `CIRegistry.manifest.json` with input/catalog hashes.
+`CMDB_Relationships.csv`, and `CIRegistry.manifest.json.txt` with input/catalog hashes.
 Invalid inputs fail without publishing a partial destination. Existing output
 directories are never replaced. The exporter streams CSV records and retains
 identity indexes and sparse governance state; memory still grows with the
@@ -809,16 +809,17 @@ cannot reuse a fixture/bounded root. Trial child paths are pinned to that root,
 and an explicit `-RawLatestOutputPath` outside its latest folder is rejected.
 Use returned output paths for subsequent direct normalization.
 
-Each raw CSV has a `.status.json` evidence file with identity, coverage,
+Each raw CSV has a `.status.json.txt` evidence file with identity, coverage,
 in-progress/completed/failed status, dates, row count and SHA-256. Failed attempts
 retain the previous raw CSV but block normalization until a successful refresh.
 Per-source locks prevent overlapping writers. Existing CSVs without evidence
 remain readable as legacy inputs; the report shows their source health as
 unknown. Copy evidence with raw CSVs when transferring them to another host.
-The current SharePoint uploader copies CSVs plus run logs and transcripts, but
-does not publish `.status.json` evidence. That evidence therefore remains
-unavailable in the synchronized copy. No live completeness claim is made for
-that copy.
+The SharePoint uploader copies CSVs, run logs, transcripts, and completed
+`.status.json.txt` source evidence. The content is JSON, but the `.txt`
+extension remains compatible with OneDrive synchronization. Legacy
+`.status.json` files can still be read until migrated; new collections write
+only `.status.json.txt`.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1 -Tenant prod -Collect -Pipeline EntraUsers -MaxItems 10

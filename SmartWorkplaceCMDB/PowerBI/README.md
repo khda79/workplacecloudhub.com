@@ -9,6 +9,40 @@ All visible release labels and the canonical project name are V1; the project
 is stored as `PowerBI/CMDB-REPORTS/SmartWorkplaceCMDB.pbip`. See
 [COCKPIT-DSI.md](COCKPIT-DSI.md) for metric and source boundaries.
 
+## Canonical report: current collection
+
+The maintained ten-page PBIP is different from a newly generated frozen report.
+Its semantic model imports 20 unchanged-schema tables directly from
+`CMDBDataRoot\PowerBI` (where `CMDBDataRoot` points to the synchronized
+`DATA-LAST` collection). Nineteen enriched/report-only tables come from a
+private `CMDBReportDataRoot` directory. Neither folder belongs in Git. When
+`ReportData.Enabled` is configured, the Full pipeline builds this directory
+under `DATA-LAST\PowerBI\Report` after the 28-table contract build. It does
+not replace or modify the collection's own CSVs. The previous directory is
+retained only during validation and removed after successful promotion.
+
+Set `ReportData.Enabled=true` and
+`ReportData.SmartInventoryLatestOutputRootPath` to the directory containing
+`Exchange_OnPrem_Mailboxes_AllDomains.csv` and
+`Exchange_OnPrem_RemoteMailboxes_AllDomains.csv` in the private tenant config.
+Python 3.10+ is required on the machine running Full. The report-data step
+exports validated CI hardware evidence, builds the 19 CSVs, verifies the
+collection build, tenant identity, source and output hashes, and publishes a
+single current `Report` directory. A failure preserves the previous report
+directory and fails the pipeline; no inferred mailbox or hardware values are
+substituted. Do not refresh Desktop during an active collection or while the
+synchronized files are still changing.
+
+Point `CMDBDataRoot` at the local synchronized `DATA-LAST` and
+`CMDBReportDataRoot` at its `PowerBI\Report` subdirectory after a completed
+Full run. Refresh in Power BI Desktop, inspect all ten pages and key
+totals/filters, then save. The legacy `report_cockpit.py` rewriter intentionally
+rejects a model containing `CMDBReportDataRoot`: it assumes a frozen
+`ReportData` copy and must not rewrite the maintained direct-source model.
+
+The following builder instructions apply to creating a separate new report,
+not to refreshing this canonical PBIP.
+
 Power BI is a native deliverable of SmartWorkplaceCMDB. The report builder
 creates six English pages: Overview, Devices and compliance, Users and
 relationships, Licenses and assignments, Mailboxes, and Quality and coverage.

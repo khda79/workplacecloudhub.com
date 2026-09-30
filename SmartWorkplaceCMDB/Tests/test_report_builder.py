@@ -91,6 +91,18 @@ class ReportTests(unittest.TestCase):
             writer.writerows(rows)
         return run_path
 
+    def test_rowless_validation_keeps_large_source_rows_out_of_memory(self):
+        self.write("FactDeviceApplication", [dict(TenantDeviceApplicationKey="fictional-prod|app1")])
+        self.write("FactUserServicePlan", [dict(TenantUserKey="fictional-prod|u1")])
+        _, data, columns, hashes = report.prepare_data(
+            self.root, rowless_tables={"FactDeviceApplication", "FactUserServicePlan"}
+        )
+        for name in ("FactDeviceApplication", "FactUserServicePlan"):
+            self.assertEqual(data[name], [])
+            self.assertEqual(columns[name], self.contract[name]["columns"])
+            self.assertEqual(hashes[str(self.path(name).relative_to(self.root))], report.sha(self.path(name)))
+        self.assertEqual(len(data["DimUser"]), 2)
+
     def test_six_pages_have_working_bindings_and_keep_source_immutable(self):
         hashes = {str(p): report.sha(p) for p in self.root.rglob("*.csv")}
         output = self.base / "report"
@@ -216,7 +228,7 @@ class ReportTests(unittest.TestCase):
             w = csv.DictWriter(f, fieldnames=t["columns"])
             w.writeheader()
             w.writerow(dict({c: "" for c in t["columns"]}, **self.identity))
-        sidecar = path.with_name(path.name + ".status.json")
+        sidecar = path.with_name(path.name + ".status.json.txt")
         sidecar.write_text(json.dumps(dict(self.identity, Status="Completed", Coverage="Complete", SHA256="invalid", RowCount=1)), encoding="utf-8")
         _, data, _, _ = report.prepare_data(self.root)
         self.assertEqual(data["SourceHealth"][0]["Evidence"], "Inconsistent")
@@ -245,7 +257,7 @@ class ReportTests(unittest.TestCase):
     def test_sidecar_takes_precedence_over_matching_run(self):
         path = self.write_first_raw_source()
         self.write_snapshot_run()
-        sidecar = path.with_name(path.name + ".status.json")
+        sidecar = path.with_name(path.name + ".status.json.txt")
         sidecar.write_text(json.dumps(dict(self.identity, Status="Partial", Coverage="Partial", SHA256=report.sha(path), RowCount=1)), encoding="utf-8")
         _, data, _, _ = report.prepare_data(self.root)
         source = data["SourceHealth"][0]
@@ -255,7 +267,7 @@ class ReportTests(unittest.TestCase):
 
     def test_source_evidence_foreign_tenant_rejected(self):
         t = json.loads((PRODUCT / "Schema/SmartWorkplaceCMDB.raw.tables.json").read_text())["tables"][0]
-        path = self.root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"] + ".status.json")
+        path = self.root.joinpath(*t["area"].replace("\\", "/").split("/"), t["name"] + ".status.json.txt")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(dict(self.identity, TenantKey="foreign")), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "evidence tenant mismatch"):

@@ -49,7 +49,9 @@ def prepare_data(dim_path, hardware_path=None):
     result = []
     if hardware_path is not None:
         hardware_path = Path(hardware_path)
-        manifest_path = hardware_path.parent / 'CIRegistry.manifest.json'
+        manifest_path = hardware_path.parent / 'CIRegistry.manifest.json.txt'
+        if not manifest_path.is_file():
+            manifest_path = hardware_path.parent / 'CIRegistry.manifest.json'
         hashes[str(hardware_path)] = sha(hardware_path)
         hashes[str(manifest_path)] = sha(manifest_path)
         manifest = load_json(manifest_path)
