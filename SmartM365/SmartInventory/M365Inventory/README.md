@@ -163,6 +163,12 @@ its folders are reparse points that the JSON transport refuses, so manifests are
 files with the same bytes as on the share (v1.1). Files already consolidated without a recorded
 capture time (interrupted run) recover their provenance when their SHA256 matches the planned snapshot.
 
+Since v1.21 each run replaces the current week (`-OverwriteExisting`), so a week keeps its latest
+report: this is what the prepared Workforce history reads (latest file of the week) and what the
+published Power BI batches contain. `Merge-SmartM365-M365UsageWeeklyHistory.ps1 -SnapshotPolicy Latest`
+(v1.2) rebuilds already consolidated weeks the same way from the timestamped CSVs left in each run
+folder; it never creates a week that had no history.
+
 Since v1.20 the collector publishes weekly history with `-UploadChangedFilesOnly`: only the CSVs
 copied during the run and a changed manifest are uploaded instead of the whole week. Since SmartM365.Core
 1.0.60 (PS5 compatibility module 1.0.44), this mode keeps an `upload.pending` marker in the week folder
