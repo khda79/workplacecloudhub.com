@@ -4,6 +4,8 @@
 
 The daily email contains SharePoint links only: the four timestamped CSV files and a timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook with one worksheet per CSV. Files are not attached and local paths are never shown. If a SharePoint upload does not return a web URL, that file link is omitted.
 
+Since v0.34 these links stay valid for seven days: after each successful upload, older timestamped copies of the same CSV or workbook are deleted from the SharePoint folder, as on the server (SmartM365.Core 1.0.62 or later required).
+
 Latest CSV files:
 
 | Entity | Latest CSV |

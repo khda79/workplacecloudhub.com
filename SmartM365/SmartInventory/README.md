@@ -61,7 +61,13 @@ Since SmartM365.Core 1.0.61 (PS5 compatibility module 1.0.45), once the run copy
 uploaded, the timestamped copies of the same CSV in the same SharePoint folder older
 than 7 days are deleted (`-SharePointRetentionDays`, 0 disables), the same retention
 as the server. Latest copies and WeeklyHistory never match. Before, SharePoint kept
-every run while the server kept seven days.
+every run while the server kept seven days. Since Core 1.0.62 (PS5 1.0.46) the same
+function also handles timestamped `.xlsx` workbooks (same prefix and extension only).
+The Teams (0.34) and SharePoint Online (0.30) collectors, which upload their run CSVs
+and workbooks directly, call it after each successful upload. The Active Directory
+inventory publishes fixed file names and needs no purge. AD HealthCheck is left
+unchanged on purpose: without WeeklyHistory, its SharePoint run copies are its only
+history beyond the seven days kept on the server.
 
 `Maintenance/Remove-SmartM365-ExpiredTimestampedCsv.ps1` removes the copies
 accumulated before. It is read-only without `-Execute` and removes a copy only when it
