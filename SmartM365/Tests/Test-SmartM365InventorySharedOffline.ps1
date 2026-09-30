@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.8
+1.1.9
 #>
 [CmdletBinding()]
 param(
@@ -38,6 +38,9 @@ function Import-OfflineFunctions {
     # collector entry point, credentials, task scheduler, mail or network calls.
     New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
 }
+# Weekly history and orchestrator distributed state go through the JSON transport (.json.txt
+# names, owned atomic writes). Load it with its deployment policy, as the production modules do.
+Import-Module (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force -Global
 
 try {
     $tenantContextModule = Import-OfflineFunctions (Join-Path $SourceRoot 'Config/SmartM365-TenantContext.ps1') @('Initialize-SmartM365TenantContext')
@@ -129,9 +132,10 @@ try {
             function script:Get-SmartM365WeeklyHistoryFileName { param($Path) [IO.Path]::GetFileName($Path) }
             function script:Copy-SmartM365FileAtomically { param($SourcePath,$DestinationPath) Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force }
             function script:Write-SmartM365TextAtomically { param($Path,$Content,$Encoding) Set-Content -LiteralPath $Path -Value $Content -Encoding utf8 }
-            function script:Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:Uploads++ }
+            function script:Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:Uploads++; $script:UploadedPaths += $LocalFilePath }
             function script:WriteLog { param($Message,$Level) if ($Level -eq 'WARNING') { $script:Warnings++ } }
             $script:Uploads=0
+            $script:UploadedPaths=@()
             $script:Warnings=0
         }
         Test-OfflineCase 'Weekly snapshot keeps first CSV and manifest capture time on rerun' {
@@ -140,15 +144,16 @@ try {
             Set-Content -LiteralPath $source -Value 'Id,Value`n1,first' -Encoding utf8
             & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
             $snapshot=Join-Path $root '2026-W39/weekly-source.csv'
-            $manifestPath=Join-Path $root '2026-W39/manifest.json'
+            $manifestPath=Get-SmartM365JsonReadPath (Join-Path $root '2026-W39/manifest.json')
             $first=(Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)
             $firstHash=(Get-FileHash -LiteralPath $manifestPath).Hash
             Set-Content -LiteralPath $source -Value 'Id,Value`n1,second' -Encoding utf8
-            $uploadsBefore=& $weeklyModule {$script:Uploads}
+            # Preferred manifests are republished on every run by design; unchanged CSVs must not be.
+            $csvUploadsBefore=& $weeklyModule {@($script:UploadedPaths | Where-Object { $_ -like '*.csv' }).Count}
             & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
             Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'first') 'Second run replaced the first weekly CSV.'
             Assert-Offline ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $firstHash) 'Skipped snapshot rewrote manifest provenance.'
-            Assert-Offline ((& $weeklyModule {$script:Uploads}) -eq $uploadsBefore) 'Skipped snapshot reuploaded unchanged history.'
+            Assert-Offline ((& $weeklyModule {@($script:UploadedPaths | Where-Object { $_ -like '*.csv' }).Count}) -eq $csvUploadsBefore) 'Skipped snapshot reuploaded unchanged history CSV.'
             Assert-Offline ($first.SnapshotTimestampStatus -eq 'Recorded' -and $first.SnapshotCreatedAtUtc -and $first.FileSnapshotCreatedAtUtc.'weekly-source.csv') 'New snapshot lacks explicit provenance.'
         }
         Test-OfflineCase 'Legacy weekly snapshot remains untouched and its capture time stays unknown' {
@@ -160,11 +165,14 @@ try {
             $snapshot=Join-Path $week 'weekly-legacy.csv'
             Set-Content -LiteralPath $snapshot -Value 'Id,Value`n1,old' -Encoding utf8
             $manifestPath=Join-Path $week 'manifest.json'
-            Set-Content -LiteralPath $manifestPath -Value '{"UpdatedAt":"2026-09-22T00:00:00Z","Files":["weekly-legacy.csv"]}' -Encoding utf8
+            # Legacy manifest under the current contract: identity fields present, no recorded capture time.
+            $legacyManifest=[ordered]@{UpdatedAt='2026-09-22T00:00:00Z';Week='2026-W39';HistoryLabel='SmartM365 inventory';HistoryRootPath=$root;Files=@('weekly-legacy.csv')}
+            Set-Content -LiteralPath $manifestPath -Value ($legacyManifest | ConvertTo-Json) -Encoding utf8
             $firstHash=(Get-FileHash -LiteralPath $manifestPath).Hash
             $warningsBefore=& $weeklyModule {$script:Warnings}
             & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
-            Assert-Offline ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $firstHash) 'Legacy manifest was mutated on a skipped run.'
+            # The .json.txt transition renames the legacy manifest byte for byte; its content must not change.
+            Assert-Offline ((Get-FileHash -LiteralPath (Get-SmartM365JsonReadPath $manifestPath)).Hash -eq $firstHash) 'Legacy manifest was mutated on a skipped run.'
             Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'old') 'Legacy weekly CSV was overwritten.'
             Assert-Offline ((& $weeklyModule {$script:Warnings}) -gt $warningsBefore) 'Unknown legacy capture time was not reported.'
         }
@@ -177,7 +185,7 @@ try {
             $snapshot=Join-Path $week 'weekly-no-manifest.csv'
             Set-Content -LiteralPath $snapshot -Value 'Id,Value`n1,old' -Encoding utf8
             & $weeklyModule {param($s,$r)Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0} $source $root
-            $manifest=Get-Content -LiteralPath (Join-Path $week 'manifest.json') -Raw | ConvertFrom-Json
+            $manifest=Get-Content -LiteralPath (Get-SmartM365JsonReadPath (Join-Path $week 'manifest.json')) -Raw | ConvertFrom-Json
             Assert-Offline ($manifest.SnapshotTimestampStatus -eq 'UnknownLegacy' -and -not $manifest.SnapshotCreatedAtUtc) 'Existing CSV without manifest was assigned an invented capture date.'
             Assert-Offline ((Get-Content -LiteralPath $snapshot -Raw) -match 'old') 'Existing manifest-less CSV was overwritten.'
         }
@@ -548,7 +556,8 @@ try {
                 }
             }
         }
-        Assert-Offline ($mailFiles.Count -eq 22) "Expected 22 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
+        # 23 since PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.ps1 sends its run mail.
+        Assert-Offline ($mailFiles.Count -eq 23) "Expected 23 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
         Assert-Offline ($directBypasses.Count -eq 0) ("Direct mail transports bypass shared normalization: {0}" -f ($directBypasses -join '; '))
         foreach ($mailFile in $mailFiles) {
             $mailSource = [IO.File]::ReadAllText($mailFile)
@@ -566,7 +575,7 @@ try {
         }
     }
     $distributed = Import-OfflineFunctions (Join-Path $SourceRoot 'SmartInventory/Orchestrator/SmartM365.Orchestrator.Distributed.psm1') @(
-        'Write-JsonAtomically', 'ConvertTo-SafeFileName', 'Enter-SmartM365OrchestratorConcurrencyLease',
+        'Resolve-DistributedJsonPath', 'Write-JsonAtomically', 'ConvertTo-SafeFileName', 'Enter-SmartM365OrchestratorConcurrencyLease',
         'Set-SmartM365OrchestratorConcurrencyLease', 'Exit-SmartM365OrchestratorConcurrencyLease',
         'Enter-SmartM365OrchestratorOccurrenceClaim', 'Set-SmartM365OrchestratorOccurrenceClaim'
     )
@@ -606,169 +615,3 @@ $results | Format-Table Name, Passed, Error -AutoSize
 $failed = @($results | Where-Object { -not $_.Passed }).Count
 Write-Output ("Cases={0}; Passed={1}; Failed={2}; PowerShell={3}" -f $results.Count, ($results.Count-$failed), $failed, $PSVersionTable.PSVersion)
 if ($failed) { exit 1 }
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLU00UF2J25bZ5
-# lkE0UpagLRX3Hfz+nUhHqLlnm32xV6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB1kXiusi2HIGdV8O8zd9y5zs5dhKvISCcenOSyJ4roFMA0GCSqG
-# SIb3DQEBAQUABIIBgK1a1KvmJrCGY6Ps+xypA6yES4pBxcMfwiRvIsHHimGvEW4q
-# A6XUEuAT+vsHKJKFNPdBnn/c6v7kqB9kySLOslN20cCLCJiu+59Cg8tFnZPpH1Tk
-# ZIAA2nusP6PLXtdy0blFhIp5du7yF+ItYWt45gPNeYhLqknxiCSkgRbvDwB6cLtw
-# BExa0qcTRSljRSFcTgDMVJf9NVAA3FR9d4dThmRIf5w+MAayHE8iA2D4KP31gl95
-# hcD37lw2SVjR62QZsYZralzyUYGZoVpYMr/2ayQ7i9oewZK8EenlNVmCVX8eygWC
-# WY22stxr+nLIjwAZ6M9nVkOhgJfYv3ulF15EskhqpvIoWbLm4be+YwSDsNq/GLO2
-# WqzAfnLuPGb+WsMlVlZxX5Sb91YD8zvGvB36erBcTXCzNll23YO8lhJNbOjW+TVD
-# e88wW4iXx0CWI7d9BZEuS/TsZWDyWnEBfNWp5d7o/yaHO3gnoIJXYpnqLy054Ain
-# Z7xSYc3/SAFZ3c+8hKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIyMTAz
-# NDBaMC8GCSqGSIb3DQEJBDEiBCBO1WNCcZmiRD/06GbXm6P4I7MHgi0cR4nsna81
-# D4e0MjANBgkqhkiG9w0BAQEFAASCAgCL/CvL6XDSvfhv5TcHzx/pohnQ8ZpZT3eZ
-# MDa/21z2oN7Spp4vPuw+FEj87X98A6M6hBBckXwRvaAiXzT0UGiX/HULJ0/bvw60
-# S0g3NN0Q1C5zUXI5gTflTcKQ5L7cWY4CavExiRI7zRF+r+iuTCHoV3R3UbN2Hupq
-# tzjiZIxtAEtRs5zMXK6YX7HSgwke8Ri/CD/1e7imgk8p+H3oDsx5+bsOzj572IPd
-# ITqJ0QCxYJ+ZJBIm3z+4eARtnQOrqiWmiOlj5SuUhc7AWsFy6PR+LdQQ0pX37OhX
-# E9WdUGKEyMkXi4NNx5rZAOcnwJMdCoDcEfuT7YS+xcpuDx0zs9cdNqkc3ZTXiDs1
-# gzdJny9W2z+phABvmJ6FjwcM0HdhoFjQE8KxPU4RbUn9xb+p8jEU1EAYw1DQ7NyE
-# vcBkZ4zVy/VGSTI3XybMggNalEU8UnbX+zDidSBVu5xm0aTm6bT0lAeaLTBHRyUg
-# cd2/KN4FTqyMg799DybRczhFyVEQXMk6EvcBiRAz4Nr6eNT46EQwS6b7FG2c2eub
-# YSQ8WfqbckinmLKucsdKhij1E+rYV78nY1QiuCElvY799Tw/mecJYQwKO+mY0S6f
-# FdtJ8WPcLw8pf3vaHWlIGTXptUPc3t55of9Y1khrOB2DfiNWmz4hJbEOyGVT0kbA
-# 3FmnyGfvCA==
-# SIG # End signature block
