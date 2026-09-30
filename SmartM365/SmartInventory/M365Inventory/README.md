@@ -158,6 +158,11 @@ keeping the earliest snapshot of each report per ISO week, and never overwrites 
 A per-run folder is removed only when each of its CSVs exists in the consolidated week and an
 identical CSV remains in a run folder. Run it outside the 04:50 collector schedule.
 
+For the OneDrive/SharePoint synchronized copy, add `-SynchronizedCopy -RecordedHistoryRootPath <production UNC WeeklyHistory root>`:
+its folders are reparse points that the JSON transport refuses, so manifests are written as plain
+files with the same bytes as on the share (v1.1). Files already consolidated without a recorded
+capture time (interrupted run) recover their provenance when their SHA256 matches the planned snapshot.
+
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
 ## Power BI And Microsoft Fabric Activity Events
