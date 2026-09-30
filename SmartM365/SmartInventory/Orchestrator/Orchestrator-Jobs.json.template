@@ -1582,7 +1582,8 @@
       "RequiredGraphAppRoles": ["Sites.Selected"],
       "EstimatedDurationMinutes": 30,
       "ConcurrencyKey": "WorkplaceEvidence-Prepare",
-      "DependencyMode": "FreshSuccess"
+      "DependencyMode": "FreshSuccess",
+      "DependencyMaxAgeHours": 48
     }
   ]
 }
