@@ -1280,16 +1280,15 @@ def resolve_report_data_dir(report: Path, model, report_data_override: Path | No
         if not data_dir.is_dir():
             raise ValueError(f"Explicit ReportData directory not found: {data_dir}")
         return data_dir
-    data_dir = report.parent / "ReportData"
     parameter = next((item for item in model.get("expressions", []) if item.get("name") == "CMDBDataRoot"), None)
-    if parameter and isinstance(parameter.get("expression"), str):
-        parts = parameter["expression"].split('"')
-        if len(parts) >= 3 and parts[1]:
-            candidate = Path(parts[1]) / "PowerBI" / "CMDB-REPORTS" / "ReportData"
-            if candidate.is_dir():
-                data_dir = candidate
+    if not parameter or not isinstance(parameter.get("expression"), str):
+        raise ValueError("CMDBDataRoot parameter is required when --report-data is not supplied")
+    parts = parameter["expression"].split('"')
+    if len(parts) < 3 or not parts[1]:
+        raise ValueError("CMDBDataRoot parameter must contain a non-empty folder path")
+    data_dir = Path(parts[1]) / "PowerBI" / "CMDB-REPORTS" / "ReportData"
     if not data_dir.is_dir():
-        raise ValueError(f"ReportData directory not found: {data_dir}")
+        raise ValueError(f"Configured ReportData directory not found: {data_dir}")
     return data_dir
 
 

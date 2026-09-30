@@ -249,6 +249,12 @@ class CockpitNavigationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Explicit ReportData"):
                 cockpit.resolve_report_data_dir(report, model, root / "missing")
 
+            parameter_data.rmdir()
+            with self.assertRaisesRegex(ValueError, "Configured ReportData"):
+                cockpit.resolve_report_data_dir(report, model)
+            with self.assertRaisesRegex(ValueError, "CMDBDataRoot parameter is required"):
+                cockpit.resolve_report_data_dir(report, {"expressions": []})
+
     def test_quality_indicators_are_explicit_and_non_additive(self):
         self.assertEqual(
             [name for name, _expression, _description in cockpit.QUALITY_INDICATORS],

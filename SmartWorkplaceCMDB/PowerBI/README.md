@@ -214,7 +214,9 @@ backup. The following path is a fictional placeholder:
 When preparing a replacement snapshot outside the configured `CMDBDataRoot`,
 pass its exact private folder with `--report-data`. This explicit directory
 takes precedence over automatic parameter discovery and prevents derived CSVs
-from being written into the previous frozen snapshot.
+from being written into the previous frozen snapshot. Without that override,
+the cockpit requires the configured `CMDBDataRoot` and fails if its `ReportData`
+folder is missing; it never falls back to an old local copy beside the PBIP.
 
 If fresh local Exchange recipient evidence is unavailable, an explicitly
 reviewed prior `FactMailboxHosting.csv` may be supplied with
