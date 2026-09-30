@@ -28,8 +28,8 @@ try {
         param($p)
         $script:mutationPath=$p; $script:mutationReads=0
         function script:Get-Item {
-            param([string]$LiteralPath)
-            $item=Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath
+            param([string]$LiteralPath,[switch]$Force)
+            $item=Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath -Force:$Force
             if($LiteralPath -eq $script:mutationPath){
                 $script:mutationReads++
                 if($script:mutationReads -eq 1){$null=$item.Length;[IO.File]::AppendAllText($LiteralPath,"`r`n")}
@@ -62,7 +62,7 @@ try {
     finally {& $module {Set-Item Function:script:Test-PreparedSourceTenants $script:originalValidator}}
     Check ($result.Identity.Rows -eq 1 -and -not $result.Publication) 'Post-capture raw update invalidated good snapshot'
     Check (-not(Test-Path (Join-Path $result.DiagnosticPath 'source'))) 'Successful preflight retained source payload'
-    Check (Test-Path (Join-Path $result.DiagnosticPath 'capture.json')) 'Capture audit missing'
+    Check ((Test-Path (Join-Path $result.DiagnosticPath 'capture.json.txt')) -or (Test-Path (Join-Path $result.DiagnosticPath 'capture.json'))) 'Capture audit missing'
     Check (([IO.File]::ReadAllText($csv)) -ceq 'changed by synthetic collector') 'Cleanup touched live source'
     Check (-not(Test-Path $output)) 'Preflight published output'
     $bad=$argsForRun.Clone();$bad.WorkRoot=$fixture
@@ -71,7 +71,7 @@ try {
     [IO.File]::WriteAllText($csv,$valid.Replace('synthetic-test','wrong-test'))
     Reject {Invoke-PreparedEvidencePipeline @argsForRun} 'incompatible TenantKey'
     Check (@(Get-ChildItem $work -Recurse -Directory | Where-Object Name -In 'source','prepared').Count -eq 0) 'Failed run leaked source/staging payload'
-    Check (@(Get-ChildItem $work -Recurse -Filter failure.json).Count -eq 1) 'Failed run diagnostic missing'
+    Check (@(Get-ChildItem $work -Recurse -File | Where-Object Name -in @('failure.json','failure.json.txt')).Count -eq 1) 'Failed run diagnostic missing'
     # Recover only explicitly marked interrupted runs, not unowned legacy payloads.
     $crashId=[guid]::NewGuid().ToString('N');$crash=Join-Path $work $crashId
     New-Item -ItemType Directory -Path (Join-Path $crash 'source'),(Join-Path $crash 'prepared'),(Join-Path $work 'unowned/source') -Force | Out-Null
@@ -132,8 +132,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABBTh41MQAoStq
-# l2sVjtr/nvhc4yqtKLAwT8cKSL2Cr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFmATqDlLS2efk
+# lGJyTRqCfAznqhGSyDB+GAmJMPe7D6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -266,31 +266,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOO4ahC4hypLHUznBYvHUSBTgDPNEA4Rn49yl3MK1k+gMA0GCSqG
-# SIb3DQEBAQUABIIBgKzwrDMcb2aeyzidbPmDiLiCWeX1FXeN3FYakkBempUMYqgV
-# UxNYFK3dFldWRejZ5SHFEshCdthd8GFfIq4U05jORRVlCQ1z8e6idsLQTOsjJVgH
-# RQiosc14n3V753mxuipSRM5ddFVXjMN5/A2ZROUBP4JCQEe6Vr93IuZ3dctQ/12v
-# HHEeif/s5d0kdRJIex5OiutPdPXaysn4G3DMi99N+rk0Z4GZNbXs97RZsNBbyMMR
-# BOmQHYVyqJ3NBJNv0vHYwUZ84G5/nWnNUjEoG9f7XJ5IZDGU7w8ERaJN94Wp+567
-# ETPoaKpgjN7XTlnXI4M8gaeRAE1hX+IzRSj/VNlP7QrHV6hXrodhZPvm9raesX66
-# wj2ST8EZFjf6C1He2isNTLDWKUYwTNdxV3jLEInLtXUZ6Rnv9N6C+AP+BCId8fb+
-# 8YtgHcrb1c7ARG5KZ874sowd2eojlPAKMTqOzQVCVTc/gT+WPh1AICw4yDpSfItn
-# TCXFBjowpqYWEJFzKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOSBtfOr0Er80lFLTPGstm/qiLCf2dSZXUNcMqKwnmddMA0GCSqG
+# SIb3DQEBAQUABIIBgCsnllQcl+Zmnn+t/31DkeijVpAyhxRflvdfLpCQOriU8kwZ
+# zrTIoXZuBsm85uLmLy4U8+pxLdhImlYF8O7Wk6jR2YvUT89MvunWzyp0y73psbr2
+# Df1mIDtOiYcwWsW/11qm+2Q+2aZ/7viR+EQ5FbW4rZVxogNcOQqhD1ClhBVspgAv
+# A+rHbnpSNgLKzHgfxpDqU/uw2dp49a6E5lbrQJGYkOvjtrBzyUQLVU1BRmsMdQNF
+# 8XdHVnvFYXNRRxAiU4kxlFwQ/VsrthOkL/NwuGSNADors6YcvDZXl6fQeYfkzmEm
+# RKfOw0Ka8SUbHcbyvqL167Tt6344twU1/jwgGYebntYM2ZNYjmgoGX+/D6YgQHqJ
+# laQFR/zsvc+ggCOvB76zO9VBczHmTHtWJfsM/naSoFnXFAi2V47Jk1b9z+UEkzil
+# qXcoVIZE5M/GqWGdDWaLvrdzJZmvv+YIl05ksnOksl+k6A+vIE2d0gHjycvTiDj4
+# K2yhKclHx+0/3gqdoKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxMzI5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBl78i0DXPnrXyyNN6U8UwYxDiOOz8VsM/OEq0o
-# iHaEVjANBgkqhkiG9w0BAQEFAASCAgCoR+9QZeAdYycr7bBHnNcpu7ziQl5xaEka
-# Q6+emKj4KRE/PkHiEN6qiy7ST0i++KURz+oWT7voM/DKcbQa/KmvBYMAiv9ThMDC
-# oA6EGu15F6GVapErcfpoh0DzkHErByXHkzEvmD/aMPNIHJ1q5OuonJF37BCHHQDW
-# rFNnhp5jDYiOQwf5wK+SCnBTmcw94WW1bb50gj+q/xDn7fQp/cQMzSHWXWimE2LU
-# qty9WL5fpBAzhTy5eFZsixMfvqC4N4nPSijhd1q8NaN48pYnr/a6a6M2DiB8Zofi
-# PykoM6AlCOS8kLljntHRJwnMSv47WPb4DbVLl/V7TIfAxkG62wCef8Hjj8Gfbmmt
-# TtTx2nL5JgVgyAKCvaOWl/RmGjbpiREtI4vZb0wwQGXwDUzV9Z+Vlz3HNFpyN91C
-# ClHqB1SIVHlQWpURmC2w1ZHZ5/+VyP8SMSOWDUF4rzfK5F21xOtPgS1NksFGycFE
-# 7kR5jtUi+OzBEPANs1c2jJs9c6bztyqdcXOizrSbmxeXMbMIdXyXHD/Am1OdGmG4
-# RolHGyLUBi+MgoNP3zNdQ/DcnXfhSgqmmT95F1GEyec9Q+w00r95cnt7IXPyqeaj
-# rCPPtD+3D7FciiOv4ys4WLddtAkIXU2kkoLOlF+7ml0SSITGf9Qvi058UDsbMUH+
-# SBouc/VuVQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
+# MDBaMC8GCSqGSIb3DQEJBDEiBCBoeOblxBKliNRDnbRLSMjQ1UQJCR4elrPxwWSM
+# vv2+qzANBgkqhkiG9w0BAQEFAASCAgC0JWCoU9S2B8iZnKhl1BramTYdzSp3U64L
+# ff0WF9Czjfhb/He9NMhbzdZMoyehXz0PKskypzoogTV/wi7CoWPgL5l+/SD2W7TN
+# v7DB58YuVsj5cmoDGoTVwluzE98HhYUdSNTKHAiGkikOJLF+oYebunatkSESwebw
+# JAOQQ1Bhm6OcRDuZZ4JsXkLDCxaTqJ1EFJ72FvTddTRPqTRGQ8CfL55NQfKKBMoM
+# caZvVqjHRbuECh8ZEZzq8QsXVvENTvi4hydqH1k67yGzyc3emDNEafHpWlMxnnxc
+# Fyu20vja+vKmY9RNVmnoGrFQqN0UIVJDGWz8tLNpTF1DoQABpdOqg/3tqAIRrWqP
+# 9MMnwzUVmIePkdolDVaILJno3vKSpZicL2h5A8SZexfof05p+tWpO/hENzqGUItS
+# OY1l76a/whn33Or4oWsRTUJ60ZGwnUuSXEzqtwk1f7sw96DGvk7zxxOu7ywAB/Kx
+# HO83kWjvTnqe0qYLhjcniUYOhu3Kk/vpqASXJvWhj6YAH1wZL9gAMRTsSrEEKg23
+# 1nRrKQ0bK233H7sgCv288t1JtyPsX1EbSvn9oESYJPwhuAHDPLaKqBhp3DAfFAbJ
+# pBrJmW0GhOV1QwOXRU8M6dmPgzwgBlavC+ZmqA+glK182wyLZgWB9aAvb36UEWaC
+# 0GM6zMAfxw==
 # SIG # End signature block
