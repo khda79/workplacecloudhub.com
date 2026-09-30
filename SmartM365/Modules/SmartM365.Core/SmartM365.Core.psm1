@@ -2189,6 +2189,7 @@ function Publish-SmartM365Csv {
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ",",
         [int]$RetentionMaxCsv = -1,
+        [ValidateRange(0, 3650)][int]$SharePointRetentionDays = 7,
         [switch]$NoSharePointUpload,
         [switch]$NoWeeklyHistory,
         [switch]$NoTenantKey
@@ -2244,6 +2245,12 @@ function Publish-SmartM365Csv {
             if (-not (Test-Path -LiteralPath $uploadCandidate)) { continue }
             $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $uploadCandidate
             if ($uploadRecord) { $sharePointUploads += $uploadRecord }
+        }
+        # Only after this run's copy is on SharePoint: same retention there as on the server.
+        $timestampedFullPath = [IO.Path]::GetFullPath($TimestampedPath)
+        $timestampedUploaded = @($sharePointUploads | Where-Object { [string]::Equals([IO.Path]::GetFullPath([string]$_.LocalFilePath), $timestampedFullPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if ($timestampedUploaded -and $SharePointRetentionDays -gt 0) {
+            Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $TimestampedPath -RetentionDays $SharePointRetentionDays | Out-Null
         }
     }
 
@@ -4760,6 +4767,93 @@ function Remove-SmartM365SharePointFile {
         return $false
     }
 }
+function Remove-SmartM365SharePointTimestampedCsvOlderThan {
+    # Applies the server retention of run copies to SharePoint: the timestamped copies of one CSV
+    # (<prefix>_yyyyMMdd_HHmmss.csv, same SharePoint folder) older than RetentionDays are deleted.
+    # Latest copies and WeeklyHistory never match the pattern. Failures only produce warnings.
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$TimestampedPath,
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [datetime]$ReferenceTime = (Get-Date),
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    $result = [pscustomobject]@{ Deleted = 0; Failed = 0; Kept = 0 }
+    if (-not $Enabled) { return $result }
+    $currentName = [IO.Path]::GetFileName($TimestampedPath)
+    $nameMatch = [regex]::Match($currentName, '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{6})\.csv$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $nameMatch.Success) { return $result }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) { return $result }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) { return $result }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site for retention'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries for retention'
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @(@($drives.value) | Where-Object { $_.name -ieq $LibraryDisplayName -or (& $normalize $_.name) -ieq (& $normalize $LibraryDisplayName) } | Select-Object -First 1)
+            if ($drive.Count -eq 0) { throw "Document library '$LibraryDisplayName' not found." }
+            $driveId = $drive[0].id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $TimestampedPath
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $folderPath = $sharePointPath.Substring(0, $sharePointPath.LastIndexOf('/'))
+        $pattern = '^' + [regex]::Escape($nameMatch.Groups['Prefix'].Value) + '_(?<Stamp>\d{8}[-_]\d{6})\.csv$'
+        $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+        $formats = [string[]]@('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss')
+        $expired = New-Object System.Collections.ArrayList
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/children?`$select=id,name,file&`$top=999" -f $driveId, (ConvertTo-GraphDrivePath $folderPath)
+        while (-not [string]::IsNullOrWhiteSpace($uri)) {
+            $page = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri $uri -Operation 'List SharePoint timestamped CSV copies'
+            foreach ($item in @($page.value)) {
+                if ($null -eq $item -or -not $item.PSObject.Properties['file'] -or $null -eq $item.file) { continue }
+                $itemName = [string]$item.name
+                $itemMatch = [regex]::Match($itemName, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                if (-not $itemMatch.Success -or $itemName -ieq $currentName) { continue }
+                $stamp = [datetime]::MinValue
+                if (-not [datetime]::TryParseExact($itemMatch.Groups['Stamp'].Value, $formats, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$stamp)) { continue }
+                if ($stamp -lt $cutoff) { [void]$expired.Add($item) } else { $result.Kept++ }
+            }
+            $nextLink = $page.PSObject.Properties['@odata.nextLink']
+            $uri = if ($null -ne $nextLink) { [string]$nextLink.Value } else { '' }
+        }
+
+        foreach ($item in $expired) {
+            if (-not $PSCmdlet.ShouldProcess(($folderPath + '/' + $item.name), 'Delete expired SharePoint timestamped CSV')) { continue }
+            $itemUri = "https://graph.microsoft.com/v1.0/drives/{0}/items/{1}" -f $driveId, $item.id
+            $deleteResult = Invoke-SmartM365GraphDeleteQuietly -Uri $itemUri -Operation 'Delete expired SharePoint timestamped CSV'
+            if ($deleteResult.Success) { $result.Deleted++ }
+            else {
+                $result.Failed++
+                WriteLog -Message ("SharePoint retention could not delete {0}/{1}: {2}" -f $folderPath, $item.name, $deleteResult.Message) -Level 'WARNING'
+            }
+        }
+        if ($expired.Count -gt 0) {
+            WriteLog -Message ("SharePoint retention for {0}_*.csv in {1}: {2} copy(ies) older than {3} days deleted, {4} failed, {5} recent kept." -f $nameMatch.Groups['Prefix'].Value, $folderPath, $result.Deleted, $RetentionDays, $result.Failed, $result.Kept) -Level 'INFO'
+        }
+    }
+    catch {
+        $result.Failed++
+        WriteLog -Message ("SharePoint retention skipped for {0}: {1}" -f $currentName, $_.Exception.Message) -Level 'WARNING'
+    }
+    return $result
+}
 function Invoke-SmartM365SharePointFileDownload {
     [CmdletBinding()]
     param(
@@ -5921,173 +6015,7 @@ Export-ModuleMember -Function `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
-    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Initialize-SmartM365SharePointFolder, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
+    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Initialize-SmartM365SharePointFolder, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Remove-SmartM365SharePointTimestampedCsvOlderThan, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnHEC1jCb6s0+9
-# eSigFIY8NYcttqLKhzKMvgzfyZnoNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGKZBqqRjfePP0vV1DbGnuNK2RZWgDlYQctzm6vbteXoMA0GCSqG
-# SIb3DQEBAQUABIIBgCBlGQEvPfMrcfooG6ocWvKjn5D6YHCXukRBXHuY7A8qv8+4
-# Bi6qLz/DghrlPfs0VuK0Pxw19aveFN91X4N30osQp4rGqmNKunGmzNqQymflHDrK
-# xQuENrYg0urhFu2xzLNoTkICqYk204cWYlFFypHb8lUBIi+xfr73wEr0Ljso3mA7
-# AkWaGG7682mjTEm+G3J6Y/Xa1zzMDpt5UobVgL6D2TaUQcoEK+zpjR8L8l6xLwfw
-# T1I4dvvhRtWgPdWT46G2xgWQUebjl29NsPUkBFnmpF70+PPMoQytBlac+W4uL2Z+
-# UHqkVmEIlYHQXdKvAf0D0qw1x0tTNvuIrfCP5IjFl/V1vz3FEZq8A2jRghilsfPk
-# TwhTObGpVLfSJUH1wjjAIC7f974vRZh40U/YDDetA6D90yty36ygggN2WG4aqW42
-# 223VpPFm5rKBXuU2IELFp/IIlNpgZhpDdCF0eBK0D980FSGuAv3SNZieESKjEOsY
-# sMi/zXrB1p5AybdESKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAxNzUw
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBMEj/Tz+wRgDIMYX3PsH9fjI7FmoKliQ0DQ/UO
-# 8hCcBDANBgkqhkiG9w0BAQEFAASCAgAEYBWNAj9fyjbhaA1JCq4Hsbz/OcNiAm6C
-# GkNgECmqunWEpwPdqIJA+yeulxddJ/y9BlXi6NAEkRDbFLBN/mIwIsd/xglWbVJ3
-# GzmYnPmimKrEnAsUDVA/qAEpgIk8X9h5pLcWmEK4d3rjI2IAblZd9IBBHZxVB4i5
-# Du3lECu3YYvh27+Mz/JVxQar4HL0C6WKNwkjD6AK9QDl4HTcsE9OeoAhYajm6nxX
-# TSGq7ju6+Gq0UQj4bNT2b5zZcpAB9CpTp0gJDZiR/2OkYV3fvXMQy+2bNuOhTUyB
-# ESFpK+b8R+l0IMa/vNLfojNPDBWs2HgvM2os7fQ9MY7f60f5fBCC1maVWuhDtheQ
-# x/4a8aZG11OyYDkwDFmTVjfbLmzP+m94z1dqHC5I7iQ2fEdaYLAhs9EuysjTKSWH
-# MJ5Ac7+gxPEPQwXBoUjObUuNgPnRyJzzR69A8Q8otMt1IqfBe36d3MObmRYpK+F0
-# 0uP6QAwtPfMkRkyTBy6Nljym9pbHCbtIxREH22TALTpmDiRzkQWgtovxvtU1KSMp
-# 0PKtDi69hHjcBFN8rSACwAj9C/WjxxH/z7kibpo2MMm6YjH/l2om3IFmkyKGUoYu
-# jF/1pVfoX3deT2lGScBx0BWBzt9ygEj6eF/W1qUJ4QSuXrLzQD2asKytEdvX79Ia
-# snGrfp021w==
-# SIG # End signature block
