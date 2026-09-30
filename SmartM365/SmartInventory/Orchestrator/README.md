@@ -18,7 +18,8 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `SmartM365.Orchestrator.Management.psm1` | Shared configuration validation, atomic publication, versions, rollback, audit and multi-server history aggregation. |
 | `SmartM365.Orchestrator.Pipeline.psm1` | Full/group selection plus atomic shared pipeline request and per-job batch status management. |
 | `SmartM365-Inventory-Pipeline.ps1` | Read-only pipeline validation or atomic `-Collect` submission, with wait-by-default aggregation. |
-| `SmartM365-Inventory-Orchestrator-GUI.ps1` | Central WPF console for planning, server assignment, election visibility, history and configuration versions. |
+| `SmartM365.Orchestrator.Insights.psm1` | Read-only GUI data layer: live operations, job health, dependency readiness, recent pipeline requests and job run requests. Testable headless. |
+| `SmartM365-Inventory-Orchestrator-GUI.ps1` | Central WPF console for live operations, planning, dependencies, run requests, server assignment, election visibility, history and configuration versions. |
 | `Set-SmartM365-OrchestratorTimeoutPolicy.ps1` | Preview-first migration that applies 23-hour daily-once and 6-day weekly-once timeouts to the shared configuration, then publishes through the normal versioned/audited path with `-Execute`. |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
@@ -71,10 +72,14 @@ When SharePoint upload is enabled, one resident server at a time mirrors `Config
 
 Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator launchers folder. The GUI:
 
-- shows enabled jobs, next occurrences, current elected owners and server health;
+- shows an `Operations` tab per server: heartbeat state (`Online`, `Starting`, `Recycling`, `Stale`), heartbeat age, version, running jobs with their duration, pending jobs with the orchestrator reason (dependency, `ConcurrencyKey`, peer claim), time until the planned recycle, active peer-monitoring incidents and orchestrator mails of the last 24 hours (double-click opens the mail copy);
+- shows enabled jobs, next occurrences, current elected owners and server health, plus per-job health columns computed from 21 days of all-server runs: `Health` (`OK`, `Stale`, `Failing`, `NoRecentSuccess`, `Disabled`, `Manual`), last status, last success, its age, the expected maximum age (longest schedule gap + 2 h + average duration, the same rule as the `FreshSuccess` gate) and the average duration;
 - edits frequency, times, weekly days, missed-run policy, enabled state, retry/timeout values and assignment mode;
+- edits `DependsOn`, `DependencyMode` (`LatestOccurrence` or `FreshSuccess`) and `DependencyMaxAgeHours` (0 = automatic; a value is a floor), shows why the selected job waits (per dependency: rule, state, last success, age, maximum age) and lists the jobs that depend on it; disabling a job used by enabled jobs asks for confirmation, and an invalid dependency (unknown job, cycle, self) leaves the draft unchanged;
+- submits `Request run` for the selected job through the orchestrators (same contract as `SmartM365-Inventory-Pipeline.ps1 -Job <Job> -Collect -NoWait`, optionally with its enabled dependencies) on the published configuration, and follows requests with per-job status, owner server and detail in the `Requests` tab; only one request can be active at a time;
+- refreshes `Operations` and `Requests` every 60 seconds while `Auto-refresh` is checked; this never reloads the configuration draft;
 - edits the expected server list, election weights and operational server policies;
-- filters the all-server run history by date, server, job and status, with CSV/HTML export and log opening;
+- filters the all-server run history by date, server, job and status (the real statuses `Success`, `CompletedWithWarnings`, `Failed`, `TimedOut`, `Interrupted`, `Retried`), with a `Failures 24 h` shortcut, CSV/HTML export and log opening (a message explains when the log is not reachable from the GUI computer);
 - validates the complete jobs and cluster documents before publication;
 - sorts the Planning grid by job name by default, uses Monday-to-Sunday checkboxes for `Weekly` schedules, and enables the pinned-server selector only for `Pinned` assignment, where exactly one expected server is required;
 - submits `Rebalance now` as an explicit atomic request against the active published configuration; the next resident tick recalculates only `Elected` owners from live capabilities, weights, policies and duration history;
@@ -83,7 +88,7 @@ Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator la
 - creates before/after versions and an audit row for every successful publication or rollback;
 - writes timestamped activity and full technical error details to the daily GUI log under `LogAllRootPath`.
 
-The GUI deliberately has no job start, stop or run-now action. `Rebalance now` changes only the shared election plan; it does not launch a job. `Elected` ownership is displayed from the generated plan and cannot be edited directly. To choose a fixed owner, set `AssignmentMode` to `Pinned` and select exactly one expected server. `Manual` jobs remain excluded from scheduled election.
+The GUI never starts or stops a process. `Request run` writes an atomic pipeline request that the resident orchestrators execute on the elected owner with their normal claims, `ConcurrencyKey` leases and dependency rules; a request is refused when an elected job has no owner in the current plan or when another request is still active. `Rebalance now` changes only the shared election plan; it does not launch a job. `Elected` ownership is displayed from the generated plan and cannot be edited directly. To choose a fixed owner, set `AssignmentMode` to `Pinned` and select exactly one expected server. `Manual` jobs remain excluded from scheduled election.
 
 ### Full and group pipeline collection
 

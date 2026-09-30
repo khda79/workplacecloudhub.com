@@ -6,7 +6,9 @@ Central WPF management console for the SmartM365 Inventory Orchestrator.
 .DESCRIPTION
 Edits the shared jobs and cluster configuration with validation, optimistic
 concurrency, atomic publication, version history and an audit CSV. It also
-shows the all-server execution history and the current election plan.
+shows the live operations of every server, job health, dependency readiness,
+the all-server execution history and the current election plan, and submits
+job run requests that the resident orchestrators execute.
 
 .PARAMETER Tenant
 SmartM365 tenant profile. Defaults to test.
@@ -28,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.0.7
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -41,12 +43,18 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.7'
+$script:AppVersion = '1.1.0'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
 $script:PlanningRows = @()
 $script:HistoryRows = @()
+$script:RecentRuns = @()
+$script:HealthByName = @{}
+$script:RequestRows = @()
+$script:MailFolderPath = ''
+$script:AutoRefreshTimer = $null
+$script:HistoryFailureStatuses = @('Failed', 'TimedOut', 'Interrupted')
 $script:Controls = $null
 $script:GuiLogPath = ''
 $script:GuiLogWriteWarningShown = $false
@@ -132,6 +140,7 @@ $xaml = @'
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Text="Ready"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <CheckBox x:Name="AutoRefreshCheck" Content="Auto-refresh (60 s)" VerticalAlignment="Center" Margin="4,0,10,0" IsChecked="True"/>
                 <Button x:Name="RefreshButton" Content="Refresh"/>
                 <Button x:Name="ValidateButton" Content="Validate draft"/>
                 <Button x:Name="RebalanceButton" Content="Rebalance now" Background="#FFF4CE"/>
@@ -167,6 +176,73 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
+            <TabItem Header="Operations">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="150"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="210"/>
+                    </Grid.RowDefinitions>
+                    <DataGrid x:Name="OperationsServersGrid">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
+                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
+                            <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
+                            <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
+                            <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="70"/>
+                            <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
+                            <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
+                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70"/>
+                            <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Grid Grid.Row="1" Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <GroupBox Header="Running jobs" Margin="0,0,6,0">
+                            <DataGrid x:Name="OperationsRunningGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
+                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
+                                    <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
+                                    <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
+                            <DataGrid x:Name="OperationsPendingGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="200"/>
+                                    <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="150"/>
+                                    <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="95"/>
+                                    <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+                    <Grid Grid.Row="2" Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
+                            <DataGrid x:Name="OperationsIncidentsGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Observed by" Binding="{Binding ObservedBy}" Width="130"/>
+                                    <DataGridTextColumn Header="Issue" Binding="{Binding Issue}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Orchestrator mails (24 h) - double-click to open" Margin="6,0,0,0">
+                            <DataGrid x:Name="OperationsMailsGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="120"/>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                    <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
             <TabItem Header="Planning">
                 <Grid Margin="12">
                     <Grid.ColumnDefinitions>
@@ -184,6 +260,12 @@ $xaml = @'
                             <DataGridTextColumn Header="Server / owner" Binding="{Binding Server}" Width="155"/>
                             <DataGridTextColumn Header="Next run" Binding="{Binding NextRun}" Width="145"/>
                             <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="100"/>
+                            <DataGridTextColumn Header="Health" Binding="{Binding Health}" Width="115"/>
+                            <DataGridTextColumn Header="Last status" Binding="{Binding LastStatus}" Width="130"/>
+                            <DataGridTextColumn Header="Last success" Binding="{Binding LastSuccess}" Width="125"/>
+                            <DataGridTextColumn Header="Age (h)" Binding="{Binding SuccessAgeHours}" Width="65"/>
+                            <DataGridTextColumn Header="Max (h)" Binding="{Binding ExpectedMaxAgeHours}" Width="65"/>
+                            <DataGridTextColumn Header="Avg (min)" Binding="{Binding AverageDurationMinutes}" Width="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <ScrollViewer Grid.Column="1" Margin="14,0,0,0" VerticalScrollBarVisibility="Auto">
@@ -220,8 +302,36 @@ $xaml = @'
                                         <StackPanel Margin="0,0,6,0"><TextBlock Text="Retry delay (sec)"/><TextBox x:Name="RetryDelayBox"/></StackPanel>
                                         <StackPanel Margin="6,0,0,0"><TextBlock Text="Estimated (min)"/><TextBox x:Name="DurationBox"/></StackPanel>
                                     </UniformGrid>
-                                    <Button x:Name="ApplyJobButton" Content="Apply to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
-                                    <TextBlock Text="Elected owners are read-only and come from the shared election plan." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,9,0,0"/>
+                                    <TextBlock Text="Elected owners are read-only and come from the shared election plan." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </GroupBox>
+                            <GroupBox Header="Dependencies">
+                                <StackPanel>
+                                    <TextBlock Text="Depends on (job names, comma separated)"/>
+                                    <TextBox x:Name="DependsOnBox" TextWrapping="Wrap" AcceptsReturn="False" MinHeight="44"/>
+                                    <UniformGrid Columns="2">
+                                        <StackPanel Margin="0,0,6,0"><TextBlock Text="Rule"/><ComboBox x:Name="DependencyModeCombo"><ComboBoxItem Content="LatestOccurrence"/><ComboBoxItem Content="FreshSuccess"/></ComboBox></StackPanel>
+                                        <StackPanel Margin="6,0,0,0"><TextBlock Text="Max age (h, 0 = auto)"/><TextBox x:Name="DependencyMaxAgeBox"/></StackPanel>
+                                    </UniformGrid>
+                                    <TextBlock x:Name="DependentsText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Why this job waits (published data, current rule)" FontWeight="SemiBold"/>
+                                    <DataGrid x:Name="ReadinessGrid" Height="200" Margin="0,4,0,0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Dependency" Binding="{Binding Dependency}" Width="*"/>
+                                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="60"/>
+                                            <DataGridTextColumn Header="Age (h)" Binding="{Binding AgeHours}" Width="55"/>
+                                            <DataGridTextColumn Header="Max" Binding="{Binding MaxAgeHours}" Width="45"/>
+                                            <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </GroupBox>
+                            <Button x:Name="ApplyJobButton" Content="Apply to draft" Background="#E5F1FB" Margin="0,0,0,12"/>
+                            <GroupBox Header="Run through the orchestrator">
+                                <StackPanel>
+                                    <CheckBox x:Name="IncludeDependenciesCheck" Content="Also run the enabled dependencies" Margin="0,0,0,8"/>
+                                    <Button x:Name="RequestRunButton" Content="Request run" Background="#FFF4CE"/>
+                                    <TextBlock Text="The request uses the published configuration. The orchestrators run the job on its elected server with their locks and dependency rules; nothing is started by this GUI." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 </StackPanel>
                             </GroupBox>
                         </StackPanel>
@@ -237,7 +347,7 @@ $xaml = @'
                     </Grid.RowDefinitions>
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="150"/><ColumnDefinition Width="150"/><ColumnDefinition Width="180"/><ColumnDefinition Width="250"/><ColumnDefinition Width="150"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="150"/><ColumnDefinition Width="150"/><ColumnDefinition Width="180"/><ColumnDefinition Width="250"/><ColumnDefinition Width="150"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,8,0"><TextBlock Text="From"/><DatePicker x:Name="HistoryFromPicker"/></StackPanel>
                         <StackPanel Grid.Column="1" Margin="0,0,8,0"><TextBlock Text="To"/><DatePicker x:Name="HistoryToPicker"/></StackPanel>
@@ -247,6 +357,7 @@ $xaml = @'
                         <Button x:Name="HistoryRefreshButton" Grid.Column="5" Content="Filter" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
                         <Button x:Name="ExportCsvButton" Grid.Column="6" Content="Export CSV" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
                         <Button x:Name="ExportHtmlButton" Grid.Column="7" Content="Export HTML" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
+                        <Button x:Name="Failures24hButton" Grid.Column="8" Content="Failures 24 h" VerticalAlignment="Bottom" Margin="4,0,4,8" Background="#FDE7E9"/>
                     </Grid>
                     <DataGrid x:Name="HistoryGrid" Grid.Row="1" Margin="0,10,0,0">
                         <DataGrid.Columns>
@@ -260,6 +371,37 @@ $xaml = @'
                             <DataGridTextColumn Header="Log" Binding="{Binding LogPath}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Requests">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <GroupBox Header="Pipeline and job run requests (newest first)">
+                        <DataGrid x:Name="RequestsGrid" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Batch" Binding="{Binding BatchId}" Width="260"/>
+                                <DataGridTextColumn Header="Selection" Binding="{Binding Selection}" Width="90"/>
+                                <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="125"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150"/>
+                                <DataGridTextColumn Header="Jobs" Binding="{Binding Jobs}" Width="55"/>
+                                <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="65"/>
+                                <DataGridTextColumn Header="Failed" Binding="{Binding Failed}" Width="60"/>
+                                <DataGridTextColumn Header="Requested by" Binding="{Binding RequestedBy}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                    <GroupBox Grid.Row="1" Header="Jobs of the selected request">
+                        <DataGrid x:Name="RequestJobsGrid">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="260"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="170"/>
+                                <DataGridTextColumn Header="Server" Binding="{Binding OwnerServer}" Width="140"/>
+                                <DataGridTextColumn Header="Updated (UTC)" Binding="{Binding UpdatedAtUtc}" Width="170"/>
+                                <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
                 </Grid>
             </TabItem>
 
@@ -328,7 +470,7 @@ $xaml = @'
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
-            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.4" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
+            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.1.0" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
         </Border>
     </Grid>
 </Window>
@@ -353,10 +495,14 @@ function Get-OrchestratorGuiPropertyValue {
 }
 $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck')) {
+    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+        'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+        'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
+        'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $jobsTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template')
@@ -614,6 +760,7 @@ function Refresh-PlanningView {
             'Manual' { 'Manual' }
             default { $allowedServers -join ', ' }
         }
+        $health = if ($script:HealthByName.ContainsKey([string]$job.Name)) { $script:HealthByName[[string]$job.Name] } else { $null }
         [pscustomobject]@{
             Name = [string]$job.Name
             Enabled = [bool]$job.Enabled
@@ -624,6 +771,12 @@ function Refresh-PlanningView {
             Server = $server
             NextRun = Get-NextRunText -Job $job
             Group = [string]$job.Group
+            Health = if ($health) { $health.Health } else { '' }
+            LastStatus = if ($health) { $health.LastStatus } else { '' }
+            LastSuccess = if ($health) { $health.LastSuccess } else { '' }
+            SuccessAgeHours = if ($health) { $health.SuccessAgeHours } else { $null }
+            ExpectedMaxAgeHours = if ($health) { $health.ExpectedMaxAgeHours } else { $null }
+            AverageDurationMinutes = if ($health) { $health.AverageDurationMinutes } else { $null }
         }
     }
     $script:PlanningRows = @($rows | Sort-Object -Property Name)
@@ -654,18 +807,132 @@ function Refresh-HistoryView {
     Write-GuiActivity -Message ("History refreshed: {0} run(s)." -f $script:HistoryRows.Count)
 }
 
+function Update-JobHealth {
+    $script:RecentRuns = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $script:SharedDataFolderPath -Days 21)
+    $script:HealthByName = @{}
+    foreach ($health in @(Get-SmartM365OrchestratorJobHealth -JobsDocument $script:DraftJobs -Runs $script:RecentRuns)) { $script:HealthByName[[string]$health.Name] = $health }
+}
+
+function Refresh-OperationsView {
+    try {
+        $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster -MailFolderPath $script:MailFolderPath -MailHours 24
+        $script:Controls.OperationsServersGrid.ItemsSource = @($operations.Servers)
+        $script:Controls.OperationsRunningGrid.ItemsSource = @($operations.Running)
+        $script:Controls.OperationsPendingGrid.ItemsSource = @($operations.Pending)
+        $script:Controls.OperationsIncidentsGrid.ItemsSource = @($operations.Incidents)
+        $script:Controls.OperationsMailsGrid.ItemsSource = @($operations.Mails)
+        return $operations
+    }
+    catch {
+        Write-GuiException -Context 'Operations refresh failed' -ErrorRecord $_
+        return $null
+    }
+}
+
+function Refresh-RequestsView {
+    try {
+        $selectedBatch = if ($null -ne $script:Controls.RequestsGrid.SelectedItem) { [string]$script:Controls.RequestsGrid.SelectedItem.BatchId } else { '' }
+        $script:RequestRows = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $script:SharedDataFolderPath -Count 30)
+        $script:Controls.RequestsGrid.ItemsSource = $script:RequestRows
+        $selectedRow = @($script:RequestRows | Where-Object { [string]$_.BatchId -eq $selectedBatch })
+        if ($selectedRow.Count) { $script:Controls.RequestsGrid.SelectedItem = $selectedRow[0] }
+        else { $script:Controls.RequestJobsGrid.ItemsSource = @() }
+    }
+    catch { Write-GuiException -Context 'Requests refresh failed' -ErrorRecord $_ }
+}
+
+function Invoke-AutoRefresh {
+    [void](Refresh-OperationsView)
+    Refresh-RequestsView
+    $script:Controls.LastRefreshText.Text = 'Live refresh: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+}
+
+function Show-SelectedJobDependencies {
+    param([Parameter(Mandatory = $true)]$Job)
+    $name = [string]$Job.Name
+    $dependents = @(Get-SmartM365OrchestratorDependents -JobsDocument $script:DraftJobs -JobName $name)
+    $enabledDependents = @(Get-SmartM365OrchestratorDependents -JobsDocument $script:DraftJobs -JobName $name -EnabledOnly)
+    $script:Controls.DependentsText.Text = if ($dependents.Count) { 'Used by {0} job(s) ({1} enabled): {2}' -f $dependents.Count, $enabledDependents.Count, ($dependents -join ', ') } else { 'No job depends on this job.' }
+    try {
+        $script:Controls.ReadinessGrid.ItemsSource = @(Get-SmartM365OrchestratorDependencyReadiness -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:DraftJobs -JobName $name -Runs $script:RecentRuns)
+    }
+    catch {
+        $script:Controls.ReadinessGrid.ItemsSource = @()
+        Write-GuiException -Context "Dependency readiness of '$name' could not be read" -ErrorRecord $_
+    }
+}
+
+function Get-PublishedJobsPath {
+    $jobsPath = (Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $script:SharedDataFolderPath).JobsPath
+    $selected = Get-SmartM365JsonReadPath $jobsPath -Optional
+    if (-not $selected) { throw "Published jobs configuration not found: $jobsPath" }
+    return $selected
+}
+
+function Test-JobDraftChanged {
+    param([Parameter(Mandatory = $true)][string]$JobName)
+    $draftJob = @($script:DraftJobs.Jobs | Where-Object { [string]$_.Name -eq $JobName })
+    $publishedJob = @($script:Snapshot.Jobs.Jobs | Where-Object { [string]$_.Name -eq $JobName })
+    if ($draftJob.Count -ne 1 -or $publishedJob.Count -ne 1) { return $true }
+    return (($draftJob[0] | ConvertTo-Json -Depth 100 -Compress) -cne ($publishedJob[0] | ConvertTo-Json -Depth 100 -Compress))
+}
+
+function Request-SelectedJobRun {
+    param([switch]$SkipConfirmation)
+
+    $row = $script:Controls.PlanningGrid.SelectedItem
+    if ($null -eq $row) { throw 'Select a job first.' }
+    $jobName = [string]$row.Name
+    $includeDependencies = [bool]$script:Controls.IncludeDependenciesCheck.IsChecked
+    # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
+    Refresh-RequestsView
+    $activeRequest = @($script:RequestRows | Where-Object Status -eq 'Running' | Select-Object -First 1)
+    if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
+    if (-not $SkipConfirmation) {
+        $message = "Ask the orchestrators to run '$jobName' now?"
+        if ($includeDependencies) { $message += "`n`nIts enabled dependencies are included and run first." }
+        else { $message += "`n`nDependencies are not run; the job starts on its elected server when its dependency rule allows it." }
+        if (Test-JobDraftChanged -JobName $jobName) { $message += "`n`nThis job has unpublished draft changes. The request uses the PUBLISHED configuration." }
+        $message += "`n`nOnly one request can be active at a time."
+        if ([System.Windows.MessageBox]::Show($message, 'Request run', 'YesNo', 'Question') -ne 'Yes') { return $null }
+    }
+    $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $script:SharedDataFolderPath -JobsPath (Get-PublishedJobsPath) -JobName @($jobName) -Tenant $Tenant -IncludeDependencies:$includeDependencies
+    Write-GuiActivity -Message ("Run requested. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount) -Level SUCCESS
+    $script:Controls.StatusText.Text = "Run requested: $($request.BatchId)"
+    Refresh-RequestsView
+    if (-not $SkipConfirmation) {
+        [System.Windows.MessageBox]::Show("Request submitted.`nBatch: $($request.BatchId)`nJobs: $($request.TotalCount)`n`nFollow it in the Requests tab.", 'Run requested', 'OK', 'Information') | Out-Null
+    }
+    return $request
+}
+
+function Show-FailuresLast24Hours {
+    $from = (Get-Date).AddHours(-24)
+    $script:Controls.HistoryFromPicker.SelectedDate = $from.Date
+    $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
+    $script:Controls.HistoryServerCombo.SelectedIndex = 0
+    $script:Controls.HistoryJobCombo.SelectedIndex = 0
+    $script:Controls.HistoryStatusCombo.SelectedIndex = 0
+    $script:HistoryRows = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From $from -To (Get-Date) | Where-Object { $_.Status -in $script:HistoryFailureStatuses })
+    $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
+    Write-GuiActivity -Message ("Failures in the last 24 h: {0} run(s)." -f $script:HistoryRows.Count)
+}
+
 function Refresh-AllViews {
     try {
         $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $script:SharedDataFolderPath
         $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
         $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+        try { Update-JobHealth } catch { $script:HealthByName = @{}; Write-GuiException -Context 'Job health could not be computed' -ErrorRecord $_ }
         Refresh-PlanningView
         $servers = @(Refresh-ServersView)
         $history7 = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From (Get-Date).AddDays(-7) -To (Get-Date))
         $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
         $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
         $script:Controls.SuccessCountText.Text = [string]@($history7 | Where-Object Status -eq 'Success').Count
-        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.Status -in @('Failed', 'Timeout', 'Blocked') }).Count
+        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.Status -in $script:HistoryFailureStatuses }).Count
+        [void](Refresh-OperationsView)
+        Refresh-RequestsView
         $script:Controls.VersionsGrid.ItemsSource = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $script:SharedDataFolderPath)
         $script:Controls.ConnectionText.Text = "Tenant: $Tenant"
         $script:Controls.LastRefreshText.Text = 'Refreshed: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -680,9 +947,28 @@ function Refresh-AllViews {
 }
 
 function Apply-SelectedJobToDraft {
+    param([switch]$SkipDependentsConfirmation)
     $row = $script:Controls.PlanningGrid.SelectedItem
     if ($null -eq $row) { throw 'Select a job first.' }
     $job = @($script:DraftJobs.Jobs | Where-Object { [string]$_.Name -eq [string]$row.Name })[0]
+    $enabled = [bool]$script:Controls.JobEnabledCheck.IsChecked
+    if ([bool]$job.Enabled -and -not $enabled -and -not $SkipDependentsConfirmation) {
+        $dependents = @(Get-SmartM365OrchestratorDependents -JobsDocument $script:DraftJobs -JobName ([string]$job.Name) -EnabledOnly)
+        if ($dependents.Count) {
+            $warning = "{0} enabled job(s) depend on '{1}':`n{2}`n`nOnce disabled, the dependency gate ignores it and these jobs run without waiting for it. Disable it anyway?" -f $dependents.Count, $job.Name, ($dependents -join [Environment]::NewLine)
+            if ([System.Windows.MessageBox]::Show($warning, 'Job used as a dependency', 'YesNo', 'Warning') -ne 'Yes') { return }
+        }
+    }
+    $dependsOn = @($script:Controls.DependsOnBox.Text -split '[,;\r\n]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    if ([string]$job.Name -in $dependsOn) { throw 'A job cannot depend on itself.' }
+    $dependencyMode = Get-ComboText -Combo $script:Controls.DependencyModeCombo
+    if ([string]::IsNullOrWhiteSpace($dependencyMode)) { $dependencyMode = 'LatestOccurrence' }
+    $dependencyMaxAge = 0
+    if (-not [int]::TryParse(([string]$script:Controls.DependencyMaxAgeBox.Text).Trim(), [ref]$dependencyMaxAge) -or $dependencyMaxAge -lt 0) {
+        if (-not [string]::IsNullOrWhiteSpace($script:Controls.DependencyMaxAgeBox.Text)) { throw 'Dependency max age must be a whole number of hours (0 = automatic).' }
+        $dependencyMaxAge = 0
+    }
+    $jobBackup = Copy-JsonDocument -Document $job
     $scheduleType = Get-ComboText -Combo $script:Controls.ScheduleTypeCombo
     $times = @($script:Controls.TimesBox.Text -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     $days = @(Get-SelectedScheduleDays)
@@ -707,7 +993,7 @@ function Apply-SelectedJobToDraft {
         throw "Pinned server '$pinnedServer' cannot be used while Assignment is '$mode'. Select Assignment 'Pinned' first."
     }
 
-    Set-JsonProperty -Object $job -Name Enabled -Value ([bool]$script:Controls.JobEnabledCheck.IsChecked)
+    Set-JsonProperty -Object $job -Name Enabled -Value $enabled
     Set-JsonProperty -Object $job.Schedule -Name Type -Value $scheduleType
     Set-JsonProperty -Object $job.Schedule -Name Times -Value $times
     Set-JsonProperty -Object $job.Schedule -Name DaysOfWeek -Value $scheduleDays
@@ -718,14 +1004,21 @@ function Apply-SelectedJobToDraft {
     Set-JsonProperty -Object $job -Name MaxRetries -Value ([int]$script:Controls.RetriesBox.Text)
     Set-JsonProperty -Object $job -Name RetryDelaySeconds -Value ([int]$script:Controls.RetryDelayBox.Text)
     Set-JsonProperty -Object $job -Name EstimatedDurationMinutes -Value ([double]::Parse($script:Controls.DurationBox.Text, [System.Globalization.CultureInfo]::InvariantCulture))
+    Set-JsonProperty -Object $job -Name DependsOn -Value ([string[]]$dependsOn)
+    if ($dependsOn.Count -gt 0 -or $job.PSObject.Properties['DependencyMode']) { Set-JsonProperty -Object $job -Name DependencyMode -Value $dependencyMode }
+    if ($dependencyMaxAge -gt 0 -or $job.PSObject.Properties['DependencyMaxAgeHours']) { Set-JsonProperty -Object $job -Name DependencyMaxAgeHours -Value $dependencyMaxAge }
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $script:DraftJobs
-    if (-not $validation.Valid) { throw $validation.Errors -join [Environment]::NewLine }
+    if (-not $validation.Valid) {
+        $index = [array]::IndexOf(@($script:DraftJobs.Jobs), $job)
+        $jobs = @($script:DraftJobs.Jobs); $jobs[$index] = $jobBackup; $script:DraftJobs.Jobs = $jobs
+        throw ("The draft was not changed:`n" + ($validation.Errors -join [Environment]::NewLine))
+    }
     Refresh-PlanningView
     $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $job.Name)[0]
     $script:Controls.StatusText.Text = "Draft changed: $($job.Name)"
     $previousAllowedText = if ($previousAllowedServers.Count -gt 0) { $previousAllowedServers -join ',' } else { '<none>' }
     $newAllowedText = if ($newAllowedServers.Count -gt 0) { $newAllowedServers -join ',' } else { '<none>' }
-    Write-GuiActivity -Message ("Job '{0}' updated in the draft. AssignmentMode={1}->{2}; AllowedServers={3}->{4}" -f $job.Name, $previousMode, $mode, $previousAllowedText, $newAllowedText)
+    Write-GuiActivity -Message ("Job '{0}' updated in the draft. AssignmentMode={1}->{2}; AllowedServers={3}->{4}; DependsOn={5}; DependencyMode={6}; DependencyMaxAgeHours={7}" -f $job.Name, $previousMode, $mode, $previousAllowedText, $newAllowedText, ($(if ($dependsOn.Count) { $dependsOn -join ',' } else { '<none>' })), $dependencyMode, $dependencyMaxAge)
 }
 
 function Apply-SelectedServerToDraft {
@@ -846,6 +1139,7 @@ else {
     Join-Path -Path $logAllRootPath -ChildPath (Join-Path 'SmartM365-Orchestrator-GUI' $env:COMPUTERNAME)
 }
 $script:GuiLogPath = Initialize-GuiLogPath -PreferredFolderPath $resolvedGuiLogFolderPath
+$script:MailFolderPath = Join-Path -Path (Resolve-ConfigTokens -Value (Get-ConfigValue -Config $localConfig -Name 'LogAllRootPath' -DefaultValue (Join-Path $PSScriptRoot 'Logs'))) -ChildPath 'SmartM365-Orchestrator'
 Write-GuiActivity -Message ("GUI session started. Version={0}; Tenant={1}; User={2}; Computer={3}; SharedDataFolderPath={4}; LogPath={5}" -f $script:AppVersion, $Tenant, [Security.Principal.WindowsIdentity]::GetCurrent().Name, $env:COMPUTERNAME, $script:SharedDataFolderPath, $script:GuiLogPath)
 
 $bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json'
@@ -890,7 +1184,10 @@ foreach ($name in @(
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
     'SelectedServerText', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
-    'ActivityBox', 'FooterText', 'VersionText'
+    'ActivityBox', 'FooterText', 'VersionText',
+    'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+    'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
+    'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }
@@ -904,11 +1201,11 @@ if (Test-Path -LiteralPath $logoPath) {
     $script:Controls.HeaderLogo.Source = $bitmap
 }
 $script:Controls.SharedPathText.Text = $script:SharedDataFolderPath
-$script:Controls.FooterText.Text = 'Shared changes are validated, versioned and audited. This GUI does not start or stop jobs.'
+$script:Controls.FooterText.Text = 'Shared changes are validated, versioned and audited. Run requests are executed by the orchestrators; this GUI never starts or stops a process.'
 $script:Controls.VersionText.Text = "v$($script:AppVersion)"
 $script:Controls.HistoryFromPicker.SelectedDate = (Get-Date).AddDays(-7).Date
 $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
-$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'Failed', 'Timeout', 'Blocked', 'Running')
+$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Retried')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
 $script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })
@@ -941,6 +1238,10 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
     $script:Controls.RetriesBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'MaxRetries' -DefaultValue 0)
     $script:Controls.RetryDelayBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'RetryDelaySeconds' -DefaultValue 300)
     $script:Controls.DurationBox.Text = ([double](Get-OrchestratorGuiPropertyValue -Object $job -Name 'EstimatedDurationMinutes' -DefaultValue 5)).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    $script:Controls.DependsOnBox.Text = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'DependsOn' -DefaultValue @()) -join ', '
+    Select-ComboText -Combo $script:Controls.DependencyModeCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'DependencyMode' -DefaultValue 'LatestOccurrence'))
+    $script:Controls.DependencyMaxAgeBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'DependencyMaxAgeHours' -DefaultValue 0)
+    Show-SelectedJobDependencies -Job $job
 })
 $script:Controls.ServersGrid.Add_SelectionChanged({
     $row = $script:Controls.ServersGrid.SelectedItem
@@ -958,7 +1259,23 @@ $script:Controls.PublishButton.Add_Click({ Publish-Draft })
 $script:Controls.HistoryRefreshButton.Add_Click({ Refresh-HistoryView })
 $script:Controls.HistoryGrid.Add_MouseDoubleClick({
     $row = $script:Controls.HistoryGrid.SelectedItem
-    if ($null -ne $row -and (Test-Path -LiteralPath $row.LogPath)) { Start-Process -FilePath $row.LogPath }
+    if ($null -eq $row) { return }
+    if (-not [string]::IsNullOrWhiteSpace([string]$row.LogPath) -and (Test-Path -LiteralPath $row.LogPath)) { Start-Process -FilePath $row.LogPath; return }
+    $logText = if ([string]::IsNullOrWhiteSpace([string]$row.LogPath)) { '<no log path recorded>' } else { [string]$row.LogPath }
+    [System.Windows.MessageBox]::Show("The log of this run is not reachable from this computer.`n`n$logText`n`nThe log stays on the server that ran the job ($($row.Server)) until it is copied to LOG-ALL.", 'Log not found', 'OK', 'Information') | Out-Null
+})
+$script:Controls.Failures24hButton.Add_Click({ try { Show-FailuresLast24Hours } catch { Write-GuiException -Context 'Failure filter failed' -ErrorRecord $_ } })
+$script:Controls.RequestRunButton.Add_Click({
+    try { [void](Request-SelectedJobRun) }
+    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.RequestsGrid.Add_SelectionChanged({
+    $row = $script:Controls.RequestsGrid.SelectedItem
+    $script:Controls.RequestJobsGrid.ItemsSource = if ($null -ne $row) { @($row.JobRows) } else { @() }
+})
+$script:Controls.OperationsMailsGrid.Add_MouseDoubleClick({
+    $row = $script:Controls.OperationsMailsGrid.SelectedItem
+    if ($null -ne $row -and (Test-Path -LiteralPath $row.Path)) { Start-Process -FilePath $row.Path }
 })
 $script:Controls.AddServerButton.Add_Click({
     try {
@@ -1078,6 +1395,55 @@ if ($SmokeTest) {
     if ([string]$smokeJob.AssignmentMode -ne 'Pinned' -or @($smokeJob.AllowedServers).Count -ne 1 -or [string]$smokeJob.AllowedServers[0] -ine [string]$smokeServer) {
         throw 'Pinned assignment smoke test did not preserve exactly one expected server.'
     }
+    $dependencyTarget = @($script:PlanningRows | Where-Object { $_.Name -ne $script:PlanningRows[0].Name } | Select-Object -First 1)[0]
+    $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
+    $script:Controls.DependsOnBox.Text = [string]$dependencyTarget.Name
+    Select-ComboText -Combo $script:Controls.DependencyModeCombo -Text 'FreshSuccess'
+    $script:Controls.DependencyMaxAgeBox.Text = '30'
+    Apply-SelectedJobToDraft -SkipDependentsConfirmation
+    $smokeJob = @($script:DraftJobs.Jobs | Where-Object Name -eq $script:PlanningRows[0].Name)[0]
+    if ((@($smokeJob.DependsOn) -join ',') -cne [string]$dependencyTarget.Name -or [string]$smokeJob.DependencyMode -ne 'FreshSuccess' -or [int]$smokeJob.DependencyMaxAgeHours -ne 30) { throw 'Dependency fields did not round-trip to the draft.' }
+    if (@(Get-SmartM365OrchestratorDependents -JobsDocument $script:DraftJobs -JobName ([string]$dependencyTarget.Name)) -notcontains [string]$smokeJob.Name) { throw 'Dependents lookup did not find the new dependency.' }
+    $readiness = @(Get-SmartM365OrchestratorDependencyReadiness -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:DraftJobs -JobName ([string]$smokeJob.Name) -Runs $script:RecentRuns)
+    if ($readiness.Count -ne 1 -or [string]$readiness[0].Dependency -ne [string]$dependencyTarget.Name) { throw 'Dependency readiness did not return the configured dependency.' }
+    $script:Controls.DependsOnBox.Text = 'Unknown-Smoke-Dependency'
+    $unknownDependencyRejected = $false
+    try { Apply-SelectedJobToDraft -SkipDependentsConfirmation } catch { $unknownDependencyRejected = $_.Exception.Message -like '*unknown dependency*' }
+    $smokeJob = @($script:DraftJobs.Jobs | Where-Object Name -eq $script:PlanningRows[0].Name)[0]
+    if (-not $unknownDependencyRejected -or (@($smokeJob.DependsOn) -join ',') -cne [string]$dependencyTarget.Name) { throw 'An unknown dependency was not rejected or the draft was not restored.' }
+    $script:Controls.DependsOnBox.Text = ''
+    Apply-SelectedJobToDraft -SkipDependentsConfirmation
+    Write-GuiActivity -Message ("SMOKE_TEST_DEPENDENCIES_OK Dependency={0}; Readiness={1}" -f $dependencyTarget.Name, $readiness[0].State) -Level SUCCESS
+
+    $operations = Refresh-OperationsView
+    if ($null -eq $operations -or @($operations.Servers).Count -ne @($script:DraftCluster.ExpectedOrchestratorServers).Count) { throw 'Operations view did not return one row per expected server.' }
+    $smokeOwners = Get-ElectionOwners
+    $activeRequests = @($script:RequestRows | Where-Object Status -eq 'Running')
+    $publishedRunnable = @($script:Snapshot.Jobs.Jobs | Where-Object {
+        $smokeMode = [string](Get-OrchestratorGuiPropertyValue -Object $_ -Name 'AssignmentMode' -DefaultValue 'Legacy')
+        [bool]$_.Enabled -and @(Get-OrchestratorGuiPropertyValue -Object $_ -Name 'DependsOn' -DefaultValue @()).Count -eq 0 -and
+        ($smokeMode -in @('Legacy', 'Pinned') -or ($smokeMode -eq 'Elected' -and $smokeOwners.ContainsKey([string]$_.Name)))
+    } | Select-Object -First 1)
+    if ($activeRequests.Count) {
+        $blockedRejected = $false
+        $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
+        try { [void](Request-SelectedJobRun -SkipConfirmation) } catch { $blockedRejected = $_.Exception.Message -like '*active pipeline request already exists*' }
+        if (-not $blockedRejected) { throw 'A run request was accepted while another request is active.' }
+        Write-GuiActivity -Message ("SMOKE_TEST_RUN_REQUEST_BLOCKED_OK ActiveBatch={0}" -f $activeRequests[0].BatchId) -Level SUCCESS
+    }
+    elseif ($publishedRunnable.Count) {
+        $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $publishedRunnable[0].Name)[0]
+        $script:Controls.IncludeDependenciesCheck.IsChecked = $false
+        $runRequest = Request-SelectedJobRun -SkipConfirmation
+        if (-not @($script:RequestRows | Where-Object BatchId -eq $runRequest.BatchId).Count) { throw 'The run request is missing from the Requests view.' }
+        $duplicateRejected = $false
+        try { [void](Request-SelectedJobRun -SkipConfirmation) } catch { $duplicateRejected = $_.Exception.Message -like '*active pipeline request already exists*' }
+        if (-not $duplicateRejected) { throw 'A second run request was accepted while the first one is active.' }
+        Write-GuiActivity -Message ("SMOKE_TEST_RUN_REQUEST_OK Job={0}; BatchId={1}" -f $publishedRunnable[0].Name, $runRequest.BatchId) -Level SUCCESS
+    }
+    else { Write-GuiActivity -Message 'SMOKE_TEST_RUN_REQUEST_SKIPPED No enabled runnable job without dependency in the published configuration.' -Level WARN }
+    Write-GuiActivity -Message ("SMOKE_TEST_OPERATIONS_OK Servers={0}; HealthRows={1}" -f @($operations.Servers).Count, $script:HealthByName.Count) -Level SUCCESS
+
     $rebalanceRequest = Request-ElectionRebalance -SkipConfirmation
     $rebalanceRequestPath = Join-Path -Path $script:SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json'
     $savedRebalanceRequest = Read-SmartM365OrchestratorJson -Path $rebalanceRequestPath
@@ -1091,6 +1457,13 @@ if ($SmokeTest) {
     return
 }
 
+$script:AutoRefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:AutoRefreshTimer.Interval = [TimeSpan]::FromSeconds(60)
+$script:AutoRefreshTimer.Add_Tick({
+    if (-not [bool]$script:Controls.AutoRefreshCheck.IsChecked) { return }
+    try { Invoke-AutoRefresh } catch { Write-GuiException -Context 'Auto-refresh failed' -ErrorRecord $_ }
+})
+$script:AutoRefreshTimer.Start()
 $window.Add_ContentRendered({
     if ($script:GuiSplash) {
         Hide-SmartM365GuiSplash -Splash $script:GuiSplash
@@ -1098,173 +1471,8 @@ $window.Add_ContentRendered({
     }
 })
 $window.Add_Closed({
+    if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() }
     Write-GuiActivity -Message 'GUI session closed.'
     if ($script:GuiSplash) { Close-SmartM365GuiSplash -Splash $script:GuiSplash }
 })
 [void]$window.ShowDialog()
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDc02Zcz0Y/jTiN
-# nuJ1W6v6dimnJIz5VsOmBz9iuJ8NMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEryhXuRsbnYTvaSSA9hgma2+p+e0l9NZx5IErdQQxXzMA0GCSqG
-# SIb3DQEBAQUABIIBgKAWaOeGRNcgNSddf/B29PikB6WK45rDZKsXW4ZHwdUz1ns+
-# GWlfdfEJHRE3DI113IgptiIZ0I9Ftqnn8POOw10F38ySB/wkmkVVrDS9BwVCNqnZ
-# KnPgQ7cdqPmP8+udeTouUqtt7S0zcn7bkcuCeTqyyazICdTovpFq9VKG5i3g5jEl
-# cTQZzdgbhNB8mrLYdQr9iyB4O/umDNx6I1jslqxaaFFkucJ1or2RPeItedFB81US
-# 3WiTOj+U5hqH1v/fXLDhszd/xgsAxj0i5h9WQ+WQNi0wGjjnZwqG94dcDveFF0bb
-# e1TFW9zAq+GPhyi/86rSMDewkEcFMWW5sZ+EJRyrU1p3rbpgF181qlVH1wMaepVb
-# KmXCr2rRz93l9Bs5ul/VTzSdr9p54L1rIk/T6E8+xgXEptXOxLnx+/UEch8skFa4
-# H9gCPbTYzI9i1jYUHowjld1hMVxu9V6clBv9UfblsyCwLw6uY4TZlTheL6u0hH11
-# 8B5WxhnCYOkaEWrUTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDKjHBHKgKnVYl+FABmT6NrotcV2jp30qpJPpjL
-# LdTLTTANBgkqhkiG9w0BAQEFAASCAgBYaS4BLWhcnkwFMjY3sv/a9vzCRPYVXWnl
-# 7Z2sueBiTa3rTt+wUP4O02ItIZvTuJIz6s/vAXV63V3CMtoeL2SUERlcCXLEmVda
-# 9zwxi5dGrwsHHLwATGjVKYuHFwnvXQDgtJdDUjf/Yu0Fb7qhan0AFMOb/9hA1o1a
-# RrWqnwJP2yqKm3pvBSnZNaN1Q/sRUKuXMXEhSvUm2LIjZiehGk0XVonMBDCeU9P9
-# o9coEKGdb9QezXuMEaZo3U/Pom6Q8DvcWcpPP88S5IbqTm2FyKCQpCGIY44yCqP/
-# 1Wf/S25Q4YZ2TaD8wxjVSorIHAvWlaag8hwJN6Ueegy0JKyzdFv8ZqYEj6qpTZ46
-# kuKeR6zN3jbhK9GmM1YXSxFf+kLr//FfomsmZ0iiCOh/IxgmsWOtXK4HX5eIObzV
-# nEYYxAuoazD4bv8r6RTRevkyq/hvYMvsTwjsQbrAA/p87QD9Wc0dAgX7AA7Y8QQl
-# RxJHyx1pd1V4WnLrPtUb7Z+lyHflvEI5IrG3MFq3Wvu51rpzPrNnpvpg+JK3cHOW
-# Pd7VIjIv8EMu5rvhw/hIS4uWnYEjg4iU1Q2rzZ7mfPR29CvtSKyVnWYdN+djJI5/
-# uLkba0ehHHaHWDSsFINjy+mgR0OQU17b28ODZaxPqIg3+i9hP8Xx6+KvHtlu41x9
-# 5XBIBSZdfQ==
-# SIG # End signature block
