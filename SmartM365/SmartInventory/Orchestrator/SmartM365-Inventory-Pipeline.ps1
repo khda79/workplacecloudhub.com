@@ -13,14 +13,22 @@ ownership, capability, dependency, claim, lock and concurrency controls.
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant prod -Pipeline Full -Collect
 
+.EXAMPLE
+./SmartM365-Inventory-Pipeline.ps1 -Tenant prod -Job WorkplaceEvidence-Prepare -Collect
+Runs only the named job(s) through the resident orchestrators. Dependencies are not rerun: the
+orchestrator applies the job's scheduled dependency rule to them (for example FreshSuccess).
+Add -IncludeDependencies to run the enabled dependencies in the same request.
+
 .VERSION
-1.0.1
+1.1.0
 #>
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
     [ValidateSet('Full', 'AD', 'Exchange', 'Exchange2016', 'M365', 'Intune')]
     [string]$Pipeline = 'Full',
+    [string[]]$Job = @(),
+    [switch]$IncludeDependencies,
     [switch]$ValidateOnly,
     [switch]$Collect,
     [switch]$NoWait,
@@ -37,7 +45,7 @@ $smartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Pare
 $tenantContextPath = Join-Path -Path $smartM365Root -ChildPath 'Config\SmartM365-TenantContext.ps1'
 if (-not (Test-Path -LiteralPath $tenantContextPath -PathType Leaf)) { throw "SmartM365 tenant context not found: $tenantContextPath" }
 . $tenantContextPath
-Write-SmartM365StartupBanner
+# Initialize-SmartM365TenantContext displays the startup banner.
 
 function Write-Host {
     [CmdletBinding()]
@@ -107,6 +115,10 @@ try {
     if ($ValidateOnly -and $Collect) { throw 'Choose either -ValidateOnly or -Collect, not both.' }
     if ($NoWait -and -not $Collect) { throw '-NoWait is valid only with -Collect.' }
     if (-not $ValidateOnly -and -not $Collect) { $ValidateOnly = $true }
+    # A launcher passing a comma-separated list arrives as one string.
+    $Job = @($Job | ForEach-Object { ([string]$_) -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($Job.Count -gt 0 -and $PSBoundParameters.ContainsKey('Pipeline')) { throw 'Choose either -Pipeline or -Job, not both.' }
+    if ($IncludeDependencies -and $Job.Count -eq 0) { throw '-IncludeDependencies is valid only with -Job.' }
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'This script requires PowerShell 7 or later.' }
 
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -145,30 +157,42 @@ try {
     $jobsDocument = (Read-SmartM365JsonDocument $JobsManifestPath).Document
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $jobsDocument
     if (-not $validation.Valid) { throw "Invalid jobs manifest: $($validation.Errors -join '; ')" }
-    $selection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $jobsDocument -Pipeline $Pipeline
+    $selection = if ($Job.Count -gt 0) {
+        Get-SmartM365OrchestratorPipelineSelection -JobsDocument $jobsDocument -JobName $Job -IncludeDependencies:$IncludeDependencies
+    }
+    else {
+        Get-SmartM365OrchestratorPipelineSelection -JobsDocument $jobsDocument -Pipeline $Pipeline
+    }
+    $selectionName = [string]$selection.Pipeline
 
     $electionPlanPath = Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Orchestrator-ElectionPlan.json'
     $electionPlan = if (Get-SmartM365JsonReadPath $electionPlanPath -Optional) { (Read-SmartM365JsonDocument $electionPlanPath).Document } else { $null }
-    $planRows = foreach ($job in @($selection.SelectedJobs)) {
-        $source = @($jobsDocument.Jobs | Where-Object { [string]$_.Name -eq [string]$job.Name } | Select-Object -First 1)[0]
-        $owner = switch ([string]$job.AssignmentMode) {
+    $planRows = foreach ($plannedJob in @($selection.SelectedJobs)) {
+        $source = @($jobsDocument.Jobs | Where-Object { [string]$_.Name -eq [string]$plannedJob.Name } | Select-Object -First 1)[0]
+        $owner = switch ([string]$plannedJob.AssignmentMode) {
             'Elected' {
-                if ($null -ne $electionPlan) { [string](@($electionPlan.Assignments | Where-Object { [string]$_.JobName -eq [string]$job.Name } | Select-Object -First 1).OwnerServer) } else { '' }
+                if ($null -ne $electionPlan) { [string](@($electionPlan.Assignments | Where-Object { [string]$_.JobName -eq [string]$plannedJob.Name } | Select-Object -First 1).OwnerServer) } else { '' }
             }
             'Pinned' { [string](@($source.AllowedServers)[0]) }
             default { if (@($source.AllowedServers).Count -gt 0) { @($source.AllowedServers) -join ',' } else { 'Any eligible server' } }
         }
-        [pscustomobject]@{ Job = $job.Name; Group = $job.Group; Mode = $job.AssignmentMode; Owner = $owner; Dependency = @($job.DependsOn) -join ',' }
+        [pscustomobject]@{ Job = $plannedJob.Name; Group = $plannedJob.Group; Mode = $plannedJob.AssignmentMode; Owner = $owner; Dependency = @($plannedJob.DependsOn) -join ','; External = @($plannedJob.ExternalDependencies).Count }
     }
     $missingOwners = @($planRows | Where-Object { $_.Mode -eq 'Elected' -and [string]::IsNullOrWhiteSpace($_.Owner) })
 
-    Write-Host ("Pipeline plan: tenant={0}; pipeline={1}; selected={2}; excluded={3}; dependencyClosure={4}." -f $Tenant, $Pipeline, $selection.SelectedCount, $selection.ExcludedCount, $selection.AddedDependencyCount) -ForegroundColor Cyan
+    Write-Host ("Pipeline plan: tenant={0}; pipeline={1}; selected={2}; excluded={3}; dependencyClosure={4}." -f $Tenant, $selectionName, $selection.SelectedCount, $selection.ExcludedCount, $selection.AddedDependencyCount) -ForegroundColor Cyan
     Write-Host ("Manifest: {0}" -f $JobsManifestPath) -ForegroundColor Gray
     Write-Host ("Shared data: {0}" -f $SharedDataFolderPath) -ForegroundColor Gray
     foreach ($row in $planRows) {
         $ownerText = if ([string]::IsNullOrWhiteSpace($row.Owner)) { '<unassigned>' } else { $row.Owner }
         $dependencyText = if ([string]::IsNullOrWhiteSpace($row.Dependency)) { '-' } else { $row.Dependency }
         Write-Host ("{0,-55} group={1,-12} mode={2,-7} owner={3} dependsOn={4}" -f $row.Job, $row.Group, $row.Mode, $ownerText, $dependencyText) -ForegroundColor Gray
+        if ($row.External -gt 0) {
+            Write-Host ("{0,-55} {1} dependency(ies) outside this request: the orchestrator applies the job's scheduled dependency rule (no stale data)." -f '', $row.External) -ForegroundColor Gray
+        }
+    }
+    foreach ($ignored in @($selection.IgnoredDependencies)) {
+        Write-Host ("Dependency ignored (disabled or manual, as in the schedule): {0} -> {1}" -f $ignored.Job, $ignored.Dependency) -ForegroundColor Yellow
     }
     if ($validation.Warnings.Count -gt 0) { foreach ($warning in $validation.Warnings) { Write-Host $warning -ForegroundColor Yellow } }
     if ($missingOwners.Count -gt 0) {
@@ -183,7 +207,7 @@ try {
         exit $(if ($warningCount -gt 0) { 3 } else { 0 })
     }
 
-    $request = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline $Pipeline -Selection $selection -ManifestHash ((Get-FileHash -LiteralPath $JobsManifestPath -Algorithm SHA256).Hash) -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
+    $request = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline $selectionName -Selection $selection -ManifestHash ((Get-FileHash -LiteralPath $JobsManifestPath -Algorithm SHA256).Hash) -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
     Write-Host ("Pipeline request submitted: BatchId={0}; request={1}" -f $request.BatchId, $request.RequestPath) -ForegroundColor Green
     if ($NoWait) {
         Complete-PipelineScript -Status Success
@@ -218,169 +242,3 @@ catch {
     $exitCode = 1
 }
 exit $exitCode
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJRk0vGkvK/GZ3
-# cVUJULRkmSNhu6dQiZr2xSvcA0SIfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEiZQpn6I0j8zQD/w8tjklwkpnoo3vYsR5fpQHTdPjklMA0GCSqG
-# SIb3DQEBAQUABIIBgHCDJMtpo0oC/8U6u7r4TPO9FjBx4k7jBM7f4drOs3w81N6v
-# ox7Obs3lxmH7a5uocrIcoDFeNNBlZ+9/eetCBIkgSLleO760IklN2qLtUJLb+BMO
-# WUHttS6qXsopLGPBBM5Xdi4edgbZEgbJcYDbKX8VVD7eRW6EQI4aNWeV8qktZ4Re
-# GkbpekLh1+MqyloFjDqH7YF7kGUBbuQZ/62ABc6pYh/LQ299UmlS6lTQkwTov0Wv
-# q5rS7VUQOIH0BU8gCWQ6QGQCVmTNSf2swQLml9iP3H5n6ijfTGhzvi7gRSWKHIq2
-# LgPzR6Ko7bbaoMv5JJGmV8zBXzlqF2eYRxu4K/lIqMYimUE8uOaZL068UTpJx+UM
-# 4hzf+Gi4Dia5WcMT3zYYJh6h/Bje+diqWgdYmL/XLhkxziyuAg98dqB5LZlF0UV+
-# fXmc6fUv+iDdvrH0H4oqsi4KQI2/LZDMNL264044puHzDPYffSypBbKgNDKFwiEI
-# JmonQX2YgIV/EphRo6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBUY7q7+cadJL+E4i7X9hm8HDjhJoL0eOVb6lI9
-# UW8r7zANBgkqhkiG9w0BAQEFAASCAgCM/M5U6IgwwJ7UzZRTqZGRvdsX2iQrxQLk
-# YMOEdsxx1VckAOKZKLibwuz58WvxSsb78uqWc0u0hmQMZmZkLGLJ7mzjecqlVfEi
-# IYMFyGvC3SwBgmjVAOcXHthOnrX2b2M4v6WBrTZIj23Mw88Qb+GaaVul5NrArADq
-# hF3Tacl9L3FCuFGLExxisop5Jn0pcSnaKBhHcYExe/3zu4H2dDytFSkvHkHlr85h
-# /vWs78iJhxtqL4EwhKEeVQS9JY5cqW4zrrMRhQhH0fDV+iAbXK0AF2Gp05HjBfEz
-# L5cl1OUlB4Prie8PXMe0JHiZ18yGJbL2q0mwnGN4pxLzJ3zKOXgHmOfK5ZFomfvP
-# V3v7WcVb0mCnpkcUuxkoSSslFZbnu697LRGGzdKHXDZQGOvE3OfiyFG80HTSP5CY
-# L3106TopwwPA5b3xnkrtSoTCFe2E6XnLWdz7EwBlZUCWs3HIk2YsoRc7VulBtmCO
-# VaE3Yvk4xSYqtGQ4SiZ6lcVd5jMnDEJPbuUqsq3Q+W/KGZI+LKAWmbUUlZ0I7cB5
-# NLC9LeHgbT8WimSdImdWph3Q+CdWx1AKHCjGZHxjG/Qi2s7QUF458VCYJfQwYo6W
-# jcvkIJh3G/oY7521ptF5t+Gj6SnkDyTgd3G8cnYjMELnh7nIQMaXxZ75O9XVH/eQ
-# RwRGliFsrQ==
-# SIG # End signature block
