@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.34
+1.5.35
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.34"
+$ScriptVersion = "1.5.35"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2602,7 +2602,7 @@ function Get-OrchestratorPeerHealthSnapshot {
                 $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName ([string]$job.Name) -Occurrence $expectedOccurrence
                 if ($null -ne $claimRecord -and $null -ne $claimRecord.Claim) {
                     $claimStatus = [string]$claimRecord.Claim.Status
-                    if ($claimStatus -in @('Success', 'Failed', 'TimedOut', 'Interrupted')) { continue }
+                    if ($claimStatus -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) { continue }
                     if ($claimStatus -in @('Claimed', 'Running', 'RetryScheduled') -and $claimRecord.Claim.PSObject.Properties['SafeUntilUtc']) {
                         $claimSafeUntilUtc = ConvertTo-OrchestratorUtcTime -Value $claimRecord.Claim.SafeUntilUtc
                         if ($null -ne $claimSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $claimSafeUntilUtc) { continue }
@@ -3100,7 +3100,8 @@ function Write-OrchestratorRuntimeUpdateWarning {
     param(
         [Parameter(Mandatory = $true)][string]$Key,
         [Parameter(Mandatory = $true)][string]$Message,
-        [datetime]$Now = (Get-Date)
+        [datetime]$Now = (Get-Date),
+        [ValidateSet('INFO', 'WARN')][string]$Level = 'WARN'
     )
 
     if ($script:RuntimeUpdateWarnings.ContainsKey($Key)) {
@@ -3108,7 +3109,7 @@ function Write-OrchestratorRuntimeUpdateWarning {
     }
 
     $script:RuntimeUpdateWarnings[$Key] = $Now
-    Write-OrchestratorLog -Message $Message -Level WARN
+    Write-OrchestratorLog -Message $Message -Level $Level
 }
 
 function Send-OrchestratorRuntimeUpdateEmail {
@@ -4485,6 +4486,33 @@ function Write-ServerAllowlistSummary {
     }
 }
 
+function Get-OrchestratorPeerOccurrenceClaimState {
+    # Read-only view of the shared claim of an occurrence owned by another server:
+    # Terminal (peer finished it), Active (peer runs it within SafeUntilUtc) or None.
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $none = [pscustomobject]@{ State = 'None'; Claim = $null }
+    $record = $null
+    try { $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $JobName -Occurrence $Occurrence }
+    catch { return $none }
+    if ($null -eq $record -or $null -eq $record.Claim) { return $none }
+    $claim = $record.Claim
+    if (-not $claim.PSObject.Properties['OwnerServer'] -or [string]$claim.OwnerServer -ieq $env:COMPUTERNAME) { return $none }
+
+    if ([string]$claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) {
+        return [pscustomobject]@{ State = 'Terminal'; Claim = $claim }
+    }
+    $safeUntilUtc = if ($claim.PSObject.Properties['SafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $claim.SafeUntilUtc } else { $null }
+    if ($null -ne $safeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $safeUntilUtc) {
+        return [pscustomobject]@{ State = 'Active'; Claim = $claim }
+    }
+    return $none
+}
+
 function Set-OccurrenceHandledByPeer {
     param(
         [Parameter(Mandatory = $true)][string]$JobName,
@@ -4493,7 +4521,7 @@ function Set-OccurrenceHandledByPeer {
     )
 
     $claimStatus = [string]$Claim.Status
-    if ($claimStatus -notin @('Success', 'Failed', 'TimedOut', 'Interrupted')) {
+    if ($claimStatus -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) {
         throw "Claim status '$claimStatus' is not terminal."
     }
     $claimEnd = Get-Date
@@ -4815,6 +4843,25 @@ function Invoke-LaunchPhase {
         if ($job.AssignmentMode -eq 'Elected' -and $null -eq $script:ElectionPlan) {
             Write-OrchestratorRuntimeUpdateWarning -Key ("election-no-plan:{0}" -f $name) -Message ("Job {0}: elected occurrence {1} is queued because no shared election plan is available." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm')) -Now $Now
             continue
+        }
+
+        if ($job.AssignmentMode -eq 'Elected') {
+            # Read the shared occurrence claim before requesting the ConcurrencyKey: an occurrence a
+            # peer already runs holds that key itself and must not be reported as blocked by it.
+            # Read-only check; the atomic claim below stays authoritative.
+            $peerClaimCheck = Get-OrchestratorPeerOccurrenceClaimState -JobName $name -Occurrence $occurrence -Now $Now
+            if ($peerClaimCheck.State -eq 'Terminal') {
+                Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $peerClaimCheck.Claim
+                if ($isPipeline) {
+                    Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status ([string]$peerClaimCheck.Claim.Status) -Attempt $attempt -Detail 'The occurrence was completed through an existing shared claim.'
+                }
+                continue
+            }
+            if ($peerClaimCheck.State -eq 'Active') {
+                Write-OrchestratorRuntimeUpdateWarning -Level INFO -Key ("peer-claim-active:{0}:{1}" -f $name, $occurrence.ToUniversalTime().ToString('o')) -Message ("Job {0}: occurrence {1} is handled by {2} (claim {3}); waiting for its result." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), [string]$peerClaimCheck.Claim.OwnerServer, [string]$peerClaimCheck.Claim.Status) -Now $Now
+                continue
+            }
+            # None or an expired peer claim: the atomic claim below decides, including a safe takeover.
         }
 
         $concurrencyLeasePath = ''
@@ -5997,7 +6044,14 @@ try {
         Write-OrchestratorLog -Message ("Created jobs manifest from template: {0}. Adjust Enabled/Schedule locally; this runtime manifest stays out of Git." -f $script:Settings.JobsManifestPath) -Level WARN
     }
     elseif ($null -ne $manifestSync -and $manifestSync.Updated) {
-        Write-OrchestratorLog -Message ("Added missing jobs from the committed template without changing existing local job settings: {0}." -f (@($manifestSync.AddedJobNames) -join ', ')) -Level WARN
+        $addedJobNames = @($manifestSync.AddedJobNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        $updatedJobNames = @($manifestSync.UpdatedJobNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        if ($addedJobNames.Count -gt 0) {
+            Write-OrchestratorLog -Message ("Added missing jobs from the committed template without changing existing local job settings: {0}." -f ($addedJobNames -join ', ')) -Level WARN
+        }
+        if ($updatedJobNames.Count -gt 0) {
+            Write-OrchestratorLog -Message ("Added missing template settings to existing jobs without overwriting local values: {0}." -f (($updatedJobNames | Sort-Object -Unique) -join ', ')) -Level WARN
+        }
     }
 
     try {
