@@ -383,7 +383,7 @@ function Test-SmartM365OrchestratorClusterDocument {
             foreach ($capability in $only) { if ([string]$capability -notin $script:ValidCapabilities) { $errors.Add("Unknown policy capability '$capability'.") } }
         }
     }
-    foreach ($name in @('PeerMonitoringCheckIntervalSeconds', 'PeerHeartbeatStaleMinutes', 'PeerMonitoringConfirmationChecks', 'PeerJobStartGraceMinutes', 'PeerAlertReminderMinutes', 'PeerAlertMailRetryMinutes')) {
+    foreach ($name in @('PeerMonitoringCheckIntervalSeconds', 'PeerHeartbeatStaleMinutes', 'PeerMonitoringConfirmationChecks', 'PeerJobStartGraceMinutes', 'PeerRecycleGraceMinutes', 'PeerAlertReminderMinutes', 'PeerAlertMailRetryMinutes')) {
         if ($Document.PSObject.Properties[$name] -and [int]$Document.$name -lt 1) { $errors.Add("$name must be greater than zero.") }
     }
     [pscustomobject]@{ Valid = ($errors.Count -eq 0); Errors = @($errors); Warnings = @($warnings); ServerCount = @($servers).Count }

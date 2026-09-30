@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.33
+1.5.34
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.33"
+$ScriptVersion = "1.5.34"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -446,6 +446,11 @@ function Update-OrchestratorHeartbeatDuringLongOperation {
     if ($script:LastLongOperationHeartbeat -ne [datetime]::MinValue -and ($now - $script:LastLongOperationHeartbeat).TotalSeconds -lt 60) { return }
     $script:LastLongOperationHeartbeat = $now
     Write-OrchestratorHeartbeat
+}
+
+function Test-OrchestratorPlannedRecycle {
+    # Runtime update and lifetime recycles end cleanly and are restarted by Task Scheduler.
+    return ($script:ExitCode -eq 0 -and [string]$script:OrchestratorStopReason -in @('RuntimeUpdate', 'MaxLifetime'))
 }
 
 function Get-OrchestratorSharePointMirrorSnapshot {
@@ -762,7 +767,8 @@ function Invoke-OrchestratorPeriodicSharePointUpload {
     param(
         [Parameter(Mandatory = $true)][datetime]$Now,
         [switch]$RunNow,
-        [switch]$Force
+        [switch]$Force,
+        [switch]$SkipMirror
     )
 
     # Scheduling bypass is independent of forcing unchanged files to upload again.
@@ -791,6 +797,10 @@ function Invoke-OrchestratorPeriodicSharePointUpload {
         }
     }
 
+    if ($SkipMirror) {
+        Write-OrchestratorLog -Message 'SharePoint operational mirror deferred to the next orchestrator instance (planned recycle).'
+        return
+    }
     Invoke-OrchestratorSharePointMirror -Force:$Force
 }
 
@@ -1526,15 +1536,15 @@ function Get-LatestPastOccurrence {
 }
 
 function Get-OrchestratorDependencyMaxAge {
-    # Explicit override, otherwise the longest gap between two scheduled occurrences plus 2 hours:
-    # about 3 h for hourly, 26 h for once-daily and 170 h for once-weekly dependencies.
+    # Longest gap between two scheduled occurrences plus 2 hours: about 3 h for hourly, 26 h for
+    # once-daily and 170 h for once-weekly dependencies. A positive override is a floor, so it can
+    # relax slow or unreliable dependencies without making a weekly dependency stale.
     param(
         [Parameter(Mandatory = $true)]$DependencyJob,
         [int]$OverrideHours = 0,
         [Parameter(Mandatory = $true)][datetime]$Now
     )
 
-    if ($OverrideHours -gt 0) { return [double]$OverrideHours }
     $occurrences = @(Get-JobOccurrencesInWindow -Job $DependencyJob -WindowStart $Now.Date.AddDays(-15) -WindowEnd $Now)
     $maxGapHours = 24.0
     if ($occurrences.Count -ge 2) {
@@ -1544,7 +1554,7 @@ function Get-OrchestratorDependencyMaxAge {
             if ($gapHours -gt $maxGapHours) { $maxGapHours = $gapHours }
         }
     }
-    return ($maxGapHours + 2.0)
+    return [math]::Max(($maxGapHours + 2.0), [double][math]::Max(0, $OverrideHours))
 }
 
 function Get-OrchestratorDependencyFreshStatus {
@@ -2288,9 +2298,13 @@ function Write-OrchestratorHeartbeat {
             ScheduledOccurrence = ConvertTo-StateTime -Value $info.Occurrence
         }
     }
-    $pending = @(Get-OrchestratorPendingJobSnapshot -Now $now)
+    # Starting/Recycling heartbeats keep the server alive for peers but publish no pending queue:
+    # before re-adoption and after the loop ends that snapshot would not be meaningful.
+    $lifecycle = [string]$script:HeartbeatLifecycle
+    $pending = if ($lifecycle -eq 'Running') { @(Get-OrchestratorPendingJobSnapshot -Now $now) } else { @() }
     $heartbeat = @{
         Timestamp = $now.ToString('o')
+        Lifecycle = $lifecycle
         Pid = $PID
         Tenant = $Tenant
         ScriptVersion = $ScriptVersion
@@ -2310,7 +2324,7 @@ function Write-OrchestratorHeartbeat {
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
 
     $interval = [int]$script:Settings.OrchestratorHeartbeatLogIntervalMinutes
-    if ($interval -le 0) { return }
+    if ($interval -le 0 -or $lifecycle -ne 'Running') { return }
     if ($script:LastHeartbeatLogTime -ne [datetime]::MinValue -and ($now - $script:LastHeartbeatLogTime).TotalMinutes -lt $interval) { return }
 
     $script:LastHeartbeatLogTime = $now
@@ -2456,6 +2470,11 @@ function Get-OrchestratorConcurrencyBlockState {
     }
 }
 
+function Get-OrchestratorPeerRecycleGrace {
+    # Never shorter than the normal stale threshold.
+    return [math]::Max([int]$script:Settings.PeerHeartbeatStaleMinutes, [int]$script:Settings.PeerRecycleGraceMinutes)
+}
+
 function Get-OrchestratorPeerHealthSnapshot {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -2518,8 +2537,23 @@ function Get-OrchestratorPeerHealthSnapshot {
             $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatFuture|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatInvalid' -Server $peerServer -Status 'Future timestamp' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details 'The peer heartbeat timestamp is more than two minutes in the future. Check clock synchronization.'))
             continue
         }
+        $peerLifecycle = if ($heartbeat.PSObject.Properties['Lifecycle']) { [string]$heartbeat.Lifecycle } else { 'Running' }
+        if (($peerLifecycle -eq 'Recycling' -and $ageMinutes -le [double](Get-OrchestratorPeerRecycleGrace)) -or
+            ($peerLifecycle -eq 'Starting' -and $ageMinutes -le [double]$script:Settings.PeerHeartbeatStaleMinutes)) {
+            # Planned restart in progress: no stale alert, and no job audit until the peer runs its tick loop again.
+            $peerDetails.Add([pscustomobject]@{
+                Server = $peerServer
+                LastSeen = $lastSeenText
+                AgeMinutes = [math]::Round($ageMinutes, 1)
+                Pid = if ($heartbeat.PSObject.Properties['Pid']) { [string]$heartbeat.Pid } else { '' }
+                RunningJobs = ''
+                PendingJobs = $peerLifecycle
+            })
+            continue
+        }
         if ($ageMinutes -gt [double]$script:Settings.PeerHeartbeatStaleMinutes) {
             $pidText = if ($heartbeat.PSObject.Properties['Pid']) { [string]$heartbeat.Pid } else { 'unknown' }
+            if ($peerLifecycle -ne 'Running') { $pidText = "{0} ({1})" -f $pidText, $peerLifecycle }
             $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatStale|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatStale' -Server $peerServer -Status 'Stale' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details ("Last known PID: {0}." -f $pidText)))
             continue
         }
@@ -4253,7 +4287,9 @@ function Get-LiveOrchestratorServerCapabilities {
             $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
             $capabilityAge = ($nowUtc - ([datetime]$capabilities.GeneratedAtUtc).ToUniversalTime()).TotalMinutes
             $heartbeatAge = ($nowUtc - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
-            if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $script:Settings.PeerHeartbeatStaleMinutes) { continue }
+            # A planned recycle keeps its assignments so a short restart does not reshuffle the plan.
+            $maxHeartbeatAge = if ($heartbeat.PSObject.Properties['Lifecycle'] -and [string]$heartbeat.Lifecycle -eq 'Recycling') { Get-OrchestratorPeerRecycleGrace } else { $script:Settings.PeerHeartbeatStaleMinutes }
+            if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $maxHeartbeatAge) { continue }
             $results += $capabilities
         }
         catch {
@@ -5496,6 +5532,7 @@ function Set-OrchestratorCentralClusterSettings {
         PeerHeartbeatStaleMinutes = 'Int32'
         PeerMonitoringConfirmationChecks = 'Int32'
         PeerJobStartGraceMinutes = 'Int32'
+        PeerRecycleGraceMinutes = 'Int32'
         PeerAlertReminderMinutes = 'Int32'
         PeerAlertMailRetryMinutes = 'Int32'
         PeerRecoveryEmailEnabled = 'Boolean'
@@ -5548,6 +5585,8 @@ $script:SharePointEnsuredFolderState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastLongOperationHeartbeat = [datetime]::MinValue
+# Published in the heartbeat: Starting (lock held, re-adoption pending), Running (tick loop), Recycling (planned exit).
+$script:HeartbeatLifecycle = 'Starting'
 $script:LastClaimRetentionRun = [datetime]::MinValue
 $script:DependencyFreshCache = @{}
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
@@ -5810,6 +5849,7 @@ try {
         PeerHeartbeatStaleMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerHeartbeatStaleMinutes' -DefaultValue 5))
         PeerMonitoringConfirmationChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerMonitoringConfirmationChecks' -DefaultValue 2))
         PeerJobStartGraceMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerJobStartGraceMinutes' -DefaultValue 15))
+        PeerRecycleGraceMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerRecycleGraceMinutes' -DefaultValue 15))
         PeerAlertReminderMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertReminderMinutes' -DefaultValue 240))
         PeerAlertMailRetryMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertMailRetryMinutes' -DefaultValue 15))
         PeerRecoveryEmailEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerRecoveryEmailEnabled' -DefaultValue $true
@@ -5864,6 +5904,7 @@ try {
             PeerHeartbeatStaleMinutes = $script:Settings.PeerHeartbeatStaleMinutes
             PeerMonitoringConfirmationChecks = $script:Settings.PeerMonitoringConfirmationChecks
             PeerJobStartGraceMinutes = $script:Settings.PeerJobStartGraceMinutes
+            PeerRecycleGraceMinutes = $script:Settings.PeerRecycleGraceMinutes
             PeerAlertReminderMinutes = $script:Settings.PeerAlertReminderMinutes
             PeerAlertMailRetryMinutes = $script:Settings.PeerAlertMailRetryMinutes
             PeerRecoveryEmailEnabled = $script:Settings.PeerRecoveryEmailEnabled
@@ -5933,7 +5974,7 @@ try {
 
     Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}; atomicWriteRetrySeconds={7}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds, $script:Settings.AtomicWriteRetrySeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
-    Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes)
+    Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}; recycleGraceMinutes={8}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes, (Get-OrchestratorPeerRecycleGrace))
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; sendUpdateEmail={5}; baselineOrchestrator={6}; baselineCore={7}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:Settings.SendRuntimeUpdateEmail, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -5996,15 +6037,24 @@ try {
     }
     $script:LockOwned = $true
 
-    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $script:Settings.ElectionClaimsPath -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -OnProgress { param($message) Write-OrchestratorLog -Message $message }
+    # Startup can take several minutes on a busy share: publish a Starting heartbeat at once and
+    # refresh it between steps so peers do not report this server as stale.
+    Write-OrchestratorHeartbeat
+    $script:LastLongOperationHeartbeat = Get-Date
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $script:Settings.ElectionClaimsPath -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -OnProgress { param($message) Write-OrchestratorLog -Message $message; Update-OrchestratorHeartbeatDuringLongOperation }
 
+    Update-OrchestratorHeartbeatDuringLongOperation
     Update-OrchestratorServerCapabilities -ForceRefresh
+    Update-OrchestratorHeartbeatDuringLongOperation
     Update-OrchestratorElectionPlan -ForceRefresh
     Write-ServerAllowlistSummary
+    Update-OrchestratorHeartbeatDuringLongOperation
     Restore-RunningJobs
     Initialize-NewJobStates
     Invoke-MissedRunCatchUp
+    Update-OrchestratorHeartbeatDuringLongOperation
     Invoke-RetentionCleanup
+    Update-OrchestratorHeartbeatDuringLongOperation
     $script:ForcedPending = @($Force | Where-Object { $script:Manifest.JobsByName.ContainsKey($_) })
     try {
         Update-OrchestratorPipelineRequests
@@ -6014,6 +6064,7 @@ try {
     }
 
     $lastCleanupDate = (Get-Date).Date
+    $script:HeartbeatLifecycle = 'Running'
     while ($true) {
         $now = Get-Date
         if (Test-OrchestratorStopRequested) {
@@ -6085,6 +6136,12 @@ try {
             Write-OrchestratorLog -Message ("Job {0}: left running detached (PID {1}, started {2}); the next orchestrator instance will re-adopt it." -f $name, $info.Process.Id, ([datetime]$info.StartTime).ToString('yyyy-MM-dd HH:mm:ss'))
         }
     }
+    if (Test-OrchestratorPlannedRecycle) {
+        # Task Scheduler restarts the orchestrator: tell peers this silence is expected.
+        $script:HeartbeatLifecycle = 'Recycling'
+        Write-OrchestratorHeartbeat
+        Write-OrchestratorLog -Message ("Heartbeat published as Recycling ({0}); peers tolerate it for {1} minute(s)." -f $script:OrchestratorStopReason, $script:Settings.PeerRecycleGraceMinutes)
+    }
     Write-OrchestratorLog -Message ("{0} exiting normally (exit code 0)." -f $ScriptName)
 }
 catch {
@@ -6113,7 +6170,8 @@ finally {
     }
     if (-not $DryRun -and -not $Stop -and -not $SendExecutionSummary) {
         try {
-            Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -RunNow
+            # A planned recycle only publishes logs and state; the next instance runs the mirror.
+            Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -RunNow -SkipMirror:(Test-OrchestratorPlannedRecycle)
         }
         catch {
             Write-OrchestratorLog -Message ("Final orchestrator SharePoint upload failed: {0}" -f $_.Exception.Message) -Level ERROR

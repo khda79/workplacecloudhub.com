@@ -9,6 +9,7 @@
   "PeerHeartbeatStaleMinutes": 5,
   "PeerMonitoringConfirmationChecks": 2,
   "PeerJobStartGraceMinutes": 15,
+  "PeerRecycleGraceMinutes": 15,
   "PeerAlertReminderMinutes": 240,
   "PeerAlertMailRetryMinutes": 15,
   "PeerRecoveryEmailEnabled": true
