@@ -288,7 +288,16 @@ function Save-SmartM365WeeklyInventoryHistory {
     if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} file(s) written in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
     else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
 
-    $historyUploadCandidates = if ($UploadChangedFilesOnly) {
+    # Changed-only publication is not self-healing on its own: a marker is kept in the week folder
+    # until every upload succeeded, and a later run that finds it republishes the whole week.
+    $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+    $publicationEnabled = [bool]($uploadSetting -and $uploadSetting.Value)
+    $pendingPublicationPath = Join-Path -Path $weekFolder -ChildPath 'upload.pending'
+    $republishWeek = $UploadChangedFilesOnly -and $publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)
+    if ($republishWeek) {
+        WriteLog -Message ("Weekly {0} history for {1}: a previous SharePoint publication was incomplete; republishing the whole week." -f $HistoryLabel, $weekName) -Level 'WARNING'
+    }
+    $historyUploadCandidates = if ($UploadChangedFilesOnly -and -not $republishWeek) {
         @(
             @($copiedFiles.ToArray()) + $(if ($manifestChanged) { @($manifestPath) } else { @() }) |
                 Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
@@ -302,12 +311,18 @@ function Save-SmartM365WeeklyInventoryHistory {
     # Include every preferred manifest on retries, including a prior interrupted rename.
     # Remote legacy-item handling is separate from this byte-preserving local transition.
     $historyUploadCandidates = @(@($historyUploadCandidates) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Item -LiteralPath $_.Path }) | Sort-Object FullName -Unique)
+    if ($UploadChangedFilesOnly -and $publicationEnabled) {
+        [IO.File]::WriteAllText($pendingPublicationPath, (Get-Date).ToUniversalTime().ToString('o'))
+    }
     foreach ($historyUploadCandidate in $historyUploadCandidates) {
         $uploadReceipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName
         $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
         if ($uploadSetting -and $uploadSetting.Value -and -not $uploadReceipt) {
             throw 'Weekly history publication failed; snapshots are preserved and retention is deferred.'
         }
+    }
+    if ($publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $pendingPublicationPath -Force
     }
 
     if ($RetentionWeeks -gt 0) {
@@ -349,7 +364,7 @@ function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
         if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $historyRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
     }
     $retentionWeeks = [int](Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
-    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceFiles -HistoryRootPath $historyRootPath -RetentionWeeks $retentionWeeks
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceFiles -HistoryRootPath $historyRootPath -RetentionWeeks $retentionWeeks -UploadChangedFilesOnly
 }
 
 
