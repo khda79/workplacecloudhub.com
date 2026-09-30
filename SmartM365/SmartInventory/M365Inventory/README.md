@@ -142,6 +142,22 @@ For multi-report runs, DATA-ALL and DATA-LAST files are uploaded per report, whi
 the cumulative WeeklyHistory snapshot is built and uploaded once after all selected
 reports complete successfully.
 
+Since v1.19 the weekly history is written to `DATA-ALL\M365\Usage\WeeklyHistory`. Up to v1.18
+the script wrote it under each run folder (`M365\Usage\<yyyyMMdd_HHmmss>\WeeklyHistory`), so no
+consolidated history existed. `Usage/Merge-SmartM365-M365UsageWeeklyHistory.ps1` rebuilds it once,
+keeping the earliest snapshot of each report per ISO week, and never overwrites a consolidated file:
+
+```powershell
+# Preview (read-only)
+.\Usage\Merge-SmartM365-M365UsageWeeklyHistory.ps1 -UsageRootPath \\server\share\...\Tenants\prod\DATA-ALL\M365\Usage
+# Consolidate, then remove the per-run WeeklyHistory folders that are fully covered
+.\Usage\Merge-SmartM365-M365UsageWeeklyHistory.ps1 -UsageRootPath <same path> -Execute
+.\Usage\Merge-SmartM365-M365UsageWeeklyHistory.ps1 -UsageRootPath <same path> -Execute -RemoveRunHistory
+```
+
+A per-run folder is removed only when each of its CSVs exists in the consolidated week and an
+identical CSV remains in a run folder. Run it outside the 04:50 collector schedule.
+
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
 ## Power BI And Microsoft Fabric Activity Events

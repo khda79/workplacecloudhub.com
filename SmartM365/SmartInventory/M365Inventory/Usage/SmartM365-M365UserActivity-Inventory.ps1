@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.18
+1.19
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -493,7 +493,9 @@ function Publish-M365UsageWeeklyHistory {
 
     $historyRootPath = [string](Get-SmartM365ConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
     if ([string]::IsNullOrWhiteSpace($historyRootPath)) {
-        $historyRootPath = Join-Path -Path $runOutputRoot -ChildPath 'WeeklyHistory'
+        # One consolidated history per collector, as in the .local.json template; a per-run root
+        # would give every run its own isolated history.
+        $historyRootPath = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
     }
     $retentionWeeks = [int](Get-SmartM365ConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 
