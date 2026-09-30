@@ -163,6 +163,13 @@ its folders are reparse points that the JSON transport refuses, so manifests are
 files with the same bytes as on the share (v1.1). Files already consolidated without a recorded
 capture time (interrupted run) recover their provenance when their SHA256 matches the planned snapshot.
 
+Since v1.20 the collector publishes weekly history with `-UploadChangedFilesOnly`: only the CSVs
+copied during the run and a changed manifest are uploaded instead of the whole week. Since SmartM365.Core
+1.0.60 (PS5 compatibility module 1.0.44), this mode keeps an `upload.pending` marker in the week folder
+until every upload succeeded; the next run that finds it republishes the whole week, so a failed
+SharePoint upload is repaired. The automatic history of CSVs exported through the Core, Exchange
+on-prem Local Mailboxes 1.49, SPO 0.29 and Teams 0.33 use the same mode.
+
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
 ## Power BI And Microsoft Fabric Activity Events

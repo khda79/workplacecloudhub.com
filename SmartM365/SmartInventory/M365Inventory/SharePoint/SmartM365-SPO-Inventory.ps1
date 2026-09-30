@@ -56,7 +56,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.28
+0.29
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
@@ -114,7 +114,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.28"
+$ScriptVersion = "0.29"
 $TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
@@ -1110,7 +1110,7 @@ try {
         }
     }
     if ($global:EnableWeeklyHistory -and -not (Test-SmartM365MaxItemsMode)) {
-        Add-SmartM365WeeklyHistory -SourceCsvPaths $weeklyHistorySourcePaths.ToArray() -HistoryRootPath $global:WeeklyHistoryFolderPath -RetentionWeeks $global:WeeklyHistoryRetentionWeeks -HistoryLabel 'SmartM365 SharePoint Online inventory'
+        Add-SmartM365WeeklyHistory -SourceCsvPaths $weeklyHistorySourcePaths.ToArray() -HistoryRootPath $global:WeeklyHistoryFolderPath -RetentionWeeks $global:WeeklyHistoryRetentionWeeks -HistoryLabel 'SmartM365 SharePoint Online inventory' -UploadChangedFilesOnly
     }
     $workbookPath = Join-Path -Path $initializedOutput -ChildPath ("M365_SPO_Inventory_{0}.xlsx" -f $exportStamp)
     New-SpoTimestampedWorkbook -CsvFiles $timestampedCsvFiles.ToArray() -Path $workbookPath | Out-Null

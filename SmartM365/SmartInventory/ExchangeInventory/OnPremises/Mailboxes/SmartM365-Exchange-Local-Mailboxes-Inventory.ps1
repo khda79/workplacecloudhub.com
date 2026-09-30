@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.48
+1.49
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.48"
+$ScriptVersion = "1.49"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -425,7 +425,7 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
     }
 
     if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
-        Add-SmartM365WeeklyHistory -SourceCsvPaths @($publishedPath) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel $HistoryLabel | Out-Null
+        Add-SmartM365WeeklyHistory -SourceCsvPaths @($publishedPath) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel $HistoryLabel -UploadChangedFilesOnly | Out-Null
     }
 
     return [pscustomobject]@{
@@ -1263,7 +1263,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $historyDailySource = if ($latestDailyCsv -and (Test-Path -LiteralPath $latestDailyCsv -PathType Leaf)) { $latestDailyCsv } else { $dailyCsv }
     $historySummarySource = if ($latestSummaryCsv -and (Test-Path -LiteralPath $latestSummaryCsv -PathType Leaf)) { $latestSummaryCsv } else { $summaryCsv }
     if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
-        Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $historySummarySource) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
+        Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $historySummarySource) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' -UploadChangedFilesOnly | Out-Null
     }
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $reportOutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
     $localMailboxUpload = if ($latestLocalCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestLocalCsv } else { $null }
