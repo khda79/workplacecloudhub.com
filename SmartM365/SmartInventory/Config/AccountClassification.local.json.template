@@ -84,6 +84,12 @@
       "LongSamNumericSuffixPattern": "^[A-Z]{6}[0-9]{4}"
     }
   },
+  "LegacyLikelyPrivilegedOrServiceAccount": {
+    "SamStartsWith": [],
+    "SamContains": [
+      "administrator"
+    ]
+  },
   "LegacyLikelyServiceAccount": {
     "UpnMayBeBlank": true,
     "OuContains": [
