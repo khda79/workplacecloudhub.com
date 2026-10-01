@@ -42,6 +42,14 @@ def hardware_hash_path(key, output):
     return Path(key)
 
 
+def report_sidecar_path(output, final_output=None):
+    """Record the promoted directory, not its temporary staging name."""
+    final = Path(final_output).resolve() if final_output is not None else output
+    if final.parent != output.parent:
+        raise ValueError("Final report directory must be beside the staging directory")
+    return final
+
+
 def write_rows(path, columns, rows):
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
@@ -94,8 +102,10 @@ def top_application_rows(rows):
     return result[:5]
 
 
-def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes):
+def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes,
+            final_output=None):
     source, output = source.resolve(), output.resolve()
+    final_output = report_sidecar_path(output, final_output)
     if output.exists() or source == output or output in source.parents:
         raise ValueError("Output must be new and separate from the collection source")
     if source in output.parents and (source / "PowerBI") not in output.parents:
@@ -201,7 +211,7 @@ def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes):
     result = {
         "status": "Prepared", "generatedUtc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "sourceBuildDateTime": manifest_rows[0]["BuildDateTime"],
-        "sourceRoot": str(source), "reportSidecar": str(output), "identity": identity,
+        "sourceRoot": str(source), "reportSidecar": str(final_output), "identity": identity,
         "rowCounts": counts, "sourceHashes": hashes,
         "mailboxEvidence": {
             "localPath": str(local_mailboxes), "localRows": local_count,
@@ -270,6 +280,8 @@ if __name__ == "__main__":
     parser.add_argument("--ci-hardware", type=Path)
     parser.add_argument("--exchange-onprem-local", type=Path)
     parser.add_argument("--exchange-onprem-remote", type=Path)
+    parser.add_argument("--final-output", type=Path,
+                        help="Promoted report directory recorded in the manifest")
     parser.add_argument("--validate-only", action="store_true", help="Verify the prepared report matches every current source without writing.")
     args = parser.parse_args()
     if args.validate_only:
@@ -278,5 +290,6 @@ if __name__ == "__main__":
         if not all((args.ci_hardware, args.exchange_onprem_local, args.exchange_onprem_remote)):
             parser.error("preparation requires --ci-hardware and both --exchange-onprem paths")
         result = prepare(args.data_root, args.output, args.ci_hardware,
-                         args.exchange_onprem_local, args.exchange_onprem_remote)
+                         args.exchange_onprem_local, args.exchange_onprem_remote,
+                         args.final_output)
     print(json.dumps(result, ensure_ascii=False))

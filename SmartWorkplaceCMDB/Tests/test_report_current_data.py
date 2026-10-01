@@ -32,6 +32,16 @@ class CurrentReportDataTests(unittest.TestCase):
             self.assertEqual(current.hardware_hash_path(key, new),
                              new / "CMDB_CIDeviceHardware.csv")
 
+    def test_manifest_sidecar_uses_promoted_report_directory(self):
+        with tempfile.TemporaryDirectory(prefix="cmdb-report-sidecar-") as temporary:
+            root = Path(temporary)
+            stage = root / "Report.stage.test"
+            final = root / "Report"
+            self.assertEqual(current.report_sidecar_path(stage, final), final)
+            self.assertEqual(current.report_sidecar_path(final), final)
+            with self.assertRaisesRegex(ValueError, "beside the staging directory"):
+                current.report_sidecar_path(stage, root / "other" / "Report")
+
     def test_validate_current_rejects_changed_collection_source(self):
         with tempfile.TemporaryDirectory(prefix="cmdb-current-report-") as temporary:
             root = Path(temporary)
