@@ -10,7 +10,7 @@
   "OldWebmailUrl": "https://old-webmail.example.com",
   "NewWebmailUrl": "https://outlook.office365.com",
   "EnableTermsPortalBlock": false,
-  "TermsPortalUrl": "https://contoso.sharepoint.com/sites/Contoso",
+  "TermsPortalUrl": "https://contoso.sharepoint.com/sites/terms",
   "DefaultEffectiveDate": "",
   "SkipWhenEffectiveDateIsPast": true,
   "DefaultSubject": "New email system - Important information",

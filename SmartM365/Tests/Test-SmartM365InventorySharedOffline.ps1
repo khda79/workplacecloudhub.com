@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.9
+1.1.10
 #>
 [CmdletBinding()]
 param(
