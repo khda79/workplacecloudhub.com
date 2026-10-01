@@ -15,8 +15,8 @@ $names=@(
     'New-DataTrustEvidence.ps1','New-ExecutiveTrendEvidence.ps1'
 )
 $paths=@($names | ForEach-Object { 'SmartWorkplaceIntelligence/scripts/'+$_ })+@(
-    'SmartWorkplaceIntelligence/config/prepared-evidence-contract.json',
-    'SmartWorkplaceIntelligence/config/prepared-source-contract.json',
+    'SmartWorkplaceIntelligence/config/prepared-evidence-contract.json.txt',
+    'SmartWorkplaceIntelligence/config/prepared-source-contract.json.txt',
     'SmartM365/SmartInventory/PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.ps1',
     'SmartM365/SmartInventory/PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.local.json.template',
     'SmartM365/SmartInventory/PreparedEvidence/README.md',
