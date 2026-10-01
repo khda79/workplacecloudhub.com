@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.11
+1.12
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -29,7 +29,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     }
 
     # Private tenant rules (git-ignored); only AccountClassification.local.json.template is published.
-    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.1.0' -ErrorAction Stop
     $accountClassificationConfig = Read-SmartM365AccountClassification -Path $AccountClassificationConfigPath
     if (-not $accountClassificationConfig.ContainsKey('LegacyLikelyPrivilegedOrServiceAccount')) {
         throw ("Account classification configuration has no LegacyLikelyPrivilegedOrServiceAccount section: {0}" -f $accountClassificationConfig.SourcePath)
@@ -40,6 +40,10 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $accountTypeRules = $accountClassificationConfig.AccountTypeRules
     $accountPopulationRules = $accountClassificationConfig.Population
     $accountClassificationRuleVersion = [string]$accountClassificationConfig.RuleVersion
+    # Organization-specific domain and OU rules also live in the private configuration.
+    Assert-SmartM365DirectoryRuleConfiguration -Configuration $accountClassificationConfig
+    $integrationFallback = $accountClassificationConfig.DirectoryRules.IntegrationFallback
+    $headquartersOuFragments = @($accountClassificationConfig.DirectoryRules.HeadquartersOuContains | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() })
     # Private site and persona workbooks shared with SmartWorkplaceIntelligence; a missing or invalid workbook stops the enrichment.
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.WorkplaceClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $siteClassification = Read-SmartM365WorkplaceSiteClassification -Path $SiteClassificationPath
@@ -60,14 +64,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 
     function Get-TypeEntityFallback {
         param([string]$DomainNameShort, [string]$Country)
-        $domainClean = ([string]$DomainNameShort).Trim().ToUpperInvariant()
-        $countryClean = ([string]$Country).Trim().ToUpperInvariant()
-        if ($domainClean -eq 'CONTOSO_01') { return 'CORP' }
-        if ($domainClean -eq 'GRP' -and @('BE','LU') -contains $countryClean) { return 'INTEGRATED' }
-        if ($domainClean -eq 'GRP') { return 'NOT-INTEGRATED' }
-        if (@('BE','CH','DE','ES','FR','IT','LU','PL','PT') -contains $domainClean) { return 'INTEGRATED' }
-        if (@('AT','CZ','NL') -contains $domainClean) { return 'NOT-INTEGRATED' }
-        return 'UNKNOWN'
+        return Get-SmartM365IntegrationFallback -Rules $integrationFallback.Users -DomainNameShort $DomainNameShort -Country $Country -Default $integrationFallback.Default
     }
 
     function Convert-SmartM365NameClean {
@@ -612,7 +609,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $typeEntityValue = if ($null -ne $site) { $site.IntegrationStatus } else { '' }
         if ([string]::IsNullOrWhiteSpace($typeEntityValue)) { $typeEntityValue = Get-TypeEntityFallback -DomainNameShort (Get-Value $user @('DomainNameShort')) -Country (Get-Value $user @('Country')) }
         $labelFromEntity = if ($null -ne $site) { $site.Name } else { 'NOTFOUND' }
-        $inTargetHqOu = $distinguishedNameUpper.Contains('OU=000000-HQSITE') -or $distinguishedNameUpper.Contains('OU=120001-HQ_SITE') -or $distinguishedNameUpper.Contains('OU=HEADQUARTER')
+        $inTargetHqOu = $false
+        foreach ($fragment in $headquartersOuFragments) { if ($distinguishedNameUpper.Contains($fragment)) { $inTargetHqOu = $true; break } }
         $inDisabledObjectsOu = $distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')
         $givenNameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('GivenName'))
         $surnameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('Surname'))

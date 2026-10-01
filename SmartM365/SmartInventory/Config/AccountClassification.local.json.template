@@ -84,6 +84,20 @@
       "LongSamNumericSuffixPattern": "^[A-Z]{6}[0-9]{4}"
     }
   },
+  "DirectoryRules": {
+    "IntegrationFallback": {
+      "Users": [
+        { "Domains": [ "CONTOSO" ], "Result": "CORP" }
+      ],
+      "Computers": [
+        { "Domains": [ "CONTOSO" ], "Result": "CORP" }
+      ],
+      "Default": "UNKNOWN",
+      "ComputerCountryOuSuffix": ",OU=COUNTRIES"
+    },
+    "HeadquartersOuContains": [],
+    "Windows11OutOfScopeDomains": []
+  },
   "LegacyLikelyPrivilegedOrServiceAccount": {
     "SamStartsWith": [],
     "SamContains": [

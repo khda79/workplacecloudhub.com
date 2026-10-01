@@ -55,7 +55,48 @@ function Read-SmartM365AccountClassification {
     return $config
 }
 
-Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification
+function Get-SmartM365IntegrationFallback {
+    # Evaluates the private DirectoryRules.IntegrationFallback rules in order: the first rule whose
+    # Domains contains the short domain, and whose optional CountryIn/CountryNotIn condition holds, wins.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyCollection()][object[]]$Rules = @(),
+        [AllowEmptyString()][string]$DomainNameShort,
+        [AllowEmptyString()][string]$Country,
+        [Parameter(Mandatory)][string]$Default
+    )
+    $domainClean = ([string]$DomainNameShort).Trim().ToUpperInvariant()
+    $countryClean = ([string]$Country).Trim().ToUpperInvariant()
+    foreach ($rule in @($Rules)) {
+        if (@($rule['Domains'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -notcontains $domainClean) { continue }
+        if ($rule.ContainsKey('CountryIn') -and @($rule['CountryIn'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -notcontains $countryClean) { continue }
+        if ($rule.ContainsKey('CountryNotIn') -and @($rule['CountryNotIn'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -contains $countryClean) { continue }
+        return [string]$rule['Result']
+    }
+    return $Default
+}
+
+function Assert-SmartM365DirectoryRuleConfiguration {
+    # The organization-specific directory rules are private configuration; a missing section stops the caller.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    if (-not $Configuration.ContainsKey('DirectoryRules')) { throw ("Account classification configuration has no DirectoryRules section: {0}" -f $Configuration['SourcePath']) }
+    $rules = $Configuration['DirectoryRules']
+    foreach ($name in 'IntegrationFallback', 'HeadquartersOuContains', 'Windows11OutOfScopeDomains') {
+        if (-not $rules.ContainsKey($name)) { throw "DirectoryRules.$name is required." }
+    }
+    foreach ($name in 'Users', 'Computers', 'Default', 'ComputerCountryOuSuffix') {
+        if (-not $rules['IntegrationFallback'].ContainsKey($name)) { throw "DirectoryRules.IntegrationFallback.$name is required." }
+    }
+    foreach ($rule in @($rules['IntegrationFallback']['Users']) + @($rules['IntegrationFallback']['Computers'])) {
+        if ($null -eq $rule) { continue }
+        if (-not $rule.ContainsKey('Domains') -or -not $rule.ContainsKey('Result') -or [string]::IsNullOrWhiteSpace([string]$rule['Result'])) { throw 'Each DirectoryRules integration fallback rule needs Domains and Result.' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$rules['IntegrationFallback']['Default'])) { throw 'DirectoryRules.IntegrationFallback.Default is required.' }
+}
+
+Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Assert-SmartM365DirectoryRuleConfiguration
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

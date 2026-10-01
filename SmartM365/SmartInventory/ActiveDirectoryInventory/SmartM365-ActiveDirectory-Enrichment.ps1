@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.5
+1.6
 #>
 
 function Invoke-SmartM365AdComputersEnrichedCsv {
@@ -14,7 +14,9 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         [Parameter(Mandatory = $false)][string]$WindowsUpdateAnchorPolicyId,
         [Parameter(Mandatory = $false)][string]$WindowsUpdate24H2PolicyId,
         [Parameter(Mandatory = $false)][string]$WindowsUpdate25H2PolicyId,
-        [Parameter(Mandatory = $true)][string]$SiteClassificationPath
+        [Parameter(Mandatory = $true)][string]$SiteClassificationPath,
+        [Parameter(Mandatory = $false)]
+        [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
     )
 
     if (-not (Test-Path -LiteralPath $CombinedComputersCsv)) {
@@ -35,6 +37,13 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.WorkplaceClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $siteClassification = Read-SmartM365WorkplaceSiteClassification -Path $SiteClassificationPath
     WriteLog -Message ("AD computers enrichment site classification loaded: {0} site(s)" -f $siteClassification.Sites.Count)
+    # Organization-specific domain and OU rules are private configuration (git-ignored AccountClassification.local.json).
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.1.0' -ErrorAction Stop
+    $accountClassificationConfig = Read-SmartM365AccountClassification -Path $AccountClassificationConfigPath
+    Assert-SmartM365DirectoryRuleConfiguration -Configuration $accountClassificationConfig
+    $integrationFallback = $accountClassificationConfig.DirectoryRules.IntegrationFallback
+    $headquartersOuFragments = @($accountClassificationConfig.DirectoryRules.HeadquartersOuContains | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() })
+    $windows11OutOfScopeDomains = @($accountClassificationConfig.DirectoryRules.Windows11OutOfScopeDomains | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() })
 
     function V($Row, [string[]]$Names) {
         if ($null -eq $Row) { return '' }
@@ -333,16 +342,14 @@ function Build($AdVersion, $IntuneVersion) {
     function GetTypeEntityFallback($DomainNameShort, $DistinguishedName) {
         $domainClean = ([string]$DomainNameShort).Trim().ToUpperInvariant()
         $dnClean = ([string]$DistinguishedName).Trim().ToUpperInvariant()
+        # Country: the two characters before the configured country OU suffix, when present.
         $countryFromDn = ''
-        if ($domainClean -eq 'GRP' -and $dnClean.Contains(',OU=COUNTRIES')) {
-            $beforeCountries = $dnClean.Substring(0, $dnClean.IndexOf(',OU=COUNTRIES'))
+        $countrySuffix = ([string]$integrationFallback.ComputerCountryOuSuffix).ToUpperInvariant()
+        if ($countrySuffix -and $dnClean.Contains($countrySuffix)) {
+            $beforeCountries = $dnClean.Substring(0, $dnClean.IndexOf($countrySuffix))
             if ($beforeCountries.Length -ge 2) { $countryFromDn = $beforeCountries.Substring($beforeCountries.Length - 2, 2) }
         }
-        if ($domainClean -eq 'CONTOSO_01') { return 'CORP' }
-        if ($domainClean -eq 'GRP' -and @('BE','LU') -notcontains $countryFromDn) { return 'NOT-INTEGRATED' }
-        if (@('BE','CH','DE','ES','FR','IT','LU','PL','PT') -contains $domainClean) { return 'INTEGRATED' }
-        if (@('AT','CZ','NL') -contains $domainClean) { return 'NOT-INTEGRATED' }
-        return 'UNKNOWN'
+        return Get-SmartM365IntegrationFallback -Rules $integrationFallback.Computers -DomainNameShort $domainClean -Country $countryFromDn -Default $integrationFallback.Default
     }
 
     function GetAccountToDeleteFromAd($Row) {
@@ -375,7 +382,7 @@ function Build($AdVersion, $IntuneVersion) {
         if ($isVmValue) { return 'OUT OF SCOPE' }
         if ($typeEntityText -eq 'NOT-INTEGRATED') { return 'OUT OF SCOPE' }
         if (-not $IsEnabled) { return 'OUT OF SCOPE' }
-        if ($domainShortText -eq 'CONTOSO_01') { return 'OUT OF SCOPE' }
+        if ($windows11OutOfScopeDomains -contains $domainShortText) { return 'OUT OF SCOPE' }
         if ($InDisabledOu) { return 'OUT OF SCOPE' }
         if ((-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return 'PHASE 2' }
         if ($IsLtsc -and $isWindows10Value) { return 'PHASE 2' }
@@ -405,7 +412,7 @@ function Build($AdVersion, $IntuneVersion) {
         if ($typeEntityText -eq 'NOT-INTEGRATED') { return 'TypeEntity = NOT-INTEGRATED -> OUT OF SCOPE' }
         if ($typeEntityText -eq 'EXCLUDED') { return 'TypeEntity = EXCLUDED -> OUT OF SCOPE' }
         if (-not $IsEnabled) { return 'Device disabled -> OUT OF SCOPE' }
-        if ($domainShortText -eq 'CONTOSO_01') { return 'Domain = CONTOSO_01 -> OUT OF SCOPE' }
+        if ($windows11OutOfScopeDomains -contains $domainShortText) { return ('Domain = {0} -> OUT OF SCOPE' -f $domainShortText) }
         if ($InDisabledOu) { return 'Disabled Objects OU -> OUT OF SCOPE' }
         if ((@('UNKNOWN','UNDETERMINED','NOT CAPABLE','CAPABLE','UPGRADED') -contains $eligibilityText) -and (-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return ('Eligibility = {0} + Inactive (no sign-in last 45 days) -> PHASE 2' -f $eligibilityText) }
         if ((@('UNKNOWN','UNDETERMINED','NOT CAPABLE','CAPABLE','UPGRADED') -contains $eligibilityText) -and $IsLtsc -and $isWindows10Value) { return ('Eligibility = {0} + Windows 10 LTSC -> PHASE 2' -f $eligibilityText) }
@@ -434,7 +441,7 @@ function Build($AdVersion, $IntuneVersion) {
         if ($typeEntityText -eq 'NOT-INTEGRATED') { return '6 - To qualify' }
         if ($typeEntityText -eq 'EXCLUDED') { return '6 - To qualify' }
         if (-not $IsEnabled) { return '6 - To qualify' }
-        if ($domainShortText -eq 'CONTOSO_01') { return '6 - To qualify' }
+        if ($windows11OutOfScopeDomains -contains $domainShortText) { return '6 - To qualify' }
         if ($InDisabledOu) { return '6 - To qualify' }
         if ($isWindows11Value) { return '6 - To qualify' }
         if ((-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return '5 - To check inactivity' }
@@ -696,7 +703,10 @@ function Build($AdVersion, $IntuneVersion) {
         $subnet = GetSubnet (V $row @('IPv4Address'))
         $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))
         $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
-        $isTargetOuHq = [string](($typeEtablissementUpper -eq 'HQ') -or ($distinguishedName -match 'OU=000000-HQSITE') -or ($distinguishedName -match 'OU=120001-HQ_SITE') -or ($distinguishedName -match 'OU=HEADQUARTER'))
+        $inHeadquartersOu = $false
+        $distinguishedNameUpper = $distinguishedName.ToUpperInvariant()
+        foreach ($fragment in $headquartersOuFragments) { if ($distinguishedNameUpper.Contains($fragment)) { $inHeadquartersOu = $true; break } }
+        $isTargetOuHq = [string](($typeEtablissementUpper -eq 'HQ') -or $inHeadquartersOu)
         $isNotTargetOuHq = [string](($typeEtablissementUpper -ne 'HQ') -and ((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
         $serverAdEntra = GetMap $serverAdEntraByName $computerName
         $serverAdDeviceId = GK (V $serverAdEntra @('DeviceId'))

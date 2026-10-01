@@ -3,7 +3,7 @@
     Validates the published account-classification template and, when present, the private
     AccountClassification.local.json(.txt) rules.
 .VERSION
-1.2
+1.3
 #>
 
 [CmdletBinding()]
@@ -15,7 +15,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $smartInventoryRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'SmartInventory'
-Import-Module (Join-Path $smartInventoryRoot 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.0.0' -Force -ErrorAction Stop
+Import-Module (Join-Path $smartInventoryRoot 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.1.0' -Force -ErrorAction Stop
 $templatePath = Join-Path $smartInventoryRoot 'Config\AccountClassification.local.json.template'
 $expectedAccountTypes = @(
     'Named Account', 'Ext Account', 'Service Account', 'Shared Mailbox',
@@ -44,6 +44,7 @@ function Test-AccountClassificationFile {
     foreach ($section in 'LegacyLikelyServiceAccount', 'LegacyLikelyPrivilegedOrServiceAccount') {
         if (-not $config.ContainsKey($section)) { throw "$section is required." }
     }
+    Assert-SmartM365DirectoryRuleConfiguration -Configuration $config
     [pscustomobject]@{
         ConfigPath = $config.SourcePath
         SchemaVersion = [string]$config.SchemaVersion
@@ -75,6 +76,23 @@ $missingRejected = $false
 try { $null = Read-SmartM365AccountClassification -Path (Join-Path ([IO.Path]::GetTempPath()) ('absent-{0}.local.json' -f [guid]::NewGuid().ToString('N'))) }
 catch { $missingRejected = $_.Exception.Message -like '*AccountClassification.local.json.template*' }
 if (-not $missingRejected) { throw 'A missing private configuration did not fail closed.' }
+
+# Integration fallback rules: first matching rule wins, country conditions are optional.
+$fallbackRules = @(
+    @{ Domains = @('HQDOM'); Result = 'CORP' }
+    @{ Domains = @('MULTI'); CountryIn = @('BE'); Result = 'INTEGRATED' }
+    @{ Domains = @('MULTI'); CountryNotIn = @('LU'); Result = 'NOT-INTEGRATED' }
+)
+$fallbackCases = @(
+    @('hqdom', '', 'CORP'), @('MULTI', 'be', 'INTEGRATED'), @('MULTI', 'FR', 'NOT-INTEGRATED'), @('MULTI', 'LU', 'UNKNOWN'), @('OTHER', '', 'UNKNOWN')
+)
+foreach ($case in $fallbackCases) {
+    $result = Get-SmartM365IntegrationFallback -Rules $fallbackRules -DomainNameShort $case[0] -Country $case[1] -Default 'UNKNOWN'
+    if ($result -ne $case[2]) { throw "Integration fallback for $($case[0])/$($case[1]) returned $result instead of $($case[2])." }
+}
+$missingDirectoryRules = $false
+try { Assert-SmartM365DirectoryRuleConfiguration -Configuration @{ SourcePath = 'test' } } catch { $missingDirectoryRules = $_.Exception.Message -like '*DirectoryRules*' }
+if (-not $missingDirectoryRules) { throw 'A configuration without DirectoryRules was accepted.' }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
