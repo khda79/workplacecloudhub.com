@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.4
+1.5
 #>
 
 function Invoke-SmartM365AdComputersEnrichedCsv {
@@ -13,7 +13,8 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         [Parameter(Mandatory = $false)][string]$LatestFolderPath,
         [Parameter(Mandatory = $false)][string]$WindowsUpdateAnchorPolicyId,
         [Parameter(Mandatory = $false)][string]$WindowsUpdate24H2PolicyId,
-        [Parameter(Mandatory = $false)][string]$WindowsUpdate25H2PolicyId
+        [Parameter(Mandatory = $false)][string]$WindowsUpdate25H2PolicyId,
+        [Parameter(Mandatory = $true)][string]$SiteClassificationPath
     )
 
     if (-not (Test-Path -LiteralPath $CombinedComputersCsv)) {
@@ -29,6 +30,11 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         $calculatedColumns = @('ObjectGuidNormalized')
         WriteLog -Message ("AD enrichment column list not found, using ObjectGuidNormalized only: {0}" -f $columnsFile) -Level "WARNING"
     }
+
+    # Private site workbook shared with SmartWorkplaceIntelligence; a missing or invalid workbook stops the enrichment.
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.WorkplaceClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
+    $siteClassification = Read-SmartM365WorkplaceSiteClassification -Path $SiteClassificationPath
+    WriteLog -Message ("AD computers enrichment site classification loaded: {0} site(s)" -f $siteClassification.Sites.Count)
 
     function V($Row, [string[]]$Names) {
         if ($null -eq $Row) { return '' }
@@ -237,40 +243,6 @@ function Build($AdVersion, $IntuneVersion) {
         return @()
     }
 
-    function LoadXlsx($Name, [string[]]$WorksheetNames) {
-        $resolvedPath = ''
-        foreach ($candidate in (Get-SourceCandidatePaths $Name)) {
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $resolvedPath = $candidate; break }
-        }
-        if ([string]::IsNullOrWhiteSpace($resolvedPath) -and (Get-Command Resolve-SmartM365AdReferenceXlsx -ErrorAction SilentlyContinue)) {
-            $sharePointPath = Resolve-SmartM365AdReferenceXlsx -Name $Name
-            if (-not [string]::IsNullOrWhiteSpace($sharePointPath) -and (Test-Path -LiteralPath $sharePointPath -PathType Leaf)) {
-                $resolvedPath = $sharePointPath
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
-            WriteLog -Message ("AD enrichment optional Excel source missing; related columns will be blank: {0}" -f $Name)
-            return @()
-        }
-        try { Import-Module ImportExcel -ErrorAction Stop }
-        catch {
-            WriteLog -Message ("AD enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $resolvedPath)
-            return @()
-        }
-        $rowsOut = New-Object System.Collections.Generic.List[object]
-        foreach ($worksheetName in @($WorksheetNames)) {
-            if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
-            try {
-                foreach ($row in @(Import-Excel -Path $resolvedPath -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) }
-            }
-            catch {
-                WriteLog -Message ("AD enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $resolvedPath, $worksheetName, $PSItem.Exception.Message)
-            }
-        }
-        WriteLog -Message ("AD enrichment Excel source loaded: {0} ({1} row(s))" -f $resolvedPath, $rowsOut.Count)
-        return $rowsOut.ToArray()
-    }
-
     function AddMap($Map, $Key, $Row) { if (-not [string]::IsNullOrWhiteSpace($Key) -and -not $Map.ContainsKey($Key)) { $Map[$Key] = $Row } }
     function AddMulti($Map, $Key, $Row) { if ([string]::IsNullOrWhiteSpace($Key)) { return }; if (-not $Map.ContainsKey($Key)) { $Map[$Key] = New-Object System.Collections.Generic.List[object] }; [void]$Map[$Key].Add($Row) }
     function GetMap($Map, $Key) { if (-not [string]::IsNullOrWhiteSpace($Key) -and $Map.ContainsKey($Key)) { return $Map[$Key] }; return $null }
@@ -373,16 +345,6 @@ function Build($AdVersion, $IntuneVersion) {
         return 'UNKNOWN'
     }
 
-    function GetTypeEtablissement($EntityRow) {
-        if ($null -eq $EntityRow) { return 'NOTFOUND' }
-        $hqText = ([string](V $EntityRow @('HQ'))).Trim().ToLowerInvariant()
-        if (@('1','true','vrai','oui') -contains $hqText) { return 'HQ' }
-        $service = ([string](V $EntityRow @('Entity (Service)'))).ToUpperInvariant()
-        if ($service.Contains('RESIDENCE')) { return 'RESIDENCE' }
-        if ($service.Contains('CLINIQUE')) { return 'CLINIC' }
-        if ($service.Contains('UNKNOWN')) { return 'UNKNOWN' }
-        return 'OTHER'
-    }
     function GetAccountToDeleteFromAd($Row) {
         $sam = V $Row @('SamAccountName')
         if ($sam -match '(?i)-K-') { return 'NO_CLEAN_DEVICES_EXCLUDED' }
@@ -498,7 +460,6 @@ function Build($AdVersion, $IntuneVersion) {
     $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
     $localMailboxRows = @(LoadCsv 'Exchange_OnPrem_Mailboxes_AllDomains.csv')
     $remoteMailboxRows = @(LoadCsv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv')
-    $entityRows = @(LoadXlsx 'EntityDirectories.xlsx' @('Entities','Entities (2)'))
     $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv')
 
     $intuneByAad = @{}
@@ -546,18 +507,6 @@ function Build($AdVersion, $IntuneVersion) {
     foreach ($row in $licenseRows) {
         $key = K (V $row @('User principal name','UserPrincipalName','primarysmtp'))
         if ($key) { $licensedUsersByUpn[$key] = $true }
-    }
-
-    $entityByCode = @{}
-    foreach ($row in $entityRows) {
-        foreach ($entityKeyCandidate in @((V $row @('Entity code Text')),(V $row @('Entity code Text 6 digits')),(V $row @('Entity code')),(V $row @('EntityCode')),(V $row @('OrganizationalUnit')))) {
-            $entityKey = K $entityKeyCandidate
-            AddMap $entityByCode $entityKey $row
-            $entityNumber = 0.0
-            if ([double]::TryParse(([string]$entityKeyCandidate).Trim().Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$entityNumber)) {
-                AddMap $entityByCode (([math]::Floor($entityNumber)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)) $row
-            }
-        }
     }
 
     $usersBySam = @{}; $usersByDomainAndSam = @{}
@@ -739,10 +688,10 @@ function Build($AdVersion, $IntuneVersion) {
         $osMinToUpdateW11 = ($operatingSystemMajorCurrent -eq 'Windows 11') -or ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and [int]$buildNumber -ge 19041)
         $orgUnit = GetOrganizationalUnitCode $row
         $domainAndOu = if ((V $row @('DomainNameShort')) -and $orgUnit) { ('{0}-{1}' -f (V $row @('DomainNameShort')), $orgUnit) } else { '' }
-        $entity = GetMap $entityByCode (K $orgUnit)
-        $labelFromEntity = if ($entity) { V $entity @('Entity label','EntityLabel') } else { 'NOTFOUND' }
-        $typeEtablissement = GetTypeEtablissement $entity
-        $typeEntity = if ($entity) { V $entity @('Entity Type','EntityType') } else { '' }
+        $site = Get-SmartM365WorkplaceSite -SiteClassification $siteClassification -SiteCode $orgUnit
+        $labelFromEntity = if ($null -ne $site) { $site.Name } else { 'NOTFOUND' }
+        $typeEtablissement = if ($null -ne $site) { $site.Type } else { 'NOTFOUND' }
+        $typeEntity = if ($null -ne $site) { $site.IntegrationStatus } else { '' }
         if (-not $typeEntity) { $typeEntity = GetTypeEntityFallback (V $row @('DomainNameShort')) $distinguishedName }
         $subnet = GetSubnet (V $row @('IPv4Address'))
         $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))

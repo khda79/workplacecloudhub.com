@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.47
+1.48
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.47"
+$ScriptVersion = "1.48"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -705,45 +705,24 @@ catch {
 $script:SmartM365AdReferenceXlsxCache = @{}
 $script:SmartM365AdReferenceXlsxCacheRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("SmartM365\ADReferenceData\{0}" -f $PID)
 
-function Resolve-SmartM365AdReferenceXlsx {
+function Get-SmartM365AdWorkplaceClassificationWorkbook {
+    # The private site and persona workbooks are read from the SharePoint DATA root on every run,
+    # as for WorkplaceEvidence-Prepare. A failed download or an invalid workbook stops the inventory.
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$Name)
+    param()
 
-    $leafName = [System.IO.Path]::GetFileName($Name)
-    if ([string]::IsNullOrWhiteSpace($leafName) -or $leafName -ne $Name -or -not $leafName.EndsWith('.xlsx', [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw ("Invalid AD reference workbook name: {0}" -f $Name)
-    }
-
-    if ($script:SmartM365AdReferenceXlsxCache.ContainsKey($leafName)) {
-        $cachedPath = [string]$script:SmartM365AdReferenceXlsxCache[$leafName]
-        if (Test-Path -LiteralPath $cachedPath -PathType Leaf) { return $cachedPath }
-        $script:SmartM365AdReferenceXlsxCache.Remove($leafName)
-    }
-
+    Import-Module (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Common\SmartM365.WorkplaceClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     if (-not (Get-Command Invoke-SmartM365SharePointFileDownload -ErrorAction SilentlyContinue)) {
-        WriteLog -Message ("AD reference workbook cannot be recovered because the SharePoint download helper is unavailable: {0}" -f $leafName) -Level 'WARNING'
-        return ''
+        throw 'The SharePoint download helper is unavailable; the site and persona classification workbooks cannot be read.'
     }
-
-    if (-not (Test-Path -LiteralPath $script:SmartM365AdReferenceXlsxCacheRoot)) {
-        New-Item -Path $script:SmartM365AdReferenceXlsxCacheRoot -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $folder = Join-Path -Path $script:SmartM365AdReferenceXlsxCacheRoot -ChildPath 'WorkplaceClassification'
+    $download = {
+        param($destination, $name)
+        Invoke-SmartM365SharePointFileDownload -LocalFilePath $destination -SharePointRelativePath $name -Enabled $true -Force
     }
-
-    $cachePath = Join-Path -Path $script:SmartM365AdReferenceXlsxCacheRoot -ChildPath $leafName
-    $sharePointRelativePath = 'DATA-ALL/{0}' -f $leafName
-    WriteLog -Message ("AD reference workbook not found locally; attempting SharePoint recovery: {0}" -f $sharePointRelativePath)
-    $downloaded = Invoke-SmartM365SharePointFileDownload `
-        -LocalFilePath $cachePath `
-        -SharePointRelativePath $sharePointRelativePath `
-        -Enabled $true `
-        -Force
-    if ($downloaded -and (Test-Path -LiteralPath $downloaded.FullName -PathType Leaf)) {
-        $script:SmartM365AdReferenceXlsxCache[$leafName] = $downloaded.FullName
-        return $downloaded.FullName
-    }
-
-    WriteLog -Message ("AD reference workbook not found in SharePoint; related enrichment columns will be blank: {0}" -f $sharePointRelativePath) -Level 'WARNING'
-    return ''
+    $workbooks = Receive-SmartM365WorkplaceClassificationWorkbook -Folder $folder -DownloadFile $download
+    WriteLog -Message ("AD classification workbooks downloaded from SharePoint and structurally validated: {0}; {1}" -f [System.IO.Path]::GetFileName($workbooks.PersonaPath), [System.IO.Path]::GetFileName($workbooks.SitePath))
+    return $workbooks
 }
 
 function Clear-SmartM365AdReferenceXlsxCache {
@@ -2898,13 +2877,16 @@ try {
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_OUs_*.csv"       -DestinationFile $combinedOusCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Contacts_*.csv"  -DestinationFile $combinedContactsCsv
 
+    $workplaceClassificationWorkbooks = Get-SmartM365AdWorkplaceClassificationWorkbook
     $combinedUsersEnrichedCsv = $null
     if (Get-Command Invoke-SmartM365AdUsersEnrichedCsv -ErrorAction SilentlyContinue) {
         $combinedUsersEnrichedCsv = Invoke-SmartM365AdUsersEnrichedCsv `
             -CombinedUsersCsv $combinedUsersCsv `
             -OutputFolder $OutputPath `
             -LatestFolderPath $destinationRootPath `
-            -RemoteRoutingDomain $RemoteRoutingDomain
+            -RemoteRoutingDomain $RemoteRoutingDomain `
+            -PersonaClassificationPath $workplaceClassificationWorkbooks.PersonaPath `
+            -SiteClassificationPath $workplaceClassificationWorkbooks.SitePath
     }
     else {
         WriteLog -Message "WARNING: AD users enrichment function is unavailable. AD_Users_AllDomains.csv will not be generated."
@@ -2917,7 +2899,8 @@ try {
             -LatestFolderPath $destinationRootPath `
             -WindowsUpdateAnchorPolicyId $AdEnrichmentWindowsUpdateAnchorPolicyId `
             -WindowsUpdate24H2PolicyId $AdEnrichmentWindowsUpdate24H2PolicyId `
-            -WindowsUpdate25H2PolicyId $AdEnrichmentWindowsUpdate25H2PolicyId
+            -WindowsUpdate25H2PolicyId $AdEnrichmentWindowsUpdate25H2PolicyId `
+            -SiteClassificationPath $workplaceClassificationWorkbooks.SitePath
     }
     else {
         WriteLog -Message "WARNING: AD computers enrichment function is unavailable. AD_Computers_AllDomains.csv will not be generated."

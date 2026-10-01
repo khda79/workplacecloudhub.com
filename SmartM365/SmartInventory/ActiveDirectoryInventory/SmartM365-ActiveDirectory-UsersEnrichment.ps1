@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.10
+1.11
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -13,7 +13,9 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         [Parameter(Mandatory = $false)][string]$LatestFolderPath,
         [Parameter(Mandatory = $true)][string]$RemoteRoutingDomain,
         [Parameter(Mandatory = $false)]
-        [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
+        [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json'),
+        [Parameter(Mandatory = $true)][string]$PersonaClassificationPath,
+        [Parameter(Mandatory = $true)][string]$SiteClassificationPath
     )
 
     $RemoteRoutingDomain = $RemoteRoutingDomain.Trim().TrimStart('@').ToLowerInvariant()
@@ -38,6 +40,12 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $accountTypeRules = $accountClassificationConfig.AccountTypeRules
     $accountPopulationRules = $accountClassificationConfig.Population
     $accountClassificationRuleVersion = [string]$accountClassificationConfig.RuleVersion
+    # Private site and persona workbooks shared with SmartWorkplaceIntelligence; a missing or invalid workbook stops the enrichment.
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.WorkplaceClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
+    $siteClassification = Read-SmartM365WorkplaceSiteClassification -Path $SiteClassificationPath
+    $personaClassification = Read-SmartM365WorkplacePersonaClassification -Path $PersonaClassificationPath -HeadquartersPersona $siteClassification.HeadquartersPersona
+    $personaLabels = Get-SmartM365WorkplacePersonaLabel
+    WriteLog -Message ("AD users enrichment classification workbooks loaded: {0} site(s), {1} persona rule(s), site attribute {2}" -f $siteClassification.Sites.Count, @($personaClassification.Rules).Count, $siteClassification.SiteAttribute)
 
     function Get-OuPathFromDistinguishedName {
         param([string]$DistinguishedName)
@@ -70,7 +78,12 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     }
 
     function Get-SmartM365BasePersona {
-        param([string]$JobFamily)
+        param([string]$JobFamily, [string]$LicenseGroup)
+        # An ambiguous persona never drives a license change: keep the current base license.
+        if (([string]$JobFamily).Trim() -eq $personaLabels.Ambiguous) {
+            if ($LicenseGroup -eq 'Microsoft 365 E3') { return 'M365E3' }
+            return 'M365F3'
+        }
         switch (([string]$JobFamily).Trim().ToUpperInvariant()) {
             'HEADQUARTERS STAFF' { return 'M365E3' }
             'MANAGEMENT AND ADMINISTRATIVE STAFF' { return 'M365E3' }
@@ -226,62 +239,10 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return $text.Substring($position + 1).Trim()
     }
 
-    function New-SmartM365PersonaeKeywordRows {
-        param([object[]]$Rows, [bool]$StrictCategory)
-        $result = New-Object System.Collections.Generic.List[object]
-        foreach ($row in $Rows) {
-            $keyword = Normalize-SmartM365PersonaeText -Value (Get-Value $row @('Keyword'))
-            $category = [string](Get-Value $row @('Category'))
-            if ([string]::IsNullOrWhiteSpace($keyword) -or [string]::IsNullOrWhiteSpace($category)) { continue }
-            [void]$result.Add([pscustomobject]@{ Keyword = $keyword; KeywordPadded = (' {0} ' -f $keyword); KeywordLength = $keyword.Length; Category = $category; StrictCategory = $StrictCategory })
-        }
-        return @($result | Sort-Object -Property @{ Expression = 'KeywordLength'; Descending = $true }, Keyword)
-    }
-
-    function Get-SmartM365JobFamilyFromKeywords {
-        param([string]$PaddedTitle, [object[]]$KeywordRows, [bool]$StrictCategory)
-        if ([string]::IsNullOrWhiteSpace($PaddedTitle) -or @($KeywordRows).Count -eq 0) { return 'Unclassified' }
-        foreach ($keywordRow in $KeywordRows) {
-            if ($PaddedTitle.Contains([string]$keywordRow.KeywordPadded)) {
-                $category = [string]$keywordRow.Category
-                if (-not $StrictCategory) { return $category }
-                switch ($category) {
-                    'Healthcare staff' { return 'Healthcare staff' }
-                    'Management and Administrative staff' { return 'Management and Administrative staff' }
-                    'Non-IT staff' { return 'Non-IT staff' }
-                    'Service staff' { return 'Service staff' }
-                    default { return 'Unclassified' }
-                }
-            }
-        }
-        return 'Unclassified'
-    }
-
-    function Get-SmartM365OrganizationalUnitCode {
-        param($Row)
-        $raw = (Get-Value $Row @('OrganizationalUnit','extensionAttribute13')).Trim()
-        if ([string]::IsNullOrWhiteSpace($raw)) { return '999999' }
-        $numVal = 0.0
-        if ([double]::TryParse($raw.Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$numVal)) { return ([math]::Floor($numVal)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture) }
-        return '999998'
-    }
-
-    function Get-SmartM365TypeEtablissement {
-        param($EntityRow)
-        if ($null -eq $EntityRow) { return 'NOTFOUND' }
-        $hqText = ([string](Get-Value $EntityRow @('HQ'))).Trim().ToLowerInvariant()
-        if (@('1','true','vrai','oui') -contains $hqText) { return 'HQ' }
-        $service = ([string](Get-Value $EntityRow @('Entity (Service)'))).ToUpperInvariant()
-        if ($service.Contains('RESIDENCE')) { return 'RESIDENCE' }
-        if ($service.Contains('CLINIQUE')) { return 'CLINIC' }
-        if ($service.Contains('UNKNOWN')) { return 'UNKNOWN' }
-        return 'OTHER'
-    }
-
     function Get-SmartM365CombinedJobFamily {
-        param([string]$AccountType, [string]$TypeEtablissement, [string]$TypeEntity, [string]$UserPrincipalName, [bool]$NoLastLogonInOnComputer, [string]$KeywordCategory)
+        # PersonaCategory comes from the persona workbook and already applies the HQ site and the non-human exclusions.
+        param([string]$AccountType, [string]$TypeEntity, [string]$UserPrincipalName, [bool]$NoLastLogonInOnComputer, [string]$PersonaCategory)
         $accountTypeText = ([string]$AccountType).Trim()
-        $typeEtablissementText = ([string]$TypeEtablissement).Trim()
         $typeEntityText = ([string]$TypeEntity).Trim()
         $upnLower = ([string]$UserPrincipalName).ToLowerInvariant()
         $notIntegrated = if ($typeEntityText -eq 'NOT-INTEGRATED') { 'Not Integrated BUs' } else { '' }
@@ -301,14 +262,11 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $extDetected = ''
         if ([string]::IsNullOrWhiteSpace($notIntegrated) -and ($upnLower.Contains('.ext') -or $upnLower.Contains('#ext#') -or $upnLower.Contains('-ext'))) { $extDetected = 'Ext staff' }
         $extFinal = if ($extDetected) { if ($NoLastLogonInOnComputer) { 'Ext staff without device' } else { 'Ext staff with device' } } else { '' }
-        $hqStaff = if ([string]::IsNullOrWhiteSpace($notIntegrated) -and [string]::IsNullOrWhiteSpace($extDetected) -and $typeEtablissementText -eq 'HQ') { 'Headquarters staff' } else { '' }
-        $keyword = if ([string]::IsNullOrWhiteSpace($notIntegrated) -and [string]::IsNullOrWhiteSpace($extDetected) -and [string]::IsNullOrWhiteSpace($hqStaff)) { $KeywordCategory } else { '' }
         if ($notIntegrated) { return $notIntegrated }
         if ($extFinal) { return $extFinal }
         if ($immediate) { return $immediate }
-        if ($hqStaff) { return $hqStaff }
-        if ($keyword) { return $keyword }
-        return 'Unclassified'
+        if ($PersonaCategory) { return $PersonaCategory }
+        return $personaLabels.NoMatch
     }
 
     function Get-Value {
@@ -370,36 +328,6 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return @(Import-Csv -LiteralPath $csvPath -Encoding UTF8)
     }
 
-    function Import-SourceXlsx {
-        param([string[]]$Names, [string[]]$WorksheetNames)
-        $resolvedPath = ''
-        foreach ($candidate in (Get-SourceCandidatePaths -Names $Names)) {
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $resolvedPath = $candidate; break }
-        }
-        if ([string]::IsNullOrWhiteSpace($resolvedPath) -and (Get-Command Resolve-SmartM365AdReferenceXlsx -ErrorAction SilentlyContinue)) {
-            foreach ($name in $Names) {
-                $sharePointPath = Resolve-SmartM365AdReferenceXlsx -Name $name
-                if (-not [string]::IsNullOrWhiteSpace($sharePointPath) -and (Test-Path -LiteralPath $sharePointPath -PathType Leaf)) {
-                    $resolvedPath = $sharePointPath
-                    break
-                }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
-            WriteLog -Message ("AD users enrichment optional Excel source missing; related columns will be blank: {0}" -f ($Names -join ', '))
-            return @()
-        }
-        try { Import-Module ImportExcel -ErrorAction Stop }
-        catch { WriteLog -Message ("AD users enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $resolvedPath); return @() }
-        $rowsOut = New-Object System.Collections.Generic.List[object]
-        foreach ($worksheetName in @($WorksheetNames)) {
-            if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
-            try { foreach ($row in @(Import-Excel -Path $resolvedPath -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) } }
-            catch { WriteLog -Message ("AD users enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $resolvedPath, $worksheetName, $PSItem.Exception.Message) }
-        }
-        WriteLog -Message ("AD users enrichment Excel source loaded: {0} ({1} row(s))" -f $resolvedPath, $rowsOut.Count)
-        return $rowsOut.ToArray()
-    }
     function Add-SmartM365MapValue {
         param([hashtable]$Map, [string]$Key, $Row)
         if ([string]::IsNullOrWhiteSpace($Key)) { return }
@@ -572,10 +500,9 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $backupCoverage = Import-SourceCsv @('M365_BackupPolicyScope_MailboxCoverage.csv')
     $migrationJobs = Import-SourceCsv @('Exchange_EXO_MigrationJobs.csv')
     $hybridIdentityIssues = Import-SourceCsv @('Exchange_HybridIdentity_Issues.csv')
-    $personaeKeywordRowsRaw = Import-SourceXlsx @('Personae-Keywords.xlsx') @('PersonaeKeywords')
-    $entityRowsRaw = Import-SourceXlsx @('EntityDirectories.xlsx') @('Entities','Entities (2)')
-    $personaeKeywordRows1 = @(New-SmartM365PersonaeKeywordRows -Rows $personaeKeywordRowsRaw -StrictCategory:$true)
-    $personaeKeywordRows2 = @(New-SmartM365PersonaeKeywordRows -Rows $personaeKeywordRowsRaw -StrictCategory:$false)
+    if ($users.Count -gt 0 -and -not $users[0].PSObject.Properties[$siteClassification.SiteAttribute]) {
+        throw ("Configured site attribute is not present in AD user evidence: {0}" -f $siteClassification.SiteAttribute)
+    }
 
     $localByDomainSam = @{}; $localBySmtp = @{}
     foreach ($row in $localMailboxes) { Add-SmartM365MapValue $localByDomainSam (Get-Key (Get-Value $row @('DomainAndSam'))) $row; Add-SmartM365MapValue $localBySmtp (Get-Key (Get-Value $row @('PrimarySMTPaddress','PrimarySmtpAddress'))) $row }
@@ -601,7 +528,6 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $backupBySmtp = @{}; foreach ($row in $backupCoverage) { Add-SmartM365MapValue $backupBySmtp (Get-Key (Get-Value $row @('PrimarySmtpAddress','MailboxUserPrincipalName','MemberUserPrincipalName'))) $row }
     $migrationBySmtp = @{}; foreach ($row in $migrationJobs) { Add-SmartM365MapValue $migrationBySmtp (Get-Key (Get-Value $row @('MigrationUser','EmailAddress'))) $row }
     $hybridIssuesByObjectGuid = @{}; foreach ($row in $hybridIdentityIssues) { Add-SmartM365MapListValue $hybridIssuesByObjectGuid (Get-Key (Get-Value $row @('ObjectGUID'))) $row }
-    $entityByCode = @{}; foreach ($row in $entityRowsRaw) { foreach ($entityKeyCandidate in @((Get-Value $row @('Entity code Text')),(Get-Value $row @('Entity code Text 6 digits')),(Get-Value $row @('Entity code')),(Get-Value $row @('EntityCode')),(Get-Value $row @('OrganizationalUnit')))) { Add-SmartM365MapValue $entityByCode (Get-Key $entityKeyCandidate) $row; $entityNumber = 0.0; if ([double]::TryParse(([string]$entityKeyCandidate).Trim().Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$entityNumber)) { Add-SmartM365MapValue $entityByCode (([math]::Floor($entityNumber)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)) $row } } }
     $enrichedRows = New-Object System.Collections.Generic.List[object]
     $currentUtcDate = [datetime]::UtcNow.Date
     $exchangeLastLogon90DayCutoff = $currentUtcDate.AddDays(-90)
@@ -680,13 +606,12 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $userPrincipalName = [string]$user.UserPrincipalName
         $enabledText = ([string]$user.Enabled).Trim()
         $isEnabled = $enabledText -match '^(?i:true|1)$'
-        $orgUnit = Get-SmartM365OrganizationalUnitCode -Row $user
-        $entity = if ($entityByCode.ContainsKey((Get-Key $orgUnit))) { $entityByCode[(Get-Key $orgUnit)] } else { $null }
-        $typeEtablissement = Get-SmartM365TypeEtablissement -EntityRow $entity
+        $site = Get-SmartM365WorkplaceSite -SiteClassification $siteClassification -SiteCode (Get-Value $user @($siteClassification.SiteAttribute))
+        $typeEtablissement = if ($null -ne $site) { $site.Type } else { 'NOTFOUND' }
         $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
-        $typeEntityValue = if ($null -ne $entity) { Get-Value $entity @('Entity Type','EntityType') } else { '' }
+        $typeEntityValue = if ($null -ne $site) { $site.IntegrationStatus } else { '' }
         if ([string]::IsNullOrWhiteSpace($typeEntityValue)) { $typeEntityValue = Get-TypeEntityFallback -DomainNameShort (Get-Value $user @('DomainNameShort')) -Country (Get-Value $user @('Country')) }
-        $labelFromEntity = if ($null -ne $entity) { Get-Value $entity @('Entity label','EntityLabel') } else { 'NOTFOUND' }
+        $labelFromEntity = if ($null -ne $site) { $site.Name } else { 'NOTFOUND' }
         $inTargetHqOu = $distinguishedNameUpper.Contains('OU=000000-HQSITE') -or $distinguishedNameUpper.Contains('OU=120001-HQ_SITE') -or $distinguishedNameUpper.Contains('OU=HEADQUARTER')
         $inDisabledObjectsOu = $distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')
         $givenNameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('GivenName'))
@@ -699,18 +624,23 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $jobTitleNormalized2 = Normalize-SmartM365JobTitleText -ManagedTitle '' -DescriptionTitle $jobTitleFromDesc2
         $jobTitlePadded = if ([string]::IsNullOrWhiteSpace($jobTitleNormalized)) { '' } else { ' ' + $jobTitleNormalized + ' ' }
         $jobTitlePadded2 = if ([string]::IsNullOrWhiteSpace($jobTitleNormalized2)) { '' } else { ' ' + $jobTitleNormalized2 + ' ' }
-        $jobFamilyFromKeywords = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded -KeywordRows $personaeKeywordRows1 -StrictCategory:$true
-        $jobFamilyFromKeywords2 = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded2 -KeywordRows $personaeKeywordRows2 -StrictCategory:$false
+        # Same persona rules as SmartWorkplaceIntelligence: AD Title first, AD Description when the title has no unique match.
+        $personaSiteType = if ($null -ne $site) { $site.Type } else { 'UNKNOWN' }
+        $personaArgs = @{ PersonaClassification = $personaClassification; JobTitle = (Get-Value $user @('Title')); Description = (Get-Value $user @('Description')); Country = (Get-Value $user @('Country')) }
+        $persona = Get-SmartM365WorkplacePersona @personaArgs -SiteType $personaSiteType
+        # Keyword-only view, without the HQ site priority.
+        $jobFamilyFromKeywords = (Get-SmartM365WorkplacePersona @personaArgs -SiteType '').Persona
+        $jobFamilyFromKeywords2 = $jobFamilyFromKeywords
         $noLastLogonInOnComputer = $true
-        $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords
-        $jobFamilyCombined2 = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords2
-        $target1Persona = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined } else { 'None' }
-        $target1Persona2 = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined2 } else { 'None' }
+        $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -PersonaCategory $persona.Persona
+        $jobFamilyCombined2 = $jobFamilyCombined
+        $target1Persona = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined -LicenseGroup $licenseGroup } else { 'None' }
+        $target1Persona2 = $target1Persona
         $target2Persona = if ($target1Persona -eq 'M365F3') { if ($totalSizeMb -ge 50000) { 'M365F3+EXCHPLAN2' } elseif ($totalSizeMb -gt 2000) { 'M365F3+EXCHPLAN1' } else { 'M365F3' } } else { $target1Persona }
         $target3Persona = if ($target1Persona -eq 'M365F3') { if ($totalSizeMb -gt 2000) { 'M365F3 > 2G' } else { 'M365F3 < 2G' } } else { $target1Persona }
         $licenseGroupNorm = $licenseGroup.Trim().ToUpperInvariant()
         $allowedAccountType = @('NAMED ACCOUNT','GENERIC ACCOUNT','UNCLASSIFIED ACCOUNT','EXT ACCOUNT') -contains $accountType.ToUpperInvariant()
-        $m365LicenseType = if ($licenseGroupNorm.Contains('MICROSOFT 365 E3')) { 'M365E3' } elseif ($licenseGroupNorm.Contains('MICROSOFT 365 F3')) { 'M365F3' } elseif (-not $allowedAccountType) { 'None' } else { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined }
+        $m365LicenseType = if ($licenseGroupNorm.Contains('MICROSOFT 365 E3')) { 'M365E3' } elseif ($licenseGroupNorm.Contains('MICROSOFT 365 F3')) { 'M365F3' } elseif (-not $allowedAccountType) { 'None' } else { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined -LicenseGroup $licenseGroup }
         $lastLogonEntra = Get-Value $m365User @('LastSignInDateTime')
         $lastLogonEntraNonInteractive = Get-Value $m365User @('LastNonInteractiveSignInDateTime')
         $exchangeLastLogonDateTime = Get-SmartM365LatestDateText -Values @(
