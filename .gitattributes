@@ -7,3 +7,7 @@
 *.txt text eol=crlf
 *.csv text eol=crlf
 *.md text eol=lf
+.githooks/* text eol=lf
+
+# Tenant-specific values are restored locally by a private clean/smudge filter (see .git/config).
+SmartWorkplaceIntelligence/pbip/SmartWorkplaceIntelligence.SemanticModel/definition/expressions.tmdl filter=tenant-url

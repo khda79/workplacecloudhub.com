@@ -1,10 +1,46 @@
 #!/bin/sh
-# WorkplaceCloudHub repository pre-push hook: sign PowerShell files before pushing.
+# WorkplaceCloudHub repository pre-push hook: refuse private terms, then sign PowerShell files before pushing.
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ -z "$repo_root" ]; then
   echo "WorkplaceCloudHub pre-push: unable to resolve repository root." >&2
   exit 1
+fi
+
+# Private terms guard. The list lives only in the local, never-pushed git directory
+# (<git-common-dir>/forbidden-terms.txt, one case-insensitive literal per line, # for comments).
+# Added lines and commit messages of every pushed commit are checked; removals are allowed.
+pushed_refs=$(cat)
+terms_file="$(git rev-parse --git-common-dir)/forbidden-terms.txt"
+if [ -f "$terms_file" ]; then
+  terms_tmp=$(mktemp)
+  tr -d '\r' < "$terms_file" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' > "$terms_tmp"
+  if [ -s "$terms_tmp" ]; then
+    zero=0000000000000000000000000000000000000000
+    found=0
+    while read -r local_ref local_sha remote_ref remote_sha; do
+      [ -z "$local_sha" ] && continue
+      [ "$local_sha" = "$zero" ] && continue
+      if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+        range="$remote_sha..$local_sha"
+      else
+        range="$local_sha --not --remotes"
+      fi
+      # shellcheck disable=SC2086
+      hits=$( { git log --format='%B' $range; git log -p --format= $range | grep '^+' | grep -v '^+++'; } | grep -i -F -f "$terms_tmp" | cut -c1-160 )
+      if [ -n "$hits" ]; then
+        echo "WorkplaceCloudHub pre-push: private term found in $local_ref; push refused." >&2
+        echo "$hits" | head -10 >&2
+        found=1
+      fi
+    done <<EOF
+$pushed_refs
+EOF
+    rm -f "$terms_tmp"
+    [ $found -ne 0 ] && exit 1
+  else
+    rm -f "$terms_tmp"
+  fi
 fi
 
 sign_script="$repo_root/Sign-WorkplaceCloudHubRepositoryPowerShellScripts.ps1"
