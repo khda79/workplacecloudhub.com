@@ -1826,6 +1826,7 @@
     {
       "table": "Executive KPI Trends",
       "file": "ExecutiveKPITrends.csv",
+      "historyKeyVersion": 2,
       "uniqueKey": [
         "Date Key",
         "Metric Name"

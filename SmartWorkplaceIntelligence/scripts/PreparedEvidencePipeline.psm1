@@ -316,9 +316,34 @@ function Publish-PreparedEvidenceBatch {
             $table = $contract.tables | Where-Object file -EQ $entry.File
             if ($entry.Rows -eq 0 -and $table.table -notin $AllowEmptyTables) { throw "Unexpected empty output: $($entry.File)" }
         }
+        $historyTables = @($contract.tables | Where-Object { $_.table -match 'History|Trend' })
+        $historyKeyVersions = [ordered]@{}
+        foreach ($table in $historyTables) {
+            $version = 1
+            if ($table.PSObject.Properties['historyKeyVersion']) {
+                if (-not [int]::TryParse([string]$table.historyKeyVersion,[ref]$version) -or $version -lt 1) { throw "Invalid historyKeyVersion: $($table.table)" }
+            }
+            $historyKeyVersions[$table.table] = $version
+        }
+        $historyKeyResets = [Collections.Generic.List[object]]::new()
         if ($previous) {
+            $previousManifestPath = Get-PreparedChildPath $output "batches/$($previous.BatchId)/batch.json.txt"
+            if (-not (Test-Path -LiteralPath $previousManifestPath -PathType Leaf)) { throw "Previous batch manifest is missing: $($previous.BatchId)" }
+            $previousManifest = Get-Content -LiteralPath $previousManifestPath -Raw | ConvertFrom-Json
             # Loss of an observed historical key is never silently accepted.
-            foreach ($table in $contract.tables | Where-Object { $_.table -match 'History|Trend' }) {
+            foreach ($table in $historyTables) {
+                # A contract key-version change (new key grain) is the only accepted reset, and it is recorded.
+                $previousVersion = 1
+                if ($previousManifest.PSObject.Properties['HistoryKeyVersions'] -and $previousManifest.HistoryKeyVersions.PSObject.Properties[$table.table]) {
+                    $previousVersion = [int]$previousManifest.HistoryKeyVersions.($table.table)
+                }
+                $version = $historyKeyVersions[$table.table]
+                if ($version -lt $previousVersion) { throw "Historical key version cannot go back: $($table.table) ($previousVersion -> $version)" }
+                if ($version -gt $previousVersion) {
+                    $historyKeyResets.Add([ordered]@{Table=$table.table;PreviousBatchId=$previous.BatchId;PreviousVersion=$previousVersion;Version=$version})
+                    Write-Warning "Historical key comparison reset by contract: $($table.table) key version $previousVersion -> $version (previous batch $($previous.BatchId))."
+                    continue
+                }
                 $oldPath = Get-PreparedChildPath $output "batches/$($previous.BatchId)/$($table.file)"
                 $newPath = Get-PreparedChildPath $batch $table.file
                 $newKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -329,7 +354,7 @@ function Publish-PreparedEvidenceBatch {
                 Import-Csv -LiteralPath $oldPath | ForEach-Object { if (-not $newKeys.Contains((& $keyOf $_))) { throw "Historical coverage would regress: $($table.table)" } }
             }
         }
-        $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
+        $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;HistoryKeyVersions=$historyKeyVersions;HistoryKeyResets=@($historyKeyResets);Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
         Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
         $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
         $pointerTemp = Join-Path $output ('current.'+$batchId+'.tmp')

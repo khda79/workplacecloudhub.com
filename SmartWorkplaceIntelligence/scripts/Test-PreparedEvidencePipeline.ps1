@@ -42,6 +42,21 @@ $next=Publish-PreparedEvidenceBatch @argsForPublish
 $pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
 if ($pointer.PreviousBatchId -ne $first.BatchId -or -not(Test-Path $first.BatchPath)) {throw 'Previous version lost.'}
 Write-Host 'PASS: complete replacement retains previous batch.'
+function Contract([int]$KeyVersion) {
+    @{tables=@(@{table='Test Trend';file='Trend.csv';historyKeyVersion=$KeyVersion;uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
+}
+Contract 2
+Fixture @([pscustomobject]@{Date='2026-01-05';Value='4';Note='x'})
+$regrained=Publish-PreparedEvidenceBatch @argsForPublish -WarningAction SilentlyContinue
+$manifest=Get-Content (Join-Path $regrained.BatchPath 'batch.json.txt') -Raw | ConvertFrom-Json
+$reset=@($manifest.HistoryKeyResets)
+if ($reset.Count -ne 1 -or $reset[0].Table -ne 'Test Trend' -or $reset[0].PreviousVersion -ne 1 -or $reset[0].Version -ne 2 -or $reset[0].PreviousBatchId -ne $next.BatchId -or $manifest.HistoryKeyVersions.'Test Trend' -ne 2) { throw 'Key-version reset was not recorded.' }
+Write-Host 'PASS: contract key-version change resets the comparison once and is recorded.'
+Fixture @([pscustomobject]@{Date='2026-01-12';Value='5';Note='x'})
+ExpectFailure 'Historical date regression after key-version change' { Publish-PreparedEvidenceBatch @argsForPublish }
+Contract 1
+Fixture @([pscustomobject]@{Date='2026-01-05';Value='4';Note='x'})
+ExpectFailure 'Key-version rollback' { Publish-PreparedEvidenceBatch @argsForPublish }
 Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
 
 # SIG # Begin signature block

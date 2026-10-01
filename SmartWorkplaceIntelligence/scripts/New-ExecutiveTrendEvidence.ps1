@@ -35,6 +35,9 @@ function Week-Files([string]$RelativeRoot, [string]$Name) {
 function Parse-Date([string]$Value) {
     [datetime]::Parse($Value,[Globalization.CultureInfo]::InvariantCulture)
 }
+function Get-WeekMonday([datetime]$Date) {
+    $Date.Date.AddDays(-(([int]$Date.DayOfWeek + 6) % 7))
+}
 function Read-DailyStats([string]$Name, [string[]]$ValueFields) {
     $path = Join-Path $DataRoot ('DATA-ALL\ActiveDirectory\Inventory\' + $Name)
     $latest = @{}
@@ -64,7 +67,7 @@ foreach ($day in Read-DailyStats 'AD_Computers_DailyStats.csv' @('TotalComputers
     if ($day.Values.EnabledAccounts -gt 0) { Add-Metric $day.Date 'Windows 11 Adoption (%)' ($day.Values['Windows 11 Enabled'] / $day.Values.EnabledAccounts) }
 }
 $usageFiles = @(Week-Files 'DATA-ALL\M365\Usage' 'M365_Users_Activity.csv') + @(Get-Item -LiteralPath (Join-Path $DataRoot 'DATA-LAST\M365_Users_Activity.csv'))
-$usageByDate = @{}
+$usageByWeek = @{}
 foreach ($file in $usageFiles | Sort-Object LastWriteTimeUtc) {
     $days = @{}
     foreach ($row in Read-Required $file.FullName) {
@@ -75,11 +78,15 @@ foreach ($file in $usageFiles | Sort-Object LastWriteTimeUtc) {
         # Match the prior distinct report-date/UPN/activity grain.
         $days[$date][($upn + '|' + $flag)] = $flag -eq 'true'
     }
-    foreach ($date in $days.Keys) { $usageByDate[$date] = $days[$date] }
+    # Weekly copies are replaced during their week: one stable Monday key per source week, latest report wins.
+    $week = (Get-WeekMonday $file.LastWriteTime).ToString('yyyy-MM-dd')
+    foreach ($date in $days.Keys) {
+        if (-not $usageByWeek.ContainsKey($week) -or $date -ge $usageByWeek[$week].Date) { $usageByWeek[$week] = @{ Date=$date; Users=$days[$date] } }
+    }
 }
-foreach ($date in $usageByDate.Keys) {
-    $values = @($usageByDate[$date].Values)
-    if ($values.Count -gt 0) { Add-Metric (Parse-Date $date) 'M365 Active Use (30D) (%)' (@($values | Where-Object { $_ }).Count / [double]$values.Count) }
+foreach ($week in $usageByWeek.Keys) {
+    $values = @($usageByWeek[$week].Users.Values)
+    if ($values.Count -gt 0) { Add-Metric (Parse-Date $week) 'M365 Active Use (30D) (%)' (@($values | Where-Object { $_ }).Count / [double]$values.Count) }
 }
 $counts = @{}
 foreach ($spec in @(
@@ -88,10 +95,9 @@ foreach ($spec in @(
 )) {
     $files = @(Week-Files $spec.Root $spec.Name)
     $current = Get-Item -LiteralPath (Join-Path $DataRoot ('DATA-LAST\' + $spec.Name))
+    # The current file is the latest observation of its week, never a separate dated point.
     foreach ($file in @($files) + @($current)) {
-        $date = $file.LastWriteTime.Date
-        if ($file.FullName -ne $current.FullName) { $date = $date.AddDays(-(([int]$date.DayOfWeek + 6) % 7)) }
-        $key = $date.ToString('yyyy-MM-dd')
+        $key = (Get-WeekMonday $file.LastWriteTime).ToString('yyyy-MM-dd')
         if (-not $counts.ContainsKey($key)) { $counts[$key] = @{} }
         $counts[$key][$spec.Hosting] = (Read-Required $file.FullName | Measure-Object).Count
     }
