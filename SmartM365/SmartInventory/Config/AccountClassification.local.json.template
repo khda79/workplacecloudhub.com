@@ -1,0 +1,96 @@
+{
+  "SchemaVersion": "1.0",
+  "RuleVersion": "template",
+  "Population": {
+    "Human": [
+      "Named Account",
+      "Ext Account"
+    ],
+    "NonHuman": [
+      "Service Account",
+      "Shared Mailbox",
+      "Room Mailbox",
+      "System Account"
+    ],
+    "ReviewRequired": [
+      "Admin Account",
+      "Generic Account",
+      "Unclassified Account"
+    ]
+  },
+  "AccountTypeRules": {
+    "SharedMailbox": {
+      "RecipientTypeContains": [
+        "SHARED"
+      ]
+    },
+    "RoomMailbox": {
+      "RecipientTypeContains": [
+        "ROOM"
+      ]
+    },
+    "ExternalAccount": {
+      "UpnContains": [
+        ".ext@"
+      ]
+    },
+    "SystemAccount": {
+      "SamStartsWith": [
+        "DEFAULTACCOUNT",
+        "KRBTGT",
+        "MSOL",
+        "GUEST"
+      ],
+      "SamEndsWith": [
+        "$"
+      ],
+      "SamContains": [
+        "HEALTHMAILBOX"
+      ]
+    },
+    "ServiceAccount": {
+      "SamStartsWith": [
+        "SVC_"
+      ],
+      "SamEndsWith": [
+        "_SVC"
+      ],
+      "OuContains": [
+        "SERVICE ACCOUNTS"
+      ]
+    },
+    "AdminAccount": {
+      "SamStartsWith": [
+        "ADMINISTRATOR"
+      ],
+      "OuContains": [
+        "OU=ADMIN"
+      ]
+    },
+    "GenericAccount": {
+      "RecipientTypes": [
+        "SharedMailbox",
+        "RoomMailbox"
+      ],
+      "SamStartsWith": [],
+      "SamContains": [],
+      "GivenNameEquals": [],
+      "SamStartsWithDigit": false,
+      "MissingGivenNameOrSurname": true
+    },
+    "NamedAccount": {
+      "MinimumGivenNamePrefixLength": 2,
+      "MinimumSurnamePrefixLength": 3,
+      "LongSamNumericSuffixPattern": "^[A-Z]{6}[0-9]{4}"
+    }
+  },
+  "LegacyLikelyServiceAccount": {
+    "UpnMayBeBlank": true,
+    "OuContains": [
+      "SERVICE ACCOUNTS"
+    ],
+    "SamContains": [
+      "SVC"
+    ]
+  }
+}

@@ -6,7 +6,7 @@ One post-collection job builds the 24 CSVs consumed by SmartWorkplaceIntelligenc
 
 Pull the approved commit into the existing repository. Keep SmartM365 and SmartWorkplaceIntelligence as sibling folders: the entry point depends on the latter's scripts and two JSON contracts. No ZIP installation is required. Tenant profiles, runtime JSON, mappings, CSVs, logs and PBIP files are not distributed by this change.
 
-The job uses the same explicit tenant profile as other jobs. Missing per-script configuration is created from its template; missing keys are merged without overwriting existing values. Required runtime dependencies are PowerShell 7, ImportExcel, the existing SmartM365 Core/TenantContext and SmartInventory/Config/AccountClassification.psd1.
+The job uses the same explicit tenant profile as other jobs. Missing per-script configuration is created from its template; missing keys are merged without overwriting existing values. Required runtime dependencies are PowerShell 7, ImportExcel, the existing SmartM365 Core/TenantContext and the private SmartInventory/Config/AccountClassification.local.json (git-ignored, created from its template).
 
 The effective LatestCsvFolderPath and DataAllRootPath must be sibling DATA-LAST and DATA-ALL directories. Output is the sibling DATA-POWERBI folder. No developer-machine paths are hard-coded.
 

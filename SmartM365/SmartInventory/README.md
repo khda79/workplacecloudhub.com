@@ -94,10 +94,10 @@ Both launchers use tenant `prod` by default. The orchestrator can override it th
 
 ## Account classification governance
 
-The authoritative account-type rules and workforce population mappings are stored in `Config/AccountClassification.psd1`. The Active Directory enrichment writes `AccountType`, `AccountPopulation`, and `AccountClassificationRuleVersion` to its enriched user export.
+The account-type rules and workforce population mappings are tenant configuration. The real rules live in the private, git-ignored `Config/AccountClassification.local.json` (stored as `AccountClassification.local.json.txt`); only the neutral `Config/AccountClassification.local.json.template` is published. Create the private file from the template and adapt it to the tenant naming conventions before the first inventory; a missing file stops the AD enrichment and the prepared workforce evidence instead of falling back to generic rules. All readers use `Common/SmartM365.AccountClassification.psd1`. The Active Directory enrichment writes `AccountType`, `AccountPopulation`, and `AccountClassificationRuleVersion` to its enriched user export.
 
 - `Human`: named and external-person accounts included in workforce KPIs.
 - `Non-human`: service, shared-mailbox, room-mailbox, and system accounts excluded from workforce KPIs.
 - `Review required`: admin, generic, unclassified, conflicting, or cloud-only accounts that must not be silently treated as human or non-human.
 
-Change `RuleVersion` whenever a classification or population rule changes. Keep the three populations disjoint; validate the configuration with `Tests/Test-SmartM365-AccountClassification.ps1` before running a full inventory.
+Change `RuleVersion` whenever a classification or population rule changes. Keep the three populations disjoint; validate the template and the private rules with `Tests/Test-SmartM365-AccountClassification.ps1` before running a full inventory.

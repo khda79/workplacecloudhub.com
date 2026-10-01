@@ -18,7 +18,7 @@ The SmartM365 JSON transport reads the `.json.txt` name first, so a stale `.json
 used; remove such leftovers instead of editing them.
 
 Keep existing `*.local.json`, tenant profiles, account-classification rules
-(`SmartM365/SmartInventory/Config/AccountClassification.psd1`), source data and scheduled tasks unchanged.
+(private `SmartM365/SmartInventory/Config/AccountClassification.local.json.txt`, never in the repository), source data and scheduled tasks unchanged.
 The two private classification workbooks must exist in the tenant data root (parent of DATA-LAST and DATA-ALL).
 
 ## 2. Preflight
