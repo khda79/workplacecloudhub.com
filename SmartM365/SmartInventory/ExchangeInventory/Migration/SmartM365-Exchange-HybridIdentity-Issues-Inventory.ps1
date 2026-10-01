@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.21
+1.22
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -44,7 +44,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.21"
+$ScriptVersion="1.22"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -223,6 +223,9 @@ try{
   Log "Starting $ScriptName v$ScriptVersion"
   $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.58' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
+  # Tenant domains are configuration, never code: the routing domain comes from the tenant context, the allowed TargetAddress domains from the local configuration.
+  $remoteRoutingDomain=([string](Cfg $lc 'RemoteRoutingDomain' '')).Trim().TrimStart('@').ToLowerInvariant(); if($remoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$'){throw "RemoteRoutingDomain is missing or invalid in the tenant configuration: '$remoteRoutingDomain'."}
+  $configuredTargetDomains=@(Cfg $lc 'AllowedTargetDomains' @() | ForEach-Object { ([string]$_).Trim().TrimStart('@').ToLowerInvariant() } | Where-Object { $_ }); if($configuredTargetDomains.Count -eq 0 -or @($configuredTargetDomains | Where-Object { $_ -in @('tenant.mail.onmicrosoft.com','contoso.com') }).Count){throw 'AllowedTargetDomains must list the tenant TargetAddress domains in the local configuration (template values are rejected).'}
   if(!$PSBoundParameters.ContainsKey('DetailedArchiveRetentionDays')){$DetailedArchiveRetentionDays=[int](Cfg $lc 'DetailedArchiveRetentionDays' 7)}
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Exchange\Issues\HybridIdentity')}
@@ -262,7 +265,7 @@ try{
   $sharedMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('SharedMailbox','RemoteSharedMailbox')|ForEach-Object{[void]$sharedMailboxTypes.Add($_)}
   $roomMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('RoomMailbox','RemoteRoomMailbox')|ForEach-Object{[void]$roomMailboxTypes.Add($_)}
   $nonPersonalAccountTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('Service Account','Admin Account','System Account','Generic Account')|ForEach-Object{[void]$nonPersonalAccountTypes.Add($_)}
-  $allowedTargetDomains=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('contoso.mail.onmicrosoft.com','contoso.com')|ForEach-Object{[void]$allowedTargetDomains.Add($_)}
+  $allowedTargetDomains=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $configuredTargetDomains|ForEach-Object{[void]$allowedTargetDomains.Add($_)}
   $issues=[Collections.Generic.List[object]]::new()
   foreach($u in $ad){
     $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $immutableId=T(P $u ImmutableId_AD); $domainAndSam=T(P $u DomainAndSam); $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtpAddress,PrimarySMTPaddress); if(!$primary){foreach($addr in SplitAddr(P $u ProxyAddresses)){if($addr -match '@'){$primary=$addr; break}}}; $target=T(P $u TargetAddress); $proxyText=T(P $u ProxyAddresses)
@@ -282,7 +285,7 @@ try{
     if($baseScope){
       if(-not $inM365){AddIssue $issues 1 $guid 'User not in Azure Entra' '1.Critical' 'Sync user account with Azure Entra'}
       if($itemCount -gt 999999){AddIssue $issues 2 $guid 'Item count > 999,999' '2.High' 'Reduce mailbox item count'}
-      if($proxyText -notmatch '@contoso\.mail\.onmicrosoft\.com'){AddIssue $issues 3 $guid 'Missing proxy address' '1.Critical' 'Add required proxy address'}
+      if($proxyText -notmatch ('@'+[regex]::Escape($remoteRoutingDomain))){AddIssue $issues 3 $guid 'Missing proxy address' '1.Critical' 'Add required proxy address'}
       if($size -gt 80 -and $recipientType -eq 'UserMailbox'){AddIssue $issues 4 $guid 'Mailbox size > 80 GB' '2.High' 'Archive or clean mailbox'}
       if(($licenseGroup -in @('Microsoft 365 F3','Microsoft 365 F1')) -and $sizeMb -ge 2000){AddIssue $issues 6 $guid 'F3/F1 user with mailbox >= 2 GB' '2.High' 'Review F3/F1 license or reduce mailbox size'}
       if(!$enabled -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 7 $guid 'Account disabled' '4.Low' 'Review account status'}
