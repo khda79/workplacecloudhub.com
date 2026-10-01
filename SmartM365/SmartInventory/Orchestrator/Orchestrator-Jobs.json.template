@@ -609,7 +609,7 @@
       "Name": "Exchange2016-Mailboxes-CalendarPermissions",
       "ScriptPath": "ExchangeInventory\\OnPremises\\CalendarPermissions\\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
       "AllowedServers": [],
@@ -619,9 +619,14 @@
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
       "Schedule": {
-        "Type": "Daily",
+        "Type": "Weekly",
         "Times": [
           "03:45"
+        ],
+        "DaysOfWeek": [
+          "Monday",
+          "Wednesday",
+          "Friday"
         ],
         "MissedRunPolicy": "RunOnce"
       },
