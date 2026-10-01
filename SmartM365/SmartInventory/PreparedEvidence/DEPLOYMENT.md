@@ -1,44 +1,62 @@
-# Prepared evidence: collection-machine qualification
+# Prepared evidence: deployment and operation
 
-This is an additive deployment candidate, not an installer or a production-qualified release. Use the same SmartM365 installation and `prod` tenant profile as the existing Cloud launchers. No source collector needs modification. The two new CMD launchers use PowerShell 7 x64, preserve the process exit code and do not bypass execution policy.
+`SmartM365-WorkplaceEvidence-Prepare.ps1` is a thin SmartM365 wrapper. The evidence generators, the
+publication pipeline (`PreparedEvidencePipeline.psm1`) and the table contracts live in the
+SmartWorkplaceIntelligence product. Both are deployed as part of the repository; there is no separate
+package.
 
-## 1. Check before copying
+## 1. Deploy
 
-Extract the package into a new temporary directory **outside** the installed repository and outside synchronized DATA. It contains only selected preparation scripts, two schema contracts, launchers, documentation and a disabled job snippet. It contains no client mappings, CSVs, PBIP, runtime JSON, certificate, tenant profile, Core module or account-classification rules.
+Deploy the reviewed repository so that `SmartM365` and `SmartWorkplaceIntelligence` stay **siblings**,
+for example `\\<server>\<share>\SmartM365` and `\\<server>\<share>\SmartWorkplaceIntelligence`.
+The wrapper finds the product next to SmartM365 unless `WorkplaceIntelligenceRootPath` is set in its
+runtime JSON. Deploy both folders together: a generator fix in SmartWorkplaceIntelligence has no effect
+while the old product files remain.
 
-In PowerShell 7, run the verifier from that extracted package:
+The contracts are `config/prepared-evidence-contract.json.txt` and `config/prepared-source-contract.json.txt`.
+The SmartM365 JSON transport reads the `.json.txt` name first, so a stale `.json` copy beside it is never
+used; remove such leftovers instead of editing them.
 
-```powershell
-# Replace both paths with the actual extraction and existing installation parent.
-$packageRoot = 'D:\Temporary\WorkplaceEvidence-Package'
-$repositoryRoot = 'D:\ExistingInstallation' # contains SmartM365
-& "$packageRoot\SmartWorkplaceIntelligence\scripts\Test-PreparedEvidenceDeploymentPackage.ps1" -PackageRoot $packageRoot -ExistingRepositoryRoot $repositoryRoot
+Keep existing `*.local.json`, tenant profiles, account-classification rules
+(`SmartM365/SmartInventory/Config/AccountClassification.psd1`), source data and scheduled tasks unchanged.
+The two private classification workbooks must exist in the tenant data root (parent of DATA-LAST and DATA-ALL).
+
+## 2. Preflight
+
+Run `SmartM365\SmartInventory\Launchers\Cloud\Test-SmartM365-WorkplaceEvidence-Prepare.cmd` under the
+collection account. It selects `-Tenant prod -ValidateOnly -Offline`, can create the missing runtime JSON
+from the template and merge missing keys, and checks source presence, fingerprints and transport age. It
+generates no CSV, uploads nothing and sends no notification.
+
+Verify that the effective profile points to the intended sibling DATA-LAST and DATA-ALL; DATA-POWERBI is
+derived from their parent. Do not weaken age, missing-source, tenant or empty-table checks to pass preflight.
+
+## 3. Scheduled and requested runs
+
+The orchestrator runs the `WorkplaceEvidence-Prepare` job daily at 06:30 with the `FreshSuccess` dependency
+rule (48 hours) on its source collectors (see `SmartInventory/Orchestrator/README.md`). For an
+out-of-schedule run, ask the orchestrators instead of starting the script by hand:
+
+```
+\\<server>\<share>\SmartM365\SmartInventory\LaunchersByOrchestrator\Request-WorkplaceEvidence-Prepare.cmd
 ```
 
-This read-only check compares file hashes, parses packaged PowerShell, checks installed reference dependencies and ImportExcel. A dependency mismatch is a review stop, not permission to overwrite Core or customer classification rules. A matching hash is a compatibility baseline, not tenant-run qualification. The manifest is not a cryptographic signature; use an approved transfer channel. Under AllSigned, have the package approved/signed through the existing signing procedure; do not bypass the policy. The signature will change hashes, so regenerate the package after signing the sources.
+`Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd` remains available for a local rebuild without API
+collection, upload or notification. It still writes logs, snapshots inputs, generates all CSVs and publishes
+the validated local DATA-POWERBI pointer; do not overlap it with collection or another preparation run.
 
-Back up existing files that overlap the manifest, then copy **only** the listed SmartM365 and SmartWorkplaceIntelligence files into matching relative paths. Keep both directories as siblings, or explicitly configure WorkplaceIntelligenceRootPath. Do not replace the whole SmartM365 tree. Do not copy package-manifest.json or the job snippet over any active configuration. Keep existing *.local.json, tenant profiles, account-classification rules, source data and scheduled tasks unchanged. Recheck deployed payload hashes against the manifest before execution.
+## 4. Checking a batch
 
-## 2. First manual preflight
+A failed run returns nonzero and never replaces the last good pointer (`DATA-POWERBI/current.json.txt`).
+For a new batch, check that `validation.json.txt` reports Passed with every contract file, that source
+dates and coverage are plausible and that historical coverage is retained: the publication guard refuses
+any loss of a historical key compared with the previous batch. Compare expected workforce, device,
+license and mailbox counts before relying on the batch. Never post private logs or manifests publicly.
 
-Run `SmartM365\SmartInventory\Launchers\Cloud\Test-SmartM365-WorkplaceEvidence-Prepare.cmd` from the existing installation, under the same account as collection. This selects `-Tenant prod -ValidateOnly -Offline`. The script can create its missing local JSON from the template and merge missing keys. It does not generate CSVs, upload or send notifications. It checks source presence, file fingerprints and transport age; see README for its limits.
+The synchronized SharePoint folder is not an atomic multi-file transaction; never assume that the pointer
+arriving means every batch file has arrived. Validate transfer completion before a Power BI refresh.
 
-Verify the effective production profile points to the intended sibling DATA-LAST and DATA-ALL. DATA-POWERBI is derived from their parent, not hard-coded. The two private classification workbooks must already exist in that parent. Preserve all weekly history. Do not copy client mappings into the code package.
+## 5. Rollback
 
-For this first qualification, set EnableSharePointUpload=false in the runtime JSON (the template default is true since v0.1.12) so the batch stays local; run logs are still uploaded except in Offline mode. Keep legacy tenantless evidence refused unless its origin is explicitly approved. Do not weaken age, missing-source, tenant or empty-table checks merely to pass preflight. Provision scratch disk outside synchronized DATA for source snapshots, intermediate outputs and retained diagnostics. No full-run duration estimate has yet been qualified.
-
-## 3. Full run after collection
-
-Only after preflight passes, all required collectors have completed successfully and source coverage has been checked, run `Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd`. Do not overlap it with collection, another preparation job, synchronization-dependent reading, or a Power BI refresh.
-
-Offline means no API collection, cloud upload or notification. **It does write logs, snapshot inputs, generate all 24 CSVs and publish the validated local DATA-POWERBI pointer.** Existing accepted batches remain recoverable. A failed run must return nonzero and must not replace the last good pointer. Do not manually point Power BI at an incomplete batch.
-
-Return the process exit code, start/end times, terminal summary and private log location. Check batch.json provenance is RebuiltFromSnapshot, validation.json has Passed=true and 24 files, source dates/coverage are plausible and historical coverage is retained. Compare expected workforce/device/license/mailbox counts before accepting the batch. Never post private logs or manifests publicly.
-
-## 4. Automation and cloud remain separate gates
-
-After the full run is qualified, review the separate WorkplaceEvidence-Prepare.job.json snippet, merge only that job into the existing orchestrator configuration, and choose its schedule after the required collectors. It is deliberately disabled. Its dependency list is ordering information, not proof that every collector succeeded.
-
-Do not enable scheduling, direct SharePoint transfer, notifications or Service refresh during this first qualification. Validate transfer completion/read-back before a later Power BI refresh. The existing synchronized folder is not an atomic multi-file transaction; never assume that current.json arriving means every batch file has arrived. A pinned batch may be used after its transfer is verified.
-
-Rollback: stop using the candidate launchers, keep the job disabled and restore only backed-up overlapping code files if necessary. Preserve every DATA-POWERBI batch and the existing raw history. No deletion is required to roll back code.
+Redeploy the previous repository revision of both folders. Every DATA-POWERBI batch is preserved and the
+previous good batch stays published until a new batch passes validation; no deletion is required.
