@@ -22,6 +22,26 @@ function Write-PreparedJson([string]$Path, $Value) {
     else{[IO.File]::WriteAllBytes($Path,$bytes)}
 }
 
+function Move-PreparedFile {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination, [switch]$Overwrite,
+        [int[]]$RetryDelaySeconds = @(2,4,8,15))
+    # A file just written to an SMB share can be held briefly by the file server (antivirus, indexing).
+    # The rename stays atomic; only a refused or busy target is retried, then the failure is final.
+    for ($attempt = 1; ; $attempt++) {
+        try { [IO.File]::Move($Source,$Destination,[bool]$Overwrite); return }
+        catch {
+            $exception = $_.Exception
+            while ($exception -is [Management.Automation.MethodInvocationException] -and $exception.InnerException) { $exception = $exception.InnerException }
+            $transient = ($exception -is [UnauthorizedAccessException]) -or
+                ($exception -is [IO.IOException] -and $exception -isnot [IO.FileNotFoundException] -and $exception -isnot [IO.DirectoryNotFoundException])
+            if (-not $transient) { throw }
+            if ($attempt -gt $RetryDelaySeconds.Count) { throw "Prepared file move failed after $attempt attempt(s): $Destination. $($exception.Message)" }
+            Write-Warning ("Prepared file move refused (attempt {0}): {1}. {2} Retrying in {3}s." -f $attempt,$Destination,$exception.Message,$RetryDelaySeconds[$attempt-1])
+            Start-Sleep -Seconds $RetryDelaySeconds[$attempt-1]
+        }
+    }
+}
+
 function Remove-PreparedOwnedPath([string]$Root, [string]$Relative) {
     # Only callers with an ownership marker/receipt may use this helper.
     $target = Get-PreparedChildPath $Root $Relative
@@ -290,23 +310,24 @@ function Publish-PreparedEvidenceBatch {
         foreach ($table in $contract.tables) {
             $source = Get-PreparedChildPath $staging $table.file
             $destination = Get-PreparedChildPath $batch $table.file
-            Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
-            if ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) { throw 'Staging changed during publication.' }
+            $sourceHash = (Get-FileHash -LiteralPath $source).Hash
             # Retain the original header for a valid header-only empty export.
-            $reader = [IO.StreamReader]::new($destination)
+            $reader = [IO.StreamReader]::new($source)
             $temp = $destination + '.tenant.tmp'
             try {
                 $header = $reader.ReadLine()
                 if ($header -match '^"?TenantKey"?,') { throw 'Staging must not contain a published TenantKey prefix.' }
             } finally { $reader.Dispose() }
             # Stream records; prepared files are modest compared with source inventories.
-            Import-Csv -LiteralPath $destination | Select-Object @{n='TenantKey';e={$TenantKey}},* |
+            Import-Csv -LiteralPath $source | Select-Object @{n='TenantKey';e={$TenantKey}},* |
                 Export-Csv -LiteralPath $temp -NoTypeInformation -Encoding utf8
             # Header-only files need explicit schema preservation.
             if ((Get-Item -LiteralPath $temp).Length -eq 0) {
                 [IO.File]::WriteAllText($temp, '"TenantKey",' + $header + [Environment]::NewLine,[Text.UTF8Encoding]::new($false))
             }
-            [IO.File]::Move($temp,$destination,$true)
+            if ((Get-FileHash -LiteralPath $source).Hash -ne $sourceHash) { throw "Staging changed during publication: $($table.file)" }
+            # The batch file does not exist yet: a plain rename, never a replacement of a file just written.
+            Move-PreparedFile -Source $temp -Destination $destination
         }
         $validationPath = Join-Path $batch 'validation.json.txt'
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Test-PreparedEvidence.ps1') -Root $batch -ContractPath $ContractPath -ReportPath $validationPath | Out-Null
@@ -361,7 +382,7 @@ function Publish-PreparedEvidenceBatch {
         Write-PreparedJson $pointerTemp $pointer
         # Immutable copy used by a delayed/cloud transfer; never upload a newer run's pointer.
         Write-PreparedJson (Join-Path $batch 'current.json.txt') $pointer
-        [IO.File]::Move($pointerTemp,$currentPath,$true)
+        Move-PreparedFile -Source $pointerTemp -Destination $currentPath -Overwrite
         $committed=$true
         try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" }
         [pscustomobject]@{BatchId=$batchId;BatchPath=$batch;Files=$validation.Files.Count;CurrentPath=$currentPath}

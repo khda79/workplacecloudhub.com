@@ -57,6 +57,31 @@ ExpectFailure 'Historical date regression after key-version change' { Publish-Pr
 Contract 1
 Fixture @([pscustomobject]@{Date='2026-01-05';Value='4';Note='x'})
 ExpectFailure 'Key-version rollback' { Publish-PreparedEvidenceBatch @argsForPublish }
+$module=Get-Module PreparedEvidencePipeline
+$moveRoot=Join-Path $root 'move'
+New-Item -ItemType Directory -Path $moveRoot -Force | Out-Null
+$target=Join-Path $moveRoot 'current.json.txt'
+$marker=Join-Path $moveRoot 'locked.marker'
+Set-Content -LiteralPath $target -Value 'old' -NoNewline
+Set-Content -LiteralPath (Join-Path $moveRoot 'next.tmp') -Value 'new' -NoNewline
+$holder=Start-ThreadJob -ScriptBlock {
+    $stream=[IO.File]::Open($using:target,'Open','Read','None')
+    try { Set-Content -LiteralPath $using:marker -Value 'locked'; Start-Sleep -Milliseconds 2500 } finally { $stream.Dispose() }
+}
+while (-not (Test-Path -LiteralPath $marker)) { Start-Sleep -Milliseconds 50 }
+$retries=@(& $module { param($s,$d) Move-PreparedFile -Source $s -Destination $d -Overwrite -RetryDelaySeconds @(1,1,1,1,1) } (Join-Path $moveRoot 'next.tmp') $target 3>&1)
+$holder | Wait-Job | Remove-Job
+if ((Get-Content -LiteralPath $target -Raw) -ne 'new' -or $retries.Count -lt 1) { throw 'Transient lock was not retried.' }
+Write-Host "PASS: transiently locked target replaced after $($retries.Count) traced retry(ies)."
+Set-Content -LiteralPath (Join-Path $moveRoot 'next.tmp') -Value 'newer' -NoNewline
+$lock=[IO.File]::Open($target,'Open','Read','None')
+try {
+    $failed=$false
+    try { & $module { param($s,$d) Move-PreparedFile -Source $s -Destination $d -Overwrite -RetryDelaySeconds @(0,0) -WarningAction SilentlyContinue } (Join-Path $moveRoot 'next.tmp') $target }
+    catch { $failed=$_.Exception.Message -like "*after 3 attempt(s): $target*" }
+} finally { $lock.Dispose() }
+if (-not $failed -or (Get-Content -LiteralPath $target -Raw) -ne 'new' -or -not (Test-Path -LiteralPath (Join-Path $moveRoot 'next.tmp'))) { throw 'Persistent lock was not rejected with the target path.' }
+Write-Host 'PASS: persistently locked target rejected with its path; source and target preserved.'
 Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
 
 # SIG # Begin signature block
