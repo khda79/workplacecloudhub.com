@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Windows PowerShell 5.1 probe contract test with a fake ShareGate module.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -40,6 +40,15 @@ SessionId,RowId,RuleId,SourceUrl,SourceList,DestinationUrl,DestinationList
 '@ | Set-Content -LiteralPath (Join-Path $analysis 'ClassifiedRows.csv') -Encoding UTF8
     $env:PSModulePath = (Join-Path $root 'Modules') + [IO.Path]::PathSeparator + $oldModulePath
     $probe = Join-Path $testsRoot '..\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateProbe.ps1'
+    $emptyProject = Join-Path $root 'NoAnalysis'
+    New-Item -ItemType Directory -Path $emptyProject -Force | Out-Null
+    try {
+        & $probe -ProjectRoot $emptyProject -DryRun | Out-Null
+        throw 'Expected a clear missing-analysis error.'
+    }
+    catch {
+        if ($_.Exception.Message -notmatch 'No phase 2a analysis exists') { throw }
+    }
     & $probe -ProjectRoot (Join-Path $root 'Project') -AnalysisDirectory $analysis -SessionId '260930-6' -ProbeSource -Run | Out-Null
     $output = Get-ChildItem -LiteralPath (Join-Path $root 'Project\ShareGate\Diagnostics') -Directory -Filter 'Probe-*' | Select-Object -First 1
     if (-not $output) { throw 'Probe output was not created.' }
@@ -72,8 +81,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvEApQ+ldnnFEl
-# FvSrkIzMDWqVdTFJyIkDxg92p02MdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBoE9bVUCRNqZ6d
+# lbgW7ix7i3WQByW5L5pWeee13LfaEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -206,31 +215,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPeaFDxKWdWJSQ5PY3kZc4YPKBjWvHs6MiDLkizopssnMA0GCSqG
-# SIb3DQEBAQUABIIBgJyRe+lojGz0NWoiolGEsiUiV+7cex87lf1LCCdNsbb4eNjW
-# kzkC6TkeJSMLpmSMFtUa71c9uOE5X6QV0vZ2B26VlACMJwT1hgxHvyfVCDhv1dtn
-# FUUFWb3oC+3WScaJ7ZTjghrSr0cKpsmSEiFflNJgYAJrKDyJ3It6SxtwKhaEefQ0
-# 8qgwhV1uMhKvnyzKrIJDj9jpwi4pEA1ydcrR6q2BiwDWPl+aG9d3Tbk0zK5sRUcg
-# V3PlRgQk2Bfn2Vq39YazSUQh6E4KAuontViRM08wFxF6pC4N9ZiHEeEco8tFvhyi
-# GUyFJaxS4h8JC7yNCEUDtz1dRR4DS8xF9FmQ1W0XeO5Os0dj8pBXY0pHyvrhxIMt
-# u9moL0MzlS6ZsUnCb4ST10qD55UZOj4LwpwY5Pj5igDWjEq4UvJ4gQk+DihTl1zV
-# Z48LuI4fgCSext/YGCeHrl66c0GpSVwamyvXnG8HyUNpljTUqkZAz2mixaa8WX8B
-# lW4yGvy0I6j0/QzhiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINAjmgpK0mrlcrmN4CAE2+/lMr6f735IIDfta/XFrYw2MA0GCSqG
+# SIb3DQEBAQUABIIBgLBs/ixCOxfiJyevOksLMX5WbEWobJpzC/tVMAdG3YZPwQQD
+# FZ079H4QikVr/8QuzxiCpazqTCZL91vGDVl720CyhBmfpDPJexnnqhvHYgbZ5iGa
+# 9vaSCghN6DlCxp2fqRsht8IkdZCODl9pMtkkhxEzXdwMTmrVnARM8GIWoY75+CVL
+# /9Pt3MsfcbFOQzgHgJYpOH7icSjUjHEsdv6jLTogKMML/3kc/E1rJYsgCIeXct9n
+# AW0t/kyRtgzpfujc30zb4iEslxNJ0WRYLvaQEcF7+2fBKLhj2H8FQ/8SlswoLen+
+# Nj8MbJqYTs4NqRl35uOJ4sm3KuBrm95AiytYchQf2LrVeUpW0qoL0Sm8O9aK2tGu
+# 778aluTGYxBMPMdCsv2oAnphE9cslc5btkV3kCqLe8d0u2K4olNA9r3JX3jf2V/+
+# FHWxMj0UXjQiIQCYPSXtuIm/VH3JpJskIPB70mxO1ahnJGCqYVDDLmM3NVo1+4UR
+# 58AOv1wVYL63qJkspaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMzA5
-# NTVaMC8GCSqGSIb3DQEJBDEiBCARzLidBkEZZMuh8ZrhDbRxORr+PTEsp+lmW/kl
-# hYyO4DANBgkqhkiG9w0BAQEFAASCAgAcIHNCBjoBGLYSIPk5zQOGlzscfAH8NnsV
-# v5iwgl0IZqBz6uslZxT0jQDPRoRstXOtQdsXXIn/MEggJHQemB5IcWR+bwin6FtI
-# Md5a0xM9cqmBuyID+rS6kgu1QgUvbXb2Vsly423XkyVlM5uyleWYiIUUndDe4sfk
-# +tMNjtGUCSvbDHgXF3YZc0RNDEAHvYZE2ZlATwn8/nhWJSctuZUAi4AW0gRIuG2p
-# rNnzV43zbEWW61DxJdWpxj4Sc+Tj3JaANB6a5WspXX7ufyEvnqxOBgecxOD2BBkP
-# 0NcKE5GyPaeZnzfmiH1wx6y9H5jxgTaJ6azIK+jvLiu9YA5eSlDjYOpCcUPkLidy
-# 5/lwy6h+S8g+MMeVs52V4od3ZiRGUHE+Ked21OsSgZuPgJi+3CSR+qI1NmlayV7T
-# MseW2A9aBS8TToLzaHCS+XA73sg0XWj126q4I8vuO/LjWAoo8LMgEgLJL4NGcwlK
-# M+2udNj8stANO29OgaZv7+RPNJ9PUWNqkpKqiGNE+OKJvlXdxygBzDCmjKH5xoJk
-# tfT0wo+/at2E1RD6FID0PXx7DQ/wtik4/1D/2kQVRc6QRJ8woYMil030eWMqOD2U
-# mnq+ARSncH+sxdj171H5HZF70hQElOerzhVsxx4JKo9tQS3EBW8pkW1R44WmsV6y
-# JR4WGMVHbA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMzIx
+# MjRaMC8GCSqGSIb3DQEJBDEiBCAxIZS8jVSaRqpf0bglCaEnw4fPW78yuPL3iGT6
+# Gbs5pzANBgkqhkiG9w0BAQEFAASCAgB0pHglLrzFI0NWLucKFV3FwZVNfwHJblvS
+# pM7+7B0vrjsFB3PVbbkk0/Zoz/ErW7DgFAn+qG3fG5DB/4RqFZodUiEjbMREDHAA
+# utboeBF34akHyfy5s0cvQvz0t28Zhl+GJ2r38ykRCBGK6CuqtzALv4lCzexHMv/B
+# Q31yU0n1/jOeQb0mJ+FnG7SItaOhMmU7khKtdwFxwByP3giJ1sU8Hur6Cf8IjqIR
+# 2zUdWxnJtkJ/h/+43FhVlHJPS2dW8So5171oNssn04JWHyGuJLo8UNqhNB2tTjZo
+# teq6+9zxfYTOV8pGcG6yqgC5WvRN7GReRReIf6IAZN4SD0XsWYI8RtVz3SX9UaMH
+# QoUT7aggzq8HiaK95bTSnKLSiP8CdtDZrRbUqCG/1ypw/wxUCeMxS2C8KmB9B2Cr
+# gfNJjyHKCBHsiDuJC44B5oeBAAZkkED3YupyzYOqssPv44+V5xl2A3jJC/JYLDKu
+# 1HGDAszELFACe8p3TcdCtAuEERAs5sAOoeyFVN8cdleS7OnjpTokB0N3wdrqtGtW
+# BXalFk9wWRRxsyAsug2pLyNmKkDTn9U+S+mNwOAnsWUla+BI9/6x2o6P+yatFua+
+# d0Uk90FOu1tJazwbAo0ylxR3kAQJKxknrl+D9ShbN4HNBHxWGA5kOKVA+8joo9+P
+# IV5rMMEvzA==
 # SIG # End signature block

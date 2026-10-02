@@ -368,6 +368,8 @@ detects the installed ShareGate application and module versions, and writes a
 plan under `ShareGate/Diagnostics/Probe-<timestamp-id>`. It does not import
 ShareGate or connect to a tenant. Use `-AnalysisDirectory` to choose a specific
 phase 2a run and `-SessionId` to narrow the cases.
+Run phase 2a against the same project folder first: generated `Diagnostics`
+outputs are ignored by Git and do not arrive with a repository pull.
 
 Explicit `-Run` imports the installed ShareGate module, records installed
 cmdlet count and parameter sets without invoking copy commands, and calls
