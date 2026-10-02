@@ -11,18 +11,19 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.8
+    1.0.10
 #>
 
 #Requires -Version 7.4
 
 [CmdletBinding()]
 param(
+    [Alias('DryRun')]
     [switch]$ValidateOnly
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.8'
+$script:AppVersion = '1.0.10'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -226,7 +227,7 @@ function Open-InExplorer {
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Smart SharePoint Migration"
-    Width="980" Height="720"
+    Width="1100" Height="760"
     MinWidth="820" MinHeight="580"
     WindowStartupLocation="CenterScreen"
     UseLayoutRounding="True"
@@ -422,6 +423,7 @@ function Open-InExplorer {
         <ToggleButton x:Name="tabFiles"       Content="Files"       Style="{StaticResource Tab}" IsChecked="True"/>
         <ToggleButton x:Name="tabPermissions" Content="Permissions" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
+        <ToggleButton x:Name="tabDiagnostics" Content="Migration Diagnostics" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabLogs"        Content="Logs"        Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabConfig"      Content="Config"      Style="{StaticResource Tab}"/>
       </StackPanel>
@@ -697,6 +699,87 @@ function Open-InExplorer {
           </ItemsControl>
         </StackPanel>
 
+        <!-- MIGRATION DIAGNOSTICS -->
+        <StackPanel x:Name="panelDiagnostics" Margin="18,14" Visibility="Collapsed">
+          <TextBlock Text="SHAREGATE REPORT ANALYSIS" Style="{StaticResource SectionLabel}"/>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
+              <TextBlock x:Name="lblDiagScope" Text="Analysis only: no ShareGate connection or migration action." Foreground="#5F6B7A" FontSize="12" Margin="0,0,0,7"/>
+              <TextBox x:Name="txtDiagInput" Height="28" VerticalContentAlignment="Center" FontSize="12"/>
+              <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button x:Name="btnDiagBrowseFile" Content="Browse file" Style="{StaticResource BtnGhost}" Width="94"/>
+                <Button x:Name="btnDiagBrowseFolder" Content="Browse folder" Style="{StaticResource BtnGhost}" Width="104" Margin="6,0,0,0"/>
+                <Button x:Name="btnDiagAnalyze" Content="Analyze reports" Style="{StaticResource Btn}" Width="112" Margin="16,0,0,0"/>
+                <Button x:Name="btnDiagOpenReport" Content="Open HTML report" Style="{StaticResource BtnGhost}" Width="120" Margin="6,0,0,0" IsEnabled="False"/>
+              </StackPanel>
+              <TextBlock x:Name="lblDiagProgress" Text="Select a migration report folder or a CSV/XLSX file." Foreground="#5F6B7A" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
+              <TextBlock Text="SUMMARY" Style="{StaticResource SectionLabel}"/>
+              <TextBlock x:Name="lblDiagKpis" Text="No analysis yet." TextWrapping="Wrap" FontSize="13" Foreground="#1F2937"/>
+              <TextBlock x:Name="lblDiagInterpretation" Text="Residual rates exclude Accepted issues. Fixed is a tracking state, not proof of a successful new migration." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,6,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
+              <TextBlock Text="ISSUE PATTERNS" Style="{StaticResource SectionLabel}"/>
+              <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                <TextBlock Text="Session" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <ComboBox x:Name="cmbDiagSession" Width="115" Height="27"/>
+                <TextBlock Text="Status" VerticalAlignment="Center" Margin="10,0,5,0"/>
+                <ComboBox x:Name="cmbDiagStatus" Width="115" Height="27">
+                  <ComboBoxItem Content="All statuses" IsSelected="True"/>
+                  <ComboBoxItem Content="Error"/>
+                  <ComboBoxItem Content="Warning"/>
+                </ComboBox>
+                <TextBox x:Name="txtDiagFilter" Width="230" Height="27" Margin="10,0,0,0" VerticalContentAlignment="Center" ToolTip="Filter category or pattern text"/>
+                <Button x:Name="btnDiagFilter" Content="Filter" Style="{StaticResource BtnGhost}" Width="62" Margin="6,0,0,0"/>
+              </StackPanel>
+              <DataGrid x:Name="gridDiagPatterns" Height="230" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" CanUserAddRows="False" HeadersVisibility="Column" AlternatingRowBackground="#F7FAFE">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="180"/>
+                  <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="70"/>
+                  <DataGridTextColumn Header="State" Binding="{Binding State}" Width="75"/>
+                  <DataGridTextColumn Header="Lines" Binding="{Binding Lines}" Width="55"/>
+                  <DataGridTextColumn Header="Items" Binding="{Binding Items}" Width="55"/>
+                  <DataGridTextColumn Header="Pattern (double-click for rows)" Binding="{Binding Pattern}" Width="*"/>
+                </DataGrid.Columns>
+              </DataGrid>
+              <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <TextBlock Text="Selected pattern state" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                <ComboBox x:Name="cmbDiagState" Width="105" Height="27">
+                  <ComboBoxItem Content="To fix" IsSelected="True"/>
+                  <ComboBoxItem Content="Accepted"/>
+                  <ComboBoxItem Content="Fixed"/>
+                </ComboBox>
+                <Button x:Name="btnDiagSaveState" Content="Save state" Style="{StaticResource BtnGhost}" Width="82" Margin="7,0,0,0" IsEnabled="False"/>
+                <Button x:Name="btnDiagHelp" Content="Open help link" Style="{StaticResource BtnGhost}" Width="100" Margin="7,0,0,0" IsEnabled="False"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
+              <TextBlock Text="RAW REPORT ROWS" Style="{StaticResource SectionLabel}"/>
+              <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                <TextBox x:Name="txtDiagRowFilter" Width="250" Height="27" VerticalContentAlignment="Center" ToolTip="Filter selected pattern rows by item, message, source or destination"/>
+                <Button x:Name="btnDiagRowFilter" Content="Filter rows" Style="{StaticResource BtnGhost}" Width="82" Margin="6,0,0,0"/>
+              </StackPanel>
+              <DataGrid x:Name="gridDiagRows" Height="180" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" CanUserAddRows="False" HeadersVisibility="Column">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Date" Binding="{Binding Timestamp}" Width="140"/>
+                  <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="70"/>
+                  <DataGridTextColumn Header="Type" Binding="{Binding ObjectType}" Width="95"/>
+                  <DataGridTextColumn Header="Item" Binding="{Binding ItemName}" Width="180"/>
+                  <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                </DataGrid.Columns>
+              </DataGrid>
+              <TextBox x:Name="txtDiagRaw" Height="105" Margin="0,7,0,0" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
         <!-- CONFIG -->
         <Grid x:Name="panelConfig" Margin="18,14" Visibility="Collapsed" MinHeight="500">
           <Grid.RowDefinitions>
@@ -799,6 +882,38 @@ if ($ValidateOnly) {
     exit 0
 }
 
+function Initialize-DiagnosticsLocalConfig {
+    $configRoot = Join-Path $script:ScriptRoot 'Config'
+    foreach ($name in @('sharegate-diagnostics.columns', 'sharegate-diagnostics.rules')) {
+        $template = Join-Path $configRoot ($name + '.json.template')
+        $runtime = Join-Path $configRoot ($name + '.json.txt')
+        if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
+            throw "Diagnostics configuration template is missing: $template"
+        }
+        if (Test-Path -LiteralPath $runtime -PathType Leaf) { continue }
+        $temporary = Join-Path $configRoot ('.' + $name + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+        try {
+            [System.IO.File]::WriteAllBytes($temporary, [System.IO.File]::ReadAllBytes($template))
+            try { [System.IO.File]::Move($temporary, $runtime) }
+            catch {
+                if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { throw }
+            }
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+                Remove-Item -LiteralPath $temporary -Force
+            }
+        }
+    }
+}
+
+try { Initialize-DiagnosticsLocalConfig }
+catch {
+    Close-SmartM365GuiSplash -Splash $script:Splash
+    [System.Windows.MessageBox]::Show("Failed to initialize local diagnostics configuration:`n$_", $script:AppName, 'OK', 'Error') | Out-Null
+    exit 1
+}
+
 # ---------------------------------------------------------------------------
 # Load window
 # ---------------------------------------------------------------------------
@@ -834,6 +949,7 @@ $btnOpenConfig = ctrl 'btnOpenConfig'
 $tabFiles       = ctrl 'tabFiles'
 $tabPermissions = ctrl 'tabPermissions'
 $tabOperations  = ctrl 'tabOperations'
+$tabDiagnostics = ctrl 'tabDiagnostics'
 $tabLogs        = ctrl 'tabLogs'
 $tabConfig      = ctrl 'tabConfig'
 
@@ -841,6 +957,7 @@ $tabConfig      = ctrl 'tabConfig'
 $panelFiles       = ctrl 'panelFiles'
 $panelPermissions = ctrl 'panelPermissions'
 $panelOperations  = ctrl 'panelOperations'
+$panelDiagnostics = ctrl 'panelDiagnostics'
 $panelLogs        = ctrl 'panelLogs'
 $panelConfig      = ctrl 'panelConfig'
 
@@ -894,6 +1011,29 @@ $btnRunCmpPerms = ctrl 'btnRunCmpPerms'
 $listOps   = ctrl 'listOps'
 $lblNoOps  = ctrl 'lblNoOps'
 
+# Migration diagnostics
+$lblDiagScope = ctrl 'lblDiagScope'
+$txtDiagInput = ctrl 'txtDiagInput'
+$btnDiagBrowseFile = ctrl 'btnDiagBrowseFile'
+$btnDiagBrowseFolder = ctrl 'btnDiagBrowseFolder'
+$btnDiagAnalyze = ctrl 'btnDiagAnalyze'
+$btnDiagOpenReport = ctrl 'btnDiagOpenReport'
+$lblDiagProgress = ctrl 'lblDiagProgress'
+$lblDiagKpis = ctrl 'lblDiagKpis'
+$lblDiagInterpretation = ctrl 'lblDiagInterpretation'
+$cmbDiagSession = ctrl 'cmbDiagSession'
+$cmbDiagStatus = ctrl 'cmbDiagStatus'
+$txtDiagFilter = ctrl 'txtDiagFilter'
+$btnDiagFilter = ctrl 'btnDiagFilter'
+$gridDiagPatterns = ctrl 'gridDiagPatterns'
+$gridDiagRows = ctrl 'gridDiagRows'
+$txtDiagRowFilter = ctrl 'txtDiagRowFilter'
+$btnDiagRowFilter = ctrl 'btnDiagRowFilter'
+$txtDiagRaw = ctrl 'txtDiagRaw'
+$cmbDiagState = ctrl 'cmbDiagState'
+$btnDiagSaveState = ctrl 'btnDiagSaveState'
+$btnDiagHelp = ctrl 'btnDiagHelp'
+
 # Logs
 $listLogFiles  = ctrl 'listLogFiles'
 $listActivity = ctrl 'listActivity'
@@ -927,6 +1067,15 @@ $script:AutoRefreshTimer = $null
 $script:WizardOpen = $false
 $script:TargetScopeMismatch = $false
 $script:ConfigEditorLoadedHash = ''
+$script:DiagInputPath = ''
+$script:DiagSummary = $null
+$script:DiagRows = @()
+$script:DiagKnownSessions = @()
+$script:DiagProcess = $null
+$script:DiagTimer = $null
+$script:DiagOutputDirectory = ''
+$script:DiagActivity = ''
+$script:DiagProjectRoot = ''
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -1181,12 +1330,14 @@ function Switch-Tab {
     $tabFiles.IsChecked       = ($Tab -eq 'Files')
     $tabPermissions.IsChecked = ($Tab -eq 'Permissions')
     $tabOperations.IsChecked  = ($Tab -eq 'Operations')
+    $tabDiagnostics.IsChecked = ($Tab -eq 'Diagnostics')
     $tabLogs.IsChecked        = ($Tab -eq 'Logs')
     $tabConfig.IsChecked      = ($Tab -eq 'Config')
 
     $panelFiles.Visibility       = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
     $panelPermissions.Visibility = if ($Tab -eq 'Permissions') { 'Visible' } else { 'Collapsed' }
     $panelOperations.Visibility  = if ($Tab -eq 'Operations')  { 'Visible' } else { 'Collapsed' }
+    $panelDiagnostics.Visibility = if ($Tab -eq 'Diagnostics') { 'Visible' } else { 'Collapsed' }
     $panelLogs.Visibility        = if ($Tab -eq 'Logs')        { 'Visible' } else { 'Collapsed' }
     $panelConfig.Visibility      = if ($Tab -eq 'Config')      { 'Visible' } else { 'Collapsed' }
 }
@@ -1454,6 +1605,22 @@ function Set-CurrentMigration {
         }
     }
     $script:CurrentMigration = $Migration
+    if (-not $sameConfig) {
+        $script:DiagInputPath = Join-Path $Migration.Root 'ShareGate\MigrationReport'
+        $txtDiagInput.Text = $script:DiagInputPath
+        $script:DiagSummary = $null
+        $script:DiagRows = @()
+        $script:DiagKnownSessions = @()
+        $gridDiagPatterns.ItemsSource = $null
+        $gridDiagRows.ItemsSource = $null
+        $txtDiagRaw.Text = ''
+        $lblDiagKpis.Text = 'No analysis yet.'
+        $lblDiagProgress.Text = 'Select a migration report folder or a CSV/XLSX file.'
+        $btnDiagOpenReport.IsEnabled = $false
+        $cmbDiagSession.Items.Clear()
+        [void]$cmbDiagSession.Items.Add('All sessions')
+        $cmbDiagSession.SelectedIndex = 0
+    }
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
     Update-UI
     if (-not $sameConfig -or -not $script:ConfigEditorDirty) {
@@ -1528,6 +1695,7 @@ function Load-Migrations {
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabPermissions.Add_Click({ Switch-Tab 'Permissions' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
+$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics' })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
 $tabConfig.Add_Click({      Switch-Tab 'Config' })
 
@@ -1689,6 +1857,164 @@ function Invoke-GlobalComparisonReport {
 $btnGlobalFileReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Files' })
 $btnGlobalPermissionsReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Permissions' })
 
+function Refresh-DiagnosticPatterns {
+    if (-not $script:DiagSummary) { return }
+    $status = if ($cmbDiagStatus.SelectedItem) { [string]$cmbDiagStatus.SelectedItem.Content } else { 'All statuses' }
+    $search = [string]$txtDiagFilter.Text
+    $matching = @($script:DiagSummary.Patterns | Where-Object {
+        ($status -eq 'All statuses' -or $_.Status -eq $status) -and
+        (-not $search -or $_.Category.Contains($search, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $_.Pattern.Contains($search, [System.StringComparison]::OrdinalIgnoreCase))
+    } | ForEach-Object { [pscustomobject]$_ })
+    $gridDiagPatterns.ItemsSource = $matching
+    $gridDiagRows.ItemsSource = $null
+    $txtDiagRaw.Text = ''
+    $btnDiagSaveState.IsEnabled = $false
+    $btnDiagHelp.IsEnabled = $false
+}
+
+function Refresh-DiagnosticRows {
+    $pattern = $gridDiagPatterns.SelectedItem
+    if (-not $pattern) { $gridDiagRows.ItemsSource = $null; return }
+    $search = [string]$txtDiagRowFilter.Text
+    $gridDiagRows.ItemsSource = @($script:DiagRows | Where-Object {
+        $_.PatternKey -eq $pattern.PatternKey -and
+        (-not $search -or $_.ItemName.Contains($search, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $_.Message.Contains($search, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $_.SourceUrl.Contains($search, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $_.DestinationUrl.Contains($search, [System.StringComparison]::OrdinalIgnoreCase))
+    })
+    $txtDiagRaw.Text = ''
+}
+
+function Load-DiagnosticResult {
+    param([string]$Directory)
+    $summaryPath = Join-Path $Directory 'Summary.json.txt'
+    if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { throw "Analysis summary was not created: $summaryPath" }
+    $script:DiagSummary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -AsHashtable
+    $script:DiagRows = @(Import-Csv -LiteralPath $script:DiagSummary.RowsPath)
+    $selected = if ($cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
+    $script:DiagKnownSessions = @($script:DiagKnownSessions + @($script:DiagSummary.Sessions) | Sort-Object -Unique)
+    $cmbDiagSession.Items.Clear()
+    [void]$cmbDiagSession.Items.Add('All sessions')
+    foreach ($session in $script:DiagKnownSessions) { [void]$cmbDiagSession.Items.Add([string]$session) }
+    $index = $cmbDiagSession.Items.IndexOf($selected)
+    $cmbDiagSession.SelectedIndex = if ($index -ge 0) { $index } else { 0 }
+    $lines = $script:DiagSummary.Lines
+    $lineStates = $script:DiagSummary.IssueLineState
+    $itemStates = $script:DiagSummary.IssueItemState
+    $lineRate = if ($null -ne $script:DiagSummary.ResidualLineRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualLineRate } else { 'n/a' }
+    $itemRate = if ($null -ne $script:DiagSummary.ResidualItemRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualItemRate } else { 'n/a' }
+    $lblDiagKpis.Text = ('Lines: {0} | Success: {1} | Error: {2} | Warning: {3} | Accepted: {4} | To fix: {5}`nDistinct keyed items: {6} | Unkeyed lines: {7} | Items to fix: {8} | Residual lines: {9} | Residual items: {10}' -f
+        $lines, $script:DiagSummary.LineStatus.Success, $script:DiagSummary.LineStatus.Error,
+        $script:DiagSummary.LineStatus.Warning, $lineStates.Accepted, $lineStates['To fix'],
+        $script:DiagSummary.DistinctItems, $script:DiagSummary.UnkeyedRows, $itemStates['To fix'],
+        $lineRate, $itemRate).Replace('`n', "`n")
+    $btnDiagOpenReport.IsEnabled = (Test-Path -LiteralPath $script:DiagSummary.ReportPath -PathType Leaf)
+    $lblDiagProgress.Text = "Analysis completed: $($script:DiagSummary.Sessions.Count) session(s); $($script:DiagSummary.DuplicateRowsSuppressed) duplicate rows suppressed."
+    if ($script:DiagSummary.ConflictingDuplicateRows -gt 0) {
+        $lblDiagProgress.Text += " $($script:DiagSummary.ConflictingDuplicateRows) conflicting duplicate rows require review."
+    }
+    Refresh-DiagnosticPatterns
+}
+
+function Start-DiagnosticAnalysis {
+    if ($script:DiagProcess -and -not $script:DiagProcess.HasExited) { return }
+    if (-not $script:CurrentMigration) { return }
+    $inputPath = [string]$txtDiagInput.Text
+    if (-not (Test-Path -LiteralPath $inputPath)) {
+        [System.Windows.MessageBox]::Show("Report path does not exist:`n$inputPath", $script:AppName, 'OK', 'Warning') | Out-Null
+        return
+    }
+    $wrapper = Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1'
+    $output = Join-Path $script:CurrentMigration.Root ('ShareGate\Diagnostics\{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N'))
+    $activity = $null
+    try {
+        New-Item -ItemType Directory -Path $output -Force | Out-Null
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration $script:CurrentMigration.Name -Action 'MigrationDiagnostics'
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$wrapper`"",
+            '-ProjectRoot', "`"$($script:CurrentMigration.Root)`"", '-InputPath', "`"$inputPath`"",
+            '-OutputDirectory', "`"$output`"", '-ActivityPath', "`"$activity`"")
+        $session = if ($cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
+        if ($session -ne 'All sessions') { $arguments += @('-SessionId', "`"$session`"") }
+        $exe = Join-Path $PSHOME 'pwsh.exe'
+        $script:DiagProcess = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $script:ScriptRoot -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput (Join-Path $output 'analysis.stdout.log') -RedirectStandardError (Join-Path $output 'analysis.stderr.log') -ErrorAction Stop
+        $script:DiagOutputDirectory = $output
+        $script:DiagActivity = $activity
+        $script:DiagProjectRoot = $script:CurrentMigration.Root
+        $btnDiagAnalyze.IsEnabled = $false
+        $lblDiagProgress.Text = "Analyzing local report files in $inputPath ..."
+        $script:DiagTimer.Start()
+        Refresh-ActivityList
+    }
+    catch {
+        if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
+        $lblDiagProgress.Text = "Could not start analysis: $($_.Exception.Message)"
+        $btnDiagAnalyze.IsEnabled = $true
+    }
+}
+
+$btnDiagBrowseFile.Add_Click({
+    $dialog = [Microsoft.Win32.OpenFileDialog]::new()
+    $dialog.Filter = 'ShareGate reports (*.csv;*.xlsx)|*.csv;*.xlsx|All files (*.*)|*.*'
+    if ($dialog.ShowDialog($script:Window)) { $txtDiagInput.Text = $dialog.FileName }
+})
+$btnDiagBrowseFolder.Add_Click({
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtDiagInput.Text = $dialog.SelectedPath }
+    $dialog.Dispose()
+})
+$btnDiagAnalyze.Add_Click({ Start-DiagnosticAnalysis })
+$btnDiagOpenReport.Add_Click({ if ($script:DiagSummary) { Open-InExplorer $script:DiagSummary.ReportPath } })
+$btnDiagFilter.Add_Click({ Refresh-DiagnosticPatterns })
+$btnDiagRowFilter.Add_Click({ Refresh-DiagnosticRows })
+$cmbDiagStatus.Add_SelectionChanged({ if ($script:DiagSummary) { Refresh-DiagnosticPatterns } })
+$cmbDiagSession.Add_SelectionChanged({
+    if ($script:DiagSummary -and $cmbDiagSession.SelectedItem) { $lblDiagProgress.Text = 'Click Analyze reports to apply the selected session.' }
+})
+$gridDiagPatterns.Add_SelectionChanged({
+    $pattern = $gridDiagPatterns.SelectedItem
+    $btnDiagSaveState.IsEnabled = ($null -ne $pattern)
+    $btnDiagHelp.IsEnabled = ($null -ne $pattern -and [string]$pattern.HelpLink -match '^https?://')
+    if ($pattern) {
+        foreach ($item in $cmbDiagState.Items) {
+            if ([string]$item.Content -eq [string]$pattern.State) { $cmbDiagState.SelectedItem = $item; break }
+        }
+    }
+})
+$gridDiagPatterns.Add_MouseDoubleClick({
+    Refresh-DiagnosticRows
+})
+$gridDiagRows.Add_SelectionChanged({
+    if ($gridDiagRows.SelectedItem) { $txtDiagRaw.Text = ($gridDiagRows.SelectedItem | ConvertTo-Json -Depth 4) }
+})
+$btnDiagHelp.Add_Click({
+    $pattern = $gridDiagPatterns.SelectedItem
+    if ($pattern -and [string]$pattern.HelpLink -match '^https?://') { Start-Process -FilePath ([string]$pattern.HelpLink) }
+})
+$btnDiagSaveState.Add_Click({
+    $pattern = $gridDiagPatterns.SelectedItem
+    if (-not $pattern -or -not $script:CurrentMigration) { return }
+    $state = [string]$cmbDiagState.SelectedItem.Content
+    $activity = $null
+    try {
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration $script:CurrentMigration.Name -Action 'DiagnosticPatternState'
+        $wrapper = Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1'
+        $exe = Join-Path $PSHOME 'pwsh.exe'
+        $result = @(& $exe -NoProfile -ExecutionPolicy Bypass -File $wrapper -ProjectRoot $script:CurrentMigration.Root -PatternKey $pattern.PatternKey -SetPatternState $state -ExpectedState $pattern.State -ActivityPath $activity 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
+        $lblDiagProgress.Text = "Pattern state saved as $state. Reanalyzing to update KPIs."
+        Start-DiagnosticAnalysis
+    }
+    catch {
+        if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
+        [System.Windows.MessageBox]::Show("Could not save pattern state:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+    }
+    finally { Refresh-ActivityList }
+})
+
 $listActivity.Add_SelectionChanged({
     $sel = $listActivity.SelectedItem
     if ($null -eq $sel) { return }
@@ -1733,6 +2059,36 @@ $script:AutoRefreshTimer.Add_Tick({
 })
 $chkAutoRefresh.Add_Checked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Start() } })
 $chkAutoRefresh.Add_Unchecked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() } })
+$script:DiagTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:DiagTimer.Interval = [TimeSpan]::FromSeconds(1)
+$script:DiagTimer.Add_Tick({
+    if (-not $script:DiagProcess -or -not $script:DiagProcess.HasExited) { return }
+    $script:DiagTimer.Stop()
+    $code = $script:DiagProcess.ExitCode
+    $script:DiagProcess.Dispose()
+    $script:DiagProcess = $null
+    $btnDiagAnalyze.IsEnabled = $true
+    try {
+        if ($code -ne 0) {
+            $stderrPath = Join-Path $script:DiagOutputDirectory 'analysis.stderr.log'
+            $errorText = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+            throw "Analysis exited with code $code. $errorText"
+        }
+        if ($script:CurrentMigration -and $script:CurrentMigration.Root -eq $script:DiagProjectRoot) {
+            Load-DiagnosticResult -Directory $script:DiagOutputDirectory
+        }
+    }
+    catch {
+        $lblDiagProgress.Text = "Analysis failed: $($_.Exception.Message)"
+        if ($script:DiagActivity) {
+            Write-SmartM365GuiActivityEvent -Path $script:DiagActivity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message
+        }
+    }
+    Refresh-ActivityList
+})
+if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
+    $lblDiagScope.Text = 'Analysis only. CSV is available; XLSX needs the optional ImportExcel module.'
+}
 try {
     $script:SessionActivity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
         -Migration '<gui>' -Action 'GuiSession'
@@ -1750,15 +2106,16 @@ Close-SmartM365GuiSplash -Splash $script:Splash
 try { [void]$script:Window.ShowDialog() }
 finally {
     $script:AutoRefreshTimer.Stop()
+    if ($script:DiagTimer) { $script:DiagTimer.Stop() }
     Write-SmartM365GuiActivityEvent -Path $script:SessionActivity -Status 'Closed' -ExitCode 0 `
         -Detail 'GUI window closed.'
 }
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUQX8vCGEeEYEJ
-# lyEpEUVWvrX8KuCCMSHRultn3VPQuaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+LDyJDzhvVWoU
+# 5yQUO/Ac2qtQoq5jn0v8M5E8iHtVlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1783,19 +2140,139 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAe/SuYKjoc4SttmuFd2ok7
-# Q890srdvJb8NwOmMFBUbxTANBgkqhkiG9w0BAQEFAASCAYBCq1DQBvEcvs7Xzc6e
-# qoyzYbVwHC2lUI7stB37hhbAC777NN721ZI8fc5W9T80XVDWHMzhRx3H+aGO8LxV
-# THEsUg8ugb4uZRmtd/xW2asbHLwRiihS/+Phsid0xy3lIq4DZqS7L+Rpm677Vcwp
-# HAd9FicTes5hA0K3R9ALmArERY/bv3QTwWgaVXdRQrE35O6QJyb4FDAOhDP2w15y
-# ShShxd0AkAsiOa3ek5FEPSUPCWF0fAOUkQE/7uThBKvPzG/bIE33gM9MLE0YvKMS
-# 8GPZ5U73FgtnTWbeCPMWS7KAoCLRCNMR9zlKjJH/V0gj2CCG0Jz18byi54jTbPkn
-# iTxH1KU3uPOv5Tny/CcuE4o+kmujV5J091lHmrMeW0pf2Z9pE9Xbv4Kxs+Kig6Yu
-# FigjjsTIguEDaO8gi222WuCFKHuhud5JXAep0VpDOp3hOAho/FW5kpwSJU69zT2X
-# 4uiJWH4FCEaANDrsjWGYCfQUfFB+GWYCfDA5/GhDGKhLX2g=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEILykoNkvJvZyFtfq0py5wVD8rzZQz7DAKO9BpnGk5yVDMA0GCSqG
+# SIb3DQEBAQUABIIBgKbGExOh2tiV2MaFuielVOM14N2zSfbn252Fg0ZExX/YPDjo
+# izbFBdJT9/PJ3Df0GyJHxN6vaYw7Ex6k7GjBGDhui/vBcssDXKCWI4FAW2Hk2R2p
+# gcrZnIag7WNHYJvtV4sszLVPxKHLGnM/DLh7f7mqLrzzZB/DG1+IA4ZF0M25p+cN
+# JIj+/58uOQxGiyFgkLMSstTZ6PyUPsm16T+Ib6gio5Zmtgej1Lh3B6OyHCI/NOHy
+# i+t0J0EbfbBObBJ4NHYAEPewQP5sQhxMPZ8slfH3iO6UaQTreY0mndUw0eO5yUvH
+# JqJnV3GAqUE40oj407pLwg0ptcFuR6Gxb0qvnKNcV6vk+f0Tn/BxUlCWPzFojhme
+# 9SvpyRdFdaIDmb+KRmRTIN15mlEhqynyXnE/ihw33m3zt+HbL5zp5/CeqXa/eSc1
+# eiRe6m7rkEf0D2iuWWMyr/BNtbqHBbmUhatPlIKR33qjvpBpRaFIaBnAInVSb50q
+# CAluBtYFm1pwsgqBIaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMzA5
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBlEujOlh1K/840oSwMKnx4IEI3jcjaJQEvcbI0
+# Bx51GzANBgkqhkiG9w0BAQEFAASCAgBpV1IidJQuEXI/lN1itZDTtnZ5iy7hIB1/
+# +a63iWcrdDFy3wPQAWCnAQgDeZ0hcLwzWk7hInE4HPPrXc2jmUdn/oF6EgCWJSr0
+# fTMOPcH9CxLA19IS3AycRX5Ik0C2CI2qR5LZuq/hqrHYApR6DzTvIJ+QMZKXGMF9
+# VrwzkW+KJ11/aIlxSKRxw0O28B2Iot+CZHEtF+xEVZyPXsSyDfRDCpi2dWQd3HbG
+# l1ldb3zjvcl4FQ9h5bWGBrPcErFUHH8OJY00ZEovJMHs4gybj9ebebptsk2A7o/z
+# O2mh3WPxOxd9qhwQ5uHErR7dXa1GX108Rw0CdBbo2qvP79x80Pj7TSQ92ojyl+sx
+# qpxC6YLDzuO0w9nSoez2iPn/+Mlshf2v4EnXIQvkEjgQKKpJ3AHKuUnvMQS9lR2K
+# xyKdjhsNFcqaTebrKmzxfz4RPLXr9x+RHmfXhLAAyfVtcV2iuqueXdwanfmOKA00
+# rUBtL779DtBxXSD3J7n9821CJFMNEozth27Nz2hfp/lQ3GjsRy/rvgVDVNVwxcjy
+# 6AS4d7HAdEJaF256w8LTDK6+NpjO+8hWiWUQrlZ/FOf2s6tPP27h0RsbEP4x0dgt
+# TjrJKfqeoDdNuG2iE/zhCMi7rRGy82vg9yUDNe8OIPF7UpxpU5F8r03IlKxy1cnX
+# NE6mBUn9IQ==
 # SIG # End signature block

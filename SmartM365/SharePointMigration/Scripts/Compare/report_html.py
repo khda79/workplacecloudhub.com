@@ -1,5 +1,7 @@
 """Shared, self-contained HTML presentation for migration comparison reports."""
 
+__version__ = "1.0.1"
+
 import base64
 import html
 import json
@@ -174,7 +176,7 @@ def client_logo_html():
     return f'<div class="client-brand"><img src="{uri}" alt="Client logo"></div>' if uri else ""
 
 
-def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html="", download_html=""):
+def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html="", download_html="", intro_text="This summary uses the selected inventory files. Review their scan logs before accepting the comparison as complete."):
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -198,7 +200,7 @@ def render_report(title, report_kind, generated_at, status_text, status_class, c
     <div class="badge {escape(status_class)}" role="status">{escape(status_text)}</div>
   </header>
   {download_html}
-  <p class="intro">This summary uses the selected inventory files. Review their scan logs before accepting the comparison as complete.</p>
+  <p class="intro">{escape(intro_text)}</p>
   {alert_html}
   <div class="metrics" aria-label="Comparison metrics">{cards_html}</div>
   {body_html}

@@ -28,7 +28,7 @@ No PowerShell Gallery package is published for this toolkit; do not use `Install
 Obtain the repository and keep the entire `SmartM365/SharePointMigration` folder;
 copying just the GUI script omits required helpers, assets and templates. Launch
 `Start-SmartM365-SharePointMigration-GUI.cmd` on Windows. The dashboard provides
-Files, Permissions, Operations, Logs and Config tabs; it discovers configured
+Files, Permissions, Operations, Migration Diagnostics, Logs and Config tabs; it discovers configured
 migration folders and displays the most recent output paths. An output timestamp
 or an available Open button is not proof that the whole scan succeeded: inspect
 the run log and any error CSV before accepting its results.
@@ -155,9 +155,13 @@ operations\generated\
 logs\
 ```
 
-`Migrations/*` is ignored by Git except for `_Template` and the template update
-launcher. Do not commit real migration folders, inventory CSVs, workbooks, logs,
-generated cleanup scripts, or local authentication files.
+`Migrations/*` is ignored by Git except for `_Template`, the template update
+launcher, and each migration's `ShareGate` folder structure. Put ShareGate
+migration reports (`.xls`, `.xlsx`, or `.csv`) in
+`Migrations/<name>/ShareGate/MigrationReport`. Only the generic README and
+empty-folder marker are versioned there; the reports remain local. Do not commit
+real migration configuration, inventory CSVs, workbooks, logs, generated cleanup
+scripts, or local authentication files.
 
 ## Authentication
 
@@ -289,6 +293,108 @@ PNG or JPEG in `Config`; leave it empty to show only the WorkplaceCloudHub logo.
 Newly generated HTML reports embed the images, so viewers do not need access
 to the original files. The local `.json.txt` configuration and client image
 are ignored by Git and must be copied privately when deploying another clone.
+
+## Migration Diagnostics (local report analysis)
+
+The **Migration Diagnostics** tab reads ShareGate migration report exports for
+the selected migration from `ShareGate/MigrationReport`. You can also browse to
+another CSV, XLSX, or report folder. This phase only reads report files; it
+does not import the ShareGate module, connect to a site, precheck, or retry a
+migration. The analysis runs in a child PowerShell process so the GUI remains
+responsive. Shared GUI activity logs record the operator and the analysis
+result. CSV is preferred when a CSV and XLSX have the same base name. DryRun
+lists every file, its selection status, detected session IDs, and the installed
+`ImportExcel` version. With ImportExcel available, a same-name XLSX is masked
+only after its row count and row identity columns match the CSV. The remaining
+cells may differ between export formats; the CSV remains the selected evidence.
+XLSX-only analysis needs the optional `ImportExcel` module. Report rows from different
+files are deduplicated by session and row ID; conflicting duplicates are
+counted and flagged for review. A session selector can restrict a new analysis
+to one session.
+
+The tab and HTML report show both report-line KPIs and distinct keyed content
+items. An item key uses source site, source list, and positive `Source ID`, so
+version rows for the same item are grouped. Rows without that key are reported
+separately and are not invented as distinct items. Raw success rates describe
+the ShareGate export; they do not prove source-to-target completeness.
+Residual rates count `To fix` issues and exclude `Accepted` issues from their
+denominator. `Fixed` records an operator decision, not a newly verified
+migration result. Unavailable site features default to `Accepted`; operators
+can change any pattern to `To fix`, `Accepted`, or `Fixed`. Each pattern state
+is saved as a separate private `.json.txt` file under
+`ShareGate/DiagnosticsState`, with operator and machine identity, and is reused
+for later analyses. When a report does not identify whether an access denial
+occurred at the source or destination, the category remains undetermined.
+
+Each run writes private evidence under `ShareGate/Diagnostics/<timestamp-id>`:
+`MigrationDiagnostics-Report.html`, `Summary.json.txt`,
+`ClassifiedRows.csv` (including original columns), `PatternSummary.csv`,
+`UnknownPatterns.csv`, `Remediation-Actions.csv`,
+`UserMapping-Candidates.csv`, and `DestinationMatches-Review.csv`.
+The HTML report breaks manual actions down by category. Undetermined access
+denials are excluded from manual actions.
+`Help links` are clickable from a selected pattern in the GUI and in HTML.
+The candidate mapping and ambiguous-match files are review inputs, not
+ShareGate mapping files or authorization to retry. The latter concerns
+destination object identity; it must not be treated as a user mapping.
+`SourceIdentity` in the user candidates comes from the report's user item
+title and may be a display name rather than a UPN; verify it before mapping.
+`Copy options`, Microsoft 365 import status, and throttling statistics remain
+in the classified rows for review. Generic EN/FR column aliases and rules are
+in `Config/sharegate-diagnostics.columns.json.template` and
+`Config/sharegate-diagnostics.rules.json.template`; private `.json.txt`
+runtime copies are created at normal GUI startup if absent. The analyzer also
+creates them when run directly and fills in missing defaults during analysis.
+The rules can be edited locally without changing the GUI.
+
+Preview which local files would be analyzed:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1 -ProjectRoot .\Migrations\MyMigration -DryRun
+```
+
+Generate an analysis without using ShareGate:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1 -ProjectRoot .\Migrations\MyMigration
+```
+
+## ShareGate probe (phase 2b)
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGateProbe.ps1` runs in
+Windows PowerShell 5.1. Its default DryRun reads the latest phase 2a
+`ClassifiedRows.csv`, enumerates distinct access-case site/list endpoints,
+detects the installed ShareGate application and module versions, and writes a
+plan under `ShareGate/Diagnostics/Probe-<timestamp-id>`. It does not import
+ShareGate or connect to a tenant. Use `-AnalysisDirectory` to choose a specific
+phase 2a run and `-SessionId` to narrow the cases.
+
+Explicit `-Run` imports the installed ShareGate module, records installed
+cmdlet count and parameter sets without invoking copy commands, and calls
+`Find-CopySessions` as a read-only license check. An empty local session
+history is reported as such; session properties are recorded only when the
+requested object exists locally. If the license check fails, site reads are
+skipped. Source site checks are skipped by default; `-ProbeSource` enables
+them when run on a host that can reach the source. With
+`-SourceAuthMode Default`, `Connect-Site -Url` uses the current Windows user
+for the on-premises source, without a supplied credential. On a GUI machine
+with access to both environments, one `-Run -ProbeSource` checks both sides.
+Destination checks
+use only `Connect-Site -Browser` and `Get-List`, with no supplied username,
+password, or saved-connection option. `Probe-Access.csv` attributes a denial
+to Source or Destination only when that side returns an access-denied error
+and the opposite endpoint is readable. Other cases remain Undetermined because
+site/list reads cannot prove item-level access. The probe writes
+`Probe-Results.csv`, `Probe-CmdletParameters.csv`, `Probe-SessionProperties.csv`,
+and `Probe-Access.csv` atomically, plus `Probe.log`, all in the private
+migration folder. A successful `Find-CopySessions` call supports that
+PowerShell integration is licensed for Pro or Enterprise, but the probe cannot
+identify the exact subscription tier. No migration or copy command is invoked.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateProbe.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -ProbeSource -SourceAuthMode Default -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateProbe.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -ProbeSource -SourceAuthMode Default -Run
+```
 
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and

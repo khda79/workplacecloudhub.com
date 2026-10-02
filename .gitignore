@@ -100,9 +100,18 @@ SmartM365/Exchange/MigrationReadiness/Input/**
 !/SmartM365/Devices/Windows11UpgradeToolkit/Lots/LOT-TEMPLATE/Windows11UpgradeToolkit.config.template
 !/SmartM365/Devices/Windows11UpgradeToolkit/Lots/LOT-TEMPLATE/SetupSourceMap.csv.template
 SmartM365/SharePointMigration/Migrations/*
+!SmartM365/SharePointMigration/Migrations/*/
+SmartM365/SharePointMigration/Migrations/*/*
 !SmartM365/SharePointMigration/Migrations/_Template/
 !SmartM365/SharePointMigration/Migrations/_Template/**
 !SmartM365/SharePointMigration/Migrations/Update-MigrationsFromTemplate.cmd
+# Keep the ShareGate report folders in Git, but never add their report contents.
+!SmartM365/SharePointMigration/Migrations/*/ShareGate/
+SmartM365/SharePointMigration/Migrations/*/ShareGate/*
+!SmartM365/SharePointMigration/Migrations/*/ShareGate/README.md
+!SmartM365/SharePointMigration/Migrations/*/ShareGate/MigrationReport/
+SmartM365/SharePointMigration/Migrations/*/ShareGate/MigrationReport/*
+!SmartM365/SharePointMigration/Migrations/*/ShareGate/MigrationReport/.gitkeep
 SmartM365/SharePointMigration/Config/*.local.psd1
 SmartM365/SharePointMigration/**/__pycache__/
 SmartM365/SharePointMigration/**/*.pyc

@@ -1,0 +1,23 @@
+{
+  "SessionId": ["Session ID", "ID de session", "Identifiant de session"],
+  "RowId": ["ID", "Identifiant"],
+  "Timestamp": ["Date", "Timestamp", "Horodatage"],
+  "Status": ["Status", "Statut"],
+  "ObjectType": ["Type", "Type d'objet"],
+  "ItemName": ["Title", "Titre", "Nom"],
+  "SourceUrl": ["Source site address", "Adresse du site source"],
+  "SourceList": ["Source list title", "Titre de la liste source"],
+  "SourceListId": ["Source list ID", "ID de la liste source"],
+  "SourceItemId": ["Source ID", "ID source"],
+  "SourcePath": ["Source path", "Chemin source"],
+  "DestinationUrl": ["Destination site address", "Adresse du site de destination"],
+  "DestinationList": ["Destination list title", "Titre de la liste de destination"],
+  "Messages": ["Messages"],
+  "Warnings": ["Warnings", "Avertissements"],
+  "Errors": ["Errors", "Erreurs"],
+  "Details": ["Details", "Détails"],
+  "HelpLinks": ["Help links", "Liens d'aide"],
+  "CopyOptions": ["Copy options", "Options de copie"],
+  "ImportStatus": ["Microsoft 365 Import: Status", "Import Microsoft 365 : Statut"],
+  "ThrottlingStatistics": ["Throttling statistics", "Statistiques de limitation"]
+}
