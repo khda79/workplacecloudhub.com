@@ -10,6 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
+import sys
+
+# The embedded Portable Python omits the script directory from sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 
 

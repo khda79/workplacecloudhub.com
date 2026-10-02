@@ -11,7 +11,7 @@ date is older than the source, so a copied file that is not at the latest source
 version is visible in the comparison workbook.
 
 The toolkit validates and reconciles evidence; it does not copy or migrate content.
-The dashboard component is **1.0.8** and the generic launcher is **1.0.18**.
+The dashboard component is **1.0.8** and the generic launcher is **1.0.19**.
 See [release notes](RELEASE-NOTES-1.0.8.md) for the changes and validation boundary.
 
 ## Install, Start, and Update
@@ -140,6 +140,12 @@ and at least one SPO endpoint; the current launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
 The branded HTML summaries are self-contained and show at most 20 objects with
 differences; use their linked CSV and Excel exports for the full detail.
+The comparators load the shared `report_html.py` from their own directory. They
+add that directory explicitly because the bundled Portable Python runs in
+isolated mode and does not add the script directory to its import path.
+The generic launcher prints a WorkplaceCloudHub introduction and a timestamped
+execution summary with status, duration and run log path. A successful script
+run means the comparison completed; inspect its report for migration differences.
 Runtime outputs stay inside the local migration folder:
 
 ```text

@@ -2,6 +2,7 @@
 import csv
 import importlib.util
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,17 @@ class PermissionComparisonTests(unittest.TestCase):
 
 
 class HtmlReportTests(unittest.TestCase):
+    def test_comparators_find_adjacent_report_module_with_portable_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shutil.copy2(COMPARE_DIR / 'report_html.py', Path(directory) / 'report_html.py')
+            portable_python = ROOT / 'Tools' / 'Python' / 'python.exe'
+            executable = str(portable_python if portable_python.is_file() else sys.executable)
+            for name in ('compare_sp_source_target_file_inventories.py', 'compare_sp_source_target_permissions.py'):
+                copied = Path(directory) / name
+                shutil.copy2(COMPARE_DIR / name, copied)
+                run = subprocess.run([executable, str(copied), '--help'], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, f'{name}: {run.stderr}')
+
     def test_branded_file_report_is_portable_and_escapes_inventory_text(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
