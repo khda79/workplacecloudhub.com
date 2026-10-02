@@ -398,6 +398,44 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\Sm
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateProbe.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -ProbeSource -SourceAuthMode Default -Run
 ```
 
+### Access evidence in phase 2a
+
+Phase 2a classifies access failures from an explicit failing `WebUri` or
+`URL ... was not authorized` in the original ShareGate exception trace. It
+compares that URL's host with the row's source and destination hosts, and
+keeps the trace excerpt in `ClassifiedRows.csv` and the HTML report. Missing,
+mixed or ambiguous failing hosts stay Undetermined. The HTML and three CSVs
+show access failures by five-minute UTC window, source site/list, and both
+dimensions together. A time cluster is a clue about authentication, not proof
+of its cause.
+
+## ShareGate item pre-check (phase 2b-bis)
+
+Run `Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePrecheck.ps1`
+only on the licensed GUI machine with Windows PowerShell 5.1. Re-run phase 2a
+first so the latest `ClassifiedRows.csv` contains the new access attribution.
+Both DryRun and Run require an explicit `-WhatIf`; the script refuses to start
+without it. Only `-Run -WhatIf` imports ShareGate. It groups access cases by
+source/destination list, connects with the current Windows user on-prem and
+`Connect-Site -Browser` for SPO, then invokes exactly one
+`Copy-Content -SourceItemId <id> -WhatIf` per distinct keyed item. It never
+invokes a migration without `-WhatIf` or any other Copy cmdlet.
+
+Each returned ShareGate pre-check result is exported with `Export-Report` to
+a separate CSV in a private `ShareGate/Diagnostics/Precheck-<timestamp-id>/Reports`
+folder. `Precheck-Items.csv` records one status per item and is updated
+atomically as the run progresses. `Precheck-SkippedRows.csv` and `Precheck.log`
+record exclusions and execution details. Statuses distinguish a source 401,
+destination 401, 401 without an attributable side, another pre-check error,
+no 401 observed, and undetermined results. No 401 observed does not prove a
+full migration will succeed; the pre-check may omit work performed during a
+real copy. The script does not apply user mappings or migration copy options.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGatePrecheck.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -WhatIf -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGatePrecheck.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -WhatIf -Run
+```
+
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
 `TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
