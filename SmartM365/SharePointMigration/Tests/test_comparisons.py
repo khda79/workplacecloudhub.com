@@ -28,6 +28,7 @@ def load(name):
 FILES = load('compare_sp_source_target_file_inventories')
 PERMISSIONS = load('compare_sp_source_target_permissions')
 GLOBAL = load('build_global_report')
+GLOBAL_PERMISSIONS = load('build_global_permissions_report')
 EVIDENCE = load('scan_evidence')
 HTML = load('report_html')
 
@@ -143,17 +144,23 @@ class PermissionComparisonTests(unittest.TestCase):
 
 
 class HtmlReportTests(unittest.TestCase):
+    def test_public_branding_template_has_no_client_logo(self):
+        template = json.loads((ROOT / 'Config' / 'report-branding.json.template').read_text(encoding='utf-8'))
+        self.assertEqual(template['ClientLogoPath'], '')
+
     def test_client_logo_is_embedded_only_when_valid(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
-            branding = project / 'Migrations' / 'branding'
+            branding = project / 'Config'
             branding.mkdir(parents=True)
             logo = branding / 'client-logo.png'
             logo.write_bytes(b'\x89PNG\r\n\x1a\n' + b'example')
-            (branding / 'branding.json.txt').write_text(json.dumps({'ClientLogoFile': logo.name}), encoding='utf-8')
+            (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': logo.name}), encoding='utf-8')
             with patch.object(HTML, '__file__', str(project / 'Scripts' / 'Compare' / 'report_html.py')):
                 self.assertIn('alt="Client logo"', HTML.client_logo_html())
-                (branding / 'branding.json.txt').write_text(json.dumps({'ClientLogoFile': '../client-logo.png'}), encoding='utf-8')
+                (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': '../client-logo.png'}), encoding='utf-8')
+                self.assertEqual(HTML.client_logo_html(), '')
+                (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': '..\\client-logo.png'}), encoding='utf-8')
                 self.assertEqual(HTML.client_logo_html(), '')
 
     def test_global_report_uses_latest_summary_and_exposes_metrics(self):
@@ -179,7 +186,9 @@ class HtmlReportTests(unittest.TestCase):
             self.assertEqual(row['SourceScannedAt'], '2026-10-02 08:00:00')
             self.assertEqual(row['MissingInTarget'], '2')
             self.assertIn('https://source/sites/example', output.read_text(encoding='utf-8'))
-            self.assertIn('Download Excel', output.read_text(encoding='utf-8'))
+            page = output.read_text(encoding='utf-8')
+            self.assertIn('Open Excel report', page)
+            self.assertLess(page.index('Open Excel report'), page.index('<p class="intro">'))
             with zipfile.ZipFile(output.with_suffix('.xlsx')) as package:
                 self.assertIsNone(package.testzip())
                 workbook = ET.fromstring(package.read('xl/workbook.xml'))
@@ -190,6 +199,38 @@ class HtmlReportTests(unittest.TestCase):
                 self.assertEqual(sheet.find(".//x:c[@r='B2']/x:v", namespace).text, '0.8')
                 self.assertEqual(sheet.find(".//x:c[@r='B2']", namespace).get('s'), '2')
                 self.assertEqual(sheet.find(".//x:c[@r='E2']", namespace).get('s'), '1')
+
+    def test_global_permissions_report_uses_latest_summary_and_excel_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migration = root / 'Migrations' / 'Example'
+            migration.mkdir(parents=True)
+            (migration / 'migration.config.psd1').write_text("@{Name='Example'}", encoding='utf-8')
+            (migration / 'migration.mapping.txt').write_text('https://source/sites/example https://target/sites/example\n', encoding='utf-8')
+            for run_stamp, matched in [('20261001-100000', '5'), ('20261002-100000', '8')]:
+                folder = migration / 'comparisons' / 'permissions' / ('Example-permissions-' + run_stamp)
+                folder.mkdir(parents=True)
+                with (folder / 'Summary.csv').open('w', encoding='utf-8', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedPermissions', 'MissingInSPO', 'ExtraInSPO'])
+                    writer.writeheader()
+                    writer.writerow({'SourceCsv': 'SP2019-PermissionInventory-Example-20261002-080000.csv',
+                                     'TargetCsv': 'SPO-PermissionInventory-Example-20261002-090000.csv',
+                                     'SourceUniqueKeys': '10', 'TargetUniqueKeys': '9', 'MatchedPermissions': matched,
+                                     'MissingInSPO': '2', 'ExtraInSPO': '1'})
+            output = GLOBAL_PERMISSIONS.build(root / 'Migrations', root / 'out')
+            self.assertTrue(output.is_file())
+            with output.with_suffix('.csv').open(encoding='utf-8-sig', newline='') as handle:
+                row = next(csv.DictReader(handle, delimiter=';'))
+            self.assertEqual(row['SuccessPercent'], '80.00%')
+            self.assertEqual(row['MatchedPermissions'], '8')
+            page = output.read_text(encoding='utf-8')
+            self.assertIn('Global permissions comparison report', page)
+            self.assertLess(page.index('Open Excel report'), page.index('<p class="intro">'))
+            with zipfile.ZipFile(output.with_suffix('.xlsx')) as package:
+                self.assertIsNone(package.testzip())
+                workbook = ET.fromstring(package.read('xl/workbook.xml'))
+                self.assertEqual([node.get('name') for group in workbook if group.tag.endswith('sheets') for node in group],
+                                 ['Latest permissions', 'Definitions'])
 
     def test_manifest_records_true_row_count_and_sha256(self):
         with tempfile.TemporaryDirectory() as directory:

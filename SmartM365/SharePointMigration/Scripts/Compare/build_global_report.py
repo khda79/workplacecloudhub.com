@@ -42,8 +42,11 @@ DATE_FIELDS = {"ComparedAt", "SourceScannedAt", "TargetScannedAt"}
 DECIMAL_FIELDS = {"ScanGapHours", "OldestScanAgeAtCompareHours"}
 
 
-def write_global_workbook(rows, fields, headings, xlsx_path):
+def write_global_workbook(rows, fields, headings, xlsx_path, *, count_fields=None, decimal_fields=None,
+                          definitions=None, sheet_name="Latest comparisons"):
     """Use the project's dependency-free OOXML writer and preserve Excel value types."""
+    count_fields = COUNT_FIELDS if count_fields is None else count_fields
+    decimal_fields = DECIMAL_FIELDS if decimal_fields is None else decimal_fields
     COLUMN_WIDTHS.update({
         "Migration": 24, "Status": 29, "Evidence": 64, "Source": 58,
         "Destination": 58, "Detail": 65, "Compared": 22, "Source scan": 22,
@@ -64,17 +67,18 @@ def write_global_workbook(rows, fields, headings, xlsx_path):
                 sheet.write(cell_xml(excel_row, column, f"{float(value[:-1]) / 100:.12g}", is_percent=True))
             else:
                 sheet.write(cell_xml(excel_row, column, value,
-                                     is_numeric=field in COUNT_FIELDS or field in DECIMAL_FIELDS,
+                                     is_numeric=field in count_fields or field in decimal_fields,
                                      is_date=field in DATE_FIELDS))
         sheet.write('</row>\n')
     sheet_xml_end(sheet, len(rows) + 1, len(fields))
 
-    definitions = [
+    if definitions is None:
+        definitions = [
         ("Success %", "Matched files / source unique keys in the compared scope. Extra target files are separate."),
         ("Scan dates", "Derived from inventory CSV filenames in this overview; verify scan receipts before migration acceptance."),
         ("Evidence alerts", "The overview flags scan gaps above 12 hours and an oldest scan above 24 hours at comparison."),
         ("Filtered rows", "A 100% success rate does not cover source or destination rows excluded by the scope filter."),
-    ]
+        ]
     note_sheet = StringIO()
     sheet_xml_start(note_sheet, ["Field", "Definition"])
     for excel_row, values in enumerate([("Field", "Definition"), *definitions], start=1):
@@ -87,7 +91,7 @@ def write_global_workbook(rows, fields, headings, xlsx_path):
         note_sheet.write('</row>\n')
     sheet_xml_end(note_sheet, len(definitions) + 1, 2)
 
-    sheets = ["Latest comparisons", "Definitions"]
+    sheets = [sheet_name, "Definitions"]
     comparison_xml = sheet.getvalue().replace(
         "<sheetViews>", f'<dimension ref="A1:{column_name(len(fields))}{len(rows) + 1}"/>\n<sheetViews>', 1)
     definitions_xml = note_sheet.getvalue().replace(
@@ -109,6 +113,14 @@ def write_global_workbook(rows, fields, headings, xlsx_path):
         archive.writestr("docProps/core.xml", doc_props_core())
         archive.writestr("xl/worksheets/sheet1.xml", comparison_xml)
         archive.writestr("xl/worksheets/sheet2.xml", definitions_xml)
+
+
+def download_bar(xlsx_path, csv_path):
+    excel_link = escape(quote(Path(xlsx_path).name), quote=True)
+    csv_link = escape(quote(Path(csv_path).name), quote=True)
+    return (f'<div class="download-bar" aria-label="Report downloads"><strong>Download this report</strong>'
+            f'<a class="download-primary" href="{excel_link}">Open Excel report</a>'
+            f'<a class="download-secondary" href="{csv_link}">Download CSV</a></div>')
 
 
 def stamp(value):
@@ -232,7 +244,7 @@ def build(migrations_root, output_directory):
     output_directory = Path(output_directory)
     rows = collect(migrations_root)
     output_directory.mkdir(parents=True, exist_ok=True)
-    name = "Global-Comparison-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
+    name = "Global-File-Comparison-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
     csv_path = output_directory / (name + ".csv")
     html_path = output_directory / (name + ".html")
     xlsx_path = output_directory / (name + ".xlsx")
@@ -266,11 +278,11 @@ def build(migrations_root, output_directory):
     table += "".join(f"<th scope=\"col\">{escape(item)}</th>" for item in headings) + "</tr></thead><tbody>"
     table += "".join(body_rows) if body_rows else f'<tr><td colspan="{len(fields)}">No file comparisons available.</td></tr>'
     table += '</tbody></table></div></section>'
-    table += f'<p><a href="{escape(quote(xlsx_path.name), quote=True)}">Download Excel</a> · <a href="{escape(quote(csv_path.name), quote=True)}">Download CSV</a></p>'
     cards = metric_card("Migrations with comparisons", len(rows), "ok")
     cards += metric_card("Inconclusive inventories", sum(row["ValidationStatus"] == "InconclusiveEmptyInventory" for row in rows), "note")
-    document = render_report("Global comparison report", "Migration portfolio", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                             "Review scan freshness", "note", cards, table, "Generated from local comparison summaries")
+    document = render_report("Global file comparison report", "Migration portfolio", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                             "Review scan freshness", "note", cards, table, "Generated from local comparison summaries",
+                             download_html=download_bar(xlsx_path, csv_path))
     html_path.write_text(document, encoding="utf-8")
     return html_path
 

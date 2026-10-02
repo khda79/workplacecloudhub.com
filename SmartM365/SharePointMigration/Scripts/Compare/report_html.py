@@ -51,6 +51,11 @@ main { width: min(1440px, calc(100% - 40px)); margin: 28px auto 48px; }
 .brand img { display: block; width: 145px; max-height: 100px; object-fit: contain; object-position: left center; }
 .client-brand { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
 .client-brand img { max-width: 180px; max-height: 72px; object-fit: contain; background: white; padding: 5px; border-radius: 6px; }
+.download-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 16px 0; padding: 13px 18px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+.download-bar strong { margin-right: auto; }
+.download-primary { display: inline-block; padding: 9px 15px; border-radius: 7px; background: #086db8; color: white; font-weight: 700; text-decoration: none; }
+.download-primary:hover { background: #005a9e; color: white; }
+.download-secondary { font-weight: 600; }
 .brand-name { font-weight: 750; font-size: 16px; letter-spacing: .01em; }
 .brand-product { color: #c9e3ff; font-size: 12px; }
 .eyebrow { color: #9ed3ff; font-size: 11px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
@@ -127,41 +132,49 @@ def metric_card(label, value, tone):
     )
 
 
-def logo_html():
-    logo = Path(__file__).resolve().parents[2] / "WorkplaceCloudHub-lockup-WPF.png"
-    if not logo.is_file():
+def _branding_config():
+    config = Path(__file__).resolve().parents[2] / "Config" / "report-branding.json.txt"
+    if not config.is_file():
+        return {}
+    try:
+        data = json.loads(config.read_text(encoding="utf-8-sig"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _logo_data_uri(file_name, max_bytes, directory):
+    if not isinstance(file_name, str) or not file_name or any(char in file_name for char in ("/", "\\", ":")) or file_name in (".", ".."):
         return ""
-    encoded = base64.b64encode(logo.read_bytes()).decode("ascii")
-    return f'<img src="data:image/png;base64,{encoded}" alt="WorkplaceCloudHub">'
+    logo = Path(__file__).resolve().parents[2] / directory / file_name
+    try:
+        if not logo.is_file() or logo.stat().st_size > max_bytes:
+            return ""
+        data = logo.read_bytes()
+    except OSError:
+        return ""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif data.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    else:
+        return ""
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def logo_html():
+    name = _branding_config().get("WorkplaceCloudHubLogoPath", "WorkplaceCloudHub-lockup-WPF.png")
+    uri = _logo_data_uri(name, 1024 * 1024, "")
+    return f'<img src="{uri}" alt="WorkplaceCloudHub">' if uri else ""
 
 
 def client_logo_html():
-    """Optional centrally configured logo; keep reports self-contained."""
-    branding = Path(__file__).resolve().parents[2] / "Migrations" / "branding"
-    config = branding / "branding.json.txt"
-    if not config.is_file():
-        return ""
-    try:
-        chosen = json.loads(config.read_text(encoding="utf-8")).get("ClientLogoFile", "")
-        if chosen != Path(chosen).name:
-            return ""
-        logo = branding / chosen
-        if not logo.is_file() or logo.stat().st_size > 200 * 1024:
-            return ""
-        data = logo.read_bytes()
-        if data.startswith(b"\x89PNG\r\n\x1a\n"):
-            mime = "image/png"
-        elif data.startswith(b"\xff\xd8\xff"):
-            mime = "image/jpeg"
-        else:
-            return ""
-        encoded = base64.b64encode(data).decode("ascii")
-        return f'<div class="client-brand"><img src="data:{mime};base64,{encoded}" alt="Client logo"></div>'
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return ""
+    """Embed the logo named by the local SharePointMigration configuration."""
+    uri = _logo_data_uri(_branding_config().get("ClientLogoPath", ""), 200 * 1024, "Config")
+    return f'<div class="client-brand"><img src="{uri}" alt="Client logo"></div>' if uri else ""
 
 
-def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html=""):
+def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html="", download_html=""):
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -184,6 +197,7 @@ def render_report(title, report_kind, generated_at, status_text, status_class, c
     </div>
     <div class="badge {escape(status_class)}" role="status">{escape(status_text)}</div>
   </header>
+  {download_html}
   <p class="intro">This summary uses the selected inventory files. Review their scan logs before accepting the comparison as complete.</p>
   {alert_html}
   <div class="metrics" aria-label="Comparison metrics">{cards_html}</div>

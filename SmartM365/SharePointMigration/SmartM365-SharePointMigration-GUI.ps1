@@ -562,6 +562,10 @@ function Open-InExplorer {
             </Grid>
           </Border>
 
+          <Button x:Name="btnGlobalFileReport" Content="Global file comparison report"
+                  ToolTip="Generate HTML, Excel and CSV reports for the latest file comparisons"
+                  Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
+
         </StackPanel>
 
         <!-- PERMISSIONS -->
@@ -659,6 +663,10 @@ function Open-InExplorer {
             </Grid>
           </Border>
 
+          <Button x:Name="btnGlobalPermissionsReport" Content="Global permissions comparison report"
+                  ToolTip="Generate HTML, Excel and CSV reports for the latest permissions comparisons"
+                  Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
+
         </StackPanel>
 
         <!-- OPERATIONS -->
@@ -735,10 +743,6 @@ function Open-InExplorer {
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0" Margin="0,0,12,0">
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-              <Button x:Name="btnGlobalReport" Content="Global report" ToolTip="Generate HTML, Excel and CSV reports" Style="{StaticResource Btn}" Padding="10,5"/>
-              <Button x:Name="btnClientLogo" Content="Client logo..." Style="{StaticResource BtnGhost}" Margin="8,0,0,0" Padding="10,5"/>
-            </StackPanel>
             <TextBlock Text="SHARED ACTIVITY" Style="{StaticResource SectionLabel}" Margin="0,0,0,8"/>
             <ListBox x:Name="listActivity" BorderBrush="#DDE7F0" BorderThickness="1"
                      FontSize="11" Height="210" ScrollViewer.HorizontalScrollBarVisibility="Auto" Margin="0,0,0,14"/>
@@ -898,8 +902,8 @@ $txtLogContent = ctrl 'txtLogContent'
 $btnOpenLogDir = ctrl 'btnOpenLogDir'
 $btnRefreshLogs= ctrl 'btnRefreshLogs'
 $btnOpenRunLog = ctrl 'btnOpenRunLog'
-$btnGlobalReport = ctrl 'btnGlobalReport'
-$btnClientLogo = ctrl 'btnClientLogo'
+$btnGlobalFileReport = ctrl 'btnGlobalFileReport'
+$btnGlobalPermissionsReport = ctrl 'btnGlobalPermissionsReport'
 
 # Config
 $lblConfigPath = ctrl 'lblConfigPath'
@@ -1649,67 +1653,41 @@ $btnOpenLogDir.Add_Click({
 
 $btnRefreshLogs.Add_Click({ Refresh-LogList })
 
-$btnGlobalReport.Add_Click({
+function Invoke-GlobalComparisonReport {
+    param([ValidateSet('Files', 'Permissions')][string]$Kind)
+
     $activity = $null
+    $reportLabel = if ($Kind -eq 'Files') { 'files' } else { 'permissions' }
     try {
-        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action 'GlobalReport'
+        $action = if ($Kind -eq 'Files') { 'GlobalFileComparisonReport' } else { 'GlobalPermissionsComparisonReport' }
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action $action
         $python = Join-Path $script:ScriptRoot 'Tools\Python\python.exe'
         if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
             $python = (Get-Command python -ErrorAction Stop).Source
         }
-        $generator = Join-Path $script:ScriptRoot 'Scripts\Compare\build_global_report.py'
+        $generatorName = if ($Kind -eq 'Files') { 'build_global_report.py' } else { 'build_global_permissions_report.py' }
+        $generator = Join-Path $script:ScriptRoot "Scripts\Compare\$generatorName"
         $migrationRoot = Join-Path $script:ScriptRoot 'Migrations'
         $reportDirectory = Join-Path $migrationRoot 'reports\global'
+        if ($Kind -eq 'Permissions') { $reportDirectory = Join-Path $reportDirectory 'permissions' }
         $result = @(& $python $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
         if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
         $reportPath = [string]($result | Select-Object -Last 1)
         if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "Report was not created: $reportPath" }
         $excelPath = [System.IO.Path]::ChangeExtension($reportPath, '.xlsx')
         if (-not (Test-Path -LiteralPath $excelPath -PathType Leaf)) { throw "Excel report was not created: $excelPath" }
-        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Global report: $reportPath; Excel: $excelPath"
+        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Global $reportLabel comparison report: $reportPath; Excel: $excelPath"
         Open-InExplorer $reportPath
     }
     catch {
         if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
-        [System.Windows.MessageBox]::Show("Could not generate global report:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+        [System.Windows.MessageBox]::Show("Could not generate global $reportLabel comparison report:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
     }
     finally { Refresh-ActivityList }
-})
+}
 
-$btnClientLogo.Add_Click({
-    $dialog = [Microsoft.Win32.OpenFileDialog]::new()
-    $dialog.Title = 'Choose a client logo (PNG or JPEG, up to 200 KB)'
-    $dialog.Filter = 'Image files (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg'
-    if ($dialog.ShowDialog($script:Window) -ne $true) { return }
-    $activity = $null
-    try {
-        $bytes = [System.IO.File]::ReadAllBytes($dialog.FileName)
-        if ($bytes.Length -gt 200KB -or $bytes.Length -lt 8) { throw 'Logo must be at most 200 KB and contain image data.' }
-        $isPng = [System.BitConverter]::ToString($bytes, 0, 8) -eq '89-50-4E-47-0D-0A-1A-0A'
-        $isJpeg = $bytes[0] -eq 255 -and $bytes[1] -eq 216 -and $bytes[2] -eq 255
-        if (-not $isPng -and -not $isJpeg) { throw 'Only PNG and JPEG logos are supported.' }
-        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action 'SetClientLogo'
-        $brandingDirectory = Join-Path $script:ScriptRoot 'Migrations\branding'
-        [void][System.IO.Directory]::CreateDirectory($brandingDirectory)
-        $extension = if ($isPng) { '.png' } else { '.jpg' }
-        $logoName = 'client-logo-' + [guid]::NewGuid().ToString('N') + $extension
-        [System.IO.File]::WriteAllBytes((Join-Path $brandingDirectory $logoName), $bytes)
-        $configPath = Join-Path $brandingDirectory 'branding.json.txt'
-        $temporaryPath = Join-Path $brandingDirectory ('branding-' + [guid]::NewGuid().ToString('N') + '.tmp')
-        try {
-            [System.IO.File]::WriteAllText($temporaryPath, (@{ ClientLogoFile = $logoName } | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
-            Move-Item -LiteralPath $temporaryPath -Destination $configPath -Force
-        }
-        finally { if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force } }
-        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Client logo configured: $logoName"
-        [System.Windows.MessageBox]::Show('Client logo saved. It will appear in newly generated HTML reports.', $script:AppName, 'OK', 'Information') | Out-Null
-    }
-    catch {
-        if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
-        [System.Windows.MessageBox]::Show("Could not save client logo:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
-    }
-    finally { Refresh-ActivityList }
-})
+$btnGlobalFileReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Files' })
+$btnGlobalPermissionsReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Permissions' })
 
 $listActivity.Add_SelectionChanged({
     $sel = $listActivity.SelectedItem
@@ -1779,8 +1757,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKsKdLgQ3T/EKw
-# 6qkfqTbwJcPL6k9l3cHiFmbwW4lAsKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUQX8vCGEeEYEJ
+# lyEpEUVWvrX8KuCCMSHRultn3VPQuaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1810,14 +1788,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMoB0VHWc5HEOQM/hidSq1
-# MDXm7SWzMx+o6pRSGrWfOTANBgkqhkiG9w0BAQEFAASCAYCfsLnu+jxXiUcCEpe+
-# ZfkAbOcWXD5kPR3ZWZ8kDzFG/EWW+OyjRuwtHSUBo5y9kY43xzwEsctT0plhywdj
-# n5dyfnxipFD+lNUF1eHEkaHSfsHQFry0z/mMWIaLKHeSFJ0yq4gAfI9oTf2UtXYB
-# BnqqdhYO/zsuBmYiXmcbKdG6rvXDwU84tSkXW8D+in694VbGGvWWMoGPW5uyL1GC
-# sWE5xYjgArM5OBjHTjvZLrqllvccRIJf+VIzWIDaSo7Ba272dtpvcB/0cO5Yo9kV
-# V2loRwyugU/Y1LqQ8TxcEPrbEhq5oO4jh6FxpI3xvaH4hiAgWc5+e5QkhaQUCRv+
-# L8ZAComzx4PjspQDan/oHuJGtfpDTnr6FsNjvVkmfAJGb3zGdNVSgELmZMyG6yPL
-# 6/aWZUg0ervMPeaMQ5bfQjFFnCvByHghGWsS+k/3ELs/flyPuiKuGnJ7IA7G5RCu
-# Jur7hXXgEFZfVZwcvFOn+jDnRTlXjGkDCbh6T3HGdbThGIc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAe/SuYKjoc4SttmuFd2ok7
+# Q890srdvJb8NwOmMFBUbxTANBgkqhkiG9w0BAQEFAASCAYBCq1DQBvEcvs7Xzc6e
+# qoyzYbVwHC2lUI7stB37hhbAC777NN721ZI8fc5W9T80XVDWHMzhRx3H+aGO8LxV
+# THEsUg8ugb4uZRmtd/xW2asbHLwRiihS/+Phsid0xy3lIq4DZqS7L+Rpm677Vcwp
+# HAd9FicTes5hA0K3R9ALmArERY/bv3QTwWgaVXdRQrE35O6QJyb4FDAOhDP2w15y
+# ShShxd0AkAsiOa3ek5FEPSUPCWF0fAOUkQE/7uThBKvPzG/bIE33gM9MLE0YvKMS
+# 8GPZ5U73FgtnTWbeCPMWS7KAoCLRCNMR9zlKjJH/V0gj2CCG0Jz18byi54jTbPkn
+# iTxH1KU3uPOv5Tny/CcuE4o+kmujV5J091lHmrMeW0pf2Z9pE9Xbv4Kxs+Kig6Yu
+# FigjjsTIguEDaO8gi222WuCFKHuhud5JXAep0VpDOp3hOAho/FW5kpwSJU69zT2X
+# 4uiJWH4FCEaANDrsjWGYCfQUfFB+GWYCfDA5/GhDGKhLX2g=
 # SIG # End signature block

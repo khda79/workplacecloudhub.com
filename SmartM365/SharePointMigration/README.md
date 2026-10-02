@@ -274,12 +274,21 @@ unverified scans for review when an override allowed comparison to continue.
 
 The file report displays `SuccessPercent = matched files / source unique keys`
 within the compared scope. Additional target files and filtered rows are
-displayed separately; 100% does not certify migration completeness. In the GUI
-Logs tab, **Global report** builds offline HTML, Excel and CSV tables from each
-migration's latest file `Summary.csv` under `Migrations/reports/global`.
-**Client logo...** accepts a PNG or JPEG up to 200 KB and stores it in the
-shared, ignored `Migrations/branding` folder. Newly generated HTML reports
-embed the logo, so viewers do not need access to the logo file.
+displayed separately; 100% does not certify migration completeness. In the GUI,
+**Global file comparison report** in Files builds offline HTML, Excel and CSV
+tables from each migration's latest file `Summary.csv` under
+`Migrations/reports/global`. **Global permissions comparison report** in
+Permissions does the same for the latest top-level permission `Summary.csv`
+under `Migrations/reports/global/permissions`. Both HTML reports show a prominent
+Excel link above the metrics.
+
+Report branding is configured in `Config/report-branding.json.txt`, based on
+`Config/report-branding.json.template`. `WorkplaceCloudHubLogoPath` names a
+PNG or JPEG in the SharePointMigration root. `ClientLogoPath` names an optional
+PNG or JPEG in `Config`; leave it empty to show only the WorkplaceCloudHub logo.
+Newly generated HTML reports embed the images, so viewers do not need access
+to the original files. The local `.json.txt` configuration and client image
+are ignored by Git and must be copied privately when deploying another clone.
 
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
