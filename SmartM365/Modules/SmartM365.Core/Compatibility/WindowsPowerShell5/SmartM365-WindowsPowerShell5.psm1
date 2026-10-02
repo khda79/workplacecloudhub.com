@@ -2050,10 +2050,11 @@ function Send-SmartM365GraphMail {
     $message = @{
         subject      = $Subject
         body         = @{ contentType = 'HTML'; content = $BodyHtml }
-        toRecipients = ConvertTo-SmartM365GraphRecipient -Recipients $toArray
+        # Always a JSON array: a single recipient would otherwise be unrolled into an object (Graph 400).
+        toRecipients = @(ConvertTo-SmartM365GraphRecipient -Recipients $toArray)
     }
-    if ($ccArray.Count -gt 0) { $message['ccRecipients'] = ConvertTo-SmartM365GraphRecipient -Recipients $ccArray }
-    $graphAttachments = ConvertTo-SmartM365GraphFileAttachment -Attachments $graphAttachmentPaths
+    if ($ccArray.Count -gt 0) { $message['ccRecipients'] = @(ConvertTo-SmartM365GraphRecipient -Recipients $ccArray) }
+    $graphAttachments = @(ConvertTo-SmartM365GraphFileAttachment -Attachments $graphAttachmentPaths)
     if ($graphAttachments.Count -gt 0) { $message['attachments'] = $graphAttachments }
 
     $body = @{ message = $message; saveToSentItems = $false } | ConvertTo-Json -Depth 12
