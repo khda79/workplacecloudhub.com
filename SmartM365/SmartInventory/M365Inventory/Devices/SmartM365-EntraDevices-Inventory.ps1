@@ -46,14 +46,14 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.15
+1.17
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
     Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.13
+    Version : 1.17
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
@@ -275,7 +275,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -573,12 +573,13 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.17"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -678,6 +679,7 @@ try {
         "trustType",
         "profileType",
         "onPremisesSyncEnabled",
+        "onPremisesSecurityIdentifier",
         "onPremisesLastSyncDateTime",
         "registrationDateTime",
         "complianceExpirationDateTime",
@@ -697,6 +699,23 @@ try {
         $devices = @(Get-MgDevice -All -Property ($deviceProperties -join ','))
     }
     $totalDeviceCount = $devices.Count
+    $devicesCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+
+    # Full source export is independent of the existing diagnostic OS/trust filters.
+    $fullDeviceColumns = @('ObjectId','DeviceId','DisplayName','OperatingSystem','OperatingSystemVersion','IsCompliant','IsManaged','ManagedBy','DeviceOwnership','Manufacturer','Model','AccountEnabled','TrustType','OnPremisesSyncEnabled','OnPremisesSecurityIdentifier','OnPremisesLastSyncDateTime','RegistrationDateTime','ApproximateLastSignInDateTime','CollectedAtUtc')
+    $fullDeviceRows = @($devices | ForEach-Object {
+        $fullRow = [ordered]@{ ObjectId = Get-SafeProperty $_ 'Id' }
+        foreach ($propertyName in $fullDeviceColumns | Where-Object { $_ -notin @('ObjectId','CollectedAtUtc') }) {
+            $nativeValue = Get-SafeProperty $_ $propertyName
+            $fullRow[$propertyName] = if ($nativeValue -is [datetimeoffset] -or $nativeValue -is [datetime]) { $nativeValue.ToString('o') } else { $nativeValue }
+        }
+        $fullRow['CollectedAtUtc'] = $devicesCollectedAtUtc
+        [pscustomobject]$fullRow
+    })
+    $fullDeviceBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_EntraDevices_All'
+    Export-SmartM365Csv -Data $fullDeviceRows -Columns $fullDeviceColumns `
+        -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $fullDeviceBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+        -LatestPath (Join-Path $LatestCsvFolderPath "$fullDeviceBaseName.csv") -NoWeeklyHistory | Out-Null
 
     WriteLog -Message "Azure Entra devices retrieved: $($devices.Count)"
     $serverAdDeviceCount = @($devices | Where-Object { (Get-SafeProperty $_ 'TrustType') -eq 'ServerAd' }).Count
@@ -823,6 +842,7 @@ try {
             "ProfileType"                     = Get-SafeProperty $_ 'ProfileType'
 
             "OnPremisesSyncEnabled"           = Get-SafeProperty $_ 'OnPremisesSyncEnabled'
+            "OnPremisesSecurityIdentifier"    = Get-SafeProperty $_ 'OnPremisesSecurityIdentifier'
             "OnPremisesLastSyncDateTime"      = Get-SafeProperty $_ 'OnPremisesLastSyncDateTime'
 
             "RegistrationDateTime"            = Get-SafeProperty $_ 'RegistrationDateTime'
@@ -1362,6 +1382,7 @@ finally {
 
     try {
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:entra_devices'
         Complete-SmartM365ExecutionContext -Status Auto
     } catch {
     }
@@ -1373,8 +1394,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaX1crouH3wUWa
-# GdNHFXUte/sdInsbJG6v5d1772+5ZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO52TRq6XTVnZB
+# zHfTsQ3fiue4dIe92h+BBOiYhGQAzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1507,31 +1528,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOhid16bRm7In3qhocL9An1aURKsACSVW8nm0yCQxIrDMA0GCSqG
-# SIb3DQEBAQUABIIBgKLbZaZ2euXRD/RB18dXpmgCNaVzcpIxoD1yL0LhufTBPZDc
-# Dz10K1+3iuChDYdpkwS3NpXgx/okxK1HnO7eGGKj+e56XD/wEuiy279+eL6mK+u3
-# ikebCoZNzau3b1Zc5OE3lV/pNNGLYTmNn5vOnihnlIi1zgVYrgJexP7y7ookbLCD
-# bq3waeq0dQqNQk3nuM5lhmYQoC685KB0efseBC762VeV/LKZgCKX+N0K6ypUXV/g
-# WpmNe8ettKbFv7LbFDNY8DkKLnMgBjYXViXyMn+2WMWNfw9tbjfhXx0j8bYFHxgu
-# 4Spw+fENLQjI0X1jVb7jcANibDW/fieEcLE+GUZ0az/mQr9/D5do2vC2daIFilfk
-# 6tE1aryn30onuRWwjecSt2CWXWof4FKDbRWSzAg1sGhfdgVjb1Zey8JUMryRfDh6
-# FGgZciS8X5VIqwwENnq/Fy6bOKdGINldoJ6hls/3EENasn6DGTqhYvJy9LfcxkVS
-# ism3kikENfK70+s9RaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG6L0X/+KvNbOZppNM4CUvMzO36mYb1Dm7KLKrgp/Zv+MA0GCSqG
+# SIb3DQEBAQUABIIBgC0qzfvYV3OF54ZKsF3OfAA85FWirGBMatogsRE1dpiItnyQ
+# Rcz5ht9grBL1o/2/lmAQJAOqPsj54eU0eauo7/IQ3PnEM8XFQsunGwzTT4mBhHRl
+# v0QXmse8j5BPfH/AymAzA/XxG5A7UH5pHLxGjKSxFxZmGT1IvlhWvE2UbrYVAgSB
+# T3F5KBuF+fIdfRJb2m0vx8FObQv15bYlt8PHy4pUN/uFwAgTNwqM8OhUp/Qd6rot
+# kCaqIJf3KtEumgt6AQrzXyOYAZye+iH7fmh9ZOsoYSO9clo6s2g/6KlNy6H2DU+q
+# g5PHIVuki3xgrS88f8MKUU7tiiz2+N77b8WK2hYzfUPODygIunqBIj5Xho85cMrp
+# 5pmWzovzg6VXWon+lwG/1Uk3hORJqbp3AaeWVKqFDnJ/qI97JX9UF9cAOfYrRHLS
+# EOBEXRpqRq5o8lPR66IkS3aHYC6BrtYNC9/5bOmZhGCn3NGzgqjaNfsfC4OTYLpC
+# N4P1PWi/2SRGv5i1LKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBuA0j/mNRaEQqlttGkApxgRkxTGqx8l40Hqyw0
-# 5mzqTjANBgkqhkiG9w0BAQEFAASCAgCguqcViRig5xu5DOLQnQmwwGwJz6T/0/rE
-# PvzZkFHo6Hss8ZlYZNdAvD6bceUlILP/OibfY2ZTAZzP3j9v0a1MpVDFYiPXD9H0
-# yxO6FwXF10ejAZEFBGjXiii2O6BnHFg1rf4PSo1isYGI8VhlxRAZIi9AM/17KzYc
-# pwk5jEVGQ0QsZw6lBDIzd383birRtbZ/SS89EmcyqwPEYF9Du944D7fgWBsxKwZ2
-# Ow3MRRu2u3ZB6pfuRSV3WHRxfA5YNGwPKkcMCaKVrPhRdQRB+ti8+frkGi9yvzY4
-# XEkXjKjd6RpOAZmOF+aQ1gQyf4H5ZYI7Qo9WhEmlpENx0kqDaAIE7YNC1tyeTRmF
-# 0xKQBUrDz376SHFtLx2eMcjqywWNVpt+aldL/vpOHFqSCPlXCtWctqUPhz08Rcx5
-# rZJlAkiab58NavceMsVSB84v8hUZflQOcHdaCMZPKHXv60HYHcA0MQelHEbWk7i9
-# wIz02JYe1Ns/A/kl8/JZUMzZPdVXDfqpy6M3rVwbkMEJk2yx7AonU38UPy63buZb
-# BFUBNK++E4kQSXinDMEVh/J4XwjyKAtjh+vXR52VDro8C982wK1l+MifKToPxLsi
-# w7jrlbC/iebvYE4q7HDInn/T6v+anfmNXQ5Ho5jf03rg0M1qwzdlss63NheKbkFf
-# dOJ1AS+Mlg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBmKvjxFZhD3vWtpbrPfz99RhA/rq1gi39i6xL8
+# wv/LGTANBgkqhkiG9w0BAQEFAASCAgCT1rdK32bvetBBPWOu/fI8WrHOlftDIqFH
+# jkV5/bmlC7XzbSbYiO8MbFoqGHDi68OZLsI57be+IF5w3eNM0VyYBl0pcZrYzwrn
+# FcxIBKxtcL95SarjizvXMCJ+p2yxyenixMg1v7oxSlKucrk9E5AyWCRpd8r1zBWJ
+# cMI/iJKf2Hpt2guTCTc3mHLEYe1spJCB7bJNcAWvZQPddRd13htY3wx/4F54/y73
+# Jt5QxXL7Odgez4SjItodzqlH8YWOerxapUR8mkuLGZ+yfHgPkcSCjk9ziB0kiCXQ
+# Zo2deQww2ttwYTeGUaCvJxDl5zS2PLOnadxVmnlMu5n3OJBBth0YYZzB2H58LIOM
+# oIteX9weHbkyFj21AhEElxqzBhh3kPulIvGliRW2K75zQsyy62mSMq5Sid6YN6Ia
+# dnT42jL7o1olLd84oyI4MNLjAwW/ktxoygKZY/20bmR8cZuVA3xDqYTsUdMRRs5/
+# kwLhd3zHrRjj7mbb1QqVqGSAOzFC6+jTm20KAWoQSKcDwws3rF608KggScZr5Mor
+# lz7CqQIn0Kv/U3wNcz+9OnhJKd0eMwUkYd/w0+POudRwkO6jHnF88iu5SLiFleny
+# cGV8iJmfi2monstEoT5VtsnG683VWnh2yumfq4IcWSL/avO2hlQNF2P+6b6nTNTx
+# KkT9CDveNA==
 # SIG # End signature block

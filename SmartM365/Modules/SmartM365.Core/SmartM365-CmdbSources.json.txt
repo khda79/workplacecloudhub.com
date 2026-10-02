@@ -1,0 +1,157 @@
+{
+  "Version": "1.0",
+  "Producers": [
+    {
+      "Script": "SmartM365-ActiveUsers-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-ActiveUsers-Inventory.current.json.txt",
+      "Scope": "CMDB:users",
+      "Files": [
+        "M365_Users_Active.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-ActiveDirectory-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt",
+      "Scope": "CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members",
+      "Files": [
+        "AD_Users_AllDomains.csv",
+        "AD_Computers_AllDomains.csv",
+        "AD_Domains_AllDomains.csv",
+        "AD_Groups_AllDomains.csv",
+        "AD_DirectoryObjects_AllDomains.csv",
+        "AD_GroupMemberships_AllDomains.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-WorkplaceScope-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-WorkplaceScope-Inventory.current.json.txt",
+      "Scope": "CMDB:group_scope,group_members,policies,policy_assignments",
+      "Files": [
+        "M365_EntraGroupMembershipScope.csv",
+        "M365_EntraGroupMemberships_All.csv",
+        "Intune_Policies_All.csv",
+        "Intune_PolicyAssignments_All.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-EntraDevices-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-EntraDevices-Inventory.current.json.txt",
+      "Scope": "CMDB:entra_devices",
+      "Files": [
+        "M365_EntraDevices_All.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Devices-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Devices-Inventory.current.json.txt",
+      "Scope": "CMDB:managed,hardware",
+      "Files": [
+        "Intune_ManagedDevices_All.csv",
+        "Intune_DeviceHardware_All.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Intune-DiscoveredApps-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Intune-DiscoveredApps-Inventory.current.json.txt",
+      "Scope": "CMDB:apps,app_relations",
+      "Files": [
+        "Intune_DiscoveredApps_Summary.csv",
+        "Intune_DiscoveredApps_AppDeviceRelations.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Licences-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Licences-Inventory.current.json.txt",
+      "Scope": "CMDB:skus,license_paths,plans,user_plans,groups",
+      "Files": [
+        "M365_Licenses_Tenant.csv",
+        "M365_Licenses_AssignmentPaths.csv",
+        "M365_Licenses_ServicePlans_Catalog.csv",
+        "M365_Licenses_UserServicePlanStates.csv",
+        "M365_EntraGroups_All.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-EXO-Mailboxes-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-EXO-Mailboxes-Inventory.current.json.txt",
+      "Scope": "CMDB:mailboxes",
+      "Files": [
+        "Exchange_EXO_Mailboxes_AllDomains.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Exchange-Local-Mailboxes-Inventory.current.json.txt",
+      "Scope": "CMDB:local_mailboxes,remote_mailboxes",
+      "Files": [
+        "Exchange_OnPrem_Mailboxes_AllDomains.csv",
+        "Exchange_OnPrem_RemoteMailboxes_AllDomains.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-SPO-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-SPO-Inventory.current.json.txt",
+      "Scope": "CMDB:sites",
+      "Files": [
+        "M365_SPO_Sites.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Teams-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Teams-Inventory.current.json.txt",
+      "Scope": "CMDB:teams,team_members",
+      "Files": [
+        "M365_Teams_Teams.csv",
+        "M365_Teams_Members.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-VerifiedDomains-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-VerifiedDomains-Inventory.current.json.txt",
+      "Scope": "CMDB:domains",
+      "Files": [
+        "M365_Entra_VerifiedDomains.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-WindowsAutopilot-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-WindowsAutopilot-Inventory.current.json.txt",
+      "Scope": "CMDB:autopilot",
+      "Files": [
+        "Intune_Autopilot_Devices.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-EndpointAnalytics-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-EndpointAnalytics-Inventory.current.json.txt",
+      "Scope": "CMDB:analytics",
+      "Files": [
+        "Intune_EndpointAnalytics_DevicePerformance.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Devices-UpgradeEligibility.ps1",
+      "Receipt": "SmartInventory_SmartM365-Devices-UpgradeEligibility.current.json.txt",
+      "Scope": "CMDB:readiness",
+      "Files": [
+        "Intune_Devices_UpgradeEligibility.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.current.json.txt",
+      "Scope": "CMDB:alerts",
+      "Files": [
+        "Intune_WindowsAutopatch_Alerts_Detail.csv"
+      ]
+    },
+    {
+      "Script": "SmartM365-M365UserActivity-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt",
+      "Scope": "CMDB:activity",
+      "Files": [
+        "M365_Users_Activity.csv"
+      ]
+    }
+  ]
+}

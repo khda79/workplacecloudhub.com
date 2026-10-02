@@ -19,7 +19,7 @@
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
-1.11
+1.13
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
@@ -251,7 +251,7 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -400,7 +400,7 @@ function Send-VerifiedDomainsTeamsAlert {
 }
 
 #region Init
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.13"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = 'InitializeScriptEnvironment'
@@ -411,6 +411,7 @@ $countVerified = 0
 
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     Start-Transcript -Path $global:logTranscriptFile -Append
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
@@ -469,7 +470,7 @@ try {
     # ==========================================================
     $currentOperation = 'RetrieveDomains'
     WriteLog -Message "Retrieving Azure AD domains via Get-MgDomain..."
-    $allDomains = Get-MgDomain -All
+    $allDomains = Get-MgDomain -All -ErrorAction Stop
 
     $verifiedDomains = $allDomains | Where-Object { $_.IsVerified -eq $true } | ForEach-Object {
         [pscustomobject]@{
@@ -508,7 +509,8 @@ try {
 
     $csvPathLast = Join-Path $LatestCsvFolderPath $OutputFileName
     WriteLog -Message ("Publishing CSV. Timestamped: {0}; latest: {1}" -f $csvPathTimestamped, $csvPathLast)
-    Export-SmartM365Csv -Data @($verifiedDomains) -TimestampedPath $csvPathTimestamped -LatestPath $csvPathLast | Out-Null
+    Export-SmartM365Csv -Data @($verifiedDomains) -TimestampedPath $csvPathTimestamped -LatestPath $csvPathLast `
+        -Columns @('Id','IsVerified','IsDefault','IsInitial','AuthenticationType','SupportedServices','AvailabilityStatus') | Out-Null
 
     # ==========================================================
     # Summary
@@ -548,6 +550,7 @@ try {
     $currentOperation = 'Cleanup'
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
     RemoveOldFiles -Path $logPath    -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile
+    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:domains'
     Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
@@ -601,8 +604,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAv+pkJt/Opcbu1
-# BigwEL/3dqfhyJmQjyjZYEDwQYNTuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi4QhzP6r5uN+Y
+# 5VrDFZFu6h7oYwjMrR5XN+awNIOs7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -735,31 +738,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICSh7hS77lBM55y1dVRc40+heHQ/F9OGCHk/sCYhiZKjMA0GCSqG
-# SIb3DQEBAQUABIIBgHs24H08c10x2SAYCjzyU+qfjd89S7pFkBXayFOUjlkKdQAA
-# MsJlipqqMxjSMky4AmHCrMKvPZNjFbYaNjF3iC5psyRJSJqJUgmLpOaxgHip8cI4
-# TvazCJc14vtr7TqTaCWUZKALJZ/bDIii4cAA9E+lldv0ve23LJ8nYMMGHFOpfGaG
-# PAbOx0vQCspUCyRswEu+jEN13uHEX7DoGOIOvM1teGDzZ2odQ8L+eREyPHiZ43vK
-# CXGB/+1NHzgl/WG6DM40t4nH6JfrGZQNDMz+dbRQedu1s7RrLTW4dXQQ+N5B4r/n
-# NDGZ8F0JKN652Wb4eJ6nvM/VSw3xGqeeYyEPjDAEy4z95sGwCtBXBdFj52XVuUQL
-# UyJLM5X3E39kTXS6PySnL2zFBXN4ju2yw1E/+0IwhErUHehCCivEXJFBZU6Y0FRh
-# H8RyTtBCXhWtLwQLBe6g16nSwTRFLybIPqkmN+HDo0qEEes7J49ciwvA1N8QJd6G
-# sxU4IeQfMNz0VTrAg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMZgpic9GASAFyCNRGW3wJ/LSCtFocVSEfV/VBRRpqW/MA0GCSqG
+# SIb3DQEBAQUABIIBgKFXsjUZhXgtfz96s2ldsw8bzQaDZBigcsDMm0MxD9ubPb2P
+# gER7XbanXhY1+egZNLCenXNDIN6iHGd3AK8fsE/VaU3ikOdN/i7o7cPhpQpqxeCj
+# OHRb4l3tKOWXIqVMKOzPc72XkeeSv3o4I72OyaSSQwOKSjRXXL19oOoiVNjAs2d3
+# sAdKetiye6VxDqiWu/1jSgiIuZdmFlh11WbQuvegpGAEmiJe3cc/uyj/UrcbZ3/T
+# +XpvQ3drD+7DfmdZfRPDg0Iy/AIQPov5pZ7h5h+8hNiNf58KGJ9Oz5wiy3vyK0+H
+# +QTfgAHd9SAU/TnkwUw8Prm0j9gJHIGo/xtT73yjwz0tF9PF4LLCImDgyJKly5pH
+# WxFh/sdmBKHIZGY8zaiIX+srJRx/lmiFU34tkVG+Sl3PjhZ8dE5tUSsntF36/aib
+# tc/VpQWRIQo0lpPVxyjBkCNDvI+eugTlVUTiDr/MlWJcNuj4IPM4BBIixwYQ8wdC
+# btd2dyTy0Jyp+7a3aaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBLhsZUg1arjMGf0AalDr+e2c9y8ztZUxrw9+yq
-# cR6o+zANBgkqhkiG9w0BAQEFAASCAgAHEmrRD5WAZ8gbukXiaJDuavNNi9uV5Irg
-# 3gWybVMCF1ZYaxXy0vBQywYne3TlO/X34nnEcQ2m+mwxNC2RtOnIKsRzRQaFgL20
-# B8ZCrujlhmRqxZryvej0Bl/E1GK60QZTtZE8qXS8gkxKzBYPYXksXr0Rsjdmlmxy
-# m8xRmbQ8L7Sd5Csn87uSGGe958QsB25ymavPF5jukaOi4GoWAmaad5fnqV3sp+JP
-# ueqdzU4pJSWz3IPfbIL+xf1MX1N24scPLciAokXTA8DlmUeNt5lHojvki1zSgRu6
-# Hr+xAW6eaLmf8hPkYuNepdtyPInqHKeJmcKfloylaCx42S9Q+/3ztDX/t3tfz/Uy
-# m0qiB/mhQ2CKCUk9ppItS+WU6WStOjV5zHODgxFibkY3YjTq//YeiPNSshTTkNGx
-# 5C9w3lusaAQX1ouPTUH1K1WgPNOdKz+OvRPEpi1khXCXQGaXEq1cHMLloUDDbgE+
-# CZWS6EFAt1Bn0y4Ebx9lYAblhD5VT0+DT97cJAyprVOhOTEQkiDNyUlvKfpGPQGx
-# N+JulJcO1glBV+nPKk195aGwSDhrmwHxpbBdQ80XZvMhtCnAPmTJaxVeTHAjWT66
-# J9FeL2z7joriipDNmKbYNzS+062FNncmQcjfrDUiYtX3Biwfq4TS3LO4e+Ji94K7
-# QZwLRXWaWg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# NDFaMC8GCSqGSIb3DQEJBDEiBCAQ85JYv16OrR//O6PvPhVt+zu7yC5cNS7rrOg0
+# 2TuSQjANBgkqhkiG9w0BAQEFAASCAgBqM/OBnsWprObNWjzNAFjrBowkGOfWxxHg
+# eg2ckQZNjPEgc5H88aGxxGyAe/k4VLjTWPpsmF0Su/AlQT4pZQ6dDQaBlfojsXwB
+# CItXllxykZO9PLBW0tdyoQdY1hoSfvWKu4eYAseHAc3KHJLyRx+IC4X01sObdQJp
+# gOqzMgp3pBvP3wLvvMCmflEZvcgpOyyoqkUt9IQEa2Ha3DFTpogI0T41ch0145tq
+# oYmsVdY+JnyCI15lGBnNPdZFwZKihOXz5+dbjt6n6hoqyvM87DrHmzXDEtnLpgGM
+# KeGogL8peZI0dPSbUcUZt73zQJNZXZvW8LwL8EgjY7Hf7tEBfIRQ7j+pQD3eg+8J
+# GgUGh4fLJJcKzmeFDWmK5zROQtarJEbzgapJ/MV6/8tm8uxHHPnjDpSK665ZFS0S
+# ZgAzIef5femPQg/nbuMf4EVKoSFdyfXDgkQ9r/iNJe7akTLMyQfN/HqhIxMblLNm
+# F91bO3WSBvniKDF8KkjzL77Xnd/HgRyEN3Nx0QcLrgPGAO+B7AW5iFH3qKVPm9JX
+# tku2OH+084kuUbPygIQvlU8g91REd2P8Xcl09v/C+CRQk0kCwVV+vr9QbSaa8DRU
+# TJADnej2+0wgh7WYkvEZcb5wFb0nwN1arPuJdfHh+q6cv6iUER4QP2WcySoLjsnw
+# yRZUqam9gQ==
 # SIG # End signature block

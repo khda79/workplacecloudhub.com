@@ -9,6 +9,7 @@
     "Intune_WindowsUpdate_Status.csv", "Intune_EndpointAnalytics_DevicePerformance.csv",
     "Intune_EndpointAnalytics_StartupDevices.csv", "M365_Entra_Devices_HardwareIdConflicts.csv",
     "M365_Entra_Devices_RemovalCandidates.csv", "Intune_DiscoveredApps_Summary.csv",
+    "Intune_DiscoveredApps_AppDeviceRelations.csv",
     "M365_Teams_Teams.csv", "M365_Teams_UserActivity.csv", "M365_SPO_Sites.csv",
     "M365_SharePoint_UserActivity.csv", "M365_OneDrive_Usage.csv", "M365_Copilot_UserUsage.csv",
     "Exchange_EXO_Mailboxes_AllDomains.csv", "Exchange_EXO_Mailboxes_AllDomains_Stats.csv",

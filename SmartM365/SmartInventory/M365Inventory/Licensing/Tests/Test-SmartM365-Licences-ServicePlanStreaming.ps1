@@ -6,7 +6,7 @@
     and safe retirement of duplicate weekly files. No Graph connection or
     production CSV is used.
 .VERSION
-1.0
+1.1
 #>
 
 [CmdletBinding()]
@@ -109,6 +109,12 @@ try {
     Assert-Equal (Test-Path -LiteralPath $publication.PublishedPath) $true 'Latest publication'
     Assert-Equal (Get-LicensesCsvDataRowCount -Path $publication.PublishedPath) 3 'Published rows'
 
+    $emptyBuilding = Join-Path $publishCurrent 'empty.building.csv'
+    $emptyWriter = New-LicensesServicePlanStateWriter -Path $emptyBuilding
+    Close-LicensesServicePlanStateWriter -Writer $emptyWriter
+    $emptyPublication = Publish-LicensesServicePlanStateCsvFile -BuildingPath $emptyBuilding -ExpectedRows 0 -CurrentOutputPath $publishCurrent -LatestOutputPath $publishLatest
+    Assert-Equal (Get-LicensesCsvDataRowCount -Path $emptyPublication.PublishedPath) 0 'Successful empty snapshot replaces stale state rows'
+
     $script:MaxItemsMode = $true
     $maxCurrent = Join-Path $testRoot 'max-current'
     $maxLatest = Join-Path $testRoot 'max-latest'
@@ -133,7 +139,7 @@ try {
     Assert-Equal (Test-Path -LiteralPath (Join-Path $weekWithBoth 'M365_Licenses_UserServicePlanStates_Detailed.csv')) $true 'Detailed preserved'
     Assert-Equal (Test-Path -LiteralPath (Join-Path $weekLegacyOnly 'M365_Licenses_UserServicePlanStates.csv')) $true 'Legacy-only week preserved'
 
-    $manifest = Get-Content -LiteralPath (Join-Path $weekWithBoth 'manifest.json') -Raw | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath (Join-Path $weekWithBoth 'manifest.json.txt') -Raw | ConvertFrom-Json
     Assert-Equal @($manifest.Files | Where-Object { $_ -eq 'M365_Licenses_UserServicePlanStates.csv' }).Count 0 'Manifest duplicate removed'
     function Get-ScriptLocalConfigValue {
         param($Config, [string]$Name, $DefaultValue)
@@ -170,8 +176,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEQcut5q1EalPu
-# HThq8NE/wp8fSWyfci8Oqhs6XFoL8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+rMOZthaOd/XD
+# nC2tdnUg+U8vvZBY15nZ4P0SElcmHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -304,31 +310,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM2xzOp8UF7BJpzeKAyD6cVATi8RGsvTPhaTUAMkbWc9MA0GCSqG
-# SIb3DQEBAQUABIIBgJRAItMPFDkNkfdunQ2J2+7I3IyP07pNe6xXXDKFvSA9thkd
-# WFIiQ8hs9lo6bnF239NamZ6sWR62eOCw8beI2LAHs+IHB0H003L3LbTzgJbGvIFL
-# tHecScK7k/KW+H5nzd+P1+W3Hlm4gYenmVMhCZLXkai0TQTgHHaaQe1l2Pqmq2u9
-# RG4Xm+P0231m81mlQrwF/NF+6grAZ8uZRFJHso8qDQt+rScX/SxaGwi6rkD80u4D
-# BsxpRN/nzPQco5Frlm7qZora/D+OmLMEF1sDhId3T5Rco/CKYThgSsoLQV+fh3GA
-# uVdBm2h+ZT3W9r2kP1eXjYr8EeHF1VoV12AskWSIrxEgWGaMAifSrPRCCoYm9JQ8
-# 5zegg4ULhE4KawNstLDe8yWxoxLGNts/ov3OeSu+1VlskugWSccw8vSyqpTKOkqt
-# rVjCO6l6hsJaEtZ60yNDIK+rpehuvG21a1UNrrI/cdsV1C4qHHQx6wpzT2FwiQ9e
-# d1EttOUnIc+7Tc3+XaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPRiWsgTFdnDNeejmlnqAvabhu76oQ9iSTeOwoT6kOEKMA0GCSqG
+# SIb3DQEBAQUABIIBgFmdZZ0JpvKjqldUSvcoQF8hMe/Sy55gO+G83nbo7YIXHXes
+# BM0n/ItkKpo6VSUAzfh3vZJfdhW+82CMQHq0xYGLba2hPNTxNp00Naky64NpiAVG
+# oZ0DbQL/QA1Z94HMV5tAbRL8dAN1eZfgEectblG8BLdJE8EPI6o5psEBeoYxesTP
+# xhNgsI/r65uc63DwzskabHuCOAR7YC2J7Ay1HwpDb/v6J3tq2wd4VnX8F3JEF7tE
+# 9Xis9l95UxZaiUJl8fxoQ18ag5EUFAZ3S0UU7gDXa/tWRNHe5BLMLzuC0Ni0ZIUi
+# aYN1XgJddk+RkxIlrGi2P1RTgsI4WYuZwMMQTPGojuCT2m+TncFfl2u8eyEKZYlI
+# 2wTGfnTzIvFLa+SFFU9RWV3q7ycI83a0+Vz5goNbCnw3ocBc8UnyoMSDur9jCZuz
+# VMSQ8WQ0dFUsgLiWrgq0f2uMNTt3i98aAdKdWsODalHRlOABknzHBbBPcnxx1j6i
+# 5SaZarm8txLyHTG5/aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDlaMC8GCSqGSIb3DQEJBDEiBCCsRL6LS+KlAS2O9lwy3NqsuDRU0XaJ2AFe16Hf
-# U1P2kzANBgkqhkiG9w0BAQEFAASCAgCIS9yc1WSlJm18L69Z0UeRs/fJJ73CPM+b
-# G8c+m+3J8il8cSz6hM6FKwv6n+1gt4QLF4a2/KbDQdacw2do1vr7FgkwAZN1GB3X
-# JsokXMH+Ik5Zz4AI39WX90cH5l70JTe4yrKtt7GgwF2kXdt3JHQJoNX1i/n2GX2O
-# q+tCNV8sco8Vf1nOoDjabmwOYFJKqtTlQOIawpnxnL4KK2QFEkjP//1ulFI01HTo
-# uw0B8MP+mpOTJ24ZqvOhgCxSREK7kiTZ/CIWJqehqWYnd6Jzgy+uBExJhs7EhgWl
-# tRWPl258kULBpcZxbKfTbJn24sMjuBO6A2bQ453SNRe0T5kvfey6zjQBzQOYeymn
-# QL0MzAEMCm1uRDuQO3tcE9P/qNWC/1UaEJnDwE8G/g4XULCFcT4Ep1o8CssetU46
-# NH2x/2kIPsiI2u7B2Gn4Yac3+gR7B86ThUbY9y7ue92EVIRkdnaBI9ysDEFBkuqy
-# 5oggJCXBpAEgQXjr66TBo/wlfVAPRKpmfATN/GOESFtEzBpyoiysdnArI/NRRB7l
-# LW5BsDXIktO36ykpKeK+umdADSg0aziy1GdqQxulklm6IKVfIn2muua88tYrsAyR
-# NBJwYiJc8hGkw23LQc7oVYLiB5wxECijiDAvNDSlPBEZVv1iksYocLsFOLcgyMdm
-# g/vyoAMnlg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDdaMC8GCSqGSIb3DQEJBDEiBCBj2ZoFQIR2rkAgfyTejNnDeX4qruTjc7hbcWbS
+# acVJ0TANBgkqhkiG9w0BAQEFAASCAgBGd7LnAt/7c8z6Pao+kEEWht1jEuuLT16O
+# vMLLhMf5qrc1NpSkjYZqpXws9pvtb0kpZBZzTe9OusjYvXJ9qi9KXCAveptqU+qK
+# piqXCy3FMlB6S1hiWRj6dmbQ8txywfVpI0Sw8Omj3HdITQEow+dabqfTWdPiWZfO
+# tjmlesbOXabgBfb+FHedY2hWplAP+lrT9B+g6A2G8QvU/aLK8Ab+g6GL0SZrAsLb
+# S6GH7Yoy/CUVok30VS6XJa888tlU5ObuIoLwRC8vlwP9f1OWwVokySRDKiMZB3BH
+# /uvV0x7T5p5DIwqQHpBPQrFZe6NTZirJpUUAzmGWdvc/760lydLGTCaIDF2A+rqM
+# 0lThiCgfZgauJDC0oJLKybaJgsoObR1rRLzmvX7X1hLO9OoA0JwjtO4k9ENFRsdx
+# IxaqWALjJjbBxWetKMs2qaY4q8FdTJugMV+adQUcvXcYND7bt/xBsfA+fGfd1+Ri
+# OlwQ6IXoyWrs7ICV41t5R6QgjtlwHvfoJNOfkiscb++ziY0MbAIedUJnVbB2oapv
+# SlzmHm/VI/B+xv4zUqjZ2/e6Ft6oImnE40GgaBCLfBBjVq/DqWQHwCl4t6cLjQIF
+# JWkfFMG1thWOQESFe9zG30KZRi77Byw7DzGpYMjjl95JkGqE16yBGJQqnq6gyFsG
+# QyMa+o0QKQ==
 # SIG # End signature block

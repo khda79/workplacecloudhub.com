@@ -772,6 +772,10 @@
           "name": "Application Source ID",
           "type": "string"
         },
+        { "name": "Application Product Key", "type": "string" },
+        { "name": "Product Distinct Devices", "type": "int64" },
+        { "name": "Metric Definition", "type": "string" },
+        { "name": "Collection Scope", "type": "string" },
         {
           "name": "Application Name",
           "type": "string"
@@ -904,6 +908,8 @@
           "name": "Dominant Version Coverage (%)",
           "type": "double"
         },
+        { "name": "Metric Definition", "type": "string" },
+        { "name": "Collection Scope", "type": "string" },
         {
           "name": "Evidence Status",
           "type": "string"

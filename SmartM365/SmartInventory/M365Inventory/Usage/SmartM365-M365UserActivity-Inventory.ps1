@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.21
+1.22
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.22"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -524,7 +524,7 @@ $logFolder = Join-Path -Path $logAllRoot -ChildPath $logFileBaseName
 $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseName,$runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.65' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -542,6 +542,8 @@ $global:LogTextFile = $logPath
 $global:logTextFile = $logPath
 $global:LogPath = $logFolder
 $global:logTranscriptFile = Join-Path -Path $logFolder -ChildPath ("{0}_{1}_Transcript.log" -f $logFileBaseName,$runId)
+$global:csvGeneratedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$ValidateOnly
 
 function Stop-SmartM365UsageTranscript {
     [CmdletBinding()]
@@ -612,6 +614,7 @@ try {
         RunId = $runId
     } | Out-Null
     Stop-SmartM365UsageTranscript
+    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($selectedReports | Where-Object Name -eq 'Office365ActiveUserDetail').Count -eq 1) -Scope 'CMDB:activity' -Qualifications @("M365 usage report period=$Period; acquisition time is not the workload report refresh date.")
     Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
@@ -641,8 +644,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAl3EanjJjjsXPS
-# Iwcy1GyakNPnOPVt/xoXiyOzTKpteKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdS4zj8YOuWYd5
+# gFulEA6yjHU0cKCjQ93FwM6P5oGda6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -775,31 +778,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBTsb4Vhg3bLzjqlQVhTtccag2BHOSRgJEILVRH2wu09MA0GCSqG
-# SIb3DQEBAQUABIIBgAEybW6sYdln+q5AnxCCkciV7XF5QRef9laMdWLvrkcqxfia
-# UY+sp4Dhqhlssc+ZHNEOuAf6pUe/qgBTOdqOeaCVzViPwinhwOFIWJ+PM9l+CRvK
-# vC4WlTbl6xYVxx/Bw3vp7noSrpB/yXQQVjTMRVNeHSdsPwtHUrcblMPSb8yD9poP
-# C2jGcTRD49ZND+IcuvtC0UF05of6h2APYz7y6OjfLSiP92Y2YN2oFpYSEvZSlm10
-# nDxgjqndeljEOwX/im553YHzOBtjJyUMihQrles0TO4W9O1GCkLx9Z/DxjL0p0hA
-# 0gBgWdktsbRHQkaY1eKZmzNCz88jBaM0yFui65uuHE6md1mfez8rI9pnW6CLUAUW
-# p0WHWmj/QaRjBsnHG++D9o0mtYbvjr+AJBqZVH0Xpho1O03YaMkg4lveE6a/5Rro
-# 5iVxuyGUdJuD6nawrDmYnQRAklpiXQuQCw14yrqLz6qLVzwLKqf+KP8CD/Ez4G1s
-# Kfn/26IzPt4FNGRO46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPcWg14T1g0QpEuSBCEgIMuZ3Zw6ITOVC/rUONNgEMrNMA0GCSqG
+# SIb3DQEBAQUABIIBgHIRFu6DMvpzK9rJI0T+6itDnzHzoShNkkGjAEr1en6TN3eQ
+# 9aEPioJ3dNHiWh1eLiOJpsXFJAGA0qdOP9o2Xo1WZYkL+NN8PNCdQdBG7Ik4QpBm
+# YmIAWXp2d6p7mtss9wkFIKhpfHpgLjWMJfdrxk72NqISiSNijOau3uLX0gYOkqtN
+# 2T43K8dQBXJWPtq8PDNZ3J9imzhhHHsCNjdPp8Su9WtkW7Um6Fnmsy0wNvCt8Xcr
+# 7GyEWzvSEPIAH1h/zdxU6GuVfW21I9HQeE9H+bMRiHlMWl/BcdiQU3Mo9waKtjry
+# tX7dI3BO8WxC+AmZmQ5tN76cQzXFhheda8Ln2z05hxxu1JySXPLromI7k75rSVKh
+# wRG6DquCXeC4AGe5Vkd3wM8a/hPZuBJHxeRuBKjYbrBe7inqKYgO8rT7CUhgHJYc
+# Bop2eIWeXEUVi+DePSlzbUqiI3MlMdCNiw5BtD40mZOkeaq4jTteYXT885voE6bo
+# ZQPe3Xw1a5KjxP3yf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAxODIz
-# MjlaMC8GCSqGSIb3DQEJBDEiBCA2HTD0Yx8Exu+L2RIOJkADwnQXCB7tm5KS36Xk
-# zek6IjANBgkqhkiG9w0BAQEFAASCAgARpT1Q/RbAWtfmFoVekHK7OyqwOp6P/3b8
-# Wi73/B2dQTJ82fkIyWZIiErEFcZKA9IKoWWjAFePcnrCr1oxUmmm+Hp0wNmRQ+E6
-# +mpDHGzm41LoPAxMIEfd7B/UBMXzc8l4begNgnjCDWM10mtc/dLhXzfbdXXenIUM
-# Aye6GYB1cll9hVqBF6O1iOJBWZqnM8zs5ZniuhEe51W/h+RKy+AAM5/oAnIPzNCU
-# 2Y++EmYdZRFzAT+PUt3Bm5HbJMz4jU3gS9VeDXulgRsQ816RiyvzIM3bQ4dsbr7E
-# E4P6uIPePCbDFZEnwA0OwE2wImLlYQWFqz4lKIhhApZelK6rc/ju/L7THMCxGScK
-# 1fSJIu81/slBHPdBm1BurUaO0JnWR+B2y6FyzK354S4ULzdWry3NMcGIB/KUYFTP
-# IurBv9NqBekedNCRuF0LMvbpcCC09lgmU1VainWY3yFn+rq/UbHYtxjl9HoMijOa
-# OlVJPm0xbhh4cKSyk2q54vutnJq64dgIZ5Qnts8juL2NWU0FCH2oz6ClQhOrqUMY
-# 7o89QpPyaZRpoV5Zd3T+Q73Ja7kA4uQNlixv+Mbk4Kjl7CWuawEmZ3/3tt6c3bFz
-# yV+CWIrHxLTUd6IYIrr8ACoHCBVpFIETZ1Jq0J+kS7LpSbUISwV+HYdo9iVQg4BI
-# JTmGipDi1g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDhaMC8GCSqGSIb3DQEJBDEiBCB4E23d23Q7mplQ8a//znabtRZssue+nz2YmH1j
+# JG2SBjANBgkqhkiG9w0BAQEFAASCAgCg4tHbld5wa0BzMTTER1Rhov1rLl+eL9Fg
+# tkUdgv/kGs56iWJ+2PMkhSpd75GyQbTdukMQu/2Vp3t8/Xg7JDbShLf3avuT6PF7
+# K0+SjEM5mHgeabK/sPsMPKTaET6SLGDNLz8VlEglmJcsTrOpfp0B4x1emXQP4+m4
+# dSYUciAzjiPQAxP9njxtGJwWAZIZVvHsZwycUg0hV3xrsVkjEkfnovkD7MM64Adn
+# i+lsMaJn7KMRXwkMNg8ia86+bW5CbjRuP10MSLmAO0nt1nQGCdDINIZet8uN3uf0
+# lcLTdNl77iMJo4QmbexyyvqeyvrEVVY+KNJDROO5iSY0fLBt/zsPqF4QUeuq9N0r
+# ogXTh00w0XohRWILSDv0XE/MSvgj/dQwzCOOnRFTh/1P7cmAoMS2zRCtwEYqC0PJ
+# +Urvf3H/RbD65uuWoj4J4sI2OCHFMyi62udVSyujS5XgsnJZg2IuqpkOzi500BiT
+# O2F9UARtVIL+8O9oHJ6kH0ACUs7hCz7B7lk12r2VNGLQzkcZioPZE/Ka1pidQEBq
+# ygFDWU6DEiBI4q51Hm60AZsgEi9lZr4b2nSZfRCjDwmEJ2RGQYsGdu6XhLdo0Kam
+# 5m0YqQJafTMDvbCt3FL15DDLyJ0E95CXoHSH6kmpf0VJEn1BeCHQlZdkFu4owva5
+# jh7mz2jT0g==
 # SIG # End signature block

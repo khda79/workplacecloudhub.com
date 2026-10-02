@@ -1,0 +1,385 @@
+"""Current-only SmartInventory CMDB preparation. Python 3.10+, standard library.
+
+No APIs, collector execution, report edits or history. Completion evidence is
+mandatory; transport timestamps are never treated as acquisition timestamps.
+"""
+import argparse
+import csv
+import datetime as dt
+import hashlib
+import json
+import os
+import shutil
+import uuid
+from pathlib import Path
+
+VERSION = '0.3.0'
+OWNER = 'SmartInventory-CMDB-Prepared'
+CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
+REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
+MANIFEST = 'current.json.txt'
+UTC = dt.timezone.utc
+
+
+def load_json(path):
+    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+
+
+def sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def utc(value):
+    try:
+        date = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if date.tzinfo is None:
+            raise ValueError()
+        return date.astimezone(UTC)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError('Acquisition timestamp requires an explicit timezone') from None
+
+
+def rows(path):
+    with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
+            raise ValueError('Missing or duplicate CSV header: ' + Path(path).name)
+        for row in reader:
+            if None in row or any(value is None for value in row.values()):
+                raise ValueError('Malformed logical CSV row: ' + Path(path).name)
+            yield row
+
+
+def header(path):
+    with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+        return next(csv.reader(stream), [])
+
+
+def normalized(value):
+    return str(value or '').strip().casefold()
+
+
+def check_rows(path, definition, tenant, exact=False, identity=None):
+    columns = header(path)
+    required = definition['columns']
+    if (exact and columns != required) or not set(required).issubset(columns):
+        raise ValueError('CSV schema mismatch: ' + path.name)
+    seen, count = set(), 0
+    for row in rows(path):
+        count += 1
+        if 'TenantKey' in columns and row['TenantKey'] != tenant:
+            raise ValueError('Foreign or blank TenantKey: ' + path.name)
+        if identity and any(row[field] != value for field, value in identity.items() if field in columns):
+            raise ValueError('Source reporting identity mismatch: ' + path.name)
+        key = tuple(normalized(row[field]) for field in definition['key'])
+        optional = {'AssignedByGroupId'} if definition.get('name') == 'license_paths' else set()
+        if any(not normalized(row[field]) for field in definition['key'] if field not in optional):
+            raise ValueError('Blank immutable key: ' + path.name)
+        if key and key in seen:
+            raise ValueError('Duplicate immutable key: ' + path.name)
+        seen.add(key)
+    if count == 0 and not definition['allowEmpty']:
+        raise ValueError('Unexpected empty table: ' + path.name)
+    return count
+
+
+def producer_records(source, identity):
+    registry_hash = sha(REGISTRY)
+    registry = load_json(REGISTRY)
+    records, receipts = {}, []
+    producers = set()
+    for definition in registry['Producers']:
+        name = definition['Script']
+        if name in producers:
+            raise ValueError('Duplicate producer registry entry')
+        producers.add(name)
+        path = source / definition['Receipt']
+        if Path(definition['Receipt']).name != definition['Receipt'] or path.is_symlink():
+            raise ValueError('Unsafe or linked producer receipt')
+        digest = sha(path)
+        proof = load_json(path)
+        if proof.get('Owner') != 'SmartInventory-CmdbSourceReceipt' or proof.get('ContractVersion') != '1.1':
+            raise ValueError('Producer completion proof owner or version mismatch')
+        if any(proof.get(field) != value for field, value in identity.items()):
+            raise ValueError('Producer completion proof tenant identity mismatch')
+        if proof.get('Producer') != name or not proof.get('ScriptVersion') or not proof.get('RunId'):
+            raise ValueError('Producer completion proof lineage mismatch')
+        if (proof.get('Status') != 'Completed' or proof.get('IsPartialInventory') is not False
+                or type(proof.get('Errors')) is not int or proof['Errors'] != 0):
+            raise ValueError('Incomplete producer completion proof')
+        if proof.get('Scope') != definition['Scope']:
+            raise ValueError('Producer full scope mismatch')
+        start, end = utc(proof['StartedAtUtc']), utc(proof['CompletedAtUtc'])
+        local = {}
+        for record in proof['Files']:
+            file = record['File']
+            if Path(file).name != file or file in records or file in local:
+                raise ValueError('Unsafe or repeated source proof filename')
+            if any(record.get(field) != proof[field] for field in ('Producer','ScriptVersion','RunId','StartedAtUtc','Scope')):
+                raise ValueError('Source record lineage or scope differs from producer')
+            completed = utc(record['CompletedAtUtc'])
+            if not start <= completed <= end:
+                raise ValueError('Invalid acquisition interval inside producer receipt')
+            local[file] = record
+        if set(local) != set(definition['Files']):
+            raise ValueError('Missing producer completion proof or unexpected source file')
+        if sha(path) != digest:
+            raise ValueError('Producer proof changed during validation')
+        records.update(local)
+        receipts.append({'File':path.name, 'SHA256':digest, 'Producer':name,
+                         'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],
+                         'Scope':proof['Scope'], 'StartedAtUtc':proof['StartedAtUtc'],
+                         'CompletedAtUtc':proof['CompletedAtUtc'],
+                         'Qualifications':proof.get('Qualifications', [])})
+    return records, receipts, registry_hash
+
+
+def validate_sources(source, contract, tenant, now=None, identity=None):
+    now = now or dt.datetime.now(UTC)
+    if not identity or identity.get('TenantKey') != tenant:
+        raise ValueError('Complete source identity is required')
+    records, receipts, registry_hash = producer_records(source, identity)
+    if contract['producerRegistry'] != REGISTRY.name:
+        raise ValueError('Preparation producer registry mismatch')
+    for receipt in receipts:
+        start, end = utc(receipt['StartedAtUtc']), utc(receipt['CompletedAtUtc'])
+        if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
+            raise ValueError('Invalid producer acquisition interval')
+        if now - start > dt.timedelta(hours=contract['maxAgeHours']):
+            raise ValueError('Stale acquisition evidence: ' + receipt['Producer'])
+    if set(records) != {s['file'] for s in contract['sources']}:
+        raise ValueError('Producer registry and source contract disagree')
+    checks, starts, ends = [], [], []
+    for definition in contract['sources']:
+        name = definition['file']
+        if name not in records:
+            raise ValueError('Missing producer completion proof: ' + name)
+        record = records[name]
+        if record.get('Status') != 'Success' or record.get('IsPartialInventory') is not False or type(record.get('Errors')) is not int or record['Errors'] != 0:
+            raise ValueError('Incomplete producer result: ' + name)
+        if not record.get('Producer') or not record.get('ScriptVersion') or not record.get('RunId'):
+            raise ValueError('Missing producer lineage: ' + name)
+        start, end = utc(record['StartedAtUtc']), utc(record['CompletedAtUtc'])
+        if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
+            raise ValueError('Invalid acquisition interval: ' + name)
+        if now - start > dt.timedelta(hours=contract['maxAgeHours']):
+            raise ValueError('Stale acquisition evidence: ' + name)
+        starts.append(start); ends.append(end)
+        path = source / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('Missing or linked source file: ' + name)
+        before = sha(path)
+        if before != str(record['SHA256']).upper():
+            raise ValueError('Producer hash mismatch: ' + name)
+        count = check_rows(path, definition, tenant, identity=identity)
+        if type(record['Rows']) is not int or count != record['Rows']:
+            raise ValueError('Producer row count mismatch: ' + name)
+        if sha(path) != before:
+            raise ValueError('Source changed during validation: ' + name)
+        checks.append(dict(record, SHA256=before))
+    if max(ends) - min(starts) > dt.timedelta(hours=contract['maxCollectionSpanHours']):
+        raise ValueError('Source collection interval exceeds the contract')
+    evidence = {'ProducerReceipts':receipts, 'RegistrySHA256':registry_hash, 'Files':checks,
+                'StartedAtUtc':min(starts).isoformat(), 'CompletedAtUtc':max(ends).isoformat()}
+    recheck_sources(source, evidence, contract)
+    return evidence
+
+
+def recheck_sources(source, evidence, contract):
+    if sha(REGISTRY) != evidence['RegistrySHA256']:
+        raise ValueError('Producer registry changed during preparation')
+    for receipt in evidence['ProducerReceipts']:
+        if sha(source / receipt['File']) != receipt['SHA256']:
+            raise ValueError('Source proof changed during preparation')
+    for record in evidence['Files']:
+        if sha(source / record['File']) != record['SHA256']:
+            raise ValueError('Source changed during preparation: ' + record['File'])
+
+
+def validate_current(output, contract, tenant):
+    if any(item.is_symlink() or not item.is_file() for item in output.iterdir()):
+        raise ValueError('Linked or non-file output artifact')
+    manifest = load_json(output / MANIFEST)
+    if manifest.get('Owner') != OWNER or manifest.get('Status') != 'Validated' or manifest.get('TenantKey') != tenant or manifest.get('ContractVersion') != contract['version']:
+        raise ValueError('Output is not the owned, validated tenant snapshot')
+    expected = {item['name'] + '.csv' for item in contract['tables']}
+    if {item.name for item in output.iterdir()} != expected | {MANIFEST}:
+        raise ValueError('Unexpected or missing output artifacts')
+    for definition in contract['tables']:
+        file = definition['name'] + '.csv'
+        if sha(output / file) != manifest['OutputFiles'][file]['SHA256']:
+            raise ValueError('Output hash mismatch: ' + file)
+        count = check_rows(output / file, definition, tenant, exact=True)
+        if count != manifest['OutputFiles'][file]['Rows']:
+            raise ValueError('Output row count mismatch: ' + file)
+        for row in rows(output / file):
+            for field, value in manifest['Identity'].items():
+                if field in row and row[field] != value:
+                    raise ValueError('Reporting identity mismatch: ' + file)
+    validate_relationships(output, contract)
+    return manifest
+
+
+def validate_relationships(output, contract):
+    parents = {'TenantDeviceKey':'DimDevice', 'TenantUserKey':'DimUser',
+               'TenantGroupKey':'DimGroup', 'TenantSkuKey':'DimLicenseSku',
+               'TenantServicePlanKey':'DimLicenseServicePlan',
+               'TenantApplicationKey':'DimDetectedApplication', 'TenantTeamKey':'DimTeam',
+               'TenantADGroupKey':'ADGroupSource', 'TenantADObjectKey':'ADDirectoryObject'}
+    keys = {field: {row[field] for row in rows(output / (table+'.csv'))}
+            for field, table in parents.items()}
+    managed_ids = {row['ManagedDeviceId'] for row in rows(output / 'DimIntuneManagedDevice.csv')}
+    mailboxes = {row['TenantMailboxKey'] for row in rows(output / 'FactMailbox.csv')}
+    for definition in contract['tables']:
+        name = definition['name']
+        for row in rows(output / (name+'.csv')):
+            for field, table in parents.items():
+                if name != table and row.get(field) and row[field] not in keys[field]:
+                    raise ValueError('Orphan output relationship: ' + name + '.' + field)
+            if name in ('DeviceHardware','FactDeviceApplication') and row['ManagedDeviceId'] not in managed_ids:
+                raise ValueError('Orphan output managed device: ' + name)
+            if name == 'FactMailboxHosting' and row['MailboxHostingKey'] not in mailboxes:
+                raise ValueError('Orphan output mailbox hosting')
+            for field in ('ManagerADObjectKey','ManagedByADObjectKey'):
+                if row.get(field) and row[field] not in keys['TenantADObjectKey']:
+                    raise ValueError('Orphan AD source owner/manager relationship')
+            if row.get('NestedTenantGroupKey') and row['NestedTenantGroupKey'] not in keys['TenantGroupKey']:
+                raise ValueError('Orphan nested Entra group relationship')
+
+
+class PublicationLock:
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        self.stream = self.path.open('a+b')
+        if self.path.stat().st_size == 0:
+            self.stream.write(b'0'); self.stream.flush()
+        self.stream.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.stream.close()
+            raise ValueError('Another CMDB preparation owns the publication lock') from None
+        return self
+
+    def __exit__(self, *_):
+        self.stream.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(self.stream.fileno(), msvcrt.LK_UNLCK, 1)
+        self.stream.close()
+
+
+def paths(source, output):
+    source, output = Path(source).absolute(), Path(output).absolute()
+    if source.name != 'DATA-LAST' or output.name != 'DATA-POWERBI-CMDB' or source.parent != output.parent:
+        raise ValueError('CMDB preparation requires sibling DATA-LAST and DATA-POWERBI-CMDB')
+    if source.is_symlink() or output.is_symlink() or source.resolve().parent != output.resolve().parent:
+        raise ValueError('Linked or redirected output/source root')
+    return source, output
+
+
+def prepare(source, output, tenant, identity, validate_only=False, contract_path=CONTRACT, now=None, fault=None):
+    source, output = paths(source, output)
+    contract = load_json(contract_path)
+    contract_hash = sha(contract_path)
+    if not tenant or identity.get('TenantKey') != tenant or any(not identity.get(k) for k in ('OrganizationKey','EnvironmentKey','TenantId')):
+        raise ValueError('Complete reporting tenant identity is required')
+    evidence = validate_sources(source, contract, tenant, now, identity)
+    if validate_only:
+        return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0}
+    # No source copies, persistent Raw adapter, dated output or history.
+    from cmdb_tables import build_tables
+    with PublicationLock(output.parent / '.cmdb-preparation.lock'):
+        orphan_stages = list(output.parent.glob('.cmdb-stage-*')) + list(output.parent.glob('.cmdb-rollback-*'))
+        if orphan_stages:
+            raise ValueError('Interrupted preparation artifacts require explicit recovery; nothing replaced')
+        previous_manifest = validate_current(output, contract, tenant) if output.exists() else None
+        if previous_manifest and previous_manifest['Identity'] != identity:
+            raise ValueError('Reporting identity changed; explicit migration required')
+        # Inherit the data-root ACL. Python 3.13+ mkdtemp uses an owner-only
+        # Windows DACL that also excludes some sandbox / scheduled identities.
+        stage = output.parent / ('.cmdb-stage-' + uuid.uuid4().hex)
+        stage.mkdir()
+        previous = output.parent / ('.cmdb-rollback-' + uuid.uuid4().hex)
+        promoted = moved = False
+        try:
+            build_tables(source, stage, contract, identity, evidence, now)
+            output_files = {}
+            for definition in contract['tables']:
+                name = definition['name'] + '.csv'
+                count = check_rows(stage / name, definition, tenant, exact=True)
+                output_files[name] = {'Rows': count, 'SHA256': sha(stage / name)}
+            manifest = {'Owner': OWNER, 'Status': 'Validated', 'ScriptVersion': VERSION,
+                        'ContractVersion': contract['version'], 'ContractSHA256': contract_hash,
+                        'TenantKey': tenant, 'Identity': identity,
+                        'GeneratedAtUtc': (now or dt.datetime.now(UTC)).isoformat(),
+                        'SourceRoot': str(source), 'OutputRoot': str(output),
+                        'SourceEvidence': evidence, 'OutputFiles': output_files,
+                        'MetricDefinitions': {
+                            'TopApplication.ReportedDeviceCount':'Distinct native managed-device IDs per name/publisher/platform product across versions',
+                            'FactHybridIdentityCoverage.OnPremisesOnlyCount':'Unavailable: unmatched identity does not establish on-premises-only existence',
+                            'FactUserActivity.HasAnyM365Activity':'Observation within the source report, not proof of lifetime use or licence waste',
+                            'EndpointAnalyticsScore':'Score on a 0-100 scale, not a proportion',
+                            'SourceFreshness':'Producer acquisition interval; workload report refresh dates are separate',
+                            'HardwareCoverage':'Managed-device list properties only; not a full detailed hardware export'}}
+            (stage / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+            validate_current(stage, contract, tenant)
+            recheck_sources(source, evidence, contract)
+            if sha(contract_path) != contract_hash:
+                raise ValueError('Preparation contract changed during execution')
+            if fault:
+                fault('before-swap', source, stage)
+            if output.exists():
+                output.rename(previous); moved = True
+            stage.rename(output); promoted = True
+            if fault:
+                fault('after-swap', source, output)
+            validate_current(output, contract, tenant)
+            recheck_sources(source, evidence, contract)
+        except BaseException:
+            if promoted:
+                shutil.rmtree(output)
+            if moved:
+                previous.rename(output); moved = False
+            raise
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+        if moved:
+            # The only old snapshot is temporary rollback evidence, not history.
+            try:
+                shutil.rmtree(previous)
+            except OSError:
+                # Publication is already validated. Never undo it after partial
+                # removal of the temporary previous snapshot.
+                return {'Status': 'PreparedWithCleanupWarning', 'GeneratedTables': len(output_files),
+                        'OutputRoot': str(output), 'CleanupRequired': str(previous)}
+        return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output)}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--source', required=True)
+    parser.add_argument('--output', required=True)
+    for name in ('tenant-key','organization-key','environment-key','tenant-id'):
+        parser.add_argument('--' + name, required=True)
+    parser.add_argument('--validate-only', action='store_true')
+    args = parser.parse_args()
+    identity = {'TenantKey': args.tenant_key, 'OrganizationKey': args.organization_key,
+                'EnvironmentKey': args.environment_key, 'TenantId': args.tenant_id}
+    print(json.dumps(prepare(args.source, args.output, args.tenant_key, identity, args.validate_only)))
+
+
+if __name__ == '__main__':
+    main()

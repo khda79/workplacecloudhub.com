@@ -5,7 +5,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.18
+1.20
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -13,7 +13,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.16
+    Version : 1.20
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -246,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -600,6 +600,61 @@ function To-GuidOrNull {
     if ("$Value".Trim()) { return [Guid]$Value }
   } catch { return $null }
   return $null
+}
+
+function ConvertTo-LicensesAssignmentPathRows {
+  param([Parameter(Mandatory)]$User, [datetimeoffset]$CollectedAtUtc = [datetimeoffset]::UtcNow)
+  $userId = [string]$User.Id
+  if ([string]::IsNullOrWhiteSpace($userId)) { throw 'License assignment user lacks an immutable Id.' }
+  $seen = @{}
+  foreach ($state in @($User.LicenseAssignmentStates)) {
+    if ($null -eq $state) { continue }
+    $skuId = [string]$state.SkuId
+    if ([string]::IsNullOrWhiteSpace($skuId)) { throw "License assignment state lacks SkuId for user '$userId'." }
+    $groupId = [string]$state.AssignedByGroup
+    $row = [pscustomobject][ordered]@{
+      UserId = $userId
+      SkuId = $skuId
+      AssignedByGroupId = $groupId
+      AssignmentRoute = if ([string]::IsNullOrWhiteSpace($groupId)) { 'Direct' } else { 'Group' }
+      AssignmentState = [string]$state.State
+      AssignmentError = [string]$state.Error
+      DisabledPlanIds = (@($state.DisabledPlans | Where-Object { $null -ne $_ } | Sort-Object -Unique) -join ';')
+      LastUpdatedDateTime = if ($null -eq $state.LastUpdatedDateTime) { $null } else { ([datetimeoffset]$state.LastUpdatedDateTime).ToUniversalTime().ToString('o') }
+      CollectedAtUtc = $CollectedAtUtc.ToUniversalTime().ToString('o')
+    }
+    $key = "$userId|$skuId|$groupId"
+    $signature = $row | ConvertTo-Json -Compress
+    if ($seen.ContainsKey($key)) {
+      if ($seen[$key] -cne $signature) { throw "Conflicting license assignment states for '$key'." }
+      continue
+    }
+    $seen[$key] = $signature
+    $row
+  }
+}
+
+function ConvertTo-LicensesTenantSkuEvidence {
+  param([Parameter(Mandatory)]$Sku)
+  function Read-EvidenceProperty {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [System.Collections.IDictionary]) { return $Object[$Name] }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+  }
+  [pscustomobject]@{
+    PartNumber = $Sku.SkuPartNumber
+    PrepaidEnabled = Read-EvidenceProperty $Sku.PrepaidUnits 'Enabled'
+    PrepaidWarning = Read-EvidenceProperty $Sku.PrepaidUnits 'Warning'
+    PrepaidSuspended = Read-EvidenceProperty $Sku.PrepaidUnits 'Suspended'
+    PrepaidLockedOut = Read-EvidenceProperty $Sku.PrepaidUnits 'LockedOut'
+    ConsumedUnits = $Sku.ConsumedUnits
+    CapabilityStatus = $Sku.CapabilityStatus
+    AppliesTo = $Sku.AppliesTo
+    SubscriptionIds = (@($Sku.SubscriptionIds) -join ';')
+  }
 }
 
 # Group cache + aggregator (for Groups CSV)
@@ -1090,7 +1145,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.20"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -1110,6 +1165,7 @@ try {
   # Initialize script environment
   # ------------------------
   $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+  Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
   Start-Transcript -Path $global:logTranscriptFile -Append
   WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
   $OutputPath = $InitializeOutputPath
@@ -1180,13 +1236,10 @@ try {
   $currentOperation = "Read tenant subscribed SKUs"
   WriteLog -Message "Reading tenant SubscribedSkus..."
   $subscribedSkus = Invoke-GraphWithRetry { Get-MgSubscribedSku -All }
+  $skusCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
   $tenantSkuMap = @{}
   foreach ($s in $subscribedSkus) {
-    $tenantSkuMap[$s.SkuId] = @{
-      PartNumber     = $s.SkuPartNumber
-      PrepaidEnabled = if ($s.PrepaidUnits -and $s.PrepaidUnits.Enabled) { [int]$s.PrepaidUnits.Enabled } else { 0 }
-      ConsumedUnits  = if ($s.ConsumedUnits) { [int]$s.ConsumedUnits } else { 0 }
-    }
+    $tenantSkuMap[$s.SkuId] = ConvertTo-LicensesTenantSkuEvidence -Sku $s
   }
 
   # ---------------- CSV mapping + enforcement ----------------
@@ -1216,9 +1269,33 @@ try {
   $usersAll = Invoke-GraphWithRetry {
     Get-MgUser -All -Property "DisplayName","UserPrincipalName","Id","AssignedLicenses","Mail","ProxyAddresses","LicenseAssignmentStates"
   }
+  $licenseUsersCollectedAtUtc = [datetimeoffset]::UtcNow
+
+  $currentOperation = 'Retrieve the complete Entra group inventory'
+  $directoryGroups = @(Invoke-GraphWithRetry {
+    Get-MgGroup -All -Property 'id','displayName','description','mail','mailEnabled','securityEnabled','groupTypes','membershipRule','membershipRuleProcessingState','onPremisesSyncEnabled','onPremisesSecurityIdentifier','createdDateTime' -ErrorAction Stop
+  })
+  $groupsCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+  $directoryGroupRows = @($directoryGroups | ForEach-Object {
+    $groupNameCache[[string]$_.Id] = [string]$_.DisplayName
+    [pscustomobject][ordered]@{
+      GroupId = $_.Id; DisplayName = $_.DisplayName; Description = $_.Description
+      Mail = $_.Mail; MailEnabled = $_.MailEnabled; SecurityEnabled = $_.SecurityEnabled
+      GroupTypes = (@($_.GroupTypes) -join ';'); MembershipRule = $_.MembershipRule
+      MembershipRuleProcessingState = $_.MembershipRuleProcessingState
+      OnPremisesSyncEnabled = $_.OnPremisesSyncEnabled
+      OnPremisesSecurityIdentifier = $_.OnPremisesSecurityIdentifier
+      CreatedDateTime = $_.CreatedDateTime
+      CollectedAtUtc = $groupsCollectedAtUtc
+    }
+  })
 
   # Sampling: prefer users with group-based licensing
   if ($TopUsers -gt 0) {
+    # Legacy sampling must have the same canonical-file protection as MaxItems.
+    $global:SmartM365MaxItems = $TopUsers
+    $global:SmartM365TestMaxItems = $TopUsers
+    $global:SmartM365IsMaxItemsRun = $true
     $groupBased=@(); $directOnly=@()
     foreach ($u in $usersAll) {
       $hasGroup = $false
@@ -1253,8 +1330,24 @@ try {
   $currentOperation = "Resolve user licenses and service plans"
   WriteLog -Message "Resolving licenses and building rows..."
   $resultsUsers       = New-Object System.Collections.Generic.List[object]
+  $assignmentPaths    = [System.Collections.Generic.List[object]]::new()
+  $userResolutionFailures = 0
   $rowsPlansExchange  = New-Object System.Collections.Generic.List[object]
   $servicePlanCatalog = @{}
+  # Tenant catalog includes plans in SKUs with no assigned users.
+  foreach ($subscribedSku in $subscribedSkus) {
+    foreach ($plan in @($subscribedSku.ServicePlans)) {
+      $catalogKey = "{0}|{1}" -f $subscribedSku.SkuId, $plan.ServicePlanId
+      $servicePlanCatalog[$catalogKey] = [pscustomobject][ordered]@{
+        SkuId = $subscribedSku.SkuId; SkuPartNumber = $subscribedSku.SkuPartNumber
+        'SKU name' = Get-SkuDisplayName -SkuId $subscribedSku.SkuId -SkuPartNumber $subscribedSku.SkuPartNumber -MapByPart $SkuMapByPart -MapById $SkuMapById
+        PlanId = $plan.ServicePlanId; PlanName = $plan.ServicePlanName
+        PlanDisplayName = Get-ServiceFriendly -PlanName $plan.ServicePlanName -PlanId $plan.ServicePlanId -ByName $null -ById $SvcMapById
+        AppliesTo = $plan.AppliesTo; TenantProvisioningStatus = $plan.ProvisioningStatus
+        CollectedAtUtc = $skusCollectedAtUtc
+      }
+    }
+  }
   if ($ServicePlans) {
     $stateRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_Licenses_UserServicePlanStates'
     $servicePlanStateBuildingPath = Join-Path -Path $OutputPath -ChildPath ("{0}_{1}.building.csv" -f $stateRunBaseFileName, (Get-Date -Format 'yyyyMMdd_HHmmss'))
@@ -1274,6 +1367,10 @@ try {
       $displayName = $u.DisplayName
       $uid         = $u.Id
       $primarySmtp = Get-PrimarySmtpAddress -User $u
+      # Keep error/disabled paths even when Graph returns no effective license detail.
+      foreach ($assignmentPath in @(ConvertTo-LicensesAssignmentPathRows -User $u -CollectedAtUtc $licenseUsersCollectedAtUtc)) {
+        $assignmentPaths.Add($assignmentPath)
+      }
 
       # Direct disabled plans per SKU (raw)
       $disabledPlansBySku=@{}
@@ -1378,6 +1475,9 @@ try {
                 "PlanId"          = $sp.ServicePlanId
                 "PlanName"        = $sp.ServicePlanName
                 "PlanDisplayName" = $planDisplayName
+                "AppliesTo"       = $null
+                "TenantProvisioningStatus" = $null
+                "CollectedAtUtc"  = $licenseUsersCollectedAtUtc.ToString('o')
               }
             }
 
@@ -1410,6 +1510,7 @@ try {
       }
     } catch {
       if ($_.Exception.Data['SmartM365FatalServicePlanStateWrite']) { throw }
+      $userResolutionFailures++
       WriteLog -Message "Error processing user $($u.UserPrincipalName): $_" "ERROR"
     }
   }
@@ -1420,12 +1521,35 @@ try {
     WriteLog -Message ("Disk-backed compact service-plan source completed: Rows={0:N0}; Size={1:N1} MB; WorkingSet={2:N1} MB." -f $servicePlanRowCount, ($stateBuildingFile.Length / 1MB), ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
   }
   Write-Progress -Activity "Processing users" -Completed -Status "Done"
+  if ($userResolutionFailures -gt 0) {
+    throw "License collection is incomplete: $userResolutionFailures user(s) could not be resolved. Current CSV publication is stopped."
+  }
+
+  $currentOperation = 'Export immutable license assignment paths'
+  Assert-SmartM365CsvDataCompleteness -Data $directoryGroupRows -BaseFileName 'M365_EntraGroups_All' `
+    -Columns @('GroupId','DisplayName','GroupTypes','SecurityEnabled')
+  $pathBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_Licenses_AssignmentPaths'
+  Export-SmartM365Csv -Data $assignmentPaths.ToArray() `
+    -Columns @('UserId','SkuId','AssignedByGroupId','AssignmentRoute','AssignmentState','AssignmentError','DisabledPlanIds','LastUpdatedDateTime','CollectedAtUtc') `
+    -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $pathBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+    -LatestPath (Join-Path $LatestCsvFolderPath "$pathBaseName.csv") -NoWeeklyHistory | Out-Null
+
+  $groupBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_EntraGroups_All'
+  Export-SmartM365Csv -Data $directoryGroupRows `
+    -Columns @('GroupId','DisplayName','Description','Mail','MailEnabled','SecurityEnabled','GroupTypes','MembershipRule','MembershipRuleProcessingState','OnPremisesSyncEnabled','OnPremisesSecurityIdentifier','CreatedDateTime','CollectedAtUtc') `
+    -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $groupBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+    -LatestPath (Join-Path $LatestCsvFolderPath "$groupBaseName.csv") -NoWeeklyHistory | Out-Null
 
   # ---------------- Export Users ----------------
   $currentOperation = "Export user license CSV"
   if (-not $resultsUsers -or $resultsUsers.Count -eq 0) {
     Write-Warning "No user license rows produced."
-    WriteLog -Message "No Users rows to export."
+    $emptyUsersBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_Licenses_Users'
+    Export-SmartM365Csv -Data @() `
+      -Columns @('Id','User principal name','primarysmtp','Display name','UserId','SkuId','SkuPartNumber','SKU name','Source','GroupsAssigningSku','GroupCountForSku','HasDirectAndGroup') `
+      -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $emptyUsersBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+      -LatestPath (Join-Path $LatestCsvFolderPath "$emptyUsersBaseName.csv") -NoWeeklyHistory | Out-Null
+    WriteLog -Message 'Successful empty effective-license snapshot published; older assignments are not reused.'
   } else {
     Write-Host ""
     Write-Host "--- Export CSV (Licenses - Users) ---"
@@ -1439,6 +1563,12 @@ $BaseFileName = "M365_Licenses_Users"
   # ---------------- Export compact ServicePlans state fact + catalog ----------------
   $currentOperation = "Export service plan CSV"
   if ($ServicePlans) {
+    $catalogRows = @($servicePlanCatalog.Values | Sort-Object SkuPartNumber, PlanName, PlanId)
+    $catalogBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_Licenses_ServicePlans_Catalog'
+    Export-SmartM365Csv -Data $catalogRows `
+      -Columns @('SkuId','SkuPartNumber','SKU name','PlanId','PlanName','PlanDisplayName','AppliesTo','TenantProvisioningStatus','CollectedAtUtc') `
+      -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $catalogBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+      -LatestPath (Join-Path $LatestCsvFolderPath "$catalogBaseName.csv") -NoWeeklyHistory | Out-Null
     if ($servicePlanRowCount -gt 0) {
       Write-Host ""
       Write-Host "--- Export CSV (User ServicePlan States - Compact) ---"
@@ -1448,15 +1578,6 @@ $BaseFileName = "M365_Licenses_Users"
         -CurrentOutputPath $OutputPath `
         -LatestOutputPath $LatestCsvFolderPath
       $servicePlanStateLatestPath = [string]$statePublication.PublishedPath
-
-      $catalogRows = @($servicePlanCatalog.Values | Sort-Object SkuPartNumber, PlanName, PlanId)
-      Write-Host ""
-      Write-Host "--- Export CSV (ServicePlans - Catalog) ---"
-      $BaseFileName = "M365_Licenses_ServicePlans_Catalog"
-      ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
-        -OutputPath $OutputPath `
-        -GlobalPath $LatestCsvFolderPath `
-        -Data $catalogRows -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
 
       if ($rowsPlansExchange.Count -gt 0) {
         Write-Host ""
@@ -1485,9 +1606,10 @@ $BaseFileName = "M365_Licenses_Users"
 
       Remove-LegacyDetailedServicePlansExport -CurrentOutputPath $OutputPath -LatestOutputPath $LatestCsvFolderPath
     } else {
-      if (-not [string]::IsNullOrWhiteSpace($servicePlanStateBuildingPath) -and (Test-Path -LiteralPath $servicePlanStateBuildingPath)) {
-        Remove-Item -LiteralPath $servicePlanStateBuildingPath -Force -ErrorAction SilentlyContinue
-      }
+      # A successful empty current state must replace, not reuse, an older state CSV.
+      $statePublication = Publish-LicensesServicePlanStateCsvFile -BuildingPath $servicePlanStateBuildingPath `
+        -ExpectedRows 0 -CurrentOutputPath $OutputPath -LatestOutputPath $LatestCsvFolderPath
+      $servicePlanStateLatestPath = [string]$statePublication.PublishedPath
       Write-Warning "No ServicePlans rows produced."
       WriteLog -Message "No ServicePlans rows to export."
     }
@@ -1502,6 +1624,13 @@ $BaseFileName = "M365_Licenses_Users"
       "TenantSkuPartNumber"  = $kvp.Value.PartNumber
       "TenantPrepaidEnabled" = $kvp.Value.PrepaidEnabled
       "TenantConsumedUnits"  = $kvp.Value.ConsumedUnits
+      "TenantPrepaidWarning" = $kvp.Value.PrepaidWarning
+      "TenantPrepaidSuspended" = $kvp.Value.PrepaidSuspended
+      "TenantPrepaidLockedOut" = $kvp.Value.PrepaidLockedOut
+      "CapabilityStatus" = $kvp.Value.CapabilityStatus
+      "AppliesTo" = $kvp.Value.AppliesTo
+      "SubscriptionIds" = $kvp.Value.SubscriptionIds
+      "CollectedAtUtc" = $skusCollectedAtUtc
     }) | Out-Null
   }
   if ($tenantRows.Count -gt 0) {
@@ -1601,6 +1730,7 @@ $BaseFileName = "M365_Licenses_Groups"
 
   WriteLog -Message "$TaskName completed."
   try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+  Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and $TopUsers -eq 0) -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
   Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
@@ -1654,8 +1784,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPyGw65NU83aKU
-# QEGaVc+TMP9NivlXH9p0STvnFwWV36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE6GC+Vy0FNEEI
+# nikLDcoxaTzAwt3WjBANHhCgPU/pDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1788,31 +1918,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN+gKHa/Ku3S2D8cKkPKa3wMjucno6Ldf/VU2W0bmU0oMA0GCSqG
-# SIb3DQEBAQUABIIBgG1LXkmNd+usKl0GZKRtfoeEAtw7p0jWO24KOta9xgx6UJ2T
-# cHtmCuNNOl/EGCliOUY42M6l9npSZaziotQPASeYqcZ/T85HPRmAysc3esykL9Tf
-# SCWRSIYbUaG/dymR68q0uvSMVlpxn5LSogjmyEMKQR6RZVZ084vnFMJW30hAuzL1
-# 3O6/6XrI+WtRY+k5/8M7bPaUx1NTe8WTYSEHNalyGtR2mKbA7/5T3DZrGQ9Ge95d
-# 2sBUC9j1AGJj9D+58y6+pniGYbYv6vHAS9P/LiFcRdPI7PwtrMv/ZjdfU9bxLfmx
-# cRSx1LufDA6mk4pK42cdbiqVBabC3JbBtaqvBKvhJzmg0g6ni50CQYmn1IE8Y3vJ
-# YBMDKDgjs6SGUl/U3mLQswGjeWuJpW1DlM2WoTw/RpfKpf+nQuECdjXhwuN9oB7F
-# 3pBTcw2Wzc5AB00taMEjUYPXGX9KkmmMEtmLiwatGdZdMXq5qoOaw7CJx24e5Fe+
-# 8Nbyu1g4Wq3dQY3EDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFr8LFf9XA4H6wVbrlzTclLm4DZezeTMnJVXEivCq79QMA0GCSqG
+# SIb3DQEBAQUABIIBgA8Jg8eQpLTPp2faqQyQe8XB5x5WSaaMGfdi2j84ggV+M33R
+# baCp0BeaDf0OiQy6ueKHgJcLtbTOVdd1q/uZNZRw3jjvNKFY8BHkzpjznouEYIGy
+# vXhtPxtPLZC74G9EyoIn2MdtX0gJUGrzWLEU9mc60DdyD+5lDFJTAl0DNm78e1Hc
+# 0e77tOqXO2kOhkh/3+I3dTNQpx2egXUNFs3pwfnCY51n2VGv+TiQDM8X1nC85SLY
+# CPQEjQECTxOOyV9rruSVodEjZCgeJUQhVWg7u9j7C9v/CRKZt+k0+noIYP7SxjsC
+# mmbV0/atYYRdyB9IdjXPG+ZcL0RtOwv6dPdMzpOE64atVnWjANVFvI/j4/k6aoP0
+# +QsXzk3jwSxtectWITnPJJKbrGXkxohirEq+SAomO+VQTN4sj+InSu09Cxd6wOrz
+# cnL9D/NuoRPl4QX8zAo9MAu0PZnQAmlfbk5/Z1sZTDTTjfvfUW7p098NQCQJCa4r
+# vGwKKtKv81hRupvzDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAy2var+2LDyTuAXkbB6ZQr2GtaJvt90yrVHuPX
-# QbKZBTANBgkqhkiG9w0BAQEFAASCAgArkCo/6pCWKXocgWMuzQuBrPP8WfckzRFv
-# HJDZKdNpZ85txsxzkz8WPq7WOP6pTPnmeIIsLcAyX6kYyxpXad22RE0IKxlvF2sg
-# 3Q364e9dw9Wl3OGdcf2HtxynSmN0rDzCFBWm5iux5FORbmVF4OXwtwhIzy2WSayn
-# UOVMNXwJVrQOEMPpW0gFOjWdQwRp7NvzM0osdbKEZSIn+kHHTuNehsRqB+SK2kBB
-# tVqACnplkNqTf50BgqXtyT4Rg4n3ZZYeLXJgp0u2lKOVBAEGTSxpT/RPxIBd6MXa
-# NGUUW5jzsRqRiw/fLwS5WzRnSdIMgivR1OxTfdBUX4Tcjnf/nYQ8tg63quXOob/k
-# BMPlqG/bsD4aNV6e+XwsBRemHYOx0Hh3KHlZDAW3meJx/UQDLfmnsAHqEbLSCOXF
-# gkUQtSQc1fiH3AlfQJjnIgWIasz5c+TPo4L+OBWyRUfC/PV4oLMbWN/MYqilbYEx
-# 7MkccMX841B9oTk6LJI5hYeCKBsKbj06cPlKchu2tA3K8yJpoa6XVqfM2NrZ6jR/
-# xccGV1P/lixwzdhKxm60DwTUEwiZPx7Gr7NBnNDX/MzBFnZo+QAuL+zz7eQ1d+qA
-# U7zHkKl+cdLJMGxaibGZDuRz+wp4F8zF7vL90lqqX0jEol2eeL1TrLq5p3kAFflF
-# 7HxquKrlqQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDdaMC8GCSqGSIb3DQEJBDEiBCDuX27il1RPXzM3bpnjUyOZ0qdi0LRu8Cue389u
+# yWE95DANBgkqhkiG9w0BAQEFAASCAgB6eXJRyjShmsi1Wjyg/nmQ8XEG9k0L36Y0
+# glw+79asi4sqKYpDjce3O4l7Y8C4zkTJOhznkGcJxnynQDrxw458FLAxLWimFGnH
+# nptYBsBPk4W3V0n8hKDj0I+4uNV2cSbnhNkssJ1kWuoBerd19hVk8AD62RtmWdzc
+# 756MYiEiZsw/scWYKGRV1A71/9xOowDsrKw97AoPe8IU+o6A4IUSCIKd+1ZSNcDm
+# 9CKIQUu6g+t9/lMHXq5R9K9/8gejzxfJ6/0vVgvQ2yTqSMmKNSyym7k8E2Gvbpw1
+# oTBramfqllKHfRmqCyxrhDdsaImJ87ohkA7JhAjshb021y+Jy4bF47IuW+rng++V
+# ZM0B4fgN63vtgPYPCAXTdSzIBEXwY4Pv6pcsZE5m04+hjkYQ0dSYxsnq94/E5r5d
+# V1A3E4M+tWW2/9l2q+rgdxlzUNz3s/mbtwoUGpHkPZvRS55ajVp3m2YDdqtGYBtD
+# Qvia7PtBAt6aPUjDfBEV8EvlrmBO71UBDkA6+h2qIs3zVT8gCgpd3lFSVYiY5o9H
+# GKg0yry5LpGgx7eVEUdhJBm+ygdRMs62xwdR9S40qYW0UJJKibpxpnvMuZi3Ml8F
+# OCwqeP4he03OiKV6wnD16PxM2Yj7EAdeaCicgNdmsRZWUkN/Ryy/slGifVP2mejw
+# lpyfPcPIEw==
 # SIG # End signature block

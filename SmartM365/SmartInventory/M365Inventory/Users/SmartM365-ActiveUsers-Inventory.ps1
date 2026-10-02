@@ -18,14 +18,14 @@
     Uses interactive authentication instead of app-only certificate authentication.
 
 .VERSION
-1.11
+1.14
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Users.
     Minimum Graph application permissions: User.Read.All; AuditLog.Read.All; Directory.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.9
+    Version : 1.13
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -248,7 +248,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -371,13 +371,14 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.14"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
     # Initialize environment (paths, logs, global variables, etc.)
     $currentOperation = "Initialize script environment"
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
 
     $currentOperation = "Start transcript"
     Start-Transcript -Path $global:logTranscriptFile -Append
@@ -571,7 +572,8 @@ $ScriptVersion = "1.11"
     WriteLog -Message "Transforming and cleaning user data..."
     $currentOperation = "Transform user data"
 
-    $cleanResults = $users | ForEach-Object {
+    $usersCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+    $cleanResults = @($users | ForEach-Object {
         $licenseNames = ($_.AssignedLicenses | ForEach-Object {
             $skuMap[$_.SkuId.ToString().ToLower()]
         }) -join ", "
@@ -614,6 +616,8 @@ $ScriptVersion = "1.11"
             "UserType"                         = $_.UserType
             "LastSignInDateTime"               = $_.SignInActivity.LastSignInDateTime
             "LastNonInteractiveSignInDateTime"  = $_.SignInActivity.LastNonInteractiveSignInDateTime
+            "LastSuccessfulSignInDateTime"      = $_.SignInActivity.LastSuccessfulSignInDateTime
+            "CollectedAtUtc"                    = $usersCollectedAtUtc
         }
 
         # Clean string values
@@ -626,7 +630,7 @@ $ScriptVersion = "1.11"
         }
 
         [PSCustomObject]$obj
-    }
+    })
 
     WriteLog -Message ("Data transformation completed. Number of exported users: {0}" -f $cleanResults.Count) "INFO"
 
@@ -638,13 +642,31 @@ $ScriptVersion = "1.11"
     $currentOperation = "Export CSV"
     $BaseFileName = "M365_Users_Active"
 
-    ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
+    if (@($cleanResults | Where-Object { $null -ne $_ }).Count -eq 0) {
+        $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+        $publication = Export-SmartM365Csv -BaseFileName $runBaseFileName -OutputPath $OutputPath `
+            -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+            -Data @() -Columns @('Display name','DirSyncEnabled','User principal name','Object Id','First name','Last name',
+                'When created','Soft deletion time stamp','Title','Department','Preferred data location','City','CountryOrRegion',
+                'Office','StateOrProvince','Usage location','Last dirsync time','Block credential','Licenses',
+                'Password never expires','Last password change time stamp','Mobile Phone','Phone number','Postal code',
+                'Preferred language','Street address','Fax','Proxy addresses','OnPremisesImmutableId','OnPremisesSecurityIdentifier',
+                'OnPremisesSyncEnabled','AccountEnabled','UserType','LastSignInDateTime','LastNonInteractiveSignInDateTime',
+                'LastSuccessfulSignInDateTime','CollectedAtUtc')
+        $global:csvFilePath1 = $publication.TimestampedPath
+        $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
+        Copy-SmartM365FileAtomically -SourcePath $publication.TimestampedPath -DestinationPath $global:csvFilePath2
+        [void]$global:csvGeneratedPaths.Add($global:csvFilePath2)
+        $global:csvFilePath3 = $publication.LatestPath
+    } else {
+        ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
                                 -OutputPath $OutputPath `
                                 -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
                                 -Data $cleanResults `
                                 -Encoding "UTF8" `
                                 -NoTypeInformation `
                                 -Delimiter ","
+    }
 
     WriteLog -Message "CSV export completed for base file name '$BaseFileName'." "INFO"
     $csvPathTimestamped = $global:csvFilePath1
@@ -787,6 +809,7 @@ finally {
         $summaryStatus = if ($global:ScriptFailed) { 'Failed' } else { 'Auto' }
         $summaryError = if ($global:ScriptFailed) { $globalError } else { $null }
         $summaryFailureStage = if ($global:ScriptFailed) { $currentOperation } else { $null }
+        Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:users'
         Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $summaryFailureStage
     }
     catch {
@@ -798,8 +821,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcH5E41KhdVxAY
-# z1MkeWeSVoZ8C6ngyAB7sVx/9COviKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxXA4A7ZM9X6vr
+# v/535F2fOdWD4wYfnMFc+fUFxXDG96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -932,31 +955,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHwoQpw/sjgDCMqWv0UMXTLjxLfl7iwUn5ubrFXr5aN4MA0GCSqG
-# SIb3DQEBAQUABIIBgH5267dghVsCemhWglyr3LTxJknGhEFio07ljkRSTG8haDUl
-# SZrH7CZK9seKwGCkEHX++zWgc8lyxd5G4MQSF8yQgNKP16Hi7w0V20eqT2JColul
-# cje8NPMREYC7/7/P0sl0Rdlh1BwvrcXoH+SM/+ydiGpE+TgpWzYeM6ZMmWvjvDAf
-# 5gswefYLcpmnUE/3RPEQygnj00KANAYrg+Kbl3bCWS/B5ITUmPcT4zEU7RE8Zo0q
-# Q4ltSvY16pXDGya//JaV6kjPSE6rIFXyCQex2dVAaOJquVpPg88yJ7FdPFI2lWtc
-# 6FaMB7g0Yn9P0SqkdHR0BLEYG0+ep7xMGWApV9LykqEFq4HHFmDp0IjZlXLN8bqk
-# eXLoCHFZWc0DzngOzVA3hdhvANcd85Dzy+wLKb6nzIAelPTWNNhk7z9Owclry1/0
-# eo8gP8DJfvu39Y1ZzlxpmMGm7MuWIpSy27OwB2+lcc5bbn/CojZDw6CVp3DOCCea
-# Cse8js3mFkWPO6ZTYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPURx/dMEY2zkD43824JRJxuzzlTYqpWDSwADn40KEKpMA0GCSqG
+# SIb3DQEBAQUABIIBgJts6zEd6jjR0yYg12KnsrFKzOLepG6MKpj1mYHusr32cIcG
+# kpcJLsW255O5F2W4tQ0bxUIVa4cOYx0RxQkHwnD6TpJJOHKMs62clqGDeKmZMmTg
+# GUptCcIFM7zBhnZjDhhsOqBgX6RSls/2fGif/y6Bp+ZX8VEW5hqTlb/EBWYzypDa
+# vGYT3xqF/LreopqCyVj/lCtmu/K9EkjtuY2ECuiArzr13zm7QKYTEpSvUK4zcK2u
+# bIkoUyA3geGOqxHx9ZW9oGImAhMy4duZKfI490/HdSu4Z/PoDR8lH0hyS7v0jE4G
+# eUwd+0zsnxoC6J5oQeiNtCHYBnUtfg5Izl/62wm5TTgVBIwHdJVgiXHrkwhmxtiK
+# r67wqi4l3geRpBSVs1f6/qC9acHy44DMePBjwT976wQ2zh99wZD6rMu+B13GA47H
+# SrQxjP+gl0QXzDAoeygpG2qzA9Y4V9Ny31aWn0lZTCJ9QQtPH3Yfw5DqLXLivRFU
+# m/xhhfCm/hWhIkmsSKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDWAqT8gGl2KKq8DsHUGkomYQLmcfB4zLMuXVh1
-# MigBGzANBgkqhkiG9w0BAQEFAASCAgBHcpmpLUnxTcFoelHc57oQ/w5GkKPKycsf
-# erK52QXMvkZPlFXJlgUBICfEKPq82w2ldwWxeDOvSdOkpjaWhx4x06HDDHyh1IkH
-# TLkuY8Uohj8I9HWAxAk59TmyxaurBU1PxZIGhXYbWJ4QDvrG8HkRf0tU4nS3XC6J
-# d7B/6f4LsWU4pR1yJaHJp7D1JB+atkaFdErw4GRmVjfm2lul0v9xd+S+Y1BEKi9I
-# i3Z9AcuNpu1ylKqlPYS4R+fBfmM6YKevDakIvRJD5JxomMhwkOLTlY4uel5aoSzs
-# GuXi2UmafgdRs/CPZamBP/Dd89FnzZnMrSIelK2O1CPN3gZeRTQDzp20oUlLffho
-# L7ytYed3moosSDyz18k7plqxTNC26qnauNMj/e0qGFY3fpvo+dbbB3ZfpymNvb4t
-# oqGWAOVcYIaflvts5pp7GRbCgClC2K/749UT6+ZY94hKpgtP68kqZDlyyQaQmEop
-# t9YM/aCDOHhnQXZoYHg5l2ZugNvrlWY4UPJPFe+Qp5x6h/MZnf6syqIUhWDo/bRH
-# utgC+3hJpIhdBjRMu9r72V89W1/oI41pL0yfiKlRFjEgayDSn2tlkMm3zazmZgw8
-# VESAdrKz0+uSCbE4EFQ1lMpCilTS/OaV8NHK7MSHo6tSeltcakuTIhORV6LURGUA
-# MphO1SXT+A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# NDJaMC8GCSqGSIb3DQEJBDEiBCAwibCb22APVy1gt5AcIszr0BKV7ni5V3fOmr4y
+# h4YviDANBgkqhkiG9w0BAQEFAASCAgCrkhNdjatYEfJynOWer7eJ6flqJ35VK2mt
+# ebDqNbGu2Fda5kVfcOBovjHD66lmursACf6IgZkj7/ercMntVqlpzvXO24nPFjeg
+# +78OStdfrBMxd9okeAie7H5xcTWw1epxSJhB/f6tPFZA4UQn/gguxqEa/B3mYswp
+# GrBorf9osK7CMqCHUEXsDgnVYXKv3lDl3XOcX7RjxL0oqiX5XmA2EFEnAskgBmHy
+# ONvOSHRBVyCMWWCvFknmpRdLWMjXzgBhsM411CQE7I/b7SHAh/LoxLnVTwMxGtJv
+# iYY4LAMGz4S6lmVMl1vNHLOrziiwpBHOqtfwG8okBYBDD//X96ydYTKIkPWFWW5c
+# 6/x9QRth+EdLA8olh8En8DbBdLcotacTrXJlGzsVDFOnhL5PmUnT3SLz55uxgCDF
+# Q1Zw76AGbMIzKo4C2Hyd4caFsQAaul8Iodu5DVHk7jXpy7GRs08u5nBwjgJTPfIZ
+# 3cDMdFDLEoKbywpjRP8SQqlnPCg9OPi9Vv3uMNp1LL3cTGsuw91Q/SAnCs0vqTYo
+# u92/K7qH1HtegVyzYNfBJCbTiqgGmWbFTBpYNfcLUjmrnJS5ymLsgCsJttwVuHv4
+# LcU58psi0u/oxq3UMaf6BvIb3P22mP19Tu9z87bBmYJUHYjD2B90l0BQdUvhfKK3
+# 6fgwmxoazw==
 # SIG # End signature block

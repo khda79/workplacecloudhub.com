@@ -1,4 +1,5 @@
 [CmdletBinding()]
+# Version 1.1.0: native product identity and distinct current product/device footprint.
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
@@ -11,6 +12,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) '../SmartM365/SmartInventory/Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
 
 function Convert-ToInvariantDecimalText {
     param([AllowNull()][object]$Value)
@@ -20,10 +22,12 @@ function Convert-ToInvariantDecimalText {
 
 function Get-ApplicationProfile {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Rows,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
         [Parameter(Mandatory = $true)][datetime]$SnapshotDate,
         [Parameter(Mandatory = $true)][string]$SnapshotWeek,
-        [switch]$IncludeDetail
+        [switch]$IncludeDetail,
+        [hashtable]$ProductFootprint = @{},
+        [switch]$LegacyDefinition
     )
 
     $detail = [System.Collections.Generic.List[object]]::new()
@@ -33,9 +37,15 @@ function Get-ApplicationProfile {
     $longTailVersions = 0
     $unknownPublisherVersions = 0
 
-    $groups = @($Rows | Group-Object AppName)
+    # Historical observations keep their original definition; do not rebase them.
+    $groups = @(if ($LegacyDefinition) { @($Rows | Group-Object AppName) } else {
+        @($Rows | Group-Object -Property { Get-WorkplaceApplicationProductKey $_ })
+    })
     foreach ($group in $groups) {
-        $applicationName = if ([string]::IsNullOrWhiteSpace($group.Name)) { 'Unknown application' } else { $group.Name.Trim() }
+        $nameText = if ($LegacyDefinition) { $group.Name } else { [string]$group.Group[0].AppName }
+        $applicationName = if ([string]::IsNullOrWhiteSpace($nameText)) { 'Unknown application' } else { $nameText.Trim() }
+        $productKey = Get-WorkplaceApplicationProductKey $group.Group[0]
+        $distinctDevices = if ($ProductFootprint.ContainsKey($productKey)) { $ProductFootprint[$productKey].Count } else { $null }
         $versions = @($group.Group | ForEach-Object { [string]$_.AppVersion } | Sort-Object -Unique)
         $versionCount = $versions.Count
         $productTotal = [int64](($group.Group | Measure-Object DeviceCount -Sum).Sum)
@@ -69,6 +79,7 @@ function Get-ApplicationProfile {
             if ($IncludeDetail) {
                 $detail.Add([pscustomobject][ordered]@{
                     'Application Source ID' = [string]$row.AppId
+                    'Application Product Key' = $productKey
                     'Application Name' = $applicationName
                     'Application Version' = if ([string]::IsNullOrWhiteSpace([string]$row.AppVersion)) { 'Unknown version' } else { ([string]$row.AppVersion).Trim() }
                     'Publisher' = $publisher
@@ -76,6 +87,9 @@ function Get-ApplicationProfile {
                     'Platform' = if ([string]::IsNullOrWhiteSpace([string]$row.Platform)) { 'Unknown' } else { ([string]$row.Platform).Trim().ToLowerInvariant() }
                     'Device Count' = $deviceCount
                     'Product Total Installs' = $productTotal
+                    'Product Distinct Devices' = $distinctDevices
+                    'Metric Definition' = if ($LegacyDefinition) { 'Legacy name / version observations' } else { 'Name + publisher + platform / distinct device footprint' }
+                    'Collection Scope' = if ($LegacyDefinition) { 'Legacy Windows' } else { 'All platforms' }
                     'Product Version Count' = $versionCount
                     'Dominant Version Share (%)' = Convert-ToInvariantDecimalText $dominantShare
                     'Installs Outside Dominant Version' = $outsideDominant
@@ -91,7 +105,7 @@ function Get-ApplicationProfile {
         }
     }
 
-    $totalInstallations = [int64](($Rows | Measure-Object DeviceCount -Sum).Sum)
+    $totalInstallations = if ($Rows.Count) { [int64](($Rows | Measure-Object DeviceCount -Sum).Sum) } else { [int64]0 }
     $publishers = @($Rows | ForEach-Object { [string]$_.AppPublisher } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique).Count
     $standardizationRate = if ($groups.Count -gt 0) { $fragmentedApplications / $groups.Count } else { $null }
     $dominantCoverage = if ($totalInstallations -gt 0) { 1 - ($installationsOutsideDominant / $totalInstallations) } else { $null }
@@ -114,6 +128,8 @@ function Get-ApplicationProfile {
             'Standardization Opportunity Rate (%)' = Convert-ToInvariantDecimalText $standardizationRate
             'Dominant Version Coverage (%)' = Convert-ToInvariantDecimalText $dominantCoverage
             'Evidence Status' = 'Observed'
+            'Metric Definition' = if ($LegacyDefinition) { 'Legacy name / version observations' } else { 'Name + publisher + platform / distinct device footprint' }
+            'Collection Scope' = if ($LegacyDefinition) { 'Legacy Windows' } else { 'All platforms' }
         }
     }
 }
@@ -125,15 +141,20 @@ if (-not (Test-Path -LiteralPath $historyRoot -PathType Container)) { throw "Req
 
 $currentItem = Get-Item -LiteralPath $currentPath
 $currentRows = @(Import-Csv -LiteralPath $currentPath)
+$relationPath = Join-Path $DataRoot 'DATA-LAST/Intune_DiscoveredApps_AppDeviceRelations.csv'
+$currentFootprint = Get-WorkplaceApplicationFootprint -Applications $currentRows -RelationPath $relationPath
 $latestHistoryFolder = Get-ChildItem -LiteralPath $historyRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
 $currentWeek = if ($latestHistoryFolder) { $latestHistoryFolder.Name } else { 'Current' }
-$currentProfile = Get-ApplicationProfile -Rows $currentRows -SnapshotDate $currentItem.LastWriteTime.Date -SnapshotWeek $currentWeek -IncludeDetail
+$currentLegacy = @($currentRows | Where-Object { (Get-WorkplaceSourceValue $_ @('CollectionScope')) -ne 'AllPlatforms' }).Count -gt 0
+$currentProfile = Get-ApplicationProfile -Rows $currentRows -SnapshotDate $currentItem.LastWriteTime.Date -SnapshotWeek $currentWeek -IncludeDetail -ProductFootprint $currentFootprint -LegacyDefinition:$currentLegacy
 
 $trend = foreach ($weekFolder in (Get-ChildItem -LiteralPath $historyRoot -Directory | Sort-Object Name)) {
     $summaryPath = Join-Path $weekFolder.FullName 'Intune_DiscoveredApps_Summary.csv'
     if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { continue }
     $summaryItem = Get-Item -LiteralPath $summaryPath
-    $weeklyProfile = Get-ApplicationProfile -Rows @(Import-Csv -LiteralPath $summaryPath) -SnapshotDate $summaryItem.LastWriteTime.Date -SnapshotWeek $weekFolder.Name
+    $weeklyRows = @(Import-Csv -LiteralPath $summaryPath)
+    $legacy = @($weeklyRows | Where-Object { (Get-WorkplaceSourceValue $_ @('CollectionScope')) -ne 'AllPlatforms' }).Count -gt 0
+    $weeklyProfile = Get-ApplicationProfile -Rows $weeklyRows -SnapshotDate $summaryItem.LastWriteTime.Date -SnapshotWeek $weekFolder.Name -LegacyDefinition:$legacy
     $weeklyProfile.Trend
 }
 
@@ -144,7 +165,14 @@ foreach ($outputPath in @($InventoryOutputPath, $TrendOutputPath)) {
     }
 }
 
-$currentProfile.Detail | Export-Csv -LiteralPath $InventoryOutputPath -NoTypeInformation -Encoding utf8NoBOM
+if ($currentProfile.Detail.Count) {
+    $currentProfile.Detail | Export-Csv -LiteralPath $InventoryOutputPath -NoTypeInformation -Encoding utf8NoBOM
+} else {
+    $empty = [ordered]@{}
+    foreach ($column in @('Application Source ID','Application Product Key','Application Name','Application Version','Publisher','Publisher State','Platform','Device Count','Product Total Installs','Product Distinct Devices','Metric Definition','Collection Scope','Product Version Count','Dominant Version Share (%)','Installs Outside Dominant Version','Standardization State','Version Footprint State','Risk Priority','Recommended Action','Snapshot Date','Snapshot Week','Evidence Status')) { $empty[$column] = '' }
+    $header = @([pscustomobject]$empty | ConvertTo-Csv -NoTypeInformation)[0]
+    [IO.File]::WriteAllText($InventoryOutputPath,$header+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+}
 $trend | Export-Csv -LiteralPath $TrendOutputPath -NoTypeInformation -Encoding utf8NoBOM
 
 [pscustomobject][ordered]@{
@@ -163,8 +191,8 @@ $trend | Export-Csv -LiteralPath $TrendOutputPath -NoTypeInformation -Encoding u
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdgeX1r+HpKWeg
-# Dng6fmNMU3f/BzZuGF1kPIY5g+PA26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVadyJzPsXco/N
+# BvDgawG2miF4k2hmatZh9JDScbNHWqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -297,31 +325,31 @@ $trend | Export-Csv -LiteralPath $TrendOutputPath -NoTypeInformation -Encoding u
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF4DIBdQvNFtMPaEXOqxU6UOWll+BpZrlWX75Cngbl+jMA0GCSqG
-# SIb3DQEBAQUABIIBgJ71bvOW2X3NOKTaXDOPI7L+8E8aSY2uzwTqmLMtkm0tCLOB
-# WKEEWKO6OoetOxHFB6RLqEmnPsAnaNfSzYMkt0wGNldKQLh2Ll17hD+gbNLQNL3x
-# M7hPXPqgK/2Kckl6Dw9ZHIYx+Y6w0uWKkVaHbX2CrUGol2kExN4JI21Twcc0hYfF
-# bJylFOieN6EIBZxk7qduxOYjmU+GfM1jn2PZ9vA8xO18vzoItbYFvXl+x9uK5C3z
-# CwA9qme3g9CSn72pq/xmLsmATeVwaHfNGIhwkSC+pDSKzREuTxQq9UihrC4pp7cz
-# VypAKmOXMQ8t5S/diNNnFlA96Zb7sbxBGVxbvP4uOhkSKmD+zWNWb/QxyLQP0UNf
-# PtZ54w+4o6SUNTgeXp5yWrGFS3+56q1nmXCniJKYq/EK3enLSwsAMKeLvwz9Egef
-# wMoWhCU+rjOMDC9Z3h6jvLM7NghpLibykkkjfs+5nL4G/gtPYeSaw2sK1lJj34Tv
-# 1k4Zv6wtHbAZY6/9Z6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHNp+2CdeU6Mbl/ZbzVgWqAMkQoVVoZ7vpRvIV+HdwECMA0GCSqG
+# SIb3DQEBAQUABIIBgKaA2yQRLORwwBazKjdLJgbkNDOGYPXQJv1w3hNwOkMxsydL
+# SED9pvuJ4Zjv/hHidHNv0CXiapp6F0LgCEVY4s+1vvVZMoBRKxU8ehp1xQi1FwzX
+# VeAC1Mh9n5gaNx7qPCRNAhTx++bqdhYu3ekEVhkDf1EGCGjfDByRrVrFycADOjyc
+# Cfxe7xW3+AlVfGx5ZKmLbjTVNTIKmSUsVsugpFea+XVzw11AtQ/pJHA9d6c9UyA+
+# dl5JBA1hdC3/MMG2zhCnCgLnK9RoOzisN3iyfgVtXFRo/b1dV1EAvhClTNhMtai+
+# bXoA9L07zDNWc4nX/LYzw47pibAqSP9YaPlJhDzx08ZsJB32R2dIDZXPFEFSprVk
+# yKX2bu9yF6BcnQoT0PP1cXkEQC4sAb6wlV88qk0NOCS7UoeB/VdQZPB/Wop1yqsY
+# 9XJvDJBP3cCpo9/Y8Yyxe7wJ/jpfVp9IxytTHFplvHPAGURQ709EQSTkBk7RvM6r
+# ZP+1Y7TGoEvtgVzTEaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MjhaMC8GCSqGSIb3DQEJBDEiBCBIH/c+RP7rmwFQ0etnjMrlKk+qAv6IzRD6xMlJ
-# tSh2QzANBgkqhkiG9w0BAQEFAASCAgCikDPwWz3oBhWIHP/kDzEaq94UQKfz99x+
-# KOrc1F6HHHwSS/RhgjGd3PBWAxu+cDxaNbvnPdn57Cw+meHXDI6OhhgvFXmqpQWs
-# nEGkka/MFnlKRja5QSCC6Nus1WYJHim6Rws9CnZ/gqKdQLpn1AvK/Lm2fS6BKRc0
-# SY+lk+PIVp1UZ3Sq5SLwGtDin72bo1dIO2vJP9XyTAwHaWmJwV38NdTgKgXfti0H
-# 2cArsEGcvUpkmIOFbEP1qLLlJsqUyKXdMw1WnA0M7ie5iHHX84PeFyv1jvNwPU0j
-# v/pzOFSezZsVOVuNdWdFejV7Tw7pA+t0k+vwWzC9aDkOd5VAmFbnZDoHxKnCYfQ3
-# g3yfMhvzy5C/wYPU1or6gpr3baJVebff5JdTM4qp2DPnGpUvJKbI8SLMzB0nbtuh
-# k9JyUFA3crMoph1B/zwInD3+tNjmx7Zst4qqYcc0fEE1LPYq4ZPs4GP9PjVLefBm
-# VDfIX1v2SOOVqXNHEqEORD5YZJo2fkRHAVXbUHbdFpFR1eZZp7i4Ja1Xu6v9DdSb
-# cvave95a77WOyPC2dExsOLPVpSZ5pbxtRLzeAOBRY++xx//T15Y2edfBsKXd/3vx
-# NmI/3Bk0oJQk0Wj4Z+S78oYmrYhBzyHSfzLkyKqDx4bvAqiqn9BM76IqBTpIfQUW
-# 38jCp6g4jQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MTBaMC8GCSqGSIb3DQEJBDEiBCDE2G3P38lFxODENJnwp+C8tZMWaDhMHVhsHOaU
+# WfQfKzANBgkqhkiG9w0BAQEFAASCAgCegFKKTtYOYq0s8WmJVojXP1f7N7a1io2q
+# nKsDsEiyTWCZ6rZmnUQq3J6VROZAM1zv/boBAVJSxwiCLofu7x5f4273nANAAeSo
+# 1JyVFX6DEQiHroS1sKTNt16wiSucoG12zAMvs89IFbc1094/li+1z4UipTiFOBDP
+# kK+rFvXQXFAlzwerH/bNzGcNilDJ61yVAOxgFh8BESq/sN70rLc3B/d8jaXzCSPC
+# FkxK1UulpUKktuOjUQhfFSrFqk8iL/7ikAJ+gjRg9QWB6cP9dZ4i66Hv1iWkZQF8
+# HPl5in8X2TNFQBDJvf4c9oO6UMn1WYMMnjHCpDlALj/sgKRgJb+TnDvKEs3al7ar
+# HZ+TtiSHh9yMb6Gf7QBUuWGRm3fZkStU2a/xui9nwJqPSCS0ppblSocWTohAj27q
+# GjzWFnzlCfgikb1/9iSuSMJdtMNjWXB6/yICRM/rXp3pbpmPuycB0QQJc5xIYvEp
+# S4c5b732vBgb1CJv2xQVDZiNODYzr9x1t6GJwvG4bdPx7t/g/DkU3FbM9ZoMJ/KO
+# FeR5GEOapHmuHVlKTz6/i61PfVCDWtHft/aRrBsJ2EBULgfsDiOImonFrALiRGcP
+# 8EznTRrHPF43D0S9f8r4eporHs+uxjjJ7aTFbZRjbwPMuNj5l4X7vmdRiwIHLC1w
+# qIPtpZjPow==
 # SIG # End signature block

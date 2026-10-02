@@ -100,6 +100,32 @@ Current Microsoft Graph application permissions include the read scopes used by 
 
 The Power BI and Microsoft Fabric activity collector uses a Power BI token with audience `https://analysis.windows.net/powerbi/api`. Interactive collection requires a Fabric Administrator with delegated `Tenant.Read.All` or `Tenant.ReadWrite.All`. App-only collection is authorized through the Fabric tenant setting **Service principals can access read-only admin APIs**, scoped to a security group containing the service principal; do not add admin-consent-required Power BI permissions to the app registration.
 
+The candidate `SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1`
+requires `Microsoft.Graph.Beta.Groups` and `Microsoft.Graph.Beta.DeviceManagement`,
+`Group.Read.All` and `DeviceManagementConfiguration.Read.All`. Hidden-membership
+groups additionally require `Member.Read.Hidden`; missing access blocks collection
+rather than reporting an empty group. Beta membership is used because Microsoft
+documents a service-principal omission in the v1.0 members endpoint. No application
+permissions are granted by this collector. It is not automatically scheduled until
+the CMDB source migration is qualified. Its completion receipt uses `.json.txt`.
+
+Discovered-app inventory now covers all platforms. All-mode collection bypasses
+previous-run caches: equal counts do not prove equal device identities. Resumed or
+cached evidence is labeled in the summary. Intelligence retains the numerical
+definition of legacy application history and labels its Windows scope; current
+product identity includes normalized name, publisher and platform, excluding version.
+Product/device footprint is distinct, while version-install observations remain
+separate. See `SmartInventory/PreparedEvidence/CMDB-SOURCE-CONTRACT.md` for migration gates.
+
+The CMDB migration candidate adds current completion receipts to 17 existing
+SmartInventory producers, through SmartM365.Core 1.0.65 (Windows PowerShell 5
+compatibility 1.0.47). The receipts qualify source acquisition scope, not tenant
+health. They use `.json.txt`, preserve native CSV schemas, and require actual
+publication in that run. The candidate preparation consumes these receipts and
+33 raw CSVs into 46 tables in a separate current-only `DATA-POWERBI-CMDB`; it does not read or
+replace Intelligence's `DATA-POWERBI`. No scheduler or production report switch
+is made by this change. See `SmartInventory/PreparedEvidence/CMDB-PREPARATION.md`.
+
 `Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` is intentionally interactive only. It administers Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` for execution-report export jobs and `Group.Read.All` to enrich assignment exports with group names. It does not use SmartM365 app-only certificate authentication. The current repository does not contain a separate remediation CLI.
 
 See `Setup/SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.

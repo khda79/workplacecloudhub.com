@@ -56,7 +56,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.30
+0.32
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
@@ -114,7 +114,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.30"
+$ScriptVersion = "0.32"
 $TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
@@ -145,7 +145,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.62' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.65' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -718,6 +718,7 @@ function Convert-SpoReportRowToSiteSeed {
     [pscustomobject]@{
         SiteUrl = $siteUrl
         SiteId = $siteId
+        ReportRefreshDate = ConvertTo-SpoText (Get-SpoReportValue -Row $Row -Names @('Report Refresh Date','ReportRefreshDate'))
         Title = $title
         Owner = $owner
         Template = ConvertTo-SpoText (Get-SpoReportValue -Row $Row -Names @('Root Web Template','RootWebTemplate','Template'))
@@ -922,6 +923,7 @@ if ([string]::IsNullOrWhiteSpace($latestFolder)) { throw 'LatestCsvFolderPath co
 
 $CurrentOperation = 'InitializeScriptEnvironment'
 $initializedOutput = InitializeScriptEnvironment -OutputPath $scriptOutputPath -LogFileName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
 if ([string]::IsNullOrWhiteSpace($global:WeeklyHistoryFolderPath)) {
     $global:WeeklyHistoryFolderPath = Join-Path -Path $initializedOutput -ChildPath 'WeeklyHistory'
 }
@@ -1028,11 +1030,19 @@ try {
             $alerts.Add((New-SpoAlertRow -Severity Warning -Category InactiveSite -SiteUrl $siteUrl -Metric DaysInactive -Value $siteText -Threshold "$InactiveDays days" -Details $siteDetails)) | Out-Null
         }
 
+        $nativeGraphSiteId = if ($graphSite) { ConvertTo-SpoText (Get-SpoPropertyValue $graphSite @('id')) } else { '' }
         $siteRows.Add([pscustomobject]@{
             RunId = $RunId
             RunDateUtc = $RunDateUtc
             TenantName = $TenantName
             SiteUrl = $siteUrl
+            SiteId = if ($nativeGraphSiteId) { $nativeGraphSiteId } else { ConvertTo-SpoText $site.SiteId }
+            ReportSiteId = ConvertTo-SpoText $site.SiteId
+            SiteIdentitySource = if ($nativeGraphSiteId) { 'GraphSite' } elseif ($site.SiteId) { 'UsageReportSiteId' } else { 'Unavailable' }
+            GraphEnrichmentStatus = if ($graphSite) { 'Collected' } else { 'Unavailable' }
+            CollectionScope = if ($IncludeOneDrive) { 'UsageReportSitesIncludingOneDrive' } else { 'UsageReportSitesExcludingOneDrive' }
+            ReportRefreshDate = $site.ReportRefreshDate
+            CollectedAtUtc = [datetime]::UtcNow.ToString('o')
             Title = $title
             Template = $template
             CreatedUtc = $createdUtc
@@ -1087,6 +1097,7 @@ try {
     $CurrentOperation = 'Export CSV files'
     $siteColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','Title','Template','CreatedUtc','LastActivityUtc','DaysSinceLastActivity','Owner','LockState','SharingCapability','ExternalSharingEnabled','StorageQuotaMB','StorageUsedMB','StorageQuotaPercent','StorageQuotaGB','StorageUsedGB','IsOneDrive','IsHubSite','HubSiteId','RelatedGroupId','IsInactive','IsOrphaned','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $listColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ListId','ListTitle','ListUrl','BaseTemplate','BaseType','Hidden','ItemCount','SizeMB','VersioningEnabled','MajorVersionLimit','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
+    $siteColumns += @('SiteId','ReportSiteId','SiteIdentitySource','GraphEnrichmentStatus','CollectionScope','ReportRefreshDate','CollectedAtUtc')
     $permissionColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','PrincipalType','PrincipalName','PrincipalLoginName','IsSiteAdmin','IsExternal','IsDisabled','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $sharingColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ObjectType','ObjectTitle','ObjectUrl','SharingSignal','SharingValue','LinkScope','Principal','IsAnonymous','IsExternal','Status','NumericValue','TextValue','Threshold','Details')
     $tenantColumns = @('RunId','RunDateUtc','TenantName','StorageUsedMB','StorageUsedGB','StorageUsedTB','StorageCapacityMB','StorageCapacityGB','StorageCapacityTB','StorageQuotaAllocatedMB','StorageQuotaAllocatedGB','StorageUtilizationPercent','CapacitySource','IsPartialInventory','Status','NumericValue','TextValue','Threshold','Details')
@@ -1181,6 +1192,7 @@ try {
     }
     Write-SpoLog -Message $resultSummary -Level SUCCESS
 
+    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxSites -eq 0 -and $MaxItems -eq 0) -Scope 'CMDB:sites' -Qualifications @("Usage report site scope; IncludeOneDrive=$([bool]$IncludeOneDrive); not a full tenant site-discovery claim.")
     Complete-SmartM365ExecutionContext -Status Success
 }
 catch {
@@ -1204,8 +1216,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTPFqkZ0cjbu8g
-# 4yGkKXNc4kddTQCaA1j4EeEcikzJ9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBoyq4vMYep9th
+# eTJPS86K/WegC/5GwAVZj6+tN2+bQ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1338,31 +1350,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDwmEXfR5ZLDS6u5jV29AgkmRnniOm/gt+JjM4LYx9eYMA0GCSqG
-# SIb3DQEBAQUABIIBgA1RWp3a94WHW1UNZHycmnuUnSqQbfK2W6XgMrLC6HsLeuhz
-# ItlPvKK/RKjHn8BIi40H134/q5h4bPYomsMdaao2eaQZuYxBPjzBW/VpLdZn7j2D
-# F/bGl+iQsKdY0G4A5Ht1xSVopkPqE6aByFect7LcrL8TDfnMutNOk5ULvW9yfCH7
-# Jyt/30u2J/SSB1UdLFTNQQFD8Ji5KVx1+PabMGfZXXaulbpu+FcO1qpBqk4zzljQ
-# qz2Yu5bfWeZfFR3xvFMbHSocpTFRZsZWaA5PgWzvP73LiHHN1Nt0BVZ7E2qIpc9o
-# G8S5ZNMfF9sQCc8NX5ZyV2HDhC71reE5r9BUv383QnpBPT6jUtK4cuKeqSiFeYHw
-# BJy0lxXKMRYsIJmG8Mpiv+gJoJgXl4H+msLSu8GTuSRhtyJ0t/Mj0nZSQL+ajrlF
-# MiUaAQbbHc7g6x+lGZe+NpLbAXED692rD46Nlv8zb0SvTdaosFpMNTm86Wzy006t
-# l9pT4lBV86d1rE48naGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINiGE8OX1y29Nh2GoQ866osl3UFLOr40OPY3I210WgSIMA0GCSqG
+# SIb3DQEBAQUABIIBgD0Z9c04PoN10+5fNOmSQzbZUxU+2yUeY4NqVnuRR5a8JEms
+# pcgjhH6ml0OMYlWcw+LKjUNg9pVoA2IpqS8Hgk2PWYCojjc55BWVBzA04lrYTt/i
+# eYk++1S5/+IC/ipImzvbUJcJgK1r7sQ7VemZzTipvEnlWeDt9XQCdbq5/pLyu0A5
+# 0WlH/u6Fe252XJmYBrbrXulABNB8snXYeLY8YWq7pbZ2eHHHzqVVQ8LtjP6WBDGG
+# kvHBxPV589pOe3ChSmc0LibwvnEptXHTkQoY+TsLhI9c+dO7/TrO+/pMaono8JQI
+# 2vyQCovJPfQy/fl2gLJw9UCoHbHyb4xOgdtYDmqSoyjSKPO2KSn8+LrVyDjtZM06
+# TVYOrfQYnK2yRsM4xjx2PC4494QvmVdzDlPwQejXD34xBo1PjICrOqDhIURKMFml
+# zCBAw4AP4qAOz8w6vDiSd/gaqUUHpX1Rqz4YGWm1tm8WRNF5q4exhFBaanEM+GeC
+# riDzCFYY/YOatDANA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMTA1
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAltwJ9//S5SzRfkY5SThCKmvzm446VVk6yn8W6
-# A/ltFDANBgkqhkiG9w0BAQEFAASCAgAEPuUgtprsxXB3bd2v/wa+JvtRBnW3I0sF
-# NBKBqv7nL3Yt0XZN2kY5ooiM0zgYE8PfvivQfmNIK4+cT6sRFzPtRdtsLrCRTo/H
-# RbKbwYkSNEVnFHL++ByRNWWhZyo+OSNlQaUYlWNqJj3wrtI+NkAk9ysrIhahX4yW
-# FIVvqXoz07w/J249mQRN6ag9EvFTqpTqPO10H7UPCQ5V+OIsDE/wC9dXKu7EuD3F
-# M33OjcdVtkU4JCjBDJd4NsnEq24iYWNmSy5DdPmovguy1r5cVkQzQoJsAhlcHHnY
-# Jiow1qChfrcPL/ZDWdVb/EKA7ae+ntd8tp7TlEhbBx/9omhT0mC5Rb8i2u8brr7Q
-# iojnipQ2oZ4FPfzvwC5rxSrrYFecN8SSE0pCy5ZyClV9vrCfXVyw3VIgDVmK5EYJ
-# kYwxXrpaK86EWV0hUHoTWCW8i3REkAGsSUVuNmTmBuwP5K4gxQ1pDWOm4JXTPzZT
-# KpgJClXhRkIlCVisZVh7JMDrYxSxbxqaNFC9seWnaBSlqSvv+bUMd8zFa6qAOBv4
-# IMwY7LkBCJX4nkZ9OL9Qz1eTOpf4T8+enJ1lPtIMxS1sa41gTtcuMe57F7UeuWym
-# mGJ7oCMXX6HSjNcGLqliQWIOd45+Zo3B12c3ZbtqFVm34SZtueCCjVtDE9TtGT8s
-# DTOh30UZUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDdaMC8GCSqGSIb3DQEJBDEiBCD5GmByE3h/aMWj2UOzhDYTvODZylY836P0zB/V
+# 7ar78zANBgkqhkiG9w0BAQEFAASCAgBeKv1VpV9Zs5DIBYnFRxhQT7b0DoJUV5rq
+# /2sbreEE9TwplYx93BgZeKFkrT7WsKVithy8EpMWibuacKUFusA0ge62Ik+TE0Qo
+# bv/Vjnm+GqKlMHbvYbyLc3XC2V5hD1sjBZ5OyU6xWZFe619QImam/YeAxGiL5YQd
+# CiHvqnjt3Ug+/at9ky+izsVbGkNNFBqvTWu6TZGi4JvP7s6HipV8VY0xRIYudnJg
+# KgcAg9dZMS8kYA9cL2h0ufQS8Qkrw0oTzLFmWffn1MixCpb6RQAcKqDRNHGQquri
+# 6d6FHJD9UupCPQii0ixzzGpsFiDcQ1hW53GqCMqQlrCMrxdACl3xesCGtfK5pHgm
+# 0tegIUzrFRvTBHKvcTZLM/2INismCaDjs9+fJ5p/Q5QuBNNwgKmIjyoFHLpkas7f
+# s7+e6WFa8+BYogKIG6KIUxuSfSkS/nXDwGAMHordYy9OSwpaD1aouLHXcrW4e1KP
+# JZolnO2FAIJbjhoueftACRrL+8PbQMAxhJMiUeT1bbv8peXBdWvh+nJDHH50n1wE
+# y/pfSMmkBapJPxcfdJdByLqnF2jtyXFAfdQvCs1AgZWeG8baih/P1IL0+9HKfHBa
+# vJpq1DcuVR7N2Q82w88MHJ2qS0DzDWnqzUkOZ13jN+vFP9k+M6/PXrupHFtxAcaq
+# Ht6tI8cPbQ==
 # SIG # End signature block

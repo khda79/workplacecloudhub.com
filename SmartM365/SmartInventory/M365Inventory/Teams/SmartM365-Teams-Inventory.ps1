@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.34
+0.36
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -45,7 +45,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.34"
+$ScriptVersion="0.36"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -55,7 +55,7 @@ $tenantContextPath=&{ $d=$PSScriptRoot; while($d){ foreach($c in @((Join-Path $d
 . $tenantContextPath
 $TenantContext=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 $ctxDir=Split-Path $tenantContextPath -Parent; $SmartM365Root=if((Split-Path $ctxDir -Leaf)-ieq 'Config'){Split-Path $ctxDir -Parent}else{$ctxDir}
-Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.62' -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.65' -Force -ErrorAction Stop
 $LocalConfigPath=Join-Path $PSScriptRoot "$ScriptBaseName.local.json"; $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath; $LocalTemplatePath=(Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
 if(-not(Test-Path -LiteralPath $LocalConfigPath)){Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration'|Out-Null}
 $ScriptConfig=Get-Content -LiteralPath $LocalConfigPath -Raw|ConvertFrom-Json
@@ -537,10 +537,12 @@ $AppId=[string](Get-ConfigValue 'AppId' ''); $TenantId=[string](Get-ConfigValue 
 $global:AppId=$AppId; $global:TenantId=$TenantId; $global:OrgDomain=$OrgDomain; $global:Thumb=$Thumb; $global:Thumbprint=$Thumb
 $teamColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','Description','Visibility','CreatedDateTimeUtc','Classification','SensitivityLabel','IsArchived','OwnerCount','MemberCount','GuestCount','StandardChannelCount','PrivateChannelCount','SharedChannelCount','LastActivityDateUtc','InactiveDays','StorageUsedGB','StorageQuotaGB','StorageQuotaPercent','Status','NumericValue','TextValue','Threshold','Details')
 $memberColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','UserId','DisplayName','UserPrincipalName','Mail','UserType','Role','Status','NumericValue','TextValue','Threshold','Details')
+$teamColumns += @('MemberCollectionStatus','OwnerCollectionStatus','ChannelCollectionStatus','StorageCollectionStatus','ActivityEvidenceStatus','ActivityReportRefreshDate','CollectedAtUtc')
 $channelColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','ChannelId','ChannelDisplayName','MembershipType','CreatedDateTimeUtc','PrivateChannelOwners','Status','NumericValue','TextValue','Threshold','Details')
 $guestColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','UserId','DisplayName','UserPrincipalName','Mail','Status','NumericValue','TextValue','Threshold','Details')
 try{
  $CurrentOperation='Initialize script environment'; $OutputPath=InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $ScriptBaseName; Start-Transcript -Path $global:logTranscriptFile -Append|Out-Null; Write-SmartM365LoadedModuleVersions; WriteLog -Message "Starting $TaskName"
+ Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$DryRun
  $CurrentOperation='Connect Microsoft Graph'; Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true; $conn=Connect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -AppId $AppId -Thumbprint $Thumb -TenantId $TenantId -Organization $OrgDomain -GraphScopes @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All'); if(-not$conn.GraphConnected){throw 'Microsoft Graph app-only connection failed.'}
  $CurrentOperation='Ensure ImportExcel module'; Ensure-TeamsImportExcelModule
  $CurrentOperation='Run preflight'; Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication','ImportExcel') -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All','Sites.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization','https://graph.microsoft.com/v1.0/groups?$top=1')|Out-Null
@@ -569,6 +571,16 @@ try{
   if($RequireSensitivityLabel -and [string]::IsNullOrWhiteSpace($label)){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('Missing sensitivity label'); Add-Alert $teamId $teamName Warning MissingSensitivityLabel 0 NoLabel 'Sensitivity label required' 'Tenant policy expects labels.'}
   [void]$TeamsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;Description=[string]$g.description;Visibility=[string]$g.visibility;CreatedDateTimeUtc=(IsoUtc $g.createdDateTime);Classification=[string]$g.classification;SensitivityLabel=$label;IsArchived=[string]$archived;OwnerCount=$owners.Count;MemberCount=$members.Count;GuestCount=$guests.Count;StandardChannelCount=$standard;PrivateChannelCount=$private;SharedChannelCount=$shared;LastActivityDateUtc=$last;InactiveDays=(Num $inactive);StorageUsedGB=(Num $usedGb);StorageQuotaGB=(Num $quotaGb);StorageQuotaPercent=(Num $quotaPct);Status=$status;NumericValue=(Num $members.Count);TextValue="Owners=$($owners.Count); Members=$($members.Count); Guests=$($guests.Count)";Threshold="Owners >= $MinOwners; inactive <= $InactiveDays days; storage <= $QuotaCriticalPercent percent; guests <= $GuestWarningThreshold";Details=(JoinVals $notes)})
  }
+ foreach ($teamRow in $TeamsRows) {
+  $teamActivity=$activityById[[string]$teamRow.TeamId]
+  $teamRow | Add-Member -NotePropertyMembers @{
+   MemberCollectionStatus='Collected';OwnerCollectionStatus='Collected';ChannelCollectionStatus='Collected'
+   StorageCollectionStatus=if([string]::IsNullOrWhiteSpace([string]$teamRow.StorageUsedGB)){'Unavailable'}else{'Collected'}
+   ActivityEvidenceStatus=if($teamActivity){'Observed'}else{'NoReportRow'}
+   ActivityReportRefreshDate=if($teamActivity){[string](Prop $teamActivity @('Report Refresh Date','ReportRefreshDate'))}else{''}
+   CollectedAtUtc=[datetime]::UtcNow.ToString('o')
+  }
+ }
  $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
  $teamsTimestampedPath=Join-Path $OutputPath "M365_Teams_Teams_$stamp.csv"; $membersTimestampedPath=Join-Path $OutputPath "M365_Teams_Members_$stamp.csv"; $channelsTimestampedPath=Join-Path $OutputPath "M365_Teams_Channels_$stamp.csv"; $guestsTimestampedPath=Join-Path $OutputPath "M365_Teams_Guests_$stamp.csv"
  Export-InventoryCsv -Rows $TeamsRows.ToArray() -Columns $teamColumns -TimestampedPath $teamsTimestampedPath -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Teams.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Teams_History.csv')
@@ -589,14 +601,15 @@ try{
  $mailFileLinks=New-TeamsSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path)+@($workbookPath))
  $worst=WorstStatus $alertArray; $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
  if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
+ Set-SmartM365CmdbSourceScope -CompleteScope ($MaxTeams -eq 0 -and $MaxItems -eq 0) -Scope 'CMDB:teams,team_members'
  $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Write-Host "Teams inventory completed. Status=$worst; $result"; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'})
 }catch{ $err=$_; try{WriteLog -Message ("Teams inventory failed during {0}: {1}" -f $CurrentOperation,$err.Exception.Message) -Level ERROR}catch{$null=$_}; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; try{Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $err -FailureStage $CurrentOperation}catch{$null=$_}; throw }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoPKjzCgSJDd6q
-# zVDhc+HkfXP6zrC1Jea4eEMRlTlC9aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDF24tflNCNXLl8
+# siE6OFQ+L0Tce8EudcO+Ze0laDRohqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -729,31 +742,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBnPPGbVEwn0SqCZwIJFtWdIGowFPjsmHCn51xBpUVUSMA0GCSqG
-# SIb3DQEBAQUABIIBgDIiKVm8XuYmpW08YO2gTg3x6bnNiB5w5K77Jffl9gOrOskD
-# KuiGnNq1F6Fy9rUmD7EcCtfv7VfoKITCtmb5tWWyqHanBxgaWHempC8HiFUKsRVT
-# ZyUS4eNDkx694wAvJBYhHgf7JqOh1KTz0h1WzH88vA6QOsTWsLGp+zgKnuEi70Vw
-# KpY+eVaJYNxemHquCWdEy1OoUvm9f1s8+aBmP2sN5ehO7GV1oC7bvyAqCtqjaU7j
-# Xhiqvr1nMW7AMdlaPzPi6kcWE0Al6WYyoQDfyo83WHjYvpR3AGLgqeEOohklxpta
-# ADubdtMIrA9ExTk3m9tocSGqlGN0e8TV7bb0NPXkdFvqPvDo7MuhfeKZ9t2OCrLM
-# IUc25V3H9FX+mcxi68mkQxRS/aPiMIuwmMV0rvmtJpBKo0mTz7TLrVhy4h1xCFvU
-# sArfm6InYMYYUdz3Z1yhYfAPToUENCU98MmehVvpweB0R/lL/WPlZ1mDHLqXobsi
-# jcUuZN9YHFC9Nph02aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHKx5NJXSCKq9LGs/q/Ks6x5yKK2lxyoBx5Bqs2i3gdKMA0GCSqG
+# SIb3DQEBAQUABIIBgG2gMMQ0AkhMtF0scYviT+T0lapJFZD9bmC3dWKhMQg1kN7b
+# A1DqjvGN8LejXrL1pio2rN2Dn9sKaED94jnVdWGkbabhpmIXSnxC1/1phtOXK5qa
+# 0rHYv1ov36+65b9egIBchz9fH/aiQ5UO0PvTeHEaek0t4gq6QbLOZFC53g0supTA
+# 9fVia7gEIrHC2W1vLStJ1s4PWGorH84aPDGQsNxKdnidWLAIq5N4Hag6N4GZcDX3
+# KmiWWUMV1cgw8ETp6gEdjBrBLot7NkEWZAlMrnfNtArIaZFia1mGZXjUxffnpTRR
+# jtZy1/dDihweRLJWDIvdLvC1tBeStcCuKAbapsEvk8qdfIuJ63hSJ4NR+LPeuisx
+# Qg5As/X7ZrdWyjzcBSWT8zta5qDxxOVDsQWqyX7VUhfqB4W84oNO3GgE/UQRwrEq
+# U9jAf43QGLQGkjZDIW9iZ2Y8PYliPkqGfHgoyq9Kjszr+PVcYq8l3ngT0os1l7m8
+# rLRdHM08HeEMYx6erqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMTA1
-# MDlaMC8GCSqGSIb3DQEJBDEiBCDJSyb2b31F1wke8UNBMye5r6UaB2f7ViE6WKMb
-# QGDXQzANBgkqhkiG9w0BAQEFAASCAgCWoA1Tt9csLaywMb2lSkNy5Vot75IrXo2q
-# QbhH+Z+EWKHCapMUua/zCeSSajRgZIRZboZpMKq7FSn7rYL0CJ9esNLAdeaJqSwp
-# rQLlJHAy2JH4Zk/HMcm11jIKtkNm7u0nw2JRxwU94kB0Vx9wZUgCB203+yn6iKmZ
-# qnCrTuG4bUTcvfM8HCTjepTt5HxHbI6Ewv8VwDmWbp1g+qh9ofaiKcc+whECFwUe
-# SxDLfp6WL1x3fi28GzBBAlGD6em8FUW8tN1R97fGrfVUmQ5q1FYC/tt4nSTkyfyM
-# SxavRnuzF6xtCGS6CQNyjGOHyr9ABJHv7CqlANjAhF9pr+lYcVIyPfF38zUQYBxp
-# PjGx5Y9harGfI/KXhwXbjzvmE1SWwf0jUznbQ2nAumLVrHBcLSIhf/7x2R2uK9Wf
-# kjshv0Pv7RHRhzvdwF6a2FaQD7CCRCLCqtkthuq8V3ceHzDzyx4S+PGYW/Pqy+RN
-# A/dCHKk9pcPUdjKYYJnmALdJEhLOZNvpCEVfPS3VW9GTQWzQ4XJdOmDvFEvqbiRQ
-# /EPN5tKvJG8fyAwJ4J2IPT0m8qm8N7xro4EIj2xc8B+2UOb3zXcidh7fwIvS0SW5
-# gVxS/t7gcOXkljdfGefKXPbaEAQrgmK08WJncJJ0N1f4e6ehS8xHojBupeAF+7BD
-# Mo/RN9sTKQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDhaMC8GCSqGSIb3DQEJBDEiBCBDQmgg3ewCtJSxpbAdf/8htTMhrZOFTzaFiHvU
+# JZrEmzANBgkqhkiG9w0BAQEFAASCAgCM1m4dfxZ4j5IZ+27VdGVmgu12gKB2yAJg
+# t0Bo3xxIqYo+LVRvYvcdJIh+eEdx9xqzd9ThBit8BtWnYncTwoJAtFsMdQEj3zJ8
+# dIALV0FDsg7GoPP20BuPkBx1t2zSMz62um0mIeyZqAYLAiE5VhWsui4VGIeeLmYa
+# zqskBow0P+caKQn3S+Kqz0e4GDy1c69xS6wjF44ojQv65QOVHmC6PESPpTcPsHQi
+# FwXfYr8cHm9UWZg39fcOvjOmIwlQEDqGDeAf9R/NUyDYjpVaEal6x3c8Ow6e8KiK
+# ZncevDBfLyfTsItFbV2NM0e/lxmbvPc5XjmAwwKFOf8ZR9E4wCaRsCG3/sH4ddKr
+# cecY7hxNBEOJ2UiiDidqtR/peupWytm1qu5cGQ2zTklbs7KnSf9L1KF0A27dxRiC
+# 2Q23fVI+LvLgkTocCu5e/b1dcacbvPALbG4VT4U8Rs/RSTMOHLCYeJSf4I7Wf90j
+# 3/rEj3YVjQviyDEMWYEu695pCrw0XtLrgP0KLbJTl2/7TC0SeE06TvM+GpKbOpsg
+# LLorOGdta95/86tHba6mT/7GDYyM1Rg0vjRjhG9Z4Csl+uawwZG5fol31mD72Uzl
+# GigrlonvRXM7f2BZF3Gt+/ozo+1HKTFZ8eA4doVvkmFkBb35yIZgoSRJtzFXVxMX
+# JSl5iL5ejw==
 # SIG # End signature block

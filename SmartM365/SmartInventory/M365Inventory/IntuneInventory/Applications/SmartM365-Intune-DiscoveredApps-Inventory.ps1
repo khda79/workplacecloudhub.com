@@ -1,13 +1,13 @@
 ﻿<#
 .SYNOPSIS
     Intune-DiscoveredApps-Inventory
-    Retrieves discovered Windows applications from Intune via Microsoft Graph API.
+    Retrieves discovered applications for all Intune platforms via Microsoft Graph API.
 
 .DESCRIPTION
     Connects to Microsoft Graph using service principal with certificate authentication.
-    Retrieves all discovered Windows applications and their associated managed devices.
+    Retrieves all discovered applications and their associated managed devices.
     Produces two CSV exports:
-      - Summary            : one row per discovered Windows app (name, version, publisher, device count)
+      - Summary            : one row per native app/version (name, publisher, platform, device count)
       - AppDeviceRelations : one compact row per app / device pair (TenantKey, AppId, DeviceId)
     Both files are written to the DATA-ALL output folder (DiscoveredAppsCsvLogFolderPath) and copied to DATA-LAST (LatestCsvFolderPath).
 
@@ -19,7 +19,7 @@
     Forces a (re)connection to Microsoft Graph (disconnects any existing session first).
 
 .PARAMETER MaxApps
-    Optional. Limits the number of Windows apps processed (0 = no limit).
+    Optional. Limits the number of apps processed (0 = no limit).
     Use a small value (e.g. 10) for testing before a full run.
 
 .PARAMETER DryRun
@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.25
+    Version : 1.29
 
 .VERSION
-1.27
+1.29
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -40,7 +40,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.25
+    Version : 1.29
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -94,6 +94,12 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
             Set-Variable -Name $smartM365LimitName -Value ([int]$MaxItems) -Scope Script
         }
     }
+}
+# A bounded app run must never replace canonical complete inventory files.
+if ($MaxApps -gt 0) {
+    $global:SmartM365MaxItems = [int]$MaxApps
+    $global:SmartM365TestMaxItems = [int]$MaxApps
+    $global:SmartM365IsMaxItemsRun = $true
 }
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -290,7 +296,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -299,7 +305,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.29"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -323,7 +329,7 @@ if (-not $PSBoundParameters.ContainsKey('ProgressEveryApps')) {
 if (-not $PSBoundParameters.ContainsKey('DeviceDetailCacheMaxAgeDays')) {
     $DeviceDetailCacheMaxAgeDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceDetailCacheMaxAgeDays' -DefaultValue 7)
 }
-$script:UsePreviousDeviceDetailCache = -not $RefreshDeviceDetailCache
+$script:UsePreviousDeviceDetailCache = -not $RefreshDeviceDetailCache -and $DeviceDetailMode -ne 'All'
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
 $script:GraphBatchMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphBatchMaxRetryAttempts' -DefaultValue 3)
 $script:GraphRetryDefaultSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryDefaultSeconds' -DefaultValue 30)
@@ -354,6 +360,7 @@ try {
     $InitializeOutputPath = InitializeScriptEnvironment `
         -OutputPathInit $OutputPath `
         -LogFileName    ($MyInvocation.MyCommand.Name -replace '\.ps1$', '')
+        Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script environment initialized at $InitializeOutputPath"
@@ -1550,32 +1557,41 @@ try {
     # ----------------------------------------------------------
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementApps.Read.All','DeviceManagementManagedDevices.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$top=1') | Out-Null
 
-    # Retrieve ALL discovered apps - filter Windows client-side
-    # Note: $filter on platform is not guaranteed on this endpoint;
-    #       client-side filtering ensures compatibility.
+    # Retrieve all platforms without a diagnostic Windows-only filter.
     # ----------------------------------------------------------
-    WriteLog -Message "Retrieving all discovered apps from Intune (Windows filter applied client-side)..." "INFO"
+    WriteLog -Message "Retrieving all discovered apps from Intune (all platforms)..." "INFO"
     $appsUri    = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$top=999&$select=id,displayName,version,publisher,deviceCount,platform'
     $allAppsRaw = Invoke-GraphPagedRequest -InitialUri $appsUri
 
     $script:Stat_AppsTotal   = $allAppsRaw.Count
-    $windowsApps             = @($allAppsRaw |
-        Where-Object { $_.platform -eq 'windows' } |
-        Group-Object -Property id |
-        ForEach-Object { $_.Group | Select-Object -First 1 })
-    $script:Stat_AppsWindows = $windowsApps.Count
+    # The legacy variable name is retained internally; its scope is now all platforms.
+    $windowsApps = @($allAppsRaw)
+    $appIdentitySet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($application in $windowsApps) {
+        if (-not $application.id -or -not $appIdentitySet.Add([string]$application.id)) { throw 'Missing or duplicate discovered application identity.' }
+    }
+    $script:Stat_AppsWindows = @($windowsApps | Where-Object platform -eq 'windows').Count
+    $appsCollectedAtUtc = [datetime]::UtcNow.ToString('o')
 
     WriteLog -Message "Total apps retrieved (all platforms) : $($script:Stat_AppsTotal)" "INFO"
-    WriteLog -Message "Windows apps after filter            : $($script:Stat_AppsWindows)" "INFO"
+    WriteLog -Message "Windows apps within the all-platform scope: $($script:Stat_AppsWindows)" "INFO"
 
-    if ($script:Stat_AppsWindows -eq 0) {
-        WriteLog -Message "No Windows apps found. Exiting." "WARNING"
+    if ($windowsApps.Count -eq 0) {
+        if (-not $DryRun) {
+            $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+            $latest = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+            Export-SmartM365Csv -Data @() -Columns @('AppId','AppName','AppVersion','AppPublisher','Platform','DeviceCount','CollectionScope','CollectedAtUtc','RelationCollectionScope','RelationEvidenceStatus') `
+                -TimestampedPath (Join-Path $OutputPath "Intune_DiscoveredApps_Summary_$stamp.csv") -LatestPath (Join-Path $latest 'Intune_DiscoveredApps_Summary.csv') -NoWeeklyHistory | Out-Null
+            Export-SmartM365Csv -Data @() -Columns @('AppId','DeviceId') `
+                -TimestampedPath (Join-Path $OutputPath "Intune_DiscoveredApps_AppDeviceRelations_$stamp.csv") -LatestPath (Join-Path $latest 'Intune_DiscoveredApps_AppDeviceRelations.csv') -NoWeeklyHistory | Out-Null
+        }
+        WriteLog -Message 'Successful empty all-platform application scope. No old application rows retained.' -Level INFO
         return
     }
 
     # Apply MaxApps limit if set
     if ($MaxApps -gt 0 -and $windowsApps.Count -gt $MaxApps) {
-        WriteLog -Message "MaxApps=$($MaxApps): limiting processing to first $($MaxApps) Windows apps." "WARNING"
+        WriteLog -Message "MaxApps=$($MaxApps): limiting processing to first $($MaxApps) apps." "WARNING"
         $windowsApps = $windowsApps | Select-Object -First $MaxApps
     }
 
@@ -1592,6 +1608,10 @@ try {
             AppPublisher = $app.publisher
             Platform     = $app.platform
             DeviceCount  = $app.deviceCount
+            CollectionScope = 'AllPlatforms'
+            CollectedAtUtc = $appsCollectedAtUtc
+            RelationCollectionScope = $DeviceDetailMode
+            RelationEvidenceStatus = 'Pending'
         })
     }
     WriteLog -Message "Summary records built: $($summaryRecords.Count) rows." "INFO"
@@ -1617,7 +1637,7 @@ try {
     }
 
     $script:Stat_DetailAppsTargeted = $detailApps.Count
-    WriteLog -Message ("Device detail mode '{0}' selected {1} app(s) out of {2} Windows apps." -f $DeviceDetailMode, $detailApps.Count, $windowsApps.Count) "INFO"
+    WriteLog -Message ("Device detail mode '{0}' selected {1} app(s) out of {2} apps." -f $DeviceDetailMode, $detailApps.Count, $windowsApps.Count) "INFO"
 
     if ($DeviceDetailMode -eq 'None') {
         WriteLog -Message "DeviceDetailMode=None; skipping per-app managedDevices retrieval." "INFO"
@@ -1913,6 +1933,9 @@ try {
     }
     $deviceCountReconciliation = Update-DiscoveredAppsSummaryDeviceCounts -SummaryRecords $summaryRecords -ActualDeviceCountsByAppId $actualDeviceCountsByAppId -RequireComplete:($DeviceDetailMode -eq 'All')
     $deviceCountReconciledApps = [int]$deviceCountReconciliation.ChangedApps
+    foreach ($summaryRow in $summaryRecords) {
+        $summaryRow.RelationEvidenceStatus = if ($DeviceDetailMode -eq 'None') { 'NotCollected' } elseif ($script:Stat_DetailAppsFromCache -gt 0 -or $script:Stat_DetailAppsSkippedByResume -gt 0) { 'ReusedEvidence' } else { 'Fresh' }
+    }
     WriteLog -Message ("Summary DeviceCount reconciliation: ComparedApps={0}; ChangedApps={1}; NetDelta={2}." -f $deviceCountReconciliation.ComparedApps, $deviceCountReconciliation.ChangedApps, $deviceCountReconciliation.NetDelta) "INFO"
 
 
@@ -1989,7 +2012,7 @@ try {
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
 
     try {
-        $title = "Intune Windows Discovered Apps - ERROR"
+        $title = "Intune Discovered Apps - ERROR"
         $msg   = @"
 An error occurred in script $($MyInvocation.MyCommand.Name) on $(Get-Date -Format "yyyy-MM-dd HH:mm:ss").
 
@@ -2060,6 +2083,7 @@ $($global:LogTextFile)
     try {
         Stop-DiscoveredAppsTranscript
         $summaryStatus = if ($script:RunError) { 'Failed' } else { 'Auto' }
+        Set-SmartM365CmdbSourceScope -CompleteScope ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0 -and $MaxItems -eq 0 -and $script:Stat_DetailAppsFromCache -eq 0 -and $script:Stat_DetailAppsSkippedByResume -eq 0) -Scope 'CMDB:apps,app_relations'
         Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $script:RunError
     } catch {
         WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
@@ -2069,8 +2093,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0UvaEsvAZ/8SO
-# pjMwiGFkFdLf06we7umE8m+w+2vjMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD93o9FcRLqOaKj
+# OnjXMTvuCSGkgdFl8JDHooJJ4sxM4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2203,31 +2227,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOnIPcdL9gQVqtjehh38g9FKFDluy4XZ2WfyiVfdg4GkMA0GCSqG
-# SIb3DQEBAQUABIIBgE6qkDszzbXojZohMxA/LWKZKblBVyzNqdOMq67BzjJUEPKP
-# l9pRRwZBYOQcI79N6yJz87KwAkwZeUhUbnEud+R7ndGEMBVfKTOzY+3zaWAPsRVi
-# 4JEfK1QBE3P9vW9fS24+g4HdKh2GWGoNjl6oIJqamoMdZIWa1ySFOX3BcedAz7jZ
-# B/BWDaqA5IGgsXxqXNtE1ceBRb1zr86+YAbllyBavixWmffwgw2FkDa+6E2LXAJ0
-# xChoadWz9DlBxzPefURwFsYbO/MV3b5NMqU5nv7zyk/t/dX3clSxnrybuaIrJoua
-# JN3fwnP1mgv2rByxDMC1ZhSHUZwKNGvkvdHgL6Lzpbpkn1auH/q1oO90EAzFnSIb
-# XPZfxMo3Ls9oNoWU3aHRS6GWfzCs7Y7/jrlbVMhWctInvj/RFyJowYIcDj3jLlZJ
-# r6ozpK5PcbCYBePFhg0id1J2Ql98RtcW298V8abwUERWcvmylUS86UmdV5NXc8oL
-# JBwLgMzoXz6A0cAp46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHGEQC24gnSbXqOsUVKiwyF+ao1c9wAkyHhWZa2M/yMhMA0GCSqG
+# SIb3DQEBAQUABIIBgFpFM3M2O2rMDP2w97FQL09/ORUCE84zrORK0cBgsm0czwB6
+# xz1bVCKMaDDumFAemF52ueT/TdnU1u6NFRNf8oqqTaYM4W5W6WD3EVIW6qVHmYh4
+# MGIBWx5SSkbYtBiqr+L6Pksom+vBCxv3wuQWn4ZxPw6a3jMLycsZjLO5zipRjmwe
+# zDluFqvpzisA4XvjMwY8TvLPI8Hwta81jKxJQzN4Q6IIe7MAEiXFOfYLng9IrMJ6
+# 41WccVIDBrL7BBAgofClJPXVDPAI17SA4zFAa26uyS0boOOB7uMsDUaD1ppUe+pR
+# 0yzqqD76H+ltJ7DaEr9UFmpD5N2geKfzFpBfD/nlpBKXN9K85F3CBLkXt1Khv7E/
+# g2eNh98JgQn0kZ8p9c1Dh6IbpfvMP4gfNtf5eVeoF/7+CCmX7bO5TXT3d5TjwIGI
+# pibwnGWyiFHEJBew7lIqWb1S64huNmEh24rD1ayyhtXUV8+iS44gmjewjgpcRHes
+# xZCJtyKEFp2+RkiUJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCAz3DnOBia2VskFRPkLaDWg+Z8k3q4vIhdNYHWK
-# hB9xhjANBgkqhkiG9w0BAQEFAASCAgAWbFyZsR0EiY5YPJwTB/EzTqOaxrvIxkCI
-# 6PJ3XdtRkD1OuyXQZaYIwtbuRINQe/VQ/0HN5I5S88S6BK9xbHD7Re64oX36pze1
-# CmriLpTgfc1xqh6n1DL+WHvzL1fUIrtqGgiMiErBK49QXNNl0yQ8o3V1tQ8vF1BC
-# 7Ok1ZADMgp4ugd4/f5f2gG6YKQAD/5Yvk7bDrqWfu6ZiI5Q4VwCKoEz4j5xgG34A
-# yv4jL0K5MCNymwp7Qi+WTqnloRvQVXV3fu3bR8HKLVF4TJbl12F82ktanAJ/RT7Y
-# NueKoZejh/Aow2rudInOR8oB+qpvtQ6+uWLbCE+hCqC5g0NNHdhFAiBmkROfQX5K
-# /OxDgwNmQl0xXausVd7PpeEa2CyigNDZ5mQTbxkJvfO4wJQGNsNgQpd3/yI+uXE6
-# vZcr6HDXlZwoh4sn4EeOG+bcN5dHn7NSYvLjoIu3J1iEzk1eO2XedE3m2XdII5q3
-# tewuH31HnSjOBuOZ1OzftWf7OjbA6UgR7CyMrZW86jvISvUFgctvody77Uh8unSI
-# Rc5z3PrZ+FuX2fNL0BtRew5kAjLCuYsxLKzE9t+LaofOxzicLG10A4D134GkZI/5
-# 4YQQIvEgNL86nbrHoFTzUgHmFresf/awwDbjSxVYypSwB4tEYJ8N5zkT6+mM3QCB
-# iny06ly1QQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCMtTv2dqnYg35TE9cBvI1wj4Q38qlYv+YLgI71
+# JEGgMzANBgkqhkiG9w0BAQEFAASCAgBLvE3yRxe2t8Wk3ZCiINAOCZtLXKGnMJ1f
+# xpPgEgl0LX0BOY4yYrL4/k9/SMnIJ1yLptj8Niwh+ACnoI+pscVjZHnV6f0IVWbL
+# zLKieqsAQ9f1EaFav7idhE1mFd0zDBOuxeBzdX9Es63JtFDDq023jRegutfjDX58
+# E+qCTsFNJhANg7sh0AAYzutFLJ40cqtAN8EZRowDhVyHFxNK1ydVlnKa8g7xMR6t
+# U6JQpZLL60iG0Q3jZNtle1S0HhW7AizV6ixArq6FKSCo7vp1B3Hkg2XaESqXnS/Y
+# vsGKZoRj6xjgRiiQpu9X8kgnscGojbEQnUeSX/qn11E/DlXW/qItr25KLCLHTwL6
+# 4kntsxEewRUMhfR/tTB3EUzfS72oJFHF4oanqMRn29M0sykh7e+R0MAy0n0wrj7X
+# sShGuSg4dk6KnONSzLRm946E0BIoWKcUnTK4O3iLes+jZMXs7+Ipskvujuba9JhI
+# Bx8mwsZSBWV+KVXkOQbXfzQ0lqRrZsfJ6rt8PYXC7iiJSrBcZOUdjgumr44HFQTd
+# MfodnzpSg+4ooCB4eXztcxP9i5EmzlIBKPyK/FLnhi8tBT6K7Dig0BjerZG65hG8
+# +vmbV9WgmqBYbUATX1k+FczkT5f8AdHu0F5RGrhS4UI4lBoSkdiJNbp2KbNwuKQg
+# ZIO5UsBJfw==
 # SIG # End signature block

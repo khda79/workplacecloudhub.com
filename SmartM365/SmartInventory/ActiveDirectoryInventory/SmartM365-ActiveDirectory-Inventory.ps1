@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.48
+1.52
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -672,7 +672,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -681,12 +681,13 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.48"
+$ScriptVersion = "1.52"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','') -CallerScriptPath $PSCommandPath
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:($DomainWorker -or $ReportOnly -or $DuplicateAnalysisOnly)
     Start-Transcript -Path $global:LogTranscriptFile -Append
 
     WriteLog -Message ("Script environment initialized at {0}" -f $InitializeOutputPath)
@@ -1011,6 +1012,40 @@ try {
 
         [void]$global:csvGeneratedPaths.Add($Path)
     }
+    # A successful zero-row query still produces the native header for its domain.
+    function Get-SmartM365AdNativeColumns {
+        param([ValidateSet('Users','Computers','Groups','DirectoryObjects','OUs','Contacts')][string]$Kind)
+        switch ($Kind) {
+            'Users' { @('DomainName','ObjectType','SamAccountName','sAMAccountType','Name','DistinguishedName','UserPrincipalName','primaryGroupID','Enabled','manager','LastLogonTimestamp','LastLogonDate','DisplayName','GivenName','Surname','Description','Department','Title','Company','Office','TelephoneNumber','MobilePhone','EmailAddress','StreetAddress','City','PostalCode','Country','CountryName','WhenCreated','WhenChanged','AccountExpirationDate','PasswordLastSetDate','badPwdCount','BadPasswordDate','LogonCount','userAccountControl','IsNormalAccount','IsScriptAccount','IsPasswordNeverExpires','IsTrustedForDelegation','MemberOfGroups','ProxyAddresses','CanonicalName','ObjectGUID','TargetAddress','msExchRemoteRecipientType','msExchRecipientTypeDetails','ObjectSID','ObjectSIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','MustChangePasswordAtNextLogon','DomainNameShort','DomainAndSam','ImmutableId_AD') }
+'Computers' { @('DomainName','ObjectType','SamAccountName','Name','DistinguishedName','Enabled','DNSHostName','OperatingSystem','operatingSystemHotfix','operatingSystemServicePack','operatingSystemVersion','LastLogonDate','Description','IPv4Address','WhenCreated','WhenChanged','pwdLastSetDate','CanonicalName','MemberOfDNs','PrimaryGroupName','ObjectGUID','SID','SIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','DomainNameShort','DomainAndSam','ImmutableId_AD','IsMemberOfConfiguredGroup01','IsMemberOfConfiguredGroup02','IsMemberOfConfiguredGroup03','IsMemberOfConfiguredGroup04','IsMemberOfConfiguredGroup05','IsMemberOfConfiguredGroup06','IsMemberOfConfiguredGroup07','IsMemberOfConfiguredGroup08','IsMemberOfConfiguredGroup09','IsMemberOfConfiguredGroup10','MatchedConfiguredGroups') }
+            'Groups' { @('DomainName','CanonicalName','CN','Created','createTimeStamp','Deleted','Description','DisplayName','DistinguishedName','GroupCategory','GroupScope','GroupType','HomePage','LastKnownParent','mail','ManagedBy','MemberOf','Members','MembersJson','Modified','modifyTimeStamp','Name','ObjectCategory','ObjectClass','ObjectGUID','objectSid','ProtectedFromAccidentalDeletion','SamAccountName','SIDHistory','whenChanged','whenCreated') }
+            'DirectoryObjects' { @('DomainName','ObjectClass','DistinguishedName','ObjectGUID','ObjectSID','PrimaryGroupID') }
+            'OUs' { @('DomainName','ObjectType','Name','DistinguishedName','ObjectGUID','whenCreated','whenChanged','Description','managedBy') }
+            'Contacts' { @('DomainName','ObjectType','Name','DistinguishedName','ObjectGUID','DisplayName','ProxyAddresses','Mail') }
+        }
+    }
+    function Get-SmartM365AdCsvColumns {
+        param([Parameter(Mandatory)][string]$Path)
+        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
+        $parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($Path)
+        try {
+            $parser.SetDelimiters(',')
+            $parser.HasFieldsEnclosedInQuotes = $true
+            $columns = @($parser.ReadFields())
+            if (-not $columns.Count -or @($columns | Group-Object | Where-Object Count -gt 1).Count) {
+                throw 'Missing or duplicate AD CSV header.'
+            }
+            $columns
+        } finally { $parser.Dispose() }
+    }
+    function Complete-SmartM365AdDomainCsvSchema {
+        param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Kind)
+        if ((Test-Path -LiteralPath $Path) -and (Get-Item -LiteralPath $Path).Length -gt 3) { return }
+        $columns = @(Get-SmartM365AdNativeColumns $Kind)
+        Add-SmartM365CsvValidationRule -Rules $global:SmartM365CsvValidationRules -BaseFileName ([IO.Path]::GetFileNameWithoutExtension($Path)) -CriticalFields @('DomainName') -RequiredColumns $columns -AllowEmptyDataset
+        Write-SmartM365CsvAtomically -Data @() -Path $Path -Columns $columns -Encoding UTF8
+    }
+
     function Combine-CsvFiles {
         param(
             [Parameter(Mandatory = $true)]
@@ -1023,7 +1058,7 @@ try {
             [string]$DestinationFile
         )
 
-        $files = Get-ChildItem -Path $SourceFolder -Filter $Filter -File | Sort-Object Name
+        $files = @(Get-ChildItem -Path $SourceFolder -Filter $Filter -File | Sort-Object Name)
         if (-not $files) {
             if (Test-Path -LiteralPath $DestinationFile) {
                 Remove-SmartM365AdFileWithRetry -Path $DestinationFile
@@ -1064,12 +1099,18 @@ try {
             }
 
             if ($isFirstFile) {
-                Remove-SmartM365AdFileWithRetry -Path $stagingFile
-                if (Test-Path -LiteralPath $DestinationFile) {
-                    Remove-SmartM365AdFileWithRetry -Path $DestinationFile
-                    WriteLog -Message ("Removed stale combined CSV because no data rows were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
+                $columns = @(Get-SmartM365AdCsvColumns -Path $files[0].FullName)
+                foreach ($emptyFile in $files) {
+                    $otherColumns = @(Get-SmartM365AdCsvColumns -Path $emptyFile.FullName)
+                    if (($columns -join '|') -cne ($otherColumns -join '|')) { throw 'Empty AD domain schemas differ.' }
                 }
-                WriteLog -Message ("No data rows found while combining filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
+                $base = [IO.Path]::GetFileNameWithoutExtension($DestinationFile)
+                if (-not $global:SmartM365CsvValidationRules.ContainsKey($base)) {
+                    Add-SmartM365CsvValidationRule -Rules $global:SmartM365CsvValidationRules -BaseFileName $base -CriticalFields @('DomainName') -RequiredColumns $columns -AllowEmptyDataset
+                }
+                Write-SmartM365CsvAtomically -Data @() -Path $DestinationFile -Columns $columns -Encoding UTF8
+                Add-SmartM365AdGeneratedCsvPath -Path $DestinationFile
+                WriteLog -Message ("Combined {0} successful empty domain exports into '{1}'." -f $files.Count, $DestinationFile)
                 return
             }
 
@@ -2426,6 +2467,34 @@ try {
 
         $safeDomainFileName = $currentDomainName -replace '[^a-zA-Z0-9\.-]', '_'
 
+        # Keep native domain identity/roles, including domains with no workplace computers.
+        $domainObj = Get-ADDomain -Server $currentDomainName -ErrorAction Stop
+        $domainSid = $domainObj.DomainSID.Value
+        # Include server and external member identities independently of workstation scope.
+        $directoryIdentityPath = Join-Path $tempFolder ("AD_DirectoryObjects_{0}.csv" -f $safeDomainFileName)
+        Get-ADObject -LDAPFilter '(|(objectClass=user)(objectClass=group)(objectClass=contact)(objectClass=foreignSecurityPrincipal))' `
+            -Server $currentDomainName -ResultSetSize $null -Properties objectGUID,objectSID,primaryGroupID -ErrorAction Stop |
+            Select-Object @{Name='DomainName';Expression={ $currentDomainName }},ObjectClass,DistinguishedName,
+                @{Name='ObjectGUID';Expression={ [string]$_.ObjectGUID }},
+                @{Name='ObjectSID';Expression={ if ($_.objectSID) { $_.objectSID.Value } else { '' } }},
+                @{Name='PrimaryGroupID';Expression={ $_.primaryGroupID }} |
+            Add-SmartM365TenantKey | Export-Csv -LiteralPath $directoryIdentityPath -NoTypeInformation -Encoding UTF8
+        Complete-SmartM365AdDomainCsvSchema -Path $directoryIdentityPath -Kind DirectoryObjects
+        $domainMetadataPath = Join-Path $tempFolder ("AD_Domains_{0}.csv" -f $safeDomainFileName)
+        [pscustomobject][ordered]@{
+            DomainName = $currentDomainName
+            DNSRoot = $domainObj.DNSRoot
+            NetBIOSName = $domainObj.NetBIOSName
+            Forest = $domainObj.Forest
+            DistinguishedName = $domainObj.DistinguishedName
+            DomainSID = $domainSid
+            DomainMode = [string]$domainObj.DomainMode
+            PDCEmulator = $domainObj.PDCEmulator
+            RIDMaster = $domainObj.RIDMaster
+            InfrastructureMaster = $domainObj.InfrastructureMaster
+            CollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+        } | Add-SmartM365TenantKey | Export-Csv -LiteralPath $domainMetadataPath -NoTypeInformation -Encoding UTF8
+
         # ------------------------------------------------------
         # OU INVENTORY
         # ------------------------------------------------------
@@ -2435,18 +2504,22 @@ try {
             $outputCsvFilePath = Join-Path $tempFolder ("AD_OUs_{0}.csv" -f $safeDomainFileName)
             [int64]$ouCount = 0
 
-            Get-ADOrganizationalUnit -Filter * -Server $currentDomainName -Properties Name, DistinguishedName, description, managedBy |
+            Get-ADOrganizationalUnit -Filter * -Server $currentDomainName -Properties Name, DistinguishedName, description, managedBy, ObjectGUID, whenCreated, whenChanged |
                 ForEach-Object { [void]($ouCount++); $_ } |
                 Select-Object `
                     @{Name = 'DomainName';   Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';   Expression = { $CurrentObjectType }},
                     Name,
                     DistinguishedName,
+                    @{Name = 'ObjectGUID'; Expression = { [string]$_.ObjectGUID }},
+                    whenCreated,
+                    whenChanged,
                     @{Name = 'Description'; Expression = { $_.Description -replace "`r", " -R " -replace "`n", " -N " }},
                     managedBy |
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported OUs for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $ouCount)
+            Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind OUs
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
@@ -2479,14 +2552,6 @@ try {
             $GroupNameByDNCache     = @{}
             $GroupParentsByDNCache = @{}
             $GroupNameBySIDCache   = @{}
-
-            try {
-                $domainObj = Get-ADDomain -Server $currentDomainName
-                $domainSid = $domainObj.DomainSID.Value
-            }
-            catch {
-                $domainSid = $null
-            }
 
             $ResolveNestedComputerGroups = $false
             [int64]$computerCount = 0
@@ -2595,6 +2660,7 @@ try {
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $computerCount)
+            Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind Computers
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
@@ -2615,17 +2681,9 @@ try {
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Users_{0}.csv" -f $safeDomainFileName)
             [int64]$userCount = 0
 
-            [int]$DomainExcludedUsersNoUpn = 0
-            try {
-                $DomainExcludedUsersNoUpn = (Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user)(!(userPrincipalName=*)))" -Server $currentDomainName -ResultSetSize $null).Count
-            }
-            catch {
-                WriteLog -Message ("WARNING: Failed to count users without UPN for domain '{0}': {1}" -f $currentDomainName, $_)
-                $DomainExcludedUsersNoUpn = 0
-            }
-            WriteLog -Message ("Users excluded because of missing UPN for domain '{0}': {1}" -f $currentDomainName, $DomainExcludedUsersNoUpn)
-
-            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user)(userPrincipalName=*))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, CanonicalName, ObjectGUID, targetAddress, msExchRemoteRecipientType, msExchRecipientTypeDetails, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
+            [int]$DomainIncludedUsersNoUpn = 0
+            # UPN is optional; GUID and SID retain identity for every AD user.
+            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, primaryGroupID, CanonicalName, ObjectGUID, targetAddress, msExchRemoteRecipientType, msExchRecipientTypeDetails, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
                 Select-Object `
                     @{Name = 'DomainName';           Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';           Expression = { $CurrentObjectType }},
@@ -2634,6 +2692,7 @@ try {
                     @{Name = 'Name';                Expression = { $_.Name        -replace "`r", " -R " -replace "`n", " -N " }},
                     DistinguishedName,
                     UserPrincipalName,
+                    primaryGroupID,
                     Enabled,
                     manager,
                     LastLogonTimestamp,
@@ -2729,10 +2788,15 @@ try {
                     @{Name = 'DomainNameShort';         Expression = { Get-DomainNameShort -DomainName $currentDomainName }},
                     @{Name = 'DomainAndSam';            Expression = { Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $_.SamAccountName }},
                     @{Name = 'ImmutableId_AD';          Expression = { Convert-GuidToImmutableId -ObjectGuid ([string]$_.ObjectGUID) }} |
-                ForEach-Object { [void]($userCount++); $_ } |
+                ForEach-Object {
+                    [void]($userCount++)
+                    if ([string]::IsNullOrWhiteSpace([string]$_.UserPrincipalName)) { $DomainIncludedUsersNoUpn++ }
+                    $_
+                } |
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported Users for domain '{0}' to '{1}'. Count: {2}. Excluded without UPN: {3}" -f $currentDomainName, $outputCsvFilePath, $userCount, $DomainExcludedUsersNoUpn)
+            WriteLog -Message ("Exported Users for domain '{0}' to '{1}'. Count: {2}. Included without UPN: {3}" -f $currentDomainName, $outputCsvFilePath, $userCount, $DomainIncludedUsersNoUpn)
+            Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind Users
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
@@ -2770,6 +2834,7 @@ try {
                     @{Name = 'ManagedBy'; Expression = { Get-ADStringValue $_.ManagedBy }},
                     @{Name = 'MemberOf'; Expression = { if ($_.MemberOf) { ($_.MemberOf -join ';') } else { '' } }},
                     @{Name = 'Members'; Expression = { if ($_.Members) { ($_.Members -join ';') } else { '' } }},
+                    @{Name = 'MembersJson'; Expression = { ConvertTo-Json -InputObject @($_.Members | ForEach-Object { [string]$_ }) -Compress }},
                     @{Name = 'Modified'; Expression = { $_.Modified }},
                     @{Name = 'modifyTimeStamp'; Expression = { $_.modifyTimeStamp }},
                     @{Name = 'Name'; Expression = { Get-ADStringValue $_.Name }},
@@ -2784,6 +2849,7 @@ try {
                     @{Name = 'whenCreated'; Expression = { $_.whenCreated }}
             )
             $GroupData | Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+            Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind Groups
             WriteLog -Message ("Exported Groups for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $GroupData.Count)
         }
         catch {
@@ -2819,6 +2885,7 @@ try {
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported Contacts for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $contactCount)
+            Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind Contacts
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
@@ -2871,11 +2938,25 @@ try {
     $combinedOusCsv       = Join-Path $OutputPath "AD_OUs_AllDomains.csv"
     $combinedContactsCsv  = Join-Path $OutputPath "AD_Contacts_AllDomains.csv"
 
+    $combinedDomainsCsv = Join-Path $OutputPath 'AD_Domains_AllDomains.csv'
+    $combinedIdentitiesCsv = Join-Path $OutputPath 'AD_DirectoryObjects_AllDomains.csv'
+    Combine-CsvFiles -SourceFolder $tempFolder -Filter 'AD_DirectoryObjects_*.csv' -DestinationFile $combinedIdentitiesCsv
+    Combine-CsvFiles -SourceFolder $tempFolder -Filter 'AD_Domains_*.csv' -DestinationFile $combinedDomainsCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Users_*.csv"     -DestinationFile $combinedUsersCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Computers_*.csv" -DestinationFile $combinedComputersCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Groups_*.csv"    -DestinationFile $combinedGroupsCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_OUs_*.csv"       -DestinationFile $combinedOusCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Contacts_*.csv"  -DestinationFile $combinedContactsCsv
+
+    $combinedMembershipCsv = $null
+    if ($EnableGroupInventory) {
+        Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
+        $nativeMemberships = @(ConvertTo-WorkplaceADMembership -Groups @(Import-Csv -LiteralPath $combinedGroupsCsv) `
+            -DirectoryObjects @(Import-Csv -LiteralPath $combinedIdentitiesCsv) -CollectedAtUtc ([datetime]::UtcNow.ToString('o')))
+        $combinedMembershipCsv = Join-Path $OutputPath 'AD_GroupMemberships_AllDomains.csv'
+        Publish-SmartM365Csv -Data $nativeMemberships -TimestampedPath $combinedMembershipCsv -NoWeeklyHistory `
+            -Columns @('TenantKey','GroupObjectGUID','GroupSID','MemberDistinguishedName','MemberObjectGUID','MemberSID','MemberObjectClass','MembershipKind','ResolutionStatus','CollectedAtUtc') | Out-Null
+    }
 
     $workplaceClassificationWorkbooks = Get-SmartM365AdWorkplaceClassificationWorkbook
     $combinedUsersEnrichedCsv = $null
@@ -2915,10 +2996,11 @@ try {
                 New-Item -Path $destinationRootPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
                 WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $destinationRootPath)
             }
-            foreach ($combinedCsv in (@($combinedUsersCsv, $combinedUsersEnrichedCsv, $combinedComputersCsv, $combinedComputersEnrichedCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+            foreach ($combinedCsv in (@($combinedDomainsCsv, $combinedIdentitiesCsv, $combinedMembershipCsv, $combinedUsersCsv, $combinedUsersEnrichedCsv, $combinedComputersCsv, $combinedComputersEnrichedCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
                 if (Test-Path -Path $combinedCsv) {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
                     Copy-SmartM365FileAtomically -SourcePath $combinedCsv -DestinationPath $destinationFile
+                    [void]$global:csvGeneratedPaths.Add($destinationFile)
                     WriteLog -Message ("Copied combined CSV '{0}' to '{1}'" -f $combinedCsv, $destinationFile)
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $combinedCsv | Out-Null
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile | Out-Null
@@ -3622,6 +3704,7 @@ finally {
     }
 
     try {
+        Set-SmartM365CmdbSourceScope -CompleteScope (-not $DomainWorker -and -not $ReportOnly -and -not $DuplicateAnalysisOnly -and @($TargetDomains | Where-Object { $_ }).Count -eq 0) -Scope 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members'
         Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
     }
     catch {
@@ -3632,8 +3715,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDj5HR0tVlfeA6r
-# CMQtuylLDHM989BVk2oItF4Olv+emqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBV52dwwwsNkRnu
+# TFBlOXqMHymnGzdc/euG9QjD0daQwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3766,31 +3849,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK2ypLG6mlcQKH8qqeUNDIitUvLYxhibXSiU9edrzPULMA0GCSqG
-# SIb3DQEBAQUABIIBgBcX2S5K2bOFNPINDueuaGfWurhbO9r7ZWe+HQbnatyInUZw
-# bvfafi2cLCW8mow7b47PKb8yo81l6QdS2wrKdok37GVeWodeNLakGVchcomx4/DU
-# mXnNPvt5WOKNPnQ6IIw/SPc9TG4iW1mGJBMkVQ+tYZJ6PwRtYyYlhYcTh8jpPYmO
-# 8q6To4doUV248a9lr/2TDSNJAp9+Fu8Z/bQtuFpQHcDXTwiTEuKLlPTTEW3oi/qs
-# j8kcpLhMz/YpKg4JWFTM1s0ijEu9L2iwZ02MVA/alPNG092pJHaHD/vQhhSULmMI
-# LAFVfzU/8KtnJKkWPuYTfCaauGZdLBjPCCl+TXBoq6hsmALiAlKO1eWjcnJGlt9W
-# UBviEMfMdFFuugweWo69N2Gh4m73eD4cG3hrJTTtejPyvI0G0rY7XhnPZiA7Exlw
-# dk/ReSIOpDKACuQYjaDb7De0PVmGakH+nGaFtI7rDaPZPmq8wwxpqqGocm4WO/D4
-# 2KOhKWZKBclb9gfjyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFIJT0RyPfBgjLh8NvjhZK5Y0ZBzwYraMWHDVtXKqwL2MA0GCSqG
+# SIb3DQEBAQUABIIBgE0lTLNMXiMwwjw0+Kj1MaEaBYCK98XSwZldHO9nbcQds/NJ
+# lXoKjLkQzrIgbhd3Ie6gqLT9fhf8rgC3LKSQsdGwXvV+wWK2RqbyBZxjKU7N9NaM
+# CUNvsgN8P36ymzylFgTZnVm2BCgq0B1J8B39WZt872CMD04osHVpGCVHaK7GM76G
+# CyDWYlymuMoqUEv7wxvPxJsXXw3FD08Mka/Kj3sVjqKPgN4LZgdCH+rBGzeDmLE+
+# xKE5CaC0ZXueIdOoI57tU5YVP6XbZlHqv5IcBKNim0XHZnC7k8clVZObHs97CImi
+# dNaSSdAebz/SoAi2WYIaU+NpMa5a6gWRY8cj8+HMw7dvsbAXTx653VYTZULr93bw
+# Rli8c7+kBlOgfvb3BvfJUNcyqOIKSHkerxhtFXmBVCVnE1y3lPYUtQgs2qJ4k7jX
+# t5oz8ChUBJUgRlUsNy7f7WcPYcuvgAGPeGHgCWu4NLfMB7NRn6e2uKSG8BmDJ8bL
+# OmaUHeJF6X8pHEnPuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExNzUw
-# MTlaMC8GCSqGSIb3DQEJBDEiBCD/kKgDGcqigFJSjW2ovlQsz3dXMRXMjYRuxQHd
-# NHdpETANBgkqhkiG9w0BAQEFAASCAgA6RbTGKTQybuEHMIjbxqj1RK4mRaqSu8pZ
-# aPkatvx3yXlbJrDfZ2osOD98dx2FleJ43axjLGmM+HFrUukoxstJJWAFfld1/rAP
-# GeAQI256WWKfJFuBeZ1Hc2c2RfwsGy5Ir2aQwwozb7dpql20+ZzaQULXrk24vFGH
-# 9us4quqKLhSktu2KQF9FWj+1TN7xYqwpUAjgWSmg+OqIK5umWSNL3hly1+hP5bwS
-# GZfQq23FjlvdEQhJjQ+VPONax0r8zmjDOy7K2nileEtR5Q9NErnLcKvKo9wFmz9M
-# RfM5GnY71TqKCBiOCpbHffEZMNgp8+R2bI6i5NikUv3WZ6UTuFYcbdo2yEbUDbwz
-# siCyn8hDREpzmAo2myJakNlVzE8TPPvE4tl2VscF9vZDmDrg5+m5+IKlU1qpc6te
-# pgArNdjIg3oekH6czNC1Phn4cAgPwpw7/vqk3xD3uJAmiVb+ReRATKf47Lm4K4Jx
-# i/RlndpeU8OK13FKSH64Ti4dmZcw0AK4J16sqvLOcCbzZ9iBH9QgrjyJhQT7Urv+
-# hsUYQnlTpnBxGKnSHpDKSOtmlyiwtPZJPVNRQA4OVfe/cIr/31b/xVKhyTvVEWZx
-# QB7EXWMdvm5ST1dVX+or4ZtrNV36hUF2YMeZmMDPfGr/D2NbP4eaPr6V3Puc7+7W
-# ZeF5SnJTqw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# MzhaMC8GCSqGSIb3DQEJBDEiBCA8sv9qJUNSAaIw1U5lxBm810ELEp5OjJdQ9/+B
+# PdZyNjANBgkqhkiG9w0BAQEFAASCAgA+t0VLZQdR9r/bkOkevWdm03pk10KKWJcn
+# rmxvnt192aI/O60ePZyORr9dSG2wVqNoEfA1CU7XFcMYju7HwuzsTUrVxKpWbJhS
+# tfcV9C5ab2/wfcx5ARDBUOfLQ/K3pq6JhsuZ8eJY0eO+aPdXRjGg1S+iviBrtDnK
+# akUrOTqCgralflDOr8O+UGQmEujVJMeWwJArMZnWAnJN+UzTXOUhTLHjcwsQqB63
+# 4fYKoFJOGNjW2Bm+eNkCBTSnPRGN9GDg6KddAENI8ucuCYIqcqurgBGOJXkLO8GF
+# fXSLuAotJLYPbmWXal8P/FMqnFhNbi9tcSSOhhSbkMBRt+/Tpkxw6R93fSxIfAFX
+# k0piKtsgqtTLsuYRfMwUqXcY4gIng/A6dwJMT70ZoYrMX7yo5jV35Zr+nlQJJLV/
+# fBUxv5HsB++OvXGJWOe9G+yYSWC+aD8kWnlS94WwHsgdQdNykIrOTcyAs6IQpzKC
+# /pZPcfUSGfCtyHNMioIVkK7D9IRbx2OZ1C4H8d71As4pUa5V9Qg8msl9xUZxNXog
+# gFxCSgwfhoIgASZe4x0QRlxeesYXalX6KTPVCF410H1LM+Vgu5K+kxYq21KEWMvl
+# /oiKlRqadlpVe/7NPtik10zY7UVyJCh2LnwJD8OGBLiIIsKvZB2xVdDIUMr3rLyG
+# BJlakp+0ag==
 # SIG # End signature block

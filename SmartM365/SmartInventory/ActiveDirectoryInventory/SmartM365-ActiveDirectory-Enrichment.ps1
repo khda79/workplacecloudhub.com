@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.6
+1.7
 #>
 
 function Invoke-SmartM365AdComputersEnrichedCsv {
@@ -861,7 +861,14 @@ function Build($AdVersion, $IntuneVersion) {
     }
 
     $enrichedCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Computers_AllDomains.csv'
-    Write-SmartM365CsvAtomically -Data $enrichedRows.ToArray() -Path $enrichedCsv -Encoding UTF8
+    $exportColumns = @()
+    if ($enrichedRows.Count -eq 0) {
+        $nativeColumns = @(Get-SmartM365AdCsvColumns -Path $CombinedComputersCsv)
+        $exportColumns = @($nativeColumns | Where-Object { -not $rawCalculatedColumnRenames.Contains($_) })
+        $exportColumns += @($calculatedColumns | Where-Object { $exportColumns -inotcontains $_ })
+        $exportColumns += @($rawCalculatedColumnRenames.Values | Where-Object { $exportColumns -inotcontains $_ })
+    }
+    Write-SmartM365CsvAtomically -Data $enrichedRows.ToArray() -Path $enrichedCsv -Columns $exportColumns -Encoding UTF8
     if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
         $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)
         $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -879,8 +886,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfN6mwiYoOLo4A
-# PZbGoZqx31E5EcRemdpTp17GYkuvoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJEVXAHmz+RNug
+# J9HEFSFvXdsXEViCtpTfvDqB1e95FKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1013,31 +1020,31 @@ function Build($AdVersion, $IntuneVersion) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAk9FUPdHJVduxk1XtqMgeaVlEfSGjsIOYLZSjzV3Y5XMA0GCSqG
-# SIb3DQEBAQUABIIBgEqohgqrNycOJIP3OWkgJK8TJXlsSxlrp7gMzagKomxZNrlF
-# h2I2abNxeyeIDGMlrmQXbpeq6ML9J0sB1sChoN8GaZVA9ivgISfeHc/puLTQV2mT
-# jK/L8hbKpR4zKuygebaTU63xQpcA94ZTqDSjekJJH1yyV8gEvhF2fP4M+Z17V7Ac
-# nqVBJbroepgmqgSam4FKEMt6Kzj4bKFvZ29cX+tEVSwXHeceei3tYWNHY+q8AO86
-# ZNtcb4ypk5R+lQhMtIMMAwVYAUgmEN6Nv5WyTpnT/xmZ91N7sl3VG9NCxyak++Y0
-# ERT/MfqrmNNcIxZW4A9FMJtT3WIS6f695GPI6SR8nq8ojzfKoeIdZlQhfoJTnVa6
-# R/E/wBgEpcSDN6JWA7FtZ1Zebz1K/p19Ep1PHJGVyKzycjstijIzv/5S4p2Rv82M
-# BQUKPZcktB0xPlURhR0x2RyF8CspiV4alhn6Cm7gW9sU8DVNZxqg+m6IJNQR3b5d
-# KP8RSkA88yQtCaKCz6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN1v92kh8NgYrt6GbpaIwPcCsd5Y2aZH/WYqtsKS9mjjMA0GCSqG
+# SIb3DQEBAQUABIIBgDIgL2FIf7ZiR4aJjkVB53XF1ov/+/OtY/bOwtazzowvyFiR
+# ayEY+2XRgSujy8EkEcFXNVmoaySevg1QApgVxHjpCyWbAC8CZktyAJZBxVIOqGak
+# TCDF9JZCBCYS4HlEnpL7XwNmK7WVMxjgL6DfbLJ6ni4Tlm35ImGnSwY78I088qOp
+# W/fgSJpparP5t8ob2ZiNY2mn3paMiGilqzR95Kxex0xa3pv4FZd+3ZOHG+RHCJ+4
+# SZhiN3qnJDLOnxuUqVV3f9XMfxS0mn/TqtNA6rXXBN0ANWfk/rChFlm6DpAed355
+# NdKFsxNDvCpRuN1unN6UHACQFE3+5GPavSSeLGwoMhce0Dr9IIiPf+C0zSo50cV0
+# FTyDJkR3GWql+A+zp7KycrG5stnQWRIlh3l4W7ZmeeJazSnMzQZVljYDpt+PjtSY
+# 3Gdx1b7TvG3l9l44MFFX14VdBZHaY3EvKjB2JZ/NOSF5u3anemqKAtV+MWzD8j6a
+# P1xzlJT4s6+lzOHWkaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExODUy
-# MjhaMC8GCSqGSIb3DQEJBDEiBCBoJemvjtQeI+63/D2L4xHpzQ7wbCBcUoR16CJ0
-# 202rqTANBgkqhkiG9w0BAQEFAASCAgBlIzq1dliejmrDHF6qz9mSJW3hVHMweoTd
-# v7ohNqmG55p40gdSVJb5PbPv62LnnphRlEYzR9raWY6DEBgaUAr4H15ZGEaYmZ3r
-# DwmlG0x1oCgPuq+s3SOKdFkkTXJvUEMHLnPJz+2RYD2xLvjUdj0AFzYLwrtZaE04
-# VKzy3wsV6IRTGHFS181zSaKJumTl3T4YUOmumuTwDjuG+ewrc1cKzcL5HlFiPuYy
-# UHKYvqpvp5V/xssTGrjZosRHZTLGby0F2gkG/IyOZE+5a0C2sENq4husviAQOUi5
-# senDkka7KsxFfAm6ORLtjJXAPR/Em0nCrMTmGFXrqdoWb909hkegGdi8n8x1EXeQ
-# K8+U2PYYxGAY5dL5ovw4OUSMAfDv28YyeAAkHYiTlnXnYEfOTlN37c/ET2sEYW0F
-# fUxCTB6ntIUd4Avjx77BWWidiZNYFOZDdkAQ5pmmi+v3YINtJTE7HUxO6w3GorTY
-# KDEWtckxt4RMpCGJrW41xkRoYC4VEkd6CBVh3kYSQXYRFUy+LtY1CxvmpjW8SJzT
-# laHaybiDxgTDwen4hR9EK9+f9w9yPDqGSCl+KEPqbZ9jLTbr4YM3u6rJhdYsWLNE
-# S4RBz9GvJG/1h1dnAS/5l4hW2VTNf0PmK+v8xkHGwMmoGSLi9ChmvGh9cCtxFhjq
-# Gsa5q1flqA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# MzdaMC8GCSqGSIb3DQEJBDEiBCAceImY+NhHY2xFvyvG1oJuCGpH7mrKfcEgnG5P
+# MZHmyzANBgkqhkiG9w0BAQEFAASCAgA2oW/U1N5kHoHPh5Kgjbo8AALdlB0JSMsk
+# ayBpsJ5Y+iWNZG9ur75G01/10Dv86CL5vHLUaLTHzhytmgI56th4W95v9rKTDANg
+# z2xKvIAIfvsy2Hu33HFdOzuipJWut17cl4ocvsTfGpGyJTqdNjqfoekXEaFOzRzQ
+# 1YI6rl73vIQPS4M+rVsWMLHvnXzFV0oJbEwAS2qavSNppM8AV3MlCkLl/tSmEm48
+# WPLpJJan4VHueEudqn+vTEohGtj8rukiJqeTyL/n0QQyYEOakNxtYNyxFmn5IfBW
+# o1iXlWqF1pDoK+ZxChKvW15YWSr1pIHF5DTZ+3++BwUzWvxE3LUCuoxCYO0s1Ipw
+# atUtvrD5iL32ogNSVcE+10CiYYEXwMbnQ4wPB/Fjult3vPwDFPqZKRcn3vX5Jwe6
+# uOhpPZy3xnBaaPMAliwFu1bvtQMFpuAw9JlHRB5aOLR1Qjw9JkUO28Kg+Q9C3S9k
+# qcmaTVWPh8NuDBr5USxc1nlkO9jf500MxjzG7ISkSbb6+qz1rkxBLOcBRtCSe8it
+# RE3dQKX8uFVGkYZB0XbrPHCHvrcGtH1l6g3jHwRYmG24uok7fuFcSJhz7xGqsQEj
+# sQPHMWf2+G2EsTYVNl6/VxHqwZlWxf146XvsCDj+yvnX6BU0rTbBO0mNpCdEMaFA
+# kO8nl5lmUg==
 # SIG # End signature block

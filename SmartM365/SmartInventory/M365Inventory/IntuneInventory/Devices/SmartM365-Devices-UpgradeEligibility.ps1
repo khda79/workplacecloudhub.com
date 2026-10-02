@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.24
+1.26
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -56,7 +56,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.22
+    Version : 1.26
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -120,7 +120,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.26"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $runId = [guid]::NewGuid().ToString()
 
@@ -332,7 +332,7 @@ try {
         exit 1
     }
 
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.65' -Force -ErrorAction Stop
 
 } catch {
     Write-Host "Failed to initialize paths or load SmartM365.Core.psd1. $_" -ForegroundColor Red
@@ -345,6 +345,7 @@ try {
 
 $logFileBaseName = 'SmartM365-Devices-UpgradeEligibility'
 $ScriptCsvLogFolderPath = InitializeScriptEnvironment -OutputPathInit $ScriptCsvLogFolderPath -LogFileName $logFileBaseName
+Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
 
 function WriteLogSmartM365 {
     param(
@@ -555,6 +556,23 @@ function Get-UpgradeEligibilityLabel {
     }
 }
 
+function Select-UpgradeEligibilityIdentityRows {
+    param([AllowEmptyCollection()][object[]]$Rows)
+
+    $byId = @{}
+    foreach ($row in $Rows) {
+        $id = ([string]$row.GraphId).Trim()
+        if ([string]::IsNullOrWhiteSpace($id)) { throw 'Readiness row lacks GraphId; device identity cannot be established.' }
+        $signature = $row | ConvertTo-Json -Depth 10 -Compress
+        if ($byId.ContainsKey($id)) {
+            if ($byId[$id].Signature -cne $signature) { throw "Conflicting readiness rows for GraphId '$id'." }
+            continue
+        }
+        $byId[$id] = @{ Row = $row; Signature = $signature }
+    }
+    $byId.Values | ForEach-Object { $_.Row } | Sort-Object NormalizedDeviceName, DeviceName, GraphId
+}
+
 function Export-UpgradeEligibilityDuplicateAudit {
     param(
         [AllowNull()][object[]]$Rows,
@@ -671,6 +689,8 @@ function Export-HardwareReadinessSummary {
 #region Main logic
 
 $script:CompletionStatus = 'Auto'
+$script:CmdbReadinessDeviceExportComplete = $false
+$script:CmdbReadinessError = $null
 try {
     WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory started =====" -Level "INFO"
     WriteLogSmartM365 -Message ("Output directory: {0}" -f $ScriptCsvLogFolderPath) -Level "INFO"
@@ -763,8 +783,14 @@ try {
         WriteLogSmartM365 -Message ("MaxDevices={0}: limiting local report rows from {1} to {0}." -f $MaxDevices, $allDevices.Count) -Level "WARNING"
         $allDevices = @($allDevices | Select-Object -First $MaxDevices)
     }
+    if ($MaxDevices -gt 0) {
+        $global:SmartM365MaxItems = $MaxDevices
+        $global:SmartM365TestMaxItems = $MaxDevices
+        $global:SmartM365IsMaxItemsRun = $true
+    }
 
     $exportDateTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $readinessCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
     # Keep the profile selector out of row identity. The shared exporter adds
     # the canonical TenantKey/OrganizationKey/EnvironmentKey/TenantId columns.
     $projectedRows = @($allDevices | ForEach-Object {
@@ -789,6 +815,7 @@ try {
             Processor64BitCheckFailed     = $_.processor64BitCheckFailed
             OSCheckFailed                 = $_.osCheckFailed
             ExportDateTime                = $exportDateTime
+            CollectedAtUtc                = $readinessCollectedAtUtc
             RunId                         = $runId
         }
     })
@@ -796,12 +823,20 @@ try {
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $reportName = "Intune_Devices_UpgradeEligibility"
     $duplicateReportName = "Intune_Devices_UpgradeEligibility_DuplicatesByName"
+    if (-not [string]::IsNullOrWhiteSpace($Filter)) {
+        $reportName += '_PARTIAL'
+        $duplicateReportName += '_PARTIAL'
+    }
+    $reportName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $reportName
+    $duplicateReportName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $duplicateReportName
     $csvFileName = "{0}_{1}.csv" -f $reportName, $timestamp
     $csvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath $csvFileName
     $latestCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$reportName.csv" }
     $duplicateCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("{0}_{1}.csv" -f $duplicateReportName, $timestamp)
     $latestDuplicateCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$duplicateReportName.csv" }
 
+    # Validate identity before publishing any current artifact from this response.
+    $reportData = @(Select-UpgradeEligibilityIdentityRows -Rows $projectedRows)
     $duplicateAudit = Export-UpgradeEligibilityDuplicateAudit -Rows $projectedRows -TimestampedPath $duplicateCsvPath -LatestPath $latestDuplicateCsvPath
     if ($duplicateAudit.GroupCount -gt 0) {
         WriteLogSmartM365 -Message ("Duplicate readiness audit exported: {0}; duplicate groups: {1}; rows: {2}" -f $duplicateCsvPath, $duplicateAudit.GroupCount, $duplicateAudit.RowCount) -Level "WARNING"
@@ -810,21 +845,12 @@ try {
         WriteLogSmartM365 -Message ("No duplicate device names found. Empty current duplicate snapshot published: {0}" -f $duplicateCsvPath) -Level "INFO"
     }
 
-    $seenNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $reportData = @(
-        $projectedRows |
-            Sort-Object -Property NormalizedDeviceName, DeviceName |
-            Where-Object {
-                if ([string]::IsNullOrWhiteSpace($_.NormalizedDeviceName)) { $true }
-                else { $seenNames.Add($_.NormalizedDeviceName) }
-            }
-    )
-
-    WriteLogSmartM365 -Message ("Readiness rows after de-duplication: {0}; duplicates removed: {1}" -f $reportData.Count, ($projectedRows.Count - $reportData.Count)) -Level "INFO"
+    WriteLogSmartM365 -Message ("Readiness device identities retained: {0}; identical repeated IDs removed: {1}; duplicate names retained." -f $reportData.Count, ($projectedRows.Count - $reportData.Count)) -Level "INFO"
     WriteLogSmartM365 -Message ("Exporting report to CSV: {0}" -f $csvPath) -Level "INFO"
 
     if ($latestCsvPath) {
         Export-SmartM365Csv -Data @($reportData) -TimestampedPath $csvPath -LatestPath $latestCsvPath | Out-Null
+        $script:CmdbReadinessDeviceExportComplete = $true
         WriteLogSmartM365 -Message ("Latest CSV updated: {0}" -f $latestCsvPath) -Level "SUCCESS"
     }
     else {
@@ -847,6 +873,7 @@ try {
 }
 catch {
     $script:CompletionStatus = 'Failed'
+    $script:CmdbReadinessError = $_
     $globalError = $_
     WriteLogSmartM365 -Message ("Global error in Devices Upgrade Eligibility inventory: {0}" -f $globalError) -Level "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
@@ -890,7 +917,8 @@ $($global:LogTextFile)
     exit 1
 }
 finally {
-    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName
+    Set-SmartM365CmdbSourceScope -CompleteScope ($script:CmdbReadinessDeviceExportComplete -and -not $Filter -and $MaxDevices -eq 0 -and $MaxItems -eq 0) -Scope 'CMDB:readiness'
+    Complete-SmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CmdbReadinessError
 }
 
 #endregion Main logic
@@ -899,8 +927,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB706EOr2MaBxQL
-# WLOPdpytB5aw4IhG56edzIXB+2UYKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmJefASwRVK3PK
+# 09y1Y8n7pk5WASevgsP2rsiue7oIBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1033,31 +1061,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM3OKleHiH9AzvsV2m5JaISq4Ag7IpnUIwKxQKo1JcfFMA0GCSqG
-# SIb3DQEBAQUABIIBgEgoajBaJffWBCGEkG9jB6VBABzFVMw43vyMyYY4ZeXXIb9+
-# HCUJ4rBxHV/79CWbyrOpFUuAJR+SM8iT2CXqNDYoCVC8m1fof+OOWIpToz1cemJj
-# fN4vVA6Y/NTfAepKtzwr4ZnhEuscOYrHjqHxK2fYn4zb6a3X11e1Kd2i/A7dCU4l
-# un/mLwmvpZvYdmHQcjmHbk69apLHwmfWmplmI2l0QJsinLg6S2ueePnGf+ykqr4q
-# wEDDnr8rc1J/uL2AYcRxDEpUFJcnedOcatI3vamrJj7EUI2WtBEtzbmlgZAxOVxz
-# A/3qr8MR632u/KjAukmr7yS20C6ZcOHzJ64S/tVO1JQaA22fEmlneuvyBMBn4iQW
-# bmR7Kj2aE5jU7B/gb9I026atILBWUWUgVMuwYyWVrtQ9xa/qaV+kAeUUezdYj/7c
-# mgGeZPeX682ub/UtGlJa+4J1ls4h9EoxjnOodt0IbA29ogm9Acfjzcyj4yAJYkoc
-# fu2nBHZID5PQ2IkLBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJqWTOLOpg9c8eWYd4JSOGaWAF6Wn3PqAP65l6Ffh8t7MA0GCSqG
+# SIb3DQEBAQUABIIBgBRAJLNXB+rkpCkfkQlj0Z8+CVJgw3sDtm/+aS2ZibUgpw+e
+# ySHVnhvzWo+ebr+kp7Qxdzl7N8B4lERl0oBaMAk9z2jsr/VcGxiNQyuLn3RelWQm
+# kaIRy1mLUxQfCpN4XbY9hHGW8RUGmTOxn0LIob31egjnZWi6CZWdff4ySXxvDfsx
+# wYP9xFU6kg2uSV4rkR4oGzUqRVJPTeM4UAjQH0fu5sF1U3/3XVxaKD9ASxnApH/L
+# R+IhBDfRp0hE29wTM7poHrMpUXLTwBXJxnO025bmR9eSODTfFmx1ntHi7LxUpUPW
+# uRnA8G9IETQJbpX0KTvw6wbN5+jyMyN6BnfoXW5hjORAvyier0pbJDBhwuQKRqGf
+# KYiHeeF23Gf9/qSVjFOXOJYZ/Xtvxc9TKL8Gp0uoaESQe0y5sCjaia9kOfMNjDSf
+# cXdVf3A2ah95nQdFjGk+kMVSoi29TDREaWLnhD6WhIlTvAa5SNjX8m4oAtC8Vo9X
+# JTOT1Wsaac8E4bjsqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDdaMC8GCSqGSIb3DQEJBDEiBCApwWr7beEWmeXRRgrz8CGHColjGIm4HhtckcOd
-# BrwXGDANBgkqhkiG9w0BAQEFAASCAgBQF9si4BPwgnX2UI5S7WaSFSmYhj7dlnwD
-# 5hbX2F2LvnwJhPHUV7JdWkCZP3cq+1cHlg9CgouYMup+I3fnMBfet5O4a7ZKIGV8
-# 99AEMDjzBUy7T9NPYihWOLaFX4FQAJUdBP24s3iwfbN0Af+jVjhVi7Am083IVz2V
-# Cb0q7Z+BqFqIFINQTc7YTJwCxd6BhD4TclGE5nNKWP0jaP3+q93Qco9Ynik53/OS
-# 2xXOf316o8sy46swJvysIfaonqS+u47XCZPzR/VMO8mvpN2GosMvHhtJ1A0VCf/s
-# sNwvNqY9xMG0spGW4sMK4uIqr9AnBA5sJl0KJZ9tFaX2wqCbf/01R88vWJTsmd3K
-# idP8+lzs/zTQvQxGpcVFPlHWDD2FgnEkkAELUKbezoNkcnCryg31fcH1jMDv1VNb
-# OQxtbEGeJjDebi1tcvsC1TYAOCdqh2ZnOq6EwFUA29DIRRLAdLTJVz+o3PO0lirl
-# YALyRG1ayMfXni/7GT6Q4Mz1uWVk1NpOadO3BgT5MD9njr6psMKtGHUD4w1iW9GI
-# mHxqI4gHOdyM43lSsWCwK0ZUqkU1A6jKPol+mQySENW3yVbYjb+0dwGgRrBdye87
-# mqQXbbmkb3UzY8eYQxlzL7Lqqduqr8KAw2GBnMaTIKz0Wn4eYoTGI1RFSqYyB9d0
-# MaLD8ytfag==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCCP6AfURcBYwjKv+vruYcINFVNR77eCSac9TG93
+# hJQXLDANBgkqhkiG9w0BAQEFAASCAgAngZduu9oInew6vESDrJp3t9zhH2kG87D0
+# lidYCvfXrQZZCOeiS6C+Qbt/NNoD/7yfponL1AE4nPe+RnafyjAbeKYGpjQrKQkr
+# IPHLGGqxkUMq+ZvCR14OTGr95Qa3XgsdqDIEhwZsmaZbZjcBSqMbR0sFqxw7MUbM
+# 8F89cKefaMF5ASwpvOjf5tE9y+NnHocItKwB0ZKSarK/i3MoA2PmQIDt49KSu+Qa
+# YTlXyPOxEwX8APLQkbhij0S9DhRHHAWFS4ImQEVzeWAamXoz6Ej5n6SqOJD5A8sq
+# JqYFeaUo8T1sToFB8jSkLcxQRUmRPm2aS1X3EVOE0P6OQZ8Av0/6LaB6CXaBJhdC
+# 2DBC3wUR3/LvSL40x4p/JljXyHxUIEVpYDUeWiCQiCGHNASi/y6qvaXm+n+fm8Tx
+# SGh/smNWrgqQwcgPiS+8YXCp5QPjd8xNfx9L8CtHUtWqQA0j0mVJaXgEqS3CYQi5
+# jLQ+W7cpHC7Oex9o+m3RsGMV+O7wgrrHJWgdaR4uWIM20VrB8rPgdUCKP/eAtR34
+# hja4XShoLY3F5Sx178R535cQoLxpmQaqCy5CwGJrz3A/w4pCQLfwtCy2m1L7eUhy
+# suidL/EpK/cfIMsbdWxdlYu9XCdmrQhavdKb8K0KTQjx+y9IOLI/fpLVFoCcFT6b
+# D7geY3u6Gw==
 # SIG # End signature block

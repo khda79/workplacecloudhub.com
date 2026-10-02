@@ -1,10 +1,12 @@
 ﻿<#
 .SYNOPSIS
-Generates a detailed inventory of Intune-managed devices using Microsoft Graph API (Windows-only) and includes PhysicalMemoryGB .
+Generates all-platform Intune source evidence and a detailed Windows inventory with PhysicalMemoryGB.
 
 .DESCRIPTION
-Connects to Microsoft Graph, retrieves all Windows managed devices from Intune,
-adds PhysicalMemoryGB (RAM) via Graph JSON batching with $select=physicalMemoryInBytes and a per-device fallback.
+Connects to Microsoft Graph, retrieves all platforms, exports Intune_ManagedDevices_All,
+then retains the Windows-only detailed view for existing consumers,
+Adds Intune_DeviceHardware_All through explicit per-device hardware GETs in Graph
+batches, with SDK fallback. The legacy Windows view reuses the same RAM evidence.
 Exports results to CSV.
 
 .PARAMETER OutputPath
@@ -16,14 +18,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.14
+1.17
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.13
+    Version : 1.17
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -244,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -255,11 +257,19 @@ try {
 # ==========================================================
 function Get-SafeProperty {
     param(
-        [Parameter(Mandatory)][object]$Object,
+        [Parameter(Mandatory)][AllowNull()][object]$Object,
         [Parameter(Mandatory)][string]$Name
     )
 
     if (-not $Object) { return $null }
+
+    # Graph batch responses may be native dictionaries rather than PSObjects.
+    if ($Object -is [Collections.IDictionary]) {
+        foreach ($field in $Object.Keys) {
+            if ([string]$field -ieq $Name) { return $Object[$field] }
+        }
+        return $null
+    }
 
     # 1) Direct property (case-sensitive)
     $prop = $Object.PSObject.Properties[$Name]
@@ -294,147 +304,8 @@ function Get-SafeProperty {
     return $null
 }
 
-# Helper: RAM lookup per device (bytes) via unit GET + $select=physicalMemoryInBytes
-function Get-ManagedDeviceRamBytes {
-    param([Parameter(Mandatory)][string]$ManagedDeviceId)
-    try {
-        $d = Get-MgDeviceManagementManagedDevice -ManagedDeviceId $ManagedDeviceId -Property "id,physicalMemoryInBytes"
-        if ($d.PSObject.Properties.Match('physicalMemoryInBytes').Count -gt 0 -and [int64]$d.physicalMemoryInBytes -gt 0) {
-            return [int64]$d.physicalMemoryInBytes
-        }
-        if ($d.AdditionalProperties -and $d.AdditionalProperties.ContainsKey('physicalMemoryInBytes')) {
-            $val = [int64]$d.AdditionalProperties['physicalMemoryInBytes']
-            if ($val -gt 0) { return $val }
-        }
-    } catch {
-        WriteLog -Message "RAM lookup failed for device $ManagedDeviceId - $($_.Exception.Message)" "WARNING"
-    }
-    return $null
-}
+. (Join-Path $PSScriptRoot 'SmartM365-DeviceHardware.ps1')
 
-
-# Helper: Bulk RAM lookup via Graph JSON batching ($batch, max 20 sub-requests per call)
-# Returns hashtable: managedDeviceId -> physicalMemoryInBytes ([int64])
-function Get-ManagedDeviceRamMap {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string[]]$ManagedDeviceIds,
-        [int]$BatchSize  = 20,
-        [int]$MaxRetries = 5
-    )
-
-    $ids = @($ManagedDeviceIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-    $ramMap = @{}
-    $total  = $ids.Count
-    if ($total -eq 0) { return $ramMap }
-
-    if ($BatchSize -lt 1) { $BatchSize = 20 }
-    if ($BatchSize -gt 20) { $BatchSize = 20 }
-
-    WriteLog -Message ("RAM bulk lookup via Graph batching: {0} devices, batch size {1}..." -f $total, $BatchSize) "INFO"
-
-    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
-    $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
-    $batchIdx = 0
-    $maxAttempts = [math]::Max(1, $MaxRetries + 1)
-
-    for ($i = 0; $i -lt $total; $i += $BatchSize) {
-        $endIdx = [math]::Min($i + $BatchSize - 1, $total - 1)
-        $pending = @($ids[$i..$endIdx])
-        $attempt = 0
-        $batchIdx++
-
-        while ($pending.Count -gt 0 -and $attempt -lt $maxAttempts) {
-            $idToDevice = @{}
-            $attempt++
-            $requests = New-Object System.Collections.Generic.List[object]
-            $j = 1
-
-            foreach ($id in $pending) {
-                $localId = [string]$j
-                $idToDevice[$localId] = $id
-                $requests.Add(@{
-                    id     = $localId
-                    method = "GET"
-                    url    = "/deviceManagement/managedDevices/$id" + '?$select=id,physicalMemoryInBytes'
-                }) | Out-Null
-                $j++
-            }
-
-            $body = @{ requests = $requests } | ConvertTo-Json -Depth 5
-
-            try {
-                $resp = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType "application/json" -ErrorAction Stop
-            }
-            catch {
-                if ($attempt -lt $maxAttempts) {
-                    WriteLog -Message ("Graph batch RAM lookup transient failure (attempt {0}/{1}): {2}. Waiting 10s..." -f $attempt, $maxAttempts, $_.Exception.Message) "INFO"
-                    Start-Sleep -Seconds 10
-                }
-                else {
-                    WriteLog -Message ("Graph batch RAM lookup retries exhausted after {0} attempt(s): {1}. Trying unit fallback." -f $attempt, $_.Exception.Message) "INFO"
-                }
-                continue
-            }
-
-            $retryIds = New-Object System.Collections.Generic.List[string]
-            $retryAfter = 0
-
-            foreach ($r in @($resp.responses)) {
-                $responseStatus = [int]$r.status
-                $managedDeviceId = $idToDevice[[string]$r.id]
-
-                if ($responseStatus -eq 200) {
-                    $bytes = 0L
-                    if ($r.body -and $r.body.physicalMemoryInBytes) {
-                        $bytes = [int64]$r.body.physicalMemoryInBytes
-                    }
-                    if ($bytes -gt 0) {
-                        $mapKey = if ($r.body.id) { [string]$r.body.id } else { [string]$managedDeviceId }
-                        $ramMap[$mapKey] = $bytes
-                    }
-                }
-                elseif ($responseStatus -in @(401, 408, 429) -or $responseStatus -ge 500) {
-                    $retryIds.Add($managedDeviceId) | Out-Null
-                    if ($r.headers -and $r.headers.'Retry-After') {
-                        $ra = 0
-                        if ([int]::TryParse([string]$r.headers.'Retry-After', [ref]$ra) -and $ra -gt $retryAfter) {
-                            $retryAfter = $ra
-                        }
-                    }
-                }
-                else {
-                    WriteLog -Message ("RAM lookup failed for device {0} - HTTP {1}" -f $managedDeviceId, $responseStatus) "WARNING"
-                }
-            }
-
-            $pending = @($retryIds)
-            if ($pending.Count -gt 0) {
-                if ($attempt -lt $maxAttempts) {
-                    $wait = if ($retryAfter -gt 0) { $retryAfter } else { 5 * $attempt }
-                    WriteLog -Message ("Transient RAM lookup responses on {0} sub-request(s). Waiting {1}s before retry (attempt {2}/{3})..." -f $pending.Count, $wait, $attempt, $maxAttempts) "INFO"
-                    Start-Sleep -Seconds $wait
-                }
-            }
-        }
-
-        foreach ($id in $pending) {
-            $rb = Get-ManagedDeviceRamBytes -ManagedDeviceId $id
-            if ($rb) { $ramMap[[string]$id] = $rb }
-        }
-
-        $processed = $endIdx + 1
-        if (($batchIdx % 50) -eq 0 -or $processed -ge $total) {
-            $pct = [math]::Round(100 * $processed / $total)
-            WriteLog -Message ("RAM bulk lookup progress: {0} / {1} ({2}%)" -f $processed, $total, $pct) "INFO"
-        }
-    }
-
-    $swTotal.Stop()
-    WriteLog -Message ("RAM bulk lookup completed: {0} / {1} devices with RAM value in {2} s." -f $ramMap.Count, $total, [math]::Round($swTotal.Elapsed.TotalSeconds)) "INFO"
-
-    return $ramMap
-}
 # Helper: Build Entra device map (deviceId GUID -> {Id,DeviceId,DisplayName,ApproximateLastSignInDateTime})
 function Get-EntraDeviceMap {
     [CmdletBinding()]
@@ -479,6 +350,7 @@ function Get-InventoryColumns {
         "Device ID",
         "Device name",
         "Enrollment date",
+        "DeviceEnrollmentType",
         "Last check-in",
         "LastSyncDateTime",
 
@@ -530,11 +402,12 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.17"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -620,16 +493,32 @@ try {
         'https://graph.microsoft.com/v1.0/devices?$top=1'
     ) | Out-Null
 
-    # Retrieve Intune managed devices (Windows only)
+    # Export every platform; keep the detailed legacy Windows view unchanged.
     # ------------------------
-    WriteLog -Message "Retrieving Intune managed Windows devices..."
+    WriteLog -Message "Retrieving Intune managed devices (all platforms)..."
     if ($MaxItems -gt 0) {
-        WriteLog -Message ("MaxItems enabled: retrieving at most {0} managed Windows devices from Graph." -f $MaxItems) "WARNING"
-        $devices = @(Get-MgDeviceManagementManagedDevice -Top $MaxItems -Filter "operatingSystem eq 'Windows'")
+        WriteLog -Message ("MaxItems enabled: retrieving at most {0} managed devices from Graph." -f $MaxItems) "WARNING"
+        $allPlatformDevices = @(Get-MgDeviceManagementManagedDevice -Top $MaxItems -ErrorAction Stop)
     }
     else {
-        $devices = Get-MgDeviceManagementManagedDevice -All -Filter "operatingSystem eq 'Windows'"
+        $allPlatformDevices = @(Get-MgDeviceManagementManagedDevice -All -ErrorAction Stop)
     }
+    $managedDevicesCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+    $fullManagedColumns = @('ManagedDeviceId','AzureADDeviceId','DeviceName','OperatingSystem','OsVersion','ManagedDeviceOwnerType','ComplianceState','ManagementAgent','DeviceEnrollmentType','EnrolledDateTime','LastSyncDateTime','UserId','UserPrincipalName','Manufacturer','Model','SerialNumber','IsEncrypted','TotalStorageSpaceInBytes','FreeStorageSpaceInBytes','CollectedAtUtc')
+    $fullManagedRows = @($allPlatformDevices | ForEach-Object {
+        $fullRow = [ordered]@{ ManagedDeviceId = Get-SafeProperty $_ 'Id' }
+        foreach ($propertyName in $fullManagedColumns | Where-Object { $_ -notin @('ManagedDeviceId','CollectedAtUtc') }) {
+            $nativeValue = Get-SafeProperty $_ $propertyName
+            $fullRow[$propertyName] = if ($nativeValue -is [datetimeoffset] -or $nativeValue -is [datetime]) { $nativeValue.ToString('o') } else { $nativeValue }
+        }
+        $fullRow['CollectedAtUtc'] = $managedDevicesCollectedAtUtc
+        [pscustomobject]$fullRow
+    })
+    $fullManagedBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_ManagedDevices_All'
+    Export-SmartM365Csv -Data $fullManagedRows -Columns $fullManagedColumns `
+        -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $fullManagedBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+        -LatestPath (Join-Path $LatestCsvFolderPath "$fullManagedBaseName.csv") -NoWeeklyHistory | Out-Null
+    $devices = @($allPlatformDevices | Where-Object { (Get-SafeProperty $_ 'OperatingSystem') -eq 'Windows' })
     WriteLog -Message "Managed Windows devices retrieved: $($devices.Count)"
 
     # ------------------------
@@ -641,8 +530,19 @@ try {
     # ------------------------
     # Build result objects
     # ------------------------
-    $deviceIds = @($devices | ForEach-Object { Get-SafeProperty $_ 'Id' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $ramMap = Get-ManagedDeviceRamMap -ManagedDeviceIds $deviceIds
+    $hardwareMap = Get-SmartM365ManagedDeviceHardware -ManagedDeviceIds @($allPlatformDevices | ForEach-Object { Get-SafeProperty $_ 'Id' })
+    $hardwareColumns=@('ManagedDeviceId','azureADDeviceId','serialNumber','manufacturer','model','totalStorageSpaceInBytes','totalStorageSpaceInBytesStatus','freeStorageSpaceInBytes','freeStorageSpaceInBytesStatus','physicalMemoryInBytes','physicalMemoryInBytesStatus','CollectionStatus','CollectedAtUtc')
+    $hardwareRows=@($hardwareMap.Values | Sort-Object ManagedDeviceId)
+    $hardwareBaseName=Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DeviceHardware_All'
+    Export-SmartM365Csv -Data $hardwareRows -Columns $hardwareColumns `
+        -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $hardwareBaseName,(Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+        -LatestPath (Join-Path $LatestCsvFolderPath "$hardwareBaseName.csv") -NoWeeklyHistory | Out-Null
+    $ramMap=@{}
+    foreach($record in $hardwareRows){
+        if($record.CollectionStatus -eq 'Collected' -and $record.physicalMemoryInBytesStatus -eq 'Reported'){
+            $ramMap[$record.ManagedDeviceId]=[int64]$record.physicalMemoryInBytes
+        }
+    }
 
     $results = $devices | ForEach-Object {
         $devId   = Get-SafeProperty $_ 'Id'
@@ -665,6 +565,7 @@ try {
             "Device ID"                              = $devId
             "Device name"                            = Get-SafeProperty $_ 'DeviceName'
             "Enrollment date"                        = Get-SafeProperty $_ 'EnrolledDateTime'
+            "DeviceEnrollmentType"                    = Get-SafeProperty $_ 'DeviceEnrollmentType'
             "Last check-in"                          = Get-SafeProperty $_ 'LastSyncDateTime'
             "LastSyncDateTime"                       = Get-SafeProperty $_ 'LastSyncDateTime'
 
@@ -721,9 +622,9 @@ try {
     }
 
     # ------------------------
-    # Deduplicate by "Device name" (keep most recent Last check-in)
+    # Keep every native device identity; display names are not unique.
     # ------------------------
-    $sorted = $results | Sort-Object `
+    $results = @($results | Sort-Object `
         @{ Expression = { -not $_.'Intune registered' } }, `
         @{ Expression = {
             if ($_.PSObject.Properties['Last check-in'] -and $_.'Last check-in') {
@@ -731,33 +632,18 @@ try {
             } else {
                 [datetime]'1900-01-01'
             }
-        }; Descending = $true }
-
-    $seenNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $deduped   = New-Object System.Collections.Generic.List[object]
-
-    foreach ($row in $sorted) {
-        $name = $null
-        if ($row.PSObject.Properties['Device name']) { $name = ($row.'Device name' -as [string]) }
-        $name = if ($name) { $name.Trim() } else { $null }
-
-        if ([string]::IsNullOrWhiteSpace($name)) {
-            $deduped.Add($row) | Out-Null
-        } elseif ($seenNames.Add($name)) {
-            $deduped.Add($row) | Out-Null
-        }
-    }
-
-    $dupCount = ($results.Count - $deduped.Count)
-    WriteLog -Message "Dedup by Device name: removed $dupCount duplicate row(s). Kept $($deduped.Count)." "INFO"
-
-    $results = $deduped
+        }; Descending = $true })
+    WriteLog -Message "Windows inventory retains $($results.Count) native device identities; duplicate display names are retained." 'INFO'
 
     # ------------------------
     # If no devices (in the chosen scope), exit gracefully
     # ------------------------
     if (-not $results -or $results.Count -eq 0) {
-        WriteLog -Message "No devices found. Exiting." "WARNING"
+        $emptyInventoryBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_Devices_Inventory'
+        Export-SmartM365Csv -Data @() -Columns (Get-InventoryColumns) `
+            -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $emptyInventoryBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+            -LatestPath (Join-Path $LatestCsvFolderPath "$emptyInventoryBaseName.csv") -NoWeeklyHistory | Out-Null
+        WriteLog -Message 'Successful empty Windows snapshot published; previous Windows devices are not reused.' 'INFO'
         $runReachedTerminalState = $true
         return
     }
@@ -888,16 +774,18 @@ finally {
 
     try {
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($hardwareRows | Where-Object CollectionStatus -ne 'Collected').Count -eq 0) -Scope 'CMDB:managed,hardware'
         Complete-SmartM365ExecutionContext -Status $completionStatus -ErrorRecord $completionError -FailureStage $completionStage
     } catch {
         # ignore
     }
 }
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMMupcwfwNEo2Y
-# 0DWFsmY+iJU6xGXeM2ui4Mwrf3HuFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChn7/RhgyodbON
+# 1+hU9+VYCVIOnkP279wnv+f+QfLCpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1030,31 +918,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAlJGUr6DcXHmMuxdb6+A//enJ750LzcHSt28yrkLufRMA0GCSqG
-# SIb3DQEBAQUABIIBgHLbZllIPQoDYpNdp6k3YBLyTvNO5xSL5VNuEVq+CDzsIvxj
-# QkbQSzb/TmZgwRR25JQA85Eey/UxdFx73x1cJGVS9HyMib+eAo/VPA3Kdd9G0PUx
-# fvV7ZOn4BN0c2oXuW7iamvToq5zqEqWnIq1eu5QiZJEhnxdBhiY8vZI2sv2pzFRG
-# iAbo3JXEprMwWCJjo0gCVNT4L+gJPoyfbpVwRiuZ7ItLvWZ4YRQb6Dzf/PbyBZJZ
-# DOqcSZA9RoqfHW6Oprvr0oEbNnmCEOpJfm4SnD4Rzh+cPoqPSbdA0tU4wqg7SE9f
-# NyXe1esHq0njwCxOahjCV8gTcFfC/34S9GrwljajMuICTgCB+Nlgg46/aX6ymMx7
-# H/CZVjFq4+O3iBwLMFQFu6NIcvn3MwDaWj5ltUG1shi84x+UujBT5QXKcsI4U9p2
-# s2rLv9fUDQaSnxyWPjlBmV3Z7skFBsanYX7pm1CCE+NrE2eapTqD+aW7qAF8i5Zp
-# k1LYgPFTEkbcZq6bYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMDmN18akFIUwEvlSz+tq5dX0v0kv1u8fUZ1CsepwBm5MA0GCSqG
+# SIb3DQEBAQUABIIBgEHjRxytkGHkSEehSYetlu8DZW2aC6cGPsPxH0EhsPdeYBuM
+# INucdiJbUoQgwcjywDZYqNlpGBELLn3VkapknFFWieb5oF3+EIgYMuwvBOAR0pQB
+# G09xu6qI1+btqtPEZPoIXSFAI39nHU8spPb4+U66z2N7hYaE4ipkRPthS83jUrKW
+# NkKqgxTMRa9FJRiKtHPGNyFlqonASEuQ9a0Aq5OvWJcKJN+B9nysknm14bUfDY4O
+# fJA+cr/ZJHlpF7zk1iAOPmhsuccOSq7BbztUxDpymgNFzPosdLRAKAvgYMhoJgL4
+# nCtii/UoS4hSuedgEYKZZ3zcOJeBQP4i3Q9HM/hIRUME3q8dRALlA0RkWrECyrlB
+# AMUU0R2ehB0jXVDUXDn12cMbNKzhY902QN1C7sKuYDOlk4N15N0WVtKR+Zqoq3x3
+# GbyQT1C8cEycwL3y52hKMc5MaVJ1yMaBlqmvEIKlnrO6mv04AYzfUXgH+f/cKYWY
+# S8SKYgwRcIQsFZh+uKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDZaMC8GCSqGSIb3DQEJBDEiBCBjvJZ1p46gmZxcBE4hOUTp1NUdJhyr4qyFVNXh
-# bIeD9DANBgkqhkiG9w0BAQEFAASCAgBHr/N8Xo2Wws092Q6VUM1NCvNu1IV1lREc
-# Rbv62KsU6fv7niWgTe1/1r2GCypRufttbmalOoPSbLS8u6Yfrftrb1qFq0xPgCQE
-# bZVb6nax8REACECp+n4KMwrxylzFdAN9nGiTFUAcmjELLspfsDMJYkuQy0heaI2P
-# 21aYelExYT6jrkrTMMrGTViufpDJ/hhQ04OV4s0zbJWZGImJn7EXshUSFKDXBoys
-# 5+6hM0wy14K4So543e8qBZEMWVG+pfQUUK8ua8qR6+ub72nFnqqiJZvTtzqlpN/n
-# QlUdF3q98Ab9j63b0U54wk9JvwgobTCYBNz136/rHU51+3/SqXw80zC5VKthBa81
-# w5i/htifxt6907DuvArPKb2tcEc1HtKOpNqN8q9baj5KKZ+jIlgZiZuDq8cV1BTL
-# s7ynmVSFw0LsG/wwBKzlcFeq6RQ7W2YT2fr+221Ew+LPeeHJAtmlO2g3tKDrqcDs
-# KSK8D2pS5oL7aSuleJQs+9bNasT1+L4EydATgTkRC34hJvGlGWIS3P+rOTIc9wBV
-# W21ZJnlc232JZE7MI1++cA7BAuFqUocssLTtgumQnp1Ia/kGpQToUNOouDeMtvtY
-# Yr0g3QDGTdvgzeg6TRWo1tqfgo/lwpAdBD3eTcwjBdCku2BKxcPfxfDekOlT3GwD
-# t/omS596TA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBYoP/jU0dUa+HSNGig+sRkluQ5Px86yPDztun4
+# DdKeJTANBgkqhkiG9w0BAQEFAASCAgBy0nr1mwK6OsgXVZZuiVs/dgKQ2MwcwUNc
+# XydmYhSUGnDKv6000xqsP5/vcNUZKpgm44iq76+zgsPVqipYdfXmdst89oy0Fb5y
+# blK1CyPUhl3IkG8tn2uiLK2SmiiUJBfC59T6h0DAx1+2fMtdYQEOYAh+CXLi/ctN
+# ikSlWn2NPZ2Zbjm0kKTgagXKF/Rr4t6WUdjgR0zjYLnM90so/WNO5DEnQZ8r5IAt
+# LzN/t4rDXV+F7HUl7VVlFDBZxo4ZKzhuogVzTbk9SFojH4EPj0gvTQZZoBl+VJWs
+# wvXXX6R76WrfFhbOvCjYXnn25vwYP5/Ge1V3HNeuuuWY2ML/drISm1HFzeEM4kud
+# a5ljL131c/W3W4COxqbpaVetzmypqSoW+hBIVqyDWdjQx43zaOAhepnLVinOlpEZ
+# HZgtheuBZw2k0x0gySb4jGPcJMNxw22AH0KcjW5YV/VD0zwJ+grjnuPMfzh/s6SS
+# hhGU8bMmUp5Kpf2Li38ggfHMEjD3pN+WNPPpSuwx9LeuNOMTLsgZ+z8fch92GDvr
+# 9Ed8d9EJjVNNHZqPPrmyWrArt+etMmTI2f0FNzno0EzbVIz5uXM1NxpxGyd2nBOr
+# /SSmmEtfyS4WPulXUirZUmEEzPtLIYMnRwAMOF7Lpfbz63JbnZwfrxzCFo0MkOK4
+# 2LN9NcNEOg==
 # SIG # End signature block

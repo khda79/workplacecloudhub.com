@@ -1,0 +1,1645 @@
+{
+  "version": "0.3.1",
+  "tables": [
+    {
+      "name": "EntraGroupMembership",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantMembershipKey",
+        "TenantGroupKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "NestedTenantGroupKey",
+        "MemberId",
+        "MemberType",
+        "MembershipKind",
+        "LinkStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantMembershipKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADUserSource",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADUserKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "SamAccountName",
+        "UserPrincipalName",
+        "DisplayName",
+        "Enabled",
+        "Department",
+        "Title",
+        "Country",
+        "ManagerDistinguishedName",
+        "ManagerADObjectKey",
+        "TenantUserKey",
+        "CloudMatchStatus",
+        "LastLogonTimestampRaw",
+        "LastLogonUtcDateTime",
+        "LastLogonStatus",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADUserKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADComputerSource",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADComputerKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "Name",
+        "DNSHostName",
+        "Enabled",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "TenantDeviceKey",
+        "CloudMatchStatus",
+        "LastLogonTimestampRaw",
+        "LastLogonUtcDateTime",
+        "LastLogonStatus",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADComputerKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADGroupSource",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADGroupKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "Name",
+        "DisplayName",
+        "GroupCategory",
+        "GroupScope",
+        "ManagedBy",
+        "ManagedByADObjectKey",
+        "TenantGroupKey",
+        "CloudMatchStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADGroupKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADDomainSource",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADDomainKey",
+        "DNSRoot",
+        "DomainSID",
+        "NetBIOSName",
+        "Forest",
+        "DistinguishedName",
+        "DomainMode",
+        "PDCEmulator",
+        "RIDMaster",
+        "InfrastructureMaster",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADDomainKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADDirectoryObject",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADObjectKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "ObjectClass",
+        "PrimaryGroupID",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADObjectKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ADMembership",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADMembershipKey",
+        "TenantADGroupKey",
+        "TenantGroupKey",
+        "TenantADObjectKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "GroupObjectGUID",
+        "GroupSID",
+        "MemberDistinguishedName",
+        "MemberObjectGUID",
+        "MemberSID",
+        "MemberObjectClass",
+        "MembershipKind",
+        "ResolutionStatus",
+        "CloudMatchStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADMembershipKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DeviceHardware",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "ManagedDeviceId",
+        "SerialNumber",
+        "Manufacturer",
+        "Model",
+        "Storage",
+        "PhysicalMemoryGiB",
+        "StorageStatus",
+        "MemoryStatus",
+        "HardwareCollectedDateTime",
+        "InventoryCollectedDateTime",
+        "CollectionCoverage",
+        "CollectionMode"
+      ],
+      "key": [
+        "TenantDeviceKey",
+        "ManagedDeviceId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DeviceSource",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "SourceRecordKey",
+        "SourceSystem",
+        "SourceObjectId",
+        "SourceDeviceId",
+        "DeviceName",
+        "ManagementAgent",
+        "EnrollmentRaw",
+        "EnrollmentUtcDateTime",
+        "EnrollmentStatus",
+        "EnrollmentType",
+        "ActivityKind",
+        "ActivityRaw",
+        "ActivityUtcDateTime",
+        "ActivityStatus",
+        "SourceCollectedDateTime",
+        "SelectionStatus",
+        "SelectionReason"
+      ],
+      "key": [
+        "SourceRecordKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimCountry",
+      "columns": [
+        "CountryLabel"
+      ],
+      "key": [
+        "CountryLabel"
+      ],
+      "allowEmpty": false
+    },
+    {
+      "name": "DimDate",
+      "columns": [
+        "Date",
+        "Year",
+        "Quarter",
+        "Month",
+        "MonthName",
+        "Day"
+      ],
+      "key": [
+        "Date"
+      ],
+      "allowEmpty": false
+    },
+    {
+      "name": "DimDetectedApplication",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantApplicationKey",
+        "AppId",
+        "SourceApplicationKey",
+        "DisplayName",
+        "Version",
+        "Publisher",
+        "DeviceCount",
+        "ReportedDeviceCount",
+        "ExactRelatedDeviceCount",
+        "RelationshipCoverageStatus",
+        "Platform",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantApplicationKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimDevice",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "DeviceName",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "Ownership",
+        "ComplianceState",
+        "EncryptionState",
+        "ManagementState",
+        "ConfidenceScore",
+        "DeviceNameLabel",
+        "OperatingSystemLabel",
+        "OperatingSystemVersionLabel",
+        "OwnershipLabel",
+        "ComplianceStateLabel",
+        "EncryptionStateLabel",
+        "ManagementStateLabel",
+        "DeviceSelection",
+        "SourceDeviceId",
+        "SourceSystems",
+        "AssociatedAccount",
+        "AssociationStatus",
+        "CountryCode",
+        "CountryLabel",
+        "CountryStatus",
+        "PrimaryUserSourceId",
+        "SyncRaw",
+        "SyncUtcDateTime",
+        "SyncStatus",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimGroup",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantGroupKey",
+        "CmdbGroupId",
+        "DisplayName",
+        "MailEnabled",
+        "SecurityEnabled",
+        "GroupTypes",
+        "GroupSelection",
+        "SourceGroupId",
+        "MemberStatus",
+        "OwnerStatus",
+        "SourceCollectedDateTime",
+        "ObservedPathCount",
+        "ObservedPathStatus"
+      ],
+      "key": [
+        "TenantGroupKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimIntuneConfigurationPolicy",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantPolicyKey",
+        "PolicyId",
+        "DisplayName",
+        "Description",
+        "Platforms",
+        "Technologies",
+        "TemplateId",
+        "TemplateFamily",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantPolicyKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimIntuneManagedDevice",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantIntuneDeviceKey",
+        "TenantDeviceKey",
+        "ManagedDeviceId"
+      ],
+      "key": [
+        "TenantIntuneDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimLicenseServicePlan",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantServicePlanKey",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ServicePlanId",
+        "ServicePlanName",
+        "ProvisioningStatus",
+        "AppliesTo"
+      ],
+      "key": [
+        "TenantServicePlanKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimLicenseSku",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ConsumedUnits",
+        "EnabledUnits",
+        "SkuPartNumberLabel"
+      ],
+      "key": [
+        "TenantSkuKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimSharePointSite",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantSiteKey",
+        "SiteId",
+        "SiteUrl",
+        "SiteName",
+        "OwnerPrincipalName",
+        "LastActivityDate",
+        "ActivityState",
+        "StorageUsedBytes",
+        "StorageAllocatedBytes",
+        "RootWebTemplate",
+        "IsDeleted",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantSiteKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimTeam",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantTeamKey",
+        "TeamId",
+        "DisplayName",
+        "Visibility",
+        "CreatedDateTime",
+        "LastActivityDate",
+        "ActivityState",
+        "OwnerCount",
+        "MemberCount",
+        "GuestCount",
+        "UnresolvedMemberCount",
+        "MembershipCoverageStatus",
+        "IsArchived",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantTeamKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimTenant",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDisplayName",
+        "Environment",
+        "LastRefreshDateTime"
+      ],
+      "key": [
+        "TenantKey"
+      ],
+      "allowEmpty": false
+    },
+    {
+      "name": "DimUser",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "CmdbUserId",
+        "UserPrincipalName",
+        "DisplayName",
+        "AccountEnabled",
+        "UserType",
+        "Department",
+        "JobTitle",
+        "CountryCode",
+        "CountryLabel",
+        "CountryStatus",
+        "LastSignInDateTime",
+        "LastNonInteractiveSignInDateTime",
+        "LastSuccessfulSignInDateTime",
+        "ActivityState",
+        "ConfidenceScore",
+        "AccountStatusLabel",
+        "DisplayNameLabel",
+        "UserPrincipalNameLabel",
+        "DepartmentLabel",
+        "UserTypeLabel",
+        "UserSelection",
+        "SourceUserId",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime",
+        "ManagerStatus",
+        "UserActivityStatus"
+      ],
+      "key": [
+        "TenantUserKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimVerifiedDomain",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDomainKey",
+        "DomainId",
+        "IsDefault",
+        "IsInitial",
+        "AuthenticationType",
+        "SupportedServices",
+        "AvailabilityStatus"
+      ],
+      "key": [
+        "TenantDomainKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "DimWindowsUpdatePolicy",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpdatePolicyKey",
+        "PolicyType",
+        "PolicyId",
+        "DisplayName",
+        "TargetVersion",
+        "ReleaseDateTime",
+        "DaysUntilForcedReboot",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantUpdatePolicyKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "EntityFinding",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantFindingKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "TenantGroupKey",
+        "EntityType",
+        "EntityId",
+        "Severity",
+        "FindingType",
+        "Description",
+        "RecommendedAction",
+        "DetectedDateTime",
+        "LinkStatus"
+      ],
+      "key": [
+        "TenantFindingKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactADIntuneCoverage",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADComputerKey",
+        "CmdbAdComputerId",
+        "DeviceName",
+        "Enabled",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "TenantDeviceKey",
+        "EntraDeviceId",
+        "IntuneManagedDeviceId",
+        "CoverageState",
+        "MatchMethod",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantADComputerKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactAutopilotDevice",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantAutopilotDeviceKey",
+        "AutopilotDeviceId",
+        "DisplayName",
+        "SerialNumber",
+        "Manufacturer",
+        "Model",
+        "GroupTag",
+        "EnrollmentState",
+        "LastContactedDateTime",
+        "AzureAdDeviceId",
+        "ManagedDeviceId",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantAutopilotDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactDataQuality",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantFindingKey",
+        "FindingId",
+        "Severity",
+        "EntityType",
+        "FindingType",
+        "DetectedDateTime",
+        "SourceSystem",
+        "Description",
+        "RecommendedAction",
+        "SeverityLabel",
+        "FindingTypeLabel",
+        "DescriptionLabel",
+        "RecommendedActionLabel"
+      ],
+      "key": [
+        "TenantFindingKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactDeviceApplication",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceApplicationKey",
+        "TenantApplicationKey",
+        "ManagedDeviceId",
+        "AppId",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantDeviceApplicationKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactDeviceCompliance",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "ComplianceState",
+        "LastSyncDateTime",
+        "SourceSystem"
+      ],
+      "key": [
+        "TenantDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactEndpointAnalyticsDevice",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantEndpointAnalyticsDeviceKey",
+        "DeviceId",
+        "DeviceName",
+        "Manufacturer",
+        "Model",
+        "EndpointAnalyticsScore",
+        "StartupPerformanceScore",
+        "AppReliabilityScore",
+        "WorkFromAnywhereScore",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ],
+      "key": [
+        "TenantEndpointAnalyticsDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactEndpointAnalyticsUpgradeEligibility",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpgradeEligibilityDeviceKey",
+        "MetricId",
+        "MetricDeviceId",
+        "DeviceId",
+        "DeviceIdSource",
+        "DeviceName",
+        "UpgradeEligibility",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ],
+      "key": [
+        "TenantUpgradeEligibilityDeviceKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactHybridIdentityCoverage",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "EntityType",
+        "OnPremisesCount",
+        "CloudCount",
+        "MatchedCount",
+        "OnPremisesOnlyCount",
+        "CloudOnlyCount",
+        "DuplicateOnPremisesKeyCount",
+        "DuplicateCloudKeyCount",
+        "MatchRatio",
+        "MatchMethod",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "EntityType"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactMailbox",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantMailboxKey",
+        "TenantUserKey",
+        "CmdbMailboxId",
+        "CmdbUserId",
+        "RecipientTypeDetails",
+        "ArchiveStatus",
+        "SourceSystem",
+        "DisplayName",
+        "PrimarySmtpAddress",
+        "LinkStatusLabel",
+        "DisplayNameLabel",
+        "PrimarySmtpAddressLabel",
+        "RecipientTypeDetailsLabel",
+        "ArchiveStatusLabel"
+      ],
+      "key": [
+        "TenantMailboxKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactMailboxHosting",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "MailboxHostingKey",
+        "CountryLabel",
+        "HostingLocation",
+        "RecipientTypeDetails",
+        "MailboxTypeGroup",
+        "EvidenceSource"
+      ],
+      "key": [
+        "MailboxHostingKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactRelationshipOverview",
+      "columns": [
+        "RelationshipType",
+        "RelationshipCount",
+        "EvidenceSource"
+      ],
+      "key": [
+        "RelationshipType"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactTeamMember",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantTeamMemberKey",
+        "TenantTeamKey",
+        "TeamId",
+        "TenantUserKey",
+        "UserId",
+        "UserPrincipalName",
+        "UserType",
+        "Role",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantTeamMemberKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactUserActivity",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserActivityKey",
+        "TenantUserKey",
+        "UserPrincipalName",
+        "MatchStatus",
+        "ReportRefreshDate",
+        "IsDeleted",
+        "ExchangeLastActivityDate",
+        "OneDriveLastActivityDate",
+        "SharePointLastActivityDate",
+        "TeamsLastActivityDate",
+        "LastActivityDate",
+        "LastActivityWorkload",
+        "HasAnyM365Activity",
+        "AssignedProducts",
+        "SourceCollectedDateTime"
+      ],
+      "key": [
+        "TenantUserActivityKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactUserDeviceRelationship",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantRelationshipKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "CmdbRelationshipId",
+        "CmdbUserId",
+        "CmdbDeviceId",
+        "RelationshipType",
+        "ConfidenceScore",
+        "SourceSystem",
+        "Account",
+        "Device",
+        "DeviceSelection",
+        "DeviceCompliance",
+        "DeviceSyncStatus"
+      ],
+      "key": [
+        "TenantRelationshipKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactUserLicense",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "CmdbUserId",
+        "SkuId",
+        "AssignmentState",
+        "AssignedDateTime",
+        "SourceSystem",
+        "AssignmentStateLabel"
+      ],
+      "key": [
+        "TenantUserKey",
+        "TenantSkuKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactUserServicePlan",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "TenantServicePlanKey",
+        "CmdbUserId",
+        "SkuId",
+        "ServicePlanId",
+        "ServicePlanName",
+        "IsEnabled",
+        "AssignmentState",
+        "SourceSystem"
+      ],
+      "key": [
+        "TenantUserKey",
+        "TenantSkuKey",
+        "TenantServicePlanKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "FactWindowsUpdateAlert",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpdateAlertKey",
+        "SourceReport",
+        "DeviceId",
+        "DeviceName",
+        "PolicyId",
+        "EventDateTimeUTC",
+        "LastWUScanTimeUTC",
+        "AggregateState",
+        "CurrentDeviceUpdateStatus",
+        "LatestAlertMessage",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ],
+      "key": [
+        "TenantUpdateAlertKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "HardwareCoverage",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Status",
+        "Coverage",
+        "Mode",
+        "RecordCount"
+      ],
+      "key": [
+        "Status"
+      ],
+      "allowEmpty": false
+    },
+    {
+      "name": "LicenseAssignmentPath",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantAssignmentPathKey",
+        "TenantUserKey",
+        "TenantGroupKey",
+        "TenantSkuKey",
+        "SourceUserId",
+        "AssignedByGroupId",
+        "SkuId",
+        "Account",
+        "Product",
+        "AssignmentRoute",
+        "GroupName",
+        "AssignmentState",
+        "AssignmentError",
+        "ErrorStatus",
+        "DisabledPlanIds",
+        "AssignmentUpdatedRaw",
+        "AssignmentUpdatedUtcDateTime",
+        "AssignmentUpdatedStatus",
+        "SourceCollectedDateTime",
+        "GroupLinkStatus",
+        "UserLinkStatus",
+        "SkuLinkStatus"
+      ],
+      "key": [
+        "TenantAssignmentPathKey"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "SourceHealth",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "SourceName",
+        "Status",
+        "Coverage",
+        "SourceRows",
+        "MaxItems",
+        "StartedDateTime",
+        "CompletedDateTime",
+        "Evidence",
+        "SourceRowsLabel",
+        "CompletedDateTimeLabel"
+      ],
+      "key": [
+        "SourceName"
+      ],
+      "allowEmpty": false
+    },
+    {
+      "name": "TopApplication",
+      "columns": [
+        "ApplicationProduct",
+        "DisplayName",
+        "Publisher",
+        "Platform",
+        "VersionCount",
+        "ReportedDeviceCount"
+      ],
+      "key": [
+        "ApplicationProduct"
+      ],
+      "allowEmpty": true
+    }
+  ],
+  "sources": [
+    {
+      "name": "hardware",
+      "file": "Intune_DeviceHardware_All.csv",
+      "columns": ["TenantKey", "ManagedDeviceId", "azureADDeviceId", "serialNumber", "manufacturer", "model", "totalStorageSpaceInBytes", "totalStorageSpaceInBytesStatus", "freeStorageSpaceInBytes", "freeStorageSpaceInBytesStatus", "physicalMemoryInBytes", "physicalMemoryInBytesStatus", "CollectionStatus", "CollectedAtUtc"],
+      "key": ["TenantKey", "ManagedDeviceId"],
+      "allowEmpty": true
+    },
+    {
+      "name": "users",
+      "file": "M365_Users_Active.csv",
+      "columns": [
+        "TenantKey",
+        "Object Id",
+        "User principal name",
+        "AccountEnabled",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "Object Id"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_users",
+      "file": "AD_Users_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "UserPrincipalName"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGUID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_computers",
+      "file": "AD_Computers_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGUID",
+        "OperatingSystem"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGUID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_domains",
+      "file": "AD_Domains_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "DNSRoot",
+        "DomainSID"
+      ],
+      "key": [
+        "TenantKey",
+        "DNSRoot"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_groups",
+      "file": "AD_Groups_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGUID",
+        "MembersJson"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGUID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_objects",
+      "file": "AD_DirectoryObjects_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DistinguishedName",
+        "ObjectClass"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGUID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "ad_members",
+      "file": "AD_GroupMemberships_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "GroupSID",
+        "GroupObjectGUID",
+        "MemberDistinguishedName",
+        "MemberObjectGUID",
+        "MemberSID",
+        "MemberObjectClass",
+        "MembershipKind",
+        "ResolutionStatus"
+      ],
+      "key": [
+        "TenantKey",
+        "GroupSID",
+        "MemberDistinguishedName",
+        "MembershipKind"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "groups",
+      "file": "M365_EntraGroups_All.csv",
+      "columns": [
+        "TenantKey",
+        "GroupId",
+        "DisplayName"
+      ],
+      "key": [
+        "TenantKey",
+        "GroupId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "group_scope",
+      "file": "M365_EntraGroupMembershipScope.csv",
+      "columns": [
+        "TenantKey",
+        "GroupId",
+        "MemberCount",
+        "MemberCollectionStatus"
+      ],
+      "key": [
+        "TenantKey",
+        "GroupId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "group_members",
+      "file": "M365_EntraGroupMemberships_All.csv",
+      "columns": [
+        "TenantKey",
+        "GroupId",
+        "MemberId",
+        "MemberType",
+        "CollectionStatus",
+        "MembershipKind"
+      ],
+      "key": [
+        "TenantKey",
+        "GroupId",
+        "MemberId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "entra_devices",
+      "file": "M365_EntraDevices_All.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectId",
+        "DeviceId",
+        "DisplayName",
+        "OperatingSystem"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "managed",
+      "file": "Intune_ManagedDevices_All.csv",
+      "columns": [
+        "TenantKey",
+        "ManagedDeviceId",
+        "AzureADDeviceId",
+        "DeviceName",
+        "OperatingSystem",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "ManagedDeviceId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "apps",
+      "file": "Intune_DiscoveredApps_Summary.csv",
+      "columns": [
+        "TenantKey",
+        "AppId",
+        "AppName",
+        "AppPublisher",
+        "Platform",
+        "AppVersion",
+        "DeviceCount",
+        "CollectionScope",
+        "RelationCollectionScope"
+      ],
+      "key": [
+        "TenantKey",
+        "AppId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "app_relations",
+      "file": "Intune_DiscoveredApps_AppDeviceRelations.csv",
+      "columns": [
+        "TenantKey",
+        "AppId",
+        "DeviceId"
+      ],
+      "key": [
+        "TenantKey",
+        "AppId",
+        "DeviceId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "policies",
+      "file": "Intune_Policies_All.csv",
+      "columns": [
+        "TenantKey",
+        "PolicyFamily",
+        "PolicyId",
+        "NativeEvidenceJson",
+        "AssignmentCollectionStatus"
+      ],
+      "key": [
+        "TenantKey",
+        "PolicyFamily",
+        "PolicyId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "policy_assignments",
+      "file": "Intune_PolicyAssignments_All.csv",
+      "columns": [
+        "TenantKey",
+        "PolicyFamily",
+        "PolicyId",
+        "AssignmentId",
+        "NativeTargetJson"
+      ],
+      "key": [
+        "TenantKey",
+        "PolicyFamily",
+        "PolicyId",
+        "AssignmentId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "skus",
+      "file": "M365_Licenses_Tenant.csv",
+      "columns": [
+        "TenantKey",
+        "Id",
+        "TenantSkuPartNumber",
+        "TenantPrepaidEnabled",
+        "TenantConsumedUnits"
+      ],
+      "key": [
+        "TenantKey",
+        "Id"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "license_paths",
+      "file": "M365_Licenses_AssignmentPaths.csv",
+      "columns": [
+        "TenantKey",
+        "UserId",
+        "SkuId",
+        "AssignedByGroupId",
+        "AssignmentState",
+        "AssignmentError"
+      ],
+      "key": [
+        "TenantKey",
+        "UserId",
+        "SkuId",
+        "AssignedByGroupId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "plans",
+      "file": "M365_Licenses_ServicePlans_Catalog.csv",
+      "columns": [
+        "TenantKey",
+        "SkuId",
+        "PlanId",
+        "PlanName",
+        "TenantProvisioningStatus"
+      ],
+      "key": [
+        "TenantKey",
+        "SkuId",
+        "PlanId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "user_plans",
+      "file": "M365_Licenses_UserServicePlanStates.csv",
+      "columns": [
+        "TenantKey",
+        "UserId",
+        "SkuId",
+        "PlanId",
+        "StateCode"
+      ],
+      "key": [
+        "TenantKey",
+        "UserId",
+        "SkuId",
+        "PlanId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "mailboxes",
+      "file": "Exchange_EXO_Mailboxes_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ExternalDirectoryObjectId",
+        "MailboxGuid",
+        "PrimarySmtpAddress",
+        "RecipientTypeDetails",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "MailboxGuid"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "local_mailboxes",
+      "file": "Exchange_OnPrem_Mailboxes_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGUID",
+        "PrimarySMTPaddress",
+        "RecipientType",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGUID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "remote_mailboxes",
+      "file": "Exchange_OnPrem_RemoteMailboxes_AllDomains.csv",
+      "columns": [
+        "TenantKey",
+        "ObjectGuid",
+        "PrimarySmtpAddress",
+        "RecipientTypeDetails",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "ObjectGuid"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "sites",
+      "file": "M365_SPO_Sites.csv",
+      "columns": [
+        "TenantKey",
+        "SiteId",
+        "SiteIdentitySource",
+        "SiteUrl",
+        "ReportRefreshDate",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "SiteId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "teams",
+      "file": "M365_Teams_Teams.csv",
+      "columns": [
+        "TenantKey",
+        "TeamId",
+        "TeamDisplayName",
+        "MemberCount",
+        "MemberCollectionStatus",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "TeamId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "team_members",
+      "file": "M365_Teams_Members.csv",
+      "columns": [
+        "TenantKey",
+        "TeamId",
+        "UserId",
+        "Role"
+      ],
+      "key": [
+        "TenantKey",
+        "TeamId",
+        "UserId",
+        "Role"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "domains",
+      "file": "M365_Entra_VerifiedDomains.csv",
+      "columns": [
+        "TenantKey",
+        "Id"
+      ],
+      "key": [
+        "TenantKey",
+        "Id"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "autopilot",
+      "file": "Intune_Autopilot_Devices.csv",
+      "columns": [
+        "TenantKey",
+        "Autopilot ID"
+      ],
+      "key": [
+        "TenantKey",
+        "Autopilot ID"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "analytics",
+      "file": "Intune_EndpointAnalytics_DevicePerformance.csv",
+      "columns": [
+        "TenantKey",
+        "ReportName",
+        "DeviceId"
+      ],
+      "key": [
+        "TenantKey",
+        "ReportName",
+        "DeviceId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "readiness",
+      "file": "Intune_Devices_UpgradeEligibility.csv",
+      "columns": [
+        "TenantKey",
+        "GraphId",
+        "UpgradeEligibility"
+      ],
+      "key": [
+        "TenantKey",
+        "GraphId"
+      ],
+      "allowEmpty": true
+    },
+    {
+      "name": "alerts",
+      "file": "Intune_WindowsAutopatch_Alerts_Detail.csv",
+      "columns": [
+        "TenantKey",
+        "DeviceId",
+        "SourceReport",
+        "PolicyId",
+        "EventDateUtc",
+        "AlertName"
+      ],
+      "key": [],
+      "allowEmpty": true
+    },
+    {
+      "name": "activity",
+      "file": "M365_Users_Activity.csv",
+      "columns": [
+        "TenantKey",
+        "UserPrincipalName",
+        "ReportRefreshDate",
+        "IsDeleted",
+        "AssignedProducts",
+        "ExchangeLastActivityDate",
+        "OneDriveLastActivityDate",
+        "SharePointLastActivityDate",
+        "SkypeForBusinessLastActivityDate",
+        "YammerLastActivityDate",
+        "TeamsLastActivityDate"
+      ],
+      "key": [
+        "TenantKey",
+        "UserPrincipalName"
+      ],
+      "allowEmpty": true
+    }
+  ],
+  "producerRegistry": "SmartM365-CmdbSources.json.txt",
+  "maxAgeHours": 48,
+  "maxCollectionSpanHours": 48
+}

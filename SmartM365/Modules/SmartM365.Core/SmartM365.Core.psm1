@@ -1,5 +1,6 @@
-Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+. (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 # SmartM365.Core.psm1
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
@@ -1048,6 +1049,7 @@ function Complete-SmartM365ExecutionContext {
     }
 
     $hasFailure = $null -ne $ErrorRecord -or $errorCount -gt 0
+    $automaticStatus = $Status -eq 'Auto'
     if ($Status -eq 'Auto') {
         if ($hasFailure) {
             $Status = 'Failed'
@@ -1060,6 +1062,13 @@ function Complete-SmartM365ExecutionContext {
         }
     }
     $global:SmartM365ExecutionStatus = $Status
+    $cmdbReceiptPath=$null
+    if(Get-Command Complete-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue){
+        try{$receiptStatus=if($hasFailure){'Failed'}else{$Status};$cmdbReceiptPath=Complete-SmartM365CmdbSourceReceipt -Status $receiptStatus -ErrorCount $errorCount}
+        catch{WriteLog -Message ('CMDB completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
+    }
+    $warningCount = [int]$global:SmartM365WarningCount
+    if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
     if ($Status -eq 'Failed' -and $errorCount -eq 0) {
         $failureContext = if (-not [string]::IsNullOrWhiteSpace($FailureStage)) { " during $FailureStage" } else { '' }
         $failureDetail = if (-not [string]::IsNullOrWhiteSpace($failureMessage)) { " $failureMessage" } else { '' }
@@ -1111,6 +1120,7 @@ function Complete-SmartM365ExecutionContext {
     try {
     # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
     $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile)
+    if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
     if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
     $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
@@ -1697,6 +1707,19 @@ function Assert-SmartM365CsvDataCompleteness {
         }
     }
 
+    if ($rule.ContainsKey('UniqueFields') -and @($rule.UniqueFields).Count -gt 0) {
+        $keys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($row in $rows) {
+            $values = @($rule.UniqueFields | ForEach-Object {
+                $property = $row.PSObject.Properties[[string]$_]
+                if ($null -eq $property) { throw "CSV '$displayName' is missing identity column '$_'." }
+                ([string]$property.Value).Trim().ToLowerInvariant()
+            })
+            $key = ConvertTo-Json -InputObject $values -Compress
+            if (-not $keys.Add($key)) { throw "CSV '$displayName' has duplicate immutable identity keys. DATA-LAST publication is blocked." }
+        }
+    }
+
     $missingExamples = New-Object System.Collections.Generic.List[string]
     $missingCriticalRows = 0
     $rowNumber = 1
@@ -1741,6 +1764,7 @@ function Add-SmartM365CsvValidationRule {
         [Parameter(Mandatory)][string]$BaseFileName,
         [Parameter(Mandatory)][string[]]$CriticalFields,
         [string[]]$RequiredColumns = @(),
+        [string[]]$UniqueFields = @(),
         [switch]$AllowEmptyDataset,
         [string]$Name = '',
         [int]$CriticalMissingFailMinRows = 50,
@@ -1752,6 +1776,7 @@ function Add-SmartM365CsvValidationRule {
         Name                       = $ruleName
         CriticalFields             = @($CriticalFields)
         RequiredColumns            = @($RequiredColumns)
+        UniqueFields               = @($UniqueFields)
         AllowEmptyDataset          = [bool]$AllowEmptyDataset
         CriticalMissingFailMinRows = [int]$CriticalMissingFailMinRows
         CriticalMissingFailPercent = [double]$CriticalMissingFailPercent
@@ -1768,18 +1793,35 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     $rules = $global:SmartM365CsvValidationRules
     $add = { param($Base,$Fields,$AllowEmpty) Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName $Base -CriticalFields $Fields -AllowEmptyDataset:$AllowEmpty }
 
+    # Native CMDB source exports require every immutable identity, including small datasets.
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraDevices_All' -CriticalFields @('ObjectId') -RequiredColumns @('DeviceId','OnPremisesSecurityIdentifier','OperatingSystem') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedDevices_All' -CriticalFields @('ManagedDeviceId') -RequiredColumns @('AzureADDeviceId','DeviceEnrollmentType','OperatingSystem') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraGroups_All' -CriticalFields @('GroupId') -RequiredColumns @('DisplayName','GroupTypes','SecurityEnabled') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_Licenses_AssignmentPaths' -CriticalFields @('UserId','SkuId','AssignmentRoute') -RequiredColumns @('AssignedByGroupId','AssignmentState','AssignmentError','DisabledPlanIds','LastUpdatedDateTime') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    $rules['M365_EntraDevices_All'].UniqueFields = @('ObjectId')
+    $rules['Intune_ManagedDevices_All'].UniqueFields = @('ManagedDeviceId')
+    $rules['M365_EntraGroups_All'].UniqueFields = @('GroupId')
+    $rules['M365_Licenses_AssignmentPaths'].UniqueFields = @('UserId','SkuId','AssignedByGroupId')
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Domains_AllDomains' -CriticalFields @('DomainName','DNSRoot','DomainSID','DistinguishedName','CollectedAtUtc') -UniqueFields @('DNSRoot') -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_DirectoryObjects_AllDomains' -CriticalFields @('TenantKey','ObjectGUID','DistinguishedName','ObjectClass') -UniqueFields @('TenantKey','ObjectGUID') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_GroupMemberships_AllDomains' -CriticalFields @('TenantKey','GroupSID','MemberDistinguishedName','MembershipKind','ResolutionStatus') -UniqueFields @('TenantKey','GroupSID','MemberDistinguishedName','MembershipKind') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraGroupMemberships_All' -CriticalFields @('GroupId','MemberId','MembershipKind','CollectionStatus','RunId','CollectedAtUtc') -UniqueFields @('GroupId','MemberId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraGroupMembershipScope' -CriticalFields @('GroupId','MemberCollectionStatus','RunId','CollectedAtUtc') -RequiredColumns @('MemberCount','Visibility') -UniqueFields @('GroupId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_Policies_All' -CriticalFields @('PolicyId','PolicyFamily','AssignmentCollectionStatus','RunId','CollectedAtUtc') -UniqueFields @('PolicyFamily','PolicyId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_PolicyAssignments_All' -CriticalFields @('PolicyFamily','PolicyId','AssignmentId','TargetType','RunId','CollectedAtUtc') -UniqueFields @('PolicyFamily','PolicyId','AssignmentId') -RequiredColumns @('GroupId','AssignmentFilterId','AssignmentFilterType','NativeTargetJson') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+
     & $add 'AD_HealthCheck' @('Forest','Domain','Category','Check','Status') $false
     & $add 'AD_Inventory_DailySummary' @('SnapshotDate','GeneratedAt') $false
-    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $false
+    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $true
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Contacts_AllDomains' -CriticalFields @('DomainName','ObjectGUID') -RequiredColumns @('ObjectType','Name','DistinguishedName','DisplayName','ProxyAddresses','Mail') -AllowEmptyDataset
     & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
-    & $add 'AD_Users_DuplicateSMTP' @('SmtpAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
-    & $add 'AD_Users_DuplicateRemoteRoutingAddress' @('NormalizedRemoteRoutingAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateSMTP' @('SmtpAddress','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateRemoteRoutingAddress' @('NormalizedRemoteRoutingAddress','SamAccountName','DistinguishedName') $true
     & $add 'AD_Users_RemoteRoutingIssues' @('IssueType','ExpectedRemoteRoutingDomain','UserPrincipalName','SamAccountName','DistinguishedName') $true
 
     & $add 'Exchange_EXO_AcceptedDomains' @('Name','DomainName','DomainType') $false
@@ -1812,7 +1854,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'Exchange_OnPrem_Infrastructure_PerServerSummary' @('ExchangeServerName','ServerRole') $false
     & $add 'Exchange_OnPrem_MigrationReadiness_Config' @('Category','ObjectName','Setting','CollectionStatus') $false
 
-    & $add 'M365_Users_Active' @('User principal name','Object Id','AccountEnabled') $false
+    & $add 'M365_Users_Active' @('User principal name','Object Id','AccountEnabled') $true
     & $add 'M365_Users_Activity' @('RunId','UserPrincipalName','ReportRefreshDate') $false
     & $add 'M365_Mailbox_Usage' @('RunId','User Principal Name','Report Refresh Date') $false
     & $add 'M365_OneDrive_Usage' @('RunId','Site Id','Report Refresh Date') $false
@@ -1820,13 +1862,13 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'M365_Apps_Activations' @('RunId','User Principal Name','Report Refresh Date') $false
     & $add 'M365_Teams_UserActivity' @('RunId','User Principal Name','Report Refresh Date') $false
     & $add 'M365_Email_Activity' @('RunId','User Principal Name','Report Refresh Date') $false
-    & $add 'M365_Entra_VerifiedDomains' @('Id','IsVerified') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_Entra_VerifiedDomains' -CriticalFields @('Id','IsVerified') -RequiredColumns @('IsDefault','IsInitial','AuthenticationType','SupportedServices','AvailabilityStatus') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     & $add 'M365_Entra_AzureADConnect_SyncHealth' @('CheckName','Status','ExportDateTime','RunId') $false
 
-    & $add 'M365_Licenses_Users' @('Id','User principal name','UserId','SkuId','SkuPartNumber') $false
+    & $add 'M365_Licenses_Users' @('Id','User principal name','UserId','SkuId','SkuPartNumber') $true
     & $add 'M365_Licenses_ServicePlans' @('Id','User principal name','SkuId','PlanId','PlanName') $false
     & $add 'M365_Licenses_UserServicePlanStates' @('TenantKey','UserId','SkuId','PlanId','StateCode') $false
-    & $add 'M365_Licenses_ServicePlans_Catalog' @('SkuId','SkuPartNumber','PlanId','PlanName') $false
+    & $add 'M365_Licenses_ServicePlans_Catalog' @('SkuId','SkuPartNumber','PlanId','PlanName') $true
     & $add 'M365_Licenses_Tenant' @('Id','TenantSkuPartNumber') $false
     & $add 'M365_Licenses_Groups' @('Id','GroupId','GroupDisplayName') $true
 
@@ -1836,11 +1878,12 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'M365_Entra_Devices_HardwareIdConflicts_RegisteredPending' @('HardwareId','ObjectId','DeviceId') $true
     & $add 'M365_Entra_Devices_RemovalCandidates' @('HardwareId','CandidateObjectId','PrimaryObjectId','Reason') $true
 
-    & $add 'Intune_Devices_Inventory' @('Device ID','Device name','Azure AD Device ID') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_Devices_Inventory' -CriticalFields @('Device ID') -RequiredColumns @('Device name','Azure AD Device ID') -UniqueFields @('Device ID') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     & $add 'Intune_Devices_Compliance' @('DeviceName') $false
     & $add 'Intune_Devices_BIOS' @('ManagedDeviceId','DeviceName','AzureADDeviceId') $false
     & $add 'Intune_Devices_LocalSystem' @('DeviceName','DeviceId','AzureADDeviceId') $false
-    & $add 'Intune_Autopilot_Devices' @('Autopilot ID','Serial number') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_Autopilot_Devices' -CriticalFields @('Autopilot ID') -RequiredColumns @('Serial number','Azure AD Device ID','Managed device ID') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    $rules['Intune_Autopilot_Devices'].UniqueFields = @('Autopilot ID')
     & $add 'Intune_Devices_UpgradeEligibility_Summary' @('ReportType','ExportDateTime') $false
     & $add 'Intune_Devices_UpgradeEligibility_DuplicatesByName' @('DuplicateKey','DuplicateCount','NormalizedDeviceName','ExportDateTime') $true
     & $add 'Intune_Devices_Win11Readiness' @('DeviceName','GraphId','RunId') $false
@@ -1848,7 +1891,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'Intune_AutopatchAlerts_Detail' @('AlertName','Severity','SourceReport') $true
     & $add 'Intune_AutopatchAlerts_Summary' @('AlertName','Severity','SourceReport') $true
     & $add 'Intune_AutopatchAlerts_PolicySummary' @('PolicyId','PolicyName') $true
-    & $add 'Intune_DiscoveredApps_Summary' @('AppId','AppName','Platform') $false
+    & $add 'Intune_DiscoveredApps_Summary' @('AppId','AppName','Platform') $true
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_DiscoveredApps_AppDeviceRelations' -CriticalFields @('AppId','DeviceId') -RequiredColumns @('TenantKey') -AllowEmptyDataset
     & $add 'Intune_RBAC_GroupMembers' @('Country','IntuneRole','GroupName','GroupFound') $false
 
@@ -6012,6 +6055,7 @@ function Disconnect-SmartM365CloudSession {
 #endregion
 
 Export-ModuleMember -Function `
+    Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, `
     Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
@@ -6024,8 +6068,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+5l0Cuicfto4F
-# mVFlVA1EaAchmr21CZfn3HLfhwNz26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFJwTeuj+wIWLD
+# 00B8nvWLFhwommU0LuBEvlhRZMNiYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6158,31 +6202,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMZDFOTXMUlB7PifFqYKa9zAIV0u495SM0LDK/zdI6BoMA0GCSqG
-# SIb3DQEBAQUABIIBgEyjCmw36EF52NslxIm/fqukPW1sXo/K1R6nrnm2KVZab5WD
-# khcjpbd66ua05pymlLEyBD86VC47euouZzZZ3il88joha3n7Wo/E/sUCAoFtAg+h
-# yAJ28otyElTr22Pyk6+Xhg9O5wQNSMra6azOKVcDhMggLUYO2PrgCcTtd7Sh1kw8
-# JwfYOesdeNlXaAa+RwlR8IqBnsqUl8aI8UeJuTX9iVDNH0P/lPfiQX3N9kUM1x+E
-# GqeJ4DeDuWQbFtXloOjtJwiTcasSmma4zB0hUJPoSQybdoK1Su8lbiW6vHsKuyFj
-# 2KHj9MyVAWe4CZ1M5bv3Q/waWm78Mt6qbhnAqAPMeY9Ae9MIQlbO/kVLcQTTYvrf
-# 6QLR6OmAWnMlo4wZAYuadpq1HnKIPtiiW+seEL6ucw+hDsY/WLs3lSikqIaM6DcU
-# RKqfxxjaPQV72b6rR+njIGa3WIH4Pvxp2uvolcoxlaD1xwhzGuv8olkYBtkM1yY5
-# BrMM1bK534AgJuNRLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIGkyrU5zkRk8ZgVaU4KS+IDY5CC42SpOkjl6WGHLx7nMA0GCSqG
+# SIb3DQEBAQUABIIBgGXFYCXK7kqk3x2FGI1XX/27/RTQuYJ3wvtNOSPjf1rni4Bp
+# oiIAKtaNtiSS5P2P5Z9RF1vqRAVTJb0HAtrd9oNZWCFS2+oqvWO9qvQSwXJQhcj4
+# 9KWIKiJn33Q/2z517mOL9Shjv5se+bkAvAOcokBhMruwauPzntugkPe2Famr4duh
+# cPhp0s471GeQdJStvkZ+yddoP23swOiH+gV/8FBFqOsQdc0yheBBqOplBSbJnqBe
+# tgy/66EUkoVUB63gmDJAeHivstGcoZsoJJU935xpEo3hZDPyGefvHulq/JQ/c4Wh
+# iLQ0GxSh8IvQMcouXnyygXWX9rs78na1pXnBsUP/3dZcOd/eX3ECDbKX/rPrtKmb
+# xSW/hPfSSkgzbdi6/mJ4Z3Hrts5cqN8X/9XnprAUUtosRTwV8JLLteFBy7J9G0Cv
+# qR8iyW9m9mjiFPb2a3mMpT/1zpqCCMw782vStidOck/vCnlqiXLUiCaSO4B3NTDr
+# h9GnFRc/T5zOLbEt2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMTA1
-# MDVaMC8GCSqGSIb3DQEJBDEiBCCePl25VRYTPOJy2bYMmqgCxoNKjc/Go/sJMJoE
-# sKp8GjANBgkqhkiG9w0BAQEFAASCAgAwV/iijsN6lGnoNlkqSO/x7k6AFQ9KTdpm
-# tYWmLsX8A1M9t+SZOpvOmJd5eS/U+xmt66fvFfgJuWfcfeI3QTlsCi4qcL6M2toE
-# tb4h1PCkf2RJc2ke8LsVsm4UgN8zFo8iGueEPWeKeZY0hJtRondU8rHsqYNzx3xk
-# B8f57Xg360JL9OzhN/A4zgfzmzd8VCj5DavA5ZLhcOcq1C3nwZzO/cirdcZyUMiG
-# iHE2zKt4rh4IIZmgeC0JxjzDTgPhT72EpMG8lhb6Eb89JhOQM3McalDwV90IoATC
-# 3osn3ZBI4DvemQ7wQ0/H09qIKOMdaUpJwzBPX2XGSJDD176OGeuBRaFFxRojMd67
-# AhCGGPKSJj/Jlb3mVpMWAckwZo97BhK+AED1vAUJTr874F6bILaLxtyVUlGJYdDH
-# 6pSb89g2kb2s0T4Ky6uo8iI2iAeoTTySedx4T0/XBwnULqgZn0ffDVpcXySM2jCD
-# RD4JqX8l+fZAacn/EpmFZVQb8Kz40X2nThh3LA8Vlp+pBO0jcg6Yz5JR/AKVdT40
-# wY2il/9RSxIvbCf5T+0V6/q4fHMuvkgC9vsm21ULZSYe3uI5O1XUl2vs/uF3xesp
-# ioIj04OCx1NUZZ0Xj+mP+mBzsQWsyhQ2PzDBHO1sIUAqRYEvPz/qUtklpX3oOFOf
-# U+FknKGeZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# MzVaMC8GCSqGSIb3DQEJBDEiBCB2pIoM5rYo9VkoC5igImBdMekMjbqbN7wfXlmZ
+# 3QPulTANBgkqhkiG9w0BAQEFAASCAgArWnC42UItX2X39Dqvlc06+j6TuR4bE/vx
+# wkjmF7yVGvGAXO1byWMp7KVwlDFPs0AQBYAu6K93KLNCEHRPTLWJtjDRhSTRqlhh
+# Jccbqm8xvjtk1K00yhdGjfTdrw9E0HtTMBY/04jo1UwkEcNNvPjX0X0Di5ib04tD
+# w2Tx6/c9/38k6BKaaBYz23CS+k6sEFyUWCRx5/dKpDh8SEP/evKXuU+i4o6iHlYr
+# BtuEIEfQmCHvyOH/uJPKBf3q+cR6qOCQeCaWuUp2XKEU454PyfP9quyR/ej2PsA+
+# aEXctA2xLJH4gv+Fj9Y8jiZ/KGNpoVHX8uKYpBItr3X9LzzlDIdPgM5uDZdnNI7U
+# 7YZoXEDtp+SGNbw4F1p+7tI1AtIZfCKEJ6vxRgeluS0hMdHdT9PTYTHbf7Toq3xd
+# rvq/B470VtCipOkfGJYOpE2o5kjHwLovIzZqEm8P6G/92NEBto6PtpCWW6bx2uq3
+# Bwq7AFqMu0txGPV2/FjywuRQiK4D9Qi2fNPG4gKNXwy1Zwc5N8B3hRLIIN8EnDjJ
+# thPW0ievjm8SCmTABoWqHXMC7tdxxwQGGhrFEcttztKasH8CwTAz7BQYVnnK71Zo
+# laCi3P57i9WSRBv6STxlFYdaz3GcCbRoFvLNNnfduqfi/obbpprPwnShU6+sNwBm
+# vQ48I+/6/w==
 # SIG # End signature block

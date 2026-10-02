@@ -52,10 +52,10 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.8
+1.0.9
 .REQUIREMENTS
 PowerShell 7+.
-Modules: SmartM365.Core 1.0.24+; Microsoft.Graph.Authentication.
+Modules: SmartM365.Core 1.0.65+; Microsoft.Graph.Authentication.
 Graph POST exportJobs permission documented by Microsoft:
 DeviceManagementManagedDevices.ReadWrite.All (application or delegated).
 #>
@@ -88,7 +88,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.8'
+$script:ScriptVersion = '1.0.9'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -180,7 +180,7 @@ function Initialize-EARuntime {
     if ((Split-Path -Path $moduleRoot -Leaf) -eq 'Config') { $moduleRoot = Split-Path -Path $moduleRoot -Parent }
     $coreManifest = Join-Path $moduleRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     if (-not (Test-Path -LiteralPath $coreManifest)) { throw "SmartM365.Core manifest was not found: $coreManifest" }
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.58' -Prefix Core -Force -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.65' -Prefix Core -Force -ErrorAction Stop
     $script:CoreImported = $true
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -209,6 +209,7 @@ function Initialize-EARuntime {
     $global:RetentionMaxCSV = [int](Get-EAConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
     $global:RetentionMaxLogs = [int](Get-EAConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
     CoreInitializeScriptEnvironment -OutputPathInit $script:OutputPath -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
+    Start-CoreSmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:LatestCsvFolderPath -ReadOnly:$ValidateOnly
 }
 
 function Get-EAReportCatalog {
@@ -721,6 +722,7 @@ finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
     catch { Microsoft.PowerShell.Utility\Write-Debug "Graph disconnect failed: $($_.Exception.Message)" }
     if ($script:CoreImported) {
+        Set-CoreSmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($script:DataQualityRows | Where-Object { $_.ReportName -in @('EADevicePerformanceV2','EADeviceScoresV2') -and $_.Status -in @('Collected','AliasUsed') } | Select-Object -ExpandProperty ReportName -Unique).Count -eq 2) -Scope 'CMDB:analytics'
         try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage }
         catch { Microsoft.PowerShell.Utility\Write-Debug "Completion banner failed: $($_.Exception.Message)" }
     }
@@ -729,8 +731,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCh+ltk4FPLuEjE
-# LFPP/8W5S/ErPMT/t56DxswqnjPlD6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6p3xg9ML3sUY6
+# 0R5+30RPzgjEemPeWdn90yODmXu9XaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -863,31 +865,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBl1M6CO+ck0KGkZ+idS+akGz+ernlKGIWV93uHg/dSQMA0GCSqG
-# SIb3DQEBAQUABIIBgEM2XZknWf78ZPBSfSHNzlk7GQr2iIuK90pC7+d2I76JLNRk
-# lyQU8TJyY72tXxlcqJuDYxpYWaM9TYxPge48YOzVf5v1ZMc5BbEDou1CTIyH3FI+
-# iELFdyhg266YQUB18OH9oKC4fmKj+gPBpf6Xa6kn9xE9wGpJFUYyViHv+2uI1xP+
-# m1FNd07J4yKMA7ELyfTnlu5ATO9SdNebMI/1xtu5RKRby/q+oz0KC9cT82c97CJZ
-# dgAuKdfwna4cypqZXb5mC7GH/2+EwANqbbI39ZF+ycdkJSFPHCglAzc36bFIVy98
-# MwQlo9gryKFvpl6u9FHEmcp3WJtwaqXq3m1K+xeReAdV5B16aPQ7YM8oOeGjcWS5
-# Mko9jPP8UrlRxyk0x53Gk9o6A27fWSYIWAELJ2CoeHRNmXQ2TSArDW9BEubxNA8r
-# vCwhOzZKIJBuHKIXiZP/khOF/Tj5LUSgJd4EkIONo7rrhBaTdNQZBMoUJ3sLPHXF
-# ytLSM1OW+/pHZc/tYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINjfqjRK4ZbCtVN+5JlLpT4jgoV4j0CqBDCisaaLQetoMA0GCSqG
+# SIb3DQEBAQUABIIBgKzWGsK9RJogClUzxK0OTz7/+Rdid4sBeiSxwag9hU75KXal
+# XEmPEeO/1Ex4ood2rf8KFs9P3ji9EutPgu4f9oBEu4DLeCA0A6Odf8zF0xxmUruZ
+# TPG0qUZ0qm6vnjhpkiZxj/uUvlOWPzZl8KZkx/dNFusR0Y11tBY+JNOfBDbiigUu
+# 81lggP7hJCXtRnNlV1yLLY/cvxQ4pbE7zVzTeH6TCy1jJu3GnfVWAPlGNN7gyqs4
+# G8FE8lBjlunm34CigTY3SkAu/jBbnoMi/377bODCgZ8uDMBHr/KzVm3ztquWRbZ/
+# oGtV/eVO0JvcU349Tjby7eDbVPNoyvQ2iP6IplpsBABIVGXyyzfIDp6PzOp4/4LA
+# UUTYJKjfS+y5IQOJ4NRWEpbfuI+lv1aLNkotxDl8o37HhslCuSa+Qy40EsKIlr4N
+# QMPJ2d79bgm6l440sOqwgrf11Z7RkAtzC+o1pEiwn64fYbn8jXbsj5WS/8f7kl6/
+# 4pt7F93vbWyafubQ6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBd7xCGOlfvJEWdkZQY/TlJidHYF8ADR7OEib+b
-# pV9LuDANBgkqhkiG9w0BAQEFAASCAgCJwjC0C9CV6JtKkHVpm+cYV7hpQSbiR3ci
-# gnhuOaWt4F2/adDAOKDUdlUJLVusVhZd/TnSOlIv3rYb5wToOsfmAW0tMqhe6C/d
-# CbI8lKShEE9jmO8XdQ+VlEy3onojNnV9NY7DwQ9wpoRz4hMwpu0sBg5efv5jDr4G
-# hxK4x2qwYDNJVO9/PN+AqH5NlJPCPmpo3121jvyD4rUvgFTtSZKIb6/Kgf25K+uv
-# Uu4jGz4Y1rJOB9ldTahVyvaHcj+yIaDenoaQ3qjrILXTinTCwuRSNdB3/B5ZaJoC
-# q6qa9H4sQIHO9Pao6Bx8C+PpCAezalSVznJa1aUCjLWbGn2PiwS0TQ8pV5e7aPkn
-# hXPDypw/6h4YV9+Y8s++M02Z3jRGg+bLlhd/q874eobdr/4cKnQFPPZWoCrW+CbC
-# CqS1hnUGZynecwU8PT5VTOQlHzxC/aVvDunTGYewp01MlZIuivvRnz7Q9qaUcYBB
-# aNkPtzsHrv66JHZIvq94Awe0rZRa0SI3vuNcMZzZlqLzaHtRD+37l8GvQqkPS+xr
-# uEJHE0K5kpYfPIEtsCe/ydJin+L0+8lnyovV7wU+SvuSVTFwRURh6TJVtI/z2pxN
-# MDeKp5RQqptbapWSl/DqK0I5mFDFwtkM+CXBSzMYgDZ/br5PkIseSGaPwXaHMstL
-# KwtYFr0htw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDZaMC8GCSqGSIb3DQEJBDEiBCAQcPy3/lgw40tXk6vIBRPwOJCi/K4UxvmYfffj
+# s2lBBTANBgkqhkiG9w0BAQEFAASCAgAq396XVuukSn/IzJ6lOAh7jc5LXWf77qIm
+# BUyLwJwhh0qiCUG8UBTGmF0r+LluG7soBUkBO39Tp1+gByNqXrALCD5RDbujsCM/
+# klbwqHbMl4+MycsMb5GNFkp/WsFSTTTbG3xPozL2JcmuEpUwtMeo8ae/st1a8geA
+# EC6dgtg3sRluwEZy0ej6D+XRQcCrhvziE55IsI2XsuxB5c6XB+T5/wMoOr2Vlnd9
+# 2MqRdXM/LgLY6kgdJQMPwiFNQASaDc0i5Z+GjSKW8T6P6o70tpxYQr7upHoEuAHK
+# 1LAF2Jm1DqIlRn2IhNp4SdckOC0RPA/x7ffbVdBnyF/4hHLzglkM8n5s5Jowo3Ao
+# HB+fJMUz2LQHBtAMOe+Pc05aOuyBQy6neaGBCSrJm0dwiGW4EKngmRHc1fEJHV2T
+# BS6e3DQ0t+14ofiK+i/jjOseHrgn1fGRkNkWDbVjggA8LUVWLeRFlnuAYbPTk8v/
+# Hf3ymjQ3fiGe4ieK7/1psT+kVAXzlaBunQug4CNEAQw5L2mO7sNuL6Q3FqR2290M
+# VNriTqWa9TWAQgJBXIkM2XYS17u8r96ImtATd6UJSVxB969IEXiLF3u54Gv4ogMw
+# PZtgV/j9iTPgZkmw+VsLhSbsBp58f+46ngbjLJlLeK7qA2OgyPpBNPfuwZ2CoUcI
+# tHDNCIfRZw==
 # SIG # End signature block

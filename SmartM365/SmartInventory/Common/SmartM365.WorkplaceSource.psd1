@@ -1,168 +1,23 @@
-<#
-.SYNOPSIS
-    Offline regression test for Discovered Apps structured logging.
-.DESCRIPTION
-    Verifies 429 status inference, quiet retry error streams, explicit final CSV
-    sample/physical row labels, and quiet retirement of an already absent
-    SharePoint legacy file. No Graph connection or production CSV is used.
-.VERSION
-1.1
-#>
-
-[CmdletBinding()]
-param()
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
-$inventoryScriptPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\SmartM365-Intune-DiscoveredApps-Inventory.ps1')).Path
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryScriptPath, [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
-
-$requiredFunctions = @(
-    'Get-DiscoveredAppsGraphHttpErrorMessage',
-    'Invoke-GraphPagedRequest',
-    'Get-DiscoveredAppsCsvDataRowCount',
-    'Copy-DiscoveredAppsFileAtomically',
-    'Complete-DiscoveredAppsStreamExport',
-    'Remove-LegacyDiscoveredAppsDeviceDetailExport'
-)
-$definitions = @($ast.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $requiredFunctions -contains $node.Name
-}, $true) | Sort-Object { $_.Extent.StartOffset })
-if ($definitions.Count -ne $requiredFunctions.Count) {
-    throw "Expected $($requiredFunctions.Count) function definitions, found $($definitions.Count)."
-}
-foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
-
-$coreModulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psm1')).Path
-$coreTokens = $null
-$coreParseErrors = $null
-$coreAst = [System.Management.Automation.Language.Parser]::ParseFile($coreModulePath, [ref]$coreTokens, [ref]$coreParseErrors)
-if ($coreParseErrors.Count -gt 0) { throw ($coreParseErrors | Out-String) }
-$coreDeleteDefinition = $coreAst.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq 'Invoke-SmartM365GraphDeleteQuietly'
-}, $true) | Select-Object -First 1
-if (-not $coreDeleteDefinition) { throw 'Invoke-SmartM365GraphDeleteQuietly was not found in SmartM365.Core.' }
-Invoke-Expression $coreDeleteDefinition.Extent.Text
-
-$script:TestLogs = [System.Collections.Generic.List[string]]::new()
-function WriteLog {
-    param([string]$Message, [string]$Level)
-    $script:TestLogs.Add("$Level|$Message") | Out-Null
-}
-function Assert-Equal {
-    param($Actual, $Expected, [string]$Label)
-    if ($Actual -ne $Expected) { throw "$Label expected '$Expected', got '$Actual'." }
+@{
+    RootModule = 'SmartM365.WorkplaceSource.psm1'
+    ModuleVersion = '1.0.0'
+    GUID = '59962bf3-5d45-4c82-8664-cb9e302c5017'
+    Author = 'WorkplaceCloudHub'
+    PowerShellVersion = '7.0'
+    Description = 'Offline native identity, membership and application-grain helpers.'
+    FunctionsToExport = @('Get-WorkplaceSourceValue','Get-WorkplaceApplicationProductKey',
+        'Get-WorkplaceApplicationFootprint','ConvertTo-WorkplaceADMembership',
+        'Get-WorkplaceGraphCollection','ConvertTo-WorkplacePolicyEvidence')
+    CmdletsToExport = @()
+    VariablesToExport = @()
+    AliasesToExport = @()
 }
 
-$script:GraphAttempt = 0
-$script:Stat_GraphCalls = 0
-$script:Stat_ThrottleRetries = 0
-$script:GraphRetryMaxSeconds = 1
-function Invoke-MgGraphRequest {
-    [CmdletBinding()]
-    param(
-        [string]$Method,
-        [string]$Uri,
-        [string]$OutputType,
-        [string]$Body,
-        [string]$ContentType,
-        [switch]$SkipHttpErrorCheck,
-        [string]$StatusCodeVariable
-    )
-    $script:GraphAttempt++
-    if ($script:GraphAttempt -eq 1) {
-        Set-Variable -Name $StatusCodeVariable -Value 429 -Scope 1
-        return [pscustomobject]@{ error = [pscustomobject]@{ message = 'TooManyRequests synthetic test response' } }
-    }
-    Set-Variable -Name $StatusCodeVariable -Value 200 -Scope 1
-    return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'device-1' }) }
-}
-function Get-ShortGraphErrorMessage { param($ErrorRecord) return [string]$ErrorRecord.Exception.Message }
-function Get-GraphRetryDelaySeconds {
-    param($ErrorRecord, [int]$Attempt, [int]$DefaultSeconds, [int]$MaximumSeconds)
-    return 0
-}
-function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
-function Test-SmartM365MaxItemsMode { return $false }
-function Remove-SmartM365SharePointFile {
-    [CmdletBinding()]
-    param([string]$LocalFilePath)
-    return $true
-}
-function Get-SmartM365GraphAccessToken { param([string]$Purpose) return 'synthetic-token' }
-function Invoke-RestMethod {
-    [CmdletBinding()]
-    param(
-        [string]$Method,
-        [string]$Uri,
-        [hashtable]$Headers,
-        [switch]$SkipHttpErrorCheck,
-        [string]$StatusCodeVariable,
-        [string]$ResponseHeadersVariable
-    )
-    Set-Variable -Name $StatusCodeVariable -Value 404 -Scope 1
-    Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1
-    return [pscustomobject]@{ error = [pscustomobject]@{ message = 'itemNotFound' } }
-}
-
-$testRoot = Join-Path $env:TEMP ("SmartM365-DiscoveredApps-LoggingTest-" + [guid]::NewGuid().ToString('N'))
-try {
-    $pagedResult = @(Invoke-GraphPagedRequest -InitialUri 'https://graph.microsoft.com/v1.0/test' -MaxRetries 2 -DefaultRetrySeconds 0)
-    Assert-Equal $pagedResult.Count 1 'Paged result count'
-    Assert-Equal $script:Stat_ThrottleRetries 1 'Throttle retry count'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*Status=429; attempt 1/2*' }).Count 1 'Structured 429 status log'
-
-    $quietDelete = Invoke-SmartM365GraphDeleteQuietly -Uri 'https://graph.microsoft.com/v1.0/test-delete' -MaxAttempts 1
-    Assert-Equal $quietDelete.Success $true 'Quiet delete success'
-    Assert-Equal $quietDelete.NotFound $true 'Quiet delete not found'
-    Assert-Equal $quietDelete.StatusCode 404 'Quiet delete status'
-
-    $outputPath = Join-Path $testRoot 'current'
-    $latestPath = Join-Path $testRoot 'latest'
-    New-Item -ItemType Directory -Path $outputPath, $latestPath -Force | Out-Null
-    $partialPath = Join-Path $testRoot 'relations.partial.csv'
-    $timestampedPath = Join-Path $outputPath 'Intune_DiscoveredApps_AppDeviceRelations_20260720_200000.csv'
-    @(
-        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-1'; DeviceId = 'device-1' }
-        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-2'; DeviceId = 'device-2' }
-    ) | Export-Csv -LiteralPath $partialPath -NoTypeInformation -Encoding UTF8
-
-    $global:csvGeneratedPaths = $null
-    $publishedPath = Complete-DiscoveredAppsStreamExport `
-        -PartialPath $partialPath `
-        -TimestampedPath $timestampedPath `
-        -OutputPath $outputPath `
-        -GlobalPath $latestPath `
-        -BaseFileName 'Intune_DiscoveredApps_AppDeviceRelations' `
-        -ExpectedDataRows 2
-    Assert-Equal $publishedPath $timestampedPath 'Published path'
-    Assert-Equal (Test-Path -LiteralPath (Join-Path $latestPath 'Intune_DiscoveredApps_AppDeviceRelations.csv')) $true 'Latest relation CSV'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*SampleRows=1; CriticalFields=TenantKey, AppId, DeviceId*' }).Count 1 'SampleRows log'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*PhysicalRows=2*' }).Count 1 'PhysicalRows log'
-
-    $global:EnableSharePointUpload = $true
-    $legacyErrorOutput = @(Remove-LegacyDiscoveredAppsDeviceDetailExport -CurrentOutputPath $outputPath -LatestOutputPath $latestPath 2>&1)
-    Assert-Equal @($legacyErrorOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }).Count 0 'Quiet legacy SharePoint 404'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*Legacy export Intune_DiscoveredApps_DeviceDetail.csv is disabled*' }).Count 1 'Legacy retirement log'
-
-    Write-Host 'PASS: structured 429, explicit CSV row labels, and quiet legacy 404 verified.' -ForegroundColor Green
-}
-finally {
-    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
-}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjrkgb5XOlE7xH
-# WdHACAqnF7J7prkbHSRVqm6rpbuIZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCC3YOYzdhgn2s
+# nUQq7z/PWuNa47v6EBDKnl3k8AWLgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -295,31 +150,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHEfHbRAifqzDuZ7s46nDXNvpnYLIbHYYK5tWKsxYuFhMA0GCSqG
-# SIb3DQEBAQUABIIBgJzIlCcZD46q6bBzzAYLdITq9Lhk+vFV2tXBCuwsAkGOFxKX
-# 4P7D3rbbSb4x32THMhX6902fnh2k2pJVShMzWUvu7HdY0Gd120L+GqdPsS+ezKA+
-# o1Gp0/0w3XT5KNhIXFaP/ozqBPf8aYYIpAuPusWM7/rCGkNlMBPmiE1g0r92NZ89
-# rqeSEDfClpmSamDEjKuEeWFhyU4Yk12n2okj8B257q6NW4qXUHG0XIA/PyU8LHCH
-# sEu9WcMOaHIVjEn7ck/NmqgWYuElozYqv7RMXnrJfDn2ilbygTR2PqeSzv79QsXc
-# hAGGM/rQrBs4uVLpaNRTVBpMoebnfBTgcdqLNUGfOfKH4YocO48W92w/0Ptq7i26
-# /A66VYCKspg1vDElXkBWljIqaxynyeS58G9LL6GqgLyTCAmA/He5EbrF1ptHknoG
-# NExbBOOX5pDvshAj2UcD2uyoocYgCdo/Pc0KzFiNio0emZs/D511Ar4w+ekviEN5
-# OiLe3weQJ5hMqZ1vgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB8oCGoYdo2pRq5u5aaafyQDR3Gu+ETA3HWNjbQX+U1SMA0GCSqG
+# SIb3DQEBAQUABIIBgCcu7ajgOBYg80qPfknWaxtQBPvtCgJqe7a468x+8Mo/putL
+# zkDZ/RmIeWnIraHmrp3fAd/+LVWKS8cMZ8m79PPNpYh8n1TCTbvgnvq57/4t+o6+
+# m5WhecpN4mNHEohu9qvvf6QWTUy76efFwBlnZVimFH1rXTC9+9dkiOaCSAlKIYoM
+# 6vini3cA6PlPrR2fFlxBpPYnS5PwR4FElNljg0JD26hidAiu4Na6eQY5VBodRe0r
+# G4eIchmA52KdaoAQyUendEVM6lmXEA2I3Fdf5b7vk5qq0n7A8eD6Acr6KDSWAac4
+# d0cmxNpIHuOfWfO98jF3TTcXugGoUbx0A/uU+sLql1hp0DRPwtahum0fB9denPNi
+# fWn2MmzR6u+Zu7PSdPFezdkZdeeZ6br0pdnqPU709+ZDQxAYURugoPD2kyIzwfnv
+# b/V093Ywd/HV9x79OZxcj/L60505XTJ5TwnLjEFpgPLwmuIqf7L7wrZDoh/D5nwo
+# IBEee3Jk+O32KVQ6fKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCBj4N2JGJSQ+qxHW7iUBbsBx6138UjBnxubb9Mm
-# 0EpprDANBgkqhkiG9w0BAQEFAASCAgAPuW6bd1CfZT96U12Z8eAp5/Px/QTUpkXm
-# /JShnj8hnQVhwrhlxUR05Adz3eXGC88b5eC8iJV+DNy1ysfnyya0UeqL9gMluS8E
-# w1B1SPp/6hQUcPck/M+D7u8aJGwZfpt6TTFDFQ92o8Z8kZTpSCirQFGjnO3ltpnO
-# xoFD8k5SgkIzqc5O3TLkwl+7E9yc5/BwA7iHjqcwAzlXWFejJQXgiCYjIBO+0rU2
-# wkNLbD1hM31swuYNEsGUHepKtIOGaIzp2iI1vJOjpaRBhXig3sm5qtZwxlF/U7+O
-# mLYsEzWFZhrOYv69k3+k/sEX/EEQe2e+09wF7RpMTSbkLGZ0e5GPAf0CUpLKMbc6
-# iRDZ3WdRA+748LlrGAYLRrH4BSE8p02zcK20QIy+dmzxPFRDhN3HeR3pgEbTGRVA
-# 3rPCKdRya/LhV4QwleVbEX4KvhkCjm+92eWZmoBV4YdU7EZ3uhtZw5K5iX+cwEzm
-# PyO9HOg0HVaRYjFV/3QIjXvmNSanNFA3RYjB8dC2yJDKQBvdigJhbR/D2Coo8sTi
-# t2wUVLPxt01Ykg+APh4QN4JyHJOqu3SK9R0Yo+Q5BFHCFcrwhcsNXbrKWNdamDVa
-# mjegNd4PgL27B7Hg65QITNT3qsiaB3RVWz1ftaIXdQaxNSsv3dmKI4NREbgpPMIv
-# n1PitQX7hg==
+# MDJaMC8GCSqGSIb3DQEJBDEiBCCXUfyuKWjlZBelAwRHVPuVyxi1OSs7YzAEDfuE
+# inSMzjANBgkqhkiG9w0BAQEFAASCAgBUy55eH/bRnpoq9sBq/dKrxMin4a1zRH+9
+# MOUuTBMMJ9kyKXZunH3iqLMnpauQCAdeMn4jFwG6j77HAeO75e7hDAQNg8fDNz1F
+# sEQqLfx84+bTGl76TFrrsKxT43eKj06BorPuXsQs7g9b/NcCU8QhR6NPlcxS2YLf
+# 4wc52dmx9LDffhViUXp4VdvfX8QMnb9NlP2zgjyNCwbv4dFk8L0YEi2/sLCFZVfm
+# hI7u9nrX0OM/3TY3/Rmsb5Kz7Ql1zu49rU+SzdGrzzMRVUXdEs/HiXQpfudwgGf7
+# x0dIbz/EFK94V7IdPyBwz4pFzPAKqf4Ilrab6pnnaf/9LJ7TVwvuPVzGRU5qONKY
+# FjZtfHZd5XWT/1GRXTioSagEqgoHLCHxypEKqlxPPk3alQk85RfeFUo4syEIpM+N
+# qIMDvKMIf2pEQ1fbyQZdBWAHq8E/tznAB4T9HbjD632cZR4guRk4Z08esUGgvXDG
+# vZfq7GcNlXQ4uwvzejBLCWA9HL5Qw0maysSEx5HXhx21yzAA2dnlF+/UVUpQsIz5
+# O5hatfZisEVeumlsm9EMcgGngM3AuY08XHBF+h9fyd/hVE/3enZne2UwHL5qa0+T
+# EVp85iuNByYLtSgM8JMgJqLRr9mEsBhfWYfm2iiXkAUPWDxmpfCY3CEXYsEwNad5
+# zlhKowAtPw==
 # SIG # End signature block

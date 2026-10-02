@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.49
+1.52
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.48
+Version: 1.52
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.49"
+$ScriptVersion = "1.52"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -507,7 +507,7 @@ function Export-CsvAtomic {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory = $true)]
-        [object]$InputObject,
+        [AllowEmptyCollection()][object]$InputObject,
 
         [Parameter(Mandatory = $true)]
         [string]$Path,
@@ -517,10 +517,11 @@ function Export-CsvAtomic {
         [string]$Encoding = "UTF8",
 
         [Parameter(Mandatory = $false)]
-        [string]$Delimiter = ","
+        [string]$Delimiter = ",",
+        [string[]]$Columns = @()
     )
 
-    Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Encoding $Encoding -Delimiter $Delimiter
+    Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
     Register-SmartM365GeneratedCsv -Path $Path
 }
 
@@ -613,6 +614,8 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
     if ($Mailbox.Guid) { try { $immutableIdValue = [System.Convert]::ToBase64String($Mailbox.Guid.ToByteArray()) } catch { $immutableIdValue = '' } }
     $record.ImmutableId = $immutableIdValue
     $record.ObjectGuid = if ($Mailbox.Guid) { $Mailbox.Guid.ToString() } else { '' }
+    $record.CollectedAtUtc = [datetime]::UtcNow.ToString('o')
+    $record.NativeIdentityStatus = if ($record.ObjectGuid -or $record.ExchangeGuid) { 'Observed' } else { 'Unavailable' }
     return [pscustomobject]$record
 }
 
@@ -670,6 +673,18 @@ function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings {
 
     return @($results)
 }
+function Get-SmartM365RemoteMailboxColumns {
+    @('DomainName','Name','DisplayName','Alias','PrimarySmtpAddress','WindowsEmailAddress',
+      'UserPrincipalName','SamAccountName','RecipientType','RecipientTypeDetails','RemoteRoutingAddress',
+      'RemoteRecipientType','OnPremisesOrganizationalUnit','DistinguishedName','ObjectCategory',
+      'WhenCreated','WhenChanged','MailboxRelease','WhenMailboxCreated','AccountDisabled',
+      'ExchangeUserAccountControl','ArchiveState','ArchiveQuota','ArchiveWarningQuota',
+      'DeliverToMailboxAndForward','ForwardingAddress','IsValid','MailboxMoveTargetMDB',
+      'MailboxMoveSourceMDB','MailboxMoveFlags','MailboxMoveRemoteHostName','MailboxMoveBatchName',
+      'MailboxMoveStatus','SendOnBehalf','FullAccessUsers','SendAsUsers','ExchangeGuid','ImmutableId',
+      'ObjectGuid','CollectedAtUtc','NativeIdentityStatus')
+}
+
 function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     [CmdletBinding()]
     param(
@@ -692,7 +707,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
                 $allRemoteMailboxes += $remoteInScope
                 WriteLog -Message ("Found {0} remote mailboxes in scope: {1}" -f $remoteInScope.Count, $scope)
             }
-            catch { WriteLog -Message ("WARNING: Failed to retrieve remote mailboxes from scope '{0}': {1}" -f $scope, $_.Exception.Message) }
+            catch { WriteLog -Message ("Failed to retrieve remote mailboxes from scope '{0}': {1}" -f $scope, $_.Exception.Message) -Level ERROR; throw }
         }
     }
     else { $allRemoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -WarningVariable remoteWarningRecords -ErrorAction Stop) }
@@ -726,8 +741,8 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
 
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
     if ($records.Count -eq 0) {
-        WriteLog -Message 'No remote mailboxes were found. Remote mailbox CSV export skipped.'
-        return [pscustomobject]@{ RecordCount = 0; CombinedCsv = $null; PerDomainCsvs = @(); PublishResult = $null; DataQualityWarnings = $dataQualityWarnings }
+        if ($dataQualityWarnings.Count -gt 0) { throw 'Remote mailbox warnings prevent qualification of an empty inventory.' }
+        WriteLog -Message 'Remote mailbox query completed with zero records; publishing the full empty schema.'
     }
 
     $suffix = if ($OnlyADPermission) { '_OnlyADPermission.csv' } else { '.csv' }
@@ -740,7 +755,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     }
 
     $combinedPath = Join-Path -Path $RemoteOutputPath -ChildPath ("Exchange_OnPrem_RemoteMailboxes_AllDomains{0}" -f $suffix)
-    Export-CsvAtomic -InputObject @($records) -Path $combinedPath -Encoding UTF8
+    Export-CsvAtomic -InputObject @($records) -Path $combinedPath -Columns (Get-SmartM365RemoteMailboxColumns) -Encoding UTF8
     $publishResult = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedPath -LatestFileName (Split-Path -Path $combinedPath -Leaf) -HistoryLabel 'Exchange on-prem remote mailboxes'
     WriteLog -Message ("Exchange remote mailbox inventory completed. Records: {0}; CombinedCsv: {1}" -f $records.Count, $combinedPath)
     return [pscustomobject]@{ RecordCount = $records.Count; CombinedCsv = $combinedPath; PerDomainCsvs = $perDomainPaths; PublishResult = $publishResult; DataQualityWarnings = $dataQualityWarnings }
@@ -1287,8 +1302,9 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.42' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.48' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+	Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:($OnlyADPermission -or $ReportOnly -or $DryRun)
 	Start-Transcript -Path $global:logTranscriptFile -Append
 	WriteLog -Message $MyInvocation.MyCommand.Name
 	WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -2245,6 +2261,8 @@ try { # Main try block for script execution and interruption handling
 
                 # ObjectGUID from AD (via Exchange Mailbox object property - no extra AD query needed)
                 $userObj | Add-Member NoteProperty -Name "ObjectGUID" -Value $(if ($null -ne $Mbx.Guid) { $Mbx.Guid.ToString() } else { "" })
+                $userObj | Add-Member NoteProperty -Name 'CollectedAtUtc' -Value ([datetime]::UtcNow.ToString('o'))
+                $userObj | Add-Member NoteProperty -Name 'NativeIdentityStatus' -Value $(if ($Mbx.Guid -or $Mbx.ExchangeGuid) { 'Observed' } else { 'Unavailable' })
 
                 # Add to the local collection for this function's scope
                 $output += $userObj
@@ -3253,6 +3271,7 @@ Else
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
     Stop-SmartM365TranscriptSafely
+    Set-SmartM365CmdbSourceScope -CompleteScope ($DetectAllDomains -and $ForceOverwriteCSV -and $IncludeRemoteMailboxes -and -not $RemoteMailboxesOnly -and -not $OnlyADPermission -and @($IncludedOrganizationalUnit).Count -eq 0 -and @($TargetDomains).Count -eq 0 -and $MaxItems -eq 0 -and $script:LocalMailboxIssues.Count -eq 0) -Scope 'CMDB:local_mailboxes,remote_mailboxes'
     try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
 	#endregion
 }
@@ -3262,8 +3281,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCx/dc6YFT/kjpM
-# 8HOvCJFRb1AqnWKeEPjHc34ktf+FBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCw/xA3TlYH+Hef
+# 7FEv+Al/o/itiF6Gto8QOOdftaP2CaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3396,31 +3415,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIUapBAxSy63zuBwBskL4lOpLEPzBBDbW4Atd50QWxk3MA0GCSqG
-# SIb3DQEBAQUABIIBgF5zVCJrkqS7vTalAs7+vAFjXj9i3bUU8E9po0WazJBi7IuC
-# QfDIf1Bjthj9PlMQ/QqNC1F2liw91n49mfixbe+cfbeIqpFtMyiZ138vnDSrSgMo
-# 4h1oT774y/CU3XnZqduANCgZSVf27UqKkJnPFuQJzwB9QYUkTl5nFUR97zncltGX
-# RduEKpOCXO/PALdfqvorg30WdTKbn9A3EYAvlSiKNtU5NpWax7RLv6vXgSU9IMr2
-# gZKZHVQF27R6CdstDk0QthuXIh0l+UGXwvv1Eha1Jx3MsuX3Rj+hTinVXABVMmNP
-# 6UPxuQ3fB0omOs5rYRhS5dM0p8MnLkmUAUpYNjinZC/5w+W+QAgl8lPeNp8fy3fq
-# uqMF1kFK65vIxMOejKPKc4To364p0qQOtaspc1/caEofFUdHoXaz0E9KACCUdo0n
-# MpjDgfk5h/G/+ssCEEWXh+ot5JcLh6szj0vXpDu+60EPLG3zOMk1pYnQ0gflVGFq
-# VRxOceQIRHGrlu5H8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGZKeLNTU+mkE9F8ky8IxNPD2lG+Vebfq5XaawML4fNQMA0GCSqG
+# SIb3DQEBAQUABIIBgFdQch46syTCCcQRi2cKFz84v4DkQqe3dWnbUz7j5u5PxloQ
+# OC1PUEcnnGLMLfulUMDn7SZY4yyr63VLnVL89W5nDijqnt0pY+ZhwYHIuhFKZerb
+# +c6K5EJTiTs9Zga25v4fxTfpYTpjwJ8JGypT1cXPV6y3bX50L4penvAcMuqoEFFh
+# 2la/8spyK8X4ysdbyB+0MCFkWk1653yl60weAfJjOndNt8pFgvcqyyQ/qBWZLx95
+# GRyyZp2djk2HKotCThRM959cBLzZ/unDRLZ2WQJGu/UebXTH9/rJ1xF2lN3usUPx
+# U7lGhGk4yH0r+HEWj1Z/xiOUH4pcD0zLR+mJtVCitirVOR5t1323ZfsiNs+fI3Eq
+# 510/W2MbnFGUkCTNU/NhMfNrOcCK0nWb0RyBXn9Qt/1t81xQ+dkHKVLCGs5555Lp
+# Qt9ZSHyOW3pJVM4ubz8FIRhnUw3Q9TUaqNOhS9N5qAdOE8X5YDFQeXYtsGR9Su49
+# QcetxuoFS9ORmftVAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAxNzUx
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDj+puDzN8A8DW1xBZi1Oa8dWKXAAYhbX/SCfO2
-# 7jU2bjANBgkqhkiG9w0BAQEFAASCAgAZz9EpIFCK3J42iBaaAkUu/yEq5QmZauxk
-# vfilzVLFbgjFSe9FDPSYvN3Xcs41WI+1GZx5VYUvpwT0/C8zDBMBJmqq1dwjMg2c
-# GXZf11/CDWDfNnmH7MHqIHOOcaxpsv23UWvJCUV4YLB8By6JYStBQg0jwtMIp7P/
-# kFqBUl/BW/A3xbdJQlnKA92TIhT5GBVI4xsrCKje+6r3OYEdusCQz+O2kNn9SVha
-# z2wZO29Muf61wV7WShQxgKAH8h/7QFWuHauYaISoxFpwjEp3wYPupTBktqxleG31
-# 0EFEmopvPWvDW4jgPd1AX8w3goim3PFSvEF0WnkuIqq/CLOrgwy6bFc4M4UuBEIj
-# 8Vy9FoIh0OPya0JFC42hdzq01abXJJih+hHE9MzTJo35OfGAJENOivUmbdbVDT2u
-# 1MeVFHN04dqJhnLdsqLMVyRD6CThhFSCxIjd0k3Or7klFK+omMXrgcCQeJ3oKkN8
-# 3gL1Y7sbCQku7sqFAIb36mS4A/25rhxousI5pWlCu0mREOTxFHs+rw6FDm9MRXBs
-# 2wA+fQDlsDvNvnvo3wdwCK7mXme9uOgB0IS9MgN0w/yL3vRGKWoB3KfORLrpb2+/
-# x3CnQeIsgffwNzeasJ23ljYxthJWLJvUajyt/09KA5kTtezVgc8Knh9M15RHG5Mp
-# B3pWil5dQg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# NDBaMC8GCSqGSIb3DQEJBDEiBCCmqra0g8cel9HmivpvnHsHK7UYUgEAv2oaDEoy
+# MYKSWTANBgkqhkiG9w0BAQEFAASCAgA7gJsCLqPNVFRKnahfFnomh6tXkehOKano
+# ZwErAxwuhnymvqwKhyo1DfAMOtp9ERJInfjJnWjaH8esJFh+W7lllzF7HPLXsTfo
+# sGCdcMctr/mvsb8lJAHfhJ49PwBhdILbeyKCHwjZSMtmbIuwfK1wAvXY7AkyR9LA
+# eX4jvLluvW91PnnWvNVtLAH8pdeQgIJBLao6GQJjyy87CMPyfXagbAQj6T454QLA
+# 2h2p2pVO7U/h841/vP+FOixtZAagj/bm2lKyYpxJhKIuuOu34xEDGxmJMZzUZ8kH
+# 3kQ58nt9cWZqPJFoPETHLs/aJGMAqHrjbAXDLmtslq8GDMd2ODfck1lwUtFVsnvk
+# OAq8XVO1Q/8JF+Qj/JiQYFMgBVe9EzLS0tfF+Ji1tYLLwbEgAT6LZ4lQTgNbM2uy
+# DttxuOsfwY1iMmDvbExLLXfaHHRL7JHdBe++jMq5Me0aCNBLnsbLzA5Y7TUHI4MV
+# P9D0B1jyfe+gZlTpdzSRP9QvjG4ztZ64gTjNWNlpJNNfNdwaeV4ys1jz+QolW/0n
+# R1XU+39aWlq7+iSagjWfXGjaDLgRByVllr3M+LwtwAKrRFe1BMRvx4+jsSRC2tYh
+# 7XG1Qol2jMuOi1lqasQ1wGPI0uB9pM2KWn3mH7zALhyXKrH+kty//oLITGKtcu1Q
+# qEEWXzdm7w==
 # SIG # End signature block

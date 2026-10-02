@@ -1,5 +1,6 @@
-Import-Module (Join-Path $PSScriptRoot '../../SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot '../../SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+. (Join-Path $PSScriptRoot '../../SmartM365-CmdbReceipt.ps1')
 
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
@@ -1034,6 +1035,7 @@ function Complete-SmartM365ExecutionContext {
     $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
 
     $hasFailure = $null -ne $ErrorRecord -or $errorCount -gt 0
+    $automaticStatus = $Status -eq 'Auto'
     if ($Status -eq 'Auto') {
         if ($hasFailure) {
             $Status = 'Failed'
@@ -1046,6 +1048,13 @@ function Complete-SmartM365ExecutionContext {
         }
     }
     $global:SmartM365ExecutionStatus = $Status
+    $cmdbReceiptPath=$null
+    if(Get-Command Complete-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue){
+        try{$receiptStatus=if($hasFailure){'Failed'}else{$Status};$cmdbReceiptPath=Complete-SmartM365CmdbSourceReceipt -Status $receiptStatus -ErrorCount $errorCount}
+        catch{WriteLog -Message ('CMDB completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
+    }
+    $warningCount = [int]$global:SmartM365WarningCount
+    if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
 
     $summary = [ordered]@{
         Status            = $Status
@@ -1100,6 +1109,7 @@ function Complete-SmartM365ExecutionContext {
     try {
     # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
     $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile)
+    if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
     if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
     $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
@@ -4620,10 +4630,10 @@ function Initialize-SmartM365DefaultCsvValidationRules {
 
     & $add 'AD_HealthCheck' @('Forest','Domain','Category','Check','Status') $false
     & $add 'AD_Inventory_DailySummary' @('SnapshotDate','GeneratedAt') $false
-    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
-    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $false
+    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $true
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Contacts_AllDomains' -CriticalFields @('DomainName','ObjectGUID') -RequiredColumns @('ObjectType','Name','DistinguishedName','DisplayName','ProxyAddresses','Mail') -AllowEmptyDataset
     & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
@@ -4647,7 +4657,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
 
     & $add 'Exchange_OnPrem_Mailboxes_AllDomains' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
     & $add 'Exchange_OnPrem_Mailboxes_AllDomains_OnlyADPermission' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
-    & $add 'Exchange_OnPrem_RemoteMailboxes_AllDomains' @('DomainName','SamAccountName','PrimarySmtpAddress','ObjectGuid') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Exchange_OnPrem_RemoteMailboxes_AllDomains' -CriticalFields @('ObjectGuid') -RequiredColumns @('DomainName','SamAccountName','PrimarySmtpAddress','RecipientTypeDetails','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     & $add 'Exchange_OnPrem_Mailboxes_DailyStats' @('Date','DomainName') $false
     & $add 'Exchange_OnPrem_Mailboxes_DailyStats_Summary' @('DomainName','TotalMailboxCount') $false
     & $add 'Exchange_OnPrem_MailboxCollectionIssues' @('IssueIndex','Category','Operation','Message') $true
@@ -5150,8 +5160,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeZjsBNgoDhp+x
-# yaemMbhGHH93A/CqBAZOd8K9+ApgBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1jbWriZK54ZKN
+# liJLMf38/baF+XC4AcLj1ok9E4mTkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5284,31 +5294,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBxbavEss+J9wL/5SQgejigNXRvK6G+lvTLITQA+IiP9MA0GCSqG
-# SIb3DQEBAQUABIIBgK+eWkAztNFbAbzceFqee+jo5MwZ0rDviYahLbxgjGnL1Q8H
-# qZo84mRGkeqUE7oXKfwDY+zkJTvvsnf9fqPIebfnbOmO9rl1XEnmTW8lE2H2HQhY
-# odRHDKGhfaWplzGqFZhYn6GDJzNP/DrMYP+yGdVl26XUy8bsRbtwHq6ga9MQmCZr
-# UvIvcJoslMJ01whosgpDmrMsUv1IuNV8LA+cdpmFK2UDc7lS6SydIYPdf9zmdWfr
-# BHoyhiAgb6kNa2kqrLKeBecVSF7gS7ww0eMhaC42XqKWa1BN5XauzGcyGV1XtYXs
-# aA0FG/zWgpTWZlbZPpp/gquOsJepZRP8bcBsmcrQ1BUmYJ9FHVABnI8Wizn4nInb
-# gu4wgSPlxCr5i1eaJLcyNhBSzGfJv55rC5lWYah8gNFBnYCvEw6dLxCpMgYSyV0B
-# 0yJ0BE2QDjV8XjqIGTDERP8TtL3kUSTRE95cT1Rf2MsV4QX4Net/2Xud3Jj21QU0
-# fpSCskOYMWTsbZVapKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPRRMmPdWMtKUEgUEvV5HHV8wGA442qM4dXujBIddeNlMA0GCSqG
+# SIb3DQEBAQUABIIBgF7TIyUv3ZAzy68sCxQlS42z3hqCf3wy8WMETZ9XP036eQwc
+# aa/0zAYpCGdeMBX8yLG6w+ZSKht9rlHfRzdJ1arZdKyhOBsvpqYWiny3Omw62AL3
+# hr8q9kT+fqyrryvL5JGT0MbKJRlWl3wOAkO61n6sy6KD6Zha7+T0Sva4R6wLHBGX
+# JiaokHcyUM3BTqNh8783DpCWO0Km2Acn8qoI7v8DS5Cls3MJqUWKEaPjh4qyK98Q
+# UroLPhPULtoW3OUidVnBF7RwNQEp8vEbMdcKyOC/iNwnssqoJL72U9angM7E4o+W
+# AtwdkTLFa1EfBh1aHfIyeK3Rn7Z6i8w6eVERQj8VcI3Ya3MM7UFFkLxMiITBetUi
+# hxfQwT0uRpZnzGHFG0sh/3Qm4BmAz1BhC+nrR5J/SMXHs2xmessFckBifzD0Z8EP
+# twqeaihWDLDJEnDHeekk5suoe5kfOtrtixNpaddgFzRYAXvicDv84btXs3257FAN
+# XAwgXFuH1LvPyRpap6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxNDU2
-# NTNaMC8GCSqGSIb3DQEJBDEiBCAu0mVP8HQjvT7iNj9ms0Z/Df5Hs3odPFjj8wQc
-# xIrg+zANBgkqhkiG9w0BAQEFAASCAgAX8neXwm1rcD/tAR/FTcdV3OJk0+ib57qy
-# GZjoogQugdxW0wLENAuD1+CHHxNLExDM3KBkhRqisaKa9up6PBXNw/gXmdCtv6bv
-# /4iFv61dzVBpUFJGKZa//UjnYoVwjVrKcyU2ElIysRYWzeHOFRdW0blfqxTOFR7w
-# +6XedZIWPbz2CQyQ6hkreT28ax3EHbLsOlYxb0BGtxU0bwiVjFsCchRzDOyCF7Dn
-# /N9KtdLNj1K2uJChcMNSfUzkaI3QfVV0smbhTXhRc9LTRBLweJEDrYZ+WY2kTSKO
-# G6HZFx/M84/OXHL5Z9Z71O1zZwT1E7Q/TacSBOHKE7EVzC50WiCflV1Mus54B/yz
-# qryLMR8EDz8WTk/Z6aD/u8SO53kQw5RQmXc0zHwd/1vHnD/cnaaBpSAdbjahz3Li
-# QAioYRTq54Dpf0DLiHLUirWXouaFLxGC39m1c9rnu/DO74/uwS7Z8N1oQVpSPJ6g
-# QJrwZAIHFmuogiUVgFymqzz0aECWlZBDdaZH04EVOydBeZqEZYMIFQmN9LP4ARsu
-# k84B6SyJCYqCOjhypzRedO1yV+FAQ8JHqtdJEsFD/91WsdGr1JKcje5zqotXJwPY
-# x/hss7bxrgcBIUzd4t+dfayU1CxxmSOxKA45NdaWBGt+ngybp1UxrIPNTBLNzHCi
-# hTAZqiUhnw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# MzVaMC8GCSqGSIb3DQEJBDEiBCBwRQk+PAsoG789PxZmbvLf1Z0xv4pA0MmykmGf
+# TSIUxTANBgkqhkiG9w0BAQEFAASCAgBok27eE7cWdTek4krc9dtJYotVaHhWrdyV
+# Hxjtd569CVW+5nnVFxDz5ZeqmhdwOpRYtijKjkBCbp7126SsJrrOG8P4QQhL7CKH
+# Paoue2aDaBrLsmiULaEUr8/XKo8TBcBPO1TB0HKJ9ANmDazmYuO7XlArUFFdgcWe
+# WdLxjxPZXbqc6nt97SjEL6lI2mEJ0Z0mAWYDQsgRBukEHxW7YRm34om/7RmTTO1C
+# Z10bUuPmqQgubWGOQixHq6/oFHNnygZezt4ZWID1r1dpGacO0vF7Ra4zQLHCD7W0
+# 0MAAcob1dr2uIKH3yqII/YO+2xAwjmL6NslUv0kdxNYAEY2oyobR7Ut1GR56peJ3
+# kI+7/1eW4Ew0iH5SOm/QKMQrzFcvds/p7JGGWtwL/47ASxbJSMXPn9QwQlE1hB+x
+# fSJQNBxtZOlbf8b095cOQe3HroLNIVwCHdyaucmLt+m92ZXg2Ijv6v1Smz18ak3v
+# o037LtNvwIK2gcNdVlMhYfIhQcbghyUo1HuZ/ZPRKOP24oOc693OgQ+x4ByySNeX
+# r9a5k+TsVHSG9zvAR9UIUNML2ElrXoaHuW+Yw02rgXFbDCTkO82eNRAxM2wBY7I3
+# CJNz+ZWz4LwB0Qctuoe1ftlILrmxC7SJrNY4QCoVzReZt/r9Zzacs25KFeO155OM
+# mi9ic0z2SA==
 # SIG # End signature block

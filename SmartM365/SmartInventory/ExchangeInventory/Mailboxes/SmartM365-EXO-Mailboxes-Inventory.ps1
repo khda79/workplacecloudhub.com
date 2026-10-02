@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.22
+1.24
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used. SmartM365 mail/SharePoint upload uses Graph REST direct from SmartM365.Core.
@@ -285,7 +285,7 @@ $StatsSnapshotCsvPath  = Join-Path $LatestCsvFolderPath "Exchange_EXO_Mailboxes_
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -395,7 +395,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.24"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -421,6 +421,7 @@ try {
     $logMode = if ($PermissionsOnly) { 'PermissionsOnly' } elseif ($IncludeStats -and (-not $ExcludeStats)) { 'LiveStats' } else { 'Snapshot' }
     $logFileName = '{0}-{1}' -f (($MyInvocation.MyCommand.Name) -replace '\.ps1$',''), $logMode
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $logFileName
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$PermissionsOnly
     Start-Transcript -Path $global:logTranscriptFile -Append
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
@@ -1371,7 +1372,7 @@ return @{
         "ArchiveStatus","ArchiveName","ArchiveQuotaGB","ArchiveWarningQuotaGB",
         "CustomAttribute1","CustomAttribute2","CustomAttribute3","CustomAttribute4","CustomAttribute5","CustomAttribute6","CustomAttribute7","CustomAttribute8","CustomAttribute9","CustomAttribute10",
         "CustomAttribute11","CustomAttribute12","CustomAttribute13","CustomAttribute14","CustomAttribute15","ExternalDirectoryObjectId","MailboxPlan",
-        "ImmutableId","OnPremisesImmutableId"
+        "ImmutableId","OnPremisesImmutableId","CollectedAtUtc","CollectionScope","NativeIdentityStatus"
     )
     $columnOrderArchive = @('UserPrincipalName','PrimarySmtpAddress','OrganizationalUnit','Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime','ImmutableId')
     # =====================================================================
@@ -2337,6 +2338,14 @@ return @{
     # Append _PARTIAL to all CSV filenames when the run did not complete normally.
     if ($MaxRunExceeded -or $ManualStop) { $CsvSuffix += "_PARTIAL" }
     $swStageExport = [System.Diagnostics.Stopwatch]::StartNew()
+    $mailboxEvidenceCollectedAtUtc = [datetime]::UtcNow.ToString('o')
+    foreach ($mailboxRow in $resultsDetailed) {
+        $mailboxRow | Add-Member -NotePropertyMembers @{
+            CollectedAtUtc = $mailboxEvidenceCollectedAtUtc
+            CollectionScope = if ($PermissionsOnly) { 'PermissionsOnly' } else { 'MailboxDetails' }
+            NativeIdentityStatus = if ($mailboxRow.MailboxGuid -or $mailboxRow.ExternalDirectoryObjectId) { 'Observed' } else { 'Unavailable' }
+        } -Force
+    }
     $exportData = $resultsDetailed | Select-Object -Property $columnOrderDefault
     $exportDataArchive = $resultsArchiveOnly | Select-Object -Property $columnOrderArchive
     $columnOrderStats = @(
@@ -2543,6 +2552,7 @@ return @{
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
     RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     $swStageCleanup.Stop(); Add-PerfSeconds -Key "Stage_DisconnectCleanup_Seconds" -Seconds $swStageCleanup.Elapsed.TotalSeconds
+    Set-SmartM365CmdbSourceScope -CompleteScope (-not $Top100 -and -not $PermissionsOnly -and -not $DebugUPN -and $MaxItems -eq 0) -Scope 'CMDB:mailboxes'
     Complete-SmartM365ExecutionContext -Status Auto
     #endregion
 }
@@ -2593,8 +2603,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7TaoGRnTC8U1w
-# alc++OSUegcOkwseDL1v965qmvyEuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8bscz7Vtpx4bn
+# UfqoxlcdWOxuzsdQFRVIwiw7R6kjKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2727,31 +2737,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJb8N6pPCcarpNuSD5m3Zs3lXRlVo2uK5LSZtNbmskmHMA0GCSqG
-# SIb3DQEBAQUABIIBgE/iysay0CUJS93g4W8BH1UA/MLtO/usLUZm/GPV2O8bxwoJ
-# 6/dlw9ih9aWQWSrjXFpGvZa3sEAY5nI+7iCV9bYCwRvZfRkKboas2t0xHrx3gHsr
-# dviMUa7HQkfAf0vJaOV+miEzfGqCTXOVAO2fiuMtC3Hmuqgr57o1b87tWLM3CdK2
-# unJ46yAxW44e7888Gfsr1jf7hhKrblm7yIu6T7YJFVjF443OPK1mLokiPSMrNmS4
-# qRBEd14IUs/n65bDMH/3FxrzjHJjx/oVPuxPr0jbrVWeKxiGSdOvLh7xDuuTRYep
-# TvRV9rL4b58vwQKhSb96LE9GVoyhQIDX34QsniYnI7t+6oDcDpmZdSEHDBUCBVRB
-# MotRhes22Y6YjGz0N9JMoJ1t/18SW82SA21sVS1+IwwVaREZWlz1k1AYmP7/pwhY
-# OcVKfT8AF8MJT8dY3s1YRDcoNv87Z3MYzREUoGzskKu1mvcBiz1RHx3AVgahGJH2
-# 6Slp9wQuziZEzPH+xqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGOpc1MyeJyGU1XY61zPDsl/bEp+/GAwA/6LK581G7BFMA0GCSqG
+# SIb3DQEBAQUABIIBgC6oXZwbZ97rjjOaVwR7SmeSX/tAs1PkseSpfHJRVTM03cRO
+# yEBk31YlSTVnSmnCog1w8KdINgeekv3uMpLKQSC4pMlD8wh41Nlw1TlXuE6BTaRP
+# PHxxu84/8PNVHbuh/xYQ7NG3SgmsBaxK+d8KqI71r2FKOQEpAbYSYp4sPTfV5bi9
+# tlwttjNgMv2PraY8QuxFyGi+6l1s9ks1gpC3P+SHECYKkXQJY6D6s0QZpKLfGYpL
+# 15Z9tWZeGsVI29TEmcqA7Sz6U2JWFb/gm90tM0oKCZF1/tbKFQJmZyeII+4+cTdk
+# AQxAkbVa/W9XQaOOa+hgeWeX93QNbZLBR2qlyUzY9bZW4XcZsm72k9km2IoJMbQ4
+# JJcMIOz9JjEySDSW2rtJ3JxecTX4x25HIe+33J1lDTKoRWcZa9az3UQg64EKrlBN
+# Zw32sKKhN7zkWM2CEzLS68VgK0xhTSGrC+pKnY4kkYc5qxZgeZIcNgrbRhXcH+lt
+# Rj3CPyEoS8a7JerCmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAlQraBMrD1/pJL9K462NTUbuWGTXAzHwAtSizW
-# 0yZ8/DANBgkqhkiG9w0BAQEFAASCAgBEKs94WON93uwgkIpdjcz2yPY2prlb4MrW
-# vi/ILsa6WCQt5J0JmLR/1MKgFqjSaHquTUi4bqV6V5Pcts6WZq/OOsRW8x/nlwxh
-# 12bWRuEHjLJ8EPKWPcm2mE0MN9yKcEejdkzdMw1dbbmeKySxCAj/KDi09iK5uH5u
-# iQQPLxvO1WeORMMsxYWMk/WWRLi3ESDaY4of7imYwTrHLayNUxQeQ2qKZX9oZyQ6
-# G0eYB9iMpqImEfsnYr6XDMZ9rELm9OCavnlWmt9sslp3vfW0o4RrAYZuQ3NcjLSZ
-# 2HBzVVHMvTLLPJt3jPeTXyQQwlRin6yxKE3I2hQMvEZNPxSj4/Mo8qrmhe+DqhIU
-# mCC5NbiCNkYIgpsCee55Jhf3B/n6Avj5zjcTSqHdrGA2CP3H5SQMFDclvffOZeoD
-# N+LJ1o7Gdbu9nF4C7MiWhlOqg1h5Y53Gp20orBX51XegDrplti/QEgM0NLb4YmEi
-# DDgspZvOxQRw+y1Jizh0e++iR2SCQb0YlKkYf9q6+WLJ7x3pMBm1m1kmbPJUp/EY
-# 2nIVX6h6SVRgblTg2dg0ZVvEPA/NTGXbwLiikI0RVyCq2KB0cHr0XlKbpQ+j+7cZ
-# lDeEeDt+YJbyW8PwwqL8P8jsULCIF3k8fPSwpIzDDjvIhItphMA/0QlNxosW8Xoq
-# yxNRtJHFLg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCC3MvT81aWjpADYUa0tc0emwLsejpzdLRjlVClV
+# xAKlPTANBgkqhkiG9w0BAQEFAASCAgA4qjbrFkEQPLwc6+0v4JH20SgbFcgaGioj
+# VnD20Mw7Q20fKz7Mxctv89XF7edNd3yzPVkSI8e60AA9cGtJ2yLlCMrMYrCrCD+o
+# 5tN6kkVJaJ4A77xsTcwAutUsU3xZU/ssscXn0Ri1jnqgjW7q+lyPGFI8fvFnNye8
+# c7AGbfCV3rtN5/iDbbd8Vf6NaTZxcI0yx3XYfhsNKx+GzZ+LavxiLS7xwz5ezGWF
+# uPxq2SAe2gXn40GuR3tVMlFaI1WbYp8Zrnfmlsu7BNmenWWl1KyXRYHj7m2HIie7
+# I2Dv4na6iXV4+IKW6Vb41Gc/XCbNDWIYFSH/XuqvHl/qLE5a27keJcRF9D+Bz46N
+# HP8wrtwbv4YDtxWwm3tkXKJ9HDzjVOhHnDYwp91PtyWReTqb8bqGUjD115uMaEzU
+# BKoB/H1cbeFvJifHEvpG8QSBujzgeZoVqhl6lDWqRRt47Y57U/xRdgTHifycfWj4
+# HRRxjhhgylY+m0LLMRtz9nC7mmCq+fWBXPcWZXF8KGRtQ/aPOLAgqKRaN2NzZrCs
+# sKD+jJViZCvg2DMP0/n+JV1Zg1XouLQzypscbHjhKU7A7E5Vwk2ZNkwr2KajHdZ1
+# cteeIXuU0KD49YVXMMCuAvxXBiqn9izjsBXvRJGOv/EYEBexDvCmS1S8zE095Be8
+# 2j+S9usCWA==
 # SIG # End signature block

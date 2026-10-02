@@ -1,168 +1,97 @@
-<#
+﻿<#
 .SYNOPSIS
-    Offline regression test for Discovered Apps structured logging.
-.DESCRIPTION
-    Verifies 429 status inference, quiet retry error streams, explicit final CSV
-    sample/physical row labels, and quiet retirement of an already absent
-    SharePoint legacy file. No Graph connection or production CSV is used.
+Detailed managed-device hardware acquisition helpers. No execution on import.
 .VERSION
-1.1
+1.0.0
 #>
-
-[CmdletBinding()]
-param()
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
-$inventoryScriptPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\SmartM365-Intune-DiscoveredApps-Inventory.ps1')).Path
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryScriptPath, [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
-
-$requiredFunctions = @(
-    'Get-DiscoveredAppsGraphHttpErrorMessage',
-    'Invoke-GraphPagedRequest',
-    'Get-DiscoveredAppsCsvDataRowCount',
-    'Copy-DiscoveredAppsFileAtomically',
-    'Complete-DiscoveredAppsStreamExport',
-    'Remove-LegacyDiscoveredAppsDeviceDetailExport'
-)
-$definitions = @($ast.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $requiredFunctions -contains $node.Name
-}, $true) | Sort-Object { $_.Extent.StartOffset })
-if ($definitions.Count -ne $requiredFunctions.Count) {
-    throw "Expected $($requiredFunctions.Count) function definitions, found $($definitions.Count)."
-}
-foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
-
-$coreModulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psm1')).Path
-$coreTokens = $null
-$coreParseErrors = $null
-$coreAst = [System.Management.Automation.Language.Parser]::ParseFile($coreModulePath, [ref]$coreTokens, [ref]$coreParseErrors)
-if ($coreParseErrors.Count -gt 0) { throw ($coreParseErrors | Out-String) }
-$coreDeleteDefinition = $coreAst.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq 'Invoke-SmartM365GraphDeleteQuietly'
-}, $true) | Select-Object -First 1
-if (-not $coreDeleteDefinition) { throw 'Invoke-SmartM365GraphDeleteQuietly was not found in SmartM365.Core.' }
-Invoke-Expression $coreDeleteDefinition.Extent.Text
-
-$script:TestLogs = [System.Collections.Generic.List[string]]::new()
-function WriteLog {
-    param([string]$Message, [string]$Level)
-    $script:TestLogs.Add("$Level|$Message") | Out-Null
-}
-function Assert-Equal {
-    param($Actual, $Expected, [string]$Label)
-    if ($Actual -ne $Expected) { throw "$Label expected '$Expected', got '$Actual'." }
-}
-
-$script:GraphAttempt = 0
-$script:Stat_GraphCalls = 0
-$script:Stat_ThrottleRetries = 0
-$script:GraphRetryMaxSeconds = 1
-function Invoke-MgGraphRequest {
+function ConvertTo-SmartM365HardwareRecord {
     [CmdletBinding()]
-    param(
-        [string]$Method,
-        [string]$Uri,
-        [string]$OutputType,
-        [string]$Body,
-        [string]$ContentType,
-        [switch]$SkipHttpErrorCheck,
-        [string]$StatusCodeVariable
-    )
-    $script:GraphAttempt++
-    if ($script:GraphAttempt -eq 1) {
-        Set-Variable -Name $StatusCodeVariable -Value 429 -Scope 1
-        return [pscustomobject]@{ error = [pscustomobject]@{ message = 'TooManyRequests synthetic test response' } }
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$ManagedDeviceId, [Parameter(Mandatory)]$Device)
+    $actualId = [string](Get-SafeProperty $Device 'id')
+    if (-not $actualId -or $actualId -ine $ManagedDeviceId) { throw 'Hardware response identity mismatch.' }
+    $result = [ordered]@{ManagedDeviceId=$ManagedDeviceId;CollectionStatus='Collected';CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}
+    foreach ($field in @('azureADDeviceId','serialNumber','manufacturer','model')) {
+        $result[$field] = [string](Get-SafeProperty $Device $field)
     }
-    Set-Variable -Name $StatusCodeVariable -Value 200 -Scope 1
-    return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'device-1' }) }
+    foreach ($field in @('totalStorageSpaceInBytes','freeStorageSpaceInBytes','physicalMemoryInBytes')) {
+        $raw = Get-SafeProperty $Device $field
+        $parsed = 0L
+        if ($null -eq $raw -or [string]::IsNullOrWhiteSpace([string]$raw)) {
+            $result[$field] = ''; $result[$field+'Status']='Missing'
+        } elseif (-not [int64]::TryParse([string]$raw,[ref]$parsed) -or $parsed -lt 0) {
+            throw ('Invalid hardware byte value: '+$field)
+        } else {
+            $result[$field]=$parsed
+            $result[$field+'Status']=if($parsed -eq 0){'ZeroReported'}else{'Reported'}
+        }
+    }
+    if ($result.totalStorageSpaceInBytesStatus -eq 'Reported' -and $result.freeStorageSpaceInBytesStatus -eq 'Reported' -and
+        $result.freeStorageSpaceInBytes -gt $result.totalStorageSpaceInBytes) { throw 'Free storage exceeds total storage.' }
+    return [pscustomobject]$result
 }
-function Get-ShortGraphErrorMessage { param($ErrorRecord) return [string]$ErrorRecord.Exception.Message }
-function Get-GraphRetryDelaySeconds {
-    param($ErrorRecord, [int]$Attempt, [int]$DefaultSeconds, [int]$MaximumSeconds)
-    return 0
-}
-function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
-function Test-SmartM365MaxItemsMode { return $false }
-function Remove-SmartM365SharePointFile {
+
+function Get-SmartM365ManagedDeviceHardware {
     [CmdletBinding()]
-    param([string]$LocalFilePath)
-    return $true
+    [OutputType([hashtable])]
+    param([AllowEmptyCollection()][string[]]$ManagedDeviceIds, [ValidateRange(1,10)][int]$MaxAttempts=6)
+    $ids=@($ManagedDeviceIds | Sort-Object -Unique)
+    if (@($ids | Where-Object {[string]::IsNullOrWhiteSpace($_)}).Count) { throw 'Missing managed-device identity.' }
+    $result=@{}
+    $select='id,azureADDeviceId,serialNumber,manufacturer,model,totalStorageSpaceInBytes,freeStorageSpaceInBytes,physicalMemoryInBytes'
+    for($offset=0;$offset -lt $ids.Count;$offset+=20){
+        $pending=@($ids[$offset..([math]::Min($offset+19,$ids.Count-1))])
+        for($attempt=1;$pending.Count -and $attempt -le $MaxAttempts;$attempt++){
+            $requestIndex=@{}; $requests=@()
+            foreach($id in $pending){
+                $rid=[string]($requests.Count+1);$requestIndex[$rid]=$id
+                $requests+=@{id=$rid;method='GET';url=('/deviceManagement/managedDevices/'+[uri]::EscapeDataString($id)+'?$select='+$select)}
+            }
+            $retry=[Collections.Generic.List[string]]::new();$waitSeconds=5*$attempt
+            try {
+                $response=Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' -Body (@{requests=$requests}|ConvertTo-Json -Depth 6) -ContentType 'application/json' -ErrorAction Stop
+                $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                foreach($part in @(Get-SafeProperty $response 'responses')){
+                    $rid=[string](Get-SafeProperty $part 'id')
+                    if(-not $requestIndex.ContainsKey($rid) -or -not $seen.Add($rid)){throw 'Unmapped or duplicate hardware batch response.'}
+                    $id=$requestIndex[$rid];$status=[int](Get-SafeProperty $part 'status')
+                    if($status -eq 200){
+                        try {$result[$id]=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device (Get-SafeProperty $part 'body')}
+                        catch {$retry.Add($id);WriteLog -Message ('Hardware response rejected: '+$_.Exception.Message) 'WARNING'}
+                    } elseif($status -in @(408,429) -or $status -ge 500){
+                        $retry.Add($id)
+                        $headers=Get-SafeProperty $part 'headers';$delay=0
+                        if([int]::TryParse([string](Get-SafeProperty $headers 'Retry-After'),[ref]$delay) -and $delay -gt $waitSeconds){$waitSeconds=$delay}
+                    } else { $retry.Add($id);WriteLog -Message ("Hardware request HTTP $status; unit SDK fallback will verify the record.") 'WARNING' }
+                }
+                foreach($rid in $requestIndex.Keys){if(-not $seen.Contains($rid)){$retry.Add($requestIndex[$rid])}}
+                $pending=@($retry | Sort-Object -Unique)
+            } catch {
+                WriteLog -Message ('Hardware batch could not be qualified: '+$_.Exception.Message) 'WARNING'
+                # Reject the entire unqualified response envelope, not just its tail.
+                foreach($id in $pending){$result.Remove($id)}
+            }
+            if($pending.Count -and $attempt -lt $MaxAttempts){Start-Sleep -Seconds $waitSeconds}
+        }
+        foreach($id in $pending){
+            try {
+                $device=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -Property $select -ErrorAction Stop
+                $result[$id]=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device $device
+            } catch {
+                $result[$id]=[pscustomobject]@{ManagedDeviceId=$id;CollectionStatus='Failed';CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}
+                WriteLog -Message ("Detailed hardware collection failed for native device $id : "+$_.Exception.Message) 'WARNING'
+            }
+        }
+        WriteLog -Message ('Detailed hardware progress: {0}/{1}' -f ([math]::Min($offset+20,$ids.Count)),$ids.Count) 'INFO'
+    }
+    return $result
 }
-function Get-SmartM365GraphAccessToken { param([string]$Purpose) return 'synthetic-token' }
-function Invoke-RestMethod {
-    [CmdletBinding()]
-    param(
-        [string]$Method,
-        [string]$Uri,
-        [hashtable]$Headers,
-        [switch]$SkipHttpErrorCheck,
-        [string]$StatusCodeVariable,
-        [string]$ResponseHeadersVariable
-    )
-    Set-Variable -Name $StatusCodeVariable -Value 404 -Scope 1
-    Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1
-    return [pscustomobject]@{ error = [pscustomobject]@{ message = 'itemNotFound' } }
-}
 
-$testRoot = Join-Path $env:TEMP ("SmartM365-DiscoveredApps-LoggingTest-" + [guid]::NewGuid().ToString('N'))
-try {
-    $pagedResult = @(Invoke-GraphPagedRequest -InitialUri 'https://graph.microsoft.com/v1.0/test' -MaxRetries 2 -DefaultRetrySeconds 0)
-    Assert-Equal $pagedResult.Count 1 'Paged result count'
-    Assert-Equal $script:Stat_ThrottleRetries 1 'Throttle retry count'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*Status=429; attempt 1/2*' }).Count 1 'Structured 429 status log'
-
-    $quietDelete = Invoke-SmartM365GraphDeleteQuietly -Uri 'https://graph.microsoft.com/v1.0/test-delete' -MaxAttempts 1
-    Assert-Equal $quietDelete.Success $true 'Quiet delete success'
-    Assert-Equal $quietDelete.NotFound $true 'Quiet delete not found'
-    Assert-Equal $quietDelete.StatusCode 404 'Quiet delete status'
-
-    $outputPath = Join-Path $testRoot 'current'
-    $latestPath = Join-Path $testRoot 'latest'
-    New-Item -ItemType Directory -Path $outputPath, $latestPath -Force | Out-Null
-    $partialPath = Join-Path $testRoot 'relations.partial.csv'
-    $timestampedPath = Join-Path $outputPath 'Intune_DiscoveredApps_AppDeviceRelations_20260720_200000.csv'
-    @(
-        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-1'; DeviceId = 'device-1' }
-        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-2'; DeviceId = 'device-2' }
-    ) | Export-Csv -LiteralPath $partialPath -NoTypeInformation -Encoding UTF8
-
-    $global:csvGeneratedPaths = $null
-    $publishedPath = Complete-DiscoveredAppsStreamExport `
-        -PartialPath $partialPath `
-        -TimestampedPath $timestampedPath `
-        -OutputPath $outputPath `
-        -GlobalPath $latestPath `
-        -BaseFileName 'Intune_DiscoveredApps_AppDeviceRelations' `
-        -ExpectedDataRows 2
-    Assert-Equal $publishedPath $timestampedPath 'Published path'
-    Assert-Equal (Test-Path -LiteralPath (Join-Path $latestPath 'Intune_DiscoveredApps_AppDeviceRelations.csv')) $true 'Latest relation CSV'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*SampleRows=1; CriticalFields=TenantKey, AppId, DeviceId*' }).Count 1 'SampleRows log'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*PhysicalRows=2*' }).Count 1 'PhysicalRows log'
-
-    $global:EnableSharePointUpload = $true
-    $legacyErrorOutput = @(Remove-LegacyDiscoveredAppsDeviceDetailExport -CurrentOutputPath $outputPath -LatestOutputPath $latestPath 2>&1)
-    Assert-Equal @($legacyErrorOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }).Count 0 'Quiet legacy SharePoint 404'
-    Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*Legacy export Intune_DiscoveredApps_DeviceDetail.csv is disabled*' }).Count 1 'Legacy retirement log'
-
-    Write-Host 'PASS: structured 429, explicit CSV row labels, and quiet legacy 404 verified.' -ForegroundColor Green
-}
-finally {
-    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
-}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjrkgb5XOlE7xH
-# WdHACAqnF7J7prkbHSRVqm6rpbuIZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeZmtsO+o7qRlr
+# 5A8TBaYi9B919F7hKLCoLMGRefIXBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -295,31 +224,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHEfHbRAifqzDuZ7s46nDXNvpnYLIbHYYK5tWKsxYuFhMA0GCSqG
-# SIb3DQEBAQUABIIBgJzIlCcZD46q6bBzzAYLdITq9Lhk+vFV2tXBCuwsAkGOFxKX
-# 4P7D3rbbSb4x32THMhX6902fnh2k2pJVShMzWUvu7HdY0Gd120L+GqdPsS+ezKA+
-# o1Gp0/0w3XT5KNhIXFaP/ozqBPf8aYYIpAuPusWM7/rCGkNlMBPmiE1g0r92NZ89
-# rqeSEDfClpmSamDEjKuEeWFhyU4Yk12n2okj8B257q6NW4qXUHG0XIA/PyU8LHCH
-# sEu9WcMOaHIVjEn7ck/NmqgWYuElozYqv7RMXnrJfDn2ilbygTR2PqeSzv79QsXc
-# hAGGM/rQrBs4uVLpaNRTVBpMoebnfBTgcdqLNUGfOfKH4YocO48W92w/0Ptq7i26
-# /A66VYCKspg1vDElXkBWljIqaxynyeS58G9LL6GqgLyTCAmA/He5EbrF1ptHknoG
-# NExbBOOX5pDvshAj2UcD2uyoocYgCdo/Pc0KzFiNio0emZs/D511Ar4w+ekviEN5
-# OiLe3weQJ5hMqZ1vgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM1Tt0bkkC/PJe0jFnpUIDOlOx+o19yBv75AXc1bi5rcMA0GCSqG
+# SIb3DQEBAQUABIIBgHQ+AvEeMcDBbyMfvUYHLJdBwmflK9EROT4wJ8E1JNwlDvpv
+# kKyaSumh68Fyo8zeIAtdXKWho0k16Pqeu2IsOOwaWtubKcldooJxnRt8bDzI8qmg
+# +PA08d7FZckMk8/or+uvMqDR6rG/f86Wvtz1x+y8mt9hwTqQfVzd3lgdYYW8jp1E
+# r4togMsoqe9rBT76LhNcetJ4VljogsV45Sv5TCitS+fPBR5EppnlMnYaSEgwmoEg
+# 1mDRUX8rtuTeRw/CzugYR3dcpfSpJ4klDvugkWSo8JxAeh9aK3YkDExGjapCK5lv
+# MUmXMcoSQlioRHLGCMfkalm/jKxUs68P9tnhgPw+vfgrXj/NwyPIEVA76N+7f6A9
+# UVzrHWhsuZQ2uACritSa6WnIdmVKhQ6GUVaMBDSQ4vuAdwd+L4HAit1KA/v14qWl
+# RL0EzaI/UVcCOI/QxFzxqAio0IDq2xXjeRa4yB6so9tROiEkrCLgtK1wK7a9zZpc
+# TA+W9p/nFSSNwxyHSKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCBj4N2JGJSQ+qxHW7iUBbsBx6138UjBnxubb9Mm
-# 0EpprDANBgkqhkiG9w0BAQEFAASCAgAPuW6bd1CfZT96U12Z8eAp5/Px/QTUpkXm
-# /JShnj8hnQVhwrhlxUR05Adz3eXGC88b5eC8iJV+DNy1ysfnyya0UeqL9gMluS8E
-# w1B1SPp/6hQUcPck/M+D7u8aJGwZfpt6TTFDFQ92o8Z8kZTpSCirQFGjnO3ltpnO
-# xoFD8k5SgkIzqc5O3TLkwl+7E9yc5/BwA7iHjqcwAzlXWFejJQXgiCYjIBO+0rU2
-# wkNLbD1hM31swuYNEsGUHepKtIOGaIzp2iI1vJOjpaRBhXig3sm5qtZwxlF/U7+O
-# mLYsEzWFZhrOYv69k3+k/sEX/EEQe2e+09wF7RpMTSbkLGZ0e5GPAf0CUpLKMbc6
-# iRDZ3WdRA+748LlrGAYLRrH4BSE8p02zcK20QIy+dmzxPFRDhN3HeR3pgEbTGRVA
-# 3rPCKdRya/LhV4QwleVbEX4KvhkCjm+92eWZmoBV4YdU7EZ3uhtZw5K5iX+cwEzm
-# PyO9HOg0HVaRYjFV/3QIjXvmNSanNFA3RYjB8dC2yJDKQBvdigJhbR/D2Coo8sTi
-# t2wUVLPxt01Ykg+APh4QN4JyHJOqu3SK9R0Yo+Q5BFHCFcrwhcsNXbrKWNdamDVa
-# mjegNd4PgL27B7Hg65QITNT3qsiaB3RVWz1ftaIXdQaxNSsv3dmKI4NREbgpPMIv
-# n1PitQX7hg==
+# MDVaMC8GCSqGSIb3DQEJBDEiBCAZ4057MN3XYXADz0NkqW6n1HTdt92ekxYY6SM7
+# MOZP8zANBgkqhkiG9w0BAQEFAASCAgBTdbnRWjm5hxyDktsTmCrRAxRQ8G4aAyVu
+# +09/PNDywhiDnJ2FUPl3EyzaRCD1BN+OP8t0mL/s7BUDP5g2SWjEdRF1cDgWz4tR
+# J4qB1HRZpFcawCXqaanZmuXVih8Cd15qz5b4YJu3Ktvqpd6fth/SHTLin9Igs6B7
+# rbmcYelF15BpbCnh984BtLHxQbgKBrw1I3VMXH0XEjmZTKmJdbkqOkiI+yp8vsSS
+# zT2yfB2ieCwuXCt7Kj26PLhz9KHDr9mnjU7zzOIK6Ik0bfrO0DAHcLdfO85GBGHD
+# NxlkjC6t0HD9wr2hfIkn6hP2vzrQXi60zScXYJWQHzjZcuQ1OursJ5ve3zI+dkt+
+# Oj0u/2U0i8RxR4oMv1zbrPKA6N/jXRs31gjaqzN0AfzwCPIY1R5wPhKS9TzqOI/B
+# BmcEOtS3H+m2bwPxebG3lWsQaD6SyoA5aIuhoR0az4Pwaac3n0xKP1wToCFb/k0l
+# 3KctXL91hBb7yFNQXnxQmooRGb7qav2LEnRLJwtm9zHGEo5A5nlk/eYnZHLmIxh0
+# YD5yM5YYxn30s0jyBrDVkgWw3Wzux3O0DCVWoTV9iYP5jqHFyTl/PsFGMN3RHG5s
+# i1IiCpW+8NhWASTMlKhqnKwwQcGGbIpNrPUNC2vVWN9OlsQg0Gz/KI8ZS/D6RTlH
+# ACDVn1bSmw==
 # SIG # End signature block

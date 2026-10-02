@@ -16,14 +16,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.11
+1.13
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementServiceConfig.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.10
+    Version : 1.12
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementServiceConfig.Read.All
@@ -244,7 +244,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -375,14 +375,34 @@ function Get-InventoryColumns {
     )
 }
 
+function Select-AutopilotIdentityRows {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Rows = @())
+    $seen = @{}
+    foreach ($row in $Rows) {
+        $id = ([string]$row.'Autopilot ID').Trim().ToLowerInvariant()
+        if (-not $id) { throw 'Autopilot record lacks its native Autopilot ID.' }
+        $values = [ordered]@{}
+        foreach ($column in Get-InventoryColumns) { $values[$column] = $row.$column }
+        $payload = ConvertTo-Json -InputObject $values -Depth 10 -Compress
+        if ($seen.ContainsKey($id)) {
+            if ($seen[$id] -cne $payload) { throw "Conflicting Autopilot records share native ID '$id'." }
+            continue
+        }
+        $seen[$id] = $payload
+        $row
+    }
+}
+
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AutopilotDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -472,10 +492,10 @@ try {
     WriteLog -Message "Retrieving Windows Autopilot device identities..."
     if ($MaxItems -gt 0) {
         WriteLog -Message ("MaxItems enabled: retrieving at most {0} Windows Autopilot devices from Graph." -f $MaxItems) "WARNING"
-        $devices = @(Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -Top $MaxItems)
+        $devices = @(Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -Top $MaxItems -ErrorAction Stop)
     }
     else {
-        $devices = Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -All
+        $devices = Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -All -ErrorAction Stop
     }
     WriteLog -Message "Windows Autopilot devices retrieved: $($devices.Count)"
 
@@ -533,63 +553,38 @@ try {
     }
 
     # ------------------------
-    # Deduplicate by "Serial number" (keep most recent Last contacted)
+    # Native identity defines grain; serials and names never discard devices.
     # ------------------------
-    $sorted = $results | Sort-Object @{
-        Expression = {
-            if ($_.PSObject.Properties['Last contacted'] -and $_.'Last contacted') {
-                [datetime]$_.'Last contacted'
-            } else {
-                [datetime]'1900-01-01'
-            }
-        }
-        Descending = $true
-    }
-
-    $seenSerials = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $deduped     = New-Object System.Collections.Generic.List[object]
-
-    foreach ($row in $sorted) {
-        $serial = $null
-        if ($row.PSObject.Properties['Serial number']) {
-            $serial = ($row.'Serial number' -as [string])
-        }
-        $serial = if ($serial) { $serial.Trim() } else { $null }
-
-        if ([string]::IsNullOrWhiteSpace($serial)) {
-            $deduped.Add($row) | Out-Null
-        } elseif ($seenSerials.Add($serial)) {
-            $deduped.Add($row) | Out-Null
-        }
-    }
-
-    $dupCount = ($results.Count - $deduped.Count)
-    WriteLog -Message "Dedup by Serial number: removed $dupCount duplicate row(s). Kept $($deduped.Count)." "INFO"
-
-    $results = $deduped
+    $results = @(Select-AutopilotIdentityRows -Rows @($results | Where-Object { $null -ne $_ }))
 
     # ------------------------
-    # If no devices (in the chosen scope), exit gracefully
+    # A successful empty query still publishes a schema-qualified CSV.
     # ------------------------
     if (-not $results -or $results.Count -eq 0) {
-        WriteLog -Message "No devices found. Exiting." "WARNING"
-        return
+        WriteLog -Message 'Autopilot query completed with zero devices; publishing the full empty schema.' 'INFO'
     }
 
     # ------------------------
     # Export CSV
     # ------------------------
     Write-Host "`n--- Export CSV ---"
-$BaseFileName = "Intune_Autopilot_Devices"
+    $BaseFileName = "Intune_Autopilot_Devices"
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
 
-    ExportAndCopyCsv -BaseFileName $BaseFileName `
+    $publication = Export-SmartM365Csv -BaseFileName $runBaseFileName `
        -OutputPath $OutputPath `
        -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
        -Data $results `
+       -Columns (Get-InventoryColumns) `
        -Encoding "UTF8" `
        -NoTypeInformation
 
-    WriteLog -Message "Export completed: $global:csvFilePath1"
+    # Retain the legacy output-folder current copy as well as timestamped/DATA-LAST copies.
+    $currentCsvPath = Join-Path $OutputPath "$runBaseFileName.csv"
+    Copy-SmartM365FileAtomically -SourcePath $publication.TimestampedPath -DestinationPath $currentCsvPath
+    [void]$global:csvGeneratedPaths.Add($currentCsvPath)
+
+    WriteLog -Message "Export completed: $($publication.TimestampedPath)"
     WriteLog -Message "Number of exported devices: $($results.Count)"
 
 }
@@ -651,6 +646,7 @@ finally {
 
     try {
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:autopilot'
         Complete-SmartM365ExecutionContext -Status Auto
     } catch {
         # ignore
@@ -659,8 +655,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3SRo1zUFYYKkU
-# 3XTuZDRTt5cDlQox0MEMVu5qWPhsMaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC28BAkAGj+st0L
+# h83W8vbW+rwQlnhKMrQaVZ2Ym9yqdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -793,31 +789,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGEerL6598mNiPPQ9KIZnUQ/fPesz3FJIX8nkSpHJuIQMA0GCSqG
-# SIb3DQEBAQUABIIBgJBb5NjLb3iYuL48wF+lCC2PHQiNGijcgk492N3nIBSodAHO
-# zQJAlUgllckYBO/1ZU4BOSyuCE/Qil831hiEl/wtMj0NbJ39GZ917qSldjGG8UbN
-# rSIToMVRTzTp1s5YhXXQLWenPCaHNMlCAiHXgPPFyTqo6cNxpgq00ZH9yVntCIxE
-# pvzdYdqOawCH74vMMzUP6fdSteL7/BSPwf8UiBa7h2fq4VsNuhidP5t10Cau8FCa
-# rQ9i38+m2gfCfW7DPo5T3+wA0CLnDmLcpH93f8d63yBaOklYhfpMO4H4R4PxIKfw
-# lETF76DhBcWNc/WEI1VwPJ4XjV33I4v8wkKjr9ttt5zC/EqHpqM+i4MutK0ZhJc7
-# e2HT48LLj54aSXAMbNZGwldlw3hxdxIyDS4s0N+E8wVOtYdsLYjua3ngCggXjRvd
-# 0+0KiSJzb2hw0EiTHfPN5Azfy4eVl7MltsVbiNcu6+Fm1pfAxEIZ3DmVfnOeRbnG
-# tLOX8gop551XZZQ7BKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILeEKMCIPQDs877kJ2SkQKQZY2tfuBQIug7R2wCt5JLIMA0GCSqG
+# SIb3DQEBAQUABIIBgCn8/BP24/fvUIJfG6UqA6VvcVGVqZb+pkqheVxF8X1fQOJy
+# ApVituNPhFPictYly8R2BXIl18v2AiQRa0QIW/RjcEPzzWsG6fXulI+XDpB4wivb
+# vqXk0UT37tUeyHSPE/aBEswjg0YNU9l16jxYMhgPF/CSWueHpedbgr1sUglA2EMx
+# Ery0lzhsWVaOSOUk/TbIXesqIQLKnFmbLJXtUSbT0W2SYHZv7A5P67wvEU4SWly+
+# mgPiLIfhukt/90OCclYTMjFhp6++5Np2FcC+x30sKzbXxANpCGHYeSBGljO4ZyLC
+# 3/PNHMqUudZZzVNO6qghg2XKq/Ov3spfht9SdmBKtV1OsCREZOuYKFhlWLOiUGvj
+# /yTq8ayl3DwDJzH46IBvCfQufBRF2By9snIRFgmcRBtmunUDOBfXSD5eyiCuNjV4
+# 2n5QBAJPDEv/kjGtIjd8nk12mOp7i8IF6kozQ4FU+TIXLYmL5qdtVjjhzj1s+V9s
+# 8ZKy0YbxgYDzPwM0Y6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDxdE13SIs1wVyESdsjXsPxwy9Xi5/C3qjJw7MQ
-# XYrpyzANBgkqhkiG9w0BAQEFAASCAgAPK1yX3xoqWxMarexj1U+PYvDxo+/bbidz
-# tnxLZP2xuONjBlK4tyxp+DPNGnxEh4mll6S8MwuoIyqYPqh/Dxc0DpmgiT7Dz+oj
-# TcTRb801Ecxo56xKFFw5GjquLN++LxNQmN6eJ0LAhvtHeBs2/5SGTqHcqf71VYic
-# 2uL5nBbx3E5JjgeV0kE7f8hKwbcih9NCS19IaZNVLHsluuHQ3rx7vFJuj1hc0esw
-# eRMV9tmX70W8wKRANzZ21ovoGJSnAqgJ23AJCeZFTiJ45Qrf9p5y0L/fYD/1O7uq
-# IGhsUMgfZM0+2HL0+VZChEAUKB2BxUnQ61tFlkJ2yoOTwn88jbeM+22zd+xjUcMS
-# WwtFcjAQSD45xBP5jP8J4q0NjN8YJjU7dTTFjqzCMiL4US4JR3jvt30nRXF3xMuL
-# G1QB6fzkMkvIGk83sX3fQuxyjGBvS/wYKMVW57pUTby0uhVSGD2dH4MahSP6pReJ
-# lEt85ZXn9vGlY6wzbo/oq5nFEQI6LA6HjNZBN6FpTCbl6WBOHeuBeYVDfhdVKqfj
-# mPBnlCwV9dYBv9qE20sgZGDrxZqWP0XS5Za6X5iUgyJ6EXbmMNhXTGFELD2LRKXR
-# NU9SeCZq1/zsnsKCNHBmvDns70D3tNvuG5p0D7QBJo0bggiujdWi3Zlo1hQDB85s
-# IOczh39nqQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
+# NDFaMC8GCSqGSIb3DQEJBDEiBCDN/eI6OUYg+Y/km8F2cuthRdwvkwUpSOw+J5Re
+# KfYW+TANBgkqhkiG9w0BAQEFAASCAgAqwqqnEdTw1NniESxPVeMx7Gv5Mw8Gvwwd
+# V/OdIbSEOHSUiVhdY5tWYksZLLbnqTDgG9QVEr7dxVTETB8NnAyxsZkW2ffDd2ML
+# M53wbEyg3iznIDjf1rm81k1K/kwg00qyh9OrGZHJsI+NnVfg/cxArXOGEZ9Cjob0
+# zsA28kT5aPgI6bTQMpBtteL+GxNGya3AhhLnGtXlHTdfNB6+zB5W8vbUvNnW/h9O
+# sck8K8wduq+/pPbMoRJOGUgxtOW92AQD9cOSG0iZpRhfPD0FqakOWNH690K1bx+h
+# JK2sPQxeeZnFc37pjaaMwI6R2CvrWzk3UCF8PHFlZHGMIaB9CPOqVfT7MYLeY94O
+# l63dpApwXTHvXWUBuaBnDiE2vcnM1LpT/XIhNIdjNS74qDzdIig/51ZeYLA5xQC/
+# I97E+Rnm0eqSn9WJVFYsl/0ioeWntMxLgJasTKB21qyOKf7knW2gaSvPo6aWR71G
+# wTyzot8V2vFplAsJ1WkpuKXt4llIkvNxs3y6mha+7zHGUAWxePz0opYCk7W3JQpV
+# M6iE++9Gb23gwMjAbBlHLuhda/AnxJh6Jt2o1eLqVfj1ASaVvuxIKkf0puuwJKBt
+# TLDFnbhfgc+BSSuCVPYBWFlE7dBSVlWgTWcyzXhx7K5VQVBQ4YM8kU3QSUZhzrTl
+# gOXJYLAQjg==
 # SIG # End signature block

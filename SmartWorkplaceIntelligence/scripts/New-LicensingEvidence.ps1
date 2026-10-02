@@ -1,4 +1,5 @@
 [CmdletBinding()]
+# Version 1.1.0: preserve unavailable native capacity instead of coercing it to zero.
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
@@ -151,13 +152,13 @@ $optimizationRows = [System.Collections.Generic.List[object]]::new()
 $evidence = foreach ($row in $capacity) {
     $skuKey = Get-NormalizedKey $row.TenantSkuPartNumber
     $skuAssignments = if ($assignmentsBySku.ContainsKey($skuKey)) { @($assignmentsBySku[$skuKey]) } else { @() }
-    $enabled = Convert-ToDouble $row.TenantPrepaidEnabled
-    $consumed = Convert-ToDouble $row.TenantConsumedUnits
-    $available = [math]::Max(0, $enabled - $consumed)
+    $enabled = Convert-ToDoubleOrNull $row.TenantPrepaidEnabled
+    $consumed = Convert-ToDoubleOrNull $row.TenantConsumedUnits
+    $available = if ($null -ne $enabled -and $null -ne $consumed) { [math]::Max(0, $enabled - $consumed) } else { $null }
     $name = [string]$row.TenantSkuDisplayName
     $microsoft365Plan = Get-Microsoft365Plan $row.TenantSkuPartNumber
     $excludedPattern = '(?i)trial|free|viral|adhoc|stream|windows store|business center|for iws|exploratory'
-    $capacityClass = if ($enabled -gt 0 -and $enabled -lt 100000 -and $name -notmatch $excludedPattern) { 'Governed capacity' } else { 'Non-finite, free, or trial' }
+    $capacityClass = if ($null -eq $enabled -or $null -eq $consumed) { 'Capacity evidence unavailable' } elseif ($enabled -gt 0 -and $enabled -lt 100000 -and $name -notmatch $excludedPattern) { 'Governed capacity' } else { 'Non-finite, free, or trial' }
 
     $distinctUsers = @($skuAssignments | ForEach-Object { Get-NormalizedKey $_.'User principal name' } | Where-Object { $_ } | Sort-Object -Unique)
     $reclaimable = 0
@@ -223,7 +224,7 @@ $evidence = foreach ($row in $capacity) {
         if ($activityState -eq 'Dormant 31-90D') { $dormant++ }
     }
 
-    $utilization = if ($enabled -gt 0) { $consumed / $enabled } else { $null }
+    $utilization = if ($enabled -gt 0 -and $null -ne $consumed) { $consumed / $enabled } else { $null }
     if ($reclaimable -gt 0) {
         $priority = 'High'
         $signal = 'Inactive or never-used users retain license assignments'
@@ -245,9 +246,9 @@ $evidence = foreach ($row in $capacity) {
         'SKU Part Number' = [string]$row.TenantSkuPartNumber
         'Microsoft 365 Plan' = $microsoft365Plan
         'Capacity Class' = $capacityClass
-        'Enabled Units' = [int64][math]::Round($enabled)
-        'Consumed Units' = [int64][math]::Round($consumed)
-        'Available Units' = [int64][math]::Round($available)
+        'Enabled Units' = if ($null -ne $enabled) { [int64][math]::Round($enabled) } else { $null }
+        'Consumed Units' = if ($null -ne $consumed) { [int64][math]::Round($consumed) } else { $null }
+        'Available Units' = if ($null -ne $available) { [int64][math]::Round($available) } else { $null }
         'Capacity Utilization' = if ($null -ne $utilization) { Convert-ToInvariantDecimalText $utilization } else { '' }
         'Assigned Users' = $distinctUsers.Count
         'Direct Assignments' = @($skuAssignments | Where-Object Source -eq 'Direct').Count
@@ -284,8 +285,8 @@ $optimizationRows | Sort-Object 'Optimization Opportunity', 'Microsoft 365 Plan'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5kNtbfC8t8jvS
-# tOdUhrJJFOgmCuskfE/VruHBR+DRmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD691rc61sqJoN+
+# BzubHOTe3krDUvSeZsttQSKytsStaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,31 +419,31 @@ $optimizationRows | Sort-Object 'Optimization Opportunity', 'Microsoft 365 Plan'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILkfZ+yZzxdrsZ0rnutyFKCuasCeNmrXqVTHw3+/lcqqMA0GCSqG
-# SIb3DQEBAQUABIIBgH4FklM2WRfG3EjHUAI6vwwQhuhlqLzGZosDIYRqG/mUEupQ
-# Gml8O1GYHGrSeRFR2irHiAiFtEQ1HnzxgyfV3NHMn7TDrN3XktsCImhHgO6cYQgI
-# BelZvnJ0Jc2+Sm7aMxuX0s8vgBc03tZYqVikVFq6ZewHVAS8U599pifO0TeO7Z4B
-# T/BduMVnueA1SrsxY8lOep+Eg6EWC12TKjuLER7IePlAS98teMaS+XkYm8dZmX2n
-# jU1vyoPSf2CZ57OVwepxALYHtdhlvTjRKaAcOfwcNjCM2cmiMFamkosQlMJy3XGx
-# l6B1nHQuArc1gXdcfjUSvCQAGR5tdTny4bc02xsw7G6cAw9PTbrk1L4en5g2d0SA
-# A86k6PnigkE9DHCQeLMT8VN4LZCdrmtkMM7uyHTwkdr4t25PdCKwQP9w3+d5NQb/
-# MPsA6UCTQdfZ3P5fEUQH7A3OJroBiQjJAKnf/OXHnZ/AZFUKa2yMp5B32XWI4Ra4
-# NGuMYigc2+oRq6L0JKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILPG2IpHU+zXoebh8x9cEiFqnQpQZcQg7Sac/q4o2i9UMA0GCSqG
+# SIb3DQEBAQUABIIBgATxZiVlqPk4TW4/pUPde826d7GpgzRoasPtL8IiTdx5FBhO
+# Q+KdxNMgaHr14FSGBQgzbrI8nwMENwBo5TmohmYa5Jg63lgg1T785agk7udr6Mh6
+# KG5XI4AtU2LM+ITPOONZGvtbyZ8c9PbHftngcmnon8kQh3AOH0u5CTx/1NoDBcG0
+# ySJcjinYqPCeJZ/UtKIe2/pUm4BnzchNjpt3RgjV2067eZtivhLK5aFBpKoG1r6F
+# rh4lnytp2eHJVe5zSxTkaw3yv6fLnxGkYm7sokZI7wj5EiqeqjaZwUeBM9IuuO9s
+# eYpSWJIBLTFYw/4mK0AVl3z4UU2cITq5+9/jqB78TFYrj3VM3zytd4V54pE/1A9Q
+# TfCBYZA6P0mfKZYRPiC472dSmWfnlhAc1JojPPzbOoyThLYZfUvqoXJPs5/kFHD5
+# n/g3elRIZRwl9BrUHO9aXeOFJGqGcKtCdtMCqvyi13DHKzmATje8Jw1o+6V51Ugz
+# pSSSF1Clh+w4AcxwkKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDRxF/2DH2LaJW3grnkAtcSfGVQePSeKNL1IGLN
-# dXeRYjANBgkqhkiG9w0BAQEFAASCAgBCfoCkG1tSzZ1goR44Px2JKW9tCxDcg0XJ
-# JEyzTqi2s9Rj6p2olrPzpKtKK6FqzpQfKUxjfghLnee+0Ysn0lKtb+cZlvfxKeeW
-# rrBOrF4UFu/VU2j+av6uBXlFY/NWFooaeacaFitGcmOg0uOLqUCyVA23uDaXd7VG
-# djUjoGp9GICaXWCsZYuRUYacUsYzCBBOmh2+GjuLFyT3gdz6yLP5ZtG/DwU9pqH8
-# DytTsIM7wNEXVIB29k4JHOqeiqAiGiPH+9NnNTtfpkImD79zsPe++qWVpNBJF1ci
-# oeZVihSJG0lQj2XS9AnXunuZLbpzSPI8jPw5+claRQvN+t84mHeCAvv20/bFFNZx
-# jV5/KB+4jGKMtKChe08Ofg7MRy5yy3ZbE6YRHBS+mM7XXCegeyruPbd74Z4g7n8A
-# TR2qiO3UoGXkYN5bQsQhjQ5oI/PAnel3Sb/Yhc0Q002LH2gve9klZs3V+9J5YqxV
-# uMMecE7FgRx6NCXbSv9wJssQDwDZQ0EbifEQzl191jOppI3FQkmHUXFwftu2+E5+
-# Fu91Twq5d0O9PEBvTI57XfhXkT9k63zJIw5yE6ocGqiPAa9oBQLr1adhTckbjsiV
-# St9Q5U3o1rCJjsBkerpcu/F3xY0G0Qy5jd1FHGXrjrRkU7tbhLtFUBdH6rgkK0lX
-# o6ScX9QXTw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAg6fllK0HR1C1SiKoifvDiLAW4w90MGMIPNBWX
+# zpPLODANBgkqhkiG9w0BAQEFAASCAgAaDL+y1TWesiL4l22HQwf+50qG35mfB/Td
+# F81Xo8/nMphopxKzrfanVe0C+BC2v4ieI3F/8bsuTwKjemWjYDB6u68cSMwCBtTM
+# KIeyn3ej4YWipwYJZzl7m5YrL3GKWwMag+kT0X7phl12UjBFNpF0PPcIjgLxZfOF
+# hwdPQyDa2Wc5ODA+bMniI+ZCrCYR+5+7LFXP/pfvheGAO1GhJLPWU/3dItemA23c
+# ddw0K2feUkF2ZuZTr/VjO/OCSrDEaGlhz6WjAUHJAg8crEF/FgB+IKEPWNpVheZk
+# KEYz6Lj3gQkYHQZUj0tf4MmaTDRQn6nyJkAw6uTWt6PTB5Fp2lZmQCa27X20lkj6
+# A1BDhugtjjI8KBVcfrplYRJhNy8JGbd955VQh9krE/hA+bXafdNpaBaSM6bqGDEB
+# pW+LI7iwuR7abYJS7vr+r/MeC9R9a9m+fCM6Lp1KTkpELGM/OEAjHMfqKPRDEgHn
+# GFuyXoZ7B77QoWw4ghsKQetisDP4cZxNWZ1wiK8gXmgvSLyBMRzubhvOzOcwAlz9
+# eiodb60FLsd8549cSOts35bV1ggqQqeW4iptrCA26zyMr9anRq2bosgUF8sMrCfv
+# ZzdqnU6bWsyWPCDZBnLadRMlxltLu9bhUIOne77SpiIdviGENf8FmxWtOBkl+S/v
+# sfohHZWy6g==
 # SIG # End signature block
