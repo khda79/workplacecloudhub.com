@@ -435,23 +435,28 @@ function Assert-CsvScanAgeDifference {
         [Parameter(Mandatory = $true)]
         [double]$MaxAgeDifferenceHours,
 
+        [double]$MaxAgeHours = 24,
+
         [string]$Label = 'Inventory'
     )
 
-    $sourceItem = Get-Item -LiteralPath $SourceCsvPath -ErrorAction Stop
-    $targetItem = Get-Item -LiteralPath $TargetCsvPath -ErrorAction Stop
-    $ageDifference = ($sourceItem.LastWriteTime - $targetItem.LastWriteTime).Duration()
-
-    if ($ageDifference.TotalHours -le $MaxAgeDifferenceHours) {
-        return
+    $sourceEvidence = Get-CsvScanEvidence -CsvPath $SourceCsvPath
+    $targetEvidence = Get-CsvScanEvidence -CsvPath $TargetCsvPath
+    if (($null -ne $sourceEvidence.Rows -and $sourceEvidence.Rows -eq 0) -or
+        ($null -ne $targetEvidence.Rows -and $targetEvidence.Rows -eq 0)) {
+        throw "$Label cannot be compared: a completed inventory contains zero data rows. Source: $SourceCsvPath; Target: $TargetCsvPath"
     }
+    $ageDifference = ($sourceEvidence.CompletedAtUtc - $targetEvidence.CompletedAtUtc).Duration()
+    $sourceAge = ([datetime]::UtcNow - $sourceEvidence.CompletedAtUtc).TotalHours
+    $targetAge = ([datetime]::UtcNow - $targetEvidence.CompletedAtUtc).TotalHours
+    if ($ageDifference.TotalHours -le $MaxAgeDifferenceHours -and
+        $sourceAge -le $MaxAgeHours -and $targetAge -le $MaxAgeHours -and
+        $sourceAge -ge -0.25 -and $targetAge -ge -0.25) { return }
 
-    $message = ("{0} scan age difference is {1:n2}h. Maximum allowed: {2:n2}h. Source: {3}; Target: {4}" -f `
-        $Label,
-        $ageDifference.TotalHours,
-        $MaxAgeDifferenceHours,
-        $sourceItem.LastWriteTime,
-        $targetItem.LastWriteTime)
+    $message = ("{0} scan age difference is {1:n2}h (maximum {2:n2}h); absolute ages: source {3:n2}h, target {4:n2}h (maximum {5:n2}h). Source evidence: {6}; target evidence: {7}." -f `
+        $Label, $ageDifference.TotalHours, $MaxAgeDifferenceHours,
+        $sourceAge, $targetAge, $MaxAgeHours,
+        $sourceEvidence.Provenance, $targetEvidence.Provenance)
 
     if ($Force) {
         Write-Warning ("{0} Continuing because -Force was specified." -f $message)
@@ -467,6 +472,51 @@ function Assert-CsvScanAgeDifference {
     if ($answer -ne 'YES') {
         throw 'Comparison cancelled because scan age difference was not accepted.'
     }
+}
+function Get-CsvScanEvidence {
+    param([Parameter(Mandatory = $true)][string]$CsvPath)
+    $item = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+    $manifestPath = "$CsvPath.manifest.json.txt"
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($manifest.SchemaVersion -ne 1 -or $manifest.InventoryFile -ne $item.Name -or
+            [string]::IsNullOrWhiteSpace([string]$manifest.Sha256) -or
+            [string]::IsNullOrWhiteSpace([string]$manifest.CompletedAtUtc)) {
+            throw "Invalid scan manifest: $manifestPath"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $CsvPath -Algorithm SHA256).Hash
+        if ($actualHash -ne [string]$manifest.Sha256) {
+            throw "Scan CSV hash differs from its manifest: $CsvPath"
+        }
+        return [pscustomobject]@{
+            CompletedAtUtc = ([datetimeoffset]::Parse([string]$manifest.CompletedAtUtc)).UtcDateTime
+            Rows = [int]$manifest.Rows
+            Provenance = $manifestPath
+        }
+    }
+    # Legacy scans have no receipt. Their timestamp in the name survives file copies.
+    if ($item.Name -match '-(?<date>\d{8})-(?<time>\d{6})(?:-[^.]+)?\.csv$') {
+        $localTime = [datetime]::ParseExact(
+            ($Matches.date + $Matches.time), 'yyyyMMddHHmmss',
+            [Globalization.CultureInfo]::InvariantCulture)
+        Write-Warning "Legacy scan has no manifest; using filename timestamp: $CsvPath"
+        return [pscustomobject]@{ CompletedAtUtc = $localTime.ToUniversalTime(); Rows = $null; Provenance = 'filename (legacy)' }
+    }
+    Write-Warning "Scan has no manifest or standard filename; using mutable file timestamp: $CsvPath"
+    return [pscustomobject]@{ CompletedAtUtc = $item.LastWriteTimeUtc; Rows = $null; Provenance = 'LastWriteTimeUtc (unverified)' }
+}
+
+function Write-CsvScanManifest {
+    param([string]$CsvPath, [string]$Side, [string]$Kind, [string]$Scope)
+    if (-not (Test-Path -LiteralPath $CsvPath -PathType Leaf)) {
+        throw "Inventory did not publish its final CSV: $CsvPath"
+    }
+    $python = Get-PythonCommand
+    $helper = Join-Path $ProjectRoot 'Scripts\Compare\scan_evidence.py'
+    $pythonArguments = @($python.Arguments) + @($helper, '--csv', $CsvPath, '--side', $Side, '--kind', $Kind, '--scope', $Scope)
+    & $python.Executable @pythonArguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not create scan manifest for $CsvPath" }
+    Write-Info "Scan manifest: $CsvPath.manifest.json.txt" DarkCyan
 }
 function Resolve-ComparisonPathMappingsFile {
     $mappingPath = [string](Get-ComparisonConfigValue -Name 'PathMappingsFile' -DefaultValue '')
@@ -791,6 +841,7 @@ function Invoke-FileInventoryScan {
     $siteUrlsFileLabel = if ($parameters.ContainsKey('SiteUrlsFile')) { $parameters.SiteUrlsFile } else { '<none>' }
     Write-Info ("File scan options: AuthMode={0}; ForceAuthentication={1}; ParameterSet={2}; Input={3}; UseSiteUrlFilter={4}; SiteUrlsFile={5}" -f $authMode, $forceAuthenticationEnabled, $inputKey, $inputValue, $useSiteUrlFilterEnabled, $siteUrlsFileLabel) DarkCyan
     & $scriptPath @parameters
+    Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'File' -Scope ([string]$inputValue)
 }
 
 function Invoke-PermissionInventoryScan {
@@ -830,6 +881,8 @@ function Invoke-PermissionInventoryScan {
     $authMode = if ($parameters.ContainsKey('Thumbprint')) { 'Certificate' } elseif ($parameters.ContainsKey('DeviceLogin') -and $parameters.DeviceLogin) { 'DeviceLogin' } elseif ($parameters.ContainsKey('Interactive') -and $parameters.Interactive) { 'Interactive' } else { 'Default' }
     Write-Info ("Permission scan options: Scope={0}; IncludeItemPermissions={1}; ItemProgressInterval={2}; AuthMode={3}; ForceAuthentication={4}" -f $permissionScope, [bool]$parameters.IncludeItemPermissions, [int]$parameters.ItemProgressInterval, $authMode, [bool]$parameters.ForceAuthentication) DarkCyan
     & $scriptPath @parameters
+    $scopeValue = if ($parameters.ContainsKey('WebUrlsFile')) { $parameters.WebUrlsFile } elseif ($parameters.ContainsKey('SiteUrl')) { $parameters.SiteUrl } else { $parameters.WebApplicationUrl }
+    Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'Permission' -Scope ([string]$scopeValue)
 }
 
 function Invoke-SourceFileScan {
@@ -866,6 +919,7 @@ function Invoke-FileComparison {
         }
 
         $maxScanAgeDifferenceHours = [double](Get-ComparisonConfigValue -Name 'MaxScanAgeDifferenceHours' -DefaultValue 12)
+        $maxScanAgeHours = [double](Get-ComparisonConfigValue -Name 'MaxScanAgeHours' -DefaultValue 24)
         $modifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
         $sourceModifiedTimeZone = Get-MigrationEndpointModifiedTimeZone -Side 'Source'
         $targetModifiedTimeZone = Get-MigrationEndpointModifiedTimeZone -Side 'Target'
@@ -873,6 +927,7 @@ function Invoke-FileComparison {
             -SourceCsvPath $SourceCsv `
             -TargetCsvPath $TargetCsv `
             -MaxAgeDifferenceHours $maxScanAgeDifferenceHours `
+            -MaxAgeHours $maxScanAgeHours `
             -Label 'File inventory'
 
         $compareScript = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\compare_sp_source_target_file_inventories.py'
@@ -885,6 +940,8 @@ function Invoke-FileComparison {
             '--target-web-urls-file', (Resolve-MigrationUrlsFile -Side 'Target'),
             '--comparison-name', ("{0}-{1}-vs-{2}" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target')),
             '--size-tolerance-bytes', ([string]$Config.Comparison.SizeToleranceBytes),
+            '--max-scan-age-difference-hours', ([string]$maxScanAgeDifferenceHours),
+            '--max-scan-age-hours', ([string]$maxScanAgeHours),
             '--modified-date-tolerance-minutes', ([string]$modifiedDateToleranceMinutes),
             '--source-modified-time-zone', $sourceModifiedTimeZone,
             '--target-modified-time-zone', $targetModifiedTimeZone,
@@ -1049,10 +1106,12 @@ function Invoke-PermissionComparison {
         }
 
         $maxScanAgeDifferenceHours = [double](Get-ComparisonConfigValue -Name 'PermissionMaxScanAgeDifferenceHours' -DefaultValue 24)
+        $maxScanAgeHours = [double](Get-ComparisonConfigValue -Name 'PermissionMaxScanAgeHours' -DefaultValue 48)
         Assert-CsvScanAgeDifference `
             -SourceCsvPath $SourceCsv `
             -TargetCsvPath $TargetCsv `
             -MaxAgeDifferenceHours $maxScanAgeDifferenceHours `
+            -MaxAgeHours $maxScanAgeHours `
             -Label 'Permission inventory'
 
         $pathMappingsFile = Resolve-ComparisonPathMappingsFile
@@ -1068,7 +1127,9 @@ function Invoke-PermissionComparison {
             '--source-root-path', $Config.Source.PermissionRootPath,
             '--target-root-path', $Config.Target.PermissionRootPath,
             '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter),
-            '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'))
+            '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target')),
+            '--max-scan-age-difference-hours', ([string]$maxScanAgeDifferenceHours),
+            '--max-scan-age-hours', ([string]$maxScanAgeHours)
         )
         if (Get-MigrationEndpointPermissionLibraryOnly -Side 'Source') {
             $permissionCompareArguments += '--source-scan-document-libraries-only'
@@ -1195,8 +1256,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiStOeKFJtkbsT
-# XhSQrB3EdfnVeXduK03v9ut7DAwzuqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsakdbYWCCtLQ/
+# onNcWjpCGliatHlAYNo7hI2VOKqp7KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1226,14 +1287,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCASft7QHNe2BEQLmavU7XG2
-# 0nP6G5+pU62jXz0C0XfXaDANBgkqhkiG9w0BAQEFAASCAYAyilLqNjTn1QUh1Wzp
-# FT7fNeTdhkLWJSTd2wBOkL7xVngBJQW3aUASiyvQtxnAlnARZwyDg7P7i+nd+mkV
-# dB7wSJdICt/kVhucXT0QtGyuQSiXKrxHRvRxnjMVdIpUYA3OM3w4dZKN1oJ7Lc2K
-# cqmWnPQPaq6Debq/pTGvHP9wKedyT4iVFl17xxJfZhnE06C8PnRNaAIvqI/UJ41N
-# /296IOy8qoyTv7d4xZ/FvV5RisfAE1ZFj/xFOMlWss0z4VItjRP0zDTgnVeO+Jwo
-# 2S74rCGdsBAyEO39c3rZZgE2Na/rTHRhVDyHNAyf1rh0967DhhyD20zggLNAUJvZ
-# gjno8cOECp3k5WirYZNgYKoB9KA9GV6Qy+MWVkgedM5rEn3sMLORRsfD/5FO0TKJ
-# aEeS/9RmibDZH2vO3CsZ9U2gDh6erPskCOMfWS36emTK4QskCrBjcovEuzzkY0AC
-# xh2fDdgrrDf0rcAyuBhSjw//u2nPQRdCgLxHeSFATaReqoo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDk1jS2UO/fbzCnPwPgp57g
+# vg/UsEk9occQfODSrl8bljANBgkqhkiG9w0BAQEFAASCAYBmvmNrN3rkjTJh1CAK
+# m2yYBBdtQNjvq5w2/CEdKPnMShWbrrBan7GvIo1AqW7WA+l3+xAHgXWdNGhVCarf
+# jNesjHilgL0JyINONsy+vAfUE9MO4pnHJ43F4G1rB/Mc3scX3XaisRGEmVE/W3hU
+# FUc8Uz2WyfQC6i14HLrfgoJDv496sfkmICH1sY5Wij3A8jFbRx5hn2yz/cROy5n3
+# BQPx69AYcT8qLo2QpHt23Fw2wN/TYp3xT+l9iTsyZxNfjJISxT7C2psDb7fwtULD
+# HPXlkb+kIsl7UXCF7EW6OijY5LTH7IFNuVfrU28DgTCrivRpTaU737GmBXoo3c1G
+# R3WrQLT94HHIPSj/2+gLGYkeydp8MGhTnhuXduRBPkXCWfOrQoJ14/1kkefn7yXB
+# qM2CUKjqxRgZu7VoZ78rUXsBB0vOoS6v7DlXq/4gpgMgKcx+ZaCFVYDoTqKU3iLq
+# 1TF97smpKrh4/8nOVDZ3u5M3u4fdVGOVTVoGQt//325ADmc=
 # SIG # End signature block

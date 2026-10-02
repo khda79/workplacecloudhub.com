@@ -1,5 +1,6 @@
 """Offline regression tests; all evidence is synthetic and temporary."""
 import csv
+import json
 import importlib.util
 from pathlib import Path
 import shutil
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -25,6 +27,9 @@ def load(name):
 
 FILES = load('compare_sp_source_target_file_inventories')
 PERMISSIONS = load('compare_sp_source_target_permissions')
+GLOBAL = load('build_global_report')
+EVIDENCE = load('scan_evidence')
+HTML = load('report_html')
 
 
 class MappingTests(unittest.TestCase):
@@ -52,6 +57,12 @@ class MappingTests(unittest.TestCase):
 
 
 class FileComparisonTests(unittest.TestCase):
+    def test_root_scope_includes_descendants_but_not_sibling_prefix(self):
+        roots = {'https://example.com/sites/bu'}
+        self.assertTrue(FILES.web_is_in_scope('https://example.com/sites/bu', roots))
+        self.assertTrue(FILES.web_is_in_scope('https://example.com/sites/bu/subsite', roots))
+        self.assertFalse(FILES.web_is_in_scope('https://example.com/sites/bu-other', roots))
+
     def test_versions_dates_duplicates_scope_and_dry_run_generation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -80,6 +91,9 @@ class FileComparisonTests(unittest.TestCase):
                     return list(csv.DictReader(handle, delimiter=';'))
 
             self.assertEqual(len(read('ChangedVersion.csv')), 1)
+            summary = read('Summary.csv')[0]
+            self.assertEqual(summary['SuccessPercent'], '75.00%')
+            self.assertIn('75.00%', Path(summary['HtmlSummary']).read_text(encoding='utf-8'))
             self.assertEqual(len(read('TargetOlderThanSource.csv')), 1)
             self.assertEqual(len(read('DuplicateKeys.csv')), 1)
             self.assertTrue(any(r['FileName'] == 'old.docx' for r in read('MissingInTarget.csv')))
@@ -129,9 +143,61 @@ class PermissionComparisonTests(unittest.TestCase):
 
 
 class HtmlReportTests(unittest.TestCase):
+    def test_client_logo_is_embedded_only_when_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            branding = project / 'Migrations' / 'branding'
+            branding.mkdir(parents=True)
+            logo = branding / 'client-logo.png'
+            logo.write_bytes(b'\x89PNG\r\n\x1a\n' + b'example')
+            (branding / 'branding.json.txt').write_text(json.dumps({'ClientLogoFile': logo.name}), encoding='utf-8')
+            with patch.object(HTML, '__file__', str(project / 'Scripts' / 'Compare' / 'report_html.py')):
+                self.assertIn('alt="Client logo"', HTML.client_logo_html())
+                (branding / 'branding.json.txt').write_text(json.dumps({'ClientLogoFile': '../client-logo.png'}), encoding='utf-8')
+                self.assertEqual(HTML.client_logo_html(), '')
+
+    def test_global_report_uses_latest_summary_and_exposes_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migration = root / 'Migrations' / 'Example'
+            migration.mkdir(parents=True)
+            (migration / 'migration.config.psd1').write_text("@{Name='Example'}", encoding='utf-8')
+            (migration / 'migration.mapping.txt').write_text('https://source/sites/example https://target/sites/example\n', encoding='utf-8')
+            for stamp, matched in [('20261001-100000', '5'), ('20261002-100000', '8')]:
+                folder = migration / 'comparisons' / 'files' / ('Example-files-' + stamp)
+                folder.mkdir(parents=True)
+                with (folder / 'Summary.csv').open('w', encoding='utf-8', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedKeys', 'MissingInTarget', 'ExtraInTarget'], delimiter=';')
+                    writer.writeheader()
+                    writer.writerow({'SourceCsv': 'SP2019-FileInventory-Example-20261002-080000.csv', 'TargetCsv': 'SPO-FileInventory-Example-20261002-090000.csv',
+                                     'SourceUniqueKeys': '10', 'TargetUniqueKeys': '9', 'MatchedKeys': matched, 'MissingInTarget': '2', 'ExtraInTarget': '1'})
+            output = GLOBAL.build(root / 'Migrations', root / 'out')
+            self.assertTrue(output.is_file())
+            with output.with_suffix('.csv').open(encoding='utf-8-sig', newline='') as handle:
+                row = next(csv.DictReader(handle, delimiter=';'))
+            self.assertEqual(row['SuccessPercent'], '80.00%')
+            self.assertEqual(row['SourceScannedAt'], '2026-10-02 08:00:00')
+            self.assertEqual(row['MissingInTarget'], '2')
+            self.assertIn('https://source/sites/example', output.read_text(encoding='utf-8'))
+
+    def test_manifest_records_true_row_count_and_sha256(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'scan.csv'
+            path.write_text('Name,Value\nfile,"line 1\nline 2"\n', encoding='utf-8')
+            receipt = EVIDENCE.write_manifest(path, 'Source', 'File', 'https://source/sites/example')
+            data = json.loads(receipt.read_text(encoding='utf-8'))
+            self.assertEqual(data['Rows'], 1)
+            self.assertEqual(data['Side'], 'Source')
+            self.assertEqual(len(data['Sha256']), 64)
+            self.assertEqual(EVIDENCE.describe_pair(path, path)['ScanEvidenceStatus'], 'Verified')
+            path.write_text('Name,Value\nchanged,1\n', encoding='utf-8')
+            with self.assertRaises(ValueError):
+                EVIDENCE.describe_pair(path, path)
+
     def test_comparators_find_adjacent_report_module_with_portable_python(self):
         with tempfile.TemporaryDirectory() as directory:
             shutil.copy2(COMPARE_DIR / 'report_html.py', Path(directory) / 'report_html.py')
+            shutil.copy2(COMPARE_DIR / 'scan_evidence.py', Path(directory) / 'scan_evidence.py')
             portable_python = ROOT / 'Tools' / 'Python' / 'python.exe'
             executable = str(portable_python if portable_python.is_file() else sys.executable)
             for name in ('compare_sp_source_target_file_inventories.py', 'compare_sp_source_target_permissions.py'):

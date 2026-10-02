@@ -12,6 +12,7 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
+from scan_evidence import describe_pair
 
 
 def print(*args, **kwargs):
@@ -295,10 +296,14 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     target_older = to_int(summary.get("TargetOlderThanSource"))
     changed_version = to_int(summary.get("ChangedVersion"))
     review_count = missing + extra + different_size + changed_modified + target_older + changed_version
-    status_text = "Review needed" if review_count or extra_folders else "No relevant difference"
-    status_class = "warn" if review_count else ("note" if extra_folders else "ok")
+    inconclusive = not to_int(summary.get("SourceUniqueKeys")) or not to_int(summary.get("TargetUniqueKeys"))
+    filtered = to_int(summary.get("SourceFilteredRows")) + to_int(summary.get("TargetFilteredRows"))
+    evidence_problem = summary.get("ScanEvidenceStatus") in ("Stale", "Unverified")
+    status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if review_count or extra_folders else ("Review scope filter" if filtered else "No relevant difference")))
+    status_class = "note" if inconclusive else ("warn" if review_count or filtered or evidence_problem else ("note" if extra_folders else "ok"))
 
     cards = [
+        ("Success rate", summary.get("SuccessPercent") or "N/A", "muted" if inconclusive else "ok"),
         ("Matched files", matched, "ok"),
         ("Missing in target", missing, "bad" if missing else "ok"),
         ("Extra in target", extra, "bad" if extra else "ok"),
@@ -308,7 +313,8 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
         ("Modified date", changed_modified, "note" if changed_modified else "ok"),
         ("Extra folders", extra_folders, "note" if extra_folders else "ok"),
     ]
-    card_html = [metric_card(label, format_integer(value), css_class) for label, value, css_class in cards]
+    card_html = [metric_card(label, value if label == "Success rate" else format_integer(value), css_class)
+                 for label, value, css_class in cards]
 
     report_link_rows = []
     for label, target_path, description in report_links:
@@ -351,8 +357,14 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     <dl class="context">
       <dt>Source CSV</dt><dd>{html_escape(summary.get('SourceCsv'))}</dd>
       <dt>Target CSV</dt><dd>{html_escape(summary.get('TargetCsv'))}</dd>
+      <dt>Scan evidence</dt><dd>{html_escape(summary.get('ScanEvidenceStatus'))}</dd>
+      <dt>Scan gap (hours)</dt><dd>{html_escape(summary.get('ScanGapHours'))}</dd>
+      <dt>Oldest scan age (hours)</dt><dd>{html_escape(summary.get('OldestScanAgeHours'))}</dd>
       <dt>Source unique keys</dt><dd>{format_integer(summary.get('SourceUniqueKeys'))}</dd>
       <dt>Target unique keys</dt><dd>{format_integer(summary.get('TargetUniqueKeys'))}</dd>
+      <dt>Success rate definition</dt><dd>Matched files / source unique keys in comparison scope. Extra target files are shown separately.</dd>
+      <dt>Source filtered rows</dt><dd>{format_integer(summary.get('SourceFilteredRows'))}</dd>
+      <dt>Target filtered rows</dt><dd>{format_integer(summary.get('TargetFilteredRows'))}</dd>
       <dt>Size tolerance bytes</dt><dd>{format_integer(summary.get('SizeToleranceBytes'))}</dd>
       <dt>Modified date tolerance minutes</dt><dd>{html_escape(summary.get('ModifiedDateToleranceMinutes'))}</dd>
       <dt>Comparison key includes version</dt><dd>{html_escape(summary.get('ComparisonKeyIncludesVersion'))}</dd>
@@ -1232,6 +1244,12 @@ def load_web_url_filter(path, prefixes, mappings=None):
     return allowed
 
 
+def web_is_in_scope(web_key, roots):
+    if not web_key or roots is None:
+        return roots is None
+    return any(web_key == root or web_key.startswith(root.rstrip("/") + "/") for root in roots)
+
+
 def inventory_record(row, key):
     return {
         "Key": key,
@@ -1271,6 +1289,8 @@ def main():
     parser.add_argument("--target-web-urls-file")
     parser.add_argument("--comparison-name", default="SharePointInventoryComparison")
     parser.add_argument("--size-tolerance-bytes", type=int, default=10240)
+    parser.add_argument("--max-scan-age-difference-hours", type=float, default=12)
+    parser.add_argument("--max-scan-age-hours", type=float, default=24)
     parser.add_argument(
         "--modified-date-tolerance-minutes",
         type=float,
@@ -1352,7 +1372,7 @@ def main():
         with source_csv.open("r", encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle, dialect=detect_csv_dialect(handle)):
                 source_total_rows += 1
-                if source_allowed_webs is not None and inventory_web_key(row, args.source_prefix, mappings=path_mappings) not in source_allowed_webs:
+                if not web_is_in_scope(inventory_web_key(row, args.source_prefix, mappings=path_mappings), source_allowed_webs):
                     source_filtered_rows += 1
                     continue
                 if is_excluded_inventory_file(row):
@@ -1438,7 +1458,7 @@ def main():
 
             for row in csv.DictReader(target_handle, dialect=detect_csv_dialect(target_handle)):
                 target_total_rows += 1
-                if target_allowed_webs is not None and inventory_web_key(row, args.target_prefix) not in target_allowed_webs:
+                if not web_is_in_scope(inventory_web_key(row, args.target_prefix), target_allowed_webs):
                     target_filtered_rows += 1
                     continue
                 if is_excluded_inventory_file(row):
@@ -1737,6 +1757,8 @@ def main():
         "TargetUniqueKeys": len(target_seen),
         "TargetDuplicateKeysIgnored": target_duplicate_keys,
         "MatchedKeys": matched,
+        "SuccessPercent": f"{100 * matched / len(source_index):.2f}%" if source_index and target_seen else "",
+        "ValidationStatus": "InconclusiveEmptyInventory" if not source_index or not target_seen else ("ReviewNeeded" if missing or extra or extra_folder_candidates or different_size or changed_modified_date or target_older_than_source or changed_version else ("ReviewScopeFilter" if source_filtered_rows or target_filtered_rows else "NoRelevantDifference")),
         "MissingInTarget": missing,
         "ExtraInTarget": extra,
         "ExtraFoldersInTarget": len(extra_folder_candidates),
@@ -1761,6 +1783,9 @@ def main():
         "HtmlSummary": str(html_summary_path),
         "OutputDirectory": str(output_directory),
     }
+    summary.update(describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours))
+    if summary["ScanEvidenceStatus"] in ("Stale", "Unverified") and summary["ValidationStatus"] != "InconclusiveEmptyInventory":
+        summary["ValidationStatus"] = "ReviewScanEvidence"
 
     with summary_path.open("w", encoding="utf-8", newline="") as summary_handle:
         writer = csv.DictWriter(summary_handle, fieldnames=list(summary.keys()), delimiter=CSV_OUTPUT_DELIMITER)

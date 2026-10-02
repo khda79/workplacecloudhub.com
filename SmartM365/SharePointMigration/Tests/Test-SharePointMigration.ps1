@@ -26,7 +26,7 @@ function Assert-Test { param([bool]$Condition, [string]$Message) if (-not $Condi
 $script:Checks = 0
 try {
     Import-TestFunctions (Join-Path $project 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1') @(
-        'Get-PathMappingRows', 'Get-ComparisonConfigValue', 'Assert-CsvScanAgeDifference', 'Invoke-PermissionComparison'
+        'Get-PathMappingRows', 'Get-ComparisonConfigValue', 'Get-CsvScanEvidence', 'Assert-CsvScanAgeDifference', 'Invoke-PermissionComparison'
     )
     Import-TestFunctions (Join-Path $project 'SmartM365-SharePointMigration-GUI.ps1') @('Get-SelectedMigrationFolderName')
 
@@ -91,6 +91,43 @@ try {
         $expectedCalls = if ($case.Block) { 0 } else { 1 }
         Assert-Test ($script:CacheCalls -eq $expectedCalls -and $script:PythonCalls -eq $expectedCalls) 'Age validation must precede Entra/cache and comparison work.'
     }
+
+    # A copy changes LastWriteTime, but the legacy filename retains the original scan date.
+    $legacy = Join-Path $testRoot 'SP2019-FileInventory-Synthetic-20260927-120000.csv'
+    [IO.File]::WriteAllText($legacy, "Name`nfile`n")
+    (Get-Item $legacy).LastWriteTimeUtc = [datetime]::UtcNow
+    $legacyEvidence = Get-CsvScanEvidence -CsvPath $legacy -WarningAction SilentlyContinue
+    Assert-Test ($legacyEvidence.CompletedAtUtc -lt [datetime]::UtcNow.AddDays(-1)) 'Copied legacy scan must use its filename date.'
+    $legacyPeer = Join-Path $testRoot 'SPO-FileInventory-Synthetic-20260927-130000.csv'
+    [IO.File]::WriteAllText($legacyPeer, "Name`nfile`n")
+    (Get-Item $legacyPeer).LastWriteTimeUtc = [datetime]::UtcNow
+    $Force = $false; $script:LauncherNonInteractive = $true
+    $absoluteAgeBlocked = $false
+    try {
+        Assert-CsvScanAgeDifference -SourceCsvPath $legacy -TargetCsvPath $legacyPeer -MaxAgeDifferenceHours 12 -MaxAgeHours 24 -WarningAction SilentlyContinue
+    } catch { $absoluteAgeBlocked = $_ -match 'absolute ages' }
+    Assert-Test $absoluteAgeBlocked 'Two copied old scans with a small gap must be blocked.'
+
+    $receiptCsv = Join-Path $testRoot 'SP2019-FileInventory-Synthetic-20261002-120000.csv'
+    [IO.File]::WriteAllText($receiptCsv, "Name`nfile`n")
+    $python = Join-Path $project 'Tools/Python/python.exe'
+    & $python (Join-Path $project 'Scripts/Compare/scan_evidence.py') --csv $receiptCsv --side Source --kind File --scope 'https://example.com/site' | Out-Null
+    Assert-Test ($LASTEXITCODE -eq 0) 'Manifest generation failed.'
+    $receiptEvidence = Get-CsvScanEvidence -CsvPath $receiptCsv
+    Assert-Test ($receiptEvidence.Rows -eq 1 -and $receiptEvidence.Provenance -like '*.manifest.json.txt') 'Manifest data was not loaded.'
+    [IO.File]::AppendAllText($receiptCsv, "tampered`n")
+    $tamperBlocked = $false
+    try { Get-CsvScanEvidence -CsvPath $receiptCsv | Out-Null } catch { $tamperBlocked = $true }
+    Assert-Test $tamperBlocked 'Changed inventory was accepted despite manifest hash mismatch.'
+    $emptyCsv = Join-Path $testRoot 'SPO-FileInventory-Synthetic-20261002-120000.csv'
+    [IO.File]::WriteAllText($emptyCsv, "Name`n")
+    & $python (Join-Path $project 'Scripts/Compare/scan_evidence.py') --csv $emptyCsv --side Target --kind File --scope 'https://example.com/site' | Out-Null
+    Assert-Test ($LASTEXITCODE -eq 0) 'Empty inventory manifest generation failed.'
+    $emptyBlocked = $false
+    try { Assert-CsvScanAgeDifference -SourceCsvPath $emptyCsv -TargetCsvPath $emptyCsv -MaxAgeDifferenceHours 12 -MaxAgeHours 24 } catch {
+        $emptyBlocked = $_ -match 'zero data rows'
+    }
+    Assert-Test $emptyBlocked 'Header-only inventory must not be compared.'
     Write-Output "PASS: $script:Checks offline PowerShell assertions; no tenant calls or launched processes."
 }
 finally {
@@ -104,8 +141,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2/w0D9fx7TScY
-# +g7jFnyJ9hD5Sk6wPIp+vVe5hcvb2aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5IyS1Lmztv3gD
+# xdhTwWGPqdgdQT6hP3QA0akrj544paCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -135,14 +172,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD+ppLU6HkIiq2PVKX7KGk3
-# F410xv8gUb3DB3oZ7Eto1DANBgkqhkiG9w0BAQEFAASCAYAkK8mHXcUQKIP9NMkY
-# /JPNnf8of5WIcxb9EyEVuBSImeHNdeAUdylseH8ywTHj3FCGqWnvQ6iqmJg2UlLv
-# IH5Z16r2PZQXa6Qw4JIM4U416+V8Gc9hovnd3HFcl/VcZKC4aJHCZjXwHZG0mJ3c
-# AcAxL+8TliV+Xox22SN3aUFXyngISixDiHX94ZbX1FSBl/5thAXcx+/epVJq4Up9
-# XNtYo85ZJ5Nvv2fPQET4dX7iWyBnC8kHtix0g4aiTyUep5q126FCRBSvE26/firw
-# n0UBg0u0exEc81mjmqppS+EUEov+ELp8DfnaSlkIc9K+OwNDz8nEo4Q6g7NbE5nc
-# nTGmoDMyMxp+Vjj6jE4XehiWssXONLU/J5hPfIxH6dhlJASYU92e5zv/uubWWC+Q
-# Zj/Seks4oFLCVlrTryEZwCpl+Vo01ErlSxlUVg9elYHiJvUqpkutX049obZGC/R2
-# qEOSCQRfIgZTTbGlt/xsdAmARdCiCsHxiiboLKuaDQYP5Ek=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBprK5GgqFoFJD+36+/9z48
+# IP+H4yegq44E2LaYLQXPgzANBgkqhkiG9w0BAQEFAASCAYAXRpRSbe0cXq9kOsj9
+# Rr6bfpgTMGLF6S4PtEjzv4AgDxD+uBGQIqhC+Og2t7AMDnxS6Yatodlk1oS6gGUE
+# K+eCwarFh68OkGGQ3il6xQsoXiXqOJ1jkt/fnqLzVij8chaitJCdAXO1AIo4J/k2
+# ZqD2QoAxGT693wF6gPDQIC2Vrbw8VwUsPxpc3RFojJPcPlJYOH/NpU3gcFcADdq/
+# oHSma76VG+Y0YhHgvgX9NJVMqnPt2g2p2e7pC4vx260l/UtS4PLOkx4GKcikEo9B
+# 3yhIAAxh+FAIkZExpuaW0Lt+JXrTB5EajQOgT+lN9s9c6YfymTbgIyE7Y//D92hK
+# NnMndrgcZaKbd4GD6N8yVVeYoexderARL9JR8WGHXyK8iwJf+v76i7pjqn+ok+KT
+# Mf7yTUQCJgx6pZitaov2vYApZInV/ktashqmPys2XhcxEvYQnGkhUAIvT/hzQC3V
+# J7BL9W9NCimzUtrYQsGgVk1sV7T7hmlg5w7u09LJFPCNWEM=
 # SIG # End signature block

@@ -11,17 +11,18 @@ $project = Split-Path -Parent $PSScriptRoot
 $root = Join-Path ([IO.Path]::GetTempPath()) ('SharePointMigration-hosts-' + [guid]::NewGuid().ToString('N'))
 $name = "Folder O'Brien"
 try {
-    foreach ($dir in @('Scripts/Launchers/Generic', 'Scripts/Inventory', "Migrations/$name")) {
+    foreach ($dir in @('Scripts/Launchers/Generic', 'Scripts/Inventory', 'Scripts/Compare', "Migrations/$name")) {
         New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null
     }
     $launcher = Join-Path $root 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1'
     Copy-Item (Join-Path $project 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1') $launcher
     Copy-Item (Join-Path $project 'Scripts/Launchers/SmartM365-SharePointMigration-LauncherCommon.ps1') (Join-Path $root 'Scripts/Launchers')
+    Copy-Item (Join-Path $project 'Scripts/Compare/scan_evidence.py') (Join-Path $root 'Scripts/Compare')
     $fixture = @'
 [CmdletBinding()]
 param($OutputPath, $LogPath, $SiteUrl, $WebUrlsFile, $DocumentLibrariesOnly, $IncludeItemPermissions, $ItemProgressInterval, $Interactive, $ForceAuthentication)
 if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
-[IO.File]::WriteAllText($OutputPath, [string]$PSVersionTable.PSVersion.Major)
+[IO.File]::WriteAllText($OutputPath, "Host`n$($PSVersionTable.PSVersion.Major)`n")
 '@
     foreach ($side in @('Source', 'Target')) {
         foreach ($kind in @('File', 'Permission')) {
@@ -50,7 +51,8 @@ if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
             }
             $latest = Get-ChildItem (Join-Path $root "Migrations/$name") -Recurse -Filter '*.csv' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
             $expected = if ($type -eq 'SPO') { '7' } else { '5' }
-            if (-not $latest -or [IO.File]::ReadAllText($latest.FullName) -ne $expected) { throw "Wrong host for $type $action" }
+            if (-not $latest -or [IO.File]::ReadAllText($latest.FullName) -ne "Host`n$expected`n") { throw "Wrong host for $type $action" }
+            if (-not (Test-Path -LiteralPath ($latest.FullName + '.manifest.json.txt') -PathType Leaf)) { throw "Scan manifest missing for $type $action" }
             $count++
         }
     }
@@ -95,8 +97,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBus6vdjhIw6o4z
-# A7ik6l/eG9KagdqmTg5bS91Dm9NcoKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4cUP4n6pY2psF
+# Cbvr0cOAcj2Kx3IULoPHdontl5vWxqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -126,14 +128,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBBo8xZ8/qCTbzLXfNgnqL+
-# 992mTQaJtxgm+QDtMc3nXDANBgkqhkiG9w0BAQEFAASCAYAYBcwCcl14vhiBrCcS
-# IhPelKAaJ/qweJOMOfDox8LvIx/yPxdnVZwdIw18DrmAQnQj8Mmo/wyEi8aw76OR
-# sSYs0HWonNRRAcNT25a+vlUKZA4WU2N3wAzG38WAlxrLPVVV0kcnDz3jzWs4Gw92
-# NZEq7SIat47mpmjalyhgpS344Nth8/fhWQ3ayjurDN/1u8tOFrk6leYMrFvqTR3E
-# 7AGKiYJefmNCi7SLopfL7/hun/FylgmJ2OV63yShIspSVjWcgC2blg04R1GUN0N8
-# YhSeE1A3T1D8Yod3PsAZFcevzsXfnAO8jqz9cSAs9JjLztqWKO2DaoUQm6baLjqr
-# oZE5mPkgWfUAO6m2WoWC/6qYcbHH6c3StEt1z7rUmvGoFTHK0CmRkhJzCiEdLRx+
-# O14uESlsamLeCT/44cPRBrpOfdDR45aUVHHbuqOxWLpLk5dyyNWpif7iszWm2tpH
-# AaSom0By1xVrG/zN/uwyayW+kiZrQIje3UUXxcO69ag1ap8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAzzXGCZtLFGaGrbdKRIE5I
+# WVbfkppEXk88JN82J4pLszANBgkqhkiG9w0BAQEFAASCAYBfqZT3d58WJ9KEZydD
+# +D4IprysKyZWmmMsWBBVzPidJ4ZjjHdkqR7W0wYMVDEol9xHnQhinVVS2kv7sl2y
+# 5PFgW0lzJE1uBVbTT6wsR6VIYkBCErOtSAWKRPX/t1K4qTOn6D9kx086UxrjQ+ev
+# fCsCjpgcfyuXoqZuBCU1FgNHZYIkAT9JoHTna15waqlkajwUDBwgb/s7+CdqcuOf
+# Ny7iPSwjtozyCFtxTUJOw9Gf/16ujNzxshr6xl7MV0BfDDnX/JT2aiEJMVo8nXnn
+# tzYcbw5ipTesK3xTyWR/zQ7syDqCPRllgv2r6pYpWqHz78YXw9sXpNNl10df0PLv
+# YJzt3cXQDzCmhJNQJdZheB7BAlGDNCQUio4kiPkZtDRamqEwCrqHzC0qcgzPNC75
+# w8QA1q6ud8vt7boRes5ARTXNscQmcDTioqTwdaEqu9ooVouRCn/vxC5nOPSnKnik
+# Lt3BoAY1P0SdgZYTU1DKC30SOgCHJaw9B1OSlin9fRhP7u0=
 # SIG # End signature block

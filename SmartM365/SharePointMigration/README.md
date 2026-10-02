@@ -261,14 +261,35 @@ folders, and review extra libraries separately.
 For final copy validation, run fresh source and destination file scans close
 together before `CompareFiles`. The launcher enforces
 `Comparison.MaxScanAgeDifferenceHours` and uses
+`Comparison.MaxScanAgeHours` (24 hours by default) to reject old scans even
+when source and target are close to one another. New launcher scans publish a
+`*.csv.manifest.json.txt` receipt with completion time, scope, row count, and
+SHA-256. The comparison verifies that hash. For older scans without a receipt,
+the timestamp embedded in the CSV filename is used so copying a CSV cannot
+make it appear new; a nonstandard filename falls back to file time with a
+warning. Zero-row scans with a receipt block comparison. Reports from older
+zero-row scans display an inconclusive status.
+File and permission HTML reports also show scan evidence and flag stale or
+unverified scans for review when an override allowed comparison to continue.
+
+The file report displays `SuccessPercent = matched files / source unique keys`
+within the compared scope. Additional target files and filtered rows are
+displayed separately; 100% does not certify migration completeness. In the GUI
+Logs tab, **Global report** builds an offline HTML and CSV table from each
+migration's latest file `Summary.csv` under `Migrations/reports/global`.
+**Client logo...** accepts a PNG or JPEG up to 200 KB and stores it in the
+shared, ignored `Migrations/branding` folder. Newly generated HTML reports
+embed the logo, so viewers do not need access to the logo file.
+
+The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
 `TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
 normalizes source `Modified` dates as local time and target `Modified` dates as
 UTC before comparing them, while keeping the raw values in the diagnostic CSVs.
 
 `Comparison.PermissionMaxScanAgeDifferenceHours` similarly guards permission
-scan pairs (24 hours by default), before any Entra cache refresh. Both age guards
-use CSV last-write timestamps, not a certified scan-start time or absolute age.
+scan pairs (24 hours by default), before any Entra cache refresh; absolute age
+is limited by `Comparison.PermissionMaxScanAgeHours` (48 hours by default).
 Scheduled `-NonInteractive` runs fail on excessive gaps. Interactive runs require
 typing `YES`; `-Force` is an explicit warned override after review.
 

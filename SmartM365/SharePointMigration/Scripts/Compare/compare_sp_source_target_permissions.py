@@ -15,6 +15,7 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
+from scan_evidence import describe_pair
 
 
 def print(*args, **kwargs):
@@ -461,8 +462,10 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     source_la = to_int(summary_row.get("SourceLimitedAccessOnlyIgnored"))
     target_la = to_int(summary_row.get("TargetLimitedAccessOnlyIgnored"))
     real_difference_count = missing + target_less + permission_different + extra
-    status_text = "Review needed" if real_difference_count or disabled_missing or target_more else "No relevant difference"
-    status_class = "warn" if real_difference_count else ("note" if disabled_missing or target_more else "ok")
+    inconclusive = not to_int(summary_row.get("SourceUniqueKeys")) or not to_int(summary_row.get("TargetUniqueKeys"))
+    evidence_problem = summary_row.get("ScanEvidenceStatus") in ("Stale", "Unverified")
+    status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if real_difference_count or disabled_missing or target_more else "No relevant difference"))
+    status_class = "note" if inconclusive else ("warn" if real_difference_count or evidence_problem else ("note" if disabled_missing or target_more else "ok"))
 
     cards = [
         ("Matched", matched, "ok"),
@@ -538,6 +541,9 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     <dl class="context">
       <dt>Source CSV</dt><dd>{source_csv_html}</dd>
       <dt>Target CSV</dt><dd>{target_csv_html}</dd>
+      <dt>Scan evidence</dt><dd>{html_escape(summary_row.get('ScanEvidenceStatus'))}</dd>
+      <dt>Scan gap (hours)</dt><dd>{html_escape(summary_row.get('ScanGapHours'))}</dd>
+      <dt>Oldest scan age (hours)</dt><dd>{html_escape(summary_row.get('OldestScanAgeHours'))}</dd>
       <dt>Source root path</dt><dd>{html_escape(summary_row.get('SourceRootPath'))}</dd>
       <dt>Target root path</dt><dd>{html_escape(summary_row.get('TargetRootPath'))}</dd>
       <dt>Source rows</dt><dd>{format_integer(summary_row.get('SourceRows'))}</dd>
@@ -1730,6 +1736,8 @@ def main():
     parser.add_argument("--path-mapping-file")
     parser.add_argument("--sharegate-replacement-character", default="_")
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
+    parser.add_argument("--max-scan-age-difference-hours", type=float, default=24)
+    parser.add_argument("--max-scan-age-hours", type=float, default=48)
     parser.add_argument("--source-scan-document-libraries-only", action="store_true")
     parser.add_argument("--target-scan-document-libraries-only", action="store_true")
     parser.add_argument("--entra-users-csv", required=True)
@@ -1835,6 +1843,13 @@ def main():
             "TargetRootPath": args.target_root_path,
         }
     ]
+    summary_rows[0].update(describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours))
+    if not source_by_key or not target_by_key:
+        summary_rows[0]["ValidationStatus"] = "InconclusiveEmptyInventory"
+    elif summary_rows[0]["ScanEvidenceStatus"] in ("Stale", "Unverified"):
+        summary_rows[0]["ValidationStatus"] = "ReviewScanEvidence"
+    else:
+        summary_rows[0]["ValidationStatus"] = "ReviewNeeded" if any((missing_keys, disabled_entra_missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)) else "NoRelevantDifference"
 
     def rows_from_keys(keys, lookup):
         return [lookup[key] for key in keys]
@@ -2019,8 +2034,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

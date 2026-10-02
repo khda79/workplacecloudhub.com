@@ -735,6 +735,10 @@ function Open-InExplorer {
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0" Margin="0,0,12,0">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+              <Button x:Name="btnGlobalReport" Content="Global report" Style="{StaticResource Btn}" Padding="10,5"/>
+              <Button x:Name="btnClientLogo" Content="Client logo..." Style="{StaticResource BtnGhost}" Margin="8,0,0,0" Padding="10,5"/>
+            </StackPanel>
             <TextBlock Text="SHARED ACTIVITY" Style="{StaticResource SectionLabel}" Margin="0,0,0,8"/>
             <ListBox x:Name="listActivity" BorderBrush="#DDE7F0" BorderThickness="1"
                      FontSize="11" Height="210" ScrollViewer.HorizontalScrollBarVisibility="Auto" Margin="0,0,0,14"/>
@@ -894,6 +898,8 @@ $txtLogContent = ctrl 'txtLogContent'
 $btnOpenLogDir = ctrl 'btnOpenLogDir'
 $btnRefreshLogs= ctrl 'btnRefreshLogs'
 $btnOpenRunLog = ctrl 'btnOpenRunLog'
+$btnGlobalReport = ctrl 'btnGlobalReport'
+$btnClientLogo = ctrl 'btnClientLogo'
 
 # Config
 $lblConfigPath = ctrl 'lblConfigPath'
@@ -1643,6 +1649,66 @@ $btnOpenLogDir.Add_Click({
 
 $btnRefreshLogs.Add_Click({ Refresh-LogList })
 
+$btnGlobalReport.Add_Click({
+    $activity = $null
+    try {
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action 'GlobalReport'
+        $python = Join-Path $script:ScriptRoot 'Tools\Python\python.exe'
+        if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            $python = (Get-Command python -ErrorAction Stop).Source
+        }
+        $generator = Join-Path $script:ScriptRoot 'Scripts\Compare\build_global_report.py'
+        $migrationRoot = Join-Path $script:ScriptRoot 'Migrations'
+        $reportDirectory = Join-Path $migrationRoot 'reports\global'
+        $result = @(& $python $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
+        $reportPath = [string]($result | Select-Object -Last 1)
+        if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "Report was not created: $reportPath" }
+        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Global report: $reportPath"
+        Open-InExplorer $reportPath
+    }
+    catch {
+        if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
+        [System.Windows.MessageBox]::Show("Could not generate global report:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+    }
+    finally { Refresh-ActivityList }
+})
+
+$btnClientLogo.Add_Click({
+    $dialog = [Microsoft.Win32.OpenFileDialog]::new()
+    $dialog.Title = 'Choose a client logo (PNG or JPEG, up to 200 KB)'
+    $dialog.Filter = 'Image files (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg'
+    if ($dialog.ShowDialog($script:Window) -ne $true) { return }
+    $activity = $null
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($dialog.FileName)
+        if ($bytes.Length -gt 200KB -or $bytes.Length -lt 8) { throw 'Logo must be at most 200 KB and contain image data.' }
+        $isPng = [System.BitConverter]::ToString($bytes, 0, 8) -eq '89-50-4E-47-0D-0A-1A-0A'
+        $isJpeg = $bytes[0] -eq 255 -and $bytes[1] -eq 216 -and $bytes[2] -eq 255
+        if (-not $isPng -and -not $isJpeg) { throw 'Only PNG and JPEG logos are supported.' }
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action 'SetClientLogo'
+        $brandingDirectory = Join-Path $script:ScriptRoot 'Migrations\branding'
+        [void][System.IO.Directory]::CreateDirectory($brandingDirectory)
+        $extension = if ($isPng) { '.png' } else { '.jpg' }
+        $logoName = 'client-logo-' + [guid]::NewGuid().ToString('N') + $extension
+        [System.IO.File]::WriteAllBytes((Join-Path $brandingDirectory $logoName), $bytes)
+        $configPath = Join-Path $brandingDirectory 'branding.json.txt'
+        $temporaryPath = Join-Path $brandingDirectory ('branding-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        try {
+            [System.IO.File]::WriteAllText($temporaryPath, (@{ ClientLogoFile = $logoName } | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+            Move-Item -LiteralPath $temporaryPath -Destination $configPath -Force
+        }
+        finally { if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force } }
+        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Client logo configured: $logoName"
+        [System.Windows.MessageBox]::Show('Client logo saved. It will appear in newly generated HTML reports.', $script:AppName, 'OK', 'Information') | Out-Null
+    }
+    catch {
+        if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
+        [System.Windows.MessageBox]::Show("Could not save client logo:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+    }
+    finally { Refresh-ActivityList }
+})
+
 $listActivity.Add_SelectionChanged({
     $sel = $listActivity.SelectedItem
     if ($null -eq $sel) { return }
@@ -1711,8 +1777,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBV8qGtiBEwGBHM
-# sUNwq58+mckdUcUimwX3cCA+IT8NNqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOVtkwa+eAY+ba
+# OAEofOPVEKqAe9/f1tzvO2o0lQ9et6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1742,14 +1808,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDQLAAhmUbKEnbphvfcKiUG
-# UC5Lec45QO5VUMxTJjArsTANBgkqhkiG9w0BAQEFAASCAYBVD77HO6CQLC56b8Xj
-# 6WCrfAXAR0LDzYls4Wcmrj90Myq/0/aLK0qHZmiJZcgsB2umQocJ0SHsQwNrYrsn
-# 0JW9CjLTVODBP7zqHIyvYOhpACrqZGEY+lj5zFVkBYPz/NbwD/StcxceN5MMuBy3
-# 9TzgKKiaBbxIDAa4LWvCh6izNRiawal0CdnVS3nb9mAqOUv9zAK1ali9hmg3+nh/
-# F2sJ8kAnkohBcG1isFTVug8I56PCPF+MhLIRRrYjcZPJnA6NmZuH29PSgs9LIf1G
-# dr5HS9lWKW/xbpfDQpHadNMak68xbgaCnWdnnFJbZAFY2A2Kve4uGwUaqs66G2Kv
-# 0KEogd2ZnHLl6kHy755KhghszT0rZVXB0WYF3/4JKhX/stEGtpxLwEPbjjkkq+Pf
-# FG3hCpn343ab0/k8f/RDxhzYtNbfYvw2FPx1OTJMaExu0Hl9n7P+M3lQcTaOvZPZ
-# 4AtnLxPi9vk1vXY5jcGDqW59Mpk4bHJzW7ltwhupecLED1c=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCIF6cI2h8i/SDF9abhVhsF
+# 3f3Qnhgn47Cz0Y1HF8oWkDANBgkqhkiG9w0BAQEFAASCAYA5ijR51DKNHiTLnArt
+# NxsHnyGCcTlAdzri8nEBINXYgH55c+syclR1/zgeUT8NKs/dy6CHQbKC362g1HFD
+# VWYh3ZxzXOpHacJaK9r3TRCWCifA6M9iSEYQ5cXTHLZi1OqM1iNI2NWjgDo58I7/
+# Ud11ovxsjJ20xO2NgPxMcmXSHkRoR5pnAlCqp+AEOltRRBaitUYIvVJroB/+Lbg1
+# sryJJ+A3i0/fN/5amt9cq/ycF2HW4lhbiDJ4FpnFfa+NWuUZ6bJboO++lFFHfPnE
+# E+/rKMmWnLJiv9uDDsaDGt8DBkhukUrobqdtBZqgp0LTi5ldhxLwj/L/YssKPbtq
+# cSXQk+KqsC0sQzgfCtKKcQuq8PDSY3UAPzRe3rsMmavno2/X3C9frA8Cajej8xiO
+# BvVZIgKdlrtgJS2RheVWrjyQavBzGE8IiiLmhN7Fo3szq4ZiywogtkvDOh1GUHKt
+# JhWbh3Wka988+4zEtqSY8XAiIsUveHfsat2O6alPfDJNzHg=
 # SIG # End signature block

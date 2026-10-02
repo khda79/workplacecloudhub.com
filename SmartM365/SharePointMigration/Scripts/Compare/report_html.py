@@ -2,6 +2,7 @@
 
 import base64
 import html
+import json
 from pathlib import Path
 
 
@@ -48,6 +49,8 @@ main { width: min(1440px, calc(100% - 40px)); margin: 28px auto 48px; }
 .hero-main { min-width: 0; }
 .brand { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; }
 .brand img { display: block; width: 145px; max-height: 100px; object-fit: contain; object-position: left center; }
+.client-brand { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
+.client-brand img { max-width: 180px; max-height: 72px; object-fit: contain; background: white; padding: 5px; border-radius: 6px; }
 .brand-name { font-weight: 750; font-size: 16px; letter-spacing: .01em; }
 .brand-product { color: #c9e3ff; font-size: 12px; }
 .eyebrow { color: #9ed3ff; font-size: 11px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
@@ -132,6 +135,32 @@ def logo_html():
     return f'<img src="data:image/png;base64,{encoded}" alt="WorkplaceCloudHub">'
 
 
+def client_logo_html():
+    """Optional centrally configured logo; keep reports self-contained."""
+    branding = Path(__file__).resolve().parents[2] / "Migrations" / "branding"
+    config = branding / "branding.json.txt"
+    if not config.is_file():
+        return ""
+    try:
+        chosen = json.loads(config.read_text(encoding="utf-8")).get("ClientLogoFile", "")
+        if chosen != Path(chosen).name:
+            return ""
+        logo = branding / chosen
+        if not logo.is_file() or logo.stat().st_size > 200 * 1024:
+            return ""
+        data = logo.read_bytes()
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime = "image/png"
+        elif data.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        else:
+            return ""
+        encoded = base64.b64encode(data).decode("ascii")
+        return f'<div class="client-brand"><img src="data:{mime};base64,{encoded}" alt="Client logo"></div>'
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return ""
+
+
 def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html=""):
     return f'''<!doctype html>
 <html lang="en">
@@ -148,6 +177,7 @@ def render_report(title, report_kind, generated_at, status_text, status_class, c
   <header class="hero">
     <div class="hero-main">
       <div class="brand">{logo_html()}<div><div class="brand-name">WorkplaceCloudHub</div><div class="brand-product">SmartM365 · SharePoint Migration</div></div></div>
+      {client_logo_html()}
       <div class="eyebrow">{escape(report_kind)}</div>
       <h1>{escape(title)}</h1>
       <div class="subtitle">Generated at {escape(generated_at)}</div>
