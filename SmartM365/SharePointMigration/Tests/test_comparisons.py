@@ -10,6 +10,9 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
+COMPARE_DIR = ROOT / 'Scripts' / 'Compare'
+if str(COMPARE_DIR) not in sys.path:
+    sys.path.insert(0, str(COMPARE_DIR))
 
 
 def load(name):
@@ -122,6 +125,48 @@ class PermissionComparisonTests(unittest.TestCase):
             self.assertTrue(report['Html'].is_file())
             with zipfile.ZipFile(report['Excel']) as package:
                 self.assertIsNone(package.testzip())
+
+
+class HtmlReportTests(unittest.TestCase):
+    def test_branded_file_report_is_portable_and_escapes_inventory_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            detail = root / 'details & more.csv'
+            detail.write_text('sample', encoding='utf-8')
+            rows = [
+                {'Status': 'Review', 'MissingInTarget': 1, 'WebPath': '/site',
+                 'SourceLibraryTitle': '<script>alert(1)</script>' if index == 0 else f'Library {index}'}
+                for index in range(21)
+            ]
+            path = root / 'summary.html'
+            FILES.create_file_html_summary(
+                path, 'Synthetic <file> comparison', {'MissingInTarget': 21}, rows,
+                [('Details', detail, 'Full detail')],
+            )
+            report = path.read_text(encoding='utf-8')
+            self.assertIn('WorkplaceCloudHub', report)
+            self.assertIn('data:image/png;base64,', report)
+            self.assertIn('Showing 20 of 21 libraries with differences', report)
+            self.assertIn('href="details%20%26%20more.csv"', report)
+            self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', report)
+            self.assertNotIn('<script>alert(1)</script>', report)
+            self.assertIn('Synthetic &lt;file&gt; comparison', report)
+
+    def test_permission_report_keeps_scope_warning_and_skips_missing_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'summary.html'
+            PERMISSIONS.create_permission_html_summary(
+                path, 'Synthetic permissions',
+                {'ScopeWarning': 'Source < target', 'DisabledEntraUsersNotInSPO': 1},
+                [], [], [('Missing export', root / 'absent.csv', 'Not generated')],
+            )
+            report = path.read_text(encoding='utf-8')
+            self.assertIn('WorkplaceCloudHub', report)
+            self.assertIn('Source &lt; target', report)
+            self.assertIn('No report files found.', report)
+            self.assertNotIn('href="absent.csv"', report)
+            self.assertIn('Showing 0 of 0 objects with differences', report)
 
 
 if __name__ == '__main__':

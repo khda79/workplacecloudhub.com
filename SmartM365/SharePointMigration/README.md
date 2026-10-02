@@ -138,6 +138,8 @@ missing files and duplicate keys. Repeat with permission inventories and
 ComparePermissions. Permission comparison requires a fresh Entra users cache
 and at least one SPO endpoint; the current launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
+The branded HTML summaries are self-contained and show at most 20 objects with
+differences; use their linked CSV and Excel exports for the full detail.
 Runtime outputs stay inside the local migration folder:
 
 ```text

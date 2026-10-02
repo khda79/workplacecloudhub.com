@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
+from report_html import metric_card, render_report
+
 
 def print(*args, **kwargs):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -469,10 +471,7 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
         ("Source users not in Entra", not_entra, "note" if not_entra else "ok"),
         ("Limited Access ignored", source_la + target_la, "muted"),
     ]
-    card_html = [
-        f'<div class="metric {css_class}"><div class="metric-label">{html_escape(label)}</div><div class="metric-value">{format_integer(value)}</div></div>'
-        for label, value, css_class in cards
-    ]
+    card_html = [metric_card(label, format_integer(value), css_class) for label, value, css_class in cards]
 
     source_csv_html = html_escape(source_csv) if source_csv else html_escape(summary_row.get("SourceCsv"))
     target_csv_html = html_escape(target_csv) if target_csv else html_escape(summary_row.get("TargetCsv"))
@@ -483,6 +482,9 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
 
     report_link_rows = []
     for label, target_path, description in report_links:
+        target_path = Path(target_path) if target_path else None
+        if not target_path or not target_path.exists():
+            continue
         report_link_rows.append(
             "<tr>"
             f"<td>{html_escape(label)}</td>"
@@ -490,9 +492,13 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
             f"<td>{html_escape(description)}</td>"
             "</tr>"
         )
+    if not report_link_rows:
+        report_link_rows.append('<tr><td colspan="3" class="empty">No report files found.</td></tr>')
 
+    difference_rows = top_permission_difference_rows(permission_summary_rows, limit=None)
+    shown_rows = difference_rows[:20]
     top_rows_html = []
-    for row in top_permission_difference_rows(permission_summary_rows):
+    for row in shown_rows:
         top_rows_html.append(
             "<tr>"
             f"<td>{html_escape(row.get('Status'))}</td>"
@@ -522,83 +528,35 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     if not scope_rows_html:
         scope_rows_html.append('<tr><td colspan="3" class="empty">No scope summary rows.</td></tr>')
 
-    document = f'''<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{html_escape(title)}</title>
-<style>
-:root {{ color-scheme: light; --bg:#F5F8FB; --card:#FFFFFF; --text:#1F2937; --muted:#5F6B7A; --line:#DDE7F0; --accent:#0078D4; --ok:#107C10; --bad:#C50F1F; --note:#8A6A00; }}
-* {{ box-sizing:border-box; }}
-body {{ margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI", Arial, sans-serif; font-size:14px; line-height:1.45; }}
-main {{ max-width:1280px; margin:0 auto; padding:28px; }}
-.header {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin-bottom:18px; display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }}
-h1 {{ margin:0 0 6px; font-size:25px; font-weight:650; letter-spacing:0; }}
-.subtitle {{ color:var(--muted); }}
-.badge {{ display:inline-block; border:1px solid var(--line); border-radius:999px; padding:5px 10px; font-weight:600; background:#fff; white-space:nowrap; }}
-.badge.ok {{ color:var(--ok); border-color:#B8DAB8; background:#F1FAF1; }}
-.badge.warn {{ color:var(--bad); border-color:#F1B7BC; background:#FFF4F5; }}
-.badge.note {{ color:var(--note); border-color:#E7D99B; background:#FFF9DF; }}
-.metrics {{ display:grid; grid-template-columns:repeat(6, minmax(140px, 1fr)); gap:12px; margin-bottom:18px; }}
-.metric {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:15px; min-height:92px; }}
-.metric-label {{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
-.metric-value {{ font-size:28px; font-weight:700; margin-top:8px; }}
-.metric.ok .metric-value {{ color:var(--ok); }} .metric.bad .metric-value {{ color:var(--bad); }} .metric.note .metric-value {{ color:var(--note); }} .metric.muted .metric-value {{ color:var(--muted); }}
-.section {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }}
-h2 {{ margin:0 0 12px; font-size:17px; }}
-.grid {{ display:grid; grid-template-columns:190px minmax(0, 1fr); gap:8px 14px; }}
-.key {{ color:var(--muted); }}
-a {{ color:var(--accent); text-decoration:none; }} a:hover {{ text-decoration:underline; }}
-table {{ width:100%; border-collapse:collapse; }}
-th, td {{ border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }}
-th {{ background:#F8FBFE; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
-.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
-.empty {{ color:var(--muted); text-align:center; padding:18px; }}
-.callout {{ border-radius:8px; padding:12px 14px; margin-bottom:18px; }}
-.callout.warn {{ border:1px solid #E7D99B; background:#FFF9DF; color:#5F4B00; }}
-.footer {{ color:var(--muted); font-size:12px; margin-top:16px; }}
-@media (max-width:1000px) {{ .metrics {{ grid-template-columns:repeat(2, minmax(140px, 1fr)); }} .header {{ display:block; }} .badge {{ margin-top:12px; }} }}
-</style>
-</head>
-<body>
-<main>
-  <div class="header">
-    <div>
-      <h1>{html_escape(title)}</h1>
-      <div class="subtitle">Generated at {html_escape(generated_at)}</div>
-    </div>
-    <div class="badge {status_class}">{html_escape(status_text)}</div>
-  </div>
-  {warning_html}
-  <div class="metrics">{''.join(card_html)}</div>
-  <div class="section">
-    <h2>Run context</h2>
-    <div class="grid">
-      <div class="key">Source CSV</div><div>{source_csv_html}</div>
-      <div class="key">Target CSV</div><div>{target_csv_html}</div>
-      <div class="key">Source root path</div><div>{html_escape(summary_row.get('SourceRootPath'))}</div>
-      <div class="key">Target root path</div><div>{html_escape(summary_row.get('TargetRootPath'))}</div>
-      <div class="key">Source rows</div><div>{format_integer(summary_row.get('SourceRows'))}</div>
-      <div class="key">Target rows</div><div>{format_integer(summary_row.get('TargetRows'))}</div>
-    </div>
-  </div>
-  <div class="section">
-    <h2>Report files</h2>
-    <table><thead><tr><th>Report</th><th>File</th><th>Description</th></tr></thead><tbody>{''.join(report_link_rows)}</tbody></table>
-  </div>
-  <div class="section">
-    <h2>Top objects with differences</h2>
-    <table><thead><tr><th>Status</th><th>Missing</th><th>Disabled users</th><th>Target more</th><th>Target less</th><th>Different</th><th>Extra</th><th>Scope</th><th>Object path</th><th>Title</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table>
-  </div>
-  <div class="section">
-    <h2>Scope summary</h2>
-    <table><thead><tr><th>Object scope</th><th>Status</th><th>Count</th></tr></thead><tbody>{''.join(scope_rows_html)}</tbody></table>
-  </div>
-  <div class="footer">SmartM365 SharePoint migration permission comparison summary.</div>
-</main>
-</body>
-</html>
-'''
+    body_html = f'''
+  <section class="section" aria-labelledby="run-context">
+    <div class="section-heading"><h2 id="run-context">Run context</h2></div>
+    <dl class="context">
+      <dt>Source CSV</dt><dd>{source_csv_html}</dd>
+      <dt>Target CSV</dt><dd>{target_csv_html}</dd>
+      <dt>Source root path</dt><dd>{html_escape(summary_row.get('SourceRootPath'))}</dd>
+      <dt>Target root path</dt><dd>{html_escape(summary_row.get('TargetRootPath'))}</dd>
+      <dt>Source rows</dt><dd>{format_integer(summary_row.get('SourceRows'))}</dd>
+      <dt>Target rows</dt><dd>{format_integer(summary_row.get('TargetRows'))}</dd>
+    </dl>
+  </section>
+  <section class="section" aria-labelledby="report-files">
+    <div class="section-heading"><h2 id="report-files">Report files</h2><span class="section-note">Open the full CSV or Excel exports for detailed rows</span></div>
+    <div class="table-scroll" role="region" aria-label="Report files" tabindex="0"><table><thead><tr><th scope="col">Report</th><th scope="col">File</th><th scope="col">Description</th></tr></thead><tbody>{''.join(report_link_rows)}</tbody></table></div>
+  </section>
+  <section class="section" aria-labelledby="top-differences">
+    <div class="section-heading"><h2 id="top-differences">Top objects with differences</h2><span class="section-note">Showing {len(shown_rows)} of {len(difference_rows)} objects with differences</span></div>
+    <div class="table-scroll" role="region" aria-label="Top objects with differences" tabindex="0"><table><thead><tr><th scope="col">Status</th><th scope="col">Missing</th><th scope="col">Disabled users</th><th scope="col">Target more</th><th scope="col">Target less</th><th scope="col">Different</th><th scope="col">Extra</th><th scope="col">Scope</th><th scope="col">Object path</th><th scope="col">Title</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table></div>
+  </section>
+  <section class="section" aria-labelledby="scope-summary">
+    <div class="section-heading"><h2 id="scope-summary">Scope summary</h2></div>
+    <div class="table-scroll" role="region" aria-label="Scope summary" tabindex="0"><table><thead><tr><th scope="col">Object scope</th><th scope="col">Status</th><th scope="col">Count</th></tr></thead><tbody>{''.join(scope_rows_html)}</tbody></table></div>
+  </section>'''
+    document = render_report(
+        title, "Permission comparison", generated_at, status_text, status_class,
+        "".join(card_html), body_html, "SmartM365 SharePoint migration permission comparison summary",
+        alert_html=warning_html,
+    )
     path.write_text(document, encoding="utf-8", newline="\n")
     return path
 
