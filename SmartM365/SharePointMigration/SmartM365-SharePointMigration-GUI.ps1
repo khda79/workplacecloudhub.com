@@ -736,7 +736,7 @@ function Open-InExplorer {
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0" Margin="0,0,12,0">
             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-              <Button x:Name="btnGlobalReport" Content="Global report" Style="{StaticResource Btn}" Padding="10,5"/>
+              <Button x:Name="btnGlobalReport" Content="Global report" ToolTip="Generate HTML, Excel and CSV reports" Style="{StaticResource Btn}" Padding="10,5"/>
               <Button x:Name="btnClientLogo" Content="Client logo..." Style="{StaticResource BtnGhost}" Margin="8,0,0,0" Padding="10,5"/>
             </StackPanel>
             <TextBlock Text="SHARED ACTIVITY" Style="{StaticResource SectionLabel}" Margin="0,0,0,8"/>
@@ -1664,7 +1664,9 @@ $btnGlobalReport.Add_Click({
         if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
         $reportPath = [string]($result | Select-Object -Last 1)
         if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "Report was not created: $reportPath" }
-        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Global report: $reportPath"
+        $excelPath = [System.IO.Path]::ChangeExtension($reportPath, '.xlsx')
+        if (-not (Test-Path -LiteralPath $excelPath -PathType Leaf)) { throw "Excel report was not created: $excelPath" }
+        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 -Detail "Global report: $reportPath; Excel: $excelPath"
         Open-InExplorer $reportPath
     }
     catch {
@@ -1777,8 +1779,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOVtkwa+eAY+ba
-# OAEofOPVEKqAe9/f1tzvO2o0lQ9et6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKsKdLgQ3T/EKw
+# 6qkfqTbwJcPL6k9l3cHiFmbwW4lAsKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1808,14 +1810,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCIF6cI2h8i/SDF9abhVhsF
-# 3f3Qnhgn47Cz0Y1HF8oWkDANBgkqhkiG9w0BAQEFAASCAYA5ijR51DKNHiTLnArt
-# NxsHnyGCcTlAdzri8nEBINXYgH55c+syclR1/zgeUT8NKs/dy6CHQbKC362g1HFD
-# VWYh3ZxzXOpHacJaK9r3TRCWCifA6M9iSEYQ5cXTHLZi1OqM1iNI2NWjgDo58I7/
-# Ud11ovxsjJ20xO2NgPxMcmXSHkRoR5pnAlCqp+AEOltRRBaitUYIvVJroB/+Lbg1
-# sryJJ+A3i0/fN/5amt9cq/ycF2HW4lhbiDJ4FpnFfa+NWuUZ6bJboO++lFFHfPnE
-# E+/rKMmWnLJiv9uDDsaDGt8DBkhukUrobqdtBZqgp0LTi5ldhxLwj/L/YssKPbtq
-# cSXQk+KqsC0sQzgfCtKKcQuq8PDSY3UAPzRe3rsMmavno2/X3C9frA8Cajej8xiO
-# BvVZIgKdlrtgJS2RheVWrjyQavBzGE8IiiLmhN7Fo3szq4ZiywogtkvDOh1GUHKt
-# JhWbh3Wka988+4zEtqSY8XAiIsUveHfsat2O6alPfDJNzHg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMoB0VHWc5HEOQM/hidSq1
+# MDXm7SWzMx+o6pRSGrWfOTANBgkqhkiG9w0BAQEFAASCAYCfsLnu+jxXiUcCEpe+
+# ZfkAbOcWXD5kPR3ZWZ8kDzFG/EWW+OyjRuwtHSUBo5y9kY43xzwEsctT0plhywdj
+# n5dyfnxipFD+lNUF1eHEkaHSfsHQFry0z/mMWIaLKHeSFJ0yq4gAfI9oTf2UtXYB
+# BnqqdhYO/zsuBmYiXmcbKdG6rvXDwU84tSkXW8D+in694VbGGvWWMoGPW5uyL1GC
+# sWE5xYjgArM5OBjHTjvZLrqllvccRIJf+VIzWIDaSo7Ba272dtpvcB/0cO5Yo9kV
+# V2loRwyugU/Y1LqQ8TxcEPrbEhq5oO4jh6FxpI3xvaH4hiAgWc5+e5QkhaQUCRv+
+# L8ZAComzx4PjspQDan/oHuJGtfpDTnr6FsNjvVkmfAJGb3zGdNVSgELmZMyG6yPL
+# 6/aWZUg0ervMPeaMQ5bfQjFFnCvByHghGWsS+k/3ELs/flyPuiKuGnJ7IA7G5RCu
+# Jur7hXXgEFZfVZwcvFOn+jDnRTlXjGkDCbh6T3HGdbThGIc=
 # SIG # End signature block

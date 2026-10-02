@@ -4,18 +4,111 @@ import argparse
 import csv
 from datetime import datetime
 from html import escape
+from io import StringIO
 import os
 from pathlib import Path
 import re
 import sys
 from urllib.parse import quote
 from uuid import uuid4
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Export"))
 from report_html import metric_card, render_report
+from export_comparison_to_excel import (
+    COLUMN_WIDTHS,
+    cell_xml,
+    column_name,
+    content_types,
+    doc_props_app,
+    doc_props_core,
+    root_rels,
+    sheet_xml_end,
+    sheet_xml_start,
+    styles_xml,
+    workbook_rels,
+    workbook_xml,
+)
 
 
 STAMP = re.compile(r"-(\d{8})-(\d{6})(?:-[^.]+)?(?:\.csv)?$", re.I)
+COUNT_FIELDS = {
+    "SourceKeys", "TargetKeys", "MatchedFiles", "MissingInTarget", "ExtraInTarget",
+    "ExtraFoldersInTarget", "DifferentSize", "ChangedModifiedDate", "TargetOlderThanSource",
+    "ChangedVersion", "SourceFilteredRows", "TargetFilteredRows", "SourceExcludedRows", "TargetExcludedRows",
+}
+DATE_FIELDS = {"ComparedAt", "SourceScannedAt", "TargetScannedAt"}
+DECIMAL_FIELDS = {"ScanGapHours", "OldestScanAgeAtCompareHours"}
+
+
+def write_global_workbook(rows, fields, headings, xlsx_path):
+    """Use the project's dependency-free OOXML writer and preserve Excel value types."""
+    COLUMN_WIDTHS.update({
+        "Migration": 24, "Status": 29, "Evidence": 64, "Source": 58,
+        "Destination": 58, "Detail": 65, "Compared": 22, "Source scan": 22,
+        "Target scan": 22, "Success %": 15, "Definition": 85,
+    })
+    sheet = StringIO()
+    sheet_xml_start(sheet, headings)
+    sheet.write('<row r="1" ht="24" customHeight="1">')
+    for column, heading in enumerate(headings, start=1):
+        cell = cell_xml(1, column, heading)
+        sheet.write(cell.replace(f'<c r="{column_name(column)}1"', f'<c r="{column_name(column)}1" s="3"', 1))
+    sheet.write('</row>\n')
+    for excel_row, row in enumerate(rows, start=2):
+        sheet.write(f'<row r="{excel_row}">')
+        for column, field in enumerate(fields, start=1):
+            value = row.get(field, "")
+            if field == "SuccessPercent" and isinstance(value, str) and value.endswith("%"):
+                sheet.write(cell_xml(excel_row, column, f"{float(value[:-1]) / 100:.12g}", is_percent=True))
+            else:
+                sheet.write(cell_xml(excel_row, column, value,
+                                     is_numeric=field in COUNT_FIELDS or field in DECIMAL_FIELDS,
+                                     is_date=field in DATE_FIELDS))
+        sheet.write('</row>\n')
+    sheet_xml_end(sheet, len(rows) + 1, len(fields))
+
+    definitions = [
+        ("Success %", "Matched files / source unique keys in the compared scope. Extra target files are separate."),
+        ("Scan dates", "Derived from inventory CSV filenames in this overview; verify scan receipts before migration acceptance."),
+        ("Evidence alerts", "The overview flags scan gaps above 12 hours and an oldest scan above 24 hours at comparison."),
+        ("Filtered rows", "A 100% success rate does not cover source or destination rows excluded by the scope filter."),
+    ]
+    note_sheet = StringIO()
+    sheet_xml_start(note_sheet, ["Field", "Definition"])
+    for excel_row, values in enumerate([("Field", "Definition"), *definitions], start=1):
+        note_sheet.write(f'<row r="{excel_row}"' + (' ht="24" customHeight="1"' if excel_row == 1 else '') + '>')
+        for column, value in enumerate(values, start=1):
+            cell = cell_xml(excel_row, column, value)
+            if excel_row == 1:
+                cell = cell.replace(f'<c r="{column_name(column)}1"', f'<c r="{column_name(column)}1" s="3"', 1)
+            note_sheet.write(cell)
+        note_sheet.write('</row>\n')
+    sheet_xml_end(note_sheet, len(definitions) + 1, 2)
+
+    sheets = ["Latest comparisons", "Definitions"]
+    comparison_xml = sheet.getvalue().replace(
+        "<sheetViews>", f'<dimension ref="A1:{column_name(len(fields))}{len(rows) + 1}"/>\n<sheetViews>', 1)
+    definitions_xml = note_sheet.getvalue().replace(
+        "<sheetViews>", f'<dimension ref="A1:B{len(definitions) + 1}"/>\n<sheetViews>', 1)
+    default_styles = styles_xml().replace('<fonts count="1">', '<fonts count="2">', 1).replace(
+        '</fonts>', '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts>', 1).replace(
+        '<fills count="1">', '<fills count="2">', 1).replace(
+        '</fills>', '<fill><patternFill patternType="solid"><fgColor rgb="FF0D2747"/><bgColor indexed="64"/></patternFill></fill></fills>', 1).replace(
+        '<cellXfs count="3">', '<cellXfs count="4">', 1).replace(
+        '</cellXfs>', '<xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>', 1).replace(
+        "</styleSheet>", '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
+    with zipfile.ZipFile(xlsx_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        archive.writestr("[Content_Types].xml", content_types(len(sheets)))
+        archive.writestr("_rels/.rels", root_rels())
+        archive.writestr("xl/workbook.xml", workbook_xml(sheets))
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels(len(sheets)))
+        archive.writestr("xl/styles.xml", default_styles)
+        archive.writestr("docProps/app.xml", doc_props_app(sheets))
+        archive.writestr("docProps/core.xml", doc_props_core())
+        archive.writestr("xl/worksheets/sheet1.xml", comparison_xml)
+        archive.writestr("xl/worksheets/sheet2.xml", definitions_xml)
 
 
 def stamp(value):
@@ -142,6 +235,7 @@ def build(migrations_root, output_directory):
     name = "Global-Comparison-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
     csv_path = output_directory / (name + ".csv")
     html_path = output_directory / (name + ".html")
+    xlsx_path = output_directory / (name + ".xlsx")
     fields = ["Migration", "SuccessPercent", "ValidationStatus", "EvidenceNotes", "ComparedAt", "SourceScannedAt", "TargetScannedAt", "ScanGapHours", "OldestScanAgeAtCompareHours",
               "Source", "Destination", "SourceKeys", "TargetKeys", "MatchedFiles", "MissingInTarget", "ExtraInTarget",
               "ExtraFoldersInTarget", "DifferentSize", "ChangedModifiedDate", "TargetOlderThanSource", "ChangedVersion",
@@ -152,6 +246,7 @@ def build(migrations_root, output_directory):
     headings = ["Migration", "Success %", "Status", "Evidence", "Compared", "Source scan", "Target scan", "Gap (h)", "Oldest age (h)", "Source", "Destination",
                 "Source keys", "Target keys", "Matched", "Missing", "Extra", "Extra folders", "Size", "Modified", "Target older",
                 "Version", "Source filtered", "Target filtered", "Source excluded", "Target excluded", "Detail"]
+    write_global_workbook(rows, fields, headings, xlsx_path)
     body_rows = []
     for row in rows:
         cells = []
@@ -171,7 +266,7 @@ def build(migrations_root, output_directory):
     table += "".join(f"<th scope=\"col\">{escape(item)}</th>" for item in headings) + "</tr></thead><tbody>"
     table += "".join(body_rows) if body_rows else f'<tr><td colspan="{len(fields)}">No file comparisons available.</td></tr>'
     table += '</tbody></table></div></section>'
-    table += f'<p><a href="{escape(quote(csv_path.name), quote=True)}">Download CSV</a></p>'
+    table += f'<p><a href="{escape(quote(xlsx_path.name), quote=True)}">Download Excel</a> · <a href="{escape(quote(csv_path.name), quote=True)}">Download CSV</a></p>'
     cards = metric_card("Migrations with comparisons", len(rows), "ok")
     cards += metric_card("Inconclusive inventories", sum(row["ValidationStatus"] == "InconclusiveEmptyInventory" for row in rows), "note")
     document = render_report("Global comparison report", "Migration portfolio", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

@@ -179,6 +179,17 @@ class HtmlReportTests(unittest.TestCase):
             self.assertEqual(row['SourceScannedAt'], '2026-10-02 08:00:00')
             self.assertEqual(row['MissingInTarget'], '2')
             self.assertIn('https://source/sites/example', output.read_text(encoding='utf-8'))
+            self.assertIn('Download Excel', output.read_text(encoding='utf-8'))
+            with zipfile.ZipFile(output.with_suffix('.xlsx')) as package:
+                self.assertIsNone(package.testzip())
+                workbook = ET.fromstring(package.read('xl/workbook.xml'))
+                self.assertEqual([node.get('name') for node in workbook if node.tag.endswith('sheets') for node in node],
+                                 ['Latest comparisons', 'Definitions'])
+                namespace = {'x': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+                sheet = ET.fromstring(package.read('xl/worksheets/sheet1.xml'))
+                self.assertEqual(sheet.find(".//x:c[@r='B2']/x:v", namespace).text, '0.8')
+                self.assertEqual(sheet.find(".//x:c[@r='B2']", namespace).get('s'), '2')
+                self.assertEqual(sheet.find(".//x:c[@r='E2']", namespace).get('s'), '1')
 
     def test_manifest_records_true_row_count_and_sha256(self):
         with tempfile.TemporaryDirectory() as directory:

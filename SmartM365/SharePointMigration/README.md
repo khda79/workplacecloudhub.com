@@ -275,7 +275,7 @@ unverified scans for review when an override allowed comparison to continue.
 The file report displays `SuccessPercent = matched files / source unique keys`
 within the compared scope. Additional target files and filtered rows are
 displayed separately; 100% does not certify migration completeness. In the GUI
-Logs tab, **Global report** builds an offline HTML and CSV table from each
+Logs tab, **Global report** builds offline HTML, Excel and CSV tables from each
 migration's latest file `Summary.csv` under `Migrations/reports/global`.
 **Client logo...** accepts a PNG or JPEG up to 200 KB and stores it in the
 shared, ignored `Migrations/branding` folder. Newly generated HTML reports
