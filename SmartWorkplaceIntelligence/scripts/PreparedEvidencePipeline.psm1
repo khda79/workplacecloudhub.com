@@ -339,7 +339,13 @@ function Publish-PreparedEvidenceBatch {
         }
         $historyTables = @($contract.tables | Where-Object { $_.table -match 'History|Trend' })
         $historyKeyVersions = [ordered]@{}
+        $historyKeys = @{}
         foreach ($table in $historyTables) {
+            # The comparison key is declared per table: stable period and dimension columns only,
+            # never measures or provisional dates that the next run legitimately replaces.
+            if (-not $table.PSObject.Properties['historyKey'] -or @($table.historyKey).Count -eq 0) { throw "No historical comparison key configured: $($table.table)" }
+            foreach ($column in @($table.historyKey)) { if ($column -notin @($table.columns.name)) { throw "Unknown historical key column in $($table.table): $column" } }
+            $historyKeys[$table.table] = @($table.historyKey)
             $version = 1
             if ($table.PSObject.Properties['historyKeyVersion']) {
                 if (-not [int]::TryParse([string]$table.historyKeyVersion,[ref]$version) -or $version -lt 1) { throw "Invalid historyKeyVersion: $($table.table)" }
@@ -368,11 +374,15 @@ function Publish-PreparedEvidenceBatch {
                 $oldPath = Get-PreparedChildPath $output "batches/$($previous.BatchId)/$($table.file)"
                 $newPath = Get-PreparedChildPath $batch $table.file
                 $newKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-                $keyColumns = @($table.columns.name | Where-Object { $_ -match 'Date|Week|Metric Name|Service|Country' })
-                if (-not $keyColumns.Count) { throw "No historical comparison key configured: $($table.table)" }
+                $keyColumns = $historyKeys[$table.table]
                 $keyOf = { param($row) ($keyColumns | ForEach-Object { $v=[string]$row.$_; $v.Length.ToString()+':'+$v }) -join '|' }
                 Import-Csv -LiteralPath $newPath | ForEach-Object { $null=$newKeys.Add((& $keyOf $_)) }
-                Import-Csv -LiteralPath $oldPath | ForEach-Object { if (-not $newKeys.Contains((& $keyOf $_))) { throw "Historical coverage would regress: $($table.table)" } }
+                Import-Csv -LiteralPath $oldPath | ForEach-Object {
+                    if (-not $newKeys.Contains((& $keyOf $_))) {
+                        $oldRow = $_
+                        throw ("Historical coverage would regress: {0} (missing {1})" -f $table.table, (($keyColumns | ForEach-Object { '{0}={1}' -f $_, $oldRow.$_ }) -join ', '))
+                    }
+                }
             }
         }
         $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;HistoryKeyVersions=$historyKeyVersions;HistoryKeyResets=@($historyKeyResets);Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}

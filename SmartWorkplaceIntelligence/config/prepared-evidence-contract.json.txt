@@ -473,6 +473,7 @@
     {
       "table": "User Activity History Evidence",
       "file": "UserActivityHistoryEvidence.csv",
+      "historyKey": ["Week Label"],
       "uniqueKey": [
         "Date Key",
         "User Source ID"
@@ -535,6 +536,7 @@
     {
       "table": "Workforce Trend Evidence",
       "file": "WorkforceTrendEvidence.csv",
+      "historyKey": ["Week Label"],
       "uniqueKey": [],
       "columns": [
         {
@@ -660,6 +662,7 @@
     {
       "table": "Windows Lifecycle Trend Evidence",
       "file": "WindowsLifecycleTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
       "uniqueKey": [],
       "columns": [
         {
@@ -699,6 +702,7 @@
     {
       "table": "Endpoint Experience Trend Evidence",
       "file": "EndpointExperienceTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
       "uniqueKey": [],
       "columns": [
         {
@@ -841,6 +845,7 @@
     {
       "table": "Application Trend Evidence",
       "file": "ApplicationTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
       "uniqueKey": [],
       "columns": [
         {
@@ -1054,6 +1059,7 @@
     {
       "table": "Collaboration Trend Evidence",
       "file": "CollaborationTrendEvidence.csv",
+      "historyKey": ["Snapshot Week", "Service"],
       "uniqueKey": [],
       "columns": [
         {
@@ -1208,6 +1214,7 @@
     {
       "table": "Content Storage Trend Evidence",
       "file": "ContentStorageTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
       "uniqueKey": [],
       "columns": [
         {
@@ -1826,6 +1833,7 @@
     {
       "table": "Executive KPI Trends",
       "file": "ExecutiveKPITrends.csv",
+      "historyKey": ["Date Key", "Metric Name"],
       "historyKeyVersion": 2,
       "uniqueKey": [
         "Date Key",

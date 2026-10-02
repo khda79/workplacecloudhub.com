@@ -7,12 +7,12 @@ $staging=Join-Path $root 'staging'
 $output=Join-Path $root 'DATA-POWERBI'
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 $contract=Join-Path $root 'contract.json'
-@{tables=@(@{table='Test Trend';file='Trend.csv';uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
+@{tables=@(@{table='Test Trend';file='Trend.csv';historyKey=@('Date');uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
 function Fixture($Rows) { $Rows | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation }
-function ExpectFailure([string]$Name,[scriptblock]$Action) {
+function ExpectFailure([string]$Name,[scriptblock]$Action,[string]$Like='*') {
     $before=(Get-FileHash (Join-Path $output 'current.json.txt')).Hash
     $failed=$false
-    try { & $Action | Out-Null } catch { $failed=$true }
+    try { & $Action | Out-Null } catch { $failed=$_.Exception.Message -like $Like }
     if (-not $failed) { throw "Expected rejection: $Name" }
     if ((Get-FileHash (Join-Path $output 'current.json.txt')).Hash -ne $before) { throw "Last good pointer changed: $Name" }
     Write-Host "PASS: $Name rejected; last good batch preserved."
@@ -43,7 +43,7 @@ $pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-J
 if ($pointer.PreviousBatchId -ne $first.BatchId -or -not(Test-Path $first.BatchPath)) {throw 'Previous version lost.'}
 Write-Host 'PASS: complete replacement retains previous batch.'
 function Contract([int]$KeyVersion) {
-    @{tables=@(@{table='Test Trend';file='Trend.csv';historyKeyVersion=$KeyVersion;uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
+    @{tables=@(@{table='Test Trend';file='Trend.csv';historyKey=@('Date');historyKeyVersion=$KeyVersion;uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
 }
 Contract 2
 Fixture @([pscustomobject]@{Date='2026-01-05';Value='4';Note='x'})
@@ -82,6 +82,29 @@ try {
 } finally { $lock.Dispose() }
 if (-not $failed -or (Get-Content -LiteralPath $target -Raw) -ne 'new' -or -not (Test-Path -LiteralPath (Join-Path $moveRoot 'next.tmp'))) { throw 'Persistent lock was not rejected with the target path.' }
 Write-Host 'PASS: persistently locked target rejected with its path; source and target preserved.'
+# Weekly history: the declared key is the week; provisional snapshot dates and per-user values may change.
+$weekRoot=Join-Path $root 'weekly'
+$staging=Join-Path $weekRoot 'staging'; $output=Join-Path $weekRoot 'DATA-POWERBI'
+New-Item -ItemType Directory -Path $staging -Force | Out-Null
+$contract=Join-Path $weekRoot 'contract.json'
+function WeekContract([switch]$WithoutKey) {
+    $table=@{table='Week History';file='WeekHistory.csv';uniqueKey=@('Week Label','User');columns=@(@{name='Snapshot Date';type='dateTime'},@{name='Week Label';type='string'},@{name='User';type='string'},@{name='Last Activity Date';type='dateTime'})}
+    if (-not $WithoutKey) { $table.historyKey=@('Week Label') }
+    @{tables=@($table)} | ConvertTo-Json -Depth 8 | Set-Content $contract
+}
+function WeekFixture($Rows) { $Rows | Export-Csv (Join-Path $staging 'WeekHistory.csv') -NoTypeInformation }
+$argsForPublish=@{StagingRoot=$staging;OutputRoot=$output;TenantKey='synthetic-test';Provenance=@{Mode='SyntheticTest'};ContractPath=$contract}
+WeekContract
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'='2026-W39';User='u1';'Last Activity Date'='2026-09-20'},[pscustomobject]@{'Snapshot Date'='2026-09-28';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-27'})
+$null=Publish-PreparedEvidenceBatch @argsForPublish
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'='2026-W39';User='u1';'Last Activity Date'='2026-09-20'},[pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-30'})
+$null=Publish-PreparedEvidenceBatch @argsForPublish
+Write-Host 'PASS: current-week snapshot date and per-user activity changes are accepted.'
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-30'})
+ExpectFailure 'Lost historical week' { Publish-PreparedEvidenceBatch @argsForPublish } '*missing Week Label=2026-W39*'
+WeekContract -WithoutKey
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'='2026-W39';User='u1';'Last Activity Date'='2026-09-20'},[pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-30'})
+ExpectFailure 'History table without a declared key' { Publish-PreparedEvidenceBatch @argsForPublish } '*No historical comparison key*'
 Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
 
 # SIG # Begin signature block
