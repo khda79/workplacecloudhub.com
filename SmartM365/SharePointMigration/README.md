@@ -32,6 +32,27 @@ Files, Permissions, Operations, Logs and Config tabs; it discovers configured
 migration folders and displays the most recent output paths. An output timestamp
 or an available Open button is not proof that the whole scan succeeded: inspect
 the run log and any error CSV before accepting its results.
+The dashboard requires PowerShell 7.4 or later. The CMD launcher checks this
+requirement before opening the GUI, and the GUI enforces it for direct launches.
+Windows PowerShell 5.1 remains in use as a child process for SharePoint Server
+inventory and SPO site administration scripts that require it.
+
+The header displays the mapped scan scope. When a migration maps several webs,
+hover over the scope count to see their URLs. A target `SiteUrl` that differs
+from every mapped target is flagged; the GUI blocks site operations until the
+configuration is aligned. The header has an enabled-by-default 30-second
+refresh checkbox. Refresh keeps unsaved configuration edits and the selected
+log; turn the checkbox off to stop automatic updates.
+
+The Logs tab shows shared GUI activity across migrations as well as the
+selected migration's script logs. Each GUI session, migration creation,
+configuration save, and GUI-launched action has a separate activity file under
+`Migrations/logs/gui-activity`. Records include the Windows user who used the
+GUI, machine, action, local and UTC times, status, exit code, and the detailed
+run log when available. The script's execution account may differ from the
+GUI user. These records require write access to the shared migration folder;
+folder permissions govern their integrity. Actions launched outside the GUI
+are represented by their script logs rather than by GUI activity records.
 
 The startup GitHub check reports component versions only. It does not install an
 update. Set `SPMIG_GUI_UPDATE_CHECK=0` to disable that check. To update, close the
@@ -65,7 +86,22 @@ For a local resource check without displaying the GUI or contacting a tenant:
 
 ## Local Migrations
 
-Create one local folder per migration by copying the template:
+In the dashboard, click `+ New` to enter a migration name, source and target
+types, the first source/target web URL pair, any additional mapping pairs, and
+the SPO target admin URL when applicable. The wizard checks every web through
+an authenticated SharePoint read and verifies the SPO admin endpoint before
+creating a directory. SharePoint Server checks use the current Windows account
+and the `/_api/web` endpoint; SPO checks use the selected PnP authentication
+mode and `Get-PnPWeb`. A missing site, denied access, unavailable module or
+inconclusive response blocks creation. Checking the SPO admin endpoint also
+requires tenant administration access through the selected PnP authentication.
+Run the GUI where the URLs and the required authentication are available. The
+wizard copies `_Template`, writes
+the configuration and mapping, and selects the new migration only after all
+checks succeed. For a multi-web migration, each additional mapping must have
+one source URL and one target URL on its own line.
+
+You can also create one local folder per migration manually by copying the template:
 
 ```powershell
 Copy-Item -Recurse .\Migrations\_Template .\Migrations\MyMigration

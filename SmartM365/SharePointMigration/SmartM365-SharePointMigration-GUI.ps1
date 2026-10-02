@@ -14,7 +14,7 @@
     1.0.8
 #>
 
-#Requires -Version 5.1
+#Requires -Version 7.4
 
 [CmdletBinding()]
 param(
@@ -30,6 +30,8 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
 . (Join-Path $script:ScriptRoot 'SmartM365.GuiSplash.ps1')
+. (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-NewWizard.ps1')
+. (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1')
 
 $updateCheckModulePath = Join-Path $script:ScriptRoot 'SmartM365.GuiUpdateCheck.ps1'
 if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
@@ -53,7 +55,7 @@ function Get-MigrationFolders {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $results = [System.Collections.Generic.List[object]]::new()
     foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory)) {
-        if ($dir.Name -eq '_Template') { continue }
+        if ($dir.Name -eq '_Template' -or $dir.Name -like '.new-*') { continue }
         $cfgPath = Join-Path $dir.FullName 'migration.config.psd1'
         if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) { continue }
         try {
@@ -176,6 +178,7 @@ function Get-MigrationStatus {
 
 function Get-MigrationOperations {
     param($Migration)
+    if ((Get-MigrationEndpointType $Migration.Config 'Target') -ne 'SPO') { return @() }
     $opsDir = Join-Path $Migration.Root 'launchers\interactive\operations'
     if (-not (Test-Path -LiteralPath $opsDir -PathType Container)) { return @() }
     $results = [System.Collections.Generic.List[object]]::new()
@@ -370,6 +373,10 @@ function Open-InExplorer {
           <ComboBox x:Name="cmbMigration" Width="140" Height="30" FontSize="13" VerticalContentAlignment="Center"/>
           <Button x:Name="btnNewMigration" Content="+ New"    Style="{StaticResource BtnGhost}" Width="58" Margin="8,0,0,0"/>
           <Button x:Name="btnRefresh"      Content="Refresh"  Style="{StaticResource BtnGhost}" Width="62" Margin="6,0,0,0"/>
+          <CheckBox x:Name="chkAutoRefresh" Content="Auto 30s" IsChecked="True" Margin="10,0,0,0"
+                    VerticalAlignment="Center" FontSize="11" Foreground="#5F6B7A"/>
+          <TextBlock x:Name="lblLastRefresh" Margin="8,0,0,0" VerticalAlignment="Center"
+                     FontSize="10" Foreground="#5F6B7A"/>
         </StackPanel>
       </Grid>
     </Border>
@@ -724,10 +731,13 @@ function Open-InExplorer {
         <!-- LOGS -->
         <Grid x:Name="panelLogs" Margin="18,14" Visibility="Collapsed" MinHeight="400">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="210"/>
+            <ColumnDefinition Width="340"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0" Margin="0,0,12,0">
+            <TextBlock Text="SHARED ACTIVITY" Style="{StaticResource SectionLabel}" Margin="0,0,0,8"/>
+            <ListBox x:Name="listActivity" BorderBrush="#DDE7F0" BorderThickness="1"
+                     FontSize="11" Height="210" ScrollViewer.HorizontalScrollBarVisibility="Auto" Margin="0,0,0,14"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
               <TextBlock Text="LOG FILES" Style="{StaticResource SectionLabel}" Margin="0"/>
               <Button x:Name="btnRefreshLogs" Content="Refresh" Style="{StaticResource BtnGhost}"
@@ -749,6 +759,8 @@ function Open-InExplorer {
                              FontWeight="Medium" Foreground="#5F6B7A" VerticalAlignment="Center"/>
                   <Button x:Name="btnOpenLogDir" Content="Open folder" Style="{StaticResource BtnGhost}"
                           Margin="12,0,0,0" Height="26" Padding="8,0" FontSize="11"/>
+                  <Button x:Name="btnOpenRunLog" Content="Open run log" Style="{StaticResource BtnGhost}"
+                          Margin="8,0,0,0" Height="26" Padding="8,0" FontSize="11" IsEnabled="False"/>
                 </StackPanel>
               </Border>
               <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
@@ -769,6 +781,7 @@ if ($ValidateOnly) {
     try {
         $reader = [System.Xml.XmlNodeReader]::new($xaml)
         $null   = [System.Windows.Markup.XamlReader]::Load($reader)
+        $null   = Show-SmartM365NewMigrationWizard -ProjectRoot $script:ScriptRoot -ValidateOnly
     } catch {
         Close-SmartM365GuiSplash -Splash $script:Splash
         throw "XAML validation failed: $_"
@@ -796,6 +809,8 @@ function ctrl { param([string]$n) $script:Window.FindName($n) }
 # Header
 $cmbMigration    = ctrl 'cmbMigration'
 $btnRefresh      = ctrl 'btnRefresh'
+$chkAutoRefresh = ctrl 'chkAutoRefresh'
+$lblLastRefresh = ctrl 'lblLastRefresh'
 $btnNewMigration = ctrl 'btnNewMigration'
 $imgLogo         = ctrl 'imgLogo'
 
@@ -873,10 +888,12 @@ $lblNoOps  = ctrl 'lblNoOps'
 
 # Logs
 $listLogFiles  = ctrl 'listLogFiles'
+$listActivity = ctrl 'listActivity'
 $lblLogName    = ctrl 'lblLogName'
 $txtLogContent = ctrl 'txtLogContent'
 $btnOpenLogDir = ctrl 'btnOpenLogDir'
 $btnRefreshLogs= ctrl 'btnRefreshLogs'
+$btnOpenRunLog = ctrl 'btnOpenRunLog'
 
 # Config
 $lblConfigPath = ctrl 'lblConfigPath'
@@ -896,6 +913,10 @@ $script:CurrentStatus     = $null
 $script:ConfigEditorLoading = $false
 $script:ConfigEditorDirty   = $false
 $script:UpdateCheckTimer     = $null
+$script:AutoRefreshTimer = $null
+$script:WizardOpen = $false
+$script:TargetScopeMismatch = $false
+$script:ConfigEditorLoadedHash = ''
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -953,6 +974,7 @@ function Set-ScanComboItems {
         [System.IO.FileInfo]$SelectedFile
     )
 
+    $previous = if ($ComboBox.SelectedItem) { [string]$ComboBox.SelectedItem.FullName } else { '' }
     $ComboBox.Items.Clear()
     foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
     $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
@@ -962,7 +984,15 @@ function Set-ScanComboItems {
     }
 
     $selectedIndex = 0
-    if ($SelectedFile) {
+    if ($previous) {
+        for ($i = 0; $i -lt $ComboBox.Items.Count; $i++) {
+            if ([string]$ComboBox.Items[$i].FullName -eq $previous) {
+                $selectedIndex = $i
+                break
+            }
+        }
+    }
+    elseif ($SelectedFile) {
         for ($i = 0; $i -lt $ComboBox.Items.Count; $i++) {
             if ([string]$ComboBox.Items[$i].FullName -eq [string]$SelectedFile.FullName) {
                 $selectedIndex = $i
@@ -1008,6 +1038,7 @@ function Set-HistoryComboItems {
         [int]$DefaultIndex
     )
 
+    $previous = if ($ComboBox.SelectedItem) { [string]$ComboBox.SelectedItem.FullName } else { '' }
     $ComboBox.Items.Clear()
     foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
     $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
@@ -1016,7 +1047,16 @@ function Set-HistoryComboItems {
         return
     }
 
-    if ($DefaultIndex -ge 0 -and $DefaultIndex -lt $ComboBox.Items.Count) {
+    $previousIndex = -1
+    if ($previous) {
+        for ($i = 0; $i -lt $ComboBox.Items.Count; $i++) {
+            if ([string]$ComboBox.Items[$i].FullName -eq $previous) { $previousIndex = $i; break }
+        }
+    }
+    if ($previousIndex -ge 0) {
+        $ComboBox.SelectedIndex = $previousIndex
+    }
+    elseif ($DefaultIndex -ge 0 -and $DefaultIndex -lt $ComboBox.Items.Count) {
         $ComboBox.SelectedIndex = $DefaultIndex
     }
     else {
@@ -1059,20 +1099,36 @@ function Get-AuthMode {
 # ---------------------------------------------------------------------------
 
 function Invoke-MigrationAction {
-    param([string]$Action)
+    param([string]$Action, [string]$OperationPath = '')
     if ($null -eq $script:CurrentMigration) { return }
 
-    $launcher = Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-Launcher.ps1'
-    $pwsh7    = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
-    $exe      = if (Test-Path -LiteralPath $pwsh7 -PathType Leaf) { $pwsh7 } else { 'powershell.exe' }
+    if ($OperationPath -and $script:TargetScopeMismatch) {
+        [System.Windows.MessageBox]::Show(
+            'Target.SiteUrl differs from the target mapping. Align the configuration before running a site operation.',
+            $script:AppName, 'OK', 'Warning') | Out-Null
+        return
+    }
+    $launcher = Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiRun.ps1'
+    $exe      = Join-Path $PSHOME 'pwsh.exe'
 
     $migName = $script:CurrentMigration.Name
+    try {
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration $migName `
+            -Action $(if ($OperationPath) { [System.IO.Path]::GetFileNameWithoutExtension($OperationPath) } else { $Action })
+    }
+    catch {
+        [System.Windows.MessageBox]::Show("Could not create shared activity log:`n$($_.Exception.Message)",
+            $script:AppName, 'OK', 'Error') | Out-Null
+        return
+    }
     $args    = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"",
-                 '-MigrationName', "`"$migName`"", '-Action', $Action)
+                 '-ActivityPath', "`"$activity`"", '-MigrationName', "`"$migName`"")
+    if ($OperationPath) { $args += @('-OperationPath', "`"$OperationPath`"") }
+    else { $args += @('-Action', $Action) }
 
     switch (Get-AuthMode) {
-        'DeviceLogin' { $args += '-DeviceLogin' }
-        'Certificate' { $args += '-UseCertificate' }
+        'DeviceLogin' { $args += @('-AuthMode', 'DeviceLogin') }
+        'Certificate' { $args += @('-AuthMode', 'Certificate') }
     }
 
     if ($Action -eq 'CompareFiles') {
@@ -1089,7 +1145,16 @@ function Invoke-MigrationAction {
         if ($newCsv) { $args += @('-NewCsv', "`"$($newCsv.FullName)`"") }
     }
 
-    Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $script:ScriptRoot
+    try {
+        Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $script:ScriptRoot -ErrorAction Stop
+        Refresh-ActivityList
+    }
+    catch {
+        Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 `
+            -Detail $_.Exception.Message
+        [System.Windows.MessageBox]::Show("Could not launch action:`n$($_.Exception.Message)",
+            $script:AppName, 'OK', 'Error') | Out-Null
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1122,9 +1187,18 @@ function Update-UI {
     $st  = $script:CurrentStatus
 
     $lblSourceType.Text = Get-MigrationEndpointType $cfg 'Source'
-    $lblSourceUrl.Text  = Get-MigrationEndpointUrlText $cfg 'Source'
+    $sourceScope = Get-MigrationScope $script:CurrentMigration 'Source'
+    $targetScope = Get-MigrationScope $script:CurrentMigration 'Target'
+    $lblSourceUrl.Text  = $sourceScope.Text
+    $lblSourceUrl.ToolTip = $sourceScope.Tooltip
     $lblTargetType.Text = Get-MigrationEndpointType $cfg 'Target'
-    $lblTargetUrl.Text  = Get-MigrationEndpointUrlText $cfg 'Target'
+    $lblTargetUrl.Text  = $targetScope.Text
+    $lblTargetUrl.ToolTip = $targetScope.Tooltip
+    $script:TargetScopeMismatch = $targetScope.Mismatch
+    $lblTargetUrl.Foreground = if ($targetScope.Mismatch) {
+        [System.Windows.Media.Brushes]::Firebrick
+    } else { [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(31, 41, 55)) }
+    if ($targetScope.Mismatch) { $lblTargetUrl.Text += '  [CONFIG DIFFERS]' }
 
     # --- Files ---
     Set-ScanComboItems $cmbScanSrcFile @($st.SourceFileCsvItems) $st.SourceFileCsv
@@ -1165,10 +1239,10 @@ function Update-UI {
     if ($st.PermComparisonFolder) { $btnOpenCmpPerms.Tag = $st.PermComparisonFolder.FullName }
 
     # --- Operations ---
-    $ops = Get-MigrationOperations -Migration $script:CurrentMigration
+    $ops = @(Get-MigrationOperations -Migration $script:CurrentMigration)
     $listOps.Items.Clear()
     foreach ($op in $ops) { [void]$listOps.Items.Add($op) }
-    $lblNoOps.Visibility = if ($ops.Count -eq 0) { 'Visible' } else { 'Collapsed' }
+    $lblNoOps.Visibility = if (@($ops).Count -eq 0) { 'Visible' } else { 'Collapsed' }
 
     # --- Logs ---
     Refresh-LogList
@@ -1230,16 +1304,21 @@ function Load-ConfigEditor {
         $lblConfigPath.Text = $configPath
         if (Test-Path -LiteralPath $configPath -PathType Leaf) {
             $txtConfigContent.Text = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop
+            $script:ConfigEditorLoadedHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
             Set-ConfigEditorDirty $false
             Set-ConfigEditorStatus ("Loaded {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
         }
         else {
+            $script:ConfigEditorLoadedHash = ''
             $txtConfigContent.Text = ''
             Set-ConfigEditorDirty $false
             Set-ConfigEditorStatus "Config file not found: $configPath" $true
         }
     }
     catch {
+        $script:ConfigEditorLoadedHash = ''
+        $txtConfigContent.Text = ''
+        Set-ConfigEditorDirty $false
         Set-ConfigEditorStatus "Could not load config: $($_.Exception.Message)" $true
     }
     finally {
@@ -1250,29 +1329,48 @@ function Load-ConfigEditor {
 function Save-ConfigEditor {
     if ($null -eq $script:CurrentMigration) { return }
 
+    $configActivity = $null
     try {
         $content = [string]$txtConfigContent.Text
         $validatedConfig = Test-ConfigEditorContent -Content $content
         $configPath = $script:CurrentMigration.ConfigPath
+        $configActivity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+            -Migration $script:CurrentMigration.Name -Action 'SaveConfig'
         if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-            $backupPath = "{0}.bak-{1}" -f $configPath, (Get-Date -Format 'yyyyMMdd-HHmmss')
+            $currentHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+            if ($script:ConfigEditorLoadedHash -and $currentHash -ne $script:ConfigEditorLoadedHash) {
+                throw 'The configuration changed on disk since it was loaded. Review and reload it before saving.'
+            }
+            $backupPath = "{0}.bak-{1}-{2}" -f $configPath, (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N')
             Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
         }
 
         $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
         [System.IO.File]::WriteAllText($configPath, $content, $utf8NoBom)
+        $script:ConfigEditorLoadedHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
         $script:CurrentMigration.Config = $validatedConfig
         $script:CurrentStatus = Get-MigrationStatus -Migration $script:CurrentMigration
         Set-ConfigEditorDirty $false
         Update-UI
         Set-ConfigEditorStatus ("Saved {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        Write-SmartM365GuiActivityEvent -Path $configActivity -Status 'Succeeded' -ExitCode 0 `
+            -Detail 'Migration configuration saved.'
     }
     catch {
+        try {
+            if (-not $configActivity) {
+                $configActivity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                    -Migration $script:CurrentMigration.Name -Action 'SaveConfig'
+            }
+            Write-SmartM365GuiActivityEvent -Path $configActivity -Status 'Failed' -ExitCode 1 `
+                -Detail $_.Exception.Message
+        } catch { [void]$_.Exception }
         Set-ConfigEditorStatus "Save failed: $($_.Exception.Message)" $true
         [System.Windows.MessageBox]::Show("Config save failed:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
     }
 }
 function Refresh-LogList {
+    $previous = if ($listLogFiles.SelectedItem) { [string]$listLogFiles.SelectedItem.FullName } else { '' }
     $listLogFiles.Items.Clear()
     if ($null -eq $script:CurrentMigration) { return }
     $logsDir = Join-Path $script:CurrentMigration.Root 'logs'
@@ -1282,19 +1380,120 @@ function Refresh-LogList {
         Select-Object -First 60 |
         ForEach-Object {
             $display = ('{0}  {1}' -f $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $_.Name)
-            [void]$listLogFiles.Items.Add([pscustomobject]@{
+            $item = [pscustomobject]@{
                 Display  = $display
                 FullName = $_.FullName
                 Name     = $_.Name
-            })
+            }
+            [void]$listLogFiles.Items.Add($item)
+            if ($previous -and $item.FullName -eq $previous) { $listLogFiles.SelectedItem = $item }
         }
+}
+
+function Refresh-ActivityList {
+    $previous = if ($listActivity.SelectedItem) { [string]$listActivity.SelectedItem.FullName } else { '' }
+    $listActivity.Items.Clear()
+    $directory = Get-SmartM365GuiActivityDirectory -ProjectRoot $script:ScriptRoot
+    Get-ChildItem -LiteralPath $directory -Filter '*.log' -File -ErrorAction Stop |
+        Sort-Object Name -Descending | Select-Object -First 100 | ForEach-Object {
+            try {
+                $item = Read-SmartM365GuiActivity -Path $_.FullName
+                if ($item) {
+                    [void]$listActivity.Items.Add($item)
+                    if ($previous -and $item.FullName -eq $previous) { $listActivity.SelectedItem = $item }
+                }
+            } catch { [void]$_.Exception }
+        }
+}
+
+function Refresh-GuiState {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptRoot 'Migrations') -PathType Container)) {
+            throw 'Migration folder is unavailable.'
+        }
+        Load-Migrations
+        Refresh-ActivityList
+        $lblLastRefresh.Text = 'Updated ' + (Get-Date -Format 'HH:mm:ss')
+        $lblLastRefresh.ToolTip = 'Shared activity and migration state refreshed.'
+    }
+    catch {
+        $lblLastRefresh.Text = 'Refresh failed'
+        $lblLastRefresh.ToolTip = $_.Exception.Message
+    }
 }
 
 function Set-CurrentMigration {
     param($Migration)
+    $sameConfig = $null -ne $script:CurrentMigration -and
+        [string]::Equals($script:CurrentMigration.ConfigPath, $Migration.ConfigPath,
+            [System.StringComparison]::OrdinalIgnoreCase)
+    if ($script:ConfigEditorDirty -and -not $sameConfig) {
+        $answer = [System.Windows.MessageBox]::Show(
+            'Discard unsaved config changes before switching migrations?',
+            $script:AppName, 'YesNo', 'Warning')
+        if ($answer -ne [System.Windows.MessageBoxResult]::Yes) {
+            if ($null -ne $script:CurrentMigration) {
+                $cmbMigration.SelectedItem = $script:CurrentMigration.Name
+            }
+            return
+        }
+    }
     $script:CurrentMigration = $Migration
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
     Update-UI
+    if (-not $sameConfig -or -not $script:ConfigEditorDirty) {
+        Load-ConfigEditor
+    }
+}
+
+function Get-MigrationScope {
+    param($Migration, [ValidateSet('Source', 'Target')][string]$Side)
+    $cfg = $Migration.Config
+    $section = if ($Side -eq 'Source') { $cfg.Source } else { $cfg.Target }
+    $urls = [System.Collections.Generic.List[string]]::new()
+    $urlsFile = if ($section.ContainsKey('UrlsFile')) { [string]$section.UrlsFile } else { '' }
+    if ($urlsFile) {
+        $path = if ([System.IO.Path]::IsPathRooted($urlsFile)) { $urlsFile } else { Join-Path $Migration.Root $urlsFile }
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            foreach ($line in [System.IO.File]::ReadAllLines($path)) {
+                $value = $line.Trim()
+                if ($value -and -not $value.StartsWith('#') -and -not $urls.Contains($value)) { $urls.Add($value) }
+            }
+        }
+    }
+    elseif ($cfg.Comparison.PathMappingsFile) {
+        $mapping = [string]$cfg.Comparison.PathMappingsFile
+        $path = if ([System.IO.Path]::IsPathRooted($mapping)) { $mapping } else { Join-Path $Migration.Root $mapping }
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            foreach ($line in [System.IO.File]::ReadAllLines($path)) {
+                $value = $line.Trim()
+                if (-not $value -or $value.StartsWith('#')) { continue }
+                $parts = @($value -split '[\t;, ]+' | Where-Object { $_ })
+                if ($parts.Count -ne 2) { continue }
+                $url = if ($Side -eq 'Source') { $parts[0] } else { $parts[1] }
+                if (-not $urls.Contains($url)) { $urls.Add($url) }
+            }
+        }
+    }
+    if ($urls.Count -eq 0) {
+        $fallback = Get-MigrationEndpointUrlText $cfg $Side
+        if ($fallback) { $urls.Add($fallback) }
+    }
+    $configured = if ($section.ContainsKey('SiteUrl')) { [string]$section.SiteUrl } else { '' }
+    $mismatch = $false
+    if ($Side -eq 'Target' -and $configured -and $urls.Count -gt 0) {
+        $matched = $false
+        foreach ($url in $urls) {
+            if ([string]::Equals($url.TrimEnd('/'), $configured.TrimEnd('/'),
+                    [System.StringComparison]::OrdinalIgnoreCase)) { $matched = $true; break }
+        }
+        $mismatch = -not $matched
+    }
+    [pscustomobject]@{
+        Text = if ($urls.Count -eq 1) { $urls[0] } else { '{0} sites (hover for URLs)' -f $urls.Count }
+        Tooltip = (($urls.ToArray() -join "`n") + $(if ($mismatch) { "`nConfig SiteUrl differs: $configured" } else { '' }))
+        Mismatch = $mismatch
+    }
 }
 
 function Load-Migrations {
@@ -1325,14 +1524,35 @@ $cmbMigration.Add_SelectionChanged({
 })
 
 $btnRefresh.Add_Click({
-    Load-Migrations
+    Refresh-GuiState
 })
 
 $btnNewMigration.Add_Click({
-    $tpl = Join-Path $script:ScriptRoot 'Migrations\_Template'
-    $msg = "Copy the _Template folder to create a new migration:`n$tpl`n`nThen edit migration.config.psd1 in the copy, and click Refresh."
-    try { Open-InExplorer (Join-Path $script:ScriptRoot 'Migrations') } catch {}
-    [System.Windows.MessageBox]::Show($msg, $script:AppName, 'OK', 'Information')
+    $script:WizardOpen = $true
+    try {
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<new>' -Action 'NewMigration'
+        $createdName = Show-SmartM365NewMigrationWizard -Owner $script:Window `
+            -ProjectRoot $script:ScriptRoot -AuthMode (Get-AuthMode) -ActivityPath $activity
+        if ($createdName) {
+            Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' `
+                -Detail "Created migration $createdName after URL validation." -ExitCode 0 -Migration $createdName
+            Refresh-GuiState
+            $cmbMigration.SelectedItem = $createdName
+        }
+    }
+    catch {
+        if ($activity) {
+            Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 `
+                -Detail $_.Exception.Message
+        }
+        [System.Windows.MessageBox]::Show("Could not open new migration wizard:`n$($_.Exception.Message)",
+            $script:AppName, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $script:WizardOpen = $false
+        try { Refresh-ActivityList }
+        catch { $lblLastRefresh.ToolTip = $_.Exception.Message }
+    }
 })
 
 $btnOpenConfig.Add_Click({
@@ -1393,8 +1613,7 @@ $listOps.AddHandler(
         if ($btn -is [System.Windows.Controls.Button] -and -not [string]::IsNullOrWhiteSpace([string]$btn.Tag)) {
             $cmd = [string]$btn.Tag
             if (Test-Path -LiteralPath $cmd -PathType Leaf) {
-                $dir = Split-Path $cmd -Parent
-                Start-Process -FilePath 'cmd.exe' -ArgumentList "/C `"$cmd`"" -WorkingDirectory $dir
+                Invoke-MigrationAction -Action 'Operation' -OperationPath $cmd
             }
         }
     }
@@ -1419,6 +1638,22 @@ $btnOpenLogDir.Add_Click({
 
 $btnRefreshLogs.Add_Click({ Refresh-LogList })
 
+$listActivity.Add_SelectionChanged({
+    $sel = $listActivity.SelectedItem
+    if ($null -eq $sel) { return }
+    $lblLogName.Text = $sel.Display
+    $btnOpenRunLog.IsEnabled = [bool]($sel.LogPath -and (Test-Path -LiteralPath $sel.LogPath -PathType Leaf))
+    $btnOpenRunLog.Tag = $sel.LogPath
+    try { $txtLogContent.Text = Get-Content -LiteralPath $sel.FullName -Raw -ErrorAction Stop }
+    catch { $txtLogContent.Text = "Could not read activity log: $_" }
+})
+
+$btnOpenRunLog.Add_Click({
+    if ($btnOpenRunLog.Tag -and (Test-Path -LiteralPath $btnOpenRunLog.Tag -PathType Leaf)) {
+        Start-Process -FilePath 'notepad.exe' -ArgumentList "`"$($btnOpenRunLog.Tag)`""
+    }
+})
+
 # ---------------------------------------------------------------------------
 # Init and show
 # ---------------------------------------------------------------------------
@@ -1440,15 +1675,39 @@ if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinu
     })
 }
 
-Load-Migrations
+$script:AutoRefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:AutoRefreshTimer.Interval = [TimeSpan]::FromSeconds(30)
+$script:AutoRefreshTimer.Add_Tick({
+    if ($chkAutoRefresh.IsChecked -and -not $script:WizardOpen) { Refresh-GuiState }
+})
+$chkAutoRefresh.Add_Checked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Start() } })
+$chkAutoRefresh.Add_Unchecked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() } })
+try {
+    $script:SessionActivity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+        -Migration '<gui>' -Action 'GuiSession'
+}
+catch {
+    Close-SmartM365GuiSplash -Splash $script:Splash
+    [System.Windows.MessageBox]::Show(
+        "The shared activity folder is unavailable or not writable:`n$($_.Exception.Message)",
+        $script:AppName, 'OK', 'Error') | Out-Null
+    exit 1
+}
+Refresh-GuiState
+$script:AutoRefreshTimer.Start()
 Close-SmartM365GuiSplash -Splash $script:Splash
-[void]$script:Window.ShowDialog()
+try { [void]$script:Window.ShowDialog() }
+finally {
+    $script:AutoRefreshTimer.Stop()
+    Write-SmartM365GuiActivityEvent -Path $script:SessionActivity -Status 'Closed' -ExitCode 0 `
+        -Detail 'GUI window closed.'
+}
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFtBxtl4vy4OI9
-# 7UhWOOQdHHX42mUp13slmnCle8OD/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyLwgJdZHAUfrB
+# oCGWNFpqcVyo4kSO+2OqvJCuZq+CnqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1473,139 +1732,19 @@ Close-SmartM365GuiSplash -Splash $script:Splash
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK4tNg/Qr2RNeI45oIoQWjplUvcpv+JrXS/TGjHxDmD7MA0GCSqG
-# SIb3DQEBAQUABIIBgH8v1MgoJn0hZcYS61NNO/pjKvuo2ygJ5xHLXXAddaUyh2rE
-# 9r4k0kXluWKsOVLeSv+r5YSpfFz/oFNVcWdug4T4syeAc97XWp2R87wjKUgoADbr
-# Tr/k1X2FsxfvKmt4wpVdq6XypUq6sD1IVGAA4nV68TNkoYzeUiQXbDi8OlE0T5Xz
-# jWNR+TWXxMt3eXBKXZGJx6xEbJfdDBISVL/LblutbB/VWo83Gd+11Fv18hKahfSF
-# OpHzEV4cKyQBfYQfIs4+FRMcd+0qFdSYkwwJLK6DVMk1FILCaNXQdyHPDDjLbloJ
-# M8lnmEpCJeDXTHqnpiZbGjo6GE3e2YbDr4EW09OYE7YB+M3XvBBlNdbgNDWeB67r
-# GDDNV/E9EvcdFqyEoDuiT/Lx5vAUQi81EAsjVHWLxpWLue9dGpSIfeAlNZmNUzNF
-# /8IJ5nLFMTu1e5oIMM7qidUe/JP54WJlAa4Wr46qdmyXAc5YXn6Hfuu40z+BgH9h
-# ia0QrcY28b3Kvji3GaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDgxNjA2
-# MTVaMC8GCSqGSIb3DQEJBDEiBCBXqnOphfDqep0xWUmSCLZ7Fw403fSyZ9/gfoyI
-# p+Zd9jANBgkqhkiG9w0BAQEFAASCAgBScqaJq1unMMeRcYm3biuR5CIPTBABckAm
-# jBl/a1QdnG8kNS7DGcrwHxu+eC4AjXEZq2rl7kVLwJX07QUrKi/fO4YxBPyhemPK
-# dQzy13EZrD0PG+ldSM67gM5LMwDKVWA3MsEW53OaYKjAuXY/4mNShjOT0oypbSCI
-# fpz2ewPnxyPKT9NfN1Wk0MMu0dyCOMmmF0Z7VBfcVTVjBhJxD6oPwoaDTCy5LMgs
-# GE1gZgunfCL4we9rOzGbB1jc7Td8E6/Gxf5VdtVtWTfXUXVZuISI796Mmnx/+HFz
-# 9za/oJBetZWrCLX31+lvPjSxyzOiJXrv13QXhzcA1y2r7aj8yb781TKWX9qwmb2I
-# nz9NejGeQq40TJqmSVMbAOeHZFX5G7OXrm5C6QWMV6d+sn86VstBPwQBPOnp/RwK
-# 1trd7xy7DwGsjMqU5WFSGfmIhh+AEPPWuHj+pWA1AF0Xlf41GYCTE+l86SsOuYZU
-# axPaKly9HtVwKqJ1U49GzRikLFYerowB+2IAC5tw3fwNSBMx96/Hns5Wch/rah0D
-# Fw3JmqkG0vB5qX6Atymr0ZAan4cvTNVTp7rfRXb5qJSKVcaNBesdT570ir9MNRlT
-# bV6g/26JfrrOYSxlJl2VRaulQpC2Caa09LylffPePKrDTrqsygmT1Al6pQxpOCWP
-# tVKKAI86vg==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC8Kb4sCoMaysjUioyWzAyL
+# jr8QceulzGmEoG3sPjfSrjANBgkqhkiG9w0BAQEFAASCAYCcxq7qmDnQCz/ewKhT
+# KXAvWaK2W0MTNVeMhNzAB26OQEMzU8Hp//i1WrmEuLc96ajiGEGGDJ7bNeezW0af
+# bNgoo1/gjfuzu9oeCk6+WO2zK6Irtw4SpqKJm23UvL9IAw/kx6yi3B5DO/O8Cshh
+# eBEuMEV0qVw3RwvGaUSPP56OfCeA0IuVO+0Mu/X97pr3ofVXTWhNwLpNE1uVFeg/
+# bD+8dRUcUcjZXFgGp3MEAaIe+hQF7UuRm8puBXRSuxYtM196dYzs6784ULfqqRVu
+# /VdSOBoipemRn+rvQ6dqMzF2HshXpvqem25IVzroKO30c2bZ+IzPjtAT3UskUgI9
+# 34TtglqKCi+H4FM5gZL2r6Wwjr9nrTEmrQaupIzdGq5Unq8NDJlMzNbFQ6dfG3dM
+# 9Kznr8cy4KQrOMBnTFLUb6A7IG7VLSgM9p7C9etvaj9AYfdjQdsXNQkB32Z8k9cz
+# oFzq/Npmlw4ENl6L3qQwhnn8yIOhMnRxUuWbKa3ppWsYQmY=
 # SIG # End signature block
