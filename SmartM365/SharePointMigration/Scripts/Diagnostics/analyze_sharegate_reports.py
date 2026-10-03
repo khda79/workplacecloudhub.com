@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 import argparse
 import collections
@@ -606,4 +606,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from pathlib import Path as _ScriptPath
+    import sys as _script_sys
+    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
     main()

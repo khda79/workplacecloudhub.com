@@ -1,3 +1,4 @@
+__version__ = "1.0.0"
 import argparse
 import builtins
 import shutil
@@ -89,4 +90,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from pathlib import Path as _ScriptPath
+    import sys as _script_sys
+    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
     main()

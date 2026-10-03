@@ -1,4 +1,5 @@
 """Summarize the latest available permission comparison for each migration, offline."""
+__version__ = "1.0.0"
 
 import argparse
 import csv
@@ -204,6 +205,9 @@ def build(migrations_root, output_directory):
 
 
 if __name__ == "__main__":
+    from pathlib import Path as _ScriptPath
+    import sys as _script_sys
+    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migrations-root", required=True)
     parser.add_argument("--output-directory", required=True)
