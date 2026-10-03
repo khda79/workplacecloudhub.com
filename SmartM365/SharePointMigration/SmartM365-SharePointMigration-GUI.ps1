@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.29
+    1.0.30
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.29'
+$script:AppVersion = '1.0.30'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -2309,7 +2309,11 @@ function Invoke-GlobalComparisonReport {
         if ($Kind -eq 'Permissions') { $reportDirectory = Join-Path $reportDirectory 'permissions' }
         $result = @(& $python $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
         if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
-        $reportPath = [string]($result | Select-Object -Last 1)
+        $reportPath = [string]($result |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { $_.EndsWith('.html', [System.StringComparison]::OrdinalIgnoreCase) } |
+            Select-Object -Last 1)
+        if (-not $reportPath) { throw "Generator did not return an HTML report path. Output:`n$($result -join "`n")" }
         if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "Report was not created: $reportPath" }
         $excelPath = [System.IO.Path]::ChangeExtension($reportPath, '.xlsx')
         if (-not (Test-Path -LiteralPath $excelPath -PathType Leaf)) { throw "Excel report was not created: $excelPath" }
@@ -2701,8 +2705,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4QJosQXfbU5kP
-# y5opj9eMGZ6TA+8IGw0y/1VAMrq7W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7HVKm+t1p7Rn2
+# MmtY7+hFCNWdmLfdssdQQWmizOnLvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2835,31 +2839,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHD+DxVgTtSUdXRgHv/NuI1dM0SJmynNkTg7LpcqcI7xMA0GCSqG
-# SIb3DQEBAQUABIIBgF/8VsIzboUpK4Uiu2m9goJE3RO4ZqxWvfxRW8Zkn1xplb0B
-# 5cP4oyEfffrMNOQu0OBrdcNTDQQlmP+oQIEjeySUWzCZ9vDprGoixnCxqoATezca
-# oCazCzf9FLku/0I/vlZAoL1rgBdReb4XNf+m5rJi7nzAEPf7bwDhgjrPKwohKxHE
-# 4g6vZTBw+RBECokG/qtBuLEFYjJMR2BDueSKbB9f5+YMRYEtRAPmeWLhZNRdr/NP
-# 3vEyqbZs2Stgf8fKO2fXaB3eSvkpa+1ZO5Zzm/zO1xrMUn0bQLW55ZMferarXPeI
-# NQDMDmHGuwokhy9QHTTPP8G/rEJdNGshUikPQ6kbYPZOHNOk2t0IWoHJFMf4hzDL
-# bwuuAkuQoXnThqvjo33Xn5K8t7glBReB4Ff64wcpQyjcHdR76mRzwmuu2s2SQ/PY
-# xo52u26WBEWiXK4/+3gKmvAgUnbkGxpVSV6WvZMz46qwAmRUwUfc9lCnFEQv3ONS
-# 1O2CCtqw7MDRgFHMCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICMe5CL9cHnlzOsObtcyI4+6t7fAanH9M5EcHVNtzYycMA0GCSqG
+# SIb3DQEBAQUABIIBgK+rcRbEYUD2oPVMpHjrxC9X27h9GjSeHooelN7W1j+YXU1G
+# r//DIqqzONSbkkL0lo1zgAJ7sK5WiMRoPHvQW0HvYiZgDSCJBOzn1f/Wc0+hH2lc
+# lCmeCyVxUirilz43c4gFp4kRExSFxIJ/GqKo0MZPllWRR1E+hRQrV++1VO/eyURk
+# 8yHEfZNV4rYFboqgdp24bfsdhY/mXFCt9IhqvkorvNG9RA5/TeZPdChVh4tyKqEI
+# 4i90+waRjl8/7lql1/uFopZwW89Czl/1OFKlIjycJmRdqNZpoeJXogBbDc3+pv9G
+# +l+tQf/BP4U0MPOqM/oSmUP3L2ooCuJKGqOhy7uGKeUYCgTcNSYvXk75PN+RjK8o
+# EvDtEa3RGQBJTUBQqxmTOQ5rWozW87U/1i6kgje+l7aA/a19ZYSz/KvOV/fuV/5W
+# 62qVFReWCyFlysW2zzky8N2sOYmb4Ys7KFAoCvM4Bebq1BwzUNI6EmoTLkJmBQOk
+# zbNiZAWvGFQaxQQ9r6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjQz
-# MzdaMC8GCSqGSIb3DQEJBDEiBCDIqKFqO8b/Mk3T5rmb0I8YTAZTjHn12peWswhw
-# wXCWujANBgkqhkiG9w0BAQEFAASCAgCMmjvHiRJ0MzlaZqHyuh1v5bLh2OZvELqI
-# GBTuCVEULUrzQ2fWxqH1yBAAkGu0SunUdnryIvgds7oGUaeUpjK/CF+j6rTIYcrC
-# Pw3+eapv/A/Gl9uUg92Hm4xbQgiV290c/AM3392Px403zFAirAun4mMEc2hDcaP2
-# N/4KoQ38eZDTe5LB++fM9gDkw4qld/b03tiyLPJ6AbzQo6zxz5i51HSizKrWmuld
-# JEhJ8NAtFlrJGp91R6ncDM7j+2UchVio5p9rPYymFYwYCLFY6hVR15wbtlS0EV2U
-# D/j42LGiaivmpMZ8sDyxA0gIjiDpsuvJ+rnSID2Z25oZrHb8PU0Nu4KHsSIASc/O
-# nfgN24LKSfU6HR5YsnHYAFPFUc8A3RjxF73IAUIlQXXvP4zsAfM4OAemScp1fqN9
-# Sbtkx1BKO6UIA/rbWvk1vSAB5WDQZFG0F3dFs6q7MZyNfYFbhyT3CWgz1nLBCh0z
-# yXaXCwHupGtUZga95bDwe5hcDtltagO/6HHwftzezlb+RcogX0du8zCKF8+2VQR8
-# boZmL5v4TEMfoMB9UrWBQpE42q0jVnrp7fMawmFPsi4B8XFKH/ELoyYQj7qMKaB9
-# cEU4HDEjkuKBCJiAcfxF3tmjEYz0dDA/Nb3i8fr5tfksguWlvK37Q2mYuzVnYJar
-# skcIB0nllg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMzU0
+# MjJaMC8GCSqGSIb3DQEJBDEiBCDaeyoqv/IPsQxbZ6Id5wzpRfnojBTpnaAs4Wzn
+# uMbz0TANBgkqhkiG9w0BAQEFAASCAgBaOeea9LbT/hoZ9Z8devi0xT+NzZ3d3vVn
+# WoCLayWw/ZAuJVM/PmpKbMMvMFsvfg7SlyMdrx64SQAdBCGycAIpuU3Rw/gBZ5MS
+# zEpwvravsOzmdzp6bIJ5I5bCUVuSTX5a8OR5jlcEIzuYau5nv7eX6pKyv/X4Ad6h
+# qA9T/L7XHgCyEgIe/PDKHslb2BosfxgCeEbhp9sMS/OeHLYRRt3B6n1JJZ/e/HHm
+# AKWaNGbBbOQfGkRMQtVTuqXLUk0Xi+KmY3wCE48Z+GvWpytF0TM2KpGPhNCl6gxK
+# RNcAQ+/ph0+1X0fU6Li77RVwYNv8Qo4zZ1uLoxYeHPcSCvFzsn2m8Se021oBvvKa
+# hj4ryxC8TMN2qiUnOWSpjpESC80PUXpn4cyuembN75mEo5GkMvgi3Gg0TmhoNz5R
+# A0wQhZp2OU6KM1PyTcD6MXvIkEtENM1BZtSJJ2Sq3RvCvsOQCQs9RkxT4SI0ZmfQ
+# rQu898SfWPWDgjOdi5s4/fNYxbsXr9Y4gQ1UruCgPiMZu0LxosH1hXxmNVjw6rU2
+# y4r6WJIGSLZNl0Ic7GYfmIOBeHv/q91axZu1OuwNWUzz49AALsE9cxwZqhBkQV8U
+# AEArUUcGCr9xctYDWQ3NXV7hxmLhzaYInWuTe3DcuNtCPBPaXCJAkaGDCleCzJnA
+# XmMwegZgOw==
 # SIG # End signature block
