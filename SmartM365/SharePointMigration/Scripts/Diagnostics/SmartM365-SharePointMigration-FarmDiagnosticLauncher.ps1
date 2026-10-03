@@ -5,7 +5,7 @@
     Lists migration projects when -Project is omitted, then finds the selected
     project's latest ShareGate five-minute access CSV. DryRun is the default.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -85,7 +85,7 @@ try {
         throw '-Project is required when -ShareGatePeaksCsv is supplied.'
     }
     $projects = @(Get-ChildItem -LiteralPath $migrationsRoot -Directory -ErrorAction Stop |
-        Where-Object { $_.Name -match '^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9 ._-]*$' } |
+        Where-Object { $_.Name -match '^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9 ._-]*$' -and $_.Name -notin @('logs','reports') } |
         Sort-Object Name |
         ForEach-Object { Get-FarmLauncherProjectInfo -Directory $_ })
     if (-not $projects.Count) { throw "No migration project folder found in $migrationsRoot" }
@@ -164,8 +164,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6Tkb+uzzwvyQY
-# qWfnJ23wgHpu6VS5jIQA0oLZ5AuWOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDte3lLLDQKqnFA
+# Y9qS/q1c4Gdvwa5bVC6gfHSN3+VmhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -298,31 +298,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK3LdzWvpic5B2RrpKPL0QwTYxoekoBF5ceNdqlTzEQYMA0GCSqG
-# SIb3DQEBAQUABIIBgCb8S5Tvqwc7ZTGi33bvK4LlABBEMCxSf2MCb9AFVcaXC6up
-# okaHRO5TuBAersxjxSepyWUCxxovGpIbl7zGKfxTzPHmPPXe/K0iw7WWAxqcUrnE
-# 1ob74zNMdN8DHjsgKW6htxRtc7k6FqG+OwNyKZcFDQAW9ninrFKW7bcE8pUWZ6yh
-# j7MsNkBsNC/x7zy8ubpHs4difziDE5KGYUJ2QHReKjPVqqAsDynOyMlVFlVYXo6j
-# rQRzFTHUn63bSZjtPN5N3MccmXuM8KVCGXSHWtPlo0G8Xdj9k02XD1o/L5X+6lKh
-# O8vVjxIRa5yrSXsNakkljfDD14b5pW/i2d8KUw2sb+kzpdYNWz1j3FeiCYm3ITT1
-# HzvgpwIY8OJCQ2L3nXluYpPeKWXuCbmw6s+9+nsYDhOPy7/hjQBDzAuyM0+9QDAG
-# x0sOhxJoLpZmksyhmmM4tzZr/6eIRxhtjzik2Bu+eZU+ttDoPEOdJlQBw27EF2C1
-# tlQyPfuDtLXe9Cls9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFqBh9YUxYltJ9Zjugg0bogdO+sTRJc5aQKSjbcNYByIMA0GCSqG
+# SIb3DQEBAQUABIIBgBF52i5P1siBSYoyKaWMSu0HDOHzb+EEQyP1hEeSaX18QmKc
+# 8Y3FH4VCpmO1mljCuSeTVvyuwa4KaXSI54mteH7qq+3WW0syWDWanu/J68G50kRv
+# QD0Ws/S04H21vdEBr8q6WDQSsAxKjRsk1shtMhgO62GZZt7/BRoz7Ke9cfixTnOf
+# FlA9D10lahY3QrCnyGIJHklXReedxT/cZzb4jungCqm2mhHQfkdiEbHEAeOfgtsK
+# py4+XPk2WUtXHLpzfV29CK8BgNG1xw+WjSLlibthXebeT30y3I8FuKce8J0tvNlx
+# aSUjrXJGiHu10y7Q3n3endeTnioFioqyDsIQXoeMSxvWeq0YpzmHRsIZaFwauRbZ
+# pi6JTZfG/bI9Lr+cRk9CJrRNwkx+NxMKaFICNXuQUfDGZIYi/MUkkVLBKp8fhCDO
+# AQb44aul7c92t5j0ePexD9vsFr5e4v1aAqbPTKIM6Ixy0IF82v0XjZ+vXhAronLD
+# hBrvDSBqH797Snqs8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjUz
-# MDNaMC8GCSqGSIb3DQEJBDEiBCBrm8TMuxudDCZ9/4PYYNMmMaB3uCRk0suChzJZ
-# xYIOlzANBgkqhkiG9w0BAQEFAASCAgAqUpuJdonTVPASBxDjN1nuVG97HhZ3/rbq
-# NfR/kPBNsoA8cC7xdpwnidXeSKHjKEkGXT7/a2PtjDmU+9+Ewo2HnV+uf3Dwtsk3
-# NALZwu2BINCyW6SWOgvn3Qmhz2wBucc2mkwFUDqBZSeaWP2aa1Orc2aT1jn9LJ09
-# F2up36prbk9ayxxM0cf4mkd78RtRj6O2nvUI13/ZArpXqzK8F+8gVDZBG6nq3aIQ
-# 6TrIrkZse7KKz51Vqnir8a89Ck2n5Sjv5U0RezYKxQQPXVDefK9ytxxfh77ialeG
-# lJKr044PvtgUH1W7JQ4kSkSmF6xKNoGZQXJB91YKQsqjA4Tt8G/XGg/VReg4nr87
-# WEqlSXWa8ljzaMNltgSqbZ99Ssv3h64uLbN4h0TFA0t2Sc/ITK/WotTklypNlC+p
-# GPpj7MXmhdGK3lT/Ms7bkFWl+Te/J25nPLuRkeiSuyMttWoTiOKPiElGxvj/GhH5
-# lEJGPb44Jls/m5BPT1D7lWI3kku44ApHYJ80UxRPo2yKWQkvzmWmeElzwF1pq1Qz
-# JcjLspy1Eubj4b/+IMKW/znZaNf2+ZoE+AaQd3iqWEki6liFovbR1Fb5DaeTgeEp
-# FfMoKasAiqEr9v69UisSiX3S778GteYBTedLNLh9hJvVGfE05julE4zZEMNuNYjT
-# OpYiodDj6w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzAy
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCdXmalK+/gNsE6nKAawzlFeBECZYNKg8kAKBnl
+# VblBljANBgkqhkiG9w0BAQEFAASCAgBdgGKGsiNTXYNV0ZRE2NdDIgl/NcK2W/+W
+# VijvXBg+gYxgmrCpZP1DdF7N+S7xICc9Wa5vS9MJy85blxAUWKTtktp7hGeT4tLA
+# RtJA3jEaihcCItVlWS+YZ1SUFgnWmHsg0Z3XItFW/oymxlTnsdJrU0z7CxyvcjE1
+# ZRizfIsmUFSPIFXoAD7oAj6i0kHzZK6P2D0KTQd1+F3aHhmlId5E745mvzx7a+17
+# 4XlTk4iNOBEwRFPkyosYUxjj09OceXQqGOTYxd1fsbsg+i/ajxjOVLSir6ZaQp5r
+# dc5yIR+hkg1YheUGPru61jOxPVbpFapNxVwEbwItp5wHPSjkHTpLXcI+vKc+ENFN
+# dwQF6IuX3a3T6+qH9oZ52rJp4iTbeJ+Tqac2ccWIGx415uKccVs6aWekO4CFzWNe
+# rZvyWdIbbQOdn+V05QqUAygg/7yRhKcecGysk9EXdZYPh2HHu8tvEgI8Iw397XYB
+# lDvAAmDxQTCFX65Iwn6FHO2jnD3ChV1DwYnGFVfJzlu+kh/jn/QooCckXFNwdGjN
+# nl7SEfYBGxzPWvsLTi/r4KDfs0CBBhPxgqjGlvbwH2fp7WOrDGSE2jKkxoL7Dfth
+# e6ZcDfX+YNRv9D8A//FhH/A07DpsVOXYTQpX5TDMt0JwWgiT9JENknrbhMqqxBHW
+# olYelXTlPg==
 # SIG # End signature block

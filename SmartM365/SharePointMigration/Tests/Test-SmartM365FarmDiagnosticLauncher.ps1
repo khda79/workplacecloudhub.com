@@ -22,9 +22,11 @@ try {
     $newer = Join-Path $project 'ShareGate\Diagnostics\Analysis-new'
     $alpha = Join-Path $root 'Migrations\Alpha\ShareGate\Diagnostics\Analysis'
     $missing = Join-Path $root 'Migrations\Missing'
+    $logs = Join-Path $root 'Migrations\logs'
+    $reports = Join-Path $root 'Migrations\reports'
     $template = Join-Path $root 'Migrations\_Template\ShareGate\Diagnostics\Analysis'
     $scripts = Join-Path $root 'Scripts\Diagnostics'
-    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$template,$scripts -Force)
+    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$logs,$reports,$template,$scripts -Force)
     $oldCsv = Join-Path $older 'AccessFailures-5min.csv'
     $newCsv = Join-Path $newer 'AccessFailures-5min.csv'
     $newline = [Environment]::NewLine
@@ -55,7 +57,7 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
     if ($LASTEXITCODE -ne 0 -or -not $menuText.Contains('Project: Synthetic')) {
         throw "Prompted project selection failed: $($prompted -join ' ')"
     }
-    if ($menuText -notmatch '1\. Alpha' -or $menuText -notmatch '2\. Missing \| CSV absent' -or $menuText -notmatch '3\. Synthetic' -or $menuText -match '_Template') {
+    if ($menuText -notmatch '1\. Alpha' -or $menuText -notmatch '2\. Missing \| CSV absent' -or $menuText -notmatch '3\. Synthetic' -or $menuText -match '_Template' -or $menuText -match '\d+\.\s+(logs|reports)\s+\|') {
         throw 'The project menu was not ordered, annotated or filtered correctly.'
     }
     $cancelled = @('0' | & $runLauncher -ToolkitRoot $root 2>&1)
@@ -92,8 +94,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeLuQ5k49c66Cp
-# 6TgF30wctH0gB0q7yErRqNE8ixYHTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7kcPfpJLOt2Bx
+# v0amaMy96IT4RB9+dvpl48f7Gxs8zKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -226,31 +228,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPgZTxv33Bgojy6gH897Hg0HAuwwA5wngnzwwuLJpBWFMA0GCSqG
-# SIb3DQEBAQUABIIBgHxrBnMM3XZtoaSFzMfwTjMSBenuSlJSGvG5FQEiC0ZTnO3g
-# oRK2JuvOxLiC2UC+Af26YmsUKlMip+H7VRE+eR7LlDm2ULM4rlWTokf38+THJqt5
-# mAYTm4rkIcs7XNBvbHovZPT1PNLo4k2A4Zq5oWn+kM+PSvPOxIq0dr5KCv7atgAS
-# P3eKE7ArbCHMXG7rk1+ZOpAc5rTKt/GQGrJavCDkzIA+/00JvncHcYGjn/gFXoV0
-# BbvPp/yRyKGM+X0WbnVVAv5G3HqFKGthBvYM3cn94lWOTaU1NvxGfe7plQyZqqFr
-# L5yQ+mszoDMFNrc8915jkMNGQdVg8/h4MJn4gg6lntFrQdJM9bzkHNLQpihyKxRS
-# RteZkKN9iHEAJDTvm0F5jpGYV53WLelCMtLV7KisKKLLATAdIG4j4TsEm87V+Mfx
-# TkEreU4159LgF2RUjYdhzJuYMTlTRS2Ori6P6eh2H8aUI9iGHhL9LzuiihhJgX3p
-# ez6eCiERthX+uM4Af6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAcz7rnWTM/SD+Kg0+zigmRqalQNgsUYJV5huIYuYBC3MA0GCSqG
+# SIb3DQEBAQUABIIBgEhEIHX+phJjjnpuJx0L8hlNDPXLETM38TP4bQHn6Oz3g9mZ
+# 2WO0eAedYp80wKenJvRF3v6ClS6gNmN/+Q3ohJgpktOUbJy4LK5y66LPbq/ACx9G
+# Z/Q2j9/QqTBZNxf7A8VnbEh8NxEb15VrKqPnxCiERuICfyLFS1PuE9YC78KFuOPN
+# NacDFv5/T4PeV0cLlThAkiIrCG+MjxWgA+RSyDr8Hy/AVAki+5zWaJxyRCY1Hvsj
+# 2+8usTF2/3phts6fob9V83W76zHZ/SwElP1Of9jCz1BjqGMaJ8bInO2oNqpYMrwH
+# UxgCeH0ubo5ZHaCjvp9UBtLz2rwQSslDZLwoUqblGGgU3XsBj9gfT/9WzaiD/3NJ
+# JQztw3lG74d6R5gANP7gzlB+TducrCWm/d8IPxxJ7Fm4UbrQjLeF6TmQvYH6cKcH
+# Yudx4eN2GdgzksAZ/V5FZAKxHbhDPqmNCPxh8VkgM94uVAqWeaE8fTFpKKERKkRb
+# YyAjTyNkr4wqh338i6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjUz
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDm6WY1eMuRAag/s+dFcY30glIpK31ARVm/UkZR
-# vX3dqTANBgkqhkiG9w0BAQEFAASCAgACiBGO8xyskPIf33mgaZWWAVeeUxrKAG9Q
-# a3HnoMMt6nRbNqwnf85au2l3s7GqPhfgNyuaON1fqK6mhIrFqVzBCd2YP4DdSIE+
-# GGyrzkdIHrg9hqiI3HpoMTq0Qto7beQQTpC2j+PEkJjqkzrhRKejMbF7o3VN0ZRu
-# 5M+TnvS2S9wXFIynB76yPXwsorOChReriEEdZUk/C+gjPrf3+CRyG8/plVbaMOZs
-# vUaa8B10PFD6JCARbl1jjCdk+/GN/UAO0D/4ahGq8Y4WB0QwlDRStrYdFGnx/iaz
-# jZwZA5stZzv8J6AkV5VC/e5MQi0DNX+ARQP6MS09YoBKK5nZKaJfAxtl7e+Jw4Q4
-# uLa4t/cx6IrsULkAxSAEBP8+yWtWp9c5UqrUG6OZLCe0/3pyppd7pBimjo0sZCd/
-# g2osMk4u7vLcKWLnruMjZKd6eI1h033vhXLQQ0BuQfndeDQFcfsoiqzqE2uqtYru
-# LP3tG1L9WrXg8jpp+stBCLffaSXiZCCEaAE9zQCrtpX15+FIzRZmXiN/gifq+EvJ
-# tvk7Mihi0WS9Bej+r0hwfr4hExIVVYqCvAKJT7dOAVRuKMJytxcHRACxLTkdLuQo
-# iqyoYwmALiZgkkNVNdoDeLhopzLjWKvU3acPd5o0hlSpyFxmF1138dOoiG/vEhmU
-# EelOMtGcUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzAw
+# NTdaMC8GCSqGSIb3DQEJBDEiBCB9ZRCZ9QWiX8Coa7t1hfdhFz+0NY9BsBADLNFY
+# hdrgNDANBgkqhkiG9w0BAQEFAASCAgB3OKzA9P1rSV87FDtIMlRC4ge6YkhHnx47
+# 3FgV8vvmLVq8cmnMWj2cEGfWUQeOZuIvbKmtJQEvTu9vG4BSJRzuF5HRC67QLYuC
+# k457F+gKVGppodWZm3snVS58mfyPyP8CSg69X1dk6ShrFKneo+VBDako5R/jidxD
+# yZUTnSJ/71n1TvZskIHuBhFRF2Ki/fQnQC33PVhqXq5GQapbcsPp0eIHZyG9U+iV
+# lKdNP3ycGaBoI6yqgmq9P2UNdVvWeRVPEthu9oQx7Jp2oR5nyqRrUn16u+fD9V8x
+# cpxpaI57lCqev7Fu7trO+j89yiRZGXFtjbQiF/+baiwdLmzgVG2XXtwfXV4pQp3e
+# k+uHxCVho7bZ3gV8CbLXlZNRYUkgoV/nxPlTJ402CYhLOoRmgg61YB1MTj0B/Rd3
+# bfCweOyt+jPIF20IT/3B3ZtavdMKICO8anAntzlOLAe4pc83iEhABdFTjL/n3k6Y
+# xYhqNTQIEqmSWbuTwEeihvd8B2rb2QvoDIX27mC8ZnBFcgbUhxrNJDgXadLvNauU
+# oJlLf3bCjDKxJvzRe2HQZSqCCCARYL3b9u/enWYg75cyNeuMtZF7x8yiuHO7adDV
+# R4N1PxvbTjq/QJenzSnkNwuTP0QppxyYaNf6Qhv1PbpQ0HsUAnEz3uIzXs2lSFuI
+# CJw26w/DAw==
 # SIG # End signature block
