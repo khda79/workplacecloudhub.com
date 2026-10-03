@@ -682,17 +682,30 @@ by site, list, and source ID. It excludes the five pilot item keys and
 separately identifies any other `Home.aspx` in a site-pages list. The
 DryRun displays that page's title, type, source site URL, relative path,
 and destination site URL before excluding it for separate review. The
-seven source access lines without an item ID (six Site and one File in
+DryRun also requires `-QualificationDirectory` and `-PathCorrectionDirectory`.
+It verifies that the one-file qualification and three-file correction prove
+the destination paths of all four previously copied pilot items, checks their
+ShareGate exports for `Success`, the exact subfolder and a finished Microsoft
+365 import, and fingerprints all six correction files plus the three
+qualification files. The plan fingerprint includes both placement proofs.
+The script uses the slowest observed per-item time from the original and
+path-correction pilots for a conservative maintenance-window estimate.
+The prepared batch path still uses `IncrementalUpdate`; a completed item's
+export must identify its exact planned destination path and finished import.
+An unproven item or a skipped item stops the run for review before another
+batch can start. `-Run` remains disabled until the placement-proof DryRun and
+copy mode are reviewed separately.
+
+The seven source access lines without an item ID (six Site and one File in
 the reviewed session) are retained in `Transient-HorsLot.csv` with the
 status `Hors lot - à traiter à part`; their counts appear in the console
-and GUI summary. Batch size defaults to 50. The previous real run required `-Run
--ConfirmBatch`, both expected item counts, all four reviewed hashes, and the
-exact interactive phrase. That path now stops before ShareGate is loaded.
-It used the current Windows identity for the
-source, `Connect-Site -Browser` for SPO, and only `Copy-Content
--SourceItemId <IDs>` with `IncrementalUpdate` and a distinct task name per
-batch. The DryRun estimates duration from the four successful pilot copy
-timings. A real run refuses to start when its projected finish plus
+and GUI summary. Batch size defaults to 50. `-Run` currently stops before
+ShareGate is loaded. The prepared path requires `-Run -ConfirmBatch`, both
+expected item counts, all six reviewed hashes, and the exact interactive
+phrase. It uses the current Windows identity for the source,
+`Connect-Site -Browser` for SPO, and only `Copy-Content -SourceItemId <IDs>`
+with `IncrementalUpdate` and a distinct task name per batch. When enabled,
+a real run refuses to start when its projected finish plus
 `-MaintenanceMarginMinutes` (60 by default) reaches the next 23:45 farm
 maintenance window. It repeats the estimate before each batch, checks the
 active 23:45-00:15 window before each batch and copy, uses an exclusive

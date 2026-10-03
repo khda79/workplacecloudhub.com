@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline ShareGate transient batch and pilot review validation.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
@@ -18,18 +18,21 @@ try {
     $analysis = Join-Path $diag 'Analysis-Test'
     $witness = Join-Path $diag 'Witness-Test'
     $pilot = Join-Path $diag 'Pilot-Test'
+    $qualification = Join-Path $diag 'PathQualification-Test'
+    $correction = Join-Path $diag 'PathCorrection-Test'
     $reports = Join-Path $pilot 'Reports'
-    New-Item -ItemType Directory -Path $analysis,$witness,$reports -Force | Out-Null
+    $correctionReports = Join-Path $correction 'Reports'
+    New-Item -ItemType Directory -Path $analysis,$witness,$reports,$qualification,$correctionReports -Force | Out-Null
     $source = 'https://source.example/comm/'
     $destination = 'https://destination.example/sites/comm/'
     $dominantId = '03a7e397-f234-4a3f-a538-0b79b10cd968'
     $pagesId = 'b9e1059b-08ae-492a-926c-9fbe071756f5'
     $otherId = '4e532988-0dbe-47be-a6ac-a476c3ab97ea'
     $items = @(
-        [pscustomobject]@{ Id=88; List='Files'; ListId=$dominantId; Site=$source; Role='PilotA'; Status='Success'; Path='a.jpg' },
-        [pscustomobject]@{ Id=185; List='Files'; ListId=$dominantId; Site=$source; Role='PilotB'; Status='Success'; Path='b.jpg' },
-        [pscustomobject]@{ Id=467; List='Files'; ListId=$dominantId; Site=$source; Role='PilotC'; Status='Success'; Path='c.jpg' },
-        [pscustomobject]@{ Id=868; List='Files'; ListId=$dominantId; Site=$source; Role='PilotD'; Status='Success'; Path='d.jpg' },
+        [pscustomobject]@{ Id=88; List='Files'; ListId=$dominantId; Site=$source; Role='PilotA'; Status='Success'; Path='Album/a.jpg' },
+        [pscustomobject]@{ Id=185; List='Files'; ListId=$dominantId; Site=$source; Role='PilotB'; Status='Success'; Path='Album/b.jpg' },
+        [pscustomobject]@{ Id=467; List='Files'; ListId=$dominantId; Site=$source; Role='PilotC'; Status='Success'; Path='Album/c.jpg' },
+        [pscustomobject]@{ Id=868; List='Files'; ListId=$dominantId; Site=$source; Role='PilotD'; Status='Success'; Path='Album/d.jpg' },
         [pscustomobject]@{ Id=1; List='Pages du site'; ListId=$pagesId; Site=$source; Role='PilotSkipped'; Status='Skipped'; Path='Home.aspx' },
         [pscustomobject]@{ Id=1; List='Pages du site'; ListId=$otherId; Site='https://source.example/other/'; Role='SeparateHome'; Status=''; Path='Home.aspx' },
         [pscustomobject]@{ Id=2; List='Files'; ListId=$otherId; Site='https://source.example/other/'; Role='Remaining'; Status=''; Path='Album/Next.jpg' },
@@ -83,14 +86,82 @@ try {
       '2026-10-03 13:02:00 Finished item 4/5: ID=868') |
         Set-Content -LiteralPath (Join-Path $pilot 'Pilot.log') -Encoding UTF8
     'complete' | Set-Content -LiteralPath (Join-Path $pilot 'Pilot-Summary.json.txt') -Encoding UTF8
+    $qualifiedPath = $destination + 'Files/Album/a.jpg'
+    [pscustomobject]@{
+        SessionId='260930-6'; SourceItemId=88; AnalysisSHA256=$analysisHash;
+        SourceUrl=$source; SourceList='Files'; SourceFilePath='Album/a.jpg';
+        DestinationUrl=$destination; DestinationList='Files'; DestinationFilePath='Album/a.jpg';
+        SourceRead=($source + 'Files/Album/a.jpg'); DestinationBefore=$qualifiedPath; DestinationAfter=$qualifiedPath;
+        RootBefore='Absent'; RootAfter='Absent'; CopySessionId='261003-101';
+        ShareGateResult='Success'; Qualification='Passed'; Error=''
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $qualification 'PathQualification-Result.json.txt') -Encoding UTF8
+    @(
+        [pscustomobject]@{'Source ID'=88;'Session ID'='261003-101';Status='Success';'Destination path'='Album/a.jpg';Errors='';Warnings='';'Microsoft 365 Import: Status'=''},
+        [pscustomobject]@{'Source ID'='';'Session ID'='261003-101';Status='Success';'Destination path'='';Errors='';Warnings='';'Microsoft 365 Import: Status'='Finished'}
+    ) | Export-Csv -LiteralPath (Join-Path $qualification 'ShareGate-Report.csv') -NoTypeInformation -Encoding UTF8
+    @('ShareGate module version=26.9.5.0; path=synthetic',
+      'Qualification=Passed; ShareGate=Success; Root=Absent;') |
+        Set-Content -LiteralPath (Join-Path $qualification 'PathQualification.log') -Encoding UTF8
+    . (Join-Path $scriptRoot 'SmartM365-SharePointMigration-PlacementEvidence.ps1')
+    $qHash = Get-SmartM365PlacementEvidenceHash -Paths @(
+        (Join-Path $qualification 'PathQualification-Result.json.txt'),
+        (Join-Path $qualification 'ShareGate-Report.csv'),
+        (Join-Path $qualification 'PathQualification.log'))
+    $correctionResults = @(
+        for ($i=1; $i -le 3; $i++) {
+            $item = $items[$i]
+            $reportPath = Join-Path $correctionReports ('Item-{0:D2}.csv' -f $i)
+            @(
+                [pscustomobject]@{'Source ID'=$item.Id;'Session ID'=('261003-10' + $i);Status='Success';'Destination path'=$item.Path;Errors='';Warnings='';'Microsoft 365 Import: Status'=''},
+                [pscustomobject]@{'Source ID'='';'Session ID'=('261003-10' + $i);Status='Success';'Destination path'='';Errors='';Warnings='';'Microsoft 365 Import: Status'='Finished'}
+            ) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
+            [pscustomobject]@{
+                ItemKey=($item.Site.TrimEnd('/') + '|' + $item.ListId + '|' + $item.Id);
+                SourceItemId=$item.Id; SourceFilePath=$item.Path; DestinationFilePath=$item.Path;
+                DestinationFolder='Album'; DestinationItemUrl=($destination + 'Files/' + $item.Path);
+                Status='Success'; RootBefore='Absent'; RootAfter='Absent';
+                CopySessionId=('261003-10' + $i); ReportPath=$reportPath; Error=''
+            }
+        }
+    )
+    $correctionResults | Export-Csv -LiteralPath (Join-Path $correction 'PathCorrection-Results.csv') -NoTypeInformation -Encoding UTF8
+    $correctionPlanHash = 'A' * 64
+    [pscustomobject]@{
+        SessionId='260930-6'; AnalysisSHA256=$analysisHash; QualificationSHA256=$qHash;
+        RunStatus='Completed'; Planned=3; Success=3; Skipped=0; Error=0;
+        Unreported=0; NotAttempted=0; PlanSHA256=$correctionPlanHash
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $correction 'PathCorrection-Summary.json.txt') -Encoding UTF8
+    @(
+        "2026-10-03 10:00:00 ShareGate=26.9.5.0; PlanSHA256=$correctionPlanHash",
+        '2026-10-03 10:00:01 Starting item 1/3; ID=185;',
+        '2026-10-03 10:00:30 Completed ID=185; Status=Success;',
+        '2026-10-03 10:00:31 Starting item 2/3; ID=467;',
+        '2026-10-03 10:01:00 Completed ID=467; Status=Success;',
+        '2026-10-03 10:01:01 Starting item 3/3; ID=868;',
+        '2026-10-03 10:01:30 Completed ID=868; Status=Success;',
+        '2026-10-03 10:01:30 Completed all three items;'
+    ) | Set-Content -LiteralPath (Join-Path $correction 'PathCorrection.log') -Encoding UTF8
     . (Join-Path $scriptRoot 'SmartM365-SharePointMigration-TransientEvidence.ps1')
     $evidence = Get-SmartM365TransientEvidence -ProjectRoot $project -AnalysisDirectory $analysis -PilotDirectory $pilot -SessionId '260930-6'
     if (@($evidence.AccessItems).Count -ne 8 -or @($evidence.PilotItems).Count -ne 5 -or @($evidence.OutOfBatchRows).Count -ne 7) { throw 'Synthetic evidence count mismatch.' }
-    $base = @{ ProjectRoot=$project; AnalysisDirectory=$analysis; WitnessDirectory=$witness; PilotDirectory=$pilot; SessionId='260930-6'; BatchSize=1 }
+    $base = @{ ProjectRoot=$project; AnalysisDirectory=$analysis; WitnessDirectory=$witness;
+        PilotDirectory=$pilot; QualificationDirectory=$qualification; PathCorrectionDirectory=$correction;
+        SessionId='260930-6'; BatchSize=1 }
     $dry = & $batchScript @base -DryRun 2>&1 | Out-String
-    if ($dry -notmatch 'remaining=2; batches=2' -or $dry -notmatch 'destinationFolder=Album' -or
+    if ($dry -notmatch 'remaining=2; batches=2' -or $dry -notmatch 'Placement proof: qualified=1; corrected=3' -or
+        $dry -notmatch 'destinationFolder=Album' -or
         $dry -notmatch 'destinationFolder=Autre' -or $dry -notmatch 'PlanSHA256=([0-9A-F]{64})') { throw "DryRun plan mismatch: $dry" }
     $planHash = $Matches[1]
+    $corruptReport = Join-Path $correctionReports 'Item-01.csv'
+    $originalBytes = [IO.File]::ReadAllBytes($corruptReport)
+    try {
+        $tamperedRows = @(Import-Csv -LiteralPath $corruptReport)
+        $tamperedRows[0].'Destination path' = 'Wrong/b.jpg'
+        $tamperedRows | Export-Csv -LiteralPath $corruptReport -NoTypeInformation -Encoding UTF8
+        try { & $batchScript @base -DryRun 2>&1 | Out-Null; throw 'Expected wrong destination-path rejection.' }
+        catch { if ($_.Exception.Message -notmatch 'Placement report does not prove') { throw } }
+    }
+    finally { [IO.File]::WriteAllBytes($corruptReport,$originalBytes) }
     $fakeModuleRoot = Join-Path $root 'Modules\ShareGate'
     New-Item -ItemType Directory -Path $fakeModuleRoot -Force | Out-Null
     @'
@@ -135,7 +206,7 @@ Export-ModuleMember -Function Connect-Site,Get-List,Get-File,Get-ListItem,New-Co
         @($reviewItems | Where-Object { $_.Result -eq 'Skipped' -and $_.SkipAssessment -like 'Consistent*' }).Count -ne 1) {
         throw 'Read-only review failed to verify URLs or compare Home.aspx Modified dates.'
     }
-    Write-Output 'Offline ShareGate batch test passed: Home.aspx excluded, seven hors-lot rows retained, folder-aware DryRun and real-copy block.'
+    Write-Output 'Offline ShareGate batch test passed: four placement proofs, wrong-path rejection, Home.aspx and hors-lot exclusions, folder-aware DryRun, and real-copy block.'
     Write-Output 'Offline ShareGate review test passed: five verified item URLs and Home.aspx Modified comparison.'
 }
 finally {
@@ -148,8 +219,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB95n5w04w+hrB5
-# t/0goZG+8miiTaipRZIPxP3QR271H6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDcnRWC3MRPFsbG
+# 2gDGsu8fCl5ZS7dIRluZmnBGDpt//aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -282,31 +353,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDVoOBIJo0YtTB2c7Wia/iCOCr7e0NDJ+9XXQmYga4uGMA0GCSqG
-# SIb3DQEBAQUABIIBgAGm3kT5+nxadi0XmxbOQp+SWLNeEMIjFwIOeYtQUQWWZcVA
-# 76MWn1l11ubjlL+O+txjh9WAUoJqsb4krwFanmrMAkRyD6AuULgIs5y33psI6OHF
-# 4CfnK82KJcv7q5kZNx5Bb9wLvBeOIxCvhUcBKLCe9sM7r1P7+wEA0wsSU9cUrOyO
-# HjVjqFQp6l+CSjt1JdC8DT+r/+aveNKDzfY6DMTckNSe/UmZT3yQi5OWyYp3QCVk
-# d3LW0xKOAMtcjxKdFt9eXtvSukm89Fx98gsPJ33ohq+c49fmKfE2kA/wwNelASaH
-# 24rNggJ11XN+DBdhma3DgFgH8uft3NWO11lvrTl3rkPHQ2ItbCFHLxHQHIqnfQ6j
-# vFcLzjntKcP68C9C1MFSU3jAeO+gNr0qoiuIMC5UlCtC/+WJb8VRe/0sZIcKXyse
-# KjIY2+lms1Y29oU/xVQYSZjuwCcbVf1Hmj35WytQsP4vHkjIoZE/OL+pYW78JSer
-# tjvR2fe0q96eoW20baGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKqjrLavvAbhSZlOdYerI0+GG/SCptz3yQcgIxNATmg6MA0GCSqG
+# SIb3DQEBAQUABIIBgGbgdzSPOU65DBTdmNdYZ6WqnC5V4Cx2BJsUT1V1aKz7j6IZ
+# o/iqPEtM1WtgId+HkdbQnzykjQ9MV4etWqUR1nICgh7aQs6vINBC4sG+b0K/V0zA
+# 5n2aFV32+rBEn5TbTaCqCymXzA9GTqr/i0kVvRFWio2mI0BcrlgCNV7MqtJLMClL
+# BR/0ZosCshUpTvHyvuZpFFC2dHe2wPCpThPGG8miyiPJWJqrB7Wj+hwN21NBpixM
+# PXjCj/pfhK/nmHsEYjC2L9hKs65xUNTOWPST6oRoK3nGrWd4MsXEg22qzDFD0c5C
+# DnBedg1GHL5xhOfvWoptR/R4wYwV/ucp82xtQLRxGUaXh3+7xOQlXCjq+xufDd0F
+# xSAu4y3cK08iMiiNMO5ERKiAv/5DYbfyecMUL6hB1uZZXkg7cGiwe/0QE0hC+WkQ
+# +0wu8GX00fEe3NxUVboop/DvtYFag2TxVyMfH2lblPzKIYg9GwYH1/KbndPI/WUH
+# hAMP8CdvanVDwPosTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
-# MjJaMC8GCSqGSIb3DQEJBDEiBCAm6t0KWsP9ye+TsI3GXgFlXFh7rlz6ByqJhF84
-# Vnx8czANBgkqhkiG9w0BAQEFAASCAgBFGJFKEJ/Vf9zCFeSXGeMx8i1fdWN8zx6K
-# 3fgU2pHbeJ7t2SjdA8Dz+xzg0CTTVXWmxrSrbg79BytDL6kPLMK6A9jkxPZtzhH+
-# QoOg/AgY5Ph5e245ZcVgCwswQfFsWvp/h/9Ixer5wdT3eL6nMCf1NKTb+Fwa/dRx
-# 04gMbBAua2+p8wMsqFpL36/5mggOHr9M9jrgkyzinR1cd9i/C7L7u3LdxOllpyfU
-# 5V2+bxq5iQjI6Ms6zrikoZlBodQtFjiudEnNZ8l4WciGT1JlXP1euxwRmHZJUyYc
-# E0+G1aYWAZcf427XvnVbrKCy4Kc9EqLg8I9GK+8Va6yuZgQFUa9dUtxVKbTUDWwX
-# FRrjH04016KFqtEY64akjghSitX63xcqFLB2MdLClNDsa4F55ei2R35UhEwOr7Vy
-# KHHnaLwCgujCRVk/pxEOzJQa6iue5ffQYWdTdhAKTqqw+Nu1O+J0+Ba1tYhw8u35
-# 0qHlEOZn+dtJI8ZS8Ntf9VGTPyb5v3XK0InaHm/OfLKP8Y2YG/22J90LtMq2OJ86
-# EMMJ9YcV/J/ovU8Vp7B1F06J8p+i5HdSS5n10aRTjtQUDGjNiaypLJu1mEb484Tz
-# dQ3QJBArj52JE7FwbTIr1lsmFGYJxpk31PioHVnn9VlC8npFbKiCvvulRvmTShub
-# qyodISHFJQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxODIy
+# NDhaMC8GCSqGSIb3DQEJBDEiBCBl16yqxVzd5yduk6sdBMacEraFSG1k9tu622jj
+# vkCFxzANBgkqhkiG9w0BAQEFAASCAgCMvgp31cDjfARnbNuwh+DI63NTLYagQbnH
+# 1xoXo0dyUhBLWRE37xwrGDGalNQ2GMILTtVleZ46gRDiHONX80CT2/J7JPPHP7dj
+# 8/nqAFjUl/0S7LEu13ApbHsPTPFqbmAkmNSHoOI6MH4VjlJz1rQa92kamHxlNAzu
+# bpDjAOSFUYlol6x73fYvFQ/lMSg2PEkCWtafee96qYw/7ZNJCjkkLUEvXHClyiNR
+# zC2wE0B9LEQUjoxMEip/T/9uRVfvWV4E2YNHNSv6UkeeQSLGjl5LtdcizU73zZ4I
+# 13wdFbdC2U2G0Q+Q+luYOvDh8/UjJAZkfzUe5VSDe8UrcXyWzfaV9Innv7sVD1eM
+# 1pAucY+3mCTyYJjMYaxuSWT0wegDkil73TulRJfEu5GHF8LZM1m1L5a4WCe/9QFB
+# OCdFSP+IC4LCORBfnCgK6xNJPDecz+RsYDxsRCaiaKWCVzczH+mpmSA4ZElW86CK
+# qJo/SsMw0AbQcIi6aX8CWD11MQVtPhhcddCRxKcHy3bf2CWRpdbDWivlA4IMORqF
+# q6EzjbyxlCo4jn0tx8cNq2sVh437lukWfS3VIrFy2z0/XRRKepFHnOC/MNfgENYi
+# 60tQqILhxDtd3btR+aR3wJq3Y2nKtYU+1ae3giVA14TC1jy81vesOQLpPqAOAYhy
+# jeJkVaYAKg==
 # SIG # End signature block

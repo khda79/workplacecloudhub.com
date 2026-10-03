@@ -2,7 +2,7 @@
 .SYNOPSIS
     Approval-gated item-scoped batches for source 401 cases after a reviewed pilot.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,8 @@ param(
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$WitnessDirectory,
     [Parameter(Mandatory)][string]$PilotDirectory,
+    [Parameter(Mandatory)][string]$QualificationDirectory,
+    [Parameter(Mandatory)][string]$PathCorrectionDirectory,
     [Parameter(Mandatory)][string]$SessionId,
     [ValidateRange(1,100)][int]$BatchSize = 50,
     [ValidateRange(0,100)][int]$MaxErrorsPerBatch = 0,
@@ -21,6 +23,8 @@ param(
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedAnalysisHash = '',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedWitnessHash = '',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedPilotManifestHash = '',
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedQualificationHash = '',
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedPathCorrectionHash = '',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedPlanHash = '',
     [switch]$DryRun,
     [switch]$Run,
@@ -29,24 +33,28 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.3'
+$version = '1.0.4'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
 try {
 if ($DryRun -and $Run) { throw 'Choose either -DryRun or -Run.' }
-if ($Run) { throw 'Real item-scoped copy remains disabled until the explicit destination-folder routing is qualified on the ShareGate GUI machine.' }
+if ($Run) { throw 'Real item-scoped batch copy remains disabled pending review of the placement-proof DryRun and separate approval.' }
 if ($ConfirmBatch -and -not $Run) { throw '-ConfirmBatch applies only with -Run.' }
 if ($Run -and -not $ConfirmBatch) { throw 'Real copies require both -Run and -ConfirmBatch.' }
 if ($Run -and (-not $ExpectedAnalysisHash -or -not $ExpectedWitnessHash -or -not $ExpectedPilotManifestHash -or
+    -not $ExpectedQualificationHash -or -not $ExpectedPathCorrectionHash -or
     -not $ExpectedPlanHash -or -not $ExpectedOriginalItemCount -or -not $ExpectedRemainingItemCount)) {
-    throw 'Real copies require reviewed analysis, witness, pilot and plan SHA256 values plus both item counts.'
+    throw 'Real copies require reviewed analysis, witness, pilot, qualification, correction, and plan SHA256 values plus both item counts.'
 }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.1 for ShareGate.' }
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-FarmMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-TransientEvidence.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-DestinationPath.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateReportReader.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-PlacementEvidence.ps1')
+$reportAliases = Get-SmartM365ShareGateReportAliases -ConfigRoot (Join-Path $PSScriptRoot '..\..\Config')
 $farmZone = [TimeZoneInfo]::FindSystemTimeZoneById($FarmTimeZoneId)
 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase 'Transient batch preparation'
 $evidence = Get-SmartM365TransientEvidence -ProjectRoot $ProjectRoot -AnalysisDirectory $AnalysisDirectory -PilotDirectory $PilotDirectory -SessionId $SessionId
@@ -65,6 +73,16 @@ $copied = @($evidence.PilotItems | Where-Object { $_.Result -eq 'Success' -and $
 $skipped = @($evidence.PilotItems | Where-Object { $_.Result -eq 'Skipped' -and $_.SourceItemId -eq 1 -and $_.SourcePath -eq 'Home.aspx' })
 if ($copied.Count -ne 4 -or $skipped.Count -ne 1 -or @($evidence.PilotItems | Where-Object { $_.Result -notin @('Success','Skipped') }).Count) {
     throw 'Pilot evidence must show four imported Success items and one separately handled Home.aspx Skipped item.'
+}
+$placement = Get-SmartM365ShareGatePlacementEvidence -DiagnosticsRoot $evidence.DiagnosticsRoot `
+    -QualificationDirectory $QualificationDirectory -PathCorrectionDirectory $PathCorrectionDirectory `
+    -SessionId $SessionId -AnalysisSHA256 $evidence.AnalysisSHA256 `
+    -AccessItems $evidence.AccessItems -PilotSuccessItems $copied -Aliases $reportAliases
+if ($ExpectedQualificationHash -and $ExpectedQualificationHash.ToUpperInvariant() -ne $placement.QualificationSHA256) {
+    throw 'Qualification evidence hash differs from the reviewed value.'
+}
+if ($ExpectedPathCorrectionHash -and $ExpectedPathCorrectionHash.ToUpperInvariant() -ne $placement.PathCorrectionSHA256) {
+    throw 'Path correction evidence hash differs from the reviewed value.'
 }
 $excluded = @{}
 foreach ($item in $evidence.PilotItems) { $excluded[$item.ItemKey] = $true }
@@ -123,7 +141,8 @@ foreach ($group in $groups) {
 }
 if ($planRows.Count -ne $remaining.Count -or -not $batches.Count) { throw 'The batch plan is incomplete.' }
 $canonicalRows = [System.Collections.Generic.List[string]]::new()
-$canonicalRows.Add('schema=3;batchSize=' + $BatchSize)
+$canonicalRows.Add('schema=4;batchSize=' + $BatchSize + ';qualification=' + $placement.QualificationSHA256 +
+    ';correction=' + $placement.PathCorrectionSHA256)
 foreach ($row in $planRows) {
     $canonicalRows.Add('COPY' + "`t" + (@($row.BatchNumber,$row.ItemKey,$row.SourceUrl,$row.SourceList,$row.SourceItemId,$row.DestinationUrl,$row.DestinationList,$row.SourceFilePath,$row.DestinationFilePath,$row.DestinationFolder) -join "`t"))
 }
@@ -155,7 +174,25 @@ foreach ($line in (Get-Content -LiteralPath $evidence.PilotLogPath -ErrorAction 
     }
 }
 if ($pilotDurations.Count -ne 4) { throw 'Cannot estimate duration: four completed pilot Success timings are required.' }
-$secondsPerItem = ($pilotDurations | Measure-Object -Average).Average
+$correctionStarts = @{}
+$correctionDurations = [System.Collections.Generic.List[double]]::new()
+$correctionLogPath = Join-Path $placement.PathCorrectionDirectory 'PathCorrection.log'
+foreach ($line in (Get-Content -LiteralPath $correctionLogPath -ErrorAction Stop)) {
+    if ($line -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) Starting item \d/3; ID=(\d+);') {
+        $correctionStarts[$Matches[2]] = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    elseif ($line -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) Completed ID=(\d+); Status=Success;') {
+        $id = $Matches[2]
+        if ($correctionStarts.ContainsKey($id)) {
+            $finished = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+            $seconds = ($finished - $correctionStarts[$id]).TotalSeconds
+            if ($seconds -gt 0) { $correctionDurations.Add($seconds) }
+        }
+    }
+}
+if ($correctionDurations.Count -ne 3) { throw 'Cannot estimate duration: three completed path-correction item timings are required.' }
+$secondsPerItem = [math]::Max(($pilotDurations | Measure-Object -Maximum).Maximum,
+    ($correctionDurations | Measure-Object -Maximum).Maximum)
 $estimatedSeconds = [math]::Ceiling($remaining.Count * $secondsPerItem)
 
 function Get-TransientScheduleAssessment {
@@ -192,10 +229,12 @@ function Write-TransientLog {
     Write-Output $line
 }
 $script:logPath = ''
-Write-TransientLog ('Mode={0}; script=v{1}; session={2}; source 401 items={3}; pilot Success excluded=4; pilot Home.aspx Skipped excluded=1; other Home.aspx separate={4}; remaining={5}; batches={6}; batchSize={7}; maxErrorsPerBatch={8}; maintenance=23:45-00:15 farm time; writes={9}' -f
+Write-TransientLog ('Mode={0}; script=v{1}; session={2}; source 401 items={3}; pilot Success excluded=4; pilot Home.aspx Skipped excluded=1; other Home.aspx separate={4}; remaining={5}; batches={6}; batchSize={7}; maxErrorsPerBatch={8}; copySettings=IncrementalUpdate; maintenance=23:45-00:15 farm time; writes={9}' -f
     $(if ($Run) { 'Run' } else { 'DryRun' }),$version,$SessionId,@($evidence.AccessItems).Count,$separatePages.Count,$remaining.Count,$batches.Count,$BatchSize,$MaxErrorsPerBatch,$(if ($Run) { 'possible after confirmation' } else { 'none' }))
 Write-TransientLog ('AnalysisSHA256={0}; WitnessSHA256={1}; PilotManifestSHA256={2}; PlanSHA256={3}' -f
     $evidence.AnalysisSHA256,$witnessHash,$evidence.PilotManifestSHA256,$planHash)
+Write-TransientLog ('Placement proof: qualified=1; corrected=3; ShareGate={0}; QualificationSHA256={1}; PathCorrectionSHA256={2}; correction folder={3}' -f
+    $placement.ShareGateVersion,$placement.QualificationSHA256,$placement.PathCorrectionSHA256,$placement.PathCorrectionDirectory)
 foreach ($item in $otherIdOne) {
     $disposition = if ($excluded.ContainsKey($item.ItemKey)) { 'Hors lot - page a examiner a part' } else { 'Included in item batch' }
     Write-TransientLog ('Other Source ID 1: title={0}; type={1}; source site URL={2}; source path={3}; target site URL={4}; list={5}; disposition={6}' -f
@@ -208,8 +247,8 @@ foreach ($row in $outOfBatch) {
         $row.RowId,$row.ObjectType,$row.ItemName,$row.SourceUrl,$row.SourcePath)
 }
 $schedule = Get-TransientScheduleAssessment -ItemCount $remaining.Count
-Write-TransientLog ('Pilot Success timing: {0} seconds for {1} items ({2:N2} s/item); estimated batch duration={3}; projected farm end={4:yyyy-MM-dd HH:mm:ss}; with margin {5} min={6:yyyy-MM-dd HH:mm:ss}; next maintenance={7:yyyy-MM-dd HH:mm:ss}; start allowed={8}' -f
-    ($pilotDurations -join ','),$pilotDurations.Count,$secondsPerItem,([timespan]::FromSeconds($estimatedSeconds)),
+Write-TransientLog ('Observed item seconds: original pilot={0}; path correction={1}; conservative estimate={2:N2} s/item; estimated batch duration={3}; projected farm end={4:yyyy-MM-dd HH:mm:ss}; with margin {5} min={6:yyyy-MM-dd HH:mm:ss}; next maintenance={7:yyyy-MM-dd HH:mm:ss}; start allowed={8}' -f
+    ($pilotDurations -join ','),($correctionDurations -join ','),$secondsPerItem,([timespan]::FromSeconds($estimatedSeconds)),
     $schedule.ProjectedEndFarm,$MaintenanceMarginMinutes,$schedule.EndWithMarginFarm,$schedule.NextWindowFarm,$schedule.IsSafe)
 foreach ($batch in $batches) {
     Write-TransientLog ('Batch {0}/{1}: {2} | {3} -> {4} | {5}; destinationFolder={6}; items={7}; SourceItemIds={8}' -f
@@ -228,6 +267,9 @@ $null = Assert-TransientSchedule -ItemCount $remaining.Count -Phase 'transient r
 $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
 if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
 Import-Module -Name $module[0].Path -ErrorAction Stop
+if ([string]$module[0].Version -ne $placement.ShareGateVersion) {
+    throw 'Installed ShareGate version differs from the qualified path-correction version.'
+}
 foreach ($name in @('Connect-Site','Get-List','Get-Folder','Copy-Content','New-CopySettings','Export-Report')) {
     if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
 }
@@ -260,7 +302,7 @@ $resultPath = Join-Path $output 'Transient-Results.csv'
 $outOfBatchPath = Join-Path $output 'Transient-HorsLot.csv'
 $summaryPath = Join-Path $output 'Transient-Summary.json.txt'
 $planColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','SourceFilePath','DestinationFilePath','DestinationFolder')
-$resultColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','Result','CopySessionId','ReportPath','Error')
+$resultColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','DestinationFilePath','DestinationFolder','ExportedDestinationPath','Result','CopySessionId','ReportPath','Error')
 $outOfBatchColumns = @('Disposition','Reason','RowId','Timestamp','ObjectType','ItemName','SourceUrl','SourceList','SourcePath','DestinationUrl','DestinationList','DestinationPath')
 Export-SmartM365TransientCsv -Path $planPath -Rows $planRows.ToArray() -Columns $planColumns
 Export-SmartM365TransientCsv -Path $outOfBatchPath -Rows $outOfBatch -Columns $outOfBatchColumns
@@ -270,7 +312,8 @@ foreach ($item in $planRows) {
     $result = [pscustomobject]@{
         BatchNumber=$item.BatchNumber; ItemKey=$item.ItemKey; SourceUrl=$item.SourceUrl; SourceList=$item.SourceList;
         SourceItemId=$item.SourceItemId; DestinationUrl=$item.DestinationUrl; DestinationList=$item.DestinationList;
-        Result='NotAttempted'; CopySessionId=''; ReportPath=''; Error=''
+        DestinationFilePath=$item.DestinationFilePath; DestinationFolder=$item.DestinationFolder;
+        ExportedDestinationPath=''; Result='NotAttempted'; CopySessionId=''; ReportPath=''; Error=''
     }
     $results.Add($result)
     $byKey[$item.ItemKey] = $result
@@ -294,7 +337,9 @@ function Save-TransientState {
         Unreported=@($results | Where-Object Result -EQ 'Unreported').Count;
         NotAttempted=@($results | Where-Object Result -EQ 'NotAttempted').Count;
         AnalysisSHA256=$evidence.AnalysisSHA256; WitnessSHA256=$witnessHash;
-        PilotManifestSHA256=$evidence.PilotManifestSHA256; PlanSHA256=$planHash;
+        PilotManifestSHA256=$evidence.PilotManifestSHA256;
+        QualificationSHA256=$placement.QualificationSHA256; PathCorrectionSHA256=$placement.PathCorrectionSHA256;
+        PlacementShareGateVersion=$placement.ShareGateVersion; PlanSHA256=$planHash;
         PilotSuccessSecondsPerItem=$secondsPerItem; EstimatedDurationSeconds=$estimatedSeconds;
         MaintenanceMarginMinutes=$MaintenanceMarginMinutes;
         SeparatePageItems=$separatePages.Count;
@@ -352,6 +397,12 @@ try {
         $currentCopySession = ''
         $null = Assert-TransientSchedule -ItemCount @($results | Where-Object Result -EQ 'NotAttempted').Count -Phase ("batch $($batch.Number)/$($batches.Count) preparation")
         $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase ("batch $($batch.Number)/$($batches.Count) preparation")
+        if ((Get-SmartM365PlacementEvidenceHash -Paths $placement.QualificationFiles) -ne $placement.QualificationSHA256 -or
+            (Get-SmartM365PlacementEvidenceHash -Paths $placement.CorrectionFiles) -ne $placement.PathCorrectionSHA256 -or
+            (Get-SmartM365PilotManifest -PilotDirectory $evidence.PilotDirectory).SHA256 -ne $evidence.PilotManifestSHA256 -or
+            (Get-FileHash -LiteralPath $evidence.ClassifiedPath -Algorithm SHA256).Hash -ne $evidence.AnalysisSHA256) {
+            throw 'Reviewed placement, pilot, or analysis evidence changed before the next batch.'
+        }
         $sourceList = Get-ExactTransientList -Side Source -SiteUrl $batch.SourceUrl -ListName $batch.SourceList
         $destinationList = Get-ExactTransientList -Side Destination -SiteUrl $batch.DestinationUrl -ListName $batch.DestinationList
         Assert-SmartM365ShareGateDestinationFolder -DestinationList $destinationList -DestinationFolder $batch.DestinationFolder
@@ -377,36 +428,70 @@ try {
         if (-not (Test-Path -LiteralPath $temporaryReport -PathType Leaf)) { throw 'Export-Report did not create the batch CSV.' }
         Move-Item -LiteralPath $temporaryReport -Destination $reportPath -Force
         $reportRows = @(Import-Csv -LiteralPath $reportPath -Encoding UTF8)
+        if (-not $reportRows.Count -or
+            -not (Test-SmartM365ShareGateReportField -Row $reportRows[0] -Field 'SourceItemId' -Aliases $reportAliases) -or
+            -not (Test-SmartM365ShareGateReportField -Row $reportRows[0] -Field 'DestinationPath' -Aliases $reportAliases)) {
+            throw 'Batch export has no rows or lacks source-ID/destination-path columns.'
+        }
+        $importStates = @($reportRows | ForEach-Object { [string]$_.'Microsoft 365 Import: Status' } | Where-Object { $_ } | Sort-Object -Unique)
+        $importFinished = ($importStates.Count -eq 1 -and $importStates[0] -eq 'Finished')
         $plannedIds = @{}
         foreach ($id in $batch.Ids) { $plannedIds[[string]$id] = $true }
         $unexpected = @($reportRows | Where-Object {
             $id = 0
-            [int]::TryParse([string]$_.'Source ID',[ref]$id) -and $id -gt 0 -and -not $plannedIds.ContainsKey([string]$id)
+            [int]::TryParse((Get-SmartM365ShareGateReportValue -Row $_ -Field 'SourceItemId' -Aliases $reportAliases),[ref]$id) -and
+                $id -gt 0 -and -not $plannedIds.ContainsKey([string]$id)
         })
         foreach ($item in $batch.Items) {
             $result = $byKey[$item.ItemKey]
-            $itemRows = @($reportRows | Where-Object { $_.'Source ID' -eq [string]$item.SourceItemId })
-            $statuses = @($itemRows | ForEach-Object { [string]$_.Status } | Where-Object { $_ } | Sort-Object -Unique)
+            $itemRows = @($reportRows | Where-Object {
+                (Get-SmartM365ShareGateReportValue -Row $_ -Field 'SourceItemId' -Aliases $reportAliases) -eq [string]$item.SourceItemId
+            })
+            $statuses = @($itemRows | ForEach-Object {
+                Get-SmartM365ShareGateReportValue -Row $_ -Field 'Status' -Aliases $reportAliases
+            } | Where-Object { $_ } | Sort-Object -Unique)
+            $paths = @($itemRows | ForEach-Object {
+                Get-SmartM365ShareGateReportValue -Row $_ -Field 'DestinationPath' -Aliases $reportAliases
+            } | Where-Object { $_ } | Sort-Object -Unique)
+            $reportedProblems = @($itemRows | ForEach-Object {
+                (Get-SmartM365ShareGateReportValue -Row $_ -Field 'Errors' -Aliases $reportAliases),
+                (Get-SmartM365ShareGateReportValue -Row $_ -Field 'Warnings' -Aliases $reportAliases)
+            } | Where-Object { $_ })
             $state = if (-not $itemRows.Count -or -not $statuses.Count) { 'Unreported' }
                      elseif ($statuses.Count -gt 1) { 'Mixed' }
                      elseif ($statuses[0] -match '(?i)^(success|skipped|error|warning)$') { $statuses[0] }
                      else { 'Unreported' }
+            if ($state -eq 'Success' -and ($paths.Count -ne 1 -or
+                (ConvertTo-SmartM365ShareGateRelativePath -Path $paths[0] -Side ExportedDestination) -ne $item.DestinationRoute.DestinationFilePath -or
+                -not $importFinished)) {
+                $state = 'Unreported'
+                $result.Error = 'Success was not proven at the planned destination path with a finished Microsoft 365 import.'
+            }
+            elseif ($state -eq 'Success' -and $reportedProblems.Count) {
+                $state = 'Error'
+                $result.Error = $reportedProblems -join ' | '
+            }
             $result.Result = $state
+            $result.ExportedDestinationPath = $paths -join '; '
             $result.CopySessionId = $copySession
             $result.ReportPath = $reportPath
-            if ($state -eq 'Unreported') { $result.Error = 'No recognized item result in ShareGate export.' }
+            if ($state -eq 'Unreported' -and -not $result.Error) { $result.Error = 'No recognized item result in ShareGate export.' }
             elseif ($state -eq 'Mixed') { $result.Error = 'Mixed version statuses; inspect ShareGate export.' }
-            elseif ($state -eq 'Error') { $result.Error = (@($itemRows | ForEach-Object { $_.Errors } | Where-Object { $_ }) -join ' | ') }
+            elseif ($state -eq 'Error' -and -not $result.Error) { $result.Error = $reportedProblems -join ' | ' }
+            elseif ($state -eq 'Skipped') { $result.Error = 'Skipped item requires separate placement review.' }
         }
         $completedBatches++
         $itemErrors = @($batch.Items | Where-Object { $byKey[$_.ItemKey].Result -eq 'Error' }).Count
-        $reportErrors = @($reportRows | Where-Object { $_.Status -match '(?i)^(error|failed|failure)$' }).Count
+        $reportErrors = @($reportRows | Where-Object {
+            (Get-SmartM365ShareGateReportValue -Row $_ -Field 'Status' -Aliases $reportAliases) -match '(?i)^(error|failed|failure)$'
+        }).Count
         $copyErrors = if ($copyResult.PSObject.Properties['Errors']) { [int]$copyResult.Errors } else { 0 }
         $errorCount = [math]::Max($itemErrors,[math]::Max($reportErrors,$copyErrors))
         $unknownCount = @($batch.Items | Where-Object { $byKey[$_.ItemKey].Result -in @('Unreported','Mixed') }).Count
         if ($unexpected.Count) { $runStatus = 'StoppedUnexpectedSourceId' }
         elseif ($unknownCount) { $runStatus = 'StoppedUnreportedItems' }
         elseif ($errorCount -gt $MaxErrorsPerBatch) { $runStatus = 'StoppedErrorThreshold' }
+        elseif (@($batch.Items | Where-Object { $byKey[$_.ItemKey].Result -eq 'Skipped' }).Count) { $runStatus = 'StoppedSkippedItems' }
         Save-TransientState
         Write-TransientLog ('Finished batch {0}/{1}; session={2}; export={3}; Success={4}; Skipped={5}; Error={6}; Unknown={7}; errorsForThreshold={8}/{9}; status={10}' -f
             $batch.Number,$batches.Count,$copySession,$reportPath,
@@ -463,8 +548,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzH/lolOT18KIN
-# /TYpMEVB4v/UAguWN1Y+9enny2FbrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9OLW8Rm53gq3h
+# mdU/7TUX3L1u20c69naFSd5DJZjFeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -597,31 +682,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOct0mz2mWiRt3KwlbAznuzIQp05FJS8M6wp2LJc3paaMA0GCSqG
-# SIb3DQEBAQUABIIBgKywthoGso+1N7L/goS3updcHENqw6ojlrdRcnzukg4ih2Ob
-# +nH9f4zBKQAqt5SRHS6i24zbqu4mh53mgQ/0vOgUGhjAH8dtWOg+ePYWcpX9lbpa
-# xyEN2CrSiZWxajA/MVTiGvmGR/ZMNeb0G/c0XSu1hTrUkMc+HRWiPjFj8k1GFiQk
-# lwkTbmfxVNSLzOZUfaFBkJAnDgOP6xokZ0iI12nttoSxENn+0Jodi24fSqAiykRo
-# 08U+xrIufa0mhRlw1GdtYtBYk8QxvtzdRSRoecm4mCKBLMKnQAjQUtgoM6KOpbc1
-# 0HG44Qvr7kr7DYQUCWuYY+etyLUvNLnmYXIk12CjjApMVXXw8ULeA+6DO2UszoDx
-# spu0D4iCJKDrRywdR7gnCBRnth6MlkeESnnVIiShPCxeCEtTU7mGCQWWUuJ7Mhp3
-# 4KXEoTN3qUpADv9Juvh+FW1hjserjVMrI0fdqeiiY4IcUoSoLNVRjvSS0sLccW6C
-# ieLK1NHimkU+OpXIc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKkgvqhKAqSuCHMF1zc4JnU12Kx0gCqTvb21Bm/hUEEMMA0GCSqG
+# SIb3DQEBAQUABIIBgHv85v67luJpB7jMxigA+GXkQx8anwljLlY3HOyjmLzB371U
+# RG2NMYYrhD98IJ5/WvIs3EZ6wZFH+G4TlvAw0wuqxQEkUvBeJcOduyvKZm5R4pHj
+# wuEWFzV3yMaPPpRF9KB8AMmBN0t1nvoW3RRuMhx0SfVdM0102WLreOt4U3SdrC0U
+# bHs6aWyXo7vK2pK6rh/Z5YG9/FsobkNDsMwpHiwFyEZPjzrKajfLeG3U56TOlPV3
+# HJfWPklNOtqvTZW7BnElwa786scchC25k8za9QnIloDFXYALj3qiPKi3drNcYNEW
+# BQ8OzXWJijc51TO8pODUaQNBF+etJqtdg2DRO4XnBjWqKhVwn8Zm0Op1ARgks8/q
+# zQqTOc3MLSLYs8KyRKnurInycGX6esShqFWKvyVKW3ytjKeploU0nDhCe3dDguxQ
+# onmfp2FVffBYm2xec1ScDEgJoyDCjozuJyE30U3w+cV3JaRsxK00yCHp0KCT2Byk
+# zl8DesCW1LomDhCerKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
-# MThaMC8GCSqGSIb3DQEJBDEiBCAdXXtlj6ipU8WGzZbMxBUM04oahWUMcBOO58Ki
-# ZcCXLzANBgkqhkiG9w0BAQEFAASCAgBSz+F79S9ryX5B5wPIQat+NxkNAdHQYc0X
-# fme7KEH96h8B5wTH23FsIoLRijR1YTXpd6lT+Pvw29rvdSGnKD6BUYa6rKqOYqd5
-# L6JWKkNu6AKsaZ7jEwUuYHayCfks7acLulTAxuY4sk8hDp0hs5lKlF0W+ICmEZXL
-# Nve9Ub9BnxlFJZ/PX9q+CrtnMzWuq3Wf6lledQEBh8emVsDlhknK9myW3IC84EwO
-# 9+VfG88984LxrZyIQnEetlIdxglcoGUi2KKPW4g0tY7vm9LdYUikU4UAdWq7DT7a
-# JupNe/Gz/qro/llT2b2Zck7D2ZgDsctjlLveZgvX/Enz1dnYVtIikeKOpNQvQFZ3
-# 0jvlhdJwWqPyS+5oRae+NjGOCldik8EHDYM4ihYwFzGM/VSTmLtf9IjZEdvKtPLF
-# Afo4ES8stH/MYm8Wqvo1WodG1a27/Cy0w0jmKX3yfcxameR9hreFUe91Phbea2jV
-# bpeQ+BKK9CDQJ81Xr4HL8I0xAYJNLQM3s/Zej0BPyEOrQGqnwYxJaCbpEoUy8IWn
-# Ey6q/Np09X479sNDKEVanlq1Xov7t0JndGOxpXLs7khJmWllf59H0BNgRC/MA84B
-# 3mDRAktUi4syXJj4TJvTKq/d9bUqHTv34/9MyXZJwKdsEOnbjX7a5UmV828co8LR
-# 46Hu9pBRsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxODE3
+# NDZaMC8GCSqGSIb3DQEJBDEiBCA9WBzd2K62rw+oMs3KUqbrb2OeMtEdSTj0w1DD
+# oqFQKzANBgkqhkiG9w0BAQEFAASCAgBUqfpyU9PJlu/gXDu/+x+w9MLV/cuPU1sI
+# y5acaTyDOiq0wXNc9VZ4HdPdAwjXfulxqDuQFcsED7fm27YBZRd/EoS/U0cm9DoN
+# /Zgz9RTSoQpcTP7qjRuHoBqJ7nwSfqAC1YaIFaru+GxF3ss/Mmq7O4ZiKeVbfS0k
+# UsN2JUa6NqDylfUlkxEO6vqF+EKm2zgWI8TzrBGuaRvydpUx6BwCNngVbN5CqKA4
+# uk96WTnmMPkYUFGG+S8hDfQJ406YCCvz+uBn+1x7Oj/ej2RamTdjZ17LccyoEz5R
+# lF7AU2dQP6JWIUCEjxTHSmNqhocUUvJf1lX3GhHoavwZAMOSu+xXGQvHZT8yZWlV
+# XkSv6R04t3En2Se6RuAT8OQ0rxpdqGDtybkwwEGiyKYD6z0/Vlwke7LEvAuE6XMj
+# Y9n+zT4G4bWAAKpsQ+0I2wsRBIg70U/nuwvXmhlRB4LXAV2G2KtDVq8ao+eyMu8j
+# mE0weJNcxK6xxJzajjAEyNR5pkYkA3cbsMt+a0B4JvagcL7t/gP7yowKRWrNoZG5
+# jLKco2RUjegkAslzqKqs7HD4o76CZs9Yd5Js04qTuMD8iYS185x02Cl2ZJut9F1j
+# FhwUvUjKNCi2nsSb0X0Dhu9KdtB2IegNW+IV9lTsTzgZXv97DLoph32pfm92Wm/a
+# Jp4cz7M/Mw==
 # SIG # End signature block
