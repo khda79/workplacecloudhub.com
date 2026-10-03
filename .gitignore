@@ -332,3 +332,8 @@ desktop.ini
 
 # Reviewed public qualification manifest (no operational data).
 !/SmartM365/Tests/JsonTransport-CandidateFiles.csv
+
+# Keep the archive directory, but never publish archived migration content.
+/SmartM365/SharePointMigration/ArchivedMigrations/**
+!/SmartM365/SharePointMigration/ArchivedMigrations/
+!/SmartM365/SharePointMigration/ArchivedMigrations/.gitkeep
