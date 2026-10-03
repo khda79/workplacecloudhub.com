@@ -569,6 +569,39 @@ It exports the ShareGate result and checks the expected file
 and library root afterward. A missing or ambiguous report path is recorded as
 inconclusive. The script never launches the five-item pilot or transient
 batches, which remain blocked pending review of the qualification result.
+The result is saved as `PathQualification-Result.json.txt` so OneDrive can
+synchronize it with the rest of the private diagnostic evidence. For a run
+created by v1.0.0, copy the existing `PathQualification-Result.json` to the
+same folder as `PathQualification-Result.json.txt`; no ShareGate copy needs to
+be repeated.
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePathCorrectionPilot.ps1`
+prepares a separate three-file correction after a successful one-file path
+qualification. Its default DryRun imports no ShareGate module and makes no
+site connection. It requires exactly three distinct source IDs and verifies
+that all three are source-401 files in the same site and list as the qualified
+item, with explicit destination subfolders. The DryRun prints each source and
+destination route, the analysis, qualification-evidence, and plan SHA256
+fingerprints, a maintenance-window estimate, and the versioned confirmation
+phrase. The qualification fingerprint covers its `.json.txt` result, CSV
+export, and log. No customer IDs or URLs are built into the script.
+
+A future real run needs `-Run -ConfirmPathCorrection`, all three reviewed
+fingerprints, and the exact interactive phrase. It runs only under Windows
+PowerShell 5.1 with the same ShareGate module version as the qualification.
+It reads the on-premises source with the current Windows identity and connects
+to SPO using `-Browser`. For each selected ID, it verifies the existing target
+file and folder, then calls item-scoped `Copy-Content` with the explicit
+`-DestinationFolder` and `New-CopySettings -OnContentItemExists Overwrite`.
+This overwrites up to three files in the selected SPO destination; it never
+writes to the source. It rechecks the maintenance window and evidence before
+every copy, exports a CSV per item, and stops if the report or destination
+cannot prove the expected result. An existing wrong-root copy is recorded but
+is not removed by this pilot. Result CSV, `.json.txt` summary, and actor log
+are written under private `ShareGate/Diagnostics/PathCorrection-*`.
+
+The old five-item pilot and 274-item batch remain blocked. Review the actual
+GUI-machine DryRun before any real copy; that copy needs separate approval.
 
 `Scripts/Diagnostics/SmartM365-SharePointMigration-RootDuplicateLiveAudit.ps1`
 checks a private root-duplicate audit against current SPO metadata. It first
@@ -700,6 +733,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-LauncherHosts.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePrecheck.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGateWitness.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePilot.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePathCorrectionPilot.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SharePointTransientOffline.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
 ```
