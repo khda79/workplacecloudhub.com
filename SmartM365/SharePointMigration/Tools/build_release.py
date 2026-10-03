@@ -1,5 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 import argparse
 import hashlib
 import json
@@ -30,6 +30,7 @@ def main():
     tracked = subprocess.check_output(['git', '-C', str(REPO), 'ls-files', '-z', '--', PREFIX], text=True).split('\0')
     files = {p for p in tracked if p} | {PREFIX + p for p in NEW_FILES} | set(ROOT_FILES)
     records = []
+    excluded_workspace_markers = []
     for relative in sorted(files):
         path = REPO / relative
         product_relative = relative.removeprefix(PREFIX)
@@ -37,12 +38,18 @@ def main():
             if '.local.' in product_relative or '__pycache__' in product_relative or product_relative.startswith(('Tools/Python/', 'Output/')):
                 raise SystemExit(f'Runtime/private file rejected: {relative}')
             if product_relative.startswith('Migrations/') and product_relative != 'Migrations/Update-MigrationsFromTemplate.cmd':
+                parts = Path(product_relative).parts
+                if len(parts) >= 4 and parts[0] == 'Migrations' and parts[2:] in (
+                        ('ShareGate', 'README.md'), ('ShareGate', 'MigrationReport', '.gitkeep')):
+                    excluded_workspace_markers.append(relative)
+                    continue
                 raise SystemExit(f'Local migration rejected: {relative}')
         if path.is_symlink() or not path.is_file():
             raise SystemExit(f'Invalid input: {relative}')
         data = path.read_bytes()
         records.append({'path': relative, 'sha256': hashlib.sha256(data).hexdigest().upper(), 'bytes': len(data)})
     manifest = {'product': 'Smart SharePoint Migration Toolkit', 'version': VERSION, 'status': 'release-build',
+                'excludedWorkspaceMarkers': len(excluded_workspace_markers),
                 'baseCommit': subprocess.check_output(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], text=True).strip(),
                 'includesUncommittedChanges': bool(subprocess.check_output(
                     ['git', '-C', str(REPO), 'status', '--porcelain', '--untracked-files=all', '--', PREFIX, *ROOT_FILES], text=True).strip()),
