@@ -45,6 +45,10 @@ from every mapped target is flagged; the GUI blocks site operations until the
 configuration is aligned. The header has an enabled-by-default 30-second
 refresh checkbox. Refresh keeps unsaved configuration edits and the selected
 log; turn the checkbox off to stop automatic updates.
+In Files, the scan selectors follow the newest completed CSV until an older
+scan is selected manually. Compare files refreshes both selectors immediately
+before launch and asks for confirmation when a selected scan is older than an
+available one. The launch log records the exact source and target CSV paths.
 
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
@@ -539,6 +543,35 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\Sm
 
 ## Five-item ShareGate remediation pilot (phase 2c)
 
+Real runs of the pilot and transient batch scripts are currently disabled.
+Post-run inventory comparison showed that item-scoped copies placed files
+at the destination library root while matching files already existed in the
+expected subfolders. Keep both scripts in DryRun mode until a path-safe
+remediation has been reviewed. Do not treat their ShareGate Success counts as
+proof that the intended destination paths were updated.
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-RootDuplicateLiveAudit.ps1`
+checks a private root-duplicate audit against current SPO metadata. It first
+validates the audit structure and expected row count locally. With
+`-LiveReadOnly`, it uses interactive PnP authentication, reads the selected
+library once, and checks both paths, sizes, and versions for every audited
+file. It writes a per-file CSV, summary, and actor log beside the private
+audit. It has no SPO write or cleanup operation. Content hashes are not read.
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-RootDuplicateCleanup.ps1`
+requires the exact reviewed audit SHA256 and row count. Its default run only
+validates the local audit. `-Run -ConfirmRecycle` connects interactively to
+SPO, verifies every root copy and its expected subfolder original before any
+change, then rechecks each root item immediately before sending that exact
+file to the recycle bin. It records the actor, each result, and a final
+original-preservation check in the private comparison folder. It does not
+delete other comparison extras or permanently delete files.
+
+The GUI retains shared `Migrations/logs/gui-activity` files for seven days.
+At startup and once per day while open, it removes only old activity `.log`
+files matching its generated filename pattern and records the cleanup when
+files were removed or could not be removed.
+
 `Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePilot.ps1` is a
 separate, real-copy pilot. It starts in `-DryRun` mode and imports no ShareGate
 module in that mode. It requires a matching analysis and witness run: both
@@ -548,8 +581,9 @@ two more items distributed across the dominant affected list. The plan always
 contains exactly five distinct source items and can be pinned to a reviewed
 `ClassifiedRows.csv` SHA256 hash.
 
-Real execution requires `-Run -ConfirmPilot` and typing the exact confirmation
-phrase shown in the console. It also requires the analysis and witness SHA256
+The previous real execution path required `-Run -ConfirmPilot` and typing the exact confirmation
+phrase shown in the console. That path now stops before ShareGate is loaded.
+It also required the analysis and witness SHA256
 hashes displayed by `-DryRun`, so a shared input cannot change unnoticed
 between review and execution. It uses the current Windows identity for the
 on-premises source and `Connect-Site -Browser` for the destination. For each
@@ -597,9 +631,10 @@ and destination site URL before excluding it for separate review. The
 seven source access lines without an item ID (six Site and one File in
 the reviewed session) are retained in `Transient-HorsLot.csv` with the
 status `Hors lot - à traiter à part`; their counts appear in the console
-and GUI summary. Batch size defaults to 50. A real run requires `-Run
+and GUI summary. Batch size defaults to 50. The previous real run required `-Run
 -ConfirmBatch`, both expected item counts, all four reviewed hashes, and the
-exact interactive phrase. It uses the current Windows identity for the
+exact interactive phrase. That path now stops before ShareGate is loaded.
+It used the current Windows identity for the
 source, `Connect-Site -Browser` for SPO, and only `Copy-Content
 -SourceItemId <IDs>` with `IncrementalUpdate` and a distinct task name per
 batch. The DryRun estimates duration from the four successful pilot copy
