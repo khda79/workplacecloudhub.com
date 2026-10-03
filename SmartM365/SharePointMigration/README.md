@@ -46,9 +46,10 @@ configuration is aligned. The header has an enabled-by-default 30-second
 refresh checkbox. Refresh keeps unsaved configuration edits and the selected
 log; turn the checkbox off to stop automatic updates.
 Overview shows every configured migration, including those without a completed
-comparison. It displays the mapped source and destination, the latest published
-file inventory dates, their absolute difference in decimal days, and separate
-rates and comparison dates for files and permissions. The file rate is matched
+comparison. It displays the mapped source and destination, with separate file
+and permission scan dates in each source and target scan cell. The displayed gap
+in decimal days compares the file scans. Rates and comparison dates are separate
+for files and permissions. The file rate is matched
 files divided by source unique keys;
 the permission rate is matched permissions divided by source unique permission
 keys. An empty inventory or missing comparison has no rate.

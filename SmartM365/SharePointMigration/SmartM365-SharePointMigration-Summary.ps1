@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 
 function Get-SmartM365PortfolioTimestamp {
@@ -200,6 +200,14 @@ function Get-SmartM365PortfolioRow {
     }
     $scanSourceText = if ($sourceScan) { $sourceScan.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
     $scanTargetText = if ($targetScan) { $targetScan.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
+    $sourcePermissionScanText = if ($sourcePermissions) { $sourcePermissions.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
+    $targetPermissionScanText = if ($targetPermissions) { $targetPermissions.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
+    $sourceScansSortDate = if ($sourceScan -and $sourcePermissions) {
+        if ($sourceScan.Date -ge $sourcePermissions.Date) { $sourceScan.Date } else { $sourcePermissions.Date }
+    } elseif ($sourceScan) { $sourceScan.Date } elseif ($sourcePermissions) { $sourcePermissions.Date } else { [datetime]::MinValue }
+    $targetScansSortDate = if ($targetScan -and $targetPermissions) {
+        if ($targetScan.Date -ge $targetPermissions.Date) { $targetScan.Date } else { $targetPermissions.Date }
+    } elseif ($targetScan) { $targetScan.Date } elseif ($targetPermissions) { $targetPermissions.Date } else { [datetime]::MinValue }
     $scanGapDays = $null
     $scanGapText = '—'
     $scanGapTooltip = 'Gap unavailable: source or target scan is missing.'
@@ -305,10 +313,18 @@ function Get-SmartM365PortfolioRow {
         SourceTooltip = $SourceTooltip
         SourceScan = $scanSourceText
         SourceScanTooltip = if ($sourceScan) { "$($sourceScan.File.Name)`nDate: $($sourceScan.Provenance)" } else { 'No source inventory.' }
+        SourcePermissionScan = $sourcePermissionScanText
+        SourceScansDisplay = "Files $scanSourceText`nPerms $sourcePermissionScanText"
+        SourceScansSortDate = $sourceScansSortDate
+        SourceScansTooltip = "Files: $(if ($sourceScan) { "$($sourceScan.File.Name) — $($sourceScan.Provenance)" } else { 'No source file inventory.' })`nPermissions: $(if ($sourcePermissions) { "$($sourcePermissions.File.Name) — $($sourcePermissions.Provenance)" } else { 'No source permission inventory.' })"
         Destination = $TargetScope
         DestinationTooltip = $TargetTooltip
         TargetScan = $scanTargetText
         TargetScanTooltip = if ($targetScan) { "$($targetScan.File.Name)`nDate: $($targetScan.Provenance)" } else { 'No target inventory.' }
+        TargetPermissionScan = $targetPermissionScanText
+        TargetScansDisplay = "Files $scanTargetText`nPerms $targetPermissionScanText"
+        TargetScansSortDate = $targetScansSortDate
+        TargetScansTooltip = "Files: $(if ($targetScan) { "$($targetScan.File.Name) — $($targetScan.Provenance)" } else { 'No target file inventory.' })`nPermissions: $(if ($targetPermissions) { "$($targetPermissions.File.Name) — $($targetPermissions.Provenance)" } else { 'No target permission inventory.' })"
         ScanGapDays = $scanGapDays
         ScanGapText = $scanGapText
         ScanGapTooltip = $scanGapTooltip
@@ -328,8 +344,8 @@ function Get-SmartM365PortfolioRow {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqpZqS9b9BcBRi
-# 5LJAtZ7JkMBH/F66esYxZbS4i+j6TaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHbVMWkn5+asV+
+# U4EcMn+h0MaKQqAfw6VHZuKZsQWJ3KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -462,31 +478,31 @@ function Get-SmartM365PortfolioRow {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL6X43UXNcWczSaLdUCZLpGqgUgIZFiuibUvWblkWJlzMA0GCSqG
-# SIb3DQEBAQUABIIBgBeSNhaXrGMDie5QRtWnSJbw8OcmG8gslrcJNeqj3sGQlkXa
-# GLuk0KYwWbc2DBlgGUxY3wKWlcVuc22MZSwRz2vodJL8k1PhrEdWFUrYWHoYC5vP
-# hChRMDFEIaTm2kG18LvRQbZmoVoQo2uzWTDpZngOt0QXBMsUmT+aI2Qp5F0ATIf4
-# LfncYyl4nHbwGeGj7MF9m9x8bvFhwKNNShyj6QLvHvCEFiLvBki+64umuwXFP+5a
-# 3OIqm6aNew3ovV8aUmvjGKowoezLvyUA1Wz3a0XvtJbpiAlsyAiz5mwp7/0FfEfA
-# 5dXtlRb9fVQhnpgceGMIEMuMn9PF7rZPdio6LHgo+6QgiH8ucjxv5c5KWsV4DyjM
-# q/W1OXXUfpn7lSS305PfY8MqwPz4zTI9N0ncDuXHTaR8qm415/jXbWlGUtNG5oBc
-# yMhItLEaOmaV+aXcMvQWKgz5cEZHmf5RVeEe7vMsfsJud9lM+i0teze/O+6slsFS
-# Fhap1fWPq/EGskAyCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIII+YlRMwuKF/VzQ6a0h8gJfySy6CJcY6D+fGm0smUYSMA0GCSqG
+# SIb3DQEBAQUABIIBgJ2HAdagex+Kx67IoKjrdm5t+dsDaYlMgtA8MHuhXg+u25jS
+# ylELa643ZH64BI/WPEZcfyAqj2h0xe44N5L75TALKkJahW6Ko57lAZdZmTH/4Z4p
+# sbzrli9Srs8MG47t+Vn+imZrbHVjEYoUvrrh78NRtqv1Yj16Du8g/3q0N6CUXFT3
+# DHPTUULEODYj1YF8uMIDaQCbilEpDqxSR66lzmQsO+MXcNDYtfN3baB3opo6eHOG
+# UMq/7Z81PIMcMmd9RlTfmmnghwKxFoyCVsp9sjHKzTHvHatDTq9Fg6bSgM6Ylnhy
+# nW6RZgHBmH3uER/6+UVUnbrrn0TsqcVoIO9AJnhostef/2lA/pCQC21BTvyzSgQJ
+# +Tks2zxTn8GWa1BE0gpxY9cEMIceV9jzyO9U1hsGwHcK1hnwt3Ko7lEH7gVBsgba
+# 19BVXfzH2jIbtzVInHTAEexKWkFG8rbuoXC1ufrGHvjToaej5ut7kIrwN7AYkQd+
+# SszhcZrv6xWFZN7aNqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDM3
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAIMV65lyiArbkc+l3r7vKoGYsOmyFmDLjWs5Tr
-# U1cjajANBgkqhkiG9w0BAQEFAASCAgAxWFo9szdpjXpJwVsQy3XnF1x4H91FKN2J
-# umS0k2b7tpddZo7yrj0VgvjdSsZO9Ai+wWBSWQM8kc127EmZeJQSRTi/K1i1DUZs
-# LNd5jjduFiwN73p2sNipfimkWB7nnej3Tm56oBNa3LzjUx9vcZi+z6F0UVYuw+Rz
-# o0PergMTHCRD7Iqc8xH+FOBOxzMNpEPADUA4Wqw3+iO42r7Gd0KbGE/wLwbBypsU
-# lHlfrMjPrZsv+6I15NqVb7s64EzTB4Dm3eYRKFK6gpZzuKsqNXfkQz/nrR8nwzLs
-# sXrEHiyCf/LUUZZS/MwK7MDo5raFcxeYL3TsUlerfKQsAhHpS5JugiL5FFuQfh1Q
-# Jh0zN0WrdbW6QAsTqZgqskqy4fTOniyGnoPYAywlHsp4m6cqOlj2xjhKdmSnOkRJ
-# bDCci+30UIaAmV/ArOWxYTQx9Jcq3++o68WtKovwu+hgDd5CgO2g38/S5sAkG6dG
-# SjjRMHUPP18S+zOwd5ww0nCvfe7IFA/KnhEPjTkorkMnXX+kCevbL8IHFJ8SM75P
-# oNEzcn17x3fTqxtSY6MxI2dnKjal/C3z+Y5iM6nzobWk0HokRMehfdsyKcatTZoh
-# kObnjkhmjVme9VRz+YuW5kPLEwZ+MU4moi3jamEMwwkdfe7rDCtoC8/tDmNVXFUM
-# PCBjBHnPrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjI0
+# MDBaMC8GCSqGSIb3DQEJBDEiBCB+tQyW85tfGOiusCshreFoQ0rlKufwT8jVBCn+
+# PFHZXzANBgkqhkiG9w0BAQEFAASCAgACHxOFGRWlLg0pSJsgF/lccwEz8XLbFv4e
+# Bjuis/DHLQPObEvDDa5ZvutIuPf7ZiF0cmON/rJGMMQErnDs1034H0SXQKNCFJ46
+# ZVvvgaif0tdsIXyzE69SbJUf9UsOuEouE5RqGLQCKWSF9NcyF3bnpTFct788OWdu
+# ddyzBbxJvnR1EoAaUbv5cCZ7eMkqrOG5gN7aFGS1zcnSbK7IqNKOPzB4Mt3Q6csL
+# MgDX1pdetQsQ3Pr9PFYaFeeQpXn1faXm390Hn8REEUW/AkzPijk8l4ii4Y7FAeal
+# j6PhN7Ou7OHvZmw6R8ZJ2w6dRtX7RFBqnit42xVgVRQEAzcHuZyHUhq7UQv/iGuw
+# MIfWua15T3KZ9Ea3MbZKB75cIXt+rpUn54X+eH+oR1y8u7T6V+z3B3pHd1SQNuua
+# +E0D68sQIJtx22BZnrXo2k2TQfscIeF7uysJ0JaTxD4smudXXy6l6CdqmRE8f24v
+# KSC/Krn7dIFGrD3y1DxNpXwhwsSd9tKw0dEA0NKBF+hDadjEXrXpI0ULq6snHUvq
+# rZ4JZh2+9WfWLxbXc8t97wliILTkLjWH6+Py6rVAqP1VIVJ7LyvRiFb07e3+QIfj
+# JCEGYqLFRx7NV/EwddwdTo/MkEhfRQFDhW7kXSJZA5jBiol9AF4ZNfzD0WH7X2ox
+# ywmKoA2IpA==
 # SIG # End signature block

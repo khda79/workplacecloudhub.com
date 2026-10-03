@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Verify portfolio summary states without connecting to SharePoint.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -50,6 +50,8 @@ try {
     if ($row.Status -ne 'Scan needed' -or $row.ScanGapText -ne '—' -or
         $null -ne $row.ScanGapDays -or $row.ComparisonPercent -ne '—' -or
         $row.PermissionComparisonPercent -ne '—' -or
+        $row.SourceScansDisplay -ne "Files —`nPerms —" -or
+        $row.TargetScansDisplay -ne "Files —`nPerms —" -or
         $row.StatusTooltip -notmatch 'Files: Scan needed' -or
         $row.StatusTooltip -notmatch 'Permissions: Scan needed') { throw 'Missing scans were not identified.' }
 
@@ -63,6 +65,10 @@ try {
     $row = Get-SmartM365PortfolioRow @params
     if ($row.Status -ne 'Scan needed' -or $row.StatusTooltip -notmatch 'Files: Compare needed') {
         throw 'The combined status must include missing permission scans.'
+    }
+    if ($row.SourceScansDisplay -ne "Files $($row.SourceScan)`nPerms —" -or
+        $row.TargetScansDisplay -ne "Files $($row.TargetScan)`nPerms —") {
+        throw 'The overview must distinguish available file scans from missing permission scans.'
     }
     if ($row.ScanGapDays -le 0 -or $row.ScanGapDays -ge 0.01 -or
         $row.ScanGapTooltip -notmatch 'Target is newer') {
@@ -92,13 +98,23 @@ try {
         throw 'A clean file comparison must not hide missing permission scans.'
     }
 
-    $sourcePermissionCsv = Join-Path $sourcePermissionDir "SP2019-PermissionInventory-Fixture-$sourceStamp.csv"
-    $targetPermissionCsv = Join-Path $targetPermissionDir "SPO-PermissionInventory-Fixture-$targetStamp.csv"
+    $sourcePermissionStamp = (Get-Date).AddMinutes(-4).ToString('yyyyMMdd-HHmmss')
+    $targetPermissionStamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $sourcePermissionCsv = Join-Path $sourcePermissionDir "SP2019-PermissionInventory-Fixture-$sourcePermissionStamp.csv"
+    $targetPermissionCsv = Join-Path $targetPermissionDir "SPO-PermissionInventory-Fixture-$targetPermissionStamp.csv"
     'Principal' | Set-Content -LiteralPath $sourcePermissionCsv -Encoding utf8
     'Principal' | Set-Content -LiteralPath $targetPermissionCsv -Encoding utf8
     $row = Get-SmartM365PortfolioRow @params
     if ($row.Status -ne 'Compare needed' -or $row.StatusTooltip -notmatch 'Permissions: Compare needed') {
         throw 'A missing permission comparison was not identified.'
+    }
+    if ($row.SourcePermissionScan -eq $row.SourceScan -or
+        $row.TargetPermissionScan -eq $row.TargetScan -or
+        $row.SourceScansDisplay -ne "Files $($row.SourceScan)`nPerms $($row.SourcePermissionScan)" -or
+        $row.TargetScansDisplay -ne "Files $($row.TargetScan)`nPerms $($row.TargetPermissionScan)" -or
+        $row.TargetScansSortDate.ToString('yyyy-MM-dd HH:mm') -ne $row.TargetPermissionScan -or
+        $row.TargetScansTooltip -notmatch 'PermissionInventory') {
+        throw 'The overview must show distinct file and permission scan dates on both sides.'
     }
     $permissionFolder = Join-Path $permissionComparisonDir "Fixture-permissions-$comparisonStamp-test"
     [void](New-Item -ItemType Directory -Path $permissionFolder)
@@ -158,8 +174,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8LV8QdPdG8qYA
-# dw+uqVI9E0EJmVZJG3laXPkcIah3TKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUVjcOJDboj6Vz
+# Cv/frpCYFPp/tA0Ssg1OtZ/Da8WQk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -292,31 +308,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJpue9uxUMxereD/CVEuRhWX41ARC/2sfoNH7nHsxQsdMA0GCSqG
-# SIb3DQEBAQUABIIBgEbYNFc78xcA1JWMAXCXCLIPWNJqkZOx0m1q4jtQuh17LrRs
-# 3A3SVZfVhZ3qTP9IpXYQKIa8PYlO91azJIg6e1vnVuw/hzMWYD0v08xsPmvMVnU5
-# zfwDcxC30LcAFgks7vFLCitKLL0BO9iyQI3cFYE1idrBBnnMCa2P18PI9K6lXnk3
-# WCevkfJRaeockNOIHb93oTkkAZPjiScUuU4wDAzXa485F/NqNjN9Ha46cTQsiB4l
-# K4l+rW3uzJ6PH0GvtzfSmTIW4B+8RQhfq8s2tJxZ7c9+b48+hYzb2AyH2xHjl08f
-# qKIweIEODB8u3jn59kGg0Fs4vnHxRD/NVYq9Qqs2vIS6oqihKp+fw/DwrF2DWopm
-# IQiP3Wae1jcB/rZpwJYAFcRLtIgY+EAxN9uUhRmaTvjcOoWYCFGyQcYrs5Lv3lGw
-# CpoRXCxTWXvNQfm2SVrlzPrRCopwjAhC10fY/d0/gi+JpilRCigokXucu3bKgos9
-# X0kFSpKGIDpZ9zwKsKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFa6MGiSlMXEtObyw2vlFncF6+SuVCmoGoQ9RQrXpYovMA0GCSqG
+# SIb3DQEBAQUABIIBgBZHv6R277qdWbzXPxQk2Vq/k1AXZLFdhZAj0bGhHtpkSYJ3
+# DanUtKdAW6kQ5W2AuCHB+mItw5TOUuareX5gwIlpEwg09FO6pPItfNhrDO7hRxF/
+# ym88fA3F45dak8VByZPRnC3QZXKqkPEbx4VdI225t2cR14IzvZQAxNtdGfOvebGc
+# kXJeiA1CeTzqdUReI5zusKDozBd3MbxEb/1nKrrIHlPkEEj7ysTamgCVFviVbvMX
+# lNF7DGlm58Io4RzUAURtQCLvwrDjyuPQerjOcNZZgqE88tmmmjNRaSQtpm7EgPiC
+# jhuIHlJO5K5ZtN/tya0lI7tjVCcbH5s5wXKy8E9Nihgvcddn1KNcBuSOi58zzY4O
+# vnj4gMnIfGXw42LICsdNVjU1BZWKE2rKQbei1I9hc519gk0/Mdef25rXd+5zUsWI
+# bKHr1hliZK4ydcw/daghkyjzK3Ssq63ak81OPIKU1R3hVbbnDIe5I4aYENimfSpE
+# e67k1k1H9/ZAKUh4WKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDM3
-# MzZaMC8GCSqGSIb3DQEJBDEiBCBMBxGwg0Nhp5ZUsze00LLBIIV1nr5z3GAjSEvJ
-# 1JDbHjANBgkqhkiG9w0BAQEFAASCAgBIva4kyFrqeH1v3gUrR6Zt090sA+FQrg/b
-# i429ii7e949MZ0hj4wPwK7WntO697OD/831l3Is799zlkkNObAylH7CqJqZ9WKgZ
-# GWROcfnJWTUnoOL1cQW5L7rK3nHoWs9gtiji849l+tn/U3RAgDWWqhf+UJGBV3Q4
-# i2wu+YXCIb/DyhvC3bKhI9MQJ/3+DyuOyuK0pxssFn0tSQoDC6bRTMA86mUE4u+h
-# bYo3dvifcU9Rm0osEuVojcvEpTidikDd6jYsL7St+Cwescj2z5ycJsC4G241G1fN
-# p21HenArAkSJqACLTDoFWAHskcUKQBLgElKvWwlpvmV8cDfjroP9C/jglhKOt9Zl
-# hvs3Ji4NPzgYsuAkf+MxPsLm5/IUoS0wjDx1enJZGBwh26kMmg9cA1VlHpL1lNoa
-# p1mcX9gVDC+MNvfLDpjVMdjL89ABDxgZFCFioF26GEDRTrr4Qt/qA1dVNNn4P+FP
-# wndEc4C7y2jVQuyMNxch4P+QsHG53qjZCHSI4tlPRkDz34rxbiDqnBOjhyr4B2i8
-# 6zyAQdFImTGcBGT5Vci/kddZ2Rs0mLUuF14ljaKXYb1hiEHJI0+d9OL6FR31DryS
-# /bTo+lzZoCZ2n8fIaDcqvugttw/5s1GC5ieyNwa8gV8N1krg13Cs0OmSaxbkTK1h
-# FObv0JnGZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjI0
+# MDBaMC8GCSqGSIb3DQEJBDEiBCD7HTSI2r41T5GYDDrbSEUg5HFiJseG9bdhPJDH
+# 2NFtrTANBgkqhkiG9w0BAQEFAASCAgB5dxRAlEyQVlbegNgeN1Ldta+I4vUZNy+w
+# /XsQ7gH+2Bdbc7PXEzcFE1mVug6pWvcpgjQnM18Bw3WtAdC2IhuVZOlTEz3N8IqC
+# dAAFLmuVYHD63TOQR2txxCoXb9sxoL04TAGQ5w8A922CZs/cEKhiGyW6V861bIQs
+# cLx+W2HQG0VP9edbfr7wormLsMzkISJhK99ZEojqsk/N9un3w41wRAEcJ+8aZ4Ha
+# YtaITn/HvH7YQ+2+IVCyM7mTL/V+dLQG/gVoeQ9QR8CIUcDrfCw3FZqzQA/VGfw8
+# lAxBc8hhr3hb6yF0taN9pqyZTEN0/Pr+wcIpBxFhFa+VURt6S+mynhGh7XpeLtJN
+# SKKNHcwo49FXma5rdl9z4LEdO+Pq063ZrxULVXXmK/jSg1Rkf/ix2XzNKvAM3iPM
+# 2TR6j/J04YoSpHU4c12TFtYaH6N3m7gEaRgY1tprob9WtdrN0mYY1QpRhr4ij15Y
+# XyxGP/SUKCVBIViTc6I+Zi9JKKAN3GC+jmR2lKtptnr7M8wh2zwctL9y3ifMeSXJ
+# z2lHxuGufGYrhCOvRRwYVNk6VWdIcIeRLTBWJojQrAfiwW8it5MKFBImvKxNhDG+
+# K5VaOgErKnMTFRAq3tG5n3QYuFM+kMDdAHPmdp3fW3+15TL2REXv0DnimZNy61Jf
+# 1qpCuYmZKg==
 # SIG # End signature block

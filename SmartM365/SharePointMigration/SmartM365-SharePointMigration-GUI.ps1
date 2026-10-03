@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.27
+    1.0.28
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.27'
+$script:AppVersion = '1.0.28'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -459,7 +459,7 @@ function Open-InExplorer {
             <DataGrid x:Name="gridSummary" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
                       SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
-                      GridLinesVisibility="None" RowHeight="36" ColumnHeaderHeight="40"
+                      GridLinesVisibility="None" RowHeight="42" ColumnHeaderHeight="40"
                       AlternatingRowBackground="#F5F8FB" Background="White"
                       BorderThickness="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
@@ -479,9 +479,9 @@ function Open-InExplorer {
                     </Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Source scan" Binding="{Binding SourceScan}" Width="125" SortMemberPath="SourceScan">
+                <DataGridTextColumn Header="Source scans" Binding="{Binding SourceScansDisplay}" Width="145" SortMemberPath="SourceScansSortDate">
                   <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding SourceScanTooltip}"/></Style>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding SourceScansTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="255">
@@ -492,9 +492,9 @@ function Open-InExplorer {
                     </Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Target scan" Binding="{Binding TargetScan}" Width="125" SortMemberPath="TargetScan">
+                <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="145" SortMemberPath="TargetScansSortDate">
                   <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding TargetScanTooltip}"/></Style>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding TargetScansTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="Gap (days)" Binding="{Binding ScanGapText}" Width="85" SortMemberPath="ScanGapDays">
@@ -1925,8 +1925,12 @@ function Refresh-PortfolioSummary {
                 $rows.Add([pscustomobject]@{
                     Migration = $migration.Name; Source = '—'; SourceTooltip = ''
                     SourceScan = '—'; SourceScanTooltip = ''
+                    SourcePermissionScan = '—'; SourceScansDisplay = "Files —`nPerms —"
+                    SourceScansSortDate = [datetime]::MinValue; SourceScansTooltip = $message
                     Destination = '—'; DestinationTooltip = ''
                     TargetScan = '—'; TargetScanTooltip = ''
+                    TargetPermissionScan = '—'; TargetScansDisplay = "Files —`nPerms —"
+                    TargetScansSortDate = [datetime]::MinValue; TargetScansTooltip = $message
                     ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
                     ComparisonRate = $null; ComparisonPercent = '—'
                     ComparisonDate = '—'; ComparisonTooltip = $message
@@ -2673,8 +2677,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhjj/QIvJEc8f7
-# CXIgltWJ6WLOegCONMz3f5mOG5R7pKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqQSJLL7u1vpo1
+# R+DUlQ7QB8lWumQk+36OEDjrGrp1pqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2807,31 +2811,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFgmFrCUnbKOZzukpRGe3u89fjowsnQa5Y5pIaOIGQszMA0GCSqG
-# SIb3DQEBAQUABIIBgESt31GvtrGRqKeWoUriRc48W7dwZL8K49b/x6D0QLv7SgJl
-# H9TPB8Pi8xvLenbGmFClSlVSg3cMAsNIKtfuZGZVs/VdDENA4o/JhTlZYdBO/NCy
-# pO4dOYDJrEw7quhgVVDfDThU4Aw5n/iQd4AMh/5waI5v3JdXXxoinv3VceyV72Hy
-# ud8CQEGmNe9fTkO9LuWYnKAm+8hPv8fCdmnlbMsJ71rZG7NZJOUszwZxhXDZH7wm
-# hj5mIt9uWbdAdtIJfcooX7oj7rkkQ/UVOrcJKDRgQnLFkWmfRoiljvFrqeuo1Wxn
-# EE5y7wdetpWqCOPXyzjhvH7z7hfW1+5ZwXPONutL3lzuoFSp4wULq2vHZ+wlQ3fN
-# uKQWxtRMsSlmHAwKQ7iRpwVHU1hP/pnXS6tsjZSjWdBVsbpPCrxL68H/nUL0VEPo
-# 2SR2vK5IidJ6WqOWrN+EJh+xat6w/oxCO6z7FQNUl2SgYSUT/OKRPqBgRKJJHhbS
-# aLgz67DJos9jJluyQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIItJ8Hwz/aR8EuOnt6Fxz9U2MMk/TpVh3JKEdtV7ZnQ7MA0GCSqG
+# SIb3DQEBAQUABIIBgKNdMln2dt6+oVh96VPJ0PVOWHg4wtXiJxDNCRLwESolrMcP
+# 1F3amHZ+QixgqwiF4buuNsCVLgull9658MHnUo1E9ahlT7aUu8atyRn1ZNcVOu99
+# CSOBOKb6oL4FrjNb/2tSBu4qTqqtT4VXoyZtyub30RbzXuPeSDAGMnJLRsIaNu75
+# F6a64/h7YX+xRTNnUeTaMCEvpB/bRDQ/vF4pdCB8AVAOW8rOrW5omk9ZUQfhAubu
+# wJbgGeJ9OQx66NxSYDYzTC3GnNiYp4BAn7+IY880N76KLA2+jsd7Y4pMLqNEDxf1
+# Ztmjs/9bzCuCOUvsUbo+Ewn1csvmC0GwambNTG8zk9002kuT88Po0of+G9nTT48x
+# WxwHpInqP/rV8qu9rwYqlWpVBDfULCQABK4I6e2+9ua7GVhe2xf3+7nl/vNku9px
+# SRYGe302wXdrHZTglijd/cVIRuhRWJfwWBJy9t2wDleQK5GdG7g38A9MS0ta0rh+
+# khZrS/Lw3E67Tm4xAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDM3
-# MzRaMC8GCSqGSIb3DQEJBDEiBCAKVqmToDTbrnHAY973X9zA7zE2PslsAojn4t3Z
-# B50LzjANBgkqhkiG9w0BAQEFAASCAgAIVFk4D2pTs5Cot5R+UO1dtDUs+Y+x84Wq
-# zp2tRsS0VQJj16xcOUtibHRy9tYqNZfU9Oz3OXt8mJbfBD3z4/YgM3cwFkPokgg2
-# Z0uwqlNtyOEgGcKzT8rB3FwP9cpYgUOX6ZxMbqsZgz5p6fNO7dlOISGFM9N//9sJ
-# P0QdrIHm+e5nYhj5SfrZkBqsI8ihVOcCcZ5CPevPDoX+pkUFE8JhVAI2QeIj8Esq
-# hFExaOHXujOEPQQ3AHE5w1eJ6FO2iyyxt3KhnLtDgm0v1gPzUxOpnS/dKwTjtZXy
-# CSETV3HqnQQM2nb0vpOehGzcPKY1cR836B0D86TIk2X3gXxLqgYU6eZss+IhyxTQ
-# RUXInZjwm2jNleQQhvo8gp4PhBXCNro71p9pQc9683fR4OBRVbCVIsP+3xxg1pND
-# dDTm8Vl/Rb19e/ZMu9PDfp8w992tpr/LZNngaM4k+VnpC0Br8S5GHGZJZn3QRpj6
-# O6m7/PAUeGcqMK9ZPDKqjwT7/KMMDQZilyznFHTmLEfGsQd+rNS/x7J2RZipMNlK
-# lsDxet0ipVX3nxPMuspFlJU/nCCz8BQaQkprg86NlaXJ+vl8kPdRh+XM2x/W8VjV
-# fo4AUErY19xVwAqrx2cYlKfIPP2TlePaLOlvy4i6YY4VpcZA86v1cE13f5ODYenV
-# Oid2bl7vyw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjIz
+# NTlaMC8GCSqGSIb3DQEJBDEiBCAPYcsAXLiE1OV5XnPZf6FFwHc4BoG2Mmx3YN08
+# Fg4o5DANBgkqhkiG9w0BAQEFAASCAgCN3ORaTdBOPEV3f91SHTJ7zBg8xMfwwjnQ
+# EFU3pWVoPn5niOzzFlc5qJSGaB3amJ7FvGHmLmtyrp44QoInPN2GESWNFfKq2qNp
+# 7FNfIZSY8afBTnV2J4z7R4NfZqgaJeqpP7Pg+o0dXswzA2C6Zlvn7+ZK8T9c/a/H
+# 1q3Gz8UBYpQoiFDRfQE3bx/OTkU2CMyQu+uxCPavWe9GF8v8mw4gW+BS9R/XzPv7
+# l07n7OqgT2Iu5A9re5jOg32KWHi8K5M0MQ4l25FR1oot2AOR89eSGe4f0EzhckTG
+# OHTv9+5CJ5I+N4oe31KlbV87c8j5wiNeipcyTa8h/MinWaF7rOjxipHO8qZBe9tS
+# 1cyc7zFG/ZEqPvCGiPmaAi/ayiA3r7mwMJ7L5j/wzuLI51w7OUKHi+sFQ/qcLQpZ
+# RIP1b5FdE5How+ODqqVKSOc7telJaLAaPxqB6/qjj+dGOXC79Cv4zug5maWzm0px
+# Afpc1axxuqjCBUsXjzUDh1dHaEEHhtleu1pvJEZwbDXI8qjt0MzTqcPxdkvcPQ7H
+# I25fmOB8OORyt6hF1F2oaxD9s3RmcBg3SGQEOzo5kA+JggUElzVqrhgSJs7y05wF
+# 2lgcu6CcX/Qry6U//3btmSrV5Cr6kyqhdm6oNEaDjpNQaoDAJrrpOqnAJS9ivKkH
+# LQwJe/3qBA==
 # SIG # End signature block
