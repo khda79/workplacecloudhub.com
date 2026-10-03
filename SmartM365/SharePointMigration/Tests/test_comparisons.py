@@ -250,6 +250,7 @@ class HtmlReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             shutil.copy2(COMPARE_DIR / 'report_html.py', Path(directory) / 'report_html.py')
             shutil.copy2(COMPARE_DIR / 'scan_evidence.py', Path(directory) / 'scan_evidence.py')
+            shutil.copy2(ROOT / 'Scripts' / 'console_lifecycle.py', Path(directory) / 'console_lifecycle.py')
             portable_python = ROOT / 'Tools' / 'Python' / 'python.exe'
             executable = str(portable_python if portable_python.is_file() else sys.executable)
             for name in ('compare_sp_source_target_file_inventories.py', 'compare_sp_source_target_permissions.py'):

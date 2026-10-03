@@ -614,5 +614,6 @@ def main():
 if __name__ == "__main__":
     from pathlib import Path as _ScriptPath
     import sys as _script_sys
-    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
-    raise SystemExit(main())
+    _script_sys.path.insert(0, str(_ScriptPath(__file__).resolve().parents[1]))
+    from console_lifecycle import run_console_script
+    raise SystemExit(run_console_script(main, __file__, __version__))

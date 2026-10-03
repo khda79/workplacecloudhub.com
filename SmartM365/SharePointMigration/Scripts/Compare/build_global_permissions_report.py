@@ -204,12 +204,17 @@ def build(migrations_root, output_directory):
     return html_path
 
 
-if __name__ == "__main__":
-    from pathlib import Path as _ScriptPath
-    import sys as _script_sys
-    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
+def _console_main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migrations-root", required=True)
     parser.add_argument("--output-directory", required=True)
     args = parser.parse_args()
     print(build(args.migrations_root, args.output_directory))
+
+
+if __name__ == "__main__":
+    from pathlib import Path as _ScriptPath
+    import sys as _script_sys
+    _script_sys.path.insert(0, str(_ScriptPath(__file__).resolve().parents[1]))
+    from console_lifecycle import run_console_script
+    run_console_script(_console_main, __file__, __version__)

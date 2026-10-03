@@ -42,7 +42,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.0') -ForegroundColor Cyan
+. (Join-Path $PSScriptRoot 'Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+$script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
+$script:ConsoleLifecycleFailure = $null
+$script:ConsoleLifecycleStatus = 'SUCCESS'
+try {
 
 function Write-Step {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -59,6 +63,7 @@ $pythonExe = Join-Path -Path $DestinationPath -ChildPath 'python.exe'
 if ((Test-Path -LiteralPath $pythonExe -PathType Leaf) -and -not $Force) {
     Write-Step "Portable Python already exists: $pythonExe"
     Write-Step "Use -Force to replace it."
+    $script:ConsoleLifecycleStatus = 'SUCCESS'
     exit 0
 }
 
@@ -139,12 +144,20 @@ finally {
         Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     }
 }
+}
+catch {
+    $script:ConsoleLifecycleFailure = $_
+    throw
+}
+finally {
+    Complete-SmartM365MigrationConsoleLifecycle -Context $script:ConsoleLifecycleContext -Failure $script:ConsoleLifecycleFailure -Status $script:ConsoleLifecycleStatus
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCitGQ+6DNDhL5i
-# ozgmMWboq0XEttYOqDa18d+9HbeT76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD42zXOtCaUfPZb
+# 9/5Umsy8AWUPa5taG1bwJ97hTU54sqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -277,31 +290,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIClfjf1ZkTcpJY6T5EfnfVJWSx6qGBTHRO61EmqoaLBoMA0GCSqG
-# SIb3DQEBAQUABIIBgDJMv2Uy+L2vuCaS3YUUO26mHFz3k9sgzLQrDaruk1DgGIGQ
-# TDZJ1uBMBba9n+niQlKzM8oj0PIYKkqaDND7ImgBT7Y0FSEEStRaN4On4GM53SLn
-# e9kDQposP6cgiE6fly4jof3a8DmWgrPI7RB7q8nSGGpoti1nA6p7SnABMG/fQjSI
-# i5Z0TLw5elwz8k5J4IQ2h2vtsMK7lMLCBpDKteic+RBGnmEM6zzb3bcZbhqDir5P
-# MYjm/mwnaitQCG4ucPTL6GP5K5JYBRNpLcR8CYOAo4p4pJ0U0Fw0el7uzuSqONhD
-# lP9/xaulLYgbP0j+JV9kwJAz+7cQrk5iOr4gLofJ7tXFIoPuSJBKCexHKb7mcpF/
-# Zq5y0g1JfPNIbC9C8SmJJLaL1ndv4tFMpQIiVHZQIt8YcrAZnam0XMy8niAmfuCW
-# iTu3ftzByZxN6PcyNXLTL9uW0OKUb1nbxcmm3vqqLP5lJvr8CzQPiKo9kKxJzrw/
-# WS9t8ZCTLWZ5iNTkpqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICvFuLY9okdfKEN1vrershzaAtXiwC5zMAXcON9hovyPMA0GCSqG
+# SIb3DQEBAQUABIIBgDvkEjo2fhHTSU62WfgC0VUFwuA6dHuE2EBcRuqDK4Z+Z9sJ
+# hvVQk1+zDy18gBo8r6rwSjvliZuQmxAURey+QvAFcRnQ23UV8f1VV/SnO10QqtdW
+# sHGvkXDT3URCjYfgQpZ7lgAStScJbEJyfRUrzfqGrtjoQKeDGR/zMCjZUoucIGwJ
+# lzNeEXzL/Vww/hks7kX2dCjuGFnfIW2VWgtlJti0Wf0Qro8hCr8gGNqRdcX6oH1T
+# ob0RBn/UZkUXXAlFqeMzX7TI8RTkI9Gmvaqo89ynf5eCKn77YmXoSc4XdnPqBq/B
+# ySkX73lQvevsiMedVPDbUNM8G5Enqb+Jz8CDr6QOzkfmZIqo43sgvDEF093uhKOu
+# 5U1x2w7rdo+EEI7o/Xb1xdrzjMA0B0pnsPW0HnM7NiJ0zA/4xIUOa7RmwxA857B5
+# iSaZ4Z+olODWyIELiTVWZkMtUFhDQLTd+Fg3EUHjkbqPtO0EwsFEC9qWdaSaZuAN
+# VWckUp6i54sy6nXreaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBp6EqmN5OCzdGu6PAkNnZsYcgPwcpOvMxwYsgA
-# nRe1zjANBgkqhkiG9w0BAQEFAASCAgBevPDrgNCeX7qr0s1C4Tsm7O3uCfiZPC+J
-# gpK5wlVzmdv9l2DrE/L6kSp0rtxSEEumvvTVTobX2KHSKUyS6pQnN5wucIoeQDo2
-# Ki8GIEgn3p9/RWeUh0I2Q8yqRrNxGcFvbtZvgTXAoI3Gzr6Bsw6A9LZfF1PGBUvA
-# BBZSPL/dfDrOQpWUC3qceKp9Uf0V4V5US14hFP7lzz3vu8P26cg2gDh5i9YFaYjM
-# e+NyBK7x30PreZ6GornX2G3bp8zQHNDCbyZygSuy6jaqmr6XbAGhF8QXWepJ6XN/
-# zxCTfIIAWGZuzxTUet/KTPw8GD/RUnnjlWwva8oghM2RKam3HcIqAc3NZhrfaV0N
-# 9bp4hGSR1AaYa49pj8cAKFPkHXU2dBaHYpKjUoX8pA9Bh7ruWM0bFVkid0qiusP3
-# G7Tntu0Zq6imeRuAF/hFU3z59mhzcfEUl1DR/YLVqU0CqNETYJV9kA1rN9bmQQAc
-# SHESXgdhfQjv38yYZLCIrl6FHPGqktmgjdnsKGrmHbIk1IXMa9GRgx8Nw3lYQrtW
-# sSeqWzcRLPsgZTgEKE4o0BzxG2jZHYezZLLxqLvIBlhQLKrXWtqUrtLGC2b+mEAu
-# SooMhiycVD7aJCTh4SSMxNAVU0hXo31Dl7rx1nLr+MAR2Bu5cYmY3UNtPxUPIWv/
-# jGsHL2Phlg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA4
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCPCUPBAQ6W88huKWeQwcyxWi8G/QPrz80JQQ2l
+# BvPAJDANBgkqhkiG9w0BAQEFAASCAgCIAAvPrThaTP05Nakr+wilIC11wo0AaWhC
+# rX828+AgHCjbcNOHYkkwN1+A0VRcD7aVMjR/a5co9KQHWDMoUQL6f+PSn66xJG5e
+# rQUaUWbqOAd/naWO25c+/AQdDtwtFNW6jkRcePU8Z16Pk9De8FAirgy0weh2AKmY
+# xPrtDR0a/FLdgIoqR1C1wJXYtm+favW1E0h4D8ZmV/GArJJ31kXrRtNn/loh1Wmu
+# 0L+JZx22SnjY7mhF7AeSt/1DxH7PIGuUXZTXRhVovQXvq2T8XQHq2EwYsMQNKMun
+# 9z91c9D0MG/VWIfUW4wAgxuER9me4oSNtMt5G1TAoMgMWDctZSpTpJzQ8FTn8Yki
+# NHwd6m+3pHuMMrDkbDcUZT9yjXWW8vx0gUxZB+WCUZheozFdzdxSUsIy+rxLHkmq
+# ZmGRvTyznAz6bjyXCM3F0MpHyN4T315NZ14JQjTV0G7a+xYsGc/oo0P1Hdeds+j7
+# 95UDculEz3AkBVBAgk3pylrxGo0mJoxIOSjYGoT2SzC8GV5W1EYVAEoZMlm1MVH4
+# bkq2NfOMb/CwNLBWmcvVWmD7J8gX67QRx4TTdKfy+Wl+lHEeJbSk9ARm54mGaa+F
+# 1h7wYwzsPjaXJNtH5unCjIy4UgSh4e25oGuKzsThOb84tzm/RDkFr+ObwEsod38h
+# XsGPvYNH6g==
 # SIG # End signature block

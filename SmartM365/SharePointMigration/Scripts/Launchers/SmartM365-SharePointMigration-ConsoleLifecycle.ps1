@@ -1,105 +1,113 @@
-﻿<#
+<#
 .SYNOPSIS
-    Tests real child-process host routing with mock inventory files only.
+    Shared console introduction and completion for SharePoint migration entry scripts.
 .VERSION
     1.0.0
 #>
-[CmdletBinding()]
-param()
-$ErrorActionPreference = 'Stop'
-$project = Split-Path -Parent $PSScriptRoot
-$root = Join-Path ([IO.Path]::GetTempPath()) ('SharePointMigration-hosts-' + [guid]::NewGuid().ToString('N'))
-$name = "Folder O'Brien"
-try {
-    foreach ($dir in @('Scripts/Launchers/Generic', 'Scripts/Inventory', 'Scripts/Compare', "Migrations/$name")) {
-        New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null
-    }
-    $launcher = Join-Path $root 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1'
-    Copy-Item (Join-Path $project 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1') $launcher
-    Copy-Item (Join-Path $project 'Scripts/Launchers/SmartM365-SharePointMigration-LauncherCommon.ps1') (Join-Path $root 'Scripts/Launchers')
-    Copy-Item (Join-Path $project 'Scripts/console_lifecycle.py') (Join-Path $root 'Scripts')
-    Copy-Item (Join-Path $project 'Scripts/Compare/scan_evidence.py') (Join-Path $root 'Scripts/Compare')
-    $fixture = @'
-[CmdletBinding()]
-param($OutputPath, $LogPath, $SiteUrl, $WebUrlsFile, $DocumentLibrariesOnly, $IncludeItemPermissions, $ItemProgressInterval, $Interactive, $ForceAuthentication)
-if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
-[IO.File]::WriteAllText($OutputPath, "Host`n$($PSVersionTable.PSVersion.Major)`n")
-'@
-    foreach ($side in @('Source', 'Target')) {
-        foreach ($kind in @('File', 'Permission')) {
-            [IO.File]::WriteAllText((Join-Path $root "Scripts/Inventory/SmartM365-SharePoint$side-$($kind)Inventory.ps1"), $fixture)
-        }
-    }
-    $count = 0
-    foreach ($type in @('SP2016', 'SP2019', 'SPO')) {
-        $config = @"
-@{
- Name = 'ReportLabel'
- Source = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/source'; UrlsFile = 'urls.txt' }
- Target = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/target'; UrlsFile = 'urls.txt' }
- Output = @{ SourceFileScans = 'sf'; TargetFileScans = 'tf'; SourcePermissionScans = 'sp'; TargetPermissionScans = 'tp'; Logs = 'logs' }
- Permissions = @{ IncludeItemPermissions = `$true; ItemProgressInterval = 500 }
-}
-"@
-        [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $config)
-        [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/urls.txt"), 'https://workplacecloudhub.sharepoint.com/example')
-        foreach ($action in @('ScanSourceFiles', 'ScanTargetFiles', 'ScanSourcePermissions', 'ScanTargetPermissions')) {
-            $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action $action -NonInteractive -ForceAuthentication:$false 2>&1
-            if ($LASTEXITCODE -ne 0) { throw ($result | Out-String) }
-            $consoleText = $result | Out-String
-            if ($consoleText -notmatch 'SmartM365 by WorkplaceCloudHub' -or $consoleText -notmatch 'Status\s+: SUCCESS' -or $consoleText -notmatch ('Action\s+: {0}' -f $action)) {
-                throw "Launcher intro or success summary missing for $type $action"
-            }
-            $latest = Get-ChildItem (Join-Path $root "Migrations/$name") -Recurse -Filter '*.csv' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-            $expected = if ($type -eq 'SPO') { '7' } else { '5' }
-            if (-not $latest -or [IO.File]::ReadAllText($latest.FullName) -ne "Host`n$expected`n") { throw "Wrong host for $type $action" }
-            if (-not (Test-Path -LiteralPath ($latest.FullName + '.manifest.json.txt') -PathType Leaf)) { throw "Scan manifest missing for $type $action" }
-            $count++
-        }
-    }
-    # A failed comparison must end with a visible status and persist that status in its run log.
-    $compareConfig = @"
-@{
- Name = 'ReportLabel'
- Source = @{ Type = 'SPO'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/source'; UrlsFile = 'urls.txt' }
- Target = @{ Type = 'SPO'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/target'; UrlsFile = 'urls.txt' }
- Output = @{ SourceFileScans = 'sf'; TargetFileScans = 'tf'; FileComparisons = 'cf'; Logs = 'logs' }
- Comparison = @{ MaxScanAgeDifferenceHours = 12; ModifiedDateToleranceMinutes = 0; SizeToleranceBytes = 0; ShareGateReplacementCharacter = '_' }
-}
-"@
-    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $compareConfig)
-    $missingCsv = Join-Path $root 'missing.csv'
-    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action CompareFiles -SourceCsv $missingCsv -TargetCsv $missingCsv -NonInteractive 2>&1
-    if ($LASTEXITCODE -eq 0 -or ($result | Out-String) -notmatch 'Status\s+: FAILED') { throw 'Failed comparison did not return a failure summary.' }
-    $compareLog = Get-ChildItem (Join-Path $root "Migrations/$name/logs") -Filter 'ReportLabel-CompareFiles-*.log' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    if (-not $compareLog -or (Get-Content -LiteralPath $compareLog.FullName -Raw) -notmatch 'Status\s+: FAILED') { throw 'Failed comparison summary was not appended to its run log.' }
+#Requires -Version 5.1
 
-    # Verify failure propagation across the PowerShell 7 -> 5.1 boundary.
-    $config = $config.Replace("Type = 'SPO'", "Type = 'SP2019'")
-    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $config)
-    $env:SPMIG_TEST_FAIL = '1'
-    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action ScanSourceFiles -NonInteractive 2>&1
-    if ($LASTEXITCODE -eq 0) { throw 'Child failure was reported as success.' }
-    $consoleText = $result | Out-String
-    if ($consoleText -notmatch 'Status\s+: FAILED' -or $consoleText -notmatch 'Reason\s+: Synthetic failure') {
-        throw 'Launcher failure summary missing or misleading.'
+function Start-SmartM365MigrationConsoleLifecycle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [string]$Action = '',
+        [string]$Migration = ''
+    )
+
+    $started = Get-Date
+    $previous = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
+    $previousLog = [string]$env:SPMIG_CONSOLE_LIFECYCLE_LOG
+    $ownsConsole = [string]::IsNullOrWhiteSpace($previous)
+    $scriptName = [IO.Path]::GetFileName($ScriptPath)
+    $version = 'unknown'
+    $head = [IO.File]::ReadAllText($ScriptPath)
+    if ($head -match '(?ms)^\.VERSION\s*\r?\n\s*([0-9][^\r\n]*)') { $version = $Matches[1].Trim() }
+    $context = [pscustomobject]@{
+        ScriptName = $scriptName
+        Started = $started
+        OwnsConsole = $ownsConsole
+        PreviousMarker = $previous
+        PreviousLog = $previousLog
+        Action = $(if ($Action) { $Action } else { [IO.Path]::GetFileNameWithoutExtension($scriptName) })
+        Migration = $Migration
     }
-    Write-Output "PASS: $count host-routing cases and child failure propagation; only mock inventories executed."
+    if (-not $ownsConsole) { return $context }
+
+    $env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE = '1'
+    Remove-Item Env:SPMIG_CONSOLE_LIFECYCLE_LOG -ErrorAction SilentlyContinue
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f $started.ToString('yyyy-MM-dd HH:mm:ss'),$scriptName,$version) -ForegroundColor Cyan
+    $lines = @(
+        '================================================================================',
+        ' SmartM365 by WorkplaceCloudHub',
+        ' Website : https://workplacecloudhub.com',
+        ' GitHub  : https://github.com/khda79/workplacecloudhub.com',
+        '================================================================================'
+    )
+    $colors = @('DarkCyan','Cyan','Yellow','Yellow','DarkCyan')
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        Microsoft.PowerShell.Utility\Write-Host $lines[$index] -ForegroundColor $colors[$index]
+    }
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Action    : {1}' -f $started.ToString('yyyy-MM-dd HH:mm:ss'),$context.Action) -ForegroundColor Cyan
+    if ($Migration) { Microsoft.PowerShell.Utility\Write-Host ('{0} Migration : {1}' -f $started.ToString('yyyy-MM-dd HH:mm:ss'),$Migration) -ForegroundColor Cyan }
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Started   : {1}' -f $started.ToString('yyyy-MM-dd HH:mm:ss'),$started.ToString('yyyy-MM-dd HH:mm:ss')) -ForegroundColor Cyan
+    return $context
 }
-finally {
-    Remove-Item Env:SPMIG_TEST_FAIL -ErrorAction SilentlyContinue
-    $resolved = [IO.Path]::GetFullPath($root)
-    $allowed = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-    if ($resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path $resolved -Leaf) -like 'SharePointMigration-hosts-*') {
-        Remove-Item -LiteralPath $resolved -Recurse -Force
+
+function Complete-SmartM365MigrationConsoleLifecycle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Context,
+        [AllowNull()]$Failure,
+        [ValidateSet('SUCCESS','FAILED','CANCELLED')][string]$Status = 'SUCCESS',
+        [string]$LogPath = ''
+    )
+
+    if (-not $Context.OwnsConsole) { return }
+    try {
+        if ($null -ne $Failure) { $Status = 'FAILED' }
+        $ended = Get-Date
+        $elapsed = $ended - $Context.Started
+        $duration = '{0:00}:{1:00}:{2:00}' -f [int][math]::Floor($elapsed.TotalHours),$elapsed.Minutes,$elapsed.Seconds
+        if (-not $LogPath) {
+            $logVariable = Get-Variable -Name LogPath -Scope Script -ErrorAction SilentlyContinue
+            if ($logVariable) { $LogPath = [string]$logVariable.Value }
+        }
+        if (-not $LogPath) { $LogPath = [string]$env:SPMIG_CONSOLE_LIFECYCLE_LOG }
+        $lines = @(
+            '================================================================================',
+            ('SmartM365 by WorkplaceCloudHub - {0}' -f $(switch ($Status) { 'FAILED' { 'Execution failed' } 'CANCELLED' { 'Execution cancelled' } default { 'Execution completed' } })),
+            ('Script    : {0}' -f $Context.ScriptName),
+            ('Action    : {0}' -f $Context.Action),
+            ('Status    : {0}' -f $Status),
+            ('Duration  : {0}' -f $duration)
+        )
+        if ($Context.Migration) { $lines += ('Migration : {0}' -f $Context.Migration) }
+        if ($LogPath -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) { $lines += ('Log       : {0}' -f $LogPath) }
+        if ($null -ne $Failure) { $lines += ('Reason    : {0}' -f $Failure.Exception.Message) }
+        $lines += '================================================================================'
+        $outputLines = @($lines | ForEach-Object { '{0} {1}' -f $ended.ToString('yyyy-MM-dd HH:mm:ss'),$_ })
+        for ($index = 0; $index -lt $outputLines.Count; $index++) {
+            $color = if ($lines[$index] -like 'Status*') { if ($Status -eq 'SUCCESS') { 'Green' } elseif ($Status -eq 'CANCELLED') { 'Yellow' } else { 'Red' } } elseif ($index -eq 0 -or $index -eq ($lines.Count - 1)) { 'DarkCyan' } else { 'Gray' }
+            Microsoft.PowerShell.Utility\Write-Host $outputLines[$index] -ForegroundColor $color
+        }
+        if ($LogPath -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+            try { Add-Content -LiteralPath $LogPath -Value $outputLines -Encoding UTF8 -ErrorAction Stop }
+            catch { Microsoft.PowerShell.Utility\Write-Host ('{0} Could not append completion to log: {1}' -f $ended.ToString('yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -ForegroundColor Yellow }
+        }
+    }
+    finally {
+        if ($Context.PreviousMarker) { $env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE = $Context.PreviousMarker }
+        else { Remove-Item Env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE -ErrorAction SilentlyContinue }
+        if ($Context.PreviousLog) { $env:SPMIG_CONSOLE_LIFECYCLE_LOG = $Context.PreviousLog }
+        else { Remove-Item Env:SPMIG_CONSOLE_LIFECYCLE_LOG -ErrorAction SilentlyContinue }
     }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrJwcSHDgPAdy2
-# tdjxHI7CUXujpwAuCcqv1SBiUQ6BX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwD3zf7VdWnoQs
+# SM/eAYHaKmJz262cshQzGINmEETJFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +240,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMn0kimi1gmH5YsY/B54XU+gB1vZYhOjLW0+wdWcoUa7MA0GCSqG
-# SIb3DQEBAQUABIIBgFhQzC0aRofXZ84tkHUfWKG+uqSKgcLxzWG7qAQeU/RxFCaS
-# u26Duubdvtc0a7nDuH9xwbsBcfcQifHlvCU7gQE6n3zdtDedUkwP/94Y4ddaSDpp
-# nknT7MeXPUK9EO+oG8AKiqcWSsI3QZfE9+FsHG2azkydT0nUMqaji9UhD9cyPHgD
-# V5NwxtSA+Q8c4muH/VL2z1F0g3bAYZCkrQSpdXoNz1ZCjbBFj9OEfvElHtBnnC/O
-# uVs2QRr8IrOzKiqKwin//mIW/DqaX7GgWrxGF9Re3h9413bM4EQH9Hn3keolqDcy
-# taSK/SJu18HpG62u+FBWLxZfYpIrnp5UtVdq/OTm0Fn08Fzd8cbCeDUKr6rmHINY
-# jHX2iEzGRfITxlO9N+QCL1ppDhlGjz13UOjOJZ/TnI7zk3nhes5DEs5t32YOiFxE
-# NIYT///e/ctq8FJkFi+z77TsCxvj0ApPRTP9OQXIdYUE2CcTyskDjNd4EhPqofu2
-# JlZKaH64fh1elUiCMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGW8iCTfCApmHPriLkW1BliC1lnJ+36UBL4salr6AHZ0MA0GCSqG
+# SIb3DQEBAQUABIIBgFHcD97ScV2lF5bkPDaOPzHrRClaZ6J22YI1//5KkASK9/c7
+# G50bpOHHT4MQwEdASVceVBecxLXUQ700MQmLhLWCLr3m+r2mCKRRudFzV+GhHtVa
+# lb3zyN/IlpaHvowo0QzvvcGTS4/7aDRvebUNinAcUctckwpGeE4PF82E3nzV5AQA
+# mtxtC0atsW0uRvwldJoLDcSS2qfzbsBXo355+3s2AOk2Zjt+N5y/0X/YG54iUIas
+# Ms9efuvBC5jd45OlZA9sbOMrQT++IwH8c6OW15OPDTZqqhWY2ea2XuqfGY+yUQAu
+# QVfM6SAosglgunmcf6XmQMh62sOUXdkMlNEw1u9lMUjRyGXU4zkvSAQCjsqNpzN0
+# de+kyjWJkhbQxJcsWj2rd1VaStgdffwECHTa4iw5aKI7980IQsnS2DkH+8/CBjai
+# /yw7brgN1O8LWgBlE3er24cpDHldtGwAY1ufOtOM3/r4TOrSid3bU9c6AjjPxMXw
+# tAZ5mnYBEaSUPeVVmKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA4
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCI0B+OY4hFNHTlUWoCEdSHbCOsI50dKfup8SAp
-# 8URE1jANBgkqhkiG9w0BAQEFAASCAgCwqiV76rTmOW+ToqZ2VbV/KVqZmLqhG3JN
-# biTc+pgw/l7Qx+RpXyDVmDTdKrYCr31w82UdSXA0ROgnvNyPANU4kGMQocwedNhp
-# 4b9IlSRdKYud3gXooU+ie8gpkfM4JN/g/1JQ5O9dGpnOZWitVnxkAcdhMXDOSsnr
-# luQtdPT+6l8KbUZ8f1OuqykhIRMT+ZWGiQzfUa06tcGiFsk47uX4jeOSFjoUS9RL
-# OFzRdeOWMTL0l/FnEvI0PYJxDbZukBd2j7e7NJ4ByaMpc03dDGM/W6/P7rqPtWvW
-# ahlLBkb9bz8PAU8abyftfpXu/dmTs1Z/+TjE/949W0FNq0K8x2ztQ6d5xvozaNww
-# xA9WeVZxh4LoT+6gGT8WFvzcwuOMbkqgYBc/fdLjdLiuoZOMc7V22shWLV3yNNrV
-# phr6dt9HGopRATOr2lqiZRQpoVEEuRndGjoEILaCNwp9ag1KpbukImuXELALYN9e
-# pWC6cv//XkY5F6f3LyBNVmjCQzT20jT6WeKyYOc7fgHucwy3qjomSLwbL6i9MlHw
-# 4dvFZtgm1ffQp4q6tLVXQPIqy5GnJqC3Xt5s1R1bkO8Y/5X2ArgygQOAeAwbKbMm
-# BfTN/MklWCkcy0nj4JMEeWnZBGbovrFVDgyrbTRX7MuouKL06T3hDxX0NmIZyL58
-# 35RIQePMtA==
+# MDRaMC8GCSqGSIb3DQEJBDEiBCA09Es+JJyqepzY67I7rgZGvOSgATr7+sO3L5df
+# YVF2HzANBgkqhkiG9w0BAQEFAASCAgALzSBmOY5DXQpVNxTyGmqSvfySPDPnbS88
+# LteyknYJtpZsublKLmwoKBXHxvMszpdbJHc1q6IQ2XtRIu7ToyaZ4k/4CvrDpfOQ
+# a4FXiYUi4nDDgP8pKR4nbKCtZiyM90SnkpHp5ABVJXprgPawsTuBCD/dzbr9ifgA
+# hNyp4SGsepvYYzs0+3uzKYuQ/WlV7CnneWoOV43wW0PZE5/EqDaM+2R7nF6VAU3q
+# KuZBdViiKxw5/uh5elYEwIeRqnn00pVkwbLCqnS047OUotGyw9aR9ZzFwnGwq/gY
+# czZ2zNLTP2xNmGpBnldXnjA0fxGzBea1ZXg3fM5e7z2BynMav8pXtckUS2NBuZP8
+# 9zT+XU48kk/510c/MOqkhQMQR7GttWpDOpt5rylzzdsDnfwEmG+prifgi7rnHFCj
+# 0m4+cTU1R1laJz8fjS1tknG8RsD3NWQmjn31673XlCSetUeoXtiLwij41P/50sF1
+# vYSF0BZU6M7Vaeg9Opy9kRO7ByIp00tFMTUGF9O3BpFkNvND+SZwCfWGnyNwr3zS
+# lUnzMKfsO3XaoX7lE0k9B8OBn25O7XtTdGtWjO+NcyNIKtThpfwaS2kPU9NjgX7M
+# VUK27d5TWU98G5VNHGHRKxtW4uQyy3ylRlMfMcZJ4PAxt6ad6l1Frz2TsKWqMlKv
+# 7y/fGaAyIw==
 # SIG # End signature block

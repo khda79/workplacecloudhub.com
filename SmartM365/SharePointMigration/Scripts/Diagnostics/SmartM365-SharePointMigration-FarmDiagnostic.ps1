@@ -2,7 +2,7 @@
 .SYNOPSIS
     Collect read-only SharePoint farm diagnostics and correlate them with ShareGate peaks.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 #Requires -Version 5.1
 [CmdletBinding(DefaultParameterSetName='Peaks')]
@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:FarmDiagVersion = '1.0.3'
+$script:FarmDiagVersion = '1.0.4'
 $script:FarmDiagScriptPath = $PSCommandPath
 $script:FarmDiagMode = $PSCmdlet.ParameterSetName
 $script:FarmDiagToolkitRoot = if ($ToolkitRoot) { $ToolkitRoot } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')) }
@@ -517,6 +517,7 @@ function Invoke-FarmDiagnostic {
     }
     if (-not $selected.Count) { throw 'No SharePoint application server was discovered.' }
     $output = Get-FarmDiagOutput -ProjectName $Project -Override $OutputPath -Preview ([bool]$DryRun)
+    $script:FarmDiagOutputPath = $output.Path
     Write-FarmDiagLog "Output: $($output.Path)"
     foreach ($window in $windows) { Write-FarmDiagLog ("Window UTC: {0:o} to {1:o}; ShareGate lines: {2}" -f $window.StartUtc,$window.EndUtc,$window.ShareGateLines) }
     foreach ($server in $selected) { Write-FarmDiagLog "Discovered server: $($server.Address); role=$($server.Role)" }
@@ -621,18 +622,26 @@ function Invoke-FarmDiagnostic {
     Write-FarmDiagLog "Final output: $($output.Path)"
     Write-FarmDiagText (Join-Path $output.Path 'Farm.log') (($script:FarmDiagLog -join [Environment]::NewLine)+[Environment]::NewLine)
     Write-FarmDiagText (Join-Path $output.Path 'Farm-Summary.json.txt') (($summary | ConvertTo-Json -Depth 8)+[Environment]::NewLine)
+    $env:SPMIG_CONSOLE_LIFECYCLE_LOG = Join-Path $output.Path 'Farm.log'
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+    . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+    $script:FarmDiagLifecycle = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath -Action $(if ($DryRun) { 'Farm diagnostic DryRun' } else { 'Farm diagnostic Run' }) -Migration $Project
+    $script:FarmDiagFailure = $null
     try { Invoke-FarmDiagnostic }
-    catch { Write-FarmDiagLog "ERROR: $($_.Exception.Message)"; exit 1 }
+    catch { $script:FarmDiagFailure = $_; Write-FarmDiagLog "ERROR: $($_.Exception.Message)"; exit 1 }
+    finally {
+        $farmLog = if ($script:FarmDiagOutputPath) { Join-Path $script:FarmDiagOutputPath 'Farm.log' } else { '' }
+        Complete-SmartM365MigrationConsoleLifecycle -Context $script:FarmDiagLifecycle -Failure $script:FarmDiagFailure -LogPath $farmLog
+    }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmHCM452WDdsLK
-# Lj3NjjbpUaHq/GEFHHITbQt3Q0bNs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI98mguDMOc4Yz
+# pwGWxqqwA8RB1MuWvxALiLqOkoVTn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -765,31 +774,31 @@ if ($MyInvocation.InvocationName -ne '.') {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMzkNeTkiJY6pGxB0TqKQ2i2x9bLe+lIxeYBMKSaouMRMA0GCSqG
-# SIb3DQEBAQUABIIBgBwtr323R74mSOos7vzGVGM/QaAN7FebH8t+VncYO5CVlAq0
-# 48XhMJGk/TH1VORwaXWDV7ZVbHEQiVj7w5bthaz80NAQp0TGG0I3EXHoranIUDVd
-# aRE6ARn7ctxBuaHakrUnl8NOJdldgNjGrXQHTfqecEAiFrWADo1g8QbxkkWo0aIt
-# SUEJwnjwTnsVYUx+rugrx+NcpC1LVi9A/J3goQHNVQxJQxV5YVSIMrluiNen7CSb
-# iQMGeMKWnGP1mwWuKBSF6lxhVWc+k2Bpq3zXJjBT8wB0sBkm23ldVkRfLjhFgn86
-# oD04ZZWJdr4Y7lzNYiVshH5MFOxBLJKN50DHHxwwlBiJJUGU9tLITtO91OGBzHBX
-# B6YHQR3ZE8ed5ycD2oMui8pN1OZG0CV4xinonRs6pLDJrNQ3HB8hjLjRQ+kAkoWC
-# 9uolgJ0xJvZXUEk8cgdjNJPOLEV1mMAkMMAnNx2o9zVIP1/LSK7haAFhA5vBPF03
-# V6tfsa7b8ZDPNba496GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICDCh0CPgJFyPEKJD9MlWEn/LZxUgiq920iHmBER+BNkMA0GCSqG
+# SIb3DQEBAQUABIIBgBSIHo80FsH0PgmEuoDlv07nIDZwmHQj/VGrFiOG/7fdm8eI
+# nP9DOz7dnwrxQVX9nrJ1Lz0KfEUHU/FtvpngqP5olILJL4bh4+5bTqQKakEBHiS5
+# h7cMazgtsYBxhl9ZhgjQtgk4v9Hl16ktYHJZuGnPjNixfJIw/IK2spdJy4sILWXz
+# H16uUYwc7DeIe59bsx5G0hla9qP+7QvvnA/sOH52Q1MnmW9xJx0hkmiJy2JF767c
+# Ip1WMpd+vBx4hdkeMfIZwSuXZt780fQXyzmwIi5ErveOVgfkswK4sreo887jJSSE
+# uOQWyR8BA3s351YaCEjMijpw8snGbIgl9qdLYftOqfPq3XriYaIpva1s1WxCnqWX
+# 9RMqTJ1cEk7dPxvHr1RV28L0m5ekHxMTZtyBCtXfzzjsF9hZ0Kthn8bc5t66GCqY
+# q0FpknWb0OXbDBH71KhsxabhRaYpvpyBIUQERBdv6H1YQvg5tmoxx7Eum8gtKkPT
+# S6jQnMTEvZHkF6/aOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCDB9IdgH8WaJv7Jqp2m0bziFtKUYlarIV7mGv0U
-# 4gCmbjANBgkqhkiG9w0BAQEFAASCAgBe5lygxz/mWq3I1sboAuEk8HTpA30A2AqJ
-# +gUIsaz4v/1ioCOX15JfMZNZumNfhTPA7T1vRlqZHnv7yvrlqjpcZuKSu4FQD8Lz
-# AtlAxOIqS5HS0Goh4ai3o9IubR/FV4w2NEsTVU7Qi9b9UDU5N/kKgcYZYtvq30/k
-# qixmUBjrzkMFV3h7+g8s81YB37edbXNJY0EFMVcq7KoS4Ww8qfn3g8kSFSkRqFX6
-# 7pHXDakpdv+8GFZHHnjKBpdk3ETOKnw/j34byEEIYZT9RkbTXkrCaz5LEjh3qZ/e
-# zV+aKs4Ny+rA8/wypL+JviY0LUonHPeecZ6HL4czzIqTdyK3vFmpNhc/WJK+Z/w4
-# jVx/YeBtKp343oYERge47jBvY3gcTBe0ThhW47+oEHPGe0jxc4vdocPdepetJ8VT
-# FaGrOUSH2IJKRhWXH7G7TJ3pBVPU0GbsOIX+pmV/V8WYPwfHVns+Q7Il1VBZMy/W
-# k+suKDqzxwePndRANJVaOht9eWPjsqh7gutMDWzcoAh7Ecwvdb8UiBRZE6lMhC3A
-# kOmrP2WDO9PsvZXMuTalCk4d7gOx2/w6puwxZokb19h1Z241LZl1W8nCDahOiIUF
-# GaD+59q3OBdq48uxD4HwOdZZiqDyIYc+KLkGxfNfV6tue13rZFwQSrAoclmFkO0O
-# K6YBGDPYzg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA3
+# NTdaMC8GCSqGSIb3DQEJBDEiBCCNpvoycav19CryWNrK9sv4nNymVzuOaUOoKAwX
+# spJ/WjANBgkqhkiG9w0BAQEFAASCAgCrr5yThDW0Xg1PdKaVlWmaEqSCWHp44Pfm
+# vROh7Q+kWm1pE/UlhKSMIPMmqmCGCD4mlRiFWhogN8IYUo5L+JPAQuIUaqhE9HD5
+# HNHAuyefZeZakU6lbDB7nLGaZGWuYTAslRrVRUjqJYf2fb217n8AiBJ8YI6HWQpl
+# uCJssKQbAZNZ6PlsIhopofvnQbDIZTeegYzLDIhV6uF+P3XJduL3zMe3AVEf48tq
+# bxMc1dq/JD/xGDGSx8DLq7abL6Lkje2yEbt9pEkJk8iIDGKU6kZUwv0ZO+A8aAlC
+# 8aj8SbolHVYjNuijk57rTsas4wxErGfNJ3oxGWPlEs1aKd1+wYibZ1O58z0Phy1q
+# 9Fz5B/nJr5rDxLgOl+w3BOGWnsZtAAV5KP4BVIqNO7lV5+PpQPQpXcTrJLkVgMUh
+# CDd75YScqtr71eaHDzigVoa4OAHqyPuDiVMoqSvMBhr/VF9Dc/tn6pRl9BsTUqhj
+# 1vz8llb6tH0eHsumJFJd5E8eiPoR8YR5q2wvM8MbMsJ5FKY3LqMzjNs1qc7YEMej
+# EISaDoRbjtNJ0vDRrbLUhaR97eFHMbEmu+x5+8mJYN6atMKL2DN9XvxWAEQ28ibU
+# 2NiqBcw/n1Q0Z7TTwGsG8HVD941VeOL8ZdiAZv0Xj7tkZwmcpiSKhxlAtkBA7EoG
+# +M0urFbwDg==
 # SIG # End signature block

@@ -150,9 +150,11 @@ differences; use their linked CSV and Excel exports for the full detail.
 The comparators load the shared `report_html.py` from their own directory. They
 add that directory explicitly because the bundled Portable Python runs in
 isolated mode and does not add the script directory to its import path.
-Executable PowerShell and Python scripts, along with the versioned CMD launchers,
-print their name and version at startup. The generic launcher then prints a WorkplaceCloudHub introduction and a timestamped
-execution summary with status, duration and run log path. A successful script
+Executable PowerShell and Python console scripts print their name and version,
+the WorkplaceCloudHub introduction, and a timestamped completion summary with
+status, duration, and the run log path when one exists. A nested script does not
+repeat the introduction or summary; CMD launchers delegate to their scripts.
+A successful script
 run means the comparison completed; inspect its report for migration differences.
 Runtime outputs stay inside the local migration folder:
 
