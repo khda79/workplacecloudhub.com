@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.17
+    1.0.18
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.17'
+$script:AppVersion = '1.0.18'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
@@ -173,9 +173,9 @@ function Get-MigrationStatus {
 
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
-        SourceFileCsvItems    = Get-CsvFileItems     $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
+        SourceFileCsvItems    = @(Get-CsvFileItems   $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
         TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
-        TargetFileCsvItems    = Get-CsvFileItems     $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
+        TargetFileCsvItems    = @(Get-CsvFileItems   $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
         FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
         HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
@@ -1179,7 +1179,10 @@ function Set-ScanComboItems {
     $previous = if ($ComboBox.SelectedItem) { [string]$ComboBox.SelectedItem.FullName } else { '' }
     $previousLatest = [string]$ComboBox.Tag
     $ComboBox.Items.Clear()
-    foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
+    foreach ($item in @($Items)) {
+        if ($null -eq $item -or -not $item.PSObject.Properties['FullName']) { continue }
+        [void]$ComboBox.Items.Add($item)
+    }
     $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
     if ($ComboBox.Items.Count -eq 0) {
         $ComboBox.SelectedIndex = -1
@@ -1246,7 +1249,10 @@ function Set-HistoryComboItems {
 
     $previous = if ($ComboBox.SelectedItem) { [string]$ComboBox.SelectedItem.FullName } else { '' }
     $ComboBox.Items.Clear()
-    foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
+    foreach ($item in @($Items)) {
+        if ($null -eq $item -or -not $item.PSObject.Properties['FullName']) { continue }
+        [void]$ComboBox.Items.Add($item)
+    }
     $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
     if ($ComboBox.Items.Count -eq 0) {
         $ComboBox.SelectedIndex = -1
@@ -1818,7 +1824,30 @@ $tabConfig.Add_Click({      Switch-Tab 'Config' })
 $cmbMigration.Add_SelectionChanged({
     $idx = $cmbMigration.SelectedIndex
     if ($idx -ge 0 -and $idx -lt $script:Migrations.Count) {
-        Set-CurrentMigration -Migration $script:Migrations[$idx]
+        $requestedMigration = $script:Migrations[$idx]
+        $previousMigration = $script:CurrentMigration
+        $previousStatus = $script:CurrentStatus
+        try {
+            Set-CurrentMigration -Migration $requestedMigration
+        }
+        catch {
+            $selectionError = $_
+            $script:CurrentMigration = $previousMigration
+            $script:CurrentStatus = $previousStatus
+            try {
+                $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                    -Migration $requestedMigration.Name -Action 'SelectMigration'
+                Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 `
+                    -Detail ($selectionError.Exception.Message + ' | ' + $selectionError.ScriptStackTrace)
+            }
+            catch { [void]$_.Exception }
+            $lblLastRefresh.Text = 'Migration load failed'
+            $lblLastRefresh.ToolTip = $selectionError.Exception.Message
+            [System.Windows.MessageBox]::Show(
+                "Could not load migration '$($requestedMigration.Name)':`n$($selectionError.Exception.Message)",
+                $script:AppName, 'OK', 'Error') | Out-Null
+            if ($previousMigration) { $cmbMigration.SelectedItem = $previousMigration.Name }
+        }
     }
 })
 
@@ -2348,8 +2377,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3Wj80nxPOT55M
-# f+b7CZyLjwFZsfV+/Qp+6p3P88u07KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQ+zUaCJ043gdO
+# 6WHNqmPmMJ+L/+65dQEKlZ28W6nuBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2482,31 +2511,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJRM806QnCe4yzyAYTEhDj0X1L3g0iEOL9vLuOKPPUAEMA0GCSqG
-# SIb3DQEBAQUABIIBgDcFoxZ/VNtAsZ2LZO/K+qSjvggykOuwVOGp4M6rItn/Svr+
-# xuZ8LR5T+nMml6wX0Tho+zxTfS4S8J8NZyG3zYj0PrJGm81+g91MZl85kiehN35B
-# TtfgeXlmSjZxH+TCgP9UdVBrtlMEmdAOOS2+jq/aPYUvgoaVVDyQPE81THeuY2K9
-# BVzTlKcLKgrksP47MUqd11jluOiziHU3nJ/Z4vJXOEU9UaHOZOUca4eAV/gtfb2x
-# juSV/yTyGjAyE9oRdMI/cSaDqHNBk3kzYufDH8Btyf01hkH6OrECBswdqkUqm8xk
-# 9lWGKzUvBqNXw4THxvKevo5zeE8DrTMnP1Cc79jwrCpgx5dsooyDjHf9Jlg/c0D9
-# d+6LUhulcBrnUeUkD6ufkHoJM9XL4D0p225N0DibN2qlFxog9nGikdDf6ShZVI7H
-# i+6M720PaUJiu9mpbt7GyBX6d6siBHS7cgj8arUOODhoqyv5B7llURejRR/Acmwk
-# CnvSrzuPPX2ET5GJL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKmAoO/bf3D1fq42xsFXXfujM9hj0Bi8Mywh+OaSbYxaMA0GCSqG
+# SIb3DQEBAQUABIIBgGr2LcgajoI6isW7T/4Iuk/7WWkNT2f/SNL/UrtxbzL8HUVv
+# 9zEmgU+EuUUxY2Ph3RcVMLEWAGXpGVv0OvUgc/P4B76B+kDp/pZo3P7q9tOOPQrM
+# F25SS+sF+6ZKzceFOUP4ZzHo3O+M/8k4OWnkd6fg3Xv50CnuBglQR81GVje0wmnJ
+# VMaIzWdUmZRUX9yfAajvgkPNty+VXg8PUorSmQa9d60Yjl26NVSPER8oBR4q/NBZ
+# i1RlYXjoRY+AzVWfXXZbiPF3BNW5BULSqNuAsTNJEFldQ6qUMns/ciC7njvc++fv
+# 2VCtMx8NId3r9An3l4H206vsc1jhAXfwQN1U2MSAB/rxDghh+xMmobggbxy8gIkV
+# MM+K5zBC1TscKPW9IWu7r9xqE9z7adVJQyZj9R1ZAkfeMQHGKSjV9DhUc5hHfDTb
+# oUkaEqJ4dKm64QUoBGYP8w4J5Zw/OiMpy0TvDkdw4ZLWuWGS0J23BxN8CYGTh1j2
+# QqQbmDSENBzDIhmd3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTI3
-# NDdaMC8GCSqGSIb3DQEJBDEiBCAQQhfWuWouji/x00ky3OE+E+9vllw2uctSglNL
-# qR3m8DANBgkqhkiG9w0BAQEFAASCAgCrMGZFTyBW21mUMKMQfitDnR83N5+tavWt
-# 2hL8xL5g8D7n+IfxSBq69sH8EzBpcWee0QHvvOJUnnLiqJL2uerf6fh1xFd9G7kf
-# p+7BF8WFtcmeAIs93jHNMmOWz1DK7WeC9ZIGKR0PvCc7DiLBRR4HH8AI2yhFz0W/
-# E7QSNdsB5lj6xaWsQiL4vwWt5WFA7kv7OZhZcL9haQMbJ6o65NGYV+PbI9/bZD06
-# U4Tzci2Rp+Zx8yhVKn4JE2Xggi/3Q6fk0ntLFnOu9V/t1EIFJXHkIBKZVeVOd8xQ
-# TGEkSYEi6BupJI+pJSKKI58viwCCxyfJW9whi4NxGM7WIOc5QyW4DhMHtbd/eEWP
-# obHA2JoJhbbQTdIPyISryJeoE2jHRDOSSnoI7xpNGGYLaPOCW7P0OKH5zdc8dt7Z
-# sjJSHjPB01gPeZLCztEdAQjPtZpTS9jiFfoZKAjou+CwULnmumTi7ZWqBRHcPwYl
-# IqrCSMrNTTHpZngFjqUFmhWo81ZqZs8PCeoOrQ8fhDnY6AWzLPRHr4LVIjLH6EGZ
-# PfF7nJE3q2ISvVik2LFywl3wGf5A8/lC4hE1Ss02n0ko9rVeWFbDuNMpKO9JqkDW
-# JUQzmZgjcgjKPtTPRtoPHzBFKY0yxsfDEbfRNFedlBYeNFildD4+juSp4go0JfEa
-# oWJY2q6ZDA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNjMz
+# NThaMC8GCSqGSIb3DQEJBDEiBCAWEqBxQQtHeI/0sF/Kk14bcgyqolHc/KLkx/+W
+# i1R79DANBgkqhkiG9w0BAQEFAASCAgCLB+Jsjw+N+MzfyvPeMyEjEgqHWc13lDDn
+# S1luutn5uFD3ogU9zgo1CpdZ7WkIHfmxk/oOkUih42lAGBjNfW770WGlicF68gzJ
+# oTs+VeUKlkpXvSIxC2zjeCm5NY7KH1ZDL5xS8LZQakSc4hOKGLzINEx0NxV0UjKV
+# rkYSoNIflQ2f9imxkU8Z/6xiYf3DLqJMJSzv+0gbXwwZsSXHRclf41Sf9KqTjHM3
+# yaCfsM2Gw5yF6bzW312Iqc5d60wvnvtOwFddQqVHz7EYieW0uDcEfzLDpDtWBweV
+# lGIBrh5QaBFJs13Br87Jtavkh6TslcotqeIKQ4RDj1p+u8sjNSJnaDpq5NCCiPZd
+# rI1CEccU1mjBJM/FVb6Omtu700fRCQEgDADLIEIYhpLXBcn0fQMQHoiI1Y/vnYfa
+# SIrcN+Qw5Ad6XOMiXxSucA0xRFbGQfsVWdWw7cnYL3Zi4uaM3MCLWvAVEQAY+Igf
+# oKYcrtqz7OHPeevppAXe3svgGu8BYNy31ERJ63T94Jwb1kgy+szbK7oXEaLOlC+0
+# u1JpEkZt5JbbsMn3JHTPjzAtn6XJ0KrAKwRjIFtp1+eR1Uebs6S8jb2PZTx6K+zJ
+# osFfy/fdSR3slZevkp+wlGiNEvUPwVxGws9QHRZ9IJhRKrPlh+tf2wt3wkDVVKwr
+# PPJdRnhlLQ==
 # SIG # End signature block
