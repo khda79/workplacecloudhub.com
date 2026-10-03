@@ -2,7 +2,7 @@
 .SYNOPSIS
     Approval-gated, five-item ShareGate remediation pilot for source 401 cases.
 .VERSION
-    1.0.3
+    1.0.5
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -27,13 +27,14 @@ $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
 try {
 if ($DryRun -and $Run) { throw 'Choose either -DryRun or -Run.' }
-if ($Run) { throw 'Real item-scoped copy is disabled: validation found that Copy-Content -SourceItemId created files at the destination library root while the originals already existed in their subfolders. Review paths and use a corrected remediation plan before any further copy.' }
+if ($Run) { throw 'Real item-scoped copy remains disabled until the explicit destination-folder routing is qualified on the ShareGate GUI machine.' }
 if ($ConfirmPilot -and -not $Run) { throw '-ConfirmPilot applies only with -Run.' }
 if ($Run -and -not $ConfirmPilot) { throw 'A real copy requires both -Run and -ConfirmPilot.' }
 if ($Run -and (-not $ExpectedAnalysisHash -or -not $ExpectedWitnessHash)) { throw 'A real copy requires both reviewed analysis and witness SHA256 hashes.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.1 (powershell.exe) for ShareGate.' }
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-FarmMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateReportReader.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-DestinationPath.ps1')
 $reportAliases = Get-SmartM365ShareGateReportAliases -ConfigRoot (Join-Path $PSScriptRoot '..\..\Config')
 $farmTimeZone = [TimeZoneInfo]::FindSystemTimeZoneById($FarmTimeZoneId)
 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmTimeZone -Phase 'pilot preparation'
@@ -71,8 +72,10 @@ function Assert-WitnessRow {
     $expectedCount = 0
     if (-not [int]::TryParse([string]$Row.ReportRows, [ref]$expectedCount)) { throw "Witness role $Role has an invalid report count." }
     if ($MustContainRows -ne ($expectedCount -gt 0)) { throw "Witness role $Role has an unexpected report count." }
-    $report = (Resolve-Path -LiteralPath $Row.ReportPath -ErrorAction Stop).ProviderPath
-    if (-not $report.StartsWith($witness + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'A witness report is outside WitnessDirectory.' }
+    $reportName = [IO.Path]::GetFileName([string]$Row.ReportPath)
+    if (-not $reportName -or $reportName -notmatch '^[^\\/:*?"<>|]+\.csv$') { throw "Witness role $Role has an invalid report filename." }
+    $report = Join-Path (Join-Path $witness 'Reports') $reportName
+    if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw "Witness report is missing under the selected WitnessDirectory: $report" }
     $actualCount = @(Import-Csv -LiteralPath $report -Encoding UTF8).Count
     if ($actualCount -ne $expectedCount) { throw "Witness role $Role report count changed." }
 }
@@ -139,10 +142,16 @@ $selection = @(
     [pscustomobject]@{ Role='AccessOtherList'; Row=$other }
 )
 if (@($selection | ForEach-Object { $_.Row.ItemKey } | Sort-Object -Unique).Count -ne 5) { throw 'Pilot item keys are not unique.' }
+foreach ($entry in $selection) {
+    $entry | Add-Member -NotePropertyName Path -NotePropertyValue (Resolve-SmartM365ShareGateDestinationPath -Row $entry.Row)
+}
 Write-Output ('{0} Mode={1}; Session={2}; AnalysisSHA256={3}; WitnessSHA256={4}; selected=5; writes={5}; FarmTimeZone={6}; Maintenance=23:45-00:15' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $(if ($Run) { 'Run' } else { 'DryRun' }), $SessionId, $analysisHash, $selectionHash, $(if ($Run) { 'possible after confirmation' } else { 'none' }), $farmTimeZone.Id)
 foreach ($entry in $selection) {
     $row = $entry.Row
-    Write-Output ('{0} {1}: ID={2}; {3} | {4} -> {5} | {6}; original={7}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $entry.Role, $row.SourceItemId, $row.SourceUrl, $row.SourceList, $row.DestinationUrl, $row.DestinationList, $row.RuleId)
+    Write-Output ('{0} {1}: ID={2}; {3} | {4} -> {5} | {6}; sourcePath={7}; destinationPath={8}; destinationFolder={9}; original={10}' -f
+        (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $entry.Role, $row.SourceItemId, $row.SourceUrl, $row.SourceList,
+        $row.DestinationUrl, $row.DestinationList, $entry.Path.SourceFilePath,
+        $entry.Path.DestinationFilePath, $(if ($entry.Path.DestinationFolder) { $entry.Path.DestinationFolder } else { '<library root>' }), $row.RuleId)
 }
 if (-not $Run) { return }
 
@@ -304,18 +313,18 @@ function Write-PilotSummary {
 
 try {
     Write-PilotLog ('Actor={0}\{1}; Machine={2}; RealCopy=True; Session={3}; AnalysisSHA256={4}; WitnessSHA256={5}; FarmTimeZone={6}; Maintenance=23:45-00:15' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysisHash, $selectionHash, $farmTimeZone.Id)
-    $plan = @($selection | ForEach-Object { [pscustomobject]@{ Role=$_.Role; ItemKey=$_.Row.ItemKey; SourceUrl=$_.Row.SourceUrl; SourceList=$_.Row.SourceList; SourceItemId=$_.Row.SourceItemId; DestinationUrl=$_.Row.DestinationUrl; DestinationList=$_.Row.DestinationList } })
-    Export-AtomicCsv -Path (Join-Path $output 'Pilot-Plan.csv') -Rows $plan -Columns @('Role','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList')
+    $plan = @($selection | ForEach-Object { [pscustomobject]@{ Role=$_.Role; ItemKey=$_.Row.ItemKey; SourceUrl=$_.Row.SourceUrl; SourceList=$_.Row.SourceList; SourceItemId=$_.Row.SourceItemId; DestinationUrl=$_.Row.DestinationUrl; DestinationList=$_.Row.DestinationList; SourceFilePath=$_.Path.SourceFilePath; DestinationFilePath=$_.Path.DestinationFilePath; DestinationFolder=$_.Path.DestinationFolder } })
+    Export-AtomicCsv -Path (Join-Path $output 'Pilot-Plan.csv') -Rows $plan -Columns @('Role','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','SourceFilePath','DestinationFilePath','DestinationFolder')
     Export-AtomicCsv -Path $resultPath -Rows $results.ToArray() -Columns $resultColumns
     $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
     if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
     Write-PilotLog ('ShareGate module version={0}; path={1}' -f $module[0].Version, $module[0].Path)
-    foreach ($name in @('Connect-Site','Get-List','Copy-Content','New-CopySettings','Export-Report')) {
+    foreach ($name in @('Connect-Site','Get-List','Get-Folder','Copy-Content','New-CopySettings','Export-Report')) {
         if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
     }
     $copy = Get-Command Copy-Content -Module ShareGate
-    $requiredCopyParameters = @('SourceItemId','SourceList','DestinationList','CopySettings','TaskName')
+    $requiredCopyParameters = @('SourceItemId','SourceList','DestinationList','DestinationFolder','CopySettings','TaskName')
     if (-not @($copy.ParameterSets | Where-Object {
         $names = @($_.Parameters | ForEach-Object Name)
         @($requiredCopyParameters | Where-Object { $_ -notin $names }).Count -eq 0
@@ -341,9 +350,14 @@ try {
             $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmTimeZone -Phase ('item {0}/5 connection' -f ($index + 1))
             $sourceList = Get-ExactList -Side 'Source' -Url $row.SourceUrl -Name $row.SourceList
             $destinationList = Get-ExactList -Side 'Destination' -Url $row.DestinationUrl -Name $row.DestinationList
+            Assert-SmartM365ShareGateDestinationFolder -DestinationList $destinationList -DestinationFolder $entry.Path.DestinationFolder
             $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmTimeZone -Phase ('item {0}/5 copy' -f ($index + 1))
-            Write-PilotLog ('Starting real item copy {0}/5: {1}; ID={2}; TaskName={3}' -f ($index + 1), $entry.Role, $row.SourceItemId, $taskName)
-            $copyResult = ShareGate\Copy-Content -SourceList $sourceList -DestinationList $destinationList -SourceItemId @([int]$row.SourceItemId) -CopySettings $settings -TaskName $taskName -ErrorAction Stop
+            Write-PilotLog ('Starting real item copy {0}/5: {1}; ID={2}; DestinationFolder={3}; TaskName={4}' -f
+                ($index + 1), $entry.Role, $row.SourceItemId, $entry.Path.DestinationFolder, $taskName)
+            $copyParameters = @{ SourceList=$sourceList; DestinationList=$destinationList; SourceItemId=@([int]$row.SourceItemId);
+                CopySettings=$settings; TaskName=$taskName; ErrorAction='Stop' }
+            if ($entry.Path.DestinationFolder) { $copyParameters.DestinationFolder = $entry.Path.DestinationFolder }
+            $copyResult = ShareGate\Copy-Content @copyParameters
             if (-not $copyResult -or @($copyResult).Count -ne 1) { throw 'Copy-Content did not return exactly one CopyResult; inspect the ShareGate session before continuing.' }
             $copySession = Get-CopySessionId -CopyResult $copyResult
             @('Type: ' + $copyResult.GetType().FullName, 'Session ID: ' + $(if ($copySession) { $copySession } else { '(not exposed)' }), '', ($copyResult | Format-List * -Force | Out-String -Width 4096)) |
@@ -412,8 +426,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAULLCfEa6y+yb8
-# rgz7Bm3hSsr66Qdqk5u3uqGcLQfR/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsHZ3NvKV9Pz4l
+# JVBam8IUJS/7kFmoKUfI4DiVBdZbvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -546,31 +560,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK9iXIwCb6HUYQGJutEBNG9NZDfe87WnQ1jIr70KjgaRMA0GCSqG
-# SIb3DQEBAQUABIIBgD7U1tPhE4kkZ0rCnmUGIcywTNqM9nHBSh7N55Fa+INDTWeG
-# pFP0c3q6YX1Ll1VcSkB1V0I7QgQXi5DI7eimQx8/zd6VHKoOtrNxKg4ufpkrl3ra
-# h7WqQ4CxeT3cH38PcOpSM3G19J5OtBzRxaRks/Sp8OuFSdLrMrNm32zwyawamRVB
-# pyoWuW1zHOHO+yLuzAObBnFhQRDZAwAMGIjwwLl8WoE30FRZY16PHdn2DH+fr2Wy
-# 97ZeKVRrQgo2CRrTYNus4dCwFJCR1ugOcJV1fGYkkfxjqcS0VkBWRlI0pxEw07t3
-# 7gM11cfAYEmN4V0Wh6WH9dV2/7Cfi7usc5hebtVJS4jKXT4B1e4lEb05GeGR1o5b
-# 02AwDOdlknAu6z/5U8N7GCR+dpfdGYTTAOuOLHK82TMZNBKRVsTUUMwdO1SjsBsy
-# dLwdnL+upHNljxMHmkEzfcCQgXddSYI24sw9bRE9eH2azfw+2RcmVPwV2k11/Dl+
-# vOFk04QYWK4zYRKupqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINMU4eG1ernRAIhryk9gu20junvRpgc0d9UXcc48GSrhMA0GCSqG
+# SIb3DQEBAQUABIIBgBoZhfzVo2n7PuBr51mfm5os2YQ2dCLGlVOxyrUAeYeQMwN9
+# n5VFuOF4MtkF/iaDTeOiMBZAW3akQlgTNrYJ+g8syyVFmOWFCSuT16k4joPLyaMz
+# 1MF1ElQcnt9IfFbBDRpgXPHc4RS4fRbwwFfMLcJ78bP+zrmy2dqOJwajaKuK+pqu
+# BEuv8nmnIabdeK+uMIPTIJ8/9jZxaHtPTdBXiwrxmnlFhago0yLGSLHH8jvuwERk
+# 3KeerdjVe9Qe548m16YRk/gC38PKrbpZkEmKcOiuFZMHPYrwTF3KA8tRGdQ+ax84
+# frOB+OzRE7kNQc47WFVRemWdO5Na6VQbBYCr3FrNOtxjDT9z73psbZc349kiqSLK
+# HDC6eumGYqzIb3HxcCvp8lrZQP9hK5Ue8/t2sqJt+0UMasMT+UQvRP0AakKc1J7W
+# dldzRslZzQoDvtHaACLlhOZwuZkwvxuCzBSERUjViiemskGKq8ONvRSSQEWIuax+
+# lmD6PszaOZcC+G06lqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTI3
-# NDNaMC8GCSqGSIb3DQEJBDEiBCDQa1C38S5nnf3grSbDAO5kcIc+BiUo67e4Xai6
-# wzekSDANBgkqhkiG9w0BAQEFAASCAgAMe+o6GVS9nu05lsXjwVcJhnDqyfUaTSAd
-# d83tbhVHMNtg7sSb94Oe0hYysXVvVk2mBeziPshNpx3jDwhcJFqMiie8fXMjHKrF
-# nIIDsGSkuLcCofCMM62hnJckxPytBMVbkIoe3aYbhaty8QlmYFnO5OmMT4De3Zy2
-# HdsPG7eLryJGS0v4CiWAuHSHDJNepA3ohELmJ+tZuoaI6kM0nwAhe++SvDrB3JY0
-# zh/iVB1qaACrsfdBd3u46AYynu0khZ2lE28fmY57oPZYITEjYcukEKXuICQAc6Rf
-# wSM2oB/3HUZSvoJidXH3JDLeyJX+aSHxl808+FBoWypSs3Iail1AC+HvxU856tpg
-# KoSL8CdXhe5InLhfUd4vOh1gaAKIcIH8SMAKqpVlSEuaxBA/AGgTiAPW2+Jsq2wo
-# TNVLZpTxqqwlNNrv31BIERjDwAieNJfG0i7WZgLE7KPjZESepNBmM85El5I4YMmh
-# jmU//8OZw9kyngMXm6aRFrqbqkC801NGqdk6YdtH6KTPtF/qO6Rm3ZolNdKchRNB
-# bXVWETkmuLPksDQfdPcFMDSfQr7q9WXWdGrRvTX3Owtse9F75jVmfHuHMu6iaHUW
-# J7F/17+w749YlAnKGRwbFwOXlFUk9O2iF8iJU9RuZeGJOA2C/w+Fo+H/F0Z5Wj2r
-# PuzCpg/mSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
+# MTdaMC8GCSqGSIb3DQEJBDEiBCDglGf3w+OMJqqeRbwCX7EKDsMYjz/1Zd+veXvE
+# NbV57jANBgkqhkiG9w0BAQEFAASCAgCSrEXjzJVjbaSM5hoxLPdPG2iwkt3LfKlY
+# h1o36uQmkZX2k+WnNhSS4L9Ml0M5Ffjoi1fB86UIQGXb6BPM4pew3C4xmkqbsiiy
+# PUnFWJzVu7MlA+XFzhFbxmuH7h8RAd68PvK+tqepyaz38TXfqq0bkihiIhiYozFB
+# Kq/NHBaWUS/0OTa5l5yDtTb0InEpXB45Dxzq5GLove69evSAktCIpOBqIK4afF1u
+# PyjJlKNZ/JF4pBijCHXe3oNtyMYLyVf34zwFINnMKYX30d7aSEQZTBT5wjuVmQS8
+# Y/qNs9x8pVR41y7Z9KD/S9K6zh9+Zf1G+f0yLNFYsXLEsEIN4GGlknm7HXLCWsgs
+# NE44sA1WliXui4ayNrJX5/E0GIwh6xaIAcB27+rRp+DUkGTbdialFlCyWM+nCrR9
+# pTZ8O10/P8xa5MVo0LcGltYPRdfvzVsW6lWfUO00Kb/D8MPaCZzxeWhn+AKbCaSl
+# 0Lt6QFu2mgF3V10zauun2ig3uZv8X74LXMw5NgQI5nADg4NJS6Wg3ZRoisAhBR6P
+# LezQus7Mr9xC2bXmymItYKoIMBLfYwi/GalD7tZmqQAhCvGmT4W5GJb/ugVyenYI
+# P76lkncXSv8wYOlyP9c5kA0LgxJ/qSJ8KCA+HD2u9o4uhFnyzxA5x+FIVdTHyUvs
+# S6I3kkVwEg==
 # SIG # End signature block

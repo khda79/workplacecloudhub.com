@@ -546,9 +546,29 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\Sm
 Real runs of the pilot and transient batch scripts are currently disabled.
 Post-run inventory comparison showed that item-scoped copies placed files
 at the destination library root while matching files already existed in the
-expected subfolders. Keep both scripts in DryRun mode until a path-safe
-remediation has been reviewed. Do not treat their ShareGate Success counts as
-proof that the intended destination paths were updated.
+expected subfolders. The local DryRun now derives each destination folder from
+the classified report path, rejects ambiguous paths, and groups batch items by
+destination folder. The prepared real path checks that the folder exists and
+passes `-DestinationFolder` to ShareGate. It remains blocked until this behavior
+is qualified with the installed ShareGate version on the GUI machine. Do not
+treat ShareGate Success counts as proof that the intended paths were updated.
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePathQualification.ps1`
+is a separate one-file qualification for the ShareGate GUI machine. Its default
+DryRun derives one source and destination path from a reviewed source-401 file
+row without loading ShareGate. A real run requires the reviewed analysis hash,
+`-Run -ConfirmQualification`, and a versioned console phrase. It reads the
+on-premises source using the current Windows identity, authenticates to SPO
+with `Connect-Site -Browser`, and checks that the source file, destination
+folder, and original target file exist while no same-named root file exists.
+It then makes exactly one `Copy-Content -SourceItemId` call with the explicit
+`-DestinationFolder` and `New-CopySettings -OnContentItemExists Overwrite`.
+This **overwrites one file in the selected SPO destination**; use it only on
+a destination designated as a test copy. It does not write to the source.
+It exports the ShareGate result and checks the expected file
+and library root afterward. A missing or ambiguous report path is recorded as
+inconclusive. The script never launches the five-item pilot or transient
+batches, which remain blocked pending review of the qualification result.
 
 `Scripts/Diagnostics/SmartM365-SharePointMigration-RootDuplicateLiveAudit.ps1`
 checks a private root-duplicate audit against current SPO metadata. It first
@@ -573,13 +593,14 @@ files matching its generated filename pattern and records the cleanup when
 files were removed or could not be removed.
 
 `Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePilot.ps1` is a
-separate, real-copy pilot. It starts in `-DryRun` mode and imports no ShareGate
+separate pilot plan. It starts in `-DryRun` mode and imports no ShareGate
 module in that mode. It requires a matching analysis and witness run: both
 positive witnesses must have warning rows and all three source 401 witnesses
 must have header-only reports. It selects those three source 401 items plus
 two more items distributed across the dominant affected list. The plan always
 contains exactly five distinct source items and can be pinned to a reviewed
-`ClassifiedRows.csv` SHA256 hash.
+`ClassifiedRows.csv` SHA256 hash. The DryRun prints each source file path,
+expected destination file path, and destination folder.
 
 The previous real execution path required `-Run -ConfirmPilot` and typing the exact confirmation
 phrase shown in the console. That path now stops before ShareGate is loaded.
@@ -622,7 +643,7 @@ only when both dates and destination item existence can be established.
 
 `SmartM365-SharePointMigration-ShareGateTransientBatch.ps1` prepares an
 item-scoped follow-up after a reviewed pilot. Default `-DryRun` prints each
-source-list batch, selected source IDs, the evidence SHA256 values, the plan
+source-list-and-destination-folder batch, selected source IDs, the evidence SHA256 values, the plan
 SHA256, and an exact versioned confirmation phrase. It identifies elements
 by site, list, and source ID. It excludes the five pilot item keys and
 separately identifies any other `Home.aspx` in a site-pages list. The

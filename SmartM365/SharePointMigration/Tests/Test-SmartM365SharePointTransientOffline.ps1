@@ -1,8 +1,8 @@
-﻿<#
+<#
 .SYNOPSIS
     Offline ShareGate transient batch and pilot review validation.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
@@ -32,15 +32,15 @@ try {
         [pscustomobject]@{ Id=868; List='Files'; ListId=$dominantId; Site=$source; Role='PilotD'; Status='Success'; Path='d.jpg' },
         [pscustomobject]@{ Id=1; List='Pages du site'; ListId=$pagesId; Site=$source; Role='PilotSkipped'; Status='Skipped'; Path='Home.aspx' },
         [pscustomobject]@{ Id=1; List='Pages du site'; ListId=$otherId; Site='https://source.example/other/'; Role='SeparateHome'; Status=''; Path='Home.aspx' },
-        [pscustomobject]@{ Id=2; List='Files'; ListId=$otherId; Site='https://source.example/other/'; Role='Remaining'; Status=''; Path='Next.jpg' },
-        [pscustomobject]@{ Id=3; List='Files'; ListId=$otherId; Site='https://source.example/other/'; Role='Remaining'; Status=''; Path='Last.jpg' }
+        [pscustomobject]@{ Id=2; List='Files'; ListId=$otherId; Site='https://source.example/other/'; Role='Remaining'; Status=''; Path='Album/Next.jpg' },
+        [pscustomobject]@{ Id=3; List='Files'; ListId=$otherId; Site='https://source.example/other/'; Role='Remaining'; Status=''; Path='Autre/Last.jpg' }
     )
     $classified = @($items | ForEach-Object {
         [pscustomobject]@{ SessionId='260930-6'; RowId=('row-' + $_.ListId + '-' + $_.Id); Timestamp='2026-10-03T10:00:00Z';
             RuleId='SG-ACCESS-SOURCE'; State='To fix'; AccessSide='Source'; ItemName=$_.Path;
             ItemKey=($_.Site.TrimEnd('/') + '|' + $_.ListId + '|' + $_.Id); SourceUrl=$_.Site; SourceList=$_.List;
             SourceListId=$_.ListId; SourceItemId=$_.Id; DestinationUrl=$destination; DestinationList=$_.List;
-            ObjectType='File'; 'Raw: Source path'=$_.Path; 'Raw: Destination path'='' }
+            ObjectType='File'; 'Raw: Source path'=$_.Path; 'Raw: Destination path'=$_.Path }
     })
     $classified += @(1..7 | ForEach-Object {
         [pscustomobject]@{ SessionId='260930-6'; RowId=('no-id-' + $_); Timestamp='2026-10-03T10:00:00Z';
@@ -88,7 +88,8 @@ try {
     if (@($evidence.AccessItems).Count -ne 8 -or @($evidence.PilotItems).Count -ne 5 -or @($evidence.OutOfBatchRows).Count -ne 7) { throw 'Synthetic evidence count mismatch.' }
     $base = @{ ProjectRoot=$project; AnalysisDirectory=$analysis; WitnessDirectory=$witness; PilotDirectory=$pilot; SessionId='260930-6'; BatchSize=1 }
     $dry = & $batchScript @base -DryRun 2>&1 | Out-String
-    if ($dry -notmatch 'remaining=2; batches=2' -or $dry -notmatch 'PlanSHA256=([0-9A-F]{64})') { throw "DryRun plan mismatch: $dry" }
+    if ($dry -notmatch 'remaining=2; batches=2' -or $dry -notmatch 'destinationFolder=Album' -or
+        $dry -notmatch 'destinationFolder=Autre' -or $dry -notmatch 'PlanSHA256=([0-9A-F]{64})') { throw "DryRun plan mismatch: $dry" }
     $planHash = $Matches[1]
     $fakeModuleRoot = Join-Path $root 'Modules\ShareGate'
     New-Item -ItemType Directory -Path $fakeModuleRoot -Force | Out-Null
@@ -122,46 +123,11 @@ Export-ModuleMember -Function Connect-Site,Get-List,Get-File,Get-ListItem,New-Co
     $expected = @{ ExpectedAnalysisHash=$analysisHash; ExpectedWitnessHash=$witnessHash;
         ExpectedPilotManifestHash=$evidence.PilotManifestSHA256; ExpectedPlanHash=$planHash;
         ExpectedOriginalItemCount=8; ExpectedRemainingItemCount=2; MaxErrorsPerBatch=0 }
-    try {
-        & $batchScript @base @expected -MaintenanceMarginMinutes 1440 -Run -ConfirmBatch 2>&1 | Out-Null
-        throw 'Maintenance estimate did not refuse an unsafe run.'
-    }
-    catch { if ($_.Exception.Message -notmatch 'estimated completion') { throw } }
+    try { & $batchScript @base @expected -Run -ConfirmBatch 2>&1 | Out-Null; throw 'Expected real-copy block.' }
+    catch { if ($_.Exception.Message -notmatch 'remains disabled') { throw } }
     if (@(Get-ChildItem -LiteralPath $diag -Directory -Filter 'Transient-*').Count) {
-        throw 'Unsafe estimate created a run output before refusing.'
-    }
-    function global:Read-Host { param($Prompt) 'COPY 2 ITEMS 260930-6 v1.0.1' }
-    try { & $batchScript @base @expected -Run -ConfirmBatch 2>&1 | Out-Null; throw 'Error threshold did not stop the run.' }
-    catch { if ($_.Exception.Message -notmatch 'StoppedErrorThreshold') { throw } }
-    finally { Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue }
-    $run = @(Get-ChildItem -LiteralPath $diag -Directory -Filter 'Transient-*' | Select-Object -First 1)
-    if ($run.Count -ne 1) { throw 'Expected exactly one synthetic batch output.' }
-    $summary = Get-Content -LiteralPath (Join-Path $run[0].FullName 'Transient-Summary.json.txt') -Raw | ConvertFrom-Json
-    if ($summary.RunStatus -ne 'StoppedErrorThreshold' -or $summary.Error -ne 1 -or $summary.NotAttempted -ne 1 -or $summary.CompletedBatches -ne 1) {
-        throw 'Error threshold or persisted counters are incorrect.'
-    }
-    $result = @(Import-Csv -LiteralPath (Join-Path $run[0].FullName 'Transient-Results.csv'))
-    if (@($result | Where-Object { $_.SourceItemId -eq '1' }).Count -ne 0 -or
-        @($result | Where-Object { $_.SourceItemId -eq '2' -and $_.Result -eq 'Error' }).Count -ne 1 -or
-        @($result | Where-Object { $_.SourceItemId -eq '3' -and $_.Result -eq 'NotAttempted' }).Count -ne 1) {
-        throw 'The separate Home.aspx was copied or a later batch started.'
-    }
-    if ($summary.SeparatePageItems -ne 1 -or $summary.OutOfBatchLines -ne 7 -or $summary.OutOfBatchSiteLines -ne 6 -or $summary.OutOfBatchFileLines -ne 1) {
-        throw 'Separate page or hors-lot summary is incorrect.'
-    }
-    if (@(Import-Csv -LiteralPath (Join-Path $run[0].FullName 'Transient-HorsLot.csv')).Count -ne 7) { throw 'Hors-lot CSV must retain all seven rows.' }
-    $env:SMART_TRANSIENT_TEST_EXPORT_FAIL = '1'
-    function global:Read-Host { param($Prompt) 'COPY 2 ITEMS 260930-6 v1.0.1' }
-    try { & $batchScript @base @expected -Run -ConfirmBatch 2>&1 | Out-Null; throw 'Synthetic export failure did not stop the run.' }
-    catch { if ($_.Exception.Message -notmatch 'Synthetic export failure') { throw } }
-    finally { Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue; Remove-Item Env:\SMART_TRANSIENT_TEST_EXPORT_FAIL -ErrorAction SilentlyContinue }
-    $failedRun = @(Get-ChildItem -LiteralPath $diag -Directory -Filter 'Transient-*' | Where-Object Name -NE $run[0].Name)
-    if ($failedRun.Count -ne 1) { throw 'Expected exactly one additional synthetic batch output.' }
-    $failedSummary = Get-Content -LiteralPath (Join-Path $failedRun[0].FullName 'Transient-Summary.json.txt') -Raw | ConvertFrom-Json
-    if ($failedSummary.RunStatus -ne 'Failed' -or $failedSummary.Unreported -ne 1 -or $failedSummary.NotAttempted -ne 1) {
-        throw 'Export failure did not mark the started batch as Unreported.'
-    }
-    $reviewOutput = & $reviewScript -ProjectRoot $project -AnalysisDirectory $analysis -PilotDirectory $pilot -SessionId '260930-6' -Run 2>&1 | Out-String
+        throw 'Blocked real run created a batch output.'
+    }    $reviewOutput = & $reviewScript -ProjectRoot $project -AnalysisDirectory $analysis -PilotDirectory $pilot -SessionId '260930-6' -Run 2>&1 | Out-String
     $reviewRun = @(Get-ChildItem -LiteralPath $diag -Directory -Filter 'PilotReview-*' | Select-Object -First 1)
     if ($reviewRun.Count -ne 1) { throw "Read-only review did not create output: $reviewOutput" }
     $reviewItems = @(Import-Csv -LiteralPath (Join-Path $reviewRun[0].FullName 'PilotReview-Items.csv'))
@@ -169,7 +135,7 @@ Export-ModuleMember -Function Connect-Site,Get-List,Get-File,Get-ListItem,New-Co
         @($reviewItems | Where-Object { $_.Result -eq 'Skipped' -and $_.SkipAssessment -like 'Consistent*' }).Count -ne 1) {
         throw 'Read-only review failed to verify URLs or compare Home.aspx Modified dates.'
     }
-    Write-Output 'Offline ShareGate batch test passed: Home.aspx excluded, seven hors-lot rows retained, item scope, error threshold, persisted summary.'
+    Write-Output 'Offline ShareGate batch test passed: Home.aspx excluded, seven hors-lot rows retained, folder-aware DryRun and real-copy block.'
     Write-Output 'Offline ShareGate review test passed: five verified item URLs and Home.aspx Modified comparison.'
 }
 finally {
@@ -182,8 +148,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsU8nD3AgMM9re
-# f2y80DmDFLV0syCHgIHSbLY+9JkPEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB95n5w04w+hrB5
+# t/0goZG+8miiTaipRZIPxP3QR271H6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -316,31 +282,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINnQXalQ5l+qZkqfQjbywLOt7E47t7BJe3G2G3DFYmrAMA0GCSqG
-# SIb3DQEBAQUABIIBgDLug5sZoZEJU/42fiJT4ncmkgmLs2eoDd7Nkpy4/sWxEXNB
-# HysY7b4tlc+6tuAONcFLev6Xsbjf5Qv1qD7Jw/+f8med1ORsdv6DGGqv8qZx4AiH
-# H+gCIOpOE8JpM7XhXohjABg0r9w10u5gu/klG+Y7+MpFIsZhycXzt9XFpzBdpdru
-# 4rhb85mU6Jc4SdWXlyecmjJZjxPXJOVhi67p701fiGq81ukBYbzKR/CFDEBIPTRB
-# pF+DC//mSufVRJQEUxxyaGuQiSIn9jnxYWaKpqGcvFTAKVVh1jJ6Npw7b4IhL2Jh
-# xdy8sJ0sskruia/qysWUBIlxrutVZZ/7Rdx/vfeTOoM7ByZgTn+JUjD/d0pDTg+d
-# /QFIN0/B/VfnCAC5VC/epd+Px525kmoDmh8BPYI8Au4F7mzqkbNmYvpB4eG9d/lD
-# dFj3a87HzHChmcs04ccLnMGfcpMFjNJSwkJPWl/ys5uVsI0JykK4sm7dzhpX5bum
-# zwQu9tzcZdKyIYlRsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDVoOBIJo0YtTB2c7Wia/iCOCr7e0NDJ+9XXQmYga4uGMA0GCSqG
+# SIb3DQEBAQUABIIBgAGm3kT5+nxadi0XmxbOQp+SWLNeEMIjFwIOeYtQUQWWZcVA
+# 76MWn1l11ubjlL+O+txjh9WAUoJqsb4krwFanmrMAkRyD6AuULgIs5y33psI6OHF
+# 4CfnK82KJcv7q5kZNx5Bb9wLvBeOIxCvhUcBKLCe9sM7r1P7+wEA0wsSU9cUrOyO
+# HjVjqFQp6l+CSjt1JdC8DT+r/+aveNKDzfY6DMTckNSe/UmZT3yQi5OWyYp3QCVk
+# d3LW0xKOAMtcjxKdFt9eXtvSukm89Fx98gsPJ33ohq+c49fmKfE2kA/wwNelASaH
+# 24rNggJ11XN+DBdhma3DgFgH8uft3NWO11lvrTl3rkPHQ2ItbCFHLxHQHIqnfQ6j
+# vFcLzjntKcP68C9C1MFSU3jAeO+gNr0qoiuIMC5UlCtC/+WJb8VRe/0sZIcKXyse
+# KjIY2+lms1Y29oU/xVQYSZjuwCcbVf1Hmj35WytQsP4vHkjIoZE/OL+pYW78JSer
+# tjvR2fe0q96eoW20baGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMy
-# MjNaMC8GCSqGSIb3DQEJBDEiBCDvKQ9Jp7CDgPuCIjRIvfKqHGj8cHcMeI8AUT54
-# rHShYjANBgkqhkiG9w0BAQEFAASCAgAkrHmIrbTCwB+qSPzmtqDE+tT1U11D9QLh
-# 2wsMnnkshkMBMd+o+54bcsJHpNsC8OfnNDSKuGBwIOWh5s/QwCO6amDY+h0GfPiW
-# rwvxq2DKJrEneT7IEIaP9QRHVLQ+0dR/dJDxhjRqq1CBpCTlNKBmGHsu2RArsMD2
-# q+QDUvwKSk53SuxE3BozsuegRxqdcraAu6TjHVciqik6beZuQUcYWEiEvT6mtt63
-# 4qhuQrFgYgXumaRt8w0IcQWpCokdVrBUQNw6iFoRixDz6tH+m6nIOxbCFboc7te9
-# j+RmqfEpAOVMhRNoxEVPEBSuvMmSI1Fh0CEQ0j2DdPo76goXqadk8bBGfXUyGA8x
-# 26LuqfFV8EvYoN6g/k5r9VBAzdngX6tiY1jpX4NdNUbKJwWr5UXQQbgTcyKwIJ0V
-# orybfPKP0+eJm8oiMZbi34AjWj9qbcPDY7mX+dscOPoIxwyCD5M0ITz+cspJ4t9y
-# D4aI/jtI5iPe+uIO9vP1wKEkIE0Z9fDZhLRSohGz9siNpDg4SPFs0DHZlYISUTOV
-# zFmOaSHOzOIs2A70mZoOEnE4MP2oBAngPjILV+rtcHedoTGTxrd6Ug61ZyPUgDUs
-# eZVnyWLQzPom/g25rnQZeayXjQKofiMUH4e1SMB2fkG5F2uCoHnHKj2h1cxWsuyc
-# ro7f74SEfQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
+# MjJaMC8GCSqGSIb3DQEJBDEiBCAm6t0KWsP9ye+TsI3GXgFlXFh7rlz6ByqJhF84
+# Vnx8czANBgkqhkiG9w0BAQEFAASCAgBFGJFKEJ/Vf9zCFeSXGeMx8i1fdWN8zx6K
+# 3fgU2pHbeJ7t2SjdA8Dz+xzg0CTTVXWmxrSrbg79BytDL6kPLMK6A9jkxPZtzhH+
+# QoOg/AgY5Ph5e245ZcVgCwswQfFsWvp/h/9Ixer5wdT3eL6nMCf1NKTb+Fwa/dRx
+# 04gMbBAua2+p8wMsqFpL36/5mggOHr9M9jrgkyzinR1cd9i/C7L7u3LdxOllpyfU
+# 5V2+bxq5iQjI6Ms6zrikoZlBodQtFjiudEnNZ8l4WciGT1JlXP1euxwRmHZJUyYc
+# E0+G1aYWAZcf427XvnVbrKCy4Kc9EqLg8I9GK+8Va6yuZgQFUa9dUtxVKbTUDWwX
+# FRrjH04016KFqtEY64akjghSitX63xcqFLB2MdLClNDsa4F55ei2R35UhEwOr7Vy
+# KHHnaLwCgujCRVk/pxEOzJQa6iue5ffQYWdTdhAKTqqw+Nu1O+J0+Ba1tYhw8u35
+# 0qHlEOZn+dtJI8ZS8Ntf9VGTPyb5v3XK0InaHm/OfLKP8Y2YG/22J90LtMq2OJ86
+# EMMJ9YcV/J/ovU8Vp7B1F06J8p+i5HdSS5n10aRTjtQUDGjNiaypLJu1mEb484Tz
+# dQ3QJBArj52JE7FwbTIr1lsmFGYJxpk31PioHVnn9VlC8npFbKiCvvulRvmTShub
+# qyodISHFJQ==
 # SIG # End signature block

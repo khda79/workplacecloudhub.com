@@ -2,7 +2,7 @@
 .SYNOPSIS
     Approval-gated item-scoped batches for source 401 cases after a reviewed pilot.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -29,14 +29,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.2'
+$version = '1.0.3'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
 try {
 if ($DryRun -and $Run) { throw 'Choose either -DryRun or -Run.' }
-if ($Run) { throw 'Real item-scoped copy is disabled: validation found that Copy-Content -SourceItemId created files at the destination library root while the originals already existed in their subfolders. Review paths and use a corrected remediation plan before any further copy.' }
+if ($Run) { throw 'Real item-scoped copy remains disabled until the explicit destination-folder routing is qualified on the ShareGate GUI machine.' }
 if ($ConfirmBatch -and -not $Run) { throw '-ConfirmBatch applies only with -Run.' }
 if ($Run -and -not $ConfirmBatch) { throw 'Real copies require both -Run and -ConfirmBatch.' }
 if ($Run -and (-not $ExpectedAnalysisHash -or -not $ExpectedWitnessHash -or -not $ExpectedPilotManifestHash -or
@@ -46,6 +46,7 @@ if ($Run -and (-not $ExpectedAnalysisHash -or -not $ExpectedWitnessHash -or -not
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.1 for ShareGate.' }
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-FarmMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-TransientEvidence.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-DestinationPath.ps1')
 $farmZone = [TimeZoneInfo]::FindSystemTimeZoneById($FarmTimeZoneId)
 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase 'Transient batch preparation'
 $evidence = Get-SmartM365TransientEvidence -ProjectRoot $ProjectRoot -AnalysisDirectory $AnalysisDirectory -PilotDirectory $PilotDirectory -SessionId $SessionId
@@ -74,6 +75,9 @@ $separatePages = @($otherIdOne | Where-Object {
 })
 foreach ($page in $separatePages) { $excluded[$page.ItemKey] = $true }
 $remaining = @($evidence.AccessItems | Where-Object { -not $excluded.ContainsKey($_.ItemKey) })
+foreach ($item in $remaining) {
+    $item | Add-Member -NotePropertyName DestinationRoute -NotePropertyValue (Resolve-SmartM365ShareGateDestinationPath -Row $item)
+}
 if ($remaining.Count -ne @($evidence.AccessItems).Count - 5 - $separatePages.Count) {
     throw 'The pilot and separately handled page item keys were not uniquely excluded.'
 }
@@ -83,7 +87,8 @@ $outOfBatch = @($evidence.OutOfBatchRows | Sort-Object RowId)
 function Get-TransientEndpointKey {
     param($Row)
     return ($Row.SourceUrl.TrimEnd('/').ToLowerInvariant() + '|' + $Row.SourceListId.ToLowerInvariant() + '|' +
-        $Row.SourceList.ToLowerInvariant() + '|' + $Row.DestinationUrl.TrimEnd('/').ToLowerInvariant() + '|' + $Row.DestinationList.ToLowerInvariant())
+        $Row.SourceList.ToLowerInvariant() + '|' + $Row.DestinationUrl.TrimEnd('/').ToLowerInvariant() + '|' +
+        $Row.DestinationList.ToLowerInvariant() + '|' + $Row.DestinationRoute.DestinationFolder.ToLowerInvariant())
 }
 $groups = @($remaining | Group-Object { Get-TransientEndpointKey -Row $_ } | Sort-Object Name)
 $batches = [System.Collections.Generic.List[object]]::new()
@@ -101,22 +106,26 @@ foreach ($group in $groups) {
         $batch = [pscustomobject]@{
             Number=$number; SourceUrl=$first.SourceUrl; SourceList=$first.SourceList;
             DestinationUrl=$first.DestinationUrl; DestinationList=$first.DestinationList;
+            DestinationFolder=$first.DestinationRoute.DestinationFolder;
             Items=$slice; Ids=$ids
         }
         $batches.Add($batch)
         foreach ($item in $slice) {
             $planRows.Add([pscustomobject]@{
                 BatchNumber=$number; ItemKey=$item.ItemKey; SourceUrl=$item.SourceUrl; SourceList=$item.SourceList;
-                SourceItemId=[int]$item.SourceItemId; DestinationUrl=$item.DestinationUrl; DestinationList=$item.DestinationList
+                SourceItemId=[int]$item.SourceItemId; DestinationUrl=$item.DestinationUrl; DestinationList=$item.DestinationList;
+                SourceFilePath=$item.DestinationRoute.SourceFilePath;
+                DestinationFilePath=$item.DestinationRoute.DestinationFilePath;
+                DestinationFolder=$item.DestinationRoute.DestinationFolder
             })
         }
     }
 }
 if ($planRows.Count -ne $remaining.Count -or -not $batches.Count) { throw 'The batch plan is incomplete.' }
 $canonicalRows = [System.Collections.Generic.List[string]]::new()
-$canonicalRows.Add('schema=2;batchSize=' + $BatchSize)
+$canonicalRows.Add('schema=3;batchSize=' + $BatchSize)
 foreach ($row in $planRows) {
-    $canonicalRows.Add('COPY' + "`t" + (@($row.BatchNumber,$row.ItemKey,$row.SourceUrl,$row.SourceList,$row.SourceItemId,$row.DestinationUrl,$row.DestinationList) -join "`t"))
+    $canonicalRows.Add('COPY' + "`t" + (@($row.BatchNumber,$row.ItemKey,$row.SourceUrl,$row.SourceList,$row.SourceItemId,$row.DestinationUrl,$row.DestinationList,$row.SourceFilePath,$row.DestinationFilePath,$row.DestinationFolder) -join "`t"))
 }
 foreach ($page in @($separatePages | Sort-Object ItemKey)) {
     $canonicalRows.Add('SEPARATE-PAGE' + "`t" + (@($page.ItemKey,$page.ItemName,$page.ObjectType,$page.SourceUrl,$page.'Raw: Source path',$page.DestinationUrl) -join "`t"))
@@ -203,8 +212,8 @@ Write-TransientLog ('Pilot Success timing: {0} seconds for {1} items ({2:N2} s/i
     ($pilotDurations -join ','),$pilotDurations.Count,$secondsPerItem,([timespan]::FromSeconds($estimatedSeconds)),
     $schedule.ProjectedEndFarm,$MaintenanceMarginMinutes,$schedule.EndWithMarginFarm,$schedule.NextWindowFarm,$schedule.IsSafe)
 foreach ($batch in $batches) {
-    Write-TransientLog ('Batch {0}/{1}: {2} | {3} -> {4} | {5}; items={6}; SourceItemIds={7}' -f
-        $batch.Number,$batches.Count,$batch.SourceUrl,$batch.SourceList,$batch.DestinationUrl,$batch.DestinationList,
+    Write-TransientLog ('Batch {0}/{1}: {2} | {3} -> {4} | {5}; destinationFolder={6}; items={7}; SourceItemIds={8}' -f
+        $batch.Number,$batches.Count,$batch.SourceUrl,$batch.SourceList,$batch.DestinationUrl,$batch.DestinationList,$batch.DestinationFolder,
         $batch.Ids.Count,($batch.Ids -join ','))
 }
 $phrase = 'COPY ' + $remaining.Count + ' ITEMS ' + $SessionId + ' v' + $version
@@ -219,11 +228,11 @@ $null = Assert-TransientSchedule -ItemCount $remaining.Count -Phase 'transient r
 $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
 if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
 Import-Module -Name $module[0].Path -ErrorAction Stop
-foreach ($name in @('Connect-Site','Get-List','Copy-Content','New-CopySettings','Export-Report')) {
+foreach ($name in @('Connect-Site','Get-List','Get-Folder','Copy-Content','New-CopySettings','Export-Report')) {
     if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
 }
 $copyCommand = Get-Command -Name Copy-Content -Module ShareGate
-$requiredParameters = @('SourceList','DestinationList','SourceItemId','CopySettings','TaskName')
+$requiredParameters = @('SourceList','DestinationList','SourceItemId','DestinationFolder','CopySettings','TaskName')
 if (-not @($copyCommand.ParameterSets | Where-Object {
     $names = @($_.Parameters | ForEach-Object Name)
     @($requiredParameters | Where-Object { $_ -notin $names }).Count -eq 0
@@ -250,7 +259,7 @@ $planPath = Join-Path $output 'Transient-Plan.csv'
 $resultPath = Join-Path $output 'Transient-Results.csv'
 $outOfBatchPath = Join-Path $output 'Transient-HorsLot.csv'
 $summaryPath = Join-Path $output 'Transient-Summary.json.txt'
-$planColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList')
+$planColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','SourceFilePath','DestinationFilePath','DestinationFolder')
 $resultColumns = @('BatchNumber','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','Result','CopySessionId','ReportPath','Error')
 $outOfBatchColumns = @('Disposition','Reason','RowId','Timestamp','ObjectType','ItemName','SourceUrl','SourceList','SourcePath','DestinationUrl','DestinationList','DestinationPath')
 Export-SmartM365TransientCsv -Path $planPath -Rows $planRows.ToArray() -Columns $planColumns
@@ -345,14 +354,19 @@ try {
         $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase ("batch $($batch.Number)/$($batches.Count) preparation")
         $sourceList = Get-ExactTransientList -Side Source -SiteUrl $batch.SourceUrl -ListName $batch.SourceList
         $destinationList = Get-ExactTransientList -Side Destination -SiteUrl $batch.DestinationUrl -ListName $batch.DestinationList
+        Assert-SmartM365ShareGateDestinationFolder -DestinationList $destinationList -DestinationFolder $batch.DestinationFolder
         $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase ("batch $($batch.Number)/$($batches.Count) copy")
         $taskName = 'SmartM365 Transient 401 ' + $SessionId + ' ' + $runId + ' batch ' + ('{0:D3}' -f $batch.Number)
         $reportPath = Join-Path $reportDir ('Batch-{0:D3}.csv' -f $batch.Number)
         $temporaryReport = Join-Path $reportDir ('.Batch-{0:D3}-{1}.csv' -f $batch.Number,[guid]::NewGuid().ToString('N'))
         $objectPath = Join-Path $objectDir ('CopyResult-{0:D3}.txt' -f $batch.Number)
-        Write-TransientLog ('Starting batch {0}/{1}; items={2}; task={3}' -f $batch.Number,$batches.Count,$batch.Ids.Count,$taskName)
+        Write-TransientLog ('Starting batch {0}/{1}; destinationFolder={2}; items={3}; task={4}' -f
+            $batch.Number,$batches.Count,$batch.DestinationFolder,$batch.Ids.Count,$taskName)
         $currentCopyStarted = $true
-        $copyResult = ShareGate\Copy-Content -SourceList $sourceList -DestinationList $destinationList -SourceItemId $batch.Ids -CopySettings $settings -TaskName $taskName -ErrorAction Stop
+        $copyParameters = @{ SourceList=$sourceList; DestinationList=$destinationList; SourceItemId=$batch.Ids;
+            CopySettings=$settings; TaskName=$taskName; ErrorAction='Stop' }
+        if ($batch.DestinationFolder) { $copyParameters.DestinationFolder = $batch.DestinationFolder }
+        $copyResult = ShareGate\Copy-Content @copyParameters
         if (-not $copyResult -or @($copyResult).Count -ne 1) { throw 'Copy-Content did not return exactly one CopyResult.' }
         $copySession = Get-TransientCopySessionId -CopyResult $copyResult
         $currentCopySession = $copySession
@@ -449,8 +463,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCGpoBv+1+2JrP7
-# 6BFTzpqIqMjywjEHFsyIy8vUWhj1B6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzH/lolOT18KIN
+# /TYpMEVB4v/UAguWN1Y+9enny2FbrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -583,31 +597,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHOkRI65t1Dy2PdcBKRjapm+svWEdA6Qy67QBq2DQXFTMA0GCSqG
-# SIb3DQEBAQUABIIBgCFe5o4CObFLUgveebem07BK8QwBgUZOKXsW5S+KHQbsPWjD
-# pSXrLG38ttL6RXJ8w+ulbMeexquObDMyw2VgHmk5zovoZWcLTUMd/BymRWlZNRan
-# D66RqqPdFlk5nmWbOsI5RPq5l3/onXx7ZVDTmCGu1tMoBtNRXMcWWKuSuu0m8ytf
-# Y98B0OcJwST8iuTCqAk5f62zrMosPJ1V5Ow3bL19a0sl8M1beLyOMAnkeJSyrKva
-# gYlw50ri9rIopQjSjl/X+Ub51gzwzn/U08y92xoLpqlb5i7ieFexDRZ/hjWk+3cC
-# soKYT/YfxCCEBqjVh1/mkyEfy+TgFwZjsISsR1ESINW7ITISJZOzAuAq23JK6q7h
-# RinY4e1aL6uu/HMkNd126onXp/SrLOprEdpeSaLf8YWtIaQpCewG508c6vhJM/67
-# AzNzDfgopeqsWY66JQaXPZtWic/ZjuMjfuQUcsyBpPcpuIFGkVikONKQKjRKjeTG
-# DLI2+2RXXST2VKujOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOct0mz2mWiRt3KwlbAznuzIQp05FJS8M6wp2LJc3paaMA0GCSqG
+# SIb3DQEBAQUABIIBgKywthoGso+1N7L/goS3updcHENqw6ojlrdRcnzukg4ih2Ob
+# +nH9f4zBKQAqt5SRHS6i24zbqu4mh53mgQ/0vOgUGhjAH8dtWOg+ePYWcpX9lbpa
+# xyEN2CrSiZWxajA/MVTiGvmGR/ZMNeb0G/c0XSu1hTrUkMc+HRWiPjFj8k1GFiQk
+# lwkTbmfxVNSLzOZUfaFBkJAnDgOP6xokZ0iI12nttoSxENn+0Jodi24fSqAiykRo
+# 08U+xrIufa0mhRlw1GdtYtBYk8QxvtzdRSRoecm4mCKBLMKnQAjQUtgoM6KOpbc1
+# 0HG44Qvr7kr7DYQUCWuYY+etyLUvNLnmYXIk12CjjApMVXXw8ULeA+6DO2UszoDx
+# spu0D4iCJKDrRywdR7gnCBRnth6MlkeESnnVIiShPCxeCEtTU7mGCQWWUuJ7Mhp3
+# 4KXEoTN3qUpADv9Juvh+FW1hjserjVMrI0fdqeiiY4IcUoSoLNVRjvSS0sLccW6C
+# ieLK1NHimkU+OpXIc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTI3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBNpa8fx6qLItdBSbU5mUk1UA7Uw10ZEev9IfkS
-# R3XAJDANBgkqhkiG9w0BAQEFAASCAgCNEYpKQ0tQ9gHJChufeoIm2AS1l33cvT3S
-# Bjm48TmzkbTavPoxL0pt5k+hX3o4ATGZba88k5reHGPVgzaIcNPvipRIF15IiIeu
-# pKBSlO1kJb3HaZG9Wq3l/v//rY92xAlPwjEHNY6BU6e241HVCzAizCSi2FVIL1ct
-# hZCeoFZ/wkVV2FuCVDsAuQR6u+ZqvTIuJdi2Wssixz38fn0Jh8XVIyM8MkXDc9xp
-# boAQx9+klLJ3HPD1zUavyBZjxYolUjRGxPwY/JfPac0DTiutvsdntgskEw+/IyRZ
-# 95uHxKuTqkl7XOJGlWHoNIisCJa+VM96utjHkk+2bB4FeL0rvoc/OaKy0bWvTbHW
-# 6XaKMS8ISu4B0rTS1ESUcAbzp5ZJG5KibA3lxhhOxSnEjQqFHE1PJHVdrKW0ya2V
-# 0hR8zUae2i0psSD9AlXvyBMoEbLFY4D4F4Su2Rm1uzfAQa0G6pn6S3l2uMnHD7BJ
-# +0K6IF9apvpdUHfTU0nS7LYYJPYBYtwTZzHestBtoa7k25LV+orht7gOR/XwnVEU
-# 1YSc40JZnwAc7mwmmg8RfKbPnHumnYjuYsSEuvZM6taHZbXngFkztFrprfedavlV
-# 57ZWgzUk5cblE+f7orhR3RAlUc1dr802N/iMT7V7wuHon7xd6aLjGACFXx6eCe5n
-# sKQnG7hgYQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
+# MThaMC8GCSqGSIb3DQEJBDEiBCAdXXtlj6ipU8WGzZbMxBUM04oahWUMcBOO58Ki
+# ZcCXLzANBgkqhkiG9w0BAQEFAASCAgBSz+F79S9ryX5B5wPIQat+NxkNAdHQYc0X
+# fme7KEH96h8B5wTH23FsIoLRijR1YTXpd6lT+Pvw29rvdSGnKD6BUYa6rKqOYqd5
+# L6JWKkNu6AKsaZ7jEwUuYHayCfks7acLulTAxuY4sk8hDp0hs5lKlF0W+ICmEZXL
+# Nve9Ub9BnxlFJZ/PX9q+CrtnMzWuq3Wf6lledQEBh8emVsDlhknK9myW3IC84EwO
+# 9+VfG88984LxrZyIQnEetlIdxglcoGUi2KKPW4g0tY7vm9LdYUikU4UAdWq7DT7a
+# JupNe/Gz/qro/llT2b2Zck7D2ZgDsctjlLveZgvX/Enz1dnYVtIikeKOpNQvQFZ3
+# 0jvlhdJwWqPyS+5oRae+NjGOCldik8EHDYM4ihYwFzGM/VSTmLtf9IjZEdvKtPLF
+# Afo4ES8stH/MYm8Wqvo1WodG1a27/Cy0w0jmKX3yfcxameR9hreFUe91Phbea2jV
+# bpeQ+BKK9CDQJ81Xr4HL8I0xAYJNLQM3s/Zej0BPyEOrQGqnwYxJaCbpEoUy8IWn
+# Ey6q/Np09X479sNDKEVanlq1Xov7t0JndGOxpXLs7khJmWllf59H0BNgRC/MA84B
+# 3mDRAktUi4syXJj4TJvTKq/d9bUqHTv34/9MyXZJwKdsEOnbjX7a5UmV828co8LR
+# 46Hu9pBRsg==
 # SIG # End signature block

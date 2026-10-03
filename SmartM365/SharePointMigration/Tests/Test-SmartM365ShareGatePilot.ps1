@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline contract test for the approval-gated five-item ShareGate pilot.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -55,9 +55,9 @@ Export-ModuleMember -Function *
     $target = 'https://target.example/sites/a'
     $analysisRows = @()
     foreach ($id in @(88,185,300,467,600,868)) {
-        $analysisRows += [pscustomobject]@{ SessionId='260930-6'; RuleId='SG-ACCESS-SOURCE'; State='To fix'; AccessSide='Source'; ItemKey=('photo-' + $id); SourceUrl=$source; SourceList='Photos'; SourceItemId=$id; DestinationUrl=$target; DestinationList='Photos'; ObjectType='File' }
+        $analysisRows += [pscustomobject]@{ SessionId='260930-6'; RuleId='SG-ACCESS-SOURCE'; State='To fix'; AccessSide='Source'; ItemKey=('photo-' + $id); SourceUrl=$source; SourceList='Photos'; SourceItemId=$id; DestinationUrl=$target; DestinationList='Photos'; ObjectType='File'; 'Raw: Source path'=('Album/image-' + $id + '.jpg'); 'Raw: Destination path'=('Album/image-' + $id + '.jpg') }
     }
-    $analysisRows += [pscustomobject]@{ SessionId='260930-6'; RuleId='SG-ACCESS-SOURCE'; State='To fix'; AccessSide='Source'; ItemKey='page-1'; SourceUrl=$source; SourceList='Pages'; SourceItemId=1; DestinationUrl=$target; DestinationList='Pages'; ObjectType='File' }
+    $analysisRows += [pscustomobject]@{ SessionId='260930-6'; RuleId='SG-ACCESS-SOURCE'; State='To fix'; AccessSide='Source'; ItemKey='page-1'; SourceUrl=$source; SourceList='Pages'; SourceItemId=1; DestinationUrl=$target; DestinationList='Pages'; ObjectType='File'; 'Raw: Source path'='Home.aspx'; 'Raw: Destination path'='Home.aspx' }
     $analysisPath = Join-Path $analysis 'ClassifiedRows.csv'
     $analysisRows | Export-Csv -LiteralPath $analysisPath -NoTypeInformation -Encoding UTF8
     $hash = (Get-FileHash -LiteralPath $analysisPath -Algorithm SHA256).Hash
@@ -84,50 +84,21 @@ Export-ModuleMember -Function *
     } | Select-Object -First 1)[0]
     if (-not $testZone) { throw 'No safe daytime zone is available for the offline pilot test.' }
 
-    try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -Run | Out-Null; throw 'Expected -ConfirmPilot guard.' }
-    catch { if ($_.Exception.Message -notmatch 'both -Run and -ConfirmPilot') { throw } }
-    try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -Run -ConfirmPilot | Out-Null; throw 'Expected reviewed hash guard.' }
-    catch { if ($_.Exception.Message -notmatch 'both reviewed analysis and witness SHA256') { throw } }
+    foreach ($switches in @(@{ Run=$true }, @{ Run=$true; ConfirmPilot=$true })) {
+        try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id @switches | Out-Null; throw 'Expected real-copy block.' }
+        catch { if ($_.Exception.Message -notmatch 'remains disabled') { throw } }
+    }
     try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash ('0' * 64) -DryRun | Out-Null; throw 'Expected analysis hash guard.' }
     catch { if ($_.Exception.Message -notmatch 'hash differs') { throw } }
     $dry = @(& $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash $hash -DryRun)
     if (@($dry | Where-Object { $_ -match ': ID=(88|185|467|868|1);' }).Count -ne 5) { throw 'DryRun did not select the five intended 401 items.' }
+    if (@($dry | Where-Object { $_ -match 'destinationFolder=Album' }).Count -ne 4 -or
+        @($dry | Where-Object { $_ -match 'destinationFolder=<library root>' }).Count -ne 1) {
+        throw 'DryRun did not route the four photos to Album and Home.aspx to the library root.'
+    }
     if (Test-Path -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS) { throw 'DryRun invoked Copy-Content.' }
     if (@(Get-ChildItem -LiteralPath (Join-Path $project 'ShareGate\Diagnostics') -Directory -Filter 'Pilot-*').Count) { throw 'DryRun created pilot output.' }
-
-    function global:Read-Host { param([string]$Prompt) return 'NO' }
-    try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash $hash -ExpectedWitnessHash $witnessHash -Run -ConfirmPilot | Out-Null; throw 'Expected exact interactive approval guard.' }
-    catch { if ($_.Exception.Message -notmatch 'confirmation was not entered exactly') { throw } }
-    if (Test-Path -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS) { throw 'Pilot invoked Copy-Content without the exact phrase.' }
-
-    function global:Read-Host { param([string]$Prompt) return 'COPY 5 ITEMS 260930-6' }
-    & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash $hash -ExpectedWitnessHash $witnessHash -Run -ConfirmPilot | Out-Null
-    $calls = @(Get-Content -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS)
-    if ($calls.Count -ne 5 -or (@($calls | ForEach-Object { ($_ -split '\|')[0] }) -join ',') -ne '88,185,467,868,1') { throw 'Pilot did not perform exactly the five selected item calls.' }
-    $output = @(Get-ChildItem -LiteralPath (Join-Path $project 'ShareGate\Diagnostics') -Directory -Filter 'Pilot-*')
-    if ($output.Count -ne 1) { throw 'Pilot output folder was not created exactly once.' }
-    $results = @(Import-Csv -LiteralPath (Join-Path $output[0].FullName 'Pilot-Results.csv'))
-    if ($results.Count -ne 5 -or @($results | Where-Object Status -NE 'Completed - review report').Count) { throw 'Pilot result CSV did not record all five calls.' }
-    if (@($results | Where-Object { $_.ShareGateResult -ne 'Success=1' -or $_.DestinationItemUrlEvidence -ne 'Verified by ShareGate Get-File' -or -not (Test-Path -LiteralPath $_.ReportPath -PathType Leaf) }).Count) { throw 'Pilot did not capture the ShareGate result, export, and verified destination URL.' }
-    foreach ($result in $results) {
-        $suffix = if ($result.SourceItemId -eq '1') { 'Pages/Home.aspx' } else { 'Photos/image-' + $result.SourceItemId + '.jpg' }
-        if ($result.DestinationItemUrl -ne ($target + '/' + $suffix)) { throw ('Wrong destination URL for ID ' + $result.SourceItemId) }
-    }
-    $summary = @(Get-Content -LiteralPath (Join-Path $output[0].FullName 'Pilot.log') | Where-Object { $_ -match 'SUMMARY ID=' })
-    if ($summary.Count -ne 5 -or @($summary | Where-Object { $_ -notmatch 'ShareGate=Success=1;.*Export=.*Pilot-\d\d.csv; SPO item=https://target.example/sites/a/' }).Count) { throw 'Pilot console summary is incomplete.' }
-    if (@(Get-ChildItem -LiteralPath (Join-Path $output[0].FullName 'Reports') -Filter '*.csv').Count -ne 5) { throw 'Pilot reports are incomplete.' }
-
-    Remove-Item -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS -Force
-    $env:SMARTM365_PILOT_TEST_ERROR_ID = '185'
-    try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash $hash -ExpectedWitnessHash $witnessHash -Run -ConfirmPilot | Out-Null; throw 'Expected ShareGate error stop.' }
-    catch { if ($_.Exception.Message -notmatch 'Pilot stopped after item 2') { throw } }
-    $errorCalls = @(Get-Content -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS)
-    if ($errorCalls.Count -ne 2) { throw 'Pilot continued copying after a ShareGate Error result.' }
-    $errorOutput = @(Get-ChildItem -LiteralPath (Join-Path $project 'ShareGate\Diagnostics') -Directory -Filter 'Pilot-*' | Sort-Object Name | Select-Object -Last 1)
-    $errorResults = @(Import-Csv -LiteralPath (Join-Path $errorOutput[0].FullName 'Pilot-Results.csv'))
-    if ($errorResults.Count -ne 5 -or $errorResults[1].ShareGateResult -ne 'Error=1' -or $errorResults[1].Status -ne 'ShareGate error - stopped' -or @($errorResults | Select-Object -Skip 2 | Where-Object Status -NE 'Not attempted').Count) { throw 'Pilot did not preserve all item states after an error.' }
-    if (@(Get-Content -LiteralPath (Join-Path $errorOutput[0].FullName 'Pilot.log') | Where-Object { $_ -match 'SUMMARY ID=' }).Count -ne 5) { throw 'Failed pilot lacks a five-item summary.' }
-    Write-Output 'ShareGate pilot offline contract test passed.'
+    Write-Output 'ShareGate pilot offline path plan and real-copy block passed.'
 }
 finally {
     Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
@@ -142,8 +113,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFKvYYT7UcJePj
-# 6kgigHMBGnkZK5GsZvRzr1ERsAUzIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQJ1bynMC/T0Pg
+# KTuleYLHIzVFeyvIpg8owSSWWQGKt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -276,31 +247,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB4UiJ2/dVioWn6FrCYmBTQZmLAgVbbw6ppPOp4Tz9IVMA0GCSqG
-# SIb3DQEBAQUABIIBgEcUr/syKt0fnRWznxcBm8CTVR0YgLDM9MgtjSm2d+3deaRv
-# JilebyLVzjSnL3yCoacdGQma+L6/6p7Efu1hW+0dUt35vaF7uVNNVqh3E19J3FHm
-# CI00/JBG0h3QCYvESVrRfrFZSXBlucjW6MdKJehx1oCCgDh0DirYoOqi8o5l/7lG
-# 8yqhlf96XGm03GKsfVaFT8Y7tqXkypF5pnNNldk8px0r/dbqI1AQJ2EWIwXyNe1E
-# rYMpPZMkM9CTFwpxVPdVQQ4QNXxeBNSokZ8G6X0WKBepY9OO2a3Xs3eeoIaT+X68
-# ism8ORVIcqKpcjVITkayNGoOWdf94JjcRZ1Kf6LX+t81FtJ/yQhqncIAPz+6vknG
-# 9aWf/cCBTLNsUQWqIps0rxqCD2tZRSK27VhPaWN9VFdPP2gosRchpJklK+862M7v
-# 3ix+fsnQ3kNyG6Xp4lSJqKs3j8ChiHodcCeCJY3yVAacuqExqf92/c4YknGMevLe
-# XGaMGII58feP2jmqTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJGRb0zyz6B2EaGYfpxPRjqsAwXgCvk6qWIql3MOymOxMA0GCSqG
+# SIb3DQEBAQUABIIBgISuChwLvAYrMAkQdaDuUHi1aiAtAZN90z/N2lhg51t2bB0N
+# 8p9Y+E1uTJdgmHgl3ZcVUYRCyEac+xqTc0k8/OAEka1IBKYM4cAmwVjbwUNPJgLS
+# GeX6+0G0TwjMZmUesfE7x6CAYFhWSzIpb4WxRX+NhvAiSWgyaWflD16FIoR/eAbT
+# lo0nW+VkbhrIEkp1yuNyGhCdQUX1EvdBypZtSLitEGAmgy7MmpjL2k0A23AU4iEp
+# kauAR8OmGIQHckdy3Zj1Zg60geyM1psMzbEa+LqJavYZcrm0/VzIu3KA8dBoXMHK
+# xax0QwZMSMDYD8mhSj58E1+D0oV0OeAb9BxAu7d/FJuvuTTYt+rYAj7mcPSZVs6s
+# FlsMg0M34xymcdQ8t+MM33tP08C9qZ98HZTcbvy87zqNTYg+XCWibrIqY7hfWHey
+# uxwkjzjBb4k03crgXib96Pgdt36haTxssntfNIs0hDwcvxxyUxNo/KOKXUjRGJ0r
+# EgWY9xl3ezVcb2eoJ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMTUy
-# MDJaMC8GCSqGSIb3DQEJBDEiBCD8/L97AdEdzuVNrcl00dCKWF5My9Zvk7hi3Guv
-# 1Z4MfjANBgkqhkiG9w0BAQEFAASCAgBxQCI9dBpRajCoexhmB6E2nvQrPv7fH05i
-# n9shybk5qT9Oi9fc1UfgjIHZPU/AWvP+uFolZYupYu70E8GgWhYT3X+envBSlp3f
-# USweL8yO8tCwYt1A8RRKUZLEH8/1svc4ADgvUekhMFZQ2v8ocE6RpVvPOoKjWD6P
-# l2P60dusERx/263CcNy2ureYooijI0ZijLmMxsVqVNh2WJRIkN2obUSaysGPIEn2
-# x6iNXV5vLOIMvemlS/6qWvzBPjzrBnaQA3VrB0xUoaJJL5o0saANWqCyaQt55ghP
-# qEc8+3NVskY5ZRZen3vcEc/TIbms2r1+aQj2eY4iSCV4BItC/vKSamN67/AYy5lI
-# k34U750qh1XlzIXol4Xb7ziWMcyWKVARMp2dfLOVfyG3n8xv5VezuBZU3oKigmPw
-# ebiDJlGe91wyJIW0Y2bL4pBT2nIikwCMcKsw2iNUJ+cygPgp+fta/oymMWUu3h26
-# r3ky9xuzHUMq1iwfe4pHfjBf0A4yJf/osSdRFlYCvgbdgdS3ebCkqJaakosmhOg2
-# KQimdCybjOaQColo01TluaYs8Tv3azsHbdUz80nI43+KzMaSAu3hzeKRSyfFQlpZ
-# kuv3GKM1xTyTI2hL5rkV6kSrQq8E445Sl/UfbKEiG9nZrOVEa2hePSu7B8dWNZRt
-# A8P+DcRj5g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTQ5
+# MjFaMC8GCSqGSIb3DQEJBDEiBCAJqGAJUZ+ySE2ATUqQp2vfmD+JFI3YIbCupKTa
+# G55gPTANBgkqhkiG9w0BAQEFAASCAgCoNYg+3sye1SasK8IPUZisS86PqQdIcmKe
+# zJly8xRGTLbpqGbLfxRAprHHf1d/6/OYR2T7myen67Ruz/GaRZbfc/LWFRt5yHS3
+# VzYs3OIOpDBEMctV/AWmdN+fi/wAZrSk6ZVxOJVBJ9h/afJmxcC4icB9i8iTdLy7
+# 2JZ2xMsOx2CI2fKOIeS7S8Wed5W2UAMUbu7PwiNhn+CD58h87+2hgX9/UIfcNvdk
+# SjX7dSVwgr8R8ynhK5jx+9e5EmqQisn0vcvJkAZcIkJYO1daMLlzO96bVJYS29Ys
+# Xv6Vu+X5ESC4kM4+gSyDyPtqHASBpQtYrxgah5O/JNOEHfvDHbp4a+a1Tk/h1fG5
+# 2QA1knF88Ak7zHm6nyh8jgfxSvvG7XSWDHQjvRjZFvJcHVilQchnembYTjagyAK3
+# frXe0BxIuKN+KdSuFf46tmVRIWsP6dQx3qw0VfPZ0hFqrkOPxMpxkLETz8PkmI3x
+# JzOLORgHc/4Oe9L3gRERXiu87cqFcphpZkAcJ5XalnKGEvKDIAPtlgD/nGcMvYA6
+# cGkHzXDHB1xgiyrS3mckfvBJdqHgi35X5Uo7HnavhEqAFFps8/bblwbTiEZI3jd0
+# HaPtSwlSvPAZyx/nOPucawpCulv2TtUYUWBiwgTXFqh1T0UbWUFAxJ95c0OMUDz2
+# kE24ESA0tw==
 # SIG # End signature block
