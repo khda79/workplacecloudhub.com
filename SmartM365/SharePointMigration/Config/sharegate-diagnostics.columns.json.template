@@ -12,6 +12,8 @@
   "SourcePath": ["Source path", "Chemin source"],
   "DestinationUrl": ["Destination site address", "Adresse du site de destination"],
   "DestinationList": ["Destination list title", "Titre de la liste de destination"],
+  "DestinationPath": ["Destination path", "Chemin de destination"],
+  "DestinationItemId": ["Destination ID", "ID de destination"],
   "Messages": ["Messages", "Message"],
   "Warnings": ["Warnings", "Avertissements", "Warning", "Avertissement"],
   "Errors": ["Errors", "Erreurs", "Error", "Erreur"],

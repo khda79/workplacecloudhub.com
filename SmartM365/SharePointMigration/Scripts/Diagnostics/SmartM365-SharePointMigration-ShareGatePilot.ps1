@@ -2,7 +2,7 @@
 .SYNOPSIS
     Approval-gated, five-item ShareGate remediation pilot for source 401 cases.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -21,13 +21,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.1') -ForegroundColor Cyan
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.2') -ForegroundColor Cyan
 if ($DryRun -and $Run) { throw 'Choose either -DryRun or -Run.' }
 if ($ConfirmPilot -and -not $Run) { throw '-ConfirmPilot applies only with -Run.' }
 if ($Run -and -not $ConfirmPilot) { throw 'A real copy requires both -Run and -ConfirmPilot.' }
 if ($Run -and (-not $ExpectedAnalysisHash -or -not $ExpectedWitnessHash)) { throw 'A real copy requires both reviewed analysis and witness SHA256 hashes.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.1 (powershell.exe) for ShareGate.' }
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-FarmMaintenance.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateReportReader.ps1')
+$reportAliases = Get-SmartM365ShareGateReportAliases -ConfigRoot (Join-Path $PSScriptRoot '..\..\Config')
 $farmTimeZone = [TimeZoneInfo]::FindSystemTimeZoneById($FarmTimeZoneId)
 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmTimeZone -Phase 'pilot preparation'
 
@@ -151,8 +153,12 @@ $objects = Join-Path $output 'CopyResults'
 New-Item -ItemType Directory -Path $reports,$objects -Force | Out-Null
 $logPath = Join-Path $output 'Pilot.log'
 $resultPath = Join-Path $output 'Pilot-Results.csv'
-$resultColumns = @('Role','SessionId','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','TaskName','CopySessionId','Status','ReportRows','ReportPath','CopyResultPath','Error')
+$resultColumns = @('Role','SessionId','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','TaskName','CopySessionId','Status','ShareGateResult','ReportRows','ReportPath','CopyResultPath','DestinationPath','DestinationItemId','DestinationItemUrl','DestinationItemUrlEvidence','Error')
 $results = [System.Collections.Generic.List[object]]::new()
+foreach ($entry in $selection) {
+    $row = $entry.Row
+    $results.Add([pscustomobject]@{ Role=$entry.Role; SessionId=$SessionId; ItemKey=$row.ItemKey; SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; SourceItemId=$row.SourceItemId; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; TaskName=''; CopySessionId=''; Status='Not attempted'; ShareGateResult='Not attempted'; ReportRows=0; ReportPath=''; CopyResultPath=''; DestinationPath=''; DestinationItemId=''; DestinationItemUrl=''; DestinationItemUrlEvidence='Unavailable'; Error='' })
+}
 $siteCache = @{}
 $listCache = @{}
 
@@ -200,12 +206,102 @@ function Get-CopySessionId {
     }
     return ''
 }
+function Get-ShareGateReportReview {
+    param([object[]]$Rows, [int]$SourceItemId)
+    if (-not $Rows.Count) {
+        return [pscustomobject]@{ Result='No report rows'; HasError=$false; DestinationPath=''; DestinationItemId='' }
+    }
+    $itemRows = $Rows
+    if (Test-SmartM365ShareGateReportField -Row $Rows[0] -Field 'SourceItemId' -Aliases $reportAliases) {
+        $matched = @($Rows | Where-Object { (Get-SmartM365ShareGateReportValue -Row $_ -Field 'SourceItemId' -Aliases $reportAliases) -eq [string]$SourceItemId })
+        if ($matched.Count) { $itemRows = $matched }
+    }
+    $values = @($itemRows | ForEach-Object { Get-SmartM365ShareGateReportValue -Row $_ -Field 'Status' -Aliases $reportAliases } | Where-Object { $_ })
+    $groups = @($values | Group-Object | Sort-Object Name)
+    $result = if ($groups.Count) { ($groups | ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }) -join '; ' } else { 'Result column unavailable' }
+    $hasError = @($values | Where-Object { $_ -match '(?i)^(error|failed|failure|erreur|échec)$' }).Count -gt 0
+    if (-not $values.Count) {
+        $hasError = @($itemRows | Where-Object { Get-SmartM365ShareGateReportValue -Row $_ -Field 'Errors' -Aliases $reportAliases }).Count -gt 0
+    }
+    $paths = @($itemRows | ForEach-Object { Get-SmartM365ShareGateReportValue -Row $_ -Field 'DestinationPath' -Aliases $reportAliases } | Where-Object { $_ } | Select-Object -Unique)
+    $ids = @($itemRows | ForEach-Object { Get-SmartM365ShareGateReportValue -Row $_ -Field 'DestinationItemId' -Aliases $reportAliases } | Where-Object { $_ } | Select-Object -Unique)
+    return [pscustomobject]@{
+        Result=$result
+        HasError=$hasError
+        DestinationPath=$(if ($paths.Count -eq 1) { $paths[0] } else { '' })
+        DestinationItemId=$(if ($ids.Count -eq 1) { $ids[0] } else { '' })
+    }
+}
+function Test-ExpectedDestinationUrl {
+    param([string]$Candidate, [string]$SiteUrl)
+    $uri = $null
+    if (-not [uri]::TryCreate($Candidate, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') { return $false }
+    $site = [uri]$SiteUrl
+    return ($uri.Host -eq $site.Host -and $uri.AbsolutePath.StartsWith($site.AbsolutePath.TrimEnd('/') + '/', [StringComparison]::OrdinalIgnoreCase))
+}
+function Resolve-DestinationItemUrl {
+    param($DestinationList, [string]$SiteUrl, [string]$DestinationPath, [string]$DestinationItemId, [string]$PathEvidence)
+    $relativePath = $DestinationPath.Trim().TrimStart('/')
+    if ($relativePath -and (Get-Command -Name Get-File -Module ShareGate -ErrorAction SilentlyContinue)) {
+        try {
+            $files = @(ShareGate\Get-File -List $DestinationList -Path $relativePath -ErrorAction Stop)
+            if ($files.Count -eq 1 -and $files[0].PSObject.Properties['Address']) {
+                $address = [string]$files[0].Address
+                if (Test-ExpectedDestinationUrl -Candidate $address -SiteUrl $SiteUrl) {
+                    return [pscustomobject]@{ Url=$address; Evidence='Verified by ShareGate Get-File' }
+                }
+            }
+        }
+        catch { Write-PilotLog ('Destination Get-File lookup failed: ' + $_.Exception.Message) | Out-Null }
+    }
+    $numericId = 0
+    if ([int]::TryParse($DestinationItemId, [ref]$numericId) -and $numericId -gt 0 -and
+        (Get-Command -Name Get-ListItem -Module ShareGate -ErrorAction SilentlyContinue)) {
+        try {
+            $items = @(ShareGate\Get-ListItem -List $DestinationList -Id $numericId -ErrorAction Stop)
+            if ($items.Count -eq 1 -and $items[0].PSObject.Properties['Address']) {
+                $address = [string]$items[0].Address
+                if (Test-ExpectedDestinationUrl -Candidate $address -SiteUrl $SiteUrl) {
+                    return [pscustomobject]@{ Url=$address; Evidence='Verified by ShareGate Get-ListItem' }
+                }
+            }
+        }
+        catch { Write-PilotLog ('Destination Get-ListItem lookup failed: ' + $_.Exception.Message) | Out-Null }
+    }
+    if ($relativePath -and $DestinationList.PSObject.Properties['RootFolder']) {
+        $root = [string]$DestinationList.RootFolder
+        if ($root) {
+            try {
+                $site = [uri]$SiteUrl
+                if ($root -match '^https://') { $base = $root.TrimEnd('/') }
+                elseif ($root.StartsWith('/')) { $base = $site.GetLeftPart([UriPartial]::Authority) + $root.TrimEnd('/') }
+                else { $base = $SiteUrl.TrimEnd('/') + '/' + $root.Trim('/') }
+                $encoded = (($relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString([uri]::UnescapeDataString($_)) }) -join '/')
+                $candidate = ([uri]($base + '/' + $encoded)).AbsoluteUri
+                if (Test-ExpectedDestinationUrl -Candidate $candidate -SiteUrl $SiteUrl) {
+                    return [pscustomobject]@{ Url=$candidate; Evidence=('Inferred from ' + $PathEvidence + ' and destination RootFolder; verify in SPO') }
+                }
+            }
+            catch { Write-PilotLog ('Destination URL inference failed: ' + $_.Exception.Message) | Out-Null }
+        }
+    }
+    return [pscustomobject]@{ Url=''; Evidence='Item URL unavailable; use destination site and report' }
+}
+function Write-PilotSummary {
+    foreach ($item in $results) {
+        Write-PilotLog ('SUMMARY ID={0}; ShareGate={1}; Status={2}; Export={3}; SPO item={4}; URL evidence={5}; Destination site={6}' -f
+            $item.SourceItemId, $item.ShareGateResult, $item.Status,
+            $(if ($item.ReportPath) { $item.ReportPath } else { '(none)' }),
+            $(if ($item.DestinationItemUrl) { $item.DestinationItemUrl } else { '(unavailable)' }),
+            $item.DestinationItemUrlEvidence, $item.DestinationUrl)
+    }
+}
 
 try {
     Write-PilotLog ('Actor={0}\{1}; Machine={2}; RealCopy=True; Session={3}; AnalysisSHA256={4}; WitnessSHA256={5}; FarmTimeZone={6}; Maintenance=23:45-00:15' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysisHash, $selectionHash, $farmTimeZone.Id)
     $plan = @($selection | ForEach-Object { [pscustomobject]@{ Role=$_.Role; ItemKey=$_.Row.ItemKey; SourceUrl=$_.Row.SourceUrl; SourceList=$_.Row.SourceList; SourceItemId=$_.Row.SourceItemId; DestinationUrl=$_.Row.DestinationUrl; DestinationList=$_.Row.DestinationList } })
     Export-AtomicCsv -Path (Join-Path $output 'Pilot-Plan.csv') -Rows $plan -Columns @('Role','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList')
-    Export-AtomicCsv -Path $resultPath -Rows @() -Columns $resultColumns
+    Export-AtomicCsv -Path $resultPath -Rows $results.ToArray() -Columns $resultColumns
     $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
     if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
@@ -230,6 +326,11 @@ try {
         $copySession = ''
         $reportRows = 0
         $status = 'Failed'
+        $shareGateResult = 'Copy not completed'
+        $destinationPath = ''
+        $destinationItemId = ''
+        $itemUrl = ''
+        $urlEvidence = 'Unavailable'
         $errorText = ''
         try {
             $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmTimeZone -Phase ('item {0}/5 connection' -f ($index + 1))
@@ -244,16 +345,45 @@ try {
                 Set-Content -LiteralPath $objectPath -Encoding UTF8
             ShareGate\Export-Report -CopyResult $copyResult -Path $reportPath -ErrorAction Stop | Out-Null
             if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Export-Report did not create a CSV.' }
-            $reportRows = @(Import-Csv -LiteralPath $reportPath -Encoding UTF8).Count
-            $status = 'Completed - review report'
+            $exportedRows = @(Import-Csv -LiteralPath $reportPath -Encoding UTF8)
+            $reportRows = $exportedRows.Count
+            $review = Get-ShareGateReportReview -Rows $exportedRows -SourceItemId ([int]$row.SourceItemId)
+            $shareGateResult = $review.Result
+            $destinationPath = $review.DestinationPath
+            $destinationItemId = $review.DestinationItemId
+            $pathEvidence = 'current ShareGate export'
+            if (-not $destinationPath -and $row.PSObject.Properties['Raw: Destination path']) {
+                $destinationPath = [string]$row.'Raw: Destination path'
+                $pathEvidence = 'prior ShareGate report'
+            }
+            $url = Resolve-DestinationItemUrl -DestinationList $destinationList -SiteUrl $row.DestinationUrl -DestinationPath $destinationPath -DestinationItemId $destinationItemId -PathEvidence $pathEvidence
+            $itemUrl = $url.Url
+            $urlEvidence = $url.Evidence
+            $status = if ($review.HasError) { 'ShareGate error - stopped' } else { 'Completed - review report' }
+            if ($review.HasError) { $errorText = 'The ShareGate export contains an Error result; pilot stopped before the next item.' }
         }
         catch {
             $errorText = $_.Exception.Message
             $status = 'Failed - stopped'
         }
-        $results.Add([pscustomobject]@{ Role=$entry.Role; SessionId=$SessionId; ItemKey=$row.ItemKey; SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; SourceItemId=$row.SourceItemId; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; TaskName=$taskName; CopySessionId=$copySession; Status=$status; ReportRows=$reportRows; ReportPath=$(if (Test-Path -LiteralPath $reportPath -PathType Leaf) { $reportPath } else { '' }); CopyResultPath=$(if (Test-Path -LiteralPath $objectPath -PathType Leaf) { $objectPath } else { '' }); Error=$errorText })
+        $result = $results[$index]
+        $result.TaskName = $taskName
+        $result.CopySessionId = $copySession
+        $result.Status = $status
+        $result.ShareGateResult = $shareGateResult
+        $result.ReportRows = $reportRows
+        $result.ReportPath = if (Test-Path -LiteralPath $reportPath -PathType Leaf) { $reportPath } else { '' }
+        $result.CopyResultPath = if (Test-Path -LiteralPath $objectPath -PathType Leaf) { $objectPath } else { '' }
+        $result.DestinationPath = $destinationPath
+        $result.DestinationItemId = $destinationItemId
+        $result.DestinationItemUrl = $itemUrl
+        $result.DestinationItemUrlEvidence = $urlEvidence
+        $result.Error = $errorText
         Export-AtomicCsv -Path $resultPath -Rows $results.ToArray() -Columns $resultColumns
-        Write-PilotLog ('Finished item {0}/5: ID={1}; status={2}; copySession={3}; reportRows={4}; error={5}' -f ($index + 1), $row.SourceItemId, $status, $copySession, $reportRows, $errorText)
+        Write-PilotLog ('Finished item {0}/5: ID={1}; ShareGate={2}; status={3}; copySession={4}; reportRows={5}; export={6}; SPO item={7}; URL evidence={8}; error={9}' -f
+            ($index + 1), $row.SourceItemId, $shareGateResult, $status, $copySession, $reportRows,
+            $(if ($result.ReportPath) { $result.ReportPath } else { '(none)' }),
+            $(if ($itemUrl) { $itemUrl } else { '(unavailable)' }), $urlEvidence, $errorText)
         if ($errorText) { throw "Pilot stopped after item $($index + 1): $errorText" }
     }
     Write-PilotLog ('Completed: 5 item-scoped real Copy-Content calls; results={0}' -f $resultPath)
@@ -262,12 +392,15 @@ catch {
     Write-PilotLog ('Pilot failed: ' + $_.Exception.Message)
     throw
 }
+finally {
+    if (Test-Path -LiteralPath $logPath -PathType Leaf) { Write-PilotSummary }
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDc+kxbWybUI1yp
-# DkE1TU8igrObkzO0FMpTqEXtRxRvyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCD19XhWfytW7ii
+# ySyXLipNDJ1LcAJiPCpVaIYb7aLwsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -400,31 +533,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHn8n5kX+6Vk67XBwm5sQWO2/hrGjlRrrNWl0IFfILsRMA0GCSqG
-# SIb3DQEBAQUABIIBgGpE4b2Z3PdD7vJdVyVg66c4Eyn0nXeuPFWr6eCsQEbhi4Ef
-# EMc793XNcwT6zYQFP5xwKQMKATqFIS/N3H5Q7ZpqcJHV4laEQx/6Xpa2kDOcvlbz
-# W0a4nStxXq1OB2JOMu/hJvW7fhSJzhCZ2DZTGO23sf1H+FPGBxogI5sX9XM1jSMb
-# zRlQk993RSKdv8PvfYQI1pf37E3x6dkBNixDJJsB7a3TbCXxIlQPTdrXVCh0fAh/
-# LeQO6rNAjfJnfuZJ8PYGIEt3NOi23twAucDK3sGHkblREIidTR/OUkubcKMQStuO
-# AEcTm7xVpPK5pSCz1rofsLyHasZT8b4LwLBomHADGpHtgEyBOReIXPgjahP89sf2
-# Vxzswb4gfWaB08CXcBE2sLyyRg0ibP6ShIfdRYV+swCDhRf+B0tjnJKbzbwScnZa
-# G6VrviBcg4xkogNK+3fmOzLfd0uWMPHtJXjYF7ifhrBIJFi6OXyUc2wsPTx62Cpz
-# WKF5SzgxMm//T1xHfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHv0X2ejqUbEyrCL//vlsRT5E3xau9R2RShq0VgfNQWWMA0GCSqG
+# SIb3DQEBAQUABIIBgJVLfD7hMSQRPNMBeCDZ1WASR9s6BgaygZ0mtPcyOsoO0Mfb
+# iw+UhrvCHnHB/E4OOVRbL2RVAtWKhlFnXBDNC49+ZqdNCaKCl8l3UeYJsaGcEpwu
+# Q7t656lPg/thz8BPH0LWhlqklqdhEO007JrhDX2qNbanb+0PLALDx3kMzshGj785
+# Rii5vDYz7m7sGZhayxLNdzV14QNNMhiT59zknoq/yfC3/kPFtrfF9s5D20FPYyQH
+# kPWJq9k3X4rRLuAoqeqDBWT9z+lb442a1ZGTT6t27HB7hOPIMb10o2ur6KOJaOke
+# rnDT29PXQO7QSLoHfQGTk2T4a/EciV8r31YikjFqSY8mYZ9rMGYg/oYSoI7bAfHT
+# iwQFjeD0v8pQByoXgVW4RjBB8nfkk/4J7hJdUQ12vIdNcqMMy+tvOeEqfutV4Ixc
+# dFqe3PUnNjBpZE8lZgeTBfcnQ13hCjz+fgxIvswBMRim86+AJCQGAYd5u7pbi2gg
+# LWW6T/40THm6RypsfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMTE2
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBNvPY1EHP6fVoa+89Zciv5piSJg24oRxjVi2to
-# 1C2hyzANBgkqhkiG9w0BAQEFAASCAgBMSWq5e236e2Gl102t+Y8sZy0bnRGZzyVP
-# PwbtKMCf9Kgmnw8fdBdBcBngrrUtcTFMAs4xwK7B6g7scCmOPC81CwoLaGBiHBLp
-# X9LmNhgZWczub+Ls6U6clGthcWe9+ncAId1LmVcvv55ugE8cW386IqHDqQLkP9SQ
-# WIJibQV6tZz7NzL9G8Ilb7Tg5SQVCp9jyZx9D0TSugJfpjDwdYvRekmWc5N8vAY8
-# o5S9b+YOogVSGGAdJA/4+cehtDBJxGDt9aYkzzzt8/4GLX+fiMZgdEFPWb6A1vdf
-# fnuylUzgaWDslQXrhc3Xff1LCqrBWR7pHOB0qBoNO2o4aRejEL1TPUSsJqnShwQR
-# ozUTwI0LHkHhYV/NpjG+dUrhaXAmAJ3Nz27V8nA8tpiPGYLlaX9buqy20ZjBtw3x
-# FI+PIcseVhovLLrocLjdUXnOHgNbhvqK6dUIxZnDj0le4rEKsM+BnienJyFh57UN
-# d+o0VMHsnCPLpNY6dUxH3FT2cYgL/6r3Yf5nyjc1q1woI7PW51SJo6uiRRFR9+D6
-# Ov6VaxgAdQARQzGJQF5SLN5xbvlcmWslzrFrYCtf+TdjIXIR9VM+WSVT/jHXbz9n
-# KXlxfUSuobxu20SDKzYC0kKT+XwoCfVsTXiO2fJ6tqo+YecpeVd4V4PsKWcE8e80
-# O/2m3P8L4g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMTUy
+# MDJaMC8GCSqGSIb3DQEJBDEiBCABJmsJO21+dGxUswWI/x+q0/U8moEhOrxLGJSm
+# SvEMZTANBgkqhkiG9w0BAQEFAASCAgBmRYBp+KmNpUW1nu7kLvWYKfH5ShSOErJl
+# trEZQwZ/e1OM/vZXk1lmsK+TV6hbb1XwJMkjIKrFo8D44Q6iW6CiGnC3BVZj4zcy
+# ID0j3BlqSd701XiSfRPjEnhBQnEUERdWEJx8bS61f+ZGDmJWs2yIHUU8HtaidPbQ
+# iLLgvgQxawYdz4dKinQbActD6u/xiCRekm2uO5fipZsX4QTJWJBcUcGGmCxikG11
+# vWbouI2ndPRzlulOnegMvGungIkC3oTYSDuKWZ8KcefpA6NFakIlD4rvd9IYxH91
+# mz08UGbCZaajK3B6Q21xXl6VwBJJtFqv8asL1Oezoo7I0renXIq1reDqM/JwqcVl
+# jH4Oz5wSWt2/O7oIA5daOlrDi2zbHaCG/P5WHtIlEJialSkQ7/+iRoOMfbBJN/+k
+# r33bE730rC4gbqqRHPeF4cfvkGaCWMGu3gwLJPBEvjxOLG85m9haW0VmkDJ6pzFq
+# mSa9seuaYeNMBHQvn9x/sC/msI59kme8HzGgvFWQ4BOpfCDFYddGQXkEWUfH53np
+# LPcyxwi7k8Y10HbAbEvvndfOTHexIXa7Fafjo9UVXdE5FM0aeer7uNoKxge3ywN8
+# jhgZHnHJoqKemB9UcZF05Y89yHieuW0Uj9Vy0GRwEkF3eVmMI+noJlJBsnZDYg4G
+# /qygGNWwZg==
 # SIG # End signature block

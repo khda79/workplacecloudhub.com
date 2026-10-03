@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline contract test for the approval-gated five-item ShareGate pilot.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -15,6 +15,7 @@ $scratch = Join-Path $testsRoot ('.pilot-test-' + [guid]::NewGuid().ToString('N'
 if (-not $scratch.StartsWith($testsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test path.' }
 $oldModulePath = $env:PSModulePath
 $oldCalls = $env:SMARTM365_PILOT_TEST_CALLS
+$oldErrorId = $env:SMARTM365_PILOT_TEST_ERROR_ID
 
 try {
     . (Join-Path $testsRoot '..\Scripts\Diagnostics\SmartM365-SharePointMigration-FarmMaintenance.ps1')
@@ -37,14 +38,16 @@ try {
     $reports = Join-Path $witness 'Reports'
     New-Item -ItemType Directory -Path $moduleDir,$analysis,$reports -Force | Out-Null
     @'
-@{ RootModule='ShareGate.psm1'; ModuleVersion='99.0.0'; GUID='2b63af52-c537-4e71-875e-fdf16ec46924'; FunctionsToExport=@('Connect-Site','Get-List','Copy-Content','New-CopySettings','Export-Report') }
+@{ RootModule='ShareGate.psm1'; ModuleVersion='99.0.0'; GUID='2b63af52-c537-4e71-875e-fdf16ec46924'; FunctionsToExport=@('Connect-Site','Get-List','Get-File','Get-ListItem','Copy-Content','New-CopySettings','Export-Report') }
 '@ | Set-Content -LiteralPath (Join-Path $moduleDir 'ShareGate.psd1') -Encoding UTF8
     @'
 function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser) if ($Url -match 'target' -and -not $Browser) { throw 'Destination Browser missing' }; if ($Url -match 'source' -and $Browser) { throw 'Source must use current Windows user' }; [pscustomobject]@{ Url=$Url } }
-function Get-List { [CmdletBinding()] param($Site,[string[]]$Name) [pscustomobject]@{ Title=$Name[0]; Site=$Site } }
+function Get-List { [CmdletBinding()] param($Site,[string[]]$Name) [pscustomobject]@{ Title=$Name[0]; Site=$Site; RootFolder=('/sites/a/' + $Name[0]) } }
+function Get-File { [CmdletBinding()] param($List,[string]$Path) [pscustomobject]@{ Address=($List.Site.Url.TrimEnd('/') + '/' + $List.Title + '/' + $Path) } }
+function Get-ListItem { [CmdletBinding()] param($List,[int]$Id) [pscustomobject]@{ Address=($List.Site.Url.TrimEnd('/') + '/' + $List.Title + '/item-' + $Id) } }
 function New-CopySettings { [CmdletBinding()] param([string]$OnContentItemExists) if ($OnContentItemExists -ne 'IncrementalUpdate') { throw 'IncrementalUpdate missing' }; [pscustomobject]@{ OnContentItemExists=$OnContentItemExists } }
 function Copy-Content { [CmdletBinding()] param($SourceList,$DestinationList,[int[]]$SourceItemId,$CopySettings,[string]$TaskName) if ($SourceItemId.Count -ne 1 -or $CopySettings.OnContentItemExists -ne 'IncrementalUpdate' -or $TaskName -notmatch '^SmartM365 401 pilot 260930-6 ') { throw 'Pilot copy scope or settings were changed' }; Add-Content -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS -Value ($SourceItemId[0].ToString() + '|' + $TaskName); [pscustomobject]@{ Id=('261003-'+$SourceItemId[0]); SourceId=$SourceItemId[0]; Marker='synthetic' } }
-function Export-Report { [CmdletBinding()] param($CopyResult,[string]$Path) [pscustomobject]@{ Result='Success'; 'Source ID'=$CopyResult.SourceId; Error='' } | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 }
+function Export-Report { [CmdletBinding()] param($CopyResult,[string]$Path) $id=$CopyResult.SourceId; $result=if ($env:SMARTM365_PILOT_TEST_ERROR_ID -eq [string]$id) { 'Error' } else { 'Success' }; $itemPath=if ($id -eq 1) { 'Home.aspx' } else { 'image-' + $id + '.jpg' }; [pscustomobject]@{ Result=$result; 'Source ID'=$id; 'Destination path'=$itemPath; 'Destination ID'=(1000 + $id); 'Destination site address'='https://target.example/sites/a'; Error=$(if ($result -eq 'Error') { 'Synthetic item failure' } else { '' }) } | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 }
 Export-ModuleMember -Function *
 '@ | Set-Content -LiteralPath (Join-Path $moduleDir 'ShareGate.psm1') -Encoding UTF8
 
@@ -105,13 +108,32 @@ Export-ModuleMember -Function *
     if ($output.Count -ne 1) { throw 'Pilot output folder was not created exactly once.' }
     $results = @(Import-Csv -LiteralPath (Join-Path $output[0].FullName 'Pilot-Results.csv'))
     if ($results.Count -ne 5 -or @($results | Where-Object Status -NE 'Completed - review report').Count) { throw 'Pilot result CSV did not record all five calls.' }
+    if (@($results | Where-Object { $_.ShareGateResult -ne 'Success=1' -or $_.DestinationItemUrlEvidence -ne 'Verified by ShareGate Get-File' -or -not (Test-Path -LiteralPath $_.ReportPath -PathType Leaf) }).Count) { throw 'Pilot did not capture the ShareGate result, export, and verified destination URL.' }
+    foreach ($result in $results) {
+        $suffix = if ($result.SourceItemId -eq '1') { 'Pages/Home.aspx' } else { 'Photos/image-' + $result.SourceItemId + '.jpg' }
+        if ($result.DestinationItemUrl -ne ($target + '/' + $suffix)) { throw ('Wrong destination URL for ID ' + $result.SourceItemId) }
+    }
+    $summary = @(Get-Content -LiteralPath (Join-Path $output[0].FullName 'Pilot.log') | Where-Object { $_ -match 'SUMMARY ID=' })
+    if ($summary.Count -ne 5 -or @($summary | Where-Object { $_ -notmatch 'ShareGate=Success=1;.*Export=.*Pilot-\d\d.csv; SPO item=https://target.example/sites/a/' }).Count) { throw 'Pilot console summary is incomplete.' }
     if (@(Get-ChildItem -LiteralPath (Join-Path $output[0].FullName 'Reports') -Filter '*.csv').Count -ne 5) { throw 'Pilot reports are incomplete.' }
+
+    Remove-Item -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS -Force
+    $env:SMARTM365_PILOT_TEST_ERROR_ID = '185'
+    try { & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -WitnessDirectory $witness -SessionId '260930-6' -FarmTimeZoneId $testZone.Id -ExpectedAnalysisHash $hash -ExpectedWitnessHash $witnessHash -Run -ConfirmPilot | Out-Null; throw 'Expected ShareGate error stop.' }
+    catch { if ($_.Exception.Message -notmatch 'Pilot stopped after item 2') { throw } }
+    $errorCalls = @(Get-Content -LiteralPath $env:SMARTM365_PILOT_TEST_CALLS)
+    if ($errorCalls.Count -ne 2) { throw 'Pilot continued copying after a ShareGate Error result.' }
+    $errorOutput = @(Get-ChildItem -LiteralPath (Join-Path $project 'ShareGate\Diagnostics') -Directory -Filter 'Pilot-*' | Sort-Object Name | Select-Object -Last 1)
+    $errorResults = @(Import-Csv -LiteralPath (Join-Path $errorOutput[0].FullName 'Pilot-Results.csv'))
+    if ($errorResults.Count -ne 5 -or $errorResults[1].ShareGateResult -ne 'Error=1' -or $errorResults[1].Status -ne 'ShareGate error - stopped' -or @($errorResults | Select-Object -Skip 2 | Where-Object Status -NE 'Not attempted').Count) { throw 'Pilot did not preserve all item states after an error.' }
+    if (@(Get-Content -LiteralPath (Join-Path $errorOutput[0].FullName 'Pilot.log') | Where-Object { $_ -match 'SUMMARY ID=' }).Count -ne 5) { throw 'Failed pilot lacks a five-item summary.' }
     Write-Output 'ShareGate pilot offline contract test passed.'
 }
 finally {
     Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
     $env:PSModulePath = $oldModulePath
     $env:SMARTM365_PILOT_TEST_CALLS = $oldCalls
+    $env:SMARTM365_PILOT_TEST_ERROR_ID = $oldErrorId
     if ((Test-Path -LiteralPath $scratch) -and $scratch.StartsWith($testsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $scratch -Recurse -Force
     }
@@ -120,8 +142,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVcQllNjSj6N5C
-# rptR57TjbLZ+zv2hHEsGRwLJkLxE/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFKvYYT7UcJePj
+# 6kgigHMBGnkZK5GsZvRzr1ERsAUzIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -254,31 +276,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPn4v7V5uwH8FubS4Frn7sWeBbILOirndHNxvFMTY0DKMA0GCSqG
-# SIb3DQEBAQUABIIBgJGMzjeBysb2BtJQnM+7Np7A/OVqQigkS+zq/IMsPt7t6OZX
-# HgDrE7qi6f+s9834z3/UFPiEj4ruHhl3CYQmROKWYzd7iOVldwmkKM+av3jP7BRM
-# UikwL7bMF4hNlaMGeMFuVbvw/KgWKaB4VwIZRt2WZwuYtcUm3UXmPug9c/RwPywy
-# tkHVwKsYmcL3EvrHclHwOG5AQv9lzV4sK79s9SC+ATNOWd+lJ1quiYCoNubWXO/E
-# IyNpCFTlrwjWZ/GOLOTFvjU21jwpEsaqvEfrqvxrn89OK0lyjKLC8/ti140ZpNli
-# BFNjzyYGkwX825oavRrc7ZFJvOBYbki9iaNpTbGtcnPt7c+g92fCsetNaBGfmjsO
-# kR+1z19WUg58T2g0oFD/JtJVUoK4ONqkhZnkyOiAsHOq6uFzjwQ9SDtEK41YCl9I
-# Z2XBDJLh6EV/oSIMcM8NH1wqlDRbSyChTfNfLZ4Cj/sb0o8HfGb1/pH1QBMVlq8G
-# J3QgCXi7WSGwrnHw46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB4UiJ2/dVioWn6FrCYmBTQZmLAgVbbw6ppPOp4Tz9IVMA0GCSqG
+# SIb3DQEBAQUABIIBgEcUr/syKt0fnRWznxcBm8CTVR0YgLDM9MgtjSm2d+3deaRv
+# JilebyLVzjSnL3yCoacdGQma+L6/6p7Efu1hW+0dUt35vaF7uVNNVqh3E19J3FHm
+# CI00/JBG0h3QCYvESVrRfrFZSXBlucjW6MdKJehx1oCCgDh0DirYoOqi8o5l/7lG
+# 8yqhlf96XGm03GKsfVaFT8Y7tqXkypF5pnNNldk8px0r/dbqI1AQJ2EWIwXyNe1E
+# rYMpPZMkM9CTFwpxVPdVQQ4QNXxeBNSokZ8G6X0WKBepY9OO2a3Xs3eeoIaT+X68
+# ism8ORVIcqKpcjVITkayNGoOWdf94JjcRZ1Kf6LX+t81FtJ/yQhqncIAPz+6vknG
+# 9aWf/cCBTLNsUQWqIps0rxqCD2tZRSK27VhPaWN9VFdPP2gosRchpJklK+862M7v
+# 3ix+fsnQ3kNyG6Xp4lSJqKs3j8ChiHodcCeCJY3yVAacuqExqf92/c4YknGMevLe
+# XGaMGII58feP2jmqTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMTE2
-# NTRaMC8GCSqGSIb3DQEJBDEiBCCjLt2YI72RQLwFcO6ZYbaqNz6sY5EQBHFzrASa
-# ygBrKzANBgkqhkiG9w0BAQEFAASCAgAYxLpDe/RCpbkk/iDOdClh1KB2EG0FKS2R
-# 4Hex847aZYC0Im4ejKJgGkwXMcJk5haq0kXNTm5xHEI602xxRnTnYBjxobtVIQng
-# +9XAPr/Xzma5sWjtPYJFn63sfJqg7fXDntWyn4IM910zFgoxUJc1IwP7PSHydjgV
-# 4AoQyFkWe9syhfukJvvXteoi9k8JxOk2UIBZWYwTRDPN8teznVYVYQPvm3UqyflZ
-# s39QSZG8HUdzTWZlH59HUxTzElXINL7lFxNqprvNx90fInNs/iLNvN3FOnD3HZ7m
-# KX3eiIdQRUde0Qn88OFvuUs/rXoNeheiFuxwnsAuUi9x4jp1MdT1wb4oeaC1By7K
-# HmOTnJy8tmjWKBZsmzRtxt6dXvvA8B/cgwEmTSCsDJN8HI2dJ6vWOk3XPzrKVNTH
-# ZUcDiLmhQjelfu15zcoN94SopmL/BEkT4EqjMR+sWTFyl8/Rk3+vgaraTe72Il2/
-# SEIXZ7PZmnPfi8rvruL3qynTqZE9ZK6n94l/uU9FNfhvI37kyA9nCnwyN0kFVfGn
-# LxlfjFljYw4NAlRanJLDvWHNRXJUM8zlsKUAWdJuF8ClfJ4CoGT6EBWxMDD4fLGB
-# XuI9cxhX0OfesLLif6S8zfyjwJfN4kdrjVCiRbqqAhjXd24DDqZalRuVr6ZOdsXJ
-# qIo2V1mBtA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMTUy
+# MDJaMC8GCSqGSIb3DQEJBDEiBCD8/L97AdEdzuVNrcl00dCKWF5My9Zvk7hi3Guv
+# 1Z4MfjANBgkqhkiG9w0BAQEFAASCAgBxQCI9dBpRajCoexhmB6E2nvQrPv7fH05i
+# n9shybk5qT9Oi9fc1UfgjIHZPU/AWvP+uFolZYupYu70E8GgWhYT3X+envBSlp3f
+# USweL8yO8tCwYt1A8RRKUZLEH8/1svc4ADgvUekhMFZQ2v8ocE6RpVvPOoKjWD6P
+# l2P60dusERx/263CcNy2ureYooijI0ZijLmMxsVqVNh2WJRIkN2obUSaysGPIEn2
+# x6iNXV5vLOIMvemlS/6qWvzBPjzrBnaQA3VrB0xUoaJJL5o0saANWqCyaQt55ghP
+# qEc8+3NVskY5ZRZen3vcEc/TIbms2r1+aQj2eY4iSCV4BItC/vKSamN67/AYy5lI
+# k34U750qh1XlzIXol4Xb7ziWMcyWKVARMp2dfLOVfyG3n8xv5VezuBZU3oKigmPw
+# ebiDJlGe91wyJIW0Y2bL4pBT2nIikwCMcKsw2iNUJ+cygPgp+fta/oymMWUu3h26
+# r3ky9xuzHUMq1iwfe4pHfjBf0A4yJf/osSdRFlYCvgbdgdS3ebCkqJaakosmhOg2
+# KQimdCybjOaQColo01TluaYs8Tv3azsHbdUz80nI43+KzMaSAu3hzeKRSyfFQlpZ
+# kuv3GKM1xTyTI2hL5rkV6kSrQq8E445Sl/UfbKEiG9nZrOVEa2hePSu7B8dWNZRt
+# A8P+DcRj5g==
 # SIG # End signature block
