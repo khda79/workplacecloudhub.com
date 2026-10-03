@@ -64,6 +64,11 @@ usage-report scope (OneDrive inclusion is not a claim of full site discovery).
 Read-only and MAXITEMS runs do not create canonical completion evidence.
 Optional workload enrichment is not silently reclassified as full evidence.
 
+DiscoveredApps 1.30 provides the explicit non-destructive `-FreshDeviceDetails`
+option for this acquisition gate. The inactive integration specification and
+remaining cadence/deployment approvals are described in `CMDB-INTEGRATION.md`.
+The active orchestrator manifest/template is not changed by that specification.
+
 Every required filename must have its own actual receipt; the example is not a
 complete proof. `Rows` counts parsed logical CSV records, not physical lines.
 Empty success still needs a complete header, scope and receipt. All required

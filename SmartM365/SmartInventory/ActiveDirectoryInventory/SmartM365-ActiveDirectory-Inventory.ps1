@@ -14,6 +14,7 @@
     - Discovers all domains in the forest or uses a subset passed via -TargetDomains
     - Exports detailed CSVs per domain in a "Not-CSV-Combined" folder
     - Combines all per-domain CSVs into global "AllDomains" CSVs
+    - Retains workstation accounts without DNSHostName and logs their count separately
     - Analyzes duplicate UserPrincipalNames, SMTP proxy addresses, and remote mailbox routing consistency across all domains
     - Uses the shared framework (SmartM365.Core / InitializeScriptEnvironment)
     - Logs to text + transcript
@@ -22,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.52
+1.53
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -681,7 +682,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.52"
+$ScriptVersion = "1.53"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -2555,12 +2556,15 @@ try {
 
             $ResolveNestedComputerGroups = $false
             [int64]$computerCount = 0
+            [int64]$computerWithoutDnsHostNameCount = 0
 
             Get-ADComputer -Filter $computerFilter -Server $currentDomainName -Properties SamAccountName, Name, DistinguishedName, Enabled, DNSHostName, OperatingSystem, operatingSystemHotfix, operatingSystemServicePack, operatingSystemVersion, LastLogonDate, LastLogonTimestamp, Description, IPv4Address, WhenCreated, WhenChanged, pwdLastSet, CanonicalName, MemberOf, primaryGroupID, ObjectGUID, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_.DNSHostName) } |
                 ForEach-Object {
                     [void]($computerCount++)
                     $computer = $_
+                    if ([string]::IsNullOrWhiteSpace([string]$computer.DNSHostName)) {
+                        [void]($computerWithoutDnsHostNameCount++)
+                    }
                     $computerGroupNames = Get-ComputerGroupNames -Computer $computer -Server $currentDomainName -DomainSid $domainSid -ResolveNestedGroups:$ResolveNestedComputerGroups -GroupNameByDNCache $GroupNameByDNCache -GroupParentsByDNCache $GroupParentsByDNCache -GroupNameBySIDCache $GroupNameBySIDCache
                     $computerGroupNameSet = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
                     foreach ($computerGroupName in @($computerGroupNames)) {
@@ -2659,7 +2663,7 @@ try {
                 } |
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $computerCount)
+            WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}; Without DNSHostName: {3}" -f $currentDomainName, $outputCsvFilePath, $computerCount, $computerWithoutDnsHostNameCount)
             Complete-SmartM365AdDomainCsvSchema -Path $outputCsvFilePath -Kind Computers
         }
         catch {
@@ -3715,8 +3719,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBV52dwwwsNkRnu
-# TFBlOXqMHymnGzdc/euG9QjD0daQwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPVFugpf6kBcPE
+# YdYpKsDnNv2x8/Kwg6hwoPme8A7qZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3849,31 +3853,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFIJT0RyPfBgjLh8NvjhZK5Y0ZBzwYraMWHDVtXKqwL2MA0GCSqG
-# SIb3DQEBAQUABIIBgE0lTLNMXiMwwjw0+Kj1MaEaBYCK98XSwZldHO9nbcQds/NJ
-# lXoKjLkQzrIgbhd3Ie6gqLT9fhf8rgC3LKSQsdGwXvV+wWK2RqbyBZxjKU7N9NaM
-# CUNvsgN8P36ymzylFgTZnVm2BCgq0B1J8B39WZt872CMD04osHVpGCVHaK7GM76G
-# CyDWYlymuMoqUEv7wxvPxJsXXw3FD08Mka/Kj3sVjqKPgN4LZgdCH+rBGzeDmLE+
-# xKE5CaC0ZXueIdOoI57tU5YVP6XbZlHqv5IcBKNim0XHZnC7k8clVZObHs97CImi
-# dNaSSdAebz/SoAi2WYIaU+NpMa5a6gWRY8cj8+HMw7dvsbAXTx653VYTZULr93bw
-# Rli8c7+kBlOgfvb3BvfJUNcyqOIKSHkerxhtFXmBVCVnE1y3lPYUtQgs2qJ4k7jX
-# t5oz8ChUBJUgRlUsNy7f7WcPYcuvgAGPeGHgCWu4NLfMB7NRn6e2uKSG8BmDJ8bL
-# OmaUHeJF6X8pHEnPuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN8ORjTN78aUFuvZk0NaMvgpJ5m0MBR3/f7FC9pKMh+tMA0GCSqG
+# SIb3DQEBAQUABIIBgGdxHcyAn0Did4/jImVep1hRuwLp3pdtXG4eN+/OUQ43y9g2
+# YhJ2VAP3jaZAATv6CCRjl/2bvRL9nfOm4gWV29S/vSfYO65HRyWN+4I21r48q5tb
+# qLp79CLmMKhO+Guz2o+RclsqhzUxvX43CeEY/Ax9Mn5wTfMXwQv9kLH90zZqOa9M
+# kz+8ChmxmEvri0Cl6K8ZZfhpQuurtOG9obUJik2EO8pQ1IUDygWkdBZ0DfavkIg6
+# I0HY6sn3K4LtUWPlRH2SBUioA3MSMTK0DrAG6iX2xPFVZD3rPQvIcJX6ZUFFYDbC
+# VPwgerdNaKzbqDsKpwHtXsok3b64kI0sAfnmXOQBmE0Qtv+9WVQAeECiGON0t9+m
+# IDPKN3jkdpSy3dgKxhylsbn237udHkuDxvyW3B+YSN0uftEJO8ZYGKxCrK+WhLv2
+# zamWm/nfabEW1BTMutULl/SszScoRq/mSO7t2dT82CROJbsFWlnDZLKxW0FgKsuF
+# tt63jH4mG+MynPJKcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
-# MzhaMC8GCSqGSIb3DQEJBDEiBCA8sv9qJUNSAaIw1U5lxBm810ELEp5OjJdQ9/+B
-# PdZyNjANBgkqhkiG9w0BAQEFAASCAgA+t0VLZQdR9r/bkOkevWdm03pk10KKWJcn
-# rmxvnt192aI/O60ePZyORr9dSG2wVqNoEfA1CU7XFcMYju7HwuzsTUrVxKpWbJhS
-# tfcV9C5ab2/wfcx5ARDBUOfLQ/K3pq6JhsuZ8eJY0eO+aPdXRjGg1S+iviBrtDnK
-# akUrOTqCgralflDOr8O+UGQmEujVJMeWwJArMZnWAnJN+UzTXOUhTLHjcwsQqB63
-# 4fYKoFJOGNjW2Bm+eNkCBTSnPRGN9GDg6KddAENI8ucuCYIqcqurgBGOJXkLO8GF
-# fXSLuAotJLYPbmWXal8P/FMqnFhNbi9tcSSOhhSbkMBRt+/Tpkxw6R93fSxIfAFX
-# k0piKtsgqtTLsuYRfMwUqXcY4gIng/A6dwJMT70ZoYrMX7yo5jV35Zr+nlQJJLV/
-# fBUxv5HsB++OvXGJWOe9G+yYSWC+aD8kWnlS94WwHsgdQdNykIrOTcyAs6IQpzKC
-# /pZPcfUSGfCtyHNMioIVkK7D9IRbx2OZ1C4H8d71As4pUa5V9Qg8msl9xUZxNXog
-# gFxCSgwfhoIgASZe4x0QRlxeesYXalX6KTPVCF410H1LM+Vgu5K+kxYq21KEWMvl
-# /oiKlRqadlpVe/7NPtik10zY7UVyJCh2LnwJD8OGBLiIIsKvZB2xVdDIUMr3rLyG
-# BJlakp+0ag==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMTAy
+# MjlaMC8GCSqGSIb3DQEJBDEiBCDq1gx6RsqBI8MwXRj14ubrdjFGmY/jlpBx5LgU
+# /DjovTANBgkqhkiG9w0BAQEFAASCAgANLh9OtUGFb9A2f5ZVg31hWP3Wk6wf9yaK
+# 5WcA2b6RQQ9JMUB68afLA+T5erhUrVzGCwRyiHucVPfNgL3lnTCwEbiq6aMnsZ5W
+# dydxg9vKevq20NnrgReBjcAAKqMY6cZvH9vNFS6lOVfei0dlpi4lA5xw2XSewcL/
+# ycIpgqmzUn56t8f2NO/LOKgAAiEllkLHXAcpDtnsnABQepmXyQqtuIu1/QuzT5m+
+# +r1n+6fWBhA2oW+1nlKC1t+strV/2jGV7HBkV/Opb07XDcVabtdmUYh5QGK7nWDy
+# OGQxJTSV3CDtxOpjWmjOpgJq7P69l0tdV24nYQSuZS8mTh9B6+FEDONzn2ruDqNX
+# VsMS73DwYF7U+KxwEAOJ1VDBIuoX12XxOQMW/wTwSX0J983ACwzgBdjrBmnXViUp
+# mAqYruq1rpVuo5n8IJ3nMSqlhAIOsEJ72GQLjkO/9XwCl+NGp1eh9kO/+Y3rwCzO
+# zzmVpwguUTiSILrJl3MYR+B45lQLWf2bpBBELE9NMvQ7pCAEY6IO3lVZvpb+tYns
+# anrlDC+TvUzCdc1xMKKq9Eg8TvcW1KseZ43bBMygwq9Jt8I6ZEgVft+2ESF/7n5z
+# eHF7cn/GoOvKqFQCYRwSzf1ds9dtCaditqNf1nikfABmY8eJGc5SU2+LL2k+AP+A
+# kJmMQusagQ==
 # SIG # End signature block

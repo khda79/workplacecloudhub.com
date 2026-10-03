@@ -457,6 +457,27 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         members=self.table('ADMembership');self.assertEqual(len(members),2)
         self.assertTrue(all(r['TenantUserKey'] and r['TenantADGroupKey'] and r['TenantADObjectKey'] for r in members))
 
+    def test_ad_computers_without_dns_remain_identifiable_and_countable(self):
+        self.seed_ad()
+        self.inputs['ad_computers']=[]
+        for index,dns in enumerate((None,'','   ','test.synthetic.invalid')):
+            native=dict(ObjectGUID=f'ad-c{index}',SID=f'S-1-5-21-1-2-3-{2000+index}',
+                DomainName='synthetic.invalid',DistinguishedName=f'CN=Computer{index},DC=synthetic,DC=invalid',
+                Name=f'Computer{index}',DNSHostName=dns,Enabled='false',OperatingSystem='')
+            self.inputs['ad_computers'].append(native)
+            self.inputs['ad_objects'].append(dict(ObjectGUID=native['ObjectGUID'],ObjectSID=native['SID'],
+                DistinguishedName=native['DistinguishedName'],ObjectClass='computer'))
+        self.write_inputs();self.prepare()
+        computers=self.table('ADComputerSource')
+        self.assertEqual(len(computers),4)
+        self.assertEqual(sum(not row['DNSHostName'] for row in computers),3)
+        self.assertEqual(len({row['TenantADComputerKey'] for row in computers}),4)
+        for row,native in zip(computers,self.inputs['ad_computers']):
+            self.assertEqual(row['ObjectGUID'],native['ObjectGUID'])
+            self.assertEqual(row['ObjectSID'],native['SID'])
+            self.assertEqual(row['Name'],native['Name'])
+            self.assertEqual(row['TenantDeviceKey'],'')
+
     def test_ad_duplicate_sid_does_not_fabricate_two_cloud_links(self):
         self.seed_ad();self.inputs['ad_users'].append(dict(self.inputs['ad_users'][0],ObjectGUID='duplicate'))
         self.write_inputs();self.prepare()

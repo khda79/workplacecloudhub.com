@@ -1,0 +1,78 @@
+{
+  "Version": "0.1.0",
+  "CandidateOnly": true,
+  "Description": "Review-only integration specification, not an executable jobs manifest or an automatic template merge.",
+  "ActivationRequires": [
+    "Explicit deployment approval",
+    "Verified effective raw source root and tenant identities",
+    "Validated SDK modules, Graph roles and hidden membership access",
+    "Python 3.10+ available to the resident orchestrator account",
+    "Fresh unrestricted Exchange local and RemoteMailbox acquisition",
+    "Schedule and timeouts qualified against actual application collection duration",
+    "All 17 producer receipts within the unchanged 48-hour acquisition gates"
+  ],
+  "JobArgumentAdditions": [
+    {
+      "Name": "Intune-DiscoveredApps-Inventory",
+      "Arguments": "-DeviceDetailMode All -FreshDeviceDetails",
+      "RejectConflictingArguments": ["-ResetResume", "-MaxApps", "-MaxItems", "-DeviceDetailMode"]
+    }
+  ],
+  "ProposedJobs": [
+    {
+      "Name": "M365-WorkplaceScope-Inventory",
+      "ScriptPath": "M365Inventory\\WorkplaceScope\\SmartM365-WorkplaceScope-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "PowerShellEdition": "PowerShell7",
+      "RequiredCapabilities": ["Graph", "SharedRuntime"],
+      "RequiredGraphAppRoles": ["Group.Read.All", "DeviceManagementConfiguration.Read.All"],
+      "ConditionalGraphAppRoles": ["Member.Read.Hidden"],
+      "ContinueOnError": false,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 0,
+      "ConcurrencyKey": "M365-WorkplaceScope-Inventory"
+    },
+    {
+      "Name": "CmdbEvidence-Prepare",
+      "ScriptPath": "PreparedEvidence\\SmartM365-CmdbEvidence-Prepare.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "PreparedEvidence",
+      "DependsOn": [
+        "M365-ActiveUsers-Inventory",
+        "AD-Inventory",
+        "M365-WorkplaceScope-Inventory",
+        "M365-EntraDevices-Inventory",
+        "Intune-Devices-Inventory",
+        "Intune-DiscoveredApps-Inventory",
+        "M365-Licences-Inventory",
+        "EXO-Mailboxes-Inventory",
+        "Exchange2016-Local-Mailboxes-Inventory",
+        "M365-SPO-Inventory",
+        "M365-Teams-Inventory",
+        "M365-VerifiedDomains-Inventory",
+        "Intune-WindowsAutopilot-Inventory",
+        "Intune-EndpointAnalytics-Inventory",
+        "Intune-Devices-UpgradeEligibility",
+        "Intune-AutopatchAlerts-Inventory",
+        "M365-Usage-Inventory"
+      ],
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "PowerShellEdition": "PowerShell7",
+      "RequiredCapabilities": ["SharedRuntime"],
+      "RequiredGraphAppRoles": [],
+      "ContinueOnError": false,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 0,
+      "ConcurrencyKey": "CmdbEvidence-Prepare",
+      "DependencyMode": "FreshSuccess",
+      "DependencyMaxAgeHours": 48
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-Offline native empty-export and fail-preserving CSV regression checks.
+Offline native CSV projection, empty-export and fail-preserving regression checks.
 .DESCRIPTION
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -122,6 +122,57 @@ try {
         $actual+=@(1..10 | ForEach-Object { 'IsMemberOfConfiguredGroup{0:D2}' -f $_ })
         $actual+='MatchedConfiguredGroups'
         Assert-True ((@(Get-SmartM365AdNativeColumns Computers) -join '|') -ceq ($actual -join '|')) 'Native configured-group schema drifted.'
+    }
+    Test-Case 'AD workstation projection retains and counts missing DNS without widening OS scope' {
+        foreach ($name in @('Get-ADStringValue','Get-DomainNameShort','Get-NormalizedDomainAndSam','Convert-GuidToImmutableId')) { Import-TestFunction $adAst $name }
+        $query=$adAst.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Get-ADComputer' -and $n.Extent.Text -match '-Filter \$computerFilter\b' },$true)
+        Assert-True ($null -ne $query) 'Native computer acquisition missing.'
+        $pipeline=$query.Parent
+        Assert-True (($pipeline.PipelineElements.GetCommandName() -join '|') -ceq 'Get-ADComputer|ForEach-Object|Add-SmartM365TenantKey|Export-Csv') 'Unexpected acquisition topology or a row-dropping filter.'
+        $filterAssignment=$adAst.Find({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$computerFilter' },$true)
+        $computerFilter=& ([scriptblock]::Create($filterAssignment.Right.Extent.Text))
+        $currentDomainName='synthetic.example'; $CurrentObjectType='Computers'; $domainSid=''
+        $DomainFriendlyNames=[pscustomobject]@{}
+        $GroupNameByDNCache=@{}; $GroupParentsByDNCache=@{}; $GroupNameBySIDCache=@{}
+        $ResolveNestedComputerGroups=$false; $ConfiguredComputerGroupNames=@(1..10 | ForEach-Object { '' })
+        $computerCount=0; $computerWithoutDnsHostNameCount=0
+        $dnsValues=@($null,'','   ','test-3.synthetic.example','server.synthetic.example','linux.synthetic.example')
+        $operatingSystems=@('','Windows 10','Windows 7','Windows 11','Windows Server 2022','Linux')
+        $syntheticComputers=@(for ($index=0; $index -lt $dnsValues.Count; $index++) {
+            $record=[ordered]@{}
+            foreach ($column in @(Get-SmartM365AdNativeColumns Computers)) { $record[$column]=$null }
+            foreach ($column in @('LastLogonTimestamp','pwdLastSet','MemberOf','primaryGroupID','ObjectSID')) { $record[$column]=$null }
+            $record.Name='test-'+$index; $record.SamAccountName=$record.Name+'$'
+            $record.DNSHostName=$dnsValues[$index]; $record.OperatingSystem=$operatingSystems[$index]
+            $record.ObjectGUID=[guid]('00000000-0000-0000-0000-{0:D12}' -f ($index+1))
+            $record.ObjectSID=[pscustomobject]@{ Value=('S-1-5-21-1-2-3-{0}' -f (1000+$index)) }
+            [pscustomobject]$record
+        })
+        function Get-ADComputer {
+            [CmdletBinding()]param([scriptblock]$Filter,[string]$Server,[string[]]$Properties)
+            $expected='(OperatingSystem -like "*Windows*" -and OperatingSystem -notlike "*Server*") -or (OperatingSystem -notlike "*")'
+            Assert-True (($Filter.ToString().Trim() -replace '\s+',' ') -ceq $expected) 'Workstation OS scope changed.'
+            # Translate AD attribute syntax and its absent-attribute LDAP presence test.
+            $mockText=$Filter.ToString().Replace('OperatingSystem','$_.OperatingSystem')
+            $mockText=$mockText.Replace('($_.OperatingSystem -notlike "*")','([string]::IsNullOrEmpty($_.OperatingSystem))')
+            $mockFilter=[scriptblock]::Create($mockText)
+            $syntheticComputers | Where-Object -FilterScript $mockFilter
+        }
+        function Get-ComputerGroupNames {
+            param($Computer,$Server,$DomainSid,$ResolveNestedGroups,$GroupNameByDNCache,$GroupParentsByDNCache,$GroupNameBySIDCache)
+            @()
+        }
+        # Execute the actual query/projector only; do not run a collector or publish tenant data.
+        $projection=(@($pipeline.PipelineElements | Select-Object -First 2 | ForEach-Object { $_.Extent.Text }) -join ' | ')
+        $observed=& ([scriptblock]::Create('$rows=@('+ $projection +'); [pscustomobject]@{ Rows=@($rows); Total=$computerCount; WithoutDns=$computerWithoutDnsHostNameCount }'))
+        Assert-True ($observed.Rows.Count -eq 4 -and $observed.Total -eq 4 -and $observed.WithoutDns -eq 3) ("Missing DNS rows were dropped or counted incorrectly: Rows={0}; Total={1}; WithoutDns={2}." -f $observed.Rows.Count,$observed.Total,$observed.WithoutDns)
+        for ($index=0; $index -lt 4; $index++) {
+            $row=$observed.Rows[$index]; $native=$syntheticComputers[$index]
+            Assert-True ($row.Name -ceq $native.Name -and $row.ObjectGUID -eq $native.ObjectGUID -and $row.SID -ceq $native.ObjectSID.Value) 'Native identity changed.'
+            Assert-True ($row.DNSHostName -ceq $native.DNSHostName) 'DNS evidence was fabricated or normalized.'
+            Assert-True ($row.ImmutableId_AD -ceq [Convert]::ToBase64String($native.ObjectGUID.ToByteArray())) 'GUID-based identity was lost.'
+            Assert-True ((@($row.PSObject.Properties.Name) -join '|') -ceq (@(Get-SmartM365AdNativeColumns Computers) -join '|')) 'Native schema changed.'
+        }
     }
     Test-Case 'Remote empty schema matches the actual native record projector' {
         $converter=$exchangeAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'ConvertTo-SmartM365ExchangeRemoteMailboxRecord' },$true)
@@ -271,8 +322,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAY9XmmDpSEEFmb
-# 39qWRNX1RJaUmgZ+LI55mcF6Ry5GmqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCykXOlLqeoolqo
+# BC1FjF8Bc5oJiU2P1cnPjGxsmmhlGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -405,31 +456,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG6Esu68dmL5aGyS8x3KO2NnYYyol8mC62lu2depDm8nMA0GCSqG
-# SIb3DQEBAQUABIIBgBexCkJfTbjkvFaaZ56kXo/YLPwEcYH7TuoYwZA4C/Hwk89g
-# hJ/qTal5+6xkhyd5/0Alt/fl2jccVu1LoxK8nCg3/djV2Ca7RaW1vDc0h9jEIncL
-# aIlJF3P53JiF0aNq1fq77G/sRmtSMryl0Z616+UxOA52tJs63kTpuZc6tC0AX9tH
-# Cfi11hqDRGqyhIHEbcY9Xj2/1vKcEpGrXnvyncwj3lykH5AMmIiBEmLNyIQjf4/1
-# 59quLMYouySoc/5/05EjfSr9y9eOTTAqvab3srBpPGfnfZPKa+dRiyko3MHR0MXp
-# MZqXReI2PsITb41LXwuOxA8Rjpa2Nnkm3efISBELHN+jwSX1tklT3RElN+TbwRoU
-# mTVhlZQGrnP0/OGdSNAZ00a4LRQtMsSOa8m8nFKwO5d2PVJJByIu09l5TD1Kuft9
-# egEfoaJ6OeOtcAB2tPJG8pGgULEkNbnKhFCbfTEgie6bkbRwJeOptpW92MYloPg6
-# o3G4uE6OHsyPrnIDzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG99E7XDYQxE1X+Znugm05YUatgkK0ept3qBMePcv4naMA0GCSqG
+# SIb3DQEBAQUABIIBgKNqO4vZrSNJiO0AuGqD8BcX7M8uGRBNQMyf1mgE+fOoXlfv
+# 8gc5DZ/WJJpiPR79viI7BAL+vi/JVE6SGJdsLeTrpIKl7WbuJu+CGFa/pfNL7LzR
+# 389CNeT5qxqavFn5G0+etQeTvfiNDvSFyP9FX+aXBUgcH76iWTy8wa7GfEAv7f01
+# UEWYCV0rpHVkmfk3tPZiHrYqXyk6+BYqLMZ1QuSgtYBnr3fWmPy7F0U+cQ2Cpvcs
+# 7hbK4fs25yiz+Ya6EFOYdC0Lhm92gldoWZEWvqg0b8vdC+HPE7XySL0NAdFqk/Vi
+# hNwx7fuqoy3oQ0QchtIgiIjiNo+IgExrEKnxivfQhuUtZZ33FKlyydORh1CUJwLP
+# 8EbxwkB1Qh9HgwysrA1sNun/TLvoG94YtQmFYdbXsjp/1bW1aMfSBM+BumXCO0wU
+# laSy/2aKzeHDSCHhR6nTgse6DI+HkcGP1ub1qFZUj6qUKbgYd/t3Nbcs3MbhqPt0
+# FTSqrLUWhMS4lQ6P1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAHWesjt7/s+bBvrfqpaUQC8eL+o6/B2/hFIKZz
-# poInNjANBgkqhkiG9w0BAQEFAASCAgCbYowL72Ie2tC02kEiFY3QhtsIAO01Q0B+
-# Vsna1DdOg2vyV6iPOYOegPjLNFiNVwcS31jSsz1H02d3ms88UHuKqcupRMxgQxUa
-# rsm+BJPbEATYRCKDekpQ9AkpFuIksJSM3OdnBoYKxQDW19GNNI6b3r8lxfLsKp68
-# KBYb4BZMf7NtX62eYJRTXPbQnZNz26KHHWIKxVd7TRkg2+0xJHL0lGV4AYtZwXZd
-# g5XaKl2kEIvdTJq49TlrjhuHzbenzL8fFCGGNKJlt8UHORvRavzopWDeaJVl5paP
-# YC9CsLGl2yg5NQsR+1DtuWbKQgoYsw3QNkbgkuWNfRO5LUi/56Bjw3p8hkB72eUQ
-# DbWK8fk8yEYS3BQZ9fhm0GL/HoYkyulAg2mlMOpD0EpFeYe5FwDBBJv5du0kCbOU
-# jUj/u1/aMoOn6mtTbDp/gUl0/yGNoXypxo0chDVwonkuJsvw6urZUHQGanJqvUqa
-# Dru9v7hrspyDTtioG3OuRpoQwkNqKvwyi1PaK+2bGNPhWQo01ejGRAG7OtN/VpgT
-# SqEku96Sxp/9gDx0A4d0cFXNzJslepqg+Uog4Fo7rZmg/fGdfP7bk6fwgHCofN5F
-# XPaJFBck0vlA0GsEzGyAbVSLUdDlMa/91OG0sxvzb6h3nyCO0z47SgQscRKo3ecN
-# JMiP9DETBQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMTAy
+# MzNaMC8GCSqGSIb3DQEJBDEiBCDqu7g5yOAFmY5F0r5ZqfOIMCpfrpK3ZIWYZU8v
+# DJ2ceDANBgkqhkiG9w0BAQEFAASCAgCz6kA1Iq666gfKOl6mke7XZc3EZbermDoM
+# v8koA2BSQdn03/z/IU7c8vkR31BA1WDe5vYeHbjwFf138+nQY9BeCCqo1W5QFCht
+# gLaJt/CdZHl94Yp/NcG+H4u+pmyF3lcaW4UlgG1ky6eFrToOODnWoUSKEMNiIIX/
+# nIInfW6qali34ZsNUZQHo1OcT/kBzp7vk7TI7kURlthqnkHiAA66zuCmQ53KAxa/
+# 3bIl0mD5Nkcgyo04scT39+wxCo3iyQgvaUv1ZZoZp99lKhNhXNRrue2S2KoPDale
+# pBPVTPFW5i0nsqVb8IamwDMKl63vkfmefz+gsOKeQlTGILNGuH+WL74u0s6x5CBO
+# PjxiwqT6wOM/ITqG+TOHf1mfendYfpKNrBjAKM1MhFEhN0gprC3HWuaAqjZdwK27
+# ASkSe8/E6pgFApclxHsGhx3KH9jcaqB0OZRMIBJlDxu1+4sNnWgwzjQyiJ5+mhUo
+# mkZyzAxEamrWgPxtqZF8ZFlbYcKv9tRsjvyNHR2LK6fdt0dO7kU8hDFuU1fVNPOE
+# 1AItgcGoOn/JOSrZDWEJoZ5rhHRBMQO6yDUS3SLxyOXIhH5sBx+frQA3GsVn0id8
+# Tss1Wm/4QyiICxAgDl5l7a0/8Ak1EO0wtogBonMStg+bqsLtlDk8+gI6IFm7E6CM
+# R1aaV2Y35g==
 # SIG # End signature block

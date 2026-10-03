@@ -25,13 +25,18 @@
 .PARAMETER DryRun
     If specified, collects and logs data but does not write CSV files.
 
+.PARAMETER FreshDeviceDetails
+    Starts a full app/device acquisition without reusing a previous checkpoint.
+    Preserves previous checkpoint bytes and partial CSVs. Requires All mode and
+    no item/app limit; cannot be combined with the destructive ResetResume switch.
+
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.29
+    Version : 1.30
 
 .VERSION
-1.29
+1.30
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -40,7 +45,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.29
+    Version : 1.30
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -75,6 +80,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$ResetResume,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$FreshDeviceDetails,
 
     [Parameter(Mandatory = $false)]
     [switch]$RefreshDeviceDetailCache,
@@ -305,7 +313,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -317,6 +325,16 @@ if (-not $PSBoundParameters.ContainsKey('DeviceDetailMode')) {
 if ($DeviceDetailMode -notin @('All', 'None', 'NonZero', 'Top')) {
     throw "Invalid DeviceDetailMode '$DeviceDetailMode'. Valid values: All, None, NonZero, Top."
 }
+function Assert-DiscoveredAppsFreshDeviceDetailsOptions {
+    [CmdletBinding()]
+    param([switch]$FreshDeviceDetails, [string]$Mode, [int]$MaxApps, [int]$MaxItems, [switch]$ResetResume)
+    if (-not $FreshDeviceDetails) { return }
+    if ($ResetResume) { throw 'FreshDeviceDetails cannot be combined with ResetResume; previous state must be preserved.' }
+    if ($Mode -ne 'All' -or $MaxApps -ne 0 -or $MaxItems -ne 0) {
+        throw 'FreshDeviceDetails requires DeviceDetailMode=All, MaxApps=0 and MaxItems=0.'
+    }
+}
+Assert-DiscoveredAppsFreshDeviceDetailsOptions -FreshDeviceDetails:$FreshDeviceDetails -Mode $DeviceDetailMode -MaxApps $MaxApps -MaxItems $MaxItems -ResetResume:$ResetResume
 if (-not $PSBoundParameters.ContainsKey('TopAppsByDeviceCount')) {
     $TopAppsByDeviceCount = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TopAppsByDeviceCount' -DefaultValue 500)
 }
@@ -377,6 +395,7 @@ try {
     WriteLog -Message "Graph batch max retry attempts: $script:GraphBatchMaxRetryAttempts"
     WriteLog -Message "RefreshDeviceDetailCache: $RefreshDeviceDetailCache"
     WriteLog -Message "ResetResume        : $ResetResume"
+    WriteLog -Message "FreshDeviceDetails : $FreshDeviceDetails"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
@@ -1211,10 +1230,12 @@ function Test-DiscoveredAppsResumeStateCompatible {
         [Parameter(Mandatory = $true)][string]$Mode,
         [Parameter(Mandatory = $true)][int]$TargetCount,
         [Parameter(Mandatory = $true)][string]$TargetAppIdsHash,
-        [Parameter(Mandatory = $true)][int]$ResumeContractVersion
+        [Parameter(Mandatory = $true)][int]$ResumeContractVersion,
+        [switch]$FreshDeviceDetails
     )
 
-    if (-not $State) { return $false }
+    # A fresh run must query every app, even when the previous app set is identical.
+    if ($FreshDeviceDetails -or -not $State) { return $false }
     $propertyNames = @($State.PSObject.Properties.Name)
     foreach ($requiredProperty in @('ResumeContractVersion','TargetAppIdsHash','TargetCount','DeviceDetailMode','PartialPath','PartialLength','TimestampedPath','ProcessedAppIds','ProcessedCount','SkippedCount','ActualDeviceCounts')) {
         if ($propertyNames -notcontains $requiredProperty) { return $false }
@@ -1665,7 +1686,7 @@ try {
         }
 
         $resumeState = if ($streamingEnabled) { Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath } else { $null }
-        $resumeStateCompatible = Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode $DeviceDetailMode -TargetCount $script:Stat_DetailAppsTargeted -TargetAppIdsHash $detailTargetAppIdsHash -ResumeContractVersion $script:DeviceDetailResumeContractVersion
+        $resumeStateCompatible = Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode $DeviceDetailMode -TargetCount $script:Stat_DetailAppsTargeted -TargetAppIdsHash $detailTargetAppIdsHash -ResumeContractVersion $script:DeviceDetailResumeContractVersion -FreshDeviceDetails:$FreshDeviceDetails
         if ($resumeStateCompatible) {
             $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
             $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
@@ -2093,8 +2114,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD93o9FcRLqOaKj
-# OnjXMTvuCSGkgdFl8JDHooJJ4sxM4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfOYrESit6XZJ4
+# RYibUdHFhf7CFC489XCEZZFyXcUcsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2227,31 +2248,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHGEQC24gnSbXqOsUVKiwyF+ao1c9wAkyHhWZa2M/yMhMA0GCSqG
-# SIb3DQEBAQUABIIBgFpFM3M2O2rMDP2w97FQL09/ORUCE84zrORK0cBgsm0czwB6
-# xz1bVCKMaDDumFAemF52ueT/TdnU1u6NFRNf8oqqTaYM4W5W6WD3EVIW6qVHmYh4
-# MGIBWx5SSkbYtBiqr+L6Pksom+vBCxv3wuQWn4ZxPw6a3jMLycsZjLO5zipRjmwe
-# zDluFqvpzisA4XvjMwY8TvLPI8Hwta81jKxJQzN4Q6IIe7MAEiXFOfYLng9IrMJ6
-# 41WccVIDBrL7BBAgofClJPXVDPAI17SA4zFAa26uyS0boOOB7uMsDUaD1ppUe+pR
-# 0yzqqD76H+ltJ7DaEr9UFmpD5N2geKfzFpBfD/nlpBKXN9K85F3CBLkXt1Khv7E/
-# g2eNh98JgQn0kZ8p9c1Dh6IbpfvMP4gfNtf5eVeoF/7+CCmX7bO5TXT3d5TjwIGI
-# pibwnGWyiFHEJBew7lIqWb1S64huNmEh24rD1ayyhtXUV8+iS44gmjewjgpcRHes
-# xZCJtyKEFp2+RkiUJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGwe40eFgQzyLXYPWxWF2Qu8Ldd1jrXPatEFIcUX6luiMA0GCSqG
+# SIb3DQEBAQUABIIBgFZP5eSqzmGf+6nI5td7opIgv0VW3USRxyzLO72qxRkjDuTM
+# HjX2OEWD/ERg6olSNXZ7qWPkCsqXZ6WTqlMOhAU4CKxjOzzykegknwaTJKZ4JY4C
+# SwHUSv8IHTOuekrQrw58Rnpa4B5q5ayw/om0m7nDmQYHMWHGOk61nxLFfrW5duJt
+# btCq7qkbvpPb/OG5vDJixAn+C+wzHTBH22gX6CSKFEvAhNAzOhDnFhrvZId23gnf
+# enszHMgzrTZB3cb+tKdTeTkcmMLJnvb8rNx9Z2pstGoxorZ7NDb3FSTwOrJkhj1Q
+# zVR0abhQUZxrIgETu2rBASpfQJV+pV3hX7EyR2kaVPG2xwh5Z8OONgUbrOd9yS2u
+# 369q7abuLUUFsWTmYsZ60sYxyHRS6222u7ZE86te84IJ+VW7DzBxg0uHhJCqicOb
+# ncujbtlFeIWzAYDZEhYjrHohQdAhA38P0p8jgwWgMcNHt3a5li4dkpu1z7Ye68fQ
+# RgdRvDCIS/Ryb35zDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCMtTv2dqnYg35TE9cBvI1wj4Q38qlYv+YLgI71
-# JEGgMzANBgkqhkiG9w0BAQEFAASCAgBLvE3yRxe2t8Wk3ZCiINAOCZtLXKGnMJ1f
-# xpPgEgl0LX0BOY4yYrL4/k9/SMnIJ1yLptj8Niwh+ACnoI+pscVjZHnV6f0IVWbL
-# zLKieqsAQ9f1EaFav7idhE1mFd0zDBOuxeBzdX9Es63JtFDDq023jRegutfjDX58
-# E+qCTsFNJhANg7sh0AAYzutFLJ40cqtAN8EZRowDhVyHFxNK1ydVlnKa8g7xMR6t
-# U6JQpZLL60iG0Q3jZNtle1S0HhW7AizV6ixArq6FKSCo7vp1B3Hkg2XaESqXnS/Y
-# vsGKZoRj6xjgRiiQpu9X8kgnscGojbEQnUeSX/qn11E/DlXW/qItr25KLCLHTwL6
-# 4kntsxEewRUMhfR/tTB3EUzfS72oJFHF4oanqMRn29M0sykh7e+R0MAy0n0wrj7X
-# sShGuSg4dk6KnONSzLRm946E0BIoWKcUnTK4O3iLes+jZMXs7+Ipskvujuba9JhI
-# Bx8mwsZSBWV+KVXkOQbXfzQ0lqRrZsfJ6rt8PYXC7iiJSrBcZOUdjgumr44HFQTd
-# MfodnzpSg+4ooCB4eXztcxP9i5EmzlIBKPyK/FLnhi8tBT6K7Dig0BjerZG65hG8
-# +vmbV9WgmqBYbUATX1k+FczkT5f8AdHu0F5RGrhS4UI4lBoSkdiJNbp2KbNwuKQg
-# ZIO5UsBJfw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwNjU3
+# MzNaMC8GCSqGSIb3DQEJBDEiBCBRDSp/tCVE3jnUVtUP1jnKYTR8Gk80X8thkGpb
+# vBAb2zANBgkqhkiG9w0BAQEFAASCAgBwng7bsngTNO6A8Esl8V4ezfzkjQyPtJp4
+# DbmcSb2xxpBNmUiH793pzIpwhXFQLYEmXFYZox1utfItdgY/th86gORxZFSem+3S
+# k+4VCH4ODRGf2vphhWqh0VPlUZV2UiCIJtVjt3rfOa78YB4MU/el/BxYCCRczynq
+# e/YSOeM1JnCkgaU+jFdqyza5yhu61xu/ZrmMm48A5vdcKsdMtjPSMawxJrPnVqFb
+# p4ysuZjoLZIYHGkE8PSBbmS3kgXk5mrbI8fJ46D9x5tsj0s0ECIZddew7hf4Yia+
+# rGzBPj0vAcuqweh+t1PAF8igWOhSlmoe3RB0c8cVyhCv7bZiYSzcyjp63tyjwQMM
+# P6d0PNsdqcRo8zBRqOrr8wxsFcSEQcdkPX7sfYoe/z/zghnNt1TPFsMGPKcdu8ZE
+# Kqu0Ga0He7gCVIzXyn+wlQWH2akCXMuPUOR7n0fFhZZ3wMoXVfoSoHmm3qft2slL
+# aCg2umOfJ5OKxEKFDN1Vv6BUgScHa8rRKHbVqZdB4ZqRQGHtumdS2Boo0CykTWcd
+# Vq58QFvNJhrCMrSaHVsDhg5mgWu40fNyvUhxKiimajO0TrpeQA84R0u8pFqEi9Bw
+# VY+vlhRANQq3TyXMRH5MllYdoLSw6GZsWzHnyoSKj7aO4f0GrOb15EJ7lX8aXsmp
+# u01cY7RxTQ==
 # SIG # End signature block
