@@ -20,13 +20,18 @@ try {
     $project = Join-Path $root 'Migrations\Synthetic'
     $older = Join-Path $project 'ShareGate\Diagnostics\Analysis-old'
     $newer = Join-Path $project 'ShareGate\Diagnostics\Analysis-new'
+    $alpha = Join-Path $root 'Migrations\Alpha\ShareGate\Diagnostics\Analysis'
+    $missing = Join-Path $root 'Migrations\Missing'
+    $template = Join-Path $root 'Migrations\_Template\ShareGate\Diagnostics\Analysis'
     $scripts = Join-Path $root 'Scripts\Diagnostics'
-    [void](New-Item -ItemType Directory -Path $older,$newer,$scripts -Force)
+    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$template,$scripts -Force)
     $oldCsv = Join-Path $older 'AccessFailures-5min.csv'
     $newCsv = Join-Path $newer 'AccessFailures-5min.csv'
     $newline = [Environment]::NewLine
     ('WindowUtc,Lines' + $newline + '2026-10-02 20:00 UTC,1') | Set-Content -LiteralPath $oldCsv -Encoding UTF8
     ('WindowUtc,Lines' + $newline + '2026-10-02 22:00 UTC,9' + $newline + '2026-10-02 22:05 UTC,4') | Set-Content -LiteralPath $newCsv -Encoding UTF8
+    ('WindowUtc,Lines' + $newline + '2026-10-02 21:00 UTC,2') | Set-Content -LiteralPath (Join-Path $alpha 'AccessFailures-5min.csv') -Encoding UTF8
+    ('WindowUtc,Lines' + $newline + '2026-10-02 23:00 UTC,3') | Set-Content -LiteralPath (Join-Path $template 'AccessFailures-5min.csv') -Encoding UTF8
     (Get-Item -LiteralPath $oldCsv).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-2)
     (Get-Item -LiteralPath $newCsv).LastWriteTimeUtc = [datetime]::UtcNow
     $fake = Join-Path $scripts 'SmartM365-SharePointMigration-FarmDiagnostic.ps1'
@@ -45,9 +50,25 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
         throw 'Launcher did not select Windows PowerShell 5.1 and both CSV windows.'
     }
     if (-not ($preview -join ' ').Contains($newCsv)) { throw 'Latest ShareGate CSV was not selected.' }
-    $prompted = @('Synthetic' | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
-    if ($LASTEXITCODE -ne 0 -or -not ($prompted -join ' ').Contains('Project: Synthetic')) {
+    $prompted = @('3' | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
+    $menuText = $prompted -join ' '
+    if ($LASTEXITCODE -ne 0 -or -not $menuText.Contains('Project: Synthetic')) {
         throw "Prompted project selection failed: $($prompted -join ' ')"
+    }
+    if ($menuText -notmatch '1\. Alpha' -or $menuText -notmatch '2\. Missing \| CSV absent' -or $menuText -notmatch '3\. Synthetic' -or $menuText -match '_Template') {
+        throw 'The project menu was not ordered, annotated or filtered correctly.'
+    }
+    $cancelled = @('0' | & $runLauncher -ToolkitRoot $root 2>&1)
+    if ($LASTEXITCODE -ne 0 -or -not ($cancelled -join ' ').Contains('Selection annulee') -or (Test-Path -LiteralPath $marker)) {
+        throw 'Cancellation did not stop the Run launcher before collection.'
+    }
+    $unavailable = @('2' | & $runLauncher -ToolkitRoot $root 2>&1)
+    if ($LASTEXITCODE -eq 0 -or -not ($unavailable -join ' ').Contains('CSV absent') -or (Test-Path -LiteralPath $marker)) {
+        throw 'A project without ShareGate CSV was accepted.'
+    }
+    $invalid = @(@('99','99','99') | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
+    if ($LASTEXITCODE -eq 0 -or -not ($invalid -join ' ').Contains('No valid project number') -or (Test-Path -LiteralPath $marker)) {
+        throw 'Invalid menu choices were accepted.'
     }
 
     $dry = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
@@ -55,7 +76,7 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|True' -f $newCsv)) {
         throw 'DryRun did not forward the project, latest CSV and window margin.'
     }
-    $real = @(& $runLauncher -Project Synthetic -ToolkitRoot $root 2>&1)
+    $real = @('3' | & $runLauncher -ToolkitRoot $root 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Dedicated Run launcher failed: $($real -join ' ')" }
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|False' -f $newCsv)) {
         throw 'Dedicated Run launcher did not remove DryRun.'
@@ -71,8 +92,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKEEiRppNpjtN6
-# Kjs2E2m4/j8OPIM5Gt3RTE4GAnOxM6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeLuQ5k49c66Cp
+# 6TgF30wctH0gB0q7yErRqNE8ixYHTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -205,31 +226,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINBvkRGZixNDJzYnsX3XVu9o/3jR41OuEzaZhlgfOD2aMA0GCSqG
-# SIb3DQEBAQUABIIBgAH1Kbuqm/vqXfM2RTvnNiXIwfd+XmPoZrZ4GNTwBUjnrhWs
-# p/Rk+y+6xfvqWujcRpknKzzz21zFH4dbsQhREImrNjs6dUSeFiU7wVd4QoTs1zgv
-# /SVpdxg5WZniHoAEpoaA6m9kaK2DQNyHXKfg5XeQqrtjVfNjoJJiA3MyPJTeWNuM
-# yZu88NGoH/fUHUsHXkN8nXgQRvIu48ypp3lloReZZOP3LupMBOa9h8KWi2DQJ7cT
-# ZBDl4jEfZ0c8WryhjwUrMjlyJirMr9QGbiElIypKUe868O1zSTw/3cWACiIjrfrj
-# 4fYnyBh0uRnLyfgeyDIKPeNTt55LHH6BFCYyK1k6id7KQUwsKSokVwxnvGtM/hkW
-# Rvr7qQUT5GMe7wsyJamSp8MUOo82HC+w+30fqWHeXpP1uecqDebsC12hdQGCIoxd
-# 6ZvfJJdjFJY9Pb8/RC6Hl9Ko244/umladzDOYZ9iR02HUq0qo4rCgqr7Glksp2Hb
-# Ox1FedK+bFGyzXd7iKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPgZTxv33Bgojy6gH897Hg0HAuwwA5wngnzwwuLJpBWFMA0GCSqG
+# SIb3DQEBAQUABIIBgHxrBnMM3XZtoaSFzMfwTjMSBenuSlJSGvG5FQEiC0ZTnO3g
+# oRK2JuvOxLiC2UC+Af26YmsUKlMip+H7VRE+eR7LlDm2ULM4rlWTokf38+THJqt5
+# mAYTm4rkIcs7XNBvbHovZPT1PNLo4k2A4Zq5oWn+kM+PSvPOxIq0dr5KCv7atgAS
+# P3eKE7ArbCHMXG7rk1+ZOpAc5rTKt/GQGrJavCDkzIA+/00JvncHcYGjn/gFXoV0
+# BbvPp/yRyKGM+X0WbnVVAv5G3HqFKGthBvYM3cn94lWOTaU1NvxGfe7plQyZqqFr
+# L5yQ+mszoDMFNrc8915jkMNGQdVg8/h4MJn4gg6lntFrQdJM9bzkHNLQpihyKxRS
+# RteZkKN9iHEAJDTvm0F5jpGYV53WLelCMtLV7KisKKLLATAdIG4j4TsEm87V+Mfx
+# TkEreU4159LgF2RUjYdhzJuYMTlTRS2Ori6P6eh2H8aUI9iGHhL9LzuiihhJgX3p
+# ez6eCiERthX+uM4Af6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjI0
-# NDJaMC8GCSqGSIb3DQEJBDEiBCBZn6dwYA9Iqrd0LMOtZPXip3ztYOoVsrlo82fB
-# pNz/6DANBgkqhkiG9w0BAQEFAASCAgBU1HYdRymxsZlKOBvaelg0cbeNc9WMYnuW
-# SIC1fPfMn+D5It3/XHj0/NRYRBzFQTYhjjPH2hk9aaui2/sJRu3I1fhhUpg/J4mm
-# Nd3qClclAWGqIdz4uFtLmNquJ1Hb9ntefBKcMQVr8PNkFpKK7MDK7zcpLob/03l9
-# 6iHvOZCrWchiz76yyU4Hzw+38pbOzEgU/m7pHEb/nen4NUTuMA3W+mxAyBLxQqVd
-# R/+gVgAKeOjwyYCSAkXpf1N8MiHJdHeWN4QrGKejfn7qFWoPpmCqyCgblOJ8C/LU
-# IWPjOXzBzuLDC/WXUnP77E7VrAi1eC9KuzI/RPvABxAi6100X357jA70Q3j/STd4
-# rP1XLOP7q/XJaJeRC4wI/vZeqHv30NpAj5M6eWkp6qvgyfXF56Qn+lR9EtSXauFt
-# TShd4QEbOG/V8TJsp1+e7E/6mKvO7rw5/G25ZSw0f1lTrqtu/B8FTP3RtoQ4UaJA
-# iRdLKj+D9Y9u+cIB5TPgINWicgRJkiJN4yNRvvTlIWyaLXS8z/xXHgSBO1IEMCK8
-# BaGDsqXfEhq7HJijHUiIRDAECl4NDJpSowiGrn97yZBBd4YDLWEgJa5R45UrQNrZ
-# mZUR3nxYHrg1Ug/30QCWKNKexQ0RjYF6qvuEycU0/Hjui5sojRUg2KC+55MYSVv2
-# Bd110waUWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjUz
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDm6WY1eMuRAag/s+dFcY30glIpK31ARVm/UkZR
+# vX3dqTANBgkqhkiG9w0BAQEFAASCAgACiBGO8xyskPIf33mgaZWWAVeeUxrKAG9Q
+# a3HnoMMt6nRbNqwnf85au2l3s7GqPhfgNyuaON1fqK6mhIrFqVzBCd2YP4DdSIE+
+# GGyrzkdIHrg9hqiI3HpoMTq0Qto7beQQTpC2j+PEkJjqkzrhRKejMbF7o3VN0ZRu
+# 5M+TnvS2S9wXFIynB76yPXwsorOChReriEEdZUk/C+gjPrf3+CRyG8/plVbaMOZs
+# vUaa8B10PFD6JCARbl1jjCdk+/GN/UAO0D/4ahGq8Y4WB0QwlDRStrYdFGnx/iaz
+# jZwZA5stZzv8J6AkV5VC/e5MQi0DNX+ARQP6MS09YoBKK5nZKaJfAxtl7e+Jw4Q4
+# uLa4t/cx6IrsULkAxSAEBP8+yWtWp9c5UqrUG6OZLCe0/3pyppd7pBimjo0sZCd/
+# g2osMk4u7vLcKWLnruMjZKd6eI1h033vhXLQQ0BuQfndeDQFcfsoiqzqE2uqtYru
+# LP3tG1L9WrXg8jpp+stBCLffaSXiZCCEaAE9zQCrtpX15+FIzRZmXiN/gifq+EvJ
+# tvk7Mihi0WS9Bej+r0hwfr4hExIVVYqCvAKJT7dOAVRuKMJytxcHRACxLTkdLuQo
+# iqyoYwmALiZgkkNVNdoDeLhopzLjWKvU3acPd5o0hlSpyFxmF1138dOoiG/vEhmU
+# EelOMtGcUg==
 # SIG # End signature block

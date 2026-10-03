@@ -2,10 +2,10 @@
 .SYNOPSIS
     Start only the read-only farm diagnostic in Windows PowerShell 5.1.
 .DESCRIPTION
-    Finds the latest ShareGate five-minute access CSV for one migration project.
-    Runs the diagnostic DryRun by default. Use -Run for real collection.
+    Lists migration projects when -Project is omitted, then finds the selected
+    project's latest ShareGate five-minute access CSV. DryRun is the default.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -41,21 +41,86 @@ function Get-FarmLauncherPeakCount {
     return $count
 }
 
+function Get-FarmLauncherProjectInfo {
+    param([IO.DirectoryInfo]$Directory)
+    $diagnostics = Join-Path $Directory.FullName 'ShareGate\Diagnostics'
+    $info = [pscustomobject]@{
+        Name = $Directory.Name
+        CsvPath = ''
+        PeakCount = 0
+        Status = 'CSV absent'
+        Usable = $false
+    }
+    if (-not (Test-Path -LiteralPath $diagnostics -PathType Container)) { return $info }
+    try {
+        $latest = Get-ChildItem -LiteralPath $diagnostics -Recurse -File -Filter 'AccessFailures-5min.csv' -ErrorAction Stop |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if (-not $latest) { return $info }
+        $info.CsvPath = $latest.FullName
+        $info.PeakCount = Get-FarmLauncherPeakCount -Path $latest.FullName
+        $info.Status = 'CSV {0} UTC ({1} fenetres)' -f $latest.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm:ss'),$info.PeakCount
+        $info.Usable = $true
+    }
+    catch {
+        $info.Status = 'CSV invalide ou inaccessible'
+    }
+    return $info
+}
+
 try {
     if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
         throw 'Windows PowerShell 5.1 is required for the farm diagnostic launcher.'
     }
-    if (-not $Project) {
-        $Project = Read-Host ('[{0}] Migration project folder' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-    }
-    if ($Project -notmatch '^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9 ._-]*$') {
-        throw 'Project must be a migration folder name without path separators.'
-    }
     $root = if ($ToolkitRoot) { $ToolkitRoot } else { Join-Path $PSScriptRoot '..\..' }
     $root = [IO.Path]::GetFullPath($root)
-    $projectRoot = Join-Path (Join-Path $root 'Migrations') $Project
-    if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
-        throw "Migration project folder is missing: $projectRoot. Launch from the shared toolkit or supply -ToolkitRoot."
+    $migrationsRoot = Join-Path $root 'Migrations'
+    if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
+        throw "Migrations folder is missing: $migrationsRoot. Launch from the shared toolkit or supply -ToolkitRoot."
+    }
+    if ($Project -and $Project -notmatch '^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9 ._-]*$') {
+        throw 'Project must be a migration folder name without path separators.'
+    }
+    if (-not $Project -and $ShareGatePeaksCsv) {
+        throw '-Project is required when -ShareGatePeaksCsv is supplied.'
+    }
+    $projects = @(Get-ChildItem -LiteralPath $migrationsRoot -Directory -ErrorAction Stop |
+        Where-Object { $_.Name -match '^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9 ._-]*$' } |
+        Sort-Object Name |
+        ForEach-Object { Get-FarmLauncherProjectInfo -Directory $_ })
+    if (-not $projects.Count) { throw "No migration project folder found in $migrationsRoot" }
+    $selected = $null
+    if ($Project) {
+        $selected = @($projects | Where-Object { $_.Name -ieq $Project } | Select-Object -First 1)
+        if (-not $selected.Count) { throw "Project is not in the migration list: $Project" }
+        $selected = $selected[0]
+    }
+    else {
+        Write-FarmLauncherInfo 'Projets de migration disponibles :'
+        for ($index = 0; $index -lt $projects.Count; $index++) {
+            Write-FarmLauncherInfo ('{0,2}. {1} | {2}' -f ($index + 1),$projects[$index].Name,$projects[$index].Status)
+        }
+        Write-FarmLauncherInfo ' 0. Annuler'
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $answer = Read-Host ('[{0}] Choisissez le numero du projet' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+            $number = -1
+            if ([int]::TryParse([string]$answer,[ref]$number)) {
+                if ($number -eq 0) {
+                    Write-FarmLauncherInfo 'Selection annulee. Aucun diagnostic lance.'
+                    return
+                }
+                if ($number -ge 1 -and $number -le $projects.Count) {
+                    $selected = $projects[$number - 1]
+                    break
+                }
+            }
+            Write-FarmLauncherInfo "Choix invalide ($attempt/3)."
+        }
+        if (-not $selected) { throw 'No valid project number was selected.' }
+        $Project = $selected.Name
+    }
+    if (-not $selected.Usable -and -not $ShareGatePeaksCsv) {
+        throw "Project $Project cannot run: $($selected.Status)."
     }
     $diagnosticScript = Join-Path $root 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnostic.ps1'
     if (-not (Test-Path -LiteralPath $diagnosticScript -PathType Leaf)) {
@@ -65,15 +130,7 @@ try {
         $peaksPath = [IO.Path]::GetFullPath($ShareGatePeaksCsv)
     }
     else {
-        $diagnostics = Join-Path $projectRoot 'ShareGate\Diagnostics'
-        if (-not (Test-Path -LiteralPath $diagnostics -PathType Container)) {
-            throw "ShareGate diagnostics folder is missing: $diagnostics"
-        }
-        $latest = Get-ChildItem -LiteralPath $diagnostics -Recurse -File -Filter 'AccessFailures-5min.csv' -ErrorAction Stop |
-            Sort-Object LastWriteTimeUtc -Descending |
-            Select-Object -First 1
-        if (-not $latest) { throw "No AccessFailures-5min.csv found in $diagnostics" }
-        $peaksPath = $latest.FullName
+        $peaksPath = $selected.CsvPath
     }
     if (-not (Test-Path -LiteralPath $peaksPath -PathType Leaf)) {
         throw "ShareGate peaks CSV is missing: $peaksPath"
@@ -107,8 +164,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfk3LCsvtUr19w
-# Q+y+blNrjwRZ8YzgHcrHWzKwN0xvKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6Tkb+uzzwvyQY
+# qWfnJ23wgHpu6VS5jIQA0oLZ5AuWOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -241,31 +298,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAsN9SbaMLy5c9jKGIeAnw3MIdLFzeczt/tFOYD45EEHMA0GCSqG
-# SIb3DQEBAQUABIIBgDFvht0B48Nh0qSIQfGK9jtHDBpmn7MUfiiseWu+I0NOtvdG
-# SvIv7q3bNPfbBEUnk7DRz6xrpWJFlnGsxyZJiaxOdY3WhQlBCXWDS0MGtEiCfVMx
-# OCNv6kbutFyzkJhEnzi2N2CaXGqYgOVebqBaYZ/ysWJZQnFnVLaPpYzJvzGeorL4
-# Nl7Uy32ruZv7Iq7Xi2uo0xdaNxDfKqvit38LcvKoik/00rAEYBwrbc9UVYCFMwIa
-# +doFGQ1EaQfAqxv35UWKAY9nsONDGDWyKXRvf3etxln6fN+PJhkVzN1oUY7FONGa
-# ++uYUgARkN+heYcq1sM4fA8rV0A/Ihu2XvEXL9YUwVzI9GKH7C4TJgnMr3wWuDZI
-# l/t1TI9/JJ93eQIaJuY+xzo+Q9FSRKSCdvTHZC4+tAzbyEQ0/DXUmyLQwDhPHNzW
-# /nDkD5tcRnSaGFn0XyM/z9Utt3nCh1WMrk3/tfg0Ocm0Ahs2jnmvUhdi4qbuy6Oz
-# WxWgFz++xCEc5Su+66GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK3LdzWvpic5B2RrpKPL0QwTYxoekoBF5ceNdqlTzEQYMA0GCSqG
+# SIb3DQEBAQUABIIBgCb8S5Tvqwc7ZTGi33bvK4LlABBEMCxSf2MCb9AFVcaXC6up
+# okaHRO5TuBAersxjxSepyWUCxxovGpIbl7zGKfxTzPHmPPXe/K0iw7WWAxqcUrnE
+# 1ob74zNMdN8DHjsgKW6htxRtc7k6FqG+OwNyKZcFDQAW9ninrFKW7bcE8pUWZ6yh
+# j7MsNkBsNC/x7zy8ubpHs4difziDE5KGYUJ2QHReKjPVqqAsDynOyMlVFlVYXo6j
+# rQRzFTHUn63bSZjtPN5N3MccmXuM8KVCGXSHWtPlo0G8Xdj9k02XD1o/L5X+6lKh
+# O8vVjxIRa5yrSXsNakkljfDD14b5pW/i2d8KUw2sb+kzpdYNWz1j3FeiCYm3ITT1
+# HzvgpwIY8OJCQ2L3nXluYpPeKWXuCbmw6s+9+nsYDhOPy7/hjQBDzAuyM0+9QDAG
+# x0sOhxJoLpZmksyhmmM4tzZr/6eIRxhtjzik2Bu+eZU+ttDoPEOdJlQBw27EF2C1
+# tlQyPfuDtLXe9Cls9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjIw
-# MjZaMC8GCSqGSIb3DQEJBDEiBCDv3yVRvHVC9kHlWMQlu67T61BTLZH3G+Ll1y3R
-# e1XZNDANBgkqhkiG9w0BAQEFAASCAgB2zNL949u6+gVfiUVlIMcoK5YJTtfggNKn
-# 4MoG+OkQh69PJHI8sx5bpVcR1PATNJiY3MwIacFu9ifBryksuHrXG/Q3hAshmL8D
-# czthqjjis1exZoGMbaPXoetEOWxdpl+271Ro3JKe6cRsBCyb41Nh1BlSrSmVr3TY
-# O8CjO96HPg1FlYbEZy5zcHv+0j4bLsM1toMfXT3xNasO5d48b3eicW82RBFHFuSe
-# 5U9sN3IOANzvRUApD6wDeAg2qExqKSin2UeM+YgCiW+VBeFU8kvkMtLdu6NICf9m
-# DXk1VAlDXs1IaAa0yQ6O+9BG/ITWzX0+FfrHcUU+KM/0Udwt9zbJSE6EEVNhqpmA
-# J0fwWZHo8fuNSi+A+7TUJqOOCk+WoSgZvNjq5UKarWH24uYHCwvWluToifQyIILf
-# Tvy4gBeKKKG4Wb2buTJ43zkHG7Pi0Pul8wgZrgmvqogJCFZaTWSCPvoZKU685NhM
-# hyfYIWAv/0RMGSmIkPUl278YfXWLrEybH81H/RrEzqowngf3LlHJiHny0X60/SVL
-# p60PzGyPebbiuiPLIvEmzDvf5u/jlNj2o64MVjJItR7OXsIAijzIGArIgk+7wk99
-# jBOTppMnZKWr5ii7N3IYGF1gWkbIElKLl6drDDy4hMCBExv0R4WyBeiuVVNWzTTK
-# D//7fF+IbQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjUz
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBrm8TMuxudDCZ9/4PYYNMmMaB3uCRk0suChzJZ
+# xYIOlzANBgkqhkiG9w0BAQEFAASCAgAqUpuJdonTVPASBxDjN1nuVG97HhZ3/rbq
+# NfR/kPBNsoA8cC7xdpwnidXeSKHjKEkGXT7/a2PtjDmU+9+Ewo2HnV+uf3Dwtsk3
+# NALZwu2BINCyW6SWOgvn3Qmhz2wBucc2mkwFUDqBZSeaWP2aa1Orc2aT1jn9LJ09
+# F2up36prbk9ayxxM0cf4mkd78RtRj6O2nvUI13/ZArpXqzK8F+8gVDZBG6nq3aIQ
+# 6TrIrkZse7KKz51Vqnir8a89Ck2n5Sjv5U0RezYKxQQPXVDefK9ytxxfh77ialeG
+# lJKr044PvtgUH1W7JQ4kSkSmF6xKNoGZQXJB91YKQsqjA4Tt8G/XGg/VReg4nr87
+# WEqlSXWa8ljzaMNltgSqbZ99Ssv3h64uLbN4h0TFA0t2Sc/ITK/WotTklypNlC+p
+# GPpj7MXmhdGK3lT/Ms7bkFWl+Te/J25nPLuRkeiSuyMttWoTiOKPiElGxvj/GhH5
+# lEJGPb44Jls/m5BPT1D7lWI3kku44ApHYJ80UxRPo2yKWQkvzmWmeElzwF1pq1Qz
+# JcjLspy1Eubj4b/+IMKW/znZaNf2+ZoE+AaQd3iqWEki6liFovbR1Fb5DaeTgeEp
+# FfMoKasAiqEr9v69UisSiX3S778GteYBTedLNLh9hJvVGfE05julE4zZEMNuNYjT
+# OpYiodDj6w==
 # SIG # End signature block
