@@ -365,6 +365,53 @@ Generate an analysis without using ShareGate:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1 -ProjectRoot .\Migrations\MyMigration
 ```
 
+### Source farm diagnostics
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-FarmDiagnostic.ps1` runs from an
+elevated Windows PowerShell 5.1 console on a SharePoint farm server. It loads
+the SharePoint snap-in or Subscription Edition module itself and checks farm
+access. It only reads farm configuration and logs. It does not alter IIS,
+SharePoint, audit policy, or the service state. Its only persistent writes are
+the output files under `ShareGate/Diagnostics/Farm-<timestamp>` or the local
+fallback folder.
+
+The default output is the project's private diagnostics folder on the shared
+toolkit path. Launch the script from that UNC path or supply `-ToolkitRoot` with
+the shared UNC toolkit root. `-OutputPath` overrides its parent folder. If that path cannot
+be written, results go to `C:\Temp\SPFarmDiag\<timestamp>` and the script prints
+a `-CopyResultsFrom` command to copy the completed output to the share.
+`-Project` takes the migration directory name. The script accepts
+`-StartTime/-EndTime`, `-Around/-WindowMinutes`, or an
+`AccessFailures-5min.csv` file through `-ShareGatePeaksCsv`. The time zone is
+detected on the farm server unless `-TimeZone` provides a Windows time zone ID.
+
+Remote Windows events use RPC through `Get-WinEvent -ComputerName`. IIS
+configuration and W3C logs are read through administrative shares; remote ULS
+uses the configured log directory through `Get-SPLogEvent -Directory`. WinRM is
+optional only for checking the remote audit policy. IIS files are processed
+line by line and filtered by UTC window while reading. The report records the
+read duration, coverage gaps and a local rerun command for each inaccessible
+server. The IIS robot user agent `MS Search 6.0 Robot` is counted as excluded
+and does not contribute to access correlations.
+
+Each run writes separate topology, IIS, WAS, Security, ULS, coverage,
+correlation and nightly-recurrence CSVs, an HTML report, a log and an atomic
+`Farm-Summary.json.txt` completion marker. A `Partial` result can contain
+useful evidence but does not establish complete farm coverage. The Migration
+Diagnostics tab shows the latest matching farm result and generates one-line
+DryRun and real commands from the project's `AccessFailures-5min.csv` windows.
+The GUI does not execute those commands on the farm. Run the DryRun command
+first on a farm server, then review and run the real read-only command. Launch
+the GUI from the shared UNC toolkit root or pass `-FarmToolkitRoot` with that
+root to generate UNC commands.
+
+The offline fixture test is:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365FarmDiagnostic.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365FarmDiagnosticGui.ps1
+```
+
 ## ShareGate probe (phase 2b)
 
 `Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGateProbe.ps1` runs in

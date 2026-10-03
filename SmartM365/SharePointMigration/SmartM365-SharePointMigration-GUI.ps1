@@ -10,8 +10,12 @@
 .PARAMETER ValidateOnly
     Loads the GUI resources and exits without showing the window.
 
+.PARAMETER FarmToolkitRoot
+    Shared UNC root of the toolkit used by generated farm commands. Defaults to
+    the directory containing this GUI when launched from the shared toolkit.
+
 .VERSION
-    1.0.11
+    1.0.12
 #>
 
 #Requires -Version 7.4
@@ -19,12 +23,14 @@
 [CmdletBinding()]
 param(
     [Alias('DryRun')]
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [string]$FarmToolkitRoot = ''
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.11'
+$script:AppVersion = '1.0.12'
 $script:ScriptRoot = $PSScriptRoot
+$script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
 
 Add-Type -AssemblyName PresentationFramework
@@ -725,6 +731,20 @@ function Open-InExplorer {
           </Border>
           <Border Style="{StaticResource StepCard}">
             <StackPanel>
+              <TextBlock Text="SOURCE FARM DIAGNOSTICS" Style="{StaticResource SectionLabel}"/>
+              <TextBlock x:Name="lblFarmResult" Text="No farm diagnostic result found." TextWrapping="Wrap" FontSize="12"/>
+              <TextBlock x:Name="lblFarmPeaks" Text="Analyze ShareGate reports to prepare farm windows." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,5,0,0"/>
+              <StackPanel Orientation="Horizontal" Margin="0,7,0,5">
+                <Button x:Name="btnFarmRefresh" Content="Refresh farm results" Style="{StaticResource BtnGhost}" Width="120"/>
+                <Button x:Name="btnFarmOpenReport" Content="Open farm report" Style="{StaticResource BtnGhost}" Width="110" Margin="6,0,0,0" IsEnabled="False"/>
+              </StackPanel>
+              <TextBlock Text="Run on an elevated Windows PowerShell 5.1 console on a farm server. DryRun first." FontSize="11" Foreground="#5F6B7A"/>
+              <TextBox x:Name="txtFarmDryRun" IsReadOnly="True" Height="28" Margin="0,5,0,0" VerticalContentAlignment="Center" FontFamily="Consolas" FontSize="10" ToolTip="DryRun command for the farm server"/>
+              <TextBox x:Name="txtFarmRun" IsReadOnly="True" Height="28" Margin="0,5,0,0" VerticalContentAlignment="Center" FontFamily="Consolas" FontSize="10" ToolTip="Real read-only diagnostic command for the farm server"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
               <TextBlock Text="ISSUE PATTERNS" Style="{StaticResource SectionLabel}"/>
               <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
                 <TextBlock Text="Session" VerticalAlignment="Center" Margin="0,0,5,0"/>
@@ -1034,6 +1054,12 @@ $txtDiagRaw = ctrl 'txtDiagRaw'
 $cmbDiagState = ctrl 'cmbDiagState'
 $btnDiagSaveState = ctrl 'btnDiagSaveState'
 $btnDiagHelp = ctrl 'btnDiagHelp'
+$lblFarmResult = ctrl 'lblFarmResult'
+$lblFarmPeaks = ctrl 'lblFarmPeaks'
+$btnFarmRefresh = ctrl 'btnFarmRefresh'
+$btnFarmOpenReport = ctrl 'btnFarmOpenReport'
+$txtFarmDryRun = ctrl 'txtFarmDryRun'
+$txtFarmRun = ctrl 'txtFarmRun'
 
 # Logs
 $listLogFiles  = ctrl 'listLogFiles'
@@ -1077,6 +1103,7 @@ $script:DiagTimer = $null
 $script:DiagOutputDirectory = ''
 $script:DiagActivity = ''
 $script:DiagProjectRoot = ''
+$script:FarmReportPath = ''
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -1623,6 +1650,7 @@ function Set-CurrentMigration {
         $cmbDiagSession.SelectedIndex = 0
     }
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
+    Refresh-FarmDiagnostics
     Update-UI
     if (-not $sameConfig -or -not $script:ConfigEditorDirty) {
         Load-ConfigEditor
@@ -1888,6 +1916,62 @@ function Refresh-DiagnosticRows {
     $txtDiagRaw.Text = ''
 }
 
+function Refresh-FarmDiagnostics {
+    $script:FarmReportPath = ''
+    $btnFarmOpenReport.IsEnabled = $false
+    $txtFarmDryRun.Text = ''
+    $txtFarmRun.Text = ''
+    if (-not $script:CurrentMigration) { return }
+    $project = [string]$script:CurrentMigration.Name
+    $diagnostics = Join-Path $script:CurrentMigration.Root 'ShareGate\Diagnostics'
+    $lblFarmResult.Text = 'No farm diagnostic result found for this project.'
+    $lblFarmPeaks.Text = 'Analyze ShareGate reports to prepare farm windows.'
+    if (-not (Test-Path -LiteralPath $diagnostics -PathType Container)) { return }
+    $farmDirs = @(Get-ChildItem -LiteralPath $diagnostics -Directory -Filter 'Farm-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    foreach ($dir in $farmDirs) {
+        $summaryPath = Join-Path $dir.FullName 'Farm-Summary.json.txt'
+        if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { continue }
+        try {
+            $result = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -AsHashtable
+            if ($result.SchemaVersion -ne 1 -or $result.Project -ne $project) { continue }
+            $missing = @($result.Coverage | Where-Object { $_.Status -in @('Missing','Partial') }).Count
+            $lblFarmResult.Text = "Latest farm result: $($result.Status); $missing missing or partial source(s); $($result.GeneratedAtUtc) UTC; $dir"
+            if (Test-Path -LiteralPath $result.ReportPath -PathType Leaf) {
+                $script:FarmReportPath = [string]$result.ReportPath
+                $btnFarmOpenReport.IsEnabled = $true
+            }
+            break
+        }
+        catch { $lblFarmResult.Text = "Farm result cannot be read: $summaryPath. $($_.Exception.Message)" }
+    }
+    $analysisFiles = @(Get-ChildItem -LiteralPath $diagnostics -Recurse -File -Filter 'AccessFailures-5min.csv' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    if (-not $analysisFiles.Count) { return }
+    $peaks = @()
+    $peakFile = $null
+    foreach ($file in $analysisFiles) {
+        try {
+            $peaks = @(Import-Csv -LiteralPath $file.FullName | Where-Object { [int]$_.Lines -gt 0 -and $_.WindowUtc -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$' } | Sort-Object { [int]$_.Lines } -Descending)
+            if ($peaks.Count) { $peakFile = $file; break }
+        }
+        catch { continue }
+    }
+    if (-not $peakFile) { $lblFarmPeaks.Text = 'No valid five-minute access peak is available.'; return }
+    $peak = $peaks[0]
+    $utc = ([string]$peak.WindowUtc -replace ' UTC$','').Replace(' ','T') + ':00Z'
+    $relative = $peakFile.FullName.Substring($script:CurrentMigration.Root.TrimEnd('\').Length).TrimStart('\')
+    $farmRoot = $script:FarmToolkitRoot
+    if (-not $farmRoot.StartsWith('\\')) {
+        $lblFarmPeaks.Text = 'Set -FarmToolkitRoot to the shared UNC toolkit path to generate farm commands.'
+        return
+    }
+    $scriptPath = Join-Path $farmRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnostic.ps1'
+    $uncPeakPath = Join-Path (Join-Path (Join-Path $farmRoot 'Migrations') $project) $relative
+    $common = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Project "{1}" -Around "{2}" -WindowMinutes 30 -ShareGatePeaksCsv "{3}" -ToolkitRoot "{4}"' -f $scriptPath,$project,$utc,$uncPeakPath,$farmRoot
+    $txtFarmDryRun.Text = $common + ' -DryRun'
+    $txtFarmRun.Text = $common
+    $lblFarmPeaks.Text = "ShareGate access windows: $($peaks.Count) in $($peakFile.Name). Largest: $($peak.WindowUtc), $($peak.Lines) lines. Both commands include every window through the peaks CSV."
+}
+
 function Load-DiagnosticResult {
     param([string]$Directory)
     $summaryPath = Join-Path $Directory 'Summary.json.txt'
@@ -1917,6 +2001,7 @@ function Load-DiagnosticResult {
         $lblDiagProgress.Text += " $($script:DiagSummary.ConflictingDuplicateRows) conflicting duplicate rows require review."
     }
     Refresh-DiagnosticPatterns
+    Refresh-FarmDiagnostics
 }
 
 function Start-DiagnosticAnalysis {
@@ -1961,6 +2046,8 @@ $btnDiagBrowseFile.Add_Click({
     $dialog.Filter = 'ShareGate reports (*.csv;*.xlsx)|*.csv;*.xlsx|All files (*.*)|*.*'
     if ($dialog.ShowDialog($script:Window)) { $txtDiagInput.Text = $dialog.FileName }
 })
+$btnFarmRefresh.Add_Click({ Refresh-FarmDiagnostics })
+$btnFarmOpenReport.Add_Click({ if ($script:FarmReportPath) { Open-InExplorer $script:FarmReportPath } })
 $btnDiagBrowseFolder.Add_Click({
     Add-Type -AssemblyName System.Windows.Forms
     $dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
@@ -2115,8 +2202,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAd7wWeC+v37qvC
-# YT5otXKYmkSyAWQZ+LVP8WehcqMp06CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzKVxpfI/6soZ+
+# HjH8C6sM8jpG24zSF/iXITxX3xGGbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2249,31 +2336,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIABiXgy9Qoxkp+X8s+eWY0d9WgeSjVF82Xnf3xgCd0lZMA0GCSqG
-# SIb3DQEBAQUABIIBgDxGa/Q+TejoW4JUGSnDNobnTthdCQgvCTcrd3NSaXdQw0eh
-# XDN2Xqz8J4yihDZkgG01lXZyWm/QfJ6PtEr7RcvksOEcfT6eMfmX/44svM/M6OHs
-# hsjqf18PIRwuv7juziqcqtRQ90mkHjsqq3Ol9FtUnmpC3rr+TvWQ5zeCHj7hde3N
-# WA3y4SJIV5CyNjPOqaaTgNs4u1JGROlLfr7XGsyAzmQcUOu7JJV22doMIY2u8ufm
-# 0nJq0LOXe0Pohb/a15oogksGPCq8Cq6WuvsoXSEqoev8Cj28+3nObkzo4dq0SaIW
-# pkI7/GlwNFZeI9/8V0uCSxzrsV5uclNcmuWuL+JpWVvR4TVoAw+ilod8M0TISHSN
-# E8762BqSdHqvvWUdPur2PkTYuMAaufq+12qXAS8D+iwrVZvhAtnUeOv8DhHEPCdv
-# v3uWCH6fDRq2hr1Ix7dfv4WLGiRSo2uoa72jTnjjldISGAlXzCUA4KthixC5w/wg
-# pVEMnR3kPRUXQ4kE8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEms0sqldIHDcyMO2luXW4K6Lyp3aSU0fGCwx5Njzmw/MA0GCSqG
+# SIb3DQEBAQUABIIBgBN32PohW3u5XE73+esdL3QtUHYAyzOl1xUrEGauwed4b5ur
+# 8xf04LDJ9+wTlsa6Z2Eoasnt/PdjcAqlS5/AY4KWKXcaZS0eNSTaVOHcrj3C3AIG
+# Ybit3TYy2Tqm3lsHrINe1etI7GH8a2ZMIQm6g5q98RABMQyMZ3jsfcxuDgSQIEi+
+# 5KmogItuwUEtF2M16UgldVk6CFvdvK7X4v2dEarLdRXVL6D1KHp+A7gNUOjUfefa
+# RxudcvGe6jBS1F7lZurJSItROyWOoEpYxWp+73EoF0AcmWVvFG6kL3n/8wx+R2XC
+# LQAIG4iyuLTPeuOtGrngDUi3eWcHtNMU+MCXBkEi0mddd0iMggJKZTaXt+3zl182
+# mXlxX5qZtnFfZSijc46c9K++nGl8YmtEBVN9eG77Wkx4n19uA3ffBGyYDpHaqgJ1
+# Ej1TmKn7QMusP/6jAL7CSK+x/JxZoaM80zG4FOALE15EaAVR6mMYTSNQRgJXIuV0
+# uOoEWnqR1Q/sRt3XeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
-# MTJaMC8GCSqGSIb3DQEJBDEiBCA1Ioq6FBdlDOEnwP6do6/X1uK1GKtv6U6X37DN
-# 6bmOBjANBgkqhkiG9w0BAQEFAASCAgBlLFRAXT+HCOC05yv+izpD0aY7qfJZ3dfo
-# 1ASYQi8MjBpzF2JrNo0cIzTGjv/Z+nhVfxrK+7EiEUXUwTMCceHiPKF31Zm6IcUI
-# niTzdj1zpJFFzb6ULBDHFjlBqWVvm4+u8CNhS/zLlhlNLZ1zuvygrrLG/mkrJbyW
-# J7uE9g5gJSSCl2Y1jImwRMUTpNYpOiyqeBxbTI5yeOuCvRYN1TOw9KkSnkeDnoBU
-# riQPp9yaOnc6fG6XloUIqDkD04uYI0WkqPMwjdyoAdXK46+7obrF3MsGkhe7/6Oc
-# ymQrkJ0ZKwOl6xnhs65s6sr6lnXYyUmtYUcxCRUPF5aq+QzFZ9O8MvfAGQ9MPn+y
-# tFOB3yO867N5E+PZBodUu5I2tkEoxuIBFUm6ZKEWNZ0gq3o9oaLVCGTq3YaCtryL
-# ouzmgyxRkZ0ZRf4TZj4OiEr52ymVhu31HF83XeswZ0esxEFldGipCB6rDtl1JmCP
-# iOJO5BBtmQXAvnWecn3pLCiRowp2njOvYL25wZWGD41pp+XCvXjzLWRx1cuw2Nvy
-# c3WSHRZ335a7Jsc11m1juV0OOOP6kfzAgrSWh0HnwKQrXcYiskkdN4n7YD2clXeV
-# /GWhnuM2dOEKARCNnSGZnwlt6+Kyr+ifay9vzuuKHuKEBSLZHL6UvVS1YuFrQY0L
-# IzW9zERMhA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjA4
+# NDhaMC8GCSqGSIb3DQEJBDEiBCDeQQPeh0EpS3/TcIC64SU/qXhlxG3R+VXucG0P
+# gOPyrTANBgkqhkiG9w0BAQEFAASCAgA84MhxaNIz+A6JbuIOI1ldJLNiV1GGvuMx
+# bu5DDZXqvb3w2Bp1Yf9JNuk9uy4hj736UTdTTBUN4RPXLgWwV9z8/bjGlEIWR9Ch
+# Q5rQ/QAa5WaBTfxQb+aavwx1zWBQ5jrPK6B1WgwHuJQO1PLUG07W7yW5YTMeNnXW
+# 6/weVkQelmgad8R4Vueds41YP2fDCJAFWQZQWOt7hCSQ5YdJa1CEjFOKYjiYxYYQ
+# tw84Ix3RzTWubkOzw6l9aAqJZJFt5nTj9nw5UmVWma7e9PiixRsgvsqPmsK7Ihbu
+# gIXWwNIl5vOMpIqvBC17Pp1hc8ZWPRkCyDd0f+o1OPmOOpiTgMn8pv2hqY5ldTuy
+# oGictlDbZ+8fknV04z6Owdhb1TvbDVSe6XXymEK/hhP+p/+W9pquUtPRRh9Rx4J8
+# uGqAPEdmwkRB31grdG2htQg3+aXQOrPjpA+t9vGFzDy9YzjTKw7Zk/eFZWv/kKUv
+# cpieVOanQBGbsrZ7TYZPfDUI5UkXlUF3qT7xiNdI7LXm+iWLcHo2YIAnWHqVZtoH
+# u0H/b+OPkJ0JZCqfewRCX5dpfWjvE7N3zgVl4Eu+kk8Qn1mF76L/Haell6AqUhGD
+# OTPfktB9F15z4br4vlK28XmrnOVzRkfzcy2SXkl89vAIw/G9IcjdFhOfQF51UlNo
+# 4MuwFNqtmA==
 # SIG # End signature block
