@@ -370,16 +370,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-Sh
 ### Source farm diagnostics
 
 On a farm server, open an elevated console at the toolkit's shared UNC folder.
-Use `Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd` with the migration folder name.
-The launcher starts only Windows PowerShell 5.1, selects the newest
-`AccessFailures-5min.csv` under that project's `ShareGate/Diagnostics`, and includes
-all valid UTC windows. It defaults to DryRun; add `-Run` for real read-only
-collection. If the launcher is stored outside the shared toolkit, supply
+The regular CMD launcher performs DryRun; the `-Run.cmd` launcher performs real
+read-only collection. Both start only Windows PowerShell 5.1. Pass the migration
+folder name with `-Project`, or omit it to enter the name when prompted. The
+launcher selects the newest `AccessFailures-5min.csv` under that project's
+`ShareGate/Diagnostics` and includes all valid UTC windows. If the launcher
+is stored outside the shared toolkit, supply
 `-ToolkitRoot` with the shared UNC root. It does not call the PowerShell 7 GUI.
 
 ```text
 Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd -Project MyMigration
-Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd -Project MyMigration -Run
+Start-SmartM365-SharePointMigration-FarmDiagnostic-Run.cmd -Project MyMigration
 ```
 
 `Scripts/Diagnostics/SmartM365-SharePointMigration-FarmDiagnostic.ps1` runs from an

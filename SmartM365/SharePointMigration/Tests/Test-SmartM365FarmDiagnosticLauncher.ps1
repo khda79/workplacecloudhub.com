@@ -11,6 +11,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $toolkit = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcher = Join-Path $toolkit 'Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd'
+$runLauncher = Join-Path $toolkit 'Start-SmartM365-SharePointMigration-FarmDiagnostic-Run.cmd'
 $root = Join-Path $PSScriptRoot ('.farm-launcher-test-' + [guid]::NewGuid().ToString('N'))
 if (-not $root.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {
     throw 'Unsafe test path.'
@@ -44,16 +45,20 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
         throw 'Launcher did not select Windows PowerShell 5.1 and both CSV windows.'
     }
     if (-not ($preview -join ' ').Contains($newCsv)) { throw 'Latest ShareGate CSV was not selected.' }
+    $prompted = @('Synthetic' | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
+    if ($LASTEXITCODE -ne 0 -or -not ($prompted -join ' ').Contains('Project: Synthetic')) {
+        throw "Prompted project selection failed: $($prompted -join ' ')"
+    }
 
     $dry = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Launcher DryRun failed: $($dry -join ' ')" }
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|True' -f $newCsv)) {
         throw 'DryRun did not forward the project, latest CSV and window margin.'
     }
-    $real = @(& $launcher -Project Synthetic -ToolkitRoot $root -Run 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Launcher real route failed: $($real -join ' ')" }
+    $real = @(& $runLauncher -Project Synthetic -ToolkitRoot $root 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Dedicated Run launcher failed: $($real -join ' ')" }
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|False' -f $newCsv)) {
-        throw 'Real route did not remove DryRun.'
+        throw 'Dedicated Run launcher did not remove DryRun.'
     }
     Write-Output 'Farm diagnostic launcher offline host and routing tests passed.'
 }
@@ -66,8 +71,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDji9f+QncWS+Bu
-# MuBGZwXmi+szOd5icZlWDC4qBcdLsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKEEiRppNpjtN6
+# Kjs2E2m4/j8OPIM5Gt3RTE4GAnOxM6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -200,31 +205,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDXszwDm4PdGFnRHmz3UU1v0pVB8bw6mraSsW4fjLV9UMA0GCSqG
-# SIb3DQEBAQUABIIBgCEGRbfsXi8HCfgSW+SpUig5Ift6X5UoGxeZMGCuwhwAMYbm
-# gZmxnkhxjpa3FRsov4OvDOGge9qGEXlgIxxuvvTBZiEvFkhJHGXH98so4hcHPvgS
-# /FEeNHTeDzcXZhUDPV7ZV8osNhlgUKLz5HgNZ/m817N6ed6780R/LGb0Oq2VQLyd
-# ofnMUejmBbuxiW4c9Ibr9gXurtL8jP217bgoaSelxv9nzo3NMLZdG8TEwPyXBrnu
-# E6nlo4MNDhZCN8HdulPGBONCIANv8jfAs79erLG3ScfsYLD4mtZpH8yvFZGtfWzw
-# ByZpFaB6HVH9M4ZQmw62ibBbG5srYEvrFH8bpsblyBAg5iT5cE40eKmeyLMo26lA
-# ws8/UQpBut2ttuPGxX3hRx7KA/IsMYT/bwT7RyRfvvCR4/hfWaXzHw/yTVgbgxsg
-# eiiXTmGfhdQniZyOf3hYfOjiyale4irCCIM6Gp89n9voSJ9XiiULJ/gt923n7bP9
-# t3SjYZfEzaL8SqpE8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINBvkRGZixNDJzYnsX3XVu9o/3jR41OuEzaZhlgfOD2aMA0GCSqG
+# SIb3DQEBAQUABIIBgAH1Kbuqm/vqXfM2RTvnNiXIwfd+XmPoZrZ4GNTwBUjnrhWs
+# p/Rk+y+6xfvqWujcRpknKzzz21zFH4dbsQhREImrNjs6dUSeFiU7wVd4QoTs1zgv
+# /SVpdxg5WZniHoAEpoaA6m9kaK2DQNyHXKfg5XeQqrtjVfNjoJJiA3MyPJTeWNuM
+# yZu88NGoH/fUHUsHXkN8nXgQRvIu48ypp3lloReZZOP3LupMBOa9h8KWi2DQJ7cT
+# ZBDl4jEfZ0c8WryhjwUrMjlyJirMr9QGbiElIypKUe868O1zSTw/3cWACiIjrfrj
+# 4fYnyBh0uRnLyfgeyDIKPeNTt55LHH6BFCYyK1k6id7KQUwsKSokVwxnvGtM/hkW
+# Rvr7qQUT5GMe7wsyJamSp8MUOo82HC+w+30fqWHeXpP1uecqDebsC12hdQGCIoxd
+# 6ZvfJJdjFJY9Pb8/RC6Hl9Ko244/umladzDOYZ9iR02HUq0qo4rCgqr7Glksp2Hb
+# Ox1FedK+bFGyzXd7iKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjIw
-# MjdaMC8GCSqGSIb3DQEJBDEiBCBddm8kK2VY1n/KvqeGW7+Fj5ACt7M2UCCIWNiW
-# GtNYdDANBgkqhkiG9w0BAQEFAASCAgCshG+F8R2an5oyQXO94fstmJpoLTSbLHlT
-# OS5zstjODTUMDHHkYT0vWhoFSYNZKSo4LKD+2/FqoAObPmfOf2y30zSIvKPX0PjG
-# GsGv2b1wz0Q2NDmqHJm9TSTK9EXgTaaiGOUe4pUCuLxxGOHFZvkneaXIpFzsKm/l
-# 10jK8pq80zjTBDEGssicj5XGC+vwSWtQUvX/c5KWUnOzg8yfv4dOmHsrfm5Nv+nh
-# HPmrqdHNztLRZdGHnTcbroRe5YreDNuVwUqWMt6Ruxh5MFVnUGC4BxXzFOneYaVD
-# QRIyWznIfsmxghgMUz3O6R8lZogR57+JCi0lNBSjLReWgRrH+fCAQCelFsje+xJg
-# 413cz15zhEbjWlWvK+qa0Uq+YmVWLqGn3T0tUZoPCitYIn/Q9a6bO6Ay02Wqn5b8
-# QNE+LGqNmo/FviVNR0/ogSbfuQoApqZ73JVizLbTztAJz3AlfM5YhM7yShAnSmT2
-# lgVKQGyWV/Nvz6mCXxjOose0ybqv/aS1uegmNDiIcXaOB53S97HvqpwuRIj74KVI
-# /72UPIteB8w1kQQu5xN9CN/K3bAfxZWB/OJutWbdwNvE2cVg0YCej+eEKsEf0Msp
-# lVTRmrsyGegb4QakP35Ijbw2cnNJQ7Q07LUpimXG0QwHeesXcjCpavv8J/Mg1c/b
-# xr7XYdsqOA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjI0
+# NDJaMC8GCSqGSIb3DQEJBDEiBCBZn6dwYA9Iqrd0LMOtZPXip3ztYOoVsrlo82fB
+# pNz/6DANBgkqhkiG9w0BAQEFAASCAgBU1HYdRymxsZlKOBvaelg0cbeNc9WMYnuW
+# SIC1fPfMn+D5It3/XHj0/NRYRBzFQTYhjjPH2hk9aaui2/sJRu3I1fhhUpg/J4mm
+# Nd3qClclAWGqIdz4uFtLmNquJ1Hb9ntefBKcMQVr8PNkFpKK7MDK7zcpLob/03l9
+# 6iHvOZCrWchiz76yyU4Hzw+38pbOzEgU/m7pHEb/nen4NUTuMA3W+mxAyBLxQqVd
+# R/+gVgAKeOjwyYCSAkXpf1N8MiHJdHeWN4QrGKejfn7qFWoPpmCqyCgblOJ8C/LU
+# IWPjOXzBzuLDC/WXUnP77E7VrAi1eC9KuzI/RPvABxAi6100X357jA70Q3j/STd4
+# rP1XLOP7q/XJaJeRC4wI/vZeqHv30NpAj5M6eWkp6qvgyfXF56Qn+lR9EtSXauFt
+# TShd4QEbOG/V8TJsp1+e7E/6mKvO7rw5/G25ZSw0f1lTrqtu/B8FTP3RtoQ4UaJA
+# iRdLKj+D9Y9u+cIB5TPgINWicgRJkiJN4yNRvvTlIWyaLXS8z/xXHgSBO1IEMCK8
+# BaGDsqXfEhq7HJijHUiIRDAECl4NDJpSowiGrn97yZBBd4YDLWEgJa5R45UrQNrZ
+# mZUR3nxYHrg1Ug/30QCWKNKexQ0RjYF6qvuEycU0/Hjui5sojRUg2KC+55MYSVv2
+# Bd110waUWw==
 # SIG # End signature block
