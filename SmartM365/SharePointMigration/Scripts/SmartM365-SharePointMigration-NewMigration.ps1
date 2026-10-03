@@ -4,6 +4,8 @@
 .DESCRIPTION
     The migration directory is created only after every configured web and the
     SharePoint Online admin endpoint have passed authenticated read checks.
+.VERSION
+    1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.0') -ForegroundColor Cyan
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $migrationsRoot = Join-Path $projectRoot 'Migrations'
 
@@ -265,7 +268,7 @@ function Invoke-NewMigration {
     if ($adminUrl) { Test-SPOAdmin -Url $adminUrl -AuthParameters $auth }
 
     if (Test-Path -LiteralPath $destination) { throw "Migration folder appeared during validation: $destination" }
-    $template = Join-Path $migrationsRoot '_Template'
+    $template = Join-Path $projectRoot 'Migrations_Template'
     if (-not (Test-Path -LiteralPath $template -PathType Container)) { throw "Template not found: $template" }
     $staging = Join-Path $migrationsRoot ('.new-{0}-{1}' -f $Request.Name, [guid]::NewGuid().ToString('N'))
     try {
@@ -330,8 +333,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNkxVnYACYsIW+
-# vYo8F1d6tUSFgUq1pAj9m0+2ejxEAaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBInPSk5/z0l+d
+# T27iy0RmJSdvT6LTsbh7Wfp01J+246CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -464,31 +467,31 @@ if ($MyInvocation.InvocationName -ne '.') {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILpR2JTG0+Xswy5JZmh87g670Sg2upm7xr8kpwc+4F5eMA0GCSqG
-# SIb3DQEBAQUABIIBgGM5NYMxtdja0Epebu2E1VnMjcuEgWoRtYdFxACiN1lf1SVS
-# rflx/zkSCTnViHJ1C4qr8HRaRUHzlASwPyPxyPT03XN0phqpLoSYl9sedFGJY55j
-# dyze9TxJWi0nUizYiNd2ZJ7hgYy2B0nAB6Aa/d6paZF3TYrHwFX6MGhqeJqFsz25
-# 9qHbCuKtTfCPavu1bEG1fPPn4WAj/3BiHC0SGZnUta6XSu2+TqSMDYrGLs9jjFa8
-# xuxe2ahiDriKpSHxfT0FLAqz6wXQzmKScVGb33cA7sZdCljhkemx/0skf2IhG/wM
-# w+HPCu+DHdOIjYsjcU/DsgcR2ib/0eDepuEhcPlNEnvyRmWWjsYShkD9jnyym3nA
-# zvnwSw6Plc1ZrceE41U8JS7tGT4ooWQMaI4DWX9FKpjMukc0G6ApLcDZuV+KQopS
-# 5SqIeM2aZtMJBNsJSPfIE7Dxxi6ToJNKFGRudIm1bTPxZuZz8cI4nQU7L+OpEq2w
-# f55GglCSpCF1hhm7i6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHiZUbYLuOXck+BSIxNuO11Mjpndmp05iNbxIMyfKc8ZMA0GCSqG
+# SIb3DQEBAQUABIIBgE/4Hyq8D4U1H2aOx+qbZZ72w5Qu5LMM70YzM6JKA6JOYefP
+# kqy0LNWZ2YEtQcuNX87N41RBkNPq5CiHUew85ZDf4kF62QF1YWR4cNsxSnWMSEcf
+# OKsgg0PB45vker6ylGZdKtE77GXxPbJmhY58IbSCQ45UTDPHfb3rxWHGQJ7WlQbF
+# h3Y1D0/EgD3LMedR0m7PdYYyqG/vJaG13dWLVxQlvE30gF3bmtAULvP+h76kkmSQ
+# WE9m0Qf/jyDctSFoWh1UoSIohi9AR9iODmdTfcYTGBW7NyWLWm1s09tzO+shRFjt
+# pQeln53smjEXLJlHrNkFzZW86LvFOY+5I3m84cDhAZlzblqLeNDuw+ACs3+pQJac
+# 2zQFGbDh6LOyQY2uyAR+x104DjWmiiNPvTUzmpYr5mloR+uvZCfrz0ozPxWY7etO
+# B9KfxZNuEQ63BZummn319SjSGukb91nkHgiqk7wKl9Ov8qz2l2kVwxMZW+R6hKK1
+# SJ5D8sWeS9ga8s5PQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxMjIw
-# NTJaMC8GCSqGSIb3DQEJBDEiBCBN3SeHMC2wIEm80jAPJVpsDjiTVXQJEllUBfF7
-# 8kTcITANBgkqhkiG9w0BAQEFAASCAgBHc34HG8I57ePdsP4p0dwJIeG5MPgpF1+Z
-# bAtuV6PumHyNBN3MMzcNZsVF6qq8W9SXB6gAq+CD4hTZ6VdYR+ytnHaM1ZkIiGGA
-# zVDGP7r3qSz8i+4miejiX6t59g85XAs0P12dJdVZRmM5/rWGiCIyT8/ziGpiENpc
-# uD++PI+sY0NgF+4h1SWLo55K5bMj7KaoE473pyBi/3aIYKAqPpLdTmTT0dGAG2aN
-# xKgeiZVvT6qT4DCSpm7EwF0Xyp4T1WH0+5y5N4/gUpylWFq+YafuIDGE7S8FWRrH
-# NO94uxoV0VhP2L61ftylohOfvfIe3x7stBb8XX5fYAFs/3Ivq50Xw2YYVXW2FDUW
-# Talc9SEwKl+pfEixd8u8RLNnOpWRoqFnaUJcYU0IvB8hZLd5ldL9KXpDDT0TJBba
-# Tl970hz6c2QEx+JucAQs3PdnnRF6njUjMsNLitOYu20Uoc2Ud/b9bWZBuqrShOyR
-# Do0EwyzjeUeQ5TB++NV2nHPaM27NicR5NsT4V7w457ws46+9MO/7bxZW+vqj1bMC
-# ctPtPVL2oqoUZDTacmpXEmSZ1SEYmaNP3sr0PKWNczeD4dcDekfxjrVs0M0CxHNN
-# NHBqpJFCAboN4ygOsQStMiM2oecodrSYzpn/CSDH1yE+B5ofeA61oBB/gCJezTj3
-# HTWg8o3njQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
+# MTFaMC8GCSqGSIb3DQEJBDEiBCDErScwA5b4gje0xKW/VxPlAGP/AkFAz+tP0BhX
+# 6m1AFDANBgkqhkiG9w0BAQEFAASCAgAWKviumJ6aec+cdO1M6WN+RYF0EZVrIgH5
+# X//sJ4c+pXChywiO2j6aq1ADOoQHtKTiBb7ixTNxnl6EUS1rqVG9rkiH6AFghw5B
+# /ugRRLGhhgmiJ1huq1fLt5Pz3e5lnApO9t8ZJETeJDKO96Td/2AtMfemQs7ncNyi
+# gHwWMsgvEds3JzyGYKnpU1traIBonDOwQN/QyVVLxgIZQj15HYHo6jUazFQJQHyc
+# BSjigxYKPpAHOWe9XbESc8o3rqQxrw8KZ+4ERKe2LCQoh/tYpYYdKkHs852yXJUx
+# DRh82M+2E9vrFtyn4H9s9v6xt2JvCmyzz88IV9XRwJLrNtspCaQu08YMD9hNUhPg
+# XNqmTZrfZ9DbHfJ7kEguItr3NN2/tT1oOrl8b+4DrrYSbN77CUZ6Ev0PBplqp2qN
+# j18DrLMKO3ZCkHz8WcU6WhsopbwfR5+TEbc883V37ovL8oQ3QOl0U0HkSBrkOrLP
+# pDPqhyAf6vFWEiqG90AhYh2Ytxvc9b8qHPSRe+kOAauEyCjdi5yl/+GazQ2kx80Z
+# kPpdo4FzEC3P7F+COfu82aSNUd1AkDPukrMtsf4ddjjDDESKr0Ck8isQ1zeoH2cq
+# hYWiR5xUH4V5EZgDaAzvU/S29Fes38Jd5CVRGkO7QAfC0+ts1AQgh3l3ULoUh9nC
+# VRVVb6kp1Q==
 # SIG # End signature block

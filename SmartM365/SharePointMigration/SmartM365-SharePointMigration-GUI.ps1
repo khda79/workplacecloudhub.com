@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.10
+    1.0.11
 #>
 
 #Requires -Version 7.4
@@ -23,8 +23,9 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.10'
+$script:AppVersion = '1.0.11'
 $script:ScriptRoot = $PSScriptRoot
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -56,7 +57,7 @@ function Get-MigrationFolders {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $results = [System.Collections.Generic.List[object]]::new()
     foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory)) {
-        if ($dir.Name -eq '_Template' -or $dir.Name -like '.new-*') { continue }
+        if ($dir.Name -like '.new-*') { continue }
         $cfgPath = Join-Path $dir.FullName 'migration.config.psd1'
         if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) { continue }
         try {
@@ -2114,8 +2115,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+LDyJDzhvVWoU
-# 5yQUO/Ac2qtQoq5jn0v8M5E8iHtVlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAd7wWeC+v37qvC
+# YT5otXKYmkSyAWQZ+LVP8WehcqMp06CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2248,31 +2249,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILykoNkvJvZyFtfq0py5wVD8rzZQz7DAKO9BpnGk5yVDMA0GCSqG
-# SIb3DQEBAQUABIIBgKbGExOh2tiV2MaFuielVOM14N2zSfbn252Fg0ZExX/YPDjo
-# izbFBdJT9/PJ3Df0GyJHxN6vaYw7Ex6k7GjBGDhui/vBcssDXKCWI4FAW2Hk2R2p
-# gcrZnIag7WNHYJvtV4sszLVPxKHLGnM/DLh7f7mqLrzzZB/DG1+IA4ZF0M25p+cN
-# JIj+/58uOQxGiyFgkLMSstTZ6PyUPsm16T+Ib6gio5Zmtgej1Lh3B6OyHCI/NOHy
-# i+t0J0EbfbBObBJ4NHYAEPewQP5sQhxMPZ8slfH3iO6UaQTreY0mndUw0eO5yUvH
-# JqJnV3GAqUE40oj407pLwg0ptcFuR6Gxb0qvnKNcV6vk+f0Tn/BxUlCWPzFojhme
-# 9SvpyRdFdaIDmb+KRmRTIN15mlEhqynyXnE/ihw33m3zt+HbL5zp5/CeqXa/eSc1
-# eiRe6m7rkEf0D2iuWWMyr/BNtbqHBbmUhatPlIKR33qjvpBpRaFIaBnAInVSb50q
-# CAluBtYFm1pwsgqBIaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIABiXgy9Qoxkp+X8s+eWY0d9WgeSjVF82Xnf3xgCd0lZMA0GCSqG
+# SIb3DQEBAQUABIIBgDxGa/Q+TejoW4JUGSnDNobnTthdCQgvCTcrd3NSaXdQw0eh
+# XDN2Xqz8J4yihDZkgG01lXZyWm/QfJ6PtEr7RcvksOEcfT6eMfmX/44svM/M6OHs
+# hsjqf18PIRwuv7juziqcqtRQ90mkHjsqq3Ol9FtUnmpC3rr+TvWQ5zeCHj7hde3N
+# WA3y4SJIV5CyNjPOqaaTgNs4u1JGROlLfr7XGsyAzmQcUOu7JJV22doMIY2u8ufm
+# 0nJq0LOXe0Pohb/a15oogksGPCq8Cq6WuvsoXSEqoev8Cj28+3nObkzo4dq0SaIW
+# pkI7/GlwNFZeI9/8V0uCSxzrsV5uclNcmuWuL+JpWVvR4TVoAw+ilod8M0TISHSN
+# E8762BqSdHqvvWUdPur2PkTYuMAaufq+12qXAS8D+iwrVZvhAtnUeOv8DhHEPCdv
+# v3uWCH6fDRq2hr1Ix7dfv4WLGiRSo2uoa72jTnjjldISGAlXzCUA4KthixC5w/wg
+# pVEMnR3kPRUXQ4kE8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMzA5
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBlEujOlh1K/840oSwMKnx4IEI3jcjaJQEvcbI0
-# Bx51GzANBgkqhkiG9w0BAQEFAASCAgBpV1IidJQuEXI/lN1itZDTtnZ5iy7hIB1/
-# +a63iWcrdDFy3wPQAWCnAQgDeZ0hcLwzWk7hInE4HPPrXc2jmUdn/oF6EgCWJSr0
-# fTMOPcH9CxLA19IS3AycRX5Ik0C2CI2qR5LZuq/hqrHYApR6DzTvIJ+QMZKXGMF9
-# VrwzkW+KJ11/aIlxSKRxw0O28B2Iot+CZHEtF+xEVZyPXsSyDfRDCpi2dWQd3HbG
-# l1ldb3zjvcl4FQ9h5bWGBrPcErFUHH8OJY00ZEovJMHs4gybj9ebebptsk2A7o/z
-# O2mh3WPxOxd9qhwQ5uHErR7dXa1GX108Rw0CdBbo2qvP79x80Pj7TSQ92ojyl+sx
-# qpxC6YLDzuO0w9nSoez2iPn/+Mlshf2v4EnXIQvkEjgQKKpJ3AHKuUnvMQS9lR2K
-# xyKdjhsNFcqaTebrKmzxfz4RPLXr9x+RHmfXhLAAyfVtcV2iuqueXdwanfmOKA00
-# rUBtL779DtBxXSD3J7n9821CJFMNEozth27Nz2hfp/lQ3GjsRy/rvgVDVNVwxcjy
-# 6AS4d7HAdEJaF256w8LTDK6+NpjO+8hWiWUQrlZ/FOf2s6tPP27h0RsbEP4x0dgt
-# TjrJKfqeoDdNuG2iE/zhCMi7rRGy82vg9yUDNe8OIPF7UpxpU5F8r03IlKxy1cnX
-# NE6mBUn9IQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
+# MTJaMC8GCSqGSIb3DQEJBDEiBCA1Ioq6FBdlDOEnwP6do6/X1uK1GKtv6U6X37DN
+# 6bmOBjANBgkqhkiG9w0BAQEFAASCAgBlLFRAXT+HCOC05yv+izpD0aY7qfJZ3dfo
+# 1ASYQi8MjBpzF2JrNo0cIzTGjv/Z+nhVfxrK+7EiEUXUwTMCceHiPKF31Zm6IcUI
+# niTzdj1zpJFFzb6ULBDHFjlBqWVvm4+u8CNhS/zLlhlNLZ1zuvygrrLG/mkrJbyW
+# J7uE9g5gJSSCl2Y1jImwRMUTpNYpOiyqeBxbTI5yeOuCvRYN1TOw9KkSnkeDnoBU
+# riQPp9yaOnc6fG6XloUIqDkD04uYI0WkqPMwjdyoAdXK46+7obrF3MsGkhe7/6Oc
+# ymQrkJ0ZKwOl6xnhs65s6sr6lnXYyUmtYUcxCRUPF5aq+QzFZ9O8MvfAGQ9MPn+y
+# tFOB3yO867N5E+PZBodUu5I2tkEoxuIBFUm6ZKEWNZ0gq3o9oaLVCGTq3YaCtryL
+# ouzmgyxRkZ0ZRf4TZj4OiEr52ymVhu31HF83XeswZ0esxEFldGipCB6rDtl1JmCP
+# iOJO5BBtmQXAvnWecn3pLCiRowp2njOvYL25wZWGD41pp+XCvXjzLWRx1cuw2Nvy
+# c3WSHRZ335a7Jsc11m1juV0OOOP6kfzAgrSWh0HnwKQrXcYiskkdN4n7YD2clXeV
+# /GWhnuM2dOEKARCNnSGZnwlt6+Kyr+ifay9vzuuKHuKEBSLZHL6UvVS1YuFrQY0L
+# IzW9zERMhA==
 # SIG # End signature block

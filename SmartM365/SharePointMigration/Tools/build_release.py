@@ -1,4 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
+__version__ = "1.0.1"
 import argparse
 import hashlib
 import json
@@ -35,7 +36,7 @@ def main():
         if relative.startswith(PREFIX):
             if '.local.' in product_relative or '__pycache__' in product_relative or product_relative.startswith(('Tools/Python/', 'Output/')):
                 raise SystemExit(f'Runtime/private file rejected: {relative}')
-            if product_relative.startswith('Migrations/') and not product_relative.startswith('Migrations/_Template/') and product_relative != 'Migrations/Update-MigrationsFromTemplate.cmd':
+            if product_relative.startswith('Migrations/') and product_relative != 'Migrations/Update-MigrationsFromTemplate.cmd':
                 raise SystemExit(f'Local migration rejected: {relative}')
         if path.is_symlink() or not path.is_file():
             raise SystemExit(f'Invalid input: {relative}')
@@ -62,4 +63,7 @@ def main():
 
 
 if __name__ == '__main__':
+    from pathlib import Path as _ScriptPath
+    import sys as _script_sys
+    print(f"{_ScriptPath(__file__).name} v{__version__}", file=_script_sys.stderr)
     main()

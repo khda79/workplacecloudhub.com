@@ -4,6 +4,8 @@
 .DESCRIPTION
     Interactive use offers a preview by default and requires typed confirmation
     before applying a change. Scheduled use previews unless -Execute is given.
+.VERSION
+    1.0.0
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +25,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.0') -ForegroundColor Cyan
 
 function Write-LauncherMessage {
     param([string]$Message)
@@ -40,8 +43,8 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     throw "Migration configuration not found: $configPath"
 }
 Import-LocalizedData -BindingVariable config -BaseDirectory $migrationDirectory -FileName 'migration.config.psd1' -ErrorAction Stop
-if ((Split-Path -Leaf $migrationDirectory) -eq '_Template' -or [string]$config.Name -eq 'NewMigration') {
-    throw 'The migration template cannot be executed directly. Copy Migrations\_Template to a named migration and update migration.config.psd1 first.'
+if ([string]$config.Name -eq 'NewMigration') {
+    throw 'The migration template cannot be executed directly. Copy Migrations_Template to a named migration and update migration.config.psd1 first.'
 }
 if ([string]$config.Target.Type -ine 'SPO') {
     throw 'These operations require a SharePoint Online target.'
@@ -131,8 +134,8 @@ if (-not $Execute) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYU1D2/HMWjtoV
-# v6cdB9/+ZKPwr3Z/nNpYY36s5L6wX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAce+6hKhYsrgRU
+# QEd119aV99sT2MnxNjgSHlJxb/DbgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -265,31 +268,31 @@ if (-not $Execute) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJyn95K2Jpt6I9oxQNJ0TWeTKS/ESwS8e9F3/Cx1CDabMA0GCSqG
-# SIb3DQEBAQUABIIBgElahR97EwFKe2uOdkCi/cA/IgZQ4xlnssDZNghfrnTS8y7n
-# ZBJ3M8O9brzN4pkNZATdHpkthLHpdlTMT6AUJ6VjJFMDEeOAmaoREg5Dpa/6Aqqg
-# ZsTg3MC43XDV8BL9OzNx80jM/Ji7dv4G5MdHxjSTz7eEjryQeKeqF9sW/AzKI2Uo
-# Efm6/LPWxYdFA19sPZH9LDIqyBCYnJo8hXDK9yVtGVLWXlM9XIAIMYfvhsMK6kn1
-# U7G1Na9OgQYTyU7Bmmarvy2CWAy10i7fjyuFOpTRbCWWPbkc312pSZHD4IFpFiT3
-# 0pk5sqHBMMp+WUygZqdjjK7uyYwuPRgAlW9XxEfXVBO2Ox/YmPxCydE+86IkPgeK
-# pK66DbDvZCl9I3xQ+rkXB47v8lIbxX06UjLNeAPn/YTz50S5utS2xfWvZq86EEb/
-# OEUCcM5rVkPpeTyhlGktMbq8an4+d5pvxPGmsH4sidIHTB+DiQdu0husKSTwSobK
-# oABAGrZNXOIIBNiMe6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFNzXcXVLZvW02yDiU+x4xj7n7n9a0TqLs0RZI7mmpaHMA0GCSqG
+# SIb3DQEBAQUABIIBgEhhBDkxbcKes9NMGDBohmZZv619jSOILXDYNoSq/0jzvmMq
+# jnK0aQpADBFcQOQnJMKxewxR3jKVvc/D4GJgZM47LcZNWJ87OIqGh6b53SAQJ+Vd
+# DU+7Psh1ukn8rZiouD/tNiEpb+KdL0GtDZtANQdhGRBLRF2H6ZYFcYHxqxlAyfEi
+# x5UoOcFxhH4hx2EZhgyaYjebj3Cd6Ztod4TUxM+qCz7pJsb4d26ACPYi1y8lIsKh
+# tf0Au4VASpidX8eakJdeQVAhPSV7sRvPgxGQuI0cAqrzPAAixsqzTfB+fKFlVZCU
+# qyOTvJcshBg5M3CzNeZ++AP4LRme2npm+FnFIqW0oYbyH0XwiUzSpEd7uicU+0X4
+# NAjoSOOU0CRdSxoGSQQaDT4mb9QRUGQiW+DyuAFZmSt/ChNvio+SgLQnVPLHxVt/
+# cwuI5jvV8o7ky0/sJ6shkEZiWMKjGtFl4QjlICg5zTGGex1dLItVVKMHK73LMOsm
+# KY+6ZGNxmljdUwBjKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxMjIw
-# NTFaMC8GCSqGSIb3DQEJBDEiBCDman3qgFG95YAbkvP5CsRJV/j6hloerzLPngzU
-# yh7gIjANBgkqhkiG9w0BAQEFAASCAgBZSdd8csWe9Gfnyu+AFQ9y89i6fYLK2eSj
-# jkvzYTIrr7vRRrnvNln841TOZHEcE3j0L8d0uEfLJeg+eUXZpnVHo3GPBKgus/Kp
-# 9XRP1cZgg44kXYPevkc9+NFcc7YJ/Tz6kVDBo+KbZawPdgv1Qhie+KG/XmZcGUqi
-# aVl00z4VIwRCX1vbaMnr3Fv+DEGQ3HgVL6O5HH2r+bdFbrjiD6S8sFxSFJwf7AaF
-# u0Ml3vBwkH5ytJkpmobenddPlygg+46qN4sGHVwDY1yzQmyv8exm9l1DqcD1D4nP
-# teEuae+r/29WvkzLCSmJPFw0Vgu497/RCh2M3sgEtZcD80x4x2gtq3gB870AvfO3
-# onA5R56moGtGZCDuRIwqDJAyWz6vRpvNdC4Sh1RYFJ7LJZIJJXagKPpC7XsJJLo5
-# XLo/5JX/xKNKh03BOUPljAey24VgXyVGcV9xclJFIgP/hmIVK5tuYJzJzah/aKiU
-# XtRVhbia6lhFHPpC0H3fz2k7F7/LIAsfWb5jBDelCC88pAFcb0sGyiaZ3FS7y1TK
-# ocBH8x7U87ZDZxhkXERUbPrk3pyJFKa3jj8BKnh6v4BMnDCVrw8n8cb+Xliz27qP
-# co7qGbMF9qYfO5brxxZuZjuxjVINsEe/lYiOo5MEucKvj4iVmjvuJ2FEu8mAd9MF
-# NelHr9iU2w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
+# MDlaMC8GCSqGSIb3DQEJBDEiBCDz5fTrYxmfSpyoZI3qZ+YZZSsvCy3ifikRv0us
+# U/QfmzANBgkqhkiG9w0BAQEFAASCAgBfjnr/UOHbOg20irCpK7V11v5MR3ZN8Cb6
+# kLfriVO349fBey8uWD2s6PLqTD3vvyFEHD1NLMo8rd2O+m45IcBOUr2EI/48EaBu
+# NFUxzLAKE7ur5IqQIpoYwT5AH59iVsufsC/tEzarPCSWH188TFMCUqW4w6ZKxQXN
+# nW1FOJiR35CL+R0OA7N9YccssUJWxAcezI0PXUIgupYjAH8xq+K4pq86jf/gO6yb
+# //Fo8H6KeeUt2GTTm40XxVynpLoT83N8Dbjr1/FpkPK7fA0QZ6iTFosY7Gknd2j3
+# w7v1TfoUE7Ipcog1ZZJ9q9h568ZYiS8VSAnr/gvTDnqccPIgi2l4KP0HGZYrQhCH
+# byx5HjJMCJ2jrow8gL8RfZNsDnXlaPWcDdaFa8wQTT68rd2VGQyqIkgA9shBQzKi
+# ecg9Ae4V5JLKk26Rq0QoAu+r79o8wu2pX1d1Y1q1j4kVAhq/vD19xOgUt0SCrNHx
+# cJ1G2+Q0SQ4t2Ep/RxB6zJg3LXaXNVtgcV5fioER7uEWqAk5bU3LYJZIegXtr3AO
+# paeZ0T174R6b/ZkhKDJzxagk1LzwZ+x4rMXqEFfG0PMPXPwM9oAApjEeFz/uI5Sm
+# aK7z9Pk+3NB8m6xEq21sj+13OYXonMqJkbHpttrR4YgvhOl4MMKb/P/bfc3Qa4NQ
+# DOiNeeBSuw==
 # SIG # End signature block

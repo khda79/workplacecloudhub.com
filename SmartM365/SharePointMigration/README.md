@@ -80,7 +80,8 @@ For a local resource check without displaying the GUI or contacting a tenant:
   administration operations.
 - `Scripts/Launchers/`: migration-aware launchers shared by each migration
   folder.
-- `Migrations/_Template/`: safe template used to create local migration folders.
+- `Migrations_Template/`: safe template used to create local migration folders.
+- `_Local/`: private workstation helpers, excluded from Git.
 - `Config/SPOAuth.sample.psd1`: placeholder model for local SharePoint Online
   authentication values.
 
@@ -96,7 +97,7 @@ mode and `Get-PnPWeb`. A missing site, denied access, unavailable module or
 inconclusive response blocks creation. Checking the SPO admin endpoint also
 requires tenant administration access through the selected PnP authentication.
 Run the GUI where the URLs and the required authentication are available. The
-wizard copies `_Template`, writes
+wizard copies `Migrations_Template`, writes
 the configuration and mapping, and selects the new migration only after all
 checks succeed. For a multi-web migration, each additional mapping must have
 one source URL and one target URL on its own line.
@@ -104,7 +105,7 @@ one source URL and one target URL on its own line.
 You can also create one local folder per migration manually by copying the template:
 
 ```powershell
-Copy-Item -Recurse .\Migrations\_Template .\Migrations\MyMigration
+Copy-Item -Recurse .\Migrations_Template .\Migrations\MyMigration
 ```
 
 Then edit the copied files:
@@ -143,7 +144,8 @@ differences; use their linked CSV and Excel exports for the full detail.
 The comparators load the shared `report_html.py` from their own directory. They
 add that directory explicitly because the bundled Portable Python runs in
 isolated mode and does not add the script directory to its import path.
-The generic launcher prints a WorkplaceCloudHub introduction and a timestamped
+Each executable PowerShell entry script prints its name and version first. The
+generic launcher then prints a WorkplaceCloudHub introduction and a timestamped
 execution summary with status, duration and run log path. A successful script
 run means the comparison completed; inspect its report for migration differences.
 Runtime outputs stay inside the local migration folder:
@@ -155,7 +157,7 @@ operations\generated\
 logs\
 ```
 
-`Migrations/*` is ignored by Git except for `_Template`, the template update
+`Migrations/*` is ignored by Git except for the template update
 launcher, and each migration's `ShareGate` folder structure. Put ShareGate
 migration reports (`.xls`, `.xlsx`, or `.csv`) in
 `Migrations/<name>/ShareGate/MigrationReport`. Only the generic README and
