@@ -5,7 +5,7 @@ Offline native CSV projection, empty-export and fail-preserving regression check
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -63,14 +63,14 @@ function Remove-SmartM365AdFileWithRetry { param([string]$Path) if (Test-Path -L
 function Publish-SmartM365ExchangeLocalMailboxCsv { param($SourcePath,$LatestFileName,$HistoryLabel) [pscustomobject]@{ Path=$SourcePath } }
 function Get-RemoteMailbox { [CmdletBinding()]param($OnPremisesOrganizationalUnit,$ResultSize) if ($script:failQuery) { throw 'Synthetic query failure.' } }
 function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings { param($Warnings) $script:mockWarnings }
-function Add-SmartM365LocalMailboxIssue { param($Category,$Operation,$MailboxIdentity,$Message,$SuggestedAction) }
+function Add-SmartM365LocalMailboxIssue { param($Category,$Operation,$MailboxIdentity,$Message,$SuggestedAction,$ObjectGuid,$NativeRecordRetained) }
 $global:SmartM365TenantKey='synthetic-test'; $global:SmartM365OrganizationKey='synthetic'
 $global:SmartM365EnvironmentKey='test'; $global:SmartM365TenantId='00000000-0000-0000-0000-000000000001'
 $global:SmartM365RequireCsvValidationRules=$true
 $adAst=Read-TestAst 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1'
 foreach ($name in @('Get-SmartM365AdNativeColumns','Get-SmartM365AdCsvColumns','Complete-SmartM365AdDomainCsvSchema','Combine-CsvFiles')) { Import-TestFunction $adAst $name }
 $exchangeAst=Read-TestAst 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
-foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Export-CsvAtomic','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
+foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Export-CsvAtomic','Resolve-SmartM365MailboxWarningNativeGuid','Assert-SmartM365MailboxNativePopulation','Find-SmartM365MailboxSmtpConflicts','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
 $autopilotAst=Read-TestAst 'SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1'
 Import-TestFunction $autopilotAst 'Get-InventoryColumns'
 $TargetDomains=@(); $OnlyADPermission=$false; $IncludeRemoteMailboxDelegation=$false
@@ -322,8 +322,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCykXOlLqeoolqo
-# BC1FjF8Bc5oJiU2P1cnPjGxsmmhlGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB2Txo3qc4RE/r
+# BWGnRadR2YNW68K934Fuh2R/KZ6BFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -456,31 +456,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG99E7XDYQxE1X+Znugm05YUatgkK0ept3qBMePcv4naMA0GCSqG
-# SIb3DQEBAQUABIIBgKNqO4vZrSNJiO0AuGqD8BcX7M8uGRBNQMyf1mgE+fOoXlfv
-# 8gc5DZ/WJJpiPR79viI7BAL+vi/JVE6SGJdsLeTrpIKl7WbuJu+CGFa/pfNL7LzR
-# 389CNeT5qxqavFn5G0+etQeTvfiNDvSFyP9FX+aXBUgcH76iWTy8wa7GfEAv7f01
-# UEWYCV0rpHVkmfk3tPZiHrYqXyk6+BYqLMZ1QuSgtYBnr3fWmPy7F0U+cQ2Cpvcs
-# 7hbK4fs25yiz+Ya6EFOYdC0Lhm92gldoWZEWvqg0b8vdC+HPE7XySL0NAdFqk/Vi
-# hNwx7fuqoy3oQ0QchtIgiIjiNo+IgExrEKnxivfQhuUtZZ33FKlyydORh1CUJwLP
-# 8EbxwkB1Qh9HgwysrA1sNun/TLvoG94YtQmFYdbXsjp/1bW1aMfSBM+BumXCO0wU
-# laSy/2aKzeHDSCHhR6nTgse6DI+HkcGP1ub1qFZUj6qUKbgYd/t3Nbcs3MbhqPt0
-# FTSqrLUWhMS4lQ6P1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPaAfNbO4qi2Tf/+DpM4dG+nq8mJDAHP2r9c4Ddq9z6bMA0GCSqG
+# SIb3DQEBAQUABIIBgAsyNZUuiRyxNTffMD70vEksLHnERxhXwlDFPR6hkcRxm1+4
+# NgRyaZIDCVT13aDvYIRZMudIEA8hBSoawLLiCCOONiI3NJbDojVrPZLsVc5V9RAE
+# XZZEzQokpBApnWG4swBc+6hzykcff8SibMitM6j/gksTJPOiCi5GDlQx523BmtKV
+# BLZ1cNwcUYsHSVxKo5K2YZAyZtMPfBXbjVoyH//lRgYZM/IDjzx5AHo7qtIn9sa0
+# z6TI12VxVo2yukWr5dye7uR8N83Kt5Q2mb1pN5wBOH7nlZCzolLfWVblTb0Zm0KP
+# Qk6bpBNYye49UUoGIy2Pt4utDDg7fU0uH109HQWc9KNUaIcVnNpkhoxLXeSvXm6u
+# E5edXCW47WFSK3mbGWj7qitaKeR1RB0IF2sfhu/w6wDEcUP81+iof1jbcDTINKkW
+# 7C1c5MkdY4ctqQjdLjlCAAi6gcVexfcRz8xI0cNDpXhrmdE7xTggXUTiJ0p16Icr
+# n8oBV8FkG5F1PkiFD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMTAy
-# MzNaMC8GCSqGSIb3DQEJBDEiBCDqu7g5yOAFmY5F0r5ZqfOIMCpfrpK3ZIWYZU8v
-# DJ2ceDANBgkqhkiG9w0BAQEFAASCAgCz6kA1Iq666gfKOl6mke7XZc3EZbermDoM
-# v8koA2BSQdn03/z/IU7c8vkR31BA1WDe5vYeHbjwFf138+nQY9BeCCqo1W5QFCht
-# gLaJt/CdZHl94Yp/NcG+H4u+pmyF3lcaW4UlgG1ky6eFrToOODnWoUSKEMNiIIX/
-# nIInfW6qali34ZsNUZQHo1OcT/kBzp7vk7TI7kURlthqnkHiAA66zuCmQ53KAxa/
-# 3bIl0mD5Nkcgyo04scT39+wxCo3iyQgvaUv1ZZoZp99lKhNhXNRrue2S2KoPDale
-# pBPVTPFW5i0nsqVb8IamwDMKl63vkfmefz+gsOKeQlTGILNGuH+WL74u0s6x5CBO
-# PjxiwqT6wOM/ITqG+TOHf1mfendYfpKNrBjAKM1MhFEhN0gprC3HWuaAqjZdwK27
-# ASkSe8/E6pgFApclxHsGhx3KH9jcaqB0OZRMIBJlDxu1+4sNnWgwzjQyiJ5+mhUo
-# mkZyzAxEamrWgPxtqZF8ZFlbYcKv9tRsjvyNHR2LK6fdt0dO7kU8hDFuU1fVNPOE
-# 1AItgcGoOn/JOSrZDWEJoZ5rhHRBMQO6yDUS3SLxyOXIhH5sBx+frQA3GsVn0id8
-# Tss1Wm/4QyiICxAgDl5l7a0/8Ak1EO0wtogBonMStg+bqsLtlDk8+gI6IFm7E6CM
-# R1aaV2Y35g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxODIy
+# NTJaMC8GCSqGSIb3DQEJBDEiBCA3+sDtzTeByYWrFC7RLSuCWfcRY4zV2uWnORIh
+# 04GFMDANBgkqhkiG9w0BAQEFAASCAgCEY1FFTuH0NXePgK30qOwc3ehwC4meqt0v
+# OWVDoR1gPlYS5wkqvJl97TBTxJDIOazyI7moj9UaabjAmHIv3CboaGRO0+2zh2xf
+# wLG0K4sX2T2gWtM0plW045pSxZiG4ET4mh1eyvR8Df8gmqOvDHE+RpI0vfuYTwSW
+# CtVFcXP0yREey2wCWGhLNZrl5wVemsKga4OhJrg6F674qFikZzGVnmnDylj+toGk
+# j43GzeAuBNwQ9H0nKssjAYOrtDyT/ernLxQMzL/CcXKzshXz/VM5MwbV732K3iJA
+# gAkq5V7RESQ3b/cayHjzkEGPIz6qtyN7wm0zfhEmCsViYbjI8qZ6v4DxH4hvdfDn
+# +wc8W/IfKZcNpz3l+oSukVNEqOz+0GNvA5jk0d2mH5tNmEjhr4jOGpPDL1FS42AP
+# 0DGZonou/1mEBounDEfON8giUz7mG/5VSow0xIfmbzCzRkyn1O+4gtfnJFWAFfrK
+# 260tGaqse2Xqu3XZHVzoq60rE0VEjhKYbV2tJ3GejKWdMgd+q6u0vsZy/AN73gL4
+# 4d0C5rNY50GyyFpotle3DFTO0QQdT1oXkqB/smYfoqXElpaGJgUV7CKinj3WcL4h
+# FxQBAlflWx6ypz4zFuhPpukcRvcKE7TvBJRCZvKlkAY6woR2B4jMg67x2dSWlbb7
+# CT17Bt1JJQ==
 # SIG # End signature block

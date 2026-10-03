@@ -35,7 +35,39 @@ does not solve the problem. Before activation, qualify a fresh full run, then
 approve cadence/timeouts or explicitly redesign freshness requirements. Do not
 change those gates merely to pass a preparation run.
 
-## Proposed integration
+## Exchange local acquisition and recipient quality
+
+Exchange local 1.53 qualifies full acquisition separately from recipient health.
+Every discovered domain is queried at its domain DN, including the forest-root
+containers (not only first-level OUs). Required queries are terminating on error.
+Their projections must preserve the exact native object-GUID population; missing,
+empty, repeated or substituted identities fail. The RemoteMailbox projection is
+checked against its unrestricted native query as well.
+
+Known recipient validation findings and unavailable statistics, quotas or mobile
+fields remain in the native issue CSV. Five additive columns declare Severity,
+CollectionImpact, BlocksCmdbQualification, ObjectGuid and NativeRecordRetained.
+An explicit category/operation
+allowlist distinguishes RecipientDataQuality and FieldUnavailable from blocking
+acquisition failures. Unknown warnings are retained and blocking; no wildcard
+exception or fabricated zero replaces missing evidence. Recipient findings are
+nonblocking only when their exact native Identity/DN/GUID resolves to one returned
+object; absent or ambiguous warning targets remain blocking. Complete query and
+projection evidence remains mandatory even when all issues are nonblocking.
+
+SMTP conflicts are reported without deleting or rewriting native records; they
+block qualification because address-based reconciliation is ambiguous. An empty
+SMTP remains a retained object-GUID record, not a duplicate blank address or a
+proven EXO match. The receipt includes aggregate qualification notes; the issue
+CSV keeps the detailed evidence. Existing failed receipts are never repaired or
+stamped retroactively: a new acquisition is required.
+
+The base mailbox/RemoteMailbox CSV schemas and Intelligence history keys are
+unchanged. Supplemental field failures still appear as Error/N/A in the existing
+exports, never as measured zero. This preparation does not activate jobs or
+change the existing application's schedule, timeout or arguments.
+
+## Proposed jobs
 
 Reuse the existing resident orchestrator and pipeline. Add only:
 
@@ -89,6 +121,8 @@ Use the repository's synthetic tests:
 ```powershell
 pwsh -NoProfile -File .\SmartM365\Tests\Test-SmartM365DiscoveredAppsFreshOffline.ps1
 pwsh -NoProfile -File .\SmartM365\Tests\Test-SmartM365CmdbIntegrationCandidate.ps1
+pwsh -NoProfile -File .\SmartM365\Tests\Test-SmartM365ExchangeLocalQualificationOffline.ps1
+powershell.exe -NoProfile -File .\SmartM365\Tests\Test-SmartM365ExchangeLocalQualificationOffline.ps1
 ```
 
 The integration test merges the candidate into the committed jobs template **in
