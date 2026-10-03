@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.14
+    1.0.17
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.14'
+$script:AppVersion = '1.0.17'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
@@ -365,17 +365,13 @@ function Open-InExplorer {
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-          <Border Width="38" Height="38" Background="#0078D4" CornerRadius="8" Margin="0,0,12,0">
-            <TextBlock Text="SP" Foreground="White" FontSize="14" FontWeight="Medium"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
+          <Image x:Name="imgLogo" Width="48" Height="38" Margin="0,0,12,0"
+                 VerticalAlignment="Center" Stretch="Uniform"/>
           <StackPanel VerticalAlignment="Center">
             <TextBlock Text="Smart SharePoint Migration" FontSize="15" FontWeight="Medium" Foreground="#1F2937"/>
             <TextBlock Text="SharePoint migration dashboard" FontSize="12" Foreground="#5F6B7A" Margin="0,1,0,0"/>
           </StackPanel>
         </StackPanel>
-        <Image Grid.Column="1" x:Name="imgLogo" Height="30" HorizontalAlignment="Right"
-               Margin="0,0,16,0" VerticalAlignment="Center" Stretch="Uniform"/>
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
           <TextBlock Text="Migration" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,7,0"/>
           <ComboBox x:Name="cmbMigration" Width="140" Height="30" FontSize="13" VerticalContentAlignment="Center"/>
@@ -1181,16 +1177,19 @@ function Set-ScanComboItems {
     )
 
     $previous = if ($ComboBox.SelectedItem) { [string]$ComboBox.SelectedItem.FullName } else { '' }
+    $previousLatest = [string]$ComboBox.Tag
     $ComboBox.Items.Clear()
     foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
     $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
     if ($ComboBox.Items.Count -eq 0) {
         $ComboBox.SelectedIndex = -1
+        $ComboBox.Tag = ''
         return
     }
 
+    $latest = [string]$ComboBox.Items[0].FullName
     $selectedIndex = 0
-    if ($previous) {
+    if ($previous -and $previous -ne $previousLatest) {
         for ($i = 0; $i -lt $ComboBox.Items.Count; $i++) {
             if ([string]$ComboBox.Items[$i].FullName -eq $previous) {
                 $selectedIndex = $i
@@ -1207,6 +1206,7 @@ function Set-ScanComboItems {
         }
     }
     $ComboBox.SelectedIndex = $selectedIndex
+    $ComboBox.Tag = $latest
 }
 
 function Get-SelectedScanFile {
@@ -1318,6 +1318,40 @@ function Invoke-MigrationAction {
             'Target.SiteUrl differs from the target mapping. Align the configuration before running a site operation.',
             $script:AppName, 'OK', 'Warning') | Out-Null
         return
+    }
+    if ($Action -eq 'CompareFiles') {
+        try {
+            $script:CurrentStatus = Get-MigrationStatus -Migration $script:CurrentMigration
+            $st = $script:CurrentStatus
+            Set-ScanComboItems $cmbScanSrcFile @($st.SourceFileCsvItems) $st.SourceFileCsv
+            Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc
+            Set-ScanComboItems $cmbScanTgtFile @($st.TargetFileCsvItems) $st.TargetFileCsv
+            Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt
+        }
+        catch {
+            [System.Windows.MessageBox]::Show("Could not refresh file scans before comparison:`n$($_.Exception.Message)",
+                $script:AppName, 'OK', 'Error') | Out-Null
+            return
+        }
+
+        $olderScans = [System.Collections.Generic.List[string]]::new()
+        foreach ($pair in @(
+            @{ Side = 'Source'; ComboBox = $cmbScanSrcFile; Latest = $st.SourceFileCsv },
+            @{ Side = 'Target'; ComboBox = $cmbScanTgtFile; Latest = $st.TargetFileCsv }
+        )) {
+            $selected = Get-SelectedScanFile -ComboBox $pair.ComboBox
+            if ($selected -and $pair.Latest -and
+                -not [string]::Equals($selected.FullName, $pair.Latest.FullName,
+                    [System.StringComparison]::OrdinalIgnoreCase)) {
+                $olderScans.Add(('{0}: {1} (latest: {2})' -f $pair.Side, $selected.Name, $pair.Latest.Name))
+            }
+        }
+        if ($olderScans.Count -gt 0) {
+            $answer = [System.Windows.MessageBox]::Show(
+                ("An older inventory is selected while a newer scan is available:`n{0}`n`nContinue with the selected inventory?" -f ($olderScans -join "`n")),
+                $script:AppName, 'YesNo', 'Warning')
+            if ($answer -ne [System.Windows.MessageBoxResult]::Yes) { return }
+        }
     }
     $launcher = Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiRun.ps1'
     $exe      = Join-Path $PSHOME 'pwsh.exe'
@@ -1619,6 +1653,33 @@ function Refresh-ActivityList {
         }
 }
 
+function Invoke-ActivityLogRetention {
+    $now = [datetime]::UtcNow
+    if ($script:NextActivityCleanupUtc -and $now -lt $script:NextActivityCleanupUtc) { return }
+    $script:NextActivityCleanupUtc = $now.AddDays(1)
+    $directory = Get-SmartM365GuiActivityDirectory -ProjectRoot $script:ScriptRoot
+    $cutoff = $now.AddDays(-7)
+    $removed = 0
+    $failed = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $directory -Filter '*.log' -File -ErrorAction Stop)) {
+        if ($file.Name -cnotmatch '^\d{8}-\d{6}-[0-9a-f]{32}\.log$' -or $file.LastWriteTimeUtc -ge $cutoff) { continue }
+        try {
+            $current = Get-Item -LiteralPath $file.FullName -ErrorAction Stop
+            if ($current.LastWriteTimeUtc -ge $cutoff) { continue }
+            Remove-Item -LiteralPath $current.FullName -ErrorAction Stop
+            $removed++
+        }
+        catch {
+            if (Test-Path -LiteralPath $file.FullName -PathType Leaf) { $failed++ }
+        }
+    }
+    if ($removed -gt 0 -or $failed -gt 0) {
+        $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<gui>' -Action 'ActivityLogRetention'
+        Write-SmartM365GuiActivityEvent -Path $activity -Status $(if ($failed) { 'Partial' } else { 'Succeeded' }) `
+            -ExitCode $(if ($failed) { 1 } else { 0 }) -Detail "Retention=7 days; removed=$removed; failed=$failed"
+    }
+}
+
 function Refresh-GuiState {
     try {
         if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptRoot 'Migrations') -PathType Container)) {
@@ -1626,6 +1687,11 @@ function Refresh-GuiState {
         }
         Load-Migrations
         Refresh-TransientResults
+        try { Invoke-ActivityLogRetention }
+        catch {
+            Microsoft.PowerShell.Utility\Write-Warning ('{0} Activity log retention failed: {1}' -f
+                (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message)
+        }
         Refresh-ActivityList
         $lblLastRefresh.Text = 'Updated ' + (Get-Date -Format 'HH:mm:ss')
         $lblLastRefresh.ToolTip = 'Shared activity and migration state refreshed.'
@@ -2216,6 +2282,15 @@ $script:AutoRefreshTimer.Add_Tick({
 })
 $chkAutoRefresh.Add_Checked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Start() } })
 $chkAutoRefresh.Add_Unchecked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() } })
+$script:ActivityRetentionTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:ActivityRetentionTimer.Interval = [TimeSpan]::FromHours(1)
+$script:ActivityRetentionTimer.Add_Tick({
+    try { Invoke-ActivityLogRetention }
+    catch {
+        Microsoft.PowerShell.Utility\Write-Warning ('{0} Activity log retention failed: {1}' -f
+            (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message)
+    }
+})
 $script:DiagTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:DiagTimer.Interval = [TimeSpan]::FromSeconds(1)
 $script:DiagTimer.Add_Tick({
@@ -2259,10 +2334,12 @@ catch {
 }
 Refresh-GuiState
 $script:AutoRefreshTimer.Start()
+$script:ActivityRetentionTimer.Start()
 Close-SmartM365GuiSplash -Splash $script:Splash
 try { [void]$script:Window.ShowDialog() }
 finally {
     $script:AutoRefreshTimer.Stop()
+    $script:ActivityRetentionTimer.Stop()
     if ($script:DiagTimer) { $script:DiagTimer.Stop() }
     Write-SmartM365GuiActivityEvent -Path $script:SessionActivity -Status 'Closed' -ExitCode 0 `
         -Detail 'GUI window closed.'
@@ -2271,8 +2348,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRHhSibdGliSlJ
-# qe3gLplzVVtEvrXF0eSlsDck+cBNyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3Wj80nxPOT55M
+# f+b7CZyLjwFZsfV+/Qp+6p3P88u07KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2405,31 +2482,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIABivr6fRu650fY+WgfiBHNoQdSF8S9JlB+zxbRbfJRIMA0GCSqG
-# SIb3DQEBAQUABIIBgAWIeCILoqyAICkcByREkXw+4Enc6fbx/0pWtbx9y+gDxHA6
-# bJzne6YGVpfp6BaR77PCRF3QQMz3udjJ+ijCLQEHVLRDJ1wjCHki8BLKAu+ZyB8D
-# NfNk32n24GfmKASGU/z2X4I6zsm8dLrd4CwhHVRNE8TBHGCqC32itU0QbCW2yrIy
-# 4lGO2FGW7aqFs1ot4XqrVzjNthDnij15K6p/XvjXFlaWO/9Idqg0TkmmqXrGvCMu
-# xieDtOXhVMe1sV24eozjLZrbkoXdaGSO9/dEawbKCmnS+VsxQfFItifejaxKqLDM
-# Qjn+IUmzVLkGJvU2b5bM9L0bEa25w9XDgZbtccLKPg7Tx+SiVF8cpMd+B+RyDNuc
-# jU2xURUGITJF9udjltQUjOuKjcO5SK1S55N9yZKZ1oI6A7mKcjtLQOAY8uB6lUv5
-# jLjiGdc6khRvVAiruBdufLv4h03hZskwQBsm500gARBH1QL7VBIuwKEJZ+g/iK87
-# ist4hqUeHP/VreiYkaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJRM806QnCe4yzyAYTEhDj0X1L3g0iEOL9vLuOKPPUAEMA0GCSqG
+# SIb3DQEBAQUABIIBgDcFoxZ/VNtAsZ2LZO/K+qSjvggykOuwVOGp4M6rItn/Svr+
+# xuZ8LR5T+nMml6wX0Tho+zxTfS4S8J8NZyG3zYj0PrJGm81+g91MZl85kiehN35B
+# TtfgeXlmSjZxH+TCgP9UdVBrtlMEmdAOOS2+jq/aPYUvgoaVVDyQPE81THeuY2K9
+# BVzTlKcLKgrksP47MUqd11jluOiziHU3nJ/Z4vJXOEU9UaHOZOUca4eAV/gtfb2x
+# juSV/yTyGjAyE9oRdMI/cSaDqHNBk3kzYufDH8Btyf01hkH6OrECBswdqkUqm8xk
+# 9lWGKzUvBqNXw4THxvKevo5zeE8DrTMnP1Cc79jwrCpgx5dsooyDjHf9Jlg/c0D9
+# d+6LUhulcBrnUeUkD6ufkHoJM9XL4D0p225N0DibN2qlFxog9nGikdDf6ShZVI7H
+# i+6M720PaUJiu9mpbt7GyBX6d6siBHS7cgj8arUOODhoqyv5B7llURejRR/Acmwk
+# CnvSrzuPPX2ET5GJL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMy
-# MjJaMC8GCSqGSIb3DQEJBDEiBCCATNDAS6VZbV1EZ2YAlzqI06/Gq7G3vKb9BvJd
-# yr8iPTANBgkqhkiG9w0BAQEFAASCAgBgp+KyRFNYUuufdbbmZt7fr2enji9YSXjs
-# RoQxeEaTvxm79yOjyymptkr0+uCt5yu24A8F/lD6m/kAjwBWKcchDn1mUpnflwN5
-# MdG2idEiTjdaERR7JsMLfdVRcSDqbtT5hpJevYXUTJq+D9WpoiWTbs2J8LARdeur
-# evUX3qv/NZaka+tzYYd2bdpbYiDwyN/CfiifLk4p03LeY8nt+KK/TF5QTwfFlrHX
-# 1fd3ogDkRsM1k+RN3czNCSOeL1dRfFPOMEJOVn1qKTNyLC6oCL6oSh+kQIlxTatJ
-# Ql5MEva+dO3KiTxt4WDBkAY/yFFWiRvbEGRFLcPMJQpsZddTDUZ3cJz+C4emfG9U
-# Plja5ehvhICC8q/uaWUeT2XtjHxr5RaSGpaWE2FanHiu3kuKB/CJGQD02Z0mPd0Z
-# w3FBDpWWwxubEXKOndBfiKu3rV3cixCRe1v57Xy/ylGziRffqeiK7Bgx96Sbc9ai
-# GYyIp0xmHmJnotuO+7MwXUD0rt41TiNLxfQdEeTX5lkpqaNAAmMPTvnOhZz9+fcc
-# WXPAMu8z4QbIJaSsYH/NrWUzWeLMDpbzr8MUtZ0EtV92Cq8MLULXD43gSx+fiidj
-# VBQF5PP7FWpPutdcng7HU/1r/L+j9TBM3/CrquLN7t7nTSJFRyZVsmdFJghL+VMF
-# cVOdpgDzQQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTI3
+# NDdaMC8GCSqGSIb3DQEJBDEiBCAQQhfWuWouji/x00ky3OE+E+9vllw2uctSglNL
+# qR3m8DANBgkqhkiG9w0BAQEFAASCAgCrMGZFTyBW21mUMKMQfitDnR83N5+tavWt
+# 2hL8xL5g8D7n+IfxSBq69sH8EzBpcWee0QHvvOJUnnLiqJL2uerf6fh1xFd9G7kf
+# p+7BF8WFtcmeAIs93jHNMmOWz1DK7WeC9ZIGKR0PvCc7DiLBRR4HH8AI2yhFz0W/
+# E7QSNdsB5lj6xaWsQiL4vwWt5WFA7kv7OZhZcL9haQMbJ6o65NGYV+PbI9/bZD06
+# U4Tzci2Rp+Zx8yhVKn4JE2Xggi/3Q6fk0ntLFnOu9V/t1EIFJXHkIBKZVeVOd8xQ
+# TGEkSYEi6BupJI+pJSKKI58viwCCxyfJW9whi4NxGM7WIOc5QyW4DhMHtbd/eEWP
+# obHA2JoJhbbQTdIPyISryJeoE2jHRDOSSnoI7xpNGGYLaPOCW7P0OKH5zdc8dt7Z
+# sjJSHjPB01gPeZLCztEdAQjPtZpTS9jiFfoZKAjou+CwULnmumTi7ZWqBRHcPwYl
+# IqrCSMrNTTHpZngFjqUFmhWo81ZqZs8PCeoOrQ8fhDnY6AWzLPRHr4LVIjLH6EGZ
+# PfF7nJE3q2ISvVik2LFywl3wGf5A8/lC4hE1Ss02n0ko9rVeWFbDuNMpKO9JqkDW
+# JUQzmZgjcgjKPtTPRtoPHzBFKY0yxsfDEbfRNFedlBYeNFildD4+juSp4go0JfEa
+# oWJY2q6ZDA==
 # SIG # End signature block
