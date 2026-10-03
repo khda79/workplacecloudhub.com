@@ -2,7 +2,7 @@
 .SYNOPSIS
     Analyze local ShareGate migration reports without connecting to ShareGate.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -19,8 +19,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.2') -ForegroundColor Cyan
-$toolRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.3') -ForegroundColor Cyan
+$toolRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).ProviderPath
 $analyzer = Join-Path $PSScriptRoot 'analyze_sharegate_reports.py'
 $activityHelper = Join-Path $toolRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1'
 if ($ActivityPath) { . $activityHelper }
@@ -34,7 +34,7 @@ function Write-DiagnosticEvent {
 }
 
 try {
-    $project = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).Path
+    $project = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).ProviderPath
     if (-not (Test-Path -LiteralPath $project -PathType Container)) { throw 'Project root is not a directory.' }
     $python = Join-Path $toolRoot 'Tools\Python\python.exe'
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -133,6 +133,7 @@ try {
         $id = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N')
         $OutputDirectory = Join-Path $project "ShareGate\Diagnostics\$id"
     }
+    $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
     $converted = [System.Collections.Generic.List[string]]::new()
     $inputs = [System.Collections.Generic.List[string]]::new()
@@ -192,8 +193,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxtUpySmVQGbMZ
-# iuoqRj4mg7kWDzXodE+y3fUrfz8KQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQE9GT+wR4hBz0
+# pq0z3IHsxoUeS3sLV9SdHxD4l3+TqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -326,31 +327,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA7P5A5pFsk+wmSK+r7lngE6osARwPVv0pA+xAKFyYrpMA0GCSqG
-# SIb3DQEBAQUABIIBgDCR2P2WHmfZw40ENLLWDp2i7nHHFzChwRDnk2L3OMB6ws0g
-# IhatamC82NOQ27JR3mnZIFNlh1YGom00guIe5OD9Ve/7ps1oDHmDW4Zn2A/65JlI
-# bBn3zC0RNKacRdYXpS3RylqiIgPvyVPgZ2IJTQ2lu2wOBDeayA98AiEOW6pQYQoO
-# WzQgJagoC+MgIxgzmEFroH2RM6VpvMLEeszN/R2a6EnNMa7iKhFTAb2CYyAYJHBD
-# rbGzG8ghb6oPs8oy7M/9XjELVOxxsg/9U3iu3WThKfAAJw1GdIIHbQykzj2ZnSmW
-# 0DsuUSLzCkG/dPYIU9bnUfdB7iCiktojAI5/LVbfac2FEeIGuUeajbypvvzcMxB8
-# Y+PzcaDnASHbphddizmvHBN1SGUXv4H2g0ImcOySh7dgXYNZJEFV4ITvYNCcM7z2
-# zCYzsYfgrpvFEHiN//08UhG1DvnQCeOeembSvTWqjTVAlok4/LMQf257H1yyv4Hq
-# VgbS6aEqontmW51Iy6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIObu7gfJsAAq5ngPODZjIri8Ca5Z3/NaZ5gwCmt1PYuYMA0GCSqG
+# SIb3DQEBAQUABIIBgHOj/oIBAVxELYxkI1XlpSmfjnpTG0aW4k1qcds0FMHX2tLn
+# CRTlfuPHqdPrNCRAgtbhL+Ze083I+xEtZp7taKjAtND3TCuQAcOhrZHeXZGF1xGe
+# peozNjNxcrElV7zCd2ADOMvxgFrdnMnMsKgb/6kukk4PiY3kVgctXYDaEdz1gDiu
+# 7kqay6msyHWC/Pg/3hVJZVzfH00a/pwAGkxmG8Y3L0YEA/vBFp18/tLT6ZTmq52K
+# qHd2snAawWeDhgxaUe138Sl7ASCXSHg6t8Ky3yssVZ9/JIa+qmSOSBmzBfC1pcpK
+# 01XzOTMdQWMzSkl6Ak6JxRFkPD4iKLWWUe2MJmZALw0EQn/+j7XZoTwF4yEBieik
+# RbDAd3hI+LP8vAU//X5EHSjwxC+WeG92O1ZFToypW3WreDznI6Wpaxsq1cGYauND
+# yGKme7bNEbOr8mgtvYqqxNgRpPxHbq5E2YmbnwVumZGR9TkqdCQYvWaXOnN5XR4p
+# 4ass/VajTATiVx9+G6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDi5p6+OD7TDRJF/LZt6NJKCpBKiDch84YV32mV
-# Che/5DANBgkqhkiG9w0BAQEFAASCAgA9IN5sWp3e+lmwVu9kxFNxUxLVLpulCCIH
-# A6ZBudJpijQuy2gaaO4lbrpyE5cRRlcLrOPuHJqW99J4zTBcybyJsSn8kBjXgv7L
-# uAqjabv5ksUqjD2gf0OCqaSyPkk52shttjx3Fn5ZnfcL7t8tNz9ZsNYe1G8G0mgA
-# ThlGYGQvRXf0CJUH34+325UCYYv4+5BAvZBNcXEoQ4K69HCJFplHrarsPxZLSmo1
-# Bp+Qbidcuub3ZdB+wIO8eDZEyP/hovytvSIuPre2uizNEkI986mA+JqWH6FXKUKB
-# tQrxdNCuoU74RIyAG85hBGWtK/6iv9DXgjrgHeizpflwVIm4e740PYhjblmsp4kl
-# twK0Q+Q99wg06dfUSdU+UiA/zdwV/AOWNRjWlqbHDmG0yCMGMtjPgcikM/NcjfdX
-# xDfCdSBtHx/6WzPCWPpbow7hTuM3g1BT8yVIqVz4lJf1Tl3AHuQgQPUYiTSrLp1B
-# sJrqOU4J7ijn0tBLhqhNQevabwsNMWYLOd7Y1l9bi9VwUeMsQORLcDsP+vjxpHXo
-# S5bMYF0UN+J3wpJuEHuUkPE5ySEHapXKJPzeQrvOISGctRkrS/w8dT/dW+KWGHJ3
-# TbRAKSMrjV2FpSEL5eXbAeMGRqqov5XOSwWjB9jbuZIq0nAwOpddOOhCs21yZQvv
-# NazUt9Lxfw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDQw
+# MjBaMC8GCSqGSIb3DQEJBDEiBCAO8fsVtRbMba+IdGrxMsv1f2QXgttcvEubI/Hu
+# c6Y5+jANBgkqhkiG9w0BAQEFAASCAgCKMuySaF36ug2ap4vQro/tQGkyVlujqSOg
+# BeDvGsetj5nko9qHPWk+EgVpJLt0mh++9bzA0byRQ6OlNLO5FTg4pUIGJCdZUv5P
+# LRTjNXmURvGjOxxvR8Jsz7nT2IV6fdwCteV5CXhqQWVFQk7PeDNlQSMWWQ1Zh2fz
+# d4F0ByO0ACuxhIn+3r1ZACinmBnbJA4X0gEKlxijgpeTzNbdk7o+8/RTXCPjYub8
+# THeVcJSvJERyxiZfsx82l7xNPIF386ZoqieK6HQ5DF7Es32a+rPnBJUeTyRoFpxZ
+# 3XWGe3FUDfzP7330Yuln1A9i2P8fm+u1tO2fO3qOPyVVOHFXFY+33xNROGO2rosh
+# SW8FJotcBCO7KjpiVYLn/6SOKgCTceLyPqwx3BdSKWf2MJ8rs+XBeAj6aDQ87D0p
+# DZG5OC2O/khEOkypx+0UMqhLC6G4hiJCoKdPJ4Olayo6YnMr3AF4/B4VMA5YsDkH
+# LRaZ6Gfco8Er0TIUvoKfKGGJ0BJnTilKCadppImzp2nFtq/MNUkTbqDcBYLOonrq
+# YOrJiMfPryKGfRM/nMimMRF4JJWd3B3VSpKl3YQ9iQWdY1M1LVJ7zHgO53AMXlC+
+# 8u5Z4GYTZLjPwtrOYYp9wociBq5tHx1jua+WDvqgj5gLP2TnSLrldhG7Uf4a2IfP
+# aF+H49eaQA==
 # SIG # End signature block
