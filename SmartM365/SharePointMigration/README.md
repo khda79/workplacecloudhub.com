@@ -28,7 +28,7 @@ No PowerShell Gallery package is published for this toolkit; do not use `Install
 Obtain the repository and keep the entire `SmartM365/SharePointMigration` folder;
 copying just the GUI script omits required helpers, assets and templates. Launch
 `Start-SmartM365-SharePointMigration-GUI.cmd` on Windows. The dashboard provides
-Files, Permissions, Operations, Migration Diagnostics, Logs and Config tabs; it discovers configured
+Overview, Files & Permissions, Operations, Migration Diagnostics, Logs and Config tabs; it discovers configured
 migration folders and displays the most recent output paths. An output timestamp
 or an available Open button is not proof that the whole scan succeeded: inspect
 the run log and any error CSV before accepting its results.
@@ -45,10 +45,29 @@ from every mapped target is flagged; the GUI blocks site operations until the
 configuration is aligned. The header has an enabled-by-default 30-second
 refresh checkbox. Refresh keeps unsaved configuration edits and the selected
 log; turn the checkbox off to stop automatic updates.
-In Files, the scan selectors follow the newest completed CSV until an older
-scan is selected manually. Compare files refreshes both selectors immediately
-before launch and asks for confirmation when a selected scan is older than an
-available one. The launch log records the exact source and target CSV paths.
+Overview shows every configured migration, including those without a completed
+comparison. It displays the mapped source and destination, the latest published
+file inventory dates, their absolute difference in decimal days, and separate
+rates and comparison dates for files and permissions. The file rate is matched
+files divided by source unique keys;
+the permission rate is matched permissions divided by source unique permission
+keys. An empty inventory or missing comparison has no rate.
+The Status column combines file and permission scan availability, comparison freshness,
+findings, and scan provenance. Hover over a row for the separate file and permission
+reasons. Click a row to select that migration and open Files & Permissions. The
+table reads only inventory names, small scan receipts, and comparison summaries;
+it does not parse the full inventories on each refresh. A scan receipt provides
+its completion time, but the GUI does not recalculate its CSV hash on each
+refresh. Dates from legacy CSV filenames are identified in the tooltips.
+If one migration cannot be refreshed, its last successful values remain visible;
+the row tooltip and shared activity log show the refresh error.
+Files and Permissions share one tab, with a vertical divider between their workflows.
+The file and permission scan selectors follow the newest completed CSV until an
+older scan is selected manually. Each source-versus-target comparison refreshes
+its selectors immediately before launch and asks for confirmation when a selected
+scan is older than an available one. The launch log records the exact source and
+target CSV paths. Both columns offer scan history comparison for Source or Target;
+select a previous and current scan of the same kind and endpoint.
 
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
@@ -77,8 +96,8 @@ For a local resource check without displaying the GUI or contacting a tenant:
 ## Layout
 
 - `Scripts/Inventory/`: source and destination file and permission inventories.
-- `Scripts/Compare/`: source versus destination comparisons and source scan
-  history comparisons.
+- `Scripts/Compare/`: source versus destination comparisons and file/permission
+  scan history comparisons.
 - `Scripts/Export/`: CSV to Excel export helpers used by comparison workflows.
 - `Scripts/Generate/`: generated operation script builders for reviewed
   destination cleanup.
@@ -149,6 +168,11 @@ missing files and duplicate keys. Repeat with permission inventories and
 ComparePermissions. Permission comparison requires a fresh Entra users cache
 and at least one SPO endpoint; the current launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
+Permission scan history comparison reads two CSV inventories from the same
+endpoint and requires neither SharePoint authentication nor an Entra cache.
+It writes `PermissionChanges.csv`, `Summary.csv`, and a branded HTML report
+under `comparisons/permission-scan-history` by default. It counts added,
+removed, changed, unchanged, and ambiguous permission grants.
 The branded HTML summaries are self-contained and show at most 20 objects with
 differences; use their linked CSV and Excel exports for the full detail.
 The comparators load the shared `report_html.py` from their own directory. They

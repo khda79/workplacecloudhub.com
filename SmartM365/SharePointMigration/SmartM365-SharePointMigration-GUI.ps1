@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.18
+    1.0.27
 #>
 
 #Requires -Version 7.4
@@ -28,9 +28,13 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.18'
+$script:AppVersion = '1.0.27'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
+$script:SummaryLastGoodRows = @{}
+$script:SummaryLastErrorMessages = @{}
+$script:NextActivityCleanupUtc = $null
+$script:LastGlobalRefreshError = ''
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
 
 Add-Type -AssemblyName PresentationFramework
@@ -40,6 +44,7 @@ Add-Type -AssemblyName WindowsBase
 . (Join-Path $script:ScriptRoot 'SmartM365.GuiSplash.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-NewWizard.ps1')
 . (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1')
+. (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-Summary.ps1')
 
 $updateCheckModulePath = Join-Path $script:ScriptRoot 'SmartM365.GuiUpdateCheck.ps1'
 if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
@@ -170,6 +175,11 @@ function Get-MigrationStatus {
     $srcPermDir  = Join-Path $root $cfg.Output.SourcePermissionScans
     $tgtPermDir  = Join-Path $root $cfg.Output.TargetPermissionScans
     $permCmpDir  = Join-Path $root $cfg.Output.PermissionComparisons
+    $permissionHistoryPath = if ($cfg.Output.ContainsKey('PermissionHistoryComparisons') -and
+        -not [string]::IsNullOrWhiteSpace([string]$cfg.Output.PermissionHistoryComparisons)) {
+        [string]$cfg.Output.PermissionHistoryComparisons
+    } else { 'comparisons\permission-scan-history' }
+    $permissionHistoryDir = Join-Path $root $permissionHistoryPath
 
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
@@ -179,8 +189,11 @@ function Get-MigrationStatus {
         FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
         HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
+        SourcePermCsvItems    = @(Get-CsvFileItems   $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
         TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
+        TargetPermCsvItems    = @(Get-CsvFileItems   $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
         PermComparisonFolder  = Get-LatestSubfolder  $permCmpDir  "$name-*"
+        PermissionHistoryFolder = Get-LatestSubfolder $permissionHistoryDir '*-PermissionChanges-*'
     }
 }
 
@@ -234,8 +247,8 @@ function Open-InExplorer {
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Smart SharePoint Migration"
-    Width="1100" Height="760"
-    MinWidth="820" MinHeight="580"
+    Width="1480" Height="800"
+    MinWidth="1280" MinHeight="580"
     WindowStartupLocation="CenterScreen"
     UseLayoutRounding="True"
     SnapsToDevicePixels="True"
@@ -354,6 +367,7 @@ function Open-InExplorer {
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
     <!-- Header -->
@@ -423,8 +437,8 @@ function Open-InExplorer {
     <!-- Tab bar -->
     <Border Grid.Row="2" Background="White" BorderBrush="#DDE7F0" BorderThickness="0,0,0,1">
       <StackPanel Orientation="Horizontal" Margin="10,0">
-        <ToggleButton x:Name="tabFiles"       Content="Files"       Style="{StaticResource Tab}" IsChecked="True"/>
-        <ToggleButton x:Name="tabPermissions" Content="Permissions" Style="{StaticResource Tab}"/>
+        <ToggleButton x:Name="tabSummary"     Content="Overview"    Style="{StaticResource Tab}" IsChecked="True"/>
+        <ToggleButton x:Name="tabFiles"       Content="Files &amp; Permissions" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabDiagnostics" Content="Migration Diagnostics" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabLogs"        Content="Logs"        Style="{StaticResource Tab}"/>
@@ -436,8 +450,90 @@ function Open-InExplorer {
     <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
       <Grid>
 
-        <!-- FILES -->
-        <StackPanel x:Name="panelFiles" Margin="18,14" Visibility="Visible">
+        <!-- PORTFOLIO SUMMARY -->
+        <StackPanel x:Name="panelSummary" Margin="18,14" Visibility="Visible">
+          <TextBlock Text="MIGRATION OVERVIEW" Style="{StaticResource SectionLabel}"/>
+          <TextBlock Text="Files: matches / source keys. Permissions: matches / source permission keys. Select a migration to open Files &amp; Permissions."
+                     FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
+          <Border Style="{StaticResource StepCard}" Padding="0">
+            <DataGrid x:Name="gridSummary" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
+                      SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
+                      GridLinesVisibility="None" RowHeight="36" ColumnHeaderHeight="40"
+                      AlternatingRowBackground="#F5F8FB" Background="White"
+                      BorderThickness="0" HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
+                      FrozenColumnCount="1">
+              <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                  <Setter Property="ToolTip" Value="{Binding StatusTooltip}"/>
+                </Style>
+              </DataGrid.RowStyle>
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="110"/>
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="195">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                      <Setter Property="ToolTip" Value="{Binding SourceTooltip}"/>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Source scan" Binding="{Binding SourceScan}" Width="125" SortMemberPath="SourceScan">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding SourceScanTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="255">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                      <Setter Property="ToolTip" Value="{Binding DestinationTooltip}"/>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Target scan" Binding="{Binding TargetScan}" Width="125" SortMemberPath="TargetScan">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding TargetScanTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Gap (days)" Binding="{Binding ScanGapText}" Width="85" SortMemberPath="ScanGapDays">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ScanGapTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Files %" Binding="{Binding ComparisonPercent}" Width="72" SortMemberPath="ComparisonRate"/>
+                <DataGridTextColumn Header="File compare" Binding="{Binding ComparisonDate}" Width="125" SortMemberPath="ComparisonDate">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ComparisonTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Perms %" Binding="{Binding PermissionComparisonPercent}" Width="85" SortMemberPath="PermissionComparisonRate">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding PermissionComparisonTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Perms compare" Binding="{Binding PermissionComparisonDate}" Width="135" SortMemberPath="PermissionComparisonDate">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding PermissionComparisonTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="105"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </Border>
+          <TextBlock x:Name="lblSummaryStatus" FontSize="11" Foreground="#5F6B7A" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <!-- FILES AND PERMISSIONS -->
+        <Grid x:Name="panelWorkflows" Margin="18,14" Visibility="Collapsed">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="1"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel x:Name="panelFiles" Grid.Column="0" Margin="0,0,14,0">
+          <TextBlock Text="FILES" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
 
@@ -459,7 +555,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanSrc" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanSrcAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <ComboBox x:Name="cmbScanSrcFile" Width="430" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanSrcFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -488,7 +584,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanTgt" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanTgtAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <ComboBox x:Name="cmbScanTgtFile" Width="430" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanTgtFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -520,7 +616,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeCmpFiles" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblCmpFilesAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" MaxWidth="280" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -553,10 +649,12 @@ function Open-InExplorer {
                     <ComboBoxItem Content="Source" IsSelected="True"/>
                     <ComboBoxItem Content="Target"/>
                   </ComboBox>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                   <TextBlock Text="Previous" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                  <ComboBox x:Name="cmbHistoryOldFile" Width="270" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                  <ComboBox x:Name="cmbHistoryOldFile" Width="175" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
                   <TextBlock Text="Current" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                  <ComboBox x:Name="cmbHistoryNewFile" Width="270" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
+                  <ComboBox x:Name="cmbHistoryNewFile" Width="175" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -571,10 +669,12 @@ function Open-InExplorer {
                   ToolTip="Generate HTML, Excel and CSV reports for the latest file comparisons"
                   Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
 
-        </StackPanel>
+          </StackPanel>
+          <Border Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
 
-        <!-- PERMISSIONS -->
-        <StackPanel x:Name="panelPermissions" Margin="18,14" Visibility="Collapsed">
+          <!-- PERMISSIONS -->
+          <StackPanel x:Name="panelPermissions" Grid.Column="2" Margin="14,0,0,0">
+          <TextBlock Text="PERMISSIONS" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
 
@@ -596,7 +696,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanSrcPerm" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanSrcPermAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblScanSrcPermFile" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanSrcPermFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -625,7 +725,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanTgtPerm" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanTgtPermAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblScanTgtPermFile" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanTgtPermFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -657,7 +757,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeCmpPerms" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblCmpPermsAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" MaxWidth="310" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -668,11 +768,50 @@ function Open-InExplorer {
             </Grid>
           </Border>
 
+          <Border Style="{StaticResource StepCard}">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
+                      Background="#FFF8E6" Margin="0,0,12,0" VerticalAlignment="Center">
+                <TextBlock Text="4" FontSize="12" FontWeight="Medium" Foreground="#8A5E00"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="Compare permission scan history" FontSize="13" FontWeight="Medium" Foreground="#1F2937"/>
+                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                  <Border x:Name="badgePermHistory" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#F0F4F8">
+                    <TextBlock x:Name="lblPermHistoryAge" Text="No run yet" FontSize="11" Foreground="#5F6B7A"/>
+                  </Border>
+                  <ComboBox x:Name="cmbPermHistorySide" Width="80" Height="24" FontSize="11" VerticalContentAlignment="Center" Margin="0,0,8,0">
+                    <ComboBoxItem Content="Source" IsSelected="True"/>
+                    <ComboBoxItem Content="Target"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                  <TextBlock Text="Previous" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="cmbPermHistoryOldFile" Width="175" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBlock Text="Current" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="cmbPermHistoryNewFile" Width="175" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
+                </StackPanel>
+              </StackPanel>
+              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="btnOpenPermHistory" Content="Open" Style="{StaticResource BtnGhost}"
+                        Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+                <Button x:Name="btnRunPermHistory" Content="Compare" Style="{StaticResource Btn}" Width="70"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+
           <Button x:Name="btnGlobalPermissionsReport" Content="Global permissions comparison report"
                   ToolTip="Generate HTML, Excel and CSV reports for the latest permissions comparisons"
                   Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
 
-        </StackPanel>
+          </StackPanel>
+        </Grid>
 
         <!-- OPERATIONS -->
         <StackPanel x:Name="panelOperations" Margin="18,14" Visibility="Collapsed">
@@ -733,7 +872,7 @@ function Open-InExplorer {
               <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
                 <Button x:Name="btnTransientRefresh" Content="Refresh batch results" Style="{StaticResource BtnGhost}" Width="128"/>
                 <Button x:Name="btnTransientOpen" Content="Open results CSV" Style="{StaticResource BtnGhost}" Width="112" Margin="6,0,0,0" IsEnabled="False"/>
-                <Button x:Name="btnTransientOutOfBatch" Content="Open hors lot CSV" Style="{StaticResource BtnGhost}" Width="120" Margin="6,0,0,0" IsEnabled="False"/>
+                <Button x:Name="btnTransientOutOfBatch" Content="Open excluded CSV" Style="{StaticResource BtnGhost}" Width="135" Margin="6,0,0,0" IsEnabled="False"/>
               </StackPanel>
             </StackPanel>
           </Border>
@@ -893,6 +1032,9 @@ function Open-InExplorer {
 
       </Grid>
     </ScrollViewer>
+    <Border Grid.Row="4" Background="#F5F8FB" BorderBrush="#DDE7F0" BorderThickness="0,1,0,0" Padding="18,5">
+      <TextBlock x:Name="lblAppVersion" HorizontalAlignment="Right" FontSize="10" Foreground="#5F6B7A"/>
+    </Border>
   </Grid>
 </Window>
 '@
@@ -950,6 +1092,9 @@ catch {
 try {
     $reader        = [System.Xml.XmlNodeReader]::new($xaml)
     $script:Window = [System.Windows.Markup.XamlReader]::Load($reader)
+    $availableWidth = [System.Windows.SystemParameters]::WorkArea.Width - 24
+    $script:Window.Width = [math]::Max($script:Window.MinWidth,
+        [math]::Min($script:Window.Width, $availableWidth))
 } catch {
     Close-SmartM365GuiSplash -Splash $script:Splash
     [System.Windows.MessageBox]::Show("Failed to load GUI:`n$_", $script:AppName, 'OK', 'Error')
@@ -965,6 +1110,8 @@ $chkAutoRefresh = ctrl 'chkAutoRefresh'
 $lblLastRefresh = ctrl 'lblLastRefresh'
 $btnNewMigration = ctrl 'btnNewMigration'
 $imgLogo         = ctrl 'imgLogo'
+$lblAppVersion   = ctrl 'lblAppVersion'
+$lblAppVersion.Text = 'v' + $script:AppVersion
 
 # Context bar
 $lblSourceType = ctrl 'lblSourceType'
@@ -975,16 +1122,18 @@ $cmbAuthMode   = ctrl 'cmbAuthMode'
 $btnOpenConfig = ctrl 'btnOpenConfig'
 
 # Tabs
+$tabSummary     = ctrl 'tabSummary'
 $tabFiles       = ctrl 'tabFiles'
-$tabPermissions = ctrl 'tabPermissions'
 $tabOperations  = ctrl 'tabOperations'
 $tabDiagnostics = ctrl 'tabDiagnostics'
 $tabLogs        = ctrl 'tabLogs'
 $tabConfig      = ctrl 'tabConfig'
 
 # Panels
-$panelFiles       = ctrl 'panelFiles'
-$panelPermissions = ctrl 'panelPermissions'
+$panelSummary     = ctrl 'panelSummary'
+$gridSummary      = ctrl 'gridSummary'
+$lblSummaryStatus = ctrl 'lblSummaryStatus'
+$panelWorkflows   = ctrl 'panelWorkflows'
 $panelOperations  = ctrl 'panelOperations'
 $panelDiagnostics = ctrl 'panelDiagnostics'
 $panelLogs        = ctrl 'panelLogs'
@@ -1020,13 +1169,13 @@ $cmbHistoryNewFile = ctrl 'cmbHistoryNewFile'
 # Permissions step
 $badgeScanSrcPerm  = ctrl 'badgeScanSrcPerm'
 $lblScanSrcPermAge = ctrl 'lblScanSrcPermAge'
-$lblScanSrcPermFile= ctrl 'lblScanSrcPermFile'
+$cmbScanSrcPermFile= ctrl 'cmbScanSrcPermFile'
 $btnOpenScanSrcPerm= ctrl 'btnOpenScanSrcPerm'
 $btnRunScanSrcPerm = ctrl 'btnRunScanSrcPerm'
 
 $badgeScanTgtPerm  = ctrl 'badgeScanTgtPerm'
 $lblScanTgtPermAge = ctrl 'lblScanTgtPermAge'
-$lblScanTgtPermFile= ctrl 'lblScanTgtPermFile'
+$cmbScanTgtPermFile= ctrl 'cmbScanTgtPermFile'
 $btnOpenScanTgtPerm= ctrl 'btnOpenScanTgtPerm'
 $btnRunScanTgtPerm = ctrl 'btnRunScanTgtPerm'
 
@@ -1035,6 +1184,13 @@ $lblCmpPermsAge = ctrl 'lblCmpPermsAge'
 $lblCmpPermsDir = ctrl 'lblCmpPermsDir'
 $btnOpenCmpPerms= ctrl 'btnOpenCmpPerms'
 $btnRunCmpPerms = ctrl 'btnRunCmpPerms'
+$badgePermHistory = ctrl 'badgePermHistory'
+$lblPermHistoryAge = ctrl 'lblPermHistoryAge'
+$cmbPermHistorySide = ctrl 'cmbPermHistorySide'
+$cmbPermHistoryOldFile = ctrl 'cmbPermHistoryOldFile'
+$cmbPermHistoryNewFile = ctrl 'cmbPermHistoryNewFile'
+$btnOpenPermHistory = ctrl 'btnOpenPermHistory'
+$btnRunPermHistory = ctrl 'btnRunPermHistory'
 
 # Operations
 $listOps   = ctrl 'listOps'
@@ -1104,6 +1260,7 @@ $script:ConfigEditorLoading = $false
 $script:ConfigEditorDirty   = $false
 $script:UpdateCheckTimer     = $null
 $script:AutoRefreshTimer = $null
+$script:SummaryLoading = $false
 $script:WizardOpen = $false
 $script:TargetScopeMismatch = $false
 $script:ConfigEditorLoadedHash = ''
@@ -1233,7 +1390,8 @@ function Update-ScanFileSelection {
     if ($selectedFile) { $OpenButton.Tag = (Split-Path $selectedFile.FullName -Parent) }
 }
 function Get-HistorySide {
-    $sel = $cmbHistorySide.SelectedItem
+    param([System.Windows.Controls.ComboBox]$ComboBox = $cmbHistorySide)
+    $sel = $ComboBox.SelectedItem
     if ($null -eq $sel) { return 'Source' }
     $txt = if ($sel.PSObject.Properties.Name -contains 'Content') { [string]$sel.Content } else { [string]$sel }
     if ($txt -eq 'Target') { return 'Target' }
@@ -1291,6 +1449,26 @@ function Update-HistoryScanSelection {
     Update-HistoryRunState
 }
 
+function Update-PermissionHistoryRunState {
+    $oldCsv = Get-SelectedScanFile -ComboBox $cmbPermHistoryOldFile
+    $newCsv = Get-SelectedScanFile -ComboBox $cmbPermHistoryNewFile
+    $btnRunPermHistory.IsEnabled = ($oldCsv -and $newCsv -and $oldCsv.FullName -ne $newCsv.FullName)
+}
+
+function Update-PermissionHistoryScanSelection {
+    if ($null -eq $script:CurrentStatus) { return }
+    $items = if ((Get-HistorySide -ComboBox $cmbPermHistorySide) -eq 'Target') {
+        @($script:CurrentStatus.TargetPermCsvItems)
+    } else { @($script:CurrentStatus.SourcePermCsvItems) }
+    $items = @($items | Sort-Object {
+        $stamp = Get-SmartM365PortfolioTimestamp $_.Name
+        if ($stamp) { $stamp } else { $_.File.LastWriteTime }
+    } -Descending)
+    Set-HistoryComboItems $cmbPermHistoryNewFile $items 0
+    Set-HistoryComboItems $cmbPermHistoryOldFile $items 1
+    Update-PermissionHistoryRunState
+}
+
 # ---------------------------------------------------------------------------
 # Auth mode
 # ---------------------------------------------------------------------------
@@ -1325,26 +1503,40 @@ function Invoke-MigrationAction {
             $script:AppName, 'OK', 'Warning') | Out-Null
         return
     }
-    if ($Action -eq 'CompareFiles') {
+    if ($Action -in @('CompareFiles', 'ComparePermissions')) {
+        $permissions = $Action -eq 'ComparePermissions'
         try {
             $script:CurrentStatus = Get-MigrationStatus -Migration $script:CurrentMigration
             $st = $script:CurrentStatus
-            Set-ScanComboItems $cmbScanSrcFile @($st.SourceFileCsvItems) $st.SourceFileCsv
-            Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc
-            Set-ScanComboItems $cmbScanTgtFile @($st.TargetFileCsvItems) $st.TargetFileCsv
-            Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt
+            if ($permissions) {
+                Set-ScanComboItems $cmbScanSrcPermFile @($st.SourcePermCsvItems) $st.SourcePermCsv
+                Update-ScanFileSelection $cmbScanSrcPermFile $badgeScanSrcPerm $lblScanSrcPermAge $btnOpenScanSrcPerm
+                Set-ScanComboItems $cmbScanTgtPermFile @($st.TargetPermCsvItems) $st.TargetPermCsv
+                Update-ScanFileSelection $cmbScanTgtPermFile $badgeScanTgtPerm $lblScanTgtPermAge $btnOpenScanTgtPerm
+            }
+            else {
+                Set-ScanComboItems $cmbScanSrcFile @($st.SourceFileCsvItems) $st.SourceFileCsv
+                Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc
+                Set-ScanComboItems $cmbScanTgtFile @($st.TargetFileCsvItems) $st.TargetFileCsv
+                Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt
+            }
         }
         catch {
-            [System.Windows.MessageBox]::Show("Could not refresh file scans before comparison:`n$($_.Exception.Message)",
+            $kind = if ($permissions) { 'permission' } else { 'file' }
+            [System.Windows.MessageBox]::Show("Could not refresh $kind scans before comparison:`n$($_.Exception.Message)",
                 $script:AppName, 'OK', 'Error') | Out-Null
             return
         }
 
         $olderScans = [System.Collections.Generic.List[string]]::new()
-        foreach ($pair in @(
+        $pairs = if ($permissions) { @(
+            @{ Side = 'Source'; ComboBox = $cmbScanSrcPermFile; Latest = $st.SourcePermCsv },
+            @{ Side = 'Target'; ComboBox = $cmbScanTgtPermFile; Latest = $st.TargetPermCsv }
+        ) } else { @(
             @{ Side = 'Source'; ComboBox = $cmbScanSrcFile; Latest = $st.SourceFileCsv },
             @{ Side = 'Target'; ComboBox = $cmbScanTgtFile; Latest = $st.TargetFileCsv }
-        )) {
+        ) }
+        foreach ($pair in $pairs) {
             $selected = Get-SelectedScanFile -ComboBox $pair.ComboBox
             if ($selected -and $pair.Latest -and
                 -not [string]::Equals($selected.FullName, $pair.Latest.FullName,
@@ -1382,16 +1574,22 @@ function Invoke-MigrationAction {
         'Certificate' { $args += @('-AuthMode', 'Certificate') }
     }
 
-    if ($Action -eq 'CompareFiles') {
-        $sourceCsv = Get-SelectedScanFile -ComboBox $cmbScanSrcFile
-        $targetCsv = Get-SelectedScanFile -ComboBox $cmbScanTgtFile
+    if ($Action -in @('CompareFiles', 'ComparePermissions')) {
+        $sourceCombo = if ($Action -eq 'ComparePermissions') { $cmbScanSrcPermFile } else { $cmbScanSrcFile }
+        $targetCombo = if ($Action -eq 'ComparePermissions') { $cmbScanTgtPermFile } else { $cmbScanTgtFile }
+        $sourceCsv = Get-SelectedScanFile -ComboBox $sourceCombo
+        $targetCsv = Get-SelectedScanFile -ComboBox $targetCombo
         if ($sourceCsv) { $args += @('-SourceCsv', "`"$($sourceCsv.FullName)`"") }
         if ($targetCsv) { $args += @('-TargetCsv', "`"$($targetCsv.FullName)`"") }
     }
-    elseif ($Action -eq 'CompareScanHistory') {
-        $oldCsv = Get-SelectedScanFile -ComboBox $cmbHistoryOldFile
-        $newCsv = Get-SelectedScanFile -ComboBox $cmbHistoryNewFile
-        $args += @('-HistorySide', (Get-HistorySide))
+    elseif ($Action -in @('CompareScanHistory', 'ComparePermissionScanHistory')) {
+        $permissionHistory = $Action -eq 'ComparePermissionScanHistory'
+        $oldCombo = if ($permissionHistory) { $cmbPermHistoryOldFile } else { $cmbHistoryOldFile }
+        $newCombo = if ($permissionHistory) { $cmbPermHistoryNewFile } else { $cmbHistoryNewFile }
+        $sideCombo = if ($permissionHistory) { $cmbPermHistorySide } else { $cmbHistorySide }
+        $oldCsv = Get-SelectedScanFile -ComboBox $oldCombo
+        $newCsv = Get-SelectedScanFile -ComboBox $newCombo
+        $args += @('-HistorySide', (Get-HistorySide -ComboBox $sideCombo))
         if ($oldCsv) { $args += @('-OldCsv', "`"$($oldCsv.FullName)`"") }
         if ($newCsv) { $args += @('-NewCsv', "`"$($newCsv.FullName)`"") }
     }
@@ -1414,15 +1612,15 @@ function Invoke-MigrationAction {
 
 function Switch-Tab {
     param([string]$Tab)
+    $tabSummary.IsChecked     = ($Tab -eq 'Summary')
     $tabFiles.IsChecked       = ($Tab -eq 'Files')
-    $tabPermissions.IsChecked = ($Tab -eq 'Permissions')
     $tabOperations.IsChecked  = ($Tab -eq 'Operations')
     $tabDiagnostics.IsChecked = ($Tab -eq 'Diagnostics')
     $tabLogs.IsChecked        = ($Tab -eq 'Logs')
     $tabConfig.IsChecked      = ($Tab -eq 'Config')
 
-    $panelFiles.Visibility       = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
-    $panelPermissions.Visibility = if ($Tab -eq 'Permissions') { 'Visible' } else { 'Collapsed' }
+    $panelSummary.Visibility     = if ($Tab -eq 'Summary')     { 'Visible' } else { 'Collapsed' }
+    $panelWorkflows.Visibility   = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
     $panelOperations.Visibility  = if ($Tab -eq 'Operations')  { 'Visible' } else { 'Collapsed' }
     $panelDiagnostics.Visibility = if ($Tab -eq 'Diagnostics') { 'Visible' } else { 'Collapsed' }
     $panelLogs.Visibility        = if ($Tab -eq 'Logs')        { 'Visible' } else { 'Collapsed' }
@@ -1473,23 +1671,23 @@ function Update-UI {
     Update-HistoryScanSelection
 
     # --- Permissions ---
-    $r = Format-ItemAge $st.SourcePermCsv
-    Set-Badge $badgeScanSrcPerm $lblScanSrcPermAge $r.Text $r.HasRun
-    $lblScanSrcPermFile.Text = if ($st.SourcePermCsv) { $st.SourcePermCsv.Name } else { '' }
-    $btnOpenScanSrcPerm.Visibility = if ($st.SourcePermCsv) { 'Visible' } else { 'Collapsed' }
-    if ($st.SourcePermCsv) { $btnOpenScanSrcPerm.Tag = (Split-Path $st.SourcePermCsv.FullName -Parent) }
+    Set-ScanComboItems $cmbScanSrcPermFile @($st.SourcePermCsvItems) $st.SourcePermCsv
+    Update-ScanFileSelection $cmbScanSrcPermFile $badgeScanSrcPerm $lblScanSrcPermAge $btnOpenScanSrcPerm
 
-    $r = Format-ItemAge $st.TargetPermCsv
-    Set-Badge $badgeScanTgtPerm $lblScanTgtPermAge $r.Text $r.HasRun
-    $lblScanTgtPermFile.Text = if ($st.TargetPermCsv) { $st.TargetPermCsv.Name } else { '' }
-    $btnOpenScanTgtPerm.Visibility = if ($st.TargetPermCsv) { 'Visible' } else { 'Collapsed' }
-    if ($st.TargetPermCsv) { $btnOpenScanTgtPerm.Tag = (Split-Path $st.TargetPermCsv.FullName -Parent) }
+    Set-ScanComboItems $cmbScanTgtPermFile @($st.TargetPermCsvItems) $st.TargetPermCsv
+    Update-ScanFileSelection $cmbScanTgtPermFile $badgeScanTgtPerm $lblScanTgtPermAge $btnOpenScanTgtPerm
 
     $r = Format-ItemAge $st.PermComparisonFolder
     Set-Badge $badgeCmpPerms $lblCmpPermsAge $r.Text $r.HasRun
     $lblCmpPermsDir.Text = if ($st.PermComparisonFolder) { $st.PermComparisonFolder.Name } else { '' }
     $btnOpenCmpPerms.Visibility = if ($st.PermComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.PermComparisonFolder) { $btnOpenCmpPerms.Tag = $st.PermComparisonFolder.FullName }
+
+    $r = Format-ItemAge $st.PermissionHistoryFolder
+    Set-Badge $badgePermHistory $lblPermHistoryAge $r.Text $r.HasRun
+    $btnOpenPermHistory.Visibility = if ($st.PermissionHistoryFolder) { 'Visible' } else { 'Collapsed' }
+    if ($st.PermissionHistoryFolder) { $btnOpenPermHistory.Tag = $st.PermissionHistoryFolder.FullName }
+    Update-PermissionHistoryScanSelection
 
     # --- Operations ---
     $ops = @(Get-MigrationOperations -Migration $script:CurrentMigration)
@@ -1686,12 +1884,74 @@ function Invoke-ActivityLogRetention {
     }
 }
 
+function Refresh-PortfolioSummary {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    if ($null -eq $script:SummaryLastGoodRows) { $script:SummaryLastGoodRows = @{} }
+    if ($null -eq $script:SummaryLastErrorMessages) { $script:SummaryLastErrorMessages = @{} }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($migration in $script:Migrations) {
+        try {
+            $source = Get-MigrationScope $migration 'Source'
+            $target = Get-MigrationScope $migration 'Target'
+            $row = Get-SmartM365PortfolioRow -Migration $migration `
+                -SourceScope $source.Text -SourceTooltip $source.Tooltip `
+                -TargetScope $target.Text -TargetTooltip $target.Tooltip `
+                -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
+                -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
+            $rows.Add($row)
+            $script:SummaryLastGoodRows[$migration.Name] = $row
+            [void]$script:SummaryLastErrorMessages.Remove($migration.Name)
+        }
+        catch {
+            $message = [string]$_.Exception.Message
+            $errors.Add(('{0}: {1}' -f $migration.Name, $message))
+            if ($script:SummaryLastErrorMessages[$migration.Name] -ne $message) {
+                try {
+                    $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                        -Migration $migration.Name -Action 'PortfolioSummaryRefresh'
+                    Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' `
+                        -ExitCode 1 -Detail $message -Migration $migration.Name
+                }
+                catch { }
+            }
+            $script:SummaryLastErrorMessages[$migration.Name] = $message
+            if ($script:SummaryLastGoodRows.ContainsKey($migration.Name)) {
+                $cached = $script:SummaryLastGoodRows[$migration.Name] | Select-Object *
+                $cached.Status = 'Refresh error'
+                $cached.StatusTooltip = "Refresh failed; showing last successful values.`n$message"
+                $rows.Add($cached)
+            }
+            else {
+                $rows.Add([pscustomobject]@{
+                    Migration = $migration.Name; Source = '—'; SourceTooltip = ''
+                    SourceScan = '—'; SourceScanTooltip = ''
+                    Destination = '—'; DestinationTooltip = ''
+                    TargetScan = '—'; TargetScanTooltip = ''
+                    ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
+                    ComparisonRate = $null; ComparisonPercent = '—'
+                    ComparisonDate = '—'; ComparisonTooltip = $message
+                    PermissionComparisonRate = $null; PermissionComparisonPercent = '—'
+                    PermissionComparisonDate = '—'; PermissionComparisonTooltip = $message
+                    Status = 'Refresh error'; StatusTooltip = $message
+                })
+            }
+        }
+    }
+    $script:SummaryLoading = $true
+    try { $gridSummary.ItemsSource = $rows.ToArray() }
+    finally { $script:SummaryLoading = $false }
+    $lblSummaryStatus.Text = ('{0} migrations · {1} refresh errors · Updated {2}' -f
+        $rows.Count, $errors.Count, (Get-Date -Format 'HH:mm:ss'))
+    $lblSummaryStatus.ToolTip = if ($errors.Count) { $errors -join "`n" } else { $null }
+}
+
 function Refresh-GuiState {
     try {
         if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptRoot 'Migrations') -PathType Container)) {
             throw 'Migration folder is unavailable.'
         }
         Load-Migrations
+        if ($tabSummary.IsChecked) { Refresh-PortfolioSummary }
         Refresh-TransientResults
         try { Invoke-ActivityLogRetention }
         catch {
@@ -1701,10 +1961,27 @@ function Refresh-GuiState {
         Refresh-ActivityList
         $lblLastRefresh.Text = 'Updated ' + (Get-Date -Format 'HH:mm:ss')
         $lblLastRefresh.ToolTip = 'Shared activity and migration state refreshed.'
+        $script:LastGlobalRefreshError = ''
     }
     catch {
+        $refreshError = $_
+        $message = [string]$_.Exception.Message
         $lblLastRefresh.Text = 'Refresh failed'
-        $lblLastRefresh.ToolTip = $_.Exception.Message
+        $lblLastRefresh.ToolTip = $message
+        if ($tabSummary.IsChecked -and $null -eq $gridSummary.ItemsSource) {
+            $lblSummaryStatus.Text = "Overview refresh failed: $message"
+            $lblSummaryStatus.ToolTip = $message
+        }
+        if ($script:LastGlobalRefreshError -ne $message) {
+            try {
+                $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                    -Migration '<gui>' -Action 'GuiRefresh'
+                Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' `
+                    -ExitCode 1 -Detail ($message + ' | ' + $refreshError.ScriptStackTrace)
+            }
+            catch { }
+        }
+        $script:LastGlobalRefreshError = $message
     }
 }
 
@@ -1814,12 +2091,23 @@ function Load-Migrations {
 # Events
 # ---------------------------------------------------------------------------
 
+$tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
-$tabPermissions.Add_Click({ Switch-Tab 'Permissions' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
 $tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics' })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
 $tabConfig.Add_Click({      Switch-Tab 'Config' })
+
+$gridSummary.Add_SelectionChanged({
+    if ($script:SummaryLoading -or -not $gridSummary.SelectedItem) { return }
+    $migrationName = [string]$gridSummary.SelectedItem.Migration
+    if ($cmbMigration.Items.Contains($migrationName)) {
+        $cmbMigration.SelectedItem = $migrationName
+        if ($script:CurrentMigration -and $script:CurrentMigration.Name -eq $migrationName) {
+            Switch-Tab 'Files'
+        }
+    }
+})
 
 $cmbMigration.Add_SelectionChanged({
     $idx = $cmbMigration.SelectedIndex
@@ -1927,10 +2215,18 @@ $btnOpenHistory.Add_Click({  Open-InExplorer ([string]$btnOpenHistory.Tag) })
 $btnRunScanSrcPerm.Add_Click({  Invoke-MigrationAction 'ScanSourcePermissions' })
 $btnRunScanTgtPerm.Add_Click({  Invoke-MigrationAction 'ScanTargetPermissions' })
 $btnRunCmpPerms.Add_Click({     Invoke-MigrationAction 'ComparePermissions' })
+$btnRunPermHistory.Add_Click({ Invoke-MigrationAction 'ComparePermissionScanHistory' })
+
+$cmbScanSrcPermFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanSrcPermFile $badgeScanSrcPerm $lblScanSrcPermAge $btnOpenScanSrcPerm })
+$cmbScanTgtPermFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanTgtPermFile $badgeScanTgtPerm $lblScanTgtPermAge $btnOpenScanTgtPerm })
+$cmbPermHistorySide.Add_SelectionChanged({ Update-PermissionHistoryScanSelection })
+$cmbPermHistoryOldFile.Add_SelectionChanged({ Update-PermissionHistoryRunState })
+$cmbPermHistoryNewFile.Add_SelectionChanged({ Update-PermissionHistoryRunState })
 
 $btnOpenScanSrcPerm.Add_Click({ Open-InExplorer ([string]$btnOpenScanSrcPerm.Tag) })
 $btnOpenScanTgtPerm.Add_Click({ Open-InExplorer ([string]$btnOpenScanTgtPerm.Tag) })
 $btnOpenCmpPerms.Add_Click({    Open-InExplorer ([string]$btnOpenCmpPerms.Tag) })
+$btnOpenPermHistory.Add_Click({ Open-InExplorer ([string]$btnOpenPermHistory.Tag) })
 
 # Operations - buttons inside DataTemplate handled via bubbled RoutedEvent
 $listOps.AddHandler(
@@ -2053,7 +2349,7 @@ function Refresh-TransientResults {
                 [int]$summary.Warning + [int]$summary.Mixed + [int]$summary.Unreported + [int]$summary.NotAttempted
             if ($total -ne [int]$summary.PlannedItems) { throw 'Batch result counters do not equal PlannedItems.' }
             $lblTransientStatus.Text = "Latest run: $($summary.RunStatus) | session $($summary.SessionId) | $($summary.CompletedBatches)/$($summary.BatchCount) batches | $($summary.GeneratedAtUtc) UTC"
-            $lblTransientCounts.Text = "Planned: $($summary.PlannedItems) | Success: $($summary.Success) | Skipped: $($summary.Skipped) | Error: $($summary.Error) | Warning: $($summary.Warning) | Mixed: $($summary.Mixed) | Unreported: $($summary.Unreported) | Not attempted: $($summary.NotAttempted) | Hors lot - à traiter à part: $($summary.OutOfBatchLines) ($($summary.OutOfBatchSiteLines) Site, $($summary.OutOfBatchFileLines) File) | Home pages separate: $($summary.SeparatePageItems)"
+            $lblTransientCounts.Text = "Planned: $($summary.PlannedItems) | Success: $($summary.Success) | Skipped: $($summary.Skipped) | Error: $($summary.Error) | Warning: $($summary.Warning) | Mixed: $($summary.Mixed) | Unreported: $($summary.Unreported) | Not attempted: $($summary.NotAttempted) | Excluded for separate handling: $($summary.OutOfBatchLines) ($($summary.OutOfBatchSiteLines) Site, $($summary.OutOfBatchFileLines) File) | Home pages separate: $($summary.SeparatePageItems)"
             $resultsPath = Join-Path $run.FullName 'Transient-Results.csv'
             if ($resultsPath -and (Test-Path -LiteralPath $resultsPath -PathType Leaf)) {
                 $resolved = (Resolve-Path -LiteralPath $resultsPath).ProviderPath
@@ -2377,8 +2673,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQ+zUaCJ043gdO
-# 6WHNqmPmMJ+L/+65dQEKlZ28W6nuBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhjj/QIvJEc8f7
+# CXIgltWJ6WLOegCONMz3f5mOG5R7pKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2511,31 +2807,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKmAoO/bf3D1fq42xsFXXfujM9hj0Bi8Mywh+OaSbYxaMA0GCSqG
-# SIb3DQEBAQUABIIBgGr2LcgajoI6isW7T/4Iuk/7WWkNT2f/SNL/UrtxbzL8HUVv
-# 9zEmgU+EuUUxY2Ph3RcVMLEWAGXpGVv0OvUgc/P4B76B+kDp/pZo3P7q9tOOPQrM
-# F25SS+sF+6ZKzceFOUP4ZzHo3O+M/8k4OWnkd6fg3Xv50CnuBglQR81GVje0wmnJ
-# VMaIzWdUmZRUX9yfAajvgkPNty+VXg8PUorSmQa9d60Yjl26NVSPER8oBR4q/NBZ
-# i1RlYXjoRY+AzVWfXXZbiPF3BNW5BULSqNuAsTNJEFldQ6qUMns/ciC7njvc++fv
-# 2VCtMx8NId3r9An3l4H206vsc1jhAXfwQN1U2MSAB/rxDghh+xMmobggbxy8gIkV
-# MM+K5zBC1TscKPW9IWu7r9xqE9z7adVJQyZj9R1ZAkfeMQHGKSjV9DhUc5hHfDTb
-# oUkaEqJ4dKm64QUoBGYP8w4J5Zw/OiMpy0TvDkdw4ZLWuWGS0J23BxN8CYGTh1j2
-# QqQbmDSENBzDIhmd3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFgmFrCUnbKOZzukpRGe3u89fjowsnQa5Y5pIaOIGQszMA0GCSqG
+# SIb3DQEBAQUABIIBgESt31GvtrGRqKeWoUriRc48W7dwZL8K49b/x6D0QLv7SgJl
+# H9TPB8Pi8xvLenbGmFClSlVSg3cMAsNIKtfuZGZVs/VdDENA4o/JhTlZYdBO/NCy
+# pO4dOYDJrEw7quhgVVDfDThU4Aw5n/iQd4AMh/5waI5v3JdXXxoinv3VceyV72Hy
+# ud8CQEGmNe9fTkO9LuWYnKAm+8hPv8fCdmnlbMsJ71rZG7NZJOUszwZxhXDZH7wm
+# hj5mIt9uWbdAdtIJfcooX7oj7rkkQ/UVOrcJKDRgQnLFkWmfRoiljvFrqeuo1Wxn
+# EE5y7wdetpWqCOPXyzjhvH7z7hfW1+5ZwXPONutL3lzuoFSp4wULq2vHZ+wlQ3fN
+# uKQWxtRMsSlmHAwKQ7iRpwVHU1hP/pnXS6tsjZSjWdBVsbpPCrxL68H/nUL0VEPo
+# 2SR2vK5IidJ6WqOWrN+EJh+xat6w/oxCO6z7FQNUl2SgYSUT/OKRPqBgRKJJHhbS
+# aLgz67DJos9jJluyQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNjMz
-# NThaMC8GCSqGSIb3DQEJBDEiBCAWEqBxQQtHeI/0sF/Kk14bcgyqolHc/KLkx/+W
-# i1R79DANBgkqhkiG9w0BAQEFAASCAgCLB+Jsjw+N+MzfyvPeMyEjEgqHWc13lDDn
-# S1luutn5uFD3ogU9zgo1CpdZ7WkIHfmxk/oOkUih42lAGBjNfW770WGlicF68gzJ
-# oTs+VeUKlkpXvSIxC2zjeCm5NY7KH1ZDL5xS8LZQakSc4hOKGLzINEx0NxV0UjKV
-# rkYSoNIflQ2f9imxkU8Z/6xiYf3DLqJMJSzv+0gbXwwZsSXHRclf41Sf9KqTjHM3
-# yaCfsM2Gw5yF6bzW312Iqc5d60wvnvtOwFddQqVHz7EYieW0uDcEfzLDpDtWBweV
-# lGIBrh5QaBFJs13Br87Jtavkh6TslcotqeIKQ4RDj1p+u8sjNSJnaDpq5NCCiPZd
-# rI1CEccU1mjBJM/FVb6Omtu700fRCQEgDADLIEIYhpLXBcn0fQMQHoiI1Y/vnYfa
-# SIrcN+Qw5Ad6XOMiXxSucA0xRFbGQfsVWdWw7cnYL3Zi4uaM3MCLWvAVEQAY+Igf
-# oKYcrtqz7OHPeevppAXe3svgGu8BYNy31ERJ63T94Jwb1kgy+szbK7oXEaLOlC+0
-# u1JpEkZt5JbbsMn3JHTPjzAtn6XJ0KrAKwRjIFtp1+eR1Uebs6S8jb2PZTx6K+zJ
-# osFfy/fdSR3slZevkp+wlGiNEvUPwVxGws9QHRZ9IJhRKrPlh+tf2wt3wkDVVKwr
-# PPJdRnhlLQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDM3
+# MzRaMC8GCSqGSIb3DQEJBDEiBCAKVqmToDTbrnHAY973X9zA7zE2PslsAojn4t3Z
+# B50LzjANBgkqhkiG9w0BAQEFAASCAgAIVFk4D2pTs5Cot5R+UO1dtDUs+Y+x84Wq
+# zp2tRsS0VQJj16xcOUtibHRy9tYqNZfU9Oz3OXt8mJbfBD3z4/YgM3cwFkPokgg2
+# Z0uwqlNtyOEgGcKzT8rB3FwP9cpYgUOX6ZxMbqsZgz5p6fNO7dlOISGFM9N//9sJ
+# P0QdrIHm+e5nYhj5SfrZkBqsI8ihVOcCcZ5CPevPDoX+pkUFE8JhVAI2QeIj8Esq
+# hFExaOHXujOEPQQ3AHE5w1eJ6FO2iyyxt3KhnLtDgm0v1gPzUxOpnS/dKwTjtZXy
+# CSETV3HqnQQM2nb0vpOehGzcPKY1cR836B0D86TIk2X3gXxLqgYU6eZss+IhyxTQ
+# RUXInZjwm2jNleQQhvo8gp4PhBXCNro71p9pQc9683fR4OBRVbCVIsP+3xxg1pND
+# dDTm8Vl/Rb19e/ZMu9PDfp8w992tpr/LZNngaM4k+VnpC0Br8S5GHGZJZn3QRpj6
+# O6m7/PAUeGcqMK9ZPDKqjwT7/KMMDQZilyznFHTmLEfGsQd+rNS/x7J2RZipMNlK
+# lsDxet0ipVX3nxPMuspFlJU/nCCz8BQaQkprg86NlaXJ+vl8kPdRh+XM2x/W8VjV
+# fo4AUErY19xVwAqrx2cYlKfIPP2TlePaLOlvy4i6YY4VpcZA86v1cE13f5ODYenV
+# Oid2bl7vyw==
 # SIG # End signature block
