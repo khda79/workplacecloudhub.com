@@ -2,7 +2,7 @@
 .SYNOPSIS
     Collect read-only SharePoint farm diagnostics and correlate them with ShareGate peaks.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 [CmdletBinding(DefaultParameterSetName='Peaks')]
@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:FarmDiagVersion = '1.0.2'
+$script:FarmDiagVersion = '1.0.3'
 $script:FarmDiagScriptPath = $PSCommandPath
 $script:FarmDiagMode = $PSCmdlet.ParameterSetName
 $script:FarmDiagToolkitRoot = if ($ToolkitRoot) { $ToolkitRoot } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')) }
@@ -85,6 +85,13 @@ function Get-FarmDiagWindows {
         if (-not $peakCount) { throw 'The ShareGate peaks CSV has no valid five-minute UTC windows.' }
     }
     return @($windows | Sort-Object StartUtc,EndUtc -Unique)
+}
+
+function Get-FarmDiagEligibleServers {
+    param([object[]]$FarmServers)
+    return @($FarmServers | Where-Object {
+        [string]$_.Role -notin @('Invalid','External') -and [string]$_.Type -notmatch '(?i)database|sql'
+    })
 }
 
 function Get-FarmDiagServerTimeZone {
@@ -499,10 +506,13 @@ function Invoke-FarmDiagnostic {
     $diagnosticConfig = Get-SPDiagnosticConfig -ErrorAction Stop
     $zone = if ($TimeZone) { [TimeZoneInfo]::FindSystemTimeZoneById($TimeZone) } else { [TimeZoneInfo]::Local }
     $windows = @(Get-FarmDiagWindows -Mode $script:FarmDiagMode -Start $StartTime -End $EndTime -Center $Around -Minutes $WindowMinutes -PeaksPath $ShareGatePeaksCsv -Zone $zone)
-    $selected = @($farmServers | Where-Object { [string]$_.Type -notmatch '(?i)database|sql' })
+    $selected = @(Get-FarmDiagEligibleServers $farmServers)
+    foreach ($external in @($farmServers | Where-Object { [string]$_.Role -in @('Invalid','External') })) {
+        Write-FarmDiagLog "Excluded external farm entry: $($external.Address); role=$($external.Role)"
+    }
     if ($Servers) {
         $unknown = @($Servers | Where-Object { $_ -notin @($selected | ForEach-Object Address) })
-        if ($unknown.Count) { throw "Servers are not members of the discovered SharePoint farm: $($unknown -join ', ')" }
+        if ($unknown.Count) { throw "Servers are not eligible SharePoint farm servers: $($unknown -join ', ')" }
         $selected = @($selected | Where-Object { $_.Address -in $Servers })
     }
     if (-not $selected.Count) { throw 'No SharePoint application server was discovered.' }
@@ -621,8 +631,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYBHsSYxZabWB1
-# haqjVENMdoyblY6mspXePJuNMwYoTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmHCM452WDdsLK
+# Lj3NjjbpUaHq/GEFHHITbQt3Q0bNs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -755,31 +765,31 @@ if ($MyInvocation.InvocationName -ne '.') {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ5/WTwkmb1EsS4uUjjkGVa/UmiNo3LRFMpIQUYwdbTvMA0GCSqG
-# SIb3DQEBAQUABIIBgEro1PjNrsih8yorxSHG36OoDU4i9iKpn3hUkEo17ydCo//8
-# 3UIh90MejzNl8Q0YlUfDkQDeLbiETl6JHO2Fu6TIaU+9tYx54Xyam6Xx4WwXkQKY
-# GjZD1BuiWeI/hPd8JKoFAfh9EymRgniJsFCKatONXvJdfTHJG7eBxkeiEFxPc2UC
-# u4Hbu+mKjp92qRcT00QbPoDgFyG3XTj/KG5PMk1fofPurQXKKBTX645LP0wB6Ksw
-# cxcvDPv5w9UndUXPPQjq3iimlUijpAnm23P6vcOMRLgGGeKBp+Pmhp7J77HpGbtT
-# lAoQKC8Y/FT8pCKjLZdi/CjwUJTZ4kblE1c/dez2q6n4LZFRtcH5NBaFC+ZFVd/a
-# HgHpreHsJt7nsMFly1EqTGoiEkdvWZBOd0KLANrjPfXDrjLtd0ORR+edPVViLVs8
-# xCVC+4jMi8Dzf6Iq2IWS6Z6Zl7CQ28iHExiUiqPk0CNYc87J2tz4pBodGy3vNxtg
-# cNWVz9iWG8ITu524jqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMzkNeTkiJY6pGxB0TqKQ2i2x9bLe+lIxeYBMKSaouMRMA0GCSqG
+# SIb3DQEBAQUABIIBgBwtr323R74mSOos7vzGVGM/QaAN7FebH8t+VncYO5CVlAq0
+# 48XhMJGk/TH1VORwaXWDV7ZVbHEQiVj7w5bthaz80NAQp0TGG0I3EXHoranIUDVd
+# aRE6ARn7ctxBuaHakrUnl8NOJdldgNjGrXQHTfqecEAiFrWADo1g8QbxkkWo0aIt
+# SUEJwnjwTnsVYUx+rugrx+NcpC1LVi9A/J3goQHNVQxJQxV5YVSIMrluiNen7CSb
+# iQMGeMKWnGP1mwWuKBSF6lxhVWc+k2Bpq3zXJjBT8wB0sBkm23ldVkRfLjhFgn86
+# oD04ZZWJdr4Y7lzNYiVshH5MFOxBLJKN50DHHxwwlBiJJUGU9tLITtO91OGBzHBX
+# B6YHQR3ZE8ed5ycD2oMui8pN1OZG0CV4xinonRs6pLDJrNQ3HB8hjLjRQ+kAkoWC
+# 9uolgJ0xJvZXUEk8cgdjNJPOLEV1mMAkMMAnNx2o9zVIP1/LSK7haAFhA5vBPF03
+# V6tfsa7b8ZDPNba496GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzI2
-# MDBaMC8GCSqGSIb3DQEJBDEiBCAeipOBtVAhoDh7onWarBib6gxJPIPmPnGulVbK
-# 3FG3GjANBgkqhkiG9w0BAQEFAASCAgBksvrq3AdA20voXkw2nVq/FurqKokbm0tw
-# x4XS4GAu2vxR3o/wIiz8QJs5TmVTNm5UzGOEbe1/Lv75TlnM6/6oFMZXYE2IVFq1
-# HIeRDYhlgOpXd9Fx0Yf+c0HgP9O0uMVHXCnSglKQTi8vYCkqEQ/HrPBvVpOYvkHX
-# ShrKjQ/c5HMqNHDWkpnciweZC4CcL4Q6hr7OH8sg34Z3U+1H5bfCauRO3pVNqYLj
-# Q4QqLye8R2pfaTFnLIvqVOBSp7bNpJ2EypKIQVQozkzh/RI7+2p7oQb3Tb8X2oqB
-# OTb2jOJR6VmfPe1WSOMKDFUhjJSSZAq49RaaFAfD2Wlx467m0fpfBgTm8kf7J2x/
-# OCMG/GMmF2RjDLjclucbvGtuECTMdSsoTAjhFpagWVrBfN6Wjh+MRE29rL15Umoo
-# nxM0qXcYeykV4oN2lG2PMkMzPgekM8IlPy5Qf+4gj9kVIvfGUrIkWK7cs7R6Ov2H
-# R0iaum3x/xN9r57iCaGF7fvGzIDsgE8uROWMBvoqt2YTNCQXgnCUZmbmTnMfbeOw
-# aSUJyBSHdfaH3AIOi/04KNgqYQjwOQdLzN8ZQ2XJkVjoFj1zRzmP2+Pw+muD1xgH
-# 3Hdo4uVB+bWQY/YRY8ZknHY548f3ofUrGvKzFw/DYc4c9tSqPSTzvPIVr0HPYAd1
-# tW+I/yn7gg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMx
+# NTRaMC8GCSqGSIb3DQEJBDEiBCDB9IdgH8WaJv7Jqp2m0bziFtKUYlarIV7mGv0U
+# 4gCmbjANBgkqhkiG9w0BAQEFAASCAgBe5lygxz/mWq3I1sboAuEk8HTpA30A2AqJ
+# +gUIsaz4v/1ioCOX15JfMZNZumNfhTPA7T1vRlqZHnv7yvrlqjpcZuKSu4FQD8Lz
+# AtlAxOIqS5HS0Goh4ai3o9IubR/FV4w2NEsTVU7Qi9b9UDU5N/kKgcYZYtvq30/k
+# qixmUBjrzkMFV3h7+g8s81YB37edbXNJY0EFMVcq7KoS4Ww8qfn3g8kSFSkRqFX6
+# 7pHXDakpdv+8GFZHHnjKBpdk3ETOKnw/j34byEEIYZT9RkbTXkrCaz5LEjh3qZ/e
+# zV+aKs4Ny+rA8/wypL+JviY0LUonHPeecZ6HL4czzIqTdyK3vFmpNhc/WJK+Z/w4
+# jVx/YeBtKp343oYERge47jBvY3gcTBe0ThhW47+oEHPGe0jxc4vdocPdepetJ8VT
+# FaGrOUSH2IJKRhWXH7G7TJ3pBVPU0GbsOIX+pmV/V8WYPwfHVns+Q7Il1VBZMy/W
+# k+suKDqzxwePndRANJVaOht9eWPjsqh7gutMDWzcoAh7Ecwvdb8UiBRZE6lMhC3A
+# kOmrP2WDO9PsvZXMuTalCk4d7gOx2/w6puwxZokb19h1Z241LZl1W8nCDahOiIUF
+# GaD+59q3OBdq48uxD4HwOdZZiqDyIYc+KLkGxfNfV6tue13rZFwQSrAoclmFkO0O
+# K6YBGDPYzg==
 # SIG # End signature block

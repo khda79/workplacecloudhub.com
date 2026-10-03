@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline contract tests for the read-only farm diagnostic.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -41,6 +41,15 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     Assert-Equal $fromPeaksWithEmptyDates.Count 2 'CSV-only window selection with unbound dates'
     . $scriptPath -Project 'Synthetic' -ShareGatePeaksCsv $peakPath -WindowMinutes 30 -DryRun
     Assert-Equal $script:FarmDiagMode 'Peaks' 'CSV-only parameter set without Around prompt'
+    $eligibleServers = @(Get-FarmDiagEligibleServers @(
+        [pscustomobject]@{ Address='WEB01'; Role='WebFrontEnd'; Type='Application' },
+        [pscustomobject]@{ Address='APP01'; Role='ApplicationWithSearch'; Type='Application' },
+        [pscustomobject]@{ Address='SQL01'; Role='Invalid'; Type='Application' },
+        [pscustomobject]@{ Address='SMTP01'; Role='External'; Type='Application' },
+        [pscustomobject]@{ Address='DB01'; Role='Custom'; Type='Database' }
+    ))
+    Assert-Equal $eligibleServers.Count 2 'Only SharePoint servers are eligible for collection'
+    Assert-Equal ((@($eligibleServers | ForEach-Object { [string]$_.Address })) -join ',') 'WEB01,APP01' 'External farm entries are excluded'
     Assert-Equal (ConvertTo-FarmDiagUncPath 'WFE02' 'D:\IIS\Logs') '\\WFE02\d$\IIS\Logs' 'Remote drive mapping'
     $rerun = Get-FarmDiagRerunCommand 'WFE02' $zone.Id $true
     if ($rerun -notmatch '-Project "Synthetic"' -or $rerun -notmatch '-Servers "WFE02"' -or $rerun -notmatch '-DryRun$') { throw 'Local rerun command is incomplete.' }
@@ -134,8 +143,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhxrZDEk4h7Mi6
-# UnSZKkLN8ve40mdmggoQDB5O1OPLlqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvOV073VX4X7Kr
+# apOzv/nfdUlU307jHmDbzGIxW7MedaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -268,31 +277,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDIVGg9sWmVC89GvEFqtOh0zFI2cM9WeWDJIdCSIazoCMA0GCSqG
-# SIb3DQEBAQUABIIBgFaAlwyryfqRUTmPjhlMY+ZYjuNNud6B2Rs4LOdCl0tblZc5
-# YZlcoMku6sRXmZf7kNM2kBfbnJ12+R5+v5gbhiTH4ZvAtUWC2Nuui25Sq05Ur7sZ
-# xtReHR1awWSGW5kWhwrjsyuIKWhsWM3+OTS6lMa2SFjgWsIOsd6wFDWMMrxz8J9j
-# SRT+1KTnXsKQPUY8baJGV54Z+uBPY4Q/z5jgv8Y63K4tEk4q1JJhRw6pP/MRMpnH
-# QjEUjmywzecEoP4G+kk3LTtZPOw0MFegfrcRmUKe9hZUy/OF0TLB8TlDc+QcL9dV
-# AFUXnk536Rxy4FWJHDCl1KgH6wR1HR9zEAAf+r7yXjXWLRo5g5Aj7ZWf1EyrRE+0
-# SjGGcBI/JWJEgwD/rm1y9sGyQBM0sH97LEuaUYtA/zZrJLCUDUB7Nbc+2DskCCSa
-# iq3u2faLQPYSYXiJRK+/DA1AvUOhNezhEe/FEaTklpj7q6n3i8dtFNCcE0nj+rzZ
-# eXeJ8KFwljiGdk76hKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN4/TBjiPQR+hWZZl+SqgkeBzAkQ5GsBm/uz3gv4liHvMA0GCSqG
+# SIb3DQEBAQUABIIBgHshhgW3fvk0sAkWEmwTat2aLw4ZvNVnlEAH6hYcaqXjW7p1
+# /m5mZ5/b5hguQ1XcMnfDY5+iK4TD5qjhJbCOWifZPBzmQ9ceO8LPFNHEmoEXIwgn
+# uCUSKZUK9uKlEwFvFo7z8ClIyidwYIMsl3kvncjRHGd+SZJDFQY+ac7flEbj+DC1
+# 5XXLR9QYRmipZMyqmGG+XDpG8Co7bcktFLYiM7sjJg4wcF2O5l6ah0OlI22oaBux
+# P0A+VW4P/WQocaboBEceQToKl0xduMWTpjgaqCEq/tvk6mlJ1xIFJlTesM9pnDRN
+# W/k/xv3Oo3m2b3bWPwwNSKIFYl8I5PYz8Optt7ZFoL/Jg80j2Sv3Oz5sWvVWubDV
+# s/c2g1m2TRo7C/lLG4DwjPAlBHISLeobgq6y6ikozgEBxcoRXFRjq8VhRvfCLRd9
+# lD+MbyMLECEPbL8Xw+JIomikHi/sIryRk/pYqDlb3yD1qlSDc5P/06xJd1MEylTN
+# eoq4lkXKKmtQk2uZKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzI2
-# MDFaMC8GCSqGSIb3DQEJBDEiBCCBrxZgbgph2D6BMlDJYIvWGjo+DzwFKMVZjr1e
-# NgEAJjANBgkqhkiG9w0BAQEFAASCAgBYgbfWpTLiclwZ9TprZD4R0vhaefgcZQzh
-# ktq29mxY23SDDKSfYewixYN7DBp6L9HdjrPvcdtQ1re00tEsTPsvrNZ2mua3y+Wm
-# ASe0c7ehaYafkcnlGgoyUqweROuVKaXqqAW6D9HqasuaFKn25sErY2jyvcVszg+T
-# tmStzqeXxcyFFwxxEsLdjzbDHGsxQ8bmCSZE50Napr7AY3gXRxDptnAZ2f/4YtuF
-# A/up+6GaxXZNWjBa3gHf+AAjXSQtCV/4VQ/PVGYyzpUj7MSjBZBU5g3xrfPoKw/X
-# vkdkaCxDguvGoUEWNLE5gY320rEiNOPmEzJyuuwRAyXmM+hUhJ2AOQ1+5LGPOeOh
-# DMGHYjxfwHPoA1aGp8/6Jzzv6MGYtyaPOFXvPOlXO7oiZQYBf+YdYcEalcP1gjoh
-# OORn19ajVjxUc2MHklWHKYvP2eWX70rV+U76zDWNQQ2h7KbGR4r4zravcNV35vB0
-# USHLZZM5LU1n3JxrGziI7VnQtKApJ2/VZLgiTGk3p5Oqvqk0yZiNTUomtryIPLjw
-# UehQLtVU9wLAlr7RBbke+ejzjb0w+K/ZlklwSTYcgL7kVAhpRCJpz55T1UYofvOd
-# iGkgPolN5meaobYC7fVdqWkjaFb/rmztu9GZDNEQtJJmkXDqb7L4GPDpmw6AkhC8
-# U+zwdcTjZQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMx
+# NTVaMC8GCSqGSIb3DQEJBDEiBCBKmOSYQ/Qv0fbIHyPT2uNvcI4FYBYsJFrCMMDl
+# KfP37zANBgkqhkiG9w0BAQEFAASCAgAUquKu1xCbc/fI7RigDJoJqT/JrNeM3y7j
+# j+LqNsd2OvQJosdsWs7EEIx06REvsUTBZYP9Ha7fzIn0HRQb4QbhrReZbWwsDQyJ
+# 9qp2dlZnLbdsUTDusaeniQY98UY6AvYde4uRx9UXQMCgRmP32GYQoUHU11H8guaD
+# Oc4hApvodG5+qVxMacOVuglPnCYQHavKBRTOH88kwKdT83ZAN1RsLX4GnCBsiAFa
+# d4TY9zqNq3NzuNI6+uYe7q+gcsOqqteYLc+EpQxAgCWA2lzeiXvJTJl34JfsdU9S
+# b2qG9OzMepu6ruP5LVDAw8STo+EkueT9/xvzFBkqOTveo5Rf3BNNMHe7iALD+hhZ
+# 6aCVJj7MAIL/VNurDuRo/3joo6WPp5cY2xKtdzeVsXMwxWYXDYaRNLVfu9RkITt5
+# UuE2r6WnNAbOuDWLwQjuvi9SM9MBXsR+VbJtQurJDfx/5mOlLC0/d1fNPmsHd6jM
+# uYsSh4KRvLC4fe4M90UujDCN+Sg6oJd3c/u3fR2lHBSuEsYvviutI5OiObHHOnhx
+# NQsetT17ioG3ZXFxM37c/wY0IQGbYOxrGgObl2bp5vJ4uQn8afa/HQBaqraC7FP3
+# cg7qI4AhUcrEomh4nCeTTMX/R4HIt8rIMLJ/Bb91RVC/APXtMbc0jaof8OQdPo3B
+# asUR4ZExWQ==
 # SIG # End signature block
