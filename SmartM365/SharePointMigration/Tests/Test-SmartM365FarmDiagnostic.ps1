@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline contract tests for the read-only farm diagnostic.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -26,6 +26,8 @@ try {
     $windows = @(Get-FarmDiagWindows -Mode Around -Center $center -Minutes 30 -Zone $zone)
     Assert-Equal $windows.Count 1 'Around window count'
     Assert-Equal ($windows[0].PeakUtc.ToString('o')) '2026-10-02T22:00:00.0000000Z' 'Local to UTC conversion'
+    $rangeWindows = @(Get-FarmDiagWindows -Mode Range -Start $center.AddMinutes(-5) -End $center.AddMinutes(5) -Zone $zone)
+    Assert-Equal $rangeWindows.Count 1 'Range window count'
     $peakPath = Join-Path $root 'AccessFailures-5min.csv'
     @'
 WindowUtc,Lines,Items,Source,Destination,Undetermined
@@ -35,6 +37,8 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     $fromPeaks = @(Get-FarmDiagWindows -Mode Peaks -Minutes 10 -PeaksPath $peakPath -Zone $zone)
     Assert-Equal $fromPeaks.Count 2 'CSV peak window count'
     Assert-Equal $fromPeaks[0].ShareGateLines 9 'CSV line count'
+    $fromPeaksWithEmptyDates = @(Get-FarmDiagWindows -Mode Peaks -Start $null -End $null -Center $null -Minutes 10 -PeaksPath $peakPath -Zone $zone)
+    Assert-Equal $fromPeaksWithEmptyDates.Count 2 'CSV-only window selection with unbound dates'
     . $scriptPath -Project 'Synthetic' -ShareGatePeaksCsv $peakPath -WindowMinutes 30 -DryRun
     Assert-Equal $script:FarmDiagMode 'Peaks' 'CSV-only parameter set without Around prompt'
     Assert-Equal (ConvertTo-FarmDiagUncPath 'WFE02' 'D:\IIS\Logs') '\\WFE02\d$\IIS\Logs' 'Remote drive mapping'
@@ -130,8 +134,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMcRgS5lAV8OP8
-# JbJNpLfaa9ch+7VSR6EEaSCSl3DIRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhxrZDEk4h7Mi6
+# UnSZKkLN8ve40mdmggoQDB5O1OPLlqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -264,31 +268,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH0OurLBDXhnnxryKUTMcg3XVFiTKvFNEF9fFyZLYMT4MA0GCSqG
-# SIb3DQEBAQUABIIBgKjnv4ZF5xX1wlC1uyZF+o8tpPnbgQnt8vU3fOhQ4dDE0Q+4
-# +XZzoX5jyQYN44QJcMAV+XSrY9kT5iCx3iN8XnVTLqMqQeQXGCCaIKESDIVLFGmP
-# weViGTGQNu0kA34B7AzHCOHFq4ovNMwI1OglNtyXgVp+CUhRqDP7FvznxWn12I3E
-# EDTAKdEqiOZZr/XF4/m1weg7pegWhfxBsxRqDE6M/jfEVK4j3lQe2jY7qdcDvx8j
-# XxcpCt0MYHNOafXlhcKUXi0wAIhEU2AZi8+eLXymSM7dShQuU3OfPpn2zorep4/H
-# GYfdarb/O9hH48mZys8QRFR3kVlqA1YooMWac+7Frl8YPxplYdrJ/RsDz0bhpDfP
-# lykIsOrUNlROBueq71C1opfoOKtLCBs60lVolO+t8CUimftnF+ACz/k43Gy6Dc7d
-# OhhDuAZUJC9leHmajnulbgtIVznXb6lCrA7cwqNaKOqIPS2PsNM1wF3wiDHwBSA6
-# s8+hKnzZuTGyKl8aYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDIVGg9sWmVC89GvEFqtOh0zFI2cM9WeWDJIdCSIazoCMA0GCSqG
+# SIb3DQEBAQUABIIBgFaAlwyryfqRUTmPjhlMY+ZYjuNNud6B2Rs4LOdCl0tblZc5
+# YZlcoMku6sRXmZf7kNM2kBfbnJ12+R5+v5gbhiTH4ZvAtUWC2Nuui25Sq05Ur7sZ
+# xtReHR1awWSGW5kWhwrjsyuIKWhsWM3+OTS6lMa2SFjgWsIOsd6wFDWMMrxz8J9j
+# SRT+1KTnXsKQPUY8baJGV54Z+uBPY4Q/z5jgv8Y63K4tEk4q1JJhRw6pP/MRMpnH
+# QjEUjmywzecEoP4G+kk3LTtZPOw0MFegfrcRmUKe9hZUy/OF0TLB8TlDc+QcL9dV
+# AFUXnk536Rxy4FWJHDCl1KgH6wR1HR9zEAAf+r7yXjXWLRo5g5Aj7ZWf1EyrRE+0
+# SjGGcBI/JWJEgwD/rm1y9sGyQBM0sH97LEuaUYtA/zZrJLCUDUB7Nbc+2DskCCSa
+# iq3u2faLQPYSYXiJRK+/DA1AvUOhNezhEe/FEaTklpj7q6n3i8dtFNCcE0nj+rzZ
+# eXeJ8KFwljiGdk76hKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzAw
-# NTZaMC8GCSqGSIb3DQEJBDEiBCAUjfgZPyZ5R74RAGy60u/kRrkdOg2VVZEpWkFW
-# HgNpFjANBgkqhkiG9w0BAQEFAASCAgAqaeSMTSIk60TSIhMn+WQl1FiatRBSQCa0
-# rCoBsLqhzOeTee3B91E9lWMKIGUPcDsFQHdqB8iNhuTt885wXTO6I9LIcubr2UGQ
-# UBWfYEClpLqCO80WtBx7qnE0gmG7PQSGhvEnebwExo/NcwCM6XkNvOdyW79dUBdf
-# M4clJhnYpnxj13aXn+/oyllLZGEpvnCDUq2lHXyfS5uKy7kdxI9xiuh9vNOE85ey
-# 0kCRd+5IgB6G6PnVCPSJ8Tdv4BVjjowM8B/f72hvNlCoQRTawZuRAj1ZhH+C3/NW
-# sZwzoxMg73C8OLHFw1nxxxZQFY36QLpq1IckR5T2393tkz8rHW3kqMBZ18v2BsYw
-# D1/clbWoTHa30VGgZFssHNauaBN4ATLKwTWEOEavM+fGFaBB9vd/k9TLb1Qkhaqq
-# 8qeR8IZfBJ5xUjSHg/K5IbRZHLrh95IrcxkWiYm7jPK+7t1M5CPGrE/lTvzOf1dB
-# 0+GYHpt5UNO7ZjOCVkLirUI4XDidJNOY96vJJdaPfgOs/PShFMg1rTF8An2//vru
-# sEBWBqo1tSbwhTu8m4GVyU+rHfGQkGrLn+lKczsk5S2bzT51Ch3zNrZTqsvyzQOG
-# nq8Ls0REk5qZrO9XymNmG1KD7Js6GSJfKTAssr4ecUpXx0WNxIS5XY4FdwLEZ7+s
-# gDosdNCN9g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzI2
+# MDFaMC8GCSqGSIb3DQEJBDEiBCCBrxZgbgph2D6BMlDJYIvWGjo+DzwFKMVZjr1e
+# NgEAJjANBgkqhkiG9w0BAQEFAASCAgBYgbfWpTLiclwZ9TprZD4R0vhaefgcZQzh
+# ktq29mxY23SDDKSfYewixYN7DBp6L9HdjrPvcdtQ1re00tEsTPsvrNZ2mua3y+Wm
+# ASe0c7ehaYafkcnlGgoyUqweROuVKaXqqAW6D9HqasuaFKn25sErY2jyvcVszg+T
+# tmStzqeXxcyFFwxxEsLdjzbDHGsxQ8bmCSZE50Napr7AY3gXRxDptnAZ2f/4YtuF
+# A/up+6GaxXZNWjBa3gHf+AAjXSQtCV/4VQ/PVGYyzpUj7MSjBZBU5g3xrfPoKw/X
+# vkdkaCxDguvGoUEWNLE5gY320rEiNOPmEzJyuuwRAyXmM+hUhJ2AOQ1+5LGPOeOh
+# DMGHYjxfwHPoA1aGp8/6Jzzv6MGYtyaPOFXvPOlXO7oiZQYBf+YdYcEalcP1gjoh
+# OORn19ajVjxUc2MHklWHKYvP2eWX70rV+U76zDWNQQ2h7KbGR4r4zravcNV35vB0
+# USHLZZM5LU1n3JxrGziI7VnQtKApJ2/VZLgiTGk3p5Oqvqk0yZiNTUomtryIPLjw
+# UehQLtVU9wLAlr7RBbke+ejzjb0w+K/ZlklwSTYcgL7kVAhpRCJpz55T1UYofvOd
+# iGkgPolN5meaobYC7fVdqWkjaFb/rmztu9GZDNEQtJJmkXDqb7L4GPDpmw6AkhC8
+# U+zwdcTjZQ==
 # SIG # End signature block

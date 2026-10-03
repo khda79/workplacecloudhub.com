@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Windows PowerShell 5.1 farm diagnostic launcher routing test.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -44,6 +44,7 @@ try {
 param([string]$Project,[string]$ToolkitRoot,[string]$ShareGatePeaksCsv,[int]$WindowMinutes,[switch]$DryRun)
 $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$DryRun
 [IO.File]::WriteAllText((Join-Path $ToolkitRoot 'invoked.txt'),$value)
+if (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'force-error.txt')) { Write-Host 'Simulated diagnostic failure.'; exit 23 }
 '@ | Set-Content -LiteralPath $fake -Encoding UTF8
     $marker = Join-Path $root 'invoked.txt'
 
@@ -87,6 +88,11 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|False' -f $newCsv)) {
         throw 'Dedicated Run launcher did not remove DryRun.'
     }
+    [IO.File]::WriteAllText((Join-Path $root 'force-error.txt'),'1')
+    $failed = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
+    if ($LASTEXITCODE -eq 0 -or ($failed -join ' ').Contains('Farm diagnostic completed.') -or -not ($failed -join ' ').Contains('exit code 23')) {
+        throw 'The launcher reported success after the diagnostic failed.'
+    }
     Write-Output 'Farm diagnostic launcher offline host and routing tests passed.'
 }
 finally {
@@ -98,8 +104,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwsQ7oxq9LKRBM
-# f/i+U54x++76LHbh5HWwSXWCseV/UqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdt1O/AIycV2hB
+# rkG45rpPNiNMZYZk2iRPoAVPzYBhQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +238,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC5WMxBiFy1ZgY7mG63Sk1gDyppF8mfYd91ZgMR9aJTxMA0GCSqG
-# SIb3DQEBAQUABIIBgC5uJmWXI+RMyE1iWSZw7TKxAKGsWBijxxQTaFBFZhmfsUO4
-# zWnNAq4FmdrmYqWeSyEawhs585Xe62KV596yrEbIV5FHWCFT5DxGZjGOQYWVWsUL
-# 8YZDesTecUZJ2YkjHUNqH3CzD7LxnkZxsY/0WHf3CyGv9MaEfqskfZZ0SWafEfpY
-# NJY7e0ztD1BBCmhf3m2pp0y+N8C1nr2SvWiLUPr1Kj0xKF9qVXZtddYiZEXmCT5e
-# gUwPZ/QXWRF7TWJ5gCzxb3goiHMl9Fihu6Hs8MwQ4v+0uzsg86Eq9YKwWliNvl6e
-# eS8KSuB4hSNR9KMDfUMeddTIGNefY+yJvJ95fV2k2yozoPSTlCiFO9U4RftQ7n3W
-# u7sssNpf/5uaVW5vwhlgF0d1rY5Ch579nad19dADonjiKIIgkeMwHTQkvq9ESpc3
-# JFNAr4mOxA2Tx7HHlVgz98lXl22n/1kaI50gS62IqewgMFFdzqLzhMxabe6WrKwE
-# UZ2Ys7nK9xYQ7LAokaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDW6OVtxtY1kE3nKRZoiBo9mcf4dpHk6QhV024KAhLo3MA0GCSqG
+# SIb3DQEBAQUABIIBgCCyzEiixA6NKiAIYJ4wBBeQZ5rahDxqolHlBQ9y+XbM2JWZ
+# K/fLaSYs/JQmBMjUEJhLeEyBiNtMc0tQQqqhf3/Bz/D8IXiB8bYZ38tb/++UsZ1g
+# 7/51xowUm5FrapqDtVZlbhhSxP3n9Wx7zDejiLsxCnnpY2s2c8INCAX30cPLF0ei
+# ddXv+ZrqCr4i1ADrZM+Itocn2afdm0zE/0n0YlRCQ5GiVs1wC/rOC0rj8eGVeF/7
+# 0VMzBhAw/L6Idk8PvY02lXoxmBJ6Tk0lHjiGZ4pUJDbvb3mexNPKbDZuFrHUYau1
+# nH4+gkzp/3kLJmGnc7ra5eacaPsC3AS186o2CF59AASp5ufXxlCYmsax4lSFudTy
+# 4gIVO5qAW2oqFkWWaBvtme2PgUP5qcPTIIJHpBZRIsRWBS9Fc3ittFbbKN/XZy98
+# LtLSXrG32IpS4fSn2uQ55IdgzHnGmU13huDc+jFCLgQl4pHPZUbQegL4MLmREddC
+# gEjfv8q1togcEStzFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzA4
-# MjhaMC8GCSqGSIb3DQEJBDEiBCAI5EHO/Q3NFIj0SMh9ljFpY2rlGR/e6tk2OVJE
-# Y3NMgzANBgkqhkiG9w0BAQEFAASCAgBmT0J/DRKvFXH0XII4qIRuMCOmBGMk1P8A
-# 0Q48Dr3K/r9sMHYTEarl46Dg1uPeafmLOcxTx0uBmo76ggRiSpLpaUe/gfBihr/y
-# S560cuHrkKqf6docaWqCANwt0o/YCWUHYWcPkVwa7RlRgdpzXd5hxTctZPw5qz/m
-# JL485AzJJ97cAIqDLtH5RMgjZ9aYT3PM8wtLBM9A57KWSp/mJvZTIalFW7fV+Kw1
-# 9PhrHGuVjH9rWlfbHVWJ5dLOlsEE4ftTCYEJ+hfFOKuBgny6WG2Fg5wH9CBkph/T
-# v1vhEcTGWPDfHytF/JI6h2jwFLLQc2cIIEg1Y8Qch8YHNN+RCNERlzYexVZ0Q7yP
-# tJ95PZrrxInTJGzJmnCNihLai6i0OvoUTuTkmV7o389vtoW7CbofBg86kdHsJn6r
-# r9VI6qjWQf/Vfz9RBAs8q/46F7j02FFJqG/5Pyu+HvDbung05zO/d+l8Ff6QR/su
-# lQ5EW4NRIPE6HpdrWT5QddPn0ahxhKwuJzzhHNsFPEFx3GpjzZ4jkvU8u3hDKLM8
-# ngnMXb7bGFVCg+wwjDSM7KY8msJ5tzL1TgoCXDw2g6bSfIafPzBAY4xtuPVVmFy+
-# Xe43Hsean+SymtPGolIU8CCFFQS+NSxI4LniO6JQkoAx1wGjWGkx+4qjDXadPkca
-# Tfuwz9o9sg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzI2
+# MDFaMC8GCSqGSIb3DQEJBDEiBCBaqnWKRJDS99pmI4Z0i84aiVnc+lWtXNG3r0U+
+# 5ThiOjANBgkqhkiG9w0BAQEFAASCAgA2LMTd9eRkQyYhAv60lyD/uyFJVnea/JdO
+# bvhcWdx77DsFmmgEamZujSkN2cuURHNOIU90D7sVtqPPV1dBmFpOpyhcOGR6D11v
+# VhqAEK03q6dc068XpeTsPEKtQJ9Ar1K5Nu5uxRjSmEa8fctcAKKHLQlAI4Jh74xC
+# HehGHMYucrm9zBR2gZexmQsP1GhwGTO6AC7XfDMh4L477ysGRf7u8XJ7N4SXPgqT
+# mn5rqGdwMEnb3JOEL8Zo1SfYjNUbR3+GgnDd/DkDz2/EDmX5W+pzjNHXQuiqfbXA
+# M+pUGPjSP6atlwNGRFiac4ZFWl//4paoJwNp0gp3/ZqaQJMirX03Lft79+VRI3Cb
+# y9bgK0P1YOvPz4eVCuN5vO2aY+a49Xd/azhxDUQqTUaGqbDYvl0HvZ0cyIrCWm7g
+# j19+IhOuKxZR6ZyIOyvVcQhhCw38ZHpEGsx9QvB/BAaQkfAIRM+aGbd21M4Kxfbq
+# OimNk1W/IiVd1dEHWtrkuNlJWbGisEcqbwjhhKMhK93JZCKIFmo87s+f73G4HCfE
+# Tz/WoTGkQz3yxwR/OfIrl3/43cTh+XkXH8rlz4lZ3FX9IehUom33s2MuIygfykf9
+# ZKabWWjodggq67hrZmcz56NKJXjp3H9jnoVxJ6nMMLbj561If7hPkC1m+3ixiNa5
+# zruGgPT7uQ==
 # SIG # End signature block
