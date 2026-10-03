@@ -11,6 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'EndpointAnalyticsEvidence.psm1') -Force -ErrorAction Stop
 
 function Convert-ToDoubleOrNull {
     param([AllowNull()][object]$Value)
@@ -50,6 +51,7 @@ function Get-LatestRowsByDevice {
         [string]$PreferredProperty
     )
 
+    Assert-EndpointAnalyticsDeviceGrain -Rows $Rows
     $index = @{}
     foreach ($row in $Rows) {
         $key = ([string]$row.DeviceId).Trim().ToLowerInvariant()
@@ -116,8 +118,8 @@ $endpointTrend = foreach ($weekFolder in (Get-ChildItem -LiteralPath $endpointHi
     $startupPath = Join-Path $weekFolder.FullName 'Intune_EndpointAnalytics_StartupDevices.csv'
     if (-not (Test-Path -LiteralPath $performancePath -PathType Leaf) -or -not (Test-Path -LiteralPath $startupPath -PathType Leaf)) { continue }
 
-    $performance = Get-LatestRowsByDevice -Rows @(Import-Csv -LiteralPath $performancePath) -PreferredProperty 'EndpointAnalyticsScore'
-    $startup = Get-LatestRowsByDevice -Rows @(Import-Csv -LiteralPath $startupPath) -PreferredProperty 'StartupScore'
+    $performance = @(Get-LatestRowsByDevice -Rows @(Import-Csv -LiteralPath $performancePath) -PreferredProperty 'EndpointAnalyticsScore')
+    $startup = @(Get-LatestRowsByDevice -Rows @(Import-Csv -LiteralPath $startupPath) -PreferredProperty 'StartupScore')
     $endpointScores = @($performance | ForEach-Object { Convert-ToDoubleOrNull $_.EndpointAnalyticsScore } | Where-Object { $null -ne $_ })
     $startupScores = @($startup | ForEach-Object { Convert-ToDoubleOrNull $_.StartupScore } | Where-Object { $null -ne $_ })
     $appScores = @($performance | ForEach-Object { Convert-ToDoubleOrNull $_.AppReliabilityScore } | Where-Object { $null -ne $_ -and $_ -ge 0 })
@@ -167,8 +169,8 @@ $endpointTrend | Export-Csv -LiteralPath $EndpointOutputPath -NoTypeInformation 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDT/8eRjg60yTPI
-# 6yMbPY+AP+Lj9jX4xexNTlyi0v7sVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDw5R9CMeocCtZv
+# eHKVYghG7pulAyxBYPpRqQ5eBChJA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -301,31 +303,31 @@ $endpointTrend | Export-Csv -LiteralPath $EndpointOutputPath -NoTypeInformation 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILp/TfIGhK1/8/TT19X70UBbqJOgK8GLous/Yx9e5mz2MA0GCSqG
-# SIb3DQEBAQUABIIBgEchdOpf9ssU5YXG6OUGKdtsnFo6mIEttB83KxzGEKMRsgNr
-# wntifzUEtBYK8OFNGsilfece5bRu3WbjEGSg8Jnes6IZPWYdkBGyw4Zv5FKmVf0E
-# FFlDXcRxnBqIVnQ+s9SfiGEG9rgSALC+uWLh79IJitFoYVfMfQ4CoLhKplmsJe/B
-# GQoPhgbc4kO3nS1AaqoqyYgH3/NTzIk+Em80TyPEIiuuzl1ubreLxmr+51kZkxkf
-# RIiqioaiAqXmibnRP+vs8DGtwetyJkAwLat4tBdA71tK3HxuOPHSlci2Eu2+1zzW
-# PRlyE1CfX5slpDLREdhHBHDE64Dm5VRQXGgiCs79mWO0OfhvreVcLeRJ9Q6jYWdS
-# bwCdJEzAxQvi1UqBMrHt/8pTtGnYHiFwadjD8gljpJoWu1PhVzqRfBuVqNg6YaYk
-# l9Sf9jtsQNneKLNOZjKzq9r6qPjUQYzSAVj0DrJm/PYC0N3Z4C8iXOO951Syck90
-# 2mJgLyIFWH6fNXBefqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPB9uWK15yUQgBG75VWkANU3ux7E0RhdZykcFNcJt8EIMA0GCSqG
+# SIb3DQEBAQUABIIBgDmmNvLzNbEA7SHceDwu1GDfvP0/I5c1gUo27EMwzvE0p06l
+# bFF+0Cw4IHuKcRS7XaW4ZOvgGMynDsnV8z6bURke6T+m5KvFhfHCos9+YtrQ04ji
+# EPtzLJhE7HUBfYiIYEWxKxi3rsI4Q60m+0ABmV0jgtCuA85j9r2RCHYtEUMarrFK
+# ZLhFocLz4ILwTdZdOoFSg/3pC/Vq0ODfJ8HWVB6Pbuyw5tMjOa8weatygXNkukbo
+# oLRB/jYaM1Fh/BbzylglZNePE4sdpDs0ZQNjfdJuY9dtia133NDmJFVE/nUghhwy
+# 0XclKHv2nuhzpSmTqbga9b4EDfLqpvc8ARjyXGpnjLsxxEtCNiD3qFqBz6OZsBWS
+# yEodOrIE7J2xpu/0iHYNtc/YhYqTTxo65lrB8HFc/2GVRUIEro+IDkdF+j+RAAML
+# 2jKQ4zRJfXip/pTgbfd6KIsnWrHOmLH/cduV+HitTYWkdZZNKWEYevFOVMh9inQt
+# 8tWYYi5JloH42pDu/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBjEYA5iQZiavWQDDCO1ODjbcm8ZoTmRrJ+ObG5
-# Lfn4pzANBgkqhkiG9w0BAQEFAASCAgCusnYUiBddtrblBNVP1H5rDWXm+d3rOcKx
-# u9hUyIXn4hlkIJ7NTl+65sxf/c/lOa3DDRBiH3GocTzrGjEA8bdHy7l1N637D4Ph
-# PlF1nJW95LFk4/XIjyBOcUaT4uLDXrpS5zH5nWc9lKFb2q1H79mVniYEycuZ3l0c
-# 3TWT4KXbb1KOi5HFPwMJ5248zR73zyEbioKSjZBVilGGqoU+y0HAZ5oPuprsMQTC
-# ZNF6pWaLnpiHLlYFM4NLtVwEX3Qvx/bpCYfr3prMA8YHuT5smO3Xk9dilqTufIvS
-# IyB/jJ+fY+zWirjLOj5wIB0mKzdTdONe4flAdC7LbJkr40JG9JltG3UoMz17n3g0
-# eaYmZL6Jynae9kZ8XV21Bl4WiwqbfymGzWD3f1V9zC+ZdSbgvIn4jRRm+MdKRSWA
-# LT/UbMwRBBFknlncc+71fTDlMQMAxguNrgMzshV7N3gBNsZfPJDGjk5dwtOhvIUu
-# lif2B+WVZ1PwM/V9qGa7me+mt4egBSaOpEiO2q6ol7PqyArEQd20N3+wm3ZKguHV
-# GB9gE1nprU139rmdXbdlckBGAhNftVN5ZPFTXp9WeZX/9SRaotCdZ7sdsXa/xgfN
-# +FxGO1Cafi/BkAxZwaFrdomWbG4qUzfLk/YnQ7UrNNwRoURJI4qCSuJlc+fOMElp
-# AzYvI/QjVA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
+# NDVaMC8GCSqGSIb3DQEJBDEiBCB/gdG4WBMpk5WTAPfghYxP3+mQEak/zgGVhMQh
+# /FB1fjANBgkqhkiG9w0BAQEFAASCAgBaQdo2RUazHuRxBowJ5q7USTi7tI0l3SbB
+# Zaf+2hFOdNQFlrk8cie92SZL776jlSUQnKMYCEmjWiVpumOQq4s4krWWyRIuKIHl
+# Y7Y+iY2YFNmThwqXuCoXc3fNHYugkOWzJJKBwepz2FxWTDCQjRL1QpUetI5ZzM8I
+# V5dNccQR1x6rUB7pmfEkLE0ylIjXTQzXfsL+ZD2UzFn/tRIMC4cRMRNLH1ygqS/s
+# nul1r7+LwDnYBYzH4qOwWsj8ol3YteBiQ4ldzaZNXvedncO/jA+iQX6CbOqhz9ay
+# yy9zxVQfLkUe13qUJz2nAvHlsY78LQQWgmE0j1x9/OaMe2g31kLu8K4fTRYqPuLw
+# texhjvXfI5UkBbfn3DUEJ9UVanavYUrhOyEA1C93YKQMcRLwgukGTN7Wx9VFVndE
+# 1+AwiNtr/Zsqft+NEaaIXgL8XwX53Xy6d02FNtolHO/O8n0L1/G3xq9PLtUC3Nfi
+# WtmnDWGiRbqelWGhWhITS+lLpDJ09+C5rSXOxB1vO6Op0HIhXaQPsOtaw/+zLV/8
+# dLsihr4HKXqouVbnv3JZCvYVUACwMdsjs/BHqHOtiDAOb85K2oEcO1PMNud2VFne
+# RrAVlajRIYZ1cBLqvdDbCgnffEOC+/lmLliWoblKlVl05Tzqw17Z9KEQgMqc6o4N
+# 5uVo10W4oQ==
 # SIG # End signature block

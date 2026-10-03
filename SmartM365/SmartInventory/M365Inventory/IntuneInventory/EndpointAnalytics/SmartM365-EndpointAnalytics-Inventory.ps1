@@ -41,6 +41,13 @@ jobs to verify tenant availability, but downloads no data and publishes no CSV.
 .PARAMETER MaxItems
 Limits normalized rows per source report and activates the SmartM365 MAXITEMS filename suffix.
 
+.PARAMETER ReportConsistencyAttempts
+Maximum complete export attempts for a device-grain inconsistency. Defaults to 3.
+No cached rows or per-row score selection is used.
+
+.PARAMETER ReportConsistencyRetryDelaySeconds
+Base delay between consistency attempts. Defaults to 15 seconds, then 30 seconds.
+
 .PARAMETER SelfTest
 Runs offline completed, failed, throttled, schema, MAXITEMS, TenantKey, and Advanced Analytics
 guard simulations. No tenant context or Graph connection is used.
@@ -52,7 +59,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.9
+1.0.10
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.65+; Microsoft.Graph.Authentication.
@@ -83,12 +90,16 @@ param(
     [int]$PollIntervalSeconds = 5,
     [ValidateRange(1, 12)]
     [int]$MaxRetryCount = 6,
+    [ValidateRange(1, 3)]
+    [int]$ReportConsistencyAttempts = 3,
+    [ValidateRange(0, 300)]
+    [int]$ReportConsistencyRetryDelaySeconds = 15,
     [switch]$SelfTest
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.9'
+$script:ScriptVersion = '1.0.10'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -281,6 +292,8 @@ function Test-EAStaticContract {
 
 function Get-EAStatusCode {
     param([Parameter(Mandatory)]$ErrorRecord)
+    # Row counts such as 400/404 in a grain failure are never HTTP statuses.
+    if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Data['EndpointAnalyticsGrain']) { return 0 }
     if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Data.Contains('StatusCode')) { return [int]$ErrorRecord.Exception.Data['StatusCode'] }
     try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } }
     catch { Microsoft.PowerShell.Utility\Write-Debug "No HTTP response status was exposed: $($_.Exception.Message)" }
@@ -506,21 +519,59 @@ function New-EADataQualityRow {
     }
 }
 
+function Assert-EADeviceReportGrain {
+    param([AllowEmptyCollection()][object[]]$Rows, [Parameter(Mandatory)][string]$ReportName)
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $duplicates = 0; $invalid = 0
+    foreach ($row in $Rows) {
+        if ($null -eq $row) { $invalid++; continue }
+        $deviceId = [string](Get-EARawValue $row @('DeviceId'))
+        $nativeReport = [string](Get-EARawValue $row @('ReportName'))
+        if ([string]::IsNullOrWhiteSpace($deviceId) -or $nativeReport -ine $ReportName) { $invalid++; continue }
+        if (-not $seen.Add($deviceId.Trim())) { $duplicates++ }
+    }
+    if ($duplicates -gt 0 -or $invalid -gt 0) {
+        $grainError = [IO.InvalidDataException]::new(("Endpoint Analytics report grain rejected: {0}; duplicate device rows={1}; invalid identity rows={2}. No rows were selected or removed." -f $ReportName,$duplicates,$invalid))
+        $grainError.Data['EndpointAnalyticsGrain'] = $true
+        throw $grainError
+    }
+}
+
+function Invoke-EAConsistentReport {
+    param([Parameter(Mandatory)][object]$Report, [Parameter(Mandatory)][string]$EffectiveName, [switch]$AvailabilityOnly)
+    $attempts = if ($AvailabilityOnly) { 1 } else { $ReportConsistencyAttempts }
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            # Every consistency attempt obtains a new complete export, never cached rows.
+            $job = Start-EAExportJob $Report $EffectiveName
+            $completed = Wait-EAExportJob ([string]$job.id) $Report.ApiVersion
+            $rawRows = if ($AvailabilityOnly) { @() } else { @(Import-EAExportedCsv $completed $EffectiveName) }
+            $normalizedRows = @($rawRows | ForEach-Object { New-EANormalizedRow $EffectiveName $_ })
+            if (-not $AvailabilityOnly -and $Report.Grain -eq 'Device') {
+                Assert-EADeviceReportGrain -Rows $normalizedRows -ReportName $EffectiveName
+            }
+            return [pscustomobject]@{ EffectiveName=$EffectiveName; Job=$completed; Rows=$normalizedRows; AliasUsed=($EffectiveName -ne $Report.Name) }
+        }
+        catch {
+            if (-not $_.Exception.Data['EndpointAnalyticsGrain'] -or $attempt -ge $attempts) { throw }
+            $delay = [Math]::Min(300, $ReportConsistencyRetryDelaySeconds * $attempt)
+            Write-EALog ("Report {0} failed its grain check (attempt {1}/{2}); requesting a new complete export in {3}s. {4}" -f $EffectiveName,$attempt,$attempts,$delay,$_.Exception.Message) WARNING
+            if ($delay -gt 0) { Start-Sleep -Seconds $delay }
+        }
+    }
+}
+
 function Invoke-EAReport {
     param([Parameter(Mandatory)][object]$Report, [switch]$AvailabilityOnly)
     $lastError = $null
     foreach ($effectiveName in @($Report.Name) + @($Report.Aliases)) {
         try {
-            $job = Start-EAExportJob $Report $effectiveName
-            $completed = Wait-EAExportJob ([string]$job.id) $Report.ApiVersion
-            $rawRows = if ($AvailabilityOnly) { @() } else { @(Import-EAExportedCsv $completed $effectiveName) }
-            $normalizedRows = @($rawRows | ForEach-Object { New-EANormalizedRow $effectiveName $_ })
-            return [pscustomobject]@{ EffectiveName=$effectiveName; Job=$completed; Rows=$normalizedRows; AliasUsed=($effectiveName -ne $Report.Name) }
+            return Invoke-EAConsistentReport -Report $Report -EffectiveName $effectiveName -AvailabilityOnly:$AvailabilityOnly
         }
         catch {
             $lastError = $_
             $statusCode = Get-EAStatusCode $_
-            if ($effectiveName -eq $Report.Name -and @($Report.Aliases).Count -gt 0 -and $statusCode -in @(0,400,404)) {
+            if (-not $_.Exception.Data['EndpointAnalyticsGrain'] -and $effectiveName -eq $Report.Name -and @($Report.Aliases).Count -gt 0 -and $statusCode -in @(0,400,404)) {
                 Write-EALog ("Report {0} rejected; trying alias {1}. {2}" -f $Report.Name,$Report.Aliases[0],$_.Exception.Message) WARNING
                 continue
             }
@@ -542,6 +593,18 @@ function Publish-EAOutputs {
         OSReliability='Intune_EndpointAnalytics_OSReliability.csv'
         WorkFromAnywhere='Intune_EndpointAnalytics_WorkFromAnywhere.csv'
         DataQuality='Intune_EndpointAnalytics_DataQuality.csv'
+    }
+    # Validate every device-grain output before the first canonical CSV write.
+    $catalog = @(Get-EAReportCatalog)
+    foreach ($key in @('DevicePerformance','StartupDevices','WorkFromAnywhere')) {
+        if (-not $OutputRows.Contains($key)) { continue }
+        foreach ($group in @($OutputRows[$key] | Group-Object ReportName)) {
+            $reportsForGroup = @($catalog | Where-Object { $_.Output -eq $key -and ($_.Name -eq $group.Name -or $_.Aliases -contains $group.Name) })
+            if ($reportsForGroup.Count -ne 1) { throw 'Endpoint Analytics output contains an unknown or misplaced report. No canonical CSV was published.' }
+            if ($reportsForGroup[0].Grain -eq 'Device') {
+                Assert-EADeviceReportGrain -Rows @($group.Group) -ReportName $group.Name
+            }
+        }
     }
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     foreach ($key in $fileNames.Keys) {
@@ -731,8 +794,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6p3xg9ML3sUY6
-# 0R5+30RPzgjEemPeWdn90yODmXu9XaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3A1hxCs6UXGN+
+# ZvcE8td/VtLpml+2irOgCb/uxPpB2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -865,31 +928,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINjfqjRK4ZbCtVN+5JlLpT4jgoV4j0CqBDCisaaLQetoMA0GCSqG
-# SIb3DQEBAQUABIIBgKzWGsK9RJogClUzxK0OTz7/+Rdid4sBeiSxwag9hU75KXal
-# XEmPEeO/1Ex4ood2rf8KFs9P3ji9EutPgu4f9oBEu4DLeCA0A6Odf8zF0xxmUruZ
-# TPG0qUZ0qm6vnjhpkiZxj/uUvlOWPzZl8KZkx/dNFusR0Y11tBY+JNOfBDbiigUu
-# 81lggP7hJCXtRnNlV1yLLY/cvxQ4pbE7zVzTeH6TCy1jJu3GnfVWAPlGNN7gyqs4
-# G8FE8lBjlunm34CigTY3SkAu/jBbnoMi/377bODCgZ8uDMBHr/KzVm3ztquWRbZ/
-# oGtV/eVO0JvcU349Tjby7eDbVPNoyvQ2iP6IplpsBABIVGXyyzfIDp6PzOp4/4LA
-# UUTYJKjfS+y5IQOJ4NRWEpbfuI+lv1aLNkotxDl8o37HhslCuSa+Qy40EsKIlr4N
-# QMPJ2d79bgm6l440sOqwgrf11Z7RkAtzC+o1pEiwn64fYbn8jXbsj5WS/8f7kl6/
-# 4pt7F93vbWyafubQ6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGP4p6m9bYawLExMKj+fDZJBOIVh48x7/uHCZN+wwgpHMA0GCSqG
+# SIb3DQEBAQUABIIBgId0jh8eVjzuYrQvoE2TkrGd6yutMJ372Tba85ZG3gx6Lccy
+# DRneoz0xfQFTLpy9cP9XTQDgICLXuCc5eHucHyo7uVdx6RGuOEjEd8xczqX8kMQ4
+# olTiU64SGhADQMyzaNx7AI/VnAnZk3vzEijdaebOAd5AamVqPawEj1vRKn0kvtq6
+# w0O0AJKoYmwtmpFMJvppw5EghnIn5da7Uk8NRH1NjR780+r8pNnxZe3XaDSTzE59
+# GRuNrJf6YhXeRAbCPTWcFK/6krdqknRKOTpK04Fvj1UdEzBpAQSzmvL2rjrsfc4X
+# raB0gmwpDqGKM3DbwwvBP+t0EEyOBNwn71xNxx1nfB7eiZrHllqli4m/wGXBdwvg
+# /HqRzeZqGqbKUFe3o6aX50EYb3I16FzhKgqzmdzBnM+gbmxfOvcafWABXlEkIcIa
+# EbxiMi9cvTlD4/S9qzWDEGwZogoriNAjVcEHXldKgF2QdaPPRx76Thz8+As9og8w
+# bPllTbUsaCmGifoy0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDZaMC8GCSqGSIb3DQEJBDEiBCAQcPy3/lgw40tXk6vIBRPwOJCi/K4UxvmYfffj
-# s2lBBTANBgkqhkiG9w0BAQEFAASCAgAq396XVuukSn/IzJ6lOAh7jc5LXWf77qIm
-# BUyLwJwhh0qiCUG8UBTGmF0r+LluG7soBUkBO39Tp1+gByNqXrALCD5RDbujsCM/
-# klbwqHbMl4+MycsMb5GNFkp/WsFSTTTbG3xPozL2JcmuEpUwtMeo8ae/st1a8geA
-# EC6dgtg3sRluwEZy0ej6D+XRQcCrhvziE55IsI2XsuxB5c6XB+T5/wMoOr2Vlnd9
-# 2MqRdXM/LgLY6kgdJQMPwiFNQASaDc0i5Z+GjSKW8T6P6o70tpxYQr7upHoEuAHK
-# 1LAF2Jm1DqIlRn2IhNp4SdckOC0RPA/x7ffbVdBnyF/4hHLzglkM8n5s5Jowo3Ao
-# HB+fJMUz2LQHBtAMOe+Pc05aOuyBQy6neaGBCSrJm0dwiGW4EKngmRHc1fEJHV2T
-# BS6e3DQ0t+14ofiK+i/jjOseHrgn1fGRkNkWDbVjggA8LUVWLeRFlnuAYbPTk8v/
-# Hf3ymjQ3fiGe4ieK7/1psT+kVAXzlaBunQug4CNEAQw5L2mO7sNuL6Q3FqR2290M
-# VNriTqWa9TWAQgJBXIkM2XYS17u8r96ImtATd6UJSVxB969IEXiLF3u54Gv4ogMw
-# PZtgV/j9iTPgZkmw+VsLhSbsBp58f+46ngbjLJlLeK7qA2OgyPpBNPfuwZ2CoUcI
-# tHDNCIfRZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
+# NDRaMC8GCSqGSIb3DQEJBDEiBCC2SxqVyDjfv1ly/dhC+K+/eb8mBlNLL2m4K91K
+# L1XNCzANBgkqhkiG9w0BAQEFAASCAgApqDqjLP2CUohOxcG+xI9dYiLirG68hzt3
+# lsDE+XxVuiZpX6B9CH6dQSfczyEoA1biz+Io62ll6Q8fN2O1km3z+00e18uZ/v+D
+# na1BZwl4ioQ+tRp8qLbAJ0oqfdfDcz5mo4GLfYro34ntDUghVLVy/tekhaqUI4YE
+# gUo9Eil15r+lTe3cqM9lz/9JHRoak4RSzrNDiJYiP8Uda+WGzAFmwF9J2mLB/4U1
+# VkEj1ERa1tFHkSpuVKfYIE8M7jQKDtJXSP6nemfJmTQtT+46ZPswYWG1F5BZAJUD
+# YfQ2+YynVcpPfP2VSaE0m97xqUUZDbloF5XubrpusQRoSlKNVbabuKLqmNK1qsqa
+# 43O6Bh1AWQYv3cZVJlJpsgmVphB2g5UElqGLNVNSvDIeuBoVFXtT/StPsyAsmNzv
+# Cuc3qtpP1tAy+E2ZD+n8Gw+ViXeQkTYyFWktUHf1qFTcJwKTFCEJp0zX+bdI1i8h
+# wqHysWdZ9ZWSbpgxPEorsuXKHPaaERwCkhx47wqmbQFe7YVKOKJq/NpI2DJrEYxt
+# CMw55o15NqeNux8+vg05QCHzK3y8P7b4OKNmfa2PcFIN4boAb08lnrb82zuwTEDG
+# Peq6hoT/8mM1eqoojaoX3+8DdFBXdQIPr7PJU+Ma8gzxxhhEA6nXCW+pNoyt1EVK
+# 7bmLYhkxVQ==
 # SIG # End signature block

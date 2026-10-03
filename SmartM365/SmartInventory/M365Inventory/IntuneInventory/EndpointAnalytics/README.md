@@ -126,3 +126,32 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -SelfTest -MaxItems 10
 ```
 
 Do not run a production tenant collection without explicit operational approval.
+
+## Device-grain consistency
+
+For each device report, a complete export must contain at most one row per
+`DeviceId` (case-insensitive, trimmed). Blank device identities and repeated rows,
+including identical duplicates or conflicting scores, are rejected. Different
+reports for the same device remain separate; model/application/process reports
+do not inherit the device identity requirement.
+
+`ReportConsistencyAttempts` defaults to 3 (range 1–3). A grain failure requests a
+new export job and downloads the whole export again; the default delays are 15
+then 30 seconds (`ReportConsistencyRetryDelaySeconds`, capped at 300 seconds).
+Rows are never removed, merged, averaged or chosen by score/date to repair an
+ambiguous export. Permission failures and existing HTTP retries keep their
+separate behavior. Alias fallback cannot hide a grain failure. Availability-only
+validation does not download or qualify CSV contents.
+
+If ambiguity persists, the collection fails before canonical business CSV
+publication; the prior files remain but the failed source receipt must prevent
+their admission as a successful fresh collection. All device-grain output groups
+are checked again before the first publication call, including the mixed
+device/model Work From Anywhere output. Diagnostics contain report names and
+counts, not device identities or score values.
+
+Offline regression tests (mocked export jobs, downloads, waits and publishers):
+
+```powershell
+pwsh -NoProfile -File .\SmartM365\Tests\Test-SmartM365EndpointAnalyticsConsistencyOffline.ps1
+```
