@@ -2,7 +2,7 @@
 .SYNOPSIS
     Item-level ShareGate pre-check. Copy-Content is invoked only with -WhatIf.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -17,10 +17,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.1') -ForegroundColor Cyan
+Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.2') -ForegroundColor Cyan
 if (-not $WhatIf) { throw 'Refusing to start: -WhatIf is mandatory for every ShareGate pre-check invocation.' }
 if ($DryRun -and $Run) { throw 'Choose either -DryRun or -Run.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.1 (powershell.exe) for ShareGate.' }
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateReportReader.ps1')
+$reportAliases = Get-SmartM365ShareGateReportAliases -ConfigRoot (Join-Path $PSScriptRoot '..\..\Config')
 $execute = [bool]$Run
 $project = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).ProviderPath
 if (-not (Test-Path -LiteralPath $project -PathType Container)) { throw 'ProjectRoot must be a directory.' }
@@ -163,15 +165,10 @@ try {
                         ShareGate\Export-Report -CopyResult $copyResult -Path $reportPath -ErrorAction Stop | Out-Null
                         if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Export-Report did not create a CSV.' }
                         $reportRows = @(Import-Csv -LiteralPath $reportPath -Encoding UTF8)
-                        if (-not $reportRows.Count) { $status = 'Undetermined - empty report'; $reason = 'Export-Report contained no rows.' }
-                        else {
-                            $reportText = ($reportRows | ForEach-Object { @($_.PSObject.Properties | Where-Object { $_.Name -match '(?i)error|warning|message|detail' } | ForEach-Object { [string]$_.Value }) -join "`n" }) -join "`n"
-                            $status = Get-PrecheckStatus -Text $reportText -SourceUrl $item.SourceUrl -DestinationUrl $item.DestinationUrl
-                            $itemRows = @($reportRows | Where-Object { $_.PSObject.Properties['Source ID'] -and [string]$_.'Source ID' -eq [string]$item.SourceItemId })
-                            if ($status -eq 'No 401 observed in pre-check' -and -not $itemRows.Count) { $status = 'Undetermined - item not in report' }
-                            elseif ($status -eq 'No 401 observed in pre-check' -and @($itemRows | Where-Object { $_.Status -match '(?i)error|failed|erreur|échec' }).Count) { $status = 'Other pre-check error' }
-                            $reason = 'Observed in the ShareGate -WhatIf pre-check report; no content was copied. Absence of 401 does not prove a full migration will succeed.'
-                        }
+                        $assessment = Get-SmartM365ShareGatePrecheckAssessment -Rows $reportRows -SourceItemId $item.SourceItemId -SourceUrl $item.SourceUrl -DestinationUrl $item.DestinationUrl -Aliases $reportAliases
+                        $status = $assessment.Status
+                        $reason = if ($reportRows.Count -eq 0) { 'Export-Report contained only a header; item-level access remains undetermined.' }
+                                  else { 'Observed in the ShareGate -WhatIf pre-check report; no content was copied. Absence of 401 does not prove a full migration will succeed.' }
                     }
                 }
                 catch {
@@ -196,8 +193,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5nuaXeKsnqXr9
-# sPGCqL4qvUAtmhAf9fG13qDHD8mKNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFIisyh8WfrMD3
+# sLtn2ktwwoNSk5D4IV7Q5LnO53B/caCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -330,31 +327,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPK7Im+8LD6CqDX4e5tB7g14gM3QiROm9vmqPsgnS1Q7MA0GCSqG
-# SIb3DQEBAQUABIIBgIX6O0CTezuXkb+EkibP7sx1iHB4fD4MRgUD91nMD4vYQrsz
-# KDScHoN5DjEHEh8KgSUCPS/ncqnIva3vj93Mz20ebCiBQPOfnE+kKXub9MMLS2Ny
-# DzesIj/ODr4IxseXeUOlv4Ctxt0LqNBQS15hQq13umdAkTQyDMfGkWlA+aCgqz/s
-# cdS3eRWDtvfn1WMQUXvISnh8ZqrfsAhYdaJn+c1MbpfNzPr2RbjmUHzmBOBCtJok
-# yaVveisTc0LCkukNMFX70J4lCVNLUec1TqxG70Zx3M5L2tdKpI5gkiupcurGOYls
-# WCdsl4ffdfxi2H4a0Q0CettgFiG9BIsmhGchY+pBHY/ll9zpSUXQVM00LmPH3c4U
-# kXzmH/s9rZ8CJhP3PvS34b3Y5s57unVGogX08Daq1NZjg1m7qAk5jxgRlyZU+c7W
-# FDJsHUYyXzWR4Us/0vifsqfpwHQvG9vMoGvvR/evO1yt3M8Wb/ANmaYQyPVADepK
-# x/kAUWzefye4UOe/nqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMf5UUdk5xGDEMXmcKnW+TaLoYTjPvxon84rFN1cbV2fMA0GCSqG
+# SIb3DQEBAQUABIIBgKuTAyFBOc7O5f2oyPq0eFbDqfWxoNIYNRr1Rb0bIkn4TWMX
+# i15Y1oemZSNR19LtpTc1w0ISHM/OnEEL3oV63qqq6KC1veqBBESorIc5wW6o1ZMC
+# 58VZMSRRvmdMWtC7EZzlgSplC4Xo+a0fr8shM4NuuzSvdVdbfTukNp720DvOeRpC
+# 3JkiA51gWEuSk1g4dHBvRC+CWxWEjFblE6JHYCdeRGtrmpD3n0kWgZaFvN1Uz2SH
+# ibDdd5tPnD9j15i7UjPXpSbRwzraKrlk2Id3gteFlDITaITwv3nBUZVTF8y8LmR8
+# vs68hTtvDXI6/F03dqJr2tLLlnqNmWVlgs9Gk7P5B4k7+BLJwf3gMreqXcarVv5R
+# qCXDZR43KtFvt1pK14UNTv2gSRG2uc9sVYB4u6lCehu617xBjw6KFS/uNdvgDnaV
+# dbSfmC4zc4lv2G6MUqgiGoHpkrumg/b1hfNB9szYK77o0rkTPdT6nBiiLr3Gn/pO
+# keCbCmcvalD2I3JoDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwMDE5
-# MDRaMC8GCSqGSIb3DQEJBDEiBCAtpZj6aRuEVOl95uEpxd3xONuvopZF16+m6bNk
-# xyqhbDANBgkqhkiG9w0BAQEFAASCAgAN74BVF1wbKp5BaF57OPV3OfafcIVIYf76
-# Mdtbzl5mIj3wLoA8egnjC6Vff1Y04rL31BSuaD9HSsDnNWxKqRs/R+i0j1Kd9WCR
-# rDWm6VmwiX/T0mI4qd8DPtVInypz/CbAT4dJG6cZs3jnT0oF/g8r00wC6ukb/uMh
-# V4LqQr9gJkYdjma4e39o1yNgzBd0ZcKYXnYXMMhFgN8422KMPt5lwNNhWGoWsRVe
-# sLHUFO/8jYBHGwqKujf00cVjmNq5ae9BJVEh506uvU+iyvsJ1TJXRe7QI/YufBKW
-# SA+ZyJR04rXcumGXslfCZeYH6Q0ei7kLvCsTpI4E+RiMtZuigjrcGvtQ7ZS9xwbs
-# YiTyfuLAHF2jfYecM2KCvzSRIZwAMlUrk2Z+OVhE9KSAXemIYhRjZWpOcWOj8eLR
-# +ptyqZjoA5531cf7CNbei6DmH3pRTuxB8aUQP0ijUP/UUWRpCF8mIvdZImywGU2W
-# h7Fvou47JJ386c/QeIytYNDIFOlcH2Zfl1xSVphs9Sot6fJkmEckzjvKuM5VvRy3
-# 5k4L3MHYo8qLyMm0LOeY2VF/Lgx6jyf9Ei+87DKEt7hG4ScZk9XnatBRJfbJUvXX
-# Z1SfjMUTGYY3AxXiEC3AEGh9ms9RLBMSJlTIhHZK8UBtiENRSKV+Av85vZTD8zYm
-# FF2jjIq4og==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMDQy
+# NDVaMC8GCSqGSIb3DQEJBDEiBCC5nri8XeDq92nyRR6s2Bx7e9js7kirCV6KyN6L
+# az+3xDANBgkqhkiG9w0BAQEFAASCAgB3/MYKZDlPXwZLD8eqeYTy9d13A2rX2rbr
+# y95ZHAwee8YT23AueFqc967CaoTjXxBMdk4q8gEpwbTeno+ItYGpKazOY2h93wRZ
+# LOxro9yxYGAjInOEJZCk3iKlikYW9V3xyOTRm6/SJTb4tyVSeMTpYyM25zNgMCG4
+# lQcOLFvTuq1Omc8yEYSOES+vTah0cCWSI7fvefNsHZyWC37lTVfBlhlNYv93fdMd
+# z0CeOMDO+MOmlvmWu8bb9+Oq88c1mAR1Jtb2bxMovh7kcpMr8a3E5RkiIxlPoP9P
+# m6Qq2XvJGc7JiNwqb56Ahn5kL2UotLH2f9T9xPPnDvaNm3JuiBQk0DkODgyaPHNy
+# ibcfyegv7bgVRmmrcp7oAc/HkXqR/dIi/o/yygUDQrobhAIOyHGReM2/EhW9JoC2
+# xIpVsVq3/FfCpMva0quLoFJow5a8aeIAf9WTT1ccRMqLG4SCa/ovS5Jhsn7ioOCn
+# 2F4Udc6L5srBDOrMKdisH6kpK6RtMJmhZ0SJHScMHIjqFlv7j6XsG2gEcURo/X56
+# 3u9tkjPqeMgPgyzY78KxAIl8Gdoz4bKQlWO3QhVBEgutnnvjkNkAL+B9u/dyZpq8
+# 7xfYgXwxAc3rSfoyTKiJ1IyxOcbSq9iwyLjsT59HzPfcGzfqEGUDBBE90YAEif8O
+# p2jx7LmZ3g==
 # SIG # End signature block

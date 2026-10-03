@@ -442,6 +442,32 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\Sm
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGatePrecheck.ps1 -ProjectRoot .\Migrations\MyMigration -SessionId 260930-6 -WhatIf -Run
 ```
 
+## Bounded ShareGate witness (phase 2b-ter)
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGateWitness.ps1`
+selects exactly five distinct source items from one phase 2a analysis: one
+unsupported shortcut, one modern component link, two source 401 items from
+the largest affected list, and one source 401 item from another list. The
+selection is deterministic and displayed by `-DryRun`. The original warning
+is a witness candidate, not a guarantee that ShareGate's pre-check will
+reproduce it. Both modes require `-WhatIf`; only `-Run` imports ShareGate.
+Source connections use the current Windows identity and destination
+connections use `Connect-Site -Browser`.
+
+The run invokes only five item-scoped `Copy-Content -WhatIf` calls. It writes
+the complete `Format-List *` output of each CopyResult, an available session
+ID, one `Export-Report` CSV per call, and an atomic result CSV under the
+private `ShareGate/Diagnostics/Witness-<timestamp-id>` folder. The report
+reader accepts both migration headers (`Status`, `Errors`) and actual
+pre-check headers (`Result`, `Error`) through the configured column aliases.
+An empty report remains undetermined until a positive witness produces rows.
+Even then, no pre-check result authorizes a real migration.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateWitness.ps1 -ProjectRoot .\Migrations\MyMigration -AnalysisDirectory .\Migrations\MyMigration\ShareGate\Diagnostics\AnalysisFolder -SessionId 260930-6 -WhatIf -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateWitness.ps1 -ProjectRoot .\Migrations\MyMigration -AnalysisDirectory .\Migrations\MyMigration\ShareGate\Diagnostics\AnalysisFolder -SessionId 260930-6 -WhatIf -Run
+```
+
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
 `TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
@@ -467,6 +493,8 @@ chosen. Read every generated script and target before running it.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-LauncherHosts.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePrecheck.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGateWitness.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
 ```
 
