@@ -77,6 +77,9 @@ def check_rows(path, definition, tenant, exact=False, identity=None):
             raise ValueError('Source reporting identity mismatch: ' + path.name)
         key = tuple(normalized(row[field]) for field in definition['key'])
         optional = {'AssignedByGroupId'} if definition.get('name') == 'license_paths' else set()
+        if (definition.get('name') == 'ad_members' and row.get('MembershipKind') == 'PrimaryGroup'
+                and row.get('ResolutionStatus') == 'UnresolvedPrimaryGroup'):
+            optional = {'GroupObjectGUID'}  # The native group SID remains mandatory.
         if any(not normalized(row[field]) for field in definition['key'] if field not in optional):
             raise ValueError('Blank immutable key: ' + path.name)
         if key and key in seen:

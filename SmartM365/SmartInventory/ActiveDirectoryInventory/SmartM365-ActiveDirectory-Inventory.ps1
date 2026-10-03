@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.53
+1.54
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -673,7 +673,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.66' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -682,8 +682,10 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.53"
+$ScriptVersion = "1.54"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
+$script:ExitCode = 0
+$globalError = $null
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
 try {
@@ -3639,6 +3641,7 @@ try {
 }
 catch {
     $globalError = $_
+    $script:ExitCode = 1
     WriteLog -Message ("Fatal error in script: {0}" -f $globalError)
 
     try {
@@ -3712,15 +3715,18 @@ finally {
         Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
     }
     catch {
+        $script:ExitCode = 1
         Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Yellow
     }
+    if ($globalError -or $global:SmartM365ExecutionStatus -eq 'Failed' -or [int]$global:SmartM365ErrorCount -gt 0) { $script:ExitCode = 1 }
+    if ($script:ExitCode -eq 1) { exit 1 }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPVFugpf6kBcPE
-# YdYpKsDnNv2x8/Kwg6hwoPme8A7qZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2XcsZFCHcDeII
+# jJQfDy2oKiv4qhyM2TLdRtal1K1ja6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3853,31 +3859,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN8ORjTN78aUFuvZk0NaMvgpJ5m0MBR3/f7FC9pKMh+tMA0GCSqG
-# SIb3DQEBAQUABIIBgGdxHcyAn0Did4/jImVep1hRuwLp3pdtXG4eN+/OUQ43y9g2
-# YhJ2VAP3jaZAATv6CCRjl/2bvRL9nfOm4gWV29S/vSfYO65HRyWN+4I21r48q5tb
-# qLp79CLmMKhO+Guz2o+RclsqhzUxvX43CeEY/Ax9Mn5wTfMXwQv9kLH90zZqOa9M
-# kz+8ChmxmEvri0Cl6K8ZZfhpQuurtOG9obUJik2EO8pQ1IUDygWkdBZ0DfavkIg6
-# I0HY6sn3K4LtUWPlRH2SBUioA3MSMTK0DrAG6iX2xPFVZD3rPQvIcJX6ZUFFYDbC
-# VPwgerdNaKzbqDsKpwHtXsok3b64kI0sAfnmXOQBmE0Qtv+9WVQAeECiGON0t9+m
-# IDPKN3jkdpSy3dgKxhylsbn237udHkuDxvyW3B+YSN0uftEJO8ZYGKxCrK+WhLv2
-# zamWm/nfabEW1BTMutULl/SszScoRq/mSO7t2dT82CROJbsFWlnDZLKxW0FgKsuF
-# tt63jH4mG+MynPJKcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAFbUfMkYl6HbQCaEBkcoj6fP+OsZBYqsxo6hfGukaJwMA0GCSqG
+# SIb3DQEBAQUABIIBgJpshcN4yO72Zrq3yaDEjSQUJ1P8l9WnuO65mKDCyc4TL1Wc
+# VDHU5BpdaDUqTPuRPQCG17a72jzdb0mxo8CYrkWV8t2ApoSXR0Hmj3BDGf6iTiFh
+# ARILMcNXaYvbiVT5uX+VKCNInq0oWIGxMsIyBhUqfIII5N2kAFR0R+sO29FJiD75
+# d5NoRBvx1+9tWjMgxwFu0sRmVxy+Hh7gwLOBOOlOptJ52ICqHWO8DSWqMP2O91i/
+# CsOvsP0Z561cFEkVjrCPY2Ul8DfAD+O7KUZKsFP6Cio/pSBq6Fmr6KQsfk2zWLll
+# vkMHQ+ufonnckCPAjRlwJ6CfElKMvvouhlg4aHPQxbKUlBcQiCc1CSLbkztVl8E2
+# PwkACZCdfKuh90ziTWK9Oaoy7l2jssjlV8hojKtYQzD/Xytq6DIbAgeYSFcr/ZpZ
+# FJFK9wcETAPiMdOEU2qHgw0hNLeaIecRe8bENRraH7koFz1zXQAZLAa76f5oshW0
+# DHRTrdPuGHyB4aXgRqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIyMTAy
-# MjlaMC8GCSqGSIb3DQEJBDEiBCDq1gx6RsqBI8MwXRj14ubrdjFGmY/jlpBx5LgU
-# /DjovTANBgkqhkiG9w0BAQEFAASCAgANLh9OtUGFb9A2f5ZVg31hWP3Wk6wf9yaK
-# 5WcA2b6RQQ9JMUB68afLA+T5erhUrVzGCwRyiHucVPfNgL3lnTCwEbiq6aMnsZ5W
-# dydxg9vKevq20NnrgReBjcAAKqMY6cZvH9vNFS6lOVfei0dlpi4lA5xw2XSewcL/
-# ycIpgqmzUn56t8f2NO/LOKgAAiEllkLHXAcpDtnsnABQepmXyQqtuIu1/QuzT5m+
-# +r1n+6fWBhA2oW+1nlKC1t+strV/2jGV7HBkV/Opb07XDcVabtdmUYh5QGK7nWDy
-# OGQxJTSV3CDtxOpjWmjOpgJq7P69l0tdV24nYQSuZS8mTh9B6+FEDONzn2ruDqNX
-# VsMS73DwYF7U+KxwEAOJ1VDBIuoX12XxOQMW/wTwSX0J983ACwzgBdjrBmnXViUp
-# mAqYruq1rpVuo5n8IJ3nMSqlhAIOsEJ72GQLjkO/9XwCl+NGp1eh9kO/+Y3rwCzO
-# zzmVpwguUTiSILrJl3MYR+B45lQLWf2bpBBELE9NMvQ7pCAEY6IO3lVZvpb+tYns
-# anrlDC+TvUzCdc1xMKKq9Eg8TvcW1KseZ43bBMygwq9Jt8I6ZEgVft+2ESF/7n5z
-# eHF7cn/GoOvKqFQCYRwSzf1ds9dtCaditqNf1nikfABmY8eJGc5SU2+LL2k+AP+A
-# kJmMQusagQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDHRc3faBc8xyqyX9TijU0H1pkgUihuab2ZCaUU
+# GDPewDANBgkqhkiG9w0BAQEFAASCAgBnJblM7fF879v4LpDAdP9Bt04F1xyLQLq7
+# BDW3AdoJrfVzPgUGYB6WrCLsjRKvwx8rv9hOxokLwFsx/1Fr9UcRGiImeCTrT6i3
+# PMemzb3jL8WupTfgfdcSQc2ACzOt+RY/ItedGOdIzcYr/u7XhlMzdPnX/z934O8f
+# +T1+e4Lnij3Si+OdX8qOi8KdCp1jCq3fZc1mPBPsz/AyT0UeaK2akOvuF3fHlAQP
+# rJSCQJuHJyf+6OLX0vmVpmWrXCuonXK7N6G/jg5I8QtSy7x5Xm0OKM+qaheYHZ/q
+# k4tWmfAaOuemGKGG0VgnZS3a7bysrxZJRvbLcj/7BTkyDAVrt42BF9/vVxCiSOwP
+# x+FGPlPixz+cARF3oR6cNHqJxrEbPnLqSHU7jdpwrqnXHp6S0TLZ7QS1vDvfOcJa
+# rChZYt1KYC9Um0bpyLmF9wHFRRLKiQBnoTBFd1AQoEKe2/ll+hVvw+m5bQ2nroYd
+# fVA82XAcpQ0HuYs+GIg1NjdezpuZs2W7Pu2RklwB/cKURyBQBdos1PC1t8xITMbE
+# oj3p0auaz6bDfyQzZTLb1Hpm5ajNjaGCcxWyUnigyZeCRLkAaVRHOADPoURGGMbY
+# WnV1EZ+aOX+OW79xdRxs9MbZQ39DHt3wW1UqKKAFsw2a6aOTk+jSuT9/XOrM1X41
+# obn8KD7dfQ==
 # SIG # End signature block

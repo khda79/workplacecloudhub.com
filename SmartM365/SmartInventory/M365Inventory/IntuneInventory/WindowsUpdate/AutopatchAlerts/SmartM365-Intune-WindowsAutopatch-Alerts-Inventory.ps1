@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.22
+1.23
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.22
+    Version : 1.23
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
@@ -310,7 +310,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.23"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -708,7 +708,6 @@ function Group-AlertSummary {
 
 $script:CompletionStatus = 'Success'
 $global:csvGeneratedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-Start-CoreSmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath
 $script:GraphTransientRetryCount = 0
 $script:CompletionError = $null
 $script:TranscriptStarted = $false
@@ -717,12 +716,13 @@ try {
     Ensure-Folder -Path $LogFolder
     try { Start-Transcript -Path $TranscriptFile -Force -ErrorAction Stop | Out-Null; $script:TranscriptStarted = $true } catch { Write-Log -Message ("Transcript start failed: {0}" -f $_.Exception.Message) -Level WARN }
     Test-Ps7
+    Import-SmartM365CorePreflight
+    Start-CoreSmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath
     Import-RequiredModule -Name Microsoft.Graph.Authentication
 
     Write-Log -Message ("Starting {0} v{1}" -f $ScriptName, $ScriptVersion)
     Write-Log -Message ("Using output folder [{0}]" -f $OutputFolder)
     Connect-GraphSession
-    Import-SmartM365CorePreflight
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($OutputFolder, $LogFolder) -RequiredGraphApplicationPermissions @('DeviceManagementConfiguration.Read.All','DeviceManagementManagedDevices.Read.All','DeviceManagementApps.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1'
     ) | Out-Null
@@ -819,8 +819,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyn2ZP2HKLR4MD
-# H6fkOOGBhg1aNfS4Mrmy2fqGMNUqvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2RVFKJh6a009S
+# 27O2kMZbgAMaAdQmnJiPGABm/dAKwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -953,31 +953,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMex0ARq9cPWeQrGvPJndN+L9M9mwU1slWGGd1gAxuSiMA0GCSqG
-# SIb3DQEBAQUABIIBgA9MEU8PmcI9uC4JUr7EIUW/H7EC+dstinG3To/IMAhC0GhP
-# 7ElHeIU1Gbdz/l5AHbrmkybHHvqcXcZxKKGCwpDfRUXuNG2Z5ts9uUgt8AUSZWhO
-# Sh8xcqJ943S5uGqtwDnhz7i0HO/7joyrfBz56KiFoD93DdE69IRpDe3dQEPEJLQi
-# m97pliylO9abrkSkyN8GAFoJWbP/WudO5mZBgU4gNnclU6rFM5H3wQxvqtasvkUe
-# v/CQfhzTlDJQDgWrKdx0rxbbd/KlETCaKXSLyr7WDZOBYQ55dBIj0fuK0CE+5497
-# rqLNOna+OkusN4uTb6FsQr39rkKAiU+JpK94U9AzMjddAi/xC7Kq4D22xh1O/37j
-# SN3pM/9CvBG81XbxAYYVZ//n5/ESEHin2c3l7a73gaIkosQtHi4C+zKOwhM1O9Bn
-# hRIm7+O3f2Jsd3Bm03/R/2DBx5mV6BvU/K1/PNlj19fdjTCVZJzsz2/GBiTDmgnc
-# Ei05Z0PW5T47O94rsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGPW+EkfKfo9EiQCcYg45qfQKsV0n9EzE5slCmHinQfTMA0GCSqG
+# SIb3DQEBAQUABIIBgIzqTTW4nQk3qQb7NH2NR82HGW8Opi8iqJtqsCek8Wp/OLZN
+# u//MKS7dDqhmNZPXFAmNQ86PtJBdUiz92XjxCQtKbsBx7bvpFJrhbrLlq1+1Fmf3
+# T0lBQtYQSTy4YRyIkYDpbHhd0XVY+gT3rivpmRpSbUqi+i2B4dq+GGnj5J74Qtw5
+# 5bpjVuGLdCPkXMN689kv8fNCkiGR3VGG2vQw9AESh2csztVNdd9E3Rgm8AXU7kh0
+# aJ1m3154cDNJrf79GA8lx/F9/T+ww7mBs4yvU7X71f6vI+uJ98v6isPUvQuM8J85
+# KdFndFIOEm8bwur+AEkzzruvibl/ul4qwwzp5PBzXeILmphiXlTRikFZkuAcf6Dd
+# Z7Vauueu5aJY4jLvvjPuslFTB+itdMUPNg1f3+0yontROeIw+/FhbnLIQvDnPpX9
+# GAWdMNZwzf0HVq26W6Z2M3VSZIrzCjaXZGiMM4VOvOzpx1YKE0N2fHUw6AY86od+
+# +FG2UYNgoEYomMJtN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDNwVXpT8s7DG3SLLThyxkuAY8ivIhnu00fmzo7
-# sWOItTANBgkqhkiG9w0BAQEFAASCAgAYPIGtnOOCvSEnXQTJQp9qy/4Wsaopo6Sy
-# L+UZfjsDNXCY5bWCOAAN7kCr9WpyTmn9WxmsF9G7x7ibYMIp230bcG8M78abv1Z2
-# eEmmVYG6Vtg+4Ub8ObcEPEEEqqsRIv8LOr7+o5WsSLReAviKWZi2s8P+UnWfjNqE
-# x1YKlnfjvpdd9NkY0EzaWynHnu7VhbvMFoDF/ilp8nxb5uedhceU0TfcvlV5U3Jq
-# eGVjzBz6CN6b/eOLZZU9Z5R3+ZG2RdaJ/SDW/qoJFbA7CXQpwzNmdoRT4DwiDjd8
-# pyd2nVqEKgOIOzpTyYhySW+fY6DgzglaejC6T35s+EjsaCzdLFEGE8FKOzHbp43t
-# hBZoBnh5K4eQxix1F/RHmx/rQojf01iqEjWd0jMJ2Okz3jnGyWWc8tFimQxykLkD
-# MyUcHtATPg4XkdQVYrolltWwnNz1sdUiQd4+MS81lFp0xk6urVjhXvUbhI8yz43V
-# OFPmZhlzm9924FRTTZYvA8jVsU8eKg+lPlx347eNsqar7LTiJuhGalfUH3H8oafk
-# so1ZkeiKFyEe1sVt/00jecJZX+NW6pgsY4Pi9xtG57syZi8fdGCaDM+eIjtbux4P
-# I9PDBTO4kq30fdBzXFUexYjXNk++uhdFMbOY81ivRoJUJmwICZRyL7IkTpDcuFZ/
-# qD04anreug==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBQh0sCMACT7CT8B8uKfyO2ONXhcfPdbMjNz9PX
+# uYllgzANBgkqhkiG9w0BAQEFAASCAgBNIOi6f/ZFIIfkkNhPWjjKWi/8lTJJv8Vu
+# eif6F+875oWM9meCNFb7YC+3Y7833kz8oHHUb8zMaWzIotXwOOLlvae6WvqjGFAl
+# Z0z/jBiIcKAVc2+D8zrK+iU5jou4hjiBeuodH+cUMSSOQr05c/1GeqQ4fb6qXitf
+# TskO/ogw6luA9q6IMzZasByrqWBP4yPqJAX5cwSBNniA1Jg0F78f3YZ6aA6eg31I
+# BhfIwPDZM8WjEjydp7UDWB9NnGwKZw3FH8e5bkE8HDmBmSDb1zHHsU2J4TvHTS7B
+# ubmqdpWWcM/VMxwBL6Y1S2C83VdBvsW0/hbjuYYbDpwLR3Lh5yitpA3lxhgljH66
+# 0pd7TrepyCYVRwbavxrwSoLTPSvYZkNbeNZf4+Ox9I1LntRXhKgp6zgd8OmzePFP
+# OZdizfoGWfXsw81U+PHBiKdyBdckFu7yoYCN2iubuy4uFTp7yXMcF9AtFNe39xLh
+# rMHC2Ov5drdiByljTboo82cs/T8HqYZyUduNrVRDrUyu0wujyDEk2dBydUs5sNgz
+# E/ZGxxYLyTudp8GFXfZYzjQBbp1kIZD1yQ3zyIy83ChmhHXZbKWfU5MKxc2KT0cg
+# Lzyz7PI8aNVMjQfpwzUbbtV2bw7MK7PH8jMGXS/LwW8Cm2LWbCddTCyo1+/JjIlK
+# QNr3ys/ovA==
 # SIG # End signature block

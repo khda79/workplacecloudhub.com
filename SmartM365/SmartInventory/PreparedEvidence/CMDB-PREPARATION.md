@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Version: 0.3.1. Status: offline-tested migration candidate, not deployed or scheduled.
+Version: 0.3.2. Status: offline-tested migration candidate, not deployed or scheduled.
 
 ## Scope and execution boundaries
 
@@ -74,10 +74,16 @@ complete proof. `Rows` counts parsed logical CSV records, not physical lines.
 Empty success still needs a complete header, scope and receipt. All required
 sources must pass; a failed or partial producer cannot be rescued by an old CSV.
 
-The 0.3.1 contract requires native AD membership identity/type columns, Entra
+The 0.3.2 contract requires native AD membership identity/type columns, Entra
 membership type/status, Teams member counts, and update-alert provenance/key
 columns. Header absence blocks replacement; a legitimately unavailable value is
 not silently converted to zero or successful evidence.
+
+AD membership uniqueness includes the native group GUID as well as its SID,
+member distinguished name and membership kind. Built-in SIDs can repeat across
+domains, so distinct groups must retain their separate relationships. True
+duplicate relationships still fail. Only an explicitly unresolved primary group
+may omit its GUID; its native SID/RID and member identity remain required.
 
 Autopilot grain is its native Autopilot ID, not serial number. Different IDs
 sharing a serial remain separate records, including records with a blank serial.

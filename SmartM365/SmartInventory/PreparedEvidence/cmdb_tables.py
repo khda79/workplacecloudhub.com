@@ -706,7 +706,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         cloud_group,_=ad_group_links.get(key(get(group or {},'ObjectGUID')),(None,''))
         user,user_status=ad_user_links.get(uid,(None,'Outside collected AD user scope'))
         device,device_status=ad_device_links.get(uid,(None,'Outside collected AD workstation scope'))
-        memberships.append({'TenantADMembershipKey':native_key(tenant,'ad-membership',r['GroupSID'],r['MemberDistinguishedName'],r['MembershipKind']),
+        memberships.append({'TenantADMembershipKey':native_key(tenant,'ad-membership',get(r,'GroupObjectGUID'),r['GroupSID'],r['MemberDistinguishedName'],r['MembershipKind']),
             'TenantADGroupKey':native_key(tenant,'ad-group',group['ObjectGUID']) if group else '', 'TenantADObjectKey':ad_object_key(member),
             'TenantGroupKey':cloud_group['TenantGroupKey'] if cloud_group else '',
             'TenantUserKey':user['TenantUserKey'] if user else '', 'TenantDeviceKey':device['TenantDeviceKey'] if device else '',

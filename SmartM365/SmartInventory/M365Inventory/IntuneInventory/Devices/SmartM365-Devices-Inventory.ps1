@@ -18,14 +18,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.17
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.17
+    Version : 1.18
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -402,9 +402,13 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath) -or $LatestCsvFolderPath -match '\{\{') {
+    throw 'LatestCsvFolderPath must resolve to the configured tenant DATA-LAST folder.'
+}
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
@@ -424,6 +428,7 @@ try {
 $connectedGraphInThisRun = $false
 $results = @()
 $globalError = $null
+$script:ExitCode = 0
 $runReachedTerminalState = $false
 
 try {
@@ -668,6 +673,7 @@ $BaseFileName = "Intune_Devices_Inventory"
 }
 catch {
     $globalError = $_
+    $script:ExitCode = 1
     WriteLog -Message ("Global error in Intune devices inventory: {0}" -f $globalError) "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
 
@@ -703,36 +709,8 @@ finally {
     $completionStatus = 'Auto'
     $completionStage = ''
     $completionError = $globalError
-    $pipelineStopped = $false
-
-    if (-not $runReachedTerminalState) {
-        $currentException = if ($globalError -is [System.Management.Automation.ErrorRecord]) {
-            $globalError.Exception
-        }
-        elseif ($globalError -is [System.Exception]) {
-            $globalError
-        }
-        else {
-            $null
-        }
-
-        while ($currentException) {
-            if ($currentException -is [System.Management.Automation.PipelineStoppedException] -or $currentException.Message -match '(?i)pipeline has been stopped') {
-                $pipelineStopped = $true
-                break
-            }
-            $currentException = $currentException.InnerException
-        }
-
-        if (-not $pipelineStopped -and $global:logTranscriptFile -and (Test-Path -LiteralPath $global:logTranscriptFile -PathType Leaf)) {
-            try {
-                $pipelineStopped = [bool](Select-String -LiteralPath $global:logTranscriptFile -SimpleMatch 'The pipeline has been stopped.' -Quiet)
-            }
-            catch { }
-        }
-    }
-
-    if (-not $runReachedTerminalState -and ($pipelineStopped -or $null -eq $globalError)) {
+    # Preserve the actual caught error; a transcript can contain unrelated SDK stops.
+    if (-not $runReachedTerminalState -and $null -eq $globalError) {
         $completionStatus = 'Failed'
         $completionStage = 'Interrupted'
         $interruptionException = [System.OperationCanceledException]::new('Inventory execution was interrupted before collection and export reached a terminal state.')
@@ -777,15 +755,18 @@ finally {
         Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($hardwareRows | Where-Object CollectionStatus -ne 'Collected').Count -eq 0) -Scope 'CMDB:managed,hardware'
         Complete-SmartM365ExecutionContext -Status $completionStatus -ErrorRecord $completionError -FailureStage $completionStage
     } catch {
-        # ignore
+        $script:ExitCode = 1
+        Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Red
     }
+    if ($null -ne $completionError -or $completionStatus -eq 'Failed' -or $global:SmartM365ExecutionStatus -eq 'Failed' -or [int]$global:SmartM365ErrorCount -gt 0) { $script:ExitCode = 1 }
+    if ($script:ExitCode -ne 0) { exit $script:ExitCode }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChn7/RhgyodbON
-# 1+hU9+VYCVIOnkP279wnv+f+QfLCpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9g0AW49rTqAH0
+# apIIHbMDUa7Xm42HbVU44g/q4F6fmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -918,31 +899,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMDmN18akFIUwEvlSz+tq5dX0v0kv1u8fUZ1CsepwBm5MA0GCSqG
-# SIb3DQEBAQUABIIBgEHjRxytkGHkSEehSYetlu8DZW2aC6cGPsPxH0EhsPdeYBuM
-# INucdiJbUoQgwcjywDZYqNlpGBELLn3VkapknFFWieb5oF3+EIgYMuwvBOAR0pQB
-# G09xu6qI1+btqtPEZPoIXSFAI39nHU8spPb4+U66z2N7hYaE4ipkRPthS83jUrKW
-# NkKqgxTMRa9FJRiKtHPGNyFlqonASEuQ9a0Aq5OvWJcKJN+B9nysknm14bUfDY4O
-# fJA+cr/ZJHlpF7zk1iAOPmhsuccOSq7BbztUxDpymgNFzPosdLRAKAvgYMhoJgL4
-# nCtii/UoS4hSuedgEYKZZ3zcOJeBQP4i3Q9HM/hIRUME3q8dRALlA0RkWrECyrlB
-# AMUU0R2ehB0jXVDUXDn12cMbNKzhY902QN1C7sKuYDOlk4N15N0WVtKR+Zqoq3x3
-# GbyQT1C8cEycwL3y52hKMc5MaVJ1yMaBlqmvEIKlnrO6mv04AYzfUXgH+f/cKYWY
-# S8SKYgwRcIQsFZh+uKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPGcOHXEv7SLr5lrPFfHeIpjpoFBo7YEib5Ry1bKIZcgMA0GCSqG
+# SIb3DQEBAQUABIIBgJAGuUfD8kK/1d9NjtT7D3jxB9/IzwGptkRcqTJDz7Ciyk7/
+# 18uYo1bzg8c8PaKckGsd3v9F1Im1Y8fLfQu9G7eOW3cdi0CnvodiesmX6qrGUz/b
+# 00sXaLQv08t/N/m3JbmRYq56J3NSVajY3+hxh+cHsRjj1L/Lxx8I5J2OqriHw10w
+# 0h7i+BnPokdjAYFZ4OKJXSlQ3Sey507gzMBNDoCP7xXX+XqxsKy7dZFx8+RAPhbv
+# l/KlS06ioYlBDPEzAj+h+ofas/JbNbGd56dXX7+cGcEzeiuGahbR9QGt/EDg7py+
+# /cQFqJCpnlPYm3+TXje0VMkMOQaBzAQqPTEGDCCo8OmN3HnwnbaOBrtRRIm+o4TL
+# m5TPM16piYxTqdFs2bNnDNeLPqQrg37e/aVl9hEVWSXm4KUNiUzm3W11GKez5nqM
+# TqLRvKF9saYTaRCKNOFO1HFmsRw3Rj2m7GxORkiUuJUDTCQIkTPvrK4rAVwik1t5
+# w+iZaHePoGB67y38FKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDVaMC8GCSqGSIb3DQEJBDEiBCBYoP/jU0dUa+HSNGig+sRkluQ5Px86yPDztun4
-# DdKeJTANBgkqhkiG9w0BAQEFAASCAgBy0nr1mwK6OsgXVZZuiVs/dgKQ2MwcwUNc
-# XydmYhSUGnDKv6000xqsP5/vcNUZKpgm44iq76+zgsPVqipYdfXmdst89oy0Fb5y
-# blK1CyPUhl3IkG8tn2uiLK2SmiiUJBfC59T6h0DAx1+2fMtdYQEOYAh+CXLi/ctN
-# ikSlWn2NPZ2Zbjm0kKTgagXKF/Rr4t6WUdjgR0zjYLnM90so/WNO5DEnQZ8r5IAt
-# LzN/t4rDXV+F7HUl7VVlFDBZxo4ZKzhuogVzTbk9SFojH4EPj0gvTQZZoBl+VJWs
-# wvXXX6R76WrfFhbOvCjYXnn25vwYP5/Ge1V3HNeuuuWY2ML/drISm1HFzeEM4kud
-# a5ljL131c/W3W4COxqbpaVetzmypqSoW+hBIVqyDWdjQx43zaOAhepnLVinOlpEZ
-# HZgtheuBZw2k0x0gySb4jGPcJMNxw22AH0KcjW5YV/VD0zwJ+grjnuPMfzh/s6SS
-# hhGU8bMmUp5Kpf2Li38ggfHMEjD3pN+WNPPpSuwx9LeuNOMTLsgZ+z8fch92GDvr
-# 9Ed8d9EJjVNNHZqPPrmyWrArt+etMmTI2f0FNzno0EzbVIz5uXM1NxpxGyd2nBOr
-# /SSmmEtfyS4WPulXUirZUmEEzPtLIYMnRwAMOF7Lpfbz63JbnZwfrxzCFo0MkOK4
-# 2LN9NcNEOg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDOR0XupO+Y5hjU/s2U/5Bahq/GAm5QLwGTbkMA
+# V5AtkTANBgkqhkiG9w0BAQEFAASCAgCb60Afzs9cqSDwvMLYu36uxu0wuDA8f35L
+# lDVHpaCk2PVzFPeKqyafW5XbzcE0RDa0yUF2p11lUow2Dbn1GGbtQ1o4JgIs6TXp
+# 3tJX3mY15EwLD+4w64FJFsw3jeUVicOXZ0duEYt2n/UqHImsg9diSw3mLGJKCkvl
+# IZnADI1LE9wmo/DzfEgwKsun08YPwd0kSQko2yOuyolyUsgetB4p6ri/bciap5w3
+# mCNkd0x6uRnNhSD8lsMVffOWYY4yzPSbCGn7umrm4VjqwdBzUC8ibrDvf8xjtPmN
+# HpMbAfyH/v4HeF0VxyqNUORHZQHMB8e/nrApOl0urWo0FzfYaxdAThBxo1U29pjT
+# tY9D3PmYx+QtV01t7AlFXFgYTxCIxECBsbq9BmKjzBN5nSU/XTG7NdAM+78kmkJQ
+# uSH102I4toNLYcSDPR1cLlA29HjZWJsXBynJpm1Omsi/9AUqPSX2/U9/OMk1vViQ
+# qo2cNZ53PT+HSfiftGKrC+F5o5qg96xoPQwUvCcWZrjkOTV7EPmLp6hNoKl9aY3y
+# kWpj6auqEompIN6UkHXonlnLLVq63tyzmyFl2y6cg/ftqsFAH3VdD2yWrZID0XMf
+# eW0gJ1ASHSGspY72OjgR6hBpGJ8qkarq3vXMO9TTfNBNJ4gWhb1MBd1Y2RrmRr2h
+# 2Dy0TxtHAw==
 # SIG # End signature block

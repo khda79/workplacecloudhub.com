@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline native identity, application-grain and consumer regression tests.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -151,6 +151,17 @@ try {
     function WriteLog { param([string]$Message,[string]$Level) }
     $global:SmartM365CsvValidationRules=@{}; $global:SmartM365RequireCsvValidationRules=$true
     Initialize-SmartM365DefaultCsvValidationRules
+    Case 'Native AD membership gate preserves distinct groups with the same built-in SID' {
+        $groups=@(
+            [pscustomobject]@{TenantKey='test';ObjectGUID='builtin-a';objectSid='S-1-5-32-544';MembersJson=$group.MembersJson;Members=''},
+            [pscustomobject]@{TenantKey='test';ObjectGUID='builtin-b';objectSid='S-1-5-32-544';MembersJson=$group.MembersJson;Members=''}
+        )
+        $membership=@(ConvertTo-WorkplaceADMembership $groups $objects '2026-01-01T00:00:00Z')
+        $direct=@($membership | Where-Object MembershipKind -eq 'Direct')
+        Assert-Equal $direct.Count 8
+        Assert-SmartM365CsvDataCompleteness -BaseFileName 'AD_GroupMemberships_AllDomains' -Data $membership
+        Assert-Throws { Assert-SmartM365CsvDataCompleteness -BaseFileName 'AD_GroupMemberships_AllDomains' -Data @($direct[0],$direct[0]) } '*duplicate immutable*'
+    }
     foreach ($sourceName in @('AD_DirectoryObjects_AllDomains','AD_GroupMemberships_AllDomains','M365_EntraGroupMemberships_All','M365_EntraGroupMembershipScope','Intune_Policies_All','Intune_PolicyAssignments_All')) {
         Case "Native CSV gate: empty schema, missing identity and duplicate keys / $sourceName" {
             $rule=Get-SmartM365CsvValidationRule -BaseFileName $sourceName
@@ -175,8 +186,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANzbzxHk5hkoTP
-# PkyhVpMpEqa+PgAQm1CBR8BAIWs9DqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1WhVfXdy6fLWy
+# TFcJMg3NrWTJUCFzwaMjvLGBVYf8i6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -309,31 +320,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGg7tlk1sPfGvNJbjbYWKdJyb0F4zYXnS50W/5u1NjrlMA0GCSqG
-# SIb3DQEBAQUABIIBgFquZCjMW//USgPg68S4A3UjxOFS4gXEgb6e8q7e+bnQm9iY
-# LW2BgjMmBRQ8ssrhgzx/2QwSZiXXVVyVjQZUFllk62ufexOjphhblwVYgDy9HL1W
-# JyuMHKjpeluem9GNHkwkgzlIaOX6Kgi9A5fIkr1cm/3rGRO+vIXafQDLY6dwLLPv
-# Uc6CMmdiPCqxJYbGFpk1nh9qeA+jk+c/xoSL4ha+Y52SLYNEPWcUDl6IU4K3QO9F
-# ZQuoojFmIlTPluFxc51tuTOxQ8zZamOqcTqG1OUaMea3Slpc9keM5oMauHLXzdPt
-# 4xTP+1zELVXNp1Bc7KwJg8TCQlzykuXtfQQDZo/fUdHSno9sYbQrQNmDxJ++ajis
-# 7Sv/D5FliokGwGc1aYUKJDiSBBjMApcpgAuI1gjLD2siiunF3rxq9fWGJkrjWHB4
-# bFzE77XC42hDCEJK+NGel2jqAqGYkQhXa1qdWn96tvKWdkWWuJ2E8NAwsGcz+FmO
-# hmvx2G8USV9XgnrcH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKl6SKvsra9iK2wsO8ADH++4D1+vj/8VcVMebA1RpCwzMA0GCSqG
+# SIb3DQEBAQUABIIBgK7mAkH7Byp8PljYKJJKcBD/FNWMcz1vZ0hrSNp3dJvllnZu
+# qfD5c93GOSdjL1Z8ivwKZieF1DGFvUgqs5h2Y4E2PEAtrqowrX/R9WSQXIaRZJ7G
+# vIp3vG5Ew2DdvbJqAcljonkDy5v6TzURU+oH3cKqOlTE86obcShDQBWKlpmJHyXb
+# RzwU/ncBMT/NRcd7LufMtnswk8Azqf0DOyYScj7JCReQ62XAWpBqDeKa15Oal4iY
+# ofOI8OoM68hHAFD9cOVXz3+s1tbWwPWMeccyfRddWuQNSVWtVKo3gxN9KOxgVjmS
+# aQpV7bwzvPCIYBrBMN77O2SJGay3KWT9OkKGoiGi9UliowO4u/EXnazAix4bUqDn
+# LbgMo+bBDkSzC4vpOcdZd/RLh6CCPD44hBETRIzO3895ldGyiz88sYcIIgo7cJ7o
+# VgMXS3t0hm0RGm0zRKWWEiEHPRUzyxKSFiHHfrEpASoteKeTF4/XvPK1nN57JwuH
+# 500aJeStqvNJHUOHQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MTBaMC8GCSqGSIb3DQEJBDEiBCAW1O1e8DkWYzv8p2l/kIU9qjaPgdx/2f6UQOkk
-# hiusIjANBgkqhkiG9w0BAQEFAASCAgCFlorLwtpB7nlcaS/PyF532QX0hXqSpW0h
-# lDY4tly/Sbfgh6j5aUIalZiYVSXynSvCKrSTm6oUs0cgdHvlSmRBr9VfuGZRBVX0
-# Rasu1ebu5oIyCXyMeNGlA0fLiH76DToipCEPvE9dZr/xzx9kJXrJjG5w/D0Hk2EC
-# 7B9HvBn1eN+XnKjctSlrkChk8LqxEr2FYLEVMEftBHP0KN6zMpr7HThLm+Wu/OZi
-# Ok5UM6XSGqt2NfyNEH/1BYkIGGg91Lz87cty0yMO8WuP8+OfHKH6gkx9a3PgtzSb
-# CyXBw5eM1Ieb4/RvFqvQafKrHYujeVvc/h8foaTP+wu2TDAjdKQ09z/WtKRlUEUm
-# 7B8lk8P4JvXGVHtjv5RanNuIZR1dvNWQwnZc3TzrLSXk5lD9bVjXFsoO0kDJGnap
-# fK7Fo2X/xi2U25JTlmxD8n6fiyjtaIPutpearufLcoXauYFfNzCiMlKLzr7huS5D
-# 9yvZ40Xb7WrElqaOhjdYjreHoFsvuS+seUroZuihsmZHmpHTy6FBeHwomUh56JD0
-# 2zgPzcdC6LV+2eAsCOS78kkfv3uyFC1cHEkQ2R2Vcpy0vsP1C9nblDObN9MN31Rr
-# t672Gj+gfcSxuUdzPFagIkRot6yTOYnkmhtbjbTdA2i/VOPPbnoivnp3yNNeN033
-# M+/oLBe3sA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzNaMC8GCSqGSIb3DQEJBDEiBCD9X9fvMtz5j37jEpynxuVch/cntuDQR8+2iENK
+# w4nhYjANBgkqhkiG9w0BAQEFAASCAgCQWtPyD18ZQNviPEH6piajblKUdSzOvwpc
+# vbXgIQavwCnI0dm45bqYJuRKEL0FORPLhnPVwwrK7889m28kw08yYiJupVtGbLQW
+# ewAr2KoDmVHGkgYXSkQcnrri2cKUgMLBQWWTfuAvPsCMvmoc+nZEnwbkEoxH18Nq
+# cwI7f5Uc0b51YJCP84qzrNrn8zhhB+duErR16EJYHv6WYuOkZcx+MwJvXRJjYlkb
+# 0GUeZzcHi89B/gw65ardqdHLsFeXvye9nPaInhTVEdjKSzOLpNHwC60QvHy5XwL5
+# YYLaCw226JJIZvR+U6P5ZaZKdMMS4WsIOc/iyXiZieXdzDsfhUNdZsnqkkrUgvcD
+# hECJBmXo2jitN9gsotjSuN0Ef16HQvsiUeSQjeJ7p7f53bD+lOFhVr+1MpXFGLGw
+# SiCyz11vAc0Pnh3aHcBl+IAHIBSl2Vm0tVsYdu4Fw5nFdez8SvAyiimTPpF8aV0Y
+# 7mOaKOYNJ+LIx1veewtrWpmTHAI6I2ej4cLmvG8SwpmtlkV7yLLmhUsqm3K1JhVT
+# AiOzogvs/GY4zVfCyyL42ApLDQ9rxm7qhHLDYXmNkGmJpWCXk/ZeKptm5ft6qfFG
+# f5iA8ASzs9McWCUfdxDTHz3q/wN3KcbPcb7IpedzJC96tW/m0sajnf7gMRM5QBYy
+# AatbeZbrYw==
 # SIG # End signature block

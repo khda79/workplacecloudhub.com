@@ -1,5 +1,5 @@
 {
-  "version": "0.3.1",
+  "version": "0.3.2",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -1221,6 +1221,7 @@
       ],
       "key": [
         "TenantKey",
+        "GroupObjectGUID",
         "GroupSID",
         "MemberDistinguishedName",
         "MembershipKind"

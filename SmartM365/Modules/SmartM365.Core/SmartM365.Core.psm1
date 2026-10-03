@@ -1804,7 +1804,8 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     $rules['M365_Licenses_AssignmentPaths'].UniqueFields = @('UserId','SkuId','AssignedByGroupId')
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Domains_AllDomains' -CriticalFields @('DomainName','DNSRoot','DomainSID','DistinguishedName','CollectedAtUtc') -UniqueFields @('DNSRoot') -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_DirectoryObjects_AllDomains' -CriticalFields @('TenantKey','ObjectGUID','DistinguishedName','ObjectClass') -UniqueFields @('TenantKey','ObjectGUID') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
-    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_GroupMemberships_AllDomains' -CriticalFields @('TenantKey','GroupSID','MemberDistinguishedName','MembershipKind','ResolutionStatus') -UniqueFields @('TenantKey','GroupSID','MemberDistinguishedName','MembershipKind') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    # Built-in group SIDs can repeat across domains; keep their native GUIDs distinct.
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_GroupMemberships_AllDomains' -CriticalFields @('TenantKey','GroupSID','MemberDistinguishedName','MembershipKind','ResolutionStatus') -RequiredColumns @('GroupObjectGUID') -UniqueFields @('TenantKey','GroupObjectGUID','GroupSID','MemberDistinguishedName','MembershipKind') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraGroupMemberships_All' -CriticalFields @('GroupId','MemberId','MembershipKind','CollectionStatus','RunId','CollectedAtUtc') -UniqueFields @('GroupId','MemberId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'M365_EntraGroupMembershipScope' -CriticalFields @('GroupId','MemberCollectionStatus','RunId','CollectedAtUtc') -RequiredColumns @('MemberCount','Visibility') -UniqueFields @('GroupId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_Policies_All' -CriticalFields @('PolicyId','PolicyFamily','AssignmentCollectionStatus','RunId','CollectedAtUtc') -UniqueFields @('PolicyFamily','PolicyId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
@@ -6068,8 +6069,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFJwTeuj+wIWLD
-# 00B8nvWLFhwommU0LuBEvlhRZMNiYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqWplyDM4ioF81
+# Z9QLbWVES23B20KtzkTCTvZUyJIA6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6202,31 +6203,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIGkyrU5zkRk8ZgVaU4KS+IDY5CC42SpOkjl6WGHLx7nMA0GCSqG
-# SIb3DQEBAQUABIIBgGXFYCXK7kqk3x2FGI1XX/27/RTQuYJ3wvtNOSPjf1rni4Bp
-# oiIAKtaNtiSS5P2P5Z9RF1vqRAVTJb0HAtrd9oNZWCFS2+oqvWO9qvQSwXJQhcj4
-# 9KWIKiJn33Q/2z517mOL9Shjv5se+bkAvAOcokBhMruwauPzntugkPe2Famr4duh
-# cPhp0s471GeQdJStvkZ+yddoP23swOiH+gV/8FBFqOsQdc0yheBBqOplBSbJnqBe
-# tgy/66EUkoVUB63gmDJAeHivstGcoZsoJJU935xpEo3hZDPyGefvHulq/JQ/c4Wh
-# iLQ0GxSh8IvQMcouXnyygXWX9rs78na1pXnBsUP/3dZcOd/eX3ECDbKX/rPrtKmb
-# xSW/hPfSSkgzbdi6/mJ4Z3Hrts5cqN8X/9XnprAUUtosRTwV8JLLteFBy7J9G0Cv
-# qR8iyW9m9mjiFPb2a3mMpT/1zpqCCMw782vStidOck/vCnlqiXLUiCaSO4B3NTDr
-# h9GnFRc/T5zOLbEt2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOLG0uiFiWLR2GJmxBRBJudImoPdsSNcILmq5oiHnalbMA0GCSqG
+# SIb3DQEBAQUABIIBgGTkoobbcjkThrLy7Af2NSmnb0JhLCHC+k1gbzYYsRRIErsh
+# kPiyJ0U5lNoysCraLOFOLDtntdSMytfmPN/QkWIeFhl8jf5MC8VWjujJeeDdrfz5
+# t4Ail+d4ypVOnS1TdGN4MSRig2BP7qP7aQ5TgFQgABuF1RIsXqA4tvK+TISL5fW1
+# pOQkuR4vWWpGGaSK1HailVa+R6roV0hmIZslZrvohvrXMoTKsmGvns5n1JFB0iOp
+# GiaDSyT76Ywb0McXGUaQGI3k4wSyayo8rL1Ayl5JEGg8M7fE4+SXvNpsizOKi/Y3
+# 64E3xeQqAVrUWbfiYxHb4iGTfQV/MpdkNd70ZSjC0JPBWkoMTO79vzi5GBVL1uZr
+# QtSXatC2+xvutsKf8Ry37SEJHR1jo6p0gxiDZtvDTjEwKp+cOEtBERuxJRt55/Ky
+# gFXVkjODkAFsxM7KR9TuJszKUyf7kFpXDplv0ghvhjnxIKtG4/ZhLiREonn3TwH5
+# g6NWpDrma1Pk2dcOb6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
-# MzVaMC8GCSqGSIb3DQEJBDEiBCB2pIoM5rYo9VkoC5igImBdMekMjbqbN7wfXlmZ
-# 3QPulTANBgkqhkiG9w0BAQEFAASCAgArWnC42UItX2X39Dqvlc06+j6TuR4bE/vx
-# wkjmF7yVGvGAXO1byWMp7KVwlDFPs0AQBYAu6K93KLNCEHRPTLWJtjDRhSTRqlhh
-# Jccbqm8xvjtk1K00yhdGjfTdrw9E0HtTMBY/04jo1UwkEcNNvPjX0X0Di5ib04tD
-# w2Tx6/c9/38k6BKaaBYz23CS+k6sEFyUWCRx5/dKpDh8SEP/evKXuU+i4o6iHlYr
-# BtuEIEfQmCHvyOH/uJPKBf3q+cR6qOCQeCaWuUp2XKEU454PyfP9quyR/ej2PsA+
-# aEXctA2xLJH4gv+Fj9Y8jiZ/KGNpoVHX8uKYpBItr3X9LzzlDIdPgM5uDZdnNI7U
-# 7YZoXEDtp+SGNbw4F1p+7tI1AtIZfCKEJ6vxRgeluS0hMdHdT9PTYTHbf7Toq3xd
-# rvq/B470VtCipOkfGJYOpE2o5kjHwLovIzZqEm8P6G/92NEBto6PtpCWW6bx2uq3
-# Bwq7AFqMu0txGPV2/FjywuRQiK4D9Qi2fNPG4gKNXwy1Zwc5N8B3hRLIIN8EnDjJ
-# thPW0ievjm8SCmTABoWqHXMC7tdxxwQGGhrFEcttztKasH8CwTAz7BQYVnnK71Zo
-# laCi3P57i9WSRBv6STxlFYdaz3GcCbRoFvLNNnfduqfi/obbpprPwnShU6+sNwBm
-# vQ48I+/6/w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzBaMC8GCSqGSIb3DQEJBDEiBCDP/m3rL72sWEm92Ms7mShRwANW0mP4NgMJE/hX
+# FZrMBTANBgkqhkiG9w0BAQEFAASCAgBUjsDvGC/sSxZpJvGuI7tc8WN+ANOc/cMd
+# 5BVEURO9LqSz2wjj5LHPN1QY2s6T9A6C9ncimRVR+THdy7fQWeaRUjxJog/+Il+t
+# 8X67WrLfmvF7PK2/eJij0zneNV3k/vTnNd0qu96ObPZIxhQQiBNMnc7ZzAqE8eMm
+# an7dfA7+q+iHh5hZtU7EBpbS/JZIZHT6DgLLhZOYgIxgiALAfALQy3jS1or4GL04
+# v/E1v3D+nGyBDJwp7OHrWPttuuqwG67SuMX1HdDu2nBueexRXdePGPtnTuku4SMe
+# +rAQ5X/hFLhnZpY47a9KDLwyMY8bGGhcFg+MFok1Tny98yRVjA4upmyhhsVANdiP
+# OaqEL5wskIcWkc2KpxPxA/w7qHdlX4HaasjxtW/4UGdE9p/HBEKQIqjimgPNsDYb
+# ey6vnaV4fkRC/L1sFf7rkkl9mhnzmeMZgpaqMEKSRF1C4UHZD1SaMU/Ex43U0K91
+# iEBBvLrxTYQeXY3qTqifpmvVlx0naiB4Gv7jWTJZIG0XIWhEgpnkq3WCSESjBtxC
+# dwiJwrGrrtzWjoWbI+jgXxXB4t7+E6ZMIDojHCXGvS0nXRAia9VSpUOkNPJRigXN
+# im666DB52nFKnzvsnbgUTgUnFJ76Q2GugEGgX0IcOirYrHjHUqW5L9JUhI3+Qnu0
+# eKWAcYD6HQ==
 # SIG # End signature block

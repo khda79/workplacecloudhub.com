@@ -46,14 +46,14 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.17
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
     Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.17
+    Version : 1.18
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
@@ -573,10 +573,14 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath) -or $LatestCsvFolderPath -match '\{\{') {
+    throw 'LatestCsvFolderPath must resolve to the configured tenant DATA-LAST folder.'
+}
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
@@ -600,6 +604,7 @@ try {
 # ==========================================================
 $connectedGraphInThisRun = $false
 $script:ExitCode = 0
+$globalError = $null
 $currentOperation = 'Starting main processing'
 $totalDeviceCount = 0
 $registeredPendingCount = 0
@@ -1383,10 +1388,13 @@ finally {
     try {
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
         Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:entra_devices'
-        Complete-SmartM365ExecutionContext -Status Auto
+        Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
     } catch {
+        $script:ExitCode = 1
+        Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Red
     }
 
+    if ($global:SmartM365ExecutionStatus -eq 'Failed' -or [int]$global:SmartM365ErrorCount -gt 0) { $script:ExitCode = 1 }
     if ($script:ExitCode -ne 0) {
         exit $script:ExitCode
     }
@@ -1394,8 +1402,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO52TRq6XTVnZB
-# zHfTsQ3fiue4dIe92h+BBOiYhGQAzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRKR4nxEZqpBuE
+# +FkzyTv6tk3zs9bBZzbDXM4S0O3J56CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1528,31 +1536,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG6L0X/+KvNbOZppNM4CUvMzO36mYb1Dm7KLKrgp/Zv+MA0GCSqG
-# SIb3DQEBAQUABIIBgC0qzfvYV3OF54ZKsF3OfAA85FWirGBMatogsRE1dpiItnyQ
-# Rcz5ht9grBL1o/2/lmAQJAOqPsj54eU0eauo7/IQ3PnEM8XFQsunGwzTT4mBhHRl
-# v0QXmse8j5BPfH/AymAzA/XxG5A7UH5pHLxGjKSxFxZmGT1IvlhWvE2UbrYVAgSB
-# T3F5KBuF+fIdfRJb2m0vx8FObQv15bYlt8PHy4pUN/uFwAgTNwqM8OhUp/Qd6rot
-# kCaqIJf3KtEumgt6AQrzXyOYAZye+iH7fmh9ZOsoYSO9clo6s2g/6KlNy6H2DU+q
-# g5PHIVuki3xgrS88f8MKUU7tiiz2+N77b8WK2hYzfUPODygIunqBIj5Xho85cMrp
-# 5pmWzovzg6VXWon+lwG/1Uk3hORJqbp3AaeWVKqFDnJ/qI97JX9UF9cAOfYrRHLS
-# EOBEXRpqRq5o8lPR66IkS3aHYC6BrtYNC9/5bOmZhGCn3NGzgqjaNfsfC4OTYLpC
-# N4P1PWi/2SRGv5i1LKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEo0MAHd+9dBnjPcVMNuRc2e6AFNg+3Cemji8htGFLgrMA0GCSqG
+# SIb3DQEBAQUABIIBgB7LYeWvQGTqWsLWFvWR5qNajuX/wrpbT/QbPi38yzOT/9Rj
+# 9OT1EsDYvY4WLuCn3OjobiNqW1+9FTg7CE06zb6wr8daeuzzvXFp+jSG4a+7khCW
+# g3/2t0NjLU76IQmKHWqcJ+bpoELJZfEmxcRdelaGDXmBoU/rRdEptesB4z1LFqW0
+# 6qDyPEN+xHqHWz7sLm40e4ijOEXZWL1PnSHNyLu+oU/ritFz/ASmVzV34WxkPh3+
+# 1K0qHpeQZlbq22DBCPmNMMR15jmDExR/dP5qGvaY1k6Ddx/cpNlM7f43f0aYz01c
+# IFkF0JW6DjrTWSOEg9I1LMImkB7iXg01xCHgStS/yGw2nlHrxt50b98m7sEU2ZWv
+# Vhn17AgthVCuAlFrK6ptkOpqnnUSUj0Z4ETHHCOtjXSqnsJ7vfjlVfackvUVHpeA
+# nmItnrUj1P4msbl2gE/50aKgmDJKkvK3vZx0H/BbfCZxsEmz1McBgk7ysejps+se
+# nGNYJk5uZP0YNo3pC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCBmKvjxFZhD3vWtpbrPfz99RhA/rq1gi39i6xL8
-# wv/LGTANBgkqhkiG9w0BAQEFAASCAgCT1rdK32bvetBBPWOu/fI8WrHOlftDIqFH
-# jkV5/bmlC7XzbSbYiO8MbFoqGHDi68OZLsI57be+IF5w3eNM0VyYBl0pcZrYzwrn
-# FcxIBKxtcL95SarjizvXMCJ+p2yxyenixMg1v7oxSlKucrk9E5AyWCRpd8r1zBWJ
-# cMI/iJKf2Hpt2guTCTc3mHLEYe1spJCB7bJNcAWvZQPddRd13htY3wx/4F54/y73
-# Jt5QxXL7Odgez4SjItodzqlH8YWOerxapUR8mkuLGZ+yfHgPkcSCjk9ziB0kiCXQ
-# Zo2deQww2ttwYTeGUaCvJxDl5zS2PLOnadxVmnlMu5n3OJBBth0YYZzB2H58LIOM
-# oIteX9weHbkyFj21AhEElxqzBhh3kPulIvGliRW2K75zQsyy62mSMq5Sid6YN6Ia
-# dnT42jL7o1olLd84oyI4MNLjAwW/ktxoygKZY/20bmR8cZuVA3xDqYTsUdMRRs5/
-# kwLhd3zHrRjj7mbb1QqVqGSAOzFC6+jTm20KAWoQSKcDwws3rF608KggScZr5Mor
-# lz7CqQIn0Kv/U3wNcz+9OnhJKd0eMwUkYd/w0+POudRwkO6jHnF88iu5SLiFleny
-# cGV8iJmfi2monstEoT5VtsnG683VWnh2yumfq4IcWSL/avO2hlQNF2P+6b6nTNTx
-# KkT9CDveNA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
+# MzFaMC8GCSqGSIb3DQEJBDEiBCCH6zu6AdfJbVJWCRLgdBI82PgLk6VBzbPaPzdW
+# Jibt+TANBgkqhkiG9w0BAQEFAASCAgBzwIGHQNfnO12imIq1uFemPUcCqlueu8Fm
+# gox+4gs+emHYeQl91AwMxafN4fAsl94JVi3n2ZXxQSinmiy6V2dXcKnQqWTK1HB8
+# nQuql6CTTWFKwChmO/AJSLy3/UllXp8I07m/MxqVScYCIXfj4MhklpUaWpG1BHgN
+# RcWlEE4qPkWJPMb1TC0J7SDZLNt4k5k8GSnLBz2BZC+QeVr+wdlmpXuHde3IgXOB
+# W4dW4YOqT26UabIxODWCDsROk4l/FIRWP+ZnZXzf4NGGcIQCgqqjrGcx0TMwlKFd
+# hRRzw4R1DG0c1nF3zjntwL7uKvLzPzFAcoj7WjDcAVsW22gfLP1QBWzbyQaCnYVW
+# O9k4Y2bHKbreFdRHkp4c7xaeH+MIRo5MvLGMf1Yt8hmxXrQzxaSbi+bn6OV62hc1
+# T7cNNSm0Uf022DYIEKrGihJ/TwdFmPht9sLm//VcBo2CmkZbmYaR1VitXu4Nil7l
+# Q1Ids7dudcxcIqjrk5+fQLLoZUEVC/44+F2hTAMTxoYthqmrfzF6/g5e+2HA7XMN
+# ecNN5Tij1n1PU6BT5Dqlm2FC4iYznbH9JZHoXZILrykxtgedibsmo2rdt9ERLvkP
+# DY7M8e2B5wSu3l0GCJVB8pmj2KiilkgF40supRozmRFVf4IC1OesyMUnURA2u7lz
+# AFBhXU2nmg==
 # SIG # End signature block

@@ -489,6 +489,37 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         self.assertTrue(self.table('ADGroupSource')[0]['TenantGroupKey'])
         self.assertTrue(all(r['TenantGroupKey'] for r in self.table('ADMembership')))
 
+    def test_ad_builtin_group_sid_repeated_across_domains_retains_both_memberships(self):
+        self.seed_ad()
+        dn=self.inputs['ad_objects'][0]['DistinguishedName']
+        for guid,domain in [('builtin-a','domain-a'),('builtin-b','domain-b')]:
+            self.inputs['ad_groups'].append(dict(ObjectGUID=guid,objectSid='S-1-5-32-544',
+                DomainName=domain,MembersJson=json.dumps([dn])))
+            self.inputs['ad_members'].append(dict(self.inputs['ad_members'][0],
+                GroupObjectGUID=guid,GroupSID='S-1-5-32-544'))
+        self.write_inputs();self.prepare()
+        members=self.table('ADMembership')
+        self.assertEqual(len(members),4)
+        self.assertEqual(len({r['TenantADMembershipKey'] for r in members}),4)
+        builtin=[r for r in members if r['GroupSID']=='S-1-5-32-544']
+        self.assertEqual({r['GroupObjectGUID'] for r in builtin},{'builtin-a','builtin-b'})
+        self.assertEqual(len({r['TenantADGroupKey'] for r in builtin}),2)
+        self.assertTrue(all(r['TenantADObjectKey'] for r in builtin))
+
+    def test_ad_true_duplicate_membership_preserves_last_output(self):
+        self.seed_ad();self.write_inputs()
+        def reject():
+            self.inputs['ad_members'].append(dict(self.inputs['ad_members'][0]))
+            self.write_inputs();self.prepare()
+        self.unchanged_after(reject,'Duplicate immutable key')
+
+    def test_ad_direct_membership_cannot_omit_group_guid(self):
+        self.seed_ad();self.write_inputs()
+        def reject():
+            self.inputs['ad_members'][0]['GroupObjectGUID']=''
+            self.write_inputs();self.prepare()
+        self.unchanged_after(reject,'Blank immutable key')
+
     def test_ad_computer_duplicate_sid_is_ambiguous(self):
         self.inputs['ad_computers'][0]['SID']='sid'
         self.inputs['ad_computers'].append(dict(self.inputs['ad_computers'][0],ObjectGUID='ad-pc2'))
