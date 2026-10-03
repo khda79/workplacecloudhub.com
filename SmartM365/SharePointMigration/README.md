@@ -36,6 +36,8 @@ The dashboard requires PowerShell 7.4 or later. The CMD launcher checks this
 requirement before opening the GUI, and the GUI enforces it for direct launches.
 Windows PowerShell 5.1 remains in use as a child process for SharePoint Server
 inventory and SPO site administration scripts that require it.
+The farm diagnostic has a separate Windows PowerShell 5.1 launcher and does not
+open or require the dashboard; see "Source farm diagnostics" below.
 
 The header displays the mapped scan scope. When a migration maps several webs,
 hover over the scope count to see their URLs. A target `SiteUrl` that differs
@@ -367,6 +369,19 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-Sh
 
 ### Source farm diagnostics
 
+On a farm server, open an elevated console at the toolkit's shared UNC folder.
+Use `Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd` with the migration folder name.
+The launcher starts only Windows PowerShell 5.1, selects the newest
+`AccessFailures-5min.csv` under that project's `ShareGate/Diagnostics`, and includes
+all valid UTC windows. It defaults to DryRun; add `-Run` for real read-only
+collection. If the launcher is stored outside the shared toolkit, supply
+`-ToolkitRoot` with the shared UNC root. It does not call the PowerShell 7 GUI.
+
+```text
+Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd -Project MyMigration
+Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd -Project MyMigration -Run
+```
+
 `Scripts/Diagnostics/SmartM365-SharePointMigration-FarmDiagnostic.ps1` runs from an
 elevated Windows PowerShell 5.1 console on a SharePoint farm server. It loads
 the SharePoint snap-in or Subscription Edition module itself and checks farm
@@ -409,6 +424,7 @@ The offline fixture test is:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365FarmDiagnostic.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365FarmDiagnosticLauncher.ps1
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365FarmDiagnosticGui.ps1
 ```
 
