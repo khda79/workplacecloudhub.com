@@ -4,6 +4,7 @@
 Set-StrictMode -Version 2.0
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 
 $script:InsightsTerminalSuccess = @('Success', 'CompletedWithWarnings')
 $script:InsightsTerminalFailure = @('Failed', 'TimedOut', 'Interrupted')
@@ -242,6 +243,12 @@ function Get-SmartM365OrchestratorOperations {
     $servers = [Collections.Generic.List[object]]::new(); $running = [Collections.Generic.List[object]]::new()
     $pending = [Collections.Generic.List[object]]::new(); $incidents = [Collections.Generic.List[object]]::new()
     $staleMinutes = [double](Get-InsightsProperty $ClusterDocument 'PeerHeartbeatStaleMinutes' 5)
+    $maintenance = $null; $maintenanceError = ''; $maintenanceServers = @()
+    try {
+        $maintenance = Get-SmartM365OrchestratorMaintenanceState $SharedDataFolderPath
+        $maintenanceServers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $ClusterDocument $maintenance -Now $Now)
+    }
+    catch { $maintenanceError = $_.Exception.Message }
     foreach ($serverName in @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { [string]$_ } | Sort-Object -Unique)) {
         $folder = Join-Path $SharedDataFolderPath $serverName
         $heartbeat = Read-InsightsJson -Path (Join-Path $folder 'Orchestrator-Heartbeat.json')
@@ -262,6 +269,7 @@ function Get-SmartM365OrchestratorOperations {
             Version = [string](Get-InsightsProperty $heartbeat 'ScriptVersion' ''); Pid = [string](Get-InsightsProperty $heartbeat 'Pid' '')
             Running = $jobsRunning.Count; Pending = $jobsPending.Count
             RecycleIn = $recycleIn
+            Maintenance = if ($maintenanceError) { 'Control unavailable' } else { [string](@($maintenanceServers | Where-Object Server -eq $serverName)[0].Status) }
             StatePersistence = if ([bool](Get-InsightsProperty $heartbeat 'StatePersistenceHealthy' $true)) { 'OK' } else { 'Launches paused: ' + [string](Get-InsightsProperty $heartbeat 'StatePersistenceLastError' '') }
         })
         foreach ($job in $jobsRunning) {
@@ -299,6 +307,7 @@ function Get-SmartM365OrchestratorOperations {
     [pscustomobject]@{
         Servers = @($servers); Running = @($running | Sort-Object Server, Job); Pending = @($pending | Sort-Object Server, Job)
         Incidents = @($incidents); Mails = @($mails | Sort-Object Time -Descending); RefreshedAt = $Now
+        Maintenance = $maintenance; MaintenanceError = $maintenanceError; MaintenanceServers = $maintenanceServers
     }
 }
 
@@ -367,8 +376,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi8qSCxkOTd3Dj
-# s7ByDDbbENKB2extlOOprJonc3supKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ414hZoffH6e5
+# zDPQyjqsPLazlRAGI/mIyfvqpzylYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -501,31 +510,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICMtCXGOlhT9WqJlFscejYYfKTbCMfUCmZCNtzmKHYE8MA0GCSqG
-# SIb3DQEBAQUABIIBgGVJeW6Iq0eJSC2avJdtChVVFaWwIYyCvXIdPQ+nCNUc5EzH
-# SyxHBmC8xidGyT0OoWKV0BmTZK+UGxN2Zl/mdDdiJUIO9XWOX/eNsmt2fltgVBD+
-# fm2lm+XmgPgdpAIGhpPzh+B7De8yf8co37vSIJ9yAInV7sURuK6f3s7K6XA6n+lj
-# PG3iAk1YwfJDHVZ2EWjZDuoTxPxLtHmPtHWHxN1S3CZh+o+wF0Ym9cQMFbfGQ4vn
-# nZnQY6kq6sQ0P70PEDZWsA1bYorH8u0ldfR8n17DWxCGfIv6c5W9c8vfc8ya0K2i
-# Fy39gH02v69KiYyi7ys0+WICgJxHs07JJVUoqJ2prbO9b8isc7e4P9xqOh2QzTD9
-# IGlzuisUk68kuH4jzmpmrVdaRC1XteLNq5+GuoUyua1xVAd0YXlZyu7iFgZkxXvg
-# gvtKxg2Irvr13/77jCvOhnx5Ep0iGhk7AxuBFQWP0dLFsteSLGE09Ino4vwylB7z
-# EJdzxEmKC+WE6WcnD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGdzglAy2/TwmeHSFtWgfRgepOiIDBYO/eGGpSeuRSRqMA0GCSqG
+# SIb3DQEBAQUABIIBgI6ITIgd3I95QOWxsPQDR7EfqLHZpC+fC5bGZXU1rqcmH6LP
+# MAIyUdat2zpuB7vK5XJh85qqkPXhp3TYTG8biN/3gxdeogXLViC5kP/Pk8z4CQF2
+# yNcF/0mdzqh+DxE4CsilTrRGJOOJ2QBXJajwUj7wPXZG27xaaY/L/cRfX4WJt2uB
+# IX2LAV3aXV2wxSEXMNRj63P3QozR2Wcqqwf9mDgv0R+d/EhHulRnwYvxfqyidG8e
+# SNocPpDyPlqjiRy0ytyvXOQ2n4z8LFGUxS2p+7J2sQvgi6yX6sY2wAdRUPOxK5lz
+# UqAuaNSmv+D0uOiY7if7yjV0swmV5NIJ0sux1RyoqQ0vVPYSLeRGX2jlvqbN1DFN
+# m0s+4espTajlCdWCkiNg5RNJEvPlG386DE+DWPDr2noLrhnxe/2RasZq/bB3IEkx
+# d95nITQBoL2BIa39vhvtMr/kkpnaEEAMq+bFk5pxer0zuvMPWJyk1un0H3GiJVNM
+# dO5bqBV5HLZSJuWfiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMDEy
-# MjBaMC8GCSqGSIb3DQEJBDEiBCCCDSJZVoQkWqC9YsUZ8c751g7jaO4KxEIeYF9r
-# DxI8pzANBgkqhkiG9w0BAQEFAASCAgCBVLwgZ1szyl6UrtefdObvtofEn4cEb3DY
-# 1cOmepufJtejjOnWOHc7O5Mt+atjyzy+8l18+4DIij0O3pG9B+6HCV7uEc4PI90j
-# JSz3x3RIAxuJEMIcnZgIKLcw/NTiI1xFxG6vNVkBLHBvUsxYEQypkHYDHwwHQw2/
-# STptxlAizf2ll20psaTxo1xLW16qfwDYJ8zUXENJnsQD7LiyZZThAec6UZAzwS04
-# kgEwqz+U6TyFNljfL15uYzew8oapwJgaIMaUKCfw8/SjhnVPuuV155XgC5BeHp4s
-# EQHVJ9JWx9uNdNZ47trEVhfXjjKg/CdJBnV0xCXFxZNW36CdCWYo0sTfsEqdHyAT
-# 24/QMCRXavGM0CO5mvuoPJaXbd3dqkOCLdaTZrh9M9W31HmA0YnrHX3hOJIuko3N
-# RwZ4fcjK1GeahJaSLTZ0gtmpJy9vnhhekQQNBhtwqI3QnZrWOk6cgplLSLU6C6l2
-# Dst++ZeMdtPuuGvhZWmtkgUp0W9SYGLZbu9MNW/sGCXU3vfkCgE9Ue04Gmt86QJS
-# wqcPVQ1irlL8cMRRzOcH384TbkU79YFSZL9xaqNtySUN9PRdO6oKParXxK1932o6
-# K9rMTlzYrDy5JbvQw7NTTx+Lied8bgnzTzG4Z0cHBRyFqwYnBTKneREN6jpeGxC0
-# YVaL5/4CcQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCB+/0T4vRfGzUO368FcEjmRTjOZ8hzhpF9x7ir3
+# 3Igz/TANBgkqhkiG9w0BAQEFAASCAgBsTDBinlWYHAQPw1pXoMoy0poCefq6XbBc
+# yQwDZ864cVa5AkT7VEswSKnyxPG0kvPCBQQrdV1Ro767gn36z3DxtnDWiIckgJdx
+# 9HosbXFmgjI1IEqMEtKnrfCPVsFN7CKkBy+0CzKeU3VUqxkKzo22YHR8irMQb1E8
+# PSXnBrsCG/+lIy6G/PKtUFCGCzl40wZKfJWYnX6RACZDPWp+HsxEkUXdTGla6FU+
+# qmaWgcYQdLAVFkqOUwrcCmDDjsvxOiI8QLTQ1I9ajS0ck7IpOB7U0s/d9AP0Wazk
+# TTaGTQFaP/cO2/khmqQhtPZAXMHEitVMB+/jOKga74ITtdMD+7c0NTaCS8sZ5HcG
+# rBjVztdIFuDSv59sA52i5wZeO3GtGkDPiJA1Q3Us2uQMxbeReHHbFIv8YofTMmik
+# s47dTTOLylTZ7bH7dGAkrFOdizanJ54RUT33PeKMJ9/FYjIv097tsTBT7g0Sccer
+# j+ICkJ8oxvJswYQCfrVhjUZ10S+BiaSUfs2ALPVyh4LffutfAzxfcYDOjo9U6wud
+# Xs/7WuU9qq4UMrS2mbzeLO8XXTypGHHy+K7wRPEVu/BWTOA0qE/mjUMKTv38x3NC
+# 94Ggv7wKH0nMLgdDWhZbMH7Fe9JY7G9gfPUAlAmt5ywa5UoW1+zIUB0mEAN81CEk
+# bDCqgCikdg==
 # SIG # End signature block

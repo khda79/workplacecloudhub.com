@@ -1,6 +1,65 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.38) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.39) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+
+## Shared scheduling maintenance
+
+Orchestrator 1.5.39 and GUI 1.2.0 add tenant-wide scheduling maintenance. In **Operations**,
+enter a reason and select **Enable maintenance**; use **Disable maintenance** to resume.
+Both actions require confirmation and optimistic revision checks. They publish only the
+maintenance transition, never the jobs/cluster draft edited elsewhere in the GUI.
+
+The authoritative state is `Config/Orchestrator-Maintenance.json.txt` under the shared
+Orchestrator folder. GUI and residents must use that same live shared folder, not a
+SharePoint/OneDrive mirror. SharePoint remains an operational mirror, not a control plane.
+The state survives restart and has no automatic expiry. A persistent `.guard` coordinates
+transition writes with process creation and detects disappearance of initialized state;
+it is excluded from synchronization with other locks. Never delete the state or guard to
+resume scheduling. Transitions are recorded in `Audit/Orchestrator_Maintenance.csv` without
+creating configuration snapshots or modifying manifest hashes.
+
+| Operation | Maintenance behavior |
+| --- | --- |
+| Running collector | Continues; timeout, completion, leases and logs remain supervised. |
+| Automatic due launch / scheduled retry | Suspended; no new process. |
+| New/pending Pipeline request and its retries | Allowed, preserving dependencies, ownership, claims and concurrency. |
+| Explicit `-Force` | Still explicit; original ownership/overlap checks and dependency-bypass semantics are unchanged. Prefer Pipeline. |
+| Heartbeat, peer health, mail, retention, SharePoint mirror | Continue; deliberately suspended schedules are not missing-start incidents. |
+| Direct collector outside the orchestrator | Not controlled by maintenance. |
+
+A pending manual request may supersede a suspended scheduled retry for the same job;
+the original failure stays in run history. Maintenance never changes CSV schemas, invents
+successful source receipts, weakens freshness checks, or changes prepared evidence contracts.
+A manual child may still wait for an external dependency whose latest scheduled occurrence
+was suspended: collect that dependency explicitly (or resume planning), rather than reuse
+an inadmissible old export.
+
+On resume, the durable UTC cutoff advances scheduling cursors past suspended automatic
+occurrences and discards their pending automatic retries; original failures and running
+process records are preserved. This applies after restart, missed intervals and ownership
+changes as well. Next future schedules run normally: no catch-up burst. Scheduling cursors
+are not success evidence. No run is recorded as successful for a suspended occurrence.
+
+Activation requires **every published expected server** to have a fresh, Running heartbeat,
+maintenance protocol 1, healthy control and acknowledgement of the current revision.
+Update all residents before using the feature. The GUI shows **Applied**, **Pending**,
+**Offline**, **Unsupported version** or **Control unavailable** and keeps an always-visible
+banner; publication is not announced as globally applied until every acknowledgement is
+present. Disabling remains possible if a server went offline, but its acknowledgement is
+still pending. A missing, malformed or unreadable initialized control pauses new launches
+(including manual ones) without abandoning job supervision. The launch-phase read and
+shared gate protect activation during a scheduler tick; failure does not bypass the gate.
+
+Offline validation (synthetic temporary data only):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorMaintenanceOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/SmartInventory/Orchestrator/SmartM365-Inventory-Orchestrator-GUI.ps1 -ValidateOnly
+```
+
+These tests do not qualify production SMB atomicity, real deployment, task recycling or
+live multi-server operation. Deployment and a controlled production test remain separate
+approval steps.
 
 Version 1.5.20 mirrors the shared `Config`, `Audit`, `Election` and `PipelineRuns` operational trees to SharePoint when uploads are enabled. It creates missing SharePoint folders, preserves the `DATA-ALL\Orchestrator` hierarchy, skips locks and temporary files, uploads only changed JSON/CSV artifacts under a cluster-wide mirror lock, and removes expired mirrored concurrency leases without treating SharePoint as an operational source. GUI v1.0.6 replaces the free-text weekly-day field with Monday-to-Sunday checkboxes, disables and clears them for `Daily`, and requires at least one selected day for `Weekly`. Version 1.5.19 adds an atomic, cluster-wide `Rebalance now` request from the GUI. A resident orchestrator consumes each unique request under the planner lock, recalculates elected owners without sticky ownership, and records the applied request in the shared plan. Version 1.5.18 treats `CompletedWithWarnings` as a terminal distributed occurrence result, preserves Teams capability-probe diagnostics when cleanup is unavailable, and retries transient pipeline status-file replacement failures. Version 1.5.17 ensures that collectors requiring explicit external-action opt-in receive `-EnableConfiguredExternalActions`, including an additive migration of existing central manifests that preserves operator arguments and scheduling overrides. Version 1.5.15 standardized every orchestrator mail subject as `[SMART 365] - [tenant] - [ Orchestrator] - ...` and guaranteed that the common mail footer identifies the script and its version. Version 1.5.14 added an atomic distributed pipeline request consumed by the existing
 resident orchestrators. A `Full` request selects every enabled non-manual job from
@@ -16,6 +75,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `SmartM365-Inventory-Orchestrator.ps1` | Orchestrator script (PowerShell 7). |
 | `SmartM365.Orchestrator.Distributed.psm1` | Automatic capability probes, weighted election planner and atomic occurrence claims. |
 | `SmartM365.Orchestrator.Management.psm1` | Shared configuration validation, atomic publication, versions, rollback, audit and multi-server history aggregation. |
+| `SmartM365.Orchestrator.Maintenance.psm1` | Shared scheduling state, revision-checked transitions, server acknowledgements and launch gate. |
 | `SmartM365.Orchestrator.Pipeline.psm1` | Full/group selection plus atomic shared pipeline request and per-job batch status management. |
 | `SmartM365-Inventory-Pipeline.ps1` | Read-only pipeline validation or atomic `-Collect` submission, with wait-by-default aggregation. |
 | `SmartM365.Orchestrator.Insights.psm1` | Read-only GUI data layer: live operations, job health, dependency readiness, recent pipeline requests and job run requests. Testable headless. |

@@ -43,6 +43,8 @@ Features:
   Graph/SMTP/Both transport selection, branding and HTML copy behavior as inventory scripts.
 - Optional Authenticode validation before job launch, configurable and usable
   in Audit mode before switching to Enforce.
+- Shared maintenance pauses automatic launches/retries, not supervision or Pipeline requests.
+  Resume skips suspended occurrences; GUI transitions and process creation share a gate.
 
 .PARAMETER Tenant
 Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -98,7 +100,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.38
+1.5.39
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +112,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.29
+    Version : 1.5.39
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +137,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.38"
+$ScriptVersion = "1.5.39"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2276,6 +2278,16 @@ function Get-OrchestratorPendingJobSnapshot {
         if ($script:RunningJobs.ContainsKey($name)) { continue }
 
         $state = Get-JobState -JobName $name
+        if (-not $script:MaintenanceHealthy -or ($null -ne $script:MaintenanceControl -and $script:MaintenanceControl.Enabled)) {
+            $pipelineRetry = $null -ne $state.PendingRetry -and $state.PendingRetry.ContainsKey('PipelineBatchId') -and $state.PendingRetry.PipelineBatchId
+            if (-not $pipelineRetry) {
+                $pending.Add([pscustomobject]@{
+                    Name=$name; ScheduledOccurrence=''; Reason=if ($script:MaintenanceHealthy) { 'Maintenance' } else { 'MaintenanceControlUnavailable' }
+                    FirstSeen=''; Details=if ($script:MaintenanceHealthy) { $script:MaintenanceControl.Reason } else { $script:MaintenanceError }
+                })
+                continue
+            }
+        }
         if ($null -ne $state.PendingRetry) {
             $pending.Add([pscustomobject]@{
                 Name = $name
@@ -2370,6 +2382,11 @@ function Write-OrchestratorHeartbeat {
         StatePersistenceHealthy = [bool]$script:StatePersistenceHealthy
         StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount
         StatePersistenceLastError = [string]$script:StatePersistenceLastError
+        MaintenanceProtocol = 1
+        MaintenanceHealthy = [bool]$script:MaintenanceHealthy
+        MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
+        MaintenanceEnabled = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Enabled } else { $false }
+        MaintenanceError = [string]$script:MaintenanceError
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
@@ -2627,6 +2644,9 @@ function Get-OrchestratorPeerHealthSnapshot {
         }
 
         if (-not $script:Settings.PeerJobMonitoringEnabled) { continue }
+        if ($heartbeat.PSObject.Properties['MaintenanceHealthy'] -and -not $heartbeat.MaintenanceHealthy) {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("MaintenanceUnavailable|{0}" -f $peerServer) -Type 'MaintenanceControlUnavailable' -Server $peerServer -Status 'Launches paused' -LastSeen $lastSeenText -Details ([string]$heartbeat.MaintenanceError)))
+        }
         $peerStatePath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-State.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $peerStatePath -Optional; if ($selectedPeerPath) { $peerStatePath = $selectedPeerPath }
         if (-not (Test-Path -LiteralPath $peerStatePath -PathType Leaf)) {
             $issues.Add((New-OrchestratorPeerIssue -Key ("StateMissing|{0}" -f $peerServer.ToUpperInvariant()) -Type 'StateMissing' -Server $peerServer -Status 'Missing' -LastSeen $lastSeenText -Details "Heartbeat is healthy but no orchestrator state file was found at $peerStatePath"))
@@ -2648,6 +2668,12 @@ function Get-OrchestratorPeerHealthSnapshot {
             if (-not $job.Enabled -or -not (Test-JobAllowedOnNamedServer -Job $job -ServerName $peerServer)) { continue }
             $expectedOccurrence = Get-LatestPastOccurrence -Job $job -Now $auditNow
             if ($null -eq $expectedOccurrence) { continue }
+
+            # A deliberate scheduling suspension is not a missing-start incident. Server/state
+            # health and real run failures are still monitored above and in job supervision.
+            if ($script:MaintenanceHealthy -and $null -ne $script:MaintenanceControl -and
+                ($script:MaintenanceControl.Enabled -or ($script:MaintenanceControl.ResumeAfterUtc -and
+                 $expectedOccurrence.ToUniversalTime() -le ([datetimeoffset]::Parse($script:MaintenanceControl.ResumeAfterUtc)).UtcDateTime))) { continue }
 
             try {
                 $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName ([string]$job.Name) -Occurrence $expectedOccurrence
@@ -3075,6 +3101,10 @@ function Get-OrchestratorRuntimeSnapshot {
     $distributedModulePath = [string]$script:Settings.DistributedModulePath
     $managementModulePath = [string]$script:Settings.ManagementModulePath
     $pipelineModulePath = [string]$script:Settings.PipelineModulePath
+    $maintenanceModulePath = Join-Path (Split-Path $scriptPath -Parent) 'SmartM365.Orchestrator.Maintenance.psm1'
+    $maintenanceTokens=$null; $maintenanceErrors=$null
+    [void][Management.Automation.Language.Parser]::ParseFile($maintenanceModulePath,[ref]$maintenanceTokens,[ref]$maintenanceErrors)
+    if (@($maintenanceErrors).Count -gt 0) { throw ('Maintenance module parser validation failed: ' + (($maintenanceErrors | ForEach-Object Message) -join '; ')) }
 
     $distributedTokens = $null
     $distributedParseErrors = $null
@@ -3123,7 +3153,8 @@ function Get-OrchestratorRuntimeSnapshot {
     $distributedModuleFingerprint = Get-OrchestratorFileFingerprint -Path $distributedModulePath
     $managementModuleFingerprint = Get-OrchestratorFileFingerprint -Path $managementModulePath
     $pipelineModuleFingerprint = Get-OrchestratorFileFingerprint -Path $pipelineModulePath
-    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint + '|' + $pipelineModuleFingerprint
+    $maintenanceModuleFingerprint = Get-OrchestratorFileFingerprint -Path $maintenanceModulePath
+    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint + '|' + $pipelineModuleFingerprint + '|' + $maintenanceModuleFingerprint
     $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
     $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
     $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
@@ -3139,6 +3170,8 @@ function Get-OrchestratorRuntimeSnapshot {
         ManagementModuleFingerprint = $managementModuleFingerprint
         PipelineModulePath = $pipelineModulePath
         PipelineModuleFingerprint = $pipelineModuleFingerprint
+        MaintenanceModulePath = $maintenanceModulePath
+        MaintenanceModuleFingerprint = $maintenanceModuleFingerprint
         CoreManifestPath = $coreManifestPath
         CoreModulePath = $coreModulePath
         CoreVersion = $coreVersionOnDisk
@@ -3278,6 +3311,7 @@ function Test-OrchestratorRuntimeUpdate {
         Test-OrchestratorAuthenticodeFile -Path $candidate.DistributedModulePath -Role 'Distributed orchestrator runtime module'
         Test-OrchestratorAuthenticodeFile -Path $candidate.ManagementModulePath -Role 'Management orchestrator runtime module'
         Test-OrchestratorAuthenticodeFile -Path $candidate.PipelineModulePath -Role 'Pipeline orchestrator runtime module'
+        Test-OrchestratorAuthenticodeFile -Path $candidate.MaintenanceModulePath -Role 'Maintenance orchestrator runtime module'
     )
     if ($script:Settings.MonitorCoreModuleVersion) {
         $signatureResults += @(
@@ -4765,9 +4799,53 @@ function Initialize-NewJobStates {
 
 }
 
+function Update-OrchestratorMaintenance {
+    param([switch]$Initialize, [datetime]$Now = (Get-Date))
+    try {
+        $control = if ($Initialize) {
+            Initialize-SmartM365OrchestratorMaintenance -SharedDataFolderPath $script:Settings.SharedDataFolderPath
+        } else { Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $script:Settings.SharedDataFolderPath }
+        $cutoff = if ($control.Enabled) { $Now } elseif ($control.ResumeAfterUtc) { ([datetimeoffset]::Parse($control.ResumeAfterUtc)).LocalDateTime } else { $null }
+        $changed = $false
+        if ($null -ne $cutoff) {
+            foreach ($job in $script:Manifest.OrderedJobs) {
+                $state = Get-JobState -JobName $job.Name
+                $latest = Get-LatestPastOccurrence -Job $job -Now $cutoff
+                $handled = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
+                if ($null -ne $latest -and ($null -eq $handled -or $latest -gt $handled)) {
+                    # Scheduling cursor only: never invent a successful execution or replace Running.
+                    $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $latest
+                    Write-OrchestratorLog -Message ("Job {0}: automatic occurrences through {1} suspended by maintenance revision {2}; no catch-up." -f $job.Name, $latest.ToString('yyyy-MM-dd HH:mm'), $control.Revision)
+                    $changed = $true
+                }
+                if (-not $control.Enabled -and $null -ne $state.PendingRetry -and
+                    (-not $state.PendingRetry.ContainsKey('PipelineBatchId') -or -not $state.PendingRetry.PipelineBatchId)) {
+                    $retryOccurrence = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.ScheduledOccurrence)
+                    if ($null -ne $retryOccurrence -and $retryOccurrence -le $cutoff) {
+                        Write-OrchestratorLog -Message ("Job {0}: suspended automatic retry discarded on maintenance resume; original failure remains in run history." -f $job.Name)
+                        $state.PendingRetry = $null; $changed = $true
+                    }
+                }
+            }
+        }
+        if ($changed) { Save-OrchestratorState }
+        if (-not $script:StatePersistenceHealthy) { throw 'Maintenance scheduling cursor could not be persisted.' }
+        if (-not $script:MaintenanceHealthy -or $null -eq $script:MaintenanceControl -or $script:MaintenanceControl.Revision -ne $control.Revision) {
+            Write-OrchestratorLog -Message ("Maintenance control applied: revision={0}; enabled={1}; reason={2}." -f $control.Revision, $control.Enabled, $control.Reason)
+        }
+        $script:MaintenanceControl = $control
+        $script:MaintenanceHealthy = $true; $script:MaintenanceError = ''
+    }
+    catch {
+        $script:MaintenanceHealthy = $false; $script:MaintenanceError = $_.Exception.Message
+        Write-OrchestratorRuntimeUpdateWarning -Key ('maintenance:' + $_.Exception.Message) -Message ("Maintenance control unavailable; new launches paused, existing jobs remain supervised: {0}" -f $_.Exception.Message) -Now $Now
+    }
+}
+
 function Invoke-MissedRunCatchUp {
     # Startup only: apply MissedRunPolicy=Skip by fast-forwarding past occurrences.
     # RunOnce jobs keep their due occurrence and are caught up by the launch phase.
+    if (-not $script:MaintenanceHealthy -or $script:MaintenanceControl.Enabled) { return }
     $now = Get-Date
     foreach ($job in $script:Manifest.OrderedJobs) {
         if (-not $job.Enabled) { continue }
@@ -4786,6 +4864,7 @@ function Invoke-MissedRunCatchUp {
 function Invoke-LaunchPhase {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
+    if (-not $script:MaintenanceHealthy) { return }
     $limit = $script:Settings.MaxConcurrency
     $launchedThisTick = New-Object System.Collections.Generic.List[string]
 
@@ -4805,6 +4884,9 @@ function Invoke-LaunchPhase {
         }
         $state = Get-JobState -JobName $name
         $lastOccurrence = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
+
+        $isPipelineRetry = $null -ne $state.PendingRetry -and $state.PendingRetry.ContainsKey('PipelineBatchId') -and $state.PendingRetry.PipelineBatchId
+        if ($script:MaintenanceControl.Enabled -and -not $isForced -and -not $isPipelineRetry -and -not $isPipeline) { continue }
 
         # Per-job overlap guard: a job still running at its next occurrence is not
         # relaunched; the new occurrence is marked Skipped.
@@ -4829,7 +4911,7 @@ function Invoke-LaunchPhase {
             $occurrence = $Now
             $reason = 'forced'
         }
-        elseif ($null -ne $state.PendingRetry) {
+        elseif ($null -ne $state.PendingRetry -and (-not $script:MaintenanceControl.Enabled -or -not $isPipeline -or $isPipelineRetry)) {
             $isPipeline = $false
             $pipelineInfo = $null
             $notBefore = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.NotBefore)
@@ -5024,6 +5106,16 @@ function Invoke-LaunchPhase {
             continue
         }
 
+        # Same short-lived gate as GUI transitions: activation cannot race process creation.
+        $maintenanceGate = $null
+        $maintenanceValidated = $false
+        try {
+            $maintenanceGate = Enter-SmartM365OrchestratorMaintenanceGate -SharedDataFolderPath $script:Settings.SharedDataFolderPath
+            $launchControl = Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $script:Settings.SharedDataFolderPath
+            $launchOrigin = if ($isPipeline) { 'pipeline' } else { $reason }
+            if (-not (Test-SmartM365OrchestratorMaintenanceLaunch -State $launchControl -Origin $launchOrigin -Occurrence $occurrence)) { continue }
+            $maintenanceValidated = $true
+
         if ($job.AssignmentMode -eq 'Elected') {
             # Read the shared occurrence claim before requesting the ConcurrencyKey: an occurrence a
             # peer already runs holds that key itself and must not be reported as blocked by it.
@@ -5117,6 +5209,14 @@ function Invoke-LaunchPhase {
             Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
             break
         }
+        }
+        catch {
+            if ($maintenanceValidated) { throw }
+            $script:MaintenanceHealthy = $false; $script:MaintenanceError = $_.Exception.Message
+            Write-OrchestratorRuntimeUpdateWarning -Key ("maintenance-launch:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: launch gate failed; no maintenance bypass: {1}" -f $name, $_.Exception.Message) -Now $Now
+            break
+        }
+        finally { if ($null -ne $maintenanceGate) { $maintenanceGate.Dispose() } }
     }
 }
 
@@ -5800,6 +5900,9 @@ function Update-OrchestratorCentralConfigurationIfChanged {
 $script:LogReady = $false
 $script:LockOwned = $false
 $script:RunningJobs = @{}
+$script:MaintenanceControl = $null
+$script:MaintenanceHealthy = $false
+$script:MaintenanceError = ''
 $script:ForcedPending = @()
 $script:PipelinePending = @{}
 # Job names of each active pipeline request, to tell request dependencies from external ones.
@@ -5842,6 +5945,7 @@ try {
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
+    Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
     Import-Module -Name $managementModulePath -Force -ErrorAction Stop
     $pipelineModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
     Import-Module -Name $pipelineModulePath -Force -ErrorAction Stop
@@ -6286,6 +6390,7 @@ try {
     Update-OrchestratorHeartbeatDuringLongOperation
     Restore-RunningJobs
     Initialize-NewJobStates
+    Update-OrchestratorMaintenance -Initialize
     Invoke-MissedRunCatchUp
     Update-OrchestratorHeartbeatDuringLongOperation
     Invoke-RetentionCleanup
@@ -6311,6 +6416,7 @@ try {
         Update-OrchestratorServerCapabilities
         Update-OrchestratorElectionPlan
         Update-RunningJobs -Now $now
+        Update-OrchestratorMaintenance -Now $now
         try {
             Update-OrchestratorPipelineRequests
         }
@@ -6427,8 +6533,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpKz0rR/XmAZK/
-# rvOmeYoHDVyzyVxkBQEBy/FUy3ZryKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARMVRVB7e9z1oV
+# efslfIzbpIrpWMQOEGpHjDbPGuXiuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6561,31 +6667,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILT1C+17/qfPnXLphvWvrOkuqRmqnYkaOEm80YJ6s8UVMA0GCSqG
-# SIb3DQEBAQUABIIBgHVatOiuuVttaG2A2n5Sl9Ynfoktzgc3nIaP1MI6YowtRXVS
-# TEBSPkrhC23SM80z74jMtugjxZmbKv9oUZ5AolDIDTGfbREA8NrR8MdtNkV5mYGm
-# TBV7SN4X/sdRf1sT3wlFzK/PiZwfI/Qjw0CXnRJa/hqztfBP+8oowJbMzTHPI5QH
-# 4KwCl8e/4wIfu5MFd7BEGcC/VvbLqbanQMJFrB4ZkG3Bl7BIA2vgYylr9GjDULET
-# xkm9pKoVQaaV5e/7y86HW2Ga+ifMbvkNL7k5UwHMnG0gQnI+a3Ct7oVs7G+/EiSF
-# YL/9dt+qPUzFv2vK1QhDPSh+ZYWVpGmzXGwezSSf5uFjka2PXICcK1yS0FaRBmbz
-# 0PfLoCwPURVCiD9HYy+3kbGrRpOhiBLGX9s+hH56oby2DsZ9EJVlB5cyVB0hLWIS
-# w8EJCPZpBFo+zgHR/9eM32sTUWCj5apZ+4fYzqx6RnqHko69TNnY1e0a3ZYcda7/
-# fs1K22bkgdbzhSeodaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPPTLQqKhaL3u9eoa0GC/Yvwm9ku1/2tbXDlSAVCNs71MA0GCSqG
+# SIb3DQEBAQUABIIBgHrlhwUH4uNTH0lV9Yf2uZkGpDf2SUxPpIbru2VulLdO6rno
+# pJ1xUYphoO424CCiXQzqyS6UU4oj1LCg8pPjQXjLTupDf7PWU3S01VjfJmGivLF6
+# AJZbVW+cPR4EFIoj6T1uKEUeu8AOC0iFC7AXY8LiCUtAOvKsHtgsgd+WaIHsUhDX
+# hNiisHWn/syp2SEBPsJMjyiBSDkXXXCYE10Yvh5lHks83nMtC1+24y0Kp91EYw1S
+# zCEv7mGl1iOJse8Mh1tD85QWFo9WD2i98MptqiqN6eHHruWB8o1O2McwYij5C5OQ
+# n01KTD8VTbO80gUivJxjnaOHVc3eCRmJLf81CYFZyTESOQpX31OlDvV/2BukSINv
+# GfH7hyPhUKtWTN07DoOlWSwI0lXHSKu0ycnXnQZ4GPoejo5/TeILPWRQX/ng8GDR
+# bLBmaBFQy4zI2pGJBfLJxEHqpGc1x9xZn22GumqdcasNPes/1O8bkju1xOeH3Dgi
+# eM+kQmg4mpQRLyUzR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExMDUx
-# MDZaMC8GCSqGSIb3DQEJBDEiBCA5dzSMF0g2CKGuLhYkq5L9l+dT//z/zRDWWzRT
-# HaR3uTANBgkqhkiG9w0BAQEFAASCAgBsn6cOlrkbUNOgjNbxaOYfD91ivpESmSQp
-# Y/SEodBx1i8XrZxsZMb+ZghgZ8gm4EQwcQFpbNFumHu+Bpzst3c4scfqGg/7E7oR
-# qnqaCr+aCGoarCvf9iAlj0i0s1scJ2hAHiz0CMrAabBuo+1ElZwCE1Dl1cqm5Wz/
-# z+UHlp0lLwOhfS3sEpGL617xw55u/HZfYnn5evp8rcdZwVJ3Anj3eRIKJKnLvRUQ
-# +4VSDg797i2922x4Sa/Z9kTVQMjdVIQizi4EjMwkz3plqZKveuY2RSyJIaqXLSMu
-# /RTPPAIpVPmxRALjcQmKmVmd4WAWWjY+c8S2FoB+BoizlVMVSf60GUZg2TNA7hwg
-# 8GC4v3Njkk9PMHHMViWMBP4XKuujjXdCxzq0JWdpoaK9YB6NfgzypnajmwhYZVgp
-# ku1gRUaeZmmPR1LJANDpb8fYk6HKtCojINAT/qyw2XOUJQmvDWiAq+eVdWbfATt+
-# noHE9w0KRfQUoomgFM5zuTXX0P9m95WJkP+e0iKA6UOXe1SNss4jV6XGQbuvZ1At
-# kaqraH4XZFVjsy49kxqIzai58Vp3L2XJEMFEzqmzCv4EW+HmPUzfU2N/p19fUjbs
-# yfnAnHp7BXRBwa65yquASFzYIkSic/YHQvMew+mY1zjyvDSAm0FNVl0D0Aiad6mX
-# 9CQ/UrDLjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
+# MTNaMC8GCSqGSIb3DQEJBDEiBCADPLWJ+/hZ2+iKLEnNv4IbIkweBUr+fq/UaUq1
+# KI7KEDANBgkqhkiG9w0BAQEFAASCAgAEenxlr7a3+82Ak5yltq0VkHZHV017edC4
+# a7fiooSeHlis9tC8fSSO1PvXWfv5fFcassaBmv9illa5+YgKEjcnQ1AZwabMwkzM
+# T7j9Fd65pDdrh5aipBNHrBWnl27kIdrjuA39SLgHKmwPa+dakbtjuvkOO3hM3Dws
+# QqYTCiJbdcjJ8w/XH/9TE+8E7MYi7muU7ZELPXl1ywl6UrskYieeoVmdwR7iwjIN
+# RsQ/F+FlHzsi/NLM98Df5tpgjtCuaMu3OQamSlygnJAIGTZ9CMHDBXo6AMsEM8tW
+# ZXuY9XOaPyM7MGSu7Ie+zqenWbSqbM8UWaBfUbkZq4KZwui1MXEXF2u6uiiI0uEx
+# VjgoozHqVi4y9GicotujqdjCgaB3djyHncUaiqyqK1jI9NF+CtgIpKB7fjuytSC4
+# t8wyRJGGE44dxkwonnnM5QUiRoknZOcr8Yt23bW45XSOuPq5THAZRkNOXpU2n8f8
+# OAtpbDI0kiGvZ+BcOwWUi6XG6IMqfbonHhZ1GE/wuf2H/crVUwO/YJj8mUqUQl1o
+# mECSt1jRuPapyYwCDTlWzQ4ty3Se0vrmjvC1gY7RHp6IojVOY+Zhge5e99UVtmh7
+# T2hJeELuWVc4j/EsEjIJiC4jJGVjn+ULU/nOcaCxUD2lCfw+xtVJUaATvm2DXX6j
+# n5v5tRDxMg==
 # SIG # End signature block

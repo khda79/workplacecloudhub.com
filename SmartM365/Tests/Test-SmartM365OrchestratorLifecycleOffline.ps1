@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -46,6 +46,8 @@ $results = New-Object 'System.Collections.Generic.List[object]'
         $script:State = @{Jobs=@{Synthetic=@{Running=@{Pid=987654;StartTime=$start.ToString('o');ScheduledOccurrence=$start.ToString('o');LogPath='synthetic.log';Attempt=0;TimeoutMinutes=1;ClaimPath='synthetic-claim';ConcurrencyLeasePath='synthetic-lease.json';ConcurrencyLeaseId='synthetic-id'};PendingRetry=$null;LastStatus='Running';LastScheduledOccurrence=$start.ToString('o')}}}
         $script:ForcedPending = @()
         $script:StatePersistenceHealthy = $true
+        $script:MaintenanceHealthy = $true
+        $script:MaintenanceControl = [pscustomobject]@{Enabled=$false}
     }
     function script:Write-OrchestratorLog { param($Message,$Level) }
     function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) }
@@ -86,6 +88,10 @@ $results = New-Object 'System.Collections.Generic.List[object]'
         return @{Acquired=$true;LeasePath='synthetic-lease.json';Lease=@{LeaseId='synthetic-id'}}
     }
     function script:Test-JobSelected { param($JobName) return $true }
+    # Lifecycle tests isolate process supervision; maintenance admission has its own suite.
+    function script:Enter-SmartM365OrchestratorMaintenanceGate { param($SharedDataFolderPath) return [IO.MemoryStream]::new() }
+    function script:Get-SmartM365OrchestratorMaintenanceState { param($SharedDataFolderPath) return $script:MaintenanceControl }
+    function script:Test-SmartM365OrchestratorMaintenanceLaunch { param($State,$Origin,$Occurrence) return $true }
     function script:Test-JobAllowedOnServer { param($Job,[switch]$AllowManual) return $true }
     function script:Get-DueOccurrence { param($Job,$LastOccurrence,$Now) return $null }
     function script:Clear-DependencyWaitLog { param($JobName) }
@@ -295,8 +301,8 @@ if($failed.Count){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbawvBdnmVx3Zk
-# Wx3tTojXiVShWI2mWeacvxuJyL/UiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDq2UsxPO8zbZbq
+# BNQy5FsVC9h0/peOFBGvLwWhMdCttaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -429,31 +435,31 @@ if($failed.Count){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOgziI7268ITu6XWYSyDyy9iW7QnsErNCINYeX9ILTHEMA0GCSqG
-# SIb3DQEBAQUABIIBgCmL9iWp1gsUJcC1PRWpSrQRf3xiZTVxARuuH0zKZTQularw
-# /0wpdbAONNyt+Ec7U5fcjkYTDbhCRfUl6kyupHGtvJc3O8rAk+3LMwE4awYYrd9O
-# A1iSpinszDWa8oQC86PlOa6JraxaTEQHkdGlz4YzBGEaHiwvYzcqeSsgiDp+eq2E
-# 3t8DocbGv+p5G9kQp+/SqXCVOBab/4f4aMhku2mot1LrFnNFj4nQjGu0kNr8Gjad
-# BxvlnQTV7ILNVArTj6gVDEiSdjBciX6qd1aHaEIN+3l9nK9vAGyWAfRQ/PI0hdIr
-# g6+VftFSVf+cs7i8mTJQ1FM/Nu7LEk4L2GZHZogg6gU4CADRZfyghMFs7jbpR1Gb
-# VVDi1A+rNzYHFWCdk5vC+VYr+dPlOfWI+t6cZUzavfJ0PsiJI5HQZLVSjmWH4E/J
-# rnUrqNuSEobjiceBCx/wsDQZy+95E7rRB8jeV8Cs/aSB8QVxNANlmOsL/UO+d6V2
-# A9WiLjEaTHk4QNo4e6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG7ht0iafBMxwqdiQfhZKK9WBCSBRWFr8rKjvLIF20mYMA0GCSqG
+# SIb3DQEBAQUABIIBgHlQ5f6E8kGD3NV/EZC4LB69LQdlyahKIoJy/aNMi9DyzYvV
+# SoJc31xT9essvARy+WIln0b1NurhxTJge39OcfmE643lUdBkoVsQLg40PLjkqcy7
+# DYLMV2Ufg5QGquEo+2gW7OFgXbd0tv1ilqWo+cgQLyc/ESo3fBFT1tUp4IsG/kfV
+# 8ZrjSUwhpKslnq46HTEzsmHeaWiZ0NGIvLEwpLo6qA5wg8c6lwhLW07qbqzsIsCF
+# n0Sx8WZvRrEkWoIV4SFJ8HvSR8ZV5a/WRy5YxkLSDqzQF2cd9pL/OAMQVazjBoix
+# YZqb4Qf2h6lpgFDmyVVzl2B4sl2E9EKCG76Za66gK/nnLYSJTbZs1anoeiC/p5M8
+# cSIbQb8VUvF0CV0QS+TK8AaG6NtwyMBfmoCmhZaRWWi00TyHs4rs+vekd2+ck9aI
+# xBS7G4X0vYFudHjrQc7pcqjRx2yLC/76HgHRfn/JKRnNQXgpU6P7trdzQkCHc1dq
+# PQ/PYwa+xvPc8U/UvqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NThaMC8GCSqGSIb3DQEJBDEiBCA+oFmZQOXHnok7hJFm9YRtP72UnMI7wrqBIobX
-# ybp05zANBgkqhkiG9w0BAQEFAASCAgCD1jt/iPZTj6lOZmvIsJpGyl2VWvHQrfwb
-# C8N/Z1lamzzc6Mn7XLjlzfOSOgwD9OO6BDDupZl4pV4RjV+QxfHJs9B8sDUZCqjO
-# bq6u+YuDK/ywukx1Sm0eLkOOtu/KEgPS9CVGYapCH4K3LkCxS5b7O7q9hy7jGzZ/
-# knvowGnv8eiSf7+kIOW/VUNkULeThj5gK21RSfBllqxP1yM+ibuFmoSr+qN4yigQ
-# Y82urSgKKMPSLBwYyi2qwt11LHQDVSP6LcNcdzxqiBfGliboXhsOLd4DhOmo51sd
-# gEsjn6JVgmVGSC/ZTLwcd533usJfKgeDeQPofCbIe3vCrMN077IucGcuVvO278Rs
-# JIRrWnr1izcSTzK+fXIV6AU3sjKZ6LFr5w5U1s9gvAIetdXz0LUEmwEyefIu2CSI
-# tcPHITM016IWKd7gRT6kjcYgJfLL4Q8k0F/GLWGahGcqGNZCi1mMrLkCm1gjgA76
-# RxYh84ETBSTqLHN7+fKBIZhtLo5renHyCWViuCtvCoWS8Kw+xDqKt0aFHtzvJYcN
-# bIPRxjSKL53Rn/cMDU2ENpwS2b3gmiT+00QJiTXI9ti9FC/bXPNg7bclNjighPop
-# BvYuzdUbJY5ANkmkwCFC+5AlJbjbnQBzvrWbFXij3hHt4sFcpki9WS9dOMrYFxJZ
-# 4F1nEGgy4w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDOXtjwp9t5yelb84MnTlba6jAxtpiQgI5l7NWV
+# h/E5UDANBgkqhkiG9w0BAQEFAASCAgCM8UNg2j7k5HsNn0jc8w9gnbxV8Y3bWWUQ
+# SWGE7ExkwFpEdPjdJfFAmBQOiPV/7omGh5NjjK6+f9wf/hpLklMBTP9huNJsBKn8
+# 5jXHwHLMNXiUFlWI9QsyUQ7EWLOrP5ch416iCSuBBALSHpm+dHvSdC/EZi9/mg5O
+# ly9Jqrplv9+3u+TUCyxBwqER2xIrU5k25rv5yaoaoYvlBfcm2wLH32o05xx5PGJn
+# YGumtJR4mo027gZhStMWT16FqIhDKDrBH5kLsepDTy4lMiMDgAELBZbQMbW/3V3t
+# 4UM++H2JS4Njdd+Br7Z42t0IfsLWq9AJvrZQOiTTeFYsBcu6pc3Ci2Vzi2NmnzWO
+# TYVUtalJuhSuALctFWuYn1K5EBnH7G02DSYGrYlkBREryLWNLd4w13kTvYPnaB9t
+# ymHyurCz8Fg2S9neuWFPRFzMb4azfEDthhrvmLgttYpwlUBakQ1OFuF06B2/m8qO
+# agAm5VQU1uV9BuN/EeVSa+EIgrJhhROaNBokqkvGWIaC4uvxNc2ho38SqrMBmAKA
+# /BhM/snlUEeZWQCm93+EJcYLCc/VYZCaUo7OSUnIyRhtCZ3ZkMbzPclmUiG9yEfL
+# jkATTldBDplxnVe4lg1z9pyxpNDBt5CWIzKgbZuSEqmOFIsyVHDFjFsiOSdMzj67
+# vqBKtjH4qw==
 # SIG # End signature block

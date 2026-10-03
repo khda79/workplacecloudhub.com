@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.1.0
+1.2.0
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.1.0'
+$script:AppVersion = '1.2.0'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -138,7 +138,10 @@ $xaml = @'
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Text="Ready"/>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Text="Ready"/>
+                <TextBlock x:Name="MaintenanceBannerText" Foreground="#92400E" FontWeight="SemiBold" TextWrapping="Wrap" Text="Maintenance: checking shared control..."/>
+            </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <CheckBox x:Name="AutoRefreshCheck" Content="Auto-refresh (60 s)" VerticalAlignment="Center" Margin="4,0,10,0" IsChecked="True"/>
                 <Button x:Name="RefreshButton" Content="Refresh"/>
@@ -179,16 +182,27 @@ $xaml = @'
             <TabItem Header="Operations">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="150"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="210"/>
                     </Grid.RowDefinitions>
-                    <DataGrid x:Name="OperationsServersGrid">
+                    <StackPanel Margin="0,0,0,10">
+                        <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="MaintenanceReasonBox" Width="330" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
+                            <Button x:Name="EnableMaintenanceButton" Content="Enable maintenance" Background="#FFF4CE" IsEnabled="False"/>
+                            <Button x:Name="DisableMaintenanceButton" Content="Disable maintenance" IsEnabled="False"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <DataGrid x:Name="OperationsServersGrid" Grid.Row="1">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
                             <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
                             <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
                             <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
+                            <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="140"/>
                             <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="70"/>
                             <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
                             <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
@@ -196,7 +210,7 @@ $xaml = @'
                             <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
-                    <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid Grid.Row="2" Margin="0,10,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <GroupBox Header="Running jobs" Margin="0,0,6,0">
                             <DataGrid x:Name="OperationsRunningGrid">
@@ -220,7 +234,7 @@ $xaml = @'
                             </DataGrid>
                         </GroupBox>
                     </Grid>
-                    <Grid Grid.Row="2" Margin="0,10,0,0">
+                    <Grid Grid.Row="3" Margin="0,10,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
                             <DataGrid x:Name="OperationsIncidentsGrid">
@@ -496,13 +510,15 @@ function Get-OrchestratorGuiPropertyValue {
 $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
     foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
-        'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid')) {
+        'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'MaintenanceBannerText', 'MaintenanceDetailText',
+        'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $jobsTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template')
@@ -815,7 +831,9 @@ function Update-JobHealth {
 
 function Refresh-OperationsView {
     try {
-        $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster -MailFolderPath $script:MailFolderPath -MailHours 24
+        $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $script:SharedDataFolderPath 'Config/Orchestrator-Cluster.json')
+        $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $publishedCluster -MailFolderPath $script:MailFolderPath -MailHours 24
+        Refresh-MaintenanceView -Operations $operations
         $script:Controls.OperationsServersGrid.ItemsSource = @($operations.Servers)
         $script:Controls.OperationsRunningGrid.ItemsSource = @($operations.Running)
         $script:Controls.OperationsPendingGrid.ItemsSource = @($operations.Pending)
@@ -824,9 +842,56 @@ function Refresh-OperationsView {
         return $operations
     }
     catch {
+        Refresh-MaintenanceView
         Write-GuiException -Context 'Operations refresh failed' -ErrorRecord $_
         return $null
     }
+}
+
+function Refresh-MaintenanceView {
+    param($Operations = $null)
+    try {
+        if ($null -ne $Operations) {
+            if ($Operations.MaintenanceError) { throw $Operations.MaintenanceError }
+            $control = $Operations.Maintenance; $servers = @($Operations.MaintenanceServers)
+        } else {
+            $control = Get-SmartM365OrchestratorMaintenanceState $script:SharedDataFolderPath
+            # Published cluster only. Editing a draft cannot hide an unacknowledged server.
+            $cluster = Read-SmartM365OrchestratorJson -Path (Join-Path $script:SharedDataFolderPath 'Config/Orchestrator-Cluster.json')
+            $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $script:SharedDataFolderPath $cluster $control)
+        }
+        $applied = $servers.Count -gt 0 -and @($servers | Where-Object Status -ne 'Applied').Count -eq 0
+        $script:MaintenanceViewState = $control
+        $script:Controls.EnableMaintenanceButton.IsEnabled = (-not $control.Enabled -and $applied)
+        $script:Controls.DisableMaintenanceButton.IsEnabled = $control.Enabled
+        $stateText = if ($control.Enabled) { if ($applied) { 'ACTIVE' } else { 'ACTIVATION REQUESTED' } }
+            elseif ($applied) { 'INACTIVE' } else { 'ACKNOWLEDGEMENT PENDING' }
+        $script:Controls.MaintenanceBannerText.Text = "Maintenance: $stateText | revision $($control.Revision) | scheduled launches only; manual Pipeline requests remain available"
+        $running = ($servers | Measure-Object Running -Sum).Sum
+        $stamp = if ($control.ChangedAtUtc) { ([datetimeoffset]::Parse($control.ChangedAtUtc)).LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss') } else { 'not changed' }
+        $script:Controls.MaintenanceDetailText.Text = "Changed: $stamp | By: $($control.ChangedBy) | Reason: $($control.Reason) | Running jobs: $running`n" + (($servers | ForEach-Object { "$($_.Server): $($_.Status)" }) -join ' | ')
+    }
+    catch {
+        $script:MaintenanceViewState = $null
+        $script:Controls.EnableMaintenanceButton.IsEnabled = $false
+        $script:Controls.DisableMaintenanceButton.IsEnabled = $false
+        $script:Controls.MaintenanceBannerText.Text = 'Maintenance: CONTROL UNAVAILABLE - do not assume scheduling is paused or resumed'
+        $script:Controls.MaintenanceDetailText.Text = $_.Exception.Message
+    }
+}
+
+function Set-GuiMaintenance {
+    param([bool]$Enabled)
+    if ($null -eq $script:MaintenanceViewState) { throw 'Refresh the maintenance control before changing it.' }
+    $reason = $script:Controls.MaintenanceReasonBox.Text.Trim()
+    if (-not $reason -and $Enabled) { throw 'Enter a reason before enabling maintenance.' }
+    if (-not $reason) { $reason = 'Scheduled planning resumed from GUI' }
+    $action = if ($Enabled) { 'Enable' } else { 'Disable' }
+    $message = "$action shared maintenance for this tenant?`n`nRunning jobs remain supervised. Manual Pipeline requests keep their dependency and concurrency checks.`nResume skips suspended automatic occurrences and retries.`n`nReason: $reason`n`nConfiguration draft changes are NOT published."
+    if ([System.Windows.MessageBox]::Show($message, "$action maintenance", 'YesNo', 'Warning') -ne 'Yes') { return }
+    $result = Set-SmartM365OrchestratorMaintenance -SharedDataFolderPath $script:SharedDataFolderPath -Enabled $Enabled -ExpectedRevision $script:MaintenanceViewState.Revision -Reason $reason
+    Write-GuiActivity -Message ("Maintenance transition published: revision={0}; enabled={1}; reason={2}. Awaiting server acknowledgement." -f $result.Revision, $result.Enabled, $result.Reason)
+    [void](Refresh-OperationsView)
 }
 
 function Refresh-RequestsView {
@@ -1187,7 +1252,8 @@ foreach ($name in @(
     'ActivityBox', 'FooterText', 'VersionText',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
-    'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid'
+    'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'MaintenanceBannerText', 'MaintenanceDetailText',
+    'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }
@@ -1265,6 +1331,14 @@ $script:Controls.HistoryGrid.Add_MouseDoubleClick({
     [System.Windows.MessageBox]::Show("The log of this run is not reachable from this computer.`n`n$logText`n`nThe log stays on the server that ran the job ($($row.Server)) until it is copied to LOG-ALL.", 'Log not found', 'OK', 'Information') | Out-Null
 })
 $script:Controls.Failures24hButton.Add_Click({ try { Show-FailuresLast24Hours } catch { Write-GuiException -Context 'Failure filter failed' -ErrorRecord $_ } })
+$script:Controls.EnableMaintenanceButton.Add_Click({
+    try { Set-GuiMaintenance -Enabled $true }
+    catch { Write-GuiException -Context 'Enable maintenance failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+})
+$script:Controls.DisableMaintenanceButton.Add_Click({
+    try { Set-GuiMaintenance -Enabled $false }
+    catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+})
 $script:Controls.RequestRunButton.Add_Click({
     try { [void](Request-SelectedJobRun) }
     catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
@@ -1480,8 +1554,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/BI8b3IZfrU/7
-# GDAZQdGfr5tDUxAUqhjS+D2NvL+95aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoXqzEfA5rxPLI
+# aClYU48AOOtqQwqgYW+Nwh2SbxcQUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1614,31 +1688,31 @@ $window.Add_Closed({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGuARA4xBflSJDy/PFZXsEhDMOwvi/sEFBBq8heN2mwTMA0GCSqG
-# SIb3DQEBAQUABIIBgF1ovk/280qTNzeS+rp9KZJMb885B02mfNeLWSlE266C6Pwj
-# dtWup9Mg+XPfdya6/bVHaRxq2R/oQxKX27kCkrXuQDKHcFMNnCXoWK7GITp2SEaR
-# Xtt6/g9jXE3edWRmXZm9GBZHFGg4bTq8UKhQR7//Qbt8KsRPZ5hqf6QUKqyC04jK
-# SFEtbucVIbt0j0442po1zprp2gBM+puGa79Fmgoz4uhUH62RE76ZY9HXtcdiv1gK
-# 3RP51P2bk7Kmex7lzJf2ZO80RGE/UYpcTSN391atawNXyieW7WVVaDAeUQgegUYn
-# 0+hWY50Mvc+Fyjt65D+fnKvpS7644Ea6rQHLcoz++s3++sAD5lABkQqUZaKbGsNr
-# 8hpuYHXsLU7J5xRlFR3xPXpGKWCs10qUFGm60RnWAYgRyEoZ8/+f0bkv+yM2n86i
-# Fq+nLxz+YMoBSJJ+jLyHUNyYZhW5SDQbYgCoSqCiN76jVatze5rQZD7nPGi8n9Ni
-# Xs73WTqfebe1yLykZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKtC2THqj3XxPrRdKDKMmQR19kbXhs4YTIb6gItt4SbvMA0GCSqG
+# SIb3DQEBAQUABIIBgDz4ROHws9XG7tRYcDA7iM+8BLgqvonJ4HdIu31AiJR1vVEk
+# 6DNab5GtAeW+wPftEi93sCsJGgrp0h27c5MwLAGAnnSRM2uAtTW85qNn6OevGLuW
+# cVJKJWc1dBgJaG8+OjgQfYSpjisZcm/zaJl7m5YbgfJtLZBXnCw86vCpfluD/MSy
+# IVztELLcb9HpT/XcdcY3n/YcYOE0B20GLeC5F08WDjiUGO7DumTU3sSHPrf3kFzM
+# +x5pHB0qafeQmvDSurFQNDX8NtxnvQ5BTCxHN2wGweG3JCXqqR/hMrZ9Ud5WWMJw
+# nNw4Ex+MRXap+Nt0ku6VhbYu2O261P1i5kXgmXfbZ0e9awpw0yZiiw0TwU/LlW0a
+# 7kr1kumdTJqOI7FINSNwJJiJmExMHf7BMW+DvoDY9yYWHU1VPkVJu2An2GbTE++W
+# 0H/IdHzt7/yNAUd/6/K01y0YUIgc3sgBijF6klsa+8zGetz5Y3pPIoRigChsCBqr
+# IGJH/DKvZ74vwC5WpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMDEy
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCPNsuHie1Z1lZGi/kal7nqd6mHG8Y+q0sDnxmz
-# vRwXHTANBgkqhkiG9w0BAQEFAASCAgCgjUchrkwvuT4ITRA/mk/vRRcSEa3gEiLC
-# WsOjLJwX4IrOQ1N4moHG3rJnYDQzaUCLgYhu1owKPlM+P/xW2s3frP70d/jFFqAY
-# g/5r4qyNU2ITHmMbdno1twGlZ3OD3zDI3McoZoamOb/kJxzo1tPdOqsBPGWdCgRp
-# GlqMI1iNheMEPodXJHpm1sht2Mx2Z3O//RH9QZHvzfliUifuazgja8LNw/x4+Eho
-# we4kPwzqL9S2N6eZyuM34p5XzHLm3/wQB1cqEr4qdPAV3UsT9ZCMDahslJWWt/pM
-# 1Ily517s3/7QcIKwYcqcRNwG/eSZ3S637FxHUBYRb0QBhd5noTcX3Q72a9wQrdbS
-# F3ZpOBUwQUdh3kVdLFWNkwo4YBHaiM+IkcXRh3ruWJg0vw1eTt9iWRH96KuLrXVl
-# aEx7edGwS+io88zooY//tFoR7twc0siCTQ4YK0GA1KXVp/DIFe5vAu8/8r2xQYmA
-# BqexhUjdfoyTHZzqiGUHoKi/XXTVhODk14lsKH43dhZNN+cO5b4SyFL9zFAJJFB7
-# V9GveFYMNnSib02zyaIiT9t4k7eT1WNa9iKlEHGZxjgqrXMPaTIoEGiRWf+quOWZ
-# wNqcwiFv74/LAEMkfoORJ6R3sEk0vR7u+bB3w1K7DgihEMQbedDCSAdtA6yIRLzF
-# Fed4wwmqyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBE4vOngbGAwY7wmY21bJpF+lzAMorcCAGMz2Nd
+# /+0x6DANBgkqhkiG9w0BAQEFAASCAgBCdgG/dpOn28mCksAIVS/xRWJ5FQce+al7
+# PBgus+ZzHKQ2G5BmX9TrtRFKlTeD7lB4VfZyV3kdVT14zslgD09uT4FL1zuFBzmB
+# N5vjYdUf++TjqwdbLkuHkHOYgCU7mYDMDQ6Z2ikjJ6fwroIA6RBJHyTSReYQl52i
+# lAP7jTjJSkOGX8iJl+CJSX6rup+pSiY2HwvXFNMy1A0ZiNE690I+PtxmWgADYqgI
+# E61HJo1x5pHSFURXMb4qjTQNoQU1cN01Mq8OhgTl06BQa38uemUdi0pja1x9jCvm
+# 91Vhc3FjBtH6KALdnF+ShBZ7wmVpSe9b2Utit587Q2FV3Y22lA3IPX/HOXBGRX6j
+# f25ntQatBR74ooL2Gx89ppkgSg5tXLOxprJdSeIWIOUxYobFFkH/50bEupCPSrrP
+# 1LceGfrKkE2r/IFmDkRbGd502JKDnat1CC4SIEyqBFojh8DvYoGf2+ScSatVtkO5
+# iHyM9cv7dKGEzz7wJPLkpMjftLYZB36gW8sjwp+aMCJoPknA2z+jNhiEDKcRi1RM
+# p8vlbq3gHsiuJsHa8dq2y+QIhj1zPo/m3icjM6xzyiwo5uTkiQUbRwO/mMot/NWH
+# 4IYX4fSaPCPFr525UYJYEGphkpGfINJz5kU/7xLz40Zo4R62EcYP+eQRadi8GF9X
+# PT5jTiUK/Q==
 # SIG # End signature block
