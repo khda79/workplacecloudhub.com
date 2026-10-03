@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.12
+    1.0.14
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.12'
+$script:AppVersion = '1.0.14'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
@@ -731,6 +731,18 @@ function Open-InExplorer {
           </Border>
           <Border Style="{StaticResource StepCard}">
             <StackPanel>
+              <TextBlock Text="TRANSIENT 401 BATCHES" Style="{StaticResource SectionLabel}"/>
+              <TextBlock x:Name="lblTransientStatus" Text="No batch result found." TextWrapping="Wrap" FontSize="12"/>
+              <TextBlock x:Name="lblTransientCounts" Text="A reviewed ShareGate batch run will appear here." TextWrapping="Wrap" FontSize="12" Foreground="#5F6B7A" Margin="0,5,0,0"/>
+              <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                <Button x:Name="btnTransientRefresh" Content="Refresh batch results" Style="{StaticResource BtnGhost}" Width="128"/>
+                <Button x:Name="btnTransientOpen" Content="Open results CSV" Style="{StaticResource BtnGhost}" Width="112" Margin="6,0,0,0" IsEnabled="False"/>
+                <Button x:Name="btnTransientOutOfBatch" Content="Open hors lot CSV" Style="{StaticResource BtnGhost}" Width="120" Margin="6,0,0,0" IsEnabled="False"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StepCard}">
+            <StackPanel>
               <TextBlock Text="SOURCE FARM DIAGNOSTICS" Style="{StaticResource SectionLabel}"/>
               <TextBlock x:Name="lblFarmResult" Text="No farm diagnostic result found." TextWrapping="Wrap" FontSize="12"/>
               <TextBlock x:Name="lblFarmPeaks" Text="Analyze ShareGate reports to prepare farm windows." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,5,0,0"/>
@@ -1054,6 +1066,11 @@ $txtDiagRaw = ctrl 'txtDiagRaw'
 $cmbDiagState = ctrl 'cmbDiagState'
 $btnDiagSaveState = ctrl 'btnDiagSaveState'
 $btnDiagHelp = ctrl 'btnDiagHelp'
+$lblTransientStatus = ctrl 'lblTransientStatus'
+$lblTransientCounts = ctrl 'lblTransientCounts'
+$btnTransientRefresh = ctrl 'btnTransientRefresh'
+$btnTransientOpen = ctrl 'btnTransientOpen'
+$btnTransientOutOfBatch = ctrl 'btnTransientOutOfBatch'
 $lblFarmResult = ctrl 'lblFarmResult'
 $lblFarmPeaks = ctrl 'lblFarmPeaks'
 $btnFarmRefresh = ctrl 'btnFarmRefresh'
@@ -1104,6 +1121,8 @@ $script:DiagOutputDirectory = ''
 $script:DiagActivity = ''
 $script:DiagProjectRoot = ''
 $script:FarmReportPath = ''
+$script:TransientResultsPath = ''
+$script:TransientOutOfBatchPath = ''
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -1606,6 +1625,7 @@ function Refresh-GuiState {
             throw 'Migration folder is unavailable.'
         }
         Load-Migrations
+        Refresh-TransientResults
         Refresh-ActivityList
         $lblLastRefresh.Text = 'Updated ' + (Get-Date -Format 'HH:mm:ss')
         $lblLastRefresh.ToolTip = 'Shared activity and migration state refreshed.'
@@ -1650,6 +1670,7 @@ function Set-CurrentMigration {
         $cmbDiagSession.SelectedIndex = 0
     }
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
+    Refresh-TransientResults
     Refresh-FarmDiagnostics
     Update-UI
     if (-not $sameConfig -or -not $script:ConfigEditorDirty) {
@@ -1916,6 +1937,51 @@ function Refresh-DiagnosticRows {
     $txtDiagRaw.Text = ''
 }
 
+function Refresh-TransientResults {
+    $script:TransientResultsPath = ''
+    $script:TransientOutOfBatchPath = ''
+    $btnTransientOpen.IsEnabled = $false
+    $btnTransientOutOfBatch.IsEnabled = $false
+    $lblTransientStatus.Text = 'No batch result found for this migration.'
+    $lblTransientCounts.Text = 'A reviewed ShareGate batch run will appear here.'
+    if (-not $script:CurrentMigration) { return }
+    $diagnostics = Join-Path $script:CurrentMigration.Root 'ShareGate\Diagnostics'
+    if (-not (Test-Path -LiteralPath $diagnostics -PathType Container)) { return }
+    $runs = @(Get-ChildItem -LiteralPath $diagnostics -Directory -Filter 'Transient-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    foreach ($run in $runs) {
+        $summaryPath = Join-Path $run.FullName 'Transient-Summary.json.txt'
+        if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { continue }
+        try {
+            $summary = Get-Content -LiteralPath $summaryPath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable
+            if ($summary.SchemaVersion -ne 1) { continue }
+            $total = [int]$summary.Success + [int]$summary.Skipped + [int]$summary.Error +
+                [int]$summary.Warning + [int]$summary.Mixed + [int]$summary.Unreported + [int]$summary.NotAttempted
+            if ($total -ne [int]$summary.PlannedItems) { throw 'Batch result counters do not equal PlannedItems.' }
+            $lblTransientStatus.Text = "Latest run: $($summary.RunStatus) | session $($summary.SessionId) | $($summary.CompletedBatches)/$($summary.BatchCount) batches | $($summary.GeneratedAtUtc) UTC"
+            $lblTransientCounts.Text = "Planned: $($summary.PlannedItems) | Success: $($summary.Success) | Skipped: $($summary.Skipped) | Error: $($summary.Error) | Warning: $($summary.Warning) | Mixed: $($summary.Mixed) | Unreported: $($summary.Unreported) | Not attempted: $($summary.NotAttempted) | Hors lot - à traiter à part: $($summary.OutOfBatchLines) ($($summary.OutOfBatchSiteLines) Site, $($summary.OutOfBatchFileLines) File) | Home pages separate: $($summary.SeparatePageItems)"
+            $resultsPath = Join-Path $run.FullName 'Transient-Results.csv'
+            if ($resultsPath -and (Test-Path -LiteralPath $resultsPath -PathType Leaf)) {
+                $resolved = (Resolve-Path -LiteralPath $resultsPath).ProviderPath
+                if ($resolved.StartsWith($run.FullName.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    $script:TransientResultsPath = $resolved
+                    $btnTransientOpen.IsEnabled = $true
+                }
+            }
+            $horsLotPath = Join-Path $run.FullName 'Transient-HorsLot.csv'
+            if (Test-Path -LiteralPath $horsLotPath -PathType Leaf) {
+                $script:TransientOutOfBatchPath = $horsLotPath
+                $btnTransientOutOfBatch.IsEnabled = $true
+            }
+            return
+        }
+        catch {
+            $lblTransientStatus.Text = "Batch summary cannot be read: $summaryPath"
+            $lblTransientCounts.Text = $_.Exception.Message
+            return
+        }
+    }
+}
+
 function Refresh-FarmDiagnostics {
     $script:FarmReportPath = ''
     $btnFarmOpenReport.IsEnabled = $false
@@ -2047,6 +2113,9 @@ $btnDiagBrowseFile.Add_Click({
     if ($dialog.ShowDialog($script:Window)) { $txtDiagInput.Text = $dialog.FileName }
 })
 $btnFarmRefresh.Add_Click({ Refresh-FarmDiagnostics })
+$btnTransientRefresh.Add_Click({ Refresh-TransientResults })
+$btnTransientOpen.Add_Click({ if ($script:TransientResultsPath) { Open-InExplorer $script:TransientResultsPath } })
+$btnTransientOutOfBatch.Add_Click({ if ($script:TransientOutOfBatchPath) { Open-InExplorer $script:TransientOutOfBatchPath } })
 $btnFarmOpenReport.Add_Click({ if ($script:FarmReportPath) { Open-InExplorer $script:FarmReportPath } })
 $btnDiagBrowseFolder.Add_Click({
     Add-Type -AssemblyName System.Windows.Forms
@@ -2202,8 +2271,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzKVxpfI/6soZ+
-# HjH8C6sM8jpG24zSF/iXITxX3xGGbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCevy8RdMwcl9i
+# ZFYa0yFqGCdKK0kThF2LufcE5BfhgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2336,31 +2405,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEms0sqldIHDcyMO2luXW4K6Lyp3aSU0fGCwx5Njzmw/MA0GCSqG
-# SIb3DQEBAQUABIIBgBN32PohW3u5XE73+esdL3QtUHYAyzOl1xUrEGauwed4b5ur
-# 8xf04LDJ9+wTlsa6Z2Eoasnt/PdjcAqlS5/AY4KWKXcaZS0eNSTaVOHcrj3C3AIG
-# Ybit3TYy2Tqm3lsHrINe1etI7GH8a2ZMIQm6g5q98RABMQyMZ3jsfcxuDgSQIEi+
-# 5KmogItuwUEtF2M16UgldVk6CFvdvK7X4v2dEarLdRXVL6D1KHp+A7gNUOjUfefa
-# RxudcvGe6jBS1F7lZurJSItROyWOoEpYxWp+73EoF0AcmWVvFG6kL3n/8wx+R2XC
-# LQAIG4iyuLTPeuOtGrngDUi3eWcHtNMU+MCXBkEi0mddd0iMggJKZTaXt+3zl182
-# mXlxX5qZtnFfZSijc46c9K++nGl8YmtEBVN9eG77Wkx4n19uA3ffBGyYDpHaqgJ1
-# Ej1TmKn7QMusP/6jAL7CSK+x/JxZoaM80zG4FOALE15EaAVR6mMYTSNQRgJXIuV0
-# uOoEWnqR1Q/sRt3XeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHnfQM3yQO5kO+3Ww2RqxwnGBs8fRz93QF7N9ZfDkN2cMA0GCSqG
+# SIb3DQEBAQUABIIBgJMfcTbMMxpzq50UdcaUtmH0rR+3TXQUhvhhUxRAnFwBauvA
+# 4NHAb46AWUnnHXH3eTGHzDMGEUvaV1LsftORoSAletRDtfug97pOElSAA9O2nb+J
+# vtljpLt2uIc4NLW10iU5ttDe84obNELP8WyOX9RO/+OyNCRr5THBu32em+0y81kf
+# nLFk7J4rji5a/sw7uUfn3TL5e6XywWX2c8GsAPnS0M36S5eLJtmTqUv50mwo9osV
+# c+I2Jalmmy5jaqgcdYfB7yXi5i50q5TJ/I6ViZIn2AvO47zyq9m9t2dH041KeCaP
+# WNE3p8cj9hHuQ1mxnpFttjIivg4YlC6SlaKr54EBJ8TfK49Ssfjd0yP1o2c4n149
+# i5ksdFtXFKoaA1E9z1+YG/ycAD/8/jQerYhC/swM66+5blYkF/pFuLKRbnXe0j97
+# tLXM4hxoGalA9JprmaurBh79laa/NBT+FyGALCWl0nh5d7dLYtCQpZpCptypVQwx
+# 9Owz/82ARNqKtsRGwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMjA4
-# NDhaMC8GCSqGSIb3DQEJBDEiBCDeQQPeh0EpS3/TcIC64SU/qXhlxG3R+VXucG0P
-# gOPyrTANBgkqhkiG9w0BAQEFAASCAgA84MhxaNIz+A6JbuIOI1ldJLNiV1GGvuMx
-# bu5DDZXqvb3w2Bp1Yf9JNuk9uy4hj736UTdTTBUN4RPXLgWwV9z8/bjGlEIWR9Ch
-# Q5rQ/QAa5WaBTfxQb+aavwx1zWBQ5jrPK6B1WgwHuJQO1PLUG07W7yW5YTMeNnXW
-# 6/weVkQelmgad8R4Vueds41YP2fDCJAFWQZQWOt7hCSQ5YdJa1CEjFOKYjiYxYYQ
-# tw84Ix3RzTWubkOzw6l9aAqJZJFt5nTj9nw5UmVWma7e9PiixRsgvsqPmsK7Ihbu
-# gIXWwNIl5vOMpIqvBC17Pp1hc8ZWPRkCyDd0f+o1OPmOOpiTgMn8pv2hqY5ldTuy
-# oGictlDbZ+8fknV04z6Owdhb1TvbDVSe6XXymEK/hhP+p/+W9pquUtPRRh9Rx4J8
-# uGqAPEdmwkRB31grdG2htQg3+aXQOrPjpA+t9vGFzDy9YzjTKw7Zk/eFZWv/kKUv
-# cpieVOanQBGbsrZ7TYZPfDUI5UkXlUF3qT7xiNdI7LXm+iWLcHo2YIAnWHqVZtoH
-# u0H/b+OPkJ0JZCqfewRCX5dpfWjvE7N3zgVl4Eu+kk8Qn1mF76L/Haell6AqUhGD
-# OTPfktB9F15z4br4vlK28XmrnOVzRkfzcy2SXkl89vAIw/G9IcjdFhOfQF51UlNo
-# 4MuwFNqtmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMw
+# MzRaMC8GCSqGSIb3DQEJBDEiBCDycg+5TxcVSsWuJK4LW75JJfAWQNO2r/cRBOEp
+# YKGaNTANBgkqhkiG9w0BAQEFAASCAgCtLc00hF0tSPR82PdEr47r0UNsTz+mDDLN
+# f5Zlb53zmVGIzHtGOXhwNv68ahuFlkxPlclmGtgSyX7b7VZhaYns1ZHb6oISSGKh
+# V+LbVAuy6EJ8jiFKSRbqd8ojiDJtYhebxIkWcEEow4djcXcbo2VtKdcO84mYbSKJ
+# rczkNwH577vJMxrKCM+OPXXO/Kdcfpe3dPB7h+FJfoQjMraD9j7pBkOElxY7KfNC
+# xirbe/OnXXMlbr7IMx924HPjSjCWmn9bBNh6IEBB03ZZpbSFGQqXGv5d2irH/+QW
+# vK406g/fpeUQcTxcFfeLEX1Ed2M5WcrS5emuTOdfWLwrIh0IwVk6OccLJKVJnBwM
+# mb7Zkt9wqVr4Fkcj4v96umDzBxY78CkS9uSmlQg47IPQB5HNJ2sLL4A8gBTYCO/M
+# kMm9TWwLyE8V/h9/Y6rHCVyFOBrvKTxlVmZ09Br0JhAlDGHikuTCsdEuFTBBtVDj
+# txbXEBAVdOfTu0I4Stb7RwoDczD+o087nOnq/3BVdQciQUCZk5d5UXSSstuVS/35
+# STYcxRSBvUGfJfKShAM15X0l796c/RsPNEelrFpj1L+wJIuGyYPjK/yZP0QcQI8X
+# BgyBk/q2VujJ0J8hfZC7aO1kIHGq69Hja9jE12RmEJcI/0TbrCto3ey+RXM8GY62
+# ps3Q5PR3tg==
 # SIG # End signature block

@@ -572,6 +572,48 @@ before 23:45.
 The migration owner must review the DryRun selection and explicitly approve
 real execution separately. No bulk 401 remediation is part of this pilot.
 
+## Pilot review and prepared transient batches
+
+`SmartM365-SharePointMigration-ShareGatePilotReview.ps1` reads an existing
+five-item pilot. Its default `-DryRun` reads local evidence only. `-Run` uses
+ShareGate read cmdlets to look up the destination item and, for a skipped
+item, the source and destination Modified dates. It does not copy content.
+The CSV labels each SPO item URL as verified, inferred, or unavailable; an
+inferred URL must be checked in SPO. The original ShareGate export may leave
+`Destination path` blank, in which case the review tries the source-relative
+path in the destination list. The skipped-item date explanation is reported
+only when both dates and destination item existence can be established.
+
+`SmartM365-SharePointMigration-ShareGateTransientBatch.ps1` prepares an
+item-scoped follow-up after a reviewed pilot. Default `-DryRun` prints each
+source-list batch, selected source IDs, the evidence SHA256 values, the plan
+SHA256, and an exact versioned confirmation phrase. It identifies elements
+by site, list, and source ID. It excludes the five pilot item keys and
+separately identifies any other `Home.aspx` in a site-pages list. The
+DryRun displays that page's title, type, source site URL, relative path,
+and destination site URL before excluding it for separate review. The
+seven source access lines without an item ID (six Site and one File in
+the reviewed session) are retained in `Transient-HorsLot.csv` with the
+status `Hors lot - à traiter à part`; their counts appear in the console
+and GUI summary. Batch size defaults to 50. A real run requires `-Run
+-ConfirmBatch`, both expected item counts, all four reviewed hashes, and the
+exact interactive phrase. It uses the current Windows identity for the
+source, `Connect-Site -Browser` for SPO, and only `Copy-Content
+-SourceItemId <IDs>` with `IncrementalUpdate` and a distinct task name per
+batch. The DryRun estimates duration from the four successful pilot copy
+timings. A real run refuses to start when its projected finish plus
+`-MaintenanceMarginMinutes` (60 by default) reaches the next 23:45 farm
+maintenance window. It repeats the estimate before each batch, checks the
+active 23:45-00:15 window before each batch and copy, uses an exclusive
+session lock, and stops after a batch
+exceeds `-MaxErrorsPerBatch` (default 0). Each batch report and the atomic
+global results CSV/summary stay under private `ShareGate/Diagnostics`.
+The GUI Diagnostics tab reads the latest summary and shows Success, Skipped,
+Error, Warning, Mixed, Unreported, NotAttempted, and hors-lot counts. A started batch
+with no usable export is marked Unreported for manual review.
+
+A successful offline test or DryRun does not authorize a real copy run.
+
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
 `TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
@@ -600,6 +642,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-LauncherHosts.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePrecheck.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGateWitness.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePilot.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SharePointTransientOffline.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
 ```
 
