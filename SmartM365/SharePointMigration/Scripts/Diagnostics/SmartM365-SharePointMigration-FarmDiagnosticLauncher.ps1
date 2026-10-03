@@ -5,7 +5,7 @@
     Lists migration projects when -Project is omitted, then finds the selected
     project's latest ShareGate five-minute access CSV. DryRun is the default.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -48,7 +48,7 @@ function Get-FarmLauncherProjectInfo {
         Name = $Directory.Name
         CsvPath = ''
         PeakCount = 0
-        Status = 'CSV absent'
+        Status = 'CSV missing'
         Usable = $false
     }
     if (-not (Test-Path -LiteralPath $diagnostics -PathType Container)) { return $info }
@@ -59,11 +59,12 @@ function Get-FarmLauncherProjectInfo {
         if (-not $latest) { return $info }
         $info.CsvPath = $latest.FullName
         $info.PeakCount = Get-FarmLauncherPeakCount -Path $latest.FullName
-        $info.Status = 'CSV {0} UTC ({1} fenetres)' -f $latest.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm:ss'),$info.PeakCount
+        $windowLabel = if ($info.PeakCount -eq 1) { 'window' } else { 'windows' }
+        $info.Status = 'CSV {0} UTC ({1} {2})' -f $latest.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm:ss'),$info.PeakCount,$windowLabel
         $info.Usable = $true
     }
     catch {
-        $info.Status = 'CSV invalide ou inaccessible'
+        $info.Status = 'CSV invalid or inaccessible'
     }
     return $info
 }
@@ -96,17 +97,17 @@ try {
         $selected = $selected[0]
     }
     else {
-        Write-FarmLauncherInfo 'Projets de migration disponibles :'
+        Write-FarmLauncherInfo 'Available migration projects:'
         for ($index = 0; $index -lt $projects.Count; $index++) {
             Write-FarmLauncherInfo ('{0,2}. {1} | {2}' -f ($index + 1),$projects[$index].Name,$projects[$index].Status)
         }
-        Write-FarmLauncherInfo ' 0. Annuler'
+        Write-FarmLauncherInfo ' 0. Cancel'
         for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $answer = Read-Host ('[{0}] Choisissez le numero du projet' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+            $answer = Read-Host ('[{0}] Select a project number' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
             $number = -1
             if ([int]::TryParse([string]$answer,[ref]$number)) {
                 if ($number -eq 0) {
-                    Write-FarmLauncherInfo 'Selection annulee. Aucun diagnostic lance.'
+                    Write-FarmLauncherInfo 'Selection cancelled. No diagnostic started.'
                     return
                 }
                 if ($number -ge 1 -and $number -le $projects.Count) {
@@ -114,7 +115,7 @@ try {
                     break
                 }
             }
-            Write-FarmLauncherInfo "Choix invalide ($attempt/3)."
+            Write-FarmLauncherInfo "Invalid selection ($attempt/3)."
         }
         if (-not $selected) { throw 'No valid project number was selected.' }
         $Project = $selected.Name
@@ -140,7 +141,8 @@ try {
     Write-FarmLauncherInfo "Host: Windows PowerShell $($PSVersionTable.PSVersion)"
     Write-FarmLauncherInfo "Project: $Project"
     Write-FarmLauncherInfo "Toolkit root: $root"
-    Write-FarmLauncherInfo "ShareGate peaks: $peaksPath ($peakCount UTC windows)"
+    $peakWindowLabel = if ($peakCount -eq 1) { 'window' } else { 'windows' }
+    Write-FarmLauncherInfo "ShareGate peaks: $peaksPath ($peakCount UTC $peakWindowLabel)"
     Write-FarmLauncherInfo "Mode: $mode; margin: $WindowMinutes minutes"
     if ($PreviewOnly) {
         Write-FarmLauncherInfo 'PreviewOnly completed; no farm command was run.'
@@ -164,8 +166,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDte3lLLDQKqnFA
-# Y9qS/q1c4Gdvwa5bVC6gfHSN3+VmhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZP3QxAuIhisIu
+# yQqRFWCviRlfvNn6xb7cNVrl0L1j7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -298,31 +300,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFqBh9YUxYltJ9Zjugg0bogdO+sTRJc5aQKSjbcNYByIMA0GCSqG
-# SIb3DQEBAQUABIIBgBF52i5P1siBSYoyKaWMSu0HDOHzb+EEQyP1hEeSaX18QmKc
-# 8Y3FH4VCpmO1mljCuSeTVvyuwa4KaXSI54mteH7qq+3WW0syWDWanu/J68G50kRv
-# QD0Ws/S04H21vdEBr8q6WDQSsAxKjRsk1shtMhgO62GZZt7/BRoz7Ke9cfixTnOf
-# FlA9D10lahY3QrCnyGIJHklXReedxT/cZzb4jungCqm2mhHQfkdiEbHEAeOfgtsK
-# py4+XPk2WUtXHLpzfV29CK8BgNG1xw+WjSLlibthXebeT30y3I8FuKce8J0tvNlx
-# aSUjrXJGiHu10y7Q3n3endeTnioFioqyDsIQXoeMSxvWeq0YpzmHRsIZaFwauRbZ
-# pi6JTZfG/bI9Lr+cRk9CJrRNwkx+NxMKaFICNXuQUfDGZIYi/MUkkVLBKp8fhCDO
-# AQb44aul7c92t5j0ePexD9vsFr5e4v1aAqbPTKIM6Ixy0IF82v0XjZ+vXhAronLD
-# hBrvDSBqH797Snqs8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIcsXC5hahTl8mhlECmYU6JwXdlOs+PQqIXau6Ivd3AoMA0GCSqG
+# SIb3DQEBAQUABIIBgHk8RrMz/R55GDQyJqNlqudFIdAEWn2SpeGg/+lVcAg42WPJ
+# ATq2j/OXl+MxBTpYZO2Z1Nx91VjJW0jSXFeJfHmVieMMVa8Hm6vIwdi+pYZHtyjK
+# VfN6NcCXq5KuXJg+U9Kdmr7usI5kYBfkEDnA/q7ilLWYaMwnVyLe06+iuSi0YOQt
+# wVay4ltjqMHjK0eG1bSVEJrfSRwvS0mIpX+MAHydwibbMrMLngxyCf8tvfpDjhlP
+# Sv7U2tc2GzW8e471GTAJEFAl/B6uAD0Tm9hbe9h/LOjbl+Ul0p1oPTNFUt4qVYmJ
+# 589wVn9NzbKk5szmefk2Dhxj08O5SLbcPAPOE2egPbS55csv8PpKq8FjX17T4UYN
+# 2o+ffolVpY8KMATgak7F+kNUDRzoA5lenOiRsPkeS7+Hmj/Bs6Jx92Cx9Zo3zEfq
+# dysuZuuXwoB9e9APNV0HMKx6NXv5SoyqHWcnMmRE3z+L9caM2J+UpXGDHRhluxau
+# ea/TF201QIfPT7xdtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzAy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCdXmalK+/gNsE6nKAawzlFeBECZYNKg8kAKBnl
-# VblBljANBgkqhkiG9w0BAQEFAASCAgBdgGKGsiNTXYNV0ZRE2NdDIgl/NcK2W/+W
-# VijvXBg+gYxgmrCpZP1DdF7N+S7xICc9Wa5vS9MJy85blxAUWKTtktp7hGeT4tLA
-# RtJA3jEaihcCItVlWS+YZ1SUFgnWmHsg0Z3XItFW/oymxlTnsdJrU0z7CxyvcjE1
-# ZRizfIsmUFSPIFXoAD7oAj6i0kHzZK6P2D0KTQd1+F3aHhmlId5E745mvzx7a+17
-# 4XlTk4iNOBEwRFPkyosYUxjj09OceXQqGOTYxd1fsbsg+i/ajxjOVLSir6ZaQp5r
-# dc5yIR+hkg1YheUGPru61jOxPVbpFapNxVwEbwItp5wHPSjkHTpLXcI+vKc+ENFN
-# dwQF6IuX3a3T6+qH9oZ52rJp4iTbeJ+Tqac2ccWIGx415uKccVs6aWekO4CFzWNe
-# rZvyWdIbbQOdn+V05QqUAygg/7yRhKcecGysk9EXdZYPh2HHu8tvEgI8Iw397XYB
-# lDvAAmDxQTCFX65Iwn6FHO2jnD3ChV1DwYnGFVfJzlu+kh/jn/QooCckXFNwdGjN
-# nl7SEfYBGxzPWvsLTi/r4KDfs0CBBhPxgqjGlvbwH2fp7WOrDGSE2jKkxoL7Dfth
-# e6ZcDfX+YNRv9D8A//FhH/A07DpsVOXYTQpX5TDMt0JwWgiT9JENknrbhMqqxBHW
-# olYelXTlPg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzA4
+# MjhaMC8GCSqGSIb3DQEJBDEiBCC61wz9mvm+BY/b9fLHPpEa6ckdBtDwTuNY4hJr
+# h9mDdjANBgkqhkiG9w0BAQEFAASCAgAxTqebbE3A5QA+kVnOVitp9HMy2W4Jt4zb
+# offzcSaUJnwweqlg/eseDiVJZeFT1agYrZIobZ1UwNgEt3okT7Ds9J9Oqu1J4YmA
+# Ioy4a2Cwsp+te87KaiHAd4JY5gwQ2tP87B75rkJEJ0SoOPF1mx0lIgR1FavYbJPn
+# O1K0wDk22E93UpHhKHL88zFuGtZc2gydo2ynFU/MXTey9Tasasic3TU46IVb5rZk
+# sc3DLgeYHYCwbTm9x4fgpRrldqV8melV9sTN/WnwHEA2BEciABt6asoLVlSmK7n1
+# ikJXrjlLKNAzYMpXzdcfwEAw5dYmCuKCft1Dadx4SW4cJrP7FUxVNIo4bgeouYho
+# ZsxR8Hv5rCLrziisots9M90BsyFMjl179ZH/blcpBkHWxzKzc9nA1AwmcU7GT2xR
+# LIrPQJP1CAWvY/svQUPibOza6l/JGs9gPc+d1qq0X2kWxLt6FMcBKyLF2F5t2WmG
+# gvKNgw/1LE8EF1rz+0zr2AAE7kcUlSZc9O9NKOAhOD0U+mM1QJpqZkXniXA4DZTn
+# A8ZWNO/FIFbj2m9iK7a8hjb01yn4SW1jGDC0FLkOEt30wiTgCBi9391gXf2I2zhn
+# ysGeCS1M1sd16WxqAr497bhcudpPIkSVfrgWcptTwFo1G8L3J0Xi5IXOpHFzSdyt
+# /cfk+JwOeQ==
 # SIG # End signature block

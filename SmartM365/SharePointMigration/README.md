@@ -373,7 +373,7 @@ On a farm server, open an elevated console at the toolkit's shared UNC folder.
 The regular CMD launcher performs DryRun; the `-Run.cmd` launcher performs real
 read-only collection. Both start only Windows PowerShell 5.1. Pass the migration
 folder name with `-Project` for unattended use, or omit it to see a numbered
-project list. The list shows the latest CSV date or "CSV absent"; choose a
+project list. The list shows the latest CSV date or "CSV missing"; choose a
 number or `0` to cancel. No project is selected by default, and a project
 without a usable CSV cannot run. The launcher selects the newest
 `AccessFailures-5min.csv` under that project's `ShareGate/Diagnostics` and

@@ -25,8 +25,9 @@ try {
     $logs = Join-Path $root 'Migrations\logs'
     $reports = Join-Path $root 'Migrations\reports'
     $template = Join-Path $root 'Migrations\_Template\ShareGate\Diagnostics\Analysis'
+    $invalidCsv = Join-Path $root 'Migrations\Z-Invalid\ShareGate\Diagnostics\Analysis'
     $scripts = Join-Path $root 'Scripts\Diagnostics'
-    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$logs,$reports,$template,$scripts -Force)
+    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$logs,$reports,$template,$invalidCsv,$scripts -Force)
     $oldCsv = Join-Path $older 'AccessFailures-5min.csv'
     $newCsv = Join-Path $newer 'AccessFailures-5min.csv'
     $newline = [Environment]::NewLine
@@ -34,6 +35,7 @@ try {
     ('WindowUtc,Lines' + $newline + '2026-10-02 22:00 UTC,9' + $newline + '2026-10-02 22:05 UTC,4') | Set-Content -LiteralPath $newCsv -Encoding UTF8
     ('WindowUtc,Lines' + $newline + '2026-10-02 21:00 UTC,2') | Set-Content -LiteralPath (Join-Path $alpha 'AccessFailures-5min.csv') -Encoding UTF8
     ('WindowUtc,Lines' + $newline + '2026-10-02 23:00 UTC,3') | Set-Content -LiteralPath (Join-Path $template 'AccessFailures-5min.csv') -Encoding UTF8
+    ('WindowUtc,Lines' + $newline + 'invalid,1') | Set-Content -LiteralPath (Join-Path $invalidCsv 'AccessFailures-5min.csv') -Encoding UTF8
     (Get-Item -LiteralPath $oldCsv).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-2)
     (Get-Item -LiteralPath $newCsv).LastWriteTimeUtc = [datetime]::UtcNow
     $fake = Join-Path $scripts 'SmartM365-SharePointMigration-FarmDiagnostic.ps1'
@@ -57,15 +59,17 @@ $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$
     if ($LASTEXITCODE -ne 0 -or -not $menuText.Contains('Project: Synthetic')) {
         throw "Prompted project selection failed: $($prompted -join ' ')"
     }
-    if ($menuText -notmatch '1\. Alpha' -or $menuText -notmatch '2\. Missing \| CSV absent' -or $menuText -notmatch '3\. Synthetic' -or $menuText -match '_Template' -or $menuText -match '\d+\.\s+(logs|reports)\s+\|') {
+    if ($menuText -notmatch 'Available migration projects:' -or $menuText -notmatch '1\. Alpha \| CSV .* \(1 window\)' -or $menuText -notmatch '2\. Missing \| CSV missing' -or $menuText -notmatch '3\. Synthetic' -or $menuText -notmatch '4\. Z-Invalid \| CSV invalid or inaccessible' -or $menuText -notmatch '0\. Cancel' -or $menuText -match '_Template' -or $menuText -match '\d+\.\s+(logs|reports)\s+\|') {
         throw 'The project menu was not ordered, annotated or filtered correctly.'
     }
+    $launcherSource = [IO.File]::ReadAllText((Join-Path $toolkit 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnosticLauncher.ps1'))
+    if (-not $launcherSource.Contains('Select a project number')) { throw 'The interactive prompt is not in English.' }
     $cancelled = @('0' | & $runLauncher -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -ne 0 -or -not ($cancelled -join ' ').Contains('Selection annulee') -or (Test-Path -LiteralPath $marker)) {
+    if ($LASTEXITCODE -ne 0 -or -not ($cancelled -join ' ').Contains('Selection cancelled') -or (Test-Path -LiteralPath $marker)) {
         throw 'Cancellation did not stop the Run launcher before collection.'
     }
     $unavailable = @('2' | & $runLauncher -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -eq 0 -or -not ($unavailable -join ' ').Contains('CSV absent') -or (Test-Path -LiteralPath $marker)) {
+    if ($LASTEXITCODE -eq 0 -or -not ($unavailable -join ' ').Contains('CSV missing') -or (Test-Path -LiteralPath $marker)) {
         throw 'A project without ShareGate CSV was accepted.'
     }
     $invalid = @(@('99','99','99') | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
@@ -94,8 +98,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7kcPfpJLOt2Bx
-# v0amaMy96IT4RB9+dvpl48f7Gxs8zKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwsQ7oxq9LKRBM
+# f/i+U54x++76LHbh5HWwSXWCseV/UqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -228,31 +232,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAcz7rnWTM/SD+Kg0+zigmRqalQNgsUYJV5huIYuYBC3MA0GCSqG
-# SIb3DQEBAQUABIIBgEhEIHX+phJjjnpuJx0L8hlNDPXLETM38TP4bQHn6Oz3g9mZ
-# 2WO0eAedYp80wKenJvRF3v6ClS6gNmN/+Q3ohJgpktOUbJy4LK5y66LPbq/ACx9G
-# Z/Q2j9/QqTBZNxf7A8VnbEh8NxEb15VrKqPnxCiERuICfyLFS1PuE9YC78KFuOPN
-# NacDFv5/T4PeV0cLlThAkiIrCG+MjxWgA+RSyDr8Hy/AVAki+5zWaJxyRCY1Hvsj
-# 2+8usTF2/3phts6fob9V83W76zHZ/SwElP1Of9jCz1BjqGMaJ8bInO2oNqpYMrwH
-# UxgCeH0ubo5ZHaCjvp9UBtLz2rwQSslDZLwoUqblGGgU3XsBj9gfT/9WzaiD/3NJ
-# JQztw3lG74d6R5gANP7gzlB+TducrCWm/d8IPxxJ7Fm4UbrQjLeF6TmQvYH6cKcH
-# Yudx4eN2GdgzksAZ/V5FZAKxHbhDPqmNCPxh8VkgM94uVAqWeaE8fTFpKKERKkRb
-# YyAjTyNkr4wqh338i6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC5WMxBiFy1ZgY7mG63Sk1gDyppF8mfYd91ZgMR9aJTxMA0GCSqG
+# SIb3DQEBAQUABIIBgC5uJmWXI+RMyE1iWSZw7TKxAKGsWBijxxQTaFBFZhmfsUO4
+# zWnNAq4FmdrmYqWeSyEawhs585Xe62KV596yrEbIV5FHWCFT5DxGZjGOQYWVWsUL
+# 8YZDesTecUZJ2YkjHUNqH3CzD7LxnkZxsY/0WHf3CyGv9MaEfqskfZZ0SWafEfpY
+# NJY7e0ztD1BBCmhf3m2pp0y+N8C1nr2SvWiLUPr1Kj0xKF9qVXZtddYiZEXmCT5e
+# gUwPZ/QXWRF7TWJ5gCzxb3goiHMl9Fihu6Hs8MwQ4v+0uzsg86Eq9YKwWliNvl6e
+# eS8KSuB4hSNR9KMDfUMeddTIGNefY+yJvJ95fV2k2yozoPSTlCiFO9U4RftQ7n3W
+# u7sssNpf/5uaVW5vwhlgF0d1rY5Ch579nad19dADonjiKIIgkeMwHTQkvq9ESpc3
+# JFNAr4mOxA2Tx7HHlVgz98lXl22n/1kaI50gS62IqewgMFFdzqLzhMxabe6WrKwE
+# UZ2Ys7nK9xYQ7LAokaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzAw
-# NTdaMC8GCSqGSIb3DQEJBDEiBCB9ZRCZ9QWiX8Coa7t1hfdhFz+0NY9BsBADLNFY
-# hdrgNDANBgkqhkiG9w0BAQEFAASCAgB3OKzA9P1rSV87FDtIMlRC4ge6YkhHnx47
-# 3FgV8vvmLVq8cmnMWj2cEGfWUQeOZuIvbKmtJQEvTu9vG4BSJRzuF5HRC67QLYuC
-# k457F+gKVGppodWZm3snVS58mfyPyP8CSg69X1dk6ShrFKneo+VBDako5R/jidxD
-# yZUTnSJ/71n1TvZskIHuBhFRF2Ki/fQnQC33PVhqXq5GQapbcsPp0eIHZyG9U+iV
-# lKdNP3ycGaBoI6yqgmq9P2UNdVvWeRVPEthu9oQx7Jp2oR5nyqRrUn16u+fD9V8x
-# cpxpaI57lCqev7Fu7trO+j89yiRZGXFtjbQiF/+baiwdLmzgVG2XXtwfXV4pQp3e
-# k+uHxCVho7bZ3gV8CbLXlZNRYUkgoV/nxPlTJ402CYhLOoRmgg61YB1MTj0B/Rd3
-# bfCweOyt+jPIF20IT/3B3ZtavdMKICO8anAntzlOLAe4pc83iEhABdFTjL/n3k6Y
-# xYhqNTQIEqmSWbuTwEeihvd8B2rb2QvoDIX27mC8ZnBFcgbUhxrNJDgXadLvNauU
-# oJlLf3bCjDKxJvzRe2HQZSqCCCARYL3b9u/enWYg75cyNeuMtZF7x8yiuHO7adDV
-# R4N1PxvbTjq/QJenzSnkNwuTP0QppxyYaNf6Qhv1PbpQ0HsUAnEz3uIzXs2lSFuI
-# CJw26w/DAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzA4
+# MjhaMC8GCSqGSIb3DQEJBDEiBCAI5EHO/Q3NFIj0SMh9ljFpY2rlGR/e6tk2OVJE
+# Y3NMgzANBgkqhkiG9w0BAQEFAASCAgBmT0J/DRKvFXH0XII4qIRuMCOmBGMk1P8A
+# 0Q48Dr3K/r9sMHYTEarl46Dg1uPeafmLOcxTx0uBmo76ggRiSpLpaUe/gfBihr/y
+# S560cuHrkKqf6docaWqCANwt0o/YCWUHYWcPkVwa7RlRgdpzXd5hxTctZPw5qz/m
+# JL485AzJJ97cAIqDLtH5RMgjZ9aYT3PM8wtLBM9A57KWSp/mJvZTIalFW7fV+Kw1
+# 9PhrHGuVjH9rWlfbHVWJ5dLOlsEE4ftTCYEJ+hfFOKuBgny6WG2Fg5wH9CBkph/T
+# v1vhEcTGWPDfHytF/JI6h2jwFLLQc2cIIEg1Y8Qch8YHNN+RCNERlzYexVZ0Q7yP
+# tJ95PZrrxInTJGzJmnCNihLai6i0OvoUTuTkmV7o389vtoW7CbofBg86kdHsJn6r
+# r9VI6qjWQf/Vfz9RBAs8q/46F7j02FFJqG/5Pyu+HvDbung05zO/d+l8Ff6QR/su
+# lQ5EW4NRIPE6HpdrWT5QddPn0ahxhKwuJzzhHNsFPEFx3GpjzZ4jkvU8u3hDKLM8
+# ngnMXb7bGFVCg+wwjDSM7KY8msJ5tzL1TgoCXDw2g6bSfIafPzBAY4xtuPVVmFy+
+# Xe43Hsean+SymtPGolIU8CCFFQS+NSxI4LniO6JQkoAx1wGjWGkx+4qjDXadPkca
+# Tfuwz9o9sg==
 # SIG # End signature block
