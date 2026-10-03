@@ -104,7 +104,8 @@ SmartM365/SharePointMigration/_Local/
 !SmartM365/SharePointMigration/Migrations_Template/
 !SmartM365/SharePointMigration/Migrations_Template/**
 # Migration workspaces contain private client paths, configurations, scans and reports.
-/SmartM365/SharePointMigration/Migrations/
+/SmartM365/SharePointMigration/Migrations/*
+!/SmartM365/SharePointMigration/Migrations/.gitkeep
 SmartM365/SharePointMigration/Config/*.local.psd1
 SmartM365/SharePointMigration/**/__pycache__/
 SmartM365/SharePointMigration/**/*.pyc
