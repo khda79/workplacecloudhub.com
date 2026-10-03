@@ -1,5 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 import argparse
 import hashlib
 import json
@@ -37,7 +37,7 @@ def main():
         if relative.startswith(PREFIX):
             if '.local.' in product_relative or '__pycache__' in product_relative or product_relative.startswith(('Tools/Python/', 'Output/')):
                 raise SystemExit(f'Runtime/private file rejected: {relative}')
-            if product_relative.startswith('Migrations/') and product_relative != 'Migrations/Update-MigrationsFromTemplate.cmd':
+            if product_relative.startswith('Migrations/'):
                 parts = Path(product_relative).parts
                 if len(parts) >= 4 and parts[0] == 'Migrations' and parts[2:] in (
                         ('ShareGate', 'README.md'), ('ShareGate', 'MigrationReport', '.gitkeep')):

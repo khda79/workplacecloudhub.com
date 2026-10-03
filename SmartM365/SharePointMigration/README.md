@@ -81,6 +81,7 @@ For a local resource check without displaying the GUI or contacting a tenant:
 - `Scripts/Launchers/`: migration-aware launchers shared by each migration
   folder.
 - `Migrations_Template/`: safe template used to create local migration folders.
+- `Update-MigrationsFromTemplate.cmd`: refreshes launchers and folders in local migrations from the template.
 - `_Local/`: private workstation helpers, excluded from Git.
 - `Config/SPOAuth.sample.psd1`: placeholder model for local SharePoint Online
   authentication values.
@@ -107,6 +108,9 @@ You can also create one local folder per migration manually by copying the templ
 ```powershell
 Copy-Item -Recurse .\Migrations_Template .\Migrations\MyMigration
 ```
+
+Run `Update-MigrationsFromTemplate.cmd` from the toolkit root to refresh
+existing migration launchers and template-owned folders.
 
 Then edit the copied files:
 
@@ -157,8 +161,8 @@ operations\generated\
 logs\
 ```
 
-`Migrations/*` is ignored by Git except for the template update
-launcher, and each migration's `ShareGate` folder structure. Put ShareGate
+`Migrations/*` is ignored by Git except for each migration's `ShareGate`
+folder structure. Put ShareGate
 migration reports (`.xls`, `.xlsx`, or `.csv`) in
 `Migrations/<name>/ShareGate/MigrationReport`. Only the generic README and
 empty-folder marker are versioned there; the reports remain local. Do not commit

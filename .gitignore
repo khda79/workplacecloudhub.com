@@ -105,7 +105,6 @@ SmartM365/SharePointMigration/_Local/
 SmartM365/SharePointMigration/Migrations/*
 !SmartM365/SharePointMigration/Migrations/*/
 SmartM365/SharePointMigration/Migrations/*/*
-!SmartM365/SharePointMigration/Migrations/Update-MigrationsFromTemplate.cmd
 # Keep the ShareGate report folders in Git, but never add their report contents.
 !SmartM365/SharePointMigration/Migrations/*/ShareGate/
 SmartM365/SharePointMigration/Migrations/*/ShareGate/*
