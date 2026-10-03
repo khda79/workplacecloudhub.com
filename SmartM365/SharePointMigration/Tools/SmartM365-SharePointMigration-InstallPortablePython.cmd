@@ -1,5 +1,6 @@
 @echo off
 setlocal
+echo Script  : %~nx0 v1.0.0
 
 set "UNC_WORK_DIR=%~dp0."
 

@@ -1,5 +1,6 @@
 @echo off
 setlocal
+echo Script  : %~nx0 v1.0.0
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..\..") do set "MIGRATION_NAME=%%~nxI"
