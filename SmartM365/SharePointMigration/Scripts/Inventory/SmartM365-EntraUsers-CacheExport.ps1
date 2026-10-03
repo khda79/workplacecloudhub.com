@@ -8,7 +8,7 @@
     principals during source/target comparisons.
 
 .VERSION
-    1.0.3
+    1.0.4
 #>
 
 [CmdletBinding()]
@@ -16,7 +16,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputPath,
 
-    [double]$MaxCacheAgeHours = 6,
+    [double]$MaxCacheAgeHours = 12,
+
+    [string]$TenantHost = '',
 
     [switch]$Connect,
 
@@ -118,7 +120,8 @@ function Connect-EntraUsersGraph {
     $context = $null
     try { $context = Get-MgContext -ErrorAction SilentlyContinue } catch { }
 
-    if (-not $Connect -and $context -and (Test-GraphConnection)) {
+    $sameTenant = (-not $script:ExpectedTenantId -or ([string]$context.TenantId).Equals($script:ExpectedTenantId, [StringComparison]::OrdinalIgnoreCase))
+    if (-not $Connect -and $context -and $sameTenant -and (Test-GraphConnection)) {
         Write-CacheInfo 'Existing Microsoft Graph session detected. Reusing current connection.' DarkCyan
         return
     }
@@ -136,6 +139,7 @@ function Connect-EntraUsersGraph {
     }
     else {
         $connectParams.Scopes = @('User.Read.All', 'Directory.Read.All')
+        if ($TenantId) { $connectParams.TenantId = $TenantId }
         if ($DeviceLogin) {
             $connectParams.UseDeviceCode = $true
         }
@@ -148,36 +152,72 @@ function Connect-EntraUsersGraph {
     }
 }
 
+function Get-ReusableEntraCacheAge {
+    param([string]$CsvPath, [string]$MetadataPath)
+    if (-not (Test-Path -LiteralPath $CsvPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $MetadataPath -PathType Leaf)) { return $null }
+    try {
+        $metadata = Get-Content -LiteralPath $MetadataPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$metadata.SchemaVersion -ne 1 -or
+            [string]$metadata.TenantHost -ne $script:NormalizedTenantHost -or
+            [string]$metadata.RequestedTenantId -ne $script:NormalizedTenantId -or
+            [int]$metadata.UserCount -le 0 -or
+            [string]::IsNullOrWhiteSpace([string]$metadata.GraphTenantId)) { return $null }
+        if ($script:ExpectedTenantId -and
+            [string]$metadata.GraphTenantId -ne $script:ExpectedTenantId) { return $null }
+        $exported = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse([string]$metadata.ExportedAtUtc,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind, [ref]$exported)) { return $null }
+        $age = ([datetimeoffset]::UtcNow - $exported).TotalHours
+        if ($age -lt 0 -or $age -ge $MaxCacheAgeHours) { return $null }
+        $csv = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+        if ($csv.Length -eq 0) { return $null }
+        $header = Get-Content -LiteralPath $CsvPath -TotalCount 1 -ErrorAction Stop
+        if ($header -notmatch '^"?Id"?,') { return $null }
+        $hash = (Get-FileHash -LiteralPath $CsvPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($hash -ne [string]$metadata.CsvSHA256) { return $null }
+        return $age
+    }
+    catch { return $null }
+}
+
 $outputDirectory = Split-Path -Path $OutputPath -Parent
 if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 
 if ($MaxCacheAgeHours -le 0) { throw 'MaxCacheAgeHours must be greater than zero.' }
-$MaxCacheAgeHours = [math]::Min($MaxCacheAgeHours, 6)
+$MaxCacheAgeHours = [math]::Min($MaxCacheAgeHours, 12)
+$script:NormalizedTenantHost = $TenantHost.Trim().ToLowerInvariant()
+$script:NormalizedTenantId = $TenantId.Trim().ToLowerInvariant()
+$parsedTenantId = [guid]::Empty
+$script:ExpectedTenantId = if ([guid]::TryParse($script:NormalizedTenantId, [ref]$parsedTenantId)) { $parsedTenantId.ToString('D') } else { '' }
+$metadataPath = [IO.Path]::ChangeExtension($OutputPath, 'meta.json.txt')
 $cacheLock = Enter-EntraCacheLock -Path ("{0}.lock.txt" -f $OutputPath)
 $tempPath = $null
+$tempMetadataPath = $null
 try {
-if (-not $ForceRefresh -and (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
-    $cacheItem = Get-Item -LiteralPath $OutputPath -ErrorAction Stop
-    $cacheAgeHours = ((Get-Date) - $cacheItem.LastWriteTime).TotalHours
-    $cacheHeader = if ($cacheItem.Length -gt 0) { Get-Content -LiteralPath $OutputPath -TotalCount 1 -ErrorAction Stop } else { '' }
-    if ($cacheAgeHours -ge 0 -and $cacheAgeHours -lt $MaxCacheAgeHours -and $cacheHeader -match '^"?Id"?,') {
-        Write-CacheInfo ("Using existing Entra users cache: {0} (age {1:n2}h, max {2:n2}h)" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours) Green
+if (-not $ForceRefresh) {
+    $cacheAgeHours = Get-ReusableEntraCacheAge -CsvPath $OutputPath -MetadataPath $metadataPath
+    if ($null -ne $cacheAgeHours) {
+        Write-CacheInfo ("Using shared Entra users cache: {0} (age {1:n2}h, max {2:n2}h; tenant {3})" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours, $script:NormalizedTenantHost) Green
         return
     }
-
-    Write-CacheInfo ("Entra users cache is stale or invalid: {0} (age {1:n2}h, max {2:n2}h)" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours) Yellow
-}
-elseif ($ForceRefresh) {
-    Write-CacheInfo "Entra users cache refresh was requested for $OutputPath; Microsoft Graph export is required." Yellow
+    Write-CacheInfo "Shared Entra users cache is missing, expired, or invalid: $OutputPath" Yellow
 }
 else {
-    Write-CacheInfo "No reusable Entra users cache at $OutputPath; Microsoft Graph export is required." Yellow
+    Write-CacheInfo "Entra users cache refresh was requested for $OutputPath; Microsoft Graph export is required." Yellow
 }
 
 Ensure-GraphUsersModule
 Connect-EntraUsersGraph
+$graphContext = Get-MgContext -ErrorAction Stop
+$graphTenantId = ([string]$graphContext.TenantId).Trim().ToLowerInvariant()
+if (-not $graphTenantId) { throw 'Microsoft Graph did not report a tenant ID; the shared cache was not published.' }
+if ($script:ExpectedTenantId -and $graphTenantId -ne $script:ExpectedTenantId) {
+    throw "Microsoft Graph tenant $graphTenantId does not match configured tenant $($script:ExpectedTenantId); the shared cache was not published."
+}
 
 $selectProperties = @(
     'id',
@@ -215,12 +255,26 @@ $rows = foreach ($user in $users) {
 
 $tempPath = "{0}.{1}.tmp" -f $OutputPath, [guid]::NewGuid().ToString('N')
 $rows | Export-Csv -LiteralPath $tempPath -NoTypeInformation -Encoding UTF8
+$metadata = [ordered]@{
+    SchemaVersion = 1
+    TenantHost = $script:NormalizedTenantHost
+    RequestedTenantId = $script:NormalizedTenantId
+    GraphTenantId = $graphTenantId
+    ExportedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+    UserCount = @($rows).Count
+    CsvSHA256 = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256).Hash
+}
+$tempMetadataPath = "{0}.{1}.tmp" -f $metadataPath, [guid]::NewGuid().ToString('N')
+$metadata | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $tempMetadataPath -Encoding UTF8
 Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
-Write-CacheInfo ("Entra users cache exported: {0} ({1} users)" -f $OutputPath, @($rows).Count) Green
 $tempPath = $null
+Move-Item -LiteralPath $tempMetadataPath -Destination $metadataPath -Force
+$tempMetadataPath = $null
+Write-CacheInfo ("Shared Entra users cache exported: {0} ({1} users; Graph tenant {2})" -f $OutputPath, @($rows).Count, $graphTenantId) Green
 }
 finally {
     if ($tempPath -and (Test-Path -LiteralPath $tempPath)) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    if ($tempMetadataPath -and (Test-Path -LiteralPath $tempMetadataPath)) { Remove-Item -LiteralPath $tempMetadataPath -Force -ErrorAction SilentlyContinue }
     $cacheLock.Dispose()
 }
 }
@@ -235,8 +289,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+l6r/uGkjN3GA
-# Yn56NIxBKbEqc/WnewgNDLRmYZHL8aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGL2WfXwgpjyaJ
+# 4Kn1CW3BJ2KJRvxZIc3laqofCvsQl6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -266,14 +320,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAQmPDAU7ADKgX1D82EyuBa
-# BuQ8GDkx2esxkBBJWgnKSDANBgkqhkiG9w0BAQEFAASCAYCGP8TDcSPbNXe44QAH
-# D/s4QAxFZk6ycdScJ4IdZhNcdEpm4ytuxZh1Lezn91ZU6ooZ0i06mVcPv7/2MG9L
-# Os56INNWnA1R26qjyD3BWz2ZETD4SoV1Mz/UYugKuUbF69R8WFD6JF5B4/G/jCBm
-# nxPr7tBiqyiwE4T1hjcFX90yLnnVp8woqQr65WtlxJien6PljI7Uv8qi+y9GaHyS
-# BM+1oEydAhpaWzvudPdufitKBdzFd37xLUC78rCauQP7drZu3am5ZTepkk9fCbLO
-# +SHoMp6600CY40Cf0sT+CpVykHrTfxU/PLGRIb1oX2s46Ip3VNZfNUXRgmwhzhcJ
-# awGhOWekzwnV60qiWN/x0oGg1zBEPb9KDugKW3BiwiQEW3KJZW3sBJNVuUEazfs5
-# me9z6x00kyw37Ouf7TNa2S+tBGj6q+lDmQCXSFS5H5Efq5WGm+evu3u8nuV0rXG3
-# G1ipa7U2lyMPCDiyBiVpu37lQHyvXR4UYNLapWWwiYG4UFs=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAEGMrG+7EKOqEWA6hRrpWI
+# KrbDp6c8VW2spmr1BMhWXzANBgkqhkiG9w0BAQEFAASCAYAJzv0kbZ2RZxbm5pNJ
+# L8GTQWVWSVsb58+oHdzzt4s80BevV1mx35Dn8BkCtL0RvdDwLppHVVRk53AK5q8o
+# ljLrdNDGoOW4SZLoGotKeOHjuhqvbJNGqY3toCJpTqJe1Ha9dbjKYbOSqnhk2ssJ
+# aclaVPklf6R685WoQNl5gPDcQPdPKMHTjGwHOOqYoJOQy/5weEf/15gr0IJ/yVoX
+# SukBtmvq/o2d5wGZF5kr4UnggKKKlbV3bUPI5ojk1emiLyGOYZWP22Nldv4rcC0C
+# deoefYMiqCE7RnKm1qTjQzstSWDCc1SlfY+kw1l69QX1//gdCk+4sLYZMj9LbRso
+# QRYDHyweef2O++tdACSLkMeq9z/7UimEhybWXAoUKraVDikvUwUVTKPiWvD3Gt6u
+# hSeZsKPl1A4SuC5p5FLsB73yYdiL9NySVoV+TQFTNoMDQ4queYB6QxrDfLyubmN2
+# 1Ze4nQhBQqGUOSmoV0i6AaT6HGK5RejB8UL9As126EaSvCk=
 # SIG # End signature block

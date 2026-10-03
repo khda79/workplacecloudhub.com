@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.23
+    1.0.24
 #>
 
 [CmdletBinding()]
@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.23') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.24') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -1025,13 +1025,31 @@ function Get-GeneratedOperationsDirectory {
     return $generatedDirectory
 }
 
+function Get-EntraUsersCacheHost {
+    $side = if ((Get-MigrationEndpointType -Side 'Target') -eq 'SPO') { 'Target' } else { 'Source' }
+    $endpoint = Get-MigrationEndpointConfig -Side $side
+    $url = @('SiteUrl', 'WebApplicationUrl', 'TenantAdminUrl') |
+        ForEach-Object { if ($endpoint.ContainsKey($_) -and $endpoint[$_]) { [string]$endpoint[$_] } } |
+        Select-Object -First 1
+    $parsed = $null
+    if (-not [uri]::TryCreate($url, [UriKind]::Absolute, [ref]$parsed) -or $parsed.Scheme -ne 'https') {
+        throw "Cannot identify the SPO tenant host for the shared Entra cache from $side configuration."
+    }
+    return ($parsed.Host.ToLowerInvariant() -replace '-admin(\.sharepoint\.)', '$1')
+}
+
 function Resolve-EntraUsersCachePath {
+    param([string]$TenantHost, [string]$TenantId)
     $configuredPath = [string](Get-ComparisonConfigValue -Name 'EntraUsersCachePath' -DefaultValue '')
     if (-not [string]::IsNullOrWhiteSpace($configuredPath)) {
         return (Resolve-MigrationPath $configuredPath)
     }
 
-    return (Join-Path -Path (Get-GeneratedOperationsDirectory) -ChildPath ("{0}-entra-users-cache.csv" -f $Config.Name))
+    $key = ('{0}|{1}' -f $TenantHost.ToLowerInvariant(), $TenantId.ToLowerInvariant())
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = -join @($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)) | ForEach-Object { $_.ToString('x2') }) }
+    finally { $sha.Dispose() }
+    return (Join-Path -Path (Join-Path $ProjectRoot '_Local\EntraUsersCache') -ChildPath ("{0}-{1}.csv" -f $TenantHost, $hash.Substring(0, 16)))
 }
 
 function Get-AuthConfigValue {
@@ -1058,17 +1076,19 @@ function Update-EntraUsersCacheForComparison {
         throw "Entra users cache is mandatory for permission comparisons. At least one endpoint must be SPO to resolve destination Entra users."
     }
 
-    $cachePath = Resolve-EntraUsersCachePath
-    $maxAgeHours = [double](Get-ComparisonConfigValue -Name 'EntraUsersCacheMaxAgeHours' -DefaultValue 6)
+    $authConfig = Get-SPOAuthConfig
+    $tenantId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId')
+    $tenantHint = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId', 'Tenant')
+    $tenantHost = Get-EntraUsersCacheHost
+    $cachePath = Resolve-EntraUsersCachePath -TenantHost $tenantHost -TenantId $tenantId
+    $maxAgeHours = [double](Get-ComparisonConfigValue -Name 'EntraUsersCacheMaxAgeHours' -DefaultValue 12)
     if ($maxAgeHours -le 0) { throw 'Comparison.EntraUsersCacheMaxAgeHours must be greater than zero.' }
-    $maxAgeHours = [math]::Min($maxAgeHours, 6)
+    $maxAgeHours = [math]::Min($maxAgeHours, 12)
     $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-EntraUsers-CacheExport.ps1'
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         throw "Entra users cache export script not found: $scriptPath"
     }
 
-    $authConfig = Get-SPOAuthConfig
-    $tenantId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId', 'Tenant')
     $clientId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('ClientId', 'AppId')
     $thumbprint = Get-AuthConfigValue -AuthConfig $authConfig -Names @('Thumbprint', 'Thumb')
 
@@ -1077,18 +1097,20 @@ function Update-EntraUsersCacheForComparison {
         '-ExecutionPolicy', 'Bypass',
         '-File', $scriptPath,
         '-OutputPath', $cachePath,
+        '-TenantHost', $tenantHost,
         '-MaxCacheAgeHours', ([string]$maxAgeHours)
     )
+    if ($tenantHint) { $arguments += @('-TenantId', $tenantHint) }
 
     if ($ForceAuthentication) {
         $arguments += '-Connect'
     }
     if ($UseCertificate) {
-        if (-not ($tenantId -and $clientId -and $thumbprint)) {
+        if (-not ($tenantHint -and $clientId -and $thumbprint)) {
             throw "Certificate authentication for Entra users cache requires TenantId, ClientId and Thumbprint in Config\SPOAuth.local.psd1."
         }
 
-        $arguments += @('-TenantId', $tenantId, '-AppId', $clientId, '-CertificateThumbprint', $thumbprint)
+        $arguments += @('-AppId', $clientId, '-CertificateThumbprint', $thumbprint)
     }
     else {
         $arguments += '-InteractiveAuth'
@@ -1336,8 +1358,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyXZgL3wOJ9Ugm
-# repSw7k6nGpTG0u8IbOEzsb2Jqdt+qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZJl4Gtm+w4fPO
+# OsuaXxDdlvM3ktEzi0tt1DGzscM/gKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1367,14 +1389,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAA6LZFZLMMQg7HVelP5D+u
-# FIRbU+gkvDNI77caqFEpyDANBgkqhkiG9w0BAQEFAASCAYAxbNeQa+d3Y/JqkktQ
-# y9z2J6H89iQhmLWlcEZv2oW4F3Hsral1ghF3YUBh2v/47Po02OHWMkukCemu3e46
-# IYFuSyvd9fXFjm7vHDwu3IvZ9+mJc6OBPoJhuiQpS8Hr48kBdVeSQSY0D7tw02uN
-# PKy3S/Y29Dgwrdz5fHwzKiYGGJPAiuAQ/Ba7CHH6cSwq0WSLCYFasedl+FmgMwMS
-# KZdCkJE33jxI+MOz059Y6FrZKI2cYK483DmZqCaaWFlECmzwxZWk1DPM6NDwjLlM
-# XXHtqTRTuf6NiOYd9meh7i6FPo7tnivS/6FhveqQ+nOgJ1i6viFNlMqFwTT+C4bP
-# soFy6GtojUfmn7L/2Uzmh9Mth8GczoXWNpgn55GX3mmoBGQFRbeltkm8JhhkgIv0
-# n0yA88nROc+/3rK0w4NR/8EQGXcJ9xJLATEl63ZMr0oHNWdNckoqtryGobfu+zgb
-# PLnEjJgegJMYnCtES//I8nOmgrA+qSD/z7Di2caDlBAgABI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDPifsUDRIeuDtVsumnIHXO
+# +D3LUk87g2Y2f/ChIVRB0jANBgkqhkiG9w0BAQEFAASCAYAj9xzDwrF1g+ANlL8H
+# kUZC6tJCYfYrVLdvqbrh69TUpifm++2UKXpulYBpaWRygntckjEf5V3TVQGJ391C
+# CdXlRKro1uwPGByfts7HOydIraPv2L++tXxdqyYc/4al2cwWJBpGN5CXIhGdgyJN
+# W+lWTMlqUI8lC4Sw2zc2he40CyrEikBS9FJdJ21qjGo19xX844v8Ae/jOasYR4Ib
+# V2MCrPBruZuDHC2nVMyNoeh9m13Hk6zVCWAh+9JugWW3ymR9K7qYNklhn62UEwcD
+# TMVLpE379aogf4wPEO+6KcfmtKNVsyw94S3OKZnBMnPnkHejYepvfxXZHCdPGRV5
+# QlL0fBkvjx7m6g7OVmi/ztRf5VxG0GpFli6E7yT61V2H4arJFFFx71FF60tXZONe
+# mvU+/vC0uK9R/LLfRlB+MbyRPx3TlC/tD3BxRantRfLvd8a2NDY8L/iL8Vt3W04X
+# AzJFEQEFcpuJHApMZo/jbhUOCruknZiah+esJgMVlGJRagE=
 # SIG # End signature block

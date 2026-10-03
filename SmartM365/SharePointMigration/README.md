@@ -169,11 +169,15 @@ ComparePermissions. Permission comparison requires a fresh Entra users cache
 and at least one SPO endpoint; the current launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
 The cache contains identity fields for all Entra users returned by Microsoft
-Graph. A valid cache is reused for up to 6 hours (or a shorter configured age),
-including across GUI users sharing the migration folder. The refresh is
-serialized per cache file. If a required Graph submodule is absent, the script
-asks before installing only that submodule for the current PowerShell 7 user.
-Older migration configs still set to 24 hours are capped at 6 hours at runtime.
+Graph. By default, migrations targeting the same SPO host and configured tenant
+share a cache under `_Local/EntraUsersCache`. Its CSV and `.meta.json.txt`
+receipt are reused for up to 12 hours (or a shorter configured age). The receipt
+records the Graph tenant, export time, user count, and CSV SHA256; mismatches
+trigger a refresh. A per-cache lock serializes refreshes from multiple GUI users.
+An explicit `Comparison.EntraUsersCachePath` still overrides the shared default.
+If a required Graph submodule is absent, the script asks before installing only
+that submodule for the current PowerShell 7 user. Older migration configs still
+set to 24 hours are capped at 12 hours at runtime.
 Permission scan history comparison reads two CSV inventories from the same
 endpoint and requires neither SharePoint authentication nor an Entra cache.
 It writes `PermissionChanges.csv`, `Summary.csv`, and a branded HTML report
