@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.28
+    1.0.29
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.28'
+$script:AppVersion = '1.0.29'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -117,6 +117,13 @@ function Get-LatestSubfolder {
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 }
+function Get-ComparisonHtmlReport {
+    param([System.IO.DirectoryInfo]$Folder)
+    if ($null -eq $Folder -or -not (Test-Path -LiteralPath $Folder.FullName -PathType Container)) { return $null }
+    Get-ChildItem -LiteralPath $Folder.FullName -Filter '*-summary-*.html' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
 function Get-MigrationEndpointType {
     param($Config, [string]$Side)
     $section = if ($Side -eq 'Source') { $Config.Source } else { $Config.Target }
@@ -181,18 +188,23 @@ function Get-MigrationStatus {
     } else { 'comparisons\permission-scan-history' }
     $permissionHistoryDir = Join-Path $root $permissionHistoryPath
 
+    $fileComparisonFolder = Get-LatestSubfolder $fileCmpDir "$name-*"
+    $permComparisonFolder = Get-LatestSubfolder $permCmpDir "$name-*"
+
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
         SourceFileCsvItems    = @(Get-CsvFileItems   $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
         TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         TargetFileCsvItems    = @(Get-CsvFileItems   $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
-        FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
+        FileComparisonFolder  = $fileComparisonFolder
+        FileComparisonReport  = Get-ComparisonHtmlReport $fileComparisonFolder
         HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
         SourcePermCsvItems    = @(Get-CsvFileItems   $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
         TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         TargetPermCsvItems    = @(Get-CsvFileItems   $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
-        PermComparisonFolder  = Get-LatestSubfolder  $permCmpDir  "$name-*"
+        PermComparisonFolder  = $permComparisonFolder
+        PermComparisonReport  = Get-ComparisonHtmlReport $permComparisonFolder
         PermissionHistoryFolder = Get-LatestSubfolder $permissionHistoryDir '*-PermissionChanges-*'
     }
 }
@@ -622,6 +634,8 @@ function Open-InExplorer {
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpFiles" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+                <Button x:Name="btnReportCmpFiles" Content="HTML report" Style="{StaticResource BtnGhost}"
+                        Width="88" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunCmpFiles"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -763,6 +777,8 @@ function Open-InExplorer {
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpPerms" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+                <Button x:Name="btnReportCmpPerms" Content="HTML report" Style="{StaticResource BtnGhost}"
+                        Width="88" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunCmpPerms"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -1156,6 +1172,7 @@ $badgeCmpFiles  = ctrl 'badgeCmpFiles'
 $lblCmpFilesAge = ctrl 'lblCmpFilesAge'
 $lblCmpFilesDir = ctrl 'lblCmpFilesDir'
 $btnOpenCmpFiles= ctrl 'btnOpenCmpFiles'
+$btnReportCmpFiles = ctrl 'btnReportCmpFiles'
 $btnRunCmpFiles = ctrl 'btnRunCmpFiles'
 
 $badgeHistory  = ctrl 'badgeHistory'
@@ -1183,6 +1200,7 @@ $badgeCmpPerms  = ctrl 'badgeCmpPerms'
 $lblCmpPermsAge = ctrl 'lblCmpPermsAge'
 $lblCmpPermsDir = ctrl 'lblCmpPermsDir'
 $btnOpenCmpPerms= ctrl 'btnOpenCmpPerms'
+$btnReportCmpPerms = ctrl 'btnReportCmpPerms'
 $btnRunCmpPerms = ctrl 'btnRunCmpPerms'
 $badgePermHistory = ctrl 'badgePermHistory'
 $lblPermHistoryAge = ctrl 'lblPermHistoryAge'
@@ -1663,6 +1681,8 @@ function Update-UI {
     $lblCmpFilesDir.Text    = if ($st.FileComparisonFolder) { $st.FileComparisonFolder.Name } else { '' }
     $btnOpenCmpFiles.Visibility = if ($st.FileComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.FileComparisonFolder) { $btnOpenCmpFiles.Tag = $st.FileComparisonFolder.FullName }
+    $btnReportCmpFiles.Visibility = if ($st.FileComparisonReport) { 'Visible' } else { 'Collapsed' }
+    $btnReportCmpFiles.Tag = if ($st.FileComparisonReport) { $st.FileComparisonReport.FullName } else { $null }
 
     $r = Format-ItemAge $st.HistoryFolder
     Set-Badge $badgeHistory $lblHistoryAge $r.Text $r.HasRun
@@ -1682,6 +1702,8 @@ function Update-UI {
     $lblCmpPermsDir.Text = if ($st.PermComparisonFolder) { $st.PermComparisonFolder.Name } else { '' }
     $btnOpenCmpPerms.Visibility = if ($st.PermComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.PermComparisonFolder) { $btnOpenCmpPerms.Tag = $st.PermComparisonFolder.FullName }
+    $btnReportCmpPerms.Visibility = if ($st.PermComparisonReport) { 'Visible' } else { 'Collapsed' }
+    $btnReportCmpPerms.Tag = if ($st.PermComparisonReport) { $st.PermComparisonReport.FullName } else { $null }
 
     $r = Format-ItemAge $st.PermissionHistoryFolder
     Set-Badge $badgePermHistory $lblPermHistoryAge $r.Text $r.HasRun
@@ -2213,6 +2235,7 @@ $cmbHistoryNewFile.Add_SelectionChanged({ Update-HistoryRunState })
 $btnOpenScanSrc.Add_Click({  Open-InExplorer ([string]$btnOpenScanSrc.Tag) })
 $btnOpenScanTgt.Add_Click({  Open-InExplorer ([string]$btnOpenScanTgt.Tag) })
 $btnOpenCmpFiles.Add_Click({ Open-InExplorer ([string]$btnOpenCmpFiles.Tag) })
+$btnReportCmpFiles.Add_Click({ Open-InExplorer ([string]$btnReportCmpFiles.Tag) })
 $btnOpenHistory.Add_Click({  Open-InExplorer ([string]$btnOpenHistory.Tag) })
 
 # Permissions
@@ -2230,6 +2253,7 @@ $cmbPermHistoryNewFile.Add_SelectionChanged({ Update-PermissionHistoryRunState }
 $btnOpenScanSrcPerm.Add_Click({ Open-InExplorer ([string]$btnOpenScanSrcPerm.Tag) })
 $btnOpenScanTgtPerm.Add_Click({ Open-InExplorer ([string]$btnOpenScanTgtPerm.Tag) })
 $btnOpenCmpPerms.Add_Click({    Open-InExplorer ([string]$btnOpenCmpPerms.Tag) })
+$btnReportCmpPerms.Add_Click({ Open-InExplorer ([string]$btnReportCmpPerms.Tag) })
 $btnOpenPermHistory.Add_Click({ Open-InExplorer ([string]$btnOpenPermHistory.Tag) })
 
 # Operations - buttons inside DataTemplate handled via bubbled RoutedEvent
@@ -2677,8 +2701,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqQSJLL7u1vpo1
-# R+DUlQ7QB8lWumQk+36OEDjrGrp1pqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4QJosQXfbU5kP
+# y5opj9eMGZ6TA+8IGw0y/1VAMrq7W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2811,31 +2835,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIItJ8Hwz/aR8EuOnt6Fxz9U2MMk/TpVh3JKEdtV7ZnQ7MA0GCSqG
-# SIb3DQEBAQUABIIBgKNdMln2dt6+oVh96VPJ0PVOWHg4wtXiJxDNCRLwESolrMcP
-# 1F3amHZ+QixgqwiF4buuNsCVLgull9658MHnUo1E9ahlT7aUu8atyRn1ZNcVOu99
-# CSOBOKb6oL4FrjNb/2tSBu4qTqqtT4VXoyZtyub30RbzXuPeSDAGMnJLRsIaNu75
-# F6a64/h7YX+xRTNnUeTaMCEvpB/bRDQ/vF4pdCB8AVAOW8rOrW5omk9ZUQfhAubu
-# wJbgGeJ9OQx66NxSYDYzTC3GnNiYp4BAn7+IY880N76KLA2+jsd7Y4pMLqNEDxf1
-# Ztmjs/9bzCuCOUvsUbo+Ewn1csvmC0GwambNTG8zk9002kuT88Po0of+G9nTT48x
-# WxwHpInqP/rV8qu9rwYqlWpVBDfULCQABK4I6e2+9ua7GVhe2xf3+7nl/vNku9px
-# SRYGe302wXdrHZTglijd/cVIRuhRWJfwWBJy9t2wDleQK5GdG7g38A9MS0ta0rh+
-# khZrS/Lw3E67Tm4xAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHD+DxVgTtSUdXRgHv/NuI1dM0SJmynNkTg7LpcqcI7xMA0GCSqG
+# SIb3DQEBAQUABIIBgF/8VsIzboUpK4Uiu2m9goJE3RO4ZqxWvfxRW8Zkn1xplb0B
+# 5cP4oyEfffrMNOQu0OBrdcNTDQQlmP+oQIEjeySUWzCZ9vDprGoixnCxqoATezca
+# oCazCzf9FLku/0I/vlZAoL1rgBdReb4XNf+m5rJi7nzAEPf7bwDhgjrPKwohKxHE
+# 4g6vZTBw+RBECokG/qtBuLEFYjJMR2BDueSKbB9f5+YMRYEtRAPmeWLhZNRdr/NP
+# 3vEyqbZs2Stgf8fKO2fXaB3eSvkpa+1ZO5Zzm/zO1xrMUn0bQLW55ZMferarXPeI
+# NQDMDmHGuwokhy9QHTTPP8G/rEJdNGshUikPQ6kbYPZOHNOk2t0IWoHJFMf4hzDL
+# bwuuAkuQoXnThqvjo33Xn5K8t7glBReB4Ff64wcpQyjcHdR76mRzwmuu2s2SQ/PY
+# xo52u26WBEWiXK4/+3gKmvAgUnbkGxpVSV6WvZMz46qwAmRUwUfc9lCnFEQv3ONS
+# 1O2CCtqw7MDRgFHMCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjIz
-# NTlaMC8GCSqGSIb3DQEJBDEiBCAPYcsAXLiE1OV5XnPZf6FFwHc4BoG2Mmx3YN08
-# Fg4o5DANBgkqhkiG9w0BAQEFAASCAgCN3ORaTdBOPEV3f91SHTJ7zBg8xMfwwjnQ
-# EFU3pWVoPn5niOzzFlc5qJSGaB3amJ7FvGHmLmtyrp44QoInPN2GESWNFfKq2qNp
-# 7FNfIZSY8afBTnV2J4z7R4NfZqgaJeqpP7Pg+o0dXswzA2C6Zlvn7+ZK8T9c/a/H
-# 1q3Gz8UBYpQoiFDRfQE3bx/OTkU2CMyQu+uxCPavWe9GF8v8mw4gW+BS9R/XzPv7
-# l07n7OqgT2Iu5A9re5jOg32KWHi8K5M0MQ4l25FR1oot2AOR89eSGe4f0EzhckTG
-# OHTv9+5CJ5I+N4oe31KlbV87c8j5wiNeipcyTa8h/MinWaF7rOjxipHO8qZBe9tS
-# 1cyc7zFG/ZEqPvCGiPmaAi/ayiA3r7mwMJ7L5j/wzuLI51w7OUKHi+sFQ/qcLQpZ
-# RIP1b5FdE5How+ODqqVKSOc7telJaLAaPxqB6/qjj+dGOXC79Cv4zug5maWzm0px
-# Afpc1axxuqjCBUsXjzUDh1dHaEEHhtleu1pvJEZwbDXI8qjt0MzTqcPxdkvcPQ7H
-# I25fmOB8OORyt6hF1F2oaxD9s3RmcBg3SGQEOzo5kA+JggUElzVqrhgSJs7y05wF
-# 2lgcu6CcX/Qry6U//3btmSrV5Cr6kyqhdm6oNEaDjpNQaoDAJrrpOqnAJS9ivKkH
-# LQwJe/3qBA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjQz
+# MzdaMC8GCSqGSIb3DQEJBDEiBCDIqKFqO8b/Mk3T5rmb0I8YTAZTjHn12peWswhw
+# wXCWujANBgkqhkiG9w0BAQEFAASCAgCMmjvHiRJ0MzlaZqHyuh1v5bLh2OZvELqI
+# GBTuCVEULUrzQ2fWxqH1yBAAkGu0SunUdnryIvgds7oGUaeUpjK/CF+j6rTIYcrC
+# Pw3+eapv/A/Gl9uUg92Hm4xbQgiV290c/AM3392Px403zFAirAun4mMEc2hDcaP2
+# N/4KoQ38eZDTe5LB++fM9gDkw4qld/b03tiyLPJ6AbzQo6zxz5i51HSizKrWmuld
+# JEhJ8NAtFlrJGp91R6ncDM7j+2UchVio5p9rPYymFYwYCLFY6hVR15wbtlS0EV2U
+# D/j42LGiaivmpMZ8sDyxA0gIjiDpsuvJ+rnSID2Z25oZrHb8PU0Nu4KHsSIASc/O
+# nfgN24LKSfU6HR5YsnHYAFPFUc8A3RjxF73IAUIlQXXvP4zsAfM4OAemScp1fqN9
+# Sbtkx1BKO6UIA/rbWvk1vSAB5WDQZFG0F3dFs6q7MZyNfYFbhyT3CWgz1nLBCh0z
+# yXaXCwHupGtUZga95bDwe5hcDtltagO/6HHwftzezlb+RcogX0du8zCKF8+2VQR8
+# boZmL5v4TEMfoMB9UrWBQpE42q0jVnrp7fMawmFPsi4B8XFKH/ELoyYQj7qMKaB9
+# cEU4HDEjkuKBCJiAcfxF3tmjEYz0dDA/Nb3i8fr5tfksguWlvK37Q2mYuzVnYJar
+# skcIB0nllg==
 # SIG # End signature block
