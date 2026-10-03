@@ -8,7 +8,7 @@
     principals during source/target comparisons.
 
 .VERSION
-    1.0.1
+    1.0.3
 #>
 
 [CmdletBinding()]
@@ -16,7 +16,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputPath,
 
-    [double]$MaxCacheAgeHours = 24,
+    [double]$MaxCacheAgeHours = 6,
 
     [switch]$Connect,
 
@@ -56,11 +56,61 @@ function Test-GraphConnection {
 }
 
 function Ensure-GraphUsersModule {
-    if (-not (Get-Command -Name Get-MgUser -ErrorAction SilentlyContinue)) {
-        Import-Module Microsoft.Graph.Users -ErrorAction Stop
+    $required = @('Microsoft.Graph.Users', 'Microsoft.Graph.Authentication')
+    $missing = @($required | Where-Object { -not (Get-Module -ListAvailable -Name $_) })
+    if ($missing.Count -gt 0) {
+        $account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        Write-CacheInfo ("Missing Microsoft Graph modules for {0} in PowerShell {1}: {2}" -f $account, $PSVersionTable.PSVersion, ($missing -join ', ')) Yellow
+        try { $answer = Read-Host 'Install only the required modules from PSGallery for the current user? [Y/N]' }
+        catch { throw "Module installation could not be confirmed interactively: $($_.Exception.Message)" }
+        if ([string]$answer -notmatch '^(?i:y|yes|o|oui)$') {
+            throw 'Required Microsoft Graph module installation was declined; the Entra users cache cannot be refreshed.'
+        }
+        if (-not (Get-Command -Name Install-Module -ErrorAction SilentlyContinue)) {
+            throw 'Install-Module is unavailable in this PowerShell session; install PowerShellGet for the current user.'
+        }
+        try {
+            if ('Microsoft.Graph.Users' -in $missing) {
+                Write-CacheInfo 'Installing Microsoft.Graph.Users for CurrentUser (Authentication is a dependency)...' Cyan
+                Install-Module -Name Microsoft.Graph.Users -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
+            }
+            if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+                Write-CacheInfo 'Installing Microsoft.Graph.Authentication for CurrentUser...' Cyan
+                Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
+            }
+        }
+        catch { throw "Required Microsoft Graph module installation failed for ${account}: $($_.Exception.Message)" }
     }
-    if (-not (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue)) {
-        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    foreach ($name in $required) {
+        try { Import-Module -Name $name -ErrorAction Stop }
+        catch { throw "Required module $name could not be loaded: $($_.Exception.Message)" }
+    }
+    foreach ($command in @('Get-MgUser', 'Get-MgContext', 'Connect-MgGraph', 'Invoke-MgGraphRequest')) {
+        if (-not (Get-Command -Name $command -ErrorAction SilentlyContinue)) {
+            throw "Required Microsoft Graph command is unavailable after module import: $command"
+        }
+    }
+    $versions = @($required | ForEach-Object { $module = Get-Module -Name $_; '{0}={1}' -f $_, $module.Version })
+    Write-CacheInfo ("Microsoft Graph modules ready: {0}" -f ($versions -join '; ')) DarkCyan
+}
+
+function Enter-EntraCacheLock {
+    param([string]$Path)
+    $deadline = (Get-Date).AddMinutes(10)
+    $announced = $false
+    while ($true) {
+        try {
+            return [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        }
+        catch [System.IO.IOException] {
+            if ((Get-Date) -ge $deadline) { throw "Timed out waiting for Entra cache lock: $Path" }
+            if (-not $announced) {
+                Write-CacheInfo "Another user is refreshing the Entra cache; waiting for $Path" Yellow
+                $announced = $true
+            }
+            Start-Sleep -Seconds 2
+        }
     }
 }
 
@@ -103,15 +153,27 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 
+if ($MaxCacheAgeHours -le 0) { throw 'MaxCacheAgeHours must be greater than zero.' }
+$MaxCacheAgeHours = [math]::Min($MaxCacheAgeHours, 6)
+$cacheLock = Enter-EntraCacheLock -Path ("{0}.lock.txt" -f $OutputPath)
+$tempPath = $null
+try {
 if (-not $ForceRefresh -and (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
     $cacheItem = Get-Item -LiteralPath $OutputPath -ErrorAction Stop
     $cacheAgeHours = ((Get-Date) - $cacheItem.LastWriteTime).TotalHours
-    if ($cacheAgeHours -lt $MaxCacheAgeHours) {
+    $cacheHeader = if ($cacheItem.Length -gt 0) { Get-Content -LiteralPath $OutputPath -TotalCount 1 -ErrorAction Stop } else { '' }
+    if ($cacheAgeHours -ge 0 -and $cacheAgeHours -lt $MaxCacheAgeHours -and $cacheHeader -match '^"?Id"?,') {
         Write-CacheInfo ("Using existing Entra users cache: {0} (age {1:n2}h, max {2:n2}h)" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours) Green
         return
     }
 
-    Write-CacheInfo ("Entra users cache is stale: {0} (age {1:n2}h, max {2:n2}h)" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours) Yellow
+    Write-CacheInfo ("Entra users cache is stale or invalid: {0} (age {1:n2}h, max {2:n2}h)" -f $OutputPath, $cacheAgeHours, $MaxCacheAgeHours) Yellow
+}
+elseif ($ForceRefresh) {
+    Write-CacheInfo "Entra users cache refresh was requested for $OutputPath; Microsoft Graph export is required." Yellow
+}
+else {
+    Write-CacheInfo "No reusable Entra users cache at $OutputPath; Microsoft Graph export is required." Yellow
 }
 
 Ensure-GraphUsersModule
@@ -133,6 +195,7 @@ $selectProperties = @(
 
 Write-CacheInfo 'Exporting Microsoft Entra users cache...' Cyan
 $users = Get-MgUser -All -Property $selectProperties -ErrorAction Stop
+if (@($users).Count -eq 0) { throw 'Microsoft Graph returned no users; the Entra cache was not published.' }
 $rows = foreach ($user in $users) {
     [pscustomobject]@{
         Id                          = $user.Id
@@ -150,10 +213,16 @@ $rows = foreach ($user in $users) {
     }
 }
 
-$tempPath = "{0}.tmp" -f $OutputPath
+$tempPath = "{0}.{1}.tmp" -f $OutputPath, [guid]::NewGuid().ToString('N')
 $rows | Export-Csv -LiteralPath $tempPath -NoTypeInformation -Encoding UTF8
 Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
 Write-CacheInfo ("Entra users cache exported: {0} ({1} users)" -f $OutputPath, @($rows).Count) Green
+$tempPath = $null
+}
+finally {
+    if ($tempPath -and (Test-Path -LiteralPath $tempPath)) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    $cacheLock.Dispose()
+}
 }
 catch {
     $script:ConsoleLifecycleFailure = $_
@@ -164,10 +233,10 @@ finally {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoNon2j8+C11Jk
-# pBo6g/EZFsC9kfxvERpmPgalRgoLUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+l6r/uGkjN3GA
+# Yn56NIxBKbEqc/WnewgNDLRmYZHL8aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -192,139 +261,19 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFn1TwNob/SIz/rECRDJAC34qpl2sOxw8vppcTj3G0wwMA0GCSqG
-# SIb3DQEBAQUABIIBgBW0C02Sj/vGn0kiiNrImfy4K85ZzeYH/kp/nd166ZFi3Z+0
-# OR2jQl0g4QIWJlamSTngBO/gGKvCLVKqhvkYlAag4c5rcXWEWmziXvm34dgF19c7
-# Lh+g4M5QtDwaSu4kZobU3qPbKjEClJT60o3In6PC5eamZhZJYIziBWXxb09+43+n
-# lzj6O1BChPmjdbpTzvgjTiSnoaey3vWMW0un4VDERKfGlM9pUb89IleVymfqF3+p
-# XxsWAexVkzOt+R5DI7OSccMcBWeLMfE8QyxGKoKtCkiKuVSPniB/tXP1RsdSpOWA
-# zcprYEi/F5x7sdv6HZS1c+WdGUquoEkwY5ePCthuiyJtn0vE4ydSidEPGPmkSL92
-# Y8IWFBEUQh3T/m/Eg06pfprRSIrfKCwC8Hs6FWenl9ck+2Yq3wv2FJIEE2DbuMNr
-# 6/AgTjjy/pvijVRhaSeEP3+2e1uJnKIJSgDi1S/iqJAiyhbyvwF5hWI3VKkDFQ0u
-# lt4ay6h05WNC9bgwm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA4
-# MDBaMC8GCSqGSIb3DQEJBDEiBCAR12PtT4NvDh9OC2StQ1+m2Gu8DtVe9qg7cdGp
-# 0aWc3zANBgkqhkiG9w0BAQEFAASCAgAncezLJvKx+8w3MeGeQo/6NIwocCTLjdt0
-# GvJ5a2RvZtmf033AMfYSzeCTgFTmrsktAQ/FGxPKxQfGcsQ1apfxqQu0kYAO6duv
-# yK83G8Lo4ztpyifsNkZyAzzy/PUEnNPgOgkDRtC8zYqYaRU3KCY0/GQjh1F/yXEF
-# r+0trSdu7MzeLQX4PrHkWt/Ls7oxzo1MTinGGEH04eSpQ1ab8kxxixWFQCzsDV5t
-# bu9vFGzr7b4BU3FvBRfw443bTrO9a7+SXfEEe9hptA3qzyHi+5XO07k8r2nLVfBi
-# nABg3A0Dz4F/VfsUgRTz56MMuoP9cGc93D7d+MXW8HQMxbCJzZIPvJu/gktFGMq9
-# yyWiJZUqiMR7z0OfNsOYcn/P15s+YXiS2SVzz5wP/TaNbXCwVwyLwg9XyZJuM3Pg
-# n/5OtHEgYRAlFED0Iy/lb+eBTupexiUkcvBg/jIHVLNE5gMwp+1hSa/xmur0CYQq
-# zoajGNUQzq3KHJGx9RZ6AgygaqO9gHCAg2n2kI28obCUEAlb7xdD/N+whiUazhFJ
-# Gaugmz++DutOKP6bTHnZOAy+4H5UjKthcFjmMJOYP1QzAjH9tMPEJ2jU4nfqrPHl
-# +siep025aQj8op7fxIJi6rwFaH1cUxPioyQhGV8svt7tJeRZwXpAu62xTTijYW5p
-# Ac0Ljn7hDA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAQmPDAU7ADKgX1D82EyuBa
+# BuQ8GDkx2esxkBBJWgnKSDANBgkqhkiG9w0BAQEFAASCAYCGP8TDcSPbNXe44QAH
+# D/s4QAxFZk6ycdScJ4IdZhNcdEpm4ytuxZh1Lezn91ZU6ooZ0i06mVcPv7/2MG9L
+# Os56INNWnA1R26qjyD3BWz2ZETD4SoV1Mz/UYugKuUbF69R8WFD6JF5B4/G/jCBm
+# nxPr7tBiqyiwE4T1hjcFX90yLnnVp8woqQr65WtlxJien6PljI7Uv8qi+y9GaHyS
+# BM+1oEydAhpaWzvudPdufitKBdzFd37xLUC78rCauQP7drZu3am5ZTepkk9fCbLO
+# +SHoMp6600CY40Cf0sT+CpVykHrTfxU/PLGRIb1oX2s46Ip3VNZfNUXRgmwhzhcJ
+# awGhOWekzwnV60qiWN/x0oGg1zBEPb9KDugKW3BiwiQEW3KJZW3sBJNVuUEazfs5
+# me9z6x00kyw37Ouf7TNa2S+tBGj6q+lDmQCXSFS5H5Efq5WGm+evu3u8nuV0rXG3
+# G1ipa7U2lyMPCDiyBiVpu37lQHyvXR4UYNLapWWwiYG4UFs=
 # SIG # End signature block

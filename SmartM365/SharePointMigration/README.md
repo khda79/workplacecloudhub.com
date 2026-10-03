@@ -168,6 +168,12 @@ missing files and duplicate keys. Repeat with permission inventories and
 ComparePermissions. Permission comparison requires a fresh Entra users cache
 and at least one SPO endpoint; the current launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
+The cache contains identity fields for all Entra users returned by Microsoft
+Graph. A valid cache is reused for up to 6 hours (or a shorter configured age),
+including across GUI users sharing the migration folder. The refresh is
+serialized per cache file. If a required Graph submodule is absent, the script
+asks before installing only that submodule for the current PowerShell 7 user.
+Older migration configs still set to 24 hours are capped at 6 hours at runtime.
 Permission scan history comparison reads two CSV inventories from the same
 endpoint and requires neither SharePoint authentication nor an Entra cache.
 It writes `PermissionChanges.csv`, `Summary.csv`, and a branded HTML report
@@ -226,7 +232,10 @@ The sample contains placeholders only.
   admin operations such as site lock state and page comment settings.
 - Python 3 for comparison, Excel export, and generated-operation helpers.
 - Microsoft.Graph.Users and Microsoft.Graph.Authentication for Entra cache
-  refresh. Comparison/export Python helpers use the standard library; Excel
+  refresh. The script asks before installing missing submodules for the account
+  and PowerShell 7 host that runs the GUI; the shared migration folder does not
+  provide them.
+  Comparison/export Python helpers use the standard library; Excel
   itself is not needed to generate workbooks.
 
 SP2016/SP2019/SPO are configured engine selectors, not a certification of every
