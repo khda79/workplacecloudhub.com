@@ -468,6 +468,43 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\Sm
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateWitness.ps1 -ProjectRoot .\Migrations\MyMigration -AnalysisDirectory .\Migrations\MyMigration\ShareGate\Diagnostics\AnalysisFolder -SessionId 260930-6 -WhatIf -Run
 ```
 
+## Five-item ShareGate remediation pilot (phase 2c)
+
+`Scripts/Diagnostics/SmartM365-SharePointMigration-ShareGatePilot.ps1` is a
+separate, real-copy pilot. It starts in `-DryRun` mode and imports no ShareGate
+module in that mode. It requires a matching analysis and witness run: both
+positive witnesses must have warning rows and all three source 401 witnesses
+must have header-only reports. It selects those three source 401 items plus
+two more items distributed across the dominant affected list. The plan always
+contains exactly five distinct source items and can be pinned to a reviewed
+`ClassifiedRows.csv` SHA256 hash.
+
+Real execution requires `-Run -ConfirmPilot` and typing the exact confirmation
+phrase shown in the console. It also requires the analysis and witness SHA256
+hashes displayed by `-DryRun`, so a shared input cannot change unnoticed
+between review and execution. It uses the current Windows identity for the
+on-premises source and `Connect-Site -Browser` for the destination. For each
+selected ID, it invokes only `Copy-Content -SourceItemId <one ID>` with
+`New-CopySettings -OnContentItemExists IncrementalUpdate` and a distinct
+`-TaskName`. There is no `-WhatIf` during the real pilot. ShareGate's default
+Insane mode waits for Microsoft 365 import completion before returning. The
+script stops at the first failed call and writes one `Export-Report` CSV per
+completed call, full CopyResult properties, an atomic result CSV, a plan CSV,
+and an actor/machine log under the private `ShareGate/Diagnostics/Pilot-*`
+folder. Review the reports and destination results before considering any
+broader remediation.
+
+The pilot refuses both `-DryRun` and `-Run` from 23:45 inclusive to 00:15
+exclusive in the farm's time zone. `-FarmTimeZoneId` defaults to Windows
+`W. Europe Standard Time` (Bern/Zurich); the gate checks at startup, after
+interactive approval, and before every site/list connection and real copy.
+An already-running synchronous ShareGate copy cannot be interrupted safely at
+the window boundary, so schedule the five-item pilot with sufficient time
+before 23:45.
+
+The migration owner must review the DryRun selection and explicitly approve
+real execution separately. No bulk 401 remediation is part of this pilot.
+
 The launcher uses
 `Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
 `TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
@@ -495,6 +532,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigra
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-LauncherHosts.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePrecheck.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGateWitness.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePilot.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
 ```
 
