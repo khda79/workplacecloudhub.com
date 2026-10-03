@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.21
+    1.0.22
 #>
 
 [CmdletBinding()]
@@ -25,7 +25,8 @@ param(
         'ScanTargetPermissions',
         'ComparePermissions',
         'CompareSourceHistory',
-        'CompareScanHistory'
+        'CompareScanHistory',
+        'ComparePermissionScanHistory'
     )]
     [string]$Action,
 
@@ -55,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.21') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.22') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -1220,6 +1221,63 @@ function Invoke-FileHistoryComparison {
     & $scriptPath @parameters
     Open-DirectoryInExplorer -Path $outputDirectory
 }
+
+function Invoke-PermissionHistoryComparison {
+    param([ValidateSet('Source', 'Target')][string]$Side = 'Source')
+
+    $scanDirectory = if ($Side -eq 'Source') {
+        Resolve-MigrationPath $Config.Output.SourcePermissionScans
+    } else { Resolve-MigrationPath $Config.Output.TargetPermissionScans }
+    $endpointType = Get-MigrationEndpointType -Side $Side
+    $filter = '{0}-PermissionInventory-{1}-*.csv' -f $endpointType, $Config.Name
+    $scans = @(Get-ChildItem -LiteralPath $scanDirectory -Filter $filter -File -Recurse -ErrorAction Stop |
+        Where-Object { $_.Name -notlike '*-Errors.csv' } | Sort-Object {
+            if ($_.Name -match '-(?<date>\d{8})-(?<time>\d{6})(?:-[^.]+)?\.csv$') {
+                [datetime]::ParseExact(($Matches.date + $Matches.time), 'yyyyMMddHHmmss',
+                    [Globalization.CultureInfo]::InvariantCulture)
+            } else { $_.LastWriteTime }
+        } -Descending)
+    if ($scans.Count -lt 2 -and (-not $OldCsv -or -not $NewCsv)) {
+        throw "At least two completed $Side permission scans are required."
+    }
+    $older = if ($OldCsv) { $OldCsv } else { $scans[1].FullName }
+    $newer = if ($NewCsv) { $NewCsv } else { $scans[0].FullName }
+    $scanRoot = [IO.Path]::GetFullPath($scanDirectory).TrimEnd('\') + '\'
+    foreach ($path in @($older, $newer)) {
+        $full = [IO.Path]::GetFullPath($path)
+        if (-not $full.StartsWith($scanRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $full -PathType Leaf) -or
+            [IO.Path]::GetFileName($full) -notlike $filter -or
+            [IO.Path]::GetFileName($full) -like '*-Errors.csv') {
+            throw "Selected permission scan is outside the $Side inventory or has an unexpected name: $path"
+        }
+    }
+    if ([string]::Equals([IO.Path]::GetFullPath($older), [IO.Path]::GetFullPath($newer),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Previous and current permission scans must be different files.'
+    }
+
+    $historyRoot = if ($Config.Output.ContainsKey('PermissionHistoryComparisons') -and
+        -not [string]::IsNullOrWhiteSpace([string]$Config.Output.PermissionHistoryComparisons)) {
+        Resolve-MigrationPath $Config.Output.PermissionHistoryComparisons
+    } else { Resolve-MigrationPath 'comparisons\permission-scan-history' }
+    $timestamp = New-MigrationRunTimestamp
+    $outputDirectory = Join-Path $historyRoot ('{0}-{1}-PermissionChanges-{2}' -f $Config.Name, $endpointType, $timestamp)
+    $logPath = New-MigrationLogPath -Action 'ComparePermissionScanHistory' -Timestamp $timestamp
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    Start-Transcript -Path $logPath -Force -WhatIf:$false | Out-Null
+    try {
+        Write-Info ("Run log: {0}" -f $logPath) Cyan
+        Write-Info ("Comparing $Side permission scans: $older -> $newer") Cyan
+        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_permission_inventory_history.py') `
+            -Arguments @('--old-csv', $older, '--new-csv', $newer,
+                '--output-directory', $outputDirectory,
+                '--comparison-name', ('{0}-{1}-permission-history' -f $Config.Name, $endpointType))
+        Write-Info ("Permission scan history comparison completed: {0}" -f $outputDirectory) Green
+        if (-not $script:LauncherNonInteractive) { Open-DirectoryInExplorer -Path $outputDirectory }
+    }
+    finally { Stop-LauncherTranscript -Path $logPath }
+}
 # SharePoint Server snap-ins are unavailable in PowerShell 7. Re-enter the same
 # launcher under Windows PowerShell, retaining explicit switches and literal paths.
 if ($PSVersionTable.PSVersion.Major -gt 5 -and $Action -match '^Scan(Source|Target)(Files|Permissions)$') {
@@ -1260,6 +1318,7 @@ try {
         'ComparePermissions' { Invoke-PermissionComparison }
         'CompareSourceHistory' { Invoke-FileHistoryComparison -Side 'Source' -LogAction 'CompareSourceHistory' }
         'CompareScanHistory' { Invoke-FileHistoryComparison -Side $HistorySide -LogAction 'CompareScanHistory' }
+        'ComparePermissionScanHistory' { Invoke-PermissionHistoryComparison -Side $HistorySide }
     }
 }
 catch {
@@ -1275,8 +1334,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfA66pM/QwuPzR
-# s2cZpvlzZ12IoQQ5bHdmbsqUOKhCSaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7EOyEkx+TIvlz
+# p5ANF7LYioWZ+wiI7/0TpdvQHGBC2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1409,31 +1468,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINBBZ6Z/ID2SQ9FOctLUafVqS20oEvBmFghJy03ep/ByMA0GCSqG
-# SIb3DQEBAQUABIIBgJQCVTXF/4dlh176FNqx5GMZ0GKnBva2eotY1DC6BSgAgnpX
-# miJ87Yqmy6rNwEL5QTZM7VGOxCOg3VIs3Rqx0N0T9Eh9DcFOgQi2wqCBwTgcRUFL
-# vT+Hk9AThwAz/TtsoxFRHqkv81MRlBa1DTYvX+ynH9d8AU0XvHPXS2ZkAwnuh+9H
-# 1Y45+Mr8a1iJlqSKcx5zceTconXn76dFRKRPrQ5XxeHxWJW5abvQrVhkLWk5oDIM
-# pre6gelU4bqKfwaoWPD358nilA5z043LZA9ZeXKwWhS5wAaV+DDGtUvvMcY1b7yS
-# 32GN8+Pbgo416PJoWTW44njzwjFq/HgAXppglJxkYxoRxNBlS7SCIol43fZpNZ2z
-# SXJ1ttwmRJosEs5gIhRDk06EblV+fwvCFrEylaUPbyqsOCgziCp2KW4tYSv6XRwe
-# K0vn7c9TLngMaY1DoriktVJB9AOcJgE2JoXykDYCHIlKhU5KuiYYNnC366oug1kh
-# T+gB2UVK6ygG8JdaaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEcIAo67Ph+eEi44ikXS2TvTbd0PaDx0n+ui/fjLPbbIMA0GCSqG
+# SIb3DQEBAQUABIIBgGQA4rjKi/cY6mVYOCvETIRkM0K7OPH7kE+ZjwLHGr//yo+/
+# 7VfNMHbSR/IvuZ0MQ46WW19pkK4nX+4LT1sSs4TxCzZP5kcBUfOvm0Dqc19sTXDp
+# uaq/qk/9wQXyq3ow4e8bIwMSDHrKKHG4pqr7K9vegPELG7X6zTUHksWzQkkbVE5N
+# uDk6KXPY+STKavNAI2SYAID3IG1yt2FCDIul+8XGddCXSPCWZ3kjWdyRmMJf3pdf
+# l2aHgoRl0GwiDepbmBtiKK+qYneqdDTLRLBZkoM1k7Fm/BhY+LCSymjg3yPv2jPJ
+# AF8SNjwnM5Gu9OOzjZkd0PtNwqflREwT9C/Xx/zxdd2kyHGwmMSe8OUzJteBAiFA
+# 9pGE7nYUe8/yZ8a4wX3Z/dSt2Idv/yZEO2Iml4hhiF9112ohhcbone1JvjRK4OD4
+# 9jtN6hWQg7OYbzIbpCnss7kQnjORZ/Vd3E7awEkWhDm2lRVER8iOsbys3mzRIz9c
+# B4MtBx59FRLxf82f06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNTI3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDtqd0yy28QiYlLIJT7OHezJFj7mf8a/T6YTP8/
-# OQ+8/DANBgkqhkiG9w0BAQEFAASCAgB8epexriTRZYKPJIJyH/d9PFOwFbf5Kwem
-# N/MtpI3ze1HeY24QLPbxrviI68SM1JZxQXiNoLxD3CcXSML+6BdcbXFqga5vjx7B
-# 8GYc97+ZsELBg04zh+ORDVvN5Ply2qqs1jaXMGMfWUvE3Sesne6zRrUPV+sQOjWh
-# YtAVJqjFsxhBBrTAZYLNVpU1X9GVUbA2FcutVaPwSz9G/q3oZ5Rw9pZAquFgyvIw
-# T09L8g77lfB4VuL15lsITV2PA9IeeDPkh9j80hKutwlc4xefOx6iZ0jjWuDHU+EM
-# /pYofMkH+XH/Tm5a7T4Rftrr5w+Drg8ZPPviEH4YfbZ3379DmTQNQa8HuT0VqFcw
-# nOU1CuXi3ktQdaRSDpkPURad3d/oHiXWvpiri42iqsxys3iJ1LnOeZPd1971Nb/1
-# FQYcTBg9UcqSib1QenmxUY4Cl/pF6u7O2RaykZcQujja1PDkqUc53ZVDw5whqAxC
-# of/mEL9ilxBiRN5/HDLIsB1kwjLdvAIqmeGmW23zmK5LDO7eAwDDbFG5EtKTLG0T
-# XiNg0Qf8bMUVLoT3b1N5xubgm9iEwt90ZKDNdJpUtnIZEZgOE6zNIp6C1ksBHgKU
-# I4oAJqdbfQf016fP8oI7fQKn1A/ovXeIYkVHRlSpMXeSig/fB7wyt6wFLwvbasMK
-# 0KfNwnlqew==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEx
+# NDZaMC8GCSqGSIb3DQEJBDEiBCBauptAXv4zaz7TQtkWkSPwlKrkNHL/NP1JqWAc
+# elPWGDANBgkqhkiG9w0BAQEFAASCAgAXt0VfyRF1SW7swC3xhYlNfzkC6fb/H4wY
+# 85zr/LVNb4r0N10fv7eFT+II5pSLkY1blDfvZbCp46/TA2BwOlzI/oTOn4bEeadR
+# zdslKibAmVoyQA11MdskTUI/MdGXBEdLIv8yCUZUhdVCbJMccib6s4qNIhMGf5aH
+# HIsBYyZy0/+ogPf5k4yitm5Y12r7kQkjNYOIrJ2swz6RkWh2yxXDBOuyaDbyIDY2
+# n1UwOrzaf4ZvlIQVZJ0OUkDKEzxRczZqLGMUxT7dCn2ux15+iUY3RWmNTxOy/1u0
+# YOBN3/qQ6OsU1SGLDv7A7XOhLLxzhKX/mxAtL1YUfNblwQ0xZky3x0Zmydj4RBEp
+# pgUnt8oZIsQgTrhQyCcHB+94fT6t2gCJ1z2m1bXZggsuKJK38kGzeINABHmpfRDx
+# N9lcOZv0CSWz3ACHIo6i2sWwG2d8NV3YA4W2zDBSZ6kUbrYmlTKlbmSfKAr2JVgh
+# 2clhGhp5C+tgwqzgaHD//shBQ/PNYhvlgdLqJUQm5/SwD1bD8BSNEC4O6X352nQ2
+# sAVWcdq5vhvzglRvCUpp3Cis2Me8OVp03yJApF011yWDc5yGU16XppONNElbI5eL
+# +lzl4vFBEsMWEZHBl3DuVHCeEYyFzc7HihG5vCeMUBVdTbS5rlrRJBT5yTe+NXag
+# IpDzcQFP7w==
 # SIG # End signature block

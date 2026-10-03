@@ -42,6 +42,9 @@ and `Comparison.MaxScanAgeHours` to limit absolute scan age. Launcher scans
 write a hash-verified `.csv.manifest.json.txt` receipt beside each CSV;
 legacy scans use the timestamp in their filename. Permission comparison has
 equivalent `PermissionMaxScanAgeDifferenceHours` and `PermissionMaxScanAgeHours` settings.
+The GUI can also compare two permission scans from the same Source or Target
+endpoint. `Output.PermissionHistoryComparisons` selects the report folder;
+this offline comparison does not require a SharePoint or Entra connection.
 
 `Comparison.ModifiedDateToleranceMinutes` flags matched files where the
 destination is older than the source. It also normalizes source `Modified`
