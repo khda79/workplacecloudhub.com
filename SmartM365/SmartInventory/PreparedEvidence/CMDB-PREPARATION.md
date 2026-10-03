@@ -38,6 +38,16 @@ The source root must contain the 17 individual current receipts declared in
 no extra aggregate source file, no scheduler change, and no receipt history.
 Preparation assembles the verified set in its output `current.json.txt`.
 
+The Python CSV reader accepts native fields up to 64 MiB by default (including
+large AD membership JSON), without truncation. It restores the caller's CSV
+limit after reading; schema, immutable-key, tenant, row-count and hash checks
+remain mandatory. Both source validation and table generation use this reader.
+
+SPO inventory 0.33 requires Core 1.0.67 to write UTF-8 BOM before publication.
+Uploaded, weekly-snapshot and receipt bytes must agree; the other collectors'
+default UTF-8 encoding is unchanged. Previously mismatched receipts require a
+new producer acquisition, not manual CSV or receipt repair.
+
 The shared helper starts a receipt before acquisition with `Status=Running`.
 Completion can declare `Status=Completed` only after explicit full-scope
 qualification, zero collection errors, and publication of every required

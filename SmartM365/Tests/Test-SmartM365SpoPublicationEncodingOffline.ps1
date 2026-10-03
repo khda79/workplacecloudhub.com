@@ -1,0 +1,316 @@
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+Offline byte-level tests for SPO publication and CMDB receipt encoding.
+.VERSION
+1.0.0
+.NOTES
+Loads AST functions only. Never imports Core, reads tenant configuration,
+executes a collector, connects to Graph, or uploads to SharePoint.
+#>
+[CmdletBinding()]
+param()
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$root = Split-Path $PSScriptRoot -Parent
+
+function Read-TestFunctions {
+    param([string]$Path, [string[]]$Names)
+    $tokens = $null; $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if ($errors.Count) { throw "Parser failed: $Path" }
+    foreach ($name in $Names) {
+        $node = $ast.Find({ param($item)
+            $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name
+        }, $true)
+        if (-not $node) { throw "Missing function: $name" }
+        $node.Extent.Text
+    }
+}
+
+$definitions = @(
+    Read-TestFunctions (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1') @(
+        'Write-SmartM365CsvAtomically', 'Publish-SmartM365Csv', 'Export-SmartM365Csv')
+    Read-TestFunctions (Join-Path $root 'SmartInventory/M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1') @('Export-SpoEntityCsv')
+    Read-TestFunctions (Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') @('Get-SmartM365CmdbCsvReceipt')
+)
+$module = New-Module -Name SyntheticSpoEncoding -ScriptBlock {
+    param($Definitions)
+    foreach ($definition in $Definitions) { . ([scriptblock]::Create($definition)) }
+    $script:Uploads = [Collections.Generic.List[object]]::new()
+    $script:Weekly = [Collections.Generic.List[object]]::new()
+    $script:Retention = [Collections.Generic.List[object]]::new()
+    $script:AppendCalls = 0
+    $script:FailUpload = $false
+    $script:DryRun = $false
+    function Assert-Test { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
+    function Test-SmartM365MaxItemsMode { return $false }
+    function Limit-SmartM365RowsForMaxItems { param($Data) return $Data }
+    function Add-SmartM365TenantKeyToCsvData {
+        param($Data, $Columns)
+        $identity = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')
+        $rows = foreach ($row in $Data) {
+            $value = [ordered]@{TenantKey='synthetic';OrganizationKey='test';EnvironmentKey='test';TenantId='synthetic-tenant'}
+            foreach ($property in $row.PSObject.Properties) {
+                if ($property.Name -notin $identity) { $value[$property.Name] = $property.Value }
+            }
+            [pscustomobject]$value
+        }
+        return @{ Data=@($rows); Columns=@($identity)+@($Columns | Where-Object { $_ -notin $identity }) }
+    }
+    function Assert-SmartM365CsvDataCompleteness { param($Data,$Columns,$TimestampedPath,$LatestPath) }
+    function Get-SmartM365CoreContextValue { param($Name,$DefaultValue) return 2 }
+    function WriteLog { param($Message,$Level) }
+    function Write-SpoLog { param($Message,$Level) }
+    function RemoveOldFiles { param($Path,$Filter,$KeepCount,$LogFile) }
+    function Invoke-SmartM365SharePointCsvUpload {
+        param($LocalFilePath)
+        if ($script:FailUpload) { throw 'Synthetic upload failure' }
+        $bytes = [IO.File]::ReadAllBytes($LocalFilePath)
+        $record = [pscustomobject]@{
+            LocalFilePath = [IO.Path]::GetFullPath($LocalFilePath)
+            SHA256 = (Get-FileHash -LiteralPath $LocalFilePath -Algorithm SHA256).Hash
+            HasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191)
+        }
+        $script:Uploads.Add($record)
+        return $record
+    }
+    function Remove-SmartM365SharePointTimestampedCsvOlderThan {
+        param($TimestampedPath,$RetentionDays)
+        $script:Retention.Add([pscustomobject]@{Path=$TimestampedPath;Days=$RetentionDays})
+    }
+    function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
+        param($SourceFiles,$TimestampedPath)
+        $script:Weekly.Add((Get-FileHash -LiteralPath $SourceFiles[0] -Algorithm SHA256).Hash)
+    }
+    function Add-SpoHistoryCsv { param($Data,$Path,$Columns) $script:AppendCalls++ }
+} -ArgumentList (,$definitions)
+
+$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Spo-Encoding-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($tempRoot)
+$oldGenerated = Get-Variable csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue
+$oldLog = Get-Variable LogTextFile -Scope Global -ErrorAction SilentlyContinue
+$global:csvGeneratedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$global:LogTextFile = ''
+try {
+    & $module {
+        param($TempRoot)
+        $columns = @('Id','Title')
+        $data = @([pscustomobject]@{Id='site-1';Title=('Synthetic ' + [char]0x00E9 + ', "quoted"' + "`r`nsecond line")})
+        foreach ($empty in @($false,$true)) {
+            $folder = Join-Path $TempRoot $(if ($empty) {'empty'} else {'populated'})
+            $script:Uploads.Clear(); $script:Weekly.Clear(); $script:Retention.Clear()
+            $rows = @()
+            if (-not $empty) { $rows = $data }
+            $result = Export-SpoEntityCsv -BaseFileName 'Synthetic_Sites' -Data $rows -Columns $columns -TimestampedFolder $folder -LatestFolder $folder -Timestamp '20260115_120000'
+            Assert-Test ($script:Uploads.Count -eq 2) 'Expected timestamped and latest simulated uploads.'
+            foreach ($record in $script:Uploads) {
+                Assert-Test $record.HasBom 'SPO bytes were not finalized before upload.'
+                $receipt = Get-SmartM365CmdbCsvReceipt -Path $record.LocalFilePath -TenantKey 'synthetic'
+                Assert-Test ($receipt.SHA256 -eq $record.SHA256) 'Receipt hash differs from uploaded bytes.'
+                Assert-Test ($receipt.Rows -eq @($rows).Count) ("Logical rows were changed: expected={0}; actual={1}; empty={2}." -f @($rows).Count,$receipt.Rows,$empty)
+            }
+            Assert-Test ($script:Retention.Count -eq 1 -and $script:Retention[0].Days -eq 7) 'Timestamped SharePoint retention changed.'
+            $imported = @(Import-Csv -LiteralPath $result.LatestPath)
+            if (-not $empty) {
+                Assert-Test ($imported[0].Title -ceq $data[0].Title) 'Unicode, quoting or multiline content was changed.'
+                Assert-Test ($script:Weekly.Count -eq 1 -and $script:Weekly[0] -eq $script:Uploads[0].SHA256) 'Weekly history received different bytes.'
+            }
+            else { Assert-Test ($script:Weekly.Count -eq 0) 'Empty export history behavior changed.' }
+        }
+        $script:Uploads.Clear(); $script:Weekly.Clear()
+        Export-SpoEntityCsv -BaseFileName 'Synthetic_NoHistory' -Data $data -Columns $columns -TimestampedFolder $TempRoot -LatestFolder $TempRoot -Timestamp '20260115_120000' -NoWeeklyHistory -AppendHistoryMode | Out-Null
+        Assert-Test ($script:Weekly.Count -eq 0 -and $script:AppendCalls -eq 1) 'History switches were not preserved.'
+
+        $script:Uploads.Clear(); $script:Weekly.Clear()
+        $result = Export-SmartM365Csv -Data $data -Columns $columns -TimestampedPath (Join-Path $TempRoot 'Default_run.csv') -LatestPath (Join-Path $TempRoot 'Default.csv') -NoWeeklyHistory
+        Assert-Test ($script:Uploads.Count -eq 2 -and -not $script:Uploads[0].HasBom -and -not $script:Uploads[1].HasBom) 'Core default UTF8 encoding changed.'
+        Assert-Test ((Import-Csv -LiteralPath $result.LatestPath)[0].Title -ceq $data[0].Title) 'Default Core content changed.'
+
+        $script:Uploads.Clear()
+        Export-SmartM365Csv -Data $data -Columns $columns -TimestampedPath (Join-Path $TempRoot 'Offline.csv') -Encoding utf8BOM -NoSharePointUpload -NoWeeklyHistory | Out-Null
+        Assert-Test ($script:Uploads.Count -eq 0) 'NoSharePointUpload was ignored.'
+
+        $script:FailUpload = $true; $script:Weekly.Clear()
+        $caught = $false
+        try {
+            Export-SpoEntityCsv -BaseFileName 'Synthetic_Failed' -Data $data -Columns $columns -TimestampedFolder $TempRoot -LatestFolder $TempRoot -Timestamp '20260115_120000' | Out-Null
+        } catch { $caught = $_.Exception.Message -match 'Synthetic upload failure' }
+        Assert-Test ($caught -and $script:Weekly.Count -eq 0) 'Failed upload was hidden or promoted to weekly history.'
+        'PASS: SPO populated/empty bytes and receipt hashes, multiline Unicode, retention, history switches, Core defaults, offline upload switch and failure propagation.'
+    } $tempRoot
+} finally {
+    Remove-Module $module -Force -ErrorAction SilentlyContinue
+    if ($oldGenerated) { $global:csvGeneratedPaths = $oldGenerated.Value } else { Remove-Variable csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue }
+    if ($oldLog) { $global:LogTextFile = $oldLog.Value } else { Remove-Variable LogTextFile -Scope Global -ErrorAction SilentlyContinue }
+    $resolved = [IO.Path]::GetFullPath($tempRoot)
+    if ((Split-Path $resolved -Parent) -ne [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') -or
+        (Split-Path $resolved -Leaf) -notlike 'SmartM365-Spo-Encoding-*') { throw 'Unsafe test cleanup target.' }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
+# SIG # Begin signature block
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgvE4z93dQJH7n
+# Ry8aoFhEDnou74Nd3By2kdCDelI4kqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
+# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
+# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
+# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
+# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
+# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
+# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
+# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
+# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
+# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
+# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
+# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
+# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
+# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
+# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
+# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
+# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
+# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
+# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
+# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
+# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
+# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEILAlrAjYLf2URCgHca1ZXEsabQLTIT+CbyqQQ1OmgVCvMA0GCSqG
+# SIb3DQEBAQUABIIBgDWGqdqO2iYBVogqEW/3ARt8kUZw/Hgw1LsskHdgEyGml9Ql
+# HljzZ2nq7NiAaPKlQjqBVc/JLDUPzDO1MR8ytD29EykIBPlNkz0LBBm6c25gkPE9
+# /l7ryfTAZfXYLrxHfl7ItW6Nj+xH7zdITDiQ9VRGn0+pqfYukvIxwE6GzOYsx214
+# w6H6LSwbVaesof480hNqVJ+EHLJJ/y9Rzfd0XwcLNcJpwERUd8fHPqSRi+P7/MBG
+# JB0TkEt5r0NEZahNmvCyGC62xY+g5hebpb0868hpGvMeGV/mHCJLzPcO53B6yG1e
+# 4mB0tY1gAWxNhcwT7W2YdOmqML4w65xEd/lHka9JUiKfGZKnI7zubusVbGuu4g4M
+# hoUFSR+3QIqHbx1up5n5Pa24n6Qbww5Ge7xRPywcfU8dFFM2MeXt9Z9XCW0eCXkO
+# LV++BL2fQMtj1rjxBZweLLq8Px5+Wm6ezyeFnv276Hh/Qm0IuNG7p+dxGnVrsGFE
+# JYH3P0jw1E2IXMLng6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMTU1
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAmNboZiflDE+0PvktnQolE6j4+ra6iPI/FyHd4
+# dkpz+DANBgkqhkiG9w0BAQEFAASCAgAYTdRBKxhOcyOLT3f92H0kbwO7JXM8nOln
+# XNgQ8j5rgcSNNItj/aKZRszQcobnmLRrG5zWb7D3dqwoBdwZI9uszT4z68d2kQaf
+# fAvwKqL6DRCJTbp2bQSf+QAKsLPH6KvbM9dm+bWx9yoo7M1RtOzc4MaoHgQDdkUf
+# riwlXDPFeh7oe3wEDT/NSzFhTEWp224gapQtKSk3pcYKeBGbRK7SsSKNriDruEcW
+# C3pX/OqW1l3L30PiiyCeJC8zs9UjC3a3a9KfTJH4apW+VvJlcFlC36r68EoCDqyA
+# gQGM06JyETjI+UxUeDrjkZbYQ/4uJw4EcJ2xCynZciKbZ98vMDsVqzAuyItmLq4y
+# GeZU/14ICekrRWLkeoLoqe4msbqx3SNwUP22O2RcBjOXnJ/2MV1vSMQBUtwKWG6u
+# ib65zLClfG9zlFvdtJZY3TIvTAeE30pRYmUE24w2FgZJST0DWMOzt0f9e/xn8ott
+# kYfipn+JJw3jdQyqMNFfAvhvBReq5C3g8nhDIEGLrq0mMgLfMt2KmoOXtBTHhYTQ
+# fDH16TRUcL2D1f1e6lcvgYdpS+D5ojVX7a8BCLio7jZ1L4vrxnXH5NfjmDPuJo+o
+# yBZRh85ucQ1loWZHFZ0dP9SNbMdun11kW4Zs0hB84m5T4L69uClUUwrXgk4ewOAz
+# 4KirfSdsUQ==
+# SIG # End signature block

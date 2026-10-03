@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline producer-receipt tests for PowerShell 5.1 and 7. No operational imports.
 .VERSION
-1.0.3
+1.0.5
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored; no operational module is imported.')]
@@ -119,6 +119,7 @@ try {
         'script:Stat_DetailAppsFromCache'=0;'script:Stat_DetailAppsSkippedByResume'=0
         'script:CmdbReadinessDeviceExportComplete'=$true
         'script:LocalMailboxIssues'=@()
+        'script:CmdbLocalMailboxSourceComplete'=$true
         hardwareRows=@([pscustomobject]@{CollectionStatus='Collected'})
         'script:DataQualityRows'=@([pscustomobject]@{ReportName='EADevicePerformanceV2';Status='Collected'},[pscustomobject]@{ReportName='EADeviceScoresV2';Status='Collected'})
         selectedReports=@([pscustomobject]@{Name='Office365ActiveUserDetail'})
@@ -129,7 +130,7 @@ try {
         'SmartM365-Intune-DiscoveredApps-Inventory.ps1'=@{DeviceDetailMode='Top';'script:Stat_DetailAppsFromCache'=1;'script:Stat_DetailAppsSkippedByResume'=1;MaxApps=1}
         'SmartM365-Licences-Inventory.ps1'=@{TopUsers=1}
         'SmartM365-EXO-Mailboxes-Inventory.ps1'=@{Top100=$true;PermissionsOnly=$true;DebugUPN='one-user'}
-        'SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'=@{IncludeRemoteMailboxes=$false;ForceOverwriteCSV=$false;DetectAllDomains=$false;IncludedOrganizationalUnit=@('one-ou');TargetDomains=@('one-domain');'script:LocalMailboxIssues'=@('collection issue')}
+        'SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'=@{IncludeRemoteMailboxes=$false;ForceOverwriteCSV=$false;DetectAllDomains=$false;IncludedOrganizationalUnit=@('one-ou');TargetDomains=@('one-domain');'script:CmdbLocalMailboxSourceComplete'=$false}
         'SmartM365-SPO-Inventory.ps1'=@{MaxSites=1}
         'SmartM365-Teams-Inventory.ps1'=@{MaxTeams=1}
         'SmartM365-EndpointAnalytics-Inventory.ps1'=@{'script:DataQualityRows'=@([pscustomobject]@{ReportName='EADevicePerformanceV2';Status='Collected'},[pscustomobject]@{ReportName='EADeviceScoresV2';Status='UnavailableInTenant'})}
@@ -166,7 +167,7 @@ try {
                 Assert-ReceiptTest (-not [bool](& $scopeModule {param($e,$v) Test-CmdbScopeExpression $e $v} $expression $values)) ('Restricted scope accepted: '+$producer.Script+' / '+$name)
             }
         }
-        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}else{'1.0.65'}
+        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}elseif($producer.Script -eq 'SmartM365-SPO-Inventory.ps1'){'1.0.67'}else{'1.0.65'}
         Assert-ReceiptTest ($ast.Extent.Text -match ([regex]::Escape("-MinimumVersion '$minimum'"))) ('Missing module guard: '+$producer.Script)
     }
     "PASS: $script:checks offline producer receipt checks; PowerShell $($PSVersionTable.PSVersion)."
@@ -184,8 +185,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCita3zKM0ejTj
-# eqGlFj7Cdu0OxAeLnKC5rQkofTkhcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqzjFikZIkD7gb
+# kGb5+4qNuujv8Gy4gsYro1krXzv6U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -318,31 +319,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA770yp9iyFbzeR8C1B7LuhrFaM0cviKBR4TIrqycnm9MA0GCSqG
-# SIb3DQEBAQUABIIBgBJQU1z9U+laV9kqcCcpYyv3jm2FUBG8T1wn7/WBFOGJMqyt
-# h6LUAyK0awWh24vt9t+wu+0loEoDYkZLk+vKsrdhkLDXkcf01D/iZY9FtzeL3hoV
-# o9GnhYKSNXZBtASwleWqHFt6qouuWBeazc6RcwC5ri/7AyMT4RnEVAjT9jrpDIAE
-# loQWzFJ8Kcy3P8JGWoYMpKqGfQzPp4ZtMX8FdLdZoQS4hk8d7Jbf1H4T5IN8fylQ
-# dBKdPlzKbkx1rO1RiUU3h2SzUa3XSlt/QcjrMLaKa+EzhXQHP5FL00L32DemFTKW
-# 2lUxadK16m1wybVxCsFS+mvekbpLX5hqUzh30vaV9OgY38ZwNPQ26wybN1CbOqYQ
-# WJBG8wIvXWyajGPnam3R8nNZqScHVqMiYFsJ3hPOwsN238sFjMAhMm935/p05cT2
-# 0kzH40XWbF7Tgj4BS8vsqFEdAStMhD/Cs1FRuJKJEvAsbt4LKoIw6caJJpe6d9Si
-# C5NnB8zE1pAI6tCeB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBHVTRqUle5AyKycJJnqeqky76kqRfxyY2dad9f+XWixMA0GCSqG
+# SIb3DQEBAQUABIIBgKSB5YbEQRjqvq/9CdxKxfXFil/djPQ2KBdUDIKPixUtD/e0
+# CfTVdjeVcKmT8p5EBf2vMbxG9OS+unT4p9pflmbpfeaMbH+7aiAQ2cFF/jvojFm9
+# K57OUxFoI3AapYtbu0G7Dg1muk6kpcotAa00m+8FMrSI4FYpVvitNycIyM0jLZrX
+# vQDoSeauqnpbzu2BS+X9UScpj79NbVKf5r/r1P/dG0oJ8mtPiU5uiyz31+d7WCdC
+# sjPRDVQHqDcGwAduHiQ1zNRi7dvZgCYcr7vKaJqkLoZOKAplcrC6WhuP6F9JoTwA
+# vLHmYqK5JDxqlItXgBZoABpJ0L5gea9toR1UTkrHNyKj2Ea5+a0caKZZP5KiorPu
+# FwLe4Z+p5OaF7FxirUv6eZuDblipC7CLvKazY/N6ixeRZnRCCu/BF8o/lNSmhV91
+# YP7EKLVA+mD0KITkZXJJOKZGTKT3UQ3+wmUzzLcBeCr1wIO1c5tRZ/364zIDnazr
+# rfDADKIVacVgFiM3D6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
-# MzNaMC8GCSqGSIb3DQEJBDEiBCAPEoY+NS/116tW7SDR79RCw3596fra2uSjg5Iq
-# H5Am3jANBgkqhkiG9w0BAQEFAASCAgCIeiE9yg72TIfzwoA5ITAiHxrkFpgweIIn
-# /6x01S/mvk8tTzezeNXrkW4YYG1gZ3sRzov6684LkU6vrVxD0scml9yaNUfLpaTE
-# 8SpfFRRbet4mZSzcw8WB0GMdYsCowz6bQjxjZlo4G0vdlJ0AycAxZo/S51UHLroa
-# E5IGey49G8pcs/92NdXxeayuGxWetzHECTdLt4bHHxMDcPlOPzIAjon4//LOcUWo
-# WD0SHG+A4ouDMgcbhjyp4EHa5MrB9lTLDG1+kdxaxnAgq+7E5HGY/MHGWvW3hp/4
-# nfWn946fDRndi0kD29gh9nhRVhoql9ZWXFnL+gP4nx/gW+5nE2y3yf/gHr/mLuaP
-# n/0zK9FFtTQetLwbTNmC7ozGbJcA5ympE9LySI3IaHycU7g8tr0jYpZ+gkB7jJsc
-# LdsTly0WS6EvwXjD1/5ozfGo+Q0jX5CvcpF6PQc58wLWTgp1zFlPLZxfeExmI8ZU
-# 9Gnux3zjbbbcaNC9/UbheOmzmrq01RZORHSE/MtcWI0I0x27oUPHLJ1vkCHI6IN3
-# 3xFQ+NoEJoZfCOW47tM9m6lntGO3Fg7zrFu75qsfi8izsVQAhutnzvkch1odtMcK
-# MxoXyIEU4zhumoJf8u7oLVtD2kHKkN946lvW4KMLHD/BABrRQTy50utn8Wiy0IcT
-# vKumVyAe0g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjQ1
+# NDFaMC8GCSqGSIb3DQEJBDEiBCDvBillSDgQPqfE/+0GXMv37YupZLQzWOrvy/8O
+# TXixrTANBgkqhkiG9w0BAQEFAASCAgA7t9HXfbSJU7wyrV0JsqJLDbqNZFqhDzCB
+# UqbPUnVqx9oKI52WTWzkjCjm9aBHzVXxu0Qt5hGjxHjG9ZAv358wncCN9mqMHPq2
+# nOTKDNmK1xsrzOORGrVCTg9fYfiwwTORAOlL6uzVX2J5+UXkEvMUfD8AEuOihUNp
+# pWtCr2sXw85yWzz9Db95nwwucSptQ9JyClQE5M+KGKe/OMMVy/+jufSuHsFJmD2Z
+# aiKrMpNMg/kjhUnwXjsyfhJHc9wusBTdST39UpmvjQt2zJg/ECgkLNLgfn3yVYTo
+# gXspp/991Ftr8Zdt3AdCP++/XSYyCXLvATsnV2mJ7mQfyKDL/GqSFbNpuQDimEvb
+# vhCfHeMZpxEmEEr2q0qYgw0MELBQpshs++IKXSgHtH9nkNOtTRY6xERFQOv8tvZX
+# creGjW+b0wvKqcao9DvkchwNG+eKNOqQEB/5jKgVgCKb3FX/n4Nsxci9Z9m6V0SF
+# VLrx+8LLRP07+D+ThTy2HG+YH2iqIto76uVn1Bbe/fKBU52DDXTS7VcLgUzaqEj7
+# CufdgS/b8QyhFsg0ISZFNZ0YnUOGnCe47ebfmkS6lTrbzmdZrmWIjTySc3ansIaC
+# CwWRtMG4ZDn3BQv9i7ZI4HWSm6G6dkbWUFrGbE+hIKWF8XNyxMBBJnrVjcg3qibw
+# /eZO5sY2XA==
 # SIG # End signature block

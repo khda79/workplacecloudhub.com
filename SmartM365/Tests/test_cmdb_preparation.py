@@ -19,6 +19,56 @@ NOW = dt.datetime(2026, 1, 15, 12, tzinfo=dt.timezone.utc)
 IDENTITY = {'TenantKey':'synthetic','OrganizationKey':'test','EnvironmentKey':'test','TenantId':'synthetic-tenant'}
 
 
+class CsvReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.gettempdir()) / ('SmartInventory-Cmdb-Reader-' + uuid.uuid4().hex)
+        self.root.mkdir()
+        self.path = self.root / 'synthetic.csv'
+
+    def tearDown(self):
+        if self.root.parent.resolve() == Path(tempfile.gettempdir()).resolve() and self.root.name.startswith('SmartInventory-Cmdb-Reader-'):
+            shutil.rmtree(self.root)
+
+    def test_large_multiline_quoted_membership_is_lossless(self):
+        value = 'member,"quoted"\r\n' * 200000
+        previous = csv.field_size_limit()
+        with self.path.open('w', encoding='utf-8-sig', newline='') as stream:
+            writer = csv.writer(stream)
+            writer.writerow(['TenantKey', 'MembersJson'])
+            writer.writerow(['synthetic', value])
+        before = pipeline.sha(self.path)
+        self.assertEqual(list(pipeline.rows(self.path)), [{'TenantKey':'synthetic', 'MembersJson':value}])
+        self.assertEqual(pipeline.sha(self.path), before)
+        self.assertEqual(csv.field_size_limit(), previous)
+
+    def test_reader_restores_limit_after_malformed_row(self):
+        previous = csv.field_size_limit()
+        self.path.write_text('TenantKey,MembersJson\nsynthetic\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'Malformed logical CSV row'):
+            list(pipeline.rows(self.path))
+        self.assertEqual(csv.field_size_limit(), previous)
+
+    def test_reader_restores_limit_when_closed_early(self):
+        previous = csv.field_size_limit()
+        self.path.write_text('TenantKey\nsynthetic\nsynthetic\n', encoding='utf-8')
+        reader = pipeline.rows(self.path)
+        next(reader)
+        reader.close()
+        self.assertEqual(csv.field_size_limit(), previous)
+
+    def test_reader_retains_a_finite_field_limit(self):
+        previous = csv.field_size_limit()
+        try:
+            csv.field_size_limit(512)
+            self.path.write_text('TenantKey,MembersJson\nsynthetic,' + 'x' * 1025 + '\n', encoding='utf-8')
+            with mock.patch.object(pipeline, 'CSV_FIELD_LIMIT', 1024):
+                with self.assertRaises(csv.Error):
+                    list(pipeline.rows(self.path))
+            self.assertEqual(csv.field_size_limit(), 512)
+        finally:
+            csv.field_size_limit(previous)
+
+
 class PreparationTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.gettempdir()) / ('SmartInventory-Cmdb-Tests-'+uuid.uuid4().hex)
@@ -329,6 +379,31 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
                                       for value in ('71','88')]
             self.write_inputs();self.prepare()
         self.unchanged_after(reject,'Duplicate immutable key: Intune_EndpointAnalytics_DevicePerformance.csv')
+
+    def test_native_large_ad_group_fields_pass_validation_and_generation(self):
+        dns = [f'CN=member-{i},' + 'OU=Synthetic,' * 25 + 'DC=synthetic,DC=invalid' for i in range(10000)]
+        members = json.dumps(dns)
+        self.assertGreater(len(members),3300000)
+        group_sid = 'S-1-5-21-1-2-3-2001'
+        self.inputs['ad_groups']=[dict(ObjectGUID='ad-group-1',ObjectSID=group_sid,Name='Synthetic group',MembersJson=members)]
+        self.inputs['ad_members']=[dict(GroupObjectGUID='ad-group-1',GroupSID=group_sid,MemberDistinguishedName=dn,
+            MemberObjectGUID='',MemberSID='',MemberObjectClass='user',MembershipKind='Direct',
+            ResolutionStatus='UnresolvedOrExternal') for dn in dns]
+        self.write_inputs()
+        path=self.source/'AD_Groups_AllDomains.csv'
+        before=pipeline.sha(path)
+        self.prepare()
+        self.assertEqual(list(pipeline.rows(path))[0]['MembersJson'],members)
+        self.assertEqual(pipeline.sha(path),before)
+        self.assertEqual(self.table('ADGroupSource')[0]['ObjectGUID'],'ad-group-1')
+        self.assertEqual(len(self.table('ADMembership')),len(dns))
+
+    def test_large_ad_group_fields_do_not_weaken_duplicate_key_rejection(self):
+        def reject():
+            row=dict(ObjectGUID='ad-group-1',MembersJson=json.dumps(['x' * 200000]))
+            self.inputs['ad_groups']=[row,dict(row)]
+            self.write_inputs();self.prepare()
+        self.unchanged_after(reject,'Duplicate immutable key: AD_Groups_AllDomains.csv')
 
     def test_different_analytics_reports_for_one_device_are_not_duplicate_keys(self):
         self.inputs['analytics']=[dict(ReportName='EADeviceScoresV2',DeviceId='md1',EndpointAnalyticsScore='71'),

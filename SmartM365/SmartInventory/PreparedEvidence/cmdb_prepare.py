@@ -13,12 +13,14 @@ import shutil
 import uuid
 from pathlib import Path
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
 MANIFEST = 'current.json.txt'
 UTC = dt.timezone.utc
+# Native AD group membership JSON can exceed Python's 128 KiB CSV default.
+CSV_FIELD_LIMIT = 64 * 1024 * 1024
 
 
 def load_json(path):
@@ -44,14 +46,19 @@ def utc(value):
 
 
 def rows(path):
-    with Path(path).open(encoding='utf-8-sig', newline='') as stream:
-        reader = csv.DictReader(stream)
-        if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
-            raise ValueError('Missing or duplicate CSV header: ' + Path(path).name)
-        for row in reader:
-            if None in row or any(value is None for value in row.values()):
-                raise ValueError('Malformed logical CSV row: ' + Path(path).name)
-            yield row
+    previous_limit = csv.field_size_limit()
+    csv.field_size_limit(max(previous_limit, CSV_FIELD_LIMIT))
+    try:
+        with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
+                raise ValueError('Missing or duplicate CSV header: ' + Path(path).name)
+            for row in reader:
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError('Malformed logical CSV row: ' + Path(path).name)
+                yield row
+    finally:
+        csv.field_size_limit(previous_limit)
 
 
 def header(path):
