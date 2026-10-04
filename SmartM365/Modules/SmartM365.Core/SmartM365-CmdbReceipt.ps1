@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only CMDB acquisition receipts. Dot-sourced helper.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
 #>
@@ -125,7 +125,7 @@ function Complete-SmartM365CmdbSourceReceipt {
         $document.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
         $document.Status=if($complete){'Completed'}else{'Failed'};$document.IsPartialInventory=-not $complete
         $document.Errors=if($complete){0}else{[math]::Max(1,$ErrorCount)};$document.Scope=$context.Scope
-        $document.Qualifications=if($context.ContainsKey('Qualifications')){$context.Qualifications}else{@()}
+        $document.Qualifications=@(if($context.ContainsKey('Qualifications')){$context.Qualifications})
         $document.Error=$reason;$document.Files=@($files)
         Write-SmartM365CmdbReceiptDocument $context $document
         if(-not $complete){WriteLog -Message "CMDB source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
@@ -136,8 +136,8 @@ function Complete-SmartM365CmdbSourceReceipt {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0QmVJXvgUG74+
-# 6Y+NRkfnXeqPCfKJ+IaOfoY6b/qX8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQbAwqKjaoHRXL
+# DWqpd8GOIDOFESEzs8s9x7okj1pJtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -270,31 +270,31 @@ function Complete-SmartM365CmdbSourceReceipt {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAtia8vyFEubiZowXsDNPAAXMhSjbebZg1dc230XzuOsMA0GCSqG
-# SIb3DQEBAQUABIIBgDqg2FROS+gBYimosPyGa2DVyzBp88KDjI/a8fsB5FWk6WR8
-# U8senMgnRtu1b7trWnAJstJsm9zHe559GTfQSB2KTizbsAr7WeYj8g2RjeEV8eFy
-# Xc40cbPDVJCfe7rBLvmcCi4UG0x4FRGJxN225Qwo4InxypoVqBadAgLMRIqq0kCx
-# V8V4i8WmYyVo10MpEn/dPQrW11BfOdWnINnB6P5GWWEejh7KKEXj4JgtlhJo3r0s
-# k6yaYKWez7ABE06VUQKW6XxxTPlduB8N4vIbPAb0j35OsKnPndvH49G+MQxJpQyz
-# 8F/9tIOHyWA1yMHr0VnALhFr9JxxFTlbtXfoUAwuHAO+1BewB3lRBLVZ+AhRlzaQ
-# znW0te5Qphi98LvULV0I5A4iEL5S7h96SqJESfEWUBvB/yGiiqxz7JYRaq91V9ew
-# 1XP50oProhzPMSNoUhB6oI4q0l5mVQbsxT8NKUHe0oqdd56Cm3/DPucRvBQRBygj
-# pUR8OHPQKMX6drfrM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ2UYqU4mDavufOaulLJolEOO6mtLZrcoSDtjMcUNcsjMA0GCSqG
+# SIb3DQEBAQUABIIBgBBWVN82TpkRi3/EFZDFAm2v1VLCe+ULQRRKB7VDWyAsAcd9
+# iul65OZSIxhh2Xo/2WjlxtAfU1w6Oc502A/YlKbAW9+Io2c0Xbi5tXAhU2Ujhh7q
+# O5i7vkk+JLCtBFYYck750bNc3Z7TnKb5fGOqktXWDJVh3Hx865KtHwlU9m11mwOc
+# wy6XJ430avJXAjwvR4DSA51kFEUxnh8/Bl2R1dZGCDiz4/VlA8j2KmrZNAZ0atZ7
+# HgVY66rt70uWXBa+Dz43X66sYNF2bAf3jX4k33mQKZRaJYPEq0InLs5oAzww34Yh
+# qZFoeeITl4aPCpG8dNrutH5dtww8aWwTVd9J5aRAIWLYYM8+wGGB5ORZSID4Wb27
+# 7KXJIMnMdH4L1HJzzTR65ox0kANhSmY4PdUCSe/Zlz6ZYqakOK4dO2va1tIkRnz+
+# XTPuST1Gg1lT0EbfUNOqEc95xoxseDVzcsG1kuWQ0IwUxdmqjBbSsZbc1xBAnZCJ
+# YhVe+V2W2FOegOrOeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDFaMC8GCSqGSIb3DQEJBDEiBCDYpglbBn7aBqu+nvFIbnriYly4HgHDgXPJbX3r
-# IcldGDANBgkqhkiG9w0BAQEFAASCAgBBg1BmSuuNJSwQ7+IYgdDd/388AxHr+k3C
-# TlaQLiQnJpZ6J1FWQfXEtCsnJOZbSQHg3PQ+WTNXd+VQvvBFQ7lPQmqnyMgEKojl
-# 4IEM6HAbT/8Hx0t9LC8FE3shRapFpiEg1jaqJobEEprngsf3x6XLRR+ooZsRO/tx
-# nGtJ3ZwYuX3ttSKeI2KOXVkbV2mR1F8HM6FWJce8gCUzjbEUoGZnM9CiXwLlhA8y
-# ZIE073bnQeNOf54iXckIkP1elB4u+9nVY8+fXWUi6DxkkhGHL/qS7NEFEYZLGNX5
-# kEgVU71eikzgWZHe0rVyNX86i5F6/PRLN0Mdq53GRnwh9An0IbS9ID9ZN9IHKjUm
-# gzqnA5qrO0TSOx7W0d2BwpMJUbLrjZQvTx3OrtxkLNxuZFWKulF+ZzMDuXrdLFpA
-# CL2KE0x+BjiqoiIZNyIAvX8WPuWJ5wlIZYqTm4DyZJdhV7xI7VU+CYYo2O0pZCql
-# vZqPXw84vNwsJYUIjqXjzrEnWgrDYNMl8kTcykhRBWcj2vqh+gQd0LTADajPktEq
-# wZgF0LkGC5+z3XkkthB6x1vvZ4PDWEasepqlkPsSnNFatEMGOXqes4abRr5Da1wp
-# Xfqr4Elw6FXx3evRqsUEDQmdveyGGhiL1/XoGdhwqXo7p7NpCF/mVDzKBQNeNf4B
-# kWe4+tDUTw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTRaMC8GCSqGSIb3DQEJBDEiBCCKqprMm0cz6Im3IOf+zJihCMBVz2GAbjZL2vs/
+# 5CNp+zANBgkqhkiG9w0BAQEFAASCAgBMq9FyqpE15XPrwkgrbGQ+okNtnExuvo5+
+# DGAcuUL5yBCRV2GXioXFaKd5zZjIo4i3nVm2mUK7tHsgBO4o8iAYeq7d1vRF9HY+
+# K/j9OyA8WzUSczyky6JYWDuRhTGu3jJ2UFw4oumqYxUyBdZWL9o4GKedk6cS7os8
+# XxoKZaNvZX3MUiquvozY+QUjKQRjVPXqcC5YJl/zNEBoEDVbWKkOkvDZQtCVc4a4
+# 8gf7DyTdQImXDIYaOII8PPL0hQB2TBugqNOpqveLYeDjy1ykSKWEX4YhUlExOKb+
+# cJP8pzHEKJ3O7Jewsvja1f7UutvKLbnP3CVwGr26AY2snG2FPfsO40wwss8yTLfM
+# Q3q7xHGBNyx6akEmKK1GNnNBfqI3agZdwDDWOSqlmkPzsBS/iFKV636bzb2ppzKD
+# 26Fc8o5065ef5NAXGsVsuG4qkLpugg42dzLWeoeKAi4qD18MyB5LxGWsAR2JJ0uX
+# 6T8eJLXTgIk81ThflAonAmIDN3v1+z/lk3irXhHFNTKViLYuqytSq/WdODVUkO/9
+# HJenuQcm+NCuyilqbORJ8sauSfaHNoEBdwHgBtiPhxn2076+R+pcZ2Q2HcYc9D1N
+# +gEuviZgmTO+MtgpKN5L/O5BKbwDtdpPYvO9ktaZt4u1hiOb1HcgwnZMqvDvnbDl
+# SBSjYha8LA==
 # SIG # End signature block

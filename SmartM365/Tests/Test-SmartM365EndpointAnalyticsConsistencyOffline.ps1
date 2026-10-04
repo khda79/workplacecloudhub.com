@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics fresh-export consistency and publication boundary tests.
 .VERSION
-1.0.1
+1.0.3
 .NOTES
 Loads AST functions only; all export jobs, downloads, delays and publication are mocked.
 Does not import Core, read tenant configuration or execute a collector entrypoint.
@@ -18,7 +18,7 @@ $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartInventory/M365Invento
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Endpoint Analytics parse failed.' }
-$definitions = foreach ($name in @('Get-EAReportCatalog','Get-EAOutputSchemas','Get-EAStatusCode','Get-EARawValue','New-EANormalizedRow','Assert-EADeviceReportGrain','Save-EARejectedRowDiagnostic','Invoke-EAConsistentReport','Invoke-EAReport','Publish-EAOutputs')) {
+$definitions = foreach ($name in @('Get-EAReportCatalog','Get-EAOutputSchemas','Get-EAStatusCode','Get-EARawValue','New-EANormalizedRow','Assert-EADeviceReportGrain','Get-EARejectedRowDiagnostic','Save-EARejectedRowDiagnostic','Get-EAScoreExclusion','Invoke-EAConsistentReport','Invoke-EAReport','Publish-EAOutputs')) {
     $node = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true)
     if (-not $node) { throw "Missing production function: $name" }
     $node.Extent.Text
@@ -92,6 +92,12 @@ $module = New-Module -Name SyntheticEndpointConsistency -ScriptBlock {
     }
     $catalog = @(Get-EAReportCatalog)
     $scores = @($catalog | Where-Object Name -eq 'EADeviceScoresV2')[0]
+    Assert-Test (@(@('DeviceScopeIds','HealthStatus','PartnerFeaturesBitmask') | Where-Object { $_ -notin $scores.Select }).Count -eq 0) 'Raw score diagnostics omitted scope/health/feature metadata.'
+    $schemas = Get-EAOutputSchemas
+    Assert-Test (($schemas.DevicePerformance -join ',') -ceq 'RunId,ReportName,ReportRefreshDate,DeviceId,DeviceName,Manufacturer,Model,EndpointAnalyticsScore,StartupScore,AppReliabilityScore,WorkFromAnywhereScore,CrashCount,MeanTimeToFailure') 'Diagnostic metadata changed the canonical device score schema.'
+    Reset-TestState @()
+    $normalized = New-EANormalizedRow EADeviceScoresV2 ([pscustomobject]@{DeviceId='synthetic';EndpointAnalyticsScore=80;DeviceScopeIds='scope';HealthStatus='health';PartnerFeaturesBitmask=3})
+    Assert-Test (@(@('DeviceScopeIds','HealthStatus','PartnerFeaturesBitmask') | Where-Object { $_ -in $normalized.PSObject.Properties.Name }).Count -eq 0) 'Raw diagnostic metadata entered canonical rows.'
     $wfa = @($catalog | Where-Object Name -eq 'EAWFADeviceList')[0]
     $models = @($catalog | Where-Object Name -eq 'EAModelScoresV2')[0]
     $conflict = @(
@@ -120,16 +126,35 @@ $module = New-Module -Name SyntheticEndpointConsistency -ScriptBlock {
         $failure=Get-TestFailure { Assert-EADeviceReportGrain -Rows $repeated -ReportName EADeviceScoresV2 }
         Assert-Test ((Get-EAStatusCode $failure) -eq 0) 'A duplicate count was confused with HTTP 400/404 and could bypass the terminal failure boundary.'
     }
+    Reset-TestState @([pscustomobject]@{Rows=@([pscustomobject]@{DeviceId=' ';EndpointAnalyticsScore=73})})
+    $script:ReportConsistencyAttempts = 1
+    $failure = Get-TestFailure { Invoke-EAReport $scores }
+    Assert-Test ($script:JobNames.Count -eq 1 -and $script:Delays.Count -eq 0) 'Invalid identity was accepted or ignored the one-attempt setting.'
     foreach ($rows in @(
         [pscustomobject]@{Rows=@($conflict[0],$conflict[0])},
-        [pscustomobject]@{Rows=@([pscustomobject]@{DeviceId=' ';EndpointAnalyticsScore=73})},
         [pscustomobject]@{Rows=@($conflict[0],[pscustomobject]@{DeviceId=' SYNTHETIC-SECRET-DEVICE ';EndpointAnalyticsScore=73})}
     )) {
         Reset-TestState @($rows)
         $script:ReportConsistencyAttempts = 1
-        $failure = Get-TestFailure { Invoke-EAReport $scores }
-        Assert-Test ([bool]$failure.Exception.Data['EndpointAnalyticsGrain'] -and $script:JobNames.Count -eq 1 -and $script:Delays.Count -eq 0) 'Invalid or repeated identity was accepted or ignored the one-attempt setting.'
+        $result = Invoke-EAReport $scores
+        Assert-Test ($result.Rows.Count -eq 0 -and $result.Exclusion.ExcludedRowCount -eq 2 -and $result.Exclusion.ExcludedDeviceCount -eq 1) 'All repeated score rows were not excluded.'
     }
+    Reset-TestState @([pscustomobject]@{Rows=@($conflict + $clean)})
+    $result = Invoke-EAReport $scores
+    Assert-Test ($script:JobNames.Count -eq 3 -and $result.RawRowCount -eq 4 -and $result.Rows.Count -eq 2) 'Persistent score conflict did not exhaust fresh retries or lost clean rows.'
+    Assert-Test ($result.Exclusion.ExcludedRowCount -eq 2 -and $result.Exclusion.Diagnostic.DuplicateGroups[0].RawRows.Count -eq 2) 'Exclusion counts or raw evidence changed.'
+    Assert-Test (($result.Rows.DeviceId -join ',') -notmatch 'synthetic-secret-device' -and ($script:Logs -join ' ') -notmatch 'synthetic-secret-device|\b71\b|\b88\b') 'Excluded identity leaked into output or console.'
+    $multiple=@($conflict+$clean+@(
+        [pscustomobject]@{DeviceId='other-conflict';EndpointAnalyticsScore=80},
+        [pscustomobject]@{DeviceId=' OTHER-CONFLICT ';EndpointAnalyticsScore=80}
+    ))
+    Reset-TestState @([pscustomobject]@{Rows=$multiple})
+    $result=Invoke-EAReport $scores
+    Assert-Test ($result.RawRowCount -eq 6 -and $result.Exclusion.ExcludedRowCount -eq 4 -and $result.Exclusion.ExcludedDeviceCount -eq 2 -and $result.Rows.Count -eq 2) 'Multiple conflicting/identical duplicate groups were not fully excluded and reconciled.'
+    Assert-Test (($result.Rows.DeviceId -join ',') -eq 'synthetic-clean-one,synthetic-clean-two') 'Multiple-group exclusion changed valid device identity/order.'
+    Reset-TestState @([pscustomobject]@{Rows=@($conflict+@([pscustomobject]@{DeviceId='';EndpointAnalyticsScore=80}))})
+    $failure=Get-TestFailure { Invoke-EAReport $scores }
+    Assert-Test ($script:JobIds.Count -eq 3 -and $script:Published.Count -eq 0) 'Duplicate-score exclusion bypassed an invalid identity.'
     Reset-TestState @([pscustomobject]@{Rows=$conflict},[pscustomobject]@{Rows=$conflict},[pscustomobject]@{Rows=$clean})
     $script:ReportConsistencyRetryDelaySeconds = 300
     $result = Invoke-EAReport $scores
@@ -172,8 +197,8 @@ finally { Remove-Module $module -ErrorAction SilentlyContinue }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUhCBT3+7ajfNj
-# 3XDACeEk4lkYYqzEiJ/JxaIAlur7+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/dFhOmOASdheh
+# EMsF0Pw1CkEgH6NULKUMHcMPMfY2zqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -306,31 +331,31 @@ finally { Remove-Module $module -ErrorAction SilentlyContinue }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFoCH2HQpSDIRRuedAAEmZBn6vC2+X2P6Z0zuK/Mpnx+MA0GCSqG
-# SIb3DQEBAQUABIIBgHuTfRvGpLB8XikMZdTqEAtjEvfYlo6gxBAiSXr1cvFAtNi5
-# tRi6kinQz2ykaYWCrcVwh/Tmjvttpz7tmHQxAnDAeD/kPOJW9wMc+2AdFWoLKMym
-# 4o8oentzbvw3urhbhwj4IdkpqTBNhQW0JNZWPgkGpDc3DuJjh2a9uP2H79ZfvkMR
-# 2R6LtnmUOEPSUbNtPb5mGMJjrS4BoirzMZzWnrH9QBUI9tsfSvjuXRnPc3/vJF3d
-# p3AZpjlA435tffCfCpuhic4LgprL2zwellUIzPsM5iohqd3u5xZl7hWr54ikFzs2
-# P+4UymgjdyQA3d92OH2T/KVQ/sYlYnIT26QTOohDdT9IxMRHbLSiK1ItYcCyV1bo
-# 9oUWbTFp7zkEzXnMuBaARe0Wm1ISvTvl4rUxSnQ8NVYQvT0Tr6+5HnviTlX0uRVQ
-# 473j5GdBfWC7KgiAe4KhbIqGp/vrVatJdfn0kbiehPna0N2OAUhJk86zjCc0NRPA
-# J3KQCSA9UNTelD7yoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO3XBbq0EFjOPbq5OxsX9L9kXcf/BehcsxR2JPXNBLRjMA0GCSqG
+# SIb3DQEBAQUABIIBgEMUIBJifNluAiD6cNiyPAlknzXBTUjyMeaPyvIHcFIItMVd
+# XZAC61G0zscUmMMT1zkoluf8rNXVabUWWGGDa7itJGIX8YppkAsVn8cSXfdpCUa4
+# 3u8SQE7CCnk78/vAnTJpjdnpixOeqZdQFfNJGrmj3ngFzwoOG7f2pGTSIp1TyaxT
+# hjkzrv1FaYJv5sdAv8dja9feC4rGKq9/7vrgHFvJvSnIElD9WUUNs4bPvaL3IZEC
+# CY1+naEvDLTeR8WSlJ5JUMmGYgX6bYv7y1m54Wn88FSQKgkxyEHy5+Ole8kkhViU
+# QkLQeh1aSctB8PNQJLQ7Sm2QcgBs03ZRqi/Z+TQU2BpqCNSxdJXP9Sr+Z/XFw87I
+# D4IswpzdiB7fImW06FooPCrpbngQdoILyrZFjNwG9mlvnVWqRWmL4qd87ASyOKqO
+# XwGb8EGmwXTF+SP/zWTPaTf5oMqHGtLejwobuEW36eSUqXXaSjYH566R7CXRoDfB
+# VWrFJKoEi4yMdQE50KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxNjIx
-# MTdaMC8GCSqGSIb3DQEJBDEiBCBI2qwd6KOekc49xUM3ojmw+BRc+LI1O7vuja/Z
-# 3XnqMjANBgkqhkiG9w0BAQEFAASCAgCU9J9TV70BNavV+dHJ1XFAqlcIH0QQowJ8
-# 8LzrztRJ69nRKgIABJ+UuniHDKB1WtH7/G9LyTiuhVhIKgyZ7D8GpgK4w29da8Ai
-# HC3DQKD3fpO1HGS0/lSc2zX3KBog0XLs7S2cFW7Cg42uRkoaPyZv2Z3TT/0Kv5Ui
-# sp2x3vvmPz/4V4sIloWiADOV8+eJUP6ZI7RF1aTjlFz+jHvG51+OrT5W1bZJIiQL
-# GIiHLcAvE2sgzaQyu2iAcq74ndOP4lz9ircAbANbPR6KgsDXJuqc5TEh3WKJFbnm
-# T3IKTpSBZ5gD34ggZIvCKzCOlEXG2ScS/sedsRI/5aEWzz4qy/LfrcbY+xKrM0gR
-# NzqH1HpM0/4sjJJrHWK+WFyGB17kBsTz9d9M+nm2idhPD+5zLk1zAgyfVq+wHnxe
-# mQJfCI2W+GAYPaE+B4c+m6FyzvVgVK2lAy9edt1RXU6tOKsC+5J9SlVXUnMfrcn/
-# uxL6Y2pNgdS9tyfFCAfnV2PAy6rYDlwSJuCbN8wzvLc3YdNQFZ8HeAZJGkTGu6+U
-# RQ9KNsmP0mcyE0w1pY85RXL4z8sk7shjewgrQynpUKu8LFUYNkDWX7gkeUBf6MfP
-# gdXxfnQkYwYiGf89VLkE56ujPlr60v5oCyxLvc8YFN19ZqmnRNdINL1jAxbDPqWY
-# hpO0B6tuTA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDeYgqTRszanmFaL22+xhJc2hnzPJ31xDz6FAeC
+# pMuQvzANBgkqhkiG9w0BAQEFAASCAgBF1FV6i6yKALIGssjKeR15IJWRUp/+Jc+z
+# rS8pGwac4uUgHKeVqSgV8wTEj5cNxJG/V4z4sFrdOJlWtMoSxBMoqp33S+Eov5zq
+# kKjyzrG2zYsXp+fXG+XBHP7ICz37Uks6vzMPIbzDbITe1MyLDfblQJOWXDr15f+D
+# EyXR8fLfFo3S0UTJH6feuZ6cgLzrJz77IKtzgHXaGr1pY27NtayiKek6Dfdi1DnF
+# yD5W7j9IoxjwBG102ekKRWGxUiZRAAqp/cjHrpNj4v11qQ7WCuAawdDAAIG1CXCW
+# QzQKd4rvwqCSpt2k7P6/oMlwIvNuJtPzawFqF2JyL3psFYlscnWu6RnX6ifQ2gSN
+# XC04cx+9McM5O3W7vlmkoh8F0R4BOCv6/8ijCg9ibVYhpLYkxOMNQD5X9Z5gQULZ
+# skQPfIK1+kPXOP6+pkLwRx4e3KkDbZf5/YDozYl1m6ovZB+DDqnpkyNHcErdJDDg
+# A5z5NMCmXcMic4Rf5DcospeY4/LWQ1iX/6CsjeztTJUUlALVYMso+mhnQpdkOBgk
+# ZXXEUsfhEiCoUqX3RwEI5yOGbDs70o/TLI1YvWDc68Cl7gEC9i7C9xBBUjvCq50v
+# NpxW5NdDG5wrdXamfjW/fWGnW8Vw8DKv4B2eR7dgLBeFPhGm41j9Kmf3nLSKz/99
+# 5lXedNwijg==
 # SIG # End signature block

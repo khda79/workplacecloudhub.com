@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics logging, transcript and rejected-row evidence tests.
 .VERSION
-1.0.0
+1.0.2
 .NOTES
 Loads production AST functions and the main try/finally only. Configuration, Core
 actions, Graph calls, downloads, delays and CSV publication are simulated.
@@ -85,6 +85,9 @@ try {
             $script:FailureStage = ''
             $script:OutputRows = [ordered]@{}
             $script:DataQualityRows = [Collections.Generic.List[object]]::new()
+            $script:ScoreExclusions = [Collections.Generic.List[object]]::new()
+            $script:Mails = [Collections.Generic.List[object]]::new()
+            $script:ScopeQualifications = @()
             $script:ScriptName = 'SyntheticEndpointAnalytics'
             $script:ScriptVersion = 'synthetic-version'
             $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -103,9 +106,12 @@ try {
             $script:Jobs = 0
             $script:Delays = [Collections.Generic.List[int]]::new()
             $script:CanonicalWrites = 0
+            $script:PublicationFails = $false
+            $script:MailFails = $false
             $script:MockConnections = 0
             $script:PreflightFails = $false
             $script:CompletionFails = $false
+            $script:TranscriptUploadDeferred = $false
             $script:UploadFails = $false
             $script:Exports = @([pscustomobject]@{Rows=@(
                 [pscustomobject]@{DeviceId='private-device';EndpointAnalyticsScore=71;ExtraEvidence='first'},
@@ -133,7 +139,7 @@ try {
         }
         function Start-EAExportJob {
             param($Report,$EffectiveReportName)
-            if ($EffectiveReportName -ne 'EADeviceScoresV2') { throw 'Unexpected alias/report.' }
+            if ($EffectiveReportName -notin @('EADeviceScoresV2','EAWFADeviceList')) { throw 'Unexpected alias/report.' }
             $script:Jobs++
             [pscustomobject]@{id=('synthetic-job-' + $script:Jobs)}
         }
@@ -149,13 +155,26 @@ try {
         function Start-Sleep { param($Seconds) $script:Delays.Add($Seconds) }
         function Publish-CoreSmartM365Csv {
             param($Data,$TimestampedPath,$LatestPath,$Columns)
+            if ($script:PublicationFails) { throw 'Synthetic publication failure.' }
             $script:CanonicalWrites++
         }
         function Remove-CoreSmartM365TimestampedFilesOlderThan { param($FolderPath,$FilePattern,$RetentionDays,$LogFile) }
         function Send-CoreSmartM365TeamsNotification { param($Title,$Message,$Level,$Channel,$ResultSummary,$Facts) }
-        function Set-CoreSmartM365CmdbSourceScope { param($CompleteScope,$Scope) $script:ScopeComplete = $CompleteScope }
+        function Set-CoreSmartM365CmdbSourceScope { param($CompleteScope,$Scope,$Qualifications) $script:ScopeComplete = $CompleteScope; $script:ScopeQualifications = @($Qualifications) }
+        function Get-EAConfigValue { param($Name,$Default) if ($Name -eq 'ErrorMailTo') { 'reviewer@example.invalid' } elseif ($script:TenantConfig.PSObject.Properties[$Name]) { $script:TenantConfig.$Name } else { $Default } }
+        function New-CoreSmartM365EmailBody {
+            param($Title,$Category,$Severity,$Message,$SummaryData,$Sections,$PathRows,$Tenant)
+            Assert-Test ($Severity -eq 'Warning' -and $SummaryData.Status -eq 'CompletedWithWarnings') 'Exclusion mail lost warning semantics.'
+            $Message + ($Sections.Html -join '')
+        }
+        function CoreSendEmailHtmlReport {
+            param($To,$Cc,$Subject,$BodyHtml,$MailPurpose)
+            if ($script:MailFails) { throw 'Synthetic mail failure.' }
+            $script:Mails.Add([pscustomobject]@{To=$To;Cc=$Cc;Subject=$Subject;Body=$BodyHtml;Purpose=$MailPurpose;Writes=$script:CanonicalWrites})
+        }
         function Complete-CoreSmartM365ExecutionContext {
-            param($Status,$ErrorRecord,$FailureStage)
+            param($Status,$ErrorRecord,$FailureStage,[switch]$DeferTranscriptUpload)
+            $script:TranscriptUploadDeferred = [bool]$DeferTranscriptUpload
             Write-EALog ('SYNTHETIC FINAL BANNER: ' + $Status)
             if ($script:CompletionFails) { throw 'Synthetic completion failure.' }
         }
@@ -213,9 +232,12 @@ try {
             Assert-Test ($failure.Exception.Message -match 'Unsafe') 'Unsafe diagnostic file identity was accepted.'
 
             Reset-TestState 'persistent-rejection'
+            $script:Reports = @('EAWFADeviceList')
             $global:EnableSharePointUpload = $true
             $failure = Get-TestFailure { & $script:Main }
             Assert-Test ($failure.Exception.Message -match 'Canonical business CSV files were not published') 'Collector failure boundary changed.'
+            Assert-Test ($failure.Exception.Message -match 'Failed reports: EAWFADeviceList \[ExportFailed\]:' -and $failure.Exception.Message -match 'duplicate device rows=1' -and $failure.Exception.Message -notmatch 'private-device|ExtraEvidence|\b71\b|\b88\b') 'Final failure omitted the report/root cause or exposed raw row values.'
+            Assert-Test ($script:TranscriptUploadDeferred) 'Core attempted to upload the active transcript before the final banner.'
             Assert-Test ($script:Imports -eq 3 -and $script:Jobs -eq 3 -and ($script:Delays -join ',') -eq '15,30') 'Fresh complete exports or bounded retries changed.'
             Assert-Test ($script:CanonicalWrites -eq 0 -and $script:ScopeComplete -eq $false -and $script:CompletionStatus -eq 'Failed') 'Failed collection was admitted or published.'
             Assert-Test ($script:GrainDiagnosticPaths.Count -eq 3) 'An exhausted export attempt lacks private evidence.'
@@ -237,6 +259,43 @@ try {
             Assert-Test ($script:GrainDiagnosticPaths.Count -eq 1 -and -not $script:TranscriptStarted) 'Clean retry lost rejected evidence or transcript closure.'
             Assert-Test ($script:OutputRows.DevicePerformance.Count -eq 1 -and $script:OutputRows.DevicePerformance[0].DeviceId -eq 'clean') 'Rejected rows contaminated the clean output.'
             Assert-Test ($script:Uploads.Count -eq 0) 'Unconfigured external action ran after success.'
+            Assert-Test ($script:Mails.Count -eq 0) 'Clean retry sent an exclusion alert.'
+
+            Reset-TestState 'exclude-ambiguous-scores'
+            $script:Exports[0].Rows += [pscustomobject]@{DeviceId='clean';EndpointAnalyticsScore=90}
+            & $script:Main | Out-Null
+            Assert-Test ($script:Imports -eq 3 -and $script:CanonicalWrites -eq 9 -and $script:CompletionStatus -eq 'CompletedWithWarnings') 'Qualified exclusion did not publish fresh valid outputs with warning status.'
+            Assert-Test ($script:OutputRows.DevicePerformance.Count -eq 1 -and $script:OutputRows.DevicePerformance[0].DeviceId -eq 'clean' -and $script:OutputRows.DevicePerformance[0].EndpointAnalyticsScore -eq 90) 'Exclusion chose a conflicting row or changed valid scores.'
+            $quality = @($script:DataQualityRows)[0]
+            Assert-Test ($quality.Status -eq 'CollectedWithExclusions' -and $quality.RawRowCount -eq 3 -and $quality.RowCount -eq 1 -and $quality.ExcludedRowCount -eq 2 -and $quality.ExcludedDeviceCount -eq 1) 'Exclusion accounting was not published in DataQuality.'
+            Assert-Test ($script:Mails.Count -eq 1 -and $script:Mails[0].Writes -eq 9 -and $script:Mails[0].Purpose -eq 'Error' -and $script:Mails[0].Cc -eq '' -and $script:Mails[0].To -eq 'reviewer@example.invalid') 'Exclusion alert was not sent after publication via the Core error-mail route.'
+            Assert-Test ($script:Mails[0].Body -match 'private-device' -and $script:Mails[0].Body -match '71' -and $script:Mails[0].Body -match '88' -and $script:Mails[0].Body -notmatch 'ExtraEvidence') 'Exclusion alert omitted the device/conflicting scores or leaked unnecessary source fields.'
+            Assert-Test ($script:GrainDiagnosticPaths.Count -eq 3 -and -not $script:TranscriptStarted) 'Qualified exclusion lost raw evidence or transcript closure.'
+            Assert-Test (($script:ScopeQualifications -join '') -match 'excludedRows=2; excludedDevices=1' -and ($script:ScopeQualifications -join '') -notmatch 'private-device|\b71\b|\b88\b') 'Producer qualification omitted exclusions or exposed private row values.'
+            $performanceReport = @(Get-EAReportCatalog | Where-Object Name -eq EADevicePerformanceV2)[0]
+            $cleanQuality = New-EADataQualityRow -ReportName $performanceReport.Name -ApiVersion beta -Status Collected -RowCount 1
+            $scope = Get-EACollectionScope -QualityRows @($quality,$cleanQuality) -ItemLimit 0
+            Assert-Test ($scope.CompleteScope -and $scope.Qualifications.Count -eq 1) 'Complete acquired scope with explicit exclusions was rejected.'
+            Assert-Test (-not (Get-EACollectionScope -QualityRows @($quality,$cleanQuality) -ItemLimit 1).CompleteScope) 'Limited acquisition was admitted as complete.'
+            Assert-Test (-not (Get-EACollectionScope -QualityRows @($quality) -ItemLimit 0).CompleteScope) 'Missing required performance report was admitted as complete.'
+            $schemas = Get-EAOutputSchemas
+            Assert-Test ($schemas.DataQuality -contains 'RawRowCount' -and $schemas.DataQuality -contains 'ExcludedRowCount' -and $schemas.DataQuality -contains 'ExcludedDeviceCount') 'CSV schema dropped exclusion counts.'
+
+            Reset-TestState 'all-scores-excluded'
+            $script:Exports[0].Rows[0] | Add-Member -NotePropertyName DeviceName -NotePropertyValue '<script>alert("test")</script>'
+            & $script:Main | Out-Null
+            Assert-Test ($script:OutputRows.DevicePerformance.Count -eq 0 -and $script:CanonicalWrites -eq 9 -and $script:Mails.Count -eq 1) 'All-score exclusion failed stable empty-output publication.'
+            Assert-Test ($script:Mails[0].Body -match '&lt;script&gt;' -and $script:Mails[0].Body -notmatch '<script>') 'Raw device text was not HTML escaped in the alert.'
+
+            Reset-TestState 'publication-fails-before-alert'
+            $script:PublicationFails=$true
+            $failure=Get-TestFailure { & $script:Main }
+            Assert-Test ($failure.Exception.Message -eq 'Synthetic publication failure.' -and $script:Mails.Count -eq 0 -and $script:CompletionStatus -eq 'Failed') 'Alert claimed successful publication before valid outputs existed.'
+
+            Reset-TestState 'mail-fails-after-publication'
+            $script:MailFails=$true
+            $failure=Get-TestFailure { & $script:Main }
+            Assert-Test ($failure.Exception.Message -eq 'Synthetic mail failure.' -and $script:CanonicalWrites -eq 9 -and $script:CompletionStatus -eq 'Failed' -and -not $script:TranscriptStarted) 'Mail failure was hidden, removed valid CSVs or left the transcript open.'
 
             Reset-TestState 'diagnostic-write-failure'
             # Save failure is injected without changing the production consistency code.
@@ -319,8 +378,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/fSWt4HbdPHW3
-# XG6DF5Vy7SdK6+ea6hHkU2soQZSsXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHwYk2p/UbqThu
+# Acjtyf953T3H6Ys9PnYZqRKNEELrFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -453,31 +512,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEV7vz92gNJNpmARt2zCSjahH4ESEFpl35tA84QedzChMA0GCSqG
-# SIb3DQEBAQUABIIBgJtlixAHlXSzAP9KC+HxPccrxFqmrmVkLTjNtAiNlpiO4ZdB
-# FU9EsuCVElrYExE/GWFuJVxI+aA1u4/aV1Nc80NCq6YuZqimjauBpyVQ0J4t2Ngu
-# yplR9evajnQbgoQkKVo0L5T6aHXdazSdvOzGoYJRKCguZIWeG3RB9SIkKXRW1Js0
-# FQUnAw0IoD4U/eBdwiWZYAGgejxOreiY6izrOLti0yFR08KmjTaTY63ODD1NaHhx
-# bRaRM1hp2X1atAONh7g5WHWu0sqPRuAJlqAXqEHLTP0sEZxF9ljMq+0Ma5jHTHS9
-# HN4tSmXs6Qf58CfOzUfzYgswIuM3hfP1dTSZYwBiF33eT+w14hdZt9jMf1Ud41cb
-# GPg7zra96TpWmzkE1oU9F5GJabeAzFGZjHXWp4ogsQJTD6jiyoU7Rtc8ZWKEZjfl
-# YhbMJzq38J3O6MVi8OMiUFGSZn6ADZPpXWJodi0anVT9ysQ35c+OibsFAYJpTTnm
-# y8CN62mCTYeMg3v9JqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID9SfsjNYnwPaiR8FmY59TOOE5MDx3+rjFtnlVyr71XlMA0GCSqG
+# SIb3DQEBAQUABIIBgGL+HYAEIDdphlFL+DYtu0OpJgEewkblykj/zsbZ28RHzjfw
+# iMwoR0MaaZnlz3EDW5aUqXlWVw6OrUwU1UxckSRCZYCgrgtE+BEoaVRCqnRoWO4E
+# FQ8pucpGR3861FP3IhjaWAeSO9zMDtm3aVDnnkI2VCxfVsRQOCuGxK9Jxof7JjBv
+# Q6sxpMeGPiZlpCVQAqptjJXa6v96IQ2KAaksMT6aWW7a68SCShHfZZu9b/MbHNGf
+# gDHKGuPxrea2k9EUWFiITU4TMatxhfFh2ENraNCOKi56qIsy+jrT+krloj6AjA90
+# CIeatMB2gWHDRFjRi5Racw1C+3n+RaBmsuOeIMeAydlzhsOmwDGJ/VcYFe6LoL9h
+# 0Pc16yWGB6PMcDSrjTojcxsQgMZjsD4eCfGv2cdYVWz1r2c5Q7wJ41nu5eKfUWQj
+# XKx5X0WSuyvCnQH5eR2SXDDrRSQhbms/5bgNOVBQtJ2Lm0yyGiajOu838wvVsOjC
+# vTHRQ3ZU5/M9QpBwKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxNjIx
-# MTdaMC8GCSqGSIb3DQEJBDEiBCCqWkoj0vdFnRJLJA3cenhZBe896qT6XGLzan08
-# tZ2htTANBgkqhkiG9w0BAQEFAASCAgC2HBCO2nFlvqSj6FxpUGZ7pAPfA1na9Vxq
-# CXFqdoSUbjKkPD239qd7jNI7yDHV5uAIliWeys3GQuJaDGI1FIbyATDWtzEloin9
-# U4DGi95NPcENn7azMMAb5t0LC7+eelgKR5tLiav2Ikn3RS05bQ3mouJaVeUHdbh1
-# fGiGwx8Uru2ROfEPSWLnFgcXPETzQ2wzL5NqVLWBVefimm5zSXwahnL2ShAO05Bg
-# 15OfYS+soGQQMwiRmO3P7CxHZOYA36qI2hPlRZBovaJT53g566iWFhRwjuk8L/7S
-# 9G7VxsaIZBwV6uVFHq2zI552eXddLqQwrEsbrwj5gjbRr83GfG0c85pi8WsJmd8r
-# RuVzfGHwgEk/wWnxYF4L2xUiTyZT2UD0veID8fQF2QmhJ99fJTORxjNCW+tuvQxM
-# uogfgqHWG7UtWK7YUyNIDwO2HxmfOxnRrzw01agvtnlj29SE8lwiqyRu1nNUKJfK
-# v/hdjTQDdcBpX9RIyDMpKBfhau5OQNnFKui47HqWGQK1Y4IYzAC7hAu4Uvn467oo
-# plWyAJj/fMTNuhs1wECra7Kx40zuzOCV9Psy5qWaYC/NeJydoX4czJuIELxJnJpU
-# 9+EAjv9xdEYWbyZDbc+RWJQFwgA4Wjujr/JGJs/L4/W+iZgDpg3OLecftKurnAET
-# 9xdrloEWZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTZaMC8GCSqGSIb3DQEJBDEiBCCiWCUn6HahPGkTvSeYlHak3xTYcwxlrL5PvkFh
+# TU/3mjANBgkqhkiG9w0BAQEFAASCAgCdyQRWtE45NlGpzVYejY8YEhO7LBvWmW0Q
+# s/rKtDJAMGnE3ACZv40uaFL7xpBbGpiUVjzPxvCZa6Q1/9NiSGYpCM/aIZJRdI/x
+# 2u3yZWNllgbmLMqwMMBwGeidTjdVr/x0pMtx/P+/ipvEOjVYe/gcEqIiXcCGUyyK
+# NTJibgdI/EcEKxH9fmBNUCmKqLt6UPYbgDrHIoFXN7vfmMQJnXJCCj1xv7EysEXw
+# LQfyFo1mvf+uFZv2/eDMnfG7EvVYQ4C6opWqqgurFtdrBOuIsI8MrpGNc5QwXm+o
+# S7rOB+31kC4VEW+IxOjkUUf7RRZEOaQlorHMFDpYp8vDXysNaec5uzkan/gC8WfF
+# /v+J35gFyyQRN+8Q+7eWPydCKcGnUmad/WE4SjnJsw2XP2wwytslT/QdeMgyZYEZ
+# aoZtYIu00hAhbaYEVZSTh0Oo/zorz1vpdcrgjxaBC9myfkQbHjuWohSJSXHn8ETt
+# M/9ZWoSM6Oa7PLLduX0/MYIxThr5k7baHEEpHXxf+X5K/EWbcTUpZxAifxX+7KPH
+# 2iq6fQZbt1JeKCYhXWLPR99ozfZhLx/Seateu2mbVgac46rHXsylu3lJDo6GThbE
+# jHZGS/RqS2AzrGdcEOoL4r0+XE6mK9qewD7aitDuXdnUSfhfFZDRyCAT9DmdbjvW
+# tHofh2+KIw==
 # SIG # End signature block

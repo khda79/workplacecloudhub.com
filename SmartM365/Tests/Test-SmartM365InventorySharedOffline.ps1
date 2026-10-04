@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.10
+1.1.11
 #>
 [CmdletBinding()]
 param(
@@ -121,6 +121,56 @@ try {
             Assert-Offline ((@($observed.Lines) -match 'FailureStage: SyntheticPhase').Count -eq 1) 'Failed summary lost FailureStage.'
             Assert-Offline ((@($observed.Lines) -match 'Execution failed during SyntheticPhase').Count -eq 1) 'Failed completion did not write the missing ERROR entry.'
             Assert-Offline ((@($observed.Lines) -match 'Synthetic failure').Count -ge 1) 'The failure diagnostic was omitted from the log.'
+        }
+        Test-OfflineCase 'Transcript deferral preserves other completion artifacts and default behavior' {
+            $observed = & $completionModule {
+                param($Root)
+                function WriteLog { param($Message,$Level) }
+                function Write-SmartM365CompletionBanner {
+                    param($Status,$ScriptName,$StartedAt,$EndedAt,$WarningCount,$ErrorCount,$GeneratedCsvFiles,$LogPath)
+                    $script:BannerCount++
+                }
+                function Complete-SmartM365CmdbSourceReceipt { param($Status,$ErrorCount) $script:Receipt }
+                function Invoke-SmartM365SharePointCsvUpload {
+                    param($LocalFilePath)
+                    if ($script:ActiveTranscript -and $LocalFilePath -eq $global:logTranscriptFile) {
+                        throw 'Active transcript upload must be deferred.'
+                    }
+                    $script:UploadedPaths.Add($LocalFilePath)
+                }
+                $global:LogTextFile = Join-Path $Root 'completion.log'
+                $global:logTranscriptFile = Join-Path $Root 'completion.transcript.txt'
+                $script:Receipt = Join-Path $Root 'receipt.json.txt'
+                $mail = Join-Path $Root 'mail.html'
+                foreach ($path in @($global:LogTextFile,$global:logTranscriptFile,$script:Receipt,$mail)) {
+                    Set-Content -LiteralPath $path -Value 'synthetic completion artifact'
+                }
+                $global:SmartM365MailHtmlFiles = @($mail)
+                $global:SmartM365SharePointUploadedFiles = $null
+                $global:SmartM365WarningCount = 0
+                $global:SmartM365ErrorCount = 0
+                $script:BannerCount = 0
+                $script:UploadedPaths = [Collections.Generic.List[string]]::new()
+                $script:ActiveTranscript = $true
+                $global:SmartM365ExecutionSummaryWritten = $false
+                Complete-SmartM365ExecutionContext -Status Success -DeferTranscriptUpload
+                $deferred = @($script:UploadedPaths.ToArray())
+                $script:ActiveTranscript = $false
+                $script:UploadedPaths.Clear()
+                $global:SmartM365ExecutionSummaryWritten = $false
+                Complete-SmartM365ExecutionContext -Status Success
+                $default = @($script:UploadedPaths.ToArray())
+                $script:UploadedPaths.Clear()
+                $global:SmartM365ExecutionSummaryWritten = $false
+                Complete-SmartM365ExecutionContext -Status Success -DeferTranscriptUpload:$false
+                [pscustomobject]@{Deferred=$deferred;Default=$default;ExplicitFalse=@($script:UploadedPaths.ToArray());Banners=$script:BannerCount}
+            } $testRoot
+            Assert-Offline ($observed.Deferred.Count -eq 3 -and @($observed.Deferred | Where-Object { $_ -like '*.transcript.txt' }).Count -eq 0) 'Deferral lost logs, receipts or mail artifacts, or uploaded the active transcript.'
+            Assert-Offline ($observed.Default.Count -eq 4 -and ($observed.Default -join ',') -ceq ($observed.ExplicitFalse -join ',')) 'Default or explicit-false completion behavior changed.'
+            Assert-Offline ($observed.Banners -eq 3) 'Deferral omitted the final completion banner.'
+            $global:LogTextFile = ''
+            $global:logTranscriptFile = ''
+            $global:SmartM365MailHtmlFiles = $null
         }
     }
     finally { Remove-Module $completionModule -Force }
@@ -619,8 +669,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQKEF709K9qWf8
-# tfYkAgEDgAI4m2pPbzMdovdmLurv9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCOAIjbk/an5lS1
+# K2ahsn91Ua42rg/gy3sVAnB73pgK66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -753,31 +803,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ7tRrGp616PQMpLNCyDuuALYtpejLJuFKez72lAT7srMA0GCSqG
-# SIb3DQEBAQUABIIBgCklCbaKL1HAlc2hQ0HisbYD3uDEWr0ZtB5XNESE0BWMrh20
-# Vw/SSxtZCIdmzao5DoUPeWyvhCk+dhfbbHXpljdh2n5KnIDVyn9/LETarjwpYq/P
-# phFUI3lTIvXSF52vplmM8exwqC+noRiMrUSwRuycZhlcuE48DQ5UhMAY2EYeqelh
-# I/Zb1FnngD0RycltwqWfgzQ9vyFEtfv97FCeOuZk1Bb+FC2QqGBLbLVrAQ5M9/lF
-# i+Dh9agGvL52jkDKOVw0PbxxJMeNRSlf0/WgGO6t+9iWRulCDAd3a5YsHOEEhghK
-# 7e3aZ9EoqnN0M+O+cPs9BwNrp87kpiWbBKL2Jg9R4xsdftxtVhoO2Ki3LaxpojPr
-# OJXFagMSjUgXYojXDVvtoCLXhWE5O1Wjy69RRppU6M/puJzUR+29jc77mFz2bjCN
-# /cAXdNHc5RLllYOG1rnLWWi/7E6BDCdYhK9xSTVyXW7ger9FKI3KSKt1tZq5qPkS
-# 0d2pcjYOHFMLgIkvG6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN+/dMTb2SbYmcgcTHNHi0Zrb/GcOMnjgQkR+2+8alGpMA0GCSqG
+# SIb3DQEBAQUABIIBgHV7JZOw+g6q8WxHXjVR/C0W50Nk6gbXgy7SfA7ittgz8a6L
+# PQ8TGi3EokCQBPRFdUup/hr25fgJLH9+H03ocjbXu6pZXU6120utN6tZyuOSPvgV
+# Ow5eXmh2sPK+GAs+nQSai+Pl4DNXIuYtL3kb3nlj2mhjd/8qPKMQcwKtm5hFy6WR
+# 62vo3LRfhzgRceE25ORAWtBP7/FMEldpZZ7EGdcX44giHwNo3BdmEM+AC4wpqXC0
+# xXNlE2aV1bI+iBjtmzM/eQ7mF8bZzeG80Y2BjAJnF4v7TI8NqmMDuXcjG3BenF6n
+# nu7EPefSKRXW3yZUL8Rx08jyMfx7E+ZwwR94hHW+mJ/6xaUQvZfcIY0yOecn458E
+# wx4YVhV81+Bq5/okyBCGmhQJn39z6l2XOMR13EDK+TZn3N1EGkktW9EKLJCsZxEP
+# Ie2/BTR79bPyW6BmXviz+vRFMH6O+XyFwpxhQ/hpX8VWvn0waDVrrClVQsBlwchl
+# e25j07k93HxKTFtsCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExODUy
-# MzRaMC8GCSqGSIb3DQEJBDEiBCDsms8losR/78Hhfx6e14e8f84wwGPGBZ3xRRFW
-# mb7w4DANBgkqhkiG9w0BAQEFAASCAgBNP1uEsv5Jhq46w6znbxZbIb+oyhOZGzDB
-# LeNFr275GfNokj/HSlzynp0ReJd79RoHM1h7Qkj/CMDMv2wC3WSZlvGU4UbnKB10
-# wmMcbBZd0IlyUo7ej5fQDD+fZHB+yDgW7NQ8eF5dVlUjI/v2cq7hpa3AoguBqUuM
-# 3LHWN+yYL7/RhnqVUp7ADUG/Iy9gf7XsJkphbOsT7sMLZqAmNeOT5+RLMPeQYLYe
-# xiKnUTrKJKRu4E6OzQrGTFmZpoxj+kHbVI2WK1Bk9ApUbK9zRTOQmgx4kCb5jzcI
-# Vya/JMgtO8w2P/75/mG7eeOEXfDEoz8rxFKWjSNa2LAL3HH0Ze7etvUr3qiNczg7
-# I1VwCo9CMDYnEmRQftfCxezlqwdPfnJAQoBVwZP/pt8DnegbCM6xp0l1+yllEj4U
-# 5d+DvK6r3O6sRCjqvC5OLwdGXR7Kk/X5iGN8cvVji8v0qNQSPCOGfmooM/b+xTB+
-# SdQWCNbVwXkH2gYkqNZlRPSRPz6qj/JuEBccg66y6uunOKRTOLXrPGIGPiYh3W10
-# 9cLLQdzbCjnhR5w5iDob8G3lroKTWf9sKP3boRVrZMyOhiLN+fjCvLnyJWhQgyX9
-# BWeqJMhI1skTwHoohg8LkgvYiacXK8JEQEXMbE4NJfbwLIiHlFSTNCetfjqvakSi
-# eITvaQSaKA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAUecirg7CS2aZD2OQXJ0okz+wF3JLIY4FYBXuw
+# Z879hTANBgkqhkiG9w0BAQEFAASCAgCFG7yaSK5YPQdE4vOQpx+P/EGCwTLUk/XM
+# qAN27LjcC/yozYlWpManiJCnhtf2D8qMLkUMDcjQLrWNEI5pjchD2QQYQl7+twVO
+# WQKLktfs65Q9iRDfvf2qSuxls8UWYloLOivJZ/Qf5ISy2Sk55qkTM5skIPgWEPZS
+# 0kdxmqnk6Obl6U1w1Uzz/Hrszb3pCNS5aKOByDb0gEB1MvMKVFvFsjetzVfrCPRs
+# HulhUC9gH55qMCd/oJT5zju3GeQHukjCXSiWIQre7gsfS/HjQDNOJDVX39KE1sJh
+# 1rAO/5AtXTYvz+ck++MUHEpBkqrPTqLTNf3VxWJ2zlNSoKV33jvsep1tQuhTA7Rh
+# QhklIn3JopvqofNzfg8WVD1wvRAkCE5PEKcsuVc/dGdSdSUozR4hxrMKmbcWOX75
+# v4eCcvaC63JdeBwYRcYPIGpDnNGYPuWgAlS+U+n/UL7iMFmRAtfODxr1Hnwt9sG4
+# 5fpFsBoEeGzFGJRq3SXE4n3c5+Svk9kN2YEZbUuFrcY7da30zKjJydbIrZW0XF/7
+# F2Sh89311KGwUJq0vOY6UolGzgQQ3iFG6sSIBoDG7ZVhUxxT98NJdLl5CaCosuNa
+# 6suX8JNjReG+Q4wtym3ib7VJyaBI0iQF/O9Eks+gefWecKKAwNQPxjE8tw+Hpl0I
+# fulH0OTeEQ==
 # SIG # End signature block

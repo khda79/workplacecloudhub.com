@@ -59,10 +59,10 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.11
+1.0.13
 .REQUIREMENTS
 PowerShell 7+.
-Modules: SmartM365.Core 1.0.65+; Microsoft.Graph.Authentication.
+Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
 Graph POST exportJobs permission documented by Microsoft:
 DeviceManagementManagedDevices.ReadWrite.All (application or delegated).
 #>
@@ -99,7 +99,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.11'
+$script:ScriptVersion = '1.0.13'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -110,6 +110,7 @@ $script:CoreImported = $false
 $script:TenantConfig = $null
 $script:TranscriptStarted = $false
 $script:GrainDiagnosticPaths = [Collections.Generic.List[string]]::new()
+$script:ScoreExclusions = [Collections.Generic.List[object]]::new()
 
 if ($MaxItems -gt 0) {
     $global:SmartM365MaxItems = $MaxItems
@@ -232,7 +233,7 @@ function Initialize-EARuntime {
     if ((Split-Path -Path $moduleRoot -Leaf) -eq 'Config') { $moduleRoot = Split-Path -Path $moduleRoot -Parent }
     $coreManifest = Join-Path $moduleRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     if (-not (Test-Path -LiteralPath $coreManifest)) { throw "SmartM365.Core manifest was not found: $coreManifest" }
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.65' -Prefix Core -Force -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.69' -Prefix Core -Force -ErrorAction Stop
     $script:CoreImported = $true
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -268,7 +269,7 @@ function Get-EAReportCatalog {
     return @(
         [pscustomobject]@{ Name='EADevicePerformanceV2'; Group='Scores'; Output='DevicePerformance'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('DeviceAppHealthScore','DeviceId','DeviceManufacturer','DeviceModel','DeviceName','MeanTimeToFailure','MemaTimeGenerated','ProcessedDateTime','TotalAppCrashes') },
         [pscustomobject]@{ Name='EADeviceModelPerformanceV2'; Group='Scores'; Output='ModelPerformance'; Grain='Model'; ApiVersion='beta'; Aliases=@(); Select=@('ActiveDevices','DeviceManufacturer','DeviceModel','MeanTimeToFailure','MemaTimeGenerated','ModelAppHealthScore') },
-        [pscustomobject]@{ Name='EADeviceScoresV2'; Group='Scores'; Output='DevicePerformance'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('AppReliabilityScore','DeviceId','DeviceName','EndpointAnalyticsScore','Manufacturer','Model','StartupPerformanceScore','WorkFromAnywhereScore') },
+        [pscustomobject]@{ Name='EADeviceScoresV2'; Group='Scores'; Output='DevicePerformance'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('AppReliabilityScore','DeviceId','DeviceName','DeviceScopeIds','EndpointAnalyticsScore','HealthStatus','Manufacturer','Model','PartnerFeaturesBitmask','StartupPerformanceScore','WorkFromAnywhereScore') },
         [pscustomobject]@{ Name='EAModelScoresV2'; Group='Scores'; Output='ModelPerformance'; Grain='Model'; ApiVersion='beta'; Aliases=@(); Select=@('AppReliabilityScore','EndpointAnalyticsScore','Manufacturer','Model','ModelDeviceCount','StartupPerformanceScore','WorkFromAnywhereScore') },
         [pscustomobject]@{ Name='EAStartupPerfDevicePerformanceV2'; Group='Startup'; Output='StartupDevices'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('BlueScreenCount','BootScore','CoreBootTime','CoreLogonTime','DeviceId','DeviceName','LogonScore','Manufacturer','MemaTimeGenerated','Model','OSVersion','RestartCount','StartupPerformanceScore') },
         [pscustomobject]@{ Name='EAStartupPerfModelPerformanceV2'; Group='Startup'; Output='StartupModels'; Grain='Model'; ApiVersion='beta'; Aliases=@(); Select=@('AverageBlueScreens','AverageRestarts','CoreBootTime','CoreLogonTime','Manufacturer','MemaTimeGenerated','Model','StartupPerformanceScore') },
@@ -291,7 +292,7 @@ function Get-EAOutputSchemas {
         AppReliability=@('RunId','ReportName','ReportRefreshDate','ApplicationName','Publisher','AppReliabilityScore','CrashCount','UsageDuration','MeanTimeToFailure')
         OSReliability=@('RunId','ReportName','ReportRefreshDate','OSVersion','AppReliabilityScore','MeanTimeToFailure')
         WorkFromAnywhere=@('RunId','ReportName','ReportRefreshDate','DeviceId','DeviceName','Manufacturer','Model','OSVersion','WorkFromAnywhereScore','CloudManagementScore','WindowsScore')
-        DataQuality=@('RunId','ReportName','ApiVersion','Status','RowCount','ExportJobStatus','IsAdvancedAnalytics','RequiredPermission','ErrorCode','ErrorMessage','CollectedAtUtc')
+        DataQuality=@('RunId','ReportName','ApiVersion','Status','RowCount','ExportJobStatus','IsAdvancedAnalytics','RequiredPermission','ErrorCode','ErrorMessage','CollectedAtUtc','RawRowCount','ExcludedRowCount','ExcludedDeviceCount')
     }
 }
 
@@ -551,13 +552,93 @@ function New-EADataQualityRow {
         [int]$RowCount=0,
         [string]$ExportJobStatus='',
         [string]$ErrorCode='',
-        [string]$ErrorMessage=''
+        [string]$ErrorMessage='',
+        [int]$RawRowCount=-1,
+        [int]$ExcludedRowCount=0,
+        [int]$ExcludedDeviceCount=0
     )
     return [pscustomobject][ordered]@{
         RunId=$script:RunId; ReportName=$ReportName; ApiVersion=$ApiVersion; Status=$Status; RowCount=$RowCount
         ExportJobStatus=$ExportJobStatus; IsAdvancedAnalytics=$false; RequiredPermission=$script:RequiredPermission
         ErrorCode=$ErrorCode; ErrorMessage=$ErrorMessage; CollectedAtUtc=$script:CollectedAtUtc
+        RawRowCount=$(if ($RawRowCount -lt 0) { $RowCount } else { $RawRowCount })
+        ExcludedRowCount=$ExcludedRowCount; ExcludedDeviceCount=$ExcludedDeviceCount
     }
+}
+
+function Get-EAScoreExclusion {
+    param([AllowEmptyCollection()][object[]]$RawRows, [string]$ReportName, [string]$ExportJobId, [int]$Attempt)
+    if ($ReportName -cne 'EADeviceScoresV2') { throw 'Score exclusion is limited to EADeviceScoresV2.' }
+    $diagnostic = Get-EARejectedRowDiagnostic -RawRows $RawRows -ReportName $ReportName -ExportJobId $ExportJobId -Attempt $Attempt
+    if ($diagnostic.InvalidIdentityRows -gt 0 -or $diagnostic.DuplicateGroups.Count -eq 0) {
+        throw 'Score exclusion requires duplicate keys and no invalid identities.'
+    }
+    $excludedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $excludedRows = 0
+    foreach ($group in $diagnostic.DuplicateGroups) {
+        $null = $excludedKeys.Add($group.DeviceId)
+        $excludedRows += $group.RawRows.Count
+    }
+    $rows = @($RawRows | Where-Object { -not $excludedKeys.Contains(([string](Get-EARawValue $_ @('DeviceId'))).Trim()) } |
+        ForEach-Object { New-EANormalizedRow $ReportName $_ })
+    Assert-EADeviceReportGrain -Rows $rows -ReportName $ReportName
+    if ($rows.Count + $excludedRows -ne $RawRows.Count) { throw 'Score exclusion row accounting failed.' }
+    return [pscustomobject]@{Rows=$rows; RawRowCount=$RawRows.Count; ExcludedRowCount=$excludedRows
+        ExcludedDeviceCount=$excludedKeys.Count; ReportName=$ReportName; Diagnostic=$diagnostic}
+}
+
+function New-EAReportQualityRow {
+    param([Parameter(Mandatory)]$Report, [Parameter(Mandatory)]$Result, [switch]$AvailabilityOnly)
+    $status = if ($Result.AliasUsed) { 'AliasUsed' } elseif ($AvailabilityOnly) { 'Available' } else { 'Collected' }
+    $message = if ($Result.AliasUsed) { "Effective report name: $($Result.EffectiveName)" } else { '' }
+    $parameters = @{ReportName=$Report.Name; ApiVersion=$Report.ApiVersion; Status=$status; RowCount=@($Result.Rows).Count
+        ExportJobStatus=[string]$Result.Job.status; ErrorMessage=$message; RawRowCount=$Result.RawRowCount}
+    if ($null -ne $Result.Exclusion) {
+        $parameters.Status = 'CollectedWithExclusions'
+        $parameters.ErrorCode = 'DuplicateScoreRowsExcluded'
+        $parameters.ExcludedRowCount = $Result.Exclusion.ExcludedRowCount
+        $parameters.ExcludedDeviceCount = $Result.Exclusion.ExcludedDeviceCount
+        $parameters.ErrorMessage = 'All rows for duplicate score keys were excluded; no score was selected, averaged or reused.'
+    }
+    New-EADataQualityRow @parameters
+}
+
+function Get-EACollectionScope {
+    param([AllowEmptyCollection()][object[]]$QualityRows, [int]$ItemLimit)
+    $accepted = @($QualityRows | Where-Object { $_.ReportName -in @('EADevicePerformanceV2','EADeviceScoresV2') -and
+        $_.Status -in @('Collected','AliasUsed','CollectedWithExclusions') } | Select-Object -ExpandProperty ReportName -Unique)
+    $qualifications = @($QualityRows | Where-Object Status -eq 'CollectedWithExclusions' | ForEach-Object {
+        'DuplicateScoreRowsExcluded: report={0}; rawRows={1}; publishedRows={2}; excludedRows={3}; excludedDevices={4}; policy=ExcludeAllDuplicateKeys' -f
+            $_.ReportName,$_.RawRowCount,$_.RowCount,$_.ExcludedRowCount,$_.ExcludedDeviceCount
+    })
+    [pscustomobject]@{CompleteScope=($ItemLimit -eq 0 -and $accepted.Count -eq 2); Qualifications=$qualifications}
+}
+
+function Send-EAScoreExclusionNotification {
+    param([AllowEmptyCollection()][object[]]$Exclusions)
+    if ($Exclusions.Count -eq 0) { return }
+    $to = [string](Get-EAConfigValue ErrorMailTo '')
+    if ([string]::IsNullOrWhiteSpace($to)) { throw 'Endpoint Analytics exclusion notification requires ErrorMailTo.' }
+    $details = [Collections.Generic.List[string]]::new()
+    $excludedRows = 0; $excludedDevices = 0
+    foreach ($exclusion in $Exclusions) {
+        $excludedRows += $exclusion.ExcludedRowCount; $excludedDevices += $exclusion.ExcludedDeviceCount
+        foreach ($group in $exclusion.Diagnostic.DuplicateGroups) {
+            foreach ($row in $group.RawRows) {
+                $values = foreach ($field in @('DeviceId','DeviceName','EndpointAnalyticsScore','HealthStatus')) {
+                    [Net.WebUtility]::HtmlEncode([string](Get-EARawValue $row @($field)))
+                }
+                $details.Add(('<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>' -f $values))
+            }
+        }
+    }
+    $table = '<table><thead><tr><th>Device ID</th><th>Device</th><th>Excluded score / 100</th><th>Raw health status</th></tr></thead><tbody>' + ($details -join '') + '</tbody></table>'
+    $body = New-CoreSmartM365EmailBody -Title 'Endpoint Analytics - duplicate score rows excluded' -Category 'SmartInventory data quality' -Severity Warning `
+        -Message 'The fresh export contains repeated score keys. Every row for each repeated key was excluded from EADeviceScoresV2. Devices remain in AD/Entra/Intune inventory. Their excluded score is unavailable, not zero; no prior score is reused. Valid collector CSVs were published.' `
+        -SummaryData @{Run=$script:RunId; 'Excluded rows'=$excludedRows; 'Affected devices'=$excludedDevices; Status='CompletedWithWarnings'} `
+        -Sections @([pscustomobject]@{Title='Excluded source rows';Html=$table}) `
+        -PathRows @([pscustomobject]@{Label='Log';Path=$global:LogTextFile},[pscustomobject]@{Label='Transcript';Path=$global:logTranscriptFile}) -Tenant $Tenant
+    CoreSendEmailHtmlReport -To $to -Cc '' -Subject 'Endpoint Analytics - duplicate score rows excluded' -BodyHtml $body -MailPurpose Error
 }
 
 function Assert-EADeviceReportGrain {
@@ -651,18 +732,30 @@ function Invoke-EAConsistentReport {
             # Every consistency attempt obtains a new complete export, never cached rows.
             $job = Start-EAExportJob $Report $EffectiveName
             $completed = Wait-EAExportJob ([string]$job.id) $Report.ApiVersion
-            $rawRows = if ($AvailabilityOnly) { @() } else { @(Import-EAExportedCsv $completed $EffectiveName) }
+            $rawRows = @(if (-not $AvailabilityOnly) { Import-EAExportedCsv $completed $EffectiveName })
             $normalizedRows = @($rawRows | ForEach-Object { New-EANormalizedRow $EffectiveName $_ })
             if (-not $AvailabilityOnly -and $Report.Grain -eq 'Device') {
                 Assert-EADeviceReportGrain -Rows $normalizedRows -ReportName $EffectiveName
             }
-            return [pscustomobject]@{ EffectiveName=$EffectiveName; Job=$completed; Rows=$normalizedRows; AliasUsed=($EffectiveName -ne $Report.Name) }
+            return [pscustomobject]@{ EffectiveName=$EffectiveName; Job=$completed; Rows=$normalizedRows; AliasUsed=($EffectiveName -ne $Report.Name); RawRowCount=$rawRows.Count; Exclusion=$null }
         }
         catch {
             $reportFailure = $_
+            $diagnosticSaved = $false
             if ($reportFailure.Exception.Data['EndpointAnalyticsGrain']) {
-                try { Save-EARejectedRowDiagnostic -RawRows $rawRows -ReportName $EffectiveName -ExportJobId ([string]$job.id) -Attempt $attempt }
+                try {
+                    Save-EARejectedRowDiagnostic -RawRows $rawRows -ReportName $EffectiveName -ExportJobId ([string]$job.id) -Attempt $attempt
+                    $diagnosticSaved = $true
+                }
                 catch { Write-EALog 'Rejected-row evidence could not be saved; the original grain failure remains blocking.' WARNING }
+            }
+            if ($reportFailure.Exception.Data['EndpointAnalyticsGrain'] -and $attempt -ge $attempts -and
+                $EffectiveName -ceq 'EADeviceScoresV2' -and $diagnosticSaved) {
+                $exclusion = Get-EAScoreExclusion -RawRows $rawRows -ReportName $EffectiveName -ExportJobId ([string]$job.id) -Attempt $attempt
+                Write-EALog ('Report {0}: excluded all {1} rows for {2} repeated score keys from the final fresh export; publishing {3} unambiguous rows.' -f
+                    $EffectiveName,$exclusion.ExcludedRowCount,$exclusion.ExcludedDeviceCount,$exclusion.Rows.Count) WARNING
+                return [pscustomobject]@{EffectiveName=$EffectiveName; Job=$completed; Rows=$exclusion.Rows; AliasUsed=$false
+                    RawRowCount=$rawRows.Count; Exclusion=$exclusion}
             }
             if (-not $reportFailure.Exception.Data['EndpointAnalyticsGrain'] -or $attempt -ge $attempts) { throw $reportFailure }
             $delay = [Math]::Min(300, $ReportConsistencyRetryDelaySeconds * $attempt)
@@ -838,9 +931,8 @@ try {
     foreach ($report in $selectedReports) {
         try {
             $result=Invoke-EAReport $report -AvailabilityOnly:$ValidateOnly
-            $status=if ($result.AliasUsed) {'AliasUsed'} elseif ($ValidateOnly) {'Available'} else {'Collected'}
-            $message=if ($result.AliasUsed) {"Effective report name: $($result.EffectiveName)"} else {''}
-            $script:DataQualityRows.Add((New-EADataQualityRow $report.Name $report.ApiVersion $status @($result.Rows).Count ([string]$result.Job.status) '' $message))
+            $script:DataQualityRows.Add((New-EAReportQualityRow -Report $report -Result $result -AvailabilityOnly:$ValidateOnly))
+            if ($null -ne $result.Exclusion) { $script:ScoreExclusions.Add($result.Exclusion) }
             if (-not $ValidateOnly) {
                 if (-not $script:OutputRows.Contains($report.Output)) { $script:OutputRows[$report.Output]=New-Object System.Collections.Generic.List[object] }
                 foreach ($row in @($result.Rows)) { $script:OutputRows[$report.Output].Add($row) }
@@ -869,20 +961,29 @@ try {
     }
     $terminalFailures = @($script:DataQualityRows | Where-Object Status -eq Failed)
     if ($terminalFailures.Count -gt 0) {
-        throw "Endpoint Analytics collection stopped because $($terminalFailures.Count) report export(s) failed. Canonical business CSV files were not published."
+        $failedReportDetails = @($terminalFailures | ForEach-Object { '{0} [{1}]: {2}' -f $_.ReportName,$_.ErrorCode,$_.ErrorMessage }) -join ' | '
+        throw "Endpoint Analytics collection stopped because $($terminalFailures.Count) report export(s) failed. Canonical business CSV files were not published. Failed reports: $failedReportDetails"
     }
-    if (@($script:DataQualityRows | Where-Object Status -in @('Collected','AliasUsed')).Count -eq 0) {
+    if (@($script:DataQualityRows | Where-Object Status -in @('Collected','AliasUsed','CollectedWithExclusions')).Count -eq 0) {
         throw 'Endpoint Analytics collection stopped because no requested standard report was available in the tenant.'
     }
 
     $script:OutputRows.DataQuality=$script:DataQualityRows
     Publish-EAOutputs $script:OutputRows $schemas
     Remove-CoreSmartM365TimestampedFilesOlderThan -FolderPath $script:OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
-    $collectedCount=@($script:DataQualityRows | Where-Object Status -in @('Collected','AliasUsed')).Count
+    $collectedCount=@($script:DataQualityRows | Where-Object Status -in @('Collected','AliasUsed','CollectedWithExclusions')).Count
     $unavailableCount=@($script:DataQualityRows | Where-Object Status -eq UnavailableInTenant).Count
     $resultSummary="Endpoint Analytics standard reports collected: $collectedCount; unavailable: $unavailableCount; Advanced Analytics reports: 0."
-    Write-EALog $resultSummary SUCCESS
-    Send-CoreSmartM365TeamsNotification -Title "$($script:ScriptName) completed" -Message $resultSummary -Level SUCCESS -Channel Infos -ResultSummary $resultSummary -Facts @{Tenant=$Tenant;OutputPath=$script:OutputPath;RunId=$script:RunId} | Out-Null
+    if ($script:ScoreExclusions.Count -gt 0) {
+        $script:CompletionStatus = 'CompletedWithWarnings'
+        $excludedCount = ($script:ScoreExclusions | Measure-Object ExcludedRowCount -Sum).Sum
+        $affectedCount = ($script:ScoreExclusions | Measure-Object ExcludedDeviceCount -Sum).Sum
+        $resultSummary += " Duplicate score rows excluded: $excludedCount; affected devices: $affectedCount; their score is unavailable."
+        Send-EAScoreExclusionNotification -Exclusions @($script:ScoreExclusions | ForEach-Object { $_ })
+    }
+    $completionLevel = if ($script:ScoreExclusions.Count -gt 0) { 'WARNING' } else { 'SUCCESS' }
+    Write-EALog $resultSummary $completionLevel
+    Send-CoreSmartM365TeamsNotification -Title "$($script:ScriptName) completed" -Message $resultSummary -Level $completionLevel -Channel Infos -ResultSummary $resultSummary -Facts @{Tenant=$Tenant;OutputPath=$script:OutputPath;RunId=$script:RunId} | Out-Null
 }
 catch {
     $script:CompletionStatus='Failed'; $script:CompletionError=$_
@@ -898,8 +999,9 @@ finally {
     catch { Microsoft.PowerShell.Utility\Write-Debug "Graph disconnect failed: $($_.Exception.Message)" }
     if ($script:CoreImported) {
         try {
-            Set-CoreSmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($script:DataQualityRows | Where-Object { $_.ReportName -in @('EADevicePerformanceV2','EADeviceScoresV2') -and $_.Status -in @('Collected','AliasUsed') } | Select-Object -ExpandProperty ReportName -Unique).Count -eq 2) -Scope 'CMDB:analytics'
-            try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage }
+            $scope = Get-EACollectionScope -QualityRows @($script:DataQualityRows | ForEach-Object { $_ }) -ItemLimit $MaxItems
+            Set-CoreSmartM365CmdbSourceScope -CompleteScope $scope.CompleteScope -Scope 'CMDB:analytics' -Qualifications $scope.Qualifications
+            try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage -DeferTranscriptUpload:$script:TranscriptStarted }
             catch { Microsoft.PowerShell.Utility\Write-Debug "Completion banner failed: $($_.Exception.Message)" }
         }
         finally { Complete-EATraceArtifacts }
@@ -909,8 +1011,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDSH2xKe6TCxKw
-# a5BX9qISSLh/m4z6e5ojbbZIlXh+i6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbzMQ1cJejzx0X
+# Ez0ZVQXlAeYZH/vrwGhT7lZCgIdCxqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1043,31 +1145,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMJX9r0e/m6aU0G1UgFlkiqyemX/2OGOuE/v//A0pGm1MA0GCSqG
-# SIb3DQEBAQUABIIBgFBQlllb2/w2NNkAjaU6YayVUtLt260zPCZvzZ2eChnII/K7
-# vBxOOIf7LeF2XMiG6u75rleO0TZfC2aq/QCQjqLTfiI+iqyuPUT1qjVCVBhxjvco
-# w9smbZrqJj0G+dGAdrUuVQ4U5UQI4kpmx9TRmCzFMkytMkpjDQcL3eLwHqUGTmGE
-# mRRdEdgrCyXi3WeQ4TqMvF6IIi0BH14P4IY9gfyP3gjCz9scC3Js9mwpubs7i0lq
-# ReHaAW6+w5tBmKupMNTffURAXVPEPD/EiucYR/a/wEPCgHGxav1cgBIJtIwvnpri
-# GQASXVkwMQxbiNzBPJ/CujaInI1cfgxbdz9eX63Of6CrD7UazQY6H2uYvxqczdXY
-# ZCySI1HCH2r7yR/mIO+ddlG8fnm9vJV25/5hljrR9+HU+a04zpVoTyPobQZYrtbx
-# mP//XosL2X0P3V+z+zkw6Imxlkr3azcBrmaIgnYVlLCXed7CW0dFvMnLkKZEx09a
-# oIOD1TbW9OO3lPicwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB3U1VUzM68NtBe5LnJVIdcUs4IsQCu+LpPMjkbo89OeMA0GCSqG
+# SIb3DQEBAQUABIIBgKWwIzb9tlAMY1rrP3Ezp4sW3z7QD/LsorazWGe/ndR6UG1F
+# 91pR44dOfkcBJfFd2OycVh2P6kaSN+6BnACs+9jswCSSVOhIDBBPnzt5T4+mJ33a
+# 2fh8os+EQSbrrEqqFwBpXwU/hBoPX6AFrWfXTYseMcyOQmhFy/OEAt3RHn9EAugu
+# /lVRxKjXRCqqzesgz/HHpQQq1PgTcMT1D1+1Mh3NX+LnV4MDJCpIXjHJ1aS8qmhF
+# 6D8G2QBhKGAK1LfFD0VEeIhlHPJLGvMp/jZZMH2e/ZmMCile4WzxPMTnmdV87TuR
+# RwqSSAKIyV/XEwxBnu5rpHWNDkTqlRdIIq9VGgfMbETytQhB5Exu9hmsrYfppXuR
+# 5fV120tCaT30sqny5Shi5viDv0va86PpafcFWKiZ+6JwDNMkcjts9F1IbKxxB4CN
+# o1fVbndanmFUhC4Q1+wyV9WqEFIR05Pdz6xtZMlI5MDwoaLOukYY3RTKXoOqbaMQ
+# 8ijW4rCn+pPM864I+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxNjIx
-# MTZaMC8GCSqGSIb3DQEJBDEiBCClnRAUjM92kw/nXJqfsni9jRIuo6ynAhwhZZAp
-# 5eWIKDANBgkqhkiG9w0BAQEFAASCAgBWEycb8Hm8JqhgKSTCGlEntMScZRoxYI1p
-# OQXg6Otc9YjCSbj4ro9NkJUScGhwY7YuOoKBa9F8SYcgZnUYR/MtjRmCKE4xCmFS
-# EX82juBgEA1TCgGpbY2d95bJ40W3hO9qtoo0wRbeXqclCcAj7+0XlG2Rst22F1oX
-# VCMkqJrKfipY58KjeyevPvzV+kcDwLqaN6M9AVsO+wJ/9l4xT0GB5URFGJr8eIDr
-# ZSReid27b7TNlgonuzZgeguVxA9x6RibIgPFCvaTscknw3mek5FrLzJD+j1nSyZ8
-# c9V4n5/g3t1DX43oBDmANETjfpuxdVqWwUGG2UdGAULtUrLfpavYmmp5zaz9oe7m
-# jPVjKGSTPTVSZKo4u/WwZVx1rkSe7z1KA+8fHCc/BX2b9/4oWlnmxcB4cCWwPHgY
-# ZtJjJRQUTTKfGCcYrypQn2KcBIkcJzXzjlAE3h/t2Cv5BABAeZMneeYxq1Tr3Hvh
-# cyyTZqVFeP0xhMD7wCF2z7CdmcvCackXJPfkFpobBJtpuPaaefPVad1opsbZz+1M
-# qaLJ87VPUF/WoDoip9kBWBqP7GfTkjb4WYXFq0XRw8U+IDCz/GTJMYFDtrXFVXHv
-# GLTXurLOyibLC+IdApNH8y441hpO/wNkjd1IAGCzRDDRZro16p10d/6F69w3efxQ
-# zyGDC4lNPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTVaMC8GCSqGSIb3DQEJBDEiBCD0QM+bt6Si8+FxWdbKdv30hG1wAFqjBjcEJq5v
+# NfRrNzANBgkqhkiG9w0BAQEFAASCAgBEZszdoH7ZI18KUFMeHVVUlKaohn+aeEN7
+# vfpQElEV/nqpQpDHF2MAyaC3oXe/8uOPUFY8O7cJIWCshafUvjW9CWrUHCp8+Bfp
+# UK6TXf1KDiO9EBhM0QSpDGIfwgCI7OJJp05CxBX9cqoTfT2xpUtXh6lxWuLd69N/
+# 7p1SW8R2rnQa+CctGVsTfCBitCenS61mjsN3nWBtklAW3t73jZmJnILkyHfB/cgw
+# IeJHPL0rH2Ayoqj781IQFoPBcnZxg373D6QxIMFQ1iYsZUkIesiZwggBgWBx1ciA
+# H9CLGPFxBYZ532GEybfTDt0xNR4sIz7VeyyfF/x6ITzNiYPYRN7hjqzzt1rF69G3
+# AxAQ4wTc0yq389iZRd0181xeIB6eB6m2kMpnGLB5H+/ZAO1Q88RyrW1WnIm4Elxo
+# GzysPEnCuI3gKoHujPRHm+3LRIcf7XAGTECdwPUdgXwRoEeTzDiKoWeDK4Dxb3UA
+# UHfEk8i1xOM+vRBp18x3JgheV7DbCW4ef3eLIi1zFT01/FtoF/T65SngiYhgx/kV
+# WJfX+BSYnsFpgsHOklivfyNfIeSRUPhUNOXw9Ws29aqUv4790+Ng2b+PnbgYRgfW
+# NI3w4Wvppq6wbv8NgjsiwZx6rwLx2V6cGVgoi4ksRDLobeSW89bVJCKLu2rKCMQT
+# ud/iesxWDg==
 # SIG # End signature block

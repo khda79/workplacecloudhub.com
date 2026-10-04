@@ -414,6 +414,34 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         scores={r['SourceSystem']:r['EndpointAnalyticsScore'] for r in rows}
         self.assertEqual(scores,{'EADeviceScoresV2':'71.0','EADevicePerformanceV2':''})
 
+    def test_excluded_score_keeps_device_blank_score_and_explicit_qualification(self):
+        self.prepare()
+        devices_before = self.table('DimDevice')
+        self.assertEqual(self.table('FactEndpointAnalyticsDevice')[0]['EndpointAnalyticsScore'], '70.0')
+        # The collector removes every duplicate score row, not the inventory device.
+        self.inputs['analytics'] = [dict(ReportName='EADevicePerformanceV2', DeviceId='md1',
+                                        EndpointAnalyticsScore='', AppReliabilityScore='90')]
+        self.write_inputs()
+        producer = next(p for p in pipeline.load_json(pipeline.REGISTRY)['Producers']
+                        if p['Scope'] == 'CMDB:analytics')
+        receipt_path = self.source / producer['Receipt']
+        receipt = pipeline.load_json(receipt_path)
+        qualification = ('DuplicateScoreRowsExcluded: report=EADeviceScoresV2; rawRows=2; '
+                         'publishedRows=0; excludedRows=2; excludedDevices=1; policy=ExcludeAllDuplicateKeys')
+        receipt['Qualifications'] = [qualification]
+        receipt_path.write_text(json.dumps(receipt), encoding='utf-8')
+        self.prepare()
+        self.assertEqual(self.table('DimDevice'), devices_before)
+        rows = self.table('FactEndpointAnalyticsDevice')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['DeviceId'], 'md1')
+        self.assertEqual(rows[0]['EndpointAnalyticsScore'], '')  # not zero, not previous 70
+        self.assertEqual(rows[0]['AppReliabilityScore'], '90.0')
+        manifest = pipeline.load_json(self.output / pipeline.MANIFEST)
+        published = next(p for p in manifest['SourceEvidence']['ProducerReceipts']
+                         if p['Scope'] == 'CMDB:analytics')
+        self.assertEqual(published['Qualifications'], [qualification])
+
     def test_failed_producer_preserves_last(self):
         def reject():
             self.proof['Files'][0]['Status']='Failed';self.write_proof();self.prepare()

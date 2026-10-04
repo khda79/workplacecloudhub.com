@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline producer-receipt tests for PowerShell 5.1 and 7. No operational imports.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored; no operational module is imported.')]
@@ -65,6 +65,13 @@ try {
     Assert-ReceiptTest ($receipt.Files[0].Rows -eq 1) 'Logical multiline CSV row count is wrong.'
     Assert-ReceiptTest ($receipt.Files[0].SHA256 -eq (Get-FileHash $fixture.File -Algorithm SHA256).Hash) 'Exact native hash missing.'
     Assert-ReceiptTest ($receipt.Files[0].RunId -eq $receipt.RunId -and $receipt.Scope -eq $fixture.Producer.Scope) 'Lineage missing.'
+    Start-SyntheticReceipt $fixture
+    & $mock {param($scope)
+        Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope $scope -Qualifications @('DuplicateScoreRowsExcluded: excludedRows=2; excludedDevices=1; policy=ExcludeAllDuplicateKeys')
+        Complete-SmartM365CmdbSourceReceipt -Status CompletedWithWarnings -ErrorCount 0 | Out-Null
+    } $fixture.Producer.Scope
+    $receipt=Get-Content $fixture.Receipt -Raw | ConvertFrom-Json
+    Assert-ReceiptTest ($receipt.Status -eq 'Completed' -and -not $receipt.IsPartialInventory -and $receipt.Qualifications.Count -eq 1 -and $receipt.Qualifications[0] -match 'excludedRows=2') 'Qualified warning completion lost fresh evidence or exclusions.'
     Assert-ReceiptTest (@(Get-ChildItem $fixture.Directory -Filter '*.tmp').Count -eq 0) 'Receipt temporary file retained.'
     $old=$receipt.RunId
     Start-SyntheticReceipt $fixture
@@ -160,6 +167,11 @@ try {
                 $expression=$scopeCommand.CommandElements[$index+1].Extent.Text;break
             }
         }
+        if ($producer.Script -eq 'SmartM365-EndpointAnalytics-Inventory.ps1') {
+            $helperDefinition=$ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Get-EACollectionScope'},$true).Extent.Text
+            $scopeAssignment=$ast.Find({param($a) $a -is [Management.Automation.Language.AssignmentStatementAst] -and $a.Left.Extent.Text -eq '$scope' -and $a.Right.Extent.Text -match 'Get-EACollectionScope'},$true).Extent.Text
+            $expression=$helperDefinition+"`n"+$scopeAssignment+"`n"+$expression
+        }
         Assert-ReceiptTest ([bool](& $scopeModule {param($e,$v) Test-CmdbScopeExpression $e $v} $expression $scopeDefaults)) ('Complete fixture scope rejected: '+$producer.Script)
         if($restricted.ContainsKey($producer.Script)){
             foreach($name in $restricted[$producer.Script].Keys){
@@ -167,7 +179,7 @@ try {
                 Assert-ReceiptTest (-not [bool](& $scopeModule {param($e,$v) Test-CmdbScopeExpression $e $v} $expression $values)) ('Restricted scope accepted: '+$producer.Script+' / '+$name)
             }
         }
-        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}elseif($producer.Script -eq 'SmartM365-SPO-Inventory.ps1'){'1.0.67'}else{'1.0.65'}
+        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}elseif($producer.Script -eq 'SmartM365-SPO-Inventory.ps1'){'1.0.67'}elseif($producer.Script -eq 'SmartM365-EndpointAnalytics-Inventory.ps1'){'1.0.69'}else{'1.0.65'}
         Assert-ReceiptTest ($ast.Extent.Text -match ([regex]::Escape("-MinimumVersion '$minimum'"))) ('Missing module guard: '+$producer.Script)
     }
     "PASS: $script:checks offline producer receipt checks; PowerShell $($PSVersionTable.PSVersion)."
@@ -185,8 +197,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqzjFikZIkD7gb
-# kGb5+4qNuujv8Gy4gsYro1krXzv6U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDh/McqNT2M43Z4
+# H0f0F+Y06s48JkBNXVszxioq8Dng1qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,31 +331,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBHVTRqUle5AyKycJJnqeqky76kqRfxyY2dad9f+XWixMA0GCSqG
-# SIb3DQEBAQUABIIBgKSB5YbEQRjqvq/9CdxKxfXFil/djPQ2KBdUDIKPixUtD/e0
-# CfTVdjeVcKmT8p5EBf2vMbxG9OS+unT4p9pflmbpfeaMbH+7aiAQ2cFF/jvojFm9
-# K57OUxFoI3AapYtbu0G7Dg1muk6kpcotAa00m+8FMrSI4FYpVvitNycIyM0jLZrX
-# vQDoSeauqnpbzu2BS+X9UScpj79NbVKf5r/r1P/dG0oJ8mtPiU5uiyz31+d7WCdC
-# sjPRDVQHqDcGwAduHiQ1zNRi7dvZgCYcr7vKaJqkLoZOKAplcrC6WhuP6F9JoTwA
-# vLHmYqK5JDxqlItXgBZoABpJ0L5gea9toR1UTkrHNyKj2Ea5+a0caKZZP5KiorPu
-# FwLe4Z+p5OaF7FxirUv6eZuDblipC7CLvKazY/N6ixeRZnRCCu/BF8o/lNSmhV91
-# YP7EKLVA+mD0KITkZXJJOKZGTKT3UQ3+wmUzzLcBeCr1wIO1c5tRZ/364zIDnazr
-# rfDADKIVacVgFiM3D6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBhqNFe0fLZ6szOfodETjNluyfzfeez71SDb9kyL8iR2MA0GCSqG
+# SIb3DQEBAQUABIIBgABUawvTEgidg5c8lfu1tyiIWFDGJ8leXLAo9gpK2ffK2fNC
+# AvoSN4COr54tAgQ8AATYiY+VdrOC7K8PQ2xSusvmpzEUXfOf1eilRO3OIJyWq/zW
+# /A+2Wn6hiUoq44iX2KoEX8mSDre+XkzWxblfpFypkf40NY4cISyrYIWRsbl/cP0x
+# 9oBpZQ4tW9zbUW4YKBreCNpTyBrR0MccumK4318ObWaXShlqguurpli9weOTdfi9
+# juhGhRgwr1CgleqgsMmAI7qIKM0gU3/SejP2tFjxzy7+7OBX/L7/1iK2nSzH070G
+# 20etkaDfehOtR4/Hq1OxG49SNcrpauderI30CFuUifm/x39epSEMpTRHhiwTnm6N
+# 8mttLBETbhO7VxiPK/A0FApjFkOP+FDlKMMuLFNMsRLi1PMxxKEEv96VmeIGUQxP
+# XvtVtju65HmA++D7x1rFt6NNRZd1GrmT+npLShhBrUGzgX1un6KouaiT0es9Di+S
+# mNrZ8NDFawrFOd8lqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjQ1
-# NDFaMC8GCSqGSIb3DQEJBDEiBCDvBillSDgQPqfE/+0GXMv37YupZLQzWOrvy/8O
-# TXixrTANBgkqhkiG9w0BAQEFAASCAgA7t9HXfbSJU7wyrV0JsqJLDbqNZFqhDzCB
-# UqbPUnVqx9oKI52WTWzkjCjm9aBHzVXxu0Qt5hGjxHjG9ZAv358wncCN9mqMHPq2
-# nOTKDNmK1xsrzOORGrVCTg9fYfiwwTORAOlL6uzVX2J5+UXkEvMUfD8AEuOihUNp
-# pWtCr2sXw85yWzz9Db95nwwucSptQ9JyClQE5M+KGKe/OMMVy/+jufSuHsFJmD2Z
-# aiKrMpNMg/kjhUnwXjsyfhJHc9wusBTdST39UpmvjQt2zJg/ECgkLNLgfn3yVYTo
-# gXspp/991Ftr8Zdt3AdCP++/XSYyCXLvATsnV2mJ7mQfyKDL/GqSFbNpuQDimEvb
-# vhCfHeMZpxEmEEr2q0qYgw0MELBQpshs++IKXSgHtH9nkNOtTRY6xERFQOv8tvZX
-# creGjW+b0wvKqcao9DvkchwNG+eKNOqQEB/5jKgVgCKb3FX/n4Nsxci9Z9m6V0SF
-# VLrx+8LLRP07+D+ThTy2HG+YH2iqIto76uVn1Bbe/fKBU52DDXTS7VcLgUzaqEj7
-# CufdgS/b8QyhFsg0ISZFNZ0YnUOGnCe47ebfmkS6lTrbzmdZrmWIjTySc3ansIaC
-# CwWRtMG4ZDn3BQv9i7ZI4HWSm6G6dkbWUFrGbE+hIKWF8XNyxMBBJnrVjcg3qibw
-# /eZO5sY2XA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDl6D1gaETO1iHSGEN/OZxdqybyaAmgbneVD53e
+# 9JGkVzANBgkqhkiG9w0BAQEFAASCAgBuSAzosCbwU2sme8eS6pq1u7Bb410dxte7
+# vxnt7mjfhnHeG75TMJTgdsbveYl1O7cVtufs5tKQA+rfncDdskXvnvcPjg4oHhDH
+# MYMFfJQJGqMCgJPxoTyXdpbwND/dUFqJbXv+6XcDL2lSCM06g8LxBwpathOUh0U2
+# 6HDLvjRmuEe7TcAaSN1tFuoQdHMRRrlT6KCkkQQJwR945zEib/PNJMpW8LZuwXvv
+# qYOTvFcXUZi3uAFNgS2UzI6iDpDmmNSPxlZtxThPraU+OCpgcNyQnh/rE9GtTm7v
+# eb/zzMqS6FxBhp4TiDDoZzbYpSw6j2tOh9SyS1ji6M6Vs4CWvS+IknHiFdpDDlhx
+# lZbS7nyIZNk15I0K9PCKs75F26/mB8mwLvpbjDj8bO9ZuGDMlCGooanvWirUq2Ap
+# 8101RwuSCkE23/UBA+nRFgz9IL9iAg6d2U9lKJj1EsZmYA79Pj0NuNIXZyQ3OngC
+# kUu/gf3B1cyjZ1SRsqLcDwAIMXHZLjZaHrafxhG0q8h0RbahdemCEwut69wFyebD
+# t0/K3giGbJUO5AYq2xfZy5nlLe9cGX8G0yJN/RVuYvFTk2EQZo06dhGAvGDng2Zw
+# gWtnURiXTvWk/LxxFqmvMSx3NZg7EKhUs1JAaFNOS3bJj/ZVA2CYyaf99p6Jvhik
+# ZuJ2zb/3oA==
 # SIG # End signature block

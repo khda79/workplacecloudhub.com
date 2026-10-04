@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Offline current and weekly Endpoint Analytics ambiguity refusal tests.
+Offline current and weekly Endpoint Analytics ambiguity and missing-score tests.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Uses synthetic CSVs only; no connected data, Power BI, collection or publication.
 #>
@@ -38,7 +38,7 @@ function Get-TestDefinitions {
 }
 function New-TestRow {
     param([string]$Device='synthetic-secret-device',[string]$Report='EADeviceScoresV2',[string]$Score='71',[string]$Date='2026-01-02T00:00:00Z')
-    [pscustomobject]@{TenantKey='synthetic';ReportName=$Report;DeviceId=$Device;EndpointAnalyticsScore=$Score;ReportRefreshDate=$Date;StartupScore='80';AppReliabilityScore='90';StopErrorCount='0';CoreBootTime='20';CoreSignInTime='10'}
+    [pscustomobject]@{TenantKey='synthetic';ReportName=$Report;DeviceId=$Device;EndpointAnalyticsScore=$Score;ReportRefreshDate=$Date;StartupScore='80';AppReliabilityScore='90';StopErrorCount='0';CoreBootTime='20';CoreSignInTime='10';BootScore='80';SignInScore='80';RestartCount='0';CrashCount='0'}
 }
 $first=New-TestRow
 $second=New-TestRow -Score '88'
@@ -143,6 +143,45 @@ try {
     Assert-Test ($failure.Exception.Message -match 'evidence rejected') 'Full weekly generator selected conflicting startup evidence.'
     Assert-Test ((Get-FileHash -LiteralPath $windowsOutput).Hash -eq $windowsHash -and (Get-FileHash -LiteralPath $endpointOutput).Hash -eq $endpointHash) 'Weekly startup conflict replaced historical output.'
 
+    # The qualified collector exclusion leaves the independent app-performance row.
+    @($appOnly) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
+    @(New-TestRow -Report 'EAStartupPerfDevicePerformanceV2') | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_StartupDevices.csv') -NoTypeInformation -Encoding utf8NoBOM
+    $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput) | ConvertFrom-Json
+    $trend=@(Import-Csv -LiteralPath $endpointOutput)
+    Assert-Test ($result.EndpointSnapshots -eq 2 -and $trend.Count -eq 2 -and $trend[0].'Snapshot Week' -eq '2026-W01' -and $trend[0].'Endpoint Analytics Score' -eq '71.0') 'Missing current score regressed stable history coverage.'
+    Assert-Test ($trend[1].'Snapshot Week' -eq '2026-W02' -and $trend[1].'Endpoint Analytics Covered Devices' -eq '0' -and $trend[1].'Endpoint Analytics Score' -eq '') 'Weekly missing score became zero or reused the previous score.'
+    Assert-Test ($trend[1].'App Reliability Score' -eq '90.0') 'Independent valid app-reliability evidence was discarded.'
+
+    # Build the native Intune row from the exact properties read by the current generator.
+    $tokens=$null; $errors=$null
+    $currentAst=[Management.Automation.Language.Parser]::ParseFile($currentPath,[ref]$tokens,[ref]$errors)
+    $nativeDevice=[ordered]@{}
+    foreach ($member in $currentAst.FindAll({param($node) $node -is [Management.Automation.Language.MemberExpressionAst] -and $node.Expression -is [Management.Automation.Language.VariableExpressionAst] -and $node.Expression.VariablePath.UserPath -eq 'device'},$true)) {
+        $nativeDevice[$member.Member.Value]=''
+    }
+    $nativeDevice['Device ID']='synthetic-secret-device'; $nativeDevice['Device name']='Synthetic device'
+    $nativeDevice['OS']='Windows'; $nativeDevice['OS version']='10.0.26100'; $nativeDevice['Ownership']='company'
+    $nativeDevice['Managed by']='Intune'; $nativeDevice['Compliance']='compliant'
+    $otherDevice=[ordered]@{}; foreach ($key in $nativeDevice.Keys) { $otherDevice[$key]=$nativeDevice[$key] }
+    $otherDevice['Device ID']='synthetic-other-device'; $otherDevice['Device name']='Other device'
+    @([pscustomobject]$nativeDevice,[pscustomobject]$otherDevice) | Export-Csv -LiteralPath (Join-Path $latest 'Intune_Devices_Inventory.csv') -NoTypeInformation -Encoding utf8NoBOM
+    @($appOnly) | Export-Csv -LiteralPath (Join-Path $latest 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
+    @(New-TestRow -Report 'EAStartupPerfDevicePerformanceV2') | Export-Csv -LiteralPath (Join-Path $latest 'Intune_EndpointAnalytics_StartupDevices.csv') -NoTypeInformation -Encoding utf8NoBOM
+    $result=(& $currentPath -DataRoot $testRoot -OutputPath $currentOutputs[0] -SignalsOutputPath $currentOutputs[1] -DirectorySummaryOutputPath $currentOutputs[2]) | ConvertFrom-Json
+    $current=@(Import-Csv -LiteralPath $currentOutputs[0])
+    Assert-Test ($result.Rows -eq 2 -and $current.Count -eq 2 -and @($current | Where-Object 'Device Source ID' -eq 'synthetic-secret-device').Count -eq 1) 'Score exclusion removed the inventory device.'
+    $excludedDevice=@($current | Where-Object 'Device Source ID' -eq 'synthetic-secret-device')[0]
+    Assert-Test ($excludedDevice.'Endpoint Analytics Score' -eq '' -and $excludedDevice.'Endpoint Analytics State' -eq 'Not observed' -and $excludedDevice.'App Reliability Score' -eq '90.0') 'Current missing score became zero or replaced independent evidence.'
+    $signal=@(Import-Csv -LiteralPath $currentOutputs[1] | Where-Object Signal -eq 'Endpoint Analytics score below 50')[0]
+    Assert-Test ($signal.'Covered Devices' -eq '0' -and $signal.'Managed Devices Covered' -eq '0' -and $signal.'Affected Devices' -eq '0') 'Missing score was counted as observed or unhealthy.'
+    @([pscustomobject]$nativeDevice) | Export-Csv -LiteralPath (Join-Path $latest 'Intune_Devices_Inventory.csv') -NoTypeInformation -Encoding utf8NoBOM
+    $result=(& $currentPath -DataRoot $testRoot -OutputPath $currentOutputs[0] -SignalsOutputPath $currentOutputs[1] -DirectorySummaryOutputPath $currentOutputs[2]) | ConvertFrom-Json
+    $single=@(Import-Csv -LiteralPath $currentOutputs[0])
+    Assert-Test ($result.Rows -eq 1 -and $single.Count -eq 1 -and $single[0].'Endpoint Analytics Score' -eq '') 'Singleton device or empty conflict sets lost missing-score semantics.'
+    [IO.File]::WriteAllText((Join-Path $latest 'Intune_Devices_Inventory.csv'), '"Synthetic empty header"'+[Environment]::NewLine)
+    $result=(& $currentPath -DataRoot $testRoot -OutputPath $currentOutputs[0] -SignalsOutputPath $currentOutputs[1] -DirectorySummaryOutputPath $currentOutputs[2]) | ConvertFrom-Json
+    Assert-Test ($result.Rows -eq 0) 'Empty inventory failed cardinality handling.'
+
     & (Join-Path $PSScriptRoot 'Test-PreparedEvidencePipeline.ps1') -TestRoot $testRoot
     Assert-Test ($true) 'Existing prepared publication and stable historyKey regressions passed.'
 } finally {
@@ -156,8 +195,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDO66VUsVsB/E/D
-# UAeszEI5QYyXsP1Nk0QuPyltQ7/Bo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyuTyQ/k/wp9kp
+# aSC9kMBeiUCZ8zKG4MSHbglBQE8rq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -290,31 +329,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMB7TddJbdU7jTgIuAbyTRyH9cT6XAIIA4g1Q+mAbh5BMA0GCSqG
-# SIb3DQEBAQUABIIBgEfM7b7d+sZ+RcGr96SN759rQLy+Yw4qTgITKM5bR6IzUd3N
-# /HgQ+8/K2siVLLThYatIQQGFmehMX2ke1kGcLONqUbwVR95sDt4vDVynznA0ga5C
-# Nc/xHUfvITWIEmmNfd2a6reWGE5tTxRlnM37y+DR9cp+lVJ9+HjGIED/1unwrhrd
-# rxSy0PQIunqT5UEImqFIMrFm1jma/QGwLxLw0qPN6qzOW5+hHzuLwpQ9N9hjndcd
-# 8zluhCmHG4L46xS+aaKFrG3OdfGxejuK2F1+ItIJil013RcxFOQ044CsOmzMTOOv
-# hqvKgWnOf1zFeuHI1mifdmuqf018XHr8+/i61TbHzupONkpSi1wykqFKNZhs4Bo7
-# UEdr7PR6SKhHte6NURA5wc8wdGrxbNyvzHchju0TCSXYN14OCBoX09zmyHG5IwC8
-# wWE5re1KPxU8MFFabG+dFQr7uLxDBV5J00NZQrcH0JVG6TIJa/98YopUuQ/UX2i8
-# 7ETRlHLufm0kmzyACaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBwEFBaKjV3Y/OdLLDH6Axlm696N0FHzBgo1L5rpOZqiMA0GCSqG
+# SIb3DQEBAQUABIIBgERYw1AlS84IzJz63CdK14TLfc1mtJfkJunPhyJnY3AA9UT8
+# XhYl5LsqCapf7L6oT6Ivark1OoM0Lr3aDNIrGlTjqRE26ZuHou0j8innqzZ7EDE4
+# G0ofEAWmDan05Okc2PqiCtgTCkIb44EYmsAwMa6ywJTYeJOHt40tmy79jeDdIVit
+# k6yRf79CmxslIBDN9ACTOdPTAb87LmMtPIYIcs9BVt3arQgNjVbMNWDTbMxjdvmv
+# 2hpvREBwRQA/iRk8WHPxwsTjrJ4fWvw1SEc3jGI+sKCBfUHhQZdLQFU4ppBcvWov
+# rhBBknGodKjzMc9aRit+tYKdMhpEDosQ8fJo1ZLjHpiEOErINpgHMqDQz0/G7hWd
+# 0i48rud2zV1pcxBXjyBkcovUIZrYdTSnWaLgqd1yTpOooKfXKvd2v1mM5+FeP07t
+# hXYEtyhFSc8r4KdiG1wa0zB6nUJDr9rKsu/8vdzA6PGBy2ifpbvXqg+1nSf8veEQ
+# PdNbK9v/WeixxSUBKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAHFHRLTPUsKxEpEttfhPfUybEP3FnEGPL2v+2O
-# wjJ4VzANBgkqhkiG9w0BAQEFAASCAgB/i3QF4WQHuf8aDYiGngNo0e7I1FcgqNsD
-# 08OpJam3l4dadQcBzSwSsxD/+g+k50xswoO5xtKd1y0xoF0S5mWYHyzbVMakzpej
-# Sw4FWNq0xrDbPPBjgRCFUx0N+5nR+W27z/KS3ECirb//JUihTOO6djdRhgadjGri
-# mixxMhoGgEqNpm4s4lK4JcupYPDrK2QhS12Cz+HaB1Ex5uvpiAHmPfgHp141gf4E
-# nU7bSWg08ZDQiKFWKeDlvP5XL2t6Iq8/6Jbh4KxSnBnX5gMqxs4JCCsv9dS30ZHX
-# u7CSRKFo762ncTQPHX4css0vHDjMJvbrrV1QLE7efWAXG9a1JIDKNz4q7IDAgL6h
-# yLeP1OWgvJ28wqaQ2MJIWW+4Djs8kCmc45LipPWC0PuYHXrIss2UxhplZsaxD1uf
-# 5EoykfFyR/N9KjPnItt4XgMTid5oyMywYN4FidHb2Se/nTCCON1+KsYbjF8k+/3Q
-# KoSNz81avLbuG6Z+tcJnCnYWonzMKLlcu/3XkHwHO7o5R0X0hw74Owg6+KmYdfz6
-# yd5Ni5ZWcn8m8opFf1h/bbGCXrshnn4ebIWacpKEzXxrcxlfN5JJXGsVyipowDLI
-# J6eAn4CnlFoX4yd5S8adUkFcd5H6KO92jezSDOF/P2wkX4+5r6IIO9M+qb0g8R5l
-# SoBlNr8jLw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
+# NTdaMC8GCSqGSIb3DQEJBDEiBCDqfrEwtE1sM6VTh/Q7EPQBaYXQLxJhdWk2fTdQ
+# rhJ45DANBgkqhkiG9w0BAQEFAASCAgCW8L9gm3ruiYKmvJymBOWa9jTOWqm3fImS
+# 8YOh0qyjYFZdc72/IwZoSshbwUWelLnd9DdFHXU9Qb1AF+0isJCPO/t8l1hnGvOw
+# t6n53Nby/wbethG8zG+YwAi/u7CkfaeLmVb48xM+chKhsVAxJRPuAk87A/wXaH3p
+# IyruPaPRcpH2EuO+cNBZoOruFjI/rUCXIHppTXutY0uovJq0j7k4e56RQNc5Fb/q
+# izPZcrKeMVab6W1orzSF41hfS1tNTTqKCGrfxaUHuZQDfi0TminLE6CpQmKBp7rs
+# FpFMVvoPeaXObxfLav9rDU6Lf2H5qPW/40eueAVr68Hvzx1YFaTIJuqIhffhjJ1F
+# OBTFJ0amQhMKUjsIAMpZcKKiC6IzmvEIqjfIIg40WYUc1EeiUEKJm4DE5KRsXZhM
+# /UxgIEaWk7imitGHc9XdWdTRz/z8GercOmstYl0YgRxqnnhLfS/SU+dgdhbHLibD
+# g22yqlsIYxW1cfSxbV0bzwTicTLGJFPxhrNx6qe6E3wTuSqdEKDCJhjzhuxAhvVF
+# /5XRcGJHlvuivMTEZwgPuVC6w6fTRuP0vnRDGFXvdZwtkIQAM/CTJ2bEJ/vqQ+8H
+# dUHjSW3tFDJkBHgaCRcl5NqaT99o2vko6u2rqE3EXYTdldvwktsKPlaBHXJYxmJw
+# f6b1PrZfhw==
 # SIG # End signature block
