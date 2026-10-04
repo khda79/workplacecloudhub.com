@@ -5,7 +5,7 @@ Offline native CSV projection, empty-export and fail-preserving regression check
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -70,7 +70,7 @@ $global:SmartM365RequireCsvValidationRules=$true
 $adAst=Read-TestAst 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1'
 foreach ($name in @('Get-SmartM365AdNativeColumns','Get-SmartM365AdCsvColumns','Complete-SmartM365AdDomainCsvSchema','Combine-CsvFiles')) { Import-TestFunction $adAst $name }
 $exchangeAst=Read-TestAst 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
-foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Export-CsvAtomic','Resolve-SmartM365MailboxWarningNativeGuid','Assert-SmartM365MailboxNativePopulation','Find-SmartM365MailboxSmtpConflicts','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
+foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Export-CsvAtomic','Resolve-SmartM365MailboxWarningNativeGuid','Assert-SmartM365MailboxNativePopulation','Find-SmartM365MailboxSmtpConflict','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
 $autopilotAst=Read-TestAst 'SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1'
 Import-TestFunction $autopilotAst 'Get-InventoryColumns'
 $TargetDomains=@(); $OnlyADPermission=$false; $IncludeRemoteMailboxDelegation=$false
@@ -185,6 +185,7 @@ try {
     foreach ($moduleRelative in @('Modules/SmartM365.Core/SmartM365.Core.psm1','Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
         $coreAst=Read-TestAst $moduleRelative
         foreach ($name in @('Get-SmartM365CsvValidationBaseName','Get-SmartM365CsvValidationRule','Assert-SmartM365CsvDataCompleteness','Add-SmartM365CsvValidationRule','Initialize-SmartM365DefaultCsvValidationRules','Add-SmartM365TenantKeyToCsvData','Write-SmartM365CsvAtomically')) { Import-TestFunction $coreAst $name }
+        if ($moduleRelative -notlike '*WindowsPowerShell5*') { Import-TestFunction $coreAst 'Write-SmartM365PreparedCsvAtomically' }
         $global:SmartM365CsvValidationRules=@{}
         Initialize-SmartM365DefaultCsvValidationRules
         $engineName=if ($moduleRelative -like '*WindowsPowerShell5*') { 'PS5 module' } else { 'Core module' }
@@ -322,8 +323,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB2Txo3qc4RE/r
-# BWGnRadR2YNW68K934Fuh2R/KZ6BFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVOozC3CpIiSkm
+# KeNW86b0zbZfJnWgrJ3L/bzC9F9u4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -456,31 +457,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPaAfNbO4qi2Tf/+DpM4dG+nq8mJDAHP2r9c4Ddq9z6bMA0GCSqG
-# SIb3DQEBAQUABIIBgAsyNZUuiRyxNTffMD70vEksLHnERxhXwlDFPR6hkcRxm1+4
-# NgRyaZIDCVT13aDvYIRZMudIEA8hBSoawLLiCCOONiI3NJbDojVrPZLsVc5V9RAE
-# XZZEzQokpBApnWG4swBc+6hzykcff8SibMitM6j/gksTJPOiCi5GDlQx523BmtKV
-# BLZ1cNwcUYsHSVxKo5K2YZAyZtMPfBXbjVoyH//lRgYZM/IDjzx5AHo7qtIn9sa0
-# z6TI12VxVo2yukWr5dye7uR8N83Kt5Q2mb1pN5wBOH7nlZCzolLfWVblTb0Zm0KP
-# Qk6bpBNYye49UUoGIy2Pt4utDDg7fU0uH109HQWc9KNUaIcVnNpkhoxLXeSvXm6u
-# E5edXCW47WFSK3mbGWj7qitaKeR1RB0IF2sfhu/w6wDEcUP81+iof1jbcDTINKkW
-# 7C1c5MkdY4ctqQjdLjlCAAi6gcVexfcRz8xI0cNDpXhrmdE7xTggXUTiJ0p16Icr
-# n8oBV8FkG5F1PkiFD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICPk1TcUfYLumIQSjl3P9GP/01WCLMnfKtqLSEjtLEVKMA0GCSqG
+# SIb3DQEBAQUABIIBgFHF6rBCSSK6MTHoFNYvwIny2nVjo9tc8cRxvMt3bG7EI1Ms
+# fntMiNCSlQ8wd2tO6OIpUGl6J0aTy0QTgqjtjFy2R9smPg6oySKm3pFjTmwjpALd
+# elGuO55RlpaFTchQab67DDsUWUHGJ04hj44CuPgQqau7nvZK2w2d+5AsiIMjbNEF
+# MZThFOi87kVauO0eP6DRFTK4mzee/X8LB8DglRJxTE/bcvX8iGBfJVmK1DvJeHyJ
+# z3L2iWb4xROlatpsSn8IapFZ/c5wqS2775ROQtFXPMNymeTLTqXWe8lp7PxFVS8n
+# CJh0MdYJ7uftM/Qv7X145PFmsBAV2EcWGVLNJVMPqVMCxEdmgtE/sBfrJwlj4TWL
+# F4qEnzxPcH2gFJJvXA4CFtqpLlm4A1/9se0nTSe93vyHDhxPrveCAn8r/joMxzxx
+# 9dUxWvi2PhiKjH57NSgH8FZWLvTxmH/OBoiPoRA9jATcxZ3YtNgenBS//aVyksva
+# LzLk2wHHgc7NUwH+p6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxODIy
-# NTJaMC8GCSqGSIb3DQEJBDEiBCA3+sDtzTeByYWrFC7RLSuCWfcRY4zV2uWnORIh
-# 04GFMDANBgkqhkiG9w0BAQEFAASCAgCEY1FFTuH0NXePgK30qOwc3ehwC4meqt0v
-# OWVDoR1gPlYS5wkqvJl97TBTxJDIOazyI7moj9UaabjAmHIv3CboaGRO0+2zh2xf
-# wLG0K4sX2T2gWtM0plW045pSxZiG4ET4mh1eyvR8Df8gmqOvDHE+RpI0vfuYTwSW
-# CtVFcXP0yREey2wCWGhLNZrl5wVemsKga4OhJrg6F674qFikZzGVnmnDylj+toGk
-# j43GzeAuBNwQ9H0nKssjAYOrtDyT/ernLxQMzL/CcXKzshXz/VM5MwbV732K3iJA
-# gAkq5V7RESQ3b/cayHjzkEGPIz6qtyN7wm0zfhEmCsViYbjI8qZ6v4DxH4hvdfDn
-# +wc8W/IfKZcNpz3l+oSukVNEqOz+0GNvA5jk0d2mH5tNmEjhr4jOGpPDL1FS42AP
-# 0DGZonou/1mEBounDEfON8giUz7mG/5VSow0xIfmbzCzRkyn1O+4gtfnJFWAFfrK
-# 260tGaqse2Xqu3XZHVzoq60rE0VEjhKYbV2tJ3GejKWdMgd+q6u0vsZy/AN73gL4
-# 4d0C5rNY50GyyFpotle3DFTO0QQdT1oXkqB/smYfoqXElpaGJgUV7CKinj3WcL4h
-# FxQBAlflWx6ypz4zFuhPpukcRvcKE7TvBJRCZvKlkAY6woR2B4jMg67x2dSWlbb7
-# CT17Bt1JJQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
+# NDdaMC8GCSqGSIb3DQEJBDEiBCBzr2nbIx5r5+/aERtc9XU2RgVLFbBckFpein3M
+# yr1p/TANBgkqhkiG9w0BAQEFAASCAgBD04blf4lr0NYo2oXThEKGEz9STcGV6de5
+# 3yQSqs1VjfjCdKU0DxfUnkUa+Sl/orA1TdO4L87DMXxS80A06f19Eecbsg3oMmAF
+# 7ueReOR0nuW7I/lE4VJmMNq2/NvoNwKbeS9aHnqluXTy0x24uSFKCSCiYtGKGfku
+# xYk5fPUqbgNgGs4b7HyZY2cv3mJM5/OoJXPg0T8aMpRw8qCgRAonwl4Nsw6ZZBMo
+# I0ORnp6QuMbZGHdNm8huYKwVy6wf6q5EN4u/TTwNF552qvUdiDe4AR4Fhe7zWYII
+# qfUmgqOTg7yfFDFBTXZi11tBdt7yqN8Bcm+lGBgaEIcre5xxYvCetKyJGOoWA0tn
+# DtwByGGHs77VuRCHKd0XnxkCJcT09K0pLsT0LpqEL2HfItPDTSY9Zc3qXQNnbV9A
+# Bn76zbLU7HbyQy+X35ECBo92RsKqLezHiMZ4rAw4lAqb2Z0wQ3B5J2hu8JxKAXc6
+# Gfnhd/kdtZEd9IqE41E3hbGo8ilBQp8pCedPCk6YXLWSBf9OagdwqPzlecg1XWSS
+# gWd7UZMPtGlA8BNsdTv+XJuJsU6xT0ujd1FT7bLav5CAls0oNoCYxChn6jKgKHqi
+# S3Gs4aFOhen2sAXFh/8fj6g60qcAoquGva3cytqkg5eNa3FB5Eg/0Y+uzfcw/X08
+# HH/POIOBuA==
 # SIG # End signature block

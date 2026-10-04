@@ -217,11 +217,13 @@ function Invoke-SmartM365EvidenceExportReport {
 }
 
 function Export-SmartM365EvidenceDataset {
-    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Rows,[Parameter(Mandatory)][string[]]$Columns,[switch]$NoWeeklyHistory)
+    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Rows,[Parameter(Mandatory)][string[]]$Columns,[switch]$NoWeeklyHistory,[switch]$SingleSerialization)
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $timestamped = Join-Path $Runtime.OutputPath "${BaseFileName}_${stamp}.csv"
     $latest = Join-Path $Runtime.LatestCsvFolderPath "${BaseFileName}.csv"
-    return Export-SmartM365Csv -Data $Rows -TimestampedPath $timestamped -LatestPath $latest -Columns $Columns -NoWeeklyHistory:$NoWeeklyHistory
+    $options = @{}
+    if ($SingleSerialization) { $options.SingleSerialization = $true }
+    return Export-SmartM365Csv -Data $Rows -TimestampedPath $timestamped -LatestPath $latest -Columns $Columns -NoWeeklyHistory:$NoWeeklyHistory @options
 }
 
 function Write-SmartM365EvidenceLog {
@@ -236,9 +238,12 @@ function Complete-SmartM365EvidenceRuntime {
     param(
         [ValidateSet('Auto','Success','CompletedWithWarnings','Failed')][string]$Status='Auto',
         [AllowNull()]$ErrorRecord,
-        [string]$FailureStage=''
+        [string]$FailureStage='',
+        [switch]$CloseTranscriptBeforeUpload
     )
-    Complete-SmartM365ExecutionContext -Status $Status -ErrorRecord $ErrorRecord -FailureStage $FailureStage
+    $options = @{}
+    if ($CloseTranscriptBeforeUpload) { $options.CloseTranscriptBeforeUpload = $true }
+    Complete-SmartM365ExecutionContext -Status $Status -ErrorRecord $ErrorRecord -FailureStage $FailureStage @options
 }
 
 Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365EvidenceText,ConvertTo-SmartM365EvidenceJson,Get-SmartM365EvidenceConfig,Initialize-SmartM365EvidenceRuntime,Connect-SmartM365EvidenceGraph,Get-SmartM365EvidenceStatusCode,Invoke-SmartM365EvidenceGraphRequest,Get-SmartM365EvidenceGraphCollection,Invoke-SmartM365EvidenceExportReport,Export-SmartM365EvidenceDataset,Write-SmartM365EvidenceLog,Complete-SmartM365EvidenceRuntime
@@ -246,8 +251,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+ssRUg05hirmK
-# oQcerSFZ2SBzA0nEyRdCCmjko7zHR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2fOn+tgcqoymn
+# no2aGxuqaK03VpmvA63PI87z3/XK4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -380,31 +385,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAhBb15GxAQTr9Faat/k24nhMfY3qKmnLbyv5P+1ZVoBMA0GCSqG
-# SIb3DQEBAQUABIIBgFJ2kU+MaEx9LrcVVfwBF20URWs/f656dkpJunJYqrG9ruwL
-# 6qN/QTP8tt0F3kzLvjZhZcMGrtHNbrjdfUdnHN4NBVSfZcd74izELjClsyVRqvg8
-# ncoSJbEm9XF2LDlvYGhTMWsrUj5Qi9DQajs2yAz1uwwG0qyeUhlj/42Eg4lPhPoM
-# a44Iqn//+0UtK2Zhvawz2HG5VNDcqdm/3JRABiO7A+ygyDu8hmSh3Degjhb0xFbL
-# pQ/1r4uLL0dJXj5hRgH7Gga4Cimf2VNERVS5SUhAcM/IJR8nCSHLOdCCo4n1yXau
-# JH54t4+EG8ZL86JYsKcxGY+W9aY31Rr+GnloUExzHC+XlaiLwFq8+WnnuITZefMe
-# PraedNhq2fGKbSNC8e6m1OdfeTfYr3FG96HKoiDPzpDpzYJ9zXb+widF37jOY1f0
-# u8l/LqWq1XLUVsVXl4NbYqVJQdl7K2il61bYpJTSc8htIteGy9TFfEYLGEfUMfRI
-# 2QF56f8NXPooM3DMJKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBL4zwMc3nUc92Hjan+ttQ+mDD8YLMC0o8EPkD7/4lz8MA0GCSqG
+# SIb3DQEBAQUABIIBgAdGh7kZ2nAYKq6bnmKail3saJAoBrP+Oih8LzMUIhykRTKi
+# JkX+eZZSLRo6A2y4FA7NBPFTJfREmqKyRBRYV5SJI04xxBhKcwK5WRJHc3PR5jcE
+# awGT/MMr4KbXEMMUenDD01COJpBfM5rNMSf6Qw8YskYjf4hJ23JzH+vcWCYRPov8
+# Rp5DFAOlHAX7RMqLWlgS7QbLzK9ynlvyHqhbC5haUzPa6H/2hQhTLFDzueGn/bTj
+# P9dShEfUV3csY7yzW9v4m6KzMPRKDihQPXunQWcWEW4jSdetau01FlgpaUs9lBvR
+# W+kUbwt9MaWpXrvwPGdlw0MSvyLG3EsMneN/3JTx1cDF02ku7Y5WTTrXwnusrBNV
+# ooemEbqTVC6J434i49qt01CRLr7BrQq2aaFFvrmVgeM6Z44kepLyI5sxRzkVcSsC
+# oah3cI+qVdDoTRXH1VsZbp+mynr0vU3bpxNyi4G3Lk9WEccvm7V0GfhdWxh7Ec7e
+# yaUeYEWT5AUqBIjxWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTMz
-# MTVaMC8GCSqGSIb3DQEJBDEiBCAdryIxEeSlgL0NZ5/Qago9S+kTUIH33DOAmT5v
-# yyD78TANBgkqhkiG9w0BAQEFAASCAgAR3ldcADLFAzE/oLnjA5cFHMiCPYyhPfu+
-# +byvXyvBuf3RhO7WMpZEpjynmGQx1yQz+HuFWODHp26Exlp6nObWf2qnXqkFE/fK
-# C/WVDYucuF3RCCqsIlO2HLBxw8wC+IU3kwgwVXwEsB/uBEDtReD7rN4rsU7jhOa6
-# JndSgzfOYC+GlLYeYhjcfNBKshktp+WvtEONhDnnWhckMek1z/1PbR73fxxGHqc8
-# rTWFOFty6+jXiYD5+uZ5isnefQ9Lz4PRBc8Qu8CJmuG7wcE3e2szq9Pw/W33FsB7
-# /h8yC1+QJOUsdTHCUH6HH2qh7rmR8nJUDxNnEXVcXyP+iZHNdmwFAu0nVgJmmQJy
-# iFi8bo5BknDVhHUXT+dCbagRmiYdvM+giEJUtNZYntu8GQEj1cohHrMvjB1l1ShU
-# CbM0ioOH4HCBjrLkY5O49dTc0Ng4cETNylXPdFMPMIQKw1E5oH1R4lSF6RUWbqXL
-# 4+esAJkq2JTM0V/aA8xYDeP1Jrzl6pmwF42S8qBekJe+r7VHGhF1iX7W+LOuAtds
-# P7OYsGhW7UmlEwzubnYN3dskI4yaHZM4GZMqEpOGZWTJnHCcS3/kxmQLKdy+UMZS
-# LEluUOIs5G2Lay7qwqUG/gVZs4XhW2A7TRhBzI1etVFKMn2yt/1L4kVtue5NvpkE
-# 3tV9oiKSSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
+# NDFaMC8GCSqGSIb3DQEJBDEiBCBw7DP9yEH857scEYYSXrN9qjdOgAEyNM4sHwNt
+# tKAzEDANBgkqhkiG9w0BAQEFAASCAgBqh23QxUBcyj5L+ny7T+wG0Gc/9N2EM/cy
+# 35XX27L+F8D+2z0OHpGO3sCRYP4QNkfJoue78PtGSX2UtPY4mRhLT8bGfGUXQhVR
+# rMFp4aMhJHNHBPc77m7pnqOPRUpf2IxMqJiKNjq4pdmbcFKx7omp/1jaxx5vadk5
+# U9m+4H4DMe0Cr0hYJ2JMh3SHyNpxQH74+gnnI9ayZZkbVgbzaL2p2HvbO5jzDh/r
+# Yi50RkKand8i8D/t5IR6Q8AubtOxPiGdQNhri2llH+9FRqoayBhfNmqIXi8vxxFo
+# W/XmrHyRR/1suwsaXSfjTxo7ai918Yq4yd13PUs/zy1ysBURv/yh+Fa6+IMPWTvl
+# epDKb6COA7m5G7yW1H3J60I+WJUtJOv9ssARWWPb2zKN7MknIk05mPZBCiFKlzk6
+# VvUT9lzA4yVaVXDg3/+t4q4L/Wete4LPE07BjeaJl2Ixreu6S7YHsT47aZiGWjAt
+# kezxAe2cVxwHwWfg2tPbfdNkdmKaLhx4hv2Oxv54TpprrAegSApUJs2dt4xtXoQt
+# Wmpmb9c8HvrGGRgqZtcVVSl7plifJRT4EeZ496TJ2v//zpw8jVyK+X7PIYjAE13u
+# SHLDsEt2k7ozxzpyVRLrA9ozkoo+LeEm6eEWqPymzC+8qgOp7OihKur9zx19upSc
+# whrIqaSOww==
 # SIG # End signature block

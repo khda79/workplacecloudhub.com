@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline producer-receipt tests for PowerShell 5.1 and 7. No operational imports.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored; no operational module is imported.')]
@@ -179,7 +179,7 @@ try {
                 Assert-ReceiptTest (-not [bool](& $scopeModule {param($e,$v) Test-CmdbScopeExpression $e $v} $expression $values)) ('Restricted scope accepted: '+$producer.Script+' / '+$name)
             }
         }
-        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}elseif($producer.Script -eq 'SmartM365-SPO-Inventory.ps1'){'1.0.67'}elseif($producer.Script -eq 'SmartM365-EndpointAnalytics-Inventory.ps1'){'1.0.69'}else{'1.0.65'}
+        $minimum=if($producer.Script -match 'Exchange-Local'){'1.0.48'}elseif($producer.Script -eq 'SmartM365-ActiveDirectory-Inventory.ps1'){'1.0.66'}elseif($producer.Script -eq 'SmartM365-SPO-Inventory.ps1'){'1.0.67'}elseif($producer.Script -eq 'SmartM365-EndpointAnalytics-Inventory.ps1'){'1.0.69'}elseif($producer.Script -eq 'SmartM365-WorkplaceScope-Inventory.ps1'){'1.0.71'}else{'1.0.65'}
         Assert-ReceiptTest ($ast.Extent.Text -match ([regex]::Escape("-MinimumVersion '$minimum'"))) ('Missing module guard: '+$producer.Script)
     }
     "PASS: $script:checks offline producer receipt checks; PowerShell $($PSVersionTable.PSVersion)."
@@ -197,8 +197,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDh/McqNT2M43Z4
-# H0f0F+Y06s48JkBNXVszxioq8Dng1qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBEz9iufTnH9r4
+# hnxPA+eNMscUCo5a32Cstq0Wzn9fu6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -331,31 +331,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBhqNFe0fLZ6szOfodETjNluyfzfeez71SDb9kyL8iR2MA0GCSqG
-# SIb3DQEBAQUABIIBgABUawvTEgidg5c8lfu1tyiIWFDGJ8leXLAo9gpK2ffK2fNC
-# AvoSN4COr54tAgQ8AATYiY+VdrOC7K8PQ2xSusvmpzEUXfOf1eilRO3OIJyWq/zW
-# /A+2Wn6hiUoq44iX2KoEX8mSDre+XkzWxblfpFypkf40NY4cISyrYIWRsbl/cP0x
-# 9oBpZQ4tW9zbUW4YKBreCNpTyBrR0MccumK4318ObWaXShlqguurpli9weOTdfi9
-# juhGhRgwr1CgleqgsMmAI7qIKM0gU3/SejP2tFjxzy7+7OBX/L7/1iK2nSzH070G
-# 20etkaDfehOtR4/Hq1OxG49SNcrpauderI30CFuUifm/x39epSEMpTRHhiwTnm6N
-# 8mttLBETbhO7VxiPK/A0FApjFkOP+FDlKMMuLFNMsRLi1PMxxKEEv96VmeIGUQxP
-# XvtVtju65HmA++D7x1rFt6NNRZd1GrmT+npLShhBrUGzgX1un6KouaiT0es9Di+S
-# mNrZ8NDFawrFOd8lqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJN6FaU+QUK74Ck5oE7VO+7sH2J16+sle4PiztTRz1AHMA0GCSqG
+# SIb3DQEBAQUABIIBgElepy1aDC/ELmUxLMLjKf9ZWEfrKWjj6yTEU/BAlVhvZdM2
+# 6Ulmeqc9UTST5jPkOIkDMPCJF6xP+C6G8lsGDCX0fYQVF0KPSgLx8I+meYQPC/I/
+# WYTEUZbD1fM40bwzn4MYFZwIYRBQHSseBv93B6V7/c3t3/OuKqdddn9z//AcbvQm
+# +2CddIQAhSlpp2nVpBUfYVUQnz79OIuR0dpzx7MlRYMguhyOPVshPpLSnOUKOwE6
+# XaVfzeq4B006wQy9JxDMivIYIaNO4pN12l1eKlISllDCU741ig0d30WYypb5M4Ic
+# SQVre3iyxWHd1Bhp+4vaBm/iUzjeT+Q079w3cRGf/o+/MXcKiz8cN4PlfwFNXZlu
+# HILwy5NxF9huTkLemmP9SENFXnU3JAoJw6F265cpD89kquIi6KCQ/Xd1Vdnh5LTr
+# v9nLtFJDC+9MyBJBQcCbXk9D5vC6q+fsGvXm3ClaAemAWAKIAZxRVDBaQi44La1Y
+# 8YjCdbNtqhWlxXB6r6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDl6D1gaETO1iHSGEN/OZxdqybyaAmgbneVD53e
-# 9JGkVzANBgkqhkiG9w0BAQEFAASCAgBuSAzosCbwU2sme8eS6pq1u7Bb410dxte7
-# vxnt7mjfhnHeG75TMJTgdsbveYl1O7cVtufs5tKQA+rfncDdskXvnvcPjg4oHhDH
-# MYMFfJQJGqMCgJPxoTyXdpbwND/dUFqJbXv+6XcDL2lSCM06g8LxBwpathOUh0U2
-# 6HDLvjRmuEe7TcAaSN1tFuoQdHMRRrlT6KCkkQQJwR945zEib/PNJMpW8LZuwXvv
-# qYOTvFcXUZi3uAFNgS2UzI6iDpDmmNSPxlZtxThPraU+OCpgcNyQnh/rE9GtTm7v
-# eb/zzMqS6FxBhp4TiDDoZzbYpSw6j2tOh9SyS1ji6M6Vs4CWvS+IknHiFdpDDlhx
-# lZbS7nyIZNk15I0K9PCKs75F26/mB8mwLvpbjDj8bO9ZuGDMlCGooanvWirUq2Ap
-# 8101RwuSCkE23/UBA+nRFgz9IL9iAg6d2U9lKJj1EsZmYA79Pj0NuNIXZyQ3OngC
-# kUu/gf3B1cyjZ1SRsqLcDwAIMXHZLjZaHrafxhG0q8h0RbahdemCEwut69wFyebD
-# t0/K3giGbJUO5AYq2xfZy5nlLe9cGX8G0yJN/RVuYvFTk2EQZo06dhGAvGDng2Zw
-# gWtnURiXTvWk/LxxFqmvMSx3NZg7EKhUs1JAaFNOS3bJj/ZVA2CYyaf99p6Jvhik
-# ZuJ2zb/3oA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
+# NDdaMC8GCSqGSIb3DQEJBDEiBCBup7BBlKtK/oCVIlG2rrR1kFrXba4pZbV/4CFG
+# m+nKcTANBgkqhkiG9w0BAQEFAASCAgBonMms54FkhoJ57UQ6DqUzFiSmBUSHcxJv
+# syEPpsN0gTsFpmfUl+BF8eUz4S3O0D6iXQM9Jhx6zQvS38AxVoq8Uw5M6RP9SeOg
+# miM6ApC4kpCv/aWklxliAiae+xP1tCH9UCSiJyMCazTYdC9rUiz1ckVGA19EIOkc
+# TfxtBTu2SKLpLSeSoRPxJjC6ttVW3kfdzXMC3m9BhS2G559hiFobGhZRMOig7Zev
+# hJSJ2XI8WHap870YdwEXFMfegw2lYo8aFjRy96HkKmw8n1AIB2/jLJpoNJryrPNL
+# 4GdgLHJqdwhFqDXE02MIvxBcPhcO0oVOjsUw+F994/MI0mJTKqORq/+hELVC5Yj8
+# HwqoQlRdE60PSIWaOaydPpu5z3XYwY1Hy4PeZBMbS36Kbwd+H5jKVDSfKvU520sE
+# A7a4u0COmmXEtK+CDP6M9Fr7ul5r0i1KCfUgysu2EdPW1NAkW62qR/tX/GR27iui
+# 39FXicHsHAX0esKB2B7GZBnBi5dPX+wOyiAhNVxcX4HJOKg+tnjZI67CRipXKH0x
+# 6qNr7Dq7TxLQtY7FOc+DfOhUtdI8urItoQ5Wbycq/xj+nnIXsUTT567Hmy7VSZLd
+# kDWAvSzekRtjBgKI8NJdGwhkbB8mp88/OPITwqj8W66iSuQm90xvORYkYAPAPiQJ
+# jrvVZzhe2A==
 # SIG # End signature block

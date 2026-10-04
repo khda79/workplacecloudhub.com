@@ -861,7 +861,12 @@ function Write-SmartM365CompletionBanner {
         [int]$WarningCount = -1,
         [int]$ErrorCount = -1,
         [int]$GeneratedCsvFiles = -1,
-        [string]$LogPath = ''
+        [string]$LogPath = '',
+        # Terminal artifact publication can stage the banner before sending closed files.
+        [string]$ClosedTranscriptPath = '',
+        [switch]$NoConsole,
+        [switch]$ConsoleOnly,
+        [switch]$Force
     )
     $scriptNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
     if ([string]::IsNullOrWhiteSpace($ScriptName) -and $scriptNameVariable) { $ScriptName = [string]$scriptNameVariable.Value }
@@ -904,7 +909,7 @@ function Write-SmartM365CompletionBanner {
     $effectiveLogPath = if ([string]::IsNullOrWhiteSpace($LogPath)) { '' } else { [string]$LogPath }
     $runKey = '{0}|{1}|{2}' -f $ScriptName, $StartedAt.Ticks, $effectiveLogPath
     $existingRunKey = [string](Get-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
-    if ($existingRunKey -eq $runKey) { return }
+    if (-not $Force -and $existingRunKey -eq $runKey) { return }
 
     $lines = @(
         '================================================================================',
@@ -920,12 +925,20 @@ function Write-SmartM365CompletionBanner {
     $lines += '================================================================================'
 
     Set-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -Value $runKey
-    Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
-    Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
-    for ($i = 2; $i -lt ($lines.Count - 1); $i++) {
-        Microsoft.PowerShell.Utility\Write-Host $lines[$i] -ForegroundColor $(if ($lines[$i] -like ' Status*') { $statusColor } else { 'Gray' })
+    if (-not $NoConsole) {
+        Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+        for ($i = 2; $i -lt ($lines.Count - 1); $i++) {
+            Microsoft.PowerShell.Utility\Write-Host $lines[$i] -ForegroundColor $(if ($lines[$i] -like ' Status*') { $statusColor } else { 'Gray' })
+        }
+        Microsoft.PowerShell.Utility\Write-Host $lines[-1] -ForegroundColor DarkCyan
     }
-    Microsoft.PowerShell.Utility\Write-Host $lines[-1] -ForegroundColor DarkCyan
+
+    if ($ConsoleOnly) { return }
+    if (-not [string]::IsNullOrWhiteSpace($ClosedTranscriptPath)) {
+        try { Add-Content -LiteralPath $ClosedTranscriptPath -Value $lines -Encoding UTF8 -ErrorAction Stop }
+        catch { WriteLog -Message ('Closed transcript completion banner could not be written: {0}' -f $_.Exception.Message) -Level WARNING }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
         try {
@@ -1025,7 +1038,9 @@ function Complete-SmartM365ExecutionContext {
         [AllowNull()]$ErrorRecord = $null,
         [string]$FailureStage = '',
         # The caller must close and upload its transcript after the final banner.
-        [switch]$DeferTranscriptUpload
+        [switch]$DeferTranscriptUpload,
+        # Opt-in ownership: close the caller's transcript and publish its terminal banner.
+        [switch]$CloseTranscriptBeforeUpload
     )
 
     if ($global:SmartM365ExecutionSummaryWritten) { return }
@@ -1120,10 +1135,22 @@ function Complete-SmartM365ExecutionContext {
         WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
     }
 
+    $closedTranscriptPath = ''
+    if ($CloseTranscriptBeforeUpload) {
+        try {
+            Stop-Transcript -ErrorAction Stop | Out-Null
+            $closedTranscriptPath = [string]$global:logTranscriptFile
+        }
+        catch {
+            $DeferTranscriptUpload = $true
+            WriteLog -Message ('Transcript closure failed; the active file will not be uploaded: {0}' -f $_.Exception.Message) -Level WARNING
+        }
+    }
+
     try {
     # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
     $logUploadCandidates = @($global:LogTextFile)
-    if (-not $DeferTranscriptUpload) { $logUploadCandidates += $global:logTranscriptFile }
+    if (-not $DeferTranscriptUpload -or $closedTranscriptPath) { $logUploadCandidates += $global:logTranscriptFile }
     if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
     if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
     $logUploadCandidates = $logUploadCandidates |
@@ -1141,7 +1168,47 @@ function Complete-SmartM365ExecutionContext {
         }
     }
     }
+    catch {
+        if (-not $CloseTranscriptBeforeUpload) { throw }
+        WriteLog -Message ('Run artifact publication failed; local outputs are preserved: {0}' -f $_.Exception.Message) -Level WARNING
+    }
     finally {
+        if ($CloseTranscriptBeforeUpload) {
+            # Include publication warnings even when the caller explicitly requested Success.
+            $warningCount = [int]$global:SmartM365WarningCount
+            $errorCount = [int]$global:SmartM365ErrorCount
+            if ($Status -ne 'Failed') {
+                if ($errorCount -gt 0 -or $null -ne $ErrorRecord) { $Status = 'Failed' }
+                elseif ($warningCount -gt 0) { $Status = 'CompletedWithWarnings' }
+            }
+            $global:SmartM365ExecutionStatus = $Status
+            $bannerArguments = @{
+                Status=$Status; ScriptName=$global:SmartM365ScriptName; StartedAt=$started; EndedAt=(Get-Date)
+                WarningCount=$warningCount; ErrorCount=$errorCount; GeneratedCsvFiles=$summary.GeneratedCsvFiles
+                LogPath=$global:LogTextFile; ClosedTranscriptPath=$closedTranscriptPath
+            }
+            WriteLog -Message ('Final execution status before trace synchronization: {0}; Warnings={1}; Errors={2}.' -f $Status,$warningCount,$errorCount) -Level INFO
+            # Stage the final banner on disk, then send closed traces, before displaying it.
+            Write-SmartM365CompletionBanner @bannerArguments -NoConsole
+            if ($global:EnableSharePointUpload) {
+                foreach ($trace in @($closedTranscriptPath,$global:LogTextFile) | Where-Object { $_ } | Select-Object -Unique) {
+                    try { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $trace | Out-Null }
+                    catch { WriteLog -Message ('Final trace synchronization failed; local evidence is preserved: {0}' -f $_.Exception.Message) -Level WARNING }
+                }
+            }
+            $finalWarnings = [int]$global:SmartM365WarningCount
+            $finalErrors = [int]$global:SmartM365ErrorCount
+            if ($finalWarnings -ne $warningCount -or $finalErrors -ne $errorCount) {
+                if ($Status -ne 'Failed') { $Status = if ($finalErrors -gt 0) { 'Failed' } else { 'CompletedWithWarnings' } }
+                $bannerArguments.Status=$Status; $bannerArguments.WarningCount=$finalWarnings; $bannerArguments.ErrorCount=$finalErrors
+                $global:SmartM365ExecutionStatus = $Status
+                WriteLog -Message ('Final execution status after trace synchronization: {0}; Warnings={1}; Errors={2}. Remote traces may be incomplete; local evidence is preserved.' -f $Status,$finalWarnings,$finalErrors) -Level INFO
+                # A failed upload must not trigger an unbounded synchronization/summary loop.
+                Write-SmartM365CompletionBanner @bannerArguments -Force
+            }
+            else { Write-SmartM365CompletionBanner @bannerArguments -Force -ConsoleOnly }
+        }
+        else {
         Write-SmartM365CompletionBanner `
             -Status $Status `
             -ScriptName $global:SmartM365ScriptName `
@@ -1151,6 +1218,7 @@ function Complete-SmartM365ExecutionContext {
             -ErrorCount $errorCount `
             -GeneratedCsvFiles $summary.GeneratedCsvFiles `
             -LogPath $global:LogTextFile
+        }
     }
 }
 
@@ -2078,6 +2146,21 @@ function Write-SmartM365CsvAtomically {
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $Path -LatestPath $Path
 
+    Write-SmartM365PreparedCsvAtomically -Data $Data -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTypeInformation:$NoTypeInformation
+}
+
+# Internal serializer: callers must prepare tenant identity and run the complete CSV gate.
+function Write-SmartM365PreparedCsvAtomically {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Columns = @(),
+        [string]$Encoding = 'UTF8',
+        [string]$Delimiter = ',',
+        [switch]$NoTypeInformation = $true
+    )
+
     $parent = Split-Path -Path $Path -Parent
     if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
     if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
@@ -2127,7 +2210,8 @@ function Copy-SmartM365FileAtomically {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$SourcePath,
-        [Parameter(Mandatory)][string]$DestinationPath
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [switch]$VerifyHash
     )
 
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
@@ -2142,11 +2226,24 @@ function Copy-SmartM365FileAtomically {
 
     $destinationLeaf = Split-Path -Path $DestinationPath -Leaf
     $temporaryPath = Join-Path -Path $destinationParent -ChildPath ("{0}.{1}.tmp" -f $destinationLeaf, [guid]::NewGuid().ToString('N'))
+    $sourceGuard = $null
     try {
+        if ($VerifyHash) {
+            # Keep the validated source immutable while hashing and copying it.
+            $sourceGuard = [IO.File]::Open($SourcePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        }
         Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
+        if ($VerifyHash) {
+            $copiedHash = (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($sourceHash -cne $copiedHash) {
+                throw 'Atomic CSV copy failed SHA-256 verification. The previous destination is preserved.'
+            }
+        }
         Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
     }
     finally {
+        if ($null -ne $sourceGuard) { $sourceGuard.Dispose() }
         if (Test-Path -LiteralPath $temporaryPath) {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
         }
@@ -2240,7 +2337,8 @@ function Publish-SmartM365Csv {
         [ValidateRange(0, 3650)][int]$SharePointRetentionDays = 7,
         [switch]$NoSharePointUpload,
         [switch]$NoWeeklyHistory,
-        [switch]$NoTenantKey
+        [switch]$NoTenantKey,
+        [switch]$SingleSerialization
     )
 
     $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
@@ -2257,7 +2355,13 @@ function Publish-SmartM365Csv {
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
 
-    Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+    if ($SingleSerialization) {
+        # The identity preparation and full validation above cover these exact rows.
+        Write-SmartM365PreparedCsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+    }
+    else {
+        Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+    }
     WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
 
     if (-not $global:csvGeneratedPaths) {
@@ -2267,7 +2371,14 @@ function Publish-SmartM365Csv {
 
     $publishedPath = $TimestampedPath
     if (-not [string]::IsNullOrWhiteSpace($LatestPath)) {
-        Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+        if ($SingleSerialization) {
+            if (-not [string]::Equals([IO.Path]::GetFullPath($TimestampedPath),[IO.Path]::GetFullPath($LatestPath),[StringComparison]::OrdinalIgnoreCase)) {
+                Copy-SmartM365FileAtomically -SourcePath $TimestampedPath -DestinationPath $LatestPath -VerifyHash
+            }
+        }
+        else {
+            Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+        }
         WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath)
         [void]$global:csvGeneratedPaths.Add($LatestPath)
         $publishedPath = $LatestPath
@@ -2345,7 +2456,8 @@ function Export-SmartM365Csv {
         [switch]$NoTypeInformation = $true,
         [switch]$NoSharePointUpload,
         [switch]$NoWeeklyHistory,
-        [switch]$NoTenantKey
+        [switch]$NoTenantKey,
+        [switch]$SingleSerialization
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'ByBaseName') {
@@ -2354,7 +2466,7 @@ function Export-SmartM365Csv {
         $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
     }
 
-    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoWeeklyHistory:$NoWeeklyHistory -NoTenantKey:$NoTenantKey
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoWeeklyHistory:$NoWeeklyHistory -NoTenantKey:$NoTenantKey -SingleSerialization:$SingleSerialization
 }
 
 function Export-SmartM365CsvFromConvert {
@@ -6082,8 +6194,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwyFIx9v6om+dg
-# Uae3nRM/AM+Oq/jLSYZnUtffMetGoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDntnQzRvhZbfZJ
+# YX3+vivkSTLHI0dtN3/z2djfoLPVsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6216,31 +6328,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOoabpk1IYmwAIr49XrD9DMuA9hWeE/F/gdBe8YvoEDAMA0GCSqG
-# SIb3DQEBAQUABIIBgIsK2WjzwvbZlYc2Jw1ZYTPqn5nl4M7hs7ZV8X3jjWIo/vLd
-# mNZfoKe9WRBqKFHCZDnP/X5V2lNNXqMK1zlOfzMd8jcL4LiR1F8a+RvQ+qU9AFtK
-# LnXX0qVHwEizHMDnoWzaSwRv8bRQTbdU/rZylElxzQpeDVLDKWzynJXS4aw7E5Qt
-# BXPqSpXsODC6+TCvym2Q5KrjU8AYMx5EMJfEpYmCbnMOR7J9p81A66t76HhlkOBy
-# maZ67fDqVrTDuvzysBhnMjhtp23w+MHIL18RrcDrDt3vKyvDyR64/IMFWtGjWFUZ
-# X3v1tkYdEEAkQnb9GFWmfpbGrBtcbT9MC2F0BeNU52PonzsOM/KSiI2BS4XGcei6
-# MUGFbNPSom/WX/RAgbqGhD3ECtSEFtaZQMIaF1cBAp4yF9hdY/Q8XL0gUG86061o
-# vd4ZCm+9FN21DAlsrKyuWC2X5wMtZBGvaZGaJx/fwbr7BMD7aPZWWIOZV+U4lm86
-# xR8s2ENFKaht3gIDiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA9Kv47JMYo/ra1E3gf9iDQn8U+uuLvBnsuQVb58ILJgMA0GCSqG
+# SIb3DQEBAQUABIIBgI7V2/TI0rLVP9wQ4Ln/PDkennH5pQ/AmT8riZAofwoPNXum
+# mWl8y2aY5D+5hBAJW1cHvVsy9pkP40Cp/aTvnXSzXnXyAwQ23Nw1qaN0DRmV4OVb
+# MSOMbOREq6UvJTfocEFRJ/R7T0Mw0cmvQnHKAb75EwLxnfyPSxanoAVXRbVsSgp3
+# ingh7ppoomEgt27dFED7qTq240qSKG4faSLTxuiMOLoecUpsmgTamihzdfGIbsTY
+# 5h0858fS4z1JseGKRtiVVR5FK+SODZ3PzP3qCJthdt19Zuo1Tw7gc1YYEeI9G2pL
+# DJyXvJH4dt1z5xvleI5+8zx3B++Hq4ZY4cQSEiJVqwjWSXnZ48kTSW7SNfHEli73
+# PWr9svYo+daQPoS/bMAX5b5QvWkHveVs5+efdh98xxLtAIY6NyhUT1UEMLcRBMY5
+# 00rVPn9bkBoNE8AU15TO8+gLArx7R3Plf0klQpbmtzvxk+vNiF8cWOQWsZ+vOszM
+# KKA3/oMQXLTDMAJLMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCDUmk9bfkAg+50mvW9UB4My7OCbrmRLpm4gMVQ4
-# XbboODANBgkqhkiG9w0BAQEFAASCAgAHDk5wCG+M+Tqtfjq10Eyd9YjkZMMZOVUJ
-# dPH9foI5YLmB8SyatsTflqXEIPVgg7Q0+LSv171YwNLa5pnfWyu0lhwSFBpTmwGv
-# NQ3UBmbjsxIyWwkalztxTRGOEoBSeXFi8jNVsPKSoFMfvOtmzwph+C4CIq3LyJ5J
-# 7iG9GHkbgZCBlkBnmoPngcBiGgwCSPz+PGMawvKBUtM/38IzuhQ1Z+gV1Ta7IuJc
-# mIIt6kLcDtwHpSXQVw7E+1zt3w0k9rM7x3Ww6H049BazZay/o9dMF5UvD3jc/nu5
-# IPlSS7FYj9ObKbg6AFcYX/cuNp0Ve0PG4SrCjtrSGGb02IAC6+rdop8vx5wQps6E
-# o22AleYBD2J2Aav2Bk2cf7rU3c3bApBioyyCT+PRl6HftREpDZbIG9v4/PX7IAU7
-# 7W3JF4vcomleS8S6JIM6CDdtTBXgaJ8BcszZgUP3sOMkA1lwfD79yjJ+/Om3kVPy
-# 3b1pVxPszr1zwDd9JeoVnTNTTS8ra9avVgskog4GCJgeXzCbB7wfqcDTtpHa3oiv
-# UMqqeOUy+bPqehcHiR6VYYxI2/qLxVcfTgDP0qarZTDDbx3UfI2dzpAdmdAb756u
-# 56u1G8TQNYBBcMEHstVRbuwVvNGzf1tE0cCOnmgMTYT6NOGFmJmEhLyasmwbdz8O
-# XM3+3HXvIg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDZNXhEXMEw3cP6THwpEaUYKo3D9Qs4BNTGgFTk
+# fYUpajANBgkqhkiG9w0BAQEFAASCAgCzOTMrI2mBAs7BYHNCv5RUmSQAzAUvqDS/
+# tLd5DjpTj1SinBRFuct/aF3UiFDZ82+UkXdL/FxNUnz23eFrpN7+n/biekfWAA5J
+# Gn7WvcJEHYT10YWJQ6eZcwO5F5iakMqR5OHxBtUhGKuDdOApNRw11DrLgYhou4vZ
+# aFr8adKLFBJsS2PN+aB4n1hca+MhAu+zeD7d5WUx75iEljtzu1ZV6zkywgEOOSsR
+# 8880v5YPrskrApFs4i8Ko2XoX3dK59uJN/fP/rqDy88txlYMIrNyUVc1SoKpP3ux
+# LGZMJ01yKZWdpjtPurYJBH13Rac7r7dB2rsEwtEDioDNqYI9xVCdZTfC9qjGkigH
+# ENJjui7G0SoyUbAFvH1AXqIlaRqiuqAZWh0Aul5/OvgpHNoDPvQUlLa3VgHcK4am
+# 40KvFAcEf9oN16xEo3uc3ETVSSOngQGWxkSVqdD+uUcU51zl7MSxDAhZYBkJcwLl
+# 1ujkFoWE0icApLRkIWW5A9K8q2gopxC8HdCKDugUEkuYPLns6ZHYDXAJ1qm1Y+YV
+# C9Yjo2lSo7YC4t5G84PVpecYubV+LrqEhIywra6eZQl2EiMD0Nlzb7faV7Zr8OCE
+# 3CYdNiM23Rlo1d73atwSQVyCBMms1t9XdGmzdSUHnQluX9U0Yv30uv+XcJcFNEUC
+# eJTPdAJ75Q==
 # SIG # End signature block
