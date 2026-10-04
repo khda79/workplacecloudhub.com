@@ -61,6 +61,7 @@ SmartWorkplaceCMDB/**
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb-prepared-contract.json.txt
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb-orchestrator-integration.json.txt
 !/SmartM365/SmartInventory/PreparedEvidence/SmartM365-CmdbEvidence-Prepare.local.json.txt.template
+!/SmartM365/SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.local.json.txt.template
 !/SmartM365/Tests/test_cmdb_preparation.py
 !/SmartM365/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub.ico
