@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.44
+    1.0.45
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.43'
+$script:AppVersion = '1.0.45'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -391,6 +391,24 @@ function Open-InExplorer {
       <Setter Property="CornerRadius"     Value="8"/>
       <Setter Property="Padding"          Value="14,10"/>
       <Setter Property="Margin"           Value="0,0,0,8"/>
+    </Style>
+
+    <Style x:Key="DiagMetricTile" TargetType="Border">
+      <Setter Property="Background" Value="#F5F8FB"/>
+      <Setter Property="BorderBrush" Value="#DDE7F0"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="Padding" Value="9,7"/>
+    </Style>
+    <Style x:Key="DiagMetricLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="Foreground" Value="#5F6B7A"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style x:Key="DiagMetricValue" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="19"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#17324D"/>
     </Style>
   </Window.Resources>
 
@@ -1010,10 +1028,44 @@ function Open-InExplorer {
           <Border Grid.Row="2" Grid.Column="1" Background="#DDE7F0" Margin="0,0,0,14"/>
           <StackPanel Grid.Row="2" Grid.Column="2" Margin="14,0,0,14">
             <TextBlock Text="SHAREGATE DETAIL" Style="{StaticResource SectionLabel}"/>
-            <Border Style="{StaticResource StepCard}">
+            <Border x:Name="cardShareGateDetail" Style="{StaticResource StepCard}">
               <StackPanel>
-                <TextBlock x:Name="lblDiagKpis" Text="No analysis for the latest report yet." TextWrapping="Wrap" FontSize="11" Foreground="#1F2937"/>
-                <TextBlock x:Name="lblDiagInterpretation" Text="File, permission and scope details are in Cross-check below. ShareGate residual rates exclude Accepted issues; Fixed is a tracking state, not proof of a successful new migration." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,6,0,0"/>
+                <TextBlock x:Name="lblDiagKpis" Text="No analysis for the latest report yet." TextWrapping="Wrap" FontSize="12" Foreground="#1F2937"/>
+                <StackPanel x:Name="panelDiagMetrics" Visibility="Collapsed">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Background="#EFF7FF" BorderBrush="#C9E3FA" Margin="0,0,4,0">
+                      <StackPanel>
+                        <TextBlock Text="LINES ANALYZED" Style="{StaticResource DiagMetricLabel}"/>
+                        <TextBlock x:Name="lblDiagLines" Text="—" Style="{StaticResource DiagMetricValue}"/>
+                      </StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Style="{StaticResource DiagMetricTile}" Background="#EFF7FF" BorderBrush="#C9E3FA" Margin="4,0,0,0">
+                      <StackPanel>
+                        <TextBlock Text="DISTINCT KEYED ITEMS" Style="{StaticResource DiagMetricLabel}"/>
+                        <TextBlock x:Name="lblDiagKeyedItems" Text="—" Style="{StaticResource DiagMetricValue}"/>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                  <TextBlock Text="LINE STATUS" Style="{StaticResource DiagMetricLabel}" Margin="0,9,0,5" FontWeight="SemiBold"/>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Background="#F0FBF8" BorderBrush="#C9EADF" Margin="0,0,4,0"><StackPanel><TextBlock Text="SUCCESS" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagSuccess" Text="—" Style="{StaticResource DiagMetricValue}" Foreground="#167658"/></StackPanel></Border>
+                    <Border Grid.Column="1" Style="{StaticResource DiagMetricTile}" Background="#FFF2F2" BorderBrush="#F2D2D2" Margin="4,0,4,0"><StackPanel><TextBlock Text="ERROR" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagError" Text="—" Style="{StaticResource DiagMetricValue}" Foreground="#A32939"/></StackPanel></Border>
+                    <Border Grid.Column="2" Style="{StaticResource DiagMetricTile}" Background="#FFF8EB" BorderBrush="#F3D8A2" Margin="4,0,4,0"><StackPanel><TextBlock Text="WARNING" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagWarning" Text="—" Style="{StaticResource DiagMetricValue}" Foreground="#8B5E00"/></StackPanel></Border>
+                    <Border Grid.Column="3" Style="{StaticResource DiagMetricTile}" Margin="4,0,4,0"><StackPanel><TextBlock Text="ACCEPTED" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagAccepted" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel></Border>
+                    <Border Grid.Column="4" Style="{StaticResource DiagMetricTile}" Background="#FFF8EB" BorderBrush="#F3D8A2" Margin="4,0,0,0"><StackPanel><TextBlock Text="TO FIX" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagToFixLines" Text="—" Style="{StaticResource DiagMetricValue}" Foreground="#8B5E00"/></StackPanel></Border>
+                  </Grid>
+                  <TextBlock Text="REVIEW DETAIL" Style="{StaticResource DiagMetricLabel}" Margin="0,9,0,5" FontWeight="SemiBold"/>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Margin="0,0,4,0"><StackPanel><TextBlock Text="UNKEYED LINES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagUnkeyedLines" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel></Border>
+                    <Border Grid.Column="1" Style="{StaticResource DiagMetricTile}" Background="#FFF8EB" BorderBrush="#F3D8A2" Margin="4,0,4,0"><StackPanel><TextBlock Text="ITEMS TO FIX" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagItemsToFix" Text="—" Style="{StaticResource DiagMetricValue}" Foreground="#8B5E00"/></StackPanel></Border>
+                    <Border Grid.Column="2" Style="{StaticResource DiagMetricTile}" Margin="4,0,4,0"><StackPanel><TextBlock Text="RESIDUAL LINES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagResidualLines" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel></Border>
+                    <Border Grid.Column="3" Style="{StaticResource DiagMetricTile}" Margin="4,0,0,0"><StackPanel><TextBlock Text="RESIDUAL ITEMS" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagResidualItems" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel></Border>
+                  </Grid>
+                </StackPanel>
+                <TextBlock x:Name="lblDiagInterpretation" Text="File, permission and scope details are in Cross-check below. ShareGate residual rates exclude Accepted issues; Fixed is a tracking state, not proof of a successful new migration." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,9,0,0"/>
               </StackPanel>
             </Border>
           </StackPanel>
@@ -1423,6 +1475,18 @@ $cardTransient = ctrl 'cardTransient'
 $panelDiagReview = ctrl 'panelDiagReview'
 $lblDiagProgress = ctrl 'lblDiagProgress'
 $lblDiagKpis = ctrl 'lblDiagKpis'
+$panelDiagMetrics = ctrl 'panelDiagMetrics'
+$lblDiagLines = ctrl 'lblDiagLines'
+$lblDiagKeyedItems = ctrl 'lblDiagKeyedItems'
+$lblDiagSuccess = ctrl 'lblDiagSuccess'
+$lblDiagError = ctrl 'lblDiagError'
+$lblDiagWarning = ctrl 'lblDiagWarning'
+$lblDiagAccepted = ctrl 'lblDiagAccepted'
+$lblDiagToFixLines = ctrl 'lblDiagToFixLines'
+$lblDiagUnkeyedLines = ctrl 'lblDiagUnkeyedLines'
+$lblDiagItemsToFix = ctrl 'lblDiagItemsToFix'
+$lblDiagResidualLines = ctrl 'lblDiagResidualLines'
+$lblDiagResidualItems = ctrl 'lblDiagResidualItems'
 $lblDiagInterpretation = ctrl 'lblDiagInterpretation'
 $lblSummaryShareGateValue = ctrl 'lblSummaryShareGateValue'
 $lblSummaryShareGateDetail = ctrl 'lblSummaryShareGateDetail'
@@ -2617,6 +2681,8 @@ function Clear-DiagnosticResult {
     $gridDiagRows.ItemsSource = $null
     $txtDiagRaw.Text = ''
     $lblDiagKpis.Text = 'No analysis for the latest report yet.'
+    $lblDiagKpis.Visibility = 'Visible'
+    $panelDiagMetrics.Visibility = 'Collapsed'
     $lblSummaryShareGateValue.Text = '—'
     $lblSummaryShareGateDetail.Text = 'Analyze the latest report'
     $lblSummaryShareGateDetail.ToolTip = $null
@@ -3044,11 +3110,19 @@ function Load-DiagnosticResult {
     $itemStates = $script:DiagSummary.IssueItemState
     $lineRate = if ($null -ne $script:DiagSummary.ResidualLineRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualLineRate } else { 'n/a' }
     $itemRate = if ($null -ne $script:DiagSummary.ResidualItemRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualItemRate } else { 'n/a' }
-    $lblDiagKpis.Text = ('Lines: {0} | Success: {1} | Error: {2} | Warning: {3} | Accepted: {4} | To fix: {5}`nDistinct keyed items: {6} | Unkeyed lines: {7} | Items to fix: {8} | Residual lines: {9} | Residual items: {10}' -f
-        $lines, [int]$lineStatuses['Success'], [int]$lineStatuses['Error'],
-        [int]$lineStatuses['Warning'], [int]$lineStates['Accepted'], [int]$lineStates['To fix'],
-        $script:DiagSummary.DistinctItems, $script:DiagSummary.UnkeyedRows, [int]$itemStates['To fix'],
-        $lineRate, $itemRate).Replace('`n', "`n")
+    $lblDiagLines.Text = '{0:N0}' -f [int]$lines
+    $lblDiagKeyedItems.Text = '{0:N0}' -f [int]$script:DiagSummary.DistinctItems
+    $lblDiagSuccess.Text = '{0:N0}' -f [int]$lineStatuses['Success']
+    $lblDiagError.Text = '{0:N0}' -f [int]$lineStatuses['Error']
+    $lblDiagWarning.Text = '{0:N0}' -f [int]$lineStatuses['Warning']
+    $lblDiagAccepted.Text = '{0:N0}' -f [int]$lineStates['Accepted']
+    $lblDiagToFixLines.Text = '{0:N0}' -f [int]$lineStates['To fix']
+    $lblDiagUnkeyedLines.Text = '{0:N0}' -f [int]$script:DiagSummary.UnkeyedRows
+    $lblDiagItemsToFix.Text = '{0:N0}' -f [int]$itemStates['To fix']
+    $lblDiagResidualLines.Text = $lineRate
+    $lblDiagResidualItems.Text = $itemRate
+    $lblDiagKpis.Visibility = 'Collapsed'
+    $panelDiagMetrics.Visibility = 'Visible'
     $lblSummaryShareGateValue.Text = [string]([int]$itemStates['To fix'])
     $verification = if ($script:DiagAnalysisVerified) { 'SHA256 verified' } else { 'legacy analysis' }
     $lblSummaryShareGateDetail.Text = "$($script:DiagSummary.DistinctItems) keyed items · $itemRate residual · $verification"
@@ -3339,8 +3413,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBxVxmqPoQVSZG
-# QYaA16p+PNqhz56J6WCQngswqtv6CqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBnT8ozAmr2J0Sg
+# YI2VqvFx/1jUJlTaOtD1jfNWupiTZqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3370,14 +3444,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCQHHqN0cS90qd/LmQOSzf6
-# xosY0suQluDS3keHQ4CBpTANBgkqhkiG9w0BAQEFAASCAYCr2V1KMZl8XA5bRxdu
-# MwHhh9+Cx7ayAsjWdDDCDlf8peh8kXpcFbknfLfI+bXADc5uLw7yxqkECfWaQxVd
-# WYkj7qIEO3nODcztbW7Yh5f5EFh8dDyWGcmScc/dQluDInGMJH3KSZf1ZY8nUrOg
-# hRPCy1T+kwTq/m5QF/rWRL8Nt+il8NEBe+EILa9k44J19KSgIdC4iEQ5V56K2j3Z
-# Hr2LkpZO0DSYohmYWpOwJuksQ+NVgZ1OX9CfC8EQq29qhgSnfRc4ago0sHuzO6Bp
-# AjKL8iMR97LnFRRCmMVDg1ZJ5S3jPpJODMp6PFaMhwh144GH7MR2lauaT270if1E
-# 1qRrOFqvbU8IOvVC6WrrcnlB9EaWvIu/X55V8oAXYc8d0LfGi/Vg8zDeVlJv29FB
-# +OL+q04Sm14ma9wa71GqhqcKkkYwa5eOKxPG+uYQjVQCkCJAFCnEo9es2BHFNrJf
-# o+S4nIsLgLkEhuzbvv/jiSlmQ/sb9IYmYo3KOUQR8hnvoEg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMEypq3j1KDy8XrrOdSpod
+# QjT7Y6a8KVAqJKL57hZQpjANBgkqhkiG9w0BAQEFAASCAYBzh6AGQw7kCpOUnBgd
+# QQfnQklFORslL/jDW/BcZuCVY0Uasd1cRTx4fVXD5eWbE3UTrs32QyZz7NTmxNtY
+# CJmQYigRn+LuU9mHTbahrDou48P2hvOQf0CvE0u6v0jfG3LPP3q+SRhw1tEYoLJT
+# nf2JZfbO6el2tJo3eQmc1+SFQk2I18YN6DNqjEqbD47HBMsBiL9ae20i4o3P304Y
+# GiaJkPLRgtMRPbnRa5ee94FQhL4ERSsP1FB73MgpGTng84xguZxp0cqUXgVviXw1
+# B67YCbAr9oYotvQbcfJON+hi/1iGwDzcULT+CczcDTSByf7RJGwiu2Th4S03nzNf
+# hBtHNeqNkKGzPbwrRAPB2/3ZlwbgizkObA1GK7AOSWeW5P5fb/5ZR11v6yEjmtGb
+# DDPB3tL/Hj4217e2oJEMWRI/P5aJIAqNYcCH6eKceOVG0AP2jVhFpyj/oDqesUFS
+# Kp3+u5XAvEI4aoWNPLSMGhi3fqTXvpxw00sfyY8jASBSlgg=
 # SIG # End signature block

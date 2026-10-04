@@ -36,7 +36,8 @@ try {
     $lblDiagMigration = [pscustomobject]@{ Text='' }
     $lblDiagLatestReport = [pscustomobject]@{ Text=''; ToolTip='' }
     $lblDiagProgress = [pscustomobject]@{ Text='' }
-    $lblDiagKpis = [pscustomobject]@{ Text='' }
+    $lblDiagKpis = [pscustomobject]@{ Text=''; Visibility='Visible' }
+    $panelDiagMetrics = [pscustomobject]@{ Visibility='Visible' }
     foreach ($name in @('lblSummaryShareGateValue','lblSummaryShareGateDetail',
         'lblSummaryFilesValue','lblSummaryFilesDetail','lblSummaryPermissionsValue',
         'lblSummaryPermissionsDetail','lblSummaryCrossCheckValue','lblSummaryCrossCheckDetail')) {
@@ -60,6 +61,7 @@ try {
         $lblDiagInputPath.Text -notlike '*\ShareGate\MigrationReport' -or
         $lblDiagInputPath.Text.Contains($script:ScriptRoot)) { throw 'Report folder display leaked an absolute path or omitted the SharePointMigration prefix.' }
     if ($btnDiagAnalyze.IsEnabled -or -not $cardDiagSummary.IsEnabled -or $panelDiagReview.IsEnabled -or $btnFarmCheck.IsEnabled -or
+        $lblDiagKpis.Visibility -ne 'Visible' -or $panelDiagMetrics.Visibility -ne 'Collapsed' -or
         $lblSummaryShareGateValue.Text -ne '—') { throw 'Empty folder did not show summary placeholders or left report actions enabled.' }
     $syntheticCrossCheck = [pscustomobject]@{
         Evidence=@(
@@ -144,8 +146,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAU5nt95RRbHOQp
-# cLh+/CT+VIMX6Lko1H+fdWYxXNsieKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjSVEDsVlR0YkQ
+# iK9fz1FxRbMpgryjl3ZR7k4XbcDsg6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -175,14 +177,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA4MOPlc7LQbyUHmyOG4frK
-# VCJp1aC65+9vme1Tif8tazANBgkqhkiG9w0BAQEFAASCAYB0/tB5lCWn6o0tqHkr
-# rjgD0zYiWNY3Bm/Av1Fn/4Y723j8Om3tFyt7l/JihNPZuqC0Blgl9wlFAL2X7HsA
-# YGPlcof5RdIDSZNfvUrvdphA5ih6Bg1Kb+85KH1ZtGJEaw8npXKC/K1lK3JkX5Yp
-# I+I44w0cpthTcGw5LepnRSqTYcmUdVKIxPRXG2U7x0Th85ZNGw1DFn2YkAwy048Z
-# y32uHdqy+U65+FUVBprB0wWCfHcQG9ZWE5UMTG6uKhebuoZj7en5Z8vv2VO9jf/F
-# tvniS3w13w+xXRQ6xV4pLNmjeh+qY5Opu0QOrPkXWN0ds58DHDjgp4YBWtCxmSIQ
-# UpcHN2yztUQsIY/L4sZfk/1m9HzFr4kOdQQFupo5x8kMY0Ye2YxDtiBp/frzx3Iv
-# pkL8/fOartKLb2CLoFt7/KLZe1dgD6fkA8A4PFJ8itjogIVX4wFoF9ayDXuQrcST
-# w+EIz31y4QLGFdBatwDePRoKYsg6OSdrBRvIHzqYfU4jOhA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC11OBIJ6Bdmfg5G+GNl7t9
+# LTD8c4j+oJVXwW+7XCLMrTANBgkqhkiG9w0BAQEFAASCAYBcTAlBByHqvB7q+L3m
+# lCmb1m8PDUN/+SL3yxjblN0tcFAbC0sX3u6jSz6AbkuiBxUjvCoONHLekDzBKJ7Y
+# D9mjpKKo/fn/Wghbo4R0H5Q6oYz5t3RRj33UsKQMm3lWHlmvwpZcX5BdFRdM8/rZ
+# Dcwq56x1Z91LfmVYRdCeKuavJvXR0MJNiwSTevz9hwuL1LNYapa/w0ZoD++1qZRg
+# ssc+EZpD2UZA1/0tPM8VAT2KuWU/5UEBX9OS2P7ChbznGrt5FLbP3uo5z4AvcbU4
+# QvRHO+Khh9A10QbeGhBgNobJChzWAlbSS9CAnmikm+LBn9+VqWOvx/l2TMq2aH2m
+# FylwRMos9ANwpX9mj93n37z/bVLU1arY73Al+6JPeyC63us8OVQ4RqypcMl/GFhw
+# YOd8MiCNg96KVrMbfd4yYxv+DidOoZl1mAdKLPB9wavQewS4Yz2SW/YX3G8vsF+A
+# /QcGKQMQVeDycfwqWsVclMyvd8nAmmsAQgqjZOwQCjAW08w=
 # SIG # End signature block
