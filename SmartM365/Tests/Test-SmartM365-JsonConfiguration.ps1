@@ -1,3 +1,13 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+Offline JSON configuration creation, enrichment and transport regression tests.
+.VERSION
+1.0.0
+.NOTES
+Only synthetic TEMP files and the public CMDB template are read. No tenant
+configuration, collector, authentication, mail or upload is executed.
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -35,16 +45,80 @@ try {
     [IO.File]::WriteAllText("$newPath.template", '{"Setting":43,"Added":true}')
     Check ((Read-SmartM365JsonConfig $newPath -Required).Added -eq $true) 'Template enrichment regressed.'
     Check ((Get-Content "$newPath.txt" -Raw | ConvertFrom-Json).Setting -eq 43) 'Template enrichment overwrote a local value.'
+    # Reproduce the CMDB first-run path using its real committed template/filename.
+    $cmdbBase = Join-Path $root 'SmartM365-CmdbEvidence-Prepare.local.json'
+    $cmdbTemplate = Join-Path $PSScriptRoot '../SmartInventory/PreparedEvidence/SmartM365-CmdbEvidence-Prepare.local.json.txt.template'
+    Copy-Item -LiteralPath $cmdbTemplate -Destination "$cmdbBase.txt.template"
+    $templateHash = (Get-FileHash -LiteralPath "$cmdbBase.txt.template").Hash
+    $cmdb = Read-SmartM365JsonConfig "$cmdbBase.txt" -Required
+    Check ($cmdb.PythonCommand -eq 'python' -and $cmdb.LatestCsvFolderPath -eq '__USE_GLOBAL__') 'Real CMDB template was not consumed on first run.'
+    Check ((Test-Path -LiteralPath "$cmdbBase.txt") -and -not (Test-Path -LiteralPath $cmdbBase)) 'CMDB initialization created the wrong transport file.'
+    Check ((Get-FileHash -LiteralPath "$cmdbBase.txt").Hash -eq $templateHash) 'First creation changed template bytes.'
+    Check ((Initialize-SmartM365LocalJsonFromTemplate "$cmdbBase.txt") -eq $false) 'Existing configuration was recreated.'
+
+    $preferredBase = Join-Path $root 'preferred.local.json'
+    [IO.File]::WriteAllText("$preferredBase.template", '{"Setting":"legacy","LegacyOnly":true}')
+    [IO.File]::WriteAllText("$preferredBase.txt.template", '{"Setting":"preferred","Nested":{"Keep":"default","Add":7}}')
+    Check ((Get-SmartM365JsonTemplatePath $preferredBase) -eq "$preferredBase.txt.template") 'Preferred template did not win for a legacy config argument.'
+    Check ((Get-SmartM365JsonTemplatePath "$preferredBase.txt") -eq "$preferredBase.txt.template") 'Preferred template did not win for a preferred config argument.'
+    Check ((Initialize-SmartM365LocalJsonFromTemplate $preferredBase) -eq $true) 'Direct initialization bypassed preferred template resolution.'
+    $preferred = Read-SmartM365JsonConfig $preferredBase -Required
+    Check ($preferred.Setting -eq 'preferred' -and -not $preferred.Contains('LegacyOnly')) 'Legacy template contaminated preferred creation.'
+    [IO.File]::WriteAllText("$preferredBase.txt", '{"Setting":"private-override","Nested":{"Keep":"custom"},"Custom":true}')
+    $preferred = Read-SmartM365JsonConfig "$preferredBase.txt" -Required
+    Check ($preferred.Setting -eq 'private-override' -and $preferred.Nested.Keep -eq 'custom' -and $preferred.Custom) 'Enrichment changed a local override or extra key.'
+    Check ($preferred.Nested.Add -eq 7) 'Preferred nested template keys were not merged.'
+    $enrichedHash = (Get-FileHash -LiteralPath "$preferredBase.txt").Hash
+    $null = Read-SmartM365JsonConfig $preferredBase -Required
+    Check ((Get-FileHash -LiteralPath "$preferredBase.txt").Hash -eq $enrichedHash) 'Repeated enrichment rewrote an unchanged configuration.'
+
+    foreach ($invalid in @('{','[]','null')) {
+        [IO.File]::WriteAllText("$preferredBase.txt.template", $invalid)
+        Reject { Read-SmartM365JsonConfig $preferredBase -Required } 'Invalid preferred template silently fell back during enrichment.'
+        Check ((Get-FileHash -LiteralPath "$preferredBase.txt").Hash -eq $enrichedHash) 'Rejected enrichment changed local bytes.'
+        $invalidBase = Join-Path $root ('invalid-' + [guid]::NewGuid().ToString('N') + '.local.json')
+        [IO.File]::WriteAllText("$invalidBase.template", '{"ValidLegacy":true}')
+        [IO.File]::WriteAllText("$invalidBase.txt.template", $invalid)
+        Reject { Read-SmartM365JsonConfig "$invalidBase.txt" -Required } 'Invalid preferred template silently fell back during creation.'
+        Check (-not (Test-Path -LiteralPath "$invalidBase.txt") -and -not (Test-Path -LiteralPath $invalidBase)) 'Invalid template created a runtime configuration.'
+    }
+    $directoryBase = Join-Path $root 'directory.local.json'
+    [IO.File]::WriteAllText("$directoryBase.template", '{"ValidLegacy":true}')
+    $null = New-Item -ItemType Directory -Path "$directoryBase.txt.template"
+    Reject { Read-SmartM365JsonConfig $directoryBase -Required } 'A preferred template directory fell back to legacy.'
+    Check (-not (Test-Path -LiteralPath "$directoryBase.txt")) 'Template directory created a runtime file.'
+
+    $tenantFolder = Join-Path $root 'Config/Tenants'
+    $null = New-Item -ItemType Directory -Path $tenantFolder -Force
+    $tenantBase = Join-Path $tenantFolder 'synthetic.local.json'
+    $tenantTemplate = Join-Path $tenantFolder 'tenant.local.json.template'
+    [IO.File]::WriteAllText($tenantTemplate, '{"TenantSetting":"legacy"}')
+    Check ((Read-SmartM365JsonConfig $tenantBase -Required).TenantSetting -eq 'legacy') 'Generic legacy tenant template no longer initializes a profile.'
+    [IO.File]::WriteAllText("$tenantFolder/tenant.local.json.txt.template", '{"TenantSetting":"preferred","Added":true}')
+    $tenant = Read-SmartM365JsonConfig "$tenantBase.txt" -Required
+    Check ($tenant.TenantSetting -eq 'legacy' -and $tenant.Added) 'Preferred generic tenant enrichment overwrote existing values.'
+    $otherTenant = Join-Path $tenantFolder 'second.local.json.txt'
+    Check ((Read-SmartM365JsonConfig $otherTenant -Required).TenantSetting -eq 'preferred') 'Preferred generic tenant template did not initialize a new profile.'
+    $missingBase = Join-Path $root 'missing.local.json.txt'
+    Reject { Read-SmartM365JsonConfig $missingBase -Required } 'Missing templates did not fail explicitly.'
+    Check (-not (Test-Path -LiteralPath $missingBase)) 'Missing templates created a runtime file.'
     [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Synthetic configuration only'}
 } finally {
     & $module { param($original) Set-Item Function:script:Get-SmartM365JsonTransportPolicy -Value $original } $originalPolicy
+    $resolved = [IO.Path]::GetFullPath($root)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if (-not $resolved.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path $resolved -Leaf) -notmatch '^SmartM365-JsonConfig-[a-f0-9]{32}$') {
+        throw 'Unsafe synthetic configuration cleanup target.'
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVYkKsuc5t+w6D
-# 29TayVj92BO79BBWJxGIXjwplTAd1KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGuqCIP2dFMv7Y
+# ZObbklZaDEW8uY96bLjS2yI2rMEh3KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -177,31 +251,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC0HTljFsCs7Xoy3nzRbwnx9OMdGXboew91W1Nu5wx7xMA0GCSqG
-# SIb3DQEBAQUABIIBgHWV/4qlM4iV2Usnb+N6MgAZk+NzSZS/v0z2PNahm0SowruU
-# bgGk2KMgVujl0jSbr1TbWsGIVMedLajBO8vkvo8BG1+71CKtoNIitNcgvhRKb8nz
-# 4B7J06f8tWy9ke4viJp87ZOpUYpjHfupLmFDrviFnqL+oFX9IUQ6gUEdYecF5Pdz
-# E7mub7wcRF41+K9zyQggWB2TOu37KvmgbwCmdTDeYirAEtr9S1sxBc73XGYsN8jT
-# g2OvOc0YmtPLiuq7QKW/f1UP2PTtP/vrPpujTIr4pjyulg6Pucx6bbORJ79y2LBj
-# hDyY5fBbXiyn3fwNt3OnR87ixqUjfzq2P2y88pkqZ41yC0zd1TdNhkwxd+lCO1Ve
-# wJW/Br9vsmzoePsKjy6/7jHHsEzepGy6HitTulGSnWI1Z8nH2uFJwsUj2KeF6V0O
-# y4VuiWwvPfPdCs4V8r5oXs5L/PuQ4bDh8U1d9yYNZVXVoWuwvb7MNFtGKd6BnL8L
-# SU0/dHGosPWaPYwpLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKvapC/dwJT8SJ4ACBOZHMYHepTdJ5WU+1YvCt6R3xgJMA0GCSqG
+# SIb3DQEBAQUABIIBgGqdI7aZ1HqVgcNx/lz7uwfd0cASXlzqG9GcAHT6cVj5TZpt
+# ewv6CEf1Ri8J2yIqY33iDJMhSsG+ayvHrhjREWArIeE9jYwRjWGOmie3r8AWj3ve
+# 1ZKXmQCkOc8iQtaxM0rO01qTFp1EhJCjfM63dRB6JvzAExrFOaGgdGlKtSEVREAP
+# HXlrjDiPyZmeGIAiYOcVi1UZ5FzUFZSMY003CQnNt7hzMnOEsyMvlCyTUSwb1nNo
+# 4a8mgoYSAklniBZCncp0YdziUFP+CA9gXoj2NavDteRRmDkzwnNxydJTgTliremY
+# 3OhiaYti0+euJf0rJJcCRpFeYSdgGHVkHKcuGQ9/8FzumLTbg9r7dBSz82ldNDVK
+# Dxil6uf6/RXp9Z/23FTIA7XB2k/whWGjqTjEnUXishPbYFpYVCDQskJObkSlx9yf
+# ToWHLreRe+Xzmj5gln542Eu2XlI9j0MuRp9SaYy4EiV0OPllOpIu89Ztk1Yg+i3C
+# W3hzbx5AyY2IdE7OaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTVaMC8GCSqGSIb3DQEJBDEiBCByOHljelR69of49NhKi+C6N4bVxtx+4pdMUQL4
-# wijwljANBgkqhkiG9w0BAQEFAASCAgBQcoRMZ6Eb6lR7ARIJrlIGRkiZFFrTEqEx
-# h9YL80Oy4sR0hQjYxAjCtdsFWR1RB45dmSxBWpBCfMRLxDFs4bIzn/ZPLUm8JTSB
-# H1MXy6CV83PjdMmZreuc+5GNG5WWuh3pmXcckw+n/7EZbdYGHp43T0V0ZFNLvSRK
-# BcEiJOE0LJqYVI2DMQb1fmSK+iJl0aTmNLyh1sdMD9FTQju0dYQzzopvNdNRQOmE
-# ylAgR1o7TKVxT3nniTUkvFARWmAy93wbvjDdtJLqAJ/9FvB+LDSKVvWklPRZG/Aq
-# tj+ZNBghFk1c4gzQWvDirScMvtPwuuIhlaU0HYZG6EzqtOb40uk8g1jt6KFxlIXE
-# yuZayQ7UBbW+hx4+ocZMdKR5H+1O+1wC4hu40PqiYx652hvYgfqtz/DR22UkWwq7
-# F1YJKd+O837yZT+d+W1BwfVXT5Lar9qP+q/7TFgo+M+070EsFm3VwG3oBCDRbOt+
-# c/zUnLNh8MSRQ1If/VzJDn+N2QcoSxWo745TCgmdIB41dTixjPtwnZUyDJ5sfXFc
-# IBTlYTNcocq7nCneBWrQjA8kJPiaIdeJ+/j/5NXyHntJaL2XaOFvBNUvldjWmrDB
-# 0yuZ9gvtenLApA4aSZMsgq0w+Lb4OGatM7r10CKbruyItlW25153I6qn+4+HYzsr
-# vdTaTydffg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMzA3
+# NDhaMC8GCSqGSIb3DQEJBDEiBCC/lXZY7JLqFIwtF4JzHbpQL+h+umOncwCu5juf
+# K1XOXzANBgkqhkiG9w0BAQEFAASCAgAiizxGw1+MYfx9t/kHIcohAN/plqrALpR9
+# ZZHrXWJp5olKDaZ7d+KbIYrNrTu1kXE+B/07iLwbzZb3ZkAOtpipEQLTljgesKGY
+# iwT/Muj9R1SulxLNhuI2f320eDea5kgR3yEJVex1T/69EPhkyComoRtkTVnvqQ2r
+# plESXdUETcYytv6nmaGvIHMKpqfVGSoojYMwr//2tmdtOIm9GAvF+jLDDQj8a0pI
+# hysihSlf0d73a6tUEIzcqAthiLBMPK9M3C0HUI2E0zptYt0AUcRIz6dWRVbNkVNR
+# WGjPO7makiKRrxTYd9SCankrwfVRdqMwy/pdlECFSb0jx/8efTWp8YfyIlhwTaL4
+# T1+qmdYeQDLWl6DmngvGahgjxZljdQ5+diiRAB9CmHMRUO0HBXThqffqUNrdMuya
+# kJtagapY+nfw91+gYadlxuw/TWuhrztZXF7YvzQ/0w0jTzyO6DYzOdEfBEYQLjQg
+# GS1ZT3+g+7/OpU2qtbH+mNvzk8oqAk3U+K2kjkGJAmu0HltmGclhZuCYnaudzkpn
+# TZS8AZ5fAinlVoszIB9Z9KdOSZhbE+LcE0doEh0AHxh7i0VOvr7rVeQtdMupI3ym
+# RwfMwEByRitDtXrmJE6su61CmC1BP9HG6M5IBgW71sun/nzfFXwbnZrIBMnzMmU4
+# ppjdzP1xaQ==
 # SIG # End signature block

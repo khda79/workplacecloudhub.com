@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.8
+1.0.9
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -145,15 +145,7 @@ function Initialize-SmartM365LocalJsonFromTemplate {
     if (Test-Path -LiteralPath $Path) { return $false }
 
     if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
-        $TemplatePath = if ((Get-SmartM365JsonNames $Path).Legacy -like '*Config\Tenants\*.local.json') {
-            Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template'
-        }
-        elseif ((Get-SmartM365JsonNames $Path).Legacy -like '*.local.json') {
-            Get-SmartM365JsonTemplateName -Path $Path
-        }
-        else {
-            ''
-        }
+        $TemplatePath = Get-SmartM365JsonTemplatePath -Path $Path
     }
 
     if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath)) {
@@ -192,15 +184,15 @@ function Get-SmartM365JsonTemplatePath {
     param([Parameter(Mandatory)][string]$Path)
 
     $Path = (Get-SmartM365JsonNames $Path).Legacy
-    if ($Path -like '*Config\Tenants\*.local.json') {
-        return (Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template')
+    $legacyTemplate = if ($Path -like '*Config\Tenants\*.local.json') {
+        Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template'
     }
-
-    if ($Path -like '*.local.json') {
-        return ('{0}.template' -f $Path)
-    }
-
-    return ''
+    elseif ($Path -like '*.local.json') { '{0}.template' -f $Path }
+    else { return '' }
+    $preferredTemplate = $legacyTemplate -replace '\.json\.template$', '.json.txt.template'
+    # Presence wins, even for an invalid file/directory: readers must fail, not fall back.
+    if (Test-Path -LiteralPath $preferredTemplate) { return $preferredTemplate }
+    return $legacyTemplate
 }
 
 function Add-SmartM365MissingJsonTemplateProperties {
@@ -270,6 +262,9 @@ function Sync-SmartM365JsonConfigWithTemplate {
 
     try {
         $template = Get-Content -LiteralPath $TemplatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($template -isnot [System.Management.Automation.PSCustomObject]) {
+            throw 'Configuration template must be an object.'
+        }
         if (-not $ExpectedSHA256) {
             $currentRead = Read-SmartM365JsonDocument -Path $Path
             if (($Config | ConvertTo-Json -Depth 100 -Compress) -cne ($currentRead.Document | ConvertTo-Json -Depth 100 -Compress)) {
@@ -512,8 +507,8 @@ function Initialize-SmartM365TenantContext {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAd6Eiu28sBIo4K
-# zDc3cmsQRYLwuSeVrnPhzM8JzXGus6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbL45lu2B65RST
+# rKmNVAhD4scBE+r8xByngudn59VCm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -646,31 +641,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPKGjJaLHJV8MnWnQKtAuG2AXxUWNBYQVX9gvbih4ffbMA0GCSqG
-# SIb3DQEBAQUABIIBgKLA7ELYPTcZVCJVR/kKkVaPgB+bglXUsr3/xGkwBCd95mKh
-# +3hguoCX6idbTOjOrgAm/SNwRq1Gv71jCS3t7JOI/aHNy7Fbj0j8CtezBnEBayT+
-# bKV6/xc240E8F3poG4dGYPx+od1m0nAABn43thi4/YONwNf2mOfPAEXf7EXY7y1C
-# Mi6F8Fe1Z8GJ2uYS7zidT/Ze0QFmIDcHsg9d0CIAAgSnFzxUH4TEr0k8QN8xzV9s
-# pui3VEIXFa5/7noPc/npyCMSEf7hRoTIW+Zhz7aDAx4ICloyBfhCcuAgwKpbQHCG
-# UF73GQkvkL6wT1Vc9/ubxXYw/Y2RMDUUMA8HwqaMJX061EJx9hdf5A1hCaFgSc+d
-# G3znXl2kog0xVAnHiRLkoQHsfcKGNKYVEuwzWbtPptYG17stZh+dY0SENKNFZgFi
-# M9yzQbWkhmD9EiNKqad/qic+JYyXDdqiXZZeDYezgXvViTmrr56vETEkhvAgtf6L
-# PYBqEzNeorJiwp0eoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDMslXQsswItyX/pYDvvhTCgm+8WBYPc9FqxiHev+MvxMA0GCSqG
+# SIb3DQEBAQUABIIBgAm46P2Loxhc1fpVeym1pzy+87oDd9ZlfIVEqA82Iapd9ZDq
+# VqNIyKLvdcYBgHxF4ibJQFOthxfJq4HfHmUsYO6Uwt6Qevb4Ek6Ja311AarLdEYx
+# shlKEYutagKykg1btvCFGzjlg1bPkuoS4Xth3Zlfib1bQyF0FarTtV9tNg8hFto9
+# hDVVsgzBdx8vV4/lpsYbcR+4uo/jwQTGdhu7z/O0kXnZNYiw8lUjqz876Dgcuxum
+# S4od7erziBPLZjdkTZ+B9SjNTvYylXMD448m3DtfD3PhuBuZZNaiJ+IlIVzIPuhm
+# zVpyq8Zk95EWzDf0vsDrqPWJtT/OLomv/FqIbnxXFDUuZrAw+rXwapWza9wf/iBv
+# L7nLc/Gn355cCfxUMwq5aXHbFjxurSymeYkGvHRenVhCx0zeeRfBIB5uLKv6uNzd
+# cKtszgnnMRd0C3FFUMWEYp9WJOUswY4gyB2OswGpB1rJdQpAlkvTfoFFGL7cFnb6
+# v3PwtjSglzoG0JcA0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# MzVaMC8GCSqGSIb3DQEJBDEiBCD4+ZPD3gvouuvDcqtBUztEz5pOTGXvl+VVRCGy
-# OjVwJDANBgkqhkiG9w0BAQEFAASCAgCxrCpQYKYiwJ9OxadXwxqX7FIPnxdl9gLm
-# ti8kNvzOd2ERP2vqxtJ/bkTaxDShkkH6GRKOUZeT1oHLEerux0Vx4IUTyN2FSFOE
-# wTX9IocFyDQgsdX/54MJFVhNFgBZ8fquIbVaghDgI3qY6ZkuKz4O5oPWHBr3IslH
-# NyuN/yBpMhtTBaeZUuZQrjPhMlbmdo4BuK9ESJrTn/AQXJmOOZBPRhWDR9z3vhng
-# HO1/6fGeyQS18AwCXHkX7eQq4KHg/fVACQkSCcYGhrqTEnkEwcDtrQOpQFR9iLdV
-# 5Sl8LVcitbzHP2HpLENnZrk5hXEK9UU+U/QZ+pJr4LdR5eK8Wd2VnxexAmLJMvMz
-# 2dN4Jdpn8HOHdb3yCv4fkPZI+eKGJzwIR3MsxY0c8TCLtPVkPjyM5mVbt0ow+0au
-# /KF9PMkhjqDD1SxG5whSSfs55IjlOfhrhlmLq8R+oyec7GP3ZZicLReSRWAEQncc
-# aQLP7YvDcPRjzdfxjM5E6QlizAOrx65TRxU3eUIeXjfBPYMIXb2hxfRtooxtTil5
-# llzcBQBjIm+NIvnap0AlypgNJrYYqS989uLQzBAALRH5zxFaOGqqZsd2bd1KjA1n
-# znbPeIq6z7lHLnyTSkixQpQotAL0uhJdGNA8cGZ0LE8Qk/7dBvXuXTnIt4HqdVWU
-# vyoxLc4vgA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMzA3
+# MjhaMC8GCSqGSIb3DQEJBDEiBCDK5yGTJ3OU+v6JgsWT5sVYDNVN6wdLpYVevthW
+# ZcU7BjANBgkqhkiG9w0BAQEFAASCAgAyq7XDMSKBMyh131ci+k1qNsT83iveVh/I
+# XGGsh8S7Lz+kXZ1aNIRxDkr+RORRcR9gyWwqiQIQdTwqB2adNveCjYyvHl+PtBo9
+# WCVhwl5KfBrYHncaMa2TEXbyFwCzIEOkI6MkGzvdMFMDNUOX9O/3TdIlH3wWnYPm
+# C2cBs4sg5onQbU1zQL2xW2oOGVsGZxuNnRrN4gQPOGOluCb/lCwuyhI5Niiaee+5
+# NQYJGZQrfEVIv6UhwcihblJE1M9RDQkhhvbLDXSMvXXbvDwQwrUq213Qv+YvS7/y
+# tKYq1+K+9B/YUKTfxAT8iE0L9fDmXln8FmNwskieBo4Hcn+e/ojPcvVQPdHuAK0e
+# ItDUQp8F11EuWJ40us0UuxT+4UtYMdqIdSP6tv2oZYXGmeYj4ggX4r8Tyjd8SR3p
+# qdyPUU0VdGE/nmXExQozTJRFw0IC8U0TIm4IdZJHVDDXZtDMQ5lxxQObP9k/LlKC
+# iFG3U6rzWhPiLonv7IkK4K1oq5ftjIeyPCYXSQRDjF3VAyks4EZ570ycUkBtTzmf
+# wqoysr/pIWJaFr5Qvu+ani8ndWGcYmzMXar3Kc2WyLwYJPVOYyQ/5viKcDNU5Qm4
+# qLDoWc3zyMBXvWcgFQt04Lmi36GV5/dzguKtNIzioAcBGgsyMoafst46Q9t1/yN1
+# 83NUFWriBg==
 # SIG # End signature block
