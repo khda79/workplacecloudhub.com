@@ -193,6 +193,48 @@ class PreparationTests(unittest.TestCase):
     def test_parent_failure_blocks_replacement(self):
         self.unchanged_after(lambda:(self.alter_receipt(Status='Failed',Errors=1),self.prepare()),'Incomplete producer')
 
+    def test_incomplete_producer_diagnostic_identifies_receipt_and_typed_flags(self):
+        producer=pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        cases=[({'Status':'Running'}, "Status='Running'"),
+               ({'Status':'Failed','IsPartialInventory':True,'Errors':1}, 'Errors=1 (int)'),
+               ({'IsPartialInventory':True}, 'IsPartialInventory=True'),
+               ({'IsPartialInventory':'false'}, "IsPartialInventory='false'"),
+               ({'Errors':'0'}, "Errors='0' (str)"),
+               ({'Errors':False}, 'Errors=False (bool)'),
+               ({'Errors':None}, 'Errors=None (NoneType)'),
+               ({'Errors':-1}, 'Errors=-1 (int)'),
+               ({'Errors':1.0}, 'Errors=1.0 (float)')]
+        for updates, expected in cases:
+            with self.subTest(updates=updates):
+                self.write_proof()
+                self.alter_receipt(**updates)
+                with self.assertRaises(ValueError) as caught:
+                    pipeline.producer_records(self.source,IDENTITY)
+                message=str(caught.exception)
+                self.assertIn('Incomplete producer completion proof',message)
+                self.assertIn('Producer='+repr(producer['Script']),message)
+                self.assertIn('Receipt='+repr(producer['Receipt']),message)
+                self.assertIn(expected,message)
+                self.assertNotIn(IDENTITY['TenantId'],message)
+
+    def test_missing_producer_diagnostic_identifies_receipt(self):
+        producer=pipeline.load_json(pipeline.REGISTRY)['Producers'][5]
+        (self.source/producer['Receipt']).unlink()
+        with self.assertRaises(ValueError) as caught:
+            pipeline.producer_records(self.source,IDENTITY)
+        message=str(caught.exception)
+        self.assertIn('Missing producer completion proof',message)
+        self.assertIn('Producer='+repr(producer['Script']),message)
+        self.assertIn('Receipt='+repr(producer['Receipt']),message)
+
+    def test_receipt_diagnostic_alone_does_not_create_outputs_or_modify_sources(self):
+        self.alter_receipt(Status='Failed',IsPartialInventory=True,Errors=1)
+        before={p.name:pipeline.sha(p) for p in self.source.iterdir() if p.is_file()}
+        with self.assertRaisesRegex(ValueError,'Incomplete producer completion proof'):
+            pipeline.producer_records(self.source,IDENTITY)
+        self.assertEqual(before,{p.name:pipeline.sha(p) for p in self.source.iterdir() if p.is_file()})
+        self.assertFalse(self.output.exists())
+
     def test_file_run_differing_from_parent_is_rejected(self):
         def reject():
             self.proof['Files'][0]['RunId']='different-run';self.write_proof();self.prepare()

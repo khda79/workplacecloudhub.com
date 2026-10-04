@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Version: 0.3.2. Status: offline-tested migration candidate, not deployed or scheduled.
+Version: 0.3.3. Status: offline-tested migration candidate, not deployed or scheduled.
 
 ## Scope and execution boundaries
 
@@ -18,6 +18,9 @@ The PowerShell entry point selects the effective `-Tenant` profile (default
 `test`). Its `.local.json.txt` template selects the Python executable and can
 override `LatestCsvFolderPath`; otherwise the tenant source root is used.
 Logs and transcripts use the existing Core LOG-ALL initialization/retention.
+The log initialization path is resolved through Core's existing configuration
+resolver before directory creation. Blank, relative or unresolved paths are
+rejected instead of creating directories containing literal configuration tokens.
 Core's automatic Teams log callback is suppressed in memory during this
 offline invocation, and SharePoint upload is disabled. No local module or
 tenant configuration is changed to disable notifications permanently.
@@ -57,6 +60,10 @@ acquisition interval, qualifications, and each file's logical row count/hash.
 File lineage must match its parent producer receipt exactly. Failed scope or
 missing current exports replace the receipt with a rejected result; native
 CSV files are preserved. Merely finding a previous file does not qualify it.
+Rejected producer proofs identify the producer and receipt filename. Incomplete
+proofs also report status, partial-inventory flag and error count/type; the
+completion requirements remain unchanged. Compare receipts on the collection
+machine when a synchronized copy may lag behind; never manually restamp a proof.
 
 Each producer holds a local exclusive `.collection.lock` while collecting.
 These small current lock files are not uploaded. Receipts use atomic local

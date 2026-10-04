@@ -3,7 +3,7 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.2
+0.3.3
 .NOTES
 Candidate, not scheduled. Offline local preparation only. No collector, Graph
 authentication, notification, SharePoint transfer or Power BI refresh is invoked.
@@ -13,10 +13,21 @@ authentication, notification, SharePoint transfer or Power BI refresh is invoked
 param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.2'
+$script:Version='0.3.3'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
 $savedOfflineGlobals=@{}; $preparationWarning=$false
+function Resolve-SmartM365CmdbPreparationLogPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
+          [AllowEmptyString()][string]$LogRootPath)
+    $resolved=& $CoreModule {param($value) Resolve-SmartM365ConfigValue -Value $value} $LogRootPath
+    if([string]::IsNullOrWhiteSpace($resolved) -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL') -or
+       $resolved -match '\{\{|\}\}' -or -not [IO.Path]::IsPathFullyQualified($resolved)){
+        throw 'CMDB preparation requires a fully resolved absolute LogAllRootPath; no log directory was created.'
+    }
+    return Join-Path $resolved 'Preparation/CMDB'
+}
 try {
     $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
@@ -50,7 +61,7 @@ try {
     $global:EnableSharePointUpload=$false
     $global:EnableTeamsNotifications=$false
     $global:SmtpServer=''; $global:From=''; $global:To=''; $global:ErrorMailTo=''
-    $logBase=Join-Path ([string]$effective.LogAllRootPath) 'Preparation/CMDB'
+    $logBase=Resolve-SmartM365CmdbPreparationLogPath -CoreModule $core -LogRootPath ([string]$effective.LogAllRootPath)
     InitializeScriptEnvironment -OutputPathInit $logBase -LogFileName 'SmartM365-CmdbEvidence-Prepare' -CallerScriptPath $PSCommandPath | Out-Null
     $runtimeInitialized=$true
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
@@ -63,8 +74,11 @@ try {
         '--tenant-key',[string]$effective.TenantKey,'--organization-key',[string]$effective.OrganizationKey,
         '--environment-key',[string]$effective.EnvironmentKey,'--tenant-id',[string]$effective.TenantId)
     if($ValidateOnly){$arguments+='--validate-only'}
-    $resultText=& $python.Source @arguments
-    if($LASTEXITCODE -ne 0){throw 'CMDB preparation rejected its source or output contract. Last validated output is preserved; inspect the transcript.'}
+    $resultText=& $python.Source @arguments 2>&1
+    if($LASTEXITCODE -ne 0){
+        $diagnostic=@($resultText | ForEach-Object {[string]$_} | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -Last 1) -join ''
+        throw "CMDB preparation rejected its source or output contract. Last validated output is preserved. $diagnostic"
+    }
     $result=$resultText | ConvertFrom-Json -ErrorAction Stop
     WriteLog -Message ([string]$resultText) -Level INFO
     if($result.Status -eq 'PreparedWithCleanupWarning'){
@@ -91,8 +105,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+A1MEWTC+Pqkb
-# jUh+WfQuNIne/zBSEWIZCibmI5KY8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvyFj6eAHq97GC
+# JyACe12915gIoLvPJf8S6bQdDJPguKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -225,31 +239,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEI2gGlwhQw+oBmwvNKU5Fiefk2OoeLDDjAiDNAL9JHiMA0GCSqG
-# SIb3DQEBAQUABIIBgDaiV5F+f0WiK6M3Iv7An8npMB92139754gkxMo/Halxqr7O
-# GbkKM9Fupro85UXmlq9AwYqt+LgpX0h9GfYid8tNcHvtBkoKL3H7JyO8KVP8QDxq
-# Bg4amNDpOkpvonSrb61tbq/h9U4VpDoaVAfrE8n2e0DXOti/kMnB6PemyFxpmI3b
-# g4ajfcOFbG2VqGyl4LA+a9czNfrMaNl3/8Nqfb7T9Nx8W2F5Y0sh9O5l43lOTN1f
-# W2DyUdfv7nyyQkL7uhpZgKEca2GDQAxSueTZJiJiBqHCAkKYqeDkKscR74foBI5/
-# /HGUTEmUzwtK6Wz8shH4/JDJjhXXs6PwCkZeZqTbiZWDHNviCPnm4lAJ/7bd9/6/
-# isF50DED9bzGYInERGzED3kHMFksOTBVBcouk8/k2TiNnD7M6W68CmI4WVcUNKO0
-# tU3kzpvDYtNXTQl9h5twvTeBUuc9Sy/rIE1CvFlw37rs9H6vmFhaQ+j0oMtKnPWf
-# +0GJC6LAlTBRZuqQq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHyOTVRfs52+PavWUlKD5vIgbg1ETqdisvkpehg2bN5mMA0GCSqG
+# SIb3DQEBAQUABIIBgE4PHtsxeDBPQvoT+NuSBJXMMkUhYZvJQvRxASXcHo0Rqsce
+# ukcFwqv1oumFVstwmlY91bnZqPruPPb4kyMB+nHFDQEtpcCtOQmiGLnPPq+CW0bk
+# XmPu5sY8p/2LPBPVNUl4zsPxcr0D3SslGSarByLRus7binIT5PrXRPC8e0Onh1oM
+# 0LpzN4ZaqlTQsFDlQe1pMs7iS/Ggrw3hwzFcseew0V948sx2pI6uGnxJV3o37me2
+# t78xAz4qx80BfkpDyiP3irDrnULAFRz0Aorws0No6P2HY84PgNJ3KMra7e6AFThw
+# 5eFAboE+qiF2kf129KKigy/e/xUslrlRohATuVhA17LgwMPnWrXoEjjH1z/isTPj
+# zKIDe5E+CB/LlouYnS0gevMvpVqHjkwmgN5H2JzKi3GVybkr4ZyX+V/shQdtusJR
+# qsIAB6B7Vsc4GAcQ2k9F751q3clYVGsJyBOlhRFNJtS3oK7SsjfhBpM82f7rJYxp
+# 7YyQfx4cvQCay5b7aaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjQ1
-# NTVaMC8GCSqGSIb3DQEJBDEiBCC/BSdGJQWiLeabsnHTJdpkv2U2/j02qpjaMHZP
-# QUrcCTANBgkqhkiG9w0BAQEFAASCAgBFsO/feB5j/sSAkrheWQx6cy4gZ/RU1ezh
-# e8HwF+eAYCUhwv+XzHqqlj4iQtYssI3KE1NmHlZoGeVpYsxV/yNizFxbm5XpBlBT
-# TBCAhtf9afs7cowYuI5sBCHLg2hgbt0ll/EswZ15jstiAXXDN53Zsyy4H+1Uevd4
-# +UxaNOMba8h5Mo0Vz9TfCzSgz04wPHOJZfiBkMcIn0vs3PbBTSujwg+Ox2+oCge/
-# OMwsaRp7LfK87Aj2sptTGY6nsSe7plEOxAulIIQdGUnOoJ2M3wkP7sNJU0Q+SkNX
-# NFPbCPdRa/SmVfCX9Uniy7xJITmZ4xtQ2JaMl0UeOtTEJF9FkcqIeGAR6qanROGV
-# FcFRjQt41eBAfl82XeRiHYmRu8F7I14JgR+YHFvJqDz8ZfBZpRh+QoriUs2Tz/dh
-# Tp8g4pQ6Pyc7QtyPmQsYfVbAk4DKVy61BUiocTl0d5Dy3V/NGW9tVrWj+dQyR/jb
-# Py+K9OMYB2NZrBhWpAx6r0UfkekHGtEm6/g8w2dn9d3IRCaIh0cY9PEnTnVgWvKp
-# KZOJTTFEZ7ZjXTaTExaM4tkGA7G8YOdecz4Pvn8Agbah8QBARdyyAHkBJ56cq1Pe
-# dkNCAn+9pD6rSybT3II3UYXKEoREt2gZC3ghGwobrI1E5vSGLGfwzUjE+CGsh1QN
-# YuHZ+zMq6w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMzUw
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAMrOinsEhF8onKntbad5ZT0CI6sLsoa9PDuFjz
+# sP87VDANBgkqhkiG9w0BAQEFAASCAgCb4O4iN5fpaclFF3dRc1sYdqaDVimZmul5
+# JZz0enQyw9R3cF3/D3gWfzmOwzTpe0t0DGRB2SvXpEgZvnMROimAWZ9wul+hUJiG
+# +53VOHCiSrW2RfTC8Yq3XP2tzbOEBkdEzEHe2sFwewz6toYYmBywT5OIT2qTjyE/
+# TeC4aW2iZwp3nab2TO2d+Mu7dL3q9afgSD+YnwkKCHC+7Uf9TGTJE0uI001t5rQc
+# KaNV0Nm+PKO3m5mSPk/o8sJsruTZUNBIUiz2F+wFwbzCTLRZsthxbzJEh9nDT8/l
+# KfLORknT0kRjIwgajt6rIRAEI0x36OMt4fMMKticn0/9wT8ZwHSBqJfKgebGKJw7
+# Woj7lJAHVNgvObkMg/neTvFs6BGBTn/xbZGmL+oxNAaRj+VAuqjFT/HifwqTz2tD
+# IJtDcmm75pUFJHb9cbSliiBQIW5B/kJkhoaEunf28quHxb/dq+GDJLa5riLVRD9t
+# S42ZCec9zqNorveDal9daSFQVi/87UhEnbOqTdeA3QPjoawke7HexTlWeAoc52nn
+# m96eFiBG/tGxFPOQC0k1H7/LMz8CB2VpqSDCXm0lqLpfLnVHMvP4jT/VSqSXEDsZ
+# zYuj65WzaKJyeecobTZpAqDDAyyfqhr1hKenK0Jw1Xp0yDEO8OlTd/vEG2/fj26K
+# rP9W6DoGJQ==
 # SIG # End signature block

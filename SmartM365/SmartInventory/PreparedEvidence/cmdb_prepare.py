@@ -13,7 +13,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-VERSION = '0.3.2'
+VERSION = '0.3.3'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -108,37 +108,43 @@ def producer_records(source, identity):
             raise ValueError('Duplicate producer registry entry')
         producers.add(name)
         path = source / definition['Receipt']
+        context = f"Producer={name!r}; Receipt={definition['Receipt']!r}"
         if Path(definition['Receipt']).name != definition['Receipt'] or path.is_symlink():
-            raise ValueError('Unsafe or linked producer receipt')
+            raise ValueError('Unsafe or linked producer receipt: ' + context)
+        if not path.is_file():
+            raise ValueError('Missing producer completion proof: ' + context)
         digest = sha(path)
         proof = load_json(path)
         if proof.get('Owner') != 'SmartInventory-CmdbSourceReceipt' or proof.get('ContractVersion') != '1.1':
-            raise ValueError('Producer completion proof owner or version mismatch')
+            raise ValueError('Producer completion proof owner or version mismatch: ' + context)
         if any(proof.get(field) != value for field, value in identity.items()):
-            raise ValueError('Producer completion proof tenant identity mismatch')
+            raise ValueError('Producer completion proof tenant identity mismatch: ' + context)
         if proof.get('Producer') != name or not proof.get('ScriptVersion') or not proof.get('RunId'):
-            raise ValueError('Producer completion proof lineage mismatch')
+            raise ValueError('Producer completion proof lineage mismatch: ' + context)
         if (proof.get('Status') != 'Completed' or proof.get('IsPartialInventory') is not False
                 or type(proof.get('Errors')) is not int or proof['Errors'] != 0):
-            raise ValueError('Incomplete producer completion proof')
+            raise ValueError('Incomplete producer completion proof: ' + context
+                             + f"; Status={proof.get('Status')!r}"
+                             + f"; IsPartialInventory={proof.get('IsPartialInventory')!r}"
+                             + f"; Errors={proof.get('Errors')!r} ({type(proof.get('Errors')).__name__})")
         if proof.get('Scope') != definition['Scope']:
-            raise ValueError('Producer full scope mismatch')
+            raise ValueError('Producer full scope mismatch: ' + context)
         start, end = utc(proof['StartedAtUtc']), utc(proof['CompletedAtUtc'])
         local = {}
         for record in proof['Files']:
             file = record['File']
             if Path(file).name != file or file in records or file in local:
-                raise ValueError('Unsafe or repeated source proof filename')
+                raise ValueError('Unsafe or repeated source proof filename: ' + context)
             if any(record.get(field) != proof[field] for field in ('Producer','ScriptVersion','RunId','StartedAtUtc','Scope')):
-                raise ValueError('Source record lineage or scope differs from producer')
+                raise ValueError('Source record lineage or scope differs from producer: ' + context)
             completed = utc(record['CompletedAtUtc'])
             if not start <= completed <= end:
-                raise ValueError('Invalid acquisition interval inside producer receipt')
+                raise ValueError('Invalid acquisition interval inside producer receipt: ' + context)
             local[file] = record
         if set(local) != set(definition['Files']):
-            raise ValueError('Missing producer completion proof or unexpected source file')
+            raise ValueError('Missing producer completion proof or unexpected source file: ' + context)
         if sha(path) != digest:
-            raise ValueError('Producer proof changed during validation')
+            raise ValueError('Producer proof changed during validation: ' + context)
         records.update(local)
         receipts.append({'File':path.name, 'SHA256':digest, 'Producer':name,
                          'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],

@@ -3,9 +3,9 @@
 .SYNOPSIS
 Offline parser and notification-boundary checks for CMDB preparation.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
-Loads a single Core AST function into an isolated dynamic module. Never imports
+Loads selected Core AST functions into an isolated dynamic module. Never imports
 the operational Core module, executes the preparation wrapper, or reads configs.
 #>
 [CmdletBinding()]
@@ -24,14 +24,26 @@ $callback=$coreAst.Find({param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-SmartM365TeamsNotificationFromLog'
 },$true)
 if(-not $callback){throw 'Core notification callback missing'}
+$configResolver=$coreAst.Find({param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-SmartM365ConfigValue'
+},$true)
+$logResolver=$wrapperAst.Find({param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-SmartM365CmdbPreparationLogPath'
+},$true)
+if(-not $configResolver -or -not $logResolver){throw 'CMDB log path resolver missing'}
+. ([scriptblock]::Create($logResolver.Extent.Text))
 $mockModule=New-Module -Name SyntheticCmdbOfflineGuard -ScriptBlock {
-    param($definition)
+    param($definition,$resolver)
     . ([scriptblock]::Create($definition))
+    . ([scriptblock]::Create($resolver))
+    $script:SyntheticConfig=[pscustomobject]@{WorkspaceRootPath='C:\Synthetic CMDB';ProfileKey='test';
+        LogAllRootPath='{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\LOG-ALL'}
+    function Get-SmartM365EffectiveModuleGlobalConfig {return $script:SyntheticConfig}
     $script:SmartM365TeamsNotificationInProgress=$true
     $script:SmartM365TeamsNotificationLogKeys=$null
     $script:Calls=0
     function Send-SmartM365TeamsNotification { $script:Calls++ }
-} -ArgumentList $callback.Extent.Text
+} -ArgumentList $callback.Extent.Text,$configResolver.Extent.Text
 try {
     # This must return before reading operational globals or invoking a sender.
     & $mockModule {Invoke-SmartM365TeamsNotificationFromLog -Message 'Preparation completed' -Level SUCCESS}
@@ -50,7 +62,55 @@ try {
         $node.GetCommandName() -match '^(Invoke-(RestMethod|WebRequest)|Connect-|Send-.*Mail|.*-Collect\.ps1)$'
     },$true)
     if($forbidden.Count){throw 'Unexpected external or collector command in offline wrapper'}
-    'PASS: parser, Core notification guard, guard restoration, SharePoint disable, external-command boundary (5 checks).'
+    $pathChecks=0
+    foreach($case in @(
+        @{Input='{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\LOG-ALL';Expected='C:\Synthetic CMDB\Tenants\test\LOG-ALL\Preparation\CMDB'},
+        @{Input='{{LogAllRootPath}}';Expected='C:\Synthetic CMDB\Tenants\test\LOG-ALL\Preparation\CMDB'},
+        @{Input='C:\Synthetic Logs';Expected='C:\Synthetic Logs\Preparation\CMDB'},
+        @{Input='\\synthetic-server\synthetic-share\LOG-ALL';Expected='\\synthetic-server\synthetic-share\LOG-ALL\Preparation\CMDB'}
+    )){
+        $actual=Resolve-SmartM365CmdbPreparationLogPath -CoreModule $mockModule -LogRootPath $case.Input
+        if($actual -cne $case.Expected){throw 'CMDB resolved log path mismatch'}
+        $pathChecks++
+    }
+    foreach($invalid in @('',' ','__USE_GLOBAL__','USE_GLOBAL','relative\LOG-ALL','C:relative','\drive-relative','{{MissingRoot}}\LOG-ALL','C:\Logs\{{Unknown}}','C:\Logs\{{broken')){
+        $rejected=$false
+        try{Resolve-SmartM365CmdbPreparationLogPath -CoreModule $mockModule -LogRootPath $invalid | Out-Null}
+        catch{if($_.Exception.Message -notlike 'CMDB preparation requires a fully resolved absolute*'){throw};$rejected=$true}
+        if(-not $rejected){throw 'Invalid log path was accepted'}
+        $pathChecks++
+    }
+    if($wrapperAst.Extent.Text -notmatch '\$logBase=Resolve-SmartM365CmdbPreparationLogPath' -or
+       $wrapperAst.Extent.Text.IndexOf('$logBase=Resolve-SmartM365CmdbPreparationLogPath') -gt
+       $wrapperAst.Extent.Text.IndexOf(('Initialize'+'ScriptEnvironment -OutputPathInit $logBase'))){
+        throw 'Resolve log path before initialization'
+    }
+    $pathChecks++
+    $failureGuard=$wrapperAst.Find({param($node)
+        $node -is [Management.Automation.Language.IfStatementAst] -and
+        $node.Extent.Text.Contains('CMDB preparation rejected its source or output contract.')
+    },$true)
+    if(-not $failureGuard -or $wrapperAst.Extent.Text -notmatch '\$resultText=& \$python.Source @arguments 2>&1'){
+        throw 'Native failure diagnostic must be captured'
+    }
+    $nativeChecks=0
+    foreach($nativeOutput in @(@('Traceback (most recent call last):','ValueError: Incomplete producer completion proof: Producer=synthetic.ps1; Receipt=synthetic.current.json.txt; Status=Failed'),@())){
+        $message=& $mockModule {
+            param($guard,$resultText)
+            $LASTEXITCODE=1
+            if($null -eq $resultText){$resultText=@()}
+            try{. ([scriptblock]::Create($guard));throw 'Failure guard did not reject'}
+            catch{return $_.Exception.Message}
+        } $failureGuard.Extent.Text $nativeOutput
+        if($message -notlike 'CMDB preparation rejected*Last validated output is preserved.*'){
+            throw 'Native failure context was lost'
+        }
+        if($nativeOutput.Count -gt 0 -and ($message -notlike '*Producer=synthetic.ps1*' -or $message -like '*Traceback*')){
+            throw 'Concise producer diagnostic was lost'
+        }
+        $nativeChecks++
+    }
+    "PASS: offline boundary (5), log paths ($pathChecks), native diagnostic ($nativeChecks) checks."
 } finally {
     Remove-Module $mockModule -ErrorAction SilentlyContinue
 }
@@ -58,8 +118,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZX8f+/3mgmaHr
-# 3aHakTOF7hONg8KuMxtz3asYgGRv0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuRDNj6X1Qc2qb
+# ji7LXvXi2E1q1hWwNftuXxJ86tfDrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -192,31 +252,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILVJDByU3nfTJMjTtYx2CaDuioXsQmHOgpgu243YuqyfMA0GCSqG
-# SIb3DQEBAQUABIIBgEQUR6eMy9/s+CErlj9/4YWpl3HaxJk2TcEswkXBtLFR/+FI
-# 9t/yKzus3wQWXaTi4KZTSV9p+1nViTj1nJQSwR1ftIfBtLdp4hn1aRYUSfMvJ4Jo
-# YYhFKikBhVrEFxI/50kTVgEuQm3lHrKa52k3ywC3TRE1Mekb1mDKnR9APSk7xwvI
-# RS87fX7BBZa9BYa59ETFgaGRHYbx5tsu2fwgcbu/McyJQUaNoXKDmAPiGvzij1sb
-# 2l0929RUyEL9zcPXSPBKCF++rF55NkpmD6r24AioWL1C97sCh2Se1ChKZd9IAlwu
-# KGJGpypPv/PfO3LhKS1yBrNG89he+YZqJOb6NLhwvyirg9YZxxpeLrEXdNbB2z0L
-# ItMVBMLV655J41sEqwifJVfy7LejBES7b/9+OlmZfKa7INv8Ul4gQYrkBtxNmYqI
-# s46exu6Jkiddor8StZPJhujY88OIj2+Ulg9aEcKHJyrTFYqtWFSQmjvEIOBrYxQt
-# In8z7DUi9P4gu1ad46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC0z3wMVi7zWtl26WIePUZdL2Uvjti4+JMkFz7K3Zuf+MA0GCSqG
+# SIb3DQEBAQUABIIBgFQQEY8fmuRoJhHEpVYoM71/uhXEv2tYviOr+r0UCDpdPrb5
+# /QWnpeBMfhtNrtU31q8jFfJvqQhMBCyu6Gs3/PV7+xcuYC036r+jgb6z8rJ7lgXU
+# H9a7BeZ5eO2tp26s76wrw/Np3QcHxwfiPR5jUFL2LNBnKz+wYHx0UU2VvWlepOjN
+# 7x/6GDuPMMGIOJocyTdLWweVJygiPxSAirVuiWoS8bJ+UhO9Fz96x/SS41d+G7Jx
+# etf4IiiE49rUPsi9WeQc1jqDNtmQmEpTHg+xfAGhIy11PjBaYTiF65H5MBKzixbe
+# ylKQQoy460TyJYEKiTwCJ10N1/Rek1Q4JzMBrxjmZfc+BsdbJNaD04gWDGvE0+ZK
+# /h659u3abb6HudQQW5kgWEI7N8UGa8frlOz5yR0VaiiST3XJtIslg9oU0a/8s/Wy
+# 0f7UO3wZ8eIEMDgn8mZ20AZtH/ieLvAJlIfNmtKg+4d2xUaTmzlkp9xdJhXJe3o3
+# aHvMzXOrh1mMpQhT/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDlaMC8GCSqGSIb3DQEJBDEiBCACYHHk3pYx/qeE//U4YKgv/JmK6DnUGiReqs6m
-# LBBuSDANBgkqhkiG9w0BAQEFAASCAgBrAj2vL46jM270gA/vjDvSVF1gWApYivrw
-# sunyEqqq7xV9k3oUbz+hFYmELaGhENr7pp5k/3E2rRFpzEHD+gHHKE3KrU5djkJt
-# bJyorAk/Tvghon39tkbOnnEOvXCRJ+E8GuLIYLM7diNzSv0UI+xstjMR9cJmjrRr
-# b01WiRaN0fwVci7ntPG5qBOG25m/JaRQpM4xhx3Fpl+AlBMs7X0iFZeEckhGIsC8
-# 860kJczsjSPd4RPCu5XNZ0ZwVRn7d7lP16npTmEknRFKFECKvZcr66VZZzdp7n/J
-# 7IlO9ZkBMbvp5LuDTwPcuADiMCsPGsShnai+wV+pfcKPmELn8xQh+PAkhHjm3OyU
-# fhgsQz7J8eZ/QE12QPJKhieMSHgURPQej2fAmPJxZcLOuzO0Qrufoc9EMgU1U0OV
-# DXiIb0I+lhoPN2WZCEXKyf9Zpqm1I3d9lJge75Ou7vGME+gTBWdHqfhpZ7FdmzsY
-# y+AcWOuadymraVnr29Ha1eELr+GyRTLr1H0EWpkfRA9hAE4q7lFm+B+aiKK9NjG6
-# aBVzzrqJjmdfQi1bUlcEkdCxi0Nm8c44n+yP83/IWTk3MlE2QOr1EXAWI/OvTW3A
-# N9FO8Ajl+3WaMRjyJG1ie1c3znTf29KiPZPnMr8iXV0AKOR7HpYPpDfU9kPmPJux
-# Y0JJgJ/bRQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMzUw
+# MThaMC8GCSqGSIb3DQEJBDEiBCC3dPBVwh0OsC/b9SAaHS5sim51Kw4blU4eGzdg
+# jG/d7DANBgkqhkiG9w0BAQEFAASCAgB0da/qCVub2B8GEG1KfpUy9nhGGXgL5uh3
+# 7eeTnzhXH/703mzsCjYRiLRqXgoFKAssG2uUIkkbKnqQ+5jSXS0ymufA8US18lt5
+# 04VzRHzDNJQ2kvd9D20ymjjPnXRUt77PIaEnPuHghxgmWGdaKQwOMXRhDAxGNTKD
+# uLWsp8tQWHVtmn8Rbw387Y4VXtZ8cfz+aDK1686sFLo83V1GBi7mqHxCSxGV6g87
+# /0juSajPnuUi9IM9XuSvWY+2JyoCt9ogNoyBsj0tWG/ye8IXBd+8NM34LQDrDV7O
+# j7UKSpBY/L4lpj5pWgecaUTDvfNgb1fSnC/SCmrKjMmuX5IFjIRWPvg8Wre27dm/
+# byS0cQM73V4FFTI9jlZBpzpt3MT7vUy76e4EjuMyv/BW1B/jZmY6smipmUu642+a
+# 7gu+8tE7fK5fPWj7ZLl4mSRxwOS1YscBf7OXfPA2OXD/yYahqEmu1alAb5PIpw/5
+# KwLLNhc0yjLG+FM8cxnLoE4ZgzFVLVptQP6RMKchMlRJPc+m9c5FQYykucjkGCW1
+# pCFmO+osfLS0vo/fqt9Ix1OKVL6feO+C7H0ppOwRCTL97DQYQS1Twr4yrj3rUn4c
+# /7uQ5TwlPdK1RbFXZ++5GIFH/D5+MasS//Fjk4zL7kywaJFgRGrG87/Y0wTbsEmX
+# 9M8KANitjQ==
 # SIG # End signature block
