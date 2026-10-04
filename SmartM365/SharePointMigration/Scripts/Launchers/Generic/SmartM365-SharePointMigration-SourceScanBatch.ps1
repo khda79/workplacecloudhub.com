@@ -155,28 +155,79 @@ function Copy-SourceScript {
     param([string]$RelativePath, [string]$Destination)
     $source = Join-Path $ProjectRoot $RelativePath
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required script not found: $source" }
-    Copy-Item -LiteralPath $source -Destination $Destination -Force
+    Copy-Item -LiteralPath $source -Destination $Destination -Force -ErrorAction Stop
     if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash) {
         throw "Local script copy differs from source: $Destination"
     }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Destination
+    if ($signature.Status -ne 'Valid') { throw "Local script signature is not valid: $Destination ($($signature.Status))" }
     Write-BatchLine ("Copied signed script: {0}" -f $Destination)
 }
 
+function Copy-VerifiedDependency {
+    param([string]$RelativePath, [string]$Destination)
+    $source = Join-Path $ProjectRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required dependency not found: $source" }
+    Copy-Item -LiteralPath $source -Destination $Destination -Force -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash) {
+        throw "Local dependency copy differs from source: $Destination"
+    }
+    Write-BatchLine ("Copied dependency: {0}" -f $Destination)
+}
+
+function Copy-PortablePython {
+    param([string]$SourceDirectory, [string]$DestinationDirectory)
+    $sourceRoot = (Get-Item -LiteralPath $SourceDirectory -ErrorAction Stop).FullName.TrimEnd('\')
+    $files = @(Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -ErrorAction Stop)
+    if ($files.Count -eq 0) { throw "Portable Python directory is empty: $sourceRoot" }
+    foreach ($file in $files) {
+        $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\')
+        $destination = Join-Path $DestinationDirectory $relativePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force -ErrorAction Stop | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction Stop
+        if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash) {
+            throw "Local Python runtime copy differs from source: $destination"
+        }
+    }
+    Write-BatchLine ("Copied and verified {0} portable Python files locally: {1}" -f $files.Count, $DestinationDirectory)
+}
+
 function Get-PythonCommand {
-    $portable = Join-Path $ProjectRoot 'Tools\Python\python.exe'
-    if (Test-Path -LiteralPath $portable -PathType Leaf) {
-        & $portable --version *> $null
-        if ($LASTEXITCODE -eq 0) { return [pscustomobject]@{ Executable = $portable; Arguments = @() } }
+    param([string]$LocalRoot)
+    $portableSource = Join-Path $ProjectRoot 'Tools\Python'
+    $portableSourceExe = Join-Path $portableSource 'python.exe'
+    if (Test-Path -LiteralPath $portableSourceExe -PathType Leaf) {
+        $portableLocal = Join-Path $LocalRoot 'Python'
+        Copy-PortablePython -SourceDirectory $portableSource -DestinationDirectory $portableLocal
+        $portableExe = Join-Path $portableLocal 'python.exe'
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $portableExe --version *> $null
+            $pythonExit = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
+        if ($pythonExit -ne 0) { throw "Local portable Python could not start: $portableExe" }
+        return [pscustomobject]@{ Executable = $portableExe; Arguments = @() }
     }
     foreach ($name in @('python', 'py')) {
         $command = Get-Command $name -ErrorAction SilentlyContinue
         if (-not $command) { continue }
+        if ([string]$command.Source -like '\\*') { continue }
         $prefix = if ($name -eq 'py') { @('-3') } else { @() }
-        & $command.Source @prefix --version *> $null
-        if ($LASTEXITCODE -eq 0) { return [pscustomobject]@{ Executable = $command.Source; Arguments = $prefix } }
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $command.Source @prefix --version *> $null
+            $pythonExit = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
+        if ($pythonExit -eq 0) { return [pscustomobject]@{ Executable = $command.Source; Arguments = $prefix } }
     }
-    throw "Python 3 is required to create scan manifests. Expected portable Python at: $portable"
+    throw "Python 3 is required to create scan manifests. Expected portable Python at: $portableSourceExe"
 }
 
 function Add-BatchResult {
@@ -242,10 +293,9 @@ if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) {
     throw 'Microsoft.SharePoint.PowerShell snap-in is not registered. Run this batch on a SharePoint farm server.'
 }
-Write-BatchLine 'Checking Python and the scan manifest script.'
-$python = Get-PythonCommand
-$manifestScript = Join-Path $ProjectRoot 'Scripts\Compare\scan_evidence.py'
-if (-not (Test-Path -LiteralPath $manifestScript -PathType Leaf)) { throw "Scan manifest script not found: $manifestScript" }
+Write-BatchLine 'Checking the scan manifest script on the shared project.'
+$manifestSource = Join-Path $ProjectRoot 'Scripts\Compare\scan_evidence.py'
+if (-not (Test-Path -LiteralPath $manifestSource -PathType Leaf)) { throw "Scan manifest script not found: $manifestSource" }
 }
 catch {
     Write-BatchLine ("Source batch preflight failed: {0}" -f $_.Exception.Message)
@@ -255,7 +305,8 @@ catch {
 $localRoot = Join-Path $LocalRunRoot $batchId
 $localInventory = Join-Path $localRoot 'Inventory'
 $localLaunchers = Join-Path $localRoot 'Launchers'
-New-Item -ItemType Directory -Path $localInventory, $localLaunchers -Force | Out-Null
+$localCompare = Join-Path $localRoot 'Compare'
+New-Item -ItemType Directory -Path $localInventory, $localLaunchers, $localCompare -Force | Out-Null
 Write-BatchLine ("Batch started. Logs: {0}; local execution copy: {1}" -f $batchRoot, $localRoot)
 
 $fileScript = Join-Path $localInventory 'SmartM365-SharePointSource-FileInventory.ps1'
@@ -266,6 +317,10 @@ try {
     Copy-SourceScript -RelativePath 'Scripts\Inventory\SmartM365-SharePointSource-FileInventory.ps1' -Destination $fileScript
     Copy-SourceScript -RelativePath 'Scripts\Inventory\SmartM365-SharePointSource-PermissionInventory.ps1' -Destination $permissionScript
     Copy-SourceScript -RelativePath 'Scripts\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1' -Destination (Join-Path $localLaunchers 'SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+    $manifestScript = Join-Path $localCompare 'scan_evidence.py'
+    Copy-VerifiedDependency -RelativePath 'Scripts\Compare\scan_evidence.py' -Destination $manifestScript
+    Copy-VerifiedDependency -RelativePath 'Scripts\console_lifecycle.py' -Destination (Join-Path $localRoot 'console_lifecycle.py')
+    $python = Get-PythonCommand -LocalRoot $localRoot
     foreach ($action in $actions) {
         Write-BatchLine ("Starting phase: {0}" -f $action)
         foreach ($migration in $migrations) {
@@ -314,8 +369,13 @@ try {
                 $code = 1
             }
             if ($code -eq 0) {
-                $manifestOutput = & $python.Executable @($python.Arguments) $manifestScript --csv $outputPath --side Source --kind $kind --scope $urlsFile 2>&1
-                $manifestExit = $LASTEXITCODE
+                $previousPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    $manifestOutput = & $python.Executable @($python.Arguments) $manifestScript --csv $outputPath --side Source --kind $kind --scope $urlsFile 2>&1
+                    $manifestExit = $LASTEXITCODE
+                }
+                finally { $ErrorActionPreference = $previousPreference }
                 foreach ($line in @($manifestOutput)) { Write-BatchLine ([string]$line) }
                 if ($manifestExit -ne 0 -or -not (Test-Path -LiteralPath "$outputPath.manifest.json.txt" -PathType Leaf)) {
                     Write-BatchLine ("Scan manifest was not published: {0}.manifest.json.txt" -f $outputPath)
@@ -353,8 +413,8 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCy1Mne2FroPELI
-# bdou55YVxckQpAkvQi8P9U4D0XQzD6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1OQKIM8uF2zdh
+# eB9Dcx6LLwJEREje2BESEqXrkj6f6aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -384,14 +444,14 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBmXgoUdDBO/+Uv/0PmLs9w
-# 3NtfUGNXj3p8LrfOhfS7MDANBgkqhkiG9w0BAQEFAASCAYCIt7ZAs/eI9xEdq0pX
-# I15nJXFCOqTYqvUgnomPegbVO0xoQddoLpPahnV5xBEGa1Uvhyk5YSTL5tONGjwk
-# 41XvsogOzJQd2LzH4hjWY3vqMI2e3l0B7PSyr+ufQR2fjKmhSTkNb+sUHSPpoXEh
-# ClzWjE1Qy/UmTJUNMm7MkxedXnVgsR7Laf++9FjLSR1KnZFYz+VX+xx1QqMHd3w5
-# 4wHaOwNTZV4tSQeuaQQ2xtbp1VENUijw3TFsUsFXiiVmom0LKVf+QV0MXV48I3gY
-# U7Ha0hP1OMPGrifpdyln0NKVhsh6B7yzK0BNlBG80vZUA3Q6+ySFN/spIDSnLEfd
-# rizeeFXbIiUivbrapSHpIjX++2HqR53Rl9uKs5CBjdASDh89OOxRQAMR5azcl9L6
-# n7XSkTsAqmSHhBONT1WDFTd/VF6h9/X/6z9VtfrG9ZgD6rC0bURs3wx/q9AK1o+L
-# tDa1836VZkjVvH/MNP26iJ9AlbhSjkOO5y5uJepA65sdv84=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDqMxRJGwAG8kxd6ITceluc
+# B3z3OPbh8K34MaWO1QROBjANBgkqhkiG9w0BAQEFAASCAYCWYDBLZGRFldq4a+d7
+# +wH+NIHZ0cIRTY4t+x/rpE0kuGn8SNJaWaOkhaGOgstebEXIKI95H9b/2W8H4zqJ
+# hE75MiwpasGmFT1rqUQd12vdv1O+41fxko0ykjLyh8QVOxOso2MegRYcpdNYMSNg
+# xGAApHv5OIiJ88kh18KGtVP5G3PPWrtcUg+vG1cjK85X4C1s0D0zcd5vjfZewTH4
+# /sc0qZ0pVUJiSKQFkLHSP+ZWyvX2Y40uEH+vrvnq5zeV2/uXXRR7M4irTnZ73YLe
+# Z2fThqpfa0TtsIW7DWIkecoWCLSts2Y9of5S871miibpDVnrnzF9XVaodn4DcGSL
+# qo8/jgRr8SuBAI8BYk+x1OEDWge40BxTikqr2CdEyGUWXwbxEC0Q67SE/bYqBVeR
+# pPHjR2gTLmignGQssat5zZd3z0yHbQEH0s6OvUKUHXk44YJqSYePXIl1nQUtmZ23
+# Dx5K0yyqlw2fC3u4DBNNTPSLEXU24TUqItilNxSBJ/Dj3BA=
 # SIG # End signature block

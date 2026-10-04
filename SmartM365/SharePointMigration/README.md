@@ -269,10 +269,12 @@ to avoid concurrent farm load. Use `-MigrationNames SiteA,SiteB`
 for a subset, or `-InventoryMode FilesOnly` / `PermissionsOnly` for one kind.
 If the wrapper is copied outside the project, pass `-ProjectRoot` pointing to
 the shared `SmartM365/SharePointMigration` folder. It copies signed source
-scripts unchanged to a unique folder under the farm server's local temp
-directory; it never edits the repository scripts at run time. A configured
-`Source.UrlsFile` or `Comparison.PathMappingsFile` is required for every
-selected migration, preventing an unintended whole-web-application scan.
+scripts, the manifest helper, and the portable Python runtime when present to
+a unique folder under the farm server's local temp directory before scanning;
+it never runs those dependencies from the share or edits the repository scripts.
+A configured `Source.UrlsFile` or `Comparison.PathMappingsFile` is required
+for every selected migration, preventing an unintended whole-web-application
+scan.
 
 The batch keeps `batch.log` and `summary.csv` in
 `Migrations/logs/source-scan-batches/<batch-id>/`, plus each scan's own log,
