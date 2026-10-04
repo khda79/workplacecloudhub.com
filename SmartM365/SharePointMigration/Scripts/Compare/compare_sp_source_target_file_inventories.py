@@ -1,6 +1,7 @@
 __version__ = "1.0.0"
 import argparse
 import builtins
+from collections import defaultdict
 import csv
 import html
 import json
@@ -41,6 +42,7 @@ def print(*args, **kwargs):
         args = (f"{timestamp} {args[0]}", *args[1:])
     else:
         args = (timestamp,)
+    kwargs.setdefault("flush", True)
     builtins.print(*args, **kwargs)
 
 
@@ -1149,12 +1151,22 @@ def target_candidate_score(source_record, target_record):
     return score
 
 
-def best_target_candidate(source_record, target_records, predicate):
-    candidates = [record for record in target_records if predicate(record)]
+def best_target_candidate(source_record, target_records):
+    candidates = list(target_records)
     if not candidates:
         return [], None
     candidates.sort(key=lambda record: (-target_candidate_score(source_record, record), str(record.get("ServerRelativeUrl") or "").lower()))
     return candidates, candidates[0]
+
+
+def build_target_candidate_indexes(target_records):
+    by_version = defaultdict(list)
+    by_modified = defaultdict(list)
+    for record in target_records:
+        name_and_size = (normalized_text(record.get("FileName")), as_int(record.get("SizeBytes")))
+        by_version[(*name_and_size, normalize_version(record.get("Version")))].append(record)
+        by_modified[(*name_and_size, normalized_text(record.get("Modified")))].append(record)
+    return by_version, by_modified
 
 
 def missing_diagnostic_row(source_record, category, signal, action_hint, candidates=None, candidate=None):
@@ -1183,7 +1195,7 @@ def missing_diagnostic_row(source_record, category, signal, action_hint, candida
     }
 
 
-def missing_diagnostics(source_record, missing_details, target_path_records, target_records):
+def missing_diagnostics(source_record, missing_details, target_path_records, target_candidate_indexes):
     rows = []
     reason = missing_details.get("MissingReason")
     if reason == "VersionMismatch":
@@ -1211,12 +1223,9 @@ def missing_diagnostics(source_record, missing_details, target_path_records, tar
         source_size = as_int(source_record.get("SizeBytes"))
         source_version = normalize_version(source_record.get("Version"))
         source_modified = normalized_text(source_record.get("Modified"))
+        by_version, by_modified = target_candidate_indexes
         candidates, candidate = best_target_candidate(
-            source_record,
-            target_records,
-            lambda record: normalized_text(record.get("FileName")) == source_name
-            and as_int(record.get("SizeBytes")) == source_size
-            and normalize_version(record.get("Version")) == source_version,
+            source_record, by_version.get((source_name, source_size, source_version), ())
         )
         if candidates:
             rows.append(
@@ -1231,11 +1240,7 @@ def missing_diagnostics(source_record, missing_details, target_path_records, tar
             )
 
         candidates, candidate = best_target_candidate(
-            source_record,
-            target_records,
-            lambda record: normalized_text(record.get("FileName")) == source_name
-            and as_int(record.get("SizeBytes")) == source_size
-            and normalized_text(record.get("Modified")) == source_modified,
+            source_record, by_modified.get((source_name, source_size, source_modified), ())
         )
         if candidates:
             rows.append(
@@ -1409,6 +1414,8 @@ def main():
         with source_csv.open("r", encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle, dialect=detect_csv_dialect(handle)):
                 source_total_rows += 1
+                if source_total_rows % 10000 == 0:
+                    print(f"Source rows indexed: {source_total_rows}")
                 if not web_is_in_scope(inventory_web_key(row, args.source_prefix, mappings=path_mappings), source_allowed_webs):
                     source_filtered_rows += 1
                     continue
@@ -1495,6 +1502,8 @@ def main():
 
             for row in csv.DictReader(target_handle, dialect=detect_csv_dialect(target_handle)):
                 target_total_rows += 1
+                if target_total_rows % 10000 == 0:
+                    print(f"Target rows compared: {target_total_rows}")
                 if not web_is_in_scope(inventory_web_key(row, args.target_prefix), target_allowed_webs):
                     target_filtered_rows += 1
                     continue
@@ -1749,6 +1758,7 @@ def main():
     print("Finding source files missing from target...")
     missing = 0
     missing_diagnostic_count = 0
+    target_candidate_indexes = build_target_candidate_indexes(target_records)
     with missing_path.open("w", encoding="utf-8", newline="") as missing_handle, missing_diagnostics_path.open(
         "w", encoding="utf-8", newline=""
     ) as missing_diagnostics_handle:
@@ -1760,7 +1770,9 @@ def main():
         )
         missing_writer.writeheader()
         missing_diagnostics_writer.writeheader()
-        for key, record in source_index.items():
+        for checked, (key, record) in enumerate(source_index.items(), start=1):
+            if checked % 10000 == 0:
+                print(f"Source keys checked for missing files: {checked}/{len(source_index)}")
             if key not in target_valid_seen:
                 missing += 1
                 lib_key = record.get("LibraryKey") or ""
@@ -1772,7 +1784,7 @@ def main():
                 missing_row = dict(record)
                 missing_row.update(missing_details)
                 missing_writer.writerow(missing_row)
-                for diagnostic_row in missing_diagnostics(record, missing_details, target_path_records, target_records):
+                for diagnostic_row in missing_diagnostics(record, missing_details, target_path_records, target_candidate_indexes):
                     missing_diagnostics_writer.writerow(diagnostic_row)
                     missing_diagnostic_count += 1
 

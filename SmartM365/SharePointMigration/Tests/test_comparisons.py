@@ -58,6 +58,27 @@ class MappingTests(unittest.TestCase):
 
 
 class FileComparisonTests(unittest.TestCase):
+    def test_missing_diagnostics_uses_matching_target_candidates(self):
+        source = {'FileName': 'report.docx', 'SizeBytes': '100', 'Version': '2.0',
+                  'Modified': '2026-10-03 12:00:00', 'LibraryTitle': 'Docs'}
+        target = [
+            {'FileName': 'report.docx', 'SizeBytes': '100', 'Version': '2.0',
+             'Modified': '2026-10-02 12:00:00', 'LibraryTitle': 'Docs', 'ServerRelativeUrl': '/b/report.docx'},
+            {'FileName': 'report.docx', 'SizeBytes': '100', 'Version': '2.0',
+             'Modified': '2026-10-01 12:00:00', 'LibraryTitle': 'Other', 'ServerRelativeUrl': '/a/report.docx'},
+            {'FileName': 'report.docx', 'SizeBytes': '100', 'Version': '1.0',
+             'Modified': '2026-10-03 12:00:00', 'LibraryTitle': 'Docs', 'ServerRelativeUrl': '/c/report.docx'},
+            {'FileName': 'unrelated.docx', 'SizeBytes': '100', 'Version': '2.0',
+             'Modified': '2026-10-03 12:00:00', 'LibraryTitle': 'Docs', 'ServerRelativeUrl': '/d/unrelated.docx'},
+        ]
+        indexes = FILES.build_target_candidate_indexes(target)
+        rows = FILES.missing_diagnostics(source, {'MissingReason': 'FileAbsent'}, [], indexes)
+        self.assertEqual([row['DiagnosticCategory'] for row in rows],
+                         ['PossibleRelocatedInTarget', 'PossibleSameContentDifferentVersion'])
+        self.assertEqual([row['TargetCandidateCount'] for row in rows], [2, 1])
+        self.assertEqual([row['TargetCandidateServerRelativeUrl'] for row in rows],
+                         ['/b/report.docx', '/c/report.docx'])
+
     def test_root_scope_includes_descendants_but_not_sibling_prefix(self):
         roots = {'https://example.com/sites/bu'}
         self.assertTrue(FILES.web_is_in_scope('https://example.com/sites/bu', roots))
