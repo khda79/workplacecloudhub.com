@@ -39,7 +39,7 @@
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
 
 .VERSION
-    1.0.5
+    1.0.7
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -603,31 +603,27 @@ function Get-DocumentLibraries {
     }
 }
 
-function Get-FileInventoryFromLibrary {
+function Invoke-FileInventoryItems {
     param(
         $Connection,
-        [string]$SiteCollectionUrl,
-        $Web,
         $Library,
-        [int]$BatchSize
+        [int]$LastItemId,
+        [int]$BatchSize,
+        [switch]$SimplePaging
     )
 
-    $lastItemId = 0
-    $itemsScanned = 0
-    $filesReturned = 0
-    $useSimplePagingFallback = $false
+    if ($SimplePaging) {
+        Get-PnPListItem `
+            -List $Library `
+            -PageSize $BatchSize `
+            -Fields 'ID', 'FSObjType', 'FileLeafRef', 'FileRef', 'UniqueId', 'File_x0020_Size', 'Created', 'Author', 'Modified', 'Editor', 'ContentType', '_UIVersionString', 'CheckoutUser' `
+            -IncludeContentType `
+            -Connection $Connection `
+            -ErrorAction Stop
+        return
+    }
 
-    do {
-        if ($useSimplePagingFallback) {
-            $items = @(Get-PnPListItem `
-                    -List $Library `
-                    -PageSize $BatchSize `
-                    -Fields 'ID', 'FSObjType', 'FileLeafRef', 'FileRef', 'UniqueId', 'File_x0020_Size', 'Created', 'Author', 'Modified', 'Editor', 'ContentType', '_UIVersionString', 'CheckoutUser' `
-                    -IncludeContentType `
-                    -Connection $Connection)
-        }
-        else {
-            $query = @"
+    $query = @"
 <View Scope='RecursiveAll'>
   <ViewFields>
     <FieldRef Name='ID' />
@@ -648,7 +644,7 @@ function Get-FileInventoryFromLibrary {
     <Where>
       <Gt>
         <FieldRef Name='ID' />
-        <Value Type='Counter'>$lastItemId</Value>
+        <Value Type='Counter'>$LastItemId</Value>
       </Gt>
     </Where>
     <OrderBy Override='TRUE'>
@@ -658,29 +654,42 @@ function Get-FileInventoryFromLibrary {
   <RowLimit Paged='TRUE'>$BatchSize</RowLimit>
 </View>
 "@
+    Get-PnPListItem -List $Library -Query $query -PageSize $BatchSize -IncludeContentType -Connection $Connection -ErrorAction Stop
+}
 
-            $items = @(Get-PnPListItem -List $Library -Query $query -PageSize $BatchSize -IncludeContentType -Connection $Connection)
-            if ($items.Count -eq 0 -and $lastItemId -eq 0 -and $Library.ItemCount -gt 0) {
-                Write-Warning ("    ID CAML paging returned 0 items for non-empty library '{0}'. Retrying with simple PnP paging." -f $Library.Title)
-                $useSimplePagingFallback = $true
-                continue
-            }
-        }
+function Get-FileInventoryFromLibrary {
+    param(
+        $Connection,
+        [string]$SiteCollectionUrl,
+        $Web,
+        $Library,
+        [int]$BatchSize
+    )
 
-        if ($items.Count -eq 0) {
-            break
-        }
+    $lastItemId = 0
+    $itemsScanned = 0
+    $filesReturned = 0
+    $useSimplePagingFallback = $false
+    $effectiveBatchSize = $BatchSize
+    $timeoutsWithoutProgress = 0
 
-        foreach ($item in $items) {
-            if ($item.Id -gt $lastItemId) {
-                $lastItemId = $item.Id
-            }
+    while ($true) {
+        $startItemId = $lastItemId
+        $itemsThisAttempt = 0
+        try {
+            Invoke-FileInventoryItems -Connection $Connection -Library $Library `
+                -LastItemId $startItemId -BatchSize $effectiveBatchSize -SimplePaging:$useSimplePagingFallback |
+                ForEach-Object {
+                    $item = $_
+                    if ($item.Id -le $lastItemId) { return }
+                    $lastItemId = $item.Id
+                    $itemsThisAttempt++
 
             $values = $item.FieldValues
             $itemsScanned++
 
             if ($values.ContainsKey('FSObjType') -and [string]$values['FSObjType'] -ne '0') {
-                continue
+                return
             }
 
             $fileName = [string]$values['FileLeafRef']
@@ -688,7 +697,7 @@ function Get-FileInventoryFromLibrary {
             $fileSizeBytes = $null
 
             if ([string]::IsNullOrWhiteSpace($serverRelativeUrl)) {
-                continue
+                return
             }
 
             if ($values.ContainsKey('File_x0020_Size') -and $null -ne $values['File_x0020_Size']) {
@@ -720,15 +729,36 @@ function Get-FileInventoryFromLibrary {
                 VersionsCount     = $null
                 CheckedOutBy      = if ($values.ContainsKey('CheckoutUser')) { Convert-PnPFieldUserValueToString -Value $values['CheckoutUser'] } else { $null }
             }
-        }
-
-        if ($useSimplePagingFallback) {
+                }
+            if (-not $useSimplePagingFallback -and $itemsThisAttempt -eq 0 -and $startItemId -eq 0 -and $Library.ItemCount -gt 0) {
+                Write-Warning ("    ID CAML paging returned 0 items for non-empty library '{0}'. Retrying with simple PnP paging." -f $Library.Title)
+                $useSimplePagingFallback = $true
+                continue
+            }
             break
         }
+        catch {
+            if ($useSimplePagingFallback) { throw }
+            $messages = [System.Collections.Generic.List[string]]::new()
+            $exception = $_.Exception
+            while ($exception) {
+                $messages.Add($exception.Message)
+                $exception = $exception.InnerException
+            }
+            if (($messages -join ' | ') -notmatch 'HttpClient\.Timeout') { throw }
+            $timeoutsWithoutProgress = if ($lastItemId -gt $startItemId) { 1 } else { $timeoutsWithoutProgress + 1 }
+            if ($timeoutsWithoutProgress -ge 3) {
+                Write-Warning ("    PnP request for library '{0}' after item ID {1} timed out on 3 attempts without further progress." -f $Library.Title, $lastItemId)
+                throw
+            }
+            $effectiveBatchSize = [Math]::Min($effectiveBatchSize, $(if ($timeoutsWithoutProgress -eq 1) { 100 } else { 25 }))
+            $delay = if ($timeoutsWithoutProgress -eq 1) { 5 } else { 15 }
+            Write-Warning ("    PnP request for library '{0}' timed out after item ID {1} (attempt {2}/3 without further progress). Retrying in {3} s with page size {4}." -f $Library.Title, $lastItemId, $timeoutsWithoutProgress, $delay, $effectiveBatchSize)
+            Start-Sleep -Seconds $delay
+        }
     }
-    while ($items.Count -gt 0)
 
-    Write-Info -Color DarkGray -Message ("    Items scanned by ID paging: {0}; files exported: {1}" -f $itemsScanned, $filesReturned)
+    Write-Info -Color DarkGray -Message ("    Items scanned: {0}; files exported: {1}" -f $itemsScanned, $filesReturned)
 }
 
 function Get-ConnectedSiteCollectionUrl {
@@ -1316,8 +1346,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6HMXPCgEa6fd3
-# EfFuwOP/+L+KGfrBDDy6ygdz4dgK+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkmQ0MoDsVm3HN
+# db7oXAbiQaZik089NX7syUXBxrKhYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1450,31 +1480,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF/aaGq5Kkwj5Xk0B67bMGYaYW2pVtwRcxZS8Ear8oiFMA0GCSqG
-# SIb3DQEBAQUABIIBgDfKsOgtqaEiV0jjS2kMNP6GRV5i/DqEtJldJx9HvonhpUM9
-# tfDHfk5mewZONQX53tDh2+w/Fr5H0GFhvuyDmL6tDRB1HZjWBuQsvnvig6PGI+D1
-# iPHUDDAOeTYilESP5fjUOwCTJYfVdLkKwkO3F1Lx/AVifG/PNhbT6cinOmBCi7V7
-# izt8L7WMzc+iOypq5vntrQewlrQDZtgb2xRqWkGeqhWomv2ONhnX+/PWBEipYE/K
-# azM24VJoRww1aNwYq4vX4p0MFZo3IDpqCcFv4I4MoQsXek8I0FnIjMpe663ripEq
-# 02rUI6mMpjH0vRaVJl406AVKE6PHHgp4motiSs//rASSVTKWhOPjTBnhi1hawUE0
-# t2TcSl2/ZRBWK7/e11hK4YcGjeDrAsGKPU0G8TY20H659oTJrh+MZy5knY7cDdyS
-# UahYPhK5DdbwMAw9KVNe8qSZ3WrD9edtmID7b3hvwYKBJYYJ3YCm/nQVxqUpNh48
-# MSJDUFSDfDaTp6JK86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPT/cJQ3Ziiq8+k2vRfESxlggFaLuMgP0ppwrVGQN3fsMA0GCSqG
+# SIb3DQEBAQUABIIBgKmNvz7+g+ELmXlYeAXxLh/wy+JIOVHrNenUwbtbdhbAVDvX
+# Dcu1ZYpr88ZOvjK3OtGWE0OcHfFj4uOExoSuyp8ByuhbzZgltDViKqOMqIObGrdu
+# un/vxN8smkG+nLgVQEZtD4xm6H4Dv/TJYMd7I4mkNlVQ2abL9ZcXm1EpEt+HQmsy
+# +pOX6FmT97FJqxgLcLmybRUg/j4RIqGDOd6Z9qehqDWjwUIGE0i0vrEgADs1ArWJ
+# np77pgXqXcujDLzcLNCJyGe3aHSuEsJokP3EfvYQUMS7bc9SNCR23yBcp/8MXwVj
+# +BumeVQx4ynzGw2D1xTYWPtvKqifJrLeVliBfLNSdNjh4lqdXGpxr3LwsxdsVW/Z
+# npOzSWMHcbj2aqQKQ/fu1WGDqWbU1jRA1exwKuHc+w0ROoOWDyZAgh67OHssbOkL
+# aU0GyxiZjcgSuAfmYy4qOjNoX885zWLpu/2J1VgLywmh5BcIrrOEHdNF0Q8CSwcK
+# 58bBEPowNGg5QMCp2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxOTAz
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCenUK8f4Z7Hm48sD6WffUndApSWDlZsPKEZ1RC
-# m+YgjTANBgkqhkiG9w0BAQEFAASCAgClCnd51gXuAKTuxIujk2QXlx6LS3D9Kw27
-# 0c6tgtuOojTuaca9EG3sTsVDoLnpRPpJb7jez11qulk3Vwk/U8nW/CqjarWhW4Bz
-# 8ErS3N9rkHIPOHychoBJVPXFvARhyE0k4Sa88s44Ol1g4So0Ix8+OHVmibLv2VOo
-# s4QpO6sQRLnloxZNZ7e28/YkGP4W6UBEtecXEfYYWZWp5CQGub4OOtC5Nh1eNO5E
-# hJS5QcqDPCj+L4fnGKosCo2AdLn+wFYbu+RfIuOECFNJMMJ9vQmPPhaZOyBOs/pv
-# u1ExqvZB8LqCuEtf4oOpE8O92I1SPnQWUOoUi3Ob/qI70ia8WcBgjRfUZ2QiNBE9
-# CtdeW2deAYfclhVY2/NJfvvTdWfqU4h6p+lAOgTXceKiQPg//K4wVLqZp/q1nCMw
-# AOYgFd3lX5vWjA8dQ1pbDYob/aeZgsL9x12DCA+pDeL7tunJbn6+VUtg5Ze4RBjy
-# 9KsTS7La6MtxFPl/wv9uRM7GUyrOIc/yXrZVokuTu/pPIHWxOEh0QsaVdCT1o569
-# NQw/b2HP8qFf1GowpBxiA8zK+KBhpsxftftufmtLJx3q7F5P0wP4wDtje42XHx75
-# bsFN52FfOQtOtYiltSl22ia0Tu615DnLp7jwKqfyKE3wiU1/oHYpvloNu1YBPcpU
-# BCuWeZJiYQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMDA4
+# NTFaMC8GCSqGSIb3DQEJBDEiBCDs0G7HGkwltHtMVElYa5NQEFHx00RjiN335R1n
+# 8qaerzANBgkqhkiG9w0BAQEFAASCAgBpISaSwf6uIT5eJgNCn9x2OHm+tj+wgepq
+# es6AcL0k0M27DUYqWWd92BKvRUMdyvl45TbRQNWtknbrJj/iGY4dSbVdIN7zs1rf
+# wPFsoG87bW2O/HlAGngnPnzBChsXtJtT1+YUffQ8Ky2e4naUxE+1cmGRfOohR+MM
+# n4hPDIMYuKCEiy+JcKrCPwEelJ0Obzv1CzcLWahBPm9qghrS2lI3edXwsAPiR5Jv
+# bax3cjk8+v1C8tXtkHVqfzo+LxUZXeHXdzvJeKy253/wMvWR+pq+SPpRrIfjik0i
+# xyC8PECnYzg//Xgfx4HVBZCH91vKf4ZKS/iwhuiRJZWLI48Q3rU7lMrPG01jbjMb
+# dehyL+RvWXPtIud7SNJw36oDk9a2GM5XG11by4Ls76k4QPEGhiiHxWMpaixDX2Km
+# wOvXz4KZ5pcyr8iM6O46ZUwdSZBIKMFbllc65ioyq2VQgcxCzrDHeIMYutWmB6mS
+# p4AgfpEJDnMeK03vIxwMZ5etiJuU+1bqE6owflzGR4cFQBkol5okbJPFduh/I/fu
+# iZtw6eu1nrJfmqG190ZzYrnnaVF7+ivWgiCD6JG2WyGf9XN9jVY2khfOtExWAeFk
+# ECHGDFO70dxaDPco76SC+564KYePWpixEYPolCah7DhDXSGed6LYF+bMDxBh678U
+# 4IO/GnBtJw==
 # SIG # End signature block
