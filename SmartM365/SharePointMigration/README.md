@@ -232,23 +232,24 @@ permission scans for every configured SPO migration:
 .\Start-SmartM365-SharePointMigration-TargetScanBatch.cmd -PlanOnly
 ```
 
-Remove `-PlanOnly` to run the batch. The default `Interactive` authentication
-runs **one scan at a time** so sign-in prompts remain usable and scans do not
-compete for the same SPO session. It runs all target file scans first, then all
-target permission scans. To select or retry only some migrations, use
+Remove `-PlanOnly` to run the batch. Both `Interactive` (the default) and
+`Certificate` authentication run **at most two scans at a time**, with a
+15-second gap between process starts. Each interactive scan opens its own
+console; complete any requested sign-in in that window. It runs all target file
+scans first, then all target permission scans. To select or retry only some migrations, use
 `-MigrationNames SiteA,SiteB`; use `-InventoryMode FilesOnly` or
 `PermissionsOnly` to select one scan type.
 
 If the machine has a configured app certificate and the required SPO access,
-`-AuthMode Certificate` runs at most two scans concurrently, with a 15-second
-gap between process starts. `-MaxParallel 1` reduces this further. Interactive
-mode rejects values above one. This limit covers only this batch; stop other
-GUI, scheduled, or cross-machine scans before starting it. The batch continues
+use `-AuthMode Certificate` for background scans. `-MaxParallel 1` reduces
+concurrency in either mode; values above two are rejected. This limit covers only
+this batch; stop other GUI, scheduled, or cross-machine scans before starting it. The batch continues
 after individual scan failures and returns a nonzero exit code if any scan
 fails. Its global `batch.log` and `summary.csv` are in
 `Migrations/logs/target-scan-batches/<batch-id>/`; each launcher also keeps its
-own migration log. Check the per-scan error CSVs and manifests before using
-the inventories for comparisons.
+own migration log. Certificate scans also capture stdout and stderr in the batch
+directory; interactive output is shown in each scan console. Check the per-scan
+error CSVs and manifests before using the inventories for comparisons.
 
 ### Batch source scans on a SharePoint farm server
 

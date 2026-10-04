@@ -3,9 +3,12 @@
     Run destination inventories for configured SharePoint migrations.
 
 .DESCRIPTION
-    Runs target file scans first, then target permission scans. Interactive
-    authentication is sequential. Certificate authentication may run up to
-    two scans at once; the limit applies to the entire batch.
+    Runs target file scans first, then target permission scans. Both
+    authentication modes run up to two scans at once. Interactive scans
+    use separate visible consoles for sign-in. The limit applies to this batch.
+
+.VERSION
+    1.0.1
 
 .EXAMPLE
     pwsh -File .\SmartM365-SharePointMigration-TargetScanBatch.ps1 -PlanOnly
@@ -158,10 +161,7 @@ $LauncherPath = [System.IO.Path]::GetFullPath($LauncherPath)
 if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
     throw "Launcher not found: $LauncherPath"
 }
-$limit = if ($MaxParallel -gt 0) { $MaxParallel } elseif ($AuthMode -eq 'Certificate') { 2 } else { 1 }
-if ($AuthMode -eq 'Interactive' -and $limit -ne 1) {
-    throw 'Interactive authentication is limited to one scan at a time. Use -MaxParallel 1.'
-}
+$limit = if ($MaxParallel -gt 0) { $MaxParallel } else { 2 }
 
 Write-BatchLine ("Loading destination migration configurations from: {0}" -f (Join-Path $ProjectRoot 'Migrations'))
 $migrations = @(Get-BatchMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
@@ -197,18 +197,6 @@ $interrupted = $true
 try {
     foreach ($action in $actions) {
         Write-BatchLine ("Starting phase: {0}" -f $action)
-        if ($AuthMode -eq 'Interactive') {
-            foreach ($migration in $migrations) {
-                $job = [pscustomobject]@{ Migration = $migration.Name; Action = $action; Started = Get-Date }
-                Write-BatchLine ("START {0} {1}; complete the visible sign-in prompt if requested." -f $job.Migration, $action)
-                & $pwshCommand.Source -NoLogo -NoProfile -File $LauncherPath -MigrationName $job.Migration -Action $action
-                $code = $LASTEXITCODE
-                if ($null -eq $code) { $code = 1 }
-                Add-BatchResult -Job $job -Status $(if ($code -eq 0) { 'SUCCESS' } else { 'FAILED' }) -ExitCode $code
-            }
-            continue
-        }
-
         $pending = [System.Collections.Generic.Queue[object]]::new()
         foreach ($migration in $migrations) { $pending.Enqueue($migration) }
         $running = [System.Collections.Generic.List[object]]::new()
@@ -221,27 +209,39 @@ try {
                 $prefix = '{0}-{1}' -f $migration.Name, $action
                 $stdout = Join-Path $batchRoot "$prefix.stdout.log"
                 $stderr = Join-Path $batchRoot "$prefix.stderr.log"
-                $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', ('"{0}"' -f $LauncherPath),
-                    '-MigrationName', ('"{0}"' -f $migration.Name), '-Action', $action, '-UseCertificate')
+                $arguments = @('-NoLogo', '-NoProfile')
+                if ($AuthMode -eq 'Certificate') { $arguments += '-NonInteractive' }
+                $arguments += @('-File', ('"{0}"' -f $LauncherPath),
+                    '-MigrationName', ('"{0}"' -f $migration.Name), '-Action', $action)
+                if ($AuthMode -eq 'Certificate') { $arguments += '-UseCertificate' }
+                $outputLog = if ($AuthMode -eq 'Certificate') { $stdout } else { '' }
                 try {
                     $startParameters = @{
                         FilePath = $pwshCommand.Source
                         ArgumentList = $arguments
                         WorkingDirectory = $env:TEMP
-                        WindowStyle = 'Hidden'
                         PassThru = $true
-                        RedirectStandardOutput = $stdout
-                        RedirectStandardError = $stderr
+                    }
+                    if ($AuthMode -eq 'Certificate') {
+                        $startParameters.WindowStyle = 'Hidden'
+                        $startParameters.RedirectStandardOutput = $stdout
+                        $startParameters.RedirectStandardError = $stderr
+                    }
+                    else {
+                        $startParameters.WindowStyle = 'Normal'
                     }
                     $process = Start-Process @startParameters
-                    $running.Add([pscustomobject]@{ Job = $job; Process = $process; Output = $stdout })
-                    $script:ActiveProcesses.Add([pscustomobject]@{ Job = $job; Process = $process; Output = $stdout })
+                    $running.Add([pscustomobject]@{ Job = $job; Process = $process; Output = $outputLog })
+                    $script:ActiveProcesses.Add([pscustomobject]@{ Job = $job; Process = $process; Output = $outputLog })
                     $lastLaunch = Get-Date
                     Write-BatchLine ("START {0} {1}; PID {2}; active {3}/{4}" -f $job.Migration, $action, $process.Id, $running.Count, $limit)
+                    if ($AuthMode -eq 'Interactive') {
+                        Write-BatchLine ("Sign-in for {0}: complete the prompt in its scan window if requested." -f $job.Migration)
+                    }
                 }
                 catch {
                     Write-BatchLine ("FAILED to start {0} {1}: {2}" -f $job.Migration, $action, $_.Exception.Message)
-                    Add-BatchResult -Job $job -Status 'FAILED' -ExitCode 1 -OutputPath $stdout
+                    Add-BatchResult -Job $job -Status 'FAILED' -ExitCode 1 -OutputPath $outputLog
                 }
             }
 
@@ -288,8 +288,8 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7DBFppanwLO+O
-# mji3oE39sAntjuHJjly2h8sXXIVcxaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmgJSMfWhTefXw
+# dDjcsfBTQgtcEq6qC6Z2hShmbgAVFaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,14 +319,14 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDCom5vElsRZRxTEJxILPrP
-# mmqcTuLHrV0EjFtpiEauKzANBgkqhkiG9w0BAQEFAASCAYACCrmgNhGqNwaEB7tL
-# 2QJWi+oac/VNYAJYzTLZkXQvddMadDaRWijE6IdDAcLg2djrtFb7KIvyJTkWl7Zv
-# 0EwdU7tbvhxymtjBJjjOzlhdhkBjqXAx6VJYgMV8oGsK7q8LsqSPCgueTuu3x0On
-# NZixqJ9uA9dv8sKIs/E3eQTrGu7X3ugdJXTVVLDZNZR2aaRJpnutTMTPJrhQaHcF
-# FAQA7ytGiotBFAr1VkQEi+cvZWJLXKYDWOQiq0nfLyX7IOE4phu9Z0oZLNvj6J+P
-# 5VQrf1WnpDVFUApKYygkmCH8AwOJkmOzCOqkLCQHD0j6WUQMv1FJBdWcXjToE4Ba
-# cdRvAjA7TsGvqotmXvxYn18miTvr+CMUZBlc4YFfanVjKBLOVXXrWGmQiuQq+SNe
-# Fczy8yT5+zqNXUBt9V8/HSyhNml4iFwKJq809sbkgZ2rESYrkbsOxXbwfQ1S9NTv
-# XBIZLpA8gLcuLT3wnYUgkpZrDKqkcPsa/FTzU8nt9jzxWL0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCXOJ/K2h/eoqVbQjhvJr3y
+# OotIeffqfvuMFK3Q+zD7yjANBgkqhkiG9w0BAQEFAASCAYB3jsEuAK7TM+nTyEQK
+# Mu4OCd2t8ClZP3+HnJ2f9nZr5QHAezmRaZcdFHg3CHpdfxRL0oP6nWGVHGo5TRsn
+# QpSqb8JQUEXPMOhl28T/pu+HIcD8ZvIVTIJkvyQ4XXxoSkJFFjnQIGbqwaFZDN85
+# EeWE3bsiwPEzoGGmIgzPJFDZcwpR23DfUi2LXl4DwzQfJ2RG2Df7mNcZVOjUaxQY
+# WtLFzJCzQt9xtLMpQrrc6J2ltMUHv3ptiz5YH4yV3xueFs5urWM+h56duEKwaccQ
+# P7BGMt2ifIsZBlCpdrJm4+kN2q4ciKtu9gxDZH1dSik/gpnYncmaR94qAQlULWbY
+# Flr3kWKamC2VAy57TbzQeTmJfcch1r6Xbuk57MrbWR4yw2kOqTMEAQpKf438ENiH
+# dgbWJZ+zu4S2hvBCTkn3Ksy5YfhqVgyQW0vm5CaEZY/upZCiLpxLvOt82+iIPVHW
+# UfCK1OJjA+cO5auAHZzQSOfpM9ehzaqfSXskwzuh6Bk8ARE=
 # SIG # End signature block
