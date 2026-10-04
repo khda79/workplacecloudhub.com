@@ -16,7 +16,7 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
-from scan_evidence import describe_pair
+from scan_evidence import assert_inventory_complete, describe_pair
 
 
 def print(*args, **kwargs):
@@ -1760,6 +1760,8 @@ def main():
 
     source_csv = Path(args.source_csv)
     target_csv = Path(args.target_csv)
+    assert_inventory_complete(source_csv)
+    assert_inventory_complete(target_csv)
     output_dir = Path(args.output_directory)
     output_dir.mkdir(parents=True, exist_ok=True)
 

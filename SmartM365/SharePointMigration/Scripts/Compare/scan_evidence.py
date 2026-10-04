@@ -16,6 +16,13 @@ def manifest_path(csv_path):
     return Path(str(csv_path) + ".manifest.json.txt")
 
 
+def assert_inventory_complete(csv_path):
+    path = Path(csv_path)
+    error_path = path.with_name(path.stem + "-Errors.csv")
+    if error_path.is_file():
+        raise ValueError(f"Inventory has recorded errors and is incomplete: {error_path}")
+
+
 def inspect_csv(path):
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -32,6 +39,7 @@ def inspect_csv(path):
 
 def write_manifest(path, side, kind, scope):
     path = Path(path)
+    assert_inventory_complete(path)
     digest, rows = inspect_csv(path)
     scope_path = Path(scope)
     if scope_path.is_file():
@@ -62,6 +70,7 @@ def write_manifest(path, side, kind, scope):
 
 def read_scan_time(path):
     path = Path(path)
+    assert_inventory_complete(path)
     receipt = manifest_path(path)
     if receipt.is_file():
         data = json.loads(receipt.read_text(encoding="utf-8"))

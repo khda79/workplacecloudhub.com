@@ -33,6 +33,33 @@ EVIDENCE = load('scan_evidence')
 HTML = load('report_html')
 
 
+class InventoryCompletenessTests(unittest.TestCase):
+    def test_error_sidecar_blocks_manifest_and_permission_comparison(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'SP2019-PermissionInventory-example-20261004-120000.csv'
+            target = root / 'SPO-PermissionInventory-example-20261004-120000.csv'
+            for path in (source, target):
+                path.write_text('ObjectUrl;PrincipalName\n', encoding='utf-8')
+            EVIDENCE.write_manifest(source, 'Source', 'Permission', 'https://example.com/source')
+            EVIDENCE.write_manifest(target, 'Target', 'Permission', 'https://example.com/target')
+            error_path = target.with_name(target.stem + '-Errors.csv')
+            error_path.write_text('Scope;Message\nItem;Timed out\n', encoding='utf-8')
+
+            with self.assertRaisesRegex(ValueError, 'incomplete'):
+                EVIDENCE.read_scan_time(target)
+            with self.assertRaisesRegex(ValueError, 'incomplete'):
+                EVIDENCE.write_manifest(target, 'Target', 'Permission', 'https://example.com/target')
+
+            output = root / 'comparison'
+            run = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_permissions.py'),
+                '--source-csv', str(source), '--target-csv', str(target), '--output-directory', str(output),
+                '--entra-users-csv', str(root / 'unused.csv')], capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('incomplete', run.stdout + run.stderr)
+            self.assertFalse(output.exists())
+
+
 class MappingTests(unittest.TestCase):
     def test_invalid_mappings_fail_in_both_engines(self):
         with tempfile.TemporaryDirectory() as directory:

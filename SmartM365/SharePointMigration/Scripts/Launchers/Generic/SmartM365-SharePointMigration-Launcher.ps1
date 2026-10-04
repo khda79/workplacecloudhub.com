@@ -499,6 +499,10 @@ function Assert-CsvScanAgeDifference {
 function Get-CsvScanEvidence {
     param([Parameter(Mandatory = $true)][string]$CsvPath)
     $item = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+    $errorPath = Join-Path -Path $item.DirectoryName -ChildPath ("{0}-Errors.csv" -f $item.BaseName)
+    if (Test-Path -LiteralPath $errorPath -PathType Leaf) {
+        throw "Inventory has recorded errors and is incomplete: $errorPath"
+    }
     $manifestPath = "$CsvPath.manifest.json.txt"
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -541,6 +545,11 @@ function Write-CsvScanManifest {
     param([string]$CsvPath, [string]$Side, [string]$Kind, [string]$Scope)
     if (-not (Test-Path -LiteralPath $CsvPath -PathType Leaf)) {
         throw "Inventory did not publish its final CSV: $CsvPath"
+    }
+    $csvItem = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+    $errorPath = Join-Path -Path $csvItem.DirectoryName -ChildPath ("{0}-Errors.csv" -f $csvItem.BaseName)
+    if (Test-Path -LiteralPath $errorPath -PathType Leaf) {
+        throw "Inventory has recorded errors; scan manifest was not published: $errorPath"
     }
     $python = Get-PythonCommand
     $helper = Join-Path $ProjectRoot 'Scripts\Compare\scan_evidence.py'
@@ -1290,6 +1299,7 @@ function Invoke-PermissionHistoryComparison {
             [IO.Path]::GetFileName($full) -like '*-Errors.csv') {
             throw "Selected permission scan is outside the $Side inventory or has an unexpected name: $path"
         }
+        Get-CsvScanEvidence -CsvPath $full | Out-Null
     }
     if ([string]::Equals([IO.Path]::GetFullPath($older), [IO.Path]::GetFullPath($newer),
             [StringComparison]::OrdinalIgnoreCase)) {
@@ -1376,8 +1386,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2pUgqjcvGSfsr
-# FwWIQ5+VFmXxxGsDkRPlOJAZNbWSvqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBABwt0az+uWuIB
+# UgO3cFeaNX6qEqyj8QrFUM0N6nJ4xKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1407,14 +1417,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBChEdMqngtO4fzohV+BwRe
-# 48Hsx+Nrb7Xlu5us18PBtTANBgkqhkiG9w0BAQEFAASCAYAaxjF6C2RIf+z1kztC
-# aOM+wlaefn+x6HbF/OMemHy3qxY3/lyHgx5CNySsuIgxTB3EH3Erib8hOJ8WGBlK
-# 35jrupSKXBQWllx3hOOUkIVbd3Bo3nWMug3sZ+qsk4eygpsgnFaTBR9ur6iL6Hk/
-# oKIxCTjG+wmoYNpwvxIA+Ojmg1b48EOcSDViPAxDf7ZHzze18x1Dpt6dRYXZyJ+E
-# jxXZJP2SRNFLC/Tbd31Q+fNV8UBkVJJqAnv3h2pZABV5GwfBC3AdYSg8uAZISpaI
-# mps8sbkOyBlNi1fg7VaZhRNPCAxmf1ZzOqqfEhwyTyKhrniQps48VNlZbzNQr72G
-# gGU8veK/9noR1kZK3v30B07tTJ0yxXPBig8U9XR6XJzdV8VazKIsYCO5MyQm8toE
-# mL383NGGIOtAuNumBstEiBjUjzL6mA8zrq4bW6j4H4zEqNOJZJXK0AoU7PD68+kt
-# uTSrpwssQVaUGJoYQHFAS/93tOVXHUCouc+3JVd90aptIBc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAsgXZHL7AT/erOmc+JFw84
+# viONNcJo94smfZAA9izKyDANBgkqhkiG9w0BAQEFAASCAYBeNi95lbe4UGoXq+ow
+# ml79dxhyW2clSfa+Q3SfXggh3gXN2x3E+C4tHaE7+32ANE+nTdT9ifAk7P1Ki3qv
+# 5VP1eNOfmRDv6MP/MzFMwoA9fHEBPmpHk/Fwkeebhkp9lOx0na/r/Levbx1mIv9L
+# 9VTjfLVCf+qpxRGHW+QrPzgEOa+dcGT05+UuJi2BXn2ajKFUhT+uEAh9dYL/D+0A
+# mxO30/5QQBsF4lFGJCrqt/VubwBNcvE963n8d8KlDvUGIXoRBE8rtRJN02+qzlnd
+# UyqA+5mQa8g96499CziJNX64zTcrIinXqm8JgY8OIVoIpaaKf0GqRTVJMekX+8m3
+# 0jXPnQYGgiwrDdZw9WZmZZKSlrXqI7N5Ws3qTHyATH1qfhEbM3cNN7+QlLsMJsPt
+# 2i5yEtLR3dWasQvRSZPGfDfHZMvYrOw7OyRCmkssPqWlBLy9iWGV2ec96xUJIC0C
+# N2FDUSta/PpasZlXakBrls40fL5ZabsxhsfYq5wYUfTpFNM=
 # SIG # End signature block
