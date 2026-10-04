@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.45
+    1.0.48
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.45'
+$script:AppVersion = '1.0.48'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -508,7 +508,7 @@ function Open-InExplorer {
                      FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
           <Grid Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/>
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0" Style="{StaticResource StepCard}" Margin="0,0,5,0" Background="#EFF7FF">
               <StackPanel>
@@ -545,12 +545,23 @@ function Open-InExplorer {
                 <TextBlock Text="Source: overview refresh" FontSize="10" Foreground="#5F6B7A"/>
               </StackPanel>
             </Border>
+            <Border Grid.Column="5" Style="{StaticResource StepCard}" Margin="10,0,0,0">
+              <StackPanel>
+                <TextBlock Text="GLOBAL REPORTS" Style="{StaticResource SectionLabel}"/>
+                <Button x:Name="btnOverviewGlobalFileReport" Content="Global file comparison report"
+                        ToolTip="Generate HTML, Excel and CSV reports for the latest file comparisons"
+                        Style="{StaticResource Btn}" FontSize="11" Padding="6,0" HorizontalAlignment="Stretch" Height="28" Margin="0,2,0,5"/>
+                <Button x:Name="btnOverviewGlobalPermissionsReport" Content="Global permissions comparison report"
+                        ToolTip="Generate HTML, Excel and CSV reports for the latest permissions comparisons"
+                        Style="{StaticResource Btn}" FontSize="11" Padding="6,0" HorizontalAlignment="Stretch" Height="28"/>
+              </StackPanel>
+            </Border>
           </Grid>
           <Border Style="{StaticResource StepCard}" Padding="0">
             <DataGrid x:Name="gridSummary" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
                       SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
-                      GridLinesVisibility="None" RowHeight="42" ColumnHeaderHeight="40"
+                      GridLinesVisibility="None" RowHeight="56" ColumnHeaderHeight="40"
                       AlternatingRowBackground="#F5F8FB" Background="White"
                       BorderThickness="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
@@ -575,6 +586,11 @@ function Open-InExplorer {
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding SourceScansTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
+                <DataGridTextColumn Header="Source inventory" Binding="{Binding SourceInventoryDisplay}" Width="175">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding SourceInventoryTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="255">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock">
@@ -586,6 +602,11 @@ function Open-InExplorer {
                 <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="145" SortMemberPath="TargetScansSortDate">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding TargetScansTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Target inventory" Binding="{Binding TargetInventoryDisplay}" Width="175">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding TargetInventoryTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="Gap (days)" Binding="{Binding ScanGapText}" Width="85" SortMemberPath="ScanGapDays">
@@ -963,6 +984,41 @@ function Open-InExplorer {
                 <TextBlock x:Name="lblDiagProgress" Text="Select a migration report folder or a CSV/XLSX file." Foreground="#5F6B7A" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
               </StackPanel>
             </Border>
+            <Border Style="{StaticResource StepCard}" Margin="0,3,0,0">
+              <StackPanel>
+                <TextBlock Text="REPORT STATUS" Style="{StaticResource SectionLabel}"/>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Background="#EFF7FF" BorderBrush="#C9E3FA" Margin="0,0,4,0">
+                    <StackPanel>
+                      <TextBlock Text="SHAREGATE REPORT" Style="{StaticResource DiagMetricLabel}"/>
+                      <TextBlock x:Name="lblDiagReportState" Text="Waiting" FontSize="15" FontWeight="SemiBold" Foreground="#17324D"/>
+                      <TextBlock x:Name="lblDiagReportEvidence" Text="Select a migration" FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="1" Style="{StaticResource DiagMetricTile}" Background="#F0FBF8" BorderBrush="#C9EADF" Margin="4,0,4,0">
+                    <StackPanel>
+                      <TextBlock Text="ANALYSIS" Style="{StaticResource DiagMetricLabel}"/>
+                      <TextBlock x:Name="lblDiagAnalysisState" Text="Waiting" FontSize="15" FontWeight="SemiBold" Foreground="#17324D"/>
+                      <TextBlock x:Name="lblDiagAnalysisEvidence" Text="No result loaded" FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="2" Style="{StaticResource DiagMetricTile}" Background="#F5F8FB" BorderBrush="#DDE7F0" Margin="4,0,0,0">
+                    <StackPanel>
+                      <TextBlock Text="HTML REPORT" Style="{StaticResource DiagMetricLabel}"/>
+                      <TextBlock x:Name="lblDiagHtmlState" Text="Waiting" FontSize="15" FontWeight="SemiBold" Foreground="#17324D"/>
+                      <TextBlock x:Name="lblDiagHtmlEvidence" Text="No report loaded" FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                </Grid>
+                <Border Background="#F5F8FB" CornerRadius="6" Padding="9,7" Margin="0,9,0,0">
+                  <StackPanel>
+                    <TextBlock Text="NEXT ACTION" Style="{StaticResource DiagMetricLabel}" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="lblDiagNextAction" Text="Select a migration to inspect its report." FontSize="11" Foreground="#17324D" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Border>
           </StackPanel>
           <Border x:Name="cardDiagSummary" Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource StepCard}" Margin="0,0,0,14">
             <StackPanel>
@@ -1023,6 +1079,35 @@ function Open-InExplorer {
                 </Border>
               </Grid>
               <TextBlock Text="Independent measures; percentages use different denominators." FontSize="10" Foreground="#5F6B7A" Margin="0,8,0,0"/>
+              <TextBlock Text="LATEST FILE INVENTORIES" Style="{StaticResource SectionLabel}" Margin="0,12,0,6"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Background="#EFF7FF" BorderBrush="#C9E3FA" Margin="0,0,5,0">
+                  <StackPanel>
+                    <TextBlock Text="SOURCE" Style="{StaticResource DiagMetricLabel}" FontWeight="SemiBold"/>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0"><TextBlock Text="FILES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagSourceFiles" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                      <StackPanel Grid.Column="1"><TextBlock Text="FOLDERS WITH FILES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagSourceFolders" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                      <StackPanel Grid.Column="2"><TextBlock Text="FILE VOLUME" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagSourceVolume" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="lblDiagSourceInventoryEvidence" Text="Waiting for the latest source scan" FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                  </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource DiagMetricTile}" Background="#F0FBF8" BorderBrush="#C9EADF" Margin="5,0,0,0">
+                  <StackPanel>
+                    <TextBlock Text="DESTINATION" Style="{StaticResource DiagMetricLabel}" FontWeight="SemiBold"/>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0"><TextBlock Text="FILES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagTargetFiles" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                      <StackPanel Grid.Column="1"><TextBlock Text="FOLDERS WITH FILES" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagTargetFolders" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                      <StackPanel Grid.Column="2"><TextBlock Text="FILE VOLUME" Style="{StaticResource DiagMetricLabel}"/><TextBlock x:Name="lblDiagTargetVolume" Text="—" Style="{StaticResource DiagMetricValue}"/></StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="lblDiagTargetInventoryEvidence" Text="Waiting for the latest destination scan" FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                  </StackPanel>
+                </Border>
+              </Grid>
+              <TextBlock Text="Folders are derived from file paths; empty folders are excluded. File volume sums current SizeBytes only (versions and recycle bin excluded)." FontSize="10" Foreground="#5F6B7A" TextWrapping="Wrap" Margin="0,7,0,0"/>
             </StackPanel>
           </Border>
           <Border Grid.Row="2" Grid.Column="1" Background="#DDE7F0" Margin="0,0,0,14"/>
@@ -1474,6 +1559,13 @@ $cardDiagSummary = ctrl 'cardDiagSummary'
 $cardTransient = ctrl 'cardTransient'
 $panelDiagReview = ctrl 'panelDiagReview'
 $lblDiagProgress = ctrl 'lblDiagProgress'
+$lblDiagReportState = ctrl 'lblDiagReportState'
+$lblDiagReportEvidence = ctrl 'lblDiagReportEvidence'
+$lblDiagAnalysisState = ctrl 'lblDiagAnalysisState'
+$lblDiagAnalysisEvidence = ctrl 'lblDiagAnalysisEvidence'
+$lblDiagHtmlState = ctrl 'lblDiagHtmlState'
+$lblDiagHtmlEvidence = ctrl 'lblDiagHtmlEvidence'
+$lblDiagNextAction = ctrl 'lblDiagNextAction'
 $lblDiagKpis = ctrl 'lblDiagKpis'
 $panelDiagMetrics = ctrl 'panelDiagMetrics'
 $lblDiagLines = ctrl 'lblDiagLines'
@@ -1496,6 +1588,14 @@ $lblSummaryPermissionsValue = ctrl 'lblSummaryPermissionsValue'
 $lblSummaryPermissionsDetail = ctrl 'lblSummaryPermissionsDetail'
 $lblSummaryCrossCheckValue = ctrl 'lblSummaryCrossCheckValue'
 $lblSummaryCrossCheckDetail = ctrl 'lblSummaryCrossCheckDetail'
+$lblDiagSourceFiles = ctrl 'lblDiagSourceFiles'
+$lblDiagSourceFolders = ctrl 'lblDiagSourceFolders'
+$lblDiagSourceVolume = ctrl 'lblDiagSourceVolume'
+$lblDiagSourceInventoryEvidence = ctrl 'lblDiagSourceInventoryEvidence'
+$lblDiagTargetFiles = ctrl 'lblDiagTargetFiles'
+$lblDiagTargetFolders = ctrl 'lblDiagTargetFolders'
+$lblDiagTargetVolume = ctrl 'lblDiagTargetVolume'
+$lblDiagTargetInventoryEvidence = ctrl 'lblDiagTargetInventoryEvidence'
 $gridCrossCheckEvidence = ctrl 'gridCrossCheckEvidence'
 $gridCrossCheckScopes = ctrl 'gridCrossCheckScopes'
 $lblCrossCheckStatus = ctrl 'lblCrossCheckStatus'
@@ -1541,6 +1641,8 @@ $btnRefreshLogs= ctrl 'btnRefreshLogs'
 $btnOpenRunLog = ctrl 'btnOpenRunLog'
 $btnGlobalFileReport = ctrl 'btnGlobalFileReport'
 $btnGlobalPermissionsReport = ctrl 'btnGlobalPermissionsReport'
+$btnOverviewGlobalFileReport = ctrl 'btnOverviewGlobalFileReport'
+$btnOverviewGlobalPermissionsReport = ctrl 'btnOverviewGlobalPermissionsReport'
 
 # Config
 $lblConfigPath = ctrl 'lblConfigPath'
@@ -2202,6 +2304,88 @@ function Invoke-ActivityLogRetention {
     }
 }
 
+function Format-FileInventoryVolume {
+    param([long]$Bytes)
+    if ($Bytes -ge 1TB) { return '{0:N2} TiB' -f ($Bytes / 1TB) }
+    if ($Bytes -ge 1GB) { return '{0:N2} GiB' -f ($Bytes / 1GB) }
+    if ($Bytes -ge 1MB) { return '{0:N1} MiB' -f ($Bytes / 1MB) }
+    if ($Bytes -ge 1KB) { return '{0:N1} KiB' -f ($Bytes / 1KB) }
+    return '{0:N0} B' -f $Bytes
+}
+
+function Get-FileInventoryMetricPresentation {
+    param($Scan)
+    if (-not $Scan -or -not $Scan.File) {
+        return [pscustomobject]@{ Files='—'; Folders='—'; Volume='—'; Table='—'; Evidence='No file inventory'; Tooltip='No file inventory scan is available.' }
+    }
+    $evidence = '{0} · {1}' -f $Scan.Date.ToString('yyyy-MM-dd HH:mm'), $Scan.Provenance
+    $basis = "Latest file inventory: $($Scan.File.Name)`n$evidence`nFolders are derived from file paths and exclude empty folders. Volume sums current SizeBytes; versions and recycle bin are excluded."
+    $metricsPath = "$($Scan.File.FullName).metrics.json.txt"
+    if (-not (Test-Path -LiteralPath $metricsPath -PathType Leaf)) {
+        return [pscustomobject]@{ Files='—'; Folders='—'; Volume='—'; Table="Metrics unavailable`nRerun scan"; Evidence="Metrics unavailable · $evidence"; Tooltip="$basis`nThis scan predates inventory metrics. Rerun the source or destination file scan." }
+    }
+    try {
+        $Scan.File.Refresh()
+        $result = Get-Content -LiteralPath $metricsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$result.SchemaVersion -ne 1 -or $result.InventoryFile -cne $Scan.File.Name -or
+            [long]$result.CsvLengthBytes -ne [long]$Scan.File.Length -or
+            [long]$result.CsvLastWriteTimeUtcTicks -ne [long]$Scan.File.LastWriteTimeUtc.Ticks) {
+            throw 'Metrics do not match the latest inventory CSV.'
+        }
+        foreach ($name in @('Rows','Files','FoldersWithFiles','KnownSizeBytes','MissingSizeFiles','MissingPathRows','InvalidLibraryRows','DuplicateRows','ConflictingSizeRows')) {
+            if ($null -eq $result.$name -or [long]$result.$name -lt 0) { throw "Invalid inventory metric: $name" }
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Files='—'; Folders='—'; Volume='—'; Table='Metrics unavailable'; Evidence="Metrics unavailable · $evidence"; Tooltip="$basis`n$($_.Exception.Message)" }
+    }
+    $pathsComplete = [int]$result.missingPathRows -eq 0
+    $foldersComplete = $pathsComplete -and [int]$result.invalidLibraryRows -eq 0
+    $volumeComplete = $pathsComplete -and [int]$result.missingSizeFiles -eq 0 -and [int]$result.conflictingSizeRows -eq 0
+    $files = if ($pathsComplete) { '{0:N0}' -f [long]$result.files } else { '—' }
+    $folders = if ($foldersComplete) { '{0:N0}' -f [long]$result.foldersWithFiles } else { '—' }
+    $volume = if ($volumeComplete) { Format-FileInventoryVolume -Bytes ([long]$result.knownSizeBytes) } else { '—' }
+    $quality = "Rows: $($result.rows); duplicate paths: $($result.duplicateRows); missing paths: $($result.missingPathRows); invalid library paths: $($result.invalidLibraryRows); missing sizes: $($result.missingSizeFiles); conflicting sizes: $($result.conflictingSizeRows)."
+    return [pscustomobject]@{
+        Files=$files; Folders=$folders; Volume=$volume
+        Table="Files $files · folders $folders`nVolume $volume"
+        Evidence=$evidence
+        Tooltip="$basis`n$quality"
+    }
+}
+
+function Update-PortfolioInventoryRow {
+    param($Row)
+    foreach ($side in @('Source','Target')) {
+        $file = $Row.("${side}FileScanFile")
+        $scan = if ($file) { [pscustomobject]@{
+            File=$file; Date=$Row.("${side}FileScanDate"); Provenance=$Row.("${side}FileScanProvenance")
+        } } else { $null }
+        $value = Get-FileInventoryMetricPresentation -Scan $scan
+        $Row.("${side}InventoryDisplay") = $value.Table
+        $Row.("${side}InventoryTooltip") = $value.Tooltip
+    }
+}
+
+function Refresh-DiagnosticInventoryMetrics {
+    if (-not $script:CurrentMigration) { return }
+    $migration = $script:CurrentMigration
+    $cfg = $migration.Config
+    foreach ($spec in @(
+        @{ Side='Source'; Type=(Get-MigrationEndpointType $cfg 'Source'); Folder=$cfg.Output.SourceFileScans; Files=$lblDiagSourceFiles; Folders=$lblDiagSourceFolders; Volume=$lblDiagSourceVolume; Evidence=$lblDiagSourceInventoryEvidence },
+        @{ Side='Target'; Type=(Get-MigrationEndpointType $cfg 'Target'); Folder=$cfg.Output.TargetFileScans; Files=$lblDiagTargetFiles; Folders=$lblDiagTargetFolders; Volume=$lblDiagTargetVolume; Evidence=$lblDiagTargetInventoryEvidence }
+    )) {
+        $directory = Join-Path $migration.Root $spec.Folder
+        $scan = Get-SmartM365LatestPortfolioScan -Directory $directory -Filter ("{0}-FileInventory-{1}-*.csv" -f $spec.Type, $migration.Name)
+        $value = Get-FileInventoryMetricPresentation -Scan $scan
+        $spec.Files.Text = $value.Files
+        $spec.Folders.Text = $value.Folders
+        $spec.Volume.Text = $value.Volume
+        $spec.Evidence.Text = $value.Evidence
+        $spec.Evidence.ToolTip = $value.Tooltip
+    }
+}
+
 function Refresh-PortfolioSummary {
     $rows = [System.Collections.Generic.List[object]]::new()
     if ($null -eq $script:SummaryLastGoodRows) { $script:SummaryLastGoodRows = @{} }
@@ -2216,6 +2400,7 @@ function Refresh-PortfolioSummary {
                 -TargetScope $target.Text -TargetTooltip $target.Tooltip `
                 -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
                 -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
+            Update-PortfolioInventoryRow -Row $row
             $rows.Add($row)
             $script:SummaryLastGoodRows[$migration.Name] = $row
             [void]$script:SummaryLastErrorMessages.Remove($migration.Name)
@@ -2243,10 +2428,12 @@ function Refresh-PortfolioSummary {
                 $rows.Add([pscustomobject]@{
                     Migration = $migration.Name; Source = '—'; SourceTooltip = ''
                     SourceScan = '—'; SourceScanTooltip = ''
+                    SourceInventoryDisplay = '—'; SourceInventoryTooltip = $message
                     SourcePermissionScan = '—'; SourceScansDisplay = "Files —`nPerms —"
                     SourceScansSortDate = [datetime]::MinValue; SourceScansTooltip = $message
                     Destination = '—'; DestinationTooltip = ''
                     TargetScan = '—'; TargetScanTooltip = ''
+                    TargetInventoryDisplay = '—'; TargetInventoryTooltip = $message
                     TargetPermissionScan = '—'; TargetScansDisplay = "Files —`nPerms —"
                     TargetScansSortDate = [datetime]::MinValue; TargetScansTooltip = $message
                     ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
@@ -2288,6 +2475,7 @@ function Refresh-GuiState {
         }
         Load-Migrations
         if ($tabSummary.IsChecked) { Refresh-PortfolioSummary }
+        if ($script:CurrentMigration -and $tabDiagnostics.IsChecked) { Refresh-DiagnosticInventoryMetrics }
         Refresh-TransientResults
         try { Invoke-ActivityLogRetention }
         catch {
@@ -2354,6 +2542,7 @@ function Set-CurrentMigration {
         Clear-DiagnosticResult
     }
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
+    Refresh-DiagnosticInventoryMetrics
     Refresh-DiagnosticReportState
     Refresh-TransientResults
     if (-not $sameConfig) { Refresh-FarmDiagnostics }
@@ -2431,7 +2620,7 @@ function Load-Migrations {
 $tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
-$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticCrossCheck })
+$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticInventoryMetrics; Refresh-DiagnosticCrossCheck })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
 $tabConfig.Add_Click({      Switch-Tab 'Config' })
 
@@ -2640,6 +2829,8 @@ function Invoke-GlobalComparisonReport {
 
 $btnGlobalFileReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Files' })
 $btnGlobalPermissionsReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Permissions' })
+$btnOverviewGlobalFileReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Files' })
+$btnOverviewGlobalPermissionsReport.Add_Click({ Invoke-GlobalComparisonReport -Kind 'Permissions' })
 
 function Refresh-DiagnosticPatterns {
     if (-not $script:DiagSummary) { return }
@@ -2683,6 +2874,13 @@ function Clear-DiagnosticResult {
     $lblDiagKpis.Text = 'No analysis for the latest report yet.'
     $lblDiagKpis.Visibility = 'Visible'
     $panelDiagMetrics.Visibility = 'Collapsed'
+    $lblDiagReportState.Text = 'Checking'
+    $lblDiagReportEvidence.Text = 'Latest report'
+    $lblDiagAnalysisState.Text = 'Checking'
+    $lblDiagAnalysisEvidence.Text = 'Matching analysis'
+    $lblDiagHtmlState.Text = 'Checking'
+    $lblDiagHtmlEvidence.Text = 'Latest HTML'
+    $lblDiagNextAction.Text = 'Checking the selected migration report.'
     $lblSummaryShareGateValue.Text = '—'
     $lblSummaryShareGateDetail.Text = 'Analyze the latest report'
     $lblSummaryShareGateDetail.ToolTip = $null
@@ -2710,6 +2908,63 @@ function Clear-DiagnosticResult {
         $cmbDiagSession.SelectedIndex = 0
     }
     finally { $script:DiagLoading = $false }
+}
+
+function Update-DiagnosticReportStatus {
+    param([string]$Failure = '')
+
+    $report = $script:DiagLatestReport
+    $isRunning = [bool]($script:DiagProcess -and -not $script:DiagProcess.HasExited)
+    $hasHtml = [bool]($script:DiagSummary -and $btnDiagOpenReport.IsEnabled)
+    if (-not $report) {
+        $lblDiagReportState.Text = 'Missing'
+        $lblDiagReportEvidence.Text = 'CSV or XLSX required'
+        $lblDiagAnalysisState.Text = 'Unavailable'
+        $lblDiagAnalysisEvidence.Text = 'No report to analyze'
+        $lblDiagHtmlState.Text = 'Unavailable'
+        $lblDiagHtmlEvidence.Text = 'No analysis HTML'
+        $lblDiagNextAction.Text = 'Place the latest ShareGate report in MigrationReport, then click Refresh reports.'
+        return
+    }
+
+    $lblDiagReportState.Text = 'Detected'
+    $lblDiagReportEvidence.Text = '{0} · {1}' -f $report.Extension.TrimStart('.').ToUpperInvariant(), $report.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+    $lblDiagHtmlState.Text = if ($hasHtml) { 'Available' } else { 'Unavailable' }
+    $lblDiagHtmlEvidence.Text = if ($hasHtml) { 'Open analysis HTML' } else { 'No HTML for latest report' }
+
+    if ($Failure) {
+        $lblDiagAnalysisState.Text = 'Failed'
+        $lblDiagAnalysisEvidence.Text = 'See analysis status above'
+        $lblDiagNextAction.Text = 'Review the analysis error above, then retry Analyze latest report.'
+    }
+    elseif ($isRunning) {
+        $lblDiagAnalysisState.Text = 'Running'
+        $lblDiagAnalysisEvidence.Text = 'Processing latest report'
+        $lblDiagNextAction.Text = 'Wait for the analysis to finish.'
+    }
+    elseif ($script:DiagSummary) {
+        $lblDiagAnalysisState.Text = if ($script:DiagAnalysisVerified) { 'SHA256 verified' } else { 'Legacy match' }
+        $lblDiagAnalysisEvidence.Text = if ($script:DiagAnalysisVerified) { 'Exact report content matched' } else { 'Path and timestamp only' }
+        if ($script:DiagAnalysisVerified) {
+            $lblDiagNextAction.Text = 'Review issue patterns and the cross-check below.'
+        }
+        elseif (-not $btnDiagAnalyze.IsEnabled -and $report.Extension -eq '.xlsx') {
+            $lblDiagNextAction.Text = 'Install ImportExcel for the current user, then reanalyze to verify this report by SHA256.'
+        }
+        else {
+            $lblDiagNextAction.Text = 'Reanalyze this report to verify it by SHA256, then review the findings.'
+        }
+    }
+    elseif (-not $btnDiagAnalyze.IsEnabled -and $report.Extension -eq '.xlsx') {
+        $lblDiagAnalysisState.Text = 'Blocked'
+        $lblDiagAnalysisEvidence.Text = 'ImportExcel is missing'
+        $lblDiagNextAction.Text = 'Install ImportExcel for the current user, then click Refresh reports.'
+    }
+    else {
+        $lblDiagAnalysisState.Text = 'Not analyzed'
+        $lblDiagAnalysisEvidence.Text = 'No matching analysis'
+        $lblDiagNextAction.Text = 'Click Analyze latest report to create the summary and HTML report.'
+    }
 }
 
 function Update-DiagnosticSummaryCrossCheck {
@@ -2891,15 +3146,12 @@ function Refresh-DiagnosticReportState {
     if (-not $report) {
         $lblDiagLatestReport.Text = 'No ShareGate report found. Place the latest migration report (CSV or XLSX) in MigrationReport, then click Refresh reports.'
         $lblDiagProgress.Text = 'Analysis unavailable until a report is deposited.'
+        Update-DiagnosticReportStatus
         return
     }
     $size = '{0:N1} MB' -f ($report.Length / 1MB)
     $lblDiagLatestReport.Text = "Latest report: $($report.Name) | $($report.LastWriteTime.ToString('yyyy-MM-dd HH:mm')) | $size | $($report.Extension.ToUpperInvariant())"
     $lblDiagLatestReport.ToolTip = $report.FullName
-    if (-not $btnDiagAnalyze.IsEnabled -and -not $isRunning) {
-        $lblDiagProgress.Text = 'XLSX analysis requires the ImportExcel module in the current user context.'
-        return
-    }
     $cached = Get-CurrentDiagnosticAnalysis -Report $report
     if ($cached) {
         $script:DiagAnalysisVerified = [bool]$cached.Verified
@@ -2908,7 +3160,11 @@ function Refresh-DiagnosticReportState {
         $session = if ($cached.Session) { " | session $($cached.Session)" } else { '' }
         $lblDiagProgress.Text = "Existing analysis for latest report ($basis$session): $($cached.Generated) UTC."
     }
+    elseif (-not $btnDiagAnalyze.IsEnabled -and -not $isRunning) {
+        $lblDiagProgress.Text = 'XLSX analysis requires the ImportExcel module in the current user context.'
+    }
     else { $lblDiagProgress.Text = 'Latest report has not been analyzed yet. Analyze it to create an HTML report and summary.' }
+    Update-DiagnosticReportStatus
 }
 
 function Refresh-TransientResults {
@@ -3167,6 +3423,7 @@ function Start-DiagnosticAnalysis {
         $script:DiagProjectRoot = $script:CurrentMigration.Root
         $btnDiagAnalyze.IsEnabled = $false
         $lblDiagProgress.Text = "Analyzing local report files in $inputPath ..."
+        Update-DiagnosticReportStatus
         $script:DiagTimer.Start()
         Refresh-ActivityList
     }
@@ -3174,6 +3431,7 @@ function Start-DiagnosticAnalysis {
         if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
         $lblDiagProgress.Text = "Could not start analysis: $($_.Exception.Message)"
         $btnDiagAnalyze.IsEnabled = [bool]$script:DiagLatestReport
+        Update-DiagnosticReportStatus -Failure $_.Exception.Message
     }
 }
 
@@ -3330,6 +3588,7 @@ $script:DiagTimer.Add_Tick({
     }
     catch {
         $lblDiagProgress.Text = "Analysis failed: $($_.Exception.Message)"
+        Update-DiagnosticReportStatus -Failure $_.Exception.Message
         if ($script:DiagActivity) {
             Write-SmartM365GuiActivityEvent -Path $script:DiagActivity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message
         }
@@ -3411,10 +3670,10 @@ finally {
 }
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBnT8ozAmr2J0Sg
-# YI2VqvFx/1jUJlTaOtD1jfNWupiTZqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb7QX5zOyKnEy4
+# zHcFVYS6Yz7bOsBZb4fPtd9P52yGIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3439,19 +3698,139 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMEypq3j1KDy8XrrOdSpod
-# QjT7Y6a8KVAqJKL57hZQpjANBgkqhkiG9w0BAQEFAASCAYBzh6AGQw7kCpOUnBgd
-# QQfnQklFORslL/jDW/BcZuCVY0Uasd1cRTx4fVXD5eWbE3UTrs32QyZz7NTmxNtY
-# CJmQYigRn+LuU9mHTbahrDou48P2hvOQf0CvE0u6v0jfG3LPP3q+SRhw1tEYoLJT
-# nf2JZfbO6el2tJo3eQmc1+SFQk2I18YN6DNqjEqbD47HBMsBiL9ae20i4o3P304Y
-# GiaJkPLRgtMRPbnRa5ee94FQhL4ERSsP1FB73MgpGTng84xguZxp0cqUXgVviXw1
-# B67YCbAr9oYotvQbcfJON+hi/1iGwDzcULT+CczcDTSByf7RJGwiu2Th4S03nzNf
-# hBtHNeqNkKGzPbwrRAPB2/3ZlwbgizkObA1GK7AOSWeW5P5fb/5ZR11v6yEjmtGb
-# DDPB3tL/Hj4217e2oJEMWRI/P5aJIAqNYcCH6eKceOVG0AP2jVhFpyj/oDqesUFS
-# Kp3+u5XAvEI4aoWNPLSMGhi3fqTXvpxw00sfyY8jASBSlgg=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIObcr/kUfKW3n4kYOhVJ5EqNn9VT5F/luXR7oYSMu0M1MA0GCSqG
+# SIb3DQEBAQUABIIBgIe+LuriB+q7RTzsKUQOIA3UmnlR2e55HY/yPqPXJ38dvGqA
+# usYk28sw1a5o4JH8700h9ZYPKVgUx+SpTqowhk85vJAlXuJw+qh1NaERhctryz9u
+# +O++ZGuE5K5SmcWaH7j82FoJlVrmfuKRh4sWd7H27EjZ8jfdn/dkGRKtzoYa3b38
+# CvdUbG+qzreZQmLGH8k6fcyXP8aRCkQ6ZjzqyLj1AN3v76l7iOEfn6ApxksBdPNb
+# 6D0pHaH78cnfqsUjemph122PbBtekMctcnwsBh2MPePQ3Wd75bUlMKvboSJnZc76
+# xyNKxT0Lmj0Hter/jrmte+Zz4oGyVqFqiPvn31Mznm15Mnr5eILm8nADBF0QLtIW
+# IX03ATSlbEu30JjFJvZYsP7XIxWTaT0M5I4L7RervUVbdLB8wYhG6iv5dZf9R6nR
+# f6WzvAgFAGklA+2kAuJL4Eo3dUAfKn4CUZme1M1FmlnzUNOQJEyX8fq40fEoJaKV
+# iLBlF7I7I0302Daj3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxOTAz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCb7l66KO3IbY6PEDPYt+wGOYKN7estZk7kab3m
+# eJ6hDDANBgkqhkiG9w0BAQEFAASCAgCD1k2aGyOHD6IK8pw4SI85e+MthS540QjV
+# yefRyaIKiDz6j+II8qk2mrTKMdgCWf3rqiQLD+jImNvr56gZ862DkIqEgJa3GCs9
+# er/rK9hCGsGdi0YYSwwOmsVDXeS/gxlxrvXqDn2HFPrMjkw3jpztzUI1DWFFSLlU
+# cWe3Ld5gESkcewFFcLELnS3Xsc/Vk01X+fgsQLlww88MLS21r0kmgNbDZhsWgay1
+# 36tPvxUtOTFCqDVm/f7V33vlhNaI7c9I5XvYwcZLxJqK4cCb09JHj6IeaQT++rpm
+# si6tCJrc2A5QoYB9RIVILUhlPDcf3qEO4V/+CzXLMozywSSWWmoVL6/aGC39wH9w
+# FJN515MxaF+EP1Yl2+f1uxoBaWFqE9BVvELRJxE84qlYtKJvm8wgRtOuFjI16Bky
+# B3Z8s0I9xhdhENe0qh9xAtJ3rqdDBpMxNZVDD4WvKU26Nk0j8hMSyYSOdJVt9D1p
+# o5yYFhUMLt19By3OZQUeboYMQge2/x3vnLik3BXV68MjYhsA0MYC6RAXLQmC9Dlm
+# SdP11mH7VAAcOYCyNWbc/IPxWdHnAAMBlDmHZhu5Zl8cBdjU1h+INSF1YzOY0XnY
+# yNRL+Uk0xfRbS8tIq/FaIE9fYPavi51ZX2sGAW8r9dM/DQ1RvNfKxfdX8XMTOUeT
+# yW6FJzeMgQ==
 # SIG # End signature block

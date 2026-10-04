@@ -243,6 +243,14 @@ The sample contains placeholders only.
   Comparison/export Python helpers use the standard library; Excel
   itself is not needed to generate workbooks.
 
+Source and destination file scans write `<inventory.csv>.metrics.json.txt` next
+to their CSV. The GUI reads this small metadata file for file count, folders
+containing files, and current file volume; it does not recalculate inventory
+metrics. Empty folders, file versions, and recycle-bin content are excluded.
+Older scans without metrics show an unavailable value until a new file scan is
+run. The GUI rejects metadata when the CSV name, length, or modification time
+does not match the scan.
+
 SP2016/SP2019/SPO are configured engine selectors, not a certification of every
 farm, module, operating system or migration combination. Use an environment
 pilot before relying on these results for acceptance.

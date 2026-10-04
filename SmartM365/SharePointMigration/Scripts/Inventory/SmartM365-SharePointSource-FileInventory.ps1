@@ -37,7 +37,7 @@
     .\SmartM365-SharePointSource-FileInventory.ps1 -WebApplicationUrl "https://intranet" -IncludePermissionInventory
 
 .VERSION
-    1.0.4
+    1.0.5
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -367,6 +367,67 @@ function Get-FileInventoryFromLibrary {
     while ($null -ne $query.ListItemCollectionPosition)
 }
 
+function Add-FileInventoryMetric {
+    param($Row)
+    $script:MetricRows++
+    $path = ([string]$Row.ServerRelativeUrl).Trim().Replace('\','/').TrimEnd('/')
+    if (-not $path) { $script:MetricMissingPathRows++; return }
+    $library = ([string]$Row.LibraryUrl).Trim().Replace('\','/').TrimEnd('/')
+    [long]$size = 0
+    $hasSize = [long]::TryParse([string]$Row.SizeBytes, [ref]$size) -and $size -ge 0
+    if ($script:MetricFileSizes.ContainsKey($path)) {
+        $script:MetricDuplicateRows++
+        $previous = $script:MetricFileSizes[$path]
+        if ($null -ne $previous -and $hasSize -and $previous -ne $size) { $script:MetricConflictingSizeRows++ }
+        if ($null -eq $previous -and $hasSize) {
+            $script:MetricFileSizes[$path] = $size
+            $script:MetricKnownSizeBytes += $size
+        }
+    }
+    else {
+        $script:MetricFileSizes[$path] = if ($hasSize) { $size } else { $null }
+        if ($hasSize) { $script:MetricKnownSizeBytes += $size }
+    }
+    if (-not $library -or -not $path.StartsWith($library + '/', [StringComparison]::OrdinalIgnoreCase)) {
+        $script:MetricInvalidLibraryRows++
+        return
+    }
+    $parent = $path.Substring(0, $path.LastIndexOf('/'))
+    while ($parent.StartsWith($library + '/', [StringComparison]::OrdinalIgnoreCase)) {
+        [void]$script:MetricFolders.Add($parent)
+        $slash = $parent.LastIndexOf('/')
+        if ($slash -lt 0) { break }
+        $parent = $parent.Substring(0, $slash)
+    }
+}
+
+function Write-FileInventoryMetrics {
+    param([string]$CsvPath)
+    $csv = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+    $missingSizes = @($script:MetricFileSizes.Values | Where-Object { $null -eq $_ }).Count
+    $payload = [ordered]@{
+        SchemaVersion = 1
+        InventoryFile = $csv.Name
+        CsvLengthBytes = [long]$csv.Length
+        CsvLastWriteTimeUtcTicks = [long]$csv.LastWriteTimeUtc.Ticks
+        CompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Rows = [long]$script:MetricRows
+        Files = [long]$script:MetricFileSizes.Count
+        FoldersWithFiles = [long]$script:MetricFolders.Count
+        KnownSizeBytes = [long]$script:MetricKnownSizeBytes
+        MissingSizeFiles = [long]$missingSizes
+        MissingPathRows = [long]$script:MetricMissingPathRows
+        InvalidLibraryRows = [long]$script:MetricInvalidLibraryRows
+        DuplicateRows = [long]$script:MetricDuplicateRows
+        ConflictingSizeRows = [long]$script:MetricConflictingSizeRows
+    }
+    $metricsPath = "$CsvPath.metrics.json.txt"
+    $tempPath = "$metricsPath.tmp"
+    $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $tempPath -Encoding UTF8
+    Move-Item -LiteralPath $tempPath -Destination $metricsPath -Force
+    Write-Host ("File inventory metrics: {0} files; {1} folders with files; {2} known bytes; details: {3}" -f $payload.Files, $payload.FoldersWithFiles, $payload.KnownSizeBytes, $metricsPath)
+}
+
 function Export-WebInventory {
     param(
         [Microsoft.SharePoint.SPWeb]$Web,
@@ -384,6 +445,7 @@ function Export-WebInventory {
             Write-Host ("  Library: {0} ({1} items)" -f $library.Title, $library.ItemCount)
 
             $rows = Get-FileInventoryFromLibrary -Web $Web -Library $library -BatchSize $BatchSize
+            foreach ($row in $rows) { Add-FileInventoryMetric -Row $row }
             if ($Append) {
                 $rows | Export-Csv -Delimiter ';' -Path $CsvPath -NoTypeInformation -Encoding UTF8 -Append
             }
@@ -930,6 +992,14 @@ $script:ErrorCsvCreated = $false
 $script:TranscriptStarted = $false
 $script:InventoryStopRequested = $false
 $script:InventoryExitCode = 0
+$script:MetricFileSizes = @{}
+$script:MetricFolders = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$script:MetricRows = [long]0
+$script:MetricKnownSizeBytes = [long]0
+$script:MetricMissingPathRows = [long]0
+$script:MetricInvalidLibraryRows = [long]0
+$script:MetricDuplicateRows = [long]0
+$script:MetricConflictingSizeRows = [long]0
 $script:InventoryStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 try {
@@ -1044,6 +1114,7 @@ try {
     }
 
     Move-Item -LiteralPath $TempOutputPath -Destination $OutputPath -Force
+    Write-FileInventoryMetrics -CsvPath $OutputPath
     $script:InventoryStopwatch.Stop()
     Write-Host ("Inventory completed: {0}" -f $OutputPath)
     Write-Host ("Scan duration: {0}" -f (Format-InventoryDuration -Elapsed $script:InventoryStopwatch.Elapsed))
@@ -1102,8 +1173,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/41ajtxvoTlmo
-# 4+vMy3djOglCgxr8jn1kwm7mAVKWgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCG9d0l0lY22KgJ
+# m8Fdh17cEXA4p06VEb7xRT/9ZFChSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1236,31 +1307,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGHXaXMwQG9Nkt/qRhOqwEVO4j14ApHQhsCIw5+OombRMA0GCSqG
-# SIb3DQEBAQUABIIBgCtE9IJFfBW2hO0YV9sosr//y6X1YV52YlywzVWx4puwyr31
-# G4TYLw/7elXm8gSBk98/tbweWhJMmiZuYCA+EEag9abW0KhiC9xXWNWKEhqjPYYt
-# hCSLmPgccSPZdZXdN8MBZ1V3cG4rjXQBmEQGhw997lHrMML0kn2RuaCs5ugfQ2Xl
-# o+ICXlC6P4in9sc9gUCtNEvBDzfK61AEnx+pfuw9pIkLXLF77oFnqNvPDdW8sQqk
-# EPk2ESBrerOJle0ciGJD3bKzm+XlNmsRnKkjNQJL2xA4LCi8C1UF68EZjKDOgTEi
-# E35gr5O7QJv4f9Kvc/G5DOgeq87/IFWkJw08IFRtQknog9bzhLpAOJRVR8oRKka7
-# +ShldQ6cKrIis5kqsGqe80Th3VHEq5cClv2JTstuOLD3HVP3MoAU0PMH9ApjilF1
-# 27VCMeYL/vYxSYSHCF/ZVqph1w8tUwenlTYV9tfH/saD+LyasQKelBJCYa2y+3l2
-# EEqI9jGKObhT+oxSiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINLeEroNd62q91QDsFiW2d9mIrUp05UMOLWWQpBNg4zPMA0GCSqG
+# SIb3DQEBAQUABIIBgGk43JXs0UY/3Rrwh/w6gianBmJcgFKwCNdlQ/k5bdEZKUd8
+# 3lyR+vU5L6FbH+5rity9YRYjEsk7zsmuh8PFts8uzPnUlbLO0zjT5I16sZMiFaJl
+# 8cioGmlgBjsUebLsI3zHAKZK/D30O0R9gHxW/EN/WiOHCzhB1g1evq4AiRjw1pDq
+# dXHCNZj/lJR3Ja6mecJnbXzO+RIU51j19ABluV1gE2o4RSwVwfh8RmuUn7evS2nN
+# uVA+dEq/X44q2/Th6Z/qSWFPdy/7a5IdZhYXoBoRqi4O+dPp1tHywK52AHPXXo4X
+# 3Z/ioR9hdxTBhTlXpUmpHcUhzDz9AxH6fMlwnEVhXcaQJ+KKNlRf5f7/DDTl5MQw
+# 96NwAjyeQJSq5coZTyHs0hF3g7sR5epfaFKjmi7vEzLgeFMDHG3JH6mThlJwft9n
+# 7O/vgckHpREXAUWSUQIvoEEcmIipaHgNfxRcLU41JFYBgVBmaQpf60UehhEDpCkg
+# eDvjXdyCI0hHWnmJ9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjA3
-# MDFaMC8GCSqGSIb3DQEJBDEiBCB9z9uFyN6kQQJ+52lgmXQ5FWPkJAIm3dpx9KG5
-# htZKrDANBgkqhkiG9w0BAQEFAASCAgAu07obGhoYSSqZHp8mBh0HgocsE2LD+kbQ
-# FfVDQ6XNfPB0vfEt90rb5+OJ6YZTWBWypowbuKuV9PXpRgWssadikHShvL5HS69/
-# O8XzXTTOrrMC3pOW73OC8AbwbEj9aJBvHSzpB1n9KRpNAJPBNfr7deGudaQxLizj
-# wx3fTtx2+BKVpLHW4oxICCKYRra2GPQ2HzaMT7NKP0/nvnLCO2mMHBxMq7Tn/sXY
-# TsSs1oDStDBHzETI5WXZkG795Wyxo+8t+G8I1VGdN/AOJIfrxANEd5Ne8GFPR2MA
-# FxCSKX99Luu8rL+ZxCm3+02r/g6q1XQoUzBM3WxCLE/I8q81zgR+Nlf/EPbvRXdm
-# qvjj7ryX32NWBW4KT3LOV4yKt3xOW6oL1PrgpOFeRlASyn+HQ42mfqvcuUbkJrKU
-# IjYJcGPhm9EEcRniUROOkbJBiEsu9M4Y4SKzE0T6rt7NKGNI0jyFM1f96CcNTdYc
-# 89nA1Lioi9mmc5wkx1Bf7x/3GbvzIcr6wMpxBpg7MZsTl0sXLFdnO82jC81QCYy1
-# 6JAFmy1b9uOuuJijMAF3wEawo2hiqI5fSolwc5wK+QCHBK0mp3W6kW1bFcZukWS7
-# yELsB4iqInRxP1uTDyuBj7pLF4oQ2z1MyoYxjqA+YC7f+wuiMCFPwiPv1azwOY4v
-# +mZqL8VDsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxOTAz
+# NTJaMC8GCSqGSIb3DQEJBDEiBCC4lvhwjGdG4j9Z5g6kdvi1layxDWRMlurCNkNZ
+# 9eNJjDANBgkqhkiG9w0BAQEFAASCAgC1eDu1TLLUoEntPyBUDk3DJzAk7COfx6y8
+# 6KS+Ek13CRpC93n+I+Uh8ES+EGNl0RYQPZPLd0HpKr4kGjP5+CuKefqzEqBRk145
+# PAWiqMokIeCA1s4k4RYMB815aCG/EyaV3zq2xqQ+H4q05RAXleHvAOvXPB/fh9cR
+# rTXj/U1MNEYO0268fdavaT5WM6hV0Z0spA1ryTQiniDikq75aaqQc+2yOdJEY+4K
+# lkL9I7OrA5Pu9T8J5yRBqVDdMeNlsFQjJuL6GQP5DZMN4d4rVsZEsbXelFUcBzBi
+# nJk1tSoHwyw/fuI3Y910YffUANaJB7bYUVjFJSKPuJIUEH4PKmInR+LKYOmmVTd+
+# 1ZFuHa1rWqTMtp0R4wgyWoAgOt272DngQioIWGW9wKsq+KjLmG2C0p7Q67bWSYl+
+# q/YwQvl0jlJGjd7yqJwK7XiYxaJ0iuZMkENrhz+O5kO+YM2/xqT64LIdCDxjyb8p
+# N0O45IfmwzM6zrnIzo0Ss9+ZIzUOBsTyvCCF5k0JkSrhDw+MT6MPBEKgLMPBMYAT
+# 1nRV2t1QH1z0S7gpcUnbDUBabe4NhYhw0ynb7cVargV14lsjLkzjsjZJ5dNRnOlZ
+# EF7fjaWGCtsR15p7M2XP1XUyMDf+ZVs8bxBiEaa+VgNlBltSJ6t494nuOx0PogVD
+# HwFPmGURHQ==
 # SIG # End signature block
