@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 import csv
@@ -453,6 +453,8 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     path.parent.mkdir(parents=True, exist_ok=True)
 
     matched = to_int(summary_row.get("MatchedPermissions"))
+    source_keys = to_int(summary_row.get("SourceUniqueKeys"))
+    target_keys = to_int(summary_row.get("TargetUniqueKeys"))
     missing = to_int(summary_row.get("MissingInSPO"))
     disabled_missing = to_int(summary_row.get("DisabledEntraUsersNotInSPO"))
     extra = to_int(summary_row.get("ExtraInSPO"))
@@ -463,12 +465,14 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     source_la = to_int(summary_row.get("SourceLimitedAccessOnlyIgnored"))
     target_la = to_int(summary_row.get("TargetLimitedAccessOnlyIgnored"))
     real_difference_count = missing + target_less + permission_different + extra
-    inconclusive = not to_int(summary_row.get("SourceUniqueKeys")) or not to_int(summary_row.get("TargetUniqueKeys"))
+    inconclusive = not source_keys or not target_keys
+    success_rate = f"{matched / source_keys * 100:.2f}%" if not inconclusive else "N/A"
     evidence_problem = summary_row.get("ScanEvidenceStatus") in ("Stale", "Unverified")
     status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if real_difference_count or disabled_missing or target_more else "No relevant difference"))
     status_class = "note" if inconclusive else ("warn" if real_difference_count or evidence_problem else ("note" if disabled_missing or target_more else "ok"))
 
     cards = [
+        ("Success rate", success_rate, "muted" if inconclusive else "ok"),
         ("Matched", matched, "ok"),
         ("Missing in SPO", missing, "bad" if missing else "ok"),
         ("Disabled Entra users not in SPO", disabled_missing, "note" if disabled_missing else "ok"),
@@ -479,7 +483,8 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
         ("Source users not in Entra", not_entra, "note" if not_entra else "ok"),
         ("Limited Access ignored", source_la + target_la, "muted"),
     ]
-    card_html = [metric_card(label, format_integer(value), css_class) for label, value, css_class in cards]
+    card_html = [metric_card(label, value if label == "Success rate" else format_integer(value), css_class)
+                 for label, value, css_class in cards]
 
     source_csv_html = html_escape(source_csv) if source_csv else html_escape(summary_row.get("SourceCsv"))
     target_csv_html = html_escape(target_csv) if target_csv else html_escape(summary_row.get("TargetCsv"))
@@ -545,6 +550,9 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
       <dt>Scan evidence</dt><dd>{html_escape(summary_row.get('ScanEvidenceStatus'))}</dd>
       <dt>Scan gap (hours)</dt><dd>{html_escape(summary_row.get('ScanGapHours'))}</dd>
       <dt>Oldest scan age (hours)</dt><dd>{html_escape(summary_row.get('OldestScanAgeHours'))}</dd>
+      <dt>Source unique keys</dt><dd>{format_integer(source_keys)}</dd>
+      <dt>Target unique keys</dt><dd>{format_integer(target_keys)}</dd>
+      <dt>Success rate definition</dt><dd>Matched permissions / source unique keys in comparison scope. Extra target permissions are shown separately.</dd>
       <dt>Source root path</dt><dd>{html_escape(summary_row.get('SourceRootPath'))}</dd>
       <dt>Target root path</dt><dd>{html_escape(summary_row.get('TargetRootPath'))}</dd>
       <dt>Source rows</dt><dd>{format_integer(summary_row.get('SourceRows'))}</dd>

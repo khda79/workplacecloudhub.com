@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.30
+    1.0.43
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.30'
+$script:AppVersion = '1.0.43'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -45,6 +45,7 @@ Add-Type -AssemblyName WindowsBase
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-NewWizard.ps1')
 . (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-Summary.ps1')
+. (Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-CrossCheck.ps1')
 
 $updateCheckModulePath = Join-Path $script:ScriptRoot 'SmartM365.GuiUpdateCheck.ps1'
 if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
@@ -123,6 +124,22 @@ function Get-ComparisonHtmlReport {
     Get-ChildItem -LiteralPath $Folder.FullName -Filter '*-summary-*.html' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
+}
+function Get-ComparisonBadgeText {
+    param(
+        [System.IO.DirectoryInfo]$Folder,
+        [string]$MigrationName,
+        [ValidateSet('Files','Permissions')][string]$Kind
+    )
+    if ($null -eq $Folder) { return 'No run yet' }
+    $comparison = Get-SmartM365LatestPortfolioComparison -Directory $Folder.Parent.FullName `
+        -MigrationName $MigrationName -Kind $Kind -SelectedFolder $Folder
+    $stamp = Get-SmartM365PortfolioTimestamp $Folder.Name
+    $date = if ($comparison) { $comparison.Date } elseif ($stamp) { $stamp } else { $Folder.LastWriteTime }
+    $rate = if ($comparison -and $comparison.Source -gt 0) {
+        '{0:N2} %' -f ([double]$comparison.Matched / [double]$comparison.Source * 100)
+    } else { 'Rate unavailable' }
+    return ('{0:yyyy-MM-dd HH:mm} · {1}' -f $date, $rate)
 }
 function Get-MigrationEndpointType {
     param($Config, [string]$Side)
@@ -262,6 +279,7 @@ function Open-InExplorer {
     Width="1480" Height="800"
     MinWidth="1280" MinHeight="580"
     WindowStartupLocation="CenterScreen"
+    WindowState="Maximized"
     UseLayoutRounding="True"
     SnapsToDevicePixels="True"
     Background="#F5F8FB">
@@ -451,8 +469,8 @@ function Open-InExplorer {
       <StackPanel Orientation="Horizontal" Margin="10,0">
         <ToggleButton x:Name="tabSummary"     Content="Overview"    Style="{StaticResource Tab}" IsChecked="True"/>
         <ToggleButton x:Name="tabFiles"       Content="Files &amp; Permissions" Style="{StaticResource Tab}"/>
-        <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabDiagnostics" Content="Migration Diagnostics" Style="{StaticResource Tab}"/>
+        <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabLogs"        Content="Logs"        Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabConfig"      Content="Config"      Style="{StaticResource Tab}"/>
       </StackPanel>
@@ -467,6 +485,46 @@ function Open-InExplorer {
           <TextBlock Text="MIGRATION OVERVIEW" Style="{StaticResource SectionLabel}"/>
           <TextBlock Text="Files: matches / source keys. Permissions: matches / source permission keys. Select a migration to open Files &amp; Permissions."
                      FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
+          <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Style="{StaticResource StepCard}" Margin="0,0,5,0" Background="#EFF7FF">
+              <StackPanel>
+                <TextBlock Text="MIGRATIONS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblPortfolioMigrations" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: displayed migrations" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#EFF7FF">
+              <StackPanel>
+                <TextBlock Text="FILES COMPARED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblPortfolioFilesCompared" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: file comparisons" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#F0FBF8">
+              <StackPanel>
+                <TextBlock Text="PERMISSIONS COMPARED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblPortfolioPermissionsCompared" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: permission comparisons" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="3" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#FFF8EB">
+              <StackPanel>
+                <TextBlock Text="ACTIONS REQUIRED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblPortfolioActions" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#8B5E00"/>
+                <TextBlock Text="Scan, compare or review" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="4" Style="{StaticResource StepCard}" Margin="5,0,0,0" Background="#FFF2F2">
+              <StackPanel>
+                <TextBlock Text="REFRESH ERRORS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblPortfolioRefreshErrors" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#A4262C"/>
+                <TextBlock Text="Source: overview refresh" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+          </Grid>
           <Border Style="{StaticResource StepCard}" Padding="0">
             <DataGrid x:Name="gridSummary" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
@@ -514,18 +572,12 @@ function Open-InExplorer {
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ScanGapTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Files %" Binding="{Binding ComparisonPercent}" Width="72" SortMemberPath="ComparisonRate"/>
-                <DataGridTextColumn Header="File compare" Binding="{Binding ComparisonDate}" Width="125" SortMemberPath="ComparisonDate">
+                <DataGridTextColumn Header="Files comparison" Binding="{Binding ComparisonDisplay}" Width="185" SortMemberPath="ComparisonDate">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ComparisonTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Perms %" Binding="{Binding PermissionComparisonPercent}" Width="85" SortMemberPath="PermissionComparisonRate">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding PermissionComparisonTooltip}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Perms compare" Binding="{Binding PermissionComparisonDate}" Width="135" SortMemberPath="PermissionComparisonDate">
+                <DataGridTextColumn Header="Permissions comparison" Binding="{Binding PermissionComparisonDisplay}" Width="205" SortMemberPath="PermissionComparisonDate">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding PermissionComparisonTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
@@ -624,12 +676,13 @@ function Open-InExplorer {
               </Border>
               <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock Text="Compare files (source vs target)" FontSize="13" FontWeight="Medium" Foreground="#1F2937"/>
-                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
-                  <Border x:Name="badgeCmpFiles" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
+                <Grid Margin="0,3,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Border Grid.Column="0" x:Name="badgeCmpFiles" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblCmpFilesAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" MaxWidth="280" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
+                  <TextBlock Grid.Column="1" x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </Grid>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpFiles" Content="Open" Style="{StaticResource BtnGhost}"
@@ -767,12 +820,13 @@ function Open-InExplorer {
               </Border>
               <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock Text="Compare permissions (source vs target)" FontSize="13" FontWeight="Medium" Foreground="#1F2937"/>
-                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
-                  <Border x:Name="badgeCmpPerms" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
+                <Grid Margin="0,3,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Border Grid.Column="0" x:Name="badgeCmpPerms" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblCmpPermsAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" MaxWidth="310" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
+                  <TextBlock Grid.Column="1" x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </Grid>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpPerms" Content="Open" Style="{StaticResource BtnGhost}"
@@ -858,31 +912,157 @@ function Open-InExplorer {
         </StackPanel>
 
         <!-- MIGRATION DIAGNOSTICS -->
-        <StackPanel x:Name="panelDiagnostics" Margin="18,14" Visibility="Collapsed">
-          <TextBlock Text="SHAREGATE REPORT ANALYSIS" Style="{StaticResource SectionLabel}"/>
-          <Border Style="{StaticResource StepCard}">
-            <StackPanel>
-              <TextBlock x:Name="lblDiagScope" Text="Analysis only: no ShareGate connection or migration action." Foreground="#5F6B7A" FontSize="12" Margin="0,0,0,7"/>
-              <TextBox x:Name="txtDiagInput" Height="28" VerticalContentAlignment="Center" FontSize="12"/>
-              <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                <Button x:Name="btnDiagBrowseFile" Content="Browse file" Style="{StaticResource BtnGhost}" Width="94"/>
-                <Button x:Name="btnDiagBrowseFolder" Content="Browse folder" Style="{StaticResource BtnGhost}" Width="104" Margin="6,0,0,0"/>
-                <Button x:Name="btnDiagAnalyze" Content="Analyze reports" Style="{StaticResource Btn}" Width="112" Margin="16,0,0,0"/>
-                <Button x:Name="btnDiagOpenReport" Content="Open HTML report" Style="{StaticResource BtnGhost}" Width="120" Margin="6,0,0,0" IsEnabled="False"/>
+        <Grid x:Name="panelDiagnostics" Margin="18,14" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="560"/>
+            <ColumnDefinition Width="1"/>
+            <ColumnDefinition Width="*" MinWidth="560"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock x:Name="lblDiagMigration" Grid.Row="0" Grid.ColumnSpan="3" Text="Selected migration: none" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" Margin="0,0,0,10"/>
+          <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,14,14">
+            <TextBlock Text="SHAREGATE REPORT ANALYSIS" Style="{StaticResource SectionLabel}"/>
+            <Border Style="{StaticResource StepCard}">
+              <StackPanel>
+                <TextBlock x:Name="lblDiagScope" Text="Analysis only: no ShareGate connection or migration action." Foreground="#5F6B7A" FontSize="12" Margin="0,0,0,7"/>
+                <TextBlock x:Name="lblDiagInputPath" Text="SharePointMigration\Migrations\…\ShareGate\MigrationReport" FontFamily="Consolas" FontSize="11" Foreground="#17324D" TextWrapping="Wrap"/>
+                <TextBlock x:Name="lblDiagLatestReport" Text="Place the latest ShareGate migration report here (CSV or XLSX)." TextWrapping="Wrap" FontSize="12" Foreground="#8B5E00" Margin="0,7,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                  <Button x:Name="btnDiagOpenFolder" Content="Open report folder" Style="{StaticResource BtnGhost}" Width="130"/>
+                  <Button x:Name="btnDiagRefresh" Content="Refresh reports" Style="{StaticResource BtnGhost}" Width="110" Margin="6,0,0,0"/>
+                  <Button x:Name="btnDiagAnalyze" Content="Analyze latest report" Style="{StaticResource Btn}" Width="145" Margin="12,0,0,0" IsEnabled="False"/>
+                  <Button x:Name="btnDiagOpenReport" Content="Open analysis HTML" Style="{StaticResource BtnGhost}" Width="130" Margin="6,0,0,0" IsEnabled="False" ToolTip="Open the HTML generated for the latest ShareGate report"/>
+                </StackPanel>
+                <TextBlock x:Name="lblDiagProgress" Text="Select a migration report folder or a CSV/XLSX file." Foreground="#5F6B7A" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
               </StackPanel>
-              <TextBlock x:Name="lblDiagProgress" Text="Select a migration report folder or a CSV/XLSX file." Foreground="#5F6B7A" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
-          </Border>
-          <Border Style="{StaticResource StepCard}">
+            </Border>
+          </StackPanel>
+          <Border x:Name="cardDiagSummary" Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource StepCard}" Margin="0,0,0,14">
             <StackPanel>
               <TextBlock Text="SUMMARY" Style="{StaticResource SectionLabel}"/>
-              <TextBlock x:Name="lblDiagKpis" Text="No analysis yet." TextWrapping="Wrap" FontSize="13" Foreground="#1F2937"/>
-              <TextBlock x:Name="lblDiagInterpretation" Text="Residual rates exclude Accepted issues. Fixed is a tracking state, not proof of a successful new migration." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,6,0,0"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="#FFF8EB" BorderBrush="#F3D8A2" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,5,0">
+                  <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="15" Background="#FCE7BD" Margin="0,0,8,0" VerticalAlignment="Top">
+                      <TextBlock Text="&#x26A0;" FontFamily="Segoe UI Symbol" FontSize="17" Foreground="#9A6200" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                      <TextBlock Text="ITEMS TO FIX" FontSize="10" FontWeight="SemiBold" Foreground="#705422"/>
+                      <TextBlock x:Name="lblSummaryShareGateValue" Text="—" FontSize="20" FontWeight="SemiBold" Foreground="#1F2937"/>
+                      <TextBlock x:Name="lblSummaryShareGateDetail" Text="Analyze the latest report" FontSize="10" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+                      <TextBlock Text="Source: ShareGate analysis" FontSize="10" Foreground="#8B5E00"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+                <Border Grid.Column="1" Background="#EFF7FF" BorderBrush="#C9E3FA" BorderThickness="1" CornerRadius="6" Padding="8" Margin="5,0,5,0">
+                  <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="15" Background="#DCEFFF" Margin="0,0,8,0" VerticalAlignment="Top">
+                      <TextBlock Text="&#x25A3;" FontFamily="Segoe UI Symbol" FontSize="18" Foreground="#1266A3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                      <TextBlock Text="FILES MATCH" FontSize="10" FontWeight="SemiBold" Foreground="#285477"/>
+                      <TextBlock x:Name="lblSummaryFilesValue" Text="—" FontSize="20" FontWeight="SemiBold" Foreground="#1F2937"/>
+                      <TextBlock x:Name="lblSummaryFilesDetail" Text="Loading comparison" FontSize="10" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+                      <TextBlock Text="Source: file comparison" FontSize="10" Foreground="#1266A3"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+                <Border Grid.Column="2" Background="#F0FBF8" BorderBrush="#C9EADF" BorderThickness="1" CornerRadius="6" Padding="8" Margin="5,0,5,0">
+                  <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="15" Background="#D8F2E8" Margin="0,0,8,0" VerticalAlignment="Top">
+                      <TextBlock Text="&#x25C6;" FontFamily="Segoe UI Symbol" FontSize="17" Foreground="#167658" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                      <TextBlock Text="PERMISSIONS MATCH" FontSize="10" FontWeight="SemiBold" Foreground="#28624F"/>
+                      <TextBlock x:Name="lblSummaryPermissionsValue" Text="—" FontSize="20" FontWeight="SemiBold" Foreground="#1F2937"/>
+                      <TextBlock x:Name="lblSummaryPermissionsDetail" Text="Loading comparison" FontSize="10" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+                      <TextBlock Text="Source: permission comparison" FontSize="10" Foreground="#167658"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+                <Border Grid.Column="3" Background="#F7F3FF" BorderBrush="#E0D5F5" BorderThickness="1" CornerRadius="6" Padding="8" Margin="5,0,0,0">
+                  <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="15" Background="#EDE5FA" Margin="0,0,8,0" VerticalAlignment="Top">
+                      <TextBlock Text="&#x21C4;" FontFamily="Segoe UI Symbol" FontSize="18" Foreground="#7353A1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                      <TextBlock Text="SCOPES WITH DIFFERENCES" FontSize="10" FontWeight="SemiBold" Foreground="#58457C"/>
+                      <TextBlock x:Name="lblSummaryCrossCheckValue" Text="—" FontSize="20" FontWeight="SemiBold" Foreground="#1F2937"/>
+                      <TextBlock x:Name="lblSummaryCrossCheckDetail" Text="Loading cross-check" FontSize="10" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+                      <TextBlock Text="Source: cross-check" FontSize="10" Foreground="#7353A1"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+              </Grid>
+              <TextBlock Text="Independent measures; percentages use different denominators." FontSize="10" Foreground="#5F6B7A" Margin="0,8,0,0"/>
             </StackPanel>
           </Border>
-          <Border Style="{StaticResource StepCard}">
+          <Border Grid.Row="2" Grid.Column="1" Background="#DDE7F0" Margin="0,0,0,14"/>
+          <StackPanel Grid.Row="2" Grid.Column="2" Margin="14,0,0,14">
+            <TextBlock Text="SHAREGATE DETAIL" Style="{StaticResource SectionLabel}"/>
+            <Border Style="{StaticResource StepCard}">
+              <StackPanel>
+                <TextBlock x:Name="lblDiagKpis" Text="No analysis for the latest report yet." TextWrapping="Wrap" FontSize="11" Foreground="#1F2937"/>
+                <TextBlock x:Name="lblDiagInterpretation" Text="File, permission and scope details are in Cross-check below. ShareGate residual rates exclude Accepted issues; Fixed is a tracking state, not proof of a successful new migration." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,6,0,0"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <Border Grid.Row="3" Grid.ColumnSpan="3" Style="{StaticResource StepCard}" Margin="0,0,0,14">
             <StackPanel>
-              <TextBlock Text="TRANSIENT 401 BATCHES" Style="{StaticResource SectionLabel}"/>
+              <DockPanel LastChildFill="False" Margin="0,0,0,7">
+                <TextBlock Text="CROSS-CHECK: SHAREGATE / FILES / PERMISSIONS" Style="{StaticResource SectionLabel}" DockPanel.Dock="Left"/>
+                <Button x:Name="btnCrossCheckRefresh" Content="Refresh cross-check" Style="{StaticResource BtnGhost}" Width="130" DockPanel.Dock="Right"/>
+              </DockPanel>
+              <TextBlock Text="Three separate measures. Comparison percentages use source inventory keys; ShareGate issues use report items and lines. Scope matches are indicative, not proof for an individual item."
+                         TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,0,0,7"/>
+              <StackPanel x:Name="panelCrossCheckLoading" Visibility="Collapsed" Margin="0,4,0,10">
+                <TextBlock x:Name="lblCrossCheckLoading" Text="Loading comparison reports…" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4"/>
+                <ProgressBar Height="5" Margin="0,7,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
+              </StackPanel>
+              <DataGrid x:Name="gridCrossCheckEvidence" Height="110" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column" AlternatingRowBackground="#F7FAFE">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="100"/>
+                  <DataGridTextColumn Header="Date" Binding="{Binding Date}" Width="145"/>
+                  <DataGridTextColumn Header="Rate" Binding="{Binding Rate}" Width="80"/>
+                  <DataGridTextColumn Header="Coverage" Binding="{Binding Coverage}" Width="170"/>
+                  <DataGridTextColumn Header="Differences" Binding="{Binding Differences}" Width="*"/>
+                  <DataGridTextColumn Header="Evidence state" Binding="{Binding State}" Width="200"/>
+                </DataGrid.Columns>
+              </DataGrid>
+              <StackPanel Orientation="Horizontal" Margin="0,7,0,7">
+                <Button x:Name="btnCrossCheckFilesReport" Content="Open files report" Style="{StaticResource BtnGhost}" Width="115" IsEnabled="False"/>
+                <Button x:Name="btnCrossCheckPermissionsReport" Content="Open permissions report" Style="{StaticResource BtnGhost}" Width="145" Margin="7,0,0,0" IsEnabled="False"/>
+                <TextBlock x:Name="lblCrossCheckStatus" Text="Select a migration to compare existing reports." Margin="12,4,0,0" TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A"/>
+              </StackPanel>
+              <TextBlock Text="DIFFERENCES BY SITE AND LIST" Style="{StaticResource SectionLabel}" Margin="0,3,0,6"/>
+              <DataGrid x:Name="gridCrossCheckScopes" Height="175" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column" AlternatingRowBackground="#F7FAFE">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Site (matched scope)" Binding="{Binding Site}" Width="195"/>
+                  <DataGridTextColumn Header="List" Binding="{Binding List}" Width="130"/>
+                  <DataGridTextColumn Header="ShareGate to fix" Binding="{Binding ShareGateToFix}" Width="105"/>
+                  <DataGridTextColumn Header="Files missing" Binding="{Binding FilesMissing}" Width="85"/>
+                  <DataGridTextColumn Header="Files extra" Binding="{Binding FilesExtra}" Width="75"/>
+                  <DataGridTextColumn Header="File change flags" Binding="{Binding FileChangeFlags}" Width="90"/>
+                  <DataGridTextColumn Header="Perms missing" Binding="{Binding PermsMissing}" Width="90"/>
+                  <DataGridTextColumn Header="Disabled missing" Binding="{Binding PermsDisabled}" Width="90"/>
+                  <DataGridTextColumn Header="Perms extra" Binding="{Binding PermsExtra}" Width="75"/>
+                  <DataGridTextColumn Header="Perms changed" Binding="{Binding PermsChanged}" Width="95"/>
+                  <DataGridTextColumn Header="Interpretation" Binding="{Binding Assessment}" Width="*"/>
+                </DataGrid.Columns>
+              </DataGrid>
+            </StackPanel>
+          </Border>
+          <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,14,0">
+          <Border x:Name="cardTransient" Style="{StaticResource StepCard}" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Text="SHAREGATE 401 RETRY RESULTS" Style="{StaticResource SectionLabel}"/>
               <TextBlock x:Name="lblTransientStatus" Text="No batch result found." TextWrapping="Wrap" FontSize="12"/>
               <TextBlock x:Name="lblTransientCounts" Text="A reviewed ShareGate batch run will appear here." TextWrapping="Wrap" FontSize="12" Foreground="#5F6B7A" Margin="0,5,0,0"/>
               <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
@@ -900,30 +1080,36 @@ function Open-InExplorer {
               <StackPanel Orientation="Horizontal" Margin="0,7,0,5">
                 <Button x:Name="btnFarmRefresh" Content="Refresh farm results" Style="{StaticResource BtnGhost}" Width="120"/>
                 <Button x:Name="btnFarmOpenReport" Content="Open farm report" Style="{StaticResource BtnGhost}" Width="110" Margin="6,0,0,0" IsEnabled="False"/>
+                <Button x:Name="btnFarmCheck" Content="Check prerequisites" Style="{StaticResource BtnGhost}" Width="132" Margin="6,0,0,0"/>
+                <Button x:Name="btnFarmRun" Content="Run (read-only)" Style="{StaticResource Btn}" Width="110" Margin="6,0,0,0" IsEnabled="False"/>
               </StackPanel>
-              <TextBlock Text="Run on an elevated Windows PowerShell 5.1 console on a farm server. DryRun first." FontSize="11" Foreground="#5F6B7A"/>
+              <TextBlock x:Name="lblFarmPrerequisites" Text="Requires: farm server, elevated account with SharePoint Shell Admin rights, Windows PowerShell 5.1, SharePoint snap-in/module, shared UNC toolkit and valid access-peak CSV. Run the displayed DryRun first, then check prerequisites." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A"/>
               <TextBox x:Name="txtFarmDryRun" IsReadOnly="True" Height="28" Margin="0,5,0,0" VerticalContentAlignment="Center" FontFamily="Consolas" FontSize="10" ToolTip="DryRun command for the farm server"/>
               <TextBox x:Name="txtFarmRun" IsReadOnly="True" Height="28" Margin="0,5,0,0" VerticalContentAlignment="Center" FontFamily="Consolas" FontSize="10" ToolTip="Real read-only diagnostic command for the farm server"/>
             </StackPanel>
           </Border>
+          </StackPanel>
+          <Border Grid.Row="4" Grid.Column="1" Background="#DDE7F0"/>
+          <StackPanel x:Name="panelDiagReview" Grid.Row="4" Grid.Column="2" Margin="14,0,0,0" IsEnabled="False">
+          <TextBlock Text="ISSUE REVIEW" Style="{StaticResource SectionLabel}"/>
           <Border Style="{StaticResource StepCard}">
             <StackPanel>
               <TextBlock Text="ISSUE PATTERNS" Style="{StaticResource SectionLabel}"/>
               <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
                 <TextBlock Text="Session" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                <ComboBox x:Name="cmbDiagSession" Width="115" Height="27"/>
+                <ComboBox x:Name="cmbDiagSession" Width="100" Height="27"/>
                 <TextBlock Text="Status" VerticalAlignment="Center" Margin="10,0,5,0"/>
-                <ComboBox x:Name="cmbDiagStatus" Width="115" Height="27">
+                <ComboBox x:Name="cmbDiagStatus" Width="100" Height="27">
                   <ComboBoxItem Content="All statuses" IsSelected="True"/>
                   <ComboBoxItem Content="Error"/>
                   <ComboBoxItem Content="Warning"/>
                 </ComboBox>
-                <TextBox x:Name="txtDiagFilter" Width="230" Height="27" Margin="10,0,0,0" VerticalContentAlignment="Center" ToolTip="Filter category or pattern text"/>
+                <TextBox x:Name="txtDiagFilter" Width="170" Height="27" Margin="10,0,0,0" VerticalContentAlignment="Center" ToolTip="Filter category or pattern text"/>
                 <Button x:Name="btnDiagFilter" Content="Filter" Style="{StaticResource BtnGhost}" Width="62" Margin="6,0,0,0"/>
               </StackPanel>
               <DataGrid x:Name="gridDiagPatterns" Height="230" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" CanUserAddRows="False" HeadersVisibility="Column" AlternatingRowBackground="#F7FAFE">
                 <DataGrid.Columns>
-                  <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="180"/>
+                  <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="160"/>
                   <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="70"/>
                   <DataGridTextColumn Header="State" Binding="{Binding State}" Width="75"/>
                   <DataGridTextColumn Header="Lines" Binding="{Binding Lines}" Width="55"/>
@@ -962,7 +1148,8 @@ function Open-InExplorer {
               <TextBox x:Name="txtDiagRaw" Height="105" Margin="0,7,0,0" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
             </StackPanel>
           </Border>
-        </StackPanel>
+          </StackPanel>
+        </Grid>
 
         <!-- CONFIG -->
         <Grid x:Name="panelConfig" Margin="18,14" Visibility="Collapsed" MinHeight="500">
@@ -1149,6 +1336,11 @@ $tabConfig      = ctrl 'tabConfig'
 $panelSummary     = ctrl 'panelSummary'
 $gridSummary      = ctrl 'gridSummary'
 $lblSummaryStatus = ctrl 'lblSummaryStatus'
+$lblPortfolioMigrations = ctrl 'lblPortfolioMigrations'
+$lblPortfolioFilesCompared = ctrl 'lblPortfolioFilesCompared'
+$lblPortfolioPermissionsCompared = ctrl 'lblPortfolioPermissionsCompared'
+$lblPortfolioActions = ctrl 'lblPortfolioActions'
+$lblPortfolioRefreshErrors = ctrl 'lblPortfolioRefreshErrors'
 $panelWorkflows   = ctrl 'panelWorkflows'
 $panelOperations  = ctrl 'panelOperations'
 $panelDiagnostics = ctrl 'panelDiagnostics'
@@ -1215,15 +1407,36 @@ $listOps   = ctrl 'listOps'
 $lblNoOps  = ctrl 'lblNoOps'
 
 # Migration diagnostics
+$lblDiagMigration = ctrl 'lblDiagMigration'
 $lblDiagScope = ctrl 'lblDiagScope'
-$txtDiagInput = ctrl 'txtDiagInput'
-$btnDiagBrowseFile = ctrl 'btnDiagBrowseFile'
-$btnDiagBrowseFolder = ctrl 'btnDiagBrowseFolder'
+$lblDiagInputPath = ctrl 'lblDiagInputPath'
+$lblDiagLatestReport = ctrl 'lblDiagLatestReport'
+$btnDiagOpenFolder = ctrl 'btnDiagOpenFolder'
+$btnDiagRefresh = ctrl 'btnDiagRefresh'
 $btnDiagAnalyze = ctrl 'btnDiagAnalyze'
 $btnDiagOpenReport = ctrl 'btnDiagOpenReport'
+$cardDiagSummary = ctrl 'cardDiagSummary'
+$cardTransient = ctrl 'cardTransient'
+$panelDiagReview = ctrl 'panelDiagReview'
 $lblDiagProgress = ctrl 'lblDiagProgress'
 $lblDiagKpis = ctrl 'lblDiagKpis'
 $lblDiagInterpretation = ctrl 'lblDiagInterpretation'
+$lblSummaryShareGateValue = ctrl 'lblSummaryShareGateValue'
+$lblSummaryShareGateDetail = ctrl 'lblSummaryShareGateDetail'
+$lblSummaryFilesValue = ctrl 'lblSummaryFilesValue'
+$lblSummaryFilesDetail = ctrl 'lblSummaryFilesDetail'
+$lblSummaryPermissionsValue = ctrl 'lblSummaryPermissionsValue'
+$lblSummaryPermissionsDetail = ctrl 'lblSummaryPermissionsDetail'
+$lblSummaryCrossCheckValue = ctrl 'lblSummaryCrossCheckValue'
+$lblSummaryCrossCheckDetail = ctrl 'lblSummaryCrossCheckDetail'
+$gridCrossCheckEvidence = ctrl 'gridCrossCheckEvidence'
+$gridCrossCheckScopes = ctrl 'gridCrossCheckScopes'
+$lblCrossCheckStatus = ctrl 'lblCrossCheckStatus'
+$panelCrossCheckLoading = ctrl 'panelCrossCheckLoading'
+$lblCrossCheckLoading = ctrl 'lblCrossCheckLoading'
+$btnCrossCheckRefresh = ctrl 'btnCrossCheckRefresh'
+$btnCrossCheckFilesReport = ctrl 'btnCrossCheckFilesReport'
+$btnCrossCheckPermissionsReport = ctrl 'btnCrossCheckPermissionsReport'
 $cmbDiagSession = ctrl 'cmbDiagSession'
 $cmbDiagStatus = ctrl 'cmbDiagStatus'
 $txtDiagFilter = ctrl 'txtDiagFilter'
@@ -1245,6 +1458,9 @@ $lblFarmResult = ctrl 'lblFarmResult'
 $lblFarmPeaks = ctrl 'lblFarmPeaks'
 $btnFarmRefresh = ctrl 'btnFarmRefresh'
 $btnFarmOpenReport = ctrl 'btnFarmOpenReport'
+$btnFarmCheck = ctrl 'btnFarmCheck'
+$btnFarmRun = ctrl 'btnFarmRun'
+$lblFarmPrerequisites = ctrl 'lblFarmPrerequisites'
 $txtFarmDryRun = ctrl 'txtFarmDryRun'
 $txtFarmRun = ctrl 'txtFarmRun'
 
@@ -1283,7 +1499,17 @@ $script:WizardOpen = $false
 $script:TargetScopeMismatch = $false
 $script:ConfigEditorLoadedHash = ''
 $script:DiagInputPath = ''
+$script:DiagLatestReport = $null
+$script:DiagReportSignature = ''
+$script:DiagReportHash = ''
+$script:DiagLoading = $false
+$script:DiagAnalysisVerified = $false
 $script:DiagSummary = $null
+$script:CrossCheckSignature = ''
+$script:CrossCheckRequestedSignature = ''
+$script:CrossCheckJobSignature = ''
+$script:CrossCheckJob = $null
+$script:CrossCheckResult = $null
 $script:DiagRows = @()
 $script:DiagKnownSessions = @()
 $script:DiagProcess = $null
@@ -1291,7 +1517,10 @@ $script:DiagTimer = $null
 $script:DiagOutputDirectory = ''
 $script:DiagActivity = ''
 $script:DiagProjectRoot = ''
+$script:DiagLoadedDirectory = ''
 $script:FarmReportPath = ''
+$script:FarmInvocation = $null
+$script:FarmPrerequisitesPassed = $false
 $script:TransientResultsPath = ''
 $script:TransientOutOfBatchPath = ''
 
@@ -1676,8 +1905,8 @@ function Update-UI {
     Set-ScanComboItems $cmbScanTgtFile @($st.TargetFileCsvItems) $st.TargetFileCsv
     Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt
 
-    $r = Format-ItemAge $st.FileComparisonFolder
-    Set-Badge $badgeCmpFiles $lblCmpFilesAge $r.Text $r.HasRun
+    $fileComparisonText = Get-ComparisonBadgeText -Folder $st.FileComparisonFolder -MigrationName $script:CurrentMigration.Name -Kind Files
+    Set-Badge $badgeCmpFiles $lblCmpFilesAge $fileComparisonText ($null -ne $st.FileComparisonFolder)
     $lblCmpFilesDir.Text    = if ($st.FileComparisonFolder) { $st.FileComparisonFolder.Name } else { '' }
     $btnOpenCmpFiles.Visibility = if ($st.FileComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.FileComparisonFolder) { $btnOpenCmpFiles.Tag = $st.FileComparisonFolder.FullName }
@@ -1697,8 +1926,8 @@ function Update-UI {
     Set-ScanComboItems $cmbScanTgtPermFile @($st.TargetPermCsvItems) $st.TargetPermCsv
     Update-ScanFileSelection $cmbScanTgtPermFile $badgeScanTgtPerm $lblScanTgtPermAge $btnOpenScanTgtPerm
 
-    $r = Format-ItemAge $st.PermComparisonFolder
-    Set-Badge $badgeCmpPerms $lblCmpPermsAge $r.Text $r.HasRun
+    $permissionComparisonText = Get-ComparisonBadgeText -Folder $st.PermComparisonFolder -MigrationName $script:CurrentMigration.Name -Kind Permissions
+    Set-Badge $badgeCmpPerms $lblCmpPermsAge $permissionComparisonText ($null -ne $st.PermComparisonFolder)
     $lblCmpPermsDir.Text = if ($st.PermComparisonFolder) { $st.PermComparisonFolder.Name } else { '' }
     $btnOpenCmpPerms.Visibility = if ($st.PermComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.PermComparisonFolder) { $btnOpenCmpPerms.Tag = $st.PermComparisonFolder.FullName }
@@ -1955,16 +2184,30 @@ function Refresh-PortfolioSummary {
                     TargetScansSortDate = [datetime]::MinValue; TargetScansTooltip = $message
                     ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
                     ComparisonRate = $null; ComparisonPercent = '—'
-                    ComparisonDate = '—'; ComparisonTooltip = $message
+                    ComparisonDate = '—'; ComparisonDisplay = '—'; ComparisonTooltip = $message
                     PermissionComparisonRate = $null; PermissionComparisonPercent = '—'
-                    PermissionComparisonDate = '—'; PermissionComparisonTooltip = $message
+                    PermissionComparisonDate = '—'; PermissionComparisonDisplay = '—'; PermissionComparisonTooltip = $message
                     Status = 'Refresh error'; StatusTooltip = $message
                 })
             }
         }
     }
+    $displayedRows = $rows.ToArray()
+    $fileCount = @($displayedRows | Where-Object { $_.ComparisonDate -ne '—' }).Count
+    $permissionCount = @($displayedRows | Where-Object { $_.PermissionComparisonDate -ne '—' }).Count
+    $scanCount = @($displayedRows | Where-Object { $_.Status -eq 'Scan needed' }).Count
+    $compareCount = @($displayedRows | Where-Object { $_.Status -eq 'Compare needed' }).Count
+    $reviewCount = @($displayedRows | Where-Object { $_.Status -eq 'Review needed' }).Count
+    $actionCount = $scanCount + $compareCount + $reviewCount
+    $lblPortfolioMigrations.Text = [string]$displayedRows.Count
+    $lblPortfolioFilesCompared.Text = '{0} / {1}' -f $fileCount, $displayedRows.Count
+    $lblPortfolioPermissionsCompared.Text = '{0} / {1}' -f $permissionCount, $displayedRows.Count
+    $lblPortfolioActions.Text = [string]$actionCount
+    $lblPortfolioActions.ToolTip = 'Scan needed: {0}; Compare needed: {1}; Review needed: {2}' -f $scanCount, $compareCount, $reviewCount
+    $lblPortfolioRefreshErrors.Text = [string]$errors.Count
+    $lblPortfolioRefreshErrors.ToolTip = if ($errors.Count) { $errors -join "`n" } else { 'No refresh errors.' }
     $script:SummaryLoading = $true
-    try { $gridSummary.ItemsSource = $rows.ToArray() }
+    try { $gridSummary.ItemsSource = $displayedRows }
     finally { $script:SummaryLoading = $false }
     $lblSummaryStatus.Text = ('{0} migrations · {1} refresh errors · Updated {2}' -f
         $rows.Count, $errors.Count, (Get-Date -Format 'HH:mm:ss'))
@@ -2011,6 +2254,15 @@ function Refresh-GuiState {
     }
 }
 
+function Get-DiagnosticReportDisplayPath {
+    param([string]$Folder)
+    if (-not $Folder) { return 'SharePointMigration\Migrations' }
+    $relative = [IO.Path]::GetRelativePath($script:ScriptRoot, $Folder).Replace('/', '\')
+    if ($relative -eq '..' -or $relative.StartsWith('..\', [StringComparison]::Ordinal) -or
+        [IO.Path]::IsPathRooted($relative)) { return 'Report folder is outside SharePointMigration.' }
+    return 'SharePointMigration\' + $relative
+}
+
 function Set-CurrentMigration {
     param($Migration)
     $sameConfig = $null -ne $script:CurrentMigration -and
@@ -2030,24 +2282,16 @@ function Set-CurrentMigration {
     $script:CurrentMigration = $Migration
     if (-not $sameConfig) {
         $script:DiagInputPath = Join-Path $Migration.Root 'ShareGate\MigrationReport'
-        $txtDiagInput.Text = $script:DiagInputPath
-        $script:DiagSummary = $null
-        $script:DiagRows = @()
-        $script:DiagKnownSessions = @()
-        $gridDiagPatterns.ItemsSource = $null
-        $gridDiagRows.ItemsSource = $null
-        $txtDiagRaw.Text = ''
-        $lblDiagKpis.Text = 'No analysis yet.'
-        $lblDiagProgress.Text = 'Select a migration report folder or a CSV/XLSX file.'
-        $btnDiagOpenReport.IsEnabled = $false
-        $cmbDiagSession.Items.Clear()
-        [void]$cmbDiagSession.Items.Add('All sessions')
-        $cmbDiagSession.SelectedIndex = 0
+        $lblDiagInputPath.Text = Get-DiagnosticReportDisplayPath -Folder $script:DiagInputPath
+        $script:DiagReportSignature = ''
+        Clear-DiagnosticResult
     }
     $script:CurrentStatus    = Get-MigrationStatus -Migration $Migration
+    Refresh-DiagnosticReportState
     Refresh-TransientResults
-    Refresh-FarmDiagnostics
+    if (-not $sameConfig) { Refresh-FarmDiagnostics }
     Update-UI
+    Refresh-DiagnosticCrossCheck
     if (-not $sameConfig -or -not $script:ConfigEditorDirty) {
         Load-ConfigEditor
     }
@@ -2120,7 +2364,7 @@ function Load-Migrations {
 $tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
-$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics' })
+$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticCrossCheck })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
 $tabConfig.Add_Click({      Switch-Tab 'Config' })
 
@@ -2360,7 +2604,246 @@ function Refresh-DiagnosticRows {
     $txtDiagRaw.Text = ''
 }
 
+function Clear-DiagnosticResult {
+    $script:DiagSummary = $null
+    $script:DiagAnalysisVerified = $false
+    $script:DiagLoadedDirectory = ''
+    $script:DiagRows = @()
+    $script:DiagKnownSessions = @()
+    $gridDiagPatterns.ItemsSource = $null
+    $gridDiagRows.ItemsSource = $null
+    $txtDiagRaw.Text = ''
+    $lblDiagKpis.Text = 'No analysis for the latest report yet.'
+    $lblSummaryShareGateValue.Text = '—'
+    $lblSummaryShareGateDetail.Text = 'Analyze the latest report'
+    $lblSummaryShareGateDetail.ToolTip = $null
+    $lblSummaryFilesValue.Text = '—'
+    $lblSummaryFilesDetail.Text = 'Loading comparison'
+    $lblSummaryFilesDetail.ToolTip = $null
+    $lblSummaryPermissionsValue.Text = '—'
+    $lblSummaryPermissionsDetail.Text = 'Loading comparison'
+    $lblSummaryPermissionsDetail.ToolTip = $null
+    $lblSummaryCrossCheckValue.Text = '—'
+    $lblSummaryCrossCheckDetail.Text = 'Loading cross-check'
+    $lblSummaryCrossCheckDetail.ToolTip = $null
+    $btnDiagOpenReport.IsEnabled = $false
+    $panelDiagReview.IsEnabled = $false
+    $script:FarmInvocation = $null
+    $script:FarmPrerequisitesPassed = $false
+    $btnFarmCheck.IsEnabled = $false
+    $btnFarmRun.IsEnabled = $false
+    $txtFarmDryRun.Text = ''
+    $txtFarmRun.Text = ''
+    $script:DiagLoading = $true
+    try {
+        $cmbDiagSession.Items.Clear()
+        [void]$cmbDiagSession.Items.Add('All sessions')
+        $cmbDiagSession.SelectedIndex = 0
+    }
+    finally { $script:DiagLoading = $false }
+}
+
+function Update-DiagnosticSummaryCrossCheck {
+    param($Result)
+    foreach ($spec in @(
+        @{ Evidence='Files'; Value=$lblSummaryFilesValue; Detail=$lblSummaryFilesDetail; Path='FilesSummary' },
+        @{ Evidence='Permissions'; Value=$lblSummaryPermissionsValue; Detail=$lblSummaryPermissionsDetail; Path='PermissionsSummary' }
+    )) {
+        $entry = @($Result.Evidence | Where-Object { $_.Evidence -eq $spec.Evidence } | Select-Object -First 1)
+        if ($entry.Count -and $null -ne $entry[0] -and $entry[0].Rate -ne '—') {
+            $spec.Value.Text = [string]$entry[0].Rate
+            $spec.Detail.Text = "$($entry[0].Coverage) · $($entry[0].State)"
+        }
+        else {
+            $spec.Value.Text = '—'
+            $spec.Detail.Text = if ($entry.Count -and $null -ne $entry[0]) { [string]$entry[0].State } else { 'Comparison unavailable' }
+        }
+        $spec.Detail.ToolTip = [string]$Result.($spec.Path)
+    }
+    $hasEvidence = @($Result.Evidence | Where-Object {
+        ($_.Evidence -eq 'ShareGate' -and $_.State -ne 'Analysis missing') -or
+        ($_.Evidence -in @('Files','Permissions') -and $_.Rate -ne '—')
+    }).Count -gt 0
+    $lblSummaryCrossCheckValue.Text = if ($hasEvidence) { [string](@($Result.Scopes).Count) } else { '—' }
+    $lblSummaryCrossCheckDetail.Text = if ($hasEvidence) { "Scopes with differences · $($Result.Ambiguous) ambiguous" } else { 'Evidence unavailable' }
+    $lblSummaryCrossCheckDetail.ToolTip = 'Matched site and list scopes with at least one reported difference; not a count of individual files or permissions.'
+}
+
+function Get-DiagnosticCrossCheckSignature {
+    if (-not $script:CurrentMigration -or -not $script:CurrentStatus) { return '' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add([string]$script:CurrentMigration.Root)
+    $parts.Add([string]$script:DiagLoadedDirectory)
+    $parts.Add([string]$script:DiagAnalysisVerified)
+    foreach ($name in @('SourceFileCsv','TargetFileCsv','SourcePermCsv','TargetPermCsv','FileComparisonFolder','PermComparisonFolder')) {
+        $item = $script:CurrentStatus.PSObject.Properties[$name].Value
+        $parts.Add($(if ($item) { [string]$item.FullName } else { '' }))
+        $parts.Add($(if ($item) { [string]$item.LastWriteTimeUtc.Ticks } else { '' }))
+    }
+    return $parts -join '|'
+}
+
+function Start-DiagnosticCrossCheckJob {
+    param([string]$Signature)
+    $context = [pscustomobject]@{
+        Migration=$script:CurrentMigration; Status=$script:CurrentStatus
+        Summary=$script:DiagSummary; Rows=@($script:DiagRows)
+        Verified=[bool]$script:DiagAnalysisVerified
+    }
+    $summaryScript = Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-Summary.ps1'
+    $crossCheckScript = Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-CrossCheck.ps1'
+    $script:CrossCheckJob = Start-ThreadJob -ScriptBlock {
+        param($InputContext,$SummaryScript,$CrossCheckScript)
+        . $SummaryScript
+        . $CrossCheckScript
+        Get-SmartM365DiagnosticCrossCheck -Migration $InputContext.Migration -Status $InputContext.Status `
+            -DiagnosticSummary $InputContext.Summary -DiagnosticRows @($InputContext.Rows) `
+            -DiagnosticVerified ([bool]$InputContext.Verified)
+    } -ArgumentList $context,$summaryScript,$crossCheckScript -ErrorAction Stop
+    $script:CrossCheckJobSignature = $Signature
+    $script:CrossCheckTimer.Start()
+}
+
+function Refresh-DiagnosticCrossCheck {
+    param([switch]$Force)
+    if (-not $tabDiagnostics.IsChecked -and -not $Force) { return }
+    $signature = Get-DiagnosticCrossCheckSignature
+    if (-not $Force -and $signature -and $signature -eq $script:CrossCheckSignature) {
+        if ($script:CrossCheckResult) { Update-DiagnosticSummaryCrossCheck $script:CrossCheckResult }
+        return
+    }
+    if (-not $Force -and $script:CrossCheckJob -and $signature -eq $script:CrossCheckJobSignature) { return }
+    $script:CrossCheckRequestedSignature = $signature
+    $gridCrossCheckEvidence.ItemsSource = $null
+    $gridCrossCheckScopes.ItemsSource = $null
+    $btnCrossCheckFilesReport.IsEnabled = $false
+    $btnCrossCheckPermissionsReport.IsEnabled = $false
+    $btnCrossCheckFilesReport.Tag = $null
+    $btnCrossCheckPermissionsReport.Tag = $null
+    $script:CrossCheckResult = $null
+    $lblSummaryFilesValue.Text = '—'
+    $lblSummaryFilesDetail.Text = 'Loading comparison'
+    $lblSummaryPermissionsValue.Text = '—'
+    $lblSummaryPermissionsDetail.Text = 'Loading comparison'
+    $lblSummaryCrossCheckValue.Text = '—'
+    $lblSummaryCrossCheckDetail.Text = 'Loading cross-check'
+    if (-not $script:CurrentMigration -or -not $script:CurrentStatus) {
+        $panelCrossCheckLoading.Visibility = 'Collapsed'
+        $lblCrossCheckStatus.Text = 'Select a migration to compare existing reports.'
+        $lblSummaryFilesDetail.Text = 'Select a migration'
+        $lblSummaryPermissionsDetail.Text = 'Select a migration'
+        $lblSummaryCrossCheckDetail.Text = 'Select a migration'
+        return
+    }
+    $script:CrossCheckLoadingStarted = Get-Date
+    $panelCrossCheckLoading.Visibility = 'Visible'
+    $lblCrossCheckLoading.Text = "Loading comparison reports for $($script:CurrentMigration.Name)…"
+    $lblCrossCheckStatus.Text = if ($script:CrossCheckJob) { 'Waiting for the previous cross-check, then loading the selected migration…' }
+        else { 'Loading existing comparison reports…' }
+    if ($script:CrossCheckJob) { return }
+    try {
+        Start-DiagnosticCrossCheckJob -Signature $signature
+    }
+    catch {
+        $panelCrossCheckLoading.Visibility = 'Collapsed'
+        $lblCrossCheckStatus.Text = 'Cross-check unavailable: ' + $_.Exception.Message
+        $lblSummaryFilesDetail.Text = 'Cross-check unavailable'
+        $lblSummaryPermissionsDetail.Text = 'Cross-check unavailable'
+        $lblSummaryCrossCheckDetail.Text = 'Cross-check unavailable'
+    }
+}
+
+function Get-CurrentDiagnosticAnalysis {
+    param([System.IO.FileInfo]$Report)
+    if (-not $Report -or -not $script:CurrentMigration) { return $null }
+    $root = Join-Path $script:CurrentMigration.Root 'ShareGate\Diagnostics'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return $null }
+    $dirs = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    foreach ($dir in $dirs) {
+        $summaryPath = Join-Path $dir.FullName 'Summary.json.txt'
+        if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { continue }
+        try {
+            $summaryJson = Get-Content -LiteralPath $summaryPath -Raw -ErrorAction Stop
+            $summary = $summaryJson | ConvertFrom-Json -AsHashtable
+            $jsonDocument = [System.Text.Json.JsonDocument]::Parse($summaryJson)
+            try { $generatedAtUtc = $jsonDocument.RootElement.GetProperty('GeneratedAtUtc').GetString() }
+            finally { $jsonDocument.Dispose() }
+            if ([string]$summary.Project -ne [string]$script:CurrentMigration.Name) { continue }
+            if (@($summary.Inputs).Count -ne 1) { continue }
+            $recordedInput = [string]$summary.Inputs[0]
+            if (-not [string]::Equals($recordedInput, $Report.FullName, [StringComparison]::OrdinalIgnoreCase) -and
+                -not [string]::Equals([IO.Path]::GetFileName($recordedInput), $Report.Name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName 'MigrationDiagnostics-Report.html') -PathType Leaf) -or
+                -not (Test-Path -LiteralPath (Join-Path $dir.FullName 'ClassifiedRows.csv') -PathType Leaf)) { continue }
+            $evidence = @($summary['InputEvidence'])
+            if ($evidence.Count -eq 1 -and $evidence[0]) {
+                if ([int64]$evidence[0].Size -ne $Report.Length -or
+                    -not [string]::Equals([IO.Path]::GetFileName([string]$evidence[0].Path), $Report.Name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                if (-not $script:DiagReportHash) { $script:DiagReportHash = (Get-FileHash -LiteralPath $Report.FullName -Algorithm SHA256).Hash }
+                if (-not [string]::Equals([string]$evidence[0].Sha256, $script:DiagReportHash, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                return [pscustomobject]@{ Directory=$dir.FullName; Verified=$true; Session=[string]$summary.SelectedSessionId; Generated=$generatedAtUtc }
+            }
+            $generated = [datetimeoffset]::MinValue
+            if ([datetimeoffset]::TryParse($generatedAtUtc, [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::None, [ref]$generated) -and $generated.UtcDateTime -ge $Report.LastWriteTimeUtc) {
+                return [pscustomobject]@{ Directory=$dir.FullName; Verified=$false; Session=''; Generated=$generatedAtUtc }
+            }
+        }
+        catch { continue }
+    }
+    return $null
+}
+
+function Refresh-DiagnosticReportState {
+    param([switch]$Force)
+    if (-not $script:CurrentMigration) { return }
+    $folder = Join-Path $script:CurrentMigration.Root 'ShareGate\MigrationReport'
+    $script:DiagInputPath = $folder
+    $lblDiagInputPath.Text = Get-DiagnosticReportDisplayPath -Folder $folder
+    $lblDiagMigration.Text = 'Selected migration: ' + $script:CurrentMigration.Name
+    $files = @()
+    if (Test-Path -LiteralPath $folder -PathType Container) {
+        $files = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object Extension -In @('.csv', '.xlsx') | Sort-Object -Property @{ Expression='LastWriteTimeUtc'; Descending=$true }, Name)
+    }
+    $report = if ($files.Count) { $files[0] } else { $null }
+    if ($report -and $report.Extension -eq '.xlsx') {
+        $csv = @($files | Where-Object { $_.Extension -eq '.csv' -and $_.BaseName -eq $report.BaseName } | Select-Object -First 1)
+        if ($csv.Count) { $report = $csv[0] }
+    }
+    $signature = if ($report) { '{0}|{1}|{2}' -f $report.FullName, $report.Length, $report.LastWriteTimeUtc.Ticks } else { '(empty)' }
+    if (-not $Force -and $signature -eq $script:DiagReportSignature) { return }
+    $script:DiagReportSignature = $signature
+    $script:DiagLatestReport = $report
+    $script:DiagReportHash = ''
+    Clear-DiagnosticResult
+    $lblDiagLatestReport.ToolTip = if ($report) { $report.FullName } else { $folder }
+    $isRunning = $script:DiagProcess -and -not $script:DiagProcess.HasExited
+    $btnDiagAnalyze.IsEnabled = [bool]($report -and -not $isRunning -and ($report.Extension -eq '.csv' -or (Get-Module -ListAvailable -Name ImportExcel)))
+    if (-not $report) {
+        $lblDiagLatestReport.Text = 'No ShareGate report found. Place the latest migration report (CSV or XLSX) in MigrationReport, then click Refresh reports.'
+        $lblDiagProgress.Text = 'Analysis unavailable until a report is deposited.'
+        return
+    }
+    $size = '{0:N1} MB' -f ($report.Length / 1MB)
+    $lblDiagLatestReport.Text = "Latest report: $($report.Name) | $($report.LastWriteTime.ToString('yyyy-MM-dd HH:mm')) | $size | $($report.Extension.ToUpperInvariant())"
+    $lblDiagLatestReport.ToolTip = $report.FullName
+    if (-not $btnDiagAnalyze.IsEnabled -and -not $isRunning) {
+        $lblDiagProgress.Text = 'XLSX analysis requires the ImportExcel module in the current user context.'
+        return
+    }
+    $cached = Get-CurrentDiagnosticAnalysis -Report $report
+    if ($cached) {
+        $script:DiagAnalysisVerified = [bool]$cached.Verified
+        Load-DiagnosticResult -Directory $cached.Directory
+        $basis = if ($cached.Verified) { 'SHA256 verified' } else { 'legacy analysis: path and timestamp only' }
+        $session = if ($cached.Session) { " | session $($cached.Session)" } else { '' }
+        $lblDiagProgress.Text = "Existing analysis for latest report ($basis$session): $($cached.Generated) UTC."
+    }
+    else { $lblDiagProgress.Text = 'Latest report has not been analyzed yet. Analyze it to create an HTML report and summary.' }
+}
+
 function Refresh-TransientResults {
+    $cardTransient.Visibility = 'Collapsed'
     $script:TransientResultsPath = ''
     $script:TransientOutOfBatchPath = ''
     $btnTransientOpen.IsEnabled = $false
@@ -2382,6 +2865,7 @@ function Refresh-TransientResults {
             if ($total -ne [int]$summary.PlannedItems) { throw 'Batch result counters do not equal PlannedItems.' }
             $lblTransientStatus.Text = "Latest run: $($summary.RunStatus) | session $($summary.SessionId) | $($summary.CompletedBatches)/$($summary.BatchCount) batches | $($summary.GeneratedAtUtc) UTC"
             $lblTransientCounts.Text = "Planned: $($summary.PlannedItems) | Success: $($summary.Success) | Skipped: $($summary.Skipped) | Error: $($summary.Error) | Warning: $($summary.Warning) | Mixed: $($summary.Mixed) | Unreported: $($summary.Unreported) | Not attempted: $($summary.NotAttempted) | Excluded for separate handling: $($summary.OutOfBatchLines) ($($summary.OutOfBatchSiteLines) Site, $($summary.OutOfBatchFileLines) File) | Home pages separate: $($summary.SeparatePageItems)"
+            $cardTransient.Visibility = 'Visible'
             $resultsPath = Join-Path $run.FullName 'Transient-Results.csv'
             if ($resultsPath -and (Test-Path -LiteralPath $resultsPath -PathType Leaf)) {
                 $resolved = (Resolve-Path -LiteralPath $resultsPath).ProviderPath
@@ -2407,9 +2891,14 @@ function Refresh-TransientResults {
 
 function Refresh-FarmDiagnostics {
     $script:FarmReportPath = ''
+    $script:FarmInvocation = $null
+    $script:FarmPrerequisitesPassed = $false
     $btnFarmOpenReport.IsEnabled = $false
+    $btnFarmCheck.IsEnabled = $false
+    $btnFarmRun.IsEnabled = $false
     $txtFarmDryRun.Text = ''
     $txtFarmRun.Text = ''
+    $lblFarmPrerequisites.Text = 'Requires: farm server, elevated account with SharePoint Shell Admin rights, Windows PowerShell 5.1, SharePoint snap-in/module, shared UNC toolkit and valid access-peak CSV. Run the displayed DryRun first, then check prerequisites.'
     if (-not $script:CurrentMigration) { return }
     $project = [string]$script:CurrentMigration.Name
     $diagnostics = Join-Path $script:CurrentMigration.Root 'ShareGate\Diagnostics'
@@ -2433,7 +2922,14 @@ function Refresh-FarmDiagnostics {
         }
         catch { $lblFarmResult.Text = "Farm result cannot be read: $summaryPath. $($_.Exception.Message)" }
     }
-    $analysisFiles = @(Get-ChildItem -LiteralPath $diagnostics -Recurse -File -Filter 'AccessFailures-5min.csv' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    if (-not $script:DiagAnalysisVerified) {
+        $lblFarmPeaks.Text = 'Analyze the latest report to record its SHA256 before running source farm diagnostics.'
+        return
+    }
+    $analysisFiles = @()
+    if ($script:DiagLoadedDirectory -and (Test-Path -LiteralPath $script:DiagLoadedDirectory -PathType Container)) {
+        $analysisFiles = @(Get-ChildItem -LiteralPath $script:DiagLoadedDirectory -File -Filter 'AccessFailures-5min.csv' -ErrorAction SilentlyContinue)
+    }
     if (-not $analysisFiles.Count) { return }
     $peaks = @()
     $peakFile = $null
@@ -2455,10 +2951,66 @@ function Refresh-FarmDiagnostics {
     }
     $scriptPath = Join-Path $farmRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnostic.ps1'
     $uncPeakPath = Join-Path (Join-Path (Join-Path $farmRoot 'Migrations') $project) $relative
+    $script:FarmInvocation = [pscustomobject]@{ ScriptPath=$scriptPath; Project=$project; Around=$utc; PeaksCsv=$uncPeakPath; ToolkitRoot=$farmRoot }
+    $btnFarmCheck.IsEnabled = $true
     $common = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Project "{1}" -Around "{2}" -WindowMinutes 30 -ShareGatePeaksCsv "{3}" -ToolkitRoot "{4}"' -f $scriptPath,$project,$utc,$uncPeakPath,$farmRoot
     $txtFarmDryRun.Text = $common + ' -DryRun'
     $txtFarmRun.Text = $common
     $lblFarmPeaks.Text = "ShareGate access windows: $($peaks.Count) in $($peakFile.Name). Largest: $($peak.WindowUtc), $($peak.Lines) lines. Both commands include every window through the peaks CSV."
+}
+
+function Test-FarmDiagnosticsPrerequisites {
+    Refresh-DiagnosticReportState -Force
+    $script:FarmPrerequisitesPassed = $false
+    $btnFarmRun.IsEnabled = $false
+    $issues = [System.Collections.Generic.List[string]]::new()
+    $invocation = $script:FarmInvocation
+    if (-not $invocation) { $issues.Add('Analyze a report with valid access-failure windows first.') }
+    else {
+        if (-not $invocation.ToolkitRoot.StartsWith('\\') -or -not (Test-Path -LiteralPath $invocation.ScriptPath -PathType Leaf)) {
+            $issues.Add('Shared UNC toolkit or farm diagnostic script is unavailable. Set -FarmToolkitRoot.')
+        }
+        if (-not (Test-Path -LiteralPath $invocation.PeaksCsv -PathType Leaf)) {
+            $issues.Add('The access-peak CSV is not available on the shared UNC path.')
+        }
+    }
+    $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $ps51 -PathType Leaf)) { $issues.Add('Windows PowerShell 5.1 is unavailable.') }
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $issues.Add('Start the GUI elevated on a SharePoint farm server.')
+    }
+    if (-not $issues.Count) {
+        $check = @'
+$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion.ToString() -notlike '5.1.*') { throw 'Windows PowerShell 5.1 is required.' }
+if (-not (Get-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
+    try { Add-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction Stop }
+    catch { Import-Module SharePointServer -ErrorAction Stop }
+}
+$null = Get-SPFarm -ErrorAction Stop
+$localName = $env:COMPUTERNAME
+$servers = @(Get-SPServer -ErrorAction Stop)
+if (-not @($servers | Where-Object { ([string]$_.Address).Split('.')[0] -eq $localName }).Count) {
+    throw "This machine ($localName) is not a server in the SharePoint farm."
+}
+'@
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($check))
+        try {
+            $output = @(& $ps51 -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw (($output | ForEach-Object { [string]$_ }) -join ' ') }
+        }
+        catch { $issues.Add('SharePoint farm access failed in Windows PowerShell 5.1: ' + $_.Exception.Message) }
+    }
+    if ($issues.Count) {
+        $lblFarmPrerequisites.Text = 'Run unavailable: ' + ($issues -join ' | ')
+        return $false
+    }
+    $script:FarmPrerequisitesPassed = $true
+    $btnFarmRun.IsEnabled = $true
+    $lblFarmPrerequisites.Text = 'Ready: elevated farm server, SharePoint Shell access, Windows PowerShell 5.1, shared toolkit and access-peak CSV verified. Run collects read-only farm evidence.'
+    return $true
 }
 
 function Load-DiagnosticResult {
@@ -2466,41 +3018,59 @@ function Load-DiagnosticResult {
     $summaryPath = Join-Path $Directory 'Summary.json.txt'
     if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) { throw "Analysis summary was not created: $summaryPath" }
     $script:DiagSummary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -AsHashtable
+    $script:DiagLoadedDirectory = $Directory
+    $script:DiagSummary.ReportPath = Join-Path $Directory 'MigrationDiagnostics-Report.html'
+    $script:DiagSummary.RowsPath = Join-Path $Directory 'ClassifiedRows.csv'
+    $sessionLabel = if (@($script:DiagSummary.Sessions).Count) { @($script:DiagSummary.Sessions) -join ', ' } else { '(none)' }
+    $lblDiagLatestReport.Text += " | Session: $sessionLabel | Lines: $($script:DiagSummary.Lines)"
     $script:DiagRows = @(Import-Csv -LiteralPath $script:DiagSummary.RowsPath)
     $selected = if ($cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
     $script:DiagKnownSessions = @($script:DiagKnownSessions + @($script:DiagSummary.Sessions) | Sort-Object -Unique)
-    $cmbDiagSession.Items.Clear()
-    [void]$cmbDiagSession.Items.Add('All sessions')
-    foreach ($session in $script:DiagKnownSessions) { [void]$cmbDiagSession.Items.Add([string]$session) }
-    $index = $cmbDiagSession.Items.IndexOf($selected)
-    $cmbDiagSession.SelectedIndex = if ($index -ge 0) { $index } else { 0 }
+    $script:DiagLoading = $true
+    try {
+        $cmbDiagSession.Items.Clear()
+        [void]$cmbDiagSession.Items.Add('All sessions')
+        foreach ($session in $script:DiagKnownSessions) { [void]$cmbDiagSession.Items.Add([string]$session) }
+        $index = $cmbDiagSession.Items.IndexOf($selected)
+        $cmbDiagSession.SelectedIndex = if ($index -ge 0) { $index } else { 0 }
+    }
+    finally { $script:DiagLoading = $false }
     $lines = $script:DiagSummary.Lines
+    $lineStatuses = $script:DiagSummary.LineStatus
     $lineStates = $script:DiagSummary.IssueLineState
     $itemStates = $script:DiagSummary.IssueItemState
     $lineRate = if ($null -ne $script:DiagSummary.ResidualLineRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualLineRate } else { 'n/a' }
     $itemRate = if ($null -ne $script:DiagSummary.ResidualItemRate) { '{0:N2}%' -f [double]$script:DiagSummary.ResidualItemRate } else { 'n/a' }
     $lblDiagKpis.Text = ('Lines: {0} | Success: {1} | Error: {2} | Warning: {3} | Accepted: {4} | To fix: {5}`nDistinct keyed items: {6} | Unkeyed lines: {7} | Items to fix: {8} | Residual lines: {9} | Residual items: {10}' -f
-        $lines, $script:DiagSummary.LineStatus.Success, $script:DiagSummary.LineStatus.Error,
-        $script:DiagSummary.LineStatus.Warning, $lineStates.Accepted, $lineStates['To fix'],
-        $script:DiagSummary.DistinctItems, $script:DiagSummary.UnkeyedRows, $itemStates['To fix'],
+        $lines, [int]$lineStatuses['Success'], [int]$lineStatuses['Error'],
+        [int]$lineStatuses['Warning'], [int]$lineStates['Accepted'], [int]$lineStates['To fix'],
+        $script:DiagSummary.DistinctItems, $script:DiagSummary.UnkeyedRows, [int]$itemStates['To fix'],
         $lineRate, $itemRate).Replace('`n', "`n")
+    $lblSummaryShareGateValue.Text = [string]([int]$itemStates['To fix'])
+    $verification = if ($script:DiagAnalysisVerified) { 'SHA256 verified' } else { 'legacy analysis' }
+    $lblSummaryShareGateDetail.Text = "$($script:DiagSummary.DistinctItems) keyed items · $itemRate residual · $verification"
+    $lblSummaryShareGateDetail.ToolTip = "ShareGate analysis: $($script:DiagSummary.ReportPath)"
     $btnDiagOpenReport.IsEnabled = (Test-Path -LiteralPath $script:DiagSummary.ReportPath -PathType Leaf)
-    $lblDiagProgress.Text = "Analysis completed: $($script:DiagSummary.Sessions.Count) session(s); $($script:DiagSummary.DuplicateRowsSuppressed) duplicate rows suppressed."
+    $panelDiagReview.IsEnabled = $true
+    $lblDiagProgress.Text = "Analysis completed: $(@($script:DiagSummary.Sessions).Count) session(s); $($script:DiagSummary.DuplicateRowsSuppressed) duplicate rows suppressed."
     if ($script:DiagSummary.ConflictingDuplicateRows -gt 0) {
         $lblDiagProgress.Text += " $($script:DiagSummary.ConflictingDuplicateRows) conflicting duplicate rows require review."
     }
     Refresh-DiagnosticPatterns
     Refresh-FarmDiagnostics
+    Refresh-DiagnosticCrossCheck
 }
 
 function Start-DiagnosticAnalysis {
     if ($script:DiagProcess -and -not $script:DiagProcess.HasExited) { return }
     if (-not $script:CurrentMigration) { return }
-    $inputPath = [string]$txtDiagInput.Text
-    if (-not (Test-Path -LiteralPath $inputPath)) {
-        [System.Windows.MessageBox]::Show("Report path does not exist:`n$inputPath", $script:AppName, 'OK', 'Warning') | Out-Null
+    Refresh-DiagnosticReportState
+    $report = $script:DiagLatestReport
+    if (-not $report -or -not (Test-Path -LiteralPath $report.FullName -PathType Leaf)) {
+        [System.Windows.MessageBox]::Show('Place the latest ShareGate CSV or XLSX report in MigrationReport first.', $script:AppName, 'OK', 'Warning') | Out-Null
         return
     }
+    $inputPath = $report.FullName
     $wrapper = Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1'
     $output = Join-Path $script:CurrentMigration.Root ('ShareGate\Diagnostics\{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N'))
     $activity = $null
@@ -2526,33 +3096,47 @@ function Start-DiagnosticAnalysis {
     catch {
         if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
         $lblDiagProgress.Text = "Could not start analysis: $($_.Exception.Message)"
-        $btnDiagAnalyze.IsEnabled = $true
+        $btnDiagAnalyze.IsEnabled = [bool]$script:DiagLatestReport
     }
 }
 
-$btnDiagBrowseFile.Add_Click({
-    $dialog = [Microsoft.Win32.OpenFileDialog]::new()
-    $dialog.Filter = 'ShareGate reports (*.csv;*.xlsx)|*.csv;*.xlsx|All files (*.*)|*.*'
-    if ($dialog.ShowDialog($script:Window)) { $txtDiagInput.Text = $dialog.FileName }
+$btnDiagOpenFolder.Add_Click({
+    if (-not $script:CurrentMigration) { return }
+    $folder = Join-Path $script:CurrentMigration.Root 'ShareGate\MigrationReport'
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) { [void](New-Item -ItemType Directory -Path $folder -Force) }
+    Open-InExplorer $folder
 })
+$btnDiagRefresh.Add_Click({ Refresh-DiagnosticReportState -Force; Refresh-DiagnosticCrossCheck -Force })
+$btnCrossCheckRefresh.Add_Click({ Refresh-DiagnosticReportState -Force; Refresh-DiagnosticCrossCheck -Force })
+$btnCrossCheckFilesReport.Add_Click({ if ($btnCrossCheckFilesReport.Tag) { Open-InExplorer $btnCrossCheckFilesReport.Tag } })
+$btnCrossCheckPermissionsReport.Add_Click({ if ($btnCrossCheckPermissionsReport.Tag) { Open-InExplorer $btnCrossCheckPermissionsReport.Tag } })
 $btnFarmRefresh.Add_Click({ Refresh-FarmDiagnostics })
+$btnFarmCheck.Add_Click({ [void](Test-FarmDiagnosticsPrerequisites) })
+$btnFarmRun.Add_Click({
+    if (-not (Test-FarmDiagnosticsPrerequisites)) { return }
+    $invocation = $script:FarmInvocation
+    $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    try {
+        $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $invocation.ScriptPath + '"'),
+            '-Project',('"' + $invocation.Project + '"'),'-Around',('"' + $invocation.Around + '"'),
+            '-WindowMinutes','30','-ShareGatePeaksCsv',('"' + $invocation.PeaksCsv + '"'),
+            '-ToolkitRoot',('"' + $invocation.ToolkitRoot + '"'))
+        $process = Start-Process -FilePath $ps51 -ArgumentList $arguments -PassThru -WindowStyle Normal -ErrorAction Stop
+        $lblFarmPrerequisites.Text = "Read-only farm diagnostic started in Windows PowerShell 5.1 (PID $($process.Id)). Refresh farm results after completion."
+    }
+    catch { $lblFarmPrerequisites.Text = "Could not start farm diagnostic: $($_.Exception.Message)" }
+})
 $btnTransientRefresh.Add_Click({ Refresh-TransientResults })
 $btnTransientOpen.Add_Click({ if ($script:TransientResultsPath) { Open-InExplorer $script:TransientResultsPath } })
 $btnTransientOutOfBatch.Add_Click({ if ($script:TransientOutOfBatchPath) { Open-InExplorer $script:TransientOutOfBatchPath } })
 $btnFarmOpenReport.Add_Click({ if ($script:FarmReportPath) { Open-InExplorer $script:FarmReportPath } })
-$btnDiagBrowseFolder.Add_Click({
-    Add-Type -AssemblyName System.Windows.Forms
-    $dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
-    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtDiagInput.Text = $dialog.SelectedPath }
-    $dialog.Dispose()
-})
 $btnDiagAnalyze.Add_Click({ Start-DiagnosticAnalysis })
 $btnDiagOpenReport.Add_Click({ if ($script:DiagSummary) { Open-InExplorer $script:DiagSummary.ReportPath } })
 $btnDiagFilter.Add_Click({ Refresh-DiagnosticPatterns })
 $btnDiagRowFilter.Add_Click({ Refresh-DiagnosticRows })
 $cmbDiagStatus.Add_SelectionChanged({ if ($script:DiagSummary) { Refresh-DiagnosticPatterns } })
 $cmbDiagSession.Add_SelectionChanged({
-    if ($script:DiagSummary -and $cmbDiagSession.SelectedItem) { $lblDiagProgress.Text = 'Click Analyze reports to apply the selected session.' }
+    if (-not $script:DiagLoading -and $script:DiagSummary -and $cmbDiagSession.SelectedItem) { $lblDiagProgress.Text = 'Click Analyze latest report to apply the selected session.' }
 })
 $gridDiagPatterns.Add_SelectionChanged({
     $pattern = $gridDiagPatterns.SelectedItem
@@ -2656,7 +3240,7 @@ $script:DiagTimer.Add_Tick({
     $code = $script:DiagProcess.ExitCode
     $script:DiagProcess.Dispose()
     $script:DiagProcess = $null
-    $btnDiagAnalyze.IsEnabled = $true
+    $btnDiagAnalyze.IsEnabled = [bool]$script:DiagLatestReport
     try {
         if ($code -ne 0) {
             $stderrPath = Join-Path $script:DiagOutputDirectory 'analysis.stderr.log'
@@ -2664,7 +3248,7 @@ $script:DiagTimer.Add_Tick({
             throw "Analysis exited with code $code. $errorText"
         }
         if ($script:CurrentMigration -and $script:CurrentMigration.Root -eq $script:DiagProjectRoot) {
-            Load-DiagnosticResult -Directory $script:DiagOutputDirectory
+            Refresh-DiagnosticReportState -Force
         }
     }
     catch {
@@ -2674,6 +3258,52 @@ $script:DiagTimer.Add_Tick({
         }
     }
     Refresh-ActivityList
+})
+$script:CrossCheckTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:CrossCheckTimer.Interval = [TimeSpan]::FromMilliseconds(500)
+$script:CrossCheckTimer.Add_Tick({
+    $job = $script:CrossCheckJob
+    if (-not $job) { return }
+    if ($panelCrossCheckLoading.Visibility -eq 'Visible' -and $script:CrossCheckLoadingStarted) {
+        $elapsed = [int]((Get-Date) - $script:CrossCheckLoadingStarted).TotalSeconds
+        $lblCrossCheckLoading.Text = "Loading comparison reports for $($script:CurrentMigration.Name)… $elapsed s"
+    }
+    if ($job.State -in @('Running','NotStarted')) { return }
+    $script:CrossCheckTimer.Stop()
+    $script:CrossCheckJob = $null
+    $currentSignature = Get-DiagnosticCrossCheckSignature
+    $isCurrent = $script:CrossCheckJobSignature -eq $currentSignature
+    try {
+        if ($job.State -ne 'Completed') { throw "Background cross-check ended with state $($job.State)." }
+        $result = @(Receive-Job -Job $job -ErrorAction Stop)[0]
+        if (-not $result) { throw 'Background cross-check returned no result.' }
+        if ($isCurrent) {
+            $panelCrossCheckLoading.Visibility = 'Collapsed'
+            $script:CrossCheckResult = $result
+            Update-DiagnosticSummaryCrossCheck $result
+            $gridCrossCheckEvidence.ItemsSource = @($result.Evidence)
+            $gridCrossCheckScopes.ItemsSource = @($result.Scopes)
+            $btnCrossCheckFilesReport.Tag = $result.FilesReport
+            $btnCrossCheckPermissionsReport.Tag = $result.PermissionsReport
+            $btnCrossCheckFilesReport.IsEnabled = [bool]$result.FilesReport
+            $btnCrossCheckPermissionsReport.IsEnabled = [bool]$result.PermissionsReport
+            $lblCrossCheckStatus.Text = ('{0} scopes with differences; {1} ambiguous; unmatched rows: ShareGate {2}, files {3}, permissions {4}. Only matching site and list titles are placed on one row.' -f `
+                @($result.Scopes).Count, $result.Ambiguous, $result.Unmatched.ShareGate,
+                $result.Unmatched.Files, $result.Unmatched.Permissions)
+            $script:CrossCheckSignature = $currentSignature
+        }
+    }
+    catch {
+        if ($isCurrent) {
+            $panelCrossCheckLoading.Visibility = 'Collapsed'
+            $lblCrossCheckStatus.Text = 'Cross-check unavailable: ' + $_.Exception.Message
+            $lblSummaryFilesDetail.Text = 'Cross-check unavailable'
+            $lblSummaryPermissionsDetail.Text = 'Cross-check unavailable'
+            $lblSummaryCrossCheckDetail.Text = 'Cross-check unavailable'
+        }
+    }
+    finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+    if (-not $isCurrent -and $tabDiagnostics.IsChecked) { Refresh-DiagnosticCrossCheck -Force }
 })
 if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
     $lblDiagScope.Text = 'Analysis only. CSV is available; XLSX needs the optional ImportExcel module.'
@@ -2698,15 +3328,16 @@ finally {
     $script:AutoRefreshTimer.Stop()
     $script:ActivityRetentionTimer.Stop()
     if ($script:DiagTimer) { $script:DiagTimer.Stop() }
+    if ($script:CrossCheckTimer) { $script:CrossCheckTimer.Stop() }
     Write-SmartM365GuiActivityEvent -Path $script:SessionActivity -Status 'Closed' -ExitCode 0 `
         -Detail 'GUI window closed.'
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7HVKm+t1p7Rn2
-# MmtY7+hFCNWdmLfdssdQQWmizOnLvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrULD69w7Pauf8
+# oBEwd7HxFCFjC3iYauGwK28gwdSj9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2731,139 +3362,19 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICMe5CL9cHnlzOsObtcyI4+6t7fAanH9M5EcHVNtzYycMA0GCSqG
-# SIb3DQEBAQUABIIBgK+rcRbEYUD2oPVMpHjrxC9X27h9GjSeHooelN7W1j+YXU1G
-# r//DIqqzONSbkkL0lo1zgAJ7sK5WiMRoPHvQW0HvYiZgDSCJBOzn1f/Wc0+hH2lc
-# lCmeCyVxUirilz43c4gFp4kRExSFxIJ/GqKo0MZPllWRR1E+hRQrV++1VO/eyURk
-# 8yHEfZNV4rYFboqgdp24bfsdhY/mXFCt9IhqvkorvNG9RA5/TeZPdChVh4tyKqEI
-# 4i90+waRjl8/7lql1/uFopZwW89Czl/1OFKlIjycJmRdqNZpoeJXogBbDc3+pv9G
-# +l+tQf/BP4U0MPOqM/oSmUP3L2ooCuJKGqOhy7uGKeUYCgTcNSYvXk75PN+RjK8o
-# EvDtEa3RGQBJTUBQqxmTOQ5rWozW87U/1i6kgje+l7aA/a19ZYSz/KvOV/fuV/5W
-# 62qVFReWCyFlysW2zzky8N2sOYmb4Ys7KFAoCvM4Bebq1BwzUNI6EmoTLkJmBQOk
-# zbNiZAWvGFQaxQQ9r6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMzU0
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDaeyoqv/IPsQxbZ6Id5wzpRfnojBTpnaAs4Wzn
-# uMbz0TANBgkqhkiG9w0BAQEFAASCAgBaOeea9LbT/hoZ9Z8devi0xT+NzZ3d3vVn
-# WoCLayWw/ZAuJVM/PmpKbMMvMFsvfg7SlyMdrx64SQAdBCGycAIpuU3Rw/gBZ5MS
-# zEpwvravsOzmdzp6bIJ5I5bCUVuSTX5a8OR5jlcEIzuYau5nv7eX6pKyv/X4Ad6h
-# qA9T/L7XHgCyEgIe/PDKHslb2BosfxgCeEbhp9sMS/OeHLYRRt3B6n1JJZ/e/HHm
-# AKWaNGbBbOQfGkRMQtVTuqXLUk0Xi+KmY3wCE48Z+GvWpytF0TM2KpGPhNCl6gxK
-# RNcAQ+/ph0+1X0fU6Li77RVwYNv8Qo4zZ1uLoxYeHPcSCvFzsn2m8Se021oBvvKa
-# hj4ryxC8TMN2qiUnOWSpjpESC80PUXpn4cyuembN75mEo5GkMvgi3Gg0TmhoNz5R
-# A0wQhZp2OU6KM1PyTcD6MXvIkEtENM1BZtSJJ2Sq3RvCvsOQCQs9RkxT4SI0ZmfQ
-# rQu898SfWPWDgjOdi5s4/fNYxbsXr9Y4gQ1UruCgPiMZu0LxosH1hXxmNVjw6rU2
-# y4r6WJIGSLZNl0Ic7GYfmIOBeHv/q91axZu1OuwNWUzz49AALsE9cxwZqhBkQV8U
-# AEArUUcGCr9xctYDWQ3NXV7hxmLhzaYInWuTe3DcuNtCPBPaXCJAkaGDCleCzJnA
-# XmMwegZgOw==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAFD0X4G5Qey3IV9gZQVUk7
+# 4HeMT0OKTIsso/HIHJSivTANBgkqhkiG9w0BAQEFAASCAYCULwfxvcmNJwkHn1P9
+# jzlTjJ/LTHxDVFdumLfVSkfqrJWqr5ABJ4rVpXt/hiajyt1X/hMQEFHlGskCUV+G
+# /uYufBhMAwYWgL1YJI6eH04i1IXVAAxXDaX6oWI4JgCGGS2e1ee4/fvGFHjwm6j+
+# PPtuV8E9PJsDe0P9HVDxUpKC2r3L51rcI/Vl1C0wPxTZFN7Wo4tsrWNqu6LJvl2s
+# O8ysXud6CHwkiIxpLkUCtp0WbaR0a3K6j1R/2Kx5ADad8hzMSJITaNdEO546pV0K
+# KdjAhn0wAUBzFCo3MyjiOK329aPKb7BRwTT06zVunh0JWzUzycq6xj70qbUSCb97
+# RW4pSjaL7hD4IAemvNj0C0IQr4t54v4YwfeKjS3tR87trqXr/G85DP63Ffiaw7Dk
+# lSspX9Pnunb8QIRqmNAWB3KAsb4ZordAnmDijbGvBwCZF2MDIu39BRQQOidr5apl
+# VNVWp+Od3mjzmR3RcyGODRZDbVw43eBGHlVITAYFqGpBovM=
 # SIG # End signature block

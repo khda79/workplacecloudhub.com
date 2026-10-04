@@ -1,6 +1,6 @@
 """Shared, self-contained HTML presentation for migration comparison reports."""
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 import base64
 import html
@@ -51,8 +51,7 @@ main { width: min(1440px, calc(100% - 40px)); margin: 28px auto 48px; }
 .hero-main { min-width: 0; }
 .brand { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; }
 .brand img { display: block; width: 145px; max-height: 100px; object-fit: contain; object-position: left center; }
-.client-brand { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
-.client-brand img { max-width: 180px; max-height: 72px; object-fit: contain; background: white; padding: 5px; border-radius: 6px; }
+.brand img.brand-client-logo { width: auto; max-width: 145px; max-height: 76px; background: white; padding: 5px; border-radius: 6px; }
 .download-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 16px 0; padding: 13px 18px; background: white; border: 1px solid var(--line); border-radius: 12px; }
 .download-bar strong { margin-right: auto; }
 .download-primary { display: inline-block; padding: 9px 15px; border-radius: 7px; background: #086db8; color: white; font-weight: 700; text-decoration: none; }
@@ -165,15 +164,14 @@ def _logo_data_uri(file_name, max_bytes, directory):
 
 
 def logo_html():
-    name = _branding_config().get("WorkplaceCloudHubLogoPath", "WorkplaceCloudHub-lockup-WPF.png")
+    """Show exactly one logo: the configured client logo, or the product logo."""
+    branding = _branding_config()
+    client_uri = _logo_data_uri(branding.get("ClientLogoPath", ""), 200 * 1024, "Config")
+    if client_uri:
+        return f'<img class="brand-client-logo" src="{client_uri}" alt="Client logo">'
+    name = branding.get("WorkplaceCloudHubLogoPath", "WorkplaceCloudHub-lockup-WPF.png")
     uri = _logo_data_uri(name, 1024 * 1024, "")
     return f'<img src="{uri}" alt="WorkplaceCloudHub">' if uri else ""
-
-
-def client_logo_html():
-    """Embed the logo named by the local SharePointMigration configuration."""
-    uri = _logo_data_uri(_branding_config().get("ClientLogoPath", ""), 200 * 1024, "Config")
-    return f'<div class="client-brand"><img src="{uri}" alt="Client logo"></div>' if uri else ""
 
 
 def render_report(title, report_kind, generated_at, status_text, status_class, cards_html, body_html, footer, alert_html="", download_html="", intro_text="This summary uses the selected inventory files. Review their scan logs before accepting the comparison as complete."):
@@ -192,7 +190,6 @@ def render_report(title, report_kind, generated_at, status_text, status_class, c
   <header class="hero">
     <div class="hero-main">
       <div class="brand">{logo_html()}<div><div class="brand-name">WorkplaceCloudHub</div><div class="brand-product">SmartM365 · SharePoint Migration</div></div></div>
-      {client_logo_html()}
       <div class="eyebrow">{escape(report_kind)}</div>
       <h1>{escape(title)}</h1>
       <div class="subtitle">Generated at {escape(generated_at)}</div>

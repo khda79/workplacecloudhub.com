@@ -1,8 +1,9 @@
 """Offline contract checks for ShareGate CSV diagnostics."""
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 import csv
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -93,6 +94,12 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
             DIAG.set_state(self.project, access["PatternKey"], "Fixed", expected="To fix")
         DIAG.analyze([self.report], self.root / "second", self.project)
         updated = json.loads((self.root / "second" / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(updated["SelectedSessionId"], "")
+        self.assertEqual(updated["InputEvidence"], [{
+            "Path": str(self.report), "Size": self.report.stat().st_size,
+            "LastWriteUtc": updated["InputEvidence"][0]["LastWriteUtc"],
+            "Sha256": hashlib.sha256(self.report.read_bytes()).hexdigest(),
+        }])
         self.assertEqual(updated["IssueLineState"], {"Accepted": 2, "To fix": 1})
         self.assertEqual(updated["ResidualLineRate"], 50.0)
 

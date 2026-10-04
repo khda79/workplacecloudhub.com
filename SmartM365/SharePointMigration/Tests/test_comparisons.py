@@ -148,20 +148,29 @@ class HtmlReportTests(unittest.TestCase):
         template = json.loads((ROOT / 'Config' / 'report-branding.json.template').read_text(encoding='utf-8'))
         self.assertEqual(template['ClientLogoPath'], '')
 
-    def test_client_logo_is_embedded_only_when_valid(self):
+    def test_report_header_has_one_logo_with_client_preferred_and_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
             branding = project / 'Config'
             branding.mkdir(parents=True)
             logo = branding / 'client-logo.png'
             logo.write_bytes(b'\x89PNG\r\n\x1a\n' + b'example')
+            product_logo = project / 'product-logo.png'
+            product_logo.write_bytes(b'\x89PNG\r\n\x1a\n' + b'product')
+            def header():
+                rendered = HTML.render_report('Title', 'Migration diagnostics', 'now', 'Review', 'note', '', '', 'Footer')
+                return rendered.split('</header>', 1)[0]
             (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': logo.name}), encoding='utf-8')
             with patch.object(HTML, '__file__', str(project / 'Scripts' / 'Compare' / 'report_html.py')):
-                self.assertIn('alt="Client logo"', HTML.client_logo_html())
+                self.assertIn('alt="Client logo"', header())
+                self.assertEqual(header().count('<img '), 1)
                 (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': '../client-logo.png'}), encoding='utf-8')
-                self.assertEqual(HTML.client_logo_html(), '')
+                self.assertEqual(header().count('<img '), 0)
                 (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': '..\\client-logo.png'}), encoding='utf-8')
-                self.assertEqual(HTML.client_logo_html(), '')
+                self.assertEqual(header().count('<img '), 0)
+                (branding / 'report-branding.json.txt').write_text(json.dumps({'ClientLogoPath': '../client-logo.png', 'WorkplaceCloudHubLogoPath': product_logo.name}), encoding='utf-8')
+                self.assertIn('alt="WorkplaceCloudHub"', header())
+                self.assertEqual(header().count('<img '), 1)
 
     def test_global_report_uses_latest_summary_and_exposes_metrics(self):
         with tempfile.TemporaryDirectory() as directory:

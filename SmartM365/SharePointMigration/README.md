@@ -341,20 +341,47 @@ Excel link above the metrics.
 Report branding is configured in `Config/report-branding.json.txt`, based on
 `Config/report-branding.json.template`. `WorkplaceCloudHubLogoPath` names a
 PNG or JPEG in the SharePointMigration root. `ClientLogoPath` names an optional
-PNG or JPEG in `Config`; leave it empty to show only the WorkplaceCloudHub logo.
+PNG or JPEG in `Config`. Each newly generated HTML header displays one logo:
+the client image when configured and valid, otherwise the WorkplaceCloudHub image.
 Newly generated HTML reports embed the images, so viewers do not need access
 to the original files. The local `.json.txt` configuration and client image
 are ignored by Git and must be copied privately when deploying another clone.
 
 ## Migration Diagnostics (local report analysis)
 
-The **Migration Diagnostics** tab reads ShareGate migration report exports for
-the selected migration from `ShareGate/MigrationReport`. You can also browse to
-another CSV, XLSX, or report folder. This phase only reads report files; it
+The read-only **Cross-check: ShareGate / Files / Permissions** panel loads the
+latest valid existing file and permission comparisons for the selected migration.
+It shows each report's date, its own measure, the main differences and whether
+its source/target scans are still the latest. ShareGate to-fix counts are shown
+separately from file and permission match percentages; they have different
+denominators and are never merged into a single success rate. The GUI loads
+comparison detail in a background thread to keep migration selection responsive.
+Its scope table groups to-fix ShareGate rows, `LibrarySummary.csv` and
+`PermissionSummary.csv` by normalized destination site URL and list title when
+that scope can be verified from report fields. Rows without destination scope
+fall back to source scope and remain separate from destination-keyed rows. It shows
+missing, extra and changed file or permission flags without claiming that a
+ShareGate row and an inventory difference refer to the same individual item.
+Ambiguous list titles, rows without a usable site/list scope, missing comparisons,
+legacy or stale scan evidence, and newer scans are marked for review. Opening
+the file or permission HTML report gives the complete comparison details.
+The panel does not start scans, ShareGate actions or migration writes.
+
+The **Migration Diagnostics** tab names the selected migration and reads the
+newest ShareGate CSV or XLSX export in its `ShareGate/MigrationReport` folder.
+It displays the file name, modification time and size. If the folder is empty,
+it asks the operator to deposit the latest report and disables analysis and
+issue review. For a same-name CSV/XLSX pair, the CSV is selected. An existing
+analysis of that exact input is restored when the source SHA256 still matches;
+older analyses without a fingerprint are labelled as date-based evidence.
+The farm Run button requires a SHA256-verified analysis; reanalyze a legacy
+report before using its access peaks.
+This phase only reads report files; it
 does not import the ShareGate module, connect to a site, precheck, or retry a
 migration. The analysis runs in a child PowerShell process so the GUI remains
 responsive. Shared GUI activity logs record the operator and the analysis
-result. CSV is preferred when a CSV and XLSX have the same base name. DryRun
+result. CSV is preferred when a CSV and XLSX have the same base name. The GUI
+analyzes only the latest selected report file; the command-line folder DryRun
 lists every file, its selection status, detected session IDs, and the installed
 `ImportExcel` version. With ImportExcel available, a same-name XLSX is masked
 only after its row count and row identity columns match the CSV. The remaining
@@ -363,6 +390,9 @@ XLSX-only analysis needs the optional `ImportExcel` module. Report rows from dif
 files are deduplicated by session and row ID; conflicting duplicates are
 counted and flagged for review. A session selector can restrict a new analysis
 to one session.
+
+The `ShareGate 401 retry results` card appears only when a previous reviewed
+batch result exists. It summarizes historical retries; it does not start one.
 
 The tab and HTML report show both report-line KPIs and distinct keyed content
 items. An item key uses source site, source list, and positive `Source ID`, so
@@ -463,10 +493,16 @@ correlation and nightly-recurrence CSVs, an HTML report, a log and an atomic
 useful evidence but does not establish complete farm coverage. The Migration
 Diagnostics tab shows the latest matching farm result and generates one-line
 DryRun and real commands from the project's `AccessFailures-5min.csv` windows.
-The GUI does not execute those commands on the farm. Run the DryRun command
-first on a farm server, then review and run the real read-only command. Launch
-the GUI from the shared UNC toolkit root or pass `-FarmToolkitRoot` with that
-root to generate UNC commands.
+The GUI builds farm commands only from the analysis of the currently selected
+latest report, so a newer report cannot silently reuse older access peaks.
+Its `Run (read-only)` button remains disabled
+until `Check prerequisites` confirms that the GUI is elevated on a farm server,
+Windows PowerShell 5.1 can load the SharePoint snap-in or module, the current
+account can read the farm, and the shared UNC toolkit and access-peak CSV are
+available. It checks again immediately before launching a visible Windows
+PowerShell 5.1 console. Run the displayed DryRun command first on the farm
+server. Launch the GUI from the shared UNC toolkit root or pass
+`-FarmToolkitRoot` with that root to generate UNC commands and enable the check.
 
 The offline fixture test is:
 

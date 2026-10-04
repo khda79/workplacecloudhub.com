@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 import argparse
 import collections
@@ -499,6 +499,7 @@ def analyze(inputs, output_dir, project_root, selected_session="", source_labels
         source_labels = inputs
     if len(source_labels) != len(inputs):
         raise ValueError("Each input needs one source label.")
+    source_stats = [Path(label).stat() for label in source_labels]
     aliases = load_config("sharegate-diagnostics.columns")
     rules = load_rules()
     seen = {}
@@ -528,6 +529,21 @@ def analyze(inputs, output_dir, project_root, selected_session="", source_labels
     if not rows:
         raise ValueError("No ShareGate report rows were found.")
     summary = summarize(rows, duplicates, conflicts, source_labels, project_root)
+    summary["SelectedSessionId"] = selected_session or ""
+    evidence = []
+    for label, start_stat in zip(source_labels, source_stats):
+        source = Path(label)
+        stat = source.stat()
+        if (stat.st_size, stat.st_mtime_ns) != (start_stat.st_size, start_stat.st_mtime_ns):
+            raise ValueError(f"Report changed during analysis: {source}")
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        evidence.append({"Path": str(source), "Size": stat.st_size,
+                         "LastWriteUtc": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
+                         "Sha256": digest.hexdigest()})
+    summary["InputEvidence"] = evidence
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = ["SessionId", "RowId", "Timestamp", "Status", "ObjectType", "ItemName", "SourceUrl", "SourceList", "SourceListId", "SourceItemId", "DestinationUrl", "DestinationList", "Message", "Details", "HelpLinks", "CopyOptions", "ImportStatus", "ThrottlingStatistics", "ItemKey", "PatternKey", "Pattern", "Category", "RuleId", "State", "Action", "AccessSide", "AccessEvidence", "InputFile"]
     raw_fields = ["Raw: " + header for header in raw_headers]
