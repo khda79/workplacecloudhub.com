@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics fresh-export consistency and publication boundary tests.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Loads AST functions only; all export jobs, downloads, delays and publication are mocked.
 Does not import Core, read tenant configuration or execute a collector entrypoint.
@@ -18,7 +18,7 @@ $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartInventory/M365Invento
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Endpoint Analytics parse failed.' }
-$definitions = foreach ($name in @('Get-EAReportCatalog','Get-EAOutputSchemas','Get-EAStatusCode','Get-EARawValue','New-EANormalizedRow','Assert-EADeviceReportGrain','Invoke-EAConsistentReport','Invoke-EAReport','Publish-EAOutputs')) {
+$definitions = foreach ($name in @('Get-EAReportCatalog','Get-EAOutputSchemas','Get-EAStatusCode','Get-EARawValue','New-EANormalizedRow','Assert-EADeviceReportGrain','Save-EARejectedRowDiagnostic','Invoke-EAConsistentReport','Invoke-EAReport','Publish-EAOutputs')) {
     $node = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true)
     if (-not $node) { throw "Missing production function: $name" }
     $node.Extent.Text
@@ -48,6 +48,7 @@ $module = New-Module -Name SyntheticEndpointConsistency -ScriptBlock {
         $script:Published = [Collections.Generic.List[object]]::new()
         $script:ImportCount = 0
         $script:FailureStatus = 0
+        $script:CoreImported = $false
         $script:ReportConsistencyAttempts = 3
         $script:ReportConsistencyRetryDelaySeconds = 15
         $script:RunId = 'synthetic-run'
@@ -171,8 +172,8 @@ finally { Remove-Module $module -ErrorAction SilentlyContinue }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuj7unZla/EBIp
-# oiTVYa3benX2wT1b3343y9cI6zUChaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUhCBT3+7ajfNj
+# 3XDACeEk4lkYYqzEiJ/JxaIAlur7+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -305,31 +306,31 @@ finally { Remove-Module $module -ErrorAction SilentlyContinue }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDhonygA4D+8P26RBi2GHGIDkjGbaTGpUwHIzKavKujwMA0GCSqG
-# SIb3DQEBAQUABIIBgBLA9Rq7rCElqnFG+Mof8HqUU1dzJMFTA4B0j5GrA2r5p5Nq
-# DForVFy+WBNwBUuLxaDTcQSH+GOP7MfQVpeNMePTmUVBNNjceDBDfom4V05gKR46
-# iOcO20YEB4S8BnPPhI1p2AI8reit53QAeSKty7pQXQcRWoWTZk1420rYfmC7M8zf
-# 5IpQrXrWG6NhoKDCEuW3y7p9oQkkgomTnEbdErwE8UNQ9IeSsy6vnXwh61h50nS5
-# YsxxzTHkz/qeqYWPOGscqQcO6BgaripY4EjQNonfHAiYKBIBakSjvVQGwkYdh3Vh
-# GkfyWrxFZva+WMrXIP9TB+46s/mHiebW9swX/akiyptegcWtgJK709UYNYjI8tgp
-# BL2GPInAI5erqaS7PjtyPteaSZXZUNwCs5HLSOhKcWeQVMqgtcRq7v0TRVrnhJj6
-# 9Zod9f1N6PluHBLdRXZrvYm38jsUYRWgbFiFSfttYlAT6OwGQywLIk/WDdKTbwvE
-# iNtCtD+DnJGbUfHusKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFoCH2HQpSDIRRuedAAEmZBn6vC2+X2P6Z0zuK/Mpnx+MA0GCSqG
+# SIb3DQEBAQUABIIBgHuTfRvGpLB8XikMZdTqEAtjEvfYlo6gxBAiSXr1cvFAtNi5
+# tRi6kinQz2ykaYWCrcVwh/Tmjvttpz7tmHQxAnDAeD/kPOJW9wMc+2AdFWoLKMym
+# 4o8oentzbvw3urhbhwj4IdkpqTBNhQW0JNZWPgkGpDc3DuJjh2a9uP2H79ZfvkMR
+# 2R6LtnmUOEPSUbNtPb5mGMJjrS4BoirzMZzWnrH9QBUI9tsfSvjuXRnPc3/vJF3d
+# p3AZpjlA435tffCfCpuhic4LgprL2zwellUIzPsM5iohqd3u5xZl7hWr54ikFzs2
+# P+4UymgjdyQA3d92OH2T/KVQ/sYlYnIT26QTOohDdT9IxMRHbLSiK1ItYcCyV1bo
+# 9oUWbTFp7zkEzXnMuBaARe0Wm1ISvTvl4rUxSnQ8NVYQvT0Tr6+5HnviTlX0uRVQ
+# 473j5GdBfWC7KgiAe4KhbIqGp/vrVatJdfn0kbiehPna0N2OAUhJk86zjCc0NRPA
+# J3KQCSA9UNTelD7yoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDwQVL1s3tyayyjeEu8hVsqxPqzXjeQWZCqRtVz
-# Zc+HkDANBgkqhkiG9w0BAQEFAASCAgAG/cBCuvC9zrZdKbksCtzAxy5JdV4bEm3g
-# A6/DBNVmkU2RjpbJQMd/is0uQv+8dM9mePK76ZGmsjBx1wjzl1Rm1cDo108d5HOa
-# D+55+x2jlXwSFviBhYAhyjI2n8VpYpqoUJ309iznDuXF2pUZMkRvuaCuYzO2NF33
-# rdGQphDWq65DdlM1a1w5Ke1MstYlsUA8ht4pRd3pl1eKyrJEiq6WYlBLPoBeJsaX
-# 1rAFJq32JjYD+dZdw6QjrjajZOWtGGiuxuY87Y4rJjlen9eNsNPzM+viNomawThl
-# Fryz09N1W/+69riwHT9eFxj788fgMwJfTOY0n5K8sFV0+85fapxXsg5kr13MNbo+
-# s0E0kqdft4vfuZi0d+Nuqmmp0W/IQWl8jEd8JhTee6zwuj7L7JxrM1397gy1SVzG
-# vT5fR51olXQpYBhniW2UO/FKg5iGgae1fEtLZwmwGy5V7tTEoJYNAeJz2UxiukYi
-# +v0GoDJ8aAywnG7Pr8uTSTMdwkkI42HHQZ0Z/BZoImcKZrenVVlIqy2z7h2G0Oby
-# uch3DethenMQnzw1G6QbGk3ImeBeqrlgftESRU9NOPLhRqxBHGj3/JXbnSmwx7at
-# 8rIeEdO2CPXe/sW8kYfPly6PpE2uoOVHmWgTF8dttmKg6Gy+vBc6u7YXVSHooQII
-# rTwrIQOejQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxNjIx
+# MTdaMC8GCSqGSIb3DQEJBDEiBCBI2qwd6KOekc49xUM3ojmw+BRc+LI1O7vuja/Z
+# 3XnqMjANBgkqhkiG9w0BAQEFAASCAgCU9J9TV70BNavV+dHJ1XFAqlcIH0QQowJ8
+# 8LzrztRJ69nRKgIABJ+UuniHDKB1WtH7/G9LyTiuhVhIKgyZ7D8GpgK4w29da8Ai
+# HC3DQKD3fpO1HGS0/lSc2zX3KBog0XLs7S2cFW7Cg42uRkoaPyZv2Z3TT/0Kv5Ui
+# sp2x3vvmPz/4V4sIloWiADOV8+eJUP6ZI7RF1aTjlFz+jHvG51+OrT5W1bZJIiQL
+# GIiHLcAvE2sgzaQyu2iAcq74ndOP4lz9ircAbANbPR6KgsDXJuqc5TEh3WKJFbnm
+# T3IKTpSBZ5gD34ggZIvCKzCOlEXG2ScS/sedsRI/5aEWzz4qy/LfrcbY+xKrM0gR
+# NzqH1HpM0/4sjJJrHWK+WFyGB17kBsTz9d9M+nm2idhPD+5zLk1zAgyfVq+wHnxe
+# mQJfCI2W+GAYPaE+B4c+m6FyzvVgVK2lAy9edt1RXU6tOKsC+5J9SlVXUnMfrcn/
+# uxL6Y2pNgdS9tyfFCAfnV2PAy6rYDlwSJuCbN8wzvLc3YdNQFZ8HeAZJGkTGu6+U
+# RQ9KNsmP0mcyE0w1pY85RXL4z8sk7shjewgrQynpUKu8LFUYNkDWX7gkeUBf6MfP
+# gdXxfnQkYwYiGf89VLkE56ujPlr60v5oCyxLvc8YFN19ZqmnRNdINL1jAxbDPqWY
+# hpO0B6tuTA==
 # SIG # End signature block

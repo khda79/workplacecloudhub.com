@@ -59,7 +59,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.10
+1.0.11
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.65+; Microsoft.Graph.Authentication.
@@ -99,7 +99,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.10'
+$script:ScriptVersion = '1.0.11'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -108,6 +108,8 @@ $script:AdvancedReportPattern = '^(BR|EAResourcePerf|EAAnomaly)|DeviceTimeline|D
 $script:GraphApiBase = 'https://graph.microsoft.com'
 $script:CoreImported = $false
 $script:TenantConfig = $null
+$script:TranscriptStarted = $false
+$script:GrainDiagnosticPaths = [Collections.Generic.List[string]]::new()
 
 if ($MaxItems -gt 0) {
     $global:SmartM365MaxItems = $MaxItems
@@ -121,13 +123,52 @@ function Write-EALog {
         [ValidateSet('INFO', 'WARNING', 'ERROR', 'SUCCESS', 'DEBUG')]
         [string]$Level = 'INFO'
     )
-    if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
-        WriteLog -Message $Message -Level $Level
+    if (Get-Command CoreWriteLog -ErrorAction SilentlyContinue) {
+        CoreWriteLog -Message $Message -Level $Level
         return
     }
     $prefix = '{0} [{1}]' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level
     foreach ($line in [regex]::Split($Message, '\r?\n')) {
         Write-Host ("{0} {1}" -f $prefix, $line)
+    }
+}
+
+function Start-EATranscript {
+    if ([string]::IsNullOrWhiteSpace([string]$global:logTranscriptFile)) {
+        throw 'Endpoint Analytics transcript path was not initialized.'
+    }
+    Start-Transcript -LiteralPath $global:logTranscriptFile -Append -ErrorAction Stop | Out-Null
+    $script:TranscriptStarted = $true
+}
+
+function Complete-EATraceArtifacts {
+    # Core completion runs first so the closed transcript includes its final banner.
+    if ($script:TranscriptStarted) {
+        try {
+            Stop-Transcript -ErrorAction Stop | Out-Null
+            $script:TranscriptStarted = $false
+        }
+        catch { Write-EALog 'Endpoint Analytics transcript could not be closed.' WARNING }
+    }
+    $artifacts = @($script:GrainDiagnosticPaths | ForEach-Object { $_ })
+    if (-not $script:TranscriptStarted -and $global:logTranscriptFile -and
+        (Test-Path -LiteralPath $global:logTranscriptFile -PathType Leaf)) {
+        $artifacts += [string]$global:logTranscriptFile
+    }
+    if ($global:EnableSharePointUpload) {
+        foreach ($artifact in $artifacts) {
+            try { Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $artifact -EnsureParentFolders | Out-Null }
+            catch { Write-EALog 'Endpoint Analytics trace artifact upload failed; the local evidence remains preserved.' WARNING }
+        }
+    }
+    if ($script:GrainDiagnosticPaths.Count -gt 0 -and $global:RetentionMaxLogs -gt 0) {
+        try {
+            $folder = Split-Path -Path $script:GrainDiagnosticPaths[0] -Parent
+            CoreRemoveOldFiles -Path $folder -Filter 'Intune_EndpointAnalytics_RejectedRows_*.json.txt' `
+                -KeepCount ([Math]::Max(0, $global:RetentionMaxLogs - $script:GrainDiagnosticPaths.Count)) `
+                -ExcludeFiles @($script:GrainDiagnosticPaths | ForEach-Object { $_ })
+        }
+        catch { Write-EALog 'Endpoint Analytics diagnostic retention could not be applied.' WARNING }
     }
 }
 
@@ -537,6 +578,71 @@ function Assert-EADeviceReportGrain {
     }
 }
 
+function Get-EARejectedRowDiagnostic {
+    param([AllowEmptyCollection()][object[]]$RawRows, [string]$ReportName, [string]$ExportJobId, [int]$Attempt)
+    $groups = [Collections.Generic.Dictionary[string,Collections.Generic.List[int]]]::new([StringComparer]::OrdinalIgnoreCase)
+    $invalid = [Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $RawRows.Count; $index++) {
+        $row = $RawRows[$index]
+        $id = if ($null -eq $row) { '' } else { [string](Get-EARawValue $row @('DeviceId')) }
+        if ([string]::IsNullOrWhiteSpace($id)) {
+            $invalid.Add([pscustomobject]@{RowNumber=$index+1;RawRow=$row})
+            continue
+        }
+        $key = $id.Trim()
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = [Collections.Generic.List[int]]::new() }
+        $groups[$key].Add($index)
+    }
+    $duplicates = [Collections.Generic.List[object]]::new()
+    $excess = 0
+    foreach ($group in $groups.GetEnumerator()) {
+        if ($group.Value.Count -lt 2) { continue }
+        $rows = @($group.Value | ForEach-Object { $RawRows[$_] })
+        $columns = @($rows | ForEach-Object { $_.PSObject.Properties.Name } | Sort-Object -Unique)
+        $differences = [Collections.Generic.List[string]]::new()
+        foreach ($column in $columns) {
+            $values = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            foreach ($row in $rows) {
+                $property = $row.PSObject.Properties[$column]
+                $value = if ($null -eq $property) { 'MISSING_PROPERTY' } else { ConvertTo-Json -InputObject $property.Value -Depth 30 -Compress }
+                $null = $values.Add($value)
+            }
+            if ($values.Count -gt 1) { $differences.Add($column) }
+        }
+        $excess += $rows.Count - 1
+        $duplicates.Add([pscustomobject][ordered]@{
+            DeviceId=$group.Key; RowNumbers=@($group.Value | ForEach-Object { $_+1 })
+            Classification=$(if ($differences.Count) { 'DifferentRawRows' } else { 'IdenticalRawRows' })
+            DifferingColumns=@($differences | ForEach-Object { $_ }); RawRows=$rows
+        })
+    }
+    [pscustomobject][ordered]@{
+        SchemaVersion=1; RunId=$script:RunId; ReportName=$ReportName; ExportJobId=$ExportJobId; Attempt=$Attempt
+        CapturedAtUtc=[datetime]::UtcNow.ToString('o'); TotalRawRows=$RawRows.Count
+        CanonicalPublicationAllowed=$false; DuplicateExcessRows=$excess; InvalidIdentityRows=$invalid.Count
+        DuplicateGroups=@($duplicates | ForEach-Object { $_ }); InvalidRows=@($invalid | ForEach-Object { $_ })
+    }
+}
+
+function Save-EARejectedRowDiagnostic {
+    param([AllowEmptyCollection()][object[]]$RawRows, [string]$ReportName, [string]$ExportJobId, [int]$Attempt)
+    if (-not $script:CoreImported) { return }
+    if ($ReportName -notmatch '^[A-Za-z][A-Za-z0-9_-]*$' -or $script:RunId -notmatch '^[A-Za-z0-9_-]+$') {
+        throw 'Unsafe Endpoint Analytics diagnostic file identity.'
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) { throw 'Diagnostic log root was not initialized.' }
+    $diagnostic = Get-EARejectedRowDiagnostic -RawRows $RawRows -ReportName $ReportName -ExportJobId $ExportJobId -Attempt $Attempt
+    $diagnostic | Add-Member -NotePropertyName TenantKey -NotePropertyValue ([string](Get-EAConfigValue TenantKey ''))
+    $folder = Join-Path (Split-Path -Path $global:LogTextFile -Parent) 'Diagnostics'
+    $null = New-Item -ItemType Directory -Path $folder -Force
+    $name = 'Intune_EndpointAnalytics_RejectedRows_{0}_{1}_{2}.json.txt' -f $ReportName,$script:RunId,$Attempt
+    $path = Join-Path $folder $name
+    $diagnostic | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $path -Encoding utf8 -ErrorAction Stop
+    $script:GrainDiagnosticPaths.Add($path)
+    Write-EALog ("Rejected-row evidence saved under the private script log folder. Report={0}; attempt={1}; duplicate excess rows={2}; invalid identity rows={3}." -f
+        $ReportName,$Attempt,$diagnostic.DuplicateExcessRows,$diagnostic.InvalidIdentityRows) WARNING
+}
+
 function Invoke-EAConsistentReport {
     param([Parameter(Mandatory)][object]$Report, [Parameter(Mandatory)][string]$EffectiveName, [switch]$AvailabilityOnly)
     $attempts = if ($AvailabilityOnly) { 1 } else { $ReportConsistencyAttempts }
@@ -553,9 +659,14 @@ function Invoke-EAConsistentReport {
             return [pscustomobject]@{ EffectiveName=$EffectiveName; Job=$completed; Rows=$normalizedRows; AliasUsed=($EffectiveName -ne $Report.Name) }
         }
         catch {
-            if (-not $_.Exception.Data['EndpointAnalyticsGrain'] -or $attempt -ge $attempts) { throw }
+            $reportFailure = $_
+            if ($reportFailure.Exception.Data['EndpointAnalyticsGrain']) {
+                try { Save-EARejectedRowDiagnostic -RawRows $rawRows -ReportName $EffectiveName -ExportJobId ([string]$job.id) -Attempt $attempt }
+                catch { Write-EALog 'Rejected-row evidence could not be saved; the original grain failure remains blocking.' WARNING }
+            }
+            if (-not $reportFailure.Exception.Data['EndpointAnalyticsGrain'] -or $attempt -ge $attempts) { throw $reportFailure }
             $delay = [Math]::Min(300, $ReportConsistencyRetryDelaySeconds * $attempt)
-            Write-EALog ("Report {0} failed its grain check (attempt {1}/{2}); requesting a new complete export in {3}s. {4}" -f $EffectiveName,$attempt,$attempts,$delay,$_.Exception.Message) WARNING
+            Write-EALog ("Report {0} failed its grain check (attempt {1}/{2}); requesting a new complete export in {3}s. {4}" -f $EffectiveName,$attempt,$attempts,$delay,$reportFailure.Exception.Message) WARNING
             if ($delay -gt 0) { Start-Sleep -Seconds $delay }
         }
     }
@@ -678,6 +789,7 @@ $script:DataQualityRows=New-Object System.Collections.Generic.List[object]
 
 try {
     Initialize-EARuntime
+    Start-EATranscript
     $catalog=@(Get-EAReportCatalog)
     $schemas=Get-EAOutputSchemas
     Test-EAStaticContract $catalog $schemas | Out-Null
@@ -785,17 +897,20 @@ finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
     catch { Microsoft.PowerShell.Utility\Write-Debug "Graph disconnect failed: $($_.Exception.Message)" }
     if ($script:CoreImported) {
-        Set-CoreSmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($script:DataQualityRows | Where-Object { $_.ReportName -in @('EADevicePerformanceV2','EADeviceScoresV2') -and $_.Status -in @('Collected','AliasUsed') } | Select-Object -ExpandProperty ReportName -Unique).Count -eq 2) -Scope 'CMDB:analytics'
-        try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage }
-        catch { Microsoft.PowerShell.Utility\Write-Debug "Completion banner failed: $($_.Exception.Message)" }
+        try {
+            Set-CoreSmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($script:DataQualityRows | Where-Object { $_.ReportName -in @('EADevicePerformanceV2','EADeviceScoresV2') -and $_.Status -in @('Collected','AliasUsed') } | Select-Object -ExpandProperty ReportName -Unique).Count -eq 2) -Scope 'CMDB:analytics'
+            try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage }
+            catch { Microsoft.PowerShell.Utility\Write-Debug "Completion banner failed: $($_.Exception.Message)" }
+        }
+        finally { Complete-EATraceArtifacts }
     }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3A1hxCs6UXGN+
-# ZvcE8td/VtLpml+2irOgCb/uxPpB2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDSH2xKe6TCxKw
+# a5BX9qISSLh/m4z6e5ojbbZIlXh+i6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -928,31 +1043,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGP4p6m9bYawLExMKj+fDZJBOIVh48x7/uHCZN+wwgpHMA0GCSqG
-# SIb3DQEBAQUABIIBgId0jh8eVjzuYrQvoE2TkrGd6yutMJ372Tba85ZG3gx6Lccy
-# DRneoz0xfQFTLpy9cP9XTQDgICLXuCc5eHucHyo7uVdx6RGuOEjEd8xczqX8kMQ4
-# olTiU64SGhADQMyzaNx7AI/VnAnZk3vzEijdaebOAd5AamVqPawEj1vRKn0kvtq6
-# w0O0AJKoYmwtmpFMJvppw5EghnIn5da7Uk8NRH1NjR780+r8pNnxZe3XaDSTzE59
-# GRuNrJf6YhXeRAbCPTWcFK/6krdqknRKOTpK04Fvj1UdEzBpAQSzmvL2rjrsfc4X
-# raB0gmwpDqGKM3DbwwvBP+t0EEyOBNwn71xNxx1nfB7eiZrHllqli4m/wGXBdwvg
-# /HqRzeZqGqbKUFe3o6aX50EYb3I16FzhKgqzmdzBnM+gbmxfOvcafWABXlEkIcIa
-# EbxiMi9cvTlD4/S9qzWDEGwZogoriNAjVcEHXldKgF2QdaPPRx76Thz8+As9og8w
-# bPllTbUsaCmGifoy0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMJX9r0e/m6aU0G1UgFlkiqyemX/2OGOuE/v//A0pGm1MA0GCSqG
+# SIb3DQEBAQUABIIBgFBQlllb2/w2NNkAjaU6YayVUtLt260zPCZvzZ2eChnII/K7
+# vBxOOIf7LeF2XMiG6u75rleO0TZfC2aq/QCQjqLTfiI+iqyuPUT1qjVCVBhxjvco
+# w9smbZrqJj0G+dGAdrUuVQ4U5UQI4kpmx9TRmCzFMkytMkpjDQcL3eLwHqUGTmGE
+# mRRdEdgrCyXi3WeQ4TqMvF6IIi0BH14P4IY9gfyP3gjCz9scC3Js9mwpubs7i0lq
+# ReHaAW6+w5tBmKupMNTffURAXVPEPD/EiucYR/a/wEPCgHGxav1cgBIJtIwvnpri
+# GQASXVkwMQxbiNzBPJ/CujaInI1cfgxbdz9eX63Of6CrD7UazQY6H2uYvxqczdXY
+# ZCySI1HCH2r7yR/mIO+ddlG8fnm9vJV25/5hljrR9+HU+a04zpVoTyPobQZYrtbx
+# mP//XosL2X0P3V+z+zkw6Imxlkr3azcBrmaIgnYVlLCXed7CW0dFvMnLkKZEx09a
+# oIOD1TbW9OO3lPicwaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCC2SxqVyDjfv1ly/dhC+K+/eb8mBlNLL2m4K91K
-# L1XNCzANBgkqhkiG9w0BAQEFAASCAgApqDqjLP2CUohOxcG+xI9dYiLirG68hzt3
-# lsDE+XxVuiZpX6B9CH6dQSfczyEoA1biz+Io62ll6Q8fN2O1km3z+00e18uZ/v+D
-# na1BZwl4ioQ+tRp8qLbAJ0oqfdfDcz5mo4GLfYro34ntDUghVLVy/tekhaqUI4YE
-# gUo9Eil15r+lTe3cqM9lz/9JHRoak4RSzrNDiJYiP8Uda+WGzAFmwF9J2mLB/4U1
-# VkEj1ERa1tFHkSpuVKfYIE8M7jQKDtJXSP6nemfJmTQtT+46ZPswYWG1F5BZAJUD
-# YfQ2+YynVcpPfP2VSaE0m97xqUUZDbloF5XubrpusQRoSlKNVbabuKLqmNK1qsqa
-# 43O6Bh1AWQYv3cZVJlJpsgmVphB2g5UElqGLNVNSvDIeuBoVFXtT/StPsyAsmNzv
-# Cuc3qtpP1tAy+E2ZD+n8Gw+ViXeQkTYyFWktUHf1qFTcJwKTFCEJp0zX+bdI1i8h
-# wqHysWdZ9ZWSbpgxPEorsuXKHPaaERwCkhx47wqmbQFe7YVKOKJq/NpI2DJrEYxt
-# CMw55o15NqeNux8+vg05QCHzK3y8P7b4OKNmfa2PcFIN4boAb08lnrb82zuwTEDG
-# Peq6hoT/8mM1eqoojaoX3+8DdFBXdQIPr7PJU+Ma8gzxxhhEA6nXCW+pNoyt1EVK
-# 7bmLYhkxVQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxNjIx
+# MTZaMC8GCSqGSIb3DQEJBDEiBCClnRAUjM92kw/nXJqfsni9jRIuo6ynAhwhZZAp
+# 5eWIKDANBgkqhkiG9w0BAQEFAASCAgBWEycb8Hm8JqhgKSTCGlEntMScZRoxYI1p
+# OQXg6Otc9YjCSbj4ro9NkJUScGhwY7YuOoKBa9F8SYcgZnUYR/MtjRmCKE4xCmFS
+# EX82juBgEA1TCgGpbY2d95bJ40W3hO9qtoo0wRbeXqclCcAj7+0XlG2Rst22F1oX
+# VCMkqJrKfipY58KjeyevPvzV+kcDwLqaN6M9AVsO+wJ/9l4xT0GB5URFGJr8eIDr
+# ZSReid27b7TNlgonuzZgeguVxA9x6RibIgPFCvaTscknw3mek5FrLzJD+j1nSyZ8
+# c9V4n5/g3t1DX43oBDmANETjfpuxdVqWwUGG2UdGAULtUrLfpavYmmp5zaz9oe7m
+# jPVjKGSTPTVSZKo4u/WwZVx1rkSe7z1KA+8fHCc/BX2b9/4oWlnmxcB4cCWwPHgY
+# ZtJjJRQUTTKfGCcYrypQn2KcBIkcJzXzjlAE3h/t2Cv5BABAeZMneeYxq1Tr3Hvh
+# cyyTZqVFeP0xhMD7wCF2z7CdmcvCackXJPfkFpobBJtpuPaaefPVad1opsbZz+1M
+# qaLJ87VPUF/WoDoip9kBWBqP7GfTkjb4WYXFq0XRw8U+IDCz/GTJMYFDtrXFVXHv
+# GLTXurLOyibLC+IdApNH8y441hpO/wNkjd1IAGCzRDDRZro16p10d/6F69w3efxQ
+# zyGDC4lNPw==
 # SIG # End signature block

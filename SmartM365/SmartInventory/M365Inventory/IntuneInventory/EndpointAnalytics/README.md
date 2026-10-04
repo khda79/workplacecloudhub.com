@@ -147,8 +147,33 @@ If ambiguity persists, the collection fails before canonical business CSV
 publication; the prior files remain but the failed source receipt must prevent
 their admission as a successful fresh collection. All device-grain output groups
 are checked again before the first publication call, including the mixed
-device/model Work From Anywhere output. Diagnostics contain report names and
-counts, not device identities or score values.
+device/model Work From Anywhere output. Console/log messages contain report names
+and counts, not device identities or score values.
+
+## Private trace evidence
+
+Version 1.0.11 routes collector messages through the prefixed Core logger and
+starts a transcript after runtime initialization. The Core completion banner is
+captured before the transcript is closed. The closed transcript is uploaded
+through the existing SharePoint helper when configured; validation does not
+enable external actions.
+
+For each rejected device-grain export, only the duplicate/invalid raw rows are
+saved as a `.json.txt` diagnostic in `Diagnostics` under the script's `LOG-ALL`
+folder. It includes the run, tenant, export-job identity, attempt, raw row numbers,
+identical/different-row classification and differing column names. Unique rows
+and signed download URLs are not retained. These files contain private device
+evidence and must never enter public Git or `DATA-LAST`. They are trace artifacts,
+not successful collector outputs, and do not authorize canonical publication.
+They use `RetentionMaxLogs` with the shared cleanup helper (current-run evidence
+is preserved) and the configured SharePoint upload behavior.
+
+Trace regression tests use temporary synthetic fixtures and simulated external
+actions:
+
+```powershell
+pwsh -NoProfile -File .\SmartM365\Tests\Test-SmartM365EndpointAnalyticsTraceOffline.ps1
+```
 
 Offline regression tests (mocked export jobs, downloads, waits and publishers):
 
