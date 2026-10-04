@@ -223,6 +223,66 @@ Config\SPOAuth.local.psd1
 Start from `Config/SPOAuth.sample.psd1` and keep the real local file uncommitted.
 The sample contains placeholders only.
 
+### Batch destination scans
+
+From the `SmartM365/SharePointMigration` directory, preview the target file and
+permission scans for every configured SPO migration:
+
+```powershell
+.\Start-SmartM365-SharePointMigration-TargetScanBatch.cmd -PlanOnly
+```
+
+Remove `-PlanOnly` to run the batch. The default `Interactive` authentication
+runs **one scan at a time** so sign-in prompts remain usable and scans do not
+compete for the same SPO session. It runs all target file scans first, then all
+target permission scans. To select or retry only some migrations, use
+`-MigrationNames SiteA,SiteB`; use `-InventoryMode FilesOnly` or
+`PermissionsOnly` to select one scan type.
+
+If the machine has a configured app certificate and the required SPO access,
+`-AuthMode Certificate` runs at most two scans concurrently, with a 15-second
+gap between process starts. `-MaxParallel 1` reduces this further. Interactive
+mode rejects values above one. This limit covers only this batch; stop other
+GUI, scheduled, or cross-machine scans before starting it. The batch continues
+after individual scan failures and returns a nonzero exit code if any scan
+fails. Its global `batch.log` and `summary.csv` are in
+`Migrations/logs/target-scan-batches/<batch-id>/`; each launcher also keeps its
+own migration log. Check the per-scan error CSVs and manifests before using
+the inventories for comparisons.
+
+### Batch source scans on a SharePoint farm server
+
+`SmartM365-SharePointMigration-SourceScanBatch.ps1` replaces the private
+`Get-SP2019FileInventory-LocalWrapper.ps1` workflow. Run it on a SharePoint
+Server farm machine under an account with SharePoint Shell access. It needs
+Windows PowerShell 5.1, the registered SharePoint snap-in, and Python 3 (the
+portable runtime in `Tools/Python` is used when available) to write scan
+manifests. From the `SmartM365/SharePointMigration` directory, preview first:
+
+```powershell
+.\Start-SmartM365-SharePointMigration-SourceScanBatch.cmd -PlanOnly
+```
+
+Remove `-PlanOnly` to run source file scans for every configured SharePoint
+Server migration, followed by their permission scans. Scans run sequentially
+to avoid concurrent farm load. Use `-MigrationNames SiteA,SiteB`
+for a subset, or `-InventoryMode FilesOnly` / `PermissionsOnly` for one kind.
+If the wrapper is copied outside the project, pass `-ProjectRoot` pointing to
+the shared `SmartM365/SharePointMigration` folder. It copies signed source
+scripts unchanged to a unique folder under the farm server's local temp
+directory; it never edits the repository scripts at run time. A configured
+`Source.UrlsFile` or `Comparison.PathMappingsFile` is required for every
+selected migration, preventing an unintended whole-web-application scan.
+
+The batch keeps `batch.log` and `summary.csv` in
+`Migrations/logs/source-scan-batches/<batch-id>/`, plus each scan's own log,
+CSV, and verified manifest. It continues after individual failures and exits
+nonzero if any scan fails. Validate a `-PlanOnly` run and one real migration
+on the farm server before replacing the old scheduled task.
+Both root `.cmd` launchers forward their arguments and return the batch exit
+code. With no arguments, they start the full batch; preview with `-PlanOnly`
+first.
+
 ## Requirements
 
 - SharePoint Server Management Shell when a SharePoint Server farm is used as a
