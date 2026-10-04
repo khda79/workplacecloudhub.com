@@ -64,6 +64,46 @@ class FileComparisonTests(unittest.TestCase):
         self.assertTrue(FILES.web_is_in_scope('https://example.com/sites/bu/subsite', roots))
         self.assertFalse(FILES.web_is_in_scope('https://example.com/sites/bu-other', roots))
 
+    def test_verified_empty_target_reports_all_source_files_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fields = ['WebUrl', 'LibraryTitle', 'LibraryRootFolderUrl', 'FileName', 'ServerRelativeUrl', 'SizeBytes', 'Modified', 'Version']
+            source = root / 'source.csv'
+            target = root / 'target.csv'
+            with source.open('w', newline='', encoding='utf-8') as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerow(dict(zip(fields, ['https://example.com/source', 'Docs', '/source/Docs', 'a.docx', '/source/Docs/a.docx', '100', '2026-10-03 12:00:00', '1.0'])))
+            with target.open('w', newline='', encoding='utf-8') as handle:
+                csv.DictWriter(handle, fieldnames=fields).writeheader()
+            EVIDENCE.write_manifest(source, 'Source', 'File', 'https://example.com/source')
+            EVIDENCE.write_manifest(target, 'Target', 'File', 'https://example.com/target')
+            (root / 'mapping.txt').write_text('/source /target', encoding='utf-8')
+            (root / 'source.txt').write_text('https://example.com/source', encoding='utf-8')
+            (root / 'target.txt').write_text('https://example.com/target', encoding='utf-8')
+
+            def compare(output):
+                run = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_file_inventories.py'),
+                    '--source-csv', str(source), '--target-csv', str(target), '--output-directory', str(output),
+                    '--path-mapping-file', str(root / 'mapping.txt'), '--source-web-urls-file', str(root / 'source.txt'),
+                    '--target-web-urls-file', str(root / 'target.txt')], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                with (output / 'Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                    return next(csv.DictReader(handle, delimiter=';'))
+
+            summary = compare(root / 'verified')
+            self.assertEqual(summary['SourceUniqueKeys'], '1')
+            self.assertEqual(summary['TargetUniqueKeys'], '0')
+            self.assertEqual(summary['MissingInTarget'], '1')
+            self.assertEqual(summary['SuccessPercent'], '0.00%')
+            self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
+            self.assertIn('0.00%', Path(summary['HtmlSummary']).read_text(encoding='utf-8'))
+
+            EVIDENCE.manifest_path(target).unlink()
+            unverified = compare(root / 'unverified')
+            self.assertEqual(unverified['SuccessPercent'], '')
+            self.assertEqual(unverified['ValidationStatus'], 'InconclusiveEmptyInventory')
+
     def test_versions_dates_duplicates_scope_and_dry_run_generation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -208,6 +248,29 @@ class HtmlReportTests(unittest.TestCase):
                 self.assertEqual(sheet.find(".//x:c[@r='B2']/x:v", namespace).text, '0.8')
                 self.assertEqual(sheet.find(".//x:c[@r='B2']", namespace).get('s'), '2')
                 self.assertEqual(sheet.find(".//x:c[@r='E2']", namespace).get('s'), '1')
+
+    def test_global_report_preserves_verified_empty_target_rate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migration = root / 'Migrations' / 'Example'
+            folder = migration / 'comparisons' / 'files' / 'Example-files-20261004-150000'
+            folder.mkdir(parents=True)
+            (migration / 'migration.config.psd1').write_text("@{Name='Example'}", encoding='utf-8')
+            (migration / 'migration.mapping.txt').write_text('https://example.com/source https://example.com/target\n', encoding='utf-8')
+            with (folder / 'Summary.csv').open('w', encoding='utf-8', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys',
+                    'TargetEmptyVerified', 'MatchedKeys', 'MissingInTarget', 'ValidationStatus'], delimiter=';')
+                writer.writeheader()
+                writer.writerow({'SourceCsv': 'SP2019-FileInventory-Example-20261004-140000.csv',
+                    'TargetCsv': 'SPO-FileInventory-Example-20261004-143000.csv', 'SourceUniqueKeys': '399',
+                    'TargetUniqueKeys': '0', 'TargetEmptyVerified': 'True', 'MatchedKeys': '0',
+                    'MissingInTarget': '399', 'ValidationStatus': 'ReviewNeeded'})
+            output = GLOBAL.build(root / 'Migrations', root / 'out')
+            with output.with_suffix('.csv').open(encoding='utf-8-sig', newline='') as handle:
+                row = next(csv.DictReader(handle, delimiter=';'))
+            self.assertEqual(row['SuccessPercent'], '0.00%')
+            self.assertEqual(row['ValidationStatus'], 'ReviewNeeded')
+            self.assertIn('Verified empty target', row['EvidenceNotes'])
 
     def test_global_permissions_report_uses_latest_summary_and_excel_link(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.43
+    1.0.44
 #>
 
 #Requires -Version 7.4
@@ -136,7 +136,10 @@ function Get-ComparisonBadgeText {
         -MigrationName $MigrationName -Kind $Kind -SelectedFolder $Folder
     $stamp = Get-SmartM365PortfolioTimestamp $Folder.Name
     $date = if ($comparison) { $comparison.Date } elseif ($stamp) { $stamp } else { $Folder.LastWriteTime }
-    $rate = if ($comparison -and $comparison.Source -gt 0) {
+    $verifiedEmptyTarget = $Kind -eq 'Files' -and $comparison -and $comparison.Target -eq 0 -and
+        $comparison.Summary.PSObject.Properties['TargetEmptyVerified'] -and
+        [string]$comparison.Summary.TargetEmptyVerified -eq 'True'
+    $rate = if ($comparison -and $comparison.Source -gt 0 -and ($comparison.Target -gt 0 -or $verifiedEmptyTarget)) {
         '{0:N2} %' -f ([double]$comparison.Matched / [double]$comparison.Source * 100)
     } else { 'Rate unavailable' }
     return ('{0:yyyy-MM-dd HH:mm} · {1}' -f $date, $rate)
@@ -3336,8 +3339,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrULD69w7Pauf8
-# oBEwd7HxFCFjC3iYauGwK28gwdSj9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBxVxmqPoQVSZG
+# QYaA16p+PNqhz56J6WCQngswqtv6CqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3367,14 +3370,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAFD0X4G5Qey3IV9gZQVUk7
-# 4HeMT0OKTIsso/HIHJSivTANBgkqhkiG9w0BAQEFAASCAYCULwfxvcmNJwkHn1P9
-# jzlTjJ/LTHxDVFdumLfVSkfqrJWqr5ABJ4rVpXt/hiajyt1X/hMQEFHlGskCUV+G
-# /uYufBhMAwYWgL1YJI6eH04i1IXVAAxXDaX6oWI4JgCGGS2e1ee4/fvGFHjwm6j+
-# PPtuV8E9PJsDe0P9HVDxUpKC2r3L51rcI/Vl1C0wPxTZFN7Wo4tsrWNqu6LJvl2s
-# O8ysXud6CHwkiIxpLkUCtp0WbaR0a3K6j1R/2Kx5ADad8hzMSJITaNdEO546pV0K
-# KdjAhn0wAUBzFCo3MyjiOK329aPKb7BRwTT06zVunh0JWzUzycq6xj70qbUSCb97
-# RW4pSjaL7hD4IAemvNj0C0IQr4t54v4YwfeKjS3tR87trqXr/G85DP63Ffiaw7Dk
-# lSspX9Pnunb8QIRqmNAWB3KAsb4ZordAnmDijbGvBwCZF2MDIu39BRQQOidr5apl
-# VNVWp+Od3mjzmR3RcyGODRZDbVw43eBGHlVITAYFqGpBovM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCQHHqN0cS90qd/LmQOSzf6
+# xosY0suQluDS3keHQ4CBpTANBgkqhkiG9w0BAQEFAASCAYCr2V1KMZl8XA5bRxdu
+# MwHhh9+Cx7ayAsjWdDDCDlf8peh8kXpcFbknfLfI+bXADc5uLw7yxqkECfWaQxVd
+# WYkj7qIEO3nODcztbW7Yh5f5EFh8dDyWGcmScc/dQluDInGMJH3KSZf1ZY8nUrOg
+# hRPCy1T+kwTq/m5QF/rWRL8Nt+il8NEBe+EILa9k44J19KSgIdC4iEQ5V56K2j3Z
+# Hr2LkpZO0DSYohmYWpOwJuksQ+NVgZ1OX9CfC8EQq29qhgSnfRc4ago0sHuzO6Bp
+# AjKL8iMR97LnFRRCmMVDg1ZJ5S3jPpJODMp6PFaMhwh144GH7MR2lauaT270if1E
+# 1qRrOFqvbU8IOvVC6WrrcnlB9EaWvIu/X55V8oAXYc8d0LfGi/Vg8zDeVlJv29FB
+# +OL+q04Sm14ma9wa71GqhqcKkkYwa5eOKxPG+uYQjVQCkCJAFCnEo9es2BHFNrJf
+# o+S4nIsLgLkEhuzbvv/jiSlmQ/sb9IYmYo3KOUQR8hnvoEg=
 # SIG # End signature block

@@ -323,8 +323,12 @@ when source and target are close to one another. New launcher scans publish a
 SHA-256. The comparison verifies that hash. For older scans without a receipt,
 the timestamp embedded in the CSV filename is used so copying a CSV cannot
 make it appear new; a nonstandard filename falls back to file time with a
-warning. Zero-row scans with a receipt block comparison. Reports from older
-zero-row scans display an inconclusive status.
+warning. A zero-row source file scan with a receipt still blocks comparison.
+An older source scan without a receipt remains inconclusive if empty. A zero-row target
+file scan with a valid receipt can be compared before migration: all source
+files are reported as missing and the file match rate is 0%. An unverified
+empty target remains inconclusive. Permission comparisons still reject
+zero-row scans.
 File and permission HTML reports also show scan evidence and flag stale or
 unverified scans for review when an override allowed comparison to continue.
 

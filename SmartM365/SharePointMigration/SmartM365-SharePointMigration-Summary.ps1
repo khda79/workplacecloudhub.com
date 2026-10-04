@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.8
+    1.0.9
 #>
 
 function Get-SmartM365PortfolioTimestamp {
@@ -142,10 +142,12 @@ function Get-SmartM365PortfolioRow {
     if ($sourceScan -and $targetScan) {
         $status = 'Compare needed'
         $detail = 'No valid file comparison is available.'
-        if (($null -ne $sourceScan.Rows -and $sourceScan.Rows -eq 0) -or
-            ($null -ne $targetScan.Rows -and $targetScan.Rows -eq 0)) {
+        if ($null -ne $sourceScan.Rows -and $sourceScan.Rows -eq 0) {
             $status = 'Review needed'
-            $detail = 'A published inventory contains zero rows.'
+            $detail = 'The source file inventory contains zero rows.'
+        }
+        elseif ($null -ne $targetScan.Rows -and $targetScan.Rows -eq 0) {
+            $detail = 'Target file inventory is empty; compare to record the source files missing before a copy.'
         }
         if ($comparison) {
             $summary = $comparison.Summary
@@ -153,11 +155,14 @@ function Get-SmartM365PortfolioRow {
             $targetName = [IO.Path]::GetFileName(([string]$summary.TargetCsv).Replace('/', '\'))
             $usesLatest = [string]::Equals($sourceName, $sourceScan.File.Name, [StringComparison]::OrdinalIgnoreCase) -and
                 [string]::Equals($targetName, $targetScan.File.Name, [StringComparison]::OrdinalIgnoreCase)
-            if ($comparison.Source -gt 0 -and $comparison.Target -gt 0) {
+            $targetEmptyVerified = $comparison.Target -eq 0 -and $null -ne $targetScan.Rows -and
+                $targetScan.Rows -eq 0 -and $summary.PSObject.Properties['TargetEmptyVerified'] -and
+                [string]$summary.TargetEmptyVerified -eq 'True'
+            if ($comparison.Source -gt 0 -and ($comparison.Target -gt 0 -or $targetEmptyVerified)) {
                 $rate = [double]$comparison.Matched / [double]$comparison.Source * 100
                 $rateText = ('{0:N2} %' -f $rate)
             }
-            if ($status -eq 'Review needed' -and $detail -like '*zero rows*') {
+            if ($status -eq 'Review needed' -and $detail -like '*source file inventory contains zero rows*') {
                 $detail += ' A comparison does not replace a complete scan.'
             }
             elseif (-not $usesLatest) {
@@ -187,6 +192,9 @@ function Get-SmartM365PortfolioRow {
                 }
                 $status = if ($validation -eq 'NoRelevantDifference') { 'Up to date' } else { 'Review needed' }
                 $detail = "Validation: $validation. Matches: $($comparison.Matched) / $($comparison.Source)."
+                if ($targetEmptyVerified) {
+                    $detail += ' Target scan verified empty; source files are listed as missing.'
+                }
                 $maxAge = 24.0; $maxGap = 12.0
                 $configured = 0.0
                 if ([double]::TryParse([string]$cfg.Comparison['MaxScanAgeHours'], [ref]$configured) -and $configured -gt 0) {
@@ -356,8 +364,8 @@ function Get-SmartM365PortfolioRow {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0OrqGdH8h9THa
-# UviVhwZ4FbSVcUm3bllscmoQeb28paCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdaROqcqSlLxhu
+# ZRltWHykXiHZroO4Ya7wTy3zuxn9VaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -387,14 +395,14 @@ function Get-SmartM365PortfolioRow {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCqEr6rSe8elvGo1EAc7j3D
-# aeR7H+BYexeZ19x56oa9gjANBgkqhkiG9w0BAQEFAASCAYAocudz3TPlNtxBNO+z
-# ljtZMzhBciNMv2dvvdgdnaexFcY7oyEfZYvVTDUkP+chuLLQG6EM/NkjUZcklz8M
-# DDnJTjPXjWHQprorKRM7bBDnF4OC7plMfQbR9P3PTLeulPo00DtvP1lajCyVAaf9
-# ENrHRkYd4hcFsOVsAgbqO+EPD98wIjUsfvBkflVXI7uwgw6X3ILuo2II9P50sHgP
-# FNhUOfKDgmz4y7TVd1jVIK7Csg09UOe6hRXZSWcpsNF1FD2+HbqYysCBOQGp1+oW
-# c5AJNQLBGYcR9jLEWxfIY5AWrz3t3hlHurJXEYaDi/w+YvczbVm8rJL27DsDMZg3
-# 9Kg7uV3j5JX8sy7vqjEw2Q9HkMRPHzmZqpLD7ZAgb1bXCtJeCmbc6to0BcKJ+WyC
-# K5fbcrsjFS6RWX5gVgUp17JLt+BQ/gmJtcck/S/BV3CmnwQCczgTgxfx3uy84tfP
-# 8MWHBBPR2h13Zt0zAIirSdbTob3NYJdk9Ve0kzuZw4ACtHA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCzXN1D9XQ/U+l3V/LsSBBK
+# O7EiKyzJcOswWjp3MKq76zANBgkqhkiG9w0BAQEFAASCAYCuLd0VFORhFzuNnoDB
+# TwESbcFmr8DMUoc+bVucWj7EcdujjcyvhKkFgQEWmDNjWFdRogTvPzZtUWdq4YZ6
+# Pqyr1kUb3pSpc4VlMykqjK1KuqOwxb4T+9ir7JOlhbYtz//zdQEiB0NZUM3Jmsey
+# +Op7qv3RBTVYwyCA7Vb1plsM+vSBEbRlpKXRcSGBB3naHdxT2QzkcIcCTnbfZH/P
+# nTkK0aKF+LDJQ2iF6tVKK868o3Q5ECVE6BADzT/GVZDUQmkAKeE844nze8BTD0FY
+# wDNSDPMb1IbLtVKkttWSSohLVaacs4y3/wCvpvx1pzXcq+cNEZe6wbn9d5qBg/BB
+# VTiVFWZxckihAlVYOerUN/KEwm9N+R0bkhsz0jz8B3fj2z9p8vJjRJOIOYhTH3HU
+# 5314JJCNaJf13bBMiW3fhVFwvI0YOsQZv3M9uJQmCVzzz+fzDHRxYnWzkw/nzE0s
+# lkEHoDr/NmpIl/xv5FdXSg5/Hh4o0bzvrp8ukrMRzHaMuEU=
 # SIG # End signature block

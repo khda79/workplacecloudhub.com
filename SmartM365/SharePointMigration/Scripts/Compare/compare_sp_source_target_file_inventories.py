@@ -3,6 +3,7 @@ import argparse
 import builtins
 import csv
 import html
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,25 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
-from scan_evidence import describe_pair
+from scan_evidence import describe_pair, manifest_path
+
+
+def verified_empty_target_scan(path, target_rows):
+    """A zero-row target is comparable only when its completed scan has a receipt."""
+    if target_rows:
+        return False
+    receipt = manifest_path(path)
+    if not receipt.is_file():
+        return False
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    return (
+        data.get("SchemaVersion") == 1
+        and data.get("InventoryFile") == path.name
+        and data.get("Side") == "Target"
+        and data.get("Kind") == "File"
+        and data.get("Rows") == 0
+        and bool(data.get("ScopeRoots"))
+    )
 
 
 def print(*args, **kwargs):
@@ -297,14 +316,25 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     target_older = to_int(summary.get("TargetOlderThanSource"))
     changed_version = to_int(summary.get("ChangedVersion"))
     review_count = missing + extra + different_size + changed_modified + target_older + changed_version
-    inconclusive = not to_int(summary.get("SourceUniqueKeys")) or not to_int(summary.get("TargetUniqueKeys"))
+    inconclusive = summary.get("ValidationStatus") == "InconclusiveEmptyInventory"
     filtered = to_int(summary.get("SourceFilteredRows")) + to_int(summary.get("TargetFilteredRows"))
     evidence_problem = summary.get("ScanEvidenceStatus") in ("Stale", "Unverified")
-    status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if review_count or extra_folders else ("Review scope filter" if filtered else "No relevant difference")))
+    if inconclusive:
+        status_text = "Inconclusive - empty inventory"
+    elif evidence_problem:
+        status_text = "Review scan evidence"
+    elif summary.get("TargetEmptyVerified"):
+        status_text = "Target scan empty - source files missing"
+    elif review_count or extra_folders:
+        status_text = "Review needed"
+    elif filtered:
+        status_text = "Review scope filter"
+    else:
+        status_text = "No relevant difference"
     status_class = "note" if inconclusive else ("warn" if review_count or filtered or evidence_problem else ("note" if extra_folders else "ok"))
 
     cards = [
-        ("Success rate", summary.get("SuccessPercent") or "N/A", "muted" if inconclusive else "ok"),
+        ("Success rate", summary.get("SuccessPercent") or "N/A", "muted" if inconclusive else ("bad" if missing else "ok")),
         ("Matched files", matched, "ok"),
         ("Missing in target", missing, "bad" if missing else "ok"),
         ("Extra in target", extra, "bad" if extra else "ok"),
@@ -352,6 +382,11 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
         top_rows_html.append('<tr><td colspan="8" class="empty">No library-level differences.</td></tr>')
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    empty_target_note = (
+        "<dt>Target scan</dt><dd>Verified empty scan. All source files appear in Missing in target; "
+        "this may be expected before a copy.</dd>"
+        if summary.get("TargetEmptyVerified") else ""
+    )
     body_html = f'''
   <section class="section" aria-labelledby="run-context">
     <div class="section-heading"><h2 id="run-context">Run context</h2></div>
@@ -363,6 +398,7 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
       <dt>Oldest scan age (hours)</dt><dd>{html_escape(summary.get('OldestScanAgeHours'))}</dd>
       <dt>Source unique keys</dt><dd>{format_integer(summary.get('SourceUniqueKeys'))}</dd>
       <dt>Target unique keys</dt><dd>{format_integer(summary.get('TargetUniqueKeys'))}</dd>
+      {empty_target_note}
       <dt>Success rate definition</dt><dd>Matched files / source unique keys in comparison scope. Extra target files are shown separately.</dd>
       <dt>Source filtered rows</dt><dd>{format_integer(summary.get('SourceFilteredRows'))}</dd>
       <dt>Target filtered rows</dt><dd>{format_integer(summary.get('TargetFilteredRows'))}</dd>
@@ -1743,6 +1779,9 @@ def main():
     report_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     html_summary_path = output_directory / f"{args.comparison_name}-summary-{report_timestamp}.html"
 
+    scan_description = describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours)
+    target_empty_verified = verified_empty_target_scan(target_csv, target_total_rows) if not target_seen else False
+    comparable = bool(source_index) and (bool(target_seen) or target_empty_verified)
     summary = {
         "ComparisonName": args.comparison_name,
         "SourceCsv": str(source_csv),
@@ -1756,10 +1795,11 @@ def main():
         "TargetFilteredRows": target_filtered_rows,
         "TargetExcludedRows": target_excluded_rows,
         "TargetUniqueKeys": len(target_seen),
+        "TargetEmptyVerified": target_empty_verified,
         "TargetDuplicateKeysIgnored": target_duplicate_keys,
         "MatchedKeys": matched,
-        "SuccessPercent": f"{100 * matched / len(source_index):.2f}%" if source_index and target_seen else "",
-        "ValidationStatus": "InconclusiveEmptyInventory" if not source_index or not target_seen else ("ReviewNeeded" if missing or extra or extra_folder_candidates or different_size or changed_modified_date or target_older_than_source or changed_version else ("ReviewScopeFilter" if source_filtered_rows or target_filtered_rows else "NoRelevantDifference")),
+        "SuccessPercent": f"{100 * matched / len(source_index):.2f}%" if comparable else "",
+        "ValidationStatus": "InconclusiveEmptyInventory" if not comparable else ("ReviewNeeded" if missing or extra or extra_folder_candidates or different_size or changed_modified_date or target_older_than_source or changed_version else ("ReviewScopeFilter" if source_filtered_rows or target_filtered_rows else "NoRelevantDifference")),
         "MissingInTarget": missing,
         "ExtraInTarget": extra,
         "ExtraFoldersInTarget": len(extra_folder_candidates),
@@ -1784,7 +1824,7 @@ def main():
         "HtmlSummary": str(html_summary_path),
         "OutputDirectory": str(output_directory),
     }
-    summary.update(describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours))
+    summary.update(scan_description)
     if summary["ScanEvidenceStatus"] in ("Stale", "Unverified") and summary["ValidationStatus"] != "InconclusiveEmptyInventory":
         summary["ValidationStatus"] = "ReviewScanEvidence"
 

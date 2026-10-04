@@ -19,10 +19,11 @@ $badgeFunction = $guiAst.Find({
 if (-not $badgeFunction) { throw 'Comparison badge formatter is missing from the GUI.' }
 . ([scriptblock]::Create($badgeFunction.Extent.Text))
 
-$testRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ('.summary-test-' + [guid]::NewGuid().ToString('N'))))
-$safeRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\') + '\'
-if (-not $testRoot.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Test directory is outside the SharePointMigration Tests folder.'
+$safeRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+$testRoot = [IO.Path]::GetFullPath((Join-Path $safeRoot ('SharePointMigration-summary-tests-' + [guid]::NewGuid().ToString('N'))))
+if (-not $testRoot.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase) -or
+    (Split-Path $testRoot -Leaf) -notlike 'SharePointMigration-summary-tests-*') {
+    throw 'Test directory is outside the temporary folder.'
 }
 
 try {
@@ -85,6 +86,14 @@ try {
         $row.ScanGapTooltip -notmatch 'Target is newer') {
         throw 'Scan day difference or direction is incorrect.'
     }
+    $targetReceipt = "$targetCsv.manifest.json.txt"
+    @{ SchemaVersion = 1; InventoryFile = [IO.Path]::GetFileName($targetCsv)
+        CompletedAtUtc = [datetime]::UtcNow.ToString('o'); Sha256 = 'synthetic'; Rows = 0 } |
+        ConvertTo-Json | Set-Content -LiteralPath $targetReceipt -Encoding utf8
+    $row = Get-SmartM365PortfolioRow @params
+    if ($row.Status -ne 'Scan needed' -or $row.StatusTooltip -notmatch 'Target file inventory is empty; compare') {
+        throw 'A pre-migration empty target must invite file comparison.'
+    }
 
     $folder = Join-Path $comparisonDir "Fixture-files-$comparisonStamp-test"
     [void](New-Item -ItemType Directory -Path $folder)
@@ -104,6 +113,32 @@ try {
     if ($fileBadge -ne "$($row.ComparisonDate) · $($row.ComparisonPercent)") {
         throw 'File comparison badge did not show the date and rate from the displayed report.'
     }
+    $summary.MatchedKeys = 0
+    $summary.TargetUniqueKeys = 0
+    $summary.MissingInTarget = 10
+    $summary.ValidationStatus = 'ReviewNeeded'
+    $summary | Add-Member -NotePropertyName TargetEmptyVerified -NotePropertyValue 'True'
+    $summary | Export-Csv -LiteralPath $summaryPath -Delimiter ';' -NoTypeInformation -Encoding utf8
+    $row = Get-SmartM365PortfolioRow @params
+    if ($row.ComparisonRate -ne 0 -or $row.ComparisonPercent -notmatch '^0[,.]00 %$' -or
+        $row.StatusTooltip -notmatch 'Target scan verified empty') {
+        throw 'Verified empty target comparison must display a 0 percent file rate.'
+    }
+    $fileBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $folder) -MigrationName 'Fixture' -Kind Files
+    if ($fileBadge -ne "$($row.ComparisonDate) · $($row.ComparisonPercent)") {
+        throw 'Verified empty target comparison badge must show 0 percent.'
+    }
+    $summary.PSObject.Properties.Remove('TargetEmptyVerified')
+    $summary | Export-Csv -LiteralPath $summaryPath -Delimiter ';' -NoTypeInformation -Encoding utf8
+    $unverifiedBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $folder) -MigrationName 'Fixture' -Kind Files
+    if ($unverifiedBadge -notmatch 'Rate unavailable$') {
+        throw 'Unverified empty target comparison badge must not show a rate.'
+    }
+    Remove-Item -LiteralPath $targetReceipt -Force
+    $summary.MatchedKeys = 8
+    $summary.TargetUniqueKeys = 10
+    $summary.MissingInTarget = 2
+    $summary | Export-Csv -LiteralPath $summaryPath -Delimiter ';' -NoTypeInformation -Encoding utf8
     [void]$migration.Config.Comparison.Remove('MaxScanAgeHours')
     [void]$migration.Config.Comparison.Remove('MaxScanAgeDifferenceHours')
     $row = Get-SmartM365PortfolioRow @params
@@ -196,16 +231,19 @@ try {
     'SharePointMigration summary offline tests passed.'
 }
 finally {
-    if (Test-Path -LiteralPath $testRoot -PathType Container) {
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+    $resolvedRoot = [IO.Path]::GetFullPath($testRoot)
+    if ($resolvedRoot.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path $resolvedRoot -Leaf) -like 'SharePointMigration-summary-tests-*' -and
+        (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
     }
 }
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgqJ1TI9RoSI9n
-# MceVtBq0S0Xdg/Vj6E8VjKCYL4Jy2KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0YWZPZqoL8i33
+# +OeX0/0KyjyyVoL3/CC6YXbIuL0gUqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -235,14 +273,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAsN1WU/FioplyeDP+WX557
-# 2b5++WjsNwwwdh2XkdTJ8DANBgkqhkiG9w0BAQEFAASCAYA313QufbIcnPAVKawM
-# rxLaj3cBMgM7vCaQreemi0NQw8FPShB6SsEc2bYPyG3nmBGnPKaaLGbds6QuK2G0
-# LYr9GwWb4VsaNJoWT6Lgl0CaAMAtdPQ3kgg5E7eu7XSvayd+K2kpdrynpmZ/C2MM
-# 6jds12jU7Em4AU4hdzuBSEQ73R51jHLSCO+4oG1JThLyrPYBl8HG2g2ftmEDwvpd
-# wc2ZGSmR0oGehghvfmZkruTEKbiphvCXJ6jitMACa0ryPbl7Jt1R+DH/vHNlzapZ
-# I+A9H74MQAadKtV168gmgFc+3u+nCT09dT4Snd8104H6hv7gTpVAdYHRawQlmA6r
-# fCb9at3BPfQZDNXTpaYhVzDPkzL2dyG0KleQEgZaXeczt289+9Jvf1FIrh5TRTRt
-# PGSuRBC5SGZ+Fx6gYPlSzJ3HO3PSSdzsCSCO3fBz9se3jjBUqR2TL5GAsf5OfUWs
-# SYqYwBAlOKCy7IJhNnMGIoEDjyifigH6m9yxQI7i0bBwzEg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC7LpqTwxre/adAR/FspYOB
+# 1eiKuOoS24Ez4L0xkg45zDANBgkqhkiG9w0BAQEFAASCAYB7k9snRFdR+KMrxrlc
+# zhRk4GVF9aREl/tmvw/M5LV2km7uyRSyM/gTHxKLucSVnsBR0QwVl7glraZBTjE9
+# AhFSVQt3WfIEjxsFt4MWeO4ZdX+SaODO9ZuWviwHJ/ladp87OFu836hGwIzmOqm8
+# i6dpGGuSioNQijV4ojjMZcwJKzyHWuatDHI9E8CidibBGNxA63e7WQTdL0ueNwVo
+# 3M9evcBDXKlnzoDeejvPRocheuGQwQk6pUBIlxkDNV1HLO6zWpRB4lMs0uGbK5lA
+# nCvAraxxR0DNlqarzn9SHDF6q9AAnUN3S5jZq42FQaGVNO5AKvzcfS5qHiEUG5ku
+# uvJWQWWm3quAdZc3Nl1sCtOZN+9iSrFTBETKcc6SedbggzjFhDMQIglUngXL7HYE
+# g1HS3yJqvH7M68jIEVkNjX0e3YlvWeXkkahTxT5fDI1cIIyDl/8TL+OhkRPDmZqQ
+# nCsflopGRJMP5T76k2oBdcoBu/rBVKSDkQXd7pQRFBkC7Ng=
 # SIG # End signature block

@@ -186,7 +186,8 @@ def collect(migrations_root):
             target_count = int(summary.get("TargetUniqueKeys") or 0)
         except ValueError:
             continue
-        percent = f"{matched / source_count * 100:.2f}%" if source_count and target_count else "N/A"
+        target_empty_verified = str(summary.get("TargetEmptyVerified", "")).lower() == "true"
+        percent = f"{matched / source_count * 100:.2f}%" if source_count and (target_count or target_empty_verified) else "N/A"
         html_report = next(path.parent.glob("*-summary-*.html"), None)
         compared_at = stamp(path.parent.name)
         source_at = stamp(summary.get("SourceCsv", ""))
@@ -206,8 +207,10 @@ def collect(migrations_root):
             "InconclusiveEmptyInventory" if not source_count or not target_count else
             "ReviewNeeded" if differences else "ReviewScopeFilter" if filtered else "NoRelevantDifference")
         concerns = []
-        if not source_count or not target_count:
+        if not source_count or (not target_count and not target_empty_verified):
             concerns.append("Empty inventory")
+        elif target_empty_verified:
+            concerns.append("Verified empty target")
         if filtered:
             concerns.append("Filtered rows")
         if scan_gap is None:
