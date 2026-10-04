@@ -1,27 +1,124 @@
-@{
-    RootModule='SmartM365.EvidenceCollector.Common.psm1'
-    ModuleVersion='1.0.5'
-    GUID='ec77e13b-72ee-4d87-9a41-d3f81e70d9f6'
-    Author='WorkplaceCloudHub'
-    Description='Shared runtime, Graph, export-job, and CSV helpers for SmartM365 evidence collectors.'
-    PowerShellVersion='7.0'
-    FunctionsToExport=@(
-        'Get-SmartM365EvidenceProperty','ConvertTo-SmartM365EvidenceText','ConvertTo-SmartM365EvidenceJson',
-        'Get-SmartM365EvidenceConfig','Initialize-SmartM365EvidenceRuntime','Connect-SmartM365EvidenceGraph',
-        'Get-SmartM365EvidenceStatusCode','Invoke-SmartM365EvidenceGraphRequest','Get-SmartM365EvidenceGraphCollection',
-        'Invoke-SmartM365EvidenceExportReport','Export-SmartM365EvidenceDataset',
-        'Write-SmartM365EvidenceLog','Complete-SmartM365EvidenceRuntime'
-    )
-    CmdletsToExport=@()
-    VariablesToExport=@()
-    AliasesToExport=@()
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+Tests real evidence runtime imports and receipt visibility without tenant actions.
+.VERSION
+1.0.0
+#>
+[CmdletBinding()]
+param([ValidateSet('', 'Preloaded', 'Cold', 'ActiveState')][string]$Scenario = '')
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+if (-not $Scenario) {
+    foreach ($case in @('Preloaded', 'Cold', 'ActiveState')) {
+        & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Scenario $case
+        if ($LASTEXITCODE -ne 0) { throw "Offline runtime scope regression: $case" }
+    }
+    Write-Output 'PASS: three fresh-process runtime scenarios; real Core imports and read-only receipt calls.'
+    return
+}
+
+$smartRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$corePath = Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1'
+$commonPath = Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1'
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-RuntimeScope-' + [guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $fixtureRoot
+$scriptPath = Join-Path $fixtureRoot 'SmartM365-WorkplaceScope-Inventory.ps1'
+$templateSource = Join-Path $smartRoot 'SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.local.json.txt.template'
+[IO.File]::WriteAllBytes((Join-Path $fixtureRoot 'SmartM365-WorkplaceScope-Inventory.local.json.txt.template'), [IO.File]::ReadAllBytes($templateSource))
+$global:OfflineEnvironmentCalls = 0
+
+# Only mock the environment/logging boundary. Runtime and Core imports stay real.
+# Alias precedence prevents a nested Core import from bypassing the offline stub.
+function global:Invoke-OfflineEnvironmentInitialization {
+    [CmdletBinding()]
+    param([string]$OutputPathInit, [string]$LogFileName, [string]$CallerScriptPath)
+    $global:OfflineEnvironmentCalls++
+    if (-not $OutputPathInit -or -not $LogFileName -or -not $CallerScriptPath) {
+        throw 'Runtime omitted environment initialization arguments.'
+    }
+}
+Set-Alias -Name InitializeScriptEnvironment -Value Invoke-OfflineEnvironmentInitialization -Scope Global -Option AllScope
+
+$coreBefore = $null
+$sentinel = [pscustomobject]@{ Marker='offline-active-receipt'; Lock=$null }
+try {
+    if ($Scenario -ne 'Cold') {
+        Import-Module $corePath -MinimumVersion '1.0.65' -Global -ErrorAction Stop
+        $coreBefore = Get-Module SmartM365.Core
+        if (-not (Get-Command Start-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue)) {
+            throw 'Receipt export is missing before runtime initialization.'
+        }
+        if ($Scenario -eq 'ActiveState') {
+            & $coreBefore { param($value) $script:SmartM365CmdbSourceContext = $value } $sentinel
+        }
+    }
+    Import-Module $commonPath -MinimumVersion '1.0.5' -ErrorAction Stop
+    $effective = [pscustomobject]@{
+        SmartM365RootPath=$smartRoot
+        DataAllRootPath=(Join-Path $fixtureRoot 'archive')
+        LatestCsvFolderPath=(Join-Path $fixtureRoot 'latest')
+        LogAllRootPath=(Join-Path $fixtureRoot 'logs')
+        EnableSharePointUpload=$true
+        EnableTeamsNotifications=$true
+    }
+    $runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $scriptPath -EffectiveConfig $effective `
+        -DefaultOutputRelativePath 'M365/WorkplaceScope' -ValidateOnly -EnableConfiguredExternalActions
+
+    foreach ($commandName in @('Start-SmartM365CmdbSourceReceipt','Set-SmartM365CmdbSourceScope',
+        'Invoke-SmartM365Preflight','Complete-SmartM365ExecutionContext')) {
+        if (-not (Get-Command $commandName -ErrorAction SilentlyContinue)) {
+            throw "Core command disappeared from the collector scope: $commandName"
+        }
+    }
+    $coreAfter = Get-Module SmartM365.Core
+    if ($null -ne $coreBefore -and -not [object]::ReferenceEquals($coreBefore, $coreAfter)) {
+        throw 'Runtime replaced the already loaded Core module instance.'
+    }
+    if ($Scenario -eq 'ActiveState') {
+        $stateAfter = & $coreAfter { $script:SmartM365CmdbSourceContext }
+        if (-not [object]::ReferenceEquals($sentinel, $stateAfter)) {
+            throw 'Runtime reset the active receipt context.'
+        }
+    }
+    else {
+        # Run the exact post-initialization receipt call, in its non-writing mode.
+        Start-SmartM365CmdbSourceReceipt -ScriptPath $scriptPath -SourceRootPath $runtime.LatestCsvFolderPath -ReadOnly
+        if ($null -ne (& $coreAfter { $script:SmartM365CmdbSourceContext })) {
+            throw 'Read-only receipt call created an acquisition context.'
+        }
+    }
+    if ($global:OfflineEnvironmentCalls -ne 1 -or $global:EnableSharePointUpload -or $global:EnableTeamsNotifications) {
+        throw 'ValidateOnly environment boundary or external-action suppression regressed.'
+    }
+    if ($runtime.OutputPath -cne (Join-Path $effective.DataAllRootPath 'M365/WorkplaceScope') -or
+        $runtime.LatestCsvFolderPath -cne $effective.LatestCsvFolderPath) {
+        throw 'Runtime output path inheritance regressed.'
+    }
+    if (@(Get-ChildItem -LiteralPath $fixtureRoot -Force -Recurse).Count -ne 1) {
+        throw 'Offline runtime or read-only receipt unexpectedly wrote output files.'
+    }
+    Write-Output "PASS: $Scenario; caller-visible receipt functions, preserved Core state, no external actions."
+}
+finally {
+    if ($Scenario -eq 'ActiveState' -and $null -ne $coreBefore) {
+        & $coreBefore { $script:SmartM365CmdbSourceContext = $null }
+    }
+    $resolvedRoot = [IO.Path]::GetFullPath($fixtureRoot)
+    $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedRoot) -notmatch '^SmartM365-RuntimeScope-[0-9a-f]{32}$') {
+        throw 'Unsafe runtime fixture cleanup path.'
+    }
+    Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3XpnwccUTKM54
-# rcF2tE1WI9SpeuW1RAf4ylxUPEAXTKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUes1xJh59eKlA
+# tg9H8PMK+RfCzd31afnuFH0qYJhCXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -154,31 +251,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJx2ZBc2EyVAdf7QTsizVOpITRtfiVA92V9m2n1dE896MA0GCSqG
-# SIb3DQEBAQUABIIBgAZIhGkI1AdVI7yym7qt2d5P9GrF0Wj+2l7juB14BwFtgI4Z
-# /eh4EnxafltMdVo99j788xXTnHzJ4Wo507MOj3C1gmpbk849Zc7G6F8mN6jaMTlB
-# 6OJcirekvDTFaB/yu32Kij3jXYVqUVr55eXud/sUD3sptbx7GZNPKAIS1dT9NkUJ
-# NgsCY9T6kDFnGTcCAXQh8cBQUxOyoe2Oc56qCct3082h/1K1mZydbrzh+CPJZOnq
-# dxcrjK0yXFaGycG+nex45XAIEsbfMlZkphH4gq3SKL0p3bbug8OFStGN8tMrGTbN
-# ugXg7xgw3MdckpQenbzY5cf/T2FaRMoKLuB3gOJ11LAokwYyUfQLwBDvyaE1pC7i
-# LvhLIHej8IRbCVm1nj/uh9sjOlvWoi8io45YFgmTm+1ztR5Kkpxm41sNb96mhKGG
-# ggfd4YaHPEHauIT4DZNUYo2dxpCDltytr5eqosodSTmWjqDptjAR0Y/9tRl3o9Dt
-# bUC2g/TQvwcxCTCHxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIk/IN4o+UvyWZL9BKsZd05vbU1kJ7m7BOKYNJraT4oPMA0GCSqG
+# SIb3DQEBAQUABIIBgJu+wfmOvJJOYEJPgK01qRbA+1f1HBju6XUwKR7OMFddzIh6
+# ycKwsJ+NDbRCkfenO8ACSDLP4qRG9wVyQIGXrmmFRTMHSmvGddpjNa2Arue7G+vM
+# mTffjGDlON0/PSZrn82QSpwD3FwP+pgxVuH0JUC2VuEpMT2YCE0vaUQCDWcEbDjq
+# gpyHxy5IBaAwaQlW4lE1dwpeoXIyGbEDcQdyzUwZk06jBCUnP8NT3gfB1m1XQGNo
+# 6y2Ii6SUGajPHa891pJwuwlM689ap6ead/fk6vk31VU/vRRQlao2sqk78/beUVFR
+# wdD8ucZWXaKqlfakx2GOJaDht3CdWEx2EvEcnQsYaLYDhkhYOi+spEREhgOtXoJ9
+# CC8j5IeEewCabKlH7l1/pHwmhQfjCrOuh90SW+kvxFj6peWAtCk8wrzrZgBRa+Xi
+# q0G6VdTXYPelJJztaFfFHX4HdPRfv2Re/D7uDjrMNDbkmvi18TWr2BlTtKYzBRXQ
+# 4wd4B4sHDmNwF4zmL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTMz
-# MTVaMC8GCSqGSIb3DQEJBDEiBCCEovXdLvSqXebYUW7VooWCXBts0nyVdgy/QUiG
-# leH/dTANBgkqhkiG9w0BAQEFAASCAgCTl+Wbq0PUKLUHQwYhKZWfg+jeWojNr2pE
-# mXwClGA2+hl5fSbXMLoMT7U0T09RK2e1pLNp4+6/WtHpmLaLSLGt8RNm5M+6qdXn
-# jwUMnI1v+XyXbG8+5n2v6fAxFvwtplGdURUzJ05v/m77Ln+wtGi1PQR0OiuuPnnJ
-# qyyxRVrIGXOut/3bIT82mC3Uvedj/nrMXLhQeqTd9tnEiBw+iF2QYSbUV17by0O1
-# sUr4y7pYoOkCJsurtZ1nTYzMrK3FCjLa6ZXvKgI7yzcNMh5iwMwVQuX8gqUwRY3W
-# 909MLxu6q4jYgbprSJXXX4K+a0BCvSO9NoyMCxluV3sSUQ065rPFPPr3zpfToZ4o
-# V8s9B0aCpDG/QuGL14rid+O3BlQINn8qvXGBmVSDjv2mtXKeQDG1eKd/tluvXkm0
-# BcEMpRutzxuEfgbO2D/5fK4AGKdsFJh7FV910nsw1Nh8BmAkAeN59Ixpqb5SDjLx
-# BbtYKHsUXOhnJZEoi1ZmP0lKxdk2Fgpkt8N3hQvnr5KZvoLmXjVDGvjYi3PutUdI
-# GaRzQRgkbjO9y8BjwnYijIdrxI28bitHKOZHMKlF+D9rjAvHp4AeqJEDwVKEtv0Y
-# B2E9rk3aXMcX80Xrk0v93JVCRuSqxt7U3r96QQdi0qTFrmFrCjLP7kWCpHhFHBfJ
-# 24qdZY3oaw==
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBEOeEmuCxxCUygu/qIJNcKQnTAtvypCnJySsEI
+# AwdgmTANBgkqhkiG9w0BAQEFAASCAgAosxFwm/jqGvOu+i/65K/UejO/M+xt6QLM
+# w1N+nLMKoD7SGDw4xf451YXLBZLc+6L4kZ24/FHncrk8fPSSYJfZD+b7O3zh84u3
+# EhdGh5kHGGyxsfX+kszYeohASVOjHrsz7pLKuFzC+80C6sS5sNmCquMZIkW1PsGW
+# C9Z9YfJYiQapbyb93+c0jLo6BoINhTIhIZ9Jv/erABiUqlzl/4mPkkm86th6BgAn
+# igGu5MTeNEFdRyT+N5I0UqKpQsLnZb1YZwab4Zc3ZDSaYrE4Uepk7nqlINieWPrP
+# vc/7wfH3NKlmh+6/0n4QpkWBCQ9YIiEdareXx9vFcSFxuJKPZ+CZq+fJSxSmj3Q1
+# ykD6A7w9VBbL9xDh4Uj2i7iN1nJEZbFdUpsvvUCERtThy5wQXwk3w/eT947hPaL/
+# 9PKHXXKvUtvN4r7BEUOS4e8ifRgCoWoiBbV0E0WQLDTTidgtW4j8IZ67Dpk6amlj
+# tZzvSJWgGdqSxPtrR0fdUDklvscPMTseVuei9ugxhHtkmtO1+PQVxXTK86Bm/NOM
+# ZQXJ9+f5re/Sr3zEDrfT6tnm5abyAzHlssE1ZEwjtoWbeUQAZl/bkSIiorl624Mt
+# v7BY47Vw1MP1EJL/08nMP3d4AWUGRckd29u+wfr5DcRgxFNY93fLYng5zRKAks8d
+# QN6Uz8gYRg==
 # SIG # End signature block
