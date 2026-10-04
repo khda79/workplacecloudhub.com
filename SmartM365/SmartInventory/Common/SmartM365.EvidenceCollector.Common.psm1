@@ -55,10 +55,25 @@ function Get-SmartM365EvidenceConfig {
     $base = [System.IO.Path]::GetFileNameWithoutExtension($ScriptPath)
     $folder = Split-Path -Path $ScriptPath -Parent
     $localPath = Join-Path $folder "$base.local.json"; $localPath = Resolve-SmartM365JsonConfigurationPath -Path $localPath
-    $templatePath = (Get-SmartM365JsonTemplateName -Path $localPath)
-    $sourcePath = if (Test-Path -LiteralPath $localPath -PathType Leaf) { $localPath } else { $templatePath }
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Collector configuration template not found: $templatePath" }
-    $local = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $sourcePath = $localPath
+    if (-not (Test-Path -LiteralPath $localPath -PathType Leaf -ErrorAction Stop)) {
+        $names = Get-SmartM365JsonNames -Path $localPath
+        $templatePaths = @(($names.Preferred + '.template'), (Get-SmartM365JsonTemplateName -Path $localPath))
+        $sourcePath = $null
+        foreach ($candidate in $templatePaths) {
+            if (Test-Path -LiteralPath $candidate -ErrorAction Stop) {
+                if (-not (Test-Path -LiteralPath $candidate -PathType Leaf -ErrorAction Stop)) {
+                    throw "Collector configuration template is not a file: $candidate"
+                }
+                $sourcePath = $candidate
+                break
+            }
+        }
+        if ($null -eq $sourcePath) { throw "Collector configuration templates not found: $($templatePaths -join '; ')" }
+    }
+    # A malformed preferred file must fail, never silently select older configuration.
+    $local = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
+    if ($local -isnot [System.Management.Automation.PSCustomObject]) { throw "Collector configuration must be a JSON object: $sourcePath" }
     $result = [ordered]@{}
     foreach ($property in $EffectiveConfig.PSObject.Properties) { $result[$property.Name] = $property.Value }
     foreach ($property in $local.PSObject.Properties) {
@@ -230,8 +245,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3TRyn1V1cDCyb
-# yh7c87q5hi71yqztgGwyKj2nvMJ3HKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1Ehw/9fwt0GBs
+# bfmqP+WJvxy4qQpCNCKHb0GD5JG/KKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -364,31 +379,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHFBn8EElQw7SZQAlm9GMDum6jy1h6kxwFgW31rBLNQ4MA0GCSqG
-# SIb3DQEBAQUABIIBgCKnoDZJq67RxTyrmQUEZlTev7rBjSt8biNG0GURk5BynXyz
-# m6bk5I4DS6KMccmLS0PPJZWbQplYAtMyVBAjpUAvOuWGklzh8evGo3rvM80/rag9
-# XY2Rez7s1OjnMDvCekKx+lndHNLl7VZurgym4VY91d1b2C4mzlFD7E/QeYzI6yd4
-# d12G9GB0KPRvs+U+StRGogKAUlUDBkhBqEmuSRd+2F0QH6jGrkcnSt1ZTLa69fJ2
-# YpR4PUo9QtHymxTVUB2KP4OH7tQlCfh1IweEVs2AB1LeVTp3/qtD4Pj3KSyj+3oO
-# WECLqUS+E5OYCA39rYtcJhMOnYfYwtubo9a4SnDmbWrnhSR8QGCvnjlfSJwyaE4A
-# 6UNQ/rd59OcWZ8TzhxqgZhfEbOlpL2yZwMwbSRvx36ddZ9evWGRnqGo1vhfesCV3
-# w9Ibatx4YgLJ3yA5te+zT+0CKY643P2YiJ+F0t9JfvsUI7ZLE2fM3cClnddpaQfr
-# yOANdPeFedEPwSTQeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINtqagJCyB5qO8ArgG4hRt6iBOkIHm2i6h11n9ESa+0oMA0GCSqG
+# SIb3DQEBAQUABIIBgK7A9ZVDsw1lhOUPERoCbjJfJfKGoPWI2vUFLzJS+uqdn7Yr
+# UmK6BqYSZGTkRWLTV5xqI5lk20mAfSBpeigQ4atRx983R83GKYC0QdfrljIfdtfo
+# epCp4zs4IUwL7dYNeERpOpSfk3vJckGzD9TbwQYa6oOn+CTl/XhY9hJ1ssoEKSeo
+# 5BwmSbTuglAeyPMn9/qQRHbkSF/BGJfvJK518eU3/FKxhgNeZpWCF852LIGoifnK
+# KUcvoynp0ZDCWIdAbS8eU2V2VB7a8dBv0ynoZgXMmZBneSUkVucEslMQkLLzDcmI
+# AmxeVdfmi59EIyQBaKcI/0BAuJGCE8xuWAiZe/1vCAJ9kRyZQLrsSR3JQ2jtJBmy
+# YKmzttkiO0gbW3alPyohUxH6QmBDxd9J8z+avToVqR/FMRDIeYUn4ElRNPZNcwJY
+# ZdRmIWML0nGf1FQmDwSBdQm1hTa5ZdSM09w+atX6YRLKX3go0qXnKG9DHebjeE3N
+# SsJl8alPEx7bTcJ+/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDBaMC8GCSqGSIb3DQEJBDEiBCBmoFNXgmHqKGZqXhcdXDTkRj6bGq9XKvKUnFzQ
-# L+ZAVTANBgkqhkiG9w0BAQEFAASCAgCX6DxNuHIsSskqIIfqIQ5s3DZS5zi7ndnM
-# qXBBXOB3fnpRgmyaj89V7fTdTr4syGoDNUF1EW+BqFVpHVvuWnLEWWg6ISIN647x
-# slnmbeoUvvB0E/WpARSnaxKP8OYCQnl3xQUu21D0lwhMRDAsaTrebikNzLDpuJhx
-# qj2xoSgOHnaodLOB/0WOtgGn3oEKHgyigTH+Rv84ZUh2ajd5qr2Sr6yTj2UvXKoY
-# IYKtKy9yzg+mxoV82w7W4L9BxWzIQ3ArcDNQ14WStpFuRwrHzJU7JyCrMiA5DSdA
-# A3bYaBcnBx5WhMJkIloVYX/apYgzCrzEowUGk1zbhfHMkZYC/iLfPAjh3whcP62H
-# mNk3cti8tT9MsKjrcNcb4mpNs6XHx+YxRREnY3vukaN2DXi+kx42mQCGaII+zA9J
-# +fXYdIIVE8kEtvJMHzUiC9aazZHwqI8k9p9O/9xTjODiSR+QtggMe+RzDvquvBgq
-# n7B27chy5WAtlN0R146o+Moo+0B1o9sLcR8tGRLaF7Fh87Nn7WoxSwvLR1uoSmsJ
-# ++qtOqi+OBnKcUrFEpo2p9hWdwQdSstIU4mXWw9O0p7LFYhImhinEOL8xe1vis69
-# 76cEeTFeKBMOmDwunHa68vlbMxlWJHReYGulD7ZEXS/gkP5/mx8W+CDr1NCeEY81
-# oFw/T43CMg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTAy
+# MjVaMC8GCSqGSIb3DQEJBDEiBCABoKXHZHiYM89iNXIB02EGp+PwjEKMQIaD4FVK
+# SBFk3zANBgkqhkiG9w0BAQEFAASCAgBiNru2Uq6qsQwybiI/sDmFdNStETPQxTg6
+# UsCCnwBhqqIg9l0n6R87i6juMzEGEkAOEi8ChgGJ3RjLX2rCjqjFufbD4k41aj1V
+# B5Y/JsQrHiYWGny2nf9+bqg/G3KjDlJ2mbEMFE09L/OK9x7htiqiOh59fQETrVnP
+# fFIHJbmSRNqrzgmp6w6yQUQ2/MPSm+jm7xfH1kemaNiTu8k4z5hv2Jh6BTSQCvWz
+# t+qBXy9jCTgHWPR2bJr8lwXs8IBRpN1lK3O2V6CelnyrxCdYTB8q+iHtJEhpdfUK
+# 9IzTdq8fW/1wqvd9ZwpWOW/jiZAJwvf7tCuupMF9jWu42BEObRGv59AEMnKWczIG
+# +PVVOzAoB4Jgzdkyk3th83nopxOFuWsrlIQyJX79k48RSx0w4j9OglJMc0YCdnx/
+# noO27vbf+Rm+T+wz7eDZ1q//EXXRc9OVzPvDpJphopsVg6H4wpT70zf6egKMQI93
+# KhldtaXd0wtT/Wa9niIkD1ccwkfCS3IwSg1cVslqFaKk6HCSecUqulHNgimkMFpo
+# 5RjC6NFf4hiJ+6JGR0ACDL5mvCwwM0fRH1kczdnP2EDdfU7NvQfJM3bL9YPNNmr0
+# VbBihANMIVFW4b/WM5G2wpT6npzkoATfe7ClFaW+Y6Eyr3rqMHHUW4xOSCS82OHL
+# 3L900Zxo0w==
 # SIG # End signature block

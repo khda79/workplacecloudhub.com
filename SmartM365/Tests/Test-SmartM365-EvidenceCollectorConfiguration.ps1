@@ -1,27 +1,123 @@
-@{
-    RootModule='SmartM365.EvidenceCollector.Common.psm1'
-    ModuleVersion='1.0.4'
-    GUID='ec77e13b-72ee-4d87-9a41-d3f81e70d9f6'
-    Author='WorkplaceCloudHub'
-    Description='Shared runtime, Graph, export-job, and CSV helpers for SmartM365 evidence collectors.'
-    PowerShellVersion='7.0'
-    FunctionsToExport=@(
-        'Get-SmartM365EvidenceProperty','ConvertTo-SmartM365EvidenceText','ConvertTo-SmartM365EvidenceJson',
-        'Get-SmartM365EvidenceConfig','Initialize-SmartM365EvidenceRuntime','Connect-SmartM365EvidenceGraph',
-        'Get-SmartM365EvidenceStatusCode','Invoke-SmartM365EvidenceGraphRequest','Get-SmartM365EvidenceGraphCollection',
-        'Invoke-SmartM365EvidenceExportReport','Export-SmartM365EvidenceDataset',
-        'Write-SmartM365EvidenceLog','Complete-SmartM365EvidenceRuntime'
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+Tests evidence collector configuration precedence with isolated offline fixtures.
+.VERSION
+1.0.0
+#>
+[CmdletBinding()]
+param()
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$modulePath = Join-Path $PSScriptRoot '../SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1'
+Import-Module $modulePath -MinimumVersion '1.0.4' -Force
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-EvidenceConfig-' + [guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $fixtureRoot
+$preferred = '{"Marker":"preferred","DataAllRootPath":"__USE_GLOBAL__","EnableSharePointUpload":"__USE_GLOBAL__","DerivedPath":"{{DataAllRootPath}}/evidence"}'
+$legacy = '{"Marker":"legacy"}'
+$local = '{"Marker":"local","EnableSharePointUpload":false}'
+$cases = @(
+    @{ Name='preferred template and global inheritance'; Files=@{ 'json.txt.template'=$preferred }; Marker='preferred' },
+    @{ Name='legacy template fallback'; Files=@{ 'json.template'=$legacy }; Marker='legacy' },
+    @{ Name='preferred template wins'; Files=@{ 'json.txt.template'=$preferred; 'json.template'=$legacy }; Marker='preferred' },
+    @{ Name='preferred local configuration wins'; Files=@{ 'json.txt'=$local; 'json.txt.template'=$preferred; 'json.template'=$legacy }; Marker='local' },
+    @{ Name='legacy local configuration wins'; Files=@{ 'json'=$local; 'json.txt.template'=$preferred }; Marker='local' },
+    @{ Name='local configuration does not require a valid template'; Files=@{ 'json.txt'=$local; 'json.txt.template'='invalid' }; Marker='local' },
+    @{ Name='invalid preferred template cannot fall back'; Files=@{ 'json.txt.template'='invalid'; 'json.template'=$legacy }; Error='*' },
+    @{ Name='preferred template directory cannot fall back'; Files=@{ 'json.template'=$legacy }; Directory='json.txt.template'; Error='*not a file*' },
+    @{ Name='missing templates list both names'; Files=@{}; Error='*json.txt.template*json.template*' },
+    @{ Name='invalid local configuration cannot fall back'; Files=@{ 'json.txt'='invalid'; 'json.txt.template'=$preferred }; Error='*' },
+    @{ Name='conflicting local configurations fail'; Files=@{ 'json.txt'=$local; 'json'=$legacy; 'json.txt.template'=$preferred }; Error='*Conflicting JSON transport names*' },
+    @{ Name='template must be a JSON object'; Files=@{ 'json.txt.template'='[]'; 'json.template'=$legacy }; Error='*JSON object*' },
+    @{ Name='one-object array is not a configuration object'; Files=@{ 'json.txt.template'='[{"Marker":"array"}]'; 'json.template'=$legacy }; Error='*JSON object*' },
+    @{ Name='null template cannot fall back'; Files=@{ 'json.txt.template'='null'; 'json.template'=$legacy }; Error='*JSON object*' }
+)
+
+try {
+    $index = 0
+    foreach ($case in $cases) {
+        $index++
+        $folder = Join-Path $fixtureRoot ([string]$index)
+        $null = New-Item -ItemType Directory -Path $folder
+        $scriptPath = Join-Path $folder 'SmartM365-Fixture-Inventory.ps1'
+        $configBase = Join-Path $folder 'SmartM365-Fixture-Inventory.local.'
+        foreach ($suffix in $case.Files.Keys) {
+            [IO.File]::WriteAllText($configBase + $suffix, $case.Files[$suffix], [Text.UTF8Encoding]::new($false))
+        }
+        if ($case.ContainsKey('Directory')) {
+            $null = New-Item -ItemType Directory -Path ($configBase + $case.Directory)
+        }
+        $effective = [pscustomobject]@{ DataAllRootPath='fixture-root'; EnableSharePointUpload=$true }
+        $caught = $null
+        $actual = $null
+        try { $actual = Get-SmartM365EvidenceConfig -ScriptPath $scriptPath -EffectiveConfig $effective }
+        catch { $caught = $_ }
+
+        if ($case.ContainsKey('Error')) {
+            if ($null -eq $caught -or $caught.Exception.Message -notlike $case.Error) {
+                throw "Expected failure was not observed: $($case.Name); actual=$caught"
+            }
+        }
+        else {
+            if ($null -ne $caught) { throw $caught }
+            if ($actual.Marker -cne $case.Marker) { throw "Wrong configuration selected: $($case.Name)" }
+            if ($actual.Marker -eq 'preferred' -and
+                ($actual.DataAllRootPath -ne 'fixture-root' -or -not $actual.EnableSharePointUpload -or
+                 $actual.DerivedPath -ne 'fixture-root/evidence')) {
+                throw "Global inheritance or token resolution regressed: $($case.Name)"
+            }
+            if ($actual.Marker -eq 'local' -and $actual.EnableSharePointUpload) {
+                throw "Explicit local override was lost: $($case.Name)"
+            }
+        }
+
+        foreach ($suffix in @('json.txt.template','json.template')) {
+            if ($case.Files.ContainsKey($suffix) -and
+                [IO.File]::ReadAllText($configBase + $suffix) -cne $case.Files[$suffix]) {
+                throw "Template content was modified: $($case.Name)"
+            }
+        }
+        if (-not $case.Files.ContainsKey('json') -and -not $case.Files.ContainsKey('json.txt') -and
+            ((Test-Path -LiteralPath ($configBase + 'json')) -or (Test-Path -LiteralPath ($configBase + 'json.txt')))) {
+            throw "Template-only resolution unexpectedly created local configuration: $($case.Name)"
+        }
+        Write-Output "PASS: $($case.Name)"
+    }
+    # Exercise the actual committed WorkplaceScope template without reading private config.
+    $index++
+    $folder = Join-Path $fixtureRoot ([string]$index)
+    $null = New-Item -ItemType Directory -Path $folder
+    $templateSource = Join-Path $PSScriptRoot '../SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.local.json.txt.template'
+    $templateBytes = [IO.File]::ReadAllBytes($templateSource)
+    $templateHash = (Get-FileHash -LiteralPath $templateSource -Algorithm SHA256).Hash
+    [IO.File]::WriteAllBytes((Join-Path $folder 'SmartM365-WorkplaceScope-Inventory.local.json.txt.template'), $templateBytes)
+    $workplaceConfig = Get-SmartM365EvidenceConfig -ScriptPath (Join-Path $folder 'SmartM365-WorkplaceScope-Inventory.ps1') -EffectiveConfig (
+        [pscustomobject]@{ DataAllRootPath='fixture-root'; LatestCsvFolderPath='fixture-latest'; LogAllRootPath='fixture-logs'; EnableSharePointUpload=$true }
     )
-    CmdletsToExport=@()
-    VariablesToExport=@()
-    AliasesToExport=@()
+    if ($workplaceConfig.ScriptCsvLogFolderPath -cne 'fixture-root\M365\WorkplaceScope' -or
+        $workplaceConfig.LatestCsvFolderPath -cne 'fixture-latest' -or -not $workplaceConfig.EnableSharePointUpload -or
+        (Get-FileHash -LiteralPath $templateSource -Algorithm SHA256).Hash -cne $templateHash) {
+        throw 'Committed WorkplaceScope template inheritance or read-only contract failed.'
+    }
+    Write-Output 'PASS: committed WorkplaceScope template with inherited output and publication settings'
+    Write-Output "PASS: $index offline evidence configuration cases; no tenant connection or collection."
+}
+finally {
+    $resolvedFixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
+    $resolvedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedFixtureRoot.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedFixtureRoot) -notmatch '^SmartM365-EvidenceConfig-[0-9a-f]{32}$') {
+        throw 'Unsafe fixture cleanup path.'
+    }
+    Remove-Item -LiteralPath $resolvedFixtureRoot -Recurse -Force
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDH9AKqsQmAStdt
-# RSgXiHdDAGkRGa+Z2zDoiBYsVYs23aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC/dOzVFXfkRoh
+# Cs+u9ARF3PyAnkyh2aSkr5LWm8W5s6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -154,31 +250,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE+VMXNdw1T3jWYpaeydykFJ7LOB2VW9QrpbdXvnC3qoMA0GCSqG
-# SIb3DQEBAQUABIIBgEtE50Dj0ql6qbSprP7cg+X6Iijls8nRYtUlvCacl8Geucjw
-# kuFm9ZdvFqQE/1mMzZhmk/lrog8u5JA1ZDoznSHU51eS3oZc/CZYBSdu2t0GN22F
-# nQYHdumJgJ++thpo0u+cUrypJloJYYKmfMLud6dVJzdad3pTK4xoAgBYUFgPf52j
-# fuGu5JoJtCxvQP2CfJXNqhbuY2anmEr7rBlt/ocGlg4Hbwy5J7q5nNlc1NCATZBB
-# ZgqOBpC4JTl5/oJxpCK/C15ScO4BWWQS0027GfBya+XKnTsR7qMQnuTOm/53uAHU
-# tNrgSzQaG79Vokwdu8tbLC9DOYIxwZ7hqAlkYQ+VREc1WoaFkeyTFeOT955eCs5w
-# BR6NONo43UwkvyCgYkrNXkmHYUy8D7K0lIik4N1tRwpU8cg+rPxw6vFtkL3yZ9WP
-# C+ubZ20xAYhHUM1p8m1y3H1VWZLtFGL4KKrWvVUg5JF1TYwvW988wa8ywnylBiak
-# heUfnRJ5bMd8mxkUn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJAXMBsYZ2maAlC8ImILXUpRvTPiYTfeBcom1dd1laarMA0GCSqG
+# SIb3DQEBAQUABIIBgA//zPkBWeSnkmKxKAkFI6sonOHy4QDzfmroda/vM+gZMtDZ
+# 5HrUDk8Q0Uww4VcHdERofVQLkQQh2khrhy5rcCFbHpWKW+mvo2+AKwt9u5fS3OtX
+# 1mkvnQQFMK76yoqSEmZ0u+7SltmzPtjYgv3MncEyf5BGlNuGFvt58mR/ayKmfYfX
+# f75YEaEuczEcD4gzX00TvgaHCIY+yU8hW4lcNrV1klo+PyeiBM5qCrqsxz6TIrw4
+# uOgMQsIkU6fZoQ4o9ANfRa11fYhO/hFCuvNAnBsmHkyhMRjkPjhbu1esSoh9dDMg
+# eobf9d8mYVnMvRU4H5N8SBbaAi1u4k2H5saflwQB7UD7SPSaQ/Mits7fm7v82rUg
+# PXj2Ul8vfiCoPAa6CMJHFClpTlQwYYD++AhUIcmgn5yVvVJ1B77+74aMROOAOdwj
+# hw0EA6wDuSiJEHXKYwQDwHGBIPJ9rHNCOQnRxJHIDZ/zPZz2H6Wr7MJXuqDTn8ND
+# 9+Mk39E1ZoB3rvZj6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTAy
-# MjVaMC8GCSqGSIb3DQEJBDEiBCCt2C7n1PB6E/GHIsz2xVPeU4UhnE2fCWUdIrwM
-# 6+yX1DANBgkqhkiG9w0BAQEFAASCAgCh3rS9JaMfnmJ/obc4kRWscpxLiyOIig9H
-# lSfOnI8vcdk1pgnr43dQq72UrNk9llAkKvr5NDJgul4fMh0RJr7n+rdpVYvz9mtI
-# +KkratIGSDjNTaNF4qEM9uiAI2PeK+Gq1Qy9G3/z1Xaw515VoxN5sT0Dc204MnNl
-# YfMHQf/QMo8jOKumq6REs/q0JkgCkQdFrLmvyNkCeaQHPE4cx3h6qsKq4UCqDTc4
-# WS73jlr4cmz5bs26zVK4iYXW8BN1orBoABM3gO7BrgLWcVgQbRSPK5Se077kK13n
-# vdp+RIQIPobkZjqPdJ00jimtZYOU69GQF5thU2ZZkmtxfx6/2RIW7rCjqzLP8bGc
-# klO3G2QCtvubkrEUCn2CAwbdnww3sY91yMm8qJ8DmpCDPrp4D08hDxLuNy80BEyD
-# Z6pgA//A0jUkZqlwN2aS5CzSxOVcN/mH3JpNgHB6qsKSy2taM3MPk9qGAawEgqQY
-# rKlPIeACHp/5hZy03Gqgd1Hll5B7fBbuVILSzKHwfG41cKT67ZtoQrfFO1XHX9Zl
-# 9d7HTSLmElSITYwc7CkrM66SSpWR++WqPZyP77H046xKSISAUkhO+TAQQ7Fg07qy
-# 1/RkGOcJv48Kqbf4s7Vvm3b4UdCcT9HFuMS30TObe7CXIGhjeiCihPQ68C+Q0u7j
-# IAUKriVWEA==
+# MjZaMC8GCSqGSIb3DQEJBDEiBCBfbB8pR1/qU4CWWQ7jVxkYKjMKFZ1UcfiA72pT
+# +k0hGDANBgkqhkiG9w0BAQEFAASCAgBPdjy2uKx53+r16mUeH1lEPJIOdFugYXNg
+# HfFn/pOFgof7A6UvcsA/SRj34mjAQ3z55o8tB2m4EY+nTcaRTas+439WP7eeiWGi
+# FzXw0JSV1Fdh5diIhnd9hGwlvFdUKYQxm8HXIbAQ4nddt8JgS5fCZY9RbdlR1HNH
+# 5I7oh4HW3DDxTeaNCXeM292aI/gPKKEBloJra8foLqWND5umikud/6W3o/27yeyt
+# DNrvFXBYIW7avpEz44GM5EPcvlZQ3Il/hdVvBwuVMdjRY/mqDYmxkK3Y9ssb5ncG
+# PXrlUPWWMB6yAbKuy2ea37IZOeIC8pWOPx0K1qBl09UwNd2/wJi8+rfK3paDeofp
+# q/X9TP9SnaS/96WAeH/jFxYDaM5FuXVYB2vXgn0I7FcisdmROJM/oo0qJRLXIyLJ
+# pGrVDuvAaxm/kGVaIpBqWlGc/7VOZWtH2SOAN/Clk7m+eeSqhnhNg0F/rSLSDzd2
+# jBBeaCc3WK5OiMykbi0ikr2+8nAwbA8aGQIcMLK/JjIGbUYb30t3XORWdFqK/L9Q
+# 1CAYgULlNaRaESOhkqglIOaXS/RliDyGTDjuIgMEUA501+Y/MpUzaEcQplQByMLJ
+# Rf0Nw7YiHFHdqEWFKK5LOPaZugbPLLtP+wp5HdtcVc/dFePv0Ryg5vvtkuc37RsR
+# k1F+RPsoSw==
 # SIG # End signature block
