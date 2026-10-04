@@ -142,8 +142,18 @@ foreach ($value in $MigrationNames) {
         if (-not [string]::IsNullOrWhiteSpace($name)) { $requestedNames.Add($name.Trim()) }
     }
 }
-$pwshCommand = Get-Command pwsh -ErrorAction Stop
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+if (-not $PlanOnly) {
+    $batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $batchRoot = Join-Path $ProjectRoot "Migrations\logs\target-scan-batches\$batchId"
+    Write-BatchLine ("Creating destination batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
+    New-Item -ItemType Directory -Path $batchRoot -Force -ErrorAction Stop | Out-Null
+    $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
+    Write-BatchLine ("Destination batch preflight started. Logs: {0}" -f $batchRoot)
+}
+try {
+Write-BatchLine 'Checking PowerShell, launcher, and authentication settings.'
+$pwshCommand = Get-Command pwsh -ErrorAction Stop
 $LauncherPath = [System.IO.Path]::GetFullPath($LauncherPath)
 if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
     throw "Launcher not found: $LauncherPath"
@@ -153,6 +163,7 @@ if ($AuthMode -eq 'Interactive' -and $limit -ne 1) {
     throw 'Interactive authentication is limited to one scan at a time. Use -MaxParallel 1.'
 }
 
+Write-BatchLine ("Loading destination migration configurations from: {0}" -f (Join-Path $ProjectRoot 'Migrations'))
 $migrations = @(Get-BatchMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
 if ($migrations.Count -eq 0) { throw 'No configured SPO migrations found.' }
 $actions = @()
@@ -170,15 +181,17 @@ if ($PlanOnly) {
     return
 }
 
+Write-BatchLine 'Checking destination authentication and PnP.PowerShell.'
 if ($AuthMode -eq 'Certificate') { Assert-CertificateAuth -Root $ProjectRoot }
 if (-not (Get-Module -ListAvailable -Name PnP.PowerShell)) {
     throw 'PnP.PowerShell is required in PowerShell 7 before destination scans can run.'
 }
+}
+catch {
+    Write-BatchLine ("Destination batch preflight failed: {0}" -f $_.Exception.Message)
+    throw
+}
 
-$batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
-$batchRoot = Join-Path $ProjectRoot "Migrations\logs\target-scan-batches\$batchId"
-New-Item -ItemType Directory -Path $batchRoot -Force | Out-Null
-$script:BatchLogPath = Join-Path $batchRoot 'batch.log'
 Write-BatchLine ("Batch started. Logs: {0}" -f $batchRoot)
 $interrupted = $true
 try {
@@ -275,8 +288,8 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+qdvN5mrwcgYo
-# XhvDvlYk87jaFmzlnecc/MC6yuet6aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7DBFppanwLO+O
+# mji3oE39sAntjuHJjly2h8sXXIVcxaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -306,14 +319,14 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDl/f4d7MHvUpkwUGUaJpZN
-# 8+ttFJUTUTXjQaLhERQ/UjANBgkqhkiG9w0BAQEFAASCAYAfIUALScrHdfP5Klna
-# DsmzTPP1YuQJd0ccwv2sh980uFUcIb1KzxHch9EUvPXjUaKE9bwKOBgro+LuXfU/
-# vGxEbJ+xLS7mwVJ9AtJnUehQWHcn+Ak45UfgKGn8YPt6IVOSUCLQwBt1KyBCexKT
-# m2EKdRC8tWoB0fnGrx+Ia9rl/6163GQwPadRWq6NxcvPAg2K0DBQZLPMnCk6MfjH
-# yR7LxYx0YBZZXCIF436LtxlTtDmt36QhHEeNsvOqReVCe1cbbbQf6FjkQgpUaKax
-# Hl5OIJqibmgxpSiRrscJj53LKddIsO0wY41C4A84jO4KQmfcMkWGNcUhReb0F0Xj
-# 7A9hyRsKMHayVDWMeytWNq1+WOpuCnDZHrNeE/lUmqYslegYsfzOxOgS7BbIybIZ
-# VNVRY8uHiAr3dCqUFSkOs7Pfj/KTna/rfYnlc5oftAdHpUZdl6NXA4QMVenE0jfF
-# FuWl1PSj6fbjh8OY68P7eKjyuqIqoqEWd9jFx62UG98j2Us=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDCom5vElsRZRxTEJxILPrP
+# mmqcTuLHrV0EjFtpiEauKzANBgkqhkiG9w0BAQEFAASCAYACCrmgNhGqNwaEB7tL
+# 2QJWi+oac/VNYAJYzTLZkXQvddMadDaRWijE6IdDAcLg2djrtFb7KIvyJTkWl7Zv
+# 0EwdU7tbvhxymtjBJjjOzlhdhkBjqXAx6VJYgMV8oGsK7q8LsqSPCgueTuu3x0On
+# NZixqJ9uA9dv8sKIs/E3eQTrGu7X3ugdJXTVVLDZNZR2aaRJpnutTMTPJrhQaHcF
+# FAQA7ytGiotBFAr1VkQEi+cvZWJLXKYDWOQiq0nfLyX7IOE4phu9Z0oZLNvj6J+P
+# 5VQrf1WnpDVFUApKYygkmCH8AwOJkmOzCOqkLCQHD0j6WUQMv1FJBdWcXjToE4Ba
+# cdRvAjA7TsGvqotmXvxYn18miTvr+CMUZBlc4YFfanVjKBLOVXXrWGmQiuQq+SNe
+# Fczy8yT5+zqNXUBt9V8/HSyhNml4iFwKJq809sbkgZ2rESYrkbsOxXbwfQ1S9NTv
+# XBIZLpA8gLcuLT3wnYUgkpZrDKqkcPsa/FTzU8nt9jzxWL0=
 # SIG # End signature block

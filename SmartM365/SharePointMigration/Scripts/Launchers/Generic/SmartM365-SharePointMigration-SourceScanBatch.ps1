@@ -206,6 +206,16 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $LocalRunRoot = [System.IO.Path]::GetFullPath($LocalRunRoot)
 if ($LocalRunRoot.StartsWith('\\')) { throw 'LocalRunRoot must be on a local disk of the farm server.' }
+if (-not $PlanOnly) {
+    $batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $batchRoot = Join-Path $ProjectRoot "Migrations\logs\source-scan-batches\$batchId"
+    Write-BatchLine ("Creating source batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
+    New-Item -ItemType Directory -Path $batchRoot -Force -ErrorAction Stop | Out-Null
+    $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
+    Write-BatchLine ("Source batch preflight started. Logs: {0}" -f $batchRoot)
+}
+try {
+Write-BatchLine ("Loading source migration configurations from: {0}" -f (Join-Path $ProjectRoot 'Migrations'))
 $migrations = @(Get-SourceMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
 if ($migrations.Count -eq 0) { throw 'No configured SharePoint Server source migrations found.' }
 $actions = @()
@@ -223,6 +233,7 @@ if ($PlanOnly) {
     return
 }
 
+Write-BatchLine 'Checking Windows PowerShell 5.1 and the SharePoint snap-in.'
 $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
     throw 'Windows PowerShell 5.1 is required on the SharePoint farm server.'
@@ -231,17 +242,20 @@ if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) {
     throw 'Microsoft.SharePoint.PowerShell snap-in is not registered. Run this batch on a SharePoint farm server.'
 }
+Write-BatchLine 'Checking Python and the scan manifest script.'
 $python = Get-PythonCommand
 $manifestScript = Join-Path $ProjectRoot 'Scripts\Compare\scan_evidence.py'
 if (-not (Test-Path -LiteralPath $manifestScript -PathType Leaf)) { throw "Scan manifest script not found: $manifestScript" }
+}
+catch {
+    Write-BatchLine ("Source batch preflight failed: {0}" -f $_.Exception.Message)
+    throw
+}
 
-$batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
-$batchRoot = Join-Path $ProjectRoot "Migrations\logs\source-scan-batches\$batchId"
 $localRoot = Join-Path $LocalRunRoot $batchId
 $localInventory = Join-Path $localRoot 'Inventory'
 $localLaunchers = Join-Path $localRoot 'Launchers'
-New-Item -ItemType Directory -Path $batchRoot, $localInventory, $localLaunchers -Force | Out-Null
-$script:BatchLogPath = Join-Path $batchRoot 'batch.log'
+New-Item -ItemType Directory -Path $localInventory, $localLaunchers -Force | Out-Null
 Write-BatchLine ("Batch started. Logs: {0}; local execution copy: {1}" -f $batchRoot, $localRoot)
 
 $fileScript = Join-Path $localInventory 'SmartM365-SharePointSource-FileInventory.ps1'
@@ -339,8 +353,8 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCspmaLygj5X1Jy
-# WKdpuj/GuPibvqvo7LGpGnKkygYAt6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCy1Mne2FroPELI
+# bdou55YVxckQpAkvQi8P9U4D0XQzD6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -370,14 +384,14 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBqVCCo8qhc1zkeTagmbqs+
-# hBPlXh6RRb2yLpzVOxcaWjANBgkqhkiG9w0BAQEFAASCAYAk1Q/m6YmP2peFarvA
-# GE8QPahMu0NFSJwrTi/RdK7XhF9MMU1ORNk55rStZ4LKDHZucbc8wJQ32GYyR8vY
-# Khvqtd3W+m95FQMZaWkdPiMr2pC+XTqUmS2p2x0g/SxCa6QivjBVPGTwskOb5ZOn
-# DwqX+i2yDjbUYHbdGK8Y2OIVkONPBiS7Yq/GRXyclY0i3/nBCsbYGssUuSEDQJ2+
-# GwWfJO2OxstB/OMZYG+GZgKbxlrFraceQjXhVucf7vqzwMy3Ny7rIU0BG6FrTiN6
-# NDrFQk+3YofSDjjuRKELvcNekt++sLGD0nUip4Mmfan0pOPiRyupo7z6NnR2Y9uf
-# O3aMqSyyiMTUJ+Q0iBSEhjUrRoXEFKpOy+CvJLsU1zATxARq7A0HT12D7nskKh28
-# 84IDZCwQYCc8uF+jkn+TWaXQ8WUj1eyNbI7qKqlgHNuIvPf1BXFCUg9l1DW0kRuD
-# c5eAJJqYmulJ8UAeUPvnzzN0nIjVGknxQHOZlk0tzWoVk9g=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBmXgoUdDBO/+Uv/0PmLs9w
+# 3NtfUGNXj3p8LrfOhfS7MDANBgkqhkiG9w0BAQEFAASCAYCIt7ZAs/eI9xEdq0pX
+# I15nJXFCOqTYqvUgnomPegbVO0xoQddoLpPahnV5xBEGa1Uvhyk5YSTL5tONGjwk
+# 41XvsogOzJQd2LzH4hjWY3vqMI2e3l0B7PSyr+ufQR2fjKmhSTkNb+sUHSPpoXEh
+# ClzWjE1Qy/UmTJUNMm7MkxedXnVgsR7Laf++9FjLSR1KnZFYz+VX+xx1QqMHd3w5
+# 4wHaOwNTZV4tSQeuaQQ2xtbp1VENUijw3TFsUsFXiiVmom0LKVf+QV0MXV48I3gY
+# U7Ha0hP1OMPGrifpdyln0NKVhsh6B7yzK0BNlBG80vZUA3Q6+ySFN/spIDSnLEfd
+# rizeeFXbIiUivbrapSHpIjX++2HqR53Rl9uKs5CBjdASDh89OOxRQAMR5azcl9L6
+# n7XSkTsAqmSHhBONT1WDFTd/VF6h9/X/6z9VtfrG9ZgD6rC0bURs3wx/q9AK1o+L
+# tDa1836VZkjVvH/MNP26iJ9AlbhSjkOO5y5uJepA65sdv84=
 # SIG # End signature block
