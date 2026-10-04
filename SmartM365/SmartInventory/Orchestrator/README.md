@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.39) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.40) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Shared scheduling maintenance
 
@@ -25,7 +25,7 @@ creating configuration snapshots or modifying manifest hashes.
 | New/pending Pipeline request and its retries | Allowed, preserving dependencies, ownership, claims and concurrency. |
 | Explicit `-Force` | Still explicit; original ownership/overlap checks and dependency-bypass semantics are unchanged. Prefer Pipeline. |
 | Heartbeat, peer health, mail, retention, SharePoint mirror | Continue; deliberately suspended schedules are not missing-start incidents. |
-| Direct collector outside the orchestrator | Not controlled by maintenance. |
+| Direct collector outside the orchestrator | Launch is not controlled; shared mail restrictions still apply. |
 
 A pending manual request may supersede a suspended scheduled retry for the same job;
 the original failure stays in run history. Maintenance never changes CSV schemas, invents
@@ -60,6 +60,47 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/SmartInventory/Orchest
 These tests do not qualify production SMB atomicity, real deployment, task recycling or
 live multi-server operation. Deployment and a controlled production test remain separate
 approval steps.
+
+### Maintenance mail policy (1.5.40)
+
+Deploy Core 1.0.68, Windows PowerShell 5 compatibility 1.0.49 and orchestrator 1.5.40
+together. Shared Graph and SMTP helpers read live maintenance control immediately before
+transport. While active, report recipients come only from the effective tenant/global
+`To`, and error recipients from its `ErrorMailTo`; Cc and Bcc are removed. These are the
+same values obtained by inheriting `__USE_GLOBAL__`, not literal recipient strings.
+Script-local configuration is not rewritten. Normal routing returns when control is inactive.
+Explicit `-MailPurpose Error` is authoritative; legacy calls also recognize an explicit
+ErrorMailTo recipient or the collector's Boolean terminal `ScriptFailed` marker. Ambiguous
+legacy calls without error evidence use global `To`, never script-local recipients.
+
+Residents propagate the live shared path to their children. Direct scripts use
+`OrchestratorSharedDataFolderPath` from effective global/tenant configuration, or default
+to `DataAllRootPath/Orchestrator`. For a custom shared control location, configure that key
+for direct launches too. Do not use a synchronized mirror as control. Missing, malformed
+or inaccessible initialized control blocks sending, including SMTP fallback; a standalone
+deployment with an accessible data parent and no control/cluster/guard remains inactive.
+
+An enable/disable transition, from either the GUI or management API, is notified by a
+resident using global `To` even after disable. Subject/body include the action, revision,
+UTC timestamp, actor, server and reason. The existing published transition audit supplies
+pending events; a single `Config/Orchestrator-Maintenance-Mail.json.txt` delivery cursor and
+separate `.guard` serialize workers without holding the scheduling/GUI gate during mail.
+No-op control changes do not send mail. A failed notification leaves control unchanged and
+is retried after 60 seconds. First deployment initializes at the current revision without
+replaying old audit mail. No resident running means notification waits for a resident.
+
+The cursor prevents normal cross-server/restart duplicates, but an accepted mail followed
+by a crash before checkpoint persistence can be resent; transport does not offer exactly-once
+delivery. Revision gaps stop notification rather than silently skipping transitions.
+Already running collectors with an old module keep the old code until their next process;
+deploy/recycle all residents and let existing collectors finish before live qualification.
+
+Additional offline checks (both use synthetic data and mocked transport only):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365MaintenanceMailOffline.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365MaintenanceMailOffline.ps1
+```
 
 Version 1.5.20 mirrors the shared `Config`, `Audit`, `Election` and `PipelineRuns` operational trees to SharePoint when uploads are enabled. It creates missing SharePoint folders, preserves the `DATA-ALL\Orchestrator` hierarchy, skips locks and temporary files, uploads only changed JSON/CSV artifacts under a cluster-wide mirror lock, and removes expired mirrored concurrency leases without treating SharePoint as an operational source. GUI v1.0.6 replaces the free-text weekly-day field with Monday-to-Sunday checkboxes, disables and clears them for `Daily`, and requires at least one selected day for `Weekly`. Version 1.5.19 adds an atomic, cluster-wide `Rebalance now` request from the GUI. A resident orchestrator consumes each unique request under the planner lock, recalculates elected owners without sticky ownership, and records the applied request in the shared plan. Version 1.5.18 treats `CompletedWithWarnings` as a terminal distributed occurrence result, preserves Teams capability-probe diagnostics when cleanup is unavailable, and retries transient pipeline status-file replacement failures. Version 1.5.17 ensures that collectors requiring explicit external-action opt-in receive `-EnableConfiguredExternalActions`, including an additive migration of existing central manifests that preserves operator arguments and scheduling overrides. Version 1.5.15 standardized every orchestrator mail subject as `[SMART 365] - [tenant] - [ Orchestrator] - ...` and guaranteed that the common mail footer identifies the script and its version. Version 1.5.14 added an atomic distributed pipeline request consumed by the existing
 resident orchestrators. A `Full` request selects every enabled non-manual job from

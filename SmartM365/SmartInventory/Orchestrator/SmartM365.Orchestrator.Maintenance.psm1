@@ -9,6 +9,8 @@ function Get-SmartM365OrchestratorMaintenancePaths {
         State = Join-Path $config 'Orchestrator-Maintenance.json.txt'
         Gate = Join-Path $config 'Orchestrator-Maintenance.guard'
         Audit = Join-Path $SharedDataFolderPath 'Audit/Orchestrator_Maintenance.csv'
+        MailCheckpoint = Join-Path $config 'Orchestrator-Maintenance-Mail.json.txt'
+        MailGate = Join-Path $config 'Orchestrator-Maintenance-Mail.guard'
     }
 }
 
@@ -191,6 +193,72 @@ function Set-SmartM365OrchestratorMaintenance {
     finally { $gate.Dispose() }
 }
 
+function Assert-MaintenanceMailCheckpoint {
+    param($Document)
+    if (-not $Document.PSObject.Properties['SchemaVersion'] -or $Document.SchemaVersion -ne 1 -or
+        -not $Document.PSObject.Properties['LastSentRevision'] -or ($Document.LastSentRevision -isnot [int] -and $Document.LastSentRevision -isnot [long]) -or $Document.LastSentRevision -lt 0 -or
+        -not $Document.PSObject.Properties['LastAttemptRevision'] -or ($Document.LastAttemptRevision -isnot [int] -and $Document.LastAttemptRevision -isnot [long]) -or $Document.LastAttemptRevision -lt 0 -or
+        -not $Document.PSObject.Properties['LastAttemptUtc']) { throw 'Maintenance mail checkpoint is invalid.' }
+    if ($Document.LastAttemptUtc -is [datetime]) { $Document.LastAttemptUtc=$Document.LastAttemptUtc.ToUniversalTime().ToString('o') }
+    if ($Document.LastAttemptUtc -is [datetimeoffset]) { $Document.LastAttemptUtc=$Document.LastAttemptUtc.ToUniversalTime().ToString('o') }
+    if ($Document.LastAttemptUtc -isnot [string]) { throw 'Maintenance mail attempt timestamp is invalid.' }
+    if ($Document.LastAttemptUtc) { $null=[datetimeoffset]::Parse($Document.LastAttemptUtc,[Globalization.CultureInfo]::InvariantCulture) }
+}
+
+function Invoke-SmartM365OrchestratorMaintenanceNotification {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory)][scriptblock]$SendAction, [switch]$Initialize,
+        [ValidateRange(0,3600)][int]$RetrySeconds=60, [datetime]$Now=[datetime]::UtcNow)
+    $paths=Get-SmartM365OrchestratorMaintenancePaths $SharedDataFolderPath
+    # Dedicated lock: mail transport never holds the scheduling/GUI maintenance gate.
+    try { $gate=[IO.File]::Open($paths.MailGate,'OpenOrCreate','ReadWrite','None') }
+    catch [IO.IOException] { return [pscustomobject]@{Status='Busy';Sent=0} }
+    try {
+        $state=Get-SmartM365OrchestratorMaintenanceState $SharedDataFolderPath
+        if (-not (Test-Path -LiteralPath $paths.MailCheckpoint)) {
+            if (-not $Initialize) { throw 'Maintenance mail checkpoint is not initialized.' }
+            # First deployment starts here, without replaying historical maintenance mail.
+            $checkpoint=[pscustomobject]@{SchemaVersion=1;LastSentRevision=[long]$state.Revision;LastAttemptRevision=0;LastAttemptUtc=''}
+            $null=Write-SmartM365JsonBytesAtomically -Path $paths.MailCheckpoint -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($checkpoint|ConvertTo-Json))) -ExpectedSHA256 ABSENT -Validate {param($d) Assert-MaintenanceMailCheckpoint $d}
+            return [pscustomobject]@{Status='Initialized';Sent=0}
+        }
+        $checkpoint=(Read-SmartM365JsonDocument -Path $paths.MailCheckpoint -Validate {param($d) Assert-MaintenanceMailCheckpoint $d}).Document
+        if ($checkpoint.LastSentRevision -gt $state.Revision) { throw 'Maintenance mail checkpoint is ahead of the control revision.' }
+        $pending=@()
+        if (Test-Path -LiteralPath $paths.Audit) {
+            $pending=@(Import-Csv -LiteralPath $paths.Audit -ErrorAction Stop | Where-Object {
+                $_.Outcome -eq 'Published' -and [long]$_.Revision -gt $checkpoint.LastSentRevision -and [long]$_.Revision -le $state.Revision
+            } | Sort-Object { [long]$_.Revision })
+        }
+        # A published control remains authoritative even if its final audit append failed.
+        if ($state.Revision -gt $checkpoint.LastSentRevision -and @($pending|Where-Object {[long]$_.Revision -eq $state.Revision}).Count -eq 0) { $pending+= $state }
+        $sent=0
+        foreach ($transition in $pending) {
+            $revision=[long]$transition.Revision
+            if ($revision -ne $checkpoint.LastSentRevision+1) { throw 'Maintenance transition evidence has a revision gap or duplicate; notification stopped.' }
+            if ($checkpoint.LastAttemptRevision -eq $revision -and $checkpoint.LastAttemptUtc -and
+                ($Now.ToUniversalTime()-([datetimeoffset]::Parse($checkpoint.LastAttemptUtc)).UtcDateTime).TotalSeconds -lt $RetrySeconds) {
+                return [pscustomobject]@{Status='RetryPending';Sent=$sent}
+            }
+            $enabledText=[string]$transition.Enabled
+            if ($enabledText -notin @('True','False')) { throw 'Maintenance transition enabled flag is invalid.' }
+            $notificationEvent=[pscustomobject]@{Revision=$revision;Enabled=($enabledText -eq 'True');ChangedAtUtc=[string]$transition.ChangedAtUtc;ChangedBy=[string]$transition.ChangedBy;ChangedFromServer=[string]$transition.ChangedFromServer;Reason=[string]$transition.Reason}
+            $checkpoint.LastAttemptRevision=$revision; $checkpoint.LastAttemptUtc=$Now.ToUniversalTime().ToString('o')
+            $null=Write-SmartM365JsonBytesAtomically -Path $paths.MailCheckpoint -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($checkpoint|ConvertTo-Json))) -Validate {param($d) Assert-MaintenanceMailCheckpoint $d}
+            $deliveryResult=@(& $SendAction $notificationEvent)
+            if ($deliveryResult.Count -ne 1 -or $deliveryResult[0] -isnot [bool]) { throw 'Maintenance mail callback must return exactly one Boolean delivery result.' }
+            $delivered=$deliveryResult[0]
+            if (-not $delivered) { return [pscustomobject]@{Status='RetryPending';Sent=$sent} }
+            $checkpoint.LastSentRevision=$revision
+            $null=Write-SmartM365JsonBytesAtomically -Path $paths.MailCheckpoint -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($checkpoint|ConvertTo-Json))) -Validate {param($d) Assert-MaintenanceMailCheckpoint $d}
+            $sent++
+        }
+        return [pscustomobject]@{Status='Completed';Sent=$sent}
+    }
+    finally { $gate.Dispose() }
+}
+
 function Test-SmartM365OrchestratorMaintenanceLaunch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][ValidateSet('due','retry','pipeline','forced','pipeline-retry')][string]$Origin,
@@ -205,13 +273,13 @@ function Test-SmartM365OrchestratorMaintenanceLaunch {
 Export-ModuleMember -Function Get-SmartM365OrchestratorMaintenancePaths, Get-SmartM365OrchestratorMaintenanceState,
     Enter-SmartM365OrchestratorMaintenanceGate, Initialize-SmartM365OrchestratorMaintenance,
     Get-SmartM365OrchestratorMaintenanceReadiness, Set-SmartM365OrchestratorMaintenance,
-    Test-SmartM365OrchestratorMaintenanceLaunch
+    Test-SmartM365OrchestratorMaintenanceLaunch, Invoke-SmartM365OrchestratorMaintenanceNotification
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFD5fxdAlcpMJs
-# GuE8RwF0V68kW7Jofe6bc+W4RUFKcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCngBGON9Yiy6Vm
+# icuSd9y1+PIJr2MJudmyf/1lmVchsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -344,31 +412,31 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorMaintenancePaths, Get-Sma
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICwkl11KSxGM1u2YLEfI8cB1qWv0xo5AlUoKq1SCvhX3MA0GCSqG
-# SIb3DQEBAQUABIIBgCuKHKj3wy58PihOWuunxsh9sxFyj7OjbPUZs2aLLgVGGwrI
-# VOxEJbkJDdCicN/RDNiCLCuFqqRiY7GR8NPiX9giMnnvWFIXY8VzTWMJm39r5zgH
-# qfxArS9mmv1YZ7sIetmUI41cBtMA0P8vNG0M+zWC7SCgGZORT1J31iZKm+K6n4GU
-# +ZMMLyYe7PB1E0WKkg3WNp2p6HEZuuPxPX0sM5CtFxErb0IFPEo0DkENu+8/xTtn
-# Ud7BZSf+beBZF3ldCe9OTHBZ0vEBVaBJwZ63qUzsYICpslF54f0Jk6uG6NNGYKe8
-# 8k0ctUPK0H3n0X77s1wtw9P4yVflLZI3y3xRkbfAL8Tgq0AhE7Hl8SW+7FEcGcwR
-# osd72Yoc30viXPz2AAVwqZjI24/SBaQxnLMbt2GVKIhh3AZhVyQ7E7XnKAIHGWUO
-# 6aC7dFrWdl4t3uHolbovp7WL6KvxSe5H3DnnpNU4I3dRjM3kyPvhYds+gjHBjxeq
-# rZeRmf/iU+NtdGfMTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINwePZn/46OCMXKNFuw2SZXZThuTsUmK8gQ+FB1e81hTMA0GCSqG
+# SIb3DQEBAQUABIIBgFgSZ+NuDbKhAcqcEYgCiLK7lZ7irSleor+hsPgKhkh+8wmz
+# pcGOnYNpRVtm1611hmiJKHqD/71ZdvlzvW+etGxFgPKaQDkLj2ZLi6/aa0llMTiv
+# momXulvecCybcBeDoY2z0NcgRYQ9BzPxjVHGeCvT0YhkJAyJoNo5HDdOfSbi0g0u
+# s70EV3a0S4Ggwbc9sQYVA3OBCf3F6DBB0E7mzM02UbI/fFZE6TaIEMEiYZKR4+qh
+# 0publeISKBHvnTXPs7RpwQK0/rDDCWpqDgJjcgWMsm/E0l0eb/qCY1clTi0Wr+mg
+# Q8F1yikF3kyU3eEKOyeoEDJhy4bI8hZjqvfPoPJR8js0q4Lk/9sZocKYoGL9lZVF
+# tIL4Ue2rNRnUoR2oOG1QkWyJMG93BsqiR+zXN3eujQ074W0sfG4E8wpNzhKSqCa5
+# +0u9byjofy4ZkiiGn7oGAelCpMkhdXB3dqe1WF/o9lxgFvhunzNijXQqnT0x3KX/
+# uTcKFO2lPAKwkJiLoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBVTOEjOpYiqxVJT7Vq26Vh+UA9U2imRnXz91hQ
-# S+5vrzANBgkqhkiG9w0BAQEFAASCAgAzwu6tqF79q3MOCp2m/AFiwQ688Zdbfl6m
-# 9rAHab4Bcq6wAsSCvHaZoBTtJ+RVC8T5UZNER0Bqip2/ziBhyVyz7SowoM4Rzv+l
-# GEXLGkXnILnismJZ7/VYXkum5M6a5PdcHhUqsuDRNXxBcxkLWudbCY4SDtwuvE/W
-# e3rBwB7kawPKXMsZU2HUEXZo1ul47o1RumNQWLXUfhNsP0bR/ZDwhq/9FluMHVqP
-# iVPQXFFQ/hitU1sdMEmeVr9+UXsKPGAfl37uB6IL90jgRXlH0aOEQdw1I7wbnRx8
-# GMYvbkJu6YfOCXXEXURNxH+KKq6hwgSHKE3n5MQp17kd0lC2KnxuxoZOh0aQIvmV
-# oyyfVX1vHp2EObEhIlEAQwBQUzGLI2091V0l7F1F7lnTZq/GWKcHUR41A3ZdIfLx
-# /jYsaZZWpIAW5NDqkEH4JUbJqMz+nzzkDXnEHH6vm5G/LmYZc3VH2DU3bpSmmV4K
-# IgX5AsyjOGoS+YZL0Ctpge3VKe+7ZdkhxvgeGOrUqndqBiT/5v7v0p0iKxYxyO9f
-# 4Vv6WaDuw/N/sp6R1k6yml2p7HQITTQockWUugiwTtqYWyxa864c3+R8kmcu5Bx5
-# p94ddcWyrHm13XEC6MW/JvbHuZ9j5GSy+fVpXSdS8QsrHvllcWpkRouieVigkYGQ
-# eigQfaMAuw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
+# NDRaMC8GCSqGSIb3DQEJBDEiBCDM+VvS6RxRA8lh/6METBqFGeexJql2vwPoDPNk
+# FFxCyDANBgkqhkiG9w0BAQEFAASCAgCDKMHKPvmmMsFAe5nua3uxnH0AekBQvLf7
+# 40BleAYoAb/+ecYY9pXLA5s28UxAbdeCNkdISVUURAUhlJeFGhOcNGIapuXvhb97
+# ig/LDma2T86OaIfVjuIwHr8mxo4mvzLenSbvlnQ8NZN3DzuBUYh5IDtURiIqOKlq
+# QHFJmrpjh+7kB8ln23SiTvLFUc/H1IT2VJi89EooygCNRPCKnFlXURp6lH20CziE
+# Bf5ep/O6j39w6xtY/ocZQlp+RqR/BOjkTdpOkPZmMExoy5rULnREGjv8ulUJVhmU
+# Dmuh8ta0n9NsH46EM0YsSfL3AsQ10KA63iurAcE8a9d/UVDGKmbgm4FSwjmIPMnU
+# ZWouP4MY5p3uelnF9qedWjPTDFvts6g+WLbaxWjvz2Xo71auXJLFG+heDWCrIE5C
+# b4Ldvt6DvxTXZ1sJDGVxVHgm2wpz3gk1TWJ1oslTeVqEm3iGV7Cvxx+qB/C+pPM7
+# PBLCdTCD0bk1JujbugLvrxIbgFzfUC5e2rD1Ns6d/Kx8y6iSLZ+sJgyLvtziN+Cx
+# u3bgmYkIHQLYNCHPQ7cBiMb8PWO64iVcnE/EiyCICsP5sJSyXSYZz4q6wrXgpMCA
+# UOtlovUIIEPrAJKfCwH2Pb64Ai6gy3fsV1EXH8jy9EEV/7kf2D0ugoWjBiCdOIG5
+# z+A3wu6idw==
 # SIG # End signature block

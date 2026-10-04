@@ -3,6 +3,7 @@
   "SmartM365RootPath": ".",
   "WorkspaceRootPath": "{{SmartM365RootPath}}",
   "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{ProfileKey}}\\DATA-ALL",
+  "OrchestratorSharedDataFolderPath": "{{DataAllRootPath}}\\Orchestrator",
   "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{ProfileKey}}\\DATA-LAST",
   "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{ProfileKey}}\\LOG-ALL",
   "RetentionMaxCSV": 30,

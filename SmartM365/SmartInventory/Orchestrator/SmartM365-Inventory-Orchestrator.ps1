@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -100,7 +100,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.39
+1.5.40
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -112,7 +112,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.39
+    Version : 1.5.40
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -137,7 +137,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.39"
+$ScriptVersion = "1.5.40"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -991,7 +991,8 @@ function Send-OrchestratorMail {
     param(
         [Parameter(Mandatory = $true)][string]$Subject,
         [Parameter(Mandatory = $true)][string]$HtmlBody,
-        [switch]$IsError
+        [switch]$IsError,
+        [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose='Auto'
     )
 
     $Subject = Format-SmartM365MailSubject -Subject $Subject -Orchestrator
@@ -1012,7 +1013,8 @@ function Send-OrchestratorMail {
 
         $mailHtmlCountBefore = if ($global:SmartM365MailHtmlFiles) { @($global:SmartM365MailHtmlFiles).Count } else { 0 }
 
-        Send-SmartM365Mail -SmtpServer $script:Settings.SmtpServer -SmtpPort $script:Settings.SmtpPort -SendMailMode $script:Settings.SendMailMode -From $script:Settings.MailFrom -To $to -Cc $script:Settings.MailCc -Subject $Subject -BodyHtml $HtmlBody -BodyAsHtml -HighPriority:$IsError -ErrorAction Stop
+        if ($IsError) { $MailPurpose='Error' } elseif ($MailPurpose -eq 'Auto') { $MailPurpose='Report' }
+        Send-SmartM365Mail -SmtpServer $script:Settings.SmtpServer -SmtpPort $script:Settings.SmtpPort -SendMailMode $script:Settings.SendMailMode -From $script:Settings.MailFrom -To $to -Cc $script:Settings.MailCc -Subject $Subject -BodyHtml $HtmlBody -BodyAsHtml -HighPriority:$IsError -MailPurpose $MailPurpose -ErrorAction Stop
         Write-OrchestratorLog -Message ("Email sent via {0}: {1}" -f $script:Settings.SendMailMode, $Subject)
 
         Invoke-OrchestratorMailHtmlUploads -PreviousCount $mailHtmlCountBefore
@@ -3541,6 +3543,7 @@ function Start-InventoryJob {
     $escapedScript = $scriptFullPath.Replace("'", "''")
     $escapedLog = $logPath.Replace("'", "''")
     $escapedTenant = $Tenant.Replace("'", "''")
+    $escapedMaintenanceRoot = $script:Settings.SharedDataFolderPath.Replace("'", "''")
     $argumentPart = ''
     if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $argumentPart = ' ' + $Job.Arguments.Trim() }
     $connectPart = ''
@@ -3591,6 +3594,7 @@ function Start-InventoryJob {
             "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
             "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
     }
+    $command = "`$env:SMARTM365_ORCHESTRATOR_SHARED_DATA_FOLDER = '" + $escapedMaintenanceRoot + "'; " + $command
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
     $headerLines = @(
@@ -4840,6 +4844,20 @@ function Update-OrchestratorMaintenance {
         $script:MaintenanceHealthy = $false; $script:MaintenanceError = $_.Exception.Message
         Write-OrchestratorRuntimeUpdateWarning -Key ('maintenance:' + $_.Exception.Message) -Message ("Maintenance control unavailable; new launches paused, existing jobs remain supervised: {0}" -f $_.Exception.Message) -Now $Now
     }
+    if ($script:MaintenanceHealthy) {
+        try {
+            $notification=Invoke-SmartM365OrchestratorMaintenanceNotification -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Initialize:$Initialize -Now $Now -SendAction {
+                param($transition)
+                $action=if($transition.Enabled){'enabled'}else{'disabled'}
+                $summary=[ordered]@{Tenant=$Tenant;Revision=$transition.Revision;ChangedAtUtc=$transition.ChangedAtUtc;ChangedBy=$transition.ChangedBy;Server=$transition.ChangedFromServer;Reason=$transition.Reason}
+                $body=New-SmartM365EmailBody -Title "Orchestrator maintenance $action" -Category 'SmartInventory maintenance' -Message 'Scheduled launches are controlled by maintenance; manual Pipeline requests remain available.' -SummaryData $summary
+                Send-OrchestratorMail -Subject "Orchestrator maintenance $action" -HtmlBody $body -MailPurpose Maintenance
+            }
+            if($notification.Sent -gt 0){Write-OrchestratorLog -Message ("Maintenance notification(s) sent: {0}." -f $notification.Sent)}
+            elseif($notification.Status -eq 'RetryPending'){Write-OrchestratorLog -Message 'Maintenance notification is pending transport retry; maintenance control is unchanged.' -Level WARN}
+        }
+        catch { Write-OrchestratorLog -Message ("Maintenance notification failed; control is unchanged: {0}" -f $_.Exception.Message) -Level WARN }
+    }
 }
 
 function Invoke-MissedRunCatchUp {
@@ -5941,7 +5959,7 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.68' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -6251,6 +6269,11 @@ try {
         $script:CentralClusterHash = $centralSnapshot.ClusterHash
     }
 
+    $global:SmartM365MaintenanceMailContext = [pscustomobject]@{
+        TenantKey = $global:SmartM365GlobalConfig.TenantKey
+        ProfileKey = $global:SmartM365GlobalConfig.ProfileKey
+        SharedDataFolderPath = $script:Settings.SharedDataFolderPath
+    }
     $script:LogReady = $true
     $global:LogTextFile = Get-OrchestratorLogPath
     $global:SmartM365WarningCount = 0
@@ -6533,8 +6556,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARMVRVB7e9z1oV
-# efslfIzbpIrpWMQOEGpHjDbPGuXiuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4WVi+BJERpKqv
+# +6ycriy87n8Qb04b2MLF0Hhdxfwr5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6667,31 +6690,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPPTLQqKhaL3u9eoa0GC/Yvwm9ku1/2tbXDlSAVCNs71MA0GCSqG
-# SIb3DQEBAQUABIIBgHrlhwUH4uNTH0lV9Yf2uZkGpDf2SUxPpIbru2VulLdO6rno
-# pJ1xUYphoO424CCiXQzqyS6UU4oj1LCg8pPjQXjLTupDf7PWU3S01VjfJmGivLF6
-# AJZbVW+cPR4EFIoj6T1uKEUeu8AOC0iFC7AXY8LiCUtAOvKsHtgsgd+WaIHsUhDX
-# hNiisHWn/syp2SEBPsJMjyiBSDkXXXCYE10Yvh5lHks83nMtC1+24y0Kp91EYw1S
-# zCEv7mGl1iOJse8Mh1tD85QWFo9WD2i98MptqiqN6eHHruWB8o1O2McwYij5C5OQ
-# n01KTD8VTbO80gUivJxjnaOHVc3eCRmJLf81CYFZyTESOQpX31OlDvV/2BukSINv
-# GfH7hyPhUKtWTN07DoOlWSwI0lXHSKu0ycnXnQZ4GPoejo5/TeILPWRQX/ng8GDR
-# bLBmaBFQy4zI2pGJBfLJxEHqpGc1x9xZn22GumqdcasNPes/1O8bkju1xOeH3Dgi
-# eM+kQmg4mpQRLyUzR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP6ZaHomN5jftvX1RaEd7/KvtxejJhlgAHW0tg1cxmKnMA0GCSqG
+# SIb3DQEBAQUABIIBgIfN2Co2Gd6VKSRj4iP8VMdpFACy7r/Kvt5xauie5gXZVWYc
+# noZgRHw08vIVeGlL41CTO/LBhuMS2KPqUl/A8C406xx85ICe8p5Rajvp+Cxi6APb
+# np5zgWnJ+0YXBubuFjTMeVyM04lc4KeuhWY+SPgchpiVJ+zqAIuc1+SQuz4vISpA
+# SVlbt0ew6nFBkgbhFVqN2MOFpXl0TBbQod8IJW0HIZXGzlb4zSd4LhCXaVTiP9sb
+# uvEk6TEI5SuMrxuPa+eFKJCv26DCMEjx1cbEnaY7WdPjg1wx0Vx8vTYePg8K+/20
+# 8KXb8N4fuDphhE4WA4d87D46YFDFtpNob0xwmGB//V9ZjvHWtpwAMk9ohVl977H+
+# 69r9j6PJ0JKpHacUF94Fp0+7cKdAdHD/A85NHNx+cUF+JtHtQE5DDv/9UNdR/cgE
+# fBaXRORuCjyV6qXhlgalTVv+6PoG9JuuvxY5ZonAnARJl6cn0m/GzMhykTr77lh3
+# Bc+dbVoBbUYP3d2eF6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCADPLWJ+/hZ2+iKLEnNv4IbIkweBUr+fq/UaUq1
-# KI7KEDANBgkqhkiG9w0BAQEFAASCAgAEenxlr7a3+82Ak5yltq0VkHZHV017edC4
-# a7fiooSeHlis9tC8fSSO1PvXWfv5fFcassaBmv9illa5+YgKEjcnQ1AZwabMwkzM
-# T7j9Fd65pDdrh5aipBNHrBWnl27kIdrjuA39SLgHKmwPa+dakbtjuvkOO3hM3Dws
-# QqYTCiJbdcjJ8w/XH/9TE+8E7MYi7muU7ZELPXl1ywl6UrskYieeoVmdwR7iwjIN
-# RsQ/F+FlHzsi/NLM98Df5tpgjtCuaMu3OQamSlygnJAIGTZ9CMHDBXo6AMsEM8tW
-# ZXuY9XOaPyM7MGSu7Ie+zqenWbSqbM8UWaBfUbkZq4KZwui1MXEXF2u6uiiI0uEx
-# VjgoozHqVi4y9GicotujqdjCgaB3djyHncUaiqyqK1jI9NF+CtgIpKB7fjuytSC4
-# t8wyRJGGE44dxkwonnnM5QUiRoknZOcr8Yt23bW45XSOuPq5THAZRkNOXpU2n8f8
-# OAtpbDI0kiGvZ+BcOwWUi6XG6IMqfbonHhZ1GE/wuf2H/crVUwO/YJj8mUqUQl1o
-# mECSt1jRuPapyYwCDTlWzQ4ty3Se0vrmjvC1gY7RHp6IojVOY+Zhge5e99UVtmh7
-# T2hJeELuWVc4j/EsEjIJiC4jJGVjn+ULU/nOcaCxUD2lCfw+xtVJUaATvm2DXX6j
-# n5v5tRDxMg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
+# NDNaMC8GCSqGSIb3DQEJBDEiBCAIcLPuwsQmN8SnHbnc/MTf5BsKct/r9BLdPe0w
+# qQdtoTANBgkqhkiG9w0BAQEFAASCAgA7zd4llImiDU+5Stx1PNv8+B9ylfKOP90H
+# q/QgssM9yTp6Cfq/F80fvm0vPo5SgOzbzYUYZK01DsZulXbWZflHQG1UWfe8a8PZ
+# nHS2JWtAJRxvmmNa/36Nl2LLnBsmGA9HXZSq1UzRV8lruTkBz6WMh4vMJTjH9UnV
+# ro1RmAux1v6GnjOwF0guzV95VdrVJyJ289htXp4LbAGj1kAEfMPT1IF5KyM/vqXU
+# FNK+0rx9sAzr5Ofy0vNy9QRlrig1SQadELkvZYgr5Z6YqQ+hi035vq3Ar8Qn7Ic5
+# EXR1Hkou5k7yUgGQ3MiFfMJH2yPufnt8EwREqvuOvobqiscsX3leMG9wyQA9Cy/D
+# cs2p6h/Bfe3N2wiXVEmBGO1giN4agLktCLNw+9vJ94zsdn5MtsnUvr0lGcLUO4J8
+# cq4i6RGXPb+4tadQ86qsbfW0Z4tlsyLAF6LZrkQSjawzdsHi6hYBfBpCqD9c97Qu
+# fQUigb7SAEWCjCMsXV9Anp9+nm3i7isPtEAt4Sn9GRTx9cYq12m+uGUgSyLFa57s
+# JOlzG7ZN/jsNTFAypryipnpRr5eEy8Y0aQ6VEcpux0hVzpK0OhtVXvMeBYS2HqzF
+# iZZNn2jvrx9m35aHiCmh3XJ8V4VTsP7b2sYgtsHG4/K7iwPjBQ4ybNPQ6JNF9NW7
+# 5dV3/rYbtA==
 # SIG # End signature block

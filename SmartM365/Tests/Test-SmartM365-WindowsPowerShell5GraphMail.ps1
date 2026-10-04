@@ -3,7 +3,7 @@
     Offline check of the Windows PowerShell 5 Graph mail body: recipients and attachments
     are always JSON arrays, also for a single value. Graph is mocked; nothing is sent.
 .VERSION
-1.0
+1.1
 #>
 
 [CmdletBinding()]
@@ -17,9 +17,9 @@ if (-not $ModulePath) { $ModulePath = Join-Path (Split-Path -Parent $PSScriptRoo
 $workRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-GraphMailTest-{0}' -f [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $workRoot -Force | Out-Null
 # A synthetic global configuration: the module must not look for or create a tenant profile.
-$global:SmartM365GlobalConfig = [pscustomobject]@{ ProfileKey = 'synthetic'; TenantKey = 'synthetic'; OrganizationKey = 'contoso'; MailTenantName = 'CONTOSO' }
+$global:SmartM365GlobalConfig = [pscustomobject]@{ ProfileKey = 'synthetic'; TenantKey = 'synthetic'; OrganizationKey = 'contoso'; MailTenantName = 'CONTOSO'; DataAllRootPath = $workRoot }
 $global:LogTextFile = Join-Path $workRoot 'test.log'
-Import-Module $ModulePath -Force
+Import-Module $ModulePath -MinimumVersion '1.0.49' -Force
 $module = Get-Module SmartM365-WindowsPowerShell5
 
 function Assert-GraphMail {
@@ -66,8 +66,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKJbKJeK9DGV5D
-# HNUP6bkHS/t0IKs6chrng8Pdvi1rIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyHN3eeTFp1x3d
+# ugLuSa++uogunvt+AceY6AIftS/SUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -200,31 +200,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPVKZ7nhy+imHTnKPk/tZyiybd3+ZWsYSCo4C/Vum8OiMA0GCSqG
-# SIb3DQEBAQUABIIBgKd16+9fx3zUjTUltXEPcm2QlRrfi2XBFmqoauhhWm6HqFAv
-# Fa0ORp5rN9TB1gkPuuRTYmVqOdanVGVyTylssK+QNHNjPrACzANOXRK72/ac/saI
-# /wjejA72uA29Xpl1YXSlehgZAZPXBLIhx+7yHkD6FOPQBTKqWwqqsXDNiZGBnfMU
-# sb6t4Ujtf+ehNdoySKR5ZyVluZjfVOn8GP5L3NGqQXEPDWmShJFVQZ8vtbfdm8N4
-# hFMKK9JhL202tE4dHi0fIcVJaG+f+WA/xblYtYck3gqvinv5FbROGpbgqQQBMreN
-# sTKUdqrDrVuVjgnGpyQ1iWEU6Ojp6nceUlAz4PVX4MBKOvYFrii+k7PT+Op8ezT7
-# hfA96Mt1bGikam2eCypAaf5D/LFG6LgXkmg8da7nfpwbHCEmEZxsa1cKkKJwLWCi
-# avieRHPg5InHNyEqn2CZVaQzjfJcPPszZZ2OxSQKw3J6d/vOrEUmItcEnqnGxyVU
-# YPVIlDSMwP65i7Qe0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFCb8VoJNu+tLxDWhJfBIdjgZRKoNw07VQSuN6B80+pJMA0GCSqG
+# SIb3DQEBAQUABIIBgI6erVnqsrlsAfu4YHxkTMs5FKseXGoYCumpFTu+iI0/diBk
+# 3HYTiWziyTCdQbuiFUxrjnCsQXcRJjRYlFxglgRs33B+Hpp0/KqR1pzwLSMDlyO/
+# 7Ii0MI4gc42l4WoOIncGXM3zWRp0sdUMgo677x9c2YtTEBK82akRykl43EH2AIc+
+# j0GIeabxIl52xHyeoCYauJFFTwzxKF709/qWjjBivX/Q1Of76Pjc0JfbHiz1djfL
+# PfG1k2ESi/AvXkUFEQMT/aWBoLVQ+y3lnQp8vCuCmQ+lFVEA7/cBQfQYbxWxAcvb
+# IXIQoBZRxINu4cVCHuG+W5BD3VR3K4Lfr5ZGIO13fTnE536eXkspaX+DNUQIp416
+# qKp+17JGiRnXLS391Ff7SFHH4L5Q552NnS/qiTENWuT9hJwVHn6de0o48bmezOHS
+# JuZSg0REQ/20F43jUtwzMtwu/xyUX8pZl0Am1cos6JdDBH92qtUTumZXETuDAKbG
+# l4hJ1cXnwaVoZKytB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxNDU3
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDDsVM7+VRgXJJ9tDtLtjFXGfSXcWCpKm8BC+hl
-# EOAlDzANBgkqhkiG9w0BAQEFAASCAgAEwH5FCapM+uUJyBrA2KbMYhkT6DQQbL6h
-# fbHuQ34ad75BoTvnL/L4HPCT+8QLAerDWeDuwHIo9taa96OsqgOg7QG97QoSz65C
-# aOG9tUlQJGrvLlsESHmjCouFngMQIQ4UzdgWhK47Dch8bc53Cj8g9FixXz1sJmT2
-# 8hSiG65S0TuwCO8Qj4Btb6vVOAdo1qZq0MbDfAACG6ggHhev3LFsJhi/MzVWQLGE
-# FtEVMCInWhHvzUnlJBtdvNyltrX+UUNOO9KvsckPpOZN7PjBQykhZsSpp5FRq1bs
-# MGNRE2sKrHIhfqrYOs7ooOAqMah4i137KkI4DUKtMjXK1W+q0agkIzMrzpZCsb61
-# AP7NgzT0eixSlrGOtReJDaRzkgN4I2uWNh1M5rkSHZOjMs+RFM1h0Xuy9Q0Bvqy1
-# wOBwMzS5jPEgphQcOwwyHeanvZwO9ZkdSO/uzy5XIE3QGbUxJ7GdvqjtnJrZRGCJ
-# /53eFXz7iv4Nvrk6URLLfkurKkfHmWlvsFKus8XcZN4Mcr4Ry9r/2ZrJynMg3H9o
-# Rg3smICZCQ7UUd9QCuPmL+9AHfUHYtM4j8xKq49nqKK+GYSC0mJyOURRNJVew77a
-# NbmaJdsYlgktv2+BpN6Ssl4RH50OnYiEHg8Oz3p9Af+BGJD4rHI4Ve39D62SQyzV
-# 2IKFoA4Z0Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
+# NDRaMC8GCSqGSIb3DQEJBDEiBCD5HTIB6JUEhYEcVCokMShvyZahYh8IRvoAyIDK
+# LLru7zANBgkqhkiG9w0BAQEFAASCAgANQy/HHqlGx94LCLDLEvLK/N1NAHZpDfae
+# SnUJ9EWq2QulLaet3+/aomsjaPCX404p/Bm9IjkmE7RIYvMFvx9A7fcgqb2sigsJ
+# R0We2PLTiNKgcHtRz2BHRg5ysyipyzs9fO3X5AQDiJVcwdsmc9MtP3fUbL4j6mg4
+# xMPlm90KpldzVUbKhkW8dG2b+FDGMMFwMDCxTr4muxXf21mUL/Y721YocytXSoBw
+# iBlj7i5VvoaKeco6qARC/cFjG32OLLOpXXbkIPIdxLqavT8hwA3BtIshdabf+Bdm
+# e4c183NElNCtdOYfhHl1gA+mW917fx55Awa8F0J/J1OM/+xwPoknEQsLOzM+NszD
+# OZIcYSjh1TDCSBNy1iOKdOF3Uj9BWlCnK2eOpXGV1uKm7IduL/uXen1F696J2V9D
+# oCwczY1BsbaHgwI/eG4kpSNdF4fzkArqY2NhRcrXPbhBeRrZ01Lbgl6dJL7r2iCn
+# lfIaDvHsGYWZrMs9+i6G3OdQZcF9niH+bwQnFxGB21ehlQvcd5R5Jh4bFCB/qh6o
+# s2fC9PTaOi52YIoGT1I77TuFIAoHjwadDmr1QG5RdrKgNM9pl4yMCpdsLu5zCvjp
+# v6N+ooJkCnnaZBKOIdlta22lUlj4+76Kj9QksiR8+zcvqFssp5L0VgrTn/rV8HBl
+# Lk2JGNOVpA==
 # SIG # End signature block

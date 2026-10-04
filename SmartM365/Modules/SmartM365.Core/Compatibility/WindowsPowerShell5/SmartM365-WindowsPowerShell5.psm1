@@ -1,6 +1,7 @@
 ﻿Import-Module (Join-Path $PSScriptRoot '../../SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot '../../SmartM365-CmdbReceipt.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-MailMaintenance.ps1')
 
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
@@ -2027,6 +2028,7 @@ function Send-SmartM365GraphMail {
         [string[]]$Attachments,
         [switch]$AllowAttachments,
         [switch]$SkipHtmlCopy,
+        [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto',
         [string]$AppId = $global:AppId,
         [string]$TenantId = $global:TenantId,
         [string]$Thumbprint = $global:Thumbprint
@@ -2057,6 +2059,9 @@ function Send-SmartM365GraphMail {
     $Subject = Format-SmartM365MailSubject -Subject $Subject
     $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
     if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
+    $route = Resolve-SmartM365MaintenanceMailRecipientRoute -To $To -Cc $Cc -MailPurpose $MailPurpose
+    $toArray = @(ConvertToRecipientArray $route.To)
+    $ccArray = @(if ($route.Cc) { ConvertToRecipientArray $route.Cc })
     $message = @{
         subject      = $Subject
         body         = @{ contentType = 'HTML'; content = $BodyHtml }
@@ -2664,7 +2669,8 @@ function SendEmailHtmlReport {
         [string]$BodyHtml,                                   # HTML body (required)
         [string[]]$Attachments,                              # Attachments
         [switch]$AllowAttachments,
-        [switch]$VerboseLog                                  # Enable verbose logging
+        [switch]$VerboseLog,
+        [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto'
     )
 
     try {
@@ -2747,35 +2753,37 @@ function SendEmailHtmlReport {
         if ($atts.Count   -gt 0) { $mailParams['Attachments'] = $atts }
 
         if ($effectiveSendMailMode -eq 'Graph') {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-                WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
+                WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
             }
             return
         }
 
         if ($effectiveSendMailMode -eq 'SMTP') {
             if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: SmtpServer is required when SendMailMode is SMTP.' }
+            Set-SmartM365SmtpMaintenanceRecipient -MailParameters $mailParams -MailPurpose $MailPurpose
             Send-MailMessage @mailParams
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-                WriteLog -Message "Email sent to $($toArray -join ';') via $($SmtpServer):$SmtpPort" -Level "SUCCESS"
+                WriteLog -Message "Email sent to $($mailParams.To -join ';') via $($SmtpServer):$SmtpPort" -Level "SUCCESS"
             }
             return
         }
 
         try {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-                WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
+                WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
             }
             return
         }
         catch {
             WriteLog -Message ("Graph mail failed; falling back to SMTP: {0}" -f $_.Exception.Message) -Level "WARNING"
             if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: Graph mail failed and SMTP fallback is unavailable because SmtpServer is empty.' }
+            Set-SmartM365SmtpMaintenanceRecipient -MailParameters $mailParams -MailPurpose $MailPurpose
             Send-MailMessage @mailParams
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-                WriteLog -Message "Email sent to $($toArray -join ';') via $($SmtpServer):$SmtpPort after Graph fallback" -Level "SUCCESS"
+                WriteLog -Message "Email sent to $($mailParams.To -join ';') via $($SmtpServer):$SmtpPort after Graph fallback" -Level "SUCCESS"
             }
             return
         }
@@ -5160,8 +5168,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1jbWriZK54ZKN
-# liJLMf38/baF+XC4AcLj1ok9E4mTkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLdaPTAGGz1c25
+# qkFlVcGQwmDCjflfKG8VpAewjhkBc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5294,31 +5302,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPRRMmPdWMtKUEgUEvV5HHV8wGA442qM4dXujBIddeNlMA0GCSqG
-# SIb3DQEBAQUABIIBgF7TIyUv3ZAzy68sCxQlS42z3hqCf3wy8WMETZ9XP036eQwc
-# aa/0zAYpCGdeMBX8yLG6w+ZSKht9rlHfRzdJ1arZdKyhOBsvpqYWiny3Omw62AL3
-# hr8q9kT+fqyrryvL5JGT0MbKJRlWl3wOAkO61n6sy6KD6Zha7+T0Sva4R6wLHBGX
-# JiaokHcyUM3BTqNh8783DpCWO0Km2Acn8qoI7v8DS5Cls3MJqUWKEaPjh4qyK98Q
-# UroLPhPULtoW3OUidVnBF7RwNQEp8vEbMdcKyOC/iNwnssqoJL72U9angM7E4o+W
-# AtwdkTLFa1EfBh1aHfIyeK3Rn7Z6i8w6eVERQj8VcI3Ya3MM7UFFkLxMiITBetUi
-# hxfQwT0uRpZnzGHFG0sh/3Qm4BmAz1BhC+nrR5J/SMXHs2xmessFckBifzD0Z8EP
-# twqeaihWDLDJEnDHeekk5suoe5kfOtrtixNpaddgFzRYAXvicDv84btXs3257FAN
-# XAwgXFuH1LvPyRpap6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP6fdZlhx89SQDhetekIxmvIQvuuz4jGi89l/k8KOOC8MA0GCSqG
+# SIb3DQEBAQUABIIBgCXLZP3FR9HTlEAmnHxB3AsPJo7vewtdStGxlmAmqiD93v+L
+# Zsjo2doMu6CtmrtlzgBw0RQdfEvaZdPNh8yqKcl7SP7U1HiD7G3jbNyy/DpR8T0U
+# Xx1L/cCPpVLtXvlUb3HvQawyH6U2B/kCnX3wSMQe6A2M3thNzoFS2W7POTM/sLjN
+# Jl+mUbH491ec5+FIHSzxQtYobfwQbq1pI5SymrT2q6XTFbiGx6Z3kXuW5K/j8rMi
+# P5PSPo5glIdEiDX6oBSRLHkgQj+mclxTrQLM22m+ZyOYTNvJnhGDf2AinDQzcV7+
+# FNc/GXCOG6hPUTer+2pDsiU9mLwdsU0v5JJ5DdmtJMGNIzecJNGh0x7a2vo4lOFv
+# L4K0KDFM5c47bDf9eIxkh/YhQ3+gDPVxl9E60cKCdGu7JSIE7LT9C7zPvKJSjHCD
+# glRQqzwaYYUDST5pV1cj8gTDqaO1kesIXTMCF9lMyDGNmmNyjr5qvAS3QyYkAsyh
+# 6GAqd42t4+nYNGJPDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTM4
-# MzVaMC8GCSqGSIb3DQEJBDEiBCBwRQk+PAsoG789PxZmbvLf1Z0xv4pA0MmykmGf
-# TSIUxTANBgkqhkiG9w0BAQEFAASCAgBok27eE7cWdTek4krc9dtJYotVaHhWrdyV
-# Hxjtd569CVW+5nnVFxDz5ZeqmhdwOpRYtijKjkBCbp7126SsJrrOG8P4QQhL7CKH
-# Paoue2aDaBrLsmiULaEUr8/XKo8TBcBPO1TB0HKJ9ANmDazmYuO7XlArUFFdgcWe
-# WdLxjxPZXbqc6nt97SjEL6lI2mEJ0Z0mAWYDQsgRBukEHxW7YRm34om/7RmTTO1C
-# Z10bUuPmqQgubWGOQixHq6/oFHNnygZezt4ZWID1r1dpGacO0vF7Ra4zQLHCD7W0
-# 0MAAcob1dr2uIKH3yqII/YO+2xAwjmL6NslUv0kdxNYAEY2oyobR7Ut1GR56peJ3
-# kI+7/1eW4Ew0iH5SOm/QKMQrzFcvds/p7JGGWtwL/47ASxbJSMXPn9QwQlE1hB+x
-# fSJQNBxtZOlbf8b095cOQe3HroLNIVwCHdyaucmLt+m92ZXg2Ijv6v1Smz18ak3v
-# o037LtNvwIK2gcNdVlMhYfIhQcbghyUo1HuZ/ZPRKOP24oOc693OgQ+x4ByySNeX
-# r9a5k+TsVHSG9zvAR9UIUNML2ElrXoaHuW+Yw02rgXFbDCTkO82eNRAxM2wBY7I3
-# CJNz+ZWz4LwB0Qctuoe1ftlILrmxC7SJrNY4QCoVzReZt/r9Zzacs25KFeO155OM
-# mi9ic0z2SA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
+# NDJaMC8GCSqGSIb3DQEJBDEiBCDrikodeFU87PPiol1geBdxIo1SZfwXWLdP45BM
+# 8Ue0wzANBgkqhkiG9w0BAQEFAASCAgCRXXTmUvRA0JbriWG26jWm1gmBI2z8shTQ
+# mjKv+ejmJlufg++sHxe80504pOwzUeVx+zYauZuWrNtVkGbWQN18FfM7jn5EHXze
+# R88a4VF28ctqe8FvwApwVNflnHCZif7Ym7aazcnYqIsyo2Gm+OUlCWEk7eveb6nV
+# pAgEjQHRGp9U3Kq36SRHe98xzGPms4TOfkrr7HhQUGI67CI2i+G2s1/+8xO5rusW
+# Fs7IXBUzudkFxP+m9ha3G+ofUUC8tj79oAQAHSVcQ1rWy+bl9zZtoAsYNsTbcQnB
+# SatsNctzzfIPfesTpqHyT6UmGX01FfsHri9wY8rE3FYVEn/ZkXraO76oeWkLjFhF
+# LbK62gBXabtOVdYimttWLBAs+c54n76vuE3Z6XkS6V1RZX9Bq2Q+wURQ3lWMbnnH
+# UTTKuwiKQpu63GfiKh5mpqW+YD5C+YJC+bTnlslCk5my2A+EGF0zPJGdcxfi4aXY
+# cXK62iO6V7tJYIBrnQs19AXCejJzqRoa0TO/gVGrWBEU7kHPIio2c9nq3dF3wuXZ
+# 38Js32eQeoJ5eAEvplhVkKJ8aCMRajRclnwTssgi/3Ij3/Xbc9rfAhtdePc6/OM7
+# joizXHQr7CmMDovQZsbL9X6Mx1tu/EhhXt89r3q0oxngHPKxR6nBX8USe7cJqsQJ
+# pWin9bcYfg==
 # SIG # End signature block
