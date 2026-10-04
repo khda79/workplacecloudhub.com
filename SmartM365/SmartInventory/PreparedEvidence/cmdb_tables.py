@@ -47,6 +47,18 @@ def number(value):
     return result
 
 
+def endpoint_score(value):
+    """Only documented Endpoint Analytics sentinels become unavailable, never zero."""
+    if value == '':
+        return ''
+    result = float(value)
+    if result in (-1, -2):
+        return ''
+    if not math.isfinite(result) or not 0 <= result <= 100:
+        raise ValueError('Endpoint Analytics score outside 0-100')
+    return result
+
+
 def qualified(value):
     if not value:
         return '', 'Not provided'
@@ -576,10 +588,16 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         'AzureAdDeviceId':get(r,'Azure AD Device ID'),'ManagedDeviceId':get(r,'Managed device ID'),
         'SourceCollectedDateTime':acquired('autopilot')} for r in read('autopilot')))
     analytics=[]
+    unavailable_scores=collections.Counter()
+    unavailable_devices=set()
     for r in read('analytics'):
-        scores={field:number(get(r,source_field)) for field,source_field in [('EndpointAnalyticsScore','EndpointAnalyticsScore'),('StartupPerformanceScore','StartupScore'),('AppReliabilityScore','AppReliabilityScore'),('WorkFromAnywhereScore','WorkFromAnywhereScore')]}
-        if any(value!='' and value>100 for value in scores.values()):
-            raise ValueError('Endpoint Analytics score outside 0-100')
+        scores={}
+        for field,source_field in [('EndpointAnalyticsScore','EndpointAnalyticsScore'),('StartupPerformanceScore','StartupScore'),('AppReliabilityScore','AppReliabilityScore'),('WorkFromAnywhereScore','WorkFromAnywhereScore')]:
+            raw=get(r,source_field)
+            scores[field]=endpoint_score(raw)
+            if raw and scores[field]=='':
+                unavailable_scores[(field,int(float(raw)))]+=1
+                unavailable_devices.add(key(r['DeviceId']))
         analytics.append({'TenantEndpointAnalyticsDeviceKey':native_key(tenant,'analytics',r['ReportName'],r['DeviceId']),
             'DeviceId':r['DeviceId'],'DeviceName':get(r,'DeviceName'),'Manufacturer':get(r,'Manufacturer'),
             'Model':get(r,'Model'),**scores,'SourceCollectedDateTime':acquired('analytics'),'SourceSystem':r['ReportName']})
@@ -753,3 +771,10 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('FactRelationshipOverview',({'RelationshipType':name,'RelationshipCount':count,'EvidenceSource':text} for name,count,text in relationships))
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
+    # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
+    return {'EndpointAnalyticsUnavailableScores': {
+        'DistinctDevices':len(unavailable_devices),
+        'ScoreCells':sum(unavailable_scores.values()),
+        'ByFieldAndSentinel':[{'Field':field,'Sentinel':sentinel,'Count':count}
+            for (field,sentinel),count in sorted(unavailable_scores.items())],
+        'Policy':'Documented -1/-2 sentinels mapped to blank; device rows retained; raw sources unchanged'}}

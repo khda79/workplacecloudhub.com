@@ -748,6 +748,60 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
             self.inputs['analytics'][0]['EndpointAnalyticsScore']='101';self.write_inputs();self.prepare()
         self.unchanged_after(reject,'outside 0-100')
 
+    def test_unavailable_scores_keep_devices_reports_and_raw_bytes(self):
+        self.prepare()
+        devices_before=self.table('DimDevice')
+        self.inputs['analytics']=[
+            dict(ReportName='EADeviceScoresV2',DeviceId='md1',EndpointAnalyticsScore='0',
+                 StartupScore='-1',AppReliabilityScore='-2',WorkFromAnywhereScore='100'),
+            dict(ReportName='EADevicePerformanceV2',DeviceId='md1',EndpointAnalyticsScore='',
+                 StartupScore='75.5',AppReliabilityScore='-1',WorkFromAnywhereScore='-2'),
+            dict(ReportName='EADeviceScoresV2',DeviceId='md2',EndpointAnalyticsScore='-2',
+                 StartupScore='-1',AppReliabilityScore='42',WorkFromAnywhereScore='')]
+        self.write_inputs()
+        raw_hashes={p.name:pipeline.sha(p) for p in self.source.iterdir() if p.is_file()}
+        self.prepare()
+        self.assertEqual(self.table('DimDevice'),devices_before)
+        result=self.table('FactEndpointAnalyticsDevice')
+        self.assertEqual(len(result),3)
+        by_key={(r['DeviceId'],r['SourceSystem']):r for r in result}
+        scores=by_key[('md1','EADeviceScoresV2')]
+        self.assertEqual([scores[f] for f in ('EndpointAnalyticsScore','StartupPerformanceScore',
+                         'AppReliabilityScore','WorkFromAnywhereScore')],['0.0','','','100.0'])
+        self.assertEqual(by_key[('md1','EADevicePerformanceV2')]['StartupPerformanceScore'],'75.5')
+        self.assertEqual(by_key[('md2','EADeviceScoresV2')]['EndpointAnalyticsScore'],'')
+        self.assertEqual(raw_hashes,{p.name:pipeline.sha(p) for p in self.source.iterdir() if p.is_file()})
+        qualification=pipeline.load_json(self.output/pipeline.MANIFEST)['PreparationQualifications']['EndpointAnalyticsUnavailableScores']
+        self.assertEqual(qualification['DistinctDevices'],2)
+        self.assertEqual(qualification['ScoreCells'],6)
+        self.assertEqual(qualification['ByFieldAndSentinel'],[
+            {'Field':'AppReliabilityScore','Sentinel':-2,'Count':1},
+            {'Field':'AppReliabilityScore','Sentinel':-1,'Count':1},
+            {'Field':'EndpointAnalyticsScore','Sentinel':-2,'Count':1},
+            {'Field':'StartupPerformanceScore','Sentinel':-1,'Count':2},
+            {'Field':'WorkFromAnywhereScore','Sentinel':-2,'Count':1}])
+        self.assertNotIn('md1',json.dumps(qualification))
+        self.assertTrue(all(r['SourceCollectedDateTime']==NOW.isoformat() for r in result))
+
+    def test_invalid_scores_in_each_field_preserve_previous_publication(self):
+        for field in ('EndpointAnalyticsScore','StartupScore','AppReliabilityScore','WorkFromAnywhereScore'):
+            for value in ('-3','-0.1','100.1','NaN','Infinity','-Infinity','not-a-score'):
+                with self.subTest(field=field,value=value):
+                    self.inputs['analytics']=[dict(ReportName='EADeviceScoresV2',DeviceId='md1',EndpointAnalyticsScore='70')]
+                    self.write_inputs()
+                    def reject():
+                        self.inputs['analytics'][0][field]=value
+                        self.write_inputs()
+                        self.prepare()
+                    self.unchanged_after(reject,'outside 0-100|could not convert')
+
+    def test_score_sentinels_do_not_relax_other_numeric_evidence(self):
+        from cmdb_tables import number,endpoint_score
+        for value in ('-1','-2'):
+            self.assertEqual(endpoint_score(value),'')
+            with self.assertRaisesRegex(ValueError,'non-negative'):
+                number(value)
+
     def test_unknown_readiness_state_preserves_last(self):
         def reject():
             self.inputs['readiness'][0]['UpgradeEligibility']='unsupported';self.write_inputs();self.prepare()

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics logging, transcript and rejected-row evidence tests.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
 Loads production AST functions and the main try/finally only. Configuration, Core
 actions, Graph calls, downloads, delays and CSV publication are simulated.
@@ -27,6 +27,53 @@ $definitions = @($ast.EndBlock.Statements |
     ForEach-Object { $_.Extent.Text })
 $main = @($ast.EndBlock.Statements |
     Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[-1].Extent.Text
+$terminal = @($ast.EndBlock.Statements |
+    Where-Object { $_ -is [Management.Automation.Language.ExitStatementAst] })
+if ($terminal.Count -ne 1 -or $terminal[0].Extent.Text -ne 'exit (Get-EAExitCode)') {
+    throw 'Expected one production terminal exit after the main try/finally.'
+}
+if ($terminal[0].Extent.StartOffset -lt $ast.EndBlock.Statements.Where({
+    $_ -is [Management.Automation.Language.TryStatementAst]
+})[-1].Extent.EndOffset) { throw 'Exit must follow cleanup.' }
+$exitDefinition = @($definitions | Where-Object { $_ -match '^function Get-EAExitCode' })[0]
+# Execute the production exit in child processes: never terminate the test host.
+# Counters change in finally to prove late cleanup warnings/errors are observed.
+$exitChecks = 0
+foreach ($case in @(
+    @{Status='Success';Warnings=0;Errors=0;Expected=0},
+    @{Status='CompletedWithWarnings';Warnings=0;Errors=0;Expected=3},
+    @{Status='Success';Warnings=7;Errors=0;Expected=3},
+    @{Status='Failed';Warnings=7;Errors=0;Expected=1},
+    @{Status='Success';Warnings=7;Errors=1;Expected=1},
+    @{Status='Success';Warnings=0;Errors=0;Expected=1;Throw=$true}
+)) {
+    $failure = if ($case.ContainsKey('Throw')) { "throw 'Synthetic original failure'" } else { '' }
+    $child = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference='Stop'
+$exitDefinition
+`$script:CompletionStatus='$($case.Status)'
+try { $failure }
+finally {
+    `$global:SmartM365WarningCount=$($case.Warnings)
+    `$global:SmartM365ErrorCount=$($case.Errors)
+    Write-Output 'TRACE_CLEANUP_COMPLETED'
+}
+$($terminal[0].Extent.Text)
+Write-Output 'UNREACHABLE_AFTER_EXIT'
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
+    $lines = @(& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -EncodedCommand $encoded 2>&1)
+    $exitChecks++
+    if ($LASTEXITCODE -ne $case.Expected -or
+        ($lines -join ' ') -notmatch 'TRACE_CLEANUP_COMPLETED' -or
+        ($lines -join ' ') -match 'UNREACHABLE_AFTER_EXIT') {
+        throw "Terminal status/cleanup regression: $($case.Status), warnings=$($case.Warnings), errors=$($case.Errors)"
+    }
+    if ($case.ContainsKey('Throw') -and ($lines -join ' ') -notmatch 'Synthetic original failure') {
+        throw 'Terminal exit masked the original failure.'
+    }
+}
 $corePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psm1'
 $coreAst = [Management.Automation.Language.Parser]::ParseFile($corePath,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'Core parse failed.' }
@@ -46,12 +93,12 @@ foreach ($name in @('LogTextFile','logTranscriptFile','EnableSharePointUpload','
 $module = $null
 try {
     $module = New-Module -Name SyntheticEndpointTrace -ScriptBlock {
-        param($Definitions,$Main,$FixtureRoot,$CoreDefinitions)
+        param($Definitions,$Main,$FixtureRoot,$CoreDefinitions,$ExitChecks)
         Set-StrictMode -Version Latest
         foreach ($definition in $Definitions) { . ([scriptblock]::Create($definition)) }
         $script:Main = [scriptblock]::Create($Main)
         $script:Root = $FixtureRoot
-        $script:Checks = 0
+        $script:Checks = $ExitChecks
         function Assert-Test {
             param([bool]$Condition,[string]$Message)
             $script:Checks++
@@ -73,6 +120,8 @@ try {
             $global:logTranscriptFile = Join-Path $script:OutputPath 'synthetic.transcript.txt'
             $global:EnableSharePointUpload = $false
             $global:RetentionMaxLogs = 5
+            $global:SmartM365WarningCount = 0
+            $global:SmartM365ErrorCount = 0
             $script:GrainDiagnosticPaths = [Collections.Generic.List[string]]::new()
             $script:Logs = [Collections.Generic.List[string]]::new()
             $script:Uploads = [Collections.Generic.List[object]]::new()
@@ -120,6 +169,8 @@ try {
         }
         function CoreWriteLog {
             param($Message,$Level)
+            if ($Level -eq 'WARNING') { $global:SmartM365WarningCount++ }
+            if ($Level -eq 'ERROR') { $global:SmartM365ErrorCount++ }
             $line = '[{0}] [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$Message
             $script:Logs.Add($line)
             Add-Content -LiteralPath $global:LogTextFile -Value $line
@@ -231,6 +282,12 @@ try {
             $failure = Get-TestFailure { Save-EARejectedRowDiagnostic $raw '../unsafe' synthetic-job 1 }
             Assert-Test ($failure.Exception.Message -match 'Unsafe') 'Unsafe diagnostic file identity was accepted.'
 
+            Reset-TestState 'clean-first-export'
+            $script:Exports = @([pscustomobject]@{Rows=@([pscustomobject]@{DeviceId='clean';EndpointAnalyticsScore=90})})
+            & $script:Main | Out-Null
+            Assert-Test ($script:CompletionStatus -eq 'Success' -and (Get-EAExitCode) -eq 0) 'A clean collection did not exit successfully.'
+            Assert-Test ($script:CanonicalWrites -eq 9 -and $script:GrainDiagnosticPaths.Count -eq 0 -and -not $script:TranscriptStarted) 'Clean collection lost publication or transcript cleanup.'
+
             Reset-TestState 'persistent-rejection'
             $script:Reports = @('EAWFADeviceList')
             $global:EnableSharePointUpload = $true
@@ -255,16 +312,18 @@ try {
             Reset-TestState 'recover-clean-export'
             $script:Exports += [pscustomobject]@{Rows=@([pscustomobject]@{DeviceId='clean';EndpointAnalyticsScore=90})}
             & $script:Main | Out-Null
-            Assert-Test ($script:Imports -eq 2 -and $script:CanonicalWrites -eq 9 -and $script:CompletionStatus -eq 'Success') 'Clean fresh retry was not published normally.'
+            Assert-Test ($script:Imports -eq 2 -and $script:CanonicalWrites -eq 9 -and $script:CompletionStatus -eq 'CompletedWithWarnings') 'Clean fresh retry lost its earlier warnings or valid publication.'
             Assert-Test ($script:GrainDiagnosticPaths.Count -eq 1 -and -not $script:TranscriptStarted) 'Clean retry lost rejected evidence or transcript closure.'
             Assert-Test ($script:OutputRows.DevicePerformance.Count -eq 1 -and $script:OutputRows.DevicePerformance[0].DeviceId -eq 'clean') 'Rejected rows contaminated the clean output.'
             Assert-Test ($script:Uploads.Count -eq 0) 'Unconfigured external action ran after success.'
             Assert-Test ($script:Mails.Count -eq 0) 'Clean retry sent an exclusion alert.'
+            Assert-Test ($script:CompletionStatus -eq 'CompletedWithWarnings' -and (Get-EAExitCode) -eq 3) 'Recovered retry warnings were lost from completion or exit status.'
 
             Reset-TestState 'exclude-ambiguous-scores'
             $script:Exports[0].Rows += [pscustomobject]@{DeviceId='clean';EndpointAnalyticsScore=90}
             & $script:Main | Out-Null
             Assert-Test ($script:Imports -eq 3 -and $script:CanonicalWrites -eq 9 -and $script:CompletionStatus -eq 'CompletedWithWarnings') 'Qualified exclusion did not publish fresh valid outputs with warning status.'
+            Assert-Test ((Get-EAExitCode) -eq 3) 'Duplicate-score exclusion would be reported as Success to Pipeline.'
             Assert-Test ($script:OutputRows.DevicePerformance.Count -eq 1 -and $script:OutputRows.DevicePerformance[0].DeviceId -eq 'clean' -and $script:OutputRows.DevicePerformance[0].EndpointAnalyticsScore -eq 90) 'Exclusion chose a conflicting row or changed valid scores.'
             $quality = @($script:DataQualityRows)[0]
             Assert-Test ($quality.Status -eq 'CollectedWithExclusions' -and $quality.RawRowCount -eq 3 -and $quality.RowCount -eq 1 -and $quality.ExcludedRowCount -eq 2 -and $quality.ExcludedDeviceCount -eq 1) 'Exclusion accounting was not published in DataQuality.'
@@ -328,6 +387,7 @@ try {
             $script:UploadFails = $true
             Complete-EATraceArtifacts
             Assert-Test (-not $script:TranscriptStarted -and (Test-Path -LiteralPath $global:logTranscriptFile) -and $script:Uploads.Count -eq 1) 'Upload failure lost local transcript evidence.'
+            Assert-Test ((Get-EAExitCode) -eq 3) 'Late trace upload warning was lost from the exit status.'
 
             Reset-TestState 'core-trace-integration'
             foreach ($definition in $CoreDefinitions) { . ([scriptblock]::Create($definition)) }
@@ -355,7 +415,7 @@ try {
             Assert-Test (@($remaining | Where-Object Name -like '*old_*' | Sort-Object Name | Select-Object -ExpandProperty Name) -join ',' -eq 'Intune_EndpointAnalytics_RejectedRows_synthetic_old_1.json.txt,Intune_EndpointAnalytics_RejectedRows_synthetic_old_2.json.txt,Intune_EndpointAnalytics_RejectedRows_synthetic_old_3.json.txt') 'Actual shared retention kept stale rather than most recent diagnostics.'
             [pscustomobject]@{Status='Passed';Checks=$script:Checks;LiveCalls=0;RealDelays=0;ProductionWrites=0}
         }
-    } -ArgumentList $definitions,$main,$fixtureRoot,$coreDefinitions
+    } -ArgumentList $definitions,$main,$fixtureRoot,$coreDefinitions,$exitChecks
     & $module { Invoke-TraceTest }
 }
 finally {
@@ -378,8 +438,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHwYk2p/UbqThu
-# Acjtyf953T3H6Ys9PnYZqRKNEELrFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFJdSxB9acZE/C
+# jZFbMUJkz1vP7Z6S2qjpfk7IQ9E9A6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -512,31 +572,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID9SfsjNYnwPaiR8FmY59TOOE5MDx3+rjFtnlVyr71XlMA0GCSqG
-# SIb3DQEBAQUABIIBgGL+HYAEIDdphlFL+DYtu0OpJgEewkblykj/zsbZ28RHzjfw
-# iMwoR0MaaZnlz3EDW5aUqXlWVw6OrUwU1UxckSRCZYCgrgtE+BEoaVRCqnRoWO4E
-# FQ8pucpGR3861FP3IhjaWAeSO9zMDtm3aVDnnkI2VCxfVsRQOCuGxK9Jxof7JjBv
-# Q6sxpMeGPiZlpCVQAqptjJXa6v96IQ2KAaksMT6aWW7a68SCShHfZZu9b/MbHNGf
-# gDHKGuPxrea2k9EUWFiITU4TMatxhfFh2ENraNCOKi56qIsy+jrT+krloj6AjA90
-# CIeatMB2gWHDRFjRi5Racw1C+3n+RaBmsuOeIMeAydlzhsOmwDGJ/VcYFe6LoL9h
-# 0Pc16yWGB6PMcDSrjTojcxsQgMZjsD4eCfGv2cdYVWz1r2c5Q7wJ41nu5eKfUWQj
-# XKx5X0WSuyvCnQH5eR2SXDDrRSQhbms/5bgNOVBQtJ2Lm0yyGiajOu838wvVsOjC
-# vTHRQ3ZU5/M9QpBwKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPopPCw9/NAteulhpdL9eefIDt6cRFYMQLugWccEOK9cMA0GCSqG
+# SIb3DQEBAQUABIIBgFkT4Uhc9DiaAs7wBV3XgCktkAj/LJnswu4f6k4yV4dJVbFo
+# 4jtlTImVVefeqJOhCb9yF3FZCjrcQ5Plq/bQ7lVjakDjYOiPa8u3P6fmto1GRm6b
+# FPICZ7ag146MCLbXBwVmupZjn8ok1t53JLoJL2FqjRvNr4pLvhIflq+goFHP/H/A
+# iozR8+zfGlCO50+DC1sCDXu2mYK5x5d2N8zOXVhxkWB3t2WOB7AJaif4JqVRpKWb
+# GaWgBcI2p9EnVqKvGH7PgIPHyEHMKIR6lbGXCikM5OO5j5D+L7cP4lnl/EqR9hmH
+# 2+JQLj+810k1mXvDVwi9G/HlMQh+UpD92i0M27gU9yDF6jpeay5lmv/yx/sElpP6
+# /daNOsf9Nz1EWhG+PrR/WHIZqpqWLKS0uO+dmGwNNDVvCbBovIAUUZoeBpeKjuHg
+# v9kJ5015j/C3a6baaZLLUq7x1bqhAcma5sdjUMwIujS4drkjDkKPDKqV9FcPOIa9
+# e1TpNF0/rxFLtzc6I6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCiWCUn6HahPGkTvSeYlHak3xTYcwxlrL5PvkFh
-# TU/3mjANBgkqhkiG9w0BAQEFAASCAgCdyQRWtE45NlGpzVYejY8YEhO7LBvWmW0Q
-# s/rKtDJAMGnE3ACZv40uaFL7xpBbGpiUVjzPxvCZa6Q1/9NiSGYpCM/aIZJRdI/x
-# 2u3yZWNllgbmLMqwMMBwGeidTjdVr/x0pMtx/P+/ipvEOjVYe/gcEqIiXcCGUyyK
-# NTJibgdI/EcEKxH9fmBNUCmKqLt6UPYbgDrHIoFXN7vfmMQJnXJCCj1xv7EysEXw
-# LQfyFo1mvf+uFZv2/eDMnfG7EvVYQ4C6opWqqgurFtdrBOuIsI8MrpGNc5QwXm+o
-# S7rOB+31kC4VEW+IxOjkUUf7RRZEOaQlorHMFDpYp8vDXysNaec5uzkan/gC8WfF
-# /v+J35gFyyQRN+8Q+7eWPydCKcGnUmad/WE4SjnJsw2XP2wwytslT/QdeMgyZYEZ
-# aoZtYIu00hAhbaYEVZSTh0Oo/zorz1vpdcrgjxaBC9myfkQbHjuWohSJSXHn8ETt
-# M/9ZWoSM6Oa7PLLduX0/MYIxThr5k7baHEEpHXxf+X5K/EWbcTUpZxAifxX+7KPH
-# 2iq6fQZbt1JeKCYhXWLPR99ozfZhLx/Seateu2mbVgac46rHXsylu3lJDo6GThbE
-# jHZGS/RqS2AzrGdcEOoL4r0+XE6mK9qewD7aitDuXdnUSfhfFZDRyCAT9DmdbjvW
-# tHofh2+KIw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjQ1
+# NThaMC8GCSqGSIb3DQEJBDEiBCBY2RLxE6Z29NpDp2JD4uTKkX0LKdpsgG8/4OxF
+# AeINkzANBgkqhkiG9w0BAQEFAASCAgA8hJlXOyXmJG2vMW4wWY4c5thXjYW55hYj
+# NMHHZIX52H4gow7LzE0sSwckZLZOonCgQmdjUG6QgtpZ4Sqvc/OVBukhITsT9UuB
+# zc77GxnMall5hvS3a09KLsoaxnZ4+VqaUBUXoJ65Li7jM/bzKCZH1CoP41ilDigm
+# DPQuWppiv99/2aEkof9F1xIHiQANVsTISTNq4BlnZjRM7rhXVKC21mlNDpneeUQr
+# Z0P1TVTTTWtoGNzH2MzBv9r16gHyJg3+WNO8sUTvVonKwoojcl4Z5iPjMFAdrk2s
+# eYL2kwwAPf1wXfiXbnwcZApmodXzkrC9zZdSmtOS3joKd6m0xWTJRRdFK2Hvikc6
+# 9dIF2r+vVpJQFUrXNkJuFAnlSewML6qTGrf4t5LGWq3h6GAfpFlECMH66gfPnMRu
+# aDtfHVcsErgr30q4C/Jw58wRsk/ZDao8EkiZNWZchS5Ny8j57Q82OkpcJwAPzERu
+# A2VT6tlYjJgJb3djgSiWUTJVRrPYBZ/ylKUksdEdZq4etria/mCZOYrVRe1BUk54
+# sGhv70Ymmf8o4+i9dOz5+UdS2oGKlYzawz2WTH9nqwWzH3BuGKxJDV8otlQGbOaU
+# 06epLv4QCJIC5Lq447BlRsqA/SxnKlSum10JEVVXhGsofak8/U6KbUcQlkqLE+/Q
+# tZGCO0gx3w==
 # SIG # End signature block

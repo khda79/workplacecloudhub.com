@@ -59,7 +59,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.13
+1.0.14
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
@@ -99,7 +99,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.13'
+$script:ScriptVersion = '1.0.14'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -171,6 +171,15 @@ function Complete-EATraceArtifacts {
         }
         catch { Write-EALog 'Endpoint Analytics diagnostic retention could not be applied.' WARNING }
     }
+}
+
+function Get-EAExitCode {
+    # Resolve after trace cleanup so late upload/retention warnings also reach Pipeline.
+    $warnings = Get-Variable -Name SmartM365WarningCount -Scope Global -ErrorAction SilentlyContinue
+    $errors = Get-Variable -Name SmartM365ErrorCount -Scope Global -ErrorAction SilentlyContinue
+    if ($script:CompletionStatus -eq 'Failed' -or ($errors -and [int]$errors.Value -gt 0)) { return 1 }
+    if ($script:CompletionStatus -eq 'CompletedWithWarnings' -or ($warnings -and [int]$warnings.Value -gt 0)) { return 3 }
+    return 0
 }
 
 function Get-EARawConfigValue {
@@ -1001,6 +1010,9 @@ finally {
         try {
             $scope = Get-EACollectionScope -QualityRows @($script:DataQualityRows | ForEach-Object { $_ }) -ItemLimit $MaxItems
             Set-CoreSmartM365CmdbSourceScope -CompleteScope $scope.CompleteScope -Scope 'CMDB:analytics' -Qualifications $scope.Qualifications
+            if ($script:CompletionStatus -eq 'Success' -and (Get-EAExitCode) -eq 3) {
+                $script:CompletionStatus = 'CompletedWithWarnings'
+            }
             try { Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage $script:FailureStage -DeferTranscriptUpload:$script:TranscriptStarted }
             catch { Microsoft.PowerShell.Utility\Write-Debug "Completion banner failed: $($_.Exception.Message)" }
         }
@@ -1008,11 +1020,15 @@ finally {
     }
 }
 
+# Success=0, completed with warnings=3, failed=1: the orchestrator's native contract.
+# Never exit inside finally: cleanup must finish and the original failure must survive.
+exit (Get-EAExitCode)
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbzMQ1cJejzx0X
-# Ez0ZVQXlAeYZH/vrwGhT7lZCgIdCxqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSxEcAosaqyiOM
+# nwDZjACM35539enu8MJdEGtHkHp+56CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1145,31 +1161,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB3U1VUzM68NtBe5LnJVIdcUs4IsQCu+LpPMjkbo89OeMA0GCSqG
-# SIb3DQEBAQUABIIBgKWwIzb9tlAMY1rrP3Ezp4sW3z7QD/LsorazWGe/ndR6UG1F
-# 91pR44dOfkcBJfFd2OycVh2P6kaSN+6BnACs+9jswCSSVOhIDBBPnzt5T4+mJ33a
-# 2fh8os+EQSbrrEqqFwBpXwU/hBoPX6AFrWfXTYseMcyOQmhFy/OEAt3RHn9EAugu
-# /lVRxKjXRCqqzesgz/HHpQQq1PgTcMT1D1+1Mh3NX+LnV4MDJCpIXjHJ1aS8qmhF
-# 6D8G2QBhKGAK1LfFD0VEeIhlHPJLGvMp/jZZMH2e/ZmMCile4WzxPMTnmdV87TuR
-# RwqSSAKIyV/XEwxBnu5rpHWNDkTqlRdIIq9VGgfMbETytQhB5Exu9hmsrYfppXuR
-# 5fV120tCaT30sqny5Shi5viDv0va86PpafcFWKiZ+6JwDNMkcjts9F1IbKxxB4CN
-# o1fVbndanmFUhC4Q1+wyV9WqEFIR05Pdz6xtZMlI5MDwoaLOukYY3RTKXoOqbaMQ
-# 8ijW4rCn+pPM864I+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL98GDbpXTIeUNeiXOlhtEQk3drF80IDVZ/7wFhzmkubMA0GCSqG
+# SIb3DQEBAQUABIIBgJORsn8YVKeA7a/TZ+8iVVnNE/KpxLR3kELrdgF4H9AxujzV
+# sqfLWyRUE432nj7IUezxBu5m1M5z6e257ORkYFmsVmQ/ooeqP76zCGdL/8IudDCR
+# TO4AMQfv1DlCVc2xnFBlPDv1nDH+NSWjryytz+SM/1KeEhi/wWJCSLe8Q5fsK9B7
+# st6g5kYkrVRLWblBbmN3XoaN789IO0EKjT7MAKnLIl3RouRJm4OzqmIFslRCs2q6
+# SmA94EbB0ADw59rNwuJT2s5W14gE7o5wWy5+NgeFpC06iChMEFmIvnEj1pcP1mzB
+# ojktG4nDKFZZrcpMyBrQJh7HLNOZm+rNoiSOwAdumMR5AG2irCIL4MWsjq8eC+fC
+# CGYjtydGZW5Jj1uoc/cm/xl+Y7CmSrJWghwip99E9wacVd3IcHmPvqLC5Wh1p/1M
+# 9RczLf1sUtHm+Ox7LT9KyWYzO64Cs1B6ynVuMDYo+/q4a4JHt843K2j2GKKWziRN
+# 3hvC3UGAEhUijmVAlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCD0QM+bt6Si8+FxWdbKdv30hG1wAFqjBjcEJq5v
-# NfRrNzANBgkqhkiG9w0BAQEFAASCAgBEZszdoH7ZI18KUFMeHVVUlKaohn+aeEN7
-# vfpQElEV/nqpQpDHF2MAyaC3oXe/8uOPUFY8O7cJIWCshafUvjW9CWrUHCp8+Bfp
-# UK6TXf1KDiO9EBhM0QSpDGIfwgCI7OJJp05CxBX9cqoTfT2xpUtXh6lxWuLd69N/
-# 7p1SW8R2rnQa+CctGVsTfCBitCenS61mjsN3nWBtklAW3t73jZmJnILkyHfB/cgw
-# IeJHPL0rH2Ayoqj781IQFoPBcnZxg373D6QxIMFQ1iYsZUkIesiZwggBgWBx1ciA
-# H9CLGPFxBYZ532GEybfTDt0xNR4sIz7VeyyfF/x6ITzNiYPYRN7hjqzzt1rF69G3
-# AxAQ4wTc0yq389iZRd0181xeIB6eB6m2kMpnGLB5H+/ZAO1Q88RyrW1WnIm4Elxo
-# GzysPEnCuI3gKoHujPRHm+3LRIcf7XAGTECdwPUdgXwRoEeTzDiKoWeDK4Dxb3UA
-# UHfEk8i1xOM+vRBp18x3JgheV7DbCW4ef3eLIi1zFT01/FtoF/T65SngiYhgx/kV
-# WJfX+BSYnsFpgsHOklivfyNfIeSRUPhUNOXw9Ws29aqUv4790+Ng2b+PnbgYRgfW
-# NI3w4Wvppq6wbv8NgjsiwZx6rwLx2V6cGVgoi4ksRDLobeSW89bVJCKLu2rKCMQT
-# ud/iesxWDg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjQ1
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCsc0R6yxOpLYI3Kdqxzx/oZ6BoLE04mj6jXMjF
+# 8oSCcDANBgkqhkiG9w0BAQEFAASCAgBcKhEX4daUDiBBDM0htVJqNfDtL7dDiOnk
+# GXl6uG26Nlf5UGGfeybEcYob91ZrhaGwrzilT541DT6qEUMFoiide64JAzF52Cr/
+# nJl5xMuTKPbiclMA0/9XwhHgYcQnvES+Q3CLeLWX7noYH+BrRK10l8eYaDSyQIQs
+# EJ1Xcm3lJxwfHkqqU+irYAJF4A3PxMTICEFiLFZtLRzVX68t6smlHEDqUMwb8sJy
+# ShFGNhcNCnKPxKYd1Xd2LH3NFjhSP1CZsIoOcY7wanNs5CC/T4gBcyOrN+FIMAkM
+# X7o2m7qnQyvzHvO0PPBD/dlCDheEgkfonIppMDmecOIUdSUt7pxoKWjK84G3VFhK
+# hB7tsPT/LTMMnjwEwgYHgSPMo9xVDT5qkwiU9fmPdhhsKW1P16E8+nqgS5CyjKin
+# /GldqZJu4SR4xtfp1+wYCaw9vPNydjVpR1YyD1e9f9E7g1Rl57Wbk67FkzaHto6K
+# pMuf6u2oEzTnR4z0dzJ+bGObfbW3aIFmNRMB5d74IrqvTgYGYKD4DfYLXomW3BBF
+# 2U5yZRsd6McqgxA6wPA7SXMPezk9TohgQ0WKTGSWcv7+GcFM8WEEXDyQp2PD8kEG
+# Sj3tNzr82eyxszzstQClr08cSTcW9RK4fu9sf4nA1LZKLrVED/9JQjtz4UDDiul6
+# L1Paj6fwFw==
 # SIG # End signature block

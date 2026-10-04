@@ -13,7 +13,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-VERSION = '0.3.1'
+VERSION = '0.3.2'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -324,7 +324,7 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
         previous = output.parent / ('.cmdb-rollback-' + uuid.uuid4().hex)
         promoted = moved = False
         try:
-            build_tables(source, stage, contract, identity, evidence, now)
+            qualifications = build_tables(source, stage, contract, identity, evidence, now)
             output_files = {}
             for definition in contract['tables']:
                 name = definition['name'] + '.csv'
@@ -336,11 +336,12 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                         'GeneratedAtUtc': (now or dt.datetime.now(UTC)).isoformat(),
                         'SourceRoot': str(source), 'OutputRoot': str(output),
                         'SourceEvidence': evidence, 'OutputFiles': output_files,
+                        'PreparationQualifications': qualifications,
                         'MetricDefinitions': {
                             'TopApplication.ReportedDeviceCount':'Distinct native managed-device IDs per name/publisher/platform product across versions',
                             'FactHybridIdentityCoverage.OnPremisesOnlyCount':'Unavailable: unmatched identity does not establish on-premises-only existence',
                             'FactUserActivity.HasAnyM365Activity':'Observation within the source report, not proof of lifetime use or licence waste',
-                            'EndpointAnalyticsScore':'Score on a 0-100 scale, not a proportion',
+                            'EndpointAnalyticsScore':'Score on a 0-100 scale, not a proportion; -1/-2 mean unavailable (blank), never zero',
                             'SourceFreshness':'Producer acquisition interval; workload report refresh dates are separate',
                             'HardwareCoverage':'Managed-device list properties only; not a full detailed hardware export'}}
             (stage / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding='utf-8')
