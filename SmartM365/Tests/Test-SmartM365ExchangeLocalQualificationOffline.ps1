@@ -6,7 +6,7 @@ Offline Exchange mailbox scope, native identity and quality classification tests
 Extracts functions and statements through the AST. All Exchange queries are
 mocked; no tenant context, collector, module, export or external action runs.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -33,7 +33,8 @@ foreach ($name in @('Get-SmartM365LocalMailboxIssueImpact','Add-SmartM365LocalMa
     'Get-SmartM365LocalMailboxQualification','Find-SmartM365MailboxSmtpConflict',
     'Resolve-SmartM365MailboxWarningNativeGuid','ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings',
     'Get-SmartM365MailboxDomainPartition','Assert-SmartM365MailboxDomainCoverage',
-    'New-SmartM365LocalMailboxIssueEmailSection')) {
+    'New-SmartM365LocalMailboxIssueEmailSection','Initialize-SmartM365LocalMailboxForestPopulation',
+    'Get-SmartM365LocalMailboxColumns')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Assert-True ($null -ne $node) "Missing function: $name"
     Set-Item "Function:script:$name" ([scriptblock]::Create($node.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
@@ -45,14 +46,18 @@ function Reset-Fixture {
     $script:mockRows=@(); $script:mockWarnings=@(); $script:mockFailure=$false
     $script:DetectAllDomains=$false
     $script:LocalMailboxExpectedScopes=@()
+    $script:LocalMailboxForestPopulation=$null
+    $script:LocalMailboxAcquisitionMode='Domain'
+    $script:queryCount=0
     $script:LocalMailboxObservedNativeGuids=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $script:LocalMailboxOwnedNativeGuids=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 }
 function ConvertTo-SmartM365EmailHtmlText {param($Value) [Net.WebUtility]::HtmlEncode([string]$Value)}
 function Get-Mailbox {
     [CmdletBinding()]
-    param($ResultSize,$OrganizationalUnit)
-    $script:queryArguments=@{ResultSize=$ResultSize;Scope=$OrganizationalUnit}
+    param($ResultSize,$OrganizationalUnit,[switch]$ReadFromDomainController)
+    $script:queryCount++
+    $script:queryArguments=@{ResultSize=$ResultSize;Scope=$OrganizationalUnit;ReadFromDomainController=[bool]$ReadFromDomainController}
     if ($script:mockFailure) { throw 'Synthetic acquisition failure.' }
     foreach ($warning in $script:mockWarnings) { Write-Warning $warning }
     $script:mockRows
@@ -249,6 +254,108 @@ Case 'One GUID repeated is an export defect, not a distinct-object SMTP conflict
 $rootScope='DC=synthetic,DC=invalid'; $childScope='DC=child,DC=synthetic,DC=invalid'
 $rootNative=[pscustomobject]@{Guid=$id1;DistinguishedName='CN=Root recipient,CN=Users,DC=synthetic,DC=invalid';Identity='synthetic.invalid/Users/Root recipient'}
 $childNative=[pscustomobject]@{Guid=$id2;DistinguishedName='CN=Child recipient,CN=Users,DC=child,DC=synthetic,DC=invalid';Identity='child.synthetic.invalid/Users/Child recipient'}
+Case 'Full forest makes one fresh unlimited query and partitions every domain without new queries' {
+    Reset-Fixture; $script:DetectAllDomains=$true; $script:LocalMailboxExpectedScopes=@($rootScope,$childScope,'DC=empty,DC=invalid')
+    $script:mockRows=@($rootNative,$childNative)
+    Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes $script:LocalMailboxExpectedScopes
+    $script:mockFailure=$true
+    $parent=@(Invoke-SmartM365LocalMailboxPopulationQuery -Scope $rootScope)
+    $child=@(Invoke-SmartM365LocalMailboxPopulationQuery -Scope $childScope)
+    $empty=@(Invoke-SmartM365LocalMailboxPopulationQuery -Scope 'DC=empty,DC=invalid')
+    Assert-True ($script:queryCount -eq 1 -and $script:queryArguments.ResultSize -eq 'Unlimited' -and -not $script:queryArguments.Scope -and $script:queryArguments.ReadFromDomainController) 'Forest query is scoped, limited, stale or repeated.'
+    Assert-True ($parent.Count -eq 1 -and $child.Count -eq 1 -and $empty.Count -eq 0 -and $script:LocalMailboxAcquisitions.Count -eq 1) 'In-memory partition lost objects or fabricated domain acquisitions.'
+    Assert-True ([object]::ReferenceEquals($parent[0],$rootNative) -and [object]::ReferenceEquals($child[0],$childNative)) 'Acquired native objects were replaced.'
+    Assert-SmartM365MailboxDomainCoverage -ObservedGuids @($script:LocalMailboxObservedNativeGuids) -OwnedGuids @($script:LocalMailboxOwnedNativeGuids) -ExportRows $export
+    Assert-True (-not $script:LocalMailboxAcquisitions[0].ProjectionCompleted) 'Acquisition alone claimed completed enrichment.'
+    $script:LocalMailboxAcquisitions[0].ProjectionCompleted=$true
+    $proof=Get-SmartM365LocalMailboxQualification -ExpectedScopes $script:LocalMailboxExpectedScopes -Acquisitions $script:LocalMailboxAcquisitions.ToArray() -RemoteAcquisitionComplete $true -Issues @() -PopulationCoverageComplete $true -AcquisitionMode Forest
+    Assert-True $proof.CompleteScope 'Complete single-query population rejected.'
+    Assert-True (($proof.Qualifications -join ' ') -like '*actual queries=1*discovered domains=3*') 'Receipt calls partitions independent queries.'
+}
+Case 'Forest acquisition is not repeated and does not accept a domain outside its evidence' {
+    Assert-Throws {Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope,$childScope)} '*once before*'
+    Assert-Throws {Invoke-SmartM365LocalMailboxPopulationQuery -Scope 'DC=other,DC=invalid'} '*outside*'
+    Assert-True ($script:queryCount -eq 1) 'Rejected request triggered acquisition.'
+}
+Case 'Failed forest query cannot supply domain projections or qualify empty output' {
+    Reset-Fixture; $script:mockFailure=$true
+    Assert-Throws {Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope)} '*Synthetic acquisition failure*'
+    Assert-True ($null -eq $script:LocalMailboxForestPopulation -and -not $script:LocalMailboxAcquisitions[0].QueryCompleted) 'Failed query produced a reusable population.'
+    $proof=Get-SmartM365LocalMailboxQualification -ExpectedScopes @($rootScope) -Acquisitions $script:LocalMailboxAcquisitions.ToArray() -RemoteAcquisitionComplete $true -Issues @() -PopulationCoverageComplete $true -AcquisitionMode Forest
+    Assert-True (-not $proof.CompleteScope) 'Failed forest query qualified.'
+}
+Case 'Forest acquisition rejects ambiguous native identity and unmapped DN before processing' {
+    foreach ($rows in @(@($rootNative,$rootNative),@([pscustomobject]@{Guid=$id1;DistinguishedName='CN=Recipient,DC=other,DC=invalid'}))) {
+        Reset-Fixture; $script:mockRows=$rows
+        Assert-Throws {Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope)} '*native*'
+        Assert-True ($null -eq $script:LocalMailboxForestPopulation) 'Invalid population supplied domain rows.'
+    }
+}
+Case 'Known forest recipient warnings are bound once; unclassified warnings still block' {
+    Reset-Fixture; $script:mockRows=@($rootNative,$childNative)
+    $script:mockWarnings=@("The object $($rootNative.Identity) has been corrupted or isn't compatible with the server.",'Database is mandatory on UserMailbox.')
+    Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope,$childScope) -WarningAction SilentlyContinue
+    Invoke-SmartM365LocalMailboxPopulationQuery -Scope $rootScope | Out-Null
+    Invoke-SmartM365LocalMailboxPopulationQuery -Scope $childScope | Out-Null
+    Assert-True ($script:LocalMailboxIssues.Count -eq 2 -and @($script:LocalMailboxIssues | Where-Object BlocksCmdbQualification).Count -eq 0) 'Warnings were repeated or unbound during partitioning.'
+    $script:LocalMailboxAcquisitions[0].ProjectionCompleted=$true
+    Add-SmartM365LocalMailboxIssue -Category UnexpectedFailure -Operation Get-Mailbox -Message 'Synthetic unknown warning.' | Out-Null
+    $proof=Get-SmartM365LocalMailboxQualification -ExpectedScopes @($rootScope,$childScope) -Acquisitions $script:LocalMailboxAcquisitions.ToArray() -RemoteAcquisitionComplete $true -Issues $script:LocalMailboxIssues.ToArray() -PopulationCoverageComplete $true -AcquisitionMode Forest
+    Assert-True (-not $proof.CompleteScope) 'Unclassified forest warning qualified.'
+}
+Case 'Complete empty forest has real zero-domain evidence and never starts extra queries' {
+    Reset-Fixture
+    Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope,$childScope)
+    Assert-True ($script:LocalMailboxForestPopulation.Count -eq 2 -and $script:LocalMailboxAcquisitions[0].DomainCounts[$rootScope] -eq 0) 'Empty domain was omitted or fabricated.'
+    Assert-SmartM365MailboxDomainCoverage -ObservedGuids @($script:LocalMailboxObservedNativeGuids) -OwnedGuids @($script:LocalMailboxOwnedNativeGuids) -ExportRows @()
+    $script:LocalMailboxAcquisitions[0].ProjectionCompleted=$true
+    $proof=Get-SmartM365LocalMailboxQualification -ExpectedScopes @($rootScope,$childScope) -Acquisitions $script:LocalMailboxAcquisitions.ToArray() -RemoteAcquisitionComplete $true -Issues @() -PopulationCoverageComplete $true -AcquisitionMode Forest
+    Assert-True ($proof.CompleteScope -and $script:queryCount -eq 1) 'Successful empty forest was rejected.'
+}
+foreach ($defect in @('Scoped','Limited','NotFresh','NoProjection','MissingDomain','ExtraDomain','WrongCount','NoCoverage','RepeatedQuery','UnknownQuery')) {
+    Case "Forest qualification rejects invalid acquisition proof / $defect" {
+        Reset-Fixture; $script:mockRows=@($rootNative)
+        Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes @($rootScope,$childScope)
+        $q=$script:LocalMailboxAcquisitions[0]; $q.ProjectionCompleted=$true
+        $coverage=$true
+        switch ($defect) {
+            Scoped {$q.Scope=$rootScope}
+            Limited {$q.ResultSize='1'}
+            NotFresh {$q.ReadFromDomainController=$false}
+            NoProjection {$q.ProjectionCompleted=$false}
+            MissingDomain {$q.DomainCounts.Remove($childScope)}
+            ExtraDomain {$q.DomainCounts['DC=extra,DC=invalid']=0}
+            WrongCount {$q.DomainCounts[$rootScope]=2}
+            NoCoverage {$coverage=$false}
+            RepeatedQuery {$script:LocalMailboxAcquisitions.Add($q)}
+            UnknownQuery {$script:LocalMailboxAcquisitions.Clear();$script:LocalMailboxAcquisitions.Add([pscustomobject]@{QueryCompleted=$true})}
+        }
+        $proof=Get-SmartM365LocalMailboxQualification -ExpectedScopes @($rootScope,$childScope) -Acquisitions $script:LocalMailboxAcquisitions.ToArray() -RemoteAcquisitionComplete $true -Issues @() -PopulationCoverageComplete $coverage -AcquisitionMode Forest
+        Assert-True (-not $proof.CompleteScope) 'Incomplete, scoped or stale forest evidence qualified.'
+    }
+}
+Case 'Native empty local schema matches every distinct field of the actual normal projector' {
+    $process=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'MailboxesProcessing2'},$true)
+    $columns=New-Object 'Collections.Generic.List[string]'
+    $LargeItemThresholdMBValue=35
+    foreach ($command in $process.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Member'},$true)) {
+        if ($command.Parent.Extent.Text -notmatch '^\$userObj') { continue }
+        for ($index=0; $index -lt $command.CommandElements.Count-1; $index++) {
+            if ($command.CommandElements[$index].Extent.Text -eq '-Name') {
+                $field=& ([scriptblock]::Create($command.CommandElements[$index+1].Extent.Text))
+                if (-not $columns.Contains($field)) { $columns.Add($field) }
+            }
+        }
+    }
+    Assert-True ((@(Get-SmartM365LocalMailboxColumns) -join '|') -ceq ($columns -join '|')) 'Empty schema changed native field names/order or omitted a projected field.'
+}
+Case 'Production full acquisition precedes domain processing and empty forest publication has explicit schema' {
+    $body=$ast.Extent.Text
+    Assert-True ($body.IndexOf('Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes $script:LocalMailboxExpectedScopes') -lt $body.IndexOf('foreach ($domain in $domainsToProcess)')) 'Full mode still acquires inside each domain.'
+    Assert-True ($body.Contains('-AcquisitionMode $script:LocalMailboxAcquisitionMode') -and $body.Contains('Export-SmartM365EmptyLocalMailboxPopulation -Path $globalCombinedCsvFile') -and $body.Contains('Export-SmartM365EmptyLocalMailboxPopulation -Path $perDomainCsvFullPath -DomainScope $distinguishedName')) 'Forest proof or empty schema was not wired.'
+    $remote=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-SmartM365ExchangeRemoteMailboxInventory'},$true)
+    foreach ($query in $remote.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Get-RemoteMailbox'},$true)) { Assert-True ($query.Extent.Text.Contains('-ReadFromDomainController')) 'Remote query lost freshness flag.' }
+}
 Case 'Root/child overlap partitions native objects before enrichment and retains CN containers' {
     $parent=Get-SmartM365MailboxDomainPartition -NativeRows @($rootNative,$childNative) -DomainScope $rootScope -ForestScopes @($rootScope,$childScope)
     $child=Get-SmartM365MailboxDomainPartition -NativeRows @($childNative) -DomainScope $childScope -ForestScopes @($rootScope,$childScope)
@@ -413,14 +520,15 @@ finally {
     }
 }
 $tests | Format-Table -AutoSize
-if (@($tests | Where-Object {-not $_.Passed}).Count) { throw 'Offline Exchange local qualification failed.' }
+$failedTests=@($tests | Where-Object {-not $_.Passed})
+if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline Exchange local qualification failed.' }
 [pscustomobject]@{Status='Passed';TestCount=$tests.Count;ProductionActions=0;PowerShell=[string]$PSVersionTable.PSVersion}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABgnhvRefFL1tN
-# 3c0rvcIEuC1BgPPqf7bgiHmwqlbC06CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/5DSWP6VEZk2a
+# Yfbk0dy6xCeWONDweYGj5SMYwlYy2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -553,31 +661,31 @@ if (@($tests | Where-Object {-not $_.Passed}).Count) { throw 'Offline Exchange l
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG/m9oRzgnZdzicySiHBDsur0HIN2XEBkVXuneepnrhFMA0GCSqG
-# SIb3DQEBAQUABIIBgBhS955cShaVmX6Q536ARsmnSUyECrDzRFYFaYlinyITygIj
-# O9JdwHrm/swOvNJjynWBcdoyWHWv/mVBMH3mH/SiJP1zIxQuvHTBYNSiB+gXaRPJ
-# lU5Fy2HcaaNsWJ41opCFopC26mPWLi/ggsaYPHEgQU2TC05v8mpIycK7Ec8MjyWY
-# su3iLuWaSSXttagB3GKtYwf7IUxHEj+SoCBzPfZobPEpQ5LD350QcIpkbkvAyE9O
-# VtgECAE+WeF8U+PRyvmFkXz/nMIRIsGczNeQxv4WfS9lCbRWusouuUK0Kr6F5/f3
-# NZFGmQ4qbVGHKIu4+zrpSnl2h4YJM7hDXz7iTVe4wXUnktY3taLMrYy3dVuXwEGu
-# xRPIg7iCA/OkjMo2EvntC0TrQeqsoIzq7US52KzHusNJ23P2LrYyKlnj/KuXO2Ou
-# uGE5rQhH4vDo9K5/rnJSxoS3YpyGz5coTmxIJR/JoAjGIEhIFSf0XeYWYB9tvQUA
-# xbiKB5FXwRDqt9q7GKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGYA4ubXqdXPb40KIlkr5vbe5emh/y8wXwW7a1rJr53IMA0GCSqG
+# SIb3DQEBAQUABIIBgKQSMaHDuTUTEKxMfcVNVYPKtbb8xF0PAhVtwDVF+IOgsCgH
+# 6qYzliu+Rwh+OIP/QUVFzFSmiDgwNf89/4HuQhslJUXRxfWyBZkMfr10gLg0Xwhl
+# IuMUHKTFnZLveQ/JmQu2A+C/ZQEH0vBdBvB+yBQo5FaHPtTwOxkC8LKZzZHsvFNu
+# QQBcrEWmYd2H4dR9UVCWYX/92zhMAa2pB1GQk+7m/nFnP9TECn6DQ5rJuUGTXVrQ
+# eZkWDnCqNI97f7E2B6SgpL+1sEMMaB3/BoFgFWkZ0jGNYwoPnrrcnLzKid90tJ6n
+# hTdrzD+rX7ampTPsUm4Gb8NQTffYcupoRANlCuZwlEe2dGXQqwJyQoSnou9baq1c
+# Ad3sQ7DUXfppkAX2dcN1ysOduhLxq8RTXP5tMdpWhTvEFtmw3dVtINQOoXHq/MmU
+# Si9doMMcBos3CwDlvzqsDS16Jn+D9M7WtNPrz+B7PszQg1cA2OyZFguDztYgxZCd
+# +vN2NjBgYxsM0NnRCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwODM1
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCKJi7UXjzL7GE6Ky4Gl80Q+wCKL84fZdTd9Tps
-# MmfyPTANBgkqhkiG9w0BAQEFAASCAgCq/ZkYK5tyFC3mlWkt/D/f3kH01LEJI/MW
-# 2ZGxI1Crg7VUB10vzKxKpS23PQrdgAiH6FVIGVQ1qFsHIFNXssSBXXi8kiP38vSx
-# gwvkQNJCFYZ2NA1u7LPV/+d1BWhwemPu+qVUI3UKxR+l4ojIdvWaX1IsTgYiSkv8
-# bq1j9L5k4QKsBAwjsycXIH4VfqAXX+kF1LM9GDc/VAEe7EU+h7c9ZNHC/FZ/O8qG
-# fJkllEjYGb1W2fUWX+IYEAHquIzZq6sR5HnzJzYXqrS5TCoxVnksyxaFP1OcqptE
-# wCKfpCld7B3zzkTA59cqfb3QEboqAnXGWZ2/dVactRcYZK7Bs2jznQZFBvHWfPgh
-# uwspZ2QwZ6P4I0iS0U9/c7ioN6qoc9qhRoX9xrfftZ04cekWJqAPtN0YaadFBJb8
-# 0vQj4ayUtYY6iEpc2Gx+JQfpJ6HTC+9Pku3qUl0pMIE9sDF/8RBUrbGEI4Dophtl
-# KkjIcvGmm2bihJf0O/BebqrwBCOlotSb1+v/cKAgmBnOlB4CcozwwQD04SMnHkKG
-# vDv48sAlEVKSyh9hIquf84Vkr6IXfBrTu0p3G1a/Yl7WjyDyMx6d9qux52KqSKsF
-# eYD3tOiPQK6SVC2ajwjO+xefXND7V6l8nK+Vf6bxBZYGKIr8yaK+MbBIF2or4o5w
-# fv96iq88AQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwOTMy
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDRFM7GXhkFo4asCsG76u9eoqnAy/469VBRAFqt
+# fR/mhjANBgkqhkiG9w0BAQEFAASCAgCzF8CzafmnB+SLd0PC9Q8yoU3cu8SVSICr
+# khHBa0z1XG5ujWNrWkZzZwJGimqmsEyAyvI9n1p2Zu2zgXUpEPZTrpRJMZxuJB4O
+# nFS4c6VmcPk3kES5pl1PH0mnmNJi2D/WsWhuCuI/PyDoYZTbD9Tx+DpLxNzCu1v/
+# 0jBO5pjLFNKDCkK09M4PKJMfMU7sie6wPlHF5uAYkNepL3L3Gsv1izLdJAVmNNaZ
+# ML7KZERGZijkFJs3pJKRYbI0AcbzYMwrUd1rK1q+kdGnoJ73WqYT7UtqCjQpeUhP
+# rFeeQkHLE4NmVMuxKRr1DlirwRhOzU1N3nIYHeecpdQWftsLxHjmcpNbZiV+iacn
+# JUaD/1JvxFY9d/7rS3H+2i951gFqXwGB1/FsxbGczXwyXkjvNwMxSJ6Cyy+fPNYq
+# +AwnM2ytaIq3XlXOMbuT+bcaWfbGqVhwlTjnrn/iyAid0UuJlcP2JwBptDpZJPtB
+# FiMQ8i33TCnPVzVDd9Bfv3Yn3/QR6kq/fHRpeJPUvp/WYt/5bKt8JgMestj/YLL5
+# 6Fm6gID9Ml/5JPwvE2vxa6xEPt9vrjD03ycTp76VBJs1+vI4Ds/b3ZzGfY+oMTTQ
+# XKJnj+WBZ/N+APZf7LGubETGeCBfxl84M7WrcLRbweD8iIKxc2dumV6T6hiXHVAk
+# T8V6yvyJow==
 # SIG # End signature block

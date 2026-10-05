@@ -5,7 +5,7 @@ Offline native CSV projection, empty-export and fail-preserving regression check
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -61,7 +61,7 @@ function Add-SmartM365AdGeneratedCsvPath { param([string]$Path) }
 function Invoke-SmartM365AdCsvReadWithRetry { param([string]$Path,[scriptblock]$ReadAction) & $ReadAction }
 function Remove-SmartM365AdFileWithRetry { param([string]$Path) if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force } }
 function Publish-SmartM365ExchangeLocalMailboxCsv { param($SourcePath,$LatestFileName,$HistoryLabel) [pscustomobject]@{ Path=$SourcePath } }
-function Get-RemoteMailbox { [CmdletBinding()]param($OnPremisesOrganizationalUnit,$ResultSize) if ($script:failQuery) { throw 'Synthetic query failure.' } }
+function Get-RemoteMailbox { [CmdletBinding()]param($OnPremisesOrganizationalUnit,$ResultSize,[switch]$ReadFromDomainController) if (-not $ReadFromDomainController) { throw 'Domain-controller freshness flag missing.' }; if ($script:failQuery) { throw 'Synthetic query failure.' } }
 function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings { param($Warnings) $script:mockWarnings }
 function Add-SmartM365LocalMailboxIssue { param($Category,$Operation,$MailboxIdentity,$Message,$SuggestedAction,$ObjectGuid,$NativeRecordRetained) }
 $global:SmartM365TenantKey='synthetic-test'; $global:SmartM365OrganizationKey='synthetic'
@@ -70,11 +70,22 @@ $global:SmartM365RequireCsvValidationRules=$true
 $adAst=Read-TestAst 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1'
 foreach ($name in @('Get-SmartM365AdNativeColumns','Get-SmartM365AdCsvColumns','Complete-SmartM365AdDomainCsvSchema','Combine-CsvFiles')) { Import-TestFunction $adAst $name }
 $exchangeAst=Read-TestAst 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
-foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Export-CsvAtomic','Resolve-SmartM365MailboxWarningNativeGuid','Assert-SmartM365MailboxNativePopulation','Find-SmartM365MailboxSmtpConflict','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
+foreach ($name in @('Get-SmartM365RemoteMailboxColumns','Get-SmartM365LocalMailboxColumns','Export-SmartM365EmptyLocalMailboxPopulation','Export-CsvAtomic','Resolve-SmartM365MailboxWarningNativeGuid','Assert-SmartM365MailboxNativePopulation','Find-SmartM365MailboxSmtpConflict','Invoke-SmartM365ExchangeRemoteMailboxInventory')) { Import-TestFunction $exchangeAst $name }
 $autopilotAst=Read-TestAst 'SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1'
 Import-TestFunction $autopilotAst 'Get-InventoryColumns'
 $TargetDomains=@(); $OnlyADPermission=$false; $IncludeRemoteMailboxDelegation=$false
 $script:mockWarnings=@(); $script:failQuery=$false
+function Reset-LocalEmptyProof {
+    $script:LocalMailboxAcquisitionMode='Forest'
+    $script:LocalMailboxForestPopulation=@{ 'DC=synthetic,DC=invalid'=@() }
+    $script:LocalMailboxAcquisitions=New-Object 'Collections.Generic.List[object]'
+    $script:LocalMailboxAcquisitions.Add([pscustomobject]@{
+        Scope=''; ResultSize='Unlimited'; ReadFromDomainController=$true
+        QueryCompleted=$true; ProjectionCompleted=$true; Rows=0; ObservedRows=0
+    })
+    $script:LocalMailboxPopulationCoverageComplete=$true
+    $script:LocalMailboxIssues=New-Object 'Collections.Generic.List[object]'
+}
 try {
     Test-Case 'Autopilot empty schema matches its actual native projection' {
         $table=$autopilotAst.Find({ param($n) $n -is [Management.Automation.Language.HashtableAst] -and $n.KeyValuePairs.Count -gt 0 -and $n.KeyValuePairs[0].Item1.Value -eq 'Autopilot ID' },$true)
@@ -189,6 +200,70 @@ try {
         $global:SmartM365CsvValidationRules=@{}
         Initialize-SmartM365DefaultCsvValidationRules
         $engineName=if ($moduleRelative -like '*WindowsPowerShell5*') { 'PS5 module' } else { 'Core module' }
+        $localPath=Join-Path $testRoot ($engineName.Replace(' ','-')+'/Exchange_OnPrem_Mailboxes_AllDomains.csv')
+        Test-Case "$engineName proven empty forest replaces old local rows and restores shared validation" {
+            New-Item -ItemType Directory -Path (Split-Path $localPath -Parent) -Force | Out-Null
+            [pscustomobject]@{ ObjectGUID='00000000-0000-0000-0000-000000000001'; DomainName='synthetic.invalid' } | Export-Csv -LiteralPath $localPath -NoTypeInformation
+            Reset-LocalEmptyProof
+            $defaultRule=$global:SmartM365CsvValidationRules['Exchange_OnPrem_Mailboxes_AllDomains']
+            Assert-True (-not $defaultRule.AllowEmptyDataset) 'Fixture unexpectedly weakened the default rule.'
+            Export-SmartM365EmptyLocalMailboxPopulation -Path $localPath
+            $expected=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId')+@(Get-SmartM365LocalMailboxColumns)
+            Assert-True ((@(Get-SmartM365AdCsvColumns $localPath) -join '|') -ceq ($expected -join '|')) 'Empty local export lost native headers.'
+            Assert-True (@(Import-Csv -LiteralPath $localPath).Count -eq 0) 'Old or fabricated local rows remained.'
+            Assert-True (-not $global:SmartM365CsvValidationRules.ContainsKey($localPath) -and [object]::ReferenceEquals($defaultRule,$global:SmartM365CsvValidationRules['Exchange_OnPrem_Mailboxes_AllDomains'])) 'Shared validation changed.'
+            Assert-Throws { Write-SmartM365CsvAtomically -Data @() -Path $localPath -Columns (Get-SmartM365LocalMailboxColumns) } '*empty*'
+        }
+        Test-Case "$engineName empty native domain writes without claiming completed global projection" {
+            Reset-LocalEmptyProof
+            $script:LocalMailboxAcquisitions[0].Rows=2; $script:LocalMailboxAcquisitions[0].ObservedRows=2
+            $script:LocalMailboxAcquisitions[0].ProjectionCompleted=$false; $script:LocalMailboxPopulationCoverageComplete=$false
+            $domainPath=Join-Path (Split-Path $localPath -Parent) 'Exchange_OnPrem_Mailboxes_synthetic.invalid.csv'
+            Export-SmartM365EmptyLocalMailboxPopulation -Path $domainPath -DomainScope 'DC=synthetic,DC=invalid'
+            Assert-True (@(Import-Csv -LiteralPath $domainPath).Count -eq 0 -and @(Get-SmartM365AdCsvColumns $domainPath).Count -eq (4+@(Get-SmartM365LocalMailboxColumns).Count)) 'Domain empty export is incomplete.'
+            Assert-True (-not $script:LocalMailboxAcquisitions[0].ProjectionCompleted -and -not $script:LocalMailboxPopulationCoverageComplete) 'Domain write fabricated global coverage.'
+        }
+        foreach ($defect in @('DomainMode','NoPopulation','NoQuery','FailedQuery','LimitedQuery','ScopedQuery','StaleQuery','NoProjection','NoCoverage','Nonempty','UnknownWarning')) {
+            Test-Case "$engineName empty local export preserves last CSV when proof is invalid / $defect" {
+                Reset-LocalEmptyProof
+                $before=(Get-FileHash -LiteralPath $localPath).Hash
+                switch ($defect) {
+                    'DomainMode' { $script:LocalMailboxAcquisitionMode='Domain' }
+                    'NoPopulation' { $script:LocalMailboxForestPopulation=$null }
+                    'NoQuery' { $script:LocalMailboxAcquisitions.Clear() }
+                    'FailedQuery' { $script:LocalMailboxAcquisitions[0].QueryCompleted=$false }
+                    'LimitedQuery' { $script:LocalMailboxAcquisitions[0].ResultSize='1' }
+                    'ScopedQuery' { $script:LocalMailboxAcquisitions[0].Scope='synthetic' }
+                    'StaleQuery' { $script:LocalMailboxAcquisitions[0].ReadFromDomainController=$false }
+                    'NoProjection' { $script:LocalMailboxAcquisitions[0].ProjectionCompleted=$false }
+                    'NoCoverage' { $script:LocalMailboxPopulationCoverageComplete=$false }
+                    'Nonempty' { $script:LocalMailboxAcquisitions[0].Rows=1 }
+                    'UnknownWarning' { $script:LocalMailboxIssues.Add([pscustomobject]@{ BlocksCmdbQualification=$true }) }
+                }
+                Assert-Throws { Export-SmartM365EmptyLocalMailboxPopulation -Path $localPath } '*'
+                Assert-True ((Get-FileHash -LiteralPath $localPath).Hash -eq $before -and -not $global:SmartM365CsvValidationRules.ContainsKey($localPath)) 'Invalid evidence changed the last CSV or validation.'
+            }
+        }
+        Test-Case "$engineName unknown or nonempty domain cannot be published as zero" {
+            Reset-LocalEmptyProof
+            $before=(Get-FileHash -LiteralPath $localPath).Hash
+            Assert-Throws { Export-SmartM365EmptyLocalMailboxPopulation -Path $localPath -DomainScope 'DC=absent,DC=invalid' } '*not proven empty*'
+            $script:LocalMailboxForestPopulation['DC=synthetic,DC=invalid']=@([pscustomobject]@{ Guid=[guid]::NewGuid() })
+            Assert-Throws { Export-SmartM365EmptyLocalMailboxPopulation -Path $localPath -DomainScope 'DC=synthetic,DC=invalid' } '*not proven empty*'
+            Assert-True ((Get-FileHash -LiteralPath $localPath).Hash -eq $before) 'Domain zero proof replaced real rows.'
+        }
+        Test-Case "$engineName failed empty local write restores an existing exact-path rule" {
+            Reset-LocalEmptyProof
+            $invalidPath=Join-Path $testRoot ($engineName.Replace(' ','-')+'-locked.csv')
+            [pscustomobject]@{ ObjectGUID='00000000-0000-0000-0000-000000000001' } | Export-Csv -LiteralPath $invalidPath -NoTypeInformation
+            $previous=@{ AllowEmptyDataset=$false }
+            $global:SmartM365CsvValidationRules[$invalidPath]=$previous
+            $lock=[IO.File]::Open($invalidPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+            try { Assert-Throws { Export-SmartM365EmptyLocalMailboxPopulation -Path $invalidPath } '*' }
+            finally { $lock.Dispose() }
+            Assert-True ([object]::ReferenceEquals($previous,$global:SmartM365CsvValidationRules[$invalidPath])) 'Write failure leaked an empty-export rule.'
+            $global:SmartM365CsvValidationRules.Remove($invalidPath)
+        }
         if ($engineName -eq 'Core module') {
             $schemas=@{
                 Intune_Autopilot_Devices=@(Get-InventoryColumns)
@@ -323,8 +398,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVOozC3CpIiSkm
-# KeNW86b0zbZfJnWgrJ3L/bzC9F9u4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHERU0aR3g9wJ+
+# 9kehpvtK/O1WwCr8qub+1NwE+MYcqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -457,31 +532,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICPk1TcUfYLumIQSjl3P9GP/01WCLMnfKtqLSEjtLEVKMA0GCSqG
-# SIb3DQEBAQUABIIBgFHF6rBCSSK6MTHoFNYvwIny2nVjo9tc8cRxvMt3bG7EI1Ms
-# fntMiNCSlQ8wd2tO6OIpUGl6J0aTy0QTgqjtjFy2R9smPg6oySKm3pFjTmwjpALd
-# elGuO55RlpaFTchQab67DDsUWUHGJ04hj44CuPgQqau7nvZK2w2d+5AsiIMjbNEF
-# MZThFOi87kVauO0eP6DRFTK4mzee/X8LB8DglRJxTE/bcvX8iGBfJVmK1DvJeHyJ
-# z3L2iWb4xROlatpsSn8IapFZ/c5wqS2775ROQtFXPMNymeTLTqXWe8lp7PxFVS8n
-# CJh0MdYJ7uftM/Qv7X145PFmsBAV2EcWGVLNJVMPqVMCxEdmgtE/sBfrJwlj4TWL
-# F4qEnzxPcH2gFJJvXA4CFtqpLlm4A1/9se0nTSe93vyHDhxPrveCAn8r/joMxzxx
-# 9dUxWvi2PhiKjH57NSgH8FZWLvTxmH/OBoiPoRA9jATcxZ3YtNgenBS//aVyksva
-# LzLk2wHHgc7NUwH+p6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEJ8E95EeMSkgbMHZ4pu80gNwuAzNzcKrswL/aQAXFaJMA0GCSqG
+# SIb3DQEBAQUABIIBgEAhoUmY40SfKHZYlbH4yn/ozr9UitEeZo2c2J3NSeaqWA9+
+# ofKsPTre4qVpuZI+Lu30eL91uBsoyPxE+i32nDrQI9UDBgxC/lZeUw9Fxjipmbi+
+# y5TFn3N4YMyJkMiYiQBIs4TykthN7/pLHBw0jf+lkwBUJNE+H4cBOgqva40iYkjA
+# 3cwTIQCwUhU1/fBB2uG45y/669jaFEOo/iu8QKgvz11MhyPyb2yaP3Wf/pfj6xFK
+# 3y3oO9TvqZCP+W1kqaEabsbXHsSB6YTJokXstblvvtRdAeFkXKBZgdy86MPBIBo8
+# KmYKERorZdyVAFvDvgoLOoxqCLlmTAWw9nxROsqzcc/0cjUhq+44/bN6zzdycMJl
+# HfCr9grWbtevB+jqcT9hEtD+UX2So+fBt/gcJhRmK8iQYt8ZLW+j+BT6P+eww/RA
+# y5UGuDgLjaCHUP8Y3IfzFPDdq6fD9Kf+bf2AiMXIhBQQrYlzaWytGrgXThu9b0gu
+# 0dWA97L+v4J4PZyHMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBzr2nbIx5r5+/aERtc9XU2RgVLFbBckFpein3M
-# yr1p/TANBgkqhkiG9w0BAQEFAASCAgBD04blf4lr0NYo2oXThEKGEz9STcGV6de5
-# 3yQSqs1VjfjCdKU0DxfUnkUa+Sl/orA1TdO4L87DMXxS80A06f19Eecbsg3oMmAF
-# 7ueReOR0nuW7I/lE4VJmMNq2/NvoNwKbeS9aHnqluXTy0x24uSFKCSCiYtGKGfku
-# xYk5fPUqbgNgGs4b7HyZY2cv3mJM5/OoJXPg0T8aMpRw8qCgRAonwl4Nsw6ZZBMo
-# I0ORnp6QuMbZGHdNm8huYKwVy6wf6q5EN4u/TTwNF552qvUdiDe4AR4Fhe7zWYII
-# qfUmgqOTg7yfFDFBTXZi11tBdt7yqN8Bcm+lGBgaEIcre5xxYvCetKyJGOoWA0tn
-# DtwByGGHs77VuRCHKd0XnxkCJcT09K0pLsT0LpqEL2HfItPDTSY9Zc3qXQNnbV9A
-# Bn76zbLU7HbyQy+X35ECBo92RsKqLezHiMZ4rAw4lAqb2Z0wQ3B5J2hu8JxKAXc6
-# Gfnhd/kdtZEd9IqE41E3hbGo8ilBQp8pCedPCk6YXLWSBf9OagdwqPzlecg1XWSS
-# gWd7UZMPtGlA8BNsdTv+XJuJsU6xT0ujd1FT7bLav5CAls0oNoCYxChn6jKgKHqi
-# S3Gs4aFOhen2sAXFh/8fj6g60qcAoquGva3cytqkg5eNa3FB5Eg/0Y+uzfcw/X08
-# HH/POIOBuA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwOTMy
+# MDBaMC8GCSqGSIb3DQEJBDEiBCAoqxlESEsZAaRIna9JZM/0Fg1Hz6imdoFDSAyf
+# h1HY1TANBgkqhkiG9w0BAQEFAASCAgBQWFsF2ly6zSonxonkWJxMuszHnqMQj/uM
+# alVwKcxgzJ/xD5JmGXooNDkegnPriyWsIIiFKrsFK13z8/h2WWxuNZXakEutlwZi
+# +1zorofLqLRhBX9dRqxeu+ICEV7i/gg0wvZW1vNeG9OgU+caHvhEKFvwM/tgOnh2
+# iIzgwPQulht71MpIdeNwBRA/qODETOPLpP1TBX8E1nzfW1Jo/k9heheyonkFABEC
+# AXAoz4lpc0ssG/DJPrUKyhTcKYmbhqzcD7s/LYvlO+ym1Vh3enZgJzk7GUxY0O1P
+# VDGjCp8AUPwXoJryyZvsfnckTc5VrAzzt0TsTIoQLOSleleDt4nLzQGrFvqjwPu4
+# FP+beWT/ki2wdRsDnliLkFKjfxgFu16CfNnZVjQI0fow+910Js+P+rYoytmwe1e9
+# mcW2eAWgIQMfggeOPDc+DYwKm0CUjdposcp7xpMpFb37Q6DwVqN793Nt9EgOkXDW
+# 4RXi9dhglB2jltfAQg5B0mTrkm4OoZKJ3oa79Zg+yLq8bdFgBwOle9mvxas5bygM
+# lRD2AAU9TVhvnFHrYmAyYfVsevkcH2R1JEjpM04jMaokTxYe0sD6Gnn9yBgIIYDU
+# kWBvqlJt2IVLz+LQcd9AZg1fEZqFKDHqh4fWkchy/CMhiu32OKR2DiqqaeIgopzn
+# 0ZLQLjmZlA==
 # SIG # End signature block
