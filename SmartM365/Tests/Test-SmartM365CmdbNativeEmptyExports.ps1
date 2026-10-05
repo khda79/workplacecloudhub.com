@@ -5,7 +5,7 @@ Offline native CSV projection, empty-export and fail-preserving regression check
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param()
@@ -203,6 +203,39 @@ try {
         $engineName=if ($moduleRelative -like '*WindowsPowerShell5*') { 'PS5 module' } else { 'Core module' }
         $localPath=Join-Path $testRoot ($engineName.Replace(' ','-')+'/Exchange_OnPrem_Mailboxes_AllDomains.csv')
         $domainPath=Join-Path (Split-Path $localPath -Parent) 'Exchange_OnPrem_Mailboxes_synthetic.invalid.csv'
+        foreach ($rowCount in @(0,1,2)) {
+            Test-Case "$engineName actual domain export retains $rowCount native rows" {
+                # Match the collector's non-strict runtime, including PS5 singleton behavior.
+                & {
+                    Set-StrictMode -Off
+                    Reset-LocalEmptyProof
+                    $script:LocalMailboxPopulationCoverageComplete=$false
+                    $domainName='synthetic.invalid'; $distinguishedName='DC=synthetic,DC=invalid'
+                    $pathsForMailboxProcessing=@($distinguishedName)
+                    $perDomainCsvFullPath=Join-Path (Split-Path $localPath -Parent) ("Exchange_OnPrem_Mailboxes_cardinality{0}.csv" -f $rowCount)
+                    Add-SmartM365CsvValidationRule -Rules $global:SmartM365CsvValidationRules -BaseFileName $perDomainCsvFullPath -CriticalFields @('ObjectGUID') -RequiredColumns (Get-SmartM365LocalMailboxColumns)
+                    $script:domainFixtureRows=@(for ($index=1; $index -le $rowCount; $index++) {
+                        $values=[ordered]@{}
+                        foreach ($column in @(Get-SmartM365LocalMailboxColumns)) { $values[$column]='' }
+                        $values.ObjectGUID=([guid]("00000000-0000-0000-0000-{0:D12}" -f $index)).ToString('D')
+                        [pscustomobject]$values
+                    })
+                    $script:LocalMailboxForestPopulation[$distinguishedName]=@($script:domainFixtureRows)
+                    function MailboxesProcessing { param($IncludedLDAPPaths) $script:domainFixtureRows }
+                    $domainFunction=$exchangeAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Process-SpecificDomain' },$true)
+                    $acquire=$domainFunction.Body.ProcessBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$domainDataFromProcessing' -and $_.Right.Extent.Text -like '*MailboxesProcessing -*' }
+                    $publish=$domainFunction.Body.ProcessBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.IfStatementAst] -and $_.Extent.Text.Contains('Export-CsvAtomic -InputObject $domainDataFromProcessing') }
+                    Assert-True (@($acquire).Count -eq 1 -and @($publish).Count -eq 1) 'Actual domain acquisition/export branch is ambiguous.'
+                    & ([scriptblock]::Create(($acquire.Extent.Text,$publish.Extent.Text -join "`n")))
+                    $written=@(Import-Csv -LiteralPath $perDomainCsvFullPath)
+                    Assert-True ($written.Count -eq $rowCount) 'Domain export lost or fabricated native rows.'
+                    for ($index=0; $index -lt $rowCount; $index++) {
+                        Assert-True ($written[$index].ObjectGUID -eq $script:domainFixtureRows[$index].ObjectGUID) 'Domain export changed native identity.'
+                    }
+                    Assert-True (-not $script:LocalMailboxPopulationCoverageComplete) 'Domain export invented global coverage.'
+                }
+            }
+        }
         Test-Case "$engineName empty global forest preserves old rows and shared validation" {
             New-Item -ItemType Directory -Path (Split-Path $localPath -Parent) -Force | Out-Null
             [pscustomobject]@{ ObjectGUID='00000000-0000-0000-0000-000000000001'; DomainName='synthetic.invalid' } | Export-Csv -LiteralPath $localPath -NoTypeInformation
@@ -403,8 +436,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1d8LRP4QZhcfW
-# kuSwVyUtoiY+RtXP8aZGY5wOkTdKDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCryc/jWeQjMSZo
+# fNJmPkfa3Kg9R6p7lnZ7LlRzudkxH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -537,31 +570,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJLgMVUE9Gv5i4GaRlGEpr3PB1V4M9s29qYDEc4S4y8mMA0GCSqG
-# SIb3DQEBAQUABIIBgGxs2Ae8FZHci/RqVM+h5KkToJ+pCBrHoKb3+6U4TEnTa6Ec
-# J3lW6LfPNVRUta7Ls+Ahvqn9pggqjYFzn2mkArSEXYr261M+qgVmqiYeyRgOPMr8
-# QPH9KTaxMg3m8IlnwmbliSIvd6kf9+KK+COjZTMibiqmP7kQMexRo8Vq4r/zRrG8
-# ZmCNOGfpG+dOLaJfk6TzcWwPe5cOZ8TcTTCQlJURUMj7FaRg3mZy30RdrXBTCD2W
-# d0QkC5gtREwSM0+aJiOP3q5eY/CtcFWBHWWpQSPxIBBr/ryGYiK8obvkyuGJ9FdG
-# fGjEd6LxfY5QqqIU7UQAhFxspMMFwtRXkgHc0Eh6rmGm6aqyG19ib/UbOUxtFrhV
-# 9Mw62zWvpRlrJw4z+0gX40e8hwAxhLl2cyziI1OHM1G8fWHLZL0WaksSAcrCCT8F
-# CRxh08rPsuHHKL7FM1QNAjoNrfnk/zUs3ouchRJ0YsYd6tsNI6uM9emFKJ0+EYCu
-# eI5hHXv3L/2RoJL3WaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJDvbh3NnqwIczEcwcr2H+FCusBgYnX5YV7WzUJtqWneMA0GCSqG
+# SIb3DQEBAQUABIIBgEjyV4daBKzwox9vRlxj+PdHPI2EItj23WgP8WrTr+LG+lqx
+# 17OFEWoYPEY+cl6vMlIXzlEzjcvLHEZ2nup02NzZqZoSvhvoa6o/cvhH3XuhJzzr
+# nO+NBglIUpPneMM+PCBiafMzOX/vzwSrYIkEXvXvpRue04tPm4MAezuhQjxrgdiL
+# hQijWlhM3CsJ9N3tubjQmivSqlwAfAgxmZn2kknvwOLpO/4mZcHhN8cNas4kK7bi
+# mzJzAi3ibfTLHInOq98acfKHftf+1FeXVECXjFx6RxzcNkHPQMHl34AsecJz+9On
+# mPat61YiQS53a3cmToV7+xaL8OUxDfWXdKGzjRabESjXa4348IdKk9hC0Drp+5sR
+# fcgVus+NFoPLMLGirBJYFyEfdZuT0i/uWimJZVJGBc6IXdOsfGlRLLQkrp1BSen/
+# xdvsfCia7ixV9l0s1ExVgoj49Mn1JSLmx8iU7ohaG3LkvDxEl0OY/1lfvCqMkz4k
+# BjxNWPusd+G9YKQv1KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMTM3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAAr9a+HKKbHFvJWyTKyCTHE84UrOC4x/qeeQty
-# HBMD9DANBgkqhkiG9w0BAQEFAASCAgCMN9pZsBgnV156NILie2Gc9DJlHHrrruKQ
-# ORevcQeXzDV9auVuegNNpiAqfeLUaEGakpBt1lCZx6sJrtlQ/PsQOO1LJjh+6sCd
-# 5zN3WCZa+WIiyvYSCkl0aQma3Z/F48mceumAFWbYpFKvoGKGhFYbiTzOkeV29B3T
-# NVVe1qIwkjdTEeEjR4h73PDotidhZ10toNWsNROz4TrEXecl/RAQFFbHHgnaD+6n
-# SqrZLskC4ieDHvXUTPVjf/dSjiof0btupq9hckOBGHZ5hZVDLWS6LSg0QaPnEtXA
-# FLbviDFhvxN79jFb+t41hrpUIrI50wDtVrKizBdV+oI9sIfKSRJiM5W8qtfQpPyP
-# 8//XZRPN/nBVE+h7nIJk8Uvq1WzCY1ba+JAQvp7Px1cf7HLrszzgvB9+OY4jRKJD
-# 9F9YLdGiTsiL+uiWeRf4vzvY6YiPImySh39ySjnz0+eehk+zyACA2YgoFdsSkTZn
-# rgPwmOuAe57uW8XxlB4ZCt74Nl8LT2esfUCvS/WbDrPJB7FwmlflauEUoFtBk8du
-# hvGJEP5ruI+NaLLSeIproEfVbJTzk86uNDLcn/YgjIG+UvpemUi1nTsaePUeEUxu
-# oP+0WTkDf95fBdc0Rn7KvrZB2+BHivWwdELePi0UoD/kAXsgxbfNRX+agECkUlBF
-# z04ufeDBXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMzAz
+# MzdaMC8GCSqGSIb3DQEJBDEiBCCDO01gVud0YSXG+ILhD2ak7EK0WjZhrkY5Yb/V
+# 7iLvWzANBgkqhkiG9w0BAQEFAASCAgA9ahKy83YSDZriibxjcct+HUtyDW6HuQbR
+# 4oZyTkrst7vXDAaKEBqYKX9Ks76eI8SATmLwpIIBGJCIxNG1bH2UHju+oiJPIF8u
+# 7g3HIL4IY0hbcX/qCNI5YaWrtrockT+mQOhseI987vbyhqwsDXo/0D0X0My3HxxT
+# 3B7L1YrHc44Vrc1D4uWAnGkmp6FSSNQAI6s6u8D8ZthE9Jtsp57XEX0M2wv/jHNt
+# uyBn1vUX7jatJv2XsRHoZllZJb6pmhPhQ1TKPGGqts9o7zWvbNLTiIUCrihOLVJn
+# JI4WX5wQqPJhblCIoLIVc+Qp/qjHtSn23NsmATuedIRydn6hppMva1zJYK4cFCp6
+# EjprUP4TSx2EXDgtA1UUUd3aFj9H+ng4KLhloJql67RMKv93smKIe4PH19w4fxBT
+# RWzdD6/GbUpR/y5eQUeqhgkNE4n4dpfPRmxyw8EJps9JfIaGbDitfRFPWahnya8P
+# jkAeYGcE7TBxluXOXCRdX+WdPQHqJlZfoKpgJwQHqHuqOhERjKUjmkzUU/2suhT4
+# tcum1K0UQG23BGOJx19hYBcsd72l1xJPNeIy9Zq0seTsEeuPyzqNIe7x8t/u64Wz
+# cicxxb0C22cdVW91wL3CV2j8K65d720OYBR8DrgRRvwZ0Mt1Ww+RdK/Xem+30yoM
+# Nvr8DPJ3Ww==
 # SIG # End signature block

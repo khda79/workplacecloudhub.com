@@ -6,7 +6,7 @@ Offline Exchange mailbox scope, native identity and quality classification tests
 Extracts functions and statements through the AST. All Exchange queries are
 mocked; no tenant context, collector, module, export or external action runs.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -493,7 +493,7 @@ Case 'All-domain root query includes containers, not only first-level OUs' {
     Assert-True (-not $node.Extent.Text.Contains('-SearchScope OneLevel')) 'Forest root still excludes container recipients.'
     $statements=@($node.Body.ProcessBlock.Statements | Where-Object {
         ($_.Extent.Text -eq '$pathsForMailboxProcessing = @($distinguishedName)') -or
-        ($_.Extent.Text -eq '$domainDataFromProcessing = MailboxesProcessing -IncludedLDAPPaths $pathsForMailboxProcessing')
+        ($_.Extent.Text -eq '$domainDataFromProcessing = @(MailboxesProcessing -IncludedLDAPPaths $pathsForMailboxProcessing)')
     })
     Assert-True ($statements.Count -eq 2) 'Domain-root acquisition topology changed.'
     $distinguishedName=$scope
@@ -588,8 +588,8 @@ if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN0ubXqe8BtSF/
-# zRP1yzwcMDLpLu8RD7erfHR9QOQlwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVgZsXmqgeGAoz
+# 77KTrAOm8DQOdSwIWIiIuifM2pQf4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -722,31 +722,31 @@ if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFYqm8GGOyO+n+8rKaCgWQsZmEjECc1VkOjsYz3HAPx3MA0GCSqG
-# SIb3DQEBAQUABIIBgC+1A8MLLT7hsur7oAxUQiXpZowpuSGEVD7YRe5/rquYHYqY
-# lt1N6kvTdN9A+PVOv+Yj5jrixq+m/cnZyC1W7VO916HlkQQc9SGfHb58kAWtFIO5
-# Q/qFtTvqYFPNA4faZwJDvI8KZeg+efeHATyx+OQuCe0xivzPXE1xbG7pLo+feVEO
-# oiY0DH0X9YAnfslI0ezVaKnYVWJTBrUD5OM2xKieSgniyQyKa5Y994UilcruBpiB
-# jR5qLuZke41/z3uIF0sYs+BRoarOEeWj5cTOa7LTTeZB7SCUHEX+v7U7ESj8gwt4
-# roYcaMBELZ+rpt1aFyum7beIans9mFM0C8OChqnjaRx3tU54uAKE23B0r0pZgOHw
-# MJaNWwKNVMJxOnSU8OGzNJXm4sXv23230HHxc5J2CBhH3MA0yDIWyk9UCrUmRIXX
-# 771QDVYyn6IG8t4mqA7Qn4Hb2RGX1kgnuA1ytlnTz3Q3OeLLvuIC0h6YpnFGlhCw
-# BAVikkeYdxr7Mr5EoKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIpCd2+ntvCbqzj+3jWeEgQMw+TxH0840l+Cfqg+RLFeMA0GCSqG
+# SIb3DQEBAQUABIIBgHRPumwAZTHc7drHw1/fMyxa+CtIst/PoSAM+Xt26Xe4YJ7A
+# viCZxxnQ9xUftKWcduWwQm95f7b3xChzn4lSEKZRthRRBXX0i7VGQRwfPCB2WH6l
+# F+kb48nBw7L8x6/zev72YuRf7dkB8jIBjrbSDr2HZuIk3xbSCHrY4ZsFqhRCtVZZ
+# 5qrEwCJ1KtRa/Jhd8sdOqQ0Fs0fxkoetrIwIdvAKJ5Tw4rAEgedd+I4r0kFm7JNp
+# QtsEnoewHrEIaLxnynFA2xTbPn/5SaxkHD41+rErHWWSq/MsAAHbrwqqHK/g+uan
+# irTJFZoKCEnhq6ZlgLpFyafosdFDAGRlGARXSyzT6thFCZxQlD4O/o2f8FDRZ8r1
+# a6l6AIqkIBg+3vUdu1RvM6Kx/L2RYZbU9OCmVCY+Ckci78odKCqDQLbFXCWkECYJ
+# DJIb60TnMpSZTXKDE/crvjmM+emSngigOKb24LMqnkVe0vXeZwIy06pNQ5xNh4vh
+# 55e71Z0EqIzNRGn00qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMTM3
-# NDNaMC8GCSqGSIb3DQEJBDEiBCCdJd0zJ6LoLHE35SNm0whQS81wKxlLUaikdKgB
-# tDNsTDANBgkqhkiG9w0BAQEFAASCAgAdOZW/kgQF5rDBWG5ssKzih6i/k+VUdPTX
-# fPiOEqhVTe6meT7HmhUHr1kNMffsKkwJZutNWzipxa+E5SWdkPfL3CojYF8Q3Vr0
-# fL6MUurtV5Hjq1XA58nJHZfIjX43iVDL4HGML2HouIKaFPBlGjIV9ZszMkcgyn0I
-# zfLwuUHccIWwoPKuojNSeqrscrRrRwLXR23UyLKVq/f5kKVH+sDEF4sY5pypKtda
-# p6kEMZtDV0GYmpGRX9CgAeAeCbPe3VqWnmmLWhVVSMVN47mb8pexB+Ph3v00+yGY
-# 6xV4awYzDcG3QNhH4ApkeYKZzC4JyNgr+cUqAjW7lW5u4vdMju6JfeDnfG0R4EoD
-# RC5W/BTVajiEL1sqE0GqEeO9PF88Ztb5e7N/Cr8Cqd52bZNC5fG5F3tyBAqMZd11
-# RzeoEJaBrH8OsXdD4jBiPrsxZkCcUTu6QUzAXrGF1e0hrRBNaaQgn3YczTBCRlqX
-# CEybkb/KKyExhGjYUWYzI0PCq3ycKGXUFeYN19tMqjkuXVnZirnx69H7/ICbS5Iz
-# tiSYtOj+UTts8Gqx6AB18S/dGU+gK0WlQsj27DRtoJ9jE8r/2RzPwwbG/rKh+npD
-# 0MCif9aRejf1yW8Ooyq9DyTBnq4pfIXbywlh2SS1AHsyLLvA6zPznfZU04xmI9FF
-# 58IMXTcZ8A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMzAz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCD/x5KM2XRedlLgN2rrzWpboRhi9eMNd++i54wQ
+# ONwT9DANBgkqhkiG9w0BAQEFAASCAgBWLIrPT3hYzdbX6zQlhK2GqeqL8AVB69Lf
+# n1WRliA4txE3x7A8v+q/k2jQkJETb9Hh4+XVFDldqoFQnzz9bk6v2MbqnQliAo3M
+# OOUCnvLbr03+bwT3pvh6brOU+XiJ5yMFKDXBDtTalWEVZgjgkmXWAh0blvMXyiNm
+# cKzbsSj8D2YRQmRcYYOGZ++XlnQntYvEiam3+kS2MV2RZCFUezofn/A/qncZa8yE
+# gn7GbEEkXBFoNRbhbpjBdKXjI4ZgsyYWyR7lPaM1PsWud605T1UQ4TK7EW0/kMWn
+# d2rAiYK31Ep3NA2n1okaCdSQ3z663nwaObaPd0EiG0hQcHMGrsrB4yaNsudKFg1G
+# VAMgOfAJQoxRTVc7ml7v447yUY/3kQtK0TxNOh5hb92lxPuE3lM6V6VP+ugGbfJ3
+# Rbb7MlRV41krSo6q7/OUDNm+YkCZhd1bhfYMH1dUp0Ynhw373shcNvFldEf2DXxx
+# 6oZYE1VI7dJtIiY91qb+5xEAVu9n2I25vei0R4VxqYO4xkgHXnyhqvjqZCVzKGxY
+# hnuDvLo9I9L7rdkJMIhm7woaJhcgF0/etyRUz2myX+YZm7VyYvwPhU6MQoW/AdZE
+# urv2ZJZvcuUS+vV42QvJHPYEBSiQsw/h8z0IFbghTD/070QuB2pasABHolDFApXz
+# fmow82IeQg==
 # SIG # End signature block

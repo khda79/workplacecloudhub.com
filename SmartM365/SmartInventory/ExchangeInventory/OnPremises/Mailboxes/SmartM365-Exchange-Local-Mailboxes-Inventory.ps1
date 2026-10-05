@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.56
+1.57
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.56
+Version: 1.57
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.56"
+$ScriptVersion = "1.57"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -2894,7 +2894,8 @@ try { # Main try block for script execution and interruption handling
             # Domain-root scope includes OU descendants AND containers such as CN=Users.
             # First-level OU discovery omitted container mailboxes in the forest root.
             $pathsForMailboxProcessing = @($distinguishedName)
-            $domainDataFromProcessing = MailboxesProcessing -IncludedLDAPPaths $pathsForMailboxProcessing
+            # PS5 unwraps a singleton PSObject, whose Count can be null.
+            $domainDataFromProcessing = @(MailboxesProcessing -IncludedLDAPPaths $pathsForMailboxProcessing)
             if ($null -ne $domainDataFromProcessing) { $Global:ScriptOverallMailboxData += $domainDataFromProcessing }
 
             # Export data for THIS specific domain if it was processed live (not loaded from existing CSV)
@@ -3548,8 +3549,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqTZEVOh/SiWkl
-# PtbwRo4NYLe0Cc0BYFvTBBQi2LYFSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9tKRVXb60yk+z
+# J5nLBmMX/h6UwpbzSdqx/5+HqSzzaqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3682,31 +3683,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJIqHBvPwqLqemr36XeJsNQwRNro1ndpeKltODsgxa9QMA0GCSqG
-# SIb3DQEBAQUABIIBgK5ry88fkCZM0e7YBIz9tcmJKooALBDGRKqQ9BDZtpvESB+x
-# iqETAArlX+abjhSxU77GwW/97RHMJ9csn8qdh3hSvulhxtDcp6zU/MOvhu0WeBQg
-# /THMzeLj7uK2/RUTxYjNxo2XYfWbUvyMfq3lKZh1czRJewv8wkR1xxW2sV6wzKJg
-# VNetsVeQmiyDWQnm4Yrp4siUnoDGaHbUBwIGFukxUt085Vj93IEVMGCT5UjzfH+u
-# j1i3rCVoczCPA1AbabMQzzpJXqpPgKodWUL8z1i7VX4AXfiK5LJ9KeSMMWu6h3Jg
-# XVEcSMEaJ+2iqWSZJDw5AU8DA6z1+rPorGSr1aFxAzCxoCAMyeiHLl9mO0hB0IMo
-# rotvw6t4vR+yBgYvCoARgUtadYRwxrbdSufhF7Hgi1jTefX1YhfF6GMeBhe7W5Tu
-# /aFL7CCZOgd0W3svwEnNnFeDygfAhEWJTXmMYNjOajGBsX44tJOemV9s+cki0I5I
-# y5dt1m5Bi5y6KJq5HKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEzsTdTRDowMfzPnt5iAanqF+6shhrUYielexhHBrp3UMA0GCSqG
+# SIb3DQEBAQUABIIBgKDxIdaIOKw1FtEuCmiQQlNDLW//W96tbvp97JqzmiGcwc3C
+# Xlu3IITFL/rnG95uJJfs4qeKV9YvtoKvLuxDw3vHFu6axSOCMuWbSzCvEfgVJC0X
+# QHYf2QH9vAIwmUjILjqq99/u15IiOIlAchjKLFLUo6WQ4ndSfohF31AVtt9RmZUr
+# oLY0JxnQ9Jans+qr+fdJ5eQuw0Q9WdPZgu99O9PMQJGNVMw0EtMe0MKP1JS1Zx8B
+# 3fHsfwcRpkuaq+z3UlF4mAvkXiGqSgw0quvX3xdS5O3m9hdhJ5t8Vp4Yg0XlZBTy
+# fqv3a0DJOiVPTlsalZiTBXtT07w/vz1Fzhfs7apTQLi+OENuYecF2loi/rtZP2+p
+# e50fd2kkCSRFTsTOEca9ZUuqW7CjZat6jN4t27C/CtE4IAwQAWd2smoiJvBT2eoe
+# wA/xnU3cgQiT3oJzpPs8ZpFZYnuU40cycCEpswh6eap/Wkvp9mvzDiCCwiM34JBJ
+# KFizbywHCoOzt0f9u6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMTM2
-# NTVaMC8GCSqGSIb3DQEJBDEiBCC2l6BLExeoh3Z7nR/8OLjYdjyVdbMdDmtgj5V5
-# wgZeLDANBgkqhkiG9w0BAQEFAASCAgCS8yoCkdDH5yT1ig4xZvax3m+3tv8kw7+8
-# QiPtysr/lsMlgxht9tOy7QkqDm6RnKc4a32cck0Az+w6J1eZwLAYILlGBaBj4O85
-# gjjp0RtLUKYvi1+xBR3HeoMDNTdciAFKFW9XyZQ1RFCsSHvzwx9sssQ9g0PV/BZC
-# qB7PCYIh+SN743u9fjeP+NWnIGlwbtUtdPK95tOs1pe9MKHs5IRHUluI/VcpPW6p
-# 1b77Za9D91uKHbj21aBDvXaYb5nvrBPVbE5sVR0W0xteQpp83w4DDQ/jb34XTL08
-# M1EKLdsHZQKRX9WfHaKyZ7hRy2MaMtITKvZd0yjjIaQKPeLyrLonNbpIA1Ox0rDn
-# gY1Vsn5+ZbkPSl6J2Kih3gpwsZmBFfdWwwTdrGgmqbpzr5vu/xGxOh57rx5J03EZ
-# susT1bbzjfwd+Nc7qVzJC0HuHALrqY/M6oSOEm8wld7dJApA8NP807PTnlCan1+w
-# Uzz3XfPon4/DvWatAtFJW3Q6xZh2UZDnd56zSGqEmt0yHV7/sKPnO9y59B3pU8Iw
-# vp09eSPQu4qFRDUIiiNXevRBCuuE1RnFe82u0QrFfXUOQn9NfHm1hqZczMIbD0b8
-# dxRo9/4VmMwFEjgrUl5hErn64CaNL0etZqq/G4Mgj80c0fc+Se4JsdOC0XFY6RPt
-# fRC/gJiJMQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMzAz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCD6983RlTLKuV+lBKl/UMvC4lXgPiVUoyiPIMC3
+# YatHtjANBgkqhkiG9w0BAQEFAASCAgBfi+kXWIU0uRVe/M5QA/e4qZBzPrST9Rrh
+# uNbmCchR1RhSovbaVFXtLPZkiJoAoWxthJKGGvSkdLpZwC8UsDYGTgsiditdOmtI
+# z6v0iv3Phcx0BejNbphBqGE15bjXv57qK5U+yW4Mw4vB1+xAxseMS3O6ZvapuSR9
+# nrgwCrSZvlE/Qk3G4lurbzoG511liHZo4SMfjEdKyF2TM5yE1i4BGjm3dU+WDO1p
+# r49papxpYSKAUT9Pd8ycaai+5Mi8YeNSAIibqOoCVuvzeTOoE35b0BPQ6npJbF+m
+# 6SDP17KFpU8nSfYZArO+ORzluqtPyvijgkK3EWBu16xkqqiKYkJORVHAbZKvgE5k
+# R/EUG5zIs2CK67LF+M859tPrk7ngXSA+YAoz9r9q7pv7PYcUedgYFD3uUCBoQhAT
+# u2mD8B9HPlP4WRw/FldcH1qdSSxUSfSEBW2CPqIwrR8vMzlrHYLIV4V/FFOS9ui1
+# lYAuNCNXtvcbvRTYn9OOM0zJ899HQHTzMEnjrTaBS4vpWY0b9tgED+We7PHuM+U3
+# oo5CAjAzVLTtVkYKBI4GmvMfItRAzJLBIChz+dqo7uzVmM2VR8UCAT227BkFumaf
+# tJrZXFhrwskNe9Vm6L8VXW165P02ZfQ/2oaTJRh7cdY0Qh8fusAh/AUoHFtLjMvR
+# utg91i81Ig==
 # SIG # End signature block
