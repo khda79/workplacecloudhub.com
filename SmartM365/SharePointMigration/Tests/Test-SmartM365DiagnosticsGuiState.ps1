@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline GUI checks for newest ShareGate report selection and cached analysis.
 .VERSION
-    1.0.8
+    1.0.9
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -43,6 +43,7 @@ try {
     $lblDiagMigration = [pscustomobject]@{ Text='' }
     $lblDiagLatestReport = [pscustomobject]@{ Text=''; ToolTip='' }
     $lblDiagProgress = [pscustomobject]@{ Text='' }
+    $panelDiagAnalysisLoading = [pscustomobject]@{ Visibility='Collapsed' }
     foreach ($name in @('lblDiagReportState','lblDiagReportEvidence','lblDiagAnalysisState',
         'lblDiagAnalysisEvidence','lblDiagHtmlState','lblDiagHtmlEvidence','lblDiagNextAction')) {
         Set-Variable -Name $name -Value ([pscustomobject]@{ Text='' })
@@ -178,6 +179,7 @@ try {
     $script:DiagActiveReportKey=Get-DiagnosticReportKey
     Refresh-DiagnosticReportState -Force
     if($btnDiagAnalyze.IsEnabled){throw 'Analysis button was enabled during an active analysis.'}
+    if($panelDiagAnalysisLoading.Visibility -ne 'Visible'){throw 'Running analysis did not display its progress bar.'}
     if ($lblDiagKpis.Text -notmatch 'Analyzing ShareGate report: newest.xlsx') { throw 'Running analysis left an incorrect empty detail.' }
     $script:DiagProjectRoot=$project;$script:DiagOutputDirectory=$analysis
     @{State='InstallingImportExcel';Message='Installing ImportExcel from PSGallery for the current user…'} | ConvertTo-Json |
@@ -186,10 +188,18 @@ try {
     if($lblDiagAnalysisState.Text -ne 'Installing module' -or $lblDiagProgress.Text -notmatch 'Installing ImportExcel' -or $lblDiagAnalysisEvidence.Text -notmatch 'CurrentUser'){
         throw 'Background module installation was not visible in the GUI.'
     }
+    Update-DiagnosticReportStatus -Failure 'Synthetic analysis failure'
+    if($panelDiagAnalysisLoading.Visibility -ne 'Collapsed'){throw 'Failed analysis kept its progress bar visible.'}
+    Update-DiagnosticReportStatus
     $script:CurrentMigration=[pscustomobject]@{Name='Other';Root=(Join-Path $root 'Other')}
+    Update-DiagnosticReportStatus
+    if($panelDiagAnalysisLoading.Visibility -ne 'Collapsed'){throw 'Another migration displayed the previous analysis progress.'}
     $lblDiagProgress.Text='Other migration'
     Update-DiagnosticAnalysisProgress
     if($lblDiagProgress.Text -ne 'Other migration'){throw 'A background installation overwrote another migration status.'}
+    $script:DiagProcess=$null
+    Update-DiagnosticReportStatus
+    if($panelDiagAnalysisLoading.Visibility -ne 'Collapsed'){throw 'Completed analysis kept its progress bar visible.'}
     Write-Output 'Diagnostics GUI report-state offline test passed, including XLSX installation availability and progress.'
 }
 finally {
@@ -199,8 +209,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5bB5Ukx7jZw6a
-# 9LThop6dDV5Li6Zs3fbPbE0hEF3p4qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBA2pjV+XZbPPC
+# imPvBiK1sw2/vq/LsxDg3pbsc6fWGKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -230,14 +240,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC4u7Ql5jnDobpSYB3FNNm9
-# XFEtVAZ0WZL1WHecnXz1hDANBgkqhkiG9w0BAQEFAASCAYAVcFeuHY5OBeVk/AFQ
-# 7UTjr6MlS3Xb8v6k0u7of3XPGEJtTgAHJkMyMLeERIhx5nukyEzxZ3Z+casaJN3B
-# DjkyBZv/1NdS7jYQTMUpm2NEFs6MbAkqrQmqn/UOSgvSoT1Tz7Ri6H2HQ5HcQLH+
-# vTG0N14M/ZF9eklMuzSln3/+SQkDltZlq2tVOptv6pb/pcED9yn/uwy2A3bifapw
-# lHiLK9JwUN96/B3O2LaGVE+LbsohOjau3UDF/VrlTPpYoz9u3y5wrc/E49iQz33B
-# /VwQaBCo6ne7LXTIRnj0OA2js/oEEKlMLofp9KtobV48yJAUqQvAaeCXgqTeaQkL
-# QRr5xNjiTYn/1SM3fBr53Wy8ffySYPmpBxPOysTJ+JL0K49dG9Nm8yjk3lw6sLSm
-# 6JaNffjAvImfu/C5KGFbQ4vc+WISmfcmJrEEw2oZvKorX4PU9RRkFpxXx7n5HgKu
-# xEDCEAj/DKhqcfm9gZBkMICL8Yii7QIQZXfDa3GheNYFiX0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBwjJKMxf3ykx6wkzOfjr/e
+# 6wjdOu1oUWemPV867pGxEzANBgkqhkiG9w0BAQEFAASCAYB12XKD5V+Tkj8XTSUR
+# mT1EfOpYU+8uDmyb1SpbuGfqqIwRgeelTc2sXtuywJ0z7hN/X++xJWpR59Su3AQE
+# WCdO4a+Aff6EpHguEyqbwUsVgoQyUZuKJN+f1BKsI2MutElqdlyQtO3ySxxXSCGy
+# DB2tjMNLJ/DPcu9xPlcZTnXmhydA77fzJ6j0XYqknqBXDLiJdh1IDCzMGPLxLB07
+# SmznF0WXvjF/qq8M3RZjCpLEcSJqDnQOT5DmnXtEbgGRxOYn/oF5Ln5NrqqGCo8o
+# jUYQkJtmU1waTWrGIVKWLj9fEdjXlxbCWUizmqIZJeaY05JVB6i1+N2/eUUn5bkL
+# 9vywa6m6cNBUK6/2+7GqFWD2Vu3mg7xwVKB/O5yrZ29HPM98QtBQ1D32LqhlIoed
+# Mrs4GR7BT1Qalj8aa8V0XQwJfgTLDEN5Of8lJY7xGD0cu3Ahu2R/kweahXCEUAxB
+# GNTNzZe08qwCULL9KrIPPsXXIr7QXMKMKxUKkBRYjfK/W5Y=
 # SIG # End signature block

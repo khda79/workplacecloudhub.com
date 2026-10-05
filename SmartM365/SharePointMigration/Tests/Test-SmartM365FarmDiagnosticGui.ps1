@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Migration Diagnostics farm-result and command-generation test.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -82,6 +82,10 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     $farmHost=$layoutWindow.FindName('farmDiagnosticsHost')
     $farmCard=$farmHost.Child
     $loading=$layoutWindow.FindName('panelCrossCheckLoading')
+    $analysisLoading=$layoutWindow.FindName('panelDiagAnalysisLoading')
+    if ($analysisLoading.Parent -ne $loading.Parent -or -not $analysisLoading.Children[1].IsIndeterminate) {
+        throw 'ShareGate analysis progress is not at the top alongside cross-check progress.'
+    }
     if ([Windows.Controls.Grid]::GetRow($loading.Parent) -ne 0 -or
         $loading.Parent.Parent -ne $diagnosticsPanel) { throw 'Diagnostics loading progress is not at the top of the tab.' }
     if ([Windows.Controls.Grid]::GetColumnSpan($review) -ne 3 -or
@@ -134,8 +138,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5Ft+UlHywUeN/
-# rx0PrTWJKrENN35YAbO3BcGWOgRioaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6F+sZrZqwlSA+
+# 1KA4y9XojmVXuPH/u798faqGY2i1n6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -165,14 +169,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCEsFJbHwnC6GnPBLG6XteE
-# xSe2R9VsnnSyaZShizxJ9DANBgkqhkiG9w0BAQEFAASCAYBVicyycLXt6Esrsq/4
-# BdIYsTx+mgEjl7sM7yno6EYdHDSHXt2uzYCRXkOcY9fuE0+3DWymjjqdPP0YQm1b
-# VizKnKo93Trz1kLpcwkTSr0CKXV/dd15u2ZrvDUVDzHOpNniqzTvdGaYr+G+1k+b
-# VfmMm0Yy4hZpAnIgKo/dqwIWpVOqRKZIXz5XXf4eS0rX1mCqwj3EpSiU8gXgce9s
-# imjm8yPUPGsmDppDu207IXu/+D6GJygysGBmQ1lOz29FEYce0Rm/TaSlztxV/ffR
-# ptI0zbjDlhLM9eDbuIy8QwqLUle2eY5F5KDgKxs6CzvbOT41yhvuE9XRECyGg0kZ
-# I5cNtJDSsXTBnPBRruNMiCbmUCZks9H3NKl8rQCk8INPnPglmLE1iiOXvgAR2rA+
-# 6evrXbUqEJtyvJy3IB8RqGrKqu+fJKcpugndmvBRUIcY4DWdbAmC/dM3pt1NXeGu
-# atT4o5ok8ptx03eVLOmyAO0qcKWV7+3Rz3/96cOxWsCUfWM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA2tr7Ihouneq0w1e0NzOKm
+# oZt+RQHzOSErwjHEQxZulzANBgkqhkiG9w0BAQEFAASCAYCuT/HQVGTHYxHQygyv
+# qvE63Llqh/lZV/8UQzMs7X6QHa57LeqiL3QY59F873jMQcat5yKHaOaf1FHkxeI+
+# za+tnUUL3Vapk/Rh/3ZaG3RSQEaoWIBylAjAxGhV64J6kMZ+F21UrZ9YA7Fstdap
+# DGRmWxevnEJK7ez/RuBQ1NQ1A7VpLRA/qRWatSv89rokn0FkxWYNprKF9Hc2kNDO
+# GfIvLhub8NkDdH75jw49WRextHybzgITE2wrtwwB1Aw9Z2qOSp6IcjKnzKK2nJU1
+# KXiijRG5Woza3Tjg2RXRB17Oceb0WsmfSoSj1SFuoFlDxwJgAb/qlWw5dx4ifjFT
+# 7GU17EG8fCVZuRply80yosBa01aysbf2RZByqy+K0wJGW2ponoBEv9WfM3aoLTLZ
+# j6CxQvumAiC0w6LOWEf8OwGDZzVD7VEKYK86Wxfp9XkCVeAr3WKLKEKK1DNi6L/m
+# KIM3x/oXYu9XV7hGMDuWJ/zMo/i/lYMlWXK+BjLPnai9CDg=
 # SIG # End signature block

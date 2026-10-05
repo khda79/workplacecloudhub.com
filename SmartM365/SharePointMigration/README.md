@@ -523,6 +523,9 @@ PowerShell's execution policy and permanent repository trust settings are preser
 its matching analysis and generated HTML. **ShareGate analysis detail** is filled
 after analysis; detecting a new CSV or XLSX does not reuse indicators from an
 older input. File and permission comparison states are shown in Cross-check.
+ShareGate analysis also displays an indeterminate progress bar at the top of the
+tab, including ImportExcel preparation and the current analysis phase. It hides
+when analysis finishes or fails, and when a different migration is selected.
 Cross-check loading text and its progress bar appear at the top of the tab,
 above Summary. Its **ShareGate to fix** column shows `—` when analysis is unavailable;
 `0 items / 0 lines` is reserved for an existing analysis with no issues in that scope.
@@ -530,6 +533,7 @@ Report rows from different
 files are deduplicated by session and row ID; conflicting duplicates are
 counted and flagged for review. A session selector can restrict a manual analysis
 to one session. **Issue review** and **Raw report rows** use the full tab width.
+Selecting an issue pattern displays its matching raw report rows immediately.
 
 The `ShareGate 401 retry results` card appears only when a previous reviewed
 batch result exists. It summarizes historical retries; it does not start one.

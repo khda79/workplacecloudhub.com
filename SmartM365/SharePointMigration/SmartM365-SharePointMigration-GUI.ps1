@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.55
+    1.0.57
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.55'
+$script:AppVersion = '1.0.57'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -1015,6 +1015,10 @@ function New-FarmDiagnosticsWindow {
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Row="0" Grid.ColumnSpan="3">
             <TextBlock x:Name="lblDiagMigration" Text="Selected migration: none" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" Margin="0,0,0,10"/>
+            <StackPanel x:Name="panelDiagAnalysisLoading" Visibility="Collapsed" Margin="0,0,0,14">
+              <TextBlock Text="{Binding Text, ElementName=lblDiagProgress}" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4" TextWrapping="Wrap"/>
+              <ProgressBar Height="5" Margin="0,7,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
+            </StackPanel>
             <StackPanel x:Name="panelCrossCheckLoading" Visibility="Collapsed" Margin="0,0,0,14">
               <TextBlock x:Name="lblCrossCheckLoading" Text="Loading comparison reports…" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4"/>
               <ProgressBar Height="5" Margin="0,7,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
@@ -1305,7 +1309,7 @@ function New-FarmDiagnosticsWindow {
                   <DataGridTextColumn Header="State" Binding="{Binding State}" Width="75"/>
                   <DataGridTextColumn Header="Lines" Binding="{Binding Lines}" Width="55"/>
                   <DataGridTextColumn Header="Items" Binding="{Binding Items}" Width="55"/>
-                  <DataGridTextColumn Header="Pattern (double-click for rows)" Binding="{Binding Pattern}" Width="*"/>
+                  <DataGridTextColumn Header="Pattern" Binding="{Binding Pattern}" Width="*"/>
                 </DataGrid.Columns>
               </DataGrid>
               <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -1621,6 +1625,7 @@ $cardDiagSummary = ctrl 'cardDiagSummary'
 $cardTransient = ctrl 'cardTransient'
 $panelDiagReview = ctrl 'panelDiagReview'
 $lblDiagProgress = ctrl 'lblDiagProgress'
+$panelDiagAnalysisLoading = ctrl 'panelDiagAnalysisLoading'
 $lblDiagReportState = ctrl 'lblDiagReportState'
 $lblDiagReportEvidence = ctrl 'lblDiagReportEvidence'
 $lblDiagAnalysisState = ctrl 'lblDiagAnalysisState'
@@ -3031,7 +3036,7 @@ function Refresh-DiagnosticPatterns {
 
 function Refresh-DiagnosticRows {
     $pattern = $gridDiagPatterns.SelectedItem
-    if (-not $pattern) { $gridDiagRows.ItemsSource = $null; return }
+    if (-not $pattern) { $gridDiagRows.ItemsSource = $null; $txtDiagRaw.Text = ''; return }
     $search = [string]$txtDiagRowFilter.Text
     $gridDiagRows.ItemsSource = @($script:DiagRows | Where-Object {
         $_.PatternKey -eq $pattern.PatternKey -and
@@ -3096,6 +3101,7 @@ function Update-DiagnosticReportStatus {
 
     $report = $script:DiagLatestReport
     $isRunning = [bool]($script:DiagProcess -and $script:DiagActiveReportKey -eq (Get-DiagnosticReportKey))
+    $panelDiagAnalysisLoading.Visibility = if ($isRunning -and -not $Failure) { 'Visible' } else { 'Collapsed' }
     $hasHtml = [bool]($script:DiagSummary -and $btnDiagOpenReport.IsEnabled)
     if (-not $script:DiagSummary) {
         $lblDiagKpis.Text = if (-not $report) { 'No ShareGate migration report is available. Deposit the latest CSV or XLSX in MigrationReport.' }
@@ -3737,8 +3743,6 @@ $gridDiagPatterns.Add_SelectionChanged({
             if ([string]$item.Content -eq [string]$pattern.State) { $cmbDiagState.SelectedItem = $item; break }
         }
     }
-})
-$gridDiagPatterns.Add_MouseDoubleClick({
     Refresh-DiagnosticRows
 })
 $gridDiagRows.Add_SelectionChanged({
@@ -3940,8 +3944,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD754lMY6d0x8nb
-# sSWet5knmvMsQj0decR2RNuH+Hz4Z6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAf8974xAYHgIr3
+# 6UJozTHg2cOB+l2+sKf7TvfJlLXJn6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3971,14 +3975,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBztVOuk1PpcT01yXyQnGwq
-# xURgWegesm5005Em6IbHUzANBgkqhkiG9w0BAQEFAASCAYCOGh5i3MgMrssqDmN5
-# BpfaH8W/J30GLHaXOcii7Ubi/Hphr6tq6qSReVGsCgDn9YbLix9wUnmnVgpDIkbS
-# 730gc/ysafQbUZt9hIZ/yijbmL1utTpA0yUogr+WoGqPfh2T3pWkNaCQXa7f9R1J
-# yLQsl5YbJZW/bsA2h7JxGwxGuBvfbp7A4HluSmAkbJPOD82ZurdY7PoTIzaT10IY
-# bCLGrCzvV1nF/KFV/NjEkDvW7CbO8rHAWbyyG2cKjE7QEjqDDwvuVbokGjODGuV0
-# FOG+MSChnokIqSEI7mEJEDx5zDjRZEUXyWY2M+dw+wA7wUuCajN0hv9mJR1lkK44
-# Z2zI7m14rctAG8DofGoR6N9vb9CTkVlyDJodUJ/04mtVs/1knpkr9YiQ9DUdwAxt
-# khbRrcMdYgALLf2luGhyBubYIFWMoGzta9i4WFaQhJ0QPj+T/5cnxWJ04PwAoWR5
-# Z0XD34CrjxxvH2LFA36IrCTMwwh2RoWjdcCXg6xmE5huwPY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCBQZcd7FqtaML6mxnyLHop
+# q356mYJjwYVssV6GXY7blDANBgkqhkiG9w0BAQEFAASCAYByLe9Eog/8ICkdOag3
+# zm1wDVSWSK6DFfgnfbYA2AC40DXmgbKVnmhryR0UAEOXgkzTslYjuspUiYdey1wD
+# 8W7M4gRiVqP7VvylSKj47CKwFW6jY/vUFCgCWe/hf++tjYaVnlhXyTZMg+TVweLT
+# qxKtUkpS3wXpSMlwVINsePYWaiU3ljH4I88M2QnJ8hzaXIibEJMCMOOdHa9NUTPP
+# ahpDRv7TbLYtmGD/F+Mqnt8KocSY22gYf4zWzjZGReHssjEHh6GYPUWsFVPG1EY9
+# ibt/Ll/CxIAxWwE+DzXEUdv1/BoVRWE1a29d4dG/zITbAO1A0rMrF0SeXKOup+ui
+# dCxp7MBNATFCmdU4Gxjn1mvS227wmGv26x+ASGAvpPG/wA1WqpnY2bSMBhN0bw9I
+# MmfYBgLc7nAW3iAevVjhm+6MRjC10GMCKQLx9zdMgvB0JCGyu2NviiZ40FMVOgDl
+# 2kSeGL556Cljzt8PoTnE/OVyOXN8fPFc//2kUPkmxege0IM=
 # SIG # End signature block
