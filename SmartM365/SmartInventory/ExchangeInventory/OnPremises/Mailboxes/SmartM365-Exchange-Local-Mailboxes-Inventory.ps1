@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.55
+1.56
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.55
+Version: 1.56
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.55"
+$ScriptVersion = "1.56"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -351,6 +351,7 @@ $script:LocalMailboxIssueSequence = 0
 $script:LocalMailboxExpectedScopes = @()
 $script:LocalMailboxAcquisitions = New-Object 'System.Collections.Generic.List[object]'
 $script:RemoteMailboxAcquisitionComplete = $false
+$script:RemoteMailboxForestPopulation = $null
 $script:CmdbLocalMailboxSourceComplete = $false
 $script:LocalMailboxPopulationCoverageComplete = $false
 $script:LocalMailboxObservedNativeGuids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -445,9 +446,11 @@ function Invoke-SmartM365LocalMailboxPopulationQuery {
         if (-not $script:LocalMailboxForestPopulation.ContainsKey($Scope)) { throw 'Requested domain is outside the acquired forest population.' }
         return $script:LocalMailboxForestPopulation[$Scope]
     }
-    $acquisition = [pscustomobject]@{ Scope=$Scope; QueryCompleted=$false; ProjectionCompleted=$false; Rows=0; ObservedRows=0; ReadFromDomainController=$true; ResultSize=[string]$ResultSize; DomainCounts=@{} }
+    $acquisition = [pscustomobject]@{ Scope=$Scope; QueryCompleted=$false; ProjectionCompleted=$false; Rows=0; ObservedRows=0; AcquiredThisRun=$true; ReadFromDomainController=$false; ResultSize=[string]$ResultSize; DomainCounts=@{} }
     [void]$script:LocalMailboxAcquisitions.Add($acquisition)
-    $query = @{ ResultSize=$ResultSize; ReadFromDomainController=$true; ErrorAction='Stop'; WarningVariable='mailboxWarnings' }
+    # The domain-controller switch can silently omit the whole forest population.
+    # Freshness here means a live query in this run, never an earlier CSV.
+    $query = @{ ResultSize=$ResultSize; ErrorAction='Stop'; WarningVariable='mailboxWarnings' }
     if ($Scope) { $query.OrganizationalUnit = $Scope }
     $mailboxWarnings = @()
     $rows = @(Get-Mailbox @query)
@@ -478,6 +481,9 @@ function Initialize-SmartM365LocalMailboxForestPopulation {
     if ($script:LocalMailboxAcquisitions.Count -ne 0 -or $null -ne $script:LocalMailboxForestPopulation) { throw 'Forest population must be acquired once before domain processing.' }
     $script:LocalMailboxAcquisitionMode = 'Forest'
     $native = @(Invoke-SmartM365LocalMailboxPopulationQuery)
+    if ($native.Count -eq 0) {
+        throw 'Unconfirmed empty local mailbox forest population. Mailbox CSV publication is blocked; verify Exchange recipient scope and directory visibility.'
+    }
     $byDomain = @{}
     foreach ($scope in $ForestScopes) {
         $partition = Get-SmartM365MailboxDomainPartition -NativeRows $native -DomainScope $scope -ForestScopes $ForestScopes
@@ -557,10 +563,11 @@ function Get-SmartM365LocalMailboxQualification {
         if (@($Acquisitions).Count -ne 1) { $complete = $false }
         else {
             $query = $Acquisitions[0]
-            $fields = @('Scope','QueryCompleted','ProjectionCompleted','ReadFromDomainController','ResultSize','DomainCounts','Rows','ObservedRows')
+            $fields = @('Scope','QueryCompleted','ProjectionCompleted','AcquiredThisRun','ReadFromDomainController','ResultSize','DomainCounts','Rows','ObservedRows')
             if (@($fields | Where-Object { -not $query.PSObject.Properties[$_] }).Count -gt 0) { $complete = $false }
             elseif ($query.Scope -or -not $query.QueryCompleted -or -not $query.ProjectionCompleted -or
-                $query.ReadFromDomainController -ne $true -or $query.ResultSize -ne 'Unlimited' -or $query.DomainCounts -isnot [System.Collections.IDictionary]) { $complete = $false }
+                $query.AcquiredThisRun -ne $true -or $query.ReadFromDomainController -ne $false -or $query.ObservedRows -le 0 -or
+                $query.ResultSize -ne 'Unlimited' -or $query.DomainCounts -isnot [System.Collections.IDictionary]) { $complete = $false }
             else {
                 if ($query.DomainCounts.Count -ne @($ExpectedScopes).Count -or @($ExpectedScopes | Select-Object -Unique).Count -ne @($ExpectedScopes).Count) { $complete = $false }
                 foreach ($scope in $ExpectedScopes) { if (-not $query.DomainCounts.Contains($scope)) { $complete = $false } }
@@ -802,14 +809,15 @@ function Export-SmartM365EmptyLocalMailboxPopulation {
     if ($script:LocalMailboxAcquisitionMode -ne 'Forest' -or $null -eq $script:LocalMailboxForestPopulation -or
         $script:LocalMailboxAcquisitions.Count -ne 1) { throw 'Empty local mailbox export requires the current complete forest acquisition.' }
     $query = $script:LocalMailboxAcquisitions[0]
-    if (-not $query.QueryCompleted -or $query.Scope -or $query.ResultSize -ne 'Unlimited' -or -not $query.ReadFromDomainController) {
-        throw 'Empty local mailbox export requires a successful fresh unlimited forest query.'
+    if (-not $query.QueryCompleted -or $query.Scope -or $query.ResultSize -ne 'Unlimited' -or
+        $query.AcquiredThisRun -ne $true -or $query.ReadFromDomainController -ne $false) {
+        throw 'Empty local mailbox export requires a successful live unlimited forest query.'
     }
+    if ($query.ObservedRows -le 0 -or -not $DomainScope) { throw 'Unconfirmed empty local mailbox forest population. Existing CSVs are preserved.' }
     if ($DomainScope) {
         if (-not $script:LocalMailboxForestPopulation.ContainsKey($DomainScope) -or
             @($script:LocalMailboxForestPopulation[$DomainScope]).Count -ne 0) { throw 'Domain population is not proven empty.' }
-    } elseif (-not $script:LocalMailboxPopulationCoverageComplete -or -not $query.ProjectionCompleted -or
-        $query.Rows -ne 0 -or $query.ObservedRows -ne 0) { throw 'Combined local mailbox population is not proven complete and empty.' }
+    }
     foreach ($issue in $script:LocalMailboxIssues) {
         if ($issue.BlocksCmdbQualification) { throw 'Acquisition warnings prevent qualification of an empty local mailbox export.' }
     }
@@ -1017,6 +1025,24 @@ function Get-SmartM365RemoteMailboxColumns {
       'ObjectGuid','CollectedAtUtc','NativeIdentityStatus')
 }
 
+function Invoke-SmartM365RemoteMailboxPopulationQuery {
+    [CmdletBinding()]
+    param([string[]]$IncludedLDAPPaths = @())
+
+    $rows = @()
+    $warnings = @()
+    if ($IncludedLDAPPaths.Count -gt 0) {
+        foreach ($scope in $IncludedLDAPPaths) {
+            $rows += @(Get-RemoteMailbox -OnPremisesOrganizationalUnit $scope -ResultSize Unlimited -WarningVariable +warnings -ErrorAction Stop)
+        }
+    } else {
+        $rows = @(Get-RemoteMailbox -ResultSize Unlimited -WarningVariable warnings -ErrorAction Stop)
+    }
+    # Empty results are not proof that all recipients are visible. Fail before writes.
+    if ($rows.Count -eq 0) { throw 'Unconfirmed empty remote mailbox population. Mailbox CSV publication is blocked; verify Exchange recipient scope and directory visibility.' }
+    return [pscustomobject]@{ Rows=$rows; Warnings=@($warnings) }
+}
+
 function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     [CmdletBinding()]
     param(
@@ -1029,20 +1055,12 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     WriteLog -Message ("Starting Exchange remote mailbox inventory. OutputPath: {0}" -f $RemoteOutputPath)
     Write-Host "Starting Exchange remote mailbox inventory... $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 
-    $allRemoteMailboxes = @()
-    $remoteWarningRecords = @()
-    if ($IncludedLDAPPaths -and $IncludedLDAPPaths.Count -gt 0) {
-        foreach ($scope in $IncludedLDAPPaths) {
-            WriteLog -Message ("Retrieving remote mailboxes from scope: {0}" -f $scope)
-            try {
-                $remoteInScope = @(Get-RemoteMailbox -OnPremisesOrganizationalUnit $scope -ResultSize Unlimited -ReadFromDomainController -WarningVariable +remoteWarningRecords -ErrorAction Stop)
-                $allRemoteMailboxes += $remoteInScope
-                WriteLog -Message ("Found {0} remote mailboxes in scope: {1}" -f $remoteInScope.Count, $scope)
-            }
-            catch { WriteLog -Message ("Failed to retrieve remote mailboxes from scope '{0}': {1}" -f $scope, $_.Exception.Message) -Level ERROR; throw }
-        }
-    }
-    else { $allRemoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -ReadFromDomainController -WarningVariable remoteWarningRecords -ErrorAction Stop) }
+    $population = if (-not $IncludedLDAPPaths -and $null -ne $script:RemoteMailboxForestPopulation) {
+        $script:RemoteMailboxForestPopulation
+    } else { Invoke-SmartM365RemoteMailboxPopulationQuery -IncludedLDAPPaths $IncludedLDAPPaths }
+    $allRemoteMailboxes = @($population.Rows)
+    $remoteWarningRecords = @($population.Warnings)
+    if ($allRemoteMailboxes.Count -eq 0) { throw 'Unconfirmed empty remote mailbox population. Existing CSVs are preserved.' }
 
     $dataQualityWarnings = @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $remoteWarningRecords)
     $Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings = @($dataQualityWarnings)
@@ -1084,7 +1102,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
     if ($records.Count -eq 0) {
         if ($dataQualityWarnings.Count -gt 0) { throw 'Remote mailbox warnings prevent qualification of an empty inventory.' }
-        WriteLog -Message 'Remote mailbox query completed with zero records; publishing the full empty schema.'
+        throw 'Unconfirmed empty remote mailbox export after scope filtering. Existing CSVs are preserved.'
     }
 
     $suffix = if ($OnlyADPermission) { '_OnlyADPermission.csv' } else { '.csv' }
@@ -3035,8 +3053,13 @@ throw $errorMessage
 
             WriteLog -Message "Starting processing of each domain via the Process-SpecificDomain function..."
             if (-not $OnlyADPermission -and $ForceOverwriteCSV -and $MaxItems -eq 0) {
-                WriteLog -Message 'Acquiring the complete local mailbox forest population once, directly from domain controllers.'
+                WriteLog -Message 'Acquiring the complete local mailbox forest population once with a live Exchange query.'
                 Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes $script:LocalMailboxExpectedScopes
+                if ($IncludeRemoteMailboxes) {
+                    # Acquire both populations before the first mailbox CSV publication.
+                    $script:RemoteMailboxForestPopulation = Invoke-SmartM365RemoteMailboxPopulationQuery
+                    WriteLog -Message ("Remote forest acquisition completed: native mailboxes={0}; current-run objects retained for projection." -f @($script:RemoteMailboxForestPopulation.Rows).Count)
+                }
                 WriteLog -Message ("Forest acquisition completed: native mailboxes={0}; domains={1}. Domain processing uses these current-run objects only." -f $script:LocalMailboxAcquisitions[0].Rows,$script:LocalMailboxExpectedScopes.Count)
             }
             foreach ($domain in $domainsToProcess) {
@@ -3075,12 +3098,7 @@ throw $errorMessage
 					Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 }
             } elseif ($script:LocalMailboxAcquisitionMode -eq 'Forest' -and $script:LocalMailboxPopulationCoverageComplete) {
-                Export-SmartM365EmptyLocalMailboxPopulation -Path $globalCombinedCsvFile
-                $null = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $globalCombinedCsvFile -LatestFileName (Split-Path -Path $globalCombinedCsvFile -Leaf)
-                $scriptdatamailbox = $true
-                $InputCsvForDuplicateScan = $globalCombinedCsvFile
-                $SendFileListEmailReportFileName = $globalCombinedCsvFile
-                WriteLog -Message 'Complete forest query returned zero local mailboxes; published the native empty schema, not a previous export.'
+                throw 'Unconfirmed empty combined local mailbox export. Existing CSVs are preserved.'
             } else {
                 WriteLog -Message "No data accumulated in \$Global:ScriptOverallMailboxData. Combined 'AllDomains' CSV will not be created or will be empty if it was pre-deleted."
                 Write-Host -ForegroundColor Yellow "No mailbox data was collected or loaded. The combined file '$globalCombinedCsvFile' will not be created or will be empty."
@@ -3530,8 +3548,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQ+hvoi0x3nWtR
-# XZxWa6r8eaw3ZbgJNlusiJNVhjGYrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqTZEVOh/SiWkl
+# PtbwRo4NYLe0Cc0BYFvTBBQi2LYFSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3664,31 +3682,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAq/HwreSM89rrjfE3r02K39ZezcHdZV8GvD/qj5VRKKMA0GCSqG
-# SIb3DQEBAQUABIIBgKsjkrBTbyRY967UutziUK0aj6EXQcDCW70D0s+rLaf/6X0Q
-# gFEoZa0lWxaAA346UU4jR3PA1EB29usbY1EoIVp7jIfFwtzYSs4hCn+EVragpXdZ
-# C3jcYIv5IEPRnKBTJFlQhpNU/HaN3b2hiCCXx+vdM5r5tsXOpEwgpVlO+DXpSUJz
-# SHwEh0GXfsErSLXBDOyfbd1sMPSW+qU35jRNBN3gLHhDV06/qKTjZZGUrKCjGqlW
-# 12YJvRT4mJPDpcjq5zHUZgHpYhe/5QbwKMW9LmeGyYvATnRxdqkeaKr1fDdiBpwK
-# 91dQH6SyWD7Zu9Duq9EblYORUXyCNPwm8NXAgZMOSpRvfkhxN4LBFwsWFPQXqxQX
-# qn8TR9EUsN18Ci5odg6vSSCp5xR/EWVtIas1RvJvvVJcvPCdOyyWdLc9JXs5GSjz
-# CroUacchRwpftmYRgqBCHqTazxUnjt7eaLlit+euFGK8O6B05y3b9lJ9Et9HlyJG
-# cYTKiU+5VoQ0VFQzOaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJIqHBvPwqLqemr36XeJsNQwRNro1ndpeKltODsgxa9QMA0GCSqG
+# SIb3DQEBAQUABIIBgK5ry88fkCZM0e7YBIz9tcmJKooALBDGRKqQ9BDZtpvESB+x
+# iqETAArlX+abjhSxU77GwW/97RHMJ9csn8qdh3hSvulhxtDcp6zU/MOvhu0WeBQg
+# /THMzeLj7uK2/RUTxYjNxo2XYfWbUvyMfq3lKZh1czRJewv8wkR1xxW2sV6wzKJg
+# VNetsVeQmiyDWQnm4Yrp4siUnoDGaHbUBwIGFukxUt085Vj93IEVMGCT5UjzfH+u
+# j1i3rCVoczCPA1AbabMQzzpJXqpPgKodWUL8z1i7VX4AXfiK5LJ9KeSMMWu6h3Jg
+# XVEcSMEaJ+2iqWSZJDw5AU8DA6z1+rPorGSr1aFxAzCxoCAMyeiHLl9mO0hB0IMo
+# rotvw6t4vR+yBgYvCoARgUtadYRwxrbdSufhF7Hgi1jTefX1YhfF6GMeBhe7W5Tu
+# /aFL7CCZOgd0W3svwEnNnFeDygfAhEWJTXmMYNjOajGBsX44tJOemV9s+cki0I5I
+# y5dt1m5Bi5y6KJq5HKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwOTMx
-# NTlaMC8GCSqGSIb3DQEJBDEiBCDTQ4Z3tSE/n/EU3B8CQ5OthN9vA8MnzfCkiZJN
-# ib5qbTANBgkqhkiG9w0BAQEFAASCAgAueCwSA4/uO7nawXxW7rdPUe/R66cYdRMG
-# VyRYMD9QwJeu8hn6IO3o5ErPsgwb16cQl9Cdk2D+yhWHBifEAiNXk/m8MO9ege33
-# Cu1HqHNcQQhd6CX/pvLk7rY6W7vULKo0HX+mWzkyziR+XdlGTXfPY1s2TTwfWUrA
-# brxQhlm3wJUp+/K4Sd827pLeJWdWpCokKHTyxgFEdNESUU/ild8s18Ue8k/4Bhhl
-# cNVC8IEylh1Wrf4a2KECWICdKV9KxAsfLP9YVvZc/OXBdDdwrdP8k2N99VoSmHnm
-# L0pbxvqFKSDkWcdLYTuVUhpKQmqkxm67PRCW+7lAsssDVcxFe26CrFYTOvTF1fC0
-# 7EHsUgkHzjjL3XGWKzu+wHEgauh2plHbI7yvzmLe7/+MsSgrn8kqqucsVihLmoin
-# Wvhdi1SqXlk9BmJGWsZRDZ6CkJiLl6kqoNmForeWrtMET43F6t4CK9Fsp6WBiBME
-# 1xVnE0Nl+azGDUEMUk72mDPaY7/A4HeGf3vqbTrDJYgs2d80mSahOlR7VduSQiWv
-# YjipsAgxCl0A3WwxpA5W+LuNnwNtrLIquz/GpEF4JKIlrOB8iI8Yfto7H/hUX/63
-# UOHPj+npvwBRF/J0KFXetxvTVp9y+081eL/E17LjZr1LN9gIjq8hrEyNLch3FSqn
-# gU29i6Qbpg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMTM2
+# NTVaMC8GCSqGSIb3DQEJBDEiBCC2l6BLExeoh3Z7nR/8OLjYdjyVdbMdDmtgj5V5
+# wgZeLDANBgkqhkiG9w0BAQEFAASCAgCS8yoCkdDH5yT1ig4xZvax3m+3tv8kw7+8
+# QiPtysr/lsMlgxht9tOy7QkqDm6RnKc4a32cck0Az+w6J1eZwLAYILlGBaBj4O85
+# gjjp0RtLUKYvi1+xBR3HeoMDNTdciAFKFW9XyZQ1RFCsSHvzwx9sssQ9g0PV/BZC
+# qB7PCYIh+SN743u9fjeP+NWnIGlwbtUtdPK95tOs1pe9MKHs5IRHUluI/VcpPW6p
+# 1b77Za9D91uKHbj21aBDvXaYb5nvrBPVbE5sVR0W0xteQpp83w4DDQ/jb34XTL08
+# M1EKLdsHZQKRX9WfHaKyZ7hRy2MaMtITKvZd0yjjIaQKPeLyrLonNbpIA1Ox0rDn
+# gY1Vsn5+ZbkPSl6J2Kih3gpwsZmBFfdWwwTdrGgmqbpzr5vu/xGxOh57rx5J03EZ
+# susT1bbzjfwd+Nc7qVzJC0HuHALrqY/M6oSOEm8wld7dJApA8NP807PTnlCan1+w
+# Uzz3XfPon4/DvWatAtFJW3Q6xZh2UZDnd56zSGqEmt0yHV7/sKPnO9y59B3pU8Iw
+# vp09eSPQu4qFRDUIiiNXevRBCuuE1RnFe82u0QrFfXUOQn9NfHm1hqZczMIbD0b8
+# dxRo9/4VmMwFEjgrUl5hErn64CaNL0etZqq/G4Mgj80c0fc+Se4JsdOC0XFY6RPt
+# fRC/gJiJMQ==
 # SIG # End signature block
