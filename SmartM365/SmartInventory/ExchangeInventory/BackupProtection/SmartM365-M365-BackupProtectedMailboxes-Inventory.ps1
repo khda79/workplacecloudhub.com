@@ -33,7 +33,7 @@
     Limits the number of items for a test run without replacing canonical latest exports.
 
 .VERSION
-1.17
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -92,7 +92,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -111,7 +111,7 @@ function Import-SmartM365CoreModule {
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $candidate) {
-            Import-Module -Name $candidate -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+            Import-Module -Name $candidate -MinimumVersion '1.0.72' -Force -ErrorAction Stop
             return
         }
         $parent = Split-Path -Path $searchRoot -Parent
@@ -456,6 +456,7 @@ $script:CompletionStatus = 'Auto'
 try {
     $CurrentOperation = 'InitializeScriptEnvironment'
     $initializedOutput = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $logFileBaseName
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{IncludeNonProtected=$IncludeNonProtected}
     $ScriptCsvLogFolderPath = $initializedOutput
     if ([string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath)) { $WeeklyHistoryFolderPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath 'WeeklyHistory' }
     $timestampedCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("M365_Backup_ProtectedMailboxes_{0}.csv" -f $timestamp)
@@ -543,8 +544,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcDVuB1IQkmZOY
-# SMwSo2mSteUndP4uiacpJUTi8ioHl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcapeJ04HHzZMU
+# eFV3rC7pKMEf0aeRKsHNtiog0JQ/xqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -677,31 +678,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHchau8+9EfgOMvqEil2KNC+bzCxdcUwBA7vWWl2Z0mlMA0GCSqG
-# SIb3DQEBAQUABIIBgJr/uTr38FzI6BRVembWeTY1Pr0pGt41mHwJWqgFgZFmNxUX
-# mziZofRMmI19SmtIAs6fWQonSxmPvGRjWjQKdpQFSQ7XfQf1Pvgl0MKoiBDc2hih
-# NKO4Huco/sZfTdB0AoN+Q3D57rxsSKzIWOfsuFpjkk31+SiAOZtQIDl7+y3dVkCk
-# YLmFmrz9rHFVsQqRI6r/e1CT5sApYxoM+xurSIT5TOZ0kQ5JlfRpSolCV6XNTLvo
-# /pUjnxpxRn/hs3Mnd4oQV0nXuvxSRXMkR21ZR1CfRo5mHs3noAteW92rCTCJZO8x
-# ikn6qngyM9Y8P6NcLF2MThUVV8PYQWflOKwhBs5n8uEGxGV/wjEDYqrOxKECsnLH
-# EHjGNNfRdu0v9M3hSUBDcwcOSmMSnjLpWseKinF2Se/Q/RwnAva0tMRYwxm0pVDQ
-# ZV7AtBNw5EQtBRldV/Mf0vo63GEhZME1FiO8oLzxXMA287HyopuhUW4EqOEqUalV
-# izA3e52pShjH6Oa21aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC2PJhMhlNYHxMh0M5/ad2Lvg90kN8wpHZ+r8at7vLzfMA0GCSqG
+# SIb3DQEBAQUABIIBgJDM9efE08W2pbIv5zoOM6+5gre5kXV4tOHZqjjRVJaX3TtX
+# Ej3PCn4It12zHB+g0nOhDRDoKMFqVruPaXiBvJZ6JpA8eiQYveehc9P4ezDNfB68
+# ZzmHuTzcNzwHj6bycs5FDcFsahos0M2r/ra+Y+8MTAg1WERPHQFYgLU5LWzjNOHQ
+# LwmFdcelOoGz/mkgAoSfI5c4wyoU8B3b6ctmkyOPftY+/Q1TUIG/ay6GCVIYkE49
+# KWZzmiUoo3G7q4W8OVm8zF4UBUEQpMs2cFF5Wnjm3fwTlMrZyh6l7D3AnG3CQDlS
+# WaQQO8670WLnk9hboB+tfIwE1gl6VGP3IxA6A/iwBs88Ph7O0OVsSn5H2fPHX/DX
+# 0/itjHYk8s7Bp2UWndHNGodo0st1GweRfpa/El3O6yTQ2Cstra9yL+p8yZZO4Wgv
+# LxIFDFLnqc+WifrhJALNoe/1XpQjSjHqQslw/DA8CI3u0y7Ww9OqLASnEobvwjXg
+# ynecyM3/n9/bscPlpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDFaMC8GCSqGSIb3DQEJBDEiBCDXzjndGMK6qDluON2lR8H99MZKk60L3pKJ90Zh
-# 1lYLjDANBgkqhkiG9w0BAQEFAASCAgBn1fKHvgBfG/RaMFZB4KhukKOLzye40YiP
-# XEFPwmia8f3hWUa/DMPfF7SQiuwluxA/ntzjOTtu/lv99OH1wn++h0mofeQY3znA
-# Qlf1ZINK1TW/0x1Om/a8kKtFH5XmBLhSGEIdshOW/i62J38oCgjhLuDAGBk0GqJh
-# S+V6XcGlBDAICOpogIMp4HlDuP1ZNQg0cfxqGUtGji2hAm0e4gci/Gpar5yBbhfI
-# Nge0UN7MsOZdYFxv+I45gOS3ufX7LT/qU2fXcNtGjfcMoExPv1ucjSJt7sguGWxf
-# RlEr4nppPxRrPFc0N19LkszqZ0Cg9cw6t9tgJf7iTxKnzVpMb1FjtenNimo3Hnfz
-# AZJ1pryTNNCevpTyRJ6f4m6VYddpM1jjtgzguqZw/9bOk8FRdDq5o+1/2jucHc2+
-# THLn5NNvaGxQeQQlVeEzohOaXCyvzZn1yCuLhOvvvTlduxNq+VLHO9KwFiT/XKa2
-# lofOPbRGfkX3y5yCxlP/lupGklqQyMuKilVdqmD5kJupkce8JXMm58jE6m5QGCVp
-# SHwiLeG/u9DlkYN3GKESly84+zm9uscnnzjN6IPvShwzHdvoSNn/y0nEZAcqOzrk
-# BeaZoB+CH5B+J/glKFQJHGtqSMsupJZ39xesfem2DqGRPPfb6Pz9eK0n4fgyuF4D
-# w1Ecia+6tw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDFaMC8GCSqGSIb3DQEJBDEiBCCTxrP4/U2uoZKuGjoGg4QR4BKCZmLyDWNF4pls
+# Q2diyTANBgkqhkiG9w0BAQEFAASCAgCm3eI8PqLbNAmTBsRsU7DU8pq/fcoUgR6k
+# 5pBluOqfnhc7Z8EFs58edIUTHNJ814e53Fk1o4g4KA+POeI/6/G03vOuMEzklsKz
+# u8q6vG3cqLcOTBMASgxfDvMobwSfwdLkW2sY1kKXtAbC5Ta9qwnYLd2Z+VpoWRzK
+# BbXdA6QmlISTiHliO/54GhcbDlE8KxVLaWuF4AM95oRDqOTpIpyAFS6qOIJDQf5D
+# rx9UqbDeIMRBKeH3lVaNsAeamqVda3sncj7jf1mZxmVXq012Ql+fAwxfBMrdzx1+
+# 9j4A5XB4NzHkp1/krZv12uZt1UCy/G0PWMO4+LKxowDMGE/bOeYHAkPPFkM4hFbq
+# 5SnX0D5MRrGpMdaMHQL1hZQIe8BD52hZYvKKPYi50A1upwbUMuX+uyPcSAc3USEu
+# seY9hUhWi2STIyru8vby8N8Dmec4csuZjjQ11niClItoXAUjHhvILyxeyGA78oIk
+# X2mA1V59qxqyf+qQBHJhqcAshbbmmjIuz5FkBCZKZ3kCCa0fxgHVxTjXHTGoup6N
+# 8Kkh+csjidhvl5u2mL6ZCAck3H+hMPBkYpyIS3MvKYHbmyYphZGFU8UFD/x2YEjp
+# wX2myNcw/2jeGoZTSiWl+Ex0o3ZoEceNzQDIWVnHpBiBa+Zi5OgBSq7neTsnjOkm
+# ZKgfsgmuXg==
 # SIG # End signature block

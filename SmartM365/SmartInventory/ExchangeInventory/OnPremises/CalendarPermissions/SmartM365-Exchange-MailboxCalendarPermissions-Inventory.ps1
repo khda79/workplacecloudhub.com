@@ -21,7 +21,7 @@
     Bounds the Exchange MAPI connectivity preflight for each mailbox database. Set to 0 to disable it.
 
 .VERSION
-1.8
+1.9
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -252,14 +252,15 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.8'
+$ScriptVersion = '1.9'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.42' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.50' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{PrimaryOnly=$PrimaryOnly;EmitNoPermRow=$EmitNoPermRow;TopMailboxes=$TopMailboxes}
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -894,8 +895,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAphMTDvHmnlhlV
-# PTrrk+IIOLK9M/Y6YswAkN43HLcTZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAaYkvBuSCd+ibh
+# 3b+S69uJzXCuM0ZVXJoS1POVKp/mwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1028,31 +1029,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDCtOvRcH2rnfM7oBxQwPkLmkjeoTFd9iZexITcKDAATMA0GCSqG
-# SIb3DQEBAQUABIIBgEdYRXzT6Ri7ZxYl8j5BE91Y8dQpcreJ2GDn/h1AK1dMYKOv
-# OeoJxDYCt3puo8R2GJnWxuYjeP02P8zYFwBRx2iNinhVIHtul1VyHMFhdMqIuimI
-# PngJbfTVYW0dnkO54KUtbs6P5EzSjGzbRyjV142WW9OaQqBNYznQdAtWoA4GzB0b
-# u/hpYQ6ronCRPSfM/owxDQhs9+1NKbTdCP4J45I/Ijlwap0eru5BVjnX7grbOhwl
-# dkaBIsyFhZvzuye/TtA1sn+d3/0la8M1bRPlacG4rY7uIbs7jTk8OcRzJLGTlELh
-# nRfZtsBb4DeCA86H95nOKPZ1WSIKsDDhTekj/J/z/eZayqlpPHV7lx6bCQjSWekU
-# 8QyxdVOlZwORDRye8l/IUxdFMMC6nofwvm3k8eBn+e/wGwMq8kp3cO7Uu6QCnEWc
-# ouNSJPEHtLBiPsZAp63N1+nlR5zG0y60GZ6AsZ0gRvoRj4NACcMnA4gARHa6Sbgj
-# O1/DgsaCjtnTtR52aqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIyQuG5/sBDMfp5Uerj8w1pSo5eTjfcuarnMXMUelvnJMA0GCSqG
+# SIb3DQEBAQUABIIBgEdqi9ClMUuJuWJzsn15Rj1zVPGxLnzNtx6GT4TFkt+HL3na
+# SF91Ycl8Qlrv0ZyMpcKycfHR5ou1XbNmOcFPDQUIjGzRKOC9M1L1nz4i0p6xu/sX
+# 978GFuMEcwcDJk7u4Yi6vC5BTWtu+oEbQjYUVieVq92g3xswyZkTVIu6dtI0C1Ih
+# xJvaxEgKLTtpJfK3Jbzl528KMHLxyf6Ld4QRpmgWnr2oum273LCE6RJjySzNyHKo
+# hHH54tvBQZhSmLioTX+Ri9iAQYiAMPsdmWG2ocopLsVg+AVbOTqGbNJSPclj943K
+# GK6kgBq5N1QQGj/iIbA40dv+ivOHiv/HyxqzAT4PyZTR3jPQ622lxjL/gsMjpQlv
+# HUEzghUVaQpw6D2wgHpn2/JcGEDZ1Qz9UYoWCdJ1O1k3mJcKIoKLBsdaKCpMDTdD
+# paIFsgdRqBBVx1moHduDc+JgFMKA7wYu5XyNtrUZ/4hkPt3wHTtVFbWCXibiXOWC
+# YDlzb3hsbU6D+biR/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDJaMC8GCSqGSIb3DQEJBDEiBCBUElTUOFlviNfwFuAgYP6YKzqMXILbQBw1I9NO
-# Q/4DnDANBgkqhkiG9w0BAQEFAASCAgBPj1vuGv3QIE2+2PYVFWiISyibI76HPqBX
-# ueQRDgRaWnz2hc5esfUfLoSohRcBW5g7HDMR0JxhrLmATrs+jNpIW52VvgOypq7I
-# VlPevACPi36d68un6tS/ndDiAXu3IpMQ48OF0kXtuX+pf+8SSItR6gdwsL4aQVlH
-# 1QgBOOizNHWEpsKuFxJB6Zt6+VLdJBpKLwEXNOh1/jzVSplRTpoJtz39QrfDY7R+
-# /c1f4yDYm/hBsGcU/GOnvUhzybtAi8huGkq4PkTnZJTUyDEECzFFZhmtHkDIOELx
-# fnJwXvAJq3NUAp2nZuCRS/wt7KEusn1PwfnScZ1Si7phJx6Eku5cSko0LOsWtw8N
-# oZfuRC6V7F8WwFwiWGcDcCiF6rxbojNSUEV6vWVDaz2OtgNHtr9ja3Dunf/MJheU
-# fysARl3NCzsxvZy4VDy1b9d1rfN5TThK+kALq/F6BK1yA8LQME0nAPO/BMll8aE7
-# DgSMNOVw+SsQFOabiFlhsAGMgbo6vIZ/Jy7+SgyPokRyUFMluOq4Ky+nzC1PFQks
-# SpZ2zrFozxIBZdKKGxRlUHDTX/x5/OpkcPvWeAMWqifOkfYi8eKClty6kWvDXBaa
-# HD0i0SBfVGBVQDr6cZoFNJQyTOdxJ/Iy1emj/MtE6jsaB5LVy7KZ1lde+kYKZOUK
-# M20pXpaZIw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDRaMC8GCSqGSIb3DQEJBDEiBCAdc8HbkyQgIEn+Dzt9Usb9mL0BB/HdvCcGigp7
+# KoyuHzANBgkqhkiG9w0BAQEFAASCAgCn5EwT+a3BIMNQ60H3SIFOmmHnAOQYQFOV
+# yOagc4V2KLbFZvtJYY+caavMYpScH6uRJw1RWuqp3cCkquRfKocu2MxsrM2iJDXW
+# tE6k64Q1LpfMmz7LeKbPPRXGLibCvZ3X3s+IWWdqnZoSfHHRhyY/cOj4Tpg9WFYT
+# SvUlItkJgROnGdFTkA7znoy94LLW5T3D3eAmcnHaSzWmrO9D+bSGsnjBMqK+ovGZ
+# lb+xoQL5+fwaPRBmnTFrdtwmN26H/UTeRk7neWZSqXsg3xZefQVlIjIbYA/lVHZ3
+# ScfLD/ACd1MufrMWinvm7Rm8pgotk6naPccZcY7BTUqc3gmZ7TvNBHai+rm4la4j
+# PX9YfvHmz+mdpx/JURXx90RTz2EvN8jqmpFVkK1MJfWg57/fny0DZaQcYfb4p54g
+# vaM4kwwNEooxOMZFwzyUCFfeQwwpgOja8iXlRADVmt+5NwEKTo/4X2aVJbJ0cgkF
+# fdb2ECkL+VfmMDjNjO9S86KYlglv9OSvVWMWqiHTW5wxHf4kk4NLfL98Rbawoqx7
+# RVsZy5MUWTCqvexExiLxo5ZIRtgzXsmRUzFQad1O7/ueZeGL208/FIov6pyGoNHw
+# Ly02dQnkVqT60Od4RJBimBDu73XS7frp4B/muyW0ZCnJgdbiD3jeFmQFFNNbPTRA
+# PLKChDhWDw==
 # SIG # End signature block

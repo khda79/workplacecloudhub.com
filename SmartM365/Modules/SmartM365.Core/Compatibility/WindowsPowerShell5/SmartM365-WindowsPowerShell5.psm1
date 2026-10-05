@@ -1052,7 +1052,7 @@ function Complete-SmartM365ExecutionContext {
     $cmdbReceiptPath=$null
     if(Get-Command Complete-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue){
         try{$receiptStatus=if($hasFailure){'Failed'}else{$Status};$cmdbReceiptPath=Complete-SmartM365CmdbSourceReceipt -Status $receiptStatus -ErrorCount $errorCount}
-        catch{WriteLog -Message ('CMDB completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
+        catch{WriteLog -Message ('Source completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
     }
     $warningCount = [int]$global:SmartM365WarningCount
     if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
@@ -4930,6 +4930,7 @@ function Write-SmartM365CsvAtomically {
         }
 
         Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $tempPath) {
@@ -4960,6 +4961,7 @@ function Copy-SmartM365FileAtomically {
     try {
         Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
         Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $DestinationPath
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -5168,8 +5170,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLdaPTAGGz1c25
-# qkFlVcGQwmDCjflfKG8VpAewjhkBc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAkG8c/QnTMCNQ
+# qskcDY5qcn4IOWKetQv1rpG9RBb/+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5302,31 +5304,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP6fdZlhx89SQDhetekIxmvIQvuuz4jGi89l/k8KOOC8MA0GCSqG
-# SIb3DQEBAQUABIIBgCXLZP3FR9HTlEAmnHxB3AsPJo7vewtdStGxlmAmqiD93v+L
-# Zsjo2doMu6CtmrtlzgBw0RQdfEvaZdPNh8yqKcl7SP7U1HiD7G3jbNyy/DpR8T0U
-# Xx1L/cCPpVLtXvlUb3HvQawyH6U2B/kCnX3wSMQe6A2M3thNzoFS2W7POTM/sLjN
-# Jl+mUbH491ec5+FIHSzxQtYobfwQbq1pI5SymrT2q6XTFbiGx6Z3kXuW5K/j8rMi
-# P5PSPo5glIdEiDX6oBSRLHkgQj+mclxTrQLM22m+ZyOYTNvJnhGDf2AinDQzcV7+
-# FNc/GXCOG6hPUTer+2pDsiU9mLwdsU0v5JJ5DdmtJMGNIzecJNGh0x7a2vo4lOFv
-# L4K0KDFM5c47bDf9eIxkh/YhQ3+gDPVxl9E60cKCdGu7JSIE7LT9C7zPvKJSjHCD
-# glRQqzwaYYUDST5pV1cj8gTDqaO1kesIXTMCF9lMyDGNmmNyjr5qvAS3QyYkAsyh
-# 6GAqd42t4+nYNGJPDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINQfzuOV4zy5GlzS/OjaTRxctWsJdpr6fnSRPYoRi8oEMA0GCSqG
+# SIb3DQEBAQUABIIBgHiZFSSz2t16zP9Ldm0A2ySAItKQ/GP0YzpxgNDUaSCoJO1g
+# sX0K4B4GgcSUwBC/b65cXVswM/ezeYqpf7TW6qkCFYMwniq8lTjVoQD1/st/Wo/l
+# 74zQrX8IUroOUx3n+67o9F/9pLZjrdZWcvw5e9IHlGmZg0lkiJ8V2PSFWEhxCE7N
+# jFb0UhQ/fmKygP5RGmD7dn64wnePYR6scO9vUQ+Orl430yoIa2CtOD8ePdXxCeJT
+# 0DxHf4EJjV7qqJK6LeYl9SYFHa0oEUfdBEN9PJKxndgo0uZUGhWRvfHFTq4N+Kwl
+# 4kSiQUG1NuCszQaeN9jPYQZ85l4Ic5c8N8UNurphIlkmuroflXlSeMArjHkEfzO+
+# NJpkRkcmt0jAS9oJg8cp/HMz2126rl+23klB0hJGeqPWvA/aClAIDvYvlFDdQCzX
+# qVgWRO46ApnYJ2QdG1CaqA7ICUdnTO0/a4k9JqxT2fKUYoNDNiaNhr46rUi9jhQn
+# FZU7/WthGpVfzbDKlaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
-# NDJaMC8GCSqGSIb3DQEJBDEiBCDrikodeFU87PPiol1geBdxIo1SZfwXWLdP45BM
-# 8Ue0wzANBgkqhkiG9w0BAQEFAASCAgCRXXTmUvRA0JbriWG26jWm1gmBI2z8shTQ
-# mjKv+ejmJlufg++sHxe80504pOwzUeVx+zYauZuWrNtVkGbWQN18FfM7jn5EHXze
-# R88a4VF28ctqe8FvwApwVNflnHCZif7Ym7aazcnYqIsyo2Gm+OUlCWEk7eveb6nV
-# pAgEjQHRGp9U3Kq36SRHe98xzGPms4TOfkrr7HhQUGI67CI2i+G2s1/+8xO5rusW
-# Fs7IXBUzudkFxP+m9ha3G+ofUUC8tj79oAQAHSVcQ1rWy+bl9zZtoAsYNsTbcQnB
-# SatsNctzzfIPfesTpqHyT6UmGX01FfsHri9wY8rE3FYVEn/ZkXraO76oeWkLjFhF
-# LbK62gBXabtOVdYimttWLBAs+c54n76vuE3Z6XkS6V1RZX9Bq2Q+wURQ3lWMbnnH
-# UTTKuwiKQpu63GfiKh5mpqW+YD5C+YJC+bTnlslCk5my2A+EGF0zPJGdcxfi4aXY
-# cXK62iO6V7tJYIBrnQs19AXCejJzqRoa0TO/gVGrWBEU7kHPIio2c9nq3dF3wuXZ
-# 38Js32eQeoJ5eAEvplhVkKJ8aCMRajRclnwTssgi/3Ij3/Xbc9rfAhtdePc6/OM7
-# joizXHQr7CmMDovQZsbL9X6Mx1tu/EhhXt89r3q0oxngHPKxR6nBX8USe7cJqsQJ
-# pWin9bcYfg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODU2
+# NDRaMC8GCSqGSIb3DQEJBDEiBCAO3c2wta3PunnlKYYtoKJfiWztmnZiu3k+IuRo
+# PpUjMTANBgkqhkiG9w0BAQEFAASCAgCTIWGmMBEF+5s3iyNTEeaIc6mfmZM4w28X
+# F2QOi+aqHPoabj5+U3a8xXNjfcAXeJujxMW7eRmLMMlEe0FHJXZhULL2vkEhBLPg
+# qmttpE8WBJjK/fRZ7/ZKjro0Y3g+1LsKbqu2ZcrxK8mUCW4IXRfXSDGH+UrkrQKr
+# GjgQhRoXTMT4nneMEl8yopNBQzckftUyZlI5cN0tVz09sXMFgyvfdO6Jbr2hk8Xy
+# D8eWGLYvf6NXQfHTX57+4a7rIpELAiaOmTzm/75VVnxD21iEPblMcSuCVb55ddQW
+# DSc4JqGqfHHlC5fDu85ELadgL85TYrOozVA+wMhBRpPULVvcYobClHvZ7Rzug+3X
+# f9jm5gKlSVwmKe17CNWR/jjum8gxjoeVSTAPBrmh8CkZgfFjVssQSlO3ZxrgPi2Y
+# FtMqYHsseaSv2nT/jdGUYba5sYYtmSnRGpm3wp+sGJN+b/8MOe0rTX5bV0p/LVgd
+# uvbzhjo+Gm440stg78i/hJT9oYLmWXyisxHhhzxfbPGwIBy52YXV4h2MJPMcZrFP
+# U70JxBOxSKXfb+z2i0QfWjw5Ug+6kThdmBspAU66TAJbqdhZMfKTNaTb7+SHzMz9
+# 7c9kgqQHtwtq3EeuNA9LqGIczu0f1Gih3aJw4Ol3QneyQYmxFC0F6M5/g2DOoUZ2
+# 2Im2N/IUkA==
 # SIG # End signature block

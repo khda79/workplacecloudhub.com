@@ -27,7 +27,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.16
+1.17
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -398,7 +398,7 @@ $CsvBaseName       = "Intune_RBAC_GroupMembers"
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.72' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -542,10 +542,11 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:($DryRun) -ScopeParameters @{Countries=$Countries}
 
     Start-Transcript -Path $global:logTranscriptFile -Append
 
@@ -1176,8 +1177,8 @@ if ($global:ScriptFailed) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjiPXatLBLorv6
-# MW5RUIHkn/BYQITZtBKoN1b2DdIsFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlPSadDemcPxDg
+# ZqyOOUQlUnBGGLpsE1D94uRhCHewzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1310,31 +1311,31 @@ if ($global:ScriptFailed) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDgJMHanq+4YmJtq4xLrILNaHGPbKFHRIx3AfQYJkoU8MA0GCSqG
-# SIb3DQEBAQUABIIBgJxmPB4smfZkUaWe83YgtbYTp/80dVSVf4KH2fuIFMOea7Di
-# wQyN90ZrgkZ5YaAa9CcJxJricFspZLu5XYFgAObY3+mHPDaWp2vNUhMl5SAKHYl5
-# ZQnlBi77PqmYG7O3lWS5NBvoCYT60LxAAm1VkJLEOFe2/b5sMinOHBiA8MtzbS+O
-# +VJ4Qqc1Tg1q7/3mIem4XYZglGCXRN9lykdrCPZOM2wtJndwpcn1yu9S7bzaFx7V
-# Lk+vcLeNV1GQOC2nFil4uotRkv0ysheHvLAMIaJDxIvRmgO9nayxdwL6Ej1y2Q3y
-# rHc4x7DUOFufUBgv+6/W+1AoFQdwdMDX0WdGfg+CKcLGx3QvanOnNIxhAkK5/kNf
-# b2p5v+dqbDlx9QDnfHRQcO9XbKhx0yMsJfYsSwb69wYaYEB/gIclqbZ/UqcX/fHi
-# aycXiYROEjECLxyVS3pLUb6av5XGh3n2lShxXjgJjgI++hgSP6Sd+q1Kaf7oTAuh
-# w5K379xVyBySniTNqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHQuFynn5EWaRr5ZX35KKO2FTW/NTu/zC/71oEmfiqZkMA0GCSqG
+# SIb3DQEBAQUABIIBgAgwaixPwFdF0b/uBKDRlQTEvdTtM65JTEgRAqjNvxxyXp1i
+# zeSh/3KGLa3KYI4kxjF5RuQs9vk3W7LMI0eHxZj6JuzHtL1JQ8hm8drwTFakIRSp
+# WqmWgaAZa0MHOtPOKDf/eNyFqD0toM5AS9UB6JeZfo16amuYFYzyhzA1gsWZ8s6U
+# y2iRmE/3+fgI3U3rZxBD2e0msh6C9A9u7pvQpOw7+E1A6Q+ss+ytvNbKuY180nWL
+# IGXy1eiuE/MOLAEUz+1UfDZ0vFDusPq6s2OLCeT1iUXlA0h0WIc/nCey+MRYwTIu
+# XDLKRMY0Mgh/ManL4tODYbD9TXAX9Z5kVGkOGTqG4Qu/quJzfImmUxSMKEpEU2AM
+# Jp4dTSJS2pPuYoABm75+ss1TSpJRecTtc/50ts5pvFb8nFFI9URdAyxLw9XuHCiS
+# mjMONYSUEeqFBfuAnE0AcKggdRNIJuETtb0bcLYp5Hhn1Qs+cWDxsCIihP56uh8q
+# TttZFyec/77whoEjDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDdaMC8GCSqGSIb3DQEJBDEiBCDLzC+b1bhHm9VcIGx7t8HRivvlmlQ3I2diNwDx
-# 8YIhXjANBgkqhkiG9w0BAQEFAASCAgA2aWqWI5WFT93FqvuNsoBclJJJbtvKJ0oy
-# FyhSpl1rD0gAoSTq1cHC7VPxj0TM3fwOJdAaBLYG/frbZjVYBSVvpSjoTEDIFtIX
-# bPm9goPOt/DCnAXUjmbFiOK9toSGB7Tths0gc5ZNjI4zAifYyqWFZhRAFGm2FxNF
-# Xam4KDyFy/ZCFAma3seI2Gt+Q9zTaiqiJ0eRJorYkn7Kq0tZDuGknetMhBIXnwAN
-# bG0ZEeWVy598F1RDiDX4IJL+VDvlT3B4UK5aQDFQHBEZGACBhhYb+idz7d0FdblX
-# w9vBjKoGETtUHn3zy8i5IvMiONa1/MJWM0tubRG3gv5yo9qHr4iaWpxhUc8psVru
-# sruqFzQ8ZQoXSQuJ4JpWYJWkUjvv4U3W6x/H1g5aT3MdAInv7LLQxAF5VCebA72X
-# +IMaumgKPGBjJwP5bw6DsR5ieDdq1G//n63JsDcXB7ypjTFJmGpP/CMmWe/FiB5c
-# LVz6Mz2QBGKzmN4inq5tz22CpPKLdLu7WXj+Wz8VEfYeGzxvtR+Qb5E118hNqEwv
-# s7Z03YtIeJ+Ern86ywJsQ9A5ywGfI1qFV4JWrgOxrPMHu+9NHM3uhiKdmV3HcpxH
-# J3kfHAwjT8a2K9angdNlCi3KIyKNBmEuMae+rQsI+eMgWIXWZYYI7p1ZI4kJ4BRu
-# W4cuzZoMmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDlaMC8GCSqGSIb3DQEJBDEiBCDSM4+emOQ7VuAmd5Us1kqiozrrEEnAmXqx2e3/
+# nLS7+jANBgkqhkiG9w0BAQEFAASCAgBLx2jI7nge02YY3RRBBZWXf+qB5U+zY0ix
+# MBW2K0AyzRvt885JRJKXP9DsnxtXkxiDMHjj2sfwWYjZDS0gKlcrv2GX/PhCGdWG
+# HGjuBp6dVIkpKhE4bTxy3aTWevDqaWHMgpOYmSBkFquCk+ryUe8ZgI51/mvU2G9t
+# ocy9yFKRMYTFxVNX96yq6amcWrVbAlmCSm7xE4LiC8kYgN3WUJD+XH2SwWtjhgDF
+# TRH4ThMG9mn/GlCU0TJBjJKFqx2Ahhe2GiKez9A0YGpNmxiT70njm88SbvYEpuQ+
+# BZnc9ClEUhPk2XgU0vQhatrGsaSFSXLTLENIM27HAIkxxAyKVUKlnCgLTk4udy6j
+# 3JpWy0JRb/nm/PNYG7eAGuaPwqMJDwUPZkmw3dOY9I/hboCmi/5FLPiJxf7uR5DU
+# /qBFGH35e8U68VAYuY+KPckb/vFOtHu86GRuPdZ+r71+/7JU1XPFY6CeuB0qxE4H
+# nNuzX1oSD99Uj2gfd3p8Do6TfuNsgUQHdzRn/iD/jeOZKwdSaSgBCTz9DQFffbwJ
+# h5/04i5HEnSENwo73TsBEo2VlckxDZIEw1o9Q/Rm/7ibmJVLHs4fKTDWqOyZSe/G
+# AYgW/ffjGhY6GiF58dOgWlFskdGlCbeir1kzFOilaUxtA8smd+nxx4Psbet/oVUV
+# 1PohIbAaoQ==
 # SIG # End signature block

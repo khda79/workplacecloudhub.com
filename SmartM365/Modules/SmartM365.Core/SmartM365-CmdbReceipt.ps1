@@ -1,8 +1,8 @@
 ﻿<#
 .SYNOPSIS
-Producer-owned, current-only CMDB acquisition receipts. Dot-sourced helper.
+Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.0.1
+1.1.0
 .NOTES
 Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
 #>
@@ -20,7 +20,8 @@ function Write-SmartM365CmdbReceiptDocument {
     if(Test-Path -LiteralPath $path){
         if((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked CMDB receipt is not accepted.'}
         $existing=[IO.File]::ReadAllText($path) | ConvertFrom-Json
-        if($existing.Owner -ne 'SmartInventory-CmdbSourceReceipt' -or $existing.TenantKey -ne $Context.TenantKey){throw 'CMDB receipt is not owned by the active tenant.'}
+        $knownVersion=($existing.Owner -eq 'SmartInventory-CmdbSourceReceipt' -and $existing.ContractVersion -eq '1.1') -or ($existing.Owner -eq 'SmartInventory-SourceReceipt' -and $existing.ContractVersion -eq '1.2')
+        if(-not $knownVersion -or $existing.TenantKey -ne $Context.TenantKey){throw 'Source receipt is not owned by the active tenant or has an unsupported version.'}
         foreach($field in @('OrganizationKey','EnvironmentKey','TenantId','Producer')){if($existing.$field -cne $Context[$field]){throw 'CMDB receipt identity changed.'}}
         if($Context.Started -and $existing.RunId -ne $Context.RunId){throw 'CMDB receipt run identity changed.'}
     }
@@ -33,25 +34,35 @@ function Write-SmartM365CmdbReceiptDocument {
 
 function Start-SmartM365CmdbSourceReceipt {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ScriptPath,[string]$SourceRootPath,[switch]$ReadOnly)
+    param([Parameter(Mandatory)][string]$ScriptPath,[string]$SourceRootPath,[switch]$ReadOnly,[switch]$ConfiguredOutputs,[hashtable]$ScopeParameters=@{})
     if($script:SmartM365CmdbSourceContext){throw 'A CMDB source receipt is already active in this module.'}
     if($ReadOnly -or (Test-SmartM365MaxItemsMode)){return}
-    $registry=[IO.File]::ReadAllText($script:SmartM365CmdbRegistryPath) | ConvertFrom-Json
+    $registryPath=if($ConfiguredOutputs){Join-Path (Split-Path $script:SmartM365CmdbRegistryPath) 'SmartM365-SourceReceipts.json.txt'}else{$script:SmartM365CmdbRegistryPath}
+    $registry=[IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
     $name=[IO.Path]::GetFileName($ScriptPath)
     $producers=@($registry.Producers | Where-Object Script -eq $name)
     if($producers.Count -ne 1){throw 'CMDB producer is not registered exactly once.'}
+    if($ConfiguredOutputs){$global:csvGeneratedPaths=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
     if(-not $SourceRootPath){$SourceRootPath=[string](Get-SmartM365EffectiveModuleGlobalConfig).LatestCsvFolderPath}
+    if(-not [IO.Path]::IsPathRooted($SourceRootPath) -or $SourceRootPath -match '\{\{|__USE_GLOBAL__'){throw 'Source receipt root must be an absolute resolved path.'}
+    $effectiveScope=@{}
+    foreach($key in $ScopeParameters.Keys){
+        $value=$ScopeParameters[$key]
+        $effectiveScope[$key]=if($value -is [Management.Automation.SwitchParameter]){[bool]$value}else{$value}
+    }
     $root=[IO.Path]::GetFullPath($SourceRootPath).TrimEnd([char[]]'\/')
     if(-not(Test-Path -LiteralPath $root -PathType Container)){New-Item -ItemType Directory -Path $root | Out-Null}
     $path=Join-Path $root $producers[0].Receipt
     $context=@{
-        Owner='SmartInventory-CmdbSourceReceipt';ContractVersion='1.1'
+        Owner='SmartInventory-SourceReceipt';ContractVersion='1.2'
         TenantKey=[string]$global:SmartM365TenantKey;OrganizationKey=[string]$global:SmartM365OrganizationKey
         EnvironmentKey=[string]$global:SmartM365EnvironmentKey;TenantId=[string]$global:SmartM365TenantId
         Producer=$name;ScriptVersion=Get-SmartM365ScriptVersionFromFile -Path $ScriptPath
         RunId=[guid]::NewGuid().ToString('N');StartedAtUtc=[datetime]::UtcNow.ToString('o')
         SourceRoot=$root;ReceiptPath=$path;ExpectedFiles=@($producers[0].Files)
-        RequiredScope=[string]$producers[0].Scope;ScopeQualified=$false;Scope='NotDeclared';Started=$false;Lock=$null
+        RequiredScope=[string]$producers[0].Scope;ScopeQualified=[bool]$ConfiguredOutputs;Scope=$(if($ConfiguredOutputs){'ConfiguredOutputs'}else{'NotDeclared'});Started=$false;Lock=$null
+        ConfiguredOutputs=[bool]$ConfiguredOutputs;PublishedHashes=@{};OptionalFiles=@(if($producers[0].PSObject.Properties['OptionalFiles']){$producers[0].OptionalFiles})
+        ScopeParameters=$effectiveScope
     }
     foreach($field in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','ScriptVersion')){if(-not $context[$field]){throw "Missing producer identity: $field"}}
     try{
@@ -59,10 +70,37 @@ function Start-SmartM365CmdbSourceReceipt {
         $context.Lock=[IO.File]::Open($path+'.collection.lock',[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         $document=@{}
         foreach($field in @('Owner','ContractVersion','TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$context[$field]}
-        $document.Status='Running';$document.IsPartialInventory=$true;$document.Files=@()
+        $document.Status='Running';$document.IsPartialInventory=$true;$document.Files=@();$document.RequiredFiles=@($context.ExpectedFiles)
+        $document.ScopeQualification=if($ConfiguredOutputs){'ConfiguredOutputsOnly'}else{'ConsumerScope'}
+        $document.ScopeParameters=$effectiveScope
         Write-SmartM365CmdbReceiptDocument $context $document
         $context.Started=$true;$script:SmartM365CmdbSourceContext=$context
     }catch{if($context.Lock){$context.Lock.Dispose()};throw}
+}
+
+# Public generic entry point. CMDB wrappers retain their independently declared scope.
+function Start-SmartM365SourceReceipt {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ScriptPath,[string]$SourceRootPath,[switch]$ReadOnly,[hashtable]$ScopeParameters=@{})
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $ScriptPath -SourceRootPath $SourceRootPath -ReadOnly:$ReadOnly -ConfiguredOutputs -ScopeParameters $ScopeParameters
+}
+
+# Register only a successful write/copy in the exact current source root, never scan DATA-LAST.
+function Register-SmartM365SourceCsv {
+    param([Parameter(Mandatory)][string]$Path)
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context -or [IO.Path]::GetExtension($Path) -ine '.csv'){return}
+    $full=[IO.Path]::GetFullPath($Path)
+    if([IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/') -ine $context.SourceRoot){return}
+    $context.PublishedHashes[$full]=(Get-FileHash -LiteralPath $full -Algorithm SHA256 -ErrorAction Stop).Hash
+    if(-not $global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
+    if($global:csvGeneratedPaths -is [array]){$global:csvGeneratedPaths=@($global:csvGeneratedPaths)+@($full)}else{[void]$global:csvGeneratedPaths.Add($full)}
+}
+
+function Complete-SmartM365SourceReceipt {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Status,[int]$ErrorCount=0)
+    Complete-SmartM365CmdbSourceReceipt -Status $Status -ErrorCount $ErrorCount
 }
 
 function Set-SmartM365CmdbSourceScope {
@@ -82,6 +120,13 @@ function Get-SmartM365CmdbCsvReceipt {
     try{
         $parser.SetDelimiters(',');$parser.HasFieldsEnclosedInQuotes=$true;$parser.TrimWhiteSpace=$false
         $columns=@($parser.ReadFields())
+        $delimiter=','
+        if($columns -notcontains 'TenantKey'){
+            $parser.Close();$parser.Dispose()
+            $parser=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path,[Text.UTF8Encoding]::new($false),$true)
+            $parser.SetDelimiters(';');$parser.HasFieldsEnclosedInQuotes=$true;$parser.TrimWhiteSpace=$false
+            $columns=@($parser.ReadFields());$delimiter=';'
+        }
         if(-not $columns.Count -or @($columns | Select-Object -Unique).Count -ne $columns.Count){throw 'Invalid CSV header.'}
         $tenantIndex=[array]::IndexOf($columns,'TenantKey')
         if($tenantIndex -lt 0){throw 'CSV TenantKey header missing.'}
@@ -96,7 +141,7 @@ function Get-SmartM365CmdbCsvReceipt {
         }
     }finally{$parser.Close();$parser.Dispose()}
     if((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $before){throw 'CSV changed while recording acquisition receipt.'}
-    return @{File=[IO.Path]::GetFileName($Path);Rows=$count;SHA256=$before}
+    return @{File=[IO.Path]::GetFileName($Path);Rows=$count;SHA256=$before;Delimiter=$delimiter}
 }
 
 function Complete-SmartM365CmdbSourceReceipt {
@@ -109,13 +154,19 @@ function Complete-SmartM365CmdbSourceReceipt {
         $files=@();$reason=''
         if($complete){
             try{
-                foreach($name in $context.ExpectedFiles){
+                $published=@($global:csvGeneratedPaths | Where-Object {
+                    [IO.Path]::GetExtension($_) -ieq '.csv' -and [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($_)).TrimEnd([char[]]'\/') -ieq $context.SourceRoot
+                } | ForEach-Object {[IO.Path]::GetFileName($_)} | Sort-Object -Unique)
+                if($published.Count -eq 0){throw 'No canonical CSV was published in this run.'}
+                foreach($name in $context.ExpectedFiles){if($published -notcontains $name){throw "Required canonical CSV was not published in this run: $name"}}
+                foreach($name in $published){
                     $path=Join-Path $context.SourceRoot $name
-                    if(-not $global:csvGeneratedPaths -or -not $global:csvGeneratedPaths.Contains($path)){throw "Required canonical CSV was not published in this run: $name"}
                     $record=Get-SmartM365CmdbCsvReceipt -Path $path -TenantKey $context.TenantKey -Identity $context
+                    if($context.PublishedHashes.ContainsKey($path) -and $context.PublishedHashes[$path] -cne $record.SHA256){throw 'CSV changed after current-run publication.'}
                     foreach($field in @('Producer','ScriptVersion','RunId','StartedAtUtc')){$record[$field]=$context[$field]}
                     $record.CompletedAtUtc=[datetime]::UtcNow.ToString('o');$record.Status='Success'
-                    $record.Errors=0;$record.IsPartialInventory=$false;$record.Scope=$context.Scope;$files+=$record
+                    $record.Errors=0;$record.IsPartialInventory=$(if($context.ConfiguredOutputs){$null}else{$false});$record.Scope=$context.Scope
+                    $record.Required=$context.ExpectedFiles -contains $name;$files+=$record
                 }
                 foreach($record in $files){if((Get-FileHash -LiteralPath (Join-Path $context.SourceRoot $record.File) -Algorithm SHA256).Hash -ne $record.SHA256){throw 'CSV changed while completing the producer batch.'}}
             }catch{$complete=$false;$reason=$_.Exception.Message;$files=@()}
@@ -123,12 +174,19 @@ function Complete-SmartM365CmdbSourceReceipt {
         $document=@{}
         foreach($field in @('Owner','ContractVersion','TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$context[$field]}
         $document.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
-        $document.Status=if($complete){'Completed'}else{'Failed'};$document.IsPartialInventory=-not $complete
+        $document.Status=if($complete){'Completed'}else{'Failed'}
+        $document.IsPartialInventory=if(-not $complete){$true}elseif($context.ConfiguredOutputs){$null}else{$false}
+        $document.ScopeQualification=if($context.ConfiguredOutputs){'ConfiguredOutputsOnly'}else{'ConsumerScope'}
+        $document.RequiredFiles=@($context.ExpectedFiles)
+        $document.ScopeParameters=$context.ScopeParameters
+        $document.OptionalFiles=@($context.OptionalFiles | Where-Object {$_} | ForEach-Object {@{File=$_;Published=(@($files | ForEach-Object {$_.File}) -contains $_)}})
+        $document.FullInventoryQualified=$false
+        $document.ConsumerScopeQualified=$complete -and -not $context.ConfiguredOutputs
         $document.Errors=if($complete){0}else{[math]::Max(1,$ErrorCount)};$document.Scope=$context.Scope
         $document.Qualifications=@(if($context.ContainsKey('Qualifications')){$context.Qualifications})
         $document.Error=$reason;$document.Files=@($files)
         Write-SmartM365CmdbReceiptDocument $context $document
-        if(-not $complete){WriteLog -Message "CMDB source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
+        if(-not $complete){WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
         return $context.ReceiptPath
     }finally{if($context.Lock){$context.Lock.Dispose()};$script:SmartM365CmdbSourceContext=$null}
 }
@@ -136,8 +194,8 @@ function Complete-SmartM365CmdbSourceReceipt {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQbAwqKjaoHRXL
-# DWqpd8GOIDOFESEzs8s9x7okj1pJtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0cwaq3jhTERN5
+# TMaOrDw5UFhNUfddgYQvvhA+Gxsli6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -270,31 +328,31 @@ function Complete-SmartM365CmdbSourceReceipt {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ2UYqU4mDavufOaulLJolEOO6mtLZrcoSDtjMcUNcsjMA0GCSqG
-# SIb3DQEBAQUABIIBgBBWVN82TpkRi3/EFZDFAm2v1VLCe+ULQRRKB7VDWyAsAcd9
-# iul65OZSIxhh2Xo/2WjlxtAfU1w6Oc502A/YlKbAW9+Io2c0Xbi5tXAhU2Ujhh7q
-# O5i7vkk+JLCtBFYYck750bNc3Z7TnKb5fGOqktXWDJVh3Hx865KtHwlU9m11mwOc
-# wy6XJ430avJXAjwvR4DSA51kFEUxnh8/Bl2R1dZGCDiz4/VlA8j2KmrZNAZ0atZ7
-# HgVY66rt70uWXBa+Dz43X66sYNF2bAf3jX4k33mQKZRaJYPEq0InLs5oAzww34Yh
-# qZFoeeITl4aPCpG8dNrutH5dtww8aWwTVd9J5aRAIWLYYM8+wGGB5ORZSID4Wb27
-# 7KXJIMnMdH4L1HJzzTR65ox0kANhSmY4PdUCSe/Zlz6ZYqakOK4dO2va1tIkRnz+
-# XTPuST1Gg1lT0EbfUNOqEc95xoxseDVzcsG1kuWQ0IwUxdmqjBbSsZbc1xBAnZCJ
-# YhVe+V2W2FOegOrOeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBfx6vMycyArYPzBoGdctL0Enrdvm7YX2wP3WENGZAz8MA0GCSqG
+# SIb3DQEBAQUABIIBgH9lrZ7bx86H1yqF3HrpP568EwyF7ywzt4pF0UhAhWNPp2NV
+# qxig6fcehyK87O/gWGjUUNpBo+dzXGTLcpczaHWZa4mWAszdzNYYgMuooirbbcwW
+# 2qNoqS8TLWWNneZ3RZnUsHI+bV32c3FyaYtdA4za+B/gE2ipOYWVuOCY6O7Vp5Qq
+# H9JNSPS9Ckc/p4moPKHzSdp9AtW/9AoYcKpoUp0t3lEqqrmX5jRREjuNwGuenDY8
+# kDQCF9twIgVVSwrLftP24rg3jHgm9nMw/aeAlui/PQQcTja9q1HGm00jbqxu1mrY
+# djaq2Xp64u+Ulq5itcxuDKjsHh1KgLat+POud2uLeZdEC7s+FnQWVyHFGiN80XCd
+# VJ2DhmQmW0z/O/P6MNskmNwGQYS2FAFxxPtiPKAhGBSQEqXmmAud7LouvnJ3uDcG
+# omx28T0Ydzvn04bfes5LdueRbf94CvsP6zpHx6kI94rICFOJvmqanyyE/IwRRb7k
+# /E7SNzz6oQyc99jzaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCCKqprMm0cz6Im3IOf+zJihCMBVz2GAbjZL2vs/
-# 5CNp+zANBgkqhkiG9w0BAQEFAASCAgBMq9FyqpE15XPrwkgrbGQ+okNtnExuvo5+
-# DGAcuUL5yBCRV2GXioXFaKd5zZjIo4i3nVm2mUK7tHsgBO4o8iAYeq7d1vRF9HY+
-# K/j9OyA8WzUSczyky6JYWDuRhTGu3jJ2UFw4oumqYxUyBdZWL9o4GKedk6cS7os8
-# XxoKZaNvZX3MUiquvozY+QUjKQRjVPXqcC5YJl/zNEBoEDVbWKkOkvDZQtCVc4a4
-# 8gf7DyTdQImXDIYaOII8PPL0hQB2TBugqNOpqveLYeDjy1ykSKWEX4YhUlExOKb+
-# cJP8pzHEKJ3O7Jewsvja1f7UutvKLbnP3CVwGr26AY2snG2FPfsO40wwss8yTLfM
-# Q3q7xHGBNyx6akEmKK1GNnNBfqI3agZdwDDWOSqlmkPzsBS/iFKV636bzb2ppzKD
-# 26Fc8o5065ef5NAXGsVsuG4qkLpugg42dzLWeoeKAi4qD18MyB5LxGWsAR2JJ0uX
-# 6T8eJLXTgIk81ThflAonAmIDN3v1+z/lk3irXhHFNTKViLYuqytSq/WdODVUkO/9
-# HJenuQcm+NCuyilqbORJ8sauSfaHNoEBdwHgBtiPhxn2076+R+pcZ2Q2HcYc9D1N
-# +gEuviZgmTO+MtgpKN5L/O5BKbwDtdpPYvO9ktaZt4u1hiOb1HcgwnZMqvDvnbDl
-# SBSjYha8LA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODU2
+# NDRaMC8GCSqGSIb3DQEJBDEiBCDvZE7ijBFsr3s6jxLyUpjKEl2uU21i/yy/jhPl
+# 1jqKKTANBgkqhkiG9w0BAQEFAASCAgB1TwWHOznIhtlBQ9GwyGpttbCg2nYmzArE
+# fazTCnp1V/KSW6IBVmuwCegJZYrqO9rHyqUg01gciPh0macK0aNS7k4w1Xz/rRPX
+# vmuInCmqJgUE5d6MurUNYLqy5xeqtPqGYyqBqM/g3SrYkGebMZiURmFGNeGEpU/d
+# dLQj8HDSKNRqlf2NLFzi5fQZNTeHAQ4We15FfE6++Mxjl9soBQc0U4t/PVX6ognn
+# sWUdlD2W7F1+Lf0vLNXXmzv70xWK34upUnfTmv0FTo2ESqNuAdI4uQg+88ZwaiEu
+# gU94d5WfDGqiLkb+EgxwRIEfuCJTJtLTvtFq87HuCiAmcI1F1iL3236+HR2Q0B8b
+# Mw/8us5QT5lJi/tv5AlqImp4xcwmtHiSDPnaACacWbLoDw1uB2QGHf0xYdxVWDWt
+# uUpuR2AbG9zHqaf93qUjNWTGkrpVsUEqEgjmwHDn8D78/YGWsiNYHyxbKjds47sP
+# 0XjLuLD5UEFRaL4xzecAueeWshwlPO0Zmz221LJuwpYBw/SWc/BPrklKBrsyY3Bu
+# lr5lDeibutiVzHsif85i3otBvrhIIALDQO/6NclBMjEzNqPizcOw9L5ry9IHhT+l
+# jzz0gC9b0iBBSeixiYPJ64ArlHf73xfVOkiMtk6k0TUvCLMv5gROY/ZiRc9jtSmq
+# f3NDfrWObQ==
 # SIG # End signature block

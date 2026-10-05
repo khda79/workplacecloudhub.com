@@ -32,7 +32,7 @@
     the coverage join is representative. Generated CSV names include _MAXITEMS.
 
 .VERSION
-1.7
+1.8
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: GroupMember.Read.All, User.Read.All.
@@ -75,7 +75,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.7'
+$ScriptVersion = '1.8'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
@@ -92,7 +92,7 @@ function Import-SmartM365CoreModule {
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $candidate) {
-            Import-Module -Name $candidate -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+            Import-Module -Name $candidate -MinimumVersion '1.0.72' -Force -ErrorAction Stop
             return
         }
         $parent = Split-Path -Path $searchRoot -Parent
@@ -431,6 +431,7 @@ Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -L
 $global:LogTextFile = $script:LogPath
 
 try {
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{BackupPolicyScopeGroupId=$BackupPolicyScopeGroupId;BackupPolicyScopeGroupDisplayName=$BackupPolicyScopeGroupDisplayName}
     Write-ScopeLog -Message "Starting $TaskName. Tenant=$Tenant RunId=$runId"
     Write-ScopeLog -Message "This inventory reports expected backup policy scope membership; it does not verify Microsoft 365 Backup protection state."
     if ($MaxItems -gt 0) { Write-ScopeLog -Message "MaxItems test mode enabled: $MaxItems" -Level WARN }
@@ -499,7 +500,9 @@ finally {
     if (Get-MgContext -ErrorAction SilentlyContinue) {
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     }
+    $sourceReceipt = Complete-SmartM365SourceReceipt -Status $(if($script:CompletionStatus -eq 'Auto'){'Success'}else{$script:CompletionStatus}) -ErrorCount $global:SmartM365ErrorCount
     Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $TaskName -StartedAt $script:StartedAt -WarningCount $global:SmartM365WarningCount -ErrorCount $global:SmartM365ErrorCount -GeneratedCsvFiles $global:csvGeneratedPaths.Count -LogPath $script:LogPath
+    if($sourceReceipt -and -not $DisableSharePointUpload.IsPresent){Invoke-SmartM365SharePointCsvUpload -LocalFilePath $sourceReceipt | Out-Null}
     if ($global:EnableSharePointUpload -and -not $DisableSharePointUpload.IsPresent -and (Test-Path -LiteralPath $script:LogPath)) {
         try { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $script:LogPath | Out-Null }
         catch { Write-Warning ("Completed log upload failed: {0}" -f $_.Exception.Message) }
@@ -512,8 +515,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfYUl0r3Sx1MyO
-# q7xY1rrKJP37NXW/26Vq2a04j69NBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC93IsThUK12ZE9
+# sJiVjI5xVS1Td4V5WbiqLGv6A4OcsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -646,31 +649,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEkZFNZq9NQwFg83AGrHlG/34pPhJ8kmyd83l3r9K/yzMA0GCSqG
-# SIb3DQEBAQUABIIBgDtKdhxRk8Qt6oDQTuQw7TMIurOr4p84oSJaIzGS+fwvM6xy
-# Fc1y5+c3SZj3Ln+jMit92gY/S+0bQ79SIU1RszrZ57Rsvjh+Y1tyv3PBHDGiYNv3
-# J7scORYcnkuj8mH2kT4uBynrUrqg61AJf9KXhA3Z/DNv7YvsOxx5QEaKuRXL+mxL
-# hkH40Lj+ax+UPl6vnepouTtmMPit2LqQ1nmlgc+00fuuOh18w3FMephLtrSDk0gj
-# Ghv5Cx/2oUinGMf+e0QcOIiJroVMjZeojXb82Hgrqd1ULI2obhB6QjhrQPFrQ4rn
-# 71wog31gdfsmCNO/DV4HsY6jTvN+X3401GXlDjYQl4SmxXHD9iJl6XYxLsy5cVNI
-# WskkjQ1TRxf2Mqvaa5wx8XJ3l//QVDEurNWqGl5uOqzhR2uxawcyJdh66M16ab25
-# ejofCK6OQ95QOCsm7KM/YKUwjDaWDOBDq67rkpF0tiKdySsbdfkSF9BCVDNrpVEe
-# A60a6mRDTbtcrbfG+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICoGQhLt0+/AE4wV6bTSw+zPI1I4CdTAH5a6G4jv0jk+MA0GCSqG
+# SIb3DQEBAQUABIIBgH6a6YJkf5M2OeV/D+HBkrnZWLuY6seAKQbjd5fEitvVDbXv
+# RcIm++WOD8+VQf3bNK4AO8QN9CHZbd/gCqsSFvBlR7EnxZBS92frq8JDB3d41VXo
+# 9LGIMPwyrXE2fpgZvKHTT/crMzZZ+YXIEU4xq621BO/puz52KdVZVvNdWLJSnG8t
+# Hh1A751LTFdHQpBinORjm+kQc0ZReOHNbepmQz0aUILhXDFuVs39drePkDftlLLb
+# oKZggSf+E9N8VR/oV2kTmYeJdpHorv9qlBG5+z+SAff2O/Nynq198BRnpL0dNOmB
+# 1SRIbfeYwSzOPlFrgNqGt/OnDXhq39szC+ruyvpueSYJDLvrNl+DWKkI8pd56lLa
+# hIuz3KkKwlshyYLdmrBZEJfYQCszCxXUDraQK5fvTk6NRg8YHIjV/mhV9OHOah6a
+# LzupTRmjNeMHrwKlhElVOsk47ozgW33Qu1gp4aoofU76Z+JxL7CmvRQAgmASpfgr
+# 5F/EXUAELtPyVGkkJ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDBaMC8GCSqGSIb3DQEJBDEiBCA9J4TNOIFMMc6WuzK6f1Jtrgj9fjxDeDj7JM3y
-# MtbzrTANBgkqhkiG9w0BAQEFAASCAgAsD9YVrFebX59vOAo2OtMnWmcajkURQ8Kz
-# WEbrCKb/FJSbkXxTSNmmK7pCBQ0fjD1e4LZtpX26g5b9RbBHRfnKk/Hiuxsk742K
-# XFSA1ma0XmaYrga+TmWKwnlTcUKlKMYRtPOEhXmosKoCLFjMgKJommHr19PjJVrA
-# 6udzSb+HNTLWaqHpacbepLItXSgZIFrLKQgcU0RS5P83UhLm2bAGlWWa374moGc6
-# J7qZB82O3ZCjklewdVEDfyl3r3BHLrbEP8Oy/BFoV0pn2LWbl2dM2LVRjBKK3NQn
-# /uSP82xuQne2G9F4wV8AOW5tcW5W4wCaAFhT4OAaipLaSs0cNAXXiCsyGQTu0ho6
-# S6HYxnRRGn9VUtyQRbMffpS/euXVP/qKwBYyKHefGmQW8se/22TzK1+W1xHtJXA7
-# hhX0ZW6+yqZq6/ZYQYF11YEW0keWxWU4zWGkclNshZ/NrxF4WV0xvmDfvje8Sr1x
-# g04F5s+/s/WINurApHg9YfhvtgVBhtD8yMvUTsVJj5eFTD82wXXREiRqZk4WiM/K
-# UC6lMZ3/0AkjXmvT2rdymBPEOIsTPdYx2oR3KPTc+4qxUNogncnlOgdXI0Zg0DQb
-# mH51SvscH2frYVt8edgSjTTw+8Zxm1ML/usoQ8n06/jh6ml3pXd2icHVItWzigSq
-# NWkK9eHHvg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDBaMC8GCSqGSIb3DQEJBDEiBCCx4slyJIUfAV8jlBsps2DQwD8nQnHSdUxlWqev
+# f6UHjzANBgkqhkiG9w0BAQEFAASCAgChiZVnC389To+CI0W+sGl+GOTZLeq9nJn3
+# Z+SwXzxayZLRfAgFfcWPnIcI6MYKF1HUJled+x56d0JCZ+0HFhbJ3HpB8Lewn78Q
+# BbdsPkC8FyLw1hC5U5H0ttx2mfGm9n490KRIvlWzrDBIHd/TWQ/d/5wOmRjD+kjV
+# aJDC0k8/flOY4whhSV6kbhG6ToouR/RAS3qjvSxoHYQmGjM7ZI1j1Q6SMkeiM5nH
+# 9PGB/DZFLyxEHNOuKhcqbu2foAtXbCc2vdnp9hcel8s4tG3AY/dogcRNMA6lvikQ
+# B1yDBTVmuwpWTL+bKkchbyfZYJZ8fxLOgx1d2z5xrkLxckveiZ/YKzK0WWVL7Wgt
+# SeIwPn68VC14S9Jq2qv4JseZi2zIeFgMPsNHSzDpqXwwMJEIJkFDQCzbAAglX67Z
+# SKIOZ55vRLHrafObkF89aZ7cpVFWNft3KIM62iwppUlP98fGQ1tRa0/XnXAxH3H9
+# vx3RVsnlXyWpmdbP1SISiARTIESoOYyFw/tTtjd3M9G1s3y93zYu4VABzYYyqOGS
+# BPfGU2Iq1PnQP4VsiUS9+I2xFTRcBSKWTnW+aK/fBhaz0upbRlHHQSfbgy8NijFR
+# sCw8O1oTzJIKB6Qy6U8PGm3cDwCYdBic+PVUhionDnurtSXvCQAK9vI9cUwdvVTx
+# L9OjyD0G7A==
 # SIG # End signature block

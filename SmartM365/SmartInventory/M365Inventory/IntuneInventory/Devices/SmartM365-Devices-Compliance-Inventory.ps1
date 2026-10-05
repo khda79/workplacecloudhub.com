@@ -48,7 +48,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.24
 
 .VERSION
-1.26
+1.27
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -315,7 +315,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.72' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -324,7 +324,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -403,6 +403,7 @@ $global:logTranscriptFile = Join-Path $logDir ("{0}-{1}_Transcript.log" -f $Scri
 $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
 Set-SmartM365CoreContext -RunId $ts -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile
+Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{ManagedDeviceId=$ManagedDeviceId;DeviceName=$DeviceName;MaxDevices=$MaxDevices;AllDevices=$AllDevices;SummaryOnly=$SummaryOnly;IncludeComplianceSettings=$IncludeComplianceSettings;IncludePolicyStates=$IncludePolicyStates}
 
 function Write-ComplianceWarning {
     [CmdletBinding()]
@@ -1911,8 +1912,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRzw0fG8q+WrUQ
-# NyQVCazPzGqUDEU2i1RuS1e1yRc0rqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQwRREEOPi3O2H
+# 03Mw4UG4OUMkhZCU5+Nuv2MgaTjnZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2045,31 +2046,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJKWDxZ5loQL3NStXMpzWa6cQXBJzTIFkPkNF1RW157QMA0GCSqG
-# SIb3DQEBAQUABIIBgISLe7XobE5QhOy0JbgiX1CJz6eYnjrpuWKQAJEGBX6+S3DT
-# LvfGPej5ffR3W+XEaS8cb0CM5NYw1iYcXHywT1ZixJ6LO3F4O/SeXBSTjPMqo05n
-# aIj2pvMm2gJixRY8MJyTasIjrWihpb0tW4c1DwFuQUP3/QTYKsvEjYIsikXvn1CM
-# rjFp++pwvKg/ZywGucP3upXOPc+OuHpX8FpwjXOw6DfJdRusBnZ4SoRmFL7BB8yo
-# 9l8d+nnq9e4Xwh32vlt5y7TxbAEECZM5o0su2YTmZ2WUmREBdy1f+wm05Vcem/ML
-# oEFMl3hCgBlBzr+EfgWYgPrpd6GUka58oT9Kz8wZPKA+DxIhLZH/0qGONrzSCU26
-# jxi2JhU8fh5Scw5M2U9V7bMaRGNtFINopsntoNpNKMxNtg8FjOrMtchTvxYSooKz
-# WNe/h8AHLJ5loJD+db5R33w5Z0HFm8uNxK6Bhec/FuZSlkgo/zXES2eOTgqiLioG
-# 9rrfGApHPS8JAmuijqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGwPrtQCob9cTYQI4fclgvxy86wNGt1Ri8sDD9JpceKfMA0GCSqG
+# SIb3DQEBAQUABIIBgEKEBzsEZ26I3NSPOQ2io07FvaRUIPBTfCknPkefo7kBkd7a
+# ikXLuZrexXHJr1mPTqDxWudA++8nMg/vW5JKqKVSacfNrh4tf/jXktGPc3cUOFfK
+# 9KL6DSfOth5CcZKNk2XdjdpxT8u8OMl80oFqETu1vtg9RuorooSgQpW4WZT+d77n
+# xFjtpEZ0kB0rn1PRGWGEgO2BgoeWnPzeXIZnJzJA/nsjrswuDPOa6gLiHnz/ZlwQ
+# s48Cg9OlPSB3qIa/jmEwJcHcdhUXvFBBwX6a8LDNxncEBpKAV2Q2cpSqQpsDlU3W
+# uW9bIhLBlaT9/jcNT+pgXSHb/gA5Wy1DaHbmXUuPvITT4CFAQgbzqfpWUED2p/mW
+# 3ScI5W8eG1b/BPsxwP9R9PB5y+t1yEZV1PwEunTsuitQS0lJM7x5z43kky17ClZj
+# hJipLQmHMKCE5AIJ+Guxh4SUBaoLnjeFqQd3ojsa2XezxRukmpTP5B2SFTtVcdBo
+# DWluibH9jRIGkX7m9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDZaMC8GCSqGSIb3DQEJBDEiBCABye0ErAdknF4L8FqejIh4G0thO62ffFUxRmRr
-# lCqBpTANBgkqhkiG9w0BAQEFAASCAgC1Z66q55xE2pGNZ9l+xqk2nj8AtRbmyuVC
-# +0FyKw185rOuWcSAt1Tgmtd7nh2m0EOCkQc5pwjev0Kl5rupEU+1LdfpKYFaNcoJ
-# QTG7mID4ywPofPvuckXWquGlZqUex7RbyTdb+skfXJi0kG9icQ15+T1NgZvn15sp
-# 0dotiB0biyq51nNFWlVJCBgBW8DQf6Stqs4HJ8pWGKFLZmF35KrO1FRiCtvmtBLW
-# OT1WBj0wD3UrrJrAj6eQ7TfGbpQGFtNuO6HH1hxGuwwZM/17euNqZAYB/obpMsES
-# k20BDGesXeiVzBzaj+JdG84KlS1oxdSABJ9SrPHlF/R4z15fRZhFa6Ml+36R2F+I
-# qpe5m2zUKuoJ1g6CWGl3UcC4JU25bOe2OMG+7LmtR18EkD57ia0bDjDdhAj9wliH
-# VMGlYALjPK38BjHIcqZg/Y5APjuqb59+VDg9nPxSJsmNBKc8bZwiv0+K0GJUvWHi
-# 2dOcpIizPNUKI258PQEwQ1+hag/59EKTX/jLFew13nFmY/bmZj8085/QfqzhJCQS
-# pY9NNrEEmpR67xkLhix3bDxsJ0AgyiNYlm21YMJN1FD96CQ03UQJz3m7XlRddBjZ
-# kVQtxm2eTsjE/T4nL4d0xM9ncznCiwvsVzc0hz+qkeVGU9a1zoKJbhPH/Gj+kRd2
-# B9yBcyFrwg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDhaMC8GCSqGSIb3DQEJBDEiBCBh/gKFecx/WhnzWA4QgSUAzCVSnhD584JY3N23
+# OXEWqDANBgkqhkiG9w0BAQEFAASCAgBKbRnV2EFMtKP2FkoQ48XZFxwZQcWXj6Mf
+# NTS8SRHC+X90MiZkP3GANS3XPuemvSjvHYFHJb2wHDrWuUKL0JuOYt+eDc3ENuYI
+# r5yRIGlQvgYEGZEJ2xDGluKBkZ/nJYWblmQw9j1cbAsmkhIPcSh1mPmh4Zo6XSi7
+# uOK+D9owK2X6O+9XB6ccotuFfwwhQdOBQvXfKOCnckEOEAFJaQrXJTS2oqjl7mjZ
+# awtOb6h8u5OKx1eZMqVI2plup0Fnnsq+8LlnPx7VUpWqotdqD9aJn5jzsuGux5X1
+# /vCd58LUhTSMEQYBTNDodzjuOYnO1oeMX55iktz9FiOw2O2/SvNk1ggcUX/VtS18
+# 7D4qlSOTr3GvDnP/nh8kOTBuBV52T9izQjSzHJnrkEFPpE3JpqMhBY70wQFz2U1Z
+# V+7SZD31vc6AlHmqBrif7i8B/QwDkTbwVqxnsK5LV/2JfW9sYjmaabItsPXTNdkv
+# TZm7JijLVli4MWniMOEaB679375QCz8elToW0NUJXPuvHogyBs8dC8OQpHdlOKRY
+# TZtpn74AhHFJHk2+1j5TET1CnZJiIDaGqz1K3h+Uqv9zXrEB9Dj2bZi+8dl5zgry
+# E4JEMDa+AJR9h/UJFkOn83w967B8J0LwHt0xdqOlM57ZyPvsMFHTCprK92pc/dF8
+# oUgnrMTrvw==
 # SIG # End signature block

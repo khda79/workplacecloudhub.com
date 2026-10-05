@@ -23,6 +23,37 @@ are preserved. A failed serialization cannot replace the previous valid CSV, but
 this does not establish a transaction across all files or prove collection
 completeness. Consumers must still check source dates, schemas and tenant identity.
 
+## Current source receipts
+
+Every producer publishing reporting CSVs to `DATA-LAST` now writes one
+`SmartInventory_<producer>.current.json.txt`, with `Owner=SmartInventory-SourceReceipt`
+and contract version 1.2. This metadata is shared evidence, not exclusive ownership
+of the CSV by CMDB. One receipt lists all current-run published CSVs; there is no
+receipt per CSV, no new history and no folder scan that qualifies older files.
+The receipt is `Running` before acquisition and becomes `Completed` only after
+successful required publication and row/hash/tenant checks. Failed runs preserve
+native CSVs but invalidate completion evidence. Caches, temporary files, archives
+and the remediation-script run bundles are not `DATA-LAST` publications.
+
+The 17 CMDB source producers keep their explicit consumer-scope checks. The 28
+other `DATA-LAST` producers declare their required and optional outputs in
+`Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt`. Additional current-run
+exports are also recorded; absent optional outputs are not replaced by old CSVs.
+Effective selection parameters are included where applicable. For these producers,
+`ScopeQualification=ConfiguredOutputsOnly` and `IsPartialInventory=null` mean
+that whole-tenant exhaustiveness is **not established**, not that it succeeded.
+No receipt claims `FullInventoryQualified=true`. Derived reports remain derived;
+creating their receipt does not refresh their upstream inputs.
+
+Read-only and MAXITEMS modes do not overwrite canonical receipts. Core 1.0.72
+and Windows PowerShell 5 compatibility 1.0.50 are required by the newly integrated
+collectors. The common evidence runtime requires Core 1.0.72. CMDB preparation
+accepts strict legacy 1.1 receipts during rollout and qualified shared 1.2 receipts;
+existing metadata is never restamped or repaired from CSV timestamps. Intelligence
+CSV names, columns, prepared contracts, generators and history keys are unchanged.
+Qualify the next real acquisitions on the collection machines after deployment;
+the offline tests do not establish production freshness or completeness.
+
 Data quality takes precedence over runtime. A page limit reached by the Backup
 Protected Mailboxes collector now fails the run before replacing the latest
 CSV; use `-MaxItems` for a bounded test instead of treating `-MaxPages` as a

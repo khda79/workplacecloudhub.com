@@ -23,7 +23,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.5
+2.6
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement.
@@ -259,14 +259,15 @@ function Join-ModulePath {
     throw "SmartM365.Core module file not found: $FileName"
 }
 
-$ScriptVersion = '2.5'
+$ScriptVersion = '2.6'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365.Core.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.72' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{PrimaryOnly=$PrimaryOnly;EmitNoPermRow=$EmitNoPermRow;TopMailboxes=$TopMailboxes}
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-EXO-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -1329,8 +1330,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDn6hgehDXMAnqi
-# QE2AfekgYtnd91ym8zFbnWcLTaBGEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYGtE5/2sohKGp
+# JYSw1CCZTvFsgRLmlXa6TgUZxAy5cKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1463,31 +1464,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMJPE9Mm708UVC2z6kdbBU2a6aen3v67EWCgpVxzsoWCMA0GCSqG
-# SIb3DQEBAQUABIIBgKR1MbYOdc+A+slwzg/39p/pZR2/WrJRN1NJ/BOq9hxxMHc7
-# g9ULjcr8FsnEoM7q2gLm6L6+8dYu37mNqXzJM61fI4NGQG2a4qs8UXpgxsH8GubD
-# KOfLll+55a0mFM9YWi2h/MTXazjtwvWwUfT89qyM/17f5SRTreEMoCZBWzLIe5l6
-# zwMKOQz40/uRz6chyAB0t44NhUTfEnZLsBDT+oHfPxuxl2Gtxb6pw+Xo4WfAyuWt
-# LyuEIkVCUib4z6+/hZPRFbtAVqVQu00YJoVSDBkMkv2ARuXGaqgZGmEyjKyDC6rx
-# lpvcikePQvNuvlGuLvYI7qvLXZFNQBZ2bXEk4a+Do129gyPcNrAHMw3i3zYYGqZF
-# V6EiQf1CoRt/D6yXtzeNEjBLJsow6BF9fbzcLFx6VFW8eEWknVCW3orQbFy0XeHb
-# zeML6f1h5cq1IEfQ9Z3mUDfyVEJjBE3cIYLvAklUplGY5yEEtSHHZBLb5ATXfbfo
-# SZSKtD0jzG8SIQtXkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIVJ5Bcy8ZZbVwJNwGuZMMFtJhLsxIJtlksQZhh7LZ2NMA0GCSqG
+# SIb3DQEBAQUABIIBgDSC6a5LDXz7BN3oAmIh5q1iAJgUr6LJhD8TlpHUoMnGQoZw
+# QIg/Mb02DtKsWXvHQL3hDN0uPwMf7J9JJkhQcsKuDmWo+IvDHjcMmYzMzHD0gYTb
+# IMefPM6h3bsSsJFAgpcvlP5TRsN5IEcwMFeViecfAK0lNljQ+VoqPx/QD8YXfDIf
+# ZiEOcwVg/EBGOnVVQ1TyH6fxMp2xivnRmA0A/XlalktiINpxguW1u207Piep418N
+# CI/T7qjeDcrkYuLL61Rl7hp/u7jyb7hBrL3Z1tnn13+pVsN5pZMDBEHEi/nHDq5i
+# Qr8QLjLz1xWfwWgWtcyLwUdMnBsknBKYgMTI2+ImiNvJTyOzgbpeyObCOVcEiDC/
+# HJ2h8qKncSeH4EtPl/5QWp4QVSESqBVMnJrQbD4gzsOOf/9ivjSC8fZJyEaig4Hu
+# FFKII5raaDILNPaFhZdsyxh+HQlA7dFJsxQr4TkbZwjRiVw77EAFAmFViUyZ9l7p
+# uTy2wtrJflMpqAZSTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAnz9l7mpXqyMm+/8E3eemy4hP2tgHpvO/mvSL4
-# r2u+NTANBgkqhkiG9w0BAQEFAASCAgAGXue0AN9qOMjQvOxgIfFvgA+sMEO3woB3
-# D7r7Z45c7V6C0MokxPBWIaHJaIWxW3CDiYSijD57TJp9Pw7dYdOyIQay/mSSNlsE
-# t9qnARvaIG4s8XHd1Y3ndePr5vZQ8u7RTF5IOpfAR8DcCeZdKcqSc2eDAeQ4cWJg
-# 7A2S2Nrs+gVZ6964VDdtgRMfn+6Nii/5+myukFKAWXdmu71SJ0atgmsiW2egnFKP
-# wFELYdj7tz8Q2dO9zZqrz0bJC+rLadiA7/eYNj132HfmNfzk5Tg7S6Yry10ibi9K
-# yIxx8Be/v5u9h4lj2gy9ik+JEAlQ6P5kja3aQHoXhiKuYa5W5m5nt31FnCJjFG1h
-# ymYHwm9Lg94l5wWszq8qyTUJ+AmositMKKhA9W2muSTxIaoHBf7P9SHrxRBoddg8
-# 95wcoxYCu8Do6cCcsG4n8fqrsQhcLsXBe52Kzu1RpzEFOZ1TU82Bvmy2iAtl/qZp
-# sfxCTPS39W6QgHdBI1hdgX6aszYeXaVyCUpv8r8wM8QeokyYQuts7KDROzqbgAf+
-# gdCQfLE+aCY8tDYhp1qaPUH8OEbc6AR6zZK68VFYamUGa0vMkWSQrHoM2tl8fc+Q
-# OiN9Dpwl1b3O2u7/p5VcEkFESJ2owBSF5NhIJQL/hkhd9YhxAyU6Dt2iCRLrchOr
-# CZJR201p/w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDJaMC8GCSqGSIb3DQEJBDEiBCA4XNTIcPv0XeFwmcG7E9gP6B0SvbSuKlRGZLAF
+# mF46/jANBgkqhkiG9w0BAQEFAASCAgCIC2qwXs5VP/ehtjPIhtTo5UDs0DuxY/CF
+# BQhSgNCTkC0UX5W9zh5D52EP+2o0XA/NKYi3hPWjKj+l7QOEr+0NY/kSAVlvH0jo
+# QK27xGiU7DOMipQSVuWju2njM0oQyqKWV4I7EKEEVHtuL6Rz9hXFaZL+3OVp5lT8
+# r0G3P+nhaSP9X18zF889KlUX8U9hM5dlegs9NwTXC7KlbZM5A5nlBAfGa2N8dgog
+# pFUJil+UW2GTqdZpnB76M+UkoB5VlLsWKQJg4qgIqB9/K+Ui5YiMtfw7DSrh0t2H
+# EE3ovB5IU7ydG8WlySt9Cd//3zaNPl8c5OI7BI7DF1NmBXPZDaBmjcrDg2YkKx+Y
+# FaO+VeHZBj15MPW86GPvC6ZTCfv/vfsXffMPizs8hX+LlrbKbxA5rLrpWlmj8NzE
+# Kd7Gt6oRihOpsbiVngvPsRRM5mVC59evocga0qvnf7R2oXgIgGU3eirAiKZm0Aue
+# ntA6Iu9E0mIfv7qBhFt4pOCigwSRtgYjbg8bXuzJtAcBNDC2QntjeziI35SDbxTM
+# b+2W0TAjqBf2tBRhP+qOwgN0jNsYi+XixDufzZ9ZMzaT9SxKB2rEBp+ojSLsWyfU
+# 6jjcDRagVJVaL0UQQjWsVuhJ3uaBgmu9UaedBLnMw1sIg0xfhte/vwLJcnzzexDW
+# tmTs3jHv2A==
 # SIG # End signature block

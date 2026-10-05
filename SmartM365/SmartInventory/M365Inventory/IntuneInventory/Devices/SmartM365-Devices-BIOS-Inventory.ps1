@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.15
+1.16
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -271,7 +271,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $ModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $ModulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $ModulePath -MinimumVersion '1.0.72' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$ModulePath' : $_" -ForegroundColor Red
     exit 1
@@ -609,11 +609,12 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{DeviceNameContains=$DeviceNameContains;DebugDeviceCount=$DebugDeviceCount}
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath" "INFO"
@@ -920,8 +921,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB8r1a16T7z79IR
-# OdWz5RgLmVUZetL0VdyVsvR0pT4ZoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYuiDUd5WFoz0x
+# mMYUq6vVDN+oUQKXo1leTK+fnNL49qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1054,31 +1055,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPt28s0QlugX83I9lIW5m7EVwxueO3uFVkCplboL7l1GMA0GCSqG
-# SIb3DQEBAQUABIIBgFPu7Nxz6bKHSBXEhMQCmkSNxgXG2cJqYwc5jRYrMF9ecMkW
-# 3fK4UjcChhqeBKYG0a3eBQGh5CxJgAsgZNmxYZbqxg+gGpW5hdkKT2Z0IOtMjNtT
-# ALnyWhrwtd+cwyoHUfCmkZ5NqQLCdNcpC2NnRvL5aWdhWkbKaUMR0CnDDkGLMq1P
-# VGzVP7EJ5KdQqJil5kgvPy5cZuRqXx/a2scpxCs2KCjavHNE02ccl1IXS2L8tKdi
-# /CBoo7JcG1758kiiu7xg/Jjm1rD6wxKY0gNYEZun8ZViYE+td7WGMoQJfiLcR3xa
-# 5vPu+BmlEr0yf/IKjLkbrVBVR83rlLrO1/gd/vaa5eyJ2kseuo6qyMKUqv34Bevp
-# J3VrsBiMUpUfdjrvlusQrBuLBOtHeQmWJ5v4nNW68Pe/OYxxI8CIRx8yOq9p9jrm
-# 2jYwb9e2TSEa9dsOxXXHIzGXFQ9zXq5coATuBvFw4WKJpIVCHIveRE6ZDrHtSXid
-# g/lX/jp1dKB9OjeaQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEbq7JITjNl8Qs5wA+1uaJxCjAdT7HR+VaH1FjQBo9JUMA0GCSqG
+# SIb3DQEBAQUABIIBgKJHPPjgDBHa1pcnfxxXhUobisI+JVoEufyz2LSAMZlvYdRw
+# d4ZwhrBMCcVbEjnA3TnfiJsQEZfOerpegCXvCIhiL1tvWU3ekXWsvRBqLPwrvdwz
+# 2OqrYUi2W4tF9o2H4c1UnFBTDnCDZvlWaN7IKUZ+Guizg7SC7zku7cREUvucvqgC
+# VS5MsEA/So9DQ1bkuLUt9q63cA61uWPJn53G/ERvMElDlo3b9Qzo3X9CWl+qX691
+# kYOztHqqL3XI4XVf3Lw6epUGm/uKhEzv0BhCHNF/V4JfhWX24MSqY8kFOvZvp0Ia
+# p3y8ojEvNKtIe9VBNkLX4r+Va5mf6B3dCUHqWE/5p1fmfqq6s+knzYze/W0fvAvd
+# PTYOrqsky1Ag5m6JjMim3a6QMmgv4M2XDiELBhFsmGDmEtuF7N5np+SkE13X2Ikw
+# f518aLxpZ18QGipKpoxQSXMB/4NfXQF/EVRmVGe/8/0vAHq6hgwFsEqBsExqefTv
+# fUPMWrwtao3AwlftJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDEZa04mQrcwk7+HyhzJmtOUhFuGMMDlIrNnRt9
-# 23jaCjANBgkqhkiG9w0BAQEFAASCAgA6sybVteNt9k5UOoWnesYDhDQYFhlLemJ5
-# Y+Clcj7xsH2NM8mZkZczia3cPJ+nnYdgybm0cUubK+8JTbxx/5/4HMnAzYj7e27X
-# k/TrrIVtgfxAa1rmGURBFIz1cCrm8XKCgh4TpTIqiDxAwLj7fHUIP3lmVIF9O3yb
-# PxmxfK68yDlrHicob++V75pDJyrg00CpDX9s2nS/kJlzS1LQbbPWhk8PVqTEbRcg
-# SZybWu1pm2aJfCf9+4g9d5GnpS2fOzJcHXqvOkjbCUoh2TpfGxkyOXGu/DPd6Jbf
-# Tg6HqIp3EBi69hazmVWNgHPF9gmWb0ksnCvVwEmbda1woMrP/dFAVDvnxIym1laz
-# AjCJb2Av7cTV7QqGMU/Xb1Jw6DAW5jqZ8vXVoJ8ACoNIifXeJZhmXvqVbWkv7/QL
-# RNh7Hpfi6Opq8p2FGH8bWFMPbTvydO8a85Ib6/gefHE7Lm25n53xF+kpk4XxOWWT
-# 2kU6xwsUu/0wRE4cyZHs7mTlrq58+KaAM2u/0AcTmvFPF93P/A0xnGrRQWUt1jyo
-# 3v5PwCaMSxVbWyCQDp+zUILN7uF7UixPp3vCVpMeVuOPJNY25xn4lCdMAhbYsJp/
-# qoL6qPdak1ijjtKZzLpTE9AlSFB1Dbyf2YToTOpH/do1Wz4EjUkxFFYf54bksKxE
-# eK8u1mpDxA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDdaMC8GCSqGSIb3DQEJBDEiBCB33VtXT5PUBPapLAlfEqo8UUxQYftlZoQ8me/I
+# qd9J0DANBgkqhkiG9w0BAQEFAASCAgAPCzeCbHKJv/Wt1JKw8oEGtx2wF8HBCO2x
+# 7gDMIRssUBx1y++axFFn6V9OYkqrguZeMpGnPa+IZGgTJs6tcUnhriGY4m03C5W3
+# KdS+bwh3bIheuUdN3ntSEL3dTDaRfcZFRXl2XfZ9jTudpDB6QeeuPC6/3jZDGzEP
+# ziWMj7gJYnO7oWWAq6hKWN9t8AeaZ3vXhoTVI8gbO5N2s9IQYciJZeOHf/Q1GaKP
+# MxnwqxvBt7du4ossJC0QrDoMqdM/nZgX29AsTRuBm9uwCd5eAiPevqXzZrsgZFMA
+# 2KU9vVSVjntVHYvjZzDRPZl+6XaJocvFcmRBv5p8YVK+b9DL2y+AmoaxALXxWX71
+# +cJetEp/IMvRkdNyNms90io9plAIUxNLG9iqFfksdp/1iSCFZeiiWJTfr1geDHgT
+# DEsUfT49+bRjx5Mqa4SStjKsSXkBs8ItblCzarcx9E/xh0aFb0i+kLS8hsamUPeT
+# kQEkkiD+U12MmoPDWZZX/1z3HyfoTLajgLx/aCXfOUu+gBUIuBxPbjfch7sVCvp1
+# QjyEQA+ZjozMRDiAqFXcxOSxj4hTlGievTRVfcRNfHA0rUpyWb8xOj0JxDdcNoRK
+# xHFYrrl29fFpeav3gPJd0u8UiX/eLoLuVPSEBHyF0XCL+h58D/J/7HMBuz0wjqjd
+# CYHX28+Rwg==
 # SIG # End signature block

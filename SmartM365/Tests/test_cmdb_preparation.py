@@ -276,6 +276,59 @@ foreach($producer in $registry.Producers){{
         manifest=pipeline.load_json(self.output/pipeline.MANIFEST)
         self.assertEqual(len(manifest['SourceEvidence']['ProducerReceipts']),17)
 
+    def shared_receipts(self):
+        for producer in pipeline.load_json(pipeline.REGISTRY)['Producers']:
+            path = self.source / producer['Receipt']
+            proof = pipeline.load_json(path)
+            proof.update(Owner='SmartInventory-SourceReceipt', ContractVersion='1.2',
+                         ScopeQualification='ConsumerScope', RequiredFiles=producer['Files'],
+                         FullInventoryQualified=False, ConsumerScopeQualified=True)
+            path.write_text(json.dumps(proof), encoding='utf-8')
+
+    def test_shared_receipts_accept_additional_current_exports(self):
+        self.shared_receipts()
+        producer = pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        path = self.source / producer['Receipt']
+        proof = pipeline.load_json(path)
+        extra = dict(proof['Files'][0], File='AdditionalPublished.csv', Required=False)
+        proof['Files'].append(extra)
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        records, receipts, _ = pipeline.producer_records(self.source, IDENTITY)
+        self.assertEqual(len(records), 33)
+        self.assertEqual(len(receipts), 17)
+        self.assertNotIn(extra['File'], records)
+        self.assertEqual(self.prepare()['GeneratedTables'], 46)
+
+    def test_generic_configured_scope_does_not_qualify_cmdb(self):
+        self.shared_receipts()
+        producer = pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        path = self.source / producer['Receipt']
+        proof = pipeline.load_json(path)
+        proof.update(ScopeQualification='ConfiguredOutputsOnly', IsPartialInventory=None)
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'consumer-scope'):
+            pipeline.producer_records(self.source, IDENTITY)
+
+    def test_shared_receipt_missing_required_export_is_rejected(self):
+        self.shared_receipts()
+        producer = pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        path = self.source / producer['Receipt']
+        proof = pipeline.load_json(path)
+        proof['Files'] = []
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'Missing producer completion proof'):
+            pipeline.producer_records(self.source, IDENTITY)
+
+    def test_shared_receipt_cannot_redefine_required_outputs(self):
+        self.shared_receipts()
+        producer = pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        path = self.source / producer['Receipt']
+        proof = pipeline.load_json(path)
+        proof['RequiredFiles'] = []
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'consumer-scope'):
+            pipeline.producer_records(self.source, IDENTITY)
+
     def unchanged_after(self, action, pattern):
         self.prepare()
         before={p.name:pipeline.sha(p) for p in self.output.iterdir()}

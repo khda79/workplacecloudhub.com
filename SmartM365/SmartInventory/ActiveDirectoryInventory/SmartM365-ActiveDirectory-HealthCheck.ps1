@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.28
+1.0.29
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -72,7 +72,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.28"
+$ScriptVersion = "1.0.29"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -96,7 +96,7 @@ else {
     $TenantContextDirectory
 }
 $CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $CoreModulePath -MinimumVersion '1.0.58' -Force -ErrorAction Stop
+Import-Module -Name $CoreModulePath -MinimumVersion '1.0.72' -Force -ErrorAction Stop
 $LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json"); $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath
 $LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'; $LegacyLocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LegacyLocalConfigPath
 $LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
@@ -428,6 +428,7 @@ function Invoke-DomainCheck($ForestName,[string]$DomainName,$ForestInfo){
 try{
     Import-Module ActiveDirectory -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputFolder -LogFileName $ScriptBaseName
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{SkipDfsrBacklog=$SkipDfsrBacklog;EnableRemoteDcAdminChecks=$EnableRemoteDcAdminChecks}
     $OutputFolder = $InitializeOutputPath
     $transcriptPath = $null
     $transcriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
@@ -493,8 +494,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRLShINXjofCS3
-# 3lBFT4GrjFy53y2pysPG1iVbOykVaaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHp+1HB/bVzJvZ
+# er84ffJkRhG2LWZ4S2vehcJ3oLCNpKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -627,31 +628,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPqx0wboGyfj84rhqANZ0IFAeVjr//4q/915bmNARDyzMA0GCSqG
-# SIb3DQEBAQUABIIBgArWD3aLicD3pahOZXhicxEq8Npy1NdoiiPv07JWjwtUrZG3
-# JfR3ZTzs1/crCMsgk2ZscvaseGgu8Il6wsRGMuF7GTpLpMJfDxPkCeRfbxKemRor
-# t7tGkwIp0jJRiC4rL4Ma3HuiOxqlI9ukbmK7DhgMIVavQPeMzdZ2wRba/9Tqr4DP
-# wcVfB0XEtrG0ExQspkRaXnThT3/CJvnFKhte0M6FnZiPko1AcWsRAL3X0Mp0HJil
-# vqwo7sV8/OCOPvPn6iTFH8ak0x29wftaoUjq3HlXZvOWYdPg3RB5zwu5xhD5jfov
-# VZ9gYA7xAyTIVbu8WkbAkp7iJEQBMmZBT4wtKfof6SRWl1pY12WhYkbz8Cm4fUdl
-# QZhfFTs4UaLnsbPJ54kBSa2K9WQTTaTOtX38+4s0PqbgOk6tvv/nMc91M/pw7K9O
-# pNQe3fdocA7WOH9nhrtPwFCSGnc1xitG1PeIQpUtlI0GIKMjNdeS4kI3Olf7/1D+
-# 1iLFusMgctl7/Up/DqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGIRqR3e05atPm8dgs+zv9OIRLM8oOD03LPVF2KaWPA9MA0GCSqG
+# SIb3DQEBAQUABIIBgJpiKiMox8qTSuWC7llsi98IQs9oBi26Vh8YmZb11RJC8J5j
+# cq8sJ8WP2qoM2LHrThrEXm/J353RB30xHAULphtumVNM1I7kLC2s3HbTAQj8rHGr
+# KbhwQ4tNvfxAd1RmZp2S0GW+GnFuQkipkcqxuBxMhAeL1rXPsSUfu98XMpJ2ClGG
+# E4gdFut6sTPL/cl0W8xRg1FL00Q4rnGeITGB9u5VFZsD+CVTmDsbBdiNEiQv8cqX
+# 7XOsY+RUSQ5H7gPaoWxQkRMYQWpDQ+clmuYnrZjgVWPAOpk0H0ikIE+5bNIlBMm3
+# hpVcbAjX6qQ893Z/tuorQQvmV2LLmDaVKFinRwMsWHfqbksev3W7r28d/7pBKFSb
+# bD//+gPjU6y2CYNbdoMmxCa1cMfbW2rF+EShB2r8kOn+qAoES6YSNxqJaYVYCOTc
+# 23NCcHeBTw+FJHpP5AghrMyaquJVuVojHzSSjrsWFdPE9CM8zBhTSqv3dvWuvL0i
+# mzqt/9WIIIStTMHjlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCiVdfYlsr/mQCobrLxTXToMJtuFn8tGof2NING
-# 09UDDzANBgkqhkiG9w0BAQEFAASCAgBSy9ozA/5dYTszzqee9puV/BL7t5OrRRNu
-# mJVIT3hVZPp6Fe5bxtrkQQQj3d6QoxVjExZjRU/kkoxPSfq487LaNEB8V1B/ZlcA
-# wg+ICkZSn47RMyOiQsGrvnt9hS3EUB5KseLf4bbgzqLXzc8mK6IpvmsFM48BjIli
-# bFSTBlcz6WV2Td7al/g8YJ7O1eos3h1sjl4wOOZmJiOCNEkL8+YCIRTBRbrBnR1x
-# gYSfSCwPlu6yc7vwCObA+PAc7nkrRoFXb0u4K5BAJuT8xAC/7c2CqCrZx41PE5O2
-# r3hXt2ZiXWwBd52ePTB8HbDpAJv5ym2eyild0WgXwrU3G1q2XhoaqlmMMzkHWPXG
-# YZKe0Yhpofp/nhkaeLWU9YaZF3uN4rLlLbQnHHpUxpmrhZTLoups/KsE3RhyPzkz
-# EKilu2kUvahMnS7QXjT8WNUf4jGWfSt8FIxhUIcnl4XLSaOtJ4YP+44Np655FYdR
-# TTOlC9Ydm1CLERqS6mZMnRpmAVpKz8UfiuAYaZeq1ZpuB8r9oBH+kSP8WopPDA5r
-# dqJnyvZVZ5LCwbm5bYBXb/h6QzNf81616SwXyx2j7Wc13B9QpPA9dKAEnC3ooZq7
-# +Gczemr3u3wTU6Kw/Ojr7kY5mbxx5XubPnajZ5AUUrn4MDIJKxh75sy1RmfLgHN2
-# B29tynNAJA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# MzlaMC8GCSqGSIb3DQEJBDEiBCDCZ8JQUvTjG5pX+CdLdYJg22vwm6JXPNvx5/oL
+# T1q+ZzANBgkqhkiG9w0BAQEFAASCAgCbEKirrN28IyZwSbr3NfVpAPKPouY5z8bP
+# arvGFQeisdNtnOhhv86fV3uItfDiH4sAwvp9CoXrTYks5rJSLOD8wbHlE/v09V6Z
+# 2EbrYP1dFYnmy7uX/acEbU4AnTyNBdr8/jekvBWgWapR+MW96LLIQpY8k1OMz1i0
+# rSkvDIfr/fB9mRA4q16LkBG8qf+3N0QgGCVVMTW+lWQhMRbpwV9dYHZBg3Qef0t3
+# olziwIMxvsZNQYLH8vbFlMfc953p24njaSMs9hjrKmMODG8eiE0Ho27ydPTPuxbC
+# TjusqesAQo99f6V5uo/hp9AcwuSKpSy9jP15JhNbZU8v7yJKU8zNBJXWC2ED9lKl
+# mZJRgBehe7FEADISMGhQmED+pmNPAz1HDgQTvSVvMjZqxCRlLPd1KyyLeS6fNRLm
+# TWV6jY2rnRqt7f8uW57JVO2wNmSxVhBPgLsdWJuc7EU8zMdLJtmUtB7x41aehGma
+# boxaK7NrfmzPiMCFiZ78IFLnhAzs0Y36Rv4KZNhb3vEsX5TCX2mKfgIDdXUYYYSu
+# WO3OztQw2fQi6OiLteZsYhF3lUbsYmSW54z4Bdi1B6MiPHwJ7PVEoAQJsb0cKUIP
+# AwYYMekl3R7WsABeQYSwnbCO6Zf27mqehlt75BTFJPkj7OB2n+1jQqB12WsmGnHv
+# RiyTWm7T4g==
 # SIG # End signature block

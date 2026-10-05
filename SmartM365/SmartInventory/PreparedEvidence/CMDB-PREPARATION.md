@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Version: 0.3.3. Status: offline-tested migration candidate, not deployed or scheduled.
+Version: 0.3.4. Status: offline-tested migration candidate, not deployed or scheduled.
 
 ## Scope and execution boundaries
 
@@ -54,7 +54,8 @@ new producer acquisition, not manual CSV or receipt repair.
 The shared helper starts a receipt before acquisition with `Status=Running`.
 Completion can declare `Status=Completed` only after explicit full-scope
 qualification, zero collection errors, and publication of every required
-canonical CSV in that run. Each receipt carries owner, contract version 1.1,
+canonical CSV in that run. Shared receipts carry `Owner=SmartInventory-SourceReceipt`,
+contract version 1.2 and `ScopeQualification=ConsumerScope`,
 the four tenant identity fields, actual script/version/run, required scope,
 acquisition interval, qualifications, and each file's logical row count/hash.
 File lineage must match its parent producer receipt exactly. Failed scope or
@@ -64,6 +65,15 @@ Rejected producer proofs identify the producer and receipt filename. Incomplete
 proofs also report status, partial-inventory flag and error count/type; the
 completion requirements remain unchanged. Compare receipts on the collection
 machine when a synchronized copy may lag behind; never manually restamp a proof.
+
+The reader also accepts the previous CMDB-owned 1.1 format during rollout, with
+its original exact-file and scope rules. New 1.2 receipts may include additional
+current-run exports, but every CMDB-required file must still be present and only
+those files feed preparation. `ConfiguredOutputsOnly` receipts from other
+SmartInventory collectors cannot replace qualified CMDB source proof. Existing
+CSV schemas and Intelligence history contracts are unchanged. A future real
+producer acquisition replaces its own legacy receipt; no metadata conversion or
+synthetic production proof is performed.
 
 Each producer holds a local exclusive `.collection.lock` while collecting.
 These small current lock files are not uploaded. Receipts use atomic local
@@ -86,7 +96,7 @@ option for this acquisition gate. The inactive integration specification and
 remaining cadence/deployment approvals are described in `CMDB-INTEGRATION.md`.
 The active orchestrator manifest/template is not changed by that specification.
 
-Every required filename must have its own actual receipt; the example is not a
+Every required filename must have its own file record in its producer's receipt; the example is not a
 complete proof. `Rows` counts parsed logical CSV records, not physical lines.
 Empty success still needs a complete header, scope and receipt. All required
 sources must pass; a failed or partial producer cannot be rescued by an old CSV.

@@ -13,7 +13,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-VERSION = '0.3.3'
+VERSION = '0.3.4'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -115,8 +115,14 @@ def producer_records(source, identity):
             raise ValueError('Missing producer completion proof: ' + context)
         digest = sha(path)
         proof = load_json(path)
-        if proof.get('Owner') != 'SmartInventory-CmdbSourceReceipt' or proof.get('ContractVersion') != '1.1':
+        receipt_kind = (proof.get('Owner'), proof.get('ContractVersion'))
+        if receipt_kind not in {('SmartInventory-CmdbSourceReceipt', '1.1'),
+                                ('SmartInventory-SourceReceipt', '1.2')}:
             raise ValueError('Producer completion proof owner or version mismatch: ' + context)
+        shared = receipt_kind == ('SmartInventory-SourceReceipt', '1.2')
+        if shared and (proof.get('ScopeQualification') != 'ConsumerScope'
+                       or set(proof.get('RequiredFiles', [])) != set(definition['Files'])):
+            raise ValueError('Producer consumer-scope declaration mismatch: ' + context)
         if any(proof.get(field) != value for field, value in identity.items()):
             raise ValueError('Producer completion proof tenant identity mismatch: ' + context)
         if proof.get('Producer') != name or not proof.get('ScriptVersion') or not proof.get('RunId'):
@@ -133,7 +139,7 @@ def producer_records(source, identity):
         local = {}
         for record in proof['Files']:
             file = record['File']
-            if Path(file).name != file or file in records or file in local:
+            if Path(file).name != file or (file in records and file in definition['Files']) or file in local:
                 raise ValueError('Unsafe or repeated source proof filename: ' + context)
             if any(record.get(field) != proof[field] for field in ('Producer','ScriptVersion','RunId','StartedAtUtc','Scope')):
                 raise ValueError('Source record lineage or scope differs from producer: ' + context)
@@ -141,11 +147,13 @@ def producer_records(source, identity):
             if not start <= completed <= end:
                 raise ValueError('Invalid acquisition interval inside producer receipt: ' + context)
             local[file] = record
-        if set(local) != set(definition['Files']):
+        if (not set(definition['Files']).issubset(local)
+                or (not shared and set(local) != set(definition['Files']))):
             raise ValueError('Missing producer completion proof or unexpected source file: ' + context)
         if sha(path) != digest:
             raise ValueError('Producer proof changed during validation: ' + context)
-        records.update(local)
+        # Additional exports belong to the shared producer, not to the CMDB source contract.
+        records.update({file: local[file] for file in definition['Files']})
         receipts.append({'File':path.name, 'SHA256':digest, 'Producer':name,
                          'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],
                          'Scope':proof['Scope'], 'StartedAtUtc':proof['StartedAtUtc'],

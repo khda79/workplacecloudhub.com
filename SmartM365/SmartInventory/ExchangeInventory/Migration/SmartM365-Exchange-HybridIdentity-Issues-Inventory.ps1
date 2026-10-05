@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.22
+1.23
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -44,7 +44,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.22"
+$ScriptVersion="1.23"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -221,7 +221,7 @@ function PublishWeeklyHistory($files){
 $script:CompletionStatus = 'Auto'
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.58' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.72' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   # Tenant domains are configuration, never code: the routing domain comes from the tenant context, the allowed TargetAddress domains from the local configuration.
   $remoteRoutingDomain=([string](Cfg $lc 'RemoteRoutingDomain' '')).Trim().TrimStart('@').ToLowerInvariant(); if($remoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$'){throw "RemoteRoutingDomain is missing or invalid in the tenant configuration: '$remoteRoutingDomain'."}
@@ -236,6 +236,7 @@ try{
   $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $true; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   InitializeScriptEnvironment -OutputPath $OutputFolder -LogFileName $ScriptName -CallerScriptPath $PSCommandPath | Out-Null
+  Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestFolder
   Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
   $script:LogReady=$true
   Log "Log environment initialized for $ScriptName v$ScriptVersion (EnableSharePointUpload=$($global:EnableSharePointUpload))."
@@ -367,8 +368,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnqYQEHBnmBnZ8
-# 0RsisgYpnayTKJ/bsLWb4ZpqiuUHrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIzj7R0M6O6sH0
+# 9kHBJEEvdVEmuGf6NQeOoPiwbuRNwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -501,31 +502,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN7A0bRU5oa6LcaZ/Oh5MxvGkgysaXYoogLz4g6UVKeHMA0GCSqG
-# SIb3DQEBAQUABIIBgBp1FnlJtCIdfGite5MqHasBi3ksKMkD1L08EPVwsFVqNg8s
-# vpVuTTS0QPQ5zf1P4wyFa0AhBLOfjWyP9mF8G1Y3Ld8Bkx4WtFN7B6IsTsB8U+vw
-# elBqQrRaa6JH27qEQXFkHhB4IVRN80bWylt7qB93LqjEQOVOSPxBFtg+Fri9aAXu
-# c09Y9HWF8imRVCjuqCdJ2yyR0KEiLyBchTaACoa+JMJ1PfDwadA9hP/SZ68h0moQ
-# 8EgZTsCLRLX91TTTyuyTPNLgArftuMWz4+qvNwfphRtwAVqgmouRsZnUleRiYdE3
-# mrRKbe+bxOrpj9xLW06Oace+3YR8GCbZIxcMztuuANbuO7jr3Bi4K6l8YGY8peDi
-# Cs04H915Bzhbth1Swcx2VjogXugreuaeidXctHO8I64ToWOQ9fEK8+sECkMUYSYD
-# EfkNIR5dVYlV7nBkLLRVPPUP8qcTV4s+aovmJ99xp15TGU66X8uVbVMGpHLS+QRy
-# 9jPW9pwTn2NFhxijoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIOTvSEULJqZokhLpaPdA/q1os0GEalSTJP8gESSQXhgMA0GCSqG
+# SIb3DQEBAQUABIIBgA2++qe+H4n0hePuUX5WENtInQvLJYgmOEEAp6hmCzayz3iB
+# nnNpqlwYHvbBORs3rmRaKnGfpO39VkTLITg8wGOmC+Jetypzdf3cWEmCM7qZDYkz
+# ZRWiwUAw+4pQdfEHpAQNNXt/tx/dprtnYNHymRW/tTQ3QFXNjvi1f1wLNYCYQF2X
+# q2sN+eL5e6YjmrPEHVKnO2F3BdEAQRG00ShbmeLvpEVjYXD4AzZQfosOWm8/DKPs
+# vk/9OILQdwC+EWEDFNdagbp2QaWhXLUW1iJXgN1Nw2p0TpiV+U5S/ZxHMTDNrhn2
+# SSOzRBj8AN4xAPX4twooU8CKkPpGcJdmUecRcXGUe35tlvIYwrZXbBPsZwcthQaB
+# yeFpA8lQWEvtGMhmZaMtuaQ+wcAkB9BuTPZVTWEd+cJUsi5nSa1PI/syUpJz6U/U
+# g4t2RQJByyLmfuC47fIP6HcH19MUt/cNUsPhPR7CUGODTzppe8r5W/lQzFkfMeAF
+# QN/emUq9cWW3rwQ9UKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExODUy
-# MzBaMC8GCSqGSIb3DQEJBDEiBCCchCwuNPgFMlrEEnW3ATzCgncr4cm7ESTZCE23
-# Ie1t7DANBgkqhkiG9w0BAQEFAASCAgCbWoNk19hdAV0J+LC6bB2WovPQ6o47Z7gc
-# kCIEetwD5zi2H20vmvbhCewSAt3bRcCZoImAeUXRhDwpBq2DdORFiaCwHbm8eYTI
-# oPwnxNM7tZPJrLo2NQT6abd6qpQQQibWK8wKEgF6ZlTnchtjJMd//DRLZleWQ3J6
-# jmUqUY16upPtnHkNjmtHg9PtI73qOOD7LFwekn57gSr3Csr9ZzctJiGWoXpGegjn
-# BexsQcQr5pg/NsJgFRsDQlqbxJwevUDHVhT59xxgA5fX3DZabPzKyvGCS3KFozB7
-# NDKq9mD0zK2IMOCl7oEWcMijAodj8s8qK5NxU7SsEHahbl5EKe0Iwg+4X7DeOIVu
-# GkOnSAfKpINA8o+vfJP3Wg44YaagiudraTb59KHaWSfUtI8LeAQTZFKTPeOXM74v
-# ruf4l7TX9gILhAmQMaUzeEDiaCX5p75L/U/+rgqFFdHqwiQ+NofjzgabcdklAQ3g
-# j8JJDxE1eIR6cHAjZIBNsJgQkpgUw4o60V1QCA244rFM33l9hhldPZi0fTqhtaNK
-# 99FdTxsqAc647PqxAv8UCnRLRr0tj/ZR41KmSSHF/kkOyK3UWXtJrzrvtTOn3wTi
-# JMaWu6aFzKpYiVTI6E9ViQeG6mA/KbkAVQmyw8eDQPlVl3nVCiGzb+C/mhfxmjT2
-# 2vpLhz0P/A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDNaMC8GCSqGSIb3DQEJBDEiBCBFmMszvXQpUlH08NibF/h9X6ly+gZHLP1IKcar
+# chBJ/DANBgkqhkiG9w0BAQEFAASCAgCOJfX4/XcKTT5toNN0HNVr80+oQaNtGwXH
+# tFnXxejgiAhoXaWPsRspFgPAT49rsDjJFpsnVxa+d9h+PMa1TypDIPFH8Sfs/69g
+# wnrrK1GYWkNv6HgLdfVmJZK0bsrjcxwUemct/+IxgE+8aIOXB8AcMa7Zd5ByxYkk
+# nfv4IycmkSiU/os9VnZrwwNOxt589f7fbKEp7fkYeYYOd32NI3Z1x+Bs/JPFdkPM
+# uXUTxI8Tl08iHZN8aLkNpbNWvpCRE7tiYXmWnRpGbD90LF12OvHgZogEp06kchpZ
+# uRFF3hY0jxJsg6EV88h6qgjFtPcIbzms95D3P1N9NmHykXU0U/18vENR3WSRH+Xb
+# 9SxGURHAOTwdUjJ7FuIFWViWlFrVxkdpdyfz+S9+m18vy+mUTvi/BjwuLx/vjOWD
+# Ov48IOPbCohj7yc9nMzgXiryG2/k0gSOcAUCaSE7DxhMk9QGXg09foludVc4+35T
+# az3KIZNko3wMNHkSv7a0vSeeozYAxq3DOrb+LQjbc3LoxvK+MDw7hb+kYDvPZdDU
+# OEnuy86fwNzTa5+vkJNaCifNYuuXg2WRc+BiU6vPy2wnYIm7XCnqrTNZdmRCMsiu
+# KiWrpN+5wXwZarCCZ+5xfzTAMlCne+S/eS6hNbAyBgdaWeECFi52PLGRJKN0u9jj
+# w/8CwjwZ1Q==
 # SIG # End signature block

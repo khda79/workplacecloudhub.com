@@ -17,7 +17,7 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.10
+1.11
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement.
@@ -240,7 +240,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # Import SmartM365.Core module (psd1). 
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.58' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.72' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -351,11 +351,12 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -664,8 +665,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD04bwDtrAXgUt6
-# xpWAjbLU88850annRS4FprXvBiXrkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFpZXzU9t7jGBm
+# ZRGgA0gQmFFPCDnV+bIOOiPaPWUV0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -798,31 +799,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAK5xGdgueIdVimSujPSO6M+a2c9zBpuiSbHJXb2RnlVMA0GCSqG
-# SIb3DQEBAQUABIIBgKNeWRrx25P1BFhwB6o34gNboqd+beb0FC9oDylqrETBVIrW
-# 7W6kSSo0UdR6wKbnc3lMbFswP6t4ogzGG5cpCHWp9wFnMWO2mNzZMt+k++0gP3Jz
-# /mJN1zzXKv2cmCkqSU6KeWhbqYbMmhZ2ILqUZ4si1cwpwznSBLI8Sw5xR1bErkET
-# JptupYxysz0OD6S3Q0cFr19x7GyjvKC+aoVkuTlmPPnVAgUjXZK72Zhjx73Y0dv1
-# oopQZv1M7BjViOoauqKpr38/SFD2Yow7bXx279VdEOwWjQF211lW50UfYC6Ohe9v
-# fU50QQtH+i7Et9X/xdYF2kVccJo0ou6Otefjcko4ZV+wQisbQeBztckVpwXP8kk4
-# P5RyZxTS/BcwDyKVk8T78u7/VvoFH/HHFbENxQumqiRcuZI6twCvViP3b+q1rykE
-# yQbcKLLt2YM6EyqAK267Q8wiffSRhxSCOTSUxGRAqKbw/+NfchiPAD2VzX9Vikyp
-# cOnVQnFy9S1hXVVG9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA1tSHbWDLol6qd+A/v6NYit6xKQdFohNknBoWAfY7o1MA0GCSqG
+# SIb3DQEBAQUABIIBgJTwIdgRHQDqhf3mc7M3aArG3vpPhYQhhlUdzTjwn4RuWedL
+# St9JpWQXbpZwNtxPqDoJqscCHpXMFUJmiiHz6md/fhufnEx2qgqcGnApQlUOMrjB
+# tOdNb3Ict5csCCChLbUPZ1SNsZHkR5bxOsmouAWeYqe7Wja5hjb6/fID2oBJY/9Z
+# 9r9yTLHn8lKRpAHecXhAN+B6RzcXc9ubhIpo+js/Da/Fog09pOPXuN3jGbfPAvxQ
+# 0IrwDU2ba38F4JZw5N0s7KNSAakqDnvEXsA/UZt6Rm/V38gsnhOmemwe7/LTLkxM
+# KS5ehPS+oEdfHuMZcWIvIxWjWpCAdG5kqssKcVqS5jU1IXeZ7pvsEzG6lhOlOy+d
+# fdksK/q5uglUd9Ize9f7UksgSdeGc+ibitb2Niy39LCw2ZahWwX+ldl0cGvO1xun
+# SRoSRgKSzYnUqX35mQRgeIjb7Qkb3pzuI4iNii17FHfK9tqAG7lJLNSIt5U5rEmx
+# BLBHXUH27WuQvUxqqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NDJaMC8GCSqGSIb3DQEJBDEiBCAJnL7FSWwFT6tnV04i2+NmpTPnLMHdjH6Oe173
-# x0dkgDANBgkqhkiG9w0BAQEFAASCAgB9q0onJR0c5IXeZCvRrqwtYnl4Icpk9ZIs
-# lqY2rSQgnCrB3I61OdeRbj0fwdMDQGHCxkLXckKoajTe4Hnm0r4XrYZFYsQVAVV5
-# 3zGfLs1j6sIvt3ZT75rs77EgtNQtclKQc+Tg1OfvkO7YjGFaIGaEpTYUF0KeLHa4
-# R+qc9fD+iqcjN87bcoGAC9k6Jw8bQD2Y4xUhmsuTT1ndOWciwu8jkahgVt8FyClV
-# BP2cE8nA2SSuJFk4D9gLqs0uTw8lcYjqrjiGmsHcmrgEMKsiYXEl19jJD4WlZGAB
-# ea+MvWZSeUKLnpBmSZNcPCR3dAo3iAICVmCCyClW1Wib6HmbjoIt1kts2GSDnvAq
-# EVy8Ey4f/9/ZvnNL2yEBvzgkqKJ0+DklB3ynDdQ9v7qYuY/5oEUksHYuOp7oCQps
-# a5AabYZCtA1Kb42BnnALe1eq1khrXn3NFSkSLBGNcpjaC6nuMImtE3YfrZKGD+BG
-# iwDjSOVorIwzRODmIdQ58lMhMcZxZnTw/sKsGBEmB57XdB2fVgPMkLUglj3v0YUa
-# qwWUqdwUK+wAGU8mj5sCAUISdotNebwluJQhrubJFz5/jAWyywwa1PG0m/Og5pwZ
-# LvyL+0OewgEe0TmmmoRtTogKgKff8o9d3X5kMZEZKam6QLyAa1DM/NFKomxUQUiE
-# oT2ZD8bfqw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDxYYfv5uwAzkuiKx3ExxOyl6wPLhpehC0J+7mJ
+# 5MI1iDANBgkqhkiG9w0BAQEFAASCAgAFG2FzHCwWhpkjChq+cUGbd/KFC9HhuQ5l
+# AqpXhvoIHfUF3+igkeSqkDxBYIh73ovhB671xAZC1krRMbf9W+Egn/ZKPa+sWgmq
+# UPx+GG2P1jPuIi9fFgh+YA/ch2D2q1OcDTecWPrRSwvg2JPXbQmEJgr5XtQu27a5
+# EoRw1nV9YqFdOgvuMXDmZx96XMf3QrwvfjJQcZbluMXKwHNfVa2yv20ywi+qZO1+
+# 5y8UZdW0wPAlyM+4jjz00hCAS6V/0e+i4iJdBa+seNk4PNZ/OlHX0lvG0PZAHABI
+# qSlvSkZMRM2BfjhKZQg4WXDNlYsE+6DGPGQP0yTfTz624FUeuaFoFD9Wk6FboQ9Z
+# uJ1I0FrKdw2icpiXbg9gZB+7Qgu+EujPlnAFuWhpecucHNPn0Zr79oQbKCcRl5tf
+# HKzwzHibEqm0m8h1uDnzX33cGhe14ZmotOFUg/dJsIL8WbKTYvFI2m5hpxt9K+TD
+# 8E6EaMIGLZOiQy2qhgSYwS7ftByCIl/9qGPz9ueLrUyMExMiCHxpYQItD5Im+87w
+# AFlF5QsmvnPih5236qRAmtbLveAvEKUY852SIVp/lRSMW+xOA/lahJMs3Vs7vHF8
+# uX/sXkw9V3EZPupaxHqhus1x1A1Jcd8YWfwwv0cLJV355nm1oIo8FY0gDjl1+qPA
+# q+zyebLVCA==
 # SIG # End signature block
