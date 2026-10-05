@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.46
+  1.47
 .VERSION
-1.46
+1.47
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -89,13 +89,13 @@ $tenantContextPath = & {
 }
 . $tenantContextPath
 $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-$CsvTenantKey = ([string]$script:SmartM365GlobalConfig['TenantKey']).Trim()
+$CsvTenantKey = ([string]$global:SmartM365TenantKey).Trim()
 if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant context has no TenantKey for CSV joins.' }
 
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.46"
+$ScriptVersion = "1.47"
 
 # ==========================================================
 # App-only authentication parameters
@@ -2710,8 +2710,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHzrqpuvksoGlH
-# LmOUyj2fZ3JIlVfD+5goNpDvlugkOaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChK58+n6pi5BVW
+# eDXwi7RkL7j+m0Hnt0gfgG1Kf1Vk/KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2741,14 +2741,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAQEmO5PImtYtjerUG9jUZO
-# knjJA/UIRg7XhTy3GiqP+TANBgkqhkiG9w0BAQEFAASCAYAG0BtpmSGhzN1qpm+T
-# cHNdBZSnzwDDQrSDxaCSh8Y5qqi5DLKNsKWpukGZHF6ezw/Rrn1qVuM2/FwIR4AA
-# 3Ir1Mu7zHwQje6yxWKJV4L4PMN11tmbbXBMjq6Wt6B/RQJniif9yXNTyem8X1DOP
-# pT+6s4ey31twqd2HJwi8CyNhzKDULBxPJjQGwx/6RSbjA+YmiecfT3MqId83RoOP
-# j9T20482zOLLBYPvV3n5xnZRArHIMVMc81sDjlSKJiVgVaBaqXtlBu41Dm2kz4ol
-# BAVGlLFyJdksg4aB3gkE+Glv/1/OyXolZS5HBgjy1fYGTELHNeBf4QBrDhv+baGm
-# ndXyRQhiQgoQlP/I6eRIf2M34D9wiJXB+N05ZiyuuwqJI4LEbgpc0pEPzzjDbwaq
-# qv1aS33uIMMHrnm6D9Cl0ow+cG2qnZdrXket+sjcXDj3Q+RzyZXmPtL3b03hQ5IQ
-# eM5i9Og/oYnERKX50OGzt+Kdue8R2t/zy/1EvhGrnSrecos=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCRwuFD6P/uwp6NTSRwIFih
+# fJ/kXacPqcp2GzP6AkhTOzANBgkqhkiG9w0BAQEFAASCAYCOV1cvgflbe8glwy5N
+# 5htM/cgSodXItpsYlDUIo1SeMUf6tsS0rQryf/6KEcytBMQQs8ELxmHLYiqlwwm1
+# WpXi/Tj1SAQs77nS/BkYko/IiqHsU0lEGMsrunOwDA3YJEf8kOQrq9n4JRlInvv3
+# 6WYcajGR6gm//RwbWDYVRm/1exwa85DVeOmjitsuodyegX52M3loEehob7lA1/09
+# Ib2Bij0ciWWOwtmioTseVX2CcHyVTaS+nta17d5XX3gB2vuyHDGKVHLb1QZrLb67
+# 3tnfhFiA/T3liya4ELAP0NUNtVV7oI/k6PwR+xslziei90NcX7sTCwQ/OhfT1SdC
+# tyMR7Xt5LZ69G+rFe88TI9cRm0v0VTG+oGiCNBXtXnfppN4wcCGquR3o4F4Nfqw3
+# kJOlLKcszWES2Aj8M6CyL2RVirIDs/daYbtDtmGT14gkEEhhcrLhzoL1E5lBplxt
+# GfsKErNNob/Rdm/pC96iFP1iPWMdSLh7HQJGRXaQlMfSZ6M=
 # SIG # End signature block
