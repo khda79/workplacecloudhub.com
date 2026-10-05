@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Intune-DiscoveredApps-Inventory
     Retrieves discovered applications for all Intune platforms via Microsoft Graph API.
@@ -6,6 +6,9 @@
 .DESCRIPTION
     Connects to Microsoft Graph using service principal with certificate authentication.
     Retrieves all discovered applications and their associated managed devices.
+    Repeated catalog identities require two consecutive stable identity snapshots
+    (at most four complete reads). Compatible name-case/count variants require
+    full fresh relations; raw variants and page positions remain in the run log.
     Produces two CSV exports:
       - Summary            : one row per native app/version (name, publisher, platform, device count)
       - AppDeviceRelations : one compact row per app / device pair (TenantKey, AppId, DeviceId)
@@ -33,10 +36,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.30
+    Version : 1.31
 
 .VERSION
-1.30
+1.31
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -45,7 +48,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.30
+    Version : 1.31
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -313,7 +316,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -505,13 +508,15 @@ function Invoke-GraphPagedRequest {
     param(
         [Parameter(Mandatory = $true)] [string]$InitialUri,
         [Parameter(Mandatory = $false)] [int]$MaxRetries = $script:GraphMaxRetryAttempts,
-        [Parameter(Mandatory = $false)] [int]$DefaultRetrySeconds = $script:GraphRetryDefaultSeconds
+        [Parameter(Mandatory = $false)] [int]$DefaultRetrySeconds = $script:GraphRetryDefaultSeconds,
+        [Collections.Generic.List[object]]$PageEvidence
     )
 
     if ($MaxRetries -lt 1) { $MaxRetries = 1 }
     $allItems = [System.Collections.Generic.List[psobject]]::new()
     $visitedUris = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $currentUri = $InitialUri
+    $pageNumber = 0
 
     while ($null -ne $currentUri) {
         if (-not $visitedUris.Add([string]$currentUri)) {
@@ -543,11 +548,26 @@ function Invoke-GraphPagedRequest {
                 if ($null -eq $response -or $null -eq $response.PSObject.Properties['value']) {
                     throw "Graph collection response is invalid because the value property is missing. Uri=$currentUri"
                 }
-                foreach ($item in @($response.value)) { if ($null -ne $item) { $allItems.Add($item) } }
+                if ($null -eq $response.value -or $response.value -isnot [System.Collections.IList]) {
+                    throw "Graph collection value must be an array. Uri=$currentUri"
+                }
+                $pageNumber++
+                $position = 0
+                foreach ($item in $response.value) {
+                    $position++
+                    if ($null -eq $item) { throw "Graph collection contains a null record. Page=$pageNumber; Position=$position; Uri=$currentUri" }
+                    $allItems.Add($item)
+                    if ($null -ne $PageEvidence) {
+                        $PageEvidence.Add([pscustomobject]@{ Page=$pageNumber; Position=$position; Record=$item })
+                    }
+                }
 
                 $currentUri = if ($response.PSObject.Properties.Name -contains '@odata.nextLink') {
                     $response.'@odata.nextLink'
                 } else { $null }
+                if ($null -ne $currentUri -and ($currentUri -isnot [string] -or [string]::IsNullOrWhiteSpace($currentUri))) {
+                    throw 'Graph pagination returned an invalid @odata.nextLink; collection is incomplete.'
+                }
 
                 $success = $true
             } catch {
@@ -572,6 +592,130 @@ function Invoke-GraphPagedRequest {
     }
 
     return $allItems
+}
+
+function ConvertTo-DiscoveredAppsCatalogSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Occurrences,
+        [int]$Attempt = 1
+    )
+    $groups = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($occurrence in $Occurrences) {
+        $record = $occurrence.Record
+        $location = "Snapshot=$Attempt; Page=$($occurrence.Page); Position=$($occurrence.Position)"
+        foreach ($field in @('id','displayName','version','publisher','deviceCount','platform')) {
+            if ($null -eq $record -or $null -eq $record.PSObject.Properties[$field]) {
+                throw "Discovered application field missing: $field; $location"
+            }
+        }
+        foreach ($field in @('id','displayName','platform')) {
+            $value = $record.$field
+            if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value) -or
+                ($field -ne 'displayName' -and $value -cne $value.Trim())) {
+                throw "Invalid discovered application text identity: $field; $location"
+            }
+        }
+        foreach ($field in @('version','publisher')) {
+            if ($null -ne $record.$field -and $record.$field -isnot [string]) {
+                throw "Invalid discovered application metadata type: $field; $location"
+            }
+        }
+        $count = $record.deviceCount
+        if (($count -isnot [int] -and $count -isnot [long]) -or $count -lt 0 -or $count -gt [int]::MaxValue) {
+            throw "Invalid discovered application deviceCount; $location"
+        }
+        if (-not $groups.ContainsKey($record.id)) { $groups[$record.id] = [Collections.Generic.List[object]]::new() }
+        $groups[$record.id].Add($occurrence)
+    }
+    $apps = [Collections.Generic.List[object]]::new()
+    $identityRows = [Collections.Generic.List[string]]::new()
+    $variantIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $duplicateIds = 0
+    foreach ($id in @($groups.Keys | Sort-Object -CaseSensitive)) {
+        $occurrencesForId = $groups[$id]
+        $canonical = $occurrencesForId[0].Record
+        if ($occurrencesForId.Count -gt 1) {
+            $duplicateIds++
+            foreach ($occurrence in $occurrencesForId) {
+                # Raw variants and page positions stay in the private run log, not in public CSV schemas.
+                WriteLog -Message ("Catalog duplicate evidence: Snapshot={0}; Page={1}; Position={2}; Record={3}" -f $Attempt, $occurrence.Page, $occurrence.Position, ($occurrence.Record | ConvertTo-Json -Compress -Depth 4)) 'INFO'
+            }
+            foreach ($occurrence in $occurrencesForId) {
+                $record = $occurrence.Record
+                foreach ($field in @('id','version','publisher','platform')) {
+                    if ($record.$field -cne $canonical.$field) {
+                        throw "Conflicting discovered application identity: AppId=$id; Field=$field; Snapshot=$Attempt. Raw evidence is in the run log."
+                    }
+                }
+                if (-not [string]::Equals($record.displayName, $canonical.displayName, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Conflicting discovered application identity: AppId=$id; Field=displayName; Snapshot=$Attempt. Raw evidence is in the run log."
+                }
+                if ($record.displayName -cne $canonical.displayName -or $record.deviceCount -ne $canonical.deviceCount) {
+                    [void]$variantIds.Add($id)
+                }
+                # Deterministic presentation only; never choose or sum a reported counter as ground truth.
+                if ([StringComparer]::Ordinal.Compare($record.displayName, $canonical.displayName) -lt 0) { $canonical = $record }
+            }
+        }
+        $apps.Add($canonical)
+        # Counts are volatile. Stability compares the native ID set and compatible business identity.
+        $identityRows.Add((@($canonical.id, $canonical.displayName.ToLowerInvariant(), $canonical.version, $canonical.publisher, $canonical.platform) | ConvertTo-Json -Compress))
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($identityRows -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $fingerprint = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '') } finally { $sha.Dispose() }
+    [pscustomobject]@{ Apps=$apps.ToArray(); Fingerprint=$fingerprint; RawCount=$Occurrences.Count; DuplicateIds=$duplicateIds; VariantIds=@($variantIds) }
+}
+
+function Get-DiscoveredAppsStableCatalog {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [ValidateRange(2,4)][int]$MaxSnapshots = 4
+    )
+    $previous = $null
+    $requiresStability = $false
+    $variantIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    for ($attempt = 1; $attempt -le $MaxSnapshots; $attempt++) {
+        $evidence = [Collections.Generic.List[object]]::new()
+        $null = Invoke-GraphPagedRequest -InitialUri $Uri -PageEvidence $evidence
+        $snapshot = ConvertTo-DiscoveredAppsCatalogSnapshot -Occurrences $evidence.ToArray() -Attempt $attempt
+        foreach ($id in $snapshot.VariantIds) { [void]$variantIds.Add($id) }
+        $requiresStability = $requiresStability -or $snapshot.DuplicateIds -gt 0
+        WriteLog -Message ("Catalog snapshot {0}: RawRows={1}; UniqueApps={2}; DuplicateIds={3}; VariantIds={4}." -f $attempt, $snapshot.RawCount, $snapshot.Apps.Count, $snapshot.DuplicateIds, $snapshot.VariantIds.Count) 'INFO'
+        if (-not $requiresStability -or ($null -ne $previous -and $snapshot.Fingerprint -ceq $previous.Fingerprint)) {
+            return [pscustomobject]@{ Apps=$snapshot.Apps; RawCount=$snapshot.RawCount; SnapshotCount=$attempt; RequiresFreshRelations=($variantIds.Count -gt 0) }
+        }
+        $previous = $snapshot
+        if ($attempt -lt $MaxSnapshots) { WriteLog -Message 'Catalog repetition or coverage drift detected; reading the complete catalog again before accepting its scope.' 'INFO' }
+    }
+    throw "Discovered application catalog did not stabilize after $MaxSnapshots complete snapshots; refusing to publish incomplete or drifting coverage."
+}
+
+function Assert-DiscoveredAppsCatalogRelationScope {
+    param([bool]$RequiresFreshRelations, [switch]$FreshDeviceDetails, [string]$Mode, [int]$MaxApps, [int]$MaxItems)
+    if ($RequiresFreshRelations -and (-not $FreshDeviceDetails -or $Mode -ne 'All' -or $MaxApps -ne 0 -or $MaxItems -ne 0)) {
+        throw 'Catalog contains compatible variants with ambiguous reported counts. Use -DeviceDetailMode All -FreshDeviceDetails without app or item limits; partial or reused relations cannot resolve these counts.'
+    }
+}
+
+function Get-DiscoveredAppsValidatedDeviceIds {
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Devices, [Parameter(Mandatory)][string]$AppId)
+    if ($null -eq $Devices) { throw "Invalid app/device relation identity: AppId=$AppId; null relation collection." }
+    $ids = [Collections.Generic.List[string]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($device in $Devices) {
+        if ($null -eq $device -or $null -eq $device.PSObject.Properties['id'] -or
+            $device.id -isnot [string] -or [string]::IsNullOrWhiteSpace($device.id) -or $device.id -cne $device.id.Trim()) {
+            throw "Invalid app/device relation identity: AppId=$AppId; refusing to silently drop a device."
+        }
+        if (-not $seen.Add($device.id)) {
+            throw "Repeated device identity in app relation pages: AppId=$AppId; coverage cannot be qualified."
+        }
+        $ids.Add($device.id)
+    }
+    return $ids.ToArray()
 }
 
 function Stop-DiscoveredAppsTranscript {
@@ -694,9 +838,15 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                         continue
                     }
                     $devices = [System.Collections.Generic.List[object]]::new()
-                    foreach ($device in @($response.body.value)) { if ($null -ne $device) { [void]$devices.Add($device) } }
-                    $nextLink = [string]$response.body.'@odata.nextLink'
-                    if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                    if ($null -eq $response.body.value -or $response.body.value -isnot [System.Collections.IList]) {
+                        throw "Graph relation batch collection value must be an array: AppId=$appId"
+                    }
+                    foreach ($device in $response.body.value) { [void]$devices.Add($device) }
+                    $nextLink = if ($response.body.PSObject.Properties['@odata.nextLink']) { $response.body.'@odata.nextLink' } else { $null }
+                    if ($null -ne $nextLink -and ($nextLink -isnot [string] -or [string]::IsNullOrWhiteSpace($nextLink))) {
+                        throw "Graph relation batch returned an invalid @odata.nextLink: AppId=$appId"
+                    }
+                    if ($null -ne $nextLink) {
                         foreach ($device in @(Invoke-GraphPagedRequest -InitialUri $nextLink)) { [void]$devices.Add($device) }
                     }
                     $result[$appId] = @($devices)
@@ -1582,15 +1732,12 @@ try {
     # ----------------------------------------------------------
     WriteLog -Message "Retrieving all discovered apps from Intune (all platforms)..." "INFO"
     $appsUri    = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$top=999&$select=id,displayName,version,publisher,deviceCount,platform'
-    $allAppsRaw = Invoke-GraphPagedRequest -InitialUri $appsUri
+    $catalog = Get-DiscoveredAppsStableCatalog -Uri $appsUri
+    Assert-DiscoveredAppsCatalogRelationScope -RequiresFreshRelations $catalog.RequiresFreshRelations -FreshDeviceDetails:$FreshDeviceDetails -Mode $DeviceDetailMode -MaxApps $MaxApps -MaxItems $MaxItems
 
-    $script:Stat_AppsTotal   = $allAppsRaw.Count
+    $script:Stat_AppsTotal   = $catalog.Apps.Count
     # The legacy variable name is retained internally; its scope is now all platforms.
-    $windowsApps = @($allAppsRaw)
-    $appIdentitySet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($application in $windowsApps) {
-        if (-not $application.id -or -not $appIdentitySet.Add([string]$application.id)) { throw 'Missing or duplicate discovered application identity.' }
-    }
+    $windowsApps = @($catalog.Apps)
     $script:Stat_AppsWindows = @($windowsApps | Where-Object platform -eq 'windows').Count
     $appsCollectedAtUtc = [datetime]::UtcNow.ToString('o')
 
@@ -1814,11 +1961,10 @@ try {
                 }
 
                 $appRows = [System.Collections.Generic.List[psobject]]::new()
-                foreach ($device in @($devices)) {
-                    $deviceId = [string]$device.id
-                    if ([string]::IsNullOrWhiteSpace($deviceId)) { continue }
+                $validatedDeviceIds = @(Get-DiscoveredAppsValidatedDeviceIds -Devices @($devices) -AppId $app.id)
+                foreach ($deviceId in $validatedDeviceIds) {
                     $pairKey = '{0}|{1}' -f $app.id, $deviceId
-                    if (-not $seenAppDevicePairs.Add($pairKey)) { continue }
+                    if (-not $seenAppDevicePairs.Add($pairKey)) { throw "Repeated app/device pair during acquisition: AppId=$($app.id); refusing to silently drop a relation." }
                     $appRows.Add((ConvertTo-DiscoveredAppsAppDeviceRelationRecord -App $app -DeviceId $deviceId))
                     $script:Stat_DeviceDetailRows++
                 }
@@ -2114,8 +2260,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfOYrESit6XZJ4
-# RYibUdHFhf7CFC489XCEZZFyXcUcsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/XpPiQrxnPipd
+# aJZLOQiVLpIiXQRqodz25/H3gVt1/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2248,31 +2394,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGwe40eFgQzyLXYPWxWF2Qu8Ldd1jrXPatEFIcUX6luiMA0GCSqG
-# SIb3DQEBAQUABIIBgFZP5eSqzmGf+6nI5td7opIgv0VW3USRxyzLO72qxRkjDuTM
-# HjX2OEWD/ERg6olSNXZ7qWPkCsqXZ6WTqlMOhAU4CKxjOzzykegknwaTJKZ4JY4C
-# SwHUSv8IHTOuekrQrw58Rnpa4B5q5ayw/om0m7nDmQYHMWHGOk61nxLFfrW5duJt
-# btCq7qkbvpPb/OG5vDJixAn+C+wzHTBH22gX6CSKFEvAhNAzOhDnFhrvZId23gnf
-# enszHMgzrTZB3cb+tKdTeTkcmMLJnvb8rNx9Z2pstGoxorZ7NDb3FSTwOrJkhj1Q
-# zVR0abhQUZxrIgETu2rBASpfQJV+pV3hX7EyR2kaVPG2xwh5Z8OONgUbrOd9yS2u
-# 369q7abuLUUFsWTmYsZ60sYxyHRS6222u7ZE86te84IJ+VW7DzBxg0uHhJCqicOb
-# ncujbtlFeIWzAYDZEhYjrHohQdAhA38P0p8jgwWgMcNHt3a5li4dkpu1z7Ye68fQ
-# RgdRvDCIS/Ryb35zDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFCsTImsvik5dPjQiG+xd0qGxrpqpUOdUitIwIgqQauuMA0GCSqG
+# SIb3DQEBAQUABIIBgFVlVdAcetns4iNjGfV2qnSMwMnk35azRkG/0zoTmkhh+PzL
+# WX18j14Hn2pTJLTLf68jwhFFtWUFqBp0r77Fx9CPvuzbQoCQxIhK7SSQhkbdId7m
+# zaOHfbmWZWih70Gup0GvftciR2RwcxzE3jBMY6r+9kaIKreriX777F6Pxtr9B4av
+# e0LCJi3rpXPr45cM7+WnQHMMUZWkVyIVUe3nGLsEotQmVdLdASgF3GqTaMR19QK9
+# 6liUMoYK+aAqhA4BG1yAzWeacDYI0iSUYkLMnSO32RhKdAQ+9rjlESXoLtwxIn3C
+# nbL44wHyYC4He4SLBWXsK/5ffKypePb1tJjPy+6ZyIvfX1UYpflg8xOi9ue01i5y
+# UtKCYbUp+frmBkjHLWMg8/dMNnRVbAZyho6rS72GY5VojYotlr7CcTUQrJNrpd6a
+# zrZJZSHowlzrZY678wBg42Lt9GDhbYOXxZFkGcqe6foaS96X54qCUBH9FAPRmEc3
+# qrtAiSTjb5NIN25bcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwNjU3
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBRDSp/tCVE3jnUVtUP1jnKYTR8Gk80X8thkGpb
-# vBAb2zANBgkqhkiG9w0BAQEFAASCAgBwng7bsngTNO6A8Esl8V4ezfzkjQyPtJp4
-# DbmcSb2xxpBNmUiH793pzIpwhXFQLYEmXFYZox1utfItdgY/th86gORxZFSem+3S
-# k+4VCH4ODRGf2vphhWqh0VPlUZV2UiCIJtVjt3rfOa78YB4MU/el/BxYCCRczynq
-# e/YSOeM1JnCkgaU+jFdqyza5yhu61xu/ZrmMm48A5vdcKsdMtjPSMawxJrPnVqFb
-# p4ysuZjoLZIYHGkE8PSBbmS3kgXk5mrbI8fJ46D9x5tsj0s0ECIZddew7hf4Yia+
-# rGzBPj0vAcuqweh+t1PAF8igWOhSlmoe3RB0c8cVyhCv7bZiYSzcyjp63tyjwQMM
-# P6d0PNsdqcRo8zBRqOrr8wxsFcSEQcdkPX7sfYoe/z/zghnNt1TPFsMGPKcdu8ZE
-# Kqu0Ga0He7gCVIzXyn+wlQWH2akCXMuPUOR7n0fFhZZ3wMoXVfoSoHmm3qft2slL
-# aCg2umOfJ5OKxEKFDN1Vv6BUgScHa8rRKHbVqZdB4ZqRQGHtumdS2Boo0CykTWcd
-# Vq58QFvNJhrCMrSaHVsDhg5mgWu40fNyvUhxKiimajO0TrpeQA84R0u8pFqEi9Bw
-# VY+vlhRANQq3TyXMRH5MllYdoLSw6GZsWzHnyoSKj7aO4f0GrOb15EJ7lX8aXsmp
-# u01cY7RxTQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwNzE2
+# MzFaMC8GCSqGSIb3DQEJBDEiBCAHf+6y41lPM2Wtnvb/6F0hsMt53EzCvzUEK6sW
+# vRnhADANBgkqhkiG9w0BAQEFAASCAgCutUeP+gfB0+VGlMS2lyGr+aOTcIm1PO3u
+# 5qP9pGPF9W2hBRa9vzt7wT9xAiqlRwJ9+IYh2vNSbyGWsbSENofNE15uYnnBpbZI
+# xyITetCjVozXSKr+EsLElumPxCA20py3i8lxdCLphLXCQDKSb9kUZGejBNoW1jWh
+# 1cTONhJCU+XrfGgktefK5/LJFV2EuK4xQu+JI4/Q4IoGCgz+/FTwWab0kqcXHnSD
+# rEsjtr7yfeR2Tb8IbO4WrD9AVI80HBdEepz92SoSnKo/+9MIwAsjZgIPlxJN7197
+# WiZVVSTIwF6plOxjC0Do8dZVRer5H/vAa3RgRmJHXFGEsiFJDrZ0jm0tUl6MkoNC
+# d8MAij5DNctKXg/uUyYcfLBnurJgoMjFAD4U1D+NpEQ58tcOn8Uxps5daSVGS4HZ
+# YOS1YAzDTUF6mTRzVT4rrX6wg/JUl18NiXfG8LR8UUrULWZDc8FVPWtMV/qEJPbW
+# fn0tG6UAuCDH0WNk0Gaj813YTBBXP1NfdLYJb5piEnKt8XyrAzzatb2tmyJsxkcF
+# F31IZ3V5T5ZThRGGN6FOrlOshCXfoPUHKzh2nRXagYI0XQzEx2o7IgzAwzkFKMJG
+# Gmwf76FnqHSbXndUS3ar2nIb8rsw/Ohr/KK2NdHYEtnjVJxF3/R/mGnEhTaoMrHx
+# qHDwt39x1w==
 # SIG # End signature block
