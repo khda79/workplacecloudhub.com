@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.45
+  1.46
 .VERSION
-1.45
+1.46
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -89,11 +89,13 @@ $tenantContextPath = & {
 }
 . $tenantContextPath
 $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+$CsvTenantKey = ([string]$script:SmartM365GlobalConfig['TenantKey']).Trim()
+if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant context has no TenantKey for CSV joins.' }
 
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.45"
+$ScriptVersion = "1.46"
 
 # ==========================================================
 # App-only authentication parameters
@@ -2386,7 +2388,7 @@ try {
                 if ($activeUserRows[0].PSObject.Properties.Name -notcontains $required) { throw "Active-user CSV lacks '$required'." }
             }
             $referencePolicyId = if ($coverageAvailable) { [string]$primaryCoveragePolicy.PolicyId } else { '' }
-            $intuneFleetSummary = Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $intuneDeviceInventoryRows -ActiveUserRows $activeUserRows -PolicyRows $enrichedRows -ReferencePolicyId $referencePolicyId -TenantKey $Tenant
+            $intuneFleetSummary = Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $intuneDeviceInventoryRows -ActiveUserRows $activeUserRows -PolicyRows $enrichedRows -ReferencePolicyId $referencePolicyId -TenantKey $CsvTenantKey
             $intuneTotal = $intuneFleetSummary.Total
             if (($intuneTotal.Windows11 + $intuneTotal.Windows10 + $intuneTotal.UnknownOrOther) -ne $intuneTotal.Total -or
                 ($intuneTotal.ReferencePolicy + $intuneTotal.OtherPolicyOnly + $intuneTotal.NeitherPolicy) -ne $intuneTotal.Total -or
@@ -2408,7 +2410,7 @@ try {
                 foreach ($required in @('TenantKey','ObjectGUID','OperatingSystemShortName','Enabled','IsActiveInLast45Days')) {
                     if ($adComputerRows[0].PSObject.Properties.Name -notcontains $required) { throw "AD computer CSV lacks '$required'." }
                 }
-                $adWithoutIntuneSummary = Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $adComputerRows -IntuneDeviceRows $intuneDeviceInventoryRows -TenantKey $Tenant
+                $adWithoutIntuneSummary = Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $adComputerRows -IntuneDeviceRows $intuneDeviceInventoryRows -TenantKey $CsvTenantKey
                 $adSourceText = $adSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
                 Write-Log "AD computers without exact Intune ID match: Windows11=$($adWithoutIntuneSummary.All.Windows11) Windows10=$($adWithoutIntuneSummary.All.Windows10) Total=$($adWithoutIntuneSummary.All.Total) EnabledActive45=$($adWithoutIntuneSummary.EnabledActive45.Total) AmbiguousIntuneIds=$($adWithoutIntuneSummary.AmbiguousIntuneIds)." "INFO" "KPI"
             }
@@ -2708,8 +2710,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNor0Jk8c4zmLS
-# AJlVthJu4lvyK0rs549/nosbNG2YMqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHzrqpuvksoGlH
+# LmOUyj2fZ3JIlVfD+5goNpDvlugkOaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2739,14 +2741,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDxZFuQGVf7We91wrYBynHT
-# 0hFsXmdRSytVz9WR154+ZzANBgkqhkiG9w0BAQEFAASCAYBnBdjHC4HIBq8n7je4
-# WP9GRMd9BzRA7g7tJqSao5cio0Qo7h30ug7pdjfgJaiTUYHWJVtfyPeORaImy3tQ
-# Oe3kBToxnxGmHbRqvBNdjGWlY9IGeaypeyjIMSiLORFvtbjdvzNvE+RuhwSVG4hw
-# 5s8XVqpE1eRyX3a4i/hCGKJ0DnXNemFLLQfkHbIY5UVAVRWi+y9luxvmPaT7xByU
-# d57ns0/5nT7oCltCrpvNx/vFykZkami3TVdTNAFOShDYYSPSQPLY2cemV7Em6JvG
-# Oc1k9ADG1piKpLmYL4VXKCRUVUYVQ+c7JUJNbOOEEIHr+YCuPA3LdjLDEW42PvKd
-# HORpA1iys/cG112kCoeXQlrYTmq6rYeqbB9HFEAHfQkKwE9lm8DwX0QTLldJQD+4
-# Cf1wwmEUEa5QZJrCoHSZJvHpDDofD36BWAUpgeyCzANW960QbpMyM7rO6o/zUnYX
-# p6OAaTHc5fQpO+TF4ax91UJnC/l4zVVYrZmXI+vyxdGu3Kk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAQEmO5PImtYtjerUG9jUZO
+# knjJA/UIRg7XhTy3GiqP+TANBgkqhkiG9w0BAQEFAASCAYAG0BtpmSGhzN1qpm+T
+# cHNdBZSnzwDDQrSDxaCSh8Y5qqi5DLKNsKWpukGZHF6ezw/Rrn1qVuM2/FwIR4AA
+# 3Ir1Mu7zHwQje6yxWKJV4L4PMN11tmbbXBMjq6Wt6B/RQJniif9yXNTyem8X1DOP
+# pT+6s4ey31twqd2HJwi8CyNhzKDULBxPJjQGwx/6RSbjA+YmiecfT3MqId83RoOP
+# j9T20482zOLLBYPvV3n5xnZRArHIMVMc81sDjlSKJiVgVaBaqXtlBu41Dm2kz4ol
+# BAVGlLFyJdksg4aB3gkE+Glv/1/OyXolZS5HBgjy1fYGTELHNeBf4QBrDhv+baGm
+# ndXyRQhiQgoQlP/I6eRIf2M34D9wiJXB+N05ZiyuuwqJI4LEbgpc0pEPzzjDbwaq
+# qv1aS33uIMMHrnm6D9Cl0ow+cG2qnZdrXket+sjcXDj3Q+RzyZXmPtL3b03hQ5IQ
+# eM5i9Og/oYnERKX50OGzt+Kdue8R2t/zy/1EvhGrnSrecos=
 # SIG # End signature block

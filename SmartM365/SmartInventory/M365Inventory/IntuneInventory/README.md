@@ -77,8 +77,10 @@ inferred for this table.
 The tables read `Intune_Devices_Inventory.csv`, `M365_Users_Active.csv`, and
 `AD_Computers_AllDomains.csv` from the tenant's DATA-LAST snapshot. Their last
 write times must be no older than `CountrySourceMaxAgeHours` (48 hours by
-default). Missing, stale, invalid, or non-reconciling sources display an
-unavailable notice for the affected table. The CSV export and fleet severity
+default). CSV rows use the effective `TenantKey` from the selected tenant
+profile, which can differ from the `-Tenant` profile name. Missing, stale,
+invalid, or non-reconciling sources display an unavailable notice for the
+affected table. The CSV export and fleet severity
 remain unchanged. The `OnChange` mail state includes both breakdowns when
 available.
 
