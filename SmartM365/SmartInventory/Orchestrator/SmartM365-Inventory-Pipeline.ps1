@@ -20,7 +20,11 @@ orchestrator applies the job's scheduled dependency rule to them (for example Fr
 Add -IncludeDependencies to run the enabled dependencies in the same request.
 
 .VERSION
-1.1.0
+1.2.0
+
+.EXAMPLE
+./SmartM365-Inventory-Pipeline.ps1 -Tenant test -Cancel -BatchId '<active-batch-id>' -Reason 'Controlled direct collection' -ValidateOnly
+Read-only cancellation preview. Omit -ValidateOnly to cancel remaining jobs; running collectors continue.
 #>
 [CmdletBinding()]
 param(
@@ -31,6 +35,9 @@ param(
     [switch]$IncludeDependencies,
     [switch]$ValidateOnly,
     [switch]$Collect,
+    [switch]$Cancel,
+    [string]$BatchId = '',
+    [string]$Reason = '',
     [switch]$NoWait,
     [ValidateRange(1, 60)][int]$PollSeconds = 15,
     [ValidateRange(1, 720)][int]$WaitTimeoutHours = 168,
@@ -114,7 +121,10 @@ $exitCode = 0
 try {
     if ($ValidateOnly -and $Collect) { throw 'Choose either -ValidateOnly or -Collect, not both.' }
     if ($NoWait -and -not $Collect) { throw '-NoWait is valid only with -Collect.' }
-    if (-not $ValidateOnly -and -not $Collect) { $ValidateOnly = $true }
+    if ($Cancel -and ($Collect -or $NoWait -or $Job.Count -gt 0 -or $IncludeDependencies -or $PSBoundParameters.ContainsKey('Pipeline'))) { throw '-Cancel cannot be combined with collection/selection options.' }
+    if ($Cancel -and ([string]::IsNullOrWhiteSpace($BatchId) -or [string]::IsNullOrWhiteSpace($Reason))) { throw '-Cancel requires -BatchId and -Reason.' }
+    if (-not $Cancel -and ($BatchId -or $Reason)) { throw '-BatchId and -Reason require -Cancel.' }
+    if (-not $ValidateOnly -and -not $Collect -and -not $Cancel) { $ValidateOnly = $true }
     # A launcher passing a comma-separated list arrives as one string.
     $Job = @($Job | ForEach-Object { ([string]$_) -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($Job.Count -gt 0 -and $PSBoundParameters.ContainsKey('Pipeline')) { throw 'Choose either -Pipeline or -Job, not both.' }
@@ -150,6 +160,13 @@ try {
     }
 
     $SharedDataFolderPath = [IO.Path]::GetFullPath($SharedDataFolderPath)
+    if ($Cancel) {
+        $cancelStatus = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -Tenant $Tenant -Reason $Reason -ValidateOnly:$ValidateOnly
+        Write-Host ("Cancellation {0}: BatchId={1}; status={2}; cancelled={3}; remaining={4}; failed={5}. Running collectors are not stopped." -f $(if ($ValidateOnly) { 'validated only (no write)' } else { 'published' }), $BatchId, $cancelStatus.OverallStatus, $cancelStatus.CancelledCount, $cancelStatus.PendingCount, $cancelStatus.FailedCount)
+        $cancelStatus.Jobs | Format-Table JobName, Status, OwnerServer, Detail -AutoSize
+        Complete-PipelineScript -Status Success
+        exit 0
+    }
     $JobsManifestPath = Get-SmartM365JsonReadPath ([IO.Path]::GetFullPath($JobsManifestPath))
     if (-not (Test-Path -LiteralPath $JobsManifestPath -PathType Leaf)) { throw "Effective jobs manifest not found: $JobsManifestPath" }
     if ($Collect -and -not (Test-Path -LiteralPath $SharedDataFolderPath -PathType Container)) { throw "Shared orchestrator data folder not found: $SharedDataFolderPath" }
@@ -233,6 +250,7 @@ try {
     Write-Host ("Pipeline completed: BatchId={0}; status={1}; failed={2}; warnings={3}." -f $status.BatchId, $status.OverallStatus, $status.FailedCount, $status.WarningCount) -ForegroundColor $(if ($status.OverallStatus -eq 'Success') { 'Green' } elseif ($status.OverallStatus -eq 'CompletedWithWarnings') { 'Yellow' } else { 'Red' })
     if ($status.OverallStatus -eq 'Success') { Complete-PipelineScript -Status Success; exit 0 }
     if ($status.OverallStatus -eq 'CompletedWithWarnings') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings $status.WarningCount; exit 3 }
+    if ($status.OverallStatus -eq 'Cancelled') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings 1; exit 3 }
     Complete-PipelineScript -Status Failed -Errors $status.FailedCount
     exit 1
 }
@@ -246,8 +264,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCC2zPpGQHQ5kf
-# qLix/X6qASui8rPmsvfA2CyUd2dxbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDohCbgauZ4BUJ+
+# i1TZItFM34PVIqAESeKUuCn7wrlv2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -380,31 +398,31 @@ exit $exitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHjuzOnq+bo5jzRLWBzxmtjrJcFOhzBxzgDUZEDGqIALMA0GCSqG
-# SIb3DQEBAQUABIIBgBXbioiR2GhPSqinIZSLzMHaZAbl8AZ+NSFLP7GBQ756McqM
-# DoQgC2BI+1zXdKZ2K32+FZxKFfju9dLWiVMBXgACQXMTw7RLaV/Fw0D3xLqFneOz
-# 3Rb8cbo24L1pEX/wdzcFWe5CiBsYo2ReLNDeDUg8rxPhzgSQSiFFSugHmm0dokCx
-# 8VN8N2W7ocg43EKakTwgAxt4F3eRnx+kDy7vHBpRY/hHq70jmQt+T4l/jwwdo7JX
-# 6hGZAZPYtsjEvy8lBXT4cPxSyadbrO0N2fGSQCpqe9FnwehOiD/9Y3OdYgJxZhLa
-# 8ys1CM6N7A7GktOd3QJGTAFWsnwMxVTwI1kWXW3bGCG/dnMDXfOJH/iRO6W9bpST
-# nTo0s8ieF7OavbSkS59exhgJi7zAT6xcQveDrSjXdOte127VGQ5iWk8t36WLkPoc
-# O5sFBPKDKxg7HKGdhu+oY1vo9unksWZgi5obUt8dEoP+zxm7wDld6s8rpgYb+ayN
-# XGWnrV44QnjXyFwFq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC26WJv1SAjI6Jx5wc24AEjv7UlSP+XCuONHE729pXv9MA0GCSqG
+# SIb3DQEBAQUABIIBgHsGSBvd2iFLw/Y+R3zqqIY1z+u1ZqeNCXPjShmNa8WU5aPM
+# /y60KMqvC3PGWKeFkBx/aD++WKUXyrIC3RhMq6JzqjKm5E7wsuvHszHg6IeMKxxP
+# k0J4wqc72TiH3PnrOpYlydM3PvIf3SNN1/VOOj6zF+k58e1jgfiAspONK1DQcKan
+# IjiJEO/2Q31U1FmZ2ZVJr/7vrB+gaikdynDHGkBhYent7bvzu3OvS65kL0qgSi5q
+# Nr9R/2vavKJ4OrZSVHQahVKPobomlbLg/WXF91Ts+IU8y//Y/L+r74uqaxEydPvA
+# uGU/c0KikMN6xGxg9/1kplTKOXmIeqh7I0C7ICFRpfBPjW4K/VePBUjgbU5i9dit
+# 5sJwaLxEp+S2dwGN5Ykl5FzHgQFjIRe6DZSF8h3Eb+J+GDuB2dqgif8Sj1SjhR5O
+# 7PlHEZ1YdoFhpvHO9xiBOyfLFD0jnjzbm8NYE+uOu3G7/pkn/XsdAQsGoRjEcahC
+# Dp5QnN/wx9qHCz3xGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAxOTMx
-# MjFaMC8GCSqGSIb3DQEJBDEiBCDxEibDA6dqUhh+zGjjp6S1e+zDVtbiIh4zu6nT
-# eZuBCTANBgkqhkiG9w0BAQEFAASCAgBm9fA314YhYkv0+7r+H25Jq/I7xpwZqo8P
-# UTWmoqMBQYkNHW3bJidZKn8CrbEBPNBngcWoAQxQEtjGwqRkeeMYJa5dlPf7Pcnh
-# 0n9rq3qgidmuUlLB4Ea7+6lnSQMovbmdb47hImGtCuWJJzz9suEoZiwpRPAmrxt9
-# cgL++tuQv9JSFLfj28qzvD6LEwsvmqvYN4COzBplB6/flTDEQB1SK2GQAZDq4vxP
-# nKsVZkrRSTB5ai2jRgC/pvToneA7StrbA1lcugSYhSb9JmpwYNG5A5zLeZnxzuQU
-# dyLROPRRoNfjOlmx9X7xHThqnDOsj9mHNlP2Qmj2z+tB0E1Jdb+jTZLJipkgCXHa
-# cOslhuOp4qIL2yKexBCsTRrUZsLfHwbeKK5mrGQOaBYmNN0a0zf8ZG1TnSRD2ATK
-# TqKRDZ//Zu1gzvr0GRk5K1pdymAXnB3DxjLfXfie59WirqacgV3nJpcHTpW3IkL2
-# TLLh29YSYUts5Rpq1mhmifKghNkXQJqT6qpQjZzQVKYfGtW+A9S+RUyRawRkfGoe
-# 5N9fgVqmU35iX/SnwQRhf09UPuMf6LxSAszmA3CQxs03emeWX56gBxnkICdQc0FC
-# iqg3n/OW7Z0IMBhBl4CGQOHm0RREWJSqqkf5D7ji87hM8JpP61BPZ/rD8a7g0kYD
-# g4SHlN3+7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCkW+lWQuZi4m/iGJx0R/geDdyRxpC63R1NhNs1
+# 8VBZ6DANBgkqhkiG9w0BAQEFAASCAgCoxVK3Kv/fXGiyX0KHCtE6sEULq0g41Tci
+# 25jLdPrOrr+VwN2iF5dhrfaRJnMF7Hma1YGfDN9d64mb8FAp6MVL6q5dH5NeJ1To
+# b4Btas6HLcabU/ITUq+QPVUQgj/euJ2/sdScu3IaWAzPd3/zg/GSxpUChxJbbcEB
+# IyGgp2Dpmp3HlfDVwEyL2tF6FB9fyFEw9HWx4RPuHbHeKzdub654RSxcMqhuIbcR
+# NXEcZtLGvqvHERmd5mzGwvBsp8Ff0ma5niBa6nKhhWxzs8pyfGyHORV5VlapAyGY
+# /ne+YFUBeXkIjiIY3z8y5nKqfTV11dy/FuJxglhr4Hvk82/d1+3AxNX2jXRit5Tk
+# YRLXFyzpdA1A+aKcSuZyeoRGuN9Ux6LZ4jy4dE9b9/w1M+p8anHRG8rTEL/lljjE
+# pLR4FE2NkU+aj7PVW7ibQs7xJMYBXNDu/DpOORo1mp2DSte7ZTaXJ7cRAookQ6Lg
+# mLfZT5ec32GG9zY0JoS08fxYftSwIoBgwNXaz/YUOgylFB73cvRQF4hUwDhXy+ra
+# dapzR0rC89h9Jcus+XEah7CvReFXCUYRv7M9LMP4490DFMwAa+pbTCgPlIKK92Kn
+# VBtJmDbI+VexL87/mibF+oJ0HGXyCZhrAjg484I9pJqpEhiX/o1FbNF2yWJzCYkp
+# UNQKoxLOTQ==
 # SIG # End signature block

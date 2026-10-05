@@ -10,7 +10,7 @@ $script:InsightsTerminalSuccess = @('Success', 'CompletedWithWarnings')
 $script:InsightsTerminalFailure = @('Failed', 'TimedOut', 'Interrupted')
 # Same lists as SmartM365.Orchestrator.Pipeline.psm1 (Get-SmartM365OrchestratorPipelineRunStatus).
 $script:InsightsPipelineFailure = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')
-$script:InsightsPipelineTerminal = @('Success', 'CompletedWithWarnings') + $script:InsightsPipelineFailure
+$script:InsightsPipelineTerminal = @('Success', 'CompletedWithWarnings', 'Cancelled') + $script:InsightsPipelineFailure
 
 function Get-InsightsProperty {
     param([AllowNull()]$Object, [Parameter(Mandatory)][string]$Name, [AllowNull()]$Default = $null)
@@ -338,11 +338,13 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
         $pendingCount = @($jobRows | Where-Object { $_.Status -notin $script:InsightsPipelineTerminal }).Count
         $failedCount = @($jobRows | Where-Object { $_.Status -in $script:InsightsPipelineFailure }).Count
         $warningCount = @($jobRows | Where-Object { $_.Status -eq 'CompletedWithWarnings' }).Count
+        $cancellationRequested = $null -ne (Get-InsightsProperty $request 'Cancellation' $null)
         $created = ConvertTo-InsightsUtc (Get-InsightsProperty $request 'CreatedAtUtc' $null)
         [pscustomobject]@{
             BatchId = $folder.Name; Selection = [string](Get-InsightsProperty $request 'Pipeline' '')
             Created = if ($null -ne $created) { $created.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
-            Status = if ($pendingCount -gt 0) { 'Running' } elseif ($failedCount -gt 0) { 'Failed' } elseif ($warningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+            Status = if ($pendingCount -gt 0) { if ($cancellationRequested) { 'Cancelling' } else { 'Running' } } elseif ($failedCount -gt 0) { 'Failed' } elseif ($cancellationRequested) { 'Cancelled' } elseif ($warningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+            Cancelled = @($jobRows | Where-Object Status -eq 'Cancelled').Count
             Jobs = $jobRows.Count; Pending = $pendingCount; Failed = $failedCount
             RequestedBy = [string](Get-InsightsProperty $request 'RequestedBy' ''); JobRows = $jobRows
         }
@@ -376,8 +378,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ414hZoffH6e5
-# zDPQyjqsPLazlRAGI/mIyfvqpzylYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALAsoCvGg5B1vP
+# GoIkq7k65IlIjyesFulAISqGyhIyJKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -510,31 +512,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGdzglAy2/TwmeHSFtWgfRgepOiIDBYO/eGGpSeuRSRqMA0GCSqG
-# SIb3DQEBAQUABIIBgI6ITIgd3I95QOWxsPQDR7EfqLHZpC+fC5bGZXU1rqcmH6LP
-# MAIyUdat2zpuB7vK5XJh85qqkPXhp3TYTG8biN/3gxdeogXLViC5kP/Pk8z4CQF2
-# yNcF/0mdzqh+DxE4CsilTrRGJOOJ2QBXJajwUj7wPXZG27xaaY/L/cRfX4WJt2uB
-# IX2LAV3aXV2wxSEXMNRj63P3QozR2Wcqqwf9mDgv0R+d/EhHulRnwYvxfqyidG8e
-# SNocPpDyPlqjiRy0ytyvXOQ2n4z8LFGUxS2p+7J2sQvgi6yX6sY2wAdRUPOxK5lz
-# UqAuaNSmv+D0uOiY7if7yjV0swmV5NIJ0sux1RyoqQ0vVPYSLeRGX2jlvqbN1DFN
-# m0s+4espTajlCdWCkiNg5RNJEvPlG386DE+DWPDr2noLrhnxe/2RasZq/bB3IEkx
-# d95nITQBoL2BIa39vhvtMr/kkpnaEEAMq+bFk5pxer0zuvMPWJyk1un0H3GiJVNM
-# dO5bqBV5HLZSJuWfiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOV1Xh6h4oI2rcWT0hsvkmSid+qTigmU5KORvvOzF9E7MA0GCSqG
+# SIb3DQEBAQUABIIBgDj8poCn49qkaoaXYx9mf+/QMor+2vZbY8q//pK4E5+bI9hE
+# 55uB0Efclf3CISNMESyjh1xWJ8RLgGgTWBbJ+gtCFzp2/VC/Mz6KJiQxYNxEL+3f
+# V98qjkN/pCLMkmWVJ9skmWEJfP9QYuEZ+w/pV13DSNNm5Lz/x+JpRLwsS0qql5rN
+# alQAu1cTfkNU3MkDHdW8unu0puanapXiAR9RhK0asuu6Edx8Wp0e/G+yAsBwUMmI
+# wz4rBEgQn2y5XJtZ/Fx/7iR5ZQI54A49v09IzNhdoubEADYEQCxbiWMAV17x83A9
+# nZnWahffzzaRlLK9TPnX7mAWMWvuu16O3z9Eejj/gAq3yeBo2OJ8PvXe8f+1dfzX
+# 8jDh9C0tGmDQPdezZt2jotUnotInAsUrvi2fKMEQogGFI2o7gTNJLijCbIdVZjSf
+# SQ4Y1nwK6x3Sd+P1OSlx//U1ySLkOXka1NEhA+eXJyWb1Mbr1I/mQq1lxO6yIcQp
+# ONcIJg+PH5Ik4VYGJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCB+/0T4vRfGzUO368FcEjmRTjOZ8hzhpF9x7ir3
-# 3Igz/TANBgkqhkiG9w0BAQEFAASCAgBsTDBinlWYHAQPw1pXoMoy0poCefq6XbBc
-# yQwDZ864cVa5AkT7VEswSKnyxPG0kvPCBQQrdV1Ro767gn36z3DxtnDWiIckgJdx
-# 9HosbXFmgjI1IEqMEtKnrfCPVsFN7CKkBy+0CzKeU3VUqxkKzo22YHR8irMQb1E8
-# PSXnBrsCG/+lIy6G/PKtUFCGCzl40wZKfJWYnX6RACZDPWp+HsxEkUXdTGla6FU+
-# qmaWgcYQdLAVFkqOUwrcCmDDjsvxOiI8QLTQ1I9ajS0ck7IpOB7U0s/d9AP0Wazk
-# TTaGTQFaP/cO2/khmqQhtPZAXMHEitVMB+/jOKga74ITtdMD+7c0NTaCS8sZ5HcG
-# rBjVztdIFuDSv59sA52i5wZeO3GtGkDPiJA1Q3Us2uQMxbeReHHbFIv8YofTMmik
-# s47dTTOLylTZ7bH7dGAkrFOdizanJ54RUT33PeKMJ9/FYjIv097tsTBT7g0Sccer
-# j+ICkJ8oxvJswYQCfrVhjUZ10S+BiaSUfs2ALPVyh4LffutfAzxfcYDOjo9U6wud
-# Xs/7WuU9qq4UMrS2mbzeLO8XXTypGHHy+K7wRPEVu/BWTOA0qE/mjUMKTv38x3NC
-# 94Ggv7wKH0nMLgdDWhZbMH7Fe9JY7G9gfPUAlAmt5ywa5UoW1+zIUB0mEAN81CEk
-# bDCqgCikdg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzNaMC8GCSqGSIb3DQEJBDEiBCAlHNL9Xm4xcYTzvIlQl6xoVlM4FYItmFWLpaZ9
+# FF9yIzANBgkqhkiG9w0BAQEFAASCAgBld40+Sd5Y41+/dy9OQEJ2ib6Iy6vXnFHh
+# P84+7ZbmZGRlGE3rXdnUQi1FaHT04l0zWl/AN3y0OsNLmxPplg8dm4DWeqdYXhAb
+# o7SDNnie0a27TeV9VI/oG/t9xFWvVipX1wf7tMWyuFNw4fXzYFBPQFyjD6qPxEAo
+# EGhOkrTlXBcb1lgDSchFZ+Vwf4mp2KeGq3S1sd6WMV2Wlcxig2w6mkeIN/s1UkEY
+# 16NH/nU5mom/Uslp8nCZ20EOkvTbl1wRk+oSgeIJ3tgjnkqLiSfAcxMU5TQDEOcX
+# ddIyeYqXO4qKLo7BCm+m0GylLVf/a9wPJwTRhoWRe5Tftjww5NWtK1Ux64lh3MhW
+# ngCgPxVSDdO50s8UTxL2/9eQvKIjtn6I+WkVhDT0ennm0i7nD/RgI0TVt6I/qVCd
+# wqv3WKo8QpKoUKrQi3AmVCr/AC16tzhLy43wZFNPVpLlc/BJkCA4BRxfwFpkox57
+# 83Lf4t6AHkpGmlDYdxzGwAu6nOrUde0GUZQpZQsiLRukaNdQyyOL2Vh6nFcjcqQR
+# L1vLbUN5HYifUmYDcsntaNUDllq5Gg0o7Uly5+dmf0jeH9NWwnVTLWH5SYbwvmZ6
+# rnjPHfu+FI/wAOAm0FCHzDXfkYHHDPoJVMq5a7pP5ORjwEKm59LRRYZD16J0IWCI
+# 9ghbvfiUTA==
 # SIG # End signature block

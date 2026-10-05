@@ -100,7 +100,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.40
+1.5.41
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -112,7 +112,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.40
+    Version : 1.5.41
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -137,7 +137,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.40"
+$ScriptVersion = "1.5.41"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2385,6 +2385,7 @@ function Write-OrchestratorHeartbeat {
         StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount
         StatePersistenceLastError = [string]$script:StatePersistenceLastError
         MaintenanceProtocol = 1
+        PipelineCancellationProtocol = 1
         MaintenanceHealthy = [bool]$script:MaintenanceHealthy
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
         MaintenanceEnabled = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Enabled } else { $false }
@@ -3765,7 +3766,15 @@ function Complete-JobRun {
     }
 
     $retryScheduled = $false
-    if ($status -notin @('Success', 'CompletedWithWarnings') -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
+    $pipelineCancelled = $false
+    if ($RunInfo.ContainsKey('PipelineBatchId') -and $RunInfo.PipelineBatchId) {
+        try { $pipelineCancelled = Test-SmartM365OrchestratorPipelineCancellation -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId ([string]$RunInfo.PipelineBatchId) }
+        catch {
+            $pipelineCancelled = $true
+            Write-OrchestratorLog -Level ERROR -Message "Pipeline cancellation control could not be read; automatic retry suppressed: $($_.Exception.Message)"
+        }
+    }
+    if (-not $pipelineCancelled -and $status -notin @('Success', 'CompletedWithWarnings') -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
         $notBefore = $EndTime.AddSeconds($manifestJob.RetryDelaySeconds)
         $state.PendingRetry = @{
             NotBefore = ConvertTo-StateTime -Value $notBefore
@@ -4278,7 +4287,7 @@ function Update-OrchestratorPipelineRequests {
     foreach ($batchJob in @($run.Jobs)) { [void]$batchJobNames.Add([string]$batchJob.JobName) }
     $script:PipelineBatchJobNames = @{ ([string]$run.BatchId) = $batchJobNames }
     if ([string]$run.Tenant -ne [string]$Tenant) {
-        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus') })) {
+        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus', 'Cancelled') })) {
             Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $jobStatus.JobName -Status Rejected -Detail ("Request tenant '{0}' does not match resident tenant '{1}'." -f $run.Tenant, $Tenant)
         }
         $script:PipelinePending = $pending
@@ -4289,6 +4298,15 @@ function Update-OrchestratorPipelineRequests {
     $occurrence = if ($occurrenceValue -is [datetime]) { ([datetime]$occurrenceValue).ToLocalTime() } else { [datetime]::Parse([string]$occurrenceValue, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime() }
     try { Repair-OrchestratorPipelineOrphanStatus -Run $run -Occurrence $occurrence -Now (Get-Date) }
     catch { Write-OrchestratorRuntimeUpdateWarning -Key ("pipeline-orphan:{0}:{1}" -f $run.BatchId, $_.Exception.Message) -Message ("Pipeline {0}: orphan status reconciliation failed: {1}" -f $run.BatchId, $_.Exception.Message) -Now (Get-Date) }
+
+    if ($run.PSObject.Properties['CancellationRequested'] -and $run.CancellationRequested) {
+        # Finish a partially published cancellation; running/orphan results still reconcile above.
+        foreach ($jobStatus in @($run.Jobs | Where-Object Status -in @('Pending', 'RetryScheduled'))) {
+            Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $jobStatus.JobName -Status Cancelled -Detail 'Operator cancellation; no remaining attempt will launch.'
+        }
+        $script:PipelinePending = $pending
+        return
+    }
 
     $currentManifestHash = (Get-FileHash -LiteralPath $script:Settings.JobsManifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
     if (-not [string]::IsNullOrWhiteSpace([string]$run.ManifestHash) -and [string]$run.ManifestHash -ne $currentManifestHash) {
@@ -4904,6 +4922,19 @@ function Invoke-LaunchPhase {
         $lastOccurrence = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
 
         $isPipelineRetry = $null -ne $state.PendingRetry -and $state.PendingRetry.ContainsKey('PipelineBatchId') -and $state.PendingRetry.PipelineBatchId
+        if ($isPipelineRetry) {
+            try {
+                if (Test-SmartM365OrchestratorPipelineCancellation -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId ([string]$state.PendingRetry.PipelineBatchId)) {
+                    $state.PendingRetry = $null
+                    Save-OrchestratorState
+                    continue
+                }
+            }
+            catch {
+                Write-OrchestratorLog -Level ERROR -Message "Pipeline retry control unavailable; no launch: $($_.Exception.Message)"
+                continue
+            }
+        }
         if ($script:MaintenanceControl.Enabled -and -not $isForced -and -not $isPipelineRetry -and -not $isPipeline) { continue }
 
         # Per-job overlap guard: a job still running at its next occurrence is not
@@ -5126,6 +5157,7 @@ function Invoke-LaunchPhase {
 
         # Same short-lived gate as GUI transitions: activation cannot race process creation.
         $maintenanceGate = $null
+        $pipelineGuard = $null
         $maintenanceValidated = $false
         try {
             $maintenanceGate = Enter-SmartM365OrchestratorMaintenanceGate -SharedDataFolderPath $script:Settings.SharedDataFolderPath
@@ -5133,6 +5165,17 @@ function Invoke-LaunchPhase {
             $launchOrigin = if ($isPipeline) { 'pipeline' } else { $reason }
             if (-not (Test-SmartM365OrchestratorMaintenanceLaunch -State $launchControl -Origin $launchOrigin -Occurrence $occurrence)) { continue }
             $maintenanceValidated = $true
+
+            if ($isPipeline) {
+                try {
+                    $pipelineGuard = Enter-SmartM365OrchestratorPipelineLaunchGuard -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId ([string]$pipelineInfo.BatchId) -JobName $name
+                    if (-not $pipelineGuard.Allowed) { continue }
+                }
+                catch {
+                    Write-OrchestratorLog -Level ERROR -Message "Pipeline launch control unavailable; no launch: $($_.Exception.Message)"
+                    continue
+                }
+            }
 
         if ($job.AssignmentMode -eq 'Elected') {
             # Read the shared occurrence claim before requesting the ConcurrencyKey: an occurrence a
@@ -5217,6 +5260,7 @@ function Invoke-LaunchPhase {
         $pipelineBatchId = if ($isPipeline) { [string]$pipelineInfo.BatchId } else { '' }
         $pipelineStatusPath = if ($isPipeline) { [string]$pipelineInfo.StatusPath } else { '' }
         if ($isPipeline) {
+            $pipelineGuard.LaunchAttempted = $true
             Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId -PipelineBatchId $pipelineBatchId -PipelineStatusPath $pipelineStatusPath
         }
         else {
@@ -5234,7 +5278,10 @@ function Invoke-LaunchPhase {
             Write-OrchestratorRuntimeUpdateWarning -Key ("maintenance-launch:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: launch gate failed; no maintenance bypass: {1}" -f $name, $_.Exception.Message) -Now $Now
             break
         }
-        finally { if ($null -ne $maintenanceGate) { $maintenanceGate.Dispose() } }
+        finally {
+            try { if ($null -ne $pipelineGuard) { Exit-SmartM365OrchestratorPipelineLaunchGuard -Guard $pipelineGuard } }
+            finally { if ($null -ne $maintenanceGate) { $maintenanceGate.Dispose() } }
+        }
     }
 }
 
@@ -6556,8 +6603,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4WVi+BJERpKqv
-# +6ycriy87n8Qb04b2MLF0Hhdxfwr5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwLjAeLSIqxKnn
+# Vdya7kGna1LsC6NIKlgjuIMKlRqIaaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6690,31 +6737,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP6ZaHomN5jftvX1RaEd7/KvtxejJhlgAHW0tg1cxmKnMA0GCSqG
-# SIb3DQEBAQUABIIBgIfN2Co2Gd6VKSRj4iP8VMdpFACy7r/Kvt5xauie5gXZVWYc
-# noZgRHw08vIVeGlL41CTO/LBhuMS2KPqUl/A8C406xx85ICe8p5Rajvp+Cxi6APb
-# np5zgWnJ+0YXBubuFjTMeVyM04lc4KeuhWY+SPgchpiVJ+zqAIuc1+SQuz4vISpA
-# SVlbt0ew6nFBkgbhFVqN2MOFpXl0TBbQod8IJW0HIZXGzlb4zSd4LhCXaVTiP9sb
-# uvEk6TEI5SuMrxuPa+eFKJCv26DCMEjx1cbEnaY7WdPjg1wx0Vx8vTYePg8K+/20
-# 8KXb8N4fuDphhE4WA4d87D46YFDFtpNob0xwmGB//V9ZjvHWtpwAMk9ohVl977H+
-# 69r9j6PJ0JKpHacUF94Fp0+7cKdAdHD/A85NHNx+cUF+JtHtQE5DDv/9UNdR/cgE
-# fBaXRORuCjyV6qXhlgalTVv+6PoG9JuuvxY5ZonAnARJl6cn0m/GzMhykTr77lh3
-# Bc+dbVoBbUYP3d2eF6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHucc9lxDsxQ8m11I7LQZvQmF1+hATELzGlSe+rbyKZ0MA0GCSqG
+# SIb3DQEBAQUABIIBgE23S8351giHBnG35ny7u0dIQQExZrGqRcufFQObo9qSi7HX
+# 1t8v0w6JzkCrcKjc0Lfrm0k+qPCB/BpOz5LaCryXHrwHgz5h2RAQy5ujiDqxpspi
+# RQA7Lvr92WDZiICQ6PvsxGRbwIa4A/5y0d4J3mX9JkcxIMivtykunFYvLbthKqva
+# rwKwZMBQxW2AT81CnO8Ww48nRbu7Q3MvOfLULwsc4LixqPYeRhODr2R0v0uW4Z4u
+# g6COmknv9jc9vONzYLJZiEKQ50vT2zSsRuAA1W6nRNxv7K4Z/6azHPC3Ikk7RrGd
+# SIgfNdGa3BEuzttKPsMVZhJJ2og2vHZaVP2noRmOwXiB6if5zsJdP8GMv5vJENBZ
+# OEmiN0VnHMH2e4lBUx/ax6PM9KQf8FfNOb3elXXtOutggGA4mO17cajzjdfl4LMl
+# mmEp9u54z0rqMHcHj9BJkkkHYO2YnDsVV9e7JQyaZb0+q1jvqx1+ZYrbMWTrm0V6
+# pQwlepJsQ/tpbD/qFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
-# NDNaMC8GCSqGSIb3DQEJBDEiBCAIcLPuwsQmN8SnHbnc/MTf5BsKct/r9BLdPe0w
-# qQdtoTANBgkqhkiG9w0BAQEFAASCAgA7zd4llImiDU+5Stx1PNv8+B9ylfKOP90H
-# q/QgssM9yTp6Cfq/F80fvm0vPo5SgOzbzYUYZK01DsZulXbWZflHQG1UWfe8a8PZ
-# nHS2JWtAJRxvmmNa/36Nl2LLnBsmGA9HXZSq1UzRV8lruTkBz6WMh4vMJTjH9UnV
-# ro1RmAux1v6GnjOwF0guzV95VdrVJyJ289htXp4LbAGj1kAEfMPT1IF5KyM/vqXU
-# FNK+0rx9sAzr5Ofy0vNy9QRlrig1SQadELkvZYgr5Z6YqQ+hi035vq3Ar8Qn7Ic5
-# EXR1Hkou5k7yUgGQ3MiFfMJH2yPufnt8EwREqvuOvobqiscsX3leMG9wyQA9Cy/D
-# cs2p6h/Bfe3N2wiXVEmBGO1giN4agLktCLNw+9vJ94zsdn5MtsnUvr0lGcLUO4J8
-# cq4i6RGXPb+4tadQ86qsbfW0Z4tlsyLAF6LZrkQSjawzdsHi6hYBfBpCqD9c97Qu
-# fQUigb7SAEWCjCMsXV9Anp9+nm3i7isPtEAt4Sn9GRTx9cYq12m+uGUgSyLFa57s
-# JOlzG7ZN/jsNTFAypryipnpRr5eEy8Y0aQ6VEcpux0hVzpK0OhtVXvMeBYS2HqzF
-# iZZNn2jvrx9m35aHiCmh3XJ8V4VTsP7b2sYgtsHG4/K7iwPjBQ4ybNPQ6JNF9NW7
-# 5dV3/rYbtA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCAi+SMiQPZv3jeMLG9LLvaAf28vIiQXi/xgm4/F
+# iF57cjANBgkqhkiG9w0BAQEFAASCAgCpP/xM3jTpiI5raciAC/NfkBdzmc6+hDBJ
+# 2gIQtCn7X8MiOr9F69+70VbMHl2VIv+QyZTxnXpIFi9+GUXQFgISCroVIVSoQF6x
+# rvEahRnlJ5fQ4fUgR0Q9e3GdBneAOZ1emfoTUPhWPdYVtHLNW7gkYbTWgxYj8RBU
+# iR7bhx/ghjgyEHzL+uBWzaTIsPYvzax6y8X8bezj2ZvwV2tciECJUTGA6My3StsX
+# 11MSXrUacioIW/6gZ78c8jHGwgc+AruWBEPZMcdnjsWsw/5ThHjXF4YxZKWfEG19
+# SSyk3ZenTNf9CRM3PDFWf/gLjdaSS4ntVfvNsOK/HCUygHWNVVCpFJDkk6kpPIY0
+# YGqGUQIr6GCw6aMrW6k3q2tp9Wp9y/5clJ8KEi+GEptaPlmD0anzVvmEmoZszhpW
+# ddIfwQHgEn+uLKaHy16WKzG5kMR5UiBmoSGIa9m8ZAVh21iFJSyCMtviKxds7e/N
+# JvcmwwyHer2Ap48oH/pTUrbEdnH0XEU2UxpElOWkUof/JcQgoynk0RsFpzlj/nKS
+# gMsWQGds3cZU1yy4jhAjOB8UUr+myhaS7MN6oddpJ/c3pUOJ0KaJSdEifB3AzVNn
+# cYFUmaabvqWGvWu4ARrXR/PVMRw+rFFP/qZsG4k7jZbMhTRXf8hhARfsrtJ95ew7
+# v0sqkjSWfg==
 # SIG # End signature block

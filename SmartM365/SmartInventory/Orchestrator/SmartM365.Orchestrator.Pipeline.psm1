@@ -10,6 +10,7 @@ $script:PipelineTerminalStatuses = @(
     'BlockedDependencyFailed',
     'BlockedDependencyTimeout',
     'Rejected',
+    'Cancelled',
     'MissingStatus'
 )
 
@@ -29,6 +30,7 @@ function Get-SmartM365OrchestratorPipelinePaths {
         if ($BatchId -notmatch '^[A-Za-z0-9._-]+$' -or $BatchId -in @('.','..')) { throw "Invalid pipeline BatchId '$BatchId'." }
         $batchPath = Join-Path -Path $root -ChildPath $BatchId
         $result['BatchPath'] = $batchPath
+        $result['ControlLockPath'] = Join-Path $batchPath 'Control.lock'
         $result['RequestPath'] = Resolve-SmartM365OwnedJsonPath -Path (Join-Path $batchPath 'request.json') -Owner 'Orchestrator Pipeline request' -Validate {
             param($document) if ($document.BatchId -ne $BatchId -or -not $document.PSObject.Properties['SelectedJobs']) { throw 'Pipeline request owner/batch mismatch.' }
         }
@@ -274,7 +276,9 @@ function Get-SmartM365OrchestratorPipelineRunStatus {
     $pending = @($jobs | Where-Object { [string]$_.Status -notin $script:PipelineTerminalStatuses })
     $failed = @($jobs | Where-Object { [string]$_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus') })
     $warnings = @($jobs | Where-Object { [string]$_.Status -eq 'CompletedWithWarnings' })
-    $overallStatus = if ($pending.Count -gt 0) { 'Running' } elseif ($failed.Count -gt 0) { 'Failed' } elseif ($warnings.Count -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    $cancellationRequested = $null -ne $request.PSObject.Properties['Cancellation']
+    $cancelled = @($jobs | Where-Object Status -eq 'Cancelled')
+    $overallStatus = if ($pending.Count -gt 0) { if ($cancellationRequested) { 'Cancelling' } else { 'Running' } } elseif ($failed.Count -gt 0) { 'Failed' } elseif ($cancellationRequested) { 'Cancelled' } elseif ($warnings.Count -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
 
     [pscustomobject]@{
         BatchId = $BatchId
@@ -288,6 +292,8 @@ function Get-SmartM365OrchestratorPipelineRunStatus {
         PendingCount = $pending.Count
         FailedCount = $failed.Count
         WarningCount = $warnings.Count
+        CancelledCount = $cancelled.Count
+        CancellationRequested = $cancellationRequested
         Jobs = $jobs
         Request = $request
         RequestPath = $paths.RequestPath
@@ -385,7 +391,7 @@ function Set-SmartM365OrchestratorPipelineJobStatus {
         [Parameter(Mandatory)][string]$SharedDataFolderPath,
         [Parameter(Mandatory)][string]$BatchId,
         [Parameter(Mandatory)][string]$JobName,
-        [Parameter(Mandatory)][ValidateSet('Pending', 'Starting', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected')][string]$Status,
+        [Parameter(Mandatory)][ValidateSet('Pending', 'Starting', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'Cancelled')][string]$Status,
         [int]$Attempt = 0,
         [string]$OwnerServer = '',
         [string]$Detail = '',
@@ -399,6 +405,15 @@ function Set-SmartM365OrchestratorPipelineJobStatus {
     $lock = Enter-SmartM365OrchestratorPipelineLock -Path $lockPath -TimeoutSeconds $LockTimeoutSeconds
     try {
         $document = Read-SmartM365OrchestratorPipelineJson -Path $statusPath
+        # A cached scheduler view or late retry must never resurrect a cancelled job.
+        if ([string]$document.Status -eq 'Cancelled') { return $document }
+        if ($Status -eq 'Cancelled' -and [string]$document.Status -notin @('Pending', 'RetryScheduled')) { return $document }
+        if ($Status -in @('Pending', 'Starting', 'RetryScheduled') -and
+            (Test-SmartM365OrchestratorPipelineCancellation -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId)) {
+            $Status = 'Cancelled'
+            $Detail = 'Remaining attempt cancelled by the operator; previous attempt evidence is preserved.'
+            $NotBeforeUtc = ''
+        }
         $document.Status = $Status
         if ($document.PSObject.Properties['Attempt']) { $document.Attempt = $Attempt } else { $document | Add-Member -NotePropertyName Attempt -NotePropertyValue $Attempt }
         if ($document.PSObject.Properties['OwnerServer']) { $document.OwnerServer = $OwnerServer } else { $document | Add-Member -NotePropertyName OwnerServer -NotePropertyValue $OwnerServer }
@@ -414,7 +429,140 @@ function Set-SmartM365OrchestratorPipelineJobStatus {
     }
 }
 
+function Test-SmartM365OrchestratorPipelineCancellation {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)][string]$BatchId)
+    $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    $request = Read-SmartM365OrchestratorPipelineJson -Path $paths.RequestPath
+    return ($null -ne $request.PSObject.Properties['Cancellation'])
+}
+
+function Get-SmartM365OrchestratorPipelineCancellationReadiness {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [string]$Tenant = '')
+    $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
+    $servers = @($cluster.ExpectedOrchestratorServers)
+    if ($servers.Count -eq 0) { throw 'Cancellation requires published expected orchestrator servers.' }
+    $staleMinutes = if ($cluster.PSObject.Properties['PeerHeartbeatStaleMinutes']) { [int]$cluster.PeerHeartbeatStaleMinutes } else { 5 }
+    if ($staleMinutes -lt 1) { throw 'Invalid heartbeat freshness threshold.' }
+    foreach ($server in $servers) {
+        if ([string]$server -notmatch '^[A-Za-z0-9_-]+$') { throw 'Invalid expected orchestrator server.' }
+        $ready = $false
+        $detail = ''
+        try {
+            $heartbeat = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath "$server/Orchestrator-Heartbeat.json")).Document
+            $timestamp = [datetimeoffset]::Parse((ConvertTo-SmartM365OrchestratorPipelineTimestampText $heartbeat.Timestamp), [Globalization.CultureInfo]::InvariantCulture)
+            $age = ([datetimeoffset]::UtcNow - $timestamp.ToUniversalTime()).TotalMinutes
+            $ready = $heartbeat.PSObject.Properties['PipelineCancellationProtocol'] -and
+                [int]$heartbeat.PipelineCancellationProtocol -eq 1 -and
+                [string]$heartbeat.Lifecycle -eq 'Running' -and $age -ge -1 -and $age -le $staleMinutes -and
+                (-not $Tenant -or ($heartbeat.PSObject.Properties['Tenant'] -and [string]$heartbeat.Tenant -eq $Tenant))
+            if (-not $ready) { $detail = 'Fresh Running heartbeat with cancellation protocol 1 required.' }
+        }
+        catch { $detail = $_.Exception.Message }
+        [pscustomobject]@{ Server = [string]$server; Ready = [bool]$ready; Detail = $detail }
+    }
+}
+
+function Enter-SmartM365OrchestratorPipelineLaunchGuard {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory)][string]$BatchId, [Parameter(Mandatory)][string]$JobName,
+        [int]$LockTimeoutSeconds = 15)
+    $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    $lock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.ControlLockPath -TimeoutSeconds $LockTimeoutSeconds
+    try {
+        $cancelled = Test-SmartM365OrchestratorPipelineCancellation -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+        $jobPath = Get-SmartM365OrchestratorPipelineJobStatusPath -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -JobName $JobName
+        $state = Read-SmartM365OrchestratorPipelineJson -Path $jobPath
+        if ($cancelled -or [string]$state.Status -notin @('Pending', 'RetryScheduled')) {
+            $lock.Dispose(); $lock = $null
+            Remove-Item -LiteralPath $paths.ControlLockPath -Force
+            return [pscustomobject]@{ Allowed = $false; Lock = $null; LockPath = '' }
+        }
+        # Persist reservation before claims/process creation. A late status-write failure
+        # cannot make a live collector look Pending and eligible for cancellation.
+        $null = Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -JobName $JobName -Status Starting -Attempt ([int]$state.Attempt) -OwnerServer ([Environment]::MachineName)
+        return [pscustomobject]@{
+            Allowed = $true; Lock = $lock; LockPath = $paths.ControlLockPath
+            SharedDataFolderPath = $SharedDataFolderPath; BatchId = $BatchId; JobName = $JobName
+            OriginalState = $state; LaunchAttempted = $false
+        }
+    }
+    catch {
+        if ($null -ne $lock) { $lock.Dispose(); Remove-Item -LiteralPath $paths.ControlLockPath -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+}
+
+function Exit-SmartM365OrchestratorPipelineLaunchGuard {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Guard)
+    if ($null -ne $Guard.Lock) {
+        try {
+            if (-not $Guard.LaunchAttempted) {
+                $path = Get-SmartM365OrchestratorPipelineJobStatusPath -SharedDataFolderPath $Guard.SharedDataFolderPath -BatchId $Guard.BatchId -JobName $Guard.JobName
+                $state = Read-SmartM365OrchestratorPipelineJson -Path $path
+                if ([string]$state.Status -eq 'Starting') {
+                    $original = $Guard.OriginalState
+                    $null = Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $Guard.SharedDataFolderPath -BatchId $Guard.BatchId -JobName $Guard.JobName -Status $original.Status -Attempt $original.Attempt -OwnerServer $original.OwnerServer -Detail $original.Detail -NotBeforeUtc (ConvertTo-SmartM365OrchestratorPipelineTimestampText $original.NotBeforeUtc)
+                }
+            }
+        }
+        finally { $Guard.Lock.Dispose(); Remove-Item -LiteralPath $Guard.LockPath -Force -ErrorAction Stop }
+    }
+}
+
+function Stop-SmartM365OrchestratorPipelineRequest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory)][string]$BatchId, [Parameter(Mandatory)][string]$Tenant,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Reason,
+        [string]$RequestedBy = ([Environment]::UserName),
+        [string]$RequestedFrom = ([Environment]::MachineName),
+        [int]$LockTimeoutSeconds = 15, [switch]$ValidateOnly)
+    if ([string]::IsNullOrWhiteSpace($Reason)) { throw 'Cancellation reason is required.' }
+    $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    $before = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    if ($before.Tenant -ne $Tenant) { throw 'Cancellation tenant does not match the request.' }
+    if ($before.IsTerminal -and -not $before.CancellationRequested) { throw 'The request is already terminal; no cancellation was published.' }
+    $readiness = @(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant)
+    if (@($readiness | Where-Object { -not $_.Ready }).Count -gt 0) {
+        throw "Cancellation unavailable: update/recycle all expected residents and wait for fresh heartbeats. $(@($readiness | Where-Object { -not $_.Ready } | ForEach-Object { "$($_.Server): $($_.Detail)" }) -join '; ')"
+    }
+    if ($ValidateOnly) { return $before }
+    $submissionLock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds
+    $controlLock = $null
+    try {
+        $controlLock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.ControlLockPath -TimeoutSeconds $LockTimeoutSeconds
+        $run = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+        if ($run.Tenant -ne $Tenant) { throw 'Cancellation tenant changed; no cancellation published.' }
+        if ($run.IsTerminal -and -not $run.CancellationRequested) { throw 'The request completed before cancellation; results are unchanged.' }
+        if (-not $run.CancellationRequested) {
+            $run.Request | Add-Member -NotePropertyName Cancellation -NotePropertyValue ([pscustomobject]@{
+                RequestedAtUtc = [datetime]::UtcNow.ToString('o'); RequestedBy = $RequestedBy
+                RequestedFrom = $RequestedFrom; Reason = $Reason.Trim(); Protocol = 1
+            })
+            # Publish intent first. Interrupted writes can be completed by an idempotent retry.
+            Write-SmartM365OrchestratorPipelineJsonAtomically -Path $paths.RequestPath -Document $run.Request
+        }
+        foreach ($job in @($run.Jobs | Where-Object Status -in @('Pending', 'RetryScheduled'))) {
+            $null = Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -JobName $job.JobName -Status Cancelled -Attempt $job.Attempt -OwnerServer $job.OwnerServer -Detail "Cancelled: $($run.Request.Cancellation.Reason)"
+        }
+        Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    }
+    finally {
+        if ($null -ne $controlLock) { $controlLock.Dispose(); Remove-Item -LiteralPath $paths.ControlLockPath -Force -ErrorAction SilentlyContinue }
+        $submissionLock.Dispose(); Remove-Item -LiteralPath $paths.SubmissionLockPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Export-ModuleMember -Function @(
+    'Test-SmartM365OrchestratorPipelineCancellation',
+    'Get-SmartM365OrchestratorPipelineCancellationReadiness',
+    'Enter-SmartM365OrchestratorPipelineLaunchGuard',
+    'Exit-SmartM365OrchestratorPipelineLaunchGuard',
+    'Stop-SmartM365OrchestratorPipelineRequest',
     'Get-SmartM365OrchestratorPipelinePaths',
     'Get-SmartM365OrchestratorPipelineJobStatusPath',
     'Get-SmartM365OrchestratorPipelineSelection',
@@ -427,8 +575,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzN1wCzoMxpftg
-# ZpVMfL+Xgv5vY9+s0YEsZFnrQirFsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIszjIjhiQ6/Gb
+# Y+AEGXx8fh/EJBQSkHLwhkxdzvsgfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -561,31 +709,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINusTZcF3smW6IAXsfdLeqbfAqYjroC/3LMwrOS/UBfAMA0GCSqG
-# SIb3DQEBAQUABIIBgJRcda4kVqcIGB4d5dICo2lLuUbWoKAuPwl1JSL8rI3OZ8Yi
-# RJaQAN7DZT//PCxBaPnqsGlamnyCYQ64zhw/lK7mTGZapFHeG89Jve7m+o/9FuIh
-# /CcHwPix2oJiiJGKxl6lnIVmqS8Y1puH6fheFcyyIigyi71kyq3QmAMma25oaRt5
-# SYxqzmgdxaqZPPyDMpnYT9iiCULgBARFCUNOwCUdMTe+nt5OZDKkjnH2GnMKYRqW
-# buYakMotRYL5HRiBBuJRkKPwndiliVXISSrDlV30UrMtX7Tc0UJ59Obisph0e/JW
-# X+gWMkJs1L/U/LZASk1Z6gn53GO9YOSVAZNPX6f7kXIW5+15VwrrBCgCvSIjrk41
-# gj62+ivKLvRZ9ATvyRqcDk27wkgJ5cqZLRIxHobEoJRt+Xm0h5U+3L9yDS6zigK8
-# 5QBtrLFZ1IY+xIhmhTBkPMuFePdixUuFOQngTQbOColeeupzRgW6aeg8i9NECYqA
-# 24827T6top6WN/hmWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGpgVxCif5Zx2bH4CQ14NCoW3+OX0JUqgQEcGvXV0+AsMA0GCSqG
+# SIb3DQEBAQUABIIBgDQFwsAQFMeQuwsLb4wqJ52uFCDshg0t7hBnBVoX2v61Nybs
+# etfR9Vg78QXHnJ5/bychIiOfo4d/BXfw7dIZLXI39RC9C1jhJOOBx8Z5J653fiPc
+# K9TqU6jXZeULdRgoJXnKuJKV7BDHHyx9eBQvPonpWV/fulqyGg6C6BaKKF6h4RPQ
+# avmvDk64TkGPMchTe4SMOJDrRP+vCwevATbyCQFSiIvDGXo8opQ/UuW+s81354R4
+# sFNnTNQjit73ZMKUGO21BrVsiZsQCm0T/lfJe0Ek+btrb/Z+i6TSmBJtWBSNT2sF
+# CdfHhx3D9DYKi7BiQKdNwCuFZ6IK7O2x1ROgE1Zp+i/2HyXFHA72b/u1lmZvHRmo
+# fQNiWFUAhTAkecoqJjfes7t2jCNnLZ8y5bijrRMtdvf3qn85Qa/YnG2+t26s/lj8
+# JQ2nAqWK0PVZ/I7t4uVr5j9bDClTiYpLeQ2BTe3MdppQHg6iM+42jsWlR0OenvK6
+# i/DbFdrMGoJl7zelJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAxOTMx
-# MjJaMC8GCSqGSIb3DQEJBDEiBCC8IHgY8S8wdMENHBf5KKV2ZMBPpHOoq1hgrNw3
-# diDLgjANBgkqhkiG9w0BAQEFAASCAgBmKbeM9R3YdOjxVqY+OErvOQbt1sYQ6x8c
-# OIJzbwQHaO0FEe+iEMj6X3cHrNntTHUvBTEwxkoaLO/m5M68ySmw4uXJ8WJC1jMk
-# PJsw4joxuDZ4Ho2XKvEs2IfsWnCWq7Q2rl85cQ7q7aPaoFHXVrUBGb1kQYuh6u/2
-# T3MWKGSv32WT14STzmQfpepghRlylol5H7b4dOWT3N0hyNTZyPEXLRBZrH+Kxm1/
-# hhsb/17UHoAwkGrtn7SaR6hogngmLCFw4Mx099Gwbis7EP9BAxQEcvWyAUvZ/U5D
-# rQpFSXYzCDTVs0jzTZ7nzyjogWg6PGyGJeiint4UWjS+ZNDcals53t0wiJqLyCR/
-# 2Ity3htjwcPd5tCdTXXEWocA51Kx/ZgATrPH/kB8omLDDFAtZej3PWXFu0v/7sp2
-# h+XMWOqjFZaPRhRtLy7Z+Gi611dR39SM9UN4FINF/Dt0Ht+BeADljpQn8XBpWUEv
-# WhfzlxJKA14oYXH7mAbDvcnqFnV2bKLtQ88IwtPgFROlRW1R9U0UUKI0rPcqkUOP
-# gM2wqMvBEvmwiBFYpldnL8v5zgf0nfp4LyvarAh8EHzT35FW9dOLW/mK2yZvtQ6N
-# c4t8vqHQrq4FbyPu3g/Qusy/uvLaZx4jYoW0Z+NfMD0BubKRgP67+QT7Y64NurTr
-# Gmg+Bxfa5Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzNaMC8GCSqGSIb3DQEJBDEiBCBxrgdMJz1Lp+RQzxbl/IR9NFpkd9Jz6nsGDDb0
+# y7JfcjANBgkqhkiG9w0BAQEFAASCAgA0lsFjwpPdgWTx5251aMLQ3Byhi6XyRajy
+# vZzK3Hj3CM4+supljaT2FQRMLyit3ZK8+CSBFsL8QF+vSM+f1VXZcw6sU8akqHUI
+# 0fwnPSoKBlTns6ZU1M0XmTSJXpJDS1XaLlw9Ws/3Dz4uDt+Dg5Iw0WiRFTdDsigU
+# 8FmO4NTtCxs6OXDQfpB/LhKbMz1gGiZIngKxyMcm+QMs5Lpfty081p+Zujmjh/pn
+# zUsN0k6QfY3O0yhCUhf7GAbdCheHFAphXJFthlmbkBvMfDpp/Gsk/H2/WkrWWfcA
+# LLICr4TzD1k1SSUR7P11CbvolThWRDrJeyS3mASXVn07X7C727UVILO43jMKolU8
+# owKb1CxcnF7BSi4cNqI2RyjLYwAhs7KU4GqcDMzm3i+CibDxv8peTikQqv2/5ARK
+# JhgSrAzbtc55E7j4campGJAw98CSYBFEb8spe+k1zpQWKTVrAXXOL+TiWjMxGILy
+# ecbu7V5h+UtAI0yHn4egelgA9aHm3FurF4q99obHYyjGiKb4WAL9aWUNFnwBmpIL
+# Kcakzxym6Otsm8XRDnskpMFdrvEfcZswA0smpWah74bj47edzyNwcAY+eWFMl4pl
+# uQaxvVuyeV+3eX2E4nw3j39cnwang9Vf9rGPsMh9Vlnc2DNVpmKbTSDt64fhw29d
+# EyRph2QlQg==
 # SIG # End signature block

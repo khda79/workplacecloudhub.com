@@ -1,6 +1,63 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.40) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.41) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+
+## Cancel remaining pipeline jobs
+
+Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.0** add cooperative
+cancellation. In **Requests**, select an active batch, enter a reason and choose
+**Cancel remaining jobs**. Confirm the batch before publication. This is independent
+of scheduling maintenance and does not publish the GUI configuration draft.
+
+Alternatively, use the CLI against the **live shared Orchestrator folder**, never its
+SharePoint/OneDrive mirror. Replace the generic paths and batch identifier below:
+
+```powershell
+$parameters = @{
+    Tenant = 'test'
+    SharedDataFolderPath = '<live-shared-Orchestrator-folder>'
+    JobsManifestPath = '<live-shared-Orchestrator-folder>/Config/Orchestrator-Jobs.json.txt'
+    Cancel = $true
+    BatchId = '<active-batch-id>'
+    Reason = 'Replace remaining pipeline work with controlled direct launches'
+}
+./SmartM365-Inventory-Pipeline.ps1 @parameters -ValidateOnly
+# Only after successful read-only validation:
+./SmartM365-Inventory-Pipeline.ps1 @parameters
+```
+
+- Every published expected resident must advertise cancellation protocol 1 in a fresh,
+  Running heartbeat for the same tenant. Deploy the entire lot and let residents recycle
+  safely; cancellation is refused during partial upgrades, startup or stale heartbeats.
+- Pending jobs and scheduled pipeline retries become `Cancelled`. Already reserved or
+  running jobs continue under ordinary supervision and record their real result. No
+  collector process is killed; an already running collector is not cancelled remotely.
+- A shared launch fence serializes reservation/process admission and cancellation.
+  Cached queues cannot resurrect a cancelled job. Running failures do not start another
+  pipeline retry after cancellation. Automatic schedules are not cancelled: keep
+  scheduling maintenance enabled if you intend to run collectors directly.
+- Successful/failed existing results, native CSVs, logs, leases and source receipts are
+  preserved. The request itself records UTC time, actor, workstation and reason. Repeating
+  cancellation resumes a partially completed publication without rewriting its audit.
+- A batch remains `Cancelling` while a started job has not finished. It becomes `Cancelled`
+  after completion, or `Failed` if there is a genuine failure (counts retain both failures
+  and cancellations). New requests remain blocked while any job is nonterminal.
+- The cancellation CLI returns 0 when the control operation succeeds, not as evidence of
+  a successful collection. A waiting `-Collect` console exits 3 for a cancelled batch.
+  Closing that console with Ctrl+C only stops waiting; it does not cancel shared work.
+
+Control/job locks are excluded from the SharePoint mirror. Never remove a live lock or
+edit/delete a request to bypass cancellation. An inaccessible control fails closed; a
+crash-held lock needs operator diagnosis before recovery, not automatic deletion.
+
+Offline checks (synthetic data only; real SMB/deployment qualification remains separate):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorPipelineCancellation.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorPipeline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorMaintenanceOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/SmartInventory/Orchestrator/SmartM365-Inventory-Orchestrator-GUI.ps1 -ValidateOnly
+```
 
 ## Shared scheduling maintenance
 

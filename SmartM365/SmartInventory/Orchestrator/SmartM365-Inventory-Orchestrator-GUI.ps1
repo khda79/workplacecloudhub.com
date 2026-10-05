@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.2.0'
+$script:AppVersion = '1.3.0'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -390,8 +390,13 @@ $xaml = @'
 
             <TabItem Header="Requests">
                 <Grid Margin="12">
-                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <GroupBox Header="Pipeline and job run requests (newest first)">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Cancellation reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="CancellationReasonBox" Width="340" Margin="0,0,8,0"/>
+                        <Button x:Name="CancelRequestButton" Content="Cancel remaining jobs" IsEnabled="False" ToolTip="Pending jobs and retries only. Running collectors continue. All residents must support cancellation."/>
+                    </StackPanel>
+                    <GroupBox Grid.Row="1" Header="Pipeline and job run requests (newest first)">
                         <DataGrid x:Name="RequestsGrid" SelectionMode="Single">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Batch" Binding="{Binding BatchId}" Width="260"/>
@@ -401,11 +406,12 @@ $xaml = @'
                                 <DataGridTextColumn Header="Jobs" Binding="{Binding Jobs}" Width="55"/>
                                 <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="65"/>
                                 <DataGridTextColumn Header="Failed" Binding="{Binding Failed}" Width="60"/>
+                                <DataGridTextColumn Header="Cancelled" Binding="{Binding Cancelled}" Width="70"/>
                                 <DataGridTextColumn Header="Requested by" Binding="{Binding RequestedBy}" Width="*"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </GroupBox>
-                    <GroupBox Grid.Row="1" Header="Jobs of the selected request">
+                    <GroupBox Grid.Row="2" Header="Jobs of the selected request">
                         <DataGrid x:Name="RequestJobsGrid">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="260"/>
@@ -511,13 +517,14 @@ $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orch
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
     foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
-        'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'MaintenanceBannerText', 'MaintenanceDetailText',
+        'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancelRequestButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
@@ -906,6 +913,20 @@ function Refresh-RequestsView {
     catch { Write-GuiException -Context 'Requests refresh failed' -ErrorRecord $_ }
 }
 
+function Stop-SelectedPipelineRequest {
+    $row = $script:Controls.RequestsGrid.SelectedItem
+    if ($null -eq $row -or $row.Status -notin @('Running', 'Cancelling')) { throw 'Select an active request.' }
+    $reason = $script:Controls.CancellationReasonBox.Text.Trim()
+    if (-not $reason) { throw 'Enter a cancellation reason.' }
+    $run = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $script:SharedDataFolderPath -BatchId $row.BatchId -Tenant $Tenant -Reason $reason -ValidateOnly
+    $message = "Cancel remaining jobs in batch $($run.BatchId)?`nPending jobs and retries will not launch. Running collectors continue; completed results stay unchanged.`nReason: $reason"
+    if ([System.Windows.MessageBox]::Show($message, 'Cancel remaining jobs', 'YesNo', 'Warning') -ne 'Yes') { return }
+    $result = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $script:SharedDataFolderPath -BatchId $run.BatchId -Tenant $Tenant -Reason $reason
+    Write-GuiActivity -Level SUCCESS -Message "Cancellation published. Batch=$($result.BatchId); Status=$($result.OverallStatus); Cancelled=$($result.CancelledCount); Remaining=$($result.PendingCount)."
+    $script:Controls.CancellationReasonBox.Clear()
+    Refresh-RequestsView
+}
+
 function Invoke-AutoRefresh {
     [void](Refresh-OperationsView)
     Refresh-RequestsView
@@ -951,7 +972,7 @@ function Request-SelectedJobRun {
     $includeDependencies = [bool]$script:Controls.IncludeDependenciesCheck.IsChecked
     # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
     Refresh-RequestsView
-    $activeRequest = @($script:RequestRows | Where-Object Status -eq 'Running' | Select-Object -First 1)
+    $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
     if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
     if (-not $SkipConfirmation) {
         $message = "Ask the orchestrators to run '$jobName' now?"
@@ -1252,7 +1273,7 @@ foreach ($name in @(
     'ActivityBox', 'FooterText', 'VersionText',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
-    'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'MaintenanceBannerText', 'MaintenanceDetailText',
+    'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancelRequestButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton'
 )) {
     $script:Controls[$name] = $window.FindName($name)
@@ -1346,6 +1367,11 @@ $script:Controls.RequestRunButton.Add_Click({
 $script:Controls.RequestsGrid.Add_SelectionChanged({
     $row = $script:Controls.RequestsGrid.SelectedItem
     $script:Controls.RequestJobsGrid.ItemsSource = if ($null -ne $row) { @($row.JobRows) } else { @() }
+    $script:Controls.CancelRequestButton.IsEnabled = $null -ne $row -and $row.Status -in @('Running', 'Cancelling')
+})
+$script:Controls.CancelRequestButton.Add_Click({
+    try { Stop-SelectedPipelineRequest }
+    catch { Write-GuiException -Context 'Cancellation failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Cancellation failed', 'OK', 'Error') | Out-Null; Refresh-RequestsView }
 })
 $script:Controls.OperationsMailsGrid.Add_MouseDoubleClick({
     $row = $script:Controls.OperationsMailsGrid.SelectedItem
@@ -1492,7 +1518,7 @@ if ($SmokeTest) {
     $operations = Refresh-OperationsView
     if ($null -eq $operations -or @($operations.Servers).Count -ne @($script:DraftCluster.ExpectedOrchestratorServers).Count) { throw 'Operations view did not return one row per expected server.' }
     $smokeOwners = Get-ElectionOwners
-    $activeRequests = @($script:RequestRows | Where-Object Status -eq 'Running')
+    $activeRequests = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling'))
     $publishedRunnable = @($script:Snapshot.Jobs.Jobs | Where-Object {
         $smokeMode = [string](Get-OrchestratorGuiPropertyValue -Object $_ -Name 'AssignmentMode' -DefaultValue 'Legacy')
         [bool]$_.Enabled -and @(Get-OrchestratorGuiPropertyValue -Object $_ -Name 'DependsOn' -DefaultValue @()).Count -eq 0 -and
@@ -1554,8 +1580,8 @@ $window.Add_Closed({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoXqzEfA5rxPLI
-# aClYU48AOOtqQwqgYW+Nwh2SbxcQUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXiGtPDFhmyjNQ
+# I3yexxOSUaew8C8j86mnRtYeEa9HdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1688,31 +1714,31 @@ $window.Add_Closed({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKtC2THqj3XxPrRdKDKMmQR19kbXhs4YTIb6gItt4SbvMA0GCSqG
-# SIb3DQEBAQUABIIBgDz4ROHws9XG7tRYcDA7iM+8BLgqvonJ4HdIu31AiJR1vVEk
-# 6DNab5GtAeW+wPftEi93sCsJGgrp0h27c5MwLAGAnnSRM2uAtTW85qNn6OevGLuW
-# cVJKJWc1dBgJaG8+OjgQfYSpjisZcm/zaJl7m5YbgfJtLZBXnCw86vCpfluD/MSy
-# IVztELLcb9HpT/XcdcY3n/YcYOE0B20GLeC5F08WDjiUGO7DumTU3sSHPrf3kFzM
-# +x5pHB0qafeQmvDSurFQNDX8NtxnvQ5BTCxHN2wGweG3JCXqqR/hMrZ9Ud5WWMJw
-# nNw4Ex+MRXap+Nt0ku6VhbYu2O261P1i5kXgmXfbZ0e9awpw0yZiiw0TwU/LlW0a
-# 7kr1kumdTJqOI7FINSNwJJiJmExMHf7BMW+DvoDY9yYWHU1VPkVJu2An2GbTE++W
-# 0H/IdHzt7/yNAUd/6/K01y0YUIgc3sgBijF6klsa+8zGetz5Y3pPIoRigChsCBqr
-# IGJH/DKvZ74vwC5WpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINxIk2ChkFWnW4Gop6HLJSjVsXfN1xpmgpcEJS3fw2OPMA0GCSqG
+# SIb3DQEBAQUABIIBgAvte+E0MElFsNTGIuOUBbUEAHeB1tOp2+kwAwULJVcqDVlG
+# WGwYgIhdCJO0OyPGxhREW5o8CgUMcdopBKj/qbW/rNUPl9oTVS3jayMOyRC2+cK9
+# skmLB2+5IPQ0Fnxz3cMaX7juptn+OCv+vrl4B63MC6DAI7EMnSWItH8osupETnGS
+# lH9wu4Ybm7lThSbXhe5nLJJNHBCDt2CZtAsVk3/DSg+lNl8X627YsANkTKrT5dTg
+# zorJLADZYEFgDHacLlVjXR3i62AgovJPDl7eaZUHVqAMGWQx4LWO9+oYG/7KHxNW
+# z66atd1z5GQ2sdQw9NdeUmWJC+V7btP8o+8d37yhuOcpI4bMV0uUiNevaTMRHhSI
+# xUeZ0su8Xficj8W4nLjqq58vuIeWwuMZevqvqvGzedhYsh4oAugFcVa8YfdFHQUN
+# IFjmh3K8Sux4pyKO5YUhr7qGYu+IvRQtuY3pr3ch8sezG7cWQlrlTm9eSM1+8C1d
+# vbQosjO2tHYfjM2B0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBE4vOngbGAwY7wmY21bJpF+lzAMorcCAGMz2Nd
-# /+0x6DANBgkqhkiG9w0BAQEFAASCAgBCdgG/dpOn28mCksAIVS/xRWJ5FQce+al7
-# PBgus+ZzHKQ2G5BmX9TrtRFKlTeD7lB4VfZyV3kdVT14zslgD09uT4FL1zuFBzmB
-# N5vjYdUf++TjqwdbLkuHkHOYgCU7mYDMDQ6Z2ikjJ6fwroIA6RBJHyTSReYQl52i
-# lAP7jTjJSkOGX8iJl+CJSX6rup+pSiY2HwvXFNMy1A0ZiNE690I+PtxmWgADYqgI
-# E61HJo1x5pHSFURXMb4qjTQNoQU1cN01Mq8OhgTl06BQa38uemUdi0pja1x9jCvm
-# 91Vhc3FjBtH6KALdnF+ShBZ7wmVpSe9b2Utit587Q2FV3Y22lA3IPX/HOXBGRX6j
-# f25ntQatBR74ooL2Gx89ppkgSg5tXLOxprJdSeIWIOUxYobFFkH/50bEupCPSrrP
-# 1LceGfrKkE2r/IFmDkRbGd502JKDnat1CC4SIEyqBFojh8DvYoGf2+ScSatVtkO5
-# iHyM9cv7dKGEzz7wJPLkpMjftLYZB36gW8sjwp+aMCJoPknA2z+jNhiEDKcRi1RM
-# p8vlbq3gHsiuJsHa8dq2y+QIhj1zPo/m3icjM6xzyiwo5uTkiQUbRwO/mMot/NWH
-# 4IYX4fSaPCPFr525UYJYEGphkpGfINJz5kU/7xLz40Zo4R62EcYP+eQRadi8GF9X
-# PT5jTiUK/Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzZaMC8GCSqGSIb3DQEJBDEiBCD9PtBV3x/8faOs+c3ODQt9y5oZsM0JulHGHkw4
+# 27uW9TANBgkqhkiG9w0BAQEFAASCAgAGsvYg0G281H1gggmrWgxbe6QszNLm3zLn
+# FpQ5BCnhXiMot17GAu9/aIquCAREME+01Shlx1Hdl2y6mUhtmu7uR2Z7WipfFiSv
+# rdZ8OretYsat+HDtMwJWuBkk0jcWXXhvj3kceMFoecALK36CwtRuE+HE35liNwna
+# W42TvACwwpUibScGEaDFhPsFISeMP6CaLxq39d6RlLGMfzF9Le+m69Y4c0q93TwX
+# fXkyOyhiTT5hz1Kz6nVR4EumJLk7m6BekxpR91RIs/av7x/q0UjY6pOWbc9o1oGe
+# YP1pHTkqBJZenMMbpo/vGhIGc9I0xcTJooiWKqxOpzPM0KmuKMfa6fn2zj/QgkVL
+# knjpG1R1uldFTY+5b+vPpUpy8wIlTa1wFlek/Eo15qw9v10ZSyerIRS/+MC60q1C
+# aHM3NMvqAtnklQap/jykonxN5E0CPICdKzWoMaEW0+BpUaCGM91ReWxLJ/5P9HTI
+# szrXuo2SlY2xnXRIPWecU42fUhCG7YcBL58ptAQ8OtX+/jCdxOteqklhqnvNuqaZ
+# JsF6VBuXnb3krPDyr8aV8OdRzcdWeQxdHSCev/TU/sMqUzfgb7pAHVMJNcFyNfyG
+# Unm2wLfSem+nJhzzGomN2NcUELnTZGfz5YlgPiUvlVe5bIHhg15y+MN5IM6VNn5g
+# 8txz3F2pxg==
 # SIG # End signature block

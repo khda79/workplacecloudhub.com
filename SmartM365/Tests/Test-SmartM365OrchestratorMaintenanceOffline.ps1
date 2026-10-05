@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -137,6 +137,10 @@ try {
         $script:RunningJobs=@{};$script:Starts=0;$script:LeaseCalls=0;$script:MaintenanceHealthy=$true
         $script:PipelinePending=@{};$script:MaintenanceControl=$Active
         function script:Clear-DependencyWaitLog {param($JobName)}
+        # This suite isolates maintenance; cancellation admission has its own synthetic suite.
+        function script:Test-SmartM365OrchestratorPipelineCancellation {param($SharedDataFolderPath,$BatchId) $false}
+        function script:Enter-SmartM365OrchestratorPipelineLaunchGuard {param($SharedDataFolderPath,$BatchId,$JobName) [pscustomobject]@{Allowed=$true;Lock=$null;LaunchAttempted=$false}}
+        function script:Exit-SmartM365OrchestratorPipelineLaunchGuard {param($Guard)}
         function script:Write-DependencyWaitLog {param($JobName,$BlockingDependencies,$Now)}
         function script:Enter-SmartM365OrchestratorConcurrencyLease {param($LeasesRootPath,$ConcurrencyKey,$JobName,$Occurrence,$OwnerServer,$SafeMinutes,$HeartbeatRootPath,$HeartbeatStaleMinutes) $script:LeaseCalls++; @{Acquired=$true;LeasePath='synthetic';Lease=@{LeaseId='synthetic'}}}
         function script:Get-DueOccurrence {param($Job,$LastOccurrence,$Now) $Now}
@@ -221,8 +225,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7FxYyfceYkjvZ
-# OY8QNXoBGM6zbdiDpDt9GQB8ytxBEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8SsPK2XjADxMB
+# QaITXPSk9/qVbmX6pFd1sbvWPN8TvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -355,31 +359,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILuG3QwnP/2X3ePu5W8oNmYZyEGRW4SSfZTIx5mSv6ZgMA0GCSqG
-# SIb3DQEBAQUABIIBgEp57D432koCt5u7XbsGvPuJsMOZkR1wS2bubmUfGtRXX5tX
-# LvB8y3W5L19YUqjyy10yF+t2crE3T0UVrGVjrisAzfZA3ca+AsYQqqFZMng1j4Z5
-# XLgRV0eYX2gkyAwZ9gkjyvTgXLwBuwpNaUKQVAmhVeQy9VG0TTBT4/Qqbb1Nk7D7
-# D9yTo2MXnNS4/0Z4RSn3GzJ+bquMapgPzlX72E3csjbyuxQkg6/+sCcIAc9MLupi
-# P7SX53V9KkDG3DRR8SWoqCeiTXLe2zrK8ysdLOIYzocaYe2VsLQdtmOUD/h3NyZw
-# 0OH0zAcgCx2LNM0Z9KVqya+mCHmBpUEAHDYaaQI844YaNIywtHCBFKybIdfRZCJ4
-# IYPXe3e8owfVnZDus2nTrYNq6jaE9J/sezQ6vyBTR+pSl4Ia10naqeFoKTTZEJDm
-# 5/iGskOtrdC5RBfrgpg/dL8w82Fk3gJlxeLns6tDBvy4R/ixa05il/mnPZeSVxRo
-# u+YvKUOV+IT9q3RHMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH8rtSgiOpAYZFhLKJ5pxWCsTXE6uy0j9Pw/+LAQh6lnMA0GCSqG
+# SIb3DQEBAQUABIIBgBm+oA7qWfMWHtdaqcabcDY+UThRZvkkElLUESLTCoRx146t
+# JzydmFTYKfpk7Lgi+sGRQgkc2OlnPkk14sQY7Nbgzj4/+UtdID26L6RKYQMZb/zv
+# 17z82yLJbfEiApUVIlyy/xUdR3fZOcmpJxIuwaRABuDg0g1gcHAYVvPxHs8Xf0/3
+# oQllrzEfiuufomwAiNTcYuzTCKoNJ26UecFZRaCzhFMcQcBxLIEyHxJUmmuaVX+W
+# 69SBz55pbnNL4ruoWKU3VWYYxurEwzHTFlNLUI84KszYA5o/DjT5MCpCmXDc3KNF
+# bP4zGXOP+P4/ixHW6eWugW0XQyhEDiq0h6YvWfZVoQo2GZUBOu9zxqDkdiD0tnZp
+# RoJ8r4j/LJWxJKtd/eE0sYvXdqPHNJbUMXMtx+luRLbbtTXovIiL/HmCf0BAP3Ve
+# 2h0DE4gBgnCsFG1amVCyy/6pPx6MXMvGldeyqjxGfBl2SnGdkJLQkgaSNTFPj81B
+# HaDPs5k3Hpab/Fz0AaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDsr7BK5tr3Ii+3Ed5RHk8O3hvUlGLCYGEJe9gb
-# 41dcuDANBgkqhkiG9w0BAQEFAASCAgCuP3nN2ZFFKEQX5aGY0SN2SiwhARWPjvA7
-# 62zRNdGNZ2QqGGt5DT5E8DlXTwoPOUh82U1bOzUPvzgvTtO1NY6HCoJDZg+SWnlw
-# O/Zp1U33mbHQ5KeKJYYSIMkqZ6kI3J9UUK3dH5p4N+u2juXzcyXhdSz+qNRZlxzi
-# aUq3SaMLFVUGohEs2xgjZ1t0VsxnoNpdvIqTN7YzLItNSt7sns58q14IZW2UePtm
-# CtP+EE2zzfvQJf+dmrWRWjORZ2/sk8zcsDkU0vdkqZMNQhQHeVJ5qe8tgb9KAJGw
-# C8JIiDRhbchC8bSoknahPfvt6BLSJn7axA6EKGwn4yv/ZOfzr/5eSdU05pyneupn
-# TCjsGH34r/egx7UDjV8FvyUWCS2CEXa4P3FYj48xCwoibXi/YGPQ1R06ZhaA4zYO
-# piEWTOO/UhFh76ucqSS8W3Be7tYepATj6tpQe3KWj2HcnVMvfF/Rg376VYWXiFDG
-# k0+CK+7g0P+V4eLv/BzsZ3VbTMwl1usXPEC6XuFiCCSuubzqM7aBEPpA7YkkCA6i
-# qbKgFinDe+CH8C+XB4GJEnr121PVyvFvYVhNMmJ/hYr87ZMpSzbl5ZfcbILhF1Nl
-# UnR2HU4FD83hINf9lq9FxHlxyeoqo6e90cyHdzE9FHiVpEs96MqB/gV/JlU5R+o0
-# 4Ofn2kqWXA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDywFSFME6MRxrIDtColql5mJQskjSUC+VSjtcE
+# YzDGRjANBgkqhkiG9w0BAQEFAASCAgB+17r3gc2xv+EHvE/QJWB8eCAn/2b+KYlC
+# j0AoEGjZddoS4SMcqyaCM90Lg2x9k8KPKH6S57Q/uVQWIunKMR5MfAvsVUFa/uJM
+# aKRU+S9dy6/9ZyPP2RBMAfstNAq2i7x0zDdxdtsoyyR6CSbZVwIJIeJnKfGXWlFK
+# AGaHaHdBvQ8gkU2bPmZHdwwPXP12Db1WtFubpCo0yJ7X9DIU8cXEHB6o13Q2sPqV
+# J+RzpzGQBEL+6f8NcX1k66Y6/Iy/w05Ta13mzxpmLSjPn9J9Tz3CfE9uLh7vU35r
+# btvepDdSFLbZF9CX/QL68TvsYp94S72QKYBXsavqF32Zafnkxg+Zdlmm/ch94jl6
+# CAglM+ggq+GQbvXrvt9xaThlJeFN5mAN9zdU6zN5Ayef9e8UcQ5KNp/ylrCI0SvV
+# gRy8GKJansU65PAsxQ+5DJliv55cgVjY6Op/wKprQN/+A44YDsrfBTjVcpDfwS55
+# CKwwNjpC6L+uPjRLBBlaxWYpVusGI4npVpYAFE81ORiQn6ipbv0rnzrzvNiKiMyn
+# kf4wet/1i5hHLGhDwYj+qb2yebFgR//rK89qSVIJAgLCsZSTayNfQP/5B45V78gw
+# qX6qVoIZHvfEGNKrjnYgUaO4V3a5LjFH8tSKRMvLd7X/BPZUqRiCqlQEQW/devb5
+# sTu4Ld2HVg==
 # SIG # End signature block
