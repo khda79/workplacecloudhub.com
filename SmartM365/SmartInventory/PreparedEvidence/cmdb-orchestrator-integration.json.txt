@@ -1,5 +1,5 @@
 {
-  "Version": "0.1.0",
+  "Version": "0.1.1",
   "CandidateOnly": true,
   "Description": "Review-only integration specification, not an executable jobs manifest or an automatic template merge.",
   "ActivationRequires": [
@@ -9,7 +9,8 @@
     "Python 3.10+ available to the resident orchestrator account",
     "Fresh unrestricted Exchange local and RemoteMailbox acquisition",
     "Schedule and timeouts qualified against actual application collection duration",
-    "All 17 producer receipts within the unchanged 48-hour acquisition gates"
+    "Core producer receipts within 48 hours; complete DiscoveredApps within 240 hours with warnings after 168 hours",
+    "Preparation enforces source-specific acquisition gates independently of the scheduler completion-age gate"
   ],
   "JobArgumentAdditions": [
     {
@@ -72,7 +73,7 @@
       "RetryDelaySeconds": 0,
       "ConcurrencyKey": "CmdbEvidence-Prepare",
       "DependencyMode": "FreshSuccess",
-      "DependencyMaxAgeHours": 48
+      "DependencyMaxAgeHours": 240
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "version": "0.3.2",
+  "version": "0.3.3",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -1642,5 +1642,17 @@
   ],
   "producerRegistry": "SmartM365-CmdbSources.json.txt",
   "maxAgeHours": 48,
-  "maxCollectionSpanHours": 48
+  "maxCollectionSpanHours": 48,
+  "freshnessGroups": [
+    {
+      "name": "DiscoveredApps",
+      "sources": [
+        "Intune_DiscoveredApps_Summary.csv",
+        "Intune_DiscoveredApps_AppDeviceRelations.csv"
+      ],
+      "warningAgeHours": 168,
+      "maxAgeHours": 240,
+      "maxCollectionSpanHours": 240
+    }
+  ]
 }

@@ -169,6 +169,10 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                          'Description':message,'RecommendedAction':'Review native source evidence before taking action.',
                          'DetectedDateTime':reference.isoformat(),'SourceSystem':'SmartInventory',**links}
 
+    freshness = {item['File']:item for item in evidence['Freshness']['Sources']}
+    for warning in evidence['Freshness']['Warnings']:
+        finding('Source', warning['File'], 'SourceFreshnessWarning', warning['Message'])
+
     users, users_by_native = [], {}
     for row in read('users'):
         sid = get(row,'Object Id')
@@ -762,7 +766,10 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('DimDate',dates)
     emit('SourceHealth',({'SourceName':r['File'],'Status':r['Status'],'Coverage':'Complete producer file scope',
         'SourceRows':r['Rows'],'MaxItems':0,'StartedDateTime':r['StartedAtUtc'],'CompletedDateTime':r['CompletedAtUtc'],
-        'Evidence':'Native producer success; exact hash and logical row count'} for r in evidence['Files']))
+        'Evidence':('Native producer success; exact hash and logical row count; acquisition age '
+                    + str(freshness[r['File']]['AgeHours']) + 'h; '
+                    + freshness[r['File']]['State'] + '; rejection after '
+                    + str(freshness[r['File']]['MaxAgeHours']) + 'h')} for r in evidence['Files']))
     relationships=[('PrimaryUser',len(user_devices),'Native Intune primary user'),('HasMailbox',sum(bool(m['TenantUserKey']) for m in mailbox_rows.values()),'Unique native ID or SMTP/user match'),
         ('AssignedLicense',len(assignment_rows),'Native Entra user/SKU pairs'),('MemberOfGroup',sum(member_counts.values()),'Direct Entra memberships, including non-user objects'),
         ('DeviceHasApplication',table_counts['FactDeviceApplication'],'Native Intune app/device links'),('DeviceInAutopilot',sum(bool(get(r,'Managed device ID')) for r in read('autopilot')),'Native Autopilot managed device link'),

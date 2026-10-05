@@ -56,6 +56,7 @@ SmartWorkplaceCMDB/**
 !/SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceMap.csv.template
 !/SmartM365/SharePointMigration/**/*.py
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb_prepare.py
+!/SmartM365/SmartInventory/PreparedEvidence/cmdb_freshness.py
 !/SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt
 !/SmartM365/Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb_tables.py
@@ -64,6 +65,7 @@ SmartWorkplaceCMDB/**
 !/SmartM365/SmartInventory/PreparedEvidence/SmartM365-CmdbEvidence-Prepare.local.json.txt.template
 !/SmartM365/SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.local.json.txt.template
 !/SmartM365/Tests/test_cmdb_preparation.py
+!/SmartM365/Tests/test_cmdb_freshness.py
 !/SmartM365/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub-lockup-WPF.png

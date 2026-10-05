@@ -12,8 +12,9 @@ import os
 import shutil
 import uuid
 from pathlib import Path
+import cmdb_freshness
 
-VERSION = '0.3.4'
+VERSION = '0.3.5'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -173,7 +174,9 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
         start, end = utc(receipt['StartedAtUtc']), utc(receipt['CompletedAtUtc'])
         if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
             raise ValueError('Invalid producer acquisition interval')
-        if now - start > dt.timedelta(hours=contract['maxAgeHours']):
+        rule = cmdb_freshness.producer_policy(contract, [file for file, record in records.items()
+                                                       if record['Producer'] == receipt['Producer']])
+        if now - start > dt.timedelta(hours=rule['MaxAgeHours']):
             raise ValueError('Stale acquisition evidence: ' + receipt['Producer'])
     if set(records) != {s['file'] for s in contract['sources']}:
         raise ValueError('Producer registry and source contract disagree')
@@ -190,8 +193,6 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
         start, end = utc(record['StartedAtUtc']), utc(record['CompletedAtUtc'])
         if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
             raise ValueError('Invalid acquisition interval: ' + name)
-        if now - start > dt.timedelta(hours=contract['maxAgeHours']):
-            raise ValueError('Stale acquisition evidence: ' + name)
         starts.append(start); ends.append(end)
         path = source / name
         if path.is_symlink() or not path.is_file():
@@ -205,10 +206,10 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
         if sha(path) != before:
             raise ValueError('Source changed during validation: ' + name)
         checks.append(dict(record, SHA256=before))
-    if max(ends) - min(starts) > dt.timedelta(hours=contract['maxCollectionSpanHours']):
-        raise ValueError('Source collection interval exceeds the contract')
+    freshness = cmdb_freshness.evaluate(contract, checks, now)
     evidence = {'ProducerReceipts':receipts, 'RegistrySHA256':registry_hash, 'Files':checks,
-                'StartedAtUtc':min(starts).isoformat(), 'CompletedAtUtc':max(ends).isoformat()}
+                'StartedAtUtc':min(starts).isoformat(), 'CompletedAtUtc':max(ends).isoformat(),
+                'Freshness':freshness}
     recheck_sources(source, evidence, contract)
     return evidence
 
@@ -321,7 +322,8 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
         raise ValueError('Complete reporting tenant identity is required')
     evidence = validate_sources(source, contract, tenant, now, identity)
     if validate_only:
-        return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0}
+        return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0,
+                'FreshnessWarnings':evidence['Freshness']['Warnings']}
     # No source copies, persistent Raw adapter, dated output or history.
     from cmdb_tables import build_tables
     with PublicationLock(output.parent / '.cmdb-preparation.lock'):
@@ -361,6 +363,7 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
             (stage / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding='utf-8')
             validate_current(stage, contract, tenant)
             recheck_sources(source, evidence, contract)
+            cmdb_freshness.evaluate(contract, evidence['Files'], now or dt.datetime.now(UTC))
             if sha(contract_path) != contract_hash:
                 raise ValueError('Preparation contract changed during execution')
             if fault:
@@ -372,6 +375,7 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                 fault('after-swap', source, output)
             validate_current(output, contract, tenant)
             recheck_sources(source, evidence, contract)
+            cmdb_freshness.evaluate(contract, evidence['Files'], now or dt.datetime.now(UTC))
         except BaseException:
             if promoted:
                 shutil.rmtree(output)
@@ -389,8 +393,10 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                 # Publication is already validated. Never undo it after partial
                 # removal of the temporary previous snapshot.
                 return {'Status': 'PreparedWithCleanupWarning', 'GeneratedTables': len(output_files),
-                        'OutputRoot': str(output), 'CleanupRequired': str(previous)}
-        return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output)}
+                        'OutputRoot': str(output), 'CleanupRequired': str(previous),
+                        'FreshnessWarnings':evidence['Freshness']['Warnings']}
+        return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output),
+                'FreshnessWarnings':evidence['Freshness']['Warnings']}
 
 
 def main():

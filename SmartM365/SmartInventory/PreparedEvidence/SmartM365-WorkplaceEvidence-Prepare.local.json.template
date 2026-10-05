@@ -5,7 +5,11 @@
   "WorkplaceIntelligenceRootPath": "",
   "PreparedWorkRootPath": "",
   "PreparedMaxSourceAgeHours": 168,
-  "PreparedSourceAgeOverrides": {"M365_License_Prices.csv": 744},
+  "PreparedSourceAgeOverrides": {
+    "M365_License_Prices.csv": 744,
+    "Intune_DiscoveredApps_Summary.csv": 240,
+    "Intune_DiscoveredApps_AppDeviceRelations.csv": 240
+  },
   "PreparedAllowLegacyTenantless": false,
   "PreparedAllowEmptyTables": [],
   "EnableSharePointUpload": true,

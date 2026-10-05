@@ -28,11 +28,14 @@ Summary/AppDeviceRelations publication checks and full-scope receipt gates are
 not relaxed. Successful local tests do not prove live Graph completeness or a
 feasible production duration. This option may increase API calls and run time.
 
-The existing application job is weekly. CMDB receipts require acquisition no
-older than 48 hours and intervals no longer than 48 hours. A daily preparation
-cannot therefore be guaranteed from that weekly job; a multi-day resumed run
-does not solve the problem. Before activation, qualify a fresh full run, then
-approve cadence/timeouts or explicitly redesign freshness requirements. Do not
+The existing application job remains weekly. Core CMDB sources retain 48-hour
+acquisition-age/span gates. Only the two Apps sources allow 240 hours, with
+warnings after 168 hours and a separate 240-hour span. The review-only job's
+completion-age dependency gate is 240 hours to permit weekly Apps; it is only
+launch eligibility, not qualification of the prepared data. The preparer still
+rejects every Core source older than 48 hours from acquisition start, even when
+the scheduler considers its last success eligible. No active job is changed.
+Before activation, qualify a fresh full run and its actual duration. Do not
 change those gates merely to pass a preparation run.
 
 ## Exchange local acquisition and recipient quality

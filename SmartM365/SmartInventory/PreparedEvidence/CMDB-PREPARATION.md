@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Version: 0.3.4. Status: offline-tested migration candidate, not deployed or scheduled.
+Version: 0.3.5. Status: offline-tested migration candidate, not deployed or scheduled.
 
 ## Scope and execution boundaries
 
@@ -101,6 +101,48 @@ complete proof. `Rows` counts parsed logical CSV records, not physical lines.
 Empty success still needs a complete header, scope and receipt. All required
 sources must pass; a failed or partial producer cannot be rescued by an old CSV.
 
+## Weekly application freshness
+
+The DiscoveredApps job is already weekly (Sunday 00:00). Keep its complete
+`-DeviceDetailMode All -FreshDeviceDetails` acquisition; no sampling or relation
+cache reuse is introduced. The two Apps CSVs form one explicit freshness group:
+acquisition age up to 168 hours is within target; strictly above 168 hours emits
+warnings; strictly above 240 hours rejects the entire preparation. Age is measured
+from `StartedAtUtc`, never completion, file modification, upload or preparation.
+Exactly 240 hours remains acceptable, with a warning. The six-day job timeout is
+not a freshness target; actual long-run duration still requires qualification.
+
+All other sources retain the 48-hour acquisition-age and collection-span limits.
+Apps are assessed within their own 240-hour span, not included in the Core span.
+One producer cannot split across freshness groups. Unknown/overlapping groups,
+missing sources, invalid bounds and partial/failed/running proofs fail closed.
+
+`SourceEvidence.Freshness` records the dates, age, target, hard limit and state of
+each input plus group spans and the earliest individual expiration. Warnings
+are returned even by ValidateOnly, logged as WARNING by the offline wrapper,
+and retained as source-level quality findings and SourceHealth evidence. They
+are not a count of affected devices or proof that an unobserved device has no
+applications. Current orphan-app/device joins still reject preparation.
+
+Preparation and buffered readers share `cmdb_freshness.py`; both reject expired
+evidence. The read session expires at the earliest source-specific deadline,
+not the oldest timestamp plus a blanket limit. No historical fallback, new
+service or permanent data copy is added. A Running Apps receipt still blocks
+new preparation; the already loaded report is not refreshed or modified.
+
+Intelligence's existing transport-age overrides are set to 240 hours for the
+same two filenames in its preparation template; its other defaults, licence
+price override, historyKey rules and CSV schemas are unchanged. Template merging
+adds absent nested keys on the next configuration load; explicit existing local
+overrides are preserved and need separate deployment review. Intelligence's
+publication-age guard uses file modification time, not CMDB acquisition proof.
+Its Data Trust view keeps the existing seven-day Fresh/Aging distinction; this
+change does not certify transport timestamps as acquisition timestamps.
+
+The contract version is bumped: old prepared batches cannot be loaded under the
+new reader contract. Regenerate only after complete valid sources are available;
+do not edit existing manifests or receipts to make old batches pass.
+
 The 0.3.2 contract requires native AD membership identity/type columns, Entra
 membership type/status, Teams member counts, and update-alert provenance/key
 columns. Header absence blocks replacement; a legitimately unavailable value is
@@ -126,8 +168,9 @@ Intelligence's history keys, prepared contracts and generators are unchanged by
 this correction lot. Current Autopilot counts can increase when previously lost
 native identities are restored; qualify consumer counts and joins before deployment.
 
-The initial contract rejects acquisition older than 48 hours, intervals spanning
-over 48 hours, and future acquisition over five minutes. Explicit timezones are
+Core rejects acquisition older than 48 hours or Core intervals spanning over
+48 hours; only the Apps group follows the weekly policy above. All sources reject
+future acquisition over five minutes. Explicit timezones are
 mandatory. These acquisition gates do not prove that a workload usage report
 itself is fresh: its source report refresh date remains separate evidence.
 

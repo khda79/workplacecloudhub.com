@@ -1,116 +1,83 @@
-﻿#Requires -Version 7.0
+#Requires -Version 7.0
 <#
 .SYNOPSIS
-Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
+Test the Intelligence Apps publication-age overrides without operational imports.
 .VERSION
-0.3.4
+1.0.0
 .NOTES
-Candidate, not scheduled. Offline local preparation only. No collector, Graph
-authentication, notification, SharePoint transfer or Power BI refresh is invoked.
+Synthetic temporary files only. No collectors, tenant configuration or notifications.
 #>
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Existing SmartM365.Core operational contract; offline toggles are saved and restored.')]
-param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly)
+param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.4'
-$failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
-$core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
-$savedOfflineGlobals=@{}; $preparationWarning=$false
-function Resolve-SmartM365CmdbPreparationLogPath {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
-          [AllowEmptyString()][string]$LogRootPath)
-    $resolved=& $CoreModule {param($value) Resolve-SmartM365ConfigValue -Value $value} $LogRootPath
-    if([string]::IsNullOrWhiteSpace($resolved) -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL') -or
-       $resolved -match '\{\{|\}\}' -or -not [IO.Path]::IsPathFullyQualified($resolved)){
-        throw 'CMDB preparation requires a fully resolved absolute LogAllRootPath; no log directory was created.'
-    }
-    return Join-Path $resolved 'Preparation/CMDB'
+$repository=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$pipelineFile=Join-Path $repository 'SmartWorkplaceIntelligence/scripts/PreparedEvidencePipeline.psm1'
+$templateFile=Join-Path $repository 'SmartM365/SmartInventory/PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.local.json.template'
+$tokens=$null; $parseErrors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($pipelineFile,[ref]$tokens,[ref]$parseErrors)
+if($parseErrors.Count){throw 'Pipeline parser rejected the source.'}
+foreach($name in 'Get-PreparedChildPath','Get-PreparedSourcePlan','Copy-PreparedStableSource'){
+    $definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true) | Where-Object Name -eq $name)
+    if($definition.Count -ne 1){throw "Expected one function: $name"}
+    . ([scriptblock]::Create($definition[0].Extent.Text))
 }
-try {
-    $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-    . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
-    $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.66' -ErrorAction Stop
-    # WriteLog can notify Teams using module-local settings, independent of the
-    # global toggle. Suppress its existing callback for this offline invocation.
-    # This is in-memory only: no module/config file is changed.
-    $core=Get-Module SmartM365.Core
-    $previousTeamsGuard=& $core {
-        $previous=Get-Variable -Name SmartM365TeamsNotificationInProgress -Scope Script -ErrorAction SilentlyContinue
-        if($null -ne $previous){$previous.Value}else{$false}
+function Read-SmartM365JsonDocument([string]$Path){@{Document=(Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)}}
+$template=Get-Content -LiteralPath $templateFile -Raw | ConvertFrom-Json
+$overrides=@{}
+foreach($property in $template.PreparedSourceAgeOverrides.PSObject.Properties){$overrides[$property.Name]=[int]$property.Value}
+$apps=@('Intune_DiscoveredApps_Summary.csv','Intune_DiscoveredApps_AppDeviceRelations.csv')
+if($template.PreparedMaxSourceAgeHours -ne 168 -or $overrides['M365_License_Prices.csv'] -ne 744){throw 'Unrelated defaults changed.'}
+foreach($name in $apps){if($overrides[$name] -ne 240){throw "Missing Apps override: $name"}}
+$temporary=Join-Path ([IO.Path]::GetTempPath()) ('prepared-apps-freshness-'+[guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory -Path (Join-Path $temporary 'DATA-LAST')
+try{
+    $sourceNames=$apps+@('M365_Users_Active.csv')
+    $contractFile=Join-Path $temporary 'sources.json.txt'
+    @{currentFiles=$sourceNames;mappingFiles=@();dailyFiles=@();history=@()} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $contractFile -Encoding utf8
+    foreach($name in $sourceNames){
+        $path=Join-Path $temporary "DATA-LAST/$name"
+        [IO.File]::WriteAllText($path,"TenantKey,Value`nsynthetic,1`n")
+        if($name -in $apps){[IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-216))}
     }
-    & $core { $script:SmartM365TeamsNotificationInProgress=$true }
-    $teamsGuardInstalled=$true
-    $config=Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-CmdbEvidence-Prepare.local.json.txt') -Required
-    if (-not $SourceRootPath) {
-        $SourceRootPath=if($config['LatestCsvFolderPath'] -and $config['LatestCsvFolderPath'] -notin @('__USE_GLOBAL__','USE_GLOBAL')){
-            [string]$config['LatestCsvFolderPath']
-        }else{[string]$effective.LatestCsvFolderPath}
+    $parameters=@{DataRoot=$temporary;SourceContractPath=$contractFile;MaxSourceAgeHours=[int]$template.PreparedMaxSourceAgeHours;AgeOverrides=$overrides;MetadataOnly=$true}
+    $plan=@(Get-PreparedSourcePlan @parameters)
+    if($plan.Count -ne 3){throw 'Unexpected source plan.'}
+    $snapshot=Join-Path $temporary 'snapshot'
+    foreach($entry in $plan){
+        $captured=Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours 168 -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0
+        if(-not $captured.SHA256){throw 'Stable capture did not qualify bytes.'}
     }
-    $source=[IO.Path]::GetFullPath($SourceRootPath)
-    if ((Split-Path $source -Leaf) -ne 'DATA-LAST') {throw 'Use the authoritative SmartInventory DATA-LAST, not DATA-POWERBI.'}
-    $output=Join-Path (Split-Path $source -Parent) 'DATA-POWERBI-CMDB'
-    $pythonName=if($config['PythonCommand']){[string]$config['PythonCommand']}else{'python'}
-    # Keep logs in LOG-ALL; initialization must not create the protected output.
-    foreach($name in @('EnableSharePointUpload','EnableTeamsNotifications','SmtpServer','From','To','ErrorMailTo')){
-        $variable=Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
-        $savedOfflineGlobals[$name]=@{Exists=($null -ne $variable);Value=$(if($null -ne $variable){$variable.Value}else{$null})}
-    }
-    $global:EnableSharePointUpload=$false
-    $global:EnableTeamsNotifications=$false
-    $global:SmtpServer=''; $global:From=''; $global:To=''; $global:ErrorMailTo=''
-    $logBase=Resolve-SmartM365CmdbPreparationLogPath -CoreModule $core -LogRootPath ([string]$effective.LogAllRootPath)
-    InitializeScriptEnvironment -OutputPathInit $logBase -LogFileName 'SmartM365-CmdbEvidence-Prepare' -CallerScriptPath $PSCommandPath | Out-Null
-    $runtimeInitialized=$true
-    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
-    $transcriptStarted=$true
-    WriteLog -Message "CMDB preparation $script:Version. Source='$source'; Output='$output'; ValidateOnly=$ValidateOnly. No external actions." -Level INFO
-    $python=Get-Command $pythonName -CommandType Application -ErrorAction Stop | Select-Object -First 1
-    $pythonVersion=& $python.Source -c 'import sys; print(".".join(map(str,sys.version_info[:3])))'
-    if($LASTEXITCODE -ne 0 -or [version]$pythonVersion -lt [version]'3.10'){throw 'Python 3.10+ is required.'}
-    $arguments=@((Join-Path $PSScriptRoot 'cmdb_prepare.py'),'--source',$source,'--output',$output,
-        '--tenant-key',[string]$effective.TenantKey,'--organization-key',[string]$effective.OrganizationKey,
-        '--environment-key',[string]$effective.EnvironmentKey,'--tenant-id',[string]$effective.TenantId)
-    if($ValidateOnly){$arguments+='--validate-only'}
-    $resultText=& $python.Source @arguments 2>&1
-    if($LASTEXITCODE -ne 0){
-        $diagnostic=@($resultText | ForEach-Object {[string]$_} | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -Last 1) -join ''
-        throw "CMDB preparation rejected its source or output contract. Last validated output is preserved. $diagnostic"
-    }
-    $result=$resultText | ConvertFrom-Json -ErrorAction Stop
-    WriteLog -Message ([string]$resultText) -Level INFO
-    foreach($warning in @($result.FreshnessWarnings)){
-        $preparationWarning=$true
-        WriteLog -Message ([string]$warning.Message) -Level WARNING
-    }
-    if($result.Status -eq 'PreparedWithCleanupWarning'){
-        $preparationWarning=$true
-        WriteLog -Message "Validated output published locally, but transient rollback cleanup needs review: '$($result.CleanupRequired)'." -Level WARNING
-    }
-    WriteLog -Message 'CMDB local preparation completed. No collection, history, report switch or publication.' -Level SUCCESS
-} catch { $failure=$_; throw } finally {
-    try {
-        if($runtimeInitialized){Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}elseif($preparationWarning){'CompletedWithWarnings'}else{'Success'}) -ErrorRecord $failure -FailureStage 'CmdbPreparation'}
-    } finally {
-        try {if($transcriptStarted){Stop-Transcript | Out-Null}}
-        finally {
-            if($teamsGuardInstalled){& $core {param($previous) $script:SmartM365TeamsNotificationInProgress=$previous} $previousTeamsGuard}
-            foreach($name in $savedOfflineGlobals.Keys){
-                $previous=$savedOfflineGlobals[$name]
-                if($previous.Exists){Set-Variable -Name $name -Scope Global -Value $previous.Value}
-                else{Remove-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue}
-            }
+    $checks=3
+    foreach($name in $sourceNames){
+        $path=Join-Path $temporary "DATA-LAST/$name"
+        $original=(Get-Item -LiteralPath $path).LastWriteTimeUtc
+        $limit=if($name -in $apps){240}else{168}
+        [IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-($limit+1)))
+        foreach($action in @(
+            {Get-PreparedSourcePlan @parameters | Out-Null},
+            {Copy-PreparedStableSource -Entry ($plan | Where-Object Relative -eq "DATA-LAST/$name") -SnapshotRoot $snapshot -MaxSourceAgeHours 168 -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0 | Out-Null}
+        )){
+            $rejected=$false
+            try{& $action}catch{if($_.Exception.Message -notmatch 'age limit|publication-age'){throw};$rejected=$true}
+            if(-not $rejected){throw 'Expired source was accepted.'}
+            $checks++
         }
+        [IO.File]::SetLastWriteTimeUtc($path,$original)
     }
+    Write-Output "PASS: $checks source plan/capture freshness checks; Apps 240h, unrelated 168h, price 744h. Offline only."
+}finally{
+    $target=[IO.Path]::GetFullPath($temporary)
+    $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if((Split-Path $target -Parent) -ne $parent -or (Split-Path $target -Leaf) -notlike 'prepared-apps-freshness-*'){throw 'Temporary cleanup target mismatch.'}
+    Remove-Item -LiteralPath $target -Recurse -Force
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjkDRDrWXCHm8B
-# Rk5L4NkNungX3e6ZJH8+x7RZ32y5KKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD16JGvuwzjGgEv
+# DaDTKagcV84wsvzVMrQw6P9nh4JwwqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -243,31 +210,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ9Q/lhSaKh7tWzyuszIhTsA8a2PzukZP4TW3ve2DdY9MA0GCSqG
-# SIb3DQEBAQUABIIBgE2EJUrYt8JySck4S40uHYZg2lV6HN63WR4D1hd1lgKRfvuh
-# +V83B3FklvTWmoI0bn0ASWN0W5u6yf7sJlA1Jy7HKwjd3abuXvliZAUm1U9V93ub
-# wNVuT1ot0XIN9y7zAYcgKkyO4whbk/qY9vRQpKaUhOPSaW6NALPIT7MPgXkjd80A
-# 9octoWH/SXHPYlJCNWNs0xeyao/0Aj3Ibom0BB4PZzf4+EjRuo/b+3wfpZoBdgbi
-# PCYzlMwxNHS+KyLG1F5Eg9dZwsMlhdmQlLy/dqhP7pYmvi5iUz7oBPmPjnkUBusF
-# kMR1IDsmT68C0uUF25I7mDqNzohpFsurb+Cze7VcsfPgNl1FoWa8XadNSzPbPYej
-# Hop3KuLVgQzJxxx05CO2Wkux9ZVD4WAMox0VWx4bZPPZSRz13lalh7x4keCsbZHa
-# 0VxooABdHYbV1e/maBfUFedlX3inZEOsQb1WCtic4P4c2Ic8HMXlo5coGh7gQ2Iu
-# GmqtEAMzNR1DSoL2+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICUUhTs+Rik1L5Z9s2ZPHPUen39KdFmg3Owl8E+VHykoMA0GCSqG
+# SIb3DQEBAQUABIIBgLHHwhpINPLOKvG7P234ZhGTXMDjidhJD69AzfiaYw+a2Bml
+# Og6yQG980depmnXAgH4UffHl2YdFL1qR2EovNbw8tGPyLFPK5j++FoacS+QHroC8
+# II7gpVXqi9bLNy4hNJccQcSv7JZPswps4cHVukcxRHa1E3jtOJcxpuydGQnmVtSD
+# 4hLrvH0rfsfSp0VKNPwadSxfM3b7CkbCZC30qcI7GsQz8eRPXkKFjONf6IEjvQU5
+# h+zUGr3xUc/GV9zse0dOqSGcRSnOGGiYSJLaxOFOJ5F7P/EE61vryG7jOFqctO3I
+# kb3b+CpUfg/tf0bzbretz3Y+l52fnilLIaQiucM3b9AuQPlIAgHmRlqLpKfEf0Tm
+# 5dQ6yQh5e0NgWkR+8ZNVrJVN3AfjhkzqbVpOMyfVp3HakgvKElXb07BlV86IfH6n
+# qWTISqc7FfWctsSf0aiQ16rRX8aykJFvfMpGJ9GdqwfCsLMvwQHv8l31RnXpQqDV
+# PBGqrPfK25qaC4INuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUyMDA4
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAeLqICErZkMbKU+RudXeUx94V9pvy3Kgp7AxwC
-# caSLazANBgkqhkiG9w0BAQEFAASCAgAS/ibQhaMp3fZGTlAm70XDzVz+fTSS5Esh
-# pYu+oG+PbQ2SH9ULOAuNemPzgrsqgE0yLjaC8pxSA1nlW8hUi+gpKdLKX66rtlMY
-# 0KIWVCjMenV94zbHEAAEd2eYeBh7DDymyD4VEvuBAIDE5Ytm9dfF7vxdhKaYBJD3
-# xTfxtOh+hAd1lZe8pk3G+mbtvg8z4gb7Lo8hJ4lIBNzfiIz9JR4sTGEEkSwlSN8e
-# 547f/RLrD4UTOf7QttbgDsbURsDbsvgVvEOi/942cL411P8MieaTty+JkXpyroLR
-# 6fXh6dGxMUMBMARCvGYFMaf7UL1tdzz5kLQ/KGBO88CbtbFjv4kV1F63iUDw5hnm
-# q0cHNXnoBfeK3+heWxtsgdjrlNwpwnEqdjRPR3x+ZPuhze/UNEd93g2DGe/B5meN
-# jFDK+WtkBYZ01S9wEZ+dXDEZfyn8q0tFb5VNPPkM1YkT75dsmNasITOC8CgqIOwR
-# sBpwm7SV+OZe1HJfqY1+QeSchov9U3EERTpV2OGcHVI4jotPoK/XF65RzEMujCgm
-# bWMmOohp7NJetFOk6xFhY8PNWtz6kngRSXSrhgjPmC80gHxbZBd06aZ+Xn23EPJ8
-# EwD+fgRZjRcPGVAOyvnNHYc2y5Ofs4Sc+4UocRuCNSry25qwDp0CA91RIMxLSgO8
-# 6WvNDdpTkA==
+# NDlaMC8GCSqGSIb3DQEJBDEiBCDbCe5/9QGCQcchIpYlFjRfjuHyMEbPJg2P1vZ2
+# RDUxqzANBgkqhkiG9w0BAQEFAASCAgAO9ZDPa9h6X/zSofcc5DRYSj4/o+lxWtzj
+# w2UTuKTZ5DquMooZ3h6z9Yrrben/1GUX8UqE9qNS02jDA7LgcJ/9FM4dlVMuSKrU
+# J1p6Xg9o8sXixmeSSe0LuVd24KDKR/UQ1gad7fra2jQXJHfVIIcfilUE5aGdBfwV
+# T8ZvFIcpe+342Zn5IBfsxJ9b+NigYTy0IiDlQGjiUsPIxOrjIHjdHFQa0hMfBKhk
+# pMna4UGSsRGnHmyvw+kGxMIpnYis1Moe+vlH/mWq8KJTH3IDu55QKgIdIc7a/Gi0
+# V2ZlNrQHawZAzHND0R2ip+7tpigb74iwgkm71lsiZ28iBBQZR4s4m6GhGWrvULlj
+# Cv8KcnfdNw4wRqYSMAeRprkyng58g20UIQ9lIyh3mWBEDqAROyNPGnEYfWTdxmA0
+# JoGXJGeaiSDk9vx1W47ZmKoGGfmhe7wmU6BSLJwD3mjpqaoqBBbhDoretrFd+LxD
+# xzfUSHuuDYR9LXrDbLSB+4GhtwzZpUcJByS5bOFSdEcB0ezEAYM2YCoMnGYeFHhh
+# 9rMQarNJ5gPwFxyJdJ+5eamAyUvUaOwDY9n1t7nGDJBgTNLL3IA/l1QxzOjDdVCW
+# i+LLErCiM+khm2C1gdjTUGzOqnR1dfMPRDjtSK3K5aJV7FmXDuP4+SUt+fEECXE7
+# l6YRysaPfQ==
 # SIG # End signature block

@@ -6,7 +6,7 @@ Offline contract and dependency tests for the inactive CMDB integration candidat
 Reads repository contracts, merges jobs in memory and calls the real pipeline
 selector. No tenant configuration, API, submission, scheduling or file write.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -59,7 +59,10 @@ Test-Case 'All 17 native producers have exactly one dependency' {
         Assert-True (@($dependencies | Where-Object { [IO.Path]::GetFileName($_.ScriptPath) -eq $producer.Script }).Count -eq 1) "Producer coverage: $($producer.Script)"
     }
     Assert-True ($prepare.DependsOn -contains 'EXO-Mailboxes-Inventory' -and $prepare.DependsOn -notcontains 'EXO-Mailboxes-Permissions') 'Permissions-only used for mailbox acquisition.'
-    Assert-True ($prepare.DependencyMode -eq 'FreshSuccess' -and $prepare.DependencyMaxAgeHours -eq 48) 'Freshness weakened.'
+    Assert-True ($prepare.DependencyMode -eq 'FreshSuccess' -and $prepare.DependencyMaxAgeHours -eq 240) 'Weekly Apps scheduler gate differs.'
+    $contract=Get-Content -LiteralPath (Join-Path $inventoryRoot 'PreparedEvidence/cmdb-prepared-contract.json.txt') -Raw | ConvertFrom-Json
+    Assert-True ($contract.maxAgeHours -eq 48 -and $contract.maxCollectionSpanHours -eq 48) 'Core acquisition gates weakened.'
+    Assert-True ($contract.freshnessGroups.Count -eq 1 -and $contract.freshnessGroups[0].maxAgeHours -eq 240 -and $contract.freshnessGroups[0].warningAgeHours -eq 168) 'Apps acquisition gates differ.'
 }
 Test-Case 'Real selector rejects disabled CMDB candidate' {
     $rejected = $false
@@ -107,8 +110,8 @@ Write-Output "CMDB integration candidate tests: $testCount passed. No requests o
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMOh6WNrylPN1h
-# N8A5X+3w5T1f7VASO/FoGA9FqCHoPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB9ZjHWDYR23wH
+# SPK0CQcFi+w1gED8807x8tNxhWkKiqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -241,31 +244,31 @@ Write-Output "CMDB integration candidate tests: $testCount passed. No requests o
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMlSLzPMMAfwTjJ2gZ6Q4ZjhJscFH7SrSQU+ICOrPhZJMA0GCSqG
-# SIb3DQEBAQUABIIBgB0VXlSWIWLTiuEgyxyGyz7qOhGrRI9rjEWQvQGviwyrRNnA
-# hEQ6lqp7S78l7qx0ah6DgNGlOgrzS1/Abt5poyghWsvyqEDznZAa5uv1dgcsp+QD
-# 4U/iuqzWaTxq7uvK4q8n8CA2Zgf7QyRSOHiBreVW7hXHXD37QGThwuGiLZQF8HS9
-# WgTvtAPiEEksCKTijMvvxFl6sh7+O5SeQLiCx9a0Ho2D3enHCxKjRWGSs1nwYY6k
-# +zwKMNPwaL3rJd2BluFLaV6XOwqIUhaMGX1fafs7L2SoSZdLu6nuij/F58G1NZ6Z
-# JpqQUO6KSaI99hpK1Go/e/j6kxHAzaqlf4rilbXP36SBrOBG+UvXqF5f5BxAsvLE
-# k99ODZ94cIQrLTYufBy9VUhBe4vdkYDLx0D3Kj9sewjCovUnTRIdIxdyx+OjEa6E
-# ayFAz2tTcXeCn8PmEQ5bfmNRjjRvp/DlKVFKWSlz17+rKib+DN54AgVhv6zl8w8n
-# sKwHO9gWKhsagmcW3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHQa+yaKCekUFZaslRuSziPPIn7SXIzRvEAo6hUyjZQfMA0GCSqG
+# SIb3DQEBAQUABIIBgCWFh4U4QMfedxFfnajZ8PoSSe7uVyj7PqpJzFA+Jgm1+zjb
+# 97WCZ2/yNxiAdklr2bm3xTh4y+UZcT6dAL9toTdvm2+q0Zcg1cKxHSadkuLvQe1R
+# /5q5ACwgXvwAirR9oC98I6fzxc+380lTyxqZ4ekVvtq7nRSPOD7XGY+t6rZrJpTd
+# XFBUU0+zSjkhkh0QN7oK4ii3i7pHDbvcn9WAysesYjsfFCO3T+OaTVRfInYR5AgP
+# H2yN316cGxnj0TkTvAFi1MC41w5yAXemxZppnX70WsN3BiIzmN5k2FXYa24T0Tq8
+# cBGuBOtuFUQOs/rs8B05DiiXAf34IXCKHHZgietRUMnSqlKxJpYNzMLU4M76Xl8h
+# V2n+JI8JR9TVHjs4BHB6Ods+BjRgTTz2wIdUGcUVMlqlQsAaSpLXpYtPB5/C3pN5
+# Q/mjGu89WURruhGdtOKkDdTx4ZekUU3ka1WC/dCjtVd/dti1EK74L6eDGPd4QLXc
+# ssmfA3OSAjudUzGNt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwNjU3
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAapp/+Q1IBLvVwQBE+bs+yfifwFKFNVFbAxRVp
-# YlIq2TANBgkqhkiG9w0BAQEFAASCAgCrqzEHrXgAHr9YQQDG8iAE12qP1XEuwzs5
-# GOXaxStfy4850JKsgHqBiH/sL3YfDUxT58ldcq6zjfKVpEkA8/F0txAATWZzWG6o
-# tFK/ubI1mSVNu9AHtc/zDzGYjWgaXrhM+SZDtKzYOKWBzx0YdalpNjLCfN/9klNW
-# a6KZnKurh5JD+g4gn3qltSWM7md9VowWK4kPKMA8Bj5CAt/CqUm5WBtn4gyw3qpt
-# ZnDEV2lwL2AKbSWSdF/4wJAvqireDmfZF9BEj0kdnmtgJL3j4eiXy79kmq3YTVCH
-# WWVc14icJt7nCZbjpwLFcB2vnfWdsGifBdc79N5uNjkDgwLoyzUpaXqW7isnUEwW
-# 4zCCfhX+47IE9+4L0cWiS6GSKJfQx5PYJ/9VTr/nVCtI7ujl0MTsP6Ty3dLcOhxV
-# 9ITgMIadxHFY/hP/XzJpPcdheTGqDKvyh43wSPc2BMbqcQzJ/W6KS24laCUBYMYD
-# tPdvN7A54u5k/l+G0XLCNXmdwSRJ7fEg+yfLKdmaeKBL8kdcLEvi5aBkXX4zAIkb
-# f/ydoUuPCLsqdsAxjedcGYy7TUtt+AdrgqMo/q4toQ3Ugm4tyP/l/0vnDnKX5zRS
-# w2FAqbxag8gq8UhJ9hYWsa/aQ1YZ6s8G692E+XJg9UMf0wBpo3xzVxQOsIkAjw2/
-# 6zqsgSXf4Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUyMDA4
+# NDlaMC8GCSqGSIb3DQEJBDEiBCBOFeNeahLFtEIp1iSj/nfEUWJO5Gxf8e2LO44Z
+# y6OjiTANBgkqhkiG9w0BAQEFAASCAgA14+cWgqO8h0FG+anUGvlR3KHEXTqnYpaS
+# SExS+A/qhy0k4ExvgLGPOArjQMtdyBw4JQcQ1NxoBlqgOPxL9oIFyJdrZDioJbOB
+# elqR8NAIK1DP5e1E/hPYbPk1HiSGYOwOjBAn+PZeZvjC8/SD0sSQ856Ei9BcuUSr
+# KPMPZzqxajS2DuvRbnBiTXydQsO+A/sIhBbJyiP9v47fn59lMUgl8uE7fX3W2J8H
+# 1fXx8OkEiQyjlDIvUva759vz6n8DiyFQ8GJFGoqh5ETXshsBncDshhTN2JcA4FEE
+# 3LmTvg5kTHEcr/oYOly5l+YddvAkg4BCAVkWA03rssC0aItJnikDCYaAfa785pM9
+# vuOKPS6qHPMpoPrGabnhbhUVRAtq2yVzgMURPPfta0cOdXcjzVkrKty4+IbPEKRt
+# nk49gU12losJGjmj63TOqM0XqMhiAFHZztbEtWpSSIaqeVXJ5PTMpMVwCtPr5xlB
+# RvTrM2IFx9wc2rMMMGEkfyUr7CYLVoOZQt0zKtmlAZzJ20vz4VRVCh4w9NFdq9XW
+# GDHmnhAlaKlaBPzKoZmgr3HvFI1Wu3lOVtBeb3F4Frg0X3dc56MZGs3OohCWe8ks
+# pb37KIO37DhYk5sENkA92i8qEm3lgwQlr3qtkBJ2IbWOraa+7LvIdAT36HtvlCSP
+# U9XAE4qjMw==
 # SIG # End signature block
