@@ -69,6 +69,11 @@ its selectors immediately before launch and asks for confirmation when a selecte
 scan is older than an available one. The launch log records the exact source and
 target CSV paths. Both columns offer scan history comparison for Source or Target;
 select a previous and current scan of the same kind and endpoint.
+Comparison badges use `today` and `yesterday`, like scan badges, followed by
+the matching percentage. Source-versus-target **Run** requires both selected
+scans to exist without an `-Errors.csv` sidecar; a disabled comparison displays
+the missing or incomplete scan reason. History **Compare** requires two different
+completed scans on the selected side. Existing comparison reports remain accessible.
 
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
@@ -483,7 +488,7 @@ analysis of that exact input is restored when the source SHA256 still matches;
 older analyses without a fingerprint are labelled as date-based evidence.
 The farm Run button requires a SHA256-verified analysis; reanalyze a legacy
 report before using its access peaks.
-This phase only reads report files; it
+Analysis uses local report files; it
 does not import the ShareGate module, connect to a site, precheck, or retry a
 migration. The analysis runs in a child PowerShell process so the GUI remains
 responsive. Shared GUI activity logs record the operator and the analysis
@@ -493,7 +498,14 @@ lists every file, its selection status, detected session IDs, and the installed
 `ImportExcel` version. With ImportExcel available, a same-name XLSX is masked
 only after its row count and row identity columns match the CSV. The remaining
 cells may differ between export formats; the CSV remains the selected evidence.
-XLSX-only analysis needs the optional `ImportExcel` module. Report rows from different
+XLSX analysis automatically installs `ImportExcel` from the official PSGallery
+for the current user when missing, then imports and verifies its commands.
+The GUI keeps **Analyze latest report** available for XLSX and displays the
+installation phase while the child process works. Installation errors stop
+analysis and show an actionable message; no partial CSV-only analysis is
+silently substituted. `DryRun` never installs a module or registers a repository.
+PowerShell's execution policy and permanent repository trust settings are preserved.
+Report rows from different
 files are deduplicated by session and row ID; conflicting duplicates are
 counted and flagged for review. A session selector can restrict a new analysis
 to one session.

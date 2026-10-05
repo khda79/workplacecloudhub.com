@@ -2,7 +2,7 @@
 .SYNOPSIS
     Analyze local ShareGate migration reports without connecting to ShareGate.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -28,6 +28,19 @@ $toolRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Provid
 $analyzer = Join-Path $PSScriptRoot 'analyze_sharegate_reports.py'
 $activityHelper = Join-Path $toolRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1'
 if ($ActivityPath) { . $activityHelper }
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ImportExcel.ps1')
+
+function Write-DiagnosticPhase {
+    param([string]$State, [string]$Message)
+    foreach ($line in ($Message -split '\r?\n')) {
+        Microsoft.PowerShell.Utility\Write-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $line)
+    }
+    if ($OutputDirectory -and -not $DryRun) {
+        [void](New-Item -ItemType Directory -Path $OutputDirectory -Force)
+        @{ State=$State; Message=$Message; UpdatedUtc=[DateTimeOffset]::UtcNow.ToString('o') } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory 'analysis.phase.json.txt') -Encoding utf8
+    }
+}
 
 function Write-DiagnosticEvent {
     param([string]$Status, [int]$ExitCode, [string]$Detail)
@@ -68,7 +81,10 @@ try {
     $allXlsxFiles = @($files | Where-Object Extension -EQ '.xlsx' | Sort-Object FullName)
     $xlsxFiles = @($allXlsxFiles | Where-Object { $name = $_.BaseName; -not @($csvFiles | Where-Object BaseName -EQ $name).Count })
     if ($files.Count -eq 0) { throw 'No CSV or XLSX reports were found.' }
-    $excelModule = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+    $excelModule = if ($allXlsxFiles.Count) {
+        Initialize-SmartM365ImportExcel -DryRun:$DryRun -Progress { param($state,$message) Write-DiagnosticPhase $state $message }
+    } else { $null }
+    if (-not $DryRun) { Write-DiagnosticPhase 'InspectingReports' 'Inspecting the selected ShareGate report…' }
     $inventory = [System.Collections.Generic.List[object]]::new()
     $sessions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($file in $csvFiles) {
@@ -105,7 +121,7 @@ try {
             catch { $inventory.Add([pscustomobject]@{ File=$file.FullName; Status='Error'; Reason=$_.Exception.Message; Sessions=@() }) }
         }
         elseif (-not $excelModule) {
-            $inventory.Add([pscustomobject]@{ File=$file.FullName; Status='Skipped - ImportExcel not installed'; Reason='XLSX conversion requires ImportExcel.'; Sessions=@() })
+            $inventory.Add([pscustomobject]@{ File=$file.FullName; Status='Requires ImportExcel'; Reason='ImportExcel will be installed automatically for analysis; DryRun does not install it.'; Sessions=@() })
         }
         elseif ($DryRun) {
             try {
@@ -124,7 +140,7 @@ try {
     $usedXlsx = @($inventory | Where-Object { $_.Status -eq 'Used' -and $_.File -like '*.xlsx' })
     $errors = @($inventory | Where-Object Status -EQ 'Error')
     if ($errors.Count -and -not $DryRun) { throw ('Input validation failed: ' + (($errors | ForEach-Object { $_.File + ': ' + $_.Reason }) -join '; ')) }
-    if (-not $usedCsv.Count -and -not $usedXlsx.Count) { throw 'No usable CSV or XLSX report was found.' }
+    if (-not $usedCsv.Count -and -not $usedXlsx.Count -and -not ($DryRun -and $allXlsxFiles.Count)) { throw 'No usable CSV or XLSX report was found.' }
     if ($DryRun) {
         $moduleLabel = if ($excelModule) { "present v$($excelModule.Version)" } else { 'not installed' }
         Write-Output "DryRun: project=$project; input=$($inputItem.FullName); found CSV=$($csvFiles.Count), XLSX=$($allXlsxFiles.Count); used CSV=$($usedCsv.Count), XLSX=$($usedXlsx.Count); ImportExcel=$moduleLabel"
@@ -147,8 +163,7 @@ try {
     }
     if ($xlsxFiles.Count -gt 0) {
         if (-not $excelModule) {
-            if ($inputs.Count -eq 0) { throw 'ImportExcel is required when only XLSX reports are available.' }
-            Write-Output "ImportExcel is not installed; $($xlsxFiles.Count) XLSX report(s) were skipped."
+            throw 'ImportExcel preparation did not complete; XLSX reports cannot be analyzed.'
         }
         else {
             Import-Module ImportExcel -ErrorAction Stop
@@ -174,6 +189,7 @@ try {
         $arguments.Add('--source-label'); $arguments.Add($sourceLabels[$index])
     }
     if ($SessionId) { $arguments.Add('--session'); $arguments.Add($SessionId) }
+    Write-DiagnosticPhase 'AnalyzingReports' 'Analyzing the ShareGate report and generating the HTML summary…'
     Write-DiagnosticEvent -Status 'Running' -ExitCode 0 -Detail "Analyzing $($inputs.Count) local report(s); output=$OutputDirectory"
     $analyzerOutput = @(& $python $arguments.ToArray())
     $code = $LASTEXITCODE
@@ -182,10 +198,12 @@ try {
     $summary = Get-Content -LiteralPath (Join-Path $OutputDirectory 'Summary.json.txt') -Raw | ConvertFrom-Json -AsHashtable
     $unknown = @($summary.Patterns | Where-Object RuleId -EQ 'UNKNOWN').Count
     Write-Output ("Summary: lines={0}; distinct items={1}; Success={2}; Warning={3}; Error={4}; To fix={5}; Accepted={6}; residual lines={7}%; residual items={8}%; Unknown patterns={9}" -f $summary.Lines, $summary.DistinctItems, [int]$summary.LineStatus['Success'], [int]$summary.LineStatus['Warning'], [int]$summary.LineStatus['Error'], [int]$summary.IssueLineState['To fix'], [int]$summary.IssueLineState['Accepted'], $summary.ResidualLineRate, $summary.ResidualItemRate, $unknown)
+    Write-DiagnosticPhase 'Completed' 'ShareGate report analysis completed.'
     Write-Output $summary.ReportPath
     Write-DiagnosticEvent -Status 'Succeeded' -ExitCode 0 -Detail "ShareGate report analysis completed; output=$OutputDirectory"
 }
 catch {
+    Write-DiagnosticPhase 'Failed' $_.Exception.Message
     Write-DiagnosticEvent -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message
     [Console]::Error.WriteLine($_.Exception.Message)
     $script:ConsoleLifecycleStatus = 'FAILED'
@@ -206,8 +224,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATXb6NCddYfk5z
-# fAtC3rfVVNeRg6DIkWPd/T8LoH7JYqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiWcOhshRUAFHt
+# nNRX3SfEeFDA6nYG7Odb2echVcYuH6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -237,14 +255,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDobAbbRM2GBuG80Q2YBOI9
-# 5nFtMEFjL7Dx+6aZh4TPjzANBgkqhkiG9w0BAQEFAASCAYA7HF/8Xu9FJxWyl/dE
-# rNA86Tz5LW8S7AlzlW5u/AwuZ5p78XacxR9IbPCGiZeOG7Oy+VcVchhfdsMRjjh8
-# m4fMalpMTCrvdgdG2Y+/Ih2qmj9DNv87ms8vFxUW9wYHPtlsXDwNk/+NBb0ttfJk
-# w75Kpnu+2jiyquEOrWG8UB2YbInhrsqoXDitGZlw88hygUGBt+wQD5FFu+5Lp9bX
-# dJ3WvHnnYxz7WrTqpghLR1LyvbPKGoxLbRXQdAsRgr9gG3rQEBCyq6uo8OvRbuK1
-# Tql8ZYWZD5gR+vjlQQrrP2/O6V24xL5FNyzQU+eA4qtAQ5AsH/gCAxtK8M4VHVMa
-# bJwMSDN7MJ7hCE77UieFwFUn51R7vTUlhh+GkjLO8cDuFRaF4TO39FVVrvFRvP3f
-# cyBEEju+9N9zXCcO3/T1E/lGGK5FGkrvXZqPfL3uBZYoATq7/Hkm/Tt99viRDY/V
-# M7kDpGxn9tJOjnB4bcNGhvIBJ2lgQCc5hwT+Tl8n3HREkm8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC0EvmVfhD/mOxqKVcUKU8V
+# ZxsCG65J0CJoOkO87CKFVzANBgkqhkiG9w0BAQEFAASCAYBKNztrZRdP+GWp0Jaf
+# 5ugYVY4xcZ6jXFCi/Ln0WYngwKQm5XaVj7j6cDQ4o7zFm5yRDis4muewNLHBhfE3
+# sH5kQxT7XX7CurM8PwEr1SNsUBsJ1MgYD346KIqHNKMWQB/MZpSPHWF6eVUbwQTb
+# k9KnJh3mCU4k5i6YSEs52D7qjJRPTo7UuP0ICNOqh063arJNVSUy8oXhvuajdVQ9
+# lIDgkwhM7uAA1BdffYOFEwol7X+OMDHWwA1xN+dwK36gckrOt+x/qU0kSHT0/8G3
+# wq3Nz5hXYmHRroIgA/Ahiar3Xd7FA2yIk+AA0FJdSU4B+i9Re2TRpW0D070tHBv6
+# gIu5qxsWe/pY9lPdhGXNxbizE0AjmSLlUrmE89GYmxNYxlc7rmJ59z1o0tVh10wL
+# YGKu85CKCxR9DJ46aqfiCJmsjC3xKqJi63fuX3qTdC7+njl4I0dVMCNo1T0wEGmw
+# txp8pe3Z+DkkFp1aqpQWGkMYIomu63J6sR+/OJKWzxBWk04=
 # SIG # End signature block

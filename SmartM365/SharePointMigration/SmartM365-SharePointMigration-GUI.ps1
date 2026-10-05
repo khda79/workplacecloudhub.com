@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.49
+    1.0.51
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.49'
+$script:AppVersion = '1.0.51'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -143,7 +143,7 @@ function Get-ComparisonBadgeText {
     $rate = if ($comparison -and $comparison.Source -gt 0 -and ($comparison.Target -gt 0 -or $verifiedEmptyTarget)) {
         '{0:N2} %' -f ([double]$comparison.Matched / [double]$comparison.Source * 100)
     } else { 'Rate unavailable' }
-    return ('{0:yyyy-MM-dd HH:mm} · {1}' -f $date, $rate)
+    return ('{0} · {1}' -f (Format-RunAgeText -Date $date), $rate)
 }
 function Get-MigrationEndpointType {
     param($Config, [string]$Side)
@@ -246,23 +246,23 @@ function Get-MigrationOperations {
     return $results.ToArray()
 }
 
+function Format-RunAgeText {
+    param([datetime]$Date, [datetime]$Now = (Get-Date))
+    $age = $Now - $Date
+    $dayOffset = ($Now.Date - $Date.Date).Days
+    if ($dayOffset -eq 0 -and $age.TotalMinutes -ge 0 -and $age.TotalMinutes -lt 90) {
+        return ('{0:HH:mm} today ({1:n0} min ago)' -f $Date, [int]$age.TotalMinutes)
+    } elseif ($dayOffset -eq 0) {
+        return ('{0:HH:mm} today' -f $Date)
+    } elseif ($dayOffset -eq 1) {
+        return ('{0:HH:mm} yesterday' -f $Date)
+    }
+    return ('{0:yyyy-MM-dd HH:mm}' -f $Date)
+}
 function Format-ItemAge {
     param([System.IO.FileSystemInfo]$Item)
     if ($null -eq $Item) { return [pscustomobject]@{ Text = 'No run yet'; HasRun = $false } }
-
-    $now = Get-Date
-    $age = $now - $Item.LastWriteTime
-    $dayOffset = ($now.Date - $Item.LastWriteTime.Date).Days
-    $text = if ($dayOffset -eq 0 -and $age.TotalMinutes -lt 90) {
-        '{0:HH:mm} today ({1:n0} min ago)' -f $Item.LastWriteTime, [int]$age.TotalMinutes
-    } elseif ($dayOffset -eq 0) {
-        '{0:HH:mm} today' -f $Item.LastWriteTime
-    } elseif ($dayOffset -eq 1) {
-        '{0:HH:mm} yesterday' -f $Item.LastWriteTime
-    } else {
-        '{0:yyyy-MM-dd HH:mm}' -f $Item.LastWriteTime
-    }
-    return [pscustomobject]@{ Text = $text; HasRun = $true }
+    return [pscustomobject]@{ Text = (Format-RunAgeText -Date $Item.LastWriteTime); HasRun = $true }
 }
 
 function Open-InExplorer {
@@ -727,13 +727,14 @@ function Open-InExplorer {
                   </Border>
                   <TextBlock Grid.Column="1" x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
+                <TextBlock x:Name="lblCmpFilesAvailability" FontSize="11" Foreground="#8A5E00" Margin="0,4,8,0" TextWrapping="Wrap" Visibility="Collapsed"/>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpFiles" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnReportCmpFiles" Content="HTML report" Style="{StaticResource BtnGhost}"
                         Width="88" Margin="0,0,6,0" Visibility="Collapsed"/>
-                <Button x:Name="btnRunCmpFiles"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
+                <Button x:Name="btnRunCmpFiles" Content="Run" Style="{StaticResource Btn}" Width="55" IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
               </StackPanel>
             </Grid>
           </Border>
@@ -771,7 +772,7 @@ function Open-InExplorer {
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenHistory" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
-                <Button x:Name="btnRunHistory"  Content="Compare"  Style="{StaticResource Btn}" Width="70"/>
+                <Button x:Name="btnRunHistory" Content="Compare" Style="{StaticResource Btn}" Width="70" IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
               </StackPanel>
             </Grid>
           </Border>
@@ -871,13 +872,14 @@ function Open-InExplorer {
                   </Border>
                   <TextBlock Grid.Column="1" x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
+                <TextBlock x:Name="lblCmpPermsAvailability" FontSize="11" Foreground="#8A5E00" Margin="0,4,8,0" TextWrapping="Wrap" Visibility="Collapsed"/>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpPerms" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnReportCmpPerms" Content="HTML report" Style="{StaticResource BtnGhost}"
                         Width="88" Margin="0,0,6,0" Visibility="Collapsed"/>
-                <Button x:Name="btnRunCmpPerms"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
+                <Button x:Name="btnRunCmpPerms" Content="Run" Style="{StaticResource Btn}" Width="55" IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
               </StackPanel>
             </Grid>
           </Border>
@@ -915,7 +917,7 @@ function Open-InExplorer {
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenPermHistory" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
-                <Button x:Name="btnRunPermHistory" Content="Compare" Style="{StaticResource Btn}" Width="70"/>
+                <Button x:Name="btnRunPermHistory" Content="Compare" Style="{StaticResource Btn}" Width="70" IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
               </StackPanel>
             </Grid>
           </Border>
@@ -1513,6 +1515,7 @@ $lblCmpFilesDir = ctrl 'lblCmpFilesDir'
 $btnOpenCmpFiles= ctrl 'btnOpenCmpFiles'
 $btnReportCmpFiles = ctrl 'btnReportCmpFiles'
 $btnRunCmpFiles = ctrl 'btnRunCmpFiles'
+$lblCmpFilesAvailability = ctrl 'lblCmpFilesAvailability'
 
 $badgeHistory  = ctrl 'badgeHistory'
 $lblHistoryAge = ctrl 'lblHistoryAge'
@@ -1541,6 +1544,7 @@ $lblCmpPermsDir = ctrl 'lblCmpPermsDir'
 $btnOpenCmpPerms= ctrl 'btnOpenCmpPerms'
 $btnReportCmpPerms = ctrl 'btnReportCmpPerms'
 $btnRunCmpPerms = ctrl 'btnRunCmpPerms'
+$lblCmpPermsAvailability = ctrl 'lblCmpPermsAvailability'
 $badgePermHistory = ctrl 'badgePermHistory'
 $lblPermHistoryAge = ctrl 'lblPermHistoryAge'
 $cmbPermHistorySide = ctrl 'cmbPermHistorySide'
@@ -1798,6 +1802,45 @@ function Get-SelectedScanFile {
     return $ComboBox.SelectedItem.File
 }
 
+function Get-ComparisonRunState {
+    param([System.IO.FileInfo]$FirstCsv, [System.IO.FileInfo]$SecondCsv, [switch]$History)
+    $issues = [System.Collections.Generic.List[string]]::new()
+    $labels = if ($History) { @('Previous', 'Current') } else { @('Source', 'Target') }
+    $files = @($FirstCsv, $SecondCsv)
+    for ($i = 0; $i -lt 2; $i++) {
+        $file = $files[$i]
+        if ($null -eq $file) {
+            $issues.Add("$($labels[$i]) scan unavailable (missing or incomplete).")
+        }
+        elseif (-not (Test-Path -LiteralPath $file.FullName -PathType Leaf)) {
+            $issues.Add("$($labels[$i]) scan file is no longer available.")
+        }
+        elseif (-not (Test-SmartM365InventoryCsvComplete -File $file)) {
+            $issues.Add("$($labels[$i]) scan is incomplete: an Errors.csv file is present.")
+        }
+    }
+    if ($History -and $FirstCsv -and $SecondCsv -and
+        [string]::Equals($FirstCsv.FullName, $SecondCsv.FullName, [StringComparison]::OrdinalIgnoreCase)) {
+        $issues.Add('Select two different completed scans.')
+    }
+    $reason = $issues -join ' '
+    if ($issues.Count -gt 0 -and -not $History) { $reason += ' Run the missing or incomplete scan successfully before comparing.' }
+    return [pscustomobject]@{ Ready = ($issues.Count -eq 0); Reason = $reason }
+}
+
+function Update-ComparisonRunState {
+    foreach ($controls in @(
+        @{ Source=$cmbScanSrcFile; Target=$cmbScanTgtFile; Button=$btnRunCmpFiles; Label=$lblCmpFilesAvailability },
+        @{ Source=$cmbScanSrcPermFile; Target=$cmbScanTgtPermFile; Button=$btnRunCmpPerms; Label=$lblCmpPermsAvailability }
+    )) {
+        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $controls.Source) -SecondCsv (Get-SelectedScanFile $controls.Target)
+        $controls.Button.IsEnabled = $state.Ready
+        $controls.Button.ToolTip = if ($state.Ready) { 'Compare the selected completed source and target scans.' } else { $state.Reason }
+        $controls.Label.Text = $state.Reason
+        $controls.Label.Visibility = if ($state.Ready) { 'Collapsed' } else { 'Visible' }
+    }
+}
+
 function Update-ScanFileSelection {
     param(
         [System.Windows.Controls.ComboBox]$ComboBox,
@@ -1811,6 +1854,7 @@ function Update-ScanFileSelection {
     Set-Badge $Badge $Label $age.Text $age.HasRun
     $OpenButton.Visibility = if ($selectedFile) { 'Visible' } else { 'Collapsed' }
     if ($selectedFile) { $OpenButton.Tag = (Split-Path $selectedFile.FullName -Parent) }
+    Update-ComparisonRunState
 }
 function Get-HistorySide {
     param([System.Windows.Controls.ComboBox]$ComboBox = $cmbHistorySide)
@@ -1860,7 +1904,9 @@ function Set-HistoryComboItems {
 function Update-HistoryRunState {
     $oldCsv = Get-SelectedScanFile -ComboBox $cmbHistoryOldFile
     $newCsv = Get-SelectedScanFile -ComboBox $cmbHistoryNewFile
-    $btnRunHistory.IsEnabled = ($oldCsv -and $newCsv -and $oldCsv.FullName -ne $newCsv.FullName)
+    $state = Get-ComparisonRunState -FirstCsv $oldCsv -SecondCsv $newCsv -History
+    $btnRunHistory.IsEnabled = $state.Ready
+    $btnRunHistory.ToolTip = $state.Reason
 }
 
 function Update-HistoryScanSelection {
@@ -1875,7 +1921,9 @@ function Update-HistoryScanSelection {
 function Update-PermissionHistoryRunState {
     $oldCsv = Get-SelectedScanFile -ComboBox $cmbPermHistoryOldFile
     $newCsv = Get-SelectedScanFile -ComboBox $cmbPermHistoryNewFile
-    $btnRunPermHistory.IsEnabled = ($oldCsv -and $newCsv -and $oldCsv.FullName -ne $newCsv.FullName)
+    $state = Get-ComparisonRunState -FirstCsv $oldCsv -SecondCsv $newCsv -History
+    $btnRunPermHistory.IsEnabled = $state.Ready
+    $btnRunPermHistory.ToolTip = $state.Reason
 }
 
 function Update-PermissionHistoryScanSelection {
@@ -1951,6 +1999,15 @@ function Invoke-MigrationAction {
             return
         }
 
+        $sourceCombo = if ($permissions) { $cmbScanSrcPermFile } else { $cmbScanSrcFile }
+        $targetCombo = if ($permissions) { $cmbScanTgtPermFile } else { $cmbScanTgtFile }
+        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $sourceCombo) -SecondCsv (Get-SelectedScanFile $targetCombo)
+        Update-ComparisonRunState
+        if (-not $state.Ready) {
+            [System.Windows.MessageBox]::Show($state.Reason, $script:AppName, 'OK', 'Warning') | Out-Null
+            return
+        }
+
         $olderScans = [System.Collections.Generic.List[string]]::new()
         $pairs = if ($permissions) { @(
             @{ Side = 'Source'; ComboBox = $cmbScanSrcPermFile; Latest = $st.SourcePermCsv },
@@ -1972,6 +2029,17 @@ function Invoke-MigrationAction {
                 ("An older inventory is selected while a newer scan is available:`n{0}`n`nContinue with the selected inventory?" -f ($olderScans -join "`n")),
                 $script:AppName, 'YesNo', 'Warning')
             if ($answer -ne [System.Windows.MessageBoxResult]::Yes) { return }
+        }
+    }
+    if ($Action -in @('CompareScanHistory', 'ComparePermissionScanHistory')) {
+        $oldCombo = if ($Action -eq 'ComparePermissionScanHistory') { $cmbPermHistoryOldFile } else { $cmbHistoryOldFile }
+        $newCombo = if ($Action -eq 'ComparePermissionScanHistory') { $cmbPermHistoryNewFile } else { $cmbHistoryNewFile }
+        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $oldCombo) -SecondCsv (Get-SelectedScanFile $newCombo) -History
+        if (-not $state.Ready) {
+            Update-HistoryRunState
+            Update-PermissionHistoryRunState
+            [System.Windows.MessageBox]::Show($state.Reason, $script:AppName, 'OK', 'Warning') | Out-Null
+            return
         }
     }
     $launcher = Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiRun.ps1'
@@ -2959,17 +3027,17 @@ function Update-DiagnosticReportStatus {
         if ($script:DiagAnalysisVerified) {
             $lblDiagNextAction.Text = 'Review issue patterns and the cross-check below.'
         }
-        elseif (-not $btnDiagAnalyze.IsEnabled -and $report.Extension -eq '.xlsx') {
-            $lblDiagNextAction.Text = 'Install ImportExcel for the current user, then reanalyze to verify this report by SHA256.'
+        elseif ($report.Extension -eq '.xlsx') {
+            $lblDiagNextAction.Text = 'Reanalyze to verify this report by SHA256. ImportExcel installs automatically if needed.'
         }
         else {
             $lblDiagNextAction.Text = 'Reanalyze this report to verify it by SHA256, then review the findings.'
         }
     }
-    elseif (-not $btnDiagAnalyze.IsEnabled -and $report.Extension -eq '.xlsx') {
-        $lblDiagAnalysisState.Text = 'Blocked'
-        $lblDiagAnalysisEvidence.Text = 'ImportExcel is missing'
-        $lblDiagNextAction.Text = 'Install ImportExcel for the current user, then click Refresh reports.'
+    elseif ($report.Extension -eq '.xlsx') {
+        $lblDiagAnalysisState.Text = 'Ready to analyze'
+        $lblDiagAnalysisEvidence.Text = 'XLSX support prepared automatically'
+        $lblDiagNextAction.Text = 'Click Analyze latest report. ImportExcel installs automatically for the current user if needed.'
     }
     else {
         $lblDiagAnalysisState.Text = 'Not analyzed'
@@ -3153,7 +3221,7 @@ function Refresh-DiagnosticReportState {
     Clear-DiagnosticResult
     $lblDiagLatestReport.ToolTip = if ($report) { $report.FullName } else { $folder }
     $isRunning = $script:DiagProcess -and -not $script:DiagProcess.HasExited
-    $btnDiagAnalyze.IsEnabled = [bool]($report -and -not $isRunning -and ($report.Extension -eq '.csv' -or (Get-Module -ListAvailable -Name ImportExcel)))
+    $btnDiagAnalyze.IsEnabled = [bool]($report -and -not $isRunning)
     if (-not $report) {
         $lblDiagLatestReport.Text = 'No ShareGate report found. Place the latest migration report (CSV or XLSX) in MigrationReport, then click Refresh reports.'
         $lblDiagProgress.Text = 'Analysis unavailable until a report is deposited.'
@@ -3171,8 +3239,8 @@ function Refresh-DiagnosticReportState {
         $session = if ($cached.Session) { " | session $($cached.Session)" } else { '' }
         $lblDiagProgress.Text = "Existing analysis for latest report ($basis$session): $($cached.Generated) UTC."
     }
-    elseif (-not $btnDiagAnalyze.IsEnabled -and -not $isRunning) {
-        $lblDiagProgress.Text = 'XLSX analysis requires the ImportExcel module in the current user context.'
+    elseif ($report.Extension -eq '.xlsx' -and -not $isRunning) {
+        $lblDiagProgress.Text = 'Ready to analyze XLSX. ImportExcel installs automatically for the current user if needed.'
     }
     else { $lblDiagProgress.Text = 'Latest report has not been analyzed yet. Analyze it to create an HTML report and summary.' }
     Update-DiagnosticReportStatus
@@ -3405,6 +3473,21 @@ function Load-DiagnosticResult {
     Refresh-DiagnosticCrossCheck
 }
 
+function Update-DiagnosticAnalysisProgress {
+    if (-not $script:CurrentMigration -or $script:CurrentMigration.Root -ne $script:DiagProjectRoot) { return }
+    $path = Join-Path $script:DiagOutputDirectory 'analysis.phase.json.txt'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    try {
+        $phase = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if (-not $phase.Message) { return }
+        $lblDiagProgress.Text = [string]$phase.Message
+        $lblDiagAnalysisState.Text = if ($phase.State -eq 'InstallingImportExcel') { 'Installing module' } else { 'Running' }
+        $lblDiagAnalysisEvidence.Text = if ($phase.State -eq 'InstallingImportExcel') { 'ImportExcel · CurrentUser · PSGallery' } else { 'Processing latest report' }
+        $lblDiagNextAction.Text = 'Wait for preparation and report analysis to finish.'
+    }
+    catch { } # A phase file can briefly be incomplete while the worker writes it.
+}
+
 function Start-DiagnosticAnalysis {
     if ($script:DiagProcess -and -not $script:DiagProcess.HasExited) { return }
     if (-not $script:CurrentMigration) { return }
@@ -3421,7 +3504,7 @@ function Start-DiagnosticAnalysis {
     try {
         New-Item -ItemType Directory -Path $output -Force | Out-Null
         $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration $script:CurrentMigration.Name -Action 'MigrationDiagnostics'
-        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$wrapper`"",
+        $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$wrapper`"",
             '-ProjectRoot', "`"$($script:CurrentMigration.Root)`"", '-InputPath', "`"$inputPath`"",
             '-OutputDirectory', "`"$output`"", '-ActivityPath', "`"$activity`"")
         $session = if ($cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
@@ -3433,7 +3516,7 @@ function Start-DiagnosticAnalysis {
         $script:DiagActivity = $activity
         $script:DiagProjectRoot = $script:CurrentMigration.Root
         $btnDiagAnalyze.IsEnabled = $false
-        $lblDiagProgress.Text = "Analyzing local report files in $inputPath ..."
+        $lblDiagProgress.Text = if ($report.Extension -eq '.xlsx') { 'Preparing XLSX analysis; ImportExcel will be installed automatically if needed…' } else { "Analyzing local report files in $inputPath ..." }
         Update-DiagnosticReportStatus
         $script:DiagTimer.Start()
         Refresh-ActivityList
@@ -3581,7 +3664,8 @@ $script:ActivityRetentionTimer.Add_Tick({
 $script:DiagTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:DiagTimer.Interval = [TimeSpan]::FromSeconds(1)
 $script:DiagTimer.Add_Tick({
-    if (-not $script:DiagProcess -or -not $script:DiagProcess.HasExited) { return }
+    if (-not $script:DiagProcess) { return }
+    if (-not $script:DiagProcess.HasExited) { Update-DiagnosticAnalysisProgress; return }
     $script:DiagTimer.Stop()
     $code = $script:DiagProcess.ExitCode
     $script:DiagProcess.Dispose()
@@ -3652,9 +3736,7 @@ $script:CrossCheckTimer.Add_Tick({
     finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
     if (-not $isCurrent -and $tabDiagnostics.IsChecked) { Refresh-DiagnosticCrossCheck -Force }
 })
-if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
-    $lblDiagScope.Text = 'Analysis only. CSV is available; XLSX needs the optional ImportExcel module.'
-}
+$lblDiagScope.Text = 'Analysis only: no ShareGate connection or migration action. XLSX support installs automatically if needed.'
 try {
     $script:SessionActivity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
         -Migration '<gui>' -Action 'GuiSession'
@@ -3685,8 +3767,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaGytIzuINy2xt
-# IAKp7icmDY+92BM5ufHFz0+x/93SiKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNTSrXHYYBRYu/
+# 24X3P1PvCaUB96wxz1Ea1Z2oR56sTKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3716,14 +3798,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAqKwfoVDHS2AyEuQuxPlKR
-# dN+FFqEBSF7u6r/9DrBinTANBgkqhkiG9w0BAQEFAASCAYAqedsO6Jr3Vg7HDw9Z
-# dgHV2IkJcZ7HVcwkTOGGN/vSZX6d65kvRMt9VSPPjRzdqIj8Tx+0xu/vOrN3hSUA
-# 9ZtKWoCixrOSkI0TGbeoZ95d0tmmAXg6In2ZQjymTR9+Hy6F3pDcJ7YiIobX1aMa
-# kYoJ1OPjWz4k6pnW+D5IhRmkvE9h7eCbi7BIBRZgvoVRPS3sdK3yPyAovNHggYnN
-# ZKTha5xpsStbQCZQwDMNArptdPMkgp+gtdpU4Z8LkfzcQkLru/3JYxltdc1HJsSb
-# +IW+FNafE47E/KetAOyNm2undIF8dVz5k4Yff1fkYcTH3cjvtjc8hnQDWukt/i3O
-# ly1MueDLOrHtm4zBiOEQPiif86XHqprYet629xcGGY3qxYd1mB9gV3vqjXbK18vM
-# ligqqsM4Q5vednZ8Ut1kUsmN9O9qkUnLCxv7eeEGOSATXOpmJXF5zk4pxhT2Pi1Y
-# mUPACfeCXo3cAqa9Iz6OtNBRW/MBfP44W3LUpIwN8BjeItA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAFDZv22PvK3LV973Sc2lnM
+# NNffQrTU60CjpeTlxwhcHzANBgkqhkiG9w0BAQEFAASCAYBY3rfOvBnqf6dsRE2D
+# qKi95GAYpsi/Kj7dcp5/7uvyJw/hqMuJ9+0Smc4vHnrxlsHbhKOmXR2dMsnVpZ76
+# HC5sC05PVSMfwt+XXmDaxEvfSXWClpDRaxVkAYoGxjigrxJQGehx8zE5G15NIZjO
+# UBlsGkkzYMe4AUt1xRAm1VGcAkzBt+g1haU1e5II9YOnIdnlx8lmbJ5+WxzQQ5pu
+# Z6ula4dT60tyOJ2neBXfqYPTkDStj3fX1RWyXOSIDqDUggDqnfsTggrLk3C0bl4y
+# COFMFtb2kOdwOSp9h6lK9NX45RL9BZTpORQcUXF1rupxzSHs8yKHkmk7KeBBfi9a
+# icd7vtDIGxqvIVW/jD1JjEM0BNxCqer3WtWmVi1X2A2ZRp1xrEKaZ7pwcl3WTrM0
+# 8UUP7qDsVUzVI3jvcMdca0EjD8XoJKpG6rljHPD4+zVSU87a4IdReXTr3y3hkPQD
+# fGUXH65JtiDlC0KOM1MbnwutQofvnmwFE8Tg9hEJOKB3Ib0=
 # SIG # End signature block

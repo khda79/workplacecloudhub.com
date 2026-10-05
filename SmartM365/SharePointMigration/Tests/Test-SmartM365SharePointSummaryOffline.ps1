@@ -1,8 +1,8 @@
-﻿<#
+<#
 .SYNOPSIS
     Verify portfolio summary states without connecting to SharePoint.
 .VERSION
-    1.0.7
+    1.0.8
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +18,7 @@ $badgeFunction = $guiAst.Find({
 }, $true)
 if (-not $badgeFunction) { throw 'Comparison badge formatter is missing from the GUI.' }
 . ([scriptblock]::Create($badgeFunction.Extent.Text))
-foreach ($name in @('Get-LatestCsvFile', 'Get-CsvFileItems')) {
+foreach ($name in @('Get-LatestCsvFile', 'Get-CsvFileItems', 'Format-RunAgeText')) {
     $node = $guiAst.Find({
         param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name
     }, $true)
@@ -131,7 +131,7 @@ try {
         $row.ComparisonDisplay -ne "$($row.ComparisonDate) · $($row.ComparisonPercent)" -or
         $row.PermissionComparisonDisplay -ne '—') { throw 'Comparison findings or overview display were not identified.' }
     $fileBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $folder) -MigrationName 'Fixture' -Kind Files
-    if ($fileBadge -ne "$($row.ComparisonDate) · $($row.ComparisonPercent)") {
+    if ($fileBadge -notlike "* today* · $($row.ComparisonPercent)") {
         throw 'File comparison badge did not show the date and rate from the displayed report.'
     }
     $summary.MatchedKeys = 0
@@ -146,7 +146,7 @@ try {
         throw 'Verified empty target comparison must display a 0 percent file rate.'
     }
     $fileBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $folder) -MigrationName 'Fixture' -Kind Files
-    if ($fileBadge -ne "$($row.ComparisonDate) · $($row.ComparisonPercent)") {
+    if ($fileBadge -notlike "* today* · $($row.ComparisonPercent)") {
         throw 'Verified empty target comparison badge must show 0 percent.'
     }
     $summary.PSObject.Properties.Remove('TargetEmptyVerified')
@@ -214,7 +214,7 @@ try {
         throw 'Permission findings were not included in the combined status.'
     }
     $permissionBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $permissionFolder) -MigrationName 'Fixture' -Kind Permissions
-    if ($permissionBadge -ne "$($row.PermissionComparisonDate) · $($row.PermissionComparisonPercent)") {
+    if ($permissionBadge -notlike "* today* · $($row.PermissionComparisonPercent)") {
         throw 'Permission comparison badge did not show the date and rate from the displayed report.'
     }
 
@@ -263,8 +263,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDM/tgWt/TsiQsg
-# OiGThk4nyiT96FP5I6wX/92S1ev+96CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeZV4N8YcWNMXL
+# KYsNJGlSBQPwOWVEPFTnUnAmiZEStKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -294,14 +294,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC0AI84XRJjbnTbvhEL02eZ
-# Yg3jURepzlnVcZFxrUM7hzANBgkqhkiG9w0BAQEFAASCAYCYfXr2Es2GSbeBUUBV
-# VOml3eTMs10NPcrYUfhENkNFehygzjiQEYcxBK0HUylOoa1YZQJUPKnoT6NPeWWf
-# uIRSGzpa+OR3RDSwj1vHRWEkA3hgfFR3DD4SRWDR2m0m/VTGwt18JrUArUcU8EIv
-# 7o8hFQInimx+yQNaCYxqwaLZrZS/qFA+5u9DiV0gCQ4IejTxUxV8M8OkxUmWDpDl
-# 1B41yP4RBwU9PP+sQp2ZhkmbIsiNHoq3KgzUlEzmF8LlBDKFvEzkb5mWPAVA7ngl
-# WB6R90OgSd+BIJkyNjYwCVVn5fLXObxa1qDiH9Q3p20Ri03/uYyotixCFIBGn58m
-# Q51ZaAD3ZZMAvr95tbrBL3z913hXfo2sGZ81XQF6smMGwvPZzMaOQqvlX4pnooxd
-# 3kgQVp9EPeWJ3fanZUKLwkksY1slnLfD7MyQKx8B+YCy9c2lhi4Lo4bE4drxDcJB
-# edZNgS5tCPkkjmXTA9C38P36FbGm8fWVN0Lx/XdxaDcORn0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBjn5z99ZayQCmKNQ4XYYS0
+# x+v+msVPVgsKzORw8k9fSDANBgkqhkiG9w0BAQEFAASCAYAykeBqsxYrWiFNH1ES
+# ftuKIKDzIMG3Zec4mY4pze06ef6GTJKOTO+/X7gSguM+/BH9X9YdEBIUFyZp6bIm
+# MIGLeLnFu33MceX4e2nz0IiJJfuNtPemSjShWVRbueaFcfEtdJH8A8SFSxpkDL3O
+# gHR3IzsiEKRUGLy7HrrLQ/uRueu8p6q5U98jKlZXY6ZJ+8lbQvsCiTTLt7B+wCol
+# jSOuoSWi+LyDnMu1T0POISD9oDJn2AUUpOX1+bWIeyoTbvqb31Vil/GehNzcrg4S
+# CBSms+2JLI2Qx30KvXCgxYf3cVam9sS5QLUujeR66K3fLmlnDRd3BOe+UVnF/7yk
+# HJZgkJV1YmyO49j8dtZ2M75XpiMoSlIax5tdaZTvJAltkG17v3HQU94Y9nYUO34p
+# hNFv1PI+H+I5g4xUxRuAZwEgYGpNUh08YLpaPHLJlFhyfEqcOgS5M9DvVx9vuiRE
+# YzeTOrQ5hB+uTzXrPpCgFQuHHc1EdgxbeCT3hcZau65UzTA=
 # SIG # End signature block
