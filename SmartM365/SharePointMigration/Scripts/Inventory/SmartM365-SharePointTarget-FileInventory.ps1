@@ -39,7 +39,7 @@
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
 
 .VERSION
-    1.0.9
+    1.0.10
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -415,7 +415,7 @@ function Format-InventoryDuration {
         return ("{0}d {1:00}:{2:00}:{3:00}" -f $Elapsed.Days, $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
     }
 
-    return ("{0:00}:{1:00}:{2:00}" -f [int]$Elapsed.TotalHours, $Elapsed.Minutes, $Elapsed.Seconds)
+    return ("{0:00}:{1:00}:{2:00}" -f $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
 }
 
 function Write-InventoryHeaderOnlyCsv {
@@ -563,7 +563,7 @@ function Get-DocumentLibraries {
         [switch]$WriteSummary
     )
 
-    $lists = Get-PnPList -Includes BaseType,Hidden,Title,ItemCount,RootFolder,IsSystemList -Connection $Connection
+    $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes BaseType,Hidden,Title,ItemCount,RootFolder,IsSystemList -Connection $Connection -ErrorAction Stop }
     $totalDocumentLibraries = 0
     $selectedDocumentLibraries = 0
     $hiddenSkipped = 0
@@ -858,7 +858,7 @@ function Export-WebInventory {
     )
 
     $connection = Connect-SPOInventory -Url $Url
-    $web = Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection
+    $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection -ErrorAction Stop }
     if ([string]::IsNullOrWhiteSpace($SiteCollectionUrl)) {
         $SiteCollectionUrl = $Url
     }
@@ -896,6 +896,27 @@ function Export-WebInventory {
     }
 }
 
+function Write-SPOReadRetry { param([string]$Message) Write-Warning $Message }
+
+function Invoke-SPORead {
+    param([scriptblock]$Operation, [string]$Label, [int]$Attempts = 3)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            # Buffer each attempt so a partial response is never emitted twice.
+            $result = @(& $Operation)
+            return $result
+        }
+        catch {
+            $message = $_.Exception.ToString()
+            $transient = $message -match '(?i)HttpClient.Timeout|timed? out|timeout|\b429\b|\b503\b|TooManyRequests|temporarily unavailable|connection.*(closed|reset)'
+            if (-not $transient -or $attempt -eq $Attempts) { throw }
+            $delay = if ($attempt -eq 1) { 5 } else { 15 }
+            Write-SPOReadRetry -Message ("Retrying {0} after a transient read failure ({1}/{2}); waiting {3}s: {4}" -f $Label, $attempt, $Attempts, $delay, $_.Exception.Message)
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Get-WebUrlsFromSite {
     param(
         [string]$Url
@@ -915,11 +936,11 @@ function Get-WebUrlsFromSite {
 
         try {
             $connection = Connect-SPOInventory -Url $currentWebUrl
-            $web = Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection
+            $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection -ErrorAction Stop }
             $webUrls.Add($web.Url)
 
             try {
-                $subWebs = @(Get-PnPSubWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection)
+                $subWebs = @(Invoke-SPORead -Label 'subsites' -Operation { Get-PnPSubWeb -Includes Title,Url,ServerRelativeUrl -Connection $connection -ErrorAction Stop })
                 Write-Info -Color DarkCyan -Message ("  Subsites found under {0}: {1}" -f $web.Url, $subWebs.Count)
 
                 foreach ($subWeb in $subWebs) {
@@ -1010,7 +1031,7 @@ function Get-DefaultOutputPath {
         'Site' {
             try {
                 $connection = Connect-SPOInventory -Url $SiteUrl
-                $web = Get-PnPWeb -Includes Title,Url -Connection $connection
+                $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url -Connection $connection -ErrorAction Stop }
                 $targetName = $web.Title
             }
             catch {
@@ -1021,7 +1042,7 @@ function Get-DefaultOutputPath {
         'Web' {
             try {
                 $connection = Connect-SPOInventory -Url $WebUrl
-                $web = Get-PnPWeb -Includes Title,Url -Connection $connection
+                $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url -Connection $connection -ErrorAction Stop }
                 $targetName = $web.Title
             }
             catch {
@@ -1348,8 +1369,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIXg+2lOrge32V
-# 4axFTBUf6AyXB8n2WqmnwjQg04I3YKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDg2DT9P3wnyutc
+# NwSYWfyp94ym6L/4g4wlRjTMWICUYqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1379,14 +1400,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCWkb4PtKRurejqDxKLW4ax
-# 539n0d/s5AhNzKBM9jsNyjANBgkqhkiG9w0BAQEFAASCAYBdXbWZAEdhf0TwQmom
-# khEodSg5rFQv88tmeQy2YaJ1aTEPZr071kSCddDGjpn1SsCBhqrQ496JyENYt7Wr
-# sL52qKykM6uZuj/jxqLCri+2J/AI1k0vpatMc9O65zZpOG6SrDNOUVHZNGuqCGPr
-# nlElk02M8TQJcE0uTHtn0OipmkzYdikCSBF4ibX7DvbLjyHI2QjqaNJXHTXuZgVt
-# cBJ/HvkoeXOBLlcksL3UMNyfya0S4mKWZEXkzDwWejJSMrJSxpgzo30q+oGpIurk
-# 2n0i89AzDEr4ShkG/gJQfzEG9OnNbJUKJPCRNgNx4GGC+tpx3VwLCkVSvgVx3rO4
-# rB1bZKCNZCC45moHf3+BdeyLQinXYAfDa8l+HNPKZwk7ny8AqT7AdBL1tv6Dxx9f
-# TkpC96aP5Vm3ZPjG1quYuBDmafxvTy49aqreKfcpVcs9p7vEHNRWnFIttgWv83Fw
-# K0o6pN5HKxXEfPY97Tf/DdtGnsMwsB4BtifbVOwnbeDi2qU=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCvj8pvO45XcGjda4aIeiWm
+# 3mi0PvH53dLsI47+dB+7UjANBgkqhkiG9w0BAQEFAASCAYAetvv7/MYx5wFOR114
+# g8/5D0BUgfcY1Il6Xbe0jp7vi6rXHlXoEbDFjeNOb3Wb30qNbt9lpoWaQ9mi+cE3
+# HZ7547XAd2Mk4K/QOGQKP8qSx/L+SWVrjkCEyakOo6Vqq7P3xnIBVFZYvDxLAiQi
+# o2j6cQbmJL4qWU/TqNpLNQEUFq5CmMWvMscBKUhI3K4OLkAq48QT4eeA96+AuP2I
+# 9QfVyF2M3jsm6xxqiNaFcfzyuaRSIwjalKXcpmZondE1eUk+dvNfCL3Ojz6w/zlq
+# TK22MDTiKWZ7qsnnk2hByrBqlQqXCPwki8c11erPJNn9qqPrGY4wZQpVMqLWRKuq
+# mSLNBPPKpGnvLV31cvxJFZVw7q12Fp2Zy/3mGF8XV7jtjgGfZZeNyKAbAMdSKvzL
+# HynltQB0DU1NlvvS3RBAm0PH37ioRSbWo8B7j0Xl9Q2XspdVodVUf2pOr87zVzDT
+# g4/rUrxNvo9Y8mRiHD95FQMmWqYlys+BxUPfrq0qJb6+lyM=
 # SIG # End signature block

@@ -1012,7 +1012,47 @@ scope selection and prerequisite gating, and can export WPF previews:
 pwsh -NoProfile -File .\Tests\Test-SmartM365BatchGuiOffline.ps1
 ```
 
-### Existing offline checks
+### Inventory reliability and diagnostic report snapshots
+
+- SPO permission scans retain the actual associated member, owner and visitor
+  group titles. A failed group read records an inventory error; a genuinely
+  absent associated group remains empty. Names are cached per web for the run.
+- Item inheritance is loaded in one CSOM query per page. Pages are processed
+  immediately; role assignments are read only for items with unique permissions.
+  A missing-item page falls back to individual reads to identify the affected
+  IDs. Error CSVs include `ItemId` and `ItemUrl`, with an existence check for
+  missing-item errors. Any recorded inventory error still prevents final CSV
+  publication and manifest creation.
+- Transient web, subsite and library discovery reads use at most three attempts,
+  with waits of 5 and 15 seconds. Access errors are not retried. Token diagnostics
+  appear once per host, account and authentication configuration during the run.
+- All four inventory scripts format elapsed durations without rounding hours.
+- ShareGate XLSX analysis uses a verified local snapshot, with up to three
+  attempts when an export is locked, changing or incomplete. Generated evidence
+  keeps the original path and SHA256; a source/snapshot mismatch prevents report
+  publication. Temporary workbooks are removed after analysis.
+- New destination batch summaries include `RunLog`, `OutputCsv` and `ConsoleLog`.
+  `OutputLog` points to the actual inventory log when available, including in
+  interactive mode. Each action uses a unique launcher receipt; unavailable or
+  mismatched receipts are reported without guessing a path from another run.
+  The concurrency default remains two scans in either authentication mode.
+
+Offline reliability and batch tests:
+
+```powershell
+pwsh -NoProfile -File .\Tests\Test-SmartM365InventoryReliabilityOffline.ps1
+pwsh -NoProfile -File .\Tests\Test-SmartM365TargetScanBatchConcurrency.ps1
+pwsh -NoProfile -File .\Tests\Test-SmartM365WorkbookSnapshotOffline.ps1
+python -B -m unittest discover -s .\Tests -p test_sharegate_diagnostics.py
+```
+
+After deploying the toolkit, qualify these changes with a small successful SPO
+permission scan, the previously failing missing-item scope, and a large library.
+Check associated group columns, error IDs/paths, final publication, batch log
+links and actual wall-clock duration. These offline tests do not establish a
+production speed improvement or live tenant completeness.
+
+### Other offline checks
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1

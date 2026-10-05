@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 import argparse
 import collections
@@ -494,12 +494,28 @@ def make_html(summary):
                          "This report is based on local ShareGate export files. It does not validate migration completeness or live site state.")
 
 
-def analyze(inputs, output_dir, project_root, selected_session="", source_labels=None):
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def analyze(inputs, output_dir, project_root, selected_session="", source_labels=None, source_snapshots=None):
     if source_labels is None:
         source_labels = inputs
     if len(source_labels) != len(inputs):
         raise ValueError("Each input needs one source label.")
     source_stats = [Path(label).stat() for label in source_labels]
+    if source_snapshots is None:
+        source_snapshots = source_labels
+    if len(source_snapshots) != len(inputs):
+        raise ValueError("Each input needs one source snapshot.")
+    snapshot_hashes = [file_sha256(path) for path in source_snapshots]
+    for label, expected in zip(source_labels, snapshot_hashes):
+        if file_sha256(label) != expected:
+            raise ValueError(f"Report changed after its snapshot was copied: {label}")
     aliases = load_config("sharegate-diagnostics.columns")
     rules = load_rules()
     seen = {}
@@ -531,18 +547,17 @@ def analyze(inputs, output_dir, project_root, selected_session="", source_labels
     summary = summarize(rows, duplicates, conflicts, source_labels, project_root)
     summary["SelectedSessionId"] = selected_session or ""
     evidence = []
-    for label, start_stat in zip(source_labels, source_stats):
+    for label, start_stat, expected_hash in zip(source_labels, source_stats, snapshot_hashes):
         source = Path(label)
         stat = source.stat()
         if (stat.st_size, stat.st_mtime_ns) != (start_stat.st_size, start_stat.st_mtime_ns):
             raise ValueError(f"Report changed during analysis: {source}")
-        digest = hashlib.sha256()
-        with source.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
+        digest = file_sha256(source)
+        if digest != expected_hash:
+            raise ValueError(f"Report content changed during analysis: {source}")
         evidence.append({"Path": str(source), "Size": stat.st_size,
                          "LastWriteUtc": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
-                         "Sha256": digest.hexdigest()})
+                         "Sha256": digest})
     summary["InputEvidence"] = evidence
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = ["SessionId", "RowId", "Timestamp", "Status", "ObjectType", "ItemName", "SourceUrl", "SourceList", "SourceListId", "SourceItemId", "DestinationUrl", "DestinationList", "Message", "Details", "HelpLinks", "CopyOptions", "ImportStatus", "ThrottlingStatistics", "ItemKey", "PatternKey", "Pattern", "Category", "RuleId", "State", "Action", "AccessSide", "AccessEvidence", "InputFile"]
@@ -593,6 +608,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", action="append", type=Path)
     parser.add_argument("--source-label", action="append", type=Path)
+    parser.add_argument("--source-snapshot", action="append", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--project-root", type=Path)
     parser.add_argument("--set-state", choices=sorted(STATES))
@@ -618,7 +634,7 @@ def main():
     else:
         if not args.project_root or not args.input or not args.output_dir:
             parser.error("--project-root, --input and --output-dir are required for analysis")
-        analyze(args.input, args.output_dir, args.project_root, args.session, args.source_label)
+        analyze(args.input, args.output_dir, args.project_root, args.session, args.source_label, args.source_snapshot)
 
 
 if __name__ == "__main__":

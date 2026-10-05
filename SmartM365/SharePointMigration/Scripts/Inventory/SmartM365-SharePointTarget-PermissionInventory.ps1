@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.3
+    1.1.4
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -206,7 +206,7 @@ function Format-InventoryDuration {
         return ("{0}d {1:00}:{2:00}:{3:00}" -f $Elapsed.Days, $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
     }
 
-    return ("{0:00}:{1:00}:{2:00}" -f [int]$Elapsed.TotalHours, $Elapsed.Minutes, $Elapsed.Seconds)
+    return ("{0:00}:{1:00}:{2:00}" -f $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
 }
 
 function Write-ItemPermissionHeartbeat {
@@ -264,7 +264,9 @@ function Write-InventoryError {
         [string]$Scope,
         [string]$Url,
         [string]$Name,
-        [string]$Message
+        [string]$Message,
+        [string]$ItemId = '',
+        [string]$ItemUrl = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($script:ErrorPath)) {
@@ -277,6 +279,8 @@ function Write-InventoryError {
         Url     = $Url
         Name    = $Name
         Message = $Message
+        ItemId  = $ItemId
+        ItemUrl = $ItemUrl
     }
 
     if ($script:ErrorCsvCreated) {
@@ -313,6 +317,7 @@ function Connect-ToSPOWeb {
     $parameters = @{
         Url         = $Url
         ErrorAction = 'Stop'
+        ReturnConnection = $true
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ClientId)) {
@@ -354,9 +359,10 @@ function Connect-ToSPOWeb {
     }
 
     $connection = Connect-PnPOnline @parameters
+    $script:SPOPermissionConnection = $connection
     Write-SPOConnectionIdentity -Connection $connection -Url $Url
-    Write-PnPTokenSummary -Connection $connection
-    return $connection
+    $tokenContext = '{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f ([uri]$Url).Host, $Tenant, $TenantId, $ClientId, $Thumbprint, [bool]$DeviceLogin, $script:SPOConnectedAccount
+    if ($script:TokenSummaryContexts.Add($tokenContext)) { Write-PnPTokenSummary -Connection $connection }
 }
 
 function Write-SPOConnectionIdentity {
@@ -365,12 +371,14 @@ function Write-SPOConnectionIdentity {
         [string]$Url
     )
 
+    $script:SPOConnectedAccount = $Url
     try {
         $context = Get-PnPContext -Connection $Connection
         $context.Load($context.Web.CurrentUser)
         $context.ExecuteQuery()
 
         $currentUser = $context.Web.CurrentUser
+        $script:SPOConnectedAccount = [string]$currentUser.LoginName
         $loginName = if ($currentUser.LoginName) { $currentUser.LoginName } else { '<unknown>' }
         $email = if ($currentUser.Email) { $currentUser.Email } else { '<no email>' }
         $title = if ($currentUser.Title) { $currentUser.Title } else { '<no title>' }
@@ -481,7 +489,7 @@ function Test-SystemList {
         $List
     )
 
-    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder
+    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
     $systemUrls = @(
         '_catalogs/masterpage',
         '_catalogs/wp',
@@ -529,12 +537,8 @@ function Get-PnPGroupTitle {
         return ''
     }
 
-    try {
-        $Group = Get-PnPProperty -ClientObject $Group -Property Title
-    }
-    catch {}
-
-    return [string]$Group.Title
+    # A single-property request returns its value, not the original group object.
+    return [string](Get-PnPProperty -ClientObject $Group -Property Title -ErrorAction Stop -Connection $script:SPOPermissionConnection)
 }
 
 function Get-AssociatedWebGroupNames {
@@ -542,32 +546,28 @@ function Get-AssociatedWebGroupNames {
         $Web
     )
 
-    $memberGroup = ''
-    $ownerGroup = ''
-    $visitorGroup = ''
-
-    try {
-        $memberGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedMemberGroup)
+    $key = [string]$Web.Url
+    if ($script:AssociatedWebGroupCache.ContainsKey($key)) { return $script:AssociatedWebGroupCache[$key] }
+    $names = [ordered]@{}
+    foreach ($property in @('AssociatedMemberGroup', 'AssociatedOwnerGroup', 'AssociatedVisitorGroup')) {
+        $names[$property] = ''
+        try {
+            $names[$property] = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property $property -ErrorAction Stop -Connection $script:SPOPermissionConnection)
+        }
+        catch {
+            Write-ConsoleWarning -Message ("Failed to read {0} for '{1}': {2}" -f $property, $key, $_.Exception.Message)
+            Write-InventoryError -Scope 'AssociatedGroup' -Url $key -Name $property -Message $_.Exception.Message
+        }
     }
-    catch {}
-
-    try {
-        $ownerGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedOwnerGroup)
-    }
-    catch {}
-
-    try {
-        $visitorGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedVisitorGroup)
-    }
-    catch {}
-
-    [pscustomobject]@{
-        AssociatedMemberGroup  = $memberGroup
-        AssociatedOwnerGroup   = $ownerGroup
-        AssociatedVisitorGroup = $visitorGroup
-    }
+    $result = [pscustomobject]$names
+    $script:AssociatedWebGroupCache[$key] = $result
+    return $result
 }
 
+$script:AssociatedWebGroupCache = @{}
+$script:TokenSummaryContexts = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:SPOInheritanceLoad = $null
+$script:SPOInheritanceItemType = $null
 $script:SharePointGroupMembershipCache = @{}
 
 function Join-PrincipalMemberValues {
@@ -618,7 +618,7 @@ function Get-PrincipalMembershipInfo {
     }
 
     try {
-        $members = @(Get-PnPGroupMember -Group $groupIdentity -ErrorAction Stop)
+        $members = @(Get-PnPGroupMember -Group $groupIdentity -ErrorAction Stop -Connection $script:SPOPermissionConnection)
         $loginNames = @($members | ForEach-Object { $_.LoginName })
         $displayNames = @($members | ForEach-Object { $_.Title })
         $domainGroupMembers = @($members | Where-Object { [string]$_.PrincipalType -match 'SecurityGroup|DistributionList|SharePointGroup' })
@@ -668,8 +668,8 @@ function Get-RoleAssignmentRows {
 
     foreach ($roleAssignment in $RoleAssignments) {
         try {
-            $member = Get-PnPProperty -ClientObject $roleAssignment -Property Member
-            $bindings = @(Get-PnPProperty -ClientObject $roleAssignment -Property RoleDefinitionBindings)
+            $member = Get-PnPProperty -ClientObject $roleAssignment -Property Member -Connection $script:SPOPermissionConnection
+            $bindings = @(Get-PnPProperty -ClientObject $roleAssignment -Property RoleDefinitionBindings -Connection $script:SPOPermissionConnection)
             $permissionLevels = @($bindings | ForEach-Object { $_.Name })
             if ($permissionLevels.Count -eq 0) {
                 continue
@@ -715,7 +715,7 @@ function Get-RoleAssignmentRows {
         }
         catch {
             Write-ConsoleWarning -Message ("Failed to read role assignment on '{0}': {1}" -f $ObjectUrl, $_.Exception.Message)
-            Write-InventoryError -Scope "$ObjectScope RoleAssignment" -Url $ObjectUrl -Name $ObjectTitle -Message $_.Exception.Message
+            Write-InventoryError -Scope "$ObjectScope RoleAssignment" -Url $ObjectUrl -Name $ObjectTitle -ItemId ([string]$ItemId) -ItemUrl $(if ($ObjectScope -eq 'Item') { $ObjectUrl } else { '' }) -Message $_.Exception.Message
         }
     }
 }
@@ -729,73 +729,48 @@ function Export-ItemPermissionInventory {
     )
 
     $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
-    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder
+    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
+    $state = @{ Processed=0; Unique=0; Exported=0; LastItem='<none>' }
+    $script:SPOPermissionPageState = $state
+    $script:SPOPermissionPageWeb = $Web
+    $script:SPOPermissionPageList = $List
+    $script:SPOPermissionPageCsv = $CsvPath
+    $script:SPOPermissionPageInterval = $ProgressInterval
+    $script:SPOPermissionPageStopwatch = $stopwatch
     try {
-        $script:SPOPermissionListPageItemsRead = 0
-        $script:SPOPermissionListPageLastHeartbeat = 0
-        $script:SPOPermissionListPageWebUrl = $Web.Url
-        $script:SPOPermissionListPageTitle = $List.Title
-        $script:SPOPermissionListPageStopwatch = $stopwatch
-        $script:SPOPermissionListPageInterval = $ProgressInterval
-
-        $items = Get-PnPListItem `
-            -List $List `
-            -PageSize $PageSize `
-            -Fields 'FileRef','FileLeafRef','FSObjType','UniqueId','ID' `
-            -ScriptBlock {
-                param($PageItems)
-
-                $script:SPOPermissionListPageItemsRead += $PageItems.Count
-                if (($script:SPOPermissionListPageItemsRead - $script:SPOPermissionListPageLastHeartbeat) -ge $script:SPOPermissionListPageInterval) {
-                    $script:SPOPermissionListPageLastHeartbeat = $script:SPOPermissionListPageItemsRead
-                    Write-ItemPermissionHeartbeat `
-                        -WebUrl $script:SPOPermissionListPageWebUrl `
-                        -ListTitle $script:SPOPermissionListPageTitle `
-                        -ProcessedItems $script:SPOPermissionListPageItemsRead `
-                        -UniquePermissionItems 0 `
-                        -ExportedRows 0 `
-                        -Elapsed $script:SPOPermissionListPageStopwatch.Elapsed `
-                        -LastItem 'retrieving list items'
-                }
-            } `
-            -ErrorAction Stop
+        # Process the callback before the next page is fetched; do not retain the whole library.
+        Get-PnPListItem -List $List -PageSize $PageSize -Fields 'FileRef','FileLeafRef','FSObjType','UniqueId','ID' -Connection $script:SPOPermissionConnection -ScriptBlock {
+            param($PageItems)
+            Export-SPOPermissionPage -PageItems $PageItems -Web $script:SPOPermissionPageWeb -List $script:SPOPermissionPageList -CsvPath $script:SPOPermissionPageCsv -State $script:SPOPermissionPageState -ProgressInterval $script:SPOPermissionPageInterval -Stopwatch $script:SPOPermissionPageStopwatch
+        } -ErrorAction Stop | Out-Null
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate items for list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
         Write-InventoryError -Scope 'ListItems' -Url $listUrl -Name $List.Title -Message $_.Exception.Message
-        return
     }
+    finally { $stopwatch.Stop() }
+    Write-ItemPermissionHeartbeat -WebUrl $Web.Url -ListTitle $List.Title -ProcessedItems $state.Processed -UniquePermissionItems $state.Unique -ExportedRows $state.Exported -Elapsed $stopwatch.Elapsed -LastItem $state.LastItem
+}
 
-    $processedItems = 0
-    $uniquePermissionItems = 0
-    $exportedRows = 0
-    $lastItem = '<none>'
-
-    foreach ($item in $items) {
-        $processedItems++
+function Export-SPOPermissionPage {
+    param($PageItems, $Web, $List, [string]$CsvPath, [hashtable]$State, [int]$ProgressInterval, $Stopwatch)
+    $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
+    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
+    $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
+    $inheritance = Get-SPOPageInheritance -PageItems $PageItems -Web $Web -List $List -ListUrl $listUrl
+    foreach ($item in $PageItems) {
+        $State.Processed++
+        $State.LastItem = "ID $($item.Id)"
         try {
-            $lastItem = if ($item.Id) { "ID $($item.Id)" } else { '<unknown>' }
-            $hasUniqueRoleAssignments = Get-PnPProperty -ClientObject $item -Property HasUniqueRoleAssignments
-            if ($processedItems % $ProgressInterval -eq 0) {
-                Write-ItemPermissionHeartbeat `
-                    -WebUrl $Web.Url `
-                    -ListTitle $List.Title `
-                    -ProcessedItems $processedItems `
-                    -UniquePermissionItems $uniquePermissionItems `
-                    -ExportedRows $exportedRows `
-                    -Elapsed $stopwatch.Elapsed `
-                    -LastItem $lastItem
+            if ($State.Processed % $ProgressInterval -eq 0) {
+                Write-ItemPermissionHeartbeat -WebUrl $Web.Url -ListTitle $List.Title -ProcessedItems $State.Processed -UniquePermissionItems $State.Unique -ExportedRows $State.Exported -Elapsed $Stopwatch.Elapsed -LastItem $State.LastItem
             }
-
-            if (-not $hasUniqueRoleAssignments) {
-                continue
-            }
-
-            $uniquePermissionItems++
-            $roleAssignments = Get-PnPProperty -ClientObject $item -Property RoleAssignments
+            if (-not $inheritance.ContainsKey([int]$item.Id) -or -not $inheritance[[int]$item.Id]) { continue }
+            $State.Unique++
+            $roleAssignments = Get-PnPProperty -ClientObject $item -Property RoleAssignments -Connection $script:SPOPermissionConnection
             $serverRelativeUrl = [string]$item.FieldValues.FileRef
             $absoluteUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $serverRelativeUrl
             $fsObjType = if ([string]$item.FieldValues.FSObjType -eq '1') { 'Folder' } else { 'FileOrItem' }
@@ -829,23 +804,68 @@ function Export-ItemPermissionInventory {
                     -RoleAssignments $roleAssignments)
 
             Export-PermissionRows -Rows $rows -CsvPath $CsvPath
-            $exportedRows += $rows.Count
+            $State.Exported += $rows.Count
         }
         catch {
-            Write-ConsoleWarning -Message ("Failed to inventory item permissions in list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
-            Write-InventoryError -Scope 'Item' -Url $listUrl -Name $List.Title -Message $_.Exception.Message
+            Write-SPOItemError -Item $item -Web $Web -List $List -ListUrl $listUrl -Message $_.Exception.Message
         }
     }
+}
 
-    $stopwatch.Stop()
-    Write-ItemPermissionHeartbeat `
-        -WebUrl $Web.Url `
-        -ListTitle $List.Title `
-        -ProcessedItems $processedItems `
-        -UniquePermissionItems $uniquePermissionItems `
-        -ExportedRows $exportedRows `
-        -Elapsed $stopwatch.Elapsed `
-        -LastItem $lastItem
+function Add-SPOInheritanceRead {
+    param($Context, $Item)
+    # Queue only HasUniqueRoleAssignments through the supported CSOM Load<T> API.
+    $itemType = $Item.GetType()
+    if (-not $script:SPOInheritanceLoad -or $script:SPOInheritanceItemType -ne $itemType) {
+        $parameter = [System.Linq.Expressions.Expression]::Parameter($itemType, 'item')
+        $property = [System.Linq.Expressions.Expression]::Property($parameter, 'HasUniqueRoleAssignments')
+        $boxed = [System.Linq.Expressions.Expression]::Convert($property, [object])
+        $delegateType = [System.Func`2].MakeGenericType($itemType, [object])
+        $lambda = [System.Linq.Expressions.Expression]::Lambda($delegateType, $boxed, [System.Linq.Expressions.ParameterExpression[]]@($parameter))
+        $expressionType = [System.Linq.Expressions.Expression`1].MakeGenericType($delegateType)
+        $script:SPOInheritanceSelectors = [Array]::CreateInstance($expressionType, 1)
+        $script:SPOInheritanceSelectors.SetValue($lambda, 0)
+        $method = @($Context.GetType().GetMethods() | Where-Object { $_.Name -eq 'Load' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 2 })[0]
+        $script:SPOInheritanceLoad = $method.MakeGenericMethod($itemType)
+        $script:SPOInheritanceItemType = $itemType
+    }
+    [void]$script:SPOInheritanceLoad.Invoke($Context, [object[]]@($Item, $script:SPOInheritanceSelectors))
+}
+
+function Write-SPOItemError {
+    param($Item, $Web, $List, [string]$ListUrl, [string]$Message)
+    $itemUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl ([string]$Item.FieldValues.FileRef)
+    if ($Message -match '(?i)item does not exist|does not exist.*item') {
+        try {
+            $probe = Get-PnPListItem -List $List -Id $Item.Id -Fields 'FileRef' -Connection $script:SPOPermissionConnection -ErrorAction Stop
+            $Message += $(if ($null -eq $probe) { ' Existence check: no item returned.' } else { ' Existence check: item still exists; permission read failed.' })
+        }
+        catch { $Message += ' Existence check failed: ' + $_.Exception.Message }
+    }
+    Write-ConsoleWarning -Message ("Failed item permission read: list='{0}'; ID={1}; path='{2}'; {3}" -f $List.Title, $Item.Id, $itemUrl, $Message)
+    Write-InventoryError -Scope 'Item' -Url $ListUrl -Name $List.Title -ItemId ([string]$Item.Id) -ItemUrl $itemUrl -Message $Message
+}
+
+function Get-SPOPageInheritance {
+    param($PageItems, $Web, $List, [string]$ListUrl)
+    $context = Get-PnPContext -Connection $script:SPOPermissionConnection
+    $result = @{}
+    try {
+        Invoke-SPORead -Label ("inheritance page in {0}" -f $List.Title) -Operation {
+            foreach ($item in $PageItems) { Add-SPOInheritanceRead -Context $context -Item $item }
+            $context.ExecuteQuery()
+        } | Out-Null
+        foreach ($item in $PageItems) { $result[[int]$item.Id] = [bool]$item.HasUniqueRoleAssignments }
+    }
+    catch {
+        if ($_.Exception.Message -notmatch '(?i)item does not exist|does not exist.*item') { throw }
+        # Identify the individual failed item without treating a missing read as inherited.
+        foreach ($item in $PageItems) {
+            try { $result[[int]$item.Id] = [bool](Get-PnPProperty -ClientObject $item -Property HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection) }
+            catch { Write-SPOItemError -Item $item -Web $Web -List $List -ListUrl $ListUrl -Message $_.Exception.Message }
+        }
+    }
+    return $result
 }
 
 function Export-WebPermissionInventory {
@@ -855,14 +875,14 @@ function Export-WebPermissionInventory {
     )
 
     Connect-ToSPOWeb -Url $WebUrl
-    $web = Get-PnPWeb -Includes Title,Url,ServerRelativeUrl,HasUniqueRoleAssignments -ErrorAction Stop
+    $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url,ServerRelativeUrl,HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection }
     $siteCollectionUrl = Get-SiteCollectionUrlFromWebUrl -WebUrl $web.Url
 
     Write-ConsoleMessage -Message ("Web: {0}" -f $web.Url)
     $associatedGroups = Get-AssociatedWebGroupNames -Web $web
 
     try {
-        $webRoleAssignments = Get-PnPProperty -ClientObject $web -Property RoleAssignments
+        $webRoleAssignments = Get-PnPProperty -ClientObject $web -Property RoleAssignments -Connection $script:SPOPermissionConnection
         $rows = @(Get-RoleAssignmentRows `
                 -SiteCollectionUrl $siteCollectionUrl `
                 -WebUrl $web.Url `
@@ -894,7 +914,7 @@ function Export-WebPermissionInventory {
     }
 
     try {
-        $lists = Get-PnPList -Includes Title,Hidden,BaseTemplate,BaseType,Id,RootFolder,HasUniqueRoleAssignments -ErrorAction Stop
+        $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes Title,Hidden,BaseTemplate,BaseType,Id,RootFolder,HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection }
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate lists for web '{0}': {1}" -f $web.Url, $_.Exception.Message)
@@ -907,7 +927,7 @@ function Export-WebPermissionInventory {
         $listUrl = $web.Url
 
         try {
-            $rootFolder = Get-PnPProperty -ClientObject $list -Property RootFolder
+            $rootFolder = Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $script:SPOPermissionConnection
             $listTitle = $list.Title
             $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
 
@@ -928,7 +948,7 @@ function Export-WebPermissionInventory {
 
             $isDocumentLibrary = ([string]$list.BaseType -eq 'DocumentLibrary')
             $listBaseType = if ($isDocumentLibrary) { 'DocumentLibrary' } else { '' }
-            $roleAssignments = Get-PnPProperty -ClientObject $list -Property RoleAssignments
+            $roleAssignments = Get-PnPProperty -ClientObject $list -Property RoleAssignments -Connection $script:SPOPermissionConnection
             $rows = @(Get-RoleAssignmentRows `
                     -SiteCollectionUrl $siteCollectionUrl `
                     -WebUrl $web.Url `
@@ -995,6 +1015,27 @@ function Get-WebUrlsFromFile {
 }
 
 
+function Write-SPOReadRetry { param([string]$Message) Write-ConsoleWarning -Message $Message }
+
+function Invoke-SPORead {
+    param([scriptblock]$Operation, [string]$Label, [int]$Attempts = 3)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            # Buffer each attempt so a partial response is never emitted twice.
+            $result = @(& $Operation)
+            return $result
+        }
+        catch {
+            $message = $_.Exception.ToString()
+            $transient = $message -match '(?i)HttpClient.Timeout|timed? out|timeout|\b429\b|\b503\b|TooManyRequests|temporarily unavailable|connection.*(closed|reset)'
+            if (-not $transient -or $attempt -eq $Attempts) { throw }
+            $delay = if ($attempt -eq 1) { 5 } else { 15 }
+            Write-SPOReadRetry -Message ("Retrying {0} after a transient read failure ({1}/{2}); waiting {3}s: {4}" -f $Label, $attempt, $Attempts, $delay, $_.Exception.Message)
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Get-WebUrlsFromSite {
     param(
         [string]$Url
@@ -1014,11 +1055,11 @@ function Get-WebUrlsFromSite {
 
         try {
             Connect-ToSPOWeb -Url $currentWebUrl
-            $web = Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop
+            $web = Invoke-SPORead -Label 'web' -Operation { Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop -Connection $script:SPOPermissionConnection }
             $webUrls.Add($web.Url)
 
             try {
-                $subWebs = @(Get-PnPSubWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop)
+                $subWebs = @(Invoke-SPORead -Label 'subsites' -Operation { Get-PnPSubWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop -Connection $script:SPOPermissionConnection })
                 Write-ConsoleMessage -Message ("  Subsites found under {0}: {1}" -f $web.Url, $subWebs.Count)
 
                 foreach ($subWeb in $subWebs) {
@@ -1179,8 +1220,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClxykrgPmbGPcB
-# zHpyk9GXptJlHLBLzdqppPWaWMQlt6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf4CChufWu4Smg
+# P3Js3dCbN/WBhUkK24ZYTMksgqEIkqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1210,14 +1251,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDxegpxw+zlVba1YG7CVaua
-# lFiIkilQ8zH71cJpeF9gBzANBgkqhkiG9w0BAQEFAASCAYAcnsKAQfIpnYyyJbso
-# 5jJsUd75VmGp5QwPzucQf2c6sZtnsZuzUTaR48KKCmODKYZQmCt2/d1V3ut+KoyA
-# OrAl+L9v0FyN5g/hHxyUXUSsXhdWvDK2gT/GGcbuGQbFWGY0Li9QjOoD3D2UA07b
-# //4mGt8CBuH3Bwq8aAsRPxEbZUY6XSG1qZgypNGTWY73A79KW8/hM/hR1zQ2AxY9
-# HXmqtt/5AmA3A3J8g9eys0K8s8TZAJl6i9AGSipINwz/uf4MhNjc7Cjf5rsEbEWj
-# XihkEbnbHkp36dVXO9yezXWVcLRxSOK6PlYMqkdntUPX6CdrbIJNSOpSykqXfP5C
-# MCfe6KZqrtuhNhdtzl9JDHlGvsF7zCmHMw7pA6upm5Wgfwik4Ffg2fa/DdmiPSyw
-# PFagRd+/FeMJk0IqhGRptZEV4ANLHw+KvjD8II5bKgXumKIt6mFTqA2jwDrgZqme
-# ucbyEv4m5AdJJSj8pc9OVan/mpUM8ODbABqOlfxAKZficjA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCVLFcQyRiVcrKJrluXT0uH
+# 77+Au8AwCDlTGX2GhtLNJDANBgkqhkiG9w0BAQEFAASCAYA2Q6Ik3jfBKXG5Pfph
+# 4UZ9QqIKH94/WXrI/OHHhacACIrvX3Dvni2foPtpFaokJooioX5kQYXpJrDqeX4s
+# vW3hTjFHcwCE8K8lmm59uy9fjbCrSdsuiLQFL6AtH5oQvWW5D08r84nTtav1Rnqu
+# u4xS0SwXsWRW8oT3AoY40XXWpEAHa1j69h7apF7r6+g8n+bKxn+KDjCRMkaOL63x
+# uDzC+EVLr4bK8U/VAKTfsanxfPklKNTHQODGx6ftFeIV28tPgCfW4tRQxSHmwN12
+# XKOnuK/6C7wHfczhBcqKjn+Ouc94ZIc/CJWuj1IyxBMSfK/NRii2ogbBov5VAleN
+# 0jRZmcOC5+HStcAJDB8/m+cfQNcLf8fs8+i/hlqQ0HOSEb7ABfObrZiLOarAKvlI
+# VdHqrFVvA8KNBdfTxyjPFpnIzjVqIuIRwXmZ1eNVoZIOguyC0FTg9InsyotxNT4/
+# bcNVlQS2QJ+sJFyBaSI2t33qKCvexl2gtEhkE+7rx58fdvc=
 # SIG # End signature block

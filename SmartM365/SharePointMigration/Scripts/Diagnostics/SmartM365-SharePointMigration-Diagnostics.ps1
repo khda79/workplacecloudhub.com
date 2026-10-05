@@ -2,7 +2,7 @@
 .SYNOPSIS
     Analyze local ShareGate migration reports without connecting to ShareGate.
 .VERSION
-    1.0.5
+    1.0.6
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -42,6 +42,47 @@ function Write-DiagnosticPhase {
     }
 }
 
+function Copy-StableShareGateWorkbook {
+    param([string]$Source, [string]$Destination, [int]$Attempts = 3)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $sourceStream = $targetStream = $archive = $null
+        try {
+            $before = Get-Item -LiteralPath $Source -ErrorAction Stop
+            Start-Sleep -Milliseconds 500
+            $ready = Get-Item -LiteralPath $Source -ErrorAction Stop
+            if ($before.Length -ne $ready.Length -or $before.LastWriteTimeUtc -ne $ready.LastWriteTimeUtc) { throw 'Workbook is still changing.' }
+            # Deny concurrent writes/deletes while reading the original bytes.
+            $sourceStream = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            $targetStream = [IO.File]::Create($Destination)
+            $sourceStream.CopyTo($targetStream)
+            $targetStream.Dispose(); $targetStream = $null
+            $sourceStream.Dispose(); $sourceStream = $null
+            $after = Get-Item -LiteralPath $Source -ErrorAction Stop
+            if ($ready.Length -ne $after.Length -or $ready.LastWriteTimeUtc -ne $after.LastWriteTimeUtc -or
+                (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash) {
+                throw 'Workbook changed while its snapshot was being copied.'
+            }
+            $archive = [IO.Compression.ZipFile]::OpenRead($Destination)
+            if (-not $archive.GetEntry('[Content_Types].xml') -or -not $archive.GetEntry('xl/workbook.xml')) { throw 'Workbook package is incomplete.' }
+            foreach ($entry in $archive.Entries) {
+                $stream = $entry.Open()
+                try { $stream.CopyTo([IO.Stream]::Null) } finally { $stream.Dispose() }
+            }
+            return $Destination
+        }
+        catch {
+            if ($attempt -eq $Attempts) { throw "Cannot obtain a stable workbook snapshot after $Attempts attempts: $Source. $($_.Exception.Message)" }
+            Write-DiagnosticPhase 'WaitingForReport' ("Waiting for a stable ShareGate workbook ({0}/{1}): {2}" -f $attempt, $Attempts, $_.Exception.Message)
+        }
+        finally {
+            if ($archive) { $archive.Dispose() }
+            if ($targetStream) { $targetStream.Dispose() }
+            if ($sourceStream) { $sourceStream.Dispose() }
+        }
+        Start-Sleep -Seconds $attempt
+    }
+}
+
 function Write-DiagnosticEvent {
     param([string]$Status, [int]$ExitCode, [string]$Detail)
     if ($ActivityPath) {
@@ -50,6 +91,9 @@ function Write-DiagnosticEvent {
     }
 }
 
+$converted = [System.Collections.Generic.List[string]]::new()
+$snapshots = @{}
+$snapshotRoot = ''
 try {
     $project = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).ProviderPath
     if (-not (Test-Path -LiteralPath $project -PathType Container)) { throw 'Project root is not a directory.' }
@@ -84,6 +128,14 @@ try {
     $excelModule = if ($allXlsxFiles.Count) {
         Initialize-SmartM365ImportExcel -DryRun:$DryRun -Progress { param($state,$message) Write-DiagnosticPhase $state $message }
     } else { $null }
+    if ($excelModule -and $allXlsxFiles.Count) {
+        $snapshotRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ShareGate-' + [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path $snapshotRoot)
+        foreach ($file in $allXlsxFiles) {
+            $destination = Join-Path $snapshotRoot ([guid]::NewGuid().ToString('N') + '.xlsx')
+            $snapshots[$file.FullName] = Copy-StableShareGateWorkbook -Source $file.FullName -Destination $destination
+        }
+    }
     if (-not $DryRun) { Write-DiagnosticPhase 'InspectingReports' 'Inspecting the selected ShareGate report…' }
     $inventory = [System.Collections.Generic.List[object]]::new()
     $sessions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -105,8 +157,8 @@ try {
             }
             try {
                 Import-Module ImportExcel -ErrorAction Stop
-                $sheet = @(Get-ExcelSheetInfo -Path $file.FullName -ErrorAction Stop | Where-Object Name -EQ 'Data' | Select-Object -First 1)
-                $excelRows = if ($sheet.Count) { @(Import-Excel -Path $file.FullName -WorksheetName 'Data' -ErrorAction Stop) } else { @(Import-Excel -Path $file.FullName -ErrorAction Stop) }
+                $sheet = @(Get-ExcelSheetInfo -Path $snapshots[$file.FullName] -ErrorAction Stop | Where-Object Name -EQ 'Data' | Select-Object -First 1)
+                $excelRows = if ($sheet.Count) { @(Import-Excel -Path $snapshots[$file.FullName] -WorksheetName 'Data' -ErrorAction Stop) } else { @(Import-Excel -Path $snapshots[$file.FullName] -ErrorAction Stop) }
                 $csvRows = @(Import-Csv -LiteralPath $matchingCsv[0].FullName -ErrorAction Stop)
                 if ($excelRows.Count -ne $csvRows.Count) { throw "Row count differs: CSV=$($csvRows.Count), XLSX=$($excelRows.Count)." }
                 $checkColumns = @('Session ID','ID','Status','Type','Source site address','Destination site address')
@@ -126,8 +178,8 @@ try {
         elseif ($DryRun) {
             try {
                 Import-Module ImportExcel -ErrorAction Stop
-                $sheet = @(Get-ExcelSheetInfo -Path $file.FullName -ErrorAction Stop | Where-Object Name -EQ 'Data' | Select-Object -First 1)
-                $excelRows = if ($sheet.Count) { @(Import-Excel -Path $file.FullName -WorksheetName 'Data' -ErrorAction Stop) } else { @(Import-Excel -Path $file.FullName -ErrorAction Stop) }
+                $sheet = @(Get-ExcelSheetInfo -Path $snapshots[$file.FullName] -ErrorAction Stop | Where-Object Name -EQ 'Data' | Select-Object -First 1)
+                $excelRows = if ($sheet.Count) { @(Import-Excel -Path $snapshots[$file.FullName] -WorksheetName 'Data' -ErrorAction Stop) } else { @(Import-Excel -Path $snapshots[$file.FullName] -ErrorAction Stop) }
                 $found = @($excelRows | ForEach-Object { $_.'Session ID' } | Where-Object { $_ } | Sort-Object -Unique)
                 foreach ($session in $found) { [void]$sessions.Add([string]$session) }
                 $inventory.Add([pscustomobject]@{ File=$file.FullName; Status='Used'; Reason='XLSX report selected for conversion.'; Sessions=$found })
@@ -155,7 +207,6 @@ try {
     }
     $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $converted = [System.Collections.Generic.List[string]]::new()
     $inputs = [System.Collections.Generic.List[string]]::new()
     $sourceLabels = [System.Collections.Generic.List[string]]::new()
     foreach ($file in $csvFiles) {
@@ -169,9 +220,9 @@ try {
             Import-Module ImportExcel -ErrorAction Stop
             foreach ($file in $xlsxFiles) {
                 $target = Join-Path $OutputDirectory ('.converted-' + [guid]::NewGuid().ToString('N') + '.csv')
-                $sheet = @(Get-ExcelSheetInfo -Path $file.FullName | Where-Object Name -EQ 'Data' | Select-Object -First 1)
-                if ($sheet.Count -gt 0) { $rows = @(Import-Excel -Path $file.FullName -WorksheetName 'Data') }
-                else { $rows = @(Import-Excel -Path $file.FullName) }
+                $sheet = @(Get-ExcelSheetInfo -Path $snapshots[$file.FullName] | Where-Object Name -EQ 'Data' | Select-Object -First 1)
+                if ($sheet.Count -gt 0) { $rows = @(Import-Excel -Path $snapshots[$file.FullName] -WorksheetName 'Data') }
+                else { $rows = @(Import-Excel -Path $snapshots[$file.FullName]) }
                 if ($rows.Count -eq 0) { throw "XLSX report has no rows: $($file.FullName)" }
                 $rows | Export-Csv -LiteralPath $target -NoTypeInformation -Encoding utf8
                 $converted.Add($target)
@@ -187,6 +238,8 @@ try {
     for ($index = 0; $index -lt $inputs.Count; $index++) {
         $arguments.Add('--input'); $arguments.Add($inputs[$index])
         $arguments.Add('--source-label'); $arguments.Add($sourceLabels[$index])
+        $arguments.Add('--source-snapshot')
+        $arguments.Add($(if ($snapshots.ContainsKey($sourceLabels[$index])) { $snapshots[$sourceLabels[$index]] } else { $sourceLabels[$index] }))
     }
     if ($SessionId) { $arguments.Add('--session'); $arguments.Add($SessionId) }
     Write-DiagnosticPhase 'AnalyzingReports' 'Analyzing the ShareGate report and generating the HTML summary…'
@@ -211,6 +264,10 @@ catch {
 }
 finally {
     foreach ($file in $converted) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+    if ($snapshotRoot -and (Test-Path -LiteralPath $snapshotRoot)) {
+        Get-ChildItem -LiteralPath $snapshotRoot -File | Remove-Item -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $snapshotRoot -ErrorAction SilentlyContinue
+    }
 }
 }
 catch {
@@ -224,8 +281,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiWcOhshRUAFHt
-# nNRX3SfEeFDA6nYG7Odb2echVcYuH6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXrnVi5z5Qxkgm
+# t5j5vvDGjjk4ecAMhCsga/U7hiinwqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -255,14 +312,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC0EvmVfhD/mOxqKVcUKU8V
-# ZxsCG65J0CJoOkO87CKFVzANBgkqhkiG9w0BAQEFAASCAYBKNztrZRdP+GWp0Jaf
-# 5ugYVY4xcZ6jXFCi/Ln0WYngwKQm5XaVj7j6cDQ4o7zFm5yRDis4muewNLHBhfE3
-# sH5kQxT7XX7CurM8PwEr1SNsUBsJ1MgYD346KIqHNKMWQB/MZpSPHWF6eVUbwQTb
-# k9KnJh3mCU4k5i6YSEs52D7qjJRPTo7UuP0ICNOqh063arJNVSUy8oXhvuajdVQ9
-# lIDgkwhM7uAA1BdffYOFEwol7X+OMDHWwA1xN+dwK36gckrOt+x/qU0kSHT0/8G3
-# wq3Nz5hXYmHRroIgA/Ahiar3Xd7FA2yIk+AA0FJdSU4B+i9Re2TRpW0D070tHBv6
-# gIu5qxsWe/pY9lPdhGXNxbizE0AjmSLlUrmE89GYmxNYxlc7rmJ59z1o0tVh10wL
-# YGKu85CKCxR9DJ46aqfiCJmsjC3xKqJi63fuX3qTdC7+njl4I0dVMCNo1T0wEGmw
-# txp8pe3Z+DkkFp1aqpQWGkMYIomu63J6sR+/OJKWzxBWk04=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAOfwUAcH6CKSCe07cP//9S
+# 5TC6XDLhsRofvLB2uDokjjANBgkqhkiG9w0BAQEFAASCAYAjYHyinsd7HHXYq+T/
+# fhBYTwPJNWxjhY0sXr7CDKx237y5vhFG7wD3neK/dkJ4R9Vp6QJo7raKvlolExEj
+# B92dZ8R4QTHWPvIJejFwa+MsAZzFB+6e0tRh2Pi8i0Ai2H4ICB8q3+jAPE56AdVs
+# 3EdrTrg6hM9h7t+HaWKq1ry0Mo5Ymx3gkr4GtLEEq9S/W98Dx84SdKWntoppi5W6
+# Gu9GgQ58ZZChKveWTEqwR/D3+R1/h9bGQ9GGVzaEoycwbDTpIFsi9kzk3eQNhzBz
+# jjdc8es39lnBZrgJKHAd5pNov0SHdkF6qdpOAIbCXG9zSPP0UTWQBew1yz5D4ZPt
+# fdkGEZN22DKFpWTL2VyTyEE45OmjWpIsgw9PaqAT7rjfZ8FPY1PuInRi9UByN+3Z
+# +1LmoXQaI+1Hn5CPrR5lNCLAhLLAMB+hxUFVUzVO++pFcIZKvlIozYGPBSaiWmtM
+# 2HyxfOdOcgBBYvdfVOHTPx52NgdstHxnabIuHTo4NBtbLDE=
 # SIG # End signature block

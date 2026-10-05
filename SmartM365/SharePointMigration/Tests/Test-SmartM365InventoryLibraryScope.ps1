@@ -2,10 +2,11 @@
 .SYNOPSIS
     Verify file and permission scan library scope without SharePoint connections.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+$script:SPOPermissionConnection = 'offline'
 
 # Minimal SharePoint types let the real source helpers bind synthetic lists.
 if ('Microsoft.SharePoint.SPList' -as [type]) { throw 'Run in a fresh offline PowerShell process without SharePoint assemblies.' }
@@ -72,6 +73,10 @@ foreach ($side in @('Source', 'Target')) {
         if (-not (& $systemFunction -List $script:FixtureLists[3])) { throw "$name no longer excludes the master-page catalog" }
 
         if ($kind -eq 'File') {
+            if ($side -eq 'Target') {
+                $retry = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-SPORead' }, $true)
+                Invoke-Expression $retry.Extent.Text
+            }
             $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DocumentLibraries' }, $true)
             Invoke-Expression $definition.Extent.Text
             $args = @{}
@@ -110,8 +115,8 @@ Microsoft.PowerShell.Utility\Write-Host 'Offline library scope tests passed for 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAva+w0Onq7wgvK
-# edJZInaRMVgX9at0dBG7AgAhO+Gg2qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBT61+tP+4BAqzB
+# IDJKMwvh1+iXOUKM27MDuMujPk39S6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -141,14 +146,14 @@ Microsoft.PowerShell.Utility\Write-Host 'Offline library scope tests passed for 
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBJCc52KJYksFAkBMh9Cpmf
-# M79C4KCipQuiBlEmiELlKjANBgkqhkiG9w0BAQEFAASCAYCgOHHYr7955mIWW6di
-# 4JKRjtg4wJDJU4wZJmXJrL7pViM0pZ3alYFKT9zgZRfbnI3Ms2GRlvJSeW5o1Tvt
-# 4hlhSlF+HvOZYA/Y8bltjnRSeDPbSRouzDhXtbJ7tojBZxvnj9/j+FFNvhw8g56p
-# TFxDZZWbulJ6gQWisGFhYfuJ9/mz1aAcXI4JfVTyNMywiRxVtFcjcOeL3M+cqvCF
-# J8RkSZN7aN85q3sv2UwdDl2IOi+98hZTaX1Ij2FlP0lDqLHrmTST7V+Q689u5Pss
-# 8OK18U6IgRb3aifX438QVge0POpl+/mW+Oa/7mZdxkM6zlHgnzu46VfDVEiTKAIm
-# Es99tRJFBRluH9zesvVKs/GE4wkBuaxUVNHxUFUUk+Asv07OI+mGWUEzPBgmZmR/
-# EiY13peGL3N3FSC7rIl0MlZJ9Yw0l3ZvGDPf+UYYnUITwQAp2HC+2+O0/gn3u1I+
-# 4HY1mP0NsxPq6YRHlJ4PF7AO+WDl9g1qaJSe+FAnMUxgZGA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAr3P9lJl4BzilVykPnqq5T
+# v+WqAdZZ2IQ5JMjEplsQ4zANBgkqhkiG9w0BAQEFAASCAYCMAjqHqmPA42comCVv
+# qta/jDik5PORrAd8XwpLZYJinNamKsiGJgakT+3NFfpW+Fp9OCY2YwfrkoI3HeqM
+# gB4F0Zv0e2q3glZbfv4fUhQ96dCmgJk18PIeJZaEt4kI2SXg4TAUN9M98lq1Td1+
+# vABRw8UdU/pnUgpOSHttWJJC2+MKwcZTJn4SjlKUnWVWlS4MKSzvfP6zYBeqDxou
+# eHyHDI7cnzbB0ydAzsYyYphhIPc5jueBy/g8sKgKBPTl9IJpYyA1b4VTUTWIoKEN
+# 380LM1CSRb6WbFzvTb5vF5yr8Pvyh/dUSVXYw2yQuu6uHzoDPvNAQAdfOmcmcdXh
+# ABXzdpSqdYx8tCNdvgT18HEzhZOdshY3Id5HosdmHnH/nClviuBSEq2ON953I5fB
+# SZwrmUV61VCx1sn6yENap+ePuPIt3x4R/nmxDwNTL6IGD1mq3WJ/ZAVkFDMing7y
+# ufn7R4LDpjETAmmMWHP2H2/jrS9NI1IptNHV/XcsLWmPinw=
 # SIG # End signature block

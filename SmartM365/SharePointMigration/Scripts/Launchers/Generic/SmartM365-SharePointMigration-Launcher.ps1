@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.27
+    1.0.28
 #>
 
 [CmdletBinding()]
@@ -49,14 +49,18 @@ param(
 
     [switch]$Force,
 
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [string]$RunResultPath = '',
+
+    [string]$RunResultId = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.27') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.28') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -845,6 +849,23 @@ function New-MigrationInventoryOutputPath {
     Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}Inventory-{2}-{3}.csv" -f $endpointType, $InventoryKind, $Config.Name, $Timestamp)
 }
 
+function Write-LauncherRunResult {
+    if (-not $RunResultPath) { return }
+    $temporary = $RunResultPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        $published = $script:LauncherOutputCsvPath -and (Test-Path -LiteralPath $script:LauncherOutputCsvPath -PathType Leaf)
+        [ordered]@{
+            RunId=$RunResultId; Migration=$MigrationName; Action=$Action
+            Status=$script:LauncherStatus; LogPath=$script:LauncherRunLogPath
+            OutputCsv=$(if ($published) { $script:LauncherOutputCsvPath } else { '' })
+            Started=$script:LauncherRunStartedAt.ToString('o'); Updated=(Get-Date).ToString('o')
+        } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding UTF8
+        Move-Item -LiteralPath $temporary -Destination $RunResultPath -Force
+    }
+    catch { Write-Warning ("Could not write launcher run receipt '{0}': {1}" -f $RunResultPath, $_.Exception.Message) }
+    finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+}
+
 function Invoke-FileInventoryScan {
     param(
         [Parameter(Mandatory = $true)]
@@ -882,6 +903,9 @@ function Invoke-FileInventoryScan {
     $useSiteUrlFilterEnabled = $parameters.ContainsKey('UseSiteUrlFilter') -and [bool]$parameters.UseSiteUrlFilter
     $siteUrlsFileLabel = if ($parameters.ContainsKey('SiteUrlsFile')) { $parameters.SiteUrlsFile } else { '<none>' }
     Write-Info ("File scan options: AuthMode={0}; ForceAuthentication={1}; ParameterSet={2}; Input={3}; UseSiteUrlFilter={4}; SiteUrlsFile={5}" -f $authMode, $forceAuthenticationEnabled, $inputKey, $inputValue, $useSiteUrlFilterEnabled, $siteUrlsFileLabel) DarkCyan
+    $script:LauncherOutputCsvPath = $parameters.OutputPath
+    $script:LauncherStatus = 'RUNNING'
+    Write-LauncherRunResult
     & $scriptPath @parameters
     Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'File' -Scope ([string]$inputValue)
 }
@@ -922,6 +946,9 @@ function Invoke-PermissionInventoryScan {
     $permissionScope = if ($parameters.DocumentLibrariesOnly) { 'DocumentLibrariesOnly' } else { 'AllListsAndLibraries' }
     $authMode = if ($parameters.ContainsKey('Thumbprint')) { 'Certificate' } elseif ($parameters.ContainsKey('DeviceLogin') -and $parameters.DeviceLogin) { 'DeviceLogin' } elseif ($parameters.ContainsKey('Interactive') -and $parameters.Interactive) { 'Interactive' } else { 'Default' }
     Write-Info ("Permission scan options: Scope={0}; IncludeItemPermissions={1}; ItemProgressInterval={2}; AuthMode={3}; ForceAuthentication={4}" -f $permissionScope, [bool]$parameters.IncludeItemPermissions, [int]$parameters.ItemProgressInterval, $authMode, [bool]$parameters.ForceAuthentication) DarkCyan
+    $script:LauncherOutputCsvPath = $parameters.OutputPath
+    $script:LauncherStatus = 'RUNNING'
+    Write-LauncherRunResult
     & $scriptPath @parameters
     $scopeValue = if ($parameters.ContainsKey('WebUrlsFile')) { $parameters.WebUrlsFile } elseif ($parameters.ContainsKey('SiteUrl')) { $parameters.SiteUrl } else { $parameters.WebApplicationUrl }
     Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'Permission' -Scope ([string]$scopeValue)
@@ -1356,6 +1383,7 @@ if ($PSVersionTable.PSVersion.Major -gt 5 -and $Action -match '^Scan(Source|Targ
 
 $script:LauncherRunStartedAt = Get-Date
 $script:LauncherRunLogPath = ''
+$script:LauncherOutputCsvPath = ''
 $script:LauncherFailure = $null
 $script:LauncherStatus = 'CANCELLED'
 $env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE = '1'
@@ -1381,6 +1409,7 @@ catch {
 }
 finally {
     Write-LauncherSummary -Failure $script:LauncherFailure -Status $script:LauncherStatus
+    Write-LauncherRunResult
     if ($script:LauncherPreviousConsoleMarker) { $env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE = $script:LauncherPreviousConsoleMarker }
     else { Remove-Item Env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE -ErrorAction SilentlyContinue }
 }
@@ -1388,8 +1417,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHnV7+Rb1XM/sA
-# sUlhQpTuHBlXUV32OuTtbERXkmyZPaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeU6GFQBdGhllk
+# ZeKmLO754MqevCladHtaqga53p9l66CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1419,14 +1448,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB92GyyxnZBne87dLhyqvNL
-# oNPU8SFmm6oZQLK+OLQG9TANBgkqhkiG9w0BAQEFAASCAYCtRHaljesDTaHxHArR
-# AHdF/wB6Qb0lU/TyazmCt02mCSh/Ix/sltq+uZ9Cx4VPvs3g2WQ/ALBD+sucrL2C
-# driPPzeIS/YgQq6d2lirOwP0HKFoRYBKpNTn6GOWROAqYG/2N4uIC7R1DyGA6rn4
-# QSmWPhayitsBym/ri3PAAFREhJexhrt0qLkGK4U/AXFAxwQSRwIZvT1+AcLEtN3c
-# kMh43Il9qPE16KblbHjAm8HOY/M18GuWeACIeRowmf0lStiRvOASbuEEuFqDYe3+
-# 8Edtvbn/IQzdBNHkuRFnOKP3aTSk8l8KxANA4qVc9qTvoXHx83DjKqPYAOBXe4Ft
-# mAfec8S/eULAunlpID+CKTJCO3JUwnG3Vvv5ypFTYxUnmMv+uQ/qJR5OdvZIYNFd
-# CLq0HuwLe/ljsIPHf5CKyLL6r/7LXTtA/IN4YS7lLNOH2M2qXFn0OWSyVZP+VtmS
-# sg4OrFitthfaYHqRP9Wje5a/xR0DzRtg1mUgaB9sEghfV4I=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBHYyf+qwFGZLevwI+37aSI
+# B0WhZg24II14nd1wI45JWDANBgkqhkiG9w0BAQEFAASCAYBVrzIv8MTw84XTikbe
+# dkTxQCI57EMzA95MUOI4Du//Rm3Ngit14sflmmwCqjUUa38EGCYKOQkxEW+UXpsd
+# 7b//F/KCDlBfCfl7EN9GVhK6Bo2p7bp4UiMDt4mkli61Mkb1C43e+UWnq1wGeWpq
+# C2+WZbOpNPB9V5T7PyD91QMPEht9FWfosGFJ+8Lko8Xs21GT4Mr0u9qQUw4FPwkG
+# 8zglS/Dg4H5EkSJF6Q0Ld6VI9iB/ejHrxcAxU6XaYX+uHsUbXFLvKsVaLLXdrEqc
+# W+SWhZqiWU7A8v0wodgNFOgak6ayGP+e6CAwJE828zsAnrFuExqMjfC6PwvpKouA
+# l0RB8HIRIi4AlTW9hgzq7FltDuhNuAXjHka5n+t2W/i5PZPMFkqvH9KkMLQwYdL1
+# bcAOV9/CsRMR9+eZB7Y+rTxt4mqAcgjnW8Et0+ZCBoMPZh8iuUTcAGGKa7nLjBQv
+# ZADzii9pvkIO1CL6fDY5qP+HAV00fWJiClhnGU2MKFJQjPs=
 # SIG # End signature block

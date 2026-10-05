@@ -8,7 +8,7 @@
     use separate visible consoles for sign-in. The limit applies to this batch.
 
 .VERSION
-    1.0.2
+    1.0.3
 
 .EXAMPLE
     pwsh -File .\SmartM365-SharePointMigration-TargetScanBatch.ps1 -PlanOnly
@@ -127,6 +127,19 @@ function Assert-CertificateAuth {
 
 function Add-BatchResult {
     param([object]$Job, [string]$Status, [int]$ExitCode, [string]$OutputPath = '')
+    $runLog = $outputCsv = ''
+    try {
+        if (Test-Path -LiteralPath $Job.ResultPath -PathType Leaf) {
+            $receipt = Get-Content -LiteralPath $Job.ResultPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($receipt.RunId -ne $Job.RunId -or $receipt.Migration -ne $Job.Migration -or $receipt.Action -ne $Job.Action) {
+                throw 'The launcher receipt does not match this batch action.'
+            }
+            $runLog = [string]$receipt.LogPath
+            $outputCsv = [string]$receipt.OutputCsv
+        }
+        else { Write-BatchLine ("Run receipt unavailable for {0} {1}; no output path was inferred." -f $Job.Migration, $Job.Action) }
+    }
+    catch { Write-BatchLine ("Could not read run receipt for {0} {1}: {2}" -f $Job.Migration, $Job.Action, $_.Exception.Message) }
     $script:Results.Add([pscustomobject]@{
         Migration = $Job.Migration
         Action = $Job.Action
@@ -134,7 +147,10 @@ function Add-BatchResult {
         ExitCode = $ExitCode
         Started = $Job.Started.ToString('o')
         Finished = (Get-Date).ToString('o')
-        OutputLog = $OutputPath
+        OutputLog = $(if ($runLog) { $runLog } else { $OutputPath })
+        ConsoleLog = $OutputPath
+        RunLog = $runLog
+        OutputCsv = $outputCsv
     })
     Write-BatchLine ("{0}: {1} {2} (exit {3})" -f $Status, $Job.Migration, $Job.Action, $ExitCode)
 }
@@ -207,14 +223,16 @@ try {
             while ($pending.Count -gt 0 -and $running.Count -lt $limit -and
                    ((Get-Date) - $lastLaunch).TotalSeconds -ge $LaunchDelaySeconds) {
                 $migration = $pending.Dequeue()
-                $job = [pscustomobject]@{ Migration = $migration.Name; Action = $action; Started = Get-Date }
+                $runId = [guid]::NewGuid().ToString('N')
+                $job = [pscustomobject]@{ Migration = $migration.Name; Action = $action; Started = Get-Date; RunId=$runId; ResultPath=(Join-Path $batchRoot "$runId.result.json.txt") }
                 $prefix = '{0}-{1}' -f $migration.Name, $action
                 $stdout = Join-Path $batchRoot "$prefix.stdout.log"
                 $stderr = Join-Path $batchRoot "$prefix.stderr.log"
                 $arguments = @('-NoLogo', '-NoProfile')
                 if ($AuthMode -eq 'Certificate') { $arguments += '-NonInteractive' }
                 $arguments += @('-File', ('"{0}"' -f $LauncherPath),
-                    '-MigrationName', ('"{0}"' -f $migration.Name), '-Action', $action)
+                    '-MigrationName', ('"{0}"' -f $migration.Name), '-Action', $action,
+                    '-RunResultPath', ('"{0}"' -f $job.ResultPath), '-RunResultId', $job.RunId)
                 if ($AuthMode -eq 'Certificate') { $arguments += '-UseCertificate' }
                 $outputLog = if ($AuthMode -eq 'Certificate') { $stdout } else { '' }
                 try {
@@ -290,8 +308,8 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1S7zNJ5pE+eWr
-# ++URJyeu5KBsVZOQAIqnRZrpbcJBBKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJ5B9jj3OdcEHb
+# 4HwjvvFVEhJW2gSyxPQdN1RVDfvvBaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -321,14 +339,14 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA0FwE/sB0cYomKX/7Ayx+h
-# MGY44qGoZk/mwLOBALjfizANBgkqhkiG9w0BAQEFAASCAYBRhFM7jKjtnQq1qQ/B
-# GNnszcA1DyNUfurjBqMCYRUngEj0p1X0dgWsb3CCDB4/ZtKxw8yrUR4V0jwptjSs
-# cBRntk5ts39b5cLFph0YcMHXqBQq7AYnI3ix5B1dpCKf3FPPZA2n16FnJq+D2bRP
-# K5JQt2n/gMyozYtRUyNjJiOCmppzipvnZeGWwVi/CsFVgWeqrnmKR93T2nAWxlY/
-# BLmMX7DeiIOCdNeXNnTYPE7R6RRTvAHFH1u0LEUFOFFoctcq8y0+U9MUzUWhQ9R/
-# wAXMZza1MvNbMimTA4OrlFiuoFvWijiKptKwC9Y3uZV3SqOZsEBhB7vTSxEgEaMe
-# GmKkGjt4jDe8dDQY5NxfDX4BX35CNLIPiql6QZ11QmhmvBO94Lv7Ksrz6MzHnq90
-# KrLddaoTuDX/Uo02Gpq5qA2FmySaPWiA3Kc9OFoh+aXMkTY57TFofkjUf2RZgmWg
-# XvmgIRqpGd1jymBrYZrYin4OLiO8HbMwzjoPQTDyjBSUTfk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDrRcCWq5ENeG5Gy9Nn8L/C
+# Q87lt+/Jr/n9TpORO5KdcjANBgkqhkiG9w0BAQEFAASCAYAc5sc+ZzS7R3pnBmCV
+# 41PIj17cj/tIP4bBsINnNDG/ICbY8KqSF1hN8+0ljCDtcrp5dnWeBe65VrfXtEkz
+# DN19icsJFt2OT5g4l08p9BnPhvakZbQ3j2iggH4DzH1/HhCrVpmzGPRhnWGtEvV8
+# z2/Og4ZsM/WUxwoU8uKWzu+LarDYCSTEEwdJbPDcA62UgWh1BZjI+b6Bw3VSNAEH
+# 1QEgqRHL7lTHsoomBkQ+rVURg5z8Nx8csicDeq9xtiqRFekGmEYcmveRRBgvP1X1
+# cZ16uojqM1lXBvs4m/znFp9LKxaZSc2xOHPGdOAr2zpgWvS77o0wMBKlkMqGTJ8S
+# ITGhdPuxfkpvJdWhvUbVWv7V/N5IKaMqvbZMWoVwP2tpuy7W0FoCw2v+JF2MPefS
+# ChSLqXLt5zBLDPBxhje1dFx/iU+28RqzKQnblvjJXALadxpoOOaHvXXIcdpn3OAk
+# yfN9jHZQzogKseTQgjy+g+ex4eQrmgfMWxmmffHUwsVY6NY=
 # SIG # End signature block

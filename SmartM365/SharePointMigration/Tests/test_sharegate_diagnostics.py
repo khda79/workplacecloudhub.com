@@ -1,6 +1,6 @@
 """Offline contract checks for ShareGate CSV diagnostics."""
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 import csv
 import hashlib
@@ -102,6 +102,37 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
         }])
         self.assertEqual(updated["IssueLineState"], {"Accepted": 2, "To fix": 1})
         self.assertEqual(updated["ResidualLineRate"], 50.0)
+
+    def test_snapshot_must_match_original_report(self):
+        snapshot = self.root / "snapshot.xlsx"
+        snapshot.write_bytes(b"stable original workbook")
+        original = self.root / "original.xlsx"
+        original.write_bytes(snapshot.read_bytes())
+        DIAG.analyze([self.report], self.output, self.project,
+                     source_labels=[original], source_snapshots=[snapshot])
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(summary["InputEvidence"][0]["Path"], str(original))
+        self.assertEqual(summary["InputEvidence"][0]["Sha256"], hashlib.sha256(snapshot.read_bytes()).hexdigest())
+        original.write_bytes(b"new workbook being synchronized")
+        unpublished = self.root / "changed"
+        with self.assertRaisesRegex(ValueError, "changed after its snapshot"):
+            DIAG.analyze([self.report], unpublished, self.project,
+                         source_labels=[original], source_snapshots=[snapshot])
+        self.assertFalse((unpublished / "Summary.json.txt").exists())
+
+    def test_source_changed_during_analysis_is_not_published(self):
+        original_read = DIAG.read_csv
+        def changing_read(path):
+            result = original_read(path)
+            self.report.write_bytes(self.report.read_bytes() + b"\n")
+            return result
+        DIAG.read_csv = changing_read
+        try:
+            with self.assertRaisesRegex(ValueError, "changed during analysis"):
+                DIAG.analyze([self.report], self.output, self.project)
+            self.assertFalse((self.output / "Summary.json.txt").exists())
+        finally:
+            DIAG.read_csv = original_read
 
     def test_raw_columns_and_manual_actions_are_exported(self):
         DIAG.analyze([self.report], self.output, self.project)

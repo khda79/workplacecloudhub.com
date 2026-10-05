@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify destination batch concurrency with offline child processes.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -73,11 +73,17 @@ exit $LASTEXITCODE
                 Set-Content -LiteralPath (Join-Path $dir 'migration.config.psd1')
         }
         [IO.File]::WriteAllText((Join-Path $root 'stub.ps1'), @'
-param([string]$MigrationName, [string]$Action, [switch]$UseCertificate)
+param([string]$MigrationName, [string]$Action, [switch]$UseCertificate, [string]$RunResultPath, [string]$RunResultId)
 $start = [datetime]::UtcNow
 Start-Sleep -Milliseconds 1800
 [pscustomobject]@{ Migration=$MigrationName; Action=$Action; Start=$start.ToString('o'); End=[datetime]::UtcNow.ToString('o'); Certificate=[bool]$UseCertificate } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "$Action-$MigrationName.event.json")
+$log=Join-Path $PSScriptRoot "$Action-$MigrationName.log"
+$csv=Join-Path $PSScriptRoot "$Action-$MigrationName.csv"
+Set-Content -LiteralPath $log 'offline scan log'
+Set-Content -LiteralPath $csv 'offline scan output'
+@{ RunId=$RunResultId; Migration=$MigrationName; Action=$Action; LogPath=$log; OutputCsv=$csv } |
+    ConvertTo-Json | Set-Content -LiteralPath $RunResultPath
 if ((Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) -and $MigrationName -eq 'SiteB' -and $Action -eq 'ScanTargetFiles') { exit 7 }
 '@)
         if ($scenario.Fail) { [IO.File]::WriteAllText((Join-Path $root 'fail'), '') }
@@ -131,6 +137,12 @@ if ((Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) -and $MigrationNam
         }
         $summary = @(Get-ChildItem -LiteralPath (Join-Path $root 'Migrations\logs') -Recurse -Filter summary.csv | Import-Csv)
         if ($summary.Count -ne 6) { throw 'Incomplete batch summary.' }
+        foreach ($row in $summary) {
+            if (-not $row.RunLog -or -not $row.OutputCsv -or $row.OutputLog -ne $row.RunLog -or
+                -not (Test-Path -LiteralPath $row.RunLog) -or -not (Test-Path -LiteralPath $row.OutputCsv)) {
+                throw 'Interactive or certificate batch lost the actual scan log/output receipt.'
+            }
+        }
         $failures = @($summary | Where-Object Status -EQ FAILED)
         if ($failures.Count -ne $(if ($scenario.Fail) { 1 } else { 0 }) -or
             ($scenario.Fail -and $failures[0].ExitCode -ne '7')) { throw 'Child failure was not propagated.' }
@@ -145,8 +157,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB60KmHxKnSsGDa
-# ZuIMdQ9OAjfrMCVblgsTOTjMpsnxl6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDo2CH4M9SNjCmp
+# j8z/UaCPh492yUrVuVqkOS1yPL/rRqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -176,14 +188,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBmHg62wenME2RjYZfDRNdB
-# QYWUBOodU58HrsBMEHxhazANBgkqhkiG9w0BAQEFAASCAYAI3cCsy7ZEsUVA48xL
-# o9X/hhDWp0qBY57AiKANdXhO4uCEJ0iWFV3lfwf7PMj3a0ZzqB+/PKrdhynk28FT
-# cYDpk8/eYPK94HBasEbCjCfy+0F8ixLDFDqybcDGsgH8R9X1GuDt/3+1Eg+TPl1d
-# AJZBAt/rHcsMYpwxhPxpT8osyCMPxfSJnafgvtz+Bja2iRREbyNRLbw7J8Ib5JGX
-# fEhPCjaGZi1LbenPx9QvPfqcVx+ntkh1rhosXkuWAzxKaEm7bhTbI3AhpFil1gxZ
-# j0AxQQi3naDxvdKnvFVyNreR9j2027aD1NRAEtr1J3YJG/NQzzPg7vHN65tVPRXO
-# nySXHPHGAIs6MLvEr5I6sdvHuVKyY8wfrRYYEEjvp63R/+HqvA9Bz71DPOFnF0Rl
-# 7kvkc036oGnygixW//0kFS+B8++5sS2DGUVeCjb9iTz9Dvn2nRyjtgBHqndD+g/s
-# V4DKVNZZAsE856xMePSt5mZuOOB9gs6WNaJyd731cKIRc2Q=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCpCkCCzQ40Tws+93llyfI9
+# 1OirQFrXlVOoawn1RXzS5zANBgkqhkiG9w0BAQEFAASCAYASS97q/QQOFCkQ4CyU
+# 7pKKMYJ0ydZQtjY7XQpXxpaQtc1eogeU9E5EPhj8aK4YiVIepMiCDr9lceRBCQnH
+# AIxFtxjI+aonSWhRlrShcR27vq+2Gsi77gmPuBSDzykveWTZLVZQQ2om4w/bZBuN
+# 3/rD/1aWn9zvwclF9BhLyLFujLu/MhbUylOpPsFRMd20LS+mCl98jsH+CrAk+KFL
+# PWdnU68qmQG9KkOpuLgdtUDh8XIBRBrfIVGVXuDSFgI7Y02W1E9e0572z+TU7cIw
+# H6qhWGIIppCcO9qml/e9i1AYg1JUgvwri+nUG8w3QW7UV+o5TEU5yh6JDYfS5XGW
+# h/GioFy2s479tKHlX7XJkt22QSVyEntPwBYr8Nmp+QpNCBtQzrhLBsc40fJ2QJ1j
+# ILK1mTQxocMls04RPz3jNcuFkWD5GqNaDZgGnqJ+D0zQ198pUvliqXKv8O3fmtjF
+# lWxAvW9fDGmeRCSP7M8UziTV/LtM8+lsBOxjMVCeUf2xcWo=
 # SIG # End signature block

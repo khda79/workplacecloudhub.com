@@ -37,7 +37,7 @@
     .\SmartM365-SharePointSource-FileInventory.ps1 -WebApplicationUrl "https://intranet" -IncludePermissionInventory
 
 .VERSION
-    1.0.8
+    1.0.9
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -550,7 +550,7 @@ function Format-InventoryDuration {
         return ("{0}d {1:00}:{2:00}:{3:00}" -f $Elapsed.Days, $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
     }
 
-    return ("{0:00}:{1:00}:{2:00}" -f [int]$Elapsed.TotalHours, $Elapsed.Minutes, $Elapsed.Seconds)
+    return ("{0:00}:{1:00}:{2:00}" -f $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
 }
 
 function Write-InventoryHeaderOnlyCsv {
@@ -1178,8 +1178,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdPF7G6JvYk6Nz
-# vEO5x4s1+X+efS+eLmxLf2gx9mxjLqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+EKRA5OVvHWYb
+# bPC1FbqRY590uEVCo2TNBwATg6lXzqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1209,14 +1209,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCv5AzQrJyHY2lWMG8f687S
-# ImScNKi8x+vYMy6CIzSAyzANBgkqhkiG9w0BAQEFAASCAYBZyyl/XGNLf3VFgGt1
-# IcArEVLl7WUCOdA/P6Nn+W4l6FWG2eQXTnjvuGEKi+RemXzXpLQW/Ub+qyjVtBcs
-# GxayO9Cz2GTL9mLS1ZSChPmCTUH7XgGV/Iu6xtCF0TQjh9hN7ZxWvN07V/RtFScD
-# nJ/LCysYdJkZq3jFlfk20LXoRm1HC39hAj1BqQsWKf/LnN4yFCNhkZUhyQy4jg2z
-# 5sGyFyNiiw6pO6u2g6kkN8qb3UI8IvtNfvgroU0lRxx75KxKvwjA4QXMfC0uuNM6
-# 6jjH3y4GpMfvquPUluytERnwdLImfUoU6LLHYtrjaqBoCA2x76VekI3lqFDKuV9V
-# 4SNtpIwOFcEN6vdnbeosCqivRfsuy7oxjEV4EnPYvu8NlrMB0PlPTdpmAdYtOY1S
-# mo3NN370mT4V8txWK72dBhInHTY3Q3SThjW7LGTzKUG+7IVdxXIILWFleAKbm90j
-# R2TlAOCGS+X3JUqnbwZdCGL4w2WOWgTK6t0iT8eBc9KIRpg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBW8ExnaG3BDNeMzed+8xu/
+# d8dXzyzh7B6WNPwUeBIigTANBgkqhkiG9w0BAQEFAASCAYBUs/HDR3uu8vpFFYCA
+# qjecdMzvPq35K4jV3JwOp+KSilYhTSvWeTI7/nEHXJCMrxxiDPDxL8OAam+gxNkt
+# qcQNiLQZd6wK/kh4TTJ40dHoJTvOcG5rQ+LHbvDcWgJThboviL7eKIO7k7glSxKp
+# Lytiwobs3JjbS6vv8pWU5VnwsMPkN54bE51toCJqGSsoaX9TVbXejLfbJg7vOsVR
+# AafbcSToFLJd3Txp96UiIQOGPf3yy51Q2dgJqW5f/Y5hFeTLYLmNxlrlCE+MHfMe
+# cgWZJ2a9/pAb/HAEo1o9F6Oh5N8QMe85iJ2/GMD8ERhjRiFEJGb2P/f6yIQBX0xh
+# eTQqgCYF4IOamm5UuhwLJNqbv6fSVbikiK2+HkvTSPaz18dMNS3e+TM86dVpzVWJ
+# ESHmNYilsFRGq8UAqX19hmAhZFqnCLkwcuPBARyPAK+lGBqSaJlmHXiH+cuMys+9
+# 36BvRgRjN/00HAJ1yaRX+sLYHkYFAomyrq8BfOy80Z5LDP8=
 # SIG # End signature block
