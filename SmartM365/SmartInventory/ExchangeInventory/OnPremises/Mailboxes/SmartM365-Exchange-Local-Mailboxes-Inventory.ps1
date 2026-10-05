@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.53
+1.54
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.53
+Version: 1.54
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -255,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.53"
+$ScriptVersion = "1.54"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -352,6 +352,9 @@ $script:LocalMailboxExpectedScopes = @()
 $script:LocalMailboxAcquisitions = New-Object 'System.Collections.Generic.List[object]'
 $script:RemoteMailboxAcquisitionComplete = $false
 $script:CmdbLocalMailboxSourceComplete = $false
+$script:LocalMailboxPopulationCoverageComplete = $false
+$script:LocalMailboxObservedNativeGuids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$script:LocalMailboxOwnedNativeGuids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 
 function Get-SmartM365LocalMailboxIssueImpact {
     [CmdletBinding()]
@@ -363,7 +366,8 @@ function Get-SmartM365LocalMailboxIssueImpact {
     $statisticsIssues = @('MailboxStatisticsFailure','ArchiveMailboxStatisticsFailure',
         'MissingMailboxDatabase','ExchangeStoreUnavailable')
     $impact = 'AcquisitionIncomplete'
-    if ($Operation -in @('Get-Mailbox','Get-RemoteMailbox') -and $Category -in $recipientIssues) {
+    if (($Operation -in @('Get-Mailbox','Get-RemoteMailbox') -and $Category -in $recipientIssues) -or
+        ($Operation -eq 'Get-Mailbox' -and $Category -eq 'MissingRequiredMailboxDatabase')) {
         $impact = if ($NativeRecordRetained) { 'RecipientDataQuality' } else { 'RecipientNotProvenRetained' }
     }
     elseif ($Operation -in @('Get-MailboxStatistics','Get-MailboxStatistics-Archive') -and $Category -in $statisticsIssues) {
@@ -434,19 +438,80 @@ function Invoke-SmartM365LocalMailboxPopulationQuery {
     [CmdletBinding()]
     param([string]$Scope = '', $ResultSize = 'Unlimited')
 
-    $acquisition = [pscustomobject]@{ Scope=$Scope; QueryCompleted=$false; ProjectionCompleted=$false; Rows=0 }
+    $acquisition = [pscustomobject]@{ Scope=$Scope; QueryCompleted=$false; ProjectionCompleted=$false; Rows=0; ObservedRows=0 }
     [void]$script:LocalMailboxAcquisitions.Add($acquisition)
     $query = @{ ResultSize=$ResultSize; ErrorAction='Stop'; WarningVariable='mailboxWarnings' }
     if ($Scope) { $query.OrganizationalUnit = $Scope }
     $mailboxWarnings = @()
     $rows = @(Get-Mailbox @query)
-    $acquisition.QueryCompleted = $true
-    $acquisition.Rows = $rows.Count
+    $acquisition.ObservedRows = $rows.Count
     foreach ($warning in @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $mailboxWarnings)) {
         $nativeGuid = Resolve-SmartM365MailboxWarningNativeGuid -ObjectPath $warning.ObjectPath -NativeRows $rows
         Add-SmartM365LocalMailboxIssue -Category $warning.Issue -Operation 'Get-Mailbox' -MailboxIdentity $warning.ObjectPath -ObjectGuid $nativeGuid -NativeRecordRetained:([bool]$nativeGuid) -Message $warning.Warning -SuggestedAction $warning.SuggestedAction | Out-Null
     }
+    if ($DetectAllDomains -and $Scope -and @($script:LocalMailboxExpectedScopes).Count -gt 0) {
+        $partition = Get-SmartM365MailboxDomainPartition -NativeRows $rows -DomainScope $Scope -ForestScopes $script:LocalMailboxExpectedScopes
+        foreach ($id in $partition.ObservedGuids) { [void]$script:LocalMailboxObservedNativeGuids.Add($id) }
+        foreach ($id in $partition.OwnedGuids) {
+            if (-not $script:LocalMailboxOwnedNativeGuids.Add($id)) { throw 'Native mailbox was assigned to more than one domain acquisition.' }
+        }
+        $rows = @($partition.Rows)
+    }
+    $acquisition.QueryCompleted = $true
+    $acquisition.Rows = $rows.Count
     return $rows
+}
+
+function Get-SmartM365MailboxDomainPartition {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$NativeRows,
+        [Parameter(Mandatory=$true)][string]$DomainScope,
+        [Parameter(Mandatory=$true)][string[]]$ForestScopes)
+
+    $scopes = @($ForestScopes | Sort-Object Length -Descending)
+    if ($DomainScope -notin $scopes -or @($scopes | Select-Object -Unique).Count -ne $scopes.Count) {
+        throw 'Invalid or repeated mailbox forest domain scope.'
+    }
+    $observed = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $owned = New-Object 'Collections.Generic.List[object]'
+    $ownedIds = New-Object 'Collections.Generic.List[string]'
+    foreach ($row in $NativeRows) {
+        $id = [guid]::Empty
+        if (-not [guid]::TryParse([string]$row.Guid, [ref]$id) -or $id -eq [guid]::Empty) { throw 'Native mailbox has no usable object GUID.' }
+        if (-not $observed.Add($id.ToString('D'))) { throw 'Repeated native mailbox object GUID within one domain query.' }
+        $dn = [string]$row.DistinguishedName
+        $owner = ''
+        foreach ($candidate in $scopes) {
+            # Longest native DN suffix assigns child-domain objects to that child,
+            # not to a parent/root query that also returned them. CN containers stay in scope.
+            if ($dn.EndsWith(',' + $candidate, [StringComparison]::OrdinalIgnoreCase)) { $owner = $candidate; break }
+        }
+        if (-not $owner) { throw 'Native mailbox DN does not belong to a discovered forest domain.' }
+        if ($owner -eq $DomainScope) { [void]$owned.Add($row); [void]$ownedIds.Add($id.ToString('D')) }
+    }
+    [pscustomobject]@{Rows=$owned.ToArray(); OwnedGuids=$ownedIds.ToArray(); ObservedGuids=@($observed | Sort-Object)}
+}
+
+function Assert-SmartM365MailboxDomainCoverage {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][string[]]$ObservedGuids,
+        [AllowEmptyCollection()][string[]]$OwnedGuids,
+        [AllowEmptyCollection()][object[]]$ExportRows)
+
+    $expected = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($text in $ObservedGuids) {
+        $id = [guid]::Empty
+        if (-not [guid]::TryParse($text, [ref]$id) -or $id -eq [guid]::Empty) { throw 'Invalid observed native mailbox GUID.' }
+        [void]$expected.Add($id.ToString('D'))
+    }
+    $owned = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($text in $OwnedGuids) {
+        $id = [guid]::Empty
+        if (-not [guid]::TryParse($text, [ref]$id) -or $id -eq [guid]::Empty -or -not $owned.Add($id.ToString('D'))) { throw 'Invalid or repeated owned native mailbox GUID.' }
+    }
+    if (-not $expected.SetEquals($owned)) { throw 'Domain partition lost or substituted observed native mailbox objects.' }
+    $nativeRows = @($expected | ForEach-Object { [pscustomobject]@{Guid=$_} })
+    Assert-SmartM365MailboxNativePopulation -NativeRows $nativeRows -ExportRows $ExportRows
 }
 
 function Get-SmartM365LocalMailboxQualification {
@@ -454,9 +519,10 @@ function Get-SmartM365LocalMailboxQualification {
     param([AllowEmptyCollection()][object[]]$ExpectedScopes,
         [AllowEmptyCollection()][object[]]$Acquisitions,
         [bool]$RemoteAcquisitionComplete,
-        [AllowEmptyCollection()][object[]]$Issues)
+        [AllowEmptyCollection()][object[]]$Issues,
+        [bool]$PopulationCoverageComplete = $false)
 
-    $complete = @($ExpectedScopes).Count -gt 0 -and $RemoteAcquisitionComplete
+    $complete = @($ExpectedScopes).Count -gt 0 -and $RemoteAcquisitionComplete -and $PopulationCoverageComplete
     if (@($Acquisitions).Count -ne @($ExpectedScopes).Count) { $complete = $false }
     foreach ($scope in $ExpectedScopes) {
         $scopeMatches = @($Acquisitions | Where-Object Scope -eq $scope)
@@ -477,6 +543,7 @@ function Get-SmartM365LocalMailboxQualification {
         Qualifications = @(
             "Local domain queries: completed projections=$(@($Acquisitions | Where-Object ProjectionCompleted).Count); expected=$(@($ExpectedScopes).Count).",
             "Remote mailbox native population acquired and projected: $RemoteAcquisitionComplete.",
+            "Observed forest mailbox GUID union equals the unique domain-owned export: $PopulationCoverageComplete.",
             "Mailbox issue occurrences: $(@($Issues).Count); blocking=$blocking. See Exchange_OnPrem_MailboxCollectionIssues.csv; unknown supplementary fields are not zero.",
             'Recipient anomalies are retained by native object GUID; missing SMTP does not establish an EXO match.'
         )
@@ -487,9 +554,13 @@ function Find-SmartM365MailboxSmtpConflict {
     [CmdletBinding()]
     param([AllowEmptyCollection()][object[]]$Rows)
 
+    foreach ($duplicate in @($Rows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.ObjectGuid) } | Group-Object ObjectGuid | Where-Object Count -gt 1)) {
+        Add-SmartM365LocalMailboxIssue -Category 'RepeatedNativeMailboxObjectGuid' -Operation 'MailboxReconciliation' -ObjectGuid $duplicate.Name -Message "One native mailbox GUID occurs $($duplicate.Count) times in the export; no row was removed." -SuggestedAction 'Review overlapping acquisition scopes before publishing mailbox data.' | Out-Null
+    }
     $groups = @($Rows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.PrimarySmtpAddress) } |
         Group-Object { ([string]$_.PrimarySmtpAddress).Trim().ToLowerInvariant() } | Where-Object Count -gt 1)
     foreach ($group in $groups) {
+        if (@($group.Group.ObjectGuid | Sort-Object -Unique).Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$group.Group[0].ObjectGuid)) { continue }
         Add-SmartM365LocalMailboxIssue -Category 'ConflictingPrimarySmtpAddress' -Operation 'MailboxReconciliation' -PrimarySmtpAddress $group.Name -Message "Multiple native mailbox objects share one primary SMTP address; all $($group.Count) records are retained." -SuggestedAction 'Review distinct native object GUIDs before address-based reconciliation.' | Out-Null
     }
 }
@@ -811,6 +882,10 @@ function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings {
             $issue = 'InvalidDisplayName'
             $suggestedAction = 'Remove invalid leading or trailing whitespace or unsupported characters from DisplayName.'
         }
+        elseif ($message -match '^\s*Database is mandatory on UserMailbox\.\s*$') {
+            $issue = 'MissingRequiredMailboxDatabase'
+            $suggestedAction = 'Review the retained UserMailbox recipient with no database. No database or mailbox statistics are inferred.'
+        }
 
         if ([string]::IsNullOrWhiteSpace($issue)) {
             $issue = 'UnclassifiedRecipientWarning'
@@ -1130,6 +1205,36 @@ function Get-SmartM365MailboxReportCsvRowCount {
     catch { return 0 }
 }
 
+function New-SmartM365LocalMailboxIssueEmailSection {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Issues, [string]$IssuesCsvPath)
+
+    if (@($Issues).Count -eq 0) { return }
+    $rowsHtml = foreach ($group in @($Issues | Group-Object Category,Operation | Sort-Object Name)) {
+        $nativeIds = @($group.Group | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.ObjectGuid) } | Select-Object -ExpandProperty ObjectGuid -Unique)
+        $unbound = @($group.Group | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ObjectGuid) }).Count
+        $objects = if ($unbound -gt 0) { '{0} identified; {1} unbound occurrences' -f $nativeIds.Count,$unbound } else { [string]$nativeIds.Count }
+        $blocking = @($group.Group | Where-Object { [string]$_.BlocksCmdbQualification -eq 'True' }).Count
+        @"
+<tr>
+  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $group.Group[0].Category)</td>
+  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $group.Group[0].Operation)</td>
+  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $objects)</td>
+  <td align="right" style="padding:8px;border-bottom:1px solid #fde68a;">$($group.Count)</td>
+  <td align="right" style="padding:8px;border-bottom:1px solid #fde68a;">$blocking</td>
+</tr>
+"@
+    }
+    [pscustomobject]@{ Title='Mailbox acquisition and recipient findings'; Html=@"
+<p>Recipient findings do not mean objects were omitted. Unbound warnings and acquisition failures still block CMDB qualification.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#fffbeb;color:#78350f;font-size:12px;">
+<tr style="background:#fef3c7;"><th align="left" style="padding:8px;">Finding</th><th align="left" style="padding:8px;">Operation</th><th align="left" style="padding:8px;">Affected objects</th><th align="right" style="padding:8px;">Occurrences</th><th align="right" style="padding:8px;">Blocking occurrences</th></tr>
+$($rowsHtml -join "`r`n")
+</table>
+<p>Detailed evidence: $(ConvertTo-SmartM365EmailHtmlText $IssuesCsvPath)</p>
+"@ }
+}
+
 function New-SmartM365ExchangeLocalMailboxReportEmailBody {
     [CmdletBinding()]
     param(
@@ -1155,6 +1260,8 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [AllowNull()]$RemoteMailboxUpload,
 
         [object[]]$RemoteMailboxDataQualityWarnings = @(),
+        [object[]]$LocalMailboxCollectionIssues = @(),
+        [string]$CollectionIssuesCsvPath = '',
 
         [Parameter(Mandatory = $true)]
         [string]$Title
@@ -1282,6 +1389,8 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
     $sections = @(
         [pscustomobject]@{ Title = 'Domain summary'; Html = $domainTableHtml }
     )
+    $localIssueSection = New-SmartM365LocalMailboxIssueEmailSection -Issues $LocalMailboxCollectionIssues -IssuesCsvPath $CollectionIssuesCsvPath
+    if ($localIssueSection) { $sections += $localIssueSection }
 
     $exchangeDataQualityWarnings = @($RemoteMailboxDataQualityWarnings | Select-Object -First 100)
     if ($exchangeDataQualityWarnings.Count -gt 0) {
@@ -1457,7 +1566,8 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $summaryCsvForMail = if ($latestSummaryCsv -and (Test-Path -LiteralPath $latestSummaryCsv -PathType Leaf)) { $latestSummaryCsv } else { $summaryCsv }
     $remoteMailboxDataQualityWarnings = @($Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings)
     try {
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -Title ($TaskName + ' - Mailbox report')
+        $issueCsvPath = Join-Path $(if ($latestCsvFolder) { $latestCsvFolder } else { $localMailboxFolder }) 'Exchange_OnPrem_MailboxCollectionIssues.csv'
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -Title ($TaskName + ' - Mailbox report')
         $mailMarkerPath = Join-Path $reportOutputPath 'SmartM365-ExchangeLocalMailboxSummary.sent'
         Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $mailMarkerPath -SendAction {
             Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
@@ -2827,6 +2937,10 @@ throw $errorMessage
                 Process-SpecificDomain -CurrentDomain $domain
             }
             WriteLog -Message "Finished processing all domains."
+            if (-not $OnlyADPermission -and $ForceOverwriteCSV -and $MaxItems -eq 0) {
+                Assert-SmartM365MailboxDomainCoverage -ObservedGuids @($script:LocalMailboxObservedNativeGuids | Sort-Object) -OwnedGuids @($script:LocalMailboxOwnedNativeGuids | Sort-Object) -ExportRows @($Global:ScriptOverallMailboxData)
+                $script:LocalMailboxPopulationCoverageComplete = $true
+            }
             # Export the globally accumulated data to the AllDomains CSV
             if ($Global:ScriptOverallMailboxData.Count -gt 0) {
                 WriteLog -Message "Exporting combined data for all processed domains to '$globalCombinedCsvFile'..."
@@ -3289,7 +3403,7 @@ Else
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
     Stop-SmartM365TranscriptSafely
-    $qualification = Get-SmartM365LocalMailboxQualification -ExpectedScopes $script:LocalMailboxExpectedScopes -Acquisitions @($script:LocalMailboxAcquisitions.ToArray()) -RemoteAcquisitionComplete $script:RemoteMailboxAcquisitionComplete -Issues @($script:LocalMailboxIssues.ToArray())
+    $qualification = Get-SmartM365LocalMailboxQualification -ExpectedScopes $script:LocalMailboxExpectedScopes -Acquisitions @($script:LocalMailboxAcquisitions.ToArray()) -RemoteAcquisitionComplete $script:RemoteMailboxAcquisitionComplete -Issues @($script:LocalMailboxIssues.ToArray()) -PopulationCoverageComplete $script:LocalMailboxPopulationCoverageComplete
     $script:CmdbLocalMailboxSourceComplete = $qualification.CompleteScope
     foreach ($qualificationNote in $qualification.Qualifications) { WriteLog -Message $qualificationNote -Level $(if ($qualification.CompleteScope -and $script:LocalMailboxIssues.Count -eq 0) { 'INFO' } else { 'WARNING' }) }
     Set-SmartM365CmdbSourceScope -CompleteScope ($DetectAllDomains -and $ForceOverwriteCSV -and $IncludeRemoteMailboxes -and -not $RemoteMailboxesOnly -and -not $OnlyADPermission -and @($IncludedOrganizationalUnit).Count -eq 0 -and @($TargetDomains).Count -eq 0 -and $MaxItems -eq 0 -and $script:CmdbLocalMailboxSourceComplete) -Scope 'CMDB:local_mailboxes,remote_mailboxes' -Qualifications $qualification.Qualifications
@@ -3302,8 +3416,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCvg/pQz9Ssrym
-# EKPHQRIQb8ROsgVzkP6Wwc0eCzKd6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKdiLf4YWCcSMS
+# dSQAUYYoLAqeXJZ97U+2Oc3F17SCm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3436,31 +3550,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICGSEjWqcwEx9zm4+RIcEiH64pDHKo/ftaa+HvkWPzKYMA0GCSqG
-# SIb3DQEBAQUABIIBgAKEPKCx2o1foq5mKDLATuj6PqAQPsbbkvbAPctkEJcNCjWy
-# lIBGlSUEU57qn+uzB+Xn8PwAoxzL243VYAGfksREo7NYFP79ZCv+SmaJGrlUPCqe
-# Zmd0FmGy/r/LYNKvtDcTQn2lL0bI6nPUUJ8tPQm/YdhaZsTe6umnWWD/rwLNmzCl
-# 7guBK2jJfxW1xbdER7+lO8JIZzqu4Saz6EJAPEuh+aC/+oURcn475qmU1tEkLL7L
-# 01NXw5/EuQJ94RLJTVXecFGXHE4+RVgduS/nAZxs8wlIzPiT3hpjcJMhMUoctDjq
-# 9NvqjGMA5kpQRxccM3t++mdYl4c46sTt8bwccnOe1+zCIHd7ghQp9EeNVx9+4d5J
-# Z5YRh9tWbBtAFNUuo8sMuKiS9XmtC53wqU4kZKEEJ1q3vOvx9cdRPMJHYqU0T60g
-# XrDmUxfg+bgpsVHlDqOUR/8ZyALKgaFshM1x/ZpuRPkqE6WhlJewsa7VB0fJtE1j
-# uIptra66SquOBpmBx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAImq6x3W+wYWqDIOOigojyxsYgJ5+wxn1gcqd50t18kMA0GCSqG
+# SIb3DQEBAQUABIIBgDG+qhzWDxoVJ3H+2r9c5bRCqKp7x2YufA6q7Lm75iPeLnPZ
+# IajO1p4OZ8oeE4DlGugO0r5WMpTk3ZR7eC3+P3yHPrDbmBWcFx5pJJ8Vmx8aTqGh
+# E9MmPLXK2yW2nL7/E1eOVzziWIX0ErRx22S6VGzIOpOHGTUbNmfJi63p6CWPszsk
+# 6hK7yBYlNoos/VhChGxJPErn13fuuMRrb0SeHfW8ARiQKOYDtxH3oacFb1aE1PzC
+# w2o/YKCFL/Q7k6YB4RHQfgwxFHtfubH1qoW7rId27T/UpTQVMlSG4B3F3NxJ4SqN
+# hY31vYm4sLcBDU91UzIjGYElMiB79FaZJhhegarVNtKqJRGcJrmdMLthlNE1jeNk
+# GE8p3WK6+VU9gqjD60WKy8LdKhJphGbWvLe1SIRjYspNfuH9GjII1idGzuW/nTxn
+# s46PB1s2URqYDrgVdYXOhtmUfv8BanedLjCfOVMuxZeHNo7YTiRLQvUuKjwOla1x
+# vxTnIY3q700Ze3Es06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjUy
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAPBjsHJllDqaHox18lU8Y+dawBlxi5Nt7GE/lI
-# STYHwDANBgkqhkiG9w0BAQEFAASCAgAyIz855spmqDjlw7oxj7cJF2LXahBS+1tP
-# CpebiEJjpMTdHN1qOk6diQehwlCSOoiQZSD/ZoFjJLGdTDRxxIvENpGqnjxUXMEN
-# FsdR4VUdqGgKuCxSmg6JYn4QUdgiOl4ZuTZNuSGS8zp8t75tKEXBZPnYh5JUwTQl
-# bY6Agr600O7mjouM5yVrMQ0nr6krJ5R7tP8YKTvMNYC7ZPXp2gNSWpqH7JVsxyeN
-# hhAH0GQKKKyVt4DG+aTYmvvxhxnnlG7LmKB6KYF4/SExykGjs92jt0x1W5TAfQdK
-# VorTLjKkHvjOVDE5gYn9/rUPUeBEifpUo9Nzt/ZJdNXMJMlPTNHI74EPH1pgi+49
-# DjDuBs2WwpGGAxmxMTuarH+/Qv+J50XX5wEhtIhM41xNbzaifa3s6dw+KWuB0zGc
-# nsXwiSj4Zhs5q9lFYrFev3aDpVdzIG/6VrczctaUMn5r5zU1mtgTIwRlsR8tTF52
-# lMfoCBw6MzBW1LLazWquW1R9J5yA2a8fHNS1yYa2rMsYaQ8GlcbGlVRz2QIPHT2y
-# JAJ+xefdRDLFzW6CpBsTC+er+Ffn2U1Y5VOQrXcAEd0gl54eo2T1SNqjJLuV0V+M
-# 3EMmkswfv/8QCQrP1YCpkOfP7y69y0wiW2jyhHUnsVDb3xXb4aJUX0Mvlwrkf2dS
-# A81jbDGAkg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwODM1
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDrlCOLHTmU0odQGtlPgvFHi6aisTR0Gkc+bHw3
+# xajjKDANBgkqhkiG9w0BAQEFAASCAgB8igdIS3wEB70H+U9K2GcvchKDiwM2l1eu
+# Im66DgZpSldhZJr6L3YmmKVZNj0lkryHZulRL4mSHEmADZE5g53zpwDk9FIsJk70
+# 7m79pdjbvA+9Jpb7s+JTH/ObeZ9t59hcoROhyEUaB2iIUvsiIB5gdSoynBS+nMSI
+# CxbbDpUTQv4lpOYYaMF9un78mErbteNBjbnsc4R4z5i+Gq0Ta+91nw77eWMeoG0a
+# Dz1w0B6uyKWGg8hhE5oifUeES+EKvYTo7TL+rrhLIUgPt5YCS7TlY/00nnG93BuO
+# IpoSs2pSkIRcwbdGNBJ1jELWshS0fOIa6ZhBjmCOlS7csaknW4mllLJTdh23eSRe
+# /wzaO+gCbV6k/qTLpmdqFW9wBnd8j2qRuSvuwjrFm96YEz8E2mhV0ldaGd5YBBu2
+# 9OVylMmOMRgl5zuBdcMTpUN789QhclXe6F5ooDTRa1Ene2wFAhuL+AH31/yEXcjl
+# c7vXaaS0FB4nZ0ZV3kjyfEF8j1KVRDB/UfuN7JLQ/fGVcUnOSI4gtM6/NnjQUQyU
+# 6bfE863gY7pfU4MsPBtnzCs098jplQE78csuHX5X7g613twT+PuWlQud2Wy2071W
+# ZBqMPzJtHv4IAJiwEWuXj1dS296bk5jq5e2O4WbYd4IbboSAlt5KvUqc0Z88rGlY
+# Lhw7tePitA==
 # SIG # End signature block
