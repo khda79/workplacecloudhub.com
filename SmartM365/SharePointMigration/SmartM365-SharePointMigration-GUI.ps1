@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.59
+    1.0.60
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.59'
+$script:AppVersion = '1.0.60'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -674,23 +674,19 @@ function New-FarmDiagnosticsWindow {
 
         <!-- FILES AND PERMISSIONS -->
         <Grid x:Name="panelWorkflows" Margin="18,14" Visibility="Collapsed">
-          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="1"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
-          <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
-            <Button x:Name="btnOpenSourceSite" Content="Open source site" Style="{StaticResource BtnGhost}" Width="145" IsEnabled="False"/>
-            <Button x:Name="btnOpenTargetSite" Content="Open destination site" Style="{StaticResource BtnGhost}" Width="170" Margin="6,0,0,0" IsEnabled="False"/>
-          </StackPanel>
-          <StackPanel x:Name="panelFiles" Grid.Row="1" Grid.Column="0" Margin="0,0,14,0">
+          <StackPanel x:Name="panelFiles" Grid.Column="0" Margin="0,0,14,0">
           <TextBlock Text="FILES" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
 
           <Border Style="{StaticResource StepCard}">
             <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -710,9 +706,10 @@ function New-FarmDiagnosticsWindow {
                   <ComboBox x:Name="cmbScanSrcFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
-              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="btnOpenScanSrc" Content="Open" Style="{StaticResource BtnGhost}"
-                        Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button x:Name="btnOpenSourceSite" Content="Open source site" Style="{StaticResource Btn}" Width="145" Margin="0,0,6,0" IsEnabled="False"/>
+                <Button x:Name="btnOpenScanSrc" Content="Open folder" Style="{StaticResource BtnGhost}"
+                        Width="100" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunScanSrc"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -720,6 +717,7 @@ function New-FarmDiagnosticsWindow {
 
           <Border Style="{StaticResource StepCard}">
             <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -739,9 +737,10 @@ function New-FarmDiagnosticsWindow {
                   <ComboBox x:Name="cmbScanTgtFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
-              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="btnOpenScanTgt" Content="Open" Style="{StaticResource BtnGhost}"
-                        Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button x:Name="btnOpenTargetSite" Content="Open destination site" Style="{StaticResource Btn}" Width="170" Margin="0,0,6,0" IsEnabled="False"/>
+                <Button x:Name="btnOpenScanTgt" Content="Open folder" Style="{StaticResource BtnGhost}"
+                        Width="100" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunScanTgt"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -826,16 +825,17 @@ function New-FarmDiagnosticsWindow {
                   Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
 
           </StackPanel>
-          <Border Grid.Row="1" Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
+          <Border Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
 
           <!-- PERMISSIONS -->
-          <StackPanel x:Name="panelPermissions" Grid.Row="1" Grid.Column="2" Margin="14,0,0,0">
+          <StackPanel x:Name="panelPermissions" Grid.Column="2" Margin="14,0,0,0">
           <TextBlock Text="PERMISSIONS" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
 
           <Border Style="{StaticResource StepCard}">
             <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -855,9 +855,10 @@ function New-FarmDiagnosticsWindow {
                   <ComboBox x:Name="cmbScanSrcPermFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
-              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="btnOpenScanSrcPerm" Content="Open" Style="{StaticResource BtnGhost}"
-                        Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button x:Name="btnOpenSourceSitePerm" Content="Open source site" Style="{StaticResource Btn}" Width="145" Margin="0,0,6,0" IsEnabled="False"/>
+                <Button x:Name="btnOpenScanSrcPerm" Content="Open folder" Style="{StaticResource BtnGhost}"
+                        Width="100" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunScanSrcPerm"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -865,6 +866,7 @@ function New-FarmDiagnosticsWindow {
 
           <Border Style="{StaticResource StepCard}">
             <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -884,9 +886,10 @@ function New-FarmDiagnosticsWindow {
                   <ComboBox x:Name="cmbScanTgtPermFile" Width="290" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
-              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="btnOpenScanTgtPerm" Content="Open" Style="{StaticResource BtnGhost}"
-                        Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button x:Name="btnOpenTargetSitePerm" Content="Open destination site" Style="{StaticResource Btn}" Width="170" Margin="0,0,6,0" IsEnabled="False"/>
+                <Button x:Name="btnOpenScanTgtPerm" Content="Open folder" Style="{StaticResource BtnGhost}"
+                        Width="100" Margin="0,0,6,0" Visibility="Collapsed"/>
                 <Button x:Name="btnRunScanTgtPerm"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
               </StackPanel>
             </Grid>
@@ -1563,6 +1566,8 @@ $cmbScanSrcFile= ctrl 'cmbScanSrcFile'
 $btnOpenScanSrc= ctrl 'btnOpenScanSrc'
 $btnOpenSourceSite = ctrl 'btnOpenSourceSite'
 $btnOpenTargetSite = ctrl 'btnOpenTargetSite'
+$btnOpenSourceSitePerm = ctrl 'btnOpenSourceSitePerm'
+$btnOpenTargetSitePerm = ctrl 'btnOpenTargetSitePerm'
 $btnRunScanSrc = ctrl 'btnRunScanSrc'
 
 $badgeScanTgt  = ctrl 'badgeScanTgt'
@@ -2239,6 +2244,8 @@ function Update-UI {
     $targetScope = Get-MigrationScope $script:CurrentMigration 'Target'
     Set-MigrationSiteButton -Button $btnOpenSourceSite -Scope $sourceScope
     Set-MigrationSiteButton -Button $btnOpenTargetSite -Scope $targetScope
+    Set-MigrationSiteButton -Button $btnOpenSourceSitePerm -Scope $sourceScope
+    Set-MigrationSiteButton -Button $btnOpenTargetSitePerm -Scope $targetScope
     $lblSourceUrl.Text  = $sourceScope.Text
     $lblSourceUrl.ToolTip = $sourceScope.Tooltip
     $lblTargetType.Text = Get-MigrationEndpointType $cfg 'Target'
@@ -2990,6 +2997,8 @@ $cmbHistoryNewFile.Add_SelectionChanged({ Update-HistoryRunState })
 $btnOpenScanSrc.Add_Click({  Open-InExplorer ([string]$btnOpenScanSrc.Tag) })
 $btnOpenSourceSite.Add_Click({ Open-MigrationSite -Button $btnOpenSourceSite })
 $btnOpenTargetSite.Add_Click({ Open-MigrationSite -Button $btnOpenTargetSite })
+$btnOpenSourceSitePerm.Add_Click({ Open-MigrationSite -Button $btnOpenSourceSitePerm })
+$btnOpenTargetSitePerm.Add_Click({ Open-MigrationSite -Button $btnOpenTargetSitePerm })
 $btnOpenScanTgt.Add_Click({  Open-InExplorer ([string]$btnOpenScanTgt.Tag) })
 $btnOpenCmpFiles.Add_Click({ Open-InExplorer ([string]$btnOpenCmpFiles.Tag) })
 $btnReportCmpFiles.Add_Click({ Open-InExplorer ([string]$btnReportCmpFiles.Tag) })
@@ -4015,8 +4024,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDiCFpazs7JSBin
-# H3KH7phWiuSlp8jqf65CxLiK+gU/maCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTvFMNbWSh8NMY
+# Avfl/lIrXHyaIjhGjX94ot2GwhDe4qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4046,14 +4055,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBQQPSkpp8CryTGDzF8yakS
-# py17rb/qDAPKvKjx/BC+GzANBgkqhkiG9w0BAQEFAASCAYBnwQxH4NAu6IRXKxMB
-# 93yCoHHLfFqfe97pVCG5JGJ++pMEhAj51IbDBK9COMLyLZuurVaSlDi7shqx6sKc
-# 0R5qGd9aoG/hj6hbBIS9TUYRAbygekfWpWWM0B3OJlEGp+Xng5UUAo7rPmX65s4K
-# gXMROK773ApNtrittShEIMzwjm4DkNDOKzO/f+jVL9/kx1rw0bEHN8wNAqJpTRcb
-# CgjZNOCXhBQRExc6BRbojHD4gKI1O9idI/jEhr9VS5gUqMNDIOEkGnU3JQ8ne2AP
-# 1HoDvr1SFBYwLotP5qhDlRv52k1gFohKSV0Gfy1cpZC6fsJpg8OMREnGkH9YuBH5
-# JR5V3NocQrZgWbHn1m265l/Oh3Hc5mf6TuAUKtnTJgnCn6djcwzxrUARW1FFe2it
-# YBTcxYyxkVKamkugU/FJQPrSt3snUwcnQSEyaH8EtYSU86bmgBqbzEI5Hle/kY1Q
-# qB96mQ0xV9T0apQgzc/dLPSEsfrjUsdcplXzBiNBYkrnNuo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDErF+rcIe7jBwdhTcegF4S
+# u83Vikx9Y8cQWSeIFVLlxDANBgkqhkiG9w0BAQEFAASCAYCxdCCHv5mo4BveOK+q
+# samtKPy1KQg+aD/u0aLhHMYdu3gaRL0Q3IrU5xRlnj5Si+gf3Cl777ziF2LJMEXy
+# 80joAtfJqZosygyyhj89mLq2qU3XFyIpZOkaxcphzFT7WcNpbvZEEme2u08AVXq6
+# pAy2ZfqN/jIN+2VB2fAO2mZTrFbL1E9/1RQoiYl4nXH9YyQdjEoMtIG7v5g0Retn
+# PjHPHnByt3lJpkYcPLbGqSKBeziAYdugxvIL8GrEs4oXuaW42Pi2armmitWXn1k0
+# YKQDLXYfbW8jZDJ6g3tGvxTN3jR9Y8kKU88Vr7EK6uSnHWuZx5WvfAn+HNScbKfP
+# bISbrhEPFEXYq1ZM92h6u4gvLoQZKvAs70rmbY8C3Xx3NKW8bkuxeRs6izLIPaLm
+# YM0fR4yG6kEyMBc3aSnK2qLOqOO7kJ0fdqljU9/Az5ti+0oOxuudejqoHXGyMmu7
+# hpsOAIkMTI7gFCLcBjn/sYZQydAhdv/pNnYasJBxK6klpdk=
 # SIG # End signature block

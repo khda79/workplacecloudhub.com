@@ -85,7 +85,8 @@ an empty output folder created by a failed attempt. A newer attempt without a
 summary is shown separately; the previous available report remains labelled as such.
 
 In **Files & Permissions**, **Open source site**
-and **Open destination site** open the selected migration's mapped site in the
+and **Open destination site** appear in scan cards 1 and 2 for both files and
+permissions, immediately before **Open folder**. They open the mapped site in the
 default browser. If that side includes several URLs, a menu lets the operator
 choose a site. Invalid or missing HTTP/HTTPS URLs disable the corresponding button.
 
