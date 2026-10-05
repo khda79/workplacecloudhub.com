@@ -8,7 +8,7 @@
     use separate visible consoles for sign-in. The limit applies to this batch.
 
 .VERSION
-    1.0.1
+    1.0.2
 
 .EXAMPLE
     pwsh -File .\SmartM365-SharePointMigration-TargetScanBatch.ps1 -PlanOnly
@@ -32,6 +32,8 @@ param(
     [ValidateRange(0, 300)]
     [int]$LaunchDelaySeconds = 15,
     [switch]$PlanOnly,
+    [ValidatePattern('^\d{8}-\d{6}-[a-f0-9]{8}$')]
+    [string]$BatchId = '',
     [string]$ProjectRoot = (Join-Path $PSScriptRoot '..\..\..'),
     [string]$LauncherPath = (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-Launcher.ps1')
 )
@@ -147,10 +149,10 @@ foreach ($value in $MigrationNames) {
 }
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 if (-not $PlanOnly) {
-    $batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    if (-not $BatchId) { $BatchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8)) }
     $batchRoot = Join-Path $ProjectRoot "Migrations\logs\target-scan-batches\$batchId"
     Write-BatchLine ("Creating destination batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
-    New-Item -ItemType Directory -Path $batchRoot -Force -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
     $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
     Write-BatchLine ("Destination batch preflight started. Logs: {0}" -f $batchRoot)
 }
@@ -288,8 +290,8 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmgJSMfWhTefXw
-# dDjcsfBTQgtcEq6qC6Z2hShmbgAVFaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1S7zNJ5pE+eWr
+# ++URJyeu5KBsVZOQAIqnRZrpbcJBBKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,14 +321,14 @@ if ($interrupted -or @($script:Results | Where-Object Status -NE 'SUCCESS').Coun
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCXOJ/K2h/eoqVbQjhvJr3y
-# OotIeffqfvuMFK3Q+zD7yjANBgkqhkiG9w0BAQEFAASCAYB3jsEuAK7TM+nTyEQK
-# Mu4OCd2t8ClZP3+HnJ2f9nZr5QHAezmRaZcdFHg3CHpdfxRL0oP6nWGVHGo5TRsn
-# QpSqb8JQUEXPMOhl28T/pu+HIcD8ZvIVTIJkvyQ4XXxoSkJFFjnQIGbqwaFZDN85
-# EeWE3bsiwPEzoGGmIgzPJFDZcwpR23DfUi2LXl4DwzQfJ2RG2Df7mNcZVOjUaxQY
-# WtLFzJCzQt9xtLMpQrrc6J2ltMUHv3ptiz5YH4yV3xueFs5urWM+h56duEKwaccQ
-# P7BGMt2ifIsZBlCpdrJm4+kN2q4ciKtu9gxDZH1dSik/gpnYncmaR94qAQlULWbY
-# Flr3kWKamC2VAy57TbzQeTmJfcch1r6Xbuk57MrbWR4yw2kOqTMEAQpKf438ENiH
-# dgbWJZ+zu4S2hvBCTkn3Ksy5YfhqVgyQW0vm5CaEZY/upZCiLpxLvOt82+iIPVHW
-# UfCK1OJjA+cO5auAHZzQSOfpM9ehzaqfSXskwzuh6Bk8ARE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA0FwE/sB0cYomKX/7Ayx+h
+# MGY44qGoZk/mwLOBALjfizANBgkqhkiG9w0BAQEFAASCAYBRhFM7jKjtnQq1qQ/B
+# GNnszcA1DyNUfurjBqMCYRUngEj0p1X0dgWsb3CCDB4/ZtKxw8yrUR4V0jwptjSs
+# cBRntk5ts39b5cLFph0YcMHXqBQq7AYnI3ix5B1dpCKf3FPPZA2n16FnJq+D2bRP
+# K5JQt2n/gMyozYtRUyNjJiOCmppzipvnZeGWwVi/CsFVgWeqrnmKR93T2nAWxlY/
+# BLmMX7DeiIOCdNeXNnTYPE7R6RRTvAHFH1u0LEUFOFFoctcq8y0+U9MUzUWhQ9R/
+# wAXMZza1MvNbMimTA4OrlFiuoFvWijiKptKwC9Y3uZV3SqOZsEBhB7vTSxEgEaMe
+# GmKkGjt4jDe8dDQY5NxfDX4BX35CNLIPiql6QZ11QmhmvBO94Lv7Ksrz6MzHnq90
+# KrLddaoTuDX/Uo02Gpq5qA2FmySaPWiA3Kc9OFoh+aXMkTY57TFofkjUf2RZgmWg
+# XvmgIRqpGd1jymBrYZrYin4OLiO8HbMwzjoPQTDyjBSUTfk=
 # SIG # End signature block

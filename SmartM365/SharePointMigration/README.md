@@ -251,6 +251,38 @@ own migration log. Certificate scans also capture stdout and stderr in the batch
 directory; interactive output is shown in each scan console. Check the per-scan
 error CSVs and manifests before using the inventories for comparisons.
 
+### Batch comparisons for all migrations
+
+Preview source-versus-target file and permission comparisons:
+
+```powershell
+.\Start-SmartM365-SharePointMigration-ComparisonBatch.cmd -PlanOnly
+```
+
+Remove `-PlanOnly` to execute all file comparisons, then all permission
+comparisons, one at a time. The existing launcher chooses each migration's
+latest inventories and generates its usual HTML reports and other comparison
+outputs. Missing inventories, recorded scan errors, invalid manifests, or scan
+ages outside the configured limits fail that comparison; the batch continues
+with the others and returns a nonzero exit code if any comparison fails.
+
+Use `-ComparisonMode FilesOnly` or `PermissionsOnly`, and
+`-MigrationNames SiteA,SiteB` for a subset. `-AuthMode Certificate` selects
+certificate authentication for any required Entra users cache refresh;
+interactive authentication is the default. Permission comparisons can request
+sign-in if that cache needs refreshing. No source or target inventory scan is
+started. `-Force` explicitly overrides the launcher's scan age limits only;
+review stale evidence before using it.
+
+Global `batch.log`, per-comparison `*.console.log`, and a progressively saved
+`summary.csv` are written to `Migrations/logs/comparison-batches/<batch-id>/`.
+The migration launcher retains its own logs and reports. The batch suppresses
+Explorer windows and fails stale comparisons without asking for confirmation;
+interactive authentication remains available for Entra cache refresh.
+PowerShell 7.4 or later and the comparison launcher's Python dependencies are
+required. Run on the workstation or server that has access to the migration
+files; SharePoint farm snap-ins are not required for comparison actions.
+
 ### Batch source scans on a SharePoint farm server
 
 `SmartM365-SharePointMigration-SourceScanBatch.ps1` replaces the private
@@ -887,6 +919,44 @@ defaults to dry-run; `-Execute` permanently deletes unless `-Recycle` is also
 chosen. Read every generated script and target before running it.
 
 ## Offline Validation
+
+### Dashboard batch tab
+
+The **Batch runs** tab follows **Migration Diagnostics**. Its scope is independent
+of the migration selected in the header: all configured migrations by default,
+or a selected subset. Three cards launch the existing source scan, destination
+scan and comparison CMD launchers in dedicated consoles.
+
+- **Both** is the default; **Files** and **Permissions** are also available.
+- **Preview plan** passes `-PlanOnly`; it does not start a scan or comparison.
+- Destination scans explicitly use `-MaxParallel 2` in Interactive and Certificate
+  modes. Source scans and comparisons remain sequential.
+- Source **Run batch** is disabled until **Check prerequisites** succeeds on the
+  local source farm server: elevated Windows PowerShell 5.1, SharePoint snap-in
+  and Shell/database access, trusted toolkit dependencies, Python availability
+  and writable logs. The batch validates local staging again before collection.
+  **Copy command** uses the editable source toolkit path for execution on that
+  server; the dashboard does not remotely run source scans.
+  The source CMD launcher copies and verifies the batch entry script locally;
+  the batch then stages its inventory scripts and dependencies locally.
+- **Open logs** and **Open summary.csv** show the latest batch evidence. Counts
+  are actions, not migrations. A progressive CSV alone is not considered proof
+  that a batch completed.
+
+Dashboard requests and completion receipts are stored in
+`Migrations/logs/batch-gui-runs/`. A unique `-BatchId` connects each run to its
+batch log directory. The receipt records the child launcher's exit code even
+when the console stays open. Closing the dashboard does not stop batch consoles.
+The destination limit applies per batch, not across computers or other launchers.
+
+The offline GUI test uses synthetic CMD launchers, validates failure receipts,
+scope selection and prerequisite gating, and can export WPF previews:
+
+```powershell
+pwsh -NoProfile -File .\Tests\Test-SmartM365BatchGuiOffline.ps1
+```
+
+### Existing offline checks
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1

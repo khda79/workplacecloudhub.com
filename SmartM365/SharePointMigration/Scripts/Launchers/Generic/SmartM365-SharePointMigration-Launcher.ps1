@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.26
+    1.0.27
 #>
 
 [CmdletBinding()]
@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.25') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.27') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -288,6 +288,8 @@ function Open-DirectoryInExplorer {
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
+
+    if ($script:LauncherNonInteractive) { return }
 
     try {
         $resolvedPath = [string](Resolve-Path -LiteralPath $Path).ProviderPath
@@ -1386,8 +1388,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBABwt0az+uWuIB
-# UgO3cFeaNX6qEqyj8QrFUM0N6nJ4xKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHnV7+Rb1XM/sA
+# sUlhQpTuHBlXUV32OuTtbERXkmyZPaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1417,14 +1419,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAsgXZHL7AT/erOmc+JFw84
-# viONNcJo94smfZAA9izKyDANBgkqhkiG9w0BAQEFAASCAYBeNi95lbe4UGoXq+ow
-# ml79dxhyW2clSfa+Q3SfXggh3gXN2x3E+C4tHaE7+32ANE+nTdT9ifAk7P1Ki3qv
-# 5VP1eNOfmRDv6MP/MzFMwoA9fHEBPmpHk/Fwkeebhkp9lOx0na/r/Levbx1mIv9L
-# 9VTjfLVCf+qpxRGHW+QrPzgEOa+dcGT05+UuJi2BXn2ajKFUhT+uEAh9dYL/D+0A
-# mxO30/5QQBsF4lFGJCrqt/VubwBNcvE963n8d8KlDvUGIXoRBE8rtRJN02+qzlnd
-# UyqA+5mQa8g96499CziJNX64zTcrIinXqm8JgY8OIVoIpaaKf0GqRTVJMekX+8m3
-# 0jXPnQYGgiwrDdZw9WZmZZKSlrXqI7N5Ws3qTHyATH1qfhEbM3cNN7+QlLsMJsPt
-# 2i5yEtLR3dWasQvRSZPGfDfHZMvYrOw7OyRCmkssPqWlBLy9iWGV2ec96xUJIC0C
-# N2FDUSta/PpasZlXakBrls40fL5ZabsxhsfYq5wYUfTpFNM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB92GyyxnZBne87dLhyqvNL
+# oNPU8SFmm6oZQLK+OLQG9TANBgkqhkiG9w0BAQEFAASCAYCtRHaljesDTaHxHArR
+# AHdF/wB6Qb0lU/TyazmCt02mCSh/Ix/sltq+uZ9Cx4VPvs3g2WQ/ALBD+sucrL2C
+# driPPzeIS/YgQq6d2lirOwP0HKFoRYBKpNTn6GOWROAqYG/2N4uIC7R1DyGA6rn4
+# QSmWPhayitsBym/ri3PAAFREhJexhrt0qLkGK4U/AXFAxwQSRwIZvT1+AcLEtN3c
+# kMh43Il9qPE16KblbHjAm8HOY/M18GuWeACIeRowmf0lStiRvOASbuEEuFqDYe3+
+# 8Edtvbn/IQzdBNHkuRFnOKP3aTSk8l8KxANA4qVc9qTvoXHx83DjKqPYAOBXe4Ft
+# mAfec8S/eULAunlpID+CKTJCO3JUwnG3Vvv5ypFTYxUnmMv+uQ/qJR5OdvZIYNFd
+# CLq0HuwLe/ljsIPHf5CKyLL6r/7LXTtA/IN4YS7lLNOH2M2qXFn0OWSyVZP+VtmS
+# sg4OrFitthfaYHqRP9Wje5a/xR0DzRtg1mUgaB9sEghfV4I=
 # SIG # End signature block

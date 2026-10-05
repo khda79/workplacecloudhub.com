@@ -9,6 +9,9 @@
     Source URLs come from Source.UrlsFile or migration.mapping.txt; an absent
     filter is an error so a batch cannot accidentally scan an entire farm.
 
+.VERSION
+    1.0.1
+
 .EXAMPLE
     powershell.exe -NoProfile -File .\SmartM365-SharePointMigration-SourceScanBatch.ps1 -PlanOnly
 
@@ -22,6 +25,8 @@ param(
     [ValidateSet('FilesOnly', 'PermissionsOnly', 'Both')]
     [string]$InventoryMode = 'Both',
     [switch]$PlanOnly,
+    [ValidatePattern('^\d{8}-\d{6}-[a-f0-9]{8}$')]
+    [string]$BatchId = '',
     [string]$ProjectRoot = '',
     [string]$LocalRunRoot = (Join-Path $env:TEMP 'SmartM365-SharePointMigration-SourceBatch')
 )
@@ -258,10 +263,10 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $LocalRunRoot = [System.IO.Path]::GetFullPath($LocalRunRoot)
 if ($LocalRunRoot.StartsWith('\\')) { throw 'LocalRunRoot must be on a local disk of the farm server.' }
 if (-not $PlanOnly) {
-    $batchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    if (-not $BatchId) { $BatchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8)) }
     $batchRoot = Join-Path $ProjectRoot "Migrations\logs\source-scan-batches\$batchId"
     Write-BatchLine ("Creating source batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
-    New-Item -ItemType Directory -Path $batchRoot -Force -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
     $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
     Write-BatchLine ("Source batch preflight started. Logs: {0}" -f $batchRoot)
 }
@@ -413,8 +418,8 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1OQKIM8uF2zdh
-# eB9Dcx6LLwJEREje2BESEqXrkj6f6aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFNpPjn5ycRiGs
+# FNpnsYwTLy8WOfv9I4PwrbXzwKjHyKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -444,14 +449,14 @@ if (@($script:Results | Where-Object { $_.Status -ne 'SUCCESS' }).Count -gt 0) {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDqMxRJGwAG8kxd6ITceluc
-# B3z3OPbh8K34MaWO1QROBjANBgkqhkiG9w0BAQEFAASCAYCWYDBLZGRFldq4a+d7
-# +wH+NIHZ0cIRTY4t+x/rpE0kuGn8SNJaWaOkhaGOgstebEXIKI95H9b/2W8H4zqJ
-# hE75MiwpasGmFT1rqUQd12vdv1O+41fxko0ykjLyh8QVOxOso2MegRYcpdNYMSNg
-# xGAApHv5OIiJ88kh18KGtVP5G3PPWrtcUg+vG1cjK85X4C1s0D0zcd5vjfZewTH4
-# /sc0qZ0pVUJiSKQFkLHSP+ZWyvX2Y40uEH+vrvnq5zeV2/uXXRR7M4irTnZ73YLe
-# Z2fThqpfa0TtsIW7DWIkecoWCLSts2Y9of5S871miibpDVnrnzF9XVaodn4DcGSL
-# qo8/jgRr8SuBAI8BYk+x1OEDWge40BxTikqr2CdEyGUWXwbxEC0Q67SE/bYqBVeR
-# pPHjR2gTLmignGQssat5zZd3z0yHbQEH0s6OvUKUHXk44YJqSYePXIl1nQUtmZ23
-# Dx5K0yyqlw2fC3u4DBNNTPSLEXU24TUqItilNxSBJ/Dj3BA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA4qPduN8U1BBoYouBdyV4c
+# xDZ14uY1QoHqohxabUj7/DANBgkqhkiG9w0BAQEFAASCAYB+2QeyTeU9Meik6dPi
+# 3Z6eEbI0Vx1Rl71BXwtIwtltDR3LYz7l8JDaUEn9rje6ZWA+VWKu4GcBwjHPCISh
+# zl1Qx5vyI2XcoxO3BuVtQ5EUv8nTxJ+F5FDN8y0aZ3MnIfKMr7mDI5I1FNMHKFpm
+# oSBbFjlHj94T6tCOOiZi8c7rQMBwMt16tgE+eZqMZuZe4kJAZbPjN4bG9+bA0Fqo
+# 2NVJuo+YSy8gHU7MoG3Oo5I7c2UIfK2IT+I1CV7aHMgDfR/OPDz7gbcJ1IXD0z/R
+# MJbphDg7kD25T48HZi1wz2pksxLNRx6KSsZAAbGtwT4Crumhz/7IbzKeZmaWl8Zz
+# STMOo7V5LTR4Ttza97Nlld4QNMLKcsbmED4qoSjr4gRksONPDLA+o9v4VOM4yhYy
+# E5RQK9G6hbxyjCulhqJ7C5jKuQg4KKDnSUnbjatMYaZAvrxHZNqpRANrljRIXoNq
+# dn6dQvLCHfG5DzPCahIB008eWgrRhjPe+8qt8qRlqPb+CRc=
 # SIG # End signature block

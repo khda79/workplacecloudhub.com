@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Smart SharePoint Migration dashboard GUI.
 
@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.48
+    1.0.49
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.48'
+$script:AppVersion = '1.0.49'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -44,6 +44,7 @@ Add-Type -AssemblyName WindowsBase
 . (Join-Path $script:ScriptRoot 'SmartM365.GuiSplash.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-NewWizard.ps1')
 . (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1')
+. (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-BatchGui.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-Summary.ps1')
 . (Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-CrossCheck.ps1')
 
@@ -491,6 +492,7 @@ function Open-InExplorer {
         <ToggleButton x:Name="tabSummary"     Content="Overview"    Style="{StaticResource Tab}" IsChecked="True"/>
         <ToggleButton x:Name="tabFiles"       Content="Files &amp; Permissions" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabDiagnostics" Content="Migration Diagnostics" Style="{StaticResource Tab}"/>
+        <ToggleButton x:Name="tabBatches" Content="Batch runs" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabLogs"        Content="Logs"        Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabConfig"      Content="Config"      Style="{StaticResource Tab}"/>
@@ -926,6 +928,8 @@ function Open-InExplorer {
         </Grid>
 
         <!-- OPERATIONS -->
+        <ContentControl x:Name="panelBatches" Margin="18,14" Visibility="Collapsed"/>
+
         <StackPanel x:Name="panelOperations" Margin="18,14" Visibility="Collapsed">
           <TextBlock Text="MIGRATION OPERATIONS" Style="{StaticResource SectionLabel}"/>
           <TextBlock x:Name="lblNoOps" Text="No operations found for this migration."
@@ -1385,7 +1389,8 @@ function Open-InExplorer {
 if ($ValidateOnly) {
     try {
         $reader = [System.Xml.XmlNodeReader]::new($xaml)
-        $null   = [System.Windows.Markup.XamlReader]::Load($reader)
+        $validationWindow = [System.Windows.Markup.XamlReader]::Load($reader)
+        $null = Initialize-SmartM365BatchGui -Panel $validationWindow.FindName('panelBatches') -Root $script:ScriptRoot -SourceRoot $script:FarmToolkitRoot -ValidateOnly
         $null   = Show-SmartM365NewMigrationWizard -ProjectRoot $script:ScriptRoot -ValidateOnly
     } catch {
         Close-SmartM365GuiSplash -Splash $script:Splash
@@ -1469,6 +1474,7 @@ $tabSummary     = ctrl 'tabSummary'
 $tabFiles       = ctrl 'tabFiles'
 $tabOperations  = ctrl 'tabOperations'
 $tabDiagnostics = ctrl 'tabDiagnostics'
+$tabBatches = ctrl 'tabBatches'
 $tabLogs        = ctrl 'tabLogs'
 $tabConfig      = ctrl 'tabConfig'
 
@@ -1483,6 +1489,7 @@ $lblPortfolioActions = ctrl 'lblPortfolioActions'
 $lblPortfolioRefreshErrors = ctrl 'lblPortfolioRefreshErrors'
 $panelWorkflows   = ctrl 'panelWorkflows'
 $panelOperations  = ctrl 'panelOperations'
+$panelBatches = ctrl 'panelBatches'
 $panelDiagnostics = ctrl 'panelDiagnostics'
 $panelLogs        = ctrl 'panelLogs'
 $panelConfig      = ctrl 'panelConfig'
@@ -2032,6 +2039,7 @@ function Switch-Tab {
     $tabFiles.IsChecked       = ($Tab -eq 'Files')
     $tabOperations.IsChecked  = ($Tab -eq 'Operations')
     $tabDiagnostics.IsChecked = ($Tab -eq 'Diagnostics')
+    $tabBatches.IsChecked     = ($Tab -eq 'Batches')
     $tabLogs.IsChecked        = ($Tab -eq 'Logs')
     $tabConfig.IsChecked      = ($Tab -eq 'Config')
 
@@ -2039,6 +2047,7 @@ function Switch-Tab {
     $panelWorkflows.Visibility   = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
     $panelOperations.Visibility  = if ($Tab -eq 'Operations')  { 'Visible' } else { 'Collapsed' }
     $panelDiagnostics.Visibility = if ($Tab -eq 'Diagnostics') { 'Visible' } else { 'Collapsed' }
+    $panelBatches.Visibility     = if ($Tab -eq 'Batches')     { 'Visible' } else { 'Collapsed' }
     $panelLogs.Visibility        = if ($Tab -eq 'Logs')        { 'Visible' } else { 'Collapsed' }
     $panelConfig.Visibility      = if ($Tab -eq 'Config')      { 'Visible' } else { 'Collapsed' }
 }
@@ -2606,6 +2615,7 @@ function Get-MigrationScope {
 function Load-Migrations {
     $prev = if ($cmbMigration.SelectedItem) { [string]$cmbMigration.SelectedItem } else { $null }
     $script:Migrations = @(Get-MigrationFolders)
+    Sync-SmartM365BatchMigrations -Names @($script:Migrations | ForEach-Object Name)
     $cmbMigration.Items.Clear()
     foreach ($m in $script:Migrations) { [void]$cmbMigration.Items.Add($m.Name) }
     if ($script:Migrations.Count -eq 0) { return }
@@ -2621,6 +2631,7 @@ $tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
 $tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticInventoryMetrics; Refresh-DiagnosticCrossCheck })
+$tabBatches.Add_Click({ Switch-Tab 'Batches'; Refresh-SmartM365BatchGui -Force })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
 $tabConfig.Add_Click({      Switch-Tab 'Config' })
 
@@ -3655,12 +3666,14 @@ catch {
         $script:AppName, 'OK', 'Error') | Out-Null
     exit 1
 }
+Initialize-SmartM365BatchGui -Panel $panelBatches -Root $script:ScriptRoot -SourceRoot $script:FarmToolkitRoot
 Refresh-GuiState
 $script:AutoRefreshTimer.Start()
 $script:ActivityRetentionTimer.Start()
 Close-SmartM365GuiSplash -Splash $script:Splash
 try { [void]$script:Window.ShowDialog() }
 finally {
+    Stop-SmartM365BatchGui
     $script:AutoRefreshTimer.Stop()
     $script:ActivityRetentionTimer.Stop()
     if ($script:DiagTimer) { $script:DiagTimer.Stop() }
@@ -3672,8 +3685,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUOsmhc1Yc5C5z
-# of/6z1OdZ/4oJpnBq6W8xUVZxYBhLqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaGytIzuINy2xt
+# IAKp7icmDY+92BM5ufHFz0+x/93SiKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3703,14 +3716,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBSHyht65RhAkSvqXh4IP8B
-# ZMXhzdbvgZFCJ33634ukejANBgkqhkiG9w0BAQEFAASCAYAgL/2m8N6yRNrn8r/x
-# LkxrOdpXHWXLxXxek/fG/AhZfc6dzq7/2QouHh4kjZtZvvZp4z34YpsMPAp4DV2C
-# ncKmAQYm17dZHBbBqZeen5Q9qFBoTtk6dCmtbAeV7V9r1YQbao12oJPLpao/BQlr
-# 9aOWH/5jdXWuwZzCJGDHIHWYuQ4n3z5AbjauzeWj/tJXgsbxDvsMy9ZbVKERGVqf
-# +XSqjueQEoIA8nqTuaJB1c770W4Cal9RWiM3c3HfkKO367GEM5+b4PTCUUalUWS4
-# GTKEyLMLBl1uRjl43W6ASJZ8015hfBqbItUAadLSglEbg1EzM0w7xzKCx5loMwMU
-# bDV/vqoZq/1crPiUDsmJu+hEwqtvtlE8T60SPGGJgSsam2kk8NnoksOejlVvrIhs
-# XG2Ke6KSWWcnpFMQlHHrciShtrt5mEAmebBQmBfkYOjfhQRNwq/Se6Zfbe2JSuHY
-# fTSKDRViB06+vTQPUEjysgN0UaFd34oMbViPZ5paBflNJc4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAqKwfoVDHS2AyEuQuxPlKR
+# dN+FFqEBSF7u6r/9DrBinTANBgkqhkiG9w0BAQEFAASCAYAqedsO6Jr3Vg7HDw9Z
+# dgHV2IkJcZ7HVcwkTOGGN/vSZX6d65kvRMt9VSPPjRzdqIj8Tx+0xu/vOrN3hSUA
+# 9ZtKWoCixrOSkI0TGbeoZ95d0tmmAXg6In2ZQjymTR9+Hy6F3pDcJ7YiIobX1aMa
+# kYoJ1OPjWz4k6pnW+D5IhRmkvE9h7eCbi7BIBRZgvoVRPS3sdK3yPyAovNHggYnN
+# ZKTha5xpsStbQCZQwDMNArptdPMkgp+gtdpU4Z8LkfzcQkLru/3JYxltdc1HJsSb
+# +IW+FNafE47E/KetAOyNm2undIF8dVz5k4Yff1fkYcTH3cjvtjc8hnQDWukt/i3O
+# ly1MueDLOrHtm4zBiOEQPiif86XHqprYet629xcGGY3qxYd1mB9gV3vqjXbK18vM
+# ligqqsM4Q5vednZ8Ut1kUsmN9O9qkUnLCxv7eeEGOSATXOpmJXF5zk4pxhT2Pi1Y
+# mUPACfeCXo3cAqa9Iz6OtNBRW/MBfP44W3LUpIwN8BjeItA=
 # SIG # End signature block
