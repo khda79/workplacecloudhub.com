@@ -4,12 +4,12 @@
 
 ## Cancel remaining pipeline jobs
 
-Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.1** support cooperative
+Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.2** support cooperative
 cancellation. In **Requests**, select an active batch, enter a reason and choose
 **Cancel remaining jobs**. Confirm the batch before publication. This is independent
 of scheduling maintenance and does not publish the GUI configuration draft.
 
-GUI **1.3.1** also provides **Cancel All remaining Jobs**, with a single reason and
+GUI **1.3.2** also provides **Cancel All remaining Jobs**, with a single reason and
 confirmation listing every active pipeline batch. It includes active requests outside
 the displayed recent history, not future requests, automatic schedules or running
 collector processes. Each batch is validated before confirmation and revalidated
@@ -17,6 +17,18 @@ under the shared locks before cancellation. If a batch changes or a control beco
 unavailable during publication, the operation stops and reports the error; already
 published cancellations remain audited. Selecting zero, one or several job rows no
 longer unwraps a singleton into an invalid WPF ItemsSource.
+
+The selected-request and all-request cancellation paths run shared-folder reads,
+readiness checks, publication, persistent cancellation logs and the final Requests
+refresh in an in-process background runspace (no ThreadJob module required). WPF
+only applies results and displays the confirmation. A stage/elapsed-time label stays
+visible before and after confirmation; slow storage still takes time but does not
+block the window. Duplicate clicks and competing GUI control operations are disabled,
+and automatic refresh is deferred until cancellation finishes. New batches submitted
+after confirmation are not included. Partial publication and display-refresh errors
+are reported separately; published cancellations are never rolled back. Closing the
+GUI is refused while the operation is active: no worker, lock or collector is forcibly
+stopped to impose an artificial GUI timeout. Other ordinary GUI refreshes are unchanged.
 
 Alternatively, use the CLI against the **live shared Orchestrator folder**, never its
 SharePoint/OneDrive mirror. Replace the generic paths and batch identifier below:
