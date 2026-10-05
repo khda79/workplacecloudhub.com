@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.57
+    1.0.59
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.57'
+$script:AppVersion = '1.0.59'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -674,12 +674,17 @@ function New-FarmDiagnosticsWindow {
 
         <!-- FILES AND PERMISSIONS -->
         <Grid x:Name="panelWorkflows" Margin="18,14" Visibility="Collapsed">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="1"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
-          <StackPanel x:Name="panelFiles" Grid.Column="0" Margin="0,0,14,0">
+          <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
+            <Button x:Name="btnOpenSourceSite" Content="Open source site" Style="{StaticResource BtnGhost}" Width="145" IsEnabled="False"/>
+            <Button x:Name="btnOpenTargetSite" Content="Open destination site" Style="{StaticResource BtnGhost}" Width="170" Margin="6,0,0,0" IsEnabled="False"/>
+          </StackPanel>
+          <StackPanel x:Name="panelFiles" Grid.Row="1" Grid.Column="0" Margin="0,0,14,0">
           <TextBlock Text="FILES" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
@@ -821,10 +826,10 @@ function New-FarmDiagnosticsWindow {
                   Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
 
           </StackPanel>
-          <Border Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
+          <Border Grid.Row="1" Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
 
           <!-- PERMISSIONS -->
-          <StackPanel x:Name="panelPermissions" Grid.Column="2" Margin="14,0,0,0">
+          <StackPanel x:Name="panelPermissions" Grid.Row="1" Grid.Column="2" Margin="14,0,0,0">
           <TextBlock Text="PERMISSIONS" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
@@ -1556,6 +1561,8 @@ $badgeScanSrc  = ctrl 'badgeScanSrc'
 $lblScanSrcAge = ctrl 'lblScanSrcAge'
 $cmbScanSrcFile= ctrl 'cmbScanSrcFile'
 $btnOpenScanSrc= ctrl 'btnOpenScanSrc'
+$btnOpenSourceSite = ctrl 'btnOpenSourceSite'
+$btnOpenTargetSite = ctrl 'btnOpenTargetSite'
 $btnRunScanSrc = ctrl 'btnRunScanSrc'
 
 $badgeScanTgt  = ctrl 'badgeScanTgt'
@@ -1863,8 +1870,24 @@ function Get-SelectedScanFile {
     return $ComboBox.SelectedItem.File
 }
 
+function Test-ComparisonInventoryHasRows {
+    param([System.IO.FileInfo]$File)
+    $receiptPath = $File.FullName + '.manifest.json.txt'
+    if (Test-Path -LiteralPath $receiptPath -PathType Leaf) {
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($receipt.SchemaVersion -ne 1 -or $receipt.InventoryFile -ne $File.Name -or
+            -not $receipt.PSObject.Properties['Rows'] -or $null -eq $receipt.Rows -or
+            [long]$receipt.Rows -lt 0 -or -not $receipt.Sha256 -or -not $receipt.CompletedAtUtc) {
+            throw 'Invalid scan receipt. Rerun this inventory scan.'
+        }
+        return [long]$receipt.Rows -gt 0
+    }
+    # Older scans have no receipt: stop after the first record, without counting the inventory.
+    return @(Import-Csv -LiteralPath $File.FullName -Delimiter ';' -ErrorAction Stop | Select-Object -First 1).Count -gt 0
+}
+
 function Get-ComparisonRunState {
-    param([System.IO.FileInfo]$FirstCsv, [System.IO.FileInfo]$SecondCsv, [switch]$History)
+    param([System.IO.FileInfo]$FirstCsv, [System.IO.FileInfo]$SecondCsv, [switch]$History, [switch]$AllowEmptyTarget)
     $issues = [System.Collections.Generic.List[string]]::new()
     $labels = if ($History) { @('Previous', 'Current') } else { @('Source', 'Target') }
     $files = @($FirstCsv, $SecondCsv)
@@ -1879,22 +1902,30 @@ function Get-ComparisonRunState {
         elseif (-not (Test-SmartM365InventoryCsvComplete -File $file)) {
             $issues.Add("$($labels[$i]) scan is incomplete: an Errors.csv file is present.")
         }
+        elseif (-not $History) {
+            try {
+                if (-not (Test-ComparisonInventoryHasRows -File $file) -and ($i -eq 0 -or -not $AllowEmptyTarget)) {
+                    $issues.Add("$($labels[$i]) inventory is empty (0 data rows). No comparison percentage can be calculated.")
+                }
+            }
+            catch { $issues.Add("$($labels[$i]) scan cannot be verified: $($_.Exception.Message)") }
+        }
     }
     if ($History -and $FirstCsv -and $SecondCsv -and
         [string]::Equals($FirstCsv.FullName, $SecondCsv.FullName, [StringComparison]::OrdinalIgnoreCase)) {
         $issues.Add('Select two different completed scans.')
     }
     $reason = $issues -join ' '
-    if ($issues.Count -gt 0 -and -not $History) { $reason += ' Run the missing or incomplete scan successfully before comparing.' }
+    if ($issues.Count -gt 0 -and -not $History) { $reason += ' Check the scan scope and logs; obtain a complete inventory with data before comparing.' }
     return [pscustomobject]@{ Ready = ($issues.Count -eq 0); Reason = $reason }
 }
 
 function Update-ComparisonRunState {
     foreach ($controls in @(
-        @{ Source=$cmbScanSrcFile; Target=$cmbScanTgtFile; Button=$btnRunCmpFiles; Label=$lblCmpFilesAvailability; Result='FileComparisonFolder'; Attempt='FileComparisonAttemptFolder' },
-        @{ Source=$cmbScanSrcPermFile; Target=$cmbScanTgtPermFile; Button=$btnRunCmpPerms; Label=$lblCmpPermsAvailability; Result='PermComparisonFolder'; Attempt='PermComparisonAttemptFolder' }
+        @{ Source=$cmbScanSrcFile; Target=$cmbScanTgtFile; Button=$btnRunCmpFiles; Label=$lblCmpFilesAvailability; Result='FileComparisonFolder'; Attempt='FileComparisonAttemptFolder'; AllowEmptyTarget=$true },
+        @{ Source=$cmbScanSrcPermFile; Target=$cmbScanTgtPermFile; Button=$btnRunCmpPerms; Label=$lblCmpPermsAvailability; Result='PermComparisonFolder'; Attempt='PermComparisonAttemptFolder'; AllowEmptyTarget=$false }
     )) {
-        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $controls.Source) -SecondCsv (Get-SelectedScanFile $controls.Target)
+        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $controls.Source) -SecondCsv (Get-SelectedScanFile $controls.Target) -AllowEmptyTarget:$controls.AllowEmptyTarget
         $controls.Button.IsEnabled = $state.Ready
         $controls.Button.ToolTip = if ($state.Ready) { 'Compare the selected completed source and target scans.' } else { $state.Reason }
         $resultNote = ''
@@ -2074,7 +2105,7 @@ function Invoke-MigrationAction {
 
         $sourceCombo = if ($permissions) { $cmbScanSrcPermFile } else { $cmbScanSrcFile }
         $targetCombo = if ($permissions) { $cmbScanTgtPermFile } else { $cmbScanTgtFile }
-        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $sourceCombo) -SecondCsv (Get-SelectedScanFile $targetCombo)
+        $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $sourceCombo) -SecondCsv (Get-SelectedScanFile $targetCombo) -AllowEmptyTarget:(-not $permissions)
         Update-ComparisonRunState
         if (-not $state.Ready) {
             [System.Windows.MessageBox]::Show($state.Reason, $script:AppName, 'OK', 'Warning') | Out-Null
@@ -2206,6 +2237,8 @@ function Update-UI {
     $lblSourceType.Text = Get-MigrationEndpointType $cfg 'Source'
     $sourceScope = Get-MigrationScope $script:CurrentMigration 'Source'
     $targetScope = Get-MigrationScope $script:CurrentMigration 'Target'
+    Set-MigrationSiteButton -Button $btnOpenSourceSite -Scope $sourceScope
+    Set-MigrationSiteButton -Button $btnOpenTargetSite -Scope $targetScope
     $lblSourceUrl.Text  = $sourceScope.Text
     $lblSourceUrl.ToolTip = $sourceScope.Tooltip
     $lblTargetType.Text = Get-MigrationEndpointType $cfg 'Target'
@@ -2782,9 +2815,45 @@ function Get-MigrationScope {
     }
     [pscustomobject]@{
         Text = if ($urls.Count -eq 1) { $urls[0] } else { '{0} sites (hover for URLs)' -f $urls.Count }
+        Urls = @($urls.ToArray())
         Tooltip = (($urls.ToArray() -join "`n") + $(if ($mismatch) { "`nConfig SiteUrl differs: $configured" } else { '' }))
         Mismatch = $mismatch
     }
+}
+
+function Set-MigrationSiteButton {
+    param($Button, $Scope)
+    $valid = @($Scope.Urls | Where-Object {
+        $uri = $null
+        [Uri]::TryCreate([string]$_, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @('http','https')
+    } | Select-Object -Unique)
+    $Button.Tag = $valid
+    $Button.IsEnabled = $valid.Count -gt 0
+    $Button.ToolTip = if ($valid.Count) { $valid -join "`n" } else { 'No valid site URL is configured for this migration.' }
+}
+
+function Open-MigrationSiteUrl {
+    param([string]$Url)
+    try { Start-Process -FilePath $Url -ErrorAction Stop }
+    catch {
+        [void][System.Windows.MessageBox]::Show("Could not open the site in your browser:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error')
+    }
+}
+
+function Open-MigrationSite {
+    param($Button)
+    $urls = @($Button.Tag)
+    if (-not $Button.IsEnabled -or $urls.Count -eq 0) { return }
+    if ($urls.Count -eq 1) { Open-MigrationSiteUrl -Url $urls[0]; return }
+    $menu = [System.Windows.Controls.ContextMenu]::new()
+    foreach ($url in $urls) {
+        $item = [System.Windows.Controls.MenuItem]::new()
+        $item.Header = $url; $item.Tag = $url
+        $item.Add_Click({ param($sender, $eventArgs) Open-MigrationSiteUrl -Url ([string]$sender.Tag) })
+        [void]$menu.Items.Add($item)
+    }
+    $Button.ContextMenu = $menu
+    $menu.PlacementTarget = $Button; $menu.Placement = 'Bottom'; $menu.IsOpen = $true
 }
 
 function Load-Migrations {
@@ -2919,6 +2988,8 @@ $cmbHistorySide.Add_SelectionChanged({ Update-HistoryScanSelection })
 $cmbHistoryOldFile.Add_SelectionChanged({ Update-HistoryRunState })
 $cmbHistoryNewFile.Add_SelectionChanged({ Update-HistoryRunState })
 $btnOpenScanSrc.Add_Click({  Open-InExplorer ([string]$btnOpenScanSrc.Tag) })
+$btnOpenSourceSite.Add_Click({ Open-MigrationSite -Button $btnOpenSourceSite })
+$btnOpenTargetSite.Add_Click({ Open-MigrationSite -Button $btnOpenTargetSite })
 $btnOpenScanTgt.Add_Click({  Open-InExplorer ([string]$btnOpenScanTgt.Tag) })
 $btnOpenCmpFiles.Add_Click({ Open-InExplorer ([string]$btnOpenCmpFiles.Tag) })
 $btnReportCmpFiles.Add_Click({ Open-InExplorer ([string]$btnReportCmpFiles.Tag) })
@@ -3944,8 +4015,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAf8974xAYHgIr3
-# 6UJozTHg2cOB+l2+sKf7TvfJlLXJn6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDiCFpazs7JSBin
+# H3KH7phWiuSlp8jqf65CxLiK+gU/maCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3975,14 +4046,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCBQZcd7FqtaML6mxnyLHop
-# q356mYJjwYVssV6GXY7blDANBgkqhkiG9w0BAQEFAASCAYByLe9Eog/8ICkdOag3
-# zm1wDVSWSK6DFfgnfbYA2AC40DXmgbKVnmhryR0UAEOXgkzTslYjuspUiYdey1wD
-# 8W7M4gRiVqP7VvylSKj47CKwFW6jY/vUFCgCWe/hf++tjYaVnlhXyTZMg+TVweLT
-# qxKtUkpS3wXpSMlwVINsePYWaiU3ljH4I88M2QnJ8hzaXIibEJMCMOOdHa9NUTPP
-# ahpDRv7TbLYtmGD/F+Mqnt8KocSY22gYf4zWzjZGReHssjEHh6GYPUWsFVPG1EY9
-# ibt/Ll/CxIAxWwE+DzXEUdv1/BoVRWE1a29d4dG/zITbAO1A0rMrF0SeXKOup+ui
-# dCxp7MBNATFCmdU4Gxjn1mvS227wmGv26x+ASGAvpPG/wA1WqpnY2bSMBhN0bw9I
-# MmfYBgLc7nAW3iAevVjhm+6MRjC10GMCKQLx9zdMgvB0JCGyu2NviiZ40FMVOgDl
-# 2kSeGL556Cljzt8PoTnE/OVyOXN8fPFc//2kUPkmxege0IM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBQQPSkpp8CryTGDzF8yakS
+# py17rb/qDAPKvKjx/BC+GzANBgkqhkiG9w0BAQEFAASCAYBnwQxH4NAu6IRXKxMB
+# 93yCoHHLfFqfe97pVCG5JGJ++pMEhAj51IbDBK9COMLyLZuurVaSlDi7shqx6sKc
+# 0R5qGd9aoG/hj6hbBIS9TUYRAbygekfWpWWM0B3OJlEGp+Xng5UUAo7rPmX65s4K
+# gXMROK773ApNtrittShEIMzwjm4DkNDOKzO/f+jVL9/kx1rw0bEHN8wNAqJpTRcb
+# CgjZNOCXhBQRExc6BRbojHD4gKI1O9idI/jEhr9VS5gUqMNDIOEkGnU3JQ8ne2AP
+# 1HoDvr1SFBYwLotP5qhDlRv52k1gFohKSV0Gfy1cpZC6fsJpg8OMREnGkH9YuBH5
+# JR5V3NocQrZgWbHn1m265l/Oh3Hc5mf6TuAUKtnTJgnCn6djcwzxrUARW1FFe2it
+# YBTcxYyxkVKamkugU/FJQPrSt3snUwcnQSEyaH8EtYSU86bmgBqbzEI5Hle/kY1Q
+# qB96mQ0xV9T0apQgzc/dLPSEsfrjUsdcplXzBiNBYkrnNuo=
 # SIG # End signature block

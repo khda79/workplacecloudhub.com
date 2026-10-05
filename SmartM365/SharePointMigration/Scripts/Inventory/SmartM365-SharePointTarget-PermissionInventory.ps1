@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.2
+    1.1.3
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -487,8 +487,6 @@ function Test-SystemList {
         '_catalogs/wp',
         '_catalogs/lt',
         'Style Library',
-        'SiteAssets',
-        'SitePages',
         'FormServerTemplates',
         'PreservationHoldLibrary',
         'Site Collection Documents',
@@ -822,8 +820,8 @@ function Export-ItemPermissionInventory {
                     -ListTitle $List.Title `
                     -ListUrl $listUrl `
                     -ListBaseTemplate ([int]$List.BaseTemplate) `
-                    -ListBaseType $(if ([int]$List.BaseTemplate -eq 101) { 'DocumentLibrary' } else { '' }) `
-                    -IsDocumentLibrary ([int]$List.BaseTemplate -eq 101) `
+                    -ListBaseType $(if ([string]$List.BaseType -eq 'DocumentLibrary') { 'DocumentLibrary' } else { '' }) `
+                    -IsDocumentLibrary ([string]$List.BaseType -eq 'DocumentLibrary') `
                     -ItemId $item.Id `
                     -ItemFileSystemObjectType $fsObjType `
                     -HasUniqueRoleAssignments $true `
@@ -896,7 +894,7 @@ function Export-WebPermissionInventory {
     }
 
     try {
-        $lists = Get-PnPList -Includes Title,Hidden,BaseTemplate,Id,RootFolder,HasUniqueRoleAssignments -ErrorAction Stop
+        $lists = Get-PnPList -Includes Title,Hidden,BaseTemplate,BaseType,Id,RootFolder,HasUniqueRoleAssignments -ErrorAction Stop
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate lists for web '{0}': {1}" -f $web.Url, $_.Exception.Message)
@@ -914,18 +912,21 @@ function Export-WebPermissionInventory {
             $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
 
             if (-not $IncludeHiddenLists -and $list.Hidden) {
+                Write-ConsoleMessage -Message ("  Skipping list/library '{0}' ({1}): hidden; use -IncludeHiddenLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 
             if (-not $IncludeSystemLists -and (Test-SystemList -List $list)) {
+                Write-ConsoleMessage -Message ("  Skipping list/library '{0}' ({1}): system; use -IncludeSystemLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 
-            if ($DocumentLibrariesOnly -and $list.BaseTemplate -ne 101) {
+            if ($DocumentLibrariesOnly -and [string]$list.BaseType -ne 'DocumentLibrary') {
+                Write-ConsoleMessage -Message ("  Skipping list '{0}' ({1}): not a document library; -DocumentLibrariesOnly is enabled." -f $listTitle, $listUrl)
                 continue
             }
 
-            $isDocumentLibrary = ([int]$list.BaseTemplate -eq 101)
+            $isDocumentLibrary = ([string]$list.BaseType -eq 'DocumentLibrary')
             $listBaseType = if ($isDocumentLibrary) { 'DocumentLibrary' } else { '' }
             $roleAssignments = Get-PnPProperty -ClientObject $list -Property RoleAssignments
             $rows = @(Get-RoleAssignmentRows `
@@ -1178,8 +1179,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFc2bE/I/NEXRo
-# ME06MGLQfeeBhXsBmHppvZyjGAc+66CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClxykrgPmbGPcB
+# zHpyk9GXptJlHLBLzdqppPWaWMQlt6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1209,14 +1210,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCBmgPMRPCR0UNjvXHFvzWm
-# fmufyH84CMNi8Wwo2muErDANBgkqhkiG9w0BAQEFAASCAYAmwx8AIcOhBJZilTI4
-# YfnCyzAAdEqTCl+K25QUengZXDfeYx4mGCOOZvSQjnfJN/CdD4ZmobPvnEEupSJD
-# DKEBQYiFQcwpGJ5M4hgJ07aPTJqWIXqM0wLCFbhqhtkJctusMG4SDAGcOELSoPZC
-# /BAn03skLSTZYoBUJ7exmB/q95RUS8gRcO2BEHmK0Hauga1eXTouN3+5+sfGqdV2
-# D8T6wvBA0iRKDMl7cie0rQD3gNe1UTAG3gVoqRBYsDvurC2/RIT+ekx0yQnlI4g0
-# G+yeSI70S+TDP970i9Eit2xT9dGZ4R7wXbKLhSGEg+UjgNByRBajjxK+WfHMmLp1
-# jHanJsnvASasj5Ag5q8GXhBaocVppBJAiK47J+C9XAUWtCEwoBlA55CXSW42T5QK
-# W2QUob3yYFhI1q2XDkp+u8SXSjSNETf2Dj+A36yAGjejsY8RObAj0Kpfs0WUIbvi
-# 67tFhRZ0A1V9AbT4EEp6kXGVb3j8vXFfcK+Ka2QOoXx4jVg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDxegpxw+zlVba1YG7CVaua
+# lFiIkilQ8zH71cJpeF9gBzANBgkqhkiG9w0BAQEFAASCAYAcnsKAQfIpnYyyJbso
+# 5jJsUd75VmGp5QwPzucQf2c6sZtnsZuzUTaR48KKCmODKYZQmCt2/d1V3ut+KoyA
+# OrAl+L9v0FyN5g/hHxyUXUSsXhdWvDK2gT/GGcbuGQbFWGY0Li9QjOoD3D2UA07b
+# //4mGt8CBuH3Bwq8aAsRPxEbZUY6XSG1qZgypNGTWY73A79KW8/hM/hR1zQ2AxY9
+# HXmqtt/5AmA3A3J8g9eys0K8s8TZAJl6i9AGSipINwz/uf4MhNjc7Cjf5rsEbEWj
+# XihkEbnbHkp36dVXO9yezXWVcLRxSOK6PlYMqkdntUPX6CdrbIJNSOpSykqXfP5C
+# MCfe6KZqrtuhNhdtzl9JDHlGvsF7zCmHMw7pA6upm5Wgfwik4Ffg2fa/DdmiPSyw
+# PFagRd+/FeMJk0IqhGRptZEV4ANLHw+KvjD8II5bKgXumKIt6mFTqA2jwDrgZqme
+# ucbyEv4m5AdJJSj8pc9OVan/mpUM8ODbABqOlfxAKZficjA=
 # SIG # End signature block

@@ -74,9 +74,20 @@ the matching percentage. Source-versus-target **Run** requires both selected
 scans to exist without an `-Errors.csv` sidecar; a disabled comparison displays
 the missing or incomplete scan reason. History **Compare** requires two different
 completed scans on the selected side. Existing comparison reports remain accessible.
+Source-versus-target comparisons also require a non-empty source inventory.
+An empty destination file inventory is allowed so missing files can be reported;
+an empty destination permission inventory is blocked, matching the launcher.
+The GUI checks receipt row counts, or reads only the first record for older scans,
+and displays an empty-inventory reason before launching a worker. Empty file
+inventories remain available for scan history and inventory metrics.
 The date and rate come from the latest readable comparison summary, rather than
 an empty output folder created by a failed attempt. A newer attempt without a
 summary is shown separately; the previous available report remains labelled as such.
+
+In **Files & Permissions**, **Open source site**
+and **Open destination site** open the selected migration's mapped site in the
+default browser. If that side includes several URLs, a menu lets the operator
+choose a site. Invalid or missing HTTP/HTTPS URLs disable the corresponding button.
 
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
@@ -381,8 +392,13 @@ references, URLs and user exports local; logs and workbooks are not guaranteed
 anonymous and must be reviewed before sharing.
 
 Scope and paging settings remain explicit: descendant subsites are included by
-the inventory roots; hidden/system content is excluded by default unless opted
-in; permission list/library and item settings affect what is assessed. PageSize
+the inventory roots. Site Assets and Site Pages are included by default in source
+and destination file and permission scans, including library-only permission
+scans. Other hidden/system content is excluded unless opted in; scan logs identify
+each excluded list/library and its reason (hidden, system, empty for file scans,
+or not a document library in library-only permission scans). Existing inventories
+must be rescanned on both sides before comparing this expanded scope.
+Permission list/library and item settings affect what is assessed. PageSize
 and RowLimit are paging controls, not a promise that a partial or failed scan is
 complete. Current file version labels and version counts do not validate every
 historical version or byte-for-byte content integrity. Review scan errors,

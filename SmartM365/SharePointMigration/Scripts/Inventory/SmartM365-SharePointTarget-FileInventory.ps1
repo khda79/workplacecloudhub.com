@@ -39,7 +39,7 @@
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
 
 .VERSION
-    1.0.8
+    1.0.9
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -535,8 +535,6 @@ function Test-SystemLibrary {
         '_catalogs/wp',
         '_catalogs/lt',
         'Style Library',
-        'SiteAssets',
-        'SitePages',
         'FormServerTemplates',
         'PreservationHoldLibrary',
         'Site Collection Documents',
@@ -581,16 +579,19 @@ function Get-DocumentLibraries {
 
         if (-not $IncludeHidden -and $list.Hidden) {
             $hiddenSkipped++
+            Write-Info -Color DarkCyan -Message ("  Skipping library '{0}' ({1}): hidden; use -IncludeHiddenLibraries to include it." -f $list.Title, $list.RootFolder.ServerRelativeUrl)
             continue
         }
 
         if (-not $IncludeSystem -and (Test-SystemLibrary -List $list)) {
             $systemSkipped++
+            Write-Info -Color DarkCyan -Message ("  Skipping library '{0}' ({1}): system; use -IncludeSystemLibraries to include it." -f $list.Title, $list.RootFolder.ServerRelativeUrl)
             continue
         }
 
         if ($list.ItemCount -eq 0) {
             $emptySkipped++
+            Write-Info -Color DarkCyan -Message ("  Skipping library '{0}' ({1}): zero items." -f $list.Title, $list.RootFolder.ServerRelativeUrl)
             continue
         }
 
@@ -1347,8 +1348,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZaht1g/qQ25qL
-# tfzq8cWX+Y1rFPh9gkuzug9MZimSLaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIXg+2lOrge32V
+# 4axFTBUf6AyXB8n2WqmnwjQg04I3YKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1378,14 +1379,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD2Ay988xpRiQep4jzS6vjp
-# JfuF0vF70woPyEHzIHHxeTANBgkqhkiG9w0BAQEFAASCAYA8sBnpW5SINEt+b5KA
-# FEovH5l9Mb8BMK5E1mP3hB7vuhcD693ofG37uwB3VUYLaLWRgPkizMA8EvcDfSPm
-# u7OKtVCoJLEB2LoDqfWvFjsvcwLtkvL2WEzOl0qWS5/I8bBcDTbY5svo8rYBvV5A
-# Q6KeySFCkyuFf5MrbTeLpPJToU47YuoXMKPSYw8SZeWlqDQu1/lzNqkwHMD/WiRy
-# dTzXRlSWALjB1zQ+zw/2mpq8wsZH7rfVorsI6xHlSvSPomVtbRMgZpTIOFGcLRwh
-# Xn+4hK7om71Y+dA0UOsQ+1VS/iSFTN3dQTIm0SCF9BVHXw1oT4DUTxSIp+HTjqGD
-# L9UHR0mRsU4iBz1Vb7r2MlHC0leAc5zDX2STp8CpB0VJY0kE8x0p38Nt+PWpbQyp
-# y4GGglk43CeVAgzVZkVl5RrYwbgDzW7Ao+XPPAv3oYGxoawuHNMv3TptSOg5Mqc7
-# EawqW8puSwYQHmiJfZTav+PWwfcvmAYvMx82OC2Y5Q9Ilxw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCWkb4PtKRurejqDxKLW4ax
+# 539n0d/s5AhNzKBM9jsNyjANBgkqhkiG9w0BAQEFAASCAYBdXbWZAEdhf0TwQmom
+# khEodSg5rFQv88tmeQy2YaJ1aTEPZr071kSCddDGjpn1SsCBhqrQ496JyENYt7Wr
+# sL52qKykM6uZuj/jxqLCri+2J/AI1k0vpatMc9O65zZpOG6SrDNOUVHZNGuqCGPr
+# nlElk02M8TQJcE0uTHtn0OipmkzYdikCSBF4ibX7DvbLjyHI2QjqaNJXHTXuZgVt
+# cBJ/HvkoeXOBLlcksL3UMNyfya0S4mKWZEXkzDwWejJSMrJSxpgzo30q+oGpIurk
+# 2n0i89AzDEr4ShkG/gJQfzEG9OnNbJUKJPCRNgNx4GGC+tpx3VwLCkVSvgVx3rO4
+# rB1bZKCNZCC45moHf3+BdeyLQinXYAfDa8l+HNPKZwk7ny8AqT7AdBL1tv6Dxx9f
+# TkpC96aP5Vm3ZPjG1quYuBDmafxvTy49aqreKfcpVcs9p7vEHNRWnFIttgWv83Fw
+# K0o6pN5HKxXEfPY97Tf/DdtGnsMwsB4BtifbVOwnbeDi2qU=
 # SIG # End signature block

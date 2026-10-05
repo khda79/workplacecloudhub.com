@@ -27,7 +27,7 @@
     .\SmartM365-SharePointSource-PermissionInventory.ps1 -WebUrl "https://intranet/sites/finance" -DocumentLibrariesOnly -IncludeItemPermissions
 
 .VERSION
-    1.1.3
+    1.1.4
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -394,8 +394,6 @@ function Test-SystemList {
         '_catalogs/wp',
         '_catalogs/lt',
         'Style Library',
-        'SiteAssets',
-        'SitePages',
         'FormServerTemplates'
     )
 
@@ -855,14 +853,17 @@ function Export-WebPermissionInventory {
             $listUrl = ConvertTo-AbsoluteSharePointUrl -Web $Web -ServerRelativeUrl $list.RootFolder.ServerRelativeUrl
 
             if (-not $IncludeHidden -and $list.Hidden) {
+                Write-Host ("  Skipping list/library '{0}' ({1}): hidden; use -IncludeHiddenLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 
             if (-not $IncludeSystem -and (Test-SystemList -List $list)) {
+                Write-Host ("  Skipping list/library '{0}' ({1}): system; use -IncludeSystemLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 
-            if ($LibrariesOnly -and $list.BaseTemplate -ne [Microsoft.SharePoint.SPListTemplateType]::DocumentLibrary) {
+            if ($LibrariesOnly -and $list.BaseType -ne [Microsoft.SharePoint.SPBaseType]::DocumentLibrary) {
+                Write-Host ("  Skipping list '{0}' ({1}): not a document library; -DocumentLibrariesOnly is enabled." -f $listTitle, $listUrl)
                 continue
             }
 
@@ -1272,8 +1273,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGqLUXoW9Dq2/z
-# 0BN6yrSe+H1K5rfCFCKOT+oh7/m5vaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3/hsF2QH2jGMd
+# VlvECM5C78wMFjZm6bm0xSA7e6CxA6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1303,14 +1304,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBTiWXtj695j5LBd7EvBMN/
-# v8Reun+DD9PNBf2hw+kzSjANBgkqhkiG9w0BAQEFAASCAYAgsIefCAom0K9Y2/7F
-# KHq3IE/G7W6BrcLAa3lFPGN4SwyyPQE5bXO42X2T3G9Lid0EoKon2YhKw7/yl00g
-# 78TXDff+KdfhmFPEC3CkHUZkJCHXOQHevh//hTCTmrdCilhwJzn1yXhEst31FAOM
-# o4Gu4jylGgka+b0QA3j/hlIozbTHeIbjl4vexN0hwvySZMjC4Yz7NQDT91wCzn2K
-# UpPrL2iXDkT9gLl0jdRXX2SdRYf+dwd/bkhdy9wilzhdSBOnrSTg92MDy7tfPBF+
-# hL/8yMgrWjn4K90YV/NokUd9zxrOq/fM3zfoQcUGPfeQOK+LYsr1Ja5Hvq3U6Fgp
-# hf0P4d3k8njR0+9W5lhbD5PM4WSMf1ym67TgEffjOuAnkHP/xomhr2gEeMlUUMNO
-# +c2ixvlUpgpWVAWdFAc20U07lJ0s40paFjTgaTqdXC56rq7ALi+gCeNSVkZnk8cP
-# Km6GXXY+P7ObmkKz18Bf+3lfyPdaJAOnwHeXvzVMbAT/rQc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAMnivXzSoMd/fh7Wqx635n
+# sgVac7O8Z5O+hj1iCggdZTANBgkqhkiG9w0BAQEFAASCAYBsKP3QdtphN8XCcloW
+# hkFJ9u2HbD8vT4hydl8Tc8FkmTJkb9ZxZe3YZcxvNnMZwINkAdrJsckrOV6saZcH
+# 7KYrji8cyN5+DD+MaXKjzrMJwpI5itfcAIMY+UmmFtYzh9nUrzt3uhnZE8RW4leV
+# B+Q2f11QI5hVCgJeqtZ1lP+dCep3hvmq1RfmdP/NpEi3+yP/P7jTOQFNZFu7jj2b
+# YpeC/cf4g16Ci7EPYoL4lPZRt++7W5Bb3RaZ4sM5jAQIq5kqzxx/P4SGYyKLhfH2
+# 1tmKf2tiJ1zXdl6lbATw9NsXxDCYBOi7skTILht3iCUGpCGkXWzdkXJaZgpz6ofp
+# xh/VrE2pm7giWTXUP42EWvBt1bkcazizrPAf1GlEjz6jM6frJUsgQs1nryci6abR
+# kgyK5MIGeUgsoh0XFpGE72HHrGfw5F22uGsRm3NZB+4FFcSOmogAaLs4IndCA6cj
+# vu5/5vC0VXdKMGYp5wVm+q7G7zFr5u7Mc+Eb9SLmHbgBtu8=
 # SIG # End signature block

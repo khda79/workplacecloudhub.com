@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline checks for comparison dates and selected inventory availability.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -17,7 +17,7 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | ForEach-Object Message) }
 foreach ($name in @('Format-RunAgeText','Format-ItemAge','Get-ComparisonBadgeText',
-    'Get-SelectedScanFile','Get-ComparisonRunState','Update-ComparisonRunState',
+    'Get-SelectedScanFile','Test-ComparisonInventoryHasRows','Get-ComparisonRunState','Update-ComparisonRunState',
     'Update-ScanFileSelection','Update-HistoryRunState','Update-PermissionHistoryRunState',
     'Get-LatestCsvFile','Get-CsvFileItems','Set-ScanComboItems',
     'Get-LatestComparisonResultFolder','Get-LatestSubfolder')) {
@@ -92,8 +92,8 @@ try {
     }
     $sourcePath = Join-Path $root 'SP2019-FileInventory-Fixture-20261005-100000.csv'
     $targetPath = Join-Path $root 'SPO-FileInventory-Fixture-20261005-100100.csv'
-    'File' | Set-Content -LiteralPath $sourcePath
-    'File' | Set-Content -LiteralPath $targetPath
+    @('File','source.txt') | Set-Content -LiteralPath $sourcePath
+    @('File','target.txt') | Set-Content -LiteralPath $targetPath
     $source = Get-Item $sourcePath; $target = Get-Item $targetPath
     $sourceItems = @(Get-CsvFileItems -Directory $root -Filter 'SP2019-FileInventory*.csv')
     $targetItems = @(Get-CsvFileItems -Directory $root -Filter 'SPO-FileInventory*.csv')
@@ -110,6 +110,38 @@ try {
         throw 'Latest unsuccessful attempt was presented as a successful result.'
     }
     $script:CurrentStatus=$null
+    # Header-only source inventories must block before a worker starts, with or without a receipt.
+    'File' | Set-Content -LiteralPath $sourcePath
+    Update-ComparisonRunState
+    if ($btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'Source inventory is empty') {
+        throw 'Header-only legacy source inventory left comparison enabled.'
+    }
+    @('File','source.txt') | Set-Content -LiteralPath $sourcePath
+    $receiptPath=$sourcePath+'.manifest.json.txt'
+    @{SchemaVersion=1;InventoryFile=$source.Name;Rows=0;Sha256=('0'*64);CompletedAtUtc='2026-10-05T08:00:00Z'} |
+        ConvertTo-Json | Set-Content -LiteralPath $receiptPath
+    Update-ComparisonRunState
+    if ($btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'Source inventory is empty') {
+        throw 'Zero-row receipt left source comparison enabled.'
+    }
+    'invalid receipt' | Set-Content -LiteralPath $receiptPath
+    Update-ComparisonRunState
+    if ($btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'cannot be verified') {
+        throw 'Invalid scan receipt left comparison enabled.'
+    }
+    Remove-Item -LiteralPath $receiptPath
+    'File' | Set-Content -LiteralPath $targetPath
+    Update-ComparisonRunState
+    if (-not $btnRunCmpFiles.IsEnabled -or (Get-ComparisonRunState $source $target).Ready) {
+        throw 'Empty target file scan was rejected or empty target permission scan was accepted.'
+    }
+    'File' | Set-Content -LiteralPath $sourcePath
+    if (-not (Get-ComparisonRunState $source $target -History).Ready) {
+        throw 'Empty inventories were incorrectly blocked for scan history.'
+    }
+    @('File','source.txt') | Set-Content -LiteralPath $sourcePath
+    @('File','target.txt') | Set-Content -LiteralPath $targetPath
+    Update-ComparisonRunState
     $cmbScanSrcFile.SelectedIndex = -1
     if ($btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'Source scan unavailable') {
         throw 'Removing the source selection left comparison enabled.'
@@ -188,8 +220,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzaaEKkIC7jSd3
-# LlAM8kpHNp2psORvfVD/XrB5l+gL5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNw0gzot5XRtjv
+# L+flTomBwcdqOi31KR4mIioLWFN45qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -219,14 +251,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBRTxIBcenpOYo7zVL7LMlD
-# Zn4rLnIKAj478w4s0CbzzTANBgkqhkiG9w0BAQEFAASCAYA9Tu2F/YmrZyeB4tb0
-# e5ghZEJYusK+qfskJ7lgO65gzli6lBZceGXQT+2NtBwKYRQXk7yj6slDd2NL7b1P
-# 3lQ9TebuWtRT22kbqfPoPcW4RYKxBjUHwmTe5PaLSf3RFgtQQ7OX6PqVLykeJXjT
-# pgOB0mpTy/6mXzz2INvi+ohMzQaGdAioiOQtaiCX27L08J84j0OqpAiEDFKsDCiV
-# YIocw/Vv1xMCSSgiSl1xKgOSOrGu8dnedGk3/KsgNVEu8yq+7Cj3lBElzxM3UrO6
-# dvALYrMRNBr50JGjqy1UvGkmAjAKm2eqNgB3Rvg+qL5/OUbJLuOlmNu2Dv8R6E/f
-# E0TIstlMqNKq2add5gvy/wFdSTv70cNZowVAIB9U5Xspnh91WfD8QYPga1tUFI2D
-# sIh9e1k7TmUAaPplJSWOCtJG14Eu/88s3IfR7g1cuo1sHA+IzD0m/3Wo1aWr9oeJ
-# rbn/mmxYLAR1JeLO7Ef8MolSmX7rCU8akTYGvoHzNdEKsRg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCn9s1xmhe1cE0urarQ8UiK
+# kcZPRLbm0yJtkdEEe11sFTANBgkqhkiG9w0BAQEFAASCAYBgvULuhWFGQf8J7cHn
+# 1hdJZRUmZnC1AmyzuhAkJE2HUYsZijJ2xK2S1Awu/QSiwQXgth6R161DS2kq1CC+
+# Z7fY4rrvZNMD2PGuGDnBJSF3L4LjzCFmQdMQtbKGWWrgwXjn0NT1aVQ13YQhQCSa
+# jFPm3n1NcbqYZUhdP8uyxdrLcc5e1LLc+3vdQVrwdVPXtmCqXuTqdLfoD0eMrvWR
+# ri/ATg3nty/DJvYQM0yhVOE36EgoJlPgtFhYKh2TeKAYrGWYwDseTK6QfsqaFyCU
+# je6FDKAYQM4oH05NdbQxXClNKA/6Dm0MlxHtbSCl7tlgDQLDbyBXwwZ28x5UGoR0
+# Zypn4KmD1maodI8L+9QIKcG/oozs5152bSJbuyUMRoAB57R2oqipuPWs0RdZ4Ppg
+# sAwYfTzM/fa4YLTmOTDeZuUUqTXtZ/wPnJhonoynAxRj4H7+MzTLS+L09muI4WJv
+# HyZ/JAAfPF+niRGXWN5SFx1wwdbttpZ6QZf9CqyNi+XFR20=
 # SIG # End signature block
