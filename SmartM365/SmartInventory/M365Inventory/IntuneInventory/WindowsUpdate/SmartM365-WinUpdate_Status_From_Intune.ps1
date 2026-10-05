@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.41
+  1.45
 .VERSION
-1.43
+1.45
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -93,7 +93,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.43"
+$ScriptVersion = "1.45"
 
 # ==========================================================
 # App-only authentication parameters
@@ -325,11 +325,21 @@ $CsvLastFinal  = Join-Path $LatestCsvFolderPath $CsvName
 $CsvLastTemp   = Join-Path $LatestCsvFolderPath "$CsvName.tmp"
 $IntuneDeviceInventoryCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IntuneDeviceInventoryCsvPath' -DefaultValue ""
 $EntraDeviceInventoryCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDeviceInventoryCsvPath' -DefaultValue ""
+$ActiveUsersCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvPath' -DefaultValue ""
+$AdComputersCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdComputersCsvPath' -DefaultValue ""
+$CountrySourceMaxAgeHours = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'CountrySourceMaxAgeHours' -DefaultValue 48)
+if ($CountrySourceMaxAgeHours -lt 1) { throw 'CountrySourceMaxAgeHours must be at least 1.' }
 if ([string]::IsNullOrWhiteSpace($IntuneDeviceInventoryCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $IntuneDeviceInventoryCsvPath = Join-Path $LatestCsvFolderPath 'Intune_Devices_Inventory.csv'
 }
 if ([string]::IsNullOrWhiteSpace($EntraDeviceInventoryCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $EntraDeviceInventoryCsvPath = Join-Path $LatestCsvFolderPath 'M365_Entra_Devices.csv'
+}
+if ([string]::IsNullOrWhiteSpace($ActiveUsersCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
+    $ActiveUsersCsvPath = Join-Path $LatestCsvFolderPath 'M365_Users_Active.csv'
+}
+if ([string]::IsNullOrWhiteSpace($AdComputersCsvPath) -and -not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
+    $AdComputersCsvPath = Join-Path $LatestCsvFolderPath 'AD_Computers_AllDomains.csv'
 }
 
 # ==========================================================
@@ -1439,6 +1449,137 @@ function Get-WinUpdateOsCoverageSummary {
     }
 }
 
+function Get-WinUpdateFreshCsvItem {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][int]$MaxAgeHours)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Source CSV is missing: $Path" }
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $ageHours = ((Get-Date).ToUniversalTime() - $item.LastWriteTimeUtc).TotalHours
+    if ($ageHours -gt $MaxAgeHours -or $ageHours -lt -1) {
+        throw "Source CSV is outside the $MaxAgeHours-hour freshness window: $Path"
+    }
+    $item
+}
+
+function Get-WinUpdateIntuneFleetCountrySummary {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ActiveUserRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PolicyRows,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ReferencePolicyId,
+        [Parameter(Mandatory)][string]$TenantKey
+    )
+
+    $countryByUserId = @{}
+    $ambiguousUserIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($user in $ActiveUserRows) {
+        if ([string]$user.TenantKey -ne $TenantKey) { continue }
+        $id = ([string]$user.'Object Id').Trim().ToLowerInvariant()
+        if (-not $id) { continue }
+        if ($countryByUserId.ContainsKey($id)) { [void]$ambiguousUserIds.Add($id); continue }
+        $countryByUserId[$id] = ([string]$user.CountryOrRegion).Trim()
+    }
+    if ($countryByUserId.Count -eq 0) { throw 'No active-user rows match the current tenant.' }
+
+    $referenceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $otherPolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $PolicyRows) {
+        if ([string]$row.TenantKey -ne $TenantKey) { continue }
+        $id = ([string]$row.DeviceId).Trim().ToLowerInvariant()
+        if (-not $id) { continue }
+        if ($ReferencePolicyId -and [string]$row.PolicyId -eq $ReferencePolicyId) { [void]$referenceIds.Add($id) }
+        else { [void]$otherPolicyIds.Add($id) }
+    }
+
+    $groups = @{}
+    $seenDeviceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $nonWindowsRows = 0
+    foreach ($device in $IntuneDeviceRows) {
+        if ([string]$device.TenantKey -ne $TenantKey) { continue }
+        if ([string]$device.OS -ne 'Windows') { $nonWindowsRows++; continue }
+        $id = ([string]$device.'Device ID').Trim().ToLowerInvariant()
+        if (-not $id -or -not $seenDeviceIds.Add($id)) { throw 'Intune Windows inventory contains a blank or duplicate managed Device ID.' }
+        $country = ''
+        $userId = ([string]$device.UserId).Trim().ToLowerInvariant()
+        if ($userId -and $countryByUserId.ContainsKey($userId) -and -not $ambiguousUserIds.Contains($userId)) {
+            $country = [string]$countryByUserId[$userId]
+        }
+        $key = $country.ToLowerInvariant()
+        if (-not $groups.ContainsKey($key)) {
+            $groups[$key] = [pscustomobject]@{ Country = $country; Windows11 = 0; Windows10 = 0; UnknownOrOther = 0; Total = 0; ReferencePolicy = 0; OtherPolicyOnly = 0; NeitherPolicy = 0 }
+        }
+        $group = $groups[$key]
+        $build = Get-WinUpdateOsBuild -Value $device.'OS version'
+        if ($null -ne $build -and $build -ge 22000) { $group.Windows11++ }
+        elseif ($null -ne $build -and $build -ge 10240) { $group.Windows10++ }
+        else { $group.UnknownOrOther++ }
+        if ($referenceIds.Contains($id)) { $group.ReferencePolicy++ }
+        elseif ($otherPolicyIds.Contains($id)) { $group.OtherPolicyOnly++ }
+        else { $group.NeitherPolicy++ }
+        $group.Total++
+    }
+    if ($seenDeviceIds.Count -eq 0) { throw 'No Intune Windows devices match the current tenant.' }
+
+    $known = @($groups.Values | Where-Object { $_.Country } | Sort-Object @{Expression='Total';Descending=$true},Country)
+    $unknown = if ($groups.ContainsKey('')) { $groups[''] } else { [pscustomobject]@{ Country = ''; Windows11 = 0; Windows10 = 0; UnknownOrOther = 0; Total = 0; ReferencePolicy = 0; OtherPolicyOnly = 0; NeitherPolicy = 0 } }
+    $total = [pscustomobject]@{
+        Country = 'Total'
+        Windows11 = [int](($groups.Values | Measure-Object -Property Windows11 -Sum).Sum)
+        Windows10 = [int](($groups.Values | Measure-Object -Property Windows10 -Sum).Sum)
+        UnknownOrOther = [int](($groups.Values | Measure-Object -Property UnknownOrOther -Sum).Sum)
+        Total = $seenDeviceIds.Count
+        ReferencePolicy = [int](($groups.Values | Measure-Object -Property ReferencePolicy -Sum).Sum)
+        OtherPolicyOnly = [int](($groups.Values | Measure-Object -Property OtherPolicyOnly -Sum).Sum)
+        NeitherPolicy = [int](($groups.Values | Measure-Object -Property NeitherPolicy -Sum).Sum)
+    }
+    $reportOnlyReferenceIds = 0
+    foreach ($id in $referenceIds) { if (-not $seenDeviceIds.Contains($id)) { $reportOnlyReferenceIds++ } }
+    [pscustomobject]@{ Known = $known; Unknown = $unknown; Total = $total; ReportOnlyReferenceIds = $reportOnlyReferenceIds; NonWindowsRows = $nonWindowsRows }
+}
+
+function Get-WinUpdateAdWithoutIntuneSummary {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdComputerRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
+        [Parameter(Mandatory)][string]$TenantKey
+    )
+
+    $intuneAadCounts = @{}
+    foreach ($device in $IntuneDeviceRows) {
+        if ([string]$device.TenantKey -ne $TenantKey) { continue }
+        $id = ([string]$device.'Azure AD Device ID').Trim().Trim('{}').ToLowerInvariant()
+        if ($id) {
+            if (-not $intuneAadCounts.ContainsKey($id)) { $intuneAadCounts[$id] = 0 }
+            $intuneAadCounts[$id]++
+        }
+    }
+    if ($intuneAadCounts.Count -eq 0) { throw 'No Intune Azure AD Device IDs match the current tenant.' }
+
+    $seenAdIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $all = [pscustomobject]@{ Windows11 = 0; Windows10 = 0; Total = 0 }
+    $active = [pscustomobject]@{ Windows11 = 0; Windows10 = 0; Total = 0 }
+    $ambiguous = 0
+    foreach ($ad in $AdComputerRows) {
+        if ([string]$ad.TenantKey -ne $TenantKey) { continue }
+        $os = [string]$ad.OperatingSystemShortName
+        if ($os -notin @('Windows 10','Windows 11')) { continue }
+        $id = ([string]$ad.ObjectGUID).Trim().Trim('{}').ToLowerInvariant()
+        if (-not $id -or -not $seenAdIds.Add($id)) { throw 'AD Windows computer inventory contains a blank or duplicate ObjectGUID.' }
+        if ($intuneAadCounts.ContainsKey($id)) {
+            if ($intuneAadCounts[$id] -gt 1) { $ambiguous++ }
+            continue
+        }
+        if ($os -eq 'Windows 11') { $all.Windows11++ } else { $all.Windows10++ }
+        $all.Total++
+        if ([string]$ad.Enabled -eq 'True' -and [string]$ad.IsActiveInLast45Days -eq 'True') {
+            if ($os -eq 'Windows 11') { $active.Windows11++ } else { $active.Windows10++ }
+            $active.Total++
+        }
+    }
+    if ($seenAdIds.Count -eq 0) { throw 'No AD Windows 10 or Windows 11 computers match the current tenant.' }
+    [pscustomobject]@{ All = $all; EnabledActive45 = $active; AmbiguousIntuneIds = $ambiguous; AdWindowsClients = $seenAdIds.Count }
+}
+
 function Get-WinUpdateProgressPhase {
     param([Parameter(Mandatory)][object]$Row)
 
@@ -2224,6 +2365,69 @@ try {
         $fleetOsCoveragePct,$fleetPolicyCompleted,$fleetPolicyCompletionPct
     ) -join '|'
 
+    $intuneFleetSummary = $null
+    $adWithoutIntuneSummary = $null
+    $intuneSourceText = ''
+    $adSourceText = ''
+    if ($EnableSummaryEmail -and $SummaryEmailMode -ne 'Never') {
+        $intuneSourceItem = $null
+        try {
+            $intuneSourceItem = Get-WinUpdateFreshCsvItem -Path $IntuneDeviceInventoryCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+            $userSourceItem = Get-WinUpdateFreshCsvItem -Path $ActiveUsersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+            if ($intuneDeviceInventoryRows.Count -eq 0) {
+                $intuneDeviceInventoryRows = @(Import-Csv -LiteralPath $IntuneDeviceInventoryCsvPath -ErrorAction Stop)
+            }
+            $activeUserRows = @(Import-Csv -LiteralPath $ActiveUsersCsvPath -ErrorAction Stop)
+            if ($intuneDeviceInventoryRows.Count -eq 0 -or $activeUserRows.Count -eq 0) { throw 'An Intune fleet source CSV has no data rows.' }
+            foreach ($required in @('TenantKey','Device ID','OS','OS version','UserId','Azure AD Device ID')) {
+                if ($intuneDeviceInventoryRows[0].PSObject.Properties.Name -notcontains $required) { throw "Intune device CSV lacks '$required'." }
+            }
+            foreach ($required in @('TenantKey','Object Id','CountryOrRegion')) {
+                if ($activeUserRows[0].PSObject.Properties.Name -notcontains $required) { throw "Active-user CSV lacks '$required'." }
+            }
+            $referencePolicyId = if ($coverageAvailable) { [string]$primaryCoveragePolicy.PolicyId } else { '' }
+            $intuneFleetSummary = Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $intuneDeviceInventoryRows -ActiveUserRows $activeUserRows -PolicyRows $enrichedRows -ReferencePolicyId $referencePolicyId -TenantKey $Tenant
+            $intuneTotal = $intuneFleetSummary.Total
+            if (($intuneTotal.Windows11 + $intuneTotal.Windows10 + $intuneTotal.UnknownOrOther) -ne $intuneTotal.Total -or
+                ($intuneTotal.ReferencePolicy + $intuneTotal.OtherPolicyOnly + $intuneTotal.NeitherPolicy) -ne $intuneTotal.Total -or
+                ($coverageAvailable -and ($intuneTotal.ReferencePolicy + $intuneFleetSummary.ReportOnlyReferenceIds) -ne $fleetDevices)) {
+                throw 'Intune fleet OS or policy totals do not reconcile.'
+            }
+            $intuneSourceText = 'Intune devices: {0}; active users: {1}' -f $intuneSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $userSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+            Write-Log "Intune fleet breakdown: Devices=$($intuneTotal.Total) Windows11=$($intuneTotal.Windows11) Windows10=$($intuneTotal.Windows10) OsUnknown=$($intuneTotal.UnknownOrOther) ReferencePolicy=$($intuneTotal.ReferencePolicy) OtherPolicyOnly=$($intuneTotal.OtherPolicyOnly) NeitherPolicy=$($intuneTotal.NeitherPolicy) CountryUnknown=$($intuneFleetSummary.Unknown.Total) ReportOnlyReferenceIds=$($intuneFleetSummary.ReportOnlyReferenceIds) NonWindowsRows=$($intuneFleetSummary.NonWindowsRows)." "INFO" "KPI"
+        }
+        catch {
+            $intuneFleetSummary = $null
+            Write-Log "Intune fleet breakdown unavailable: $($_.Exception.Message)" "WARN" "KPI"
+        }
+        if ($intuneSourceItem -and $intuneDeviceInventoryRows.Count -gt 0) {
+            try {
+                $adSourceItem = Get-WinUpdateFreshCsvItem -Path $AdComputersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+                $adComputerRows = @(Import-Csv -LiteralPath $AdComputersCsvPath -ErrorAction Stop)
+                if ($adComputerRows.Count -eq 0) { throw 'AD computer CSV has no data rows.' }
+                foreach ($required in @('TenantKey','ObjectGUID','OperatingSystemShortName','Enabled','IsActiveInLast45Days')) {
+                    if ($adComputerRows[0].PSObject.Properties.Name -notcontains $required) { throw "AD computer CSV lacks '$required'." }
+                }
+                $adWithoutIntuneSummary = Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $adComputerRows -IntuneDeviceRows $intuneDeviceInventoryRows -TenantKey $Tenant
+                $adSourceText = $adSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+                Write-Log "AD computers without exact Intune ID match: Windows11=$($adWithoutIntuneSummary.All.Windows11) Windows10=$($adWithoutIntuneSummary.All.Windows10) Total=$($adWithoutIntuneSummary.All.Total) EnabledActive45=$($adWithoutIntuneSummary.EnabledActive45.Total) AmbiguousIntuneIds=$($adWithoutIntuneSummary.AmbiguousIntuneIds)." "INFO" "KPI"
+            }
+            catch {
+                $adWithoutIntuneSummary = $null
+                Write-Log "AD/Intune comparison unavailable: $($_.Exception.Message)" "WARN" "KPI"
+            }
+        }
+        $fleetState = if ($intuneFleetSummary) {
+            @(@($intuneFleetSummary.Known) + @($intuneFleetSummary.Unknown) | ForEach-Object {
+                [ordered]@{ Country = $_.Country; Windows11 = $_.Windows11; Windows10 = $_.Windows10; UnknownOrOther = $_.UnknownOrOther; ReferencePolicy = $_.ReferencePolicy; OtherPolicyOnly = $_.OtherPolicyOnly; NeitherPolicy = $_.NeitherPolicy }
+            }) | ConvertTo-Json -Compress -Depth 3
+        } else { 'Unavailable' }
+        $adState = if ($adWithoutIntuneSummary) {
+            '{0},{1},{2},{3},{4},{5}' -f $adWithoutIntuneSummary.All.Windows11,$adWithoutIntuneSummary.All.Windows10,$adWithoutIntuneSummary.All.Total,$adWithoutIntuneSummary.EnabledActive45.Windows11,$adWithoutIntuneSummary.EnabledActive45.Windows10,$adWithoutIntuneSummary.EnabledActive45.Total
+        } else { 'Unavailable' }
+        $summaryState = "$summaryState|IntuneFleet=$fleetState|AdWithoutIntune=$adState"
+    }
+
     Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount ActionRequiredRate=$($reportHealth.ActionRequiredRatePct)% Priority0=$priority0Count Priority0CriticalThreshold=$($reportHealth.Priority0Threshold) Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
     if ($coverageAvailable) {
         Write-Log "Fleet OS coverage: ReferencePolicy='$fleetPolicyName' Target='$fleetTargetLabel' Devices=$fleetDevices Windows11=$fleetWindows11 Windows10=$fleetWindows10 UnknownOrOther=$fleetUnknownOrOther Covered=$fleetOsCovered BelowTarget=$fleetOsBelowTarget OsVersionUnknown=$fleetOsVersionUnknown Coverage=$fleetOsCoveragePct% KnownOsCoverage=$fleetKnownOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct%" "INFO" "KPI"
@@ -2353,6 +2557,45 @@ try {
             $windowsVersionDistributionSection = ''
             $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
         }
+        if ($intuneFleetSummary) {
+            $intuneCountryRowsHtml = foreach ($countryRow in @($intuneFleetSummary.Known) + @($intuneFleetSummary.Unknown)) {
+                $countryName = if ($countryRow.Country) { Html-Encode $countryRow.Country } else { 'Country unknown' }
+                $rowBackground = if ($countryRow.Country) { '#ffffff' } else { '#f8fafc' }
+                "<tr style='background:$rowBackground;'><td style='padding:7px 8px;border-bottom:1px solid #e2e8f0;'>$countryName</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.Windows11)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.Windows10)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.UnknownOrOther)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;font-weight:600;'>$($countryRow.Total)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.ReferencePolicy)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.OtherPolicyOnly)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.NeitherPolicy)</td></tr>"
+            }
+            $intuneCountryRowsHtml = $intuneCountryRowsHtml -join [Environment]::NewLine
+            $countryResolved = $intuneFleetSummary.Total.Total - $intuneFleetSummary.Unknown.Total
+            $countryResolvedPct = [math]::Round(100.0 * $countryResolved / $intuneFleetSummary.Total.Total,2)
+            $referencePolicyLabel = if ($coverageAvailable) { Html-Encode $fleetPolicyName } else { 'Unavailable' }
+            $intuneFleetSection = @"
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows devices by primary user's country - all Intune inventory</h2>
+<p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Reference Feature Update policy: $referencePolicyLabel | Country is the primary user's Entra CountryOrRegion, not the device's physical location.</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;font-size:11px;color:#0f172a;margin:0 0 10px 0;">
+<tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">COUNTRY</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">OS UNKNOWN/OTHER</th><th style="padding:8px;text-align:right;">TOTAL</th><th style="padding:8px;text-align:right;">REFERENCE POLICY</th><th style="padding:8px;text-align:right;">OTHER FEATURE UPDATE POLICY ONLY</th><th style="padding:8px;text-align:right;">NEITHER POLICY</th></tr>
+$intuneCountryRowsHtml
+<tr style="background:#dbeafe;font-weight:700;"><td style="padding:9px;">TOTAL</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Windows11)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Windows10)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.UnknownOrOther)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Total)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.ReferencePolicy)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.OtherPolicyOnly)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.NeitherPolicy)</td></tr>
+</table>
+<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">Country resolved: $countryResolved/$($intuneFleetSummary.Total.Total) ($countryResolvedPct%). Reference-policy report devices absent from this Intune snapshot: $($intuneFleetSummary.ReportOnlyReferenceIds). Source file times (local): $(Html-Encode $intuneSourceText).</p>
+<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Policy columns are exclusive; reference-policy membership takes precedence. Neither policy means absent from the exported Feature Update policies, not confirmed outside Windows Autopatch.</p>
+"@
+        }
+        else {
+            $intuneFleetSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Windows devices by primary user's country - all Intune inventory</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>Intune fleet breakdown unavailable: a source is missing, stale, invalid, or could not be reconciled. No fleet total is inferred.</p>"
+        }
+        if ($adWithoutIntuneSummary) {
+            $adComparisonSection = @"
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">AD Windows devices without exact Intune ID match</h2>
+<table role="presentation" style="width:100%;border-collapse:collapse;font-size:12px;color:#0f172a;margin:0 0 10px 0;">
+<tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">AD SCOPE</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">TOTAL</th></tr>
+<tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;">All AD computer objects</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.All.Total)</td></tr>
+<tr style="background:#f8fafc;"><td style="padding:8px;">Of which enabled and active in the last 45 days</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.EnabledActive45.Total)</td></tr>
+</table>
+<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Of $($adWithoutIntuneSummary.AdWindowsClients) AD Windows 10/11 computer objects. Exact join: AD ObjectGUID to Intune Azure AD Device ID; no match does not prove absence from Intune. Ambiguous Intune IDs excluded: $($adWithoutIntuneSummary.AmbiguousIntuneIds). AD source file time (local): $(Html-Encode $adSourceText). AD country is not qualified.</p>
+"@
+        }
+        else {
+            $adComparisonSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>AD Windows devices without exact Intune ID match</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>AD/Intune comparison unavailable: a source is missing, stale, invalid, or could not be reconciled. AD country is not qualified.</p>"
+        }
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
             $encodedUrl = Html-Encode $spUploadUrl
             $encodedName = Html-Encode ([IO.Path]::GetFileName($CsvLastFinal))
@@ -2365,6 +2608,8 @@ try {
 <div style="display:inline-block;margin-bottom:18px;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
 $severityInputsHtml
 $windowsVersionDistributionSection
+$intuneFleetSection
+$adComparisonSection
 $fleetCoverageSection
 <h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Operational policy state - all policies</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once across all policies for operational follow-up. The most severe policy state is retained here only for actions and workflow monitoring; it is not used as the fleet OS coverage KPI.</p>
@@ -2461,10 +2706,10 @@ finally {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAaY9uk4HrSvMIm
-# ozjMmxO1tanihuRkosiqG/Ev196nsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNor0Jk8c4zmLS
+# AJlVthJu4lvyK0rs549/nosbNG2YMqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2489,139 +2734,19 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGbbFbNc7ZLuaybCykrjAyakc+g2VjlDOCJY6Y2VT4tZMA0GCSqG
-# SIb3DQEBAQUABIIBgIxno4wLqo43k0fC4AHdb+SjoK5WU8R4IA48CAj4Faz6BQAB
-# yDgrKTRejT/5WFUSEC4AhpJG9bViN75883c2FDp4jfAgMcHcYD+zVZJ8ZlT1UbkL
-# /v2DymNjU6D9LnQPvK9Wn0ijYRdoHDggz2vip7D+Wv0lAZKH3ZZu9bNVQBBqaTbi
-# K7vcYVzwsUd+Sl3SMTsvJXB2JDsJfktKsZJa07jBHAdRjIxpayEELIDQdm+obimI
-# x2z8RJrV9AORtHJkLrLwRlj6opBxsGwVB0wRW9pv4JQsRmAKpJEI5UdWiGFtj170
-# wc41I9v4pTb0J1o4ky33rOejX4p6aWX4ZlZsGlIyq9TKvgml45iT4dLIC8MsTiWr
-# XLfa8TLfYWEdi/G7GDhZ/MBxRe3WOEf4mjIPCYzpq4SAnNyzIA1XD93JoU3WxcjS
-# Q8DMlnL1Pi0pk3kYApDF7HW3UZwxa0LfUI4eevw6lF5LzHQ9hnZX2uqUwnk+cSR+
-# 4R8kol9ZsPKnb3URaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTFaMC8GCSqGSIb3DQEJBDEiBCCk1a9YuT6+71Wej/KVNJPaJ46oB3Sh+0WGLoCp
-# OByCkzANBgkqhkiG9w0BAQEFAASCAgAMdHPcUSRlbgBcP8iCuDEFJnFQTwnRNBvp
-# HLAyY1qLRtAqygyF4FuOOmZEElZcMNuka6bGzvoLIQ+ohVXG1sdJxNuuxRTrr6kn
-# dKUXK85nGc3IctLZTLZfqzGWRfaX4YgoZd++XNfIrp0hIYo7VjChqWe1tfU/GeB/
-# X6bHnr51LtSSjtzAI1t4yi9wNrSPo97jx6iaukOyOIA6Ua0x6NayfEn2PRdVzZIT
-# MUBeFXTQOk7jSuYMyOaeOqmZuBxHe7CT7t319Tf8ILJnZkmoUgxBNjV/Qy1MRQJU
-# dO4uJxdswOpuW3+WUvZwRpoYncxjY9DeVi6SfqYaI0Av4rVkc7YAufuCteniIx8q
-# 6wTwe+6kcUeL0CJncNRG/kyFJDt3ZfQGPBIMbzF0MqMwwflPrxvIjwmKYQb7i23H
-# 96wVzPodewe8QJh1+AgzHjW8jO2KAHRmrnXdLGRBM2BoUcmAtthnyY8lNYJd06rt
-# b+Ip/OWUlbKCMuA1Ywxq92teoyyln52/0eXb9uZhQYoeRLi6wK4jeZqAl09SOmzW
-# 24RA8qFaaKLdouUR5LZJaQoXFhpECAUGb5wYqdPGcRRlZY73AXbhehNIAACgJFmb
-# 7sy8Jxgm4tKSnEBMv+0iGSUV/xT642DwA33tl7mvtaSxiyfv3MP75PaS1XRIS6tK
-# VV70tRJJtA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDxZFuQGVf7We91wrYBynHT
+# 0hFsXmdRSytVz9WR154+ZzANBgkqhkiG9w0BAQEFAASCAYBnBdjHC4HIBq8n7je4
+# WP9GRMd9BzRA7g7tJqSao5cio0Qo7h30ug7pdjfgJaiTUYHWJVtfyPeORaImy3tQ
+# Oe3kBToxnxGmHbRqvBNdjGWlY9IGeaypeyjIMSiLORFvtbjdvzNvE+RuhwSVG4hw
+# 5s8XVqpE1eRyX3a4i/hCGKJ0DnXNemFLLQfkHbIY5UVAVRWi+y9luxvmPaT7xByU
+# d57ns0/5nT7oCltCrpvNx/vFykZkami3TVdTNAFOShDYYSPSQPLY2cemV7Em6JvG
+# Oc1k9ADG1piKpLmYL4VXKCRUVUYVQ+c7JUJNbOOEEIHr+YCuPA3LdjLDEW42PvKd
+# HORpA1iys/cG112kCoeXQlrYTmq6rYeqbB9HFEAHfQkKwE9lm8DwX0QTLldJQD+4
+# Cf1wwmEUEa5QZJrCoHSZJvHpDDofD36BWAUpgeyCzANW960QbpMyM7rO6o/zUnYX
+# p6OAaTHc5fQpO+TF4ax91UJnC/l4zVVYrZmXI+vyxdGu3Kk=
 # SIG # End signature block

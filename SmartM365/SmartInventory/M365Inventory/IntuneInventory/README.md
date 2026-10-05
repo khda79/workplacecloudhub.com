@@ -45,6 +45,43 @@ Windows 11 Readiness Issues 1.21 uses the shared atomic publisher for detail,
 summary, archives and weekly manifest. Its readiness classification and input
 contract are unchanged.
 
+## Windows Update country breakdown
+
+The Windows Update status summary email places two tables between Windows
+version distribution and Fleet OS coverage. The first covers every Windows
+row in `Intune_Devices_Inventory.csv`, once per managed Device ID. It shows
+Windows 11, Windows 10, unknown/other OS, and totals for each primary user's
+Entra `CountryOrRegion`. Country is joined through the managed device's UserId
+and the active-user Object Id. It is not the device's physical location.
+Missing or ambiguous user IDs, users absent from the active-user snapshot,
+and blank countries are counted under `Country unknown`. There is no UPN or
+device-name inference. OS family uses the Intune OS version build (Windows 11
+at build 22000 or later; Windows 10 from build 10240 through 21999).
+
+The same table splits each Intune Windows device into exclusive Feature Update
+policy groups: the selected reference policy, another exported Feature Update
+policy only, or neither exported policy. Reference-policy membership takes
+precedence when a device occurs in both. These groups describe policy report
+presence, not confirmed Windows Autopatch enrollment. The reference-policy
+report can contain Device IDs absent from the current Intune inventory; those
+are disclosed separately rather than added to the Intune total. The existing
+Fleet OS coverage section remains scoped to its reference policy.
+
+The second table shows AD Windows 10/11 computer objects with no exact match
+from AD ObjectGUID to Intune Azure AD Device ID. It also shows the subset
+enabled and active in the last 45 days. No exact match does not prove that a
+computer is unenrolled: identity differences, synchronization and snapshot
+timing can prevent a join. AD country is not qualified and is therefore not
+inferred for this table.
+
+The tables read `Intune_Devices_Inventory.csv`, `M365_Users_Active.csv`, and
+`AD_Computers_AllDomains.csv` from the tenant's DATA-LAST snapshot. Their last
+write times must be no older than `CountrySourceMaxAgeHours` (48 hours by
+default). Missing, stale, invalid, or non-reconciling sources display an
+unavailable notice for the affected table. The CSV export and fleet severity
+remain unchanged. The `OnChange` mail state includes both breakdowns when
+available.
+
 ## Endpoint Analytics
 
 `EndpointAnalytics/SmartM365-EndpointAnalytics-Inventory.ps1` exports standard Endpoint Analytics reports through Microsoft Graph `deviceManagement/reports/exportJobs`. Microsoft currently requires `DeviceManagementManagedDevices.ReadWrite.All` to create the temporary export-job resource, although the collector performs no device, policy, baseline, assignment, or remediation change.
