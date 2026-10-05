@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.47
+  1.48
 .VERSION
-1.47
+1.48
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -95,7 +95,7 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.47"
+$ScriptVersion = "1.48"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1463,11 +1463,55 @@ function Get-WinUpdateFreshCsvItem {
     $item
 }
 
+function New-WinUpdateActivationIndex {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$EntraDeviceRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdComputerRows,
+        [Parameter(Mandatory)][string]$TenantKey
+    )
+
+    $entraById = @{}
+    foreach ($device in $EntraDeviceRows) {
+        if ([string]$device.TenantKey -ne $TenantKey) { continue }
+        $id = ([string]$device.DeviceId).Trim().Trim('{}').ToLowerInvariant()
+        if (-not $id) { continue }
+        if ($entraById.ContainsKey($id)) { throw 'Entra device inventory contains a duplicate DeviceId.' }
+        $entraById[$id] = ([string]$device.AccountEnabled).Trim()
+    }
+    if ($entraById.Count -eq 0) { throw 'No Entra DeviceIds match the current tenant.' }
+
+    $adById = @{}
+    foreach ($computer in $AdComputerRows) {
+        if ([string]$computer.TenantKey -ne $TenantKey) { continue }
+        $id = ([string]$computer.ObjectGUID).Trim().Trim('{}').ToLowerInvariant()
+        if (-not $id) { continue }
+        if ($adById.ContainsKey($id)) { throw 'AD computer inventory contains a duplicate ObjectGUID.' }
+        $adById[$id] = ([string]$computer.Enabled).Trim()
+    }
+    if ($adById.Count -eq 0) { throw 'No AD ObjectGUIDs match the current tenant.' }
+    [pscustomobject]@{ EntraById = $entraById; AdById = $adById }
+}
+
+function Get-WinUpdateActivationState {
+    param([AllowEmptyString()][string]$DeviceGuid, [Parameter(Mandatory)][object]$Index)
+
+    $id = ([string]$DeviceGuid).Trim().Trim('{}').ToLowerInvariant()
+    if (-not $id) { return 'Unqualified' }
+    $entra = $Index.EntraById[$id]
+    $ad = $Index.AdById[$id]
+    if ($entra -eq 'True' -or $ad -eq 'True') { return 'Enabled' }
+    if ($Index.EntraById.ContainsKey($id) -and $Index.AdById.ContainsKey($id) -and $entra -eq 'False' -and $ad -eq 'False') {
+        return 'DisabledBoth'
+    }
+    return 'Unqualified'
+}
+
 function Get-WinUpdateIntuneFleetCountrySummary {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ActiveUserRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PolicyRows,
+        [Parameter(Mandatory)][object]$ActivationIndex,
         [Parameter(Mandatory)][AllowEmptyString()][string]$ReferencePolicyId,
         [Parameter(Mandatory)][string]$TenantKey
     )
@@ -1486,7 +1530,8 @@ function Get-WinUpdateIntuneFleetCountrySummary {
     $referenceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $otherPolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($row in $PolicyRows) {
-        if ([string]$row.TenantKey -ne $TenantKey) { continue }
+        # Graph report rows are tenant-scoped in memory; the CSV publisher adds TenantKey later.
+        if ($row.PSObject.Properties['TenantKey'] -and [string]$row.TenantKey -ne $TenantKey) { continue }
         $id = ([string]$row.DeviceId).Trim().ToLowerInvariant()
         if (-not $id) { continue }
         if ($ReferencePolicyId -and [string]$row.PolicyId -eq $ReferencePolicyId) { [void]$referenceIds.Add($id) }
@@ -1496,11 +1541,20 @@ function Get-WinUpdateIntuneFleetCountrySummary {
     $groups = @{}
     $seenDeviceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $nonWindowsRows = 0
+    $excludedDisabledBoth = 0
+    $excludedUnqualified = 0
+    $excludedReferencePolicy = 0
     foreach ($device in $IntuneDeviceRows) {
         if ([string]$device.TenantKey -ne $TenantKey) { continue }
         if ([string]$device.OS -ne 'Windows') { $nonWindowsRows++; continue }
         $id = ([string]$device.'Device ID').Trim().ToLowerInvariant()
         if (-not $id -or -not $seenDeviceIds.Add($id)) { throw 'Intune Windows inventory contains a blank or duplicate managed Device ID.' }
+        $activationState = Get-WinUpdateActivationState -DeviceGuid ([string]$device.'Azure AD Device ID') -Index $ActivationIndex
+        if ($activationState -ne 'Enabled') {
+            if ($activationState -eq 'DisabledBoth') { $excludedDisabledBoth++ } else { $excludedUnqualified++ }
+            if ($referenceIds.Contains($id)) { $excludedReferencePolicy++ }
+            continue
+        }
         $country = ''
         $userId = ([string]$device.UserId).Trim().ToLowerInvariant()
         if ($userId -and $countryByUserId.ContainsKey($userId) -and -not $ambiguousUserIds.Contains($userId)) {
@@ -1529,20 +1583,26 @@ function Get-WinUpdateIntuneFleetCountrySummary {
         Windows11 = [int](($groups.Values | Measure-Object -Property Windows11 -Sum).Sum)
         Windows10 = [int](($groups.Values | Measure-Object -Property Windows10 -Sum).Sum)
         UnknownOrOther = [int](($groups.Values | Measure-Object -Property UnknownOrOther -Sum).Sum)
-        Total = $seenDeviceIds.Count
+        Total = $seenDeviceIds.Count - $excludedDisabledBoth - $excludedUnqualified
         ReferencePolicy = [int](($groups.Values | Measure-Object -Property ReferencePolicy -Sum).Sum)
         OtherPolicyOnly = [int](($groups.Values | Measure-Object -Property OtherPolicyOnly -Sum).Sum)
         NeitherPolicy = [int](($groups.Values | Measure-Object -Property NeitherPolicy -Sum).Sum)
     }
     $reportOnlyReferenceIds = 0
     foreach ($id in $referenceIds) { if (-not $seenDeviceIds.Contains($id)) { $reportOnlyReferenceIds++ } }
-    [pscustomobject]@{ Known = $known; Unknown = $unknown; Total = $total; ReportOnlyReferenceIds = $reportOnlyReferenceIds; NonWindowsRows = $nonWindowsRows }
+    [pscustomobject]@{
+        Known = $known; Unknown = $unknown; Total = $total
+        AllIntuneWindows = $seenDeviceIds.Count; ExcludedDisabledBoth = $excludedDisabledBoth
+        ExcludedUnqualified = $excludedUnqualified; ExcludedReferencePolicy = $excludedReferencePolicy
+        ReportOnlyReferenceIds = $reportOnlyReferenceIds; NonWindowsRows = $nonWindowsRows
+    }
 }
 
 function Get-WinUpdateAdWithoutIntuneSummary {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdComputerRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
+        [Parameter(Mandatory)][object]$ActivationIndex,
         [Parameter(Mandatory)][string]$TenantKey
     )
 
@@ -1561,6 +1621,9 @@ function Get-WinUpdateAdWithoutIntuneSummary {
     $all = [pscustomobject]@{ Windows11 = 0; Windows10 = 0; Total = 0 }
     $active = [pscustomobject]@{ Windows11 = 0; Windows10 = 0; Total = 0 }
     $ambiguous = 0
+    $unmatchedTotal = 0
+    $excludedDisabledBoth = 0
+    $excludedUnqualified = 0
     foreach ($ad in $AdComputerRows) {
         if ([string]$ad.TenantKey -ne $TenantKey) { continue }
         $os = [string]$ad.OperatingSystemShortName
@@ -1571,15 +1634,25 @@ function Get-WinUpdateAdWithoutIntuneSummary {
             if ($intuneAadCounts[$id] -gt 1) { $ambiguous++ }
             continue
         }
+        $unmatchedTotal++
+        $activationState = Get-WinUpdateActivationState -DeviceGuid $id -Index $ActivationIndex
+        if ($activationState -ne 'Enabled') {
+            if ($activationState -eq 'DisabledBoth') { $excludedDisabledBoth++ } else { $excludedUnqualified++ }
+            continue
+        }
         if ($os -eq 'Windows 11') { $all.Windows11++ } else { $all.Windows10++ }
         $all.Total++
-        if ([string]$ad.Enabled -eq 'True' -and [string]$ad.IsActiveInLast45Days -eq 'True') {
+        if ([string]$ad.IsActiveInLast45Days -eq 'True') {
             if ($os -eq 'Windows 11') { $active.Windows11++ } else { $active.Windows10++ }
             $active.Total++
         }
     }
     if ($seenAdIds.Count -eq 0) { throw 'No AD Windows 10 or Windows 11 computers match the current tenant.' }
-    [pscustomobject]@{ All = $all; EnabledActive45 = $active; AmbiguousIntuneIds = $ambiguous; AdWindowsClients = $seenAdIds.Count }
+    [pscustomobject]@{
+        All = $all; EnabledActive45 = $active; AmbiguousIntuneIds = $ambiguous
+        AdWindowsClients = $seenAdIds.Count; UnmatchedTotal = $unmatchedTotal
+        ExcludedDisabledBoth = $excludedDisabledBoth; ExcludedUnqualified = $excludedUnqualified
+    }
 }
 
 function Get-WinUpdateProgressPhase {
@@ -2369,54 +2442,76 @@ try {
 
     $intuneFleetSummary = $null
     $adWithoutIntuneSummary = $null
+    $activationIndex = $null
     $intuneSourceText = ''
     $adSourceText = ''
     if ($EnableSummaryEmail -and $SummaryEmailMode -ne 'Never') {
         $intuneSourceItem = $null
         try {
             $intuneSourceItem = Get-WinUpdateFreshCsvItem -Path $IntuneDeviceInventoryCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
-            $userSourceItem = Get-WinUpdateFreshCsvItem -Path $ActiveUsersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+            $entraSourceItem = Get-WinUpdateFreshCsvItem -Path $EntraDeviceInventoryCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+            $adSourceItem = Get-WinUpdateFreshCsvItem -Path $AdComputersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
             if ($intuneDeviceInventoryRows.Count -eq 0) {
                 $intuneDeviceInventoryRows = @(Import-Csv -LiteralPath $IntuneDeviceInventoryCsvPath -ErrorAction Stop)
             }
-            $activeUserRows = @(Import-Csv -LiteralPath $ActiveUsersCsvPath -ErrorAction Stop)
-            if ($intuneDeviceInventoryRows.Count -eq 0 -or $activeUserRows.Count -eq 0) { throw 'An Intune fleet source CSV has no data rows.' }
+            if ($entraDeviceInventoryRows.Count -eq 0) {
+                $entraDeviceInventoryRows = @(Import-Csv -LiteralPath $EntraDeviceInventoryCsvPath -ErrorAction Stop)
+            }
+            $adComputerRows = @(Import-Csv -LiteralPath $AdComputersCsvPath -ErrorAction Stop)
+            if ($intuneDeviceInventoryRows.Count -eq 0 -or $entraDeviceInventoryRows.Count -eq 0 -or $adComputerRows.Count -eq 0) {
+                throw 'An Intune, Entra, or AD activation source CSV has no data rows.'
+            }
             foreach ($required in @('TenantKey','Device ID','OS','OS version','UserId','Azure AD Device ID')) {
                 if ($intuneDeviceInventoryRows[0].PSObject.Properties.Name -notcontains $required) { throw "Intune device CSV lacks '$required'." }
             }
-            foreach ($required in @('TenantKey','Object Id','CountryOrRegion')) {
-                if ($activeUserRows[0].PSObject.Properties.Name -notcontains $required) { throw "Active-user CSV lacks '$required'." }
+            foreach ($required in @('TenantKey','DeviceId','AccountEnabled')) {
+                if ($entraDeviceInventoryRows[0].PSObject.Properties.Name -notcontains $required) { throw "Entra device CSV lacks '$required'." }
             }
-            $referencePolicyId = if ($coverageAvailable) { [string]$primaryCoveragePolicy.PolicyId } else { '' }
-            $intuneFleetSummary = Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $intuneDeviceInventoryRows -ActiveUserRows $activeUserRows -PolicyRows $enrichedRows -ReferencePolicyId $referencePolicyId -TenantKey $CsvTenantKey
-            $intuneTotal = $intuneFleetSummary.Total
-            if (($intuneTotal.Windows11 + $intuneTotal.Windows10 + $intuneTotal.UnknownOrOther) -ne $intuneTotal.Total -or
-                ($intuneTotal.ReferencePolicy + $intuneTotal.OtherPolicyOnly + $intuneTotal.NeitherPolicy) -ne $intuneTotal.Total -or
-                ($coverageAvailable -and ($intuneTotal.ReferencePolicy + $intuneFleetSummary.ReportOnlyReferenceIds) -ne $fleetDevices)) {
-                throw 'Intune fleet OS or policy totals do not reconcile.'
+            foreach ($required in @('TenantKey','ObjectGUID','OperatingSystemShortName','Enabled','IsActiveInLast45Days')) {
+                if ($adComputerRows[0].PSObject.Properties.Name -notcontains $required) { throw "AD computer CSV lacks '$required'." }
             }
-            $intuneSourceText = 'Intune devices: {0}; active users: {1}' -f $intuneSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $userSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
-            Write-Log "Intune fleet breakdown: Devices=$($intuneTotal.Total) Windows11=$($intuneTotal.Windows11) Windows10=$($intuneTotal.Windows10) OsUnknown=$($intuneTotal.UnknownOrOther) ReferencePolicy=$($intuneTotal.ReferencePolicy) OtherPolicyOnly=$($intuneTotal.OtherPolicyOnly) NeitherPolicy=$($intuneTotal.NeitherPolicy) CountryUnknown=$($intuneFleetSummary.Unknown.Total) ReportOnlyReferenceIds=$($intuneFleetSummary.ReportOnlyReferenceIds) NonWindowsRows=$($intuneFleetSummary.NonWindowsRows)." "INFO" "KPI"
+            $activationIndex = New-WinUpdateActivationIndex -EntraDeviceRows $entraDeviceInventoryRows -AdComputerRows $adComputerRows -TenantKey $CsvTenantKey
         }
         catch {
-            $intuneFleetSummary = $null
-            Write-Log "Intune fleet breakdown unavailable: $($_.Exception.Message)" "WARN" "KPI"
+            $activationIndex = $null
+            Write-Log "Directory activation comparison unavailable: $($_.Exception.Message)" "WARN" "KPI"
         }
-        if ($intuneSourceItem -and $intuneDeviceInventoryRows.Count -gt 0) {
+        if ($activationIndex) {
             try {
-                $adSourceItem = Get-WinUpdateFreshCsvItem -Path $AdComputersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
-                $adComputerRows = @(Import-Csv -LiteralPath $AdComputersCsvPath -ErrorAction Stop)
-                if ($adComputerRows.Count -eq 0) { throw 'AD computer CSV has no data rows.' }
-                foreach ($required in @('TenantKey','ObjectGUID','OperatingSystemShortName','Enabled','IsActiveInLast45Days')) {
-                    if ($adComputerRows[0].PSObject.Properties.Name -notcontains $required) { throw "AD computer CSV lacks '$required'." }
+                $userSourceItem = Get-WinUpdateFreshCsvItem -Path $ActiveUsersCsvPath -MaxAgeHours $CountrySourceMaxAgeHours
+                $activeUserRows = @(Import-Csv -LiteralPath $ActiveUsersCsvPath -ErrorAction Stop)
+                if ($activeUserRows.Count -eq 0) { throw 'Active-user CSV has no data rows.' }
+                foreach ($required in @('TenantKey','Object Id','CountryOrRegion')) {
+                    if ($activeUserRows[0].PSObject.Properties.Name -notcontains $required) { throw "Active-user CSV lacks '$required'." }
                 }
-                $adWithoutIntuneSummary = Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $adComputerRows -IntuneDeviceRows $intuneDeviceInventoryRows -TenantKey $CsvTenantKey
-                $adSourceText = $adSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
-                Write-Log "AD computers without exact Intune ID match: Windows11=$($adWithoutIntuneSummary.All.Windows11) Windows10=$($adWithoutIntuneSummary.All.Windows10) Total=$($adWithoutIntuneSummary.All.Total) EnabledActive45=$($adWithoutIntuneSummary.EnabledActive45.Total) AmbiguousIntuneIds=$($adWithoutIntuneSummary.AmbiguousIntuneIds)." "INFO" "KPI"
+                $referencePolicyId = if ($coverageAvailable) { [string]$primaryCoveragePolicy.PolicyId } else { '' }
+                $intuneFleetSummary = Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $intuneDeviceInventoryRows -ActiveUserRows $activeUserRows -PolicyRows $enrichedRows -ActivationIndex $activationIndex -ReferencePolicyId $referencePolicyId -TenantKey $CsvTenantKey
+                $intuneTotal = $intuneFleetSummary.Total
+                if (($intuneTotal.Windows11 + $intuneTotal.Windows10 + $intuneTotal.UnknownOrOther) -ne $intuneTotal.Total -or
+                    ($intuneTotal.ReferencePolicy + $intuneTotal.OtherPolicyOnly + $intuneTotal.NeitherPolicy) -ne $intuneTotal.Total -or
+                    ($intuneTotal.Total + $intuneFleetSummary.ExcludedDisabledBoth + $intuneFleetSummary.ExcludedUnqualified) -ne $intuneFleetSummary.AllIntuneWindows -or
+                    ($coverageAvailable -and ($intuneTotal.ReferencePolicy + $intuneFleetSummary.ExcludedReferencePolicy + $intuneFleetSummary.ReportOnlyReferenceIds) -ne $fleetDevices)) {
+                    throw "Intune fleet totals do not reconcile: Enabled=$($intuneTotal.Total) All=$($intuneFleetSummary.AllIntuneWindows) DisabledBoth=$($intuneFleetSummary.ExcludedDisabledBoth) Unqualified=$($intuneFleetSummary.ExcludedUnqualified) OS=$($intuneTotal.Windows11 + $intuneTotal.Windows10 + $intuneTotal.UnknownOrOther) Policy=$($intuneTotal.ReferencePolicy + $intuneTotal.OtherPolicyOnly + $intuneTotal.NeitherPolicy) ReferenceEnabled=$($intuneTotal.ReferencePolicy) ReferenceExcluded=$($intuneFleetSummary.ExcludedReferencePolicy) ReferenceReportOnly=$($intuneFleetSummary.ReportOnlyReferenceIds) ReferenceReport=$fleetDevices."
+                }
+                $intuneSourceText = 'Intune devices: {0}; Entra devices: {1}; AD computers: {2}; active users: {3}' -f $intuneSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'),$entraSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'),$adSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'),$userSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+                Write-Log "Enabled Intune Windows breakdown: Devices=$($intuneTotal.Total) Windows11=$($intuneTotal.Windows11) Windows10=$($intuneTotal.Windows10) OsUnknown=$($intuneTotal.UnknownOrOther) ReferencePolicy=$($intuneTotal.ReferencePolicy) OtherPolicyOnly=$($intuneTotal.OtherPolicyOnly) NeitherPolicy=$($intuneTotal.NeitherPolicy) ExcludedDisabledBoth=$($intuneFleetSummary.ExcludedDisabledBoth) ExcludedUnqualified=$($intuneFleetSummary.ExcludedUnqualified) CountryUnknown=$($intuneFleetSummary.Unknown.Total) ReportOnlyReferenceIds=$($intuneFleetSummary.ReportOnlyReferenceIds)." "INFO" "KPI"
+            }
+            catch {
+                $intuneFleetSummary = $null
+                Write-Log "Enabled Intune fleet breakdown unavailable: $($_.Exception.Message)" "WARN" "KPI"
+            }
+            try {
+                $adWithoutIntuneSummary = Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $adComputerRows -IntuneDeviceRows $intuneDeviceInventoryRows -ActivationIndex $activationIndex -TenantKey $CsvTenantKey
+                if (($adWithoutIntuneSummary.All.Total + $adWithoutIntuneSummary.ExcludedDisabledBoth + $adWithoutIntuneSummary.ExcludedUnqualified) -ne $adWithoutIntuneSummary.UnmatchedTotal -or
+                    $adWithoutIntuneSummary.EnabledActive45.Total -gt $adWithoutIntuneSummary.All.Total) {
+                    throw 'Enabled AD/Intune comparison totals do not reconcile.'
+                }
+                $adSourceText = 'Intune devices: {0}; Entra devices: {1}; AD computers: {2}' -f $intuneSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'),$entraSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm'),$adSourceItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+                Write-Log "Enabled AD computers without exact Intune ID match: Windows11=$($adWithoutIntuneSummary.All.Windows11) Windows10=$($adWithoutIntuneSummary.All.Windows10) Total=$($adWithoutIntuneSummary.All.Total) EnabledActive45=$($adWithoutIntuneSummary.EnabledActive45.Total) ExcludedDisabledBoth=$($adWithoutIntuneSummary.ExcludedDisabledBoth) ExcludedUnqualified=$($adWithoutIntuneSummary.ExcludedUnqualified) AmbiguousIntuneIds=$($adWithoutIntuneSummary.AmbiguousIntuneIds)." "INFO" "KPI"
             }
             catch {
                 $adWithoutIntuneSummary = $null
-                Write-Log "AD/Intune comparison unavailable: $($_.Exception.Message)" "WARN" "KPI"
+                Write-Log "Enabled AD/Intune comparison unavailable: $($_.Exception.Message)" "WARN" "KPI"
             }
         }
         $fleetState = if ($intuneFleetSummary) {
@@ -2427,7 +2522,9 @@ try {
         $adState = if ($adWithoutIntuneSummary) {
             '{0},{1},{2},{3},{4},{5}' -f $adWithoutIntuneSummary.All.Windows11,$adWithoutIntuneSummary.All.Windows10,$adWithoutIntuneSummary.All.Total,$adWithoutIntuneSummary.EnabledActive45.Windows11,$adWithoutIntuneSummary.EnabledActive45.Windows10,$adWithoutIntuneSummary.EnabledActive45.Total
         } else { 'Unavailable' }
-        $summaryState = "$summaryState|IntuneFleet=$fleetState|AdWithoutIntune=$adState"
+        $activationState = if ($intuneFleetSummary) { "$($intuneFleetSummary.ExcludedDisabledBoth),$($intuneFleetSummary.ExcludedUnqualified),$($intuneFleetSummary.ExcludedReferencePolicy),$($intuneFleetSummary.ReportOnlyReferenceIds)" } else { 'Unavailable' }
+        $adExclusionState = if ($adWithoutIntuneSummary) { "$($adWithoutIntuneSummary.ExcludedDisabledBoth),$($adWithoutIntuneSummary.ExcludedUnqualified)" } else { 'Unavailable' }
+        $summaryState = "$summaryState|IntuneFleet=$fleetState|Activation=$activationState|AdWithoutIntune=$adState|AdExcluded=$adExclusionState"
     }
 
     Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount ActionRequiredRate=$($reportHealth.ActionRequiredRatePct)% Priority0=$priority0Count Priority0CriticalThreshold=$($reportHealth.Priority0Threshold) Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
@@ -2567,36 +2664,36 @@ try {
             }
             $intuneCountryRowsHtml = $intuneCountryRowsHtml -join [Environment]::NewLine
             $countryResolved = $intuneFleetSummary.Total.Total - $intuneFleetSummary.Unknown.Total
-            $countryResolvedPct = [math]::Round(100.0 * $countryResolved / $intuneFleetSummary.Total.Total,2)
+            $countryResolvedPct = if ($intuneFleetSummary.Total.Total -gt 0) { [math]::Round(100.0 * $countryResolved / $intuneFleetSummary.Total.Total,2) } else { 0.0 }
             $referencePolicyLabel = if ($coverageAvailable) { Html-Encode $fleetPolicyName } else { 'Unavailable' }
             $intuneFleetSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows devices by primary user's country - all Intune inventory</h2>
-<p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Reference Feature Update policy: $referencePolicyLabel | Country is the primary user's Entra CountryOrRegion, not the device's physical location.</p>
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Enabled Windows devices by primary user's country - Intune inventory</h2>
+<p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Included when Entra AccountEnabled or AD Enabled is true. Reference Feature Update policy: $referencePolicyLabel | Country is the primary user's Entra CountryOrRegion, not the device's physical location.</p>
 <table role="presentation" style="width:100%;border-collapse:collapse;font-size:11px;color:#0f172a;margin:0 0 10px 0;">
 <tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">COUNTRY</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">OS UNKNOWN/OTHER</th><th style="padding:8px;text-align:right;">TOTAL</th><th style="padding:8px;text-align:right;">REFERENCE POLICY</th><th style="padding:8px;text-align:right;">OTHER FEATURE UPDATE POLICY ONLY</th><th style="padding:8px;text-align:right;">NEITHER POLICY</th></tr>
 $intuneCountryRowsHtml
 <tr style="background:#dbeafe;font-weight:700;"><td style="padding:9px;">TOTAL</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Windows11)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Windows10)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.UnknownOrOther)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.Total)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.ReferencePolicy)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.OtherPolicyOnly)</td><td style="padding:9px;text-align:right;">$($intuneFleetSummary.Total.NeitherPolicy)</td></tr>
 </table>
-<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">Country resolved: $countryResolved/$($intuneFleetSummary.Total.Total) ($countryResolvedPct%). Reference-policy report devices absent from this Intune snapshot: $($intuneFleetSummary.ReportOnlyReferenceIds). Source file times (local): $(Html-Encode $intuneSourceText).</p>
-<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Policy columns are exclusive; reference-policy membership takes precedence. Neither policy means absent from the exported Feature Update policies, not confirmed outside Windows Autopatch.</p>
+<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">Enabled: $($intuneFleetSummary.Total.Total) of $($intuneFleetSummary.AllIntuneWindows) Intune Windows devices. Excluded: $($intuneFleetSummary.ExcludedDisabledBoth) disabled in both directories; $($intuneFleetSummary.ExcludedUnqualified) without positive enabled evidence. Country resolved: $countryResolved/$($intuneFleetSummary.Total.Total) ($countryResolvedPct%). Source file times (local): $(Html-Encode $intuneSourceText).</p>
+<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Policy columns are exclusive; reference-policy membership takes precedence. Reference-policy devices excluded by activation: $($intuneFleetSummary.ExcludedReferencePolicy); report devices absent from this Intune snapshot: $($intuneFleetSummary.ReportOnlyReferenceIds). Neither policy means absent from the exported Feature Update policies, not confirmed outside Windows Autopatch. Fleet OS coverage below retains its reference-policy scope.</p>
 "@
         }
         else {
-            $intuneFleetSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Windows devices by primary user's country - all Intune inventory</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>Intune fleet breakdown unavailable: a source is missing, stale, invalid, or could not be reconciled. No fleet total is inferred.</p>"
+            $intuneFleetSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Enabled Windows devices by primary user's country - Intune inventory</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>Enabled Intune fleet breakdown unavailable: a source is missing, stale, invalid, or could not be reconciled. No fleet total is inferred.</p>"
         }
         if ($adWithoutIntuneSummary) {
             $adComparisonSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">AD Windows devices without exact Intune ID match</h2>
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Enabled AD Windows devices without exact Intune ID match</h2>
 <table role="presentation" style="width:100%;border-collapse:collapse;font-size:12px;color:#0f172a;margin:0 0 10px 0;">
 <tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">AD SCOPE</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">TOTAL</th></tr>
-<tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;">All AD computer objects</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.All.Total)</td></tr>
-<tr style="background:#f8fafc;"><td style="padding:8px;">Of which enabled and active in the last 45 days</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.EnabledActive45.Total)</td></tr>
+<tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;">Enabled in Entra or AD</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.All.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.All.Total)</td></tr>
+<tr style="background:#f8fafc;"><td style="padding:8px;">Of which active in the last 45 days</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows11)</td><td style="padding:8px;text-align:right;">$($adWithoutIntuneSummary.EnabledActive45.Windows10)</td><td style="padding:8px;text-align:right;font-weight:600;">$($adWithoutIntuneSummary.EnabledActive45.Total)</td></tr>
 </table>
-<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Of $($adWithoutIntuneSummary.AdWindowsClients) AD Windows 10/11 computer objects. Exact join: AD ObjectGUID to Intune Azure AD Device ID; no match does not prove absence from Intune. Ambiguous Intune IDs excluded: $($adWithoutIntuneSummary.AmbiguousIntuneIds). AD source file time (local): $(Html-Encode $adSourceText). AD country is not qualified.</p>
+<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">Enabled: $($adWithoutIntuneSummary.All.Total) of $($adWithoutIntuneSummary.UnmatchedTotal) AD Windows 10/11 objects without exact Intune ID match. Excluded: $($adWithoutIntuneSummary.ExcludedDisabledBoth) disabled in both directories; $($adWithoutIntuneSummary.ExcludedUnqualified) without positive enabled evidence. Exact join: AD ObjectGUID to Intune Azure AD Device ID; no match does not prove absence from Intune. Ambiguous Intune IDs excluded: $($adWithoutIntuneSummary.AmbiguousIntuneIds). Source file times (local): $(Html-Encode $adSourceText). AD country is not qualified.</p>
 "@
         }
         else {
-            $adComparisonSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>AD Windows devices without exact Intune ID match</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>AD/Intune comparison unavailable: a source is missing, stale, invalid, or could not be reconciled. AD country is not qualified.</p>"
+            $adComparisonSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Enabled AD Windows devices without exact Intune ID match</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>Enabled AD/Intune comparison unavailable: a source is missing, stale, invalid, or could not be reconciled. AD country is not qualified.</p>"
         }
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
             $encodedUrl = Html-Encode $spUploadUrl
@@ -2710,8 +2807,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChK58+n6pi5BVW
-# eDXwi7RkL7j+m0Hnt0gfgG1Kf1Vk/KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDujWQd5/ofy91L
+# LlwdSs8ZflOTTHhMZuZWXpe1+9CI5aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2741,14 +2838,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCRwuFD6P/uwp6NTSRwIFih
-# fJ/kXacPqcp2GzP6AkhTOzANBgkqhkiG9w0BAQEFAASCAYCOV1cvgflbe8glwy5N
-# 5htM/cgSodXItpsYlDUIo1SeMUf6tsS0rQryf/6KEcytBMQQs8ELxmHLYiqlwwm1
-# WpXi/Tj1SAQs77nS/BkYko/IiqHsU0lEGMsrunOwDA3YJEf8kOQrq9n4JRlInvv3
-# 6WYcajGR6gm//RwbWDYVRm/1exwa85DVeOmjitsuodyegX52M3loEehob7lA1/09
-# Ib2Bij0ciWWOwtmioTseVX2CcHyVTaS+nta17d5XX3gB2vuyHDGKVHLb1QZrLb67
-# 3tnfhFiA/T3liya4ELAP0NUNtVV7oI/k6PwR+xslziei90NcX7sTCwQ/OhfT1SdC
-# tyMR7Xt5LZ69G+rFe88TI9cRm0v0VTG+oGiCNBXtXnfppN4wcCGquR3o4F4Nfqw3
-# kJOlLKcszWES2Aj8M6CyL2RVirIDs/daYbtDtmGT14gkEEhhcrLhzoL1E5lBplxt
-# GfsKErNNob/Rdm/pC96iFP1iPWMdSLh7HQJGRXaQlMfSZ6M=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDdm8avknpVJznDE1R1ZPQT
+# iFVphye7vFT+Ciib2PanzjANBgkqhkiG9w0BAQEFAASCAYA5gHzQSsUr2Tr4wYQt
+# jtqj9ryRCuPL6T+7Fk77INX03IE6+5kX9p7zCxkSDFHFh9QGkKEW578dnDy4Cukk
+# 4ah6TxOIhXqRgOFEp7ikASwsHi/o6T83x2h+hCyqlwOLMNKiRGFyIcPcQe3GuKXz
+# bADULkT6A70Iu7YZM5dJaq0baegp1Yp9YJgfczx1tU0h4WY27nLGffVY4AXfU6SC
+# 5lLVtOfBHbhT4pTclvbMqMd1/F4gZM8/JsYSieq7BntMbe+KNAcbo7SFf45S827V
+# ErP7rkDGunrdC8sWaNQ6iYg/ZHEH3zYaeg7yv7BfcwoPiNbwh7SGUe+GqZe4y1kd
+# /CKA3OUWhVR1JHAb7KkbK0oslvkZdfQvVWZYZ35xjCsfEJpIp+dVmm5nYiIRU4ZE
+# xYGaiM7z18YCReO8SiLT8yAPBE2bU4VAjPlxnuceuepIjuTIDWKNQ0lPIRTwS9/2
+# KM663q5tigAHRGaZEsIUwUWCfnxV3hB0F2EJ6KWStNGw9RE=
 # SIG # End signature block

@@ -48,8 +48,10 @@ contract are unchanged.
 ## Windows Update country breakdown
 
 The Windows Update status summary email places two tables between Windows
-version distribution and Fleet OS coverage. The first covers every Windows
-row in `Intune_Devices_Inventory.csv`, once per managed Device ID. It shows
+version distribution and Fleet OS coverage. The first covers enabled Windows
+rows in `Intune_Devices_Inventory.csv`, once per managed Device ID. A device is
+included only when its exact Azure AD Device ID matches an Entra DeviceId with
+`AccountEnabled=True` or an AD ObjectGUID with `Enabled=True`. It shows
 Windows 11, Windows 10, unknown/other OS, and totals for each primary user's
 Entra `CountryOrRegion`. Country is joined through the managed device's UserId
 and the active-user Object Id. It is not the device's physical location.
@@ -64,25 +66,35 @@ policy only, or neither exported policy. Reference-policy membership takes
 precedence when a device occurs in both. These groups describe policy report
 presence, not confirmed Windows Autopatch enrollment. The reference-policy
 report can contain Device IDs absent from the current Intune inventory; those
-are disclosed separately rather than added to the Intune total. The existing
-Fleet OS coverage section remains scoped to its reference policy.
+are disclosed separately rather than added to the Intune total. Disabled
+devices and those without positive enabled evidence are excluded and counted
+separately. The existing Windows version distribution and Fleet OS coverage
+sections retain their reference-policy scope and are not activation filtered.
 
-The second table shows AD Windows 10/11 computer objects with no exact match
-from AD ObjectGUID to Intune Azure AD Device ID. It also shows the subset
-enabled and active in the last 45 days. No exact match does not prove that a
+The second table shows enabled AD Windows 10/11 computer objects with no exact
+match from AD ObjectGUID to Intune Azure AD Device ID. The enabled rule is the
+same Entra-or-AD rule, using the AD ObjectGUID as the identity. It also shows
+the subset active in the last 45 days. No exact match does not prove that a
 computer is unenrolled: identity differences, synchronization and snapshot
 timing can prevent a join. AD country is not qualified and is therefore not
 inferred for this table.
 
-The tables read `Intune_Devices_Inventory.csv`, `M365_Users_Active.csv`, and
-`AD_Computers_AllDomains.csv` from the tenant's DATA-LAST snapshot. Their last
-write times must be no older than `CountrySourceMaxAgeHours` (48 hours by
+The tables read `Intune_Devices_Inventory.csv`, `M365_Entra_Devices.csv`,
+`AD_Computers_AllDomains.csv`, and `M365_Users_Active.csv` from the tenant's
+DATA-LAST snapshot. Their last write times must be no older than
+`CountrySourceMaxAgeHours` (48 hours by
 default). CSV rows use the effective `TenantKey` from the selected tenant
 profile, which can differ from the `-Tenant` profile name. Missing, stale,
 invalid, or non-reconciling sources display an unavailable notice for the
 affected table. The CSV export and fleet severity
 remain unchanged. The `OnChange` mail state includes both breakdowns when
 available.
+
+The Feature Update rows used by the email are the current Graph report rows in
+memory. They are already scoped to the selected tenant and receive their
+`TenantKey` column only when the CSV is published. The breakdown accepts these
+untagged in-memory rows; if policy rows already have a `TenantKey`, they must
+match the effective key.
 
 ## Endpoint Analytics
 
