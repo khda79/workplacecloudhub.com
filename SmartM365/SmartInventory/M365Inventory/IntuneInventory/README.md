@@ -47,8 +47,8 @@ contract are unchanged.
 
 ## Windows Update country breakdown
 
-The Windows Update status summary email places two tables between Windows
-version distribution and Fleet OS coverage. The first covers enabled Windows
+The Windows Update status summary email places one combined country table between
+Windows version distribution and Fleet OS coverage. Its Intune portion covers enabled Windows
 rows in `Intune_Devices_Inventory.csv`, once per managed Device ID. A device is
 included only when its exact Azure AD Device ID matches an Entra DeviceId with
 `AccountEnabled=True` or an AD ObjectGUID with `Enabled=True`. It shows
@@ -70,25 +70,37 @@ are disclosed separately rather than added to the Intune total. Disabled
 devices and those without positive enabled evidence are excluded and counted
 separately. The existing Windows version distribution and Fleet OS coverage
 sections retain their reference-policy scope and are not activation filtered.
+Their OS family uses the current Graph report `OSVersion` (with the Entra
+fallback); the country table uses Intune `OS version`. Therefore their
+Windows 10/11 subtotals need not match even for shared device IDs.
 
-The second table shows enabled AD Windows 10/11 computer objects with no exact
+The same country rows also include enabled AD Windows 10/11 computer objects with no exact
 match from AD ObjectGUID to Intune Azure AD Device ID. The enabled rule is the
 same Entra-or-AD rule, using the AD ObjectGUID as the identity. It also shows
-the subset active in the last 45 days. No exact match does not prove that a
+the subset active in the last 45 days in a note below the table. The selected
+tenant profile's private `AdComputerNameCountryPrefixes` JSON object maps the
+first two letters of the AD computer `Name` to a country label. This mapping
+is kept in the ignored `Config/Tenants/<profile>.local.json.txt`; it is not
+published in the repository. Unmapped or short names use `Country unknown`.
+The Intune and AD country sources have different meanings: primary user's
+Entra country versus computer-name prefix, neither a verified physical location.
+Each row shows the combined OS totals plus separate Intune and unmatched AD
+counts. The Intune policy columns exclude the AD count. No exact match does not prove that a
 computer is unenrolled: identity differences, synchronization and snapshot
-timing can prevent a join. AD country is not qualified and is therefore not
-inferred for this table.
+timing can prevent a join. Such differences can also make one physical PC
+appear twice in the combined count. The AD Windows 10/11 family
+comes from AD `OperatingSystemShortName`.
 
-The tables read `Intune_Devices_Inventory.csv`, `M365_Entra_Devices.csv`,
+The table reads `Intune_Devices_Inventory.csv`, `M365_Entra_Devices.csv`,
 `AD_Computers_AllDomains.csv`, and `M365_Users_Active.csv` from the tenant's
 DATA-LAST snapshot. Their last write times must be no older than
 `CountrySourceMaxAgeHours` (48 hours by
 default). CSV rows use the effective `TenantKey` from the selected tenant
 profile, which can differ from the `-Tenant` profile name. Missing, stale,
 invalid, or non-reconciling sources display an unavailable notice for the
-affected table. The CSV export and fleet severity
-remain unchanged. The `OnChange` mail state includes both breakdowns when
-available.
+combined table rather than an inferred partial total. The CSV export and fleet
+severity remain unchanged. The `OnChange` mail state includes the Intune, AD,
+and combined per-country breakdowns when available.
 
 The Feature Update rows used by the email are the current Graph report rows in
 memory. They are already scoped to the selected tenant and receive their

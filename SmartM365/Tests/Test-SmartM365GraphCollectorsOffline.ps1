@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.20
+1.0.21
 #>
 [CmdletBinding()]
 param(
@@ -492,7 +492,7 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
         } finally {Remove-Module $m -Force}
     }
     Test-OfflineCase 'Windows Update fleet accepts tenant-scoped Graph rows before CSV publication' {
-        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateOsBuild','New-WinUpdateActivationIndex','Get-WinUpdateActivationState','Get-WinUpdateIntuneFleetCountrySummary','Get-WinUpdateAdWithoutIntuneSummary')
+        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateOsBuild','New-WinUpdateActivationIndex','Get-WinUpdateActivationState','Get-WinUpdateIntuneFleetCountrySummary','Get-WinUpdateAdWithoutIntuneSummary','Get-WinUpdateEnabledWindowsCombinedSummary')
         try {
             $users=@([pscustomobject]@{TenantKey='org-prod';'Object Id'='user-1';CountryOrRegion='France'})
             $devices=@(
@@ -511,11 +511,13 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
                 [pscustomobject]@{TenantKey='other-prod';DeviceId='id-5';AccountEnabled='True'}
             )
             $ad=@(
-                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-1';Enabled='False';OperatingSystemShortName='Windows 11';IsActiveInLast45Days='False'},
-                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-2';Enabled='True';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='True'},
-                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-3';Enabled='False';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='False'},
-                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-6';Enabled='True';OperatingSystemShortName='Windows 11';IsActiveInLast45Days='True'},
-                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-7';Enabled='False';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='False'}
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-1';Name='FR-MATCHED';Enabled='False';OperatingSystemShortName='Windows 11';IsActiveInLast45Days='False'},
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-2';Name='DE-MATCHED';Enabled='True';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='True'},
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-3';Name='FR-DISABLED';Enabled='False';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='False'},
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-6';Name='fr-ADONLY';Enabled='True';OperatingSystemShortName='Windows 11';IsActiveInLast45Days='True'},
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-7';Name='DE-ADONLY';Enabled='False';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='False'},
+                [pscustomobject]@{TenantKey='org-prod';ObjectGUID='id-8';Name='ZZ-ADONLY';Enabled='True';OperatingSystemShortName='Windows 10';IsActiveInLast45Days='False'},
+                [pscustomobject]@{TenantKey='other-prod';ObjectGUID='id-9';Name='FR-OTHER-TENANT';Enabled='True';OperatingSystemShortName='Windows 11';IsActiveInLast45Days='False'}
             )
             $index=&$m {param($e,$a)New-WinUpdateActivationIndex -EntraDeviceRows $e -AdComputerRows $a -TenantKey 'org-prod'} $entra $ad
             $graphRows=@(
@@ -530,8 +532,13 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
             $publishedRows=@($graphRows|ForEach-Object{[pscustomobject]@{TenantKey='org-prod';PolicyId=$_.PolicyId;DeviceId=$_.DeviceId}})+@([pscustomobject]@{TenantKey='other-prod';PolicyId='reference';DeviceId='device-3'})
             $published=&$m {param($d,$u,$p,$i)Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $d -ActiveUserRows $u -PolicyRows $p -ActivationIndex $i -ReferencePolicyId 'reference' -TenantKey 'org-prod'} $devices $users $publishedRows $index
             Assert-Offline ($published.Total.ReferencePolicy-eq1 -and $published.Total.OtherPolicyOnly-eq1 -and $published.Total.NeitherPolicy-eq0) 'Tagged policy rows were not tenant-isolated.'
-            $adSummary=&$m {param($a,$d,$i)Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $a -IntuneDeviceRows $d -ActivationIndex $i -TenantKey 'org-prod'} $ad $devices $index
-            Assert-Offline ($adSummary.UnmatchedTotal-eq2 -and $adSummary.All.Total-eq2 -and $adSummary.EnabledActive45.Total-eq1) 'AD activation did not use the Entra-or-AD rule.'
+            $countryMap=@{FR='France';DE='Germany'}
+            $adSummary=&$m {param($a,$d,$i,$c)Get-WinUpdateAdWithoutIntuneSummary -AdComputerRows $a -IntuneDeviceRows $d -ActivationIndex $i -TenantKey 'org-prod' -CountryPrefixMap $c} $ad $devices $index $countryMap
+            Assert-Offline ($adSummary.UnmatchedTotal-eq3 -and $adSummary.All.Total-eq3 -and $adSummary.EnabledActive45.Total-eq1) 'AD activation or tenant isolation did not use the Entra-or-AD rule.'
+            Assert-Offline (@($adSummary.Known).Count-eq2 -and $adSummary.Unknown.Total-eq1 -and @($adSummary.Known|Where-Object Country -eq 'France')[0].Windows11-eq1 -and @($adSummary.Known|Where-Object Country -eq 'Germany')[0].Windows10-eq1) 'AD computer name prefixes were not mapped to countries or unknown.'
+            $combined=&$m {param($i,$a)Get-WinUpdateEnabledWindowsCombinedSummary -IntuneSummary $i -AdWithoutIntuneSummary $a} $runtime $adSummary
+            Assert-Offline ($combined.Windows11-eq2 -and $combined.Windows10-eq3 -and $combined.UnknownOrOther-eq0 -and $combined.Total-eq5) 'Enabled unmatched AD Windows devices were not added to the country total.'
+            Assert-Offline (@($combined.Known|Where-Object Country -eq 'France')[0].Total-eq3 -and @($combined.Known|Where-Object Country -eq 'France')[0].Intune-eq2 -and @($combined.Known|Where-Object Country -eq 'France')[0].AdWithoutIntune-eq1 -and $combined.Unknown.AdWithoutIntune-eq1) 'Intune and AD country rows did not reconcile by source.'
             $wrongTenantRejected=$false
             try { &$m {param($d,$u,$p,$i)Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $d -ActiveUserRows $u -PolicyRows $p -ActivationIndex $i -ReferencePolicyId 'reference' -TenantKey 'prod'} $devices $users $graphRows $index | Out-Null } catch {$wrongTenantRejected=$true}
             Assert-Offline $wrongTenantRejected 'The profile selector was accepted as a CSV tenant key.'
@@ -580,7 +587,8 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
     Test-OfflineCase 'Windows Update email places the OS distribution before fleet coverage' {
         $text=Get-OfflineSourceText $paths.WindowsUpdate
         Assert-Offline ($text.Contains('Windows version distribution')) 'The Windows version distribution title is missing.'
-        Assert-Offline ($text -match '(?s)\$severityInputsHtml\s+\$windowsVersionDistributionSection\s+\$intuneFleetSection\s+\$adComparisonSection\s+\$fleetCoverageSection') 'The fleet and AD tables are not placed between OS distribution and coverage.'
+        Assert-Offline ($text -match '(?s)\$severityInputsHtml\s+\$windowsVersionDistributionSection\s+\$intuneFleetSection\s+\$fleetCoverageSection') 'The enabled Windows table is not placed between OS distribution and coverage.'
+        Assert-Offline ($text -match '(?s)INTUNE NEITHER POLICY</th></tr>\s+\$combinedCountryRowsHtml\s+\$combinedRowHtml\s+</table>') 'The combined Intune and unmatched AD country rows are not in the same table.'
         Assert-Offline ($text.Contains('#2563eb') -and $text.Contains('#f59e0b') -and $text.Contains('#94a3b8')) 'The approved Windows distribution colors are missing.'
         Assert-Offline ($text.Contains('OS VERSION UNKNOWN') -and -not $text.Contains('UNKNOWN / OTHER')) 'The OS-version-unavailable label is not explicit.'
     }
@@ -814,8 +822,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAMc4iBapVCiXL
-# WTlqZGLzjz0lwm9L0r2eZtLQPyzEBKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCed4Yby0SUhAeH
+# ukTEuuSYITfX0KSlZv0JqR/LZvLJJ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -845,14 +853,14 @@ if($summary.Failed -gt 0){exit 1}
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCAG6H1G+aANdcu/KsxMR3+
-# 9wwFUCahxGgTXYrZRSC8dzANBgkqhkiG9w0BAQEFAASCAYALbZILFKpBWy4v3opW
-# VgXz6QOdRgxFWMfp0X3g8pqJvfYI2nXiiDfLdnUrGxR3BZebjHchJ3kiqHvhJXwD
-# D5odvdcZAiHxEwb3fTsrHQ8k0J/RzVPb0yPpHZR75/hrsm3XSk0OoK4iV1TqRls1
-# L9QcHkTV/PA4nmF71eGW9IKNU8ZR4sI5k+FWf0JBtoO1jo5FvdMv0pzuZspXV/Sv
-# zsU1A37qkzHkeZiiB3hM7ai3pmvtFlzpZHzV4/i7bN3GadUnSVBYFY0c1ewZ0USR
-# LHFCAlQlItCYFb2tlX1xlnVyPrcxLlno6jPmjZg5bQAnzfQwleG6YFGlFP645Vok
-# 5q5Ce4Hkv9Nmwdp4sNYNY7rTvdqQcLTaBWP+lQUmbMiDA2LBdHn8AibxZ8YzKJaS
-# Um9Ype5ljl6vswT9m6jYsr+QXx7tjiIcbuulLTow9v8ZI1PlJv9L/PwA7LrrFG/4
-# r1K/WjnKpFDupJgCIOTruzc+ulw/MTQ8fpY/+DRIUuhTOrw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB4vonWTtlY7qPdAHLJ6EBg
+# V+Z/YOyKnspQcPmt6uOIVjANBgkqhkiG9w0BAQEFAASCAYBbTSMGn69de9W478at
+# mvzN0DJ9eMtLEclnJ273apewnOEButk6TNhejaiLWKEeZHbQSsUZk6NwrUiRLvf/
+# KUapIS3ZhFGQ2ucl5mz25Ab/MVmx8XNNfdEUstLUrttgp91Tb1Nv+wtsiA6fVKSZ
+# iRM7Ic49Ox6b/w1dCgFSdlFfk9keDfaC3gWokEfEnhfVSPftMNToJHD0JA9QaZIz
+# C4xTx8/v1Q8tvh4ys0HtZkXzM/lRbJgLo36tNZVBnsKWCvo3YNwUrSgtx61ZF5S4
+# BIa6loUHHlxuUnV0oZRZuQrbGHbaCPlaEHNZepTbmkEHUqBNMIhUR3jZ9mvUOi6A
+# Ca8QkF02kH8ISZn3Dr1qc8VlTIw1qMowy+0qDyEF1E4/y8npiLq4khrbkIrpZgtz
+# Dvu+1F1AfX83/Mo3iuSSNsfN2Bp75mnlneC3FRrCCcDmKrKIzDnscLWYIu5HAynV
+# B26FireuOt9S3vxwmCp/lUa58FK/y0/8duWQNEzWt75OBuQ=
 # SIG # End signature block
