@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline GUI checks for newest ShareGate report selection and cached analysis.
 .VERSION
-    1.0.6
+    1.0.8
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -13,11 +13,12 @@ $guiPath = Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-GUI.ps1'
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($guiPath,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | ForEach-Object Message) }
-foreach ($name in @('Clear-DiagnosticResult','Get-CurrentDiagnosticAnalysis','Refresh-DiagnosticReportState','Update-DiagnosticReportStatus','Update-DiagnosticSummaryCrossCheck','Get-DiagnosticReportDisplayPath','Update-DiagnosticAnalysisProgress')) {
+foreach ($name in @('Clear-DiagnosticResult','Get-CurrentDiagnosticAnalysis','Refresh-DiagnosticReportState','Update-DiagnosticReportStatus','Update-DiagnosticSummaryCrossCheck','Get-DiagnosticReportDisplayPath','Update-DiagnosticAnalysisProgress','Get-DiagnosticReportKey')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name },$true)
     if (-not $definition) { throw "Missing GUI function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
+function Start-AutomaticDiagnosticAnalysis { } # Automatic launch policy has its own worker-free tests.
 function Load-DiagnosticResult {
     param([string]$Directory)
     $script:LoadedAnalysis = $Directory
@@ -34,6 +35,7 @@ try {
     [void](New-Item -ItemType Directory -Path $reports -Force)
     $script:CurrentMigration = [pscustomobject]@{ Name='Synthetic'; Root=$project }
     $script:DiagProcess = $null
+    $script:DiagActiveReportKey = ''
     $script:DiagReportSignature = ''
     $script:DiagReportHash = ''
     $script:LoadedAnalysis = ''
@@ -66,6 +68,7 @@ try {
     $cmbDiagSession = [pscustomobject]@{ Items=[System.Collections.ArrayList]::new(); SelectedIndex=0 }
 
     Refresh-DiagnosticReportState -Force
+    if ($lblDiagKpis.Text -notmatch 'No ShareGate migration report') { throw 'Absent input was described as an unanalyzed report.' }
     if (-not $lblDiagInputPath.Text.StartsWith('SharePointMigration\Tests\',[StringComparison]::Ordinal) -or
         $lblDiagInputPath.Text -notlike '*\ShareGate\MigrationReport' -or
         $lblDiagInputPath.Text.Contains($script:ScriptRoot)) { throw 'Report folder display leaked an absolute path or omitted the SharePointMigration prefix.' }
@@ -135,7 +138,7 @@ try {
     if ((Get-Item -LiteralPath $latest).Length -ne $item.Length) { throw 'The hash-change test did not preserve report size.' }
     $script:LoadedAnalysis = ''
     Refresh-DiagnosticReportState -Force
-    if ($script:LoadedAnalysis -or $script:DiagAnalysisVerified -or $lblDiagProgress.Text -notmatch 'has not been analyzed') { throw 'Stale analysis was accepted after input changed.' }
+    if ($script:LoadedAnalysis -or $script:DiagAnalysisVerified -or $lblDiagProgress.Text -notmatch 'Waiting for automatic analysis') { throw 'Stale analysis was accepted after input changed.' }
     if ($lblDiagAnalysisState.Text -ne 'Not analyzed' -or $lblDiagHtmlState.Text -ne 'Unavailable') { throw 'Stale analysis remained visible in the report status.' }
 
     'latest' | Set-Content -LiteralPath $latest
@@ -167,9 +170,15 @@ try {
     if(-not $btnDiagAnalyze.IsEnabled -or $script:DiagLatestReport.FullName -ne $xlsx -or $lblDiagProgress.Text -notmatch 'installs automatically' -or $lblDiagAnalysisState.Text -ne 'Ready to analyze'){
         throw 'An XLSX report was blocked instead of offering automatic module installation.'
     }
+    if ($script:DiagSummary -or $btnDiagOpenReport.IsEnabled -or
+        $lblDiagKpis.Text -notmatch 'newest.xlsx.*start automatically') {
+        throw 'A new ShareGate input was presented as an analyzed report or left its missing indicators unexplained.'
+    }
     $script:DiagProcess=[pscustomobject]@{HasExited=$false}
+    $script:DiagActiveReportKey=Get-DiagnosticReportKey
     Refresh-DiagnosticReportState -Force
     if($btnDiagAnalyze.IsEnabled){throw 'Analysis button was enabled during an active analysis.'}
+    if ($lblDiagKpis.Text -notmatch 'Analyzing ShareGate report: newest.xlsx') { throw 'Running analysis left an incorrect empty detail.' }
     $script:DiagProjectRoot=$project;$script:DiagOutputDirectory=$analysis
     @{State='InstallingImportExcel';Message='Installing ImportExcel from PSGallery for the current user…'} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $analysis 'analysis.phase.json.txt')
@@ -190,8 +199,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCoxHv5ob3KHaVr
-# CkSXvHVRW3H81H+ZX+bw+1Mv+FVGE6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5bB5Ukx7jZw6a
+# 9LThop6dDV5Li6Zs3fbPbE0hEF3p4qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -221,14 +230,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD+E5GXjRSwvpONYugroZtT
-# PtqtCx3vITosh2gpNwlHKzANBgkqhkiG9w0BAQEFAASCAYAbB7Jf/HNI1TSTQree
-# oNWwR2mZ8U+DMaYgBcScC8u+eCfJgCaTWriWF7wS8vha/NPCcWeI5TClmFPah52g
-# kR7FVxKkjMsfYovVFsvQVyQEmpQ/NI/tVjRrBWF660fmONVFqUGEsgmCHwMsFthU
-# 7bo3iVIc/QwEzYbcZp+cStaGe2XivDXCkwB5971mopq/9ZluCPnxIa1iLdvNDe+C
-# 7vzQM35QwJUN1UwFcGl8oZ4ZZkHuOk+Df4VZIGp8l4i4sXwQmSCgc6ylQ+VduFzE
-# hrl73wlnzH5C3F3ElRlVAVgGO5m2IOK+OC+nAZnTT5kplBMNoINmX63CcXOFmFTr
-# uASxNN2Dpr2zpdfT6nqCekYIwR/7E2Gl+gx+twkFrQBDh2POdxT7hu1+WnWpueHe
-# p8mdWisnO5UYVnlzelVTWKNVFenjxaGPu4mxhE1SccoY6SoFzCyJLx+BPMAiXyRq
-# fKCKtIW/bKcrDJ5XL8bDED4oLVVKCPpKTcJFY0e2NsHaL7o=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC4u7Ql5jnDobpSYB3FNNm9
+# XFEtVAZ0WZL1WHecnXz1hDANBgkqhkiG9w0BAQEFAASCAYAVcFeuHY5OBeVk/AFQ
+# 7UTjr6MlS3Xb8v6k0u7of3XPGEJtTgAHJkMyMLeERIhx5nukyEzxZ3Z+casaJN3B
+# DjkyBZv/1NdS7jYQTMUpm2NEFs6MbAkqrQmqn/UOSgvSoT1Tz7Ri6H2HQ5HcQLH+
+# vTG0N14M/ZF9eklMuzSln3/+SQkDltZlq2tVOptv6pb/pcED9yn/uwy2A3bifapw
+# lHiLK9JwUN96/B3O2LaGVE+LbsohOjau3UDF/VrlTPpYoz9u3y5wrc/E49iQz33B
+# /VwQaBCo6ne7LXTIRnj0OA2js/oEEKlMLofp9KtobV48yJAUqQvAaeCXgqTeaQkL
+# QRr5xNjiTYn/1SM3fBr53Wy8ffySYPmpBxPOysTJ+JL0K49dG9Nm8yjk3lw6sLSm
+# 6JaNffjAvImfu/C5KGFbQ4vc+WISmfcmJrEEw2oZvKorX4PU9RRkFpxXx7n5HgKu
+# xEDCEAj/DKhqcfm9gZBkMICL8Yii7QIQZXfDa3GheNYFiX0=
 # SIG # End signature block

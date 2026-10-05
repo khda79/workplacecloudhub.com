@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.51
+    1.0.55
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.51'
+$script:AppVersion = '1.0.55'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -112,11 +112,11 @@ function Get-CsvFileItems {
 }
 
 function Get-LatestSubfolder {
-    param([string]$Directory, [string]$Pattern)
+    param([string]$Directory, [string]$Pattern, [switch]$UseRunTimestamp)
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $null }
     Get-ChildItem -LiteralPath $Directory -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -like $Pattern } |
-        Sort-Object LastWriteTime -Descending |
+        Sort-Object { $stamp = if ($UseRunTimestamp) { Get-SmartM365PortfolioTimestamp $_.Name }; if ($stamp) { $stamp } else { $_.LastWriteTime } } -Descending |
         Select-Object -First 1
 }
 function Get-ComparisonHtmlReport {
@@ -126,13 +126,19 @@ function Get-ComparisonHtmlReport {
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 }
+function Get-LatestComparisonResultFolder {
+    param([string]$Directory, [string]$MigrationName, [ValidateSet('Files','Permissions')][string]$Kind)
+    $result = Get-SmartM365LatestPortfolioComparison -Directory $Directory -MigrationName $MigrationName -Kind $Kind
+    if ($result) { return Get-Item -LiteralPath (Split-Path $result.Path -Parent) -ErrorAction Stop }
+    return $null
+}
 function Get-ComparisonBadgeText {
     param(
         [System.IO.DirectoryInfo]$Folder,
         [string]$MigrationName,
         [ValidateSet('Files','Permissions')][string]$Kind
     )
-    if ($null -eq $Folder) { return 'No run yet' }
+    if ($null -eq $Folder) { return 'No comparison result yet' }
     $comparison = Get-SmartM365LatestPortfolioComparison -Directory $Folder.Parent.FullName `
         -MigrationName $MigrationName -Kind $Kind -SelectedFolder $Folder
     $stamp = Get-SmartM365PortfolioTimestamp $Folder.Name
@@ -209,8 +215,8 @@ function Get-MigrationStatus {
     } else { 'comparisons\permission-scan-history' }
     $permissionHistoryDir = Join-Path $root $permissionHistoryPath
 
-    $fileComparisonFolder = Get-LatestSubfolder $fileCmpDir "$name-*"
-    $permComparisonFolder = Get-LatestSubfolder $permCmpDir "$name-*"
+    $fileComparisonFolder = Get-LatestComparisonResultFolder $fileCmpDir $name Files
+    $permComparisonFolder = Get-LatestComparisonResultFolder $permCmpDir $name Permissions
 
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
@@ -218,6 +224,7 @@ function Get-MigrationStatus {
         TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         TargetFileCsvItems    = @(Get-CsvFileItems   $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
         FileComparisonFolder  = $fileComparisonFolder
+        FileComparisonAttemptFolder = Get-LatestSubfolder $fileCmpDir "$name-*" -UseRunTimestamp
         FileComparisonReport  = Get-ComparisonHtmlReport $fileComparisonFolder
         HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
@@ -225,6 +232,7 @@ function Get-MigrationStatus {
         TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         TargetPermCsvItems    = @(Get-CsvFileItems   $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
         PermComparisonFolder  = $permComparisonFolder
+        PermComparisonAttemptFolder = Get-LatestSubfolder $permCmpDir "$name-*" -UseRunTimestamp
         PermComparisonReport  = Get-ComparisonHtmlReport $permComparisonFolder
         PermissionHistoryFolder = Get-LatestSubfolder $permissionHistoryDir '*-PermissionChanges-*'
     }
@@ -269,6 +277,37 @@ function Open-InExplorer {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
     try { Invoke-Item -LiteralPath $Path } catch { Start-Process explorer.exe -ArgumentList ('"' + $Path + '"') }
+}
+
+function New-FarmDiagnosticsWindow {
+    param([System.Windows.Window]$Owner, [string]$MigrationName, [System.Windows.UIElement]$Content)
+    $window = [System.Windows.Window]::new()
+    $window.Title = 'Source farm diagnostics · ' + $MigrationName
+    $window.Width = 1000; $window.Height = 500
+    $window.MinWidth = 760; $window.MinHeight = 360
+    $window.WindowStartupLocation = 'CenterOwner'
+    $window.ShowInTaskbar = $false
+    $window.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#F5F8FB')
+    $window.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
+    if ($Owner) {
+        if ($Owner.IsVisible) { $window.Owner = $Owner }
+        $window.Icon = $Owner.Icon; $window.Resources = $Owner.Resources
+    }
+    $panel = [System.Windows.Controls.DockPanel]::new()
+    $panel.Margin = [System.Windows.Thickness]::new(18)
+    $panel.Background = $window.Background
+    $heading = [System.Windows.Controls.TextBlock]::new()
+    $heading.Text = 'Selected migration: ' + $MigrationName
+    $heading.FontSize = 16; $heading.FontWeight = [System.Windows.FontWeights]::SemiBold
+    $heading.Margin = [System.Windows.Thickness]::new(0,0,0,14)
+    [System.Windows.Controls.DockPanel]::SetDock($heading, 'Top')
+    [void]$panel.Children.Add($heading)
+    $scroll = [System.Windows.Controls.ScrollViewer]::new()
+    $Content.VerticalAlignment = 'Top'
+    $scroll.VerticalScrollBarVisibility = 'Auto'; $scroll.Content = $Content
+    [void]$panel.Children.Add($scroll)
+    $window.Content = $panel
+    return $window
 }
 
 # ---------------------------------------------------------------------------
@@ -723,7 +762,7 @@ function Open-InExplorer {
                 <Grid Margin="0,3,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Border Grid.Column="0" x:Name="badgeCmpFiles" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
-                    <TextBlock x:Name="lblCmpFilesAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
+                    <TextBlock x:Name="lblCmpFilesAge" Text="No comparison result yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
                   <TextBlock Grid.Column="1" x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
@@ -868,7 +907,7 @@ function Open-InExplorer {
                 <Grid Margin="0,3,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Border Grid.Column="0" x:Name="badgeCmpPerms" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
-                    <TextBlock x:Name="lblCmpPermsAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
+                    <TextBlock x:Name="lblCmpPermsAge" Text="No comparison result yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
                   <TextBlock Grid.Column="1" x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
@@ -966,14 +1005,21 @@ function Open-InExplorer {
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" MinWidth="560"/>
             <ColumnDefinition Width="1"/>
             <ColumnDefinition Width="*" MinWidth="560"/>
           </Grid.ColumnDefinitions>
-          <TextBlock x:Name="lblDiagMigration" Grid.Row="0" Grid.ColumnSpan="3" Text="Selected migration: none" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" Margin="0,0,0,10"/>
+          <StackPanel Grid.Row="0" Grid.ColumnSpan="3">
+            <TextBlock x:Name="lblDiagMigration" Text="Selected migration: none" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" Margin="0,0,0,10"/>
+            <StackPanel x:Name="panelCrossCheckLoading" Visibility="Collapsed" Margin="0,0,0,14">
+              <TextBlock x:Name="lblCrossCheckLoading" Text="Loading comparison reports…" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4"/>
+              <ProgressBar Height="5" Margin="0,7,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
+            </StackPanel>
+          </StackPanel>
           <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,14,14">
             <TextBlock Text="SHAREGATE REPORT ANALYSIS" Style="{StaticResource SectionLabel}"/>
             <Border Style="{StaticResource StepCard}">
@@ -992,7 +1038,8 @@ function Open-InExplorer {
             </Border>
             <Border Style="{StaticResource StepCard}" Margin="0,3,0,0">
               <StackPanel>
-                <TextBlock Text="REPORT STATUS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock Text="SHAREGATE REPORT &amp; ANALYSIS STATUS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock Text="For the latest ShareGate migration report. File and permission comparison states are shown in Cross-check." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,0,0,8"/>
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Border Grid.Column="0" Style="{StaticResource DiagMetricTile}" Background="#EFF7FF" BorderBrush="#C9E3FA" Margin="0,0,4,0">
@@ -1118,10 +1165,10 @@ function Open-InExplorer {
           </Border>
           <Border Grid.Row="2" Grid.Column="1" Background="#DDE7F0" Margin="0,0,0,14"/>
           <StackPanel Grid.Row="2" Grid.Column="2" Margin="14,0,0,14">
-            <TextBlock Text="SHAREGATE DETAIL" Style="{StaticResource SectionLabel}"/>
+            <TextBlock Text="SHAREGATE ANALYSIS DETAIL" Style="{StaticResource SectionLabel}"/>
             <Border x:Name="cardShareGateDetail" Style="{StaticResource StepCard}">
               <StackPanel>
-                <TextBlock x:Name="lblDiagKpis" Text="No analysis for the latest report yet." TextWrapping="Wrap" FontSize="12" Foreground="#1F2937"/>
+                <TextBlock x:Name="lblDiagKpis" Text="Analyze the latest ShareGate report to calculate its indicators." TextWrapping="Wrap" FontSize="12" Foreground="#1F2937"/>
                 <StackPanel x:Name="panelDiagMetrics" Visibility="Collapsed">
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -1168,10 +1215,6 @@ function Open-InExplorer {
               </DockPanel>
               <TextBlock Text="Three separate measures. Comparison percentages use source inventory keys; ShareGate issues use report items and lines. Scope matches are indicative, not proof for an individual item."
                          TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A" Margin="0,0,0,7"/>
-              <StackPanel x:Name="panelCrossCheckLoading" Visibility="Collapsed" Margin="0,4,0,10">
-                <TextBlock x:Name="lblCrossCheckLoading" Text="Loading comparison reports…" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4"/>
-                <ProgressBar Height="5" Margin="0,7,0,0" IsIndeterminate="True" Foreground="#0078D4"/>
-              </StackPanel>
               <DataGrid x:Name="gridCrossCheckEvidence" Height="110" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column" AlternatingRowBackground="#F7FAFE">
                 <DataGrid.Columns>
                   <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="100"/>
@@ -1205,7 +1248,8 @@ function Open-InExplorer {
               </DataGrid>
             </StackPanel>
           </Border>
-          <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,14,0">
+          <StackPanel Grid.Row="4" Grid.ColumnSpan="3">
+          <Button x:Name="btnFarmWindow" Content="Source farm diagnostics…" Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
           <Border x:Name="cardTransient" Style="{StaticResource StepCard}" Visibility="Collapsed">
             <StackPanel>
               <TextBlock Text="SHAREGATE 401 RETRY RESULTS" Style="{StaticResource SectionLabel}"/>
@@ -1218,7 +1262,8 @@ function Open-InExplorer {
               </StackPanel>
             </StackPanel>
           </Border>
-          <Border Style="{StaticResource StepCard}">
+          <Border x:Name="farmDiagnosticsHost" Visibility="Collapsed">
+          <Border x:Name="cardFarmDiagnostics" Style="{StaticResource StepCard}">
             <StackPanel>
               <TextBlock Text="SOURCE FARM DIAGNOSTICS" Style="{StaticResource SectionLabel}"/>
               <TextBlock x:Name="lblFarmResult" Text="No farm diagnostic result found." TextWrapping="Wrap" FontSize="12"/>
@@ -1234,9 +1279,9 @@ function Open-InExplorer {
               <TextBox x:Name="txtFarmRun" IsReadOnly="True" Height="28" Margin="0,5,0,0" VerticalContentAlignment="Center" FontFamily="Consolas" FontSize="10" ToolTip="Real read-only diagnostic command for the farm server"/>
             </StackPanel>
           </Border>
+          </Border>
           </StackPanel>
-          <Border Grid.Row="4" Grid.Column="1" Background="#DDE7F0"/>
-          <StackPanel x:Name="panelDiagReview" Grid.Row="4" Grid.Column="2" Margin="14,0,0,0" IsEnabled="False">
+          <StackPanel x:Name="panelDiagReview" Grid.Row="5" Grid.ColumnSpan="3" IsEnabled="False">
           <TextBlock Text="ISSUE REVIEW" Style="{StaticResource SectionLabel}"/>
           <Border Style="{StaticResource StepCard}">
             <StackPanel>
@@ -1392,6 +1437,12 @@ if ($ValidateOnly) {
     try {
         $reader = [System.Xml.XmlNodeReader]::new($xaml)
         $validationWindow = [System.Windows.Markup.XamlReader]::Load($reader)
+        $farmHost = $validationWindow.FindName('farmDiagnosticsHost')
+        $farmCard = $farmHost.Child; $farmHost.Child = $null
+        $farmValidationWindow = New-FarmDiagnosticsWindow -Owner $validationWindow -MigrationName 'Validation' -Content $farmCard
+        $farmValidationWindow.Content.Children[1].Content = $null
+        $farmValidationWindow.Close()
+        $farmHost.Child = $farmCard
         $null = Initialize-SmartM365BatchGui -Panel $validationWindow.FindName('panelBatches') -Root $script:ScriptRoot -SourceRoot $script:FarmToolkitRoot -ValidateOnly
         $null   = Show-SmartM365NewMigrationWizard -ProjectRoot $script:ScriptRoot -ValidateOnly
     } catch {
@@ -1638,6 +1689,9 @@ $btnFarmRefresh = ctrl 'btnFarmRefresh'
 $btnFarmOpenReport = ctrl 'btnFarmOpenReport'
 $btnFarmCheck = ctrl 'btnFarmCheck'
 $btnFarmRun = ctrl 'btnFarmRun'
+$btnFarmWindow = ctrl 'btnFarmWindow'
+$farmDiagnosticsHost = ctrl 'farmDiagnosticsHost'
+$cardFarmDiagnostics = ctrl 'cardFarmDiagnostics'
 $lblFarmPrerequisites = ctrl 'lblFarmPrerequisites'
 $txtFarmDryRun = ctrl 'txtFarmDryRun'
 $txtFarmRun = ctrl 'txtFarmRun'
@@ -1697,6 +1751,8 @@ $script:DiagTimer = $null
 $script:DiagOutputDirectory = ''
 $script:DiagActivity = ''
 $script:DiagProjectRoot = ''
+$script:DiagActiveReportKey = ''
+$script:DiagAutoAttempts = @{}
 $script:DiagLoadedDirectory = ''
 $script:FarmReportPath = ''
 $script:FarmInvocation = $null
@@ -1830,14 +1886,25 @@ function Get-ComparisonRunState {
 
 function Update-ComparisonRunState {
     foreach ($controls in @(
-        @{ Source=$cmbScanSrcFile; Target=$cmbScanTgtFile; Button=$btnRunCmpFiles; Label=$lblCmpFilesAvailability },
-        @{ Source=$cmbScanSrcPermFile; Target=$cmbScanTgtPermFile; Button=$btnRunCmpPerms; Label=$lblCmpPermsAvailability }
+        @{ Source=$cmbScanSrcFile; Target=$cmbScanTgtFile; Button=$btnRunCmpFiles; Label=$lblCmpFilesAvailability; Result='FileComparisonFolder'; Attempt='FileComparisonAttemptFolder' },
+        @{ Source=$cmbScanSrcPermFile; Target=$cmbScanTgtPermFile; Button=$btnRunCmpPerms; Label=$lblCmpPermsAvailability; Result='PermComparisonFolder'; Attempt='PermComparisonAttemptFolder' }
     )) {
         $state = Get-ComparisonRunState -FirstCsv (Get-SelectedScanFile $controls.Source) -SecondCsv (Get-SelectedScanFile $controls.Target)
         $controls.Button.IsEnabled = $state.Ready
         $controls.Button.ToolTip = if ($state.Ready) { 'Compare the selected completed source and target scans.' } else { $state.Reason }
-        $controls.Label.Text = $state.Reason
-        $controls.Label.Visibility = if ($state.Ready) { 'Collapsed' } else { 'Visible' }
+        $resultNote = ''
+        if ($script:CurrentStatus -and $script:CurrentStatus.PSObject.Properties[$controls.Attempt]) {
+            $attempt = $script:CurrentStatus.($controls.Attempt)
+            $result = $script:CurrentStatus.($controls.Result)
+            if ($attempt -and (-not $result -or $attempt.FullName -ne $result.FullName)) {
+                $stamp = Get-SmartM365PortfolioTimestamp $attempt.Name
+                if (-not $stamp) { $stamp = $attempt.LastWriteTime }
+                $resultNote = 'Latest attempt: {0}; no comparison result was produced.' -f (Format-RunAgeText $stamp)
+                if ($result) { $resultNote += ' Showing the previous available comparison result.' }
+            }
+        }
+        $controls.Label.Text = (@($state.Reason, $resultNote) | Where-Object { $_ }) -join ' '
+        $controls.Label.Visibility = if ($controls.Label.Text) { 'Visible' } else { 'Collapsed' }
     }
 }
 
@@ -1851,6 +1918,7 @@ function Update-ScanFileSelection {
 
     $selectedFile = Get-SelectedScanFile -ComboBox $ComboBox
     $age = Format-ItemAge $selectedFile
+    if (-not $selectedFile) { $age.Text = 'No complete scan' }
     Set-Badge $Badge $Label $age.Text $age.HasRun
     $OpenButton.Visibility = if ($selectedFile) { 'Visible' } else { 'Collapsed' }
     if ($selectedFile) { $OpenButton.Tag = (Split-Path $selectedFile.FullName -Parent) }
@@ -2390,6 +2458,19 @@ function Format-FileInventoryVolume {
     return '{0:N0} B' -f $Bytes
 }
 
+function Get-FileInventoryMetricCsvHash {
+    param([System.IO.FileInfo]$File)
+    if (-not (Get-Variable -Name InventoryMetricHashes -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:InventoryMetricHashes = @{}
+    }
+    $key = '{0}|{1}' -f $File.Length, $File.LastWriteTimeUtc.Ticks
+    $entry = $script:InventoryMetricHashes[$File.FullName]
+    if ($entry -and $entry.Key -eq $key) { return $entry.Hash }
+    $hash = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+    $script:InventoryMetricHashes[$File.FullName] = @{ Key=$key; Hash=$hash }
+    return $hash
+}
+
 function Get-FileInventoryMetricPresentation {
     param($Scan)
     if (-not $Scan -or -not $Scan.File) {
@@ -2405,12 +2486,33 @@ function Get-FileInventoryMetricPresentation {
         $Scan.File.Refresh()
         $result = Get-Content -LiteralPath $metricsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ([int]$result.SchemaVersion -ne 1 -or $result.InventoryFile -cne $Scan.File.Name -or
-            [long]$result.CsvLengthBytes -ne [long]$Scan.File.Length -or
-            [long]$result.CsvLastWriteTimeUtcTicks -ne [long]$Scan.File.LastWriteTimeUtc.Ticks) {
+            [long]$result.CsvLengthBytes -ne [long]$Scan.File.Length) {
             throw 'Metrics do not match the latest inventory CSV.'
         }
         foreach ($name in @('Rows','Files','FoldersWithFiles','KnownSizeBytes','MissingSizeFiles','MissingPathRows','InvalidLibraryRows','DuplicateRows','ConflictingSizeRows')) {
             if ($null -eq $result.$name -or [long]$result.$name -lt 0) { throw "Invalid inventory metric: $name" }
+        }
+        $hashProperty = $result.PSObject.Properties['CsvSha256']
+        if ($hashProperty) {
+            if ([string]$hashProperty.Value -notmatch '^[0-9a-fA-F]{64}$' -or
+                (Get-FileInventoryMetricCsvHash -File $Scan.File) -ne [string]$hashProperty.Value) {
+                throw 'Inventory CSV content differs from its scan metrics SHA256.'
+            }
+            $evidence = $evidence.Replace('scan receipt (hash not recalculated)', 'scan receipt') + ' · metrics CSV SHA256 verified'
+            $basis = $basis.Replace('scan receipt (hash not recalculated)', 'scan receipt; metrics CSV SHA256 verified')
+        }
+        elseif ([long]$result.CsvLastWriteTimeUtcTicks -ne $Scan.File.LastWriteTimeUtc.Ticks) {
+            # Synced copies can truncate subsecond timestamps. Require the scan receipt's content hash.
+            $recordedSecond = [long]$result.CsvLastWriteTimeUtcTicks - ([long]$result.CsvLastWriteTimeUtcTicks % [TimeSpan]::TicksPerSecond)
+            if ($Scan.File.LastWriteTimeUtc.Ticks -ne $recordedSecond) { throw 'Metrics CSV timestamp does not match this scan.' }
+            $receipt = Get-Content -LiteralPath ($Scan.File.FullName + '.manifest.json.txt') -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ([int]$receipt.SchemaVersion -ne 1 -or $receipt.InventoryFile -cne $Scan.File.Name -or
+                [long]$receipt.Rows -ne [long]$result.Rows -or [string]$receipt.Sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+                (Get-FileInventoryMetricCsvHash -File $Scan.File) -ne [string]$receipt.Sha256) {
+                throw 'Synchronized inventory CSV cannot be verified against its scan receipt.'
+            }
+            $evidence = $evidence.Replace('scan receipt (hash not recalculated)', 'scan receipt') + ' · metrics receipt SHA256 verified'
+            $basis = $basis.Replace('scan receipt (hash not recalculated)', 'scan receipt; metrics CSV SHA256 verified')
         }
     }
     catch {
@@ -2993,8 +3095,15 @@ function Update-DiagnosticReportStatus {
     param([string]$Failure = '')
 
     $report = $script:DiagLatestReport
-    $isRunning = [bool]($script:DiagProcess -and -not $script:DiagProcess.HasExited)
+    $isRunning = [bool]($script:DiagProcess -and $script:DiagActiveReportKey -eq (Get-DiagnosticReportKey))
     $hasHtml = [bool]($script:DiagSummary -and $btnDiagOpenReport.IsEnabled)
+    if (-not $script:DiagSummary) {
+        $lblDiagKpis.Text = if (-not $report) { 'No ShareGate migration report is available. Deposit the latest CSV or XLSX in MigrationReport.' }
+            elseif ($Failure) { 'The ShareGate analysis failed. Review the error above, then retry Analyze latest report.' }
+            elseif ($isRunning) { 'Analyzing ShareGate report: ' + $report.Name + '. Indicators will appear when analysis finishes.' }
+            elseif ($script:DiagProcess) { 'Report queued for automatic analysis: ' + $report.Name + '. Indicators will appear when analysis finishes.' }
+            else { 'ShareGate report detected: ' + $report.Name + '. Its analysis will start automatically; indicators and HTML will appear when it finishes.' }
+    }
     if (-not $report) {
         $lblDiagReportState.Text = 'Missing'
         $lblDiagReportEvidence.Text = 'CSV or XLSX required'
@@ -3021,6 +3130,11 @@ function Update-DiagnosticReportStatus {
         $lblDiagAnalysisEvidence.Text = 'Processing latest report'
         $lblDiagNextAction.Text = 'Wait for the analysis to finish.'
     }
+    elseif ($script:DiagProcess -and -not $script:DiagSummary) {
+        $lblDiagAnalysisState.Text = 'Queued'
+        $lblDiagAnalysisEvidence.Text = 'Another analysis is finishing'
+        $lblDiagNextAction.Text = 'The latest report will be analyzed automatically when the current analysis finishes.'
+    }
     elseif ($script:DiagSummary) {
         $lblDiagAnalysisState.Text = if ($script:DiagAnalysisVerified) { 'SHA256 verified' } else { 'Legacy match' }
         $lblDiagAnalysisEvidence.Text = if ($script:DiagAnalysisVerified) { 'Exact report content matched' } else { 'Path and timestamp only' }
@@ -3037,12 +3151,12 @@ function Update-DiagnosticReportStatus {
     elseif ($report.Extension -eq '.xlsx') {
         $lblDiagAnalysisState.Text = 'Ready to analyze'
         $lblDiagAnalysisEvidence.Text = 'XLSX support prepared automatically'
-        $lblDiagNextAction.Text = 'Click Analyze latest report. ImportExcel installs automatically for the current user if needed.'
+        $lblDiagNextAction.Text = 'The latest report will be analyzed automatically. ImportExcel installs automatically for the current user if needed.'
     }
     else {
         $lblDiagAnalysisState.Text = 'Not analyzed'
         $lblDiagAnalysisEvidence.Text = 'No matching analysis'
-        $lblDiagNextAction.Text = 'Click Analyze latest report to create the summary and HTML report.'
+        $lblDiagNextAction.Text = 'The latest report will be analyzed automatically to create its summary and HTML report.'
     }
 }
 
@@ -3197,8 +3311,29 @@ function Get-CurrentDiagnosticAnalysis {
     return $null
 }
 
+function Get-DiagnosticReportKey {
+    if (-not $script:CurrentMigration -or -not $script:DiagLatestReport -or -not $script:DiagReportSignature) { return '' }
+    return $script:CurrentMigration.Root + '|' + $script:DiagReportSignature
+}
+
+function Start-AutomaticDiagnosticAnalysis {
+    if (-not $script:CurrentMigration -or -not $script:DiagLatestReport -or $script:DiagSummary -or $script:DiagProcess) { return }
+    $key = Get-DiagnosticReportKey
+    if (-not $key -or -not (Test-Path -LiteralPath $script:DiagLatestReport.FullName -PathType Leaf)) { return }
+    if ($script:DiagAutoAttempts.ContainsKey($key)) {
+        if ($script:DiagAutoAttempts[$key]) {
+            $lblDiagProgress.Text = 'Automatic analysis failed: ' + $script:DiagAutoAttempts[$key] + ' Click Analyze latest report to retry.'
+            Update-DiagnosticReportStatus -Failure $script:DiagAutoAttempts[$key]
+        }
+        return
+    }
+    # One automatic attempt per input signature in this GUI session; failures need a manual retry.
+    $script:DiagAutoAttempts[$key] = ''
+    Start-DiagnosticAnalysis -Automatic
+}
+
 function Refresh-DiagnosticReportState {
-    param([switch]$Force)
+    param([switch]$Force, [switch]$SkipAutoAnalysis)
     if (-not $script:CurrentMigration) { return }
     $folder = Join-Path $script:CurrentMigration.Root 'ShareGate\MigrationReport'
     $script:DiagInputPath = $folder
@@ -3214,7 +3349,10 @@ function Refresh-DiagnosticReportState {
         if ($csv.Count) { $report = $csv[0] }
     }
     $signature = if ($report) { '{0}|{1}|{2}' -f $report.FullName, $report.Length, $report.LastWriteTimeUtc.Ticks } else { '(empty)' }
-    if (-not $Force -and $signature -eq $script:DiagReportSignature) { return }
+    if (-not $Force -and $signature -eq $script:DiagReportSignature) {
+        if (-not $SkipAutoAnalysis) { Start-AutomaticDiagnosticAnalysis }
+        return
+    }
     $script:DiagReportSignature = $signature
     $script:DiagLatestReport = $report
     $script:DiagReportHash = ''
@@ -3242,8 +3380,9 @@ function Refresh-DiagnosticReportState {
     elseif ($report.Extension -eq '.xlsx' -and -not $isRunning) {
         $lblDiagProgress.Text = 'Ready to analyze XLSX. ImportExcel installs automatically for the current user if needed.'
     }
-    else { $lblDiagProgress.Text = 'Latest report has not been analyzed yet. Analyze it to create an HTML report and summary.' }
+    else { $lblDiagProgress.Text = 'Latest report detected. Waiting for automatic analysis to create its HTML report and summary.' }
     Update-DiagnosticReportStatus
+    if (-not $SkipAutoAnalysis) { Start-AutomaticDiagnosticAnalysis }
 }
 
 function Refresh-TransientResults {
@@ -3290,6 +3429,21 @@ function Refresh-TransientResults {
             $lblTransientCounts.Text = $_.Exception.Message
             return
         }
+    }
+}
+
+function Show-FarmDiagnosticsWindow {
+    if (-not $script:CurrentMigration) { return }
+    $farmDiagnosticsHost.Child = $null
+    $farmWindow = $null
+    try {
+        $farmWindow = New-FarmDiagnosticsWindow -Owner $script:Window -MigrationName $script:CurrentMigration.Name -Content $cardFarmDiagnostics
+        Refresh-FarmDiagnostics
+        [void]$farmWindow.ShowDialog()
+    }
+    finally {
+        if ($farmWindow) { $farmWindow.Content.Children[1].Content = $null }
+        $farmDiagnosticsHost.Child = $cardFarmDiagnostics
     }
 }
 
@@ -3475,6 +3629,7 @@ function Load-DiagnosticResult {
 
 function Update-DiagnosticAnalysisProgress {
     if (-not $script:CurrentMigration -or $script:CurrentMigration.Root -ne $script:DiagProjectRoot) { return }
+    if ($script:DiagActiveReportKey -ne (Get-DiagnosticReportKey)) { return }
     $path = Join-Path $script:DiagOutputDirectory 'analysis.phase.json.txt'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
     try {
@@ -3489,9 +3644,10 @@ function Update-DiagnosticAnalysisProgress {
 }
 
 function Start-DiagnosticAnalysis {
-    if ($script:DiagProcess -and -not $script:DiagProcess.HasExited) { return }
+    param([switch]$Automatic)
+    if ($script:DiagProcess) { return }
     if (-not $script:CurrentMigration) { return }
-    Refresh-DiagnosticReportState
+    Refresh-DiagnosticReportState -SkipAutoAnalysis
     $report = $script:DiagLatestReport
     if (-not $report -or -not (Test-Path -LiteralPath $report.FullName -PathType Leaf)) {
         [System.Windows.MessageBox]::Show('Place the latest ShareGate CSV or XLSX report in MigrationReport first.', $script:AppName, 'OK', 'Warning') | Out-Null
@@ -3501,13 +3657,15 @@ function Start-DiagnosticAnalysis {
     $wrapper = Join-Path $script:ScriptRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-Diagnostics.ps1'
     $output = Join-Path $script:CurrentMigration.Root ('ShareGate\Diagnostics\{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N'))
     $activity = $null
+    $key = Get-DiagnosticReportKey
+    $script:DiagAutoAttempts[$key] = ''
     try {
         New-Item -ItemType Directory -Path $output -Force | Out-Null
         $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration $script:CurrentMigration.Name -Action 'MigrationDiagnostics'
         $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$wrapper`"",
             '-ProjectRoot', "`"$($script:CurrentMigration.Root)`"", '-InputPath', "`"$inputPath`"",
             '-OutputDirectory', "`"$output`"", '-ActivityPath', "`"$activity`"")
-        $session = if ($cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
+        $session = if (-not $Automatic -and $cmbDiagSession.SelectedItem) { [string]$cmbDiagSession.SelectedItem } else { 'All sessions' }
         if ($session -ne 'All sessions') { $arguments += @('-SessionId', "`"$session`"") }
         $exe = Join-Path $PSHOME 'pwsh.exe'
         $script:DiagProcess = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $script:ScriptRoot -WindowStyle Hidden -PassThru `
@@ -3515,6 +3673,7 @@ function Start-DiagnosticAnalysis {
         $script:DiagOutputDirectory = $output
         $script:DiagActivity = $activity
         $script:DiagProjectRoot = $script:CurrentMigration.Root
+        $script:DiagActiveReportKey = $key
         $btnDiagAnalyze.IsEnabled = $false
         $lblDiagProgress.Text = if ($report.Extension -eq '.xlsx') { 'Preparing XLSX analysis; ImportExcel will be installed automatically if needed…' } else { "Analyzing local report files in $inputPath ..." }
         Update-DiagnosticReportStatus
@@ -3522,6 +3681,7 @@ function Start-DiagnosticAnalysis {
         Refresh-ActivityList
     }
     catch {
+        $script:DiagAutoAttempts[$key] = $_.Exception.Message
         if ($activity) { Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message }
         $lblDiagProgress.Text = "Could not start analysis: $($_.Exception.Message)"
         $btnDiagAnalyze.IsEnabled = [bool]$script:DiagLatestReport
@@ -3540,6 +3700,7 @@ $btnCrossCheckRefresh.Add_Click({ Refresh-DiagnosticReportState -Force; Refresh-
 $btnCrossCheckFilesReport.Add_Click({ if ($btnCrossCheckFilesReport.Tag) { Open-InExplorer $btnCrossCheckFilesReport.Tag } })
 $btnCrossCheckPermissionsReport.Add_Click({ if ($btnCrossCheckPermissionsReport.Tag) { Open-InExplorer $btnCrossCheckPermissionsReport.Tag } })
 $btnFarmRefresh.Add_Click({ Refresh-FarmDiagnostics })
+$btnFarmWindow.Add_Click({ Show-FarmDiagnosticsWindow })
 $btnFarmCheck.Add_Click({ [void](Test-FarmDiagnosticsPrerequisites) })
 $btnFarmRun.Add_Click({
     if (-not (Test-FarmDiagnosticsPrerequisites)) { return }
@@ -3661,12 +3822,10 @@ $script:ActivityRetentionTimer.Add_Tick({
             (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message)
     }
 })
-$script:DiagTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$script:DiagTimer.Interval = [TimeSpan]::FromSeconds(1)
-$script:DiagTimer.Add_Tick({
-    if (-not $script:DiagProcess) { return }
-    if (-not $script:DiagProcess.HasExited) { Update-DiagnosticAnalysisProgress; return }
+function Complete-DiagnosticAnalysis {
+    if (-not $script:DiagProcess -or -not $script:DiagProcess.HasExited) { return }
     $script:DiagTimer.Stop()
+    $reportKey = $script:DiagActiveReportKey
     $code = $script:DiagProcess.ExitCode
     $script:DiagProcess.Dispose()
     $script:DiagProcess = $null
@@ -3678,17 +3837,31 @@ $script:DiagTimer.Add_Tick({
             throw "Analysis exited with code $code. $errorText"
         }
         if ($script:CurrentMigration -and $script:CurrentMigration.Root -eq $script:DiagProjectRoot) {
-            Refresh-DiagnosticReportState -Force
+            Refresh-DiagnosticReportState -Force -SkipAutoAnalysis
+            if ($reportKey -eq (Get-DiagnosticReportKey) -and -not $script:DiagSummary) {
+                throw 'Analysis finished without a matching summary and HTML report.'
+            }
         }
     }
     catch {
-        $lblDiagProgress.Text = "Analysis failed: $($_.Exception.Message)"
-        Update-DiagnosticReportStatus -Failure $_.Exception.Message
+        $script:DiagAutoAttempts[$reportKey] = $_.Exception.Message
+        if ($reportKey -eq (Get-DiagnosticReportKey)) {
+            $lblDiagProgress.Text = "Analysis failed: $($_.Exception.Message)"
+            Update-DiagnosticReportStatus -Failure $_.Exception.Message
+        }
         if ($script:DiagActivity) {
             Write-SmartM365GuiActivityEvent -Path $script:DiagActivity -Status 'Failed' -ExitCode 1 -Detail $_.Exception.Message
         }
     }
     Refresh-ActivityList
+    Start-AutomaticDiagnosticAnalysis
+}
+$script:DiagTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:DiagTimer.Interval = [TimeSpan]::FromSeconds(1)
+$script:DiagTimer.Add_Tick({
+    if (-not $script:DiagProcess) { return }
+    if (-not $script:DiagProcess.HasExited) { Update-DiagnosticAnalysisProgress; return }
+    Complete-DiagnosticAnalysis
 })
 $script:CrossCheckTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:CrossCheckTimer.Interval = [TimeSpan]::FromMilliseconds(500)
@@ -3767,8 +3940,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNTSrXHYYBRYu/
-# 24X3P1PvCaUB96wxz1Ea1Z2oR56sTKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD754lMY6d0x8nb
+# sSWet5knmvMsQj0decR2RNuH+Hz4Z6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3798,14 +3971,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAFDZv22PvK3LV973Sc2lnM
-# NNffQrTU60CjpeTlxwhcHzANBgkqhkiG9w0BAQEFAASCAYBY3rfOvBnqf6dsRE2D
-# qKi95GAYpsi/Kj7dcp5/7uvyJw/hqMuJ9+0Smc4vHnrxlsHbhKOmXR2dMsnVpZ76
-# HC5sC05PVSMfwt+XXmDaxEvfSXWClpDRaxVkAYoGxjigrxJQGehx8zE5G15NIZjO
-# UBlsGkkzYMe4AUt1xRAm1VGcAkzBt+g1haU1e5II9YOnIdnlx8lmbJ5+WxzQQ5pu
-# Z6ula4dT60tyOJ2neBXfqYPTkDStj3fX1RWyXOSIDqDUggDqnfsTggrLk3C0bl4y
-# COFMFtb2kOdwOSp9h6lK9NX45RL9BZTpORQcUXF1rupxzSHs8yKHkmk7KeBBfi9a
-# icd7vtDIGxqvIVW/jD1JjEM0BNxCqer3WtWmVi1X2A2ZRp1xrEKaZ7pwcl3WTrM0
-# 8UUP7qDsVUzVI3jvcMdca0EjD8XoJKpG6rljHPD4+zVSU87a4IdReXTr3y3hkPQD
-# fGUXH65JtiDlC0KOM1MbnwutQofvnmwFE8Tg9hEJOKB3Ib0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBztVOuk1PpcT01yXyQnGwq
+# xURgWegesm5005Em6IbHUzANBgkqhkiG9w0BAQEFAASCAYCOGh5i3MgMrssqDmN5
+# BpfaH8W/J30GLHaXOcii7Ubi/Hphr6tq6qSReVGsCgDn9YbLix9wUnmnVgpDIkbS
+# 730gc/ysafQbUZt9hIZ/yijbmL1utTpA0yUogr+WoGqPfh2T3pWkNaCQXa7f9R1J
+# yLQsl5YbJZW/bsA2h7JxGwxGuBvfbp7A4HluSmAkbJPOD82ZurdY7PoTIzaT10IY
+# bCLGrCzvV1nF/KFV/NjEkDvW7CbO8rHAWbyyG2cKjE7QEjqDDwvuVbokGjODGuV0
+# FOG+MSChnokIqSEI7mEJEDx5zDjRZEUXyWY2M+dw+wA7wUuCajN0hv9mJR1lkK44
+# Z2zI7m14rctAG8DofGoR6N9vb9CTkVlyDJodUJ/04mtVs/1knpkr9YiQ9DUdwAxt
+# khbRrcMdYgALLf2luGhyBubYIFWMoGzta9i4WFaQhJ0QPj+T/5cnxWJ04PwAoWR5
+# Z0XD34CrjxxvH2LFA36IrCTMwwh2RoWjdcCXg6xmE5huwPY=
 # SIG # End signature block

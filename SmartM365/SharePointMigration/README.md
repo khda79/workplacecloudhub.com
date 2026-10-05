@@ -74,6 +74,9 @@ the matching percentage. Source-versus-target **Run** requires both selected
 scans to exist without an `-Errors.csv` sidecar; a disabled comparison displays
 the missing or incomplete scan reason. History **Compare** requires two different
 completed scans on the selected side. Existing comparison reports remain accessible.
+The date and rate come from the latest readable comparison summary, rather than
+an empty output folder created by a failed attempt. A newer attempt without a
+summary is shown separately; the previous available report remains labelled as such.
 
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
@@ -348,8 +351,13 @@ to their CSV. The GUI reads this small metadata file for file count, folders
 containing files, and current file volume; it does not recalculate inventory
 metrics. Empty folders, file versions, and recycle-bin content are excluded.
 Older scans without metrics show an unavailable value until a new file scan is
-run. The GUI rejects metadata when the CSV name, length, or modification time
-does not match the scan.
+run. New metrics include the CSV SHA256 to identify the exact scan content,
+independently of synchronized modification times. Hash verification is cached
+until the CSV length or local modification time changes. For earlier metrics,
+an exact timestamp remains valid; a copy truncated to whole seconds also needs
+a matching scan receipt, row count and verified CSV SHA256. Other mismatches
+remain unavailable. The GUI verifies identity but never calculates the counts
+or volume from the CSV.
 
 SP2016/SP2019/SPO are configured engine selectors, not a certification of every
 farm, module, operating system or migration combination. Use an environment
@@ -491,8 +499,14 @@ report before using its access peaks.
 Analysis uses local report files; it
 does not import the ShareGate module, connect to a site, precheck, or retry a
 migration. The analysis runs in a child PowerShell process so the GUI remains
-responsive. Shared GUI activity logs record the operator and the analysis
-result. CSV is preferred when a CSV and XLSX have the same base name. The GUI
+responsive. For the selected migration, detecting a latest report without a
+matching analysis starts analysis automatically, across all sessions. Only one
+analysis runs at a time in the GUI; changing migrations queues the selected
+report until that worker finishes. Each report path, size and modification time
+is attempted once per GUI session. A failure is displayed with a manual retry
+through **Analyze latest report**, rather than repeated on every refresh.
+Shared GUI activity logs record the operator and the analysis result.
+CSV is preferred when a CSV and XLSX have the same base name. The GUI
 analyzes only the latest selected report file; the command-line folder DryRun
 lists every file, its selection status, detected session IDs, and the installed
 `ImportExcel` version. With ImportExcel available, a same-name XLSX is masked
@@ -505,10 +519,17 @@ installation phase while the child process works. Installation errors stop
 analysis and show an actionable message; no partial CSV-only analysis is
 silently substituted. `DryRun` never installs a module or registers a repository.
 PowerShell's execution policy and permanent repository trust settings are preserved.
+**ShareGate report & analysis status** describes the latest ShareGate input,
+its matching analysis and generated HTML. **ShareGate analysis detail** is filled
+after analysis; detecting a new CSV or XLSX does not reuse indicators from an
+older input. File and permission comparison states are shown in Cross-check.
+Cross-check loading text and its progress bar appear at the top of the tab,
+above Summary. Its **ShareGate to fix** column shows `—` when analysis is unavailable;
+`0 items / 0 lines` is reserved for an existing analysis with no issues in that scope.
 Report rows from different
 files are deduplicated by session and row ID; conflicting duplicates are
-counted and flagged for review. A session selector can restrict a new analysis
-to one session.
+counted and flagged for review. A session selector can restrict a manual analysis
+to one session. **Issue review** and **Raw report rows** use the full tab width.
 
 The `ShareGate 401 retry results` card appears only when a previous reviewed
 batch result exists. It summarizes historical retries; it does not start one.
@@ -610,7 +631,9 @@ Each run writes separate topology, IIS, WAS, Security, ULS, coverage,
 correlation and nightly-recurrence CSVs, an HTML report, a log and an atomic
 `Farm-Summary.json.txt` completion marker. A `Partial` result can contain
 useful evidence but does not establish complete farm coverage. The Migration
-Diagnostics tab shows the latest matching farm result and generates one-line
+Diagnostics tab opens **Source farm diagnostics** in a dedicated window using
+the selected migration. Opening this window only displays existing evidence;
+it does not start collection. The window shows the latest matching farm result and generates one-line
 DryRun and real commands from the project's `AccessFailures-5min.csv` windows.
 The GUI builds farm commands only from the analysis of the currently selected
 latest report, so a newer report cannot silently reuse older access peaks.

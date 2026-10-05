@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only cross-check of ShareGate diagnostics and existing inventory comparisons.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 function Get-SmartM365CrossCheckCsvRows {
@@ -247,7 +247,7 @@ function Get-SmartM365DiagnosticCrossCheck {
             elseif (-not $DiagnosticVerified -or $files.State -ne 'Recorded scan evidence verified' -or
                 $permissions.State -ne 'Recorded scan evidence verified') { "$relationship; review evidence" }
             else { $relationship }
-        $scopeRows.Add([pscustomobject]@{ Site=$scope.Site; List=$scope.List; ShareGateToFix="$sgCount items / $($scope.ShareGateLines) lines";
+        $scopeRows.Add([pscustomobject]@{ Site=$scope.Site; List=$scope.List; ShareGateToFix=$(if ($hasDiagnostics) { "$sgCount items / $($scope.ShareGateLines) lines" } else { '—' });
             FilesMissing=$scope.FilesMissing; FilesExtra=$scope.FilesExtra; FileChangeFlags=$scope.FileChangeFlags;
             PermsMissing=$scope.PermsMissing; PermsDisabled=$scope.PermsDisabled; PermsExtra=$scope.PermsExtra;
             PermsChanged=$scope.PermsChanged; Assessment=$assessment; SortWeight=if ($isAmbiguous) { 0 } else { $gapCount + $scope.ShareGateLines } })
@@ -260,8 +260,8 @@ function Get-SmartM365DiagnosticCrossCheck {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDChodBwGknKGFE
-# CGi+zHFDQVD6BVsBuZD5re8EHc/opKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTGd/fFJXFqBBe
+# BxLoewF+5kFa/bTGa6CvgCPlVoFBqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -291,14 +291,14 @@ function Get-SmartM365DiagnosticCrossCheck {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCUE8uRWyySQgDFNxSzjdBh
-# v12JEKQIW5m0TUREA1IY/jANBgkqhkiG9w0BAQEFAASCAYAeq40krfrKGnb1pqT+
-# W2uYwaSsoVmCgofzPxpzJiypXrgIH9Y0Wi7J2JNscG8azz4XgvASj2tzXAK2rlk2
-# 0fcgZaQ5eh3ws8a0DImWGLw/2kGeVLvGwsxVROJDcpfajBrA488PQ1S8lSW6D2Gj
-# vsw9AMFB49Kz0Jyq+8KrBA21a830RdPd2UOy1hIxwfHym+g/Z0qp/C6Bi4y9wEkj
-# m2bnh/LAetKQDysGSOvTa0dHMSL2UDL5zLCyRSs3NwopnCZbbGcNdIGEZFlXpkbV
-# Mv0G5eRKLhgbT8IDVAk/bWMC/jgVIGIqsSw3znpSHlau8+X5fhYt7ZVo4tw6i5x4
-# jer42OLP4xrUEEuOoY3CnpkM7IBvZl9uDjHXNmlfFmZj52ZaXKvesauGv1F3DJnx
-# EaR+jC7Yf1zVkqdkq4Gs5Ol1JpxZUhNMjxyR4NIXnmiqcmoznabb+8a6aljTh+p9
-# 0HjB1yreMWBXwKg1vO00ks0JGLibqOWaUdqx10SAs2xde0Q=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAxn7TZpwu2kMgQjX+CxLgy
+# SLF1QgpwB3anf3bnQ4TcKDANBgkqhkiG9w0BAQEFAASCAYCCbfGwxlp4s3XRXHZ3
+# B3+dIe25sRNW8PMHATvRFqThi+WBBoWrn5gPhjLwXr2et4lLdSJr6/eTLCKu5/S7
+# IL2FAGHKhemcf3PksHnJPf36lIxhi1wigKzPf4nDLNdu/bu5qnALOknvqfIj/IN2
+# Nl5ujvU+z5N+IaeY/caoXjbWF/9cmBRaLDRYgprVhfgthlrle5/OhDb/bD6CKqPa
+# Fm9ZeX3mVulFcERD8Ddd0L5Ep0gR6h0ZhDdr0O8bO7KEcDhd1vPtS/Rc6ZjPmYzm
+# ROPpZcJDF8CW3bR0d93a/nDrTn/OX/HlzK8TAbHbkPHWZglpk6s+SmNDqbinrpgj
+# 2r2FcPlMJF7HORuavj+ma/TLBoKzMfjYexsQp4WIL6OzkDNJlUAeoKhiSiWYcD+q
+# whVz/6VSUGIlh2VqxPADG98XYkLdJrBUCtXLOCKdUIc5CPzaFT4e8M9DTGSji6Py
+# h8WM/VkTZTVTqlG//Z+o4SQlYQ8yiFJOF95cYpi6+RM7qFM=
 # SIG # End signature block

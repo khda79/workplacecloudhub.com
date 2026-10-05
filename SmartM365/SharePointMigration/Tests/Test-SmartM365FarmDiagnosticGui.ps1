@@ -2,11 +2,11 @@
 .SYNOPSIS
     Offline Migration Diagnostics farm-result and command-generation test.
 .VERSION
-    1.0.2
+    1.0.4
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
-param()
+param([string]$PreviewDirectory='')
 
 $ErrorActionPreference = 'Stop'
 $guiPath = Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-GUI.ps1'
@@ -19,6 +19,10 @@ if (-not $function) { throw 'Farm refresh function is missing from the GUI.' }
 $preflight = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-FarmDiagnosticsPrerequisites' },$true)
 if (-not $preflight) { throw 'Farm prerequisite check is missing from the GUI.' }
 . ([scriptblock]::Create($preflight.Extent.Text))
+$constructor = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-FarmDiagnosticsWindow' },$true)
+. ([scriptblock]::Create($constructor.Extent.Text))
+Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
+$layoutWindow=$null; $farmWindow=$null
 function Refresh-DiagnosticReportState { param([switch]$Force) }
 $root = Join-Path $PSScriptRoot ('.farm-gui-test-' + [guid]::NewGuid().ToString('N'))
 if (-not $root.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test path.' }
@@ -68,17 +72,70 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     $script:FarmInvocation = $null
     if (Test-FarmDiagnosticsPrerequisites) { throw 'Farm Run passed without an analysis.' }
     if ($btnFarmRun.IsEnabled -or $lblFarmPrerequisites.Text -notmatch 'Run unavailable') { throw 'Farm Run did not remain disabled.' }
-    Write-Output 'Farm diagnostics GUI offline test passed.'
+    # Use the real main XAML and dedicated window without showing a GUI or running a probe.
+    $guiText=[IO.File]::ReadAllText($guiPath)
+    $match=[regex]::Match($guiText,"(?s)\[xml\]\`$xaml\s*=\s*@'\r?\n(.*?)\r?\n'@")
+    [xml]$markup=$match.Groups[1].Value
+    $layoutWindow=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($markup))
+    $diagnosticsPanel=$layoutWindow.FindName('panelDiagnostics')
+    $review=$layoutWindow.FindName('panelDiagReview')
+    $farmHost=$layoutWindow.FindName('farmDiagnosticsHost')
+    $farmCard=$farmHost.Child
+    $loading=$layoutWindow.FindName('panelCrossCheckLoading')
+    if ([Windows.Controls.Grid]::GetRow($loading.Parent) -ne 0 -or
+        $loading.Parent.Parent -ne $diagnosticsPanel) { throw 'Diagnostics loading progress is not at the top of the tab.' }
+    if ([Windows.Controls.Grid]::GetColumnSpan($review) -ne 3 -or
+        $farmHost.Visibility -ne 'Collapsed' -or -not $layoutWindow.FindName('btnFarmWindow')) {
+        throw 'Farm diagnostics remained in the review layout or review did not span all columns.'
+    }
+    $farmHost.Child=$null
+    $farmWindow=New-FarmDiagnosticsWindow -Owner $layoutWindow -MigrationName 'Synthetic' -Content $farmCard
+    if ($farmWindow.Title -notmatch 'Synthetic' -or $farmCard.Parent -eq $farmHost -or
+        $layoutWindow.FindName('btnFarmRun').IsEnabled) { throw 'Dedicated farm window lost migration context or prerequisite gating.' }
+    $farmWindow.Content.Measure([Windows.Size]::new(1000,440))
+    $farmWindow.Content.Arrange([Windows.Rect]::new(0,0,1000,440)); $farmWindow.Content.UpdateLayout()
+    if($PreviewDirectory){
+        [void](New-Item -ItemType Directory -Path $PreviewDirectory -Force)
+        $bitmap=[Windows.Media.Imaging.RenderTargetBitmap]::new(1000,440,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap.Render($farmWindow.Content)
+        $encoder=[Windows.Media.Imaging.PngBitmapEncoder]::new();$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+        $stream=[IO.File]::Create((Join-Path $PreviewDirectory 'farm-diagnostics-window.png'));try{$encoder.Save($stream)}finally{$stream.Dispose()}
+    }
+    $farmWindow.Content.Children[1].Content=$null; $farmWindow.Close(); $farmWindow=$null
+    $farmHost.Child=$farmCard
+    $diagnosticsPanel.Visibility='Visible'; $layoutWindow.FindName('panelSummary').Visibility='Collapsed'
+    $review.IsEnabled=$true
+    $content=$layoutWindow.Content; $layoutWindow.Content=$null
+    $content.Resources=$layoutWindow.Resources; $content.Background=$layoutWindow.Background
+    foreach($width in @(1280,1920)){
+        $content.Measure([Windows.Size]::new($width,2200));$content.Arrange([Windows.Rect]::new(0,0,$width,2200));$content.UpdateLayout()
+        if ($review.ActualWidth -lt $width-60 -or $review.ActualWidth -lt $diagnosticsPanel.ActualWidth-2 -or
+            $layoutWindow.FindName('gridDiagPatterns').ActualWidth -lt $review.ActualWidth-40 -or
+            $layoutWindow.FindName('gridDiagRows').ActualWidth -lt $review.ActualWidth-40) { throw "Review tables did not fill the available width at $width." }
+        if($PreviewDirectory){
+            $height=[int][math]::Ceiling($review.ActualHeight)
+            $bitmap=[Windows.Media.Imaging.RenderTargetBitmap]::new([int]$review.ActualWidth,$height,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+            $visual=[Windows.Media.DrawingVisual]::new(); $drawing=$visual.RenderOpen()
+            $drawing.DrawRectangle($layoutWindow.Background,$null,[Windows.Rect]::new(0,0,$review.ActualWidth,$height))
+            $drawing.DrawRectangle([Windows.Media.VisualBrush]::new($review),$null,[Windows.Rect]::new(0,0,$review.ActualWidth,$height)); $drawing.Close()
+            $bitmap.Render($visual)
+            $encoder=[Windows.Media.Imaging.PngBitmapEncoder]::new();$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+            $stream=[IO.File]::Create((Join-Path $PreviewDirectory "diagnostics-review-$width.png"));try{$encoder.Save($stream)}finally{$stream.Dispose()}
+        }
+    }
+    Write-Output 'Farm diagnostics GUI offline test passed: result routing, prerequisite gates, dedicated window and full-width review at 1280/1920.'
 }
 finally {
+    if ($farmWindow) { $farmWindow.Close() }
+    if ($layoutWindow) { $layoutWindow.Close() }
     if ((Test-Path -LiteralPath $root) -and $root.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYE/q6m/1x5r7h
-# mnjVnxQz0epQWvjkU+qnxZErkemUl6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5Ft+UlHywUeN/
+# rx0PrTWJKrENN35YAbO3BcGWOgRioaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -108,14 +165,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAB5EhM1Jtb0ZcR23bi73k8
-# 7pu37yMC8LqIWY0D+as/bjANBgkqhkiG9w0BAQEFAASCAYAzO/XSH64LaLaT3Bmv
-# UlU8urMv7I1vCeRLfqRswe8tUWfm1a2KU2XH5OhLIXODKXY4LJylwrYIHWHYlSfm
-# vPrRf5D0zLMMlFDe98yAn27obkRj/6H64ajR7j9eVzpI7Xce6IGyCvBaWV3Vh5CR
-# 0RRHZBlPheZmiCof7odc8CZjYAQXr/yjNNGDB/fTdBg80AF7bnSHQp7brYTg5lKB
-# 3o/ueb5X8TiZpXnpo+44rVEQyOJo9Rdg8aCdZELSyztIkKZ2FpCNtp7QOXj+HFCz
-# yNIyMpEzfCqYdqXPs2ULM4s5Ppj0SFmB83tYcj1Rq2majvVHYptKmnImQNi4GT+G
-# okaJbqxnMWAE+r1rh8rQd2ivJxXbRhkTkstW/Nat7xvCYAZ1gDRHSsMZ7QocgBft
-# khOpEGHsPzPZTPksqAeM76u4JLNtRjs2Ff4LOj/nVmzxKT+63QaRykOpjKQ5vuNa
-# p4kL6LaEAMNsk2qHfWMvix3jVvW3sD/h/wZcWETFuGKof/4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCEsFJbHwnC6GnPBLG6XteE
+# xSe2R9VsnnSyaZShizxJ9DANBgkqhkiG9w0BAQEFAASCAYBVicyycLXt6Esrsq/4
+# BdIYsTx+mgEjl7sM7yno6EYdHDSHXt2uzYCRXkOcY9fuE0+3DWymjjqdPP0YQm1b
+# VizKnKo93Trz1kLpcwkTSr0CKXV/dd15u2ZrvDUVDzHOpNniqzTvdGaYr+G+1k+b
+# VfmMm0Yy4hZpAnIgKo/dqwIWpVOqRKZIXz5XXf4eS0rX1mCqwj3EpSiU8gXgce9s
+# imjm8yPUPGsmDppDu207IXu/+D6GJygysGBmQ1lOz29FEYce0Rm/TaSlztxV/ffR
+# ptI0zbjDlhLM9eDbuIy8QwqLUle2eY5F5KDgKxs6CzvbOT41yhvuE9XRECyGg0kZ
+# I5cNtJDSsXTBnPBRruNMiCbmUCZks9H3NKl8rQCk8INPnPglmLE1iiOXvgAR2rA+
+# 6evrXbUqEJtyvJy3IB8RqGrKqu+fJKcpugndmvBRUIcY4DWdbAmC/dM3pt1NXeGu
+# atT4o5ok8ptx03eVLOmyAO0qcKWV7+3Rz3/96cOxWsCUfWM=
 # SIG # End signature block

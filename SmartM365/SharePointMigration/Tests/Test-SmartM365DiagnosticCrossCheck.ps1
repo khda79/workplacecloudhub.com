@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline evidence cross-check cases with synthetic ShareGate, file and permission reports.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -61,6 +61,13 @@ try {
     $result = Get-SmartM365DiagnosticCrossCheck -Migration $migration -Status $status `
         -DiagnosticSummary $diagnostic -DiagnosticRows $rows -DiagnosticVerified $true
     if (@($result.Evidence).Count -ne 3 -or @($result.Scopes).Count -ne 1) { throw 'Expected three evidence rows and one matched scope.' }
+    $withoutAnalysis = Get-SmartM365DiagnosticCrossCheck -Migration $migration -Status $status -DiagnosticRows @()
+    if (@($withoutAnalysis.Scopes).Count -ne 1 -or $withoutAnalysis.Scopes[0].ShareGateToFix -ne '—' -or
+        $withoutAnalysis.Scopes[0].Assessment -ne 'ShareGate analysis missing') {
+        throw 'Missing ShareGate analysis was presented as zero issues.'
+    }
+    $noIssues = Get-SmartM365DiagnosticCrossCheck -Migration $migration -Status $status -DiagnosticSummary $diagnostic -DiagnosticRows @() -DiagnosticVerified $true
+    if ($noIssues.Scopes[0].ShareGateToFix -ne '0 items / 0 lines') { throw 'An available analysis without matching issues lost its measured zero.' }
     $scope = $result.Scopes[0]
     if ($scope.ShareGateToFix -ne '1 items / 2 lines' -or $scope.FilesMissing -ne 2 -or $scope.PermsMissing -ne 1 -or
         $scope.Assessment -ne 'Both report issues') { throw 'Scope reconciliation is incorrect.' }
@@ -137,8 +144,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeDJEMtUIALKcH
-# aPEY4KTioN4FlFqtruXGwgqJZfVdUKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBw7ajJCbhntqiP
+# m6rv030cd6vkgDhTqForZjSB74uY0KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -168,14 +175,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBipiwSE/xk9jm9N9oCrzaP
-# fIsaxo5DVS3e6fK6W2mA8TANBgkqhkiG9w0BAQEFAASCAYCfbwF6j5fjeF11Dle8
-# tdaeLxiMzkzbTS0QabRLuM1lk2YxVrEqj7TwSLkXMAEVXZw4klaD5wCygGqIP3Rc
-# uCwZz92UU7Ij8Yjhbk8ta6khdkRYeUXNNS/yzfItr5V3JMY+SllT8wND1Dr5RJwY
-# gKNQ97YPTnA+Fh3RfEy4t355ymnmfc1FY5dM3y4IbnvIoKD1mRODCyvBP8L81NI5
-# U3F00OfkX5yhfPn0exsQYpU1EGVYwwKdTZjjrDZ4QuPKMMU1Og9KlGVLZ6VaU+4L
-# kpooQb6AQb96OvghVlTq44alOfbsurlIDgBTjD7Lq8IYA7Y04980aWW12pcdAjfI
-# +sHZHmz3g0go3PNv3JZbUyGC/a/NPWA7pLdm6DSAo+einJwAEmiSFyVpnwdWN/yd
-# ZvVoMKEd0KA3FMr3sAANePZnMVYBmxfoatlDE5d4lZhxUy2uJXNXwHiNGD0kp4+L
-# pmL/KsUGLyxCGnsjX54CtVtT5fKM9TRRCXf1wH44UcgBGXY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD3FVJ/3WLCoUYSLxgsVEYa
+# JBiXSrhHXEQt5EvF7+NcpzANBgkqhkiG9w0BAQEFAASCAYAXbDIM2FpDjOj4zUtz
+# 8ahtM+hBDOft3MttbHm32prTiGxboYcnnrCFoCNJc09v+p+9wxsS7Cu3bgUAGQRu
+# EqIUGfVSH6+TIRsQ/mTXf+oSkYekYP1Ht1aCGhlHuZHMEwRtVjLnu+jG3Yx2KcPU
+# JmGH6jaoN9q1AKSJizRRXbARg67YX6QjiIrBFhzzfeGd2SQSICWkPTzwuewtK2Dg
+# P0d7yURqOJWBQqTKh+B7oJ4XNdFxqyu0aOdbDq7rRM6jsRMyk7vWPb9cZBVpmULf
+# uoNlcWsfbCpVd5aMQmz4bIlq75bD5zXcd6lDv1naPyC+k0UlMjoqdm0Mo4IZTkuB
+# uS+i1g68USaYutqnLZdqvjr7hJ0J3TThCP2fr5H68wtqzoPmSar/WnDg9DDtNSO8
+# GrbTk3/dFGeYhjc9afSEmRTQd0e4YKfTLMvmsHjbCU4N3ZG27GoCzVC+aiA03pHE
+# oXWSrsCm2myS6pQbTou9T7PDhFzM6/z+p91AfgUJIdjEvWM=
 # SIG # End signature block

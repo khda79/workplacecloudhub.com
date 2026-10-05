@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline checks for comparison dates and selected inventory availability.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -19,7 +19,8 @@ if ($errors.Count) { throw ($errors | ForEach-Object Message) }
 foreach ($name in @('Format-RunAgeText','Format-ItemAge','Get-ComparisonBadgeText',
     'Get-SelectedScanFile','Get-ComparisonRunState','Update-ComparisonRunState',
     'Update-ScanFileSelection','Update-HistoryRunState','Update-PermissionHistoryRunState',
-    'Get-LatestCsvFile','Get-CsvFileItems','Set-ScanComboItems')) {
+    'Get-LatestCsvFile','Get-CsvFileItems','Set-ScanComboItems',
+    'Get-LatestComparisonResultFolder','Get-LatestSubfolder')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -53,9 +54,15 @@ try {
     # The folder was copied today; the report date must remain yesterday.
     $badge = Get-ComparisonBadgeText -Folder (Get-Item $folder) -MigrationName Fixture -Kind Files
     if ($badge -notmatch '^12:00 yesterday · 80[,.]00 %$') { throw "Copied comparison lost its original date or rate: $badge" }
-    if ((Get-ComparisonBadgeText -Folder $null -MigrationName Fixture -Kind Files) -ne 'No run yet') {
+    if ((Get-ComparisonBadgeText -Folder $null -MigrationName Fixture -Kind Files) -ne 'No comparison result yet') {
         throw 'Absent comparison must not invent a date or rate.'
     }
+    $attempt=Join-Path $root ('Fixture-files-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-empty')
+    [void](New-Item -ItemType Directory -Path $attempt)
+    $resultFolder=Get-LatestComparisonResultFolder $root Fixture Files
+    if ($resultFolder.FullName -ne $folder) { throw 'A newer empty attempt hid the available comparison result.' }
+    $latestAttempt=Get-LatestSubfolder $root 'Fixture-files-*' -UseRunTimestamp
+    if ($latestAttempt.FullName -ne $attempt) { throw 'Latest attempt date was not preserved independently of results.' }
 
     foreach ($name in @('cmbScanSrcFile','cmbScanTgtFile','cmbScanSrcPermFile','cmbScanTgtPermFile',
         'cmbHistoryOldFile','cmbHistoryNewFile','cmbPermHistoryOldFile','cmbPermHistoryNewFile')) {
@@ -77,6 +84,7 @@ try {
         $_ -match '^\$cmbScan(Src|Tgt)(Perm)?File.Add_SelectionChanged\('
     })) { Invoke-Expression $line }
 
+    $script:CurrentStatus=$null
     Update-ComparisonRunState
     if ($btnRunCmpFiles.IsEnabled -or $btnRunCmpPerms.IsEnabled -or
         $lblCmpFilesAvailability.Text -notmatch 'Source scan unavailable.*Target scan unavailable') {
@@ -96,6 +104,12 @@ try {
     Set-ScanComboItems $cmbScanTgtFile $targetItems $target
     if (-not $btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Visibility -ne 'Collapsed' -or
         $btnRunCmpPerms.IsEnabled) { throw 'Selected complete scans did not enable only the matching comparison.' }
+    $script:CurrentStatus=[pscustomobject]@{FileComparisonFolder=$resultFolder;FileComparisonAttemptFolder=$latestAttempt}
+    Update-ComparisonRunState
+    if (-not $btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'Latest attempt:.*no comparison result.*previous available') {
+        throw 'Latest unsuccessful attempt was presented as a successful result.'
+    }
+    $script:CurrentStatus=$null
     $cmbScanSrcFile.SelectedIndex = -1
     if ($btnRunCmpFiles.IsEnabled -or $lblCmpFilesAvailability.Text -notmatch 'Source scan unavailable') {
         throw 'Removing the source selection left comparison enabled.'
@@ -112,7 +126,7 @@ try {
         throw 'Incomplete scan remained available in the selector.'
     }
     Set-ScanComboItems $cmbScanTgtFile @() $null
-    if ($btnRunCmpFiles.IsEnabled) { throw 'Refresh removed the incomplete target but left comparison enabled.' }
+    if ($btnRunCmpFiles.IsEnabled -or $lblScanTgtAge.Text -ne 'No complete scan') { throw 'Refresh did not explain that no complete target scan is available.' }
     Remove-Item -LiteralPath $errorPath
     Set-ScanComboItems $cmbScanTgtFile $targetItems $target
     Set-ScanComboItems $cmbScanSrcPermFile $sourceItems $source
@@ -174,8 +188,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAseZfpMcdm7xpz
-# 0Fk1XBh7Qa2Yd1lxRzxkq85xL0c76aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzaaEKkIC7jSd3
+# LlAM8kpHNp2psORvfVD/XrB5l+gL5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -205,14 +219,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCFch/unyDtfIsX92UfLEog
-# C7lO7ENoniuYvar6G2konTANBgkqhkiG9w0BAQEFAASCAYBAbAvUz+WtHBaENckZ
-# gs2kHy0BPcVl+j5cyCYN2cD1jKV6cUhzesZbHLflMQrunP/x6DJIVeox8cvDCiaI
-# mjObwEa6Pcc/f1rm3wHFUGujBngZAdLBuzeTALGysWUcOG1Pgg8qp8D4BWxytjyn
-# B+2z0hMw0J9sUA8+R7pZ6rwblwrhd56nJOYBiCMGNMUXbNTHvZKSrmkH2rtk9ZTH
-# 6O9OUWiyy0MdjhQ4Zo4NLRoG9+7vXoYIj3x9tKhp9CP4cMvdw1e/H4vVSCr2bIy3
-# jSLw3ieAmkIvzFZPL9IZBGP7r7MVmO4LjDLMGhlFlBMCcAdE6X/rxjEuo7kFHiFf
-# abBNvhJuGpNxJgP1AvPHo2tP8h8iqEV8BMdKabm2HjB9Euf4TbsMKQL1CiRSW6By
-# CoR4lVKm5PprtJdAPcsrzeK/DmZriW8pwk8z0lIrZQ6ZfYp4o47+LHcBogbRhTfi
-# OGBHOazF1FOInP5XPIFN+opPYgyDBvpeKsxOgdL8lbGK53I=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBRTxIBcenpOYo7zVL7LMlD
+# Zn4rLnIKAj478w4s0CbzzTANBgkqhkiG9w0BAQEFAASCAYA9Tu2F/YmrZyeB4tb0
+# e5ghZEJYusK+qfskJ7lgO65gzli6lBZceGXQT+2NtBwKYRQXk7yj6slDd2NL7b1P
+# 3lQ9TebuWtRT22kbqfPoPcW4RYKxBjUHwmTe5PaLSf3RFgtQQ7OX6PqVLykeJXjT
+# pgOB0mpTy/6mXzz2INvi+ohMzQaGdAioiOQtaiCX27L08J84j0OqpAiEDFKsDCiV
+# YIocw/Vv1xMCSSgiSl1xKgOSOrGu8dnedGk3/KsgNVEu8yq+7Cj3lBElzxM3UrO6
+# dvALYrMRNBr50JGjqy1UvGkmAjAKm2eqNgB3Rvg+qL5/OUbJLuOlmNu2Dv8R6E/f
+# E0TIstlMqNKq2add5gvy/wFdSTv70cNZowVAIB9U5Xspnh91WfD8QYPga1tUFI2D
+# sIh9e1k7TmUAaPplJSWOCtJG14Eu/88s3IfR7g1cuo1sHA+IzD0m/3Wo1aWr9oeJ
+# rbn/mmxYLAR1JeLO7Ef8MolSmX7rCU8akTYGvoHzNdEKsRg=
 # SIG # End signature block

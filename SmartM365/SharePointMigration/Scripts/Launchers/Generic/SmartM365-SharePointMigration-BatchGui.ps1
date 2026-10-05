@@ -2,7 +2,7 @@
 .SYNOPSIS
     Batch launcher UI and command helpers for the migration dashboard.
 .VERSION
-    1.0.0
+    1.0.1
 .DESCRIPTION
     Function-only library. Uses existing batch launchers and small batch summaries;
     never reads inventories or connects to a tenant to populate the dashboard.
@@ -62,7 +62,8 @@ function Get-SmartM365BatchResult {
     }
     if (-not $directory) { return [pscustomobject]@{ Directory=$parent; Summary=''; State='No batch result yet.'; Success=0; Failed=0; Total=0; Date='' } }
     $summary = Join-Path $directory.FullName 'summary.csv'
-    $rows = if (Test-Path -LiteralPath $summary -PathType Leaf) { @(Import-Csv -LiteralPath $summary) } else { @() }
+    # Keep an array even before the summary exists or when it has just one row.
+    $rows = @(if (Test-Path -LiteralPath $summary -PathType Leaf) { Import-Csv -LiteralPath $summary -ErrorAction Stop })
     $success = @($rows | Where-Object Status -eq 'Success').Count
     $failed = @($rows | Where-Object Status -ne 'Success').Count
     $tail = Read-SmartM365BatchTail (Join-Path $directory.FullName 'batch.log')
@@ -150,7 +151,7 @@ function Get-SmartM365BatchSelection {
     param([string]$Kind, [switch]$PlanOnly, [string]$BatchId='')
     $v=$script:BatchGui.View
     $all=$v.FindName('batchAll').IsChecked
-    $names = if ($all) { @() } else { @($v.FindName('batchNames').SelectedItems | ForEach-Object { [string]$_ }) }
+    $names = @(if (-not $all) { $v.FindName('batchNames').SelectedItems | ForEach-Object { [string]$_ } })
     if (-not $all -and $names.Count -eq 0) { throw 'Select at least one migration, or choose All configured migrations.' }
     $root = if ($Kind -eq 'Source') { $v.FindName('batchSourceRoot').Text.Trim() } else { $script:BatchGui.Root }
     $auth = if ($Kind -eq 'Source') { 'Interactive' } else { [string]$v.FindName("batch${Kind}Auth").SelectedItem.Content }
@@ -335,8 +336,8 @@ function Stop-SmartM365BatchGui {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIkdsXOerweFLc
-# 0AQP/R7pWbsZujClbzxL85PSN0pz86CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChyLGoB7IOl1Qn
+# JjtpchggNtjtyztj2EWoQWXk3wlJnKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -366,14 +367,14 @@ function Stop-SmartM365BatchGui {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMN2QKiKdkYWhpA99QfVwz
-# tkDru5faVmqxrriLX/tjMzANBgkqhkiG9w0BAQEFAASCAYAY6QXhgCjbov2upROL
-# 8LC5/NTd166pmcl7MBFChBT0bEjcGBNpIoskVcA+7uVbw4P7o5S2OjQYLaGYAIKD
-# 5d0EolrxSNzqZuK2vI3HA1Cj3N/VR74jHWKdVM14TfRk3IZASbv5WI1F0ZH31w+C
-# txXs5so/baotb/MelXHuqA0LsayGfzSW3u46QFv2+EiE9CpQc1wM2yY2FssTxoGV
-# ibnYBQ3f3SJnxC0eIrL1TkSMEP2Gg5VmJu9xnISXL+va3783E6HwyqdqM29bhJBv
-# SJTmtHxwTGKvTAd3UFznDNtP9TtFdbg6Q8uR12nfAOlOFJI0KQb9TDw5cpxnpppU
-# 6Jb7WCjt0+Njlx/qF4woxtdz8qyrVSVewBljWn8f3lTQodmE5X23AwwZ7snmRCyE
-# urS+QWX8Y+KLaPfG/2gEImLz/6seICPNdFvF4A7EcGpmyJHu0yjH6X4osHpwKs/E
-# qH+uFRmSldGdkoWvEO1kg1vhyxir2CP0TbhRqmm+q64LeIc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBgzsDTyHYVTySDA5M7JPyq
+# F31dBYG4fbCASNdyvyXUfTANBgkqhkiG9w0BAQEFAASCAYBWy0cazpf50RPPT3k6
+# TE3LLvyYFqmLxWAJPEa+bfGUf3DO1TW2DVQMD5YV5SARRKYCgtJ4T9IzoW+ERGiL
+# yZgHneXama62a+fVwnNXsnk+vwbFe48WvD/JjM8VgQzoCNVsMQwJL7UDPbAZvyJ+
+# 1FqZ7/7T+gy958qaw+XiVcDjWPaPWJ63noUqUOv3yLSUCscCJXNoUVzu7olfB1yl
+# KpJj0M/11aZRHwW0pYQVc1uErymgJSCCPYAMyVX7tqgAUAURjSn5YhDXHLR6o055
+# e9PZw3I90D5BFBFrwBwHVu5J4EBD4xB2eAR4lTHnLbviSLmo1AhDEQFP/ICbDsRC
+# GcJv1ZROVP99dF0AqBRKmM6Bs4E7uBP1IIU+kc4v2AXlkxqg/Tr1bkuRQ6GI/MtC
+# lyEUozk05CgOd+6kDa+ospzde3wy8QcHlrrWLbkq4axSG1ApioDxxXF9RUF1Farg
+# 67a2ZQhac8eDhi2UpQIGoPHJ2xxPjvFWxXAYLlzN4q6S9E8=
 # SIG # End signature block

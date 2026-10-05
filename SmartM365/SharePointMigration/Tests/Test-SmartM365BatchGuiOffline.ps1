@@ -4,11 +4,16 @@
 .DESCRIPTION
     Uses synthetic launchers and summaries only. No SharePoint, Graph, real scans
     or prerequisite probes are invoked. Renders the WPF tab at two window widths.
+.VERSION
+    1.0.1
 #>
 #requires -Version 7.4
 [CmdletBinding()]
 param([string]$PreviewDirectory='')
 $ErrorActionPreference='Stop'
+Set-StrictMode -Version 2.0
+$window=$null
+$script:BatchGui=$null
 $projectRoot=Split-Path $PSScriptRoot -Parent
 $generic=Join-Path $projectRoot 'Scripts\Launchers\Generic'
 . (Join-Path $generic 'SmartM365-SharePointMigration-BatchGui.ps1')
@@ -19,6 +24,40 @@ $root=Join-Path $temp 'Tool kit & migration'
 [void](New-Item -ItemType Directory -Path $root -Force)
 $script:Clicked=@()
 try {
+    # Missing, empty and single-row summaries must remain arrays under StrictMode.
+    $summaryFixtureRoot=Join-Path $temp 'summary fixtures'
+    foreach($kind in @('Source','Target','Comparison')){
+        $parent=Join-Path $summaryFixtureRoot ('Migrations\logs\'+(Get-SmartM365BatchDefinition $kind).LogFolder)
+        $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind
+        Assert-BatchGui ($r.Total -eq 0 -and $r.State -eq 'No batch result yet.') 'Absent batch was treated as a result.'
+        $fixtureId='20261005-120000-abcdef01'
+        $fixture=Join-Path $parent $fixtureId
+        [void](New-Item -ItemType Directory -Path $fixture -Force)
+        $summaryPath=Join-Path $fixture 'summary.csv'
+        $logPath=Join-Path $fixture 'batch.log'
+        Set-Content -LiteralPath $logPath -Value 'START: work continues.'
+        foreach($summaryState in @('Missing','Empty','HeaderOnly')){
+            if($summaryState -eq 'Empty'){[IO.File]::WriteAllText($summaryPath,'')}
+            if($summaryState -eq 'HeaderOnly'){Set-Content -LiteralPath $summaryPath -Value '"Migration","Action","Status","ExitCode"'}
+            $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind -BatchId $fixtureId
+            Assert-BatchGui ($r.Total -eq 0 -and $r.Success -eq 0 -and $r.Failed -eq 0 -and
+                $r.State -like 'Running or incomplete*' -and $r.Directory -eq $fixture) "$kind/$summaryState summary failed."
+            Assert-BatchGui (($r.Summary -eq '') -eq ($summaryState -eq 'Missing')) 'Summary button path disagrees with file availability.'
+        }
+        $oneRow=[pscustomobject]@{Migration='A';Action='Files';Status='SUCCESS';ExitCode=0}
+        $oneRow | Export-Csv -LiteralPath $summaryPath -NoTypeInformation
+        $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind
+        Assert-BatchGui ($r.Total -eq 1 -and $r.Success -eq 1 -and $r.Failed -eq 0 -and
+            $r.State -like 'Running or incomplete*') 'One progressive result was lost or marked completed.'
+        Set-Content -LiteralPath $logPath -Value 'Batch finished: 1 successful; 0 failed.'
+        $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind
+        Assert-BatchGui ($r.Total -eq 1 -and $r.State -eq 'Completed.') 'One completed result failed.'
+        $oneRow.Status='FAILED';$oneRow.ExitCode=9
+        $oneRow | Export-Csv -LiteralPath $summaryPath -NoTypeInformation
+        $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind
+        Assert-BatchGui ($r.Total -eq 1 -and $r.Success -eq 0 -and $r.Failed -eq 1 -and
+            $r.State -eq 'Completed with errors.') 'One failed result failed.'
+    }
     foreach($kind in @('Source','Target','Comparison')){
         $c=Get-SmartM365BatchCommand -Kind $kind -Root $root -Names @('A','B') -Mode PermissionsOnly -AuthMode Certificate -PlanOnly
         Assert-BatchGui ($c.Command -match '-MigrationNames "A,B"' -and $c.Command.EndsWith('-PlanOnly')) 'Subset or preview flag missing.'
@@ -89,6 +128,8 @@ exit 9
     $command=Get-SmartM365BatchCommand @selection
     Assert-BatchGui ($command.Command -notmatch '-MigrationNames|-BatchId') 'All-migrations copy/preview command contains an empty scope or identity.'
     $v.FindName('batchAll').IsChecked=$false
+    $blocked=$false;try{$null=Get-SmartM365BatchSelection Target}catch{$blocked=$true}
+    Assert-BatchGui $blocked 'An empty manual selection was accepted.'
     [void]$v.FindName('batchNames').SelectedItems.Add('B')
     Update-SmartM365BatchControls
     Sync-SmartM365BatchMigrations @('A','B','C')
@@ -113,6 +154,22 @@ exit 9
     Assert-BatchGui $script:BatchGui.Active.ContainsKey('Target') 'GUI did not register its preview request.'
     Assert-BatchGui (-not $v.FindName('batchTargetRun').IsEnabled) 'A second destination batch is allowed while the GUI request is active.'
     Refresh-SmartM365BatchGui -Force
+    # Latest destination batch can exist while summary.csv has not been published.
+    $pendingId='20261005-130000-abcdef02'
+    $pending=Join-Path $root "Migrations\logs\target-scan-batches\$pendingId"
+    [void](New-Item -ItemType Directory -Path $pending -Force)
+    Set-Content -LiteralPath (Join-Path $pending 'batch.log') -Value 'START: scan continues.'
+    Refresh-SmartM365BatchGui -Force
+    Assert-BatchGui ($v.FindName('batchTargetLatest').Text -like '*Running or incomplete*' -and
+        $v.FindName('batchTargetCounts').Text -eq 'Successful actions: —   Failed actions: —' -and
+        $v.FindName('batchTargetLogs').IsEnabled -and -not $v.FindName('batchTargetSummary').IsEnabled) 'Pending target batch card is incorrect.'
+    [pscustomobject]@{Migration='A';Action='Files';Status='SUCCESS';ExitCode=0} |
+        Export-Csv -LiteralPath (Join-Path $pending 'summary.csv') -NoTypeInformation
+    Set-Content -LiteralPath (Join-Path $pending 'batch.log') -Value 'Batch finished: 1 successful; 0 failed.'
+    Refresh-SmartM365BatchGui -Force
+    Assert-BatchGui ($v.FindName('batchTargetLatest').Text -like '*Completed.' -and
+        $v.FindName('batchTargetCounts').Text -eq 'Successful actions: 1   Failed actions: 0' -and
+        $v.FindName('batchTargetLogs').IsEnabled -and $v.FindName('batchTargetSummary').IsEnabled) 'Completed single-row target batch did not refresh the card.'
     Assert-BatchGui (-not $script:BatchGui.Active.ContainsKey('Target') -and $v.FindName('batchTargetStatus').Text -like 'Previewed*') 'GUI did not consume the completion receipt.'
     Start-SmartM365BatchFromGui Source
     Assert-BatchGui (-not $script:BatchGui.Active.ContainsKey('Source')) 'Source request launched without verified prerequisites.'
@@ -147,8 +204,8 @@ exit 9
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB36+yRlENHu5tY
-# pBfP0u/L+dQTfdHt9fcx8mUH8jNz56CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcIsdij4bFLScC
+# We9Sl9xI3wiB3fZp3ZAtVVATeGoiQKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -178,14 +235,14 @@ exit 9
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDaMqIrHIAdGI8LXFatrcHr
-# IxMRZbb/bLwCd/cGVYEiKzANBgkqhkiG9w0BAQEFAASCAYBVhJ+dUq04ZZY2wdIM
-# 9qMHu8kkAVQriYYu1iyL7kN1oPGruyuwlGPnXP2wgR7NrAMrfSyVx6h2kKwmjNLQ
-# qEI3M5D1EsU2eGFprUCS1Z9gJv/aaNPKJZckbvI09lifHfvQswQ/IvPUBQuM8Wu0
-# yEQM/MUNtP68b/VajdoOMqDqvM5jktItYnhcsGHQMC3f7L2M9+hlFeGaCzdmdqdd
-# TaWjoxM5M17KwTyiRJ46IbkEY6Rd0pMtgBaro/fFhEmTFyiOdlZwzDUXlpshf37s
-# hItuqFIR1h6EuamwNLFCrCwdeeBJHhkhTRQih1/5OQ3b1vOboDW9I8GpU51+DUr9
-# fH0w7uqWm9qdx85YBM+48+hWe+u27X2DX+niT4V9GvvVc8YoGo1BMfdR84M6GoV+
-# PaYLySkrmHeKUvz0eFkYTx1CWYvqtwXLBhlhuCLF0jrrxeT86PRUdkHwAsjbZj0I
-# 5oI3TZDLUXQBGezxWGsy5DelKPRWsktvL2w5n1mUl2Gza2c=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC88dTIFjrebgs2jW9wr3pU
+# wlrj7zJ0jag3RtCimeosYTANBgkqhkiG9w0BAQEFAASCAYCZkJVqbXqg1u7Z6KbE
+# uL1rl2mCiLxOHOTzaGHk9XKi7614fwvtqg79i6Oq0OyF6tXdRvjI23op9XLD6EIn
+# IOWs71R57Vrz3mIjx68V/buWt7wgkuYRfznkspMRRADNn6oKUI53hmIZGi4ySNiw
+# Kr2ezlgv4iXyv+KY9g4rboEHqdDwYnaQHzCnCxXPpYh0WdiLS36zC2vIwzYpc2P1
+# 5wjPnopjJ2Yhh6IIsuO/Klb9QdKiNu2ic3jWdgo1LSX1ikO9YXS2+o1GxEcLWQPy
+# qEOcUpXz3MnkpccLXr/q3nCANOIRTvWhz6eZ96Qt4OpoCr2bTE1Up3rHwf1UjmyB
+# u3x84JM3zkF/pCBYlkmYR8V0qI6Jwbs2e6Ao9cjgQlRnRxAaRPqRLV6jalrqHo8W
+# MVZ4Iamm8lvISa5iiOvHWNbPYiYCYsDJxJRxAv040OylWiHaJBG1b1xfyz5fiU10
+# q9FkMg3EvN4S17NuMOZ5KPjezsdeAXocm/GWkrzX6Pp11G4=
 # SIG # End signature block
