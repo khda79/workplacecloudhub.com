@@ -3,15 +3,16 @@
 .SYNOPSIS
 Offline cancellation tests. Synthetic temporary shared state; no collectors or tenant calls.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $folder = Join-Path $PSScriptRoot '../SmartInventory/Orchestrator'
-$modulePath = (Resolve-Path (Join-Path $folder 'SmartM365.Orchestrator.Pipeline.psm1')).Path
-Import-Module $modulePath -Force
+# Standalone orchestrator script module, without a versioned module manifest.
+$pipelineModuleFile = (Resolve-Path (Join-Path $folder 'SmartM365.Orchestrator.Pipeline.psm1')).Path
+Import-Module $pipelineModuleFile -Force
 $root = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Cancellation-Test-' + [guid]::NewGuid().ToString('N'))
 $script:Cases = 0
 $worker = $null
@@ -74,9 +75,17 @@ try {
     $previewOutput = & pwsh -NoProfile -ExecutionPolicy Bypass -File $cli -Tenant test -SharedDataFolderPath $root -JobsManifestPath (Join-Path $root 'unused-manifest.json.txt') -Cancel -BatchId $batch -Reason 'Synthetic CLI preview' -ValidateOnly 2>&1
     Assert-Case ($LASTEXITCODE -eq 0 -and ($previewOutput -join "`n") -match 'no write' -and (Get-FileHash $requestPath).Hash -eq $requestHash) 'CLI preview failed or modified the request.'
     foreach ($bad in @(
-        @{ Protocol = 0 }, @{ Age = 10 }, @{ Age = -10 }, @{ Lifecycle = 'Starting' }, @{ Tenant = 'different' }
+        @{ Input = @{ Protocol = 0 }; Detail = '*protocol 1*' },
+        @{ Input = @{ Age = 10 }; Detail = '*stale*' },
+        @{ Input = @{ Age = -10 }; Detail = '*future*' },
+        @{ Input = @{ Lifecycle = 'Starting' }; Detail = '*Lifecycle=Starting*' },
+        @{ Input = @{ Lifecycle = 'Recycling' }; Detail = '*Lifecycle=Recycling*' },
+        @{ Input = @{ Tenant = 'different' }; Detail = '*tenant*' }
     )) {
-        Write-Heartbeat @bad
+        $inputParameters = $bad.Input
+        Write-Heartbeat @inputParameters
+        $readiness = @(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $root -Tenant test | Where-Object Server -eq WorkerB)
+        Assert-Case ($readiness.Count -eq 1 -and -not $readiness[0].Ready -and $readiness[0].Detail -like $bad.Detail) 'Cancellation refusal did not identify the failing readiness check.'
         Assert-Throws { Stop-Request $batch } '*Cancellation unavailable*'
         Assert-Case ((Get-FileHash $requestPath).Hash -eq $requestHash) 'Readiness failure changed the request.'
     }
@@ -125,7 +134,7 @@ try {
         param($Module, $Root, $Batch)
         Import-Module $Module -Force
         Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $Root -BatchId $Batch -Tenant test -Reason 'Synthetic concurrent cancellation' -LockTimeoutSeconds 15
-    }).AddArgument($modulePath).AddArgument($root).AddArgument($batch)
+    }).AddArgument($pipelineModuleFile).AddArgument($root).AddArgument($batch)
     $handle = $worker.BeginInvoke()
     # Wait until the worker holds the submission lock, proving that it reached cancellation.
     $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $root -BatchId $batch
@@ -223,8 +232,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbrfwh7IRgYhMo
-# 70Mmrvoc0b6sacC/FDkZy/Vv/ysTrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJ1Ujf/1i/Hz94
+# l4J7DghLEUqo5VxWF/JHUWGKel8SOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -357,31 +366,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILrVz17sv1Lnbo7QD9bqm1Gp7lJ0bFQuoGfJ4PjO/FVsMA0GCSqG
-# SIb3DQEBAQUABIIBgIr0PkWqg4ri/hvLSpSn11rppVDN4sR8/4/BONuNKabxzmLX
-# Xlu98rM1+tPOUHU+J3ESMJf6ppPxKMYE0H9HilFGHBWZT97lt3oMGVCJrj1krQYW
-# T2xqiXWrk5UjanL4YVjpr8fB0ppLFLXqvxGnnpZK8PlyqKrmITPzHEaM9GiiwTLL
-# hjhl57TCYbuYzSwi9hJWfqlnSTB/ZXM4ZKkxs1GdUvs8MKawSVUX9cUk6VSY3HIU
-# 9Zjdt2zPFUUTtNq8DkltwQx70rtOzbK90wt0TC3UPkyniWq/fdy+tACyWQjKxbGU
-# D9RQPSbbD5HJvRU3eZ+eJdDr/e4xTwwhdqOuRMZsUQe/UvvGAFQObNfKWeVnSvCL
-# 0zJJHtLE6JtA7hRB7kperzD0tp9SV3ZRovkmiM9izZBHKg4E+8rpPnSadT4dH/0p
-# kfPGT71uXxS9m/8C3G5fj+rxziwwkAZyKQQAb/hDw50VXpVIvA6OOMAlO4QR2bAh
-# r6rDzaeQtyp/3XAG4aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKKpioRTHHSfc4gB1zvzGlpftfJngBEO7v5sou2QHY7rMA0GCSqG
+# SIb3DQEBAQUABIIBgEU3iH5skuSUn4m6tj/v3v8iQD//B21m9ncEmzIKCAT4Ha/N
+# SA52fEJBlkxhuXTxLGMblgoa67DG4/eYhAuyJhv9Hv60NbAwyPZKjWWMDrrDLD0N
+# Q7l7pyj1zWOWxiXrZWwitJ9XOn81Qp7mzDwteONa0Gsr4oPJWmEBd/LzAaYnGpy6
+# 1GeEVtsRTUti3QmmrFcuc7Cgm9nRa+bsaFWQERO/SVbFNpPqbGDxwk/idIPtpoRV
+# 51mCpThOkBeIriEr5xGpcbFLfs895txXN8aNEUoB1IF9fM6p08Uk4Jqq/v0lKRoe
+# JkZIWQTdmdWKuuxF+0jCEPOpKwcv2GhlhCmoG4fNx6ot4okG1aQ+4wLQqOL8QZN9
+# JndLLRApvw+NprMFyfwDJVjcBjJd7Q/FE74Nx5OPceoPO5XE2KU8cQfVywBamGHT
+# rzg8cUSZw1ejnErRLKa5p4a0TaE3gHQHSEXJ0wF+HwXBprz7D/UCUQucV0okN3oT
+# 64UOzmgjtHRgsInkRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODA1
-# NDJaMC8GCSqGSIb3DQEJBDEiBCDRsDRblChegCuB6xWwH4SgQiIk04YvgbF485Iz
-# /YU65TANBgkqhkiG9w0BAQEFAASCAgChH2WKGxnk2QEWqGwqDTgcxEImEutS5OGs
-# 4xcc/+qfP80CUb14Se6+W64o9dHOzHaCoWVVmcegIZIhxWy5Pe+RRhZGbEtDysvn
-# 9zF30W5Lc7SCBmIk8wbg05gBWaG8R9qnqNnmA4zhWBIYyNMDD2ZvkN/7EzFTKv3V
-# eS1glbpAdQYKEWYj7AsST2WBDEC4e63KTkf2vBYcR/M91dIro0ujM3BL/qOmLIjM
-# H2qg0i3OcYAeu/l9TUtDbJBV1AZw9aYbjNQKkMdCquxydqZ04R+Ng3z4XTF/suLM
-# knwt+Cz/eIK0QSvdhBlbqVOPw9cA8c0xCtmOPhBmnipCCgJrejVmAz9qvZ9T/pUk
-# N6fyzmHX+t0eRn7RrjPBioBU1zL6C/f8xs4PCOqKXr4Q7H/MplLey4vMerEfNmV9
-# r8e8hvVyEG/iO2AoSiARhxofK+swp46aJSomwjaob/Eo9yrCb30k0NSXVhOQtqge
-# SSrstr+2bsGCTgbNsVlo+vjOTWD9/Rr/Sb+FDKMH4QWBH+Vc+tCZlvJdRdHdJG8j
-# 0X3t3Rs/fo/JSdnR+xr9PShPr9QJeojh8TetpWHre032zoBIP9Z5MR2Mp8Zdo79z
-# 0x/HPYfSXvdS21ixyOOgFuTtQFOYvPVdIeI1EVfnb15cg4CVBfM0dkGV0gt+mtX8
-# /aEZMcK6gg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTM0
+# NTFaMC8GCSqGSIb3DQEJBDEiBCBAl5KbtEwcPKKHAu8IvqnJkw1XqmEs0D3jhBHv
+# WUDlnzANBgkqhkiG9w0BAQEFAASCAgCQXu/Xk2N17IMqAgL+k1VVZiKn9fwXNfRz
+# IC3n55gUJT01N+h767axBDS/lcFrh9G3IYrGbhNTydWnKUyW5htlDrVeOdxXSFFe
+# meg4VMy6lXVOhVOeT08RRKNfbnAgKHARqsrCqF+YIaNZ4FRSruG6Mw3R//dHvJk1
+# DOh1Jmq8DdOhMg03DMQfc+IDWymVbMozv6BcD9mEwQhqrw6RvHZCLWWB/1tVBut2
+# NTKmO5pJWV99YAfW1jO1XceRRgE4lPXEPMqE6pN1qxA7j3ArKS40g8qcb2F9yV/U
+# +pSwNhSs6ETifkX/bSD70RsTLir1Uv+zWlIxfI5IE8KTMuw4gfi96sUPcwZls7Os
+# Z9g1psfSwg8aWQubfyf9lY1ZVXWzjGfIymh57Vf4/wyqKWkTcFKqxQ86SqjyC9tJ
+# nZNC8leEdXCLWWB/czLBTg8B1jNfksGox6nWo1P+Rh8GYl56SlHTeDYr63jXkiUL
+# qEb3qbBxdm75NIuMgOCrgIvHaB+Porc4UaeVoWzipoqkpzMcfZFbmkvkBQ48UpPI
+# iyF6blEpMraH7EdNlaEw9L7C193wzfNbGJRR2U7M6x5bx9WeHitdOlwqEN0x616J
+# fELXjbjGrmImfMcXmjpd5Kc8krHlVAN6MW7nwaScvhj/medoJBZOc8uAUnLmMJwt
+# y7C/NCNVJw==
 # SIG # End signature block

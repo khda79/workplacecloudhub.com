@@ -4,10 +4,19 @@
 
 ## Cancel remaining pipeline jobs
 
-Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.0** add cooperative
+Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.1** support cooperative
 cancellation. In **Requests**, select an active batch, enter a reason and choose
 **Cancel remaining jobs**. Confirm the batch before publication. This is independent
 of scheduling maintenance and does not publish the GUI configuration draft.
+
+GUI **1.3.1** also provides **Cancel All remaining Jobs**, with a single reason and
+confirmation listing every active pipeline batch. It includes active requests outside
+the displayed recent history, not future requests, automatic schedules or running
+collector processes. Each batch is validated before confirmation and revalidated
+under the shared locks before cancellation. If a batch changes or a control becomes
+unavailable during publication, the operation stops and reports the error; already
+published cancellations remain audited. Selecting zero, one or several job rows no
+longer unwraps a singleton into an invalid WPF ItemsSource.
 
 Alternatively, use the CLI against the **live shared Orchestrator folder**, never its
 SharePoint/OneDrive mirror. Replace the generic paths and batch identifier below:
@@ -29,6 +38,9 @@ $parameters = @{
 - Every published expected resident must advertise cancellation protocol 1 in a fresh,
   Running heartbeat for the same tenant. Deploy the entire lot and let residents recycle
   safely; cancellation is refused during partial upgrades, startup or stale heartbeats.
+  Readiness diagnostics distinguish an unsupported protocol, startup/recycling, stale
+  or future heartbeat and a tenant mismatch. Do not restart a live collector to bypass
+  this guard. A synchronized heartbeat copy is not proof of live control readiness.
 - Pending jobs and scheduled pipeline retries become `Cancelled`. Already reserved or
   running jobs continue under ordinary supervision and record their real result. No
   collector process is killed; an already running collector is not cancelled remotely.
@@ -54,6 +66,7 @@ Offline checks (synthetic data only; real SMB/deployment qualification remains s
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorPipelineCancellation.ps1
+pwsh -NoProfile -Sta -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorGuiRequestsOffline.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorPipeline.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorMaintenanceOffline.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/SmartInventory/Orchestrator/SmartM365-Inventory-Orchestrator-GUI.ps1 -ValidateOnly

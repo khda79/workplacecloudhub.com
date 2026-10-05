@@ -449,18 +449,28 @@ function Get-SmartM365OrchestratorPipelineCancellationReadiness {
         if ([string]$server -notmatch '^[A-Za-z0-9_-]+$') { throw 'Invalid expected orchestrator server.' }
         $ready = $false
         $detail = ''
+        $version = ''; $lifecycle = ''; $age = $null
         try {
             $heartbeat = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath "$server/Orchestrator-Heartbeat.json")).Document
+            $version = if ($heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { 'unknown' }
+            $lifecycle = [string]$heartbeat.Lifecycle
             $timestamp = [datetimeoffset]::Parse((ConvertTo-SmartM365OrchestratorPipelineTimestampText $heartbeat.Timestamp), [Globalization.CultureInfo]::InvariantCulture)
             $age = ([datetimeoffset]::UtcNow - $timestamp.ToUniversalTime()).TotalMinutes
-            $ready = $heartbeat.PSObject.Properties['PipelineCancellationProtocol'] -and
-                [int]$heartbeat.PipelineCancellationProtocol -eq 1 -and
-                [string]$heartbeat.Lifecycle -eq 'Running' -and $age -ge -1 -and $age -le $staleMinutes -and
-                (-not $Tenant -or ($heartbeat.PSObject.Properties['Tenant'] -and [string]$heartbeat.Tenant -eq $Tenant))
-            if (-not $ready) { $detail = 'Fresh Running heartbeat with cancellation protocol 1 required.' }
+            $issues = @()
+            if (-not $heartbeat.PSObject.Properties['PipelineCancellationProtocol'] -or [int]$heartbeat.PipelineCancellationProtocol -ne 1) {
+                $issues += "Resident v$version does not advertise cancellation protocol 1; update/recycle safely."
+            }
+            if ($lifecycle -ne 'Running') { $issues += "Lifecycle=$lifecycle; wait for a Running heartbeat. Running collectors must not be stopped." }
+            if ($age -lt -1) { $issues += 'Heartbeat is in the future; check clock synchronization.' }
+            elseif ($age -gt $staleMinutes) { $issues += ("Heartbeat is stale ({0:F1} min; limit {1} min); wait for a fresh live heartbeat." -f $age, $staleMinutes) }
+            if ($Tenant -and (-not $heartbeat.PSObject.Properties['Tenant'] -or [string]$heartbeat.Tenant -ne $Tenant)) {
+                $issues += 'Heartbeat tenant does not match the cancellation tenant.'
+            }
+            $ready = $issues.Count -eq 0
+            $detail = $issues -join ' '
         }
         catch { $detail = $_.Exception.Message }
-        [pscustomobject]@{ Server = [string]$server; Ready = [bool]$ready; Detail = $detail }
+        [pscustomobject]@{ Server = [string]$server; Ready = [bool]$ready; Detail = $detail; Version = $version; Lifecycle = $lifecycle; HeartbeatAgeMinutes = $age }
     }
 }
 
@@ -528,7 +538,7 @@ function Stop-SmartM365OrchestratorPipelineRequest {
     if ($before.IsTerminal -and -not $before.CancellationRequested) { throw 'The request is already terminal; no cancellation was published.' }
     $readiness = @(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant)
     if (@($readiness | Where-Object { -not $_.Ready }).Count -gt 0) {
-        throw "Cancellation unavailable: update/recycle all expected residents and wait for fresh heartbeats. $(@($readiness | Where-Object { -not $_.Ready } | ForEach-Object { "$($_.Server): $($_.Detail)" }) -join '; ')"
+        throw "Cancellation unavailable: all expected residents must provide fresh Running heartbeats with cancellation protocol 1 for this tenant. $(@($readiness | Where-Object { -not $_.Ready } | ForEach-Object { "$($_.Server): $($_.Detail)" }) -join '; ')"
     }
     if ($ValidateOnly) { return $before }
     $submissionLock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds
@@ -575,8 +585,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIszjIjhiQ6/Gb
-# Y+AEGXx8fh/EJBQSkHLwhkxdzvsgfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgMZ2SmOj6ZMo0
+# bkf5t0HHrvd1XQGHicOi1EYr99s0d6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -709,31 +719,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGpgVxCif5Zx2bH4CQ14NCoW3+OX0JUqgQEcGvXV0+AsMA0GCSqG
-# SIb3DQEBAQUABIIBgDQFwsAQFMeQuwsLb4wqJ52uFCDshg0t7hBnBVoX2v61Nybs
-# etfR9Vg78QXHnJ5/bychIiOfo4d/BXfw7dIZLXI39RC9C1jhJOOBx8Z5J653fiPc
-# K9TqU6jXZeULdRgoJXnKuJKV7BDHHyx9eBQvPonpWV/fulqyGg6C6BaKKF6h4RPQ
-# avmvDk64TkGPMchTe4SMOJDrRP+vCwevATbyCQFSiIvDGXo8opQ/UuW+s81354R4
-# sFNnTNQjit73ZMKUGO21BrVsiZsQCm0T/lfJe0Ek+btrb/Z+i6TSmBJtWBSNT2sF
-# CdfHhx3D9DYKi7BiQKdNwCuFZ6IK7O2x1ROgE1Zp+i/2HyXFHA72b/u1lmZvHRmo
-# fQNiWFUAhTAkecoqJjfes7t2jCNnLZ8y5bijrRMtdvf3qn85Qa/YnG2+t26s/lj8
-# JQ2nAqWK0PVZ/I7t4uVr5j9bDClTiYpLeQ2BTe3MdppQHg6iM+42jsWlR0OenvK6
-# i/DbFdrMGoJl7zelJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKxEYDwZxLG3TqJw+EVRq8aC5SfUu1Z9VBrxIiTOajxPMA0GCSqG
+# SIb3DQEBAQUABIIBgGl2uuHMn/U2uLqaqvT3I5eDsC8HYH2boPoNx0M+DY9qVo/b
+# sAL+CjZE+Z59of1evgb34Ig+CsN5WT88bNDO/LU4IDSXxIwYT++oqFp+/+iQvjao
+# jTs+bqhiULzpZ2rNJSPqQtY7as6zHRiqBgZc1WHpzSVkdd8+05a7SBh9hdnHmYAi
+# HjQ550f3+jwqog5Pdc4aLUIH9iWtyxIcYUvfOWNAL2wIK+YL/HHTPuShrVKIGFYj
+# d9NPb8XS20SMm4ZgHWglZZCGblv1V8W3gvybhr/Tqka5shOCbyK7s5COGWWns5uG
+# iBCXLgBZdjzeE/MtbN7lvoEsb1K41RSlhTla8iQojr8nWceN4/SvEs5CQE4wkl0x
+# SENNwMaL8VDCGT0cusrl/uCRkd63R1wZXZTLv/Chk+Sh6fLc+wvEF+A3Uip030HY
+# aUCpoqPqxPimvZUKsr92Fuqw2/NhDoBZFTRkzX51IEhTvUkpeGggnLAMEu3UmQUh
+# vL7wLNesbE4WCNN35KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
-# MzNaMC8GCSqGSIb3DQEJBDEiBCBxrgdMJz1Lp+RQzxbl/IR9NFpkd9Jz6nsGDDb0
-# y7JfcjANBgkqhkiG9w0BAQEFAASCAgA0lsFjwpPdgWTx5251aMLQ3Byhi6XyRajy
-# vZzK3Hj3CM4+supljaT2FQRMLyit3ZK8+CSBFsL8QF+vSM+f1VXZcw6sU8akqHUI
-# 0fwnPSoKBlTns6ZU1M0XmTSJXpJDS1XaLlw9Ws/3Dz4uDt+Dg5Iw0WiRFTdDsigU
-# 8FmO4NTtCxs6OXDQfpB/LhKbMz1gGiZIngKxyMcm+QMs5Lpfty081p+Zujmjh/pn
-# zUsN0k6QfY3O0yhCUhf7GAbdCheHFAphXJFthlmbkBvMfDpp/Gsk/H2/WkrWWfcA
-# LLICr4TzD1k1SSUR7P11CbvolThWRDrJeyS3mASXVn07X7C727UVILO43jMKolU8
-# owKb1CxcnF7BSi4cNqI2RyjLYwAhs7KU4GqcDMzm3i+CibDxv8peTikQqv2/5ARK
-# JhgSrAzbtc55E7j4campGJAw98CSYBFEb8spe+k1zpQWKTVrAXXOL+TiWjMxGILy
-# ecbu7V5h+UtAI0yHn4egelgA9aHm3FurF4q99obHYyjGiKb4WAL9aWUNFnwBmpIL
-# Kcakzxym6Otsm8XRDnskpMFdrvEfcZswA0smpWah74bj47edzyNwcAY+eWFMl4pl
-# uQaxvVuyeV+3eX2E4nw3j39cnwang9Vf9rGPsMh9Vlnc2DNVpmKbTSDt64fhw29d
-# EyRph2QlQg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTM0
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAFQNk9hoOV342xFthZe43WQvlTE2n4qHr4k/k8
+# R1HNITANBgkqhkiG9w0BAQEFAASCAgCTTHe0XFnjTkTW0g9F96lGlTOlHA5wvm3Y
+# VujmV1uwisSuUoag2MB+stOggl2cpk1nD50zM5djEnpODAl5JJdutkRc35XqFrPE
+# od+63poE7zZojdVtRfWVEWr5qB7grYZXWnqXSFT5Q+P7IaFwr923oGbDDl0SG23L
+# zxnFaHU8eoiHyyu7XmjCTylo4V5ZbuhJfNFFjASV/2npSZH4KvRnnjNmDkc4ppjF
+# Ij7BD99FNlhwPqF6vmt8NVmNeAulHtl5OoIMK5L/E2LP0GEjvYAzZwdRLafNpWtE
+# QJuTq7Ar4IGJ5Mr+fNJiDewu7Dxjff7mnxaclsONZBnOLJUltGJZuhk0Kiqq7uAy
+# 8nEk8JHX0waxWkpDLhHN2INXTxPNhrxo/KPiSsj2paX+5M6/79dmzAPq5xr50eR/
+# rwka5Ci33eBpkbSBDN35pPQkaBdvkyoEs+e6PAXZy6nFUBNKyVADy0+RQCqwPJPJ
+# 8kEzP1Yq4ifaTXVcImUtbPjM40BtBlDGkHvUoKjs3jZ6bIctsucVoO2Ln3WveO/O
+# g8n7pz84kJcC+nVSnaO2UOCy9VoLGKHKMaR3xSagBiBRo5kQ0NS1ZZsq+v83mA0O
+# RKOXFPWTKN2BFFCFNKqdGWHDFwDoIvfxDX87SZs7JWzX0UeKfoSuuWs1LNWAtn5h
+# NGVmdE9Ycw==
 # SIG # End signature block
