@@ -1,5 +1,5 @@
 {
-  "version": "0.3.3",
+  "version": "0.3.4",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -1249,7 +1249,15 @@
         "TenantKey",
         "GroupId",
         "MemberCount",
-        "MemberCollectionStatus"
+        "MemberCollectionStatus",
+        "DisplayName",
+        "MailEnabled",
+        "SecurityEnabled",
+        "GroupTypes",
+        "OnPremisesSecurityIdentifier",
+        "RunId",
+        "CollectedAtUtc",
+        "GroupCollectedAtUtc"
       ],
       "key": [
         "TenantKey",
@@ -1266,7 +1274,9 @@
         "MemberId",
         "MemberType",
         "CollectionStatus",
-        "MembershipKind"
+        "MembershipKind",
+        "RunId",
+        "CollectedAtUtc"
       ],
       "key": [
         "TenantKey",

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.5
+1.0.6
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -43,14 +43,17 @@ try {
     }
     $memberships = [Collections.Generic.List[object]]::new()
     $groupScope = [Collections.Generic.List[object]]::new()
-    $groups = @(Get-MgBetaGroup -All -Property id,visibility -ErrorAction Stop)
+    # Catalog properties and membership scope share this single enumeration.
+    $groups = @(Get-MgBetaGroup -All -Property id,visibility,displayName,mailEnabled,securityEnabled,groupTypes,onPremisesSecurityIdentifier -ErrorAction Stop)
+    $groupCatalogCollectedAtUtc = [datetime]::UtcNow.ToString('o')
     if ($MaxItems -gt 0) { $groups = @($groups | Select-Object -First $MaxItems) }
     if (@($groups | Where-Object Visibility -eq 'HiddenMembership').Count) {
         Invoke-SmartM365Preflight -ScriptName 'SmartM365-WorkplaceScope-Inventory' -RequiredGraphApplicationPermissions @('Member.Read.Hidden') | Out-Null
     }
     Write-SmartM365EvidenceLog "Reading direct memberships for $($groups.Count) Entra groups. This can be a long-running inventory."
+    $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($group in $groups) {
-        if (-not $group.Id) { throw 'Entra group identity missing.' }
+        if (-not $group.Id -or -not $seenGroups.Add([string]$group.Id)) { throw 'Missing or duplicate Entra group identity.' }
         $members = @(Get-MgBetaGroupMember -GroupId $group.Id -All -ErrorAction Stop)
         $collected = [datetime]::UtcNow.ToString('o')
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -66,6 +69,9 @@ try {
         $groupScope.Add([pscustomobject][ordered]@{
             GroupId=$group.Id; Visibility=$group.Visibility; MemberCount=$seen.Count
             MemberCollectionStatus='Collected'; RunId=$script:Runtime.RunId; CollectedAtUtc=$collected
+            DisplayName=$group.DisplayName; MailEnabled=$group.MailEnabled; SecurityEnabled=$group.SecurityEnabled
+            GroupTypes=(@($group.GroupTypes) -join ';'); OnPremisesSecurityIdentifier=$group.OnPremisesSecurityIdentifier
+            GroupCollectedAtUtc=$groupCatalogCollectedAtUtc
         })
     }
     $policies = [Collections.Generic.List[object]]::new()
@@ -108,7 +114,7 @@ try {
     # No canonical publication until every required family and child collection succeeded.
     $exports = @(
         @{Name='M365_EntraGroupMemberships_All';Rows=$memberships.ToArray();Columns=@('GroupId','MemberId','MemberType','MembershipKind','CollectionStatus','RunId','CollectedAtUtc')},
-        @{Name='M365_EntraGroupMembershipScope';Rows=$groupScope.ToArray();Columns=@('GroupId','Visibility','MemberCount','MemberCollectionStatus','RunId','CollectedAtUtc')},
+        @{Name='M365_EntraGroupMembershipScope';Rows=$groupScope.ToArray();Columns=@('GroupId','Visibility','MemberCount','MemberCollectionStatus','RunId','CollectedAtUtc','DisplayName','MailEnabled','SecurityEnabled','GroupTypes','OnPremisesSecurityIdentifier','GroupCollectedAtUtc')},
         @{Name='Intune_Policies_All';Rows=$policies.ToArray();Columns=@('PolicyId','PolicyFamily','DisplayName','Description','Platforms','Technologies','FeatureUpdateVersion','CreatedDateTime','LastModifiedDateTime','NativeEvidenceJson','AssignmentCollectionStatus','RunId','CollectedAtUtc')},
         @{Name='Intune_PolicyAssignments_All';Rows=$assignments.ToArray();Columns=@('PolicyFamily','PolicyId','AssignmentId','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','NativeTargetJson','RunId','CollectedAtUtc')}
     )
@@ -127,8 +133,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOk1IfRu4ovJ6y
-# fvopSWZ1OLNaATm7+6V1hvTrIb7L2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBAEOP26gBO4SN
+# ia05j7Fto5SVrrasE7ta81Yq1O+G/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -261,31 +267,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN1BU1EPQZ6kzfWqniRhmuDDhNH26La/abGcFeFrQXjmMA0GCSqG
-# SIb3DQEBAQUABIIBgA9KKYr2B1RUN8XNr2Lu+NMBnd72Run/zNpfaYVII250C3UM
-# xP3VM2C1gBLEYIVvN6bTrF9P60A9dYexYcFDTfLy8IksaZjbnv9In9TF1b+J/8na
-# K05b0/lB3M0mCxz1QeVFDYatHDZBcBKwwdOMmwnZb2SSn625B455XSgg1RyAr8d7
-# fFs//03LfnwZSnlpRm1nF0qZPg66gTi+exrYWyhCy2Z1GN/bwrjo53WgQl0QRvV1
-# md5wEGYi6zaNsoNa66RAKxuUH2Hzg4iZMabpB8GHciHwe8Hov44G+/hxanrAln/V
-# eGmz/t0rhU1SdlyN5GBHNqa7QgYT8A9uwn4LYTMJcFu0yBswqkOx3coxcE5UZqb+
-# F25bakA87H3d7CA/4l8henVWQUuStiJjVl09t9TywLvNwXQHKmwR6jUutSS+fq49
-# N8dnGFKlVPX/uTq9sLDgkkpqsw4qgcppF1sPSBEP9wbPAJqRGOcwV1zqlm39xMRZ
-# T2tjWHIu6QzIQU0OAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOu3Zb8CcmHtwthN2orOqa/3GFya4LzSujOY9D5m54ljMA0GCSqG
+# SIb3DQEBAQUABIIBgDQdXXFuhJroc0Brob9dM2Rw/eBHOCDWVBJ0cYd5P1Nz10xL
+# pnTAaxSaCeI1j42R+JoQF3k4zz+yFPzwU/QB7Yq7gDv3e1LB6d0qSrYBkZ8aeNva
+# fAQ2IV0EaxbgF6RLma1b/Y0rD//fp4pJ1Ay/YZwuQQxPA+txIa98MmkXYUdmKUP8
+# vmls5JZY1uSNTvKrWPQZkAZxgIcrYmhoOeJBSKNYlhA0OlMhiCFfPmMn3DrNpQyp
+# Yh0JcoGOHMIPmIz6j7QY5HWtnPeGu+1IWLtxyW54Mb1tMspA21o0/6Hs3MjAP5IC
+# tWvDocujhTOJ6SceoRInkWFdMgGHPpV53abl5pP6AxrcL/rIQ29AXCJyij9vjF7E
+# Nko3wLjGGI6A2qU2Wmjpf8AMiZltkVwjuZU5HHFWu92L581xm0N4ZQHdkF6mS4AN
+# z4Efna3uXhwt4HVUYqaIOAp95TW2Ih+ot8qOvF0GAfM0n0pyoAF12iROSCxEMMBy
+# RkQBd3g5JvrIMs0Dn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBzQhxySjAS2rY3gCbqGgBhuh42gBcp72Ltt5gn
-# F7MJjTANBgkqhkiG9w0BAQEFAASCAgA/M8LTwdfXuP84tUJEvdGfN+//KhgFSsd4
-# 0YBQNDftMafU57FVFdvSvcEDgedWCvkJK9nADHItwsIu17+UE9SGxH9Om9kI8Qrl
-# Rjj2QxJ8ss/G+lmP1oEyikNrTKHXuxE4Q5t9s5PNtm/Ad7AgFAK96AfZRzSduNC2
-# mfjUCwzln6BmZlobaLtGCNT27rQmeyQva/ryUuyPtCps5I+e2HVAH8IoVa5Wxdum
-# if3zRWCt6VQ+B4GkeCzaJ5LnUwlvHZlMTQaQ4BVYHfdHrcYktnHR0a90J8RoWCWl
-# Myjmht+prILGBl17i/Nxv8aYTygdvf1bPBo3UDSiJl/8ZDMOatiOC5NNfl5I/y6O
-# vhVKj/nQUZZF8HCMdm+CiNQV9h7ctfUBAseeOPvYxfeTjAGvXTyI8q/N/2F9aVwq
-# dlo8J7cV3nSh1Cn1zbXChSRODEAN5Kd7rQ2y5bknLNOMqrRk0rr3jhT+E7B8FYuP
-# HXUubi9h2F2QoFUAoV7PXtv6bgkInr9x+QdnqkCpPTNbfkyH8hoN+Alxl4coazTi
-# hff3e7+A8kObq4HM5P0NMUh3KspRJYFL+Sl4C1S6w9gvsqDph7Aws6SbddYUbqUK
-# 4rWTPIXbjDdq9/TZ7bOHzApn6qObaEkPIzSdsnozm5DAFgK3G9mx+ZSv/UUf1Ygu
-# Pgyn/kgGsA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzMx
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCQNZFnTkUsyfw+wp8m2ImgpMkTt0HpD4hxfLfU
+# LGI5ZTANBgkqhkiG9w0BAQEFAASCAgCg6lXNAiFjT8K8aSq5l3X5l06EPiVHCrrm
+# RAUI4Zg/m2OhYqNyWaCexplrlMw+wnnAcNXo4xVTiQq0Wgbx2Wv/wtCQ/JtuFK40
+# o/yXRFPY334S30TtXBwaUACw94wI9p9cQXB9jcqZN2sltzY3VkexOGIAp6u1TkZa
+# RM1a8NIF5jY0SHmF+zlwO9TxIUY9Z9FxNyYUCcCI/zTs4YsovgytSBOgnf9bOi3y
+# k/1KJAiIC+c4qM9OUy+U2WNOmZWi6n2+3EZD2HDCjc4QpmbIbnXt5GmIJgRSDTEO
+# VBEZ5z2P2q7qHq9k0b3pkjelmW7Grxt6km4ZsqB3aWeMDwB1c3luMB9wadFoliCl
+# tbl54Hrqvt1InrmCtxHaO6Z0gbC8kBeiEDoHsxVOhKM1wUlP/3iY+A/joVRMPNbO
+# QNBkzRxBqHERik/dK+4IUw/hmKpuHSMGN2uCs85WVkF3jItbR5DRXma0UHzRyhwE
+# 1B+t2vxz8vdwyB15zuUzV1wM5YrR7Fy0CEAZgwUE3WRONtJxq91Z4gS/YkkCU93/
+# KOU7Uv8nOB4rMw7yqMHUcVKGzgsrhCR+erbq/1U3bAspvHV/CY/c5Ag3JbkkXDtj
+# REAX/NQ9iIo26fwyDgXfOca2qTwv8XGQbVJs0ROUz73K/EnAOVkP53zUrZW/WOCU
+# zt51ipOILA==
 # SIG # End signature block

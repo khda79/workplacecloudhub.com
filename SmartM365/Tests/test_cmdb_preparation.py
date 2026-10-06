@@ -96,7 +96,10 @@ class PreparationTests(unittest.TestCase):
             'plans':[{'SkuId':'s1','PlanId':'p1','PlanName':'Test plan','TenantProvisioningStatus':'Success'}],
             'user_plans':[{'UserId':'u1','SkuId':'s1','PlanId':'p1','StateCode':'D'}],
             'groups':[{'GroupId':'g1','DisplayName':'Group'}],
-            'group_scope':[{'GroupId':'g1','MemberCount':'0','MemberCollectionStatus':'Collected'}],
+            'group_scope':[{'GroupId':'g1','MemberCount':'0','MemberCollectionStatus':'Collected',
+                            'DisplayName':'Group','MailEnabled':'false','SecurityEnabled':'true','GroupTypes':'',
+                            'OnPremisesSecurityIdentifier':'','RunId':'synthetic-run',
+                            'GroupCollectedAtUtc':(NOW-dt.timedelta(minutes=2)).isoformat(),'CollectedAtUtc':NOW.isoformat()}],
             'mailboxes':[{'ExternalDirectoryObjectId':'u1','MailboxGuid':'ex1','PrimarySmtpAddress':'user@synthetic.invalid',
                           'RecipientTypeDetails':'UserMailbox','CollectedAtUtc':NOW.isoformat()}],
             'local_mailboxes':[{'ObjectGUID':'local1','PrimarySMTPaddress':'USER@synthetic.invalid','RecipientType':'UserMailbox',
@@ -122,6 +125,10 @@ class PreparationTests(unittest.TestCase):
         files=[]
         for source in self.contract['sources']:
             data=[dict(row,TenantKey='synthetic') for row in self.inputs[source['name']]]
+            if source['name'] == 'group_members':
+                for row in data:
+                    row.setdefault('RunId', 'synthetic-run')
+                    row.setdefault('CollectedAtUtc', NOW.isoformat())
             columns=list(dict.fromkeys(source['columns']+[col for row in data for col in row]))
             path=self.source/source['file']
             with path.open('w',encoding='utf-8-sig',newline='') as stream:
@@ -265,6 +272,13 @@ foreach($producer in $registry.Producers){{
         $hardware=@(Import-Csv -LiteralPath $hardwarePath)
         foreach($row in $hardware){{$row.CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}}
         $hardware | Export-Csv -LiteralPath $hardwarePath -NoTypeInformation -Encoding utf8
+    }}
+    if($producer.Files -contains 'M365_EntraGroupMembershipScope.csv'){{
+        $scopePath=Join-Path $directory 'M365_EntraGroupMembershipScope.csv'
+        $scopeRows=@(Import-Csv -LiteralPath $scopePath)
+        $catalogDate=[datetimeoffset]::UtcNow.ToString('o')
+        foreach($row in $scopeRows){{$row.GroupCollectedAtUtc=$catalogDate;$row.CollectedAtUtc=$catalogDate}}
+        $scopeRows | Export-Csv -LiteralPath $scopePath -NoTypeInformation -Encoding utf8
     }}
     Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope $producer.Scope
     Complete-SmartM365CmdbSourceReceipt -Status Success | Out-Null
@@ -682,7 +696,7 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         self.assertTrue(all(not r['TenantUserKey'] and r['CloudMatchStatus']=='Ambiguous native SID' for r in self.table('ADUserSource')))
 
     def test_ad_groups_link_group_360_only_through_unique_native_sid(self):
-        self.seed_ad();self.inputs['groups'][0]['OnPremisesSecurityIdentifier']='S-1-5-21-1-2-3-513'
+        self.seed_ad();self.inputs['group_scope'][0]['OnPremisesSecurityIdentifier']='S-1-5-21-1-2-3-513'
         self.write_inputs();self.prepare()
         self.assertTrue(self.table('ADGroupSource')[0]['TenantGroupKey'])
         self.assertTrue(all(r['TenantGroupKey'] for r in self.table('ADMembership')))
@@ -760,6 +774,76 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         members=self.table('EntraGroupMembership');self.assertEqual(len(members),4)
         self.assertTrue(any(r['TenantUserKey'] for r in members));self.assertTrue(any(r['TenantDeviceKey'] for r in members))
         self.assertTrue(any(r['NestedTenantGroupKey'] for r in members));self.assertTrue(any(r['MemberId']=='sp1' and r['LinkStatus']=='Outside collected entity scope' for r in members))
+
+    def test_group_properties_and_acquisition_use_workplace_scope_not_licensing(self):
+        self.inputs['groups'][0].update(DisplayName='Independent licensing name',MailEnabled='true',
+                                       SecurityEnabled='false',GroupTypes='Unified')
+        self.inputs['group_scope'][0].update(DisplayName='Membership cohort name',GroupTypes='DynamicMembership')
+        self.write_inputs();self.prepare()
+        group=self.table('DimGroup')[0]
+        self.assertEqual(group['DisplayName'],'Membership cohort name')
+        self.assertEqual(group['MailEnabled'],'false');self.assertEqual(group['SecurityEnabled'],'true')
+        self.assertEqual(group['GroupTypes'],'DynamicMembership')
+        self.assertEqual(group['SourceCollectedDateTime'],(NOW-dt.timedelta(minutes=2)).isoformat())
+
+    def test_independent_licensing_catalog_drift_does_not_fabricate_empty_groups(self):
+        self.inputs['groups']=[{'GroupId':'later-group','DisplayName':'Later group'}]
+        self.inputs['license_paths'][0]['AssignedByGroupId']='later-group'
+        self.write_inputs();self.prepare()
+        self.assertEqual([r['SourceGroupId'] for r in self.table('DimGroup')],['g1'])
+        path=self.table('LicenseAssignmentPath')[0]
+        self.assertEqual(path['AssignedByGroupId'],'later-group')
+        self.assertEqual(path['TenantGroupKey'],'');self.assertEqual(path['GroupLinkStatus'],'Unresolved')
+        self.assertTrue(any(r['FindingType']=='UnresolvedAssignmentGroup' for r in self.table('EntityFinding')))
+        comparison=pipeline.load_json(self.output/pipeline.MANIFEST)['PreparationQualifications']['EntraGroupCatalogComparison']
+        self.assertEqual([comparison[k] for k in ('CatalogGroups','LicensingCatalogGroups',
+                                                'OnlyInMembershipCatalog','OnlyInLicensingCatalog')],[1,1,1,1])
+
+    def test_group_catalog_mixed_row_runs_preserve_last(self):
+        def reject():
+            self.inputs['group_scope'].append(dict(self.inputs['group_scope'][0],GroupId='g2',RunId='other-run'))
+            self.write_inputs();self.prepare()
+        self.unchanged_after(reject,'mixed row run')
+
+    def test_group_runtime_row_id_is_not_the_receipt_transaction_id(self):
+        self.inputs['group_scope'][0]['RunId']='runtime-row-id'
+        self.inputs['group_scope'][0]['MemberCount']='1'
+        self.inputs['group_members']=[dict(GroupId='g1',MemberId='u1',MemberType='#microsoft.graph.user',
+            MembershipKind='Direct',CollectionStatus='Collected',RunId='runtime-row-id')]
+        self.write_inputs();self.prepare()
+        self.assertEqual(len(self.table('EntraGroupMembership')),1)
+
+    def test_group_catalog_timestamps_must_be_within_the_producer_and_before_membership(self):
+        for field,value,pattern in [('GroupCollectedAtUtc',(NOW-dt.timedelta(hours=1)).isoformat(),'outside producer'),
+                                    ('CollectedAtUtc',(NOW+dt.timedelta(minutes=1)).isoformat(),'outside producer'),
+                                    ('GroupCollectedAtUtc','unqualified','explicit timezone'),
+                                    ('GroupCollectedAtUtc',NOW.isoformat(),'acquired after')]:
+            with self.subTest(field=field,value=value):
+                original=copy.deepcopy(self.inputs['group_scope'][0])
+                def reject():
+                    self.inputs['group_scope'][0]['CollectedAtUtc']=(NOW-dt.timedelta(minutes=1)).isoformat()
+                    self.inputs['group_scope'][0][field]=value;self.write_inputs();self.prepare()
+                self.unchanged_after(reject,pattern)
+                self.inputs['group_scope'][0]=original;self.write_inputs()
+
+    def test_member_run_and_timestamp_must_match_the_group_scope(self):
+        self.inputs['group_scope'][0]['MemberCount']='1'
+        member=dict(GroupId='g1',MemberId='u1',MemberType='#microsoft.graph.user',
+                    MembershipKind='Direct',CollectionStatus='Collected')
+        self.inputs['group_members']=[member]
+        for change in [dict(RunId='other-run'),dict(CollectedAtUtc=(NOW-dt.timedelta(minutes=1)).isoformat())]:
+            with self.subTest(change=change):
+                def reject():
+                    self.inputs['group_members']=[dict(member,**change)];self.write_inputs();self.prepare()
+                self.unchanged_after(reject,'membership run or acquisition')
+                self.inputs['group_members']=[member];self.write_inputs()
+
+    def test_orphan_membership_outside_scope_still_preserves_last(self):
+        def reject():
+            self.inputs['group_members']=[dict(GroupId='outside',MemberId='u1',MemberType='#microsoft.graph.user',
+                                              MembershipKind='Direct',CollectionStatus='Collected')]
+            self.write_inputs();self.prepare()
+        self.unchanged_after(reject,'Unqualified Entra group membership')
 
     def test_unresolved_group_member_finding_links_group_360(self):
         self.inputs['group_scope'][0]['MemberCount']='1'
@@ -951,6 +1035,10 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
     def test_missing_required_producer_headers_preserve_last_output(self):
         for source,field in [('alerts','SourceReport'),('alerts','AlertName'),('teams','MemberCount'),
                              ('group_members','MemberType'),('group_members','CollectionStatus'),
+                             ('group_members','RunId'),('group_members','CollectedAtUtc'),
+                             ('group_scope','DisplayName'),('group_scope','MailEnabled'),('group_scope','SecurityEnabled'),
+                             ('group_scope','GroupTypes'),('group_scope','OnPremisesSecurityIdentifier'),
+                             ('group_scope','RunId'),('group_scope','CollectedAtUtc'),('group_scope','GroupCollectedAtUtc'),
                              ('ad_members','MemberObjectGUID'),('ad_members','GroupObjectGUID')]:
             with self.subTest(source=source,field=field):
                 self.write_inputs()

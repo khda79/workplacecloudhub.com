@@ -209,14 +209,30 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('DimUser', users)
 
     group_scope = index(list(read('group_scope')), 'GroupId')
-    native_groups = index(list(read('groups')), 'GroupId')
-    if set(group_scope) != set(native_groups):
-        raise ValueError('Full Entra group scope and membership scope differ')
+    # Licensing's independent catalog is comparison evidence, not a membership
+    # cohort. New/deleted groups between two successful scans are not empty groups.
+    licensing_groups = index(list(read('groups')), 'GroupId')
+    native_groups = group_scope
+    scope_proof = proof[source_defs['group_scope']['file']]
+    # EvidenceRuntime and the shared receipt have distinct run identifiers.
+    # Hashes bind files to the receipt; row run IDs bind this catalog to members.
+    catalog_runs = {get(row, 'RunId') for row in native_groups.values()}
+    if '' in catalog_runs or len(catalog_runs) > 1:
+        raise ValueError('Entra group catalog contains missing or mixed row run identities')
+    for row in native_groups.values():
+        for field in ('GroupCollectedAtUtc', 'CollectedAtUtc'):
+            if not utc(scope_proof['StartedAtUtc']) <= utc(row[field]) <= utc(scope_proof['CompletedAtUtc']):
+                raise ValueError('Entra group catalog acquisition outside producer interval')
+        if utc(row['GroupCollectedAtUtc']) > utc(row['CollectedAtUtc']):
+            raise ValueError('Entra group catalog acquired after membership evidence')
     member_counts = collections.Counter()
     for member in read('group_members'):
         gid = key(member['GroupId'])
         if gid not in native_groups or member['MembershipKind'] != 'Direct':
             raise ValueError('Unqualified Entra group membership')
+        if (get(member, 'RunId') != get(group_scope[gid], 'RunId')
+                or utc(member['CollectedAtUtc']) != utc(group_scope[gid]['CollectedAtUtc'])):
+            raise ValueError('Entra membership run or acquisition differs from group scope')
         member_counts[gid] += 1
     groups = {}
     for gid, row in native_groups.items():
@@ -228,7 +244,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                        'MailEnabled':boolean(get(row,'MailEnabled')),'SecurityEnabled':boolean(get(row,'SecurityEnabled')),
                        'GroupTypes':get(row,'GroupTypes'),'MemberStatus':'Collected',
                        'OwnerStatus':'Not collected','GroupSelection':get(row,'DisplayName')+' | '+gid,
-                       'SourceCollectedDateTime':acquired('groups')}
+                       'SourceCollectedDateTime':row['GroupCollectedAtUtc']}
 
     entra = index(list(read('entra_devices')), 'ObjectId')
     managed = index(list(read('managed')), 'ManagedDeviceId')
@@ -388,7 +404,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
             finding('User',user['CmdbUserId'],'ObservedLicenseAssignmentError','Native license assignment reports an error; this does not prove non-use or overspend.',
                     discriminator=native_key(tenant,'license-path',uid,sid,gid), TenantGroupKey=group['TenantGroupKey'] if group else '')
         if gid and not group:
-            finding('User',user['CmdbUserId'],'UnresolvedAssignmentGroup','License assignment group is absent from the current complete Entra group population.',discriminator=gid)
+            finding('User',user['CmdbUserId'],'UnresolvedAssignmentGroup','License assignment group is outside the collected WorkplaceScope cohort; membership is unknown, not empty.',discriminator=gid)
         pairs[uid,sid].append(row['AssignmentState']); group_path_counts[gid]+=1
     for gid, group in groups.items():
         group.update(ObservedPathCount=group_path_counts[gid],ObservedPathStatus='Observed paths' if group_path_counts[gid] else 'No observed license path')
@@ -779,7 +795,15 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
     # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
-    return {'EndpointAnalyticsUnavailableScores': {
+    return {'EntraGroupCatalogComparison': {
+        'CatalogSource': source_defs['group_scope']['file'],
+        'CatalogGroups': len(native_groups),
+        'LicensingCatalogSource': source_defs['groups']['file'],
+        'LicensingCatalogGroups': len(licensing_groups),
+        'OnlyInMembershipCatalog': len(set(native_groups) - set(licensing_groups)),
+        'OnlyInLicensingCatalog': len(set(licensing_groups) - set(native_groups)),
+        'Policy': 'Group properties and direct memberships use one WorkplaceScope cohort; independent licensing catalog differences do not imply empty membership'},
+        'EndpointAnalyticsUnavailableScores': {
         'DistinctDevices':len(unavailable_devices),
         'ScoreCells':sum(unavailable_scores.values()),
         'ByFieldAndSentinel':[{'Field':field,'Sentinel':sentinel,'Count':count}

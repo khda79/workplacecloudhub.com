@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Version: 0.3.5. Status: offline-tested migration candidate, not deployed or scheduled.
+Version: 0.3.6. Status: offline-tested migration candidate, not deployed or scheduled.
 
 ## Scope and execution boundaries
 
@@ -100,6 +100,38 @@ Every required filename must have its own file record in its producer's receipt;
 complete proof. `Rows` counts parsed logical CSV records, not physical lines.
 Empty success still needs a complete header, scope and receipt. All required
 sources must pass; a failed or partial producer cannot be rescued by an old CSV.
+
+## Coherent Entra group catalog
+
+WorkplaceScope 1.0.6 adds group display name, mail/security flags, group types,
+native synchronized SID and catalog acquisition time to the existing
+`M365_EntraGroupMembershipScope.csv`. The catalog and direct memberships use
+one group enumeration in one producer run. No extra CSV, group enumeration,
+membership call, permission or history is introduced. Original columns retain
+their meaning; `CollectedAtUtc` still dates the direct membership acquisition,
+while `GroupCollectedAtUtc` dates the group catalog.
+
+CMDB group properties, AD/cloud SID links and Group 360 now use this enriched
+scope rather than the separately collected licensing catalog. Catalog and member
+row run IDs must agree; both acquisition dates must lie inside the WorkplaceScope
+receipt interval. Runtime row IDs and receipt transaction IDs are distinct;
+the existing exact file hashes bind the native CSVs to their receipt.
+Membership identities, completion and exact per-group counts still fail closed.
+Licensing assignment paths keep their native group IDs. An out-of-cohort
+assignment remains explicitly unresolved with a quality finding, never a
+fabricated empty group or a discarded license assignment.
+
+`M365_EntraGroups_All.csv` remains unchanged and validated as independent
+comparison evidence. The manifest records both catalog counts and their
+directional differences in `PreparationQualifications.EntraGroupCatalogComparison`.
+Differences caused by group creation/deletion between independent scans no longer
+invalidate an internally coherent WorkplaceScope cohort. They do not establish
+that a group is empty or that both API enumerations were simultaneous.
+
+Contract 0.3.4 requires the enriched headers. Older WorkplaceScope exports must
+be recollected; never add columns or alter producer receipts manually. The
+Licensing collector, its receipt requirements, all 46 reporting table schemas,
+Intelligence contracts/history keys and existing reports remain unchanged.
 
 ## Weekly application freshness
 
