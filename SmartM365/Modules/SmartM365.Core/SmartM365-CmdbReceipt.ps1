@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.1.1
+1.1.2
 .NOTES
 Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
 #>
@@ -105,10 +105,31 @@ function Complete-SmartM365SourceReceipt {
 
 function Set-SmartM365CmdbSourceScope {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][bool]$CompleteScope,[Parameter(Mandatory)][string]$Scope,[string[]]$Qualifications=@())
+    param([Parameter(Mandatory)][bool]$CompleteScope,[Parameter(Mandatory)][string]$Scope,[string[]]$Qualifications=@(),[hashtable]$DomainCoverage)
     if(-not $script:SmartM365CmdbSourceContext){return}
     $context=$script:SmartM365CmdbSourceContext
-    $context.ScopeQualified=$CompleteScope;$context.Scope=$Scope;$context.Qualifications=@($Qualifications)
+    $context.ScopeQualified=$false;$context.Scope=$Scope;$context.Qualifications=@($Qualifications)
+    $context.DomainCoverage=$null
+    if($DomainCoverage){
+        if($CompleteScope -or $context.ConfiguredOutputs -or $context.Producer -cne 'SmartM365-ActiveDirectory-Inventory.ps1' -or $Scope -cne $context.RequiredScope){throw 'Partial domain coverage is restricted to the AD CMDB producer.'}
+        $sets=@{}
+        foreach($field in @('ExpectedDomains','CollectedDomains','UnavailableDomains','NonBlockingDomainErrors')){
+            $values=@($DomainCoverage[$field])
+            $set=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            foreach($value in $values){
+                if($value -isnot [string] -or $value -notmatch '^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$' -or -not $set.Add($value)){throw "Invalid or repeated AD coverage domain: $field"}
+            }
+            $sets[$field]=$set
+        }
+        if(-not $sets.ExpectedDomains.Count -or -not $sets.CollectedDomains.Count -or -not $sets.UnavailableDomains.Count -or
+           $sets.CollectedDomains.Overlaps($sets.UnavailableDomains) -or -not $sets.UnavailableDomains.IsSubsetOf($sets.NonBlockingDomainErrors)){throw 'Partial AD coverage is empty, overlapping or not explicitly tolerated.'}
+        $union=New-Object 'Collections.Generic.HashSet[string]' ($sets.CollectedDomains,[StringComparer]::OrdinalIgnoreCase)
+        $union.UnionWith($sets.UnavailableDomains)
+        if(-not $union.SetEquals($sets.ExpectedDomains)){throw 'Partial AD coverage does not account for every expected domain.'}
+        $coverage=@{Kind='ADDomainCoverage';Reason='NonBlockingDomainErrors';Status='PartialAccepted'}
+        foreach($field in $sets.Keys){$coverage[$field]=@($sets[$field] | Sort-Object)}
+        $context.DomainCoverage=$coverage;$context.ScopeQualified=$true
+    }else{$context.ScopeQualified=$CompleteScope}
 }
 
 function Get-SmartM365CmdbCsvReceipt {
@@ -174,7 +195,8 @@ function Complete-SmartM365CmdbSourceReceipt {
                     if($context.PublishedHashes.ContainsKey($path) -and $context.PublishedHashes[$path] -cne $record.SHA256){throw 'CSV changed after current-run publication.'}
                     foreach($field in @('Producer','ScriptVersion','RunId','StartedAtUtc')){$record[$field]=$context[$field]}
                     $record.CompletedAtUtc=[datetime]::UtcNow.ToString('o');$record.Status='Success'
-                    $record.Errors=0;$record.IsPartialInventory=$(if($context.ConfiguredOutputs){$null}else{$false});$record.Scope=$context.Scope
+                    $record.Errors=0;$record.IsPartialInventory=$(if($context.ConfiguredOutputs){$null}else{$context.ContainsKey('DomainCoverage') -and $null -ne $context.DomainCoverage});$record.Scope=$context.Scope
+                    if($context.ContainsKey('DomainCoverage') -and $context.DomainCoverage){$record.DomainCoverage=$context.DomainCoverage}
                     $record.Required=$context.ExpectedFiles -contains $name;$files+=$record
                 }
                 foreach($record in $files){if((Get-FileHash -LiteralPath (Join-Path $context.SourceRoot $record.File) -Algorithm SHA256).Hash -ne $record.SHA256){throw 'CSV changed while completing the producer batch.'}}
@@ -184,7 +206,8 @@ function Complete-SmartM365CmdbSourceReceipt {
         foreach($field in @('Owner','ContractVersion','TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$context[$field]}
         $document.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
         $document.Status=if($complete){'Completed'}else{'Failed'}
-        $document.IsPartialInventory=if(-not $complete){$true}elseif($context.ConfiguredOutputs){$null}else{$false}
+        $document.IsPartialInventory=if(-not $complete){$true}elseif($context.ConfiguredOutputs){$null}else{$context.ContainsKey('DomainCoverage') -and $null -ne $context.DomainCoverage}
+        if($context.ContainsKey('DomainCoverage') -and $context.DomainCoverage){$document.DomainCoverage=$context.DomainCoverage}
         $document.ScopeQualification=if($context.ConfiguredOutputs){'ConfiguredOutputsOnly'}else{'ConsumerScope'}
         $document.RequiredFiles=@($context.ExpectedFiles)
         $document.ScopeParameters=$context.ScopeParameters
@@ -203,8 +226,8 @@ function Complete-SmartM365CmdbSourceReceipt {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA22jYemmrTkRmC
-# fwAk+yd/xSQ+wJhL8j4Cy9Uro5JFSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeF3QjPgFjO8V1
+# 9z/kaS3fNX0b1XyAcSw8NdX7ehUcUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -337,31 +360,31 @@ function Complete-SmartM365CmdbSourceReceipt {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGGyODLRWKrOz0lpScK7NS16SDSKWa152uZ8xnmBeWPyMA0GCSqG
-# SIb3DQEBAQUABIIBgE0fX3mcPw4/JRuHHUSfOH96Q0SlL5+r05imwDWxfhKSoGOa
-# FRI2PtNCc3hQ0b/WbUQ6LubOD5H0PWdT0o8TJY970E1PoaNxwaDWlKcgnpJnDMkb
-# eJj4l/n78ftEJ/pZ5oylnwcSILs5P0pooQabA7F6PReTZA1GieA1jj+sY4Wa+P8K
-# kFvVcF0wLUBofT8wnbGNnIxrALcxw/n0m0GmaU9rH2koKGZk8qwyho+dxygvucoe
-# Hr5d20YAg1RlDK8OEDNVOf+7VLwTrmVB3glYxvU8wifO/W/lRVBHiSvR71jnFWbv
-# 5UMIUUucOlqEgcApQjv9nWKe/J0xTfMJ83BNj1YQEwL0nsxy+6NRxgFh/jPMTpVJ
-# wSS3dMN5I+hqkL+U+HAX3CDt7eSJJkK1qzThzqt4buGkDWudfRrRFFRtRlCEufO/
-# 1ZwbU7gyJv6vih3TJxy4dElsXU/R1vKxQYfCDMpwY9TrFDEgLQ6PtwaEV8Y3tDj6
-# QJLByIy8jU3CJIgod6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILOn2nt9EnrYKpzXyTEmcHMGfXd1M0Nl5/XtMD6p4GWhMA0GCSqG
+# SIb3DQEBAQUABIIBgA2kuc1jYzB8PzCJ2NbNuSYrFAy1hWJuprbrvjME0zdgkRqC
+# r1XFYRuQa3wq4JmuUlvTE/TDdW6Y4DYYkXWu08UsEeiv6Laf4Cgs3x8D2hxCaTj7
+# sA1kffyTPfr5Uwewa7i1/RqcU9SEOYeyg1f55ZGYdKgP2O2Oi2I7QRBkx7I4M/kJ
+# BSP0LScWJTw5d/6Rt8gcR2qA9qSKmVMlt+EZMDGgaumXrdKqjm+UKXSx9q74RjtV
+# i/puUBuAzSI13BqLzR9gv3JupB+wQJQv5D7/WNykOFRxDsG2op3U9IPwRhvE+8As
+# duErEj0HYwSTQljehsyqH30SwpnpTi6aAfJjNEFI0+wlEG7JWjLJ75YIg+OgvtCl
+# 1eR/nEmkRbNGtoGYBAa9mRV+g0/frQS09JbL34C/vCbKcKTHtd0TM7r8rVNnLTxo
+# 1CJvQzRjcVIQHcexrFf/cxz4gN9HbUOMwm+PLI2pP40y+SlCmsFOa3QsyJXwguaR
+# 5ActiTqgl30q2KoFn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDUz
-# MTdaMC8GCSqGSIb3DQEJBDEiBCAb5D98fm+9bA+McW5OJFDu/mpC4xUWN/FDzvcU
-# 6xSiQTANBgkqhkiG9w0BAQEFAASCAgBicQh+VjNvA149RNt8guu0Fl5yAz+dAEc+
-# 6Wqm2BV+n5w750vXp1TwG6RNd3X6DuNDHk+495T+mR3bOtbN+m7PIkA/219lvUfG
-# ezvQeyqofoeA2p9mSHz4hH1XscdQ6yrUVbpIpVk2Ewr7ZvN+MNjGVL+EB8STOZmp
-# DaBwW6ZF4Kqat8T4XszzldlAoniDSL2SPWx2K8wbfYohyKPRURyKxoujtSpoqdq0
-# 6CifwIJAlzqFMaT3lE1DFYKDe/VlJ8dUXn5KEvkvmqms9si/WKadBASYSYDUuxUB
-# Gjmc0jLcDzQuVC3ko9q66gA7W5Lek3OZuFwYoP0EHyMPcFACf+zM5MRVC0AU9lsT
-# ZwLU2as3ZZIjnlgkB7SzcsdFWrX1xkLgCjkT6qgYZ4mW1gVqmUnYJfxZxuPn0HDe
-# D6qMI+HpCxnbPSVmn1gDXowcThKtEfaOqs8tfnnNGkjADo0RXtFwYPot6keUKs0U
-# FQro6RN2nCZdWl5KaZ4wQgGdCTQ1J+nxEXny1tzU+CZK5VqmaDUUxl8YDBSYq5A/
-# jZQ1q8WhCT6j7OxFqflQ8RVFapIWtY6LHuPr39Op1lDQAcLIMopB1aLN1MavabdA
-# kPkyFlpCT9uH8BA/UrD3YFa9VmJrTzwwIVC/Mf/L+VvD8qo7q3EFs1mxo18th88x
-# J6/oAyOh1g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODA3
+# MDdaMC8GCSqGSIb3DQEJBDEiBCBddPAGTazEbYT7ZEAScj3p9X4xAPOrpa8mtdxG
+# tyfRQjANBgkqhkiG9w0BAQEFAASCAgBVIc6FSzB4TDwSA+ZyyTXZu/dEx79AUJaw
+# dYUq0g7a1mSOjbp0Zj5BZ9NA5TLPS/V56U8FwsQe0to0q9fJS7TopF0cuyVoUc13
+# TLNRwVNTbiUgXm7njh9BTUs+hmKnt8IfoFmHjy3VLE41ah4XxLeSAPrstqCZ2Vdi
+# 2uCfwfoy6FZAB+DNnVXCx79GnNv4R3Xi2Op/CFqRXaT0mELTNhB4EkUQGAl7+NaN
+# 8BZoTVn2e5N/apiZIpxsDUZewmDTHv5ia4jzlVtiIup3YJ7OW06x8+dc5vvEvQPG
+# q+87crlkPd8oumd4X9+A/b83W7lPjYvdqga7vyF9HImDKznhfUw2tpqBfDgStj1U
+# zwvcQ82kH/bZqI3Zle5DcbyKJebj3QSIDSKiOTDFb4LIqgoybcv/qadpvIBWLpl3
+# i+wwUZ8tAy1iScym3Nr6oO4/n9f85wMDuEMwdIKCpPsU2R2wejbwHWasPocj7jon
+# eOmDGe2pc+KSwgb58F02XfJZom7+lZ94CwTiYTosktkmzVfSTCTyDTrv+I2KQQjJ
+# 4BzZ3dqim3p5CUI3tql9lTMwLe0dwVbopd5wYv2dpruSAIKj31v8LZz/KsR6iDv7
+# rwkKM4xIWp3EV5Xilrz7znLP+yMHWJIEhP2gGlb5rLMFz7cILqYkjGUCD6yCMwrt
+# 7+Lc+0BWZA==
 # SIG # End signature block

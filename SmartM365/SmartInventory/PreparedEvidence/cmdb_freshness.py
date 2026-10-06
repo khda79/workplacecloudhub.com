@@ -4,9 +4,31 @@ No file access, fallback, collector invocation or transport-date substitution.
 """
 import datetime as dt
 import math
+import re
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 UTC = dt.timezone.utc
+
+
+def partial_ad_coverage(producer, coverage):
+    """Validate the explicit domain partition shared by preparation and readers."""
+    if (producer != 'SmartM365-ActiveDirectory-Inventory.ps1'
+            or not isinstance(coverage, dict) or coverage.get('Kind') != 'ADDomainCoverage'
+            or coverage.get('Reason') != 'NonBlockingDomainErrors' or coverage.get('Status') != 'PartialAccepted'):
+        raise ValueError('Invalid partial AD coverage declaration')
+    sets = {}
+    for field in ('ExpectedDomains', 'CollectedDomains', 'UnavailableDomains', 'NonBlockingDomainErrors'):
+        values = coverage.get(field)
+        if (not isinstance(values, list) or not values
+                or any(not isinstance(v, str) or not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', v) for v in values)
+                or len({v.casefold() for v in values}) != len(values)):
+            raise ValueError('Invalid partial AD coverage domain list: ' + field)
+        sets[field] = {v.casefold() for v in values}
+    if (sets['CollectedDomains'] & sets['UnavailableDomains']
+            or sets['CollectedDomains'] | sets['UnavailableDomains'] != sets['ExpectedDomains']
+            or not sets['UnavailableDomains'] <= sets['NonBlockingDomainErrors']):
+        raise ValueError('Partial AD coverage is not explicitly tolerated or fully accounted for')
+    return coverage
 
 
 def utc(value):

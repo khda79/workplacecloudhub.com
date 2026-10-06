@@ -1,5 +1,5 @@
 {
-  "version": "0.3.4",
+  "version": "0.3.5",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -1421,6 +1421,20 @@
         "SkuId",
         "AssignedByGroupId"
       ],
+      "allowEmpty": true
+    },
+    {
+      "name": "license_overview",
+      "file": "M365_Licenses_Users.csv",
+      "columns": [
+        "TenantKey",
+        "Id",
+        "UserId",
+        "SkuId",
+        "Source",
+        "GroupsAssigningSku"
+      ],
+      "key": [],
       "allowEmpty": true
     },
     {

@@ -65,6 +65,7 @@ SmartWorkplaceCMDB/**
 !/SmartM365/SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.local.json.txt.template
 !/SmartM365/Tests/test_cmdb_preparation.py
 !/SmartM365/Tests/test_cmdb_freshness.py
+!/SmartM365/Tests/test_cmdb_ad_coverage.py
 !/SmartM365/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub-lockup-WPF.png

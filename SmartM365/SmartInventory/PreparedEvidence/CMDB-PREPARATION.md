@@ -69,7 +69,7 @@ default UTF-8 encoding is unchanged. Previously mismatched receipts require a
 new producer acquisition, not manual CSV or receipt repair.
 
 The shared helper starts a receipt before acquisition with `Status=Running`.
-Completion can declare `Status=Completed` only after explicit full-scope
+Completion can declare `Status=Completed` only after explicit consumer-scope
 qualification, zero collection errors, and publication of every required
 canonical CSV in that run. Shared receipts carry `Owner=SmartInventory-SourceReceipt`,
 contract version 1.2 and `ScopeQualification=ConsumerScope`,
@@ -91,6 +91,38 @@ SmartInventory collectors cannot replace qualified CMDB source proof. Existing
 CSV schemas and Intelligence history contracts are unchanged. A future real
 producer acquisition replaces its own legacy receipt; no metadata conversion or
 synthetic production proof is performed.
+
+### Explicitly tolerated AD domain coverage
+
+An unrestricted AD inventory may qualify with `IsPartialInventory=true` only
+when every unavailable domain actually failed with a connectivity error
+explicitly tolerated by `NonBlockingDomainErrors`. A shared 1.2 receipt declares
+`DomainCoverage` with the expected, collected, unavailable and configured
+non-blocking domain lists. Collected and unavailable domains must form an exact,
+disjoint partition of the requested forest, with at least one collected domain.
+Every required file repeats the same declaration. All CSVs must be published by
+that current acquisition; failed-domain fragments and historical exports are
+excluded. Native domain rows must match the collected-domain declaration.
+
+The preparation returns `CoverageWarnings`, preserves the declaration in its
+manifest and marks the six AD `SourceHealth` rows as `SuccessWithWarnings`, with
+the unavailable domains visible. Missing domains are unknown, not zero and not a
+complete forest. Non-allowlisted failures, actual collection errors, missing
+required exports, hash mismatches and stale acquisitions still reject preparation.
+Existing failed receipts must not be repaired manually: deploy the updated
+collector and obtain a new acquisition before preparing a new snapshot.
+
+### Licensing overview source compatibility
+
+The 34-source contract includes `M365_Licenses_Users.csv`, required by the shared
+Licensing producer registry. Its schema, tenant identity, current-run completion,
+hash, logical row count and acquisition freshness are checked like the other
+sources. It appears in `SourceHealth` but does not replace assignment-path or
+service-plan facts and does not introduce another reporting table. This native
+presentation view has no immutable row key: group display names can repeat and
+one user/SKU can have multiple attribution rows. Those rows are preserved, not
+deduplicated into an invented user/SKU grain. Licensing CSVs, collection behavior
+and Intelligence tables/history keys are unchanged.
 
 Each producer holds a local exclusive `.collection.lock` while collecting.
 These small current lock files are not uploaded. Receipts use atomic local

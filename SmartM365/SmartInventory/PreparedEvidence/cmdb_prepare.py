@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 import cmdb_freshness
 
-VERSION = '0.3.6'
+VERSION = '0.3.7'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -121,6 +121,7 @@ def producer_records(source, identity):
                                 ('SmartInventory-SourceReceipt', '1.2')}:
             raise ValueError('Producer completion proof owner or version mismatch: ' + context)
         shared = receipt_kind == ('SmartInventory-SourceReceipt', '1.2')
+        coverage = accepted_ad_coverage(proof) if proof.get('DomainCoverage') is not None else None
         if shared and (proof.get('ScopeQualification') != 'ConsumerScope'
                        or set(proof.get('RequiredFiles', [])) != set(definition['Files'])):
             raise ValueError('Producer consumer-scope declaration mismatch: ' + context)
@@ -128,7 +129,7 @@ def producer_records(source, identity):
             raise ValueError('Producer completion proof tenant identity mismatch: ' + context)
         if proof.get('Producer') != name or not proof.get('ScriptVersion') or not proof.get('RunId'):
             raise ValueError('Producer completion proof lineage mismatch: ' + context)
-        if (proof.get('Status') != 'Completed' or proof.get('IsPartialInventory') is not False
+        if (proof.get('Status') != 'Completed' or proof.get('IsPartialInventory') is not bool(coverage)
                 or type(proof.get('Errors')) is not int or proof['Errors'] != 0):
             raise ValueError('Incomplete producer completion proof: ' + context
                              + f"; Status={proof.get('Status')!r}"
@@ -144,6 +145,8 @@ def producer_records(source, identity):
                 raise ValueError('Unsafe or repeated source proof filename: ' + context)
             if any(record.get(field) != proof[field] for field in ('Producer','ScriptVersion','RunId','StartedAtUtc','Scope')):
                 raise ValueError('Source record lineage or scope differs from producer: ' + context)
+            if record.get('DomainCoverage') != coverage or record.get('IsPartialInventory') is not bool(coverage):
+                raise ValueError('Incomplete producer source: domain coverage differs from producer: ' + context)
             completed = utc(record['CompletedAtUtc'])
             if not start <= completed <= end:
                 raise ValueError('Invalid acquisition interval inside producer receipt: ' + context)
@@ -159,8 +162,18 @@ def producer_records(source, identity):
                          'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],
                          'Scope':proof['Scope'], 'StartedAtUtc':proof['StartedAtUtc'],
                          'CompletedAtUtc':proof['CompletedAtUtc'],
-                         'Qualifications':proof.get('Qualifications', [])})
+                         'Qualifications':proof.get('Qualifications', []), 'DomainCoverage':coverage})
     return records, receipts, registry_hash
+
+
+def accepted_ad_coverage(proof):
+    """Only explicit, bounded AD connectivity gaps qualify; never generic partial data."""
+    coverage = proof['DomainCoverage']
+    if (proof.get('Producer') != 'SmartM365-ActiveDirectory-Inventory.ps1'
+            or proof.get('Owner') != 'SmartInventory-SourceReceipt' or proof.get('ContractVersion') != '1.2'
+            or proof.get('ConsumerScopeQualified') is not True or proof.get('IsPartialInventory') is not True):
+        raise ValueError('Invalid partial AD coverage declaration')
+    return cmdb_freshness.partial_ad_coverage(proof['Producer'], coverage)
 
 
 def validate_sources(source, contract, tenant, now=None, identity=None):
@@ -186,7 +199,8 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
         if name not in records:
             raise ValueError('Missing producer completion proof: ' + name)
         record = records[name]
-        if record.get('Status') != 'Success' or record.get('IsPartialInventory') is not False or type(record.get('Errors')) is not int or record['Errors'] != 0:
+        coverage = record.get('DomainCoverage')
+        if record.get('Status') != 'Success' or record.get('IsPartialInventory') is not bool(coverage) or type(record.get('Errors')) is not int or record['Errors'] != 0:
             raise ValueError('Incomplete producer result: ' + name)
         if not record.get('Producer') or not record.get('ScriptVersion') or not record.get('RunId'):
             raise ValueError('Missing producer lineage: ' + name)
@@ -201,6 +215,14 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
         if before != str(record['SHA256']).upper():
             raise ValueError('Producer hash mismatch: ' + name)
         count = check_rows(path, definition, tenant, identity=identity)
+        if coverage:
+            collected = {v.casefold() for v in coverage['CollectedDomains']}
+            if definition['name'] == 'ad_domains':
+                if {normalized(row['DNSRoot']) for row in rows(path)} != collected:
+                    raise ValueError('AD domain export differs from declared collected coverage')
+            elif definition['name'] in {'ad_users', 'ad_computers', 'ad_groups', 'ad_objects'}:
+                if (count and 'DomainName' not in header(path)) or any(normalized(row['DomainName']) not in collected for row in rows(path)):
+                    raise ValueError('AD export includes an unavailable or unqualified domain: ' + name)
         if type(record['Rows']) is not int or count != record['Rows']:
             raise ValueError('Producer row count mismatch: ' + name)
         if sha(path) != before:
@@ -209,7 +231,10 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
     freshness = cmdb_freshness.evaluate(contract, checks, now)
     evidence = {'ProducerReceipts':receipts, 'RegistrySHA256':registry_hash, 'Files':checks,
                 'StartedAtUtc':min(starts).isoformat(), 'CompletedAtUtc':max(ends).isoformat(),
-                'Freshness':freshness}
+                'Freshness':freshness, 'CoverageWarnings':[
+                    {'Producer':r['Producer'], 'Message':'Partial AD coverage accepted; unavailable domains: '
+                        + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
+                    for r in receipts if r.get('DomainCoverage')]}
     recheck_sources(source, evidence, contract)
     return evidence
 
@@ -323,7 +348,7 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
     evidence = validate_sources(source, contract, tenant, now, identity)
     if validate_only:
         return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0,
-                'FreshnessWarnings':evidence['Freshness']['Warnings']}
+                'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
     # No source copies, persistent Raw adapter, dated output or history.
     from cmdb_tables import build_tables
     with PublicationLock(output.parent / '.cmdb-preparation.lock'):
@@ -394,9 +419,9 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                 # removal of the temporary previous snapshot.
                 return {'Status': 'PreparedWithCleanupWarning', 'GeneratedTables': len(output_files),
                         'OutputRoot': str(output), 'CleanupRequired': str(previous),
-                        'FreshnessWarnings':evidence['Freshness']['Warnings']}
+                        'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
         return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output),
-                'FreshnessWarnings':evidence['Freshness']['Warnings']}
+            'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
 
 
 def main():

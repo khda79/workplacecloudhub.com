@@ -780,7 +780,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         dates.append({'Date':day.isoformat(),'Year':day.year,'Quarter':(day.month-1)//3+1,'Month':day.month,'MonthName':day.strftime('%B'),'Day':day.day})
         day+=dt.timedelta(days=1)
     emit('DimDate',dates)
-    emit('SourceHealth',({'SourceName':r['File'],'Status':r['Status'],'Coverage':'Complete producer file scope',
+    emit('SourceHealth',({'SourceName':r['File'],'Status':('SuccessWithWarnings' if r.get('DomainCoverage') else r['Status']),
+        'Coverage':('Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else 'Complete producer file scope'),
         'SourceRows':r['Rows'],'MaxItems':0,'StartedDateTime':r['StartedAtUtc'],'CompletedDateTime':r['CompletedAtUtc'],
         'Evidence':('Native producer success; exact hash and logical row count; acquisition age '
                     + str(freshness[r['File']]['AgeHours']) + 'h; '
@@ -795,7 +796,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
     # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
-    return {'EntraGroupCatalogComparison': {
+    return {'ADDomainCoverage':[r['DomainCoverage'] for r in evidence['ProducerReceipts'] if r.get('DomainCoverage')], 'EntraGroupCatalogComparison': {
         'CatalogSource': source_defs['group_scope']['file'],
         'CatalogGroups': len(native_groups),
         'LicensingCatalogSource': source_defs['groups']['file'],

@@ -93,6 +93,7 @@ class PreparationTests(unittest.TestCase):
             'app_relations':[{'AppId':'a1','DeviceId':'md1'},{'AppId':'a2','DeviceId':'md1'}],
             'skus':[{'Id':'s1','TenantSkuPartNumber':'SPE_E3','TenantPrepaidEnabled':'','TenantConsumedUnits':''}],
             'license_paths':[{'UserId':'u1','SkuId':'s1','AssignedByGroupId':'','AssignmentState':'Active','AssignmentError':''}],
+            'license_overview':[{'Id':'u1-s1','UserId':'u1','SkuId':'s1','Source':'Direct','GroupsAssigningSku':''}],
             'plans':[{'SkuId':'s1','PlanId':'p1','PlanName':'Test plan','TenantProvisioningStatus':'Success'}],
             'user_plans':[{'UserId':'u1','SkuId':'s1','PlanId':'p1','StateCode':'D'}],
             'groups':[{'GroupId':'g1','DisplayName':'Group'}],
@@ -308,10 +309,35 @@ foreach($producer in $registry.Producers){{
         proof['Files'].append(extra)
         path.write_text(json.dumps(proof), encoding='utf-8')
         records, receipts, _ = pipeline.producer_records(self.source, IDENTITY)
-        self.assertEqual(len(records), 33)
+        self.assertEqual(len(records), 34)
         self.assertEqual(len(receipts), 17)
         self.assertNotIn(extra['File'], records)
         self.assertEqual(self.prepare()['GeneratedTables'], 46)
+
+    def test_license_overview_preserves_legitimate_repeated_display_rows(self):
+        # Group display names are not immutable group IDs; never deduplicate this view.
+        row = dict(Id='u1-s1', UserId='u1', SkuId='s1', Source='Group', GroupsAssigningSku='Same label')
+        self.inputs['license_overview'] = [row.copy(), row.copy()]
+        self.write_inputs()
+        self.assertEqual(self.prepare()['GeneratedTables'], 46)
+        health = next(r for r in self.table('SourceHealth') if r['SourceName'] == 'M365_Licenses_Users.csv')
+        self.assertEqual(health['SourceRows'], '2')
+
+    def test_license_overview_is_required_and_hash_bound(self):
+        path = self.source / 'M365_Licenses_Users.csv'
+        with path.open('a', encoding='utf-8') as stream:
+            stream.write('changed\n')
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            self.prepare()
+        self.write_inputs()
+        definition = next(p for p in pipeline.load_json(pipeline.REGISTRY)['Producers']
+                          if p['Script'] == 'SmartM365-Licences-Inventory.ps1')
+        receipt = self.source / definition['Receipt']
+        proof = pipeline.load_json(receipt)
+        proof['Files'] = [r for r in proof['Files'] if r['File'] != path.name]
+        receipt.write_text(json.dumps(proof), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'Missing producer completion proof'):
+            self.prepare()
 
     def test_generic_configured_scope_does_not_qualify_cmdb(self):
         self.shared_receipts()
