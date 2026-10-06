@@ -7,7 +7,7 @@
   SendLicenseSummaryEmailOnly sends the license overview and recovery summary from existing published CSVs without collecting again.
   ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
 .VERSION
-1.27
+1.28
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -15,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.27
+    Version : 1.28
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -936,17 +936,17 @@ function Get-LicensesFocusedUsageRows {
 
   $cutoff = $AsOfUtc.Date.AddDays(-90)
   $metricRows = foreach ($product in $products) {
-    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleAll=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
+    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleUnknown=0; MultipleAll=0; MultipleAllUnknown=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
     if (-not $licenseSource.Ready) { [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$false }; continue }
     $candidateUsers = @{}
     $unknownUsers = @{}
     foreach ($userId in $productUsers[$product.Name].Keys) {
       $count.Assigned++
-      if ($targetSuitesByUser[$userId].Count -gt 1) { $count.Multiple++ }
-      if ($allSkusByUser[$userId].Count -gt 1) { $count.MultipleAll++ }
       $sharedStatus = 'NotShared'
+      $mailboxKind = 'Other'
       if (-not $mailboxes.Ready -or $mailboxes.Duplicates.ContainsKey($userId)) {
         $sharedStatus = 'Unknown'
+        $mailboxKind = 'Unknown'
         $count.SharedUnknown++
       }
       elseif ($mailboxes.Rows.ContainsKey($userId)) {
@@ -954,9 +954,11 @@ function Get-LicensesFocusedUsageRows {
         $recipientType = ([string]$mailbox.RecipientTypeDetails).Trim()
         if (-not $recipientType -or ([string]$mailbox.NativeIdentityStatus).Trim() -ne 'Observed') {
           $sharedStatus = 'Unknown'
+          $mailboxKind = 'Unknown'
           $count.SharedUnknown++
         }
         elseif ($recipientType -eq 'SharedMailbox') {
+          $mailboxKind = 'Shared'
           $count.SharedLicensed++
           $sizeGb = ConvertTo-LicensesMailboxSizeGb $mailbox.TotalItemSizeGB
           $archiveStatus = ([string]$mailbox.ArchiveStatus).Trim().ToLowerInvariant()
@@ -975,6 +977,15 @@ function Get-LicensesFocusedUsageRows {
       }
       if ($sharedStatus -eq 'Eligible') { $candidateUsers[$userId] = $true }
       elseif ($sharedStatus -eq 'Unknown') { $unknownUsers[$userId] = $true }
+      if ($mailboxKind -eq 'Shared') { continue }
+      if ($mailboxKind -eq 'Unknown') {
+        $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++
+        $count.MultipleUnknown++; $count.MultipleAllUnknown++
+        if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) { $count.LocalAppsUnknown++ }
+        continue
+      }
+      if ($targetSuitesByUser[$userId].Count -gt 1) { $count.Multiple++ }
+      if ($allSkusByUser[$userId].Count -gt 1) { $count.MultipleAll++ }
       if (-not $active.Ready -or -not $active.Rows.ContainsKey($userId) -or $active.Duplicates.ContainsKey($userId)) {
         $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++
         if ($sharedStatus -eq 'NotShared') { $unknownUsers[$userId] = $true }
@@ -985,7 +996,7 @@ function Get-LicensesFocusedUsageRows {
       $enabledText = ([string]$user.AccountEnabled).Trim().ToLowerInvariant()
       if ($enabledText -eq 'false') {
         $count.Disabled++
-        if ($sharedStatus -eq 'NotShared') { $candidateUsers[$userId] = $true }
+        $candidateUsers[$userId] = $true
         continue
       }
       if ($enabledText -ne 'true') {
@@ -1154,8 +1165,8 @@ function Send-LicensesFocusedSummaryEmail {
       $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
       $counts = if ($metrics) { $metrics.Counts } else { $null }
       $assigned = if ($metrics -and $metrics.Available) { [string]$counts.Assigned } else { 'N/D' }
-      $multiple = if ($metrics -and $metrics.Available) { [string]$counts.Multiple } else { 'N/D' }
-      $multipleAll = if ($metrics -and $metrics.Available) { [string]$counts.MultipleAll } else { 'N/D' }
+      $multiple = Format-LicensesMetric -Counts $counts -ValueName 'Multiple' -UnknownName 'MultipleUnknown' -Available ($metrics -and $metrics.Available)
+      $multipleAll = Format-LicensesMetric -Counts $counts -ValueName 'MultipleAll' -UnknownName 'MultipleAllUnknown' -Available ($metrics -and $metrics.Available)
       $disabled = Format-LicensesMetric -Counts $counts -ValueName 'Disabled' -UnknownName 'DisabledUnknown' -Available ($metrics -and $metrics.Available)
       $adEntra = Format-LicensesMetric -Counts $counts -ValueName 'AdEntraInactive' -UnknownName 'AdEntraUnknown' -Available ($metrics -and $metrics.Available)
       $mailbox = Format-LicensesMetric -Counts $counts -ValueName 'MailboxInactive' -UnknownName 'MailboxUnknown' -Available ($metrics -and $metrics.Available)
@@ -1231,8 +1242,8 @@ function Send-LicensesFocusedSummaryEmail {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
-    Recovery candidates are distinct licensed users per product with a disabled account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
-    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. N/D means a source or user cannot be qualified; sources older than 14 days are excluded.
+    Recovery candidates are distinct licensed users per product with a disabled non-shared account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Disabled users and activity/overlap indicators exclude identified shared mailboxes; an unqualified mailbox type is N/D. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
+    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count non-shared users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. N/D means a source or user cannot be qualified; sources older than 14 days are excluded.
   </div>
   <h2 style="margin:22px 0 8px;font-size:14px;line-height:20px;color:#334155;">Source freshness</h2>
   <ul style="margin:0;padding-left:18px;font-size:11px;line-height:18px;color:#64748b;">$($sourceRows -join "`n")</ul>
@@ -1839,7 +1850,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -2498,8 +2509,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrHUk5lc/8scZN
-# 6zlYH7XswKaKApc9vsas5r6kzCGqZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVdrSkik5M+KeL
+# 3YAU5kDZOK/3E3jVcEgNouJgyTi3DKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2632,31 +2643,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINe23nQfFJH4Xi4ekYYDlA+eRTKRKp7OdYLyBtCA84KdMA0GCSqG
-# SIb3DQEBAQUABIIBgINJNn5p1dQVrpQdqF2bnhxcMrAL7lHi3EwccEr3h+nbR/0Y
-# 4XqGBjrxZZVDzmJ2jiaT18nU6GsK2d2htRdsca7gPMcd2nd3Iyw7lqRYWHaOJw3M
-# Xo91y1moLLUhODBI8nEDeFziC9ZFqF+Q1WtG3CumnDVnxNn0zAHlgi1Tx9K4UmJ5
-# OOUSmLMYYELVG48ngFOaXcxo8jLurBxo+GKkpLFUPvmBqJNjHxhd89+eMG1owJs4
-# WExGrM9f9elqlsE5/x45Xgv4khiTNYlsc98Qw2MIXjpsQ5KooZ95ANgTGK0YIZnd
-# nczLymeh7/dbyszRQQUTdMDbyp8tHdi519vE9KzgbaGIBs6NQrwCc6Dz8tiwoINm
-# UUaZmtQa2a3nsn86xC86K6oKO7Sz+oq8BZjNljwIuuAR+17NX+XU4dfRXD4TT6nf
-# NPLJI+YCW3EjxXj7dGxmRTpMdwyFZK+Q3+ZTrjaMGnKk8h2jlZ0FpW+izR/c67CU
-# 9MQUP/ytiLZlF2eSNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICo2geDnTIuCJIGrh7UsOmQpN7MIaV+Z9QKo30kdaow3MA0GCSqG
+# SIb3DQEBAQUABIIBgIZxCw8sfOvjTdBu8ah7hsCN5lxbx60182CUeDc4r676H19l
+# 4v7K0d76xsCyDBnLbsw8smrYFkksjVNKU64S9H88+ttZ3wa7chSRa2HiOpK6+9mt
+# ofnfI92Od31SglZacLNoUY+zqHmPlq1bCBJL1SZovBbI4vjxd49pdJOI6SqIg8YC
+# ajX74IV2+rYBzlI0IkUCXVSpTatVvHblxEBzP2SQAJlPJP1kcWlTsslBWCYsGfI9
+# 35PACa2cmc9hz+N0g4CPWXjYcVxKWrX0H8PeBu23u1/fhKKk6FUAb/MCX5nRpmrw
+# PeDT4pgX+NYvlqZk/0rXIgjO5fQXPvpYEiTstoPyZsVZHBzWYPS2sbNVAh4HSJxq
+# O1lXKfX4b5f/rfIba8dmVNqOf2qK48nh3t+BoHbhRqBcA9P5nFwvf+oFbifRNCuK
+# uAVo4zvsIALZHo/SAeYcdxdH0Snx1e7/GnWG/2h/W/qLTKRT7eNzaYvlTv0MbwwW
+# 8/Nd836E9eKIgYfxX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzEz
-# NDVaMC8GCSqGSIb3DQEJBDEiBCCVIENtBe9rTqgWnAWkx2gLeUB/vRL68l697F/W
-# ezri8zANBgkqhkiG9w0BAQEFAASCAgB5ZrqL3yqmWKAsmAlc5qbgBl2iLtmG36lW
-# 7XJQFWiXyp+XP53whtrhMWfSWjF7w4HZLwdkVsv3YxK0Xjqu1ZVBf1RIAiGuid7g
-# 4xhWZaI1yitP1vQ4lZxscmLLBdM2IwDcbFwECGDBg3ZCCN89aGlqWhMmM9gMsph7
-# f7gqIpC+/z6GoFIz4JdUbiKwiDgnNGFBc3bWxWgK7ljj80m+EiuVI5rt9ER8nuQ+
-# 1pJtgCYIUTe72Cw2ghu7tLA6TlcoOT4KDay4c9SV7nClQTCS5bsJ1FN0j13kkeGC
-# 7uLLiIXmhWUY1NdDiLOJfChvnCo8S47+3T/z7l/3c9n4pFZXy5b+pFLtT+8b4sXt
-# NmArb4NCCe+6vqJQ8/B0GkNQ98J1r5Mt3Aa6O88eqr52fcY8d5tZrNfkegDbOH0E
-# 5C1olz3dHkSH1TL6OJexeG+p25tXXRdSx63ToijhqMBuj+SZS00KMTz6lwi+Q7Pk
-# nGXVgPXxO5zLy6+tCbbmVcbVrEyea0zAhy/re6oWXQI69FwxFm5Kk0AzFdFjiK4O
-# MrCHb1g3SWxGGC0GOVXhYruPIRBsbvjFfWbX14qQUrrIGnANHIvzTkye5l3MPZse
-# j1GNDFSZEdf0xlDmIx/eLz/0XA5eAIPdKJ+fly7a/w1ma7dWtkHIf0lrH1s64NZc
-# pYlX2qVlPQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzUw
+# MDVaMC8GCSqGSIb3DQEJBDEiBCB69NIkIM8LFCqJIlJMv0zpxL/ZfU1akvIxNxzJ
+# vbHL+zANBgkqhkiG9w0BAQEFAASCAgApH/eH4/HYf55loL7w6UfDhJclxauPASU3
+# 938tTkR4tzeOfZZwa58dYxQYEXW/V72hdrhs0ZvICKKy8XWBvXFEfx4Pi87E4kiV
+# 8WEOZ7laJElErSWQ4tDPsDUIyNzSIaU+1dQXY9fWbZ0FN8JPibXG30a9g/JLUU8T
+# SqrenqfogZaWc7SKOs3KXtAPbQlqCu1sd/gzuC1xTVEBTonp0CXvTNYsDWZh2IPv
+# w8yiBDNoQabnptKw+r6bY/f7d/RERGVhfIV68iDtVueHjVESyWNyFVFQIGvpakY/
+# AClYbwosUYGg22ko8IY5nkvFDUMaTx/CmXav/mpaPrcz/rddzhllHZxAuF9Gic41
+# tsJKwCgBJKsnxLL9VDOIVZ41MlwKFyoyW1UN0FPDzFZDExr6uvV9mTmUa8u4SlFs
+# Q7JOpnctDpkUdiddPaLNDow9ECgMkTQgltQ59AasT1D+cpbzfSh5GGCRjinRET0l
+# H3EymZX7OLzuumFA/4lBlPYg1wPky6yhu5xU/pShzQOnIahsCNFBfZojs1W+yQhH
+# 02XtvWW05gesSFpqaSFJCXMunbhBELavlgiSUVBTnO/ZYOKtODEP37xlGQrwOqLd
+# 14hzN1ErIyOsiulzcgUdfHPlvFn6mwI4KoKFx4X+zLBxQQpgn71pzX4LTghm9uhY
+# wma5pHUiLA==
 # SIG # End signature block

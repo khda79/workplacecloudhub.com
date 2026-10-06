@@ -164,6 +164,9 @@ try {
     [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_F1'}
     [pscustomobject]@{TenantKey='prod';UserId='u5';SkuPartNumber='M365_F1_COMM'}
     [pscustomobject]@{TenantKey='prod';UserId='u6';SkuPartNumber='SPE_E3'}
+    [pscustomobject]@{TenantKey='prod';UserId='u6';SkuPartNumber='POWER_BI_PRO'}
+    [pscustomobject]@{TenantKey='prod';UserId='u7';SkuPartNumber='SPE_E3'}
+    [pscustomobject]@{TenantKey='prod';UserId='u8';SkuPartNumber='SPE_E3'}
   ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_Users.csv') -NoTypeInformation
   @(
     [pscustomobject]@{TenantKey='prod';'Object Id'='u1';'User principal name'='u1@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
@@ -171,6 +174,8 @@ try {
     [pscustomobject]@{TenantKey='prod';'Object Id'='u3';'User principal name'='u3@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a3';LastSuccessfulSignInDateTime=$recent}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u4';'User principal name'='u4@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a4';LastSuccessfulSignInDateTime=$old}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u6';'User principal name'='u6@example.invalid';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=$recent}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u7';'User principal name'='u7@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u8';'User principal name'='u8@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
   ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Users_Active.csv') -NoTypeInformation
   @(
     [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a2';UserPrincipalName='u2@example.invalid';LastLogonDate=$adOld}
@@ -206,6 +211,8 @@ try {
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u3';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='49,99';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u4';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='12,0';ArchiveStatus='Active';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u6';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u7';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u8';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='12,0';ArchiveStatus='Active';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
   ) | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
 
   $intunePath = Join-Path $testRoot 'Intune_Devices_Inventory.csv'
@@ -222,16 +229,16 @@ try {
   foreach ($item in $usage.Rows) { $byProduct[$item.Product] = $item.Counts }
   Assert-Equal $byProduct['Microsoft 365 F1'].Assigned 2 'F1 distinct users'
   Assert-Equal $byProduct['Microsoft 365 F1'].Multiple 0 'F1 variants count as one target suite'
-  Assert-Equal $byProduct['Microsoft 365 F1'].MultipleAll 1 'F1 variants remain distinct assigned SKUs'
-  Assert-Equal $byProduct['Microsoft 365 F1'].Disabled 1 'F1 disabled'
+  Assert-Equal $byProduct['Microsoft 365 F1'].MultipleAll 0 'Shared F1 mailbox is excluded from user overlap'
+  Assert-Equal $byProduct['Microsoft 365 F1'].Disabled 0 'Disabled shared mailbox is excluded from disabled users'
   Assert-Equal $byProduct['Microsoft 365 F1'].DisabledUnknown 1 'F1 unmatched account unknown'
   Assert-Equal $byProduct['Microsoft 365 F1'].SharedEligible 1 'F1 disabled shared mailbox under 50 GB'
   Assert-Equal $byProduct['Microsoft 365 F3'].Assigned 2 'F3 duplicate assignment path deduplicated'
-  Assert-Equal $byProduct['Microsoft 365 F3'].Multiple 1 'F3 multi-SKU user'
-  Assert-Equal $byProduct['Microsoft 365 F3'].MultipleAll 2 'F3 users with any second SKU'
-  Assert-Equal $byProduct['Microsoft 365 F3'].AdEntraInactive 2 'F3 AD and Entra inactive'
-  Assert-Equal $byProduct['Microsoft 365 F3'].MailboxInactive 2 'F3 mailbox inactive'
-  Assert-Equal $byProduct['Microsoft 365 F3'].M365Inactive 2 'F3 M365 inactive'
+  Assert-Equal $byProduct['Microsoft 365 F3'].Multiple 0 'Shared F3 mailbox is excluded from target-suite overlap'
+  Assert-Equal $byProduct['Microsoft 365 F3'].MultipleAll 1 'F3 non-shared user with an add-on SKU'
+  Assert-Equal $byProduct['Microsoft 365 F3'].AdEntraInactive 1 'Shared mailbox is excluded from AD and Entra inactivity'
+  Assert-Equal $byProduct['Microsoft 365 F3'].MailboxInactive 1 'Shared mailbox is excluded from mailbox inactivity'
+  Assert-Equal $byProduct['Microsoft 365 F3'].M365Inactive 1 'Shared mailbox is excluded from M365 inactivity'
   Assert-Equal $byProduct['Microsoft 365 F3'].SharedUnder50 1 'F3 licensed shared mailbox under 50 GB'
   Assert-Equal $byProduct['Microsoft 365 F3'].SharedEligible 0 'F3 archived shared mailbox excluded'
   Assert-Equal $byProduct['Microsoft 365 F3'].RecoveryCandidates 1 'Archived shared mailbox excluded from recovery union'
@@ -241,12 +248,14 @@ try {
   Assert-Equal $byProduct['Microsoft 365 E3'].MailboxUnknown 1 'E3 missing mailbox row unknown'
   Assert-Equal $byProduct['Microsoft 365 E3'].M365Inactive 0 'Recent Apps activity prevents M365 false inactivity'
   Assert-Equal $byProduct['Microsoft 365 E3'].SharedEligible 1 'E3 active shared mailbox is a recovery candidate'
-  Assert-Equal $byProduct['Microsoft 365 E3'].RecoveryCandidates 1 'E3 shared recovery candidate counted once'
+  Assert-Equal $byProduct['Microsoft 365 E3'].SharedLicensed 2 'Both E3 shared mailboxes remain in the dedicated shared table'
+  Assert-Equal $byProduct['Microsoft 365 E3'].Disabled 1 'Only a disabled non-shared E3 account is counted'
+  Assert-Equal $byProduct['Microsoft 365 E3'].RecoveryCandidates 2 'E3 shared and disabled user candidates are distinct'
   Assert-Equal $byProduct['Microsoft 365 E3'].RecoveryPrimaryPc 1 'Shared recovery candidate can be primary on an Intune PC'
   Assert-Equal $byProduct['Microsoft 365 E3'].Multiple 0 'E3 plus Power BI is one target suite'
-  Assert-Equal $byProduct['Microsoft 365 E3'].MultipleAll 1 'E3 plus Power BI has multiple assigned SKUs'
-  Assert-Equal $byProduct['Microsoft 365 E5'].Multiple 1 'E5 multi-SKU user'
-  Assert-Equal $byProduct['Microsoft 365 E5'].LocalAppsInactive 1 'E5 local Apps inactive'
+  Assert-Equal $byProduct['Microsoft 365 E3'].MultipleAll 1 'Only non-shared E3 plus Power BI is counted'
+  Assert-Equal $byProduct['Microsoft 365 E5'].Multiple 0 'Shared E5 mailbox is excluded from target-suite overlap'
+  Assert-Equal $byProduct['Microsoft 365 E5'].LocalAppsInactive 0 'Shared E5 mailbox is excluded from local Apps inactivity'
   Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryCandidates 0 'E5 archived shared mailbox is not recoverable'
   Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryPrimaryPc 0 'A PC on a blocked shared mailbox is not a recovery intersection'
   Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
@@ -264,6 +273,10 @@ try {
       $script:SentMail[0].BodyHtml -notlike '*Intune_Devices_Inventory.csv*') {
     throw 'Intune PC recovery indicator or source freshness is missing.'
   }
+  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">E3</td><td style="[^"]*">2</td><td style="[^"]*">1</td>' -or
+      $script:SentMail[0].BodyHtml -notlike '*Disabled users and activity/overlap indicators exclude identified shared mailboxes*') {
+    throw 'The email does not separate disabled user accounts from shared mailboxes.'
+  }
   if ($script:SentMail[0].BodyHtml -notmatch 'License overview and recovery' -or $script:SentMail[0].BodyHtml -notmatch 'F3/F1 adds both suite counts') {
     throw 'KPI banner and assignment-grain note are missing.'
   }
@@ -279,7 +292,7 @@ try {
     if ($overviewBody -notmatch ('>' + [regex]::Escape($label) + '</div>')) { throw "Missing overview card '$label'." }
   }
   if ($script:SentMail[0].BodyHtml -notmatch '>0</div><div[^>]*>Recovery candidates E5' -or
-      $script:SentMail[0].BodyHtml -notmatch '>1</div><div[^>]*>Recovery candidates E3' -or
+      $script:SentMail[0].BodyHtml -notmatch '>2</div><div[^>]*>Recovery candidates E3' -or
       $script:SentMail[0].BodyHtml -notmatch '>2 \(N/D: 1\)</div><div[^>]*>Recovery candidates F3/F1') {
     throw 'Suite recovery KPI cards do not match qualified license assignments.'
   }
@@ -309,7 +322,7 @@ try {
   Assert-Equal @($partialIntune.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0].Counts.RecoveryCandidates 1 'Intune source does not change recovery count'
   $script:SentMail.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
-  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">1</td><td style="[^"]*">0</td><td style="[^"]*">2</td><td style="[^"]*">N/D</td>') {
+  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">1</td><td style="[^"]*">0</td><td style="[^"]*">1</td><td style="[^"]*">N/D</td>') {
     throw 'Unqualified Intune PC source is not marked N/D in recovery table.'
   }
   Remove-Item -LiteralPath $intuneManifestPath -Force
@@ -347,7 +360,7 @@ try {
   $boundary = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   $boundaryE3 = @($boundary.Rows | Where-Object Product -eq 'Microsoft 365 E3')[0]
   Assert-Equal $boundaryE3.Counts.SharedEligible 0 '50 GB shared mailbox is excluded'
-  Assert-Equal $boundaryE3.Counts.RecoveryCandidates 0 '50 GB boundary is excluded from recovery union'
+  Assert-Equal $boundaryE3.Counts.RecoveryCandidates 1 '50 GB shared mailbox is excluded while disabled user remains'
 
   $u3Shared.TotalItemSizeGB = '49,99'
   $u4Shared.TotalItemSizeGB = '12,0'
@@ -360,7 +373,8 @@ try {
   Assert-Equal $partialExo.SharedSourceReady $false 'Partial EXO file receipt is rejected'
   $partialE3 = @($partialExo.Rows | Where-Object Product -eq 'Microsoft 365 E3')[0]
   Assert-Equal $partialE3.Counts.RecoveryCandidates 0 'Unavailable EXO source cannot yield recovery candidates'
-  Assert-Equal $partialE3.Counts.RecoveryUnknown 2 'Unavailable EXO source makes recovery unknown'
+  Assert-Equal $partialE3.Counts.RecoveryUnknown 4 'Unavailable EXO source makes all E3 mailbox types unknown'
+  Assert-Equal $partialE3.Counts.MultipleAllUnknown 4 'Unqualified mailbox type is excluded from overlap counts'
   Remove-Item -LiteralPath $exoManifestPath -Force
 
   $adManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt'
@@ -368,7 +382,7 @@ try {
   $partialAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   $f3PartialAd = @($partialAd.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
   Assert-Equal $f3PartialAd.Counts.AdEntraInactive 0 'Partial AD export cannot prove inactivity'
-  Assert-Equal $f3PartialAd.Counts.AdEntraUnknown 2 'Partial AD export is unknown'
+  Assert-Equal $f3PartialAd.Counts.AdEntraUnknown 1 'Only non-shared F3 account has unknown AD activity'
   Assert-Equal @($partialAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0].Ready $false 'Failed AD receipt is rejected'
   $forcedAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -ForceAdCsvAnalysis
   $forcedAdSource = @($forcedAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0]
@@ -376,7 +390,7 @@ try {
   Assert-Equal $forcedAdSource.Ready $true 'Fresh AD CSV is accepted with explicit override'
   Assert-Equal $forcedAdSource.Forced $true 'AD override is recorded in source metadata'
   Assert-Equal $forcedAd.AdSourceForced $true 'AD override is reported to the email builder'
-  Assert-Equal $forcedF3.Counts.AdEntraInactive 2 'Forced AD CSV contributes observed inactivity'
+  Assert-Equal $forcedF3.Counts.AdEntraInactive 1 'Forced AD CSV contributes only non-shared user inactivity'
   $script:SentMail.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual -ForceAdCsvAnalysis
   if ($script:SentMail[0].BodyHtml -notlike '*Provisional AD/Entra indicator*' -or
@@ -406,7 +420,7 @@ try {
   $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   $e5 = @($usage.Rows | Where-Object Product -eq 'Microsoft 365 E5')[0]
   Assert-Equal $e5.Counts.LocalAppsInactive 0 'Stale Apps report is not treated as no use'
-  Assert-Equal $e5.Counts.LocalAppsUnknown 1 'Stale Apps report is unknown'
+  Assert-Equal $e5.Counts.LocalAppsUnknown 0 'Shared E5 mailbox remains outside local Apps usage'
 }
 finally {
   if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
@@ -416,8 +430,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzdlO/MC4A5Uqj
-# tQR4KXOG+wIcdKPjGeUc+Gck25N9BKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB76c4QzdtATb0B
+# vZPBAz5NQDZjUufzcS13RdXAHwzdkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -550,31 +564,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJAMgXpI2iMGSKAwOsYJsT8b/cbzGiGGNPTAUynPlH5mMA0GCSqG
-# SIb3DQEBAQUABIIBgB8osachp5dmHjNSf1Pdo7Bahts+FOoQG5lV+62oGQ+Cx2+Q
-# hXg7InrEcHPXkrKkUuv1rbAP4vdOBtRAgvhE4IaLjdhQmEmz4DRAs/Q3Tqs9MYaR
-# fkjC/lmKOq1xy9WxaKFIbHvjZ+CdS3HkhE0GJU86kcNaAzkApgSdO21RFKBIATKd
-# +cbsVB0ct1I2kyLFkDLFBZ6oWnC6NG9BR9SxuUL8y83GvITfz1dvMUoeyUaWJZJH
-# RFhkc9QpSXD6CiIwBFqaR52v5hmRvFg1w1CFYAIc4VzXG5+9IsFUouvdPlgAaSlN
-# HeLp+lc3SRBl+pE8yj6dxhWQ2gBMQtLriCFCDCw+TDSMWrvn/v8nogFvzwHcZopw
-# XSltgrcnPStjuP8fWEqM/4jJipxWvqU38p9I1FDi65Msex0uEpAAolRK6KZfelZ6
-# SC8Y9sA33bRO7R3unfhITWl0RJPUE6xYTSq7nFWIghfC3kJzkrYVYG2WZIbpFM1m
-# 8mFq0iHAu5amFhf5K6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICIOkZnPWqLzO34mMgNO7WUKYF+FjYqSBb+pL5Fb1jPyMA0GCSqG
+# SIb3DQEBAQUABIIBgCypvRT846r7th45oHR9FY49+0wcbPZbfL5Iq9mSxWauiQXH
+# D3YDv0hkCbapP2vUfe4PwncOMbt1Gg7uGbeyUP+9T616M05FBT3rKElEXxrH827N
+# m5HWS41ZyGx/4ka890vV9A5pmXaumNM2PrXCWWEy+jQB09FwfcxrGb49MTuF2twt
+# nPKRO0oN32ZXdCHhkmCzJWPURZn01UVlA5v+QJHEvbKdWQtWqCyvfYMzkl7SHfcZ
+# im/3Ft613ZzTQsyMf+/kjW9j5jAc7YWhVyuG+mkhjuOtBBI1CDHGJp5jBSrfqjcf
+# wNpOH1Zohjs5h7vl2BlCv+a3h41i+WZDA3ZB8xJ8ANyt4xTAaxdBw2KqyQTTu6uu
+# pNwpN/qpdrf4JIA1GrA/XX+iwapvxh7X+ONwbkDVXo3nysXkv3C41INZzde9wG3m
+# icVpQ0yjRd5FZPAxADi1IMXOENgNpnHXSXOeuvy/VV0aY2xmnpnuQpJslnv74fR7
+# S+2BURtoHtMLqPYw/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzEz
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDh/WBF9XYVxzqBUorNS3CQNsbHO+rYrwBjAQda
-# 0sTQbDANBgkqhkiG9w0BAQEFAASCAgCrYymeGLb4q3qBNSUBMoIHhGesVC/7lKES
-# Y9MVDbkVZ9hWQdsGIxyN/NqsonODsHcsGZVUJ9rt9QqY5beW6nivtE8q3tWZtkoC
-# M0A21zWlB7EZo5sTDtFw5Shn7e2prvtqxiP/Osh5ejpznnl7i+ez+9F8UM+Sl5Li
-# pcdlRvmkEhJF8c9QsDMXJ9fQCNRNo1iOtF7dYxB1zcJs1sSipIloAfUr0thUJ+N1
-# 08L2h2x72nRDDIYYlO/ShSs5PDTYESXXnyiKvAt5noD4TDSoBxaePR0V8PuxYayu
-# D6jIL89yirpM7gpMa91yXimXmxOawfR57I1xrZH88mFnDNq6HmA+cLZnroCJ3rP6
-# WMyWKvsPpb4hwGrbdCcmFRBVMaL1EJDOCZwGlZTXxOn2Bv7KauIiz9AHs1hTAlgI
-# MQGgckQVRNsLQCg91280+4WEnwx5UnA9P1AEKrWyF/8cMM/6Qw6ifwbaHF0IReCJ
-# RLH9edAhJF87pApUfB0mVWreESp6/wHVdsVPd974COOp5o1FgxSAZ1IV1VKPKDAh
-# 7F1nUzXUEDkZlQyfhZHytJlXHLxRt35XAcqUOmKA+B0vWs/QFgvWlwx2SlGZMSWt
-# z4LMpqE6mqysdE43Sk7eogDALolb9a/UNh7Aw8wP9xkpSqhwO1btIjMP3NfzPV4S
-# g+aFJ1RcQg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzUw
+# MDZaMC8GCSqGSIb3DQEJBDEiBCDbX+VcWuI7JzxpN5kN0z1IUpIT7SiW0myr1+Nn
+# /TbV1zANBgkqhkiG9w0BAQEFAASCAgCmkqIEQRFaBEI7HytIF1gsNJIjJHVwLlJn
+# WdVOudP4K5kQDskYSffxsfH1OM2S2vOy05+Mqu2Q0rxUQ7MXorkFOSkwuleVyfOZ
+# rCpZxLUQ41b6RkIkOFvsX8GEfI1nnwhwM6qEpQFxsFCDPQ4nehVC5XF0WLI6r1fI
+# HW4bnOcElnqslRKhohUEycWkYYn1aBmX/nx+K9XF4QnGT02Fqq6jCPxu9ko91uw4
+# 2Qradpm6XiAOsznpASxPfJs7KyxLUbPsr3AegJ045vaWbdr1qKNd9BThM7EWN6qD
+# s24uF/XPc65rCKPTJ+SiQRXIUKlSCOPKVIJmUK1Hz35uP/96TJW3KXflZqyo+uWD
+# K2c+i8EBMrmQut1qWeHodmI6Shg/61Le0qXlW1sL2LqzzhfV47kGjgEbMnjUQriZ
+# YCLQ9RN670sDolmKGZg+qSkzW+6VmQrq2FeHKu9iDYsfucHgYbCnaw9ETVw2tPu7
+# e/jqGxs726wjoWs851ItskoMyKegnByQ62aufg10+jvszY5wdjgx4EnQTLcm7MSb
+# VTHXtjQq6ssZ6XUXPzZc1WffJfRDUcBqzLAqsfAuDeXnyw+bXVA7s3IHWxz+a9eC
+# FZaJ8ORluQUSN3HaEMBxxM1zN4jREqk2EZ3Ip/imKVuFNMuxqlpjUbx1veCfoTN+
+# qvLG8DwlMQ==
 # SIG # End signature block
