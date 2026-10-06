@@ -283,6 +283,34 @@ try {
   Assert-Equal $f3PartialAd.Counts.AdEntraInactive 0 'Partial AD export cannot prove inactivity'
   Assert-Equal $f3PartialAd.Counts.AdEntraUnknown 2 'Partial AD export is unknown'
   Assert-Equal @($partialAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0].Ready $false 'Failed AD receipt is rejected'
+  $forcedAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -ForceAdCsvAnalysis
+  $forcedAdSource = @($forcedAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0]
+  $forcedF3 = @($forcedAd.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
+  Assert-Equal $forcedAdSource.Ready $true 'Fresh AD CSV is accepted with explicit override'
+  Assert-Equal $forcedAdSource.Forced $true 'AD override is recorded in source metadata'
+  Assert-Equal $forcedAd.AdSourceForced $true 'AD override is reported to the email builder'
+  Assert-Equal $forcedF3.Counts.AdEntraInactive 2 'Forced AD CSV contributes observed inactivity'
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual -ForceAdCsvAnalysis
+  if ($script:SentMail[0].BodyHtml -notlike '*Provisional AD/Entra indicator*' -or
+      $script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*FORCED AD CSV*') {
+    throw 'Forced AD usage is not visibly qualified in the email.'
+  }
+  $adPath = Join-Path $testRoot 'AD_Users_AllDomains.csv'
+  $adLastWriteUtc = (Get-Item -LiteralPath $adPath).LastWriteTimeUtc
+  [System.IO.File]::SetLastWriteTimeUtc($adPath, $today.AddDays(-20))
+  $staleAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -ForceAdCsvAnalysis
+  Assert-Equal @($staleAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0].Ready $false 'AD override does not bypass CSV freshness'
+  Assert-Equal @($staleAd.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0].Counts.AdEntraInactive 0 'Stale AD CSV does not prove inactivity'
+  [System.IO.File]::SetLastWriteTimeUtc($adPath, $adLastWriteUtc)
+  $adRows = @(Import-Csv -LiteralPath $adPath)
+  $adRows[0].TenantKey = 'another-tenant'
+  $adRows | Export-Csv -LiteralPath $adPath -NoTypeInformation
+  $crossTenantAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -ForceAdCsvAnalysis
+  Assert-Equal @($crossTenantAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0].Ready $false 'AD override does not bypass tenant isolation'
+  Assert-Equal $crossTenantAd.AdSourceForced $false 'Rejected AD CSV is not presented as forced evidence'
+  $adRows[0].TenantKey = 'prod'
+  $adRows | Export-Csv -LiteralPath $adPath -NoTypeInformation
   Remove-Item -LiteralPath $adManifestPath -Force
 
   $staleApps = @(Import-Csv -LiteralPath $appsPath)
@@ -301,8 +329,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGbuQc1i6Bnv8P
-# gkg+dXo5VnjJD3Y+YOGi0MMOfVk+oKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJMIrp/ybfWrNS
+# BZwZVPwljyezT27yqQTHcBMbn2FS4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -435,31 +463,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL3uVbJxndrVRb1KP5XJdksYKTFgtEZD7FcB4r+YhT1iMA0GCSqG
-# SIb3DQEBAQUABIIBgHuvNEXURzQ3VWxz+IiaZ52hs/3Xmb3jWoaNxTXCzt83fDA8
-# QaAKuAhtDHoH2VO6P4Vr4Drk1j2ef72OtYla5CnzZW2UmWpQuF432iftjo+m/Szm
-# aqGVcSe7toZzvkpGhgFUdsez/cJ7u3EB1SgQijuP428b5LVLfqR4eFml327HHVQi
-# DvCAKiZunLFWGOs97LCcVUcpDlLxxEHrNlSunMDPnefeH3qSaTqkHP8PeUg1xX1b
-# AaJNbb+osZ6FiYu0kAZLau1ZU1LPt1smwWvUR4OWiQ0Qc6V8P14O5Cl3QsuEnVkr
-# 1wFr+siDG37V3EpaO9EoHb48U19QZGi6pVeRVfeyCx2zY+SY8a4JP/BTzPazizjT
-# RFsfAsakeh3RTt1gkp+3PReeQHcI91145fJ9NuRxyY7c2C13xXkc9grIyOjJ5OmT
-# Ft1Pe5jgPl2XZuaKSJdbV50jhS8Y/iJIUsBU+w/z35LR3nZttpOrf+lQksFWxOTw
-# wWP5i6IYugxHW/4UBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINl+Bt0OQBnR/pWbE/SM5ZgZdiqqKt9IFeBUnQVf//cLMA0GCSqG
+# SIb3DQEBAQUABIIBgIU/NX8DcZHrWUyBVaXLs+QCb9P6zImjYj0b/6MCc6ttPG3d
+# sgloDFLukOgj2nXZY+UYGPgNsBye06eNWoBe2x/CW9rydQ7Ogo8dKmmZFJiXQK19
+# FArICS0cs5ckfNTFYKjaS31r98o5bT6Wkc8HvCtCvTZVa/lZaVHRc1iT2pHZz3Ue
+# Laq/eSZq5zlyC5d4sSJe8Sr304aP/cicRb8eBIvn5YmiC/CpjSQpWA1rRXoWuJJY
+# h+Jy3iKgXfl6LYiCdnQ5q+NMoMDFiYw56TP7706CeXcOaRlTDblrdqeO7OrLDuSw
+# Nddh3JPvvr5Q5BR7X+jELG9f6sIDFb0TNELIq2qJIR+Kg9Bvm1Q91beFIruhCkLX
+# aZUANSlChM6PbBX15Ls16PNOUiP6V5ki9kje2W+0b65aI9RFLK3wPzb7dJLtLYjG
+# TuEBc0TCKS5t0Pu0tey49kOpJ7ne/DT2MDzIHq+yQTW7/ROHpxd366AXOsf939X3
+# 3AHw57SVjA1tW17V8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMTQ1
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCcPLw3HDe80q/7Eknl4IJ3p9yt8OKKdc1MVKiW
-# hHQrnDANBgkqhkiG9w0BAQEFAASCAgAemDKTirIf3BFRFOi5AaTCmF521q52Jpna
-# n/61LS4hTBjEYeO5SSy2EkVyWERx5i72NOWSrBQKaaxUwVBBcVm7kMC/ywY/2trR
-# PzWl2rag5zO/cqjwVCTfchqK/9MlXtGLIix6fvGKc+2GPsjtPuyXTmuE/S/a/8Iw
-# yBAxLyyyU+yWm5vWIF3OAQ+iV6r2Ollvron7LMcGerz/s1bVfXLu6zYqfbfcTRA/
-# 9bDqaRd63qUbRchQ3//zYQnardGzmec4RxI8PoZGwKrxYrb5Q7gTUUFy61/nWnFV
-# Gswl9hkrq1gnEDCd2Y0brfj9fuvZ/0khizY9RyT24Ax3j4X5VnDeNNPko+EsNEY3
-# 9tpYVuuCFzxdUKxjBFJU47gYKZgcG2DOo1XDp0opoqKtBwML3m3AF2JeAHuelvBk
-# VN6jzmxjcjnr+ftcfRBi5Tb8LEBI6PzFSmrgweMZ2j6o2eg1paI2ogoyGYgjNYUX
-# 7KmrSS7q3FCe5CU7clULFt9KFdeWOuP2qNO2Yivfz8R3AR+watRvC5Wkyx5O3E/B
-# orm4ZiRHmEraMMeVgpW0MmSoZbvEoaHvYnPa+zbftmWQXQEXh9AN4C9DEdPn9567
-# +lZy5INFw2mM79MBwVUyf7y7fgAWzQGSgkN0y/KvGva+TQvKQnXkrtrl67AgMajb
-# IA/lxioB3A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjA2
+# MzVaMC8GCSqGSIb3DQEJBDEiBCAv/nBe/iVK5d0QMQaGA11Ol9qjRzWIYzRG2tao
+# 0ovzMjANBgkqhkiG9w0BAQEFAASCAgAqwmUyT79LCc2MsXFfEU2+sOjeDPkGR91A
+# xJ56Ic8OdxoBf1jtmz0n74eL+shMellD88TOmVA2OqiFXO6kJ7c6EXYGlsWaXF4q
+# uFxmATJ7GxTO2xe/mvpDlg4Fg8Vsyp6YOF5KyREtKQ0Y2joSk4vq3qnhX0cFi/lg
+# LHF7abqo7GJiEmyX8bd5KuNHLFKGsEbYr2sfnmM3OAZQtyXajw101434M4cLA/M5
+# FZ+OflXHIoXKYcPB52OPty8/Uv067s6fpOD2TEAI0NLQhmZB90OjXnwZNVw/5qBg
+# HZ/byRHngbrlSt6f3XhFN+8mjQjdRDq0orknt2aB3BTS7vLc4vDYqainxQFIcO/r
+# ah+jLHXBnCc0DgH9S3fazJL8SLPIPA7a2KM/yTC4kPltpJmhA0lVOzHmUH8bGYBK
+# k6LhoESz94d3DNxl5FMw9/+w3Yib8yVRaUbCD79BC/edeNJowTK8/6XNJGCCFM4M
+# QkT8ddpdMOFDFGFZ/Y0Fkv3o5Lf1kGmWxc0nNNrzTKvIiJIRSwKilL6PALccRkSz
+# gmTvNZ6lVEoJFFqAj5X3tLvL73rDlqe/wmDBO4REqYiDffa7wJ/aRhFiUrKv5fwO
+# RwGS03T2u9cSELcuMTqXxMHMO0BhHJNlOX18L9poq4k+GowvyOtNVYeD5gqjnZSB
+# UNwc73dB3Q==
 # SIG # End signature block

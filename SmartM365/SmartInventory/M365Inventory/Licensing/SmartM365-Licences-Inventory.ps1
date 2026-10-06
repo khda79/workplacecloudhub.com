@@ -5,8 +5,9 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
   SendLicenseSummaryEmailOnly sends the focused license and usage summary from existing published CSVs without collecting again.
+  ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
 .VERSION
-1.24
+1.25
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -14,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.24
+    Version : 1.25
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -35,6 +36,7 @@ param(
   [switch]$RequireSkuNameCsv,
   [switch]$InteractiveAuth,
   [switch]$SendLicenseSummaryEmailOnly,
+  [switch]$ForceAdCsvAnalysis,
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -662,7 +664,7 @@ function Get-LicensesCsvSource {
     [string]$CollectorManifestName = ''
   )
   $path = Join-Path -Path $Folder -ChildPath $FileName
-  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only' }
+  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $source.Reason='missing'; return $source }
   $item = Get-Item -LiteralPath $path
   $source.ModifiedUtc = $item.LastWriteTimeUtc
@@ -744,7 +746,8 @@ function Get-LicensesFocusedUsageRows {
     [Parameter(Mandatory)][string]$CsvFolderPath,
     [Parameter(Mandatory)][string]$ExpectedTenantKey,
     [datetimeoffset]$LicenseSnapshotUtc = [datetimeoffset]::MinValue,
-    [datetime]$AsOfUtc = [datetime]::UtcNow
+    [datetime]$AsOfUtc = [datetime]::UtcNow,
+    [switch]$ForceAdCsvAnalysis
   )
   $products = @(
     @{ Name='Microsoft 365 F1'; PartNumbers=@('M365_F1','M365_F1_COMM') }
@@ -791,7 +794,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); Sources=$sources.ToArray(); SharedSourceReady=$false }
+    return [pscustomobject]@{ Rows=@($unavailableRows); Sources=$sources.ToArray(); SharedSourceReady=$false; AdSourceForced=$false }
   }
 
   $sharedSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @(
@@ -816,6 +819,11 @@ function Get-LicensesFocusedUsageRows {
   }
 
   $adSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','LastLogonDate') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt'
+  $adReceiptReason = ''
+  if ($ForceAdCsvAnalysis -and -not $adSource.Ready -and $adSource.Reason -match '^(collector receipt|file receipt)') {
+    $adReceiptReason = [string]$adSource.Reason
+    $adSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','LastLogonDate') -AsOfUtc $AsOfUtc
+  }
   $sources.Add($adSource)
   $adByImmutable = @{}
   $adByUpn = @{}
@@ -838,6 +846,11 @@ function Get-LicensesFocusedUsageRows {
       }
     }
     catch { $adSource.Ready=$false; $adSource.Reason=$_.Exception.Message; $adByImmutable=@{}; $adByUpn=@{} }
+  }
+  if ($adSource.Ready -and $adReceiptReason) {
+    $adSource.Forced = $true
+    $adSource.Provenance = "FORCED AD CSV; ignored collector receipt: $adReceiptReason"
+    WriteLog -Message ("AD CSV analysis forced despite collector receipt: {0}. AD/Entra inactivity is provisional." -f $adReceiptReason) 'WARNING'
   }
 
   $reportDefinitions = @(
@@ -973,7 +986,7 @@ function Get-LicensesFocusedUsageRows {
     }
     [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$true }
   }
-  return [pscustomobject]@{ Rows=@($metricRows); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready }
+  return [pscustomobject]@{ Rows=@($metricRows); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; AdSourceForced=$adSource.Forced }
 }
 
 function Format-LicensesMetric {
@@ -997,7 +1010,8 @@ function Send-LicensesFocusedSummaryEmail {
     [Parameter(Mandatory)][string]$CollectedAtUtc,
     [string]$CsvFolderPath = '',
     [string]$ExpectedTenantKey = '',
-    [switch]$Manual
+    [switch]$Manual,
+    [switch]$ForceAdCsvAnalysis
   )
 
   if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
@@ -1021,7 +1035,7 @@ function Send-LicensesFocusedSummaryEmail {
     if ($CsvFolderPath -and $ExpectedTenantKey) {
       try {
         $snapshotTime = [datetimeoffset]::Parse($CollectedAtUtc, [Globalization.CultureInfo]::InvariantCulture)
-        $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $CsvFolderPath -ExpectedTenantKey $ExpectedTenantKey -LicenseSnapshotUtc $snapshotTime
+        $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $CsvFolderPath -ExpectedTenantKey $ExpectedTenantKey -LicenseSnapshotUtc $snapshotTime -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
       }
       catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
     }
@@ -1078,11 +1092,14 @@ function Send-LicensesFocusedSummaryEmail {
     }
     $sourceRows = if ($usage) {
       foreach ($source in $usage.Sources) {
-        $state = if ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" } else { "N/D ($($source.Reason))" }
+        $state = if ($source.Ready -and $source.Forced) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
+                 elseif ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" }
+                 else { "N/D ($($source.Reason))" }
         '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
       }
     } else { @('<li>Usage sources: N/D</li>') }
     $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Existing published CSV &middot; no new inventory</span>' } else { '<span style="color:#0f766e;font-weight:700;">Published inventory</span>' }
+    $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
     $subject = if ($Manual) { 'Microsoft 365 F1/F3/E3/E5 license summary (existing CSV)' } else { 'Microsoft 365 F1/F3/E3/E5 license summary' }
     $tableStyle = 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;'
     $headStyle = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
@@ -1091,6 +1108,7 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:0 0 5px;font-size:11px;letter-spacing:1px;font-weight:700;color:#0f766e;">MICROSOFT 365 &middot; F1 / F3 / E3 / E5</p>
   <h1 style="margin:0 0 8px;font-size:24px;line-height:30px;color:#0f172a;">License recovery overview</h1>
   <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)) &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC &nbsp;&middot;&nbsp; $sourceNote</p>
+  $adOverrideNote
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
       <td width="50%" style="width:50%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #0f766e;"><tr><td style="padding:13px 14px;"><div style="font-size:25px;line-height:29px;font-weight:700;color:#0f766e;">$topRecovery</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidate assignments</div></td></tr></table></td>
@@ -1717,7 +1735,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -1734,7 +1752,7 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -Manual
+  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -Manual -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
   Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath)
   return
 }
@@ -2283,7 +2301,7 @@ $BaseFileName = "M365_Licenses_Groups"
   $groupRowCount = $groupRows.Count
 
   $currentOperation = 'Send focused license summary email'
-  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey
+  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
 
   if ($connectedGraphInThisRun) {
     $currentOperation = "Disconnect Microsoft Graph"
@@ -2376,8 +2394,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmbKPyUCociEZc
-# w7hkIQZ1Z+6hG9a0GUtoLbqBApHomaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2aslI8Zw7JZp0
+# fIIj07adqpErenLgfcRlYD4SrTfTrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2510,31 +2528,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP/ouWSUMeO/Wc23IFy0IizrBYR2vTmmIe/f4u16+TFLMA0GCSqG
-# SIb3DQEBAQUABIIBgBFRjzd3Z9QjOrOp/7TWxum57UHoZNNizklfky4DWwb3sofL
-# VokmzMFy/pCkcyh3CVC0N4Dlm67NDQKeFqxxr5zp+RN/GpFLv9PFXrfuxAl7AelP
-# FJNZyzJit1+B/85lPfGz/aIN0YSUbXJwqtJLpjcLP6n3zDG0Lks5VaD39oD8xf+k
-# dU0xkS6XjRflfMfx+aDcWqP6dUcB94KIJ9xA9LlcBNjMiAJ08m/NJE8YWCb3fIbO
-# SV3asuF/IQ+r6lOfdcea6yvCNfCFa2b4y5HMjOwmk3kOmgOi6zE7eUFvtD4Goh1L
-# ezZZGZ55GecJVTJBGruuUf5Uq7kkmWZufWAmEQjjvd2KMF/T2vekS7vZAJEqS4DU
-# 7o+zJi4dId5Y1Ag42OLlImZhY7K0EB/5KpQKYXYVkp+R/IfwlFWvkE2ku2NC+BN2
-# QlYHnLQ9Vg972NzTcv8LMgS7NxigHykMysnQpj7suV4601zf6rbSbLw+IanKrGtr
-# 6vyopcF0c3eIWS1IJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP36UQwPXWYeuk4QB1IITcIxeH493iAdbDDoR5IDinfTMA0GCSqG
+# SIb3DQEBAQUABIIBgF/pnWLFgrDp/35dsiPTiKK8RufHMjQi2mgbiCbiQju6Gsy5
+# /+2A7l3pIEwg4nLWTBrTDcYNi8bR4sD02E7IWsaOYIEFxSyzekQZQBP66ptu80+9
+# zzKqpfttn3V578FRmCfs/mlKoKc1r5vyc/MgjHU36UJHKIWDRwWhOfzu61MtrqmR
+# /24v7gGtveKvmUhKqtlv1Ex9T77pEm9SL/PXMomUavfFZxc0voJdZRxTj1TaRjZv
+# 8BcX+tlcBhtOvx4FDdl9v9wSEGNdWKHT2o5wzzX+VMY1qv1aGjPKcg1jyGip5ovd
+# e2RfATCWujgVyjAXi5YPZ+dj4luM/QqgLvAvjUbStnpr+QHkejmVnlJyU7K3z4n8
+# amLCWZTmoWI3cUQP8CbGMAsxLpx2rWBdp0ds+RZAsklFvc/aIRGz3jHh+885aiDY
+# ZjpA6PEeJoWwvvHArQnECJP/3u9W9EPU1tTSLlK7BfUe9K1RONsd6jNPl1vwOFWA
+# nelT2XKsdV6zdLTI/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMTQ1
-# MzFaMC8GCSqGSIb3DQEJBDEiBCC+KaQq18LETeQZAqSouH20P+CGxE3wVFBIw/5R
-# hQ85KjANBgkqhkiG9w0BAQEFAASCAgB0goh0k8XWXY9GsrelLAoNnPtQE8cUMMUj
-# DUyk1Qn9jh2JUOl+2jBqS3kvRIRG1qhUVLKlptWylgh1rIuol+0vrfVhHzaHRZO2
-# KjsZT2qhOBm/0ZzwAIrh0dMdSoaxv0SG2TN8PaYPn7pk+L9Lpk6Ip0+r0fh3YqT2
-# v3JcZdcuKmovGNwDR48O4RcileEuOfGT5VT7W8my3l8Tad46QjQOBYwgPtR/FWzI
-# Aj7oj6QWPc+zX4SHnzgE/r3pRlOH+5U1uNk1Dqegi1C+ycZj94ZRHK/eCpCPkzra
-# q2AjV1SeTllVq4YDPmf3+FYFRHG20dj00tXc6tHgPOnCGE9JxAEluNNuf36CbQz9
-# Mir/M6vpJWMBbF0jKFatPsBVUsMQntQ2+y5Ds4j3smJdr5SCEXLCuhew6ETGzt05
-# ixXJrUOCxUD/EpmmFhyHWVQco95EWjmnYRN4pOatxOfl3a5LZ/Egbeeey1c2f5Va
-# ULTGWCHz7uTHtVA+jiUNcGFrxfvOWrDVwfBkGLU1OXX5FgcBuURtLNMaMcvKr/AD
-# kPhMOu0w6TbtFvbgkFhgEjffm2rac3ZvuWxEn8SaR2c6OEWIVN/D2dACxFheuwjs
-# XcgJ0K7nkurrYKrZSHCYED2OhjZx5S0zSewcIj/+qIPUta8TMyTTF1+xRiJtTkkl
-# xJUW0Hq45A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjA2
+# MzRaMC8GCSqGSIb3DQEJBDEiBCDXtDgW1w2VrjdaLxDMiAOai2EJBeAKws7MAXpw
+# hE/9wTANBgkqhkiG9w0BAQEFAASCAgAvS8mLElapwIGTPAenyZI9FkN6/KE6nQDG
+# CGKAdzYgFB8B620ohWNrv2SbWbCiQkBUd/sLow7zHPdaBbRZKyKudCRSSaM8Enab
+# l0vYSSbUKyqkFiJQVxYQgJUzb5Xoecjc2RuXzIYAU/jDzAZsbjMp5JSFr+UZ/IOM
+# RNTsj23n1V1oCPKIyZqz68MhqhOtoMQly0X2yVRk79kLzjJOoPXkEXorFdxEeK4f
+# k4b/v4UnualylR16uwqlxjoHaEmAKoKwBGwAHDhqBWbaoiVX2IemYSk4/SXL8B9m
+# BuN6tSKjjiHjb1hEjr3b5Oal2qmKq/uAAW5i1GTy1xLN4pZ9Jwolm6CWAsVhEk6c
+# /WC4okNyPwpKqthYhpxL81LWArA5N9QPYikLAIoVltRNSgAWRtKucP/QNNfs9xBJ
+# g5CYJCPjaw+tZNbgNRfk7MCLybpsATxL6S6CyCb1nhWYkFF6TAP6Jc+jNIhuAKgO
+# VzyV6JxrSCQCzMiYzasvathw/I7Y0h3s9olPXdr8R+reNb6cUjdDjvTe4+rkr9qd
+# RwsFTf/kNVUMkjzWR0QpUrSI8mrVV0+H6Op4JGJHXdjSrEKVTd5a95ICZC6FqN4P
+# Ax+ZbG1kaihYtLX/dtgIwadXXjkYb+BOJSvTHuYgc0KUB1tJtGmxOg8B4JR8BlHe
+# sdlC+8EFCg==
 # SIG # End signature block
