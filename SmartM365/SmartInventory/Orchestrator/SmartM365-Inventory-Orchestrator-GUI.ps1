@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.2
+1.3.3
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.2'
+$script:AppVersion = '1.3.3'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -209,7 +209,8 @@ $xaml = @'
                             <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
                             <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
                             <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
-                            <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="140"/>
+                            <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="100"/>
+                            <DataGridTextColumn Header="Acknowledgement" Binding="{Binding MaintenanceAcknowledgement}" Width="145"/>
                             <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="70"/>
                             <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
                             <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
@@ -218,7 +219,7 @@ $xaml = @'
                         </DataGrid.Columns>
                     </DataGrid>
                     <Grid Grid.Row="2" Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
                         <GroupBox Header="Running jobs" Margin="0,0,6,0">
                             <DataGrid x:Name="OperationsRunningGrid">
                                 <DataGrid.Columns>
@@ -232,11 +233,18 @@ $xaml = @'
                         <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
                             <DataGrid x:Name="OperationsPendingGrid">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
-                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="200"/>
-                                    <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="150"/>
-                                    <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="95"/>
-                                    <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*"/>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
+                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="165"/>
+                                    <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
+                                    <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
+                                    <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                                <Setter Property="ToolTip" Value="{Binding Details}"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
                         </GroupBox>
@@ -1766,8 +1774,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBl9XGh22mVH7mQ
-# Klal5ytulToj8yVOHaI1Z+GLWneha6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDSyGP/T7eXvkI
+# tXL3HTSWBPUtncVdGS4+A+K3/Sb1CqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1900,31 +1908,31 @@ $window.Add_Closing({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILu9Gwz6QPdk1NMPsaJgBocCBlPRmPh2PAAICI0FG+NWMA0GCSqG
-# SIb3DQEBAQUABIIBgA1RWsAu95lMLw1h99XbXo6QxIXoX2gR6Cny+pTs+bZAe3Mo
-# /efDxDxTLzv2vDEvMH+rw0h8DdlA0KIyYtajOKfZ4d0AFjvOK0JsbzI7DsyjQL4t
-# G5yhNrMtt4uxvqJ/g5BNqdWzsyYqSzSfPPRqxgk3pBAj5f9iZkJV+ASxqJzoPwtG
-# Bav+TrWE0p01B60l2bh7t1h1sJJUgSXjhz4XVL1Z/K7J5aTFtkR50d1pujKLR4He
-# QJTYGbXiG++HrYqcTah+R1/cTSzKk02tKkQdMasbBIInzkwKcgHzyyWtVUT865Ja
-# DN6and2XXg0GO3YkoJqGIEpGKQKnD6dgFlQn6/5nZVWLpFw+826/yxb5+tiXKUIB
-# emQN532vp5uqFt9z6EF3URJE/Vwp69nxmSZFqfxB9VFDii2/vK2AI+jBFUPWVpYa
-# Cm21+IZHvwnBqlmsNbLH1JZDo9DByhYOjmnWs6FKaJIFzwmV+zLYHU1Q7uScJErC
-# eUMUQo0mAoml+/nvP6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINswXpKY+r1/DqGWvjJ8hqx7wux625toGlkxGbe+zSaRMA0GCSqG
+# SIb3DQEBAQUABIIBgHJj5M7zR5oyrrgqaSpz02LXUTpbAXJn0LhPCWj9YUuRgmP3
+# IZH+J/lZCArdxWzKtJCPTeel0EiAk/+SJ6pwqyh+Xhd3DTjNiF2L0LY0A+hjQ6FK
+# jwAPL+Wl7nuAwnXKoepB0V90+Cl3eMXRS/8IzjhBdgSk19tA+oQPDjPTQtGXicTt
+# JVtJ+rYSQgav1+LvgMMV3D8T0lJNak5Gx+aorESlRSFh3sdhbWT6Y44LaHnALzeN
+# ASwBi7SOqwtRKe7vTpSfAFTWbw2hbqhVi1YFdFkESxK8Ts8i+WrOWHjVwYeqRqMg
+# +x1pCh0Lqh0a1zY4xhWLmNRLDpvf3FM81xscptAOblT861o5tZu8psgaxBGxl/R9
+# 4Eb6eSTmhg5UIxEyfn5lAvNM6pGA9QhGEfBCnP0Z0kkCwcP1oo/7awLZRVwsva8P
+# uZgV7K5pCJFC6wwk+P+In7HbmqB8t5ccKLuUToYsKcsT4oYWC5af2Q+HbLLIzgYN
+# R4iBR3IjIEx9vJs59qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUyMDQ4
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAMIldnAkfSoCqRY039/3NLrBp7SHBxx1B/vaYy
-# KBpzLTANBgkqhkiG9w0BAQEFAASCAgCiBVK9xGqwoYigNY3ts+UzYfdsdVejtwIe
-# JHQ1Ntj414S5xUeNX9aC6dzexdu7fJqJBSfNImNm0ZOACgadb0RM+UCQFxykkxDv
-# +SETQtF3eTrV8+s73E0wLgFPtYz67BH3WS/WULJff0jGnjfdYW0jXSRgav0JE0PT
-# e0FwHY8LjtI4xOojqtoyPAt/BwNou+kljShiJnR/G4lBaFqS7SJ7NFGXm8gfTQZU
-# OEwHmXw0Fwyd9VkfZrxFdXHSZDsZOKQzSyfyumI/YOZgW3eNJCfxtZ/mq2swi1U8
-# R4j1dKE8iPstKMRs3cMKcVuc456vt1HhrGl4iVMXHxlTZKgFzNgqxuqfwaN6ukB7
-# 4SiaL0zxFijIVyRWVps7z/Vu6/fhWKjZprJ36kcXNJtQYFjjlFW8vH4UnvLWOUd3
-# ozq7h0tDAEPtGdlSP0ao+LgrZBV4qdZU1PfTCvqP98YAq4EbpOS6Go6td07Ly4pr
-# UHBfa1JMdhcZ7VQtQKgRKmPzeArb51S4hOfwifQz4BytrwXhtlSgXaetUDE9OZO6
-# Pax77gkOUvu+57+mbLl2RD2sPbhcuin3n0dHVsPmPu3il2v5eac2Za1FK5gKJ6U6
-# yU6hCkPPeHXrvUR+Ut+XHsjUSbWdG5WlAsKASQNFTEYCcGa6EAHKlfKsQI8ckH+7
-# YcFUL3W46g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjI4
+# MjNaMC8GCSqGSIb3DQEJBDEiBCB6VXFgykRYojXpRunNj34ojK3JFEEfxcKy6juv
+# o2oz9TANBgkqhkiG9w0BAQEFAASCAgCIKZKAn0l5B7cNe94RvW0IuLxu7LF/WbKO
+# llW8o7WY1c5flA4HMpIp0r516rfjoRHK9fJB9aEnTfejltAbWqyDRnh9CZXfkuZe
+# TQ8fkCkn8P4WNhY3bpHsSNPdZmHyGAKjMTyymcjapyEHgzx7NZQ9NmqATyhTNNqb
+# J8ZIRjURL27QjLmm/D4baRm2gS3kV4x+V9hZuCDHrrNSD35eBk65qi3t3ubH8LSf
+# 6LicQPlj/NguNhB13LVWX7b1lHx4ssuMldqlTzw31qOgTANK7jAxpgrF1yCl4wRc
+# 1FsJOFHxUXwj9qQpvDWIT785kCo79tGS/neC6JwcuZTWd8BZjOgqwvwtnZ4krsEZ
+# UZhzNrkM5q4+p+Rr6U16joc4dz1oYYfvFa5ootThOyRUDNEzTUDBUkhTzWUIrsL2
+# qJHi5lyRJ5VkPOKp4XRNb7Bp9muiNM5KqKADArvDWKQ2SdCnPd4utCBp+n41KZ7z
+# YJoHc2AVUGEpj0HamKAvP/1ZDQs0MCvG2bjYs8xSp8tR+IkmYPQbkEV2YieYe0al
+# 9yyGlpHIfeGZIpses0PwdLCkd1PQl8+LqmYegIcM7w+5p8pgL0AsEOj7joXY322T
+# VESbt/dx9M0hoB70WBSAdv2AV/TwHiE/asMJvqt+RG8lyyMpkvcdpxqslFtE51mY
+# CtWEKzdqzQ==
 # SIG # End signature block

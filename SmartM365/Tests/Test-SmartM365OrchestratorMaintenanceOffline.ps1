@@ -113,10 +113,10 @@ try {
     Import-Module (Join-Path $orchFolder 'SmartM365.Orchestrator.Insights.psm1') -Force
     $operations=Get-SmartM365OrchestratorOperations -SharedDataFolderPath $root -ClusterDocument $cluster
     Assert-Case ($operations.Maintenance.Enabled -and -not $operations.MaintenanceError) 'Operational view lost the control state.'
-    Assert-Case (@($operations.Servers | Where-Object Maintenance -eq 'Pending').Count -eq 2) 'Operational view claimed unacknowledged activation.'
+    Assert-Case (@($operations.Servers | Where-Object { $_.Maintenance -eq 'ON' -and $_.MaintenanceAcknowledgement -eq 'Pending' }).Count -eq 2) 'Operational view claimed unacknowledged activation.'
     Write-Heartbeat 'SERVER-A' $again; Write-Heartbeat 'SERVER-B' $again
     $operations=Get-SmartM365OrchestratorOperations -SharedDataFolderPath $root -ClusterDocument $cluster
-    Assert-Case (@($operations.Servers | Where-Object Maintenance -eq 'Applied').Count -eq 2) 'Operational view does not show acknowledgements.'
+    Assert-Case (@($operations.Servers | Where-Object { $_.Maintenance -eq 'ON' -and $_.MaintenanceAcknowledgement -eq 'Applied' }).Count -eq 2) 'Operational view does not show acknowledgements.'
     # Mirror selects the state/audit, never the live launch gate.
     $mirrorDefinitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Get-OrchestratorSharePointMirrorRelativePath','Test-OrchestratorSharePointMirrorFile','Get-OrchestratorSharePointMirrorSnapshot')
     $mirror=New-Module -ScriptBlock ([scriptblock]::Create(($mirrorDefinitions -join "`n") + "`nfunction Update-OrchestratorHeartbeatDuringLongOperation {}"))
@@ -225,8 +225,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8SsPK2XjADxMB
-# QaITXPSk9/qVbmX6pFd1sbvWPN8TvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDn22k63qav4e7O
+# tUmoR3HMkgCs5XSDFgaHUdhwt7usB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -359,31 +359,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH8rtSgiOpAYZFhLKJ5pxWCsTXE6uy0j9Pw/+LAQh6lnMA0GCSqG
-# SIb3DQEBAQUABIIBgBm+oA7qWfMWHtdaqcabcDY+UThRZvkkElLUESLTCoRx146t
-# JzydmFTYKfpk7Lgi+sGRQgkc2OlnPkk14sQY7Nbgzj4/+UtdID26L6RKYQMZb/zv
-# 17z82yLJbfEiApUVIlyy/xUdR3fZOcmpJxIuwaRABuDg0g1gcHAYVvPxHs8Xf0/3
-# oQllrzEfiuufomwAiNTcYuzTCKoNJ26UecFZRaCzhFMcQcBxLIEyHxJUmmuaVX+W
-# 69SBz55pbnNL4ruoWKU3VWYYxurEwzHTFlNLUI84KszYA5o/DjT5MCpCmXDc3KNF
-# bP4zGXOP+P4/ixHW6eWugW0XQyhEDiq0h6YvWfZVoQo2GZUBOu9zxqDkdiD0tnZp
-# RoJ8r4j/LJWxJKtd/eE0sYvXdqPHNJbUMXMtx+luRLbbtTXovIiL/HmCf0BAP3Ve
-# 2h0DE4gBgnCsFG1amVCyy/6pPx6MXMvGldeyqjxGfBl2SnGdkJLQkgaSNTFPj81B
-# HaDPs5k3Hpab/Fz0AaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOzWLO5H+kw6JtR0jSGKGN31DQgdmQtbYpbcQpddlFlTMA0GCSqG
+# SIb3DQEBAQUABIIBgKmPp4Dy5B7NXm5CVTMB9HdxF8jbZ/QA0CRRhFx8eI+SGh9f
+# skd8Y+UlLCVk7VSP/PWpBRmLce5BqXoZ1pkdPEqLLBtZZaCexl3tPSvyUFqphK/V
+# 9FtmjGgs/0My+AC4XewnkqrB5z3x8xeQ33bDEIptouqia6d4N6ZYVVxDpn+Tz+U5
+# ZLMceuOrXQyxkmBNMFnlci/dDtsV+8hTOZ40/0zDIbvBGLdOjthLfFJYS7XQjNBS
+# BDftJ4ZnsNNjR7ooOMFTxN/Ah27O+wyD1RqtDxsViME9+XwmbQRSunM4p8CeCSxD
+# R4yDgjkvwDZrnnS8K8vUnsCIfZ64t+yRHNRMWYrgCgrtFrTvOQ0sfoYQWTa12WaG
+# 3cnFGjgHmUF2J8BwCh3p9NRZDI6zC5p6gYSZfgErG7TOxRp7/Ic8vFqKuMLzHrfO
+# w+VXh2y1ENtADzdJuqmBHbHhs9iJwEo4LXM4+P3D9uEeHkHITn/D6zrpB9t8tGUM
+# uxtRAMwXXHcfLFZH16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDywFSFME6MRxrIDtColql5mJQskjSUC+VSjtcE
-# YzDGRjANBgkqhkiG9w0BAQEFAASCAgB+17r3gc2xv+EHvE/QJWB8eCAn/2b+KYlC
-# j0AoEGjZddoS4SMcqyaCM90Lg2x9k8KPKH6S57Q/uVQWIunKMR5MfAvsVUFa/uJM
-# aKRU+S9dy6/9ZyPP2RBMAfstNAq2i7x0zDdxdtsoyyR6CSbZVwIJIeJnKfGXWlFK
-# AGaHaHdBvQ8gkU2bPmZHdwwPXP12Db1WtFubpCo0yJ7X9DIU8cXEHB6o13Q2sPqV
-# J+RzpzGQBEL+6f8NcX1k66Y6/Iy/w05Ta13mzxpmLSjPn9J9Tz3CfE9uLh7vU35r
-# btvepDdSFLbZF9CX/QL68TvsYp94S72QKYBXsavqF32Zafnkxg+Zdlmm/ch94jl6
-# CAglM+ggq+GQbvXrvt9xaThlJeFN5mAN9zdU6zN5Ayef9e8UcQ5KNp/ylrCI0SvV
-# gRy8GKJansU65PAsxQ+5DJliv55cgVjY6Op/wKprQN/+A44YDsrfBTjVcpDfwS55
-# CKwwNjpC6L+uPjRLBBlaxWYpVusGI4npVpYAFE81ORiQn6ipbv0rnzrzvNiKiMyn
-# kf4wet/1i5hHLGhDwYj+qb2yebFgR//rK89qSVIJAgLCsZSTayNfQP/5B45V78gw
-# qX6qVoIZHvfEGNKrjnYgUaO4V3a5LjFH8tSKRMvLd7X/BPZUqRiCqlQEQW/devb5
-# sTu4Ld2HVg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjI2
+# NDBaMC8GCSqGSIb3DQEJBDEiBCAal5worjonvyGzzywArHn1lGWZrRFhWYIf8qrq
+# UBajeDANBgkqhkiG9w0BAQEFAASCAgAEa81HjoFn+LBLEOwLRiNFfjAd/bmMl4iD
+# DUwSxYCTFSqC1aFRripukW3xbt9zmeXMrLZYHTanzirgMGQtvW8qmBEPK32luqF/
+# w1VPPWGMMGn9fZyNZDthhnpvI5WMHldxaWxI8NWAsNb80NFP9gNmd5mFIixjsjw0
+# TYnv++zT2qYbpHihrFXiKWdkLlLg6t5cnbceMyvGOoV2u/zm+dxP7OQ80huKrCuk
+# XVMXG8EK1m5hXfv7NlUrVtEa53DMidVYTxqKonrBYOUxZIlrotqlSWUqaezs8Irm
+# emxo7NuATprIBACvcn/qublNROF3mPuzcQ4te/JsSFZs/OR3hYTexs8tRNszhVu/
+# 9U1dTJzcudjLWRJ+Okd6JlYqqzIlBVYyQlcSfAQJfnw0//4SqTJoZ8cCJVUWY2Gx
+# GqifmS3Y13ynAZ59WSQMeIxPv3KU3f5mMfohwXHFpzFXWCntDxMrqSUVRiUvM9Y9
+# LDs7L+vO4q1zLXI4MSU947rczblmhjxt66AWiBrMDhxzKDQ2tVyJyUnYSej63o2r
+# I1SFYwgvUm7pcDsdPENR8y9jCGMy1e3MvsIAeNR8WoALyQ93w1bye3tuC+dghXXI
+# TI3Aza9tmPzQwdpwOmaYqoF1ZyoamhPJhSA8D3mWSi8t7Oku81l29ETHj/bEOgVP
+# 62752c6EbA==
 # SIG # End signature block
