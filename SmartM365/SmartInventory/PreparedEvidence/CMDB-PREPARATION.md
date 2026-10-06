@@ -35,6 +35,17 @@ proof is intentionally not fabricated from existing files or their timestamps.
 
 ## Required producer completion proof
 
+WorkplaceScope 1.0.7 retries a group membership 404 up to three complete SDK
+traversals (5 then 15 seconds); partial pages from failed attempts are discarded.
+Only after two targeted group reads return 404 (15 seconds apart) and a fresh
+successful full group enumeration omits that ID may it exclude the group from
+both the catalog and memberships. This corroborates absence during the run,
+not the cause of deletion. Each exclusion produces a warning and its native ID
+in the current receipt qualifications. It is never represented as an empty group.
+A surviving/reappearing group, ambiguous result, permission error or failed
+verification blocks all four canonical exports. No extra permissions, CSVs,
+history or retry configuration are introduced. Normal reads make no extra calls.
+
 The source root must contain the 17 individual current receipts declared in
 `Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt`. Their filename pattern is
 `SmartInventory_<producer script name without .ps1>.current.json.txt`. There is

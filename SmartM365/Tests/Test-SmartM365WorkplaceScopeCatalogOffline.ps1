@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline coherent group catalog/membership acquisition tests. No tenant calls.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -21,21 +21,59 @@ function Assert-Catalog([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
     $script:checks++
 }
-function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]$DuplicateMember, [switch]$FailPolicies) {
+function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]$DuplicateMember, [switch]$FailPolicies,
+    [int]$Member404Count=0, [string[]]$ParentResults=@('Absent','Absent'), [switch]$Reappears,
+    [switch]$FailFinalCatalog, [switch]$DuplicateFinalCatalog, [switch]$CodeOnly404, [int]$MemberStatus=0,
+    [ValidateSet('HttpStatus','ResponseStatus','ResponseObject','Inner')][string]$ErrorShape='HttpStatus') {
     $fixture = New-Module -ScriptBlock {
-        param($rows, $block, $memberFailure, $duplicate, $policyFailure)
+        param($rows, $block, $memberFailure, $duplicate, $policyFailure, $missingCount, $parents,
+            $reappears, $finalFailure, $finalDuplicate, $codeOnly, $memberStatus, $errorShape)
         Set-StrictMode -Version Latest
         $script:Runtime = [pscustomobject]@{RunId='synthetic-runtime-run'}
         $script:Groups = @($rows); $script:Block = $block
         $script:FailMembers = $memberFailure; $script:DuplicateMember = $duplicate
         $script:FailPolicies = $policyFailure
+        $script:MissingCount=$missingCount; $script:Parents=@($parents); $script:Reappears=$reappears
+        $script:FinalFailure=$finalFailure; $script:FinalDuplicate=$finalDuplicate
+        $script:CodeOnly=$codeOnly; $script:MemberStatus=$memberStatus; $script:ErrorShape=$errorShape; $script:FirstMemberCalls=0
         $script:Exports = @{}; $script:GroupCalls = 0; $script:MemberCalls = 0
+        $script:ParentCalls=0; $script:Sleeps=[Collections.Generic.List[int]]::new()
+        $script:Logs=[Collections.Generic.List[object]]::new(); $script:Qualifications=@()
         $script:Properties = @(); $script:Scope = ''; $script:ErrorText = ''
+        function Write-Synthetic404 {
+            if ($script:CodeOnly) { throw '[Request_ResourceNotFound] : Synthetic unavailable resource.' }
+            if ($script:ErrorShape -ne 'HttpStatus') {
+                $error404=[InvalidOperationException]::new('Synthetic structured unavailable resource.')
+                switch ($script:ErrorShape) {
+                    'ResponseStatus' { $error404 | Add-Member -NotePropertyName ResponseStatusCode -NotePropertyValue 404 }
+                    'ResponseObject' { $error404 | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{StatusCode=404}) }
+                    'Inner' { $error404=[InvalidOperationException]::new('Synthetic wrapped unavailable resource.',[Net.Http.HttpRequestException]::new('Synthetic inner 404.',$null,[Net.HttpStatusCode]::NotFound)) }
+                }
+                throw $error404
+            }
+            throw [Net.Http.HttpRequestException]::new('Synthetic unavailable resource.', $null, [Net.HttpStatusCode]::NotFound)
+        }
         function Get-MgBetaGroup {
-            [CmdletBinding()] param([switch]$All, [string[]]$Property)
+            [CmdletBinding()] param([switch]$All, [string[]]$Property, [string]$GroupId)
+            if ($GroupId) {
+                $result=$script:Parents[$script:ParentCalls]; $script:ParentCalls++
+                switch ($result) {
+                    'Absent' { Write-Synthetic404 }
+                    'Exists' { [pscustomobject]@{Id=$GroupId} }
+                    'Forbidden' { throw [Net.Http.HttpRequestException]::new('Synthetic forbidden.', $null, [Net.HttpStatusCode]::Forbidden) }
+                    'Unavailable' { throw 'Synthetic parent failure' }
+                    'WrongId' { [pscustomobject]@{Id='other-group'} }
+                    'Empty' { }
+                    default { throw 'Unexpected parent fixture.' }
+                }
+                return
+            }
             if (-not $All) { throw 'Full group enumeration required.' }
-            $script:GroupCalls++; $script:Properties = @($Property)
-            $script:Groups
+            $script:GroupCalls++
+            if ($script:GroupCalls -eq 1) { $script:Properties = @($Property); $script:Groups; return }
+            if ($script:FinalFailure) { throw 'Synthetic final catalog failure' }
+            if ($script:FinalDuplicate) { $script:Groups; $script:Groups; return }
+            $script:Groups | Where-Object { $_.Id -ne 'group-one' -or $script:Reappears }
         }
         function Get-MgBetaGroupMember {
             [CmdletBinding()] param([string]$GroupId, [switch]$All)
@@ -43,19 +81,27 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             $script:MemberCalls++
             if ($script:FailMembers) { throw 'Synthetic membership failure' }
             if ($GroupId -eq 'group-one') {
+                $script:FirstMemberCalls++
+                if ($script:MemberStatus) { throw [Net.Http.HttpRequestException]::new('Synthetic member error with 404-looking ID.', $null, [Net.HttpStatusCode]$script:MemberStatus) }
+                if ($script:FirstMemberCalls -le $script:MissingCount) {
+                    [pscustomobject]@{Id='discarded-partial-member';OdataType='#microsoft.graph.user'}
+                    Write-Synthetic404
+                }
                 [pscustomobject]@{Id='user-one';OdataType='#microsoft.graph.user'}
                 [pscustomobject]@{Id=$(if ($script:DuplicateMember) {'user-one'} else {'principal-one'});OdataType='#microsoft.graph.servicePrincipal'}
             }
         }
         function Get-WorkplaceSourceValue {
             param($Row, [string[]]$Names, $Default='')
+            if ($null -eq $Row) { return $Default }
             foreach ($name in $Names) {
                 $property = $Row.PSObject.Properties[$name]
                 if ($null -ne $property) { return $property.Value }
             }
             return $Default
         }
-        function Write-SmartM365EvidenceLog { param($Message, $Level) }
+        function Start-Sleep { param([int]$Seconds) $script:Sleeps.Add($Seconds) }
+        function Write-SmartM365EvidenceLog { param($Message, $Level) $script:Logs.Add([pscustomobject]@{Message=$Message;Level=$Level}) }
         function Invoke-SmartM365Preflight { throw 'Unexpected preflight in synthetic visible group collection.' }
         function Get-MgBetaDeviceManagementConfigurationPolicy {
             [CmdletBinding()] param([switch]$All)
@@ -71,14 +117,16 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             if (-not $NoWeeklyHistory -or -not $SingleSerialization) { throw 'Export optimization/history contract changed.' }
             $script:Exports[$Name] = [pscustomobject]@{Rows=@($Rows);Columns=@($Columns)}
         }
-        function Set-SmartM365CmdbSourceScope { param($CompleteScope, $Scope, $Qualifications) $script:Scope=$Scope }
+        function Set-SmartM365CmdbSourceScope { param($CompleteScope, $Scope, $Qualifications) $script:Scope=$Scope; $script:Qualifications=@($Qualifications) }
         function Invoke-SyntheticCatalog {
             $MaxItems = 0
             try { & $script:Block } catch { $script:ErrorText = $_.Exception.Message }
             [pscustomobject]@{Exports=$script:Exports;GroupCalls=$script:GroupCalls;MemberCalls=$script:MemberCalls;
-                             Properties=$script:Properties;Scope=$script:Scope;ErrorText=$script:ErrorText}
+                             Properties=$script:Properties;Scope=$script:Scope;ErrorText=$script:ErrorText;
+                             ParentCalls=$script:ParentCalls;Sleeps=$script:Sleeps.ToArray();Logs=$script:Logs.ToArray();Qualifications=$script:Qualifications}
         }
-    } -ArgumentList @($Groups, $collectionBlock, [bool]$FailMembers, [bool]$DuplicateMember, [bool]$FailPolicies)
+    } -ArgumentList @($Groups, $collectionBlock, [bool]$FailMembers, [bool]$DuplicateMember, [bool]$FailPolicies,
+        $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape)
     try { & $fixture { Invoke-SyntheticCatalog } }
     finally { Remove-Module $fixture -ErrorAction SilentlyContinue }
 }
@@ -123,15 +171,61 @@ foreach ($case in @(
 )) {
     $pattern=$case.Pattern; $arguments=$case.Clone(); $arguments.Remove('Pattern')
     $failed=Invoke-CatalogFixture @arguments
-    Assert-Catalog ($failed.ErrorText -match $pattern -and $failed.Exports.Count -eq 0) 'Failed/duplicate acquisition published canonical evidence.'
+    Assert-Catalog ($failed.ErrorText -match $pattern -and $failed.Exports.Count -eq 0) "Failed/duplicate acquisition contract: expected=$pattern; actual=$($failed.ErrorText); exports=$($failed.Exports.Count)."
+}
+foreach ($count in @(1,2)) {
+    $recovered=Invoke-CatalogFixture @($group,$empty) -Member404Count $count
+    Assert-Catalog (-not $recovered.ErrorText -and $recovered.Exports.Count -eq 4) 'Transient 404 did not recover.'
+    Assert-Catalog ($recovered.GroupCalls -eq 1 -and $recovered.ParentCalls -eq 0 -and $recovered.MemberCalls -eq (2+$count)) 'Recovered traversal made unexpected existence calls.'
+    $rows=$recovered.Exports['M365_EntraGroupMemberships_All'].Rows
+    Assert-Catalog ($rows.Count -eq 2 -and @($rows | Where-Object MemberId -eq 'discarded-partial-member').Count -eq 0) 'Failed pagination leaked partial membership rows.'
+    Assert-Catalog (($recovered.Sleeps -join ',') -ceq $(if($count -eq 1){'5'}else{'5,15'})) 'Membership retries are not bounded to approved delays.'
+}
+foreach ($codeOnly in @($false,$true)) {
+    $gone=Invoke-CatalogFixture @($group,$empty) -Member404Count 9 -CodeOnly404:$codeOnly
+    Assert-Catalog (-not $gone.ErrorText -and $gone.Exports.Count -eq 4) 'Corroborated absent group blocked successful collection.'
+    Assert-Catalog ($gone.GroupCalls -eq 2 -and $gone.ParentCalls -eq 2 -and $gone.MemberCalls -eq 4) 'Absence verification did not use three traversals, two probes and one complete catalog.'
+    Assert-Catalog (($gone.Sleeps -join ',') -ceq '5,15,15') 'Absence verification delay changed.'
+    $catalog=$gone.Exports['M365_EntraGroupMembershipScope'].Rows
+    Assert-Catalog ($catalog.Count -eq 1 -and $catalog[0].GroupId -ceq 'group-empty') 'Excluded group was retained as empty or another group was lost.'
+    Assert-Catalog ($gone.Exports['M365_EntraGroupMemberships_All'].Rows.Count -eq 0) 'Absent group retained partial members.'
+    Assert-Catalog (@($gone.Logs | Where-Object { $_.Level -eq 'WARNING' -and $_.Message -match 'group-one' }).Count -eq 1) 'Absent group warning lacks its native identity.'
+    Assert-Catalog (($gone.Qualifications -join ' ') -match 'group-one.*parent 404s=2') 'Current receipt qualifications do not trace exclusion.'
+}
+foreach ($shape in @('ResponseStatus','ResponseObject','Inner')) {
+    $gone=Invoke-CatalogFixture @($group,$empty) -Member404Count 9 -ErrorShape $shape
+    Assert-Catalog (-not $gone.ErrorText -and $gone.ParentCalls -eq 2 -and $gone.Exports.Count -eq 4) "Structured SDK 404 not recognized: $shape; $($gone.ErrorText)"
+}
+$allGone=Invoke-CatalogFixture @($group) -Member404Count 9
+Assert-Catalog (-not $allGone.ErrorText -and $allGone.Exports['M365_EntraGroupMembershipScope'].Rows.Count -eq 0 -and $allGone.Exports['M365_EntraGroupMembershipScope'].Columns.Count -eq 12) 'Corroborated zero remaining groups lost the explicit schema.'
+$policyFailureAfterAbsence=Invoke-CatalogFixture @($group,$empty) -Member404Count 9 -FailPolicies
+Assert-Catalog ($policyFailureAfterAbsence.ErrorText -match 'policy failure' -and $policyFailureAfterAbsence.Exports.Count -eq 0 -and -not $policyFailureAfterAbsence.Scope) 'Group exclusion bypassed a later required policy failure.'
+foreach ($case in @(
+    @{ParentResults=@('Exists');Pattern='still exists'},
+    @{ParentResults=@('Absent','Exists');Pattern='still exists'},
+    @{ParentResults=@('Empty');Pattern='Ambiguous'},
+    @{ParentResults=@('WrongId');Pattern='Ambiguous'},
+    @{ParentResults=@('Forbidden');Pattern='forbidden'},
+    @{ParentResults=@('Unavailable');Pattern='parent failure'},
+    @{Reappears=$true;Pattern='reappeared'},
+    @{FailFinalCatalog=$true;Pattern='final catalog failure'},
+    @{DuplicateFinalCatalog=$true;Pattern='duplicate identity'}
+)) {
+    $pattern=$case.Pattern; $arguments=$case.Clone(); $arguments.Remove('Pattern')
+    $ambiguous=Invoke-CatalogFixture @($group,$empty) -Member404Count 9 @arguments
+    Assert-Catalog ($ambiguous.ErrorText -match $pattern -and $ambiguous.Exports.Count -eq 0 -and -not $ambiguous.Scope) 'Ambiguous absence or failed verification published canonical evidence.'
+}
+foreach ($status in @(401,403,429,503)) {
+    $other=Invoke-CatalogFixture @($group,$empty) -MemberStatus $status
+    Assert-Catalog ($other.Exports.Count -eq 0 -and $other.MemberCalls -eq 1 -and $other.ParentCalls -eq 0 -and $other.Sleeps.Count -eq 0) 'Non-404 error was treated as group disappearance.'
 }
 Write-Output "PASS: $script:checks offline catalog/membership checks. No collectors, APIs, mail or live writes."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTojqe8ylT/WD+
-# mHOBXQgrcLSkyj2Es6iXxbe2hiaGxqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf6Xs0xVQewUWM
+# 59Sqx2WL1AYuNYcF25wbcSvUlrt1uKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -264,31 +358,31 @@ Write-Output "PASS: $script:checks offline catalog/membership checks. No collect
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINlR6ePpQz1dFXoik2KDNyoqwHsM9Gr0K80Fp+EO7iRqMA0GCSqG
-# SIb3DQEBAQUABIIBgHAI8P/fSV03Z2IXP3vrBTNIcMGOhSr+xTgFeGj7swPENt5N
-# FVL8zvgxPvyiNfKjp6ntR/C20JFN7rkD1XUDFmRk3EYzcC/QwWZ7H7NK6m4HZfFh
-# v3Uh7QIbqb5dxYXI16H1BbBL77drxhebGi0OoIan2WN1HI3prQ/uNpeL28QYEDA1
-# 9GfC5Z/Ked7BfEKVS1cL8QVQTBoVL5Id4XoUhoqveAvjHoidl6Dlw7ArDuFb5U91
-# NuQ4xPgT6IcnVIIr0W6Y8PKI5RTn96GrMALrRxD66tbiQxOC7M61NkYjERAU3fXV
-# DVohRkhFAuEiTWoZbaqczI7tGSbMD4nJbU0oXmI1QnA8gJtAv9PPHSOh89uJQ7vN
-# ZZKb9+Ld06yYpljTIMfqxH+g2mGrhRpQk3Q1WgUhO+bXpiF2wZ+kne1fsm1cjlCN
-# +4MrsRf58B31RWKg8rvwucB95Ucx3KwGs86EE0cAtfLgsTik3dio/ApgTtpUlFQt
-# 9Fn/O6WVLGcfaAsz56GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE8PcxkMKK0ioePNY8jAOJiC28c2bxwz+8dcCTrW0H7GMA0GCSqG
+# SIb3DQEBAQUABIIBgEP70K8tsiK7AfddAN9z3xwov1m3rwZ9Pjg1hYwOEzwe0SLM
+# 4nuyRfVdIa/V3MOfUI6vjNosHqohKgPpDePJpWCMThx695giaNzjS91vWdGsADGe
+# JpJOhwBMAZ+Mq09H3pPLT820zr8chU9V0bHcmx2yRMuX0maF6WsbcQUw2jnbvJPl
+# oO53WfVYCSQKhFn1+FhwUfmaKBsUGmOudb8nCaJccJE/CFze99HnwpFyWyJnYwB2
+# kLiO6Kh1salBDc5NktenxpY/Xs8MQgxQCAxiNShXNPl3/V2QLeHK5waLTa1sm0Wl
+# lN+guvpkAM2263+BHHOqKTOJC4nNZ0aKyLh92FNQW9htpoaqkOL6vCAt3IkyK5QZ
+# 13gwH9g1JykRmC4IPln8H9wzCklwTIvtIOtDv0jVcU6uQBhVDoVTw1allFRHLcSc
+# rODYzodqkhqaU3C9Xn8yZTdkHRH01k4Z+ImXNNvMrsG7GItyqUVfvUDeZ7mGbHXn
+# IcsAvVAgGP60zISSuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzMx
-# MDhaMC8GCSqGSIb3DQEJBDEiBCC3GlzCnXQoycYnwaILTnIARgsRJnrgV8NRHxDc
-# 2vdOGjANBgkqhkiG9w0BAQEFAASCAgBYvXS/97ojsBbAI0dTWc5hUJaJ/NIFLUNl
-# GTSoqqcjcyAfYEucBRb21xrM/gAcgLfeXYYe08MBPgajGHb8fxX08GeqZHigMSIJ
-# DpeiRhyyU0ZNr96yWo8c7LPK4lqIMoh9bczrdlzsTfsyBsvS7hzvefyb8X0dYDWL
-# PwYIhlFnbLCZRVuOQxd9GuzT92jCHC/JZUyNzIENp6wsmNZ1h55Lpm27kGNlsLlu
-# Sd2Q3Ifqf5jGnXp+VYxDDp27ihpBay3Eet9YS9svj0054NfL5fjkwAAkWeC2tDOU
-# NPwqfmb/DUkpyxHdg7+qgZWjDhfCJO2jRdDXMowKjV1pGll50fM2STq2F8J+DUgC
-# KriDk+tydCaezpjEZhL2ggLWGdwfFnPcxq4IR78lNu7ifuRs0v5m2Adj0nl/yEhJ
-# SL764T0RSenFyJGMADxCUJJ9m02918ltY6b/nVMnQO4rJ7g4ye8hQQMYUHZ3Vg31
-# hm3p/VjcFcg6oYD9fZJkOSh8r45C42YzYTu0wCY7OfZtLCm/ozaMnByUNCvaz5SN
-# HRlHjHaQXTBMzz30UFtWXJ0ZL6soEfMDX8zfxXLC6af/rfrDPEfAPxarSXz+Qu8j
-# U4kR/QrW1cRAO8e+1j5GjrEgy6yHm4Bin1/oNxxCas1ML/f5E3e4ivHP29YrNWDw
-# ESenVuYJ+g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTQz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCAShCFumK61O2Un/s3uk72IW5JtQ1ksyvDK8C3Y
+# p7zurzANBgkqhkiG9w0BAQEFAASCAgBWj/2YURpJRm0LNqMWdHcBbLwqAx8kpOX9
+# JKDZofdE399Cni+TIKwMR8LV2G2Dmheqxo+pZOajzUvDyGSmcmZgkrHDLvOyenhC
+# jm7O83huZp1OatA7UBv228gwQNBhnvf1VIy/7JCcfEBkUZtv1R1dr5GidJEdH1Ij
+# c/hjZ9Lr7nZ6AZw+B4PDmchr+6bY1x28y1U1Ay1RSfHUVvzZJjbskMKfV2UrnbwO
+# 9X9AtD/5smGZZQrwJPSRnwzRyiyS0NfAWG1ku+z6Xc6gEnB4asfPhnrrsGjSatbk
+# RvaxapkD3uls/2TwoKUAaGSRLJcynLYklC5ToDvPO8vLZtCDZpQ9/ELg1UMsvoxq
+# nvX6nOJcjIJvVlDMS2RVNO+gnDLwF+jACHhVO6vDA3bY55vmK/1xNYW8bed9td/6
+# d7IVE3vtVYj6JD3Mxcr0dUOtj6KSlU7g9MaJA4SnsaqayOzTB7eE1Cw0TsdgOVBw
+# lG0bgB+hQYLcDWndkItc15/fw/iU6Xz4HDp27/m9nO5GO6Xgw9hbBmeSoVeNES33
+# PA//zjKtYQvZ7B+4lgCkBAXEqtaI2U3E6DjFhgORMDhom2kmkaFt1jgzkVO6COxq
+# 0BxDSXcpSivEA7cyvh4FTJWQNjuTrvnB1ySsx3aCZknfU03lR2TOp0bQB5UW+Ty/
+# uJzvVsAWYw==
 # SIG # End signature block

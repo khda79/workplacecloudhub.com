@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.6
+1.0.7
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -43,6 +43,54 @@ try {
     }
     $memberships = [Collections.Generic.List[object]]::new()
     $groupScope = [Collections.Generic.List[object]]::new()
+    $absentGroups = [Collections.Generic.List[string]]::new()
+    function Test-WorkplaceGroupNotFound {
+        param([Parameter(Mandatory)]$Record)
+        $exception = $Record.Exception
+        while ($null -ne $exception) {
+            foreach ($name in @('ResponseStatusCode','StatusCode')) {
+                $status = Get-WorkplaceSourceValue $exception @($name) $null
+                if ($null -ne $status) { return ([int]$status -eq 404) }
+            }
+            $response = Get-WorkplaceSourceValue $exception @('Response') $null
+            $status = Get-WorkplaceSourceValue $response @('StatusCode') $null
+            if ($null -ne $status) { return ([int]$status -eq 404) }
+            $exception = $exception.InnerException
+        }
+        # SDK error code is accepted, never arbitrary digits in a message or ID.
+        return ([string]$Record.Exception.Message -match '\[Request_ResourceNotFound\]')
+    }
+    function Get-WorkplaceDirectMembers {
+        param([Parameter(Mandatory)][string]$GroupId)
+        for ($attempt=1; $attempt -le 3; $attempt++) {
+            try {
+                # Buffer each complete traversal: discard pages from a failed attempt.
+                $rows = @(Get-MgBetaGroupMember -GroupId $GroupId -All -ErrorAction Stop)
+                return [pscustomobject]@{Absent=$false;Members=$rows}
+            } catch {
+                if (-not (Test-WorkplaceGroupNotFound $_)) { throw }
+                if ($attempt -lt 3) {
+                    $delay = @(5,15)[$attempt-1]
+                    Write-SmartM365EvidenceLog "Group membership returned 404. GroupId=$GroupId; attempt=$attempt/3; restarting complete traversal after ${delay}s."
+                    Start-Sleep -Seconds $delay
+                }
+            }
+        }
+        for ($probe=1; $probe -le 2; $probe++) {
+            try {
+                $parent = @(Get-MgBetaGroup -GroupId $GroupId -Property id -ErrorAction Stop)
+            } catch {
+                if (-not (Test-WorkplaceGroupNotFound $_)) { throw }
+                if ($probe -eq 1) { Start-Sleep -Seconds 15 }
+                continue
+            }
+            if ($parent.Count -ne 1 -or [string]$parent[0].Id -ne $GroupId) {
+                throw "Ambiguous group existence response after membership 404: $GroupId"
+            }
+            throw "Group still exists but direct membership could not be collected: $GroupId"
+        }
+        return [pscustomobject]@{Absent=$true;Members=@()}
+    }
     # Catalog properties and membership scope share this single enumeration.
     $groups = @(Get-MgBetaGroup -All -Property id,visibility,displayName,mailEnabled,securityEnabled,groupTypes,onPremisesSecurityIdentifier -ErrorAction Stop)
     $groupCatalogCollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -54,7 +102,9 @@ try {
     $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($group in $groups) {
         if (-not $group.Id -or -not $seenGroups.Add([string]$group.Id)) { throw 'Missing or duplicate Entra group identity.' }
-        $members = @(Get-MgBetaGroupMember -GroupId $group.Id -All -ErrorAction Stop)
+        $memberRead = Get-WorkplaceDirectMembers -GroupId $group.Id
+        if ($memberRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
+        $members = @($memberRead.Members)
         $collected = [datetime]::UtcNow.ToString('o')
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($member in $members) {
@@ -73,6 +123,17 @@ try {
             GroupTypes=(@($group.GroupTypes) -join ';'); OnPremisesSecurityIdentifier=$group.OnPremisesSecurityIdentifier
             GroupCollectedAtUtc=$groupCatalogCollectedAtUtc
         })
+    }
+    if ($absentGroups.Count) {
+        # Corroborate targeted 404s with a successful fresh full enumeration.
+        $freshIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($currentGroup in @(Get-MgBetaGroup -All -Property id -ErrorAction Stop)) {
+            if (-not $currentGroup.Id -or -not $freshIds.Add([string]$currentGroup.Id)) { throw 'Missing or duplicate identity in group absence verification.' }
+        }
+        foreach ($id in $absentGroups) {
+            if ($freshIds.Contains($id)) { throw "Group reappeared during absence verification; membership remains unqualified: $id" }
+            Write-SmartM365EvidenceLog "Group excluded from catalog and memberships after three membership 404s, two parent 404s and absence from a fresh full catalog. GroupId=$id; absence corroborated, deletion cause not proven." -Level WARNING
+        }
     }
     $policies = [Collections.Generic.List[object]]::new()
     $assignments = [Collections.Generic.List[object]]::new()
@@ -122,8 +183,10 @@ try {
     foreach ($export in $exports) {
         Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -NoWeeklyHistory -SingleSerialization | Out-Null
     }
-    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:group_scope,group_members,policies,policy_assignments' -Qualifications @('Direct membership only; all five required policy families collected.')
-    Write-SmartM365EvidenceLog "Workplace scope collected. Groups=$($groups.Count); memberships=$($memberships.Count); policies=$($policies.Count); assignments=$($assignments.Count)." -Level SUCCESS
+    $qualifications = @('Direct membership only; all five required policy families collected.')
+    if ($absentGroups.Count) { $qualifications += "Groups excluded after corroborated absence (not empty membership): $($absentGroups -join ','); membership attempts=3; parent 404s=2; fresh full catalog verified." }
+    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:group_scope,group_members,policies,policy_assignments' -Qualifications $qualifications
+    Write-SmartM365EvidenceLog "Workplace scope collected. Groups=$($groupScope.Count); excludedAbsentGroups=$($absentGroups.Count); memberships=$($memberships.Count); policies=$($policies.Count); assignments=$($assignments.Count)." -Level SUCCESS
 } catch { $failure=$_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     # Completion owns transcript closure so SharePoint receives the terminal summary.
@@ -133,8 +196,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBAEOP26gBO4SN
-# ia05j7Fto5SVrrasE7ta81Yq1O+G/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXXYVfRBEbbUMt
+# fA3UIM5k/reU5UWcwHGWjdsh1Q95iaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -267,31 +330,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOu3Zb8CcmHtwthN2orOqa/3GFya4LzSujOY9D5m54ljMA0GCSqG
-# SIb3DQEBAQUABIIBgDQdXXFuhJroc0Brob9dM2Rw/eBHOCDWVBJ0cYd5P1Nz10xL
-# pnTAaxSaCeI1j42R+JoQF3k4zz+yFPzwU/QB7Yq7gDv3e1LB6d0qSrYBkZ8aeNva
-# fAQ2IV0EaxbgF6RLma1b/Y0rD//fp4pJ1Ay/YZwuQQxPA+txIa98MmkXYUdmKUP8
-# vmls5JZY1uSNTvKrWPQZkAZxgIcrYmhoOeJBSKNYlhA0OlMhiCFfPmMn3DrNpQyp
-# Yh0JcoGOHMIPmIz6j7QY5HWtnPeGu+1IWLtxyW54Mb1tMspA21o0/6Hs3MjAP5IC
-# tWvDocujhTOJ6SceoRInkWFdMgGHPpV53abl5pP6AxrcL/rIQ29AXCJyij9vjF7E
-# Nko3wLjGGI6A2qU2Wmjpf8AMiZltkVwjuZU5HHFWu92L581xm0N4ZQHdkF6mS4AN
-# z4Efna3uXhwt4HVUYqaIOAp95TW2Ih+ot8qOvF0GAfM0n0pyoAF12iROSCxEMMBy
-# RkQBd3g5JvrIMs0Dn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHXYjEppPYxHU+ebTIQ7+5M7Z2/p/jrxka5yxnGCF3g0MA0GCSqG
+# SIb3DQEBAQUABIIBgClmxOh1kRJJFgCKImtffjmNS2TuMzaJrw5LWLkF1vsh5CpM
+# xGK+w/4wQpAJbnpJr/1toDazCX46RGWKYp1Wmvu5Z2T9tNZRxgUws/dyU0BdbgBk
+# S50VC40bYnCo4YHjfDHybYYsTdKtsME26TmgYXWQ2rD42HBFZc1o5lBvsvChO5kP
+# KUXtMZSHpKVVvhJbZI15nMMugaYW8oyORhOntImxiVxPXRlse2+d9OPjRAKXvAD6
+# VzPycGJwKHeJVL7/QRw5pV+jyu99Hmp2OI7KbqFYiKUz5McG1cqTUT28w/rXnY90
+# KhHrX+JsA6HiAI6bjrdmgmNkUyRWjmqo9dZBW+xxm5YHNMVsM0ZmTNsziahFBfA4
+# 0Gn+aUvvORaWRFyvVQ5xwQoXgWFgNFkrYi1NjITpJGQfviJ7WCkoXTEKoZvQDCX9
+# fkfyJKa/YdGInnqLc09PyzfjOdf7xdtRZ5hEm7k9L2MXR50CFDys/ESkDdB/hQ45
+# jnP88o91OmUJmwjFE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzMx
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCQNZFnTkUsyfw+wp8m2ImgpMkTt0HpD4hxfLfU
-# LGI5ZTANBgkqhkiG9w0BAQEFAASCAgCg6lXNAiFjT8K8aSq5l3X5l06EPiVHCrrm
-# RAUI4Zg/m2OhYqNyWaCexplrlMw+wnnAcNXo4xVTiQq0Wgbx2Wv/wtCQ/JtuFK40
-# o/yXRFPY334S30TtXBwaUACw94wI9p9cQXB9jcqZN2sltzY3VkexOGIAp6u1TkZa
-# RM1a8NIF5jY0SHmF+zlwO9TxIUY9Z9FxNyYUCcCI/zTs4YsovgytSBOgnf9bOi3y
-# k/1KJAiIC+c4qM9OUy+U2WNOmZWi6n2+3EZD2HDCjc4QpmbIbnXt5GmIJgRSDTEO
-# VBEZ5z2P2q7qHq9k0b3pkjelmW7Grxt6km4ZsqB3aWeMDwB1c3luMB9wadFoliCl
-# tbl54Hrqvt1InrmCtxHaO6Z0gbC8kBeiEDoHsxVOhKM1wUlP/3iY+A/joVRMPNbO
-# QNBkzRxBqHERik/dK+4IUw/hmKpuHSMGN2uCs85WVkF3jItbR5DRXma0UHzRyhwE
-# 1B+t2vxz8vdwyB15zuUzV1wM5YrR7Fy0CEAZgwUE3WRONtJxq91Z4gS/YkkCU93/
-# KOU7Uv8nOB4rMw7yqMHUcVKGzgsrhCR+erbq/1U3bAspvHV/CY/c5Ag3JbkkXDtj
-# REAX/NQ9iIo26fwyDgXfOca2qTwv8XGQbVJs0ROUz73K/EnAOVkP53zUrZW/WOCU
-# zt51ipOILA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTQz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCALHTh88IuIr8iNTy7cYl2KBy0WwtG7z0ghn0Nq
+# 9ncb8jANBgkqhkiG9w0BAQEFAASCAgCbBwjsum8uQB+3JanymEMC0A59XI2AmRSl
+# zjEzadav3jB3zbz/wcGOIl4kZNNnZwdqkc9Tp7W1YxDyDG3h/juj/mwFL4b/qvJt
+# R5tIZJTy99iGIRKN8FYTlgpS5H3DyUo6vKzlPim4xQ4pR1nyRdTDbVWxKlJTtT2g
+# UCVKSgERZ+pDW/r2by3zwDD5y3020BsKOZ53QEzov+mQXC19Mi1cc4lD8tyjnvzI
+# LIHePJvWPZodRykosvLvu7PMK03Lj1s3hYdermTDe470FMzr7Bh7gSwcqc9t957x
+# MX4+fgvz5KjPYnN2M0L4G20EfRj3XM2AeEd3rp2+NBzi/Yip4EMmlgG0OYjGG1Zn
+# H1wcyipwE17FPqgrDWOYt4UzFeTMr3d/MdiWnX35mi7UlicOs/AtAmtmwSELobZ3
+# ns/Si/ZLX1nbTqWkUxwKOTQZroEMo8uFea5WO+j3LhOvG2KZlurt2ERCFfFpSCtS
+# B1RYfMGrgztodkDSfbI5pULDdo0ypRQ3O1klm488Y9/wFGGUNTcZHHH6i1NhqgqL
+# DMH8iGm9kR+aYyPFO5+Qm6KWViZMhC6dvBYCe6UaOGQ2C1WAxcnzEhdhxtyupF2u
+# 2hJQDBPXPA7F/G02ggSHMX+wIcDDez3uARH+kwFlOADBCqhUGnUn7lkz2Fyme6Fw
+# /DvNXahX7A==
 # SIG # End signature block
