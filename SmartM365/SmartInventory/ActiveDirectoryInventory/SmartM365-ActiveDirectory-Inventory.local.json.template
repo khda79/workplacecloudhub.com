@@ -47,6 +47,8 @@
   "EnableContactInventory": true,
   "EnableDuplicateAnalysis": true,
   "EnableDuplicateNotification": true,
+  "DuplicateNotificationPreviewLimit": 10,
+  "ShowMailLinks": true,
   "DuplicateNotificationLastSentFilePath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\AD_DuplicateNotification_LastSent.txt",
   "DomainParallelThrottleLimit": 1,
   "DeleteTemporaryPerDomainCsv": true,

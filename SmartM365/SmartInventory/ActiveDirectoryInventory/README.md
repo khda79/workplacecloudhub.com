@@ -31,11 +31,13 @@ Active Directory attribute names remain unchanged. Calculated columns use the sa
 
 ## Duplicate Identity Notification
 
-The inventory sends a single notification with the subject `SmartM365 Active Directory identity and mail routing issues detected` when it finds duplicate UPNs, duplicate SMTP proxy addresses, duplicate remote routing addresses, or remote mailbox routing inconsistencies.
+During a full inventory, the daily summary and identity diagnostics are sent in one email when duplicate UPNs, duplicate SMTP proxy addresses, duplicate remote routing addresses, or remote mailbox routing inconsistencies are found. `-DuplicateAnalysisOnly` sends only the identity diagnostic email; `-ReportOnly` sends only the daily summary email.
 
 Remote mailbox detection uses the exact Active Directory attributes `msExchRemoteRecipientType` and `msExchRecipientTypeDetails`. Validation compares `targetAddress` and `proxyAddresses` with `RemoteRoutingDomain` from the selected local profile, for example `Config/Tenants/prod.local.json`. The profile name only selects the configuration file; it is never used to construct the routing domain. If `RemoteRoutingDomain` is empty, the script derives `<tenant>.mail.onmicrosoft.com` from `OrgDomain` in that profile.
 
-The notification banner is `Identity and mail routing issues detected`. The mail includes summary counters, SharePoint links, inline top 50 previews, and one attached `AD_Users_IdentityAndMailRoutingIssues.xlsx` workbook with a worksheet for each diagnostic dataset.
+The mail includes per-domain summary tables, dated comparisons with the previous available scan and exact J-7/J-30 scans, configurable inline previews (default top 10), and one attached `AD_Users_IdentityAndMailRoutingIssues.xlsx` workbook with a worksheet for each diagnostic dataset. The workbook is also uploaded to SharePoint when enabled; its link appears with the other SharePoint links at the bottom, immediately above Paths. `DuplicateNotificationPreviewLimit` (1-50) controls preview length, and `ShowMailLinks` controls whether SharePoint and path links appear in the mail. Both settings belong in the private script-local JSON configuration; the committed template provides safe defaults.
+
+Summary object totals count parsed CSV records, including records with quoted line breaks. Historical computer, group, and contact totals created by the former physical-line counter are shown as `n/a` in comparisons until a comparable logical-count snapshot exists. J-7 and J-30 require a scan on the exact target date.
 
 The canonical CSV files remain published separately to DATA-ALL, DATA-LAST, SharePoint, and weekly history when applicable:
 

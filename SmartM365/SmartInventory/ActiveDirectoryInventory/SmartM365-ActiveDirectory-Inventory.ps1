@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.54
+1.55
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -364,7 +364,7 @@ function New-SmartM365AdDuplicatePreviewSection {
         [Parameter(Mandatory = $true)]
         [ValidateSet('UPN','SMTP','REMOTE')]
         [string]$DuplicateType,
-        [int]$Limit = 50
+        [int]$Limit = 10
     )
 
     $items = @($Rows | Where-Object { $_ })
@@ -381,9 +381,9 @@ function New-SmartM365AdDuplicatePreviewSection {
         'REMOTE' { 'duplicate remote routing address' }
     }
     $title = switch ($DuplicateType) {
-        'UPN' { 'Top 50 duplicate UPN accounts' }
-        'SMTP' { 'Top 50 duplicate SMTP entries' }
-        'REMOTE' { 'Top 50 duplicate remote routing addresses' }
+        'UPN' { "Top $Limit duplicate UPN accounts" }
+        'SMTP' { "Top $Limit duplicate SMTP entries" }
+        'REMOTE' { "Top $Limit duplicate remote routing addresses" }
     }
 
     $groups = @(
@@ -452,7 +452,7 @@ function New-SmartM365AdRemoteRoutingIssuePreviewSection {
     [CmdletBinding()]
     param(
         [array]$Rows,
-        [int]$Limit = 50
+        [int]$Limit = 10
     )
 
     $items = @($Rows | Where-Object { $_ } | Sort-Object Severity, IssueType, DomainName, SamAccountName | Select-Object -First $Limit)
@@ -488,7 +488,66 @@ function New-SmartM365AdRemoteRoutingIssuePreviewSection {
 </table>
 "@
 
-    return [pscustomobject]@{ Title = 'Top 50 remote routing issues'; Html = $html }
+    return [pscustomobject]@{ Title = "Top $Limit remote routing issues"; Html = $html }
+}
+
+function Get-SmartM365AdCaseInsensitiveDistinctCount {
+    param([array]$Rows, [Parameter(Mandatory = $true)][string]$PropertyName)
+    $values = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $Rows) {
+        $property = $row.PSObject.Properties[$PropertyName]
+        if ($null -eq $property) { continue }
+        $value = ([string]$property.Value).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) { [void]$values.Add($value) }
+    }
+    return $values.Count
+}
+
+function New-SmartM365AdIdentitySummaryHtml {
+    [CmdletBinding()]
+    param([array]$AllUsers, [array]$DuplicateUpnRows, [array]$DuplicateSmtpRows,
+          [array]$DuplicateRemoteRows, [array]$RoutingIssueRows)
+
+    $domains = @($AllUsers | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_.DomainName)) { 'Unknown domain' } else { [string]$_.DomainName } } | Sort-Object -Unique)
+    $sets = @(
+        [pscustomobject]@{ Title = 'Duplicate identities'; Metrics = @(
+            [pscustomobject]@{ Label = 'UPN values'; Rows = $DuplicateUpnRows; Distinct = 'UserPrincipalName'; IssueType = '' }
+            [pscustomobject]@{ Label = 'UPN accounts'; Rows = $DuplicateUpnRows; Distinct = ''; IssueType = '' }
+            [pscustomobject]@{ Label = 'SMTP values'; Rows = $DuplicateSmtpRows; Distinct = 'SmtpAddress'; IssueType = '' }
+            [pscustomobject]@{ Label = 'SMTP entries'; Rows = $DuplicateSmtpRows; Distinct = ''; IssueType = '' }
+            [pscustomobject]@{ Label = 'Routing values'; Rows = $DuplicateRemoteRows; Distinct = 'NormalizedRemoteRoutingAddress'; IssueType = '' }
+            [pscustomobject]@{ Label = 'Routing accounts'; Rows = $DuplicateRemoteRows; Distinct = ''; IssueType = '' }
+        ) }
+        [pscustomobject]@{ Title = 'Remote routing issues'; Metrics = @(
+            [pscustomobject]@{ Label = 'Accounts'; Rows = $RoutingIssueRows; Distinct = 'DistinguishedName'; IssueType = '' }
+            [pscustomobject]@{ Label = 'Missing target'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'MissingRemoteRoutingAddress' }
+            [pscustomobject]@{ Label = 'Invalid target'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'InvalidRemoteRoutingAddress' }
+            [pscustomobject]@{ Label = 'Wrong domain'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'UnexpectedRemoteRoutingDomain' }
+            [pscustomobject]@{ Label = 'Target absent in proxy'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'RemoteRoutingAddressMissingFromProxyAddresses' }
+            [pscustomobject]@{ Label = 'Tenant proxy missing'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'MissingMailOnMicrosoftProxyAddress' }
+        ) }
+    )
+    $tables = foreach ($set in $sets) {
+        $headers = @($set.Metrics | ForEach-Object { '<th align="right" style="padding:6px 4px;">{0}</th>' -f (ConvertTo-SmartM365EmailHtmlText $_.Label) }) -join ''
+        $rows = foreach ($domain in $domains) {
+            $cells = foreach ($metric in $set.Metrics) {
+                $items = @($metric.Rows | Where-Object {
+                    $rowDomain = if ([string]::IsNullOrWhiteSpace([string]$_.DomainName)) { 'Unknown domain' } else { [string]$_.DomainName }
+                    $rowDomain -eq $domain -and ([string]::IsNullOrWhiteSpace($metric.IssueType) -or [string]$_.IssueType -eq $metric.IssueType)
+                })
+                $value = if ($metric.Distinct) { Get-SmartM365AdCaseInsensitiveDistinctCount -Rows $items -PropertyName $metric.Distinct } else { $items.Count }
+                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:6px 4px;">{0}</td>' -f $value
+            }
+            '<tr><td style="border-bottom:1px solid #eef2f7;padding:6px 4px;">{0}</td>{1}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $domain), ($cells -join '')
+        }
+        $totalCells = foreach ($metric in $set.Metrics) {
+            $items = @($metric.Rows | Where-Object { [string]::IsNullOrWhiteSpace($metric.IssueType) -or [string]$_.IssueType -eq $metric.IssueType })
+            $value = if ($metric.Distinct) { Get-SmartM365AdCaseInsensitiveDistinctCount -Rows $items -PropertyName $metric.Distinct } else { $items.Count }
+            '<td align="right" style="background:#dbeafe;padding:7px 4px;font-weight:700;">{0}</td>' -f $value
+        }
+        '<div style="font-size:12px;font-weight:700;margin:12px 0 6px;">{0}</div><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:10px;"><tr style="background:#f1f5f9;"><th align="left">Domain</th>{1}</tr>{2}<tr><td style="background:#dbeafe;padding:7px 4px;font-weight:700;">TOTAL</td>{3}</tr></table>' -f $set.Title, $headers, ($rows -join ''), ($totalCells -join '')
+    }
+    return (($tables -join "`n") + '<div style="font-size:11px;color:#64748b;margin-top:6px;">Distinct values may span domains; TOTAL counts distinct values across the forest.</div>')
 }
 
 function Send-SmartM365AdInventoryEmailHtmlReport {
@@ -497,7 +556,8 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         [Parameter(Mandatory = $true)][string]$Subject,
         [Parameter(Mandatory = $true)][string]$BodyHtml,
         [string]$To = '',
-        [string[]]$Attachments
+        [string[]]$Attachments,
+        [bool]$ShowLinks = $true
     )
 
     $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
@@ -515,7 +575,19 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         $mailParams['AllowAttachments'] = $true
     }
 
-    SendEmailHtmlReport @mailParams
+    if ($ShowLinks) {
+        SendEmailHtmlReport @mailParams
+    }
+    else {
+        $uploadedFiles = $global:SmartM365SharePointUploadedFiles
+        try {
+            $global:SmartM365SharePointUploadedFiles = $null
+            SendEmailHtmlReport @mailParams
+        }
+        finally {
+            $global:SmartM365SharePointUploadedFiles = $uploadedFiles
+        }
+    }
 }
 
 function Export-SmartM365AdDiagnosticsWorkbook {
@@ -640,6 +712,9 @@ $EnableGroupInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalCo
 $EnableContactInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableContactInventory' -DefaultValue $true)
 $EnableDuplicateAnalysis = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateAnalysis' -DefaultValue $true)
 $EnableDuplicateNotification = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateNotification' -DefaultValue $true)
+$DuplicateNotificationPreviewLimit = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DuplicateNotificationPreviewLimit' -DefaultValue 10)
+if ($DuplicateNotificationPreviewLimit -lt 1 -or $DuplicateNotificationPreviewLimit -gt 50) { throw 'DuplicateNotificationPreviewLimit must be between 1 and 50.' }
+$ShowMailLinks = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ShowMailLinks' -DefaultValue $true)
 $DuplicateNotificationLastSentFilePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DuplicateNotificationLastSentFilePath' -DefaultValue ''
 $DeleteTemporaryPerDomainCsv = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeleteTemporaryPerDomainCsv' -DefaultValue $true)
 $TemporaryPerDomainRetentionDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TemporaryPerDomainRetentionDays' -DefaultValue 2)
@@ -682,7 +757,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.54"
+$ScriptVersion = "1.55"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1766,13 +1841,60 @@ try {
 
         if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
 
-        [int64]$lineCount = Invoke-SmartM365AdCsvReadWithRetry -Path $Path -ReadAction {
+        return (Invoke-SmartM365AdCsvReadWithRetry -Path $Path -ReadAction {
             [int64]$count = 0
-            foreach ($line in [System.IO.File]::ReadLines($Path)) { $count++ }
+            Import-Csv -LiteralPath $Path -Encoding UTF8 | ForEach-Object { $count++ }
             return $count
+        })
+    }
+
+    function Get-SmartM365AdCsvDomainRowCounts {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$Path)
+
+        $counts = @{}
+        if (-not (Test-Path -LiteralPath $Path)) { return $counts }
+        Invoke-SmartM365AdCsvReadWithRetry -Path $Path -ReadAction {
+            Import-Csv -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
+                $domain = ([string]$_.DomainName).Trim()
+                if ([string]::IsNullOrWhiteSpace($domain)) { $domain = 'Unknown domain' }
+                if (-not $counts.ContainsKey($domain)) { $counts[$domain] = [int64]0 }
+                $counts[$domain] = [int64]$counts[$domain] + 1
+            }
+        } | Out-Null
+        return $counts
+    }
+
+    function Get-SmartM365AdDomainCountTotal {
+        param([hashtable]$Counts)
+        [int64]$total = 0
+        foreach ($value in $Counts.Values) { $total += [int64]$value }
+        return $total
+    }
+
+    function New-SmartM365AdDomainSummaryHtml {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)]$Snapshot)
+
+        $maps = $script:SmartM365AdDailyDomainCounts
+        $domains = @(@($maps.Values | ForEach-Object { $_.Keys }) + @($script:SmartM365AdDailyDomainNames) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+        $rows = foreach ($domain in $domains) {
+            $cells = foreach ($key in @('Users','Computers','Groups','OUs','Contacts','DuplicateUPN','DuplicateSMTP')) {
+                $value = if ($maps[$key].ContainsKey($domain)) { $maps[$key][$domain] } else { 0 }
+                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:7px 5px;font-size:11px;">{0}</td>' -f (Format-SmartM365AdSummaryNumber $value)
+            }
+            '<tr><td style="border-bottom:1px solid #eef2f7;padding:7px 5px;font-size:11px;">{0}</td>{1}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $domain), ($cells -join '')
         }
-        if ($lineCount -le 0) { return 0 }
-        return [Math]::Max(0, $lineCount - 1)
+        $totals = foreach ($value in @($Snapshot.TotalUsers,$Snapshot.TotalComputers,$Snapshot.TotalGroups,$Snapshot.TotalOUs,$Snapshot.TotalContacts,$Snapshot.AffectedDuplicateUPNAccounts,$Snapshot.AffectedDuplicateSMTPEntries)) {
+            '<td align="right" style="padding:8px 5px;font-size:11px;font-weight:700;background:#dbeafe;">{0}</td>' -f (Format-SmartM365AdSummaryNumber $value)
+        }
+        return @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+<tr style="background:#f1f5f9;font-size:10px;"><th align="left">Domain</th><th>Users</th><th>Computers</th><th>Groups</th><th>OUs</th><th>Contacts</th><th>UPN dup.</th><th>SMTP dup.</th></tr>
+$($rows -join "`n")
+<tr><td style="padding:8px 5px;font-size:11px;font-weight:700;background:#dbeafe;">TOTAL ($($Snapshot.DomainCount) domains)</td>$($totals -join '')</tr>
+</table>
+"@
     }
 
     function Get-SmartM365AdCsvDistinctValueCount {
@@ -1849,6 +1971,7 @@ try {
         $groupsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Groups_AllDomains.csv'
         $ousCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_OUs_AllDomains.csv'
         $contactsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Contacts_AllDomains.csv'
+        $domainsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Domains_AllDomains.csv'
         $duplicateUpnCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_DuplicateUPN.csv'
         $duplicateSmtpCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_DuplicateSMTP.csv'
 
@@ -1859,34 +1982,51 @@ try {
             }
         }
 
+        $script:SmartM365AdDailyDomainCounts = @{
+            Users = Get-SmartM365AdCsvDomainRowCounts -Path $usersCsv
+            Computers = Get-SmartM365AdCsvDomainRowCounts -Path $computersCsv
+            Groups = Get-SmartM365AdCsvDomainRowCounts -Path $groupsCsv
+            OUs = Get-SmartM365AdCsvDomainRowCounts -Path $ousCsv
+            Contacts = Get-SmartM365AdCsvDomainRowCounts -Path $contactsCsv
+            DuplicateUPN = Get-SmartM365AdCsvDomainRowCounts -Path $duplicateUpnCsv
+            DuplicateSMTP = Get-SmartM365AdCsvDomainRowCounts -Path $duplicateSmtpCsv
+        }
+        $script:SmartM365AdDailyDomainNames = if (Test-Path -LiteralPath $domainsCsv) {
+            @(Import-Csv -LiteralPath $domainsCsv -Encoding UTF8 | ForEach-Object { [string]$_.DomainName } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        } else { @($script:SmartM365AdDailyDomainCounts.Users.Keys) }
+
         return [PSCustomObject][ordered]@{
             SnapshotDate                   = (Get-Date).ToString('yyyy-MM-dd')
             GeneratedAt                    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
-            DomainCount                    = Get-SmartM365AdCsvDistinctValueCount -Path $usersCsv -ColumnName 'DomainName'
-            TotalUsers                     = Get-SmartM365AdCsvDataRowCount -Path $usersCsv
-            TotalComputers                 = Get-SmartM365AdCsvDataRowCount -Path $computersCsv
-            TotalGroups                    = Get-SmartM365AdCsvDataRowCount -Path $groupsCsv
-            TotalOUs                       = Get-SmartM365AdCsvDataRowCount -Path $ousCsv
-            TotalContacts                  = Get-SmartM365AdCsvDataRowCount -Path $contactsCsv
+            DomainCount                    = @($script:SmartM365AdDailyDomainNames).Count
+            TotalUsers                     = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.Users
+            TotalComputers                 = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.Computers
+            TotalGroups                    = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.Groups
+            TotalOUs                       = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.OUs
+            TotalContacts                  = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.Contacts
             DistinctDuplicateUPNs          = Get-SmartM365AdCsvDistinctValueCount -Path $duplicateUpnCsv -ColumnName 'UserPrincipalName'
-            AffectedDuplicateUPNAccounts   = Get-SmartM365AdCsvDataRowCount -Path $duplicateUpnCsv
+            AffectedDuplicateUPNAccounts   = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.DuplicateUPN
             DistinctDuplicateSMTPAddresses = Get-SmartM365AdCsvDistinctValueCount -Path $duplicateSmtpCsv -ColumnName 'SmtpAddress'
-            AffectedDuplicateSMTPEntries   = Get-SmartM365AdCsvDataRowCount -Path $duplicateSmtpCsv
+            AffectedDuplicateSMTPEntries   = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.DuplicateSMTP
         }
     }
 
     function Get-SmartM365AdPreviousDailySummarySnapshot {
         [CmdletBinding()]
-        param([Parameter(Mandatory = $true)][string]$SummaryCsvPath)
+        param(
+            [Parameter(Mandatory = $true)][string]$SummaryCsvPath,
+            [Parameter(Mandatory = $true)][datetime]$CurrentDate,
+            [string]$ExactDate = ''
+        )
 
         if ([string]::IsNullOrWhiteSpace($SummaryCsvPath) -or -not (Test-Path -LiteralPath $SummaryCsvPath)) { return $null }
 
-        $today = (Get-Date).Date
         $previousRows = @(
             foreach ($row in @(Import-Csv -LiteralPath $SummaryCsvPath -Encoding UTF8)) {
                 $snapshotDate = [datetime]::MinValue
                 if (-not [datetime]::TryParse([string]$row.SnapshotDate, [ref]$snapshotDate)) { continue }
-                if ($snapshotDate.Date -ge $today) { continue }
+                if ($snapshotDate.Date -ge $CurrentDate.Date) { continue }
+                if (-not [string]::IsNullOrWhiteSpace($ExactDate) -and $snapshotDate.ToString('yyyy-MM-dd') -ne $ExactDate) { continue }
 
                 [PSCustomObject]@{
                     SortDate = $snapshotDate.Date
@@ -1903,7 +2043,10 @@ try {
         [CmdletBinding()]
         param(
             [Parameter(Mandatory = $true)]$Current,
-            [AllowNull()]$Previous
+            [AllowNull()]$Previous,
+            [AllowNull()]$Week,
+            [AllowNull()]$Month,
+            [string]$LogicalCountBaselineAt = ''
         )
 
         $hasPrevious = $null -ne $Previous
@@ -1920,39 +2063,56 @@ try {
             [pscustomobject]@{ Label = 'Affected duplicate SMTP entries'; Property = 'AffectedDuplicateSMTPEntries' }
         )
 
+        $comparisons = @(
+            [pscustomobject]@{ Label = 'Previous'; Snapshot = $Previous }
+            [pscustomobject]@{ Label = 'J-7'; Snapshot = $Week }
+            [pscustomobject]@{ Label = 'J-30'; Snapshot = $Month }
+        )
+        $headers = foreach ($comparison in $comparisons) {
+            $dateText = if ($comparison.Snapshot) { [string]$comparison.Snapshot.SnapshotDate } else { 'n/a' }
+            '<th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">{0} ({1})</th>' -f $comparison.Label, (ConvertTo-SmartM365EmailHtmlText $dateText)
+        }
         $rows = foreach ($metric in $metrics) {
             $currentProperty = $Current.PSObject.Properties[$metric.Property]
             $currentValue = if ($null -ne $currentProperty) { $currentProperty.Value } else { 0 }
-            $previousProperty = if ($hasPrevious) { $Previous.PSObject.Properties[$metric.Property] } else { $null }
-            $previousValue = if ($null -ne $previousProperty) { $previousProperty.Value } else { $null }
-            $delta = Format-SmartM365AdSummaryDelta -Current $currentValue -Previous $previousValue -HasPrevious $hasPrevious
-            $deltaColor = '#334155'
-            if ($delta -like '+*') { $deltaColor = '#1d4ed8' }
-            elseif ($delta -like '-*') { $deltaColor = '#b91c1c' }
-
             $labelHtml = ConvertTo-SmartM365EmailHtmlText $metric.Label
             $currentHtml = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $currentValue)
-            $previousHtml = if ($hasPrevious) { ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $previousValue) } else { 'n/a' }
-            $deltaHtml = ConvertTo-SmartM365EmailHtmlText $delta
-
-            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$labelHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#111827;`">$currentHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$previousHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:$deltaColor;`">$deltaHtml</td></tr>"
+            $comparisonCells = foreach ($comparison in $comparisons) {
+                $snapshot = $comparison.Snapshot
+                $comparable = $null -ne $snapshot
+                if ($comparable -and $metric.Property -in @('TotalComputers','TotalGroups','TotalContacts')) {
+                    $snapshotTime = [datetimeoffset]::MinValue
+                    $baselineTime = [datetimeoffset]::MinValue
+                    $comparable = (-not [string]::IsNullOrWhiteSpace($LogicalCountBaselineAt)) -and
+                        [datetimeoffset]::TryParse([string]$snapshot.GeneratedAt, [ref]$snapshotTime) -and
+                        [datetimeoffset]::TryParse($LogicalCountBaselineAt, [ref]$baselineTime) -and
+                        $snapshotTime -ge $baselineTime
+                }
+                $cell = 'n/a'
+                if ($comparable) {
+                    $property = $snapshot.PSObject.Properties[$metric.Property]
+                    $value = if ($property) { $property.Value } else { 0 }
+                    $delta = Format-SmartM365AdSummaryDelta -Current $currentValue -Previous $value -HasPrevious $true
+                    $color = if ($delta -like '+*') { '#1d4ed8' } elseif ($delta -like '-*') { '#b91c1c' } else { '#334155' }
+                    $cell = '{0}<br /><strong style="color:{1};">{2}</strong>' -f (ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $value)), $color, (ConvertTo-SmartM365EmailHtmlText $delta)
+                }
+                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td>' -f $cell
+            }
+            '<tr><td style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td><td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;font-weight:700;">{1}</td>{2}</tr>' -f $labelHtml, $currentHtml, ($comparisonCells -join '')
         }
-
-        $previousLabel = if ($hasPrevious) { ConvertTo-SmartM365EmailHtmlText ("Previous older scan: {0}" -f $Previous.SnapshotDate) } else { 'No previous older daily summary snapshot found. This run becomes the comparison baseline.' }
         $html = @"
-<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$previousLabel</div>
+<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with the dated scan. n/a means no scan on that date or an incompatible historical count.</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Metric</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Current</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Previous</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Delta</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Metric</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Current ($($Current.SnapshotDate))</th>
+    $($headers -join "`n")
   </tr>
   $($rows -join "`n")
 </table>
 "@
 
-        return [pscustomobject]@{ Title = 'Diff since previous scan'; Html = $html }
+        return [pscustomobject]@{ Title = 'Diff against previous scans'; Html = $html }
     }
 
     function Invoke-SmartM365AdDailySummaryEmail {
@@ -1962,7 +2122,8 @@ try {
             [Parameter(Mandatory = $true)][string]$SummaryOutputPath,
             [string]$LatestFolderPath,
             [string]$LastSentFilePath,
-            [bool]$ForceSend = $false
+            [bool]$ForceSend = $false,
+            [AllowNull()]$IdentityContext
         )
 
         if (-not $EnableDailySummaryEmail) {
@@ -1993,7 +2154,15 @@ try {
         }
 
         $summaryCsvPath = Join-Path -Path $SummaryOutputPath -ChildPath 'AD_Inventory_DailySummary.csv'
-        $previousSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath
+        $snapshotDate = [datetime]::ParseExact([string]$summarySnapshot.SnapshotDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $previousSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath -CurrentDate $snapshotDate
+        $weekSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath -CurrentDate $snapshotDate -ExactDate $snapshotDate.AddDays(-7).ToString('yyyy-MM-dd')
+        $monthSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath -CurrentDate $snapshotDate -ExactDate $snapshotDate.AddDays(-30).ToString('yyyy-MM-dd')
+        $logicalCountMarker = Join-Path $SummaryOutputPath 'AD_DailySummary_LogicalCountBaseline.txt'
+        if (-not (Test-Path -LiteralPath $logicalCountMarker)) {
+            Write-SmartM365TextAtomically -Path $logicalCountMarker -Content ([string]$summarySnapshot.GeneratedAt)
+        }
+        $logicalCountBaselineAt = (Get-Content -LiteralPath $logicalCountMarker -Raw).Trim()
 
         $existingDailySummary = Test-Path -LiteralPath $summaryCsvPath
         if (Test-Path -LiteralPath $summaryCsvPath) {
@@ -2045,9 +2214,12 @@ try {
             return $false
         }
 
-        $diffSection = New-SmartM365AdDailySummaryDiffSection -Current $summarySnapshot -Previous $previousSnapshot
-        $sharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $summarySharePointUploads
+        $diffSection = New-SmartM365AdDailySummaryDiffSection -Current $summarySnapshot -Previous $previousSnapshot -Week $weekSnapshot -Month $monthSnapshot -LogicalCountBaselineAt $logicalCountBaselineAt
+        $allUploads = @($summarySharePointUploads)
+        if ($IdentityContext) { $allUploads += @($IdentityContext.SharePointUploads) }
+        $sharePointSection = if ($ShowMailLinks) { New-SmartM365SharePointLinksSection -UploadRecords $allUploads } else { $null }
         $sections = @($diffSection)
+        if ($IdentityContext) { $sections += @($IdentityContext.Sections) }
         if ($sharePointSection) { $sections += $sharePointSection }
 
         $hasDuplicateIdentities = ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateUPNAccounts) -gt 0) -or ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateSMTPEntries) -gt 0)
@@ -2055,16 +2227,13 @@ try {
         $actionTitle = if ($hasDuplicateIdentities) { 'Review required' } else { 'No duplicate identity conflict detected' }
         $actionHtml = if ($hasDuplicateIdentities) { 'Review duplicate UPN and SMTP counters before identity cleanup, migration, or synchronization decisions.' } else { 'Keep the generated CSV files as the daily Active Directory inventory baseline.' }
 
-        $summaryRows = @(
-            [pscustomobject]@{ Label = 'Domains'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.DomainCount }
-            [pscustomobject]@{ Label = 'Users'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalUsers }
-            [pscustomobject]@{ Label = 'Computers'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalComputers }
-            [pscustomobject]@{ Label = 'Groups'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalGroups }
-            [pscustomobject]@{ Label = 'OUs'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalOUs }
-            [pscustomobject]@{ Label = 'Contacts'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalContacts }
-            [pscustomobject]@{ Label = 'Duplicate UPN accounts'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.AffectedDuplicateUPNAccounts }
-            [pscustomobject]@{ Label = 'Duplicate SMTP entries'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.AffectedDuplicateSMTPEntries }
-        )
+        $summaryHtml = New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot
+        if ($IdentityContext) {
+            $summaryHtml += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px;">Identity and mail routing issues by domain</div>' + [string]$IdentityContext.SummaryHtml
+            $severity = 'Warning'
+            $actionTitle = 'Action required'
+            $actionHtml = 'Review the attached Excel workbook and the identity diagnostics before cleanup, migration, or synchronization decisions.'
+        }
 
         $pathRows = @(
             [pscustomobject]@{ Label = 'Source folder'; Path = $SourceFolder }
@@ -2074,21 +2243,31 @@ try {
             $pathRows += [pscustomobject]@{ Label = 'Latest summary'; Path = $latestSummaryPath }
         }
 
+        if ($IdentityContext -and $ShowMailLinks) { $pathRows += @($IdentityContext.PathRows) }
+        if (-not $ShowMailLinks) { $pathRows = @() }
+        $mailTitle = if ($IdentityContext) { 'Active Directory daily summary and identity diagnostics' } else { 'Active Directory daily summary' }
+        $mailSubject = 'SmartM365 ' + $mailTitle
+        $mailFooter = if ($ShowMailLinks) { 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links as the inventory source of truth.' } elseif ($IdentityContext) { 'This automated message was generated by SmartM365. Use the exported CSV files and attached workbook as the inventory source of truth.' } else { 'This automated message was generated by SmartM365. Use the exported CSV files as the inventory source of truth.' }
+
         $emailBody = New-SmartM365EmailBody `
-            -Title 'Active Directory daily summary' `
+            -Title $mailTitle `
             -Category 'SmartM365 Active Directory' `
             -Severity $severity `
             -Tenant $Tenant `
             -HostName $env:COMPUTERNAME `
-            -Message 'Daily Active Directory inventory summary with comparison against the latest available scan from a previous day.' `
+            -Message 'Daily Active Directory inventory summary with previous, seven-day, and thirty-day comparisons.' `
             -ActionTitle $actionTitle `
             -ActionHtml $actionHtml `
-            -SummaryRows $summaryRows `
+            -SummaryHtml $summaryHtml `
             -PathRows $pathRows `
             -Sections $sections `
-            -Footer 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links as the inventory source of truth.'
+            -Footer $mailFooter
 
-        Send-SmartM365AdInventoryEmailHtmlReport -Subject 'SmartM365 Active Directory daily summary' -BodyHtml $emailBody -To $dailySummaryTo
+        $attachments = if ($IdentityContext) { @($IdentityContext.WorkbookPath) } else { @() }
+        Send-SmartM365AdInventoryEmailHtmlReport -Subject $mailSubject -BodyHtml $emailBody -To $dailySummaryTo -Attachments $attachments -ShowLinks $ShowMailLinks
+        if ($IdentityContext -and -not [string]::IsNullOrWhiteSpace([string]$IdentityContext.LastSentFilePath)) {
+            Set-Content -LiteralPath $IdentityContext.LastSentFilePath -Value $todayStamp -Encoding UTF8
+        }
 
         $lastSentFolder = Split-Path -Path $LastSentFilePath -Parent
         if (-not [string]::IsNullOrWhiteSpace($lastSentFolder) -and -not (Test-Path -LiteralPath $lastSentFolder)) {
@@ -3388,7 +3567,10 @@ try {
                         $lastSentStamp = (Get-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Raw -ErrorAction SilentlyContinue).Trim()
                     }
 
-                    if ($lastSentStamp -eq $todayStamp -and -not $ForceSendDuplicateNotification) {
+                    $dailyMarkerPath = if ([string]::IsNullOrWhiteSpace($DailySummaryLastSentFilePath)) { Join-Path $OutputPath 'AD_DailySummary_LastSent.txt' } else { $DailySummaryLastSentFilePath }
+                    $dailyAlreadySent = (Test-Path -LiteralPath $dailyMarkerPath) -and ((Get-Content -LiteralPath $dailyMarkerPath -Raw -ErrorAction SilentlyContinue).Trim() -eq $todayStamp)
+                    $deferToDailySummary = (-not $DuplicateAnalysisOnly -and -not $SkipDailyReport -and $EnableDailySummaryEmail -and (-not $dailyAlreadySent -or $ForceSendDailySummary -or $ForceSendDuplicateNotification))
+                    if ($lastSentStamp -eq $todayStamp -and -not $ForceSendDuplicateNotification -and -not $deferToDailySummary) {
                         WriteLog -Message ("Duplicate identity notification already sent today ({0}). Use -ForceSendDuplicateNotification to resend." -f $todayStamp)
                     }
                     else {
@@ -3398,42 +3580,43 @@ try {
                         }
 
                         $emailSubject = "SmartM365 Active Directory identity and mail routing issues detected"
-                        $duplicateSummaryRows = @(
-                            [pscustomobject]@{ Label = 'Distinct duplicate UPNs'; Value = $upnDuplicateCount }
-                            [pscustomobject]@{ Label = 'Affected UPN accounts'; Value = $duplicateUpnRows.Count }
-                            [pscustomobject]@{ Label = 'Distinct duplicate SMTP addresses'; Value = $smtpDuplicateCount }
-                            [pscustomobject]@{ Label = 'Affected SMTP entries'; Value = $duplicateSmtpRows.Count }
-                            [pscustomobject]@{ Label = 'Distinct duplicate remote routing addresses'; Value = $remoteRoutingDuplicateCount }
-                            [pscustomobject]@{ Label = 'Affected remote routing accounts'; Value = $duplicateRemoteRoutingRows.Count }
-                            [pscustomobject]@{ Label = 'Remote routing issue accounts'; Value = $remoteRoutingIssueAccountCount }
-                            [pscustomobject]@{ Label = 'Missing targetAddress'; Value = $missingRemoteRoutingAddressCount }
-                            [pscustomobject]@{ Label = 'Invalid targetAddress'; Value = $invalidRemoteRoutingAddressCount }
-                            [pscustomobject]@{ Label = 'Unexpected targetAddress domain'; Value = $unexpectedRemoteRoutingDomainCount }
-                            [pscustomobject]@{ Label = 'targetAddress absent from proxyAddresses'; Value = $remoteRoutingAddressMissingFromProxyCount }
-                            [pscustomobject]@{ Label = 'Missing tenant mail.onmicrosoft.com proxy'; Value = $missingMailOnMicrosoftProxyCount }
-                        )
                         $diagnosticWorkbookPath = Export-SmartM365AdDiagnosticsWorkbook -Path (Join-Path $OutputPath 'AD_Users_IdentityAndMailRoutingIssues.xlsx') -Sources @(
                             [pscustomobject]@{ CsvPath = $duplicateUpnCsv; WorksheetName = 'Duplicate UPN'; TableName = 'DuplicateUPN' }
                             [pscustomobject]@{ CsvPath = $duplicateSmtpCsv; WorksheetName = 'Duplicate SMTP'; TableName = 'DuplicateSMTP' }
                             [pscustomobject]@{ CsvPath = $duplicateRemoteRoutingCsv; WorksheetName = 'Duplicate RemoteRouting'; TableName = 'DuplicateRemoteRouting' }
                             [pscustomobject]@{ CsvPath = $remoteRoutingIssuesCsv; WorksheetName = 'RemoteRouting Issues'; TableName = 'RemoteRoutingIssues' }
                         )
+                        $workbookUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $diagnosticWorkbookPath
+                        $workbookUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $workbookUpload -Label 'Diagnostic workbook'
+                        if ($workbookUpload) { $duplicateSharePointUploads += $workbookUpload }
                         $duplicatePathRows = @(
                             [pscustomobject]@{ Label = 'Source users'; Path = $combinedUsersCsv }
-                            [pscustomobject]@{ Label = 'Diagnostic workbook'; Path = $diagnosticWorkbookPath }
+                            [pscustomobject]@{ Label = 'Diagnostic workbook'; Path = $(if ($workbookUpload -and $workbookUpload.WebUrl) { $diagnosticWorkbookPath } else { 'Attached workbook; SharePoint upload unavailable' }) }
                         )
-                        $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit 50
-                        $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit 50
+                        $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit $DuplicateNotificationPreviewLimit
+                        $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit $DuplicateNotificationPreviewLimit
                         $duplicateSharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $duplicateSharePointUploads
-                        $duplicateRemoteRoutingPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateRemoteRoutingRows -DuplicateType 'REMOTE' -Limit 50
-                        $remoteRoutingIssuePreviewSection = New-SmartM365AdRemoteRoutingIssuePreviewSection -Rows $remoteRoutingIssueRowsArray -Limit 50
+                        $duplicateRemoteRoutingPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateRemoteRoutingRows -DuplicateType 'REMOTE' -Limit $DuplicateNotificationPreviewLimit
+                        $remoteRoutingIssuePreviewSection = New-SmartM365AdRemoteRoutingIssuePreviewSection -Rows $remoteRoutingIssueRowsArray -Limit $DuplicateNotificationPreviewLimit
                         $duplicateSections = @()
                         if ($duplicateUpnPreviewSection) { $duplicateSections += $duplicateUpnPreviewSection }
                         if ($duplicateSmtpPreviewSection) { $duplicateSections += $duplicateSmtpPreviewSection }
-                        if ($duplicateSharePointSection) { $duplicateSections += $duplicateSharePointSection }
-
                         if ($duplicateRemoteRoutingPreviewSection) { $duplicateSections += $duplicateRemoteRoutingPreviewSection }
                         if ($remoteRoutingIssuePreviewSection) { $duplicateSections += $remoteRoutingIssuePreviewSection }
+                        $identitySummaryHtml = New-SmartM365AdIdentitySummaryHtml -AllUsers $allUsers -DuplicateUpnRows $duplicateUpnRows -DuplicateSmtpRows $duplicateSmtpRows -DuplicateRemoteRows $duplicateRemoteRoutingRows -RoutingIssueRows $remoteRoutingIssueRowsArray
+                        if ($deferToDailySummary) {
+                            $script:SmartM365AdIdentityMailContext = [pscustomobject]@{
+                                SummaryHtml = $identitySummaryHtml
+                                Sections = $duplicateSections
+                                SharePointUploads = $duplicateSharePointUploads
+                                PathRows = $duplicatePathRows
+                                WorkbookPath = $diagnosticWorkbookPath
+                                LastSentFilePath = $DuplicateNotificationLastSentFilePath
+                            }
+                            WriteLog -Message 'Identity diagnostics prepared for the combined daily summary email.'
+                        }
+                        else {
+                        if ($ShowMailLinks -and $duplicateSharePointSection) { $duplicateSections += $duplicateSharePointSection }
                         $emailBody = New-SmartM365EmailBody `
                             -Title 'Identity and mail routing issues detected' `
                             -Category 'SmartM365 Active Directory' `
@@ -3443,18 +3626,19 @@ try {
                             -Message ("Duplicate identity and remote routing analysis found conflicts in Active Directory user data. Expected remote routing domain: {0}." -f $RemoteRoutingDomain) `
                             -ActionTitle 'Action required' `
                             -ActionHtml 'Review the attached Excel workbook, which contains the duplicate UPN, SMTP, remote routing address, and remote routing issue details, before identity cleanup, migration, or synchronization decisions.' `
-                            -SummaryRows $duplicateSummaryRows `
-                            -PathRows $duplicatePathRows `
+                            -SummaryHtml $identitySummaryHtml `
+                            -PathRows $(if ($ShowMailLinks) { $duplicatePathRows } else { @() }) `
                             -Sections $duplicateSections `
-                            -Footer 'This automated message was generated by SmartM365. Use the attached Excel workbook and SharePoint links above as the source of truth for remediation.'
+                            -Footer $(if ($ShowMailLinks) { 'This automated message was generated by SmartM365. Use the attached Excel workbook and SharePoint links above as the source of truth for remediation.' } else { 'This automated message was generated by SmartM365. Use the attached Excel workbook as the source of truth for remediation.' })
                         $duplicateNotificationTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
                         if ([string]::IsNullOrWhiteSpace($duplicateNotificationTo)) {
                             WriteLog -Message 'Duplicate identity notification skipped because To is not configured in local or global configuration. Duplicate CSV exports remain valid.' -Level 'WARNING'
                         }
                         else {
-                            Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -To $duplicateNotificationTo -Attachments @($diagnosticWorkbookPath)
+                            Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -To $duplicateNotificationTo -Attachments @($diagnosticWorkbookPath) -ShowLinks $ShowMailLinks
                             Set-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Value $todayStamp -Encoding UTF8
                             WriteLog -Message ("Duplicate identity notification sent. Last-sent marker updated: {0}" -f $DuplicateNotificationLastSentFilePath)
+                        }
                         }
                     }
                 }
@@ -3549,7 +3733,8 @@ try {
                 -SummaryOutputPath $OutputPath `
                 -LatestFolderPath $destinationRootPath `
                 -LastSentFilePath $DailySummaryLastSentFilePath `
-                -ForceSend ([bool]$ForceSendDailySummary) | Out-Null
+                -ForceSend ([bool]($ForceSendDailySummary -or $ForceSendDuplicateNotification)) `
+                -IdentityContext $script:SmartM365AdIdentityMailContext | Out-Null
         }
         catch {
             WriteLog -Message ("Active Directory daily summary email failed: {0}" -f $_) -Level 'WARNING'

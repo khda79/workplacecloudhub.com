@@ -3242,6 +3242,7 @@ function New-SmartM365EmailBody {
         [string]$Message,
         [hashtable]$SummaryData,
         [array]$SummaryRows,
+        [string]$SummaryHtml,
         [array]$PathRows,
         [array]$Sections,
         [string]$ActionTitle,
@@ -3300,7 +3301,17 @@ function New-SmartM365EmailBody {
     }
 
     $summarySectionHtml = ''
-    if (($null -ne $SummaryData -and $SummaryData.Count -gt 0) -or ($null -ne $SummaryRows -and $SummaryRows.Count -gt 0)) {
+    if (-not [string]::IsNullOrWhiteSpace($SummaryHtml)) {
+        $summarySectionHtml = @"
+          <tr>
+            <td style="padding:18px 24px 0 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Summary</div>
+              $SummaryHtml
+            </td>
+          </tr>
+"@
+    }
+    elseif (($null -ne $SummaryData -and $SummaryData.Count -gt 0) -or ($null -ne $SummaryRows -and $SummaryRows.Count -gt 0)) {
         $rows = @()
         if ($null -ne $SummaryRows -and $SummaryRows.Count -gt 0) {
             foreach ($row in $SummaryRows) {
