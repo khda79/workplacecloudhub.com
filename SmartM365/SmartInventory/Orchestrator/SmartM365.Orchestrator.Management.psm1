@@ -12,10 +12,10 @@ function Resolve-OrchestratorConfigurationJsonPath {
 function Convert-OrchestratorConfigurationVersions {
     param([Parameter(Mandatory)][string]$Root)
     if ((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText' -or $script:JsonVersionRoots.ContainsKey($Root) -or -not (Test-Path -LiteralPath $Root)) { return }
+    $legacyLeaves = @('Orchestrator-Jobs.before.json','Orchestrator-Cluster.before.json','Orchestrator-Jobs.after.json','Orchestrator-Cluster.after.json','Publication-Failed.json')
     foreach ($folder in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\d{8}T\d{9}Z_[0-9a-f]{8}$' })) {
-        foreach ($leaf in @('Orchestrator-Jobs.before.json','Orchestrator-Cluster.before.json','Orchestrator-Jobs.after.json','Orchestrator-Cluster.after.json','Publication-Failed.json')) {
-            $path = Join-Path $folder.FullName $leaf
-            if (Get-SmartM365JsonReadPath $path -Optional) { $null = Resolve-OrchestratorConfigurationJsonPath $path }
+        foreach ($file in @(Get-ChildItem -LiteralPath $folder.FullName -File -ErrorAction Stop | Where-Object { $_.Name -in $legacyLeaves })) {
+            $null = Resolve-OrchestratorConfigurationJsonPath $file.FullName
         }
     }
     $script:JsonVersionRoots[$Root] = $true
@@ -600,10 +600,17 @@ function Get-SmartM365OrchestratorHistory {
     param([Parameter(Mandatory)][string]$SharedDataFolderPath, [datetime]$From = (Get-Date).AddDays(-7), [datetime]$To = (Get-Date), [string]$Server = '', [string]$JobName = '', [string]$Status = '')
     $result = [Collections.Generic.List[object]]::new()
     if (-not (Test-Path $SharedDataFolderPath)) { return @() }
+    # The CSV is named when a run is recorded; allow one extra day for clock differences.
+    $earliestFileDate = if ($From.Date -gt [datetime]::MinValue.AddDays(1)) { $From.Date.AddDays(-1) } else { [datetime]::MinValue }
     foreach ($serverFolder in @(Get-ChildItem $SharedDataFolderPath -Directory -ErrorAction SilentlyContinue)) {
         if ($Server -and $serverFolder.Name -ine $Server) { continue }
         $jobRunsFolder = Join-Path $serverFolder.FullName 'JobRuns'; if (-not (Test-Path $jobRunsFolder)) { continue }
         foreach ($csv in @(Get-ChildItem $jobRunsFolder -Filter 'Orchestrator_JobRuns_*.csv' -File -ErrorAction SilentlyContinue)) {
+            $fileDateMatch = [regex]::Match($csv.BaseName, '^Orchestrator_JobRuns_(\d{8})$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($fileDateMatch.Success) {
+                $fileDate = [datetime]::MinValue
+                if ([datetime]::TryParseExact($fileDateMatch.Groups[1].Value, 'yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$fileDate) -and $fileDate -lt $earliestFileDate) { continue }
+            }
             foreach ($row in @(Import-Csv $csv.FullName -ErrorAction SilentlyContinue)) {
                 $start = [datetime]::MinValue; if (-not [datetime]::TryParse([string]$row.StartTime, [ref]$start)) { continue }
                 if ($start -lt $From -or $start -gt $To) { continue }; if ($JobName -and $row.JobName -ine $JobName) { continue }; if ($Status -and $row.Status -ine $Status) { continue }
@@ -661,8 +668,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAj0/e/7GluQhW5
-# v2qpHC8khBeG/qESoWuNF3VP0PwcyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAIOP6mZ+3Yu9Xc
+# RbUrdw53TH2cJ1cvKkauZEZr9suR8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -795,31 +802,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHg48MMn8zTW6E1UVzxoMg9mas9Pbrd87jEzcX5t20J5MA0GCSqG
-# SIb3DQEBAQUABIIBgGCxOuMxQlvFz/UyDVaB8tbAsCrnCFap6F/Z3jA0GRuH+/bv
-# FkFJEnlPs5r3Pfa7lnoL1JiqHNppOPYVx1C5AQSFQkIW4NdqhqUc9WJRjYY3Y5NX
-# C6cN6yxwUD2JQpRy6cJH9lczqNCp1YI0tqHXadoVUFf0QuLdZAz8Bm6moB/h/QYV
-# caUpGWrYZSssxvUDEtAcJP1v8fpzFz9rAUgSDr57eSFd7I2OZ035tmj65ddHcU6L
-# 85ZIuAveC798GBZa8cXY+H+OTkWdq6zWTmGPV1eVVliKVCSWUU3lEVukOYbWEaSm
-# spkMKDKtoIZqsOslfTJTm5R1sGu5h0SVgEwnk9dcBXEeQQ2og3CvfDooYzBSScps
-# ZIwefrlqdtl63YdU8zeewkvvcVQvf05z8hQxYYCXt6OggE2ntGF7vZpOt+CtKlMq
-# NtHT9/4aO66QPWEAxShlNEpePXGSXqveeRDP5IK8F/lpLOjxZ3au5+vOZymWgs4N
-# gKo1snawo8YdY7ZVbKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH8fDUSzX1/Q4tB9ekowL8feyn/sS+/UOkSmgSHjcc52MA0GCSqG
+# SIb3DQEBAQUABIIBgGfBrrsbBuj9FWULdcEleR/cuxFHuLSmqOTO1C8ybPzSpy45
+# jPbQ23GXbwzyzgwnO2/JlgLUtspTjkPgcy+pl+JqjRa4uV2xCZkreO6S5pE8y0qr
+# IkO8fVDZetStlU+g1o6JBjuILLlFUgC5ELBInU4Vi+PntLmFDldd6gZzrc5IQHaF
+# 1HKg53LddAqYs4oBcjrmlYP88Yf6J4OvUupjQGSvlJY++DXnJDVPXHK8VAw255jS
+# oCDzYO1u4Jg1mAywSW8B06RsbaFYmJF2lE9bVLwCUZcWtysIR2EJIUcCEqJ0PGo+
+# UcYO4VZVh6k2ABVzWOcFQy+11hsRDrIxqu7+DPbiXozlh2088yw/u8DNmwOwfxsO
+# ULXhVbndPjp5xz8O+y0lI8DGRHb6WdMN3uGSdfbnCODFjAWi/XX6yDkFbgNlqIaj
+# MjHZ8i999peWIg4ydShjCFqdARxF+EPycfwlevS5QVpDB4iILMAJB0zL2lSy4gcr
+# olsoxXaWWJ6tQ5QisKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAwNzUw
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAf1vVyXMwukuuJMtmF7iudXNMTvPjdWPNII+UD
-# J9HANTANBgkqhkiG9w0BAQEFAASCAgBQois0EtjJB3nVw7lkaE5tAT3ms8dkk4nd
-# NItXoNePAqLy8efRgHcwOFJFynmv9UXa+St/VDAqTjc/CH9adGupHYZ9z1Xlv25T
-# OkVidv7dehwaMqDUoYejUAuGFGr1ZhXoyShL5m0aeCrIFiUP7A2JnI1/jrErB/c9
-# GwTTIdiOmC3ItU7YVA0u6+Ymnv/w0suwQSKmpRZwJtOnxUZbq5nLngCPu7XYd51k
-# l3uf1f41NOgx6XqZkeufbQOQMPp/jNvT+LcgnJrZRxWcXwHs17MAZNAd0e+76byS
-# WamxGQ3oJoyf6nURcKz5RPoQXnIuqaPijj0hx9UpvGETPas7/Xg7ecUvyWKXGPQ4
-# 6LSV2OvKWeG8w4IhVyyxs8B7Po2ExoDCBdtl+j4GdsPtrrJzZn6IjMAt0a6b/lOP
-# Md4CKd4HNKc5qW3gCO3ZMorSm+2aSYNA7HqARkNfNc7XmHBD3D9jPNb5gBFGKhMX
-# qcQwLd8RfkyeiTg4QURnUFfEeEqmyf+VRLZBv08NBlRhTjBEmgnSaotnlB2Fpir7
-# UiaB6oD40wEfcPC6YbMnCF+yb7BObKcVj1+74y+1vU3ECtTQ19TM/Em7We0q0Eoh
-# qvaJbsUPExANS4XKsn5Cu8yPV2T3WHVKsMxD/eTVa6Dl3iY2Ogx7VpFo+zURBI8B
-# 2P9RWc8CXw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMzE3
+# NTFaMC8GCSqGSIb3DQEJBDEiBCCwmRUCwFk86TfA2sOM4D3mXoNUTPVqsWmft8dm
+# 3LxLeTANBgkqhkiG9w0BAQEFAASCAgAXmIbfEXuVC4aTLJW1fFIj1Wlk2oU3miUy
+# OgQlh0Ho+rD7cdMzjq3iIQYocWUhe2gZEG0PAXSBUrgvj+DL7al4jI6uuV4RWLrS
+# 4t7Ek62x1dDfazrB0NYx/ndHKIOMXX0AbQfVyaplBTrAdZ0vQkhsb9xmng8/WnrK
+# xpZN8/8vqqOiFQ/GlLxVEBaYOylWrRoVPlVgn6yUebbXCfPn8bERVpriMo+KdTcB
+# 3WBLCthpaQlgIWhDUigFu449CCXt4/gY4u6pMmYcDpcOGUXdBW8g9bJUzqsx1GV9
+# O/UcSD1Ys8jtcpeV8g8NjmUgqmdQE/YZX+I9012RUA/4nFhI8s37B13o31N4jIVT
+# GG6GulsxuKeDfAddB1ucIt6ybgthdt2LDLvT4LykFjukS/ph29Ebj3YTTNeAiwCN
+# LgBwsI7sf/1kENPY85VnUKZ5qgjVXWypRyJa5mlIuvh4jRd8eDL8YiqoZraT3FK2
+# 6Tu8/LIJEFO+RTsaSslWdDd+54bAL7NYxdsJXk7xwskmYSgugPE1I73PGWJynYGA
+# emFxCgP9mWjKnlCHblaUatoPmmhQOXln0NJmPboPGxy54faJSKqfpfmCqzXJVW1d
+# Wa3jjv5OPNAZ0XiD1LNGMWVvxmEp/HSDd3bGkoc2OGj3VIu5UgQeodeVPhpDjWzr
+# 6xV2XqjDcg==
 # SIG # End signature block

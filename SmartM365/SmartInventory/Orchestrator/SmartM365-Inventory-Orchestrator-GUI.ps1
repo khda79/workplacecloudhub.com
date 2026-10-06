@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.3
+1.3.4
 #>
 [CmdletBinding()]
 param(
@@ -43,12 +43,14 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.3'
+$script:AppVersion = '1.3.4'
+$script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
 $script:PlanningRows = @()
 $script:HistoryRows = @()
+$script:InitialHistoryLoaded = $false
 $script:RecentRuns = @()
 $script:HealthByName = @{}
 $script:RequestRows = @()
@@ -530,6 +532,22 @@ function Get-OrchestratorGuiPropertyValue {
     }
     return $Object.$Name
 }
+$script:GuiSplash = $null
+if (-not $ValidateOnly -and -not $SmokeTest) {
+    if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne [System.Threading.ApartmentState]::STA) {
+        throw 'The GUI must be launched from an STA PowerShell process. Use the provided launcher.'
+    }
+    $splashPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.GuiSplash.ps1'
+    if (Test-Path -LiteralPath $splashPath) {
+        . $splashPath
+        $script:GuiSplash = Start-SmartM365GuiSplash `
+            -ProductName 'SmartM365 Orchestrator' `
+            -Subtitle 'Central planning and execution history' `
+            -LogoPath (Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png') `
+            -WindowIconPath (Join-Path $PSScriptRoot 'WorkplaceCloudHub.ico')
+    }
+}
+$script:SplashReadyMs = $script:StartupClock.ElapsedMilliseconds
 $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
@@ -1191,11 +1209,18 @@ function Refresh-AllViews {
         try { Update-JobHealth } catch { $script:HealthByName = @{}; Write-GuiException -Context 'Job health could not be computed' -ErrorRecord $_ }
         Refresh-PlanningView
         $servers = @(Refresh-ServersView)
-        $history7 = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From (Get-Date).AddDays(-7) -To (Get-Date))
+        $historyNow = Get-Date
+        $historyFrom = $historyNow.AddDays(-7)
+        $history7 = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From $historyFrom.Date -To $historyNow.Date.AddDays(1).AddTicks(-1))
+        if (-not $script:InitialHistoryLoaded) {
+            $script:HistoryRows = $history7
+            $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
+            $script:InitialHistoryLoaded = $true
+        }
         $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
         $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
-        $script:Controls.SuccessCountText.Text = [string]@($history7 | Where-Object Status -eq 'Success').Count
-        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.Status -in $script:HistoryFailureStatuses }).Count
+        $script:Controls.SuccessCountText.Text = [string]@($history7 | Where-Object { $_.StartTime -ge $historyFrom -and $_.StartTime -le $historyNow -and $_.Status -eq 'Success' }).Count
+        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.StartTime -ge $historyFrom -and $_.StartTime -le $historyNow -and $_.Status -in $script:HistoryFailureStatuses }).Count
         [void](Refresh-OperationsView)
         Refresh-RequestsView
         $script:Controls.VersionsGrid.ItemsSource = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $script:SharedDataFolderPath)
@@ -1396,6 +1421,7 @@ if ([string]::IsNullOrWhiteSpace($SharedDataFolderPath)) {
     $SharedDataFolderPath = $dataFolder
 }
 $script:SharedDataFolderPath = [System.IO.Path]::GetFullPath($SharedDataFolderPath)
+$startupContextMs = $script:StartupClock.ElapsedMilliseconds
 $resolvedGuiLogFolderPath = if (-not [string]::IsNullOrWhiteSpace($GuiLogFolderPath)) {
     [System.IO.Path]::GetFullPath((Resolve-ConfigTokens -Value $GuiLogFolderPath))
 }
@@ -1404,6 +1430,7 @@ else {
     Join-Path -Path $logAllRootPath -ChildPath (Join-Path 'SmartM365-Orchestrator-GUI' $env:COMPUTERNAME)
 }
 $script:GuiLogPath = Initialize-GuiLogPath -PreferredFolderPath $resolvedGuiLogFolderPath
+$startupLogMs = $script:StartupClock.ElapsedMilliseconds
 $script:MailFolderPath = Join-Path -Path (Resolve-ConfigTokens -Value (Get-ConfigValue -Config $localConfig -Name 'LogAllRootPath' -DefaultValue (Join-Path $PSScriptRoot 'Logs'))) -ChildPath 'SmartM365-Orchestrator'
 Write-GuiActivity -Message ("GUI session started. Version={0}; Tenant={1}; User={2}; Computer={3}; SharedDataFolderPath={4}; LogPath={5}" -f $script:AppVersion, $Tenant, [Security.Principal.WindowsIdentity]::GetCurrent().Name, $env:COMPUTERNAME, $script:SharedDataFolderPath, $script:GuiLogPath)
 
@@ -1426,17 +1453,7 @@ $bootstrapCluster = [pscustomobject][ordered]@{
     PeerRecoveryEmailEnabled = [bool](Get-ConfigValue -Config $localConfig -Name 'PeerRecoveryEmailEnabled' -DefaultValue $true)
 }
 Initialize-SmartM365OrchestratorCentralConfiguration -SharedDataFolderPath $script:SharedDataFolderPath -BootstrapJobsPath $bootstrapJobsPath -BootstrapClusterDocument $bootstrapCluster | Out-Null
-
-$script:GuiSplash = $null
-$splashPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.GuiSplash.ps1'
-if (-not $SmokeTest -and (Test-Path -LiteralPath $splashPath)) {
-    . $splashPath
-    $script:GuiSplash = Start-SmartM365GuiSplash `
-        -ProductName 'SmartM365 Orchestrator' `
-        -Subtitle 'Central planning and execution history' `
-        -LogoPath (Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png') `
-        -WindowIconPath (Join-Path $PSScriptRoot 'WorkplaceCloudHub.ico')
-}
+Write-GuiActivity -Message ('Startup timing (ms): splash={0}; context={1}; log={2}; shared configuration={3}.' -f $script:SplashReadyMs, ($startupContextMs - $script:SplashReadyMs), ($startupLogMs - $startupContextMs), ($script:StartupClock.ElapsedMilliseconds - $startupLogMs))
 
 $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
@@ -1620,11 +1637,11 @@ $script:Controls.ExportHtmlButton.Add_Click({
 })
 
 Refresh-AllViews
+Write-GuiActivity -Message ('Startup initial views loaded after {0} ms.' -f $script:StartupClock.ElapsedMilliseconds)
 $script:Controls.HistoryServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers)
 $script:Controls.HistoryServerCombo.SelectedIndex = 0
 $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
 $script:Controls.HistoryJobCombo.SelectedIndex = 0
-Refresh-HistoryView
 if ($SmokeTest) {
     $planningNames = @($script:PlanningRows | ForEach-Object { [string]$_.Name })
     $sortedPlanningNames = @($planningNames | Sort-Object)
@@ -1755,6 +1772,7 @@ $window.Add_ContentRendered({
         Hide-SmartM365GuiSplash -Splash $script:GuiSplash
         $window.Activate() | Out-Null
     }
+    Write-GuiActivity -Message ('Startup window ready after {0} ms.' -f $script:StartupClock.ElapsedMilliseconds)
 })
 $window.Add_Closed({
     if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() }
@@ -1774,8 +1792,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDSyGP/T7eXvkI
-# tXL3HTSWBPUtncVdGS4+A+K3/Sb1CqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYCiUmuyTjyrDX
+# 9Y203bnw4cnCwhp3NNyipf/Rszkgp6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1908,31 +1926,31 @@ $window.Add_Closing({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINswXpKY+r1/DqGWvjJ8hqx7wux625toGlkxGbe+zSaRMA0GCSqG
-# SIb3DQEBAQUABIIBgHJj5M7zR5oyrrgqaSpz02LXUTpbAXJn0LhPCWj9YUuRgmP3
-# IZH+J/lZCArdxWzKtJCPTeel0EiAk/+SJ6pwqyh+Xhd3DTjNiF2L0LY0A+hjQ6FK
-# jwAPL+Wl7nuAwnXKoepB0V90+Cl3eMXRS/8IzjhBdgSk19tA+oQPDjPTQtGXicTt
-# JVtJ+rYSQgav1+LvgMMV3D8T0lJNak5Gx+aorESlRSFh3sdhbWT6Y44LaHnALzeN
-# ASwBi7SOqwtRKe7vTpSfAFTWbw2hbqhVi1YFdFkESxK8Ts8i+WrOWHjVwYeqRqMg
-# +x1pCh0Lqh0a1zY4xhWLmNRLDpvf3FM81xscptAOblT861o5tZu8psgaxBGxl/R9
-# 4Eb6eSTmhg5UIxEyfn5lAvNM6pGA9QhGEfBCnP0Z0kkCwcP1oo/7awLZRVwsva8P
-# uZgV7K5pCJFC6wwk+P+In7HbmqB8t5ccKLuUToYsKcsT4oYWC5af2Q+HbLLIzgYN
-# R4iBR3IjIEx9vJs59qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH59ZIHXYcoGjgLC+25wrtR3mdAN1pr/dzv9LJT04ZwBMA0GCSqG
+# SIb3DQEBAQUABIIBgKd+wweJLx4cykThleMI/bcTBDoXKtXBYVP55eITdRewdDTj
+# BcRuX9ylo3ETsNgMnRyf43CIYaKYfcW7C65GHvoJNw8c9/Em2ML+NbXRukVieLBM
+# ZVi84XEQTUdN5c8PODao0BIOcy1qdBT+FfbdZ2ovihkF7961hAWcb60gyXkhv/wY
+# GaNoVtOL+anz2tCUh10E059oPxi9LyXh4cmWuCymIY6Z2ryxnzsUCj/lACK6dbLr
+# nii9akHX6gk4FJ2U/c1ko2ZbLF9DWO4u8M5dnWtrotwm5195+tNoJ1ObFd1avo6g
+# pVmU3r7jlLkAu6bu/FUE1fS5DzHfrWkg966Mg6zeo+hOLzDNSUJLwpt5ULIXF8xC
+# aAB3NsWZ+F9YR9oDrQdacXFRpLZBHlT8ln84ma32GhWF5PPMQ8VBkTfSG1mxSLzW
+# KfRsKpPfmwy3gQd9kxfbu25szqiH3VUjupyw5NvMHJE9iolauscM3TLMu/6cYMOE
+# Dsyt9IObYkVw2VW+mqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjI4
-# MjNaMC8GCSqGSIb3DQEJBDEiBCB6VXFgykRYojXpRunNj34ojK3JFEEfxcKy6juv
-# o2oz9TANBgkqhkiG9w0BAQEFAASCAgCIKZKAn0l5B7cNe94RvW0IuLxu7LF/WbKO
-# llW8o7WY1c5flA4HMpIp0r516rfjoRHK9fJB9aEnTfejltAbWqyDRnh9CZXfkuZe
-# TQ8fkCkn8P4WNhY3bpHsSNPdZmHyGAKjMTyymcjapyEHgzx7NZQ9NmqATyhTNNqb
-# J8ZIRjURL27QjLmm/D4baRm2gS3kV4x+V9hZuCDHrrNSD35eBk65qi3t3ubH8LSf
-# 6LicQPlj/NguNhB13LVWX7b1lHx4ssuMldqlTzw31qOgTANK7jAxpgrF1yCl4wRc
-# 1FsJOFHxUXwj9qQpvDWIT785kCo79tGS/neC6JwcuZTWd8BZjOgqwvwtnZ4krsEZ
-# UZhzNrkM5q4+p+Rr6U16joc4dz1oYYfvFa5ootThOyRUDNEzTUDBUkhTzWUIrsL2
-# qJHi5lyRJ5VkPOKp4XRNb7Bp9muiNM5KqKADArvDWKQ2SdCnPd4utCBp+n41KZ7z
-# YJoHc2AVUGEpj0HamKAvP/1ZDQs0MCvG2bjYs8xSp8tR+IkmYPQbkEV2YieYe0al
-# 9yyGlpHIfeGZIpses0PwdLCkd1PQl8+LqmYegIcM7w+5p8pgL0AsEOj7joXY322T
-# VESbt/dx9M0hoB70WBSAdv2AV/TwHiE/asMJvqt+RG8lyyMpkvcdpxqslFtE51mY
-# CtWEKzdqzQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMzE0
+# MjNaMC8GCSqGSIb3DQEJBDEiBCCbkA7KTklfOzrGCeJ+ByOWDlqmEzzcqSX7ViVe
+# cI5RHTANBgkqhkiG9w0BAQEFAASCAgAsYeVKjOKnr2ks8fEpUKp37xMg3/9V72rq
+# S+vd4A/EvyEAH9d69sPp258DVjID/27qygFvGafJ8LS8TlhPNPUmDPszhkCKcD5n
+# yxZtfESbfwkWqZZHk6PwzUwQmwWRlPm2mziaAywM8AEyC0XaELVaJz0ZXCY5NqUa
+# noCDzSXmp7FCSwnRMvdJyXRTgUMlkTMmkc2fK9TLmpNCK3XoHoHFrwIyOAjRf1RP
+# 3duKqtjT253K7CuCwouxeQ/upvyzLkej17wKZCzewjL5bNYp3H8cc+5somwMZdBP
+# DJAEm8FUBCIWfDGIavXYr+FA3VvYALAoHMii/1Lwn2br+U88v2eoKcvhxlNWQy/2
+# /2//l0VxVs5Dv2J41gXROWjDr4GmarUqFNB8qYOOxa2yKX5viMvJwDtommuCiCQW
+# LnFx0qJ9A9KOnWp56Q1b7kg6kV14SgB/P3iw4OItfXeTKZYO4IvoY7bCOKHyTNzc
+# yYdx4WCN6Wekx2f2zqfA3e9RJFCwP5PtLKpHd4q55hEYCVTa8APRRBhm2M6yOBMm
+# V0bGisEBTSOzYUG8EfDyDz55YBMy0uitjaJAjRccUFt6U/I0rzomQJ8GMJMvSBvj
+# IENgeLJnGAAoKY4CpW6E7Rz7bBBzJnXJQKlR3Zz5ZW0m2sySUaMCKvGn1fiGKYbw
+# X/nqwbHVvA==
 # SIG # End signature block

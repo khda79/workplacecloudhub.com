@@ -50,6 +50,20 @@ try {
     Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $snapshot.Jobs).Valid) -Message 'Production jobs template failed management validation.'
     Assert-True -Condition ((Test-SmartM365OrchestratorClusterDocument -Document $snapshot.Cluster).Valid) -Message 'Mock cluster configuration failed validation.'
 
+    if ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
+        $migrationRoot = Join-Path $temporaryRoot 'VersionMigration'
+        $versionFolder = Join-Path $migrationRoot 'Config\Versions\20261007T000000000Z_deadbeef'
+        New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
+        $legacyVersion = Join-Path $versionFolder 'Orchestrator-Jobs.before.json'
+        $modernVersion = Join-Path $versionFolder 'Orchestrator-Jobs.after.json.txt'
+        Set-Content -LiteralPath $legacyVersion -Value '{"SchemaVersion":1}' -Encoding utf8
+        Set-Content -LiteralPath $modernVersion -Value '{"SchemaVersion":2}' -Encoding utf8
+        $modernHash = (Get-FileHash -LiteralPath $modernVersion -Algorithm SHA256).Hash
+        $null = Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $migrationRoot
+        Assert-True -Condition ((Test-Path -LiteralPath ($legacyVersion + '.txt')) -and -not (Test-Path -LiteralPath $legacyVersion)) -Message 'Legacy version snapshot was not converted.'
+        Assert-True -Condition ((Get-FileHash -LiteralPath $modernVersion -Algorithm SHA256).Hash -eq $modernHash) -Message 'Existing JSON text version was modified during startup.'
+    }
+
     $firstRebalanceRequest = Request-SmartM365OrchestratorRebalance -SharedDataFolderPath $temporaryRoot -Reason 'Management test'
     $savedRebalanceRequest = Read-SmartM365OrchestratorJson -Path $firstRebalanceRequest.RequestPath
     Assert-True -Condition ([string]$savedRebalanceRequest.RequestId -ceq [string]$firstRebalanceRequest.RequestId) -Message 'The rebalance request was not persisted atomically.'
@@ -288,8 +302,8 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTFeHj+aEwLK7A
-# vb2x13g7m+o1i/AjMOlM/cAQ3Fu+taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJQyZVaGmfMcSC
+# CjbZk2Iyuu+ljr0gpqytYaDKafIqNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -422,31 +436,31 @@ Write-Host ("[{0}] SmartM365 Orchestrator management tests passed." -f (Get-Date
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGyovRAnXF+yVelen+GoybJNVy2qbtsFPxFtdICDB8sEMA0GCSqG
-# SIb3DQEBAQUABIIBgJbCobWiuMT6NvwoBjt/vISkrGb12sIgSUXSEIWXVMYefCRG
-# LiNqaQ1ySmpgztdqOxLzEBueCExzWkK4v3uPcM2XtROYk1vseqasvE1qz3M69Rwp
-# yI/29SDvg/zLB9eMjStN3/hi1OVutvaHKYb+fPEFIetlsI/rxY57ZxsSBAZldctD
-# hCSiqPE8XINSyZil4DObAxt4qo5uQ5BnHrrSKuwJBt/C4NsYQSzxVWYWpB/qK8Lh
-# IbNFjzgaqsTsEqDA0iU0yLTZdc7ymHQOQ2ppRVSI8I7dupMjcn5N4c7V1OAlCN4k
-# rZBk2glbTHJ3peup4Ij8l2UIpHDQ1wMCFyM8rFlGy8J6IMe6ZWp4c2VHqP8qZcsO
-# J2ZNW1e0S68w15RzWd9QN0e2x018b7u/hZLQxcdCOg2ahq0TwTtLKdrSSEzGPIal
-# ALFmqh3FHEvtK0Z6f15+lL99X9OejDT4rPe1Yx58byL5Uo/6LTBIkJ9mBiqoJUiN
-# JV8HVSizpiIAOL/EkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB2GzdrEGG8m89wEeNCBzx/jMUCC6gXmUwmigN+G3ccnMA0GCSqG
+# SIb3DQEBAQUABIIBgHji7V/aXdscI8IPY8FXwuaxgOohHgR5gfxfdcEnsI9ZpqYi
+# dzayHk4gdYXTYSf21JEuA4D1128wul2oeny3TGd6ukdpdbdDe7LMSNKrdNgPIfEj
+# IRb+TnibkGLyjyyczQG+R7Ca3MTUmksunWcDG8oNOVNPv/UKLnd9997PGG9n11jR
+# 0We930OAq/hNX8o+m7IjR7MbCZ150ExOnQZ7sJtqpbzffExrf26+z36kNgPHItpG
+# cqFeq6gilDk6WzkNzXAXiDbUF2IB/i91OnN511LMQfXCz/NsQ7PF4zYfWdDw779V
+# A/QuOxj5WAhSzJed0O6DaqFwtOK5fiewBs+z8CMcLv0JQP6KlBJ/y3pqYPYGKlV2
+# YuHqslMCcDVgUnyBOuorPgBl/QITsH/f3kBkszYAPPY8tl0C7o3vC3bnFDzmSIlq
+# G5IeoKtarjgXnjYRkGEQ4p4Ab3h9yky4X1q49JKH+yEAaM57ThEhecHoVsTsTrPm
+# NM835HYIhuPdp05YOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MzAyMDIx
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAlWPsLHH3lKyXh2NrvnwTwTMK5u3+09UD25ZGL
-# AazxXDANBgkqhkiG9w0BAQEFAASCAgALwR8Oo+948ZvA+EM0PSjPmwRasI46vLBM
-# Wjdp1OPGlcIvmIV+/tilfmBw968CcWY+dvkJ3Fkr0uxGbUJ9IB/EEIZKh1IE7U9b
-# yuVpqSxgaOVNjUHTBibA1EdnUMfKqfSjV3XBIv8/mG91q8GHxPyoLyKutBTnsxr2
-# mNFIzA2s09+CMdCFKr8jQhfXthzAwBIsz37x/jl8VgfBcM3V76knuF66gWr257vR
-# f5EfR53z9vHLOBEPmHTSGwORP/YEk89bybaa2pDhcr0JwVhUn+CQI4dFksJL4nHE
-# FD+sR+z+Dm757VPUGqko4wMGWFBzTXl7jGKAmwUY/smbr8prFDtXc7WLlhANypLI
-# By4Zhn/+ZYs9RJzTpltEAgmc/YTJl18nmos/2j5xwUVOHbG/czkz+ryfbIKx/0AR
-# GUcxKgci9tZXAIfnLbJ3wL3CWXYrrAzWhtaibb+xlXxm29F1hpNc0/4Hx1p+T/0N
-# 8qvmmLLT1NmU3gcXs0X9q8SDwbnvsNlCryLNO9ANBEHCQwFALIwPUKrnsBdKiUVR
-# 7TAIRJK79Um+cf35O6dn0UAu9rLnBwx96MsOWqkvcv+31iyLXJIO3HJTLTB9bvFM
-# NxEn1og5BUjRaYPVB46jRvtjWpafe6fFGrBP9loXQSURyiuoymAfjHZQJoiOzGNg
-# t9ZNDPxBZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMzE0
+# MjNaMC8GCSqGSIb3DQEJBDEiBCDafroQflcJt0ZMJdWAU+y9XFn3olsHaMrhD15v
+# +WjZETANBgkqhkiG9w0BAQEFAASCAgChie29DVHIM+v81II1PPKjPER8Fbmr3Wpe
+# GMOOQg2CANQmBNlh4P4ZQSz3VCdfzydZ6o+FIpNJSorsoCw0O0WzpMbrL5FKEq1n
+# MtM923Z+GE3WXsfsrxbjt+D5mjVLNV/vNIbo5rieJwdxqcEK65O0YA6A5kI7vUdt
+# Q2HQ8zekL4/YRuvmLxyAD+CWdFFbOrQC8MWC7oNqAxhEWwPP2m5jRtLLeudbLv4X
+# vQTS8U0sNPvAh5SgsMZJ1THltT/4Pr70mxd9gxDC7A/ROGKw4DMM2OpHTgDmUSYW
+# mVdovlQ2YcpOmwpjg7gEm10P5+QM/7noUEC+FoNmFEUKCGX8gKoFHtjD8DqVY6I4
+# SQjjNkF4IXc+UXIfywrKt2odfEAKfTMcagoFBoBoFC6DTq3mH6q/9GShvbOPxW+o
+# aUBMECvcascQS6es4WjDj74NKkFSblsTETcDm2BdvXJUDue1nEYXu4bFOBcFjPeO
+# mbCY7i+dZKL4UPpRG+bHebC+QqfOr0zy/iZqxGq8wJu/HhrSea9GlfSC7AoTWa5j
+# 6TZ4ukCthRpi4XbbVIN897A4ZVH9sXB1V8vu9+YlRL8efR29QZ1ypwITDwTB7fqO
+# zM1JaqubIalUwsnnqrFx0F3DwKuWsl6fLBYeIUPy/L9HGB7B3uHYwr5iErHyQs9T
+# Q2UDOneuhQ==
 # SIG # End signature block
