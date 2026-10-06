@@ -53,6 +53,18 @@ for files and permissions. The file rate is matched
 files divided by source unique keys;
 the permission rate is matched permissions divided by source unique permission
 keys. An empty inventory or missing comparison has no rate.
+File and permission rates appear in large, color-coded cells after Migration,
+Gap (days), and Status, with comparison dates underneath and small progress bars.
+The Global comparison column is the equal-weight arithmetic mean of the two
+rates: `(files % + permissions %) / 2`. It has no value if either rate is unavailable.
+Newer scans mark the affected rates and their global average as `Recalculate`.
+Migration, Gap (days), Status, and the three rate columns stay visible during
+horizontal scrolling. Compact rows and flexible URL columns fit nine migrations
+on a maximized 1920 x 1080 display at standard scaling.
+Gap badges use the unrounded file-scan time difference: green up to 12 hours,
+yellow above 12 hours through 24 hours, and red above 24 hours; unavailable gaps
+are gray. Status badges are green for `Up to date`, yellow for `Compare needed`
+or `Review needed`, and red for `Scan needed` or `Refresh error`.
 The Status column combines file and permission scan availability, comparison freshness,
 findings, and scan provenance. Hover over a row for the separate file and permission
 reasons. Click a row to select that migration and open Files & Permissions. The

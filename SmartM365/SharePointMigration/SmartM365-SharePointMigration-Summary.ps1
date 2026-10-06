@@ -1,9 +1,39 @@
-﻿<#
+<#
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.10
+    1.0.12
 #>
+
+function Get-SmartM365PortfolioGapVisual {
+    param($Days)
+    # Use the unrounded gap so formatting to two decimals cannot hide a threshold crossing.
+    $band = if ($null -eq $Days) { 'Unavailable' } elseif ($Days -gt 1.0) { 'Red' }
+        elseif ($Days -gt 0.5) { 'Yellow' } else { 'Green' }
+    $color = switch ($band) { 'Red' { '#B42335' } 'Yellow' { '#9A6700' } 'Green' { '#087F5B' } default { '#64748B' } }
+    $background = switch ($band) { 'Red' { '#FFF0F2' } 'Yellow' { '#FFF8E8' } 'Green' { '#ECFAF4' } default { '#F0F4F8' } }
+    [pscustomobject]@{ Band = $band; Color = $color; Background = $background }
+}
+
+function Get-SmartM365PortfolioRateVisual {
+    param($Rate, $Date, [string]$Notice = '', [string]$Caption = '')
+    $available = $null -ne $Rate
+    $color = if (-not $available) { '#64748B' } elseif ($Rate -ge 100 -and -not $Notice) { '#087F5B' } else { '#9A6700' }
+    $background = if (-not $available) { '#F0F4F8' } elseif ($Rate -ge 100 -and -not $Notice) { '#ECFAF4' } else { '#FFF8E8' }
+    if (-not $Caption) {
+        $Caption = if ($null -eq $Date) { 'No comparison' }
+            elseif ($Date.Date -eq (Get-Date).Date) { $Date.ToString('HH:mm') + ' today' }
+            elseif ($Date.Date -eq (Get-Date).Date.AddDays(-1)) { $Date.ToString('HH:mm') + ' yesterday' }
+            else { $Date.ToString('yyyy-MM-dd HH:mm') }
+    }
+    [pscustomobject]@{
+        Percent = if ($available) { '{0:N2} %' -f $Rate } else { '—' }
+        Progress = if ($available) { [double]$Rate } else { 0.0 }
+        ProgressVisibility = if ($available) { 'Visible' } else { 'Hidden' }
+        Color = $color; Background = $background; Caption = $Caption; Notice = $Notice
+        NoticeVisibility = if ($Notice) { 'Visible' } else { 'Collapsed' }
+    }
+}
 
 function Get-SmartM365PortfolioTimestamp {
     param([string]$Name)
@@ -143,6 +173,8 @@ function Get-SmartM365PortfolioRow {
         (Join-Path $root $cfg.Output.TargetPermissionScans) "$TargetType-PermissionInventory-$name-*.csv"
 
     $rate = $null
+    $usesLatest = $false
+    $usesLatestPermissions = $false
     $rateText = '—'
     $status = 'Scan needed'
     $detail = 'Source or target inventory is missing.'
@@ -332,6 +364,18 @@ function Get-SmartM365PortfolioRow {
         Where-Object { $_ -eq $fileStatus -or $_ -eq $permissionStatus } |
         Select-Object -First 1
     $statusTooltip = "Files: $fileStatus — $fileDetail`nPermissions: $permissionStatus — $permissionDetail"
+    $fileNotice = if ($comparison -and (-not $sourceScan -or -not $targetScan)) { 'Scan unavailable' }
+        elseif ($comparison -and -not $usesLatest) { 'Recalculate' } else { '' }
+    $permissionNotice = if ($permissionComparison -and (-not $sourcePermissions -or -not $targetPermissions)) { 'Scan unavailable' }
+        elseif ($permissionComparison -and -not $usesLatestPermissions) { 'Recalculate' } else { '' }
+    $globalRate = if ($null -ne $rate -and $null -ne $permissionRate) { ([double]$rate + [double]$permissionRate) / 2.0 } else { $null }
+    $globalNotice = if ($null -eq $globalRate) { 'Both rates required' }
+        elseif ($fileNotice -eq 'Scan unavailable' -or $permissionNotice -eq 'Scan unavailable') { 'Scan unavailable' }
+        elseif ($fileNotice -or $permissionNotice) { 'Recalculate' } else { '' }
+    $globalTooltip = "Equal-weight average: (file comparison % + permission comparison %) / 2. Each rate retains its own source denominator.`nFiles: $rateText; permissions: $permissionRateText."
+    if ($globalNotice) { $globalTooltip += "`n$globalNotice." }
+    $fileDate = if ($comparison) { $comparison.Date } else { $null }
+    $permissionDate = if ($permissionComparison) { $permissionComparison.Date } else { $null }
     return [pscustomobject]@{
         Migration = $Migration.Name
         Source = $SourceScope
@@ -362,27 +406,35 @@ function Get-SmartM365PortfolioRow {
         TargetScansTooltip = "Files: $(if ($targetScan) { "$($targetScan.File.Name) — $($targetScan.Provenance)" } else { 'No target file inventory.' })`nPermissions: $(if ($targetPermissions) { "$($targetPermissions.File.Name) — $($targetPermissions.Provenance)" } else { 'No target permission inventory.' })"
         ScanGapDays = $scanGapDays
         ScanGapText = $scanGapText
-        ScanGapTooltip = $scanGapTooltip
+        ScanGapTooltip = "$scanGapTooltip`nGreen: up to 12 hours. Yellow: over 12 hours, up to 24 hours. Red: over 24 hours."
+        ScanGapVisual = Get-SmartM365PortfolioGapVisual -Days $scanGapDays
         ComparisonRate = $rate
         ComparisonPercent = $rateText
         ComparisonDate = if ($comparison) { $comparison.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
         ComparisonDisplay = if ($comparison) { '{0} · {1}' -f $comparison.Date.ToString('yyyy-MM-dd HH:mm'), $rateText } else { '—' }
-        ComparisonTooltip = if ($comparison) { "$($comparison.Path)`n$detail" } else { $detail }
+        ComparisonTooltip = if ($comparison) { "Date: $($comparison.Date.ToString('yyyy-MM-dd HH:mm'))`n$($comparison.Path)`n$detail" } else { $detail }
+        ComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $rate -Date $fileDate -Notice $fileNotice
         PermissionComparisonRate = $permissionRate
         PermissionComparisonPercent = $permissionRateText
         PermissionComparisonDate = if ($permissionComparison) { $permissionComparison.Date.ToString('yyyy-MM-dd HH:mm') } else { '—' }
         PermissionComparisonDisplay = if ($permissionComparison) { '{0} · {1}' -f $permissionComparison.Date.ToString('yyyy-MM-dd HH:mm'), $permissionRateText } else { '—' }
-        PermissionComparisonTooltip = if ($permissionComparison) { "$($permissionComparison.Path)`n$permissionDetail" } else { $permissionDetail }
+        PermissionComparisonTooltip = if ($permissionComparison) { "Date: $($permissionComparison.Date.ToString('yyyy-MM-dd HH:mm'))`n$($permissionComparison.Path)`n$permissionDetail" } else { $permissionDetail }
+        PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $permissionRate -Date $permissionDate -Notice $permissionNotice
+        GlobalComparisonRate = $globalRate
+        GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $globalRate -Notice $globalNotice -Caption 'Equal weighting'
+        GlobalComparisonTooltip = $globalTooltip
         Status = $status
         StatusTooltip = $statusTooltip
     }
 }
 
+
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3qoL0/BzgikS0
-# TT450bCyBt9s/3i84k2ekkaNnYaL+qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3whvzraAe4Bek
+# YFT+uNZLXPIdZ5gYyYfc/qdvO7D3QaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -412,14 +464,14 @@ function Get-SmartM365PortfolioRow {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCcjDdhH6KCAPnxJpBHqU0z
-# MqlzfHbFLsZsO1l988gHpjANBgkqhkiG9w0BAQEFAASCAYAI8z8B+8h4Vm+j2itJ
-# w69AFPWFg0eh4+rleMB+vQ2YvGLqyme/msh7jZ0C/SkrfB6JKmaepucocGj702aJ
-# ucvL3n4E4Q+EFWF79I1rNQfP537ML/DUpjWOmcn70qxb+iLRZiCjBVlsMiBq1Mc0
-# J3r6brnf5kwFGaKQNb6UjHsHQmCL4szZCgtaErSF8dfxyNhZNB6756uS1YXho6AV
-# YSOvAnN3MG1ysx/JcFSopOsKh2vbZEDD4sME/H0H54UJbwqsdGQZKOGkcvusmb60
-# wGSWQ3mD12ToHrGM3tcxlV1pb/XgThKaX1iMQnIE4cqNL+KxZbvY2pX8oJ10P+Vc
-# kAe3U7L0CvhT6fji2rKVFIeGFKovQiPOyGmPnSRDsxFD6EvFeyyjAjKrqT0NMViQ
-# 2B5o1WVBI7REdT8IvJU7KDGDJJ+BqwnaHm6CbCo6JONcjAE8oaWgF1DkpvlcNHgX
-# fuq2myv64TFLynOJX4F8AyWjUV8VU3xFjzWqFeS+1kog/GY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAgzwBNUg9K3+lb3ndGKZ/J
+# G957ZBu2+d+FEEQ1HZDgQTANBgkqhkiG9w0BAQEFAASCAYA5/O9ibqvfAqVlDZQi
+# bdLXCtJ/Z21n5mrT/Pa+2bumP9pnF3EDTcLoL7MPOPVjkBr7P7eUtVmCSVqkiz9Z
+# lseqWziEmO7kZKPL/fuH9JHXzwjHozM5yrQO9H98bfWFJO8HHvR1k/CnED9Pt7ZA
+# b6zufBe6dyVlkSGC4QyyYh9NNxQKU0ONukw/uKWa7JKe2u/4f7DxKv2mthxL0g8o
+# ql4dzhZlSHK2EZ3MVUsWZlym7QrE8k7d2Cg0w8z/WN7MpgtcEFFPbg96KMeJbfTF
+# elnT2YrVGabddLnRG+x60t1ovXSk0MpRM4mM+UMWvYDLWrepOlaFeneE56F3q0QB
+# vsHz9lq/SOVQpshor3fpYDNDBe7MWMUuCgD77omvAHIX6e9GDIipzaBI78PweiyS
+# HSrHUvIXfBA7c+49jLtr+K974QL6hlEYpKaNWw9dF1GzemlfPJqTH1Y3fMqt/wdL
+# 5pVfhQRL0wsHUKknsUuigu2BZg2cG1jjmpyubwW/DzrmcGA=
 # SIG # End signature block

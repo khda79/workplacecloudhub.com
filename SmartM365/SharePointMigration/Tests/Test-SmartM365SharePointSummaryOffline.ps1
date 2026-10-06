@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify portfolio summary states without connecting to SharePoint.
 .VERSION
-    1.0.8
+    1.0.9
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -69,6 +69,7 @@ try {
         $null -ne $row.ScanGapDays -or $row.ComparisonPercent -ne '—' -or
         $row.PermissionComparisonPercent -ne '—' -or
         $row.ComparisonDisplay -ne '—' -or $row.PermissionComparisonDisplay -ne '—' -or
+        $null -ne $row.GlobalComparisonRate -or $row.GlobalComparisonVisual.Percent -ne '—' -or
         $row.SourceScansDisplay -ne "Files —`nPerms —" -or
         $row.TargetScansDisplay -ne "Files —`nPerms —" -or
         $row.StatusTooltip -notmatch 'Files: Scan needed' -or
@@ -133,6 +134,10 @@ try {
     $fileBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $folder) -MigrationName 'Fixture' -Kind Files
     if ($fileBadge -notlike "* today* · $($row.ComparisonPercent)") {
         throw 'File comparison badge did not show the date and rate from the displayed report.'
+    }
+    if ($null -ne $row.GlobalComparisonRate -or $row.GlobalComparisonVisual.Percent -ne '—' -or
+        $row.ComparisonVisual.Caption -notlike '* today' -or $row.ComparisonVisual.Color -ne '#9A6700') {
+        throw 'A missing permission rate must leave the global average unavailable; file date and partial-rate styling must be visible.'
     }
     $summary.MatchedKeys = 0
     $summary.TargetUniqueKeys = 0
@@ -217,6 +222,19 @@ try {
     if ($permissionBadge -notlike "* today* · $($row.PermissionComparisonPercent)") {
         throw 'Permission comparison badge did not show the date and rate from the displayed report.'
     }
+    # Different source counts must not change the user-approved 50/50 weighting.
+    $permissionSummary.MatchedPermissions = 700
+    $permissionSummary.SourceUniqueKeys = 1000
+    $permissionSummary.TargetUniqueKeys = 1000
+    $permissionSummary | Export-Csv -LiteralPath $permissionSummaryPath -Delimiter ',' -NoTypeInformation -Encoding utf8
+    $row = Get-SmartM365PortfolioRow @params
+    if ($row.GlobalComparisonRate -ne 85 -or $row.GlobalComparisonVisual.Percent -ne ('{0:N2} %' -f 85) -or
+        $row.GlobalComparisonVisual.Progress -ne 85 -or $row.GlobalComparisonTooltip -notmatch 'Equal-weight' -or
+        $row.PermissionComparisonVisual.Caption -notlike '* today') {
+        throw 'Global comparison must average the two rates equally rather than pool their denominators.'
+    }
+    $permissionSummary.SourceUniqueKeys = 10
+    $permissionSummary.TargetUniqueKeys = 10
 
     $permissionSummary.MatchedPermissions = 10
     $permissionSummary.MissingInSPO = 0
@@ -225,6 +243,10 @@ try {
     $row = Get-SmartM365PortfolioRow @params
     if ($row.Status -ne 'Up to date' -or $row.StatusTooltip -notmatch 'Permissions: Up to date') {
         throw 'Both clean comparisons must produce an up-to-date status.'
+    }
+    if ($row.GlobalComparisonRate -ne 100 -or $row.GlobalComparisonVisual.Color -ne '#087F5B' -or
+        $row.ComparisonVisual.Color -ne '#087F5B' -or $row.PermissionComparisonVisual.Color -ne '#087F5B') {
+        throw 'Three complete, current rates must appear green.'
     }
 
     $permissionSummary.PSObject.Properties.Remove('ValidationStatus')
@@ -239,14 +261,28 @@ try {
     $newerSource = Join-Path $sourceDir ("SP2019-FileInventory-Fixture-{0}.csv" -f (Get-Date).AddSeconds(1).ToString('yyyyMMdd-HHmmss'))
     'File' | Set-Content -LiteralPath $newerSource -Encoding utf8
     $row = Get-SmartM365PortfolioRow @params
-    if ($row.Status -ne 'Compare needed') { throw 'A newer scan must require a new comparison.' }
+    if ($row.Status -ne 'Compare needed' -or $row.ComparisonVisual.Notice -ne 'Recalculate' -or
+        $row.GlobalComparisonVisual.Notice -ne 'Recalculate' -or $row.GlobalComparisonVisual.Color -ne '#9A6700') {
+        throw 'A newer file scan must mark the file rate and global average for recalculation.'
+    }
     Remove-Item -LiteralPath $newerSource
 
     $newerPermission = Join-Path $sourcePermissionDir ("SP2019-PermissionInventory-Fixture-{0}.csv" -f (Get-Date).AddSeconds(2).ToString('yyyyMMdd-HHmmss'))
     'Principal' | Set-Content -LiteralPath $newerPermission -Encoding utf8
     $row = Get-SmartM365PortfolioRow @params
-    if ($row.Status -ne 'Compare needed' -or $row.StatusTooltip -notmatch 'Permissions: Compare needed') {
+    if ($row.Status -ne 'Compare needed' -or $row.StatusTooltip -notmatch 'Permissions: Compare needed' -or
+        $row.PermissionComparisonVisual.Notice -ne 'Recalculate' -or $row.GlobalComparisonVisual.Notice -ne 'Recalculate') {
         throw 'A newer permission scan must require a new comparison.'
+    }
+
+    $visual = Get-SmartM365PortfolioRateVisual -Rate 0 -Date (Get-Date).Date.AddDays(-1).AddHours(11)
+    if ($visual.Percent -ne ('{0:N2} %' -f 0) -or $visual.ProgressVisibility -ne 'Visible' -or
+        $visual.Caption -ne '11:00 yesterday' -or $visual.Color -ne '#9A6700') {
+        throw 'A zero rate is available and must not be confused with missing data.'
+    }
+    $visual = Get-SmartM365PortfolioRateVisual -Rate $null -Date $null
+    if ($visual.ProgressVisibility -ne 'Hidden' -or $visual.Color -ne '#64748B' -or $visual.Caption -ne 'No comparison') {
+        throw 'Missing rates must remain visibly unavailable.'
     }
 
     'SharePointMigration summary offline tests passed.'
@@ -260,11 +296,12 @@ finally {
     }
 }
 
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeZV4N8YcWNMXL
-# KYsNJGlSBQPwOWVEPFTnUnAmiZEStKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBchCcC+rRnYS7d
+# k+JsgUjMkhYNS5Ar5VpQz1/lbF0OwaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -294,14 +331,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBjn5z99ZayQCmKNQ4XYYS0
-# x+v+msVPVgsKzORw8k9fSDANBgkqhkiG9w0BAQEFAASCAYAykeBqsxYrWiFNH1ES
-# ftuKIKDzIMG3Zec4mY4pze06ef6GTJKOTO+/X7gSguM+/BH9X9YdEBIUFyZp6bIm
-# MIGLeLnFu33MceX4e2nz0IiJJfuNtPemSjShWVRbueaFcfEtdJH8A8SFSxpkDL3O
-# gHR3IzsiEKRUGLy7HrrLQ/uRueu8p6q5U98jKlZXY6ZJ+8lbQvsCiTTLt7B+wCol
-# jSOuoSWi+LyDnMu1T0POISD9oDJn2AUUpOX1+bWIeyoTbvqb31Vil/GehNzcrg4S
-# CBSms+2JLI2Qx30KvXCgxYf3cVam9sS5QLUujeR66K3fLmlnDRd3BOe+UVnF/7yk
-# HJZgkJV1YmyO49j8dtZ2M75XpiMoSlIax5tdaZTvJAltkG17v3HQU94Y9nYUO34p
-# hNFv1PI+H+I5g4xUxRuAZwEgYGpNUh08YLpaPHLJlFhyfEqcOgS5M9DvVx9vuiRE
-# YzeTOrQ5hB+uTzXrPpCgFQuHHc1EdgxbeCT3hcZau65UzTA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC+EHoNd1g2nI7cXzoxCHfC
+# p1Vew/7w6cox8eX+3DeL7TANBgkqhkiG9w0BAQEFAASCAYBwrUbZffaEyX+D9p+d
+# kO6fDi9y4XVS1BRmd6+XylhfjasxunYV44J9+2KAYKq6gBfXYVMWjkO4HXQXc41C
+# FNK5MVaOTRvvHHYUm2EYrAVXaXDn14XX5EY3ZgJzq+u+03WkWfIzSH0+ykoMQ3gy
+# OhxjLUeMlv03j8sk/nFJGNTMxuynl3b9fMFOlzc/c//SMkydyUhe4oWMRJVd8bXB
+# OwwrOdKV6VnBzPTR7Z7baWkLAynH8GhfLpGYHZ/YPExqoPlLgMKVObrKocqKlG7U
+# DjhBI04J12RhmA6gS/JmTV24jN21ks2sqVoAZqpoLjtWPs7TBUbEu5sDTb3AXGAo
+# jeJJutUfmoAfuwIM/zhQCL/6nUsIMnCdaSrlxWIgzxRjFqQH5IcjNfmfHY9QeH+P
+# UHaZrhhclx5l+M2U4iaCEZ9/hz0GPvDZK+CXJ4JVhSiLq7lECpmCf5BLgoXxbkGh
+# LyTV6gCuv2vslTgNosFmti3KNr3RiKwFx4XrtzLnpfz7jD0=
 # SIG # End signature block

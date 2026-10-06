@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.61
+    1.0.64
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.61'
+$script:AppVersion = '1.0.64'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -328,6 +328,43 @@ function New-FarmDiagnosticsWindow {
     Background="#F5F8FB">
 
   <Window.Resources>
+    <Style x:Key="PortfolioBadge" TargetType="Border">
+      <Setter Property="Background" Value="#F0F4F8"/>
+      <Setter Property="TextElement.Foreground" Value="#64748B"/>
+      <Setter Property="CornerRadius" Value="5"/>
+      <Setter Property="Padding" Value="4,5"/>
+      <Setter Property="Margin" Value="3"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="PortfolioStatusBadge" TargetType="Border" BasedOn="{StaticResource PortfolioBadge}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Status}" Value="Up to date">
+          <Setter Property="Background" Value="#ECFAF4"/><Setter Property="TextElement.Foreground" Value="#087F5B"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Compare needed">
+          <Setter Property="Background" Value="#FFF8E8"/><Setter Property="TextElement.Foreground" Value="#9A6700"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Review needed">
+          <Setter Property="Background" Value="#FFF8E8"/><Setter Property="TextElement.Foreground" Value="#9A6700"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Scan needed">
+          <Setter Property="Background" Value="#FFF0F2"/><Setter Property="TextElement.Foreground" Value="#B42335"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Refresh error">
+          <Setter Property="Background" Value="#FFF0F2"/><Setter Property="TextElement.Foreground" Value="#B42335"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <DataTemplate x:Key="PortfolioRateTemplate">
+      <Border Background="{Binding Background}" CornerRadius="5" Margin="3,2" Padding="6,2">
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="{Binding Percent}" FontSize="20" FontWeight="Bold" Foreground="{Binding Color}" HorizontalAlignment="Center"/>
+          <TextBlock Text="{Binding Caption}" FontSize="10" Foreground="#5F6B7A" HorizontalAlignment="Center"/>
+          <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="100" Height="2" Margin="0,2,0,0" Foreground="{Binding Color}" Background="#E2E8F0" BorderThickness="0" Visibility="{Binding ProgressVisibility}"/>
+          <TextBlock Text="{Binding Notice}" FontSize="10" FontWeight="SemiBold" Foreground="{Binding Color}" HorizontalAlignment="Center" Margin="0,1,0,0" Visibility="{Binding NoticeVisibility}"/>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
     <SolidColorBrush x:Key="Accent"       Color="#0078D4"/>
     <SolidColorBrush x:Key="AccentSoft"   Color="#E6F4FF"/>
     <SolidColorBrush x:Key="AccentText"   Color="#005A9E"/>
@@ -545,7 +582,7 @@ function New-FarmDiagnosticsWindow {
         <!-- PORTFOLIO SUMMARY -->
         <StackPanel x:Name="panelSummary" Margin="18,14" Visibility="Visible">
           <TextBlock Text="MIGRATION OVERVIEW" Style="{StaticResource SectionLabel}"/>
-          <TextBlock Text="Files: matches / source keys. Permissions: matches / source permission keys. Select a migration to open Files &amp; Permissions."
+          <TextBlock Text="Files: matches / source keys. Permissions: matches / source permission keys. Global: (files % + permissions %) / 2. Select a migration to open Files &amp; Permissions."
                      FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
           <Grid Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
@@ -602,19 +639,52 @@ function New-FarmDiagnosticsWindow {
             <DataGrid x:Name="gridSummary" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
                       SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
-                      GridLinesVisibility="None" RowHeight="56" ColumnHeaderHeight="40"
+                      GridLinesVisibility="None" RowHeight="68" ColumnHeaderHeight="36"
                       AlternatingRowBackground="#F5F8FB" Background="White"
                       BorderThickness="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
-                      FrozenColumnCount="1">
+                      FrozenColumnCount="6">
               <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                   <Setter Property="ToolTip" Value="{Binding StatusTooltip}"/>
                 </Style>
               </DataGrid.RowStyle>
               <DataGrid.Columns>
-                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="110"/>
-                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="195">
+                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="110">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTemplateColumn Header="Gap (days)" Width="80" SortMemberPath="ScanGapDays">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioBadge}" Background="{Binding ScanGapVisual.Background}" ToolTip="{Binding ScanGapTooltip}">
+                      <TextBlock Text="{Binding ScanGapText}" Foreground="{Binding ScanGapVisual.Color}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Status" Width="115" SortMemberPath="Status">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioStatusBadge}" ToolTip="{Binding StatusTooltip}">
+                      <TextBlock Text="{Binding Status}" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="▣ Files comparison" Width="150" SortMemberPath="ComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding ComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding ComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="◆ Permissions comparison" Width="180" SortMemberPath="PermissionComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding PermissionComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding PermissionComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="◉ Global comparison" Width="150" SortMemberPath="GlobalComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding GlobalComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding GlobalComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" MinWidth="140">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock">
                       <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -622,17 +692,17 @@ function New-FarmDiagnosticsWindow {
                     </Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Source scans" Binding="{Binding SourceScansDisplay}" Width="145" SortMemberPath="SourceScansSortDate">
+                <DataGridTextColumn Header="Source scans" Binding="{Binding SourceScansDisplay}" Width="135" SortMemberPath="SourceScansSortDate">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding SourceScansTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Source inventory" Binding="{Binding SourceInventoryDisplay}" Width="175">
+                <DataGridTextColumn Header="Source inventory" Binding="{Binding SourceInventoryDisplay}" Width="160">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding SourceInventoryTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="255">
+                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="1.3*" MinWidth="160">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock">
                       <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -640,32 +710,16 @@ function New-FarmDiagnosticsWindow {
                     </Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="145" SortMemberPath="TargetScansSortDate">
+                <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="135" SortMemberPath="TargetScansSortDate">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="ToolTip" Value="{Binding TargetScansTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Target inventory" Binding="{Binding TargetInventoryDisplay}" Width="175">
+                <DataGridTextColumn Header="Target inventory" Binding="{Binding TargetInventoryDisplay}" Width="160">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding TargetInventoryTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Gap (days)" Binding="{Binding ScanGapText}" Width="85" SortMemberPath="ScanGapDays">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ScanGapTooltip}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Files comparison" Binding="{Binding ComparisonDisplay}" Width="185" SortMemberPath="ComparisonDate">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ComparisonTooltip}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Permissions comparison" Binding="{Binding PermissionComparisonDisplay}" Width="205" SortMemberPath="PermissionComparisonDate">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding PermissionComparisonTooltip}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="105"/>
               </DataGrid.Columns>
             </DataGrid>
           </Border>
@@ -2661,10 +2715,15 @@ function Refresh-PortfolioSummary {
                     TargetPermissionScan = '—'; TargetScansDisplay = "Files —`nPerms —"
                     TargetScansSortDate = [datetime]::MinValue; TargetScansTooltip = $message
                     ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
+                    ScanGapVisual = Get-SmartM365PortfolioGapVisual -Days $null
                     ComparisonRate = $null; ComparisonPercent = '—'
                     ComparisonDate = '—'; ComparisonDisplay = '—'; ComparisonTooltip = $message
                     PermissionComparisonRate = $null; PermissionComparisonPercent = '—'
                     PermissionComparisonDate = '—'; PermissionComparisonDisplay = '—'; PermissionComparisonTooltip = $message
+                    ComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Notice 'Refresh error'
+                    PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Notice 'Refresh error'
+                    GlobalComparisonRate = $null; GlobalComparisonTooltip = $message
+                    GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Notice 'Refresh error' -Caption 'Equal weighting'
                     Status = 'Refresh error'; StatusTooltip = $message
                 })
             }
@@ -4021,11 +4080,14 @@ finally {
         -Detail 'GUI window closed.'
 }
 
+
+
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASriV37COeL9m1
-# a8fS89y5YBi/vICTFiBXrwmtcDQUtqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAx5yBwa+yyRtKC
+# Kr6mu94Ra+G72dHSWN07YofZiuMawaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4055,14 +4117,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDc+tH+LCWMsU0OiFZFgHkb
-# D1PGpVMyISvqsr4FDqdQaDANBgkqhkiG9w0BAQEFAASCAYBLVYVYsQzvdwoIRR9A
-# fNlhUcxRlzPTyLTSBHq4zQruj9STn+WviTvIa8QRodhcJei3pM5ueNlK1DqTWlY7
-# SKBAcjnyhSazgidHXFD8elRkbR2gH1R0i2BNYAqeZDQY+1Spr+XA9z5DIK1+QN2M
-# RHahFhDFjMM36MVMGPoMAR9tFueutFyLxNL41ESE6vdryq7t8xqin+0cTTWFr/s9
-# SpL7oDowCJ9+hFOdaSV1T5BMphbM/eukXELq9Ky0EDwN77teGrfk0SUlGdhl99Hb
-# DYlaFeYUB479SUhdeFi9W2Tx80xt/+bV7KWBtSQlAGUqwfkkaRUo19URseEXK5/z
-# UpFGJIYdkuhmAmaCORlnfQMs4Qf4vuGtBY36cyuHLSnFqZtEyssvfxvqNwXmNiZz
-# xrqkawiMqdNhslsk7OEICjqtxs9UfjlZgK55P+kXegtjMybwdLYrWv1xbVPbN/Ko
-# I9fcJugOVRwzVbHhfefPkoHAlExpoM1gaLXEtt8E3ziN+08=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCiSRimbZVPRDV1hmoWsH5v
+# c19Tek2NMVR/paj1102ULzANBgkqhkiG9w0BAQEFAASCAYAJoX5CKW7rSfix9I3h
+# UISzWh/9J9zJaH/byowSyJ9R9s3EdnEeT5q1y3DnJCfDE5BclFtEMuv7H6CljwoW
+# JayjR/6oY9nOXmjY9WvXsIiCwdVnVtt0x9CanS5bnZwv9li7yZLIXrJBN7B7j1Al
+# NSQl4evoUb1O4fb/xZLC0d33zCqz/gALB/izi9+uljDOCd1X1fXlRIv68zzF9+G+
+# fPYeOjrc87NWoOoAN1g1xv3YLbNMHGilcAr5hWmQPAvmIIgZ6n/lmmgDFQIPXb1d
+# z7UYtwYsHMyXlu5ADzmMq7D80obUj4jVIF3Mjq4G3XPtMmDf32dSnLJlmOrpgtCw
+# AhfKOETBPvUhICBo9x7pjhtkZCPwvdAVtHEM63ir+QeZewbcm7GXoQN6yqIp1PAl
+# 9SMSbQcT7ZtfWJRY6Gp4NiXSQVDWC+4TfiKKc998ke33XmDR4JOzrpHEJx5u4vkf
+# 5Mq6zCpxGp8flVj+B+SLOF5VxMHQWmwF4TjzCmDstujEoz4=
 # SIG # End signature block
