@@ -45,6 +45,61 @@ relationships, derived calculations and Power BI refresh still need qualificatio
 Do not schedule the entry point or switch the report yet. Required acquisition
 proof is intentionally not fabricated from existing files or their timestamps.
 
+## Separate current-only SharePoint publication
+
+`SmartM365-CmdbEvidence-Publish.ps1` version 0.1.0 transfers an **existing**
+validated `DATA-POWERBI-CMDB` cohort. It never collects, regenerates CSVs, changes
+Intelligence's `DATA-POWERBI`, refreshes Power BI or switches the report.
+The configured SharePoint CSV/DATA base is normalized using Core; the fixed
+destination is its `DATA-POWERBI-CMDB` child, not raw `DATA-LAST` or `DATA-POWERBI`.
+The publisher inherits tenant site/library/application/certificate settings from
+its adjacent `.local.json.txt.template`. It uses the existing certificate-based
+Core transport and the site's existing `Sites.Selected` write grant, not new
+tenant-wide permissions. No scheduler job is added.
+
+First run `-Tenant <profile> -ValidateOnly` (optionally with `-PreparedRootPath`).
+This creates normal private configuration/logs only; it does not authenticate,
+upload, notify, write a lock or alter the prepared cohort. The plan binds the 46
+CSV hashes to the owned Validated manifest, exact tenant identity and current
+contract hash, and re-evaluates **source acquisition** age. It does not recalculate
+rows or joins already validated by the generator, and is not BI qualification.
+The result includes `ManifestSHA256`, `EarliestSourceExpiryUtc`, warnings and the
+resolved SharePoint target. Actual publication requires that reviewed hash:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Publish.ps1 -Tenant test -ExpectedManifestSHA256 '<reviewed 64-character SHA256>'
+```
+
+Actual transfer holds the same one-byte lock as CMDB preparation, checks each
+local file, uploads and downloads it, then compares remote bytes/SHA256. A single
+temporary read-back file is removed after each check. The whole local cohort and
+acquisition age are checked again **before** `current.json.txt`, which is uploaded
+last and also read back. All 47 files must pass to return `PublishedAndReadBack`.
+Automatic log uploads and notifications remain disabled; operational logs stay
+in `LOG-ALL/Publication/CMDB`. No duplicate batch, rollback copy or additional
+history is created locally or in SharePoint. SharePoint library versioning, if
+already enabled, is not changed by this tool.
+
+This flat-folder transport is **not an atomic cloud replacement**. A failed
+transfer may leave some CSVs replaced under the previous manifest; it must not be
+treated as a readable complete cloud batch until a full retry succeeds. Failure
+before manifest publication leaves the previous manifest in place; failure during
+manifest upload/read-back leaves remote status unconfirmed. Do not refresh a
+consumer during transfer. A new consumer must validate the manifest-bound hashes
+before loading. No existing CMDB Power BI source is changed by this publisher.
+If source evidence expires, refresh the required acquisitions and regenerate;
+restamping files or copying the same old cohort does not reset freshness.
+
+Offline verification (synthetic generated cohort and transport callbacks only):
+
+```powershell
+python -B .\SmartM365\Tests\test_cmdb_transfer.py
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbTransferOffline.ps1
+```
+
+Real SharePoint permission, upload/read-back throughput, synchronization and
+Power BI qualification remain separate production checks.
+
 ## Required producer completion proof
 
 WorkplaceScope 1.0.8 retries a group membership 404 or a specifically recognized
