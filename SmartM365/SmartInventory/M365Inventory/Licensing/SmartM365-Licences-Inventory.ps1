@@ -7,7 +7,7 @@
   SendLicenseSummaryEmailOnly sends the focused license and usage summary from existing published CSVs without collecting again.
   ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
 .VERSION
-1.25
+1.26
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -15,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.25
+    Version : 1.26
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -765,7 +765,7 @@ function Get-LicensesFocusedUsageRows {
   $sources.Add($licenseSource)
   $productUsers = @{}
   foreach ($product in $products) { $productUsers[$product.Name] = @{} }
-  $skusByUser = @{}
+  $targetSuitesByUser = @{}
   $allSkusByUser = @{}
   if ($licenseSource.Ready) {
     try {
@@ -782,8 +782,8 @@ function Get-LicensesFocusedUsageRows {
           $userId = $rowUserId
           if (-not $userId) { throw 'a target license row has no UserId' }
           $productUsers[$product.Name][$userId] = $true
-          if (-not $skusByUser.ContainsKey($userId)) { $skusByUser[$userId] = @{} }
-          $skusByUser[$userId][$rowSku] = $true
+          if (-not $targetSuitesByUser.ContainsKey($userId)) { $targetSuitesByUser[$userId] = @{} }
+          $targetSuitesByUser[$userId][$product.Name] = $true
           break
         }
       }
@@ -794,7 +794,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); Sources=$sources.ToArray(); SharedSourceReady=$false; AdSourceForced=$false }
+    return [pscustomobject]@{ Rows=@($unavailableRows); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false }
   }
 
   $sharedSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @(
@@ -802,11 +802,11 @@ function Get-LicensesFocusedUsageRows {
     'ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled'
   ) -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-EXO-Mailboxes-Inventory.current.json.txt'
   $sources.Add($sharedSource)
-  $mailboxes = Read-LicensesIndexedSource -Source $sharedSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'ExternalDirectoryObjectId' -WantedKeys $skusByUser -AsOfUtc $AsOfUtc
+  $mailboxes = Read-LicensesIndexedSource -Source $sharedSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'ExternalDirectoryObjectId' -WantedKeys $targetSuitesByUser -AsOfUtc $AsOfUtc
 
   $activeSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Users_Active.csv' -Columns @('TenantKey','Object Id','User principal name','AccountEnabled','OnPremisesImmutableId','LastSuccessfulSignInDateTime') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveUsers-Inventory.current.json.txt'
   $sources.Add($activeSource)
-  $active = Read-LicensesIndexedSource -Source $activeSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Object Id' -WantedKeys $skusByUser -AsOfUtc $AsOfUtc
+  $active = Read-LicensesIndexedSource -Source $activeSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Object Id' -WantedKeys $targetSuitesByUser -AsOfUtc $AsOfUtc
   $wantedUpns = @{}
   $wantedImmutableIds = @{}
   if ($active.Ready) {
@@ -815,6 +815,37 @@ function Get-LicensesFocusedUsageRows {
       if ($upn) { $wantedUpns[$upn] = $true }
       $immutableId = ([string]$user.OnPremisesImmutableId).Trim().ToLowerInvariant()
       if ($immutableId) { $wantedImmutableIds[$immutableId] = $true }
+    }
+  }
+
+  $intuneSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Intune_Devices_Inventory.csv' -Columns @(
+    'TenantKey','Device ID','OS','UserId','Primary user UPN'
+  ) -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-Devices-Inventory.current.json.txt'
+  $sources.Add($intuneSource)
+  $intunePrimaryPcUsers = @{}
+  if ($intuneSource.Ready) {
+    try {
+      $deviceOwners = @{}
+      foreach ($device in (Import-Csv -LiteralPath $intuneSource.Path -ErrorAction Stop)) {
+        if ([string]$device.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
+        if (([string]$device.OS).Trim() -ine 'Windows') { continue }
+        $deviceId = ([string]$device.'Device ID').Trim().ToLowerInvariant()
+        if (-not $deviceId) { throw 'a Windows Intune device has no Device ID' }
+        $primaryUserId = ([string]$device.UserId).Trim().ToLowerInvariant()
+        if ($deviceOwners.ContainsKey($deviceId)) {
+          if ($deviceOwners[$deviceId] -ne $primaryUserId) { throw 'conflicting primary users for an Intune device' }
+          continue
+        }
+        $deviceOwners[$deviceId] = $primaryUserId
+        if ($primaryUserId -and $targetSuitesByUser.ContainsKey($primaryUserId)) {
+          $intunePrimaryPcUsers[$primaryUserId] = $true
+        }
+      }
+    }
+    catch {
+      $intuneSource.Ready = $false
+      $intuneSource.Reason = $_.Exception.Message
+      $intunePrimaryPcUsers = @{}
     }
   }
 
@@ -868,11 +899,13 @@ function Get-LicensesFocusedUsageRows {
 
   $cutoff = $AsOfUtc.Date.AddDays(-90)
   $metricRows = foreach ($product in $products) {
-    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleAll=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0 }
+    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleAll=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
     if (-not $licenseSource.Ready) { [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$false }; continue }
+    $candidateUsers = @{}
+    $unknownUsers = @{}
     foreach ($userId in $productUsers[$product.Name].Keys) {
       $count.Assigned++
-      if ($skusByUser[$userId].Count -gt 1) { $count.Multiple++ }
+      if ($targetSuitesByUser[$userId].Count -gt 1) { $count.Multiple++ }
       if ($allSkusByUser[$userId].Count -gt 1) { $count.MultipleAll++ }
       $sharedStatus = 'NotShared'
       if (-not $mailboxes.Ready -or $mailboxes.Duplicates.ContainsKey($userId)) {
@@ -903,11 +936,11 @@ function Get-LicensesFocusedUsageRows {
           else { $sharedStatus = 'Eligible'; $count.SharedEligible++ }
         }
       }
-      if ($sharedStatus -eq 'Eligible') { $count.RecoveryCandidates++ }
-      elseif ($sharedStatus -eq 'Unknown') { $count.RecoveryUnknown++ }
+      if ($sharedStatus -eq 'Eligible') { $candidateUsers[$userId] = $true }
+      elseif ($sharedStatus -eq 'Unknown') { $unknownUsers[$userId] = $true }
       if (-not $active.Ready -or -not $active.Rows.ContainsKey($userId) -or $active.Duplicates.ContainsKey($userId)) {
         $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++
-        if ($sharedStatus -eq 'NotShared') { $count.RecoveryUnknown++ }
+        if ($sharedStatus -eq 'NotShared') { $unknownUsers[$userId] = $true }
         if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) { $count.LocalAppsUnknown++ }
         continue
       }
@@ -915,12 +948,12 @@ function Get-LicensesFocusedUsageRows {
       $enabledText = ([string]$user.AccountEnabled).Trim().ToLowerInvariant()
       if ($enabledText -eq 'false') {
         $count.Disabled++
-        if ($sharedStatus -eq 'NotShared') { $count.RecoveryCandidates++ }
+        if ($sharedStatus -eq 'NotShared') { $candidateUsers[$userId] = $true }
         continue
       }
       if ($enabledText -ne 'true') {
         $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++
-        if ($sharedStatus -eq 'NotShared') { $count.RecoveryUnknown++ }
+        if ($sharedStatus -eq 'NotShared') { $unknownUsers[$userId] = $true }
         if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) { $count.LocalAppsUnknown++ }
         continue
       }
@@ -967,11 +1000,11 @@ function Get-LicensesFocusedUsageRows {
       $hasRecentM365 = ($m365Date -and $m365Date -ge $cutoff) -or ($appsDate -and $appsDate -ge $cutoff) -or ($mailDate -and $mailDate -ge $cutoff) -or $emailUserAction
       if (-not $hasRecentM365 -and $m365Row) {
         $count.M365Inactive++
-        if ($sharedStatus -eq 'NotShared') { $count.RecoveryCandidates++ }
+        if ($sharedStatus -eq 'NotShared') { $candidateUsers[$userId] = $true }
       }
       elseif (-not $hasRecentM365) {
         $count.M365Unknown++
-        if ($sharedStatus -eq 'NotShared') { $count.RecoveryUnknown++ }
+        if ($sharedStatus -eq 'NotShared') { $unknownUsers[$userId] = $true }
       }
 
       if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) {
@@ -984,9 +1017,18 @@ function Get-LicensesFocusedUsageRows {
         else { $count.LocalAppsUnknown++ }
       }
     }
+    $count.RecoveryCandidates = $candidateUsers.Count
+    $count.RecoveryUnknown = $unknownUsers.Count
+    $count.RecoveryPrimaryPcUnknown = $unknownUsers.Count
+    if ($intuneSource.Ready) {
+      foreach ($userId in $candidateUsers.Keys) {
+        if ($intunePrimaryPcUsers.ContainsKey($userId)) { $count.RecoveryPrimaryPc++ }
+      }
+    }
+    else { $count.RecoveryPrimaryPcUnknown += $candidateUsers.Count }
     [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$true }
   }
-  return [pscustomobject]@{ Rows=@($metricRows); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; AdSourceForced=$adSource.Forced }
+  return [pscustomobject]@{ Rows=@($metricRows); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced }
 }
 
 function Format-LicensesMetric {
@@ -1041,20 +1083,22 @@ function Send-LicensesFocusedSummaryEmail {
     }
     $usageByProduct = @{}
     if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
-    $totals = @{ Assigned=0; Disabled=0; DisabledUnknown=0; M365Inactive=0; M365Unknown=0; RecoveryCandidates=0; RecoveryUnknown=0; SharedEligible=0; Multiple=0 }
-    $usageReady = [bool]($usage -and @($usage.Rows | Where-Object { -not $_.Available }).Count -eq 0)
-    if ($usageReady) {
-      foreach ($metricRow in $usage.Rows) {
-        foreach ($key in @('Assigned','Disabled','DisabledUnknown','M365Inactive','M365Unknown','RecoveryCandidates','RecoveryUnknown','SharedEligible','Multiple')) {
-          $totals[$key] += [long]$metricRow.Counts[$key]
-        }
-      }
+    $recoveryByProduct = @{}
+    foreach ($name in @('Microsoft 365 E5','Microsoft 365 E3')) {
+      $metric = if ($usageByProduct.ContainsKey($name)) { $usageByProduct[$name] } else { $null }
+      $counts = if ($metric) { $metric.Counts } else { $null }
+      $recoveryByProduct[$name] = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metric -and $metric.Available)
     }
-    $topRecovery = Format-LicensesMetric -Counts $totals -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $usageReady
-    $topDisabled = Format-LicensesMetric -Counts $totals -ValueName 'Disabled' -UnknownName 'DisabledUnknown' -Available $usageReady
-    $topInactive = Format-LicensesMetric -Counts $totals -ValueName 'M365Inactive' -UnknownName 'M365Unknown' -Available $usageReady
-    $topShared = if ($usageReady -and $usage.SharedSourceReady) { [string]$totals.SharedEligible } else { 'N/D' }
-    $topMultiple = if ($usageReady) { [string]$totals.Multiple } else { 'N/D' }
+    $topRecoveryE5 = $recoveryByProduct['Microsoft 365 E5']
+    $topRecoveryE3 = $recoveryByProduct['Microsoft 365 E3']
+    $f3F1Counts = @{ Assigned=0; RecoveryCandidates=0; RecoveryUnknown=0 }
+    $f3F1Available = $true
+    foreach ($name in @('Microsoft 365 F3','Microsoft 365 F1')) {
+      if (-not $usageByProduct.ContainsKey($name) -or -not $usageByProduct[$name].Available) { $f3F1Available = $false; continue }
+      foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3F1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
+    }
+    $topRecoveryF3F1 = Format-LicensesMetric -Counts $f3F1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3F1Available
+    $percentCulture = [Globalization.CultureInfo]::InvariantCulture
     $capacityRows = @()
     $recoveryRows = @()
     $activityRows = @()
@@ -1073,11 +1117,17 @@ function Send-LicensesFocusedSummaryEmail {
         Format-LicensesMetric -Counts $counts -ValueName 'LocalAppsInactive' -UnknownName 'LocalAppsUnknown' -Available ($metrics -and $metrics.Available)
       } else { 'N/A' }
       $recovery = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metrics -and $metrics.Available)
+      $recoveryPrimaryPc = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryPrimaryPc' -UnknownName 'RecoveryPrimaryPcUnknown' -Available ($usage -and $usage.IntuneSourceReady -and $metrics -and $metrics.Available)
+      $availableUnits = [long]$row.Enabled - [long]$row.Consumed
+      $usedPercent = if ([long]$row.Enabled -gt 0) { (([decimal]$row.Consumed * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
+      $freePercent = if ([long]$row.Enabled -gt 0) { (([decimal]$availableUnits * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
+      $consumedCapacity = '{0} ({1})' -f $row.Consumed, $usedPercent
+      $availableCapacity = '{0} ({1})' -f $availableUnits, $freePercent
       $license = [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ',''))
       $cell = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
       $lead = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#0f172a;font-weight:700;vertical-align:top;'
-      $capacityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$row.Enabled,$row.Consumed,$assigned,$status
-      $recoveryRows += '<tr><td style="{0}">{1}</td><td style="{2}font-weight:700;color:#0f766e;">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$recovery,$disabled,$m365,$multiple
+      $capacityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$row.Enabled,$consumedCapacity,$availableCapacity,$assigned,$status
+      $recoveryRows += '<tr><td style="{0}">{1}</td><td style="{2}font-weight:700;color:#0f766e;">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$recovery,$disabled,$m365,$recoveryPrimaryPc,$multiple
       $activityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$adEntra,$mailbox,$apps,$multipleAll
     }
     $sharedRows = foreach ($row in $summaryRows) {
@@ -1111,34 +1161,33 @@ function Send-LicensesFocusedSummaryEmail {
   $adOverrideNote
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
-      <td width="50%" style="width:50%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #0f766e;"><tr><td style="padding:13px 14px;"><div style="font-size:25px;line-height:29px;font-weight:700;color:#0f766e;">$topRecovery</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidate assignments</div></td></tr></table></td>
-      <td width="50%" style="width:50%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #2563eb;"><tr><td style="padding:13px 14px;"><div style="font-size:25px;line-height:29px;font-weight:700;color:#1d4ed8;">$topDisabled</div><div style="font-size:12px;line-height:17px;color:#334155;">Disabled account assignments</div></td></tr></table></td>
+      <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#6d28d9;">$topRecoveryE5</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E5</div></td></tr></table></td>
+      <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #2563eb;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#1d4ed8;">$topRecoveryE3</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E3</div></td></tr></table></td>
+      <td width="34%" style="width:34%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #0f766e;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#0f766e;">$topRecoveryF3F1</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates F3/F1</div></td></tr></table></td>
     </tr>
-    <tr>
-      <td width="50%" style="width:50%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:13px 14px;"><div style="font-size:25px;line-height:29px;font-weight:700;color:#6d28d9;">$topInactive</div><div style="font-size:12px;line-height:17px;color:#334155;">No M365 activity (90d)</div></td></tr></table></td>
-      <td width="50%" style="width:50%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #d97706;"><tr><td style="padding:13px 14px;"><div style="font-size:25px;line-height:29px;font-weight:700;color:#b45309;">$topShared</div><div style="font-size:12px;line-height:17px;color:#334155;">Shared mailbox candidate assignments</div></td></tr></table></td>
-    </tr>
-    <tr><td colspan="2" style="padding:4px 8px 8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#17324d;"><tr><td style="padding:10px 14px;font-size:12px;line-height:18px;color:#ffffff;"><strong style="font-size:18px;color:#ffffff;">$topMultiple</strong> &nbsp; Assignments held by users with multiple target SKUs</td></tr></table></td></tr>
   </table>
-  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Banner totals count license assignments across the four suites. A user with two target suites may count twice. N/D indicates unqualified data; recovery signals overlap.</p>
-  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; Recovery by license</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Multiple target SKUs</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; License capacity</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed units</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
+  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
+  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; Activity and overlap</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Licensed shared mailboxes</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
-    Recovery candidates are distinct licensed users per product with a disabled account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Shared mailbox candidates exclude active archives and litigation or retention holds. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
-    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products; multiple target SKUs cover F1/F3/E3/E5 only. Neither proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. N/D means a source or user cannot be qualified; sources older than 14 days are excluded.
+    Recovery candidates are distinct licensed users per product with a disabled account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. M365 activity includes mailbox usage and recent email actions when the reports are qualified. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
+    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. N/D means a source or user cannot be qualified; sources older than 14 days are excluded.
   </div>
   <h2 style="margin:22px 0 8px;font-size:14px;line-height:20px;color:#334155;">Source freshness</h2>
   <ul style="margin:0;padding-left:18px;font-size:11px;line-height:18px;color:#64748b;">$($sourceRows -join "`n")</ul>
 </div>
 "@
-    Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $bodyHtml -MailPurpose Report
+    $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
+    $executionFooter = 'Host: {0} | Generated: {1}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+    $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
+    Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report
     WriteLog -Message 'Focused Microsoft 365 F1/F3/E3/E5 license summary email sent.' 'INFO'
   }
   catch {
@@ -1735,7 +1784,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.25"
+$ScriptVersion = "1.26"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -2394,8 +2443,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2aslI8Zw7JZp0
-# fIIj07adqpErenLgfcRlYD4SrTfTrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDroptQeJzQiRW7
+# ymNKb3f94/HbcKB0WuBYpRIL2z4f2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2528,31 +2577,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP36UQwPXWYeuk4QB1IITcIxeH493iAdbDDoR5IDinfTMA0GCSqG
-# SIb3DQEBAQUABIIBgF/pnWLFgrDp/35dsiPTiKK8RufHMjQi2mgbiCbiQju6Gsy5
-# /+2A7l3pIEwg4nLWTBrTDcYNi8bR4sD02E7IWsaOYIEFxSyzekQZQBP66ptu80+9
-# zzKqpfttn3V578FRmCfs/mlKoKc1r5vyc/MgjHU36UJHKIWDRwWhOfzu61MtrqmR
-# /24v7gGtveKvmUhKqtlv1Ex9T77pEm9SL/PXMomUavfFZxc0voJdZRxTj1TaRjZv
-# 8BcX+tlcBhtOvx4FDdl9v9wSEGNdWKHT2o5wzzX+VMY1qv1aGjPKcg1jyGip5ovd
-# e2RfATCWujgVyjAXi5YPZ+dj4luM/QqgLvAvjUbStnpr+QHkejmVnlJyU7K3z4n8
-# amLCWZTmoWI3cUQP8CbGMAsxLpx2rWBdp0ds+RZAsklFvc/aIRGz3jHh+885aiDY
-# ZjpA6PEeJoWwvvHArQnECJP/3u9W9EPU1tTSLlK7BfUe9K1RONsd6jNPl1vwOFWA
-# nelT2XKsdV6zdLTI/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF+lhB/QDe+mkz894eAoIi6MNwldxsj1A27S7w1tL19XMA0GCSqG
+# SIb3DQEBAQUABIIBgCpiciWAj+d2uls/cKZt6CjViRHFfAQdss2s3ytUGQLcsVfM
+# TDVqRB4mVuI2kyXQBViDyTcUKOlY9KjTwyxfgUXCvI5kGlqZKXlO2tjKi72QniRa
+# +YrUCRk71wVQQ4sLcoEWp8GO9xxeesKMxcJynPftNZwiQbUSQKvLy0QC91sNFv2g
+# eEToC7aCBz8bF63xyiIH4dJZN4qvlXM3G2z0GQOoa0+RkUIORN4JCePgRasSFIK8
+# XWUjvrl0CnlaIC77br6l7WqVC/GNCNe0EOSDp32KS2CpFQgOr3Ggg5NI2V6pI68f
+# /5i0SOov21IRlXkD16EL8QjzDM9vYcfz+DItG2I89483nTy6iAlSBWDyesXJLccF
+# 9BHGskI2a2NIFyU/XMGfQQLC1Amickfgw4s3HrZv6sgYs1fLuB+k7DkSc5rdMRoo
+# zUuhoKkqrzZwuxz4I3VXgFfslFBKL0qdVACBy6k87yKKO8fZY/qB2hFjETrthV4Z
+# RRg0BAbwE/WPar3ngKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjA2
-# MzRaMC8GCSqGSIb3DQEJBDEiBCDXtDgW1w2VrjdaLxDMiAOai2EJBeAKws7MAXpw
-# hE/9wTANBgkqhkiG9w0BAQEFAASCAgAvS8mLElapwIGTPAenyZI9FkN6/KE6nQDG
-# CGKAdzYgFB8B620ohWNrv2SbWbCiQkBUd/sLow7zHPdaBbRZKyKudCRSSaM8Enab
-# l0vYSSbUKyqkFiJQVxYQgJUzb5Xoecjc2RuXzIYAU/jDzAZsbjMp5JSFr+UZ/IOM
-# RNTsj23n1V1oCPKIyZqz68MhqhOtoMQly0X2yVRk79kLzjJOoPXkEXorFdxEeK4f
-# k4b/v4UnualylR16uwqlxjoHaEmAKoKwBGwAHDhqBWbaoiVX2IemYSk4/SXL8B9m
-# BuN6tSKjjiHjb1hEjr3b5Oal2qmKq/uAAW5i1GTy1xLN4pZ9Jwolm6CWAsVhEk6c
-# /WC4okNyPwpKqthYhpxL81LWArA5N9QPYikLAIoVltRNSgAWRtKucP/QNNfs9xBJ
-# g5CYJCPjaw+tZNbgNRfk7MCLybpsATxL6S6CyCb1nhWYkFF6TAP6Jc+jNIhuAKgO
-# VzyV6JxrSCQCzMiYzasvathw/I7Y0h3s9olPXdr8R+reNb6cUjdDjvTe4+rkr9qd
-# RwsFTf/kNVUMkjzWR0QpUrSI8mrVV0+H6Op4JGJHXdjSrEKVTd5a95ICZC6FqN4P
-# Ax+ZbG1kaihYtLX/dtgIwadXXjkYb+BOJSvTHuYgc0KUB1tJtGmxOg8B4JR8BlHe
-# sdlC+8EFCg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjUy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBrI/tmD1Y/H9SU7BpVyXoM3F6peajK1cU3UXvt
+# DoJCBzANBgkqhkiG9w0BAQEFAASCAgCvWY65UmNjFl9XxsObz30KtBudsabM/XkL
+# OV6c3hd0xn5iKWGy/lRX9F58fhNHG0/o8+cqUVJPeiBH8q38qZ/UBkDZrjliQVMz
+# R8SE8TPU5292P7qA4nKtRUJw5WVHJ1E227pwr3M3jyFkCyv62z6cFEbThxz0KJIF
+# mMnQ+IeWuw4bK3etXpqGbdC8Zel7ZPzShkGSMm5N003KgyXUTtDlwKCGMiSrHaxq
+# Fwrz+sfUQVpPo2HF9nH7aK/42s4DH06PxhayuT0GVNBtIHDixlobd/bnHlTrFLvU
+# nszQvdIKyhZ87f93KUSiHgLVtt2w1+yBMoZ1CtMwf/m5pa1wGSlgPA/2tGqHddfL
+# GdjAMaxUwxU8KeYTk+I+BHevTkSTA/KL/WBs3OaporCdjJZOW4IGHelOSfaqlEr2
+# UZR8o4TTwEbKg6ANz5BRS2losB6lVr+YiQdOvMFG8LNbAKyw+QgxCfpfypXOA+9j
+# EUndStuT61EGfRybMtIhldb+n7Z8VL2gEoZhVVZjwDNzJ6MDbcXWc45RYCicBKAB
+# +GUd8DcVUE/WntjEi2zERmrZy/NLCjIzhmSiq5aaxfgcub89c3JtFq8nwCwMT/04
+# CTGUyQK6C3TcrEBHyY6P5a3RF1+J2DTFeVWD9b4Co0Uip4R467lU4CtUhejbIMIX
+# 96t97XFH3Q==
 # SIG # End signature block

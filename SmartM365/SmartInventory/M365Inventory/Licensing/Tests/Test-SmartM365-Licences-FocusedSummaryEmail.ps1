@@ -40,11 +40,17 @@ function Send-SmartM365Mail {
   param([string]$From, [string]$To, [string]$Subject, [string]$BodyHtml, [string]$MailPurpose)
   $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose}) | Out-Null
 }
+function New-SmartM365EmailBody {
+  param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
+  $script:TemplateCalls.Add([pscustomobject]@{HostName=$HostName;GeneratedAt=$GeneratedAt;Footer=$Footer}) | Out-Null
+  return "<!-- SmartM365EmailTemplate:v1 --><html><body><header>$Title</header><main>$BodyHtml</main><footer>$Footer</footer></body></html>"
+}
 
 $script:OrgDomain = 'example.invalid'
 $script:ScriptLocalConfig = @{To='reports@example.invalid';From='sender@example.invalid';EnableLicenseSummaryEmail=$true}
 $script:Sampled = $false
 $script:SentMail = [System.Collections.Generic.List[object]]::new()
+$script:TemplateCalls = [System.Collections.Generic.List[object]]::new()
 $rows = @(
   [pscustomobject]@{TenantSkuPartNumber='M365_F1';TenantPrepaidEnabled=10;TenantConsumedUnits=8}
   [pscustomobject]@{TenantSkuPartNumber='M365_F1_COMM';TenantPrepaidEnabled=5;TenantConsumedUnits=4}
@@ -126,6 +132,7 @@ try {
     [pscustomobject]@{TenantKey='prod';UserId='u2';SkuPartNumber='SPE_F1'}
     [pscustomobject]@{TenantKey='prod';UserId='u2';SkuPartNumber='VISIOCLIENT'}
     [pscustomobject]@{TenantKey='prod';UserId='u3';SkuPartNumber='SPE_E3'}
+    [pscustomobject]@{TenantKey='prod';UserId='u3';SkuPartNumber='POWER_BI_PRO'}
     [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_E5'}
     [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_F1'}
     [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_F1'}
@@ -175,11 +182,21 @@ try {
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u6';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
   ) | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
 
+  $intunePath = Join-Path $testRoot 'Intune_Devices_Inventory.csv'
+  @(
+    [pscustomobject]@{TenantKey='prod';'Device ID'='pc-u2-a';OS='Windows';UserId='u2';'Primary user UPN'='u2@example.invalid'}
+    [pscustomobject]@{TenantKey='prod';'Device ID'='pc-u2-b';OS='Windows';UserId='u2';'Primary user UPN'='u2@example.invalid'}
+    [pscustomobject]@{TenantKey='prod';'Device ID'='pc-u3';OS='Windows';UserId='u3';'Primary user UPN'='u3@example.invalid'}
+    [pscustomobject]@{TenantKey='prod';'Device ID'='phone-u1';OS='iOS';UserId='u1';'Primary user UPN'='u1@example.invalid'}
+    [pscustomobject]@{TenantKey='prod';'Device ID'='pc-u4';OS='Windows';UserId='u4';'Primary user UPN'='u4@example.invalid'}
+  ) | Export-Csv -LiteralPath $intunePath -NoTypeInformation
+
   $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   $byProduct = @{}
   foreach ($item in $usage.Rows) { $byProduct[$item.Product] = $item.Counts }
   Assert-Equal $byProduct['Microsoft 365 F1'].Assigned 2 'F1 distinct users'
-  Assert-Equal $byProduct['Microsoft 365 F1'].Multiple 1 'F1 variants count as multiple distinct SKUs'
+  Assert-Equal $byProduct['Microsoft 365 F1'].Multiple 0 'F1 variants count as one target suite'
+  Assert-Equal $byProduct['Microsoft 365 F1'].MultipleAll 1 'F1 variants remain distinct assigned SKUs'
   Assert-Equal $byProduct['Microsoft 365 F1'].Disabled 1 'F1 disabled'
   Assert-Equal $byProduct['Microsoft 365 F1'].DisabledUnknown 1 'F1 unmatched account unknown'
   Assert-Equal $byProduct['Microsoft 365 F1'].SharedEligible 1 'F1 disabled shared mailbox under 50 GB'
@@ -192,40 +209,73 @@ try {
   Assert-Equal $byProduct['Microsoft 365 F3'].SharedUnder50 1 'F3 licensed shared mailbox under 50 GB'
   Assert-Equal $byProduct['Microsoft 365 F3'].SharedEligible 0 'F3 archived shared mailbox excluded'
   Assert-Equal $byProduct['Microsoft 365 F3'].RecoveryCandidates 1 'Archived shared mailbox excluded from recovery union'
+  Assert-Equal $byProduct['Microsoft 365 F3'].RecoveryPrimaryPc 1 'Two Windows PCs count once for a recovery candidate'
+  Assert-Equal $byProduct['Microsoft 365 F1'].RecoveryPrimaryPc 0 'An iOS device is not an Intune PC'
   Assert-Equal $byProduct['Microsoft 365 E3'].LocalAppsInactive 1 'E3 local Apps inactive'
   Assert-Equal $byProduct['Microsoft 365 E3'].MailboxUnknown 1 'E3 missing mailbox row unknown'
   Assert-Equal $byProduct['Microsoft 365 E3'].M365Inactive 0 'Recent Apps activity prevents M365 false inactivity'
   Assert-Equal $byProduct['Microsoft 365 E3'].SharedEligible 1 'E3 active shared mailbox is a recovery candidate'
   Assert-Equal $byProduct['Microsoft 365 E3'].RecoveryCandidates 1 'E3 shared recovery candidate counted once'
+  Assert-Equal $byProduct['Microsoft 365 E3'].RecoveryPrimaryPc 1 'Shared recovery candidate can be primary on an Intune PC'
+  Assert-Equal $byProduct['Microsoft 365 E3'].Multiple 0 'E3 plus Power BI is one target suite'
+  Assert-Equal $byProduct['Microsoft 365 E3'].MultipleAll 1 'E3 plus Power BI has multiple assigned SKUs'
   Assert-Equal $byProduct['Microsoft 365 E5'].Multiple 1 'E5 multi-SKU user'
   Assert-Equal $byProduct['Microsoft 365 E5'].LocalAppsInactive 1 'E5 local Apps inactive'
   Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryCandidates 0 'E5 archived shared mailbox is not recoverable'
+  Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryPrimaryPc 0 'A PC on a blocked shared mailbox is not a recovery intersection'
   Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '49,99') ([decimal]49.99) 'French mailbox size parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '50,00') ([decimal]50) '50 GB boundary parsing'
 
   $script:SentMail.Clear()
+  $script:TemplateCalls.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
   Assert-Equal $script:SentMail.Count 1 'Enriched email sent'
-  if ($script:SentMail[0].BodyHtml -notlike '*Multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Multiple target SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*' -or $script:SentMail[0].BodyHtml -notlike '*Removal candidates after archive and hold checks*') {
+  if ($script:SentMail[0].BodyHtml -notlike '*Multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Multiple target suites*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*' -or $script:SentMail[0].BodyHtml -notlike '*Removal candidates after archive and hold checks*') {
     throw 'Enriched KPI headers are missing from email.'
   }
-  if ($script:SentMail[0].BodyHtml -notmatch 'License recovery overview' -or $script:SentMail[0].BodyHtml -notmatch 'Recovery candidate assignments' -or $script:SentMail[0].BodyHtml -notmatch 'Banner totals count license assignments') {
+  if ($script:SentMail[0].BodyHtml -notlike '*Candidates primary on Intune PC*' -or
+      $script:SentMail[0].BodyHtml -notlike '*Intune_Devices_Inventory.csv*') {
+    throw 'Intune PC recovery indicator or source freshness is missing.'
+  }
+  if ($script:SentMail[0].BodyHtml -notmatch 'License recovery overview' -or $script:SentMail[0].BodyHtml -notmatch 'F3/F1 adds both suite counts') {
     throw 'KPI banner and assignment-grain note are missing.'
   }
-  if ($script:SentMail[0].BodyHtml -notmatch '3 \(N/D: 1\)</div><div[^>]*>Recovery candidate assignments' -or
-      $script:SentMail[0].BodyHtml -notmatch '1 \(N/D: 1\)</div><div[^>]*>Disabled account assignments' -or
-      $script:SentMail[0].BodyHtml -notmatch '3 \(N/D: 1\)</div><div[^>]*>No M365 activity \(90d\)' -or
-      $script:SentMail[0].BodyHtml -notmatch '>2</div><div[^>]*>Shared mailbox candidate assignments' -or
-      $script:SentMail[0].BodyHtml -notmatch '>3</strong> &nbsp; Assignments held by users with multiple target SKUs') {
-    throw 'KPI banner totals do not match qualified license assignments.'
+  if ($script:SentMail[0].BodyHtml -notmatch '>0</div><div[^>]*>Recovery candidates E5' -or
+      $script:SentMail[0].BodyHtml -notmatch '>1</div><div[^>]*>Recovery candidates E3' -or
+      $script:SentMail[0].BodyHtml -notmatch '>2 \(N/D: 1\)</div><div[^>]*>Recovery candidates F3/F1') {
+    throw 'Suite recovery KPI cards do not match qualified license assignments.'
   }
+  $body = $script:SentMail[0].BodyHtml
+  if ($body.IndexOf('01 &nbsp; License capacity') -lt 0 -or
+      $body.IndexOf('02 &nbsp; Recovery by license') -le $body.IndexOf('01 &nbsp; License capacity') -or
+      $body -notlike '*Consumed (used %)*' -or $body -notlike '*Available (free %)*') {
+    throw 'License capacity order or percentages are missing.'
+  }
+  Assert-Equal $script:TemplateCalls.Count 1 'Focused email uses one shared template'
+  Assert-Equal $script:TemplateCalls[0].HostName '' 'Host metadata removed from template header'
+  Assert-Equal $script:TemplateCalls[0].GeneratedAt '' 'Generated metadata removed from template header'
+  if ($script:TemplateCalls[0].Footer -notmatch '^Host: .+ \| Generated: \d{4}-\d{2}-\d{2}') { throw 'Host and generated time are missing from template footer.' }
+  if ($body.IndexOf('<footer>Host:') -le $body.IndexOf('Source freshness')) { throw 'Host and generated time are not at the bottom of the email.' }
   if ($script:SentMail[0].BodyHtml -match '<table border="1"' -or $script:SentMail[0].BodyHtml -match '<th>License</th>') {
     throw 'Legacy unstyled table remains in email.'
   }
-  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">20</td><td style="[^"]*">17</td><td style="[^"]*">2</td><td style="[^"]*">Subscribed</td>') {
-    throw 'Enriched F3 metrics are missing from email.'
+  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">20</td><td style="[^"]*">17 \(85%\)</td><td style="[^"]*">3 \(15%\)</td><td style="[^"]*">2</td><td style="[^"]*">Subscribed</td>') {
+    throw 'F3 license capacity and percentages are missing from email.'
   }
+
+  $intuneManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-Devices-Inventory.current.json.txt'
+  @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='Intune_Devices_Inventory.csv';Status='Failed';IsPartialInventory=$true})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $intuneManifestPath
+  $partialIntune = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $partialIntune.IntuneSourceReady $false 'Partial Intune file receipt is rejected'
+  Assert-Equal @($partialIntune.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0].Counts.RecoveryCandidates 1 'Intune source does not change recovery count'
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
+  if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">1</td><td style="[^"]*">0</td><td style="[^"]*">2</td><td style="[^"]*">N/D</td>') {
+    throw 'Unqualified Intune PC source is not marked N/D in recovery table.'
+  }
+  Remove-Item -LiteralPath $intuneManifestPath -Force
 
   $misaligned = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -LicenseSnapshotUtc ([datetimeoffset]::UtcNow.AddDays(-3)) -AsOfUtc $today
   $f3Misaligned = @($misaligned.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
@@ -329,8 +379,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJMIrp/ybfWrNS
-# BZwZVPwljyezT27yqQTHcBMbn2FS4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlEaXAMTnvCXue
+# 3/ACUS4Y41V6QutuJACLL22NEA0IKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -463,31 +513,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINl+Bt0OQBnR/pWbE/SM5ZgZdiqqKt9IFeBUnQVf//cLMA0GCSqG
-# SIb3DQEBAQUABIIBgIU/NX8DcZHrWUyBVaXLs+QCb9P6zImjYj0b/6MCc6ttPG3d
-# sgloDFLukOgj2nXZY+UYGPgNsBye06eNWoBe2x/CW9rydQ7Ogo8dKmmZFJiXQK19
-# FArICS0cs5ckfNTFYKjaS31r98o5bT6Wkc8HvCtCvTZVa/lZaVHRc1iT2pHZz3Ue
-# Laq/eSZq5zlyC5d4sSJe8Sr304aP/cicRb8eBIvn5YmiC/CpjSQpWA1rRXoWuJJY
-# h+Jy3iKgXfl6LYiCdnQ5q+NMoMDFiYw56TP7706CeXcOaRlTDblrdqeO7OrLDuSw
-# Nddh3JPvvr5Q5BR7X+jELG9f6sIDFb0TNELIq2qJIR+Kg9Bvm1Q91beFIruhCkLX
-# aZUANSlChM6PbBX15Ls16PNOUiP6V5ki9kje2W+0b65aI9RFLK3wPzb7dJLtLYjG
-# TuEBc0TCKS5t0Pu0tey49kOpJ7ne/DT2MDzIHq+yQTW7/ROHpxd366AXOsf939X3
-# 3AHw57SVjA1tW17V8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMZG/XzGo0MN9uf0lbeCJN339dxp91VGCNRZUsm7FpAPMA0GCSqG
+# SIb3DQEBAQUABIIBgAM5Bt8IUnmH93xGVYuImQM0vj2CUbllvaeLFXMiywBUv0ef
+# fXZn0tg0L1Dmt0gL3QU7km3VGVO4233p3FmDoSHMXWIMp4VfEpy4VhKDBYy4ugm5
+# 9YYjqq74ZPPNWzEOW5ffbUcc0pnnLPj4z+YsfVb5xX7ejvLNB76yzsUA7cH8sveg
+# 01BqzflJP50vqvQbYbJRP2gUkp+P27SeZPkMF2Q9b5P0orktDAxKmx+whFqgFdbL
+# nlxgIT1+yFbpszQ42cUH66gjhE5YuF7+pmEdSHglEfTUI0zU+iMEaedZWa9nAzum
+# +u6LN+1kKZocekYEAHHnK5ydmbmgyPQDvRTwbXJSWpXurNKR1lxR81ih8vDv5cuZ
+# xXUVgQtG438zxsM9TG9YiFZUhXEYfDonirGvfUEKXKn7HNzgNn94ExI1116k7sz/
+# zDfKd+0U8R1SqfOo4HAETowNy7V+UKb2Oc77CGueCtAm22QcQ7nKgZrYUNmLpY9E
+# 7R7m0mnYOW3LOpY7HKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjA2
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAv/nBe/iVK5d0QMQaGA11Ol9qjRzWIYzRG2tao
-# 0ovzMjANBgkqhkiG9w0BAQEFAASCAgAqwmUyT79LCc2MsXFfEU2+sOjeDPkGR91A
-# xJ56Ic8OdxoBf1jtmz0n74eL+shMellD88TOmVA2OqiFXO6kJ7c6EXYGlsWaXF4q
-# uFxmATJ7GxTO2xe/mvpDlg4Fg8Vsyp6YOF5KyREtKQ0Y2joSk4vq3qnhX0cFi/lg
-# LHF7abqo7GJiEmyX8bd5KuNHLFKGsEbYr2sfnmM3OAZQtyXajw101434M4cLA/M5
-# FZ+OflXHIoXKYcPB52OPty8/Uv067s6fpOD2TEAI0NLQhmZB90OjXnwZNVw/5qBg
-# HZ/byRHngbrlSt6f3XhFN+8mjQjdRDq0orknt2aB3BTS7vLc4vDYqainxQFIcO/r
-# ah+jLHXBnCc0DgH9S3fazJL8SLPIPA7a2KM/yTC4kPltpJmhA0lVOzHmUH8bGYBK
-# k6LhoESz94d3DNxl5FMw9/+w3Yib8yVRaUbCD79BC/edeNJowTK8/6XNJGCCFM4M
-# QkT8ddpdMOFDFGFZ/Y0Fkv3o5Lf1kGmWxc0nNNrzTKvIiJIRSwKilL6PALccRkSz
-# gmTvNZ6lVEoJFFqAj5X3tLvL73rDlqe/wmDBO4REqYiDffa7wJ/aRhFiUrKv5fwO
-# RwGS03T2u9cSELcuMTqXxMHMO0BhHJNlOX18L9poq4k+GowvyOtNVYeD5gqjnZSB
-# UNwc73dB3Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjUy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCClDzet07Nr2Z4cqlXRl5pz1/dYwuABxjwFeAy7
+# g9XhJjANBgkqhkiG9w0BAQEFAASCAgAphaANvDNi1ohvpTTUf6RYbvnNJ2i5OL+C
+# X4G/p8JLbsyCuGGSihrBWbUddeM+9SmvTIoLMyJWA51+F5lcjXJ7DJUHpY+tgvVQ
+# eImD9eo9274klHXcKpJiq71Pav4mOmDQ8R3lfNn0T5azHseIheBu96ApKOdh1XVe
+# MpN1wZiqu4xYEIZVvhxF+OpSgR8M/dxknkdSBsol0gm18GGCSJuOtNfGmkMlB5lA
+# N2cG9HCHbkaDKYfVlXqhNo2zG2m9GGRwIJvp+eZnXTkGCiFIEwjWPgNi/y+E9AVX
+# zKnjdfArfnS5clSQk23nChHCeUmu1SnZTSbl/SiRFsECehR5DHr7XLYhszqjObGb
+# +0rKPppCy+rPDkvkEQq1LqasFCDIDGdFDgeEYY0QD8MTLcE2S9eOn8V5reIzpnJJ
+# Wl3h+rasBgQfHTzxFgPAiTZDgHUy/l3e8xvN7LnRFcsKHk/Hmojry1vVHhndzquw
+# 6/Jp6K1TM44kHTV4YjoqxJEZNjAPJOrqNoCuvcCpKpMw6W5tx/+C90bIg7QfyckC
+# fy6vsf+XFyDiURQFg/g4SsOw+RmfBESu4mrldDhoEY2T+4AIFVZj4chZ+G9n6qBQ
+# VNXQ16GcE+hwVEXt8oAFVUUlxTXaRVfWAv4prT11rEkoHSHF4tcf4WZ+yQkn59ti
+# zpEJu3I57Q==
 # SIG # End signature block
