@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -79,6 +79,19 @@ try {
         Check ($ast.Extent.Text -match "1\.0\.72|1\.0\.50|1\.0\.8") ('Required module guard missing: '+$definition.Script)
         Check (@($commands | Where-Object {$_.GetCommandName() -match '^Complete-(Core)?SmartM365(ExecutionContext|EvidenceRuntime|SourceReceipt)$'}).Count -gt 0) ('Completion coverage missing: '+$definition.Script)
     }
+    $rbac=$registry.Producers | Where-Object Script -eq 'SmartM365-Intune-RBAC-GroupMembers.ps1'
+    $f=Begin-Fixture $rbac 'rbac-quoted-semicolon'
+    $csv=Join-Path $f.Folder $rbac.Files[0]
+    [IO.File]::WriteAllText($csv,(('"TenantKey";"Name"'+"`r`n"+'"synthetic";"name, with comma"'+"`r`n")),[Text.UTF8Encoding]::new($false))
+    & $mock {param($p) Register-SmartM365SourceCsv -Path $p} $csv
+    $r=Finish-Fixture $f
+    Check ($r.Status -eq 'Completed' -and $r.Files[0].Rows -eq 1 -and $r.Files[0].Delimiter -eq ';') 'Quoted semicolon RBAC CSV was not qualified.'
+    $f=Begin-Fixture $rbac 'rbac-malformed-semicolon'
+    $csv=Join-Path $f.Folder $rbac.Files[0]
+    [IO.File]::WriteAllText($csv,(('"TenantKey";"Name"'+"`r`n"+'"synthetic";"unclosed'+"`r`n")),[Text.UTF8Encoding]::new($false))
+    & $mock {param($p) Register-SmartM365SourceCsv -Path $p} $csv
+    $r=Finish-Fixture $f
+    Check ($r.Status -eq 'Failed' -and $r.Files.Count -eq 0) 'Malformed semicolon RBAC CSV was qualified.'
     $definition=$registry.Producers[0]
     # Exercise actual atomic publishers without running module initialization or external actions.
     foreach($publisher in @(
@@ -169,8 +182,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGiPo/8tH0xVOR
-# HGAEyCk5K5KIkIyYK0pv5NRRfGmSmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAcvdOwDiBHINc
+# B/s2HsKMHNoL7vUDpwhwm7KfslcRDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -303,31 +316,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPzFNeVqxWolQdrFYYQrv0Tslv4xOx2+efQswbAhGTpKMA0GCSqG
-# SIb3DQEBAQUABIIBgESibKmH1XwK492SR1BTAyIFV6JMJzleTD2SS59nQSuwJI0G
-# HHiTzmDcTWNDjEePwFTvYYkt4KR+fyhRya3rSK2tWI99cz/8aZ37n0I9RLzWH4a2
-# gBBzOl8MHuMzs1zti4lETOuOq8/V44R2a05eC9NjfDNp1Zd/owOFzPm4Ue1TMPcm
-# 8w+mrstGcKcTWLxplmN4xlq5poHzP9P5fIPJyHNXqlQpwMP/MzoQ8/9ES8K8JCCa
-# qNgCum210IV/vhmWvXv4rMTmqGkgaHE092Jbu8h+NbvINxH00WNBLVKOfi8Hp4T7
-# RZ1zYooVsj9arip0Ixc7LpP297Jks6lpv1EG0OvR3ksua5H2xUpRLEfiQw7M0rXx
-# 6kdUtnZ9Ukp4yKAeLvRZNj0LS2v5iS2LExf0+GNsF68jSc2lIKAkvFUJflncZox2
-# QD3RZTdIGuWM6bE07Bb5G9xbNZlapkkJeJLAhQC1gDkDHKbiNdiO2zUbUgGf8OZv
-# Nv4Sb3qtLsfrnLbLjKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM9tVcng5D709AftF/lbmUY/ZxdZ6788CVMY1IZ82Zm1MA0GCSqG
+# SIb3DQEBAQUABIIBgBubLeO1jYltfxLM6notxfVUQKvnZcC5a3XXG4YJ6BgYm3x6
+# HJWXm12zwpY3TmWEC534HERTU6LtnIeQB/flH99I2XqsZltanpL1x1mWzJqRLnau
+# LiO4mwC/KpzGrJDIBE0V8rKpaeHAlvoLg7XIBQQnN+IYXOV+Fa2iNX5l4WrzyOug
+# FAFuq065SPUQZPWksJvYXdA8FLnoF6/pljDDh/D9yymjfn2ipVI7WubsCYsnMquL
+# 98L4sal5L0xq3JC4It79B/5NWyviBSg1/5MC4cnSqkSezInkhxEsQ/vJ2mZK0xy1
+# JEDK6goYgt26E0ZWNQNFzhtnH4Xezx4Lc+ZWpZbvYY2MphZvUY8MpH6FoDrmNHGM
+# ZkRGExcDm6gg1cDAaWyBAutgZIrjLppRlPxTiDeJwr+SVsO2/2ZA0rjDLkr45aiz
+# PXxNo8V/kPhX4l49pb90tds7dSfLV8zQgNdyLFGM+lP2uPvf4enF7XlnNphvsezB
+# c1kgOGARwgRpEPspA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODU2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCCQdGxgzqTEPWtU/a0Y4GJWo5lV5HVDCVPJFEh7
-# +ujkrDANBgkqhkiG9w0BAQEFAASCAgBeVsdmqyOIvpOFAK3/pZciLBwvqf7ilr1p
-# zhVFZeTg/m/YI5mdme5ym/fuSmGDEA4bGzUljgEK4dMVO8DIg67/E42SHx+M/aPC
-# NJzaG/p/sqjsZhLFlMT4CwTAPemTECfxn1Q8XVmNtcNDc9ai7bWRamwVFUcjRwpi
-# B9eQm1z97byobe/GqHHdJiCdtvsdfh273xR5Qrrs4BiIz81/K3N5rvx5Ja9ZtKrV
-# iE+fCL2qj/n9poJt+y76bOVFfb2AOt0FV3MYWz39tzbMMNV/HICKvO3w0Q3iSfrr
-# IbqmAlt60P+6ddVqRI3Q3VJg0dC16qPOtcVhnccbUvLXCq8OecLJGbdOHes9Z8S8
-# HStFgHWbqotXKrAO5DqlekrP3e8k9LxTIZuFHl4y8tvhY/OY1OVDwufBl7x10vot
-# LLTMJkHGAUFZF24+oOv6JF/VcWlmJCHefL8Ln2xy/mwH07HT+iuu5lLEPslAjfGl
-# 5RKLqteRzewG3bPvdkzIwHrI5/fWJRG7zU9/3XndVzp+qjTETbTYOkOwJgB31G9j
-# vd/2fBpSISmZe6yCABvGwhfXwJ9fZUzV0AXHUHAyYU+SEKyrLbFFO2TxVdkazoiA
-# sTc2felaYFro35af7uepHOeMyghhS20sD+fVlFpDPxod48OGtvkZW02ZbEX6oW7f
-# iNNcG/fLoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDUz
+# MjNaMC8GCSqGSIb3DQEJBDEiBCDYjWJGfSlsD71J8EouPT4CFyGHy1Ow+mS2zmih
+# PeTPNjANBgkqhkiG9w0BAQEFAASCAgAHKj9berHLMpXOB9y7iNhOsDv9RzIBU8c6
+# fOytIhsv3wUfZyOw/sTeD3+c9oB++f3FnlKtCbdYIfSC4xNQT9w2daAAExk7yqE/
+# EeIeliqfyrdauBC63bWz+ewG32/izt58Ac9crjEf+KYdiagl1YxHN+oBCjUsd6ob
+# cR9q95Fb1AzfJZCqCcEAKs7AneqVSkAx9Ha3btOIGHbtCeMMAXUwCSWwOILWDE7F
+# eeWu4rr8hzyxBnk6G+Y11fTgMFr0jgEElbG++B95DDgNrtCoLSAO3m1TiQ0e5iE7
+# IdbhQStCe4GrecOxtFrcFzPq4NCg7W1n1r8+8PueOHoLMbxqu57nFcWfYfyJM1c8
+# Dh7SeATBd8r93ajlKMHzOSgq0PeV8Bn+RPQQUaRnsDGYgYbCFcJqwrXS++lVCeiQ
+# MDv2I8D287Q66MLMYiDPruM1E9StkBtj82PWv+CW35j27JFJgyLD9Jcr0M6bvAkH
+# 5RPyVdnF1uncvpG5zzcmCNPddc9kf0G0iokk6u4ntrKV5oewXLAZd5lC9R6j1n84
+# qYonoBUaYJsc1tf5hd8JL8ROQTG9SKZGsY4cIbVBaRZovifhTzwRKMAL7oGj7Xya
+# XjJmY9937smQfNdFD8jsJ4ctuUD3hwz2s6rzxAxX2LPc8GEYFmjjMxhkHDyUQqPK
+# AHHQmQsB4A==
 # SIG # End signature block

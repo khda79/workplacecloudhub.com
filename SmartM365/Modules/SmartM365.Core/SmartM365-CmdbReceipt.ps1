@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.1.0
+1.1.1
 .NOTES
 Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
 #>
@@ -116,17 +116,26 @@ function Get-SmartM365CmdbCsvReceipt {
     if((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked CSV source is not accepted.'}
     $before=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
     Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
-    $parser=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path,[Text.UTF8Encoding]::new($false),$true)
+    $parser=$null
+    $delimiter=$null
+    $columns=@()
+    foreach($candidate in @(',', ';')){
+        $candidateParser=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path,[Text.UTF8Encoding]::new($false),$true)
+        try{
+            $candidateParser.SetDelimiters($candidate);$candidateParser.HasFieldsEnclosedInQuotes=$true;$candidateParser.TrimWhiteSpace=$false
+            try{$candidateColumns=@($candidateParser.ReadFields())}
+            catch [Microsoft.VisualBasic.FileIO.MalformedLineException]{
+                if($candidate -eq ','){continue}
+                throw
+            }
+            if($candidateColumns -contains 'TenantKey'){
+                $parser=$candidateParser;$columns=$candidateColumns;$delimiter=$candidate
+                break
+            }
+        }finally{if($candidateParser -ne $parser){$candidateParser.Dispose()}}
+    }
+    if(-not $parser){throw 'CSV TenantKey header missing.'}
     try{
-        $parser.SetDelimiters(',');$parser.HasFieldsEnclosedInQuotes=$true;$parser.TrimWhiteSpace=$false
-        $columns=@($parser.ReadFields())
-        $delimiter=','
-        if($columns -notcontains 'TenantKey'){
-            $parser.Close();$parser.Dispose()
-            $parser=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path,[Text.UTF8Encoding]::new($false),$true)
-            $parser.SetDelimiters(';');$parser.HasFieldsEnclosedInQuotes=$true;$parser.TrimWhiteSpace=$false
-            $columns=@($parser.ReadFields());$delimiter=';'
-        }
         if(-not $columns.Count -or @($columns | Select-Object -Unique).Count -ne $columns.Count){throw 'Invalid CSV header.'}
         $tenantIndex=[array]::IndexOf($columns,'TenantKey')
         if($tenantIndex -lt 0){throw 'CSV TenantKey header missing.'}
@@ -194,8 +203,8 @@ function Complete-SmartM365CmdbSourceReceipt {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0cwaq3jhTERN5
-# TMaOrDw5UFhNUfddgYQvvhA+Gxsli6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA22jYemmrTkRmC
+# fwAk+yd/xSQ+wJhL8j4Cy9Uro5JFSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -328,31 +337,31 @@ function Complete-SmartM365CmdbSourceReceipt {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBfx6vMycyArYPzBoGdctL0Enrdvm7YX2wP3WENGZAz8MA0GCSqG
-# SIb3DQEBAQUABIIBgH9lrZ7bx86H1yqF3HrpP568EwyF7ywzt4pF0UhAhWNPp2NV
-# qxig6fcehyK87O/gWGjUUNpBo+dzXGTLcpczaHWZa4mWAszdzNYYgMuooirbbcwW
-# 2qNoqS8TLWWNneZ3RZnUsHI+bV32c3FyaYtdA4za+B/gE2ipOYWVuOCY6O7Vp5Qq
-# H9JNSPS9Ckc/p4moPKHzSdp9AtW/9AoYcKpoUp0t3lEqqrmX5jRREjuNwGuenDY8
-# kDQCF9twIgVVSwrLftP24rg3jHgm9nMw/aeAlui/PQQcTja9q1HGm00jbqxu1mrY
-# djaq2Xp64u+Ulq5itcxuDKjsHh1KgLat+POud2uLeZdEC7s+FnQWVyHFGiN80XCd
-# VJ2DhmQmW0z/O/P6MNskmNwGQYS2FAFxxPtiPKAhGBSQEqXmmAud7LouvnJ3uDcG
-# omx28T0Ydzvn04bfes5LdueRbf94CvsP6zpHx6kI94rICFOJvmqanyyE/IwRRb7k
-# /E7SNzz6oQyc99jzaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGGyODLRWKrOz0lpScK7NS16SDSKWa152uZ8xnmBeWPyMA0GCSqG
+# SIb3DQEBAQUABIIBgE0fX3mcPw4/JRuHHUSfOH96Q0SlL5+r05imwDWxfhKSoGOa
+# FRI2PtNCc3hQ0b/WbUQ6LubOD5H0PWdT0o8TJY970E1PoaNxwaDWlKcgnpJnDMkb
+# eJj4l/n78ftEJ/pZ5oylnwcSILs5P0pooQabA7F6PReTZA1GieA1jj+sY4Wa+P8K
+# kFvVcF0wLUBofT8wnbGNnIxrALcxw/n0m0GmaU9rH2koKGZk8qwyho+dxygvucoe
+# Hr5d20YAg1RlDK8OEDNVOf+7VLwTrmVB3glYxvU8wifO/W/lRVBHiSvR71jnFWbv
+# 5UMIUUucOlqEgcApQjv9nWKe/J0xTfMJ83BNj1YQEwL0nsxy+6NRxgFh/jPMTpVJ
+# wSS3dMN5I+hqkL+U+HAX3CDt7eSJJkK1qzThzqt4buGkDWudfRrRFFRtRlCEufO/
+# 1ZwbU7gyJv6vih3TJxy4dElsXU/R1vKxQYfCDMpwY9TrFDEgLQ6PtwaEV8Y3tDj6
+# QJLByIy8jU3CJIgod6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODU2
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDvZE7ijBFsr3s6jxLyUpjKEl2uU21i/yy/jhPl
-# 1jqKKTANBgkqhkiG9w0BAQEFAASCAgB1TwWHOznIhtlBQ9GwyGpttbCg2nYmzArE
-# fazTCnp1V/KSW6IBVmuwCegJZYrqO9rHyqUg01gciPh0macK0aNS7k4w1Xz/rRPX
-# vmuInCmqJgUE5d6MurUNYLqy5xeqtPqGYyqBqM/g3SrYkGebMZiURmFGNeGEpU/d
-# dLQj8HDSKNRqlf2NLFzi5fQZNTeHAQ4We15FfE6++Mxjl9soBQc0U4t/PVX6ognn
-# sWUdlD2W7F1+Lf0vLNXXmzv70xWK34upUnfTmv0FTo2ESqNuAdI4uQg+88ZwaiEu
-# gU94d5WfDGqiLkb+EgxwRIEfuCJTJtLTvtFq87HuCiAmcI1F1iL3236+HR2Q0B8b
-# Mw/8us5QT5lJi/tv5AlqImp4xcwmtHiSDPnaACacWbLoDw1uB2QGHf0xYdxVWDWt
-# uUpuR2AbG9zHqaf93qUjNWTGkrpVsUEqEgjmwHDn8D78/YGWsiNYHyxbKjds47sP
-# 0XjLuLD5UEFRaL4xzecAueeWshwlPO0Zmz221LJuwpYBw/SWc/BPrklKBrsyY3Bu
-# lr5lDeibutiVzHsif85i3otBvrhIIALDQO/6NclBMjEzNqPizcOw9L5ry9IHhT+l
-# jzz0gC9b0iBBSeixiYPJ64ArlHf73xfVOkiMtk6k0TUvCLMv5gROY/ZiRc9jtSmq
-# f3NDfrWObQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDUz
+# MTdaMC8GCSqGSIb3DQEJBDEiBCAb5D98fm+9bA+McW5OJFDu/mpC4xUWN/FDzvcU
+# 6xSiQTANBgkqhkiG9w0BAQEFAASCAgBicQh+VjNvA149RNt8guu0Fl5yAz+dAEc+
+# 6Wqm2BV+n5w750vXp1TwG6RNd3X6DuNDHk+495T+mR3bOtbN+m7PIkA/219lvUfG
+# ezvQeyqofoeA2p9mSHz4hH1XscdQ6yrUVbpIpVk2Ewr7ZvN+MNjGVL+EB8STOZmp
+# DaBwW6ZF4Kqat8T4XszzldlAoniDSL2SPWx2K8wbfYohyKPRURyKxoujtSpoqdq0
+# 6CifwIJAlzqFMaT3lE1DFYKDe/VlJ8dUXn5KEvkvmqms9si/WKadBASYSYDUuxUB
+# Gjmc0jLcDzQuVC3ko9q66gA7W5Lek3OZuFwYoP0EHyMPcFACf+zM5MRVC0AU9lsT
+# ZwLU2as3ZZIjnlgkB7SzcsdFWrX1xkLgCjkT6qgYZ4mW1gVqmUnYJfxZxuPn0HDe
+# D6qMI+HpCxnbPSVmn1gDXowcThKtEfaOqs8tfnnNGkjADo0RXtFwYPot6keUKs0U
+# FQro6RN2nCZdWl5KaZ4wQgGdCTQ1J+nxEXny1tzU+CZK5VqmaDUUxl8YDBSYq5A/
+# jZQ1q8WhCT6j7OxFqflQ8RVFapIWtY6LHuPr39Op1lDQAcLIMopB1aLN1MavabdA
+# kPkyFlpCT9uH8BA/UrD3YFa9VmJrTzwwIVC/Mf/L+VvD8qo7q3EFs1mxo18th88x
+# J6/oAyOh1g==
 # SIG # End signature block
