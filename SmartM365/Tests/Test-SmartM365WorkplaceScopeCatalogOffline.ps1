@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline coherent group catalog/membership acquisition tests. No tenant calls.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -24,10 +24,11 @@ function Assert-Catalog([bool]$Condition, [string]$Message) {
 function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]$DuplicateMember, [switch]$FailPolicies,
     [int]$Member404Count=0, [string[]]$ParentResults=@('Absent','Absent'), [switch]$Reappears,
     [switch]$FailFinalCatalog, [switch]$DuplicateFinalCatalog, [switch]$CodeOnly404, [int]$MemberStatus=0,
-    [ValidateSet('HttpStatus','ResponseStatus','ResponseObject','Inner')][string]$ErrorShape='HttpStatus') {
+    [ValidateSet('HttpStatus','ResponseStatus','ResponseObject','Inner')][string]$ErrorShape='HttpStatus',
+    [string[]]$MemberErrors=@()) {
     $fixture = New-Module -ScriptBlock {
         param($rows, $block, $memberFailure, $duplicate, $policyFailure, $missingCount, $parents,
-            $reappears, $finalFailure, $finalDuplicate, $codeOnly, $memberStatus, $errorShape)
+            $reappears, $finalFailure, $finalDuplicate, $codeOnly, $memberStatus, $errorShape, $memberErrors)
         Set-StrictMode -Version Latest
         $script:Runtime = [pscustomobject]@{RunId='synthetic-runtime-run'}
         $script:Groups = @($rows); $script:Block = $block
@@ -36,6 +37,7 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
         $script:MissingCount=$missingCount; $script:Parents=@($parents); $script:Reappears=$reappears
         $script:FinalFailure=$finalFailure; $script:FinalDuplicate=$finalDuplicate
         $script:CodeOnly=$codeOnly; $script:MemberStatus=$memberStatus; $script:ErrorShape=$errorShape; $script:FirstMemberCalls=0
+        $script:MemberErrors=@($memberErrors); $script:CallsByGroup=@{}
         $script:Exports = @{}; $script:GroupCalls = 0; $script:MemberCalls = 0
         $script:ParentCalls=0; $script:Sleeps=[Collections.Generic.List[int]]::new()
         $script:Logs=[Collections.Generic.List[object]]::new(); $script:Qualifications=@()
@@ -79,9 +81,28 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             [CmdletBinding()] param([string]$GroupId, [switch]$All)
             if (-not $All) { throw 'Full membership enumeration required.' }
             $script:MemberCalls++
+            if (-not $script:CallsByGroup.ContainsKey($GroupId)) { $script:CallsByGroup[$GroupId]=0 }
+            $script:CallsByGroup[$GroupId]++
             if ($script:FailMembers) { throw 'Synthetic membership failure' }
             if ($GroupId -eq 'group-one') {
                 $script:FirstMemberCalls++
+                if ($script:FirstMemberCalls -le $script:MemberErrors.Count) {
+                    $kind=$script:MemberErrors[$script:FirstMemberCalls-1]
+                    # Simulate pages emitted before the SDK encounters a bad nextLink.
+                    if ($kind -ne 'Success') { [pscustomobject]@{Id='discarded-pagination-member';OdataType='#microsoft.graph.user'} }
+                    switch ($kind) {
+                        'InvalidPageToken' { throw [Net.Http.HttpRequestException]::new('The page token is not valid.', $null, [Net.HttpStatusCode]::BadRequest) }
+                        'CodeOnlyPageToken' { throw '[Request_BadRequest] : The page token is not valid.' }
+                        'DirectoryPageToken' { throw '[DirectoryPageTokenNotFoundException] : Synthetic paging token failure.' }
+                        'WrappedPageToken' { throw [InvalidOperationException]::new('Synthetic SDK wrapper.',[Net.Http.HttpRequestException]::new('The page token is not valid.',$null,[Net.HttpStatusCode]::BadRequest)) }
+                        'GenericBadRequest' { throw [Net.Http.HttpRequestException]::new('Synthetic invalid query.', $null, [Net.HttpStatusCode]::BadRequest) }
+                        'ForbiddenPageToken' { throw [Net.Http.HttpRequestException]::new('[Request_BadRequest] : The page token is not valid.', $null, [Net.HttpStatusCode]::Forbidden) }
+                        'UnknownPageToken' { throw 'The page token is not valid.' }
+                        'NotFound' { Write-Synthetic404 }
+                        'Success' { }
+                        default { throw "Unknown error fixture: $kind" }
+                    }
+                }
                 if ($script:MemberStatus) { throw [Net.Http.HttpRequestException]::new('Synthetic member error with 404-looking ID.', $null, [Net.HttpStatusCode]$script:MemberStatus) }
                 if ($script:FirstMemberCalls -le $script:MissingCount) {
                     [pscustomobject]@{Id='discarded-partial-member';OdataType='#microsoft.graph.user'}
@@ -123,10 +144,11 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             try { & $script:Block } catch { $script:ErrorText = $_.Exception.Message }
             [pscustomobject]@{Exports=$script:Exports;GroupCalls=$script:GroupCalls;MemberCalls=$script:MemberCalls;
                              Properties=$script:Properties;Scope=$script:Scope;ErrorText=$script:ErrorText;
-                             ParentCalls=$script:ParentCalls;Sleeps=$script:Sleeps.ToArray();Logs=$script:Logs.ToArray();Qualifications=$script:Qualifications}
+                             ParentCalls=$script:ParentCalls;Sleeps=$script:Sleeps.ToArray();Logs=$script:Logs.ToArray();Qualifications=$script:Qualifications;
+                             CallsByGroup=$script:CallsByGroup}
         }
     } -ArgumentList @($Groups, $collectionBlock, [bool]$FailMembers, [bool]$DuplicateMember, [bool]$FailPolicies,
-        $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape)
+        $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape, $MemberErrors)
     try { & $fixture { Invoke-SyntheticCatalog } }
     finally { Remove-Module $fixture -ErrorAction SilentlyContinue }
 }
@@ -219,13 +241,56 @@ foreach ($status in @(401,403,429,503)) {
     $other=Invoke-CatalogFixture @($group,$empty) -MemberStatus $status
     Assert-Catalog ($other.Exports.Count -eq 0 -and $other.MemberCalls -eq 1 -and $other.ParentCalls -eq 0 -and $other.Sleeps.Count -eq 0) 'Non-404 error was treated as group disappearance.'
 }
+foreach ($kind in @('InvalidPageToken','CodeOnlyPageToken','DirectoryPageToken','WrappedPageToken')) {
+    foreach ($count in @(1,2)) {
+        $sequence=@(1..$count | ForEach-Object { $kind }) + @('Success')
+        $pageRecovered=Invoke-CatalogFixture @($empty,$group) -MemberErrors $sequence
+        Assert-Catalog (-not $pageRecovered.ErrorText -and $pageRecovered.Exports.Count -eq 4) "Page-token traversal was not restarted: $kind; $($pageRecovered.ErrorText)"
+        Assert-Catalog ($pageRecovered.CallsByGroup['group-empty'] -eq 1 -and $pageRecovered.CallsByGroup['group-one'] -eq (1+$count)) 'Pagination recovery restarted a previously completed group.'
+        Assert-Catalog ($pageRecovered.ParentCalls -eq 0 -and $pageRecovered.GroupCalls -eq 1) 'Pagination recovery entered absence verification.'
+        $pageRows=$pageRecovered.Exports['M365_EntraGroupMemberships_All'].Rows
+        Assert-Catalog ($pageRows.Count -eq 2 -and @($pageRows | Where-Object MemberId -eq 'discarded-pagination-member').Count -eq 0) 'Rejected pages leaked into the recovered membership export.'
+        $pageScope=$pageRecovered.Exports['M365_EntraGroupMembershipScope'].Rows
+        Assert-Catalog ($pageScope.Count -eq 2 -and $pageScope[1].MemberCount -eq 2) 'Recovered pagination lost or fabricated group coverage.'
+        Assert-Catalog (($pageRecovered.Sleeps -join ',') -ceq $(if($count -eq 1){'5'}else{'5,15'})) 'Pagination delay or attempt budget changed.'
+        Assert-Catalog (@($pageRecovered.Logs | Where-Object { $_.Message -match 'GroupId=group-one; reason=InvalidPageToken; attempt=' }).Count -eq $count) 'Pagination retry diagnostics omit the affected group or attempt.'
+        Assert-Catalog (($pageRecovered.Qualifications -join ' ') -notmatch 'excluded') 'Recovered pagination was described as an exclusion.'
+    }
+}
+foreach ($sequence in @(
+    ,@('InvalidPageToken','NotFound','Success')
+    ,@('NotFound','InvalidPageToken','Success')
+)) {
+    $mixed=Invoke-CatalogFixture @($empty,$group) -MemberErrors $sequence
+    Assert-Catalog (-not $mixed.ErrorText -and $mixed.Exports.Count -eq 4 -and $mixed.ParentCalls -eq 0) "Recoverable mixed errors: sequence=$($sequence -join ','); error=$($mixed.ErrorText); exports=$($mixed.Exports.Count)."
+}
+foreach ($sequence in @(
+    ,@('InvalidPageToken','InvalidPageToken','InvalidPageToken')
+    ,@('InvalidPageToken','NotFound','NotFound')
+    ,@('NotFound','InvalidPageToken','NotFound')
+    ,@('NotFound','NotFound','InvalidPageToken')
+)) {
+    $failedPage=Invoke-CatalogFixture @($empty,$group) -MemberErrors $sequence
+    Assert-Catalog ($failedPage.ErrorText -match 'GroupId=group-one.*no group exclusion permitted' -and $failedPage.Exports.Count -eq 0 -and -not $failedPage.Scope) 'Terminal pagination did not fail closed with the affected group identity.'
+    Assert-Catalog ($failedPage.CallsByGroup['group-one'] -eq 3 -and $failedPage.ParentCalls -eq 0 -and $failedPage.GroupCalls -eq 1) 'Mixed errors or retry exhaustion entered group exclusion.'
+    Assert-Catalog (($failedPage.Sleeps -join ',') -ceq '5,15') 'Terminal pagination exceeded the restart budget.'
+}
+foreach ($kind in @('GenericBadRequest','ForbiddenPageToken','UnknownPageToken')) {
+    $notPaging=Invoke-CatalogFixture @($group) -MemberErrors @($kind)
+    Assert-Catalog ($notPaging.ErrorText -match 'GroupId=group-one; attempt=1/3' -and $notPaging.MemberCalls -eq 1 -and $notPaging.Sleeps.Count -eq 0 -and $notPaging.ParentCalls -eq 0 -and $notPaging.Exports.Count -eq 0) "Unqualified error was retried or excluded: $kind"
+}
+foreach ($option in @('DuplicateMember','FailPolicies')) {
+    $switches=@{$option=$true}
+    $lateFailure=Invoke-CatalogFixture @($empty,$group) -MemberErrors @('InvalidPageToken','Success') @switches
+    Assert-Catalog ($lateFailure.ErrorText -and $lateFailure.Exports.Count -eq 0 -and -not $lateFailure.Scope) 'Recovered pagination weakened downstream duplicate or policy validation.'
+}
 Write-Output "PASS: $script:checks offline catalog/membership checks. No collectors, APIs, mail or live writes."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf6Xs0xVQewUWM
-# 59Sqx2WL1AYuNYcF25wbcSvUlrt1uKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC6kd7TcliQJ8Y
+# Yavq4jczt/SDdX5jPSnSP7GFqC/u4qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -358,31 +423,31 @@ Write-Output "PASS: $script:checks offline catalog/membership checks. No collect
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE8PcxkMKK0ioePNY8jAOJiC28c2bxwz+8dcCTrW0H7GMA0GCSqG
-# SIb3DQEBAQUABIIBgEP70K8tsiK7AfddAN9z3xwov1m3rwZ9Pjg1hYwOEzwe0SLM
-# 4nuyRfVdIa/V3MOfUI6vjNosHqohKgPpDePJpWCMThx695giaNzjS91vWdGsADGe
-# JpJOhwBMAZ+Mq09H3pPLT820zr8chU9V0bHcmx2yRMuX0maF6WsbcQUw2jnbvJPl
-# oO53WfVYCSQKhFn1+FhwUfmaKBsUGmOudb8nCaJccJE/CFze99HnwpFyWyJnYwB2
-# kLiO6Kh1salBDc5NktenxpY/Xs8MQgxQCAxiNShXNPl3/V2QLeHK5waLTa1sm0Wl
-# lN+guvpkAM2263+BHHOqKTOJC4nNZ0aKyLh92FNQW9htpoaqkOL6vCAt3IkyK5QZ
-# 13gwH9g1JykRmC4IPln8H9wzCklwTIvtIOtDv0jVcU6uQBhVDoVTw1allFRHLcSc
-# rODYzodqkhqaU3C9Xn8yZTdkHRH01k4Z+ImXNNvMrsG7GItyqUVfvUDeZ7mGbHXn
-# IcsAvVAgGP60zISSuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMwXWAZG/aBNqz0shLTC+/kjb56IgCxN/5DI/rhcl8SdMA0GCSqG
+# SIb3DQEBAQUABIIBgKHfZNqiLaBPvMLmgGq9aCM/pOt/CYJ74jw72imVZHosb9mR
+# A3d3dLaZEsEC4JCLdCLk1fgd3ytA9GgBz+6ijmNLQjlvpbzAQcQ/OdRyNsWFvtDG
+# rvZE1uaWfi1qeer7DzkjavAUQKSVWgOBSfJl6kVkPIb+qnSveopqvq6fuvh+z/G1
+# FdBFUZvMLKPYpF4PWd9U9RHrxIZusQ6371kiQ9PpOqTovOPiwa0spLjhFpjS5B3H
+# fxISUtBmSHXxPJC6/DtASjL8DMdeL7gyfg/jIvtMT9qLO2U9+Ko1onfmO7UIqoZy
+# r/i8C0E18nCl5KuRguJnYpFmP5o75I0aqTw+CU6aqHS9uRj60Is9SUmLjUJcz74E
+# JaFzI3VyUyIYSH6X16zu+g0PXFCMqGJBNIGfmrFs4wb2quKBjDxO3wwcKhzINpSW
+# 2ln3dpYIK/y5e7sxD994GHOWTVgHI8y4/wx4xmF1cXbOSeLhF7/uzM+QhPBxcKp7
+# OcAfWj++FE3B8eT5yqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTQz
-# NTNaMC8GCSqGSIb3DQEJBDEiBCAShCFumK61O2Un/s3uk72IW5JtQ1ksyvDK8C3Y
-# p7zurzANBgkqhkiG9w0BAQEFAASCAgBWj/2YURpJRm0LNqMWdHcBbLwqAx8kpOX9
-# JKDZofdE399Cni+TIKwMR8LV2G2Dmheqxo+pZOajzUvDyGSmcmZgkrHDLvOyenhC
-# jm7O83huZp1OatA7UBv228gwQNBhnvf1VIy/7JCcfEBkUZtv1R1dr5GidJEdH1Ij
-# c/hjZ9Lr7nZ6AZw+B4PDmchr+6bY1x28y1U1Ay1RSfHUVvzZJjbskMKfV2UrnbwO
-# 9X9AtD/5smGZZQrwJPSRnwzRyiyS0NfAWG1ku+z6Xc6gEnB4asfPhnrrsGjSatbk
-# RvaxapkD3uls/2TwoKUAaGSRLJcynLYklC5ToDvPO8vLZtCDZpQ9/ELg1UMsvoxq
-# nvX6nOJcjIJvVlDMS2RVNO+gnDLwF+jACHhVO6vDA3bY55vmK/1xNYW8bed9td/6
-# d7IVE3vtVYj6JD3Mxcr0dUOtj6KSlU7g9MaJA4SnsaqayOzTB7eE1Cw0TsdgOVBw
-# lG0bgB+hQYLcDWndkItc15/fw/iU6Xz4HDp27/m9nO5GO6Xgw9hbBmeSoVeNES33
-# PA//zjKtYQvZ7B+4lgCkBAXEqtaI2U3E6DjFhgORMDhom2kmkaFt1jgzkVO6COxq
-# 0BxDSXcpSivEA7cyvh4FTJWQNjuTrvnB1ySsx3aCZknfU03lR2TOp0bQB5UW+Ty/
-# uJzvVsAWYw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDM4
+# MThaMC8GCSqGSIb3DQEJBDEiBCDUvEVtJrrj6El/iVWsxoM2VM4G92dYxKzx4c33
+# QjFDujANBgkqhkiG9w0BAQEFAASCAgBHobKzr4KrPAIHOuuUQQ0F7V1YoEQRPzih
+# zlFTAZpI7NyvWS9C6QTOJlQOgk4pouu0/u8n5kV/71Xu1OF6cslpPNDZbYf5mgQo
+# XB9WezHGuLiedpv2ZPL4KRwgXKlpGpcP2nD2O6PztoEMK88T575xctszHV2Z1nP7
+# iTElmpir0CJqQUGefbenvqeo7Eoe7Q/SY1K0TG4qPLTl8wN8wDYfO4XwEkGKQger
+# rNR+IhfUWpSTBYMbUhJbgBBqh7/aVk+h4gawL6CXV0OkpDWGutkUTfCC84b/DUX+
+# Sgj05QT4JwhN5Be2ofGBL/KliEDC+BDjjaew9UhAhpR3THlf0gRoeq8jgMr7103a
+# FwcccySN0aLcOI1w3uP6nHcH+HUVYkPqIPWzwMGWJrGOGrE8qHEJdtDe/q0LIGE3
+# 1TcM693st4P5hWzwyKCofUfQ314jZwgQ0w1BsBBRlsN3NHLWfbidFPdoccUF4tY6
+# v7JInf3C/VmasFnjkISnw0/u+NfTKqCYyHJvVOYuIr8b0cW40GlFvEeh7YdCFw4F
+# xL3qc93XDyslCL4yiOX5IpBoziS0DQ/9S67ITPLwwOHf9Vv4AmmK/w8jkF9bhvYg
+# 5Pjg7m6ZAtPE3L7fPGN2upxzouTgv1kHXVSZjVMZcUZR3ITaXye8Jzeb4ywkXXeM
+# 0G6rUocGpw==
 # SIG # End signature block

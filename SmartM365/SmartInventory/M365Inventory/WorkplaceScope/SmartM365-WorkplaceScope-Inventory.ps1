@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.7
+1.0.8
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -62,19 +62,30 @@ try {
     }
     function Get-WorkplaceDirectMembers {
         param([Parameter(Mandatory)][string]$GroupId)
+        $onlyNotFound = $true
         for ($attempt=1; $attempt -le 3; $attempt++) {
             try {
                 # Buffer each complete traversal: discard pages from a failed attempt.
                 $rows = @(Get-MgBetaGroupMember -GroupId $GroupId -All -ErrorAction Stop)
                 return [pscustomobject]@{Absent=$false;Members=$rows}
             } catch {
-                if (-not (Test-WorkplaceGroupNotFound $_)) { throw }
+                $notFound = Test-WorkplaceGroupNotFound $_
+                $pageToken = Test-WorkplaceInvalidPageToken $_
+                if (-not $notFound -and -not $pageToken) {
+                    throw [InvalidOperationException]::new("Direct membership collection failed. GroupId=$GroupId; attempt=$attempt/3; $($_.Exception.Message)", $_.Exception)
+                }
+                if ($pageToken) { $onlyNotFound = $false }
                 if ($attempt -lt 3) {
                     $delay = @(5,15)[$attempt-1]
-                    Write-SmartM365EvidenceLog "Group membership returned 404. GroupId=$GroupId; attempt=$attempt/3; restarting complete traversal after ${delay}s."
+                    $reason = if ($pageToken) { 'InvalidPageToken' } else { 'NotFound (404)' }
+                    Write-SmartM365EvidenceLog "Group membership retry. GroupId=$GroupId; reason=$reason; attempt=$attempt/3; restarting complete traversal after ${delay}s."
                     Start-Sleep -Seconds $delay
                 }
             }
+        }
+        # A pagination failure, even mixed with later 404s, never proves absence.
+        if (-not $onlyNotFound) {
+            throw "Direct membership incomplete after three traversals. GroupId=$GroupId; invalid page token encountered; no group exclusion permitted."
         }
         for ($probe=1; $probe -le 2; $probe++) {
             try {
@@ -90,6 +101,33 @@ try {
             throw "Group still exists but direct membership could not be collected: $GroupId"
         }
         return [pscustomobject]@{Absent=$true;Members=@()}
+    }
+    function Test-WorkplaceInvalidPageToken {
+        param([Parameter(Mandatory)]$Record)
+        $exception = $Record.Exception
+        $badRequest = $false
+        $messages = [Collections.Generic.List[string]]::new()
+        while ($null -ne $exception) {
+            $messages.Add([string]$exception.Message)
+            foreach ($name in @('ResponseStatusCode','StatusCode')) {
+                $status = Get-WorkplaceSourceValue $exception @($name) $null
+                if ($null -ne $status) {
+                    if ([int]$status -ne 400) { return $false }
+                    $badRequest = $true
+                }
+            }
+            $response = Get-WorkplaceSourceValue $exception @('Response') $null
+            $status = Get-WorkplaceSourceValue $response @('StatusCode') $null
+            if ($null -ne $status) {
+                if ([int]$status -ne 400) { return $false }
+                $badRequest = $true
+            }
+            $exception = $exception.InnerException
+        }
+        $text = $messages -join "`n"
+        $directoryToken = $text -match '\[DirectoryPageTokenNotFound(?:Exception)?\]'
+        $badRequest = $badRequest -or ($text -match '\[Request_BadRequest\]') -or $directoryToken
+        return ($badRequest -and ($directoryToken -or $text -match '\bThe page token is not valid\b'))
     }
     # Catalog properties and membership scope share this single enumeration.
     $groups = @(Get-MgBetaGroup -All -Property id,visibility,displayName,mailEnabled,securityEnabled,groupTypes,onPremisesSecurityIdentifier -ErrorAction Stop)
@@ -196,8 +234,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXXYVfRBEbbUMt
-# fA3UIM5k/reU5UWcwHGWjdsh1Q95iaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNRxPkfxEXvwS2
+# QQkCUf+T+1ui/T0xIhJF+7oeuAPzsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -330,31 +368,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHXYjEppPYxHU+ebTIQ7+5M7Z2/p/jrxka5yxnGCF3g0MA0GCSqG
-# SIb3DQEBAQUABIIBgClmxOh1kRJJFgCKImtffjmNS2TuMzaJrw5LWLkF1vsh5CpM
-# xGK+w/4wQpAJbnpJr/1toDazCX46RGWKYp1Wmvu5Z2T9tNZRxgUws/dyU0BdbgBk
-# S50VC40bYnCo4YHjfDHybYYsTdKtsME26TmgYXWQ2rD42HBFZc1o5lBvsvChO5kP
-# KUXtMZSHpKVVvhJbZI15nMMugaYW8oyORhOntImxiVxPXRlse2+d9OPjRAKXvAD6
-# VzPycGJwKHeJVL7/QRw5pV+jyu99Hmp2OI7KbqFYiKUz5McG1cqTUT28w/rXnY90
-# KhHrX+JsA6HiAI6bjrdmgmNkUyRWjmqo9dZBW+xxm5YHNMVsM0ZmTNsziahFBfA4
-# 0Gn+aUvvORaWRFyvVQ5xwQoXgWFgNFkrYi1NjITpJGQfviJ7WCkoXTEKoZvQDCX9
-# fkfyJKa/YdGInnqLc09PyzfjOdf7xdtRZ5hEm7k9L2MXR50CFDys/ESkDdB/hQ45
-# jnP88o91OmUJmwjFE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN6xjhrh0AoBDu9ud7DtmAYvz1IVbNY7VUaGQZpXZZxiMA0GCSqG
+# SIb3DQEBAQUABIIBgBW4dITrVUloAxqnkOBZ28Ksr0iwfE87/C9ol5jhbOx5olAi
+# mAyfWEOs2MtaFKDxOILZmJ+JbzusD+n7C5ByoP7jtB5b2JqiNVWmFYmOAgrP5QBR
+# xx+/8HkuXrk4ohAqfFbjWePV0FYbEnlFCqBbBG/un9550cDhN/bjQOOFLqRuAhve
+# d53WwBdkLw+Xq3sD45mK2zMAaBfLJaqQphtWeG07F6FfyYcTTYz0j6MMyOSOBdSc
+# X5TwSUmuMfDqFNnJdULOi7MeiY7vuPl8nadJPdFL6k+5GAd6iwpWRBmGcbzBuOpl
+# AsP7ukjVJ4PmSUVBuYu+TsgGCeSPcDr3+M5xM89DMOwa8+E0qwjkTWjpwSd5EZ3D
+# 3jJrYGMub8IbLSUqO/JvfBkjHmoo8zO47nIsHBVQ2LaLPkfjYi70AYLRCaJPDf5z
+# Y+sbuhadJfp6a2R+5ka7wJf0d3CJsa3O++2RcAc7DbfpoWHahza9AjXkQRoMibGG
+# lYBTn91lKO44RAS1N6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTQz
-# NTNaMC8GCSqGSIb3DQEJBDEiBCALHTh88IuIr8iNTy7cYl2KBy0WwtG7z0ghn0Nq
-# 9ncb8jANBgkqhkiG9w0BAQEFAASCAgCbBwjsum8uQB+3JanymEMC0A59XI2AmRSl
-# zjEzadav3jB3zbz/wcGOIl4kZNNnZwdqkc9Tp7W1YxDyDG3h/juj/mwFL4b/qvJt
-# R5tIZJTy99iGIRKN8FYTlgpS5H3DyUo6vKzlPim4xQ4pR1nyRdTDbVWxKlJTtT2g
-# UCVKSgERZ+pDW/r2by3zwDD5y3020BsKOZ53QEzov+mQXC19Mi1cc4lD8tyjnvzI
-# LIHePJvWPZodRykosvLvu7PMK03Lj1s3hYdermTDe470FMzr7Bh7gSwcqc9t957x
-# MX4+fgvz5KjPYnN2M0L4G20EfRj3XM2AeEd3rp2+NBzi/Yip4EMmlgG0OYjGG1Zn
-# H1wcyipwE17FPqgrDWOYt4UzFeTMr3d/MdiWnX35mi7UlicOs/AtAmtmwSELobZ3
-# ns/Si/ZLX1nbTqWkUxwKOTQZroEMo8uFea5WO+j3LhOvG2KZlurt2ERCFfFpSCtS
-# B1RYfMGrgztodkDSfbI5pULDdo0ypRQ3O1klm488Y9/wFGGUNTcZHHH6i1NhqgqL
-# DMH8iGm9kR+aYyPFO5+Qm6KWViZMhC6dvBYCe6UaOGQ2C1WAxcnzEhdhxtyupF2u
-# 2hJQDBPXPA7F/G02ggSHMX+wIcDDez3uARH+kwFlOADBCqhUGnUn7lkz2Fyme6Fw
-# /DvNXahX7A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDM4
+# MThaMC8GCSqGSIb3DQEJBDEiBCCEGp7dI+So4gXJLXQXj0dWOsQF9WtzxSVpIWBU
+# ZY9jyTANBgkqhkiG9w0BAQEFAASCAgAzBesDmv7ndAc9xj1SwsXiNg4efZfTgKht
+# +F8KQ6uhimhm7i8aPW0YGiahCpzNCfih/4eFz/6OSSjY2ZlA3GfCXNJ7DyRMHQDD
+# 4+FXqCmLxaemV/rprNUwFBMSOpnHWiawY5S3BbV7VgRJK+ezewCqwW3OOcTH+XWZ
+# jpsk1oElFqBxlZM65y8Wcd9iz0YzFk0YGakEQt5p2qgttrnQh4cWFLlIUiAtO44K
+# aYK90OiLJ1jdTDRR2rwtI15e2i3AnYI6wPFnkoKcRMSJ+W7Mgj82GO0F605lQ1xt
+# eCjtZbOua1yW0OJ1ScYyscveB2fW6a3Cj4lOzviqEKApBtsJTrVgfXtdAPzY/Bhz
+# oUzOb81Aptvc+86N01UWNtR1fXt3EQ20xQ5HQwNFFgtWUchbSW4ke1FMFP3Eeb1D
+# /I3/qJXT2FG3IPtlr40/RZIaUFoYRxnY95aMHbXIki3TA99Z+eIwvqzMnzqHFWLI
+# tx1y5Pn0Xx79Jm7/k+kDCSI8kQNm8fdNj7+a4YxV/pRuJuvEgXczvT4wLQ3P6oGt
+# trS7TSMpWZcNet9kUpnaa031vzMmLoh9M8/WTE5zmDpBl7xNdlT3aW5rNaKIr8Jx
+# She9pG4tvuuengeaZ5xxXj7LPWlHdVrOSUzG4+PND+xxWq9aVdyDgOzh1XQANTAF
+# i6DVhfnk8A==
 # SIG # End signature block

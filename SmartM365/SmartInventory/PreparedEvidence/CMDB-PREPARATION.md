@@ -35,8 +35,14 @@ proof is intentionally not fabricated from existing files or their timestamps.
 
 ## Required producer completion proof
 
-WorkplaceScope 1.0.7 retries a group membership 404 up to three complete SDK
-traversals (5 then 15 seconds); partial pages from failed attempts are discarded.
+WorkplaceScope 1.0.8 retries a group membership 404 or a specifically recognized
+invalid directory page token up to three complete SDK traversals (5 then 15
+seconds). It restarts only that group's traversal from the first page and
+discards partial pages, retaining other completed groups from the current run.
+It does not reuse the rejected nextLink or retry generic HTTP 400 errors.
+Retry/terminal diagnostics identify the group and attempt. A persistent token
+failure, including a mixed token/404 sequence, fails the run without excluding
+the group or publishing canonical CSVs. No previous-run memberships are reused.
 Only after two targeted group reads return 404 (15 seconds apart) and a fresh
 successful full group enumeration omits that ID may it exclude the group from
 both the catalog and memberships. This corroborates absence during the run,
