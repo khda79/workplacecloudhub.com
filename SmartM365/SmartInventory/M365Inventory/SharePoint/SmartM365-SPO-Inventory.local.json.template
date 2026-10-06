@@ -26,5 +26,6 @@
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\M365\\SharePoint\\Inventory",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\SharePoint\\Inventory\\WeeklyHistory",
-  "WeeklyHistoryRetentionWeeks": 52
+  "WeeklyHistoryRetentionWeeks": 52,
+  "ShowMailLinks": false
 }

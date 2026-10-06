@@ -326,9 +326,9 @@ try {
         Assert-Offline ($value -eq '2026-09-11T01:15:00Z') 'Teams date normalization no longer produces invariant UTC text.'
     }
 
-    Test-OfflineCase 'Teams alert mail subject retains its operational payload' {
+    Test-OfflineCase 'Teams alert mail subject stays concise' {
         $source = Get-Content -LiteralPath $teamsPath -Raw
-        Assert-Offline ($source -match '\$subject="\[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory - \$RunDateUtc"') 'Teams alert subject payload changed.'
+        Assert-Offline ($source -match '\$subject="\[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory"') 'Teams alert subject is not the approved concise title.'
         Assert-Offline ($source -notmatch '\$subject="(?:SMART ?365|\[SmartM365\])') 'Teams alert subject still hard-codes a legacy product prefix.'
     }
 
@@ -432,8 +432,8 @@ if ($failed.Count -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5WjaEHmE7P6iG
-# GJKpSQrAtCO6gRgLayfZdUFDK1K6JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCPToPy5JwEUC1j
+# 7AbKjQltEk3SulQ2vKJCATwBbkM/AqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -566,31 +566,31 @@ if ($failed.Count -gt 0) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK3xSEvSa1E/KnWzGUqDjV1GHXYmSEnCX2sQLzaGI7BWMA0GCSqG
-# SIb3DQEBAQUABIIBgAo0UJb4O8BidkeOEdGxMBdhOcK10l2Wq5EPXLkk7lJIr+Ga
-# xgEpyjXFPHoGF7kilOZAV3C1kqDFxKh7+WI5z30cpy6k9NJN8B0eddeLJjtPLcwb
-# im7DAbuQKwC+nul32t1KtqrqLyHZcWqw36KwQPDxMydQC4qfcT3QB45R3D3aRIwq
-# aLSa70fh0Oo4P9s/iPM0fhAEngqIq/VlfmbOiTy1mBcNnFl1uahJGr0ngnd8Zk/H
-# lg1nOCb3RDN9dbLeTOetQgPNcLPCXLOVwFf49+UNYLMx7GPvPiAZZnZGkwpyFwm7
-# nMzAjnH0M8pvyv7YaOePAQRvt33QtQwmHB/+P8NfqJ6iYYQIgbMYu0B2voI97VyG
-# e7GbI/FckJoKRruLHBhYOVnKjrLkWd14QekymDQsdzY0oam5xpZdpXuCs31OwS9n
-# QH8sv9oHxZjff97dsKxF3P1kk3E4PcRGB+2MIAi5o7gQjVD7sWt2zrQOSmDNP/ZV
-# QYT0UZ0x17JPy+1kqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHys5ndelL8hZn5q/vbnZsFOexHs6InLpspK4zKAPr+uMA0GCSqG
+# SIb3DQEBAQUABIIBgJG4PzUeQbOpcOktL2p+zP8vpOz6o6UzAjVDXDq6PUTwlk64
+# 2WBHV0uwVcT/+e6haSjfDw+BC1GYeUadtnL79MiFbP4fSfwJFbCK0jaSqFAINrmw
+# iUR4duG97EXalXnZdNcnL+fXoHecSrBBbJcabMBKIagT8/0286APSs4cQkGRKYgW
+# C+uQlRKrp3jV5v0mbO1xK90Wb2HGD6D9W+yjhSiyERALL71vYGRImdYQ5NfC7W1o
+# otXH8WqtJCnFzQFP+tTdwSGYJNmYlFZCVBHiedkhvwJjLEkHnfF/HMe/yQn9946o
+# IXukD+GzgUhqfstL2J7IfqHM3KG+CClRPYjcKO7zQOF+oZwjF+k+9s1x6envNm/M
+# IrMX+Qv1Q4OZaCu/VOEjEo0RLQGCYvVWnySO4mzK/UgJFWUtHmxax8ONCT+g7t0g
+# 8xSHMxiSQlLQbhNZmEUARcnqPOC3fOTY3HN8b/1MZklUN0mdRhUdAp0WhRPtniH+
+# junWepouPL1ctOvx1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkyMjM2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCCLMhk2niDj4T736ULUKkAZQEGz1pqJnEEMmMYd
-# LILyFzANBgkqhkiG9w0BAQEFAASCAgCn6tOckb1RnU74XB2TvG+4hYDeYSAZLqbp
-# X7Cmltivf0VoBsdzZxaiAD09mR3ioC33AUYtvLwg3bb8jDIcK1FkEk8MAwFLaNs5
-# tAbwF9ySxYXGahpbYYPZqftzF9zuSASViZa8tNNnXQxmyVE3soTSZoLQCNmdOhS0
-# Qssv8GxxyRWigz0564oICYP5wzeq0JSUzbV375Fd7CP9IF79AYT2rHXgwOqHmKdB
-# e7ovO2WjcU7N2m0UHOw24onigoQMbI4a6+wC06wp9V0p/jgKWWsyybUHaknqhamI
-# ZCWXU7Q+uc52i0p21e/gPFZmN5s7pRQwMlJj6rtpvS3SGIYIeKTll4dl3yYWqIeT
-# tVi/A5Y9aPajm4RM+csIZx12AxMP//dRhjSabQMEBJAURjeZPeEi2mEt4hVg3IqV
-# FfzegTTeMmTHM4vg1zUX2IlBYn5jwCf7ixUrSDrMEIlJAtDKwky7Xz9qW177M2mv
-# tQMlW/ABu412NebPdKudy6Q0+ry4eW+Ii2nc3KpRYhaRObo0WRg9hP51nYmS6o6R
-# bawYtBxuRxXTviDAOAHbO5xBdSk8iQOsc0kqcBMPev7bZL7lC4zxEsWDbIZzAVBO
-# zUXJ5gtRTbBaSeoAYBXytYdEPDsCqSJU4feJEv1e4offvbE0ZYuH7EPdbIBnfNvo
-# ga2rftN04w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
+# MTlaMC8GCSqGSIb3DQEJBDEiBCC5BS503gynUK07HSOOVYPxWOT7Ncp/1QhuMvKj
+# 5yJoZzANBgkqhkiG9w0BAQEFAASCAgBaxgX6nvnB0RyDMq4idZQRTN3Xy/rwI2Gg
+# 37qbTtGDIpUPUIeJ17HawnsklODzrmFE/xz2XNAeG/oW/tCyyBKvGz3YlGLe7EcS
+# oa/TTRpSS4kTHA4FMmD+cret5h5FhKs6eXaCXz3dZ9r91b93mrC6RFgVzH+tYquD
+# OArUHXrAjaM4iFsrSm8hZ7Flq6bzSJYvhjf9d8r7pLwkgUCZcFKATmNt0eAAlBj4
+# CuUDBA+6JCFTWlvI6zRYErIcprsrKp5YIlSmPos6fh3OLvlxm8MYXEMcBdQwEmVN
+# 1eQdSSNTwjbXe1cm2KTK8MF5lnPOrKxzdtEyaVRosTspIAqKNeXgGdQ6fXSD8zIV
+# LfZG2Vh5kimK6jOjXwvo36R0grDUauXnTQTGOcDzg1ufbdlZB21axQUTKaf3w6Nr
+# zqtZDBIRk9fmO+VepvV/vzL0BScUKnMC9Gc07GSfCEDpn8tL5c96oybta/rp624r
+# gOhrNGNx5duKrdfDaf9JJnan8mTu5dseBpXRdK4KyB7M3lkR5zMW7qfzSYotCtIy
+# 2sqjI43ZqvepMIEonW4vW1bwlxe8ttNi4vaiFTcZtclp01wMgN1FtQr+ynrTCQTi
+# rfiPhLVkoCfz2/L6drU8xgKuSXPqIARBj5m9F703oQkaaAVRwX9NdzBlc7DKcuOF
+# kxdP7qfy1A==
 # SIG # End signature block

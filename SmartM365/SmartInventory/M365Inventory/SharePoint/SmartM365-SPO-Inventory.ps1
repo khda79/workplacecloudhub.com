@@ -56,7 +56,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.33
+0.34
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
@@ -114,7 +114,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.33"
+$ScriptVersion = "0.34"
 $TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
@@ -145,7 +145,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.67' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.74' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -184,7 +184,8 @@ function Get-ScriptLocalConfig {
         if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) { Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null }
         else { if (-not (Test-Path -LiteralPath $templatePath)) { throw "Missing local config and template: $configPath" }; Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null }
     }
-    return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath -TemplatePath (Get-SmartM365JsonTemplateName -Path $configPath))
 }
 
 function Get-ScriptLocalConfigValue {
@@ -364,6 +365,44 @@ function New-SpoTimestampedWorkbook {
     }
     return $Path
 }
+function Get-SpoMailStatus {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Summary,[bool]$PartialInventory,[double]$CapacityWarningPercent=80)
+    $total=[int]$Summary.SitesProcessed
+    $capacity=[string]$Summary.TenantStorageUtilizationPercent
+    if (-not $PartialInventory -and -not [string]::IsNullOrWhiteSpace($capacity) -and [double]$capacity -ge 95) { return 'Critical' }
+    if ($total -gt 0 -and -not $PartialInventory -and (([double]$Summary.OwnerlessSites / $total) -ge 0.1 -or ([double]$Summary.HighQuotaSites / $total) -ge 0.1)) { return 'Critical' }
+    if (-not [string]::IsNullOrWhiteSpace($capacity) -and [double]$capacity -ge $CapacityWarningPercent) { return 'Warning' }
+    if (($Summary.CriticalAlerts + $Summary.WarningAlerts) -gt 0) { return 'Warning' }
+    return 'OK'
+}
+function Add-SpoWorkbookOverview {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][System.Collections.IDictionary]$Summary,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Alerts,[Parameter(Mandatory)][string]$Status)
+    $overview = @(
+        [pscustomobject]@{Metric='Inventory status';Value=$Status}
+        [pscustomobject]@{Metric='Sites inventoried';Value=$Summary.SitesProcessed}
+        [pscustomobject]@{Metric='Sites without valid owner';Value=$Summary.OwnerlessSites}
+        [pscustomobject]@{Metric='Inactive sites';Value=$Summary.InactiveSites}
+        [pscustomobject]@{Metric='Sites above storage quota threshold';Value=$Summary.HighQuotaSites}
+        [pscustomobject]@{Metric='SharePoint sites';Value=$Summary.SharePointSites}
+        [pscustomobject]@{Metric='OneDrive sites';Value=$Summary.OneDriveSites}
+        [pscustomobject]@{Metric='Lists inventoried';Value=$Summary.ListsProcessed}
+        [pscustomobject]@{Metric='Storage used GB';Value=$Summary.StorageUsedGB}
+        [pscustomobject]@{Metric='Tenant storage utilization percent';Value=$Summary.TenantStorageUtilizationPercent}
+        [pscustomobject]@{Metric='Object-level critical findings';Value=$Summary.CriticalAlerts}
+        [pscustomobject]@{Metric='Object-level warning findings';Value=$Summary.WarningAlerts}
+    )
+    $overview | Export-Excel -Path $Path -WorksheetName 'Summary' -TableName 'SpoSummary' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+    $findings = @($Alerts | Select-Object Severity,Category,SiteUrl,ObjectName,Metric,Value,Threshold,Details)
+    if ($findings.Count -gt 0) {
+        $findings | Export-Excel -Path $Path -WorksheetName 'Findings' -TableName 'SpoFindings' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+    }
+    else {
+        [pscustomobject]@{Severity='';Category='';SiteUrl='';ObjectName='';Metric='';Value='';Threshold='';Details=''} | Export-Excel -Path $Path -WorksheetName 'Findings' -TableName 'SpoFindings' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+        $package = Open-ExcelPackage -Path $Path
+        try { $package.Workbook.Worksheets['Findings'].DeleteRow(2) }
+        finally { Close-ExcelPackage -ExcelPackage $package }
+    }
+}
 
 function Ensure-SpoSharePointUploadRecord {
     param([Parameter(Mandatory)][string]$Path)
@@ -392,15 +431,13 @@ function New-SpoSharePointLinksHtml {
 function New-SpoAlertRow { param([Parameter(Mandatory)][string]$Severity,[Parameter(Mandatory)][string]$Category,[Parameter(Mandatory)][string]$SiteUrl,[string]$ObjectName='',[string]$Metric='',[AllowNull()]$Value=$null,[string]$Threshold='',[string]$Details='') [pscustomobject]@{Severity=$Severity;Category=$Category;SiteUrl=$SiteUrl;ObjectName=$ObjectName;Metric=$Metric;Value=if($null -eq $Value){''}else{[string]$Value};Threshold=$Threshold;Details=$Details} }
 
 function New-SpoHtmlSummary {
-    param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$WorstStatus,[Parameter(Mandatory)][object[]]$Alerts,[Parameter(Mandatory)][hashtable]$Summary,[Parameter(Mandatory)][object[]]$TopSites,[string]$FileLinksHtml='')
+    param([Parameter(Mandatory)][string]$WorstStatus,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Alerts,[Parameter(Mandatory)][System.Collections.IDictionary]$Summary,[string]$FileLinksHtml='')
     $statusColor=switch($WorstStatus){'Critical'{'#991b1b'}'Warning'{'#92400e'}default{'#166534'}}; $statusBg=switch($WorstStatus){'Critical'{'#fee2e2'}'Warning'{'#fef3c7'}default{'#dcfce7'}}
-    $alertRows=foreach($alert in @($Alerts|Sort-Object @{Expression={if($_.Severity -eq 'Critical'){0}else{1}}},Category,SiteUrl|Select-Object -First 100)){ $rowColor=if($alert.Severity -eq 'Critical'){'#fee2e2'}else{'#fef3c7'}; '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;background:{0};font-weight:700;">{1}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{3}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{4}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{5}</td></tr>' -f $rowColor,(ConvertTo-SpoHtml $alert.Severity),(ConvertTo-SpoHtml $alert.Category),(ConvertTo-SpoHtml $alert.SiteUrl),(ConvertTo-SpoHtml $alert.Value),(ConvertTo-SpoHtml $alert.Details) }
-    if(-not $alertRows){$alertRows=@('<tr><td colspan="5" style="padding:10px;color:#166534;">No Warning or Critical alert detected.</td></tr>')}
-    $summaryRows=foreach($key in ($Summary.Keys|Sort-Object)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;color:#475569;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td></tr>' -f (ConvertTo-SpoHtml $key),(ConvertTo-SpoHtml $Summary[$key]) }
-    $globalRows = @('SharePointSites','OneDriveSites','ListsProcessed','StorageUsedGB','StorageQuotaGB','CriticalAlerts','WarningAlerts','InventoryMode') | ForEach-Object { if ($Summary.Contains($_)) { '<td style="padding:10px 12px;border:1px solid #d9e2ec;background:#f8fafc;min-width:120px;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $_),(ConvertTo-SpoHtml $Summary[$_]) } }
-    $topRows=foreach($site in @($TopSites|Select-Object -First 20)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td></tr>' -f (ConvertTo-SpoHtml $site.SiteUrl),(ConvertTo-SpoHtml $site.StorageUsedGB),(ConvertTo-SpoHtml $site.StorageQuotaPercent) }
-
-    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:16px;'><tr>$($globalRows -join '')</tr></table><h2 style='font-size:15px;margin:0 0 8px;'>Alerts</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Severity</th><th align='left' style='padding:8px;background:#f8fafc;'>Category</th><th align='left' style='padding:8px;background:#f8fafc;'>Site</th><th align='left' style='padding:8px;background:#f8fafc;'>Value</th><th align='left' style='padding:8px;background:#f8fafc;'>Details</th></tr>$($alertRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Summary</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'>$($summaryRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Top 20 largest sites</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Site URL</th><th align='right' style='padding:8px;background:#f8fafc;'>Used GB</th><th align='right' style='padding:8px;background:#f8fafc;'>Quota %</th></tr>$($topRows -join '')</table>$FileLinksHtml"
+    $metrics = [ordered]@{'Sites inventoried'='SitesProcessed';'Without valid owner'='OwnerlessSites';'Inactive'='InactiveSites';'Storage above threshold'='HighQuotaSites'}
+    $globalRows = foreach($label in $metrics.Keys){ '<td style="padding:10px 12px;border:1px solid #d9e2ec;background:#f8fafc;min-width:120px;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $label),(ConvertTo-SpoHtml $Summary[$metrics[$label]]) }
+    $capacityText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){'not measured'}else{"$($Summary.TenantStorageUtilizationPercent)%"}
+    $technical = 'RunId: {0}<br>Duration: {1}<br>Mode: {2}<br>Sites processed: {3}' -f (ConvertTo-SpoHtml $Summary.RunId),(ConvertTo-SpoHtml $Summary.Duration),(ConvertTo-SpoHtml $Summary.InventoryMode),(ConvertTo-SpoHtml $Summary.SitesProcessed)
+    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span><p>The detailed inventory and $(@($Alerts).Count) findings are in the attached Excel workbook.</p></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:8px;'><tr>$($globalRows -join '')</tr></table><p style='font-size:12px;color:#64748b;'>SharePoint: $($Summary.SharePointSites) &nbsp; OneDrive: $($Summary.OneDriveSites) &nbsp; Lists: $($Summary.ListsProcessed) &nbsp; Storage used: $($Summary.StorageUsedGB) GB &nbsp; Tenant capacity: $capacityText</p>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div>"
 }
 
 function Connect-SpoGraph {
@@ -909,6 +946,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $global:EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $global:WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
 $global:WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+$ShowMailLinks = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ShowMailLinks' -DefaultValue $false)
 
 $scriptOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath
@@ -1126,11 +1164,6 @@ try {
     $workbookPath = Join-Path -Path $initializedOutput -ChildPath ("M365_SPO_Inventory_{0}.xlsx" -f $exportStamp)
     New-SpoTimestampedWorkbook -CsvFiles $timestampedCsvFiles.ToArray() -Path $workbookPath | Out-Null
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $initializedOutput -FilePattern 'M365_SPO_Inventory_*.xlsx' -RetentionDays 7 -LogFile $global:LogTextFile
-    if (-not $DryRun) {
-        $workbookUpload = Ensure-SpoSharePointUploadRecord -Path $workbookPath
-        if ($workbookUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $workbookPath -RetentionDays 7 | Out-Null }
-    }
-
     $CurrentOperation = 'Build and send notification'
     $siteArray = @($siteRows.ToArray())
     $listArray = @($listRows.ToArray())
@@ -1141,13 +1174,11 @@ try {
     $alertArray = @($alerts.ToArray())
     $criticalAlertCount = @($alertArray | Where-Object { $_.Severity -eq 'Critical' }).Count
     $warningAlertCount = @($alertArray | Where-Object { $_.Severity -eq 'Warning' }).Count
-    $worstStatus = if ($criticalAlertCount -gt 0) { 'Critical' } elseif ($warningAlertCount -gt 0) { 'Warning' } else { 'OK' }
     $duration = New-TimeSpan -Start $runStart -End (Get-Date)
     $quotaMeasure = $siteArray | Measure-Object -Property StorageQuotaGB -Sum
     $usedMeasure = $siteArray | Measure-Object -Property StorageUsedGB -Sum
     $totalQuotaGb = if ($siteArray.Count -gt 0 -and $null -ne $quotaMeasure -and $null -ne $quotaMeasure.PSObject.Properties['Sum'] -and $null -ne $quotaMeasure.Sum) { [Math]::Round([double]$quotaMeasure.Sum, 2) } else { 0 }
     $totalUsedGb = if ($siteArray.Count -gt 0 -and $null -ne $usedMeasure -and $null -ne $usedMeasure.PSObject.Properties['Sum'] -and $null -ne $usedMeasure.Sum) { [Math]::Round([double]$usedMeasure.Sum, 2) } else { 0 }
-    $topSites = @($siteArray | Sort-Object -Property StorageUsedGB -Descending | Select-Object -First 20)
     $summary = [ordered]@{
         Tenant = $TenantName
         RunId = $RunId
@@ -1156,6 +1187,9 @@ try {
         SitesProcessed = $siteArray.Count
         SharePointSites = @($siteArray | Where-Object { -not [bool]$_.IsOneDrive }).Count
         OneDriveSites = @($siteArray | Where-Object { [bool]$_.IsOneDrive }).Count
+        OwnerlessSites = @($siteArray | Where-Object { [bool]$_.IsOrphaned }).Count
+        InactiveSites = @($siteArray | Where-Object { [bool]$_.IsInactive }).Count
+        HighQuotaSites = @($siteArray | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.StorageQuotaPercent) -and [double]$_.StorageQuotaPercent -gt $QuotaCriticalPercent }).Count
         ListsProcessed = $listArray.Count
         PermissionRows = $permissionArray.Count
         ExternalSharingRows = $sharingArray.Count
@@ -1171,15 +1205,22 @@ try {
         SharingScanItemLimitPerSite = $SharingScanItemLimitPerSite
     }
 
+    $worstStatus = Get-SpoMailStatus -Summary $summary -PartialInventory ($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode))
+    Add-SpoWorkbookOverview -Path $workbookPath -Summary $summary -Alerts $alertArray -Status $worstStatus
+    if (-not $DryRun) {
+        $workbookUpload = Ensure-SpoSharePointUploadRecord -Path $workbookPath
+        if ($workbookUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $workbookPath -RetentionDays 7 | Out-Null }
+    }
+
     $resultSummary = "SPO inventory $worstStatus; mode=$($summary.InventoryMode); sites=$($siteRows.Count); lists=$($listRows.Count); critical=$($summary.CriticalAlerts); warnings=$($summary.WarningAlerts)."
     if (-not $DryRun) {
         $prefix = if ($worstStatus -eq 'Critical') { '[CRITICAL]' } elseif ($worstStatus -eq 'Warning') { '[WARNING]' } else { '[OK]' }
-        $subject = "$prefix SmartM365 SharePoint Online inventory - $TenantName"
-        $mailFileLinks = New-SpoSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path) + @($workbookPath))
-        $bodyHtml = New-SpoHtmlSummary -Title $subject -WorstStatus $worstStatus -Alerts $alertArray -Summary $summary -TopSites $topSites -FileLinksHtml $mailFileLinks
+        $subject = "$prefix SmartM365 SharePoint Online inventory"
+        $mailFileLinks = if ($ShowMailLinks) { New-SpoSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path) + @($workbookPath)) } else { '' }
+        $bodyHtml = New-SpoHtmlSummary -WorstStatus $worstStatus -Alerts $alertArray -Summary $summary -FileLinksHtml $mailFileLinks
         $dailySummaryMarkerPath = Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))-DailySummary-LastSent.txt"
         $dailySummarySent = Invoke-SpoDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {
-            Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml
+            Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml -Attachments @($workbookPath) -AllowAttachments -SuppressAttachmentLinks
         }
         if ($dailySummarySent) {
             Write-SpoLog -Message ("Daily SharePoint summary email sent: {0}" -f $subject) -Level SUCCESS
@@ -1214,8 +1255,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMyt19gBPLs9XX
-# Zqh65yi1qG/pUDFy7/+PSBgnAn8owaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfelrsS8uquaow
+# KotBt+0w5geBE8/AcYIHwwOKcVTwP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1348,31 +1389,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFmkpppfkspba6BwwWGglFSV95OoIWWH86O+HAlvLF/HMA0GCSqG
-# SIb3DQEBAQUABIIBgGXXP8o46VEkmafKtycA/PMgi+hy8X+FR6y+zdje/ePsjyIH
-# elYE+jsX39URDonHffpHGlsEkXIcpmSvMaFnOH5BnY97l+O+b5oVsZZx7BGnmxQ1
-# BMQjsgA1GRPPFZpSui3nK+AZ+6Oc1AqFxzcJBagA9UHnfdRdSHYCxgyE+HMicsVp
-# 5H2JibYikKZlz67OpJUyQANiJVYVcryCnJ0e+CP7jNO4P1+V0vq31nheV0/NuPx2
-# QJD8MrRa7P+okd1tBO20Dj54+yue/DEIKaTtTdSgXEGZxbZKPdyXWSQHTnL8K/vY
-# /qnvfddymsH961WTA941ZzMk8tiF7QveWHpGlzR75/8Dj963dg1y9UgwbhI/SZg9
-# 3M09oyebaAXfHKC0rHB3oQzuSRbSz9bAaPcYjI0u/PLKNdV3SzrNzpPTL74bQqqM
-# G4GyG1ugBwO7jP2JC6s5Hw4cb8bqHXUW65/qUfWNxmyE2IPXa4niH1XQ2uux4F4h
-# aqPuJzI9x2fD+gbqK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN/nNznSH0nZcMX9wJoPAS6s9v5ec12eKVFdt6QgQNX1MA0GCSqG
+# SIb3DQEBAQUABIIBgKZU66VJ1wRlnJ/anY7Uh0aOYj+RK7Xs3DvGRQgoHnzFPO5I
+# z2iCzsyhXeJBzpVXi8D83uFPx7Xst6F7WGkCp5wAmlSRkDw2ivSzXID/90NvxMj/
+# IZ7o2pE/DDfb4nQy8AaLsN1M4TA7TwBCR89SMYOrgTU8SY19FfGmgMRHmZBYIHQb
+# BwBZMotCv/IHnP2m4uwC8SY+CeQIhaBmlZRa9DR4rtA+aHY2uOq2aQOqCXfe0ucJ
+# /j89tU4WQOF9rhc/eBDVfk29aBEIuUYEck4U5o6BlGvUCAEBjVP+GRlWFkL+e403
+# lEST8vKlLcoCesIwEckZsO3ZdryIxZRk63RFJNevfXZlSBxfqK/snCvIpoJkGLrs
+# tBKw9YvMLaU8Xhs8tXIwLFkmrsV9pNHu58mSHG5mh2tGAuvKLkYlTg17FYVjNdDq
+# ZdnCJwEdutzNQtB3zc/9AxMHId4QUmNkD90NE+dTXvfF6TxY/Z+7njHKOrfDt+a/
+# fQEuuQuxztcMskFXGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMTU1
-# NTRaMC8GCSqGSIb3DQEJBDEiBCB0xxVoEPLCqKm+/3I922VPuaUUPPGJyQSgnWp5
-# zmgWdzANBgkqhkiG9w0BAQEFAASCAgBmMexuXdak9NTf4iFRtpQQWncq+LrtI6L3
-# zReKow7hbFFgd1lJp9jovnxj/ye80c/qjwUKDXO3QY1vDjIBm5VPuAD+tLav0j2u
-# KHRr9LdZfTi+uXFcyf4zN++w3ZDFDhDYQi65BHYAItC7Lib/zfzKr2LT5qonibPJ
-# jYPfDwI15DWIv9ICUM+55R8HJ7lDoco0OjsEC8u0YXg8VxnABKccPUzJYVGwuUrd
-# MomwgvzBwOX4FtU8rsL7iyCsTXgvm20BeFgemSrxMO5a9flUUyFFv47uFYvUp6oR
-# MkhzKvwk/2eSmBQknMegN8yZ2eRQlvLiNOA8GA79MwuvOxyXZHLA94SzrHTsUTQH
-# pD4sr87PJ29MDo30GI2ZlOgfMNI9qY/B3dY2fChxzusgM4jH6P/D6SKyM8TStaTQ
-# mgk081NNo7CyVl09s8FIkyAb/+/V9JbLVD4Q3KUMS/gVXJBNZWZKP0I+JDrWbZHU
-# CaW3C/r1ykrHECZlTjGTZ2R0Dq3My5ymximvPhjLonI85Ovu5TCia9VkavxfsOyb
-# R1z3QuFHchGPa2ROxiAb0j1O+n7rvRzegNfmKcx/6CGdWquX5FWRaCStZY9cujib
-# hWkDSR/flBtFY2WsCvAVoDrj9lGelG+n0tP1HXWuFdcXOiWaPLn+ZYTz/LEKy0MZ
-# V1AwCU87Zg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
+# MTNaMC8GCSqGSIb3DQEJBDEiBCB4/5/sZIk+9Mcrjp2a/Jhh+WF81nyhcJy0VWfg
+# dGjyDDANBgkqhkiG9w0BAQEFAASCAgCK6NYGne8NYL5XkZ7YJQOSXp0U1kBsYsKH
+# A6SHzKWs87TV8sWH+eHlz6Q1qBhuhHvX0x8tOnWkrsrKTWACUPS6zcA+L81cOkHv
+# 9Lk/yb69bhAr/8SLgVodHa2d9O2o58SsKHhQIntLq5wSestgBmSTMoLYnlQe6h8I
+# k01Vsk7+ICUNLFQeintW+plvbTGMrQkFx2ihV5gV/rr5J+4yiEh6dUWDa9XYzNQu
+# rTh161TNUD27lRo6qgQ3iMmLHUwPjcwW3pRsk2UsQYzlWrc37xCacjCmwbW7ZUbu
+# SVFXRc1xakoqRkqWcp6rkD+3o83N6LukXA8FyDBDT0XAZIKAIL29XsnVGOiwvJDg
+# SqVDI/qOY2uTtRnI2ICdl/pSKfJaj25Gih+/kvqing7bc+pBlR9w/u/8RSdpopza
+# ffG12NXYuQBjPfpiZbkKP6eQSVlQPoeMRH0KT8goHnSPVDFH4RZwqPWzjHo5D5OG
+# T/baQc8iolUZ8/Y/KzKMktPmNYqdrI+jfZ3OYoTuGsuVszLsfhhnnXU8Uf2B/FQl
+# bI9IO/U3lufXqOW5gZoA/L++R0kiQvLL0DhiKif2Rbj5qWxurYtD5jk84fkgoS47
+# YB6NZfh/2BLTrjsTzKJ5q8jK69efKpGN44HwKCPMGYSW3uU4NEp1ulIVs2j3F6vi
+# D+M1M6nstQ==
 # SIG # End signature block

@@ -2,7 +2,9 @@
 
 `SmartM365-Teams-Inventory.ps1` inventories Microsoft Teams through Microsoft Graph app-only authentication and exports Power BI-ready CSV files for Teams, Members, Channels, and Guests.
 
-The daily email contains SharePoint links only: the four timestamped CSV files and a timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook with one worksheet per CSV. Files are not attached and local paths are never shown. If a SharePoint upload does not return a web URL, that file link is omitted.
+The daily email attaches one timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook. It includes the four CSV data worksheets plus `Summary` and `Findings`. The mail body shows four priority KPIs and a short secondary line; run details appear at the bottom. The CSV exports, latest copies, weekly history, and SharePoint uploads remain available to downstream consumers.
+
+`ShowMailLinks` in the script's local JSON configuration defaults to `false`. Set it to `true` to show this run's SharePoint export links in the email. The default hides export and attachment links from the mail body; the shared branded footer remains. The mail status is `Critical` only when at least 10% of inventoried teams have no owner or exceed the configured storage quota threshold in a full inventory. Individual findings keep their existing severity in the CSV and workbook. Graph mail attachments larger than 3 MB require a different delivery path and cause a clear send error.
 
 Since v0.34 these links stay valid for seven days: after each successful upload, older timestamped copies of the same CSV or workbook are deleted from the SharePoint folder, as on the server (SmartM365.Core 1.0.62 or later required).
 

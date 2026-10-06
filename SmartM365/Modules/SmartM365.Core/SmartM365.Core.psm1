@@ -2979,6 +2979,7 @@ function Send-SmartM365GraphMail {
         [Parameter(Mandatory)][string]$BodyHtml,
         [string[]]$Attachments,
         [switch]$AllowAttachments,
+        [switch]$SuppressAttachmentLinks,
         [switch]$SkipHtmlCopy,
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto',
         [string]$AppId = $global:AppId,
@@ -3002,7 +3003,7 @@ function Send-SmartM365GraphMail {
 
     $graphAttachmentPaths = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
     if ($graphAttachmentPaths.Count -gt 0) {
-        $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $graphAttachmentPaths
+        if (-not $SuppressAttachmentLinks) { $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $graphAttachmentPaths }
         if (-not $AllowAttachments) {
             WriteLog -Message 'Graph mail attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
             $graphAttachmentPaths = @()
@@ -3642,6 +3643,7 @@ function SendEmailHtmlReport {
         [string]$BodyHtml,
         [string[]]$Attachments,
         [switch]$AllowAttachments,
+        [switch]$SuppressAttachmentLinks,
         [switch]$VerboseLog,
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto'
     )
@@ -3691,7 +3693,7 @@ function SendEmailHtmlReport {
             if (Test-Path $a) { $atts += $a }
         }
         if ($atts.Count -gt 0) {
-            $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $atts
+            if (-not $SuppressAttachmentLinks) { $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $atts }
             if (-not $AllowAttachments) {
                 WriteLog -Message 'Email attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
                 $atts = @()
@@ -3724,7 +3726,7 @@ function SendEmailHtmlReport {
         if ($atts.Count   -gt 0) { $mailParams['Attachments'] = $atts }
 
         if ($effectiveSendMailMode -eq 'Graph') {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SuppressAttachmentLinks:$SuppressAttachmentLinks -SkipHtmlCopy -MailPurpose $MailPurpose
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
                 WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
             }
@@ -3742,7 +3744,7 @@ function SendEmailHtmlReport {
         }
 
         try {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SuppressAttachmentLinks:$SuppressAttachmentLinks -SkipHtmlCopy -MailPurpose $MailPurpose
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
                 WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
             }
@@ -3779,6 +3781,7 @@ function Send-SmartM365Mail {
         [string]$BodyHtml,
         [string[]]$Attachments,
         [switch]$AllowAttachments,
+        [switch]$SuppressAttachmentLinks,
         [switch]$BodyAsHtml,
         [switch]$HighPriority,
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto'
@@ -3810,6 +3813,7 @@ function Send-SmartM365Mail {
         BodyHtml   = $htmlBody
         Attachments = $Attachments
         AllowAttachments = $AllowAttachments
+        SuppressAttachmentLinks = $SuppressAttachmentLinks
         MailPurpose = $MailPurpose
     }
     if (-not [string]::IsNullOrWhiteSpace($SendMailMode)) {
@@ -6207,8 +6211,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOkjx74G/1TDBV
-# uegY7zGxBwkFq62Y9ifG666CQ1PF06CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHO3hNtXlxGwWB
+# fkGp/jYHRu7tLEz47N6hmDC3YJdl46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6341,31 +6345,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP3461nytEpcvwXjIh5t0z5/ff4mm3T7+ifpDN70WBm/MA0GCSqG
-# SIb3DQEBAQUABIIBgC7ORgRCxAK4NvTqdy6Z+hUwZqESyrlrcx4f2XCV98JbpZZY
-# 6db57UgXZvtEgQ5DpGeYkn6kAxYLGdMW/zGgKp+zV1LRhEM4UdZXNxfcdjoV9hJe
-# IC9r1+2zyYplm6qIGZ27EBPv3QanYP1EYA4f/OY6ORYpVnB3L7v2Gy4W4a+iPnoq
-# UkOK9sXxfh0v3yJxNuiHEALFP72r4dhkFUs/Cyqq9zamopwnVtRYbII/xOlg/Zpl
-# C3LoMbK+6n8E1ORExseylSysi8EuBvCImN250jVeFPJInKhXh0xfNnue7cmZUJQ1
-# U+vDdON0mDnv/4z4U3GH8ZxLP2C3vq+yp7NOi7+a7fMNU16Gmjn/LvNfcaJfUKHM
-# GKsrC8ddT/LWLjsENOXsJJbaZbwH77j/HLPGrVN534xFSMEuKVsDcTnbdBXbHYb3
-# mfFtItQWXAeMluaXoWSnJ05Yvfw/KYJLJno9NP6PNe5KCTTUkCAnBf0oqND6MXif
-# UFSlNOu5PNFzuY3Cg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ4uVsxZDjOF7mhL8pxUMEK4CRs66H+5q4MpDJ0vfRjZMA0GCSqG
+# SIb3DQEBAQUABIIBgGbakt/zhTzykmd03YHeuNTSVHOLyD6XtDhdGiNNXU374d2o
+# zilOwIsGTtlMZ/BoZDQNOggEUjgFJZDmMZpd6hXkYwUQOmDh+CZsBpULx89ty2Kn
+# ceqNXbjUPuWy+Pfd63lL6BvGkmHYxvAux7YfclWUp47BK0GKBh7RQ9XU2iVxCCoY
+# BEpFharswBM91ZKgzIl9oDVvnYY2fVbSTc9uLS7rHu41SqCIkO43gAE+AyXAlgRM
+# 0BCXNeMA6SIEaTMx4rie+CjJ43X18iOJqiIe2+UoOLUxyYzeceBu7W87lJVsah23
+# pK2yk9LRvOFQ0riDKlYmplH/l4KJAnwiZ0VjSSHLUNw+OmDyjWt/xu6dNSvob3J6
+# Aum0MyEQbfoMsIXx6seIRMWGM4imRCl7Nt+dCR96ldn/VL1RxT8/34TT22sdNzfN
+# pfo0PyB5SQeFDa5hvvY02L6xIbhkohC5SyjKD+jC5R+ey8D1afE6NklasXvkpGDh
+# LYSGq7ZUilf+h5IzeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ3
-# MjhaMC8GCSqGSIb3DQEJBDEiBCDgXN8r5ofqZK0G6Z9wVpO/z3XTeILlYV8vALDK
-# /1By0zANBgkqhkiG9w0BAQEFAASCAgA57ILIwxUASq1Styf69eDIm8iYjqd4/kbp
-# g6AvwbvWumvnGPrppPOe95LIP6YFa2OItBJob7k02i8vQ60geQGPgTu7BbCIgmaF
-# R42PJXGDmGAe42UrkK/srd+77WPG9rGkOL2YlQwVuX+Lp3VXH+YHIX/NVzPnxWHl
-# HblICFHKmhVJxGxHDc8ddtzhFrlZAgTzqPYDfSBYE5yLC5kYkaO9p993R/C5JkKs
-# qq855UdaGyszyjuT7vU6zGgM1goarFUdftsV0+IhA0J5EyCySTAXG3LC75Q/uaOK
-# RObmJx28M5dT0TCBy22ptrsrThaGW8uEiFtJJ7fYnnfjoPF2s/RgFbK1kBugEqg+
-# I4TxnLoIaCAc+2kmpmrushkVdufQx4BZOCv6EToJAiIi0hV2C4AV90pubEaoVNcu
-# EwzJ1rjUUtLvJBUghHeh+yJd9BviUVWZ4jb6XMAXmLW+y5vwmVLExH/kk7y+ubHp
-# LUdg5Rf3C4h6l7HGdEh3w3vxYgy/rGXUxtuTB/VOIvNOkvG8sKgDGEwqyUVRfuyc
-# ioYNHlFh2TitJuAiAnpC4OMCUYvlhJxtpkiJCwkOkp4C1wkDtImci+26teWXsjNp
-# 0YKOOen4IVZKeDwAlLBx0M71+OFHfB0aBR2l20u4xR59KM01wrcaEE0s52oTViIg
-# UJnGS29stg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
+# MDJaMC8GCSqGSIb3DQEJBDEiBCBmXkVJf6YjW4YSgyq+cCUl+CTS6KuicUAylXoT
+# OXraITANBgkqhkiG9w0BAQEFAASCAgAgHrdq4tPwri8ETRNrbmYvzD68ooV88lxV
+# Q0pr+0W2ulM0sAnAUJLrTxXoUDBtQoVkGHLNz23LJ0yUkbSek9Z/tuO/+n4qxghE
+# 9vZXUVbkoX9Az/oJr2/faXfOPAbca7+r9vctjgAihVbZq+l3fzxEeDIWmWYnCgLq
+# d9Y5g6L+1zQH7rUTxvG32hPFNS6HZn8gm2sqg4ouqYsSxjHxPtCkPm1z7J5gtuwm
+# oIst7mL1gpTIuQralGEl0n8DqEakzlqj7YMGVwVayr4WGhjoGCY9bWAEIWGiJd0E
+# sHcMb+r1X7jxsTEU1Da+X57N7srCy9UvaBBoyph7utGMTjnGD5q8WO3IajXgCHJm
+# +G4+SC0moww394qF0IQcZpY7OeL0p181+nT9ciy1VUV1B3bc+uYm+JtgMnBWgPid
+# SFuYu4mO8sSjXDf1OfFMYcAPmuDlI47WsYpQzBzJkoQCusns/NDVJbYcn97OdBSO
+# e6jM2IrFdgK2EEzoPb9NWu51RMgx2ZdUCgmlihj750GEtZJ2mbIfcu584M0HsJ6V
+# 7PGtt2zWJVDDzeIjjk5T+KYMh0uE90JS571XHhVa81xrE6t1QjLlcn31v64rbS33
+# Os1edA5EQozXzEaWlWe5W6hyLDUDe8NCxq11R2tB+GzgeQT6UUZcUDeAN825b7qx
+# kiDfnqGSgw==
 # SIG # End signature block

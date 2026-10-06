@@ -240,7 +240,9 @@ Main exports:
 | Lists | `M365_SPO_Lists.csv` | Lists and libraries per site when Graph can resolve the site. Versioning and size fields are marked unavailable in Graph-only mode. |
 | Permissions | `M365_SPO_Permissions.csv` | Owner rows from Graph usage data. Site collection admin enumeration is not required in default mode. |
 | External sharing | `M365_SPO_ExternalSharing.csv` | Stable schema with Graph-only availability markers. Tenant-wide anonymous/external sharing link discovery is not available in least-privilege Graph-only mode. |
-| Tenant capacity | `M365_SPO_Tenant.csv` | Always exported. Used storage comes from the site inventory. Licensed capacity is collected by default; `SharePointAdminUrl` is derived automatically and remains an optional override. |
+| Tenant capacity | `M365_SPO_Tenant.csv` | Always exported. Used storage comes from the site inventory. Licensed capacity is collected only with `-UsePnPTenantCapacity`; `SharePointAdminUrl` is derived automatically and remains an optional override. |
+
+The daily SharePoint inventory email attaches one `M365_SPO_Inventory_yyyyMMdd_HHmmss.xlsx` workbook with the five CSV data worksheets plus `Summary` and `Findings`. Its body shows four priority KPIs and brief secondary metrics; run details are at the bottom. CSV publication and weekly history remain unchanged. The script-local JSON key `ShowMailLinks` defaults to `false`; set it to `true` to display this run's SharePoint export links. The shared branded footer remains. The mail status is `Critical` only for measured tenant storage utilization of at least 95%, or when at least 10% of inventoried sites lack a valid owner or exceed the configured site quota threshold in a full inventory. Object-level severities remain in the CSV and workbook. Graph mail attachments over 3 MB fail explicitly until a larger-file delivery path is configured.
 
 Examples:
 
