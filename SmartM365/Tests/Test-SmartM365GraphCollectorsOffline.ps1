@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.21
+1.0.22
 #>
 [CmdletBinding()]
 param(
@@ -492,7 +492,7 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
         } finally {Remove-Module $m -Force}
     }
     Test-OfflineCase 'Windows Update fleet accepts tenant-scoped Graph rows before CSV publication' {
-        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateOsBuild','New-WinUpdateActivationIndex','Get-WinUpdateActivationState','Get-WinUpdateIntuneFleetCountrySummary','Get-WinUpdateAdWithoutIntuneSummary','Get-WinUpdateEnabledWindowsCombinedSummary')
+        $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateOsBuild','New-WinUpdateActivationIndex','Get-WinUpdateActivationState','Get-WinUpdateIntuneFleetCountrySummary','Get-WinUpdateAdWithoutIntuneSummary','Get-WinUpdateEnabledWindowsCombinedSummary','Get-WinUpdateCombinedVersionDistribution')
         try {
             $users=@([pscustomobject]@{TenantKey='org-prod';'Object Id'='user-1';CountryOrRegion='France'})
             $devices=@(
@@ -539,6 +539,11 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
             $combined=&$m {param($i,$a)Get-WinUpdateEnabledWindowsCombinedSummary -IntuneSummary $i -AdWithoutIntuneSummary $a} $runtime $adSummary
             Assert-Offline ($combined.Windows11-eq2 -and $combined.Windows10-eq3 -and $combined.UnknownOrOther-eq0 -and $combined.Total-eq5) 'Enabled unmatched AD Windows devices were not added to the country total.'
             Assert-Offline (@($combined.Known|Where-Object Country -eq 'France')[0].Total-eq3 -and @($combined.Known|Where-Object Country -eq 'France')[0].Intune-eq2 -and @($combined.Known|Where-Object Country -eq 'France')[0].AdWithoutIntune-eq1 -and $combined.Unknown.AdWithoutIntune-eq1) 'Intune and AD country rows did not reconcile by source.'
+            $distribution=&$m {param($c)Get-WinUpdateCombinedVersionDistribution -CombinedSummary $c} ([pscustomobject]@{Windows11=20778;Windows10=2332;UnknownOrOther=0;Total=23110})
+            Assert-Offline ($distribution.Windows11-eq20778 -and $distribution.Windows10-eq2332 -and $distribution.Total-eq23110 -and $distribution.Windows11Pct-eq89.91 -and $distribution.Windows10Pct-eq10.09 -and $distribution.UnknownOrOtherPct-eq0) 'The top distribution did not use the combined enabled Windows totals and percentages.'
+            $invalidDistributionRejected=$false
+            try { &$m {param($c)Get-WinUpdateCombinedVersionDistribution -CombinedSummary $c} ([pscustomobject]@{Windows11=20778;Windows10=2332;UnknownOrOther=0;Total=23109}) | Out-Null } catch {$invalidDistributionRejected=$true}
+            Assert-Offline $invalidDistributionRejected 'An inconsistent combined Windows distribution was accepted.'
             $wrongTenantRejected=$false
             try { &$m {param($d,$u,$p,$i)Get-WinUpdateIntuneFleetCountrySummary -IntuneDeviceRows $d -ActiveUserRows $u -PolicyRows $p -ActivationIndex $i -ReferencePolicyId 'reference' -TenantKey 'prod'} $devices $users $graphRows $index | Out-Null } catch {$wrongTenantRejected=$true}
             Assert-Offline $wrongTenantRejected 'The profile selector was accepted as a CSV tenant key.'
@@ -586,11 +591,11 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
     }
     Test-OfflineCase 'Windows Update email places the OS distribution before fleet coverage' {
         $text=Get-OfflineSourceText $paths.WindowsUpdate
-        Assert-Offline ($text.Contains('Windows version distribution')) 'The Windows version distribution title is missing.'
+        Assert-Offline ($text.Contains('Windows version distribution - enabled Windows devices') -and $text.Contains('Get-WinUpdateCombinedVersionDistribution -CombinedSummary $combinedFleetSummary')) 'The top Windows distribution is not sourced from the enabled combined scope.'
         Assert-Offline ($text -match '(?s)\$severityInputsHtml\s+\$windowsVersionDistributionSection\s+\$intuneFleetSection\s+\$fleetCoverageSection') 'The enabled Windows table is not placed between OS distribution and coverage.'
         Assert-Offline ($text -match '(?s)INTUNE NEITHER POLICY</th></tr>\s+\$combinedCountryRowsHtml\s+\$combinedRowHtml\s+</table>') 'The combined Intune and unmatched AD country rows are not in the same table.'
         Assert-Offline ($text.Contains('#2563eb') -and $text.Contains('#f59e0b') -and $text.Contains('#94a3b8')) 'The approved Windows distribution colors are missing.'
-        Assert-Offline ($text.Contains('OS VERSION UNKNOWN') -and -not $text.Contains('UNKNOWN / OTHER')) 'The OS-version-unavailable label is not explicit.'
+        Assert-Offline ($text.Contains('OS VERSION UNKNOWN</th>') -and -not $text.Contains('OS UNKNOWN/OTHER</th>')) 'The country table OS-version label is not aligned with the top cards.'
     }
     Test-OfflineCase 'Windows Update report health uses proportional severity thresholds' {
         $m=Import-OfflineFunctions $paths.WindowsUpdate @('Get-WinUpdateReportHealth')
@@ -822,8 +827,8 @@ if($summary.Failed -gt 0){exit 1}
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCed4Yby0SUhAeH
-# ukTEuuSYITfX0KSlZv0JqR/LZvLJJ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJ8T91HGBZQxz+
+# n8QGvSv+ic4P5v8ZekKBedjOClTYxaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -853,14 +858,14 @@ if($summary.Failed -gt 0){exit 1}
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB4vonWTtlY7qPdAHLJ6EBg
-# V+Z/YOyKnspQcPmt6uOIVjANBgkqhkiG9w0BAQEFAASCAYBbTSMGn69de9W478at
-# mvzN0DJ9eMtLEclnJ273apewnOEButk6TNhejaiLWKEeZHbQSsUZk6NwrUiRLvf/
-# KUapIS3ZhFGQ2ucl5mz25Ab/MVmx8XNNfdEUstLUrttgp91Tb1Nv+wtsiA6fVKSZ
-# iRM7Ic49Ox6b/w1dCgFSdlFfk9keDfaC3gWokEfEnhfVSPftMNToJHD0JA9QaZIz
-# C4xTx8/v1Q8tvh4ys0HtZkXzM/lRbJgLo36tNZVBnsKWCvo3YNwUrSgtx61ZF5S4
-# BIa6loUHHlxuUnV0oZRZuQrbGHbaCPlaEHNZepTbmkEHUqBNMIhUR3jZ9mvUOi6A
-# Ca8QkF02kH8ISZn3Dr1qc8VlTIw1qMowy+0qDyEF1E4/y8npiLq4khrbkIrpZgtz
-# Dvu+1F1AfX83/Mo3iuSSNsfN2Bp75mnlneC3FRrCCcDmKrKIzDnscLWYIu5HAynV
-# B26FireuOt9S3vxwmCp/lUa58FK/y0/8duWQNEzWt75OBuQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBGXITBE+1bQMJEdPXeO65l
+# Uqo9nHN8aet/sNvReTsKRDANBgkqhkiG9w0BAQEFAASCAYAdXxAqpNFzBLHMV05C
+# 73PrkxTRWz75bSVYKQ0ZSGZvDcoLKDooiji8mlezqCMy4ra1FrkVM0v3VnZlkB99
+# I0dJPB3HsWwUKbmDG4iJWrmNTrXy5fgoK+eR8FW5Yn+Imuw8JXpGd6EQQMi3Q9Dl
+# ALpdO9bn7n5S/y9bkNNsVeuke6LpmDzGz2R9SMeaMS6lfiyO1/XZlVVvXBuUD+p4
+# okw+dU3lWqsjxagTbY1qXkkDWBF1k+aoTLKhDFC8WCWCjEs8LvizlSRwaSnLsWh0
+# o7ZiJTBybkJebYdwW5j3KcR/3Slx4OVsQVIBxSB/cYd9VB31XwewF8sI05eLgpoq
+# 8LyW1taQRX3I6sW9RIHjgd4nJen6GCs5GNsHoS0pkomAZl7e5ybQv4jRDaaPm/oQ
+# TB+fdfOWqBv/5k3VNg5VGNifBFML8l+qNlBts1u79aBqqEN5z/5owjNWwwzX87RC
+# zAlusFXjOZqUnxE5bSZLKk925iX57XcRsoGHNLg64rekaQw=
 # SIG # End signature block

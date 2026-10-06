@@ -95,7 +95,7 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.50"
+$ScriptVersion = "1.51"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1749,6 +1749,28 @@ function Get-WinUpdateEnabledWindowsCombinedSummary {
     }
 }
 
+function Get-WinUpdateCombinedVersionDistribution {
+    param([Parameter(Mandatory)][object]$CombinedSummary)
+
+    $windows11 = [int]$CombinedSummary.Windows11
+    $windows10 = [int]$CombinedSummary.Windows10
+    $unknown = [int]$CombinedSummary.UnknownOrOther
+    $total = [int]$CombinedSummary.Total
+    if ($total -le 0 -or $windows11 -lt 0 -or $windows10 -lt 0 -or $unknown -lt 0 -or
+        ($windows11 + $windows10 + $unknown) -ne $total) {
+        throw 'Combined Windows version distribution does not reconcile.'
+    }
+    [pscustomobject]@{
+        Windows11 = $windows11
+        Windows10 = $windows10
+        UnknownOrOther = $unknown
+        Total = $total
+        Windows11Pct = [math]::Round(100.0 * $windows11 / $total, 2)
+        Windows10Pct = [math]::Round(100.0 * $windows10 / $total, 2)
+        UnknownOrOtherPct = [math]::Round(100.0 * $unknown / $total, 2)
+    }
+}
+
 function Get-WinUpdateProgressPhase {
     param([Parameter(Mandatory)][object]$Row)
 
@@ -2728,26 +2750,6 @@ try {
         $severityInputsHtml = "<p style='margin:0 0 18px 0;font-size:12px;color:#64748b;'>Severity inputs: actions $($reportHealth.ActionRequiredRatePct)% | P0 blockers $priority0Count/$($reportHealth.Priority0Threshold) critical threshold | known-OS coverage $severityCoverageText | OS unknown $severityUnknownText.</p>"
         if ($coverageAvailable) {
             $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
-            $invariantCulture = [Globalization.CultureInfo]::InvariantCulture
-            $windows11Width = [string]::Format($invariantCulture,'{0:0.##}',$fleetWindows11Pct)
-            $windows10Width = [string]::Format($invariantCulture,'{0:0.##}',$fleetWindows10Pct)
-            $unknownOrOtherWidth = [string]::Format($invariantCulture,'{0:0.##}',$fleetUnknownOrOtherPct)
-            $windows11BelowTarget = [math]::Max(0,$fleetWindows11 - $fleetOsCovered)
-            $windowsVersionDistributionSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows version distribution - reference policy</h2>
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | $fleetDevices report devices, regardless of directory activation | Current report OSVersion | Each device counted once.</p>
-<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 10px 0;"><tr>
-<td width="$windows11Width%" style="width:$windows11Width%;height:22px;background:#2563eb;font-size:1px;line-height:22px;">&nbsp;</td>
-<td width="$windows10Width%" style="width:$windows10Width%;height:22px;background:#f59e0b;font-size:1px;line-height:22px;">&nbsp;</td>
-<td width="$unknownOrOtherWidth%" style="width:$unknownOrOtherWidth%;height:22px;background:#94a3b8;font-size:1px;line-height:22px;">&nbsp;</td>
-</tr></table>
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
-<td style="width:33.33%;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">WINDOWS 11</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows11</div><div style="font-size:12px;color:#475569;">$fleetWindows11Pct%</div></td>
-<td style="width:33.33%;padding:12px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#b45309;">WINDOWS 10</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetWindows10</div><div style="font-size:12px;color:#475569;">$fleetWindows10Pct%</div></td>
-<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">OS VERSION UNKNOWN</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$fleetUnknownOrOther</div><div style="font-size:12px;color:#475569;">$fleetUnknownOrOtherPct%</div></td>
-</tr></table>
-<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Within Windows 11: $fleetOsCovered on $fleetTargetShortLabel+ | $windows11BelowTarget below $fleetTargetShortLabel.</p>
-"@
             $fleetCoverageSection = @"
 <h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Fleet OS coverage - $(Html-Encode $fleetTargetLabel)+</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Minimum build: $($primaryCoveragePolicy.TargetBuild) | OS coverage uses the current OSVersion, independently of the Intune policy workflow state.</p>
@@ -2763,8 +2765,31 @@ try {
 "@
         } else {
             $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
-            $windowsVersionDistributionSection = ''
             $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
+        }
+        if ($combinedFleetSummary) {
+            $distribution = Get-WinUpdateCombinedVersionDistribution -CombinedSummary $combinedFleetSummary
+            $invariantCulture = [Globalization.CultureInfo]::InvariantCulture
+            $windows11Width = [string]::Format($invariantCulture,'{0:0.##}',$distribution.Windows11Pct)
+            $windows10Width = [string]::Format($invariantCulture,'{0:0.##}',$distribution.Windows10Pct)
+            $unknownOrOtherWidth = [string]::Format($invariantCulture,'{0:0.##}',$distribution.UnknownOrOtherPct)
+            $windowsVersionDistributionSection = @"
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows version distribution - enabled Windows devices</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Intune inventory and AD Windows computers without an exact Intune ID match | Enabled in Entra or AD | OS family from each source.</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 10px 0;"><tr>
+<td width="$windows11Width%" style="width:$windows11Width%;height:22px;background:#2563eb;font-size:1px;line-height:22px;">&nbsp;</td>
+<td width="$windows10Width%" style="width:$windows10Width%;height:22px;background:#f59e0b;font-size:1px;line-height:22px;">&nbsp;</td>
+<td width="$unknownOrOtherWidth%" style="width:$unknownOrOtherWidth%;height:22px;background:#94a3b8;font-size:1px;line-height:22px;">&nbsp;</td>
+</tr></table>
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
+<td style="width:33.33%;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">WINDOWS 11</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.Windows11)</div><div style="font-size:12px;color:#475569;">$($distribution.Windows11Pct)%</div></td>
+<td style="width:33.33%;padding:12px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#b45309;">WINDOWS 10</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.Windows10)</div><div style="font-size:12px;color:#475569;">$($distribution.Windows10Pct)%</div></td>
+<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">OS VERSION UNKNOWN</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.UnknownOrOther)</div><div style="font-size:12px;color:#475569;">$($distribution.UnknownOrOtherPct)%</div></td>
+</tr></table>
+<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Combined exact-ID scope: $($intuneFleetSummary.Total.Total) Intune + $($adWithoutIntuneSummary.All.Total) unmatched AD = $($distribution.Total). Fleet OS coverage below uses the reference policy.</p>
+"@
+        } else {
+            $windowsVersionDistributionSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Windows version distribution unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>The enabled Intune and unmatched AD sources could not be reconciled. No combined OS counts are inferred.</p>"
         }
         if ($intuneFleetSummary -and $adWithoutIntuneSummary -and $combinedFleetSummary) {
             $combinedCountryRowsHtml = foreach ($countryRow in @($combinedFleetSummary.Known) + @($combinedFleetSummary.Unknown)) {
@@ -2784,7 +2809,7 @@ try {
 <h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Enabled Windows devices by country - Intune and unmatched AD</h2>
 <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Included when Entra AccountEnabled or AD Enabled is true. Reference Feature Update policy: $referencePolicyLabel | Intune country comes from the primary user's Entra CountryOrRegion; unmatched AD country is inferred from the first two letters of the computer name using the selected tenant's private mapping. These are different country definitions, not verified physical locations.</p>
 <table role="presentation" style="width:100%;border-collapse:collapse;font-size:11px;color:#0f172a;margin:0 0 10px 0;">
-<tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">COUNTRY</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">OS UNKNOWN/OTHER</th><th style="padding:8px;text-align:right;">TOTAL</th><th style="padding:8px;text-align:right;">INTUNE</th><th style="padding:8px;text-align:right;">AD WITHOUT INTUNE ID MATCH</th><th style="padding:8px;text-align:right;">INTUNE REFERENCE POLICY</th><th style="padding:8px;text-align:right;">INTUNE OTHER FEATURE UPDATE POLICY ONLY</th><th style="padding:8px;text-align:right;">INTUNE NEITHER POLICY</th></tr>
+<tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">COUNTRY</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">OS VERSION UNKNOWN</th><th style="padding:8px;text-align:right;">TOTAL</th><th style="padding:8px;text-align:right;">INTUNE</th><th style="padding:8px;text-align:right;">AD WITHOUT INTUNE ID MATCH</th><th style="padding:8px;text-align:right;">INTUNE REFERENCE POLICY</th><th style="padding:8px;text-align:right;">INTUNE OTHER FEATURE UPDATE POLICY ONLY</th><th style="padding:8px;text-align:right;">INTUNE NEITHER POLICY</th></tr>
 $combinedCountryRowsHtml
 $combinedRowHtml
 </table>
@@ -2908,8 +2933,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjXrDGwMFS6QUL
-# UZKO/GRCYawfI9JjWBLAAC9lUpvBuqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAo/w2y+oSXLG8x
+# 6DqdQW0QMfrA3UR3ptBZ0y4cHe9SpaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2939,14 +2964,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC8ogbU5j+0s1w6gFO6SBv9
-# A01mDVP8NL7NTJOxaQBj2zANBgkqhkiG9w0BAQEFAASCAYBN2Zrh+CXaOG70yOLQ
-# BBOFrZ2K5vXfLW9Jq4lvR80nrwgxXYMboPYv5TDFLY6F46L+2SFDWqeCYEWeAOVw
-# iG9o/yGggh1ZnBX/Vi4gvwruJzwE32fbp8uImSm4Z2CpDK3vk3tdpzsQc1KXdyWq
-# NCDaYlYYCtiQGTPz9me9eDskhlXPMfkZ+XSVngDF/cm1CM5afA32bVoScGJHHp5p
-# T95RK6omIMO4MvT1nqxscVQmbhI7VCFlb+dCcH78UgYBn+sLGdTH41nkUz9i0OV9
-# F9Nf25DFtzyeAgLLU62R6FkZDggbEJVB30rsD/7JoIgjT6DtwG6CanSRfTwmhc80
-# 4yaut/aMX+zWGT2WKDiVCNlWoNyR03JK1Lkq8uRtl12+UYD18ETWhabkuqZFf5bO
-# LF4ZnV3T6SDu6RP2BLshnG/qVrv4G7u/doBnNEcJt1IXWjQQA/qgGM0dFTQ0hHyC
-# LF+JFwQemLq6aXsNg83/qfvx4zYk1ZLfFvvkNTopYYuo31Y=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDmvz06pIeaNAK0+ZPi7CA4
+# XiwNiDh9YjWioESMr3aEDTANBgkqhkiG9w0BAQEFAASCAYA6f7MU1WCQdJqBEb7b
+# bz892ZuDyInkuoP5vthVOD8rtzDEHWuiKNiL94zLsGD85CFR8u2+Jtd7ySYfCeqI
+# SX3cEo3qPBYovTJ0N9fjLRjA3sfAisL67Wlr6wPZXz6VExpd0RUIJv+xS3tcwsF2
+# hFFR9zFZW+WkratDbenvrpg3ulT2W0tkpXwHagR89/wqkneHBVRbFKQivDcdLTHs
+# ty2lrGNiHWnOTVsIafZAIQRm+AJYqPeqvxE3hp14kfB6uGVJUI4qrsIFtz2ztM/7
+# GVp4ktY42VVHK0NJHJwT3BghzLO6YWkiqRyjfpg5lptM1pVRMmM2LyJVssPWKaTs
+# nFcKLIPO0Whhjl9G4xxR19aoVOFfCEB3PG6IdD/+2TALgcwPrjZ79tV2TInc8+bS
+# 0iKPggBsF8WOA92iuuk025DSutEI3Sg8TUHSJNcUbjoRIFwWrZW0fwJ20cR2H+9i
+# dtmYRcaJecWSajVrK1LUgJGUWs06Oxnweu2krPZMgrqVRGE=
 # SIG # End signature block

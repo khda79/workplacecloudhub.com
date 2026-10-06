@@ -68,11 +68,15 @@ presence, not confirmed Windows Autopatch enrollment. The reference-policy
 report can contain Device IDs absent from the current Intune inventory; those
 are disclosed separately rather than added to the Intune total. Disabled
 devices and those without positive enabled evidence are excluded and counted
-separately. The existing Windows version distribution and Fleet OS coverage
-sections retain their reference-policy scope and are not activation filtered.
-Their OS family uses the current Graph report `OSVersion` (with the Entra
-fallback); the country table uses Intune `OS version`. Therefore their
-Windows 10/11 subtotals need not match even for shared device IDs.
+separately. The top Windows version distribution uses the same enabled
+Intune-plus-unmatched-AD scope as the country table, with percentages calculated
+from its combined total. If that scope cannot be reconciled, the distribution
+shows an unavailable notice rather than reference-policy counts. Fleet OS
+coverage and severity retain their reference-policy scope and are not
+activation filtered. That coverage uses the current Graph report `OSVersion`
+(with the Entra fallback); the top distribution and country table use Intune
+`OS version` and AD `OperatingSystemShortName`. Their Windows 10/11 counts
+therefore need not match Fleet OS coverage.
 
 The same country rows also include enabled AD Windows 10/11 computer objects with no exact
 match from AD ObjectGUID to Intune Azure AD Device ID. The enabled rule is the
@@ -85,7 +89,9 @@ published in the repository. Unmapped or short names use `Country unknown`.
 The Intune and AD country sources have different meanings: primary user's
 Entra country versus computer-name prefix, neither a verified physical location.
 Each row shows the combined OS totals plus separate Intune and unmatched AD
-counts. The Intune policy columns exclude the AD count. No exact match does not prove that a
+counts. The table header uses `OS VERSION UNKNOWN` for unclassified builds,
+matching the top distribution. The Intune policy columns exclude the AD count.
+No exact match does not prove that a
 computer is unenrolled: identity differences, synchronization and snapshot
 timing can prevent a join. Such differences can also make one physical PC
 appear twice in the combined count. The AD Windows 10/11 family
