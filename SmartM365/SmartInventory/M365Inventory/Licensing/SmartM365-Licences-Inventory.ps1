@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.36
+    Version : 1.37
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1012,7 +1012,7 @@ function Get-LicensesAdAccountActivitySummary {
   }
   if ($result.AdObserved + $result.Ambiguous + $result.NoObservedMatch -ne $result.Members -or
       $result.AdEnabledRecent + $result.AdEnabledInactive + $result.AdEnabledNoDate + $result.AdEnabledUnknown + $result.AdDisabled -ne $result.AdObserved) {
-    throw 'AD account activity categories do not reconcile with section 06 members.'
+    throw 'AD account activity categories do not reconcile with section 07 members.'
   }
   $result.Available = $true
   return $result
@@ -1543,19 +1543,27 @@ function New-LicensesRecoveryWorkbook {
       $safeDisplayName = [string]$item.DisplayName
       if ($safeUpn -match '^\s*[=+\-@]') { $safeUpn = "'$safeUpn" }
       if ($safeDisplayName -match '^\s*[=+\-@]') { $safeDisplayName = "'$safeDisplayName" }
+      $adDateText = ([string]$item.LastAdActivityDate).Trim()
+      $m365DateText = ([string]$item.LastM365ActivityDate).Trim()
       [pscustomobject]@{
         License = $item.License
         UserId = $item.UserId
         UserPrincipalName = $safeUpn
         DisplayName = $safeDisplayName
         RecoveryReason = $item.RecoveryReason
-        LastAdActivityDate = $item.LastAdActivityDate
-        LastM365ActivityDate = $item.LastM365ActivityDate
+        LastAdActivityDate = if ($adDateText -and $adDateText -ne 'N/D') { [datetime]::ParseExact($adDateText,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture) } else { $null }
+        LastM365ActivityDate = if ($m365DateText -and $m365DateText -ne 'N/D') { [datetime]::ParseExact($m365DateText,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture) } else { $null }
         PrimaryOnIntuneWindowsPc = $item.PrimaryOnIntuneWindowsPc
         TargetSuites = $item.TargetSuites
       }
     }
     $safeDetails | Export-Excel -Path $Path -WorksheetName 'Recovery candidates' -TableName 'LicenseRecoveryCandidates' -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
+    $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
+    try {
+      $sheet = $package.Workbook.Worksheets['Recovery candidates']
+      $sheet.Cells[2,6,$sheet.Dimension.End.Row,7].Style.Numberformat.Format = 'yyyy-mm-dd'
+    }
+    finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
   }
   else {
     $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
@@ -1798,7 +1806,7 @@ function Send-LicensesFocusedSummaryEmail {
     $e3ReviewExcluded = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Excluded } else { 'N/D' }
     $e3ReviewRecovery = if ($e3Review -and $e3Review.Available) { [string]$e3Review.RecoveryExcluded } else { 'N/D' }
     $gapNotes = @()
-    foreach ($item in @(@{ Section='05'; Value=$gap05 }, @{ Section='06'; Value=$gap06 })) {
+    foreach ($item in @(@{ Section='06'; Value=$gap05 }, @{ Section='07'; Value=$gap06 })) {
       if ($item.Value -and -not $item.Value.Available -and $item.Value.Reason) {
         $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section {0} N/D: {1}</p>' -f `
           $item.Section, [System.Net.WebUtility]::HtmlEncode([string]$item.Value.Reason)
@@ -1844,29 +1852,29 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. N/D in a date column means no qualified date was observed; AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; Activity and overlap</h2>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; E3 to F3 downgrade review</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Activity and overlap</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Licensed shared mailboxes</h2>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">05 &nbsp; Licensed shared mailboxes</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">05 &nbsp; User mailboxes without licence F1/F3/E3/E5</h2>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">06 &nbsp; User mailboxes without licence F1/F3/E3/E5</h2>
   <p style="margin:0 0 8px;padding:11px 13px;background:#eff6f8;border-left:4px solid #0f766e;font-size:12px;color:#334155;"><strong style="font-size:19px;color:#0f766e;">$gap05Total</strong> of $gap05Universe qualified EXO UserMailbox &nbsp;&middot;&nbsp; <strong>$gap05Percent</strong></p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Unknown</td></tr></tbody></table>
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">06 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5</h2>
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">07 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5</h2>
   <p style="margin:0 0 8px;padding:11px 13px;background:#eff6f8;border-left:4px solid #2563eb;font-size:12px;color:#334155;"><strong style="font-size:19px;color:#1d4ed8;">$gap06Total</strong> of $gap06Universe qualified Entra accounts &nbsp;&middot;&nbsp; <strong>$gap06Percent</strong></p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">Member enabled</th><th style="$headStyle">Member disabled</th><th style="$headStyle">Guests</th><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06MemberEnabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06MemberDisabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Guests</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Unknown</td></tr></tbody></table>
-  <p style="margin:15px 0 6px;font-size:12px;font-weight:700;color:#334155;">AD accounts and activity among section 06 Members &nbsp;&middot;&nbsp; $adGapStatus</p>
+  <p style="margin:15px 0 6px;font-size:12px;font-weight:700;color:#334155;">AD accounts and activity among section 07 Members &nbsp;&middot;&nbsp; $adGapStatus</p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">Members</th><th style="$headStyle">AD accounts observed</th><th style="$headStyle">No AD match observed</th><th style="$headStyle">Ambiguous AD match</th></tr></thead><tbody><tr><td style="$cell">$adGapMembers</td><td style="$cell">$adGapObserved</td><td style="$cell">$adGapNoMatch</td><td style="$cell">$adGapAmbiguous</td></tr></tbody></table>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">AD enabled, active in 90d</th><th style="$headStyle">AD enabled, inactive 90d</th><th style="$headStyle">AD enabled, no logon date</th><th style="$headStyle">AD disabled</th><th style="$headStyle">AD state N/D</th></tr></thead><tbody><tr><td style="$cell">$adGapRecent</td><td style="$cell">$adGapInactive</td><td style="$cell">$adGapNoDate</td><td style="$cell">$adGapDisabled</td><td style="$cell">$adGapStateUnknown</td></tr></tbody></table>
   <p style="margin:5px 0 0;font-size:11px;line-height:16px;color:#64748b;">AD activity uses the replicated LastLogonDate and is approximate. No AD match means no unique match in the available AD export, not proof that no AD account exists. AD and Entra enabled states are separate.</p>
   $($gapNotes -join "`n")
-  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">07 &nbsp; E3 to F3 downgrade review</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
     Recovery candidates are distinct licensed users per product with a disabled non-shared account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Disabled users and activity/overlap indicators exclude identified shared mailboxes; an unqualified mailbox type is N/D. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
-    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count non-shared users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. Sections 05 and 06 count distinct EXO UserMailbox and Entra account IDs with none of the four target suites; other SKUs are allowed and shown separately. Section 05 percent uses qualified EXO UserMailbox as its denominator. Section 06 percent uses qualified Entra accounts after excluding identified shared, room and other technical mailbox accounts in EXO and Exchange on-premises; its Member enabled, Member disabled and Guest groups add up to the qualified total. On-premises mailboxes match by ObjectGUID/ImmutableId first, then by unique UPN; an unqualified on-premises source makes section 06 N/D. These are coverage indicators, not license recovery candidates. N/D means a source or identity cannot be qualified; sources older than 14 days are excluded.
+    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count non-shared users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. Sections 06 and 07 count distinct EXO UserMailbox and Entra account IDs with none of the four target suites; other SKUs are allowed and shown separately. Section 06 percent uses qualified EXO UserMailbox as its denominator. Section 07 percent uses qualified Entra accounts after excluding identified shared, room and other technical mailbox accounts in EXO and Exchange on-premises; its Member enabled, Member disabled and Guest groups add up to the qualified total. On-premises mailboxes match by ObjectGUID/ImmutableId first, then by unique UPN; an unqualified on-premises source makes section 07 N/D. These are coverage indicators, not license recovery candidates. N/D means a source or identity cannot be qualified; sources older than 14 days are excluded.
   </div>
   <h2 style="margin:22px 0 8px;font-size:14px;line-height:20px;color:#334155;">Source freshness</h2>
   <ul style="margin:0;padding-left:18px;font-size:11px;line-height:18px;color:#64748b;">$($sourceRows -join "`n")</ul>
@@ -2489,7 +2497,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.36"
+$ScriptVersion = "1.37"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3193,8 +3201,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAAnHT8lx7rmiG
-# Ni3SryAgn+YOsifk5vlHMSbkt6D00qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxeS1eDaUiEC0j
+# ZScqBFyAtj8avGOkD4oVHeWW696wmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3327,31 +3335,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOKc8FwGO6cnDhxG5YdVQWvP7ybgd7w3yV1DSV/wuiz1MA0GCSqG
-# SIb3DQEBAQUABIIBgHj6c9LjvEiM/GAe7def2D7TEOZ/L9CVjzUBQrrnDN7AxonB
-# 6tkRWxtusRjGnZmIJ75HRoLkhkI34dqNBhLQswjwbxs8KSuNJ8CvttBmOpTiCjEj
-# sp9hpLF8+ZcSQWV8OlkDHXaXNKKu3OYj32VOKysOfTo3iw/sLnlkt2TszqY6L7++
-# 7nStzcu2NqZAt0BwDRG9R3Jsrd908GHjfZwb6bzk6HqtnnRCuLQi7gGcRIA5fwG2
-# UriUyv0PhjaTfHY69aDlaObJQ5qm+b0Ca+Jd7T0Mnp2U8/e66aOUAK9pqaScCWjX
-# p8JDmYecevop0c+XkkfkmhOsyTjHO1Lpt82+uzi0FP67pcGTabQ6gj734RNsK5Ht
-# NGnNwiT1DOTSRrKbOqhQqqxlHI6Z1chCw2tE8vq2jNmlqmUn6I+x2zqvKJI2bwqv
-# HwktJigkUl4DcGXw/+zLpoACzuqA7nV23z1+bRkvzhhtdZsK+mI1TzekZMpqWDqz
-# sv2AGb5w66C5uReimKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMnCUl29eIMk73XPSzNdY6KePfTdWen1ZZnnpc7wPDeZMA0GCSqG
+# SIb3DQEBAQUABIIBgIA64TeBlRENcTji2Jjn1rqShdXBn/rhBVf/41nKayeVd0BP
+# 3sGoZw79PH8CKPGNDvv+grRwTm4R4h6diIYrZHBMs0n1KW6iWRM116N0VhLH2vXT
+# coO1NOYz4qXR7mPWyCKYJnVgxGBP3RefjxRr6Mz1G7v2DGHjNgOlEJoburvOP2Fd
+# No+hodwB7GplVRwS+6dHRiGlOOHmopSjFA/IPxMj0plvsYssWAkpyY+9mpwgMPx2
+# hUZf55EsAwvgZosB/sWyZmuCUXDkFMBQu70arjFXsjkqU0ASj3vasaGqqDXsLj7b
+# j+IEGQ/CJOd5XuJYqGIE4oZYjUlErqd58gSOa1m1QV9y3z+TAWPPJ+gDUG9FsMkV
+# wDtYzm/5lHu+Yam/XUUeHM7xAU4vh59PNg0nppTG1anOBMYFQXG/f4RtqhSF2l5o
+# knDEO5k2o5hqLUsx0b+QjyNQc/uJg6ocg/agPrQlJyYcFAqwRQBdoLWKuPGejjYE
+# UzG15gF48c2CKMLEXKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDAy
-# NTlaMC8GCSqGSIb3DQEJBDEiBCBRVz69GwWGhF3WTRh4DvOtk/d+uu4moMgjt/3C
-# kZuDUTANBgkqhkiG9w0BAQEFAASCAgBUnBT/mzeYsa9SMlRLT3IaXZ182iHyDNo9
-# hC9Va0WYkaiOcQWz5T11TjbwHlQL63nNKjdZSJ74KOkYxu2Xoi7XqwXsWazRfdaG
-# wq6q1CS5ZNpZLyRHPzcp0O3CMyt6Bp3fUwFWv9zAT7aLEMfq4y+ZAj+b0ZhO4jR4
-# 9sZg5bkAKffRiZQhRQqUj5dhyrT1cGGcl1khUnJMuuPlnjpm5CDnrFF+KYgn4fZD
-# 6BJZ2lkXujnV6h0tjffbWjqJzu8u2Zm+9Ii3tlugdUFcrwYMtm7Mgz+MLJg+OV0w
-# k3g5tYcuOwiEQYSD8INLSCN7M+pTYZN54V/wJZTeJjoZR+G/Yanm7ezs0HPaFxvo
-# ay8spUeWZwy/0U5Yms+48C2NrNaGvhBkEzqFT/ZekAGtn+FeBDu+BGNQFPz1xIbx
-# l4Lvi554zLHwoCxAUPbuSoxEEWzkCHspw0uQ8xg9mHfqNWaCh+QxP24flxpqnqUw
-# qrh0KAy7PDRVuRpUaPqZ4eYcUAdQJ0ZG1hCoyvPVWDuRVFNGR+PmF6FGvLijhXNQ
-# 8jntK+yKmZyxzt2fqZ8wztZf/XCsNL4oEEpGChqfY7+1Cp1ZtOiSvhkikADjIHA6
-# e3r8H3EwOr3kavkaXypfdJPK0pOpBqo0Yg4VCGt8STlbeVVQK+cQbNgnlMGScthU
-# IqPyOkcXrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDE2
+# MDlaMC8GCSqGSIb3DQEJBDEiBCBqMS8uzUTK6/z83JsAdP+YefRuwdRNNpVSghae
+# 3Sk3czANBgkqhkiG9w0BAQEFAASCAgCH1wMaEb9zK8Z7eALnBGGL4x6UNtfPs1jV
+# mOpKBhQTJA8lAp0YhafaULn2eKO7fWxcRh8lzbJDtOyGpYuQ5XMrD5bJbIgiakOW
+# HkfpnfKn4kyFHh2V6NgbD6wZvMwsdHXk8Puifcf20F96LaK3ilwq9SzNq4lbtp8G
+# oiIpnlz0puWAFNQPdoeZRKkCvNgW/rQZxxC9fn72NSB0R6K8i72tD14Y3VFAjQNA
+# t0I98lTDEtJ+NFo7Pvy16D3djBWTlK3cgyHirc6YDkA8FUuZsy6Ff+1BqDtmUz6D
+# lzHfDsnKEfeYIbp/YU3uyCylsJBjdrc3NBG+wli/AU867TZ2Zl1Ws3OsPjdviEJ2
+# r8mhhaiE0cxaJLWFSo7vDkBBMYquwYTttfk62s+8JJ1MkzHeci6HqE4maffk3dAU
+# T6f1/DH1mKQvzT58QL8CaZJO0/+GVG73arPYNUS5JKuEsM0EChiQUmsIgYELjCgS
+# m4NG32SEIedHJFv+UBCF3K8Ms8qZs/XXDF0w/Kmtp0kkvcCH+xtU5Wr8mWrktxOK
+# WRRZM9MLS6B6us9BXPnvJMWQS58OFnbImO5KB8bB6+QFTZp6ZT2L/t7rBBcz5ESy
+# gjLS0bSSj7ecQnK+xfME5xIu0WjjNQHaBClOHh3ArX7BSj05eHy3CLQ4vciS7qtA
+# a9GdzKW5sg==
 # SIG # End signature block

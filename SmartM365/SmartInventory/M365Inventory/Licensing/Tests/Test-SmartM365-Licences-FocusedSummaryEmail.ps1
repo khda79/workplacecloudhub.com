@@ -50,7 +50,21 @@ function Send-SmartM365Mail {
   if (-not $AllowAttachments -or -not $SuppressAttachmentLinks -or $Attachments.Count -ne 1 -or -not (Test-Path -LiteralPath $Attachments[0])) { throw 'Recovery workbook was not attached privately.' }
   $bookSummary = @(Import-Excel -Path $Attachments[0] -WorksheetName Summary)
   $bookCandidates = @(Import-Excel -Path $Attachments[0] -WorksheetName 'Recovery candidates' -WarningAction SilentlyContinue)
-  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;AttachmentPath=$Attachments[0]}) | Out-Null
+  $bookDates = @{}
+  $package = Open-ExcelPackage -Path $Attachments[0] -ErrorAction Stop
+  try {
+    $sheet = $package.Workbook.Worksheets['Recovery candidates']
+    for ($row=2; $row -le $sheet.Dimension.End.Row; $row++) {
+      $bookDates[[string]$sheet.Cells[$row,2].Text] = [pscustomobject]@{
+        AdValue = $sheet.Cells[$row,6].Value
+        AdFormat = $sheet.Cells[$row,6].Style.Numberformat.Format
+        M365Value = $sheet.Cells[$row,7].Value
+        M365Format = $sheet.Cells[$row,7].Style.Numberformat.Format
+      }
+    }
+  }
+  finally { $package.Dispose() }
+  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;BookDates=$bookDates;AttachmentPath=$Attachments[0]}) | Out-Null
 }
 function New-SmartM365EmailBody {
   param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
@@ -199,7 +213,7 @@ $adGap = Get-LicensesAdAccountActivitySummary `
   -AdByImmutable @{'imm-a'=$adRecentRow} `
   -AdByUpn @{'a@example.invalid'=$adRecentRow;'b@example.invalid'=$adOldRow;'c@example.invalid'=$adDisabledRow;'f@example.invalid'=$adNoDateRow} `
   -DuplicateAdUpns @{'e@example.invalid'=$true} -Cutoff ([datetime]::UtcNow.Date.AddDays(-90))
-Assert-Equal $adGap.Members 6 'Section 06 AD member population'
+Assert-Equal $adGap.Members 6 'Section 07 AD member population'
 Assert-Equal $adGap.AdObserved 4 'Unique AD matches'
 Assert-Equal $adGap.AdEnabledRecent 1 'Recent AD logon'
 Assert-Equal $adGap.AdEnabledInactive 1 'Inactive AD logon'
@@ -417,10 +431,19 @@ try {
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
   Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
-  $bookU2 = @($script:SentMail[0].BookCandidates | Where-Object UserId -eq 'u2')[0]
-  Assert-Equal $bookU2.LastAdActivityDate $old 'Workbook has AD activity date'
-  Assert-Equal $bookU2.LastM365ActivityDate $old 'Workbook has M365 activity date'
-  Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object UserId -eq 'u3')[0].LastAdActivityDate 'N/D' 'Workbook shared mailbox AD date is not inferred'
+  $bookU2 = $script:SentMail[0].BookDates['u2']
+  Assert-Equal ([datetime]::FromOADate([double]$bookU2.AdValue)).ToString('yyyy-MM-dd') $old 'Workbook has AD activity date'
+  Assert-Equal ([datetime]::FromOADate([double]$bookU2.M365Value)).ToString('yyyy-MM-dd') $old 'Workbook has M365 activity date'
+  if ($script:SentMail[0].BookDates['u2'].AdValue -is [string] -or
+      $script:SentMail[0].BookDates['u2'].M365Value -is [string] -or
+      $null -eq $script:SentMail[0].BookDates['u2'].AdValue -or
+      $null -eq $script:SentMail[0].BookDates['u2'].M365Value) {
+    throw 'Workbook activity dates are stored as text or missing.'
+  }
+  Assert-Equal $script:SentMail[0].BookDates['u2'].AdFormat 'yyyy-mm-dd' 'AD date uses sortable Excel date format'
+  Assert-Equal $script:SentMail[0].BookDates['u2'].M365Format 'yyyy-mm-dd' 'M365 date uses sortable Excel date format'
+  Assert-Equal $script:SentMail[0].BookDates['u3'].AdValue $null 'Shared mailbox AD date cell is blank'
+  Assert-Equal $script:SentMail[0].BookDates['u3'].M365Value $null 'Shared mailbox M365 date cell is blank'
   Assert-Equal (Test-Path -LiteralPath $script:SentMail[0].AttachmentPath) $false 'Temporary recovery workbook removed after send'
   if ($script:SentMail[0].BodyHtml -notlike '*Multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Multiple target suites*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*' -or $script:SentMail[0].BodyHtml -notlike '*Removal candidates after archive and hold checks*') {
     throw 'Enriched KPI headers are missing from email.'
@@ -429,13 +452,13 @@ try {
       $script:SentMail[0].BodyHtml -notlike '*Intune_Devices_Inventory.csv*') {
     throw 'Intune PC recovery indicator or source freshness is missing.'
   }
-  if ($script:SentMail[0].BodyHtml -notlike '*AD accounts and activity among section 06 Members*' -or
+  if ($script:SentMail[0].BodyHtml -notlike '*AD accounts and activity among section 07 Members*' -or
       $script:SentMail[0].BodyHtml -notlike '*No AD match means no unique match in the available AD export*') {
-    throw 'AD account activity qualification is missing from section 06.'
+    throw 'AD account activity qualification is missing from section 07.'
   }
-  if ($script:SentMail[0].BodyHtml -notlike '*07 &nbsp; E3 to F3 downgrade review*' -or
+  if ($script:SentMail[0].BodyHtml -notlike '*03 &nbsp; E3 to F3 downgrade review*' -or
       $script:SentMail[0].BodyHtml -notlike '*OneDrive storage below 2 GB*' -or
-      $script:SentMail[0].BodyHtml -notlike '*last AD logon date and last M365 activity date*') {
+      $script:SentMail[0].BodyHtml -notlike '*Activity dates are sortable Excel dates*') {
     throw 'Downgrade review or workbook activity dates are not described.'
   }
   $oneDriveRows = @(Import-Csv -LiteralPath $oneDrivePath)
@@ -476,11 +499,13 @@ try {
   $body = $script:SentMail[0].BodyHtml
   if ($body.IndexOf('01 &nbsp; License capacity') -lt 0 -or
       $body.IndexOf('02 &nbsp; Recovery by license') -le $body.IndexOf('01 &nbsp; License capacity') -or
+      $body.IndexOf('03 &nbsp; E3 to F3 downgrade review') -le $body.IndexOf('02 &nbsp; Recovery by license') -or
+      $body.IndexOf('04 &nbsp; Activity and overlap') -le $body.IndexOf('03 &nbsp; E3 to F3 downgrade review') -or
       $body -notlike '*Consumed (used %)*' -or $body -notlike '*Available (free %)*') {
     throw 'License capacity order or percentages are missing.'
   }
-  if ($body.IndexOf('05 &nbsp; User mailboxes without licence F1/F3/E3/E5') -le $body.IndexOf('04 &nbsp; Licensed shared mailboxes') -or
-      $body.IndexOf('06 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5') -le $body.IndexOf('05 &nbsp; User mailboxes without licence F1/F3/E3/E5') -or
+  if ($body.IndexOf('06 &nbsp; User mailboxes without licence F1/F3/E3/E5') -le $body.IndexOf('05 &nbsp; Licensed shared mailboxes') -or
+      $body.IndexOf('07 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5') -le $body.IndexOf('06 &nbsp; User mailboxes without licence F1/F3/E3/E5') -or
       $body -notmatch '>2</strong> of 5 qualified EXO UserMailbox.*?<strong>40%</strong>' -or
        $body -notmatch '>1</strong> of 7 qualified Entra accounts.*?<strong>14.3%</strong>' -or
        $body -notmatch 'Member enabled</th>.*?<td[^>]*>0</td><td[^>]*>0</td><td[^>]*>1</td><td[^>]*>1</td><td[^>]*>0</td><td[^>]*>0</td>') {
@@ -644,14 +669,14 @@ try {
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
   $partialOnPrem = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   Assert-Equal $partialOnPrem.MailboxGap.UserMailboxes.Available $true 'EXO UserMailbox section remains available'
-  Assert-Equal $partialOnPrem.MailboxGap.NoUserMailbox.Available $false 'Partial on-premises receipt makes section 06 N/D'
+  Assert-Equal $partialOnPrem.MailboxGap.NoUserMailbox.Available $false 'Partial on-premises receipt makes section 07 N/D'
   $script:SentMail.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
-  if ($script:SentMail[0].BodyHtml -notlike '*Section 06 N/D*') { throw 'Unqualified on-premises source is not visible in the email.' }
+  if ($script:SentMail[0].BodyHtml -notlike '*Section 07 N/D*') { throw 'Unqualified on-premises source is not visible in the email.' }
   @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256='BADHASH'})} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
   $changedOnPrem = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
-  Assert-Equal $changedOnPrem.MailboxGap.NoUserMailbox.Available $false 'Changed on-premises CSV hash makes section 06 N/D'
+  Assert-Equal $changedOnPrem.MailboxGap.NoUserMailbox.Available $false 'Changed on-premises CSV hash makes section 07 N/D'
   @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremHash})} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
 
@@ -714,8 +739,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLZ9RxuN/gPcdw
-# bZ7ySDDs2TpOwVY4GJIutuMtjO0vJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNlaEOpV2NoGvh
+# MWwEuj7WbQoZygC0hyTGxf3fdZdsj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -848,31 +873,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMAZj4HlA/BJbSuKjO/rbLvZPDb401sItHUrRHTEh0IKMA0GCSqG
-# SIb3DQEBAQUABIIBgGce9s15QWHKFe2EzdU1FIBfk1zBqL/aVYrRO624Kxbi3w55
-# bxc5qiVM/beJeU+4cj3aP/DnX8O7AegumSzfQ1sjOYmJGGrtBPa8UBTstcBKe2uK
-# UWSXH14b3ozFn7xO+LoiDoJ6n2o+dzXJkQDja0ln13S/FQqPM7ptyhY1yz+/fa+j
-# wpUqmz8FFeeMKkkq9MowtmyY5QjWoaxiuNkR66+X4jrHlJF8EA+Jj4g6QZux5+OJ
-# whJbn8oO7yX37urY/G3Q905uJpoxiVcuxTGv4qYPZLOjFrJDeoE/otUpEzWKwSha
-# wzR1/ZV/MnMaXXxvilwB9/ikQ1hPA6TDZIhTNy9cxlr9Sm5CKFOOlFtfE3uuf9fi
-# EBevXqh61Fwar8Pdah6ai/53UQDr26aFS2lI1eWq35i0apZkl3CGL/bTZI5lEqfT
-# XTjwcKQYNn+JTO7JrI6CCREpWQ5GfEEpct+NK18ByMKDMvFCh0qBY5GphVwC/5cS
-# jk42//QnzgPZaZtn5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEO9k8npYSExZOG8e017JZ9E83O8WsO0zM2wYyKrwDNtMA0GCSqG
+# SIb3DQEBAQUABIIBgEa9/WnkU2Ug++o0MxLXob/jS+LoJgvWItVBiUMzOXLh+q+R
+# 0W3blbCxoxWDKZfdbkfdpWIjNPP1pZXCBteDHDQ2IP/HnSVqQOyGgWvKN7n7IdE+
+# Cr+5yFchWI1rC3CzBju5cblwifH7V8z7FoDu6Xq0kkvjeXN/GzmWykSyD6g85YjP
+# gmbDgod59ygPx921Zx9ixsLL+GyFJc7gVZVGMBHC6uUHCku4DXZ8eWQj9rG6Mkl/
+# uGeixFbZ8I5PjPvUbwaA78r3DQHlEbi3fdbqzovhrsMqkdFlar7QebCS8Zt9KQsl
+# vup+HLuPxJNdPjP29IKhnsbe2sn4eIIA2GDzrp0BdN5dSIa1RdA4B8+1NS/lcB0v
+# PJAkojuesuiMUaqIjCemWTW8/jZmCNLPuQwgLJUm0mlDrRiSbGuR/0CUpjmKeqdO
+# Y8KAmCyM9vozIu1yTk8EDNrLyYDLAHgj/oBJ97x+31+scWVCiofgZDL3mR2xkFx1
+# 4dpOqunHxBrbF12mYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDAy
-# NTlaMC8GCSqGSIb3DQEJBDEiBCBPn964xuDS3mM+u5qyJmu0w96vxs5KbQl6+j09
-# Pp7cNzANBgkqhkiG9w0BAQEFAASCAgB1EmE9czFMWmoQmW6tEXh7HwulZWa9YLxq
-# eC8U7d3uhXIV3izBZLHbebycLc69mXAN0kmslpKl/XzAn5fMnDQh2G661BcA3hQw
-# BqdbkMz330DnGJoukfaQFLi9i/XtWR6BxfavXlosweR+1rmN3hf9iLb+nwjwkf1U
-# pjEsvzr3dS/8NJH5GAUsAQkmmCmn+m6XJTBBYdTzmpQaYLdIG+AoWEkfKuvZNZCc
-# UyUisXqoh1xRGWo3RAZheS4WkhmO1dR+ayoRGEO2P1D1PXkuzDDp0mlidtcNfuFT
-# TDy6Cyovs7mit8yV4xjiS2U/B892eyhrCLq3H0708oXBvJxb7dKhddjvRiuHX0Ld
-# acoLQ38ZdeleTAey0czcqvCbSX4vYDgFBemlR66n31OBR9354o2rIjhlb467N6rP
-# z7GQCh3YKPIHG6DGSsz6WmO1YncXxsQbrmKeJKzma+/OFrKHIqBqPhCJ7h5ZrSwo
-# E3rgvb6Gur0KS1vyX57AhniC8JYN4wPLQ67uHpN1X1Lm0DI0l0r5cOOeoxYwHWnY
-# K+BWzb5v0BH6sz5mZVrOpu+P9L6p9y10xOk3uMNF3vUGgG+mA+CGyAYf2tzQUTBF
-# diXnWfZIzOqSz7d/VRN3zWu5FmOWYg2IklCGvKLsgG+rmPIH5kNZcPOvCQkbXPIn
-# 3jWAIbG18g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDE2
+# MDlaMC8GCSqGSIb3DQEJBDEiBCBfAvmQERnY4dCyaRTuwAqVQxdYt0F4Wo6FotjU
+# agq32TANBgkqhkiG9w0BAQEFAASCAgBYuNFo2su4a7eJySUP+Ns3TO+vqzYBDq7b
+# J0yymbAfqsIobNTD8o8hu9ZJV2TcrlLWrTVPLFmANyG0Ghii961DFwCSETqcOSrD
+# TfNwE3CslQq/3GB3gaYOv579sfhhpihW2c5137X/WfJBUcGl6gtZfk66C7ydnf4R
+# YrnfdAfedUm6VBzIfGWI/TXmyuF7Ail0t4TBOFeg4/hbBvfeozGuo+9KIFO+owqj
+# XSSx4bCXafwbQ31YnUiSJbAJPz1ByRCe6AGQNFCAqU3W4HZoUY/z70BqNaRgTd4x
+# FWdMhsUK0jlEpWCLWn0Q/UrYb1me4DyDQPVascHJXhRSkb4HVhQAR2Bpg3W+03r8
+# 4Sju9VyvAcoKHymut3GVQkO9RuJv974zVAY4y+UMs2oeeFKDuxyATfZCN8SFfrdE
+# sLJau9eQlmDnBixVY73IUGUpU8p7paxsBuBepxzSjefVQaXodg7YQs1ZpnACBfP2
+# lpRi1T5vqPhPtmP97QU5tGCMxc1fRjax3qA+I1tVN93Jdgt/mf5E98Q1weG4TeA0
+# D8NuIAvU4c4E4knBcbv6qZEegHlimBgsFy27ngDcfE5rJO7HAdPbwLFijfCAl+8y
+# KPLFvfyGR0P7Ur3s7va+bvK0fcrIzxIeNL1KGjBw2OnBQaRF8+e77P/7e+QXu3wf
+# 631Jf/Hluw==
 # SIG # End signature block
