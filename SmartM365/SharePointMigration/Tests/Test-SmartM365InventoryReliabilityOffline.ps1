@@ -2,7 +2,7 @@
 .SYNOPSIS
     Regression checks for inventory data fidelity, paged reads and workbook snapshots.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -43,7 +43,10 @@ function Get-PnPProperty {
     [CmdletBinding()] param($ClientObject,[string]$Property,$Connection)
     $script:PropertyCalls++
     if ($Property -eq 'Title') { if ($script:GroupFail) { throw 'Group access denied.' }; return $ClientObject.Title }
-    if ($Property -eq 'HasUniqueRoleAssignments' -and $ClientObject.Id -eq 3 -and $script:Missing) { throw 'Item does not exist.' }
+    if ($Property -eq 'HasUniqueRoleAssignments') {
+        if (($ClientObject.Id -eq 3 -and $script:Missing) -or $ClientObject.Id -eq $script:MissingId) { throw 'Item does not exist.' }
+        return ($ClientObject.Id % 2 -eq 0)
+    }
     return $ClientObject.$Property
 }
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ReliabilityTest-'+[guid]::NewGuid().ToString('N'))
@@ -99,6 +102,12 @@ public class ReliabilityItem {
 public class ReliabilityContext {
  public int Queries;
  public bool Missing;
+ public int MissingId;
+ public int FailQuery;
+ public string FailMessage="HttpClient.Timeout";
+ public int RequestLimitBytes=2097152;
+ public List<int> BatchSizes=new List<int>();
+ public List<int> ReadIds=new List<int>();
  public List<ReliabilityItem> Pending=new List<ReliabilityItem>();
  public void Load<T>(T item, params Expression<Func<T,object>>[] selectors) {
    if(selectors.Length!=1 || !selectors[0].ToString().Contains("HasUniqueRoleAssignments")) throw new Exception("Unexpected CSOM selector");
@@ -107,13 +116,18 @@ public class ReliabilityContext {
  public void ExecuteQuery() {
    Queries++;
    var items=Pending.ToArray(); Pending.Clear();
-   if(Missing) throw new Exception("Item does not exist.");
-   foreach(var item in items) item.HasUniqueRoleAssignments=item.Id%2==0;
+   BatchSizes.Add(items.Length);
+   // Simulate a large CSOM object path per item and SPO's actual message limit.
+   if(items.Length*2048>RequestLimitBytes) throw new Exception("The request message is too big. The server does not allow messages larger than 2097152 bytes.");
+   if(Queries==FailQuery) throw new Exception(FailMessage);
+   if(Missing || Array.Exists(items,item=>item.Id==MissingId)) throw new Exception("Item does not exist.");
+   foreach(var item in items) { item.HasUniqueRoleAssignments=item.Id%2==0; ReadIds.Add(item.Id); }
  }
 }
 '@
     $script:Context=[ReliabilityContext]::new()
     $script:Missing=$false
+    $script:MissingId=0; $script:LargePages=$false
     function Get-PnPContext { param($Connection) return $script:Context }
     function ConvertTo-AbsoluteSharePointUrl { param([string]$WebUrl,[string]$ServerRelativeUrl) return "https://example.test$ServerRelativeUrl" }
     function Get-SiteCollectionUrlFromWebUrl { param($WebUrl) return $WebUrl }
@@ -130,6 +144,12 @@ public class ReliabilityContext {
     function Get-PnPListItem {
         [CmdletBinding()] param($List,[int]$PageSize,[string[]]$Fields,$Connection,[scriptblock]$ScriptBlock,[int]$Id)
         if ($Id) { throw 'Item does not exist. Existence probe.' }
+        if ($script:LargePages) {
+            & $ScriptBlock $script:Items[0..1999]
+            Assert-True ($script:Exported.Count -eq 1000) 'Large first page was not exported before fetching the final page.'
+            & $ScriptBlock @($script:Items[2000])
+            return
+        }
         & $ScriptBlock $script:Items[0..1]
         Assert-True ($script:Exported.Count -eq 1) 'First page was not processed before fetching the second page.'
         & $ScriptBlock $script:Items[2..3]
@@ -143,6 +163,37 @@ public class ReliabilityContext {
     $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
     Assert-True ($inheritance.Count -eq 1 -and $inheritance[4] -and -not $inheritance.ContainsKey(3)) 'Failed inheritance reads were silently treated as inherited.'
     Assert-True ($record.Count -eq 1 -and $record[0].ItemId -eq '3' -and $record[0].ItemUrl -eq 'https://example.test/sites/a/Docs/3.txt' -and $record[0].Message -match 'Existence check failed') 'Missing item evidence lacks ID, path or existence check.'
+    Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false; $script:Missing=$false
+    $script:Items=@(foreach($id in 1..2001) {
+        $item=[ReliabilityItem]::new(); $item.Id=$id; $item.RoleAssignments=@()
+        $item.FieldValues=[Collections.Generic.Dictionary[string,object]]::new()
+        $item.FieldValues['FileRef']="/sites/a/Docs/$id.txt"; $item.FieldValues['FileLeafRef']="$id.txt"
+        $item.FieldValues['UniqueId']=[string]$id; $item.FieldValues['FSObjType']='0'; $item
+    })
+    $script:Context=[ReliabilityContext]::new()
+    foreach($item in $script:Items[0..1999]) { Add-SPOInheritanceRead -Context $script:Context -Item $item }
+    $failed=$false
+    try { $script:Context.ExecuteQuery() } catch { $failed=$_.Exception.Message -match '2097152' }
+    Assert-True $failed 'Oversized-request fixture did not reproduce the server error.'
+    $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:LargePages=$true; $PageSize=2000
+    Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 200
+    Assert-True ($script:Context.Queries -eq 21 -and ($script:Context.BatchSizes | Measure-Object -Maximum).Maximum -le 100) 'Inheritance requests exceeded the batch cap or lost the final singleton page.'
+    Assert-True (($script:Context.ReadIds -join ',') -eq ((1..2001) -join ',') -and $script:SPOPermissionPageState.Processed -eq 2001) 'Large-page inheritance dropped, reordered or duplicated items.'
+    Assert-True (($script:Exported.ItemId -join ',') -eq ((2..2000 | Where-Object { $_ % 2 -eq 0 }) -join ',') -and -not $script:ErrorCsvCreated) 'Large-page export lost unique permissions or marked a complete read as failed.'
+    $script:Context=[ReliabilityContext]::new(); $script:Context.FailQuery=8; $script:Delays.Clear()
+    $inheritance=Get-SPOPageInheritance -PageItems $script:Items -Web $web -List $list -ListUrl 'https://example.test/sites/a/Docs'
+    Assert-True ($inheritance.Count -eq 2001 -and $script:Context.Queries -eq 22 -and ($script:Context.ReadIds -join ',') -eq ((1..2001) -join ',') -and ($script:Delays -join ',') -eq '5') 'A retried middle batch lost items, duplicated successful reads or retried the whole page.'
+    $script:Context=[ReliabilityContext]::new(); $script:Context.MissingId=103; $script:MissingId=103
+    $inheritance=Get-SPOPageInheritance -PageItems $script:Items -Web $web -List $list -ListUrl 'https://example.test/sites/a/Docs'
+    $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
+    Assert-True ($inheritance.Count -eq 2000 -and -not $inheritance.ContainsKey(103) -and $inheritance.ContainsKey(2001) -and $script:Context.Queries -eq 21) 'A missing item stopped later batches or was treated as inherited.'
+    Assert-True ($record.Count -eq 1 -and $record[0].ItemId -eq '103' -and $script:ErrorCsvCreated) 'The failed batch did not retain exact missing-item evidence.'
+    Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false; $script:MissingId=0
+    $script:Context=[ReliabilityContext]::new(); $script:Context.FailQuery=2; $script:Context.FailMessage='Access denied'
+    $script:Exported.Clear()
+    Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 200
+    $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
+    Assert-True ($script:Context.Queries -eq 2 -and $script:ErrorCsvCreated -and $script:Exported.Count -eq 0 -and $record[0].Message -match 'IDs 101-200.*Access denied') 'A failed middle batch was retried, silently accepted or lacked request context.'
     $source=[IO.File]::ReadAllText($permission)
     Assert-True ($source -match 'if \(\$script:ErrorCsvCreated\)\s*\{\s*throw') 'Incomplete inventory publication guard was removed.'
 
@@ -184,18 +235,19 @@ public class ReliabilityContext {
     Write-LauncherRunResult
     $receipt=Get-Content $RunResultPath -Raw | ConvertFrom-Json
     Assert-True ($receipt.Status -eq 'FAILED' -and -not $receipt.OutputCsv -and $receipt.LogPath -eq $script:LauncherRunLogPath) 'Failed scan receipt advertises a nonexistent published inventory.'
-    'PASS: durations, group fidelity/cache, token contexts, bounded reads, streamed inheritance, missing-item evidence, stable workbook snapshots and batch receipts.'
+    'PASS: durations, group fidelity/cache, token contexts, bounded reads, size-limited streamed inheritance, missing-item evidence, stable workbook snapshots and batch receipts.'
 }
 finally {
     Get-ChildItem -LiteralPath $temp -File | Remove-Item -Force
     Remove-Item -LiteralPath $temp
 }
 
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvCiWurT22kwsl
-# VRv+hwRu8PykJRKaz2IdIgl8q2MbLKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqMlwKvN9L6tQx
+# 9NJ7yM9uXDuKY2GwlY8J14xxtgzUh6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -225,14 +277,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAzd7DlGeRKkDqWQMA69/Hh
-# M/xxEFZXLFXU54ekmXVKSjANBgkqhkiG9w0BAQEFAASCAYBsup9Vjl1fTfRNt7fL
-# M0XjHxy2dxybcECxjhRPKfq4sUAk7voBMQwLJO1YrPUxC2u6EGdlHbLYYDm/avfD
-# swt9pLl08fZ8ld8HWkTAf6gmga26Vdy6gV/zJ7jG/fy3dEmL9ZTq18TnRH2f+5kk
-# d1Ta8DMfwgjA42voHM755rC8LJPAM1yA7AsNex4zhMPk2lRDjDfeieh+EEEKnf1F
-# P2ooccCifFzcGZ22oE27uEIeL7Ox7cojjqjwwp0mnhxwCRriYF26UalsMvlQTJj8
-# piKKwFFT7pXwlprwQm8xNmUoEmLLXHNDzIUhacvgtj2asU2czemUIrJYqPxkT/5t
-# IpNcaPzr4w+tZUILYoKwH3cOiHJ8tjpWACRCbci5Dlo48LrMCcYDwl6j3Gyh8Vgb
-# cK2/pHsrAaIZFVhl0FAatWz7Og2H63aOKm6lauFHUAR+ehe4yfmqyWFBFIog5POt
-# Q0kDqhcoFXKiB7aONGrfnhODVKq7WUa+267ODNH2dfOTclE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCvRVNTHy9nHIqrAerh7Rqy
+# aPp6sql5AvLk6AatfsoKmjANBgkqhkiG9w0BAQEFAASCAYCZlDxwbI89G+nGTg7H
+# Lcnup49g7iD+VnqnJFaiFz54Ymw3nitSg8LlYMLGatvs4woDnPsPyXjXGZ2V5JbV
+# S87BbbeEoejlO1rrV3gLe/1FvpkJPZRbS8sHU0lFc97dKBkBzjVjbRu8Luv/ny1v
+# EQBu6KFj+Gxy2RQ81HIYTObhQUYbNe0U0oY254Hwj8oDCFu91JINk7cehXLKDGKu
+# vx6PIn3ZbwCrvqzZctPtLso2+zBpTaRyiBEVQg8pqe0RRI53eg84tj0fkDGgOqIN
+# m9AsBqWheNQaIOb9Z26vrdLlVjactGzdjf4+SJyGdOyZYFqUtcebaPGtaEUHQRE5
+# 6IPS1TFG/F+aGsgMt02Ba8SfTKUYsGhgcDBhDgG8d+ACXbq2Z52G8OidL62JTqoV
+# gha0gCpLTsgG4jBOhSWOru/fBDw1nRtuzY0nsPYhi5OLDVFUwpEHNjcITh4vrjSb
+# 0bKc45qPr5ZPnNqgGKeewMSWxE9YsNILfZ1okfg8b+ezm9Q=
 # SIG # End signature block

@@ -1017,10 +1017,11 @@ pwsh -NoProfile -File .\Tests\Test-SmartM365BatchGuiOffline.ps1
 - SPO permission scans retain the actual associated member, owner and visitor
   group titles. A failed group read records an inventory error; a genuinely
   absent associated group remains empty. Names are cached per web for the run.
-- Item inheritance is loaded in one CSOM query per page. Pages are processed
-  immediately; role assignments are read only for items with unique permissions.
-  A missing-item page falls back to individual reads to identify the affected
-  IDs. Error CSVs include `ItemId` and `ItemUrl`, with an existence check for
+- Item inheritance is loaded in CSOM requests of at most 100 items within each
+  enumeration page, avoiding oversized requests with the default 2,000-item pages.
+  Pages are processed immediately; role assignments are read only for items with
+  unique permissions. A missing-item batch falls back to individual reads to
+  identify the affected IDs. Error CSVs include `ItemId` and `ItemUrl`, with an existence check for
   missing-item errors. Any recorded inventory error still prevents final CSV
   publication and manifest creation.
 - Transient web, subsite and library discovery reads use at most three attempts,

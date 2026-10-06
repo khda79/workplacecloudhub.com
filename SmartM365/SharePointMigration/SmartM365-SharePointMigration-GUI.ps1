@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.60
+    1.0.61
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.60'
+$script:AppVersion = '1.0.61'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -1261,7 +1261,6 @@ function New-FarmDiagnosticsWindow {
             </StackPanel>
           </Border>
           <StackPanel Grid.Row="4" Grid.ColumnSpan="3">
-          <Button x:Name="btnFarmWindow" Content="Source farm diagnostics…" Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
           <Border x:Name="cardTransient" Style="{StaticResource StepCard}" Visibility="Collapsed">
             <StackPanel>
               <TextBlock Text="SHAREGATE 401 RETRY RESULTS" Style="{StaticResource SectionLabel}"/>
@@ -1351,6 +1350,7 @@ function New-FarmDiagnosticsWindow {
               <TextBox x:Name="txtDiagRaw" Height="105" Margin="0,7,0,0" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
             </StackPanel>
           </Border>
+          <Button x:Name="btnFarmWindow" Content="Source farm diagnostics…" Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Margin="0,2,0,0"/>
           </StackPanel>
         </Grid>
 
@@ -4024,8 +4024,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTvFMNbWSh8NMY
-# Avfl/lIrXHyaIjhGjX94ot2GwhDe4qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASriV37COeL9m1
+# a8fS89y5YBi/vICTFiBXrwmtcDQUtqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4055,14 +4055,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDErF+rcIe7jBwdhTcegF4S
-# u83Vikx9Y8cQWSeIFVLlxDANBgkqhkiG9w0BAQEFAASCAYCxdCCHv5mo4BveOK+q
-# samtKPy1KQg+aD/u0aLhHMYdu3gaRL0Q3IrU5xRlnj5Si+gf3Cl777ziF2LJMEXy
-# 80joAtfJqZosygyyhj89mLq2qU3XFyIpZOkaxcphzFT7WcNpbvZEEme2u08AVXq6
-# pAy2ZfqN/jIN+2VB2fAO2mZTrFbL1E9/1RQoiYl4nXH9YyQdjEoMtIG7v5g0Retn
-# PjHPHnByt3lJpkYcPLbGqSKBeziAYdugxvIL8GrEs4oXuaW42Pi2armmitWXn1k0
-# YKQDLXYfbW8jZDJ6g3tGvxTN3jR9Y8kKU88Vr7EK6uSnHWuZx5WvfAn+HNScbKfP
-# bISbrhEPFEXYq1ZM92h6u4gvLoQZKvAs70rmbY8C3Xx3NKW8bkuxeRs6izLIPaLm
-# YM0fR4yG6kEyMBc3aSnK2qLOqOO7kJ0fdqljU9/Az5ti+0oOxuudejqoHXGyMmu7
-# hpsOAIkMTI7gFCLcBjn/sYZQydAhdv/pNnYasJBxK6klpdk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDc+tH+LCWMsU0OiFZFgHkb
+# D1PGpVMyISvqsr4FDqdQaDANBgkqhkiG9w0BAQEFAASCAYBLVYVYsQzvdwoIRR9A
+# fNlhUcxRlzPTyLTSBHq4zQruj9STn+WviTvIa8QRodhcJei3pM5ueNlK1DqTWlY7
+# SKBAcjnyhSazgidHXFD8elRkbR2gH1R0i2BNYAqeZDQY+1Spr+XA9z5DIK1+QN2M
+# RHahFhDFjMM36MVMGPoMAR9tFueutFyLxNL41ESE6vdryq7t8xqin+0cTTWFr/s9
+# SpL7oDowCJ9+hFOdaSV1T5BMphbM/eukXELq9Ky0EDwN77teGrfk0SUlGdhl99Hb
+# DYlaFeYUB479SUhdeFi9W2Tx80xt/+bV7KWBtSQlAGUqwfkkaRUo19URseEXK5/z
+# UpFGJIYdkuhmAmaCORlnfQMs4Qf4vuGtBY36cyuHLSnFqZtEyssvfxvqNwXmNiZz
+# xrqkawiMqdNhslsk7OEICjqtxs9UfjlZgK55P+kXegtjMybwdLYrWv1xbVPbN/Ko
+# I9fcJugOVRwzVbHhfefPkoHAlExpoM1gaLXEtt8E3ziN+08=
 # SIG # End signature block

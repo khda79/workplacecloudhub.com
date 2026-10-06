@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.4
+    1.1.5
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -850,19 +850,30 @@ function Get-SPOPageInheritance {
     param($PageItems, $Web, $List, [string]$ListUrl)
     $context = Get-PnPContext -Connection $script:SPOPermissionConnection
     $result = @{}
-    try {
-        Invoke-SPORead -Label ("inheritance page in {0}" -f $List.Title) -Operation {
-            foreach ($item in $PageItems) { Add-SPOInheritanceRead -Context $context -Item $item }
-            $context.ExecuteQuery()
-        } | Out-Null
-        foreach ($item in $PageItems) { $result[[int]$item.Id] = [bool]$item.HasUniqueRoleAssignments }
-    }
-    catch {
-        if ($_.Exception.Message -notmatch '(?i)item does not exist|does not exist.*item') { throw }
-        # Identify the individual failed item without treating a missing read as inherited.
-        foreach ($item in $PageItems) {
-            try { $result[[int]$item.Id] = [bool](Get-PnPProperty -ClientObject $item -Property HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection) }
-            catch { Write-SPOItemError -Item $item -Web $Web -List $List -ListUrl $ListUrl -Message $_.Exception.Message }
+    # A 2,000-item page can exceed SPO's 2 MiB CSOM request limit. Keep the
+    # enumeration page size, but load inheritance in smaller independent requests.
+    $items = @($PageItems)
+    $batchSize = 100
+    for ($offset = 0; $offset -lt $items.Count; $offset += $batchSize) {
+        $last = [Math]::Min($offset + $batchSize - 1, $items.Count - 1)
+        $batch = @($items[$offset..$last])
+        $label = "inheritance batch in {0} ({1} items; IDs {2}-{3})" -f $List.Title, $batch.Count, $batch[0].Id, $batch[-1].Id
+        try {
+            Invoke-SPORead -Label $label -Operation {
+                foreach ($item in $batch) { Add-SPOInheritanceRead -Context $context -Item $item }
+                $context.ExecuteQuery()
+            } | Out-Null
+            foreach ($item in $batch) { $result[[int]$item.Id] = [bool]$item.HasUniqueRoleAssignments }
+        }
+        catch {
+            if ($_.Exception.Message -notmatch '(?i)item does not exist|does not exist.*item') {
+                throw ("Failed {0}: {1}" -f $label, $_.Exception.Message)
+            }
+            # Isolate missing reads in this batch; continue collecting later batches.
+            foreach ($item in $batch) {
+                try { $result[[int]$item.Id] = [bool](Get-PnPProperty -ClientObject $item -Property HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection) }
+                catch { Write-SPOItemError -Item $item -Web $Web -List $List -ListUrl $ListUrl -Message $_.Exception.Message }
+            }
         }
     }
     return $result
@@ -1217,11 +1228,12 @@ finally {
     Complete-SmartM365MigrationConsoleLifecycle -Context $script:ConsoleLifecycleContext -Failure $script:ConsoleLifecycleFailure -Status $script:ConsoleLifecycleStatus
 }
 
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf4CChufWu4Smg
-# P3Js3dCbN/WBhUkK24ZYTMksgqEIkqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnSnH4NF1vhMVt
+# HDb4zyzoCG7c6k3bYwyGNndrfnp0U6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1251,14 +1263,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCVLFcQyRiVcrKJrluXT0uH
-# 77+Au8AwCDlTGX2GhtLNJDANBgkqhkiG9w0BAQEFAASCAYA2Q6Ik3jfBKXG5Pfph
-# 4UZ9QqIKH94/WXrI/OHHhacACIrvX3Dvni2foPtpFaokJooioX5kQYXpJrDqeX4s
-# vW3hTjFHcwCE8K8lmm59uy9fjbCrSdsuiLQFL6AtH5oQvWW5D08r84nTtav1Rnqu
-# u4xS0SwXsWRW8oT3AoY40XXWpEAHa1j69h7apF7r6+g8n+bKxn+KDjCRMkaOL63x
-# uDzC+EVLr4bK8U/VAKTfsanxfPklKNTHQODGx6ftFeIV28tPgCfW4tRQxSHmwN12
-# XKOnuK/6C7wHfczhBcqKjn+Ouc94ZIc/CJWuj1IyxBMSfK/NRii2ogbBov5VAleN
-# 0jRZmcOC5+HStcAJDB8/m+cfQNcLf8fs8+i/hlqQ0HOSEb7ABfObrZiLOarAKvlI
-# VdHqrFVvA8KNBdfTxyjPFpnIzjVqIuIRwXmZ1eNVoZIOguyC0FTg9InsyotxNT4/
-# bcNVlQS2QJ+sJFyBaSI2t33qKCvexl2gtEhkE+7rx58fdvc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAr0ltXNXDkPfKcXG6mygvS
+# KspO7lRCnS2yOIC6AykdCzANBgkqhkiG9w0BAQEFAASCAYBvVGFyKFMTWxITjbtz
+# zxPeGVLgYOStzcJWzNEOooxpHlU7SptrkQrUXYKb8B5HH4j723fY2hIRLqXNo3rP
+# Ipoixfz6Fi/mUPnM1VgsE1XsWuAG26efMRVxo/pBEhFkhWx47Y55bU4um0s+vDHl
+# k4sFS/cxrez32BCH2Ea5RdEvUhs8kyFpvAcqGPu5Nx11u0zKS6OaN/qwzuTHO382
+# /bxR3cG8EQY3bJsgYHGdcG9a3TlwhagEtVpEt4I70cY1ju6UBaRRhtWRdg+rzRGM
+# 8z5MKfP8GeHinB7xj0P/YQupC6hm8T4uls+LT1uNi7zZZWRNW5g4BunYudS7xTM4
+# ISNJBXmNSebjce8Z1Yj35Euj8+obmDlF0EgBj4JCfTuvB7JaeYDvsNxL0VELMGfr
+# SqzMqjFQsTf9aGz0g23kAdjIPNrbey2CbZEsxjYx8RJMCaqbNQcIXXpU3bHl0w6x
+# EgMfjwOX91TC3rH5ceDTQbiGGroZWYipWTKsXjijd8Vt/Dg=
 # SIG # End signature block
