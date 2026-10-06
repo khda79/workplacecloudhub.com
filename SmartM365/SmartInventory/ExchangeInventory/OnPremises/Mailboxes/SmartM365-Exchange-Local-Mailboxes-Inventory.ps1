@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.57
+1.58
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.57
+Version: 1.58
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -126,7 +126,8 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath)
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -255,7 +256,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.57"
+$ScriptVersion = "1.58"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1141,6 +1142,7 @@ $script:MailFrom = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name '
 $script:MailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue ''
 $script:MailErrorTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ''
 $script:MailCc = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ''
+$script:ShowMailLinks = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ShowMailLinks' -DefaultValue $false)
 
 function Send-SmartM365OptionalEmailHtmlReport {
     [CmdletBinding()]
@@ -1378,6 +1380,9 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [object[]]$RemoteMailboxDataQualityWarnings = @(),
         [object[]]$LocalMailboxCollectionIssues = @(),
         [string]$CollectionIssuesCsvPath = '',
+        [AllowNull()]$ProxyEvidence,
+
+        [bool]$ShowMailLinks = $false,
 
         [Parameter(Mandatory = $true)]
         [string]$Title
@@ -1403,7 +1408,7 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         )
 
         $safeText = ConvertTo-SmartM365EmailHtmlText $Text
-        if ([string]::IsNullOrWhiteSpace($Url)) { return $safeText }
+        if (-not $ShowMailLinks -or [string]::IsNullOrWhiteSpace($Url)) { return $safeText }
         $safeUrl = ConvertTo-SmartM365EmailHtmlText $Url
         return ('<a href="{0}" style="color:#075985;text-decoration:underline;">{1}</a>' -f $safeUrl, $safeText)
     }
@@ -1567,12 +1572,20 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         $sections += [pscustomobject]@{ Title = 'Exchange object data quality warnings - Top 100'; Html = $warningsTableHtml }
     }
 
+    if ($null -ne $ProxyEvidence) {
+        if (Get-Command New-SmartM365ProxyMailSections -ErrorAction SilentlyContinue) {
+            $sections += @(New-SmartM365ProxyMailSections -Evidence $ProxyEvidence -ShowMailLinks:$ShowMailLinks)
+        }
+        else {
+            $sections += [pscustomobject]@{ Title = 'Proxy address audit'; Html = '<p>ProxyAddresses report data is unavailable.</p>' }
+        }
+    }
     $sections += [pscustomobject]@{ Title = 'Files'; Html = $filesTableHtml }
 
     return New-SmartM365EmailBody `
         -Title 'Mailbox inventory summary' `
         -Category 'SmartM365 Exchange OnPrem' `
-        -Severity 'Success' `
+        -Severity $(if ($ProxyEvidence -and (-not $ProxyEvidence.Available -or @($ProxyEvidence.Summary | Where-Object { $_.Summary -eq 'With expected address missing' -and [int]$_.Count -gt 0 }).Count -gt 0)) { 'Warning' } else { 'Success' }) `
         -Tenant $Tenant `
         -Message 'Exchange on-premises mailbox inventory summary generated from the latest SmartM365 CSV outputs.' `
         -SummaryRows $summaryRows `
@@ -1683,7 +1696,17 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $remoteMailboxDataQualityWarnings = @($Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings)
     try {
         $issueCsvPath = Join-Path $(if ($latestCsvFolder) { $latestCsvFolder } else { $localMailboxFolder }) 'Exchange_OnPrem_MailboxCollectionIssues.csv'
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -Title ($TaskName + ' - Mailbox report')
+        $proxyEvidence = $null
+        try {
+            Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.ExchangeProxyMail.psm1') -Force -ErrorAction Stop
+            $proxyEvidence = Get-SmartM365ProxyMailEvidence -LatestCsvFolderPath $latestCsvFolder -TenantKey $global:SmartM365TenantKey
+            if (-not $proxyEvidence.Available) { WriteLog -Message ("ProxyAddresses mail evidence unavailable: {0}" -f $proxyEvidence.Reason) -Level 'WARNING' }
+        }
+        catch {
+            $proxyEvidence = [pscustomobject]@{ Available = $false; Reason = $_.Exception.Message; Summary = @(); Detail = @() }
+            WriteLog -Message ("ProxyAddresses mail evidence unavailable: {0}" -f $proxyEvidence.Reason) -Level 'WARNING'
+        }
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -ProxyEvidence $proxyEvidence -ShowMailLinks:$script:ShowMailLinks -Title ($TaskName + ' - Mailbox report')
         $mailMarkerPath = Join-Path $reportOutputPath 'SmartM365-ExchangeLocalMailboxSummary.sent'
         Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $mailMarkerPath -SendAction {
             Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
@@ -3549,8 +3572,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9tKRVXb60yk+z
-# J5nLBmMX/h6UwpbzSdqx/5+HqSzzaqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVB2llrjVCUS6U
+# LlOQnD9Gs/ZFSDVgv+4ZGIxyVqYGg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3683,31 +3706,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEzsTdTRDowMfzPnt5iAanqF+6shhrUYielexhHBrp3UMA0GCSqG
-# SIb3DQEBAQUABIIBgKDxIdaIOKw1FtEuCmiQQlNDLW//W96tbvp97JqzmiGcwc3C
-# Xlu3IITFL/rnG95uJJfs4qeKV9YvtoKvLuxDw3vHFu6axSOCMuWbSzCvEfgVJC0X
-# QHYf2QH9vAIwmUjILjqq99/u15IiOIlAchjKLFLUo6WQ4ndSfohF31AVtt9RmZUr
-# oLY0JxnQ9Jans+qr+fdJ5eQuw0Q9WdPZgu99O9PMQJGNVMw0EtMe0MKP1JS1Zx8B
-# 3fHsfwcRpkuaq+z3UlF4mAvkXiGqSgw0quvX3xdS5O3m9hdhJ5t8Vp4Yg0XlZBTy
-# fqv3a0DJOiVPTlsalZiTBXtT07w/vz1Fzhfs7apTQLi+OENuYecF2loi/rtZP2+p
-# e50fd2kkCSRFTsTOEca9ZUuqW7CjZat6jN4t27C/CtE4IAwQAWd2smoiJvBT2eoe
-# wA/xnU3cgQiT3oJzpPs8ZpFZYnuU40cycCEpswh6eap/Wkvp9mvzDiCCwiM34JBJ
-# KFizbywHCoOzt0f9u6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFx9j4Uf0Q5RfsW6areQJk9FOI8AX6u1HAsEb4mN5QcOMA0GCSqG
+# SIb3DQEBAQUABIIBgJgRt85LOXPeeo47L4Hl2XnVJwz8qB2zqfQTvTbdNH1AV1Ly
+# z+BVLePIavhzDYSGOCL3EH/tUGqKaAKGaQ80HVTqCbH+v3yS+4AJbE/EIMEKjHhj
+# grRmiNgG8Ra3j3cZ6PS3z+IIdKUTbHvfI4UAK5SWtxttE4l7g8fHMkp8l5fYmtPh
+# PRWzPpIhTCZOkCoqbaFtaeeMnfe0iOTjiiQeUzCYJloOG0aCRl8qxfYtc7I/lYST
+# 2gAeK2787QsE1MB+mhL9qXhTjvKEp8t9+mTmjayITHyFzSxEmYN8xxL7e1Tu85pd
+# +f0KIgbiRMmvnfXI+5czu5JqTmO0f42/V6I0goIWrAU3LIdZ/mlcwfAXvVLxaKZw
+# 6iYgxn+qab7fKAfekK6E5Nxf/pMRxy7ijno6gfnAr7KJYt24wJijZTUoYPLYorev
+# 5dAAWRQhvEFG1ls2GPiNCqfpoDZhNa/u0FFk/Pnx/gCU9hljxFDM3+oK6KrZzYtC
+# nCVNReeASPanhw4F6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxMzAz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCD6983RlTLKuV+lBKl/UMvC4lXgPiVUoyiPIMC3
-# YatHtjANBgkqhkiG9w0BAQEFAASCAgBfi+kXWIU0uRVe/M5QA/e4qZBzPrST9Rrh
-# uNbmCchR1RhSovbaVFXtLPZkiJoAoWxthJKGGvSkdLpZwC8UsDYGTgsiditdOmtI
-# z6v0iv3Phcx0BejNbphBqGE15bjXv57qK5U+yW4Mw4vB1+xAxseMS3O6ZvapuSR9
-# nrgwCrSZvlE/Qk3G4lurbzoG511liHZo4SMfjEdKyF2TM5yE1i4BGjm3dU+WDO1p
-# r49papxpYSKAUT9Pd8ycaai+5Mi8YeNSAIibqOoCVuvzeTOoE35b0BPQ6npJbF+m
-# 6SDP17KFpU8nSfYZArO+ORzluqtPyvijgkK3EWBu16xkqqiKYkJORVHAbZKvgE5k
-# R/EUG5zIs2CK67LF+M859tPrk7ngXSA+YAoz9r9q7pv7PYcUedgYFD3uUCBoQhAT
-# u2mD8B9HPlP4WRw/FldcH1qdSSxUSfSEBW2CPqIwrR8vMzlrHYLIV4V/FFOS9ui1
-# lYAuNCNXtvcbvRTYn9OOM0zJ899HQHTzMEnjrTaBS4vpWY0b9tgED+We7PHuM+U3
-# oo5CAjAzVLTtVkYKBI4GmvMfItRAzJLBIChz+dqo7uzVmM2VR8UCAT227BkFumaf
-# tJrZXFhrwskNe9Vm6L8VXW165P02ZfQ/2oaTJRh7cdY0Qh8fusAh/AUoHFtLjMvR
-# utg91i81Ig==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTIz
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDpj+MQM2PrD8Y96ypx0ZuxrZPZWCGcN7RGIz4C
+# lEEU3TANBgkqhkiG9w0BAQEFAASCAgBcCSksTJf8hlC2FJ4ntc23EHWXwEs/5oFH
+# EB9OVmnEVeUsV/grarIUmO1p6QIgLZVaAUCn8WrvY02zSQVvZMGFFwMKOXYY9uUz
+# tkyTIP8GRPynAXYg9av2/tJpL/XUWybAUnWiz/NLALEEAv4cb2YI9ry21DgThUtR
+# D+k1wS2DrLNw2Ej3zxlIpzV0ESZMpJGS6DhrPmoBjHxXHjdmMCqpzUNtfPRIPxPe
+# sKjaeOlGHC3ZxUcs4Rm5OAsmDNfwWrGQDLnfKzyvim7hWhgC8GTbSsvm+W0xbd/u
+# DOkkns7HswFnrs0aVECRwsa8aRm6pjsIwcqmaSWz1SR4t7cVHukJfI3/8wII7lmN
+# 8luOItxoJ/QzXD7s0VV3uCR6iVd/gTU+ttNoMyv98G+QZ3gBPTznw0PSTZBAyNK0
+# Zbb2oF+FKkiWD3Niho7eupc4HCyHbw0QJro6TN8EgbUuNbXCFBW9geq6oUyf6awj
+# CjMbJUU+FdxuKWE3xrvSYmRoJ6Nlf7vTLlBVgxZhjRMcOO68xVKmQgnVRDUWLzgn
+# dnGj3cf1RWaI7VCUeUiBvAddpuIZt/ahBipzZR7j6/zorVZ4GsJH4bdCQJEFgQHB
+# 712OORUtiIqtdeuUVF1kSKh2NOC3Js7jTp/s/IR826+vmdBdNuSPzNmpn5KFTZLF
+# d1/yOPyAZg==
 # SIG # End signature block

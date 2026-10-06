@@ -237,7 +237,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:30"
+          "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
       },
@@ -559,7 +559,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "02:30"
+          "00:00"
         ],
         "MissedRunPolicy": "RunOnce"
       },

@@ -13,6 +13,8 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 - Version 1.40 ajoute `InventorySchemaVersion`, conserve les propriétés de readiness de la v1.39 et expose l’état de collecte des gros éléments.
 - La collecte des gros éléments est désactivée par défaut car elle est coûteuse. Utiliser `-CollectLargeItemStatistics` pour exécuter une estimation `Search-Mailbox` à 35 Mo et alimenter `LargeItemCount-Over-35MB`, `LargeItemCollectionStatus` et `LargeItemThresholdMB`.
 - The existing `EmailAddresses` column remains unchanged for compatibility; the complete prefixed collection, including X500 values, is exported in `EmailAddressesAll`.
+- The once-per-day mailbox summary email includes the ProxyAddresses audit from its same-day completed source receipt and matching `DATA-LAST` check/summary CSVs. It includes the proxy metrics, missing-address and duplicate-alias previews, and output paths. When current evidence is unavailable, the email labels the proxy section unavailable without treating an older CSV as today's audit. The collectors remain separate.
+- `ShowMailLinks` in the script-local JSON configuration controls clickable SharePoint and other file links in the combined email. It defaults to `false`; file paths remain visible as plain text. Existing local JSON files receive the missing key from the template on the next run without replacing their other values. Set it to `true` only when recipients should receive clickable links.
 
 ## Launchers
 

@@ -18,6 +18,7 @@
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
+  "ShowMailLinks": false,
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",

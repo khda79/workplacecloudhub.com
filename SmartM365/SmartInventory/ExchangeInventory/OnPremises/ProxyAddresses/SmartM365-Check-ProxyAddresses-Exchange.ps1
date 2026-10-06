@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.27
+1.28
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -600,7 +600,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -614,7 +614,7 @@ $ScriptVersion = "1.27"
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
         Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.50' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
-        Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit}
+        Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit;AddMissingAddress=[bool]$AddMissingAddress}
         Start-Transcript -Path $global:logTranscriptFile -Append
         WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
         $OutputPath = $InitializeOutputPath
@@ -1392,6 +1392,27 @@ $ScriptVersion = "1.27"
         $publishResults += [pscustomobject]@{ SharePointUploads = @($workbookSharePointUploads) }
     }
 
+    $mailLinkRows = @($publishResults | ForEach-Object { $_.SharePointUploads } |
+        Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) } |
+        ForEach-Object {
+            [pscustomobject]@{
+                TenantKey = [string]$global:SmartM365TenantKey
+                FileName = if ($_.FileName) { [string]$_.FileName } else { Split-Path -Path ([string]$_.LocalFilePath) -Leaf }
+                SharePointPath = [string]$_.SharePointPath
+                WebUrl = [string]$_.WebUrl
+            }
+        } | Sort-Object FileName, WebUrl -Unique)
+    if ($mailLinkRows.Count -gt 0) {
+        $mailLinksTimestamped = Join-Path $OutputPath ("Exchange_OnPrem_ProxyAddresses_MailLinks_{0}.csv" -f $timestamp)
+        $mailLinksLatest = if ($LatestCsvFolderPath) { Join-Path $LatestCsvFolderPath 'Exchange_OnPrem_ProxyAddresses_MailLinks.csv' } else { $null }
+        if (Test-SmartM365MaxItemsMode) {
+            $mailLinksTimestamped = Add-SmartM365MaxItemsSuffixToCsvPath -Path $mailLinksTimestamped
+            if ($mailLinksLatest) { $mailLinksLatest = Add-SmartM365MaxItemsSuffixToCsvPath -Path $mailLinksLatest }
+        }
+        $null = Publish-SmartM365Csv -Data $mailLinkRows -TimestampedPath $mailLinksTimestamped -LatestPath $mailLinksLatest
+        WriteLog -Message ("ProxyAddresses SharePoint link CSV published: {0}" -f $mailLinksLatest)
+    }
+
     Write-Host "`n===== Summary ====="
     foreach ($item in $summary) {
         switch ($item.Summary) {
@@ -1406,205 +1427,7 @@ $ScriptVersion = "1.27"
     Write-Host "Summary: $outSummary"
     Write-Host "Excel: $outWorkbook"
 
-# ===========================
-# === Email notification ====
-# ===========================
-try {
-    function Encode([string]$s) { return (ConvertTo-SmartM365EmailHtmlText $s) }
-
-    $MailTo = @($To) -split '[;,]\s*' | Where-Object { $_ -and $_.Trim() -ne '' }
-    $MailCc = @($Cc) -split '[;,]\s*' | Where-Object { $_ -and $_.Trim() -ne '' }
-
-    $MailFrom    = $From
-    $MailSubject = $Subject
-
-    # Attach only the consolidated workbook when it is small enough for mail transport.
-    # CSV files and the workbook always remain available through the body paths/SharePoint links.
-    $attachments = @()
-    $workbookAttachmentNote = $null
-    if (Test-Path -LiteralPath $outWorkbook -PathType Leaf) {
-        $workbookItem = Get-Item -LiteralPath $outWorkbook -ErrorAction SilentlyContinue
-        if ($workbookItem) {
-            $workbookSizeMB = [Math]::Round(($workbookItem.Length / 1MB), 2)
-            if ($MaxMailAttachmentMB -le 0) {
-                $workbookAttachmentNote = "Excel workbook attachment disabled by MaxMailAttachmentMB=0. Workbook size: $workbookSizeMB MB."
-                WriteLog -Message $workbookAttachmentNote -Level 'WARNING'
-            }
-            elseif ($workbookItem.Length -le ($MaxMailAttachmentMB * 1MB)) {
-                $attachments += $outWorkbook
-            }
-            else {
-                $workbookAttachmentNote = "Excel workbook not attached because size $workbookSizeMB MB exceeds MaxMailAttachmentMB=$MaxMailAttachmentMB MB. Use the body path or SharePoint link instead."
-                WriteLog -Message $workbookAttachmentNote -Level 'WARNING'
-            }
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
-        Write-Host "Email skipped: incomplete email parameters (From/To)."
-    }
-    else {
-        $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
-        $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
-        $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
-        $plannedAddressAdditionCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Planned address additions if Write is enabled' } | Select-Object -First 1).Count)
-        $localMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'On-premises mailboxes processed' } | Select-Object -First 1).Count)
-        $remoteMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes processed' } | Select-Object -First 1).Count)
-        $noAliasCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no Alias' } | Select-Object -First 1).Count)
-        $noExpectedAddressCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no resolvable expected address' } | Select-Object -First 1).Count)
-        $remoteRoutingAddressCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress used' } | Select-Object -First 1).Count)
-        $remoteAliasFallbackCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes using Alias fallback' } | Select-Object -First 1).Count)
-        $remoteRoutingSuffixMismatchCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress suffix mismatches' } | Select-Object -First 1).Count)
-        $remoteAliasFallbackMissingBlockedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote Alias fallback missing addresses blocked' } | Select-Object -First 1).Count)
-        $remoteMailboxLookupMissCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteMailbox lookup misses' } | Select-Object -First 1).Count)
-        $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
-        $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
-        $policySkippedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Additions skipped by email policy' } | Select-Object -First 1).Count)
-        $duplicateAliasGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate alias groups' } | Select-Object -First 1).Count)
-        $duplicateAliasRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing duplicate alias' } | Select-Object -First 1).Count)
-        $duplicateExpectedAddressGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate expected address groups' } | Select-Object -First 1).Count)
-        $duplicateExpectedRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing expected address' } | Select-Object -First 1).Count)
-        $duplicateExpectedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked by duplicate' } | Select-Object -First 1).Count)
-        $addressAlreadyAssignedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Expected addresses assigned to another recipient' } | Select-Object -First 1).Count)
-        $addressAlreadyAssignedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked because already assigned' } | Select-Object -First 1).Count)
-        $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
-
-        $summaryRowsForEmail = @(
-            [pscustomobject]@{ Label = 'Total recipients processed'; Value = $totalCount }
-            [pscustomobject]@{ Label = 'On-premises mailboxes'; Value = $localMailboxCountForMail }
-            [pscustomobject]@{ Label = 'Remote mailboxes'; Value = $remoteMailboxCountForMail }
-            [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
-            [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
-            [pscustomobject]@{ Label = 'Planned address additions if Write is enabled'; Value = $plannedAddressAdditionCountForMail }
-            [pscustomobject]@{ Label = 'With no Alias'; Value = $noAliasCountForMail }
-            [pscustomobject]@{ Label = 'With no resolvable expected address'; Value = $noExpectedAddressCountForMail }
-            [pscustomobject]@{ Label = 'RemoteRoutingAddress used'; Value = $remoteRoutingAddressCountForMail }
-            [pscustomobject]@{ Label = 'Remote mailboxes using Alias fallback'; Value = $remoteAliasFallbackCountForMail }
-            [pscustomobject]@{ Label = 'RemoteRoutingAddress suffix mismatches'; Value = $remoteRoutingSuffixMismatchCountForMail }
-            [pscustomobject]@{ Label = 'Remote Alias fallback missing addresses blocked'; Value = $remoteAliasFallbackMissingBlockedCountForMail }
-            [pscustomobject]@{ Label = 'RemoteMailbox lookup misses'; Value = $remoteMailboxLookupMissCountForMail }
-            [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
-            [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
-            [pscustomobject]@{ Label = 'Duplicate alias groups'; Value = $duplicateAliasGroupCountForMail }
-            [pscustomobject]@{ Label = 'Recipients sharing duplicate alias'; Value = $duplicateAliasRecipientCountForMail }
-            [pscustomobject]@{ Label = 'Duplicate expected address groups'; Value = $duplicateExpectedAddressGroupCountForMail }
-            [pscustomobject]@{ Label = 'Recipients sharing expected address'; Value = $duplicateExpectedRecipientCountForMail }
-            [pscustomobject]@{ Label = 'Missing addresses blocked by duplicate'; Value = $duplicateExpectedMissingCountForMail }
-            [pscustomobject]@{ Label = 'Expected addresses assigned elsewhere'; Value = $addressAlreadyAssignedCountForMail }
-            [pscustomobject]@{ Label = 'Missing addresses blocked because assigned'; Value = $addressAlreadyAssignedMissingCountForMail }
-            [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
-        )
-
-        $pathRows = @(
-            [pscustomobject]@{ Label = 'Detail CSV'; Path = $outDetail }
-            [pscustomobject]@{ Label = 'Summary CSV'; Path = $outSummary }
-            [pscustomobject]@{ Label = 'Excel workbook'; Path = $outWorkbook }
-        )
-        if (Test-Path $outAdded) { $pathRows += [pscustomobject]@{ Label = 'Added CSV'; Path = $outAdded } }
-
-        $scopeHtml = if ($AllOrganizationalUnit) { 'ALL (entire forest)' } else { ($OrganizationalUnit | ForEach-Object { Encode $_ }) -join '<br/>' }
-        $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
-        $scopeSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Mode</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $modeLabel)</td></tr>
-  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Expected suffix</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $ExpectedSuffix)</td></tr>
-  <tr><td style="width:180px;background:#f8fafc;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Scope</td><td style="padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;">$scopeHtml</td></tr>
-</table>
-"@
-
-        $sections = @([pscustomobject]@{ Title = 'Scope'; Html = $scopeSectionHtml })
-        if (-not [string]::IsNullOrWhiteSpace($workbookAttachmentNote)) {
-            $attachmentSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #fde68a;background:#fffbeb;">
-  <tr><td style="padding:12px 14px;font-size:13px;color:#92400e;word-break:break-word;">$(Encode $workbookAttachmentNote)</td></tr>
-</table>
-"@
-            $sections += [pscustomobject]@{ Title = 'Email attachment notice'; Html = $attachmentSectionHtml }
-        }
-
-        $duplicateAliasPreviewRows = @($duplicateAliasRows | Sort-Object @{Expression='DuplicateAliasCount';Descending=$true}, Alias, DisplayName | Select-Object -First 50)
-        if ($duplicateAliasPreviewRows.Count -gt 0) {
-            $duplicateAliasRowsHtml = foreach ($row in $duplicateAliasPreviewRows) {
-                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.Alias)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode ([string]$row.DuplicateAliasCount))</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.SuggestedUniqueAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
-            }
-            $duplicateAliasSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Alias</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Count</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Suggested proxy</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
-  </tr>
-  $($duplicateAliasRowsHtml -join "`n")
-</table>
-"@
-            $sections += [pscustomobject]@{ Title = 'Top 50 duplicate aliases'; Html = $duplicateAliasSectionHtml }
-        }
-
-        $missingPreviewRows = @($results | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
-        if ($missingPreviewRows.Count -gt 0) {
-            $missingRowsHtml = foreach ($row in $missingPreviewRows) {
-                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.Alias)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
-            }
-            $missingSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Alias</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
-  </tr>
-  $($missingRowsHtml -join "`n")
-</table>
-"@
-            $sections += [pscustomobject]@{ Title = 'Top 50 missing proxy addresses'; Html = $missingSectionHtml }
-        }
-
-        $sharePointRecords = @($publishResults | ForEach-Object { $_.SharePointUploads } | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) })
-        if ($sharePointRecords.Count -gt 0) {
-            $sharePointRowsHtml = foreach ($record in $sharePointRecords) {
-                $label = if ($record.FileName) { [string]$record.FileName } else { [string]$record.SharePointPath }
-                $pathText = if ($record.SharePointPath) { [string]$record.SharePointPath } else { [string]$record.WebUrl }
-                "<tr><td style=`"width:220px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$(Encode $label)</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;`"><a href=`"$(Encode $record.WebUrl)`" style=`"color:#2563eb;text-decoration:underline;`">$(Encode $pathText)</a></td></tr>"
-            }
-            $sharePointSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  $($sharePointRowsHtml -join "`n")
-</table>
-"@
-            $sections += [pscustomobject]@{ Title = 'SharePoint links'; Html = $sharePointSectionHtml }
-        }
-
-        $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
-        $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy, duplicate expected addresses, addresses already assigned to another mail-enabled recipient, and remote mailboxes without a usable RemoteRoutingAddress are always skipped in write mode.' } else { '' }
-        $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
-
-        $body = New-SmartM365EmailBody `
-            -Title $MailSubject `
-            -Category 'SmartM365 Exchange OnPrem' `
-            -Severity $severity `
-            -Tenant $Tenant `
-            -HostName $env:COMPUTERNAME `
-            -Message $message `
-            -ActionTitle $actionTitle `
-            -ActionHtml $actionHtml `
-            -SummaryRows $summaryRowsForEmail `
-            -PathRows $pathRows `
-            -Sections $sections `
-            -Footer 'This automated message was generated by SmartM365. Use the exported CSV files, Excel workbook, and SharePoint links as the source of truth.'
-
-        SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments -AllowAttachments
-        Write-Host "Email sent to '$($MailTo -join ';')' via $effectiveSendMailMode."
-    }
-} catch {
-    Write-Warning "Email send failed: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
-}
-# === End Email notification ===
+WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook outputs are available for the mailbox summary.'
 
     try {
         if ($script:ChangedViewEntireForest -and $script:PrevViewEntireForest -ne $null) {
@@ -1641,8 +1464,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqGk6SygGK/AA2
-# fPebzjrCfla9K9N2yInuABvwUJm8T6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpi+bnsdshs7+v
+# vCBo3ySbsoiRXZ4RlwOmfH8l/l/2FKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1775,31 +1598,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAx4yipwN3Sh000ZnfNrjx56P5ltplsYefcn5IdfwMF9MA0GCSqG
-# SIb3DQEBAQUABIIBgHRtz9U0iV+B9xyyG+fhesxzlBr+bq4MzNsSB4E6KZymSAJ7
-# pOatZ0B5WW16ufeg7VsnR6noPpGNSyF58se/Mz8KgIMogiJXPIxhiK43hMsdENYx
-# iE5xBpE2nPEc1/kHCaTwP/CSDmmEsMVjnjftRUBuR32PxVbAhXs1lGEHSSNhBMlr
-# z/yKE9jjgOAiZHmyQqmlMyty4YjmeDkyGjQhLyOJ0fjxACeALXgktc9vGrFli1lr
-# TQMZiPJf0yt6ZouRNON1/jvUuGGAUMo5WLSekOXKpoaAuBf75ULyhfX2XKFAMnZQ
-# 204EEJ8cuqBP9DyqD9DiW1O1KwOF2fVwjcAyWKRvCT9OMZjo+1DcoA80J7igPs2q
-# JykvK18tX3R4ZJyflffwRnOXKVE+OXbzY1Fj3ZDfN1ArZ2raSkfJSeN95j8T7Ee9
-# ZvvRoB3Vst7jmkvyhjEvVasFHo0CkDCUb48YWkXpHr7HLydJyWWaNOoFZId3Ma2q
-# rIwp/fHLuXsUjTMZ2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM2+vV0+VXYx/SGhPwsq4mIw4KvKsHevQ8t7hx/V6C8oMA0GCSqG
+# SIb3DQEBAQUABIIBgAkxiOtGPbZemRodjMKXkeLfmC9V50omDsdxaEfzUr0WljBS
+# LioCtJJnS6y5HIxdNnJcR+PaCGISrJzropvCpWIp7f/yogFUbsI4I2IL2UTlicqj
+# kjf8p4kcSSvnGjFUtFqgafVNh8c8+h7WvKElBff5BepzAgcDkomcfK3u08gxPcrA
+# PKzR1jqOc8OgFexj3dNlfwyYk6rI3TUO1JegPIFTky87SDp5n8JxcYqXMAOXauUf
+# +Wj0wTy4d8YlWukI3Rz8WKr5ID/fGNcAiGcKbd5gL8OibsLnbUVVqQf24PgEBaGY
+# A0PwibMi2WzVPBznYQkW1ZmUEyg9z8nud/SjYBxCXzSLadlkCxJFpk1hsy5zUKzt
+# cjrArBwATRiw+9ynaSizWYmgDDoDzDtReJGlOcF+Db3t33h1QHWVR8q5iLUChyzk
+# 5TjUPb5Ahuyl8tsVZMWLthcA+izK4jiQ8n6frw/6TxGcpjFL4fz+KOS+RiYbVYPp
+# p/hn0KOuaQCG+sqUfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDiGgF4WlO6qNs8yN/+Rr2YDpkpcKgDqyfExI7F
-# MN1mrTANBgkqhkiG9w0BAQEFAASCAgB0SF5qctaBgTMfBYAY+RtsVrpIC/mwMRyP
-# P7jT9cGhYN49DtKlMW8TbeYXexqwyCkx3dsBz8ul8OvFRx5qk+H+aOmfdM4Be+/9
-# cIIsHztxZiflMfwcr77ESh0IpHr5T7Hc1Xscemj55hn/4AYzW9+Eg3RnyykXO4XT
-# 3cGtSaJkiJMtKmYSNJ4VL+Dn9Gvaplw9SI1TDKEWPoe6To0fvCD3QJ01ovFnu0x8
-# /oFTRykpIGcaKe3crUhnnAKnTf0onczAWryBJ5C9M9ZO6RNuDmFXMwurq+X4ggF0
-# Kp+aGPtOgrEVayBhKHzSzeyhwXpiDE6IJyx4LtAc4UWmn5wgMwN2Z/VrttEomhYV
-# dWQpcXfYvubaQLa8kKiOt3TPUBtQrgeKuzohgZz87To+amebzJ/sI+JVU8SnvqSl
-# FL6bBcALHscZbJLXigznF2XpomOwRxJRduDXnm0OKm+MV250ppXQxwnhygNIuCRL
-# iwJN/4jWA/KD63ejhZNHK+mvlkhMlt+o9HwcMSEyJO2e6pHvKaCFqrTBRuSnZCzB
-# JreJUOLYZ3/LuMhqoKduwOg8NASgUssa0+2RRDytvkRFMZWuaiIqHysdCTxoQucU
-# hODect7fWDRv3tzU22edscOeJ3JE38M1BkRNvPWsbfv+cZi629+Jk1hqlq85gNzW
-# X/OlBWoL2g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTIz
+# MDFaMC8GCSqGSIb3DQEJBDEiBCCPaIIqxFDmGkuqxo/j/yJGJe1tKmUFgxFT6uua
+# H3Ka/zANBgkqhkiG9w0BAQEFAASCAgCwfXpeVkF6G/iGE/hhx+46TVJ2GW2/3lvj
+# /CK4zVPkYjOPy/8T0u0ip5kpkMUbN0nPRKZXFZQ3AK6D1nT5tP+hz0jOmEZFTC3S
+# g2hC1ZVWf6pRJOospO7IoAZmF32cKMAtEPMWBkuctYXWEPwpiy4KNNcStj5b/Frn
+# f3ee7KeG3N7qN9XzeSA+l6sx3cIorpToFhzfQ4kqaUglaDLvoiuxcBkFO+XJ09SN
+# oQkQ4drO8QO2fhrkf7desXjHliCC3gBRfisOwC3DncbvQmF3vZ9EH36LA0uf71WR
+# FgAYk7UujcVtM6Emko8HYaaBHLHE4p+3kFDFkV0y8osJIOM4SomZ6NG7hgtq3h8w
+# 4gC07ACYYAloC+lEtC2WCf5eVYJ1xT5GlYEwfEew12yjioB82UD82jr44berPFek
+# IxcZp+kXlvl09dIzfgxd41xaV3a6MgpEoJpykackjqCKWLXz2o/okbEIPvFnpjC9
+# CoNu8FlGk/HcyTv3QVRngB+TV0ZQMNXinR1OksilPXefR2j8gxuLrlALpRweT4DQ
+# HXGFgg/Kas3CKCe67xex0+Wfhb4REejOpnGOBaYqMvxK4K7I38TfDNqqy84u8bhU
+# OK3gVWAvrdCrROXiD3sNXX4wgiHmviJz4yeGzD3Fkfy1Ik2suI+dY1cJo/wzUGY3
+# yn/jmSzKHg==
 # SIG # End signature block
