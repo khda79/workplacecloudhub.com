@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.38
+    Version : 1.39
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -664,9 +664,9 @@ function New-LicensesOverviewCardHtml {
   $percent = if ([long]$Row.Enabled -gt 0) {
     (([decimal]$Row.Consumed * 100 / [decimal]$Row.Enabled).ToString('0.#', [Globalization.CultureInfo]::InvariantCulture) + '%')
   } else { 'N/A' }
-  $status = if ($Row.Subscribed) { 'Enabled licenses' } else { 'Not subscribed' }
-  return '<td width="{0}%" style="width:{0}%;padding:5px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#ffffff;border:1px solid #dce6ed;border-top:4px solid {1};"><tr><td style="padding:12px 10px;"><div style="font-size:12px;line-height:17px;font-weight:700;color:#334155;">{2}</div><div style="margin-top:6px;font-size:22px;line-height:26px;font-weight:700;color:#0f172a;">{3}</div><div style="font-size:10px;line-height:14px;color:#64748b;">{4}</div><div style="margin-top:8px;font-size:12px;line-height:17px;color:#334155;"><strong>{5}</strong> used &nbsp;&middot;&nbsp; <strong>{6}</strong> used</div></td></tr></table></td>' -f `
-    $Width,$Accent,$label,$Row.Enabled,$status,$Row.Consumed,$percent
+  $status = if ($Row.Subscribed) { 'License utilization' } else { 'Not subscribed' }
+  return '<td width="{0}%" style="width:{0}%;padding:5px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#ffffff;border:1px solid #dce6ed;border-top:4px solid {1};"><tr><td style="padding:12px 10px;"><div style="font-size:12px;line-height:17px;font-weight:700;color:#334155;">{2}</div><div style="margin-top:6px;font-size:26px;line-height:30px;font-weight:700;color:{1};">{3}</div><div style="font-size:10px;line-height:14px;color:#64748b;">{4}</div><div style="margin-top:8px;font-size:12px;line-height:17px;color:#334155;"><strong>{5}</strong> used of <strong>{6}</strong> enabled</div></td></tr></table></td>' -f `
+    $Width,$Accent,$label,$percent,$status,$Row.Consumed,$Row.Enabled
 }
 
 function ConvertTo-LicensesActivityDate {
@@ -2554,7 +2554,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.38"
+$ScriptVersion = "1.39"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3258,8 +3258,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACBSgOlNsqn5TG
-# t1ZmfRf1y4HmSmDhwf+CHjyDrpnWOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7XCPhhFX/7SRJ
+# QtrTD8dguvWL+36T6YW479g0yp0yk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3392,31 +3392,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID1/AYclX26f8sj+1Qxqx0BAaLslVxN2unUSjgjOAfIyMA0GCSqG
-# SIb3DQEBAQUABIIBgA3QQJusDFLQEWpTPf4xHv1cyuQMwz3FpXTeHpkjkk+YPn0t
-# iQw6zhVjjlJZ4c3XusUHE5q723rfX8H+i3slg6tYEewC/SWgRrgyY7rABvEI5Ayb
-# 71dgNxb5DXSY+uF9+trVTytxvMBA2g0JGM61KTVcv0YOXMHEBAJQ7bdl5K35MjGJ
-# kulOusSTfGz/u/AJgCQJaO5FHSCr7CRde1GIJV1Gxdu+JFxe17kPYYEdhbWtaUMt
-# k1ngh74/OdgpCLK/DWoJS8YbJhjBbt7b8aRmJ7IgD0P8mQvjhKyltgNXYH20Fiie
-# ydsUKJdx2dpJAk75Fs3TSPgCGbsoBdUZxWmqfWJ9xcqZXGSo+chi6REXUqyOSzdW
-# sIpSmQd0gxIt/VXLvZEHDYEWqPEj7hnakB8pc33370Jd2/kW2ht7pHxFkSZhrmxx
-# vDTSVt33zdqTqcVh0SDptDY505YEvBfgOGsKRNfV8Qa/wmtG3sIlK3BY/2uNRXBP
-# YkjRxVPLT+bbMYwUmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFFDy6YjDGOCCjmJKhZTORkcUWTiEAlnpHx3+9MydxPDMA0GCSqG
+# SIb3DQEBAQUABIIBgCZF+m8QHlAEOPwJfLRVURj1p7JDEKwTqD+CC57WffR0URTL
+# wXSUSOP6hqI0rK6dUEYVRo80Pl+dVDsvapzmNCiY0urzxokY2RokvLy+w0jmjAHL
+# iVZw2RLGIafSS6Vyi5nTqm8iU4IjuOLZYBGvy+4nflHyjXLpASg54otc/v1Uit5H
+# 0B+9ebUd51PhTDocStCmUjTSGkvcfXk5tm5o5r8NLVWZYJU3yHgRETpRzuNugni6
+# 5JEmkAa4Wg3cRlQry+qikKyBomfuV2RoRMGo103trTF7IMcM4pQW3+WRUGh0K7Hp
+# BZwCJvKmhcL0v2Rbdf7vvCaVnbAWUIZQETcwMn/qGl4nu48tu5CqB7e+i8oLnGnS
+# PxIexuWlmeuiBv2LrnPL05wKA96Z1nSc7lgzvGBM6l/NsmKdF/b8auXu7pS1mT6d
+# sPcTzSMYSevlv6J2NxzlGo2F47j05/ivfX4Y6+ryc/f1skhmJcCp5Cy/7/aTbHe1
+# yYWh7V8V+5Gpg9ayE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDMx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCDGVu9yAOSS11RzvapG/DW3OvShc2n/2mSjTzC7
-# GcAXIzANBgkqhkiG9w0BAQEFAASCAgCLteURgwgGdfyNoXdMqyRBFjWvzVx1YE90
-# aSafsgTGXHzQI6ya7svfgu5sYv1d2O8f6b4vpZIplnnGVwlZu7z+uIK96+WUkr+b
-# nLKYUOzlDNlhgvapx7S5jKddT0vjlOXhRHQ0NTa6DXZP8FbGj3MAm9M4AcAyb7/r
-# 6cfReJOmkg1U6+p2u6on7iXNrSgXEi5x+k2QWsqfT3ZZ/UKKUj+T/zQICoBkcXNN
-# JYkodw+3zq3quHU90I8CgOJnhCFVJQhX0pxvvwJGLhkIUmhQZfs2slEQLg4OkIEh
-# Ty2TmSZW6f94JKlWIFgu7EeQAAmzFXYXplKHjXP767esc+66zsuQTeQN8GhvVPza
-# OAiUNQk4/5ff4VcG85GakDZR4qqiy5feZF2pzgAEWiuYNWko98iYeGleSNEmAGQ9
-# 34XJOw3zzunGxGYe4fAkVK9WSwBIVhuA6Bp/d3u+WgyCfe99YWuJD1vHVLqbg/F3
-# QTWX0NBIl8P5/cpAG5weBFBhmbqnlPDrXB50HEU3Ydsiv8FUVnTGfB7R2KpCysLQ
-# Z+uwjrp1Nf5ahHY66a6A0kmrGNiE/4Og5+uZvKczwgrKgje5cbDjYsdfzV3M6mpZ
-# Zj225tkmhh/kyFDpMjWiMm+Vh21GnPxBkTJUlX0pjI2m+ToxAqjUrVSJ4pwh91dL
-# 4W5aUIR4+Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDQy
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDn8Hl8l/zTAxipI2IDvfaeaL04iNUBtViKdPU4
+# VF3TxjANBgkqhkiG9w0BAQEFAASCAgAsme8H1LmA6c5fggwiTdEL+E5fnkN833pU
+# Ce2GGEZ90+SXeaCFchXpW+TQ9yMO3DCvn++SFTS5HOft2Mb5eqmAU7nyc0Icym4y
+# XvLtBoFmbdHuliutG9A3kxwhlUqzHybFviGf8WCK2uCb/5JJfwZ5AT+TjYPJ2q37
+# o72b7kcvM3eQutXMVVanlofiKrzG8/3CO29tos6pUJJYaUcDjPSEySuwUH16vV8u
+# RJkZlmBQtJL8Q8EJVjTj7Jl9028UqbL6E9G7nO19jEhQaNgy9mLDvtVmuRutZn1z
+# pcukMwHhtAAq/WMBmxeAa4sTsKf2bTaXd9dFRrz+xEfJKCD2dYWJAL7LmwF7GhnN
+# amCOr38noOlHDywyuTQvCxaLvc9BBJLZKp2SfdokMv/lLdHtpJlblo3MUIeaAcge
+# x3HBn1CMUEN65j0tEo7tv4MvJT5tr7QguK/9dkgDQ3wKBsOsy9BYl5rpMi/SPNkB
+# +ngdARq7c4r9Gbt3huqwIBXL9rVNvDT7nOELN9ubbirBkkuXhapJsX2LIufzTzxz
+# mMO/0FuR97D4T8YKfVSPvkShMM6fUtZHtbwt9KeFJzFqUnp2B9Q+ZxqGUkOeDgtN
+# qgrmgk6TMaX0/RjU/WOT6h7Uxc3wIHPGRj+GYUChFJscU3oBsSj2hdJmh+z1JiRZ
+# 0QMZRJvBsw==
 # SIG # End signature block
