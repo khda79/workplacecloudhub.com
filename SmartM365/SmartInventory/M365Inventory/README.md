@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.16 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.34 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -30,6 +30,17 @@ assignment.
 | Exchange service plans | `M365_Licenses_ServicePlans.csv` | Existing enriched Exchange/SPE subset retained for compatibility. |
 | Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
+
+The license overview and recovery email is sent at most once per tenant and
+Europe/Paris calendar day, including runs with `-SendLicenseSummaryEmailOnly`.
+By default, `DATA-LAST/M365_Licenses_SummaryEmail_SendState.json.txt` records
+delivery state. Set `LicenseSummaryMailStatePath` in the private local JSON to
+the same shared path on every collection host when runs can send from multiple
+machines. A failed preparation can be retried automatically; an interrupted
+or uncertain delivery stays pending to avoid a duplicate. After checking delivery,
+use `-ForceLicenseSummaryEmail` to send again that day. This switch works with
+both a full inventory and email-only mode. On a full inventory, it does not
+override a disabled email configuration or permit sampled inventories to send.
 
 Service-plan state codes are `A` (enabled and successfully provisioned), `D`
 (disabled), `PA` (pending activation), `PI` (pending input), `PP` (pending

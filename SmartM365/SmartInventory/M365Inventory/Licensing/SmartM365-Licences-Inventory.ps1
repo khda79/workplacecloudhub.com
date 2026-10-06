@@ -7,8 +7,9 @@
   SendLicenseSummaryEmailOnly sends the license overview and recovery summary from existing published CSVs without collecting again.
   ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when the previous completed receipt does not list it.
+  ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
 .VERSION
-1.33
+1.34
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -16,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.33
+    Version : 1.34
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -37,6 +38,7 @@ param(
   [switch]$RequireSkuNameCsv,
   [switch]$InteractiveAuth,
   [switch]$SendLicenseSummaryEmailOnly,
+  [switch]$ForceLicenseSummaryEmail,
   [switch]$ForceAdCsvAnalysis,
   [switch]$BypassLicenseUsersReceipt,
     [int]$MaxItems = 0
@@ -1448,32 +1450,113 @@ function New-LicensesRecoveryWorkbook {
   return $file.FullName
 }
 
+function Write-LicensesDailyMailState {
+  param(
+    [Parameter(Mandatory)][System.IO.FileStream]$Stream,
+    [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes
+  )
+  $Stream.SetLength(0)
+  $Stream.Position = 0
+  $Stream.Write($Bytes, 0, $Bytes.Length)
+  $Stream.Flush($true)
+}
+
+function Enter-LicensesDailyMailGate {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [switch]$Force,
+    [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow
+  )
+  if (-not (Test-Path -LiteralPath (Split-Path -Path $Path -Parent) -PathType Container)) {
+    throw "License summary mail state folder does not exist: $Path"
+  }
+  $timeZone = try { [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time') }
+              catch { [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Paris') }
+  $day = [TimeZoneInfo]::ConvertTime($NowUtc, $timeZone).ToString('yyyy-MM-dd')
+  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  try {
+    if ($stream.Length -gt 16384) { throw "License summary mail state is unexpectedly large: $Path" }
+    $previous = [byte[]]::new([int]$stream.Length)
+    if ($previous.Length -gt 0) {
+      $stream.Position = 0
+      $read = 0
+      while ($read -lt $previous.Length) {
+        $count = $stream.Read($previous, $read, $previous.Length - $read)
+        if ($count -eq 0) { throw "License summary mail state could not be read: $Path" }
+        $read += $count
+      }
+      try {
+        $state = [Text.Encoding]::UTF8.GetString($previous) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+        if ($state -isnot [System.Collections.IDictionary] -or
+            -not $state.Contains('TenantKey') -or -not $state.Contains('LocalDate') -or
+            [string]$state.Status -notin @('Sent','Pending') -or
+            [string]$state.LocalDate -notmatch '^\d{4}-\d{2}-\d{2}$') {
+          throw 'Invalid license summary mail state structure.'
+        }
+      }
+      catch {
+        if (-not $Force) { throw "License summary mail state is unreadable; use -ForceLicenseSummaryEmail after checking delivery: $Path" }
+        $state = $null
+      }
+      if ($state -and [string]$state.TenantKey -ne $TenantKey) {
+        throw "License summary mail state belongs to another tenant: $Path"
+      }
+      if ($state -and [string]$state.LocalDate -eq $day -and -not $Force) {
+        $reason = if ([string]$state.Status -eq 'Sent') { "already sent on $day" }
+                  elseif ([string]$state.Status -eq 'Pending') { "delivery is pending or uncertain on $day" }
+                  else { throw "License summary mail state has an unknown status: $Path" }
+        $stream.Dispose()
+        return [pscustomobject]@{ Skip=$true; Reason=$reason; Stream=$null; Day=$day; PreviousBytes=$previous }
+      }
+    }
+    $pending = [ordered]@{ TenantKey=$TenantKey; LocalDate=$day; Status='Pending'; LastAttemptUtc=$NowUtc.ToString('o') }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($pending | ConvertTo-Json -Compress))
+    Write-LicensesDailyMailState -Stream $stream -Bytes $bytes
+    return [pscustomobject]@{ Skip=$false; Reason=''; Stream=$stream; Day=$day; PreviousBytes=$previous }
+  }
+  catch {
+    $stream.Dispose()
+    throw
+  }
+}
+
 function Send-LicensesFocusedSummaryEmail {
   param(
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
     [Parameter(Mandatory)][string]$CollectedAtUtc,
     [string]$CsvFolderPath = '',
     [string]$ExpectedTenantKey = '',
+    [Parameter(Mandatory)][string]$MailStatePath,
     [switch]$Manual,
+    [switch]$ForceLicenseSummaryEmail,
     [switch]$ForceAdCsvAnalysis,
     [switch]$BypassLicenseUsersReceipt
   )
 
   if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
     WriteLog -Message 'Focused license summary email is disabled by configuration.' 'INFO'
-    return
+    return $false
   }
   if (-not $Manual -and (Test-SmartM365MaxItemsMode)) {
     WriteLog -Message 'Focused license summary email skipped for a sampled inventory.' 'INFO'
-    return
+    return $false
   }
 
   $attachmentPath = $null
+  $mailGate = $null
+  $sendStarted = $false
   try {
     $mailTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
     $mailFrom = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
     if ([string]::IsNullOrWhiteSpace($mailTo) -or [string]::IsNullOrWhiteSpace($mailFrom)) {
       throw 'A report recipient (To) and sender (From) are required for the focused license summary email.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedTenantKey)) { throw 'Tenant key is required for the daily license summary mail limit.' }
+    $mailGate = Enter-LicensesDailyMailGate -Path $MailStatePath -TenantKey $ExpectedTenantKey -Force:$ForceLicenseSummaryEmail
+    if ($mailGate.Skip) {
+      WriteLog -Message ("License summary email skipped: {0} (Europe/Paris). Use -ForceLicenseSummaryEmail to send again." -f $mailGate.Reason) 'INFO'
+      return $false
     }
 
     $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
@@ -1661,14 +1744,23 @@ function Send-LicensesFocusedSummaryEmail {
     $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
     $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
     [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $summaryRows -Usage $usage -CollectedAtUtc $CollectedAtUtc)
-    Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report -Attachments @($attachmentPath) -AllowAttachments -SuppressAttachmentLinks
+    $sendStarted = $true
+    [void](Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report -Attachments @($attachmentPath) -AllowAttachments -SuppressAttachmentLinks)
+    $sentState = [ordered]@{ TenantKey=$ExpectedTenantKey; LocalDate=$mailGate.Day; Status='Sent'; SentAtUtc=[datetimeoffset]::UtcNow.ToString('o') }
+    Write-LicensesDailyMailState -Stream $mailGate.Stream -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($sentState | ConvertTo-Json -Compress)))
     WriteLog -Message 'Microsoft 365 license overview and recovery email sent with recovery candidate workbook.' 'INFO'
+    return $true
   }
   catch {
+    if ($mailGate -and -not $mailGate.Skip -and -not $sendStarted) {
+      try { Write-LicensesDailyMailState -Stream $mailGate.Stream -Bytes $mailGate.PreviousBytes }
+      catch { WriteLog -Message ("License summary mail state could not be restored: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
     if ($Manual) { throw }
     WriteLog -Message ("Focused license summary email failed: {0}" -f $_.Exception.Message) 'WARNING'
   }
   finally {
+    if ($mailGate -and $mailGate.Stream) { $mailGate.Stream.Dispose() }
     if ($attachmentPath -and (Test-Path -LiteralPath $attachmentPath -PathType Leaf)) {
       Remove-Item -LiteralPath $attachmentPath -Force -ErrorAction SilentlyContinue
     }
@@ -2263,10 +2355,12 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.33"
+$ScriptVersion = "1.34"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+$defaultLicenseSummaryMailStatePath = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'M365_Licenses_SummaryEmail_SendState.json.txt' } else { '' }
+$licenseSummaryMailStatePath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseSummaryMailStatePath' -DefaultValue $defaultLicenseSummaryMailStatePath)
 if ($SendLicenseSummaryEmailOnly) {
   if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
     throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
@@ -2280,8 +2374,9 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -Manual -ForceAdCsvAnalysis:$ForceAdCsvAnalysis -BypassLicenseUsersReceipt:$BypassLicenseUsersReceipt
-  Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath)
+  $mailSent = Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -ForceAdCsvAnalysis:$ForceAdCsvAnalysis -BypassLicenseUsersReceipt:$BypassLicenseUsersReceipt
+  if ($mailSent) { Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath) }
+  else { Write-Host 'License summary email skipped: already sent or pending today (Europe/Paris).' }
   return
 }
 if ($BypassLicenseUsersReceipt) { throw '-BypassLicenseUsersReceipt requires -SendLicenseSummaryEmailOnly.' }
@@ -2840,7 +2935,7 @@ $BaseFileName = "M365_Licenses_Groups"
   catch { WriteLog -Message ("Licensing source receipt could not be completed: {0}" -f $_.Exception.Message) 'WARNING' }
 
   $currentOperation = 'Send focused license summary email'
-  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
+  [void](Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -MailStatePath $licenseSummaryMailStatePath -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -ForceAdCsvAnalysis:$ForceAdCsvAnalysis)
 
   if ($connectedGraphInThisRun) {
     $currentOperation = "Disconnect Microsoft Graph"
@@ -2964,8 +3059,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbBXuwpJ5G1Y37
-# ZQ3uFpwOpEZS8cb7INR9jCGB0AqagKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9n8qRI5i3VPVF
+# Qdr+E5buzQ2H3U1HWZdfxih/ucp7ZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3098,31 +3193,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINT7co/kLbq5LzgRG351uc9WeYs5KhPERh+MzQQAbYG+MA0GCSqG
-# SIb3DQEBAQUABIIBgF/gUSqoaHR2Tt+jGCzv3zukKbr+T9tXm4YoVj39/5mcsxlk
-# vt0fQ6HU1FAjLDTM4jYBpK1wnX6GkrIUV8ZdHce7KND3ER0sHWxLiLhsUjXN5X9v
-# wDRsDZVtP5Qe2yndz3p9NwhYnXd8Zw+5TNlOYXM0qB4ndpzkO0J5ZaoFQMGVELKg
-# RqGE0yiKgKyr59/daIsfMz4K2b+c8c/zlRC1M4UXwIAKhx0PdwQgU5L/Lub3w0yD
-# NWgUiaFzPaMeWyiE53+jcJu0g4fO0oodDRqZJU7eJ7XEBW4WgKUwpUQXFqLzGNdV
-# q0G2C8fF443739sTnMRd8vJd8j7vdJrJ9qECTKBEBPR72sIOTSVFvZiR2/Ojy1Ez
-# 0opIrQe1qysfPxtz5YLNqaOIoMis7LF/63VBpPBqrFamADloCnYVijSOa8yxzkRv
-# qE7umrUq0eOwbgXb2JDulXgv6uXGJhPwOsXlcMyjBu3HYsNvd15Yu5DrNxxGslap
-# aonaLhEZUuMmdPRyJ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGAIwoIQPFbgG8K22pjU46f/aHjK3OUXTwioSLEl93pzMA0GCSqG
+# SIb3DQEBAQUABIIBgKYGOtk50NJ9stEMhj8rgSj5G/bb1KgwHfHKbo7KwjqIRHoH
+# tMLmznDllH8j/cGgFy+RQlkwQH7CzQN1c0HWDS+cxHKdyZ0/yTBeE6Dr3UJWCejk
+# QkzuJHIhDmHNVzhkcJsOqrlGaR/7ZG59OCYZJlrvB1gbU10EDg9SHDVwq96tPpND
+# 2etdI+vGw6+zqd8qWSYGyoZjSuZbYb4iP52B/uC6YO6uj2CN9gLZ5hi1hgPNXFY/
+# 4xgQIMVMLeat6vvUonghJDrvR0ME04LSyjFY5ooc1ZwF0dJ1AXs5Z96EvdinS+RZ
+# zVWjy2jq6vMnbQj37Om4UoC0Mf+/E6qAOpe5v8RaqTbxkVElgL0SbH/c/RLXOLBu
+# TST113wJ9imEmw9hBb1WPfZxVqFbLUVAZGLbNIBoNebM7vsNyTqP/f5AsFpiV+zh
+# 1almNFleeccFXC7pkVYsjE/iDwd0KYflzCH03VKEyxSiv+2f8tpy+xOPlPGs39iE
+# WrXZgsaeXX7HMZJfyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODQx
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDVjiu7YN4A7QgUf1cZB0untcn3wTHL7WsS1Jbd
-# Q+yiuzANBgkqhkiG9w0BAQEFAASCAgCa3pGBVWr75L2x5dglkHNfrL9Etc+VJKkl
-# R23DLETkM1XCRvZ0JOdaYXnmAHR4k8tknh/BXsNVO8My+IDwod910ym5KaV67Lpg
-# UQsS5SHe2WlNiZnstEZahWoS598XwdFcjoMckdJKk5b3TWeDhUS86/mCd3ZGybW4
-# hLBKrSM/BVBTEcHzNI4FLkuRiXUor7OBfpoTviyO2uCd4eIux31/g3WxtLak5qA5
-# Hq0D4PtV+OVviXFqWQPNrUf+iJizOEqNmNKHJ6Gwlg6gO8wQO42O7/8Rt+mPoUXv
-# 2B55sBuEki+xnOvXkK0dEdi3P0bD5YFfqjDVqOfnXaFWt8/QVjjSkS7KLLTREhq9
-# B/Orl6iljPZovDQyildVz33X5q4Z8wBdyoNBbmHWbXdE41AGRbGz5gJ+OXvswz64
-# h3Sj9SynOPrL5yM/Ru7nts0FJvWBV5ZX9pJKwdANjiJE6294IS8LW7rvd1pjoUIC
-# 86ksY6mZuPogx8wT9CbFmr2JzNdho7e1309I/UT2lyjMlFYeLSKuqzCwkFRF83cd
-# U4568Go05baEba5GJ3ITDFFDBzgeuYhUEohKIcIaJWYX/DQdYRTAFqLMr9XFuMcX
-# D/5tiRuhmduC6AD2+f28I9wVCzzXOJ4XOH32VOO3AdRzrLRloBENA9NWqcPftXYA
-# Ox1OTxa/VQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODU5
+# MTVaMC8GCSqGSIb3DQEJBDEiBCD+BagMS6vtL9C2zd8GsjFzqyYrNgdKgO6QYbG2
+# SkQf7DANBgkqhkiG9w0BAQEFAASCAgBRmN5R0NAF3Xg2xV24pjSLMgqPTAK9xAh8
+# H24Nkv/XFyBrAxHcxNYDjcKTLS+RYeb2X9zLLZx8P0JfrlVDcpkBWfX7t4AQIkwW
+# loAkNkcm0ekF+RSFqrnbbESPtPgDEw2FetmKDNLtnDbPSV6dMXYZCUp8VNarDRQC
+# 4TKfOu7yEfrKnukLFEyYHerQw6dIQtN/qWKKNU5vhuF3mU1zEkA7R4anT9DTSiP1
+# SakA+xBtxgBq7EnQZi2oZXCXr295yQrOdoo75p8ZYaHRzBO/5xE03V3bTbYLFRl3
+# XH2pUM+va1iytle7+yEDsQ7viiCfzL1N6qI3ikOUwC0Kt9nS2aYtP2KlOSqDowm9
+# jGPwlQnkuZxmhIEQr4rOoCP8sjJ+ABo1D8be2ObdDnH8TE5MzgsTV7tfNP6x5dgY
+# 3ZIaxS6e+AUZyLbIxcsNzLZPtMhEA1sQERRHTjZKpE4tGfkp85w+QX8JbHLh014q
+# ickymRKPLmXnoOd4IFX7QtLON/H2GA8C0OZ50Z7wCiMr6gouiKcZsMHpQqCUI7Fh
+# /DxCnbB4Jq9wAMUUuuDRvXOw/tfc7iZJdO2L5SX/mpQ+IJ9x87Q5tK0jvTruKNRL
+# SsceyF8S9ytJogmQCV+hFbqOoXrztQGwPDbEbdtELOqTQQsu43YS0b9D0foi0t0x
+# m9MtNb47AA==
 # SIG # End signature block
