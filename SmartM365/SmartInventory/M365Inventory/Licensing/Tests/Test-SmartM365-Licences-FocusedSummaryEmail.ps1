@@ -50,6 +50,7 @@ function Send-SmartM365Mail {
   if (-not $AllowAttachments -or -not $SuppressAttachmentLinks -or $Attachments.Count -ne 1 -or -not (Test-Path -LiteralPath $Attachments[0])) { throw 'Recovery workbook was not attached privately.' }
   $bookSummary = @(Import-Excel -Path $Attachments[0] -WorksheetName Summary)
   $bookCandidates = @(Import-Excel -Path $Attachments[0] -WorksheetName 'Recovery candidates' -WarningAction SilentlyContinue)
+  $bookDowngrade = @(Import-Excel -Path $Attachments[0] -WorksheetName 'E3 to F3 review' -WarningAction SilentlyContinue)
   $bookDates = @{}
   $package = Open-ExcelPackage -Path $Attachments[0] -ErrorAction Stop
   try {
@@ -64,7 +65,7 @@ function Send-SmartM365Mail {
     }
   }
   finally { $package.Dispose() }
-  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;BookDates=$bookDates;AttachmentPath=$Attachments[0]}) | Out-Null
+  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;BookDowngrade=$bookDowngrade;BookDates=$bookDates;AttachmentPath=$Attachments[0]}) | Out-Null
 }
 function New-SmartM365EmailBody {
   param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
@@ -417,9 +418,21 @@ try {
   Assert-Equal $u3Detail.LastAdActivityDate 'N/D' 'Shared mailbox has no AD activity date'
   Assert-Equal $u3Detail.LastM365ActivityDate 'N/D' 'Shared mailbox has no M365 user activity date'
   Assert-Equal $usage.DowngradeReview.Candidates 1 'One qualified E3 to F3 review candidate'
+  Assert-Equal @($usage.DowngradeDetails).Count 1 'E3 to F3 detail count matches candidate KPI'
+  Assert-Equal $usage.DowngradeDetails[0].UserId 'u6' 'E3 to F3 review lists the qualified user'
+  Assert-Equal $usage.DowngradeDetails[0].MailboxSizeGB ([decimal]1.4) 'E3 to F3 detail keeps mailbox size'
+  Assert-Equal $usage.DowngradeDetails[0].OneDriveUsedBytes 1073741824 'E3 to F3 detail keeps exact OneDrive storage'
   Assert-Equal $usage.DowngradeReview.RecoveryExcluded 2 'Recovery candidates excluded from downgrade review'
   Assert-Equal $usage.DowngradeReview.Unknown 0 'All E3 downgrade inputs are qualified'
   Assert-Equal $usage.DowngradeReview.Excluded 1 'Archived shared mailbox is excluded from downgrade review'
+  $incompleteReview = $usage | Select-Object *
+  $incompleteReview.DowngradeDetails = @()
+  $reviewMismatchRejected = $false
+  try {
+    [void](New-LicensesRecoveryWorkbook -Path (Join-Path $testRoot 'IncompleteReview.xlsx') -SummaryRows $summary -Usage $incompleteReview -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')))
+  }
+  catch { $reviewMismatchRejected = $_.Exception.Message -like 'E3 to F3 review detail count differs from the email KPI*' }
+  Assert-Equal $reviewMismatchRejected $true 'E3 to F3 workbook cannot omit email KPI candidates'
   Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '49,99') ([decimal]49.99) 'French mailbox size parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '50,00') ([decimal]50) '50 GB boundary parsing'
@@ -431,6 +444,11 @@ try {
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
   Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
+  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].E3toF3ReviewCandidates 1 'Workbook Summary E3 review total'
+  Assert-Equal $script:SentMail[0].BookDowngrade.Count 1 'Workbook E3 to F3 rows match the email KPI'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].UserId 'u6' 'Workbook E3 to F3 review identity'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].MailboxSizeGB ([decimal]1.4) 'Workbook E3 to F3 review mailbox size'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].OneDriveUsedBytes 1073741824 'Workbook E3 to F3 review exact OneDrive bytes'
   $bookU2 = $script:SentMail[0].BookDates['u2']
   Assert-Equal ([datetime]::FromOADate([double]$bookU2.AdValue)).ToString('yyyy-MM-dd') $old 'Workbook has AD activity date'
   Assert-Equal ([datetime]::FromOADate([double]$bookU2.M365Value)).ToString('yyyy-MM-dd') $old 'Workbook has M365 activity date'
@@ -457,6 +475,7 @@ try {
     throw 'AD account activity qualification is missing from section 07.'
   }
   if ($script:SentMail[0].BodyHtml -notlike '*03 &nbsp; E3 to F3 downgrade review*' -or
+      $script:SentMail[0].BodyHtml -notlike '*E3 to F3 review tab listing every qualified review candidate*' -or
       $script:SentMail[0].BodyHtml -notlike '*OneDrive storage below 2 GB*' -or
       $script:SentMail[0].BodyHtml -notlike '*Activity dates are sortable Excel dates*') {
     throw 'Downgrade review or workbook activity dates are not described.'
@@ -466,7 +485,16 @@ try {
   $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
   $oneDriveBoundary = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   Assert-Equal $oneDriveBoundary.DowngradeReview.Candidates 0 'OneDrive at 2 GB is excluded'
+  Assert-Equal @($oneDriveBoundary.DowngradeDetails).Count 0 'Boundary user is absent from E3 to F3 detail'
   Assert-Equal $oneDriveBoundary.DowngradeReview.Excluded 2 'OneDrive at 2 GB is counted as excluded'
+  $emptyReviewPath = Join-Path $testRoot 'NoE3ToF3Review.xlsx'
+  [void](New-LicensesRecoveryWorkbook -Path $emptyReviewPath -SummaryRows $summary -Usage $oneDriveBoundary -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')))
+  $emptyReviewRows = @(Import-Excel -Path $emptyReviewPath -WorksheetName 'E3 to F3 review' -WarningAction SilentlyContinue)
+  Assert-Equal $emptyReviewRows.Count 0 'Empty E3 to F3 review sheet has no candidate rows'
+  $emptyPackage = Open-ExcelPackage -Path $emptyReviewPath
+  try { Assert-Equal $emptyPackage.Workbook.Worksheets['E3 to F3 review'].Cells[1,1].Text 'UserId' 'Empty E3 to F3 review sheet retains headers' }
+  finally { $emptyPackage.Dispose() }
+  Remove-Item -LiteralPath $emptyReviewPath -Force
   $oneDriveRows[0].'Storage Used (Byte)' = ''
   $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
   $oneDriveMissing = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
@@ -739,8 +767,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNlaEOpV2NoGvh
-# MWwEuj7WbQoZygC0hyTGxf3fdZdsj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdLTCXguIq1cK+
+# J/yEgJmxEhaLT24tUP3BoUDg/CFjE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -873,31 +901,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEO9k8npYSExZOG8e017JZ9E83O8WsO0zM2wYyKrwDNtMA0GCSqG
-# SIb3DQEBAQUABIIBgEa9/WnkU2Ug++o0MxLXob/jS+LoJgvWItVBiUMzOXLh+q+R
-# 0W3blbCxoxWDKZfdbkfdpWIjNPP1pZXCBteDHDQ2IP/HnSVqQOyGgWvKN7n7IdE+
-# Cr+5yFchWI1rC3CzBju5cblwifH7V8z7FoDu6Xq0kkvjeXN/GzmWykSyD6g85YjP
-# gmbDgod59ygPx921Zx9ixsLL+GyFJc7gVZVGMBHC6uUHCku4DXZ8eWQj9rG6Mkl/
-# uGeixFbZ8I5PjPvUbwaA78r3DQHlEbi3fdbqzovhrsMqkdFlar7QebCS8Zt9KQsl
-# vup+HLuPxJNdPjP29IKhnsbe2sn4eIIA2GDzrp0BdN5dSIa1RdA4B8+1NS/lcB0v
-# PJAkojuesuiMUaqIjCemWTW8/jZmCNLPuQwgLJUm0mlDrRiSbGuR/0CUpjmKeqdO
-# Y8KAmCyM9vozIu1yTk8EDNrLyYDLAHgj/oBJ97x+31+scWVCiofgZDL3mR2xkFx1
-# 4dpOqunHxBrbF12mYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFks3s/qZceYu+d1sHsUCmDozvbGLs3jc11btKE9idB8MA0GCSqG
+# SIb3DQEBAQUABIIBgFT784vs4NVx45eNqc1ZeJOevSe1wRZ2n2vEngUw78kKbAZR
+# 6HsHnTQ/o9n0R8n/8i6uZpLGbA/nAukvESgbOktdYk1ESQdEDp1FMgmIuFE65dzl
+# ChRqCUb/B2apx1qQMYEm0rMtI4QUkC6KhAZEBoX1kS9yRv11MvD+I6YmShQ5kk6f
+# XeynWw2Ulv05qP2sEMQDknbcbLgCPG5C+FdLIf2OUnchzVna269tX4Wl38HfW8uc
+# 888FiV3IMBDpYPKtnMNAULsBK9Hg+go4g2iiFJBJNxdK/InHMt0GsALQWl6Of8q5
+# fdVkxDARNhFqpu+Upex6i4+VF60X+0eCzSTvC2bzcRncwH3I02L8Zvhg3V3zXQPG
+# CNRQnjZBHiNw++StkLDuwztZXVF0+5rA+YrxEX/GnaW4BxMpUTEZVWLzV/NEBwMt
+# eT/Fu1DbBSnT13mo0VaXqyFZJQ/fP02lY42WPuxHCg/lxbTwT3/16rx6qnpmQ1JM
+# FmqbzXMnxJZqHzEL9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDE2
-# MDlaMC8GCSqGSIb3DQEJBDEiBCBfAvmQERnY4dCyaRTuwAqVQxdYt0F4Wo6FotjU
-# agq32TANBgkqhkiG9w0BAQEFAASCAgBYuNFo2su4a7eJySUP+Ns3TO+vqzYBDq7b
-# J0yymbAfqsIobNTD8o8hu9ZJV2TcrlLWrTVPLFmANyG0Ghii961DFwCSETqcOSrD
-# TfNwE3CslQq/3GB3gaYOv579sfhhpihW2c5137X/WfJBUcGl6gtZfk66C7ydnf4R
-# YrnfdAfedUm6VBzIfGWI/TXmyuF7Ail0t4TBOFeg4/hbBvfeozGuo+9KIFO+owqj
-# XSSx4bCXafwbQ31YnUiSJbAJPz1ByRCe6AGQNFCAqU3W4HZoUY/z70BqNaRgTd4x
-# FWdMhsUK0jlEpWCLWn0Q/UrYb1me4DyDQPVascHJXhRSkb4HVhQAR2Bpg3W+03r8
-# 4Sju9VyvAcoKHymut3GVQkO9RuJv974zVAY4y+UMs2oeeFKDuxyATfZCN8SFfrdE
-# sLJau9eQlmDnBixVY73IUGUpU8p7paxsBuBepxzSjefVQaXodg7YQs1ZpnACBfP2
-# lpRi1T5vqPhPtmP97QU5tGCMxc1fRjax3qA+I1tVN93Jdgt/mf5E98Q1weG4TeA0
-# D8NuIAvU4c4E4knBcbv6qZEegHlimBgsFy27ngDcfE5rJO7HAdPbwLFijfCAl+8y
-# KPLFvfyGR0P7Ur3s7va+bvK0fcrIzxIeNL1KGjBw2OnBQaRF8+e77P/7e+QXu3wf
-# 631Jf/Hluw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDMx
+# NTZaMC8GCSqGSIb3DQEJBDEiBCAI/Z8osqvYOMndVA7GOBhD9NFKKHv57qjGTB+8
+# oTAoTTANBgkqhkiG9w0BAQEFAASCAgAHH+5yvBw4Oi3VMCA2cVCosEdKadMYLjM0
+# 2xcobwgl6tU5LIdK0aBN5smDD3YXEwufWfJ37KnjzXWsUuMo0WQnpZHH/Bh09C7A
+# 3m1oCDPcy+zeQYNk5HP7wAEow+C+aZMQjKBkDU/pFNlzbTOpy2UPADGigrj5/gGg
+# BCoaW4ANNmT4cYrrItpL4/osEmKRdXiDU6Ik/o3Rtp7ONdmFtHnLs8EL3TyUq4tU
+# fZKZb0uZEn31e6YMhguAfviREkikCUtXUazqPYwPwOHyXt4JUcCzbAT9fRGu0rC+
+# tHc+OLJqWLH/OANnF0d4hChwbhIzRa8HhJ5S8ayzTbg/19OCqFGbXkV6EzBdemP8
+# 2yzQqZa2vBCoitGZQHNYsBPfL5fXPWhBH8ymGHxjeQ2s/MtB0PkhhXRKs+/1f0KI
+# B2kBmGlf2gUgY/oYZ5XKdgG13N41qEjP+MKXjgAhE82/mX38f9Gp+fAIxtmt9Aly
+# i305bYhkSK9FRIHZoiXRvIFz5M7R+7hAjdMpzupKS7inTZ63qxKqzMEGazg0APgj
+# I27IEsZgalGo9AaTgT2NH4mh7jCHrVXIaKe9q5uaPkTFp1rndq7GDP5dnH0WI26Y
+# Jp0kIQazyOh4/WPmRQTkr8k05DQhqMTuqNXfELthEjGm6jxP+yrazmn2RkWj0ExW
+# SrmMUF0FWw==
 # SIG # End signature block

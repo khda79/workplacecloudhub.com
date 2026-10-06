@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.37 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.38 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -60,6 +60,11 @@ Missing input remains `N/D`. The OneDrive usage CSV is fresh-data checked but
 is marked provisional because no matching current file receipt is available.
 Frontline eligibility and required E3 features require a manual review before
 changing a license.
+The same workbook has an `E3 to F3 review` sheet listing each qualified review
+candidate with mailbox size, OneDrive storage, archive and hold state, and
+Windows/Mac Apps usage flags. Its row count is checked against the email KPI;
+the Summary sheet also shows the E3 review candidate count. The review sheet
+is present with headers when there are no qualified candidates.
 
 Service-plan state codes are `A` (enabled and successfully provisioned), `D`
 (disabled), `PA` (pending activation), `PI` (pending input), `PP` (pending

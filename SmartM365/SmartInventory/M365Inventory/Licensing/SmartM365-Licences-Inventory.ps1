@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.37
+    Version : 1.38
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1129,7 +1129,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; LicenseSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
+    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; LicenseSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
   }
   if ($licenseReceiptBypassed) {
     $licenseSource.Forced = $true
@@ -1447,6 +1447,7 @@ function Get-LicensesFocusedUsageRows {
   $e3Review = [pscustomobject]@{ Available=$false; Assigned=0; Candidates=0; Unknown=0; Excluded=0; RecoveryExcluded=0; Reason='' }
   $e3Review.Assigned = $productUsers['Microsoft 365 E3'].Count
   $e3Review.Available = $true
+  $e3ReviewDetails = [System.Collections.Generic.List[object]]::new()
   $e3RecoveryIds = @{}
   foreach ($item in $recoveryDetails) { if ($item.License -eq 'Microsoft 365 E3') { $e3RecoveryIds[[string]$item.UserId] = $true } }
   $appsReport = $reports['M365_Apps_Usage_180D.csv']
@@ -1480,14 +1481,30 @@ function Get-LicensesFocusedUsageRows {
     $bytesText = ([string]$driveRow.'Storage Used (Byte)').Trim()
     $bytes = 0L
     if ($windows -notin @('yes','no') -or $mac -notin @('yes','no') -or $deleted -notin @('true','false') -or
-        ($deleted -eq 'false' -and -not [long]::TryParse($bytesText, [ref]$bytes))) { $e3Review.Unknown++; continue }
+        ($deleted -eq 'false' -and (-not [long]::TryParse($bytesText, [ref]$bytes) -or $bytes -lt 0))) { $e3Review.Unknown++; continue }
     if ($windows -eq 'yes' -or $mac -eq 'yes' -or $deleted -eq 'true' -or $bytes -ge 2GB) { $e3Review.Excluded++; continue }
     $e3Review.Candidates++
+    $identity = if ($licenseIdentityByUser.ContainsKey($userId)) { $licenseIdentityByUser[$userId] } else { $null }
+    $displayName = if ($user.PSObject.Properties['Display name'] -and $user.'Display name') { [string]$user.'Display name' } elseif ($identity) { [string]$identity.DisplayName } else { '' }
+    $e3ReviewDetails.Add([pscustomobject]@{
+      UserId = $userId
+      UserPrincipalName = [string]$user.'User principal name'
+      DisplayName = $displayName
+      MailboxSizeGB = $sizeGb
+      OneDriveUsedBytes = $bytes
+      OneDriveUsedGB = [math]::Round(([decimal]$bytes / [decimal]1GB),4)
+      ArchiveStatus = [string]$mailbox.ArchiveStatus
+      LitigationHoldEnabled = [string]$mailbox.LitigationHoldEnabled
+      RetentionHoldEnabled = [string]$mailbox.RetentionHoldEnabled
+      WindowsAppsUse180d = [string]$appsRow.Windows
+      MacAppsUse180d = [string]$appsRow.Mac
+    })
   }
   if ($e3Review.Candidates + $e3Review.Unknown + $e3Review.Excluded + $e3Review.RecoveryExcluded -ne $e3Review.Assigned) {
     throw 'E3 to F3 review categories do not reconcile with assigned E3 users.'
   }
-  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; LicenseSourceForced=$licenseSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
+  if ($e3ReviewDetails.Count -ne $e3Review.Candidates) { throw 'E3 to F3 review details do not reconcile with candidate count.' }
+  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; DowngradeDetails=$e3ReviewDetails.ToArray(); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; LicenseSourceForced=$licenseSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
 }
 
 function Format-LicensesMetric {
@@ -1520,6 +1537,12 @@ function New-LicensesRecoveryWorkbook {
   $usageByProduct = @{}
   if ($Usage) { foreach ($item in $Usage.Rows) { $usageByProduct[$item.Product] = $item } }
   $details = @(if ($Usage -and $Usage.RecoveryDetails) { $Usage.RecoveryDetails })
+  $downgradeDetails = @(if ($Usage -and $Usage.DowngradeDetails) { $Usage.DowngradeDetails })
+  $downgradeReview = if ($Usage) { $Usage.DowngradeReview } else { $null }
+  if ($downgradeReview -and $downgradeReview.Available -and
+      [long]$downgradeReview.Candidates -ne $downgradeDetails.Count) {
+    throw ("E3 to F3 review detail count differs from the email KPI: {0} versus {1}." -f $downgradeDetails.Count,$downgradeReview.Candidates)
+  }
   $summary = foreach ($product in $SummaryRows) {
     $metric = if ($usageByProduct.ContainsKey($product.Product)) { $usageByProduct[$product.Product] } else { $null }
     $available = ($metric -and $metric.Available)
@@ -1532,6 +1555,7 @@ function New-LicensesRecoveryWorkbook {
       License = $product.Product
       RecoveryCandidates = if ($available) { $expected } else { 'N/D' }
       UnknownUsers = if ($available) { [long]$metric.Counts.RecoveryUnknown } else { 'N/D' }
+      E3toF3ReviewCandidates = if ($product.Product -ne 'Microsoft 365 E3') { 'N/A' } elseif ($downgradeReview -and $downgradeReview.Available) { [long]$downgradeReview.Candidates } else { 'N/D' }
       Qualification = if (-not $available) { 'Source not qualified' } elseif ($Usage.LicenseSourceForced) { 'Provisional: license receipt bypassed' } else { 'Qualified' }
       LicenseSnapshotUtc = $CollectedAtUtc
     }
@@ -1570,6 +1594,39 @@ function New-LicensesRecoveryWorkbook {
     try {
       $sheet = $package.Workbook.Worksheets.Add('Recovery candidates')
       $headers = @('License','UserId','UserPrincipalName','DisplayName','RecoveryReason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites')
+      for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
+      $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
+      $sheet.View.FreezePanes(2,1)
+    }
+    finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
+  }
+  if ($downgradeDetails.Count -gt 0) {
+    $safeDowngradeDetails = foreach ($item in ($downgradeDetails | Sort-Object UserPrincipalName,UserId)) {
+      $safeUpn = [string]$item.UserPrincipalName
+      $safeDisplayName = [string]$item.DisplayName
+      if ($safeUpn -match '^\s*[=+\-@]') { $safeUpn = "'$safeUpn" }
+      if ($safeDisplayName -match '^\s*[=+\-@]') { $safeDisplayName = "'$safeDisplayName" }
+      [pscustomobject]@{
+        UserId = [string]$item.UserId
+        UserPrincipalName = $safeUpn
+        DisplayName = $safeDisplayName
+        MailboxSizeGB = [decimal]$item.MailboxSizeGB
+        OneDriveUsedGB = [decimal]$item.OneDriveUsedGB
+        OneDriveUsedBytes = [long]$item.OneDriveUsedBytes
+        ArchiveStatus = [string]$item.ArchiveStatus
+        LitigationHoldEnabled = [string]$item.LitigationHoldEnabled
+        RetentionHoldEnabled = [string]$item.RetentionHoldEnabled
+        WindowsAppsUse180d = [string]$item.WindowsAppsUse180d
+        MacAppsUse180d = [string]$item.MacAppsUse180d
+      }
+    }
+    $safeDowngradeDetails | Export-Excel -Path $Path -WorksheetName 'E3 to F3 review' -TableName 'LicenseE3ToF3Review' -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
+  }
+  else {
+    $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
+    try {
+      $sheet = $package.Workbook.Worksheets.Add('E3 to F3 review')
+      $headers = @('UserId','UserPrincipalName','DisplayName','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
       for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
       $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
       $sheet.View.FreezePanes(2,1)
@@ -1855,7 +1912,7 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; E3 to F3 downgrade review</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook has an E3 to F3 review tab listing every qualified review candidate and the values used by these checks. Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Activity and overlap</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">05 &nbsp; Licensed shared mailboxes</h2>
@@ -2497,7 +2554,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.37"
+$ScriptVersion = "1.38"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3201,8 +3258,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxeS1eDaUiEC0j
-# ZScqBFyAtj8avGOkD4oVHeWW696wmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACBSgOlNsqn5TG
+# t1ZmfRf1y4HmSmDhwf+CHjyDrpnWOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3335,31 +3392,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMnCUl29eIMk73XPSzNdY6KePfTdWen1ZZnnpc7wPDeZMA0GCSqG
-# SIb3DQEBAQUABIIBgIA64TeBlRENcTji2Jjn1rqShdXBn/rhBVf/41nKayeVd0BP
-# 3sGoZw79PH8CKPGNDvv+grRwTm4R4h6diIYrZHBMs0n1KW6iWRM116N0VhLH2vXT
-# coO1NOYz4qXR7mPWyCKYJnVgxGBP3RefjxRr6Mz1G7v2DGHjNgOlEJoburvOP2Fd
-# No+hodwB7GplVRwS+6dHRiGlOOHmopSjFA/IPxMj0plvsYssWAkpyY+9mpwgMPx2
-# hUZf55EsAwvgZosB/sWyZmuCUXDkFMBQu70arjFXsjkqU0ASj3vasaGqqDXsLj7b
-# j+IEGQ/CJOd5XuJYqGIE4oZYjUlErqd58gSOa1m1QV9y3z+TAWPPJ+gDUG9FsMkV
-# wDtYzm/5lHu+Yam/XUUeHM7xAU4vh59PNg0nppTG1anOBMYFQXG/f4RtqhSF2l5o
-# knDEO5k2o5hqLUsx0b+QjyNQc/uJg6ocg/agPrQlJyYcFAqwRQBdoLWKuPGejjYE
-# UzG15gF48c2CKMLEXKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID1/AYclX26f8sj+1Qxqx0BAaLslVxN2unUSjgjOAfIyMA0GCSqG
+# SIb3DQEBAQUABIIBgA3QQJusDFLQEWpTPf4xHv1cyuQMwz3FpXTeHpkjkk+YPn0t
+# iQw6zhVjjlJZ4c3XusUHE5q723rfX8H+i3slg6tYEewC/SWgRrgyY7rABvEI5Ayb
+# 71dgNxb5DXSY+uF9+trVTytxvMBA2g0JGM61KTVcv0YOXMHEBAJQ7bdl5K35MjGJ
+# kulOusSTfGz/u/AJgCQJaO5FHSCr7CRde1GIJV1Gxdu+JFxe17kPYYEdhbWtaUMt
+# k1ngh74/OdgpCLK/DWoJS8YbJhjBbt7b8aRmJ7IgD0P8mQvjhKyltgNXYH20Fiie
+# ydsUKJdx2dpJAk75Fs3TSPgCGbsoBdUZxWmqfWJ9xcqZXGSo+chi6REXUqyOSzdW
+# sIpSmQd0gxIt/VXLvZEHDYEWqPEj7hnakB8pc33370Jd2/kW2ht7pHxFkSZhrmxx
+# vDTSVt33zdqTqcVh0SDptDY505YEvBfgOGsKRNfV8Qa/wmtG3sIlK3BY/2uNRXBP
+# YkjRxVPLT+bbMYwUmqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDE2
-# MDlaMC8GCSqGSIb3DQEJBDEiBCBqMS8uzUTK6/z83JsAdP+YefRuwdRNNpVSghae
-# 3Sk3czANBgkqhkiG9w0BAQEFAASCAgCH1wMaEb9zK8Z7eALnBGGL4x6UNtfPs1jV
-# mOpKBhQTJA8lAp0YhafaULn2eKO7fWxcRh8lzbJDtOyGpYuQ5XMrD5bJbIgiakOW
-# HkfpnfKn4kyFHh2V6NgbD6wZvMwsdHXk8Puifcf20F96LaK3ilwq9SzNq4lbtp8G
-# oiIpnlz0puWAFNQPdoeZRKkCvNgW/rQZxxC9fn72NSB0R6K8i72tD14Y3VFAjQNA
-# t0I98lTDEtJ+NFo7Pvy16D3djBWTlK3cgyHirc6YDkA8FUuZsy6Ff+1BqDtmUz6D
-# lzHfDsnKEfeYIbp/YU3uyCylsJBjdrc3NBG+wli/AU867TZ2Zl1Ws3OsPjdviEJ2
-# r8mhhaiE0cxaJLWFSo7vDkBBMYquwYTttfk62s+8JJ1MkzHeci6HqE4maffk3dAU
-# T6f1/DH1mKQvzT58QL8CaZJO0/+GVG73arPYNUS5JKuEsM0EChiQUmsIgYELjCgS
-# m4NG32SEIedHJFv+UBCF3K8Ms8qZs/XXDF0w/Kmtp0kkvcCH+xtU5Wr8mWrktxOK
-# WRRZM9MLS6B6us9BXPnvJMWQS58OFnbImO5KB8bB6+QFTZp6ZT2L/t7rBBcz5ESy
-# gjLS0bSSj7ecQnK+xfME5xIu0WjjNQHaBClOHh3ArX7BSj05eHy3CLQ4vciS7qtA
-# a9GdzKW5sg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDMx
+# NTVaMC8GCSqGSIb3DQEJBDEiBCDGVu9yAOSS11RzvapG/DW3OvShc2n/2mSjTzC7
+# GcAXIzANBgkqhkiG9w0BAQEFAASCAgCLteURgwgGdfyNoXdMqyRBFjWvzVx1YE90
+# aSafsgTGXHzQI6ya7svfgu5sYv1d2O8f6b4vpZIplnnGVwlZu7z+uIK96+WUkr+b
+# nLKYUOzlDNlhgvapx7S5jKddT0vjlOXhRHQ0NTa6DXZP8FbGj3MAm9M4AcAyb7/r
+# 6cfReJOmkg1U6+p2u6on7iXNrSgXEi5x+k2QWsqfT3ZZ/UKKUj+T/zQICoBkcXNN
+# JYkodw+3zq3quHU90I8CgOJnhCFVJQhX0pxvvwJGLhkIUmhQZfs2slEQLg4OkIEh
+# Ty2TmSZW6f94JKlWIFgu7EeQAAmzFXYXplKHjXP767esc+66zsuQTeQN8GhvVPza
+# OAiUNQk4/5ff4VcG85GakDZR4qqiy5feZF2pzgAEWiuYNWko98iYeGleSNEmAGQ9
+# 34XJOw3zzunGxGYe4fAkVK9WSwBIVhuA6Bp/d3u+WgyCfe99YWuJD1vHVLqbg/F3
+# QTWX0NBIl8P5/cpAG5weBFBhmbqnlPDrXB50HEU3Ydsiv8FUVnTGfB7R2KpCysLQ
+# Z+uwjrp1Nf5ahHY66a6A0kmrGNiE/4Og5+uZvKczwgrKgje5cbDjYsdfzV3M6mpZ
+# Zj225tkmhh/kyFDpMjWiMm+Vh21GnPxBkTJUlX0pjI2m+ToxAqjUrVSJ4pwh91dL
+# 4W5aUIR4+Q==
 # SIG # End signature block
