@@ -1,11 +1,12 @@
 # Current-only CMDB preparation
 
-Version: 0.3.6. Status: offline-tested migration candidate, not deployed or scheduled.
+Generator version: 0.3.8. PowerShell entry point: 0.3.6.
+Status: offline-tested migration candidate, not scheduled or report-qualified.
 
 ## Scope and execution boundaries
 
 `SmartM365-CmdbEvidence-Prepare.ps1` prepares 46 flat reporting CSVs directly
-from 33 canonical SmartInventory CSVs in `DATA-LAST`. It requires Python 3.10+
+from 34 canonical SmartInventory CSVs in `DATA-LAST`. It requires Python 3.10+
 and uses the standard library only. No CMDB collector, compatibility Raw tree,
 Intelligence prepared table, or Power BI runtime is required.
 
@@ -25,10 +26,17 @@ Core's automatic Teams log callback is suppressed in memory during this
 offline invocation, and SharePoint upload is disabled. No local module or
 tenant configuration is changed to disable notifications permanently.
 
-`-ValidateOnly` validates acquisition proof and raw CSV contracts. Python does
+`-ValidateOnly` validates acquisition proof, raw CSV contracts, and license
+assignment user/SKU parent coverage by native IDs. It uses the same parent gate
+as generation, including paths in Error or Disabled state, and reports missing
+user rows/distinct IDs separately from missing SKU rows/distinct IDs. Parent IDs
+must exist in the current user and SKU inventories; freshness alone does not
+establish coherence between separately collected snapshots. No paths are dropped,
+identities fabricated, or historical exports substituted. Python does
 not create prepared output, staging or a publication lock in this mode.
 PowerShell still initializes its local configuration and operational logs.
-Source-only validation is not full table/relationship validation.
+This source/parent validation is not full prepared-table validation: other model
+relationships, derived calculations and Power BI refresh still need qualification.
 
 Do not schedule the entry point or switch the report yet. Required acquisition
 proof is intentionally not fabricated from existing files or their timestamps.

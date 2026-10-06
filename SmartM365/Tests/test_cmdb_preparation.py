@@ -69,6 +69,90 @@ class CsvReaderTests(unittest.TestCase):
             csv.field_size_limit(previous)
 
 
+class LicenseAssignmentParentTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='SmartInventory-Cmdb-Parents-')
+        self.source = Path(self.temporary.name)
+        self.contract = pipeline.load_json(pipeline.CONTRACT)
+        self.definitions = {item['name']: item for item in self.contract['sources']}
+        self.write('users', ['Object Id'], [{'Object Id': 'u1'}])
+        self.write('skus', ['Id'], [{'Id': 's1'}])
+        self.write_paths([{'UserId': 'u1', 'SkuId': 's1'}])
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def write(self, name, columns, data):
+        with (self.source / self.definitions[name]['file']).open(
+                'w', encoding='utf-8-sig', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(data)
+
+    def write_paths(self, data):
+        self.write('license_paths', ['UserId', 'SkuId', 'AssignedByGroupId', 'AssignmentState'], data)
+
+    def validate(self):
+        return pipeline.validate_license_assignment_parents(self.source, self.contract)
+
+    def test_normalized_native_ids_match_without_changing_files(self):
+        self.write_paths([{'UserId': ' U1 ', 'SkuId': ' S1 ', 'AssignedByGroupId': '',
+                           'AssignmentState': 'Active'},
+                          {'UserId': 'u1', 'SkuId': 's1', 'AssignedByGroupId': 'unresolved-group',
+                           'AssignmentState': 'Error'}])
+        before = {p.name: pipeline.sha(p) for p in self.source.iterdir()}
+        self.validate()
+        self.assertEqual(before, {p.name: pipeline.sha(p) for p in self.source.iterdir()})
+
+    def test_valid_empty_assignment_set_is_allowed(self):
+        self.write_paths([])
+        self.validate()
+
+    def test_missing_users_count_rows_and_distinct_native_ids(self):
+        self.write_paths([{'UserId': 'missing-user', 'SkuId': 's1', 'AssignedByGroupId': ''},
+                          {'UserId': ' MISSING-USER ', 'SkuId': 's1', 'AssignedByGroupId': 'g1'}])
+        with self.assertRaises(ValueError) as failure:
+            self.validate()
+        message = str(failure.exception)
+        self.assertIn('MissingUserRows=2; MissingUserIds=1', message)
+        self.assertIn('MissingSkuRows=0; MissingSkuIds=0', message)
+        self.assertIn('M365_Users_Active.csv (UserId -> Object Id)', message)
+        self.assertNotIn('missing-user', message)
+
+    def test_missing_skus_are_distinguished_from_missing_users(self):
+        self.write_paths([{'UserId': 'u1', 'SkuId': 'missing-sku'}])
+        with self.assertRaises(ValueError) as failure:
+            self.validate()
+        self.assertIn('MissingUserRows=0; MissingUserIds=0', str(failure.exception))
+        self.assertIn('MissingSkuRows=1; MissingSkuIds=1', str(failure.exception))
+        self.assertIn('M365_Licenses_Tenant.csv (SkuId -> Id)', str(failure.exception))
+
+    def test_complete_scan_reports_both_missing_parent_types(self):
+        self.write_paths([{'UserId': 'missing-user', 'SkuId': 's1'},
+                          {'UserId': 'u1', 'SkuId': 'missing-sku'},
+                          {'UserId': 'other-user', 'SkuId': 'missing-sku'}])
+        with self.assertRaises(ValueError) as failure:
+            self.validate()
+        self.assertIn('MissingUserRows=2; MissingUserIds=2', str(failure.exception))
+        self.assertIn('MissingSkuRows=2; MissingSkuIds=1', str(failure.exception))
+
+    def test_error_disabled_and_unknown_paths_are_not_filtered(self):
+        for state in ['Active', 'ActiveWithError', 'Error', 'Disabled', '', 'Unknown']:
+            with self.subTest(state=state):
+                self.write_paths([{'UserId': 'missing-user', 'SkuId': 's1', 'AssignmentState': state}])
+                with self.assertRaisesRegex(ValueError, 'MissingUserRows=1'):
+                    self.validate()
+
+    def test_blank_child_ids_cannot_match_blank_parent_ids(self):
+        self.write('users', ['Object Id'], [{'Object Id': ''}])
+        self.write('skus', ['Id'], [{'Id': ''}])
+        self.write_paths([{'UserId': '', 'SkuId': ''}])
+        with self.assertRaises(ValueError) as failure:
+            self.validate()
+        self.assertIn('MissingUserRows=1', str(failure.exception))
+        self.assertIn('MissingSkuRows=1', str(failure.exception))
+
+
 class PreparationTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.gettempdir()) / ('SmartInventory-Cmdb-Tests-'+uuid.uuid4().hex)
@@ -391,6 +475,58 @@ foreach($producer in $registry.Producers){{
         self.assertFalse(self.output.exists())
         self.assertEqual(before,{p.name:pipeline.sha(p) for p in self.source.iterdir()})
         self.assertFalse((self.root/'.cmdb-preparation.lock').exists())
+
+    def test_validate_only_rejects_orphan_license_user_without_output_or_source_writes(self):
+        self.inputs['license_paths'][0]['UserId'] = 'missing-user'
+        self.write_inputs()
+        before = {p.name: pipeline.sha(p) for p in self.source.iterdir()}
+        with mock.patch.object(pipeline, 'PublicationLock', side_effect=AssertionError('Lock must not start')):
+            with self.assertRaisesRegex(ValueError, 'MissingUserRows=1; MissingUserIds=1'):
+                self.prepare(validate_only=True)
+        self.assertFalse(self.output.exists())
+        self.assertFalse(list(self.root.glob('.cmdb-*')))
+        self.assertEqual(before, {p.name: pipeline.sha(p) for p in self.source.iterdir()})
+
+    def test_validate_only_rejects_orphan_license_sku_before_generation(self):
+        self.inputs['license_paths'][0]['SkuId'] = 'missing-sku'
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, 'MissingSkuRows=1; MissingSkuIds=1'):
+            self.prepare(validate_only=True)
+        self.assertFalse(self.output.exists())
+
+    def test_orphan_license_parents_preserve_last_output_before_staging(self):
+        self.prepare()
+        before = {p.name: pipeline.sha(p) for p in self.output.iterdir()}
+        self.inputs['license_paths'][0].update(UserId='missing-user', SkuId='missing-sku')
+        self.write_inputs()
+        sources = {p.name: pipeline.sha(p) for p in self.source.iterdir()}
+        for validate_only in [True, False]:
+            with self.subTest(validate_only=validate_only):
+                with mock.patch.object(pipeline, 'PublicationLock', side_effect=AssertionError('Lock must not start')):
+                    with self.assertRaises(ValueError) as failure:
+                        self.prepare(validate_only=validate_only)
+                self.assertIn('MissingUserRows=1; MissingUserIds=1', str(failure.exception))
+                self.assertIn('MissingSkuRows=1; MissingSkuIds=1', str(failure.exception))
+                self.assertEqual(before, {p.name: pipeline.sha(p) for p in self.output.iterdir()})
+                self.assertEqual(sources, {p.name: pipeline.sha(p) for p in self.source.iterdir()})
+                self.assertFalse(list(self.root.glob('.cmdb-stage-*')))
+                self.assertFalse(list(self.root.glob('.cmdb-rollback-*')))
+
+    def test_refreshed_native_user_unblocks_validation_and_preserves_error_path(self):
+        self.inputs['license_paths'].append(dict(self.inputs['license_paths'][0],
+                                                UserId='new-user', AssignmentState='Error'))
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, 'MissingUserRows=1'):
+            self.prepare(validate_only=True)
+        new_user = dict(self.inputs['users'][0], **{'Object Id': 'new-user'})
+        self.inputs['users'].append(new_user)
+        self.write_inputs()
+        self.assertEqual(self.prepare(validate_only=True)['Status'], 'ValidatedSources')
+        self.assertEqual(self.prepare()['GeneratedTables'], 46)
+        error_paths = [row for row in self.table('LicenseAssignmentPath')
+                       if row['SourceUserId'] == 'new-user']
+        self.assertEqual(len(error_paths), 1)
+        self.assertEqual(error_paths[0]['AssignmentState'], 'Error')
 
     def test_distinct_application_footprint_across_versions(self):
         self.prepare()

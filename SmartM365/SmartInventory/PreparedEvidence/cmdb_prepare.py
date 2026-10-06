@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 import cmdb_freshness
 
-VERSION = '0.3.7'
+VERSION = '0.3.8'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -176,6 +176,36 @@ def accepted_ad_coverage(proof):
     return cmdb_freshness.partial_ad_coverage(proof['Producer'], coverage)
 
 
+def validate_license_assignment_parents(source, contract):
+    """Check native parent IDs without dropping paths or inventing identities."""
+    definitions = {item['name']: item for item in contract['sources']}
+    user_file = definitions['users']['file']
+    sku_file = definitions['skus']['file']
+    path_file = definitions['license_paths']['file']
+    users = {normalized(row['Object Id']) for row in rows(source / user_file)}
+    skus = {normalized(row['Id']) for row in rows(source / sku_file)}
+    missing_users, missing_skus = set(), set()
+    missing_user_rows = missing_sku_rows = 0
+    for row in rows(source / path_file):
+        user_id, sku_id = normalized(row['UserId']), normalized(row['SkuId'])
+        if not user_id or user_id not in users:
+            missing_user_rows += 1
+            missing_users.add(user_id)
+        if not sku_id or sku_id not in skus:
+            missing_sku_rows += 1
+            missing_skus.add(sku_id)
+    if missing_user_rows or missing_sku_rows:
+        # Counts and file names suffice for diagnosis; do not expose account IDs.
+        raise ValueError(
+            'License assignment parent identity missing: '
+            + f'Source={path_file}; UserParent={user_file} (UserId -> Object Id); '
+            + f'MissingUserRows={missing_user_rows}; MissingUserIds={len(missing_users)}; '
+            + f'SkuParent={sku_file} (SkuId -> Id); '
+            + f'MissingSkuRows={missing_sku_rows}; MissingSkuIds={len(missing_skus)}. '
+            + 'Refresh the affected parent inventory and revalidate coherent current sources; '
+            + 'no assignment paths were excluded or historical exports substituted.')
+
+
 def validate_sources(source, contract, tenant, now=None, identity=None):
     now = now or dt.datetime.now(UTC)
     if not identity or identity.get('TenantKey') != tenant:
@@ -235,6 +265,7 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
                     {'Producer':r['Producer'], 'Message':'Partial AD coverage accepted; unavailable domains: '
                         + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
                     for r in receipts if r.get('DomainCoverage')]}
+    validate_license_assignment_parents(source, contract)
     recheck_sources(source, evidence, contract)
     return evidence
 
