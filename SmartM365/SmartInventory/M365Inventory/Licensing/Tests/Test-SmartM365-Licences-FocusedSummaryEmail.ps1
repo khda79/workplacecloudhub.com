@@ -632,6 +632,28 @@ try {
       $script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*license-users CSV absent*') {
     throw 'The temporary licensing receipt bypass is not visible in the email.'
   }
+  $licenseLastWriteUtc = (Get-Item -LiteralPath $licenseUsersPath).LastWriteTimeUtc
+  @{Status='Running';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(5).ToString('o');Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $runningWithoutBypass = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $runningWithoutBypass.Rows[0].Available $false 'Running receipt needs an explicit bypass'
+  $runningWithBypass = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $runningWithBypass.Rows[0].Available $true "Bypass accepts the prior CSV while a new collection is running ($($runningWithBypass.Sources[0].Reason))"
+  Assert-Equal $runningWithBypass.LicenseSourceForced $true 'Running receipt bypass is provisional'
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail -BypassLicenseUsersReceipt | Out-Null
+  if ($script:SentMail[0].BodyHtml -notlike '*Provisional license assignment indicators*' -or
+      $script:SentMail[0].BodyHtml -notlike '*previous license-users CSV while a new collection is running*') {
+    throw 'The running licensing receipt bypass is not visible in the email.'
+  }
+  @{Status='Running';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(-5).ToString('o');Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $inProgressCsv = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $inProgressCsv.Rows[0].Available $false 'Bypass rejects a CSV updated after the new collection started'
+  @{Status='Completed';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(5).ToString('o');Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $partialReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $partialReceipt.Rows[0].Available $false 'Bypass does not accept a completed partial licensing receipt'
   @{Status='Failed';IsPartialInventory=$true;Files=@()} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
   $failedReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
@@ -642,7 +664,6 @@ try {
   Assert-Equal $wrongHash.Rows[0].Available $false 'Bypass does not accept changed licensing CSV'
   @{Status='Completed';IsPartialInventory=$false;Files=@()} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $licenseLastWriteUtc = (Get-Item -LiteralPath $licenseUsersPath).LastWriteTimeUtc
   [System.IO.File]::SetLastWriteTimeUtc($licenseUsersPath, $today.AddDays(-20))
   $staleLicense = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
   Assert-Equal $staleLicense.Rows[0].Available $false 'Bypass does not accept stale licensing CSV'
@@ -657,8 +678,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMdstxeKpksN5l
-# 9ZbWpRhASP9DhfMOq/igLu3iAe40jaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNAjxfWA3q1nFN
+# Lw2q4VfcCFPH7gS6Hkn5RjY2cRmr9aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -791,31 +812,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL0SaGftNulyxTj/8oDV3LKP9DxMfdFzEZZB1zYbST5pMA0GCSqG
-# SIb3DQEBAQUABIIBgEe5ULdsfYSRULMCtx8o9Oayy3k9tHJXvdX4FXRCZkiepAg9
-# om1C5VAvZL0g3qmu3ErXpGA05R5NS6L5A+I3N7brv/l8gCF42YIjQpmne1r5DwoI
-# XwAc4WM4xBZPd97T6Ksu6E12tJFjQ74npcW8MLP02NtZl+m1/rhhniGKAWShcxKm
-# NwNIMBzbSeCIHcw7RgvG5K94rGbFhG7rYfPDPIxdj29PPjlPNrtBL114l+0w56dE
-# 9PW2yMptldMHZ04N3X52OTDnImgzLBrfyAMz1b5s3+Ytc5qFaadUq6qH7jncHLOK
-# rHt4xp1kJopyJ9eVHGUg5yOqBr5BhqdXYmg6BbAvX9DamCIjOAlPOMDKzEfbW4EF
-# TLc8v1k4DhVsEgVWCqpqb2BzDvonTh+PQEE5frcvrqy0xI74EVa3Ly3e8IzCsX0l
-# ODyILDikDOWp8Mb61j64soflcLlCeTweVwaCQAEDZPhQEN4X3l1Hu+x1Wj2xVIwV
-# MVCsjO7eNPIYVH2KHKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHSAi4DyxFlBe/DRlrJyhuNSK8nO6ZSnL2uUXE3AhSvXMA0GCSqG
+# SIb3DQEBAQUABIIBgDzaC8zSrUThL91S0V5a0LjBvgdXUC7jPzuLHndlZZ65dnwG
+# DP5fzAHa11YQ3/EdsTeLx1nTcHeEL86C89LuClnMHIWTrNbrTNnScuDkWRcQai5F
+# 3za0Fwa+HAyIDu5YFQugw4tr65oG+OYBWlwPxBsQjLwt+FfTdkRrqCjma34cTlpR
+# n3H3//BpNFZO9qWJqU3Rtxox06Ntt1K0E0mzKoqUV26CayHjZo7jBgMpvs07Z8o+
+# zFPPO/BOG3tAkXwZOxS6WtmcWDcuLNLcwqqA1m0xqBkLR4N6+wq9DF0oBSi80HOp
+# NbVkQSmwTu6NJa0OiaOdvs+eqCHQlHJcmVaxoKf3/4v0giA3qJ9p1g1V/lDGjVPK
+# As7CfK6wkDih2vgDIt5kUGYG+CLnvlTrE6PvHgD2dA+x1HGKOrxDQB61hyBNF//v
+# wFBG0avQS5EcVqjN6xntRJQtkaObiAhfQrBY6GdxgAhT93R1ag47WPnDiSwDAqq9
+# r06nyE5OIFSQmqcRWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODU5
-# MTZaMC8GCSqGSIb3DQEJBDEiBCBXg4Lhv83OIc8i8do15wObJdwjHDaCBXhxs2jD
-# Rtv9xjANBgkqhkiG9w0BAQEFAASCAgAmTRfgpG6/6t+TjD23smDelPEBf25O7IKo
-# QsiIg9Pi99JCM5GkZu9jpFAqnxYMadovOsRBgptATfjrqwxM0elpOtDAvwb4rlI0
-# To1UUkezol8YRehYDq5HgOJw7AjNqNBdhzV1OjvlvoJyWeh13ElqO7yuutM7BSHS
-# PgF0pxejO0EYIWX5tWk2m7e3yXQC7IiZdRAvMbEmEB3WcrydtYbbMBS3vNW5x9pA
-# e/vCwuApPHJIU6hyyrskoVwYlmeo34Mygn5X6OADjD8MD8h/2TFjeUAcDvE11W/7
-# yuFH96EJjOURCzUND1TvVnQS3kdAkBmC02/0gkiRRfmNpS4JWtZmzNAla0sDTW+N
-# bJZ67xfP2mR9ZEngzvamfVCO2cN+xP4Yy7VbPvsdVoMaHINM4NqGcoyf1IwZVpVE
-# uVCd8T0Mb8kv2nZAGaBGmvsy1Zj7fl5cnzTkCdvMMimcLdK3HQ1WmJlM0oJE5mTJ
-# zSGIbetxO9+l5wa/jdHg6NhcMR4rWT0tQwKHbFY9zdwB5rPvV/lHRxtvuVFIt+lr
-# ZsU5w2AkuiFD9CPOA39BjaBI+z9UkcTMBcAthqrnbt2Bmtjsz9g0hUThIvsZguRk
-# pETt/QAlXYJuXJL4vB/1aHpja457Yw5UFkiJ6P2tPAYbs5wcBUA7oBOS6ZnMbJLS
-# g/2toOhydw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxOTI2
+# MTdaMC8GCSqGSIb3DQEJBDEiBCBiz+/huFMjAW6IeKD1PF1HUohoAsOA48P75EwK
+# R96PRDANBgkqhkiG9w0BAQEFAASCAgBJ9B8UqckRgvDbUL7qA3xGh4DGtJcRuS7Q
+# gyfd2fS2JiUBVDVy+mTsw/0q/hZSORYMcAcfmvy3YAJO0KphCGaxy8UWnWkgNHRC
+# 3gccruD86B49J6k4W4UZQwAD3WS9Rc6+RGYTBdFs0UbARtxUmdFj4uNL65UgwY4F
+# 7vlsnbUHPYYpW64DidN9nx5FAym81Qr9I+mLUjcT0q1Y8QD7PT22dz2wNhTNxrm+
+# BQ8zSWaQ7yv7mvWsoe55nbWtLKe/lcPuqL24hmg5V535gzJhAJdqBiMjBHgF5Onk
+# vnbZ+TwdB1pat88igneM003b8y6XbnVHzNFkv7TiuoocaUIIcdZ+Wc+4XdPR1Iuz
+# 3lb9aVnOjDA7qcUU4PhAKjYBFGdy+ozpBFZ6WsaqmmpkjwmUaWGFcp0yiKhPzvMn
+# TNKbLcOutjhpji9UihSYhdFOBDnWsXYREP69sQE0NEOSaQfLoD03FzQwwhTIoHqb
+# 65+r8FL+8/Wqoiq6HEK5vwvnmmxE0EwfDuTsehGfbW55F23X72XCrZaH0DdDm88Z
+# bSZVMjtr9FUw6X3f3SvaKOsUHzVFRjWAJAGW1sS5uGrgnyxwzL4MH2nC7rYnaR/Y
+# /6Fmb7+IMiXAo6FjHunoKXLxqCzHZg9WPIoABPpOLXqysNVhjcXArbz+cp9mOgo5
+# /q0IVzIibQ==
 # SIG # End signature block
