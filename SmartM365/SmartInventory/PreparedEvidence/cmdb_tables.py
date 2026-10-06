@@ -13,7 +13,7 @@ import math
 import re
 from pathlib import Path
 
-from cmdb_prepare import rows, normalized as key, utc
+from cmdb_prepare import rows, normalized as key, utc, application_coverage_status
 
 UNKNOWN = 'Unknown / unassigned'
 ZERO = '00000000-0000-0000-0000-000000000000'
@@ -172,6 +172,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     freshness = {item['File']:item for item in evidence['Freshness']['Sources']}
     for warning in evidence['Freshness']['Warnings']:
         finding('Source', warning['File'], 'SourceFreshnessWarning', warning['Message'])
+    for warning in evidence['ApplicationWarnings']:
+        finding('Source', warning['File'], 'ApplicationCoverageWarning', warning['Message'],
+                severity='Information', discriminator=warning['Kind'])
 
     users, users_by_native = [], {}
     for row in read('users'):
@@ -464,7 +467,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('FactUserServicePlan',service_plan_facts())
 
     applications=index(list(read('apps')),'AppId'); product_devices=collections.defaultdict(set)
-    application_devices=collections.Counter(); product_versions=collections.defaultdict(set)
+    application_devices=collections.Counter(); unresolved_app_devices=collections.Counter()
+    product_versions=collections.defaultdict(set)
     product_names={}; app_product={}
     for aid,row in applications.items():
         if row['CollectionScope']!='AllPlatforms' or row['RelationCollectionScope']!='All':
@@ -475,21 +479,25 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     def installations():
         for row in read('app_relations'):
             aid,mid=key(row['AppId']),key(row['DeviceId'])
-            if aid not in applications or mid not in managed:
-                raise ValueError('Orphan application/device relation')
-            application_devices[aid]+=1; product_devices[app_product[aid]].add(mid)
+            application_devices[aid]+=1
+            unresolved_app_devices[aid]+=mid not in managed
+            if aid in applications:
+                product_devices[app_product[aid]].add(mid)
             yield {'TenantDeviceApplicationKey':native_key(tenant,'app-device',aid,mid),
-                   'TenantApplicationKey':native_key(tenant,'app',aid),'AppId':aid,'ManagedDeviceId':mid,
+                   'TenantApplicationKey':native_key(tenant,'app',aid) if aid in applications else '',
+                   'AppId':aid,'ManagedDeviceId':mid,
+                   'ApplicationLinkStatus':'Resolved' if aid in applications else 'Unresolved',
+                   'DeviceLinkStatus':'Resolved' if mid in managed else 'Unresolved',
                    'SourceCollectedDateTime':acquired('app_relations')}
     emit('FactDeviceApplication',installations())
-    for aid,row in applications.items():
-        if number(row['DeviceCount']) != application_devices[aid]:
-            raise ValueError('Application per-version relation coverage differs from DeviceCount')
     emit('DimDetectedApplication',({'TenantApplicationKey':native_key(tenant,'app',aid),'AppId':aid,
         'SourceApplicationKey':aid,'DisplayName':row['AppName'],'Version':row['AppVersion'],
         'Publisher':row['AppPublisher'],'Platform':row['Platform'],'DeviceCount':application_devices[aid],
         'ReportedDeviceCount':row['DeviceCount'],'ExactRelatedDeviceCount':application_devices[aid],
-        'RelationshipCoverageStatus':'Complete','SourceCollectedDateTime':acquired('apps')} for aid,row in applications.items()))
+        'ResolvedDeviceCount':application_devices[aid]-unresolved_app_devices[aid],
+        'UnresolvedDeviceCount':unresolved_app_devices[aid],
+        'RelationshipCoverageStatus':application_coverage_status(int(row['DeviceCount']), application_devices[aid], unresolved_app_devices[aid]),
+        'SourceCollectedDateTime':acquired('apps')} for aid,row in applications.items()))
     top=[]
     for product,names in product_names.items():
         name,publisher,platform=names
@@ -780,8 +788,15 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         dates.append({'Date':day.isoformat(),'Year':day.year,'Quarter':(day.month-1)//3+1,'Month':day.month,'MonthName':day.strftime('%B'),'Day':day.day})
         day+=dt.timedelta(days=1)
     emit('DimDate',dates)
-    emit('SourceHealth',({'SourceName':r['File'],'Status':('SuccessWithWarnings' if r.get('DomainCoverage') else r['Status']),
-        'Coverage':('Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else 'Complete producer file scope'),
+    app_files = {source_defs[name]['file'] for name in ('apps', 'app_relations')}
+    app_coverage = evidence['ApplicationCoverage']
+    emit('SourceHealth',({'SourceName':r['File'],'Status':('SuccessWithWarnings' if r.get('DomainCoverage') or
+        (r['File'] in app_files and (evidence['ApplicationWarnings'] or freshness[r['File']]['State']=='Aging')) else r['Status']),
+        'Coverage':('Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else
+                    'Weekly application evidence; unresolved device relations=' + str(app_coverage['UnresolvedDeviceRelationRows'])
+                    + '; unresolved application relations=' + str(app_coverage['UnresolvedApplicationRelationRows'])
+                    + '; application count mismatches=' + str(app_coverage['CountMismatchApplications'])
+                    if r['File'] in app_files else 'Complete producer file scope'),
         'SourceRows':r['Rows'],'MaxItems':0,'StartedDateTime':r['StartedAtUtc'],'CompletedDateTime':r['CompletedAtUtc'],
         'Evidence':('Native producer success; exact hash and logical row count; acquisition age '
                     + str(freshness[r['File']]['AgeHours']) + 'h; '
@@ -789,14 +804,15 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                     + str(freshness[r['File']]['MaxAgeHours']) + 'h')} for r in evidence['Files']))
     relationships=[('PrimaryUser',len(user_devices),'Native Intune primary user'),('HasMailbox',sum(bool(m['TenantUserKey']) for m in mailbox_rows.values()),'Unique native ID or SMTP/user match'),
         ('AssignedLicense',len(assignment_rows),'Native Entra user/SKU pairs'),('MemberOfGroup',sum(member_counts.values()),'Direct Entra memberships, including non-user objects'),
-        ('DeviceHasApplication',table_counts['FactDeviceApplication'],'Native Intune app/device links'),('DeviceInAutopilot',sum(bool(get(r,'Managed device ID')) for r in read('autopilot')),'Native Autopilot managed device link'),
+        ('DeviceHasApplication',table_counts['FactDeviceApplication'],'Weekly native app/device observations; includes qualified unresolved links'),('DeviceInAutopilot',sum(bool(get(r,'Managed device ID')) for r in read('autopilot')),'Native Autopilot managed device link'),
         ('ADMemberOfGroup',sum(1 for _ in read('ad_members')),'Native direct and primary-group evidence'),
         ('PolicyAssignmentTarget',sum(1 for _ in read('policy_assignments')),'Configured target; not proof of effective device assignment')]
     emit('FactRelationshipOverview',({'RelationshipType':name,'RelationshipCount':count,'EvidenceSource':text} for name,count,text in relationships))
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
     # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
-    return {'ADDomainCoverage':[r['DomainCoverage'] for r in evidence['ProducerReceipts'] if r.get('DomainCoverage')], 'EntraGroupCatalogComparison': {
+    return {'ApplicationCoverage':app_coverage,
+        'ADDomainCoverage':[r['DomainCoverage'] for r in evidence['ProducerReceipts'] if r.get('DomainCoverage')], 'EntraGroupCatalogComparison': {
         'CatalogSource': source_defs['group_scope']['file'],
         'CatalogGroups': len(native_groups),
         'LicensingCatalogSource': source_defs['groups']['file'],

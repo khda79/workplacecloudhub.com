@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Generator version: 0.3.8. PowerShell entry point: 0.3.6.
+Generator version: 0.3.9. PowerShell entry point: 0.3.7. Prepared contract: 0.3.6.
 Status: offline-tested migration candidate, not scheduled or report-qualified.
 
 ## Scope and execution boundaries
@@ -34,6 +34,10 @@ must exist in the current user and SKU inventories; freshness alone does not
 establish coherence between separately collected snapshots. No paths are dropped,
 identities fabricated, or historical exports substituted. Python does
 not create prepared output, staging or a publication lock in this mode.
+Weekly application relations are also assessed in this mode: missing current
+parents and reported/observed count differences return `ApplicationWarnings`,
+not a blocking error. `ApplicationCoverage` contains aggregate row and distinct
+ID counts without printing raw identifiers. Both modes use the same assessment.
 PowerShell still initializes its local configuration and operational logs.
 This source/parent validation is not full prepared-table validation: other model
 relationships, derived calculations and Power BI refresh still need qualification.
@@ -211,7 +215,47 @@ each input plus group spans and the earliest individual expiration. Warnings
 are returned even by ValidateOnly, logged as WARNING by the offline wrapper,
 and retained as source-level quality findings and SourceHealth evidence. They
 are not a count of affected devices or proof that an unobserved device has no
-applications. Current orphan-app/device joins still reject preparation.
+applications. The weekly application qualification below replaces the former
+strict orphan-app/device and exact per-version count gates.
+
+### Non-blocking weekly application coverage
+
+The app scan is supporting evidence, not a simultaneous device inventory. All
+native app/device relations remain in `FactDeviceApplication`, even if their
+managed-device ID is absent from the separately collected current inventory.
+`DeviceLinkStatus` is `Resolved` or `Unresolved`; missing devices do not create
+rows in either device dimension. A missing application catalog parent also
+remains a relation with its native AppId, `ApplicationLinkStatus=Unresolved` and
+a blank `TenantApplicationKey`; no catalog application is fabricated. Existing
+parents must still use the correct keys and resolution status.
+
+The application dimension preserves `ReportedDeviceCount` from the catalog and
+`ExactRelatedDeviceCount` / `DeviceCount` from the observed relations separately.
+`ResolvedDeviceCount` and `UnresolvedDeviceCount` distinguish current-inventory
+coverage. `RelationshipCoverageStatus` reports a count difference, unresolved
+device links, both, or `Complete`; a mismatch never becomes false complete
+coverage or a substituted count. The source reported count must still be a
+valid non-negative integer.
+
+Top applications count distinct IDs observed in weekly relations across product
+versions, including unresolved current-device links. This is not a count of
+currently managed devices. Relations with an unknown application remain in the
+fact but cannot be attributed to an invented product. Consumers must use the
+link statuses and coverage counts rather than imply real-time complete coverage.
+
+SourceHealth contains application acquisition age and weekly coverage labels.
+FactDataQuality has bounded source-level Information findings; the wrapper logs
+the same qualifications as WARNING and completes with warnings, not failure.
+The source and preparation manifests retain the aggregate qualifications. No
+per-relation warning storm, historical fallback or additional collector call is
+introduced. This does not relax tenant identity, CSV parsing, immutable-key
+uniqueness, receipt completion, exact hashes/counts or the 7-day target / 10-day
+maximum acquisition age. All-platform / All-mode evidence is still required.
+
+Contract 0.3.6 adds only the application link and coverage columns to two existing
+tables. Regenerate the prepared batch; do not edit an older manifest in place.
+Existing reports are not switched or refreshed by this correction. Qualification
+of those application fields in the future Power BI model remains a separate step.
 
 Preparation and buffered readers share `cmdb_freshness.py`; both reject expired
 evidence. The read session expires at the earliest source-specific deadline,
@@ -304,10 +348,11 @@ batches before refreshing.
   blank, not inferred from unmatched rows. AD-only machines remain in the
   separate AD coverage fact; they are not silently added to the cloud dimension.
 - Product identity is normalized name/publisher/platform, excluding version.
-  `TopApplication.ReportedDeviceCount` is distinct managed-device IDs across
+  `TopApplication.ReportedDeviceCount` is distinct observed device IDs across
   versions. The old occurrence metric name/description in Power BI needs
-  adaptation before a report switch. All-mode app/device relations and exact
-  per-app count agreement are required; Top/None is rejected.
+  adaptation before a report switch. All-mode app/device acquisition is required;
+  Top/None is rejected. Unresolved links and per-app count differences are retained
+  with the weekly qualifications above, not used to reject the whole CMDB.
 - Native mailbox identity is preserved per source, then normalized nonblank
   SMTP reconciles hosting. Online/Remote wins over local evidence. Conflicting
   SMTP identities within one source block output. Blank SMTP stays evidence,

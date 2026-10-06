@@ -1064,20 +1064,26 @@ ConvertFrom-M365UserActivityReport -Rows @($raw) | ConvertTo-Json -Depth 4
         self.proof['Files'][0]['SHA256']=pipeline.sha(path);self.write_proof()
         with self.assertRaisesRegex(ValueError,'TenantKey'):self.prepare()
 
-    def test_orphan_application_relation_preserves_last(self):
-        def reject():
-            self.inputs['app_relations'][0]['DeviceId']='unknown';self.write_inputs();self.prepare()
-        self.unchanged_after(reject,'Orphan application')
+    def test_orphan_application_device_is_retained_with_qualification(self):
+        self.inputs['app_relations'][0]['DeviceId']='unknown';self.write_inputs()
+        result=self.prepare()
+        self.assertEqual(result['Status'],'Prepared')
+        relation=next(r for r in self.table('FactDeviceApplication') if r['AppId']=='a1')
+        self.assertEqual(relation['ManagedDeviceId'],'unknown')
+        self.assertEqual(relation['DeviceLinkStatus'],'Unresolved')
+        self.assertEqual(len(self.table('DimIntuneManagedDevice')),2)
 
     def test_partial_application_modes_preserve_last(self):
         def reject():
             self.inputs['apps'][0]['RelationCollectionScope']='Top';self.write_inputs();self.prepare()
         self.unchanged_after(reject,'All-mode')
 
-    def test_application_count_mismatch_preserves_last(self):
-        def reject():
-            self.inputs['apps'][0]['DeviceCount']='7';self.write_inputs();self.prepare()
-        self.unchanged_after(reject,'relation coverage')
+    def test_application_count_mismatch_is_qualified_not_rejected(self):
+        self.inputs['apps'][0]['DeviceCount']='7';self.write_inputs();self.prepare()
+        app=next(r for r in self.table('DimDetectedApplication') if r['AppId']=='a1')
+        self.assertEqual(app['ReportedDeviceCount'],'7')
+        self.assertEqual(app['ExactRelatedDeviceCount'],'1')
+        self.assertEqual(app['RelationshipCoverageStatus'],'Relation count differs')
 
     def test_group_completion_mismatch_preserves_last(self):
         def reject():

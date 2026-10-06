@@ -4,6 +4,7 @@ No APIs, collector execution, report edits or history. Completion evidence is
 mandatory; transport timestamps are never treated as acquisition timestamps.
 """
 import argparse
+import collections
 import csv
 import datetime as dt
 import hashlib
@@ -14,7 +15,7 @@ import uuid
 from pathlib import Path
 import cmdb_freshness
 
-VERSION = '0.3.8'
+VERSION = '0.3.9'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -206,6 +207,58 @@ def validate_license_assignment_parents(source, contract):
             + 'no assignment paths were excluded or historical exports substituted.')
 
 
+def application_coverage_status(reported, observed, unresolved):
+    parts = []
+    if reported != observed:
+        parts.append('Relation count differs')
+    if unresolved:
+        parts.append('Device links unresolved')
+    return '; '.join(parts) or 'Complete'
+
+
+def assess_application_coverage(source, contract):
+    """Weekly app snapshots may differ from current devices; retain every relation."""
+    definitions = {item['name']: item for item in contract['sources']}
+    applications = {}
+    for row in rows(source / definitions['apps']['file']):
+        if row['CollectionScope'] != 'AllPlatforms' or row['RelationCollectionScope'] != 'All':
+            raise ValueError('All-platform, All-mode applications are required')
+        raw = row['DeviceCount'].strip()
+        if not raw.isascii() or not raw.isdecimal():
+            raise ValueError('Invalid application reported device count')
+        applications[normalized(row['AppId'])] = int(raw)
+    managed = {normalized(row['ManagedDeviceId']) for row in rows(source / definitions['managed']['file'])}
+    counts = collections.Counter()
+    observed = collections.Counter()
+    missing_devices, missing_apps = set(), set()
+    for row in rows(source / definitions['app_relations']['file']):
+        aid, mid = normalized(row['AppId']), normalized(row['DeviceId'])
+        counts['RelationRows'] += 1
+        observed[aid] += 1
+        if aid not in applications:
+            counts['UnresolvedApplicationRelationRows'] += 1
+            missing_apps.add(aid)
+        if mid not in managed:
+            counts['UnresolvedDeviceRelationRows'] += 1
+            missing_devices.add(mid)
+    coverage = {field: counts[field] for field in (
+        'RelationRows', 'UnresolvedApplicationRelationRows', 'UnresolvedDeviceRelationRows')}
+    coverage.update(DistinctUnresolvedApplicationIds=len(missing_apps),
+                    DistinctUnresolvedDeviceIds=len(missing_devices),
+                    CountMismatchApplications=sum(reported != observed[aid] for aid, reported in applications.items()),
+                    Policy='Weekly native application evidence; unresolved relations retained without fabricated parents; not an instantaneous managed-device inventory')
+    warnings = []
+    for field, message in (
+            ('UnresolvedDeviceRelationRows', 'Weekly application relations reference device IDs outside the current managed inventory'),
+            ('UnresolvedApplicationRelationRows', 'Application relations reference IDs outside the collected application catalog'),
+            ('CountMismatchApplications', 'Reported application device counts differ from collected relation counts')):
+        if coverage[field]:
+            warnings.append({'File': definitions['app_relations']['file'], 'Kind': field,
+                             'Count': coverage[field], 'Message': message + f'; {field}={coverage[field]}. '
+                             'Evidence is retained and qualified; no parent identity is fabricated.'})
+    return coverage, warnings
+
+
 def validate_sources(source, contract, tenant, now=None, identity=None):
     now = now or dt.datetime.now(UTC)
     if not identity or identity.get('TenantKey') != tenant:
@@ -266,6 +319,7 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
                         + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
                     for r in receipts if r.get('DomainCoverage')]}
     validate_license_assignment_parents(source, contract)
+    evidence['ApplicationCoverage'], evidence['ApplicationWarnings'] = assess_application_coverage(source, contract)
     recheck_sources(source, evidence, contract)
     return evidence
 
@@ -314,6 +368,8 @@ def validate_relationships(output, contract):
     keys = {field: {row[field] for row in rows(output / (table+'.csv'))}
             for field, table in parents.items()}
     managed_ids = {row['ManagedDeviceId'] for row in rows(output / 'DimIntuneManagedDevice.csv')}
+    applications = {normalized(row['AppId']): row for row in rows(output / 'DimDetectedApplication.csv')}
+    application_counts, unresolved_devices = collections.Counter(), collections.Counter()
     mailboxes = {row['TenantMailboxKey'] for row in rows(output / 'FactMailbox.csv')}
     for definition in contract['tables']:
         name = definition['name']
@@ -321,8 +377,19 @@ def validate_relationships(output, contract):
             for field, table in parents.items():
                 if name != table and row.get(field) and row[field] not in keys[field]:
                     raise ValueError('Orphan output relationship: ' + name + '.' + field)
-            if name in ('DeviceHardware','FactDeviceApplication') and row['ManagedDeviceId'] not in managed_ids:
+            if name == 'DeviceHardware' and row['ManagedDeviceId'] not in managed_ids:
                 raise ValueError('Orphan output managed device: ' + name)
+            if name == 'FactDeviceApplication':
+                aid = normalized(row['AppId'])
+                application = applications.get(aid)
+                if (row['ApplicationLinkStatus'] != ('Resolved' if application else 'Unresolved')
+                        or row['TenantApplicationKey'] != (application['TenantApplicationKey'] if application else '')):
+                    raise ValueError('Inconsistent application link qualification')
+                resolved = row['ManagedDeviceId'] in managed_ids
+                if row['DeviceLinkStatus'] != ('Resolved' if resolved else 'Unresolved'):
+                    raise ValueError('Inconsistent application device link qualification')
+                application_counts[aid] += 1
+                unresolved_devices[aid] += not resolved
             if name == 'FactMailboxHosting' and row['MailboxHostingKey'] not in mailboxes:
                 raise ValueError('Orphan output mailbox hosting')
             for field in ('ManagerADObjectKey','ManagedByADObjectKey'):
@@ -330,6 +397,14 @@ def validate_relationships(output, contract):
                     raise ValueError('Orphan AD source owner/manager relationship')
             if row.get('NestedTenantGroupKey') and row['NestedTenantGroupKey'] not in keys['TenantGroupKey']:
                 raise ValueError('Orphan nested Entra group relationship')
+    for aid, row in applications.items():
+        count, missing = application_counts[aid], unresolved_devices[aid]
+        expected = application_coverage_status(int(row['ReportedDeviceCount']), count, missing)
+        if (row['RelationshipCoverageStatus'] != expected or row['DeviceCount'] != str(count)
+                or row['ExactRelatedDeviceCount'] != str(count)
+                or row['ResolvedDeviceCount'] != str(count - missing)
+                or row['UnresolvedDeviceCount'] != str(missing)):
+            raise ValueError('Inconsistent application relationship coverage')
 
 
 class PublicationLock:
@@ -379,7 +454,8 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
     evidence = validate_sources(source, contract, tenant, now, identity)
     if validate_only:
         return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0,
-                'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
+                'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
+                'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage']}
     # No source copies, persistent Raw adapter, dated output or history.
     from cmdb_tables import build_tables
     with PublicationLock(output.parent / '.cmdb-preparation.lock'):
@@ -410,7 +486,8 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                         'SourceEvidence': evidence, 'OutputFiles': output_files,
                         'PreparationQualifications': qualifications,
                         'MetricDefinitions': {
-                            'TopApplication.ReportedDeviceCount':'Distinct native managed-device IDs per name/publisher/platform product across versions',
+                        'TopApplication.ReportedDeviceCount':'Distinct device IDs observed in weekly application relations per name/publisher/platform product across versions, including unresolved current-inventory links; not a current managed-device count',
+                        'FactDeviceApplication':'Every native application/device relation is retained; unresolved parent links are qualified, never fabricated',
                             'FactHybridIdentityCoverage.OnPremisesOnlyCount':'Unavailable: unmatched identity does not establish on-premises-only existence',
                             'FactUserActivity.HasAnyM365Activity':'Observation within the source report, not proof of lifetime use or licence waste',
                             'EndpointAnalyticsScore':'Score on a 0-100 scale, not a proportion; -1/-2 mean unavailable (blank), never zero',
@@ -450,9 +527,11 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                 # removal of the temporary previous snapshot.
                 return {'Status': 'PreparedWithCleanupWarning', 'GeneratedTables': len(output_files),
                         'OutputRoot': str(output), 'CleanupRequired': str(previous),
-                        'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
+                        'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
+                        'ApplicationWarnings':evidence['ApplicationWarnings']}
         return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output),
-            'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings']}
+            'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
+            'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage']}
 
 
 def main():

@@ -1,5 +1,5 @@
 {
-  "version": "0.3.5",
+  "version": "0.3.6",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -292,6 +292,8 @@
         "DeviceCount",
         "ReportedDeviceCount",
         "ExactRelatedDeviceCount",
+        "ResolvedDeviceCount",
+        "UnresolvedDeviceCount",
         "RelationshipCoverageStatus",
         "Platform",
         "SourceCollectedDateTime"
@@ -715,6 +717,8 @@
         "TenantApplicationKey",
         "ManagedDeviceId",
         "AppId",
+        "ApplicationLinkStatus",
+        "DeviceLinkStatus",
         "SourceCollectedDateTime"
       ],
       "key": [
