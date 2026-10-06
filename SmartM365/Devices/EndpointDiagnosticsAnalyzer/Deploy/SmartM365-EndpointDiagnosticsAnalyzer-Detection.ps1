@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $issues = New-Object System.Collections.Generic.List[string]
 $requiredFiles = @(
-    'SmartM365-EndpointDiagnosticsAnalyzer.version.json'
+    'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt'
     'SmartM365-EndpointDiagnosticsAnalyzer.installation.json'
     'SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1'
     'HardwareReadiness.ps1'
@@ -25,14 +25,14 @@ foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $issues.Add("Missing file: $path") }
 }
 
-$versionPath = Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.version.json'
+$versionPath = Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt'
 if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
     try {
         $version = Get-Content -LiteralPath $versionPath -Raw | ConvertFrom-Json
         if ([string]$version.PackageVersion -ne $ExpectedVersion) { $issues.Add("Version mismatch: installed=$($version.PackageVersion); expected=$ExpectedVersion") }
         if (-not $version.PSObject.Properties['RuntimeHashes']) { $issues.Add('Runtime integrity manifest is missing.') }
         else {
-            foreach ($file in $requiredFiles | Where-Object { $_ -notlike '*.json' }) {
+            foreach ($file in $requiredFiles | Where-Object { $_ -ne 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt' -and $_ -ne 'SmartM365-EndpointDiagnosticsAnalyzer.installation.json' }) {
                 $path = Join-Path $InstallPath $file
                 $expected = $version.RuntimeHashes.PSObject.Properties[$file]
                 if (-not $expected -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0 -or (Get-FileHash -LiteralPath $path).Hash -ne [string]$expected.Value) { $issues.Add("Runtime integrity failure: $file") }
@@ -58,8 +58,8 @@ exit 0
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBcIJi8t01GtAy
-# +gC75rpyeDc9LtswcmegIciRn8Q586CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCpiJgODQfUjHV
+# bejvn/c+kFymuF8oB5kZoLi+YQj6HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -192,31 +192,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICFyJnJVazoNUnYJz+nMydwUMhw7rrPCkOr/EoIR4YEGMA0GCSqG
-# SIb3DQEBAQUABIIBgDsb8DlTajMh9XPi2MxQMsyE5lrxMvbYLqSmvZGIS62dovPk
-# pcF454UY97PgB7QdZhXVoHlraS5wFqknMkKBNm1A9TnAvgaPg6xtfNgvOzn80E+R
-# WiPsssb5nqkNfcT8zam3xS4R+sqGqR7Qi1pc9ZnvHqeHN05vgc0Po2h8wudqFrlT
-# 6cbQ/LgAY7Hh6sryyIqAe7YwiiV79fO+DCf3SAcXCXxUiWmFMV8mbUS7DbxP1S2p
-# q8iUFuw9mzejSnGX5YqYAcWABsOe1clsCpZa01WK6R7cYOytBt6lVrR91zYZ9zL9
-# kLknpXvY/wRcj73tqPFSFlSO8hsTZutWxY6vIHQ/reDI7uu02vD2v86swRk7PS/z
-# NI28Kh+lrmYcuWZ/zSaHR32MDtMK8tAxHjSJqHNJT216hCqsqw4oPMLHU6M1FxZf
-# O4lD7+G42wQq0AgspP2qAmLgqU9W+pc5qUC7VTIigrnhtS/CLjFI9N8u7gS3VcS4
-# tVriI9l5s8MZHfBX0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILQ49NWd+qWr375M1F5c34quoKXvBlYMIEULfdIbBxG1MA0GCSqG
+# SIb3DQEBAQUABIIBgLBUu8v56T06b0wsuEv/rEnVKzFt7nuZwHEw4dWDSECrNtEj
+# r6n7fX90G4kYPyDMLwEbr5ZRdV1uOnDKqbUP8YmeVP2DJThhvZgde/NPz8uGvlCe
+# G1JVpquF6pkxIjQjTnLl2RPmWTjvSMPESJrJ22NXipjFyq+hedLtBV95HUDG4Uls
+# AhJpAG+Q/veRVh8m8GWG3cSiz94YL+cPPV9dCeNvIkFvKfPe21ICRvihL82/6l4D
+# Zab/2k9QTT1OsGqGr9I4T0e5g7MlMTYQBgLuFgXAaNDt+m79o3nVLZt7DWDEdoo3
+# iWIWvauOp+nVpeeGXrRrakTkgiSpUOHj+OSMHoSnyUZrG1WKj2FpVvSNT/yOtrm9
+# UfnAAXvoMA7q/bBU8t8nAmVVqa+eG31Xadjg/x66xzbnVZKMBYeuuPTQy8F/e0Jw
+# sIKY/8bLazI2+wrPe07pFe7VPjYOBHv/eepN3iELHIeboqgXurHm6ocRnQvmBvs5
+# JoAX9y7J65MZ06vVDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDQxNTQw
-# MzVaMC8GCSqGSIb3DQEJBDEiBCARAFRNwO+TLR50XuOxbKAUTvG6pmPA9Lt/oWuB
-# PJ2fHjANBgkqhkiG9w0BAQEFAASCAgAvS0SokcEoCcCHN4tuwI4SLw1gnOYGvKuh
-# ZdO1Ze0aNJ9lcPlykkAD3FWIZiVSBsL/4dpxVNGGBzyZ8Q+/7U0fAvGjXBORXj3g
-# osPKTZYAcX+2Wnd2DdDSx/6NHZ15AJAgOlPE7Aw08BmOl0trRmLijeDhi3bHCc7V
-# +8xQxs91YJj6ZoL7bcV/bJuiAKSsK4GzTYEF1yyxCES7tk1FIXOi51+G679bXdNa
-# CXxE3Bh+dZAn98Ewx2PqnHHXrwG9tVCpuaQdiYof942kvlQpPMS9SoCAGPNithJj
-# ECQrOcCI/399fI4aqVlpIVTbdskJ8/xxQBeN5ArJknLyBoLpFk0A2Wy1Fvt0rpgH
-# pG+0ZT1GtK1ZovQo9lCayQGdN12AL51KEQ9a/Khl1PBG9bkaCeJD7yeaSyIYpXw0
-# zRWc7VtUQ5sl8qFiHH6Z4IuW0yelBxHjxFAsf1HGY9BAMV5QYKPFGJFtmp0sgt3/
-# QTf3TO0j71wkC0VanJ6DIDgtJw3Zia3WuZtEfKktbu4/62QY+1kcVCxB8+zEjern
-# NqVPgPop3/UXpJPJaqp9cmklwqFJv6VObXqdDwVdoWzqVmcBwCwTRPkTCqQKAP80
-# EXZ0aPx5d4laVI7fEFKd7h1EiCR1uuzIkh2Ju8F5kA+VyF0sMlUIcxD2o8lmoyYi
-# rloBKVkSog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBofDvVMCezamtkhLkvtS29gH2kH3gt+yUU1Nvc
+# JgMmRDANBgkqhkiG9w0BAQEFAASCAgBeGIgQAkhksS8nrNLg/DZ5XNd+aruUJ/1M
+# Q1LIOb3eL/w86+S3oPYt8MBKoIRQsPl5UimzrwvD05ilO2ZQXtKhKvVnxjxN93tJ
+# CkHgKFvUmcb9YBKku3EjO1oXnRny6ae7+DPJOUcm8pgGNlrgG7S4GSg1AXdwFIMe
+# hCzpKE0uHhuunwkz/YsmhjgkdB1pmQF8661tX5L9oWFicZ7ptHkI6wLTRGf7HCYU
+# zF+3soBjHmMm8gO8EknVW/kqkjAmcPSC3GmUSqtmLetJKiB3nJwy5/l1qD7p5lDH
+# vuk/vqB5u0SbHC6XJ0zcNTjkJB+dF3tBYuRQ2c2hbuJVfYVjpMG45xnPUTN7b633
+# OexK3wqIC6vAho+bXGgEK52uVMQNIiwxpI14x43Yp+znrqpcfxD9kIcapSMzGlwg
+# w8SIzwIEeUXyeVxrpobrf2DEOriFcYzjng1H+SPF9qA+C58XqQo6T1y2e0cezRcd
+# qMI/Yh0FkPSO2OyVivfbESDYvBkltq4WRaVEneoB0zrQGUeXh7kyXVgUMMU/t13Q
+# eCA+JlLQ8gFRh8Q8TaV1T4/jfl4kJsHL9M6ZpnDd4WvSizPIuSoy2Kgio81JPwKm
+# AqSIFXavJGethE9xSn9B7nM6eFPuDf+dRmpFdEDSD75VJUd7h67c/BbbGUXxUjS7
+# eTTphZ5RoQ==
 # SIG # End signature block

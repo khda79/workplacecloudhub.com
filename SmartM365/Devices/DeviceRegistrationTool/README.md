@@ -30,7 +30,7 @@ The package does not include an installer or third-party binaries.
 ## Script
 
 - `SmartM365-DeviceRegistration-Tool.ps1`: checks local AD domain join, domain controller reachability, Intune enrollment signals, and `dsregcmd /status`.
-- `SmartM365-DeviceRegistration-Tool.config.template.json`: safe configuration template for retry and output settings.
+- `SmartM365-DeviceRegistration-Tool.config.json.template`: safe configuration template for retry and output settings.
 - `SmartM365-DeviceRegistration-Tool.strings.psd1`: GUI language catalog.
 - `Start-SmartM365-DeviceRegistration-Tool-User.cmd`: opens the GUI in User mode.
 - `Start-SmartM365-DeviceRegistration-Tool-Admin.cmd`: opens the GUI in Admin mode. The PowerShell script requests UAC elevation automatically when needed.
@@ -47,7 +47,7 @@ SmartM365-DeviceRegistration-Tool.config.json
 next to the script, or pass a custom path with `-ConfigPath`.
 If `SmartM365-DeviceRegistration-Tool.config.json` is not present, the tool uses the committed template values and then falls back to built-in defaults if the template is also missing.
 
-Use `SmartM365-DeviceRegistration-Tool.config.template.json` as the committed model:
+Use `SmartM365-DeviceRegistration-Tool.config.json.template` as the committed model:
 
 ```json
 {

@@ -46,7 +46,7 @@ The GUI calls Microsoft Graph `beta` endpoints. Delegated consent does not repla
 
 The local configuration file is `../SmartM365-IntuneRemediation-GUI.config.json` next to the root launcher. It is local-only and ignored by Git.
 
-Use `../SmartM365-IntuneRemediation-GUI.config.template.json` as the committed template:
+Use `../SmartM365-IntuneRemediation-GUI.config.json.template` as the committed template:
 
 ```json
 {

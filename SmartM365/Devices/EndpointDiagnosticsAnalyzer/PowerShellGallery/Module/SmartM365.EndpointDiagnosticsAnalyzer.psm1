@@ -15,15 +15,15 @@ function Get-SmartM365EndpointDiagnosticsAnalyzer {
     $metadataPath = Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.installation.json'
     $metadata = $null
     if (Test-Path -LiteralPath $metadataPath -PathType Leaf) { try { $metadata=Get-Content $metadataPath -Raw|ConvertFrom-Json } catch {} }
-    $required = @('SmartM365-EndpointDiagnosticsAnalyzer.version.json','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico')
+    $required = @('SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico')
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $InstallPath $_) -PathType Leaf) })
     $integrityIssues = @()
     try {
-        $versionPath=Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.version.json'
+        $versionPath=Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt'
         $version=Get-Content -LiteralPath $versionPath -Raw | ConvertFrom-Json
         if(-not$version.PSObject.Properties['RuntimeHashes']){throw 'Runtime hashes missing.'}
         if(-not$metadata -or -not$metadata.PSObject.Properties['VersionManifestHash'] -or $metadata.VersionManifestHash -ne (Get-FileHash -LiteralPath $versionPath).Hash){throw 'Version manifest integrity mismatch.'}
-        foreach($file in $required | Where-Object { $_ -notlike '*.json' }){
+        foreach($file in $required | Where-Object { $_ -ne 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt' }){
             $expected=$version.RuntimeHashes.PSObject.Properties[$file]
             if(-not$expected -or (Get-FileHash -LiteralPath (Join-Path $InstallPath $file)).Hash -ne [string]$expected.Value){$integrityIssues += $file}
         }
@@ -100,8 +100,8 @@ Export-ModuleMember -Function @('Get-SmartM365EndpointDiagnosticsAnalyzer','Inst
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7BT0cpRjCVTfL
-# dNcJrb3oV10zlVM5xmmr19jMygxKEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJN91SnWmeLBAX
+# 5Qh9sx9kEd8JM3rQwL9dgBdoBeNZ46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +234,31 @@ Export-ModuleMember -Function @('Get-SmartM365EndpointDiagnosticsAnalyzer','Inst
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAqPIm5rRAODUc0p6TObURerBzP33gC64OQX6c53I9iPMA0GCSqG
-# SIb3DQEBAQUABIIBgCj9/a6UMz8rODZ3frT05RbJusURjmRtukDM7+s2gfnFJzeG
-# CpaqOTWPaxuPDMcgXUyb+PiL0POJRKW8Ggwh0fAzZWYkjRrsPk4p8AVn41c+1gw3
-# CWg3TWLm5zwp/3PuWvVsjWgdJJLCi98WCYYgtlrpX+9+U21H0ZDuP/HPqEqjlBkP
-# xqvoX+NMBmo+nL0DiWdeNU47peUNQCvn8hMRQIWOjlbvjAFzo6UbkyaeWIAQoBCO
-# 4i5axnIOvh8T9LFjKWt2T42qvysnxrcBq1XtP0I8Ev/8YdEESaIgD4z/EC8KOOoI
-# IjZAShEo58sBOKnMSzWtQ4o6anQtZPuQi9ved5dgM7omOL41XzfiqxvAA6BwMnh4
-# CzvKA79WT6D1lGfrPnoltvy21zOX0tl8Kd6cx2IuVwHqF7Xcq6xm5stdPS1P/nSg
-# muZA0cc5ud1VMQ1IVyx0doO39LGCFiFuYwxWA36SE5olqbFgNxe3+CP7fd/CDHl7
-# NFgRboHoejLTbVZ0BaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILDBOzNzX5f452RU5PcALnFgGkUOTD3jxfv7IsOCKCC8MA0GCSqG
+# SIb3DQEBAQUABIIBgFQHeYVjAkrCjJtt2vn0wO32Vva5yWDcU8rET6tpODVj03XA
+# EanxsTPqXUWOl+3IAovG3EabA7M1IAjShfcDGm0tIVM1/iWalx8XWtrjpVPbov2r
+# RhMFW9V9lqvyDC6JiYt6/h/A9wFOADM+rEw7NjEge3fmCqlcPOufCsP0rrgmoWtb
+# WUjRP54nwMQzrcZu4cI9tqj6U4hOYUHjVMKeLuKIEvbcY/3Y4u3vVB1w9S9o/sBx
+# 1IN6TFmYmtqNM6NG+MeZNZqLC9a1gX02sgrb5KenJiL7LYbf4D52GRoTvPibOevw
+# J4yjBG5TgCB6+trzxxjEHA4H3znn4VR6TwuFgRPHxk2R4JBgSH/aDE+vJ3bKySma
+# 011hpdWanm0x1wV3ondnX400O7KH2JqpbZQYlLlo04Sici6aHtKJcivMcX0t2ihc
+# nuy7ClkyaeGjjbejsID2P8GlnYrGNLIsOuDUDoJxCFZ3ul18HtRoWT3eynKtPa07
+# BCKKPERC0SDYf6xY5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDQwOTEz
-# MzFaMC8GCSqGSIb3DQEJBDEiBCC8L4lNcmC12SDwx/fKsB3Frw6+TeWEk3qMynGh
-# 722aWDANBgkqhkiG9w0BAQEFAASCAgCpN8HOdj8Jj3Gshfjjgdm0q0JThVGmAmIG
-# JqM+ZxbTpS4LumzNeNqLCkHU4ZrGN8fGppcqrhZn+BkgaiykkGQngtJCeWpzyUWs
-# x4RgpmJsX5frH7wGJP4kT9yqK/Bdpjh1ChtWpGemEAUC+pSNB1kOEUb/TIOldhE+
-# tcXvyfs0keBsG4/+MhMD4O9KLaG7UsCjAW2N3naZHgwePLWoe1gmSTZlyOUORWdE
-# xx/ArRvIJI+Zle7gW57uWXItR52uuXBIsTJh9uRYbEsssvHc4PdJgIoPmu2wRx2J
-# gZh0rED4zSVwintLI1qp4GQivsQEg/+89ys4uob+Jkkbab2VOax6PEAsAVgojDtP
-# Yncatrr6CNML03XSgIYDlp9A1vRg++qnYzV/brehKTrPl86Vd5Dkt6osGLposA/r
-# ubCBtRAX6xAYpEpjhP/hbfI7CSVoE8Ep7zqz8q9bRlxd2hiNJUl069WA61vf8lAO
-# gdMotEB/r4EwcrzZPjxpThWMdfDx6Tay9yWSm6SVTMHtjPB3WHY9XWQTQrxrkPxv
-# XfEorXQwrOR+RyRB77dNvfIEj9oLFaouL8FFM/45eWEokEraHuA8/D+Eg8Je3d1G
-# ycJMpL0ujF/tIYJVtWXgGLf1vNEYcX7vUqoX6BhEMTF4bbohQSB8EhecdQvRpYQt
-# G/t1EwUTjQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCC0nI8CBEvy1ATNFWtMogGKtJn4IERK/HFWLCTU
+# E5eMQDANBgkqhkiG9w0BAQEFAASCAgBlHRDWDtk2Rg63yKOfZry953YSdVXs303P
+# bG+H0N/K0Z5Yhkwi6vFyh7OBpr8UV10SRMSQmgrtaJoaRPGpbIYI0TUEkT5hM7Zv
+# /QzX6HagEEvZ5d3LH007LgkVt8DSopqFYVZK6jEbdxtf6zJmVLHiL0or36fbYoeO
+# R6u0Krl25OqlX6feDUG+Jbk/m4J0Rrb47rrs3PzTlxVzE3JXHNAyHzkk25A+XBbB
+# 6gcflEcDPlkFyYC90bOmVVfoRff4x2fH3JJEI4uk/SUFztt4KrQjPa1XLxNJtb35
+# MIZsoi1s7TSE+hSaRa2evyQSOxb4aG9035NYxqJVsMZS158RShKWMKYqb4f9liH+
+# 8YgiMOzdYx/6rFKl5MxnLQCXwmNL/H0k60ywo7iNKafemdInjUZ13pbkTSVqvDdW
+# GnHPQKqMB6x30k+QHh/ftXCQcCDIkJVy81NJdJIZLs4jYifVlU8ju/IH3u+bOU56
+# ttVu4fChnG0qNYutQ2vXfyChuToczwK5U1eEtjBYo5LeUb+PlR9irrSqvnRT1M13
+# KSYQh+eyhamwC73HuC66Xgg9O+Vtg+1Y0UXYBB0IDM+1DcqE/s3vjQ1o5CXeXyPH
+# 3iT726R29/f9F0nSCZ213Vwdorhhj4HeJ/CQ7FaXBNyv9mw5/ZAF003BR14CYw7l
+# CnddpwbFOw==
 # SIG # End signature block

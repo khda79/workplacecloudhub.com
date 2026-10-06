@@ -12,22 +12,22 @@ $ErrorActionPreference='Stop'
 function Assert-SedaSyntax([string]$Path){$errors=$null;[void][Management.Automation.PSParser]::Tokenize((Get-Content $Path -Raw),[ref]$errors);if($errors.Count){throw "PowerShell syntax failed: $Path"}}
 function Assert-SedaSignature([string]$Path,[string]$Thumbprint){$s=Get-AuthenticodeSignature $Path;$actual=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint.Replace(' ','').ToUpperInvariant()}else{''};if($s.Status-ne'Valid'-or$actual-ne$Thumbprint.Replace(' ','').ToUpperInvariant()){throw "Authenticode validation failed: $Path; status=$($s.Status); signer=$actual"}}
 $moduleRoot=Join-Path $PSScriptRoot 'Module';$manifestPath=Join-Path $moduleRoot 'SmartM365.EndpointDiagnosticsAnalyzer.psd1';$manifest=Test-ModuleManifest $manifestPath;$prerelease=[string]$manifest.PrivateData.PSData['Prerelease'];$packageVersion=if($prerelease){"$($manifest.Version)-$prerelease"}else{[string]$manifest.Version}
-$version=Get-Content (Join-Path $SourceRoot 'SmartM365-EndpointDiagnosticsAnalyzer.version.json') -Raw|ConvertFrom-Json;if([string]$version.PackageVersion-ne$packageVersion){throw "Package version mismatch: $($version.PackageVersion) vs $packageVersion"}
+$version=Get-Content (Join-Path $SourceRoot 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt') -Raw|ConvertFrom-Json;if([string]$version.PackageVersion-ne$packageVersion){throw "Package version mismatch: $($version.PackageVersion) vs $packageVersion"}
 $packagePath=Join-Path (Join-Path $OutputRoot $manifest.Name) ([string]$manifest.Version);$fullOutput=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')+'\';if(-not[IO.Path]::GetFullPath($packagePath).StartsWith($fullOutput,[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe output path'};if(Test-Path $packagePath){if(-not$Force){throw "Build target exists: $packagePath"};Remove-Item $packagePath -Recurse -Force};New-Item -ItemType Directory $packagePath -Force|Out-Null
-$moduleFiles=@('SmartM365.EndpointDiagnosticsAnalyzer.psd1','SmartM365.EndpointDiagnosticsAnalyzer.psm1');$runtimeFiles=@('SmartM365-EndpointDiagnosticsAnalyzer.version.json','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico');$deployFiles=@('SmartM365-EndpointDiagnosticsAnalyzer-Install.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Uninstall.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Detection.ps1')
+$moduleFiles=@('SmartM365.EndpointDiagnosticsAnalyzer.psd1','SmartM365.EndpointDiagnosticsAnalyzer.psm1');$runtimeFiles=@('SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico');$deployFiles=@('SmartM365-EndpointDiagnosticsAnalyzer-Install.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Uninstall.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Detection.ps1')
 foreach($file in $moduleFiles){Copy-Item (Join-Path $moduleRoot $file) (Join-Path $packagePath $file) -Force};foreach($file in $runtimeFiles){$dest=Join-Path (Join-Path $packagePath 'Runtime') $file;New-Item -ItemType Directory (Split-Path -Parent $dest) -Force|Out-Null;Copy-Item (Join-Path $SourceRoot $file) $dest -Force};foreach($file in $deployFiles){$dest=Join-Path (Join-Path $packagePath 'Runtime\Deploy') $file;New-Item -ItemType Directory (Split-Path -Parent $dest) -Force|Out-Null;Copy-Item (Join-Path (Join-Path $SourceRoot 'Deploy') $file) $dest -Force}
 $files=@(Get-ChildItem $packagePath -Recurse -File);$ps=@($files|Where-Object{$_.Extension-in'.ps1','.psm1','.psd1'});foreach($file in $ps){Assert-SedaSyntax $file.FullName;if(-not$SkipAuthenticodeValidation){Assert-SedaSignature $file.FullName $ExpectedSignerThumbprint}};[void](Test-ModuleManifest (Join-Path $packagePath 'SmartM365.EndpointDiagnosticsAnalyzer.psd1'))
 $hashes=[ordered]@{}
-foreach($name in $runtimeFiles | Where-Object { $_ -notlike '*.json' }){$hashes[$name]=(Get-FileHash -LiteralPath (Join-Path (Join-Path $packagePath 'Runtime') $name)).Hash}
+foreach($name in $runtimeFiles | Where-Object { $_ -ne 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt' }){$hashes[$name]=(Get-FileHash -LiteralPath (Join-Path (Join-Path $packagePath 'Runtime') $name)).Hash}
 $version | Add-Member RuntimeHashes ([pscustomobject]$hashes) -Force
-$version | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Join-Path $packagePath 'Runtime') 'SmartM365-EndpointDiagnosticsAnalyzer.version.json') -Encoding UTF8
+$version | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Join-Path $packagePath 'Runtime') 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt') -Encoding UTF8
 [pscustomobject]@{ModuleName=$manifest.Name;Version=[string]$manifest.Version;Prerelease=$prerelease;PackageVersion=$packageVersion;PackagePath=$packagePath;IntuneSourcePath=Join-Path $packagePath 'Runtime';FileCount=$files.Count;PowerShellFileCount=$ps.Count;SignaturesValidated=(-not$SkipAuthenticodeValidation);Ready=$true}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBE7pFFtPZ3aXqC
-# n+2plV0o5ryOjIR9uC3s0pVN+IHhD6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDm+5ixU4q/WTdF
+# 8ueIqq6eZkYxH9l7Yf8CebCgYofP1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -160,31 +160,31 @@ $version | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Join-P
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH41rJsyQyGpauPj06C1Ii6jQ92NLNA+YXCa0bdakkrGMA0GCSqG
-# SIb3DQEBAQUABIIBgHFiY1Sa4azKJOnNUO5MbeZ8S2k7+tLgro+UwPSZQfMblNvC
-# pCu0iOIFkpLJdny7TNI/FNLbJkZXP1zNRxFus7WMWX9AvqeC8mxHgeNTMpjk0x9Q
-# UeGT09kCUr9veQ6gwWpckQDUdIWrbAKz8zgkmb+7ItaUVwKVpHZDuJxhsB/pBOtv
-# 07/lT9t1U5PIGCTAslLQVlXFGMi7ZEj5aRTAnV2fA9QAedcOsmM0OFl/zJYse1Io
-# P4Y0RfT0Sn7qeNzdAEXX+h1V03JcCs36jd790jl1ntnVZ0NX5QK1yJX/m/2QzhC8
-# Dt607PI1rmk/1snIHaXSsUswn/0Oi3ySZTj8vNn0Ou4jc71jZGjIk5i4K/trSaZt
-# YcL3Zkj2xLcgRbv8l0YMUxRS+n0oxboaTqBaY4r11idc+a548GbbZVe2iZ4GW3JV
-# niYqs1CwEeaxDmCwSZAUSQBirQiB8m5zt0NeZ2yZwS/7sA5z7OJ1CU7ysbnd2ULW
-# AMyOx1IUyn+4Z4VN2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFf/kglnWJo2tidmEZ+oL6qSsrcUqirgptayGhv3nRzyMA0GCSqG
+# SIb3DQEBAQUABIIBgHvwR+w9KmfhUPutXi//lQOSXpSEnet89DAEKWtRJYN1St5j
+# uUXWQSwp/LddkLq0ysTzQiXWP0fz08SjRLJyE6d9WqQB5600nfWYJSsnXbEJoGzT
+# KyLFrlsVkwXaVYknejU5HnOhYHUhlQWmYgfQ5/15YifAB5V9Sf20KoDL0Gvs7Q2h
+# GDx+Glq8gmxt9g5xyvIxLBatc/86vf96GscGw+aFxxxK6FZLPeXYPKbK14+UX/fV
+# XJDMhyWi6ILomAkpnDWVJf3blLB9CfeHDVzLgxydkq/PtKO1gU2OLfraHzBQHEhq
+# XpB0+xqBR/qo3tMOcP7Q67OkJXvdEAmhkgYiReEscJxkC+Sly9ygYnxiakZvf/Aw
+# B0GKCfR2H7p9E6Dqrk/yOtu5rwrlMJVPsdTYej8OXhHdQAgT6bk6L6F6MWojklRP
+# vbYFi4xFwpezpaBWPNEBqyEAoRer4rqW8B25WjTdshr4/ptXG2JbOK5DohJ9vUoo
+# qvpMsNEk/oNimZcqy6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDQwOTEz
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBa2tesRgb4s6pflyNPVFAt9tOmRG5cupXHCSU9
-# ftdFIDANBgkqhkiG9w0BAQEFAASCAgCbJyDp3ULHCmmA2xvGdmqHsXSCquezxHwT
-# II9yzczoaoU5LOKG+Bl2DSct+NoQE/qcja63VxznMrQ6fHWQu43IcS4K/My9JPCo
-# HjqT9Am8GggW4r7nY6flRCUZF9nlRXnKpEAHSi0eeAhWgnIDgGnria6EQ6mzi3Ym
-# 1N3useCwa92lexg4fIgfG855modbYnz9kVxRm5EqX03cznKKcL2pMQHMis1Hdxa3
-# RmStiyC0OitWDTQ4BhIB45UYdCtxYoBLTF9rENJ1ZdlqE6pF9iEYfvIgpZOcXxFb
-# fpAMWNoPlM7y2P+t1gKSGa+BrFmidPCyQfcE6hvaPBJOT4SAuBvyPz5853yZHAEG
-# IHUJO9ZrHvVOEFZen+cMFYCXn9snTaZPGTxUsg4hJWxSfuLp2fzgI2bUxfovlugM
-# bWkQS5K2SoFOh2qZDAdmbh4WGYhwcaUIj+/huWx385grS6MkZJQGVnZWxs8RG7YB
-# 49BUJ3BP7Y7Fyuh3/bh0dw5fZhFpfi5touL+5LvJFde6g19/PgoOkyEAvCzOmZdL
-# TifihLR2IHS6st1RYKVsS7RrVHjan16Ymv+atwbbS4hcLfn4nvSmcQH+dsFVckLc
-# X89qLRGWmJpWB2PiFZkFuow55tsjoBF96EITAAh98j2pBBZJHvKYYolcqBKW+tzX
-# Wd16jwrMQg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzE3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCA/dpgmt4DnvncH3Ff263nWaLxkTSOdvjWkxAnt
+# NSL6LDANBgkqhkiG9w0BAQEFAASCAgB5cVonnTTe6V9wp/V1/S/ixz9sFUBG5SvT
+# jrwTorWmdwsLJAcvmlWK7vcNvEn5vvXcFeydDM0NRXZn/DNRO5IjTZNzsrdO0Laz
+# qbQaTdvQBuk1c2UreDL1/iV9+mNKpWWqO0kE1N5tuSGIsusAvofLkqAJhukNj2Um
+# 4Yw6wU+4lkiHfzKhXmzHmirERSfpZ0ncOux4CjIoFQ5hlmuU1mLBrQOgWWiCutko
+# 15pnvwC6RY/dSbH/O5YAX745holu2l98+bnMolmyyMAvx9jfS8Z/44bZ/YFPz2UN
+# CHNULldm8ZEzm37Yurlv5VnLCmtfFM6ySLzvWmwSRNhwnkNy2XFRd2BDRSayyxOF
+# R4Mh0Im3KTPxgWBJd8iuew2iImGIh790+JfGf6YLHo9mgW3tLUr33jgOVHdY8rIL
+# szRNk6TMM1pG974uUmlDyz0ZLVCY6q2/nFewa23lMTDEod/dFQ24Rhz8Itz6BGCx
+# 16QFYxOSEZWQSwWSPc+WvyuNNkjoDeMtKY6Q6D7Y4zaZXiMnGAcabxArT7s7ukYc
+# qNnmx7O8U5sDlYE4goDn4EhF4605IzqerUbwbjgOm+4OstsBatP/bSqrmk2W+Nax
+# qHgyQaF1OQYBPvnEHu00YXAdWaX1MUsCOcPGHHP2T9neZ2imqgSrp09/xYJa8fvB
+# tqOtF0VIpQ==
 # SIG # End signature block
