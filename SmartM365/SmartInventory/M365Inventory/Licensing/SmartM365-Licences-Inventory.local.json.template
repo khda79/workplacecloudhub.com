@@ -15,6 +15,7 @@
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "SendMailMode": "__USE_GLOBAL__",
+  "EnableLicenseSummaryEmail": true,
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",

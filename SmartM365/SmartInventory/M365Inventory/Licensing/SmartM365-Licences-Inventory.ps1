@@ -4,8 +4,9 @@
   WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
+  SendLicenseSummaryEmailOnly sends the focused summary from the existing published tenant CSV without collecting again.
 .VERSION
-1.20
+1.22
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -13,7 +14,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.20
+    Version : 1.22
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -33,6 +34,7 @@ param(
   [string]$SkuNameCsvPath = $(Join-Path $PSScriptRoot 'Product names and service plan identifiers for licensing.csv'),
   [switch]$RequireSkuNameCsv,
   [switch]$InteractiveAuth,
+  [switch]$SendLicenseSummaryEmailOnly,
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -111,7 +113,8 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -590,6 +593,122 @@ function Send-LicensesInventorySuccessNotification {
   catch {
     WriteLog -Message ("Failed to send Teams completion notification: {0}" -f $_.Exception.Message) "WARN"
   }
+}
+
+function Get-LicensesFocusedSummaryRows {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows)
+
+  $products = @(
+    @{ Name = 'Microsoft 365 F1'; PartNumbers = @('M365_F1', 'M365_F1_COMM') }
+    @{ Name = 'Microsoft 365 F3'; PartNumbers = @('SPE_F1') }
+    @{ Name = 'Microsoft 365 E3'; PartNumbers = @('SPE_E3') }
+    @{ Name = 'Microsoft 365 E5'; PartNumbers = @('SPE_E5') }
+  )
+  foreach ($product in $products) {
+    $enabled = [long]0
+    $consumed = [long]0
+    $found = $false
+    foreach ($tenantRow in $TenantRows) {
+      if ([string]$tenantRow.TenantSkuPartNumber -notin $product.PartNumbers) { continue }
+      if ($null -eq $tenantRow.TenantPrepaidEnabled -or $null -eq $tenantRow.TenantConsumedUnits) {
+        throw "License counts are unavailable for SKU '$($tenantRow.TenantSkuPartNumber)'."
+      }
+      $found = $true
+      $enabled += [long]$tenantRow.TenantPrepaidEnabled
+      $consumed += [long]$tenantRow.TenantConsumedUnits
+    }
+    [pscustomobject]@{
+      Product = $product.Name
+      Enabled = $enabled
+      Consumed = $consumed
+      Subscribed = $found
+    }
+  }
+}
+
+function Send-LicensesFocusedSummaryEmail {
+  param(
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
+    [Parameter(Mandatory)][string]$CollectedAtUtc,
+    [switch]$Manual
+  )
+
+  if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
+    WriteLog -Message 'Focused license summary email is disabled by configuration.' 'INFO'
+    return
+  }
+  if (-not $Manual -and (Test-SmartM365MaxItemsMode)) {
+    WriteLog -Message 'Focused license summary email skipped for a sampled inventory.' 'INFO'
+    return
+  }
+
+  try {
+    $mailTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
+    $mailFrom = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($mailTo) -or [string]::IsNullOrWhiteSpace($mailFrom)) {
+      throw 'A report recipient (To) and sender (From) are required for the focused license summary email.'
+    }
+
+    $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
+    $htmlRows = foreach ($row in $summaryRows) {
+      $status = if ($row.Subscribed) { 'Subscribed' } else { 'Not subscribed' }
+      '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>' -f `
+        [System.Net.WebUtility]::HtmlEncode($row.Product), $row.Enabled, $row.Consumed, $status
+    }
+    $sourceNote = if ($Manual) { '<p>Source: existing published CSV. No new inventory was run.</p>' } else { '' }
+    $subject = if ($Manual) { 'Microsoft 365 F1/F3/E3/E5 license summary (existing CSV)' } else { 'Microsoft 365 F1/F3/E3/E5 license summary' }
+    $bodyHtml = @"
+<p>Microsoft 365 license summary for $([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)).</p>
+<p>Subscribed SKUs collected at $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) (UTC).</p>
+$sourceNote
+<table border="1" cellpadding="6" cellspacing="0">
+<thead><tr><th>License</th><th>Enabled units</th><th>Consumed units</th><th>Status</th></tr></thead>
+<tbody>$($htmlRows -join "`n")</tbody>
+</table>
+<p>Microsoft 365 F1 includes the M365_F1 and M365_F1_COMM SKUs when present.</p>
+"@
+    Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $bodyHtml -MailPurpose Report
+    WriteLog -Message 'Focused Microsoft 365 F1/F3/E3/E5 license summary email sent.' 'INFO'
+  }
+  catch {
+    if ($Manual) { throw }
+    WriteLog -Message ("Focused license summary email failed: {0}" -f $_.Exception.Message) 'WARNING'
+  }
+}
+
+function Read-LicensesTenantSnapshot {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Published tenant license CSV not found: $Path" }
+  $rows = @(Import-Csv -LiteralPath $Path -ErrorAction Stop)
+  if ($rows.Count -eq 0) { throw "Published tenant license CSV has no data rows: $Path" }
+  $requiredColumns = @('TenantKey','TenantSkuPartNumber','TenantPrepaidEnabled','TenantConsumedUnits','CollectedAtUtc')
+  $columns = @($rows[0].PSObject.Properties.Name)
+  foreach ($column in $requiredColumns) {
+    if ($column -notin $columns) { throw "Published tenant license CSV is missing '$column': $Path" }
+  }
+
+  $collectedAtUtc = [string]$rows[0].CollectedAtUtc
+  $parsedTimestamp = [datetimeoffset]::MinValue
+  if ($collectedAtUtc -notmatch '(Z|[+-][0-9]{2}:[0-9]{2})$' -or
+      -not [datetimeoffset]::TryParse($collectedAtUtc, [ref]$parsedTimestamp)) {
+    throw "Published tenant license CSV has an invalid CollectedAtUtc: $Path"
+  }
+  foreach ($row in $rows) {
+    if ([string]$row.TenantKey -ine $ExpectedTenantKey) {
+      throw "Published tenant license CSV contains a row for another tenant: $Path"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$row.TenantSkuPartNumber)) {
+      throw "Published tenant license CSV contains a row without a SKU part number: $Path"
+    }
+    if ([string]$row.CollectedAtUtc -cne $collectedAtUtc) {
+      throw "Published tenant license CSV contains mixed collection timestamps: $Path"
+    }
+  }
+  return [pscustomobject]@{ Rows = $rows; CollectedAtUtc = $parsedTimestamp.ToUniversalTime().ToString('o') }
 }
 
 function To-GuidOrNull {
@@ -1145,10 +1264,27 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.22"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+if ($SendLicenseSummaryEmailOnly) {
+  if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
+    throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
+  }
+  if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { throw 'LatestCsvFolderPath is required for email-only mode.' }
+  $tenantCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath 'M365_Licenses_Tenant.csv'
+  $expectedTenantKey = if ($global:SmartM365TenantKey) { [string]$global:SmartM365TenantKey } else { $Tenant }
+  $snapshot = Read-LicensesTenantSnapshot -Path $tenantCsvPath -ExpectedTenantKey $expectedTenantKey
+  $global:AppId = [string]$AppId
+  $global:TenantId = [string]$TenantId
+  $global:Thumb = [string]$Thumb
+  $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
+  $global:OrgDomain = [string]$OrgDomain
+  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -Manual
+  Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath)
+  return
+}
 $connectedGraphInThisRun = $false
 $currentOperation = "Initialize script environment"
 $usersProcessedCount = 0
@@ -1693,6 +1829,9 @@ $BaseFileName = "M365_Licenses_Groups"
   $tenantSkuRowCount = $tenantRows.Count
   $groupRowCount = $groupRows.Count
 
+  $currentOperation = 'Send focused license summary email'
+  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc
+
   if ($connectedGraphInThisRun) {
     $currentOperation = "Disconnect Microsoft Graph"
     Write-Host ""
@@ -1784,8 +1923,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE6GC+Vy0FNEEI
-# nikLDcoxaTzAwt3WjBANHhCgPU/pDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvH1kUbGx2ed6i
+# wcGZ3mrNN/5sIipim97gZzMEo4DwkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1918,31 +2057,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFr8LFf9XA4H6wVbrlzTclLm4DZezeTMnJVXEivCq79QMA0GCSqG
-# SIb3DQEBAQUABIIBgA8Jg8eQpLTPp2faqQyQe8XB5x5WSaaMGfdi2j84ggV+M33R
-# baCp0BeaDf0OiQy6ueKHgJcLtbTOVdd1q/uZNZRw3jjvNKFY8BHkzpjznouEYIGy
-# vXhtPxtPLZC74G9EyoIn2MdtX0gJUGrzWLEU9mc60DdyD+5lDFJTAl0DNm78e1Hc
-# 0e77tOqXO2kOhkh/3+I3dTNQpx2egXUNFs3pwfnCY51n2VGv+TiQDM8X1nC85SLY
-# CPQEjQECTxOOyV9rruSVodEjZCgeJUQhVWg7u9j7C9v/CRKZt+k0+noIYP7SxjsC
-# mmbV0/atYYRdyB9IdjXPG+ZcL0RtOwv6dPdMzpOE64atVnWjANVFvI/j4/k6aoP0
-# +QsXzk3jwSxtectWITnPJJKbrGXkxohirEq+SAomO+VQTN4sj+InSu09Cxd6wOrz
-# cnL9D/NuoRPl4QX8zAo9MAu0PZnQAmlfbk5/Z1sZTDTTjfvfUW7p098NQCQJCa4r
-# vGwKKtKv81hRupvzDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILyY4r4jmnKPuJLmHaG2LdJisj8quOBEw5lpcRVE+FahMA0GCSqG
+# SIb3DQEBAQUABIIBgFVtoi/7SmJO/JIQhTs0M+XjsUGKjU/DcQibkQSxecJZ4Zh4
+# w4AB6c5WG6laS4ZYHfFXx5TwXiuHMQ0Zb78K+j9TV5dd7F7hwdVYIajpDNUzFHL8
+# FLixki+vNRCkUdqZPv4sEkMgjtBxl/rdZZhefz8ABN5lIDSZR38Cd5FCIHGYUc4v
+# yDAAUbWj0U/yREqjyMEaM5MYD4UIsyG71k98Wwz7RPD+Q6baG8QYKTvLj3Qyfgau
+# jdur04ayfapKzxor1XL8CnzAEwj1uqaPAliZdGfp1fDEugzWEwwgpdIrsjIcsy1W
+# JZvfcqTTXDQgBAPStKkDh25f/Sdt+Fe7HmvRJOpzwq7sv0YQ/6r+kCNWE0z80oWZ
+# VGo05RZefmiGS/bPtqOD+bBMxbUYUR3iolyF9/T3m1Iv9kl4uspIB5/m4hfPbv8d
+# 81Q0SaFSIBtBoID+1PZ7Q42lUEXYsQPtMuxKPYja6/SZvZtyOJvUE8ZNMZSKmDcb
+# EtmszdmoPzP6uZrLuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDdaMC8GCSqGSIb3DQEJBDEiBCDuX27il1RPXzM3bpnjUyOZ0qdi0LRu8Cue389u
-# yWE95DANBgkqhkiG9w0BAQEFAASCAgB6eXJRyjShmsi1Wjyg/nmQ8XEG9k0L36Y0
-# glw+79asi4sqKYpDjce3O4l7Y8C4zkTJOhznkGcJxnynQDrxw458FLAxLWimFGnH
-# nptYBsBPk4W3V0n8hKDj0I+4uNV2cSbnhNkssJ1kWuoBerd19hVk8AD62RtmWdzc
-# 756MYiEiZsw/scWYKGRV1A71/9xOowDsrKw97AoPe8IU+o6A4IUSCIKd+1ZSNcDm
-# 9CKIQUu6g+t9/lMHXq5R9K9/8gejzxfJ6/0vVgvQ2yTqSMmKNSyym7k8E2Gvbpw1
-# oTBramfqllKHfRmqCyxrhDdsaImJ87ohkA7JhAjshb021y+Jy4bF47IuW+rng++V
-# ZM0B4fgN63vtgPYPCAXTdSzIBEXwY4Pv6pcsZE5m04+hjkYQ0dSYxsnq94/E5r5d
-# V1A3E4M+tWW2/9l2q+rgdxlzUNz3s/mbtwoUGpHkPZvRS55ajVp3m2YDdqtGYBtD
-# Qvia7PtBAt6aPUjDfBEV8EvlrmBO71UBDkA6+h2qIs3zVT8gCgpd3lFSVYiY5o9H
-# GKg0yry5LpGgx7eVEUdhJBm+ygdRMs62xwdR9S40qYW0UJJKibpxpnvMuZi3Ml8F
-# OCwqeP4he03OiKV6wnD16PxM2Yj7EAdeaCicgNdmsRZWUkN/Ryy/slGifVP2mejw
-# lpyfPcPIEw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDE3
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDvosgNmQvXBJAB6bdl2icJ/sMh3A8CF0bt9nIU
+# AfhNCzANBgkqhkiG9w0BAQEFAASCAgAEIIYob7AYNRuyTY8DOsN6jUPJ4ECZVHKf
+# 8mNWxb9S8YDIjlceMg4TlMjytvl9T/cvqdSrcEUUyHkLuoVFWlRNjIhxW+7fprV7
+# O/M1Y4aNb8Zo04WfmZ5gmNiY/Gk3b+2+Xeb2GBvRySIN6qrgLDpO5AY4khYsc+Th
+# HcNCAhGFkRi0LwOWT4Xjvqd1/KzbMYM0nVwEFBtDbeEK6banFAWL3jTflbeucTqo
+# uyJGTrkzWaCMJkEscK/aeFshQ86ydjqzYJfgOXqrwx1BY5E+NRhlwaaN5gKCbn/R
+# 8XGOYyRbiymnWz3NTCEk4Dhy4Sy4ptWNcLQ0Q2o5XxM04mUDKSj9lcSgViu0IqqI
+# IDLbtwWIhBPuee+TL+RJSvdeHr3rRt2n3yo/aw+pnocIV4kn12TlzgoKDcY0CI5t
+# GulcQfbhWjBj4bEidJVaOmTuHgCMQlT7KJNYbKbqNqxm7bkY57jt54Y1Y+ZnVFaR
+# 3zGPk/HDj+1wF9+6yPzQ28TKXuKBZ5E8MYhFshZ9uRNkfhilU0LOiZk2ezd5rN6y
+# lUZHO5QXUf8WacB+EdZQVP1ggCrFOKTmfHKSrfVHsErUrSwN+m+dOLKtxEIWvreM
+# nO3V6TgCcQfEfxLgWLFMMZVJGAEYbdwq5bmqrfLtHsDzkXyEwBzVHwy3j+Ahofc+
+# 5W64d1Z7Pg==
 # SIG # End signature block
