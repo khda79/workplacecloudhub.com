@@ -13,7 +13,11 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
-$names = @('Get-LicensesFocusedSummaryRows', 'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot')
+$names = @(
+  'Get-LicensesFocusedSummaryRows', 'ConvertTo-LicensesActivityDate', 'Get-LicensesCsvSource',
+  'Read-LicensesIndexedSource', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
+)
 $definitions = @($ast.FindAll({
   param($node)
   $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name
@@ -109,6 +113,112 @@ try {
   $threw = $false
   try { Read-LicensesTenantSnapshot -Path $csvPath -ExpectedTenantKey 'prod' | Out-Null } catch { $threw = $true }
   Assert-Equal $threw $true 'Mixed snapshot timestamps are rejected'
+
+  $today = [datetime]::UtcNow.Date
+  $recent = $today.AddDays(-2).ToString('yyyy-MM-dd')
+  $old = $today.AddDays(-100).ToString('yyyy-MM-dd')
+  $adRecent = $today.AddDays(-2).ToString('dd/MM/yyyy HH:mm:ss')
+  $adOld = $today.AddDays(-100).ToString('dd/MM/yyyy HH:mm:ss')
+  $refresh = $today.AddDays(-1).ToString('yyyy-MM-dd')
+  @(
+    [pscustomobject]@{TenantKey='prod';UserId='u1';SkuPartNumber='M365_F1'}
+    [pscustomobject]@{TenantKey='prod';UserId='u1';SkuPartNumber='M365_F1_COMM'}
+    [pscustomobject]@{TenantKey='prod';UserId='u2';SkuPartNumber='SPE_F1'}
+    [pscustomobject]@{TenantKey='prod';UserId='u2';SkuPartNumber='VISIOCLIENT'}
+    [pscustomobject]@{TenantKey='prod';UserId='u3';SkuPartNumber='SPE_E3'}
+    [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_E5'}
+    [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_F1'}
+    [pscustomobject]@{TenantKey='prod';UserId='u4';SkuPartNumber='SPE_F1'}
+    [pscustomobject]@{TenantKey='prod';UserId='u5';SkuPartNumber='M365_F1_COMM'}
+    [pscustomobject]@{TenantKey='prod';UserId='u6';SkuPartNumber='SPE_E3'}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_Users.csv') -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u1';'User principal name'='u1@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u2';'User principal name'='u2@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a2';LastSuccessfulSignInDateTime=$old}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u3';'User principal name'='u3@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a3';LastSuccessfulSignInDateTime=$recent}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u4';'User principal name'='u4@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a4';LastSuccessfulSignInDateTime=$old}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u6';'User principal name'='u6@example.invalid';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=$recent}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Users_Active.csv') -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a2';UserPrincipalName='u2@example.invalid';LastLogonDate=$adOld}
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a3';UserPrincipalName='u3@example.invalid';LastLogonDate=$adRecent}
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a4';UserPrincipalName='u4@example.invalid';LastLogonDate=$adOld}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'AD_Users_AllDomains.csv') -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';UserPrincipalName='u2@example.invalid';ReportPeriod='D180';ReportRefreshDate=$refresh;LastActivityDate=$old;IsDeleted='False'}
+    [pscustomobject]@{TenantKey='prod';UserPrincipalName='u3@example.invalid';ReportPeriod='D180';ReportRefreshDate=$refresh;LastActivityDate=$recent;IsDeleted='False'}
+    [pscustomobject]@{TenantKey='prod';UserPrincipalName='u4@example.invalid';ReportPeriod='D180';ReportRefreshDate=$refresh;LastActivityDate=$old;IsDeleted='False'}
+    [pscustomobject]@{TenantKey='prod';UserPrincipalName='u6@example.invalid';ReportPeriod='D180';ReportRefreshDate=$refresh;LastActivityDate=$old;IsDeleted='False'}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Users_Activity.csv') -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u2@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'='';'Is Deleted'='False'}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u3@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'=$recent;'Is Deleted'='False'}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u4@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'='';'Is Deleted'='False'}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Mailbox_Usage.csv') -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u2@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'='';'Is Deleted'='False';'Send Count'=0;'Read Count'=0}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u3@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'=$recent;'Is Deleted'='False';'Send Count'=1;'Read Count'=0}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u4@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'='';'Is Deleted'='False';'Send Count'=0;'Read Count'=0}
+  ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Email_Activity.csv') -NoTypeInformation
+  $appsPath = Join-Path $testRoot 'M365_Apps_Usage_180D.csv'
+  @(
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u3@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'=$recent;Windows='Yes';Mac='No'}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u4@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'=$old;Windows='No';Mac='No'}
+    [pscustomobject]@{TenantKey='prod';'User Principal Name'='u6@example.invalid';'Report Period'='180';'Report Refresh Date'=$refresh;'Last Activity Date'=$recent;Windows='No';Mac='No'}
+  ) | Export-Csv -LiteralPath $appsPath -NoTypeInformation
+
+  $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  $byProduct = @{}
+  foreach ($item in $usage.Rows) { $byProduct[$item.Product] = $item.Counts }
+  Assert-Equal $byProduct['Microsoft 365 F1'].Assigned 2 'F1 distinct users'
+  Assert-Equal $byProduct['Microsoft 365 F1'].Multiple 1 'F1 variants count as multiple distinct SKUs'
+  Assert-Equal $byProduct['Microsoft 365 F1'].Disabled 1 'F1 disabled'
+  Assert-Equal $byProduct['Microsoft 365 F1'].DisabledUnknown 1 'F1 unmatched account unknown'
+  Assert-Equal $byProduct['Microsoft 365 F3'].Assigned 2 'F3 duplicate assignment path deduplicated'
+  Assert-Equal $byProduct['Microsoft 365 F3'].Multiple 1 'F3 multi-SKU user'
+  Assert-Equal $byProduct['Microsoft 365 F3'].MultipleAll 2 'F3 users with any second SKU'
+  Assert-Equal $byProduct['Microsoft 365 F3'].AdEntraInactive 2 'F3 AD and Entra inactive'
+  Assert-Equal $byProduct['Microsoft 365 F3'].MailboxInactive 2 'F3 mailbox inactive'
+  Assert-Equal $byProduct['Microsoft 365 F3'].M365Inactive 2 'F3 M365 inactive'
+  Assert-Equal $byProduct['Microsoft 365 E3'].LocalAppsInactive 1 'E3 local Apps inactive'
+  Assert-Equal $byProduct['Microsoft 365 E3'].MailboxUnknown 1 'E3 missing mailbox row unknown'
+  Assert-Equal $byProduct['Microsoft 365 E3'].M365Inactive 0 'Recent Apps activity prevents M365 false inactivity'
+  Assert-Equal $byProduct['Microsoft 365 E5'].Multiple 1 'E5 multi-SKU user'
+  Assert-Equal $byProduct['Microsoft 365 E5'].LocalAppsInactive 1 'E5 local Apps inactive'
+  Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryCandidates 1 'E5 unique recovery candidate'
+  Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
+
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
+  Assert-Equal $script:SentMail.Count 1 'Enriched email sent'
+  if ($script:SentMail[0].BodyHtml -notlike '*Users with multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Users with multiple target SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*') {
+    throw 'Enriched KPI headers are missing from email.'
+  }
+  if ($script:SentMail[0].BodyHtml -notmatch 'Microsoft 365 F3</td><td>20</td><td>17</td><td>Subscribed</td><td>2</td>') {
+    throw 'Enriched F3 metrics are missing from email.'
+  }
+
+  $misaligned = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -LicenseSnapshotUtc ([datetimeoffset]::UtcNow.AddDays(-3)) -AsOfUtc $today
+  $f3Misaligned = @($misaligned.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
+  Assert-Equal $f3Misaligned.Available $false 'Misaligned license snapshots are not qualified'
+  Assert-Equal $misaligned.Sources[0].Ready $false 'Misaligned license user source is not ready'
+
+  $adManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt'
+  @{Status='Failed';IsPartialInventory=$true} | ConvertTo-Json | Set-Content -LiteralPath $adManifestPath
+  $partialAd = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  $f3PartialAd = @($partialAd.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
+  Assert-Equal $f3PartialAd.Counts.AdEntraInactive 0 'Partial AD export cannot prove inactivity'
+  Assert-Equal $f3PartialAd.Counts.AdEntraUnknown 2 'Partial AD export is unknown'
+  Assert-Equal @($partialAd.Sources | Where-Object Name -eq 'AD_Users_AllDomains.csv')[0].Ready $false 'Failed AD receipt is rejected'
+  Remove-Item -LiteralPath $adManifestPath -Force
+
+  $staleApps = @(Import-Csv -LiteralPath $appsPath)
+  foreach ($row in $staleApps) { $row.'Report Refresh Date' = $today.AddDays(-20).ToString('yyyy-MM-dd') }
+  $staleApps | Export-Csv -LiteralPath $appsPath -NoTypeInformation
+  $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  $e5 = @($usage.Rows | Where-Object Product -eq 'Microsoft 365 E5')[0]
+  Assert-Equal $e5.Counts.LocalAppsInactive 0 'Stale Apps report is not treated as no use'
+  Assert-Equal $e5.Counts.LocalAppsUnknown 1 'Stale Apps report is unknown'
 }
 finally {
   if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
@@ -118,8 +228,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdCYRuSmJDcGD4
-# zBEEp9cD/xrNAtzSXi7YZHPBRaTDs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdMbvHOtaCCoEC
+# W71W61xnfvYtt/WAeTOUdFpJJjjzYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -252,31 +362,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL4Zr6reL6U9IlhGwKMzTzfGzEJcaG+gJYWMFvf2GQxQMA0GCSqG
-# SIb3DQEBAQUABIIBgGpUDG4LO++DNkIfqP7RKpU3uA6tKqzvPxBAhz/ctI3ockQK
-# bdbdwvyU8nx4fmov5uWvf5aVM2ubFsM8UvA2Jadfo8N/HhZUwJ3qdqVtNVXPxp4a
-# GnWyJ7lp1mjCZFV50wbF/SvSjwrImdxNNvXQVYsQrYlEwDZ58l0MA4sr3EWl83S9
-# GhkQfT99vVBqH3pXJxcOPgRjCYDaFpJSxwt+l6xJ2SVCOwbyMNW4GEMTYs05n0U4
-# Nj/G8zw9UVMrz/LOqloveHQYPQGJz102A9ZutM7Wj2WRg0KAhDMLuDBwWgLM5J7p
-# epc3pCwQXG4X+rS/MlVQm6h3rwiIn/ExyQWvkSMViixij5ev43i8qEyj5lVW+9vc
-# s/frbZpGK5gBfUbB/BJiJ8TYSenUQbZX2WYpD06wkTqQWULCvYBDfi9lE4eSMJlU
-# IzGLHGbm2MW/rcGc8MyxYktKS+YpkVwQVAZZSTCjYDDxcOBoRnwMWGPjcin3FLt/
-# NzPyPQdvLXdeMuHOuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC8DXK0Mno4+Doe/VTl2G4syTtfCq8GmOhiQ4MDLYMWVMA0GCSqG
+# SIb3DQEBAQUABIIBgFVspY2njpyI6shdBr0co/P+Msi38I/tqY1Ztb6odwxeZ/Rb
+# RajPM0ecTn1VKrI738uGlQL0PMGCn+ZRAtAKekuV3LI0myOkootBGPLd2K/5hj0S
+# DDbc0XlhPEUmuGaI6sTWIR4Y7WCzFzMgVVVFdwwdn56BUKJLDycSm9fobvjO7zao
+# uzISHRB00Zlp8Fpv7meeA96zBDQFSJFiCupzs5HK3GuGwL0E4DEB+n4g442LpRlK
+# vElb6iEi9kBnNhwkX7qhPeqUaJTvjkGVntSepspIWbF0KjgsNOERQFxZwYe32lcM
+# Hck3qImCCPcrCtbD3RZ6rdRmKmva1nIQmxvJUYuJma0jg5R1INTVs2byLx7vR2LD
+# xPu4RIz2XND9DjbV8IrEraJx08SyUBO8/WHaVZzwhK//QSUPpxhuB9SlPwYY6uWq
+# TMIwyPt26Ln+saBX/MrcdlG8OlPUd0oYV7bx+MF99hfa6xyT4HylnwpTR0a/bMvk
+# IsQAMnjc8xT52lnLt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDE1
-# MzlaMC8GCSqGSIb3DQEJBDEiBCC+hnumQShg7xXuLXrFz4ju8BlITL8BLnwi/x3q
-# YQRMqTANBgkqhkiG9w0BAQEFAASCAgBUtlsorqB10S3eHl62B31KYRLGVFkSPAmK
-# 19dXNSaFLZrrMWILdjOmaiXV9Mg5Bb/0vobLlk2sHgdJpKOCDNT2rOHSbFPt7wHP
-# +PCfarFMS1y1pPelBm2ib6h31cTmBlH4vo0r+UBl+iGc+GzBWBCI/EVyh2E0EfkH
-# ASVr9TciM/iwnLWReXK3SHlrOyRE00Z55mAx/VNLCmrvYA9SISsP1whgqTMIQGfc
-# f31a4nMMmHWSH811YGdT0UFySSCknGdOrQnJdST+k1nJwNC16e3EuPS+ZfPs5x1G
-# s+sQhX0CM0dO/T270eHIA/twDnnqVFVK/61YIK/nPhwUKm3z3hhuKJRB/8mzpuGy
-# WhVpNPfuGfMshtIy4/2ryZ7MB5c5GrW487FzFy6ABP3sdk7TJc+ZGPC3AQqsnAjq
-# s4yXOMHAXtL+FkS2g8wPZmWL23gi7tCFEN7sPXvWxKKAc+V+J1bnsRhcAC9aDM7G
-# 3gOLNmP47iHxkrr0b+qlR3JfnypzRdz7SeLWnRbSkfy3MXq0UCT01+X1kLxvaEfV
-# bzPn1r5zQjXMOEr1aPvh1tf02oVMSSmyEzc8cUTAfL0gE5lD7RoYecihDCJu5QR9
-# XYIAfCoITz7ntJfzXL7kykVha3hrexeq4j+Ii8J+nv2Uu/FuFaFGy0f9eY3kI0ke
-# Y4aaTpr5sg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMTA2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAHeTrSCPp/n1jRTN5rGSB+gy+WhlCtYCD7IP6U
+# uxdSkjANBgkqhkiG9w0BAQEFAASCAgCYGqd8STK+c07si7FP3EoJXBwBf4Fe0gzm
+# FGNr+/xr8m2AYP/0g30vWtlSh6m58DNYSUh1WhXUgclH4fpC/byHE/3HMs4tNNBF
+# KNttp1uSz0YBcr9W24CjVULe5wdJP1J2cNb4d3mocdI1HLk5LeCrKVO9hnMDRx3H
+# RN7+PVHgrRckboOeVBSEaYWZ5Ytr00XtnXxKFESoSqBrrlgTQmKpSivfo5zbN3cS
+# Ym46z9U7+w2VHz+T3eREww3Y7LHupW/rVL5pv3OSYGLYdGyeKVe/mrZ04WV1wDpe
+# tWLRtSB9Am4f4j98yD62MShwacNjYNgV8Kq5ApOxa9wPWylgkNaLHaeU8g0NWnl1
+# 67l2KtLzTfAUDymiF3D//jCX0MQJeKKZoIVNw6zypo6kcJN2ayh0MDpGUcciTkti
+# 899iNi1UowVJ5AI1hDl/q7regCWDoglVptV0Pkc0SJcQBgm9o0WYV5ZjSZPaAhyb
+# QmPStCjJXGR1qu7zvk8HLIDnrLv6SaZ3ettZekhur6FmGhDoRrD8iafSsM5e3ZjV
+# +gUjrFv9pdp/8O3eJh/+oFHrUi/Gs5RlEqLOMDavI5wVt2CBISIrooAA8j1U42cC
+# foW/rFkyj82W8YcbeHwc4t8xYo6zx6w/E9v7hkgGQlgPHEm1ZRYSsiyEjSOb+1pc
+# B86Q5AI8Cg==
 # SIG # End signature block

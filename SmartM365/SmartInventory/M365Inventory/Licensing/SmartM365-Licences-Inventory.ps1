@@ -4,9 +4,9 @@
   WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
-  SendLicenseSummaryEmailOnly sends the focused summary from the existing published tenant CSV without collecting again.
+  SendLicenseSummaryEmailOnly sends the focused license and usage summary from existing published CSVs without collecting again.
 .VERSION
-1.22
+1.23
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -14,7 +14,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.22
+    Version : 1.23
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -626,10 +626,311 @@ function Get-LicensesFocusedSummaryRows {
   }
 }
 
+function ConvertTo-LicensesActivityDate {
+  param([AllowNull()]$Value)
+  $valueText = ([string]$Value).Trim()
+  if (-not $valueText) { return $null }
+  $adDate = [datetime]::MinValue
+  if ([datetime]::TryParseExact($valueText, [string[]]@('dd/MM/yyyy HH:mm:ss','dd/MM/yyyy H:mm:ss'),
+      [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$adDate)) {
+    return $adDate.Date
+  }
+  $parsed = [datetimeoffset]::MinValue
+  if ([datetimeoffset]::TryParse($valueText, [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) {
+    return $parsed.UtcDateTime.Date
+  }
+  return $null
+}
+
+function Get-LicensesCsvSource {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$FileName,
+    [Parameter(Mandatory)][string[]]$Columns,
+    [Parameter(Mandatory)][datetime]$AsOfUtc,
+    [string]$CollectorManifestName = ''
+  )
+  $path = Join-Path -Path $Folder -ChildPath $FileName
+  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only' }
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $source.Reason='missing'; return $source }
+  $item = Get-Item -LiteralPath $path
+  $source.ModifiedUtc = $item.LastWriteTimeUtc
+  $source.Date = $item.LastWriteTimeUtc.ToString('yyyy-MM-dd')
+  if ($item.LastWriteTimeUtc.Date -lt $AsOfUtc.Date.AddDays(-14)) { $source.Reason='older than 14 days'; return $source }
+  $header = Get-Content -LiteralPath $path -TotalCount 1 -ErrorAction Stop
+  $foundColumns = @($header.TrimStart([char]0xFEFF).Replace('"','').Split(','))
+  foreach ($column in $Columns) {
+    if ($column -notin $foundColumns) { $source.Reason="missing column: $column"; return $source }
+  }
+  if ($CollectorManifestName) {
+    $manifestPath = Join-Path -Path $Folder -ChildPath $CollectorManifestName
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+      try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$manifest.Status -ne 'Completed' -or [bool]$manifest.IsPartialInventory) {
+          $source.Reason = "collector receipt is $($manifest.Status) or partial"
+          return $source
+        }
+        $source.Provenance = 'collector completed'
+      }
+      catch { $source.Reason='collector receipt is unreadable'; return $source }
+    }
+  }
+  $source.Ready = $true
+  return $source
+}
+
+function Read-LicensesIndexedSource {
+  param(
+    [Parameter(Mandatory)]$Source,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
+    [Parameter(Mandatory)][string]$KeyColumn,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$WantedKeys,
+    [Parameter(Mandatory)][datetime]$AsOfUtc,
+    [string]$RefreshColumn,
+    [string]$PeriodColumn,
+    [string]$ExpectedPeriod
+  )
+  $index = @{}
+  $duplicates = @{}
+  $refreshDate = $null
+  if (-not $Source.Ready) { return [pscustomobject]@{ Ready=$false; Rows=$index; Duplicates=$duplicates; Source=$Source } }
+  try {
+    foreach ($row in (Import-Csv -LiteralPath $Source.Path -ErrorAction Stop)) {
+      if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
+      if ($PeriodColumn -and ([string]$row.$PeriodColumn).Trim() -ne $ExpectedPeriod) { throw 'unexpected report period' }
+      if ($RefreshColumn) {
+        $rowDate = ConvertTo-LicensesActivityDate $row.$RefreshColumn
+        if ($null -eq $rowDate -or $rowDate -lt $AsOfUtc.Date.AddDays(-14)) { throw 'report refresh date is missing or older than 14 days' }
+        if ($null -eq $refreshDate) { $refreshDate = $rowDate }
+        elseif ($refreshDate -ne $rowDate) { throw 'mixed report refresh dates' }
+      }
+      $key = ([string]$row.$KeyColumn).Trim().ToLowerInvariant()
+      if (-not $key -or -not $WantedKeys.Contains($key)) { continue }
+      if ($index.ContainsKey($key)) { $duplicates[$key] = $true; continue }
+      $index[$key] = $row
+    }
+    if ($RefreshColumn -and $null -eq $refreshDate) { throw 'empty report' }
+    if ($refreshDate) { $Source.Date = $refreshDate.ToString('yyyy-MM-dd') }
+  }
+  catch {
+    $Source.Ready = $false
+    $Source.Reason = $_.Exception.Message
+    $index = @{}
+    $duplicates = @{}
+  }
+  return [pscustomobject]@{ Ready=$Source.Ready; Rows=$index; Duplicates=$duplicates; Source=$Source }
+}
+
+function Get-LicensesFocusedUsageRows {
+  param(
+    [Parameter(Mandatory)][string]$CsvFolderPath,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
+    [datetimeoffset]$LicenseSnapshotUtc = [datetimeoffset]::MinValue,
+    [datetime]$AsOfUtc = [datetime]::UtcNow
+  )
+  $products = @(
+    @{ Name='Microsoft 365 F1'; PartNumbers=@('M365_F1','M365_F1_COMM') }
+    @{ Name='Microsoft 365 F3'; PartNumbers=@('SPE_F1') }
+    @{ Name='Microsoft 365 E3'; PartNumbers=@('SPE_E3') }
+    @{ Name='Microsoft 365 E5'; PartNumbers=@('SPE_E5') }
+  )
+  $sources = [System.Collections.Generic.List[object]]::new()
+  $licenseSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Licenses_Users.csv' -Columns @('TenantKey','UserId','SkuPartNumber') -AsOfUtc $AsOfUtc
+  if ($licenseSource.Ready -and $LicenseSnapshotUtc -ne [datetimeoffset]::MinValue -and
+      [math]::Abs(($licenseSource.ModifiedUtc - $LicenseSnapshotUtc.UtcDateTime).TotalHours) -gt 24) {
+    $licenseSource.Ready = $false
+    $licenseSource.Reason = 'license user assignments do not match the tenant snapshot date (over 24 hours apart)'
+  }
+  $sources.Add($licenseSource)
+  $productUsers = @{}
+  foreach ($product in $products) { $productUsers[$product.Name] = @{} }
+  $skusByUser = @{}
+  $allSkusByUser = @{}
+  if ($licenseSource.Ready) {
+    try {
+      foreach ($row in (Import-Csv -LiteralPath $licenseSource.Path -ErrorAction Stop)) {
+        if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
+        $rowUserId = ([string]$row.UserId).Trim().ToLowerInvariant()
+        $rowSku = ([string]$row.SkuPartNumber).Trim().ToUpperInvariant()
+        if ($rowUserId -and $rowSku) {
+          if (-not $allSkusByUser.ContainsKey($rowUserId)) { $allSkusByUser[$rowUserId] = @{} }
+          $allSkusByUser[$rowUserId][$rowSku] = $true
+        }
+        foreach ($product in $products) {
+          if ([string]$row.SkuPartNumber -notin $product.PartNumbers) { continue }
+          $userId = $rowUserId
+          if (-not $userId) { throw 'a target license row has no UserId' }
+          $productUsers[$product.Name][$userId] = $true
+          if (-not $skusByUser.ContainsKey($userId)) { $skusByUser[$userId] = @{} }
+          $skusByUser[$userId][$rowSku] = $true
+          break
+        }
+      }
+    }
+    catch { $licenseSource.Ready=$false; $licenseSource.Reason=$_.Exception.Message }
+  }
+  if (-not $licenseSource.Ready) {
+    $unavailableRows = foreach ($product in $products) {
+      [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
+    }
+    return [pscustomobject]@{ Rows=@($unavailableRows); Sources=$sources.ToArray() }
+  }
+
+  $activeSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Users_Active.csv' -Columns @('TenantKey','Object Id','User principal name','AccountEnabled','OnPremisesImmutableId','LastSuccessfulSignInDateTime') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveUsers-Inventory.current.json.txt'
+  $sources.Add($activeSource)
+  $active = Read-LicensesIndexedSource -Source $activeSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Object Id' -WantedKeys $skusByUser -AsOfUtc $AsOfUtc
+  $wantedUpns = @{}
+  $wantedImmutableIds = @{}
+  if ($active.Ready) {
+    foreach ($user in $active.Rows.Values) {
+      $upn = ([string]$user.'User principal name').Trim().ToLowerInvariant()
+      if ($upn) { $wantedUpns[$upn] = $true }
+      $immutableId = ([string]$user.OnPremisesImmutableId).Trim().ToLowerInvariant()
+      if ($immutableId) { $wantedImmutableIds[$immutableId] = $true }
+    }
+  }
+
+  $adSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','LastLogonDate') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt'
+  $sources.Add($adSource)
+  $adByImmutable = @{}
+  $adByUpn = @{}
+  $adDuplicateUpns = @{}
+  if ($adSource.Ready) {
+    try {
+      Import-Csv -LiteralPath $adSource.Path -ErrorAction Stop | ForEach-Object {
+        if ([string]$_.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
+        $immutableId = ([string]$_.ImmutableId_AD).Trim().ToLowerInvariant()
+        $upn = ([string]$_.UserPrincipalName).Trim().ToLowerInvariant()
+        $adValue = [pscustomobject]@{ LastLogonDate=$_.LastLogonDate }
+        if ($immutableId -and $wantedImmutableIds.ContainsKey($immutableId)) {
+          if ($adByImmutable.ContainsKey($immutableId)) { throw 'duplicate AD immutable ID' }
+          $adByImmutable[$immutableId] = $adValue
+        }
+        if ($upn -and $wantedUpns.ContainsKey($upn)) {
+          if ($adByUpn.ContainsKey($upn)) { $adDuplicateUpns[$upn] = $true }
+          else { $adByUpn[$upn] = $adValue }
+        }
+      }
+    }
+    catch { $adSource.Ready=$false; $adSource.Reason=$_.Exception.Message; $adByImmutable=@{}; $adByUpn=@{} }
+  }
+
+  $reportDefinitions = @(
+    @{ Name='M365_Users_Activity.csv'; Key='UserPrincipalName'; Columns=@('TenantKey','UserPrincipalName','ReportPeriod','ReportRefreshDate','LastActivityDate','IsDeleted'); Refresh='ReportRefreshDate'; Period='ReportPeriod'; Expected='D180' }
+    @{ Name='M365_Mailbox_Usage.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Is Deleted'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
+    @{ Name='M365_Email_Activity.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Is Deleted','Send Count','Read Count'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
+    @{ Name='M365_Apps_Usage_180D.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Windows','Mac'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
+  )
+  $reports = @{}
+  foreach ($definition in $reportDefinitions) {
+    $source = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName $definition.Name -Columns $definition.Columns -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt'
+    $sources.Add($source)
+    $reports[$definition.Name] = Read-LicensesIndexedSource -Source $source -ExpectedTenantKey $ExpectedTenantKey -KeyColumn $definition.Key -WantedKeys $wantedUpns -AsOfUtc $AsOfUtc -RefreshColumn $definition.Refresh -PeriodColumn $definition.Period -ExpectedPeriod $definition.Expected
+  }
+
+  $cutoff = $AsOfUtc.Date.AddDays(-90)
+  $metricRows = foreach ($product in $products) {
+    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleAll=0; RecoveryCandidates=0; RecoveryUnknown=0 }
+    if (-not $licenseSource.Ready) { [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$false }; continue }
+    foreach ($userId in $productUsers[$product.Name].Keys) {
+      $count.Assigned++
+      if ($skusByUser[$userId].Count -gt 1) { $count.Multiple++ }
+      if ($allSkusByUser[$userId].Count -gt 1) { $count.MultipleAll++ }
+      if (-not $active.Ready -or -not $active.Rows.ContainsKey($userId) -or $active.Duplicates.ContainsKey($userId)) {
+        $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++; $count.RecoveryUnknown++
+        if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) { $count.LocalAppsUnknown++ }
+        continue
+      }
+      $user = $active.Rows[$userId]
+      $enabledText = ([string]$user.AccountEnabled).Trim().ToLowerInvariant()
+      if ($enabledText -eq 'false') { $count.Disabled++; $count.RecoveryCandidates++; continue }
+      if ($enabledText -ne 'true') {
+        $count.DisabledUnknown++; $count.AdEntraUnknown++; $count.MailboxUnknown++; $count.M365Unknown++; $count.RecoveryUnknown++
+        if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) { $count.LocalAppsUnknown++ }
+        continue
+      }
+      $upn = ([string]$user.'User principal name').Trim().ToLowerInvariant()
+      $entraDate = ConvertTo-LicensesActivityDate $user.LastSuccessfulSignInDateTime
+      $immutableId = ([string]$user.OnPremisesImmutableId).Trim().ToLowerInvariant()
+      $adRow = $null
+      if ($adSource.Ready -and $immutableId) {
+        if ($adByImmutable.ContainsKey($immutableId)) { $adRow = $adByImmutable[$immutableId] }
+        elseif ($upn -and $adByUpn.ContainsKey($upn) -and -not $adDuplicateUpns.ContainsKey($upn)) { $adRow = $adByUpn[$upn] }
+      }
+      $adDate = if ($adRow) { ConvertTo-LicensesActivityDate $adRow.LastLogonDate } else { $null }
+      if (($entraDate -and $entraDate -ge $cutoff) -or ($adDate -and $adDate -ge $cutoff)) { }
+      elseif ($entraDate -and (-not $immutableId -or $adDate)) { $count.AdEntraInactive++ }
+      else { $count.AdEntraUnknown++ }
+
+      $mail = $reports['M365_Mailbox_Usage.csv']
+      $email = $reports['M365_Email_Activity.csv']
+      $mailRow = if ($mail.Ready -and $upn -and $mail.Rows.ContainsKey($upn) -and -not $mail.Duplicates.ContainsKey($upn)) { $mail.Rows[$upn] } else { $null }
+      $emailRow = if ($email.Ready -and $upn -and $email.Rows.ContainsKey($upn) -and -not $email.Duplicates.ContainsKey($upn)) { $email.Rows[$upn] } else { $null }
+      if ($mailRow -and ([string]$mailRow.'Is Deleted').Trim().ToLowerInvariant() -eq 'true') { $mailRow = $null }
+      if ($emailRow -and ([string]$emailRow.'Is Deleted').Trim().ToLowerInvariant() -eq 'true') { $emailRow = $null }
+      $mailDate = if ($mailRow) { ConvertTo-LicensesActivityDate $mailRow.'Last Activity Date' } else { $null }
+      $emailDate = if ($emailRow) { ConvertTo-LicensesActivityDate $emailRow.'Last Activity Date' } else { $null }
+      $emailUserAction = $false
+      if ($emailRow -and $emailDate -and $emailDate -ge $cutoff) {
+        foreach ($field in @('Send Count','Read Count','Meeting Created Count','Meeting Interacted Count')) {
+          $number = 0L
+          if ([long]::TryParse(([string]$emailRow.$field).Trim(), [ref]$number) -and $number -gt 0) { $emailUserAction=$true; break }
+        }
+      }
+      if ($mailRow) {
+        if ((-not $mailDate -or $mailDate -lt $cutoff) -and -not $emailUserAction) { $count.MailboxInactive++ }
+      }
+      else { $count.MailboxUnknown++ }
+
+      $m365 = $reports['M365_Users_Activity.csv']
+      $apps = $reports['M365_Apps_Usage_180D.csv']
+      $m365Row = if ($m365.Ready -and $upn -and $m365.Rows.ContainsKey($upn) -and -not $m365.Duplicates.ContainsKey($upn)) { $m365.Rows[$upn] } else { $null }
+      if ($m365Row -and ([string]$m365Row.IsDeleted).Trim().ToLowerInvariant() -eq 'true') { $m365Row = $null }
+      $appsRow = if ($apps.Ready -and $upn -and $apps.Rows.ContainsKey($upn) -and -not $apps.Duplicates.ContainsKey($upn)) { $apps.Rows[$upn] } else { $null }
+      $m365Date = if ($m365Row) { ConvertTo-LicensesActivityDate $m365Row.LastActivityDate } else { $null }
+      $appsDate = if ($appsRow) { ConvertTo-LicensesActivityDate $appsRow.'Last Activity Date' } else { $null }
+      $hasRecentM365 = ($m365Date -and $m365Date -ge $cutoff) -or ($appsDate -and $appsDate -ge $cutoff) -or ($mailDate -and $mailDate -ge $cutoff) -or $emailUserAction
+      if (-not $hasRecentM365 -and $m365Row) { $count.M365Inactive++; $count.RecoveryCandidates++ }
+      elseif (-not $hasRecentM365) { $count.M365Unknown++; $count.RecoveryUnknown++ }
+
+      if ($product.Name -in @('Microsoft 365 E3','Microsoft 365 E5')) {
+        if ($appsRow) {
+          $windows = ([string]$appsRow.Windows).Trim().ToLowerInvariant()
+          $mac = ([string]$appsRow.Mac).Trim().ToLowerInvariant()
+          if ($windows -notin @('yes','no') -or $mac -notin @('yes','no')) { $count.LocalAppsUnknown++ }
+          elseif ($windows -eq 'no' -and $mac -eq 'no') { $count.LocalAppsInactive++ }
+        }
+        else { $count.LocalAppsUnknown++ }
+      }
+    }
+    [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$true }
+  }
+  return [pscustomobject]@{ Rows=@($metricRows); Sources=$sources.ToArray() }
+}
+
+function Format-LicensesMetric {
+  param(
+    [AllowNull()]$Counts,
+    [Parameter(Mandatory)][string]$ValueName,
+    [Parameter(Mandatory)][string]$UnknownName,
+    [bool]$Available
+  )
+  if (-not $Available -or $null -eq $Counts) { return 'N/D' }
+  $value = [long]$Counts[$ValueName]
+  $unknown = [long]$Counts[$UnknownName]
+  if ($unknown -eq 0) { return [string]$value }
+  if ($value -eq 0 -and $unknown -eq [long]$Counts.Assigned) { return "N/D ($unknown)" }
+  return "$value (N/D: $unknown)"
+}
+
 function Send-LicensesFocusedSummaryEmail {
   param(
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
     [Parameter(Mandatory)][string]$CollectedAtUtc,
+    [string]$CsvFolderPath = '',
+    [string]$ExpectedTenantKey = '',
     [switch]$Manual
   )
 
@@ -650,11 +951,40 @@ function Send-LicensesFocusedSummaryEmail {
     }
 
     $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
+    $usage = $null
+    if ($CsvFolderPath -and $ExpectedTenantKey) {
+      try {
+        $snapshotTime = [datetimeoffset]::Parse($CollectedAtUtc, [Globalization.CultureInfo]::InvariantCulture)
+        $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $CsvFolderPath -ExpectedTenantKey $ExpectedTenantKey -LicenseSnapshotUtc $snapshotTime
+      }
+      catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
+    $usageByProduct = @{}
+    if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
     $htmlRows = foreach ($row in $summaryRows) {
       $status = if ($row.Subscribed) { 'Subscribed' } else { 'Not subscribed' }
-      '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>' -f `
-        [System.Net.WebUtility]::HtmlEncode($row.Product), $row.Enabled, $row.Consumed, $status
+      $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
+      $counts = if ($metrics) { $metrics.Counts } else { $null }
+      $assigned = if ($metrics -and $metrics.Available) { [string]$counts.Assigned } else { 'N/D' }
+      $multiple = if ($metrics -and $metrics.Available) { [string]$counts.Multiple } else { 'N/D' }
+      $multipleAll = if ($metrics -and $metrics.Available) { [string]$counts.MultipleAll } else { 'N/D' }
+      $disabled = Format-LicensesMetric -Counts $counts -ValueName 'Disabled' -UnknownName 'DisabledUnknown' -Available ($metrics -and $metrics.Available)
+      $adEntra = Format-LicensesMetric -Counts $counts -ValueName 'AdEntraInactive' -UnknownName 'AdEntraUnknown' -Available ($metrics -and $metrics.Available)
+      $mailbox = Format-LicensesMetric -Counts $counts -ValueName 'MailboxInactive' -UnknownName 'MailboxUnknown' -Available ($metrics -and $metrics.Available)
+      $m365 = Format-LicensesMetric -Counts $counts -ValueName 'M365Inactive' -UnknownName 'M365Unknown' -Available ($metrics -and $metrics.Available)
+      $apps = if ($row.Product -in @('Microsoft 365 E3','Microsoft 365 E5')) {
+        Format-LicensesMetric -Counts $counts -ValueName 'LocalAppsInactive' -UnknownName 'LocalAppsUnknown' -Available ($metrics -and $metrics.Available)
+      } else { 'N/A' }
+      $recovery = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metrics -and $metrics.Available)
+      '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td><td>{8}</td><td>{9}</td><td>{10}</td><td>{11}</td><td>{12}</td></tr>' -f `
+        [System.Net.WebUtility]::HtmlEncode($row.Product), $row.Enabled, $row.Consumed, $status, $assigned, $disabled, $adEntra, $mailbox, $m365, $apps, $multipleAll, $multiple, $recovery
     }
+    $sourceRows = if ($usage) {
+      foreach ($source in $usage.Sources) {
+        $state = if ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" } else { "N/D ($($source.Reason))" }
+        '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
+      }
+    } else { @('<li>Usage sources: N/D</li>') }
     $sourceNote = if ($Manual) { '<p>Source: existing published CSV. No new inventory was run.</p>' } else { '' }
     $subject = if ($Manual) { 'Microsoft 365 F1/F3/E3/E5 license summary (existing CSV)' } else { 'Microsoft 365 F1/F3/E3/E5 license summary' }
     $bodyHtml = @"
@@ -662,10 +992,13 @@ function Send-LicensesFocusedSummaryEmail {
 <p>Subscribed SKUs collected at $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) (UTC).</p>
 $sourceNote
 <table border="1" cellpadding="6" cellspacing="0">
-<thead><tr><th>License</th><th>Enabled units</th><th>Consumed units</th><th>Status</th></tr></thead>
+<thead><tr><th>License</th><th>Enabled units</th><th>Consumed units</th><th>Status</th><th>Assigned users</th><th>Disabled users</th><th>No AD or Entra activity (90d)</th><th>No mailbox activity (90d)</th><th>No M365 activity (90d)</th><th>No local Apps use (180d)</th><th>Users with multiple assigned SKUs</th><th>Users with multiple target SKUs</th><th>Recovery candidates</th></tr></thead>
 <tbody>$($htmlRows -join "`n")</tbody>
 </table>
 <p>Microsoft 365 F1 includes the M365_F1 and M365_F1_COMM SKUs when present.</p>
+<p>Recovery candidates are distinct users with a disabled account or no observed M365 activity in 90 days. The indicators overlap and must not be added together. Multiple assigned SKUs include add-ons, trials and free products; multiple target SKUs are limited to F1/F3/E3/E5. Neither count proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report.</p>
+<p>N/D means the source or user cannot be qualified. Sources older than 14 days are not used. Report dates below are refresh dates when available.</p>
+<ul>$($sourceRows -join "`n")</ul>
 "@
     Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $bodyHtml -MailPurpose Report
     WriteLog -Message 'Focused Microsoft 365 F1/F3/E3/E5 license summary email sent.' 'INFO'
@@ -1264,7 +1597,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.23"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -1281,7 +1614,7 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -Manual
+  Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -Manual
   Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath)
   return
 }
@@ -1830,7 +2163,7 @@ $BaseFileName = "M365_Licenses_Groups"
   $groupRowCount = $groupRows.Count
 
   $currentOperation = 'Send focused license summary email'
-  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc
+  Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey
 
   if ($connectedGraphInThisRun) {
     $currentOperation = "Disconnect Microsoft Graph"
@@ -1923,8 +2256,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvH1kUbGx2ed6i
-# wcGZ3mrNN/5sIipim97gZzMEo4DwkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDglsW55EEjZvdA
+# Q0BnxG80LgaaTcKSVs5bJIwalulTMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2057,31 +2390,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILyY4r4jmnKPuJLmHaG2LdJisj8quOBEw5lpcRVE+FahMA0GCSqG
-# SIb3DQEBAQUABIIBgFVtoi/7SmJO/JIQhTs0M+XjsUGKjU/DcQibkQSxecJZ4Zh4
-# w4AB6c5WG6laS4ZYHfFXx5TwXiuHMQ0Zb78K+j9TV5dd7F7hwdVYIajpDNUzFHL8
-# FLixki+vNRCkUdqZPv4sEkMgjtBxl/rdZZhefz8ABN5lIDSZR38Cd5FCIHGYUc4v
-# yDAAUbWj0U/yREqjyMEaM5MYD4UIsyG71k98Wwz7RPD+Q6baG8QYKTvLj3Qyfgau
-# jdur04ayfapKzxor1XL8CnzAEwj1uqaPAliZdGfp1fDEugzWEwwgpdIrsjIcsy1W
-# JZvfcqTTXDQgBAPStKkDh25f/Sdt+Fe7HmvRJOpzwq7sv0YQ/6r+kCNWE0z80oWZ
-# VGo05RZefmiGS/bPtqOD+bBMxbUYUR3iolyF9/T3m1Iv9kl4uspIB5/m4hfPbv8d
-# 81Q0SaFSIBtBoID+1PZ7Q42lUEXYsQPtMuxKPYja6/SZvZtyOJvUE8ZNMZSKmDcb
-# EtmszdmoPzP6uZrLuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMiOJGET4GhpPULfnRqoMXHYbiCprT3LUq8jwXqo+khxMA0GCSqG
+# SIb3DQEBAQUABIIBgFaE/2Mbpd6bgaV/mDSCLHBOv3KpXDQ96jhLae0MKAsBOIg+
+# f9kR6NE/zS7mbdx/dhob+N9XN3DCnzh1KJLD12JNCBjN900GFqZ4WgAvNVaYQanb
+# YUh49B3ISEnfuTn9Rc6GDDgSQ2nOo55hy17zieEmBp8mIowrl9k3ujCb/ebmJ+Kd
+# vNaTyF+/ChR9wXoiI0IJz6VIwgjuY2l/Id/0HTTAW3EmMZWjiK1lbazzlr94UegL
+# 3rt3dvT6EUCuV42CxOoQ0v6sT0N12luyYPicM7r+XFxpMDiJK/M7tDWLzO7SlJzi
+# tlOqMSfBETg+nOFlWPmeq4MTGFUak6W/X8nk7imYst/FUNnT/jGA5YURnSs4ieBI
+# hI2jwndwsP/pD+hwIIE/NRRYffwNCpOLuO9KZbkWv3vL6MfSw7qeUcFxF0+q3qc4
+# eoU5AURDdPLNjVC52Yczv2ifvk0GRiVY7yh9XuxiQboig37Owxy6tvT90A7veLGJ
+# aWARobDvvo/xeKOwhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDE3
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDvosgNmQvXBJAB6bdl2icJ/sMh3A8CF0bt9nIU
-# AfhNCzANBgkqhkiG9w0BAQEFAASCAgAEIIYob7AYNRuyTY8DOsN6jUPJ4ECZVHKf
-# 8mNWxb9S8YDIjlceMg4TlMjytvl9T/cvqdSrcEUUyHkLuoVFWlRNjIhxW+7fprV7
-# O/M1Y4aNb8Zo04WfmZ5gmNiY/Gk3b+2+Xeb2GBvRySIN6qrgLDpO5AY4khYsc+Th
-# HcNCAhGFkRi0LwOWT4Xjvqd1/KzbMYM0nVwEFBtDbeEK6banFAWL3jTflbeucTqo
-# uyJGTrkzWaCMJkEscK/aeFshQ86ydjqzYJfgOXqrwx1BY5E+NRhlwaaN5gKCbn/R
-# 8XGOYyRbiymnWz3NTCEk4Dhy4Sy4ptWNcLQ0Q2o5XxM04mUDKSj9lcSgViu0IqqI
-# IDLbtwWIhBPuee+TL+RJSvdeHr3rRt2n3yo/aw+pnocIV4kn12TlzgoKDcY0CI5t
-# GulcQfbhWjBj4bEidJVaOmTuHgCMQlT7KJNYbKbqNqxm7bkY57jt54Y1Y+ZnVFaR
-# 3zGPk/HDj+1wF9+6yPzQ28TKXuKBZ5E8MYhFshZ9uRNkfhilU0LOiZk2ezd5rN6y
-# lUZHO5QXUf8WacB+EdZQVP1ggCrFOKTmfHKSrfVHsErUrSwN+m+dOLKtxEIWvreM
-# nO3V6TgCcQfEfxLgWLFMMZVJGAEYbdwq5bmqrfLtHsDzkXyEwBzVHwy3j+Ahofc+
-# 5W64d1Z7Pg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMTA2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDXPgJSVuVARzkYX/09dcDMu0J+y8QgxzDe2iwQ
+# zDflRjANBgkqhkiG9w0BAQEFAASCAgBrVeKb11dOhFgqBnzPNFyW5OFGxWb7sZdt
+# yhn7bMRzs0NHDKwp8M2esZjjrnsiwwk09/lnMsF3eDSoEFSXbU0tQvN9IpfhjLub
+# Lb3w0Jv2dAENq0/S+Wxmxnc35EewGn2eLZItSxjaU9XqSfmPQq+JdSy3bDpSGo6R
+# 52qsIWvtBOCdn7mjIynaz/Pkd8+m2E+LPwIJD4q0XxXxp8KZTGWA8T41FhqwK7ZV
+# zeYvL5/gQmffdyyJ+XC+skOjoliDdCNKwn7YXs+hZxrbG0MIItTGCQK4Neie4VGT
+# HRQ9q5gvJuW8ZXZorW9OagufkZWE67iY0I7WbJVkTnvdsp4/cDbJ4Qwn13akWhZ3
+# HcxaGU7o57WOFFiYV6JFh0lnJJ3mMiI/5m79eBB883H1u4P3V9XHKQT25D3MI6vJ
+# PTIMc8pjuOjSRYv0w95LiscXQcoqAUlbrkA4cqaqvdiIrDegP+WkYaytcbLHUpop
+# y9zju2clDOwm+3z5QKZ+MDpMxhBUDHmmhpS1DTfMEuT9lEqBB+uKcaxapmXBjkWb
+# fvVdix12ljpY5W5EnayyjiFoVYtaHrisraHZA7Hr6EQDkOpSr6qSVfNvoqfNn8Bl
+# ffnn7bOJVFc8nkzI2+fNCmw0AVDgvRhWvNyYWJt8sphgK7sBslkhjG69Vg7sLVQR
+# mw1o6C94rg==
 # SIG # End signature block
