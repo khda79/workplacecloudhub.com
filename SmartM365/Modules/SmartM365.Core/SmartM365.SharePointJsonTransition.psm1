@@ -19,7 +19,8 @@ function Invoke-SmartM365SharePointJsonNameTransition {
         [Parameter(Mandatory)][string]$DriveId,
         [Parameter(Mandatory)][string]$EncodedTargetPath,
         [Parameter(Mandatory)][scriptblock]$Request,
-        [Parameter(Mandatory)][scriptblock]$Download
+        [Parameter(Mandatory)][scriptblock]$Download,
+        [switch]$CompareLocalContent
     )
     if (-not $EncodedTargetPath.EndsWith('.json.txt',[StringComparison]::OrdinalIgnoreCase)) { throw 'SharePoint JSON transition requires an exact preferred target.' }
     $policy = Get-SmartM365JsonTransportPolicy
@@ -110,7 +111,21 @@ function Invoke-SmartM365SharePointJsonNameTransition {
             }
             if (-not $legacy -or $legacy.id -ne $last.Record.Id -or $legacy.eTag -ne $last.Record.ETag) { throw 'Prepared remote rename changed externally; qualification required.' }
         }
-        if (-not $legacy) { return [pscustomobject]@{Status='NoLegacy';Item=$preferred} }
+        if (-not $legacy) {
+            $contentMatchesLocal = $false
+            if ($CompareLocalContent -and $preferred) {
+                if (-not $preferred.PSObject.Properties['file'] -or [string]::IsNullOrWhiteSpace([string]$preferred.eTag)) {
+                    throw 'Remote preferred JSON is not a versioned file with an eTag.'
+                }
+                $remoteHash = Get-RemoteHash $preferred.id
+                $confirmed = Get-RemoteItem ($baseUri + '/items/' + [uri]::EscapeDataString([string]$preferred.id))
+                if (-not $confirmed -or $confirmed.id -cne $preferred.id -or $confirmed.name -cne $preferred.name -or $confirmed.eTag -cne $preferred.eTag) {
+                    throw 'Remote preferred JSON changed during content verification.'
+                }
+                $contentMatchesLocal = $remoteHash -eq (Get-FileHash -LiteralPath $LocalFilePath -Algorithm SHA256 -ErrorAction Stop).Hash
+            }
+            return [pscustomobject]@{Status='NoLegacy';Item=$preferred;ContentMatchesLocal=$contentMatchesLocal}
+        }
         if (-not $legacy.PSObject.Properties['file'] -or [string]::IsNullOrWhiteSpace([string]$legacy.eTag)) { throw 'Remote legacy target is not a versioned file with an eTag.' }
         $oldHash = Get-RemoteHash $legacy.id
         $destinationName = $newName
@@ -180,8 +195,8 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATrCUmPnzQOQZf
-# QSDV3Gz883jZOJRDQgBBGhjil3MBsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5gy8rWjeN5Shp
+# KvFG52eBVVvhlGy6L0wgq6hhkg97taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -314,31 +329,31 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIkTykvB5zgAqgtstyidTn36RE2stubCpxmMJh82/EwrMA0GCSqG
-# SIb3DQEBAQUABIIBgCbrh141bj8xU1LykjjbRS4AdCny1rf4AfzkoIdeNrBIxt+b
-# FTNo0AJ7Jik5LT2Qjju5Ms14p/dsdt57MLMuDX0i7n8ZoEzJoLjWcubOgZuB+aU8
-# IJeG1NjHhaefwBoG6vMm8Nd19odvK60Yl3prCJ7kiYL8NXfWbV3zpPtlIPA5vWDk
-# fyb9SUebuATP6gYnyOP8CeCdPVbhjD/qv1fo7fxh88lQ+GqLQZeO3kd+LGv2pQ76
-# 9/0WFBFQq0+KRC4P94fcIZR3ZZcxL7BIkJcAM+/x8BBO2GTbcsNIR/UOlycYzEpj
-# vhvOnhAYDuShAxBWaT/l1eDDV3W312DJifRRJdCRUE9vxrhfCivm2nyyx+yD/xvM
-# +6fyulDN2QTCkXSL8Cda+9lCVhJbjex+jqb+tlo2BkhDTxzKHy7SOrcPyxcSS663
-# aO1kA6mKjoE2IG7bz2ouSNwyqur35TDVkXPVL7jlIZEsWo+MQoZBfZ4y25LBKtI9
-# D0A/cY+9V0wiqRtNp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEbKC+W4DMyVT6aU5TLLHuEl5SYyHrOgo73msPjspiPRMA0GCSqG
+# SIb3DQEBAQUABIIBgEQgehCSZOgeN3mtycz2NkPv1l0WS9T2jwtiEt3zmD5a/5Sc
+# ASis559DCF2JvNTV7jtj1O06nVB7HrqkQudseQHeZD9ftv0G0TlDMpXBEtULRVqK
+# H1hDhxsDrmEP2WoCZ782umcUuLQvkuItXXdE2zcTREaonte6M2t+Q4OIYCkTvRjX
+# 9lREDRZ0sf9xWohdUu/b+NtZh89zQZi2QaMmoOK2Po1wBXWC6DFVzptJiAKt8mMu
+# UDG7BL4MOwGn6LfeDzRAxDMpMshbmwEPO9IggjBX8PwkYlMgRxp/qFAv5ycEud3Q
+# MJ2S77K6XxKOKekE0gXUXtT8enELjIldolFE1FSq78tCMbIGT51xUbs4qYLC3Myo
+# 9TQBZw2Op45rfBGQc/okB8lOvpuIM/iMUvb5zKAb+jfENB1FqdV6DLdt+vabobi5
+# xtO4A4spayEttle3aa+hs7+ZaKXQ16FswrlTujm7qeqLKoXJFQkboFRLZS+Hvb42
+# HOWbzufGT4Q4LrAebaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBaZtjYjhGsRMmEHTTtKAFgMxddukUXmEwP2J92
-# vIWnlDANBgkqhkiG9w0BAQEFAASCAgBfGCcKYd5chOe95W+dUcdaOEJ1FAT8A/Zg
-# EoliLNKNqmDvtibmNvnHg/rSXKC7oNJwRGr8D8E86gMzfRtale0/uP0h1WfjcGR/
-# ee7/ef9Uyw8qZr0OsAcNDwBEB7bBGG69K7+g+yGpaYU58t8XxORBKeGe406BSPGd
-# gOtgt3t+0RI1zuZmImuU68jxRoAU8lyx0by+RPwMq4480CWMCAHEifnT009j5e8Q
-# Z+aoflqUmQ/63NEqnPvGjosuUquVQRVqOOnledbcbABCJLi9xRMRS1RaIjHKocVP
-# yAEhhsXsKsndoCF2GVkB2emmyN7GZnT4w6DqZFW/t25Yy5E+BAK0iY5OT4lofw3k
-# 1g/d9omS0dInI/ZMDMRqLyzcsWSzyC546J1lQbnpxqCWLRnBj1R5GLWYNUmugzei
-# Hy1tlQQFPyDZUBGL7J3eItBkK60jD4GTv9EfZV+Sa2ROWJZHF7Dc+/EdUJvZlhXr
-# b1+WPWuoB/wpJ+OFHNCUsdMZz4ve/nM7ms2BqXpEKpBvBtTzgpjFRdYXVLdn6nyL
-# j8Ev8fFS5CwzO/DST4ghRJe4/FFSeBt1c7B5yPMPYpNuFisJ5jOK2w2W5kFTCc67
-# ynWVnfaXlbHVsxRhsiYU9LDLCCZNmm8Ya0uRhJfMV9Te4XpvX7WU5BysJ+N/PxNM
-# D81JzCVo7A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBiPtPD+z06r2vez5ys6adU36o19l5RCAqWiQJa
+# 6TP67DANBgkqhkiG9w0BAQEFAASCAgAqbv5LlPnlZwyJAPwYW82tweh9V95cfgBM
+# A5vnYW9ufLoQWMZkT0VX+WkqWbhk58TUN7dLxlXlsKvNojQpciKVWg8366ksrzXa
+# E9dGXcsA4Kzn2d4gyz7B74jLscmSkdm6gYDlwWvj1S+8ZgYv75e8E6KRa7fOBP9Q
+# n02KuUuRpT7cVIw9YO4J9Ex8Z05MS+x4v7JNA5/Hf65BscYyE8aJ9s8Wp0q0e/cD
+# utbsK4HzyYDg81pTtkP78aQhuwKUB+IrLnsWv7tYQhShsHA83Dl99oJwqUhMtAcJ
+# rwpvHJQaJmRYH8OI5oF+hckRGngOvHUTxAhaHDy1OWbBsp3TO5gk/KAiJJTl9Jo6
+# fUP4X/RM9caFRDGFsyfk+Y1pfFgWMoqSzg/qx2TjJ4LX87+SKHtEJnpDrxtQ5ca6
+# g89CluWwXJyTHUerVzwGErAVqr4CqkWg5cPpc7YMuxRByUskZtq+PWnmRkowRB1B
+# lvLXZ4qRIsWcQ+iyDy15NuBORvpPAB6xjP89p5ey4tfd9kG0XCQcL7TckI7HyBT0
+# NCV37e2kDGg/NH5uZT1Ay/CubYXQJr63q3wF2fq2g7EhD8q3yxQf/QU0CRUsXTBK
+# wit0cpSn/PWl6I4L6yLD1AgyL+OxtQucqe1VyTKfz8U92q2xL4bsGEFJ3/xz4sSZ
+# MdNhe2H7nQ==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.1' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
@@ -318,12 +318,19 @@ function Save-SmartM365WeeklyInventoryHistory {
     if ($UploadChangedFilesOnly -and $publicationEnabled) {
         [IO.File]::WriteAllText($pendingPublicationPath, (Get-Date).ToUniversalTime().ToString('o'))
     }
+    $unchangedManifestCount = 0
     foreach ($historyUploadCandidate in $historyUploadCandidates) {
         $uploadReceipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName
+        if ($uploadReceipt -and $uploadReceipt.PSObject.Properties['SkippedUnchanged'] -and $uploadReceipt.SkippedUnchanged) {
+            $unchangedManifestCount++
+        }
         $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
         if ($uploadSetting -and $uploadSetting.Value -and -not $uploadReceipt) {
             throw 'Weekly history publication failed; snapshots are preserved and retention is deferred.'
         }
+    }
+    if ($unchangedManifestCount -gt 0) {
+        WriteLog -Message ("Weekly {0} history: {1} unchanged SharePoint manifest(s) verified; uploads skipped." -f $HistoryLabel, $unchangedManifestCount) -Level 'INFO'
     }
     if ($publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)) {
         Remove-Item -LiteralPath $pendingPublicationPath -Force
@@ -4753,6 +4760,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $fileInfo.FullName
         $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
         $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        $compareWeeklyManifest = $fileInfo.Name -ieq 'manifest.json.txt' -and $fileInfo.Directory.Parent -and $fileInfo.Directory.Parent.Name -ieq 'WeeklyHistory'
         if ($EnsureParentFolders) {
             $pathSegments = @($sharePointPath -split '/' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             if ($pathSegments.Count -gt 1) {
@@ -4768,9 +4776,12 @@ function Invoke-SmartM365SharePointCsvUpload {
             } -Download {
                 param($uri,$destination)
                 Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $destination -Operation 'Verify SharePoint JSON rename' | Out-Null
-            }
+            } -CompareLocalContent:$compareWeeklyManifest
             if ($transition.Status -ne 'NoLegacy') {
                 WriteLog -Message ("SharePoint JSON name transition: {0}; {1}" -f $transition.Status, $sharePointPath) -Level 'INFO'
+            }
+            if ($compareWeeklyManifest -and $transition.Status -eq 'NoLegacy' -and $transition.ContentMatchesLocal) {
+                return [pscustomobject]@{ SharePointPath = $sharePointPath; SkippedUnchanged = $true }
             }
         } elseif ($fileInfo.Extension -eq '.json' -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
             throw 'Legacy JSON upload refused during JsonText deployment; the owning producer must publish its preferred file first.'
@@ -6213,8 +6224,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFdVU3Ow98kYkv
-# Irk+4N5zs2EaeSSB3UHHGNjHlzFXuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGUe/XdIJVpC/a
+# gdutXcgzeRYPcQBQEN0v+vlTYMXFOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6347,31 +6358,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG5rSf8WrpqhLXI9S3tNtIXdjaLBg7G2e/LUYwvAGH4yMA0GCSqG
-# SIb3DQEBAQUABIIBgB6EGwq5a1BTnHynsJ2rYbXccNSzYvB7hfjUSNohvLHbpcE8
-# UoK99o9Uedgf3/+2JmI79bfgCKBOU9YhbS4ECThDiRJSQUq56cJMr06q1kZw8+jN
-# W09Zi0SFtwe3HplZ+g4D/QoAbMbLfJV+I0ysptDUKiuuBMOuknKqrLywriFMnnv4
-# qzCNx3QEZYBEmEWeC4YPngn332I2ujH5dhe8PcsMkvGuDoiqw/ifUZVFFagkG4zf
-# +E4idPQ0QHSiAPewq9btRzbfysbLSBEGjDUeGab+BEE1AFUqHX33jPkIKw9sQjl6
-# 335RJt6bnGyibEQLY//e0J4D6nL7n0vA0cbGVCy6SsRPvs9AI5BICzvtBA8e0+3N
-# SWPDv5vIs2WljuDOgLY+tUhSD74PRCpyOPBuuOU58Teo0lJWVvkplIN4Jqic3nI5
-# 8uXnnUj5LCIYvZ3iNVtx/z/U6HDUShBUuMf3MDF+hv9N0qz53hcLJTYh1XeW9Ewr
-# 3Codm4YWH2R4RoVDoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGmyMBfDMroN4iED4Jkdx1KATT5tZqS+pMjxV1dkwTarMA0GCSqG
+# SIb3DQEBAQUABIIBgFtXM11G9BmIyb29M0Wp69RMZlKcqlLpaakYO8uOq1e5r/Ie
+# YNl0Pp0Yfelj+Wi9X8cQ2Vlb8uHyNPcZox58yxjhert0QOEoGw8vUMsRcDOgsSuk
+# eYYW5AuHPZNZGditmDo7UZxqg997aTGd/MqpBhtoypQLILD2DRYIDNzJvhBATlUd
+# SAeqyfYId4xaVsXAVRmKN1nR4mU0YSVwlmhV2P5W4yB9wd8b1t4KGfPAV4uzf4Yd
+# pqvaWAPbUctkixhoWkEyA9BMtqdjrc+i0jFBNcBUCQgTrirX58z2uq+hyCpMdO3e
+# uqA5wbfKqwUTGAnZHCtHeWjxUWP77W7f2YtqwJiWfRdx8J+7MQp+h4YwIWqi0l+C
+# WEAfNVLhUQYjFXkMFywLLwqlgOmHwT26l7jmA3DV+mTyvie1BTC2mws6OHfo3jcQ
+# ml/7wnHdL40XfQlUkR6EGSDsn9HE9pCqQccNUwoNINslNYC7beOotW57NkT+nNt5
+# 0mw87jH6uHJx0Nicr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxNzM4
-# MTlaMC8GCSqGSIb3DQEJBDEiBCBppwV/vwNNSNGDWBgW6DjV0wKAlA9l0uaCUfvx
-# qOojxDANBgkqhkiG9w0BAQEFAASCAgBgdFk2axeCCrnHAXhpCSY+IrlAl1YxUNvC
-# Y34x9Pzo4u77Lr1a0mqnPmQL2DAti9ORSYKIA+Z3yJ2OAeLYBZZ3+IA1aO5JjNFu
-# 26IAQstQ7W+SYPAD3dhNa/B29c747udmgb4yfGrrX7u3uk76cFVdxin+3aj3pjzw
-# G7jSbYn4tLVQJG6krPZoanLNnnngsHNLuw68Own++G/s95gBu0+XnK2a36ZTeeRu
-# Fa8vYLwmfMCW4yTHEc5u7pomrW5cpm+yhpfsd+quw8uLSW5oneRPLG0WMfnD9ewN
-# RTSZJRSXoKAWt7z6g5ufi/1J2KBpZWS2/55r+SbqEjhPTkpyvF9+F7r675TPy9Sw
-# Q3WBT0+QWpYvfug24INwdz5uEV5hnYKGvT+jPElUFXBAl1s4sYYye50dRt3sBEf7
-# BoIL0vP+d4R3Tc8haQEr40EMzRlF/PEVuKAWXxYVpcVlmEWGelQTKkkKb7AW3eMo
-# L+EC3qYsn7Knpb2FtMiULfyquEtuZSBVRRMgsC3tdQuzeiOLKKWGJQqzoO1AFvbj
-# Uo91cw22XA9/nZ9APB8JzerWXj1xx9nmz4dbzTI7xrwE/mWZNMm9yg7uDy7XuyDq
-# mGjL9zMNxFzwQ7VRrdjnylFjSw2QJGLKy0TTLHCrB8GAMwbbN0F+lcAdULeO/nWi
-# XZcEzEiwCQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCTRsSXhHtWdiMChLG9m7my84nryqXy4i3dKQCr
+# qoAiHjANBgkqhkiG9w0BAQEFAASCAgAi9axeujDnQekwNSHFKyN9a8s3G6jP1P5A
+# BQP5ywYdvPw0VY58Lou2Q9VNle1Pcb/K/h/ajp1Q7YnI3LQSWA8sshSf+klDlWUI
+# 2emnuBo8z8zp55VFbsdpXW1vsxo9r74CC7SSCiUzmTfz0AMkX0cvLI+SviysIjtH
+# TXng1rK7eOALdbjfD0aKtbBfg3FHdCDAWFzAkT8ToTWHdLyHzNymK9jGMEdzh/KD
+# iZNzCQGVwdzNyZtL1yNq4Heuf6M5tsaAS0HamlrEGXpzNjIWJwKXlQ2KzRcMBas6
+# S228bSqZwzwd76B9CYGk0q2gFYGd0c3loYHuCCCFzKKZ3Z6U+TYYwH3LiedgGyMr
+# zYiHHSyN+PKPXMIAGR6/kr3z+7/eOjfZFR0kiRe9KURsBH+lVM2+jAnbmdchtD4I
+# CId2ZPH+WT3tj4dXG1Ype3iQV+Wr7ghlKzZDQzuaK3CR9TadKBzpKEw0TEuUA1mn
+# I5T3idma3P+p57D8+vrTSrZBBZ93wBDn3kIXhMYb6ymXwR5GKannDVMxC9xHRv2Q
+# AaDY+XW6AlrwurRotR4bKt8Lxa+cinQpz/oBUxBO8T5i2jxH1L6msEY+0cOE5rt9
+# BB6i9C//+3Kf2OvOxA3SlKGWFf7PuoGGFW8HTAvo2MMBiN2CzjXLSiev0g9YiMnR
+# 2m4KDQU3hg==
 # SIG # End signature block

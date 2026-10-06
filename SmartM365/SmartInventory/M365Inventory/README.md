@@ -212,6 +212,10 @@ copied during the run and a changed manifest are uploaded instead of the whole w
 until every upload succeeded; the next run that finds it republishes the whole week, so a failed
 SharePoint upload is repaired. The automatic history of CSVs exported through the Core, Exchange
 on-prem Local Mailboxes 1.49, SPO 0.29 and Teams 0.33 use the same mode.
+Core 1.0.77 (PS5 compatibility module 1.0.51) and SharePoint JSON transition 1.0.2
+verify each selected WeeklyHistory `manifest.json.txt` against the remote bytes.
+An identical manifest is not uploaded again; a missing or different one is published.
+The existing name transition and `upload.pending` recovery remain active.
 
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 

@@ -1,94 +1,98 @@
-﻿@{
-    RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.51"
-    GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
-    Author = "Internal automation team"
-    CompanyName = "Internal"
-    Copyright = "(c) 2025 Internal automation team. All rights reserved."
-    Description = "Windows PowerShell 5.1 compatibility module for SmartM365 initialization, logging, cleanup, and cloud session helpers."
-    PowerShellVersion = "5.1"
-    FunctionsToExport = @(
-        "InitializeScriptEnvironment",
-        "RemoveOldFiles",
-        "Remove-SmartM365TimestampedFilesOlderThan",
-        "Remove-SmartM365TimestampedDirectoriesOlderThan",
-        "Remove-OldFiles",
-        "EnsureExchangePSSnapinLoaded",
-        "Format-SmartM365LogLine",
-        "Update-SmartM365TimestampedTranscript",
-        "Get-SmartM365ModuleDiagnosticText",
-        "Write-SmartM365LoadedModuleVersions",
-        "Complete-SmartM365ExecutionContext",
-        "Start-SmartM365CmdbSourceReceipt",
-        "Set-SmartM365CmdbSourceScope",
-        "Start-SmartM365SourceReceipt",
-        "Complete-SmartM365SourceReceipt",
-        "Write-SmartM365CompletionBanner",
-        "WriteLog",
-        "Set-SmartM365CoreContext",
-        "Get-SmartM365MaxItemsValue",
-        "Test-SmartM365MaxItemsMode",
-        "Get-SmartM365MaxItemsSuffix",
-        "Set-SmartM365MaxItemsMode",
-        "Add-SmartM365MaxItemsSuffixToCsvPath",
-        "Add-SmartM365MaxItemsSuffixToBaseName",
-        "Add-SmartM365MaxItemsMailBanner",
-        "Add-SmartM365MaxItemsSubjectPrefix",
-        "Get-SmartM365MailTenantName",
-        "Format-SmartM365MailSubject",
-        "Get-SmartM365MailScriptContext",
-        "Add-SmartM365MailExecutionFooter",
-        "Limit-SmartM365RowsForMaxItems",
-        "Get-SmartM365CsvValidationBaseName",
-        "Get-SmartM365CsvValidationRule",
-        "Assert-SmartM365CsvDataCompleteness",
-        "Add-SmartM365CsvValidationRule",
-        "Initialize-SmartM365DefaultCsvValidationRules",
-        "Add-SmartM365TenantKey",
-        "Repair-SmartM365CsvTenantKeySchema",
-        "Write-SmartM365CsvAtomically",
-        "Add-SmartM365CsvRowsAtomically",
-        "Copy-SmartM365FileAtomically",
-        "Write-SmartM365TextAtomically",
-        "Publish-SmartM365Csv",
-        "Export-SmartM365Csv",
-        "Invoke-SmartM365Preflight",
-        "Save-SmartM365WeeklyInventoryHistory",
-        "Add-SmartM365WeeklyHistory",
-        "Send-SmartM365TeamsNotification",
-        "SendFileListEmailReport",
-        "NewTableFilesEmailBody",
-        "ConvertTo-SmartM365EmailHtmlText",
-        "ConvertTo-SmartM365ConfigBoolean",
-        "Get-SmartM365MailBrandingConfig",
-        "ConvertTo-SmartM365MailLogoDataUri",
-        "Add-SmartM365MailBranding",
-        "New-SmartM365EmailBody",
-        "ConvertTo-SmartM365EmailBody",
-        "ExportAndCopyCsv",
-        "ExportAndCopyCsvFromConvert",
-        "ConvertTo-SmartM365SharePointDataRootPath",
-        "Get-SmartM365SharePointRelativeFilePath",
-        "Invoke-SmartM365SharePointCsvUpload",
-        "Remove-SmartM365SharePointFile",
-        "Remove-SmartM365SharePointTimestampedCsvOlderThan",
-        "NewRemoteScheduledTaskAndWait",
-        "SendEmailHtmlReport",
-        "NewSimpleEmailBody",
-        "NewTableEmailBody",
-        "GetFileList",
-        "Connect-SmartM365CloudSession",
-        "Disconnect-SmartM365CloudSession"
-    )
-    VariablesToExport = @()
-    AliasesToExport = @()
+<#
+.SYNOPSIS
+Verifies that unchanged weekly manifests are not uploaded again.
+
+.VERSION
+1.0
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$root = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ManifestUpload-' + [guid]::NewGuid().ToString('N'))
+$week = Join-Path $root 'WeeklyHistory\2026-W39'
+$null = New-Item -ItemType Directory -Path $week -Force
+$manifest = Join-Path $week 'manifest.json.txt'
+$csv = Join-Path $root 'Inventory.csv'
+[IO.File]::WriteAllText($manifest, '{"Week":"2026-W39"}')
+[IO.File]::WriteAllText($csv, "Id`r`n1`r`n")
+
+$script:passed = 0
+function Check([bool]$Value,[string]$Message) { if (-not $Value) { throw $Message }; $script:passed++ }
+function WriteLog { param($Message,$Level) }
+function Connect-SmartM365GraphForSharePointUpload { param($AppId,$TenantId,$Thumbprint) $true }
+function Get-SmartM365JsonTransportPolicy { @{Mode='JsonText'} }
+function Read-SmartM365JsonDocument { param($Path) [pscustomobject]@{Path=$Path} }
+function ConvertTo-SmartM365SharePointDataRootPath { param($TargetFolderPath) 'DATA-ALL' }
+function Get-SmartM365SharePointRelativeFilePath {
+    param($LocalFilePath)
+    if ([IO.Path]::GetFileName($LocalFilePath) -eq 'manifest.json.txt') { return 'Inventory/WeeklyHistory/2026-W39/manifest.json.txt' }
+    return 'Inventory/Inventory.csv'
+}
+function ConvertTo-GraphDrivePath { param($Path) $Path }
+function Invoke-SmartM365SharePointJsonNameTransition {
+    param($LocalFilePath,$DriveId,$EncodedTargetPath,$Request,$Download,[switch]$CompareLocalContent)
+    $script:comparisonRequested = [bool]$CompareLocalContent
+    $script:transitionResult
+}
+function Invoke-SmartM365GraphRestWithRetry {
+    param($Method,$Uri,$Body,$ContentType,$Operation,$AdditionalHeaders)
+    if ($Method -ne 'PUT') { throw "Unexpected Graph method: $Method" }
+    $script:puts++
+    [pscustomobject]@{id='uploaded';webUrl='https://example.invalid/manifest'}
+}
+function Add-SmartM365SharePointUploadRecord {
+    param($LocalFilePath,$SharePointPath,$DriveId,$DriveItem)
+    $script:records++
+    [pscustomobject]@{SharePointPath=$SharePointPath;WebUrl=$DriveItem.webUrl}
+}
+function Reset-Fixture($Status,[bool]$MatchesLocal) {
+    $script:puts=0;$script:records=0;$script:comparisonRequested=$false
+    $script:transitionResult=[pscustomobject]@{Status=$Status;ContentMatchesLocal=$MatchesLocal}
+}
+
+try {
+    foreach ($relative in @('../Modules/SmartM365.Core/SmartM365.Core.psm1','../Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $relative),[ref]$tokens,[ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-SmartM365SharePointCsvUpload'},$true)
+        . ([scriptblock]::Create($definition.Extent.Text))
+        $script:SmartM365SharePointDriveIdCache=@{'host|/site|Docs'='drive'}
+        $parameters=@{Enabled=$true;SiteHostname='host';SitePath='/site';LibraryDisplayName='Docs';TargetFolderPath='DATA-ALL'}
+
+        Reset-Fixture NoLegacy $true
+        $result=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifest @parameters
+        Check ($result.SkippedUnchanged -and $script:comparisonRequested -and $script:puts -eq 0 -and $script:records -eq 0) 'Identical manifest performed a PUT or created an upload record.'
+
+        Reset-Fixture NoLegacy $false
+        $result=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifest @parameters
+        Check ($result -and $script:puts -eq 1 -and $script:records -eq 1) 'Changed or absent manifest was not uploaded.'
+
+        Reset-Fixture Renamed $true
+        $result=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifest @parameters
+        Check ($result -and $script:puts -eq 1) 'Newly renamed remote manifest was incorrectly skipped.'
+
+        Reset-Fixture NoLegacy $true
+        $result=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv @parameters
+        Check ($result -and -not $script:comparisonRequested -and $script:puts -eq 1) 'Non-manifest CSV was compared or skipped.'
+    }
+    [pscustomobject]@{Passed=$script:passed;Evidence='Mocked SharePoint transitions and PUTs; no tenant connection or collector run'}
+}
+finally {
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $resolvedRoot = [IO.Path]::GetFullPath($root)
+    if ($resolvedRoot.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -and
+        [IO.Path]::GetFileName($resolvedRoot) -like 'SmartM365-ManifestUpload-*') {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0iENhKk9/nVty
-# 4Pm3EbtJVUP6QQIWcas983v/+uGkSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3Q2VKFFv/TlcI
+# 0zLScDHLAtpRk7OW4ORuZfosO1D+CqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -221,31 +225,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII9/OTdMHl6l5rdqMk1eUolPPgZWY2o5+cnbzrycc5rEMA0GCSqG
-# SIb3DQEBAQUABIIBgDDFyziWMAuk1DcZdBudBcV1bpxPWMmFtd2DdeDFKhWhB7ua
-# cQAC5+I86SRQ0p41gnocwj+u942yVOeHVRqgPtO9do8jXSfCtIaszEfQV3VelTWC
-# fUKXSCqde71GUmzNyf7+AHzXnjvf7QYJdY/R2Rti/ygVQFsuMCYN2rensSg14jNI
-# 0s0njF+PY3CPy1k15pZz/iHJjq0eSEbxS0w4l7BPMxoTFvQACac/0sQE18Akv6sb
-# waa4kSo8wALSYPiDehjXrLcDtqikCcrtvLd++e0JYVnRFh4Irq5ns64Vl/5/xqBr
-# 8zwbPjzHsjuPVNgSqUJKbl0+Cuz/ZB4pbA3KtWYNMo1s6ZhzUHR5C2lyljNsJN7J
-# WfB3Bcgvbh/kzSQJJSRC8BNm9BHeUng7lHY+IDcPQGfEOSRgiuvkGTDuZw/2HX5J
-# Q36xq2tWdzygylC28b5Fy5MjXByOFB7FyxxloWRmYMUgyN4y8aFYRjBC44oF6ED6
-# HyFnxHLbXUvbptbryaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILfBJMU2+ntPNtVE48AXpoUlu/Y8SF8oGV7maPNLZK5jMA0GCSqG
+# SIb3DQEBAQUABIIBgCWGw6UytC/XL6SAvl9rPlw+XpZsRWW/szF6uo6oSiIAQVRy
+# 9Bcsk9fYuaHnDo+V+rJ/jt5AKKFY2hF8lrX3MNuyeW+F6r7VpiPo6WhotWOwBQYr
+# lXsUmPLSWnlNYUwjB9gLZ08vAu+yUgnsRpjYOseYKJwEkZFIAUXBHiH63gs0szoi
+# vyXhe8lPbFKIGcV7128TTl8F3X6O9gA5c490ZoutjBXnItmVQwLMxZVeLWKmHQG2
+# wCYym/DY6b3eNEmu29C/LHn3zNV6b7+/GUMJ4MbqguGlMgttHTh1LnCQUDTfxIxV
+# h7Oc6MJSWR1GPW+rrn2ISnkENjB0o0+ofbnbO6ajYMGNTF/r3jSkdrg5Vt1Ft74u
+# ku40U0GLAFhat6nlK/8oSUVDZe7IYgC7/KDZ7MB/fKB0fK8Lhn5QGJLqnGXMoMOL
+# C64ez9Y28sccVzV0wUpCw/+3geLZRDv/cCz5uwxbnUIC04sMdv1OVIEy+HaUAfc1
+# j69FW7fGmkwHgMqc/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
-# NTJaMC8GCSqGSIb3DQEJBDEiBCAkbiLnK2gNCQos+EzfodL7UklNKkapGXhMG1wR
-# 7/gJGzANBgkqhkiG9w0BAQEFAASCAgAbHx/hPb6IQFD+AVB5UUh4/fI4sLjmLuN/
-# +FaNUnlPudLrm9QQsPwjFELfnvrDhKcEW4atffbRrELY0/3gqXYyw1PpM/wqYEU6
-# dEI6qOppaoZ/lHdzSw4fLsUOhlRZU8vPfG+f54SPBhPxHt3s+kubFQ1FfUCEfPfR
-# rZQwcXxEl2V5LhASbdUbDNAEcmQWn5xggXnlh6POV1AuADJqmDBwsBbGD+DntEyz
-# hjjWb8oxZaRT96zj7IF5B/QcLBLmPAOwqNAuTBgvT4Z8pYlYJ8T5HUXJPPRzX9lP
-# 4TQpVxaEFKYCY1Yc9NkWKYO1Uxodyh9lQlvg7MUp0Tf3q79AuacmPVsHU6U0i0oj
-# yVl2bnVo17RWABySNkeJSUqLQCc6W6Jjt3dnEfBKL8DiIT52cvDGcLpxcAOqyDrx
-# AqOB29wrAwAosZnuotgIkRRhRgkeIXR2wEyX47UfmFx+wnEHAl6Wkej6wjF6PABc
-# +wfF7kX5YhzTfFOyaBn78SazlyEmOXfmQEZ0lECFYcqeLg7YjotNUB4eTqSnZg+x
-# QtUk9jZbqhLY7bfHoUHM1GPCCXWReVHhC4q5osGsYNV83dJsv76cvHlIVs/9f/up
-# p8jPK18KvnhSITFktUurghT9ejTxENRdW/H09k83M0LHbwiW25MXyNdTKW7w9S/+
-# k1JZMPEn+Q==
+# NTRaMC8GCSqGSIb3DQEJBDEiBCD9p6XhB1MDSrF59NgprwXpFVdT1WENJkCUQbpq
+# wV9YbjANBgkqhkiG9w0BAQEFAASCAgBqn84hyqpNrABqYQxYuYlTEmhWqqdQ8ntU
+# t9ejoOBbprm2DM5TcgB1LZZRnq2/1Qsua8ZT5d3rqLVibVXKOkKDM7vLc2MhacBU
+# HBtoL/PzMKYBuV/69mCUhMkr89xJOIqmhrWdL5KSg8TK9y+Wl7YojbZERAHq07rE
+# nJC0KEDXV1l8PSpLqNA9jtjv6h8SyFVrY/RwEICi8h/VwWPpSwigeh/vQToVfPZp
+# pPNxsVrDFoK8U+k+jswYgh9c6LDBwUxBkWcExQjm6edyw4x9FNlHLvwlAdg6a0VI
+# mxfzTBMHUw33R/oufpBKM3ojqlnXYmBWZ2M0mjv37QWDdnZUlwnzf9K11GDRv3+n
+# /ulEzojjCiUWsZPbtes8CtcGKwkZ8m93iTJ/+88eUEBiZEfpt/jm9ap9wkntErOq
+# mfV1DXrshAVHMgQ+DKYHTJum6BrT7uR7pFlJanqqMWniQOGG797ONeGxcCOCtBSl
+# aOa+YRPiIr4aaXUeEfQcwmHBgC69LV1JMvKpvNj0RZMDeNJGtHuK1vYhE2MZgVzj
+# Q66aMtNY8hVuoHAKprpcyFynlrixtLjqn6MOYUWsQf/3p1EwEW098/5QoLpYtIVA
+# NRqXG9mEZ2fowcilFIXWlQBbaWe4QHB+Z3v+CqkcZ7UW3vuaXhM24ct0BFBe5o60
+# 2tu3GWDL0Q==
 # SIG # End signature block

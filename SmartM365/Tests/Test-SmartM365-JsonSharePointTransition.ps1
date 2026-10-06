@@ -10,7 +10,7 @@ function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$scrip
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 function Reset-Fixture([string]$Name) {
     $script:items=@{};$script:patches=0;$script:interrupt=$false;$script:etagConflict=$false;$script:forbidden=$false
-    $script:pagination=$false;$script:badPageUri='';$script:versionPages=0
+    $script:pagination=$false;$script:badPageUri='';$script:versionPages=0;$script:alterAfterDownload=$false
     $script:local=Join-Path $root ($Name+'.json.txt')
     [IO.File]::WriteAllText($script:local,'{"Generation":2}')
 }
@@ -53,9 +53,10 @@ $download={
     param($uri,$destination)
     if($uri -notmatch '/items/([^/]+)/content$'){throw 'Unexpected download URI'}
     [IO.File]::WriteAllBytes($destination,$script:items[$Matches[1]].Bytes)
+    if ($script:alterAfterDownload) { $script:items[$Matches[1]].eTag='etag-changed' }
 }
-function Invoke-Fixture {
-    Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $script:local -DriveId synthetic -EncodedTargetPath 'Folder/state.json.txt' -Request $request -Download $download
+function Invoke-Fixture([switch]$CompareLocalContent) {
+    Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $script:local -DriveId synthetic -EncodedTargetPath 'Folder/state.json.txt' -Request $request -Download $download -CompareLocalContent:$CompareLocalContent
 }
 try {
     & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedSharePointDrives=@('synthetic')} } }
@@ -79,6 +80,18 @@ try {
     Check ([Text.Encoding]::UTF8.GetString($script:items.old.Bytes) -eq '{"Generation":1}') 'Rename modified remote bytes.'
     $null=Invoke-Fixture
     Check ($script:patches -eq 1) 'Remote transition was not idempotent.'
+    Reset-Fixture comparemissing
+    $result=Invoke-Fixture -CompareLocalContent
+    Check ($result.Status -eq 'NoLegacy' -and -not $result.ContentMatchesLocal) 'Absent preferred item was treated as unchanged.'
+    Reset-Fixture compareequal;Add-Remote new 'state.json.txt' '{"Generation":2}'
+    $result=Invoke-Fixture -CompareLocalContent
+    Check ($result.Status -eq 'NoLegacy' -and $result.ContentMatchesLocal -and $script:patches -eq 0) 'Identical preferred bytes were not recognized.'
+    Reset-Fixture comparedifferent;Add-Remote new 'state.json.txt' '{"Generation":1}'
+    $result=Invoke-Fixture -CompareLocalContent
+    Check ($result.Status -eq 'NoLegacy' -and -not $result.ContentMatchesLocal) 'Different preferred bytes were treated as unchanged.'
+    Reset-Fixture comparechanged;Add-Remote new 'state.json.txt' '{"Generation":2}';$script:alterAfterDownload=$true
+    Reject {Invoke-Fixture -CompareLocalContent} 'Preferred item changing during comparison was accepted.'
+    Check ($script:patches -eq 0) 'Content comparison changed a remote item.'
     Reset-Fixture interrupted;Add-Remote old 'state.json' '{"Generation":1}';$script:interrupt=$true
     Reject {Invoke-Fixture} 'Lost rename response not exercised.'
     [IO.File]::AppendAllText(($script:local+'.sharepoint-transition.log'),'{"Phase":"Comp')
@@ -122,8 +135,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3aLKUOsFVwygu
-# EOZ2i7mLFyXZ34xreWge1eNovNBK66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs847Vq3kj+W0K
+# DZNFAPDA1caG69MKXH/6XU5CGNXUjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -256,31 +269,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKNg1hmzJLnwtzG7c3KFqjEEXUjHCLQKuG7/qQeODSAaMA0GCSqG
-# SIb3DQEBAQUABIIBgIodmJgEusleEgzCrBR2ZkZArHKMRfbHzlRjb5VkNKm2iMFO
-# 5e7qQQ0FI3HqffRPe9UBKu0q+fHw81yV5J/FVvU2DmJe3LOaOy1TEhTdm/fJx0J8
-# KlRVmwVT3i56Soi75WutL41tv414Gg/0zNTxXI9Uz7zbTkQ3lbDDuIYFvJsz1tFu
-# /ENw9t3N+5kQw9pmAC9Q0FPW+zuzDboewfwrVEpUkQ7eQYXXUHdCOVamquWdZl7o
-# HqwJ9sbOu2i35Y+QBSWWdAzRmTTowg4X7wwm53a9OquQelR4Nzxivo3AbvPxLfuv
-# 2kFNaW+xqshWkDXeOG9FCfCxxr/PiWNDp2KpSqCC39bkFrnhhwGlu74zlRhVOOo/
-# x3Lwa6DUOsv0ukGbI4S96sHlYX/v7NtqnATwgL7U+k2PnOy9eNTaCC46iKDJSJyJ
-# Az/HbPZoW0XwPwE+LnIPnSiQoPiVItD14buBlmTxSr9aI+xfde6EcT27InHrFgwU
-# u2S45xfoIclHMDzwjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEBYQMSe6A6f7l4Og4sJ4Lc3Tl9R035y1/FAnL0TboymMA0GCSqG
+# SIb3DQEBAQUABIIBgIxLUVYN7cpg211/ltio6FebOh819fVGOC6hTauAJGz+Q2+2
+# UxJPla3a0GPWKqeKUmG+hNVWCHiirUFs6eYfDFJLqSgJO6h1/6VHG8mOHHK7budN
+# ydwQs/5GmUS+F2UBrIcBZ5bsE2nX3XD+mnP+z8miy9/WkXVcZXYPHc+z4pYFQSHP
+# 1afXMlotOSqrJh+cobKnjo07utsvt92Rs5nUrMRO1sd/uGHq2wN3KJdmpCsW37wW
+# dO2hrttBKRXGrgfy30LVXat9PzVBCbcMV9u0XI+N5qWQK/5/nj4i9bDWhnIt+YZ8
+# kt+Hbk+J3xqRkk4LxyC1HXx209UcOh7XBVPaAGVH8IiFCOuhKR+2tXsbwn5Jcynk
+# gZwC162+rZ4EAWKPGeVNGkO+gi4B1nh7fcJQ2myI9rPTSxSMoi6IG9YcW0HtfFaA
+# gAWGaUxJLudRazI8HZ6W7Klzt6fOd375hSyXXWH8bikrIL4T2xZB16ATWfKGPdvo
+# kec53gfZKxuY/INSSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxOTEz
-# NTZaMC8GCSqGSIb3DQEJBDEiBCA9EqxvxE/87wgezTmSOLrGIahlTWxcZtR12P1Q
-# LdtY0zANBgkqhkiG9w0BAQEFAASCAgALbDJZ4YRdcP/Qrmq+61oDDlMxFAOoVOon
-# 0SKegQUYrUMqmR3EiHFkVztG0NdpFlJb204iXB8MzLY917NxnV/8nKJo3EM9r/KB
-# 7kHq1LQazRmYk1/HC9rNuAWdrWO6yOkpSOfj7Hd56fiTubgYmbcLsPmfIKugaYmp
-# slHjQnVzP1VRjHaWDI3xL23VlS79Y0AHXnhWXz63wWDHmxJCBt2vxCHPsc7fPzis
-# 99F19HyVkV+eMlhWIWakNu6FHxzIeej3sasGHkbZE80OdGBsb7kA/Jd8+JruLX3g
-# aJ0yUgw7C9AKpYWeAxtgbjxl2C3S/5gjKk/F3low+4ILOAau5lFK2IoGemyODaBa
-# NgDDb04kFR9m48fe9cYFMfWKPyw7avO5ASSbSlbGPopWbUD7yOYJmoMVKhTlN+Gi
-# YW6o0jP3qcPsLtivgR67/8OhxOMwTYCDg0o0fx6tdK10yrtNObnX04JGShXZANNC
-# ZCVMmHdXK74y7T0WiXuS3CBMk+4ZBQzIyScnjIiDfS9JUaNT9NE3pvqd8xKn+D+A
-# n7WpW6tcewnw0kcbg5BbfTsdITlu8QT4YGyvGPP804CTTzDE8UHnk6WPnFBoAP2G
-# eHa4my178KSy+KngV+7Yyli01ShRapEgcHVfuIcjbmckWlb/QlY229FR+OAsbU96
-# G58wZseFaQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
+# NTRaMC8GCSqGSIb3DQEJBDEiBCAOhbTw7FQ214IAhAD0Ab3nIDup1kFFs1Pc5BT8
+# n/8RfDANBgkqhkiG9w0BAQEFAASCAgCyMZbPrUPalPtKMG/rT69z7Td/PUkUNQzG
+# wa0QedwV/Ommx/iWDlhYCpn9j7RvLWABgkds8HfmGO6MIPdAThgMtlffzw0oLmZJ
+# FOUQntZIwAJKfde2dO8NqFZcn4newBxa49ppFqaFkbTCfEofHFp8GlZEYBqfM9hZ
+# uXnrU1hxYNfHhCp2j05CpbreJZBMC9+liewxWYL6KNNQKauT2OEcbvLIOw5EhsB+
+# 5uh5j+pdBLgeyYOzRIKw9X82xuvdwWCkEzQTAgFZ+OtGpeEZraeFx/sfpvMRB74B
+# hceET/bYFL8+kjSTS4SjwPpDnD3mBHuEI0Y3D2BpItGGQUV3mavKVsV5Y1wHqUKq
+# Xv/Vgx3wEH/QxYb2MO7pHljjTOnKSnn9o2Mqb1LaReEvJ0QtSuUNDrc+2kzvCYKk
+# GWb09Y1AUcQTzFS6udi9ZaqLOaSm4Ahljyn0AIbA4mTdWa8ikjKJ3Bt5gqtPa85e
+# G5eFt1iZ8NULJwhLBL2lZy8v602hC9ALLc1+a11P34ZQdnToMsXpNLlqztrJV9W9
+# X0RiEWQEPqDSJTCXFuFaGXd+XAOoxVRrgQFgGajtWetRzY8x/ygDzpnKGOeQCbEW
+# OFZRDn9lpnhx2uB7CmKtZW0fqxXbLg97MaUOPDLVcb3MVBRkSRYo1K87ps3/ezU2
+# 4HD1zXeuQw==
 # SIG # End signature block
