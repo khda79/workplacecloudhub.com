@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.37
+0.38
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -45,7 +45,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.37"
+$ScriptVersion="0.38"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -549,9 +549,16 @@ function ConvertTo-HtmlReport {
     $sb=[Text.StringBuilder]::new()
     [void]$sb.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.kpi{border-collapse:collapse;width:100%}.kpi td{padding:10px;border:1px solid #dde7f0;background:#f8fafc}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:20px;font-weight:700;color:#0f172a}.muted{font-size:12px;color:#64748b}</style></head><body>')
     [void]$sb.AppendLine(("<div class='card'><h1>Microsoft Teams Inventory <span class='pill' style='background:{0}'>{1}</span></h1><p>The detailed inventory and {2} findings are in the attached Excel workbook.</p></div>" -f $color[$Worst],$Worst,@($AlertRows).Count))
-    $kpis=@(@('Teams inventoried','TotalTeams'),@('Without owner','OwnerlessTeams'),@('Inactive','InactiveTeams'),@('Storage above threshold','HighQuotaTeams'))
-    $cells=@($kpis|ForEach-Object{"<td><div class='kpiLabel'>{0}</div><div class='kpiValue'>{1}</div></td>" -f $_[0],$Summary[$_[1]]})
-    [void]$sb.AppendLine(("<div class='card'><h2>Global summary</h2><table class='kpi'><tr>{0}</tr></table><p class='muted'>Active: {1} &nbsp; Archived: {2} &nbsp; Public: {3} &nbsp; With guests: {4}</p></div>" -f ($cells -join ''),$Summary.ActiveTeams,$Summary.ArchivedTeams,$Summary.PublicTeams,$Summary.TeamsWithGuests))
+    $priorityKpis=@(@('Teams inventoried','TotalTeams'),@('Without owner','OwnerlessTeams'),@('Inactive','InactiveTeams'),@('Storage above threshold','HighQuotaTeams'))
+    $secondaryKpis=@(@('Active teams','ActiveTeams'),@('Archived teams','ArchivedTeams'),@('Public teams','PublicTeams'),@('Teams with guests','TeamsWithGuests'),@('Object-level critical findings','CriticalCount'),@('Object-level warning findings','WarningCount'))
+    $priorityCells=@($priorityKpis|ForEach-Object{"<td width='25%' style='padding:10px;border:1px solid #b9ddf7;background:#e6f4ff;vertical-align:top;'><div style='font-size:11px;color:#475569;text-transform:uppercase'>{0}</div><div style='font-size:20px;font-weight:700;color:#0f172a'>{1}</div></td>" -f $_[0],$Summary[$_[1]]})
+    $secondaryRows=New-Object 'System.Collections.Generic.List[string]'
+    for($i=0;$i -lt $secondaryKpis.Count;$i+=4){
+        $cells=for($j=$i;$j -lt [Math]::Min($i+4,$secondaryKpis.Count);$j++){"<td width='25%' style='padding:10px;border:1px solid #dde7f0;background:#f8fafc;vertical-align:top;'><div style='font-size:11px;color:#64748b;text-transform:uppercase'>{0}</div><div style='font-size:18px;font-weight:700;color:#0f172a'>{1}</div></td>" -f $secondaryKpis[$j][0],$Summary[$secondaryKpis[$j][1]]}
+        for($j=$cells.Count;$j -lt 4;$j++){$cells+= "<td width='25%' style='border:1px solid #dde7f0;background:#f8fafc;'>&nbsp;</td>"}
+        $secondaryRows.Add("<tr>$($cells -join '')</tr>")
+    }
+    [void]$sb.AppendLine(("<div class='card'><h2>Global summary</h2><h3 style='font-size:13px;margin:0 0 6px;'>Priority KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;margin-bottom:14px;'><tr>{0}</tr></table><h3 style='font-size:13px;margin:0 0 6px;'>Additional KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;'>{1}</table></div>" -f ($priorityCells -join ''),($secondaryRows -join '')))
     if (-not [string]::IsNullOrWhiteSpace($FileLinksHtml)) { [void]$sb.AppendLine($FileLinksHtml) }
     [void]$sb.AppendLine(("<div class='card muted'><b>Run details</b><br>RunId: {0}<br>Machine: {1}<br>Started UTC: {2}<br>Ended UTC: {3}<br>Duration: {4}<br>Teams processed: {5}</div>" -f $RunId,[Net.WebUtility]::HtmlEncode($env:COMPUTERNAME),(IsoUtc $Started),(IsoUtc $Ended),((New-TimeSpan -Start $Started -End $Ended).ToString()),$Summary.TotalTeams))
     [void]$sb.AppendLine('</body></html>')
@@ -640,8 +647,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjyKzOak17z0SP
-# NGDNloMEuzLOpo8iD8u+jlIytsfcBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpUZWPTejBZLb1
+# Mb12S8lQdAvqaW2mFKW6Q34v2fHKeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -774,31 +781,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBDSPoCwIJ0ZvEDSmt1Rqm37Jpa1EmPq1/XwK1oMPF/iMA0GCSqG
-# SIb3DQEBAQUABIIBgD2AVlI7IFxva3ckMYgx/yYMMpfPIQ9WbZt3X8z5ME/pae5O
-# 1SiNyCwPMdxYfnuktAhmmz6Kqx5wfjNsS+kcVxSZZzf3lwoGsj8uezn5R7Vw7voX
-# dZbi80jGpBBZXM0jKy7PZjV5CsKPqDT/ZszyL8f//8BHm1qytDmh+6TZDbkhefhg
-# YjUePRDIyoAwnLk6R8PiGWoHJaczYSRWmsxwHnzEixWDuP1hF4MNTPLg7TXVsLzh
-# KlhuhCPADVTqwFVv0qozmX9FaMbOwsgbG/zlrSXO+cu6TQONu7J0nHqjiYzQfbLI
-# fbInBzaX/gwq1CzaQr4PeL0/O+kN41ArZE1uHyB6MD+1y8yJ+CUjgCBiQzF2+DSb
-# 8jDdxYOmgeq3HOKrw1paA00OGHdvlfgkSZjunPU9kd8nqwkQns5ScC8Qcc3ibgUI
-# tJxoR1h7kMp3nlGaxHSnLOCgiWPEoN88i8Mmti5QeBTdnVBvAkYhuLpRg/U6G3G6
-# hIzPHSLAAQV0qSDUX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHBeMWcxTFzJbyD5M7AxnJQ2x3NXFOhuIxsFVCCtuRrWMA0GCSqG
+# SIb3DQEBAQUABIIBgAlT+m5PDYuvR0Ns9fKVGgFg0hqQk5qfrDEwErC37KgFks9R
+# dTqGBjKCe9CRSa+5K4EO5gWEzqmNPbId7745OmUNXAzacHKOgx9UG2d9OMA0hnj1
+# FHSvQsLBfQDsjcoEQLMclnndhWEOdxJkvhrBqrW7WFO/d7pHn9yI0rurxNXG7E9l
+# /kc4oOoqTbxPjxXeUoQWOAYABxq3lkoMMIpgHR05UFMfdwbM8dvRM1ye1wN/vbx6
+# jn1xbI7ZeHSJ+Whogazu3qDP5p5VWFZcsz/Z/+0cL7MnBvtf06XJIvNou4DCsYhp
+# 1Z72iHodlf6ELy49GboOV+7M41jdh44LpT3eeGkZqLZpniBPlTOI0/4NKSo1qF4L
+# pa1ly4vUTp7UgfYOJfNTjx39feAfZjIpYpv/DJ2TwHkFEXnCSmiswQiQ2AHTJwFa
+# VtUgODVGyZa7Z8oRGABeX9XFxDJv4ciu4AFMb+Ou2rjBO2a7/S9hWNPRKjhTm45A
+# ozU554JqJlWDUWsTW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
-# MTRaMC8GCSqGSIb3DQEJBDEiBCDuMahCXYyy6DgDkGGTzCKA+nxal91GNQQccCBx
-# Xvax8jANBgkqhkiG9w0BAQEFAASCAgCM1gF1GYytAd/CZI7NQnlJi7NVEBxtsv9c
-# ue8igNGljhVLBtlXQoHlu6CS1YEXi+x8EnIadVOl9sumw79dlryj6gUt5PdKC592
-# gjwflmlIKV00SVhAE4vFh2iFUqwUhizApD1b4P8gX93dGPgWcBLjz+NAHmx23Mio
-# A4e6EDSF+I1KtinofTQt48zFFIPJc0zvyFmYMAEo+1k1FXMtVz/Za4BEoGiqr1ue
-# 6rb/MTcPTS7SPXxSvkRB3in1W4IJ0yGlf8ZgXDlxOS/G4BGReXv39GO4Hb9yzG91
-# 9JW5dYiJDpZpAmtbo90NRA2svkzZBhcuZBOj7Hua6Bx3qaQIw9qjzOkueezz+8uU
-# a4H/KOOXVYP8nZfbazuv7JUwyDJxsJ1Brcb+3vi21/S6Shl8/jSEHVwdV4rqXYPa
-# H421M0L9ROsImpGc7bjsasqJ6ZQrbyirwdEhc6ng8FrI5o82CN7SIw5EtSHvFsJ0
-# pZ63oYei36EKk8jBw7Zhe9e/YrNzdu6NsfY/qzveLMlFT/oE2n3C2CDa+L23pKJZ
-# 8og+W7lQXPr0FlwVss6Bbah7yzAyT5NEdAJW7ciwumDUbuGotau1XobwrEStA2P7
-# galswiZt7ABoKLcNARcYVA2NWJFkkEuFocItWq17ZdhkF6pDVXC14XL9FBQLJhO1
-# 4bAcRD+eSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDA3
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDZdJmYUgPqUXQHNop0gbMb5qOqRDXtXFv6nl5/
+# GBY9JDANBgkqhkiG9w0BAQEFAASCAgABFjUDWXGZ3JwDSEpSTmnEbbQrApz9QKfa
+# Wtxf5mVCiLPb42h1aWVzYF8nogwP1T+Jk033mB4owt/wfcGfKVyQpcuxKcmSNB3J
+# y1y5UY9I2tPo2LHkMgsLcA05tfQp6UFMx1w9Acz7vE+tepij/wkDSPh6AjxwQ5K4
+# G7MNPf9NIEe39B9VBVoTsqipsqogYsni9M3q+TpwtsyRzdMYV13Ita9XxIMzNFSU
+# IDF+BZTytxBpa3QDVHZIvR7OwSsZc5XkjJ7wjKaL8/nWP/YI9RbGfTl6S9m22FBV
+# yKFAIzxjYqEUPaBFaO8KquKY27PsC+9d2DQhoAARDz8FlCkNLP5dTUNaZMi19C0J
+# h7GCLR2tBawzvrSjSMg4tRm4kroupn/sDnVcNz3sJZUqkQsOGG6mUtoRGwc1z+cT
+# 1bvQJTlvB5tYIKl7WjcigQh96agZnczR9TM/KFFt/Kl9ggmZPVwep2YtY4rvJ4hl
+# zA1tZohZAE58qBUgMfV+B/XSgBMdqaKSYVfFRtNkq8rHESW3nzHgheOUpPklLUnr
+# G8sCndaT+Wec12wZv+3QQbgPjbr86yj7cjpZXjZXP+DjWhdQMpx7Zuko/51F57sU
+# P4TLznUq5VAWEiwii22DsHriBYUIy1ccHuuLmDZEC8QXXGrUXVeOP/gbgndcXmOd
+# 0fmhvtNFrw==
 # SIG # End signature block

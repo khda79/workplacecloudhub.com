@@ -56,7 +56,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.34
+0.35
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
@@ -114,7 +114,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.34"
+$ScriptVersion = "0.35"
 $TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
@@ -387,6 +387,7 @@ function Add-SpoWorkbookOverview {
         [pscustomobject]@{Metric='OneDrive sites';Value=$Summary.OneDriveSites}
         [pscustomobject]@{Metric='Lists inventoried';Value=$Summary.ListsProcessed}
         [pscustomobject]@{Metric='Storage used GB';Value=$Summary.StorageUsedGB}
+        [pscustomobject]@{Metric='Tenant capacity GB';Value=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Not measured'}else{$Summary.TenantStorageCapacityGB}}
         [pscustomobject]@{Metric='Tenant storage utilization percent';Value=$Summary.TenantStorageUtilizationPercent}
         [pscustomobject]@{Metric='Object-level critical findings';Value=$Summary.CriticalAlerts}
         [pscustomobject]@{Metric='Object-level warning findings';Value=$Summary.WarningAlerts}
@@ -433,11 +434,21 @@ function New-SpoAlertRow { param([Parameter(Mandatory)][string]$Severity,[Parame
 function New-SpoHtmlSummary {
     param([Parameter(Mandatory)][string]$WorstStatus,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Alerts,[Parameter(Mandatory)][System.Collections.IDictionary]$Summary,[string]$FileLinksHtml='')
     $statusColor=switch($WorstStatus){'Critical'{'#991b1b'}'Warning'{'#92400e'}default{'#166534'}}; $statusBg=switch($WorstStatus){'Critical'{'#fee2e2'}'Warning'{'#fef3c7'}default{'#dcfce7'}}
-    $metrics = [ordered]@{'Sites inventoried'='SitesProcessed';'Without valid owner'='OwnerlessSites';'Inactive'='InactiveSites';'Storage above threshold'='HighQuotaSites'}
-    $globalRows = foreach($label in $metrics.Keys){ '<td style="padding:10px 12px;border:1px solid #d9e2ec;background:#f8fafc;min-width:120px;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $label),(ConvertTo-SpoHtml $Summary[$metrics[$label]]) }
-    $capacityText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){'not measured'}else{"$($Summary.TenantStorageUtilizationPercent)%"}
+    $priorityKpis = [ordered]@{'Sites inventoried'='SitesProcessed';'Without valid owner'='OwnerlessSites';'Inactive'='InactiveSites';'Storage above threshold'='HighQuotaSites'}
+    $priorityCells = foreach($label in $priorityKpis.Keys){ '<td width="25%" style="padding:10px 12px;border:1px solid #b9ddf7;background:#e6f4ff;vertical-align:top;"><div style="font-size:11px;color:#475569;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $label),(ConvertTo-SpoHtml $Summary[$priorityKpis[$label]]) }
+    $capacityText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Not measured'}else{"$($Summary.TenantStorageCapacityGB) GB"}
+    $utilizationText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){'Not measured'}else{"$($Summary.TenantStorageUtilizationPercent)%"}
+    $secondaryKpis = @(
+        @('SharePoint sites',$Summary.SharePointSites),@('OneDrive sites',$Summary.OneDriveSites),@('Lists inventoried',$Summary.ListsProcessed),@('Storage used',$Summary.StorageUsedGB.ToString() + ' GB'),
+        @('Tenant capacity',$capacityText),@('Tenant utilization',$utilizationText),@('Object-level critical findings',$Summary.CriticalAlerts),@('Object-level warning findings',$Summary.WarningAlerts)
+    )
+    $secondaryRows = New-Object 'System.Collections.Generic.List[string]'
+    for($i=0;$i -lt $secondaryKpis.Count;$i+=4){
+        $cells=for($j=$i;$j -lt $i+4;$j++){ '<td width="25%" style="padding:10px 12px;border:1px solid #dde7f0;background:#f8fafc;vertical-align:top;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:18px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $secondaryKpis[$j][0]),(ConvertTo-SpoHtml $secondaryKpis[$j][1]) }
+        $secondaryRows.Add("<tr>$($cells -join '')</tr>")
+    }
     $technical = 'RunId: {0}<br>Duration: {1}<br>Mode: {2}<br>Sites processed: {3}' -f (ConvertTo-SpoHtml $Summary.RunId),(ConvertTo-SpoHtml $Summary.Duration),(ConvertTo-SpoHtml $Summary.InventoryMode),(ConvertTo-SpoHtml $Summary.SitesProcessed)
-    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span><p>The detailed inventory and $(@($Alerts).Count) findings are in the attached Excel workbook.</p></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:8px;'><tr>$($globalRows -join '')</tr></table><p style='font-size:12px;color:#64748b;'>SharePoint: $($Summary.SharePointSites) &nbsp; OneDrive: $($Summary.OneDriveSites) &nbsp; Lists: $($Summary.ListsProcessed) &nbsp; Storage used: $($Summary.StorageUsedGB) GB &nbsp; Tenant capacity: $capacityText</p>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div>"
+    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span><p>The detailed inventory and $(@($Alerts).Count) findings are in the attached Excel workbook.</p></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><h3 style='font-size:13px;margin:0 0 6px;'>Priority KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;margin-bottom:14px;'><tr>$($priorityCells -join '')</tr></table><h3 style='font-size:13px;margin:0 0 6px;'>Additional KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;'>$($secondaryRows -join '')</table>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div>"
 }
 
 function Connect-SpoGraph {
@@ -1255,8 +1266,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfelrsS8uquaow
-# KotBt+0w5geBE8/AcYIHwwOKcVTwP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbU9j/EgqICyAu
+# a1hBX5uJ876BV2t09oA1dTBq/pUTOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1389,31 +1400,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN/nNznSH0nZcMX9wJoPAS6s9v5ec12eKVFdt6QgQNX1MA0GCSqG
-# SIb3DQEBAQUABIIBgKZU66VJ1wRlnJ/anY7Uh0aOYj+RK7Xs3DvGRQgoHnzFPO5I
-# z2iCzsyhXeJBzpVXi8D83uFPx7Xst6F7WGkCp5wAmlSRkDw2ivSzXID/90NvxMj/
-# IZ7o2pE/DDfb4nQy8AaLsN1M4TA7TwBCR89SMYOrgTU8SY19FfGmgMRHmZBYIHQb
-# BwBZMotCv/IHnP2m4uwC8SY+CeQIhaBmlZRa9DR4rtA+aHY2uOq2aQOqCXfe0ucJ
-# /j89tU4WQOF9rhc/eBDVfk29aBEIuUYEck4U5o6BlGvUCAEBjVP+GRlWFkL+e403
-# lEST8vKlLcoCesIwEckZsO3ZdryIxZRk63RFJNevfXZlSBxfqK/snCvIpoJkGLrs
-# tBKw9YvMLaU8Xhs8tXIwLFkmrsV9pNHu58mSHG5mh2tGAuvKLkYlTg17FYVjNdDq
-# ZdnCJwEdutzNQtB3zc/9AxMHId4QUmNkD90NE+dTXvfF6TxY/Z+7njHKOrfDt+a/
-# fQEuuQuxztcMskFXGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICkdkW3LYRKsTdtZKn4SUiQhAeJcTPAYymnMVqJXcUf3MA0GCSqG
+# SIb3DQEBAQUABIIBgJA/bODYH+irI7/EVk1tIKd34c4LD1qtPPcc33I3CMIhiz60
+# qmt0c14ure5rn8TJddpWINC0te6/UUCalAXlOIwpPyvJKESGFTdm38AxojSzT0lS
+# hS/RO6Gktw04VtVH+W6g5HMwtNoplYdjQVfKbfS/NKDaoQTODLA/fPAbtGgPP5O7
+# tVuAl0H2kQ6qDv72TZpomYu8zedMWYcgPeZYw5M2HpmStCWXGUjw+dLrzHuHDvH/
+# imjvCFjJ5o9e6jC0FG41qQ6Y8sMW9jVurVofrF4M4IwFlbVjWjRO2P6MjeQMDeoy
+# FhMT3jV0fwDxUVAAq4gw42QwZarCUMltSQodUFunyPdZ4uSaxKe1bk3fOQN9B+k9
+# B6MVqskUxGTrmFNQZkpfdYM2hT8xFcvqrvjzPLBoKSFd8K4J1/daUH8x48YPMb3+
+# crhtuYz0CNzU+BD8AF8FrEjAfors6IxnvJD7kX7BN3s55bUz0VsHy9ufeZqnEjah
+# q5UUCvfNz0HNq051xqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
-# MTNaMC8GCSqGSIb3DQEJBDEiBCB4/5/sZIk+9Mcrjp2a/Jhh+WF81nyhcJy0VWfg
-# dGjyDDANBgkqhkiG9w0BAQEFAASCAgCK6NYGne8NYL5XkZ7YJQOSXp0U1kBsYsKH
-# A6SHzKWs87TV8sWH+eHlz6Q1qBhuhHvX0x8tOnWkrsrKTWACUPS6zcA+L81cOkHv
-# 9Lk/yb69bhAr/8SLgVodHa2d9O2o58SsKHhQIntLq5wSestgBmSTMoLYnlQe6h8I
-# k01Vsk7+ICUNLFQeintW+plvbTGMrQkFx2ihV5gV/rr5J+4yiEh6dUWDa9XYzNQu
-# rTh161TNUD27lRo6qgQ3iMmLHUwPjcwW3pRsk2UsQYzlWrc37xCacjCmwbW7ZUbu
-# SVFXRc1xakoqRkqWcp6rkD+3o83N6LukXA8FyDBDT0XAZIKAIL29XsnVGOiwvJDg
-# SqVDI/qOY2uTtRnI2ICdl/pSKfJaj25Gih+/kvqing7bc+pBlR9w/u/8RSdpopza
-# ffG12NXYuQBjPfpiZbkKP6eQSVlQPoeMRH0KT8goHnSPVDFH4RZwqPWzjHo5D5OG
-# T/baQc8iolUZ8/Y/KzKMktPmNYqdrI+jfZ3OYoTuGsuVszLsfhhnnXU8Uf2B/FQl
-# bI9IO/U3lufXqOW5gZoA/L++R0kiQvLL0DhiKif2Rbj5qWxurYtD5jk84fkgoS47
-# YB6NZfh/2BLTrjsTzKJ5q8jK69efKpGN44HwKCPMGYSW3uU4NEp1ulIVs2j3F6vi
-# D+M1M6nstQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDA3
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDCrSSkmSbRoZhlGz0+DsE3+QaB6DAGynDjqIXD
+# EweC6jANBgkqhkiG9w0BAQEFAASCAgAWB1Hr14T+XdMaKAz9L8dQryPlYrwqckd5
+# XuYtM00QIluj89uokDZrlb2tn3iLYWWAEp8D4/mD+kE23U5OOrXi+Wdll2FWVK1Q
+# vWDOICxM8GHoGqNpxV5pyIB7KhkmAKgAKmfAr7zKZIU4k9MP9Ku3GGC0p38MjT6n
+# JHJt9xZvE2D9r0jCRmuF6HHhXKmFPMeAiEIRGiQvBS6bzmnv72I4J22/zedgbLN5
+# ntvFTKaL6MeMvW/qFrHqf1qF6p9qJ2auj3xOXPF8FoZIbjKklv+qeamRo0LBjBG6
+# PpN7428XZXTeglMBKNP3IdGZxI6CYprXbDxzSDP/v2JGFhmw2mxawDpVNgRR4ZSg
+# 05jFRTMXBTpZmgp4iemDyYR2+bC6OpPMyT09IjqYETCUFtfyXEwDIDjEDzjGoQ54
+# GXVOtv5M2A9iDOzbD68BxBanQyknucyg3RPDi4Rylxg5Fejks4qBpGy9m+RuD7T+
+# LMauY5/rZYw+B+YNFUKa5kWhIqXhSTX+3S+tJEf/Pykf8nF5ESSfHf07XwqA2CJH
+# re64sb53opVs/13doM3h59/tyuWyc0ED9/KwuQMxH+Oql7TdbVSgV4PKzFkkvRLq
+# WUp4WiuAu4k3R3W3kLN3TUyTf487bV4QpEjbF21/sQaWXnWwZ+LSOfDcH7TM4XNO
+# yv+PzIBxJw==
 # SIG # End signature block

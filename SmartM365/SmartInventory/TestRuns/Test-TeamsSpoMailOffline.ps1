@@ -35,7 +35,7 @@ Assert-Equal (Get-TeamsMailStatus -Summary $teamsSummary -PartialInventory $fals
 Assert-Equal (Get-TeamsMailStatus -Summary $teamsSummary -PartialInventory $true) 'Warning' 'Partial Teams inventory'
 $teamsSummary.OwnerlessTeams = 60
 
-$spoSummary = [ordered]@{SitesProcessed=1915;OwnerlessSites=5;HighQuotaSites=3;InactiveSites=789;SharePointSites=1915;OneDriveSites=0;ListsProcessed=200;StorageUsedGB=500;TenantStorageUtilizationPercent='';CriticalAlerts=8;WarningAlerts=789;RunId='synthetic-run';Duration='00:01:00';InventoryMode='GraphOnly'}
+$spoSummary = [ordered]@{SitesProcessed=1915;OwnerlessSites=5;HighQuotaSites=3;InactiveSites=789;SharePointSites=1915;OneDriveSites=0;ListsProcessed=200;StorageUsedGB=500;TenantStorageCapacityGB='';TenantStorageUtilizationPercent='';CriticalAlerts=8;WarningAlerts=789;RunId='synthetic-run';Duration='00:01:00';InventoryMode='GraphOnly'}
 Assert-Equal (Get-SpoMailStatus -Summary $spoSummary -PartialInventory $false) 'Warning' 'Localized SPO findings'
 $spoSummary.CriticalAlerts = 0
 $spoSummary.WarningAlerts = 0
@@ -49,11 +49,22 @@ $spoSummary.TenantStorageUtilizationPercent = ''
 
 $teamsHtml = ConvertTo-HtmlReport -AlertRows @([pscustomobject]@{Status='Critical'}) -Summary $teamsSummary -Worst 'Warning' -Started (Get-Date).AddMinutes(-1) -Ended (Get-Date)
 if ($teamsHtml -notmatch 'Without owner' -or $teamsHtml -match 'Critical and warning findings|Timestamped exports|<a\s') { throw 'Teams mail body is not concise or contains a data link.' }
+if ($teamsHtml.IndexOf('Priority KPIs') -lt $teamsHtml.IndexOf('Global summary') -or $teamsHtml.IndexOf('Additional KPIs') -lt $teamsHtml.IndexOf('Priority KPIs')) { throw 'Teams KPI band order is invalid.' }
+foreach($label in @('Active teams','Archived teams','Public teams','Teams with guests','Object-level critical findings','Object-level warning findings')){if($teamsHtml -notmatch [regex]::Escape($label)){throw "Teams secondary KPI missing: $label"}}
 if ($teamsHtml.IndexOf('Run details') -lt $teamsHtml.IndexOf('Global summary')) { throw 'Teams run details must follow the summary.' }
 $teamsHtmlWithLinks = ConvertTo-HtmlReport -AlertRows @() -Summary $teamsSummary -Worst 'OK' -Started (Get-Date).AddMinutes(-1) -Ended (Get-Date) -FileLinksHtml '<a href="https://example.invalid/export">Export</a>'
 if ($teamsHtmlWithLinks -notmatch 'https://example.invalid/export') { throw 'Teams mail links cannot be enabled.' }
 $spoHtml = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts @([pscustomobject]@{Severity='Critical'}) -Summary $spoSummary
 if ($spoHtml -notmatch 'Without valid owner' -or $spoHtml -match 'Top 20 largest sites|Timestamped exports|<a\s') { throw 'SPO mail body is not concise or contains a data link.' }
+if ($spoHtml.IndexOf('Priority KPIs') -lt $spoHtml.IndexOf('Global summary') -or $spoHtml.IndexOf('Additional KPIs') -lt $spoHtml.IndexOf('Priority KPIs')) { throw 'SPO KPI band order is invalid.' }
+foreach($label in @('SharePoint sites','OneDrive sites','Lists inventoried','Storage used','Tenant capacity','Tenant utilization','Object-level critical findings','Object-level warning findings')){if($spoHtml -notmatch [regex]::Escape($label)){throw "SPO secondary KPI missing: $label"}}
+if ($spoHtml -notmatch 'Tenant capacity</div><div[^>]*>Not measured') { throw 'SPO must disclose unmeasured tenant capacity in mail.' }
+$spoSummary.TenantStorageCapacityGB = 1000
+$spoSummary.TenantStorageUtilizationPercent = 50
+$spoHtmlMeasured = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts @() -Summary $spoSummary
+if ($spoHtmlMeasured -notmatch 'Tenant capacity</div><div[^>]*>1000 GB' -or $spoHtmlMeasured -notmatch 'Tenant utilization</div><div[^>]*>50%') { throw 'SPO measured tenant capacity is missing from mail.' }
+$spoSummary.TenantStorageCapacityGB = ''
+$spoSummary.TenantStorageUtilizationPercent = ''
 if ($spoHtml.IndexOf('Run details') -lt $spoHtml.IndexOf('Global summary')) { throw 'SPO run details must follow the summary.' }
 $spoHtmlWithLinks = New-SpoHtmlSummary -WorstStatus 'OK' -Alerts @() -Summary $spoSummary -FileLinksHtml '<a href="https://example.invalid/export">Export</a>'
 if ($spoHtmlWithLinks -notmatch 'https://example.invalid/export') { throw 'SPO mail links cannot be enabled.' }
@@ -90,7 +101,7 @@ try {
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoBook | Out-Null
     Add-SpoWorkbookOverview -Path $spoBook -Summary $spoSummary -Alerts @([pscustomobject]@{Severity='Critical';Category='Ownership';SiteUrl='https://example.invalid';ObjectName='';Metric='Owner';Value='';Threshold='Valid owner';Details='No owner'}) -Status 'Warning'
     $book = Open-ExcelPackage -Path $spoBook
-    try { Assert-Equal $book.Workbook.Worksheets.Count 7 'SPO worksheet count'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet' }
+    try { Assert-Equal $book.Workbook.Worksheets.Count 7 'SPO worksheet count'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[11,2].Text 'Not measured' 'Unmeasured SPO tenant capacity in workbook' }
     finally { Close-ExcelPackage -ExcelPackage $book -NoSave }
     $spoEmptyBook = Join-Path $temporaryRoot 'SPO-empty.xlsx'
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoEmptyBook | Out-Null
@@ -111,8 +122,8 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDfXU0EANaaB9n
-# DwFAxJudUEqGjEhoMY5jugmC1tPA9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjD1Piw/CWzx3b
+# CpzZ84vSGLCqtw12njTh+zrOfXdKd6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -245,31 +256,31 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDInd9llcphdCcGgYtRizwtfMdsEbkl2SygrdGWt+mPzMA0GCSqG
-# SIb3DQEBAQUABIIBgHEa0NaRDjXxPSotHkCD2MnXxdgOjE9/0qntOJMiIrzZdK/e
-# F2fGLaSbPleFM3yYWBMxS8KWt3sI7KDYp3qf71VRAgD22y9KdXMmsvnDwYUm5jLp
-# s4brDA8wV5WxZGiV6t0GteeLTG9VVx6ynXALwumj4fktn8eTsaY7UjahT7rvPEU4
-# zeBjUy8TOyruO2dt7S+hKitHbYtzGAhYUSb5CuTDy3MoEFdUTGdQgDaAxGPWBUDC
-# 1Jsg/govpFktLQ82RkFp2UZ5DuKHI/JtdEB5+0j9FoSgx81XswRJfExaLFjAnhwp
-# 2gXM3zzs/c2eJqZe8tOaVnaf1uTX9ZTb3hjXLj3ZhIkbhI85kCHXI9kcuwuOtyMU
-# 8fPOZAiVxijhojUJxVUS+LeTdbvAGIS74scPWwgELtNEZl9BQ2/ftMpRnGHtdT/Z
-# EAO/69kMFdOyxh7Cc3A32gBjnWB22OHre8xnGOE6D0tRUmAWp1xYkAtvBQn/KAHb
-# poQqvzU57G4FYq8AxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBaSgyr0FJSrGAQ3uRKlJ+uZLUew7w1yX1vEnI/lHLOlMA0GCSqG
+# SIb3DQEBAQUABIIBgBsjSdkKHFhr+EAU2dUF7Ml2IIA/ARgKhh0H12Idryq2G7Lc
+# 8QmOlF3SpDtRCDtazoyMnc/qezJkuVMPRs7TxvW0R+DqILdMHR7xelfLbCuUVzQU
+# W6MYpJUWeC34XvHdWm56RrWae1qrJ1KN+ipoHhtj/ZvPSrAc7B7BTuv2MpK6SdMt
+# WcPB5SDrjUzG6Jbpysa3+/d/EVE/1jn1QjfaKfJI6KUgzFD/6bj++AnpACl0uGbZ
+# CS97NH/ZgqU3D5PW+0b8cOVhYyJQ8zVDK8aL8gCmx1I/PfE1BYImwFKkgrahY5c6
+# U0NoKU2/SGMVr/dlK23XiDCa2aUqO8Nz4GM8zJfasaUbQfE+tBgx8dHokYq1M3Vc
+# +ez4EhDRJO5j6ZLqk0kVU4lA3cy89DvOkNCT0+rtlWd9njOdhjjWsxk9zw4l1HAf
+# 79nBBH+eIYB0CAZgEyYL5uK3rftvPi50nymfSP7Zg1AN7Bth6L87z5zNPHFvi9WP
+# PZDI4pM9n5GrEcaWmKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ1
-# MTVaMC8GCSqGSIb3DQEJBDEiBCCWYR0VegMoLe+f4hfbpeIgn9f7K10jg9O61P2E
-# b/kuEjANBgkqhkiG9w0BAQEFAASCAgAVJ7Vfp4NnzG6zaL3BbVtFUwtHuK3neMmt
-# rLJHEQN70cZdehd/ysiMl0Zup+bfAGK/mqVn6Ca68DL5+Drj8AKn0AGAW+Wzc9YT
-# 565eoG6Har3QUdTD7Vp1uWVdKSJxfc7z8nFi6HWDE5qxKRblhdHArrGIEikEt7Kz
-# WAyXD7eq7C53U6AF+L3ChQgmRQfCRPbm6bXwyzsDWu3YKoLJQU61Kg/MD+ITeaYy
-# fuayN0XQzUvIikHk5f8ColRDHcL49AByZWsDHAR1XJPGTPiL71doxc4apaMbQGUR
-# 1wxgWvXzYoodbDNvjyQUGeenkJmwvUNdoHaiznMXUluxt4iaCLh3xhuNJRiAKA4n
-# u84obVzF9YLOFxaBsJbyNFpsIQLpwgiHvm1n914pAer66UShsiHd9UWWiGu6G8jX
-# FSFC4uUJKfrR9r8uU+/vc5VTCm8LemQ9umBatGaf+QxTgnJOKDyhDBdbgoUcOiTN
-# tXUy84HOEbFk91ElWWDDa6V9HDO5RAf5A1BoeSvwpOMgpZSsl2HyA+mIBIXLYkTj
-# PUeLVwT/PwRA1q8Jjw4sAkMkfbsjXttkzoq3sX5gguyXLUcSHsPe3350q8VIhkg9
-# /QEItq/LpsY5zD2AQp7o5XPGzQupWB8PsgASR6fGg9Q6oq5l2/LotdQ7/oTn6L1H
-# q1uDzH5zXw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDA3
+# MDVaMC8GCSqGSIb3DQEJBDEiBCD4WhM//boIxucY4teZ68ZiZ3fhPAGGoL40jOjf
+# XBKcuDANBgkqhkiG9w0BAQEFAASCAgCX36bm/V7vJb7iDzQTrxUcsiUL4BShinn+
+# sRmJhbK4wIIo4K+ilykemMXI2PvtPmcs2paazEf5gNPcDPI+1opoEreC6stkv4U6
+# dcfJngkVNofLAR9bXxi+90Eo+g5U00ef/WXDrb6ID9s9ttLpj7eMk3Wj1B3MCNDt
+# 0v26kLNwujLtZAQuL4RuAthegpxFXKazyoJ+ED+HPHs4vX1EXx0rw/U/QILLE0E1
+# xcB/DAlAQ7nWyZUqhYBbEQyGPG9PWTM3wnHAFm0vI82ulD9SD3ZsKhmgFWNwDrHq
+# mUd79OgJTAZ9OLJjg+CtGiQT0e79XJ8vTecKbS2O1uAGMkKQJ/P1pHwu7wlxGUT/
+# OPCLjDKfvUzkdme0qDJxbxv9sUkI3SeFnpaeGZdZcwkKImZj7tmnNnZVFGaw/tOd
+# IKbe28QZpF0yYkWbWepGCRZMJdeYF2H2Qrq6FzpwieW+c+2S5FukdFeSk2JsNRbf
+# ACvEeW4/X3uSJh9yUrbx9mvgb+hc6/h50dXlTwC0PbeEqHX8Vyl9pbF+Ejxw1D2R
+# 6Ltlk0lm1Pml5yVxy5rZNH867Sr3JZTss0jF9XWKTMG0giBcHg3FD0sz074qM85I
+# e4wM48tmWbYzTKAa79r2dDXu+Qlj/iLKw3wLEapA5RgoeFF+TzNEVMT+bUaRRcKd
+# h7mCHRzvcA==
 # SIG # End signature block
