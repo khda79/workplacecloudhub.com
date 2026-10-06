@@ -51,6 +51,7 @@
   "ShowMailLinks": true,
   "DuplicateNotificationLastSentFilePath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\AD_DuplicateNotification_LastSent.txt",
   "DomainParallelThrottleLimit": 1,
+  "NonBlockingDomainErrors": [],
   "DeleteTemporaryPerDomainCsv": true,
   "TemporaryPerDomainRetentionDays": 2,
   "EnableWeeklyHistory": true,

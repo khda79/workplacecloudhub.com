@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.55
+1.56
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -733,6 +733,18 @@ $ConfiguredDomainParallelThrottleLimit = [int](Get-ScriptLocalConfigValue -Confi
 $EffectiveDomainParallelThrottleLimit = if ($DomainParallelThrottleLimit -gt 0) { $DomainParallelThrottleLimit } else { $ConfiguredDomainParallelThrottleLimit }
 if ($EffectiveDomainParallelThrottleLimit -lt 1) { $EffectiveDomainParallelThrottleLimit = 1 }
 if ($DomainWorker) { $EffectiveDomainParallelThrottleLimit = 1 }
+$NonBlockingDomainErrors = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($configuredDomain in @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'NonBlockingDomainErrors' -DefaultValue @())) {
+    $domainName = ([string]$configuredDomain).Trim().TrimEnd('.')
+    if ($domainName -notmatch '^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$') {
+        throw "Invalid domain in NonBlockingDomainErrors: '$configuredDomain'."
+    }
+    [void]$NonBlockingDomainErrors.Add($domainName)
+}
+if ($NonBlockingDomainErrors.Count -gt 0 -and $EffectiveDomainParallelThrottleLimit -gt 1) {
+    $EffectiveDomainParallelThrottleLimit = 1
+}
+$FailedInventoryDomains = [Collections.Generic.List[string]]::new()
 
 # ==========================================================
 # PowerShell 7 minimum
@@ -757,7 +769,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.55"
+$ScriptVersion = "1.56"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -840,6 +852,9 @@ try {
         Import-Module ActiveDirectory -ErrorAction Stop
         WriteLog -Message "ActiveDirectory module imported successfully."
         Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
+        if ($NonBlockingDomainErrors.Count -gt 0) {
+            WriteLog -Message ("NonBlockingDomainErrors configured for transient AD connectivity failures: {0}. Failed domains remain visible and the inventory will be marked incomplete." -f (($NonBlockingDomainErrors | Sort-Object) -join ', '))
+        }
     }
     else {
         Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) | Out-Null
@@ -3088,11 +3103,22 @@ $($rows -join "`n")
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) {
                 if ($domainAttempt -lt $MaxRetries) {
-                    WriteLog -Message ("WARNING: Transient AD connectivity error for domain '{0}' (attempt {1}/{2}): {3}" -f $currentDomainName, $domainAttempt, $MaxRetries, $_.Exception.Message)
+                    $message = "WARNING: Transient AD connectivity error for domain '{0}' (attempt {1}/{2}): {3}" -f $currentDomainName, $domainAttempt, $MaxRetries, $_.Exception.Message
+                    if ($NonBlockingDomainErrors.Contains($currentDomainName)) {
+                        WriteLog -Message $message -Level 'WARNING'
+                    }
+                    else {
+                        WriteLog -Message $message
+                    }
                     # Loop continues: next iteration will wait and retry
                 }
                 else {
-                    WriteLog -Message ("ERROR: Transient AD connectivity error for domain '{0}' persisted after {1} attempt(s). Skipping domain. Error: {2}" -f $currentDomainName, $domainAttempt, $_.Exception.Message)
+                    if ($NonBlockingDomainErrors.Contains($currentDomainName)) {
+                        WriteLog -Message ("WARNING: Non-blocking AD connectivity error for domain '{0}' persisted after {1} attempt(s). Skipping domain. Error: {2}" -f $currentDomainName, $domainAttempt, $_.Exception.Message) -Level 'WARNING'
+                    }
+                    else {
+                        WriteLog -Message ("ERROR: Transient AD connectivity error for domain '{0}' persisted after {1} attempt(s). Skipping domain. Error: {2}" -f $currentDomainName, $domainAttempt, $_.Exception.Message)
+                    }
                 }
             }
             else {
@@ -3104,7 +3130,8 @@ $($rows -join "`n")
         } # end while retry loop
 
         if (-not $domainSuccess) {
-            WriteLog -Message ("WARNING: Domain '{0}' could not be fully inventoried after {1} attempt(s). Skipping." -f $currentDomainName, $domainAttempt)
+            [void]$FailedInventoryDomains.Add($currentDomainName)
+            WriteLog -Message ("WARNING: Domain '{0}' could not be fully inventoried after {1} attempt(s). Skipping." -f $currentDomainName, $domainAttempt) -Level 'WARNING'
         }
     }
     }
@@ -3112,6 +3139,9 @@ $($rows -join "`n")
     if ($DomainWorker) {
         WriteLog -Message "Domain worker completed; combined CSV generation is handled by the parent process."
         return
+    }
+    if ($FailedInventoryDomains.Count -gt 0) {
+        WriteLog -Message ("Inventory is incomplete. Failed domains: {0}. Combined exports will include only the collected domains and the source receipt will not qualify full scope." -f ($FailedInventoryDomains -join ', ')) -Level 'WARNING'
     }
 
     # ------------------------------------------------------
@@ -3896,7 +3926,7 @@ finally {
     }
 
     try {
-        Set-SmartM365CmdbSourceScope -CompleteScope (-not $DomainWorker -and -not $ReportOnly -and -not $DuplicateAnalysisOnly -and @($TargetDomains | Where-Object { $_ }).Count -eq 0) -Scope 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members'
+        Set-SmartM365CmdbSourceScope -CompleteScope (-not $DomainWorker -and -not $ReportOnly -and -not $DuplicateAnalysisOnly -and @($TargetDomains | Where-Object { $_ }).Count -eq 0 -and $FailedInventoryDomains.Count -eq 0) -Scope 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members' -Qualifications @($FailedInventoryDomains | ForEach-Object { "UnavailableDomain:$_" })
         Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
     }
     catch {
@@ -3910,8 +3940,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCocODwYZltemgd
-# 0vDKR49/C7OaT4nKTCrZSLvx1pJ0lqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZKaB52HKrKJ8N
+# YPX9U+1BymJN7guMX2zktPF7gSfoSKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4044,31 +4074,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMVPR0rZ5THnnEshRh1QfZ7pzEVcRpy0wri0lI4tW1zlMA0GCSqG
-# SIb3DQEBAQUABIIBgCUNc3W5FtYiCXEOI/62JJwCtZWF/rw22kTn5Cjoj4YKDZlJ
-# OImTUOyenu9Ee8iRiZqCEn1+I6B43M856KEUNJMhIgAkQvjqBtqsMQkjz/+Ik9qs
-# SOWSe4Ixi5xfGr6NJSA0a9k44T8baQJqm9rzJ5pf+v/xC7agJi7eE7VYpt/06rks
-# WBpMrjZop87SeU20O+EeAwvqGCT7RU7Cxo+T4L4KBjcWV3HTRs54e1xhXeCku9Yg
-# tChdRrjKLx9RIBB4EYgsCK3ntLcRDhzE6IPVovgCBlRewk77Sya5Rd30UXvs6JE3
-# 7EZJST2xcmAsgSnkatONkJoADVE67Xs4YXrXt3S0Ew59Wkhr9GhbQ4to8EcjtFne
-# 4wnhLPXKUGTWljRV5Btex3xVmN9yto0PZdPq9mP2XF8KHmblR5mPihPstZSGQQxB
-# S5WheYDNPs78nMnHnirqpuw7WszqRKHV0yzHBu1l96MUF6IFJIojvNRQozEg7VRY
-# NFtVKNxzgyCGQfjFKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF0d2Ooi36BK2jtop3YVg/MbV2zDz8N4mS1GsyiK4iH+MA0GCSqG
+# SIb3DQEBAQUABIIBgKDXwQY3LnWd8lRwBvOqxjK6EpCV4aSQZ+nBvDqe6aQ5azN7
+# B5tNvM9wzvyUkYzT4NjHk++DXsoMnMgsnXp2Mn2O96hht72KLsnUHWv2PKne+Ys6
+# mqFALaGkMYirVRtWVDQ76w5t8IH5F6ODH2FxyEyn+XwqNIUVEqqOJ7Cg4+WiBXUV
+# jPJ+RcYRkpRaLxfTEQQoM3iL7KKa8zh+gmj5bRu/rvhDUAHl/07imtsG4qaqXvqv
+# tlu2tX5830GTuiiSlrf370r64cPVODpV8oTdqX137fBYvfTyZzvneBBcvjqrjeft
+# uKEaidgFkcm9s9gICqRqp1pTnuRIc+5UPkIRc4ykBhYLbEcJgno4+qChtfbi8Ubu
+# 1UPG4Ha3FQFv0uv9UvExH2mm/JwICl/kDVwi2TYTfr+tx3pqPfZ/ylRbrDe0Z4hO
+# 5HYxKh5wi5PQokdcpWe7izrJrQoe6xVGIwKz1NYWLovXHP4u0juZYdby6T42pGIF
+# LVl9PwPvUqecyrk8taGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwNzQ3
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDQn9/KXJfe8kImv6S1wPMV4L9mdAuTf1FQyLWt
-# GKAg/jANBgkqhkiG9w0BAQEFAASCAgAnoCBx1eD6+xfX94glI53qUfzuH8tvb22k
-# IIcEAsAeAzHO83qizc7PAfZuJ2Gtx/qmObMhgB0rhKjrC0FDqVgcj9S0/ha5rd+o
-# WAUa1nYisxMk0clnSJG9ai4pkFKtSdKY1sbeKdXqD9IHfoR5Xt/lWyXgn6uh6KI+
-# 2SGM7/JugugkugNRywEIboo42MZ37kbdVFFjI5U1MKIwIC/ZzRj7shRYzorACwYW
-# PUKmdkYbzregnOy3a37aGH+pjMBDOYb7On1pXsXNooRS6SLxWk4DGEgG0xlQIvZN
-# /ijALhv1GwR1z42R6CwwyKqbvHyorekyCuVldKeHdxFEL8asVPXQSvB1WYJyN8py
-# cQXqZTW03STijv/qIOu71VsId95jbmlJYmHAa3jPi4mW1eRDQkUw5B3mFrs9SVx7
-# FR4NGjf1YbZHCqHrV+Kie9zMqQFmbV1jDtpeF7fmSphSFp3ZWbAPGb+/DqMRroCa
-# bLFBoadTYIjg0keTMAyTy8fE+lNNbGThtqv1UKXIv/JqNhJYCvwwn90FwVOfvwxZ
-# TjCQZ/BQAeBzXV2qd/VPF3Npmg0uo7y0zIygGPVvkn4SPeYTfx0+jO5q0LDJywTs
-# 6MqxI4DR3LWONelbFCakcF6RM2jDahd1XwWza4K9lMiHqmRn4b/ORgRaN5+8PyJ0
-# +34reWlmLQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMTU3
+# NDBaMC8GCSqGSIb3DQEJBDEiBCA1CPQBYEUIyKuUtcv4UF2GP6CzuUlOg+M5dPR6
+# Ns/7+TANBgkqhkiG9w0BAQEFAASCAgBHX95cqGZ6rqfFH/VySh7ctTZAaYxFwgeA
+# cTQuvDWEzmMSv9JFt2osfGCXjA9tQkUH4mz8wfPo2YBfx9iQppWLmOd5lTb3qzWn
+# cN/5U3+UTp9LH1MJ4z5UFp+MxKhGhzrCl1L1/8gYOLe8WmLhbZWChrqvPvG/MBj8
+# 75StbkigZWdMETDaSTC72/uOBaAM/HWPdgywreOaXUI4s7sVWc1kQv+J/NfOFLp2
+# ElcUXJxKkR/7JOFlN5I1H3qwUyqRLasRII6OeRTt8qBlGveD8nr5qQKSPEcqVrLm
+# b+SBjcCqozTVTJf/356tOn+aFhWPZ4eo9ujMvhi3OnsaA+0yeOKummCXZncA0xbw
+# fTGDlXJiJ+QE0ai50zMWo4qXapS41/gHbn3/PkcLyz86JTohUNBOOMDNPQ+PmJJB
+# JNJUQd3hj+JYU3fvR0IBPxwXhKvYxQl/hN+Ci2BS+IIsDAsCt3vgbgqYmRwg3bhX
+# UYj1943c9LWkb+JjOg211BuIsmgYILRwyYBPvN12HHgtAowI/bSL4ZCF5DL8BrtJ
+# DvUNg5pyCf95SxNJ54h9/fph9Zyl77HbJpuJLWzoDKvrMTee/XrVd2/6LJ0dfL8v
+# Ukd/GZopktTGtd2DhhrfuMh18Kc3UvXARAtWTKtS+Ho52GU0ABGrqFRL/yHMfVe5
+# tm/6xMKprA==
 # SIG # End signature block
