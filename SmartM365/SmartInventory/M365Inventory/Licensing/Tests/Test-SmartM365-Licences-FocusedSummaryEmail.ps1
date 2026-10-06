@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Offline checks for the F1/F3/E3/E5 license summary email.
+  Offline checks for the license overview and recovery email.
 #>
 
 [CmdletBinding()]
@@ -14,7 +14,8 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
-  'Get-LicensesFocusedSummaryRows', 'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
+  'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
+  'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
   'Read-LicensesIndexedSource', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
@@ -56,6 +57,15 @@ $rows = @(
   [pscustomobject]@{TenantSkuPartNumber='M365_F1_COMM';TenantPrepaidEnabled=5;TenantConsumedUnits=4}
   [pscustomobject]@{TenantSkuPartNumber='SPE_F1';TenantPrepaidEnabled=20;TenantConsumedUnits=17}
   [pscustomobject]@{TenantSkuPartNumber='SPE_E3';TenantPrepaidEnabled=30;TenantConsumedUnits=28}
+  [pscustomobject]@{TenantSkuPartNumber='Microsoft_365_Copilot';TenantPrepaidEnabled=10;TenantConsumedUnits=8}
+  [pscustomobject]@{TenantSkuPartNumber='VIRTUAL_AGENT_USL';TenantPrepaidEnabled=1;TenantConsumedUnits=1}
+  [pscustomobject]@{TenantSkuPartNumber='DYN365_FINANCE';TenantPrepaidEnabled=20;TenantConsumedUnits=12}
+  [pscustomobject]@{TenantSkuPartNumber='Dyn365_Operations_Activity';TenantPrepaidEnabled=5;TenantConsumedUnits=3}
+  [pscustomobject]@{TenantSkuPartNumber='Dynamics_365_for_Operations_Sandbox_Tier2_SKU';TenantPrepaidEnabled=50;TenantConsumedUnits=0}
+  [pscustomobject]@{TenantSkuPartNumber='PROJECT_MADEIRA_PREVIEW_IW_SKU';TenantPrepaidEnabled=10000;TenantConsumedUnits=1}
+  [pscustomobject]@{TenantSkuPartNumber='POWER_BI_PRO';TenantPrepaidEnabled=10;TenantConsumedUnits=7}
+  [pscustomobject]@{TenantSkuPartNumber='PBI_PREMIUM_PER_USER';TenantPrepaidEnabled=4;TenantConsumedUnits=4}
+  [pscustomobject]@{TenantSkuPartNumber='POWER_BI_STANDARD';TenantPrepaidEnabled=1000000;TenantConsumedUnits=1000}
   [pscustomobject]@{TenantSkuPartNumber='OTHER_SKU';TenantPrepaidEnabled=99;TenantConsumedUnits=99}
 )
 $summary = @(Get-LicensesFocusedSummaryRows -TenantRows $rows)
@@ -67,6 +77,18 @@ Assert-Equal $summary[1].Enabled 20 'F3 enabled count'
 Assert-Equal $summary[2].Enabled 30 'E3 enabled count'
 Assert-Equal $summary[3].Subscribed $false 'Missing E5 status'
 Assert-Equal $summary[3].Enabled 0 'Missing E5 enabled count'
+$additional = @(Get-LicensesAdditionalOverviewRows -TenantRows $rows)
+Assert-Equal $additional.Count 3 'Additional product count'
+Assert-Equal $additional[0].Product 'Microsoft 365 Copilot' 'Copilot family'
+Assert-Equal $additional[0].Enabled 10 'Copilot excludes Studio licenses'
+Assert-Equal $additional[0].Consumed 8 'Copilot used units'
+Assert-Equal $additional[1].Enabled 25 'Dynamics user units exclude sandbox and preview'
+Assert-Equal $additional[1].Consumed 15 'Dynamics used units'
+Assert-Equal $additional[2].Enabled 14 'Power BI Pro and Premium Per User units exclude free Standard'
+Assert-Equal $additional[2].Consumed 11 'Power BI used units'
+if ((New-LicensesOverviewCardHtml -Row $additional[1] -Width 33 -Accent '#7c3aed') -notmatch '>25</div>.*>15</strong> used.*>60%</strong> used') {
+  throw 'Dynamics overview card is missing enabled, used or percentage values.'
+}
 
 Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z'
 Assert-Equal $script:SentMail.Count 1 'Sent mail count'
@@ -89,8 +111,12 @@ Assert-Equal $script:SentMail.Count 1 'Disabled summary sends no mail'
 $script:Sampled = $true
 Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -Manual
 Assert-Equal $script:SentMail.Count 2 'Explicit email-only mode sends mail'
-if ($script:SentMail[1].Subject -notlike '*existing CSV*' -or $script:SentMail[1].BodyHtml -notlike '*no new inventory*') {
+if ($script:SentMail[1].Subject -ne 'Microsoft 365 license overview and recovery' -or $script:SentMail[1].BodyHtml -notlike '*No new inventory was run*') {
   throw 'Email-only mode did not identify the existing CSV snapshot.'
+}
+if ($script:SentMail[1].BodyHtml.IndexOf('Source: existing published CSV') -le $script:SentMail[1].BodyHtml.IndexOf('Source freshness') -or
+    $script:SentMail[1].BodyHtml.IndexOf('Source: existing published CSV') -ge $script:SentMail[1].BodyHtml.IndexOf('<footer>Host:')) {
+  throw 'Existing CSV provenance is not at the bottom of the email content.'
 }
 $script:Sampled = $false
 
@@ -238,8 +264,19 @@ try {
       $script:SentMail[0].BodyHtml -notlike '*Intune_Devices_Inventory.csv*') {
     throw 'Intune PC recovery indicator or source freshness is missing.'
   }
-  if ($script:SentMail[0].BodyHtml -notmatch 'License recovery overview' -or $script:SentMail[0].BodyHtml -notmatch 'F3/F1 adds both suite counts') {
+  if ($script:SentMail[0].BodyHtml -notmatch 'License overview and recovery' -or $script:SentMail[0].BodyHtml -notmatch 'F3/F1 adds both suite counts') {
     throw 'KPI banner and assignment-grain note are missing.'
+  }
+  $overviewBody = $script:SentMail[0].BodyHtml
+  if ($overviewBody.IndexOf('>License overview</h2>') -lt 0 -or
+      $overviewBody.IndexOf('>License recovery overview</h2>') -le $overviewBody.IndexOf('>License overview</h2>') -or
+      $overviewBody.IndexOf('01 &nbsp; License capacity') -gt $overviewBody.IndexOf('>License recovery overview</h2>') -or
+      $overviewBody -notlike '*MICROSOFT 365 SUITES*' -or
+      $overviewBody -notlike '*COPILOT, DYNAMICS 365 AND POWER BI*') {
+    throw 'License overview bands do not precede the recovery overview.'
+  }
+  foreach ($label in @('F1','F3','E3','E5','Copilot','Dynamics 365','Power BI')) {
+    if ($overviewBody -notmatch ('>' + [regex]::Escape($label) + '</div>')) { throw "Missing overview card '$label'." }
   }
   if ($script:SentMail[0].BodyHtml -notmatch '>0</div><div[^>]*>Recovery candidates E5' -or
       $script:SentMail[0].BodyHtml -notmatch '>1</div><div[^>]*>Recovery candidates E3' -or
@@ -379,8 +416,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlEaXAMTnvCXue
-# 3/ACUS4Y41V6QutuJACLL22NEA0IKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzdlO/MC4A5Uqj
+# tQR4KXOG+wIcdKPjGeUc+Gck25N9BKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -513,31 +550,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMZG/XzGo0MN9uf0lbeCJN339dxp91VGCNRZUsm7FpAPMA0GCSqG
-# SIb3DQEBAQUABIIBgAM5Bt8IUnmH93xGVYuImQM0vj2CUbllvaeLFXMiywBUv0ef
-# fXZn0tg0L1Dmt0gL3QU7km3VGVO4233p3FmDoSHMXWIMp4VfEpy4VhKDBYy4ugm5
-# 9YYjqq74ZPPNWzEOW5ffbUcc0pnnLPj4z+YsfVb5xX7ejvLNB76yzsUA7cH8sveg
-# 01BqzflJP50vqvQbYbJRP2gUkp+P27SeZPkMF2Q9b5P0orktDAxKmx+whFqgFdbL
-# nlxgIT1+yFbpszQ42cUH66gjhE5YuF7+pmEdSHglEfTUI0zU+iMEaedZWa9nAzum
-# +u6LN+1kKZocekYEAHHnK5ydmbmgyPQDvRTwbXJSWpXurNKR1lxR81ih8vDv5cuZ
-# xXUVgQtG438zxsM9TG9YiFZUhXEYfDonirGvfUEKXKn7HNzgNn94ExI1116k7sz/
-# zDfKd+0U8R1SqfOo4HAETowNy7V+UKb2Oc77CGueCtAm22QcQ7nKgZrYUNmLpY9E
-# 7R7m0mnYOW3LOpY7HKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJAMgXpI2iMGSKAwOsYJsT8b/cbzGiGGNPTAUynPlH5mMA0GCSqG
+# SIb3DQEBAQUABIIBgB8osachp5dmHjNSf1Pdo7Bahts+FOoQG5lV+62oGQ+Cx2+Q
+# hXg7InrEcHPXkrKkUuv1rbAP4vdOBtRAgvhE4IaLjdhQmEmz4DRAs/Q3Tqs9MYaR
+# fkjC/lmKOq1xy9WxaKFIbHvjZ+CdS3HkhE0GJU86kcNaAzkApgSdO21RFKBIATKd
+# +cbsVB0ct1I2kyLFkDLFBZ6oWnC6NG9BR9SxuUL8y83GvITfz1dvMUoeyUaWJZJH
+# RFhkc9QpSXD6CiIwBFqaR52v5hmRvFg1w1CFYAIc4VzXG5+9IsFUouvdPlgAaSlN
+# HeLp+lc3SRBl+pE8yj6dxhWQ2gBMQtLriCFCDCw+TDSMWrvn/v8nogFvzwHcZopw
+# XSltgrcnPStjuP8fWEqM/4jJipxWvqU38p9I1FDi65Msex0uEpAAolRK6KZfelZ6
+# SC8Y9sA33bRO7R3unfhITWl0RJPUE6xYTSq7nFWIghfC3kJzkrYVYG2WZIbpFM1m
+# 8mFq0iHAu5amFhf5K6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjUy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCClDzet07Nr2Z4cqlXRl5pz1/dYwuABxjwFeAy7
-# g9XhJjANBgkqhkiG9w0BAQEFAASCAgAphaANvDNi1ohvpTTUf6RYbvnNJ2i5OL+C
-# X4G/p8JLbsyCuGGSihrBWbUddeM+9SmvTIoLMyJWA51+F5lcjXJ7DJUHpY+tgvVQ
-# eImD9eo9274klHXcKpJiq71Pav4mOmDQ8R3lfNn0T5azHseIheBu96ApKOdh1XVe
-# MpN1wZiqu4xYEIZVvhxF+OpSgR8M/dxknkdSBsol0gm18GGCSJuOtNfGmkMlB5lA
-# N2cG9HCHbkaDKYfVlXqhNo2zG2m9GGRwIJvp+eZnXTkGCiFIEwjWPgNi/y+E9AVX
-# zKnjdfArfnS5clSQk23nChHCeUmu1SnZTSbl/SiRFsECehR5DHr7XLYhszqjObGb
-# +0rKPppCy+rPDkvkEQq1LqasFCDIDGdFDgeEYY0QD8MTLcE2S9eOn8V5reIzpnJJ
-# Wl3h+rasBgQfHTzxFgPAiTZDgHUy/l3e8xvN7LnRFcsKHk/Hmojry1vVHhndzquw
-# 6/Jp6K1TM44kHTV4YjoqxJEZNjAPJOrqNoCuvcCpKpMw6W5tx/+C90bIg7QfyckC
-# fy6vsf+XFyDiURQFg/g4SsOw+RmfBESu4mrldDhoEY2T+4AIFVZj4chZ+G9n6qBQ
-# VNXQ16GcE+hwVEXt8oAFVUUlxTXaRVfWAv4prT11rEkoHSHF4tcf4WZ+yQkn59ti
-# zpEJu3I57Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzEz
+# NDZaMC8GCSqGSIb3DQEJBDEiBCDh/WBF9XYVxzqBUorNS3CQNsbHO+rYrwBjAQda
+# 0sTQbDANBgkqhkiG9w0BAQEFAASCAgCrYymeGLb4q3qBNSUBMoIHhGesVC/7lKES
+# Y9MVDbkVZ9hWQdsGIxyN/NqsonODsHcsGZVUJ9rt9QqY5beW6nivtE8q3tWZtkoC
+# M0A21zWlB7EZo5sTDtFw5Shn7e2prvtqxiP/Osh5ejpznnl7i+ez+9F8UM+Sl5Li
+# pcdlRvmkEhJF8c9QsDMXJ9fQCNRNo1iOtF7dYxB1zcJs1sSipIloAfUr0thUJ+N1
+# 08L2h2x72nRDDIYYlO/ShSs5PDTYESXXnyiKvAt5noD4TDSoBxaePR0V8PuxYayu
+# D6jIL89yirpM7gpMa91yXimXmxOawfR57I1xrZH88mFnDNq6HmA+cLZnroCJ3rP6
+# WMyWKvsPpb4hwGrbdCcmFRBVMaL1EJDOCZwGlZTXxOn2Bv7KauIiz9AHs1hTAlgI
+# MQGgckQVRNsLQCg91280+4WEnwx5UnA9P1AEKrWyF/8cMM/6Qw6ifwbaHF0IReCJ
+# RLH9edAhJF87pApUfB0mVWreESp6/wHVdsVPd974COOp5o1FgxSAZ1IV1VKPKDAh
+# 7F1nUzXUEDkZlQyfhZHytJlXHLxRt35XAcqUOmKA+B0vWs/QFgvWlwx2SlGZMSWt
+# z4LMpqE6mqysdE43Sk7eogDALolb9a/UNh7Aw8wP9xkpSqhwO1btIjMP3NfzPV4S
+# g+aFJ1RcQg==
 # SIG # End signature block

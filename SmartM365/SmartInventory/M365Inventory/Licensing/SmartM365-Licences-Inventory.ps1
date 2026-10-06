@@ -4,10 +4,10 @@
   WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
-  SendLicenseSummaryEmailOnly sends the focused license and usage summary from existing published CSVs without collecting again.
+  SendLicenseSummaryEmailOnly sends the license overview and recovery summary from existing published CSVs without collecting again.
   ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
 .VERSION
-1.26
+1.27
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
@@ -15,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.26
+    Version : 1.27
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -628,6 +628,43 @@ function Get-LicensesFocusedSummaryRows {
   }
 }
 
+function Get-LicensesAdditionalOverviewRows {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows)
+
+  $totals = @{}
+  foreach ($name in @('Microsoft 365 Copilot','Dynamics 365','Power BI')) {
+    $totals[$name] = @{ Enabled=[long]0; Consumed=[long]0; Subscribed=$false }
+  }
+  foreach ($tenantRow in $TenantRows) {
+    $sku = ([string]$tenantRow.TenantSkuPartNumber).Trim()
+    $name = if ($sku -in @('Microsoft_365_Copilot','M365_COPILOT')) { 'Microsoft 365 Copilot' }
+            elseif ($sku -match '^(DYN365_|DYNAMICS_365_)' -and $sku -notmatch '(SANDBOX|TRIAL|PREVIEW|VIRAL|FREE|DEMO|TEST)') { 'Dynamics 365' }
+            elseif ($sku -in @('POWER_BI_PRO','PBI_PREMIUM_PER_USER')) { 'Power BI' }
+            else { '' }
+    if (-not $name) { continue }
+    if ($null -eq $tenantRow.TenantPrepaidEnabled -or $null -eq $tenantRow.TenantConsumedUnits) {
+      throw "License counts are unavailable for SKU '$sku'."
+    }
+    $totals[$name].Enabled += [long]$tenantRow.TenantPrepaidEnabled
+    $totals[$name].Consumed += [long]$tenantRow.TenantConsumedUnits
+    $totals[$name].Subscribed = $true
+  }
+  foreach ($name in @('Microsoft 365 Copilot','Dynamics 365','Power BI')) {
+    [pscustomobject]@{ Product=$name; Enabled=$totals[$name].Enabled; Consumed=$totals[$name].Consumed; Subscribed=$totals[$name].Subscribed }
+  }
+}
+
+function New-LicensesOverviewCardHtml {
+  param([Parameter(Mandatory)]$Row, [int]$Width, [Parameter(Mandatory)][string]$Accent)
+  $label = [System.Net.WebUtility]::HtmlEncode(([string]$Row.Product).Replace('Microsoft 365 ',''))
+  $percent = if ([long]$Row.Enabled -gt 0) {
+    (([decimal]$Row.Consumed * 100 / [decimal]$Row.Enabled).ToString('0.#', [Globalization.CultureInfo]::InvariantCulture) + '%')
+  } else { 'N/A' }
+  $status = if ($Row.Subscribed) { 'Enabled licenses' } else { 'Not subscribed' }
+  return '<td width="{0}%" style="width:{0}%;padding:5px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#ffffff;border:1px solid #dce6ed;border-top:4px solid {1};"><tr><td style="padding:12px 10px;"><div style="font-size:12px;line-height:17px;font-weight:700;color:#334155;">{2}</div><div style="margin-top:6px;font-size:22px;line-height:26px;font-weight:700;color:#0f172a;">{3}</div><div style="font-size:10px;line-height:14px;color:#64748b;">{4}</div><div style="margin-top:8px;font-size:12px;line-height:17px;color:#334155;"><strong>{5}</strong> used &nbsp;&middot;&nbsp; <strong>{6}</strong> used</div></td></tr></table></td>' -f `
+    $Width,$Accent,$label,$Row.Enabled,$status,$Row.Consumed,$percent
+}
+
 function ConvertTo-LicensesActivityDate {
   param([AllowNull()]$Value)
   $valueText = ([string]$Value).Trim()
@@ -1073,6 +1110,7 @@ function Send-LicensesFocusedSummaryEmail {
     }
 
     $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
+    $additionalRows = @(Get-LicensesAdditionalOverviewRows -TenantRows $TenantRows)
     $usage = $null
     if ($CsvFolderPath -and $ExpectedTenantKey) {
       try {
@@ -1098,6 +1136,15 @@ function Send-LicensesFocusedSummaryEmail {
       foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3F1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
     }
     $topRecoveryF3F1 = Format-LicensesMetric -Counts $f3F1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3F1Available
+    $suiteColors = @('#0f766e','#2563eb','#6d28d9','#475569')
+    $suiteCards = for ($index=0; $index -lt $summaryRows.Count; $index++) {
+      New-LicensesOverviewCardHtml -Row $summaryRows[$index] -Width 25 -Accent $suiteColors[$index]
+    }
+    $otherColors = @('#d97706','#7c3aed','#0284c7')
+    $otherCards = for ($index=0; $index -lt $additionalRows.Count; $index++) {
+      $width = if ($index -eq 2) { 34 } else { 33 }
+      New-LicensesOverviewCardHtml -Row $additionalRows[$index] -Width $width -Accent $otherColors[$index]
+    }
     $percentCulture = [Globalization.CultureInfo]::InvariantCulture
     $capacityRows = @()
     $recoveryRows = @()
@@ -1148,17 +1195,26 @@ function Send-LicensesFocusedSummaryEmail {
         '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
       }
     } else { @('<li>Usage sources: N/D</li>') }
-    $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Existing published CSV &middot; no new inventory</span>' } else { '<span style="color:#0f766e;font-weight:700;">Published inventory</span>' }
+    $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Source: existing published CSV. No new inventory was run.</span>' } else { '<span style="color:#0f766e;font-weight:700;">Source: published inventory.</span>' }
     $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
-    $subject = if ($Manual) { 'Microsoft 365 F1/F3/E3/E5 license summary (existing CSV)' } else { 'Microsoft 365 F1/F3/E3/E5 license summary' }
+    $subject = 'Microsoft 365 license overview and recovery'
     $tableStyle = 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;'
     $headStyle = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
     $bodyHtml = @"
 <div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;max-width:700px;margin:0 auto;">
-  <p style="margin:0 0 5px;font-size:11px;letter-spacing:1px;font-weight:700;color:#0f766e;">MICROSOFT 365 &middot; F1 / F3 / E3 / E5</p>
-  <h1 style="margin:0 0 8px;font-size:24px;line-height:30px;color:#0f172a;">License recovery overview</h1>
-  <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)) &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC &nbsp;&middot;&nbsp; $sourceNote</p>
+  <p style="margin:0 0 5px;font-size:11px;letter-spacing:1px;font-weight:700;color:#0f766e;">MICROSOFT 365 &middot; LICENSE SUMMARY</p>
+  <h1 style="margin:0 0 8px;font-size:24px;line-height:30px;color:#0f172a;">License overview and recovery</h1>
+  <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)) &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC</p>
   $adOverrideNote
+  <h2 style="margin:0 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License overview</h2>
+  <p style="margin:0 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">MICROSOFT 365 SUITES</p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>$($suiteCards -join "`n")</tr></table>
+  <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#f8f5f1;border:1px solid #e5ddd2;"><tr>$($otherCards -join "`n")</tr></table>
+  <p style="margin:7px 0 17px;font-size:11px;line-height:16px;color:#64748b;">Enabled and used counts come from the tenant subscription snapshot. Used means consumed license units, not measured app activity. Percent used = used / enabled; N/A means no enabled units. Dynamics 365 and Power BI add SKU units, not distinct users. Copilot covers Microsoft 365 Copilot; Dynamics 365 excludes sandbox, trial and preview SKUs; Power BI covers Pro and Premium Per User, excluding free Standard.</p>
+  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
+  <h2 style="margin:24px 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License recovery overview</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
       <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#6d28d9;">$topRecoveryE5</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E5</div></td></tr></table></td>
@@ -1167,8 +1223,6 @@ function Send-LicensesFocusedSummaryEmail {
     </tr>
   </table>
   <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
-  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; Activity and overlap</h2>
@@ -1177,18 +1231,19 @@ function Send-LicensesFocusedSummaryEmail {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
-    Recovery candidates are distinct licensed users per product with a disabled account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. M365 activity includes mailbox usage and recent email actions when the reports are qualified. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
+    Recovery candidates are distinct licensed users per product with a disabled account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
     F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. N/D means a source or user cannot be qualified; sources older than 14 days are excluded.
   </div>
   <h2 style="margin:22px 0 8px;font-size:14px;line-height:20px;color:#334155;">Source freshness</h2>
   <ul style="margin:0;padding-left:18px;font-size:11px;line-height:18px;color:#64748b;">$($sourceRows -join "`n")</ul>
+  <p style="margin:14px 0 0;font-size:11px;line-height:16px;color:#64748b;">$sourceNote</p>
 </div>
 "@
     $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
     $executionFooter = 'Host: {0} | Generated: {1}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
     $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
     Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report
-    WriteLog -Message 'Focused Microsoft 365 F1/F3/E3/E5 license summary email sent.' 'INFO'
+    WriteLog -Message 'Microsoft 365 license overview and recovery email sent.' 'INFO'
   }
   catch {
     if ($Manual) { throw }
@@ -1784,7 +1839,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -2443,8 +2498,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDroptQeJzQiRW7
-# ymNKb3f94/HbcKB0WuBYpRIL2z4f2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrHUk5lc/8scZN
+# 6zlYH7XswKaKApc9vsas5r6kzCGqZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2577,31 +2632,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF+lhB/QDe+mkz894eAoIi6MNwldxsj1A27S7w1tL19XMA0GCSqG
-# SIb3DQEBAQUABIIBgCpiciWAj+d2uls/cKZt6CjViRHFfAQdss2s3ytUGQLcsVfM
-# TDVqRB4mVuI2kyXQBViDyTcUKOlY9KjTwyxfgUXCvI5kGlqZKXlO2tjKi72QniRa
-# +YrUCRk71wVQQ4sLcoEWp8GO9xxeesKMxcJynPftNZwiQbUSQKvLy0QC91sNFv2g
-# eEToC7aCBz8bF63xyiIH4dJZN4qvlXM3G2z0GQOoa0+RkUIORN4JCePgRasSFIK8
-# XWUjvrl0CnlaIC77br6l7WqVC/GNCNe0EOSDp32KS2CpFQgOr3Ggg5NI2V6pI68f
-# /5i0SOov21IRlXkD16EL8QjzDM9vYcfz+DItG2I89483nTy6iAlSBWDyesXJLccF
-# 9BHGskI2a2NIFyU/XMGfQQLC1Amickfgw4s3HrZv6sgYs1fLuB+k7DkSc5rdMRoo
-# zUuhoKkqrzZwuxz4I3VXgFfslFBKL0qdVACBy6k87yKKO8fZY/qB2hFjETrthV4Z
-# RRg0BAbwE/WPar3ngKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINe23nQfFJH4Xi4ekYYDlA+eRTKRKp7OdYLyBtCA84KdMA0GCSqG
+# SIb3DQEBAQUABIIBgINJNn5p1dQVrpQdqF2bnhxcMrAL7lHi3EwccEr3h+nbR/0Y
+# 4XqGBjrxZZVDzmJ2jiaT18nU6GsK2d2htRdsca7gPMcd2nd3Iyw7lqRYWHaOJw3M
+# Xo91y1moLLUhODBI8nEDeFziC9ZFqF+Q1WtG3CumnDVnxNn0zAHlgi1Tx9K4UmJ5
+# OOUSmLMYYELVG48ngFOaXcxo8jLurBxo+GKkpLFUPvmBqJNjHxhd89+eMG1owJs4
+# WExGrM9f9elqlsE5/x45Xgv4khiTNYlsc98Qw2MIXjpsQ5KooZ95ANgTGK0YIZnd
+# nczLymeh7/dbyszRQQUTdMDbyp8tHdi519vE9KzgbaGIBs6NQrwCc6Dz8tiwoINm
+# UUaZmtQa2a3nsn86xC86K6oKO7Sz+oq8BZjNljwIuuAR+17NX+XU4dfRXD4TT6nf
+# NPLJI+YCW3EjxXj7dGxmRTpMdwyFZK+Q3+ZTrjaMGnKk8h2jlZ0FpW+izR/c67CU
+# 9MQUP/ytiLZlF2eSNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMjUy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBrI/tmD1Y/H9SU7BpVyXoM3F6peajK1cU3UXvt
-# DoJCBzANBgkqhkiG9w0BAQEFAASCAgCvWY65UmNjFl9XxsObz30KtBudsabM/XkL
-# OV6c3hd0xn5iKWGy/lRX9F58fhNHG0/o8+cqUVJPeiBH8q38qZ/UBkDZrjliQVMz
-# R8SE8TPU5292P7qA4nKtRUJw5WVHJ1E227pwr3M3jyFkCyv62z6cFEbThxz0KJIF
-# mMnQ+IeWuw4bK3etXpqGbdC8Zel7ZPzShkGSMm5N003KgyXUTtDlwKCGMiSrHaxq
-# Fwrz+sfUQVpPo2HF9nH7aK/42s4DH06PxhayuT0GVNBtIHDixlobd/bnHlTrFLvU
-# nszQvdIKyhZ87f93KUSiHgLVtt2w1+yBMoZ1CtMwf/m5pa1wGSlgPA/2tGqHddfL
-# GdjAMaxUwxU8KeYTk+I+BHevTkSTA/KL/WBs3OaporCdjJZOW4IGHelOSfaqlEr2
-# UZR8o4TTwEbKg6ANz5BRS2losB6lVr+YiQdOvMFG8LNbAKyw+QgxCfpfypXOA+9j
-# EUndStuT61EGfRybMtIhldb+n7Z8VL2gEoZhVVZjwDNzJ6MDbcXWc45RYCicBKAB
-# +GUd8DcVUE/WntjEi2zERmrZy/NLCjIzhmSiq5aaxfgcub89c3JtFq8nwCwMT/04
-# CTGUyQK6C3TcrEBHyY6P5a3RF1+J2DTFeVWD9b4Co0Uip4R467lU4CtUhejbIMIX
-# 96t97XFH3Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzEz
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCVIENtBe9rTqgWnAWkx2gLeUB/vRL68l697F/W
+# ezri8zANBgkqhkiG9w0BAQEFAASCAgB5ZrqL3yqmWKAsmAlc5qbgBl2iLtmG36lW
+# 7XJQFWiXyp+XP53whtrhMWfSWjF7w4HZLwdkVsv3YxK0Xjqu1ZVBf1RIAiGuid7g
+# 4xhWZaI1yitP1vQ4lZxscmLLBdM2IwDcbFwECGDBg3ZCCN89aGlqWhMmM9gMsph7
+# f7gqIpC+/z6GoFIz4JdUbiKwiDgnNGFBc3bWxWgK7ljj80m+EiuVI5rt9ER8nuQ+
+# 1pJtgCYIUTe72Cw2ghu7tLA6TlcoOT4KDay4c9SV7nClQTCS5bsJ1FN0j13kkeGC
+# 7uLLiIXmhWUY1NdDiLOJfChvnCo8S47+3T/z7l/3c9n4pFZXy5b+pFLtT+8b4sXt
+# NmArb4NCCe+6vqJQ8/B0GkNQ98J1r5Mt3Aa6O88eqr52fcY8d5tZrNfkegDbOH0E
+# 5C1olz3dHkSH1TL6OJexeG+p25tXXRdSx63ToijhqMBuj+SZS00KMTz6lwi+Q7Pk
+# nGXVgPXxO5zLy6+tCbbmVcbVrEyea0zAhy/re6oWXQI69FwxFm5Kk0AzFdFjiK4O
+# MrCHb1g3SWxGGC0GOVXhYruPIRBsbvjFfWbX14qQUrrIGnANHIvzTkye5l3MPZse
+# j1GNDFSZEdf0xlDmIx/eLz/0XA5eAIPdKJ+fly7a/w1ma7dWtkHIf0lrH1s64NZc
+# pYlX2qVlPQ==
 # SIG # End signature block
