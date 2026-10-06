@@ -22,8 +22,8 @@ if ($inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Complet
 $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
-  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
-  'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
+  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'New-LicensesRecoveryWorkbook', 'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
 $definitions = @($ast.FindAll({
   param($node)
@@ -44,8 +44,11 @@ function Get-ScriptLocalConfigValue {
 function Test-SmartM365MaxItemsMode { return $script:Sampled }
 function WriteLog { param([string]$Message, [string]$Level) }
 function Send-SmartM365Mail {
-  param([string]$From, [string]$To, [string]$Subject, [string]$BodyHtml, [string]$MailPurpose)
-  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose}) | Out-Null
+  param([string]$From, [string]$To, [string]$Subject, [string]$BodyHtml, [string]$MailPurpose, [string[]]$Attachments, [switch]$AllowAttachments, [switch]$SuppressAttachmentLinks)
+  if (-not $AllowAttachments -or -not $SuppressAttachmentLinks -or $Attachments.Count -ne 1 -or -not (Test-Path -LiteralPath $Attachments[0])) { throw 'Recovery workbook was not attached privately.' }
+  $bookSummary = @(Import-Excel -Path $Attachments[0] -WorksheetName Summary)
+  $bookCandidates = @(Import-Excel -Path $Attachments[0] -WorksheetName 'Recovery candidates' -WarningAction SilentlyContinue)
+  $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;AttachmentPath=$Attachments[0]}) | Out-Null
 }
 function New-SmartM365EmailBody {
   param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
@@ -98,6 +101,9 @@ if ((New-LicensesOverviewCardHtml -Row $additional[1] -Width 33 -Accent '#7c3aed
 
 Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z'
 Assert-Equal $script:SentMail.Count 1 'Sent mail count'
+Assert-Equal $script:SentMail[0].BookSummary.Count 4 'Workbook summary has four target suites'
+Assert-Equal $script:SentMail[0].BookCandidates.Count 0 'Workbook with unavailable sources has no invented candidates'
+Assert-Equal (Test-Path -LiteralPath $script:SentMail[0].AttachmentPath) $false 'Temporary attachment removed after send'
 Assert-Equal $script:SentMail[0].MailPurpose 'Report' 'Mail purpose'
 Assert-Equal $script:SentMail[0].To 'reports@example.invalid' 'Report recipient'
 foreach ($product in @('F1','F3','E3','E5')) {
@@ -130,6 +136,33 @@ $badRows = @([pscustomobject]@{TenantSkuPartNumber='SPE_E5';TenantPrepaidEnabled
 $threw = $false
 try { Get-LicensesFocusedSummaryRows -TenantRows $badRows | Out-Null } catch { $threw = $true }
 Assert-Equal $threw $true 'Missing count is rejected'
+
+$adRecentRow = [pscustomobject]@{Enabled='True';LastLogonDate=([datetime]::UtcNow.AddDays(-2).ToString('yyyy-MM-dd'))}
+$adOldRow = [pscustomobject]@{Enabled='True';LastLogonDate=([datetime]::UtcNow.AddDays(-100).ToString('yyyy-MM-dd'))}
+$adDisabledRow = [pscustomobject]@{Enabled='False';LastLogonDate=''}
+$adNoDateRow = [pscustomobject]@{Enabled='True';LastLogonDate=''}
+$section06Members = @{
+  'a'=[pscustomobject]@{OnPremisesImmutableId='imm-a';'User principal name'='a@example.invalid'}
+  'b'=[pscustomobject]@{OnPremisesImmutableId='';'User principal name'='b@example.invalid'}
+  'c'=[pscustomobject]@{OnPremisesImmutableId='';'User principal name'='c@example.invalid'}
+  'd'=[pscustomobject]@{OnPremisesImmutableId='';'User principal name'='d@example.invalid'}
+  'e'=[pscustomobject]@{OnPremisesImmutableId='';'User principal name'='e@example.invalid'}
+  'f'=[pscustomobject]@{OnPremisesImmutableId='';'User principal name'='f@example.invalid'}
+}
+$adGap = Get-LicensesAdAccountActivitySummary `
+  -MailboxGap ([pscustomobject]@{NoUserMailbox=[pscustomobject]@{Available=$true;Members=$section06Members}}) `
+  -AdSource ([pscustomobject]@{Ready=$true;Forced=$false;Reason=''}) `
+  -AdByImmutable @{'imm-a'=$adRecentRow} `
+  -AdByUpn @{'a@example.invalid'=$adRecentRow;'b@example.invalid'=$adOldRow;'c@example.invalid'=$adDisabledRow;'f@example.invalid'=$adNoDateRow} `
+  -DuplicateAdUpns @{'e@example.invalid'=$true} -Cutoff ([datetime]::UtcNow.Date.AddDays(-90))
+Assert-Equal $adGap.Members 6 'Section 06 AD member population'
+Assert-Equal $adGap.AdObserved 4 'Unique AD matches'
+Assert-Equal $adGap.AdEnabledRecent 1 'Recent AD logon'
+Assert-Equal $adGap.AdEnabledInactive 1 'Inactive AD logon'
+Assert-Equal $adGap.AdEnabledNoDate 1 'Missing AD logon date'
+Assert-Equal $adGap.AdDisabled 1 'Disabled AD account'
+Assert-Equal $adGap.NoObservedMatch 1 'Unmatched AD account kept separate'
+Assert-Equal $adGap.Ambiguous 1 'Ambiguous AD account kept separate'
 
 $testRoot = Join-Path $env:TEMP ('SmartM365-LicenseSummary-' + [guid]::NewGuid().ToString('N'))
 try {
@@ -206,9 +239,9 @@ try {
   @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremHash})} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
   @(
-    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a2';UserPrincipalName='u2@example.invalid';LastLogonDate=$adOld}
-    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a3';UserPrincipalName='u3@example.invalid';LastLogonDate=$adRecent}
-    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a4';UserPrincipalName='u4@example.invalid';LastLogonDate=$adOld}
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a2';UserPrincipalName='u2@example.invalid';Enabled='True';LastLogonDate=$adOld}
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a3';UserPrincipalName='u3@example.invalid';Enabled='True';LastLogonDate=$adRecent}
+    [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a4';UserPrincipalName='u4@example.invalid';Enabled='True';LastLogonDate=$adOld}
   ) | Export-Csv -LiteralPath (Join-Path $testRoot 'AD_Users_AllDomains.csv') -NoTypeInformation
   @(
     [pscustomobject]@{TenantKey='prod';UserPrincipalName='u2@example.invalid';ReportPeriod='D180';ReportRefreshDate=$refresh;LastActivityDate=$old;IsDeleted='False'}
@@ -310,6 +343,10 @@ try {
   Assert-Equal $byProduct['Microsoft 365 E5'].LocalAppsInactive 0 'Shared E5 mailbox is excluded from local Apps inactivity'
   Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryCandidates 0 'E5 archived shared mailbox is not recoverable'
   Assert-Equal $byProduct['Microsoft 365 E5'].RecoveryPrimaryPc 0 'A PC on a blocked shared mailbox is not a recovery intersection'
+  Assert-Equal @($usage.RecoveryDetails).Count 4 'One detail row per qualified recovery candidate and target suite'
+  Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 F1' -and $_.UserId -eq 'u1' -and $_.RecoveryReason -eq 'Eligible shared mailbox under 50 GB' }).Count 1 'F1 shared mailbox recovery detail'
+  Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 F3' -and $_.UserId -eq 'u2' -and $_.RecoveryReason -eq 'No M365 activity in 90 days' -and $_.PrimaryOnIntuneWindowsPc -eq 'Yes' }).Count 1 'F3 inactive user and Intune detail'
+  Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 E3' -and $_.UserId -eq 'u7' -and $_.RecoveryReason -eq 'Disabled account' }).Count 1 'E3 disabled user recovery detail'
   Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '49,99') ([decimal]49.99) 'French mailbox size parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '50,00') ([decimal]50) '50 GB boundary parsing'
@@ -318,12 +355,20 @@ try {
   $script:TemplateCalls.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
   Assert-Equal $script:SentMail.Count 1 'Enriched email sent'
+  Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
+  Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
+  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
+  Assert-Equal (Test-Path -LiteralPath $script:SentMail[0].AttachmentPath) $false 'Temporary recovery workbook removed after send'
   if ($script:SentMail[0].BodyHtml -notlike '*Multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Multiple target suites*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*' -or $script:SentMail[0].BodyHtml -notlike '*Removal candidates after archive and hold checks*') {
     throw 'Enriched KPI headers are missing from email.'
   }
   if ($script:SentMail[0].BodyHtml -notlike '*Candidates primary on Intune PC*' -or
       $script:SentMail[0].BodyHtml -notlike '*Intune_Devices_Inventory.csv*') {
     throw 'Intune PC recovery indicator or source freshness is missing.'
+  }
+  if ($script:SentMail[0].BodyHtml -notlike '*AD accounts and activity among section 06 Members*' -or
+      $script:SentMail[0].BodyHtml -notlike '*No AD match means no unique match in the available AD export*') {
+    throw 'AD account activity qualification is missing from section 06.'
   }
   if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">E3</td><td style="[^"]*">2</td><td style="[^"]*">1</td>' -or
       $script:SentMail[0].BodyHtml -notlike '*Disabled users and activity/overlap indicators exclude identified shared mailboxes*') {
@@ -567,8 +612,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKCUKh2Q6MuVTf
-# mYGWWlWnRfSgKcWVM5/nNi1RnqPNNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeXqi3rSJGhPwn
+# ynrpGUSj9qKefDNjT6KRHPkgmE0CzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -701,31 +746,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKTtdyKnbHaekwC8lWMASMRld/Z8A13JdyWCS6Xab08YMA0GCSqG
-# SIb3DQEBAQUABIIBgHTpB4kqDmJIhIPIwen24lkhrojR9axvIZTeNOr7NX2LIZc2
-# 6odMfRJqTxhJIFkxH2zLi7fKWRLItKyAbNBAmt1+V2OWbOg2zMt2L22/5F9W1rhj
-# r1dQL6df27W4DOjnz0h9sbYI+ZwnGZnIZ7bYnIjmTYYn+QX4re9ShQH4p6b+TRFA
-# Baf0oAt3FcP8HH4AdVv3SSdRgjqZOnrnbhvczoZr0b12Yrqz8C4K8aw+TqEU3kKQ
-# vQlDe75680YcBeL5JhXJF60f6QlXJLWOJH2p/AOzidXgaWAwaSXhgwy3zNmj+UoV
-# +b3x/Do0a1JEwpWDmn77TC8GXA4wr8i9Gl137mrWljjphEF+/laGPHvIC8dCSAM6
-# rfR7mXNxsCd7nx09lbfhRFQWdoU+JhN5NU2ulIhFQtkt0U8qv2e6w/3LiqKaV1P3
-# 3I034fUEt46WsE0/bcmQIs/6plDzWVntQ3mvgbQxZwuYmFG0LZWryNhoLgcANQV7
-# +ICJmOE9NxVTDxdd9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFyQ4A916kWw337h3dPxvrhdIpTGqY3a9iGowxb+AgsVMA0GCSqG
+# SIb3DQEBAQUABIIBgBfzCFprlFHo8wTzaPjE1yeNNeLphfuD+/kCB9xznkLc8+Ta
+# so0DBbpw6D6ynSRzk+SpmfSosEKXJZdmVkgju6XVV7pdFGuVwJLuSNRjBTQRGBGA
+# ND2rgWPT2uDKMMhw7iZ/PuWZLOHzSJ6Dv7xNYUTpzVftdc9Ep+QWAJ68cgJRnYgu
+# rfmFW93pOsrw20Ja1NTON1Iv+W3QMIiwlMIb091mKzXl9ONMBd2iFTmBDiFZ9amj
+# jD5iBHn60JtmBbwXSmTt0I7IJu9/nFC8H4Zpl0g9kyshH0acvdePn4h1+u4PLHzx
+# QZYpPa+9PVykGDeR2E9dlXay91HeR2av4LhfyqRDFgn75ULxCMysp29y05VuEIgU
+# /OETumNGWkzAgdbf2jTFdH1ud4itWNPOYrVuwFYEGuJ3I1bFRj/4psXe8mvMmzzC
+# vsZlCIGpSEzTy8OSVHTwLLTlmpjFxL/grLdi1wwLdaEOVZFFQEhqh2VX/NXsUhTt
+# 1qwFnqGSw1kQ4wDS6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxNzI4
-# MzlaMC8GCSqGSIb3DQEJBDEiBCDlKU3Vvjj/Ru0ptPcr7/N3+74QWNmPn1F4P2kC
-# JF+03jANBgkqhkiG9w0BAQEFAASCAgB0LlrIKWTl63ovWbUdiF9DcdVw1ny8y6b/
-# W5krluFCAyvCSRAJF+4PqFsQDSR2mFyAvPD53PU5MbW237AitD2/Mf+azFnQHkC7
-# LefY1EWpQaNrlQUmCn254ENaGFn5w6/zb38i3dOyjaeQpXT2VD6T+AIhAzqSOGlZ
-# x0np3k5qe7byhgRQfQ9a/mPnF59tlsF0vzspU1ik8PToF8LipF3+0Xh9r/IobPd7
-# Q9SwQCaqkLOxOqwtR9FTMv4H3BaDJDM67TlzF73TNv/w4HcEcV9JWDtUuWRaezRv
-# GXEB42h+oNF2bXTtoxNSnA2oJPRKW5e+nz4OoZRkDcfAO9fj0sZXN50AhjJTjpiv
-# BCMekoahZSFUlOgRyCh6trxehnV+419NgT6F4+KBH2YGGtBO0/sCkPoK+Zo393te
-# uEX9c4Q3M/g1J9LAhKbgJbgaVyAyuLSqT2tIpjaANnO84hRrMPOEbVZ5yQUvpGlv
-# 1rv647rmUP3frjoQ8djv3adabtuc1KqAI+/gqrPL+c9380KfTmxjf7oA1jCRtWeU
-# Pg/dvibLy/o11zcHKAHQ0bdnBLwZ0B+1lF0WGG+hWdf9iPUc7uZjab0aV41/Dvwj
-# AmnxUuHa7vZqtZ05xzv+QW81YuvvlYeflfLmipFcd7vHPfPeS8j2pFXu0LBP/5ve
-# jkFpTmhuFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODQx
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCnbX2HSC8jkDz2YNBkyXgTYz/RY2afh7vNmics
+# y2ZasjANBgkqhkiG9w0BAQEFAASCAgCn4kSznvdSfHWpohKTp0x0sJ9wtjXcPkdn
+# ZMVwrtimfisN8ea15RN4vhUuVBV7hKVDMAa0U2bwO4BaSEU4cvZIOtVHQMNRfGQa
+# ulQgtABPxkuzZ2peMhs9i641hDHPxNGq2hh5F1YEtd3xkhzyzTijUTTlsIt+NqW/
+# quVjd/W777710d4xBPbuzvNL4I0S75H5EqQjHASKfOTm2v1Do3A9mZhw0CL2iWBu
+# q3MdGZUef4eL+DqIJG9lPHqZuXVty2ybSJvKKePQJdWfQpPSdiRTgnGVnNEFAvyu
+# KFFxgzfZGR7byX/P6zTyzyzzcYgumgmKPsTSRrF3eqUDP4CQZjbcBIlca9aYBfVl
+# dwApYXiyKtpU/JUnNCvLACYqjLDI2eX9W6onvNlpS0CObryLhepENcl6vy+A3Cw7
+# Qfb4+cgYaxRX5inVmQ0KAgO/vSpVqlNclcvmyIpbhZ6ylpw4Rlg5HIWxBFR7fW5U
+# 1KpjqXiAx6vcLQv9m9w9Z/1yjMGDNhAsBcvCTW3EQUuW/evaZdjEuQ/giqUmOLYk
+# hvdVdHoQw/ZNeVSU747bpaqSl+H+gVlAWD9+D1WDUmEvcuXkEaZ15WQvDu6zMWAd
+# dOkrZTeT44CJwzCHYnMXPcGLHT+DZyQJaU+AAlfBL56E991w8W1DWhu9ING2BPEd
+# uxf92Bqapw==
 # SIG # End signature block
