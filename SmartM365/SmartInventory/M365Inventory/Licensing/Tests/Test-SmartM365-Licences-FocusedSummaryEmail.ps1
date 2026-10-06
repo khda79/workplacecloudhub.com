@@ -315,7 +315,7 @@ try {
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u2';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u3';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='49,99';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u4';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='12,0';ArchiveStatus='Active';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
-    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u6';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u6';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='1,4';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u7';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u8';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='12,0';ArchiveStatus='Active';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u9';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
@@ -323,6 +323,11 @@ try {
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u13';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='1';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u15';RecipientTypeDetails='RoomMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='1';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
   ) | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
+
+  $oneDrivePath = Join-Path $testRoot 'M365_OneDrive_Usage.csv'
+  @(
+    [pscustomobject]@{TenantKey='prod';'Owner Principal Name'='u6@example.invalid';'Is Deleted'='False';'Storage Used (Byte)'='1073741824';'Report Refresh Date'=$refresh;'Report Period'='180'}
+  ) | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
 
   $intunePath = Join-Path $testRoot 'Intune_Devices_Inventory.csv'
   @(
@@ -391,6 +396,16 @@ try {
   Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 F1' -and $_.UserId -eq 'u1' -and $_.RecoveryReason -eq 'Eligible shared mailbox under 50 GB' }).Count 1 'F1 shared mailbox recovery detail'
   Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 F3' -and $_.UserId -eq 'u2' -and $_.RecoveryReason -eq 'No M365 activity in 90 days' -and $_.PrimaryOnIntuneWindowsPc -eq 'Yes' }).Count 1 'F3 inactive user and Intune detail'
   Assert-Equal @($usage.RecoveryDetails | Where-Object { $_.License -eq 'Microsoft 365 E3' -and $_.UserId -eq 'u7' -and $_.RecoveryReason -eq 'Disabled account' }).Count 1 'E3 disabled user recovery detail'
+  $u2Detail = @($usage.RecoveryDetails | Where-Object { $_.UserId -eq 'u2' })[0]
+  Assert-Equal $u2Detail.LastAdActivityDate $old 'F3 recovery detail has last AD logon date'
+  Assert-Equal $u2Detail.LastM365ActivityDate $old 'F3 recovery detail has last M365 activity date'
+  $u3Detail = @($usage.RecoveryDetails | Where-Object { $_.UserId -eq 'u3' })[0]
+  Assert-Equal $u3Detail.LastAdActivityDate 'N/D' 'Shared mailbox has no AD activity date'
+  Assert-Equal $u3Detail.LastM365ActivityDate 'N/D' 'Shared mailbox has no M365 user activity date'
+  Assert-Equal $usage.DowngradeReview.Candidates 1 'One qualified E3 to F3 review candidate'
+  Assert-Equal $usage.DowngradeReview.RecoveryExcluded 2 'Recovery candidates excluded from downgrade review'
+  Assert-Equal $usage.DowngradeReview.Unknown 0 'All E3 downgrade inputs are qualified'
+  Assert-Equal $usage.DowngradeReview.Excluded 1 'Archived shared mailbox is excluded from downgrade review'
   Assert-Equal ((ConvertTo-LicensesActivityDate '01/09/2026 20:00:00').ToString('yyyy-MM-dd')) '2026-09-01' 'AD day/month parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '49,99') ([decimal]49.99) 'French mailbox size parsing'
   Assert-Equal (ConvertTo-LicensesMailboxSizeGb '50,00') ([decimal]50) '50 GB boundary parsing'
@@ -402,6 +417,10 @@ try {
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
   Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
+  $bookU2 = @($script:SentMail[0].BookCandidates | Where-Object UserId -eq 'u2')[0]
+  Assert-Equal $bookU2.LastAdActivityDate $old 'Workbook has AD activity date'
+  Assert-Equal $bookU2.LastM365ActivityDate $old 'Workbook has M365 activity date'
+  Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object UserId -eq 'u3')[0].LastAdActivityDate 'N/D' 'Workbook shared mailbox AD date is not inferred'
   Assert-Equal (Test-Path -LiteralPath $script:SentMail[0].AttachmentPath) $false 'Temporary recovery workbook removed after send'
   if ($script:SentMail[0].BodyHtml -notlike '*Multiple assigned SKUs*' -or $script:SentMail[0].BodyHtml -notlike '*Multiple target suites*' -or $script:SentMail[0].BodyHtml -notlike '*Recovery candidates*' -or $script:SentMail[0].BodyHtml -notlike '*Removal candidates after archive and hold checks*') {
     throw 'Enriched KPI headers are missing from email.'
@@ -414,6 +433,23 @@ try {
       $script:SentMail[0].BodyHtml -notlike '*No AD match means no unique match in the available AD export*') {
     throw 'AD account activity qualification is missing from section 06.'
   }
+  if ($script:SentMail[0].BodyHtml -notlike '*07 &nbsp; E3 to F3 downgrade review*' -or
+      $script:SentMail[0].BodyHtml -notlike '*OneDrive storage below 2 GB*' -or
+      $script:SentMail[0].BodyHtml -notlike '*last AD logon date and last M365 activity date*') {
+    throw 'Downgrade review or workbook activity dates are not described.'
+  }
+  $oneDriveRows = @(Import-Csv -LiteralPath $oneDrivePath)
+  $oneDriveRows[0].'Storage Used (Byte)' = '2147483648'
+  $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  $oneDriveBoundary = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $oneDriveBoundary.DowngradeReview.Candidates 0 'OneDrive at 2 GB is excluded'
+  Assert-Equal $oneDriveBoundary.DowngradeReview.Excluded 2 'OneDrive at 2 GB is counted as excluded'
+  $oneDriveRows[0].'Storage Used (Byte)' = ''
+  $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  $oneDriveMissing = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $oneDriveMissing.DowngradeReview.Unknown 1 'Missing OneDrive size is N/D'
+  $oneDriveRows[0].'Storage Used (Byte)' = '1073741824'
+  $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
   if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">E3</td><td style="[^"]*">2</td><td style="[^"]*">1</td>' -or
       $script:SentMail[0].BodyHtml -notlike '*Disabled users and activity/overlap indicators exclude identified shared mailboxes*') {
     throw 'The email does not separate disabled user accounts from shared mailboxes.'
@@ -678,8 +714,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzGJSoi0D4SFCm
-# vx8M2ERzV9vHbv86m6gBKCZncti82aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLZ9RxuN/gPcdw
+# bZ7ySDDs2TpOwVY4GJIutuMtjO0vJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -812,31 +848,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHZRtMVUe+NiMm80pj32zkIXECArmOLvehTtyEX4W0IDMA0GCSqG
-# SIb3DQEBAQUABIIBgCK6hJz+6acWHXYYow1hxpHhc/nrspW5IXUZZaVIS3LEuVZY
-# VaDN813ULdk9eYbAGLnSYN2aeR4XuBfxlSRebvbIaA5O5rJ5p+nEV92yopoV3mnA
-# IzX2AZpObju7U+3knqqa8UOdquO1V37U+Kv5Bk+PVQStld+7TgcE8AtGO94d26+Z
-# QZU7gBDozdJtOEQdKNWdblZWU9la1KpsdK0vIIqAfvEOSjc4mX7Otyz17ACTCjjm
-# sKuLdVFObteSxjMGgaxwaupachLS8oJBgczYg+9fF67dUFuXpgw1uQGFvEx6dZ72
-# V7rc7g8z7KLY9cfmgEKC2YTBMkd5FDrpP4G4PwR3X+0Ab/iomHiQWtA1ay6fUhZA
-# 42anpkRyXlnCLpVU6eS0AJeEePgieXwiW5Mf3zKslfJsF+IfqT+fgmpNLJTwlsPa
-# ji3I/nc/OzN1eEzrnnX6SKSBsw4JKlysmxrOHbnMLzs74bIZSuNXPp7P6ttaayRe
-# Fhosq/DDobJBSz/Gq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMAZj4HlA/BJbSuKjO/rbLvZPDb401sItHUrRHTEh0IKMA0GCSqG
+# SIb3DQEBAQUABIIBgGce9s15QWHKFe2EzdU1FIBfk1zBqL/aVYrRO624Kxbi3w55
+# bxc5qiVM/beJeU+4cj3aP/DnX8O7AegumSzfQ1sjOYmJGGrtBPa8UBTstcBKe2uK
+# UWSXH14b3ozFn7xO+LoiDoJ6n2o+dzXJkQDja0ln13S/FQqPM7ptyhY1yz+/fa+j
+# wpUqmz8FFeeMKkkq9MowtmyY5QjWoaxiuNkR66+X4jrHlJF8EA+Jj4g6QZux5+OJ
+# whJbn8oO7yX37urY/G3Q905uJpoxiVcuxTGv4qYPZLOjFrJDeoE/otUpEzWKwSha
+# wzR1/ZV/MnMaXXxvilwB9/ikQ1hPA6TDZIhTNy9cxlr9Sm5CKFOOlFtfE3uuf9fi
+# EBevXqh61Fwar8Pdah6ai/53UQDr26aFS2lI1eWq35i0apZkl3CGL/bTZI5lEqfT
+# XTjwcKQYNn+JTO7JrI6CCREpWQ5GfEEpct+NK18ByMKDMvFCh0qBY5GphVwC/5cS
+# jk42//QnzgPZaZtn5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxOTI3
-# MjVaMC8GCSqGSIb3DQEJBDEiBCDbqdMkG3VSmIY/fFHgdpXKVigBlOgM05NPvQSm
-# uyCuijANBgkqhkiG9w0BAQEFAASCAgBJLD0fqLIr7hp328/Y8ntB/hksjEeCPxmE
-# k/NRRAr8+Ta76rhEcBwWhUZxwI6Gf768lCPeNKBPmfyWIm7L82Y4dJ9oK/IXrLM/
-# Mr4HTYvyfUoDKND/SuroZrwc7/xQkgXBncWbr7JneYXPZBetH/8RAfMh4LlauOqI
-# 3GEl2xMHH/otJCBj+bzsgnUNZHhw86zzCLryZUk9ZPYdb976FCgSxRaZFAGw7wpR
-# ZodGcZN4WWCJcwc/syGcbfmIXVqlefXn89YU9b18OWUUWGNSvPyrQ2s9G5egSYoe
-# d1LzJVAKUGDs6k3E/2N8kD8PkqiGiSR3Sn8FfJy3NdB0eIhEOBc20O26TKAIVDd1
-# vv3GCVviyZc1EAK/LQ8bmHisVz4VAV/mAuu52Za+bXT6KA0oGYHOK1pZ3dUXRUZA
-# 9BycW0NACPQcT8hrm1Wo/Ga3Z1i1nGZtnJVG/nSfNwCNQZJEi268/PqWyNfIGk8c
-# DdQ6vfffvDMv5o15VCC6PkvAT8/Qz0Q6RALVAkz4iKbrp4NwmTJ40OqQuO/Nm8UQ
-# jN8u6ZJkahf0FvNhj2RvoSprwzmByeU17zqjENbZvnNb8/lET1nXTClKyuv989Li
-# IgLuzmwPaJkLp9QH9OCAT4P7IfWpZYq6cO2qRcxEGdt6QQm2dS5v7sSj/NrF6eYz
-# +A075J3hUA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDAy
+# NTlaMC8GCSqGSIb3DQEJBDEiBCBPn964xuDS3mM+u5qyJmu0w96vxs5KbQl6+j09
+# Pp7cNzANBgkqhkiG9w0BAQEFAASCAgB1EmE9czFMWmoQmW6tEXh7HwulZWa9YLxq
+# eC8U7d3uhXIV3izBZLHbebycLc69mXAN0kmslpKl/XzAn5fMnDQh2G661BcA3hQw
+# BqdbkMz330DnGJoukfaQFLi9i/XtWR6BxfavXlosweR+1rmN3hf9iLb+nwjwkf1U
+# pjEsvzr3dS/8NJH5GAUsAQkmmCmn+m6XJTBBYdTzmpQaYLdIG+AoWEkfKuvZNZCc
+# UyUisXqoh1xRGWo3RAZheS4WkhmO1dR+ayoRGEO2P1D1PXkuzDDp0mlidtcNfuFT
+# TDy6Cyovs7mit8yV4xjiS2U/B892eyhrCLq3H0708oXBvJxb7dKhddjvRiuHX0Ld
+# acoLQ38ZdeleTAey0czcqvCbSX4vYDgFBemlR66n31OBR9354o2rIjhlb467N6rP
+# z7GQCh3YKPIHG6DGSsz6WmO1YncXxsQbrmKeJKzma+/OFrKHIqBqPhCJ7h5ZrSwo
+# E3rgvb6Gur0KS1vyX57AhniC8JYN4wPLQ67uHpN1X1Lm0DI0l0r5cOOeoxYwHWnY
+# K+BWzb5v0BH6sz5mZVrOpu+P9L6p9y10xOk3uMNF3vUGgG+mA+CGyAYf2tzQUTBF
+# diXnWfZIzOqSz7d/VRN3zWu5FmOWYg2IklCGvKLsgG+rmPIH5kNZcPOvCQkbXPIn
+# 3jWAIbG18g==
 # SIG # End signature block

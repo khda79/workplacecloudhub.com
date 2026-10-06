@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.35
+    Version : 1.36
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1129,7 +1129,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; LicenseSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
+    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; LicenseSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
   }
   if ($licenseReceiptBypassed) {
     $licenseSource.Forced = $true
@@ -1247,6 +1247,16 @@ function Get-LicensesFocusedUsageRows {
     $source = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName $definition.Name -Columns $definition.Columns -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt'
     $sources.Add($source)
     $reports[$definition.Name] = Read-LicensesIndexedSource -Source $source -ExpectedTenantKey $ExpectedTenantKey -KeyColumn $definition.Key -WantedKeys $wantedUpns -AsOfUtc $AsOfUtc -RefreshColumn $definition.Refresh -PeriodColumn $definition.Period -ExpectedPeriod $definition.Expected
+  }
+
+  $oneDriveSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_OneDrive_Usage.csv' -Columns @(
+    'TenantKey','Owner Principal Name','Is Deleted','Storage Used (Byte)','Report Refresh Date','Report Period'
+  ) -AsOfUtc $AsOfUtc
+  $sources.Add($oneDriveSource)
+  $oneDrive = Read-LicensesIndexedSource -Source $oneDriveSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Owner Principal Name' -WantedKeys $wantedUpns -AsOfUtc $AsOfUtc -RefreshColumn 'Report Refresh Date' -PeriodColumn 'Report Period' -ExpectedPeriod '180'
+  if ($oneDrive.Ready) {
+    $oneDriveSource.Forced = $true
+    $oneDriveSource.Provenance = 'CSV only; no matching current file receipt'
   }
 
   $cutoff = $AsOfUtc.Date.AddDays(-90)
@@ -1394,22 +1404,90 @@ function Get-LicensesFocusedUsageRows {
     else { $count.RecoveryPrimaryPcUnknown += $candidateUsers.Count }
     foreach ($userId in $candidateUsers.Keys) {
       $identity = if ($licenseIdentityByUser.ContainsKey($userId)) { $licenseIdentityByUser[$userId] } else { $null }
-      $activeUser = if ($active.Ready -and $active.Rows.ContainsKey($userId)) { $active.Rows[$userId] } else { $null }
+      $activeUser = if ($active.Ready -and $active.Rows.ContainsKey($userId) -and -not $active.Duplicates.ContainsKey($userId)) { $active.Rows[$userId] } else { $null }
       $upn = if ($activeUser -and $activeUser.'User principal name') { [string]$activeUser.'User principal name' } elseif ($identity) { [string]$identity.UserPrincipalName } else { '' }
       $displayName = if ($activeUser -and $activeUser.PSObject.Properties['Display name'] -and $activeUser.'Display name') { [string]$activeUser.'Display name' } elseif ($identity) { [string]$identity.DisplayName } else { '' }
+      $detailUpn = $upn.Trim().ToLowerInvariant()
+      $adActivityDate = $null
+      $m365ActivityDate = $null
+      $detailMailbox = if ($mailboxes.Ready -and $mailboxes.Rows.ContainsKey($userId) -and -not $mailboxes.Duplicates.ContainsKey($userId)) { $mailboxes.Rows[$userId] } else { $null }
+      $isSharedMailbox = $detailMailbox -and ([string]$detailMailbox.RecipientTypeDetails).Trim() -eq 'SharedMailbox'
+      if (-not $isSharedMailbox -and $activeUser -and $adSource.Ready) {
+        $detailImmutable = ([string]$activeUser.OnPremisesImmutableId).Trim().ToLowerInvariant()
+        $byImmutable = if ($detailImmutable -and $adByImmutable.ContainsKey($detailImmutable)) { $adByImmutable[$detailImmutable] } else { $null }
+        $byUpn = if ($detailUpn -and -not $adDuplicateUpns.ContainsKey($detailUpn) -and $adByUpn.ContainsKey($detailUpn)) { $adByUpn[$detailUpn] } else { $null }
+        if (-not ($byImmutable -and $byUpn -and -not [object]::ReferenceEquals($byImmutable,$byUpn)) -and
+            -not ($detailUpn -and $adDuplicateUpns.ContainsKey($detailUpn) -and -not $byImmutable)) {
+          $adMatch = if ($byImmutable) { $byImmutable } else { $byUpn }
+          if ($adMatch) { $adActivityDate = ConvertTo-LicensesActivityDate $adMatch.LastLogonDate }
+        }
+      }
+      $m365Report = $reports['M365_Users_Activity.csv']
+      if (-not $isSharedMailbox -and $m365Report.Ready -and $detailUpn -and
+          $m365Report.Rows.ContainsKey($detailUpn) -and -not $m365Report.Duplicates.ContainsKey($detailUpn)) {
+        $m365ActivityRow = $m365Report.Rows[$detailUpn]
+        if (([string]$m365ActivityRow.IsDeleted).Trim().ToLowerInvariant() -ne 'true') {
+          $m365ActivityDate = ConvertTo-LicensesActivityDate $m365ActivityRow.LastActivityDate
+        }
+      }
       $recoveryDetails.Add([pscustomobject]@{
         License = $product.Name
         UserId = $userId
         UserPrincipalName = $upn
         DisplayName = $displayName
         RecoveryReason = [string]$candidateReasons[$userId]
+        LastAdActivityDate = if ($adActivityDate) { $adActivityDate.ToString('yyyy-MM-dd') } else { 'N/D' }
+        LastM365ActivityDate = if ($m365ActivityDate) { $m365ActivityDate.ToString('yyyy-MM-dd') } else { 'N/D' }
         PrimaryOnIntuneWindowsPc = if (-not $intuneSource.Ready) { 'N/D' } elseif ($intunePrimaryPcUsers.ContainsKey($userId)) { 'Yes' } else { 'No' }
         TargetSuites = (@($targetSuitesByUser[$userId].Keys | Sort-Object) -join ', ')
       })
     }
     [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$true }
   }
-  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; LicenseSourceForced=$licenseSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
+  $e3Review = [pscustomobject]@{ Available=$false; Assigned=0; Candidates=0; Unknown=0; Excluded=0; RecoveryExcluded=0; Reason='' }
+  $e3Review.Assigned = $productUsers['Microsoft 365 E3'].Count
+  $e3Review.Available = $true
+  $e3RecoveryIds = @{}
+  foreach ($item in $recoveryDetails) { if ($item.License -eq 'Microsoft 365 E3') { $e3RecoveryIds[[string]$item.UserId] = $true } }
+  $appsReport = $reports['M365_Apps_Usage_180D.csv']
+  foreach ($userId in $productUsers['Microsoft 365 E3'].Keys) {
+    if ($e3RecoveryIds.ContainsKey($userId)) { $e3Review.RecoveryExcluded++; continue }
+    if ($targetSuitesByUser[$userId].Count -gt 1) { $e3Review.Excluded++; continue }
+    if (-not $active.Ready -or $active.Duplicates.ContainsKey($userId) -or -not $active.Rows.ContainsKey($userId) -or
+        -not $mailboxes.Ready -or $mailboxes.Duplicates.ContainsKey($userId) -or -not $mailboxes.Rows.ContainsKey($userId)) { $e3Review.Unknown++; continue }
+    $user = $active.Rows[$userId]
+    $mailbox = $mailboxes.Rows[$userId]
+    $enabled = ([string]$user.AccountEnabled).Trim().ToLowerInvariant()
+    $kind = ([string]$mailbox.RecipientTypeDetails).Trim()
+    $identityStatus = ([string]$mailbox.NativeIdentityStatus).Trim()
+    if ($enabled -notin @('true','false') -or -not $kind -or $identityStatus -ne 'Observed') { $e3Review.Unknown++; continue }
+    if ($enabled -eq 'false' -or $kind -ne 'UserMailbox') { $e3Review.Excluded++; continue }
+    $sizeGb = ConvertTo-LicensesMailboxSizeGb $mailbox.TotalItemSizeGB
+    $archive = ([string]$mailbox.ArchiveStatus).Trim().ToLowerInvariant()
+    $litigation = ([string]$mailbox.LitigationHoldEnabled).Trim().ToLowerInvariant()
+    $retention = ([string]$mailbox.RetentionHoldEnabled).Trim().ToLowerInvariant()
+    if ($null -eq $sizeGb -or $archive -notin @('none','disabled','false','active','enabled','true') -or
+        $litigation -notin @('true','false') -or $retention -notin @('true','false')) { $e3Review.Unknown++; continue }
+    if ($sizeGb -ge 2 -or $archive -in @('active','enabled','true') -or $litigation -eq 'true' -or $retention -eq 'true') { $e3Review.Excluded++; continue }
+    $upn = ([string]$user.'User principal name').Trim().ToLowerInvariant()
+    if (-not $upn -or -not $appsReport.Ready -or $appsReport.Duplicates.ContainsKey($upn) -or -not $appsReport.Rows.ContainsKey($upn) -or
+        -not $oneDrive.Ready -or $oneDrive.Duplicates.ContainsKey($upn) -or -not $oneDrive.Rows.ContainsKey($upn)) { $e3Review.Unknown++; continue }
+    $appsRow = $appsReport.Rows[$upn]
+    $driveRow = $oneDrive.Rows[$upn]
+    $windows = ([string]$appsRow.Windows).Trim().ToLowerInvariant()
+    $mac = ([string]$appsRow.Mac).Trim().ToLowerInvariant()
+    $deleted = ([string]$driveRow.'Is Deleted').Trim().ToLowerInvariant()
+    $bytesText = ([string]$driveRow.'Storage Used (Byte)').Trim()
+    $bytes = 0L
+    if ($windows -notin @('yes','no') -or $mac -notin @('yes','no') -or $deleted -notin @('true','false') -or
+        ($deleted -eq 'false' -and -not [long]::TryParse($bytesText, [ref]$bytes))) { $e3Review.Unknown++; continue }
+    if ($windows -eq 'yes' -or $mac -eq 'yes' -or $deleted -eq 'true' -or $bytes -ge 2GB) { $e3Review.Excluded++; continue }
+    $e3Review.Candidates++
+  }
+  if ($e3Review.Candidates + $e3Review.Unknown + $e3Review.Excluded + $e3Review.RecoveryExcluded -ne $e3Review.Assigned) {
+    throw 'E3 to F3 review categories do not reconcile with assigned E3 users.'
+  }
+  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; LicenseSourceForced=$licenseSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
 }
 
 function Format-LicensesMetric {
@@ -1471,6 +1549,8 @@ function New-LicensesRecoveryWorkbook {
         UserPrincipalName = $safeUpn
         DisplayName = $safeDisplayName
         RecoveryReason = $item.RecoveryReason
+        LastAdActivityDate = $item.LastAdActivityDate
+        LastM365ActivityDate = $item.LastM365ActivityDate
         PrimaryOnIntuneWindowsPc = $item.PrimaryOnIntuneWindowsPc
         TargetSuites = $item.TargetSuites
       }
@@ -1481,7 +1561,7 @@ function New-LicensesRecoveryWorkbook {
     $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
     try {
       $sheet = $package.Workbook.Worksheets.Add('Recovery candidates')
-      $headers = @('License','UserId','UserPrincipalName','DisplayName','RecoveryReason','PrimaryOnIntuneWindowsPc','TargetSuites')
+      $headers = @('License','UserId','UserPrincipalName','DisplayName','RecoveryReason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites')
       for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
       $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
       $sheet.View.FreezePanes(2,1)
@@ -1711,6 +1791,12 @@ function Send-LicensesFocusedSummaryEmail {
     $adGapDisabled = if ($adGapReady) { [string]$adGap.AdDisabled } else { 'N/D' }
     $adGapStateUnknown = if ($adGapReady) { [string]$adGap.AdEnabledUnknown } else { 'N/D' }
     $adGapStatus = if ($adGapReady -and $adGap.Provisional) { 'Provisional AD source' } elseif ($adGapReady) { 'Qualified AD source' } else { 'AD source N/D' }
+    $e3Review = if ($usage) { $usage.DowngradeReview } else { $null }
+    $e3ReviewAssigned = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Assigned } else { 'N/D' }
+    $e3ReviewCandidates = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Candidates } else { 'N/D' }
+    $e3ReviewUnknown = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Unknown } else { 'N/D' }
+    $e3ReviewExcluded = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Excluded } else { 'N/D' }
+    $e3ReviewRecovery = if ($e3Review -and $e3Review.Available) { [string]$e3Review.RecoveryExcluded } else { 'N/D' }
     $gapNotes = @()
     foreach ($item in @(@{ Section='05'; Value=$gap05 }, @{ Section='06'; Value=$gap06 })) {
       if ($item.Value -and -not $item.Value.Available -and $item.Value.Reason) {
@@ -1758,7 +1844,7 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason and Intune primary-PC indicator. Its Summary sheet reconciles with this table.</p>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. N/D in a date column means no qualified date was observed; AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; Activity and overlap</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Licensed shared mailboxes</h2>
@@ -1774,6 +1860,9 @@ function Send-LicensesFocusedSummaryEmail {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">AD enabled, active in 90d</th><th style="$headStyle">AD enabled, inactive 90d</th><th style="$headStyle">AD enabled, no logon date</th><th style="$headStyle">AD disabled</th><th style="$headStyle">AD state N/D</th></tr></thead><tbody><tr><td style="$cell">$adGapRecent</td><td style="$cell">$adGapInactive</td><td style="$cell">$adGapNoDate</td><td style="$cell">$adGapDisabled</td><td style="$cell">$adGapStateUnknown</td></tr></tbody></table>
   <p style="margin:5px 0 0;font-size:11px;line-height:16px;color:#64748b;">AD activity uses the replicated LastLogonDate and is approximate. No AD match means no unique match in the available AD export, not proof that no AD account exists. AD and Entra enabled states are separate.</p>
   $($gapNotes -join "`n")
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">07 &nbsp; E3 to F3 downgrade review</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
     Recovery candidates are distinct licensed users per product with a disabled non-shared account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Disabled users and activity/overlap indicators exclude identified shared mailboxes; an unqualified mailbox type is N/D. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
@@ -2400,7 +2489,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.35"
+$ScriptVersion = "1.36"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3104,8 +3193,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABHcoGCi0oRZMf
-# x+PyrfQl5VZqbFNKBYGnMEDXoG7gjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAAnHT8lx7rmiG
+# Ni3SryAgn+YOsifk5vlHMSbkt6D00qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3238,31 +3327,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPcF3i8b8y5JFNHmwetHu6xt54xlhpfwakHjk/EFCUSGMA0GCSqG
-# SIb3DQEBAQUABIIBgIJhh5/nZaBv4cVhzPU59lNYMiosZer0DgVWZ0wC7a1HJZkJ
-# au6+0pKz2e0+nyqUpExC2XyQPy3zBr44up47g8eksc1nRs7scP4/foHlpAT8M44l
-# V474Wuy0X/sUvG4yPZjPuroYBuC1o8BUSu/bTddEoJMxH0U4/BrhheoorBbdUmtc
-# 8IveBqc9mFVZFnD0y4Jwe45Gf8qP2Rpf8+g9CgwzJ0jKQX2Z/BANm5h/O+iHS8/b
-# NQdS+yeXNrq0KOIuVS1Ao4JfCngM7IB4WedI87cRooLDwmoIfJDv3SEEFe+A8e1e
-# reZGZBRvwS2BGwurRL2hQKuqhIqkgSeQNhUkjSGT/dU+apEqJpOqGajo2EsskxD1
-# gfUz09Jao9ABRno/cAHyBoRfAeA15OBoPJUkdMf5ZRCvYGnDK0YgT6TyvhBWbfip
-# 6YnczppIBGIQa5KZSRYyRFhdyvi0Fe9doOq3JantLJ3dvhhT7cfjqb32dX6pnaOo
-# +VqnBy5d7UMVYM9ABqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOKc8FwGO6cnDhxG5YdVQWvP7ybgd7w3yV1DSV/wuiz1MA0GCSqG
+# SIb3DQEBAQUABIIBgHj6c9LjvEiM/GAe7def2D7TEOZ/L9CVjzUBQrrnDN7AxonB
+# 6tkRWxtusRjGnZmIJ75HRoLkhkI34dqNBhLQswjwbxs8KSuNJ8CvttBmOpTiCjEj
+# sp9hpLF8+ZcSQWV8OlkDHXaXNKKu3OYj32VOKysOfTo3iw/sLnlkt2TszqY6L7++
+# 7nStzcu2NqZAt0BwDRG9R3Jsrd908GHjfZwb6bzk6HqtnnRCuLQi7gGcRIA5fwG2
+# UriUyv0PhjaTfHY69aDlaObJQ5qm+b0Ca+Jd7T0Mnp2U8/e66aOUAK9pqaScCWjX
+# p8JDmYecevop0c+XkkfkmhOsyTjHO1Lpt82+uzi0FP67pcGTabQ6gj734RNsK5Ht
+# NGnNwiT1DOTSRrKbOqhQqqxlHI6Z1chCw2tE8vq2jNmlqmUn6I+x2zqvKJI2bwqv
+# HwktJigkUl4DcGXw/+zLpoACzuqA7nV23z1+bRkvzhhtdZsK+mI1TzekZMpqWDqz
+# sv2AGb5w66C5uReimKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxOTI3
-# MjVaMC8GCSqGSIb3DQEJBDEiBCDjRdU35J2jkIhudXhq2OPt0QsRzQWQ655qUtSU
-# 5lyIdDANBgkqhkiG9w0BAQEFAASCAgClEhuAc1k2DbSX84UuU6Gfw3/ADm19KyVk
-# gQViV3ixqDwnlyLjrY2oDdPcM75igyqz+SPWjKp7ejpYkfSSufaXGABkbV1A6G55
-# PjT6L69p4j6SrXoh33qzaOPWJLLo2dxh0ifelcO9z+UjoQiP0XuOvwbL6q3qoUWE
-# KMct0ShaM/6OxtZwV4WW7MmuX5iXY+XLGETxeKslQuFtIRs77Gcs+QfPwnWn5Lqv
-# rb+ePID+zuCHHyHUC9+A8Z4Uv9Zfn98oJlJI4CgdEdTpD48pcipFBD1nFpW8LpSD
-# jjkQhWzCgH0zfmIClZG24aulBG4P4u7vYsXSPSqyAt0GI9VKpvmogKueOQKyv8UL
-# 9fYt46o0mw2lfLd7qIwK6UsTPs8B+St8QcG54Rgrm+m6w7HT4e7DBEHRQy47XBPo
-# etDnfUD0PiVqMcsskq240YYKjy1Z3IWJcZbfBjEU4rblL21J+CHnWIEbHvGCB+Fp
-# o+PpPhUBctoz78H5lvrEFiK5RZtoKFzwHbLlWDv7LlLW8Z333UegbOEiE/1zv3Fu
-# aJUCwD7AOC7hd0wk7iHQ/A4Oumo75zq84gE72JZMHFYH6nLCWPpY59KilrKcQSWv
-# JX3o7jqW9jSur1P/8LoZHuztlJcep64gVhxfwu65lnRcVFaMGCbii4wWZDzufNAq
-# SWzRjKQYhw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDAy
+# NTlaMC8GCSqGSIb3DQEJBDEiBCBRVz69GwWGhF3WTRh4DvOtk/d+uu4moMgjt/3C
+# kZuDUTANBgkqhkiG9w0BAQEFAASCAgBUnBT/mzeYsa9SMlRLT3IaXZ182iHyDNo9
+# hC9Va0WYkaiOcQWz5T11TjbwHlQL63nNKjdZSJ74KOkYxu2Xoi7XqwXsWazRfdaG
+# wq6q1CS5ZNpZLyRHPzcp0O3CMyt6Bp3fUwFWv9zAT7aLEMfq4y+ZAj+b0ZhO4jR4
+# 9sZg5bkAKffRiZQhRQqUj5dhyrT1cGGcl1khUnJMuuPlnjpm5CDnrFF+KYgn4fZD
+# 6BJZ2lkXujnV6h0tjffbWjqJzu8u2Zm+9Ii3tlugdUFcrwYMtm7Mgz+MLJg+OV0w
+# k3g5tYcuOwiEQYSD8INLSCN7M+pTYZN54V/wJZTeJjoZR+G/Yanm7ezs0HPaFxvo
+# ay8spUeWZwy/0U5Yms+48C2NrNaGvhBkEzqFT/ZekAGtn+FeBDu+BGNQFPz1xIbx
+# l4Lvi554zLHwoCxAUPbuSoxEEWzkCHspw0uQ8xg9mHfqNWaCh+QxP24flxpqnqUw
+# qrh0KAy7PDRVuRpUaPqZ4eYcUAdQJ0ZG1hCoyvPVWDuRVFNGR+PmF6FGvLijhXNQ
+# 8jntK+yKmZyxzt2fqZ8wztZf/XCsNL4oEEpGChqfY7+1Cp1ZtOiSvhkikADjIHA6
+# e3r8H3EwOr3kavkaXypfdJPK0pOpBqo0Yg4VCGt8STlbeVVQK+cQbNgnlMGScthU
+# IqPyOkcXrg==
 # SIG # End signature block

@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.35 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.36 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -46,6 +46,19 @@ or uncertain delivery stays pending to avoid a duplicate. After checking deliver
 use `-ForceLicenseSummaryEmail` to send again that day. This switch works with
 both a full inventory and email-only mode. On a full inventory, it does not
 override a disabled email configuration or permit sampled inventories to send.
+
+The attached recovery workbook includes `LastAdActivityDate` from the AD
+`LastLogonDate` export and `LastM365ActivityDate` from the M365 active-user
+activity report. Both dates use `yyyy-MM-dd`; `N/D` means the date could not be
+qualified. Identified shared mailboxes show `N/D` in both columns. AD last logon
+is replicated and approximate. The email also has a separate E3-to-F3 review
+indicator for enabled E3 users with an observed UserMailbox below 2 GB, no
+archive or hold, no Windows/Mac Apps use, OneDrive storage below 2 GB, and no
+second target suite. Existing recovery candidates are excluded from that review.
+Missing input remains `N/D`. The OneDrive usage CSV is fresh-data checked but
+is marked provisional because no matching current file receipt is available.
+Frontline eligibility and required E3 features require a manual review before
+changing a license.
 
 Service-plan state codes are `A` (enabled and successfully provisioned), `D`
 (disabled), `PA` (pending activation), `PI` (pending input), `PP` (pending
