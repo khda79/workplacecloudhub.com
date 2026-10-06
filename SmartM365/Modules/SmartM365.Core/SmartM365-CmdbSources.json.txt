@@ -66,6 +66,7 @@
       "Files": [
         "M365_Licenses_Tenant.csv",
         "M365_Licenses_AssignmentPaths.csv",
+        "M365_Licenses_Users.csv",
         "M365_Licenses_ServicePlans_Catalog.csv",
         "M365_Licenses_UserServicePlanStates.csv",
         "M365_EntraGroups_All.csv"

@@ -13,10 +13,16 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+$inventoryText = Get-Content -LiteralPath $inventoryPath -Raw
+if ($inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -lt 0 -or
+    $inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -gt
+    $inventoryText.IndexOf('Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray()')) {
+  throw 'The full collector must complete its source receipt before calculating the email KPIs.'
+}
 $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
-  'Read-LicensesIndexedSource', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
 $definitions = @($ast.FindAll({
@@ -167,16 +173,38 @@ try {
     [pscustomobject]@{TenantKey='prod';UserId='u6';SkuPartNumber='POWER_BI_PRO'}
     [pscustomobject]@{TenantKey='prod';UserId='u7';SkuPartNumber='SPE_E3'}
     [pscustomobject]@{TenantKey='prod';UserId='u8';SkuPartNumber='SPE_E3'}
+    [pscustomobject]@{TenantKey='prod';UserId='u9';SkuPartNumber='POWER_BI_PRO'}
+    [pscustomobject]@{TenantKey='prod';UserId='u11';SkuPartNumber='VISIOCLIENT'}
   ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_Users.csv') -NoTypeInformation
+  $licenseUsersPath = Join-Path $testRoot 'M365_Licenses_Users.csv'
+  $licenseManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  $licenseHash = (Get-FileHash -LiteralPath $licenseUsersPath -Algorithm SHA256).Hash
+  @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='M365_Licenses_Users.csv';Status='Success';IsPartialInventory=$false;SHA256=$licenseHash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $localGuid = [guid]::Parse('00112233-4455-6677-8899-aabbccddeeff')
+  $localImmutable = [Convert]::ToBase64String($localGuid.ToByteArray())
   @(
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u1';'User principal name'='u1@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u2';'User principal name'='u2@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a2';LastSuccessfulSignInDateTime=$old}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u3';'User principal name'='u3@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a3';LastSuccessfulSignInDateTime=$recent}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u4';'User principal name'='u4@example.invalid';AccountEnabled='True';OnPremisesImmutableId='a4';LastSuccessfulSignInDateTime=$old}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u6';'User principal name'='u6@example.invalid';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=$recent}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u7';'User principal name'='u7@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u8';'User principal name'='u8@example.invalid';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u1';'User principal name'='u1@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u2';'User principal name'='u2@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='a2';LastSuccessfulSignInDateTime=$old}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u3';'User principal name'='u3@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='a3';LastSuccessfulSignInDateTime=$recent}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u4';'User principal name'='u4@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='a4';LastSuccessfulSignInDateTime=$old}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u6';'User principal name'='u6@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=$recent}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u7';'User principal name'='u7@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u8';'User principal name'='u8@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u9';'User principal name'='u9@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u10';'User principal name'='u10@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u11';'User principal name'='u11@example.invalid';UserType='Guest';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u12';'User principal name'='u12@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId=$localImmutable;LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u13';'User principal name'='u13@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u15';'User principal name'='u15@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
   ) | Export-Csv -LiteralPath (Join-Path $testRoot 'M365_Users_Active.csv') -NoTypeInformation
+  $onPremPath = Join-Path $testRoot 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
+  @([pscustomobject]@{TenantKey='prod';ObjectGUID=$localGuid.ToString();UserPrincipalName='u12@example.invalid';RecipientType='UserMailbox';NativeIdentityStatus='Observed'}) |
+    Export-Csv -LiteralPath $onPremPath -NoTypeInformation
+  $onPremManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-Exchange-Local-Mailboxes-Inventory.current.json.txt'
+  $onPremHash = (Get-FileHash -LiteralPath $onPremPath -Algorithm SHA256).Hash
+  @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremHash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
   @(
     [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a2';UserPrincipalName='u2@example.invalid';LastLogonDate=$adOld}
     [pscustomobject]@{TenantKey='prod';ImmutableId_AD='a3';UserPrincipalName='u3@example.invalid';LastLogonDate=$adRecent}
@@ -213,6 +241,10 @@ try {
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u6';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u7';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
     [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u8';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='12,0';ArchiveStatus='Active';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u9';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u10';RecipientTypeDetails='UserMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u13';RecipientTypeDetails='SharedMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='1';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
+    [pscustomobject]@{TenantKey='prod';ExternalDirectoryObjectId='u15';RecipientTypeDetails='RoomMailbox';NativeIdentityStatus='Observed';TotalItemSizeGB='1';ArchiveStatus='None';LitigationHoldEnabled='False';RetentionHoldEnabled='False'}
   ) | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
 
   $intunePath = Join-Path $testRoot 'Intune_Devices_Inventory.csv'
@@ -225,6 +257,26 @@ try {
   ) | Export-Csv -LiteralPath $intunePath -NoTypeInformation
 
   $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $usage.MailboxGap.UserMailboxes.Total 2 'User mailboxes without target suite'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.Universe 5 'Qualified EXO UserMailbox denominator'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.OtherSkus 1 'User mailbox with another SKU'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.NoSkus 1 'User mailbox with no SKU'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.Total 1 'On-premises UserMailbox is excluded from mailbox-free accounts'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.Universe 7 'Qualified nontechnical Entra account denominator'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.OtherSkus 1 'Mailbox-free account with another SKU'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.NoSkus 0 'On-premises mailbox account with no SKU is excluded'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.Guests 1 'Guest is identified within the total'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.MemberEnabled 0 'Enabled member segment'
+  Assert-Equal $usage.MailboxGap.NoUserMailbox.MemberDisabled 0 'On-premises mailbox disabled member is excluded'
+  $activePath = Join-Path $testRoot 'M365_Users_Active.csv'
+  $activeRows = @(Import-Csv -LiteralPath $activePath)
+  $localAccount = @($activeRows | Where-Object { $_.'Object Id' -eq 'u12' })[0]
+  $localAccount.OnPremisesImmutableId = ''
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
+  $upnFallback = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $upnFallback.MailboxGap.NoUserMailbox.Total 1 'Unique UPN fallback excludes on-premises UserMailbox'
+  $localAccount.OnPremisesImmutableId = $localImmutable
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
   $byProduct = @{}
   foreach ($item in $usage.Rows) { $byProduct[$item.Product] = $item.Counts }
   Assert-Equal $byProduct['Microsoft 365 F1'].Assigned 2 'F1 distinct users'
@@ -302,6 +354,13 @@ try {
       $body -notlike '*Consumed (used %)*' -or $body -notlike '*Available (free %)*') {
     throw 'License capacity order or percentages are missing.'
   }
+  if ($body.IndexOf('05 &nbsp; User mailboxes without licence F1/F3/E3/E5') -le $body.IndexOf('04 &nbsp; Licensed shared mailboxes') -or
+      $body.IndexOf('06 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5') -le $body.IndexOf('05 &nbsp; User mailboxes without licence F1/F3/E3/E5') -or
+      $body -notmatch '>2</strong> of 5 qualified EXO UserMailbox.*?<strong>40%</strong>' -or
+       $body -notmatch '>1</strong> of 7 qualified Entra accounts.*?<strong>14.3%</strong>' -or
+       $body -notmatch 'Member enabled</th>.*?<td[^>]*>0</td><td[^>]*>0</td><td[^>]*>1</td><td[^>]*>1</td><td[^>]*>0</td><td[^>]*>0</td>') {
+    throw 'Mailbox and account gap sections are missing or have incorrect counts.'
+  }
   Assert-Equal $script:TemplateCalls.Count 1 'Focused email uses one shared template'
   Assert-Equal $script:TemplateCalls[0].HostName '' 'Host metadata removed from template header'
   Assert-Equal $script:TemplateCalls[0].GeneratedAt '' 'Generated metadata removed from template header'
@@ -313,6 +372,15 @@ try {
   if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">20</td><td style="[^"]*">17 \(85%\)</td><td style="[^"]*">3 \(15%\)</td><td style="[^"]*">2</td><td style="[^"]*">Subscribed</td>') {
     throw 'F3 license capacity and percentages are missing from email.'
   }
+
+  $mailboxRowsWithId = @(Import-Csv -LiteralPath $sharedPath)
+  @($mailboxRowsWithId | Where-Object ExternalDirectoryObjectId -eq 'u10')[0].ExternalDirectoryObjectId = ''
+  $mailboxRowsWithId | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
+  $unjoined = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $unjoined.MailboxGap.UserMailboxes.Unknown 1 'User mailbox without Entra ID is unqualified'
+  Assert-Equal $unjoined.MailboxGap.NoUserMailbox.Available $false 'Missing mailbox identity prevents proving account has no mailbox'
+  @($mailboxRowsWithId | Where-Object RecipientTypeDetails -eq 'UserMailbox' | Where-Object { -not $_.ExternalDirectoryObjectId })[0].ExternalDirectoryObjectId = 'u10'
+  $mailboxRowsWithId | Export-Csv -LiteralPath $sharedPath -NoTypeInformation
 
   $intuneManifestPath = Join-Path $testRoot 'SmartInventory_SmartM365-Devices-Inventory.current.json.txt'
   @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='Intune_Devices_Inventory.csv';Status='Failed';IsPartialInventory=$true})} |
@@ -331,6 +399,7 @@ try {
   $f3Misaligned = @($misaligned.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0]
   Assert-Equal $f3Misaligned.Available $false 'Misaligned license snapshots are not qualified'
   Assert-Equal $misaligned.Sources[0].Ready $false 'Misaligned license user source is not ready'
+  Assert-Equal $misaligned.MailboxGap $null 'Misaligned license source makes both new sections N/D'
   $script:SentMail.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.AddDays(-3).ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
   Assert-Equal $script:SentMail.Count 1 'Unqualified usage still sends a stock summary'
@@ -371,6 +440,8 @@ try {
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $exoManifestPath
   $partialExo = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   Assert-Equal $partialExo.SharedSourceReady $false 'Partial EXO file receipt is rejected'
+  Assert-Equal $partialExo.MailboxGap.UserMailboxes.Available $false 'Partial EXO source makes user mailbox gap N/D'
+  Assert-Equal $partialExo.MailboxGap.NoUserMailbox.Available $false 'Partial EXO source makes no-mailbox gap N/D'
   $partialE3 = @($partialExo.Rows | Where-Object Product -eq 'Microsoft 365 E3')[0]
   Assert-Equal $partialE3.Counts.RecoveryCandidates 0 'Unavailable EXO source cannot yield recovery candidates'
   Assert-Equal $partialE3.Counts.RecoveryUnknown 4 'Unavailable EXO source makes all E3 mailbox types unknown'
@@ -421,6 +492,72 @@ try {
   $e5 = @($usage.Rows | Where-Object Product -eq 'Microsoft 365 E5')[0]
   Assert-Equal $e5.Counts.LocalAppsInactive 0 'Stale Apps report is not treated as no use'
   Assert-Equal $e5.Counts.LocalAppsUnknown 0 'Shared E5 mailbox remains outside local Apps usage'
+
+  $conflictGuid = [guid]::Parse('10213243-5465-7687-98a9-bacbdcedfe0f')
+  $activeRows = @(Import-Csv -LiteralPath $activePath)
+  @($activeRows | Where-Object { $_.'Object Id' -eq 'u11' })[0].OnPremisesImmutableId = [Convert]::ToBase64String($conflictGuid.ToByteArray())
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
+  @(
+    [pscustomobject]@{TenantKey='prod';ObjectGUID=$localGuid.ToString();UserPrincipalName='u12@example.invalid';RecipientType='UserMailbox';NativeIdentityStatus='Observed'}
+    [pscustomobject]@{TenantKey='prod';ObjectGUID=$conflictGuid.ToString();UserPrincipalName='u12@example.invalid';RecipientType='RoomMailbox';NativeIdentityStatus='Observed'}
+    [pscustomobject]@{TenantKey='prod';ObjectGUID=([guid]::NewGuid().ToString());UserPrincipalName='u8@example.invalid';RecipientType='UserMailbox';NativeIdentityStatus='Observed'}
+  ) | Export-Csv -LiteralPath $onPremPath -NoTypeInformation
+  $conflictHash = (Get-FileHash -LiteralPath $onPremPath -Algorithm SHA256).Hash
+  @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$conflictHash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
+  $ambiguousOnPrem = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $ambiguousOnPrem.MailboxGap.NoUserMailbox.Available $true 'Unrelated accounts remain qualified when local identities conflict'
+  Assert-Equal $ambiguousOnPrem.MailboxGap.NoUserMailbox.Unknown 2 'Identity conflicts qualify affected unlicensed accounts as unknown'
+  Assert-Equal $ambiguousOnPrem.MailboxGap.NoUserMailbox.Total 0 'Conflicting local mailbox identities are not counted as mailbox-free'
+  $activeRows = @(Import-Csv -LiteralPath $activePath)
+  @($activeRows | Where-Object { $_.'Object Id' -eq 'u11' })[0].OnPremisesImmutableId = ''
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
+  @([pscustomobject]@{TenantKey='prod';ObjectGUID=$localGuid.ToString();UserPrincipalName='u12@example.invalid';RecipientType='UserMailbox';NativeIdentityStatus='Observed'}) |
+    Export-Csv -LiteralPath $onPremPath -NoTypeInformation
+
+  @{Status='Failed';IsPartialInventory=$true;ConsumerScopeQualified=$false;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
+  $partialOnPrem = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $partialOnPrem.MailboxGap.UserMailboxes.Available $true 'EXO UserMailbox section remains available'
+  Assert-Equal $partialOnPrem.MailboxGap.NoUserMailbox.Available $false 'Partial on-premises receipt makes section 06 N/D'
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual
+  if ($script:SentMail[0].BodyHtml -notlike '*Section 06 N/D*') { throw 'Unqualified on-premises source is not visible in the email.' }
+  @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256='BADHASH'})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
+  $changedOnPrem = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $changedOnPrem.MailboxGap.NoUserMailbox.Available $false 'Changed on-premises CSV hash makes section 06 N/D'
+  @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremHash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
+
+  @{Status='Completed';IsPartialInventory=$false;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $oldReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $oldReceipt.Rows[0].Available $false 'Old licensing receipt needs an explicit bypass'
+  $bypassedReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $bypassedReceipt.Rows[0].Available $true 'Bypass accepts fresh license-users CSV'
+  Assert-Equal $bypassedReceipt.LicenseSourceForced $true 'Bypass is recorded as provisional'
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -Manual -BypassLicenseUsersReceipt
+  if ($script:SentMail[0].BodyHtml -notlike '*Provisional license assignment indicators*' -or
+      $script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*license-users CSV absent*') {
+    throw 'The temporary licensing receipt bypass is not visible in the email.'
+  }
+  @{Status='Failed';IsPartialInventory=$true;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $failedReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $failedReceipt.Rows[0].Available $false 'Bypass does not accept failed licensing receipt'
+  @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='M365_Licenses_Users.csv';Status='Success';IsPartialInventory=$false;SHA256='BADHASH'})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $wrongHash = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $wrongHash.Rows[0].Available $false 'Bypass does not accept changed licensing CSV'
+  @{Status='Completed';IsPartialInventory=$false;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $licenseLastWriteUtc = (Get-Item -LiteralPath $licenseUsersPath).LastWriteTimeUtc
+  [System.IO.File]::SetLastWriteTimeUtc($licenseUsersPath, $today.AddDays(-20))
+  $staleLicense = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
+  Assert-Equal $staleLicense.Rows[0].Available $false 'Bypass does not accept stale licensing CSV'
+  [System.IO.File]::SetLastWriteTimeUtc($licenseUsersPath, $licenseLastWriteUtc)
 }
 finally {
   if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
@@ -428,10 +565,10 @@ finally {
 'PASS: Focused license summary email offline checks.'
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB76c4QzdtATb0B
-# vZPBAz5NQDZjUufzcS13RdXAHwzdkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtE4WS76mUDHr9
+# NHe+qGiHpshjcstIbwCqjSXdmk+g0KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -456,139 +593,19 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICIOkZnPWqLzO34mMgNO7WUKYF+FjYqSBb+pL5Fb1jPyMA0GCSqG
-# SIb3DQEBAQUABIIBgCypvRT846r7th45oHR9FY49+0wcbPZbfL5Iq9mSxWauiQXH
-# D3YDv0hkCbapP2vUfe4PwncOMbt1Gg7uGbeyUP+9T616M05FBT3rKElEXxrH827N
-# m5HWS41ZyGx/4ka890vV9A5pmXaumNM2PrXCWWEy+jQB09FwfcxrGb49MTuF2twt
-# nPKRO0oN32ZXdCHhkmCzJWPURZn01UVlA5v+QJHEvbKdWQtWqCyvfYMzkl7SHfcZ
-# im/3Ft613ZzTQsyMf+/kjW9j5jAc7YWhVyuG+mkhjuOtBBI1CDHGJp5jBSrfqjcf
-# wNpOH1Zohjs5h7vl2BlCv+a3h41i+WZDA3ZB8xJ8ANyt4xTAaxdBw2KqyQTTu6uu
-# pNwpN/qpdrf4JIA1GrA/XX+iwapvxh7X+ONwbkDVXo3nysXkv3C41INZzde9wG3m
-# icVpQ0yjRd5FZPAxADi1IMXOENgNpnHXSXOeuvy/VV0aY2xmnpnuQpJslnv74fR7
-# S+2BURtoHtMLqPYw/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzUw
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDbX+VcWuI7JzxpN5kN0z1IUpIT7SiW0myr1+Nn
-# /TbV1zANBgkqhkiG9w0BAQEFAASCAgCmkqIEQRFaBEI7HytIF1gsNJIjJHVwLlJn
-# WdVOudP4K5kQDskYSffxsfH1OM2S2vOy05+Mqu2Q0rxUQ7MXorkFOSkwuleVyfOZ
-# rCpZxLUQ41b6RkIkOFvsX8GEfI1nnwhwM6qEpQFxsFCDPQ4nehVC5XF0WLI6r1fI
-# HW4bnOcElnqslRKhohUEycWkYYn1aBmX/nx+K9XF4QnGT02Fqq6jCPxu9ko91uw4
-# 2Qradpm6XiAOsznpASxPfJs7KyxLUbPsr3AegJ045vaWbdr1qKNd9BThM7EWN6qD
-# s24uF/XPc65rCKPTJ+SiQRXIUKlSCOPKVIJmUK1Hz35uP/96TJW3KXflZqyo+uWD
-# K2c+i8EBMrmQut1qWeHodmI6Shg/61Le0qXlW1sL2LqzzhfV47kGjgEbMnjUQriZ
-# YCLQ9RN670sDolmKGZg+qSkzW+6VmQrq2FeHKu9iDYsfucHgYbCnaw9ETVw2tPu7
-# e/jqGxs726wjoWs851ItskoMyKegnByQ62aufg10+jvszY5wdjgx4EnQTLcm7MSb
-# VTHXtjQq6ssZ6XUXPzZc1WffJfRDUcBqzLAqsfAuDeXnyw+bXVA7s3IHWxz+a9eC
-# FZaJ8ORluQUSN3HaEMBxxM1zN4jREqk2EZ3Ip/imKVuFNMuxqlpjUbx1veCfoTN+
-# qvLG8DwlMQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBX5czwBrOm6Gjkkjz2klJD
+# 0UglY6k6rWWbSDgyGoShGzANBgkqhkiG9w0BAQEFAASCAYBF8Sj7DA4SCfuFJGeD
+# c4IN+MSFAabX8xD/Z1eZBlBFA9LXxz6Owwd587DKs4F247i8QcUqvEtnELd5CHlb
+# n0RMn8FIcV/21aSempN+Qf1bZtwMVoiaspTMx466sC5eplWjTQjpO4mi2ubhBpWg
+# vjfrZ9Gr0b5R3V6LBiA/LIlz+om0oEtsm5gBaCcsHR57RheoSOeInHZClTa1YRyf
+# 3DCm/UPFELCHmsJ8qzvhOELsJZy95jQ3POapMYowGqlwykv54advNbz90YteBgsw
+# ++oc68pIq9w0EVqKHa2g39CbkzDZuQjfytoLo6cgrqpbHT/49InnqVM4BIalurz4
+# cCdPWvonIaBfAfnga8DZQ7F9c1T3BXjU5oxWo52bHVPAucEyswoSR+xiFNh2vA+Q
+# rPVyYyMjj//zEbjOfKgiOQ+wBdcD9lCDFDHlycYUwfOqyfK6e0owGpEGfgKpkw3F
+# oLarDDMJTI5E6L2uw8VfTdyaUP8XTcmClTAIBsemPpqEAuY=
 # SIG # End signature block
