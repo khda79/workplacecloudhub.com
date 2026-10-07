@@ -116,11 +116,24 @@ A manual child may still wait for an external dependency whose latest scheduled 
 was suspended: collect that dependency explicitly (or resume planning), rather than reuse
 an inadmissible old export.
 
-On resume, the durable UTC cutoff advances scheduling cursors past suspended automatic
-occurrences and discards their pending automatic retries; original failures and running
-process records are preserved. This applies after restart, missed intervals and ownership
-changes as well. Next future schedules run normally: no catch-up burst. Scheduling cursors
-are not success evidence. No run is recorded as successful for a suspended occurrence.
+On resume, the GUI asks **Yes**, **No** or **Cancel**. Yes records a durable catch-up window
+  and queues every missed occurrence of jobs enabled at confirmation, using their published
+  schedule at that moment, including jobs whose
+usual `MissedRunPolicy` is `Skip`. No advances scheduling cursors past suspended occurrences;
+Cancel keeps maintenance active. All catch-up launches retain ownership, dependency, overlap,
+  claim and concurrency checks. They are processed in scheduled order per job; independent
+  jobs can run in parallel across servers. A new maintenance interval preserves unfinished
+  confirmed catch-up work, even when No is chosen for the new interval. Catch-up can take a
+  long time after extended maintenance. A fresh heartbeat from every expected server must
+advertise catch-up support before Yes can be published. Pending automatic retries from
+before resume are discarded; original failures and running process records are preserved.
+The choice and per-server catch-up progress survive resident restarts; shared occurrence
+  claims prevent duplicate elected launches after ownership changes. Scheduling cursors
+  are not success evidence, and no run is recorded as successful merely because
+  maintenance ended. Catch-up replays launch times against current source data; it cannot
+  recreate the inventory as it existed at the missed time. A maintenance interval already
+  resumed under an older version cannot be
+replayed automatically; use explicit Pipeline requests for those jobs.
 
 Activation requires **every published expected server** to have a fresh, Running heartbeat,
 maintenance protocol 1, healthy control and acknowledgement of the current revision.

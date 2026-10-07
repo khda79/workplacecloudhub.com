@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.6
+1.3.7
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.6'
+$script:AppVersion = '1.3.7'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -936,10 +936,20 @@ function Set-GuiMaintenance {
     if (-not $reason -and $Enabled) { throw 'Enter a reason before enabling maintenance.' }
     if (-not $reason) { $reason = 'Scheduled planning resumed from GUI' }
     $action = if ($Enabled) { 'Enable' } else { 'Disable' }
-    $message = "$action shared maintenance for this tenant?`n`nRunning jobs remain supervised. Manual Pipeline requests keep their dependency and concurrency checks.`nResume skips suspended automatic occurrences and retries.`n`nReason: $reason`n`nConfiguration draft changes are NOT published."
-    if ([System.Windows.MessageBox]::Show($message, "$action maintenance", 'YesNo', 'Warning') -ne 'Yes') { return }
-    $result = Set-SmartM365OrchestratorMaintenance -SharedDataFolderPath $script:SharedDataFolderPath -Enabled $Enabled -ExpectedRevision $script:MaintenanceViewState.Revision -Reason $reason
-    Write-GuiActivity -Message ("Maintenance transition published: revision={0}; enabled={1}; reason={2}. Awaiting server acknowledgement." -f $result.Revision, $result.Enabled, $result.Reason)
+    $catchUp = $false
+    if ($Enabled) {
+        $message = "Enable shared maintenance for this tenant?`n`nAutomatic launches and retries will pause. Running jobs remain supervised and manual Pipeline requests remain available.`n`nReason: $reason"
+        if ([System.Windows.MessageBox]::Show($message, 'Enable maintenance', 'YesNo', 'Warning') -ne 'Yes') { return }
+    }
+    else {
+        $started = ([datetimeoffset]::Parse($script:MaintenanceViewState.ChangedAtUtc)).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
+        $message = "Disable shared maintenance for this tenant?`n`nSuspended since: $started`n`nYES: replay every missed scheduled occurrence for currently enabled jobs, including jobs marked Skip. Each run collects current data; this does not reconstruct historical snapshots. Independent jobs may run in parallel; normal ownership, dependency and concurrency checks apply. This can queue many jobs.`n`nNO: skip occurrences from this maintenance interval and resume future schedules. Earlier confirmed catch-up work remains queued.`n`nCANCEL: keep maintenance enabled.`n`nReason: $reason"
+        $choice = [System.Windows.MessageBox]::Show($message, 'Disable maintenance', 'YesNoCancel', 'Warning')
+        if ($choice -eq 'Cancel') { return }
+        $catchUp = $choice -eq 'Yes'
+    }
+    $result = Set-SmartM365OrchestratorMaintenance -SharedDataFolderPath $script:SharedDataFolderPath -Enabled $Enabled -ExpectedRevision $script:MaintenanceViewState.Revision -Reason $reason -CatchUpMissedOccurrences:$catchUp
+    Write-GuiActivity -Message ("Maintenance transition published: revision={0}; enabled={1}; catchUpAll={2}; reason={3}. Awaiting server acknowledgement." -f $result.Revision, $result.Enabled, $result.CatchUpAll, $result.Reason)
     [void](Refresh-OperationsView)
 }
 
@@ -1797,8 +1807,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgYdukmQ/SM1GV
-# tauo/Ksc/z36+sLNOMPqdcmpdhp9yaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZfseTfqvGK0U7
+# nw92vduox/RgDlNDrczPykAmUFjWm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1931,31 +1941,31 @@ $window.Add_Closing({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINHrFbHeQv3ACdi4Dm/3o6cY41HGW+yLG1OU/TgAQvgrMA0GCSqG
-# SIb3DQEBAQUABIIBgApACCXNMj1zNG9zD9BoQX5nf/Izn8Za5xDxy240TNfNYB+0
-# nWF0U3Asz5LA/AilBbKIGZU/58+0DIa7SVuSegHssZNtALqVlpadVFXxvfaaApH4
-# 1Ol8F9NSSk9gv+/Jw3eyn8EY7zkacZEtMAuTW3mL787yZ2GEaPXC2W69M471Br5M
-# YVC07k4rL5Atk13uPLZiB7GjtL0FVMW76SXe3vw1UZrFpDH2EiRcFgVvuewGiVIi
-# 8rjcs4xgJd5Y/s0QI41aE4yOI8MxhblQlX5hUyhhIq8KAX9o7mIeCs6UL4RVZirM
-# DeKxTa4o/D/YFLJ3jVtoOsL2HIZSkJiMTmTrg8iAesX45K9JRrSd+o+DHPFaccN2
-# D3rHQy08oaiq66ycZKybemKI3WtjPK33AgraGyRHz2OtdrbfyEPBkuaNCE1E1gws
-# bBnIB6wy9eVSDAyUrSk3k777l3ViXtAc7MbDfT1F2lA2SiYMFdEQ51fXp1qaSqfp
-# X4FAYQ1bFElqxjeqQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKlaO/2S0DiHE5n8o0BPWhAO+Ab5r0sox2LOswiJgw2EMA0GCSqG
+# SIb3DQEBAQUABIIBgAdXUtQa6Z0KNex5oiZhwPyoTzAWPSRM5WcrKpn1769N2g6J
+# WQo/GxCMxDUFwZwobs3zjMhmNonJkPjwS6MBNh7pRep1cxIhyFf8U2/RMzZcO1iX
+# z8svnxSgf18UK45I9Tz0fM1MndyMvJRcXKMXAKoeKSV0C0kOjl4PqF8lT9IxRzi6
+# E86uSkoQHJw2+5okdty9deGndfzHj+ylmxmohX3b9p0EXJmAcCnFObmo4YVPM+9u
+# xXTpIsL9VaelW3smfjli+Ittwlqp/PCRHk8Mn6G82epYXvo+FKB9SziutFtZ7ivX
+# XR6h6eZz8yTEkRmcPYWJ97Hu9bt3Xt3M/zjcWGa6E5zZl+7pIwtc8it5ddtAvjx4
+# yGXUyT1EFLJY/LhIiWR/dCgmHw9YEMODCSQSDK3uaH0VZStfSPYLHErTGe0R4hk8
+# ptIv4ZYhhSFDYuDc/fQ24BlaivkQri2DCeTOTt94wwBdaPBJwtXuxXopEMR27lD8
+# gW0Pu06v+6JwcKa0rKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNzU1
-# MjdaMC8GCSqGSIb3DQEJBDEiBCCzhmefdIT+dLD1LPuXA7XHIqlIHh8m4ESGMoiN
-# CSfy7TANBgkqhkiG9w0BAQEFAASCAgAJe2IalxIK29qX71qF2/WBb7KZTPVtqcZy
-# fS4cDlygV+XFB9nPKcJBdKT8FxS4QdHwHLk0S1RrSAOLiuGTH8yDku3T9OCFxzYk
-# 2Ox+yY1tYnEnktcmeYwOUgYyGnuDDw52rEhGtd/psTVFzKj+izaFlzdE6Uw858VL
-# G48h7VdLxeTtDKOYaWBq8C+fEbPJoY+YDI7dj0obug3h8qj/eIPwMSPjMEAdCQu9
-# w1+w15qTOsC+i/187wi6Q877PTreRidMAfCchC/oheWcJasFyynGrbhe+a/xOHPH
-# CgUJZ0htrWiX6/STcEs7f5uGVA2upS3BcDXS34bialpOeS9h6MyM+o0pZ4Mz9CyP
-# OL7Zmm/ujWF3SKq/dt2v5whLP/7wmlwyOffWvP23Gu76C6c9rOf4mhlwpyaMMyzR
-# dCDVlt/UJdEdwtJJWZH+gKwTxIYq+AHM8SWqclGai9ba2bagPIVVSEI5KnoOfTZ3
-# tQRnzFm8+qbRiyX2bGhah1SQvkzWqjc3MB68hIsTjc8EJw6Z0jKcJPTPFv8m5m25
-# 1q0kHEJljQkfm+bCIQInOUauDEJBROt2hCLuXaQBVKDrCfMsDoj7un1MTgKxZZH7
-# IgjbluqKiIce/cuJB45GZz/O2Or0GGGP7DaYz8pXzFZ1m6H2S5Wo32uAQyiw4AO4
-# RMOe1Vacog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMzQ0
+# MDVaMC8GCSqGSIb3DQEJBDEiBCCtUvX0HcBMf6lfkbVx6YLIFhQmUReJ3HnFKhVD
+# 4ivAszANBgkqhkiG9w0BAQEFAASCAgAyQ9RxmgfJulyDTKwiAwXemzMewY/E6PmQ
+# LmqlkGme9kM79QJkkBePXhU6f89QFiV9T1UmjGBFqsqO7KJfj2K23CccfqWm7fal
+# H4LYnx8Gd+kN2Pc1JmTmMstKNOsd3s9AI9Fkjjs1SJxVltux605x3b0qkClJGVMX
+# TRDMT/o4LQ+bTe2jC7KuPPpVsKHOl/GP0huHMeegtYTo5t7IMcti/Bs8FXKSPSPb
+# nhzWX6UvH4luMbPG2Kk9/oa5yBgzg3JxMh/Y+MGcY89OWIjr2IWAkH8goK6fA0qK
+# 6aDyIRv22iXpKpcpZ0UYqx3oGC55r9UsCQej4W4jlrZcQzqA+h7J4caDqlSq7996
+# 2rQrnRwZsNLpgNDaoZc+Z68eGVcOCAIIJh6cDg3WUIUm6h26lN61y6TbYhso5pRX
+# cHVwrTpWsL5abLd8/Vk5HxUZMlMJlh2vz2kAVNaM/rKcQMfpUm7rEgUztcq+pMr2
+# aXpzhMCjT4ZuO2fjK3mj8oA5EzjoenCzxDxyATfchi15Nm4u1UnlanFXrxzXZPkm
+# uEVjRXOYd5W2+39p4C4dJH3fcAmeaAKXsQ8kIJkKsSktiuo5em8x3aOLzIR7r9Md
+# V1kQHBqRMqT8/GmZdISxcasn0g7w8JMi/hqxbQumTg42yQeQur6Xbso49s7ViOJq
+# Se5zIGRdIg==
 # SIG # End signature block

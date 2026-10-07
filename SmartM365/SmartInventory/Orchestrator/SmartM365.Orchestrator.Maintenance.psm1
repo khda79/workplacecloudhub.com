@@ -18,7 +18,7 @@ function New-MaintenanceDefaultState {
     [pscustomobject][ordered]@{
         SchemaVersion = 1; Revision = 0; Enabled = $false
         ChangedAtUtc = ''; ChangedBy = ''; ChangedFromServer = ''; Reason = ''
-        ResumeAfterUtc = ''
+        ResumeAfterUtc = ''; CatchUpFromUtc = ''; CatchUpAll = $false; CatchUpJobs = @(); CatchUpWindows = @()
     }
 }
 
@@ -45,6 +45,84 @@ function Assert-MaintenanceState {
                 throw "Maintenance state $name must be a valid UTC timestamp."
             }
         }
+    }
+    if (-not $Document.PSObject.Properties['CatchUpFromUtc']) { $Document | Add-Member NoteProperty CatchUpFromUtc '' }
+    if (-not $Document.PSObject.Properties['CatchUpAll']) { $Document | Add-Member NoteProperty CatchUpAll $false }
+    if (-not $Document.PSObject.Properties['CatchUpJobs']) { $Document | Add-Member NoteProperty CatchUpJobs @() }
+    if (-not $Document.PSObject.Properties['CatchUpWindows']) { $Document | Add-Member NoteProperty CatchUpWindows @() }
+    if ($Document.CatchUpAll -isnot [bool]) { throw 'Maintenance catch-up choice must be Boolean.' }
+    if ($null -eq $Document.CatchUpJobs -or $Document.CatchUpJobs -isnot [array]) { throw 'Maintenance catch-up jobs must be an array.' }
+    if ($null -eq $Document.CatchUpWindows -or $Document.CatchUpWindows -isnot [array]) { throw 'Maintenance catch-up windows must be an array.' }
+    $catchUpNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($job in $Document.CatchUpJobs) {
+        if ($null -eq $job -or -not $job.PSObject.Properties['Name'] -or [string]::IsNullOrWhiteSpace([string]$job.Name) -or
+            -not $job.PSObject.Properties['Schedule'] -or $null -eq $job.Schedule -or
+            -not $job.Schedule.PSObject.Properties['Type'] -or [string]$job.Schedule.Type -notin @('Daily','Weekly') -or
+            -not $job.Schedule.PSObject.Properties['Times'] -or @($job.Schedule.Times).Count -eq 0 -or
+            -not $job.Schedule.PSObject.Properties['DaysOfWeek'] -or -not $catchUpNames.Add([string]$job.Name)) {
+            throw 'Maintenance catch-up job snapshot is invalid.'
+        }
+        foreach ($time in @($job.Schedule.Times)) {
+            if ([string]$time -notmatch '^([01][0-9]|2[0-3]):[0-5][0-9]$') { throw 'Maintenance catch-up schedule time is invalid.' }
+        }
+    }
+    if (-not $Document.CatchUpAll -and $Document.CatchUpJobs.Count -gt 0) { throw 'Maintenance catch-up jobs require a confirmed catch-up choice.' }
+    $previousRevision = -1L
+    foreach ($window in $Document.CatchUpWindows) {
+        if ($null -eq $window -or -not $window.PSObject.Properties['Revision'] -or
+            ($window.Revision -isnot [int] -and $window.Revision -isnot [long]) -or [long]$window.Revision -le $previousRevision -or
+            [long]$window.Revision -gt [long]$Document.Revision -or
+            -not $window.PSObject.Properties['FromUtc'] -or -not $window.PSObject.Properties['ThroughUtc'] -or
+            -not $window.PSObject.Properties['Jobs'] -or $null -eq $window.Jobs -or $window.Jobs -isnot [array]) {
+            throw 'Maintenance catch-up window list is invalid.'
+        }
+        foreach ($timeName in @('FromUtc','ThroughUtc')) {
+            if ($window.$timeName -is [datetime]) { $window.$timeName = $window.$timeName.ToUniversalTime().ToString('o') }
+            elseif ($window.$timeName -is [datetimeoffset]) { $window.$timeName = $window.$timeName.UtcDateTime.ToString('o') }
+            if ($window.$timeName -isnot [string] -or $window.$timeName -notmatch '(Z|\+00:00)$') {
+                throw 'Maintenance catch-up window timestamps are invalid.'
+            }
+        }
+        $start = [datetimeoffset]::MinValue; $end = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse([string]$window.FromUtc, [ref]$start) -or
+            -not [datetimeoffset]::TryParse([string]$window.ThroughUtc, [ref]$end) -or
+            $start.Offset -ne [timespan]::Zero -or $end.Offset -ne [timespan]::Zero -or $start -gt $end) {
+            throw 'Maintenance catch-up window timestamps are invalid.'
+        }
+        $windowNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($windowJob in $window.Jobs) {
+            if ($null -eq $windowJob -or -not $windowJob.PSObject.Properties['Name'] -or
+                [string]::IsNullOrWhiteSpace([string]$windowJob.Name) -or -not $windowNames.Add([string]$windowJob.Name) -or
+                -not $windowJob.PSObject.Properties['Schedule'] -or $null -eq $windowJob.Schedule -or
+                -not $windowJob.Schedule.PSObject.Properties['Type'] -or [string]$windowJob.Schedule.Type -notin @('Daily','Weekly') -or
+                -not $windowJob.Schedule.PSObject.Properties['Times'] -or @($windowJob.Schedule.Times).Count -eq 0 -or
+                -not $windowJob.Schedule.PSObject.Properties['DaysOfWeek']) {
+                throw 'Maintenance catch-up window job snapshot is invalid.'
+            }
+            foreach ($time in @($windowJob.Schedule.Times)) {
+                if ([string]$time -notmatch '^([01][0-9]|2[0-3]):[0-5][0-9]$') { throw 'Maintenance catch-up window schedule time is invalid.' }
+            }
+        }
+        $previousRevision = [long]$window.Revision
+    }
+    if ($Document.CatchUpFromUtc -is [datetime]) { $Document.CatchUpFromUtc = $Document.CatchUpFromUtc.ToUniversalTime().ToString('o') }
+    elseif ($Document.CatchUpFromUtc -is [datetimeoffset]) { $Document.CatchUpFromUtc = $Document.CatchUpFromUtc.UtcDateTime.ToString('o') }
+    if ($Document.CatchUpFromUtc -isnot [string]) { throw 'Maintenance catch-up start must be a timestamp string.' }
+    if ($Document.CatchUpFromUtc) {
+        $catchUpStart = [datetimeoffset]::MinValue
+        if ($Document.CatchUpFromUtc -notmatch '(Z|\+00:00)$' -or -not [datetimeoffset]::TryParse($Document.CatchUpFromUtc, [ref]$catchUpStart)) {
+            throw 'Maintenance catch-up start must be a valid UTC timestamp.'
+        }
+    }
+    if ($Document.CatchUpAll -and ($Document.Enabled -or -not $Document.CatchUpFromUtc -or -not $Document.ResumeAfterUtc -or
+        [datetimeoffset]::Parse($Document.CatchUpFromUtc) -gt [datetimeoffset]::Parse($Document.ResumeAfterUtc))) {
+        throw 'Maintenance catch-up window is invalid.'
+    }
+    if ($Document.CatchUpAll -and ($Document.CatchUpWindows.Count -eq 0 -or
+        [long]$Document.CatchUpWindows[-1].Revision -ne [long]$Document.Revision -or
+        [string]$Document.CatchUpWindows[-1].FromUtc -ne [string]$Document.CatchUpFromUtc -or
+        [string]$Document.CatchUpWindows[-1].ThroughUtc -ne [string]$Document.ResumeAfterUtc)) {
+        throw 'Confirmed maintenance catch-up window does not match the transition.'
     }
     if ($Document.Revision -gt 0 -and (-not $Document.ChangedAtUtc -or -not $Document.ChangedBy -or -not $Document.Reason)) {
         throw 'Maintenance transition has no timestamp, actor or reason.'
@@ -122,11 +200,12 @@ function Get-SmartM365OrchestratorMaintenanceReadiness {
         [datetime]$Now = [datetime]::UtcNow)
     $stale = [double]$ClusterDocument.PeerHeartbeatStaleMinutes
     foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | Sort-Object -Unique)) {
-        $status = 'Offline'; $version = ''; $running = 0
+        $status = 'Offline'; $version = ''; $running = 0; $catchUpSupported = $false
         try {
             $path = Join-Path (Join-Path $SharedDataFolderPath $server) 'Orchestrator-Heartbeat.json'
             $h = (Read-SmartM365JsonDocument -Path $path).Document
             $version = [string]$h.ScriptVersion; $running = @($h.RunningJobs).Count
+            $catchUpSupported = $h.PSObject.Properties['MaintenanceCatchUpProtocol'] -and $h.MaintenanceCatchUpProtocol -eq 1
             $timestamp = if ($h.Timestamp -is [datetime]) { $h.Timestamp.ToUniversalTime() }
                 elseif ($h.Timestamp -is [datetimeoffset]) { $h.Timestamp.UtcDateTime }
                 else { ([datetimeoffset]::Parse([string]$h.Timestamp, [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime }
@@ -143,7 +222,7 @@ function Get-SmartM365OrchestratorMaintenanceReadiness {
             }
         }
         catch { $status = 'Offline' }
-        [pscustomobject]@{ Server=[string]$server; Status=$status; Version=$version; Running=$running }
+        [pscustomobject]@{ Server=[string]$server; Status=$status; Version=$version; Running=$running; CatchUpSupported=[bool]$catchUpSupported }
     }
 }
 
@@ -151,7 +230,8 @@ function Set-SmartM365OrchestratorMaintenance {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath,
         [Parameter(Mandatory)][bool]$Enabled, [Parameter(Mandatory)][long]$ExpectedRevision,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Reason)
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Reason,
+        [switch]$CatchUpMissedOccurrences)
     if ([string]::IsNullOrWhiteSpace($Reason) -or $Reason.Length -gt 1000) { throw 'Enter a maintenance reason (1 to 1000 characters).' }
     $paths = Get-SmartM365OrchestratorMaintenancePaths $SharedDataFolderPath
     $gate = Enter-SmartM365OrchestratorMaintenanceGate $SharedDataFolderPath
@@ -160,6 +240,30 @@ function Set-SmartM365OrchestratorMaintenance {
         $current = Get-SmartM365OrchestratorMaintenanceState $SharedDataFolderPath
         if ($current.Revision -ne $ExpectedRevision) { throw 'Maintenance changed in another session. Refresh before changing it.' }
         if ($current.Enabled -eq $Enabled) { return $current }
+        if ($Enabled -and $CatchUpMissedOccurrences) { throw 'Catch-up can only be selected when maintenance is disabled.' }
+        $catchUpJobs = @()
+        if (-not $Enabled -and $CatchUpMissedOccurrences) {
+            $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
+            $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $cluster $current)
+            if ($servers.Count -eq 0 -or @($servers | Where-Object { $_.Status -ne 'Applied' -or -not $_.CatchUpSupported }).Count -ne 0) {
+                throw 'Every expected server must acknowledge maintenance and support catch-up before resuming with missed occurrences.'
+            }
+            $jobsDocument = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Jobs.json')).Document
+            if (-not $jobsDocument.PSObject.Properties['Jobs'] -or $null -eq $jobsDocument.Jobs) { throw 'Published jobs manifest has no Jobs array.' }
+            $catchUpJobs = @(
+                foreach ($job in @($jobsDocument.Jobs)) {
+                    if (-not $job.Enabled -or [string]$job.AssignmentMode -eq 'Manual') { continue }
+                    [pscustomobject][ordered]@{
+                        Name = [string]$job.Name
+                        Schedule = [pscustomobject][ordered]@{
+                            Type = [string]$job.Schedule.Type
+                            Times = @($job.Schedule.Times | ForEach-Object { [string]$_ })
+                            DaysOfWeek = @($job.Schedule.DaysOfWeek | ForEach-Object { [string]$_ })
+                        }
+                    }
+                }
+            )
+        }
         if ($Enabled) {
             $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
             $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $cluster $current)
@@ -174,6 +278,15 @@ function Set-SmartM365OrchestratorMaintenance {
             SchemaVersion=1; Revision=([long]$current.Revision + 1); Enabled=$Enabled
             ChangedAtUtc=$now; ChangedBy=$actor; ChangedFromServer=[Environment]::MachineName; Reason=$Reason.Trim()
             ResumeAfterUtc=if ($Enabled) { $current.ResumeAfterUtc } else { $now }
+            CatchUpFromUtc=if ($Enabled) { $now } elseif ($current.CatchUpFromUtc) { $current.CatchUpFromUtc } else { $current.ChangedAtUtc }
+            CatchUpAll=if ($Enabled) { $false } else { [bool]$CatchUpMissedOccurrences }
+            CatchUpJobs=@(); CatchUpWindows=@($current.CatchUpWindows)
+        }
+        if (-not $Enabled -and $CatchUpMissedOccurrences) {
+            $desired.CatchUpJobs = @($catchUpJobs)
+            $desired.CatchUpWindows = @($current.CatchUpWindows) + @([pscustomobject][ordered]@{
+                Revision = $desired.Revision; FromUtc = $current.ChangedAtUtc; ThroughUtc = $now; Jobs = @($catchUpJobs)
+            })
         }
         Assert-MaintenanceState $desired
         $audit = [pscustomobject][ordered]@{
@@ -261,11 +374,18 @@ function Invoke-SmartM365OrchestratorMaintenanceNotification {
 
 function Test-SmartM365OrchestratorMaintenanceLaunch {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][ValidateSet('due','retry','pipeline','forced','pipeline-retry')][string]$Origin,
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][ValidateSet('due','retry','pipeline','forced','pipeline-retry','maintenance-catch-up')][string]$Origin,
         [Parameter(Mandatory)][datetime]$Occurrence)
     Assert-MaintenanceState $State
     if ($Origin -in @('pipeline','forced','pipeline-retry')) { return $true }
     if ($State.Enabled) { return $false }
+    if ($Origin -eq 'maintenance-catch-up') {
+        foreach ($window in $State.CatchUpWindows) {
+            if ($Occurrence.ToUniversalTime() -ge ([datetimeoffset]::Parse($window.FromUtc)).UtcDateTime -and
+                $Occurrence.ToUniversalTime() -le ([datetimeoffset]::Parse($window.ThroughUtc)).UtcDateTime) { return $true }
+        }
+        return $false
+    }
     if ($State.ResumeAfterUtc -and $Occurrence.ToUniversalTime() -le ([datetimeoffset]::Parse($State.ResumeAfterUtc)).UtcDateTime) { return $false }
     return $true
 }
@@ -278,8 +398,8 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorMaintenancePaths, Get-Sma
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCngBGON9Yiy6Vm
-# icuSd9y1+PIJr2MJudmyf/1lmVchsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBK1s3/Y/46IGDc
+# V2ypxVfTVNHCZLrmBxJWr4c6iJJ9UqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -412,31 +532,31 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorMaintenancePaths, Get-Sma
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINwePZn/46OCMXKNFuw2SZXZThuTsUmK8gQ+FB1e81hTMA0GCSqG
-# SIb3DQEBAQUABIIBgFgSZ+NuDbKhAcqcEYgCiLK7lZ7irSleor+hsPgKhkh+8wmz
-# pcGOnYNpRVtm1611hmiJKHqD/71ZdvlzvW+etGxFgPKaQDkLj2ZLi6/aa0llMTiv
-# momXulvecCybcBeDoY2z0NcgRYQ9BzPxjVHGeCvT0YhkJAyJoNo5HDdOfSbi0g0u
-# s70EV3a0S4Ggwbc9sQYVA3OBCf3F6DBB0E7mzM02UbI/fFZE6TaIEMEiYZKR4+qh
-# 0publeISKBHvnTXPs7RpwQK0/rDDCWpqDgJjcgWMsm/E0l0eb/qCY1clTi0Wr+mg
-# Q8F1yikF3kyU3eEKOyeoEDJhy4bI8hZjqvfPoPJR8js0q4Lk/9sZocKYoGL9lZVF
-# tIL4Ue2rNRnUoR2oOG1QkWyJMG93BsqiR+zXN3eujQ074W0sfG4E8wpNzhKSqCa5
-# +0u9byjofy4ZkiiGn7oGAelCpMkhdXB3dqe1WF/o9lxgFvhunzNijXQqnT0x3KX/
-# uTcKFO2lPAKwkJiLoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPeGCa+jN9lkF5B683Gl312sZ5/3HhRdc+cfypFZUQEVMA0GCSqG
+# SIb3DQEBAQUABIIBgFTEwpH2UKFa1PKZFIytS6flA02jLoB7gBlFugM9N4b7AGo7
+# vyBKQh6l3POlYbVanBhWZpMsBtfY5DoZK+jxj6Qjt/TPoX6RKbZR0nxdslJuBsgE
+# PNhzhf9hF//KjjK7varHSBpZIu8eLGL2UadWbjL1S20oFqMkDHSHf06KZhFiglOI
+# btAO91wdvbSluGNZyNZF71U3FiezoA+lNmhC0wKYikkp18+pkm0+fy9wURrbMggE
+# jg8w/DHryywpCECvRAs9Wr/D8+vZKbE15pJOfWuEdUUAFZGMbJ3q4Ha3FOvNMPGA
+# xKD9LCiQtpskNhOVrt1shSnv7h2K7PTV08YL6xbIIXal3C3mS2nrdLpZStUbvTuJ
+# jy80LT8TME22DCcEjVbQ8vrpYT8rahwJw9D554cIEb6hk8Tf4nqDTruUoi/rF0eh
+# 9TEwG/YPeaDuJF1grUyfi60VgytX+7oC8mmqsTKmw5c8b1JJXcwfYC6nrDblkUFq
+# 7sTaADHwwLpv+wdu+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDM+VvS6RxRA8lh/6METBqFGeexJql2vwPoDPNk
-# FFxCyDANBgkqhkiG9w0BAQEFAASCAgCDKMHKPvmmMsFAe5nua3uxnH0AekBQvLf7
-# 40BleAYoAb/+ecYY9pXLA5s28UxAbdeCNkdISVUURAUhlJeFGhOcNGIapuXvhb97
-# ig/LDma2T86OaIfVjuIwHr8mxo4mvzLenSbvlnQ8NZN3DzuBUYh5IDtURiIqOKlq
-# QHFJmrpjh+7kB8ln23SiTvLFUc/H1IT2VJi89EooygCNRPCKnFlXURp6lH20CziE
-# Bf5ep/O6j39w6xtY/ocZQlp+RqR/BOjkTdpOkPZmMExoy5rULnREGjv8ulUJVhmU
-# Dmuh8ta0n9NsH46EM0YsSfL3AsQ10KA63iurAcE8a9d/UVDGKmbgm4FSwjmIPMnU
-# ZWouP4MY5p3uelnF9qedWjPTDFvts6g+WLbaxWjvz2Xo71auXJLFG+heDWCrIE5C
-# b4Ldvt6DvxTXZ1sJDGVxVHgm2wpz3gk1TWJ1oslTeVqEm3iGV7Cvxx+qB/C+pPM7
-# PBLCdTCD0bk1JujbugLvrxIbgFzfUC5e2rD1Ns6d/Kx8y6iSLZ+sJgyLvtziN+Cx
-# u3bgmYkIHQLYNCHPQ7cBiMb8PWO64iVcnE/EiyCICsP5sJSyXSYZz4q6wrXgpMCA
-# UOtlovUIIEPrAJKfCwH2Pb64Ai6gy3fsV1EXH8jy9EEV/7kf2D0ugoWjBiCdOIG5
-# z+A3wu6idw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMzQ0
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCwejs6yTvKnZxVIAB9P9uzolxSAawPJ56ajBmw
+# Uw6Y4TANBgkqhkiG9w0BAQEFAASCAgASVezSun6FadM09IWRIey3qeXZM7Z0tN9n
+# e6c4V3AFkvSA1yQKs7cSpyXWhk3wH3CezFtMcuAhZTIk//8VQVccjtPqX2Yic3eY
+# Y0gKIBeEsZ7DjNhjq+0/3CHV8MEGBCYMnIda2Y5MTNYOON+lXBWILJ02ng0lykgg
+# EpT+aIl/kBoNGxl+F8xreX0NoATcjLJr6RQBUe/RC3jTN0ukGR14APj0DoHph2+l
+# 8YKVT0GJyWlZPOzQ2SAIsFYfCUJ7eqQ0VYMnMTc0CAolhlG0LLKJmQoe82C9zfZA
+# 1FmXjWNFUY2zPME/2J8w48mgZ49VcbpaJbGGWHOSIVPPUW6jXSLhM50NFttOHlps
+# 7TwUhPnEA8+9qShkt0iwHKDMTQLjBCfdlGXtx1QReIeyvJTZqKJmTKllkcdsFdyo
+# LVCM0medoHon2CwJ5HE3gs2SkwXWRgQCs6Ib5Plc0bu35+2uH09jCZwqDjD9dvex
+# TzrKAGLOA6+LYRkPFVTzBW7Vaez914Its2wz8RSQdirRUaBfqtr06sqV/Xz9+ITF
+# OjE46v3jBUZ95DajyyPJEPUbCWmrQgscnfrv7/LTU5kBGzgsaPvhSXipNpP+StNd
+# kHi4pOWy53Eh/3TsTCoBfmNh50CsoKFH16telP+8yGBYPIw4Sj9f+cVkesQw3NyD
+# 5FG50jYOpA==
 # SIG # End signature block

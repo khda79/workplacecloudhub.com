@@ -44,7 +44,8 @@ Features:
 - Optional Authenticode validation before job launch, configurable and usable
   in Audit mode before switching to Enforce.
 - Shared maintenance pauses automatic launches/retries, not supervision or Pipeline requests.
-  Resume skips suspended occurrences; GUI transitions and process creation share a gate.
+  Resume can catch up all suspended occurrences after explicit GUI confirmation;
+  GUI transitions and process creation share a gate.
 
 .PARAMETER Tenant
 Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -100,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.43
+1.5.44
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -112,7 +113,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.43
+    Version : 1.5.44
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -137,7 +138,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.43"
+$ScriptVersion = "1.5.44"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1505,6 +1506,46 @@ function Get-DueOccurrence {
     return $occurrences[$occurrences.Count - 1]
 }
 
+function Get-MaintenanceCatchUpOccurrence {
+    param([Parameter(Mandatory)]$Job, [Parameter(Mandatory)][hashtable]$State,
+        [Parameter(Mandatory)]$Control, [switch]$ReadOnly)
+    if ($Control.Enabled -or -not $Job.Enabled) { return $null }
+    foreach ($window in @($Control.CatchUpWindows)) {
+        $revision = [long]$window.Revision
+        $currentRevision = if ($State.ContainsKey('MaintenanceCatchUpRevision')) { [long]$State.MaintenanceCatchUpRevision } else { -1L }
+        if ($currentRevision -gt $revision) { continue }
+        $snapshot = @($window.Jobs | Where-Object { [string]$_.Name -eq [string]$Job.Name })
+        if ($snapshot.Count -ne 1) { continue }
+        $scheduledJob = [pscustomobject]@{ Schedule = $snapshot[0].Schedule }
+        $from = ([datetimeoffset]::Parse($window.FromUtc)).LocalDateTime
+        $through = ([datetimeoffset]::Parse($window.ThroughUtc)).LocalDateTime
+        if ($currentRevision -lt $revision) {
+            if (-not $ReadOnly) {
+                $State.MaintenanceCatchUpRevision = $revision
+                $State.MaintenanceCatchUpLastOccurrence = ''
+                Save-OrchestratorState
+            }
+            $last = $null
+        }
+        else { $last = ConvertFrom-StateTime -Text ([string]$State.MaintenanceCatchUpLastOccurrence) }
+        $windowStart = if ($null -ne $last -and $last -ge $from) { $last.AddTicks(1) } else { $from }
+        if ($windowStart -gt $through) { continue }
+        $occurrences = @(Get-JobOccurrencesInWindow -Job $scheduledJob -WindowStart $windowStart -WindowEnd $through)
+        if ($occurrences.Count -gt 0) { return $occurrences[0] }
+        if (-not $ReadOnly) {
+            $State.MaintenanceCatchUpLastOccurrence = ConvertTo-StateTime -Value $through
+            Save-OrchestratorState
+        }
+    }
+    return $null
+}
+
+function Complete-MaintenanceCatchUpOccurrence {
+    param([Parameter(Mandatory)][hashtable]$State, [Parameter(Mandatory)][datetime]$Occurrence)
+    $State.MaintenanceCatchUpLastOccurrence = ConvertTo-StateTime -Value $Occurrence
+    Save-OrchestratorState
+}
+
 function Get-OrchestratorSharedDependencyStatus {
     param([Parameter(Mandatory)]$Job,[Parameter(Mandatory)][datetime]$Now)
     # Require the latest scheduled occurrence, never any older successful run.
@@ -2301,6 +2342,18 @@ function Get-OrchestratorPendingJobSnapshot {
             continue
         }
 
+        if ($script:MaintenanceHealthy -and $null -ne $script:MaintenanceControl) {
+            $catchUp = Get-MaintenanceCatchUpOccurrence -Job $job -State $state -Control $script:MaintenanceControl -ReadOnly
+            if ($null -ne $catchUp) {
+                $pending.Add([pscustomobject]@{
+                    Name=$name; ScheduledOccurrence=(ConvertTo-StateTime -Value $catchUp)
+                    Reason='MaintenanceCatchUp'; FirstSeen=(ConvertTo-StateTime -Value $catchUp)
+                    Details='Missed scheduled occurrence queued by the confirmed maintenance resume.'
+                })
+                continue
+            }
+        }
+
         $lastOccurrence = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
         $due = Get-DueOccurrence -Job $job -LastOccurrence $lastOccurrence -Now $Now
         if ($null -eq $due) { continue }
@@ -2385,6 +2438,7 @@ function Write-OrchestratorHeartbeat {
         StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount
         StatePersistenceLastError = [string]$script:StatePersistenceLastError
         MaintenanceProtocol = 1
+        MaintenanceCatchUpProtocol = 1
         PipelineCancellationProtocol = 1
         MaintenanceHealthy = [bool]$script:MaintenanceHealthy
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
@@ -4810,7 +4864,8 @@ function Set-OccurrenceBlocked {
     )
 
     $state = Get-JobState -JobName $JobName
-    $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence
+    $handled = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
+    if ($null -eq $handled -or $Occurrence -gt $handled) { $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence }
     $state.LastStatus = $Status
     $state.PendingRetry = $null
     Save-OrchestratorState
@@ -4849,7 +4904,8 @@ function Update-OrchestratorMaintenance {
                 if ($null -ne $latest -and ($null -eq $handled -or $latest -gt $handled)) {
                     # Scheduling cursor only: never invent a successful execution or replace Running.
                     $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $latest
-                    Write-OrchestratorLog -Message ("Job {0}: automatic occurrences through {1} suspended by maintenance revision {2}; no catch-up." -f $job.Name, $latest.ToString('yyyy-MM-dd HH:mm'), $control.Revision)
+                    $catchUpDetail = if ($control.CatchUpAll) { 'confirmed catch-up queue retained' } else { 'no catch-up' }
+                    Write-OrchestratorLog -Message ("Job {0}: automatic occurrences through {1} suspended by maintenance revision {2}; {3}." -f $job.Name, $latest.ToString('yyyy-MM-dd HH:mm'), $control.Revision, $catchUpDetail)
                     $changed = $true
                 }
                 if (-not $control.Enabled -and $null -ne $state.PendingRetry -and
@@ -4865,7 +4921,7 @@ function Update-OrchestratorMaintenance {
         if ($changed) { Save-OrchestratorState }
         if (-not $script:StatePersistenceHealthy) { throw 'Maintenance scheduling cursor could not be persisted.' }
         if (-not $script:MaintenanceHealthy -or $null -eq $script:MaintenanceControl -or $script:MaintenanceControl.Revision -ne $control.Revision) {
-            Write-OrchestratorLog -Message ("Maintenance control applied: revision={0}; enabled={1}; reason={2}." -f $control.Revision, $control.Enabled, $control.Reason)
+            Write-OrchestratorLog -Message ("Maintenance control applied: revision={0}; enabled={1}; catchUpAll={2}; reason={3}." -f $control.Revision, $control.Enabled, $control.CatchUpAll, $control.Reason)
         }
         $script:MaintenanceControl = $control
         $script:MaintenanceHealthy = $true; $script:MaintenanceError = ''
@@ -4999,8 +5055,13 @@ function Invoke-LaunchPhase {
             $reason = 'pipeline'
         }
         elseif ($job.Enabled) {
-            $occurrence = Get-DueOccurrence -Job $job -LastOccurrence $lastOccurrence -Now $Now
-            $reason = 'due'
+            $occurrence = Get-MaintenanceCatchUpOccurrence -Job $job -State $state -Control $script:MaintenanceControl
+            if (-not $script:StatePersistenceHealthy) { break }
+            if ($null -ne $occurrence) { $reason = 'maintenance-catch-up' }
+            else {
+                $occurrence = Get-DueOccurrence -Job $job -LastOccurrence $lastOccurrence -Now $Now
+                $reason = 'due'
+            }
         }
         if ($null -eq $occurrence) { continue }
 
@@ -5136,6 +5197,7 @@ function Invoke-LaunchPhase {
             }
             if ($blockedByParent) {
                 Set-OccurrenceBlocked -JobName $name -Occurrence $occurrence -Status 'BlockedDependencyFailed' -Reason ("dependency '{0}' finally failed with ContinueOnError=false" -f $blockedDependency)
+                if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
                 Clear-DependencyWaitLog -JobName $name
                 continue
             }
@@ -5147,6 +5209,7 @@ function Invoke-LaunchPhase {
                     $waitMinutes = [int]($Now - [datetime]$waitState.FirstSeen).TotalMinutes
                     if ($waitMinutes -ge $dependencyWaitTimeout) {
                         Set-OccurrenceBlocked -JobName $name -Occurrence $occurrence -Status 'BlockedDependencyTimeout' -Reason ("dependencies still blocking after {0} min: {1}" -f $waitMinutes, (@($blockingDependencies) -join ', '))
+                        if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
                         Clear-DependencyWaitLog -JobName $name
                         continue
                     }
@@ -5195,7 +5258,8 @@ function Invoke-LaunchPhase {
             # Read-only check; the atomic claim below stays authoritative.
             $peerClaimCheck = Get-OrchestratorPeerOccurrenceClaimState -JobName $name -Occurrence $occurrence -Now $Now
             if ($peerClaimCheck.State -eq 'Terminal') {
-                Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $peerClaimCheck.Claim
+                if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
+                else { Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $peerClaimCheck.Claim }
                 if ($isPipeline) {
                     Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status ([string]$peerClaimCheck.Claim.Status) -Attempt $attempt -Detail 'The occurrence was completed through an existing shared claim.'
                 }
@@ -5237,7 +5301,8 @@ function Invoke-LaunchPhase {
                     }
                     $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
                     if ($terminalClaim) {
-                        Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim
+                        if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
+                        else { Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim }
                         if ($isPipeline) {
                             Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status ([string]$claim.Claim.Status) -Attempt $attempt -Detail 'The occurrence was completed through an existing shared claim.'
                         }
@@ -5278,6 +5343,7 @@ function Invoke-LaunchPhase {
         else {
             Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId
         }
+        if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
         $launchedThisTick.Add($name)
         if (-not $script:StatePersistenceHealthy) {
             Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
@@ -6615,8 +6681,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH4xm+H6H0Efwm
-# jX2DswXhPzb1BmaQfXID/eKJB0sX5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2Vj/nLoau5jww
+# RBhvUQRuYcHJSMGMuloxXV9Qt5kfl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6749,31 +6815,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMjL2fzuqW4xQCFDCh863WavMcumDPWRUfhnuWdUw+WNMA0GCSqG
-# SIb3DQEBAQUABIIBgDhxoAQKCZ0BsGubeGG4Y7dvmyxh7+1c5gE9oDzgUQkIeM+n
-# sEYHO8RdBkb8BcZJMgJ9qgvt+ltYj4rfbL4VeFjl32G7Vql46A2fqeCH/8izc5AA
-# 1QzAH+Tu0RzcuEmM0f4dcVK05jr6VdTUqxx/mFXRu/smLIuv6Nvl8b8qtjUFw6XR
-# jbdZgP0PLtJZV8v8mnYjuDToChxNF9KV9mZYc4pilaf1mF6rrvU4zcednkYcWB83
-# 3+NXRgRzM2bynntNWW6vGVchUy41Sz4EX6hjtpawzC5DJ3tQpabOj5g4gd7kHvJg
-# N52Nhm9fgSTppX4CgZrlvIHnwBPcgO0ysNOiBtqVpeaFpdfANOwhDfIyDJevZth3
-# N7IFI0O5anyGr02Vf3EAxOHAd4b5lxllYvsK7VurMzmHWHJXbP7rFFuIW0HPK7uT
-# IBGGk0iaT4BR/2P7+qY1zOW2mDyytMsYHpzz0G/El7DaPueMKWh2NDecSe5+7Ktq
-# tQ5Hr7lmKFSiy9WAbaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIHsC/LGm7dogVwdeLCl/7jcqMX+0vaY2RrsC7GBUxrbMA0GCSqG
+# SIb3DQEBAQUABIIBgEcmSMF4YNvlK9W09XkfbBxbsFS/y74+tBwo/39IwLi1ZlXp
+# WT8BPmbxVDLlnbLcBEBNoA6p/od2GcUeQibKffo50kvnjEcfPTgIiSaoWBQhP21i
+# HsXtkT5zlDbvco+e9OhsoXox4KEtaQIrAGmHFPraFwiaTctUmYzwy1NVUHm8sy1n
+# zEJ+ALiezuNJMtw9D+YYnAxqAufb3MesUpV64UFms55xK76L5bW1qT9PVYD39QlA
+# HQCvNEnzHa5mxq1nmAiAFvLq3XZ7FX3jWa4i6y99iY8zMV/UPAMGPFnzjpUvwAkg
+# 3t/JLpMFJHoQ7rqRFGFuimgW/gnX/vokhF6aPZMUJQp4osbiNR8+hV8xaPsJShtJ
+# Wn014rzVVnZMMGI58mzlNpe+p38JCFQWCydHOq9U9aH5W6krdfzOU31b3ijS5DGx
+# Ka/hgQTFIk04iaCjLYkaFbOfetY9JuhN2HRKtIdT92EMSlMZB8JAZT3F/cIpdCai
+# 00jnwgXrUaby1crrrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTI5
-# MDVaMC8GCSqGSIb3DQEJBDEiBCAsJYq6cUHW5t6+DOHoZs4FQuGSC/lu1ni1jYm/
-# 1aHg2DANBgkqhkiG9w0BAQEFAASCAgBTgdh/VLo6tjWjRW4sy0fzGLUieolk7o7X
-# 8eAxJm7xxjKJGDviCk3yh3LPEC74oT1WZwwrLgVSqhZhZ7npscBHBN7EH58EL/df
-# A6IniESVX165T2+aXqwLAcvPjNsIv0wn4NwfxEvi+F4qbYY88lbGH2+6ihGfqmkH
-# fleuyj1ZSVg9q9bbD1VwoM1LNVX5ETel7dlnIWdZ4tWWwWrb5qxZT2dPiebzVDRn
-# IMeLDUmZLD33WjOG/PWw1unKT/hyIXHesobEZRXXknzQP7KLowqPeZibIrwGhDPi
-# uAAZGLVSqzoe1HZNRaljafEYImeARxWnF8bznMZXQSWf65ibtaUQnYUl5FUheCbX
-# 6RvYfYFaLh9eNbowUvuoyNOONl/0K/8Ou9f9cJR+rvts8sw/X7y1MM+yLP2RMpWQ
-# w490dwFrg0RyCFcGoQuNhfecW7SCt2rwzLy8fEhywYQu0qu7zyN3+Oz8xNe1UdfF
-# ++yJQwjZH1ZZWUUEdSTqoOqAyT0mUYswY/cgb8kc4Q7kdcZUay5rAAPgzJ5WlAWI
-# wcb+1audvq6ggFQPORN9AEtL7fgYGo9W+0b+GPokpSEdpknns4CKbaXjWT8dm2Au
-# +dLm41Wkcu+cUA9pN+FY5AVP57tRpzXCNASWu5EzSESaZz3O0P3YLg2Jyy1z3Gqd
-# 9DF7WcLC2Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMzQ0
+# MDVaMC8GCSqGSIb3DQEJBDEiBCDzdH2cQDb4NDEikBXVY4keSmf3p9lk6U+0CiME
+# 9ytHlDANBgkqhkiG9w0BAQEFAASCAgCLICGjvL3ez6FqwFzrMQcPtWCSEKlJovUY
+# YacznUBhJoKBocGqatwkSq6xbdyVg+ehDqcYofHqbKvHw65oUmI+z0nIJxJeFFDE
+# KweuWOt0lsWpLLpsTt9nw24pZkto1wg3HWQ07VCTgFZ3ucDfR4LZ9r8fSWyCcmJK
+# JeZDgtVn/3pVMcIVga2B2gz49P4p4oPrEeVNiAUdlXKhoO9+WkhvVM1w3SgViKew
+# 8h6shz/wAAwZ+RP414xpVR8Hz8gzB1sXR134IML90cXQafMnL4wJD/IVvnJ9uB6U
+# M6xjFJqTcQCpLleO8k7QVSCRgu6nMmAQryrx5xxJ3qEJYN6BUTvWAqLLoeyPUPCt
+# Ylnj6pJ7OCBywTuUIAXJF7AatGURZbIdPN9rtsw0l809vPw/YFEx3jwWtXsz9Yic
+# BJ3ufHrjDDuRQ/WGwdIfiL3AFRTsPpwcsofX1UiWuW7ameHE/Jjj5NNRbtUwOPUR
+# VALX0Y55KveJOEvkihdumhQMccAnKY8roi9qbEpazITaz1dkO0i2I0W2MCL/8a/g
+# TdFaQ6UYBMivn/LbujHkwj929Ke/iadwMRbwguC5a74VuWMGUkKfSAH5ox1fKn3+
+# XBGNF8Qonl2mxI+u7zngzW5VUygOmBujkUGij4uGsVskJqejcXUodwzB6kpNHpGa
+# dhjJLeXFAg==
 # SIG # End signature block

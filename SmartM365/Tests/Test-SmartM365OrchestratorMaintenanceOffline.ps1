@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -18,10 +18,10 @@ function Assert-Case { param([bool]$Condition,[string]$Message) $script:Cases++;
 function Assert-Throws { param([scriptblock]$Body,[string]$Pattern) $failed=$false; try { & $Body | Out-Null } catch { if ($_.Exception.Message -notlike $Pattern) { throw }; $failed=$true }; Assert-Case $failed "Expected refusal: $Pattern" }
 function Write-Fixture { param([string]$Path,$Data) $null=New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force; $null=Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Data | ConvertTo-Json -Depth 20))) -Validate { param($d) if ($d -isnot [pscustomobject]) { throw 'Fixture must be an object.' } } }
 function Write-Heartbeat {
-    param([string]$Server,$Control,[int]$Protocol=1,[int]$AgeMinutes=0,[bool]$Healthy=$true,[string]$Lifecycle='Running')
+    param([string]$Server,$Control,[int]$Protocol=1,[int]$AgeMinutes=0,[bool]$Healthy=$true,[string]$Lifecycle='Running',[bool]$CatchUpSupported=$false)
     Write-Fixture (Join-Path $root "$Server/Orchestrator-Heartbeat.json.txt") ([pscustomobject]@{
         ScriptVersion='1.5.39'; Timestamp=[datetime]::UtcNow.AddMinutes(-$AgeMinutes).ToString('o')
-        Lifecycle=$Lifecycle; MaintenanceProtocol=$Protocol; MaintenanceHealthy=$Healthy
+        Lifecycle=$Lifecycle; MaintenanceProtocol=$Protocol; MaintenanceCatchUpProtocol=if($CatchUpSupported){1}else{0}; MaintenanceHealthy=$Healthy
         MaintenanceRevision=$Control.Revision; MaintenanceEnabled=$Control.Enabled
         RunningJobs=@([pscustomobject]@{Name='Synthetic';Pid=999999})
     })
@@ -31,6 +31,10 @@ try {
     $null=New-Item -ItemType Directory -Path (Join-Path $root 'Config') -Force
     $cluster=[pscustomobject]@{ExpectedOrchestratorServers=@('SERVER-A','SERVER-B');PeerHeartbeatStaleMinutes=5}
     Write-Fixture (Join-Path $root 'Config/Orchestrator-Cluster.json.txt') $cluster
+    Write-Fixture (Join-Path $root 'Config/Orchestrator-Jobs.json.txt') ([pscustomobject]@{Jobs=@(
+        [pscustomobject]@{Name='Included';Enabled=$true;AssignmentMode='Elected';Schedule=[pscustomobject]@{Type='Daily';Times=@('00:05','00:10');DaysOfWeek=@()}},
+        [pscustomobject]@{Name='Excluded';Enabled=$false;AssignmentMode='Elected';Schedule=[pscustomobject]@{Type='Daily';Times=@('00:05');DaysOfWeek=@()}}
+    )})
     $clusterHash=(Get-FileHash (Join-Path $root 'Config/Orchestrator-Cluster.json.txt')).Hash
     $zero=Get-SmartM365OrchestratorMaintenanceState $root
     Assert-Case (-not $zero.Enabled -and $zero.Revision -eq 0) 'A new deployment is not initially inactive.'
@@ -81,7 +85,7 @@ try {
     Assert-Case ($audit.Count -eq 4 -and @($audit | Where-Object Outcome -eq Published).Count -eq 2) 'Transitions were not audited.'
     Assert-Case ((Get-FileHash (Join-Path $root 'Config/Orchestrator-Cluster.json.txt')).Hash -eq $clusterHash) 'Maintenance modified cluster configuration.'
     # Real runtime functions, isolated state and no process/tenant connections.
-    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Invoke-LaunchPhase','Get-OrchestratorPendingJobSnapshot')
+    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence','Invoke-LaunchPhase','Get-OrchestratorPendingJobSnapshot')
     $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
     $runtimeResult=& $runtime {
         param($Root,$Cutoff)
@@ -183,6 +187,63 @@ try {
     Assert-Case ($launchResults.StartError -eq 'Synthetic launch failure') 'Launch exception was swallowed by maintenance wrapper.'
     $gate=Enter-SmartM365OrchestratorMaintenanceGate $root -TimeoutSeconds 0; $gate.Dispose()
     Assert-Case $true 'Gate was not released after launch exception.'
+    Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $false 3 'Catch-up without upgraded peers' -CatchUpMissedOccurrences } '*Every expected server*support catch-up*'
+    Write-Heartbeat 'SERVER-A' $again -CatchUpSupported $true
+    Write-Heartbeat 'SERVER-B' $again -CatchUpSupported $true
+    $catchUpControl=Set-SmartM365OrchestratorMaintenance $root $false 3 'Catch up all missed occurrences' -CatchUpMissedOccurrences
+    Assert-Case ($catchUpControl.CatchUpAll -and $catchUpControl.CatchUpFromUtc -eq $again.ChangedAtUtc -and $catchUpControl.ResumeAfterUtc) 'Catch-up choice or window was not persisted.'
+    Assert-Case (@($catchUpControl.CatchUpJobs).Count -eq 1 -and $catchUpControl.CatchUpJobs[0].Name -eq 'Included' -and @($catchUpControl.CatchUpJobs[0].Schedule.Times).Count -eq 2) 'Catch-up did not freeze enabled jobs and their schedule.'
+    $catchUpStart=([datetimeoffset]::Parse($catchUpControl.CatchUpFromUtc)).LocalDateTime
+    $catchUpEnd=([datetimeoffset]::Parse($catchUpControl.ResumeAfterUtc)).LocalDateTime
+    Assert-Case (Test-SmartM365OrchestratorMaintenanceLaunch $catchUpControl 'maintenance-catch-up' $catchUpStart) 'Confirmed catch-up was blocked.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceLaunch $catchUpControl 'maintenance-catch-up' $catchUpStart.AddSeconds(-1))) 'Occurrence before maintenance was admitted.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceLaunch $catchUpControl 'maintenance-catch-up' $catchUpEnd.AddSeconds(1))) 'Occurrence after resume was admitted as catch-up.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceLaunch $resumed 'maintenance-catch-up' $cutoff)) 'Unconfirmed catch-up was admitted.'
+    Write-Heartbeat 'SERVER-A' $catchUpControl; Write-Heartbeat 'SERVER-B' $catchUpControl
+    $pausedAgain=Set-SmartM365OrchestratorMaintenance $root $true 4 'Synthetic pause before catch-up completed'
+    Write-Heartbeat 'SERVER-A' $pausedAgain; Write-Heartbeat 'SERVER-B' $pausedAgain
+    $resumedWithoutNewQueue=Set-SmartM365OrchestratorMaintenance $root $false 5 'Preserve earlier catch-up only'
+    Assert-Case (-not $resumedWithoutNewQueue.CatchUpAll -and @($resumedWithoutNewQueue.CatchUpWindows).Count -eq 1) 'A later maintenance pause or No choice erased earlier catch-up work.'
+    Write-Heartbeat 'SERVER-A' $resumedWithoutNewQueue; Write-Heartbeat 'SERVER-B' $resumedWithoutNewQueue
+    $nextPause=Set-SmartM365OrchestratorMaintenance $root $true 6 'Synthetic third pause'
+    Write-Heartbeat 'SERVER-A' $nextPause -CatchUpSupported $true; Write-Heartbeat 'SERVER-B' $nextPause -CatchUpSupported $true
+    $nextCatchUp=Set-SmartM365OrchestratorMaintenance $root $false 7 'Append another confirmed catch-up' -CatchUpMissedOccurrences
+    Assert-Case (@($nextCatchUp.CatchUpWindows).Count -eq 2 -and $nextCatchUp.CatchUpWindows[0].Revision -eq 4 -and $nextCatchUp.CatchUpWindows[1].Revision -eq 8) 'A subsequent Yes did not append a distinct durable catch-up window.'
+
+    $catchUpDefinitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobOccurrencesInWindow','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence')
+    $catchUpRuntime=New-Module -ScriptBlock ([scriptblock]::Create($catchUpDefinitions -join "`n"))
+    try {
+        $queue=& $catchUpRuntime {
+            $script:Saved=0
+            function script:Save-OrchestratorState { $script:Saved++ }
+            $from=[datetime]::Today.AddMinutes(1)
+            $through=$from.AddMinutes(18)
+            $snapshot=[pscustomobject]@{Name='Repeated';Schedule=[pscustomobject]@{Type='Daily';Times=@('00:05','00:10','00:15');DaysOfWeek=@()}}
+            $control=[pscustomobject]@{Enabled=$false;CatchUpAll=$true;CatchUpFromUtc=$from.ToUniversalTime().ToString('o');ResumeAfterUtc=$through.ToUniversalTime().ToString('o');Revision=20;CatchUpJobs=@($snapshot);CatchUpWindows=@([pscustomobject]@{Revision=20;FromUtc=$from.ToUniversalTime().ToString('o');ThroughUtc=$through.ToUniversalTime().ToString('o');Jobs=@($snapshot)})}
+            $job=[pscustomobject]@{Name='Repeated';Enabled=$true;Schedule=[pscustomobject]@{Type='Daily';Times=@('00:05','00:10','00:15');DaysOfWeek=@();MissedRunPolicy='Skip'}}
+            $laterEnabled=[pscustomobject]@{Name='Later';Enabled=$true;Schedule=$job.Schedule}
+            $unplanned=Get-MaintenanceCatchUpOccurrence $laterEnabled @{} $control -ReadOnly
+            $job.Schedule.Times=@('00:30')
+            $state=@{}
+            $readOnly=Get-MaintenanceCatchUpOccurrence $job $state $control -ReadOnly
+            $first=Get-MaintenanceCatchUpOccurrence $job $state $control
+            Complete-MaintenanceCatchUpOccurrence $state $first
+            $second=Get-MaintenanceCatchUpOccurrence $job $state $control
+            Complete-MaintenanceCatchUpOccurrence $state $second
+            $third=Get-MaintenanceCatchUpOccurrence $job $state $control
+            Complete-MaintenanceCatchUpOccurrence $state $third
+            $done=Get-MaintenanceCatchUpOccurrence $job $state $control
+            $again=Get-MaintenanceCatchUpOccurrence $job $state $control
+            $nextFrom=$from.AddDays(1); $nextThrough=$through.AddDays(1)
+            $control.CatchUpWindows+=@([pscustomobject]@{Revision=22;FromUtc=$nextFrom.ToUniversalTime().ToString('o');ThroughUtc=$nextThrough.ToUniversalTime().ToString('o');Jobs=@($snapshot)})
+            $next=Get-MaintenanceCatchUpOccurrence $job $state $control
+            [pscustomobject]@{ReadOnly=$readOnly;First=$first;Second=$second;Third=$third;Done=$done;Again=$again;Next=$next;Unplanned=$unplanned;Saved=$script:Saved;Cursor=$state.MaintenanceCatchUpLastOccurrence;Revision=$state.MaintenanceCatchUpRevision}
+        }
+        Assert-Case ($queue.ReadOnly -eq [datetime]::Today.AddMinutes(5) -and $queue.First -eq [datetime]::Today.AddMinutes(5) -and $queue.Second -eq [datetime]::Today.AddMinutes(10) -and $queue.Third -eq [datetime]::Today.AddMinutes(15)) 'Catch-up did not preserve every occurrence in order.'
+        Assert-Case ($null -eq $queue.Unplanned) 'A job enabled after confirmation entered an old catch-up queue.'
+        Assert-Case ($queue.Next -eq [datetime]::Today.AddDays(1).AddMinutes(5) -and $queue.Revision -eq 22) 'A new confirmed maintenance window did not follow the earlier completed window.'
+        Assert-Case ($null -eq $queue.Done -and $null -eq $queue.Again -and $queue.Saved -ge 4) 'Catch-up was not durably completed once.'
+    } finally { Remove-Module $catchUpRuntime }
     # Invalid state cannot be interpreted as disabled, and deletion cannot reset it.
     $goodBytes=[IO.File]::ReadAllBytes($paths.State)
     $invalid=$again.PSObject.Copy();$invalid.Enabled='false'
@@ -225,8 +286,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDn22k63qav4e7O
-# tUmoR3HMkgCs5XSDFgaHUdhwt7usB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBb7NBzGMdyu1fK
+# kVKuZJ/FBrjo8P2m7GnXSKgS3mkLh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -359,31 +420,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOzWLO5H+kw6JtR0jSGKGN31DQgdmQtbYpbcQpddlFlTMA0GCSqG
-# SIb3DQEBAQUABIIBgKmPp4Dy5B7NXm5CVTMB9HdxF8jbZ/QA0CRRhFx8eI+SGh9f
-# skd8Y+UlLCVk7VSP/PWpBRmLce5BqXoZ1pkdPEqLLBtZZaCexl3tPSvyUFqphK/V
-# 9FtmjGgs/0My+AC4XewnkqrB5z3x8xeQ33bDEIptouqia6d4N6ZYVVxDpn+Tz+U5
-# ZLMceuOrXQyxkmBNMFnlci/dDtsV+8hTOZ40/0zDIbvBGLdOjthLfFJYS7XQjNBS
-# BDftJ4ZnsNNjR7ooOMFTxN/Ah27O+wyD1RqtDxsViME9+XwmbQRSunM4p8CeCSxD
-# R4yDgjkvwDZrnnS8K8vUnsCIfZ64t+yRHNRMWYrgCgrtFrTvOQ0sfoYQWTa12WaG
-# 3cnFGjgHmUF2J8BwCh3p9NRZDI6zC5p6gYSZfgErG7TOxRp7/Ic8vFqKuMLzHrfO
-# w+VXh2y1ENtADzdJuqmBHbHhs9iJwEo4LXM4+P3D9uEeHkHITn/D6zrpB9t8tGUM
-# uxtRAMwXXHcfLFZH16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDIZEfjw3HAxIZrALwl1yZPmQi00Xq8WMzr++DFSmahUMA0GCSqG
+# SIb3DQEBAQUABIIBgKu2YprWTsIz/LcypIc3GxYjULrkAKwbBH16Zmmuna81JtRb
+# iA3AC23I+oZ/R6sZdU5Je+zuiFKv1Vzrtn8x0hRcE+FMwu1xY6QZUA9YMneqmfgd
+# x7CO7nOLP7+fe0HYI+xYQSgcJfRTGwjNiyoxnv0yLtDdAZpQv+0aRQVXLjWkkSBF
+# mrS14c+QMU2fkwSO9FRQFutn6EKrHlPGC09LHwuJv+pNwo/8fH0QXyS2tv3AAGCC
+# 1gKyCU6XlZodBD6kbYX/Fs1nb9Z/pS8yTiAgSe/Sqzo7gNDYpmtqVzT69Rd6HGIX
+# p3vxszPrCcYWZGCVi7rvSkJzg8w1psvg7IC2ntSJp3x2hKNrzNyzD2Ky9dtuzN9+
+# X3/ZsbB4kSLJ1/8D7iqXQ8yzjGYRP+XdNrcDMch3EBUUjAxUh6NCIiUkXeWA0gkM
+# Au7Bsmncioljpqzt3SlAwuuiBw+p91Q5z9odP4VbWv6RnfapLJ9SGPCQrcza4AB2
+# bHyDIS47g3pROlfmn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjI2
-# NDBaMC8GCSqGSIb3DQEJBDEiBCAal5worjonvyGzzywArHn1lGWZrRFhWYIf8qrq
-# UBajeDANBgkqhkiG9w0BAQEFAASCAgAEa81HjoFn+LBLEOwLRiNFfjAd/bmMl4iD
-# DUwSxYCTFSqC1aFRripukW3xbt9zmeXMrLZYHTanzirgMGQtvW8qmBEPK32luqF/
-# w1VPPWGMMGn9fZyNZDthhnpvI5WMHldxaWxI8NWAsNb80NFP9gNmd5mFIixjsjw0
-# TYnv++zT2qYbpHihrFXiKWdkLlLg6t5cnbceMyvGOoV2u/zm+dxP7OQ80huKrCuk
-# XVMXG8EK1m5hXfv7NlUrVtEa53DMidVYTxqKonrBYOUxZIlrotqlSWUqaezs8Irm
-# emxo7NuATprIBACvcn/qublNROF3mPuzcQ4te/JsSFZs/OR3hYTexs8tRNszhVu/
-# 9U1dTJzcudjLWRJ+Okd6JlYqqzIlBVYyQlcSfAQJfnw0//4SqTJoZ8cCJVUWY2Gx
-# GqifmS3Y13ynAZ59WSQMeIxPv3KU3f5mMfohwXHFpzFXWCntDxMrqSUVRiUvM9Y9
-# LDs7L+vO4q1zLXI4MSU947rczblmhjxt66AWiBrMDhxzKDQ2tVyJyUnYSej63o2r
-# I1SFYwgvUm7pcDsdPENR8y9jCGMy1e3MvsIAeNR8WoALyQ93w1bye3tuC+dghXXI
-# TI3Aza9tmPzQwdpwOmaYqoF1ZyoamhPJhSA8D3mWSi8t7Oku81l29ETHj/bEOgVP
-# 62752c6EbA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMzQ5
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCuLWS0s4G02jEU4txVOD8Wg/dVewo8g/rrNFj1
+# aZhqfTANBgkqhkiG9w0BAQEFAASCAgB9tkA6kWLnXZYpK4CqqMgspcSbVER6GwOi
+# jLUcDw7jxlqNPywJYUa25LTknItiOQxkyWAmK2CbfTL0YqJesAd1hqv32Zyfxn0T
+# WgNpTkciRZYvCAnKt7USZzgkYGyjl35czl2U2eagC9oBnkTsgCm8EqVShKigTNJB
+# vjscqYDE7JPN6AsoDQSDqa2TjNmEzFtzUoXLnvRFM/vb2lZ3vC9Iyjnog5yxydEH
+# qO5ptl8JGp//iV31/vBK3LPZGXmz9dH+saIkWbh2QeQjsyJdMc4zY2szfvFdG8se
+# Cjs8FRDJA0Hjp9TbgD9qllpzemAE0Krz2ZMJ2U4yEZk9l88KqoiAh+ezMHlx6ALP
+# 6+FAYxIIoZUCJWSjz9IU6Ar5diUAbo3xDGSC5sL8girHnakeVXpFU1skJShOO1t1
+# b0POYOu8kZJNGgoCOTZY/tM15LNN1l1omEWG3r+ZHZNI/ltctTe0m86NyXl3qx/1
+# 0EBqp6qlI9DstyNiXCCTuWvfyFyyKfHEgbBitN/65RX4JNPFlMk817fd6GSHEUEf
+# znU8Z9UJDMmRjoJpvqhCuEInNNLLLlr+M8hD7FJVt6dHIKk9nekDApV7I1tcWfEp
+# nDehOBP08iIB8yPHPeQv3b+Ty9QzFSiLsvb6WkcZu5dvU/LJwCBVK/kuw1MoAjV4
+# az8TnzBmpQ==
 # SIG # End signature block
