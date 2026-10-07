@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.4
+1.3.5
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.4'
+$script:AppVersion = '1.3.5'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -75,7 +75,7 @@ Add-Type -AssemblyName WindowsBase
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SmartM365 Orchestrator" Width="1500" Height="900"
+        Title="SmartM365 Orchestrator" Width="1500" Height="900" WindowState="Maximized"
         MinWidth="1180" MinHeight="720" WindowStartupLocation="CenterScreen"
         Background="#F3F6FA" FontFamily="Segoe UI" UseLayoutRounding="True">
     <Window.Resources>
@@ -1792,8 +1792,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYCiUmuyTjyrDX
-# 9Y203bnw4cnCwhp3NNyipf/Rszkgp6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgC9OkLLeVBkkk
+# lOfYeIePuNyxA2fkxbQV7v4+03AEqqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1926,31 +1926,31 @@ $window.Add_Closing({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH59ZIHXYcoGjgLC+25wrtR3mdAN1pr/dzv9LJT04ZwBMA0GCSqG
-# SIb3DQEBAQUABIIBgKd+wweJLx4cykThleMI/bcTBDoXKtXBYVP55eITdRewdDTj
-# BcRuX9ylo3ETsNgMnRyf43CIYaKYfcW7C65GHvoJNw8c9/Em2ML+NbXRukVieLBM
-# ZVi84XEQTUdN5c8PODao0BIOcy1qdBT+FfbdZ2ovihkF7961hAWcb60gyXkhv/wY
-# GaNoVtOL+anz2tCUh10E059oPxi9LyXh4cmWuCymIY6Z2ryxnzsUCj/lACK6dbLr
-# nii9akHX6gk4FJ2U/c1ko2ZbLF9DWO4u8M5dnWtrotwm5195+tNoJ1ObFd1avo6g
-# pVmU3r7jlLkAu6bu/FUE1fS5DzHfrWkg966Mg6zeo+hOLzDNSUJLwpt5ULIXF8xC
-# aAB3NsWZ+F9YR9oDrQdacXFRpLZBHlT8ln84ma32GhWF5PPMQ8VBkTfSG1mxSLzW
-# KfRsKpPfmwy3gQd9kxfbu25szqiH3VUjupyw5NvMHJE9iolauscM3TLMu/6cYMOE
-# Dsyt9IObYkVw2VW+mqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPQsFojV/XBy+pWd8htGx6xjHwb3GHa5DEOvXaJunLEbMA0GCSqG
+# SIb3DQEBAQUABIIBgA5o9QpAXlTVlSNs8JbLfVUTNPWs9NxQ42Twks8acyVBsNoi
+# NnWEbP45s/rS5hL/jBNynHyKanhx/skgx91S/PFytysbk0HNCKXVNQUckecBYERN
+# iYMkQU+yiLNaPXFvd18PxPmfj3eCS1vB5XGFOjGvy6VaNyORCXUtnQ+ReERaAkd+
+# 0ZjuatiK2YU5Yz6B0ql3yygh1YR6dU0Qy+qCyLRF4LDnb3IAc2eK4rVG5QQJwi0+
+# YltX+7Qeh6nRsXIElpc6sZn0nEBe0nu8U22JhhlLv7UlCh7NLD9MWi6CnjcTEq9A
+# f4waHkaE96qo0Wo6YVOm84yJgwg9Ah7RnbiOJsba4R0GX9K1EDHAViZlX97Lgdx7
+# r9EEr7OAM3HzC8lFlWpVvrGEO3oJOMNslIuCZ2St7U7vv4Riq9waxVB21xWFZXXw
+# zswBhy6pPLmagR4bHf5RT4B2rTJAkVBkUMibIN3xLYTXEtytFrenZfWVbGH9dOqu
+# lUKC+Q0Kf3LGWjLDdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMzE0
-# MjNaMC8GCSqGSIb3DQEJBDEiBCCbkA7KTklfOzrGCeJ+ByOWDlqmEzzcqSX7ViVe
-# cI5RHTANBgkqhkiG9w0BAQEFAASCAgAsYeVKjOKnr2ks8fEpUKp37xMg3/9V72rq
-# S+vd4A/EvyEAH9d69sPp258DVjID/27qygFvGafJ8LS8TlhPNPUmDPszhkCKcD5n
-# yxZtfESbfwkWqZZHk6PwzUwQmwWRlPm2mziaAywM8AEyC0XaELVaJz0ZXCY5NqUa
-# noCDzSXmp7FCSwnRMvdJyXRTgUMlkTMmkc2fK9TLmpNCK3XoHoHFrwIyOAjRf1RP
-# 3duKqtjT253K7CuCwouxeQ/upvyzLkej17wKZCzewjL5bNYp3H8cc+5somwMZdBP
-# DJAEm8FUBCIWfDGIavXYr+FA3VvYALAoHMii/1Lwn2br+U88v2eoKcvhxlNWQy/2
-# /2//l0VxVs5Dv2J41gXROWjDr4GmarUqFNB8qYOOxa2yKX5viMvJwDtommuCiCQW
-# LnFx0qJ9A9KOnWp56Q1b7kg6kV14SgB/P3iw4OItfXeTKZYO4IvoY7bCOKHyTNzc
-# yYdx4WCN6Wekx2f2zqfA3e9RJFCwP5PtLKpHd4q55hEYCVTa8APRRBhm2M6yOBMm
-# V0bGisEBTSOzYUG8EfDyDz55YBMy0uitjaJAjRccUFt6U/I0rzomQJ8GMJMvSBvj
-# IENgeLJnGAAoKY4CpW6E7Rz7bBBzJnXJQKlR3Zz5ZW0m2sySUaMCKvGn1fiGKYbw
-# X/nqwbHVvA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDU4
+# MTBaMC8GCSqGSIb3DQEJBDEiBCCKZHaf51x0mxvKvSKxz4Bta4G4uHe2/bTrOnM+
+# 016VMzANBgkqhkiG9w0BAQEFAASCAgAgWmkVaCi18QXwJ/MdbVxeNUBTe4EJiGTw
+# aJVeYJ35mwgnXmeVOlv/0+pLGN/t1qSU2wQr4WrOOKsfDEuaxOHzFGeBkxLAXrYj
+# pQSjnoHOmQ0zE7uitsAKDTZXCACbp/Ri7R8Qxl03gJ14Vu4gL09JBEHiA9NWuRa8
+# AySsC8obliXvNFrhihAeHBeG9TvLAPQyyJkjuZx3z7UWcu8JczCjxRtQBltCqf4Y
+# dsS370i99zOQAh5W1rlHdrZDEY3nvA6cfAMCAninUkQT8iwLJwDNKBP0MlvyVLRf
+# c8FSKWkuCuLW+fBuz8RfT+77RHPghZ/deTbY0jbGXBAZyWpRQ5KuoBPoqkTYqfnI
+# BQmz5elCDOKGOKH9twTPCSiLT7xynKcriiAR8YPrk36XdmVTxAs0EJyqVZj4Z76r
+# pty3FLvpMx1jio/ZwvSYsKDccSn1fr15HUSRbN76jmLJFQJG47xlcZfWQapBsHFb
+# 96QzdR5Au1LyyiXg2kok6M2oEJywcNxkME08ZLR+tAkvC0ezqmCbymJL9y4kgHIp
+# 4zArsoZOMe6N2yrY6drjh6Wh2t0mjH1+QaltE5MYgN8x5Bg7BuinXXH5rgW+Bnld
+# gtJCdahk/UlQIPNl/Dz9ZoN1owseg2Z/N5Nw8iFm6GM+YI5glNh07EpyISuvstu7
+# gy3/bEgBgw==
 # SIG # End signature block
