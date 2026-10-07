@@ -32,7 +32,7 @@ table 'License Evidence'
 		displayFolder: Licensing | Capacity
 		lineageTag: 3a34d8d2-c7b8-455f-a8d9-79ea4608c67d
 
-	measure 'Observed Potentially Reclaimable Assignments' = SUM('License Evidence'[Potentially Reclaimable Assignments])
+	measure 'Observed Potentially Reclaimable Assignments' = [License Report Recovery Candidates]
 		formatString: #,0
 		displayFolder: Licensing | Optimization
 		lineageTag: c63d9d98-46cf-42d2-a7bc-119688956a6d
@@ -52,12 +52,12 @@ table 'License Evidence'
 		displayFolder: Licensing | Evidence
 		lineageTag: 5cc9d953-acbb-48a8-8b10-4d89b40d489c
 
-	measure 'Microsoft 365 Enabled Units' = CALCULATE ( SUM ( 'License Evidence'[Enabled Units] ), 'License Evidence'[Microsoft 365 Plan] IN { "F3", "E3", "E5" } )
+	measure 'Microsoft 365 Enabled Units' = CALCULATE ( [License Report Enabled Units], 'License Report Summary'[Category] = "Suite" )
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: ab61b7ea-fd17-44be-ae46-1146b1873f37
 
-	measure 'Microsoft 365 Consumed Units' = CALCULATE ( SUM ( 'License Evidence'[Consumed Units] ), 'License Evidence'[Microsoft 365 Plan] IN { "F3", "E3", "E5" } )
+	measure 'Microsoft 365 Consumed Units' = CALCULATE ( [License Report Consumed Units], 'License Report Summary'[Category] = "Suite" )
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: 6d8a72ff-af96-41b2-919a-6ac54186e1bf
@@ -67,27 +67,27 @@ table 'License Evidence'
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: b0f195fe-ac36-448f-829b-a771e63b659b
 
-	measure 'F3 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "F3" ), 0 )
+	measure 'F3 Reclaimable Assignments' = [License Report F3 Recovery Candidates]
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: fa70c748-4552-4812-9db4-1f3121f9d86a
 
-	measure 'E3 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "E3" ), 0 )
+	measure 'E3 Reclaimable Assignments' = [License Report E3 Recovery Candidates]
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: b4e25a48-7dbf-4f6e-99b6-0c500e5872ba
 
-	measure 'E5 Reclaimable Assignments' = COALESCE ( CALCULATE ( SUM ( 'License Evidence'[Potentially Reclaimable Assignments] ), 'License Evidence'[Microsoft 365 Plan] = "E5" ), 0 )
+	measure 'E5 Reclaimable Assignments' = [License Report E5 Recovery Candidates]
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: 539b6d11-7c27-4596-95fe-e14926d88bdb
 
-	measure 'E3 to F3 Review Candidates' = SUM ( 'License Evidence'[E3 to F3 Review Candidate Assignments] )
+	measure 'E3 to F3 Review Candidates' = [License Report E3 to F3 Review]
 		formatString: #,0
 		displayFolder: Licensing | Optimization
 		lineageTag: 326209b1-71ea-4ff6-bdcb-6887d8a4a9df
 
-	measure 'Immediate Reclaimable Assignments' = SUM ( 'License Evidence'[Potentially Reclaimable Assignments] )
+	measure 'Immediate Reclaimable Assignments' = [License Report Recovery Candidates]
 		formatString: #,0
 		displayFolder: Licensing | Optimization
 		lineageTag: 6f5d6136-4e81-46df-b2e8-c7a4d3c07ec6

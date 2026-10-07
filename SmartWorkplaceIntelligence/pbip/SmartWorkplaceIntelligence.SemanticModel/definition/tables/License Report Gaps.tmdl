@@ -1,0 +1,54 @@
+/// Mailbox and AD gap counts from the daily SmartInventory email; missing evidence remains blank.
+table 'License Report Gaps'
+
+	measure 'License Report User Mailboxes Without Suite' = IF([License Report Snapshot Consistent] = 1, CALCULATE(SUM('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "Total"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report Accounts Without Mailbox Or Suite' = IF([License Report Snapshot Consistent] = 1, CALCULATE(SUM('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Total"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	column 'Snapshot ID'
+		dataType: string
+		sourceColumn: Snapshot ID
+
+	column 'Tenant Key'
+		dataType: string
+		sourceColumn: Tenant Key
+
+	column Section
+		dataType: string
+		sourceColumn: Section
+
+	column Metric
+		dataType: string
+		sourceColumn: Metric
+
+	column Value
+		dataType: int64
+		sourceColumn: Value
+
+	column 'Evidence Status'
+		dataType: string
+		sourceColumn: Evidence Status
+
+	partition 'License Report Gaps Import' = m
+		mode: import
+		source =
+				let
+				    Snapshot = GetLicenseReportSnapshot(),
+				    Gap = Snapshot[MailboxGap],
+				    Entries = {
+				        [Section="UserMailboxes", Data=if Gap = null then null else Gap[UserMailboxes], Keys={"Total","Universe","OtherSkus","NoSkus","Unknown","EntraEnabled","EntraDisabled","EntraStateUnknown"}],
+				        [Section="NoUserMailbox", Data=if Gap = null then null else Gap[NoUserMailbox], Keys={"Total","Universe","OtherSkus","NoSkus","Unknown","Guests","MemberEnabled","MemberDisabled"}],
+				        [Section="AdGapActivity", Data=Snapshot[AdGapActivity], Keys={"Members","AdObserved","NoObservedMatch","Ambiguous","AdEnabledRecent","AdEnabledInactive","AdEnabledNoDate","AdDisabled","AdEnabledUnknown"}]
+				    },
+				    Rows = List.Combine(List.Transform(Entries, (entry) => List.Transform(entry[Keys], (metric) =>
+				        let available = entry[Data] <> null and Record.FieldOrDefault(entry[Data], "Available", false),
+				            value = if available then Record.FieldOrDefault(entry[Data], metric, null) else null
+				        in [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], Section=entry[Section], Metric=metric,
+				            Value=value, #"Evidence Status"=if value = null then "N/D" else if Record.FieldOrDefault(entry[Data], "Provisional", false) then "Provisional" else "Qualified"]))),
+				    Result = Table.FromRecords(Rows, type table [#"Snapshot ID"=text, #"Tenant Key"=text, Section=text, Metric=text, Value=nullable number, #"Evidence Status"=text])
+				in
+				    Result

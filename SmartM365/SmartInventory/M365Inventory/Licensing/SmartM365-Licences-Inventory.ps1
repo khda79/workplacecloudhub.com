@@ -9,7 +9,7 @@
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
 .VERSION
-1.42
+ 1.43
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.42
+     Version : 1.43
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -834,7 +834,7 @@ function Get-LicensesMailboxGapSummary {
     [Parameter(Mandatory)][System.Collections.IDictionary]$AllSkusByUser
   )
 
-  $userMailboxes = [pscustomobject]@{ Available=$false; Universe=0; Total=0; OtherSkus=0; NoSkus=0; Unknown=0; Reason='' }
+  $userMailboxes = [pscustomobject]@{ Available=$false; Universe=0; Total=0; OtherSkus=0; NoSkus=0; Unknown=0; EntraEnabled=0; EntraDisabled=0; EntraStateUnknown=0; EntraStateAvailable=$false; EntraStateReason=''; Reason='' }
   $noUserMailbox = [pscustomobject]@{ Available=$false; Universe=0; Total=0; OtherSkus=0; NoSkus=0; MemberEnabled=0; MemberDisabled=0; Guests=0; Unknown=0; Members=@{}; Reason='' }
   if (-not $MailboxSource.Ready) {
     $userMailboxes.Reason = [string]$MailboxSource.Reason
@@ -845,6 +845,7 @@ function Get-LicensesMailboxGapSummary {
   $mailboxTypes = @{}
   $duplicateMailboxIds = @{}
   $unqualifiedUserMailboxIds = @{}
+  $userMailboxCandidateIds = @{}
   $unjoinedMailboxRows = 0
   try {
     foreach ($row in (Import-LicensesSourceCsv -Source $MailboxSource)) {
@@ -875,6 +876,7 @@ function Get-LicensesMailboxGapSummary {
       $userMailboxes.Universe++
       if ($TargetSuitesByUser.ContainsKey($id)) { continue }
       $userMailboxes.Total++
+      $userMailboxCandidateIds[$id] = $true
       if ($AllSkusByUser.ContainsKey($id)) { $userMailboxes.OtherSkus++ }
       else { $userMailboxes.NoSkus++ }
     }
@@ -882,19 +884,11 @@ function Get-LicensesMailboxGapSummary {
   }
   catch { $userMailboxes.Reason=$_.Exception.Message; $noUserMailbox.Reason=$_.Exception.Message; return [pscustomobject]@{ UserMailboxes=$userMailboxes; NoUserMailbox=$noUserMailbox } }
 
-  if (-not $ActiveSource.Ready) {
-    $noUserMailbox.Reason = [string]$ActiveSource.Reason
-  }
-  elseif (-not $OnPremSource.Ready) {
-    $noUserMailbox.Reason = "on-premises UserMailbox source: $($OnPremSource.Reason)"
-  }
-  elseif ($unjoinedMailboxRows -gt 0) {
-    $noUserMailbox.Reason = "$unjoinedMailboxRows mailbox rows have no Entra ID; absence of a mailbox cannot be established"
-  }
-  else {
+  $accounts = @{}
+  $duplicateAccounts = @{}
+  $activeReadError = ''
+  if ($ActiveSource.Ready) {
     try {
-      $accounts = @{}
-      $duplicateAccounts = @{}
       $accountRows = 0
       foreach ($row in (Import-LicensesSourceCsv -Source $ActiveSource)) {
         $accountRows++
@@ -906,6 +900,36 @@ function Get-LicensesMailboxGapSummary {
         $accounts[$id] = $row
       }
       if ($accountRows -eq 0) { throw 'empty Entra user export' }
+      foreach ($id in $userMailboxCandidateIds.Keys) {
+        if (-not $accounts.ContainsKey($id) -or $duplicateAccounts.ContainsKey($id)) {
+          $userMailboxes.EntraStateUnknown++
+          continue
+        }
+        $enabled = ([string]$accounts[$id].AccountEnabled).Trim().ToLowerInvariant()
+        if ($enabled -eq 'true') { $userMailboxes.EntraEnabled++ }
+        elseif ($enabled -eq 'false') { $userMailboxes.EntraDisabled++ }
+        else { $userMailboxes.EntraStateUnknown++ }
+      }
+      if ($userMailboxes.EntraEnabled + $userMailboxes.EntraDisabled + $userMailboxes.EntraStateUnknown -ne $userMailboxes.Total) {
+        throw 'UserMailbox Entra states do not reconcile with the unlicensed mailbox total.'
+      }
+      $userMailboxes.EntraStateAvailable = $true
+    }
+    catch { $activeReadError = $_.Exception.Message; $userMailboxes.EntraStateReason = $activeReadError }
+  }
+  else { $userMailboxes.EntraStateReason = [string]$ActiveSource.Reason }
+
+  if (-not $ActiveSource.Ready -or $activeReadError) {
+    $noUserMailbox.Reason = if ($activeReadError) { $activeReadError } else { [string]$ActiveSource.Reason }
+  }
+  elseif (-not $OnPremSource.Ready) {
+    $noUserMailbox.Reason = "on-premises UserMailbox source: $($OnPremSource.Reason)"
+  }
+  elseif ($unjoinedMailboxRows -gt 0) {
+    $noUserMailbox.Reason = "$unjoinedMailboxRows mailbox rows have no Entra ID; absence of a mailbox cannot be established"
+  }
+  else {
+    try {
       $byImmutable = @{}
       $byUpn = @{}
       $duplicateImmutable = @{}
@@ -1664,6 +1688,175 @@ function New-LicensesRecoveryWorkbook {
   return $file.FullName
 }
 
+function Publish-LicensesReportSnapshot {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][string]$CollectedAtUtc,
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SummaryRows,
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdditionalRows,
+    [AllowNull()]$Usage
+  )
+  $snapshotId = [guid]::NewGuid().ToString('N')
+  $metricByProduct = @{}
+  if ($Usage) { foreach ($metric in @($Usage.Rows)) { $metricByProduct[[string]$metric.Product] = $metric } }
+  $products = foreach ($row in $SummaryRows) {
+    $metric = if ($metricByProduct.ContainsKey([string]$row.Product)) { $metricByProduct[[string]$row.Product] } else { $null }
+    $counts = $null
+    if ($metric -and $metric.Available) {
+      $counts = [ordered]@{}
+      foreach ($key in @('Assigned','Disabled','DisabledUnknown','AdEntraInactive','AdEntraUnknown',
+                         'MailboxInactive','MailboxUnknown','M365Inactive','M365Unknown',
+                         'LocalAppsInactive','LocalAppsUnknown','Multiple','MultipleUnknown',
+                         'MultipleAll','MultipleAllUnknown','SharedLicensed','SharedUnder50',
+                         'SharedEligible','SharedUnknown','RecoveryCandidates','RecoveryUnknown',
+                         'RecoveryPrimaryPc','RecoveryPrimaryPcUnknown')) {
+        $counts[$key] = if (($key -like 'LocalApps*' -and $row.Product -notin @('Microsoft 365 E3','Microsoft 365 E5')) -or
+                            ($key -like 'Shared*' -and -not $Usage.SharedSourceReady) -or
+                            ($key -like 'RecoveryPrimaryPc*' -and -not $Usage.IntuneSourceReady)) {
+          $null
+        } else { [long]$metric.Counts[$key] }
+      }
+    }
+    [ordered]@{
+      Product = [string]$row.Product
+      Enabled = [long]$row.Enabled
+      Consumed = [long]$row.Consumed
+      Subscribed = [bool]$row.Subscribed
+      UsageAvailable = [bool]($metric -and $metric.Available)
+      Counts = $counts
+    }
+  }
+  $otherProducts = foreach ($row in $AdditionalRows) {
+    [ordered]@{ Product=[string]$row.Product; Enabled=[long]$row.Enabled; Consumed=[long]$row.Consumed; Subscribed=[bool]$row.Subscribed }
+  }
+  $sources = [System.Collections.Generic.List[object]]::new()
+  $tenantPath = Join-Path $Folder 'M365_Licenses_Tenant.csv'
+  if (-not (Test-Path -LiteralPath $tenantPath -PathType Leaf)) { throw 'Tenant license CSV is missing before report snapshot publication.' }
+  $tenantHashBefore = (Get-FileHash -LiteralPath $tenantPath -Algorithm SHA256).Hash
+  $tenantSource = Read-LicensesTenantSnapshot -Path $tenantPath -ExpectedTenantKey $TenantKey
+  foreach ($pair in @(
+      @{ Sent=$SummaryRows; Published=@(Get-LicensesFocusedSummaryRows -TenantRows $tenantSource.Rows) },
+      @{ Sent=$AdditionalRows; Published=@(Get-LicensesAdditionalOverviewRows -TenantRows $tenantSource.Rows) })) {
+    for ($i=0; $i -lt $pair.Sent.Count; $i++) {
+      if ([string]$pair.Sent[$i].Product -ne [string]$pair.Published[$i].Product -or
+          [long]$pair.Sent[$i].Enabled -ne [long]$pair.Published[$i].Enabled -or
+          [long]$pair.Sent[$i].Consumed -ne [long]$pair.Published[$i].Consumed -or
+          [bool]$pair.Sent[$i].Subscribed -ne [bool]$pair.Published[$i].Subscribed) {
+        throw 'Mail capacity differs from the published tenant license CSV; report snapshot was not published.'
+      }
+    }
+  }
+  if ((Get-FileHash -LiteralPath $tenantPath -Algorithm SHA256).Hash -cne $tenantHashBefore) {
+    throw 'Tenant license CSV changed during report snapshot preparation.'
+  }
+  $sources.Add([ordered]@{ Name='M365_Licenses_Tenant.csv'; Ready=$true; Provisional=$false; Date=$tenantSource.CollectedAtUtc; Reason=''; SHA256=$tenantHashBefore })
+  if ($Usage) {
+    foreach ($source in @($Usage.Sources)) {
+      $hash = ''
+      if ($source.Ready) {
+        if (-not (Test-Path -LiteralPath $source.Path -PathType Leaf)) { throw "Qualified source disappeared before snapshot publication: $($source.Name)" }
+        if ($source.ModifiedUtc -and (Get-Item -LiteralPath $source.Path -ErrorAction Stop).LastWriteTimeUtc -ne $source.ModifiedUtc) {
+          throw "Qualified source changed during license report preparation: $($source.Name)"
+        }
+        $hash = (Get-FileHash -LiteralPath $source.Path -Algorithm SHA256).Hash
+        if ($source.PSObject.Properties['SHA256'] -and $source.SHA256 -and $hash -cne [string]$source.SHA256) {
+          throw "Qualified source bytes changed during license report preparation: $($source.Name)"
+        }
+        if ($source.PSObject.Properties['ReceiptPath'] -and $source.ReceiptPath) {
+          Assert-SmartM365SourcePublication -ReceiptPath $source.ReceiptPath -Proof $source.Proof
+          if ((Get-FileHash -LiteralPath $source.ReceiptPath -Algorithm SHA256).Hash -cne [string]$source.ReceiptHash) {
+            throw "Qualified source receipt changed during license report preparation: $($source.Name)"
+          }
+        }
+      }
+      $sources.Add([ordered]@{ Name=[string]$source.Name; Ready=[bool]$source.Ready; Provisional=[bool]$source.Forced; Date=[string]$source.Date; Reason=[string]$source.Reason; SHA256=$hash })
+    }
+  }
+  $gap = $null
+  if ($Usage -and $Usage.MailboxGap) {
+    $gap = [ordered]@{}
+    foreach ($name in @('UserMailboxes','NoUserMailbox')) {
+      $item = $Usage.MailboxGap.$name
+      if (-not $item -or -not $item.Available) {
+        $gap[$name] = [ordered]@{ Available=$false; Reason=if ($item) { [string]$item.Reason } else { 'source unavailable' } }
+        continue
+      }
+      $values = [ordered]@{ Available=$true; Reason='' }
+      foreach ($key in @('Total','Universe','OtherSkus','NoSkus','Unknown','Guests','MemberEnabled','MemberDisabled','EntraEnabled','EntraDisabled','EntraStateUnknown')) {
+        $property = $item.PSObject.Properties[$key]
+        if ($property) { $values[$key] = [long]$property.Value }
+      }
+      if ($name -eq 'UserMailboxes') {
+        $values.EntraStateAvailable = [bool]$item.EntraStateAvailable
+        if (-not $item.EntraStateAvailable) {
+          foreach ($key in @('EntraEnabled','EntraDisabled','EntraStateUnknown')) { $values[$key] = $null }
+        }
+      }
+      $gap[$name] = $values
+    }
+  }
+  $adGap = $null
+  if ($Usage -and $Usage.AdGapActivity) {
+    $ad = $Usage.AdGapActivity
+    $adGap = [ordered]@{ Available=[bool]$ad.Available; Provisional=[bool]$ad.Provisional; Reason=[string]$ad.Reason }
+    if ($ad.Available) {
+      foreach ($key in @('Members','AdObserved','NoObservedMatch','Ambiguous','AdEnabledRecent','AdEnabledInactive','AdEnabledNoDate','AdDisabled','AdEnabledUnknown')) {
+        $adGap[$key] = [long]$ad.$key
+      }
+    }
+  }
+  $recovery = @(if ($Usage) { $Usage.RecoveryDetails })
+  $downgrade = @(if ($Usage) { $Usage.DowngradeDetails })
+  foreach ($product in $products) {
+    if ($product.UsageAvailable -and @($recovery | Where-Object License -eq $product.Product).Count -ne $product.Counts.RecoveryCandidates) {
+      throw "Recovery detail does not reconcile with $($product.Product)."
+    }
+  }
+  if ($Usage -and $Usage.DowngradeReview -and $Usage.DowngradeReview.Available -and
+      $downgrade.Count -ne [long]$Usage.DowngradeReview.Candidates) { throw 'Downgrade detail does not reconcile with its KPI.' }
+  $snapshot = [ordered]@{
+    SchemaVersion = 1
+    LogicVersion = '1.43'
+    SnapshotId = $snapshotId
+    TenantKey = $TenantKey
+    GeneratedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+    LicenseCollectedAtUtc = $CollectedAtUtc
+    TenantFileCollectedAtUtc = $tenantSource.CollectedAtUtc
+    Products = @($products)
+    OtherProducts = @($otherProducts)
+    E3ToF3Review = if ($Usage -and $Usage.DowngradeReview) { $Usage.DowngradeReview } else { $null }
+    MailboxGap = $gap
+    AdGapActivity = $adGap
+    RecoveryCandidates = $recovery
+    DowngradeCandidates = $downgrade
+    Sources = $sources.ToArray()
+  }
+  $path = Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt'
+  $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 16 -Compress))
+  $document = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -ErrorAction Stop
+  if ([string]$document.SnapshotId -ne $snapshotId -or [string]$document.TenantKey -ne $TenantKey -or
+      @($document.Products).Count -ne 4 -or @($document.OtherProducts).Count -ne 3) {
+    throw 'License report snapshot failed its identity or product validation.'
+  }
+  $pending = "$path.$snapshotId.pending"
+  try {
+    $stream = [IO.File]::Open($pending, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    $expectedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+    if ((Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Staged license report snapshot hash differs.' }
+    [IO.File]::Move($pending, $path, $true)
+    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Published license report snapshot hash differs.' }
+  }
+  finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
+  $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+  if ($uploadSetting -and [bool]$uploadSetting.Value) {
+    $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path
+    if (-not $uploaded) { throw 'License report snapshot was not uploaded to SharePoint; summary email was not sent.' }
+  }
+  return [pscustomobject]@{ Id=$snapshotId; Path=$path; Data=$snapshot }
+}
+
 function Write-LicensesDailyMailState {
   param(
     [Parameter(Mandatory)][System.IO.FileStream]$Stream,
@@ -1783,6 +1976,9 @@ function Send-LicensesFocusedSummaryEmail {
       }
       catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
     }
+    $reportSnapshot = if ($CsvFolderPath) {
+      Publish-LicensesReportSnapshot -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage
+    } else { [pscustomobject]@{ Id='N/D' } }
     $usageByProduct = @{}
     if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
     $recoveryByProduct = @{}
@@ -1859,6 +2055,10 @@ function Send-LicensesFocusedSummaryEmail {
     $gap05Other = if ($gap05 -and $gap05.Available) { [string]$gap05.OtherSkus } else { 'N/D' }
     $gap05None = if ($gap05 -and $gap05.Available) { [string]$gap05.NoSkus } else { 'N/D' }
     $gap05Unknown = if ($gap05 -and $gap05.Available) { [string]$gap05.Unknown } else { 'N/D' }
+    $gap05EntraReady = ($gap05 -and $gap05.Available -and $gap05.EntraStateAvailable)
+    $gap05EntraEnabled = if ($gap05EntraReady) { [string]$gap05.EntraEnabled } else { 'N/D' }
+    $gap05EntraDisabled = if ($gap05EntraReady) { [string]$gap05.EntraDisabled } else { 'N/D' }
+    $gap05EntraUnknown = if ($gap05EntraReady) { [string]$gap05.EntraStateUnknown } else { 'N/D' }
     $gap06Total = if ($gap06 -and $gap06.Available) { [string]$gap06.Total } else { 'N/D' }
     $gap06Universe = if ($gap06 -and $gap06.Available) { [string]$gap06.Universe } else { 'N/D' }
     $gap06Percent = if ($gap06 -and $gap06.Available -and $gap06.Universe -gt 0) { (([decimal]$gap06.Total * 100 / [decimal]$gap06.Universe).ToString('0.#', $percentCulture) + '%') } elseif ($gap06 -and $gap06.Available) { 'N/A' } else { 'N/D' }
@@ -1893,6 +2093,10 @@ function Send-LicensesFocusedSummaryEmail {
           $item.Section, [System.Net.WebUtility]::HtmlEncode([string]$item.Value.Reason)
       }
     }
+    if ($gap05 -and $gap05.Available -and -not $gap05.EntraStateAvailable -and $gap05.EntraStateReason) {
+      $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section 06 Entra state N/D: {0}</p>' -f `
+        [System.Net.WebUtility]::HtmlEncode([string]$gap05.EntraStateReason)
+    }
     $sourceRows = if ($usage) {
       foreach ($source in $usage.Sources) {
         $state = if ($source.Ready -and $source.Forced) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
@@ -1918,12 +2122,13 @@ function Send-LicensesFocusedSummaryEmail {
   <h2 style="margin:14px 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License recovery overview</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
-      <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#6d28d9;">$topRecoveryE5</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E5</div></td></tr></table></td>
-      <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #2563eb;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#1d4ed8;">$topRecoveryE3</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E3</div></td></tr></table></td>
-      <td width="34%" style="width:34%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #0f766e;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#0f766e;">$topRecoveryF3F1</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates F3/F1</div></td></tr></table></td>
+      <td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#6d28d9;">$topRecoveryE5</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E5</div></td></tr></table></td>
+      <td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #2563eb;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#1d4ed8;">$topRecoveryE3</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E3</div></td></tr></table></td>
+      <td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #0f766e;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#0f766e;">$topRecoveryF3F1</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates F3/F1</div></td></tr></table></td>
+      <td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #d97706;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#b45309;">$e3ReviewCandidates</div><div style="font-size:12px;line-height:17px;color:#334155;">E3 to F3 downgrade review</div></td></tr></table></td>
     </tr>
   </table>
-  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
+  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Recovery cards count license assignments for each suite. F3/F1 adds both suite counts; a user with both may count twice. The E3 to F3 card counts separate manual review candidates, excludes users already in recovery and is not a recoverable license count. N/D indicates unqualified users.</p>
   <p style="margin:0 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">MICROSOFT 365 SUITES</p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>$($suiteCards -join "`n")</tr></table>
   <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
@@ -1943,7 +2148,7 @@ function Send-LicensesFocusedSummaryEmail {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">06 &nbsp; User mailboxes without licence F1/F3/E3/E5</h2>
   <p style="margin:0 0 8px;padding:11px 13px;background:#eff6f8;border-left:4px solid #0f766e;font-size:12px;color:#334155;"><strong style="font-size:19px;color:#0f766e;">$gap05Total</strong> of $gap05Universe qualified EXO UserMailbox &nbsp;&middot;&nbsp; <strong>$gap05Percent</strong></p>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Unknown</td></tr></tbody></table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">Entra enabled</th><th style="$headStyle">Entra disabled</th><th style="$headStyle">Entra state N/D</th><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraEnabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraDisabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraUnknown</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Unknown</td></tr></tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">07 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5</h2>
   <p style="margin:0 0 8px;padding:11px 13px;background:#eff6f8;border-left:4px solid #2563eb;font-size:12px;color:#334155;"><strong style="font-size:19px;color:#1d4ed8;">$gap06Total</strong> of $gap06Universe qualified Entra accounts &nbsp;&middot;&nbsp; <strong>$gap06Percent</strong></p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">Member enabled</th><th style="$headStyle">Member disabled</th><th style="$headStyle">Guests</th><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06MemberEnabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06MemberDisabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Guests</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap06Unknown</td></tr></tbody></table>
@@ -1955,7 +2160,7 @@ function Send-LicensesFocusedSummaryEmail {
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
     Recovery candidates are distinct licensed users per product with a disabled non-shared account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Disabled users and activity/overlap indicators exclude identified shared mailboxes; an unqualified mailbox type is N/D. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
-    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count non-shared users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. Sections 06 and 07 count distinct EXO UserMailbox and Entra account IDs with none of the four target suites; other SKUs are allowed and shown separately. Section 06 percent uses qualified EXO UserMailbox as its denominator. Section 07 percent uses qualified Entra accounts after excluding identified shared, room and other technical mailbox accounts in EXO and Exchange on-premises; its Member enabled, Member disabled and Guest groups add up to the qualified total. On-premises mailboxes match by ObjectGUID/ImmutableId first, then by unique UPN; an unqualified on-premises source makes section 07 N/D. These are coverage indicators, not license recovery candidates. N/D means a source or identity cannot be qualified; sources older than 14 days are excluded.
+    F1 includes M365_F1 and M365_F1_COMM. Multiple assigned SKUs include add-ons, trials and free products. Multiple target suites count non-shared users assigned to at least two distinct F1/F3/E3/E5 suites; the two F1 SKU variants count as one suite. Neither count alone proves redundant seats. Local Apps usage applies only to E3/E5 and uses the available 180-day Windows/Mac report. Sections 06 and 07 count distinct EXO UserMailbox and Entra account IDs with none of the four target suites; other SKUs are allowed and shown separately. Section 06 percent uses qualified EXO UserMailbox as its denominator. Its Entra enabled, disabled and state N/D counts add up to the mailbox total when the Entra source is qualified; these are Entra account states, not AD states. Section 07 percent uses qualified Entra accounts after excluding identified shared, room and other technical mailbox accounts in EXO and Exchange on-premises; its Member enabled, Member disabled and Guest groups add up to the qualified total. On-premises mailboxes match by ObjectGUID/ImmutableId first, then by unique UPN; an unqualified on-premises source makes section 07 N/D. These are coverage indicators, not license recovery candidates. N/D means a source or identity cannot be qualified; sources older than 14 days are excluded.
   </div>
   <h2 style="margin:22px 0 8px;font-size:14px;line-height:20px;color:#334155;">Source freshness</h2>
   <ul style="margin:0;padding-left:18px;font-size:11px;line-height:18px;color:#64748b;">$($sourceRows -join "`n")</ul>
@@ -1963,7 +2168,7 @@ function Send-LicensesFocusedSummaryEmail {
 </div>
 "@
     $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
-    $executionFooter = 'Host: {0} | Generated: {1}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+    $executionFooter = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $reportSnapshot.Id
     $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
     $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
     [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $summaryRows -Usage $usage -CollectedAtUtc $CollectedAtUtc)
@@ -2578,7 +2783,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.42"
+$ScriptVersion = "1.43"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3292,8 +3497,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4fR17GuPRlOab
-# Pfs6BUdjdWlSpa1gJyks11AXl06Lq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2SxAnRLcndhd3
+# FGKYroqjaIy8eZZEnJiz3JQGQzfGWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3426,31 +3631,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDnRfZM9u7LMQVxDxvfGPBdrsSp7vW83zL/Y7UlpCTgXMA0GCSqG
-# SIb3DQEBAQUABIIBgCxpgoZnH8M4ojO3mb/nRbIGtFCOipnGfDBM08+4Q33KRidv
-# oNIx39Bt8h6w+zzHRbgmHYdlYJjUwQu4D15urAciheJxfQqVW3IsUJDVfg+3PAqm
-# LZo3ObEaqO1IGUGL5eSd2tWvt64aj+StxjUpHyxQ34XS97wzmDoBbEuFgelX6KMC
-# zDyPhUBDluBMNt0XgXrVtp0Qh8E6cPDlOJNty6I26Q4gchn/ujai1n47pI5x1nEP
-# 3tJSu/x7pMexTOOciClLi7OMv7jbysTeYKQ6wVJDbYwzE9DfIWp8Jw1fXE16A6JP
-# XZp9zQNItLwJeL/k63K4lIg0mZLGqzvy/swp7pf+srGZNPgrCOH2WFiFgJ+gMbrk
-# gxeNnELJ4xZZhD2aJSF3OgtiN8rOYQUBYfjBZaYq4vw7i3FfTbYV35TTZKYIeQFG
-# 2cTr+Gm492RGk4XuLjBYP5bzE3AJoMVW9F3PCpH049oxg8tT6wU0phTvDnWM477m
-# tM0+2Xk37q3tDcRKDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHhjDMiWKVkAOLlkFyJj1PBmVa0/BgeeZIkZme56HuATMA0GCSqG
+# SIb3DQEBAQUABIIBgKKFOwhImEb4iLfOgiRNbg7cKGDcWznltOxCr12X0bW8sDKR
+# plTYrvhfyVRvcX6uDUnh9T1q/qlQng7+WtXOzJ7dNZvkmbL5Csu2lIF/CIgKnl81
+# BaCzaM4WBMOqiTEUIqq4PlNSpnZ7zDT9msoqXAemtEazQQebQGwRsq55yvw1+JDR
+# DOAqQoiWlilKB9sI3vWb+U+r+ZDyZm09uoOwyRs5zxyxl54+xBMJy1tv5MXhN8vW
+# 79jK4F2eypvwTZOn1dMiHREmRQscCAFcysUv4TmBqcb52Kx1KFjI0zR3NdKHl8kt
+# 64j40M0Ta7q4nMVExL4aoM/7bl7KsKhoDjzPUABEBkyKr+SXd2kZNgH8GWT6W+36
+# v5gB8CIslIIswHe2WQ9SG27VFRSjvBAv8jv5FFYKMHD6NNTgTYrSbKwXfYO9brOA
+# jeIC5DJfrurQTjKfIsuyo+uPiK/UrftfKjEwohExFkzZA/pNWSsYn7wE2rMd3+oj
+# o5K5DpEj9f7DEBsthaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTEy
-# MjhaMC8GCSqGSIb3DQEJBDEiBCCJYzEx+0d/154OGcOQKV+pr+aqzRP4dpax3XOA
-# XVbIvjANBgkqhkiG9w0BAQEFAASCAgCUTfhBD1vaxlstofcnMGp3zoptjksrEITE
-# YXtJiDP47g9id90HtnWcwUqPIZAlHoMxBjqw4nXqLy9DNJKlLoMoSLCG5sabNXuR
-# IEKprK8pCFi00dvleKC/3wxNWrarqme+EOHc+I0PfJ+w0Y7Ge/b/ZuAE6wzyp1HL
-# GByjH6ahCLfFBvMr5D9brQzJPoKJ2u3RoohHBkPBpU6ArdNZ/Qpj81t/EVKQ1aSf
-# ZbRx8DPWvwTGN2nH7BUu4YnF61Po/xtSCNxY+YpQF8BNeQAt/7DFXIiX5jvl8Bsj
-# rlfurRIQag/jZ9EDpT9E/HLWVhWfoJ/tiis5xR3jNSBxV/j7gVlwbh/DOPCHnCow
-# f/WpkH1d4gxXHQoxXmHXTUo5FoCbveTPY7mEFt1xXko/rlCTw4GEPy0UjukSbitr
-# XaXkFkd6dtWOa6OFwkuXErWPqfXAIIH1dfnOXR2Iphz+Jr4LAxYFD0o9BBBDw537
-# H2S+fNe1+72q5HsJXrj5buEXsZnjlJazyygAM//mse/4WrXDhJzrEUfJdU3ZoWin
-# /3UP5QaX8qR/NIb+eimteomOb6hY8IgPZWvJEQYLRcRoMAw8PJs8k6rk+uU4iTEs
-# XRfu5PtFZb3gsokNtCS8df3TAV5KsFojzuWoW6i99jXCVPQS4Jd+v4Lx5k+P/Epy
-# RlwVNKB7mQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNTQz
+# MTNaMC8GCSqGSIb3DQEJBDEiBCCPy7/ZCnH9UCCO0lIemVGppMxUq3CLW08Lp2hk
+# VOUNjzANBgkqhkiG9w0BAQEFAASCAgBtvs8KeM9zYdsOefLlfGoBcKXm59/wrtZF
+# 57+462+2fH900kWRHVcK1tAOL6rYhYZqWKfZNmQdJeG8dBqPc/g6WC82CLVSFpiF
+# wxxInzRkGQfKvSIYsvyuIIKWed7v43mW44DMJgT4fa+9qkUt8BU3QVTVyYdo8smw
+# +dOMabEL0RHWYdW1iFwtS1jozzRDwgfAgSze0+QCx/43HLicru+Wg1ES4iLFEq3s
+# nXZcBUdKgKwnSxg/Z9LyfhgPxYQ0d6CI5OLqaO5w46XVlNMr3kfYfSD992Kl9sp0
+# gLIDo29miL693DWD7aj5zp7CFRz9htlMuWMc0VSnilfwCGLc6Too7Zu+rmcRqUn4
+# xoj5zqQ8BOPztUYdKpO+/KDI7RLvojn15m8rlXW5tkQsiHdTA7briiAzL5nxrB8F
+# LQ4HbKJXIyyYLrBXcQviC6pfDCA3zFbl/edRMwZSZvTYPrF53f6RTbvCPGxqMw1N
+# ZoBOEh1I5i/kcOqeF+2p9WZemOYJu5pEr0S561bbkONGVKRAfHR3NdZItV0z0Fv3
+# L7XocuCmqF3YvKF3yePKTz/oUwCckIOG3bMXbQNlsTYikwgk7HXuju61z8mvIWdl
+# zsvsyaSuCMv29CdLamufjeTNyUdLyRkxAm//xFlOfIMtSGimFOEWduS36wQ5QHg0
+# dR35zIRn2w==
 # SIG # End signature block

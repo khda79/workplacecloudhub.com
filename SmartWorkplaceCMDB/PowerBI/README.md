@@ -25,6 +25,18 @@ Set `ReportData.Enabled=true` and
 `ReportData.SmartInventoryLatestOutputRootPath` to the directory containing
 `Exchange_OnPrem_Mailboxes_AllDomains.csv` and
 `Exchange_OnPrem_RemoteMailboxes_AllDomains.csv` in the private tenant config.
+When that same SmartInventory `DATA-LAST` contains
+`M365_Licenses_ReportSnapshot.json.txt`, the report-data step also validates its
+tenant and candidate counts, then writes `LicenseReportSummary.csv`,
+`LicenseReportCandidates.csv`, and `LicenseReportGaps.csv` into the frozen
+`PowerBI/Report` directory. These rows copy the daily license email's results;
+the CMDB preparation does not recalculate recovery or downgrade eligibility.
+Candidate `UserId` joins to `DimUser.SourceUserId` for context, preserving
+unmatched candidates with an explicit join status. Source hash and snapshot ID
+are recorded in `report-data.manifest.json.txt` and checked by validation.
+Until the SmartInventory snapshot is first published, the existing CMDB report
+build continues without these optional tables. The maintained private PBIP
+must import the three tables before their KPIs can appear in visuals.
 Python 3.10+ is required on the machine running Full. The report-data step
 exports validated CI hardware evidence, builds the 19 CSVs, verifies the
 collection build, tenant identity, source and output hashes, and publishes a

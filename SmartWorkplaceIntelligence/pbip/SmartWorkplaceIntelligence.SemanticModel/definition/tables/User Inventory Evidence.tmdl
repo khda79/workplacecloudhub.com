@@ -320,7 +320,7 @@ table 'User Inventory Evidence'
 		lineageTag: 4fc5756f-1bd3-44ea-9dce-ff35d933f6af
 
 	/// Existing E3-to-F3 review candidate assignments attributed to the current workforce persona by UPN. No E5 downgrade rule is applied.
-	measure 'E3 to F3 Review Candidates by Persona' = CALCULATE ( COUNTROWS ( 'License Optimization Evidence' ), 'License Optimization Evidence'[Optimization Opportunity] = "E3 to F3 review candidate", TREATAS ( VALUES ( 'User Inventory Evidence'[User Principal Name] ), 'License Optimization Evidence'[User Principal Name] ) )
+	measure 'E3 to F3 Review Candidates by Persona' = IF ( [License Report Snapshot Consistent] = 1, CALCULATE ( COUNTROWS ( 'License Report Candidates' ), 'License Report Candidates'[Candidate Type] = "E3 to F3 review", TREATAS ( VALUES ( 'User Inventory Evidence'[User Principal Name] ), 'License Report Candidates'[User Principal Name] ) ) )
 		formatString: #,0
 		displayFolder: Workforce | Personas | Licenses
 		lineageTag: 5ec09db8-3b26-4255-9281-20abb0f1b757

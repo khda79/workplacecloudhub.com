@@ -20,55 +20,41 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "License Product"
+                  "Property": "Product"
                 }
               },
-              "queryRef": "License Evidence.License Product",
-              "nativeQueryRef": "License Product"
+              "queryRef": "License Report Summary.Product",
+              "nativeQueryRef": "Product"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "SKU Part Number"
+                  "Property": "Category"
                 }
               },
-              "queryRef": "License Evidence.SKU Part Number",
-              "nativeQueryRef": "SKU"
+              "queryRef": "License Report Summary.Category",
+              "nativeQueryRef": "Category"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
-                    }
-                  },
-                  "Property": "Capacity Class"
-                }
-              },
-              "queryRef": "License Evidence.Capacity Class",
-              "nativeQueryRef": "Capacity Class"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
                   "Property": "Enabled Units"
                 }
               },
-              "queryRef": "License Evidence.Enabled Units",
+              "queryRef": "License Report Summary.Enabled Units",
               "nativeQueryRef": "Enabled Units"
             },
             {
@@ -76,13 +62,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
                   "Property": "Consumed Units"
                 }
               },
-              "queryRef": "License Evidence.Consumed Units",
+              "queryRef": "License Report Summary.Consumed Units",
               "nativeQueryRef": "Consumed Units"
             },
             {
@@ -90,41 +76,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
-                    }
-                  },
-                  "Property": "Available Units"
-                }
-              },
-              "queryRef": "License Evidence.Available Units",
-              "nativeQueryRef": "Available Units"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Evidence"
-                    }
-                  },
-                  "Property": "Capacity Utilization"
-                }
-              },
-              "queryRef": "License Evidence.Capacity Utilization",
-              "nativeQueryRef": "Capacity Utilization"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
                   "Property": "Assigned Users"
                 }
               },
-              "queryRef": "License Evidence.Assigned Users",
+              "queryRef": "License Report Summary.Assigned Users",
               "nativeQueryRef": "Assigned Users"
             },
             {
@@ -132,42 +90,84 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "Potentially Reclaimable Assignments"
+                  "Property": "Recovery Candidates"
                 }
               },
-              "queryRef": "License Evidence.Potentially Reclaimable Assignments",
-              "nativeQueryRef": "Reclaim Candidates"
+              "queryRef": "License Report Summary.Recovery Candidates",
+              "nativeQueryRef": "Recovery Candidates"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "Risk Priority"
+                  "Property": "Recovery Unknown"
                 }
               },
-              "queryRef": "License Evidence.Risk Priority",
-              "nativeQueryRef": "Risk Priority"
+              "queryRef": "License Report Summary.Recovery Unknown",
+              "nativeQueryRef": "Recovery Unknown"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "Recommended Action"
+                  "Property": "Disabled Users"
                 }
               },
-              "queryRef": "License Evidence.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "License Report Summary.Disabled Users",
+              "nativeQueryRef": "Disabled Users"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "No M365 Activity"
+                }
+              },
+              "queryRef": "License Report Summary.No M365 Activity",
+              "nativeQueryRef": "No M365 Activity"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "E3 to F3 Review Candidates"
+                }
+              },
+              "queryRef": "License Report Summary.E3 to F3 Review Candidates",
+              "nativeQueryRef": "E3 to F3 Review Candidates"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "Evidence Status"
+                }
+              },
+              "queryRef": "License Report Summary.Evidence Status",
+              "nativeQueryRef": "Evidence Status"
             }
           ]
         }
@@ -179,7 +179,7 @@
               "Column": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "License Evidence"
+                    "Entity": "License Report Summary"
                   }
                 },
                 "Property": "Enabled Units"
@@ -339,7 +339,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensing & Cost detail. Detailed records for the current filter context.'"
+                  "Value": "'Daily SmartInventory license email totals by product and source status.'"
                 }
               }
             }
@@ -359,7 +359,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensing & Cost detail'"
+                  "Value": "'License overview and recovery - email snapshot'"
                 }
               }
             },
@@ -526,155 +526,43 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "1946dece018207c00387",
+        "name": "b1b9a60c76e242bd8c7f",
         "field": {
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "License Evidence"
+                "Entity": "License Report Summary"
               }
             },
-            "Property": "License Product"
+            "Property": "Product"
           }
         },
         "type": "Categorical"
       },
       {
-        "name": "a5c33affec68c4ee5500",
+        "name": "50e0c65fbd71436996d0",
         "field": {
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "License Evidence"
+                "Entity": "License Report Summary"
               }
             },
-            "Property": "SKU Part Number"
+            "Property": "Category"
           }
         },
         "type": "Categorical"
       },
       {
-        "name": "193ef27002d01d28d301",
+        "name": "f22f9e703ff348728f11",
         "field": {
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "License Evidence"
+                "Entity": "License Report Summary"
               }
             },
-            "Property": "Capacity Class"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "b9b1462f46c4de954d9a",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Enabled Units"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "2abaaef6cd3449e38501",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Consumed Units"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "1779a1c27028de0c3a9d",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Available Units"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a18f2e1f600480891e1a",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Capacity Utilization"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a7d1d1666856060a9494",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Assigned Users"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "051d113fb4658b15638c",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Potentially Reclaimable Assignments"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "49bf73c5a2e7d9a2a313",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Risk Priority"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "ad86a174bd2a0b2b59db",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Evidence"
-              }
-            },
-            "Property": "Recommended Action"
+            "Property": "Evidence Status"
           }
         },
         "type": "Categorical"

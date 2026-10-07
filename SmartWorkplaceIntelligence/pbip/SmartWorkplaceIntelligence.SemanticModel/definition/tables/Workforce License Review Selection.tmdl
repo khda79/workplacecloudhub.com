@@ -10,7 +10,7 @@ table 'Workforce License Review Selection'
 		summarizeBy: none
 		sourceColumn: [User Source ID]
 
-	/// Review class; only explicit, covered no-use evidence or the existing E3-to-F3 optimization rule qualifies.
+	/// Review class; E3-to-F3 membership comes from the same SmartInventory snapshot as the daily email.
 	column 'Review Type'
 		dataType: string
 		lineageTag: 3b44c04b-0344-4889-bc6e-5841c0ae0ead
@@ -22,8 +22,8 @@ table 'Workforce License Review Selection'
 		source =
 				VAR _e3Users =
 				    CALCULATETABLE (
-				        VALUES ( 'License Optimization Evidence'[User Principal Name] ),
-				        'License Optimization Evidence'[Optimization Opportunity] = "E3 to F3 review candidate"
+				        VALUES ( 'License Report Candidates'[User Principal Name] ),
+				        'License Report Candidates'[Candidate Type] = "E3 to F3 review"
 				    )
 				VAR _e3Review =
 				    SELECTCOLUMNS (

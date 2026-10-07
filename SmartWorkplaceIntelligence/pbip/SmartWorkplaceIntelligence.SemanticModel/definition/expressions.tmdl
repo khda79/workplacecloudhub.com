@@ -110,3 +110,27 @@ expression GetPreparedEvidenceFile =
 expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=false]
 	lineageTag: 340fbb26-2a1c-4c79-a41c-3e024ed2a776
 
+/// Read the exact SmartInventory license report snapshot used by the daily email. Missing or malformed evidence fails refresh.
+expression GetLicenseReportSnapshot =
+		() as record =>
+		let
+		    FileName = "M365_Licenses_ReportSnapshot.json.txt",
+		    Content = if PreparedSourceMode = "Local" then GetSmartInventoryFile({"DATA-LAST"}, FileName)[Content]
+		        else if PreparedSourceMode = "SharePoint" then
+		            let
+		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                Segments = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/DATA-LAST", "/"), each _ <> ""),
+		                Folder = List.Accumulate(Segments, Root, (parent, segment) =>
+		                    let matches = Table.SelectRows(parent, each [Name] = segment)
+		                    in if Table.RowCount(matches) = 1 then matches{0}[Content] else error Error.Record("License report snapshot", "Missing or ambiguous source folder", segment)),
+		                Matches = Table.SelectRows(Folder, each [Name] = FileName)
+		            in if Table.RowCount(Matches) = 1 then Matches{0}[Content] else error Error.Record("License report snapshot", "Missing or ambiguous source file", FileName)
+		        else error "PreparedSourceMode must be Local or SharePoint",
+		    Snapshot = Json.Document(Binary.Buffer(Content)),
+		    Checked = if Snapshot[SchemaVersion] = 1 and Text.Length(Text.From(Snapshot[SnapshotId])) = 32 and
+		        Text.Length(Text.From(Snapshot[TenantKey])) > 0 and List.Count(Snapshot[Products]) = 4 and
+		        List.Count(Snapshot[OtherProducts]) = 3
+		        then Snapshot else error "Invalid SmartInventory license report snapshot"
+		in
+		    Checked
+

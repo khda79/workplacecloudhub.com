@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Builds the current Power BI report-only tables after a complete CMDB build.
 
@@ -38,9 +38,20 @@ if ([string]::IsNullOrWhiteSpace($inventoryRoot)) {
 $inventoryRoot = [IO.Path]::GetFullPath($inventoryRoot)
 $localMailboxes = Join-Path $inventoryRoot 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
 $remoteMailboxes = Join-Path $inventoryRoot 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv'
+$licenseSnapshot = Join-Path $inventoryRoot 'M365_Licenses_ReportSnapshot.json.txt'
 $source = [IO.Path]::GetFullPath($paths.LatestOutputRootPath)
 $powerBI = Join-Path $source 'PowerBI'
 $destination = Join-Path $powerBI 'Report'
+$priorReportManifest = Join-Path $destination 'report-data.manifest.json.txt'
+if (-not (Test-Path -LiteralPath $licenseSnapshot -PathType Leaf) -and
+    (Test-Path -LiteralPath $priorReportManifest -PathType Leaf)) {
+    $priorReport = Get-Content -LiteralPath $priorReportManifest -Raw -ErrorAction Stop |
+        ConvertFrom-Json -ErrorAction Stop
+    if ($priorReport.PSObject.Properties['licenseReportSnapshot'] -and
+        $null -ne $priorReport.licenseReportSnapshot) {
+        throw 'Previously prepared SmartInventory license report snapshot is now missing; retaining the prior CMDB ReportData.'
+    }
+}
 $raw = Join-Path $source 'Raw'
 $hardware = Join-Path $raw 'Intune\Intune_DeviceHardware.csv'
 foreach ($path in @($source, $powerBI, $raw, $hardware, $localMailboxes, $remoteMailboxes)) {
@@ -92,6 +103,9 @@ try {
         '--ci-hardware', (Join-Path $ciOutput 'CMDB_CIDeviceHardware.csv'),
         '--exchange-onprem-local', $localMailboxes,
         '--exchange-onprem-remote', $remoteMailboxes)
+    if (Test-Path -LiteralPath $licenseSnapshot -PathType Leaf) {
+        $arguments += @('--license-report-snapshot', $licenseSnapshot)
+    }
     & $python.Source @arguments
     if ($LASTEXITCODE -ne 0) { throw "Report-data generator failed with exit code $LASTEXITCODE." }
     & $python.Source $generator --data-root $source --output $stage --validate-only
@@ -102,9 +116,12 @@ try {
             throw "Existing Report folder has no CMDB report-data manifest: '$destination'."
         }
         $oldManifest = Get-Content -LiteralPath $oldManifestPath -Raw | ConvertFrom-Json
+        $oldTableCount = @($oldManifest.outputHashes.PSObject.Properties).Count
+        $hasOldLicenseSnapshot = $oldManifest.PSObject.Properties['licenseReportSnapshot'] -and
+            $null -ne $oldManifest.licenseReportSnapshot
         if ([string]$oldManifest.identity.TenantKey -cne [string]$paths.TenantKey -or
-            @($oldManifest.outputHashes.PSObject.Properties).Count -ne 19) {
-            throw 'Existing Report folder is not the expected 19-table tenant snapshot.'
+            $oldTableCount -ne $(if ($hasOldLicenseSnapshot) { 22 } else { 19 })) {
+            throw 'Existing Report folder does not match the expected tenant snapshot table contract.'
         }
         [IO.Directory]::Move($destination, $previous)
         $movedPrevious = $true
@@ -150,8 +167,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMrefWS+3rd987
-# j1DLPE8FG0jKjb+UAlsTnT6DTEXXE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAelIuh1CeWBKMr
+# XVayCr+jamD3NynclZy4EMD6qUlCDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -284,31 +301,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO9Sljay5V3ro+K3gf5dC+G9McCIsvqIcN7uGAl0+M1TMA0GCSqG
-# SIb3DQEBAQUABIIBgD1BFh6sIp20BEjktj+cAZ2eDIFxctqBHyTdUA+lfl+ozfsu
-# eBrDYqhZfIR/aFMORZb9LhMVX/8sHrsQCB8s0KSPeTjUGsNt5wSSNseQO0JN6Fu5
-# 3TX7sxW2srxk62VlJZ2TFSpdRAUYBQ/eHon1sWCMWdPDM50+NL73VT+B/qSB6qfC
-# tOLRa2d+V8R0xyGhXd/Fqslixj/mF5CKcFk0YqE0GiVqhuUNhXOJJQgeKBLKwGGY
-# eg5p0B90Jp//df3q2NASjAgd7wdGu9iTB6c2F4Rx3J2ZEozKSswxPrt0Qq/eDsnV
-# nhNkDpV5NFqWMvxWB3q7UqEslFGasv8o7S/rwy6+Nk8ks5Mj0nRXW4hYhiLy4wmH
-# g/cyVtMEdTDclX0/VdbNls+drtgFnBU/HUTGoARurSnQ145xH0UAQOw55/je+OzE
-# Pw0rc+QQX2X5qStcADo3PzlgcIzuyP/tiG7E8hOUy5vQj9IS7b/x7jBHQZnRzc4n
-# bZuQ1GD8+hhL5viCrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDnww3VI+9i15fxwIAAt+oAHH9UzuCkQcSsmmiqURb3tMA0GCSqG
+# SIb3DQEBAQUABIIBgLGXET0IPQV3nWF5LD6Jzo7dyLpc/3ZkLCxQVhQ83kVhDwo7
+# xvuE/HRIPP/xq/5Eli6vq+qRWWEDKE0VK5W5tz9JD17MDVLvwbhucV+hTCFN5vl5
+# f/QDANaXAE5ZnZJcIMEQbUFt9vhwMeQbieJphceZ5Sn1OJ+bnSPfrlCuZ3rtjjQn
+# SkIgLCkuFfvBpNBruMnCkSDi1F9/cpyaSnGDxy1vELz1z4Svqs2OgeRMVpNlIsU7
+# 7lRpS0BBUDmnOhrwnIW96HaSksFu0Jdxh/piJWy3GA74C20DqfkpM5uZ523+hUjG
+# 287uOTz2W/GaNnuS1V0rH6ry8qJOpvOTxr8hDcInRVxKh2Y6/hI8ZZjFthuL+f6m
+# bLYyphRUX/62mpJ71p84R7VsVBtfEhvU1K9PQa9Y2oCGomssKlesPTAQgqnSQOKw
+# YeWT6lvK2lPMWzdf2FgvE0qjbBfejj5Ibcud3gpfM4mcAuxvYkZoQ3wBh1JAJ/yq
+# Tve4YYnzABIPy12pUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExMzMy
-# NDNaMC8GCSqGSIb3DQEJBDEiBCA7YKsWzRCtLMt9y/ccrNt7wBqxBvU6fTgtqXJQ
-# J7oeXDANBgkqhkiG9w0BAQEFAASCAgB6QEUISMdGY5vcxP+84Cn8JjhLLkFUukdz
-# fCwQYFcj8dcUMFpAqesS8qCFskiggWnpVS8UPIy6+cYUAhz8lBz/APn/EHlYVaLx
-# ys7u7jvBPphMBq/81nvceWWqkwsF7EfShdvIFDniAyLnCYAFwsDjKm0KHH/nLqOd
-# WmAuB2JlOu9jKaFZRafBspnY9xjLG2t/5CtTzayX9bmF+E3jILn0ypxH9o6Xq8ZW
-# W3IMbPOW4aiuKHHbFx+ucy6QFAPq18koPobI59AMg9UjqBJNbEgIEy2dUeUWy0Vd
-# Wo8hyAbK15Qj2U24BV6VADwM1esg+odGFgpNWCPbjw41LZBRS6rdvDff1Mr4MLb2
-# s7wcHXshxDb7Cd9Pf4pW81aoXiL1EFmeQXoreseg0OKphqDYwzhE3LmpjC0BLxrN
-# kO6G25tP8/FayxRohoS3SM95G2mYeLeHD9kFjRR3mw5/EW4qXqL6TXaFDyLCfaCh
-# C1KOzvg07w5DCb2yEdXvqf12FlaRVb5NvVj+i8lNvY82ojg6mSf9Fjd7BWrxI08S
-# DQiGema/Jbw1fXly1FocVGhQFLq0sn3WghhHK8euQKoRt4X8jixpwoZI5WCc3ahP
-# JzCN37V5DKJGOtqvWUtQ0viGx92BInMGVcs3DO/BRIkrsG8Ba7KT1nIa2kNwaQFU
-# g4DboJZIDQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNTE2
+# MzdaMC8GCSqGSIb3DQEJBDEiBCCRAMJL4f4xGvbyrw5YCGaTBpFd0swrR96QtaGE
+# Wvv3+DANBgkqhkiG9w0BAQEFAASCAgBBEIC9awcnHDo5UVaw+bPA6qlozhMfyqJa
+# m5B13PZwlNHB7YYjg/gxnd73LBJBd3/fHNJJ0OoriboCsJv/xpjGg959OlOiVDWD
+# utmAAMKFRYLOUVllsHzRCxZklODCpk5qs1OkpISUgP0/102Jyno4+R5jyCdQ3zvj
+# gag/a6/7DsDRWJVZONBhpADBVLaCK8Zm8nfVpC9CjFbX/1RzdA7aMFD3ngaNmaqu
+# ns/0Uq2W489bo9wMCRj3s9Oa3Ga6SIN80A43zAhWTCD8hpEvrkrQoaY2Wjj57gCh
+# iz25DCWGKjmy0Hddnxie6jrk7qpKC80E3OkEM7bTqEVzPdGCEJmodzGP3o4nHzW1
+# 5izpd9ApKUMBt8CJjmILrJKsIqQ7UwGiVC8QN1YUppmCFSo8I4Y23R1AEKdaFMRj
+# QVg4W41WGSnwQ30SzATrxZgbkEwAXCinXjVd7+ESFXZOwBqyKacnRCsv57m3GuTh
+# hHJe06W/3jzIzATmMCGQ+owbi2tHKr1qw42+TGfB4BuE1rvO8eesu8kwkz+R7CAC
+# BQly0oA41mp+BKFe9TO8woetEN2K3ZeuGXTcrlc+Avez15ADv5DyS0c0yXOQZbDQ
+# QTfLyWaWVYhOPRNnlkHIiDFuwrq5SLtY51hsFGuHrH7Jje9TAhp28yml0yJFDe32
+# /r0DsgEsAw==
 # SIG # End signature block

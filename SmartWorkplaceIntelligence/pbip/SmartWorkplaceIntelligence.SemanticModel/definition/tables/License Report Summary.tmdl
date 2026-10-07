@@ -1,0 +1,183 @@
+/// Daily SmartInventory license email totals. One row per displayed product and one immutable snapshot ID per refresh.
+table 'License Report Summary'
+
+	/// The snapshot that produced the displayed email and recovery workbook.
+	measure 'License Report Snapshot ID' = SELECTEDVALUE('License Report Summary'[Snapshot ID])
+		formatString: @
+		displayFolder: Licensing | Mail parity
+
+	/// Blocks totals if summary and candidate detail were refreshed from different daily snapshots.
+	measure 'License Report Snapshot Consistent' = VAR _summary = CALCULATE(SELECTEDVALUE('License Report Summary'[Snapshot ID]), REMOVEFILTERS('License Report Summary')) VAR _details = CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates')) VAR _candidate = CALCULATE(SELECTEDVALUE('License Report Candidates'[Snapshot ID]), REMOVEFILTERS('License Report Candidates')) VAR _gaps = CALCULATE(SELECTEDVALUE('License Report Gaps'[Snapshot ID]), REMOVEFILTERS('License Report Gaps')) RETURN IF(NOT ISBLANK(_summary) && _summary = _gaps && (_details = 0 || _summary = _candidate), 1, 0)
+		formatString: 0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report Enabled Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Enabled Units]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report Consumed Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Consumed Units]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report Used (%)' = DIVIDE([License Report Consumed Units], [License Report Enabled Units])
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+
+	/// Qualified recovery assignments across F1, F3, E3 and E5. BLANK means the source was not qualified.
+	measure 'License Report Recovery Candidates' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Recovery Candidates]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report F1 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F1")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report F3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F3")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report E3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E3")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	measure 'License Report E5 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E5")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	/// Manual E3 to F3 review candidates, excluding E3 assignments already counted for recovery.
+	measure 'License Report E3 to F3 Review' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[E3 to F3 Review Candidates]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+
+	column 'Snapshot ID'
+		dataType: string
+		sourceColumn: Snapshot ID
+
+	column 'Tenant Key'
+		dataType: string
+		sourceColumn: Tenant Key
+
+	column Product
+		dataType: string
+		sourceColumn: Product
+
+	column Category
+		dataType: string
+		sourceColumn: Category
+
+	column 'Enabled Units'
+		dataType: int64
+		sourceColumn: Enabled Units
+
+	column 'Consumed Units'
+		dataType: int64
+		sourceColumn: Consumed Units
+
+	column 'Assigned Users'
+		dataType: int64
+		sourceColumn: Assigned Users
+
+	column 'Recovery Candidates'
+		dataType: int64
+		sourceColumn: Recovery Candidates
+
+	column 'Recovery Unknown'
+		dataType: int64
+		sourceColumn: Recovery Unknown
+
+	column 'Disabled Users'
+		dataType: int64
+		sourceColumn: Disabled Users
+
+	column 'No M365 Activity'
+		dataType: int64
+		sourceColumn: No M365 Activity
+
+	column 'No AD or Entra Activity'
+		dataType: int64
+		sourceColumn: No AD or Entra Activity
+
+	column 'No Mailbox Activity'
+		dataType: int64
+		sourceColumn: No Mailbox Activity
+
+	column 'No Local Apps Use'
+		dataType: int64
+		sourceColumn: No Local Apps Use
+
+	column 'Candidates Primary Intune PC'
+		dataType: int64
+		sourceColumn: Candidates Primary Intune PC
+
+	column 'Shared Mailboxes Licensed'
+		dataType: int64
+		sourceColumn: Shared Mailboxes Licensed
+
+	column 'Shared Under 50 GB'
+		dataType: int64
+		sourceColumn: Shared Under 50 GB
+
+	column 'Multiple Target Suites'
+		dataType: int64
+		sourceColumn: Multiple Target Suites
+
+	column 'Multiple Assigned SKUs'
+		dataType: int64
+		sourceColumn: Multiple Assigned SKUs
+
+	column 'Shared Removal Candidates'
+		dataType: int64
+		sourceColumn: Shared Removal Candidates
+
+	column 'E3 to F3 Review Candidates'
+		dataType: int64
+		sourceColumn: E3 to F3 Review Candidates
+
+	column 'E3 to F3 Review Unknown'
+		dataType: int64
+		sourceColumn: E3 to F3 Review Unknown
+
+	column 'Evidence Status'
+		dataType: string
+		sourceColumn: Evidence Status
+
+	column 'Generated At UTC'
+		dataType: dateTime
+		sourceColumn: Generated At UTC
+
+	partition 'License Report Summary Import' = m
+		mode: import
+		source =
+				let
+				    Snapshot = GetLicenseReportSnapshot(),
+				    Recovery = Snapshot[RecoveryCandidates],
+				    Downgrade = Snapshot[DowngradeCandidates],
+				    IsProvisional = List.AnyTrue(List.Transform(Snapshot[Sources], each Record.FieldOrDefault(_, "Provisional", false))),
+				    MakeRow = (item as record, category as text) as record =>
+				        let
+				            Counts = Record.FieldOrDefault(item, "Counts", null),
+				            Value = (key as text) => if Counts = null then null else Record.FieldOrDefault(Counts, key, null),
+				            Review = if item[Product] = "Microsoft 365 E3" then Snapshot[E3ToF3Review] else null,
+				            ReviewValue = if Review <> null and Review[Available] then Review[Candidates] else null,
+				            ReviewUnknown = if Review <> null and Review[Available] then Review[Unknown] else null,
+				            RecoveryRows = List.Count(List.Select(Recovery, each _[License] = item[Product])),
+				            Valid = if category = "Suite" and item[UsageAvailable] and Value("RecoveryCandidates") <> RecoveryRows then error "License recovery detail differs from the email KPI" else true
+				        in
+				            [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], Product=item[Product], Category=category,
+				             #"Enabled Units"=item[Enabled], #"Consumed Units"=item[Consumed], #"Assigned Users"=Value("Assigned"),
+				             #"Recovery Candidates"=if Valid then Value("RecoveryCandidates") else null,
+				             #"Recovery Unknown"=Value("RecoveryUnknown"), #"Disabled Users"=Value("Disabled"),
+				             #"No M365 Activity"=Value("M365Inactive"), #"No AD or Entra Activity"=Value("AdEntraInactive"),
+				             #"No Mailbox Activity"=Value("MailboxInactive"), #"No Local Apps Use"=Value("LocalAppsInactive"),
+				             #"Candidates Primary Intune PC"=Value("RecoveryPrimaryPc"),
+				             #"Shared Mailboxes Licensed"=Value("SharedLicensed"), #"Shared Under 50 GB"=Value("SharedUnder50"),
+				             #"Multiple Target Suites"=Value("Multiple"),
+				             #"Multiple Assigned SKUs"=Value("MultipleAll"), #"Shared Removal Candidates"=Value("SharedEligible"),
+				             #"E3 to F3 Review Candidates"=ReviewValue, #"E3 to F3 Review Unknown"=ReviewUnknown,
+				             #"Evidence Status"=if category = "Other paid product" then "Capacity only" else if not item[UsageAvailable] then "N/D" else if IsProvisional then "Provisional" else "Qualified",
+				             #"Generated At UTC"=DateTimeZone.RemoveZone(DateTimeZone.FromText(Snapshot[GeneratedAtUtc]))],
+				    ReviewCheck = if Snapshot[E3ToF3Review] <> null and Snapshot[E3ToF3Review][Available] and Snapshot[E3ToF3Review][Candidates] <> List.Count(Downgrade) then error "License downgrade detail differs from the email KPI" else true,
+				    Rows = if ReviewCheck then List.Transform(Snapshot[Products], each MakeRow(_, "Suite")) & List.Transform(Snapshot[OtherProducts], each MakeRow(_, "Other paid product")) else {},
+				    Result = Table.FromRecords(Rows, type table [#"Snapshot ID"=text, #"Tenant Key"=text, Product=text, Category=text, #"Enabled Units"=Int64.Type, #"Consumed Units"=Int64.Type, #"Assigned Users"=nullable number, #"Recovery Candidates"=nullable number, #"Recovery Unknown"=nullable number, #"Disabled Users"=nullable number, #"No M365 Activity"=nullable number, #"No AD or Entra Activity"=nullable number, #"No Mailbox Activity"=nullable number, #"No Local Apps Use"=nullable number, #"Candidates Primary Intune PC"=nullable number, #"Shared Mailboxes Licensed"=nullable number, #"Shared Under 50 GB"=nullable number, #"Multiple Target Suites"=nullable number, #"Multiple Assigned SKUs"=nullable number, #"Shared Removal Candidates"=nullable number, #"E3 to F3 Review Candidates"=nullable number, #"E3 to F3 Review Unknown"=nullable number, #"Evidence Status"=text, #"Generated At UTC"=datetime])
+				in
+				    Result

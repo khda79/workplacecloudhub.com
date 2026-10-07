@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.42 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.43 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -33,9 +33,26 @@ assignment.
 
 The license overview and recovery email is sent at most once per tenant and
 Europe/Paris calendar day, including runs with `-SendLicenseSummaryEmailOnly`.
+Each accepted mail attempt first publishes
+`DATA-LAST/M365_Licenses_ReportSnapshot.json.txt`. The single JSON document
+contains the exact seven overview products, four-suite recovery and activity
+counts, E3-to-F3 review, sections 06/07 mailbox and AD gaps, candidate details,
+source states and hashes, tenant key, rule version and a unique snapshot ID.
+The mail footer prints that ID. A failed snapshot publication stops the mail;
+when SharePoint upload is configured, that upload must also succeed. A skipped
+daily mail does not replace the last snapshot. Consumer reports should read this
+document rather than independently recalculating recovery or downgrade rules.
+They must display the snapshot ID and date, reject mixed IDs across imported
+tables and preserve JSON `null` as N/D rather than a verified zero. The
+candidate lists contain user identifiers and names and require the same private
+access control as the existing license-user exports.
 The full collector completes and qualifies its source receipt before sending
 the email. A receipt failure stops the email instead of publishing unqualified
 recovery KPIs.
+Section 06 splits UserMailbox accounts without F1/F3/E3/E5 into Entra enabled,
+disabled and unqualified account states. The three counts reconcile with the
+section total when the Entra source is qualified. The top recovery KPI band also
+shows the separate E3-to-F3 downgrade review count; it is not a recovery total.
 Its overview cards emphasize the used percentage, with used and enabled license
 counts below it; an unsubscribed product shows `N/A`.
 The three recovery KPI cards appear immediately below `License overview`, ahead

@@ -31,7 +31,7 @@ $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
-  'New-LicensesRecoveryWorkbook', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
+  'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
 $definitions = @($ast.FindAll({
@@ -254,6 +254,12 @@ try {
   $threw = $false
   try { Read-LicensesTenantSnapshot -Path $csvPath -ExpectedTenantKey 'prod' | Out-Null } catch { $threw = $true }
   Assert-Equal $threw $true 'Mixed snapshot timestamps are rejected'
+  $tenantCollectedAt = [datetimeoffset]::UtcNow.ToString('o')
+  $rows | ForEach-Object {
+    [pscustomobject]@{ TenantKey='prod'; TenantSkuPartNumber=$_.TenantSkuPartNumber;
+      TenantPrepaidEnabled=$_.TenantPrepaidEnabled; TenantConsumedUnits=$_.TenantConsumedUnits;
+      CollectedAtUtc=$tenantCollectedAt }
+  } | Export-Csv -LiteralPath $csvPath -NoTypeInformation
 
   $today = [datetime]::UtcNow.Date
   $recent = $today.AddDays(-2).ToString('yyyy-MM-dd')
@@ -294,7 +300,7 @@ try {
     [pscustomobject]@{TenantKey='prod';'Object Id'='u6';'User principal name'='u6@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=$recent}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u7';'User principal name'='u7@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u8';'User principal name'='u8@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
-    [pscustomobject]@{TenantKey='prod';'Object Id'='u9';'User principal name'='u9@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
+    [pscustomobject]@{TenantKey='prod';'Object Id'='u9';'User principal name'='u9@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u10';'User principal name'='u10@example.invalid';UserType='Member';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u11';'User principal name'='u11@example.invalid';UserType='Guest';AccountEnabled='True';OnPremisesImmutableId='';LastSuccessfulSignInDateTime=''}
     [pscustomobject]@{TenantKey='prod';'Object Id'='u12';'User principal name'='u12@example.invalid';UserType='Member';AccountEnabled='False';OnPremisesImmutableId=$localImmutable;LastSuccessfulSignInDateTime=''}
@@ -369,6 +375,27 @@ try {
   Assert-Equal $usage.MailboxGap.UserMailboxes.Universe 5 'Qualified EXO UserMailbox denominator'
   Assert-Equal $usage.MailboxGap.UserMailboxes.OtherSkus 1 'User mailbox with another SKU'
   Assert-Equal $usage.MailboxGap.UserMailboxes.NoSkus 1 'User mailbox with no SKU'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.EntraStateAvailable $true 'User mailbox Entra state is qualified'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.EntraEnabled 1 'Enabled Entra account with unlicensed UserMailbox'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.EntraDisabled 1 'Disabled Entra account with unlicensed UserMailbox'
+  Assert-Equal $usage.MailboxGap.UserMailboxes.EntraStateUnknown 0 'Unlicensed UserMailbox Entra state reconciles'
+  $activePath = Join-Path $testRoot 'M365_Users_Active.csv'
+  $activeRows = @(Import-Csv -LiteralPath $activePath)
+  $candidateWithoutState = @($activeRows | Where-Object { $_.'Object Id' -eq 'u10' })[0]
+  $candidateWithoutState.AccountEnabled = ''
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
+  $unknownState = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+  Assert-Equal $unknownState.MailboxGap.UserMailboxes.Total 2 'Unknown Entra state retains UserMailbox total'
+  Assert-Equal $unknownState.MailboxGap.UserMailboxes.EntraStateUnknown 1 'Blank Entra state is N/D'
+  $candidateWithoutState.AccountEnabled = 'True'
+  $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
+  Move-Item -LiteralPath $activePath -Destination ($activePath + '.missing')
+  try {
+    $missingEntra = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
+    Assert-Equal $missingEntra.MailboxGap.UserMailboxes.Total 2 'Missing Entra source retains UserMailbox total'
+    Assert-Equal $missingEntra.MailboxGap.UserMailboxes.EntraStateAvailable $false 'Missing Entra source leaves state N/D'
+  }
+  finally { Move-Item -LiteralPath ($activePath + '.missing') -Destination $activePath }
   Assert-Equal $usage.MailboxGap.NoUserMailbox.Total 1 'On-premises UserMailbox is excluded from mailbox-free accounts'
   Assert-Equal $usage.MailboxGap.NoUserMailbox.Universe 7 'Qualified nontechnical Entra account denominator'
   Assert-Equal $usage.MailboxGap.NoUserMailbox.OtherSkus 1 'Mailbox-free account with another SKU'
@@ -376,8 +403,6 @@ try {
   Assert-Equal $usage.MailboxGap.NoUserMailbox.Guests 1 'Guest is identified within the total'
   Assert-Equal $usage.MailboxGap.NoUserMailbox.MemberEnabled 0 'Enabled member segment'
   Assert-Equal $usage.MailboxGap.NoUserMailbox.MemberDisabled 0 'On-premises mailbox disabled member is excluded'
-  $activePath = Join-Path $testRoot 'M365_Users_Active.csv'
-  $activeRows = @(Import-Csv -LiteralPath $activePath)
   $localAccount = @($activeRows | Where-Object { $_.'Object Id' -eq 'u12' })[0]
   $localAccount.OnPremisesImmutableId = ''
   $activeRows | Export-Csv -LiteralPath $activePath -NoTypeInformation
@@ -452,6 +477,16 @@ try {
   $script:TemplateCalls.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   Assert-Equal $script:SentMail.Count 1 'Enriched email sent'
+  $reportSnapshotPath = Join-Path $testRoot 'M365_Licenses_ReportSnapshot.json.txt'
+  $reportSnapshot = Get-Content -LiteralPath $reportSnapshotPath -Raw | ConvertFrom-Json
+  Assert-Equal $reportSnapshot.TenantKey 'prod' 'Snapshot tenant'
+  Assert-Equal @($reportSnapshot.Products).Count 4 'Snapshot target products'
+  Assert-Equal @($reportSnapshot.OtherProducts).Count 3 'Snapshot paid overview products'
+  Assert-Equal @($reportSnapshot.RecoveryCandidates).Count 4 'Snapshot recovery detail reconciles with workbook'
+  Assert-Equal @($reportSnapshot.DowngradeCandidates).Count 1 'Snapshot downgrade detail reconciles with workbook'
+  Assert-Equal @($reportSnapshot.Products | Where-Object Product -eq 'Microsoft 365 E3')[0].Counts.RecoveryCandidates 2 'Snapshot E3 recovery KPI'
+  Assert-Equal $reportSnapshot.E3ToF3Review.Candidates 1 'Snapshot E3 downgrade KPI'
+  if ($script:SentMail[0].BodyHtml -notmatch [regex]::Escape("Snapshot: $($reportSnapshot.SnapshotId)")) { throw 'Email does not identify its Power BI snapshot.' }
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
   Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
@@ -535,8 +570,9 @@ try {
   }
   if ($script:SentMail[0].BodyHtml -notmatch '>0</div><div[^>]*>Recovery candidates E5' -or
       $script:SentMail[0].BodyHtml -notmatch '>2</div><div[^>]*>Recovery candidates E3' -or
-      $script:SentMail[0].BodyHtml -notmatch '>2 \(N/D: 1\)</div><div[^>]*>Recovery candidates F3/F1') {
-    throw 'Suite recovery KPI cards do not match qualified license assignments.'
+      $script:SentMail[0].BodyHtml -notmatch '>2 \(N/D: 1\)</div><div[^>]*>Recovery candidates F3/F1' -or
+      $script:SentMail[0].BodyHtml -notmatch '>1</div><div[^>]*>E3 to F3 downgrade review') {
+    throw 'Recovery and E3 downgrade KPI cards do not match the detailed sections.'
   }
   $body = $script:SentMail[0].BodyHtml
   if ($body.IndexOf('01 &nbsp; License capacity') -lt 0 -or
@@ -549,6 +585,7 @@ try {
   if ($body.IndexOf('06 &nbsp; User mailboxes without licence F1/F3/E3/E5') -le $body.IndexOf('05 &nbsp; Licensed shared mailboxes') -or
       $body.IndexOf('07 &nbsp; Without User mailboxes + without licence F1/F3/E3/E5') -le $body.IndexOf('06 &nbsp; User mailboxes without licence F1/F3/E3/E5') -or
       $body -notmatch '>2</strong> of 5 qualified EXO UserMailbox.*?<strong>40%</strong>' -or
+      $body -notmatch 'Entra enabled</th>.*?Entra disabled</th>.*?Entra state N/D</th>.*?<td[^>]*>1</td><td[^>]*>1</td><td[^>]*>0</td>' -or
        $body -notmatch '>1</strong> of 7 qualified Entra accounts.*?<strong>14.3%</strong>' -or
        $body -notmatch 'Member enabled</th>.*?<td[^>]*>0</td><td[^>]*>0</td><td[^>]*>1</td><td[^>]*>1</td><td[^>]*>0</td><td[^>]*>0</td>') {
     throw 'Mailbox and account gap sections are missing or have incorrect counts.'
@@ -594,6 +631,10 @@ try {
   Assert-Equal $misaligned.MailboxGap $null 'Misaligned license source makes both new sections N/D'
   $script:SentMail.Clear()
   Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.AddDays(-3).ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+  $misalignedSnapshot = Get-Content -LiteralPath $reportSnapshotPath -Raw | ConvertFrom-Json
+  $misalignedF3 = @($misalignedSnapshot.Products | Where-Object Product -eq 'Microsoft 365 F3')[0]
+  Assert-Equal $misalignedF3.UsageAvailable $false 'Snapshot rejects misaligned license assignments'
+  Assert-Equal $misalignedF3.Counts $null 'Snapshot leaves unqualified metrics null, not zero'
   Assert-Equal $script:SentMail.Count 1 'Unqualified usage still sends a stock summary'
   if ($script:SentMail[0].BodyHtml -notlike '*N/D*') { throw 'Unqualified usage is not marked N/D in email.' }
 
@@ -781,8 +822,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAs1k/b+Gqf+3yZ
-# RsRjo7kGBDeK2IHIwdK+M4XP6xjHJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJ9yBXUt4OPAyi
+# xSH56oRCvRXbNE8t3mK1yyyyGeH3+6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -915,31 +956,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFCnBzx+brWI7f6O/Sq2Ajk0ago4B1Ei+9pRNK+1Dr0MMA0GCSqG
-# SIb3DQEBAQUABIIBgBlnAhmsgby2DNNbDKmLOYR0MdI577KySyr4NQYQf0GV791i
-# p5W6a26woZdPE7uf26PBlW+Y4ddDtH2ra2zwDGUhwe+cMuMCI4nmFq0XSjn2NXYg
-# UvAmlao491mCaB69cFb+yG34EyMeSGepFQW+vb+8CHR8nlsI3CGVQy3xb/bsZ76Q
-# 3/4dVniGum0cPpS8gd8lujVbZ36Cjp6auAQENSD7ZLMTgr5dic531gCWCeeDZ94I
-# A7O/hDEuSNNkelFDZn0w9FoUOenXH8GRwyRiwBQMVNhcrTeUwK9XssHwz3lXrfdU
-# kxs/XdCfwkoHmv8JsTlTaiOfS+T8yL0z1W+bL/yjkJHiUz4Dzd5LMyTCvkfhlakA
-# 10D22qc7WvrCSU7mjO1ShkkEl5vuCuBuOoy8yQav8vGThYN2weqsf9fwuUvghLmD
-# g5uDC7YbcH1QjIPiYDpakolr5Vj7QNuQc4sxb+OPas4DXyYjnhRcU9XxdkPGJOgu
-# 51LH8MGJoHXhhq/5oqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIFAu4ICXCgbr6PzRvd5lsh5BFEA1nrMWK9M7tnCpqWjMA0GCSqG
+# SIb3DQEBAQUABIIBgIn0zAnezAm6JsdYoknV34UMV7T0p81eYBnI28hxfZmkaIcs
+# Fnf9PRjOumUjQ/AjuKdz/xu7u1/s0b5I2Lmgfypn2EdW/2AYvUui0tlBz4JIyzEJ
+# MbrbSNitk36tTZEtb9PR1u8dvyyXdqWcBdAMve+LP/5iTSdHuyznQGHwjGfgqIzV
+# 3SXt/7C+ws3gzqp1IRGe/hlgbxHCT+euM0Lc3P60J2jBW7EWO2tdROYHZbEGJdbT
+# IyHWJRPncrhsYsPX4HviMbLogYq61hhtAILDJggl6DgEcqzFk/uCd+vXVUR+LViW
+# ZAVwzp2Hx4aLkKnyACIRvLVQC9ilxtJPrGSn6WIsUqVLrM0YKRhHTALhuv3qw0rN
+# Eum4W4Ieji5aujN0ANLANYlvaPwn4aOZ2oYRtgyK21RVeztho/wq5as7CK+e0duo
+# EcjQWDQ3MDTPpsW/STOpYupxxFlu6qcYPkQFVGIanVkw2qxNSjllBv/zRsJ2TbKS
+# czlXHJb64XN9DKT4tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTEy
-# MjhaMC8GCSqGSIb3DQEJBDEiBCD8OTcAwg8D5JHC//Xde+rJawgz1sUCxSNgUIxe
-# LZ1mgjANBgkqhkiG9w0BAQEFAASCAgAMXcDgX1vDrlvsUVZ9WZBW2hds6iphIWTD
-# JsIEfPIESfqdMStMFJttj/gTwdEZJT38FnZRF6lTkhLOIyaBY1nIdctC7RZdmiaf
-# OUKcPaEwF6dE1JedCrxOmI+oQjT3aSubVCi4BDEUQszMo6OMRPxSHhFg9qHZyVIQ
-# c6Rx3vPJKG/rjbaajM/fUU2ilaChuXX7EXD+aXVfLQJyJvpUknJiXVM08KY1nAch
-# gWZ3bj/TH52MGJArfZp5Nz6hR90XD4TnMaT+cdOvSNo27L4zjilhz+Q4poIeNRxY
-# ZLdzAAH8Cbust0+fWXNFFNzoHBM5ba/ZqwvS9+GionJbKB4xcBKIycUZzbU0SS5K
-# FbsG8Z9bcQ+fZ8PadjZtPd2s7k4FbOK76jRwZ3P1MjCau/jjwFPiMlp/nMWJpShm
-# 7YOZSlYrCgmmgtJrRRRlCOS/l4IbymC21og2nrKcvC50Czm/HHfhtPpIZGbm3eFU
-# sIVb6Hg71ptDICrsWwtvWZXgKwyildrK3Ho7Nwp6FaKmpexxD2g1LUZLAKiAuUMM
-# wl9JoEDW6PiDViIKkqwm2/Vyo0BzTMu6I4iulqSHDMoYg9MxKp0wJ3fe7/qLevt0
-# tGsTKaokM4WjNLDotYjBlS5SVVZgk0BPY9vN40B2UFF9jV6d+vcwP2Lr+6E1WXLz
-# GOoeTKtKZw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNTQz
+# MTNaMC8GCSqGSIb3DQEJBDEiBCB6ZE4gq3ODXrnhn0KFevX8fNxgogc3Dg4Xfcxq
+# ffEl+TANBgkqhkiG9w0BAQEFAASCAgBCFXtYdP5VN8HO47wCUgpv86Wzd8h4wr5+
+# 6876TEZqKzDQpiGPu8BUAxJ3P+fIU0Sl6qxlv/ZIU13Eg4AQ7KDE7QYFRzb1mosC
+# 6mv8IY0MwRJBjJLw5KtUBuEXedn9Nw1IjhqD1yx0on0QTO8SKYha9V7HbSdzrjRA
+# dKarDE6JnkdRIjC7/5OfMvlP5I6ZyRCpVwdhCzciiloVSEPcnwY2x3NKlUDBh+JB
+# ja2rBSmuyQC8UsElKvveDp0mtMn1iN1QyjpFhHHfOUD8XkFXFmJLIJAjrOykdx9Y
+# ACZWqAZ5+JHkmtRDHCBZtSb5luHodS6x3CZHPV6bGF/cMAoIjfD4zzdXwtxT8JHy
+# 9PaSmSeyP+mbl3ZmwiwZLXjSpbCO6rJesuaL3nKOfvEEp5KDaLqb8IfBW7AkiXeg
+# NbVMV5JJ5C0D3dLDP7AwBIdO4/bzA/PSPaKMkb98ZhEsJjIFL3LXpBuMm629h/QX
+# lbHPZhRWoie3mU2IwdtTHDCY+KEP22kuCof/DpzC9mMp2tnWc5XSrio6UHM9H7ca
+# Jkmifj8hhvZTAOYsqqM5uc+MhVkd8Son3M1qAkCxnn4iMTsVgwu0n+qb3V8qWumn
+# +I9OveXdynH4zmCwckK1GVb6qcnMd3rRHdJFCLwGNHorAtsf5X3mLXkvt/TwDqdt
+# 2RuYmFkxiw==
 # SIG # End signature block

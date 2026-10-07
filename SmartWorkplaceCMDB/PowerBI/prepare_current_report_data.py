@@ -15,6 +15,7 @@ import build_report as base
 import report_360
 import report_cockpit as cockpit
 import report_hardware as hardware
+import license_report_snapshot as licensing
 
 
 ENRICHED = (
@@ -103,7 +104,7 @@ def top_application_rows(rows):
 
 
 def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes,
-            final_output=None):
+            final_output=None, license_snapshot=None):
     source, output = source.resolve(), output.resolve()
     final_output = report_sidecar_path(output, final_output)
     if output.exists() or source == output or output in source.parents:
@@ -129,6 +130,24 @@ def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes,
     for name in selected:
         write_rows(output / (name + ".csv"), columns[name], data[name])
         counts[name] = len(data[name])
+    license_metadata = None
+    if license_snapshot is not None:
+        license_snapshot = Path(license_snapshot).resolve()
+        license_hash = base.sha(license_snapshot)
+        report = licensing.load_snapshot(license_snapshot, identity["TenantKey"])
+        license_summary, license_candidates = licensing.flatten(report, data["DimUser"])
+        write_rows(output / "LicenseReportSummary.csv", licensing.SUMMARY_COLUMNS, license_summary)
+        write_rows(output / "LicenseReportCandidates.csv", licensing.CANDIDATE_COLUMNS, license_candidates)
+        license_gaps = licensing.flatten_gaps(report)
+        write_rows(output / "LicenseReportGaps.csv", licensing.GAP_COLUMNS, license_gaps)
+        counts["LicenseReportSummary"] = len(license_summary)
+        counts["LicenseReportCandidates"] = len(license_candidates)
+        counts["LicenseReportGaps"] = len(license_gaps)
+        if base.sha(license_snapshot) != license_hash:
+            raise ValueError("SmartInventory license report snapshot changed during CMDB preparation")
+        license_metadata = {"path": str(license_snapshot), "sha256": license_hash,
+                            "snapshotId": report["SnapshotId"],
+                            "generatedAtUtc": report["GeneratedAtUtc"]}
 
     copied_hardware = output / "CMDB_CIDeviceHardware.csv"
     copied_manifest = output / "CIRegistry.manifest.json.txt"
@@ -213,6 +232,7 @@ def prepare(source, output, ci_hardware, local_mailboxes, remote_mailboxes,
         "sourceBuildDateTime": manifest_rows[0]["BuildDateTime"],
         "sourceRoot": str(source), "reportSidecar": str(final_output), "identity": identity,
         "rowCounts": counts, "sourceHashes": hashes,
+        "licenseReportSnapshot": license_metadata,
         "mailboxEvidence": {
             "localPath": str(local_mailboxes), "localRows": local_count,
             "localSha256": base.sha(local_mailboxes),
@@ -269,6 +289,14 @@ def validate_current(source, output):
         path = hardware_hash_path(name, output)
         if not path.is_file() or base.sha(path) != digest:
             raise ValueError("Hardware evidence changed: " + name)
+    license = manifest.get("licenseReportSnapshot")
+    if license:
+        path = Path(license["path"])
+        if not path.is_file() or base.sha(path) != license["sha256"]:
+            raise ValueError("SmartInventory license report snapshot changed")
+        checked = licensing.load_snapshot(path, manifest["identity"]["TenantKey"])
+        if checked["SnapshotId"] != license["snapshotId"]:
+            raise ValueError("SmartInventory license report snapshot ID changed")
     return {"status": "Current", "sourceBuildDateTime": manifest["sourceBuildDateTime"],
             "sourceFiles": len(manifest["sourceHashes"]), "reportTables": len(expected)}
 
@@ -280,6 +308,8 @@ if __name__ == "__main__":
     parser.add_argument("--ci-hardware", type=Path)
     parser.add_argument("--exchange-onprem-local", type=Path)
     parser.add_argument("--exchange-onprem-remote", type=Path)
+    parser.add_argument("--license-report-snapshot", type=Path,
+                        help="SmartInventory JSON snapshot used by the daily license email")
     parser.add_argument("--final-output", type=Path,
                         help="Promoted report directory recorded in the manifest")
     parser.add_argument("--validate-only", action="store_true", help="Verify the prepared report matches every current source without writing.")
@@ -291,5 +321,5 @@ if __name__ == "__main__":
             parser.error("preparation requires --ci-hardware and both --exchange-onprem paths")
         result = prepare(args.data_root, args.output, args.ci_hardware,
                          args.exchange_onprem_local, args.exchange_onprem_remote,
-                         args.final_output)
+                         args.final_output, args.license_report_snapshot)
     print(json.dumps(result, ensure_ascii=False))
