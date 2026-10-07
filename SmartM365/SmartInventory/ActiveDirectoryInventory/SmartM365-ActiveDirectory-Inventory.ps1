@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.59
+1.60
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -693,9 +693,9 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $DomainFriendlyNames = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainFriendlyNames' -DefaultValue ([pscustomobject]@{})
-$AdEnrichmentWindowsUpdateAnchorPolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdateAnchorPolicyId' -DefaultValue '38ad040b-08ca-41cd-bd86-5da5ef0b740e'
-$AdEnrichmentWindowsUpdate24H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate24H2PolicyId' -DefaultValue '82e1d3e6-bbc0-4ddd-b36d-415979dadec6'
-$AdEnrichmentWindowsUpdate25H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate25H2PolicyId' -DefaultValue '41046c77-bc66-44af-b4cd-7bbf2c7d343e'
+$AdEnrichmentWindowsUpdateAnchorPolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdateAnchorPolicyId' -DefaultValue ''
+$AdEnrichmentWindowsUpdate24H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate24H2PolicyId' -DefaultValue ''
+$AdEnrichmentWindowsUpdate25H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate25H2PolicyId' -DefaultValue ''
 $ConfiguredComputerGroupNamesRaw = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ComputerMembershipGroupNames' -DefaultValue @())
 $ConfiguredComputerGroupNames = for ($groupIndex = 0; $groupIndex -lt 10; $groupIndex++) {
     if ($groupIndex -lt $ConfiguredComputerGroupNamesRaw.Count -and $null -ne $ConfiguredComputerGroupNamesRaw[$groupIndex]) {
@@ -770,7 +770,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.59"
+$ScriptVersion = "1.60"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1895,36 +1895,147 @@ try {
         return $total
     }
 
+    function ConvertTo-SmartM365AdDomainSetText {
+        [CmdletBinding()]
+        param([AllowNull()][object[]]$DomainNames)
+
+        return (@($DomainNames | ForEach-Object { ([string]$_).Trim().TrimEnd('.').ToLowerInvariant() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique) -join ';')
+    }
+
+    function Get-SmartM365AdSummaryCoverageComparison {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)]$Current, [AllowNull()]$Previous)
+
+        if ($null -eq $Previous) {
+            return [pscustomobject]@{ IsComparable = $false; Reason = 'No previous scan' }
+        }
+        if ((ConvertTo-SmartM365AdSummaryInt64 $Current.DomainCount) -ne (ConvertTo-SmartM365AdSummaryInt64 $Previous.DomainCount)) {
+            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain count changed' }
+        }
+        $currentProperty = $Current.PSObject.Properties['CollectedDomains']
+        $previousProperty = $Previous.PSObject.Properties['CollectedDomains']
+        $currentSet = if ($currentProperty) { ConvertTo-SmartM365AdDomainSetText -DomainNames @(([string]$currentProperty.Value) -split ';') } else { '' }
+        $previousSet = if ($previousProperty) { ConvertTo-SmartM365AdDomainSetText -DomainNames @(([string]$previousProperty.Value) -split ';') } else { '' }
+        if ([string]::IsNullOrWhiteSpace($currentSet) -or [string]::IsNullOrWhiteSpace($previousSet)) {
+            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain list unavailable' }
+        }
+        if (@($currentSet -split ';').Count -ne (ConvertTo-SmartM365AdSummaryInt64 $Current.DomainCount) -or
+            @($previousSet -split ';').Count -ne (ConvertTo-SmartM365AdSummaryInt64 $Previous.DomainCount)) {
+            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain list and count disagree' }
+        }
+        if ($currentSet -cne $previousSet) {
+            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain set changed' }
+        }
+        return [pscustomobject]@{ IsComparable = $true; Reason = 'Same domains' }
+    }
+
+    function Get-SmartM365AdSummaryMetricComparison {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]$Current,
+            [AllowNull()]$Previous,
+            [Parameter(Mandatory = $true)][string]$Property,
+            [string]$LogicalCountBaselineAt = ''
+        )
+
+        if ($null -eq $Previous) { return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'No previous scan' } }
+        $currentProperty = $Current.PSObject.Properties[$Property]
+        $previousProperty = $Previous.PSObject.Properties[$Property]
+        if (-not $currentProperty -or -not $previousProperty -or
+            [string]::IsNullOrWhiteSpace([string]$currentProperty.Value) -or
+            [string]::IsNullOrWhiteSpace([string]$previousProperty.Value)) {
+            return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'Metric unavailable' }
+        }
+        if ($Property -ne 'DomainCount') {
+            $coverage = Get-SmartM365AdSummaryCoverageComparison -Current $Current -Previous $Previous
+            if (-not $coverage.IsComparable) {
+                return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = $coverage.Reason }
+            }
+        }
+        if ($Property -in @('TotalComputers','TotalGroups','TotalContacts')) {
+            $snapshotTime = [datetimeoffset]::MinValue
+            $baselineTime = [datetimeoffset]::MinValue
+            if ([string]::IsNullOrWhiteSpace($LogicalCountBaselineAt) -or
+                -not [datetimeoffset]::TryParse([string]$Previous.GeneratedAt, [ref]$snapshotTime) -or
+                -not [datetimeoffset]::TryParse($LogicalCountBaselineAt, [ref]$baselineTime) -or
+                $snapshotTime -lt $baselineTime) {
+                return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'Historical count incompatible' }
+            }
+        }
+        $deltaValue = (ConvertTo-SmartM365AdSummaryInt64 $currentProperty.Value) - (ConvertTo-SmartM365AdSummaryInt64 $previousProperty.Value)
+        return [pscustomobject]@{
+            IsComparable = $true
+            Delta = Format-SmartM365AdSummaryDelta -Current $currentProperty.Value -Previous $previousProperty.Value -HasPrevious $true
+            DeltaValue = $deltaValue
+            Reason = ''
+        }
+    }
+
+    function Get-SmartM365AdSummaryDeltaColor {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$Property, [Parameter(Mandatory = $true)][int64]$DeltaValue)
+
+        if ($DeltaValue -eq 0) { return '#475569' }
+        if ($Property -in @('DistinctDuplicateUPNs','AffectedDuplicateUPNAccounts','DistinctDuplicateSMTPAddresses','AffectedDuplicateSMTPEntries')) {
+            if ($DeltaValue -gt 0) { return '#b91c1c' }
+            return '#166534'
+        }
+        if ($Property -eq 'DomainCount' -and $DeltaValue -lt 0) { return '#b91c1c' }
+        return '#475569'
+    }
+
     function New-SmartM365AdDailySummaryKpiHtml {
         [CmdletBinding()]
-        param([Parameter(Mandatory = $true)]$Snapshot)
+        param(
+            [Parameter(Mandatory = $true)]$Snapshot,
+            [AllowNull()]$Previous,
+            [string]$LogicalCountBaselineAt = ''
+        )
 
         $upnHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateUPNAccounts) -gt 0
         $smtpHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateSMTPEntries) -gt 0
         $cards = @(
-            [pscustomobject]@{ Label = 'USERS'; Value = $Snapshot.TotalUsers; Detail = 'accounts in snapshot'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
-            [pscustomobject]@{ Label = 'COMPUTERS'; Value = $Snapshot.TotalComputers; Detail = 'computer objects'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e' }
-            [pscustomobject]@{ Label = 'GROUPS'; Value = $Snapshot.TotalGroups; Detail = 'groups in snapshot'; Background = '#f5f3ff'; Border = '#ddd6fe'; Accent = '#7c3aed' }
-            [pscustomobject]@{ Label = 'UPN DUPLICATES'; Value = $Snapshot.AffectedDuplicateUPNAccounts; Detail = 'affected accounts'; Background = $(if ($upnHasIssues) { '#fff7ed' } else { '#ecfdf5' }); Border = $(if ($upnHasIssues) { '#fed7aa' } else { '#bbf7d0' }); Accent = $(if ($upnHasIssues) { '#c2410c' } else { '#166534' }) }
-            [pscustomobject]@{ Label = 'SMTP DUPLICATES'; Value = $Snapshot.AffectedDuplicateSMTPEntries; Detail = 'affected entries'; Background = $(if ($smtpHasIssues) { '#fef2f2' } else { '#ecfdf5' }); Border = $(if ($smtpHasIssues) { '#fecaca' } else { '#bbf7d0' }); Accent = $(if ($smtpHasIssues) { '#b91c1c' } else { '#166534' }) }
+            [pscustomobject]@{ Label = 'USERS'; Property = 'TotalUsers'; Detail = 'accounts in snapshot'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
+            [pscustomobject]@{ Label = 'COMPUTERS'; Property = 'TotalComputers'; Detail = 'computer objects'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e' }
+            [pscustomobject]@{ Label = 'GROUPS'; Property = 'TotalGroups'; Detail = 'groups in snapshot'; Background = '#f5f3ff'; Border = '#ddd6fe'; Accent = '#7c3aed' }
+            [pscustomobject]@{ Label = 'UPN DUPLICATES'; Property = 'AffectedDuplicateUPNAccounts'; Detail = 'affected accounts'; Background = $(if ($upnHasIssues) { '#fff7ed' } else { '#ecfdf5' }); Border = $(if ($upnHasIssues) { '#fed7aa' } else { '#bbf7d0' }); Accent = $(if ($upnHasIssues) { '#c2410c' } else { '#166534' }) }
+            [pscustomobject]@{ Label = 'SMTP DUPLICATES'; Property = 'AffectedDuplicateSMTPEntries'; Detail = 'affected entries'; Background = $(if ($smtpHasIssues) { '#fef2f2' } else { '#ecfdf5' }); Border = $(if ($smtpHasIssues) { '#fecaca' } else { '#bbf7d0' }); Accent = $(if ($smtpHasIssues) { '#b91c1c' } else { '#166534' }) }
         )
+        $coverage = Get-SmartM365AdSummaryCoverageComparison -Current $Snapshot -Previous $Previous
+        $currentDomainCount = Format-SmartM365AdSummaryNumber $Snapshot.DomainCount
+        $previousDomainText = if ($Previous) {
+            'Previous ({0}): {1} ({2})' -f $Previous.SnapshotDate,
+                (Format-SmartM365AdSummaryNumber $Previous.DomainCount),
+                (Format-SmartM365AdSummaryDelta -Current $Snapshot.DomainCount -Previous $Previous.DomainCount -HasPrevious $true)
+        } else { 'Previous: n/a' }
+        $coverageText = 'Domains analyzed: {0} | {1} | {2}' -f $currentDomainCount, $previousDomainText, $coverage.Reason
+        $coverageBackground = if ($coverage.IsComparable) { '#ecfdf5' } else { '#fff7ed' }
+        $coverageBorder = if ($coverage.IsComparable) { '#bbf7d0' } else { '#fed7aa' }
+        $coverageHtml = '<div style="background:{0};border:1px solid {1};border-radius:6px;padding:9px 12px;margin:0 0 12px 0;font-size:12px;color:#334155;">{2}</div>' -f $coverageBackground, $coverageBorder, (ConvertTo-SmartM365EmailHtmlText $coverageText)
         $cells = foreach ($card in $cards) {
+            $comparison = Get-SmartM365AdSummaryMetricComparison -Current $Snapshot -Previous $Previous -Property $card.Property -LogicalCountBaselineAt $LogicalCountBaselineAt
             $label = ConvertTo-SmartM365EmailHtmlText $card.Label
-            $value = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $card.Value)
+            $value = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $Snapshot.($card.Property))
             $detail = ConvertTo-SmartM365EmailHtmlText $card.Detail
+            $deltaColor = if ($comparison.IsComparable) { Get-SmartM365AdSummaryDeltaColor -Property $card.Property -DeltaValue $comparison.DeltaValue } else { '#64748b' }
+            $previousLabel = if ($Previous) { 'vs ' + [string]$Previous.SnapshotDate } else { 'vs previous' }
+            $deltaText = ConvertTo-SmartM365EmailHtmlText ('{0}: {1}' -f $previousLabel, $comparison.Delta)
             @"
 <td width="20%" valign="top" style="padding:0 4px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;">
-    <tr><td style="height:88px;background:$($card.Background);border:1px solid $($card.Border);border-radius:6px;padding:10px;">
+    <tr><td style="height:108px;background:$($card.Background);border:1px solid $($card.Border);border-radius:6px;padding:10px;">
       <div style="min-height:25px;font-size:10px;line-height:12px;font-weight:700;color:#64748b;">$label</div>
       <div style="font-size:25px;line-height:30px;font-weight:700;color:$($card.Accent);">$value</div>
       <div style="font-size:10px;line-height:14px;color:#475569;">$detail</div>
+      <div style="margin-top:6px;font-size:10px;line-height:13px;font-weight:700;color:$deltaColor;">$deltaText</div>
     </td></tr>
   </table>
 </td>
 "@
         }
         return @"
+$coverageHtml
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 16px 0;">
   <tr>$($cells -join [Environment]::NewLine)</tr>
 </table>
@@ -2050,7 +2161,8 @@ $($rows -join "`n")
             DuplicateUPN = Get-SmartM365AdCsvDomainRowCounts -Path $duplicateUpnCsv
             DuplicateSMTP = Get-SmartM365AdCsvDomainRowCounts -Path $duplicateSmtpCsv
         }
-        $script:SmartM365AdDailyDomainNames = if (Test-Path -LiteralPath $domainsCsv) {
+        $script:SmartM365AdDailyDomainListAvailable = Test-Path -LiteralPath $domainsCsv
+        $script:SmartM365AdDailyDomainNames = if ($script:SmartM365AdDailyDomainListAvailable) {
             @(Import-Csv -LiteralPath $domainsCsv -Encoding UTF8 | ForEach-Object { [string]$_.DomainName } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
         } else { @($script:SmartM365AdDailyDomainCounts.Users.Keys) }
 
@@ -2067,7 +2179,25 @@ $($rows -join "`n")
             AffectedDuplicateUPNAccounts   = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.DuplicateUPN
             DistinctDuplicateSMTPAddresses = Get-SmartM365AdCsvDistinctValueCount -Path $duplicateSmtpCsv -ColumnName 'SmtpAddress'
             AffectedDuplicateSMTPEntries   = Get-SmartM365AdDomainCountTotal $script:SmartM365AdDailyDomainCounts.DuplicateSMTP
+            CollectedDomains                = if ($script:SmartM365AdDailyDomainListAvailable) { ConvertTo-SmartM365AdDomainSetText -DomainNames $script:SmartM365AdDailyDomainNames } else { '' }
         }
+    }
+
+    function Update-SmartM365AdDailySummaryCoverageSchema {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$SummaryCsvPath)
+
+        if (-not (Test-Path -LiteralPath $SummaryCsvPath)) { return }
+        $historyRows = @(Import-Csv -LiteralPath $SummaryCsvPath -Encoding UTF8)
+        if ($historyRows.Count -eq 0) { throw "AD daily summary history has no rows: $SummaryCsvPath" }
+        if ($historyRows[0].PSObject.Properties['CollectedDomains']) { return }
+
+        $columns = @($historyRows[0].PSObject.Properties.Name) + @('CollectedDomains')
+        foreach ($row in $historyRows) {
+            Add-Member -InputObject $row -NotePropertyName CollectedDomains -NotePropertyValue ''
+        }
+        Write-SmartM365CsvAtomically -Data $historyRows -Path $SummaryCsvPath -Columns $columns -Encoding UTF8 -NoTenantKey
+        WriteLog -Message ("AD daily summary history schema extended with CollectedDomains; previous coverage remains unknown: {0}" -f $SummaryCsvPath)
     }
 
     function Get-SmartM365AdPreviousDailySummarySnapshot {
@@ -2108,7 +2238,6 @@ $($rows -join "`n")
             [string]$LogicalCountBaselineAt = ''
         )
 
-        $hasPrevious = $null -ne $Previous
         $metrics = @(
             [pscustomobject]@{ Label = 'Domains'; Property = 'DomainCount' }
             [pscustomobject]@{ Label = 'Users'; Property = 'TotalUsers' }
@@ -2138,29 +2267,24 @@ $($rows -join "`n")
             $currentHtml = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $currentValue)
             $comparisonCells = foreach ($comparison in $comparisons) {
                 $snapshot = $comparison.Snapshot
-                $comparable = $null -ne $snapshot
-                if ($comparable -and $metric.Property -in @('TotalComputers','TotalGroups','TotalContacts')) {
-                    $snapshotTime = [datetimeoffset]::MinValue
-                    $baselineTime = [datetimeoffset]::MinValue
-                    $comparable = (-not [string]::IsNullOrWhiteSpace($LogicalCountBaselineAt)) -and
-                        [datetimeoffset]::TryParse([string]$snapshot.GeneratedAt, [ref]$snapshotTime) -and
-                        [datetimeoffset]::TryParse($LogicalCountBaselineAt, [ref]$baselineTime) -and
-                        $snapshotTime -ge $baselineTime
-                }
+                $metricComparison = Get-SmartM365AdSummaryMetricComparison -Current $Current -Previous $snapshot -Property $metric.Property -LogicalCountBaselineAt $LogicalCountBaselineAt
                 $cell = 'n/a'
-                if ($comparable) {
+                if ($snapshot) {
                     $property = $snapshot.PSObject.Properties[$metric.Property]
-                    $value = if ($property) { $property.Value } else { 0 }
-                    $delta = Format-SmartM365AdSummaryDelta -Current $currentValue -Previous $value -HasPrevious $true
-                    $color = if ($delta -like '+*') { '#1d4ed8' } elseif ($delta -like '-*') { '#b91c1c' } else { '#334155' }
-                    $cell = '{0}<br /><strong style="color:{1};">{2}</strong>' -f (ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $value)), $color, (ConvertTo-SmartM365EmailHtmlText $delta)
+                    if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                        $color = if ($metricComparison.IsComparable) { Get-SmartM365AdSummaryDeltaColor -Property $metric.Property -DeltaValue $metricComparison.DeltaValue } else { '#64748b' }
+                        $cell = '{0}<br /><strong style="color:{1};">{2}</strong>' -f
+                            (ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $property.Value)),
+                            $color,
+                            (ConvertTo-SmartM365EmailHtmlText $metricComparison.Delta)
+                    }
                 }
                 '<td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td>' -f $cell
             }
             '<tr><td style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td><td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;font-weight:700;">{1}</td>{2}</tr>' -f $labelHtml, $currentHtml, ($comparisonCells -join '')
         }
         $html = @"
-<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with the dated scan. n/a means no scan on that date or an incompatible historical count.</div>
+<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with the dated scan. Inventory and duplicate deltas require the same recorded domain set; n/a means no scan, unknown or changed coverage, or an incompatible historical count. The historical value remains visible where available.</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Metric</th>
@@ -2226,6 +2350,7 @@ $($rows -join "`n")
         $existingDailySummary = Test-Path -LiteralPath $summaryCsvPath
         if (Test-Path -LiteralPath $summaryCsvPath) {
             Repair-SmartM365CsvTenantKeySchema -Path $summaryCsvPath -Delimiter ',' -Encoding UTF8 | Out-Null
+            Update-SmartM365AdDailySummaryCoverageSchema -SummaryCsvPath $summaryCsvPath
         }
         Add-SmartM365CsvRowsAtomically -Data @($summarySnapshot) -Path $summaryCsvPath -Encoding UTF8
         if ($existingDailySummary) {
@@ -2286,7 +2411,7 @@ $($rows -join "`n")
         $actionTitle = if ($hasDuplicateIdentities) { 'Review required' } else { 'No duplicate identity conflict detected' }
         $actionHtml = if ($hasDuplicateIdentities) { 'Review duplicate UPN and SMTP counters before identity cleanup, migration, or synchronization decisions.' } else { 'Keep the generated CSV files as the daily Active Directory inventory baseline.' }
 
-        $summaryHtml = (New-SmartM365AdDailySummaryKpiHtml -Snapshot $summarySnapshot) + (New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot)
+        $summaryHtml = (New-SmartM365AdDailySummaryKpiHtml -Snapshot $summarySnapshot -Previous $previousSnapshot -LogicalCountBaselineAt $logicalCountBaselineAt) + (New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot)
         if ($IdentityContext) {
             $summaryHtml += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px;">Identity and mail routing issues by domain</div>' + [string]$IdentityContext.SummaryHtml
             $severity = 'Warning'
@@ -3995,8 +4120,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBNWfJKHaRPd8F
-# Jnh8rG0i9anUANaxTLh3c70lDYg/86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2BGr2Ik5+G4PR
+# 3vpxhyLo29KeTVYFdUfVg9G8AbGY2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4129,31 +4254,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO7KYI+58+JTr+FWaN8gTMhKiG+29pm6fbd0U2046xshMA0GCSqG
-# SIb3DQEBAQUABIIBgFVnB6ZmrXK0FEPdG7tunj22GATH4RSBXzz0JIkBGInV4Aqq
-# rb9P/9RmQEUQK7d5qQblCcV5RZnsvjz4OZ5jxYviFAtM9YaThPZ0byzLPePCrs21
-# K8xajCZLcyfgSwiPU15f1kpZfa0gcSSZI2/ACTu18aEYLJv4sucpWBbaGV49q3DE
-# Iqe74v5lpkBcj/iUZPYXSKx9Z5pDUTeC9dMreAXxDMll+0DTMgogKh/Vd3UgnM52
-# VtFqa77Q1UJImTHQwoF7iUyCmXQIvyeQBdI9pbiu7yhVQCTPwuMxE9ShtVZkhDwv
-# A6nybW1x7vmkHfCh5Iuh3qHF3qZy/CK5BaSZPG2sT39reO8OJ34w2XhCT5MnrWy1
-# a0ZrCs90z1ATpL6ePD6oFY83wvnQK8FA4x0C1HJzGdgfw/cLWdgloDU53A5d20Ky
-# 4QkcfHoBnkTLGfobsh5J6vN3nRF+s+ZB/tGpSFsy9euAiIYA+9PX+9glbNWL2mby
-# CYQbH6s5jj5dM4EdiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMTjvetI8+iSgTmoFAo9j/OJeG/69G0GxRCzjrqoyJNQMA0GCSqG
+# SIb3DQEBAQUABIIBgGpfVgqhOD9d3QzArmphpsNYSbiVutjgASHCYuFMYoUdwszy
+# JhcB5ZZCBNPsuWVIqMl3tp+s8qimNuCHNvOlYG8q4PYFxDj1ZuF6AUGyIeqJaZ8g
+# pQUEZheOqH8s+7Tc254gUBBFH3Ef6Z0PYAuGSSsGlB6Dnz4PCDpJ43rwuXRb5MTw
+# 0NC5NzNfmW9Ovg4tloCt24w7PMtN/IieqP7viZDKDwRUa3kN2UDfl7c3Vq8ysNU7
+# jWRfVjbZpkVCMYqgZC0Ih6fN0If+erbF8KTihsUDu0Ffud/A3ETwsSBHSv8aexPI
+# wuXixUbwAK8rg3K/hZ7898UAQ4ceXXVwCJcdzk5/cvudqovfbsbsWoqc+34Qc9K2
+# PhDyb6an67X8paS6wZJCdlIcUrtxsZL0oqQspkfIP9Atu7qSreDpPCCZvruLuiSt
+# 4U1undIGQa4VJe+VKHTRGMe+4DtlxidQP+wFE+fixFmkSOVow1H2AGUtvEIYhexZ
+# gBIiN29YBC8FPg2FZ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODQy
-# MjNaMC8GCSqGSIb3DQEJBDEiBCC97eVId4vmZNlkx7MwIiYuzJa8c39Nc9qGUTOR
-# MPdrDjANBgkqhkiG9w0BAQEFAASCAgCT2+ar1OmJ8WOdvhY3lLR5PeCpkh4Xk3EM
-# lS2oWF4eUxk72rjVJYMAJS1bEvyqkX/Mu9l0OdUtz2mKpVIKu7VIyGu4EVoqIfvf
-# 8lsHjunHXV/tFLfokrRp2XpJZhFXPnCoPOHfZhlSQqoH4DDW+jVKOT35l51TJGys
-# jWOlExYDkneO9+R/tZ4G6mYrsJ8RYnUJ29HghFUfvJBbjMC1J5jT+Pe53ZbUEnNW
-# 9WEh7i3ct4h88/ASyI0M7a6UGUFxc4dXlI1h2eIxkVbEFvRVh3r1YKxaJiz2BUS+
-# ayFawQ9YeDG1OHH+DIXKqAR2B+SLB9UVbLVRPHVMAo3NQMk5oyZsGBXqKRt2z2Tp
-# m/dM7PMpyQbhg5Pw1T/gzDdVPtX64uSywdTagsfRPtuoikzN9dcb3VQB6CgdzYal
-# VEQWcWmvY2Fk7W1a+TyndQ/yJLUO78BVIBxmvcXQrrlhaXtokfs3PvosCFnAWDIu
-# d2r49E0u9POLUxufbqilnxyEmlXo/JDfTrpxK0voauotTR4w7lFuoCNZX3D5kb3x
-# foMYcykp6/2ZBNx1fG5FbexiUjI9UPsHaPWDmNaIUMsNWz1w9x4ICOSRF5V0oK7l
-# TJFMuGA5q5rCnM3i4YJWR+BWN5iydrHOpynPSihcprmEha72fkNXslbCj6+r9cKO
-# VzDX90lrCw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTEz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCBHYeRTff2T/wSnAp1JtTj/gsPoyG1ZFucN4zR1
+# dZk/PzANBgkqhkiG9w0BAQEFAASCAgCrbVtQeCm1GTsL7y8UA+sPvFnOoMQGN1KX
+# zOpo73Io5I7C6MDMgCv7bihETUohFxe1b14Au86bpp2n4qqvXnRF7X397lGEj4a2
+# i6WAL6ErMJJGuyob0fbuhKEnQf8FIq3qHmAgG5Xj8dijOYgelYD2iCQPU7p0hnsh
+# DYw1E8yXeTPIguzqew1QeGpkaJKCYHuDFgwZ+x030trZcE5MfKLckJpGnGsKKvq3
+# 0d7ozTD4Ntp7OOHBynNtifcnZjLZ8M6IrRvT3UHG7XFMKrB9qgyZk8tWMItTVozQ
+# r4wbwZwlbPQrmhqvgr1x49IhYjk6+VCCCfQqjKlQaWpLoEC8e1PpF6j0YWkfiwL0
+# yZywknMySrK13lWifZLX0TT0qh8BSmf/ln23N+NO58WM0JDrREjLkPqeDObSe4no
+# /cCkTK+DolnJ1lzMGIAvyfA4yuQZqrmKyAFLW5vGilYHtftWyUyjxH7OTdzEtuom
+# oAzbGCh7Lohn8poxaogQeZbUL4WTgFtiec+zFXYmlPWLJd3xolN99wHTt+ANPrfc
+# 4kFVh2nVYsBvXgqIc8x52cM4aUAL5ocHgHOgH0uclQXIA80+EG5QPn7A3Om4ftKV
+# o2yN48yPfe6C9q01kedAHmJEV1qfmVddoyI6q+RNIpA1E3UIrAddiaKaCz8OWa9d
+# 4nEqYXhtUA==
 # SIG # End signature block
