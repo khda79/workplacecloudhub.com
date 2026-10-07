@@ -3,7 +3,7 @@
 .SYNOPSIS
 Publish an existing, pinned current CMDB snapshot to its separate SharePoint folder.
 .VERSION
-0.1.0
+0.1.1
 .NOTES
 Manual only. ValidateOnly is offline. No collection, CSV generation, history,
 Intelligence transfer, notification, Power BI refresh or report switch.
@@ -14,7 +14,7 @@ param([string]$Tenant='test',[string]$PreparedRootPath,
       [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedManifestSHA256,[switch]$ValidateOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='0.1.0'
+$ScriptVersion='0.1.1'
 $failure=$null; $initialized=$false; $transcript=$false; $core=$null; $guardInstalled=$false
 $previousGuard=$false; $saved=@{}; $warning=$false
 try {
@@ -22,7 +22,7 @@ try {
     $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.77' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.80' -ErrorAction Stop
     $core=Get-Module SmartM365.Core
     $previousGuard=& $core {
         $previous=Get-Variable -Name SmartM365TeamsNotificationInProgress -Scope Script -ErrorAction SilentlyContinue
@@ -81,12 +81,15 @@ try {
         $result | Select-Object Status,CsvFiles,ManifestSHA256,ContractVersion,GeneratedAtUtc,EarliestSourceExpiryUtc,FreshnessWarnings,
             @{Name='SharePointTarget';Expression={$cloudRoot}} | ConvertTo-Json -Depth 8
     } else {
+        $transitionRoot=Join-Path $logRoot 'Publication/CMDB/SharePointTransition'
+        $relocated=Move-SmartM365CmdbTransitionState -PreparedRoot $root -StateRoot $transitionRoot -Identity $identity
+        if($relocated){WriteLog -Message "Relocated $relocated inactive SharePoint transition artifacts outside the CMDB cohort." -Level INFO}
         $parameters['UploadFile']={
             param($localPath,$relativePath)
             if((Get-SmartM365SharePointRelativeFilePath -LocalFilePath $localPath) -cne $relativePath){
                 throw 'CMDB transfer must not be nested under raw or log folders.'
             }
-            SmartM365.Core\Invoke-SmartM365SharePointCsvUpload -LocalFilePath $localPath -TargetFolderPath $cloudRoot -EnsureParentFolders @cloud
+            SmartM365.Core\Invoke-SmartM365SharePointCsvUpload -LocalFilePath $localPath -TargetFolderPath $cloudRoot -EnsureParentFolders -JsonTransitionStateFolderPath $transitionRoot @cloud
         }.GetNewClosure()
         $parameters['DownloadFile']={
             param($destination,$relativePath)
@@ -115,8 +118,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDodWU9zLQ+3XW0
-# yyREJ+G/HuSLQIKKrup+mnnmPA9fv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNefVFo9FylT1j
+# m/M85VEtLbxzCDtMT1AArzLSbqL4raCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -249,31 +252,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJIC9TYKbX37vI6ltNMUiOra9rr6PcMY8ERtbvAVZcUaMA0GCSqG
-# SIb3DQEBAQUABIIBgGaYrqNAJMKeX4iUN62GKeew+3KUy5//zV82FDQoQK/R7voX
-# OumS56uraruqzZb3sH7ZxiltFxmvrQ+iX72EmBPK54w/AhIB868hONx30uqQ5nr+
-# 2+bXYGaQX/QnxxjwMlreHMfvkfJB0j3DkxyHw/wzEr6CcbI7OA3UC46jMagREcMU
-# DGpoQhKZCfAYXvwvs2F2ufVVMkqYqAwaO3yvX+wwluDNqnGIkhe6BpBAtxuVOcFr
-# Czz3pI3PPDRvrHAEdIHH8S8VGeENiGLwDskPPluT/Ew3Hb3JrJa43F0OcgWCwHxB
-# ufcbpz930dXyrbhswtBo4ZBPAInaZ0ke7z5NIXtya9V9B2a7geq+0FCqaBPK8q68
-# U49OwIYwy/wo4g8bczj/pMJJxaklu/iwoXPcKhUq7qumDR6JvBhoU6hsgIMA0C8D
-# y1xnHwU14tT0Jr5QNZ1OFxMhXH3V74ppH+dyCvzw8vi3GlKJ0FjuFxnid7qhs6Ny
-# 7/W1Nwp4UD81beWNI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFEn1/dj5Y7Fg2nBD0KgNVLX6c5qdk9Hc19lUu63ZmSGMA0GCSqG
+# SIb3DQEBAQUABIIBgGglGAzZT8PsGHLBNEOPAVArUhPmmKSSitPT62SO1OlT5vx4
+# yCWs8aZ71gIi2nlci+UIdLEMfBAndNUmrpuuvXOnFGJv4zRlxc9VxhaLKLlx5o1F
+# bSngF8ln+Ds7vOkTQXxNU7KbfJ6j6Y2rb9zgFRl3M4RNeJA4IXjwTIW9YwLECYuL
+# Z0UTxP3YMuiD0v0+o1jkWXZrXGEY1Li9I0AaBpgr8KG5fsIIqJk/FBELjiNVY8At
+# HcQIKGP48J+ZpHiJYMlRmqosDIR+aCTZU0l5jkArJhz/jSBtU6HGQx0PYLAkUUcZ
+# RVW/3pj1t5Fk449Zvaxt+CUN9mCnFOqrDSkekHMm7sy1oIr1ong1UVsNEeGTwf/V
+# SVZkLlDBGSj8NHKTR4pd3VCH/NsKp4Wi1zrI2g844obb+NM931BY+gbbpSKyDEwn
+# B3Qn2DkHLySdFbRhOGlp6STemEvP6v9EBfyTP5M453F+DGS2fSwA/ra5HRWkqm+F
+# O+4Vel+iNIRwCHAf+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjQw
-# NDdaMC8GCSqGSIb3DQEJBDEiBCB0yiiWqNgttYI36M3R9HUfpYHEJJcGpNGuX658
-# vZtJXzANBgkqhkiG9w0BAQEFAASCAgAiqkdyizbmFWdVF637TtBnYJ60rpH1q0Kd
-# s91g0RvO1ulvGlfzgvCmvT5EilTz6UPZifCogA3j37ggHkGxPq/ZZ3+I2WI2aw33
-# zBtljQb/mXTNYpfXpIEX0Fikg3rqroBpEPe+b+MJ1urAuIZd4aLAa+XDGH+UkC9Q
-# rIFhvU9WlEKHg3xsX8CMPzV55fN0TDM974aCQEGZ+bBrPHOUQeEl1jOjoxsnG/9m
-# XIVMtAwklwb/z7Y+vay6OqbFx0u2VAXb/M0gC25gs3P5KuhoS/OF6iUoecP2T8TA
-# BLHK1/b3/4wF0EsOZCIkl610KCZV9fkrgTHfiedvZqDHznbzWNFFtR7QK5omFFdt
-# kgNIHWuLlyxiRarbkCO9o4V9cAyZ9/RwZDiho924BQ3g9PX+0w1oIr+hcxeF18JG
-# RAmf/61+MsAdEimF1/NMypmmubCADj/3SyvDP5VUI6qWn+xT83uded/lDcJWtCsv
-# sjfzmFq7xuXRprUHzcp9a9U0mATm517rCcL7MKhYgypHVBo59ojvvVUMewbIoRe3
-# zepeXfkHuQZXCnw7x200ZqQFOrWDEL7ox2CNOCVrHnRdDdtXkWLpE/omwWybM9at
-# 5wyES78mFmJls/sVMQZ+OEaNR67rY7TBrduFgok7iCG0lSBTsinAvP8zNNtIJv7B
-# FHYFm72cNw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCD9zzwO0fpBac3l2SC1cIFkRrcXIuZQHpaKFbaS
+# Q9XRjDANBgkqhkiG9w0BAQEFAASCAgAtF7nusLyD6DBtmT+dNG55RfAjQswnF9Jv
+# Ndsr2LAAPxJNnLGPcVf3KzeMU5F0Nr8Xz8U2ZZtoJZgsCEFtZlI3h4NPBc4Eh3yS
+# vF4fBSzWl5I27ThmRP4cL/pGjhvIx30CWxPMRX4ySrn3bglrto5YI3+E92hMATrm
+# n/tk0YEdO/JgZ3Tw9mqYFW/UT13XZSatYP9P0oqYIjd8b2o4nAdcMNsPJovn6IKr
+# x7XS9tdYQ9qqHwYu+QUa+UvC3BBC13563j+3Jcn288rX8pFAAoRTCt+qlB/H3FG8
+# cRa4WW+gsux3o8UCstDLBMoGHByYrPNO92JTxVS4fdRGUAP9bqJPnu7jqOXxK7sg
+# iXk2K+fXoY/10sPEki7NHopPatk1kj1JiPM0+pPplWvCXXJ2hh+k8tC4FhyFMpkV
+# WyK+mjqoilOE0SJx1yhlQatGl9uZKp5yA3EBOm91MV9fnVlulW1jGV9v975LQGsr
+# 2NE9oNBomfGEPljC6jhf4eL7guE6kUAs3CqJO6cRZzBrBa7lMjco6IeAKK6/N1QT
+# 39Q0tnvD3Fdwa/k0WYhOZWx6yUMRDQS1WUanJzVA2Oa6DFjD3huKcO2dj4OeaqYA
+# qTGpjxvt8vCCzZSCAGR8gPXVt/zyRWFSpz9nCV7jr9qZdQvWKk5Y/+GP8gp9NU6N
+# xo/Ly3lorw==
 # SIG # End signature block

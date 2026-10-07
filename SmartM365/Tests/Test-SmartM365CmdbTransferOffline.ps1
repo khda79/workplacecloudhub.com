@@ -1,5 +1,8 @@
 #Requires -Version 7.0
-<# .SYNOPSIS Offline transport fault tests. Synthetic fixtures and callbacks only. #>
+<# .SYNOPSIS Offline transport fault tests. Synthetic fixtures and callbacks only.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param([string]$PythonCommand='python')
 Set-StrictMode -Version Latest
@@ -148,7 +151,7 @@ function Initialize-SmartM365TenantContext {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixture.json.txt') -Raw | ConvertFrom-Json
 }
 '@)
-    [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psd1'), "@{RootModule='SmartM365.Core.psm1';ModuleVersion='1.0.77';GUID='0a5e1631-8547-4088-8abf-8d2c99f0cd61'}")
+    [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psd1'), "@{RootModule='SmartM365.Core.psm1';ModuleVersion='1.0.80';GUID='0a5e1631-8547-4088-8abf-8d2c99f0cd61'}")
     [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psm1'), @'
 $script:Fixture=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../Config/fixture.json.txt') -Raw | ConvertFrom-Json -AsHashtable
 function Read-SmartM365JsonConfig {param($Path,[switch]$Required) return $script:Fixture}
@@ -185,8 +188,8 @@ function Connect-MgGraph {throw 'Authentication reached in offline mode.'}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0shL9zIk77x77
-# HaTxiRnEkNXTRM2sFxDn2SXP6REFQ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDK9PkDkYWqbDE+
+# LE9gOZGp0u2Q8mGUI9Le3lw9DgWs8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,31 +322,31 @@ function Connect-MgGraph {throw 'Authentication reached in offline mode.'}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOuir1oks62iJxm0q6FBCFQrqhC1kbqqx/e8R8dxYKV2MA0GCSqG
-# SIb3DQEBAQUABIIBgDjAexTdHvdOynlPa8qFNoqJ3zTCX7vtB4j8xhQnvz8DW0DQ
-# 4Pn+uI5QZ+iIvwsoSo1YLhYPGTNbDojD1iAxb500gTT006bIJP1qaFGfqUqlvDAH
-# 2eiRsMcMgI9dXH1QUOe0TudJX76oR5bbPyTdXTN767eyRHUMX4gvqxbEbVh5EqhY
-# TEmqwRYEmqWMv5kYfAzKtMcFzpMQ4qbPdlF0fQGGMbt4TTqpv8OTkH38oiW4lkGr
-# OHCxyOKVh3XjQ7p7pgjPUv95e/18MaAFf2+sq5TscpHUhghObeHPs1eV7Dmb3X9q
-# yVr8/203xpEFTaFNABEcu/hUkfbZvdYarDmTpZr8gVbNLvuVb0BqR1mvYHKcM8JL
-# QbseRBIkGPqe8u1BvzorVFJqONzGNBAfUe9R8K3PPKwj/oyNb96lv4dQCtKbjUi3
-# c2vgCEEpPALcpGsbUiwtqgx6hkbMRtLKwIiL7OqvYEP5gOvh8FGDTvnBNU2kV0rJ
-# tMD/JME9Xm/LIxTBAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPD9WNkpuRMlseMGaG+blzlNnrcYia2LftGR8ML/p/upMA0GCSqG
+# SIb3DQEBAQUABIIBgIFqcSrut9rR1e2djeGE+VqNt5XNMFqH8IbdQF8IOw2nqH+9
+# YWY4hijaqIlf0o+xbxOwjaQiZ7iBvXuUnBzsFoA3BLmhYQamfE2zj9uRqMXQU8eh
+# GunNEpKUxKsmNYDvV17dmcene/s0wWead8mfIIOXaVP2TBWyC0cIbDBw/GKyXr1Q
+# llCM9wcELI1UEdB6300mm3vWIQAjj0tLPcXA6QaYAxe8VcPbJvmnnpDorqfQEurU
+# fBSN3qF/Cs69Rzjz40rVTjgeDncs7iQ9im40WkiQHlAGRxfF3Ezk9twPZJXPk3Yk
+# /ToF8DsbDJX5vuN4P7YmyBHKaGuaRcRFqykLv38WLlK+YHe4icaGqs7or+t18OZd
+# BzokvMi5k/l9THTP/Ld7nG1TNH/0COAEs70R8Vs4SI+I5HUB4+ih4cyFJmpL3DEm
+# Z68Uqo8sxmvSCXAD+cWgJqpX+xLa/fjEAJdf2EthMS2gDaPI1cMR9iUmeeF8zjcz
+# cE/e74mWfugrxjP3ZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjQz
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDndINWKmcQowqKCT9268CA7c5BVYGhMzALA9NV
-# 1fZHVzANBgkqhkiG9w0BAQEFAASCAgAkEgKOQTdKK066G+IEEB/Y+Huj8RBEWXxp
-# u68A2dyqFJOyAcoR1XEeAUwJwUwzzE/Kq4CQa2UtBGVOR0lKcmYEiUsJ4IL5pvbA
-# YrzQjtpHxakn1lhJONOKGlsvtA1guAtQ+tES5nQrNj3OgHHsfFjw0rW9AGcdldw+
-# olxSu1sT1aFNJOW3IcZxmAN+YTaL2ZvqC5+MchGuQX/5wZ4a4aAeN6KKKUCy4V3P
-# IXsyHqd1Ry9XPjUcdsSXoXtkyXVWQzcXdfPg0PgZl+eFyaCc7/btfYL8NBKpSdoa
-# 1HDqM/5UxfnjIwMEF+QisNMDD9RKmuLjgbTxybTkmR6wu2ksSt3tO5kaPXR0+cnq
-# 8Bm/t4uDYY4pHd73ve+otbueSnacFWsGC5+cwW1cGW40ld8GLqolFs5fZdnuQWlw
-# rlFrVW9NaaLV856AjtP+ap3qxk5B3DN8wZjBW59wTUB2doUQCZ6gB/mnbTLl+iZd
-# 9FkEKEwdRSrWsUXIA26J6QvCMKHrB3uN13fGUbHlIgtIr832uKqAY/lXZW9wXfg0
-# 9tJrCIaVAKE134zVseuKI6hprGM1u/NZEs05c//yRztCSp5GAt3HvSMS+CTSOW9d
-# djaZhIoHT/j51iWq8CWR2og2agbAs0NUbKYYDN9KYRyymCYe0EDPhl3FMtAoSvaC
-# qa7b9CNq1A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTFaMC8GCSqGSIb3DQEJBDEiBCBuCmtY07+yJD3r94DEpMNZ3VwvI/QojHkv31j3
+# c3ziuTANBgkqhkiG9w0BAQEFAASCAgBtQmX5/otL9A0XON//frl62tYzcK5zd1pm
+# /D+grWuU5LswzKdW96klqR1aD22i/0IQTV0Ezf2VU0OFEQGeMrgN0yv+P1XjQLA3
+# 9KB2hiIoA/ctIc3dzT7T45C9muGm1hl6YZ65TV75GLKPZFYnZqRHOMJ5uDbi11jr
+# w5JVD4pKf8rrZZdgQ9bPZ8ZmaGYVESfykklsSmyTieucpjyffr3yU0s1tCgSa4gM
+# EF2FPPvYOK6WMDFgCk5mj8gzNZj77dq78Qm3NXilduL0l8IZtU0O4kM1RLOD+1rk
+# Y8lN7JiICvGwVLgbD0VI+2uYRodgfXNQBmglJGma77VrNnXX+JBCH8lNpkcZ6JP1
+# UaxDDoRKA5/tkVf7MwkinA6Zc6aF00E8mYazG/mTwcYtZBqgCA5t3/Z0oVAcfh15
+# X04WffvQ5U0humseMdZFQOa3fmCowUhbQdIHf5zzt+ELdf9mwZlW6mjQuOmouyiO
+# kvA6cJor5z8sL/DhKViOO3M4LLYDai87cdFtw6NKoMqnnBV16WHhdDy989P8aLzn
+# FGyr8xmFgQKYdMPW9FCtAe0SFQtXfTfJEaTsdKkozzGsxIQ4+Z1oV5qBOBNRE+Yc
+# FmTNf8rQdawphoaZAIA+6o1PzugKX1FKHYyD/HtSyga69kqVe++poUVrPTu8UqYT
+# JATwC58pTA==
 # SIG # End signature block

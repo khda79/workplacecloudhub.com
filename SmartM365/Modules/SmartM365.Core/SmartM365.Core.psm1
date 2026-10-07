@@ -1,4 +1,4 @@
-﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.3' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
@@ -4722,7 +4722,8 @@ function Invoke-SmartM365SharePointCsvUpload {
         [string]$AppId = $global:AppId,
         [string]$TenantId = $global:TenantId,
         [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }),
-        [switch]$EnsureParentFolders
+        [switch]$EnsureParentFolders,
+        [string]$JsonTransitionStateFolderPath
     )
 
     if (-not $Enabled) { return }
@@ -4779,7 +4780,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         }
         if ($fileInfo.Name.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
             $null = Read-SmartM365JsonDocument -Path $fileInfo.FullName
-            $transition = Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $fileInfo.FullName -DriveId $driveId -EncodedTargetPath $targetPath -Request {
+            $transition = Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $fileInfo.FullName -DriveId $driveId -EncodedTargetPath $targetPath -StateFolderPath $JsonTransitionStateFolderPath -Request {
                 param($method,$uri,$body,$headers)
                 Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $uri -Body $body -AdditionalHeaders $headers -Operation 'Transition SharePoint JSON name'
             } -Download {
@@ -6235,8 +6236,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2TlUwP0XeQ0rv
-# 4V3UrU4RjkY2MDvoW5wmdAmTLNaa9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAazlFeDp79pbuv
+# Ll0EO+CodU++JBbFpyi05jePJUtuO6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6369,31 +6370,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAPXM2tgL4yi7KSOIoiGDsWkMr9vd6kRvfs6JdT1irUaMA0GCSqG
-# SIb3DQEBAQUABIIBgBA5v2qFUdVyLQxF9TgbFdDw7RjdTCVsd9v0DO0cGn52bYU7
-# B0jN5Wb2pqvYCMVzlVQSSWPz2QLJ5ayfc5sN8DP8Ut8kS+OGuxbOVmWbjSEjc1f0
-# ATrvUgdFJNF2sFhlxeZPpzfzYdMyzH89UwrvKW39IDZ42i6mcI8eiUV0kRESXNVn
-# LY0r3PW+vvLs9uujPi0wSplZ1Zbs61vMr3iNkEzHT/xcIGgXQpmSrpzzYVD5/5sC
-# SD5bjSwJYUAZbSNfbSNELO6+kCftERf8jmK6IbNlhc4xuiBpzpKa2jMb2u4o0ze0
-# e7Mdezw8Withzb2wRzPDsmXjw+LD4RA19HNWiE210rKaf2T0jDChCfk037wshy5y
-# m3UEUQkv9HFWe32egQ+mwjuM26g54njq+oMyKd1wr0I23fbAH4pkIUPN3z89uDwK
-# fIzdXL22+YMstasP1scP9s0Bg5DVSuNL6AULLHo/AulxNR1DGbUw9X09nZ2GDzrb
-# fN7NWYep7OEub5W6+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGk3p9lMUVTJaSB7iy3rVhSTfRhEZnGyjXrVACMWhWfTMA0GCSqG
+# SIb3DQEBAQUABIIBgBgusC8PYClU+SwY6ak71SUD03dGrpVnB1awW217f/YvZyVj
+# oZy5cm7OHB6PPUMK8zYm1BC6xw6fm2ueCUxyW4dKFrvbgik9lDSbvinjEWDqNBOX
+# y+BwpXVy1xizvwsn8drcLFXSVeYkeQBx7eUHQPh4bDhkNq1Y7wPwWrcn9YM6IGj5
+# ZUq/f2MQxyjiE8CztyBVsZlUaHVtTu3CmVPZdQdWa1c37rT3jq+zvWrmLBO6Fq6u
+# /OiFcktvSTJdUfZkYMOFe5newsQT1hhHZ3cC1y/sWdmwIuQShxSPsjbtlRiTTXdJ
+# n8gXkHl4fTYjJ0Vgf8rqEKTxyQ9WwfD5wXFpToAlxHN0xD57UEdZU+yQJLwtGY3B
+# 1COEBFRlMGEXzrDskatoshCAf6PF3P/JrRkhXpeeWqt5qj4C5qZZccRjUtjzYnj8
+# Oc1mtKHwZpnyRZJ5PKZtcI9pz5pYBVLBwf1hNcLQ3WQmFCnWD/Wra6ip923rDlbD
+# wUiAVf5tbE3YXIV9rqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
-# MjJaMC8GCSqGSIb3DQEJBDEiBCD66RG1rq7fU9GwW9AqaPuXlm/r9eZCUigq5WWj
-# GgWE5TANBgkqhkiG9w0BAQEFAASCAgBfDfThHdlxWNR4TfvqRZOCUSSBiuoEjdqG
-# +yJA7p9jLejAmgH9BcII776nX1HTqNWmb2bj1dJpTLK3Aq8ewCwa89LVvUcqFojj
-# hFb/iW3wt/2OrMeMnGEBei+4S2xyTPBUFEZf5vpQd7RLOMBy1pHwQNRlZFmnB9nQ
-# vUMfmLMniCx5yM6F7GaLPiPeTwEOLnAORP0z62ILCKOY+ZJnFV087WqgcLvJ2qRN
-# +dyg+x+XA+wxbabXwumog5QM6h/h0xmqeU34niSp4tMso5/ikHz9x4ag40+w2BjI
-# yyT6/jkaU2jV6ZGEAZebL+GKIu+szT6Yy2QELAC2rodFNr1ZzWpdaUGFRBAwOINs
-# jYT4i81wSgjVZx8/wddyXSifweErZOYDSUbiiWpk1RcYJaASZTSnwok34Ijl7xok
-# XyPz4VTAoLM1kmAEUBMdQRkC46yNB4QB4ievch6CUp/lsq2qGchadEHjUCbJlRzh
-# 6uFSAQDcJZKFyiVj8sOwPU7pLG5pKx8NKySEosHL1wBuFUPsI8JMeqXgUtjXzjhO
-# dT+5u7LuCoI4gp4s7EtooO92SL7VOlJZvdusRbt6ru9lXRYg1RHH6+FCMmGodYn+
-# aew3p4Qvab/bdQwmDEaFnHZU7A1EM2wQ3w4dLo21pDTB3YK+bvgsLG6/A1K9HTch
-# /jgz799dag==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAfR9TpT8kmqW5aEk/tL9gPtZD7ZdFW3wir1HoN
+# HOE2LzANBgkqhkiG9w0BAQEFAASCAgAJNA20B5KeKvuYEyg3SJohujOcy9LHG/DZ
+# P3ZowXCXnP9eWsgw1Y9gpqdcqba476MYF6TRzFEr3pt0sbcUkiQ3oCwcIasv10FJ
+# es+4aU/N5sBXYU3QYaIl0wijnb4Eq731/bVccUITdPvfLj+XNTvD3F+8LYxiz5gz
+# IFgiDJWtpqE8GTLEHNcftsnAvsYLMy/T9R7quNPgjg9fsr4YxuCekG95qTtjOq6r
+# k4svqr+/Tw05KY0be+agomKFNbAB8bUvaQ8vHMkDIO0djC/LodMiXUIwvCqMiBGZ
+# Sr9plvkxh9qmPTQ9Mf/6ohTnHf88nquhscxYQdMu9qWj9KtrXRfqpfTqk08Jckfd
+# /0sWw5VxdlOm7U+/5wXoLNgWgMX7hrVXqn5HfRhcdhce23BqOPFIz1HolSwobkpU
+# 28MbHxM3oseKI7y5OnJze/Uo051sDrfIKW9qcZmdmDXUCdk2Y6meR5+iYULYyUCi
+# OsXJokAPK7F8A4Qza2D/5qzvqitxItXurq95ArVPUEMQxnbaY5N+Pp3JsM0CG3qo
+# ckgTIRo23m9HpH9hGTN9NI6Pog2cAaVY+sHJZ3GlQyFTLT0M/Aczk+Sfng3L7O+3
+# W7QwLXQtcxVV18KplH7k5AJ3gAmR8AfyzAE/BYGexzwTDsC/R3Ki9rH7CIj2ZmEj
+# wK6GB6VVXQ==
 # SIG # End signature block

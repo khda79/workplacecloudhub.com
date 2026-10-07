@@ -20,7 +20,8 @@ function Invoke-SmartM365SharePointJsonNameTransition {
         [Parameter(Mandatory)][string]$EncodedTargetPath,
         [Parameter(Mandatory)][scriptblock]$Request,
         [Parameter(Mandatory)][scriptblock]$Download,
-        [switch]$CompareLocalContent
+        [switch]$CompareLocalContent,
+        [string]$StateFolderPath
     )
     if (-not $EncodedTargetPath.EndsWith('.json.txt',[StringComparison]::OrdinalIgnoreCase)) { throw 'SharePoint JSON transition requires an exact preferred target.' }
     $policy = Get-SmartM365JsonTransportPolicy
@@ -34,6 +35,15 @@ function Invoke-SmartM365SharePointJsonNameTransition {
     $journalParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($journalPath))
     if (-not (Test-Path -LiteralPath $journalParent -PathType Container)) { throw 'Local owner directory missing for SharePoint transition journal.' }
     $transport = Get-Module SmartM365.JsonTransport
+    if(-not [string]::IsNullOrWhiteSpace($StateFolderPath)){
+        if(-not [IO.Path]::IsPathRooted($StateFolderPath)){throw 'SharePoint transition state requires an absolute directory.'}
+        $stateRoot=[IO.Path]::GetFullPath($StateFolderPath)
+        & $transport {param($path) Assert-SmartM365JsonUnlinkedPath $path} $stateRoot
+        $null=New-Item -Path $stateRoot -ItemType Directory -Force
+        $stateFile=Join-Path $stateRoot ([IO.Path]::GetFileName($LocalFilePath))
+        $journalPath=$stateFile+'.sharepoint-transition.log'
+        $lockPath=$stateFile+'.sharepoint-transition.lock'
+    }
     foreach ($candidate in @($LocalFilePath,$journalPath,$lockPath)) {
         & $transport { param($path) Assert-SmartM365JsonUnlinkedPath $path } $candidate
     }
@@ -195,8 +205,8 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5gy8rWjeN5Shp
-# KvFG52eBVVvhlGy6L0wgq6hhkg97taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzBVVZazhaHRyK
+# hKChFpeg6xwqD+FQmFvHzYEPPMFsBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -329,31 +339,31 @@ Export-ModuleMember -Function Invoke-SmartM365SharePointJsonNameTransition,Recei
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEbKC+W4DMyVT6aU5TLLHuEl5SYyHrOgo73msPjspiPRMA0GCSqG
-# SIb3DQEBAQUABIIBgEQgehCSZOgeN3mtycz2NkPv1l0WS9T2jwtiEt3zmD5a/5Sc
-# ASis559DCF2JvNTV7jtj1O06nVB7HrqkQudseQHeZD9ftv0G0TlDMpXBEtULRVqK
-# H1hDhxsDrmEP2WoCZ782umcUuLQvkuItXXdE2zcTREaonte6M2t+Q4OIYCkTvRjX
-# 9lREDRZ0sf9xWohdUu/b+NtZh89zQZi2QaMmoOK2Po1wBXWC6DFVzptJiAKt8mMu
-# UDG7BL4MOwGn6LfeDzRAxDMpMshbmwEPO9IggjBX8PwkYlMgRxp/qFAv5ycEud3Q
-# MJ2S77K6XxKOKekE0gXUXtT8enELjIldolFE1FSq78tCMbIGT51xUbs4qYLC3Myo
-# 9TQBZw2Op45rfBGQc/okB8lOvpuIM/iMUvb5zKAb+jfENB1FqdV6DLdt+vabobi5
-# xtO4A4spayEttle3aa+hs7+ZaKXQ16FswrlTujm7qeqLKoXJFQkboFRLZS+Hvb42
-# HOWbzufGT4Q4LrAebaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIDdcxmcuPm2ytH8tXHlAL42ow/UQgEj17nV4D9uT9IaMA0GCSqG
+# SIb3DQEBAQUABIIBgCF9bhizbrZYVUpugBdPnmZeLmsPouNhbLRgFb2EbhX22Aja
+# 5Rc4ZOmzHtd2sGYpSregELdaM0w7VEC9D2LSMPuofUx17byv5UW5B3WT3NrGtS10
+# fxZSA18CIyE2gX264Uc3gX6RbTPGVv7g849SCRGzKQttHQveGQ9UaNAgyOyk1+aU
+# ToWboXX8SbJwDPzb56q1Zgpje9zxG6bcKIy1Nz5SoifOmP83mSvCUAgCKJlkhgsF
+# DOHdoCr5Rk+GB0wS4d0EoDouAEZY03A7Lf+TnzBc4TyLp/HVnLrSobmI5KHCRSdl
+# dXCDC5NuIwgwegczDEknx6ZoPgyUEb8c2zGNVKds0jsiovBuPFJqta8cyKyxgQPe
+# TBk+nPh7aLP2fKLYe/Z1J498Q1rUXYR0LFQ272HH4+rOollxh0eS2GrVAJ8TeIhZ
+# dhqi4nDTY7s/03jG6UETFBnWXXeIQXpVznRa1Xyobw2NBGd+LG1dEEy9uM/tfBbM
+# iveL7TS7gWNki0YFE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBiPtPD+z06r2vez5ys6adU36o19l5RCAqWiQJa
-# 6TP67DANBgkqhkiG9w0BAQEFAASCAgAqbv5LlPnlZwyJAPwYW82tweh9V95cfgBM
-# A5vnYW9ufLoQWMZkT0VX+WkqWbhk58TUN7dLxlXlsKvNojQpciKVWg8366ksrzXa
-# E9dGXcsA4Kzn2d4gyz7B74jLscmSkdm6gYDlwWvj1S+8ZgYv75e8E6KRa7fOBP9Q
-# n02KuUuRpT7cVIw9YO4J9Ex8Z05MS+x4v7JNA5/Hf65BscYyE8aJ9s8Wp0q0e/cD
-# utbsK4HzyYDg81pTtkP78aQhuwKUB+IrLnsWv7tYQhShsHA83Dl99oJwqUhMtAcJ
-# rwpvHJQaJmRYH8OI5oF+hckRGngOvHUTxAhaHDy1OWbBsp3TO5gk/KAiJJTl9Jo6
-# fUP4X/RM9caFRDGFsyfk+Y1pfFgWMoqSzg/qx2TjJ4LX87+SKHtEJnpDrxtQ5ca6
-# g89CluWwXJyTHUerVzwGErAVqr4CqkWg5cPpc7YMuxRByUskZtq+PWnmRkowRB1B
-# lvLXZ4qRIsWcQ+iyDy15NuBORvpPAB6xjP89p5ey4tfd9kG0XCQcL7TckI7HyBT0
-# NCV37e2kDGg/NH5uZT1Ay/CubYXQJr63q3wF2fq2g7EhD8q3yxQf/QU0CRUsXTBK
-# wit0cpSn/PWl6I4L6yLD1AgyL+OxtQucqe1VyTKfz8U92q2xL4bsGEFJ3/xz4sSZ
-# MdNhe2H7nQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCCZpfyhv8JmErdNgwREaYXj6bVF/Jc0Qz+zFpe/
+# qxJY7TANBgkqhkiG9w0BAQEFAASCAgAKwPB+sjTDrDMwrRyrrLo/z9j4G7kHLXCy
+# kfBqI1NwDQvxWhHnzBmdw/QjARCX6fwUtBaHK3sJ231jWfJVSIF7xC+G7Xzoi5vE
+# /p95zKrR2277xwOOVlAA8KHyNSjGvffdeiaeDsR97vSzcMojGD77MnfUX0SVwuJE
+# Yfb2xek+GlexwZpqYZJ1rsM9y6iDfEz5HndmTxyMed9JqoxQ0Pl8HKYxgPlWD1/D
+# Vcc8kDR8pdetsxrIdcBcYixef6axS6hTshZV10rZ0V68EG2V/jh0bt8RZJ+Kf9cf
+# PbAAnRiVckybRSIsZLja+vEre8ris/rqgt7i9N5Y57qZzq1Zh817EkpvsmKHezJL
+# RBx0d9LWtTHDzNCAnR60DiGsfGvk5yLPhy1K35nB846J401HkmHRNEO6ax0Oafyp
+# 6OBZnUiEuNNUkM/AHNBUdSBe9EalsP6UNf0iDKDwU+79bYIVcMBAmdkz5DDmwXvT
+# ulkLTgLSTvxbG2g/nBJjRnJEonirbuF2mpUcvwb9fP9wJ9tM+0GNSZ+IqvQitJg7
+# q+xo3Tl4PKVdzPC+gBJMv8IOOOd6jc2cz4RVgbl71XzlRZEM10+76dsYreIBPYmM
+# iwijdjA9u89HKzChanAD1M/PRy0SQIrnR0eebjF6Yeql/cPBNKDDotftIRGtcGEq
+# f5csM1AwAg==
 # SIG # End signature block

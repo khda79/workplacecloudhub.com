@@ -1,6 +1,93 @@
 #Requires -Version 7.0
 # Current-only transport. Callbacks provide the shared Core upload/download APIs.
+# Version 0.2.0: isolate persistent transition state from the validated cohort.
 Set-StrictMode -Version Latest
+
+function Assert-SmartM365CmdbTransitionPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $cursor=[IO.Path]::GetFullPath($Path)
+    while($cursor){
+        if(Test-Path -LiteralPath $cursor){
+            if((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){
+                throw 'Linked CMDB transition state path refused.'
+            }
+        }
+        $parent=[IO.Path]::GetDirectoryName($cursor)
+        if($parent -eq $cursor){break}
+        $cursor=$parent
+    }
+}
+
+function Resolve-SmartM365CmdbTransitionStateRoot {
+    param([string]$PreparedRoot,[string]$StateRoot)
+    $prepared=[IO.Path]::GetFullPath($PreparedRoot).TrimEnd('\','/')
+    $state=[IO.Path]::GetFullPath($StateRoot).TrimEnd('\','/')
+    if((Split-Path $prepared -Leaf) -cne 'DATA-POWERBI-CMDB' -or
+       $state -ieq $prepared -or $state.StartsWith($prepared+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){
+        throw 'CMDB transition state must be outside the prepared cohort.'
+    }
+    Assert-SmartM365CmdbTransitionPath $prepared
+    Assert-SmartM365CmdbTransitionPath $state
+    return $state
+}
+
+function Move-SmartM365CmdbTransitionState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$PreparedRoot,
+          [Parameter(Mandatory)][string]$StateRoot,
+          [Parameter(Mandatory)][hashtable]$Identity)
+    if(-not $IsWindows){throw 'CMDB transition recovery requires Windows locking.'}
+    $state=Resolve-SmartM365CmdbTransitionStateRoot $PreparedRoot $StateRoot
+    if(-not(Test-Path -LiteralPath $PreparedRoot)){return 0}
+    $lock=$null;$locked=$false;$handles=@();$moved=@()
+    try {
+        $lockPath=Join-Path (Split-Path ([IO.Path]::GetFullPath($PreparedRoot)) -Parent) '.cmdb-preparation.lock'
+        Assert-SmartM365CmdbTransitionPath $lockPath
+        $lock=[IO.File]::Open($lockPath,'OpenOrCreate','ReadWrite','ReadWrite')
+        $lock.Lock(0,1);$locked=$true
+        $names=@('current.json.txt.sharepoint-transition.lock','current.json.txt.sharepoint-transition.log')
+        $legacy=@($names|Where-Object{Test-Path -LiteralPath (Join-Path $PreparedRoot $_)})
+        if(-not $legacy.Count){return 0}
+        $manifestPath=Join-Path $PreparedRoot 'current.json.txt'
+        Assert-SmartM365CmdbTransitionPath $manifestPath
+        $manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json
+        if($manifest.Owner -cne 'SmartInventory-CMDB-Prepared' -or $manifest.Status -cne 'Validated'){
+            throw 'Transition recovery requires an owned validated CMDB manifest.'
+        }
+        foreach($field in 'TenantKey','OrganizationKey','EnvironmentKey','TenantId'){
+            if([string]::IsNullOrWhiteSpace([string]$Identity[$field]) -or $manifest.Identity.$field -cne $Identity[$field]){
+                throw 'Transition recovery reporting identity mismatch.'
+            }
+        }
+        # Keep handles open through relocation: FileShare.Delete permits our
+        # rename, but prevents a legacy exclusive transition from acquiring them.
+        foreach($name in $legacy){
+            $source=Join-Path $PreparedRoot $name
+            $destination=Join-Path $state $name
+            Assert-SmartM365CmdbTransitionPath $source
+            if(Test-Path -LiteralPath $destination){throw 'Transition recovery destination already exists; nothing overwritten.'}
+            $handle=[IO.File]::Open($source,'Open','ReadWrite','Delete')
+            $handles+=,$handle
+            if($name.EndsWith('.lock') -and $handle.Length -ne 0){throw 'Nonempty legacy transition lock refused.'}
+        }
+        $null=New-Item -Path $state -ItemType Directory -Force
+        foreach($name in $legacy){
+            [IO.File]::Move((Join-Path $PreparedRoot $name),(Join-Path $state $name))
+            $moved+=,$name
+        }
+        return $moved.Count
+    } catch {
+        [array]::Reverse($moved)
+        foreach($name in $moved){
+            [IO.File]::Move((Join-Path $state $name),(Join-Path $PreparedRoot $name))
+        }
+        throw
+    } finally {
+        foreach($handle in $handles){$handle.Dispose()}
+        if($lock){if($locked){$lock.Unlock(0,1)};$lock.Dispose()}
+    }
+}
+
 $ErrorActionPreference='Stop'
 
 function Resolve-SmartM365CmdbSharePointFolder {
@@ -122,13 +209,13 @@ function Send-SmartM365CmdbPreparedSnapshot {
     }
 }
 
-Export-ModuleMember -Function Resolve-SmartM365CmdbSharePointFolder,Get-SmartM365CmdbTransferPlan,Send-SmartM365CmdbPreparedSnapshot
+Export-ModuleMember -Function Resolve-SmartM365CmdbSharePointFolder,Get-SmartM365CmdbTransferPlan,Send-SmartM365CmdbPreparedSnapshot,Move-SmartM365CmdbTransitionState
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEA8dawXGuMPcV
-# XcwHFIpzs6izUOn9v6ULrdK6//3cZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqkqmu8DmIyhXp
+# ggxFO/wCb5UIxQNq2yUzFfkWfb6RZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -261,31 +348,31 @@ Export-ModuleMember -Function Resolve-SmartM365CmdbSharePointFolder,Get-SmartM36
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL6RUky1qxDOf81vkxux1xmwEXgwdZ7CttZq5iKXn/u+MA0GCSqG
-# SIb3DQEBAQUABIIBgEFcHyjnbuK4FkeEF4rE58bM/pu0kV+1vXXT2AwJHyEHt0i/
-# cV46dz1ZLBkX52cltO2aPJJjnZlnX7PrlTYvxJodkK9jarstLc10ltv9tMFCofzQ
-# +RAjibBvDop9l7xJf4AX9BXopTBkijkVydhoeeETv5dNkRLmlHz+EjeMh94Ch8wi
-# 7uvF50zYNocRxcvkC2K1IPtaVKU5sfYRY8yzHqK94FJjjG2NLFPkmDg/aPWYFM50
-# DkbDFbip1k1HRgqlJklEdcuBW+Cw6aQ7RoucfcLWm5uIA3Jm8ibQIVknLqo8YcZZ
-# FTdvszKJjYnCyAcHUb/f0s9cLkDge4uEl5wPyIpt0b7qwEk8eRSvztdk8xECt1V2
-# Yw0Hrewt3WkSfp6CSB2cOb5OM+Z8Bc5nV4FBk8iaUQ6/gQyXJA8UJEaG1zzeIEhG
-# g8tKOj7+ZyT3lN18qwkE9xL9w537NmL2cbrnkCHXZ1VAoSQIzBIXempZZE06An4v
-# wsnH8HEdsDdWSLSmj6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP6icJYk5Pki9Ts9oRJk9sJ8yqPHx4zPrriC0UhXjQMjMA0GCSqG
+# SIb3DQEBAQUABIIBgB9ooy8m1rnhkh9ZDZMULCswVpX3sGHhA5sY0daYjATags93
+# YbkHv/U0ZFVTQ5GLNaVaMmL9qgzRhEvFjWk4ALX3ZViGDs7dktlDVMiLI6UI9ize
+# AjijxwjHPOOBZMgdvl2U2j76enrdGpNaLWZjtcGteFPsXNNUhg2Ofdx53CxFu/9c
+# qbN35aU4r7Vlb7RN5pDahuwyNQXNt6z4xMFwFU45GgHCGWclYbv0jSJhCmw7aYKS
+# pXpCTS0ghm7CS9q4R+bJ7YF9eiz+v0JA3/Xv+xpeonauWiLpg6tZarm+x6O/GrCj
+# CHSJ+Z3wKE9cuRm8FSr+JtC7Iy998LrFTiyZzh9/a85RCM2ClDTLhct9vt4IGAEk
+# vgAR1oYmJU8efHYb9UCCBTpzobTz54KzZIJeyhH2gaYStPwkxvERBTMo5w4xtYHW
+# tR8GsZrdLzR31HqlCmPMYNQ0vnvROE+j7prNF8eQHPNeANHKxNymQhK3PUb+2ccB
+# 3MnHzZuUQ9ozufAgdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMjQw
-# NDhaMC8GCSqGSIb3DQEJBDEiBCCwL0nkPqkbVAUqHEltr7DZ07GAbR2r2tyUcW38
-# 8BOO9DANBgkqhkiG9w0BAQEFAASCAgAWrkq3F8fIo6PjShz6w84TEOuzl3jLg+KX
-# tgkXUUJwHGq2VxAGjUObIbUwaJhfXILLw+oe3PKiPdKhNtHaetsDREPxXSBysCKw
-# 5P8/G4jfbHwnxoAEZo56C0rFDMYLEU2mCyBUSysGWZRSaqEWypk/e4N9mho9GY+B
-# 9RhARx09RkMPycBlGuqK8gUcOWhrI7pDk2vPRqEdX8EMq6k7Lrix17x1RrFt6KeW
-# iT91eHSeOhijTvpwmf28fs1ZzJUyq4aVBLx4+zD9+BupHDHcliXG84PY0y4F1wpz
-# I05JGcZdzNmqST0xMWb/QZ2GzGrm+uSxmsIeY+dz/g/0i1Um6D5ekTvA+kR1OLb5
-# aNW0G1uOJSclx+sSd/LIym9sKWa/HbMmd458VoJ+W0+Z5kpEweJCdl2llIwYrbvq
-# GE4JXa5g+4QC2Wt0Ven6Kja8nd3uJnggumYGY+4F5tD15ONxCZQ1hXWb3k294sFU
-# zr/Gl2OxnWnEgzMjUUsd3nXPytsPLajxFgBRKyhFI1gzxESptN5IaKNvB6A5VPF7
-# nFOQobDBRsRo2De/frUniyMmvMltFDP9Qj6pPwSSOMjKJ1kHHtw6DAg/fi84Odg3
-# XDXPGOHmljPpGex9SdI0SbZuSqUDjKhrpNKvHjlKTaUq66GvV+vmwuzWF74GnpnV
-# GVSJAGCoGg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTFaMC8GCSqGSIb3DQEJBDEiBCCVc1VeGWK00qrNdozm0RVcRTOXUWlUJa2gbSv7
+# OPP5FTANBgkqhkiG9w0BAQEFAASCAgCpsgKyiOcQUcgqR8UzjKktsQ5CSJsck15K
+# RikXrT6IGZH7AFttngUDkVJ9BfY+OrhGF5c3UgYzUbfS3lXXiZYgx3/jKUL8oki1
+# 6tUyONUdLsIFLOmpOIghrouVrQ6SNn/uOirft4hsqSSPsBHVbWO5GI80QcswQgoB
+# Xn66bNAfg5CN1SJx7q5OMSCBa++Cb8uUuWaa9V77qTKDqOFZew/kN+pFjRl1UEFb
+# 4tA0A8GmcI3f8oY7+k5Fermj5XRdJEw/End/uOSk1LoAmVs5ttaJ5gbxt4NXQZmW
+# zDibFga5FvjwBC1K2rY33ekqVBjTd+LTwhvbcoG5+P5rYjmkiIxdV6bf6F4VXmg/
+# bVaqQrFPYu3TNRE9nLD/3Ni2hpDpFoAr8Job4jyRhlcGoSBp2m7zxLxhRqfky5Gs
+# L7gYJw4GCcr27D1aqvY1QFzlHNVMOlParpNSHWMRUbw6inrV8WEkO2PxLRJsh1GZ
+# zmLaQ7IT8do3Vwxg3sK7OBFWjgYE4dqje2eENUesFWxuSp9vdDnVqjaK6HrVarxY
+# I4BPJvyU2XOZZQk4GEoGp6e+XhZD3jd6o3ZtnPwAlKPpRK4uFNl8KzSTct4g8Lmw
+# xEf+U9gwQfTflHA15ctjwGD5/wN0sNgaTP8S4dZYHgNFOwNG/da+EvazO28j/rHh
+# 1Qawi7PW7A==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.9
+0.3.10
 .NOTES
 Local preparation by default. -Publish explicitly transfers the newly validated
 snapshot through the existing SharePoint publisher. -ValidateOnly never uploads.
@@ -14,7 +14,7 @@ No collector, history or Power BI refresh is invoked.
 param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly,[switch]$Publish)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.9'
+$script:Version='0.3.10'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
 $savedOfflineGlobals=@{}; $preparationWarning=$false
@@ -90,6 +90,14 @@ try {
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted=$true
     WriteLog -Message "CMDB preparation $script:Version. Source='$source'; Output='$output'; ValidateOnly=$ValidateOnly; Publish=$Publish. ValidateOnly never uploads." -Level INFO
+    if(-not $ValidateOnly){
+        Import-Module (Join-Path $PSScriptRoot 'SmartM365-CmdbSharePointTransfer.psm1') -Force
+        $identity=@{}
+        foreach($field in 'TenantKey','OrganizationKey','EnvironmentKey','TenantId'){$identity[$field]=[string]$effective.$field}
+        $transitionRoot=Join-Path (Split-Path (Split-Path $logBase -Parent) -Parent) 'Publication/CMDB/SharePointTransition'
+        $relocated=Move-SmartM365CmdbTransitionState -PreparedRoot $output -StateRoot $transitionRoot -Identity $identity
+        if($relocated){WriteLog -Message "Relocated $relocated inactive SharePoint transition artifacts outside the CMDB cohort." -Level INFO}
+    }
     $python=Get-Command $pythonName -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $pythonVersion=& $python.Source -c 'import sys; print(".".join(map(str,sys.version_info[:3])))'
     if($LASTEXITCODE -ne 0 -or [version]$pythonVersion -lt [version]'3.10'){throw 'Python 3.10+ is required.'}
@@ -145,8 +153,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBem4WCP5zZkVDx
-# Ltr8qZQV6nlnlEhehgQU10PRUb+w7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWSDq5bnvXMIu2
+# 24INAJAtQZuRPK7kBUG92cuEBp1MiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -279,31 +287,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAjfVAn3eJkI8uctd/dCGokp0SibbX90Ky6mJUEHahZaMA0GCSqG
-# SIb3DQEBAQUABIIBgAwVW9fyb9WCDGZh2FSBmtUp9AMFWKM+0ftDJKjoyphkD+q8
-# wIq9VatJZKJ58XJp38LujNFy+hfnitkZ4DSXpRVwQVszSTcCsEmUArAPU5ES9hnc
-# CMrJWN03V1F34jsYIAjmtjMtRh4soAQbcCSEIDsHHe6sF7p0GdyOV75i1gSpLz1L
-# ODyEoY0NZ+2MdybYDzG3ml3VgzBNCKtQjbvJFkt4nEzbd5+yztVXsPIEilnF4seD
-# 1LJeHw9WBwOf7lIhr2GZoh7H0vUf9uVf6B39hHZGXsVdnSV304/CqFjdiKeBj6VT
-# WtTmehRJK+OhlE2KrbcoSdHGBTRQ7+95kk0Uvd/o2tC9xfm9wQb2Q96zZGc2yugv
-# vjb7aaI/yjhR6PpR0zOBaAJ0YuEPhCfwhVPqHJvmYd2OSdOEwjt9oIyr8FaDicNI
-# zh2lLuVMquzr+ZGBL76f7/b8GxDsHJU3VzmUIIq04K12DargCkMw/57WSQrwYXS5
-# 7u/yjxKW1JgMi4uf+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIATfU5IjQBeol/Fk0d4mGfhqbNkBmoETNcz+ODHsmAtIMA0GCSqG
+# SIb3DQEBAQUABIIBgBDPY6jRw+y3rP0chIa7psA0G3a+D8pns42PaSpxo9cboA2q
+# mfPcGgll2wo/44wFmNPFVlgyAXn7L7rcrRzfiZXTDg4H1VD0HEt1Xdna/RU5p8GD
+# j/yPfrD2QbQEdNvVigU9VrJOD/1dMMSxFnVaKV+QLDmfgPk68rWTR7w7NHybHKdc
+# Vvh/kI2C059mgiV+ANLbc4G0siGdSgkZT7VdTFxTQwXXYYGs9cfD+QC9ZPe956Pg
+# UxN67QxTA4b5b3V9My2WdZxJIgxP22Q2KUaTfsiyT6W8hmywmos27TPMG3/ip8fW
+# zX0jIKVbcebJl/AKrMV7yg5AAWVXRjxz/P8NDlSRoC9XYjGTjFDUM9m9zYoaiet2
+# Rt/swPEYjtDu5Joct63a5U/FZWdBj0CJxZtgdhk/SyDm2ZlcYORYK79ZcR9R936X
+# FZ70l3FCSL4uffMqXQfYWjBZ0eNxpWe3rHZZJiTAsP4zNYZ+NKcBHV4P6bx6omZH
+# Pynk3NkksXyPDJFeNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
-# MjRaMC8GCSqGSIb3DQEJBDEiBCD9EOzKDEhb+brbiz+Ri4tCQ7SyjFBOBydDjiik
-# 4qkpFDANBgkqhkiG9w0BAQEFAASCAgAMB0erfI0nPXCrqQq4XYpDHMtNQ/y+eLgU
-# hstUo/NXz1sYxzT+J0qd95zLP7t9zR/26w416E9Dy/dTVcUmvKpgh2fzF4Tn/KYz
-# mftqOdQh+LKX0+iOdujIDQb65suIGRh4r6B0fSxBIR1vXCwyh9mJ/hEgtuWTAsWQ
-# K7rQz+oVvVqj7JDdKp5mcGaySipDkLJcPkt1QSMZ1pA7O5nLbH3sM+bdZ2o7slMU
-# gOziywarC/QRZMaEr+/jVTbgO7JtcO6mMiW80+DcsHtkO/yljevYwDHrrgGCqnh8
-# ajAdIa5FKzoPiWzcuT1fucbAu9WWL1695Ngro+fJ3LmjYRHigPlAxx1r8TrNCR7X
-# Wn8ilSxfKK2IfTwY7Uf3SBsR+EoLLlboHKc8Hvf5AtMFZQHQUNI5SwUZgYv+8CKN
-# vwckZQghzGQnrOR+7MXDTq3PgRlo361PR8V2vgVKYTLAarW65jvuqn/k/pKKMiRJ
-# /iproBvhkzcrqFnYdD75pQtEryCPMRSgGOllBbGDuaFB7k+gnG8UfLzI3+Yxvj0j
-# +YnmrSIY9d0OnzxV+a6vsp5qDBF6LLFMFWB6uvQwHbg60zB5AWXIZr2/WG2HqHTD
-# nWGDXG5xsCj9CQ9OSxy1moCp/nvo0938JOgnRHEv22g7IyBEbdsU1RmE2Ti5RCp7
-# adXQbNSAlQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTBaMC8GCSqGSIb3DQEJBDEiBCD9RMGDpnfa9Un/LIa0eRa8QQF6FDbDhvi5MPey
+# UEzAHzANBgkqhkiG9w0BAQEFAASCAgA3/5Lk4N0K/ggVJo7ssd0HxaQfWFoBklEA
+# SXBiKkB5oApFC2KnvB69JAXQ1eT5WiNWuB75iZDSuhk60Ga7xTjgY1PxOi1/MWUJ
+# +MpOOnXeGsYkuVL68MIQDoLeJpnWisQrIs2eakoVcRRqq+iFLFaL1mSNxTS+s3Qk
+# V9LetMBCgpNLX4EbBiDmTcic48jrwCYu/ASGGWDg7RYyrBEW7jtW1qan3DIfWU5Z
+# rqYpELAznQ8NNfT873D56iWdJRnisO5/P7R3tGcDHSsoyc3YMyKCdFzr3tHqYnNi
+# ULI5KBw8KSL/wvvSeRz6GG4sjFAdTEdkT1e37bDvcCkebxuj3oGBJNsGKSr9Tgtj
+# mVw5j5dNB4qGOwdKjNEs5WPRX2r+DYQQ8uARFI5kblATEPBB6qqSwqXC/MT9/UaT
+# KlVPnqqO6Yv7v7L5TVWHGPYMJl9nZDkPTfA1PIgBSuA8t4ir05W9W4hKDvULIpy+
+# j/FG2tFuXt1wc/fui49HlVqsyxA+6wqoKIX72hVSdbxyeSWnwXYq6FldjuJtZgG1
+# XcAnyDzIKQi4WXlhXuxBiggDDwLnRUPjYkUjyMvOBJJbaPHVeGJSLczrOZCQVpow
+# g9l0uTBMWX3spM/jYae6EcTd/Foc6dX7L6Q6Qbqlow5VH980lSnS2020p9DTPhEB
+# fsCeCPdR3A==
 # SIG # End signature block

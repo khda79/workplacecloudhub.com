@@ -1,5 +1,9 @@
 [CmdletBinding()]
 param()
+<#
+.VERSION
+1.0.1
+#>
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.SharePointJsonTransition.psd1') -Force
 $module=Get-Module SmartM365.SharePointJsonTransition
@@ -55,8 +59,8 @@ $download={
     [IO.File]::WriteAllBytes($destination,$script:items[$Matches[1]].Bytes)
     if ($script:alterAfterDownload) { $script:items[$Matches[1]].eTag='etag-changed' }
 }
-function Invoke-Fixture([switch]$CompareLocalContent) {
-    Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $script:local -DriveId synthetic -EncodedTargetPath 'Folder/state.json.txt' -Request $request -Download $download -CompareLocalContent:$CompareLocalContent
+function Invoke-Fixture([switch]$CompareLocalContent,[string]$StateFolderPath) {
+    Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $script:local -DriveId synthetic -EncodedTargetPath 'Folder/state.json.txt' -Request $request -Download $download -CompareLocalContent:$CompareLocalContent -StateFolderPath $StateFolderPath
 }
 try {
     & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedSharePointDrives=@('synthetic')} } }
@@ -129,14 +133,29 @@ try {
     $script:forbidden=$true
     Reject {Read-Fixture} 'Read authorization error treated as absence.'
     Check ($script:patches -eq 0) 'Reading performed remote mutations.'
+    & $module {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedSharePointDrives=@('synthetic')}}}
+    Reset-Fixture external
+    $externalState=Join-Path $root 'external-state'
+    $result=Invoke-Fixture -StateFolderPath $externalState
+    Check ($result.Status -eq 'NoLegacy') 'Explicit external state changed transition behavior.'
+    Check (Test-Path -LiteralPath (Join-Path $externalState 'external.json.txt.sharepoint-transition.lock')) 'External lock missing.'
+    Check (-not(Test-Path -LiteralPath ($script:local+'.sharepoint-transition.lock'))) 'External state polluted local owner directory.'
+    Reject {Invoke-Fixture -StateFolderPath 'relative-state'} 'Relative transition state accepted.'
+    Reset-Fixture externalrecover
+    Add-Remote old 'state.json' '{"Generation":1}';$script:interrupt=$true
+    Reject {Invoke-Fixture -StateFolderPath $externalState} 'Interrupted external-state rename succeeded.'
+    Check (Test-Path -LiteralPath (Join-Path $externalState 'externalrecover.json.txt.sharepoint-transition.log')) 'External durable journal missing.'
+    Check (-not(Test-Path -LiteralPath ($script:local+'.sharepoint-transition.log'))) 'Recovery journal polluted local owner directory.'
+    $result=Invoke-Fixture -StateFolderPath $externalState
+    Check ($result.Status -eq 'Recovered' -and $script:patches -eq 1) 'External-state recovery repeated or lost remote rename.'
     [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Mock Graph metadata, versions and bytes; no SharePoint connection or request'}
 } finally { & $module {Remove-Item Function:script:Get-SmartM365JsonTransportPolicy -ErrorAction SilentlyContinue} }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs847Vq3kj+W0K
-# DZNFAPDA1caG69MKXH/6XU5CGNXUjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA57qPc5CxseW7E
+# snx14s51j/n8qHxjpbY4+20duXzgR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -269,31 +288,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEBYQMSe6A6f7l4Og4sJ4Lc3Tl9R035y1/FAnL0TboymMA0GCSqG
-# SIb3DQEBAQUABIIBgIxLUVYN7cpg211/ltio6FebOh819fVGOC6hTauAJGz+Q2+2
-# UxJPla3a0GPWKqeKUmG+hNVWCHiirUFs6eYfDFJLqSgJO6h1/6VHG8mOHHK7budN
-# ydwQs/5GmUS+F2UBrIcBZ5bsE2nX3XD+mnP+z8miy9/WkXVcZXYPHc+z4pYFQSHP
-# 1afXMlotOSqrJh+cobKnjo07utsvt92Rs5nUrMRO1sd/uGHq2wN3KJdmpCsW37wW
-# dO2hrttBKRXGrgfy30LVXat9PzVBCbcMV9u0XI+N5qWQK/5/nj4i9bDWhnIt+YZ8
-# kt+Hbk+J3xqRkk4LxyC1HXx209UcOh7XBVPaAGVH8IiFCOuhKR+2tXsbwn5Jcynk
-# gZwC162+rZ4EAWKPGeVNGkO+gi4B1nh7fcJQ2myI9rPTSxSMoi6IG9YcW0HtfFaA
-# gAWGaUxJLudRazI8HZ6W7Klzt6fOd375hSyXXWH8bikrIL4T2xZB16ATWfKGPdvo
-# kec53gfZKxuY/INSSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN1gHd9dGhIbU0RTSlzZIOFOLMpw/x8uHIuTuiTa41lrMA0GCSqG
+# SIb3DQEBAQUABIIBgEvJZ+SmViOaoOsteY1NR1iKEyiG8Jld/wD17DSGUwa1bR5x
+# SCoDB7aEc9VJsYtgnWL+IHrqiJbEqK0at0zmslolYrk1zGvpC5AXLN+qitP1iY7X
+# 7chAYd5yFoMC9XSwFuXLyePK/AsXO/VQpZHVNGhfkfBs/KZjeGT/SPjCcSj1pwfx
+# /tJtGn36+HgjxzFv0Ha7Pbo4zAC9hX3qbC7ZOwxMjVcWFzSHMOycagkPvDVzZmXH
+# B+HoZ1hwXLxcC2Q20IXE0mpESPS7ONGOWvhGBDhf1vakJ3JnRgS04NzKPDlnH+Md
+# isUn7nqylH1WT1P2efODfpY28mlugbu5uyN2vjn/n5e0y4T7xFIWqNji/2kh5bjf
+# Uaki34zy58UPXna4dwXyTLOrmh/+l36BUtGYZZol9i6pvLftjavByhbmdMPYJNXS
+# 0RMz3UQJ1VzFN9y1cxTaIFNBU/xm8/W88qTYv8bw2zaxIKcHsP4J9cg9SsBesTxB
+# xIg4aiWeRV0oej7eVKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCAOhbTw7FQ214IAhAD0Ab3nIDup1kFFs1Pc5BT8
-# n/8RfDANBgkqhkiG9w0BAQEFAASCAgCyMZbPrUPalPtKMG/rT69z7Td/PUkUNQzG
-# wa0QedwV/Ommx/iWDlhYCpn9j7RvLWABgkds8HfmGO6MIPdAThgMtlffzw0oLmZJ
-# FOUQntZIwAJKfde2dO8NqFZcn4newBxa49ppFqaFkbTCfEofHFp8GlZEYBqfM9hZ
-# uXnrU1hxYNfHhCp2j05CpbreJZBMC9+liewxWYL6KNNQKauT2OEcbvLIOw5EhsB+
-# 5uh5j+pdBLgeyYOzRIKw9X82xuvdwWCkEzQTAgFZ+OtGpeEZraeFx/sfpvMRB74B
-# hceET/bYFL8+kjSTS4SjwPpDnD3mBHuEI0Y3D2BpItGGQUV3mavKVsV5Y1wHqUKq
-# Xv/Vgx3wEH/QxYb2MO7pHljjTOnKSnn9o2Mqb1LaReEvJ0QtSuUNDrc+2kzvCYKk
-# GWb09Y1AUcQTzFS6udi9ZaqLOaSm4Ahljyn0AIbA4mTdWa8ikjKJ3Bt5gqtPa85e
-# G5eFt1iZ8NULJwhLBL2lZy8v602hC9ALLc1+a11P34ZQdnToMsXpNLlqztrJV9W9
-# X0RiEWQEPqDSJTCXFuFaGXd+XAOoxVRrgQFgGajtWetRzY8x/ygDzpnKGOeQCbEW
-# OFZRDn9lpnhx2uB7CmKtZW0fqxXbLg97MaUOPDLVcb3MVBRkSRYo1K87ps3/ezU2
-# 4HD1zXeuQw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
+# NTFaMC8GCSqGSIb3DQEJBDEiBCDKiPCwtXmm/wOq7n/lD/0jR1J6qpepBoz5Yvfk
+# GlUF4jANBgkqhkiG9w0BAQEFAASCAgBsyND1ahOw3Apxx4ERNZ9zq02IIbpxYKIn
+# sVNB8/SZStzq9wsSs1V3TGkWYPRWgf9zlNg0qPdzackx7PZCfslUnGpURAcMBBkn
+# 7n04jM0vAlAMVXyvYqFP3ub3Y6br6twr2M422YuF8QZiTDzVGKx1CuRy/wgE/6b6
+# B3mTAaOUv2vBZfytzhBbWjPaFRyxqdr8sbKcg0I6VLXWNsObPAaPGehf0aHesIWn
+# nQ72QbQ0KJEGcPOOHI6Q9VaO+cXlb56icOPV3ziBBVAVr5UthW2Xq0O0mY40t0gT
+# QQh6gLnaWH56nL/8xy0PVFJD+6OyU/411EJsVi+cM7DCVj+gEl4ub1fB7QkbzbyF
+# 6/qJb7Oym8WRSakVtiwVm/Z8hwmjG2WDVEI8aTIZG65RfDJ4NqSqhwF7H8CfA+1o
+# knaIVXkYsUhfE2i8PXRjcTVtPjgWSNwAIqkL8T3yB4RHA4VLCfcbxskG9b+akRuj
+# AVLdG7oXqIoIVTBJrY6ZW5PPvY0/E7ZvT7XWPHq9ne8RhlydCPYRnp6piKcRBuNz
+# tkbiBEfT3TstuP2rTOA2bUYXD9X0LRTgQNpHXPNY53SmQgAfzUhtslifu/RLLjPL
+# M+p5zMaCxJHXo5Q3vtLk9DlkXl1cbCxfjDGZwU976FsIw7x4TrNfqE9K7lt0eEBH
+# +fHjxNYCOA==
 # SIG # End signature block

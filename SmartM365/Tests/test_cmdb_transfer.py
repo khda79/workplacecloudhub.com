@@ -169,6 +169,7 @@ if __name__ == '__main__':
         case = create_case()
         try:
             shutil.copytree(case.output, root / 'DATA-POWERBI-CMDB')
+            shutil.copytree(case.source, root / 'DATA-LAST')
         finally:
             case.tearDown()
     else:
