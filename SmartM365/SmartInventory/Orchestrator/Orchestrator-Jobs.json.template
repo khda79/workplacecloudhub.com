@@ -1192,7 +1192,6 @@
       "Group": "PreparedEvidence",
       "DependsOn": [
         "AD-Inventory",
-        "AD-HealthCheck",
         "M365-ActiveUsers-Inventory",
         "M365-Licences-Inventory",
         "M365-EntraDevices-Inventory",

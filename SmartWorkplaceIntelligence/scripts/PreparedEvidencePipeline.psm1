@@ -76,7 +76,9 @@ function Clear-PreparedRunPayload([string]$WorkRoot, [string]$RunId, [string]$Da
 
 function Copy-PreparedStableSource {
     param($Entry, [string]$SnapshotRoot, [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{},
-        [ValidateRange(1,3)][int]$Attempts=3, [ValidateRange(0,2000)][int]$RetryDelayMs=1000)
+        [ValidateRange(1,3)][int]$Attempts=3, [ValidateRange(0,2000)][int]$RetryDelayMs=1000,
+        [Collections.Generic.List[object]]$OptionalSourceIssues)
+    $optional = $Entry.PSObject.Properties['IsOptional'] -and $Entry.IsOptional
     $to = Get-PreparedChildPath $SnapshotRoot $Entry.Relative
     New-Item -ItemType Directory -Path (Split-Path $to -Parent) -Force | Out-Null
     for ($attempt=1; $attempt -le $Attempts; $attempt++) {
@@ -85,7 +87,7 @@ function Copy-PreparedStableSource {
             $before = Get-Item -LiteralPath $Entry.SourcePath -ErrorAction Stop
             if ($before.Length -eq 0) { throw 'Empty input file.' }
             if ($Entry.Kind -eq 'Current') {
-                $limit = if ($AgeOverrides.ContainsKey($before.Name)) { [int]$AgeOverrides[$before.Name] } else { $MaxSourceAgeHours }
+                $limit = if ($optional) { [int]$Entry.MaxAgeHours } elseif ($AgeOverrides.ContainsKey($before.Name)) { [int]$AgeOverrides[$before.Name] } else { $MaxSourceAgeHours }
                 if ($limit -lt 1 -or ([datetime]::UtcNow-$before.LastWriteTimeUtc).TotalHours -gt $limit -or $before.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw 'Input publication-age limit or future timestamp violated.' }
             }
             # Do not lock out raw collectors. Verify the bytes against a fresh source
@@ -109,13 +111,30 @@ function Copy-PreparedStableSource {
             [IO.File]::SetLastWriteTimeUtc($to,$after.LastWriteTimeUtc)
             return [pscustomobject]@{Relative=$Entry.Relative;SourcePath=$Entry.SourcePath;Kind=$Entry.Kind;Bytes=$copy.Length;ModifiedUtc=$after.LastWriteTimeUtc.ToString('O');SHA256=$capturedHash;CapturedUtc=[datetime]::UtcNow.ToString('O');CaptureAttempts=$attempt}
         } catch {
-            if ($attempt -eq $Attempts) { throw "Capture failed after $attempt attempts: $($Entry.Relative): $($_.Exception.Message)" }
+            if ($attempt -eq $Attempts) {
+                if (-not $optional) { throw "Capture failed after $attempt attempts: $($Entry.Relative): $($_.Exception.Message)" }
+                $reason = $_.Exception.Message
+                # Dispose before removing only this run-owned, partial snapshot file.
+                if ($inputStream) { $inputStream.Dispose(); $inputStream=$null }
+                if ($outputStream) { $outputStream.Dispose(); $outputStream=$null }
+                Remove-PreparedOwnedPath $SnapshotRoot $Entry.Relative
+                Add-PreparedOptionalSourceIssue $OptionalSourceIssues $Entry.Relative 'Capture' $reason
+                return
+            }
             Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Capture retry {1}/{2}: {3}: {4}' -f (Get-Date),($attempt+1),$Attempts,$Entry.Relative,$_.Exception.Message)
         } finally {
             foreach ($resource in $inputStream,$outputStream,$hash,$verifyStream,$sha) { if ($null -ne $resource) { $resource.Dispose() } }
         }
         if ($RetryDelayMs) { Start-Sleep -Milliseconds $RetryDelayMs }
     }
+}
+
+function Add-PreparedOptionalSourceIssue {
+    param([Collections.Generic.List[object]]$Issues, [string]$Relative, [string]$Phase, [string]$Reason)
+    if ($null -ne $Issues) {
+        $Issues.Add([pscustomobject]@{Relative=$Relative;Phase=$Phase;Reason=$Reason;Utc=[datetime]::UtcNow.ToString('O')})
+    }
+    Write-Warning "Optional monitoring unavailable: $Relative ($Phase): $Reason. Other evidence can continue."
 }
 
 function Remove-PreparedMappingWorkbooks([string]$WorkRoot, [string]$MappingRoot) {
@@ -201,11 +220,19 @@ function Get-PreparedSourcePlan {
     param([Parameter(Mandatory)][string]$DataRoot,
         [string]$SourceContractPath = (Join-Path $script:ProductRoot 'config/prepared-source-contract.json'),
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
-        [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly)
+        [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly,
+        [Collections.Generic.List[object]]$OptionalSourceIssues)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = (Read-SmartM365JsonDocument $SourceContractPath).Document
     $items = [Collections.Generic.List[object]]::new()
     foreach ($name in $spec.currentFiles) { $items.Add(@{Relative="DATA-LAST/$name";Kind='Current'}) }
+    if ($spec.PSObject.Properties['optionalCurrentFiles']) {
+        $optionalNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($entry in $spec.optionalCurrentFiles) {
+            if ([string]::IsNullOrWhiteSpace($entry.file) -or -not $optionalNames.Add($entry.file) -or $entry.file -in $spec.currentFiles -or [int]$entry.maxAgeHours -lt 1 -or [int]$entry.maxAgeHours -gt 8760) { throw 'Invalid or duplicate optional source contract.' }
+            $items.Add(@{Relative="DATA-LAST/$($entry.file)";Kind='Current';IsOptional=$true;MaxAgeHours=[int]$entry.maxAgeHours})
+        }
+    }
     foreach ($name in $spec.mappingFiles) { $items.Add(@{Relative=$name;Kind='Mapping'}) }
     foreach ($name in $spec.dailyFiles) { $items.Add(@{Relative=$name;Kind='History'}) }
     foreach ($entry in $spec.history) {
@@ -218,16 +245,22 @@ function Get-PreparedSourcePlan {
     foreach ($item in $items | Sort-Object Relative -Unique) {
         $sourceRoot = if ($item.Kind -eq 'Mapping' -and $MappingRoot) { $MappingRoot } else { $root }
         $path = Get-PreparedChildPath $sourceRoot $item.Relative
-        $file = Get-Item -LiteralPath $path -ErrorAction Stop
-        if ($file.Length -eq 0) { throw "Empty input file: $($item.Relative)" }
-        # Transport freshness only; business report timestamps remain in Data Trust.
-        if ($item.Kind -eq 'Current') {
-            $limit = if ($AgeOverrides.ContainsKey($file.Name)) { [int]$AgeOverrides[$file.Name] } else { $MaxSourceAgeHours }
-            if ($limit -lt 1 -or ([datetime]::UtcNow - $file.LastWriteTimeUtc).TotalHours -gt $limit) {
-                throw "Input exceeds configured publication-age limit: $($item.Relative)" }
-            if ($file.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw "Future input timestamp: $($item.Relative)" }
+        $optional = $item.ContainsKey('IsOptional') -and $item.IsOptional
+        try {
+            $file = Get-Item -LiteralPath $path -ErrorAction Stop
+            if ($file.Length -eq 0) { throw "Empty input file: $($item.Relative)" }
+            # Transport freshness only; business report timestamps remain in Data Trust.
+            if ($item.Kind -eq 'Current') {
+                $limit = if ($optional) { [int]$item.MaxAgeHours } elseif ($AgeOverrides.ContainsKey($file.Name)) { [int]$AgeOverrides[$file.Name] } else { $MaxSourceAgeHours }
+                if ($limit -lt 1 -or ([datetime]::UtcNow - $file.LastWriteTimeUtc).TotalHours -gt $limit) {
+                    throw "Input exceeds configured publication-age limit: $($item.Relative)" }
+                if ($file.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw "Future input timestamp: $($item.Relative)" }
+            }
+            [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=$(if($MetadataOnly){$null}else{(Get-FileHash -LiteralPath $path).Hash});IsOptional=[bool]$optional;MaxAgeHours=$(if($optional){$item.MaxAgeHours}else{$null})}
+        } catch {
+            if (-not $optional) { throw }
+            Add-PreparedOptionalSourceIssue $OptionalSourceIssues $item.Relative 'Selection' $_.Exception.Message
         }
-        [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=$(if($MetadataOnly){$null}else{(Get-FileHash -LiteralPath $path).Hash})}
     }
 }
 
@@ -435,7 +468,8 @@ function Invoke-PreparedEvidencePipeline {
             if (Get-SmartM365JsonReadPath (Join-Path $prior.FullName 'run.json') -Optional) { Clear-PreparedRunPayload $work $prior.Name $root $TenantKey }
         }
         $selectedUtc=[datetime]::UtcNow.ToString('O')
-        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly)
+        $optionalIssues = [Collections.Generic.List[object]]::new()
+        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly -OptionalSourceIssues $optionalIssues)
         $runId=[guid]::NewGuid().ToString('N')
         $run = Get-PreparedChildPath $work $runId
         New-Item -ItemType Directory -Path $run -Force | Out-Null
@@ -444,14 +478,15 @@ function Invoke-PreparedEvidencePipeline {
         $staging = Join-Path $run 'prepared'
         $captured=[Collections.Generic.List[object]]::new()
         foreach ($entry in $plan) {
-            $captured.Add((Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides))
+            $copy = Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -OptionalSourceIssues $optionalIssues
+            if ($null -ne $copy) { $captured.Add($copy) }
             if ($captured.Count % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Stable source copies: {1}/{2}.' -f (Get-Date),$captured.Count,$plan.Count) }
         }
         $plan=$captured.ToArray()
-        Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;Policy='Per-file verified capture; later raw updates belong to the next run, not an atomic collector-wide snapshot.'}
+        Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();Policy='Per-file verified capture; later raw updates belong to the next run, not an atomic collector-wide snapshot.'}
         $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey -SnapshotRoot $snapshot
         if ($ValidateOnly) {
-            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity;DiagnosticPath=$run}
+            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity;DiagnosticPath=$run;OptionalSourceIssues=$optionalIssues.ToArray()}
         }
         $rules = Join-Path $run 'AccountClassification.json.txt'
         Copy-Item -LiteralPath $AccountClassificationConfigPath -Destination $rules
@@ -459,7 +494,7 @@ function Invoke-PreparedEvidencePipeline {
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
-        $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
+        $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
     } catch {
         if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
@@ -474,8 +509,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAb5vjRGNI4SiMS
-# TxGJ5O4ZzirD7+tPBXVv6RknTbVZcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE/gn+Smkqr8gr
+# xOcG/+Sjn8fuTzEdYTY3r/9fEOMki6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -608,31 +643,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN+DOCJJ+/iRCXfIS3coO5bLJnwXKacIE4KAHz3i6xF6MA0GCSqG
-# SIb3DQEBAQUABIIBgHZ+JeNYGJVVQTo4v3iIRkvF/2wpVfrLNEBNNue/MyLyjbA8
-# G7figDd1Xpd6PhtJZ/ahVE4QKAxhO/tZUfV3O4n6mBT01pZzImxuH4LRVzyCtPLR
-# epPVbA163TJbjH1B91PQIMmxMJu8+STo2VM4o23bjsbCWIibgLLlVCiVCGlGOfz8
-# /o7Z6uq5Bc3wo/qiru2dE05CYq0YoMIQsoP2rp+ZBrhmaNf8usyDD1DvwkU5gycE
-# eS+AhYVpGUMmedhtgRt8MqViSRBz65zOhjnSy7ezLI5ZFEpFAYvJwUXylYKfTqKf
-# Q2xtcRGZgg7HEHiy/Ug0SbjkSTofpg4gJP3SfmzHSadqR65AE/rDggMk4S2aLZa7
-# 2idBb6KW5RC0XP4f3YqW2WeiUhZ3kokkV+sGAPglrsyvv0P4Cv2/vqDFUSNQqwzK
-# nzewbi3zVgjrlnbR8pBKUUGRzFENUSsrI3VQx0nkIhblNq4NLjgougZBGfTd1MGY
-# vOe/16Vx25dex4FM1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKy3wlsFG5KADSAUrIrMbcQCuAh7o7pXCNYrSZ2zWuaHMA0GCSqG
+# SIb3DQEBAQUABIIBgFtQ+jKME2UAdn49ULJrgM3BbSN5swjPhXqxvJyP7OTA/QLs
+# 9gJotDhcUOAzTRKvVJxwUNZeCfwcLwl2cDCq65oOfxgwEnRiUt0m96QoWw0VNGvb
+# V9Z47foC66SfMfvoURIJeNlg/KDKzAI8gsUbgWTv33+NGYkCDJNY3dCUcFTj6wP7
+# w1KQR7sRaxbeil4hzoIibYXGh8Xgk/SqsXrrOd08TYJv56OPybq2cRYM91ce7hzP
+# EK4PYDVXJX8e0qnPnyW6a0K0KfY6cEp0a9DMvPakoqd4A9Sd5VnK/EKM3mYd4O7R
+# hLqbLpoyXMsP2w8ztcCJ82DPdb1NPnJvUntcdOrO+XXhXzyEvvOOiN7tE6BdPO4j
+# xk19dWDnvq+deOBwA9HoqK3FVraoO+gA05nbPplR4ILN2p6tU7Si0PHg+L4uSOSp
+# 8+zJsaH9f5sOxdPPd3BaZqtUXykeRubxRA2b5vqVVn7rTEPxpmUZwLID28K0e/xM
+# s52TJaKCDoMefd4q+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIwODQ1
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAgxIP9RsOdpQAKctk1wC23pyEASxRugYeVoTPI
-# eJgrrjANBgkqhkiG9w0BAQEFAASCAgBMJ12lA9h8BLlqlNkB9P82y/hsu1xEnPeM
-# NMGxa9GONlxw6Ukb44fsAjqfWOmZLYi5b/KiEAVTOfqg7bohlob6sTuIbo2eA1oE
-# rNknHm5yTQgC8Q4InR2+8eONuuJSvy46Du6EcLwWanQ7gRM7jq/ua5L7f6mrCHOs
-# Yh91jfXGc7A/RXLqaYjZl01VJttqLuw4DtI6BxPwswQ89G4lycxLSiyn/ilrOLLH
-# 7Fm/iAxCHxd+gNH7PBvKnvSna97ncLEbSqxavRWmrAEJADmSG/yGVqvxjmb7r+zf
-# S3thkT+zIRMN4NI4aqNcGle7DoDYdtU8OQmtVhHkWWO7oQyD7G6OXWywKyMwUWKb
-# OhQQvVJ+Of80nXv2xfOGBiKjsK97jOyunmCsewJdthLKtKAnzPojk8LKXVTJkFQC
-# e7m9fuCeqJNV+/jUBJQl6LYhrEJH+1yvBF62rK2o3IVmpeBOLDa6XmAKyWCabXfa
-# b2r5onchCPpqaWzIEybJylNIKJhB4ffE/GoQPny3tMfQFnKaXkFA4NrbYCfmhgRT
-# Xc7PDBjVfInTdgLdrW8i8Slxcc4vWEGkLLfeLcSkwYm5JoTcvSNCxQIe60GqlP0V
-# BPahkbPLJ5RtHuf/jwGIyiWHMsgUJNmF08YwFvpWgD6CJMK5q/7LrBbvcgOgPXTL
-# VfpMAzFTuQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjMz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCANS7j76k20Pc9q4NzCgV6AZ6OpcfZHT2mafdwk
+# +8rf3TANBgkqhkiG9w0BAQEFAASCAgBLkFF/V6NLSblNu+ujPxD+YoOyihrFyRBu
+# 35HumAV3vpauFlx+b/aRaC67yvOETIw+hcH3dBhJ6tvhD8Xs7fXFVqU/f23RkeRV
+# A1nWULMXps/jMiUrjhZL/NV4IzSjjCdczCwRL77soqVpBT+Tx9YVfuj6kygc4Cmt
+# hiYCSQEqTuX1RiuRMbmvO4HYMz5xPFR0fnYjn+cQusJ8H8JPRkUscGaEhejYtmAB
+# l3tD8+YgSMfp6au7kg5Y4M2FYmdhDJRT9OQdBMVu2Zj/EY3Go5hOgzNYJ8QTL7in
+# E0cI1eaiEzUUFX/cd1MOYJ4YV+YFySHeCeg9d/+oGTWxGtgE3l9wDBi7r0m2KCs0
+# 98kmVLhIC3B3TSE+qwlYOmpxXYmaNvp2N9o1ErOZCyMCivGSeyMTkmiulaQ9nQOc
+# OTWtP5KDQp1OtUIlURDbH9bsJu+BdON5Xzoc6oVoRjYveV302pqnozi/JNn0IJ5K
+# OQh5/9ufmcXM1KPVgSr3MAnsfDxInshTDh9IqUC7tN6K+IZ7oi6CsUWm5h/HxBUj
+# ySWPkDgTwM4j1gP3fH7gqyuEEqTsIJx90XpVVkMK8pJIaf9yCcB8KZQeepJF8Vht
+# PqoCwmruhYsMkxCYq09TIlx5epq5RVxU63kKWmZv/j12I4SDzvkynkDJ1jh7M4SU
+# uISfgLttqw==
 # SIG # End signature block

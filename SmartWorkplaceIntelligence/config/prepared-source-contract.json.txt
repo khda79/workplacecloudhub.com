@@ -16,13 +16,14 @@
     "Exchange_EXO_Mailboxes_AllDomains_Archive.csv", "Exchange_EXO_Mailboxes_AllDomains_Permissions.csv",
     "Exchange_OnPrem_Mailboxes_AllDomains.csv", "Exchange_OnPrem_Servers_Inventory.csv",
     "M365_Licenses_Tenant.csv", "M365_License_Prices.csv", "Intune_Devices_Compliance_Policies.csv",
-    "AD_HealthCheck.csv", "M365_Entra_AzureADConnect_SyncHealth.csv",
+    "M365_Entra_AzureADConnect_SyncHealth.csv",
     "M365_Entra_ConditionalAccessPolicies.csv", "M365_Entra_ConditionalAccessPolicyTargets.csv",
     "Intune_EndpointSecurity_DefenderAgents.csv", "Intune_EndpointSecurity_FirewallStatus.csv",
     "M365_Security_SecureScore.csv", "M365_Backup_ProtectedMailboxes.csv",
     "M365_Backup_ProtectedSharePointSites.csv", "M365_Backup_ProtectedOneDriveAccounts.csv",
     "M365_BackupPolicyScope_MailboxCoverage.csv", "M365_BackupPolicyScope_GroupMembers.csv"
   ],
+  "optionalCurrentFiles": [{"file":"AD_HealthCheck.csv", "maxAgeHours":48}],
   "mappingFiles": ["SmartWorkplaceIntelligence-PersonaClassification.xlsx", "SmartWorkplaceIntelligence-SiteClassification.xlsx"],
   "dailyFiles": ["DATA-ALL/ActiveDirectory/Inventory/AD_Users_DailyStats.csv", "DATA-ALL/ActiveDirectory/Inventory/AD_Computers_DailyStats.csv"],
   "history": [

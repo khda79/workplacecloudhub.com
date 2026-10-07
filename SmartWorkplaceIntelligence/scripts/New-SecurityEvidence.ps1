@@ -10,11 +10,14 @@ param(
 
     [string]$ExtendedEvidenceRoot = $DataRoot,
 
-    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\SecurityControlEvidence.csv')
+    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\SecurityControlEvidence.csv'),
+
+    [datetime]$AsOfUtc = [datetime]::UtcNow
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'OptionalMonitoringEvidence.psm1') -Force
 
 function Test-PassValue {
     param([AllowNull()][object]$Value)
@@ -92,14 +95,14 @@ function New-ControlRow {
 $policyPath = Join-Path $DataRoot 'Intune_Devices_Compliance_Policies.csv'
 $adHealthPath = Join-Path $DataRoot 'AD_HealthCheck.csv'
 $syncHealthPath = Join-Path $DataRoot 'M365_Entra_AzureADConnect_SyncHealth.csv'
-foreach ($path in @($policyPath, $adHealthPath, $syncHealthPath, $DeviceEvidencePath, $UserEvidencePath)) {
+foreach ($path in @($policyPath, $syncHealthPath, $DeviceEvidencePath, $UserEvidencePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required private evidence file was not found: $path" }
 }
 
 $devices = @(Import-Csv -LiteralPath $DeviceEvidencePath)
 $workforceUsers = @(Import-Csv -LiteralPath $UserEvidencePath)
 $policies = @(Import-Csv -LiteralPath $policyPath)
-$adHealth = @(Import-Csv -LiteralPath $adHealthPath)
+$adMonitoring = Get-OptionalADHealthEvidence -Path $adHealthPath -AsOfUtc $AsOfUtc
 $syncHealth = @(Import-Csv -LiteralPath $syncHealthPath)
 $snapshotDate = (Get-Item -LiteralPath $policyPath).LastWriteTime.Date.ToString('yyyy-MM-dd')
 
@@ -140,9 +143,15 @@ $codeIntegrityHealthy = @($codeIntegrity.Values | Where-Object { $_ -eq 'Pass' }
 $codeIntegrityAffected = @($codeIntegrity.Values | Where-Object { $_ -eq 'Fail' }).Count
 $controls.Add((New-ControlRow 4 'Device security' 'Code integrity' 'Observed' ([int64]$codeIntegrity.Count) ([int64]$codeIntegrityHealthy) ([int64]$codeIntegrityAffected) 'Devices' 'Intune compliance policy evidence' 'Investigate code-integrity failures and close devices without observed policy evidence.' $snapshotDate))
 
-$adHealthy = @($adHealth | Where-Object Status -eq 'OK').Count
-$adAffected = @($adHealth | Where-Object { $_.Status -in @('Warning','Critical') }).Count
-$controls.Add((New-ControlRow 5 'Identity infrastructure' 'Active Directory health checks' 'Observed' ([int64]$adHealth.Count) ([int64]$adHealthy) ([int64]$adAffected) 'Checks' 'AD health check evidence' 'Resolve critical and warning health checks before relying on directory services.' $snapshotDate))
+if ($adMonitoring.Available) {
+    $adHealthy = @($adMonitoring.Rows | Where-Object Status -eq 'OK').Count
+    $adAffected = @($adMonitoring.Rows | Where-Object { $_.Status -in @('Warning','Critical') }).Count
+    $action = "Resolve critical and warning health checks; $($adMonitoring.UnmeasuredChecks) unmeasured checks are excluded, not healthy."
+    $controls.Add((New-ControlRow 5 'Identity infrastructure' 'Active Directory health checks' 'Observed' ([int64]$adMonitoring.Rows.Count) ([int64]$adHealthy) ([int64]$adAffected) 'Checks' 'AD health check evidence (optional monitoring)' $action $adMonitoring.SnapshotUtc.ToString('yyyy-MM-dd')))
+} else {
+    Write-Warning $adMonitoring.Reason
+    $controls.Add((New-ControlRow 5 'Identity infrastructure' 'Active Directory health checks' 'Not collected' $null $null $null 'Checks' 'Optional AD monitoring unavailable' ("Refresh optional AD monitoring; other evidence remains usable. " + $adMonitoring.Reason) ''))
+}
 
 $syncHealthy = @($syncHealth | Where-Object Status -eq 'OK').Count
 $syncAffected = @($syncHealth | Where-Object { $_.Status -ne 'OK' }).Count
@@ -221,8 +230,8 @@ $controls | Sort-Object 'Control Sort' | Export-Csv -LiteralPath $OutputPath -No
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTCscnOIWww5C0
-# dZszLnnUpjoh9dwjcT7s7IC/2IGSOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOW5Yi231hCcNX
+# Dejljrncc7JqBe+6UzxlLtSFzdgpXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -355,31 +364,31 @@ $controls | Sort-Object 'Control Sort' | Export-Csv -LiteralPath $OutputPath -No
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIANEHUnXxtiDKDOMQJWas1FFx+qfk1TaozgFSLz70O2TMA0GCSqG
-# SIb3DQEBAQUABIIBgGTcR+nTZ4GAzWmQeoB1TvY6aypfIfwQ8iFoFXguVja8ZJh3
-# huEoaGNWO4ysULQ48NiLaLz/dlTV7yYQW6P98VHoKKwqRGoQyH9YiRNKvYrKYLtp
-# Q+a6vWiRN5rUNgoD9my0PGGMZvKbouTFy1BqzQ6WYbrjbHvn2P/ls7hjhDxMReRL
-# PfSnWJokEyh7AW5sfYT2M9z42XOifFV/tbkpRvM6K6kruyevN7Pqxwg8Jm+NfPA/
-# dAI1qGSaGZzwNrs/WesP/bndzrDoN+5v9pEa4Vg2S0HLkRNI5APoubPlRamnFKqE
-# QkpeJH5L8rnuNJohxqCwLtdg4pe9vBlblhAJ2Fdm3yf2Zaynt64aZnnFptNSwhU5
-# Ho2UNwgetyrLVsoB8dwvZ9aRLl9JPBkYP5C4JcbKy9XeVllTnvdmd132otN6n+DP
-# NugfK0jVN12NOPX1nDf+cwSWTnSIPSbrYA2+0Smd7QTWD0axFthL+HlPaoOX2ku4
-# PIHdyjLTTlE40iAw6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII+M1nW5WJXqpjMo7dngJsefB11geIO7X58zl95lFcy9MA0GCSqG
+# SIb3DQEBAQUABIIBgJYk/oEqtIggLUNFPxLRhZ1GGJzr3nwcCGw+gw2De8kpOj1M
+# 2BnTqq8u0fGBBG4ZOczCMNIKA5db3NlPjcQoO7Jje/WIIVojlptvTkte82sAgAQo
+# wgoU5AM/QlG1y/quuCXJ0ImZN7hbat/jEOVeNSYA6CfWLeYIDPyh5QxdgdyzUjoP
+# L5emy0brW3YTza/qp6PvfgXhac7I4F+MsMqGJhcDDNm/gaF2DYLY8ELULjJx3Fvq
+# 5Ft4Eve4J0e9Hu8DpfzPmvURkNKQZ/g2rfMe5LhQU78VOoKJgmbeokoH8eOoP5wF
+# Ij48BmDOaT7ExI/FwAodb8+OgEb1zvO9JRzfxSuWhoNd2Pf7AAGCEUkfGOBUwweG
+# e/RYyiFw/qfvMXPX4zTkxAVKxkjk4PwJpISGa+T+8wAEwNvpu1IDPlWfXn4BgzX9
+# /5pwbzWdC1ie2eiCxieC3FlKRTDN9/hSStsoGRzS7Jg3yBF6E9tmub4SAYpq62nw
+# /QB9bXq7KGzSuKBgS6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MzFaMC8GCSqGSIb3DQEJBDEiBCBa4JgS9eaxHeV8BpzSzc73IITxLtKv+EWOKWpD
-# elRPBzANBgkqhkiG9w0BAQEFAASCAgBJMVO++iF194vO6EFM+/ltxnosnHu33GHZ
-# fLgZE7xHe3Xqlttf9RA6NHt8bhAOzBifaOhhMTxAgJreKNhqP11YuA0lhkWPEHKO
-# s2LOV8lcWsnB1O1yj9Ueb/fwZjG07KgJeIXJG/FDYxcTwrYhKyZ7PnYF5NtrC/gs
-# Tp99cgkEP+XKt90CA3i7P9yTtUmgIOEpbwvFaM5ukFXNugvy6KeF13xPhMaXflV5
-# MQkwr8O/EndDLPJJ1SOrCVfTxTyTcJ61pN4ODDWByli7MhMNQqNwKIucRWhM9Ab4
-# NiiU9urfsuksZB52KHHih4yEr75ThKtB1GINbt6rXXWBwK2SkGc2n/xfv3oksSw1
-# ElHLTOxQRcLvf5+z+/yHaTZJWVHlswhlWR18lbZ1d6nvESLvMkt2K7Rjbr2Sxkfz
-# j1aNrskWtd+Pnex50NtFOyjFM4NswLTh9k7NYv2Qbiy/acB6G16+d4Uy9ZI+rMOC
-# C96EcGWImqtfcjT/D7e7Dr4wFRzVMbcdMd7Zp/IF05tADZvmDHXc1g2BVfdFbeqK
-# Byj/LV6SA8UklfWwk/7n8e8mfMSAx5/zuFAaRbJZbO8EFLhDd33q1DytvCA263Ke
-# 6LEudlWKjwwvNKVWgvW5jQeUI/CKJ5e4SM1iRhkB7AwAm3wL06QobUPo1SdP1VT3
-# /VeEefw4IQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjMz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCALgfJG7RfirdALjgL0nc/x12/GortRgoZhLR8E
+# fbayizANBgkqhkiG9w0BAQEFAASCAgAqpucjMb/cSxDLxATD9UPjYXsH3VUysF/+
+# o18Ws+ohcZUQGbWnaUAU+uhll9pMr1NySObQe3Y97/jCzACd9cwd1lAPgHubLpUi
+# O9wm6oNP1n6gPWCUfr0hxbZseQ20K4P1BxXwXBTLuZAdIj4kYpzf72DxWGNEEfC8
+# TSc+Ra2e/FBT2DpfQin6rvWb0VsVbycILeCy4bKi0NYDPivvy8zeD64QtP5gEUcr
+# 1HGuIIOvWeibcSXxd/cjsBnTs/yca6ZrbXhKE7X6VluTFEAezvuyLod3bYVJy0oH
+# Sg0hIkCebRNllJknXWpMvB5Uxf97ZdTRZo4vATu1Bvoxpen6jCi7lLFdp+uh1pHq
+# pD70XubPvaR7FUJLQBfN800cxrTY8XC68+fUyR8WZnfquV7EHr50udoCdIiM8ygB
+# Qv0C8tM94YQyCEq63vcUmLb8m/+zvRON0EtRui7LlBCKnPVtja8zOOshWJbjtzMR
+# o3lk5hsoaX2NxXH3gkx5sCONUJWsYF7tfoTwwv3e3jt6Qwr7EFzT/LihHcK2mr4n
+# ZWLikgkAE66YRpk80KB1tnbR/SEB6KUrDM3I+qdT5Yd7UkExDjIQuFBG3l5rdXpr
+# WV8PX6aoLohb3j2Hg012o4Ihxi8sxBv6V3H6WvPCeBfujqWbH7rqkxVftyddH/xa
+# suaPNOiYdA==
 # SIG # End signature block

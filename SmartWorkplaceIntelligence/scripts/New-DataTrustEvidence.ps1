@@ -6,11 +6,14 @@ param(
 
     [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DataTrustEvidence.csv'),
 
-    [datetime]$AsOfDate = (Get-Date).Date
+    [datetime]$AsOfDate = (Get-Date).Date,
+
+    [datetime]$AsOfUtc = [datetime]::UtcNow
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'OptionalMonitoringEvidence.psm1') -Force
 
 function New-SourceDefinition {
     param(
@@ -144,6 +147,17 @@ foreach ($source in $sources) {
         default { 'Maintain the current collection and schema contract.' }
     }
 
+    if ($source.FileName -eq 'AD_HealthCheck.csv') {
+        $monitoring = Get-OptionalADHealthEvidence -Path $path -AsOfUtc $AsOfUtc
+        $snapshotDate = $monitoring.SnapshotUtc
+        $snapshotBasis = 'Optional monitoring: oldest RunDateUtc; maximum age 48 hours'
+        $ageDays = if ($snapshotDate) { [math]::Max(0, [int][math]::Floor(($AsOfUtc.ToUniversalTime() - $snapshotDate).TotalDays)) } else { $null }
+        $freshnessState = if ($monitoring.Available) { 'Fresh' } elseif ($snapshotDate -and ($AsOfUtc.ToUniversalTime()-$snapshotDate).TotalHours -gt 48) { 'Stale' } else { 'Unknown' }
+        $decisionReadiness = if ($monitoring.Available) { 'Ready' } else { 'Optional unavailable' }
+        $evidenceStatus = if ($monitoring.Available) { 'Observed' } else { 'Not collected' }
+        $recommendedAction = if ($monitoring.Available) { 'Maintain optional AD monitoring; unmeasured checks are not healthy results.' } else { 'Refresh optional AD monitoring without blocking other evidence. ' + $monitoring.Reason }
+    }
+
     $evidence.Add([pscustomobject][ordered]@{
         'Source Key' = "$($source.Domain)|$($source.SourceName)"
         'Evidence Domain' = $source.Domain
@@ -188,8 +202,8 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD92FE9KPKLPwAd
-# pgE/YhLPpFBp398+qsAO7t8Qz1e4R6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCCtA3lVtKp6NP
+# 1yLGtHsfzT1J6HRyWxNp4gk+Qjw28KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -322,31 +336,31 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGyF0plkkqvM/KnCTXaXRP3SRI8B0Bm6s+hGe2gQmqsHMA0GCSqG
-# SIb3DQEBAQUABIIBgHvpIEsqte/4Qk1q/I40XXStVykWxNCiKlbqznou7wHx6a6u
-# 0xhQqe0/WcBSS4bhExU68te+j+tT/IgOQyZTb+xUyv3NZ8va0zN+ZqiJ+lGCpIXE
-# S2/iZTsvfNGipgJRJT0wEyCMlSX07OFxNT5eXdmV/nj51Y7cMtCFgjGK/N6IlCf8
-# GSwCAA/FLWL5M8t75ddiNKQ6LwJ4qoNjuCM5+PgLbKvH36sxrK04yi1je6u2RYm4
-# MPD0460IOZr3mWdYjmqzpBgBjTeYdHMQkrlzX6xjJLVmcuBgnPRnZ4oSVwFhB2Qr
-# KoTCcznPAuDwl6wWlc8mb10syQxj3PBFg77qCwt1exSiEBvTktUwYO2929zNLXI+
-# XjqGptp2BOHz86Go5PNE+6OUYmNbxKgYBtRbzENO1zyZCI84J7b4b4MOaPeZkP04
-# 7YjiBoOfxJenuniHkjmF6+gQM3oih3wG3m/9w4a37/+An6M/He9kcBWKoeMyP53M
-# kIViJu1138UYYJnKr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB/fagwd5/eB/u21DqgL3ptUr79cJMpeh8c0WItAFUtnMA0GCSqG
+# SIb3DQEBAQUABIIBgHcV1DY2DOFrlSEgfw4CVxNbEEiczj920akgcLYnzuOhC/D0
+# 8p9FCNoNEi2e2BuSWbSlKhaLHRBks/JjdGAQ1h8mdt8edtWkbdKKrLMccDdvY5sv
+# fNEh3Tf4XWSKxHqc6jWbt/MZtjP+1Netcl5WwZK56MOydh/vEzYHZh0Dyt8nA6Rf
+# +S2PtTBhMR/yMIQcD6j4JJwh6ATWGVfkXjou4vSsbqqmF3vbSN0r+aFXB39QU7hz
+# gLYYFAexLGN3aFg3mXwPLfI5mfPWIhgqcnkEmgzfTy4lAfWLl9F1lDOH6RrPSDHh
+# lVtmr4LjPIXh2ou/LWUl3Cm/D4RWFNaEUuIVT+WEqfiqVHIogljcCrz0yaPeHd//
+# KuN6PoXuqM7BeDU6bOHnSZxZ9mlpYUUeT5fqStPsJyWdJmEDRuxh0DZzMn6F5DLf
+# 7suSesjIKULl91i+GlmPRIMa7r7RahUtBQJ1RuPRbi9fOvhF0ouQUrgCcmMNxiHq
+# rurhmwhzXg3RIfZs5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MjlaMC8GCSqGSIb3DQEJBDEiBCDCL6tBA5uS2cbvg94I/RdHocbyMsKSklKCYrIq
-# h+X/ADANBgkqhkiG9w0BAQEFAASCAgBn1ae6/bq7p+hmpv30HrA4TH+dnfA3qf7c
-# 69IPYHNlqumRsF09Az47VCIOuFAI4j4u7kzCHp6ZSIW7ZTprpMcQOaWL7WvFkc4E
-# 273l1+4RfEGlpDE8rl/odZz/ijPah6Ec3mLfnhktqbqhPpIH4eM7bZNDdpmiPnrQ
-# hklqET1lUA26Expqg1bCubRUexmtmq0M2OWHUY0e8iewPhTeRY1HZj85thmYB30/
-# hUhZcbxJhyGt2ZGOaKi23ZXD3NGkoMi+kZgdANdkFZ731j9knNQ+S3mU2pSTJ6g6
-# ynujAWdPNYeM+hvxHKBAPIt0z4Ez6TBuwtjK+loYtNsnrzaok66/ahudKvngFYt9
-# eCvRMY8SAOtNQfO2EeJAwL3KnfZhQ1rJb6sw2gHC+hGpWueyFC5Kec5Z20UVIR65
-# ZK8LrNIE+FGRi6S1jMjtfmb4CtaHgsJ9X/EKvfhjdHxBXdkOpJS2teT8oI7gAtFH
-# KlG6Chfk8UoaynaL/SGyA4T1OijjeBfri0mkrp4JelEaUnRrrk4gUlA+vxoEcmC7
-# 2gskfqXoEiGuvLCa2ahWdIRCJDnl4s18cdcvFrwcDlPy/OrYCe9QU76RDbbsKLUj
-# Lh4zzzfQObSa+nIQKSCrj7PZhPqtPvGkNboLmkF9kT6z4xmJPbKRMBf3dtEW3nty
-# atsGpsWmtA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjMz
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDOHfJEdsufyDjjeMGLL/38OXNtP1/JW8bVVjKc
+# 2OhkYTANBgkqhkiG9w0BAQEFAASCAgCh7vXE5iz4TkW2y0lTw1rKjQylYpAdb7cL
+# 0jO4DBdZ+V07AbOYe3L1GJH4ddNLs3wRv75GlyZRrfcKsR7pptVbdXCoe7T94fal
+# TcJoFK9feEmme+lxgOK26lLt6yb+Nd6XQ+LDaMcE62M8zO96w9bdQX5XD/kXHKJr
+# XAzIRsVIaEP0mJ0j9N4aUk9t7VNguc4UpZvdpRmisb68smjkEntqxtJfj+9FQDcH
+# JqEi91QzcJhhd1ki7NeWvFnHGtxPF2DT+1R/vYZ65iKo6uxROGl1mlfHH+hmqA59
+# 4KJ6mnzfxoQFEp3SdZrpF2iuNyMLajwSx8YocSoK3gupgcbZu1o3kbI+ur0IoD8k
+# /Yt41bbzjT0e78akPwQ13lCqjwcnn23Z1fnY1Ymlu3AOfzW6IbYuMBqVkb63vaTf
+# 5WOQKNKkNzKpIHFZiHDsqPUcSXjJ8AgSgtlcrQcTjzV68Rg99hKcaRF8F6qsYjVh
+# nlST8x5yWeHLL7BjvMV5JLvYPixCFvxt/w3imufzws86lKLrk4ABY4AABTSp4uPm
+# HAfYR9e1AHnHwY0K2rV7yCNrzfkLVSmc5KkV8g2paupblY8/T7B7Hiy205rAzSYm
+# 3TANx4g9GXobBtEVB+7XPkk71b4HagJGqm5JW/DGEZvCup2/eTIbvXwVysm6lzCj
+# xb/U/EM68w==
 # SIG # End signature block
