@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.5
+1.3.6
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.5'
+$script:AppVersion = '1.3.6'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -252,7 +252,7 @@ $xaml = @'
                         </GroupBox>
                     </Grid>
                     <Grid Grid.Row="3" Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
                         <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
                             <DataGrid x:Name="OperationsIncidentsGrid">
                                 <DataGrid.Columns>
@@ -299,65 +299,10 @@ $xaml = @'
                             <DataGridTextColumn Header="Avg (min)" Binding="{Binding AverageDurationMinutes}" Width="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
-                    <ScrollViewer Grid.Column="1" Margin="14,0,0,0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-                            <GroupBox Header="Selected job">
-                                <StackPanel>
-                                    <TextBlock x:Name="SelectedJobText" FontWeight="SemiBold" FontSize="15" Text="Select a job"/>
-                                    <CheckBox x:Name="JobEnabledCheck" Content="Enabled" Margin="0,10,0,8"/>
-                                    <TextBlock Text="Frequency"/>
-                                    <ComboBox x:Name="ScheduleTypeCombo"><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
-                                    <TextBlock Text="Times (HH:mm, comma separated)"/>
-                                    <TextBox x:Name="TimesBox"/>
-                                    <TextBlock Text="Days"/>
-                                    <UniformGrid x:Name="DaysPanel" Columns="2" Margin="0,3,0,8">
-                                        <CheckBox x:Name="MondayCheck" Content="Monday" Margin="0,3"/>
-                                        <CheckBox x:Name="TuesdayCheck" Content="Tuesday" Margin="0,3"/>
-                                        <CheckBox x:Name="WednesdayCheck" Content="Wednesday" Margin="0,3"/>
-                                        <CheckBox x:Name="ThursdayCheck" Content="Thursday" Margin="0,3"/>
-                                        <CheckBox x:Name="FridayCheck" Content="Friday" Margin="0,3"/>
-                                        <CheckBox x:Name="SaturdayCheck" Content="Saturday" Margin="0,3"/>
-                                        <CheckBox x:Name="SundayCheck" Content="Sunday" Margin="0,3"/>
-                                    </UniformGrid>
-                                    <TextBlock Text="Missed run policy"/>
-                                    <ComboBox x:Name="MissedPolicyCombo"><ComboBoxItem Content="RunOnce"/><ComboBoxItem Content="Skip"/></ComboBox>
-                                    <TextBlock Text="Assignment"/>
-                                    <ComboBox x:Name="AssignmentCombo"><ComboBoxItem Content="Elected"/><ComboBoxItem Content="Pinned"/><ComboBoxItem Content="Manual"/><ComboBoxItem Content="Legacy"/></ComboBox>
-                                    <TextBlock Text="Pinned server"/>
-                                    <ComboBox x:Name="PinnedServerCombo" IsEditable="False" IsEnabled="False"/>
-                                    <UniformGrid Columns="2">
-                                        <StackPanel Margin="0,0,6,0"><TextBlock Text="Timeout (min)"/><TextBox x:Name="TimeoutBox"/></StackPanel>
-                                        <StackPanel Margin="6,0,0,0"><TextBlock Text="Retries"/><TextBox x:Name="RetriesBox"/></StackPanel>
-                                    </UniformGrid>
-                                    <UniformGrid Columns="2">
-                                        <StackPanel Margin="0,0,6,0"><TextBlock Text="Retry delay (sec)"/><TextBox x:Name="RetryDelayBox"/></StackPanel>
-                                        <StackPanel Margin="6,0,0,0"><TextBlock Text="Estimated (min)"/><TextBox x:Name="DurationBox"/></StackPanel>
-                                    </UniformGrid>
-                                    <TextBlock Text="Elected owners are read-only and come from the shared election plan." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                                </StackPanel>
-                            </GroupBox>
-                            <GroupBox Header="Dependencies">
-                                <StackPanel>
-                                    <TextBlock Text="Depends on (job names, comma separated)"/>
-                                    <TextBox x:Name="DependsOnBox" TextWrapping="Wrap" AcceptsReturn="False" MinHeight="44"/>
-                                    <UniformGrid Columns="2">
-                                        <StackPanel Margin="0,0,6,0"><TextBlock Text="Rule"/><ComboBox x:Name="DependencyModeCombo"><ComboBoxItem Content="LatestOccurrence"/><ComboBoxItem Content="FreshSuccess"/></ComboBox></StackPanel>
-                                        <StackPanel Margin="6,0,0,0"><TextBlock Text="Max age (h, 0 = auto)"/><TextBox x:Name="DependencyMaxAgeBox"/></StackPanel>
-                                    </UniformGrid>
-                                    <TextBlock x:Name="DependentsText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
-                                    <TextBlock Text="Why this job waits (published data, current rule)" FontWeight="SemiBold"/>
-                                    <DataGrid x:Name="ReadinessGrid" Height="200" Margin="0,4,0,0">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Dependency" Binding="{Binding Dependency}" Width="*"/>
-                                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="60"/>
-                                            <DataGridTextColumn Header="Age (h)" Binding="{Binding AgeHours}" Width="55"/>
-                                            <DataGridTextColumn Header="Max" Binding="{Binding MaxAgeHours}" Width="45"/>
-                                            <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </StackPanel>
-                            </GroupBox>
-                            <Button x:Name="ApplyJobButton" Content="Apply to draft" Background="#E5F1FB" Margin="0,0,0,12"/>
+                    <Grid Grid.Column="1" Margin="14,0,0,0">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <StackPanel Margin="0,0,0,8">
+                            <Button x:Name="ApplyJobButton" Content="Apply to draft" Background="#E5F1FB" Margin="0,0,0,8"/>
                             <GroupBox Header="Run through the orchestrator">
                                 <StackPanel>
                                     <CheckBox x:Name="IncludeDependenciesCheck" Content="Also run the enabled dependencies" Margin="0,0,0,8"/>
@@ -366,7 +311,67 @@ $xaml = @'
                                 </StackPanel>
                             </GroupBox>
                         </StackPanel>
-                    </ScrollViewer>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <GroupBox Header="Selected job">
+                                    <StackPanel>
+                                        <TextBlock x:Name="SelectedJobText" FontWeight="SemiBold" FontSize="15" Text="Select a job"/>
+                                        <CheckBox x:Name="JobEnabledCheck" Content="Enabled" Margin="0,10,0,8"/>
+                                        <TextBlock Text="Frequency"/>
+                                        <ComboBox x:Name="ScheduleTypeCombo"><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
+                                        <TextBlock Text="Times (HH:mm, comma separated)"/>
+                                        <TextBox x:Name="TimesBox"/>
+                                        <TextBlock Text="Days"/>
+                                        <UniformGrid x:Name="DaysPanel" Columns="2" Margin="0,3,0,8">
+                                            <CheckBox x:Name="MondayCheck" Content="Monday" Margin="0,3"/>
+                                            <CheckBox x:Name="TuesdayCheck" Content="Tuesday" Margin="0,3"/>
+                                            <CheckBox x:Name="WednesdayCheck" Content="Wednesday" Margin="0,3"/>
+                                            <CheckBox x:Name="ThursdayCheck" Content="Thursday" Margin="0,3"/>
+                                            <CheckBox x:Name="FridayCheck" Content="Friday" Margin="0,3"/>
+                                            <CheckBox x:Name="SaturdayCheck" Content="Saturday" Margin="0,3"/>
+                                            <CheckBox x:Name="SundayCheck" Content="Sunday" Margin="0,3"/>
+                                        </UniformGrid>
+                                        <TextBlock Text="Missed run policy"/>
+                                        <ComboBox x:Name="MissedPolicyCombo"><ComboBoxItem Content="RunOnce"/><ComboBoxItem Content="Skip"/></ComboBox>
+                                        <TextBlock Text="Assignment"/>
+                                        <ComboBox x:Name="AssignmentCombo"><ComboBoxItem Content="Elected"/><ComboBoxItem Content="Pinned"/><ComboBoxItem Content="Manual"/><ComboBoxItem Content="Legacy"/></ComboBox>
+                                        <TextBlock Text="Pinned server"/>
+                                        <ComboBox x:Name="PinnedServerCombo" IsEditable="False" IsEnabled="False"/>
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,6,0"><TextBlock Text="Timeout (min)"/><TextBox x:Name="TimeoutBox"/></StackPanel>
+                                            <StackPanel Margin="6,0,0,0"><TextBlock Text="Retries"/><TextBox x:Name="RetriesBox"/></StackPanel>
+                                        </UniformGrid>
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,6,0"><TextBlock Text="Retry delay (sec)"/><TextBox x:Name="RetryDelayBox"/></StackPanel>
+                                            <StackPanel Margin="6,0,0,0"><TextBlock Text="Estimated (min)"/><TextBox x:Name="DurationBox"/></StackPanel>
+                                        </UniformGrid>
+                                        <TextBlock Text="Elected owners are read-only and come from the shared election plan." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </GroupBox>
+                                <GroupBox Header="Dependencies">
+                                    <StackPanel>
+                                        <TextBlock Text="Depends on (job names, comma separated)"/>
+                                        <TextBox x:Name="DependsOnBox" TextWrapping="Wrap" AcceptsReturn="False" MinHeight="44"/>
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,6,0"><TextBlock Text="Rule"/><ComboBox x:Name="DependencyModeCombo"><ComboBoxItem Content="LatestOccurrence"/><ComboBoxItem Content="FreshSuccess"/></ComboBox></StackPanel>
+                                            <StackPanel Margin="6,0,0,0"><TextBlock Text="Max age (h, 0 = auto)"/><TextBox x:Name="DependencyMaxAgeBox"/></StackPanel>
+                                        </UniformGrid>
+                                        <TextBlock x:Name="DependentsText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+                                        <TextBlock Text="Why this job waits (published data, current rule)" FontWeight="SemiBold"/>
+                                        <DataGrid x:Name="ReadinessGrid" Height="200" Margin="0,4,0,0">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Dependency" Binding="{Binding Dependency}" Width="*"/>
+                                                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="60"/>
+                                                <DataGridTextColumn Header="Age (h)" Binding="{Binding AgeHours}" Width="55"/>
+                                                <DataGridTextColumn Header="Max" Binding="{Binding MaxAgeHours}" Width="45"/>
+                                                <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
             </TabItem>
 
@@ -1792,8 +1797,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgC9OkLLeVBkkk
-# lOfYeIePuNyxA2fkxbQV7v4+03AEqqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgYdukmQ/SM1GV
+# tauo/Ksc/z36+sLNOMPqdcmpdhp9yaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1926,31 +1931,31 @@ $window.Add_Closing({
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPQsFojV/XBy+pWd8htGx6xjHwb3GHa5DEOvXaJunLEbMA0GCSqG
-# SIb3DQEBAQUABIIBgA5o9QpAXlTVlSNs8JbLfVUTNPWs9NxQ42Twks8acyVBsNoi
-# NnWEbP45s/rS5hL/jBNynHyKanhx/skgx91S/PFytysbk0HNCKXVNQUckecBYERN
-# iYMkQU+yiLNaPXFvd18PxPmfj3eCS1vB5XGFOjGvy6VaNyORCXUtnQ+ReERaAkd+
-# 0ZjuatiK2YU5Yz6B0ql3yygh1YR6dU0Qy+qCyLRF4LDnb3IAc2eK4rVG5QQJwi0+
-# YltX+7Qeh6nRsXIElpc6sZn0nEBe0nu8U22JhhlLv7UlCh7NLD9MWi6CnjcTEq9A
-# f4waHkaE96qo0Wo6YVOm84yJgwg9Ah7RnbiOJsba4R0GX9K1EDHAViZlX97Lgdx7
-# r9EEr7OAM3HzC8lFlWpVvrGEO3oJOMNslIuCZ2St7U7vv4Riq9waxVB21xWFZXXw
-# zswBhy6pPLmagR4bHf5RT4B2rTJAkVBkUMibIN3xLYTXEtytFrenZfWVbGH9dOqu
-# lUKC+Q0Kf3LGWjLDdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINHrFbHeQv3ACdi4Dm/3o6cY41HGW+yLG1OU/TgAQvgrMA0GCSqG
+# SIb3DQEBAQUABIIBgApACCXNMj1zNG9zD9BoQX5nf/Izn8Za5xDxy240TNfNYB+0
+# nWF0U3Asz5LA/AilBbKIGZU/58+0DIa7SVuSegHssZNtALqVlpadVFXxvfaaApH4
+# 1Ol8F9NSSk9gv+/Jw3eyn8EY7zkacZEtMAuTW3mL787yZ2GEaPXC2W69M471Br5M
+# YVC07k4rL5Atk13uPLZiB7GjtL0FVMW76SXe3vw1UZrFpDH2EiRcFgVvuewGiVIi
+# 8rjcs4xgJd5Y/s0QI41aE4yOI8MxhblQlX5hUyhhIq8KAX9o7mIeCs6UL4RVZirM
+# DeKxTa4o/D/YFLJ3jVtoOsL2HIZSkJiMTmTrg8iAesX45K9JRrSd+o+DHPFaccN2
+# D3rHQy08oaiq66ycZKybemKI3WtjPK33AgraGyRHz2OtdrbfyEPBkuaNCE1E1gws
+# bBnIB6wy9eVSDAyUrSk3k777l3ViXtAc7MbDfT1F2lA2SiYMFdEQ51fXp1qaSqfp
+# X4FAYQ1bFElqxjeqQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDU4
-# MTBaMC8GCSqGSIb3DQEJBDEiBCCKZHaf51x0mxvKvSKxz4Bta4G4uHe2/bTrOnM+
-# 016VMzANBgkqhkiG9w0BAQEFAASCAgAgWmkVaCi18QXwJ/MdbVxeNUBTe4EJiGTw
-# aJVeYJ35mwgnXmeVOlv/0+pLGN/t1qSU2wQr4WrOOKsfDEuaxOHzFGeBkxLAXrYj
-# pQSjnoHOmQ0zE7uitsAKDTZXCACbp/Ri7R8Qxl03gJ14Vu4gL09JBEHiA9NWuRa8
-# AySsC8obliXvNFrhihAeHBeG9TvLAPQyyJkjuZx3z7UWcu8JczCjxRtQBltCqf4Y
-# dsS370i99zOQAh5W1rlHdrZDEY3nvA6cfAMCAninUkQT8iwLJwDNKBP0MlvyVLRf
-# c8FSKWkuCuLW+fBuz8RfT+77RHPghZ/deTbY0jbGXBAZyWpRQ5KuoBPoqkTYqfnI
-# BQmz5elCDOKGOKH9twTPCSiLT7xynKcriiAR8YPrk36XdmVTxAs0EJyqVZj4Z76r
-# pty3FLvpMx1jio/ZwvSYsKDccSn1fr15HUSRbN76jmLJFQJG47xlcZfWQapBsHFb
-# 96QzdR5Au1LyyiXg2kok6M2oEJywcNxkME08ZLR+tAkvC0ezqmCbymJL9y4kgHIp
-# 4zArsoZOMe6N2yrY6drjh6Wh2t0mjH1+QaltE5MYgN8x5Bg7BuinXXH5rgW+Bnld
-# gtJCdahk/UlQIPNl/Dz9ZoN1owseg2Z/N5Nw8iFm6GM+YI5glNh07EpyISuvstu7
-# gy3/bEgBgw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNzU1
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCzhmefdIT+dLD1LPuXA7XHIqlIHh8m4ESGMoiN
+# CSfy7TANBgkqhkiG9w0BAQEFAASCAgAJe2IalxIK29qX71qF2/WBb7KZTPVtqcZy
+# fS4cDlygV+XFB9nPKcJBdKT8FxS4QdHwHLk0S1RrSAOLiuGTH8yDku3T9OCFxzYk
+# 2Ox+yY1tYnEnktcmeYwOUgYyGnuDDw52rEhGtd/psTVFzKj+izaFlzdE6Uw858VL
+# G48h7VdLxeTtDKOYaWBq8C+fEbPJoY+YDI7dj0obug3h8qj/eIPwMSPjMEAdCQu9
+# w1+w15qTOsC+i/187wi6Q877PTreRidMAfCchC/oheWcJasFyynGrbhe+a/xOHPH
+# CgUJZ0htrWiX6/STcEs7f5uGVA2upS3BcDXS34bialpOeS9h6MyM+o0pZ4Mz9CyP
+# OL7Zmm/ujWF3SKq/dt2v5whLP/7wmlwyOffWvP23Gu76C6c9rOf4mhlwpyaMMyzR
+# dCDVlt/UJdEdwtJJWZH+gKwTxIYq+AHM8SWqclGai9ba2bagPIVVSEI5KnoOfTZ3
+# tQRnzFm8+qbRiyX2bGhah1SQvkzWqjc3MB68hIsTjc8EJw6Z0jKcJPTPFv8m5m25
+# 1q0kHEJljQkfm+bCIQInOUauDEJBROt2hCLuXaQBVKDrCfMsDoj7un1MTgKxZZH7
+# IgjbluqKiIce/cuJB45GZz/O2Or0GGGP7DaYz8pXzFZ1m6H2S5Wo32uAQyiw4AO4
+# RMOe1Vacog==
 # SIG # End signature block
