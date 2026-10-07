@@ -9,7 +9,7 @@
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
 .VERSION
-1.35
+1.40
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.39
+    Version : 1.40
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -255,7 +255,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.78' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -2554,7 +2554,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.39"
+$ScriptVersion = "1.40"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3130,8 +3130,18 @@ $BaseFileName = "M365_Licenses_Groups"
 
   $currentOperation = 'Complete licensing source receipt'
   Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and $TopUsers -eq 0) -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
-  try { Complete-SmartM365CmdbSourceReceipt -Status 'Completed' | Out-Null }
-  catch { WriteLog -Message ("Licensing source receipt could not be completed: {0}" -f $_.Exception.Message) 'WARNING' }
+  try {
+    $completedReceiptPath = Complete-SmartM365CmdbSourceReceipt -Status 'Completed'
+    if (-not $completedReceiptPath -or -not (Test-Path -LiteralPath $completedReceiptPath -PathType Leaf)) {
+      throw 'Licensing source receipt was not written.'
+    }
+    $completedReceipt = Get-Content -LiteralPath $completedReceiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$completedReceipt.Status -ne 'Completed' -or [bool]$completedReceipt.IsPartialInventory -or
+        -not [bool]$completedReceipt.ConsumerScopeQualified) {
+      throw ("Licensing source receipt is not qualified: {0}. {1}" -f $completedReceipt.Status, $completedReceipt.Error)
+    }
+  }
+  catch { throw ("Licensing source receipt could not be completed; summary email was not sent: {0}" -f $_.Exception.Message) }
 
   $currentOperation = 'Send focused license summary email'
   [void](Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -MailStatePath $licenseSummaryMailStatePath -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -ForceAdCsvAnalysis:$ForceAdCsvAnalysis)
@@ -3258,8 +3268,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7XCPhhFX/7SRJ
-# QtrTD8dguvWL+36T6YW479g0yp0yk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAuetbyBY8lsW8N
+# ywO1LcgPv/Kp/DaIUEbsLolwtu6ZbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3392,31 +3402,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFFDy6YjDGOCCjmJKhZTORkcUWTiEAlnpHx3+9MydxPDMA0GCSqG
-# SIb3DQEBAQUABIIBgCZF+m8QHlAEOPwJfLRVURj1p7JDEKwTqD+CC57WffR0URTL
-# wXSUSOP6hqI0rK6dUEYVRo80Pl+dVDsvapzmNCiY0urzxokY2RokvLy+w0jmjAHL
-# iVZw2RLGIafSS6Vyi5nTqm8iU4IjuOLZYBGvy+4nflHyjXLpASg54otc/v1Uit5H
-# 0B+9ebUd51PhTDocStCmUjTSGkvcfXk5tm5o5r8NLVWZYJU3yHgRETpRzuNugni6
-# 5JEmkAa4Wg3cRlQry+qikKyBomfuV2RoRMGo103trTF7IMcM4pQW3+WRUGh0K7Hp
-# BZwCJvKmhcL0v2Rbdf7vvCaVnbAWUIZQETcwMn/qGl4nu48tu5CqB7e+i8oLnGnS
-# PxIexuWlmeuiBv2LrnPL05wKA96Z1nSc7lgzvGBM6l/NsmKdF/b8auXu7pS1mT6d
-# sPcTzSMYSevlv6J2NxzlGo2F47j05/ivfX4Y6+ryc/f1skhmJcCp5Cy/7/aTbHe1
-# yYWh7V8V+5Gpg9ayE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICRfVzYiou1qxj5ViAuSMT5urKG407nnqKT3OeIZYKyxMA0GCSqG
+# SIb3DQEBAQUABIIBgGF/XEZLlBXiSgxn+zGeUSu99NhGtXa6+ihdZdzsCgA47sKw
+# x6BKLVMhu8X+s7q67vsXGHq/3hDMo9JKmTRjMKMByD4e6T/MU2/uSijot1IiRwsQ
+# KK+0Ri7R8arSR9UZc4siFVOm3dFY1RStrCcKhvRxD/BvU14ZZ4WmQSi84zOrHJoh
+# sJtAjYHMnZlU0Fn71aZW9eMhzaxEtq7SinlhyixtnZYJRdbWa9mrbh3Ln/MNVuie
+# 30iQ7Kb3mTQcb9SBXsgDEomeD/tiXiwLnS3EeCclCcGUOnnkIguom5j6AvAbEoe8
+# zvc7uFvappRgBnVE79+ne7EZcVlV7qA/klpazZVNbiQNGdc9HhpG7LeC2K2+xXhO
+# gMr/j02cY9x2AwXGEXkgzcE+M/qp7mVX3SPELq0ArTeh6xL8OVBDD81HD/OnG1vv
+# EMwaxYVJudQZdflXdlC4+dRdtbPQW6ijZsPOHlsvFCztqv0+JeYoZzIrKHiOIWxG
+# XXkT/8L3zNfdtiKiQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDQy
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDn8Hl8l/zTAxipI2IDvfaeaL04iNUBtViKdPU4
-# VF3TxjANBgkqhkiG9w0BAQEFAASCAgAsme8H1LmA6c5fggwiTdEL+E5fnkN833pU
-# Ce2GGEZ90+SXeaCFchXpW+TQ9yMO3DCvn++SFTS5HOft2Mb5eqmAU7nyc0Icym4y
-# XvLtBoFmbdHuliutG9A3kxwhlUqzHybFviGf8WCK2uCb/5JJfwZ5AT+TjYPJ2q37
-# o72b7kcvM3eQutXMVVanlofiKrzG8/3CO29tos6pUJJYaUcDjPSEySuwUH16vV8u
-# RJkZlmBQtJL8Q8EJVjTj7Jl9028UqbL6E9G7nO19jEhQaNgy9mLDvtVmuRutZn1z
-# pcukMwHhtAAq/WMBmxeAa4sTsKf2bTaXd9dFRrz+xEfJKCD2dYWJAL7LmwF7GhnN
-# amCOr38noOlHDywyuTQvCxaLvc9BBJLZKp2SfdokMv/lLdHtpJlblo3MUIeaAcge
-# x3HBn1CMUEN65j0tEo7tv4MvJT5tr7QguK/9dkgDQ3wKBsOsy9BYl5rpMi/SPNkB
-# +ngdARq7c4r9Gbt3huqwIBXL9rVNvDT7nOELN9ubbirBkkuXhapJsX2LIufzTzxz
-# mMO/0FuR97D4T8YKfVSPvkShMM6fUtZHtbwt9KeFJzFqUnp2B9Q+ZxqGUkOeDgtN
-# qgrmgk6TMaX0/RjU/WOT6h7Uxc3wIHPGRj+GYUChFJscU3oBsSj2hdJmh+z1JiRZ
-# 0QMZRJvBsw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODIx
+# MDJaMC8GCSqGSIb3DQEJBDEiBCCJO3OB2Vcy/yTZnal9JEtknQaxqGGgi1MWEz5k
+# 8IQvsjANBgkqhkiG9w0BAQEFAASCAgAsmzoEYwOuDpzFBGRvCHSNBQzrcyIOxRly
+# QBWZ6QKpajGzgz4fD0ENjjIuMwD891n7SmUTxzAuSSRKP66vc4028kaD4tiCVftO
+# JuyKuKcU6C+92Spt96c+vYk8bFgB0hQGhDVfD+5mLYK2bvmbLNe/wtrvY44fVkVC
+# MDYu+KWhtrkoLqh0TNoBKYGU4tyFbhsQzBJnVrejRQs7c/RvnZg5fS9CjjnNuUc3
+# dWuuoqLro+7PjB+iEYPd5JaNIXwZm1mV9ye4WGOFChgCvgq0Ha/2NKEBxN9IAyAI
+# mFt15MilMlWmOVZnzOUDXPjNsZf7wWb3Di3UpwQAyzQtSdRd0xkfLLqGjrw+F4n7
+# xrWsT2VjzGSQCdNqZrU9rXZ/kHDrqcwyrJQaRMmEWzbqRc/AP9vOBEe6ciPONWLj
+# pgNdK4dfUNj9OBSRjIY7PcSBC+zzCOvtjoN+0PvwxRBAqeYQUaayo1fRt8fLIkUk
+# VvUkPAE2rND9le9m5aFyKq931IYUtNWGUpxH62uBRCIvkikujyySZuiRVbKjVbrm
+# u8QrenvOuOoQeskG7jC9VDz0GxjgKiueJMbNOTB1DEzjwhQMhUPX6jCSg03kI1tn
+# 9cboiHTaZlw3btKb0pJdSeAgZQvJD/jWx7nbkJ5aoGZXGm718epem09pdY98uL4F
+# /Hm+gwOJ0g==
 # SIG # End signature block

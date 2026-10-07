@@ -14,10 +14,16 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $inventoryText = Get-Content -LiteralPath $inventoryPath -Raw
+$coreModulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1')).Path
+$coreModule = Import-Module -Name $coreModulePath -Force -PassThru -ErrorAction Stop
+if (-not (Get-Command -Name Complete-SmartM365CmdbSourceReceipt -Module $coreModule.Name -ErrorAction SilentlyContinue)) {
+  throw 'SmartM365.Core must export the source receipt completion command used before the email.'
+}
 if ($inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -lt 0 -or
     $inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -gt
-    $inventoryText.IndexOf('Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray()')) {
-  throw 'The full collector must complete its source receipt before calculating the email KPIs.'
+    $inventoryText.IndexOf('Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray()') -or
+    $inventoryText.IndexOf('Licensing source receipt could not be completed; summary email was not sent') -lt 0) {
+  throw 'The full collector must qualify its source receipt before sending the email.'
 }
 $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
@@ -770,8 +776,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzpnTiPFLB73EU
-# LHZtyY357XKIg7xr2GlaLxqdVbwRFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdgDTrORjwFSPE
+# zqE49LUd/XrP0uNmqPW2lR4pNGaLSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -904,31 +910,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPYd7q7RgY7vGFYkmcDuZhxgT5b7k39qdM0r8LDYNwEmMA0GCSqG
-# SIb3DQEBAQUABIIBgAZmmTmA+8/CfCyfIvKmCIZka4YGbcHOnczsgQT/fyYlSHX/
-# daPY35caI6rOdV6hw4xvy3nPGRP4vUGz1YRE+1bTxcBa5r4O4ECOSuCWrmtBfdVv
-# lkTjAd5HUoJXmE7Ec25EMuilIShItgAVXVOoJUIdnX/dbq/I+N2OyTQvgDxNab+0
-# bW9LBsL4u0aK9CzRxewsAQIJTUi2LCZeay7EOwgCUjwOrkoNYWAui8rCjuXPS6gH
-# jyoJlA6R5PDa3kbGXbGsHEhryNKt0dIedJxekkkMF7WUmMO/y/uy1+0EFiRAn9L6
-# m3cAoqFKKE/cMEC2AJe0NQjYAWo0J5NvNPujcb276sxkw2fI981plillSMIu4gAG
-# AXwlSynBmBGzAwwIgMDsuKIA/hnZm9sgPJWVcVb+UepIw38dYvBC+dfhBykzdHOw
-# kJDuO0+67J08Cj53Nrjet8Osrn1jrnkAo0SoKUpXMaT9oT2judXJ76Gj1can/7Op
-# jr76sD6Sxpxh6D2R6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILXI0qz9bXqYxGWOg9mH0hYLHbTutPmOk0is4DDndLwuMA0GCSqG
+# SIb3DQEBAQUABIIBgIJCO/odBnAwbqUNf1e1ea4uGS41cRlJYCHYRhE9/cVGKhDd
+# 09zJFjj8HksTN53l3EQr0GrJhpIWf0UFpdw/gFA4qfvemLuiNFkvMnqo3ffFkStG
+# jr5uJQNQOukzMD8hCuDs9haqq797y58JG0R8gFxN3jwBcfOBp9C0eclwpZKBKcDj
+# m1rtcDwmNWt0anyRr1h2kk+Bdkw2O3rXw5WJSKqHeDWt+uucgpRMMCa7cFxWkjqK
+# 8pQmODh6zeNJfXA0WZ1z0Txb2pqFVNxzye9+rLOFsyEF5CUMFTUCnyyTDveNi7+P
+# 5WfWIHDU0WqjYWJ1aTtA1bORX12P4xuUXBsWb1XS4hM1C6JtOXM7G5dhKDGhfMIg
+# y+P1GG0iNnQgDLMvohvQ5EXnYwnqmSixZv86YhgQxHcbGdq0laSKxQeuMmiXl9aM
+# 1m5G9ZwkA2bRnix9yPu3aXlcvvtf3WEwGfsHjgY2bApr/jKFhw6Xmut/T1EDFXVS
+# OYd7/EZHeCi20QPtWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMDQy
-# MzZaMC8GCSqGSIb3DQEJBDEiBCBPKKm2t5Sadwg13lwsCjerds88NM3TWaioVeyZ
-# 5WVQaTANBgkqhkiG9w0BAQEFAASCAgAbt2uruxDfrZKs5lJrzCoY3vlD7ZU+E4uZ
-# lZynwuK+r6z/SZYkH89v33BPuiDT64famZd+fMUg/eURBMSpdM6ig21iGJtRmHP2
-# UIPHVNQx/A3cboMJugD2vKmzxDEdzhIGNyt9/r/+fv4iZ8LqJwgkgoRQT3Ymqnhm
-# VNs02sPLTuqL5LVRMaqtIWEgIoP6ZwoDyLLnsWBk+FWQErU2JnMPeT+MyydeLXuL
-# VuVdx4xTA21nrtinNCH7pUZRWqe1izODnYLYyZ4m6SZngg7CtENIq5obVc+5q+zr
-# BJk31X1ceKT5M02cGD1TJhI4lnOedNnkgWR1Qi4OMbWnihMV/dkDfqA5GR+RKY73
-# P2N2bI57On+GZ65aVUHiXwBWcmH8FeFx3hybvPKSPFLvI6N57wyvtQUSlWhBOnZt
-# s/VIT9iLKNABUlESabjMBKQ0CeLthEFOI36G0bUkdLoytAf+YXpAJJWiDM5Y9+Vi
-# SjZNV2pBL97u2D2G2cGO3L92Q9TMIlygcTC/OawS4QDeJH2No1l4GMHun9jk+P7O
-# 4+7bl+dDGC9osSvMsfOUTfWT6se0LPU1KMt8pmb29uClJn7p+kDRNsC8BFCIzFEQ
-# CfdiP7YfnG8bXUP3DgK8P17i4FrVQG04xEwrXTD0GNXVgb0wbgizSaS7pvVFmaUJ
-# gIJiHGRPMA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODIx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCCAIh/+ljGLXFhc2eFymVK0H0nIJjrP0vYB+Fl6
+# klWavjANBgkqhkiG9w0BAQEFAASCAgBw45881V+Yo3lOX7a8tGKqUEp/BzMyQqWC
+# y6KDIZIoGif4qJUtyLnAgLhpx/EsFR+U6faiJ5XiaRP2kD3Stz0QDrGkCeRkcDPJ
+# jkhexEHp/sMD/0qEcKCPDb1W3AsUFRkcYTvRTgftohYXS0G9i3xdquhlFDFHVpqD
+# Ar6pBewNkifFv49vuVaoAxUnuXP221stb6r0rmd2OnKTqYdiasyZfLDE8QfhdYME
+# sx8LcA5jNy0/5ua1bdSeoPZqCSdhMWWpiHLywuGqLPvOcOjsDnXf/nrPS2B1/cqn
+# 3ghDP4gKuClHEtjYUlLOcupqctbFgbHuN5bgeAhH9nCCJXmdPaHiYjvJVYVH+KT2
+# RG8R8Z3ntKm5RhJTq6rsL7/Hxj3WCBfswJ3e6lbGiOxxgGwxwgqOqvk4Jlb/9xNn
+# Fs/uiV9B3RwhlNXOkJwYQ4ovX6Jqv2utWKgLMdnR1qB17BDfam3gn4UOYGX+HsIg
+# Y37nREBpyai2wrFBgaHodU5POR2JiVDSVitIhpA4SZ7LbOYB3gp/wz/eiIvj3DGh
+# yFw5ZIdSAOm9QviDPy5VhifqF815F35Jelb8QYAmkjJDW39y6Yy/kmPVM1FKbTXl
+# YU0qNzYV6xdpgCHTGBJ9fGBIDeOrSl5M/OXbumdNDtmKB9RYmn+pyN9++2iBH7oT
+# 8HbU591yaw==
 # SIG # End signature block
