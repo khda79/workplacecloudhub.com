@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.40 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.42 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -38,6 +38,8 @@ the email. A receipt failure stops the email instead of publishing unqualified
 recovery KPIs.
 Its overview cards emphasize the used percentage, with used and enabled license
 counts below it; an unsubscribed product shows `N/A`.
+The three recovery KPI cards appear immediately below `License overview`, ahead
+of the suite and other-product cards and the numbered detail sections.
 In email-only mode, `-BypassLicenseUsersReceipt` can provisionally use a fresh
 `M365_Licenses_Users.csv` when its file receipt is missing or a new licensing
 collection is still running. During a running collection, the CSV must predate

@@ -9,7 +9,7 @@
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
 .VERSION
-1.41
+1.42
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -17,7 +17,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.40
+    Version : 1.42
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1915,14 +1915,7 @@ function Send-LicensesFocusedSummaryEmail {
   $adOverrideNote
   $licenseOverrideNote
   <h2 style="margin:0 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License overview</h2>
-  <p style="margin:0 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">MICROSOFT 365 SUITES</p>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>$($suiteCards -join "`n")</tr></table>
-  <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#f8f5f1;border:1px solid #e5ddd2;"><tr>$($otherCards -join "`n")</tr></table>
-  <p style="margin:7px 0 17px;font-size:11px;line-height:16px;color:#64748b;">Enabled and used counts come from the tenant subscription snapshot. Used means consumed license units, not measured app activity. Percent used = used / enabled; N/A means no enabled units. Dynamics 365 and Power BI add SKU units, not distinct users. Copilot covers Microsoft 365 Copilot; Dynamics 365 excludes sandbox, trial and preview SKUs; Power BI covers Pro and Premium Per User, excluding free Standard.</p>
-  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
-  <h2 style="margin:24px 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License recovery overview</h2>
+  <h2 style="margin:14px 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License recovery overview</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
       <td width="33%" style="width:33%;padding:8px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #7c3aed;"><tr><td style="padding:13px 12px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#6d28d9;">$topRecoveryE5</div><div style="font-size:12px;line-height:17px;color:#334155;">Recovery candidates E5</div></td></tr></table></td>
@@ -1931,6 +1924,13 @@ function Send-LicensesFocusedSummaryEmail {
     </tr>
   </table>
   <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Each card counts license assignments for its suite. F3/F1 adds both suite counts; a user with both may count twice. N/D indicates unqualified users.</p>
+  <p style="margin:0 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">MICROSOFT 365 SUITES</p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>$($suiteCards -join "`n")</tr></table>
+  <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#f8f5f1;border:1px solid #e5ddd2;"><tr>$($otherCards -join "`n")</tr></table>
+  <p style="margin:7px 0 17px;font-size:11px;line-height:16px;color:#64748b;">Enabled and used counts come from the tenant subscription snapshot. Used means consumed license units, not measured app activity. Percent used = used / enabled; N/A means no enabled units. Dynamics 365 and Power BI add SKU units, not distinct users. Copilot covers Microsoft 365 Copilot; Dynamics 365 excludes sandbox, trial and preview SKUs; Power BI covers Pro and Premium Per User, excluding free Standard.</p>
+  <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
   <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
@@ -2578,7 +2578,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.41"
+$ScriptVersion = "1.42"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3292,8 +3292,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDF/9y9HpNK/S78
-# iAjmDQdzV3E2uDtE50IqLCoTwQKYWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4fR17GuPRlOab
+# Pfs6BUdjdWlSpa1gJyks11AXl06Lq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3426,31 +3426,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFuDXEOgmNdqKTB8Fbqv8r6UqexF9/W19voa3QxiwghMMA0GCSqG
-# SIb3DQEBAQUABIIBgDlZI26+7jIYw51HyREE1DAkegZF6BCToHQcmHoSbWPMUlrl
-# Q3EwhXjoBkN6gfnFov/i8p0kCL4nFi8Iuvod0shpKJ2FFHBUnpgdh/zSkcX29aco
-# mE6Up59Mssmhd9pJSndqj/ZikvDxJb3oSO6Hfqib+IDVZWmogLEY4sAvXWd1VLpl
-# FmtCQ+xvu+j3V/EREmlvPz1Hlau9BS4OBlIF8MglV0w2p+9ISoOIN9IX23oetLT4
-# Fxukt6A65rrt7GZthzad8kEJYirg2S93X5vWBWxNUxq0b497E24hOi4p9GFxHPA/
-# hjrsv3Q8RpUIWuqz5hAGVZlL0UuMJh95N0Oc3xUSYoMSWAbvjFL7SxCsNn0sSsVp
-# 0w2/ANKJS9hllVbKrflfcDcbTDoFaY8CyL1xIRF7Zdj1+XOjzTUxTgL+xy/JydNi
-# gcM119zPC4HJmosnL6ZGum8FBEqJUcApARA/yPFTkpnONQpQa6UKW3V2VUtQt977
-# kl9Pke3G5DhzuMMaB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDnRfZM9u7LMQVxDxvfGPBdrsSp7vW83zL/Y7UlpCTgXMA0GCSqG
+# SIb3DQEBAQUABIIBgCxpgoZnH8M4ojO3mb/nRbIGtFCOipnGfDBM08+4Q33KRidv
+# oNIx39Bt8h6w+zzHRbgmHYdlYJjUwQu4D15urAciheJxfQqVW3IsUJDVfg+3PAqm
+# LZo3ObEaqO1IGUGL5eSd2tWvt64aj+StxjUpHyxQ34XS97wzmDoBbEuFgelX6KMC
+# zDyPhUBDluBMNt0XgXrVtp0Qh8E6cPDlOJNty6I26Q4gchn/ujai1n47pI5x1nEP
+# 3tJSu/x7pMexTOOciClLi7OMv7jbysTeYKQ6wVJDbYwzE9DfIWp8Jw1fXE16A6JP
+# XZp9zQNItLwJeL/k63K4lIg0mZLGqzvy/swp7pf+srGZNPgrCOH2WFiFgJ+gMbrk
+# gxeNnELJ4xZZhD2aJSF3OgtiN8rOYQUBYfjBZaYq4vw7i3FfTbYV35TTZKYIeQFG
+# 2cTr+Gm492RGk4XuLjBYP5bzE3AJoMVW9F3PCpH049oxg8tT6wU0phTvDnWM477m
+# tM0+2Xk37q3tDcRKDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
-# MjNaMC8GCSqGSIb3DQEJBDEiBCCifcD40d7qTuiDyLzCkCnObVU9X/xdVFnYU6Rv
-# oKu+ZTANBgkqhkiG9w0BAQEFAASCAgA8LkaxD/YL7O9MewijS8EpEbyZSYEypdGx
-# VPUl8IItlJdPJS53qT82yxBuVf/vwthxf5d5zlhwiQep4sW39zlaFMAcE5128N3c
-# bE4x20w2PDrXu1JYMYElIMleWdAKnqeHb0kIj49E6p/AXmY1mCl4fjbHwwQ59Ba8
-# IljrhSyHUDr03Xr7X9hLV0AgFrUyMl5CouZOn1VPAytygyFQIRzD2+4gU4SkSans
-# RYvSdMSC3/fipHX+bUD8aJF8vALq7heJq8KQmSB8cZQTklOnE6wML4y/Ja9SsFXR
-# pMbqyf81IcOOv2RH2S5R7gRSuL/vrq/RYobAueBoXerAuErJ8HUfJ959jhDf5lof
-# 5lUHUaQ3sk4aUZudQZ0KHEgWu7ym/whFEQzdQSa+fq1OPmH/VassHSfRtZlIlmv+
-# Hyfb8QrgwsaIDzW/NdTz6BMC/BpnIp4k3kdcBJit5S7UA4jt8sWlPxdEwdAhzuQB
-# /TDYULXQGQkyGsoOfI/BNRtPHM5tXNiGciT/9P1+oPMhzpPjCBTfWJko0RvnnXbn
-# SenWNexacUo0dHtbyXrA5RTJUHoqpG81g0Dv6JlLbGulW/JL8SGdmz/d462P3Gry
-# 2f7aM+Mj3C9SnlwodnqvssTUUjdCnK7WBBdu3qj03Z6QgZXrVvLZmvtlCdXdzYTA
-# GmlxZ9tQ4Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTEy
+# MjhaMC8GCSqGSIb3DQEJBDEiBCCJYzEx+0d/154OGcOQKV+pr+aqzRP4dpax3XOA
+# XVbIvjANBgkqhkiG9w0BAQEFAASCAgCUTfhBD1vaxlstofcnMGp3zoptjksrEITE
+# YXtJiDP47g9id90HtnWcwUqPIZAlHoMxBjqw4nXqLy9DNJKlLoMoSLCG5sabNXuR
+# IEKprK8pCFi00dvleKC/3wxNWrarqme+EOHc+I0PfJ+w0Y7Ge/b/ZuAE6wzyp1HL
+# GByjH6ahCLfFBvMr5D9brQzJPoKJ2u3RoohHBkPBpU6ArdNZ/Qpj81t/EVKQ1aSf
+# ZbRx8DPWvwTGN2nH7BUu4YnF61Po/xtSCNxY+YpQF8BNeQAt/7DFXIiX5jvl8Bsj
+# rlfurRIQag/jZ9EDpT9E/HLWVhWfoJ/tiis5xR3jNSBxV/j7gVlwbh/DOPCHnCow
+# f/WpkH1d4gxXHQoxXmHXTUo5FoCbveTPY7mEFt1xXko/rlCTw4GEPy0UjukSbitr
+# XaXkFkd6dtWOa6OFwkuXErWPqfXAIIH1dfnOXR2Iphz+Jr4LAxYFD0o9BBBDw537
+# H2S+fNe1+72q5HsJXrj5buEXsZnjlJazyygAM//mse/4WrXDhJzrEUfJdU3ZoWin
+# /3UP5QaX8qR/NIb+eimteomOb6hY8IgPZWvJEQYLRcRoMAw8PJs8k6rk+uU4iTEs
+# XRfu5PtFZb3gsokNtCS8df3TAV5KsFojzuWoW6i99jXCVPQS4Jd+v4Lx5k+P/Epy
+# RlwVNKB7mQ==
 # SIG # End signature block
