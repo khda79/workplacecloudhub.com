@@ -3,20 +3,43 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.7
+0.3.8
 .NOTES
-Candidate, not scheduled. Offline local preparation only. No collector, Graph
-authentication, notification, SharePoint transfer or Power BI refresh is invoked.
+Local preparation by default. -Publish explicitly transfers the newly validated
+snapshot through the existing SharePoint publisher. -ValidateOnly never uploads.
+No collector, history or Power BI refresh is invoked.
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Existing SmartM365.Core operational contract; offline toggles are saved and restored.')]
-param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly)
+param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly,[switch]$Publish)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.7'
+$script:Version='0.3.8'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
 $savedOfflineGlobals=@{}; $preparationWarning=$false
+function Invoke-SmartM365CmdbPreparedPublication {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$PreparationResult,
+          [Parameter(Mandatory)][string]$PreparedRoot,
+          [Parameter(Mandatory)][string]$TenantProfile,
+          [Parameter(Mandatory)][scriptblock]$PublisherInvoker)
+    if($PreparationResult.Status -notin @('Prepared','PreparedWithCleanupWarning')){
+        throw 'Publication requires a successfully prepared current snapshot.'
+    }
+    $manifest=Join-Path $PreparedRoot 'current.json.txt'
+    $item=Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+    if($item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint){
+        throw 'Linked or non-file CMDB manifest refused.'
+    }
+    # Capture this generation, not a manually pasted or previous batch hash.
+    # The publisher independently locks and validates all 46 files and freshness.
+    $hash=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+    $exitCode=& $PublisherInvoker $TenantProfile $PreparedRoot $hash
+    if($exitCode -isnot [int] -or $exitCode -ne 0){
+        throw 'CMDB SharePoint publication failed. Prepared local output is retained; no upload success is inferred.'
+    }
+}
 function Resolve-SmartM365CmdbPreparationLogPath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
@@ -66,7 +89,7 @@ try {
     $runtimeInitialized=$true
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted=$true
-    WriteLog -Message "CMDB preparation $script:Version. Source='$source'; Output='$output'; ValidateOnly=$ValidateOnly. No external actions." -Level INFO
+    WriteLog -Message "CMDB preparation $script:Version. Source='$source'; Output='$output'; ValidateOnly=$ValidateOnly; Publish=$Publish. ValidateOnly never uploads." -Level INFO
     $python=Get-Command $pythonName -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $pythonVersion=& $python.Source -c 'import sys; print(".".join(map(str,sys.version_info[:3])))'
     if($LASTEXITCODE -ne 0 -or [version]$pythonVersion -lt [version]'3.10'){throw 'Python 3.10+ is required.'}
@@ -89,7 +112,20 @@ try {
         $preparationWarning=$true
         WriteLog -Message "Validated output published locally, but transient rollback cleanup needs review: '$($result.CleanupRequired)'." -Level WARNING
     }
-    WriteLog -Message 'CMDB local preparation completed. No collection, history, report switch or publication.' -Level SUCCESS
+    if($Publish -and -not $ValidateOnly){
+        $publisherScript=Join-Path $PSScriptRoot 'SmartM365-CmdbEvidence-Publish.ps1'
+        $publisherInvoker={
+            param($tenantProfile,$preparedRoot,$manifestHash)
+            # A separate PS7 process prevents preparation's offline globals from
+            # leaking into the publisher's independently resolved tenant config.
+            & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $publisherScript -Tenant $tenantProfile -PreparedRootPath $preparedRoot -ExpectedManifestSHA256 $manifestHash | Out-Host
+            return [int]$LASTEXITCODE
+        }.GetNewClosure()
+        Invoke-SmartM365CmdbPreparedPublication -PreparationResult $result -PreparedRoot $output -TenantProfile $Tenant -PublisherInvoker $publisherInvoker
+        WriteLog -Message 'CMDB preparation and verified SharePoint publication completed. No collection, history or Power BI refresh.' -Level SUCCESS
+    } else {
+        WriteLog -Message 'CMDB local preparation completed. No collection, history, report switch or publication.' -Level SUCCESS
+    }
 } catch { $failure=$_; throw } finally {
     try {
         if($runtimeInitialized){Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}elseif($preparationWarning){'CompletedWithWarnings'}else{'Success'}) -ErrorRecord $failure -FailureStage 'CmdbPreparation'}
@@ -109,8 +145,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrRSeMxbsXkWi0
-# +sGqFUe9lnXvo4qR478cCOhNa0fDQ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUeBz2WnK1CxsV
+# mIwoeIJwPF8w9qeAhsw9Xwp74yuzYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -243,31 +279,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHdlcTAeq1U7a2GSzPXll091+bOTGtHxJGPt1sPOtOIKMA0GCSqG
-# SIb3DQEBAQUABIIBgD/wSWJ+9IXRRgiatXE90dlLsayUXMgjYkDFnEQYGJT/lzSy
-# 4/Ttw7JM6kMRUXPwJOqeRFZ+ShQI3cP5JQAvbew6b+KwVQ2Sje5poleecXui92WC
-# +2aGjlLp9jRmQurtQi+3AFqedSeNg//kgQTT6UtKYWyh0fjCM87umww/2kedpm84
-# U+NmSCWqTsA7T8FtQjvXQZa5XgefFYj5fcrpFGOXTbP1NRAB18PLGBc4Pcr0aTJm
-# Nr1XP0zgYoaZSCgSpsh8gwjd5xxJJQuaddcYy3oVqfcA6iTfwdYO2inOxRldRJAv
-# a4p+Jg3+IWd7ZKZDIscipoalvUx6cwaPbheZgND5DvEhVUeaFfOroZN8TM0iLnDM
-# ydU3KZ05tiPydK1w84GiudLmQeljeak6Qp3Tgr1+cU7Xs6+3Z7tabnZT/tH6ufKc
-# xWnvFbrDD5QqRYhSKPwC0pGQ+4QvMyPBHMjrp8HeNTPKg6YJN/avytRMhOq11l1L
-# OKuAHMFVh+cqAVbAsKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEFrslTiCLshLCwyjpGoKLKOA+/vaYmfTbpDXO7pDuloMA0GCSqG
+# SIb3DQEBAQUABIIBgIFdYJKbKOdhDYd7Gbxr963k3NvcGC3UAqlJr/pfo+Z08miO
+# LVlXJ6207hU20rW1G8KjHmz4XX6wYZ9P39MVOdkpszNG5PnS5NKgF6EY7TSTzA2v
+# H9meuwZolHKlYMGGva9H30LR8msjR+LMvovQ6ahVkDi2WvScBkMzw/jQUioavsTC
+# fby7/16H7MVws5BzL9CW+RaS26MdnoJShU5KpN6QdoTwToABCK2PQqR1tR/glv1S
+# BnF5WlXUjt1xHjNNaN0Rp/EhN4fsL7LfNfuME6ZvClcBCWGxP6rfOt1NBbL0WoEO
+# jXF26d9c/zOa9KuM2xJOIVG9A82WJOYyKHf4mmBg0ZP9AwDNj5+N0fMJXh91BR0H
+# 3PslHD81gNt034SEGujmaWrJ+qTtXh58JxvnRw80qMox+D6M/5vQHgBK/ntZrosj
+# JlCUD8zlXHITUIgRfFYO3C0YKpiiAZrVUeXO+SXbsnuxIFSwgyRy7bbX1A+in3ml
+# XUHJd5WPzKe79hQ/6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTQx
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBfbx6jhVMgYsKaQ0Nw7xszxYjjCvhxei5zvJC8
-# xcKp4jANBgkqhkiG9w0BAQEFAASCAgBiS/juznGmqZa4K4ZA/CH2TtxnpkURRJjb
-# AgLmLXJX9sP5Uz6D5e4LzO/UheKHbvTk6MfTm77DmxTg2D6+RtoXAZC+g1YkcsRr
-# GTC8tazWJ4lcKMq6d+19XbZIBayttyS3SfU3XoRJ431PpWkKr5I5lhalZr+9uDDz
-# U4krfSkkNMsqpKoC9R13v1maxCB/v9A40Ycw6KwijpwKqro2nm00nTQHdFJOydNB
-# 9gayvnG9UMugAky9adyRnBO9yremlxTwwHq7+zogfVLJVqlATElNzN5ZtdvDO9eT
-# 0AnXYZGa+tjFfHZYcveHOfwM8jGVr7eRkffqE5o608NpLILK9wUxOwijYZfYMWgt
-# LhjP8gEU8d1kohClhXavfFKjilswtcQ93bHoLjVdHkOiP/SLY8pIZPVlMa/v2uzH
-# JL8Gjp0EuHF0Dbayp1gfd7QUybi/fy/G9piK1kDbD9Pq7p8UVIGuEXSk+rMEBnbp
-# JNiqoYK6aWi/nvS+MPHKMii1le4SSTzCuk3qyp8XDxUk7SWkb9khUIWsTAoevLsc
-# Yk/krT4gbwUQecMktKmAi6PhKLfkPM2IOypbDPu1i5kr+6r6Isv6mFZsK5lOezSx
-# LSDIQarW1Qhr5ddS1QyeEhUDJhBPn2CesVTTh/KgJewGAR7cRkqQDMsVVqyRhWZo
-# a++sYTYZ4g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTAw
+# NDBaMC8GCSqGSIb3DQEJBDEiBCAnptUglHHUi6xaDYGul/zT2t49D3Q8aemzCI+a
+# VcWFmTANBgkqhkiG9w0BAQEFAASCAgBYBQ3Cz3jJK+Z5Hs+DRCgtCw8Hn2QCWw8/
+# 8k2Srpcx88ovhhaVEs8Rn/0grC0CtnINJzJD7LmGw9Xpsm8+EwqutN8nX4S9zQVD
+# TaAlH5MfSXyjAQGPppt8pQg77LQZAHRrUFvfVkvbzGWBUiFgVQyxKI3Blv595YTu
+# yNIHzJPMAe2q9vKVbEkM89RHzXD5tJSJvXU3gjlFzIs1noLDnh//Lu/NATE4Ai1T
+# RGw54vmEOIXo/pk4YveSWMzrYDU7+IyBVKeBaKKesktMC4SqAwqA2GhfoMeg5snc
+# 7FCUJGtgZNgy8JgPa8XQY8Ny0cXakqifeBTJnJ+AlNqTccdzNO8AuXEmBfJK0HDR
+# W1Mc+AicIP85bWxEDIkJkAMZg1zcyN2dytKpuKgtg4hjZiDYqHNSQK0vRHgb+/rg
+# GU6mieFMpF8Z8o++adAEamD95/lvoPJyIJ4OvFkYKnbuDrU+lEVfAzVuaWVOYFa0
+# M02pSGa3ePznVYnKmuju2QwFwuzxZmoxaJbkimop2KNgEi/h2zQO05vjbyocBtPS
+# BvM2AFm3446drMuHRpTYpOuW8UOoSr020bFFesnfZbHidrvUlYw+eLtuwx7NJFya
+# 0tZkQimy9jYLwAJvJbvGoYfRD3br4CdaV0E4pJQdcrLDwFF61C2HdeK8NypsC0jh
+# +6haB2h6zg==
 # SIG # End signature block

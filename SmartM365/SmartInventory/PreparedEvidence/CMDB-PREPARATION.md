@@ -1,7 +1,7 @@
 # Current-only CMDB preparation
 
-Generator version: 0.3.9. PowerShell entry point: 0.3.7. Prepared contract: 0.3.6.
-Status: offline-tested migration candidate, not scheduled or report-qualified.
+Generator version: 0.3.9. PowerShell entry point: 0.3.8. Prepared contract: 0.3.6.
+Status: explicit automation available; activation and Power BI qualification remain deployment steps.
 
 ## Scope and execution boundaries
 
@@ -23,7 +23,7 @@ The log initialization path is resolved through Core's existing configuration
 resolver before directory creation. Blank, relative or unresolved paths are
 rejected instead of creating directories containing literal configuration tokens.
 Core's automatic Teams log callback is suppressed in memory during this
-offline invocation, and SharePoint upload is disabled. No local module or
+local preparation invocation, and automatic log upload is disabled. No local module or
 tenant configuration is changed to disable notifications permanently.
 
 `-ValidateOnly` validates acquisition proof, raw CSV contracts, and license
@@ -42,8 +42,16 @@ PowerShell still initializes its local configuration and operational logs.
 This source/parent validation is not full prepared-table validation: other model
 relationships, derived calculations and Power BI refresh still need qualification.
 
-Do not schedule the entry point or switch the report yet. Required acquisition
-proof is intentionally not fabricated from existing files or their timestamps.
+Local preparation remains the default. The explicit `-Publish` switch calls the
+existing publisher in a separate PowerShell 7 process only after successful
+generation. It captures the newly prepared manifest's SHA256; transfer failure
+fails the combined job rather than reporting preparation as upload success.
+`-ValidateOnly -Publish` still does not upload. No collection or report refresh
+is requested by this switch. Required acquisition proof is never fabricated
+from existing files or their timestamps.
+
+For reviewed scheduler activation, see [CMDB automation](CMDB-AUTOMATION.md).
+Qualify the report against a complete transferred cohort before applying it.
 
 ## Separate current-only SharePoint publication
 
@@ -55,7 +63,7 @@ destination is its `DATA-POWERBI-CMDB` child, not raw `DATA-LAST` or `DATA-POWER
 The publisher inherits tenant site/library/application/certificate settings from
 its adjacent `.local.json.txt.template`. It uses the existing certificate-based
 Core transport and the site's existing `Sites.Selected` write grant, not new
-tenant-wide permissions. No scheduler job is added.
+tenant-wide permissions. The publisher itself adds no scheduler job.
 
 First run `-Tenant <profile> -ValidateOnly` (optionally with `-PreparedRootPath`).
 This creates normal private configuration/logs only; it does not authenticate,
