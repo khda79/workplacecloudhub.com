@@ -1693,7 +1693,7 @@ function Publish-LicensesReportCsv {
     [Parameter(Mandatory)][string]$Folder,
     [Parameter(Mandatory)]$Snapshot
   )
-  $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AssignedUsers','RecoveryCandidates','RecoveryUnknown','DisabledUsers','NoM365Activity','MultipleTargetSuites','MultipleAssignedSkus','NoAdOrEntraActivity','NoMailboxActivity','NoLocalAppsUse','CandidatesPrimaryIntunePc','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','EvidenceStatus','WorkbookQualification')
+  $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AvailableUnits','Subscribed','AssignedUsers','RecoveryCandidates','RecoveryUnknown','DisabledUsers','DisabledUnknown','NoM365Activity','NoM365ActivityUnknown','MultipleTargetSuites','MultipleTargetSuitesUnknown','MultipleAssignedSkus','MultipleAssignedSkusUnknown','NoAdOrEntraActivity','NoAdOrEntraActivityUnknown','NoMailboxActivity','NoMailboxActivityUnknown','NoLocalAppsUse','NoLocalAppsUseUnknown','CandidatesPrimaryIntunePc','CandidatesPrimaryIntunePcUnknown','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','SharedUnknown','E3ToF3ReviewAssigned','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','E3ToF3ReviewExcluded','E3ToF3ReviewRecoveryExcluded','EvidenceStatus','WorkbookQualification')
   $candidateColumns = @('SnapshotId','TenantKey','CandidateType','Product','UserId','TenantUserKey','IdentityJoinStatus','UserPrincipalName','DisplayName','Reason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
   $gapColumns = @('SnapshotId','TenantKey','Section','Metric','Value','EvidenceStatus')
   $sourceColumns = @('SnapshotId','TenantKey','Name','Ready','Provisional','Date','Reason','SHA256')
@@ -1709,12 +1709,22 @@ function Publish-LicensesReportCsv {
         [pscustomobject][ordered]@{
           SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; GeneratedAtUtc=$Snapshot.GeneratedAtUtc; LicenseCollectedAtUtc=$Snapshot.LicenseCollectedAtUtc
           Product=$product.Product; Category=$category; EnabledUnits=$product.Enabled; ConsumedUnits=$product.Consumed
+          AvailableUnits=([long]$product.Enabled - [long]$product.Consumed); Subscribed=[bool]$product.Subscribed
           AssignedUsers=(& $count 'Assigned'); RecoveryCandidates=(& $count 'RecoveryCandidates'); RecoveryUnknown=(& $count 'RecoveryUnknown')
-          DisabledUsers=(& $count 'Disabled'); NoM365Activity=(& $count 'M365Inactive'); MultipleTargetSuites=(& $count 'Multiple')
-          MultipleAssignedSkus=(& $count 'MultipleAll'); NoAdOrEntraActivity=(& $count 'AdEntraInactive'); NoMailboxActivity=(& $count 'MailboxInactive')
-          NoLocalAppsUse=(& $count 'LocalAppsInactive'); CandidatesPrimaryIntunePc=(& $count 'RecoveryPrimaryPc')
-          SharedMailboxesLicensed=(& $count 'SharedLicensed'); SharedUnder50Gb=(& $count 'SharedUnder50'); SharedRemovalCandidates=(& $count 'SharedEligible')
+          DisabledUsers=(& $count 'Disabled'); DisabledUnknown=(& $count 'DisabledUnknown')
+          NoM365Activity=(& $count 'M365Inactive'); NoM365ActivityUnknown=(& $count 'M365Unknown')
+          MultipleTargetSuites=(& $count 'Multiple'); MultipleTargetSuitesUnknown=(& $count 'MultipleUnknown')
+          MultipleAssignedSkus=(& $count 'MultipleAll'); MultipleAssignedSkusUnknown=(& $count 'MultipleAllUnknown')
+          NoAdOrEntraActivity=(& $count 'AdEntraInactive'); NoAdOrEntraActivityUnknown=(& $count 'AdEntraUnknown')
+          NoMailboxActivity=(& $count 'MailboxInactive'); NoMailboxActivityUnknown=(& $count 'MailboxUnknown')
+          NoLocalAppsUse=(& $count 'LocalAppsInactive'); NoLocalAppsUseUnknown=(& $count 'LocalAppsUnknown')
+          CandidatesPrimaryIntunePc=(& $count 'RecoveryPrimaryPc'); CandidatesPrimaryIntunePcUnknown=(& $count 'RecoveryPrimaryPcUnknown')
+          SharedMailboxesLicensed=(& $count 'SharedLicensed'); SharedUnder50Gb=(& $count 'SharedUnder50')
+          SharedRemovalCandidates=(& $count 'SharedEligible'); SharedUnknown=(& $count 'SharedUnknown')
+          E3ToF3ReviewAssigned=if ($review) { $review.Assigned } else { $null }
           E3ToF3ReviewCandidates=if ($review) { $review.Candidates } else { $null }; E3ToF3ReviewUnknown=if ($review) { $review.Unknown } else { $null }
+          E3ToF3ReviewExcluded=if ($review) { $review.Excluded } else { $null }
+          E3ToF3ReviewRecoveryExcluded=if ($review) { $review.RecoveryExcluded } else { $null }
           EvidenceStatus=if ($category -ne 'Suite') { 'Capacity only' } elseif (-not $product.UsageAvailable) { 'N/D' } elseif ($provisional) { 'Provisional' } else { 'Qualified' }
           WorkbookQualification=if ($category -ne 'Suite') { '' } elseif (-not $product.UsageAvailable) { 'Source not qualified' } elseif ($licenseProvisional) { 'Provisional: license receipt bypassed' } else { 'Qualified' }
         }
@@ -3603,8 +3613,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs4B/fDdqsJeqi
-# 2i7ibv+hNN4lfl5AOhr9avvSCRebxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqm9h00d23U8of
+# wL34EdOECcYALRyNrc3+sGEeHPLPl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3737,31 +3747,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINOgmpWmNrNrIH4NkhDQp1Eq0030YVYT2uIwph0z55fNMA0GCSqG
-# SIb3DQEBAQUABIIBgH21Y0JDpZ/B2hykpuhGjXALs4Ax/dqM5NvuioqQimLYshKs
-# Owou4Uw4OkCj0aCXxBsbhVl9R8TgigpHh0O2la7/G7LoFw4BSRAPzDHK2o9wfpwb
-# jo+AZAkQ2Hfs0QXWZclBjVg6boli3cMfvdiapq4XnbtvvmmBaL316mZZtQB8LRHO
-# wNwabUq/ggG6071H4lpfmlCghs2//I79VMVCKQPwrlHjp+XuQQ4USLivVMj1ma2v
-# pKSLv1T9xO5an0H/hWn4/kX/YahJxb1amMwjCt7siUPf4nnctQZSfRyV6XVsuIUv
-# VJmRkcxUEAggxvri0fCcIJ1cjru3NXWMayNYhtxuySb2HaYeML2Qb333f9qgiSLm
-# 8PkK82PQzUY1yt37GDuoNYZ69dkKe5rR15oWwEMoYwtFC+YWzrGTUffjJgbPcLNc
-# tZ9SeHtQLsoGxwSXyGj3jWZIrE+rz6cI44DvgHaCOx68hyr9OkQ/390lrXaZ2698
-# IWYnc3eAJngnzUXfCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICdoefTb+SCZjyvxGTk5QJv5nSnl0JrIIFMXVas78QXLMA0GCSqG
+# SIb3DQEBAQUABIIBgKtskZu8TZq+rSHBzbcimpjzvifNQCBwoHoVwG/J3M1NZjlL
+# 08liQjeq2CgXSZlrXSLnlO/XPg9NBQ0PD+ntFq+6Is30oqVvt0iK2ljMzZePY00A
+# xTdkCxSqlEnofhysWywBRxQfU2F2tQh55VXJMvGZDH/7DqyWNKS//UjTE2ivl/pu
+# jE+84T07IbC85Y/jt05Oo7XmxKL8zUojlXUBj6bR9Jgp0OUWIRlXFDmP/8lAIPnG
+# FYrT3p6tHWsM4k28sEhp4E7k7Lh+QlGWoeLCaIvx2sdAniR7dl3qC69biqbNEek4
+# r9dY6E3kkkHA9Gm5Iv2pGaScJB9itHXxK5O8T52w6rd6bk4t2DpuZzrgFL9BhDO4
+# LJRQchtaI6zaP9lL4P7jldzOkuOZKCtXOzvMUduHfVx/MJy0ibSUWXeJiXtkCfyn
+# edxYc8GTCt5DCP/lL/oQZmNWSUb4EKQXB9JSEKKDWi0IooEgPvVHyrtW2cKkAeWz
+# LmAnO/GDXoht3lqCAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDA4
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDWHDmft32//r4gXC9VQMMgzvIb6e6E+merPGg9
-# KGBCXDANBgkqhkiG9w0BAQEFAASCAgCwCDF+fQZt8K2wOWq6Qj1vdnjlgQhYNvAZ
-# 5gsB3KaZVZfcBNF5mFvzKD6ovohOaF7+SJKwSna+zPtFDZFElhFkkdETPi0MbYJI
-# 8nPoAnZLkWLMJEY+K6L4RGL+Xx7GCStVfiU4QRhf9OyZ9Dg+cgI5oHiTUsq5WjWL
-# AvTvxdTUevVB1ykz1U/sxCegad8Bz9VTD2Vx1c9MDAGA2YUD20zKG8FwJRgeXjEf
-# ErZmB4kppfYCYFXNwtbiD6R1fCp5Tx2L2Cgv+8RP5CiVcxSk/BWIh/o2ILE9Ww7w
-# SLhmyrRhtLO85sLoSAhnG2tKmd273oEQlX/gHP7ZDEhSdzkcGbMlvT/g4mgmkfoX
-# iVT7EUAt/f897VW3P5UHqxEZD2HDTc9SkFZyn0pu0ktD7Y1G/NHgBIvZzuhoKf1v
-# sgGU3DLzrJhn8EtWHieXKvgQdSrAFzfiq2Yvi8lkJW1aZntoE6BLfLcA8f7qkGkM
-# Pkucx2+W3Ww2zQjh5MIqctFJZxwezsgtXglzySvLz51IP1m00DJwIn8Sr/V3vyX8
-# ttd8CXum2APTcZ1g/6zmOmygmEwyFghsv4erI52x3zfOJ4/3XBXPPUsKdUNrTm2q
-# iUeFeRJgRnREuJMPAHAcKoLQgrHa4ADEr3AKI13rBK56WgKsDFKJ/opIxE2rfxzP
-# uX7N7SVgcg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDI5
+# NDZaMC8GCSqGSIb3DQEJBDEiBCCYWiW/mA9KZabxu74YnLZIvOqiJ/C1x7JX0xiU
+# 4ucPxTANBgkqhkiG9w0BAQEFAASCAgB8S7n+BatcKSzW44Zl/sr5udV+Iktm+5cj
+# KALFFvCzbHbK4ZPs8qI4AB3tECeNEcB5lXBi7hKXt3xRgeVQ0fdZP/Mf6amlr1zp
+# zA+OPcZVN/V9772cOWq+1QTm6AYNPS/F4InEXk216+Sl62vuuJTGFD0sUWqeQk1C
+# g+iSYD3M6QHFFXSZ5AE3qhYzvZIJKkbYRBNCS/52qhMhYbr481n1kSfT1rR16qZ2
+# 5xMNxnXul9zOqZ7gWB4xJG/uPSEBnqxVXLWkqAVFcb4NcPI4zbyE243jVCtdzFPw
+# NHWl/w8XzMmErMd0QR4NyMToNeaIRj01C3JnouVdks/mfBBn4GVrcaRTN4m/R1wG
+# eRYES1M1ylT1OlQZrrd6luSBxmgEsgkBLo5KivRHeL7EM/ONR2CnUwFdnPlD6M91
+# 26IytbQjT64q8U3W8KaY1dDXigl+VGXqr/T/l/CisQjjXhv4OTzsTI6dQPuZmTtg
+# KUjcZAFRHos/cZz0PBSAm5+cC6N38JAC1LjFMlR0fYZy3tHVkFw83yRd4DqAMPWb
+# Vz5J5cyhsLippK47bR+v3mFzTlDemdl0yF56zqAMhOvXYcC8tDV6D/vrS/Bn3yFg
+# BqsSqTJvkQH/G8p8Bs4a6m54BZ8slv//zwvqL/4XLCwqqmPN2+J9+ZtQjeeMFMjP
+# 0e03KU3Psg==
 # SIG # End signature block

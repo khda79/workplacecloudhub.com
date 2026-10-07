@@ -491,6 +491,12 @@ try {
   $reportGapsCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportGaps.csv'))
   $reportSourcesCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportSources.csv'))
   Assert-Equal $reportSummaryCsv.Count 7 'Power BI summary has all email products'
+  $e3Csv = @($reportSummaryCsv | Where-Object Product -eq 'Microsoft 365 E3')[0]
+  Assert-Equal $e3Csv.E3ToF3ReviewAssigned $reportSnapshot.E3ToF3Review.Assigned 'CSV E3 review assigned KPI'
+  Assert-Equal $e3Csv.E3ToF3ReviewExcluded $reportSnapshot.E3ToF3Review.Excluded 'CSV E3 review excluded KPI'
+  Assert-Equal $e3Csv.E3ToF3ReviewRecoveryExcluded $reportSnapshot.E3ToF3Review.RecoveryExcluded 'CSV E3 review already-in-recovery KPI'
+  Assert-Equal $e3Csv.NoM365ActivityUnknown (@($reportSnapshot.Products | Where-Object Product -eq 'Microsoft 365 E3')[0].Counts.M365Unknown) 'CSV E3 unqualified activity KPI'
+  Assert-Equal $e3Csv.AvailableUnits ([long]$e3Csv.EnabledUnits - [long]$e3Csv.ConsumedUnits) 'CSV available capacity KPI'
   Assert-Equal @($reportCandidatesCsv | Where-Object CandidateType -eq 'Recovery').Count 4 'Power BI recovery rows match the workbook'
   Assert-Equal @($reportCandidatesCsv | Where-Object CandidateType -eq 'E3 to F3 review').Count 1 'Power BI review rows match the workbook'
   Assert-Equal $reportGapsCsv.Count 25 'Power BI gaps have all mail indicators'
@@ -839,8 +845,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyeYJbJCAEFBVe
-# FNVQpJlBJtHiPKX9JpyQD5eAj56rx6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXQBqnRsHS50Fq
+# PRrztNmUcKMU6II15Ndb90zv4y30QaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -973,31 +979,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJRgJLjur5LCuTGSO8eEKXbq05U/YqeKb29G053VTspbMA0GCSqG
-# SIb3DQEBAQUABIIBgJACrGxEjxX+JsZFQXIe8qF7QFoIL7c+FrPKdchuGXBZROMP
-# Njc4rDzK/SuRAa29Q672/Zc6rlbbMFGT+QKTt9C6HIs/R3CZHBS45QJrsIbLoYQK
-# 5TLw1EafrEfeNhfXC9KkrNdeSyyWGMDexMXX0jnoOA4KDpKEnIZjrrpzcTjy0v4y
-# J5EQB6BX74PsXYr1Nrw0Y6LH4P8dFA/uL58ZY27N0w+B/pgpcsUptJ7kko3pIWta
-# jB2ZlLVUOZIQXxuY3fXwTg8mvhRqdjmdfuYx0RY7K+io/OKxySyDtNoPWV/YuS/X
-# XFrji85eJ+vw3rq1pEKdLTvXnr3IJ7lMbSsKL9BLWM5f4+WHT5Icirh5fQZR+k0X
-# oXvMPJ2nLR9fOrvFmT8FWFJr5DVcicNhq+snepsBFJVrR8wGKt/qJZdJTql1jehK
-# /6CNOG+eoLaTEZgZpRPvR9j496igdCMxmlTKvy/tVwniBIvraW3JlEIEgE0YFukP
-# NSDOfndjYL3CZj8db6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINO7CI7zvrjsqB0aAa+NW6wFaLQmlMg+E/KLtGEewHwJMA0GCSqG
+# SIb3DQEBAQUABIIBgFWQJUrnrf0ffnP0qkTmf9mXrkCFzGbHEdehYuhYph+C+y4T
+# LPe0SoHDyrlIPt1XaogYVemBd1vidg7+hrbRmKJ3BtBrO3nuRhPw2wLfOR+aFZIu
+# XE6ZSKSmOKL0mhttMHswuzx/3gP8F7ifF9x52hvXeUZpm9YWfGmHic+x0BRh/+yO
+# YN+WGA3wVZDAHhcDLOCOkcPYVP0ri4UECZ7oTDfu/OUowSsLQoybsmD8nw0Ktu34
+# sWPoYBAL1nZP1ba1OAZ3QmjJuY1RJnVAonz8bjwqagHcrWGKHsqgCm9EyQ7VsFFs
+# XnsMrYy9JZ0UJ1RRgoJI7emmMFpux1L3HXz25Q2yout6ZuUc1h2AO/Kn+3xRa7i3
+# iLjMjYzs6/Mz0MjKibjiTVwAfffPetLcZzarvlcrHGVGqB6YCgeF+x8zJlG1eFv5
+# Pl3q3jLpIjcF7qmUlotRpN1omaBV5HVjACWwYwHGHYRYV9XGDRWcD2sM8LEsWpqn
+# BF8idI27Hwn1ea0QcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDA4
-# MjJaMC8GCSqGSIb3DQEJBDEiBCCkIk8xNDdiCZ+F54ZlyPJ98y71WqV4ufqfxay4
-# M5XwCzANBgkqhkiG9w0BAQEFAASCAgBPBhyE1NHlUTJCffrzAuVJRLn4uVfrMhnA
-# wGUi70pmP2hWgrzjfl1KHW3I2Opb5ZCx8l4KROU+xJiq1TK5R/llguX5q9hvjNaU
-# 9RUEqE+YQvUHmZ+Bm5H5j2ZcpDCf3Ixqvl4iKQWgrLck3sNhnxtW2t2o0RqHdyGq
-# n10bBBTpAYNpE7D9oe+dxlPvGVrA15QpkSeKEZhTE/Nbpls415EyziLc5OKXiKkf
-# 8Az6A8s14NrvJcjGB6kNmRc1qAFd88i/qdooKij3dmkxqqZzIs7UgRMp+YtB41B/
-# UALz2fZcT5kn/UxHs+QgJh044WukNJwNoeSoIgRpu+Vpwc7Irb7QmPzQNtDBwYRC
-# AGndme2WvYf1D/ao/rDZpgqPt1pIZjhw3L8llWkkwWh6sGFfVm2GdEjIl5NQ3Bdj
-# SS7jpew1SMQX0OA+9pLOX9tkplfc1SKLLxa8+GnhzXAjqUVQEclnY8B3UpqZmSsA
-# fosFcF2h8c73x6hVY/tg1mAA7JAAWXHzE2ZoyeTl+0O17N3waAK+lkZCXeC15Eay
-# ndaRfDxQF4BGww+5fhWT0Wiw0/Fh4pqucO6T3m4MtTMxn5mqNFGnpfEXayAMyoMh
-# BXJIQzTKTMOSrv8LMOSwfL0smyXdlzL9P9ckSvYdaeZOPwgPSWF5GM5Tj7eNyewo
-# J+zjD445Dw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDI5
+# NDdaMC8GCSqGSIb3DQEJBDEiBCA4HLRRZkJmDumf9qO5gyZfV3iesvJrJEkVjtGi
+# 8VsIfTANBgkqhkiG9w0BAQEFAASCAgCvj7zJpeKN/1YwxJPTh165gJjIaDrdZx7y
+# Qp+3qcBWiXAkXzJCeoMs5uTIg8V7LsJz3+nBgwQ+e3R8/C5lpoWUU7n1U7+vxayJ
+# MVi7O/wEH3Zgad8HbILotw8Cv++I8eYBpniWLaVdxnA1B7W5RskHOHCZADSklM7N
+# +fYIxKZSYR0ELy4k/KVGlv9XWed4yjL4VIyV6samzuwW3hVoo4tqsAsYhZitw8UL
+# e91otmoeTgn2bexam0XW5XGBf0MO0i1pIDXPv4g1W6sSW9mXVa4UifikXBeHxCre
+# lInnExAiLZ2qgKlGQhmoIMeV9ebWAAXlWHevF0tf66BfndrYqDYUUSL2/zMYCEIZ
+# JNvvO2woSyaqivcl3rfzB5FXt+M/ZpYbi30J3CVd2YK0nvN1LWRbYk+O8TEL8gGC
+# 4xLt6bSVIJZ/GMUPKVRJW4Ehr8I2R03/f8VkgFDWCfvuGqQ71b4y6oyoTCV1d2oI
+# P2OZPTTMYKO6pzNpZO6bt+welESbeA4CMixbT3e3sVzf1H55GxbUyLkLfBpbtYAK
+# pGD0G7JcLSDPFumZXC4jkhAYFPua5RRoBSIK9t4Vv01umdUenOlgvHOOEEvMrMd/
+# HsY4N5RQB3ETPAlZnkuoqrx+8bexS8+R2NyaxrHa54xYPBCMakohLSwBHYHuH/j7
+# vxQeVLY17Q==
 # SIG # End signature block
