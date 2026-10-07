@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
 Offline Exchange mailbox scope, native identity and quality classification tests.
@@ -6,7 +6,7 @@ Offline Exchange mailbox scope, native identity and quality classification tests
 Extracts functions and statements through the AST. All Exchange queries are
 mocked; no tenant context, collector, module, export or external action runs.
 .VERSION
-1.0.5
+1.0.7
 #>
 [CmdletBinding()]
 param()
@@ -34,7 +34,11 @@ foreach ($name in @('Get-SmartM365LocalMailboxIssueImpact','Add-SmartM365LocalMa
     'Resolve-SmartM365MailboxWarningNativeGuid','ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings',
     'Get-SmartM365MailboxDomainPartition','Assert-SmartM365MailboxDomainCoverage',
     'New-SmartM365LocalMailboxIssueEmailSection','Initialize-SmartM365LocalMailboxForestPopulation',
-    'Get-SmartM365LocalMailboxColumns','Invoke-SmartM365RemoteMailboxPopulationQuery')) {
+    'Get-SmartM365LocalMailboxColumns','Invoke-SmartM365RemoteMailboxPopulationQuery',
+    'Get-SmartM365ExchangeMailboxDailySnapshotColumns','New-SmartM365ExchangeMailboxDailySnapshot',
+    'Get-SmartM365ExchangeMailboxDailySnapshotHistory','New-SmartM365ExchangeMailboxDailyDiffSection',
+    'Get-SmartM365MailboxReportValue','Get-SmartM365MailboxReportDomain','ConvertTo-SmartM365MailboxReportRecord',
+    'Publish-SmartM365ExchangeMailboxDailySnapshot')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Assert-True ($null -ne $node) "Missing function: $name"
     Set-Item "Function:script:$name" ([scriptblock]::Create($node.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
@@ -478,6 +482,92 @@ Case 'Local finding email counts native objects, occurrences and unbound warning
     Assert-True ($section.Html -notlike ('*'+$id1.ToString('D')+'*')) 'Aggregate section exposed raw native GUIDs.'
     Assert-True ($null -eq (New-SmartM365LocalMailboxIssueEmailSection -Issues @() -IssuesCsvPath 'Synthetic.csv')) 'Empty findings fabricated a section.'
 }
+Case 'Mailbox email renders seven summary KPI cards without a metric table' {
+    $reportNode=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-SmartM365ExchangeLocalMailboxReportEmailBody'},$true)
+    Assert-True ($null -ne $reportNode) 'Mailbox report email function is missing.'
+    Set-Item Function:script:New-SmartM365ExchangeLocalMailboxReportEmailBody ([scriptblock]::Create($reportNode.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
+    $modulePath=Join-Path $root 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1'
+    $moduleTokens=$null;$moduleErrors=$null
+    $moduleAst=[Management.Automation.Language.Parser]::ParseFile($modulePath,[ref]$moduleTokens,[ref]$moduleErrors)
+    Assert-True (@($moduleErrors).Count -eq 0) 'Windows PowerShell 5.1 mail template does not parse.'
+    $mailNode=$moduleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-SmartM365EmailBody'},$true)
+    Assert-True ($null -ne $mailNode) 'Shared mail template is missing.'
+    Set-Item Function:script:New-SmartM365EmailBody ([scriptblock]::Create($mailNode.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
+    function Get-SmartM365MailboxReportCsvRowCount {param($Path) 0}
+    $script:Tenant='synthetic'
+    $row=[pscustomobject]@{DomainName='synthetic & invalid';TotalMailboxCount=12;TotalLocalMailboxCount=5;TotalRemoteMailboxCount=7;EnabledAccounts=9;DisabledAccounts=3;TotalLocalMailboxSizeGB=17.5}
+    $html=New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows @($row) -DailyStatsCsv 'synthetic-daily.csv' -SummaryCsv 'synthetic-summary.csv' -Title 'Synthetic report'
+    Assert-True ([regex]::Matches($html,'font-size:28px;line-height:32px;font-weight:800').Count -eq 7) 'Expected seven KPI cards.'
+    foreach ($label in @('Domains','Total mailboxes','Local mailboxes','Remote mailboxes','Enabled accounts','Disabled accounts','Local mailbox size')) {
+        Assert-True ($html.Contains(('>{0}</div>' -f $label))) "Missing KPI card: $label"
+    }
+    Assert-True ($html.Contains('colspan="2"') -and ($html.Contains('>17,50</div>') -or $html.Contains('>17.50</div>'))) 'Local size card or value is missing.'
+    Assert-True ($html -notmatch '>Metric</th>' -and $html -match '(?s)>Summary</div>.*>Domain summary</div>') 'Legacy summary table remained or section order changed.'
+    Assert-True ($html.Contains('synthetic &amp; invalid')) 'Domain names were not HTML-escaped.'
+    $snapshot=New-SmartM365ExchangeMailboxDailySnapshot -ReportRows @($row) -Records @([pscustomobject]@{RecipientTypeDetails='UserMailbox';TotalItemSizeKnown=$true},[pscustomobject]@{RecipientTypeDetails='SharedMailbox';TotalItemSizeKnown=$true})
+    $diff=New-SmartM365ExchangeMailboxDailyDiffSection -Current $snapshot -History @()
+    $withDiff=New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows @($row) -DailyStatsCsv 'synthetic-daily.csv' -SummaryCsv 'synthetic-summary.csv' -DailyDiffSection $diff -Title 'Synthetic report'
+    Assert-True ($withDiff -match '(?s)>Summary</div>.*>Diff against previous scans</div>.*>Domain summary</div>') 'Daily difference section was not placed below KPI cards.'
+}
+Case 'Daily mailbox snapshot marks incomplete size statistics without losing population counts' {
+    $zeroSize=ConvertTo-SmartM365MailboxReportRecord -Row ([pscustomobject]@{RecipientTypeDetails='UserMailbox';ADDomain='synthetic.invalid';TotalItemSizeToMB=0})
+    Assert-True ($zeroSize.TotalItemSizeKnown -and $zeroSize.TotalItemSizeToMB -eq 0) 'A valid zero-size mailbox was marked as missing statistics.'
+    $report=@([pscustomobject]@{TotalMailboxCount=3;TotalLocalMailboxCount=2;TotalRemoteMailboxCount=1;EnabledAccounts=2;DisabledAccounts=1;TotalLocalMailboxSizeGB=1.25})
+    $records=@(
+        [pscustomobject]@{RecipientTypeDetails='UserMailbox';TotalItemSizeKnown=$true}
+        [pscustomobject]@{RecipientTypeDetails='SharedMailbox';TotalItemSizeKnown=$false}
+        [pscustomobject]@{RecipientTypeDetails='RemoteUserMailbox';TotalItemSizeKnown=$false}
+    )
+    $snapshot=New-SmartM365ExchangeMailboxDailySnapshot -ReportRows $report -Records $records
+    Assert-True ($snapshot.TotalMailboxCount -eq 3 -and $snapshot.TotalLocalMailboxCount -eq 2 -and $snapshot.LocalSizeKnownMailboxCount -eq 1 -and -not $snapshot.LocalSizeCoverageComplete) 'Missing local size was treated as complete or removed a mailbox.'
+    Assert-True ($snapshot.TotalLocalMailboxSizeGB -eq '1.25' -and $snapshot.SchemaVersion -eq '1') 'Daily snapshot value or schema changed.'
+}
+Case 'Daily mailbox diff uses the prior completed day and exact J-7 and J-30 dates' {
+    $current=[pscustomobject]@{SnapshotDate='2026-10-07';DomainCount=10;TotalMailboxCount=100;TotalLocalMailboxCount=20;TotalRemoteMailboxCount=80;EnabledAccounts=90;DisabledAccounts=10;TotalLocalMailboxSizeGB=12.5;LocalSizeCoverageComplete=$false}
+    $history=@(
+        [pscustomobject]@{SnapshotDate='2026-10-06';GeneratedAt=[datetimeoffset]'2026-10-06T03:00:00+02:00';DomainCount=10;TotalMailboxCount=99;TotalLocalMailboxCount=21;TotalRemoteMailboxCount=78;EnabledAccounts=90;DisabledAccounts=9;TotalLocalMailboxSizeGB=12.0;LocalSizeCoverageComplete=$true}
+        [pscustomobject]@{SnapshotDate='2026-09-30';GeneratedAt=[datetimeoffset]'2026-09-30T03:00:00+02:00';DomainCount=10;TotalMailboxCount=95;TotalLocalMailboxCount=20;TotalRemoteMailboxCount=75;EnabledAccounts=85;DisabledAccounts=10;TotalLocalMailboxSizeGB=11.0;LocalSizeCoverageComplete=$true}
+        [pscustomobject]@{SnapshotDate='2026-09-07';GeneratedAt=[datetimeoffset]'2026-09-07T03:00:00+02:00';DomainCount=9;TotalMailboxCount=90;TotalLocalMailboxCount=18;TotalRemoteMailboxCount=72;EnabledAccounts=82;DisabledAccounts=8;TotalLocalMailboxSizeGB=10.0;LocalSizeCoverageComplete=$true}
+    )
+    $section=New-SmartM365ExchangeMailboxDailyDiffSection -Current $current -History $history
+    Assert-True ($section.Html.Contains('Previous (2026-10-06)') -and $section.Html.Contains('J-7 (2026-09-30)') -and $section.Html.Contains('J-30 (2026-09-07)')) 'Comparison dates are not exact.'
+    Assert-True ($section.Html.Contains('>+1</strong>') -and $section.Html.Contains('>-1</strong>')) 'Signed count deltas were lost.'
+    $sizeRow=[regex]::Match($section.Html,'(?s)<tr><td[^>]*>Local mailbox size \(GB\)</td>.*?</tr>').Value
+    Assert-True ([regex]::Matches($sizeRow,'>n/a</td>').Count -eq 3) 'Incomplete size statistics produced a numeric delta.'
+    $current.LocalSizeCoverageComplete=$true
+    $complete=New-SmartM365ExchangeMailboxDailyDiffSection -Current $current -History $history
+    $completeSizeRow=[regex]::Match($complete.Html,'(?s)<tr><td[^>]*>Local mailbox size \(GB\)</td>.*?</tr>').Value
+    Assert-True ($completeSizeRow -match '\+0[,.]50' -and $completeSizeRow -notmatch '>n/a</td>') 'Complete size statistics did not produce a decimal delta.'
+    $missing=New-SmartM365ExchangeMailboxDailyDiffSection -Current $current -History @($history[0])
+    Assert-True ($missing.Html.Contains('J-7 (2026-09-30)') -and $missing.Html.Contains('J-30 (2026-09-07)') -and ([regex]::Matches($missing.Html,'>n/a</td>').Count -eq 14)) 'Missing exact dates were replaced with nearby scans.'
+}
+Case 'Daily mailbox history replaces the same date and rejects incompatible schema' {
+    $folder=Join-Path ([IO.Path]::GetTempPath()) ('MailboxDailyHistory-'+[guid]::NewGuid().ToString('N'))
+    New-Item -Path $folder -ItemType Directory -Force | Out-Null
+    try {
+        $path=Join-Path $folder 'Exchange_OnPrem_Mailboxes_DailySummary.csv'
+        $makeRow={param($date,$generated,$count)
+            [pscustomobject][ordered]@{TenantKey='synthetic';OrganizationKey='synthetic';EnvironmentKey='test';TenantId='synthetic';SnapshotDate=$date;GeneratedAt=$generated;SchemaVersion='1';CompleteScope='True';DomainCount=1;TotalMailboxCount=$count;TotalLocalMailboxCount=1;TotalRemoteMailboxCount=($count-1);EnabledAccounts=$count;DisabledAccounts=0;TotalLocalMailboxSizeGB='1.00';LocalSizeKnownMailboxCount=1;LocalSizeCoverageComplete='True'}
+        }
+        $old=& $makeRow '2026-10-06' '2026-10-06T03:00:00+02:00' 4
+        $sameDay=& $makeRow '2026-10-07' '2026-10-07T03:00:00+02:00' 5
+        @($old,$sameDay) | Export-Csv -LiteralPath $path -Delimiter ';' -Encoding UTF8 -NoTypeInformation
+        $read=@(Get-SmartM365ExchangeMailboxDailySnapshotHistory -Path $path -TenantKey 'synthetic')
+        Assert-True ($read.Count -eq 2 -and $read[0].TotalMailboxCount -eq 4) 'Qualified history was not read.'
+        function Export-CsvAtomic {param($InputObject,$Path,$Columns,$Encoding,$Delimiter) $script:publishedDailyRows=@($InputObject)}
+        $global:SmartM365TenantKey='synthetic'
+        $replacement=& $makeRow '2026-10-07' '2026-10-07T09:00:00+02:00' 6
+        Publish-SmartM365ExchangeMailboxDailySnapshot -Snapshot $replacement -Path $path
+        Assert-True ($script:publishedDailyRows.Count -eq 2 -and @($script:publishedDailyRows | Where-Object { $_.SnapshotDate -eq '2026-10-07' }).Count -eq 1 -and @($script:publishedDailyRows | Where-Object { $_.TotalMailboxCount -eq 6 }).Count -eq 1) 'Same-day rerun was appended twice.'
+        Set-Content -LiteralPath $path -Value 'Incompatible;Header' -Encoding UTF8
+        Assert-Throws {Get-SmartM365ExchangeMailboxDailySnapshotHistory -Path $path -TenantKey 'synthetic'} '*schema is incompatible*'
+    }
+    finally {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
+        Remove-Variable -Name SmartM365TenantKey -Scope Global -ErrorAction SilentlyContinue
+    }
+}
 Case 'Global coverage is enforced before combined publication and wired to completion' {
     $process=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'MailboxesProcessing2'},$true)
     Assert-True ($process.Extent.Text.IndexOf('Invoke-SmartM365LocalMailboxPopulationQuery') -lt $process.Extent.Text.IndexOf('Get-MailboxStatistics')) 'Partition happened only after enrichment.'
@@ -522,7 +612,11 @@ Case 'Child-domain acquisition does not depend on a default-domain AD lookup' {
 }
 Case 'Final scope uses computed acquisition proof and qualifications' {
     $command=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Set-SmartM365CmdbSourceScope'},$true)
-    Assert-True ($command.Extent.Text.Contains('$script:CmdbLocalMailboxSourceComplete') -and $command.Extent.Text.Contains('-Qualifications $qualification.Qualifications')) 'Completeness evidence is not wired to receipt.'
+    $assignment=$ast.Find({param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$script:LocalMailboxDailySummaryQualified' -and $n.Extent.Text.Contains('$script:CmdbLocalMailboxSourceComplete')},$true)
+    Assert-True ($null -ne $assignment -and $assignment.Extent.Text.Contains('$script:CmdbLocalMailboxSourceComplete') -and $assignment.Extent.Text.Contains('$MaxItems -eq 0')) 'Qualified daily summary guard lost full-scope proof.'
+    Assert-True ($command.Extent.Text.Contains('-CompleteScope $script:LocalMailboxDailySummaryQualified') -and $command.Extent.Text.Contains('-Qualifications $qualification.Qualifications')) 'Completeness evidence is not wired to receipt.'
+    $reportCall=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-SmartM365ExchangeLocalMailboxReport' -and $n.Extent.Text.Contains('-UseCurrentInventoryData:$true')},$true)
+    Assert-True ($null -ne $reportCall -and $assignment.Extent.StartOffset -lt $reportCall.Extent.StartOffset) 'Completeness proof is calculated only after mail generation.'
     Assert-True (-not $ast.Extent.Text.Contains('_WithoutDuplicateSMTP.csv')) 'Destructive SMTP cleanup remains.'
 }
 
@@ -605,166 +699,167 @@ if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline 
 [pscustomobject]@{Status='Passed';TestCount=$tests.Count;ProductionActions=0;PowerShell=[string]$PSVersionTable.PSVersion}
 
 # SIG # Begin signature block
-# MIIePgYJKoZIhvcNAQcCoIIeLzCCHisCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
-# gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUqhsDDUkgDP6uaLY+OWbHTrNZ
-# FSWgghf7MIIEvTCCAyWgAwIBAgIQHm7vO8c44bNEOMjxAx/iaDANBgkqhkiG9w0B
-# AQsFADBOMR4wHAYDVQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG
-# 9w0BCQEWHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIuY29tMB4XDTI2MDcxMzA4
-# MjIzNVoXDTI5MDcxMzA4MzIyOVowTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRo
-# dWIuY29tMSwwKgYJKoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHVi
-# LmNvbTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBALHul87REUsh5/Q1
-# ao/EXb9Ko3OaMKr4ACBmmMQZn4kLqDOPBaOF7daL4vW6y1LX+eRuF4LYTTwqGp8X
-# wkUYN9CFUcWg33T1yc2JoLDObV5bLjVOPZROxDyZN/oxDoEgrfDSs5lTyqTURtDZ
-# itGvMJtdnHHmGTmZUmBNPmbU+sMuT0EIzFKiMV5xo7eB9J34GWWuw+BcgESjlYP1
-# 6/bFKuYyJ987M74OI43m+G9AyibX2x7pIVnNmKFRYLMMVQVwliGgZ3xf3I6jHyvw
-# mk6E9ra1W+IRuKnEN9bNZ0eJHqEWjsP78nemqaxLQrE9tjfycdHc+3yKNbVcryGl
-# XB3TfS1t3IZ9Hp9DimeintTh/cH9qa5eCgOlsFc6wGazpV0wCLXSuw/ZCjvx3iXe
-# D2bzud6MtS3ZjBi0s9ziwfXuau8qPK36ouSmvSszNgq0s89cqYZ/x/dMM+0NqZuB
-# SJVnXI/OgP9JJoWIPuVqqm4NXa6z17uJxAcFjf3c6BrSmSh03QIDAQABo4GWMIGT
-# MA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzA/BgNVHREEODA2
-# gR1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbYIVd29ya3BsYWNlY2xvdWRo
-# dWIuY29tMAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFFyDjgA0DO/F3zwJ3Iq4AhAn
-# nYPYMA0GCSqGSIb3DQEBCwUAA4IBgQA4WVAdkeSfycNN9MaHYRFngkNL5yUWohLI
-# zsbgK0ERCh95Qq0N1LFFZdvdnei50FEkx/4xe66LxGfiTdhkPywq10WgrsAhBmSs
-# 5UhG7WFoX8A8o+hqSD6vGOEnl8o3auP66yNW5okyuEquxKAZRibl+pdp378dbU4q
-# Eq9dRaA35ZSUexGGsEY/YQRSdIBtG9krmGTIFoGgynn3JyQ5jsHETQGVCCNLLPBH
-# sgDbpFkpDTeSC2foig6UIGcYAyz04kYLgsseOTyOcK1U41f6UeyK7UiH6vFJWnZa
-# 0mScsg59zVdgE7yGesDcW05jxXBNLjIPxGM8HU3pPgoFy908VCnpXSTOGA1j4pjQ
-# UYTj18wQ4jkCI+ljbMLfyjNaAy5wNNAjbXIjzXZ/nV5Z3jL0xFGofcMrfKPLZC6a
-# AcPijfgavytDtaj7Uu7pou9JeOaT4no/psG8Ks7XGqFQ+2vIIBz9VXaf652nzOBr
-# cggBOm+1PWM4L6df2tZIe1335qlYUUYwggWNMIIEdaADAgECAhAOmxiO+dAt5+/b
-# UOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
-# aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNVBAMT
-# G0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBaFw0z
-# MTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJ
-# bmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0
-# IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIB
-# AL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4SmnPVirdprNrnsbhA3EMB/z
-# G6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6fqVcWWVVyr2iTcMKyunWZ
-# anMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O7F5OyJP4IWGbNOsFxl7s
-# Wxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZVu7Ke13jrclPXuU15zHL
-# 2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4FfYj1gj4QkXCrVYJBMtfb
-# BHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLmqaBn3aQnvKFPObURWBf3
-# JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMreSx7nDmOu5tTvkpI6nj3c
-# AORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/chsrIRt7t/8tWMcCxBYKqx
-# YxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+UDCEdslQpJYls5Q5SUUd0
-# viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xMdT9j7CFfxCBRa2+xq4aL
-# T8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUbAgMBAAGjggE6MIIBNjAP
-# BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFdZEzfLmc/57qYrhwPTzAf
-# BgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAOBgNVHQ8BAf8EBAMCAYYw
-# eQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2Vy
-# dC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9E
-# aWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0fBD4wPDA6oDigNoY0aHR0
-# cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNy
-# bDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEMBQADggEBAHCgv0NcVec4
-# X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLtpIh3bb0aFPQTSnovLbc4
-# 7/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouyXtTP0UNEm0Mh65ZyoUi0
-# mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jSTEAZNUZqaVSwuKFWjuyk
-# 1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAcAgPLILCsWKAOQGPFmCLB
-# sln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2h5b9W9FcrBjDTZ9ztwGp
-# n1eqXijiuZQwgga0MIIEnKADAgECAhANx6xXBf8hmS5AQyIMOkmGMA0GCSqGSIb3
-# DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAX
-# BgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0IFRydXN0
-# ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBaFw0zODAxMTQyMzU5NTlaMGkxCzAJ
-# BgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGln
-# aUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAy
-# NSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC0eDHTCphBcr48
-# RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1DahGPNRcybEKq+RuwOnPhof6pvF4u
-# GjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn5B1IpYzTqpyFQ/4Bt0mAxAHeHYNn
-# QxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLuxBG5AvftBdsOECS1UkxBvMgEdgkFi
-# DNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3IfDReb6e3mmdglTcaarps0wjUjsZv
-# kgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cVFBURJg6zMUjZa/zbCclF83bRVFLe
-# GkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQT/aofEnS5xLrfxnGpTXiUOeSLsJy
-# goLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gbylsXQskBBBnGy3tW/AMOMCZIVNSaz
-# 7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rKWDEJlIqLXvJWnY0v5ydPpOjL6s36
-# czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6z1ev+7psNOdgJMoiwOrUG2ZdSoQb
-# U2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9VnePs6BaaeEWvjJSjNm2qA+sdFUeEY0
-# qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQABo4IBXTCCAVkwEgYDVR0TAQH/BAgw
-# BgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6yuKQVvYv1Ensy04wHwYDVR0jBBgw
-# FoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0PAQH/BAQDAgGGMBMGA1UdJQQM
-# MAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAkBggrBgEFBQcwAYYYaHR0cDov
-# L29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAChjVodHRwOi8vY2FjZXJ0cy5k
-# aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNydDBDBgNVHR8EPDA6
-# MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
-# Um9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEEAjALBglghkgBhv1sBwEwDQYJ
-# KoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2cTC9vgvItTSmf83Qh8WIGjB/T8Ob
-# XAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe36zwbSI/mS83afsl3YTj+IQhQE7jU
-# /kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMDPjTLxLgXf9r5nWMQwr8Myb9rEVKC
-# hHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2AIMD8liyrukZ2iA/wdG2th9y1IsA
-# 0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410ANVko43+Cdmu4y81hjajV/gxdEkM
-# x1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47OvgRaPs+2ykgcGV00TYr2Lr3ty9qI
-# ijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39OlV8cipDoq7+qNNjqFzeGxcytL5T
-# TLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9vODRzW6AxnJll38F0cuJG7uEBYTpt
-# MSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+NJpud/v4+
-# 7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckTetiSuEtQ
-# vLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszWkPZPubdc
-# MIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0BAQsFADBp
-# MQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMT
-# OERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2
-# IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVowYzELMAkG
-# A1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdp
-# Q2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIwMjYgMTCC
-# AiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSbTGWz/TjG
-# MPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP0BMxt9l3
-# Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3BSkUxDjL
-# JhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNFKZZEeoy/
-# 0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbjbrEOvZ3f
-# P2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26QZYMn/Fnb
-# uTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRsIolvykE1
-# jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/ScpaZCZVl
-# 6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5prW83vV8
-# d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0ODjdzi0x
-# lp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwroczk9icflf5
-# 5W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAAMB0GA1Ud
-# DgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYIKwYBBQUH
-# AwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5k
-# aWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFtcGluZ1JTQTQwOTZTSEEyNTYy
-# MDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5kaWdpY2Vy
-# dC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2
-# MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0G
-# CSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLaDXQIENoy
-# KqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEtrfGhz45F
-# 4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAdZkfHhHv1
-# mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAYyzSA02nX
-# D1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8pD7KVyF5
-# aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v5jhtKVnd
-# 3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeSWmvKqzpA
-# ec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR5eHs0NzU
-# /+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZEbGRsMNb
-# XmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjWagkJNt68
-# Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvdN8yWQPT9
-# gzGCBa0wggWpAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29t
-# MSwwKgYJKoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQ
-# Hm7vO8c44bNEOMjxAx/iaDAJBgUrDgMCGgUAoHgwGAYKKwYBBAGCNwIBDDEKMAig
-# AoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgEL
-# MQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG9w0BCQQxFgQUki0kGnCmNwNsN/vjXeVz
-# +2AN5Q0wDQYJKoZIhvcNAQEBBQAEggGAT/BDeZZeOvt0UUPyANvR/mvGwyMB3CQ7
-# CoBpfS+rSWuv4hdb/1jxK4XLAStGx5SJbMMuYXtUv2shX+d+KPMAAeZKsOFyeSbO
-# R4fjx0jOnH+yw7+689sCwrGdpEZH2+Gw9DkxNJ8AmsZLcQblZ7huHcqt3SKH2u5X
-# eGPY88V5rJ/ikag/wl7kZfzwbMxU5lreS42NTw10uAeiIOGZENRnrfRkroRyU30L
-# fn2QrUW4MiIje4igr7zV2VIvtAFuvvobwU8pbLH4XbaSbvX3XqZLjnqbggubYHhD
-# W+fHaCBFZe7dS0Sk1EwkVQJN5VhuNc8rz1WwGqREL9cCadcTcdr9vSQqQpsr0NBu
-# /ZhB6mUopTxfxapl0fT4pmV632o1t1ujBKUyqYCxa3UAnnOwvQ1sKlCKfOXvJLOQ
-# vqOXn0z1CoQjvc5nn/VcMgxBj0x50jUz9gz8PcoPGunMVGh1+hJtd/+fw6xbJuuD
-# Ea14a8NX4E2GK+lxFAr5ABUZnP1FXZ5HoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMw
-# ggMPAgEBMH0waTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMu
-# MUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0
-# MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/cM09+RU7bww+P+ZIYNTANBglghkgBZQME
-# AgEFAKBpMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8X
-# DTI2MTAwNjE0NDgxM1owLwYJKoZIhvcNAQkEMSIEIOaZg28tnL4y7YP639BEKk5j
-# MZuUZjVpWNy6NskdpJXpMA0GCSqGSIb3DQEBAQUABIICAJE0J8uxbAvVRkH2Ctj6
-# TOqk863CkYQ0jSrvuN/9LAkU5seW3ElqkacNC7OA3VWqYD6b5LpPzqYOWI6/KkHS
-# qQNFw5r0botYf5+SkJjYANramd2AZVV8Smspm7L5mkDYSxJ8MfOmXejUxyMBi6Sp
-# 4hSx06bbN2kpRKqh505P/GRPnD0Mm2CmNrMcBtMhnIk+p7GuvUMGeYm7NgzxtmER
-# cilknZPTrR874UDk8nT2BMLw88RyZTX/YTIWBOnDAg4gReIsSSDs6iBat9me9Spq
-# e8FE3EGFNVetdxgX7Yrcc2v9wuJC8XBsJurj4HKIoSqKcmuqS3SVR2rpCHQNQpFd
-# zJ4/Vw61D45dlLx2JS5ag77DTCzePiP7dMFhVC8pO5cVjMOKLPb1lHd1+62+G/g5
-# rmKmPUAcOrmmxtST8NHY6/1ZrvsXcA/73KADzIlup97k6Ggy4AgV1R86tdKL1RIn
-# DpkzLQ+U18wrOvUFUoOLROl59mDPaO+mqVaC5uHIQzRLC6RW7Q2Esg/Ncz1BHuF0
-# GQAVaNmmag1IXvoy+yW9Q+yGbBY42WGhMmMU6GpvKRxcoPfzJz/Qjc4DSx8Bx78D
-# Gy1dhz2fa8H7TM/9AdtVz+jATaCUQSpg/1wppyYqJ/1E9WZcAt9b9bndmwdA8rSD
-# x6OPd7BDmVq/YZmTjqpBKZqX
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCtHHUfE8jApln
+# EQQIxFZfmf+/z5RvS6jL8cChHrxviKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
+# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
+# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
+# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
+# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
+# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
+# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
+# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
+# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
+# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
+# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
+# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
+# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
+# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
+# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
+# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
+# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
+# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
+# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
+# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
+# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
+# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIAqUMm24SiRAmhnkDJFbb6kSQSFegETjSTFFfsJq9B70MA0GCSqG
+# SIb3DQEBAQUABIIBgGuoGGrQ8jbE5W761Q1QDdHqToKqUsOyCmIb8dfqkMzGVxQr
+# BJG4qwVxzvV8u2HKsIO5AqFJXdX9DFqnSpWY2O5T/ahpCebjSRwZPPmLsFpLDA0p
+# 1rC2WevsukJ2RhruwvziG7jOY6fAo+shlNLrpEzFd/UhL+TPt7oNZOwO2Etcl+xp
+# U9owDWnkdWpJZOB6JOBbd3nZuKDNB7QElg6lI2i5jPUkLTBcFXC1Dpf0yTLrXbQ3
+# AyEyXDsLjjVdpFKr8YhU6aHX0lnUs8dyOl9DPa0LRJviZmy7BLBOnqn9WnWd8wes
+# vOLqZVDEsl8Nmgw9R36b9jsWQ8RlPOedQ8VlqS1ERAuW5GbWg7xzoL4QrUC3SW+s
+# uBS12hizDgdaVgaUPZQxD/FzRoO3Akx4VZzkBkP6OzcNZiiUYX5hh4wFvpQr7HS0
+# ugiZ/q/rjNhi0hL2S2YfI1VrR5ogI5zzKHv18UAaOysyODdYph7MEp1pvtdNWHo4
+# wYzWSTCKwa+baFCG8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTA5
+# NDRaMC8GCSqGSIb3DQEJBDEiBCDUeWY7gyPPAlmnwGHpB2W6wPTRyCx9Ik/xRJZ4
+# FwYkdjANBgkqhkiG9w0BAQEFAASCAgCPDRVv05lvobIBj7l5Zr6gyG560y8c+27L
+# Pc/3OdmiZEbilhVIHi9heKFQYSV/NRt1O4coNE/lQiOuvJojioO5hfgFz1P3Z8mx
+# e39Ff3mv1Nm3gyPZlofilwEOfZ99wQIEwAs/488iqTmPGJmnnPOibiWgsPcx56wr
+# wvw4qRzjnO9TPU/Ih4C2K91m1H6lf8hmvm4sGIIsShdutWH/WFkQqWpYOIbDOGVr
+# eiPGwWt2Q3ZjaG7UT7r/TF2J/w6enl+LllpNCNe/l4pXsEV4mvQixSRQsmJfkG4K
+# 95mOkFh3FJfqeifR0Im8Y9ILrHF7VRyJAThgxxiGBmWIjk92En+FLLa+YqnXeyfC
+# UixLEgfX1NSzbPzlqJQy3lk1BmoRkWtquDSYtrWokj9vKOsr3CtMkIRnkvKiuuZE
+# uNJn2mu3KgeF1XgTaTJPeambFtx5MHyDRDVHnY76zPbBOF4+WWyaQnBSWfMKVMl9
+# 0YdgY1W/9gRH3ulH/Xgj8M95+0Ce9btRAPu9uQDtlK0/6mAkcte+67lyBA10ixye
+# Segoi24QrDMS3MR0euoW/jJtM4sauF2EgnBJGBaP99saOh66tCXanNbNvebN81NY
+# zVEQcu2vbz+i+NnoRUeFLGEkm2134cjisUuPOArzlIXKU/njRZKhbHQChljqXVfO
+# 3tBekfN/ow==
 # SIG # End signature block
