@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Generator version: 0.3.9. PowerShell entry point: 0.3.8. Prepared contract: 0.3.6.
+Generator version: 0.3.11. PowerShell entry point: 0.3.11. Prepared contract: 0.3.7.
 Status: explicit automation available; activation and Power BI qualification remain deployment steps.
 
 ## Scope and execution boundaries
@@ -26,14 +26,16 @@ Core's automatic Teams log callback is suppressed in memory during this
 local preparation invocation, and automatic log upload is disabled. No local module or
 tenant configuration is changed to disable notifications permanently.
 
-`-ValidateOnly` validates acquisition proof, raw CSV contracts, and license
-assignment user/SKU parent coverage by native IDs. It uses the same parent gate
-as generation, including paths in Error or Disabled state, and reports missing
-user rows/distinct IDs separately from missing SKU rows/distinct IDs. Parent IDs
-must exist in the current user and SKU inventories; freshness alone does not
-establish coherence between separately collected snapshots. No paths are dropped,
-identities fabricated, or historical exports substituted. Python does
-not create prepared output, staging or a publication lock in this mode.
+`-ValidateOnly` validates acquisition proof, raw CSV contracts, and native license
+assignment/service-plan coverage. Separately collected snapshots may contain a
+native license UserId absent from the current user inventory. This returns
+`LicenseWarnings` and aggregate `LicenseCoverage`, rather than blocking preparation.
+Every native assignment path (including Error and Disabled), user/SKU pair and
+service-plan fact is retained. Missing users are explicitly unresolved, not added
+to DimUser or matched by display name/address. This does not establish deletion.
+Blank native child IDs and missing SKU, service-plan or native assignment parents
+remain blocking. No historical exports are substituted. Python does not create
+prepared output, staging or a publication lock in this mode.
 Weekly application relations are also assessed in this mode: missing current
 parents and reported/observed count differences return `ApplicationWarnings`,
 not a blocking error. `ApplicationCoverage` contains aggregate row and distinct
@@ -52,6 +54,29 @@ from existing files or their timestamps.
 
 For reviewed scheduler activation, see [CMDB automation](CMDB-AUTOMATION.md).
 Qualify the report against a complete transferred cohort before applying it.
+
+## Native license user link qualification (contract 0.3.7)
+
+The existing 46 output files and their previous columns are retained.
+`FactUserLicense` and `FactUserServicePlan` append `SourceUserId` and
+`UserLinkStatus`; their immutable grain now uses the native SourceUserId, so two
+unresolved users cannot collapse into one blank reporting-user key.
+`LicenseAssignmentPath` already carries these link fields. An unresolved row has
+blank `TenantUserKey` and, where present, blank `CmdbUserId`. SKU/plan links remain
+required. User-linked KPIs must distinguish resolved users from native license
+evidence; an unresolved assignment is not a verified extra user in DimUser.
+
+`SourceHealth`, bounded source-level data-quality findings and per-native-user
+findings expose the gap. The PowerShell wrapper logs warnings and completes with
+warnings rather than disguising a gap as complete user coverage. Source receipt,
+tenant identity, freshness, CSV, native-key and hash checks remain unchanged.
+
+An owned, validated contract 0.3.6 predecessor can be replaced atomically after
+all its file hashes, row counts, identity and relationships have been checked.
+The new cohort must pass contract 0.3.7 before promotion; failure preserves the
+previous cohort. No old manifest is edited in place. Other predecessor versions
+are not automatically migrated. Transfer/readers and the Power BI model must be
+qualified against the regenerated cohort; this change does not refresh Desktop.
 
 ## Separate current-only SharePoint publication
 

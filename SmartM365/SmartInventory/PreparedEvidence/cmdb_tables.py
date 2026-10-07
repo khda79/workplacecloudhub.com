@@ -175,6 +175,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     for warning in evidence['ApplicationWarnings']:
         finding('Source', warning['File'], 'ApplicationCoverageWarning', warning['Message'],
                 severity='Information', discriminator=warning['Kind'])
+    for warning in evidence['LicenseWarnings']:
+        finding('Source', warning['File'], 'LicenseCoverageWarning', warning['Message'],
+                discriminator=warning['Kind'])
 
     users, users_by_native = [], {}
     for row in read('users'):
@@ -390,24 +393,29 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     for row in read('license_paths'):
         uid, sid, gid = key(row['UserId']), key(row['SkuId']), key(row['AssignedByGroupId'])
         user, sku, group = users_by_native.get(uid), skus.get(sid), groups.get(gid)
-        if not user or not sku:
-            raise ValueError('License assignment parent identity missing')
+        if not uid or not sku:
+            raise ValueError('License assignment SKU parent or native user identity missing')
+        entity = 'User' if user else 'LicenseSourceUser'
+        entity_id = user['CmdbUserId'] if user else 'license-source-user|' + uid
         updated, status = qualified(get(row,'LastUpdatedDateTime'))
         paths.append({'TenantAssignmentPathKey':native_key(tenant,'license-path',uid,sid,gid),
-            'TenantUserKey':user['TenantUserKey'],'TenantSkuKey':native_key(tenant,'sku',sid),
+            'TenantUserKey':user['TenantUserKey'] if user else '', 'TenantSkuKey':native_key(tenant,'sku',sid),
             'TenantGroupKey':group['TenantGroupKey'] if group else '', 'SourceUserId':uid,'SkuId':sid,
-            'AssignedByGroupId':gid,'Account':user['UserPrincipalName'],'Product':sku['TenantSkuPartNumber'],
+            'AssignedByGroupId':gid,'Account':user['UserPrincipalName'] if user else '', 'Product':sku['TenantSkuPartNumber'],
             'AssignmentRoute':'Group' if gid else 'Direct','GroupName':group['DisplayName'] if group else 'Unresolved group' if gid else 'Direct assignment',
             'AssignmentState':row['AssignmentState'],'AssignmentError':row['AssignmentError'],
             'ErrorStatus':'Error reported' if key(row['AssignmentError']) not in ('','none') else 'No error reported' if row['AssignmentError'] else 'Not provided',
             'DisabledPlanIds':get(row,'DisabledPlanIds'),'AssignmentUpdatedRaw':get(row,'LastUpdatedDateTime'),
             'AssignmentUpdatedUtcDateTime':updated,'AssignmentUpdatedStatus':status,'SourceCollectedDateTime':acquired('license_paths'),
-            'GroupLinkStatus':'Resolved' if group else 'Unresolved' if gid else 'Not applicable','UserLinkStatus':'Resolved','SkuLinkStatus':'Resolved'})
+            'GroupLinkStatus':'Resolved' if group else 'Unresolved' if gid else 'Not applicable',
+            'UserLinkStatus':'Resolved' if user else 'Unresolved','SkuLinkStatus':'Resolved'})
+        if not user:
+            finding(entity,entity_id,'UnresolvedLicenseUser','Native licensing user is absent from the independently collected user inventory; evidence retained without inferring deletion or fabricating a user.')
         if key(row['AssignmentError']) not in ('','none'):
-            finding('User',user['CmdbUserId'],'ObservedLicenseAssignmentError','Native license assignment reports an error; this does not prove non-use or overspend.',
+            finding(entity,entity_id,'ObservedLicenseAssignmentError','Native license assignment reports an error; this does not prove non-use or overspend.',
                     discriminator=native_key(tenant,'license-path',uid,sid,gid), TenantGroupKey=group['TenantGroupKey'] if group else '')
         if gid and not group:
-            finding('User',user['CmdbUserId'],'UnresolvedAssignmentGroup','License assignment group is outside the collected WorkplaceScope cohort; membership is unknown, not empty.',discriminator=gid)
+            finding(entity,entity_id,'UnresolvedAssignmentGroup','License assignment group is outside the collected WorkplaceScope cohort; membership is unknown, not empty.',discriminator=gid)
         pairs[uid,sid].append(row['AssignmentState']); group_path_counts[gid]+=1
     for gid, group in groups.items():
         group.update(ObservedPathCount=group_path_counts[gid],ObservedPathStatus='Observed paths' if group_path_counts[gid] else 'No observed license path')
@@ -434,9 +442,11 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     state_rank={'Active':0,'ActiveWithError':1,'Error':2,'Disabled':3}
     for (uid,sid), states in pairs.items():
         state=min(states,key=lambda s:state_rank.get(s,4))
-        assignment_rows.append({'TenantUserKey':users_by_native[uid]['TenantUserKey'],
-            'TenantSkuKey':native_key(tenant,'sku',sid),'CmdbUserId':users_by_native[uid]['CmdbUserId'],
-            'SkuId':sid,'AssignmentState':state,'SourceSystem':'Entra'})
+        user = users_by_native.get(uid)
+        assignment_rows.append({'TenantUserKey':user['TenantUserKey'] if user else '',
+            'TenantSkuKey':native_key(tenant,'sku',sid),'CmdbUserId':user['CmdbUserId'] if user else '',
+            'SkuId':sid,'AssignmentState':state,'SourceSystem':'Entra',
+            'SourceUserId':uid,'UserLinkStatus':'Resolved' if user else 'Unresolved'})
     emit('FactUserLicense',assignment_rows)
     plans={}
     for row in read('plans'):
@@ -453,17 +463,19 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                      'PI':('true','PendingInput'),'PP':('true','PendingProvisioning'),'E':('true','Error')}
         for row in read('user_plans'):
             uid,sid,pid=key(row['UserId']),key(row['SkuId']),key(row['PlanId'])
-            if uid not in users_by_native or (sid,pid) not in plans or (uid,sid) not in pairs:
+            if not uid or (sid,pid) not in plans or (uid,sid) not in pairs:
                 raise ValueError('User service-plan parent missing')
             state=row['StateCode']; decoded=state_codes.get(state)
             if decoded is None and state.startswith(('EN:','DIS:')):
                 decoded=('true' if state.startswith('EN:') else 'false',state.split(':',1)[1])
             if decoded is None:
                 raise ValueError('Unknown compact service-plan state code')
-            yield {'TenantUserKey':users_by_native[uid]['TenantUserKey'],'TenantSkuKey':native_key(tenant,'sku',sid),
-                   'TenantServicePlanKey':native_key(tenant,'plan',sid,pid),'CmdbUserId':users_by_native[uid]['CmdbUserId'],
+            user = users_by_native.get(uid)
+            yield {'TenantUserKey':user['TenantUserKey'] if user else '', 'TenantSkuKey':native_key(tenant,'sku',sid),
+                   'TenantServicePlanKey':native_key(tenant,'plan',sid,pid),'CmdbUserId':user['CmdbUserId'] if user else '',
                    'SkuId':sid,'ServicePlanId':pid,'ServicePlanName':plans[sid,pid]['PlanName'],
-                   'IsEnabled':decoded[0],'AssignmentState':decoded[1],'SourceSystem':'Entra'}
+                   'IsEnabled':decoded[0],'AssignmentState':decoded[1],'SourceSystem':'Entra',
+                   'SourceUserId':uid,'UserLinkStatus':'Resolved' if user else 'Unresolved'}
     emit('FactUserServicePlan',service_plan_facts())
 
     applications=index(list(read('apps')),'AppId'); product_devices=collections.defaultdict(set)
@@ -790,20 +802,24 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('DimDate',dates)
     app_files = {source_defs[name]['file'] for name in ('apps', 'app_relations')}
     app_coverage = evidence['ApplicationCoverage']
+    license_counts = {source_defs['license_paths']['file']:evidence['LicenseCoverage']['UnresolvedAssignmentRows'],
+                      source_defs['user_plans']['file']:evidence['LicenseCoverage']['UnresolvedServicePlanRows']}
     emit('SourceHealth',({'SourceName':r['File'],'Status':('SuccessWithWarnings' if r.get('DomainCoverage') or
+        license_counts.get(r['File'], 0) or
         (r['File'] in app_files and (evidence['ApplicationWarnings'] or freshness[r['File']]['State']=='Aging')) else r['Status']),
         'Coverage':('Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else
                     'Weekly application evidence; unresolved device relations=' + str(app_coverage['UnresolvedDeviceRelationRows'])
                     + '; unresolved application relations=' + str(app_coverage['UnresolvedApplicationRelationRows'])
                     + '; application count mismatches=' + str(app_coverage['CountMismatchApplications'])
-                    if r['File'] in app_files else 'Complete producer file scope'),
+                    if r['File'] in app_files else 'Complete producer file scope; unresolved native licensing user links=' + str(license_counts[r['File']])
+                    if license_counts.get(r['File'], 0) else 'Complete producer file scope'),
         'SourceRows':r['Rows'],'MaxItems':0,'StartedDateTime':r['StartedAtUtc'],'CompletedDateTime':r['CompletedAtUtc'],
         'Evidence':('Native producer success; exact hash and logical row count; acquisition age '
                     + str(freshness[r['File']]['AgeHours']) + 'h; '
                     + freshness[r['File']]['State'] + '; rejection after '
                     + str(freshness[r['File']]['MaxAgeHours']) + 'h')} for r in evidence['Files']))
     relationships=[('PrimaryUser',len(user_devices),'Native Intune primary user'),('HasMailbox',sum(bool(m['TenantUserKey']) for m in mailbox_rows.values()),'Unique native ID or SMTP/user match'),
-        ('AssignedLicense',len(assignment_rows),'Native Entra user/SKU pairs'),('MemberOfGroup',sum(member_counts.values()),'Direct Entra memberships, including non-user objects'),
+        ('AssignedLicense',len(assignment_rows),'Native Entra user/SKU pairs, including explicitly unresolved user links'),('MemberOfGroup',sum(member_counts.values()),'Direct Entra memberships, including non-user objects'),
         ('DeviceHasApplication',table_counts['FactDeviceApplication'],'Weekly native app/device observations; includes qualified unresolved links'),('DeviceInAutopilot',sum(bool(get(r,'Managed device ID')) for r in read('autopilot')),'Native Autopilot managed device link'),
         ('ADMemberOfGroup',sum(1 for _ in read('ad_members')),'Native direct and primary-group evidence'),
         ('PolicyAssignmentTarget',sum(1 for _ in read('policy_assignments')),'Configured target; not proof of effective device assignment')]
@@ -811,7 +827,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
     # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
-    return {'ApplicationCoverage':app_coverage,
+    return {'ApplicationCoverage':app_coverage, 'LicenseCoverage':evidence['LicenseCoverage'],
         'ADDomainCoverage':[r['DomainCoverage'] for r in evidence['ProducerReceipts'] if r.get('DomainCoverage')], 'EntraGroupCatalogComparison': {
         'CatalogSource': source_defs['group_scope']['file'],
         'CatalogGroups': len(native_groups),

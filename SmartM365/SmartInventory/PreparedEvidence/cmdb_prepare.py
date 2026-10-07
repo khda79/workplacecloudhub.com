@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 import cmdb_freshness
 
-VERSION = '0.3.10'
+VERSION = '0.3.11'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -201,7 +201,7 @@ def accepted_ad_coverage(proof):
 
 
 def validate_license_assignment_parents(source, contract):
-    """Check native parent IDs without dropping paths or inventing identities."""
+    """Keep native user gaps qualified; missing SKU and blank IDs remain invalid."""
     definitions = {item['name']: item for item in contract['sources']}
     user_file = definitions['users']['file']
     sku_file = definitions['skus']['file']
@@ -209,16 +209,20 @@ def validate_license_assignment_parents(source, contract):
     users = {normalized(row['Object Id']) for row in rows(source / user_file)}
     skus = {normalized(row['Id']) for row in rows(source / sku_file)}
     missing_users, missing_skus = set(), set()
-    missing_user_rows = missing_sku_rows = 0
+    missing_user_rows = missing_sku_rows = blank_user_rows = total_rows = 0
+    pairs = set()
     for row in rows(source / path_file):
         user_id, sku_id = normalized(row['UserId']), normalized(row['SkuId'])
+        total_rows += 1
+        pairs.add((user_id, sku_id))
+        blank_user_rows += not user_id
         if not user_id or user_id not in users:
             missing_user_rows += 1
             missing_users.add(user_id)
         if not sku_id or sku_id not in skus:
             missing_sku_rows += 1
             missing_skus.add(sku_id)
-    if missing_user_rows or missing_sku_rows:
+    if blank_user_rows or missing_sku_rows:
         # Counts and file names suffice for diagnosis; do not expose account IDs.
         raise ValueError(
             'License assignment parent identity missing: '
@@ -228,6 +232,45 @@ def validate_license_assignment_parents(source, contract):
             + f'MissingSkuRows={missing_sku_rows}; MissingSkuIds={len(missing_skus)}. '
             + 'Refresh the affected parent inventory and revalidate coherent current sources; '
             + 'no assignment paths were excluded or historical exports substituted.')
+    return {'AssignmentRows':total_rows, 'UnresolvedAssignmentRows':missing_user_rows,
+            'DistinctUnresolvedUserIds':len(missing_users), 'AssignmentUserSkuPairs':len(pairs),
+            'UnresolvedUserSkuPairs':sum(uid not in users for uid, _ in pairs)}
+
+
+def assess_license_coverage(source, contract):
+    """Validate service-plan lineage while retaining every native unresolved user."""
+    definitions = {item['name']: item for item in contract['sources']}
+    coverage = validate_license_assignment_parents(source, contract)
+    users = {normalized(row['Object Id']) for row in rows(source / definitions['users']['file'])}
+    skus = {normalized(row['Id']) for row in rows(source / definitions['skus']['file'])}
+    pairs = {(normalized(row['UserId']), normalized(row['SkuId']))
+             for row in rows(source / definitions['license_paths']['file'])}
+    plans = set()
+    for row in rows(source / definitions['plans']['file']):
+        sid, pid = normalized(row['SkuId']), normalized(row['PlanId'])
+        if not pid or sid not in skus:
+            raise ValueError('Service-plan SKU missing or blank plan identity')
+        plans.add((sid, pid))
+    total = unresolved = 0
+    missing_users = set()
+    for row in rows(source / definitions['user_plans']['file']):
+        uid, sid, pid = (normalized(row[field]) for field in ('UserId', 'SkuId', 'PlanId'))
+        if not uid or (sid, pid) not in plans or (uid, sid) not in pairs:
+            raise ValueError('User service-plan native assignment or catalog parent missing')
+        total += 1
+        if uid not in users:
+            unresolved += 1
+            missing_users.add(uid)
+    coverage.update(ServicePlanRows=total, UnresolvedServicePlanRows=unresolved,
+                    DistinctUnresolvedServicePlanUserIds=len(missing_users),
+                    Policy='Native license paths, user/SKU pairs and service plans retained; missing user links are unresolved, never fabricated; missing SKU/plan/assignment parents remain blocking')
+    warnings = []
+    for name, count in (('license_paths', coverage['UnresolvedAssignmentRows']), ('user_plans', unresolved)):
+        if count:
+            warnings.append({'File':definitions[name]['file'], 'Kind':'UnresolvedLicenseUser',
+                'Message':f'Native licensing evidence retained with {count} unresolved user link(s): '
+                    + definitions[name]['file'] + '; no users fabricated or source rows excluded.'})
+    return coverage, warnings
 
 
 def application_coverage_status(reported, observed, unresolved):
@@ -341,7 +384,7 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
                     {'Producer':r['Producer'], 'Message':'Partial AD coverage accepted; unavailable domains: '
                         + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
                     for r in receipts if r.get('DomainCoverage')]}
-    validate_license_assignment_parents(source, contract)
+    evidence['LicenseCoverage'], evidence['LicenseWarnings'] = assess_license_coverage(source, contract)
     evidence['ApplicationCoverage'], evidence['ApplicationWarnings'] = assess_application_coverage(source, contract)
     recheck_sources(source, evidence, contract)
     return evidence
@@ -395,6 +438,7 @@ def validate_relationships(output, contract):
     applications = {normalized(row['AppId']): row for row in rows(output / 'DimDetectedApplication.csv')}
     application_counts, unresolved_devices = collections.Counter(), collections.Counter()
     mailboxes = {row['TenantMailboxKey'] for row in rows(output / 'FactMailbox.csv')}
+    users = {normalized(row['SourceUserId']): row for row in rows(output / 'DimUser.csv')}
     for definition in contract['tables']:
         name = definition['name']
         for row in rows(output / (name+'.csv')):
@@ -416,6 +460,13 @@ def validate_relationships(output, contract):
                 unresolved_devices[aid] += not resolved
             if name == 'FactMailboxHosting' and row['MailboxHostingKey'] not in mailboxes:
                 raise ValueError('Orphan output mailbox hosting')
+            if name in {'LicenseAssignmentPath', 'FactUserLicense', 'FactUserServicePlan'} and 'UserLinkStatus' in row:
+                user = users.get(normalized(row['SourceUserId']))
+                if (not normalized(row['SourceUserId'])
+                        or row['UserLinkStatus'] != ('Resolved' if user else 'Unresolved')
+                        or row['TenantUserKey'] != (user['TenantUserKey'] if user else '')
+                        or ('CmdbUserId' in row and row['CmdbUserId'] != (user['CmdbUserId'] if user else ''))):
+                    raise ValueError('Inconsistent license user link qualification: ' + name)
             for field in ('ManagerADObjectKey','ManagedByADObjectKey'):
                 if row.get(field) and row[field] not in keys['TenantADObjectKey']:
                     raise ValueError('Orphan AD source owner/manager relationship')
@@ -469,6 +520,22 @@ def paths(source, output):
     return source, output
 
 
+def previous_output_contract(output, contract):
+    """Validate the exact predecessor shape before atomic 0.3.6 -> 0.3.7 replacement."""
+    manifest = load_json(output / MANIFEST)
+    if contract['version'] != '0.3.7' or manifest.get('ContractVersion') != '0.3.6':
+        return contract
+    legacy = json.loads(json.dumps(contract))
+    legacy['version'] = '0.3.6'
+    for definition in legacy['tables']:
+        if definition['name'] in {'FactUserLicense', 'FactUserServicePlan'}:
+            if definition['columns'][-2:] != ['SourceUserId', 'UserLinkStatus'] or definition['key'][0] != 'SourceUserId':
+                raise ValueError('Unexpected license contract migration shape')
+            definition['columns'] = definition['columns'][:-2]
+            definition['key'][0] = 'TenantUserKey'
+    return legacy
+
+
 def prepare(source, output, tenant, identity, validate_only=False, contract_path=CONTRACT, now=None, fault=None):
     source, output = paths(source, output)
     contract = load_json(contract_path)
@@ -479,14 +546,15 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
     if validate_only:
         return {'Status': 'ValidatedSources', 'SourceFiles': len(evidence['Files']), 'GeneratedTables': 0,
                 'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
-                'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage']}
+                'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage'],
+                'LicenseWarnings':evidence['LicenseWarnings'], 'LicenseCoverage':evidence['LicenseCoverage']}
     # No source copies, persistent Raw adapter, dated output or history.
     from cmdb_tables import build_tables
     with PublicationLock(output.parent / '.cmdb-preparation.lock'):
         orphan_stages = list(output.parent.glob('.cmdb-stage-*')) + list(output.parent.glob('.cmdb-rollback-*'))
         if orphan_stages:
             raise ValueError('Interrupted preparation artifacts require explicit recovery; nothing replaced')
-        previous_manifest = validate_current(output, contract, tenant) if output.exists() else None
+        previous_manifest = validate_current(output, previous_output_contract(output, contract), tenant) if output.exists() else None
         if previous_manifest and previous_manifest['Identity'] != identity:
             raise ValueError('Reporting identity changed; explicit migration required')
         # Inherit the data-root ACL. Python 3.13+ mkdtemp uses an owner-only
@@ -512,6 +580,7 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                         'MetricDefinitions': {
                         'TopApplication.ReportedDeviceCount':'Distinct device IDs observed in weekly application relations per name/publisher/platform product across versions, including unresolved current-inventory links; not a current managed-device count',
                         'FactDeviceApplication':'Every native application/device relation is retained; unresolved parent links are qualified, never fabricated',
+                        'LicenseUserLinks':'LicenseAssignmentPath, FactUserLicense and FactUserServicePlan retain native SourceUserId; unresolved users have blank report user keys and UserLinkStatus=Unresolved, never invented DimUser rows',
                             'FactHybridIdentityCoverage.OnPremisesOnlyCount':'Unavailable: unmatched identity does not establish on-premises-only existence',
                             'FactUserActivity.HasAnyM365Activity':'Observation within the source report, not proof of lifetime use or licence waste',
                             'EndpointAnalyticsScore':'Score on a 0-100 scale, not a proportion; -1/-2 mean unavailable (blank), never zero',
@@ -552,10 +621,12 @@ def prepare(source, output, tenant, identity, validate_only=False, contract_path
                 return {'Status': 'PreparedWithCleanupWarning', 'GeneratedTables': len(output_files),
                         'OutputRoot': str(output), 'CleanupRequired': str(previous),
                         'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
-                        'ApplicationWarnings':evidence['ApplicationWarnings']}
+                        'ApplicationWarnings':evidence['ApplicationWarnings'],
+                        'LicenseWarnings':evidence['LicenseWarnings'], 'LicenseCoverage':evidence['LicenseCoverage']}
         return {'Status': 'Prepared', 'GeneratedTables': len(output_files), 'OutputRoot': str(output),
             'FreshnessWarnings':evidence['Freshness']['Warnings'], 'CoverageWarnings':evidence['CoverageWarnings'],
-            'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage']}
+            'ApplicationWarnings':evidence['ApplicationWarnings'], 'ApplicationCoverage':evidence['ApplicationCoverage'],
+            'LicenseWarnings':evidence['LicenseWarnings'], 'LicenseCoverage':evidence['LicenseCoverage']}
 
 
 def main():

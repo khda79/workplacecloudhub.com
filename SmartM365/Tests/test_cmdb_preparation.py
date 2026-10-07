@@ -71,8 +71,8 @@ class CsvReaderTests(unittest.TestCase):
 
 class LicenseAssignmentParentTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='SmartInventory-Cmdb-Parents-')
-        self.source = Path(self.temporary.name)
+        self.source = Path(tempfile.gettempdir()) / ('SmartInventory-Cmdb-Parents-' + uuid.uuid4().hex)
+        self.source.mkdir()
         self.contract = pipeline.load_json(pipeline.CONTRACT)
         self.definitions = {item['name']: item for item in self.contract['sources']}
         self.write('users', ['Object Id'], [{'Object Id': 'u1'}])
@@ -80,7 +80,8 @@ class LicenseAssignmentParentTests(unittest.TestCase):
         self.write_paths([{'UserId': 'u1', 'SkuId': 's1'}])
 
     def tearDown(self):
-        self.temporary.cleanup()
+        if self.source.parent.resolve() == Path(tempfile.gettempdir()).resolve() and self.source.name.startswith('SmartInventory-Cmdb-Parents-'):
+            shutil.rmtree(self.source)
 
     def write(self, name, columns, data):
         with (self.source / self.definitions[name]['file']).open(
@@ -111,13 +112,11 @@ class LicenseAssignmentParentTests(unittest.TestCase):
     def test_missing_users_count_rows_and_distinct_native_ids(self):
         self.write_paths([{'UserId': 'missing-user', 'SkuId': 's1', 'AssignedByGroupId': ''},
                           {'UserId': ' MISSING-USER ', 'SkuId': 's1', 'AssignedByGroupId': 'g1'}])
-        with self.assertRaises(ValueError) as failure:
-            self.validate()
-        message = str(failure.exception)
-        self.assertIn('MissingUserRows=2; MissingUserIds=1', message)
-        self.assertIn('MissingSkuRows=0; MissingSkuIds=0', message)
-        self.assertIn('M365_Users_Active.csv (UserId -> Object Id)', message)
-        self.assertNotIn('missing-user', message)
+        coverage = self.validate()
+        self.assertEqual(coverage['UnresolvedAssignmentRows'], 2)
+        self.assertEqual(coverage['DistinctUnresolvedUserIds'], 1)
+        self.assertEqual(coverage['UnresolvedUserSkuPairs'], 1)
+        self.assertNotIn('missing-user', json.dumps(coverage))
 
     def test_missing_skus_are_distinguished_from_missing_users(self):
         self.write_paths([{'UserId': 'u1', 'SkuId': 'missing-sku'}])
@@ -140,8 +139,7 @@ class LicenseAssignmentParentTests(unittest.TestCase):
         for state in ['Active', 'ActiveWithError', 'Error', 'Disabled', '', 'Unknown']:
             with self.subTest(state=state):
                 self.write_paths([{'UserId': 'missing-user', 'SkuId': 's1', 'AssignmentState': state}])
-                with self.assertRaisesRegex(ValueError, 'MissingUserRows=1'):
-                    self.validate()
+                self.assertEqual(self.validate()['UnresolvedAssignmentRows'], 1)
 
     def test_blank_child_ids_cannot_match_blank_parent_ids(self):
         self.write('users', ['Object Id'], [{'Object Id': ''}])
@@ -552,13 +550,17 @@ foreach($producer in $registry.Producers){{
         self.assertEqual(before,{p.name:pipeline.sha(p) for p in self.source.iterdir()})
         self.assertFalse((self.root/'.cmdb-preparation.lock').exists())
 
-    def test_validate_only_rejects_orphan_license_user_without_output_or_source_writes(self):
+    def test_validate_only_qualifies_orphan_license_user_without_output_or_source_writes(self):
         self.inputs['license_paths'][0]['UserId'] = 'missing-user'
+        self.inputs['user_plans'][0]['UserId'] = 'missing-user'
         self.write_inputs()
         before = {p.name: pipeline.sha(p) for p in self.source.iterdir()}
         with mock.patch.object(pipeline, 'PublicationLock', side_effect=AssertionError('Lock must not start')):
-            with self.assertRaisesRegex(ValueError, 'MissingUserRows=1; MissingUserIds=1'):
-                self.prepare(validate_only=True)
+            result = self.prepare(validate_only=True)
+        self.assertEqual(result['Status'], 'ValidatedSources')
+        self.assertEqual(result['LicenseCoverage']['UnresolvedAssignmentRows'], 1)
+        self.assertEqual(result['LicenseCoverage']['UnresolvedServicePlanRows'], 1)
+        self.assertEqual(len(result['LicenseWarnings']), 2)
         self.assertFalse(self.output.exists())
         self.assertFalse(list(self.root.glob('.cmdb-*')))
         self.assertEqual(before, {p.name: pipeline.sha(p) for p in self.source.iterdir()})
@@ -592,8 +594,7 @@ foreach($producer in $registry.Producers){{
         self.inputs['license_paths'].append(dict(self.inputs['license_paths'][0],
                                                 UserId='new-user', AssignmentState='Error'))
         self.write_inputs()
-        with self.assertRaisesRegex(ValueError, 'MissingUserRows=1'):
-            self.prepare(validate_only=True)
+        self.assertEqual(self.prepare(validate_only=True)['LicenseCoverage']['UnresolvedAssignmentRows'], 1)
         new_user = dict(self.inputs['users'][0], **{'Object Id': 'new-user'})
         self.inputs['users'].append(new_user)
         self.write_inputs()
@@ -603,6 +604,176 @@ foreach($producer in $registry.Producers){{
                        if row['SourceUserId'] == 'new-user']
         self.assertEqual(len(error_paths), 1)
         self.assertEqual(error_paths[0]['AssignmentState'], 'Error')
+        self.assertEqual(error_paths[0]['UserLinkStatus'], 'Resolved')
+
+    def seed_unresolved_license_users(self):
+        for uid in ['outside-user-1', 'outside-user-2']:
+            self.inputs['license_paths'].append(dict(self.inputs['license_paths'][0],
+                UserId=uid, AssignmentState='Error', AssignmentError='CountViolation'))
+            self.inputs['license_paths'].append(dict(self.inputs['license_paths'][0],
+                UserId=uid, AssignedByGroupId='g1', AssignmentState='Disabled'))
+            self.inputs['user_plans'].append(dict(self.inputs['user_plans'][0], UserId=uid))
+        self.write_inputs()
+
+    def test_unresolved_license_users_keep_all_native_evidence_without_fake_parents(self):
+        self.seed_unresolved_license_users()
+        before = {p.name:pipeline.sha(p) for p in self.source.iterdir()}
+        result = self.prepare()
+        self.assertEqual(result['GeneratedTables'], 46)
+        self.assertEqual(len(self.table('DimUser')), 1)
+        self.assertEqual(len(self.table('LicenseAssignmentPath')), 5)
+        self.assertEqual(len(self.table('FactUserLicense')), 3)
+        self.assertEqual(len(self.table('FactUserServicePlan')), 3)
+        for table in ['LicenseAssignmentPath', 'FactUserLicense', 'FactUserServicePlan']:
+            unresolved = [r for r in self.table(table) if r['UserLinkStatus'] == 'Unresolved']
+            self.assertEqual({r['SourceUserId'] for r in unresolved}, {'outside-user-1', 'outside-user-2'})
+            self.assertTrue(all(r['TenantUserKey'] == '' and r.get('CmdbUserId', '') == '' for r in unresolved))
+        coverage = result['LicenseCoverage']
+        self.assertEqual(coverage['UnresolvedAssignmentRows'], 4)
+        self.assertEqual(coverage['DistinctUnresolvedUserIds'], 2)
+        self.assertEqual(coverage['UnresolvedUserSkuPairs'], 2)
+        self.assertEqual(coverage['UnresolvedServicePlanRows'], 2)
+        self.assertNotIn('outside-user', json.dumps(result))
+        manifest = pipeline.validate_current(self.output, self.contract, IDENTITY['TenantKey'])
+        self.assertEqual(manifest['SourceEvidence']['LicenseCoverage'], coverage)
+        self.assertEqual(manifest['PreparationQualifications']['LicenseCoverage'], coverage)
+        import cmdb_transfer
+        plan = cmdb_transfer.plan(self.output, IDENTITY, now=NOW)
+        self.assertEqual(plan['Status'], 'VerifiedForTransfer')
+        self.assertEqual(plan['ContractVersion'], '0.3.7')
+        self.assertEqual(plan['CsvFiles'], 46)
+        license_sources = {'M365_Licenses_AssignmentPaths.csv', 'M365_Licenses_UserServicePlanStates.csv'}
+        health = [r for r in self.table('SourceHealth') if r['SourceName'] in license_sources]
+        self.assertTrue(all(r['Status'] == 'SuccessWithWarnings' for r in health))
+        findings = [r for r in self.table('EntityFinding') if r['FindingType'] == 'UnresolvedLicenseUser']
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(all(r['TenantUserKey'] == '' and r['LinkStatus'] == 'Outside 360 entity scope' for r in findings))
+        errors = [r for r in self.table('EntityFinding') if r['FindingType'] == 'ObservedLicenseAssignmentError']
+        self.assertEqual(len(errors), 2)
+        self.assertEqual(before, {p.name:pipeline.sha(p) for p in self.source.iterdir()})
+
+    def test_unresolved_user_is_not_joined_by_matching_display_name_or_address(self):
+        self.seed_unresolved_license_users()
+        # Licensing display attributes cannot turn an absent native ID into a DimUser.
+        self.inputs['license_overview'].append(dict(self.inputs['license_overview'][0],
+            Id='outside-user-1-s1', UserId='outside-user-1', DisplayName='Test user'))
+        self.write_inputs(); self.prepare()
+        self.assertEqual(len(self.table('DimUser')), 1)
+        self.assertTrue(all(r['Account'] == '' for r in self.table('LicenseAssignmentPath')
+                            if r['UserLinkStatus'] == 'Unresolved'))
+
+    def test_user_inventory_resolution_removes_warnings_on_next_preparation(self):
+        self.seed_unresolved_license_users(); self.prepare()
+        for uid in ['outside-user-1', 'outside-user-2']:
+            self.inputs['users'].append(dict(self.inputs['users'][0], **{'Object Id':uid}))
+        self.write_inputs()
+        result = self.prepare()
+        self.assertEqual(result['LicenseWarnings'], [])
+        self.assertEqual(result['LicenseCoverage']['UnresolvedServicePlanRows'], 0)
+        self.assertEqual(len(self.table('FactUserServicePlan')), 3)
+        self.assertTrue(all(r['UserLinkStatus'] == 'Resolved' for r in self.table('FactUserLicense')))
+        self.assertEqual(len(self.table('DimUser')), 3)
+
+    def test_user_service_plan_missing_native_assignment_still_blocks(self):
+        self.inputs['user_plans'][0]['UserId'] = 'unassigned-native-user'
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, 'native assignment or catalog parent'):
+            self.prepare(validate_only=True)
+        self.assertFalse(self.output.exists())
+
+    def test_user_service_plan_missing_catalog_plan_still_blocks(self):
+        self.inputs['user_plans'][0]['PlanId'] = 'missing-plan'
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, 'native assignment or catalog parent'):
+            self.prepare(validate_only=True)
+        self.assertFalse(self.output.exists())
+
+    def test_unresolved_user_plan_unknown_state_still_preserves_last_snapshot(self):
+        self.prepare()
+        before = {p.name:pipeline.sha(p) for p in self.output.iterdir()}
+        self.seed_unresolved_license_users()
+        self.inputs['user_plans'][-1]['StateCode'] = 'BAD-STATE'
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, 'Unknown compact service-plan state'):
+            self.prepare()
+        self.assertEqual(before, {p.name:pipeline.sha(p) for p in self.output.iterdir()})
+
+    def rewrite_output_table(self, table, records):
+        definition = next(t for t in self.contract['tables'] if t['name'] == table)
+        file = self.output / (table + '.csv')
+        with file.open('w', encoding='utf-8-sig', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=definition['columns'])
+            writer.writeheader(); writer.writerows(records)
+        manifest = pipeline.load_json(self.output / pipeline.MANIFEST)
+        manifest['OutputFiles'][file.name].update(SHA256=pipeline.sha(file), Rows=len(records))
+        (self.output / pipeline.MANIFEST).write_text(json.dumps(manifest))
+
+    def test_unresolved_user_cannot_claim_resolved_even_with_updated_output_hash(self):
+        self.seed_unresolved_license_users(); self.prepare()
+        for table in ['LicenseAssignmentPath', 'FactUserLicense', 'FactUserServicePlan']:
+            with self.subTest(table=table):
+                original = self.table(table)
+                changed = copy.deepcopy(original)
+                next(r for r in changed if r['UserLinkStatus'] == 'Unresolved')['UserLinkStatus'] = 'Resolved'
+                self.rewrite_output_table(table, changed)
+                with self.assertRaisesRegex(ValueError, 'license user link qualification'):
+                    pipeline.validate_current(self.output, self.contract, IDENTITY['TenantKey'])
+                self.rewrite_output_table(table, original)
+
+    def test_license_path_requires_native_user_id_even_if_marked_unresolved(self):
+        self.seed_unresolved_license_users(); self.prepare()
+        records = self.table('LicenseAssignmentPath')
+        next(r for r in records if r['UserLinkStatus'] == 'Unresolved')['SourceUserId'] = ''
+        self.rewrite_output_table('LicenseAssignmentPath', records)
+        with self.assertRaisesRegex(ValueError, 'license user link qualification'):
+            pipeline.validate_current(self.output, self.contract, IDENTITY['TenantKey'])
+
+    def make_predecessor_snapshot(self):
+        self.prepare()
+        manifest = pipeline.load_json(self.output / pipeline.MANIFEST)
+        manifest['ContractVersion'] = '0.3.6'
+        (self.output / pipeline.MANIFEST).write_text(json.dumps(manifest))
+        legacy = pipeline.previous_output_contract(self.output, self.contract)
+        for table in ['FactUserLicense', 'FactUserServicePlan']:
+            definition = next(t for t in legacy['tables'] if t['name'] == table)
+            file = self.output / (table + '.csv')
+            data = self.table(table)
+            with file.open('w', encoding='utf-8-sig', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=definition['columns'], extrasaction='ignore')
+                writer.writeheader(); writer.writerows(data)
+            manifest['OutputFiles'][file.name].update(SHA256=pipeline.sha(file), Rows=len(data))
+        manifest['ContractSHA256'] = 'predecessor-fixture'
+        (self.output / pipeline.MANIFEST).write_text(json.dumps(manifest))
+        pipeline.validate_current(self.output, legacy, IDENTITY['TenantKey'])
+
+    def test_predecessor_contract_replaced_only_after_new_snapshot_is_validated(self):
+        self.make_predecessor_snapshot()
+        self.seed_unresolved_license_users()
+        self.prepare()
+        manifest = pipeline.validate_current(self.output, self.contract, IDENTITY['TenantKey'])
+        self.assertEqual(manifest['ContractVersion'], '0.3.7')
+        self.assertEqual(len(self.table('FactUserLicense')), 3)
+        self.assertFalse(list(self.root.glob('.cmdb-rollback-*')))
+
+    def test_failed_new_preparation_preserves_predecessor_contract_and_bytes(self):
+        self.make_predecessor_snapshot()
+        before = {p.name:pipeline.sha(p) for p in self.output.iterdir()}
+        self.seed_unresolved_license_users()
+        def fault(phase, *_):
+            if phase == 'after-swap':
+                raise ValueError('Synthetic migration rollback')
+        with self.assertRaisesRegex(ValueError, 'Synthetic migration rollback'):
+            self.prepare(fault=fault)
+        self.assertEqual(before, {p.name:pipeline.sha(p) for p in self.output.iterdir()})
+
+    def test_predecessor_with_corrupt_hash_is_not_replaced(self):
+        self.make_predecessor_snapshot()
+        file = self.output / 'FactUserLicense.csv'
+        file.write_bytes(file.read_bytes() + b'corrupt')
+        before = {p.name:pipeline.sha(p) for p in self.output.iterdir()}
+        with self.assertRaisesRegex(ValueError, 'Output hash mismatch'):
+            self.prepare()
+        self.assertEqual(before, {p.name:pipeline.sha(p) for p in self.output.iterdir()})
 
     def test_distinct_application_footprint_across_versions(self):
         self.prepare()
