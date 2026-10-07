@@ -26,5 +26,6 @@
   "AppendHistory": false,
   "HistoryCsvPath": "{{DataAllRootPath}}\\ActiveDirectory\\HealthCheck\\AD_HealthCheck_History.csv",
   "AlwaysSend": false,
-  "EnableRemoteDcAdminChecks": false
+  "EnableRemoteDcAdminChecks": false,
+  "NonBlockingDomainErrors": []
 }

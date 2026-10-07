@@ -2,11 +2,14 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.29
+1.0.30
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
     Minimum permissions: PowerShell 7+, RSAT ActiveDirectory module, and read access to the AD forest/domains. Remote DC admin checks require explicit T0/admin rights only when -EnableRemoteDcAdminChecks is used.
+
+.PARAMETER NonBlockingDomainErrors
+    Domains whose transient replication-query connectivity failures may remain non-blocking after retries. Their missing measurements are marked NotMeasured and the forest query coverage is marked Warning. Other domains and error types remain blocking.
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -44,6 +47,7 @@ param(
     [int]$DfsrBacklogCriticalCount = 1000,
     [switch]$SkipDfsrBacklog,
     [switch]$EnableRemoteDcAdminChecks,
+    [string[]]$NonBlockingDomainErrors = @(),
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -72,7 +76,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.29"
+$ScriptVersion = "1.0.30"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -164,6 +168,15 @@ if (-not $PSBoundParameters.ContainsKey('AlwaysSend')) { $AlwaysSend = [bool](Ge
 if (-not $PSBoundParameters.ContainsKey('AppendHistory')) { $AppendHistory = [bool](Get-LocalConfigValue 'AppendHistory' $false) }
 if ([string]::IsNullOrWhiteSpace($HistoryCsvPath)) { $HistoryCsvPath = [string](Get-LocalConfigValue 'HistoryCsvPath' '{{DataAllRootPath}}\ActiveDirectory\HealthCheck\AD_HealthCheck_History.csv') }
 if (-not $PSBoundParameters.ContainsKey('EnableRemoteDcAdminChecks')) { $EnableRemoteDcAdminChecks = [bool](Get-LocalConfigValue 'EnableRemoteDcAdminChecks' $false) }
+if (-not $PSBoundParameters.ContainsKey('NonBlockingDomainErrors')) { $NonBlockingDomainErrors = @(Get-LocalConfigValue 'NonBlockingDomainErrors' @()) }
+$NonBlockingDomainErrorSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($configuredDomain in @($NonBlockingDomainErrors)) {
+    $domainName = ([string]$configuredDomain).Trim().TrimEnd('.')
+    if ($domainName -notmatch '^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$') {
+        throw "Invalid domain in NonBlockingDomainErrors: '$configuredDomain'."
+    }
+    [void]$NonBlockingDomainErrorSet.Add($domainName)
+}
 if ([string]::IsNullOrWhiteSpace($From)) { $From = [string](Get-LocalConfigValue 'From' '') }
 if ([string]::IsNullOrWhiteSpace($SmtpServer)) { $SmtpServer = [string](Get-LocalConfigValue 'SmtpServer' '') }
 $SendMailMode = [string](Get-LocalConfigValue 'SendMailMode' '')
@@ -214,6 +227,44 @@ function Invoke-Retry([scriptblock]$ScriptBlock){
     for($i=1;$i -le [math]::Max(1,$RetryCount);$i++){
         try{ return & $ScriptBlock }catch{ $m=[string]$_.Exception.Message; $transient=$m -match 'timeout|temporar|server is not operational|RPC server|unavailable|busy|could not be contacted|network path|WinRM|timed out'; if(-not $transient -or $i -ge $RetryCount){throw}; Start-Sleep -Seconds $RetryDelaySeconds }
     }
+}
+function Test-IsTransientAdConnectivityError([Management.Automation.ErrorRecord]$ErrorRecord) {
+    for ($exception = $ErrorRecord.Exception; $null -ne $exception; $exception = $exception.InnerException) {
+        if ($exception.Message -match 'timeout|temporar|server is not operational|RPC server|unavailable|busy|could not be contacted|unable to contact|network path|WinRM|timed out') { return $true }
+    }
+    return $false
+}
+function Add-ForestReplicationAgeRows([string]$ForestName,[string]$RootDomain,[string[]]$Domains,[int]$TombstoneDays) {
+    $oldest = 0.0
+    $unavailableDomains = [Collections.Generic.List[string]]::new()
+    foreach ($domainName in @($Domains | Sort-Object)) {
+        $started = Get-Date
+        try {
+            $failures = @(Invoke-Retry { Get-ADReplicationFailure -Target $domainName -Scope Domain -ErrorAction Stop })
+            foreach ($failure in $failures) {
+                if ($failure.FirstFailureTime -and $failure.FirstFailureTime -ne [datetime]::MinValue) {
+                    $days = ((Get-Date).ToUniversalTime() - $failure.FirstFailureTime.ToUniversalTime()).TotalDays
+                    if ($days -gt $oldest) { $oldest = $days }
+                }
+            }
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            if (-not $NonBlockingDomainErrorSet.Contains($domainName) -or -not (Test-IsTransientAdConnectivityError $_)) {
+                throw "Replication failure query failed for domain '$domainName': $errorMessage"
+            }
+            [void]$unavailableDomains.Add($domainName)
+            WriteLog -Message ("Non-blocking replication query error for domain '{0}': {1}. The measurement remains unavailable." -f $domainName,$errorMessage) -Level 'WARNING'
+            Add-Row $ForestName $domainName '' Replication ReplicationFailureQuery NotMeasured '' Error 'Domain replication failures readable' $errorMessage (Ms $started)
+        }
+    }
+    if ($unavailableDomains.Count -gt 0) {
+        Add-Row $ForestName $RootDomain '' Replication DomainQueryCoverage Warning ($Domains.Count - $unavailableDomains.Count) ("Unavailable={0}" -f $unavailableDomains.Count) ("All {0} domains queried" -f $Domains.Count) ("Unavailable domains: {0}" -f ($unavailableDomains -join ', ')) 0
+    }
+    $status = if ($oldest -gt $TombstoneDays) { 'Critical' } elseif ($oldest -gt ($TombstoneDays * .8)) { 'Warning' } elseif ($unavailableDomains.Count -gt 0) { 'NotMeasured' } else { 'OK' }
+    $value = if ($status -eq 'NotMeasured') { '' } else { [math]::Round($oldest,2) }
+    $details = if ($unavailableDomains.Count -gt 0) { "Incomplete forest measurement; unavailable domains: $($unavailableDomains -join ', '). Observed oldest age is a lower bound." } else { 'Compared with forest tombstone lifetime' }
+    Add-Row $ForestName $RootDomain '' Tombstone OldestReplicationFailureAgeDays $status $value "TombstoneLifetimeDays=$TombstoneDays" "Critical > $TombstoneDays days; Warning > 80 percent" $details 0
 }
 function Test-Port([string]$Computer,[int]$Port){
     $c=[Net.Sockets.TcpClient]::new(); try{ $a=$c.BeginConnect($Computer,$Port,$null,$null); if(-not $a.AsyncWaitHandle.WaitOne($TcpTimeoutMs,$false)){return $false}; $c.EndConnect($a); $true }catch{$false}finally{try{$c.Close()}catch{ $null = $_ }}
@@ -443,6 +494,7 @@ try{
     WriteLog -Message ("Starting {0}" -f $TaskName)
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputFolder) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
     if (-not $EnableRemoteDcAdminChecks) { WriteLog -Message 'Remote DC admin checks are disabled. Service status and AD database disk checks will be marked NotMeasured; use -EnableRemoteDcAdminChecks only with a T0 account.' -Level 'INFO' }
+    if ($NonBlockingDomainErrorSet.Count -gt 0) { WriteLog -Message ("NonBlockingDomainErrors configured for replication connectivity errors: {0}. Unavailable measurements will be explicit." -f (($NonBlockingDomainErrorSet | Sort-Object) -join ', ')) -Level 'INFO' }
     $forest=Invoke-Retry {Get-ADForest -ErrorAction Stop}; $forestName=[string]$forest.Name
     WriteLog -Message ("Forest discovered: {0}; Domains: {1}" -f $forestName, @($forest.Domains).Count) -Level 'INFO'
     WriteLog -Message 'Collecting forest FSMO checks.' -Level 'INFO'
@@ -450,8 +502,7 @@ try{
     WriteLog -Message 'Collecting tombstone lifetime.' -Level 'INFO'
     $s=Get-Date;try{$cfg=(Get-ADRootDSE -Server $forest.RootDomain -ErrorAction Stop).configurationNamingContext;$ds="CN=Directory Service,CN=Windows NT,CN=Services,$cfg";$obj=Get-ADObject -Identity $ds -Properties tombstoneLifetime -Server $forest.RootDomain -ErrorAction Stop;$tomb=if($obj.tombstoneLifetime){[int]$obj.tombstoneLifetime}else{180};Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays OK $tomb 'Forest tombstone lifetime' 'Compare with oldest replication failure' $ds (Ms $s)}catch{$tomb=180;Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays Warning $tomb Defaulted 'Compare with oldest replication failure' $_.Exception.Message (Ms $s)}
     foreach($d in @($forest.Domains|Sort-Object)){WriteLog -Message ("Collecting domain checks: {0}" -f $d) -Level 'INFO';try{Invoke-DomainCheck $forestName ([string]$d) $forest}catch{Add-Row $forestName ([string]$d) '' Domain DomainScan Critical 0 Failed 'Domain scan succeeds' $_.Exception.Message 0}}
-    $oldest=0.0;foreach($d in @($forest.Domains|Sort-Object)){$oldestErrors=$null;foreach($f in @(Get-ADReplicationFailure -Target $d -Scope Domain -ErrorAction SilentlyContinue -ErrorVariable oldestErrors)){if($f.FirstFailureTime -and $f.FirstFailureTime -ne [datetime]::MinValue){$days=((Get-Date).ToUniversalTime()-$f.FirstFailureTime.ToUniversalTime()).TotalDays;if($days -gt $oldest){$oldest=$days}}}}
-    $st=if($oldest -gt $tomb){'Critical'}elseif($oldest -gt ($tomb*.8)){'Warning'}else{'OK'};Add-Row $forestName $forest.RootDomain '' Tombstone OldestReplicationFailureAgeDays $st ([math]::Round($oldest,2)) "TombstoneLifetimeDays=$tomb" "Critical > $tomb days; Warning > 80 percent" 'Compared with forest tombstone lifetime' 0
+    Add-ForestReplicationAgeRows -ForestName $forestName -RootDomain $forest.RootDomain -Domains @($forest.Domains) -TombstoneDays $tomb
     $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
     $all = Get-RowSnapshot
     if(-not (Test-Path -LiteralPath $LatestCsvFolderPath)){New-Item -Path $LatestCsvFolderPath -ItemType Directory -Force|Out-Null}
@@ -494,8 +545,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHp+1HB/bVzJvZ
-# er84ffJkRhG2LWZ4S2vehcJ3oLCNpKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhvvmis340nd3/
+# twSuP1aPWAH2snJMr4J1QZxNWTIZKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -628,31 +679,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGIRqR3e05atPm8dgs+zv9OIRLM8oOD03LPVF2KaWPA9MA0GCSqG
-# SIb3DQEBAQUABIIBgJpiKiMox8qTSuWC7llsi98IQs9oBi26Vh8YmZb11RJC8J5j
-# cq8sJ8WP2qoM2LHrThrEXm/J353RB30xHAULphtumVNM1I7kLC2s3HbTAQj8rHGr
-# KbhwQ4tNvfxAd1RmZp2S0GW+GnFuQkipkcqxuBxMhAeL1rXPsSUfu98XMpJ2ClGG
-# E4gdFut6sTPL/cl0W8xRg1FL00Q4rnGeITGB9u5VFZsD+CVTmDsbBdiNEiQv8cqX
-# 7XOsY+RUSQ5H7gPaoWxQkRMYQWpDQ+clmuYnrZjgVWPAOpk0H0ikIE+5bNIlBMm3
-# hpVcbAjX6qQ893Z/tuorQQvmV2LLmDaVKFinRwMsWHfqbksev3W7r28d/7pBKFSb
-# bD//+gPjU6y2CYNbdoMmxCa1cMfbW2rF+EShB2r8kOn+qAoES6YSNxqJaYVYCOTc
-# 23NCcHeBTw+FJHpP5AghrMyaquJVuVojHzSSjrsWFdPE9CM8zBhTSqv3dvWuvL0i
-# mzqt/9WIIIStTMHjlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOaH7skMOPzf0hxejcTyAXLL971Mpam3PHeDjBEHXBoIMA0GCSqG
+# SIb3DQEBAQUABIIBgBBoTPHEvCofGhgFyA2xpEMxH32YUJ4Audi3VxsIGSeVCpF8
+# PSK4P4Uz612EY8c4jCeEYzOip6hJC4Cfa3IlsBYfUfPlksPUuVpnLAmnuT645Mpe
+# NPcy9jk4PFrC06WbHV0VSmZgAGJ8CxrOU9h3rbtIpgtKT/GrWvddbxOT7RbkJs2Y
+# psEpabncYT7+hrC657rfjwqaeEG0iCi6zPRhqj45yPUsLDzDrSj0e3cezsyMoY04
+# vgDLPYFx8Opgqn2sJ+ygU2gp/fweOwUcczcKr5sfavxTa9iDWgZAvCyJhOGIP6E7
+# ih4yGbpb10qaR2WAg41DQpwbbN8lYVgM64h59kJE7GcWKVbV9vS4rlLpR8aWntQF
+# HQxly17bxbT+FHIuLTjaW8aeTtE62zl4D7b/m/zcjAPLWQ3Rpn1BEWAwfnHI7Ntn
+# nGGTMTDQWW2fkPAsAbBqYzpik/NLD5dIBoqdP055vcpPb+Pj+FjpbPb1FQ+d8AE3
+# f4Tn+xHq/ekwCsfHyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# MzlaMC8GCSqGSIb3DQEJBDEiBCDCZ8JQUvTjG5pX+CdLdYJg22vwm6JXPNvx5/oL
-# T1q+ZzANBgkqhkiG9w0BAQEFAASCAgCbEKirrN28IyZwSbr3NfVpAPKPouY5z8bP
-# arvGFQeisdNtnOhhv86fV3uItfDiH4sAwvp9CoXrTYks5rJSLOD8wbHlE/v09V6Z
-# 2EbrYP1dFYnmy7uX/acEbU4AnTyNBdr8/jekvBWgWapR+MW96LLIQpY8k1OMz1i0
-# rSkvDIfr/fB9mRA4q16LkBG8qf+3N0QgGCVVMTW+lWQhMRbpwV9dYHZBg3Qef0t3
-# olziwIMxvsZNQYLH8vbFlMfc953p24njaSMs9hjrKmMODG8eiE0Ho27ydPTPuxbC
-# TjusqesAQo99f6V5uo/hp9AcwuSKpSy9jP15JhNbZU8v7yJKU8zNBJXWC2ED9lKl
-# mZJRgBehe7FEADISMGhQmED+pmNPAz1HDgQTvSVvMjZqxCRlLPd1KyyLeS6fNRLm
-# TWV6jY2rnRqt7f8uW57JVO2wNmSxVhBPgLsdWJuc7EU8zMdLJtmUtB7x41aehGma
-# boxaK7NrfmzPiMCFiZ78IFLnhAzs0Y36Rv4KZNhb3vEsX5TCX2mKfgIDdXUYYYSu
-# WO3OztQw2fQi6OiLteZsYhF3lUbsYmSW54z4Bdi1B6MiPHwJ7PVEoAQJsb0cKUIP
-# AwYYMekl3R7WsABeQYSwnbCO6Zf27mqehlt75BTFJPkj7OB2n+1jQqB12WsmGnHv
-# RiyTWm7T4g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTMz
+# MjNaMC8GCSqGSIb3DQEJBDEiBCDoJFUZbQFkD2khve7WSvfAOqD08lMMViGDfd0/
+# AOy8KTANBgkqhkiG9w0BAQEFAASCAgBWBr7opHQTxit6YbxVIC+MYt7G6j4+1wsb
+# EdAjWiKSEsnzwJPu3AxyFd/V57BhZMzouk+u4FbryYgXA9AAv/STbhwtuEnP46kk
+# JgKbhDqXgr762oaIkWQsEqUXMLtsXqZ2s8hIBdMwwa8bmlr7IoMPfCG/RfhtqYyU
+# 8MB0h8mkdrXyFPr0gjHo/5zItphUKGXU6soQOy5tB0DPE9GGo+BisKWpjy8OKsdj
+# pWkVnIbbqWCTJl44Ia5HUvddyS5tWXkZWSkjj5e19qpcyPDvTZ3kBsEXSwuiovs/
+# pOdtmRpT0V5+6rBD8/GggwNK17tOY7ygLuRoWZ+Dpi/P+AQjtYgnsZwIxLPhUi4e
+# zM5YSX0hGyWUgfD8JxZ6M1c8aw5RPT5Z4kq2nKw4WvnE+P4z7/5ki+YuXay9Wf/g
+# F4udWpozn6S3iY3sppNuDrcEfH4T+ApuUDeyWKJPj/Fw3uRmxyUhcmaH3Cak2nZp
+# C+4me8aiKC0FvRDrC72U2GauG+Y6poZato0eufCovJYzUWQADbE5naD4LBtcdbHV
+# FOIIjXyDNCKEWnKBlPyQn/7BvRD3qXzlL6izawi4du9wSElPfiV5pJ37HZ6uMNa1
+# 8qQK/80hVccDvDdtCmtWk4GpFhyH2aFZkYJoLE3VLlkHgXSb/0UVmRz67Ic/f3DX
+# HKqpJoKSlA==
 # SIG # End signature block
