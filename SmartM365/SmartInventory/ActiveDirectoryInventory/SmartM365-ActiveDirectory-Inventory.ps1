@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.57
+1.59
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -770,7 +770,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.58"
+$ScriptVersion = "1.59"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1895,6 +1895,42 @@ try {
         return $total
     }
 
+    function New-SmartM365AdDailySummaryKpiHtml {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)]$Snapshot)
+
+        $upnHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateUPNAccounts) -gt 0
+        $smtpHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateSMTPEntries) -gt 0
+        $cards = @(
+            [pscustomobject]@{ Label = 'USERS'; Value = $Snapshot.TotalUsers; Detail = 'accounts in snapshot'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
+            [pscustomobject]@{ Label = 'COMPUTERS'; Value = $Snapshot.TotalComputers; Detail = 'computer objects'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e' }
+            [pscustomobject]@{ Label = 'GROUPS'; Value = $Snapshot.TotalGroups; Detail = 'groups in snapshot'; Background = '#f5f3ff'; Border = '#ddd6fe'; Accent = '#7c3aed' }
+            [pscustomobject]@{ Label = 'UPN DUPLICATES'; Value = $Snapshot.AffectedDuplicateUPNAccounts; Detail = 'affected accounts'; Background = $(if ($upnHasIssues) { '#fff7ed' } else { '#ecfdf5' }); Border = $(if ($upnHasIssues) { '#fed7aa' } else { '#bbf7d0' }); Accent = $(if ($upnHasIssues) { '#c2410c' } else { '#166534' }) }
+            [pscustomobject]@{ Label = 'SMTP DUPLICATES'; Value = $Snapshot.AffectedDuplicateSMTPEntries; Detail = 'affected entries'; Background = $(if ($smtpHasIssues) { '#fef2f2' } else { '#ecfdf5' }); Border = $(if ($smtpHasIssues) { '#fecaca' } else { '#bbf7d0' }); Accent = $(if ($smtpHasIssues) { '#b91c1c' } else { '#166534' }) }
+        )
+        $cells = foreach ($card in $cards) {
+            $label = ConvertTo-SmartM365EmailHtmlText $card.Label
+            $value = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $card.Value)
+            $detail = ConvertTo-SmartM365EmailHtmlText $card.Detail
+            @"
+<td width="20%" valign="top" style="padding:0 4px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;">
+    <tr><td style="height:88px;background:$($card.Background);border:1px solid $($card.Border);border-radius:6px;padding:10px;">
+      <div style="min-height:25px;font-size:10px;line-height:12px;font-weight:700;color:#64748b;">$label</div>
+      <div style="font-size:25px;line-height:30px;font-weight:700;color:$($card.Accent);">$value</div>
+      <div style="font-size:10px;line-height:14px;color:#475569;">$detail</div>
+    </td></tr>
+  </table>
+</td>
+"@
+        }
+        return @"
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 16px 0;">
+  <tr>$($cells -join [Environment]::NewLine)</tr>
+</table>
+"@
+    }
+
     function New-SmartM365AdDomainSummaryHtml {
         [CmdletBinding()]
         param([Parameter(Mandatory = $true)]$Snapshot)
@@ -2250,7 +2286,7 @@ $($rows -join "`n")
         $actionTitle = if ($hasDuplicateIdentities) { 'Review required' } else { 'No duplicate identity conflict detected' }
         $actionHtml = if ($hasDuplicateIdentities) { 'Review duplicate UPN and SMTP counters before identity cleanup, migration, or synchronization decisions.' } else { 'Keep the generated CSV files as the daily Active Directory inventory baseline.' }
 
-        $summaryHtml = New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot
+        $summaryHtml = (New-SmartM365AdDailySummaryKpiHtml -Snapshot $summarySnapshot) + (New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot)
         if ($IdentityContext) {
             $summaryHtml += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px;">Identity and mail routing issues by domain</div>' + [string]$IdentityContext.SummaryHtml
             $severity = 'Warning'
@@ -3959,8 +3995,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPIDdgv7ciKTrw
-# OszvQgzvCBjI9e2qw1jty6b+uotVKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBNWfJKHaRPd8F
+# Jnh8rG0i9anUANaxTLh3c70lDYg/86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4093,31 +4129,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICxyT40T+iAgCxboElxeHwZqCP3vCdbDWNPq6XeAdhuYMA0GCSqG
-# SIb3DQEBAQUABIIBgAMInRcnZ4EAAjww4/LbanPRqlUCJCUhfH8oSrKnr0AGmvjw
-# DAsXg6ZvyLUVMd+nx8vXAD00fgTbIUE3SSfCN4S+oRU4rLp6UjgXBH0diwVai0oX
-# AC2QBbKtVSu3oSr+dmx2wo+IfJWut2PQC+o4HpchQpEpWr3JLvnfYfgpB3zb/6D5
-# w+yUv+BS2xJUj6A568OSweORyfBVu5itcQFige1QsYna2lqTQkaQUeV8JImka6O3
-# E2NjmyDwm8Fkk/0SM8e+QGGpWei1wIEMEhzq2g2iHaZJqhJrRadchwKLEN3m9ZQO
-# brFIST4N+1JDazfLO8a4/ozweTSiy20YqJ47JG4y/gZxnGQRnT0aiFNX317scbIX
-# qCCtCj+u3n1N3+2FmLTr2X7O/aXUZABUqfOtBIWQE/pZUs8DTTOQFPsUwCjfqteo
-# ccQNvXeXveKty6Lu4Dia6y+3XFUN/TkcSKsEeTvxhGrwDMaNShWuxDU6zSQoMK4I
-# rPZ8zJm2HSV5UBTCjKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO7KYI+58+JTr+FWaN8gTMhKiG+29pm6fbd0U2046xshMA0GCSqG
+# SIb3DQEBAQUABIIBgFVnB6ZmrXK0FEPdG7tunj22GATH4RSBXzz0JIkBGInV4Aqq
+# rb9P/9RmQEUQK7d5qQblCcV5RZnsvjz4OZ5jxYviFAtM9YaThPZ0byzLPePCrs21
+# K8xajCZLcyfgSwiPU15f1kpZfa0gcSSZI2/ACTu18aEYLJv4sucpWBbaGV49q3DE
+# Iqe74v5lpkBcj/iUZPYXSKx9Z5pDUTeC9dMreAXxDMll+0DTMgogKh/Vd3UgnM52
+# VtFqa77Q1UJImTHQwoF7iUyCmXQIvyeQBdI9pbiu7yhVQCTPwuMxE9ShtVZkhDwv
+# A6nybW1x7vmkHfCh5Iuh3qHF3qZy/CK5BaSZPG2sT39reO8OJ34w2XhCT5MnrWy1
+# a0ZrCs90z1ATpL6ePD6oFY83wvnQK8FA4x0C1HJzGdgfw/cLWdgloDU53A5d20Ky
+# 4QkcfHoBnkTLGfobsh5J6vN3nRF+s+ZB/tGpSFsy9euAiIYA+9PX+9glbNWL2mby
+# CYQbH6s5jj5dM4EdiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODA3
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBlCScC9hy6k7PwP5lWt0OmkEwexvoPA3lvL2j8
-# ehWpxTANBgkqhkiG9w0BAQEFAASCAgCO4rUWrZG4/49p9wPT2HTALY/DdVGplpa/
-# D1Ii2DfSGsdllEg1lyDFTgVbhgW+ESeWh+OBgkJBEagWAjgExtO2zJltjWfjvS57
-# df65iy8QyXq60M7QhSJZK3Ob5C8nq3dGmZ1T9lykRMSvRR6fKCcAZnoxTfYTrZZi
-# fSTGAeW7RFudgyc6Ayokdg8ArofyFoQ8lJBll+9svXrP2svSx5I+c+XEIqzL4ViS
-# +mR3u3NQ3Epl3xc/72qzE0+CjZeM0hQ8G09Zcm3QPUQrUB1APjLvciv6ur/Mwdo6
-# ix6k773DDbPzBhzezHI9vhPWcXvU/i7ZlUdhWUhOKsOoEQLwiOwouWreAEGSpi6g
-# JmHsXv9H5h8hThGuRS4pU0B+FevJ/XIwQtPcCjROeD0fX9yMT4YH6MdwE46gBI5r
-# AjmPvam51vChXY6m3DRtOhbFXpmk8df60dUi+R3O4IC1WO2w1gqQrgBIPmmcRAQ4
-# jah9+BbTILCTW0LI3pFLGgDvpCRezslxZ41f5Yi1opGcECj1RQIfUnaRESSz5a4l
-# C1qAIBveu8KfVM8rYUCP1W2iGfk/uGQb25eepc7Qz3DavRB0swtle7/8GMVVbfEJ
-# q+uUgmb1n4tzWSeszvxw7tdaiOHzTvwk77ziFItXCiiSz7Qm5TSVZwnhx+c2O9zC
-# uw8pvegWUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODQy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCC97eVId4vmZNlkx7MwIiYuzJa8c39Nc9qGUTOR
+# MPdrDjANBgkqhkiG9w0BAQEFAASCAgCT2+ar1OmJ8WOdvhY3lLR5PeCpkh4Xk3EM
+# lS2oWF4eUxk72rjVJYMAJS1bEvyqkX/Mu9l0OdUtz2mKpVIKu7VIyGu4EVoqIfvf
+# 8lsHjunHXV/tFLfokrRp2XpJZhFXPnCoPOHfZhlSQqoH4DDW+jVKOT35l51TJGys
+# jWOlExYDkneO9+R/tZ4G6mYrsJ8RYnUJ29HghFUfvJBbjMC1J5jT+Pe53ZbUEnNW
+# 9WEh7i3ct4h88/ASyI0M7a6UGUFxc4dXlI1h2eIxkVbEFvRVh3r1YKxaJiz2BUS+
+# ayFawQ9YeDG1OHH+DIXKqAR2B+SLB9UVbLVRPHVMAo3NQMk5oyZsGBXqKRt2z2Tp
+# m/dM7PMpyQbhg5Pw1T/gzDdVPtX64uSywdTagsfRPtuoikzN9dcb3VQB6CgdzYal
+# VEQWcWmvY2Fk7W1a+TyndQ/yJLUO78BVIBxmvcXQrrlhaXtokfs3PvosCFnAWDIu
+# d2r49E0u9POLUxufbqilnxyEmlXo/JDfTrpxK0voauotTR4w7lFuoCNZX3D5kb3x
+# foMYcykp6/2ZBNx1fG5FbexiUjI9UPsHaPWDmNaIUMsNWz1w9x4ICOSRF5V0oK7l
+# TJFMuGA5q5rCnM3i4YJWR+BWN5iydrHOpynPSihcprmEha72fkNXslbCj6+r9cKO
+# VzDX90lrCw==
 # SIG # End signature block

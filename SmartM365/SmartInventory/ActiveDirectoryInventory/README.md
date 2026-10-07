@@ -74,6 +74,8 @@ Useful settings in `SmartM365-ActiveDirectory-Inventory.local.json`:
 
 ## Daily Summary Email
 
+Five cards at the top of the email Summary show current-snapshot users, computers, groups, affected duplicate UPN accounts, and affected duplicate SMTP entries. These values come from the same CSV snapshot as the per-domain table; the cards do not imply that a partial inventory covers the full forest.
+
 The inventory script also writes `AD_Inventory_DailySummary.csv` and can send one daily synthesis email to the configured `To` recipients. The email uses the shared SmartM365 template and compares the current scan with the latest summary snapshot from a previous day. Same-day snapshots are ignored for the diff because the script can run several times per day.
 
 Useful settings:
