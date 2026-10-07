@@ -1688,6 +1688,111 @@ function New-LicensesRecoveryWorkbook {
   return $file.FullName
 }
 
+function Publish-LicensesReportCsv {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)]$Snapshot
+  )
+  $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AssignedUsers','RecoveryCandidates','RecoveryUnknown','DisabledUsers','NoM365Activity','MultipleTargetSuites','MultipleAssignedSkus','NoAdOrEntraActivity','NoMailboxActivity','NoLocalAppsUse','CandidatesPrimaryIntunePc','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','EvidenceStatus','WorkbookQualification')
+  $candidateColumns = @('SnapshotId','TenantKey','CandidateType','Product','UserId','TenantUserKey','IdentityJoinStatus','UserPrincipalName','DisplayName','Reason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
+  $gapColumns = @('SnapshotId','TenantKey','Section','Metric','Value','EvidenceStatus')
+  $sourceColumns = @('SnapshotId','TenantKey','Name','Ready','Provisional','Date','Reason','SHA256')
+  $provisional = @($Snapshot.Sources | Where-Object Provisional).Count -gt 0
+  $licenseProvisional = @($Snapshot.Sources | Where-Object { $_.Name -eq 'M365_Licenses_Users.csv' -and $_.Provisional }).Count -gt 0
+  $summary = @(
+    foreach ($category in @('Suite','Other paid product')) {
+      $products = if ($category -eq 'Suite') { $Snapshot.Products } else { $Snapshot.OtherProducts }
+      foreach ($product in $products) {
+        $counts = if ($category -eq 'Suite') { $product.Counts } else { $null }
+        $count = { param($key) if ($null -ne $counts) { $counts[$key] } else { $null } }
+        $review = if ($product.Product -eq 'Microsoft 365 E3' -and $Snapshot.E3ToF3Review -and $Snapshot.E3ToF3Review.Available) { $Snapshot.E3ToF3Review } else { $null }
+        [pscustomobject][ordered]@{
+          SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; GeneratedAtUtc=$Snapshot.GeneratedAtUtc; LicenseCollectedAtUtc=$Snapshot.LicenseCollectedAtUtc
+          Product=$product.Product; Category=$category; EnabledUnits=$product.Enabled; ConsumedUnits=$product.Consumed
+          AssignedUsers=(& $count 'Assigned'); RecoveryCandidates=(& $count 'RecoveryCandidates'); RecoveryUnknown=(& $count 'RecoveryUnknown')
+          DisabledUsers=(& $count 'Disabled'); NoM365Activity=(& $count 'M365Inactive'); MultipleTargetSuites=(& $count 'Multiple')
+          MultipleAssignedSkus=(& $count 'MultipleAll'); NoAdOrEntraActivity=(& $count 'AdEntraInactive'); NoMailboxActivity=(& $count 'MailboxInactive')
+          NoLocalAppsUse=(& $count 'LocalAppsInactive'); CandidatesPrimaryIntunePc=(& $count 'RecoveryPrimaryPc')
+          SharedMailboxesLicensed=(& $count 'SharedLicensed'); SharedUnder50Gb=(& $count 'SharedUnder50'); SharedRemovalCandidates=(& $count 'SharedEligible')
+          E3ToF3ReviewCandidates=if ($review) { $review.Candidates } else { $null }; E3ToF3ReviewUnknown=if ($review) { $review.Unknown } else { $null }
+          EvidenceStatus=if ($category -ne 'Suite') { 'Capacity only' } elseif (-not $product.UsageAvailable) { 'N/D' } elseif ($provisional) { 'Provisional' } else { 'Qualified' }
+          WorkbookQualification=if ($category -ne 'Suite') { '' } elseif (-not $product.UsageAvailable) { 'Source not qualified' } elseif ($licenseProvisional) { 'Provisional: license receipt bypassed' } else { 'Qualified' }
+        }
+      }
+    }
+  )
+  $candidates = @(
+    foreach ($candidateType in @('Recovery','E3 to F3 review')) {
+      $details = if ($candidateType -eq 'Recovery') { $Snapshot.RecoveryCandidates } else { $Snapshot.DowngradeCandidates }
+      foreach ($detail in $details) {
+        $recovery = $candidateType -eq 'Recovery'
+        [pscustomobject][ordered]@{
+          SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; CandidateType=$candidateType
+          Product=if ($recovery) { $detail.License } else { 'Microsoft 365 E3' }; UserId=$detail.UserId
+          TenantUserKey=''; IdentityJoinStatus='Not joined in SmartM365'; UserPrincipalName=$detail.UserPrincipalName; DisplayName=$detail.DisplayName
+          Reason=if ($recovery) { $detail.RecoveryReason } else { 'Manual downgrade review' }
+          LastAdActivityDate=if ($recovery -and $detail.LastAdActivityDate -ne 'N/D') { $detail.LastAdActivityDate } else { '' }
+          LastM365ActivityDate=if ($recovery -and $detail.LastM365ActivityDate -ne 'N/D') { $detail.LastM365ActivityDate } else { '' }
+          PrimaryOnIntuneWindowsPc=if ($recovery) { $detail.PrimaryOnIntuneWindowsPc } else { '' }
+          TargetSuites=if ($recovery) { $detail.TargetSuites } else { 'Microsoft 365 E3' }
+          MailboxSizeGB=if ($recovery) { '' } else { $detail.MailboxSizeGB }; OneDriveUsedGB=if ($recovery) { '' } else { $detail.OneDriveUsedGB }
+          OneDriveUsedBytes=if ($recovery) { '' } else { $detail.OneDriveUsedBytes }; ArchiveStatus=if ($recovery) { '' } else { $detail.ArchiveStatus }
+          LitigationHoldEnabled=if ($recovery) { '' } else { $detail.LitigationHoldEnabled }; RetentionHoldEnabled=if ($recovery) { '' } else { $detail.RetentionHoldEnabled }
+          WindowsAppsUse180d=if ($recovery) { '' } else { $detail.WindowsAppsUse180d }; MacAppsUse180d=if ($recovery) { '' } else { $detail.MacAppsUse180d }
+        }
+      }
+    }
+  )
+  $gapMetrics = [ordered]@{
+    UserMailboxes=@('Total','Universe','OtherSkus','NoSkus','Unknown','EntraEnabled','EntraDisabled','EntraStateUnknown')
+    NoUserMailbox=@('Total','Universe','OtherSkus','NoSkus','Unknown','Guests','MemberEnabled','MemberDisabled')
+    AdGapActivity=@('Members','AdObserved','NoObservedMatch','Ambiguous','AdEnabledRecent','AdEnabledInactive','AdEnabledNoDate','AdDisabled','AdEnabledUnknown')
+  }
+  $gaps = @(
+    foreach ($section in $gapMetrics.Keys) {
+      $record = if ($section -eq 'AdGapActivity') { $Snapshot.AdGapActivity } elseif ($Snapshot.MailboxGap) { $Snapshot.MailboxGap[$section] } else { $null }
+      foreach ($metric in $gapMetrics[$section]) {
+        $value = if ($record -and $record.Available) { $record[$metric] } else { $null }
+        [pscustomobject][ordered]@{ SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; Section=$section; Metric=$metric; Value=$value
+          EvidenceStatus=if ($null -eq $value) { 'N/D' } elseif ($record.Contains('Provisional') -and $record.Provisional) { 'Provisional' } else { 'Qualified' } }
+      }
+    }
+  )
+  $sources = @($Snapshot.Sources | ForEach-Object {
+    [pscustomobject][ordered]@{ SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; Name=$_.Name; Ready=$_.Ready; Provisional=$_.Provisional; Date=$_.Date; Reason=$_.Reason; SHA256=$_.SHA256 }
+  })
+  if (@($summary).Count -ne 7 -or @($candidates | Where-Object CandidateType -eq 'Recovery').Count -ne @($Snapshot.RecoveryCandidates).Count -or
+      @($candidates | Where-Object CandidateType -eq 'E3 to F3 review').Count -ne @($Snapshot.DowngradeCandidates).Count -or @($gaps).Count -ne 25) {
+    throw 'License report CSV rows do not reconcile with the mail snapshot.'
+  }
+  foreach ($spec in @(
+    @{ Name='M365_Licenses_ReportSummary.csv'; Columns=$summaryColumns; Rows=$summary },
+    @{ Name='M365_Licenses_ReportCandidates.csv'; Columns=$candidateColumns; Rows=$candidates },
+    @{ Name='M365_Licenses_ReportGaps.csv'; Columns=$gapColumns; Rows=$gaps },
+    @{ Name='M365_Licenses_ReportSources.csv'; Columns=$sourceColumns; Rows=$sources }
+  )) {
+    $path = Join-Path $Folder $spec.Name
+    $pending = "$path.$($Snapshot.SnapshotId).pending"
+    try {
+      $lines = if (@($spec.Rows).Count -gt 0) { @($spec.Rows | Select-Object -Property $spec.Columns | ConvertTo-Csv -NoTypeInformation) }
+               else { @(($spec.Columns -join ',')) }
+      $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join "`r`n") + "`r`n")
+      $stream = [IO.File]::Open($pending, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+      [IO.File]::Move($pending, $path, $true)
+      $readBack = @(Import-Csv -LiteralPath $path -ErrorAction Stop)
+      if ($readBack.Count -ne @($spec.Rows).Count -or @($readBack | Where-Object { $_.SnapshotId -cne $Snapshot.SnapshotId }).Count -gt 0) {
+        throw "Published license report CSV does not match its snapshot: $($spec.Name)"
+      }
+      $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+      if ($uploadSetting -and [bool]$uploadSetting.Value -and -not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) {
+        throw "License report CSV was not uploaded to SharePoint: $($spec.Name)"
+      }
+    }
+    finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
+  }
+}
+
 function Publish-LicensesReportSnapshot {
   param(
     [Parameter(Mandatory)][string]$Folder,
@@ -1854,6 +1959,7 @@ function Publish-LicensesReportSnapshot {
     $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path
     if (-not $uploaded) { throw 'License report snapshot was not uploaded to SharePoint; summary email was not sent.' }
   }
+  Publish-LicensesReportCsv -Folder $Folder -Snapshot $snapshot
   return [pscustomobject]@{ Id=$snapshotId; Path=$path; Data=$snapshot }
 }
 
@@ -3497,8 +3603,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2SxAnRLcndhd3
-# FGKYroqjaIy8eZZEnJiz3JQGQzfGWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs4B/fDdqsJeqi
+# 2i7ibv+hNN4lfl5AOhr9avvSCRebxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3631,31 +3737,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHhjDMiWKVkAOLlkFyJj1PBmVa0/BgeeZIkZme56HuATMA0GCSqG
-# SIb3DQEBAQUABIIBgKKFOwhImEb4iLfOgiRNbg7cKGDcWznltOxCr12X0bW8sDKR
-# plTYrvhfyVRvcX6uDUnh9T1q/qlQng7+WtXOzJ7dNZvkmbL5Csu2lIF/CIgKnl81
-# BaCzaM4WBMOqiTEUIqq4PlNSpnZ7zDT9msoqXAemtEazQQebQGwRsq55yvw1+JDR
-# DOAqQoiWlilKB9sI3vWb+U+r+ZDyZm09uoOwyRs5zxyxl54+xBMJy1tv5MXhN8vW
-# 79jK4F2eypvwTZOn1dMiHREmRQscCAFcysUv4TmBqcb52Kx1KFjI0zR3NdKHl8kt
-# 64j40M0Ta7q4nMVExL4aoM/7bl7KsKhoDjzPUABEBkyKr+SXd2kZNgH8GWT6W+36
-# v5gB8CIslIIswHe2WQ9SG27VFRSjvBAv8jv5FFYKMHD6NNTgTYrSbKwXfYO9brOA
-# jeIC5DJfrurQTjKfIsuyo+uPiK/UrftfKjEwohExFkzZA/pNWSsYn7wE2rMd3+oj
-# o5K5DpEj9f7DEBsthaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINOgmpWmNrNrIH4NkhDQp1Eq0030YVYT2uIwph0z55fNMA0GCSqG
+# SIb3DQEBAQUABIIBgH21Y0JDpZ/B2hykpuhGjXALs4Ax/dqM5NvuioqQimLYshKs
+# Owou4Uw4OkCj0aCXxBsbhVl9R8TgigpHh0O2la7/G7LoFw4BSRAPzDHK2o9wfpwb
+# jo+AZAkQ2Hfs0QXWZclBjVg6boli3cMfvdiapq4XnbtvvmmBaL316mZZtQB8LRHO
+# wNwabUq/ggG6071H4lpfmlCghs2//I79VMVCKQPwrlHjp+XuQQ4USLivVMj1ma2v
+# pKSLv1T9xO5an0H/hWn4/kX/YahJxb1amMwjCt7siUPf4nnctQZSfRyV6XVsuIUv
+# VJmRkcxUEAggxvri0fCcIJ1cjru3NXWMayNYhtxuySb2HaYeML2Qb333f9qgiSLm
+# 8PkK82PQzUY1yt37GDuoNYZ69dkKe5rR15oWwEMoYwtFC+YWzrGTUffjJgbPcLNc
+# tZ9SeHtQLsoGxwSXyGj3jWZIrE+rz6cI44DvgHaCOx68hyr9OkQ/390lrXaZ2698
+# IWYnc3eAJngnzUXfCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNTQz
-# MTNaMC8GCSqGSIb3DQEJBDEiBCCPy7/ZCnH9UCCO0lIemVGppMxUq3CLW08Lp2hk
-# VOUNjzANBgkqhkiG9w0BAQEFAASCAgBtvs8KeM9zYdsOefLlfGoBcKXm59/wrtZF
-# 57+462+2fH900kWRHVcK1tAOL6rYhYZqWKfZNmQdJeG8dBqPc/g6WC82CLVSFpiF
-# wxxInzRkGQfKvSIYsvyuIIKWed7v43mW44DMJgT4fa+9qkUt8BU3QVTVyYdo8smw
-# +dOMabEL0RHWYdW1iFwtS1jozzRDwgfAgSze0+QCx/43HLicru+Wg1ES4iLFEq3s
-# nXZcBUdKgKwnSxg/Z9LyfhgPxYQ0d6CI5OLqaO5w46XVlNMr3kfYfSD992Kl9sp0
-# gLIDo29miL693DWD7aj5zp7CFRz9htlMuWMc0VSnilfwCGLc6Too7Zu+rmcRqUn4
-# xoj5zqQ8BOPztUYdKpO+/KDI7RLvojn15m8rlXW5tkQsiHdTA7briiAzL5nxrB8F
-# LQ4HbKJXIyyYLrBXcQviC6pfDCA3zFbl/edRMwZSZvTYPrF53f6RTbvCPGxqMw1N
-# ZoBOEh1I5i/kcOqeF+2p9WZemOYJu5pEr0S561bbkONGVKRAfHR3NdZItV0z0Fv3
-# L7XocuCmqF3YvKF3yePKTz/oUwCckIOG3bMXbQNlsTYikwgk7HXuju61z8mvIWdl
-# zsvsyaSuCMv29CdLamufjeTNyUdLyRkxAm//xFlOfIMtSGimFOEWduS36wQ5QHg0
-# dR35zIRn2w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDA4
+# MjJaMC8GCSqGSIb3DQEJBDEiBCDWHDmft32//r4gXC9VQMMgzvIb6e6E+merPGg9
+# KGBCXDANBgkqhkiG9w0BAQEFAASCAgCwCDF+fQZt8K2wOWq6Qj1vdnjlgQhYNvAZ
+# 5gsB3KaZVZfcBNF5mFvzKD6ovohOaF7+SJKwSna+zPtFDZFElhFkkdETPi0MbYJI
+# 8nPoAnZLkWLMJEY+K6L4RGL+Xx7GCStVfiU4QRhf9OyZ9Dg+cgI5oHiTUsq5WjWL
+# AvTvxdTUevVB1ykz1U/sxCegad8Bz9VTD2Vx1c9MDAGA2YUD20zKG8FwJRgeXjEf
+# ErZmB4kppfYCYFXNwtbiD6R1fCp5Tx2L2Cgv+8RP5CiVcxSk/BWIh/o2ILE9Ww7w
+# SLhmyrRhtLO85sLoSAhnG2tKmd273oEQlX/gHP7ZDEhSdzkcGbMlvT/g4mgmkfoX
+# iVT7EUAt/f897VW3P5UHqxEZD2HDTc9SkFZyn0pu0ktD7Y1G/NHgBIvZzuhoKf1v
+# sgGU3DLzrJhn8EtWHieXKvgQdSrAFzfiq2Yvi8lkJW1aZntoE6BLfLcA8f7qkGkM
+# Pkucx2+W3Ww2zQjh5MIqctFJZxwezsgtXglzySvLz51IP1m00DJwIn8Sr/V3vyX8
+# ttd8CXum2APTcZ1g/6zmOmygmEwyFghsv4erI52x3zfOJ4/3XBXPPUsKdUNrTm2q
+# iUeFeRJgRnREuJMPAHAcKoLQgrHa4ADEr3AKI13rBK56WgKsDFKJ/opIxE2rfxzP
+# uX7N7SVgcg==
 # SIG # End signature block

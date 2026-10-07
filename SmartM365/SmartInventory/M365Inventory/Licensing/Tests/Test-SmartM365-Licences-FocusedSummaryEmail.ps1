@@ -31,7 +31,7 @@ $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
-  'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
+  'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
 $definitions = @($ast.FindAll({
@@ -486,6 +486,19 @@ try {
   Assert-Equal @($reportSnapshot.DowngradeCandidates).Count 1 'Snapshot downgrade detail reconciles with workbook'
   Assert-Equal @($reportSnapshot.Products | Where-Object Product -eq 'Microsoft 365 E3')[0].Counts.RecoveryCandidates 2 'Snapshot E3 recovery KPI'
   Assert-Equal $reportSnapshot.E3ToF3Review.Candidates 1 'Snapshot E3 downgrade KPI'
+  $reportSummaryCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportSummary.csv'))
+  $reportCandidatesCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportCandidates.csv'))
+  $reportGapsCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportGaps.csv'))
+  $reportSourcesCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportSources.csv'))
+  Assert-Equal $reportSummaryCsv.Count 7 'Power BI summary has all email products'
+  Assert-Equal @($reportCandidatesCsv | Where-Object CandidateType -eq 'Recovery').Count 4 'Power BI recovery rows match the workbook'
+  Assert-Equal @($reportCandidatesCsv | Where-Object CandidateType -eq 'E3 to F3 review').Count 1 'Power BI review rows match the workbook'
+  Assert-Equal $reportGapsCsv.Count 25 'Power BI gaps have all mail indicators'
+  Assert-Equal @($reportSourcesCsv | Where-Object Name -eq 'M365_Licenses_Tenant.csv').Count 1 'Power BI source freshness includes tenant source'
+  foreach ($csvRow in @($reportSummaryCsv) + @($reportCandidatesCsv) + @($reportGapsCsv) + @($reportSourcesCsv)) {
+    Assert-Equal $csvRow.SnapshotId $reportSnapshot.SnapshotId 'Power BI CSV snapshot identity'
+    Assert-Equal $csvRow.TenantKey 'prod' 'Power BI CSV tenant identity'
+  }
   if ($script:SentMail[0].BodyHtml -notmatch [regex]::Escape("Snapshot: $($reportSnapshot.SnapshotId)")) { throw 'Email does not identify its Power BI snapshot.' }
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
@@ -635,6 +648,10 @@ try {
   $misalignedF3 = @($misalignedSnapshot.Products | Where-Object Product -eq 'Microsoft 365 F3')[0]
   Assert-Equal $misalignedF3.UsageAvailable $false 'Snapshot rejects misaligned license assignments'
   Assert-Equal $misalignedF3.Counts $null 'Snapshot leaves unqualified metrics null, not zero'
+  $misalignedSummaryCsv = @(Import-Csv -LiteralPath (Join-Path $testRoot 'M365_Licenses_ReportSummary.csv'))
+  $misalignedF3Csv = @($misalignedSummaryCsv | Where-Object Product -eq 'Microsoft 365 F3')[0]
+  Assert-Equal $misalignedF3Csv.EvidenceStatus 'N/D' 'CSV marks unqualified usage N/D'
+  Assert-Equal $misalignedF3Csv.RecoveryCandidates '' 'CSV leaves unqualified recovery count blank'
   Assert-Equal $script:SentMail.Count 1 'Unqualified usage still sends a stock summary'
   if ($script:SentMail[0].BodyHtml -notlike '*N/D*') { throw 'Unqualified usage is not marked N/D in email.' }
 
@@ -822,8 +839,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJ9yBXUt4OPAyi
-# xSH56oRCvRXbNE8t3mK1yyyyGeH3+6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyeYJbJCAEFBVe
+# FNVQpJlBJtHiPKX9JpyQD5eAj56rx6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -956,31 +973,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIFAu4ICXCgbr6PzRvd5lsh5BFEA1nrMWK9M7tnCpqWjMA0GCSqG
-# SIb3DQEBAQUABIIBgIn0zAnezAm6JsdYoknV34UMV7T0p81eYBnI28hxfZmkaIcs
-# Fnf9PRjOumUjQ/AjuKdz/xu7u1/s0b5I2Lmgfypn2EdW/2AYvUui0tlBz4JIyzEJ
-# MbrbSNitk36tTZEtb9PR1u8dvyyXdqWcBdAMve+LP/5iTSdHuyznQGHwjGfgqIzV
-# 3SXt/7C+ws3gzqp1IRGe/hlgbxHCT+euM0Lc3P60J2jBW7EWO2tdROYHZbEGJdbT
-# IyHWJRPncrhsYsPX4HviMbLogYq61hhtAILDJggl6DgEcqzFk/uCd+vXVUR+LViW
-# ZAVwzp2Hx4aLkKnyACIRvLVQC9ilxtJPrGSn6WIsUqVLrM0YKRhHTALhuv3qw0rN
-# Eum4W4Ieji5aujN0ANLANYlvaPwn4aOZ2oYRtgyK21RVeztho/wq5as7CK+e0duo
-# EcjQWDQ3MDTPpsW/STOpYupxxFlu6qcYPkQFVGIanVkw2qxNSjllBv/zRsJ2TbKS
-# czlXHJb64XN9DKT4tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJRgJLjur5LCuTGSO8eEKXbq05U/YqeKb29G053VTspbMA0GCSqG
+# SIb3DQEBAQUABIIBgJACrGxEjxX+JsZFQXIe8qF7QFoIL7c+FrPKdchuGXBZROMP
+# Njc4rDzK/SuRAa29Q672/Zc6rlbbMFGT+QKTt9C6HIs/R3CZHBS45QJrsIbLoYQK
+# 5TLw1EafrEfeNhfXC9KkrNdeSyyWGMDexMXX0jnoOA4KDpKEnIZjrrpzcTjy0v4y
+# J5EQB6BX74PsXYr1Nrw0Y6LH4P8dFA/uL58ZY27N0w+B/pgpcsUptJ7kko3pIWta
+# jB2ZlLVUOZIQXxuY3fXwTg8mvhRqdjmdfuYx0RY7K+io/OKxySyDtNoPWV/YuS/X
+# XFrji85eJ+vw3rq1pEKdLTvXnr3IJ7lMbSsKL9BLWM5f4+WHT5Icirh5fQZR+k0X
+# oXvMPJ2nLR9fOrvFmT8FWFJr5DVcicNhq+snepsBFJVrR8wGKt/qJZdJTql1jehK
+# /6CNOG+eoLaTEZgZpRPvR9j496igdCMxmlTKvy/tVwniBIvraW3JlEIEgE0YFukP
+# NSDOfndjYL3CZj8db6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNTQz
-# MTNaMC8GCSqGSIb3DQEJBDEiBCB6ZE4gq3ODXrnhn0KFevX8fNxgogc3Dg4Xfcxq
-# ffEl+TANBgkqhkiG9w0BAQEFAASCAgBCFXtYdP5VN8HO47wCUgpv86Wzd8h4wr5+
-# 6876TEZqKzDQpiGPu8BUAxJ3P+fIU0Sl6qxlv/ZIU13Eg4AQ7KDE7QYFRzb1mosC
-# 6mv8IY0MwRJBjJLw5KtUBuEXedn9Nw1IjhqD1yx0on0QTO8SKYha9V7HbSdzrjRA
-# dKarDE6JnkdRIjC7/5OfMvlP5I6ZyRCpVwdhCzciiloVSEPcnwY2x3NKlUDBh+JB
-# ja2rBSmuyQC8UsElKvveDp0mtMn1iN1QyjpFhHHfOUD8XkFXFmJLIJAjrOykdx9Y
-# ACZWqAZ5+JHkmtRDHCBZtSb5luHodS6x3CZHPV6bGF/cMAoIjfD4zzdXwtxT8JHy
-# 9PaSmSeyP+mbl3ZmwiwZLXjSpbCO6rJesuaL3nKOfvEEp5KDaLqb8IfBW7AkiXeg
-# NbVMV5JJ5C0D3dLDP7AwBIdO4/bzA/PSPaKMkb98ZhEsJjIFL3LXpBuMm629h/QX
-# lbHPZhRWoie3mU2IwdtTHDCY+KEP22kuCof/DpzC9mMp2tnWc5XSrio6UHM9H7ca
-# Jkmifj8hhvZTAOYsqqM5uc+MhVkd8Son3M1qAkCxnn4iMTsVgwu0n+qb3V8qWumn
-# +I9OveXdynH4zmCwckK1GVb6qcnMd3rRHdJFCLwGNHorAtsf5X3mLXkvt/TwDqdt
-# 2RuYmFkxiw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDA4
+# MjJaMC8GCSqGSIb3DQEJBDEiBCCkIk8xNDdiCZ+F54ZlyPJ98y71WqV4ufqfxay4
+# M5XwCzANBgkqhkiG9w0BAQEFAASCAgBPBhyE1NHlUTJCffrzAuVJRLn4uVfrMhnA
+# wGUi70pmP2hWgrzjfl1KHW3I2Opb5ZCx8l4KROU+xJiq1TK5R/llguX5q9hvjNaU
+# 9RUEqE+YQvUHmZ+Bm5H5j2ZcpDCf3Ixqvl4iKQWgrLck3sNhnxtW2t2o0RqHdyGq
+# n10bBBTpAYNpE7D9oe+dxlPvGVrA15QpkSeKEZhTE/Nbpls415EyziLc5OKXiKkf
+# 8Az6A8s14NrvJcjGB6kNmRc1qAFd88i/qdooKij3dmkxqqZzIs7UgRMp+YtB41B/
+# UALz2fZcT5kn/UxHs+QgJh044WukNJwNoeSoIgRpu+Vpwc7Irb7QmPzQNtDBwYRC
+# AGndme2WvYf1D/ao/rDZpgqPt1pIZjhw3L8llWkkwWh6sGFfVm2GdEjIl5NQ3Bdj
+# SS7jpew1SMQX0OA+9pLOX9tkplfc1SKLLxa8+GnhzXAjqUVQEclnY8B3UpqZmSsA
+# fosFcF2h8c73x6hVY/tg1mAA7JAAWXHzE2ZoyeTl+0O17N3waAK+lkZCXeC15Eay
+# ndaRfDxQF4BGww+5fhWT0Wiw0/Fh4pqucO6T3m4MtTMxn5mqNFGnpfEXayAMyoMh
+# BXJIQzTKTMOSrv8LMOSwfL0smyXdlzL9P9ckSvYdaeZOPwgPSWF5GM5Tj7eNyewo
+# J+zjD445Dw==
 # SIG # End signature block
