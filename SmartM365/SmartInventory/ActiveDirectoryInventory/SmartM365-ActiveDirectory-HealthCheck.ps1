@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.30
+1.0.31
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -76,7 +76,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.30"
+$ScriptVersion = "1.0.31"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -374,18 +374,22 @@ function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[d
     $okRows = @($r | Where-Object Status -eq OK)
     $notMeasuredRows = @($r | Where-Object Status -eq NotMeasured)
     $find = @($r | Where-Object { $_.Status -in @('Critical','Warning') } | Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check | Select-Object -First 200)
-    $forestName = if ($forestInfo -and $forestInfo.Name) { [string]$forestInfo.Name } else { [string](@($r | Where-Object Forest | Select-Object -ExpandProperty Forest -First 1)[0]) }
-    $rootDomain = if ($forestInfo -and $forestInfo.RootDomain) { [string]$forestInfo.RootDomain } else { [string](@($r | Where-Object Domain | Select-Object -ExpandProperty Domain -First 1)[0]) }
+    $forestName = if ($forestInfo -and $forestInfo.Name) { [string]$forestInfo.Name } else { [string]($r | Where-Object Forest | Select-Object -ExpandProperty Forest -First 1) }
+    $rootDomain = if ($forestInfo -and $forestInfo.RootDomain) { [string]$forestInfo.RootDomain } else { [string]($r | Where-Object Domain | Select-Object -ExpandProperty Domain -First 1) }
+    if ([string]::IsNullOrWhiteSpace($forestName)) { $forestName = 'NotAvailable' }
+    if ([string]::IsNullOrWhiteSpace($rootDomain)) { $rootDomain = 'NotAvailable' }
     $forestMode = if ($forestInfo -and $forestInfo.ForestMode) { [string]$forestInfo.ForestMode } else { 'NotAvailable' }
     $domains = if ($forestInfo -and $forestInfo.Domains) { @($forestInfo.Domains | Sort-Object) } else { @($r | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique | Sort-Object) }
     $domainBadges = (@($domains) | ForEach-Object { '<span class="tag">' + (ConvertTo-HtmlSafe $_) + '</span>' }) -join ' '
     $dcNames = @($r | Where-Object { $_.Category -eq 'Connectivity' -and $_.Check -eq 'Ping' -and $_.DC } | Select-Object -ExpandProperty DC -Unique | Sort-Object)
-    $gcCount = if ($facts.Count -gt 0) { ($facts | Measure-Object -Property GlobalCatalogCount -Sum).Sum } else { '' }
+    $gcCount = if ($facts.Count -gt 0) { ($facts | Measure-Object -Property GlobalCatalogCount -Sum).Sum } else { 'NotMeasured' }
     $lockedTotal = 0
-    foreach ($row in @($r | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' })) {
+    $lockedRows = @($r | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' })
+    foreach ($row in $lockedRows) {
         $value = 0.0
         if ([double]::TryParse([string]$row.NumericValue,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$value)) { $lockedTotal += [int]$value }
     }
+    if ($lockedRows.Count -eq 0) { $lockedTotal = 'NotMeasured' }
     $domainsWithCritical = @($criticalRows | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique).Count
     $dcsWithCritical = @($criticalRows | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count
     $unreachableDcs = @($criticalRows | Where-Object { $_.Category -eq 'Connectivity' -and $_.DC } | Select-Object -ExpandProperty DC -Unique).Count
@@ -407,10 +411,26 @@ function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[d
     foreach ($g in @($priorityGroups | Where-Object { $_.Critical -gt 0 -or $_.Warning -gt 0 } | Sort-Object @{Expression='Critical';Descending=$true},@{Expression='Warning';Descending=$true},Type,Name | Select-Object -First 20)) { [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td class='riskCritical'>{2}</td><td class='riskWarning'>{3}</td></tr>" -f (ConvertTo-HtmlSafe $g.Type),(ConvertTo-HtmlSafe $g.Name),$g.Critical,$g.Warning)) }
     [void]$b.AppendLine('</table></div>')
     [void]$b.AppendLine('<div class="card"><h2>Domain status summary</h2><table><tr><th>Domain</th><th>DCs</th><th>OK</th><th>Warning</th><th>Critical</th><th>NotMeasured</th><th>Locked users</th><th>FSMO</th><th>Replication</th><th>SYSVOL</th></tr>')
-    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) { $it = @($g.Group); $fact = @($facts | Where-Object Domain -eq $g.Name | Select-Object -First 1)[0]; $locked = @($it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1)[0]; $lockedValue = if ($locked) { $locked.NumericValue } else { '' }; $fsmoWorst = Worst @($it | Where-Object Category -eq FSMO); $repWorst = Worst @($it | Where-Object Category -eq Replication); $sysvolWorst = Worst @($it | Where-Object Category -eq SYSVOL); $dcCount = if ($fact) { $fact.DCCount } else { @($it | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count }; [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td><td class='risk{9}'>{9}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,@($it | Where-Object Status -eq NotMeasured).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst)) }
+    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) {
+        $it = @($g.Group)
+        # A failed domain scan can leave findings without facts or account measurements.
+        $fact = $facts | Where-Object Domain -eq $g.Name | Select-Object -First 1
+        $locked = $it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1
+        $lockedValue = if ($locked) { $locked.NumericValue } else { 'NotMeasured' }
+        $fsmoRows = @($it | Where-Object Category -eq FSMO)
+        $repRows = @($it | Where-Object Category -eq Replication)
+        $sysvolRows = @($it | Where-Object Category -eq SYSVOL)
+        $fsmoWorst = if ($fsmoRows.Count -gt 0) { Worst $fsmoRows } else { 'NotMeasured' }
+        $repWorst = if ($repRows.Count -gt 0) { Worst $repRows } else { 'NotMeasured' }
+        $sysvolWorst = if ($sysvolRows.Count -gt 0) { Worst $sysvolRows } else { 'NotMeasured' }
+        $dcCount = if ($fact) { $fact.DCCount } else { 'NotMeasured' }
+        [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td><td class='risk{9}'>{9}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,@($it | Where-Object Status -eq NotMeasured).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst))
+    }
     [void]$b.AppendLine('</table></div>')
     [void]$b.AppendLine('<div class="card"><h2>Critical and warning findings</h2><table><tr><th>Status</th><th>Domain</th><th>DC</th><th>Category</th><th>Check</th><th>Value</th><th>Threshold</th><th>Details</th></tr>')
-    if ($find.Count -eq 0) { [void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>') }
+    if ($r.Count -eq 0) { [void]$b.AppendLine('<tr class="rowNotMeasured"><td colspan="8">No health measurements are available.</td></tr>') }
+    elseif ($find.Count -eq 0 -and $notMeasuredRows.Count -gt 0) { [void]$b.AppendLine('<tr class="rowNotMeasured"><td colspan="8">No critical or warning findings; unmeasured checks do not imply healthy results.</td></tr>') }
+    elseif ($find.Count -eq 0) { [void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>') }
     foreach ($x in $find) { [void]$b.AppendLine(("<tr class='row{0}'><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.DC),(ConvertTo-HtmlSafe $x.Category),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.NumericValue),(ConvertTo-HtmlSafe $x.Threshold),(ConvertTo-HtmlSafe $x.Details))) }
     [void]$b.AppendLine('</table></div><div class="card small"><h2>Technical files</h2><p>CSV: ' + (ConvertTo-HtmlSafe $csv) + '</p></div></body></html>')
     $b.ToString()
@@ -545,8 +565,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhvvmis340nd3/
-# twSuP1aPWAH2snJMr4J1QZxNWTIZKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBV0GUDRW/CXOfu
+# 3+eSceVTX6QBWTvtyKgh63RGQ3vnj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -679,31 +699,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOaH7skMOPzf0hxejcTyAXLL971Mpam3PHeDjBEHXBoIMA0GCSqG
-# SIb3DQEBAQUABIIBgBBoTPHEvCofGhgFyA2xpEMxH32YUJ4Audi3VxsIGSeVCpF8
-# PSK4P4Uz612EY8c4jCeEYzOip6hJC4Cfa3IlsBYfUfPlksPUuVpnLAmnuT645Mpe
-# NPcy9jk4PFrC06WbHV0VSmZgAGJ8CxrOU9h3rbtIpgtKT/GrWvddbxOT7RbkJs2Y
-# psEpabncYT7+hrC657rfjwqaeEG0iCi6zPRhqj45yPUsLDzDrSj0e3cezsyMoY04
-# vgDLPYFx8Opgqn2sJ+ygU2gp/fweOwUcczcKr5sfavxTa9iDWgZAvCyJhOGIP6E7
-# ih4yGbpb10qaR2WAg41DQpwbbN8lYVgM64h59kJE7GcWKVbV9vS4rlLpR8aWntQF
-# HQxly17bxbT+FHIuLTjaW8aeTtE62zl4D7b/m/zcjAPLWQ3Rpn1BEWAwfnHI7Ntn
-# nGGTMTDQWW2fkPAsAbBqYzpik/NLD5dIBoqdP055vcpPb+Pj+FjpbPb1FQ+d8AE3
-# f4Tn+xHq/ekwCsfHyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIsCLsMzMyfzDwB2PEDO0dCNsMkFkXMm7UGIbhTg8QrAMA0GCSqG
+# SIb3DQEBAQUABIIBgFABRWV8NfMqxtILpRk/K/3DRymePGemPU7+8QKz2//UMEmG
+# 4OaWM2GYpE3x9csj9gm//e3oNqf9/2lxfvW0NThudGLg5J5/K0/E7yVXxQbN/cMn
+# nPT7+WnfbbJy7IYWwFKKKJkhaubLYXIswfRJAjJU9VF2M7VYHXhe0dDXxBThVTdt
+# GltbeBk/0lWIt4PNUAJnK1AE0AbjcETT54ne2DCWwoZ9vdtjxZh0DkjwPcAFJoID
+# VFc6dam2PKPUp7aE24LMIU7dVfuE6GY85zCXga1fFfbTtHPbxwbcca+mz8OzdkuU
+# 63AhBG9r1ly1utEV8oUNDXecbZq4W5I2MZICGkhlPrFafEjV1ydazPJIq2KO3cAK
+# ccRP702UBqdgVdWs+WWfC7x54Rcgw5Vg1gU5bD3zuKsJRyjiXCgPlMrcsuPk/NbQ
+# ileJwmE6fhrb3y5GxMjxAZuEWoPqMaOmQauQ1BGt15ILvuRxxq++m0FIwaiZrPs+
+# aKFkqyVwlwoVirVaKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTMz
-# MjNaMC8GCSqGSIb3DQEJBDEiBCDoJFUZbQFkD2khve7WSvfAOqD08lMMViGDfd0/
-# AOy8KTANBgkqhkiG9w0BAQEFAASCAgBWBr7opHQTxit6YbxVIC+MYt7G6j4+1wsb
-# EdAjWiKSEsnzwJPu3AxyFd/V57BhZMzouk+u4FbryYgXA9AAv/STbhwtuEnP46kk
-# JgKbhDqXgr762oaIkWQsEqUXMLtsXqZ2s8hIBdMwwa8bmlr7IoMPfCG/RfhtqYyU
-# 8MB0h8mkdrXyFPr0gjHo/5zItphUKGXU6soQOy5tB0DPE9GGo+BisKWpjy8OKsdj
-# pWkVnIbbqWCTJl44Ia5HUvddyS5tWXkZWSkjj5e19qpcyPDvTZ3kBsEXSwuiovs/
-# pOdtmRpT0V5+6rBD8/GggwNK17tOY7ygLuRoWZ+Dpi/P+AQjtYgnsZwIxLPhUi4e
-# zM5YSX0hGyWUgfD8JxZ6M1c8aw5RPT5Z4kq2nKw4WvnE+P4z7/5ki+YuXay9Wf/g
-# F4udWpozn6S3iY3sppNuDrcEfH4T+ApuUDeyWKJPj/Fw3uRmxyUhcmaH3Cak2nZp
-# C+4me8aiKC0FvRDrC72U2GauG+Y6poZato0eufCovJYzUWQADbE5naD4LBtcdbHV
-# FOIIjXyDNCKEWnKBlPyQn/7BvRD3qXzlL6izawi4du9wSElPfiV5pJ37HZ6uMNa1
-# 8qQK/80hVccDvDdtCmtWk4GpFhyH2aFZkYJoLE3VLlkHgXSb/0UVmRz67Ic/f3DX
-# HKqpJoKSlA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjA2
+# MjFaMC8GCSqGSIb3DQEJBDEiBCByNfRGYRRU36gqgv9/cvrI03QB8ya7JgormbNe
+# t8JktzANBgkqhkiG9w0BAQEFAASCAgBv/nMQ/caTdl2Dtyu+m57L4xV82NA5BdPr
+# igIopG0ebB2LxBLVwauJlWXbHVkvHI6ufXQ1M6PdLPTABbaxeTVymJ/Bc9TYS6u0
+# QqUVs8mamkpLWZeEw1kQ2rzio65HbC0S9gsIDx2W+FjaC33LW+2cu2roRbfxLmqR
+# 7/fJyS7XmktCEpy12QVlGvVyhRtkjCcJrOft1RGdARthvMfDyWEwnVD/+ZI0ZvqK
+# nWkOf18HNsSShxZ5aJDJCEn6Phr/f6zsRdxn5IpNTruesN3+KADSf1rBrnI/HMVs
+# c2KoaShet5QWLBXXguoa8+tJf4Njwbty2HHXKgCrVerKPYJz99evhzNulbJFxqhy
+# 5g5Qy25lZGSzPF4LnYCRP9Q8oasfIifbSLrt0Qs9ALuJ0CCRBBgGfUPf3UEpBFdy
+# k4BoK26PrQh7wqRTt0UXJhKblDPF5qheirwiagvT5dyohuhMJbjtC98goKNkNx0Q
+# cMAlL5WSgE5f9KwZnwyhclNjg07kE/5Zu1wJQETI5bFu8Krs7LNnMQTNZzzeW0GP
+# HukXQja5CGgD/wwmwylFXjevbEu5Rz6VxyJe6WhzI7Ogzz+47TIUkCEsmvIYhOAo
+# BxL3fjjqO7Yo4Ui3eGsIFZWIz7ieQrTszEdUHY/SEa7v31ngRJtGBlXWnAmGh03p
+# KsX/XP165w==
 # SIG # End signature block
